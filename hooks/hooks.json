@@ -1,0 +1,17 @@
+{
+  "description": "Work2 orchestrator hooks for deterministic workflow execution",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "^\\s*/work\\s+",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/work-orchestrator-hook.js",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
