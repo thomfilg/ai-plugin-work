@@ -20,7 +20,9 @@ Implement missing test edge cases using the appropriate developer agent. Writes 
 
 ```bash
 # Source shared library and initialize
-source "/home/node/.claude/plugins/cache/work-workflow/work-workflow/1.0.0/lib/tests-common.sh"
+# Find the plugin's lib directory (resolve from plugin cache)
+PLUGIN_LIB=$(find ~/.claude/plugins/cache -path "*/work-workflow/*/lib/tests-common.sh" 2>/dev/null | head -1)
+source "$PLUGIN_LIB"
 tests_lib_strict_mode
 tests_lib_require_jq
 tests_lib_init "$ARGUMENTS"
