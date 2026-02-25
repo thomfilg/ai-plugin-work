@@ -2,13 +2,13 @@
 # tests-common.sh - Shared library for /tests-review and /tests-create
 #
 # Usage: source this file at the start of your command
-#   source "/home/node/.claude/commands/lib/tests-common.sh"
+#   source "${CLAUDE_PLUGIN_ROOT}/lib/tests-common.sh"
 #   tests_lib_init  # Optional: pass TARGET_PATH as argument
 #
 # The library auto-detects:
 #   - GIT_ROOT: from current directory
 #   - TASK_FOLDER: from branch name (Jira ID) or repo-branch format
-#   - REPORT_FOLDER: /home/node/worktrees/tasks/${TASK_FOLDER}
+#   - REPORT_FOLDER: $HOME/worktrees/tasks/${TASK_FOLDER}
 #
 # All functions use these auto-detected values, so agents can just call them.
 
@@ -69,7 +69,7 @@ tests_lib_init() {
   fi
 
   # Set REPORT_FOLDER
-  REPORT_FOLDER="${REPORT_FOLDER:-/home/node/worktrees/tasks/${TASK_FOLDER}}"
+  REPORT_FOLDER="${REPORT_FOLDER:-$HOME/worktrees/tasks/${TASK_FOLDER}}"
   mkdir -p "$REPORT_FOLDER"
 
   # Set standard file paths

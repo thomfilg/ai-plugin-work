@@ -40,7 +40,7 @@ const crypto = require('crypto');
 // ─── Configuration ───────────────────────────────────────────────────────────
 
 const MAIN_WORKTREE_FOLDER = process.env.REPO_NAME || 'app-services-monitoring';
-const WORKTREES_BASE = '/home/node/worktrees';
+const WORKTREES_BASE = `${process.env.HOME}/worktrees`;
 const TASKS_BASE = path.join(WORKTREES_BASE, 'tasks');
 
 // ─── State Machine ───────────────────────────────────────────────────────────

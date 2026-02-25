@@ -21,7 +21,7 @@ Review test files for edge case coverage iteratively. Writes feedback to `tests-
 ```bash
 # Source shared library and initialize
 # Find the plugin's lib directory (resolve from plugin cache)
-PLUGIN_LIB=$(find ~/.claude/plugins/cache -path "*/work-workflow/*/lib/tests-common.sh" 2>/dev/null | head -1)
+PLUGIN_LIB="${CLAUDE_PLUGIN_ROOT}/lib/tests-common.sh"
 source "$PLUGIN_LIB"
 tests_lib_strict_mode
 tests_lib_require_jq

@@ -70,7 +70,7 @@ For EACH task in the list, execute sequentially:
 ```
 FOR i = 0 TO length(TASKS_TO_PROCESS) - 1:
     TASK_ID = TASKS_TO_PROCESS[i]
-    WORKTREE_PATH = "/home/node/worktrees/${my_repository_main_worktree_folder}-${TASK_ID}"
+    WORKTREE_PATH = "$HOME/worktrees/${my_repository_main_worktree_folder}-${TASK_ID}"
 
     1. Display progress banner:
        ═══════════════════════════════════════════════════════
@@ -245,7 +245,7 @@ The orchestrator uses `claude -p` to spawn sessions:
 
 ```bash
 # Spawns Claude in the worktree directory with /work command
-cd /home/node/worktrees/${my_repository_main_worktree_folder}-APPSUPEN-851 && \
+cd $HOME/worktrees/${my_repository_main_worktree_folder}-APPSUPEN-851 && \
   claude -p "/work APPSUPEN-851" 2>&1 | tee /tmp/claude-orchestrate-APPSUPEN-851.log
 
 # The -p flag runs the prompt and exits when done

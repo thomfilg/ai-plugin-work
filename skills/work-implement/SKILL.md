@@ -29,7 +29,7 @@ Quick implementation without the full /work workflow. Use when you already have 
 # Determine task ID (from branch name or Jira ticket)
 BRANCH=$(git branch --show-current)
 TICKET_ID=$(echo "$BRANCH" | grep -oE 'APPSUPEN-[0-9]+' || echo "task-$(date +%Y%m%d-%H%M%S)")
-TASK_DIR="/home/node/worktrees/tasks/${TICKET_ID}"
+TASK_DIR="$HOME/worktrees/tasks/${TICKET_ID}"
 
 # Create task folder
 mkdir -p "$TASK_DIR"
@@ -37,7 +37,7 @@ mkdir -p "$TASK_DIR"
 
 **Save implementation tracking file:**
 ```markdown
-# /home/node/worktrees/tasks/${TICKET_ID}/implement.md
+# $HOME/worktrees/tasks/${TICKET_ID}/implement.md
 
 ## Implementation: <description>
 Date: <timestamp>
@@ -139,7 +139,7 @@ Fix any issues before completing.
 
 **Update the implementation tracking file:**
 ```bash
-# Update /home/node/worktrees/tasks/${TICKET_ID}/implement.md with results
+# Update $HOME/worktrees/tasks/${TICKET_ID}/implement.md with results
 ```
 
 Add the following to the `### Changes` section:
@@ -151,7 +151,7 @@ Add the following to the `### Changes` section:
 ```
 Implementation Complete
 
-Task folder: /home/node/worktrees/tasks/${TICKET_ID}/
+Task folder: $HOME/worktrees/tasks/${TICKET_ID}/
 Report: implement.md
 
 Agent used: <agent-name>

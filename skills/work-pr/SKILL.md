@@ -28,14 +28,14 @@ Updates PR description and adds visual documentation for a Jira task. Uses the w
 Run the workflow engine to get the execution plan:
 
 ```bash
-node ~/.claude/lib/workflow-engine.js work-pr plan "$ARGS"
+node ${CLAUDE_PLUGIN_ROOT}/lib/workflow-engine.js work-pr plan "$ARGS"
 ```
 
 Parse the JSON output. Extract `instanceId`, `params`, `plan`, and `summary`.
 Set these variables from params:
 - `TICKET_ID` = params.ticketId
 - `FORCE_MODE` = params.force
-- `TASKS_DIR` = `/home/node/worktrees/tasks/${TICKET_ID}`
+- `TASKS_DIR` = `$HOME/worktrees/tasks/${TICKET_ID}`
 
 If `summary.run === 0`, print "Everything up-to-date" and stop.
 
@@ -45,7 +45,7 @@ Initialize state, then execute each step marked `RUN` in order. Call `transition
 
 **Transition command:**
 ```bash
-node ~/.claude/lib/workflow-engine.js work-pr transition ${TICKET_ID} <step_id>
+node ${CLAUDE_PLUGIN_ROOT}/lib/workflow-engine.js work-pr transition ${TICKET_ID} <step_id>
 ```
 
 ---
@@ -86,7 +86,7 @@ Transition to `2_setup`.
 Set variables:
 ```bash
 TICKET_ID="${TICKET_ID}"
-TASKS_DIR="/home/node/worktrees/tasks/${TICKET_ID}"
+TASKS_DIR="$HOME/worktrees/tasks/${TICKET_ID}"
 PR_SHA_FILE="${TASKS_DIR}/.pr-update-sha"
 POST_PR_SHA_FILE="${TASKS_DIR}/.post-pr-update-sha"
 CURRENT_SHA=$(git rev-parse HEAD)
@@ -199,7 +199,7 @@ echo "Current HEAD: ${CURRENT_SHA}"
 
 Mark workflow complete:
 ```bash
-node ~/.claude/lib/workflow-engine.js work-pr transition ${TICKET_ID} 6_summary
+node ${CLAUDE_PLUGIN_ROOT}/lib/workflow-engine.js work-pr transition ${TICKET_ID} 6_summary
 ```
 
 ## State Machine

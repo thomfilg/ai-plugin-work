@@ -35,7 +35,7 @@ This command uses the workflow engine for resumability and skip detection.
 ### Step 0: Generate Plan
 
 ```bash
-PLAN_JSON=$(node ~/.claude/lib/workflow-engine.js check plan "$ARGUMENTS")
+PLAN_JSON=$(node ${CLAUDE_PLUGIN_ROOT}/lib/workflow-engine.js check plan "$ARGUMENTS")
 echo "$PLAN_JSON"
 ```
 
@@ -52,7 +52,7 @@ Parse the plan JSON to get:
 
 Before starting each step, call:
 ```bash
-node ~/.claude/lib/workflow-engine.js check transition <instanceId> <step_id>
+node ${CLAUDE_PLUGIN_ROOT}/lib/workflow-engine.js check transition <instanceId> <step_id>
 ```
 
 ---
@@ -86,8 +86,8 @@ pnpm dev:test      # Unit tests for changed files (excludes smoke/e2e)
 Run the setup script to initialize variables and check cache:
 
 ```bash
-node ~/.claude/lib/workflow-engine.js check transition ${INSTANCE_ID} 1_setup
-SETUP_RESULT=$(node ~/.claude/hooks/check-setup.js "$ARGUMENTS")
+node ${CLAUDE_PLUGIN_ROOT}/lib/workflow-engine.js check transition ${INSTANCE_ID} 1_setup
+SETUP_RESULT=$(node ${CLAUDE_PLUGIN_ROOT}/hooks/check-setup.js "$ARGUMENTS")
 echo "$SETUP_RESULT"
 ```
 
@@ -113,7 +113,7 @@ Parse the JSON output to get:
 ║                                                                      ║
 ╚══════════════════════════════════════════════════════════════════════╝
 ```
-Transition directly to `8_output`: `node ~/.claude/lib/workflow-engine.js check transition ${INSTANCE_ID} 8_output`
+Transition directly to `8_output`: `node ${CLAUDE_PLUGIN_ROOT}/lib/workflow-engine.js check transition ${INSTANCE_ID} 8_output`
 Display the cached README.md and then transition to `9_cleanup` and EXIT.
 
 **If `cache.cached` is false:** Continue with Step 2_start_env.
@@ -123,8 +123,8 @@ Display the cached README.md and then transition to `9_cleanup` and EXIT.
 ## Step 2_start_env: Start Dev Environment (DYNAMIC PORTS)
 
 ```bash
-node ~/.claude/lib/workflow-engine.js check transition ${INSTANCE_ID} 2_start_env
-ENV_RESULT=$(node ~/.claude/hooks/check-start-env.js '${JSON.stringify(IMPACTED_APPS)}')
+node ${CLAUDE_PLUGIN_ROOT}/lib/workflow-engine.js check transition ${INSTANCE_ID} 2_start_env
+ENV_RESULT=$(node ${CLAUDE_PLUGIN_ROOT}/hooks/check-start-env.js '${JSON.stringify(IMPACTED_APPS)}')
 RUNNING_APPS=$(echo "$ENV_RESULT" | jq '.runningApps')
 echo "Running apps: $RUNNING_APPS"
 ```
@@ -161,7 +161,7 @@ DB_ENV = {
 ## Step 3_verify_playwright: Verify Playwright (FAIL FAST)
 
 ```bash
-node ~/.claude/lib/workflow-engine.js check transition ${INSTANCE_ID} 3_verify_playwright
+node ${CLAUDE_PLUGIN_ROOT}/lib/workflow-engine.js check transition ${INSTANCE_ID} 3_verify_playwright
 ```
 
 **Before launching QA agents**, verify Playwright works:
@@ -189,7 +189,7 @@ mcp__playwright__browser_navigate(url: "https://www.google.com")
 ╚══════════════════════════════════════════════════════════════════════╝
 ```
 
-**If Playwright fails:** Transition to `8_output`: `node ~/.claude/lib/workflow-engine.js check transition ${INSTANCE_ID} 8_output`
+**If Playwright fails:** Transition to `8_output`: `node ${CLAUDE_PLUGIN_ROOT}/lib/workflow-engine.js check transition ${INSTANCE_ID} 8_output`
 **If Playwright works:** Continue to Step 4_phase1_agents.
 
 ---
@@ -197,7 +197,7 @@ mcp__playwright__browser_navigate(url: "https://www.google.com")
 ## Step 4_phase1_agents: Launch Phase 1 Agents (PARALLEL)
 
 ```bash
-node ~/.claude/lib/workflow-engine.js check transition ${INSTANCE_ID} 4_phase1_agents
+node ${CLAUDE_PLUGIN_ROOT}/lib/workflow-engine.js check transition ${INSTANCE_ID} 4_phase1_agents
 ```
 
 Launch agents in **parallel**:
@@ -319,10 +319,10 @@ Skill("check-qa", args: `${APP_NAME} ${JSON.stringify(qaParams)}`)
 
 ```
 # For status-site
-Skill("check-qa", args: "status-site {\"jiraTicketId\":\"APPSUPEN-856\",\"reportPath\":\"/home/node/worktrees/tasks/APPSUPEN-856/qa-status-site.check.md\",\"changesHash\":\"e44af95d\",\"appUrl\":\"http://host.docker.internal:5175\",\"screenshotsFolder\":\"/home/node/worktrees/tasks/APPSUPEN-856/screenshots/status-site/\",\"affectedFiles\":[],\"affectedPackages\":[\"@$my_repository_main_worktree_folder/ui\"]}")
+Skill("check-qa", args: "status-site {\"jiraTicketId\":\"APPSUPEN-856\",\"reportPath\":\"${HOME}/worktrees/tasks/APPSUPEN-856/qa-status-site.check.md\",\"changesHash\":\"e44af95d\",\"appUrl\":\"http://host.docker.internal:5175\",\"screenshotsFolder\":\"${HOME}/worktrees/tasks/APPSUPEN-856/screenshots/status-site/\",\"affectedFiles\":[],\"affectedPackages\":[\"@$my_repository_main_worktree_folder/ui\"]}")
 
 # For as-dashboard
-Skill("check-qa", args: "as-dashboard {\"jiraTicketId\":\"APPSUPEN-856\",\"reportPath\":\"/home/node/worktrees/tasks/APPSUPEN-856/qa-as-dashboard.check.md\",\"changesHash\":\"e44af95d\",\"appUrl\":\"http://host.docker.internal:5178\",\"screenshotsFolder\":\"/home/node/worktrees/tasks/APPSUPEN-856/screenshots/as-dashboard/\",\"affectedFiles\":[\"apps/as-dashboard/src/EmailPreview.tsx\"],\"affectedPackages\":[]}")
+Skill("check-qa", args: "as-dashboard {\"jiraTicketId\":\"APPSUPEN-856\",\"reportPath\":\"${HOME}/worktrees/tasks/APPSUPEN-856/qa-as-dashboard.check.md\",\"changesHash\":\"e44af95d\",\"appUrl\":\"http://host.docker.internal:5178\",\"screenshotsFolder\":\"${HOME}/worktrees/tasks/APPSUPEN-856/screenshots/as-dashboard/\",\"affectedFiles\":[\"apps/as-dashboard/src/EmailPreview.tsx\"],\"affectedPackages\":[]}")
 ```
 
 **What /check-qa does:**
@@ -331,7 +331,7 @@ Skill("check-qa", args: "as-dashboard {\"jiraTicketId\":\"APPSUPEN-856\",\"repor
 3. Launches qa-feature-tester agent with context
 4. Validates report was created with required sections
 
-**Enforcement:** SubagentStop hook validates QA reports (see `~/.claude/hooks/validate-qa-report.js`)
+**Enforcement:** SubagentStop hook validates QA reports (see `${CLAUDE_PLUGIN_ROOT}/hooks/validate-qa-report.js`)
 
 ### Agent 3.5: API Testing (CONDITIONAL - only if backend changes)
 
@@ -497,7 +497,7 @@ Include:
 ## Step 5_phase2_consensus: Phase 2 Consensus Loop
 
 ```bash
-node ~/.claude/lib/workflow-engine.js check transition ${INSTANCE_ID} 5_phase2_consensus
+node ${CLAUDE_PLUGIN_ROOT}/lib/workflow-engine.js check transition ${INSTANCE_ID} 5_phase2_consensus
 ```
 
 ⚠️ **CRITICAL: Wait for ALL Phase 1 agents to complete before this step.**
@@ -541,7 +541,7 @@ Use `TaskOutput` to wait for all Phase 1 agents, then launch Phase 2 sequentiall
 ### Phase 2 Step 1: Determine Developer Agents (DYNAMIC SELECTION)
 
 ```bash
-DEVELOPER_RESULT=$(node ~/.claude/scripts/check-determine-developers.js '${JSON.stringify(AFFECTED_FILES)}')
+DEVELOPER_RESULT=$(node ${CLAUDE_PLUGIN_ROOT}/hooks/check-determine-developers.js '${JSON.stringify(AFFECTED_FILES)}')
 echo "$DEVELOPER_RESULT"
 ```
 
@@ -861,7 +861,7 @@ Merge all `*-reply-v${iteration}.md` files into final `code-review-reply.check.m
 ## Step 6_quality_recheck: Quality Re-check (Affected Files Only)
 
 ```bash
-node ~/.claude/lib/workflow-engine.js check transition ${INSTANCE_ID} 6_quality_recheck
+node ${CLAUDE_PLUGIN_ROOT}/lib/workflow-engine.js check transition ${INSTANCE_ID} 6_quality_recheck
 ```
 
 ⚠️ **Only runs if developer agent modified files (IMPLEMENTED suggestions).**
@@ -906,7 +906,7 @@ After quality re-check completes, transition to `7_validate_summary`.
 ## Step 7_validate_summary: Validate and Generate Summary
 
 ```bash
-node ~/.claude/lib/workflow-engine.js check transition ${INSTANCE_ID} 7_validate_summary
+node ${CLAUDE_PLUGIN_ROOT}/lib/workflow-engine.js check transition ${INSTANCE_ID} 7_validate_summary
 ```
 
 After all agents complete, validate reports and generate summary.
@@ -940,10 +940,10 @@ Exit with INFRASTRUCTURE_FAILURE status (not APPROVED).
 
 ```bash
 # Validate reports
-node ~/.claude/hooks/check-validate-reports.js "${REPORT_FOLDER}" '${JSON.stringify(IMPACTED_APPS)}'
+node ${CLAUDE_PLUGIN_ROOT}/hooks/check-validate-reports.js "${REPORT_FOLDER}" '${JSON.stringify(IMPACTED_APPS)}'
 
 # Generate summary README.md
-node ~/.claude/hooks/check-generate-summary.js "${REPORT_FOLDER}" "${CHANGES_HASH}" "${JIRA_TICKET_ID}" '${JSON.stringify(IMPACTED_APPS)}'
+node ${CLAUDE_PLUGIN_ROOT}/hooks/check-generate-summary.js "${REPORT_FOLDER}" "${CHANGES_HASH}" "${JIRA_TICKET_ID}" '${JSON.stringify(IMPACTED_APPS)}'
 ```
 
 **Validation rules (causes NEEDS_WORK):**
@@ -963,7 +963,7 @@ node ~/.claude/hooks/check-generate-summary.js "${REPORT_FOLDER}" "${CHANGES_HAS
 ## Step 8_output: Final Output
 
 ```bash
-node ~/.claude/lib/workflow-engine.js check transition ${INSTANCE_ID} 8_output
+node ${CLAUDE_PLUGIN_ROOT}/lib/workflow-engine.js check transition ${INSTANCE_ID} 8_output
 ```
 
 Display summary to user:
@@ -996,7 +996,7 @@ ${ENDIF}
 ## Step 9_cleanup: Cleanup (ALWAYS RUN)
 
 ```bash
-node ~/.claude/lib/workflow-engine.js check transition ${INSTANCE_ID} 9_cleanup
+node ${CLAUDE_PLUGIN_ROOT}/lib/workflow-engine.js check transition ${INSTANCE_ID} 9_cleanup
 ```
 
 Stop all services started in Step 2_start_env:
@@ -1035,11 +1035,11 @@ fi
 
 | Script | Purpose |
 |--------|---------|
-| `~/.claude/hooks/check-setup.js` | Setup variables, generate hash, check cache |
-| `~/.claude/hooks/check-start-env.js` | Start database and apps |
-| `~/.claude/scripts/check-determine-developers.js` | Determine which developer agents to involve |
-| `~/.claude/hooks/check-validate-reports.js` | Validate all reports exist and are complete |
-| `~/.claude/hooks/check-generate-summary.js` | Generate README.md summary |
+| `${CLAUDE_PLUGIN_ROOT}/hooks/check-setup.js` | Setup variables, generate hash, check cache |
+| `${CLAUDE_PLUGIN_ROOT}/hooks/check-start-env.js` | Start database and apps |
+| `${CLAUDE_PLUGIN_ROOT}/hooks/check-determine-developers.js` | Determine which developer agents to involve |
+| `${CLAUDE_PLUGIN_ROOT}/hooks/check-validate-reports.js` | Validate all reports exist and are complete |
+| `${CLAUDE_PLUGIN_ROOT}/hooks/check-generate-summary.js` | Generate README.md summary |
 | Step 9_cleanup commands | Stop background services (inline, no script) |
 
 | Variable | Description |

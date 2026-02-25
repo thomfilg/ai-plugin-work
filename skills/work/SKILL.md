@@ -31,7 +31,7 @@ Deterministic workflow that pre-computes an action plan and enforces exact step 
 **MANDATORY: Your first action must be running the orchestrator.**
 
 ```bash
-node ~/.claude/hooks/work-orchestrator.js "$ARGUMENTS"
+node ${CLAUDE_PLUGIN_ROOT}/hooks/work-orchestrator.js "$ARGUMENTS"
 ```
 
 Parse the JSON output. This is your roadmap.
@@ -74,7 +74,7 @@ For each step where `action = "RUN"`:
 ### 2a. Validate the Transition First
 
 ```bash
-node ~/.claude/hooks/work-orchestrator.js transition APPSUPEN-XXX <target_step>
+node ${CLAUDE_PLUGIN_ROOT}/hooks/work-orchestrator.js transition APPSUPEN-XXX <target_step>
 ```
 
 **If success:** Proceed with the step's command.
@@ -124,7 +124,7 @@ If a step fails:
 After fixing any issue, always get a fresh plan:
 
 ```bash
-node ~/.claude/hooks/work-orchestrator.js APPSUPEN-XXX
+node ${CLAUDE_PLUGIN_ROOT}/hooks/work-orchestrator.js APPSUPEN-XXX
 ```
 
 The orchestrator will re-inspect state and generate an updated plan.
@@ -153,13 +153,13 @@ Skip edges (forward):
 ### Check Available Transitions
 
 ```bash
-node ~/.claude/hooks/work-orchestrator.js transitions APPSUPEN-XXX
+node ${CLAUDE_PLUGIN_ROOT}/hooks/work-orchestrator.js transitions APPSUPEN-XXX
 ```
 
 ### View Full Graph
 
 ```bash
-node ~/.claude/hooks/work-orchestrator.js graph
+node ${CLAUDE_PLUGIN_ROOT}/hooks/work-orchestrator.js graph
 ```
 
 ---

@@ -21,10 +21,10 @@ Run QA testing for a specific application by launching the `qa-feature-tester` a
 
 ## Context Loss Protection
 
-This command uses `~/.claude/hooks/qa-progress.js` to track progress incrementally.
+This command uses `${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js` to track progress incrementally.
 If interrupted, QA can resume from where it left off.
 
-**Progress file:** `/home/node/worktrees/tasks/{TICKET_ID}/.qa-progress-{APP_NAME}.json`
+**Progress file:** `$HOME/worktrees/tasks/{TICKET_ID}/.qa-progress-{APP_NAME}.json`
 
 ---
 
@@ -45,7 +45,7 @@ const options = args[1] ? JSON.parse(args[1]) : {};
 
 // Defaults
 const JIRA_TICKET_ID = options.jiraTicketId || ''; // Extract from branch if empty
-const GLOBAL_TASKS = '/home/node/worktrees/tasks';
+const GLOBAL_TASKS = `${process.env.HOME}/worktrees/tasks`;
 const TASK_FOLDER = `${GLOBAL_TASKS}/${JIRA_TICKET_ID || 'unknown'}`;
 const REPORT_PATH = options.reportPath || `${TASK_FOLDER}/qa-${APP_NAME}.md`;
 const CHANGES_HASH = options.changesHash || 'NO_HASH';
@@ -265,16 +265,16 @@ This creates a checkpoint file that enables resume on context loss.
 
 ```bash
 # Initialize QA progress tracking
-node ~/.claude/hooks/qa-progress.js init "${JIRA_TICKET_ID}" "${APP_NAME}" "${APP_URL}"
+node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js init "${JIRA_TICKET_ID}" "${APP_NAME}" "${APP_URL}"
 
 echo "✅ QA progress tracking initialized"
-echo "   Progress file: /home/node/worktrees/tasks/${JIRA_TICKET_ID}/.qa-progress-${APP_NAME}.json"
+echo "   Progress file: $HOME/worktrees/tasks/${JIRA_TICKET_ID}/.qa-progress-${APP_NAME}.json"
 ```
 
 **Check for existing progress (resume detection):**
 ```bash
 # Check if we can resume from previous run
-RESUME_INFO=$(node ~/.claude/hooks/qa-progress.js resume-info "${JIRA_TICKET_ID}" "${APP_NAME}")
+RESUME_INFO=$(node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js resume-info "${JIRA_TICKET_ID}" "${APP_NAME}")
 CAN_RESUME=$(echo "$RESUME_INFO" | jq -r '.canResume')
 COMPLETED_TESTS=$(echo "$RESUME_INFO" | jq -r '.completedTests | length')
 
@@ -308,13 +308,13 @@ Test ${APP_NAME} application.
 - SCREENSHOTS_FOLDER: ${SCREENSHOTS_FOLDER}
 
 ## Progress Tracking (CRITICAL - enables resume on context loss)
-- PROGRESS_SCRIPT: ~/.claude/hooks/qa-progress.js
+- PROGRESS_SCRIPT: ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js
 - Use these commands to track progress:
-  - Start test: node ~/.claude/hooks/qa-progress.js start-test ${JIRA_TICKET_ID} ${APP_NAME} 'test_name'
-  - Complete test: node ~/.claude/hooks/qa-progress.js complete-test ${JIRA_TICKET_ID} ${APP_NAME} 'test_name' pass 'screenshot.png'
-  - Fail test: node ~/.claude/hooks/qa-progress.js fail-test ${JIRA_TICKET_ID} ${APP_NAME} 'test_name' 'error message'
-  - Playwright status: node ~/.claude/hooks/qa-progress.js set-playwright ${JIRA_TICKET_ID} ${APP_NAME} true/false
-  - Infrastructure failure: node ~/.claude/hooks/qa-progress.js infrastructure-failure ${JIRA_TICKET_ID} ${APP_NAME} 'error'
+  - Start test: node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js start-test ${JIRA_TICKET_ID} ${APP_NAME} 'test_name'
+  - Complete test: node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js complete-test ${JIRA_TICKET_ID} ${APP_NAME} 'test_name' pass 'screenshot.png'
+  - Fail test: node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js fail-test ${JIRA_TICKET_ID} ${APP_NAME} 'test_name' 'error message'
+  - Playwright status: node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js set-playwright ${JIRA_TICKET_ID} ${APP_NAME} true/false
+  - Infrastructure failure: node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js infrastructure-failure ${JIRA_TICKET_ID} ${APP_NAME} 'error'
 
 ## Resume Info (skip already-completed tests)
 ${JSON.stringify(resumeInfo || { completedTests: [] })}
@@ -347,7 +347,7 @@ ${AFFECTED_PACKAGES.join('\n') || 'None specified'}
 
 ### With options (from /check)
 ```
-/check-qa as-dashboard {"jiraTicketId":"APPSUPEN-856","reportPath":"/home/node/worktrees/tasks/APPSUPEN-856/qa-as-dashboard.md","changesHash":"abc123","appUrl":"http://host.docker.internal:5178"}
+/check-qa as-dashboard {"jiraTicketId":"APPSUPEN-856","reportPath":"$HOME/worktrees/tasks/APPSUPEN-856/qa-as-dashboard.md","changesHash":"abc123","appUrl":"http://host.docker.internal:5178"}
 ```
 
 ### No arguments (auto-discover)
@@ -361,7 +361,7 @@ ${AFFECTED_PACKAGES.join('\n') || 'None specified'}
 
 ## Enforcement
 
-Reports are validated by SubagentStop hook: `~/.claude/hooks/validate-qa-report.js`
+Reports are validated by SubagentStop hook: `${CLAUDE_PLUGIN_ROOT}/hooks/validate-qa-report.js`
 
 **Blocked if:**
 - Missing report file
