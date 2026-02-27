@@ -37,7 +37,11 @@ Set these variables from params:
 - `FORCE_MODE` = params.force
 - `TASKS_DIR` = `$HOME/worktrees/tasks/${TICKET_ID}`
 
-If `summary.run === 0`, print "Everything up-to-date" and stop.
+If `summary.run === 0`, print "Everything up-to-date", then transition to `6_summary` and complete the workflow:
+```bash
+node ${CLAUDE_PLUGIN_ROOT}/lib/workflow-engine.js work-pr transition ${TICKET_ID} 6_summary
+echo "✅ Everything up-to-date — nothing to do."
+```
 
 ### Phase 2: Execute RUN Steps
 
@@ -95,6 +99,8 @@ mkdir -p "$TASKS_DIR"
 
 Check the plan to determine next transition:
 - If both `3_pr_gen` and `5_post_pr_gen` are SKIP → transition to `6_summary`
+- If `3_pr_gen` is SKIP but `5_post_pr_gen` is RUN → transition to `5_post_pr_gen`
+- If `3_pr_gen` is SKIP but `4_screenshot_gate` is RUN → transition to `4_screenshot_gate`
 - Otherwise → transition to `3_pr_gen`
 
 ---
@@ -117,14 +123,20 @@ Task(pr-generator):
   "PR_UPDATE_RESULT: SUCCESS" or "PR_UPDATE_RESULT: FAILED"
 ```
 
-On success, record SHA:
+On success, record compound key (HEAD SHA + screenshot hash):
 ```bash
-echo "$CURRENT_SHA" > "$PR_SHA_FILE"
-echo "✅ PR updated. Recorded SHA: $CURRENT_SHA"
+SCREENSHOT_DIR="${TASKS_DIR}/screenshots"
+SCREENSHOT_HASH="none"
+if [ -d "$SCREENSHOT_DIR" ] && [ "$(find "$SCREENSHOT_DIR" -type f 2>/dev/null | head -1)" ]; then
+  SCREENSHOT_HASH=$(find "$SCREENSHOT_DIR" -type f -print0 2>/dev/null | sort -z | xargs -0 sha256sum 2>/dev/null | sha256sum | cut -d' ' -f1)
+fi
+echo "${CURRENT_SHA}|${SCREENSHOT_HASH}" > "$PR_SHA_FILE"
+echo "✅ PR updated. Recorded key: ${CURRENT_SHA}|${SCREENSHOT_HASH}"
 ```
 
 Check plan for next transition:
 - If `4_screenshot_gate` is RUN → transition to `4_screenshot_gate`
+- If `5_post_pr_gen` is SKIP → transition to `6_summary`
 - Otherwise → transition to `5_post_pr_gen`
 
 ---
@@ -151,16 +163,20 @@ If screenshots are missing (`SCREENSHOT_COUNT == 0`), use `AskUserQuestion`:
   - Option 3: "Skip screenshots (non-visual change)"
 
 **Based on user choice:**
-- If skip → transition to `5_post_pr_gen`
+- If skip and `5_post_pr_gen` is SKIP → transition to `6_summary`
+- If skip and `5_post_pr_gen` is RUN → transition to `5_post_pr_gen`
 - If capture → run selected command, then transition **backward** to `3_pr_gen` (re-generates PR with screenshots)
 
 ---
 
 #### Step: 5_post_pr_gen — Run pr-post-generator (content SHA-gated)
 
-Calculate content SHA:
+Calculate content SHA (all `*.check.md` reports + screenshots):
 ```bash
-CONTENT_SHA=$( (cat ${TASKS_DIR}/qa*.md 2>/dev/null; find ${TASKS_DIR}/screenshots -type f 2>/dev/null | sort | xargs cat 2>/dev/null) | sha256sum | cut -d' ' -f1)
+CONTENT_SHA=$( (
+  find "${TASKS_DIR}" -maxdepth 1 -name '*.check.md' -print0 2>/dev/null | sort -z | xargs -0 sha256sum 2>/dev/null
+  find "${TASKS_DIR}/screenshots" -type f -print0 2>/dev/null | sort -z | xargs -0 sha256sum 2>/dev/null
+) | sha256sum | cut -d' ' -f1)
 ```
 
 Run pr-post-generator:
@@ -205,17 +221,29 @@ node ${CLAUDE_PLUGIN_ROOT}/lib/workflow-engine.js work-pr transition ${TICKET_ID
 ## State Machine
 
 ```
-1_preflight → 2_setup → 3_pr_gen → 4_screenshot_gate → 5_post_pr_gen → 6_summary
-                  ↓                       ↓ (backward)
-              6_summary               3_pr_gen (after screenshots captured)
+Happy path: 1_preflight → 2_setup → 3_pr_gen → 4_screenshot_gate → 5_post_pr_gen → 6_summary
+
+Skip edges (forward):
+  2_setup → 4_screenshot_gate  (pr_gen SKIP, screenshot gate RUN)
+  2_setup → 5_post_pr_gen      (pr_gen SKIP, screenshot gate SKIP, post_pr_gen RUN)
+  2_setup → 6_summary          (all SKIP — everything up-to-date)
+  3_pr_gen → 5_post_pr_gen     (screenshot gate SKIP — no TSX changes)
+  3_pr_gen → 6_summary         (both screenshot gate and post_pr_gen SKIP)
+  4_screenshot_gate → 6_summary (post_pr_gen SKIP — skip screenshots)
+
+Retry loop (backward):
+  4_screenshot_gate → 3_pr_gen  (after screenshots captured, re-gen PR)
+
+No-op path:
+  summary.run === 0 → transition to 6_summary and complete
 ```
 
 ## Tracking Files
 
 | File | Location | SHA Source | Purpose |
 |------|----------|------------|---------|
-| `.pr-update-sha` | `tasks/{TICKET}/` | `git rev-parse HEAD` | Tracks last pr-generator run |
-| `.post-pr-update-sha` | `tasks/{TICKET}/` | `qa*.md + screenshots/**/*` | Tracks last pr-post-generator run |
+| `.pr-update-sha` | `tasks/{TICKET}/` | `HEAD_SHA\|SCREENSHOT_HASH` (compound key) | Tracks last pr-generator run |
+| `.post-pr-update-sha` | `tasks/{TICKET}/` | `*.check.md + screenshots/**/*` | Tracks last pr-post-generator run |
 | `.workflow-state.json` | `tasks/{TICKET}/` | Workflow engine | Tracks step execution state |
 
 ## When to Use

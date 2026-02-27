@@ -174,8 +174,12 @@ Happy path:  1→2→3→4→5→6→7→8→9→10→11→12→13
 
 Retry loops (backward):
   4_quality   → 3_implement   (quality failed)
+  5_commit    → 4_quality     (re-verify after commit)
   6_check     → 3_implement   (check found issues)
+  6_check     → 4_quality     (check needs quality re-run)
   8_test_enh  → 5_commit      (new tests need commit)
+  8_test_enh  → 4_quality     (new tests need quality check)
+  8_test_enh  → 3_implement   (tests reveal implementation flaw)
   11_ci       → 3_implement   (CI failed)
   11_ci       → 8_test_enh    (coverage failed)
 
@@ -184,6 +188,7 @@ Skip edges (forward):
   2_bootstrap → 5_commit      (quality done)
   2_bootstrap → 6_check       (committed)
   6_check     → 8_test_enh    (no cleanup needed)
+  9_pr        → 11_ci         (PR already ready, skip 10_ready)
 ```
 
 ---

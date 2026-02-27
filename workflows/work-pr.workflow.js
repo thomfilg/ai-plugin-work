@@ -10,7 +10,7 @@
  * Steps:
  *   1. Pre-flight memory & zombie check
  *   2. Parse args, set variables
- *   3. Run pr-generator (SHA-gated)
+ *   3. Run pr-generator (SHA-gated with compound key: HEAD|screenshotHash)
  *   4. Screenshot gate for TSX/JSX changes
  *   5. Run pr-post-generator (content SHA-gated)
  *   6. Print summary
@@ -23,7 +23,6 @@ const { execSync } = require('child_process');
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 const TASKS_BASE = `${process.env.HOME}/worktrees/tasks`;
-const REPO_DIR = `${process.env.HOME}/worktrees/${process.env.REPO_NAME || 'my-project'}`;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -31,9 +30,14 @@ function getTasksDir(ticketId) {
   return path.join(TASKS_BASE, ticketId);
 }
 
+function getWorktreeDir(ticketId) {
+  const repo = process.env.REPO_NAME || 'my-project';
+  return path.join(process.env.HOME, 'worktrees', `${repo}-${ticketId}`);
+}
+
 function safeExec(cmd, options = {}) {
   try {
-    return execSync(cmd, { encoding: 'utf8', cwd: REPO_DIR, ...options }).trim();
+    return execSync(cmd, { encoding: 'utf8', ...options }).trim();
   } catch {
     return '';
   }
@@ -57,9 +61,9 @@ module.exports = {
 
   transitions: [
     { source: '1_preflight',       targets: ['2_setup'] },
-    { source: '2_setup',           targets: ['3_pr_gen', '6_summary'] },
-    { source: '3_pr_gen',          targets: ['4_screenshot_gate', '5_post_pr_gen'] },
-    { source: '4_screenshot_gate', targets: ['5_post_pr_gen', '3_pr_gen'] },
+    { source: '2_setup',           targets: ['3_pr_gen', '4_screenshot_gate', '5_post_pr_gen', '6_summary'] },
+    { source: '3_pr_gen',          targets: ['4_screenshot_gate', '5_post_pr_gen', '6_summary'] },
+    { source: '4_screenshot_gate', targets: ['5_post_pr_gen', '3_pr_gen', '6_summary'] },
     { source: '5_post_pr_gen',     targets: ['6_summary'] },
     { source: '6_summary',         targets: [] },
   ],
@@ -91,30 +95,33 @@ module.exports = {
 
   /**
    * Inspect real filesystem state for an instance.
+   * Uses the ticket-specific worktree directory for all git commands.
    * @param {string} instanceId - The ticket ID
    * @returns {object} Inspection data
    */
   inspect(instanceId) {
     const tasksDir = getTasksDir(instanceId);
+    const worktreeDir = getWorktreeDir(instanceId);
     const data = {
       tasksDir,
       tasksDirExists: fs.existsSync(tasksDir),
+      worktreeDir,
+      worktreeExists: fs.existsSync(worktreeDir),
     };
 
-    // Current HEAD SHA
-    data.headSha = safeExec('git rev-parse HEAD');
+    // Current HEAD SHA (from ticket worktree)
+    data.headSha = safeExec('git rev-parse HEAD', { cwd: worktreeDir });
 
-    // .pr-update-sha
+    // .pr-update-sha (stores compound key: HEAD_SHA|SCREENSHOT_HASH)
     const prShaFile = path.join(tasksDir, '.pr-update-sha');
     data.prShaFile = prShaFile;
     data.lastPrSha = '';
     if (fs.existsSync(prShaFile)) {
       try { data.lastPrSha = fs.readFileSync(prShaFile, 'utf8').trim(); } catch { /* */ }
     }
-    data.prUpToDate = data.headSha && data.headSha === data.lastPrSha;
 
-    // TSX/JSX changes vs main
-    data.tsxChanged = safeExec("git diff --name-only origin/main...HEAD -- '*.tsx' '*.jsx'");
+    // TSX/JSX changes vs main (from ticket worktree)
+    data.tsxChanged = safeExec("git diff --name-only origin/main...HEAD -- '*.tsx' '*.jsx'", { cwd: worktreeDir });
     data.hasTsxChanges = data.tsxChanged.length > 0;
 
     // Screenshot count
@@ -129,9 +136,25 @@ module.exports = {
     }
     data.screenshotsExist = data.screenshotCount > 0;
 
-    // Content SHA for post-pr (qa*.md + screenshots)
+    // Screenshot hash for compound gating key
+    let screenshotHash = 'none';
+    if (data.screenshotsExist) {
+      screenshotHash = safeExec(
+        `find "${screenshotDir}" -type f -print0 2>/dev/null | sort -z | xargs -0 sha256sum 2>/dev/null | sha256sum | cut -d' ' -f1`
+      ) || 'none';
+    }
+    data.screenshotHash = screenshotHash;
+
+    // Compound pr-gen gating key: HEAD_SHA|SCREENSHOT_HASH
+    data.prKey = `${data.headSha}|${data.screenshotHash}`;
+    data.prUpToDate = !!(data.prKey && data.prKey === data.lastPrSha);
+
+    // Content SHA for post-pr (all *.check.md + screenshots)
     data.contentSha = safeExec(
-      `(cat ${tasksDir}/qa*.md 2>/dev/null; find ${tasksDir}/screenshots -type f 2>/dev/null | sort | xargs cat 2>/dev/null) | sha256sum | cut -d' ' -f1`
+      `(
+        find "${tasksDir}" -maxdepth 1 -name '*.check.md' -print0 2>/dev/null | sort -z | xargs -0 sha256sum 2>/dev/null
+        find "${tasksDir}/screenshots" -type f -print0 2>/dev/null | sort -z | xargs -0 sha256sum 2>/dev/null
+      ) | sha256sum | cut -d' ' -f1`
     );
 
     // .post-pr-update-sha
@@ -141,7 +164,10 @@ module.exports = {
     if (fs.existsSync(postPrShaFile)) {
       try { data.lastPostPrSha = fs.readFileSync(postPrShaFile, 'utf8').trim(); } catch { /* */ }
     }
-    data.postPrUpToDate = data.contentSha && data.contentSha === data.lastPostPrSha;
+    data.postPrUpToDate = !!(data.contentSha && data.contentSha === data.lastPostPrSha);
+
+    // SKIP 5_post_pr_gen if no content to post
+    data.hasContent = !!(data.contentSha && data.contentSha !== 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
 
     return data;
   },
@@ -170,21 +196,18 @@ module.exports = {
         if (!force && d.prUpToDate) {
           return {
             action: 'SKIP',
-            reason: `HEAD SHA matches .pr-update-sha (${d.headSha?.slice(0, 8)})`,
+            reason: `Compound key matches (${d.headSha?.slice(0, 8)}|${d.screenshotHash?.slice(0, 8)})`,
           };
         }
         return {
           action: 'RUN',
           reason: force ? 'Force mode — regenerating PR description' :
-            d.lastPrSha ? `SHA changed: ${d.lastPrSha?.slice(0, 8)} → ${d.headSha?.slice(0, 8)}` :
+            d.lastPrSha ? `Key changed: ${d.lastPrSha?.slice(0, 16)}… → ${d.prKey?.slice(0, 16)}…` :
             'No previous PR update recorded',
           command: 'Task(pr-generator)',
         };
 
       case '4_screenshot_gate':
-        if (force) {
-          return { action: 'SKIP', reason: 'Force mode — bypassing screenshot gate' };
-        }
         if (!d.hasTsxChanges) {
           return { action: 'SKIP', reason: 'No TSX/JSX files changed' };
         }
@@ -201,16 +224,22 @@ module.exports = {
         };
 
       case '5_post_pr_gen':
+        if (!d.hasContent) {
+          return {
+            action: 'SKIP',
+            reason: 'No content to post (no check reports or screenshots)',
+          };
+        }
         if (!force && d.postPrUpToDate) {
           return {
             action: 'SKIP',
-            reason: `Content SHA matches .post-pr-update-sha`,
+            reason: 'Content SHA matches .post-pr-update-sha',
           };
         }
         return {
           action: 'RUN',
           reason: force ? 'Force mode — regenerating post-PR content' :
-            d.lastPostPrSha ? 'QA content changed since last run' :
+            d.lastPostPrSha ? 'Content changed since last run' :
             'No previous post-PR update recorded',
           command: 'Task(pr-post-generator)',
         };
