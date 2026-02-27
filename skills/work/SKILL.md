@@ -6,9 +6,13 @@ user-invocable: true
 allowed-tools: Task, Bash, Read, Write, Edit, Grep, Glob, TodoWrite, Skill, mcp__atlassian__jira_get_issue, mcp__atlassian__jira_get_transitions, mcp__atlassian__jira_transition_issue
 ---
 
-# /work - Orchestrated Workflow Command
+# /work - Pure Orchestrator Workflow
 
-Deterministic workflow that pre-computes an action plan and enforces exact step execution via state machine validation.
+You are a **pure orchestrator**. You NEVER execute step work directly — you ALWAYS delegate to sub-agents via `Task()` or `Skill()`. The only commands you run inline are:
+- The orchestrator itself (plan/transition)
+- Tiny metadata commands (reading plan JSON, writing state)
+
+This keeps your context window lean: just plan JSON + transition outputs + agent summaries.
 
 ## Modes
 
@@ -16,13 +20,6 @@ Deterministic workflow that pre-computes an action plan and enforces exact step 
 |------|---------|----------|
 | **Resume** (default) | `/work APPSUPEN-XXX` | Skip completed steps based on real state |
 | **Rework** | `/work APPSUPEN-XXX --rework` | Re-run /check and PR update |
-
-## How It Works
-
-1. **Orchestrator generates plan** - Inspects git, files, reports, PRs
-2. **You execute RUN steps** - Follow the plan exactly
-3. **Validate transitions** - Call `transition` before each step
-4. **Re-plan after fixes** - Fresh state inspection after any fix
 
 ---
 
@@ -34,7 +31,7 @@ Deterministic workflow that pre-computes an action plan and enforces exact step 
 node ${CLAUDE_PLUGIN_ROOT}/hooks/work-orchestrator.js "$ARGUMENTS"
 ```
 
-Parse the JSON output. This is your roadmap.
+Parse the JSON output. This is your roadmap. Each RUN step includes `agentType` and `agentPrompt` — use these directly.
 
 ### Understanding the Plan Output
 
@@ -43,25 +40,19 @@ Parse the JSON output. This is your roadmap.
   "ticket": "APPSUPEN-881",
   "mode": "resume",
   "currentStep": "6_check",
-  "allowedTransitions": ["7_cleanup", "8_test_enhancement", "3_implement"],
   "plan": [
     { "step": "1_ticket", "action": "SKIP", "reason": "Fetched" },
-    { "step": "2_bootstrap", "action": "SKIP", "reason": "Worktree + PR #142 exist" },
-    { "step": "3_implement", "action": "SKIP", "reason": "Changes exist: 4 files changed" },
-    { "step": "6_check", "action": "RUN", "command": "/check", "reason": "missing: tests.check.md" }
+    { "step": "4_quality", "action": "RUN", "command": "Task(quality-checker)",
+      "agentType": "quality-checker",
+      "agentPrompt": "Run quality checks in /home/node/worktrees/...\npnpm dev:check\n\nReturn PASS or FAIL with summary.",
+      "reason": "Lint + typecheck + test" }
   ],
-  "summary": {
-    "total": 14,
-    "run": 4,
-    "skip": 10,
-    "firstAction": "6_check",
-    "stepsToRun": ["6_check", "9_pr", "11_ci", "13_complete"]
-  }
+  "summary": { "total": 14, "run": 4, "skip": 10, "firstAction": "6_check" }
 }
 ```
 
 **Action Types:**
-- `RUN` - Execute this step
+- `RUN` - Delegate this step to a sub-agent
 - `SKIP` - Already done, move on
 - `PENDING` - Depends on earlier steps
 
@@ -77,57 +68,102 @@ For each step where `action = "RUN"`:
 node ${CLAUDE_PLUGIN_ROOT}/hooks/work-orchestrator.js transition APPSUPEN-XXX <target_step>
 ```
 
-**If success:** Proceed with the step's command.
+**If success:** Proceed with delegation.
+**If error:** Complete intermediate steps first.
 
-**If error:** The state machine blocked you. You must complete intermediate steps first. The error will tell you what steps are allowed:
+### 2b. Delegate the Step
 
-```json
-{
-  "error": true,
-  "message": "BLOCKED: 3_implement → 9_pr",
-  "allowed": ["4_quality"],
-  "hint": "From 3_implement you can go to: 4_quality"
-}
+Use the plan's `agentType` and `agentPrompt` to delegate. **NEVER run step commands yourself.**
+
+**Delegation by agentType:**
+
+| agentType | How to Delegate | Description Field Convention |
+|-----------|----------------|------------------------------|
+| `general-purpose` | `Task(general-purpose)` | `"<step_name> <short description>"` |
+| `jira-task-creator` | `Task(jira-task-creator)` | `"1_ticket create ticket"` |
+| `quality-checker` | `Task(quality-checker)` | `"4_quality run checks"` |
+| `commit-writer` | `Task(commit-writer)` | `"5_commit changes"` |
+| `Bash` | `Task(Bash)` | `"<step_name> <short description>"` |
+| `skill` | `Skill(<skill_name>)` | N/A (use Skill tool directly) |
+
+**CRITICAL**: For Task-based delegations, the `description` field MUST start with the step name (e.g., `"7_cleanup kill dev session"`). This is how the enforcement hook identifies which step the Task belongs to.
+
+#### Delegation Examples
+
+**Task-based step (e.g., 4_quality):**
+```
+Task(quality-checker):
+  description: "4_quality run checks"
+  prompt: <agentPrompt from plan>
 ```
 
-### 2b. Execute the Step's Command
+**Task-based Bash step (e.g., 10_ready):**
+```
+Task(Bash):
+  description: "10_ready mark PR ready"
+  prompt: <agentPrompt from plan>
+```
 
-Run the command specified in the plan:
+**Skill-based step (e.g., 6_check):**
+```
+Skill(check)
+```
 
-| Step | Typical Command |
-|------|-----------------|
-| 1_ticket | `mcp__atlassian__jira_get_issue` or `Task(jira-task-creator)` |
-| 2_bootstrap | `/bootstrap TICKET` |
-| 3_implement | `/work-implement <requirements>` |
-| 4_quality | `pnpm dev:check` |
-| 5_commit | `Task(commit-writer)` |
-| 6_check | `/check` |
-| 7_cleanup | `tmux kill-session -t TICKET-dev` |
-| 8_test_enhancement | `Skill(test-coordination)` |
-| 9_pr | `/work-pr TICKET` |
-| 10_ready | `gh pr ready` |
-| 11_ci | `gh pr checks --watch` |
-| 12_reports | Consolidate reports |
-| 13_complete | Mark state complete |
+**General-purpose step (e.g., 1_ticket fetch):**
+```
+Task(general-purpose):
+  description: "1_ticket fetch ticket details"
+  prompt: <agentPrompt from plan>
+```
 
-### 2c. Handle Failures
+### 2c. Check Agent Result
+
+After each agent returns:
+- **Success**: Move to next RUN step
+- **Failure**: Re-plan (Step 3)
+
+### 2d. Pre-Commands (if present)
+
+Some steps include `preCommands` (e.g., rework mode for 6_check). Run these via `Task(Bash)` before the main delegation:
+```
+Task(Bash):
+  description: "6_check pre-cleanup"
+  prompt: "Run these commands:\n<preCommands from plan>"
+```
+
+---
+
+## Step 3: Re-Plan After Failures
 
 If a step fails:
-1. Fix the issue
-2. Re-run the orchestrator for a fresh plan
+1. Do NOT reason about the failure in your context — the agent's summary is sufficient
+2. Re-run the orchestrator for a fresh plan:
+```bash
+node ${CLAUDE_PLUGIN_ROOT}/hooks/work-orchestrator.js APPSUPEN-XXX
+```
 3. Continue from the new plan
 
 ---
 
-## Step 3: Re-Plan After Fixes
+## Step-by-Step Delegation Reference
 
-After fixing any issue, always get a fresh plan:
-
-```bash
-node ${CLAUDE_PLUGIN_ROOT}/hooks/work-orchestrator.js APPSUPEN-XXX
-```
-
-The orchestrator will re-inspect state and generate an updated plan.
+| Step | agentType | Delegation |
+|------|-----------|------------|
+| `1_ticket` (fetch) | `general-purpose` | `Task(general-purpose)` — fetches Jira ticket via MCP |
+| `1_ticket` (create) | `jira-task-creator` | `Task(jira-task-creator)` — creates new ticket |
+| `2_bootstrap` | `skill` | `Skill(bootstrap)` |
+| `2b_transition` | `general-purpose` | `Task(general-purpose)` — transitions Jira status |
+| `3_implement` | `skill` | `Skill(work-implement)` |
+| `4_quality` | `quality-checker` | `Task(quality-checker)` — runs pnpm dev:check |
+| `5_commit` | `commit-writer` | `Task(commit-writer)` |
+| `6_check` | `skill` | `Skill(check)` |
+| `7_cleanup` | `Bash` | `Task(Bash)` — kills tmux dev session |
+| `8_test_enhancement` | `skill` | `Skill(test-coordination)` |
+| `9_pr` | `skill` | `Skill(work-pr)` |
+| `10_ready` | `Bash` | `Task(Bash)` — runs `gh pr ready` |
+| `11_ci` | `Bash` | `Task(Bash)` — watches CI with `gh pr checks` |
+| `12_reports` | `Bash` | `Task(Bash)` — consolidates reports |
+| `13_complete` | `Bash` | `Task(Bash)` — marks workflow complete |
 
 ---
 
@@ -150,27 +186,18 @@ Skip edges (forward):
   6_check     → 8_test_enh    (no cleanup needed)
 ```
 
-### Check Available Transitions
-
-```bash
-node ${CLAUDE_PLUGIN_ROOT}/hooks/work-orchestrator.js transitions APPSUPEN-XXX
-```
-
-### View Full Graph
-
-```bash
-node ${CLAUDE_PLUGIN_ROOT}/hooks/work-orchestrator.js graph
-```
-
 ---
 
 ## Rules
 
-1. **FIRST tool call = orchestrator** - No text-only responses before getting the plan
-2. **Call transition before each RUN step** - Validates the move is legal
-3. **Re-run orchestrator after any fix** - Fresh state inspection
-4. **Never claim completion without plan showing all done** - The orchestrator is the source of truth
-5. **Follow the plan exactly** - Don't skip steps, don't improvise
+1. **FIRST tool call = orchestrator** — No text-only responses before getting the plan
+2. **Call transition before each RUN step** — Validates the move is legal
+3. **NEVER run step commands directly** — Always delegate via Task() or Skill()
+4. **Task description MUST start with step name** — e.g., `"7_cleanup kill dev session"`
+5. **Re-run orchestrator after any failure** — Fresh state inspection
+6. **Never claim completion without plan showing all done** — The orchestrator is truth
+7. **Only run inline**: orchestrator commands, transitions, and reading plan output
+8. **Don't process large outputs** — Agent summaries are enough for decision-making
 
 ---
 
@@ -179,28 +206,16 @@ node ${CLAUDE_PLUGIN_ROOT}/hooks/work-orchestrator.js graph
 ```
 User: /work APPSUPEN-881
 
-Agent: [Runs orchestrator]
+Agent: [Runs orchestrator — gets plan JSON]
 Plan shows:
   - 1_ticket: SKIP
-  - 2_bootstrap: SKIP
-  - 3_implement: SKIP
-  - 4_quality: SKIP
-  - 5_commit: SKIP
-  - 6_check: RUN (missing reports)
-  - 7_cleanup: SKIP
-  - 8_test_enh: RUN
-  - 9_pr: RUN
-  - 10_ready: RUN
-  - 11_ci: RUN
-  - 12_reports: RUN
-  - 13_complete: RUN
+  - 6_check: RUN (agentType: "skill", agentPrompt: "/check")
+  - 10_ready: RUN (agentType: "Bash", agentPrompt: "gh pr ready")
 
-Agent: [Validates transition to 6_check]
-Agent: [Runs /check]
-Agent: [Check passes, validates transition to 8_test_enhancement]
-Agent: [Runs test enhancement]
-Agent: [Validates transition to 9_pr]
-Agent: [Runs /work-pr]
+Agent: [Transition to 6_check]
+Agent: [Skill(check)]  ← delegated, not inline
+Agent: [Transition to 10_ready]
+Agent: [Task(Bash) description="10_ready mark PR ready"]  ← delegated
 ... continues until 13_complete
 ```
 
@@ -215,22 +230,3 @@ Agent: [Runs /work-pr]
 | `work-orchestrator.js transition TICKET STEP` | Validate & record step change |
 | `work-orchestrator.js transitions TICKET` | Show allowed next steps |
 | `work-orchestrator.js graph` | Show full state machine |
-
----
-
-## Troubleshooting
-
-### "BLOCKED" error on transition
-You're trying to skip steps. Complete the intermediate steps first, or check if there's a valid skip edge.
-
-### Plan shows unexpected state
-The orchestrator reads real files/git state. If something looks wrong:
-1. Check the `state` object in the plan output
-2. Verify files exist where expected
-3. Run `git status` to confirm git state
-
-### Steps keep showing RUN after completion
-The orchestrator uses file presence and content to detect completion. Ensure:
-- Reports have correct `Status: APPROVED` patterns
-- Commits include the ticket ID
-- Files are in expected locations

@@ -21,10 +21,32 @@
  * Fail-open: Any error → exit 0 (allow).
  */
 
-const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { appendAction } = require(path.join(__dirname, '..', 'lib', 'work-actions'));
+
+// (Patch 11) Gate transient stderr logging behind debug env var — declared early for use in handlers
+const DEBUG = !!process.env.ENFORCE_HOOK_DEBUG;
+
+// (Patch 2) didBlock flag — if we've decided to block, errors after that must preserve the block
+let didBlock = false;
+
+// (Patch 1+2) Fail-open error handlers — registered BEFORE any require that could fail
+process.on('uncaughtException', (err) => {
+  if (DEBUG) process.stderr.write(`[enforce-step-workflow] uncaught: ${err?.message}\n`);
+  process.exit(didBlock ? 2 : 0);
+});
+process.on('unhandledRejection', (err) => {
+  if (DEBUG) process.stderr.write(`[enforce-step-workflow] unhandled rejection: ${err?.message}\n`);
+  process.exit(didBlock ? 2 : 0);
+});
+
+// (Patch 1) Lazy-load appendAction with fallback
+let appendAction;
+try {
+  appendAction = require(path.join(__dirname, '..', 'lib', 'work-actions')).appendAction;
+} catch {
+  appendAction = () => {};
+}
 
 // ─── Configuration ──────────────────────────────────────────────────────────
 
@@ -49,29 +71,26 @@ const WORKFLOWS = [
     ],
     softSteps: new Set(['1_ticket', '12_reports']),
     commandMap: [
-      { step: '1_ticket',           tool: 'Task',  field: 'subagent_type', pattern: /^jira-task-creator$/ },
-      { step: '1_ticket',           tool: 'mcp__atlassian__jira_get_issue', field: null, pattern: null },
-      { step: '2_bootstrap',        tool: 'Skill', field: 'skill', pattern: /^bootstrap$/ },
-      { step: '3_implement',        tool: 'Skill', field: 'skill', pattern: /^work-implement$/ },
-      { step: '4_quality',          tool: 'Bash',  field: 'command', pattern: /pnpm\s+dev:check/ },
-      { step: '4_quality',          tool: 'Bash',  field: 'command', pattern: /pnpm\s+dev:lint/ },
-      { step: '4_quality',          tool: 'Bash',  field: 'command', pattern: /pnpm\s+dev:typecheck/ },
-      { step: '4_quality',          tool: 'Bash',  field: 'command', pattern: /pnpm\s+dev:test/ },
-      { step: '5_commit',           tool: 'Task',  field: 'subagent_type', pattern: /^commit-writer$/ },
-      { step: '6_check',            tool: 'Skill', field: 'skill', pattern: /^check$/ },
-      { step: '7_cleanup',          tool: 'Bash',  field: 'command', pattern: /tmux\s+kill-session/ },
-      { step: '8_test_enhancement', tool: 'Skill', field: 'skill', pattern: /^test-coordination$/ },
-      { step: '9_pr',               tool: 'Skill', field: 'skill', pattern: /^work-pr$/ },
-      { step: '10_ready',           tool: 'Bash',  field: 'command', pattern: /gh\s+pr\s+ready/ },
-      { step: '11_ci',              tool: 'Bash',  field: 'command', pattern: /gh\s+pr\s+checks/ },
-      { step: '13_complete',        tool: 'Bash',  field: 'command', pattern: /work-state\.js\s+complete/ },
+      { step: '1_ticket',           tool: 'Task',  field: 'description',    pattern: /^1_ticket/i },
+      { step: '3_implement',        tool: 'Skill', field: 'skill',          pattern: /^work-implement$/ },
+      { step: '4_quality',          tool: 'Task',  field: 'subagent_type',  pattern: /^quality-checker$/ },
+      { step: '4_quality',          tool: 'Task',  field: 'description',    pattern: /^4_quality/i },
+      { step: '5_commit',           tool: 'Task',  field: 'subagent_type',  pattern: /^commit-writer$/ },
+      { step: '6_check',            tool: 'Skill', field: 'skill',          pattern: /^check$/ },
+      { step: '7_cleanup',          tool: 'Task',  field: 'description',    pattern: /^7_cleanup/i },
+      { step: '8_test_enhancement', tool: 'Skill', field: 'skill',          pattern: /^test-coordination$/ },
+      { step: '9_pr',               tool: 'Skill', field: 'skill',          pattern: /^work-pr$/ },
+      { step: '10_ready',           tool: 'Task',  field: 'description',    pattern: /^10_ready/i },
+      { step: '11_ci',              tool: 'Task',  field: 'description',    pattern: /^11_ci/i },
+      { step: '12_reports',         tool: 'Task',  field: 'description',    pattern: /^12_reports/i },
+      { step: '13_complete',        tool: 'Task',  field: 'description',    pattern: /^13_complete/i },
     ],
     transitionPattern: /work-orchestrator\.js\s+transition\s+(\S+)\s+(\S+)/,
     exemptPatterns: [
-      /work-orchestrator\.js\s+(plan|transitions?|graph)/,
+      /work-orchestrator\.js\s+(plan|transitions|graph)/,
       /work-state\.js\s+(get|resume-info|init)/,
     ],
-    transitionHint: 'node ~/.claude/plugins/cache/work-workflow/work-workflow/1.0.0/hooks/work-orchestrator.js transition',
+    transitionHint: `node ${path.join(__dirname, 'work-orchestrator.js')} transition`,
   },
   {
     name: 'work-pr',
@@ -91,23 +110,96 @@ const WORKFLOWS = [
     ],
     transitionPattern: /workflow-engine\.js\s+work-pr\s+transition\s+(\S+)\s+(\S+)/,
     exemptPatterns: [
-      /workflow-engine\.js\s+work-pr\s+(plan|transitions?|graph)/,
+      /workflow-engine\.js\s+work-pr\s+(plan|transitions|graph)/,
       /workflow-state\.js\s+work-pr\s+(get|resume-info|init)/,
     ],
-    transitionHint: 'node ~/.claude/plugins/cache/work-workflow/work-workflow/1.0.0/lib/workflow-engine.js work-pr transition',
+    transitionHint: `node ${path.join(__dirname, '..', 'lib', 'workflow-engine.js')} work-pr transition`,
   },
 ];
 
+// (Patch 7) Validate workflow config at startup
+function validateWorkflow(wf) {
+  const stepSet = new Set(wf.steps);
+
+  for (const s of wf.softSteps) {
+    if (!stepSet.has(s)) throw new Error(`[${wf.name}] softSteps references unknown step: ${s}`);
+  }
+
+  for (const m of wf.commandMap) {
+    if (!stepSet.has(m.step)) throw new Error(`[${wf.name}] commandMap references unknown step: ${m.step}`);
+    if (m.field === undefined) throw new Error(`[${wf.name}] commandMap missing field for step: ${m.step}`);
+  }
+}
+
+try {
+  for (const wf of WORKFLOWS) validateWorkflow(wf);
+} catch (e) {
+  process.stderr.write(`WARNING: workflow config invalid: ${String(e?.message || e)}\n`);
+  // fail-open: config errors don't block tool use
+}
+
+// Pre-index commandMap by tool name for O(1) lookup
+function buildCommandIndex(commandMap) {
+  const index = {};
+  for (const mapping of commandMap) {
+    if (!index[mapping.tool]) index[mapping.tool] = [];
+    index[mapping.tool].push(mapping);
+  }
+  return index;
+}
+
+for (const wf of WORKFLOWS) {
+  wf.commandIndex = buildCommandIndex(wf.commandMap);
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
-function getTicketId() {
-  try {
-    const branch = execSync('git branch --show-current 2>/dev/null', { encoding: 'utf8', timeout: 5000 }).trim();
-    const match = branch.match(/APPSUPEN-\d+/);
-    return match ? match[0] : null;
-  } catch {
-    return null;
+// Cache git branch per invocation
+let _cachedTicketId;
+let _ticketIdResolved = false;
+
+// (Patch 9+12) Resolve HEAD for worktrees: .git is a file containing "gitdir: <path>"
+function resolveGitHead() {
+  const dotgitPath = '.git';
+  const dotgit = fs.readFileSync(dotgitPath, 'utf-8').trim();
+
+  // Worktree case: .git is a file containing "gitdir: <path>"
+  if (dotgit.startsWith('gitdir: ')) {
+    const rawGitdir = dotgit.slice('gitdir: '.length);
+    // (Patch 12) Resolve relative gitdir paths relative to the directory containing .git
+    const gitdir = path.resolve(path.dirname(dotgitPath), rawGitdir);
+    return fs.readFileSync(path.join(gitdir, 'HEAD'), 'utf-8').trim();
   }
+
+  // Not a worktree pointer — unexpected content
+  throw new Error('unexpected .git content');
+}
+
+function getTicketId() {
+  if (_ticketIdResolved) return _cachedTicketId;
+  _ticketIdResolved = true;
+  // Allow override for testing
+  if (process.env.ENFORCE_HOOK_TICKET_ID) {
+    _cachedTicketId = process.env.ENFORCE_HOOK_TICKET_ID;
+    return _cachedTicketId;
+  }
+  // (Patch 6+9) Worktree-aware .git/HEAD read — no subprocess spawn
+  try {
+    let head;
+    try {
+      // Try worktree-aware read first (.git as file)
+      head = resolveGitHead();
+    } catch {
+      // Fallback: normal repo (.git is a directory)
+      head = fs.readFileSync(path.join('.git', 'HEAD'), 'utf-8').trim();
+    }
+    const ref = head.startsWith('ref: ') ? head.slice(5) : head;
+    const match = ref.match(/[A-Z]+-\d+/);
+    _cachedTicketId = match ? match[0] : null;
+  } catch {
+    _cachedTicketId = null;
+  }
+  return _cachedTicketId;
 }
 
 function loadStateFile(ticketId, stateFile) {
@@ -119,12 +211,14 @@ function loadStateFile(ticketId, stateFile) {
   }
 }
 
+// Dual in_progress detection — warn but still fail-open
 function getCurrentStep(state, steps) {
   if (!state?.stepStatus) return null;
-  for (const step of steps) {
-    if (state.stepStatus[step] === 'in_progress') return step;
+  const active = steps.filter(s => state.stepStatus[s] === 'in_progress');
+  if (active.length > 1) {
+    process.stderr.write(`WARNING: Multiple steps in_progress: ${active.join(', ')}. Using first.\n`);
   }
-  return null;
+  return active[0] || null;
 }
 
 function loadEvidence(ticketId, evidenceFile) {
@@ -136,25 +230,31 @@ function loadEvidence(ticketId, evidenceFile) {
   }
 }
 
+// Atomic evidence writes — write to tmp then rename
 function saveEvidence(ticketId, evidenceFile, evidence) {
   const dir = path.join(TASKS_BASE, ticketId);
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, evidenceFile), JSON.stringify(evidence, null, 2));
+  const target = path.join(dir, evidenceFile);
+  const tmp = `${target}.tmp.${process.pid}`;
+  fs.writeFileSync(tmp, JSON.stringify(evidence, null, 2));
+  fs.renameSync(tmp, target);
 }
 
 /**
- * Match a tool call to a workflow step using a command map.
+ * Match a tool call to a workflow step using the pre-indexed command map.
  * Returns the step name or null if no match.
  */
-function matchToolToStep(toolName, toolInput, commandMap) {
-  for (const mapping of commandMap) {
-    if (mapping.tool !== toolName) continue;
+function matchToolToStep(toolName, toolInput, commandIndex) {
+  const mappings = commandIndex[toolName];
+  if (!mappings) return null;
 
+  for (const mapping of mappings) {
     // Tool-only match (no field pattern needed)
     if (mapping.field === null) return mapping.step;
 
-    // Field pattern match
-    const value = toolInput?.[mapping.field] || '';
+    // Safer field coercion — handle non-string values
+    const raw = toolInput?.[mapping.field];
+    const value = typeof raw === 'string' ? raw : (raw == null ? '' : JSON.stringify(raw));
     if (mapping.pattern && mapping.pattern.test(value)) return mapping.step;
   }
   return null;
@@ -165,20 +265,22 @@ function matchToolToStep(toolName, toolInput, commandMap) {
  */
 function isExempt(toolName, toolInput, exemptPatterns) {
   if (toolName !== 'Bash') return false;
-  const cmd = toolInput?.command || '';
+  // (Patch 13) Consistent String() coercion
+  const cmd = String(toolInput?.command || '');
   return exemptPatterns.some(p => p.test(cmd));
 }
 
 /**
  * Parse a transition command for a specific workflow.
- * Returns { isTransition: true, ticket, targetStep } or { isTransition: false }.
+ * Returns { isTransition: true, ticket, targetStep, raw } or { isTransition: false }.
  */
 function parseTransition(toolName, toolInput, transitionPattern) {
   if (toolName !== 'Bash') return { isTransition: false };
-  const cmd = toolInput?.command || '';
+  // (Patch 4) Coerce command to string
+  const cmd = String(toolInput?.command || '');
   const match = cmd.match(transitionPattern);
   if (match) {
-    return { isTransition: true, ticket: match[1], targetStep: match[2] };
+    return { isTransition: true, ticket: match[1], targetStep: match[2], raw: cmd };
   }
   return { isTransition: false };
 }
@@ -207,31 +309,47 @@ function handlePreToolUse(hookData) {
     // 4. Check if this is a transition command for THIS workflow (Rule 2)
     const transition = parseTransition(toolName, toolInput, wf.transitionPattern);
     if (transition.isTransition) {
+      // (Patch 10) Validate target is a real step in this workflow
+      if (!wf.steps.includes(transition.targetStep)) continue;
+
+      // Ticket-aware transition — skip if transition targets a different ticket
+      if (transition.ticket !== ticketId) continue;
+
       // Rule 2: Block transition if current step's command wasn't executed
       if (wf.softSteps.has(currentStep)) continue; // Soft steps don't need evidence
 
       const evidence = loadEvidence(ticketId, wf.evidenceFile);
       if (evidence[currentStep]?.executed) continue; // Evidence exists → allow
 
-      // Find expected command description
-      const expectedMapping = wf.commandMap.find(m => m.step === currentStep);
-      const expectedDesc = expectedMapping
-        ? `${expectedMapping.tool}: ${expectedMapping.pattern || '(any call)'}`
-        : 'expected command';
+      // (Patch 5) Multi-command expected hint — show all valid commands with field names
+      const expectedMappings = wf.commandMap.filter(m => m.step === currentStep);
+      const expectedLines = expectedMappings.length > 0
+        ? expectedMappings.map(m => {
+            if (m.field == null) return `${m.tool} (any call)`;
+            const pat = m.pattern ? m.pattern.toString() : '(any)';
+            return `${m.tool}.${m.field} matches ${pat}`;
+          })
+        : ['expected command'];
+
+      // (Patch 4) Use transition.raw for attempted command
+      const transitionCmd = transition.raw || '(unknown)';
 
       if (wf.name === 'work') {
         appendAction(ticketId, { step: currentStep, what: 'BLOCKED: transition without evidence', meta: { rule: 2 } });
       }
+      didBlock = true;
       process.stderr.write(
         `BLOCKED [${wf.name}]: Cannot transition from ${currentStep} — expected command not executed.\n` +
-        `Expected: ${expectedDesc}\n` +
+        `Attempted: ${transitionCmd}\n` +
+        `Expected one of:\n` +
+        expectedLines.map(s => `  - ${s}\n`).join('') +
         `Run the expected command first, then transition.\n`
       );
       process.exit(2);
     }
 
     // 5. Map tool call to a step in THIS workflow (Rule 1)
-    const matchedStep = matchToolToStep(toolName, toolInput, wf.commandMap);
+    const matchedStep = matchToolToStep(toolName, toolInput, wf.commandIndex);
     if (!matchedStep) continue; // Not a step command for this workflow → skip
 
     // Rule 1: Block if matched step ≠ currentStep
@@ -241,6 +359,7 @@ function handlePreToolUse(hookData) {
         const truncDesc = String(cmdDesc).substring(0, 80);
         appendAction(ticketId, { step: matchedStep, what: `BLOCKED: ${truncDesc} (step ${matchedStep} not in_progress)`, meta: { rule: 1 } });
       }
+      didBlock = true;
       process.stderr.write(
         `BLOCKED [${wf.name}]: Cannot run '${cmdDesc}' — step ${matchedStep} is not in_progress.\n` +
         `Current step: ${currentStep} (in_progress)\n` +
@@ -274,14 +393,21 @@ function handlePostToolUse(hookData) {
     // 3. Check if this is a transition command — clear evidence on backward transitions
     const transition = parseTransition(toolName, toolInput, wf.transitionPattern);
     if (transition.isTransition) {
+      // (Patch 10) Validate target is a real step in this workflow
+      if (!wf.steps.includes(transition.targetStep)) continue;
+
+      // (Patch 3) Ticket-aware transition gate — mirror PreToolUse
+      if (transition.ticket !== ticketId) continue;
+
       if (currentStep && transition.targetStep) {
         const currentIdx = wf.steps.indexOf(currentStep);
         const targetIdx = wf.steps.indexOf(transition.targetStep);
 
-        // Backward transition: clear evidence for steps in the range
+        // Backward transition: clear evidence for steps AFTER target through current
+        // Target step itself is preserved — we're going TO it, so redo everything after
         if (targetIdx >= 0 && currentIdx >= 0 && targetIdx < currentIdx) {
           const evidence = loadEvidence(ticketId, wf.evidenceFile);
-          for (let i = targetIdx; i <= currentIdx; i++) {
+          for (let i = targetIdx + 1; i <= currentIdx; i++) {
             delete evidence[wf.steps[i]];
           }
           saveEvidence(ticketId, wf.evidenceFile, evidence);
@@ -291,7 +417,7 @@ function handlePostToolUse(hookData) {
     }
 
     // 4. Map tool call to step and record evidence
-    const matchedStep = matchToolToStep(toolName, toolInput, wf.commandMap);
+    const matchedStep = matchToolToStep(toolName, toolInput, wf.commandIndex);
     if (!matchedStep) continue;
 
     const evidence = loadEvidence(ticketId, wf.evidenceFile);
@@ -322,20 +448,29 @@ function handlePostToolUse(hookData) {
 
 // ─── Main ───────────────────────────────────────────────────────────────────
 
+// (Patch 8) Harden main() — guard empty stdin and log errors
 async function main() {
-  let input = '';
-  for await (const chunk of process.stdin) {
-    input += chunk;
-  }
+  try {
+    let input = '';
+    for await (const chunk of process.stdin) {
+      input += chunk;
+    }
 
-  const hookData = JSON.parse(input);
-  const hookType = process.env.CLAUDE_HOOK_TYPE || 'PostToolUse';
+    if (!input.trim()) return; // Empty stdin → allow
 
-  if (hookType === 'PreToolUse') {
-    handlePreToolUse(hookData);
-  } else if (hookType === 'PostToolUse') {
-    handlePostToolUse(hookData);
+    const hookData = JSON.parse(input);
+    const hookType = process.env.CLAUDE_HOOK_TYPE || 'PostToolUse';
+
+    if (hookType === 'PreToolUse') {
+      handlePreToolUse(hookData);
+    } else if (hookType === 'PostToolUse') {
+      handlePostToolUse(hookData);
+    }
+  } catch (err) {
+    if (DEBUG) process.stderr.write(`[enforce-step-workflow] fail-open: ${err?.message}\n`);
   }
 }
 
-main().catch(() => {});
+main().catch((err) => {
+  if (DEBUG) process.stderr.write(`[enforce-step-workflow] fatal: ${err?.message}\n`);
+});

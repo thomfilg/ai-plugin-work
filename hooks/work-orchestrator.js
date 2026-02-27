@@ -273,6 +273,9 @@ function inspect(ticket) {
 function generatePlan(ticket, description, s, rework) {
   const plan = [];
   const mode = rework ? 'rework' : 'resume';
+  const t = ticket || '{TICKET}';
+  const worktreeDir = s?.worktreeDir || `${WORKTREES_BASE}/${MAIN_WORKTREE_FOLDER}-${t}`;
+  const tasksDir = s?.tasksDir || `${TASKS_BASE}/${t}`;
 
   function add(stepName, action, command, reason, extra = {}) {
     plan.push({ step: stepName, action, ...(command ? { command } : {}), reason, ...extra });
@@ -280,29 +283,47 @@ function generatePlan(ticket, description, s, rework) {
 
   // 1_ticket
   if (!ticket) {
-    add('1_ticket', 'RUN', 'Task(jira-task-creator)', `Create ticket from: "${description}"`);
+    add('1_ticket', 'RUN', 'Task(jira-task-creator)', `Create ticket from: "${description}"`, {
+      agentType: 'jira-task-creator',
+      agentPrompt: `Create a Jira ticket from this description: "${description}"`,
+    });
   } else {
-    add('1_ticket', 'RUN', `mcp__atlassian__jira_get_issue(issue_key: "${ticket}")`, 'Fetch ticket details');
+    add('1_ticket', 'RUN', 'Task(general-purpose)', 'Fetch ticket details', {
+      agentType: 'general-purpose',
+      agentPrompt: `Fetch Jira ticket ${ticket} using mcp__atlassian__jira_get_issue with issue_key "${ticket}". Return the ticket summary, description, status, and acceptance criteria.`,
+    });
   }
 
   // 2_bootstrap
   if (s?.worktreeExists && s?.pr) {
     add('2_bootstrap', 'SKIP', null, `Worktree + PR #${s.pr.number} exist`);
   } else if (s?.worktreeExists) {
-    add('2_bootstrap', 'RUN', `/bootstrap ${ticket}`, 'Worktree exists but no PR');
+    add('2_bootstrap', 'RUN', `/bootstrap ${ticket}`, 'Worktree exists but no PR', {
+      agentType: 'skill',
+      agentPrompt: `/bootstrap ${ticket}`,
+    });
   } else {
-    add('2_bootstrap', 'RUN', `/bootstrap ${ticket || '{TICKET}'}`, 'No worktree found');
+    add('2_bootstrap', 'RUN', `/bootstrap ${t}`, 'No worktree found', {
+      agentType: 'skill',
+      agentPrompt: `/bootstrap ${t}`,
+    });
   }
 
   add('2b_transition', 'RUN',
-    'mcp__atlassian__jira_get_transitions + jira_transition_issue',
-    'Jira → In Development (idempotent)');
+    'Task(general-purpose)',
+    'Jira → In Development (idempotent)', {
+      agentType: 'general-purpose',
+      agentPrompt: `Transition Jira ticket ${t} to "In Development" (idempotent). Use mcp__atlassian__jira_get_transitions to get available transitions for ${t}, then use mcp__atlassian__jira_transition_issue to move it to "In Development" (or similar active status). If already in that status, report success.`,
+    });
 
   // 3_implement
   if (s?.hasDiffVsMain) {
     add('3_implement', 'SKIP', null, `Changes exist: ${s.diffSummary}`);
   } else {
-    add('3_implement', 'RUN', '/work-implement <requirements>', 'No changes vs main');
+    add('3_implement', 'RUN', '/work-implement <requirements>', 'No changes vs main', {
+      agentType: 'skill',
+      agentPrompt: '/work-implement <requirements>',
+    });
   }
 
   // 4_quality
@@ -311,27 +332,38 @@ function generatePlan(ticket, description, s, rework) {
   } else if (!s?.hasDiffVsMain) {
     add('4_quality', 'PENDING', null, 'Depends on 3_implement');
   } else {
-    add('4_quality', 'RUN', 'pnpm dev:check', 'Lint + typecheck + test');
+    add('4_quality', 'RUN', 'Task(quality-checker)', 'Lint + typecheck + test', {
+      agentType: 'quality-checker',
+      agentPrompt: `Run quality checks in ${worktreeDir}:\npnpm dev:check\n\nReturn PASS or FAIL with summary.`,
+    });
   }
 
   // 5_commit
   if (s?.hasUncommitted) {
-    add('5_commit', 'RUN', 'Task(commit-writer)', `${s.uncommittedCount} uncommitted file(s)`);
+    add('5_commit', 'RUN', 'Task(commit-writer)', `${s.uncommittedCount} uncommitted file(s)`, {
+      agentType: 'commit-writer',
+      agentPrompt: `autonomous - commit staged changes for ${t}`,
+    });
   } else if (s?.hasCommitWithTicket) {
     add('5_commit', 'SKIP', null, `Latest: "${s.lastCommitMsg}"`);
   } else if (!s?.hasDiffVsMain) {
     add('5_commit', 'PENDING', null, 'Depends on 3_implement');
   } else {
-    add('5_commit', 'RUN', 'Task(commit-writer)', 'Commit missing ticket ID');
+    add('5_commit', 'RUN', 'Task(commit-writer)', 'Commit missing ticket ID', {
+      agentType: 'commit-writer',
+      agentPrompt: `autonomous - commit staged changes for ${t}`,
+    });
   }
 
   // 6_check
   if (rework) {
     add('6_check', 'RUN', '/check', 'REWORK: Always re-run', {
+      agentType: 'skill',
+      agentPrompt: '/check',
       preCommands: [
-        `rm -f "${s?.tasksDir}"/*.check.md`,
-        `rm -f "${s?.tasksDir}"/.pr-update-sha`,
-        `rm -f "${s?.tasksDir}"/.post-pr-update-sha`,
+        `rm -f "${tasksDir}"/*.check.md`,
+        `rm -f "${tasksDir}"/.pr-update-sha`,
+        `rm -f "${tasksDir}"/.post-pr-update-sha`,
       ],
     });
   } else if (s?.allReportsPass && Object.keys(s.reports).length >= 3) {
@@ -340,49 +372,82 @@ function generatePlan(ticket, description, s, rework) {
     const p = [];
     if (s?.missingReports?.length) p.push(`missing: ${s.missingReports.join(', ')}`);
     if (s?.failedReports?.length) p.push(`failed: ${s.failedReports.join(', ')}`);
-    add('6_check', 'RUN', '/check', p.length ? p.join('; ') : 'No reports found');
+    add('6_check', 'RUN', '/check', p.length ? p.join('; ') : 'No reports found', {
+      agentType: 'skill',
+      agentPrompt: '/check',
+    });
   }
 
   // 7_cleanup
   if (s?.hasDevSession) {
-    add('7_cleanup', 'RUN', `tmux kill-session -t "${ticket}-dev"`, 'Dev session running');
+    add('7_cleanup', 'RUN', `Task(Bash)`, 'Dev session running', {
+      agentType: 'Bash',
+      agentPrompt: `Run: tmux kill-session -t "${ticket}-dev" 2>/dev/null; echo "Cleanup done"`,
+    });
   } else {
     add('7_cleanup', 'SKIP', null, 'No dev session');
   }
 
   // 8_test_enhancement
   if (rework) {
-    add('8_test_enhancement', 'RUN', `Skill(test-coordination): ${ticket}`, 'REWORK: Re-run');
+    add('8_test_enhancement', 'RUN', `Skill(test-coordination): ${ticket}`, 'REWORK: Re-run', {
+      agentType: 'skill',
+      agentPrompt: `/test-coordination ${ticket}`,
+    });
   } else if (s?.testEnhancementDone) {
     const te = s.testEnhancement;
     const d = te?.skipped ? `Skipped: ${te.skipReason || '?'}` : `Rating ${te?.finalRating || '?'}/10`;
     add('8_test_enhancement', 'SKIP', null, d);
   } else {
-    add('8_test_enhancement', 'RUN', `Skill(test-coordination): ${ticket || '{TICKET}'}`, 'Not yet run');
+    add('8_test_enhancement', 'RUN', `Skill(test-coordination): ${t}`, 'Not yet run', {
+      agentType: 'skill',
+      agentPrompt: `/test-coordination ${t}`,
+    });
   }
 
   // 9_pr
   if (rework) {
-    add('9_pr', 'RUN', `/work-pr ${ticket} --force`, 'REWORK: Force update');
+    add('9_pr', 'RUN', `/work-pr ${ticket} --force`, 'REWORK: Force update', {
+      agentType: 'skill',
+      agentPrompt: `/work-pr ${ticket} --force`,
+    });
   } else if (s?.prShaMatch && s?.prEverUpdated) {
     add('9_pr', 'SKIP', null, `SHA match (${s.headSha?.substring(0, 8)})`);
   } else if (s?.prEverUpdated) {
-    add('9_pr', 'RUN', `/work-pr ${ticket}`, `HEAD: ${s.prUpdateSha?.substring(0, 8) || '?'} → ${s.headSha?.substring(0, 8) || '?'}`);
+    add('9_pr', 'RUN', `/work-pr ${ticket}`, `HEAD: ${s.prUpdateSha?.substring(0, 8) || '?'} → ${s.headSha?.substring(0, 8) || '?'}`, {
+      agentType: 'skill',
+      agentPrompt: `/work-pr ${ticket}`,
+    });
   } else {
-    add('9_pr', 'RUN', `/work-pr ${ticket || '{TICKET}'}`, 'Must run once');
+    add('9_pr', 'RUN', `/work-pr ${t}`, 'Must run once', {
+      agentType: 'skill',
+      agentPrompt: `/work-pr ${t}`,
+    });
   }
 
   // 10_ready
   if (s?.pr && !s.pr.isDraft) {
     add('10_ready', 'SKIP', null, 'Already ready');
   } else {
-    add('10_ready', 'RUN', 'gh pr ready', 'Mark PR ready');
+    add('10_ready', 'RUN', 'Task(Bash)', 'Mark PR ready', {
+      agentType: 'Bash',
+      agentPrompt: `Run in ${worktreeDir}: gh pr ready`,
+    });
   }
 
   // 11_ci → 13_complete
-  add('11_ci', 'RUN', 'gh pr checks --watch --interval 60', 'Wait for CI');
-  add('12_reports', 'RUN', 'verify_and_consolidate_reports', 'Move reports to tasks/');
-  add('13_complete', 'RUN', `node ~/.claude/hooks/work-state.js complete ${ticket || '{TICKET}'}`, 'Finish');
+  add('11_ci', 'RUN', 'Task(Bash)', 'Wait for CI', {
+    agentType: 'Bash',
+    agentPrompt: `Run in ${worktreeDir}: gh pr checks --watch --interval 60\n\nReturn PASS if all checks pass, FAIL with details if any fail.`,
+  });
+  add('12_reports', 'RUN', 'Task(Bash)', 'Move reports to tasks/', {
+    agentType: 'Bash',
+    agentPrompt: `Verify and consolidate reports in ${tasksDir}. List all *.check.md files and confirm they exist. Report the count and status of each.`,
+  });
+  add('13_complete', 'RUN', 'Task(Bash)', 'Finish', {
+    agentType: 'Bash',
+    agentPrompt: `Run: node ~/.claude/hooks/work-state.js complete ${t}`,
+  });
 
   return { ticket: ticket || `TBD ("${description}")`, mode, plan };
 }
