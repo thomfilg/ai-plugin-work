@@ -40,6 +40,45 @@
             "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/hooks/enforce-step-workflow.js"
           }
         ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/enforce-work-command.js"
+          },
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/work-implement-enforce.js"
+          },
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/work-require-implement.js"
+          }
+        ]
+      },
+      {
+        "matcher": "Task|Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/hooks/enforce-env-start-failure.js"
+          },
+          {
+            "type": "command",
+            "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/hooks/enforce-screenshot-requirement.js"
+          }
+        ]
+      },
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/hooks/work-enforce-steps.js"
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -58,6 +97,61 @@
           {
             "type": "command",
             "command": "CLAUDE_HOOK_TYPE=PostToolUse node ${CLAUDE_PLUGIN_ROOT}/hooks/enforce-step-workflow.js"
+          }
+        ]
+      },
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CLAUDE_HOOK_TYPE=PostToolUse node ${CLAUDE_PLUGIN_ROOT}/hooks/work-enforce-steps.js"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CLAUDE_HOOK_TYPE=PostToolUse node ${CLAUDE_PLUGIN_ROOT}/hooks/enforce-env-start-failure.js"
+          },
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/enforce-coverage-fix.js"
+          }
+        ]
+      },
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CLAUDE_HOOK_TYPE=PostToolUse node ${CLAUDE_PLUGIN_ROOT}/hooks/enforce-env-start-failure.js"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/enforce-completion-protocol.js"
+          }
+        ]
+      },
+      {
+        "matcher": ".*(/check|code.?review|quality.?check|APPROVED|PASS|tests?.?md|code-review.?md|qa.?md).*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/work-code-review-status.js"
+          },
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/work-suggestion-replies.js"
           }
         ]
       }

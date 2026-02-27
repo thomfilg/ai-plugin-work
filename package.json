@@ -1,10 +1,16 @@
 {
   "name": "work-workflow",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "description": "Deterministic workflow orchestrator for Jira task implementation with state machine validation.",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/user/claude-plugin-work"
+  },
+  "scripts": {
+    "test": "node --test hooks/__tests__/*.test.js lib/__tests__/*.test.js workflows/__tests__/*.test.js",
+    "test:enforce": "node --test hooks/__tests__/enforce-step-workflow.test.js",
+    "test:orchestrator": "node --test hooks/__tests__/work-orchestrator.test.js",
+    "test:work-pr": "node --test workflows/__tests__/work-pr.workflow.test.js"
   }
 }

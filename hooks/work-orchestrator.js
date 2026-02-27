@@ -81,9 +81,13 @@ function canTransition(statusTransitions) {
 //  Happy path:  1→2→3→4→5→6→7→8→9→10→11→12→13
 //
 //  Retry loops (backward edges):
-//    6_check     → 3_implement   (check failed, fix code)
 //    4_quality   → 3_implement   (quality failed, re-implement)
+//    5_commit    → 4_quality     (re-verify quality after commit)
+//    6_check     → 3_implement   (check failed, fix code)
+//    6_check     → 4_quality     (check needs quality re-run)
 //    8_test_enh  → 5_commit      (enhanced tests need committing)
+//    8_test_enh  → 4_quality     (new tests need quality check)
+//    8_test_enh  → 3_implement   (tests reveal implementation flaw)
 //    11_ci       → 3_implement   (CI failed, fix code)
 //    11_ci       → 8_test_enh    (coverage failed)
 //
@@ -92,17 +96,18 @@ function canTransition(statusTransitions) {
 //    2_bootstrap → 5_commit      (resume: code + quality done)
 //    2_bootstrap → 6_check       (resume: committed, need check)
 //    6_check     → 8_test_enh    (no cleanup needed)
+//    9_pr        → 11_ci         (PR already ready, skip 10_ready)
 
 const STEP_TRANSITIONS = createStatusTransitions([
   { source: '1_ticket',            targets: ['2_bootstrap'] },
   { source: '2_bootstrap',         targets: ['3_implement', '4_quality', '5_commit', '6_check'] },
   { source: '3_implement',         targets: ['4_quality'] },
   { source: '4_quality',           targets: ['5_commit', '3_implement'] },
-  { source: '5_commit',            targets: ['6_check'] },
-  { source: '6_check',             targets: ['7_cleanup', '8_test_enhancement', '3_implement'] },
+  { source: '5_commit',            targets: ['6_check', '4_quality'] },
+  { source: '6_check',             targets: ['7_cleanup', '8_test_enhancement', '3_implement', '4_quality'] },
   { source: '7_cleanup',           targets: ['8_test_enhancement'] },
-  { source: '8_test_enhancement',  targets: ['9_pr', '5_commit'] },
-  { source: '9_pr',                targets: ['10_ready'] },
+  { source: '8_test_enhancement',  targets: ['9_pr', '5_commit', '4_quality', '3_implement'] },
+  { source: '9_pr',                targets: ['10_ready', '11_ci'] },
   { source: '10_ready',            targets: ['11_ci'] },
   { source: '11_ci',               targets: ['12_reports', '3_implement', '8_test_enhancement'] },
   { source: '12_reports',          targets: ['13_complete'] },
@@ -411,8 +416,8 @@ function generatePlan(ticket, description, s, rework) {
       agentType: 'skill',
       agentPrompt: `/work-pr ${ticket} --force`,
     });
-  } else if (s?.prShaMatch && s?.prEverUpdated) {
-    add('9_pr', 'SKIP', null, `SHA match (${s.headSha?.substring(0, 8)})`);
+  } else if (s?.prShaMatch && s?.prEverUpdated && (s?.postPrShaMatch || !s?.contentSha)) {
+    add('9_pr', 'SKIP', null, `SHA match (${s.headSha?.substring(0, 8)}, content: ${s?.postPrShaMatch ? 'match' : 'n/a'})`);
   } else if (s?.prEverUpdated) {
     add('9_pr', 'RUN', `/work-pr ${ticket}`, `HEAD: ${s.prUpdateSha?.substring(0, 8) || '?'} → ${s.headSha?.substring(0, 8) || '?'}`, {
       agentType: 'skill',

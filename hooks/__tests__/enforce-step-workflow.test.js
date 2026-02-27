@@ -1030,4 +1030,142 @@ describe('enforce-step-workflow', () => {
       assert.ok(stderr.includes('WARNING: Multiple steps in_progress'), 'WARNING always visible');
     });
   });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Patch 14: Bash dev:check command matching for 4_quality
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe('Bash dev:check → 4_quality command matching (Patch 14)', () => {
+    it('blocks pnpm dev:check when step is NOT 4_quality', async () => {
+      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook({
+        tool_name: 'Bash',
+        tool_input: { command: 'pnpm dev:check' },
+      });
+      assert.equal(code, 2);
+      assert.ok(stderr.includes('BLOCKED'), 'Should block dev:check outside 4_quality');
+      assert.ok(stderr.includes('4_quality'), 'Should mention 4_quality');
+    });
+
+    it('allows pnpm dev:check when step IS 4_quality', async () => {
+      writeWorkState(makeStepStatus('4_quality', WORK_STEPS));
+
+      const { code } = await runHook({
+        tool_name: 'Bash',
+        tool_input: { command: 'pnpm dev:check' },
+      });
+      assert.equal(code, 0);
+    });
+
+    it('blocks LOW_CONCURRENCY=1 pnpm dev:check outside 4_quality', async () => {
+      writeWorkState(makeStepStatus('6_check', WORK_STEPS));
+
+      const { code, stderr } = await runHook({
+        tool_name: 'Bash',
+        tool_input: { command: 'LOW_CONCURRENCY=1 pnpm dev:check' },
+      });
+      assert.equal(code, 2);
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+
+    it('allows LOW_CONCURRENCY=1 pnpm dev:check during 4_quality', async () => {
+      writeWorkState(makeStepStatus('4_quality', WORK_STEPS));
+
+      const { code } = await runHook({
+        tool_name: 'Bash',
+        tool_input: { command: 'LOW_CONCURRENCY=1 pnpm dev:check' },
+      });
+      assert.equal(code, 0);
+    });
+
+    it('blocks npm run dev:check outside 4_quality', async () => {
+      writeWorkState(makeStepStatus('5_commit', WORK_STEPS));
+
+      const { code, stderr } = await runHook({
+        tool_name: 'Bash',
+        tool_input: { command: 'npm run dev:check' },
+      });
+      assert.equal(code, 2);
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+
+    it('records evidence for pnpm dev:check via PostToolUse during 4_quality', async () => {
+      writeWorkState(makeStepStatus('4_quality', WORK_STEPS));
+
+      const { code } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: 'pnpm dev:check' } },
+        'PostToolUse',
+      );
+      assert.equal(code, 0);
+
+      const evidence = readEvidence();
+      assert.ok(evidence['4_quality']?.executed, 'Should record evidence for 4_quality');
+      assert.equal(evidence['4_quality']?.tool, 'Bash');
+    });
+
+    it('matches pnpm dev:check-types as 4_quality (\\b matches at hyphen)', async () => {
+      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook({
+        tool_name: 'Bash',
+        tool_input: { command: 'pnpm dev:check-types' },
+      });
+      // \b matches at word boundary before hyphen — this IS caught as 4_quality
+      assert.equal(code, 2);
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Patch 14: 10_ready as soft step
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe('10_ready soft step (Patch 14)', () => {
+    it('allows transition from 10_ready without evidence', async () => {
+      writeWorkState(makeStepStatus('10_ready', WORK_STEPS));
+      // No evidence written for 10_ready
+
+      const { code } = await runHook({
+        tool_name: 'Bash',
+        tool_input: { command: `node /path/to/work-orchestrator.js transition ${TEST_TICKET} 11_ci` },
+      });
+      // Soft step → should allow transition without evidence
+      assert.equal(code, 0);
+    });
+
+    it('source confirms 10_ready is in softSteps set', () => {
+      const hookSource = fs.readFileSync(HOOK_PATH, 'utf-8');
+      // Check that softSteps contains 10_ready
+      const softStepsMatch = hookSource.match(/softSteps:\s*new Set\(\[([^\]]+)\]\)/);
+      assert.ok(softStepsMatch, 'Should have softSteps declaration');
+      assert.ok(softStepsMatch[1].includes("'10_ready'"), 'softSteps should include 10_ready');
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Patch 14: 9_pr evidence validation
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe('9_pr evidence validation (Patch 14)', () => {
+    it('does NOT record evidence for 9_pr when .pr-update-sha is missing', async () => {
+      writeWorkState(makeStepStatus('9_pr', WORK_STEPS));
+      // Do NOT create .pr-update-sha file
+
+      const { code } = await runHook(
+        { tool_name: 'Skill', tool_input: { skill: 'work-pr' } },
+        'PostToolUse',
+      );
+      assert.equal(code, 0);
+
+      const evidence = readEvidence();
+      assert.equal(evidence['9_pr'], undefined, 'Should NOT record evidence without .pr-update-sha');
+    });
+
+    it('source has Patch 14 evidence validation block', () => {
+      const hookSource = fs.readFileSync(HOOK_PATH, 'utf-8');
+      assert.ok(hookSource.includes("(Patch 14) Strengthen 9_pr evidence"), 'Should have Patch 14 comment');
+      assert.ok(hookSource.includes('.pr-update-sha'), 'Should reference .pr-update-sha file');
+    });
+  });
 });

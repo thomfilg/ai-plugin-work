@@ -69,12 +69,13 @@ const WORKFLOWS = [
       '5_commit', '6_check', '7_cleanup', '8_test_enhancement',
       '9_pr', '10_ready', '11_ci', '12_reports', '13_complete',
     ],
-    softSteps: new Set(['1_ticket', '12_reports']),
+    softSteps: new Set(['1_ticket', '10_ready', '12_reports']),
     commandMap: [
       { step: '1_ticket',           tool: 'Task',  field: 'description',    pattern: /^1_ticket/i },
       { step: '3_implement',        tool: 'Skill', field: 'skill',          pattern: /^work-implement$/ },
       { step: '4_quality',          tool: 'Task',  field: 'subagent_type',  pattern: /^quality-checker$/ },
       { step: '4_quality',          tool: 'Task',  field: 'description',    pattern: /^4_quality/i },
+      { step: '4_quality',          tool: 'Bash',  field: 'command',        pattern: /(^|\s)(LOW_CONCURRENCY=\d+\s+)?(pnpm|npm)\s+(run\s+)?dev:check\b/ },
       { step: '5_commit',           tool: 'Task',  field: 'subagent_type',  pattern: /^commit-writer$/ },
       { step: '6_check',            tool: 'Skill', field: 'skill',          pattern: /^check$/ },
       { step: '7_cleanup',          tool: 'Task',  field: 'description',    pattern: /^7_cleanup/i },
@@ -101,7 +102,7 @@ const WORKFLOWS = [
       '1_preflight', '2_setup', '3_pr_gen',
       '4_screenshot_gate', '5_post_pr_gen', '6_summary',
     ],
-    softSteps: new Set(['1_preflight', '2_setup', '6_summary']),
+    softSteps: new Set(['1_preflight', '2_setup', '4_screenshot_gate', '6_summary']),
     commandMap: [
       { step: '3_pr_gen',       tool: 'Task',  field: 'subagent_type', pattern: /^pr-generator$/ },
       { step: '3_pr_gen',       tool: 'Bash',  field: 'command', pattern: /gh\s+pr\s+create/ },
@@ -419,6 +420,34 @@ function handlePostToolUse(hookData) {
     // 4. Map tool call to step and record evidence
     const matchedStep = matchToolToStep(toolName, toolInput, wf.commandIndex);
     if (!matchedStep) continue;
+
+    // (Patch 14) Strengthen 9_pr evidence: verify .pr-update-sha matches HEAD
+    if (wf.name === 'work' && matchedStep === '9_pr') {
+      const tasksDir = path.join(TASKS_BASE, ticketId);
+      const prShaFile = path.join(tasksDir, '.pr-update-sha');
+      let prShaOk = false;
+      try {
+        let head;
+        try { head = resolveGitHead(); } catch {
+          head = fs.readFileSync(path.join('.git', 'HEAD'), 'utf-8').trim();
+        }
+        const ref = head.startsWith('ref: ') ? head.slice(5) : head;
+        // For ref pointers, we can't easily get the SHA without git — skip validation
+        if (/^[0-9a-f]{40}$/.test(ref)) {
+          const storedSha = fs.readFileSync(prShaFile, 'utf-8').trim();
+          prShaOk = storedSha === ref;
+        } else {
+          // Can't compare ref to SHA — trust the file exists
+          prShaOk = fs.existsSync(prShaFile);
+        }
+      } catch {
+        prShaOk = false;
+      }
+      if (!prShaOk) {
+        if (DEBUG) process.stderr.write(`[enforce] 9_pr: pr-update-sha missing or stale\n`);
+        continue; // Skip evidence recording — PR wasn't actually updated
+      }
+    }
 
     const evidence = loadEvidence(ticketId, wf.evidenceFile);
     evidence[matchedStep] = {
