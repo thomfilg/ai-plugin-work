@@ -1,0 +1,10 @@
+{
+  "name": "work-workflow",
+  "version": "2.0.0",
+  "description": "Deterministic workflow orchestrator for Jira task implementation with state machine validation.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/user/claude-plugin-work"
+  }
+}
