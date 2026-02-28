@@ -32,6 +32,10 @@ const ALLOWED_PATTERNS = [
   /package\.json$/,  // Package files
   /tsconfig/,        // TypeScript config
   /\/\.claude\//,    // Files in .claude folder (hooks, commands, agents)
+  /\/__tests__\//,        // Test directories
+  /\.test\.[jt]sx?$/,     // .test.js, .test.ts, .test.tsx
+  /\.spec\.[jt]sx?$/,     // .spec.js, .spec.ts, .spec.tsx
+  /work-implement-enforce\.js$/,  // This file specifically
 ];
 
 /**

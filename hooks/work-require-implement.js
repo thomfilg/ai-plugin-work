@@ -39,6 +39,10 @@ const ALLOWED_PATTERNS = [
   /tsconfig/,        // TypeScript config
   new RegExp(config.TASKS_BASE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),  // Global task tracking files
   /\.task-/,         // Task files
+  /\/__tests__\//,        // Test directories
+  /\.test\.[jt]sx?$/,     // .test.js, .test.ts, .test.tsx
+  /\.spec\.[jt]sx?$/,     // .spec.js, .spec.ts, .spec.tsx
+  /work-implement-enforce\.js$/,  // This file specifically
 ];
 
 function isProtectedWorkImplementFile(filePath) {
