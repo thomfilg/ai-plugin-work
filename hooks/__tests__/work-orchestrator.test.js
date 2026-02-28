@@ -5,7 +5,7 @@
  * Run: node --test hooks/__tests__/work-orchestrator.test.js
  */
 
-const { describe, it, afterEach } = require('node:test');
+const { describe, it, after, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const { spawn } = require('child_process');
 const path = require('path');
@@ -48,12 +48,21 @@ function runOrchestrator(args = [], opts = {}) {
 
 function cleanupTempWorkState(ticket) {
   const dir = path.join(TASKS_BASE, ticket);
-  const filePath = path.join(dir, '.work-state.json');
-  try { if (fs.existsSync(filePath)) fs.unlinkSync(filePath); } catch {}
-  // Also clean up actions file
-  const actionsFile = path.join(dir, '.work-actions.jsonl');
-  try { if (fs.existsSync(actionsFile)) fs.unlinkSync(actionsFile); } catch {}
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
 }
+
+// ─── Global Cleanup ─────────────────────────────────────────────────────────
+
+after(() => {
+  try {
+    const entries = fs.readdirSync(TASKS_BASE);
+    for (const entry of entries) {
+      if (entry.startsWith('TEST-')) {
+        fs.rmSync(path.join(TASKS_BASE, entry), { recursive: true, force: true });
+      }
+    }
+  } catch {}
+});
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
