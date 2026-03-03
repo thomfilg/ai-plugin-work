@@ -73,10 +73,10 @@ const WORKFLOWS = [
     commandMap: [
       { step: '1_ticket',           tool: 'Task',  field: 'description',    pattern: /^1_ticket/i },
       { step: '3_implement',        tool: 'Skill', field: 'skill',          pattern: /^work-implement$/ },
-      { step: '4_quality',          tool: 'Task',  field: 'subagent_type',  pattern: /^quality-checker$/ },
+      { step: '4_quality',          tool: 'Task',  field: 'subagent_type',  pattern: /^(work-workflow:)?quality-checker$/ },
       { step: '4_quality',          tool: 'Task',  field: 'description',    pattern: /^4_quality/i },
       { step: '4_quality',          tool: 'Bash',  field: 'command',        pattern: /(^|\s)(LOW_CONCURRENCY=\d+\s+)?(pnpm|npm)\s+(run\s+)?dev:check\b/ },
-      { step: '5_commit',           tool: 'Task',  field: 'subagent_type',  pattern: /^commit-writer$/ },
+      { step: '5_commit',           tool: 'Task',  field: 'subagent_type',  pattern: /^(work-workflow:)?commit-writer$/ },
       { step: '6_check',            tool: 'Skill', field: 'skill',          pattern: /^check$/ },
       { step: '7_cleanup',          tool: 'Task',  field: 'description',    pattern: /^7_cleanup/i },
       { step: '8_test_enhancement', tool: 'Skill', field: 'skill',          pattern: /^test-coordination$/ },
@@ -104,10 +104,10 @@ const WORKFLOWS = [
     ],
     softSteps: new Set(['1_preflight', '2_setup', '4_screenshot_gate', '6_summary']),
     commandMap: [
-      { step: '3_pr_gen',       tool: 'Task',  field: 'subagent_type', pattern: /^pr-generator$/ },
+      { step: '3_pr_gen',       tool: 'Task',  field: 'subagent_type', pattern: /^(work-workflow:)?pr-generator$/ },
       { step: '3_pr_gen',       tool: 'Bash',  field: 'command', pattern: /gh\s+pr\s+create/ },
       { step: '3_pr_gen',       tool: 'Bash',  field: 'command', pattern: /gh\s+pr\s+edit/ },
-      { step: '5_post_pr_gen',  tool: 'Task',  field: 'subagent_type', pattern: /^pr-post-generator$/ },
+      { step: '5_post_pr_gen',  tool: 'Task',  field: 'subagent_type', pattern: /^(work-workflow:)?pr-post-generator$/ },
     ],
     transitionPattern: /workflow-engine\.js\s+work-pr\s+transition\s+(\S+)\s+(\S+)/,
     exemptPatterns: [

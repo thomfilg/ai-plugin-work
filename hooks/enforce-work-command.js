@@ -99,7 +99,7 @@ function isInsideSubagent(transcriptPath) {
     ];
     for (const agent of agentTypes) {
       if (new RegExp(`^name:\\s*${agent}`, 'm').test(content)) return true;
-      if (new RegExp(`"subagent_type"\\s*:\\s*"${agent}"`, 'i').test(content)) return true;
+      if (new RegExp(`"subagent_type"\\s*:\\s*"(work-workflow:)?${agent}"`, 'i').test(content)) return true;
     }
     return false;
   } catch {
