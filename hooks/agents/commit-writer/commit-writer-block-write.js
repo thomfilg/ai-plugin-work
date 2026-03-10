@@ -10,11 +10,6 @@
  *   exit 2  = block the tool call (stderr message fed back to Claude)
  */
 
-// CANARY: write to log file to prove hook is executing
-const fs = require('fs');
-const logFile = '/tmp/commit-writer-hook-canary.log';
-fs.appendFileSync(logFile, `[${new Date().toISOString()}] Hook invoked\n`);
-
 async function main() {
   let input = '';
   for await (const chunk of process.stdin) {
@@ -24,8 +19,9 @@ async function main() {
   let hookData;
   try {
     hookData = JSON.parse(input);
-  } catch {
-    process.exit(0); // Can't parse input — don't block
+  } catch (err) {
+    process.stderr.write(`COMMIT-WRITER GUARD: Failed to parse hook input: ${err.message}\n`);
+    process.exit(2);
   }
 
   const toolName = hookData.tool_name || '';
@@ -88,4 +84,7 @@ async function main() {
   process.exit(2);
 }
 
-main().catch(() => process.exit(0));
+main().catch((err) => {
+  process.stderr.write(`COMMIT-WRITER GUARD ERROR: ${err.message}\n`);
+  process.exit(2);
+});
