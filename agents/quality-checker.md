@@ -31,9 +31,17 @@ Run all applicable automated tests and report the results with actual output.
 
 ## What You DO (Run These Commands)
 
-### 1. Quality Gate (ALWAYS)
+### 1. Quality Gate (ALWAYS — 3-tier fallback)
+Try these in order, use the first one that works:
 ```bash
+# Tier 1: Project has dev:check in package.json
 pnpm dev:check
+
+# Tier 2: Bundled dev-check scripts (if pnpm dev:check doesn't exist)
+${CLAUDE_PLUGIN_ROOT}/scripts/dev-check/dev-check.sh
+
+# Tier 3: Standard scripts (if neither above works)
+pnpm lint && pnpm typecheck && pnpm test
 ```
 This runs lint + typecheck + tests on all branch changes vs origin/main.
 Capture and report the full output.
@@ -78,9 +86,17 @@ ls -la **/tests/smoke/ 2>/dev/null
 ls -la **/tests/e2e/ 2>/dev/null
 ```
 
-### Step 2: Run Quality Gate
+### Step 2: Run Quality Gate (3-tier fallback)
+Try in order — use the first that succeeds:
 ```bash
-pnpm dev:check
+# Check if project has dev:check
+cat package.json | grep -q '"dev:check"' && pnpm dev:check
+
+# If not, use bundled scripts
+# ${CLAUDE_PLUGIN_ROOT}/scripts/dev-check/dev-check.sh
+
+# If neither, fall back to standard scripts
+# pnpm lint && pnpm typecheck && pnpm test
 ```
 - Capture full output
 - Note pass/fail count
@@ -151,7 +167,7 @@ OR
 
 **DON'T:**
 - ❌ Ask for proof (you ARE the proof)
-- ❌ Run `pnpm lint`, `pnpm typecheck`, or `pnpm test` separately (use dev:check)
-- ❌ Run lint or typecheck as standalone full-workspace commands
+- ❌ Run `pnpm lint`, `pnpm typecheck`, or `pnpm test` separately unless as Tier 3 fallback
+- ❌ Run lint or typecheck as standalone full-workspace commands when dev:check is available
 - ❌ Summarize without actual output
 - ❌ Skip any test type that exists

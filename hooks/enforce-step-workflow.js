@@ -75,7 +75,7 @@ const WORKFLOWS = [
       { step: '3_implement',        tool: 'Skill', field: 'skill',          pattern: /^work-implement$/ },
       { step: '4_quality',          tool: 'Task',  field: 'subagent_type',  pattern: /^(work-workflow:)?quality-checker$/ },
       { step: '4_quality',          tool: 'Task',  field: 'description',    pattern: /^4_quality/i },
-      { step: '4_quality',          tool: 'Bash',  field: 'command',        pattern: /(^|\s)(LOW_CONCURRENCY=\d+\s+)?(pnpm|npm)\s+(run\s+)?dev:check\b/ },
+      { step: '4_quality',          tool: 'Bash',  field: 'command',        pattern: /^\s*(LOW_CONCURRENCY=\d+\s+)?((pnpm|npm)\s+(run\s+)?dev:check\b|([\w./-]*\/)?dev-check\.sh(\s+--[\w-]+)*)/ },
       { step: '5_commit',           tool: 'Task',  field: 'subagent_type',  pattern: /^(work-workflow:)?commit-writer$/ },
       { step: '6_check',            tool: 'Skill', field: 'skill',          pattern: /^check$/ },
       { step: '7_cleanup',          tool: 'Task',  field: 'description',    pattern: /^7_cleanup/i },

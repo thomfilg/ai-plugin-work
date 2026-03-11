@@ -44,6 +44,7 @@ const FIX_ATTEMPT_PATTERNS = [
 // Explicitly allowed commands (quality gate + git/gh)
 const ALLOWED_COMMANDS = [
   /^\s*pnpm\s+dev:check\b/,  // Quality gate — read-only verification
+  /^\s*(\w+=\S+\s+)*([\w./-]*\/)?dev-check\.sh(\s+[-\w=./]+)*\s*$/,  // Bundled dev-check scripts — plugin fallback (anchored, no shell chaining)
   /^\s*git\b/,
   /^\s*gh\b/,
   /^\s*DEFAULT_BRANCH=/,

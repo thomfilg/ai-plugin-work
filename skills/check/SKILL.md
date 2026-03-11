@@ -66,9 +66,18 @@ pnpm affected:lint, pnpm affected:typecheck, pnpm affected:test
 make dev-local, pnpm dev (services already running)
 ```
 
-**ALLOWED for agents during development** - Quick checks on changed files only:
+**ALLOWED for agents during development** - Quick checks on changed files only (3-tier fallback):
 ```
+# Tier 1: Project defines dev:check
 pnpm dev:check     # Runs: dev:lint → dev:typecheck → dev:test
+
+# Tier 2: Bundled dev-check scripts (if project has no dev:check)
+${CLAUDE_PLUGIN_ROOT}/scripts/dev-check/dev-check.sh
+
+# Tier 3: Standard scripts (last resort)
+pnpm lint && pnpm typecheck && pnpm test
+
+# Individual scripts (if project defines them):
 pnpm dev:lint      # Lint only changed JS/TS files
 pnpm dev:typecheck # Typecheck only changed TS files
 pnpm dev:test      # Unit tests for changed files (excludes smoke/e2e)

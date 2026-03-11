@@ -44,7 +44,7 @@ Parse the JSON output. This is your roadmap. Each RUN step includes `agentType` 
     { "step": "1_ticket", "action": "SKIP", "reason": "Fetched" },
     { "step": "4_quality", "action": "RUN", "command": "Task(quality-checker)",
       "agentType": "quality-checker",
-      "agentPrompt": "Run quality checks in /home/node/worktrees/...\npnpm dev:check\n\nReturn PASS or FAIL with summary.",
+      "agentPrompt": "Run quality checks in /home/node/worktrees/...\nUse pnpm dev:check if available, bundled dev-check scripts as fallback, or pnpm lint && pnpm typecheck && pnpm test as last resort.\n\nReturn PASS or FAIL with summary.",
       "reason": "Lint + typecheck + test" }
   ],
   "summary": { "total": 14, "run": 4, "skip": 10, "firstAction": "6_check" }
@@ -154,7 +154,7 @@ node ${CLAUDE_PLUGIN_ROOT}/hooks/work-orchestrator.js PROJ-XXX
 | `2_bootstrap` | `skill` | `Skill(bootstrap)` |
 | `2b_transition` | `general-purpose` | `Task(general-purpose)` — transitions Jira status |
 | `3_implement` | `skill` | `Skill(work-implement)` |
-| `4_quality` | `quality-checker` | `Task(quality-checker)` — runs pnpm dev:check |
+| `4_quality` | `quality-checker` | `Task(quality-checker)` — runs quality checks (dev:check → bundled scripts → lint/typecheck/test) |
 | `5_commit` | `commit-writer` | `Task(commit-writer)` |
 | `6_check` | `skill` | `Skill(check)` |
 | `7_cleanup` | `Bash` | `Task(Bash)` — kills tmux dev session |

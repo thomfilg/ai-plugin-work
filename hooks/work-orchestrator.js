@@ -41,6 +41,7 @@ const tp = require(path.join(__dirname, '..', 'lib', 'ticket-provider'));
 
 // ─── Configuration ───────────────────────────────────────────────────────────
 
+const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.join(__dirname, '..');
 const MAIN_WORKTREE_FOLDER = process.env.REPO_NAME || 'my-project';
 const WORKTREES_BASE = `${process.env.HOME}/worktrees`;
 const TASKS_BASE = path.join(WORKTREES_BASE, 'tasks');
@@ -349,7 +350,7 @@ function generatePlan(ticket, description, s, rework) {
   } else {
     add('4_quality', 'RUN', 'Task(quality-checker)', 'Lint + typecheck + test', {
       agentType: 'quality-checker',
-      agentPrompt: `Run quality checks in ${worktreeDir}:\npnpm dev:check\n\nReturn PASS or FAIL with summary.`,
+      agentPrompt: `Run quality checks in ${worktreeDir}:\nUse pnpm dev:check if available. If it doesn't exist, run ${PLUGIN_ROOT}/scripts/dev-check/dev-check.sh as fallback. If that also fails, use pnpm lint && pnpm typecheck && pnpm test.\n\nReturn PASS or FAIL with summary.`,
     });
   }
 
