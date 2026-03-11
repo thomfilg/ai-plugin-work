@@ -13,7 +13,7 @@
 
 const { execSync } = require('child_process');
 const path = require('path');
-const { runQualityCheck, findRepoRoot, describeStrategy } = require(path.join(__dirname, '..', '..', '..', 'lib', 'quality-check'));
+const { runQualityCheck, describeStrategy } = require(path.join(__dirname, '..', '..', '..', 'lib', 'quality-check'));
 
 async function main() {
   let input = '';
