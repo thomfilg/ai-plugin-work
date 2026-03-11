@@ -1,9 +1,9 @@
 ---
 name: work
-description: Orchestrated workflow for Jira tasks with deterministic step execution
+description: Orchestrated workflow for ticket tasks with deterministic step execution
 argument-hint: <TICKET_ID or description> [--rework]
 user-invocable: true
-allowed-tools: Task, Bash, Read, Write, Edit, Grep, Glob, TodoWrite, Skill, mcp__atlassian__jira_get_issue, mcp__atlassian__jira_get_transitions, mcp__atlassian__jira_transition_issue
+allowed-tools: Task, Bash, Read, Write, Edit, Grep, Glob, TodoWrite, Skill, mcp__atlassian__jira_get_issue, mcp__atlassian__jira_get_transitions, mcp__atlassian__jira_transition_issue, mcp__linear__get_issue, mcp__linear__save_issue
 ---
 
 # /work - Pure Orchestrator Workflow

@@ -1,6 +1,6 @@
 ---
 name: developer-devops
-tools: Bash, Read, Write, Edit, Grep, Glob, TodoWrite, mcp__atlassian__jira_get_issue
+tools: Bash, Read, Write, Edit, Grep, Glob, TodoWrite, mcp__atlassian__jira_get_issue, mcp__linear__get_issue
 description: Use this agent for deploying, configuring, and managing infrastructure components such as cloud resources, containerized applications, CI/CD pipelines, and server configurations. Example tasks include provisioning AWS/Azure/GCP resources, configuring Kubernetes clusters, creating Docker deployments, establishing monitoring/logging systems, implementing Infrastructure as Code (Terraform, CloudFormation, Pulumi), troubleshooting deployments, and optimizing infrastructure for performance, security, and cost.
 model: opus
 color: red

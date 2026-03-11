@@ -85,7 +85,7 @@ module.exports = {
 
     // Prefix with project key if just a number
     if (/^\d+$/.test(ticketId)) {
-      ticketId = `${process.env.JIRA_PROJECT_KEY || 'PROJ'}-${ticketId}`;
+      ticketId = `${process.env.TICKET_PROJECT_KEY || process.env.JIRA_PROJECT_KEY || 'PROJ'}-${ticketId}`;
     }
     // Ensure uppercase
     ticketId = ticketId.toUpperCase();

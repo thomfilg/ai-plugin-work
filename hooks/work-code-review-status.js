@@ -18,9 +18,9 @@ const config = require('../lib/config');
 // Get current task ID from cwd or git branch
 function getCurrentTaskId(cwd) {
   // Try to get from worktree folder name (e.g., ${config.REPO_NAME}-${jira_task_id})
-  const worktreeMatch = cwd.match(new RegExp(`${config.JIRA_PROJECT_KEY}-(\\d+)`, 'i'));
+  const worktreeMatch = cwd.match(new RegExp(`${config.TICKET_PROJECT_KEY}-(\\d+)`, 'i'));
   if (worktreeMatch) {
-    return `${config.JIRA_PROJECT_KEY}-${worktreeMatch[1]}`;
+    return `${config.TICKET_PROJECT_KEY}-${worktreeMatch[1]}`;
   }
 
   // Try to get from git branch name
@@ -30,9 +30,9 @@ function getCurrentTaskId(cwd) {
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe']
     }).trim();
-    const branchMatch = branch.match(new RegExp(`${config.JIRA_PROJECT_KEY}-(\\d+)`, 'i'));
+    const branchMatch = branch.match(new RegExp(`${config.TICKET_PROJECT_KEY}-(\\d+)`, 'i'));
     if (branchMatch) {
-      return `${config.JIRA_PROJECT_KEY}-${branchMatch[1]}`;
+      return `${config.TICKET_PROJECT_KEY}-${branchMatch[1]}`;
     }
   } catch {
     // Ignore git errors

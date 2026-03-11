@@ -1,6 +1,6 @@
 ---
 name: developer-nodejs-tdd
-tools: Bash, Read, Write, Edit, Grep, Glob, TodoWrite, WebFetch, mcp__atlassian__jira_get_issue, mcp__pg_as_dashboard__query, mcp__pg_status_site__query
+tools: Bash, Read, Write, Edit, Grep, Glob, TodoWrite, WebFetch, mcp__atlassian__jira_get_issue, mcp__linear__get_issue, mcp__pg_as_dashboard__query, mcp__pg_status_site__query
 hooks:
   Stop:
     - matcher: ".*"

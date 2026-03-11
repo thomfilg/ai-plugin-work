@@ -1,9 +1,9 @@
 ---
 name: orchestrate
-description: Runs /work for multiple Jira tasks sequentially in isolated worktrees
+description: Runs /work for multiple ticket tasks sequentially in isolated worktrees
 argument-hint: <task-ids...>
 user-invocable: true
-allowed-tools: Task, Bash, Read, Write, Grep, Glob, AskUserQuestion, Skill, mcp__atlassian__jira_get_issue
+allowed-tools: Task, Bash, Read, Write, Grep, Glob, AskUserQuestion, Skill, mcp__atlassian__jira_get_issue, mcp__linear__get_issue
 ---
 
 # Orchestrate Command

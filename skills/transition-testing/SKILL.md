@@ -1,8 +1,8 @@
 ---
 name: transition-testing
-description: Transition Jira tasks from In Testing to Done after verifying PRs are merged
+description: Transition ticket tasks from In Testing to Done after verifying PRs are merged
 user-invocable: true
-allowed-tools: Bash, Read, Grep, Glob, AskUserQuestion, mcp__atlassian__jira_search, mcp__atlassian__jira_get_issue, mcp__atlassian__jira_get_transitions, mcp__atlassian__jira_transition_issue
+allowed-tools: Bash, Read, Grep, Glob, AskUserQuestion, mcp__atlassian__jira_search, mcp__atlassian__jira_get_issue, mcp__atlassian__jira_get_transitions, mcp__atlassian__jira_transition_issue, mcp__linear__get_issue, mcp__linear__save_issue
 ---
 # Transition Testing Tasks Command
 

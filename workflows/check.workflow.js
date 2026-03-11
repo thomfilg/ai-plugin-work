@@ -156,7 +156,7 @@ module.exports = {
       // Use branch name as fallback
       ticketId = safeExec('git branch --show-current') || 'unknown';
     } else if (/^\d+$/.test(ticketId)) {
-      ticketId = `${process.env.JIRA_PROJECT_KEY || 'PROJ'}-${ticketId}`;
+      ticketId = `${process.env.TICKET_PROJECT_KEY || process.env.JIRA_PROJECT_KEY || 'PROJ'}-${ticketId}`;
     }
 
     ticketId = ticketId.toUpperCase();

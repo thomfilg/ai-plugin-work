@@ -1,6 +1,6 @@
 ---
 name: developer-react-ui-architect
-tools: Bash, Read, Write, Edit, Grep, Glob, TodoWrite, mcp__atlassian__jira_get_issue
+tools: Bash, Read, Write, Edit, Grep, Glob, TodoWrite, mcp__atlassian__jira_get_issue, mcp__linear__get_issue
 description: Use this agent when you need to create, refactor, or enhance React-based user interfaces with a focus on stunning visual design, robust functionality through TDD, and production-ready code quality. This includes developing new React components, implementing complex layouts, optimizing UI performance, or architecting component libraries. The agent excels at balancing aesthetic excellence with technical rigor.
 model: opus
 color: pink

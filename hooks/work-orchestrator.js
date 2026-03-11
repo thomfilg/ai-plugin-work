@@ -37,6 +37,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { appendAction, loadActions, analyzeActions } = require(path.join(__dirname, '..', 'lib', 'work-actions'));
+const tp = require(path.join(__dirname, '..', 'lib', 'ticket-provider'));
 
 // ─── Configuration ───────────────────────────────────────────────────────────
 
@@ -287,15 +288,19 @@ function generatePlan(ticket, description, s, rework) {
   }
 
   // 1_ticket
+  const providerConfig = tp.getProviderConfig({ skipPrompt: true });
   if (!ticket) {
-    add('1_ticket', 'RUN', 'Task(jira-task-creator)', `Create ticket from: "${description}"`, {
-      agentType: 'jira-task-creator',
-      agentPrompt: `Create a Jira ticket from this description: "${description}"`,
+    const createAgent = tp.getCreateTicketAgentType(providerConfig) || 'general-purpose';
+    const createPrompt = tp.getCreateTicketPrompt(description, providerConfig) || `Create a ticket from this description: "${description}"`;
+    add('1_ticket', 'RUN', `Task(${createAgent})`, `Create ticket from: "${description}"`, {
+      agentType: createAgent,
+      agentPrompt: createPrompt,
     });
   } else {
+    const fetchPrompt = tp.getFetchTicketPrompt(ticket, providerConfig) || `Fetch ticket ${ticket} details. Return the summary, description, status, and acceptance criteria.`;
     add('1_ticket', 'RUN', 'Task(general-purpose)', 'Fetch ticket details', {
       agentType: 'general-purpose',
-      agentPrompt: `Fetch Jira ticket ${ticket} using mcp__atlassian__jira_get_issue with issue_key "${ticket}". Return the ticket summary, description, status, and acceptance criteria.`,
+      agentPrompt: fetchPrompt,
     });
   }
 
@@ -314,12 +319,17 @@ function generatePlan(ticket, description, s, rework) {
     });
   }
 
-  add('2b_transition', 'RUN',
-    'Task(general-purpose)',
-    'Jira → In Development (idempotent)', {
-      agentType: 'general-purpose',
-      agentPrompt: `Transition Jira ticket ${t} to "In Development" (idempotent). Use mcp__atlassian__jira_get_transitions to get available transitions for ${t}, then use mcp__atlassian__jira_transition_issue to move it to "In Development" (or similar active status). If already in that status, report success.`,
-    });
+  const transitionPrompt = tp.getTransitionPrompt(t, 'In Development', providerConfig);
+  if (transitionPrompt) {
+    add('2b_transition', 'RUN',
+      'Task(general-purpose)',
+      'Ticket → In Development (idempotent)', {
+        agentType: 'general-purpose',
+        agentPrompt: transitionPrompt,
+      });
+  } else {
+    add('2b_transition', 'SKIP', null, 'No ticket transition for this provider');
+  }
 
   // 3_implement
   if (s?.hasDiffVsMain) {
@@ -556,7 +566,7 @@ function main() {
       const rework = rest.includes('--rework');
       const raw = rest.filter(a => a !== '--rework').join(' ').trim();
       if (!raw) { console.log(JSON.stringify({ error: true, message: 'Provide ticket ID or description' })); process.exit(1); }
-      const isTicket = /^[A-Z]+-\d+$/i.test(raw);
+      const isTicket = /^[A-Z]+-\d+$/i.test(raw) || (/^#?\d+$/.test(raw) && tp.getProviderConfig({ skipPrompt: true })?.provider === 'github');
       const ticket = isTicket ? raw.toUpperCase() : null;
       const state = ticket ? inspect(ticket) : null;
       const result = generatePlan(ticket, isTicket ? null : raw, state, rework);
