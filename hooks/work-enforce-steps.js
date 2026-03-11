@@ -23,13 +23,13 @@ if (!['work', 'work-pr'].includes(toolInput.skill)) {
 
 // Extract ticket ID
 const args = toolInput.args || '';
-const ticketMatch = args.match(new RegExp(config.JIRA_PROJECT_KEY + '-\\d+|\\d+'));
+const ticketMatch = args.match(new RegExp(config.TICKET_PROJECT_KEY + '-\\d+|\\d+'));
 if (!ticketMatch) {
   process.exit(0);
 }
 
 let ticketId = ticketMatch[0];
-if (!ticketId.startsWith(config.JIRA_PROJECT_KEY + '-')) {
+if (!ticketId.startsWith(config.TICKET_PROJECT_KEY + '-')) {
   ticketId = config.prefixTicketId(ticketId);
 }
 

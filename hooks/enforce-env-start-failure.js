@@ -28,7 +28,7 @@ function getTicketId() {
   try {
     const { execSync } = require('child_process');
     const branch = execSync('git branch --show-current 2>/dev/null', { encoding: 'utf8' }).trim();
-    const match = branch.match(new RegExp(config.JIRA_PROJECT_KEY + '-\\d+', 'i'));
+    const match = branch.match(new RegExp(config.TICKET_PROJECT_KEY + '-\\d+', 'i'));
     return match ? match[0].toUpperCase() : 'UNKNOWN';
   } catch {
     return 'UNKNOWN';

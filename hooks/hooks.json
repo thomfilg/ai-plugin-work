@@ -33,7 +33,7 @@
         ]
       },
       {
-        "matcher": "mcp__atlassian__jira_get_issue",
+        "matcher": "mcp__atlassian__jira_get_issue|mcp__linear__get_issue",
         "hooks": [
           {
             "type": "command",

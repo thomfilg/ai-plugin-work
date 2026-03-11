@@ -91,7 +91,7 @@ async function main() {
       timeout: 5000,
       stdio: ['pipe', 'pipe', 'pipe']
     }).trim();
-    const match = branch.match(new RegExp(config.JIRA_PROJECT_KEY + '-\\d+'));
+    const match = branch.match(new RegExp(config.TICKET_PROJECT_KEY + '-\\d+'));
     ticketId = match ? match[0] : null;
   } catch {
     ticketId = null;

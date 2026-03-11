@@ -1,6 +1,6 @@
 ---
 name: project-coordinator
-tools: Task, Bash, Read, Write, Edit, Grep, Glob, TodoWrite, mcp__atlassian__jira_get_issue
+tools: Task, Bash, Read, Write, Edit, Grep, Glob, TodoWrite, mcp__atlassian__jira_get_issue, mcp__linear__get_issue
 description: Orchestrates multiple specialized agents for complex tasks. Breaks down requirements, delegates to appropriate agents, ensures quality, and maintains context throughout workflow.
 model: inherit
 color: orange

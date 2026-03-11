@@ -85,7 +85,7 @@ function isWorkCommandActive(transcriptPath) {
 
     // Check if we're past Step 3 (bootstrap) but before Step 6 (commit)
     // Look for signs that bootstrap is done
-    const bootstrapDone = new RegExp('\\/bootstrap\\s+' + config.JIRA_PROJECT_KEY + '-\\d+').test(content) ||
+    const bootstrapDone = new RegExp('\\/bootstrap\\s+' + config.TICKET_PROJECT_KEY + '-\\d+').test(content) ||
                           /Worktree.*created|worktree.*exists/i.test(content) ||
                           /draft PR.*created/i.test(content);
 

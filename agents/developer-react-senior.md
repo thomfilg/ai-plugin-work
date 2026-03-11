@@ -1,6 +1,6 @@
 ---
 name: developer-react-senior
-tools: Bash, Read, Write, Edit, Grep, Glob, TodoWrite, mcp__atlassian__jira_get_issue
+tools: Bash, Read, Write, Edit, Grep, Glob, TodoWrite, mcp__atlassian__jira_get_issue, mcp__linear__get_issue
 description: Use this agent when you need to build, debug, or architect complex React applications with a focus on scalable architecture, performance optimization, and production-ready code. This includes developing SPAs, implementing state management, optimizing bundle sizes, solving React-specific challenges, or architecting large-scale React applications. The agent excels at delivering maintainable, performant React solutions with comprehensive testing and documentation.
 model: inherit
 color: blue

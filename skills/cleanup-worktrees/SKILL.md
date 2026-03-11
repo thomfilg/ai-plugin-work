@@ -2,7 +2,7 @@
 name: cleanup-worktrees
 description: Safely clean up git worktrees by verifying code has been merged to main
 user-invocable: true
-allowed-tools: Bash, Read, Grep, Glob, AskUserQuestion, mcp__atlassian__jira_search, mcp__atlassian__jira_get_issue
+allowed-tools: Bash, Read, Grep, Glob, AskUserQuestion, mcp__atlassian__jira_search, mcp__atlassian__jira_get_issue, mcp__linear__get_issue
 ---
 # Cleanup Worktrees Command
 

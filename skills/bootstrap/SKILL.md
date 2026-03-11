@@ -1,9 +1,9 @@
 ---
 name: bootstrap
-description: Setup multiple Jira tasks - creates worktrees, symlinks configs, and opens draft PRs
+description: Setup multiple ticket tasks - creates worktrees, symlinks configs, and opens draft PRs
 argument-hint: <task-ids...>
 user-invocable: true
-allowed-tools: Task, Bash, Read, Write, Edit, Grep, Glob, mcp__atlassian__jira_get_issue
+allowed-tools: Task, Bash, Read, Write, Edit, Grep, Glob, mcp__atlassian__jira_get_issue, mcp__linear__get_issue
 ---
 
 # Setup multiple Jira tasks - creates worktrees, symlinks configs, and opens draft PRs

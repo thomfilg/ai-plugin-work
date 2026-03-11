@@ -94,7 +94,7 @@ async function main() {
     try {
       const { execSync } = require('child_process');
       const branch = execSync('git branch --show-current', { encoding: 'utf8' }).trim();
-      const match = branch.match(new RegExp(config.JIRA_PROJECT_KEY + '-\\d+', 'i'));
+      const match = branch.match(new RegExp(config.TICKET_PROJECT_KEY + '-\\d+', 'i'));
       if (match) ticketId = match[0].toUpperCase();
     } catch { /* */ }
 
