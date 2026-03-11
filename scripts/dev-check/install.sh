@@ -35,6 +35,7 @@ const scripts = {
 let added = [];
 let skipped = [];
 
+pkg.scripts ||= {};
 for (const [name, cmd] of Object.entries(scripts)) {
   if (pkg.scripts[name]) {
     skipped.push(name);
