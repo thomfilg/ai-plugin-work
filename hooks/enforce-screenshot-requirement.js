@@ -123,11 +123,12 @@ function blockIfNoScreenshots(hookData) {
   const prompt = (hookData.tool_input?.prompt || '').toLowerCase();
   const skill = (hookData.tool_input?.skill || '').toLowerCase();
   const subagentType = hookData.tool_input?.subagent_type || '';
+  const normalizedSubagentType = subagentType.replace(/^work-workflow:/, '');
 
   const isQaAgent = toolName === 'Task' && (
-    subagentType === 'qa-feature-tester' ||
-    subagentType === 'pr-generator' ||
-    subagentType === 'pr-post-generator' ||
+    normalizedSubagentType === 'qa-feature-tester' ||
+    normalizedSubagentType === 'pr-generator' ||
+    normalizedSubagentType === 'pr-post-generator' ||
     /screenshot|qa.*report/i.test(prompt)
   );
 

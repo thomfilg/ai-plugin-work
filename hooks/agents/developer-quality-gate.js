@@ -45,8 +45,9 @@ async function main() {
   let hookData;
   try {
     hookData = JSON.parse(input);
-  } catch {
-    process.exit(0);
+  } catch (err) {
+    process.stderr.write(`DEVELOPER QUALITY GATE: Failed to parse hook input: ${err.message}\n`);
+    process.exit(2);
   }
 
   // Check if this is a developer agent
@@ -88,8 +89,7 @@ async function main() {
   }
 }
 
-main().catch(err => {
-  console.error('Hook error:', err.message);
-  // On error, approve to avoid blocking
-  process.exit(0);
+main().catch((err) => {
+  process.stderr.write(`DEVELOPER QUALITY GATE ERROR: ${err.message}\n`);
+  process.exit(2);
 });

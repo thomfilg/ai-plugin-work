@@ -518,14 +518,14 @@ This is great 🎉
   });
 
   describe('Error handling', () => {
-    it('should APPROVE on invalid JSON input', async () => {
+    it('should BLOCK on invalid JSON input (fail-fast)', async () => {
       const proc = spawn('node', [HOOK_PATH], {
         stdio: ['pipe', 'pipe', 'pipe'],
       });
 
-      let stdout = '';
-      proc.stdout.on('data', (data) => {
-        stdout += data.toString();
+      let stderr = '';
+      proc.stderr.on('data', (data) => {
+        stderr += data.toString();
       });
 
       const code = await new Promise((resolve) => {
@@ -534,7 +534,8 @@ This is great 🎉
         proc.stdin.end();
       });
 
-      expect(code).not.toBe(2);
+      expect(code).toBe(2);
+      expect(stderr).toContain('PR-GENERATOR VALIDATOR: Failed to parse hook input');
     });
 
     it('should APPROVE when agent_name is missing', async () => {

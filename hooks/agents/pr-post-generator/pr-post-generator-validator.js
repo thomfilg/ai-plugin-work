@@ -101,8 +101,9 @@ async function main() {
   let hookData;
   try {
     hookData = JSON.parse(input);
-  } catch {
-    process.exit(0);
+  } catch (err) {
+    process.stderr.write(`PR-POST-GENERATOR VALIDATOR: Failed to parse hook input: ${err.message}\n`);
+    process.exit(2);
   }
 
   // Only validate pr-post-generator subagent
@@ -212,7 +213,7 @@ ${warnings.length > 0 ? warnings.map(w => `║  ${w.padEnd(66)}║`).join('\n') 
   process.exit(0);
 }
 
-main().catch(err => {
-  console.error('Hook error:', err.message);
-  process.exit(0);
+main().catch((err) => {
+  process.stderr.write(`PR-POST-GENERATOR VALIDATOR ERROR: ${err.message}\n`);
+  process.exit(2);
 });

@@ -41,17 +41,17 @@ hooks:
     - matcher: "*"
       hooks:
         - type: command
-          command: "sh -c 'TICKET=$(node \"$HOME/.claude/plugins/work-workflow/scripts/get-ticket-id.js\"); [ -n \"$TICKET\" ] && mkdir -p \"/home/node/worktrees/tasks/$TICKET\" && touch \"/home/node/worktrees/tasks/$TICKET/.qa-api-agent-active\"'"
+          command: "sh -c 'TICKET=$(node \"${CLAUDE_PLUGIN_ROOT}/scripts/get-ticket-id.js\"); [ -n \"$TICKET\" ] && mkdir -p \"/home/node/worktrees/tasks/$TICKET\" && touch \"/home/node/worktrees/tasks/$TICKET/.qa-api-agent-active\"'"
     - matcher: "Read|Glob|Grep|Bash"
       hooks:
         - type: command
-          command: "sh -c 'node \"$HOME/.claude/plugins/work-workflow/hooks/agents/qa-feature-tester/qa-pretooluse-hooks.js\" 2>/dev/null || true'"
+          command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/qa-feature-tester/qa-pretooluse-hooks.js 2>/dev/null || true"
   Stop:
     - hooks:
         - type: command
-          command: "sh -c 'TICKET=$(node \"$HOME/.claude/plugins/work-workflow/scripts/get-ticket-id.js\"); [ -n \"$TICKET\" ] && rm -f \"/home/node/worktrees/tasks/$TICKET/.qa-api-agent-active\"'"
+          command: "sh -c 'TICKET=$(node \"${CLAUDE_PLUGIN_ROOT}/scripts/get-ticket-id.js\"); [ -n \"$TICKET\" ] && rm -f \"/home/node/worktrees/tasks/$TICKET/.qa-api-agent-active\"'"
         - type: command
-          command: "sh -c 'node \"$HOME/.claude/plugins/work-workflow/hooks/agents/qa-api-tester/validate-api-report.js\" 2>/dev/null || true'"
+          command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/qa-api-tester/validate-api-report.js 2>/dev/null || true"
 ---
 
 # CRITICAL: NEVER CALL YOURSELF

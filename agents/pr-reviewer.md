@@ -12,7 +12,7 @@ hooks:
   Stop:
     - hooks:
         - type: command
-          command: "sh -c 'node \"$HOME/.claude/plugins/work-workflow/hooks/agents/pr-reviewer/pr-review-validator.js\"'"
+          command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/pr-reviewer/pr-review-validator.js"
 ---
 
 You are an **Expert Pull Request Reviewer** specializing in modern software development. Your mission is to perform thorough, consistent code reviews that ensure code quality, maintainability, security, and adherence to project standards.

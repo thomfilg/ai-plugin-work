@@ -39,28 +39,28 @@ hooks:
     - matcher: "*"
       hooks:
         - type: command
-          command: "sh -c 'node \"$HOME/.claude/plugins/work-workflow/hooks/agents/qa-feature-tester/qa-agent-start.js\"'"
+          command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/qa-feature-tester/qa-agent-start.js"
     - matcher: "Read|Glob|Grep|Bash"
       hooks:
         - type: command
-          command: "sh -c 'node \"$HOME/.claude/plugins/work-workflow/hooks/agents/qa-feature-tester/qa-pretooluse-hooks.js\"'"
+          command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/qa-feature-tester/qa-pretooluse-hooks.js"
     - matcher: "mcp__playwright__browser_take_screenshot|mcp__playwright_headed__browser_take_screenshot"
       hooks:
         - type: command
-          command: "sh -c 'node \"$HOME/.claude/plugins/work-workflow/hooks/agents/qa-feature-tester/screenshot-naming.js\"'"
+          command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/qa-feature-tester/screenshot-naming.js"
   PostToolUse:
     - matcher: "mcp__playwright__browser_snapshot|mcp__chrome-devtools__take_snapshot"
       hooks:
         - type: command
-          command: "sh -c 'node \"$HOME/.claude/plugins/work-workflow/hooks/agents/qa-feature-tester/qa-screenshot-validator.js\"'"
+          command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/qa-feature-tester/qa-screenshot-validator.js"
   Stop:
     - hooks:
         - type: command
           command: "rm -f /tmp/qa-agent-active"
         - type: command
-          command: "sh -c 'node \"$HOME/.claude/plugins/work-workflow/hooks/agents/qa-feature-tester/qa-subagent-stop.js\"'"
+          command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/qa-feature-tester/qa-subagent-stop.js"
         - type: command
-          command: "sh -c 'node \"$HOME/.claude/plugins/work-workflow/hooks/agents/qa-feature-tester/validate-qa-report.js\"'"
+          command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/qa-feature-tester/validate-qa-report.js"
 ---
 
 # CRITICAL: NEVER CALL YOURSELF
@@ -78,24 +78,24 @@ hooks:
 ║  You MUST call qa-progress.js at EACH step of testing:                       ║
 ║                                                                              ║
 ║  STEP 1: Check Playwright (IMMEDIATELY, BEFORE ANYTHING ELSE)                ║
-║  node $HOME/.claude/plugins/work-workflow/hooks/qa-progress.js set-playwright ${JIRA_TICKET_ID} ${APP} true/false
+║  node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js set-playwright ${JIRA_TICKET_ID} ${APP} true/false
 ║                                                                              ║
 ║  STEP 2: Mark app reachability                                               ║
-║  node $HOME/.claude/plugins/work-workflow/hooks/qa-progress.js set-reachable ${JIRA_TICKET_ID} ${APP} true/false
+║  node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js set-reachable ${JIRA_TICKET_ID} ${APP} true/false
 ║                                                                              ║
 ║  STEP 3: For EACH test:                                                      ║
 ║  - Start test:                                                               ║
-║    node $HOME/.claude/plugins/work-workflow/hooks/qa-progress.js start-test ${JIRA_TICKET_ID} ${APP} "test_name"
+║    node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js start-test ${JIRA_TICKET_ID} ${APP} "test_name"
 ║  - Complete test:                                                            ║
-║    node $HOME/.claude/plugins/work-workflow/hooks/qa-progress.js complete-test ${JIRA_TICKET_ID} ${APP} "test_name" pass "screenshot.png"
+║    node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js complete-test ${JIRA_TICKET_ID} ${APP} "test_name" pass "screenshot.png"
 ║  - Fail test:                                                                ║
-║    node $HOME/.claude/plugins/work-workflow/hooks/qa-progress.js fail-test ${JIRA_TICKET_ID} ${APP} "test_name" "error"
+║    node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js fail-test ${JIRA_TICKET_ID} ${APP} "test_name" "error"
 ║                                                                              ║
 ║  STEP 4: On infrastructure failure                                           ║
-║  node $HOME/.claude/plugins/work-workflow/hooks/qa-progress.js infrastructure-failure ${JIRA_TICKET_ID} ${APP} "error"
+║  node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js infrastructure-failure ${JIRA_TICKET_ID} ${APP} "error"
 ║                                                                              ║
 ║  STEP 5: On completion                                                       ║
-║  node $HOME/.claude/plugins/work-workflow/hooks/qa-progress.js complete ${JIRA_TICKET_ID} ${APP} pass/fail
+║  node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js complete ${JIRA_TICKET_ID} ${APP} pass/fail
 ║                                                                              ║
 ║  WHY: If interrupted, the next agent can resume from progress file           ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
@@ -107,7 +107,7 @@ hooks:
 
 ```bash
 # Check for existing progress
-RESUME=$(node $HOME/.claude/plugins/work-workflow/hooks/qa-progress.js resume-info ${JIRA_TICKET_ID} ${APP_NAME})
+RESUME=$(node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js resume-info ${JIRA_TICKET_ID} ${APP_NAME})
 COMPLETED=$(echo "$RESUME" | jq -r '.completedTests[]')
 
 if [ -n "$COMPLETED" ]; then
@@ -124,10 +124,10 @@ fi
 ║                                                                              ║
 ║  1. Call mcp__playwright__browser_navigate("https://google.com")             ║
 ║  2. IMMEDIATELY record result:                                               ║
-║     node $HOME/.claude/plugins/work-workflow/hooks/qa-progress.js set-playwright ${TICKET} ${APP} true/false
+║     node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js set-playwright ${TICKET} ${APP} true/false
 ║  3. If SUCCESS → proceed to app testing                                      ║
 ║  4. If FAILS → Record failure and STOP:                                      ║
-║     node $HOME/.claude/plugins/work-workflow/hooks/qa-progress.js infrastructure-failure ${TICKET} ${APP} "Playwright unavailable"
+║     node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js infrastructure-failure ${TICKET} ${APP} "Playwright unavailable"
 ║                                                                              ║
 ║  ❌ DO NOT:                                                                   ║
 ║     - Fall back to curl testing                                              ║
