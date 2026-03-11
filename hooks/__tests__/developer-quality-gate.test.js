@@ -1,7 +1,7 @@
 /**
  * Tests for developer-quality-gate.js hook (SubagentStop)
- * Runs pnpm dev:check when developer agent finishes.
- * We can only test the parsing/exit behavior, not actual pnpm dev:check.
+ * Runs quality checks when developer agent finishes.
+ * We can only test the parsing/exit behavior, not actual quality checks.
  *
  * Run with: node --test hooks/__tests__/developer-quality-gate.test.js
  */
@@ -43,13 +43,13 @@ describe('developer-quality-gate hook', () => {
   });
 
   it('should handle hook input with agent name', async () => {
-    // The hook runs pnpm dev:check if code changes exist.
-    // In test context (cwd=~/.claude), git diff may return nothing or error.
+    // The hook runs quality checks if code changes exist.
+    // In test context, git diff may return nothing or error.
     // Either way the hook should not crash.
     const { code } = await runHook({
       agent_name: 'developer-nodejs-tdd'
     });
-    // Should exit 0 (approve) or 2 (block if dev:check fails)
+    // Should exit 0 (approve) or 2 (block if checks fail)
     assert.ok([0, 2].includes(code));
   });
 });

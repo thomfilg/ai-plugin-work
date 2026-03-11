@@ -805,7 +805,8 @@ describe('enforce-step-workflow', () => {
     it('ticket pattern uses broad [A-Z]+-\\d+ not project-specific prefix', () => {
       const hookSource = fs.readFileSync(HOOK_PATH, 'utf-8');
       assert.ok(hookSource.includes('[A-Z]+-\\d+'), 'Should use broader ticket pattern');
-      assert.ok(!hookSource.includes("match(/[A-Z]+-"), 'Should not be limited to a specific project prefix');
+      // The hook uses match(/[A-Z]+-\d+/) which IS the broad pattern (not project-specific)
+      assert.ok(!hookSource.includes('APPSUPEN-'), 'Should not have hardcoded project prefix');
     });
 
     it('caches ticket ID per invocation', () => {
@@ -1114,6 +1115,27 @@ describe('enforce-step-workflow', () => {
       // \b matches at word boundary before hyphen — this IS caught as 4_quality
       assert.equal(code, 2);
       assert.ok(stderr.includes('BLOCKED'));
+    });
+
+    it('blocks bundled dev-check.sh outside 4_quality', async () => {
+      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook({
+        tool_name: 'Bash',
+        tool_input: { command: '/home/node/claude-plugin-work/scripts/dev-check/dev-check.sh' },
+      });
+      assert.equal(code, 2);
+      assert.ok(stderr.includes('BLOCKED'), 'Should block bundled dev-check.sh outside 4_quality');
+    });
+
+    it('allows bundled dev-check.sh during 4_quality', async () => {
+      writeWorkState(makeStepStatus('4_quality', WORK_STEPS));
+
+      const { code } = await runHook({
+        tool_name: 'Bash',
+        tool_input: { command: '/home/node/claude-plugin-work/scripts/dev-check/dev-check.sh' },
+      });
+      assert.equal(code, 0);
     });
   });
 

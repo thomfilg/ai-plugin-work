@@ -3,8 +3,12 @@
 /**
  * SubagentStop hook: Quality gate for developer agents
  *
- * When a developer agent finishes, runs `pnpm dev:check` (lint + typecheck + test
- * on changed files only). If it fails, blocks the agent's result so the parent
+ * When a developer agent finishes, runs quality checks with a 3-tier fallback:
+ *   1. `pnpm dev:check` — if the project defines it in package.json
+ *   2. Bundled dev-check scripts — this plugin's scripts/dev-check/
+ *   3. Standard scripts — `pnpm lint`, `pnpm typecheck`, `pnpm test`
+ *
+ * If checks fail, blocks the agent's result so the parent
  * must fix the issues before accepting the work.
  *
  * Targets: developer-nodejs-tdd, developer-devops, developer-react-senior,
@@ -12,6 +16,8 @@
  */
 
 const { execSync } = require('child_process');
+const path = require('path');
+const { runQualityCheck, describeStrategy } = require(path.join(__dirname, '..', '..', 'lib', 'quality-check'));
 
 /**
  * Check if there are actual code changes to validate.
@@ -59,32 +65,18 @@ async function main() {
     process.exit(0);
   }
 
-  // Run quality checks
-  try {
-    const output = execSync('pnpm dev:check', {
-      encoding: 'utf8',
-      timeout: 120000,
-      cwd: process.env.CLAUDE_PROJECT_DIR || process.cwd(),
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
+  // Run quality checks (3-tier fallback: project dev:check → bundled scripts → standard scripts)
+  const cwd = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  const result = runQualityCheck({ cwd, timeout: 120000 });
+  const strategyLabel = describeStrategy(result.strategy);
 
-    // Last 500 chars of output as proof
-    const summary = output.trim().slice(-500);
-
-    // Quality gate passed - exit 0 (approve)
-    // Note: reason is not supported for approve in exit code mode,
-    // so we log it to stderr for debugging
-    console.error(`Quality gate PASSED for ${agentName}\n\n${summary}`);
+  if (result.success) {
+    const summary = result.output.slice(-500);
+    console.error(`Quality gate PASSED for ${agentName} [${strategyLabel}]\n\n${summary}`);
     process.exit(0);
-  } catch (error) {
-    const stdout = error.stdout || '';
-    const stderr = error.stderr || '';
-    const combined = (stdout + '\n' + stderr).trim();
-
-    // Last 1500 chars to give enough context for fixing
-    const summary = combined.slice(-1500);
-
-    process.stderr.write(`QUALITY GATE FAILED for ${agentName}\n\npnpm dev:check failed (lint, typecheck, or tests). The developer agent's changes have issues that must be fixed.\n\nDo NOT accept this agent's work as complete. Fix the issues below, then re-run pnpm dev:check.\n\nOutput:\n${summary}\n`);
+  } else {
+    const summary = result.output.slice(-1500);
+    process.stderr.write(`QUALITY GATE FAILED for ${agentName}\n\nQuality checks failed using ${strategyLabel}. The developer agent's changes have issues that must be fixed.\n\nDo NOT accept this agent's work as complete. Fix the issues below, then re-run quality checks.\n\nOutput:\n${summary}\n`);
     process.exit(2);
   }
 }
