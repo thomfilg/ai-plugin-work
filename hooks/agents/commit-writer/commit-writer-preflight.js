@@ -82,8 +82,9 @@ async function main() {
   let hookData;
   try {
     hookData = JSON.parse(input);
-  } catch {
-    process.exit(0);
+  } catch (err) {
+    process.stderr.write(`COMMIT-WRITER PREFLIGHT: Failed to parse hook input: ${err.message}\n`);
+    process.exit(2);
   }
 
   // Only intercept Task tool calls
@@ -147,4 +148,7 @@ async function main() {
   process.exit(0);
 }
 
-main().catch(() => process.exit(0));
+main().catch((err) => {
+  process.stderr.write(`COMMIT-WRITER PREFLIGHT ERROR: ${err.message}\n`);
+  process.exit(2);
+});

@@ -9,7 +9,7 @@ hooks:
     - matcher: ".*"
       hooks:
         - type: command
-          command: "sh -c 'node $HOME/.claude/plugins/work-workflow/hooks/agents/commit-writer/commit-writer-block-write.js'"
+          command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/commit-writer/commit-writer-block-write.js"
 ---
 
 You are a Git Commit Expert. Analyze staged changes, create semantic commit messages, commit, and push.

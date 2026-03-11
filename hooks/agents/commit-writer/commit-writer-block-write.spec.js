@@ -42,6 +42,24 @@ function execHook(input) {
   }
 }
 
+/** Pipe raw string input into the hook (for malformed JSON tests) */
+function execHookRaw(rawInput) {
+  const escaped = rawInput.replace(/'/g, "'\\''");
+  try {
+    const stdout = execSync(`echo '${escaped}' | node "${HOOK}"`, {
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    return { exitCode: 0, stdout: stdout.trim(), stderr: '' };
+  } catch (err) {
+    return {
+      exitCode: err.status,
+      stdout: (err.stdout || '').trim(),
+      stderr: (err.stderr || '').trim(),
+    };
+  }
+}
+
 function describe(suite, fn) {
   console.log(`\n  ${suite}`);
   fn();
@@ -158,6 +176,21 @@ describe('non-Bash tools → exit 2 (block)', () => {
       assert.match(r.stderr, /not allowed/);
     });
   }
+});
+
+describe('malformed input → exit 2 (fail-fast)', () => {
+  it('should exit 2 on malformed JSON', () => {
+    const r = execHookRaw('{invalid');
+    assert.strictEqual(r.exitCode, 2, `Expected exit 2, got ${r.exitCode}`);
+    assert.match(r.stderr, /COMMIT-WRITER GUARD/, 'stderr should contain guard message');
+    assert.match(r.stderr, /Failed to parse/, 'stderr should mention parse failure');
+  });
+
+  it('should exit 2 on empty stdin', () => {
+    const r = execHookRaw('');
+    assert.strictEqual(r.exitCode, 2, `Expected exit 2, got ${r.exitCode}`);
+    assert.match(r.stderr, /COMMIT-WRITER GUARD/, 'stderr should contain guard message');
+  });
 });
 
 describe('edge cases', () => {

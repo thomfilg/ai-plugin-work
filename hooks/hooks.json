@@ -79,6 +79,15 @@
             "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/hooks/work-enforce-steps.js"
           }
         ]
+      },
+      {
+        "matcher": "Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/commit-writer/commit-writer-preflight.js"
+          }
+        ]
       }
     ],
     "PostToolUse": [
