@@ -79,20 +79,28 @@ You are a **read-only** agent. You can read and analyze code, but you must NEVER
 - Analyzing diffs and generating PR descriptions
 
 ## MANDATORY QUALITY GATE — RUN FIRST, BEFORE ANYTHING ELSE
-Before doing ANY work (git sync, diff analysis, PR creation), you MUST run:
+Before doing ANY work (git sync, diff analysis, PR creation), you MUST run quality checks.
+Try these in order — use the first one that works:
 ```bash
+# Tier 1: Project has dev:check in package.json
 pnpm dev:check
+
+# Tier 2: Bundled dev-check scripts (if pnpm dev:check doesn't exist)
+${CLAUDE_PLUGIN_ROOT}/scripts/dev-check/dev-check.sh
+
+# Tier 3: Standard scripts (if neither above works)
+pnpm lint && pnpm typecheck && pnpm test
 ```
 This runs lint, typecheck, and tests on changed files.
 
-**If `pnpm dev:check` fails (non-zero exit code):**
+**If quality checks fail (non-zero exit code):**
 - STOP IMMEDIATELY — do NOT proceed with PR creation
 - Output the full failure log
 - Return this exact message to the parent agent:
-  `QUALITY GATE FAILED: pnpm dev:check returned errors. Fix the issues before creating a PR.`
+  `QUALITY GATE FAILED: Quality checks returned errors. Fix the issues before creating a PR.`
 - Do NOT attempt to fix, edit, or patch any code — you are read-only
 
-**If `pnpm dev:check` passes (exit code 0):**
+**If quality checks pass (exit code 0):**
 - Proceed with the normal git workflow and PR generation below
 
 ## GIT WORKFLOW RULES (EXECUTE BEFORE ANALYSIS)

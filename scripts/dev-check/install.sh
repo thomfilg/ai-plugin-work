@@ -1,0 +1,54 @@
+#!/bin/bash
+# Install dev-check scripts into a repository's package.json
+#
+# Usage:
+#   ~/g2i/scripts/dev-check/install.sh          # Run from any repo root
+#   ~/g2i/scripts/dev-check/install.sh /path/to/repo
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+TARGET_DIR="${1:-.}"
+
+if [ ! -f "$TARGET_DIR/package.json" ]; then
+  echo "Error: No package.json found in $TARGET_DIR"
+  exit 1
+fi
+
+echo "Installing dev-check scripts into $TARGET_DIR/package.json..."
+
+# Add scripts using node to preserve JSON formatting
+node -e "
+const fs = require('fs');
+const path = require('path');
+
+const pkgPath = path.resolve('$TARGET_DIR', 'package.json');
+const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+
+const scripts = {
+  'dev:lint': '$SCRIPT_DIR/dev-lint.sh',
+  'dev:typecheck': '$SCRIPT_DIR/dev-typecheck.sh',
+  'dev:test': '$SCRIPT_DIR/dev-test.sh',
+  'dev:check': 'pnpm dev:lint && pnpm dev:typecheck && pnpm dev:test',
+};
+
+let added = [];
+let skipped = [];
+
+pkg.scripts ||= {};
+for (const [name, cmd] of Object.entries(scripts)) {
+  if (pkg.scripts[name]) {
+    skipped.push(name);
+  } else {
+    pkg.scripts[name] = cmd;
+    added.push(name);
+  }
+}
+
+fs.writeFileSync(pkgPath, JSON.stringify(pkg, null, 2) + '\n');
+
+if (added.length) console.log('Added:', added.join(', '));
+if (skipped.length) console.log('Skipped (already exist):', skipped.join(', '));
+"
+
+echo "Done. Run 'pnpm dev:check' to lint, typecheck, and test changed files."
