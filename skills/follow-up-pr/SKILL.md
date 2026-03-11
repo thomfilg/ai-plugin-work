@@ -1,13 +1,13 @@
 ---
 name: follow-up-pr
-description: Monitor PR CI status, auto-fix failures, and retry until passing (max 10 attempts)
+description: Monitor PR CI status and review comments, auto-fix failures and address feedback, retry until passing (max 10 attempts)
 user-invocable: true
 allowed-tools: Task, Bash, Read, Write, Edit, Grep, Glob, TodoWrite, AskUserQuestion, Skill
 ---
 
-# /follow-up-pr - PR CI Monitor and Auto-Fixer
+# /follow-up-pr - PR CI Monitor, Review Handler, and Auto-Fixer
 
-Monitor the current PR's CI status, automatically diagnose and fix failures, and retry until CI passes.
+Monitor the current PR's CI status and review comments (from humans and AI reviewers), automatically diagnose and fix failures, address review feedback, and retry until CI passes and reviews are resolved.
 
 ---
 
@@ -16,9 +16,12 @@ Monitor the current PR's CI status, automatically diagnose and fix failures, and
 ```
 MAX_ATTEMPTS=10
 WAIT_INTERVAL_SECONDS=60
+FOLLOW_UP_PR_POLL_REVIEWS=true   # Set to false in .env to disable review polling
 ```
 
-**Strategy:** Start working immediately on first failure - don't wait for all checks.
+**Strategy:** Start working immediately on first failure — don't wait for all checks.
+
+**Review polling** is enabled by default. To disable it per-repository, set `FOLLOW_UP_PR_POLL_REVIEWS=false` in the `.env` file. When disabled, the command only monitors CI status and skips Steps 3.3–3.4 and Step 5 entirely.
 
 ---
 
@@ -34,6 +37,7 @@ const summary = {
   startTime: new Date().toISOString(),
   attempts: [],
   fixes: [],
+  reviewsAddressed: [],    // review comments that were addressed
   finalStatus: null
 };
 ```
@@ -92,8 +96,8 @@ gh pr view <PR_NUMBER> --json statusCheckRollup,mergeable,mergeStateStatus
 If `mergeable` is `"CONFLICTING"` or `mergeStateStatus` is `"DIRTY"`, resolve conflicts using the same process from Step 2.1 before evaluating CI status. Conflicts can appear mid-loop when main is updated by other PRs merging.
 
 **If ALL checks pass AND no conflicts:**
-- Record final status as "PASSED"
-- Go to Step 5 (Success Summary)
+- If `FOLLOW_UP_PR_POLL_REVIEWS` is enabled, go to Step 3.3 (Poll Review Comments)
+- If review polling is disabled OR no actionable reviews remain, record final status as "PASSED" and go to Step 6 (Success Summary)
 
 **If ANY checks FAILED (even if others are still running):**
 - Log which checks failed
@@ -104,6 +108,93 @@ If `mergeable` is `"CONFLICTING"` or `mergeStateStatus` is `"DIRTY"`, resolve co
 - Log: "CI is still running, waiting 60 seconds..."
 - Wait 60 seconds (use: `sleep 60`)
 - Continue to next attempt
+
+### 3.3 Poll Review Comments
+
+**Skip this step if `FOLLOW_UP_PR_POLL_REVIEWS=false`.** Check the config:
+```bash
+# Read from .env or environment — defaults to true
+echo "${FOLLOW_UP_PR_POLL_REVIEWS:-true}"
+```
+
+After CI passes (or while waiting for CI), check for PR review comments from humans or AI reviewers.
+
+```bash
+# Get all PR reviews (approved, changes_requested, commented)
+gh pr view <PR_NUMBER> --json reviews --jq '.reviews[] | {author: .author.login, state: .state, body: .body, submittedAt: .submittedAt}'
+
+# Get inline review comments (code-level feedback)
+gh api repos/{owner}/{repo}/pulls/<PR_NUMBER>/comments --jq '.[] | {author: .user.login, path: .path, line: .line, body: .body, created_at: .created_at, in_reply_to_id: .in_reply_to_id}'
+
+# Get general PR conversation comments
+gh pr view <PR_NUMBER> --json comments --jq '.comments[] | {author: .author.login, body: .body, createdAt: .createdAt}'
+```
+
+**Derive `{owner}/{repo}` from:**
+```bash
+gh repo view --json nameWithOwner --jq '.nameWithOwner'
+```
+
+### 3.4 Evaluate Review Comments
+
+**Classify each comment/review:**
+
+1. **CHANGES_REQUESTED reviews** — These MUST be addressed. Go to Step 5 (Address Review Feedback).
+2. **Inline code comments** (not replies to your own comments) — Actionable feedback on specific lines. Go to Step 5.
+3. **General conversation comments** — Check if they contain actionable requests (e.g., "please rename X", "can you add Y"). If actionable, go to Step 5.
+4. **APPROVED reviews** — No action needed. Log the approval.
+5. **COMMENTED reviews with no actionable content** (e.g., "looks good", "nice work") — No action needed.
+
+**Filtering rules:**
+- **Ignore your own comments** — Filter out comments from the bot/author who created the PR
+- **Ignore already-addressed comments** — Track which comments have been addressed in `summary.reviewsAddressed` by their ID/timestamp. Skip those.
+- **Prioritize CHANGES_REQUESTED** — Address these before general comments
+- **Treat AI reviewer comments the same as human comments** — Common AI reviewers include bots like `github-actions[bot]`, `copilot`, `coderabbitai`, `codeclimate`, etc. Their feedback is equally actionable.
+
+**If no actionable reviews remain:**
+- Record final status as "PASSED"
+- Go to Step 6 (Success Summary)
+
+**If actionable reviews exist:**
+- Log: "Found <N> actionable review comments to address"
+- Go to Step 5 (Address Review Feedback)
+
+---
+
+## Step 5: Address Review Feedback
+
+### 5.1 Read and Understand Feedback
+
+For each actionable review comment:
+
+1. Read the comment body and understand what change is requested
+2. If it's an inline comment, read the referenced file and line(s)
+3. Group related comments (e.g., multiple comments about the same pattern)
+
+### 5.2 Apply Review Fixes
+
+For each group of related feedback:
+
+1. Make the requested code changes
+2. Stage changes: `git add <files>`
+3. Commit using commit-writer agent with "autonomous" flag
+   - Use message format: `fix(review): <description of what was addressed>`
+4. Record in `summary.reviewsAddressed`:
+   ```javascript
+   { author: "<reviewer>", comment: "<summary>", fix: "<what was changed>" }
+   ```
+
+### 5.3 Push and Re-enter Loop
+
+1. Push: `git push`
+2. Log the review fixes in `summary.fixes`
+3. Return to Step 3 (re-check CI since new commits may trigger new runs, and re-poll reviews for new feedback)
+
+**Important notes for review handling:**
+- **If a review comment is ambiguous or you're unsure how to address it**, use AskUserQuestion to ask the user for guidance
+- **Never dismiss or resolve review threads** — let the reviewer verify your fix
+- **If the same reviewer keeps requesting changes**, consider asking the user if they want to continue or discuss directly with the reviewer
+- **After addressing reviews**, the reviewer may add new comments — that's why we re-enter the loop
 
 ---
 
@@ -216,9 +307,9 @@ This command will:
 
 ---
 
-## Step 5: Generate Summary
+## Step 6: Generate Summary
 
-### Success Summary (CI Passed)
+### Success Summary (CI Passed, Reviews Resolved)
 
 ```markdown
 ## PR Follow-up Summary
@@ -238,6 +329,13 @@ This command will:
   - Issue: <WHAT_FAILED>
   - Resolution: <WHAT_WAS_FIXED>
 </For each>
+
+### Reviews Addressed
+<For each review in summary.reviewsAddressed>
+- @<AUTHOR>: "<COMMENT_SUMMARY>"
+  - Fix: <WHAT_WAS_CHANGED>
+</For each>
+<If no reviews addressed: "No review comments required changes.">
 
 ### CI Checks (Final)
 <List all passing checks>
@@ -274,6 +372,14 @@ This command will:
 - <COMMIT_MESSAGE>: <DESCRIPTION>
 </For each>
 
+### Reviews Addressed
+<For each review in summary.reviewsAddressed>
+- @<AUTHOR>: "<COMMENT_SUMMARY>" → <FIX>
+</For each>
+
+### Unresolved Review Comments
+<List any review comments that could not be addressed>
+
 ### Current Error
 <Last error message from CI>
 
@@ -284,7 +390,7 @@ This command will:
 
 ---
 
-## Step 6: Handle Max Attempts Exceeded
+## Step 7: Handle Max Attempts Exceeded
 
 If 10 attempts are reached without success:
 
@@ -320,6 +426,8 @@ Claude will:
 3. Diagnose: coverage report glob pattern issue
 4. Fix: update glob pattern in ci.yml
 5. Commit and push
-6. Wait 3 minutes, check again
-7. If passing, report success
-8. If failing, diagnose next issue and repeat
+6. Wait, check again — CI now passes
+7. Poll review comments — finds 2 inline comments from reviewer
+8. Address review feedback, commit and push
+9. Re-check CI (still passing) and re-poll reviews (no new comments)
+10. Report success with all fixes and reviews addressed
