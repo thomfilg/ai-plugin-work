@@ -18,7 +18,7 @@ hooks:
   Stop:
     - hooks:
         - type: command
-          command: "sh -c 'node \"$HOME/.claude/plugins/work-workflow/hooks/agents/pr-post-generator/pr-post-generator-validator.js\"'"
+          command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/pr-post-generator/pr-post-generator-validator.js"
 ---
 
 You enhance PR descriptions with visual documentation and test results AFTER the PR is created.

@@ -90,13 +90,26 @@ describe('work-implement-enforce hook', () => {
     assert.strictEqual(result.decision, 'approve');
   });
 
-  it('should APPROVE on parse error', async () => {
+  it('should APPROVE when developer agent invoked with work-workflow: prefix', async () => {
+    const tp = path.join(os.tmpdir(), `test-wie6-${Date.now()}.jsonl`);
+    fs.writeFileSync(tp, '# Implement Command\n"subagent_type": "work-workflow:developer-nodejs-tdd"\n');
+    const { result } = await runHook({
+      tool_name: 'Edit',
+      tool_input: { file_path: '/home/node/project/src/app.ts' },
+      transcript_path: tp
+    });
+    assert.strictEqual(result.decision, 'approve');
+  });
+
+  it('should APPROVE on parse error (JSON.parse in main fails, main().catch fires)', async () => {
     const proc = spawn('node', [HOOK_PATH], { stdio: ['pipe', 'pipe', 'pipe'] });
     const exitCode = await new Promise((resolve) => {
       proc.on('close', resolve);
       proc.stdin.write('not json');
       proc.stdin.end();
     });
+    // work-implement-enforce uses raw JSON.parse (no try/catch), so invalid JSON
+    // throws and is caught by main().catch which exits 0 to avoid blocking
     assert.strictEqual(exitCode === 2 ? 'block' : 'approve', 'approve');
   });
 });

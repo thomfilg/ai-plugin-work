@@ -94,7 +94,7 @@ async function main() {
 
   // Only intercept commit-writer agent
   const subagentType = hookData.tool_input?.subagent_type || '';
-  if (subagentType !== 'commit-writer') {
+  if (subagentType !== 'commit-writer' && subagentType !== 'work-workflow:commit-writer') {
     process.exit(0);
   }
 

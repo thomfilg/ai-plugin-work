@@ -40,11 +40,11 @@ hooks:
     - matcher: Bash
       hooks:
         - type: command
-          command: "sh -c 'node \"$HOME/.claude/plugins/work-workflow/hooks/agents/pr-generator/pr-generator-readonly-guard.js\"'"
+          command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/pr-generator/pr-generator-readonly-guard.js"
   Stop:
     - hooks:
         - type: command
-          command: "sh -c 'node \"$HOME/.claude/plugins/work-workflow/hooks/agents/pr-generator/pr-generator-validator.js\"'"
+          command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/pr-generator/pr-generator-validator.js"
 ---
 
 You are a Pull Request Description Generator specialized in analyzing git diffs and creating precise, developer-focused PR descriptions. You excel at identifying code patterns, detecting feature flags, test coverage, and documentation changes.

@@ -76,7 +76,7 @@ function hasDeveloperAgentBeenInvoked(transcriptPath) {
 
     // Check if any developer agent has been called via Task tool
     for (const agent of DEVELOPER_AGENTS) {
-      const pattern = new RegExp(`"subagent_type"\\s*:\\s*"${agent}"`, 'i');
+      const pattern = new RegExp(`"subagent_type"\\s*:\\s*"(work-workflow:)?${agent}"`, 'i');
       if (pattern.test(content)) {
         return true;
       }

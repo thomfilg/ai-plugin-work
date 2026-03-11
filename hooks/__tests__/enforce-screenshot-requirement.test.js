@@ -113,6 +113,25 @@ describe('enforce-screenshot-requirement', () => {
       assert.equal(r.code, 2);
     });
 
+    it('blocks work-workflow:pr-generator (prefixed subagent_type)', async () => {
+      if (!ticketId) return;
+      const r = await runHook({ tool_name: 'Task', tool_input: { subagent_type: 'work-workflow:pr-generator', prompt: 'create PR' } });
+      assert.equal(r.code, 2);
+      assert.match(r.stderr, /BLOCKED/);
+    });
+
+    it('blocks work-workflow:qa-feature-tester (prefixed subagent_type)', async () => {
+      if (!ticketId) return;
+      const r = await runHook({ tool_name: 'Task', tool_input: { subagent_type: 'work-workflow:qa-feature-tester', prompt: 'test' } });
+      assert.equal(r.code, 2);
+    });
+
+    it('blocks work-workflow:pr-post-generator (prefixed subagent_type)', async () => {
+      if (!ticketId) return;
+      const r = await runHook({ tool_name: 'Task', tool_input: { subagent_type: 'work-workflow:pr-post-generator', prompt: 'post' } });
+      assert.equal(r.code, 2);
+    });
+
     it('blocks work-pr skill', async () => {
       if (!ticketId) return;
       const r = await runHook({ tool_name: 'Skill', tool_input: { skill: 'work-pr', args: '' } });

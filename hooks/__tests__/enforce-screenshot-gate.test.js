@@ -46,13 +46,16 @@ describe('enforce-screenshot-gate hook', () => {
     assert.strictEqual(result.decision, 'approve');
   });
 
-  it('should APPROVE on invalid JSON', async () => {
+  it('should BLOCK on invalid JSON (fail-fast)', async () => {
     const proc = spawn('node', [HOOK_PATH], { stdio: ['pipe', 'pipe', 'pipe'] });
+    let stderr = '';
+    proc.stderr.on('data', (d) => { stderr += d.toString(); });
     const exitCode = await new Promise((resolve) => {
       proc.on('close', resolve);
       proc.stdin.write('not json');
       proc.stdin.end();
     });
-    assert.strictEqual(exitCode === 2 ? 'block' : 'approve', 'approve');
+    assert.strictEqual(exitCode, 2);
+    assert.ok(stderr.includes('SCREENSHOT GATE: Failed to parse hook input'));
   });
 });

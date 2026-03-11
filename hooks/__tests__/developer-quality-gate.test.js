@@ -2,12 +2,16 @@
  * Tests for developer-quality-gate.js hook (SubagentStop)
  * Runs pnpm dev:check when developer agent finishes.
  * We can only test the parsing/exit behavior, not actual pnpm dev:check.
+ *
+ * Run with: node --test hooks/__tests__/developer-quality-gate.test.js
  */
 
+const { describe, it } = require('node:test');
+const assert = require('node:assert');
 const { spawn } = require('child_process');
 const path = require('path');
 
-const HOOK_PATH = path.join(__dirname, '..', 'developer-quality-gate.js');
+const HOOK_PATH = path.join(__dirname, '..', 'agents', 'developer-quality-gate.js');
 
 function runHook(input) {
   return new Promise((resolve, reject) => {
@@ -25,14 +29,17 @@ function runHook(input) {
 }
 
 describe('developer-quality-gate hook', () => {
-  it('should APPROVE on invalid JSON', async () => {
+  it('should BLOCK on invalid JSON (fail-fast)', async () => {
     const proc = spawn('node', [HOOK_PATH], { stdio: ['pipe', 'pipe', 'pipe'] });
+    let stderr = '';
+    proc.stderr.on('data', (d) => { stderr += d.toString(); });
     const exitCode = await new Promise((resolve) => {
       proc.on('close', resolve);
       proc.stdin.write('not json');
       proc.stdin.end();
     });
-    expect(exitCode === 2 ? 'block' : 'approve').toBe('approve');
+    assert.strictEqual(exitCode, 2);
+    assert.ok(stderr.includes('DEVELOPER QUALITY GATE: Failed to parse hook input'));
   });
 
   it('should handle hook input with agent name', async () => {
@@ -43,6 +50,6 @@ describe('developer-quality-gate hook', () => {
       agent_name: 'developer-nodejs-tdd'
     });
     // Should exit 0 (approve) or 2 (block if dev:check fails)
-    expect([0, 2]).toContain(code);
+    assert.ok([0, 2].includes(code));
   });
 });
