@@ -17,14 +17,14 @@
  *   2 — error (no PR found, gh CLI failed, etc.)
  */
 
-const { execSync } = require('child_process');
+const { execSync, execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
 // ── Colors ──────────────────────────────────────────────────────────────────
 
-const isColorEnabled = process.stdout.isTTY !== false && !process.env.NO_COLOR;
+const isColorEnabled = process.stdout.isTTY === true && !process.env.NO_COLOR;
 const c = {
   red: (s) => isColorEnabled ? `\x1b[31m${s}\x1b[0m` : s,
   green: (s) => isColorEnabled ? `\x1b[32m${s}\x1b[0m` : s,
@@ -99,16 +99,15 @@ Options:
 // ── gh CLI Wrapper ──────────────────────────────────────────────────────────
 
 function ghExec(ghArgs, { json = true, allowNonZero = false } = {}) {
-  const cmd = `gh ${ghArgs}`;
+  const args = typeof ghArgs === 'string' ? ghArgs.split(/\s+/) : ghArgs;
   try {
-    const result = execSync(cmd, {
+    const result = execFileSync('gh', args, {
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
       timeout: 30000,
     });
     return json ? JSON.parse(result) : result.trim();
   } catch (err) {
-    // Some gh commands exit non-zero but still produce valid JSON output (e.g. pr checks)
     if (allowNonZero && err.stdout) {
       const stdout = err.stdout.toString().trim();
       if (json && stdout) {
@@ -117,7 +116,7 @@ function ghExec(ghArgs, { json = true, allowNonZero = false } = {}) {
       if (!json && stdout) return stdout;
     }
     const stderr = err.stderr ? err.stderr.toString().trim() : '';
-    throw new Error(`gh command failed: ${cmd}\n${stderr}`);
+    throw new Error(`gh command failed: gh ${args.join(' ')}\n${stderr}`);
   }
 }
 
@@ -173,15 +172,40 @@ function checkCI(prNumber) {
       // Fallback: use pr view --json statusCheckRollup
       try {
         const data = ghExec(`pr view ${prArg} --json statusCheckRollup`);
-        raw = (data.statusCheckRollup || []).map((check) => ({
-          name: check.name || check.context || 'unknown',
-          bucket: check.conclusion === 'SUCCESS' ? 'pass'
-            : check.conclusion === 'FAILURE' ? 'fail'
-            : check.status === 'COMPLETED' ? 'pass'
-            : 'pending',
-          state: check.status || '',
-          link: check.detailsUrl || check.targetUrl || null,
-        }));
+        raw = (data.statusCheckRollup || []).map((check) => {
+          let bucket;
+          if (check.status !== 'COMPLETED') {
+            bucket = 'pending';
+          } else {
+            switch (check.conclusion) {
+              case 'SUCCESS':
+              case 'NEUTRAL':
+                bucket = 'pass';
+                break;
+              case 'FAILURE':
+              case 'TIMED_OUT':
+              case 'ACTION_REQUIRED':
+              case 'STALE':
+                bucket = 'fail';
+                break;
+              case 'SKIPPED':
+                bucket = 'skipping';
+                break;
+              case 'CANCELLED':
+                bucket = 'cancel';
+                break;
+              default:
+                bucket = 'fail';
+                break;
+            }
+          }
+          return {
+            name: check.name || check.context || 'unknown',
+            bucket,
+            state: check.status || '',
+            link: check.detailsUrl || check.targetUrl || null,
+          };
+        });
       } catch {
         throw err;
       }
@@ -209,6 +233,7 @@ function checkCI(prNumber) {
   if (failed.length > 0) status = 'failing';
   else if (running.length > 0) status = 'pending';
   else if (checks.length === 0) status = 'no-checks';
+  else if (cancelled.length > 0) status = 'cancelled';
   else status = 'passing';
 
   return { status, checks, failed, running, passed, cancelled, total: checks.length };
@@ -235,22 +260,27 @@ function getReviews(prNumber) {
     submittedAt: r.submittedAt,
   }));
 
-  // Get review comments (inline comments)
+  // Get review comments (inline comments) with pagination
   let comments = [];
   try {
-    // gh api for review comments
     const repoData = ghExec('repo view --json nameWithOwner');
     const repo = repoData.nameWithOwner;
-    comments = ghExec(`api repos/${repo}/pulls/${prNumber}/comments`);
-    if (!Array.isArray(comments)) comments = [];
-    comments = comments.map((cm) => ({
-      id: cm.id,
-      author: cm.user?.login || 'unknown',
-      body: (cm.body || '').trim(),
-      path: cm.path || null,
-      line: cm.line || cm.original_line || null,
-      state: 'COMMENTED',
-    }));
+    const perPage = 100;
+    let page = 1;
+    while (true) {
+      const pageData = ghExec(['api', `repos/${repo}/pulls/${prNumber}/comments?per_page=${perPage}&page=${page}`]);
+      if (!Array.isArray(pageData) || pageData.length === 0) break;
+      comments.push(...pageData.map((cm) => ({
+        id: cm.id,
+        author: cm.user?.login || 'unknown',
+        body: (cm.body || '').trim(),
+        path: cm.path || null,
+        line: cm.line || cm.original_line || null,
+        state: 'COMMENTED',
+      })));
+      if (pageData.length < perPage) break;
+      page++;
+    }
   } catch {
     // Non-critical — inline comments are supplementary
   }
@@ -288,8 +318,19 @@ function getReviews(prNumber) {
 
 // ── State Persistence ───────────────────────────────────────────────────────
 
+function getRepoSlug() {
+  try {
+    const result = execFileSync('gh', ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'], {
+      encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 5000,
+    }).trim();
+    return result.replace(/[^\w.-]/g, '_');
+  } catch {
+    return 'local';
+  }
+}
+
 function stateFilePath(prNumber) {
-  return path.join(os.tmpdir(), `follow-up-pr-${prNumber}.json`);
+  return path.join(os.tmpdir(), `follow-up-pr-${getRepoSlug()}-${prNumber}.json`);
 }
 
 function loadState(prNumber) {
@@ -313,7 +354,6 @@ function initState(prInfo) {
     branch: prInfo.branch,
     startTime: new Date().toISOString(),
     attempts: [],
-    addressedReviewIds: [],
     finalStatus: null,
   };
 }
@@ -378,10 +418,15 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
     lines.push(c.dim('CI: No checks found'));
   }
 
-  // Merge conflicts
-  if (prInfo.mergeable === 'CONFLICTING') {
+  // Merge status
+  const isConflicting = prInfo.mergeable === 'CONFLICTING' || prInfo.mergeStateStatus === 'DIRTY';
+  const isMergeReady = prInfo.mergeable === 'MERGEABLE' && (!prInfo.mergeStateStatus || prInfo.mergeStateStatus === 'CLEAN' || prInfo.mergeStateStatus === 'HAS_HOOKS' || prInfo.mergeStateStatus === 'UNSTABLE');
+  if (isConflicting) {
     lines.push('');
     lines.push(c.red('CONFLICTS: Merge conflicts detected — rebase required'));
+  } else if (!isMergeReady) {
+    lines.push('');
+    lines.push(c.yellow(`MERGE STATUS: ${prInfo.mergeable || 'UNKNOWN'} (${prInfo.mergeStateStatus || 'UNKNOWN'}) — not yet mergeable`));
   }
 
   // Reviews
@@ -421,9 +466,11 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
     lines.push(`→ Fix the failure, push, then re-run: ${c.dim('node scripts/follow-up-pr.js')}`);
   } else if (ci.status === 'passing' && !opts.noReviews && reviews.hasActionable) {
     lines.push(`→ Address reviews, push, then re-run: ${c.dim('node scripts/follow-up-pr.js')}`);
-  } else if (prInfo.mergeable === 'CONFLICTING') {
+  } else if (isConflicting) {
     lines.push(`→ Resolve conflicts, push, then re-run: ${c.dim('node scripts/follow-up-pr.js')}`);
-  } else if (ci.status === 'passing' && (!reviews.hasActionable || opts.noReviews) && prInfo.mergeable !== 'CONFLICTING') {
+  } else if (!isMergeReady) {
+    lines.push(`→ Merge status not ready (${prInfo.mergeable || 'UNKNOWN'}). Waiting...`);
+  } else if (ci.status === 'passing' && (!reviews.hasActionable || opts.noReviews) && isMergeReady) {
     lines.push(c.green(`CI: PASSED | Reviews: ${opts.noReviews ? 'SKIPPED' : 'CLEAR'} | Conflicts: NONE`));
     lines.push(c.green(`PR #${prInfo.number} is ready for merge!`));
   } else if (ci.status === 'pending') {
@@ -507,14 +554,6 @@ async function main() {
     if (!opts.noReviews) {
       try {
         reviews = getReviews(prInfo.number);
-        // Filter out already-addressed review IDs
-        reviews.actionable = reviews.actionable.filter(
-          (r) => !state.addressedReviewIds.includes(r.id)
-        );
-        reviews.comments = reviews.comments.filter(
-          (cm) => !state.addressedReviewIds.includes(cm.id)
-        );
-        reviews.hasActionable = reviews.actionable.length > 0 || reviews.comments.length > 0;
       } catch (err) {
         console.error(c.yellow(`Warning: Could not fetch reviews: ${err.message}`));
       }
@@ -544,18 +583,19 @@ async function main() {
     }
 
     // All clear?
-    const isConflicting = prInfo.mergeable === 'CONFLICTING';
-    const ciPassed = ci.status === 'passing' || ci.status === 'no-checks';
+    const isConflicting = prInfo.mergeable === 'CONFLICTING' || prInfo.mergeStateStatus === 'DIRTY';
+    const isMergeReady = prInfo.mergeable === 'MERGEABLE' && (!prInfo.mergeStateStatus || prInfo.mergeStateStatus === 'CLEAN' || prInfo.mergeStateStatus === 'HAS_HOOKS' || prInfo.mergeStateStatus === 'UNSTABLE');
+    const ciPassed = ci.status === 'passing';
     const reviewsClear = opts.noReviews || (!reviews.hasActionable && reviews.pendingBots.length === 0);
 
-    if (ciPassed && reviewsClear && !isConflicting) {
+    if (ciPassed && reviewsClear && isMergeReady) {
       state.finalStatus = 'ready';
       saveState(state);
       process.exit(0);
     }
 
     // Actionable reviews or conflicts → exit 1 (user needs to act)
-    if (ciPassed && (reviews.hasActionable || isConflicting)) {
+    if (ciPassed && (reviews.hasActionable || !isMergeReady)) {
       state.finalStatus = reviews.hasActionable ? 'reviews-pending' : 'conflicting';
       saveState(state);
       process.exit(1);
