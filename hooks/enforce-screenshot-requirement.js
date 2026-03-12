@@ -20,6 +20,26 @@ const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp']);
 
 // Per-process cache to avoid re-fetching/re-diffing within same invocation
 let _cachedTsxChanges = undefined;
+let _cachedRepoRoot = undefined;
+
+function getRepoRoot() {
+  if (_cachedRepoRoot !== undefined) return _cachedRepoRoot;
+  try {
+    _cachedRepoRoot = execSync('git rev-parse --show-toplevel 2>/dev/null', { encoding: 'utf8' }).trim();
+  } catch {
+    _cachedRepoRoot = null;
+  }
+  return _cachedRepoRoot;
+}
+
+function getScreenshotDir(ticketId) {
+  const repoRoot = getRepoRoot();
+  if (repoRoot) {
+    return path.join(path.dirname(repoRoot), 'tasks', ticketId, 'screenshots');
+  }
+  // Fallback: use cwd parent
+  return path.join(process.cwd(), '..', 'tasks', ticketId, 'screenshots');
+}
 
 function getTicketId() {
   try {
@@ -91,7 +111,7 @@ function hasTsxChanges() {
  * Compatible with Node < 18.17 (no recursive readdirSync needed).
  */
 function hasScreenshots(ticketId) {
-  const root = `/home/node/worktrees/tasks/${ticketId}/screenshots`;
+  const root = getScreenshotDir(ticketId);
   try {
     if (!fs.existsSync(root)) return false;
     const stack = [root];
@@ -138,9 +158,10 @@ function blockIfNoScreenshots(hookData) {
 
   if (!isQaAgent && !isCompletingSkill) return;
 
+  const screenshotDir = getScreenshotDir(ticketId);
   process.stderr.write(
     'BLOCKED: TSX/JSX files changed but NO screenshots found in ' +
-    `/home/node/worktrees/tasks/${ticketId}/screenshots/. ` +
+    `${screenshotDir}/. ` +
     'You MUST capture screenshots before completing QA or creating a PR. ' +
     'Call AskUserQuestion with options: ' +
     '"Capture screenshots now" (use Playwright to take screenshots) | ' +
