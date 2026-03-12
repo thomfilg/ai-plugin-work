@@ -17,7 +17,15 @@ process.on('uncaughtException', () => process.exit(didBlock ? 2 : 0));
 process.on('unhandledRejection', () => process.exit(didBlock ? 2 : 0));
 
 let config;
-try { config = require('../lib/config'); } catch { config = null; }
+try {
+  config = require('../lib/config');
+} catch (err) {
+  if (err && err.code === 'MODULE_NOT_FOUND') {
+    config = null;
+  } else {
+    throw err;
+  }
+}
 if (!config) process.exit(0);
 
 let toolInput;
@@ -145,7 +153,7 @@ if (hookType === 'PreToolUse') {
       console.log('║                                                                      ║');
       console.log('╚══════════════════════════════════════════════════════════════════════╝');
       didBlock = true;
-      process.exit(1);
+      process.exit(2);
     }
 
     // All good - clean up work-pr-executed file

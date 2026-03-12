@@ -46,14 +46,26 @@ try {
   appendAction = wa.appendAction;
   loadActions = wa.loadActions;
   analyzeActions = wa.analyzeActions;
-} catch {
-  appendAction = () => {};
-  loadActions = () => [];
-  analyzeActions = () => ({});
+} catch (err) {
+  if (err && err.code === 'MODULE_NOT_FOUND') {
+    appendAction = () => {};
+    loadActions = () => [];
+    analyzeActions = () => ({});
+  } else {
+    throw err;
+  }
 }
 
 let tp;
-try { tp = require(path.join(__dirname, '..', 'lib', 'ticket-provider')); } catch { tp = null; }
+try {
+  tp = require(path.join(__dirname, '..', 'lib', 'ticket-provider'));
+} catch (err) {
+  if (err && err.code === 'MODULE_NOT_FOUND') {
+    tp = null;
+  } else {
+    throw err;
+  }
+}
 if (!tp) process.exit(0);
 
 // ─── Configuration ───────────────────────────────────────────────────────────

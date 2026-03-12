@@ -21,7 +21,15 @@ process.on('uncaughtException', () => process.exit(0));
 process.on('unhandledRejection', () => process.exit(0));
 
 let config;
-try { config = require('../lib/config'); } catch { config = null; }
+try {
+  config = require('../lib/config');
+} catch (err) {
+  if (err && err.code === 'MODULE_NOT_FOUND') {
+    config = null;
+  } else {
+    throw err;
+  }
+}
 if (!config) process.exit(0);
 
 const TASKS_BASE = config.TASKS_BASE;

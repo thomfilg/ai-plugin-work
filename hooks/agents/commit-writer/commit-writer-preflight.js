@@ -23,11 +23,13 @@ try {
   const qc = require(path.join(__dirname, '..', '..', '..', 'lib', 'quality-check'));
   runQualityCheck = qc.runQualityCheck;
   describeStrategy = qc.describeStrategy;
-} catch {
-  runQualityCheck = null;
-  describeStrategy = null;
+} catch (err) {
+  if (err && err.code === 'MODULE_NOT_FOUND') {
+    process.exit(0); // Can't load quality checks — fail open
+  } else {
+    throw err;
+  }
 }
-if (!runQualityCheck) process.exit(0);
 
 async function main() {
   let input = '';
