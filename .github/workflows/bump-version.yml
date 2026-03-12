@@ -4,18 +4,22 @@ on:
   push:
     branches: [main]
 
-permissions:
-  contents: write
-
 jobs:
   bump:
     runs-on: ubuntu-latest
     # Skip bump commits to avoid infinite loop
     if: "!contains(github.event.head_commit.message, 'chore(release):')"
     steps:
+      - name: Generate App Token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
       - uses: actions/checkout@v4
         with:
-          token: ${{ secrets.BUMP_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
 
       - uses: actions/setup-node@v4
         with:
@@ -26,8 +30,8 @@ jobs:
 
       - name: Commit and push
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.name "claude-plugin-work-botApp[bot]"
+          git config user.email "claude-plugin-work-botApp[bot]@users.noreply.github.com"
           VERSION=$(node -p "require('./package.json').version")
           git add package.json .claude-plugin/plugin.json .claude-plugin/marketplace.json
           git commit -m "chore(release): bump version to ${VERSION}"
