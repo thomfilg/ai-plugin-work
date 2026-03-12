@@ -21,7 +21,9 @@ async function main() {
   }
 
   // Find the most recent qa-api report
-  const tasksDir = '/home/node/worktrees/tasks';
+  let _config;
+  try { _config = require(path.join(__dirname, '..', '..', '..', 'lib', 'config')); } catch { _config = null; }
+  const tasksDir = _config?.TASKS_BASE || `${process.env.HOME}/worktrees/tasks`;
   let reportPath = null;
   let reportContent = null;
   let httpPath = null;
