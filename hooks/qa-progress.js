@@ -19,6 +19,9 @@
 const fs = require('fs');
 const path = require('path');
 
+process.on('uncaughtException', () => process.exit(0));
+process.on('unhandledRejection', () => process.exit(0));
+
 const TASKS_BASE = `${process.env.HOME}/worktrees/tasks`;
 
 /**
@@ -418,10 +421,7 @@ async function main() {
   }
 }
 
-main().catch(err => {
-  console.error('Error:', err.message);
-  process.exit(1);
-});
+main().catch(() => process.exit(0));
 
 module.exports = {
   loadProgress,

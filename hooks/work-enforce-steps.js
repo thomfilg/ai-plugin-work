@@ -11,9 +11,25 @@
 
 const fs = require('fs');
 const path = require('path');
-const config = require('../lib/config');
 
-const toolInput = JSON.parse(process.env.TOOL_INPUT || '{}');
+let didBlock = false;
+process.on('uncaughtException', () => process.exit(didBlock ? 2 : 0));
+process.on('unhandledRejection', () => process.exit(didBlock ? 2 : 0));
+
+let config;
+try {
+  config = require('../lib/config');
+} catch (err) {
+  if (err && err.code === 'MODULE_NOT_FOUND' && /['"]\.\.\/lib\/config['"]/.test(err.message)) {
+    config = null;
+  } else {
+    throw err;
+  }
+}
+if (!config) process.exit(0);
+
+let toolInput;
+try { toolInput = JSON.parse(process.env.TOOL_INPUT || '{}'); } catch { toolInput = {}; }
 const hookType = process.env.CLAUDE_HOOK_TYPE || 'PostToolUse'; // PreToolUse or PostToolUse
 
 // Only handle work and work-pr skills
@@ -136,7 +152,8 @@ if (hookType === 'PreToolUse') {
       console.log('║  This command updates the PR and creates required SHA tracking.     ║');
       console.log('║                                                                      ║');
       console.log('╚══════════════════════════════════════════════════════════════════════╝');
-      process.exit(1);
+      didBlock = true;
+      process.exit(2);
     }
 
     // All good - clean up work-pr-executed file

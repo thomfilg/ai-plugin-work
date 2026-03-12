@@ -15,8 +15,12 @@
 const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 
+process.on('uncaughtException', () => { console.log(JSON.stringify({ error: 'uncaught exception', apps: {} })); process.exit(0); });
+process.on('unhandledRejection', () => { console.log(JSON.stringify({ error: 'unhandled rejection', apps: {} })); process.exit(0); });
+
 // Get impacted apps from args
-const IMPACTED_APPS = JSON.parse(process.argv[2] || '[]');
+let IMPACTED_APPS;
+try { IMPACTED_APPS = JSON.parse(process.argv[2] || '[]'); } catch { IMPACTED_APPS = []; }
 
 /**
  * Derive ticket prefix (e.g., PROJ-964) from current worktree path or git branch.
@@ -347,7 +351,4 @@ async function main() {
   console.log(JSON.stringify(result, null, 2));
 }
 
-main().catch(err => {
-  console.error('Error:', err.message);
-  process.exit(1);
-});
+main().catch(() => process.exit(0));

@@ -11,7 +11,22 @@
  */
 
 const fs = require('fs');
-const config = require('../lib/config');
+
+let didBlock = false;
+process.on('uncaughtException', () => process.exit(didBlock ? 2 : 0));
+process.on('unhandledRejection', () => process.exit(didBlock ? 2 : 0));
+
+let config;
+try {
+  config = require('../lib/config');
+} catch (err) {
+  if (err && err.code === 'MODULE_NOT_FOUND' && /['"]\.\.\/lib\/config['"]/.test(err.message)) {
+    config = null;
+  } else {
+    throw err;
+  }
+}
+if (!config) process.exit(0);
 
 // Tools that require /work-implement first
 const BLOCKED_TOOLS = ['Write', 'Edit', 'MultiEdit'];
@@ -208,6 +223,7 @@ async function main() {
         `     "${WORK_IMPLEMENT_UNLOCK_PHRASE}"\n` +
         `  2) delegate via developer-nodejs-tdd\n`
       );
+      didBlock = true;
       process.exit(2);
     }
 
@@ -246,11 +262,8 @@ async function main() {
     `  - Quality checks before proceeding\n\n` +
     `See /work Step 4 for details.\n`
   );
+  didBlock = true;
   process.exit(2);
 }
 
-main().catch(err => {
-  console.error('Hook error:', err.message);
-  // On error, approve to avoid blocking legitimate operations
-  process.exit(0);
-});
+main().catch(() => process.exit(didBlock ? 2 : 0));

@@ -13,7 +13,22 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
-const config = require('../lib/config');
+
+let didBlock = false;
+process.on('uncaughtException', () => process.exit(didBlock ? 2 : 0));
+process.on('unhandledRejection', () => process.exit(didBlock ? 2 : 0));
+
+let config;
+try {
+  config = require('../lib/config');
+} catch (err) {
+  if (err && err.code === 'MODULE_NOT_FOUND' && /['"]\.\.\/lib\/config['"]/.test(err.message)) {
+    config = null;
+  } else {
+    throw err;
+  }
+}
+if (!config) process.exit(0);
 
 // Get current task ID from cwd or git branch
 function getCurrentTaskId(cwd) {
@@ -265,6 +280,7 @@ async function main() {
         `  **Decision:** FIXED | DEFERRED | NOT_APPLICABLE\n` +
         `  **Reason:** [specific justification]\n`
       );
+      didBlock = true;
       process.exit(2);
     }
 
@@ -287,6 +303,7 @@ async function main() {
         `ACTION: Re-run the developer agent to generate a new reply\n` +
         `        based on the current code-review.check.md\n`
       );
+      didBlock = true;
       process.exit(2);
     }
 
@@ -299,6 +316,7 @@ async function main() {
         `ACTION: Add the following line at top of code-review-reply.check.md:\n\n` +
         `  **Changes Hash:** ${reviewHash}\n`
       );
+      didBlock = true;
       process.exit(2);
     }
 
@@ -342,6 +360,7 @@ async function main() {
         `  **Decision:** FIXED | DEFERRED | NOT_APPLICABLE\n` +
         `  **Reason:** [specific justification]\n`
       );
+      didBlock = true;
       process.exit(2);
     }
   }
@@ -349,7 +368,4 @@ async function main() {
   process.exit(0);
 }
 
-main().catch(err => {
-  console.error('Hook error:', err.message);
-  process.exit(0);
-});
+main().catch(() => process.exit(didBlock ? 2 : 0));
