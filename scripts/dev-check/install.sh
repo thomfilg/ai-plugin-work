@@ -18,17 +18,19 @@ fi
 echo "Installing dev-check scripts into $TARGET_DIR/package.json..."
 
 # Add scripts using node to preserve JSON formatting
-node -e "
+TARGET_DIR="$TARGET_DIR" SCRIPT_DIR="$SCRIPT_DIR" node -e "
 const fs = require('fs');
 const path = require('path');
 
-const pkgPath = path.resolve('$TARGET_DIR', 'package.json');
+const targetDir = process.env.TARGET_DIR;
+const scriptDir = process.env.SCRIPT_DIR;
+const pkgPath = path.resolve(targetDir, 'package.json');
 const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
 
 const scripts = {
-  'dev:lint': '$SCRIPT_DIR/dev-lint.sh',
-  'dev:typecheck': '$SCRIPT_DIR/dev-typecheck.sh',
-  'dev:test': '$SCRIPT_DIR/dev-test.sh',
+  'dev:lint': scriptDir + '/dev-lint.sh',
+  'dev:typecheck': scriptDir + '/dev-typecheck.sh',
+  'dev:test': scriptDir + '/dev-test.sh',
   'dev:check': 'pnpm dev:lint && pnpm dev:typecheck && pnpm dev:test',
 };
 
