@@ -21,143 +21,95 @@ FOLLOW_UP_PR_POLL_REVIEWS=true   # Set to false in .env to disable review pollin
 
 **Strategy:** Start working immediately on first failure — don't wait for all checks.
 
-**Review polling** is enabled by default. To disable it per-repository, set `FOLLOW_UP_PR_POLL_REVIEWS=false` in the `.env` file. When disabled, the command only monitors CI status and skips Steps 3.3–3.4 and Step 5 entirely.
+**Review polling** is enabled by default. To disable it per-repository, set `FOLLOW_UP_PR_POLL_REVIEWS=false` in the `.env` file. When disabled, pass `--no-reviews` to the monitor script.
 
 ---
 
-## Step 1: Initialize Tracking
+## Step 1: Run the Monitor Script
 
-Create a summary tracker:
-
-```javascript
-const summary = {
-  prNumber: null,
-  prUrl: null,
-  branch: null,
-  startTime: new Date().toISOString(),
-  attempts: [],
-  fixes: [],
-  reviewsAddressed: [],    // review comments that were addressed
-  finalStatus: null
-};
-```
-
----
-
-## Step 2: Get Current PR Info
+The `scripts/follow-up-pr.js` script handles all deterministic polling (CI checks, review fetching, bot review detection, state persistence). Run it first to get the current status:
 
 ```bash
-# Get current branch
-BRANCH=$(git branch --show-current)
+# Determine script path (plugin root or project root)
+PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+SCRIPT_PATH="$PLUGIN_ROOT/scripts/follow-up-pr.js"
 
-# Get PR number, URL, and conflict status in one call
-gh pr view --json number,url,title,headRefName,mergeable,mergeStateStatus
+# Build flags
+REVIEW_FLAG=""
+if [ "${FOLLOW_UP_PR_POLL_REVIEWS:-true}" = "false" ]; then
+  REVIEW_FLAG="--no-reviews"
+fi
+
+# Single check (don't let the script loop — we handle the loop with fixes)
+node "$SCRIPT_PATH" --once $REVIEW_FLAG 2>&1
 ```
 
-If no PR exists for the current branch, inform the user and exit.
+### 1.1 Interpret Exit Codes
 
-### 2.1 Check for Merge Conflicts
+| Exit Code | Meaning | Action |
+|-----------|---------|--------|
+| **0** | CI passed, reviews clear, no conflicts | Go to Step 6 (Success Summary) |
+| **1** | Failures detected (CI failed, actionable reviews, or conflicts) | Read the output, then go to Step 2 |
+| **2** | Error (no PR found, gh CLI failed) | Inform user and exit |
 
-From the PR info already fetched above, check the `mergeable` and `mergeStateStatus` fields.
+### 1.2 Read the State File
 
-**If `mergeable` is `"CONFLICTING"` or `mergeStateStatus` is `"DIRTY"`:**
+The script persists state to `/tmp/follow-up-pr-<repo>-<PR_NUMBER>.json`. Read it for structured data:
+
+```bash
+cat /tmp/follow-up-pr-*-<PR_NUMBER>.json
+```
+
+The state file contains: `prNumber`, `prUrl`, `branch`, `startTime`, `attempts[]`, and `finalStatus`.
+
+---
+
+## Step 2: Triage the Script Output
+
+Parse the script's terminal output to determine what needs fixing:
+
+### 2.1 CI Failures
+If the output shows `CI: FAILING`:
+- Note the failed check names and their categories (shown in `[brackets]`)
+- Go to Step 4 (Diagnose and Fix Failures)
+
+### 2.2 Merge Conflicts
+If the output shows `CONFLICTS: Merge conflicts detected`:
 1. Fetch latest main: `git fetch origin main`
 2. Attempt rebase: `git rebase origin/main`
 3. If conflicts occur:
    - List conflicting files: `git diff --name-only --diff-filter=U`
    - Read each conflicting file and resolve conflicts intelligently
-   - Follow CLAUDE.md merge conflict rules (check Jira context for the conflicting commit if applicable)
    - After resolving: `git add <resolved-files> && git rebase --continue`
-4. Force push the rebased branch: `git push --force-with-lease`
-5. Log the conflict resolution in `summary.fixes`
-6. Wait 30 seconds for GitHub to recalculate mergeability, then continue to Step 3
+4. Force push: `git push --force-with-lease`
+5. Return to Step 1 (re-run script)
 
-**If `mergeable` is `"MERGEABLE"`:** Continue to Step 3.
+### 2.3 Actionable Reviews
+If the output shows `Reviews: N actionable`:
+- Note reviewer names, states, file paths and comment previews
+- Go to Step 5 (Address Review Feedback)
+
+### 2.4 Pending Bot Reviews
+If the output shows `Reviews: Awaiting bot reviews`:
+- Wait 60 seconds, then return to Step 1 (re-run script)
 
 ---
 
-## Step 3: Check CI Status Loop
+## Step 3: Loop Until Resolved
 
-For each attempt (1 to MAX_ATTEMPTS):
-
-### 3.1 Check CI Status and Conflicts
+After fixing issues (Steps 4 or 5), push and re-run the monitor:
 
 ```bash
-# Get PR checks status
-gh pr checks <PR_NUMBER> --watch=false
-
-# Also get the overall status AND conflict state
-gh pr view <PR_NUMBER> --json statusCheckRollup,mergeable,mergeStateStatus
+git push
+node "$SCRIPT_PATH" --once $REVIEW_FLAG 2>&1
 ```
 
-### 3.2 Evaluate Status
+Repeat this loop up to MAX_ATTEMPTS (10) times. If the script exits 0, go to Step 6.
 
-**FIRST — Check for merge conflicts:**
-If `mergeable` is `"CONFLICTING"` or `mergeStateStatus` is `"DIRTY"`, resolve conflicts using the same process from Step 2.1 before evaluating CI status. Conflicts can appear mid-loop when main is updated by other PRs merging.
-
-**If ALL checks pass AND no conflicts:**
-- If `FOLLOW_UP_PR_POLL_REVIEWS` is enabled, go to Step 3.3 (Poll Review Comments)
-- If review polling is disabled OR no actionable reviews remain, record final status as "PASSED" and go to Step 6 (Success Summary)
-
-**If ANY checks FAILED (even if others are still running):**
-- Log which checks failed
-- **DO NOT WAIT** - immediately go to Step 4 (Diagnose and Fix)
-- Run the failing checks locally and fix them while CI continues
-
-**If ALL checks are still RUNNING (none failed yet):**
-- Log: "CI is still running, waiting 60 seconds..."
-- Wait 60 seconds (use: `sleep 60`)
-- Continue to next attempt
-
-### 3.3 Poll Review Comments
-
-**Skip this step if `FOLLOW_UP_PR_POLL_REVIEWS=false`.** Check the config:
-```bash
-# Read from .env or environment — defaults to true
-echo "${FOLLOW_UP_PR_POLL_REVIEWS:-true}"
-```
-
-After CI passes (or while waiting for CI), check for PR review comments from humans or AI reviewers.
-
-```bash
-# Get all PR reviews (approved, changes_requested, commented)
-gh pr view <PR_NUMBER> --json reviews --jq '.reviews[] | {author: .author.login, state: .state, body: .body, submittedAt: .submittedAt}'
-
-# Get inline review comments (code-level feedback)
-gh api repos/{owner}/{repo}/pulls/<PR_NUMBER>/comments --jq '.[] | {author: .user.login, path: .path, line: .line, body: .body, created_at: .created_at, in_reply_to_id: .in_reply_to_id}'
-
-# Get general PR conversation comments
-gh pr view <PR_NUMBER> --json comments --jq '.comments[] | {author: .author.login, body: .body, createdAt: .createdAt}'
-```
-
-**Derive `{owner}/{repo}` from:**
-```bash
-gh repo view --json nameWithOwner --jq '.nameWithOwner'
-```
-
-### 3.4 Evaluate Review Comments
-
-**Classify each comment/review:**
-
-1. **CHANGES_REQUESTED reviews** — These MUST be addressed. Go to Step 5 (Address Review Feedback).
-2. **Inline code comments** (not replies to your own comments) — Actionable feedback on specific lines. Go to Step 5.
-3. **General conversation comments** — Check if they contain actionable requests (e.g., "please rename X", "can you add Y"). If actionable, go to Step 5.
-4. **APPROVED reviews** — No action needed. Log the approval.
-5. **COMMENTED reviews with no actionable content** (e.g., "looks good", "nice work") — No action needed.
-
-**Filtering rules:**
-- **Ignore your own comments** — Filter out comments from the bot/author who created the PR
-- **Ignore already-addressed comments** — Track which comments have been addressed in `summary.reviewsAddressed` by their ID/timestamp. Skip those.
-- **Prioritize CHANGES_REQUESTED** — Address these before general comments
-- **Treat AI reviewer comments the same as human comments** — Common AI reviewers include bots like `github-actions[bot]`, `copilot`, `coderabbitai`, `codeclimate`, etc. Their feedback is equally actionable.
-
-**If no actionable reviews remain:**
-- Record final status as "PASSED"
-- Go to Step 6 (Success Summary)
-
-**If actionable reviews exist:**
-- Log: "Found <N> actionable review comments to address"
-- Go to Step 5 (Address Review Feedback)
+**Important:** The script handles all the polling logic. You only need to:
+1. Run the script (Step 1)
+2. Fix what it reports (Steps 4/5)
+3. Push and re-run (Step 3)
 
 ---
 
@@ -188,7 +140,7 @@ For each group of related feedback:
 
 1. Push: `git push`
 2. Log the review fixes in `summary.fixes`
-3. Return to Step 3 (re-check CI since new commits may trigger new runs, and re-poll reviews for new feedback)
+3. Return to Step 1 (re-run monitor script to re-check CI and reviews)
 
 **Important notes for review handling:**
 - **If a review comment is ambiguous or you're unsure how to address it**, use AskUserQuestion to ask the user for guidance
@@ -288,7 +240,7 @@ This command will:
 
 **After /test-coordination completes:**
 1. Push: `git push`
-2. Continue to next attempt (return to Step 3)
+2. Push and return to Step 1 (re-run the monitor script)
 
 **Common coverage failure scenarios (for reference only — action is always the same):**
 - "No coverage data" for all files = tests failed, coverage JSON wasn't generated. Fix tests first, THEN run /test-coordination.
@@ -303,7 +255,7 @@ This command will:
 3. Commit using commit-writer agent with "autonomous" flag
 4. Push: `git push`
 5. Record the fix in summary.fixes array
-6. Continue to next attempt (return to Step 3)
+6. Push and return to Step 1 (re-run the monitor script)
 
 ---
 
@@ -421,13 +373,11 @@ If 10 attempts are reached without success:
 User: `/follow-up-pr`
 
 Claude will:
-1. Identify current PR (#463)
-2. Check CI status (failing: unit-tests)
-3. Diagnose: coverage report glob pattern issue
-4. Fix: update glob pattern in ci.yml
-5. Commit and push
-6. Wait, check again — CI now passes
-7. Poll review comments — finds 2 inline comments from reviewer
-8. Address review feedback, commit and push
-9. Re-check CI (still passing) and re-poll reviews (no new comments)
-10. Report success with all fixes and reviews addressed
+1. Run `node scripts/follow-up-pr.js --once` → exit 1 (CI failing: unit-tests)
+2. Diagnose: coverage report glob pattern issue
+3. Fix: update glob pattern in ci.yml
+4. Commit and push
+5. Re-run script → exit 1 (CI now passes, but 2 inline review comments)
+6. Address review feedback, commit and push
+7. Re-run script → exit 0 (CI passing, reviews clear)
+8. Report success with all fixes and reviews addressed
