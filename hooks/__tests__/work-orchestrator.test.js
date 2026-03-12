@@ -13,9 +13,9 @@ const fs = require('fs');
 const os = require('os');
 
 const HOOK_PATH = path.join(__dirname, '..', 'work-orchestrator.js');
-const TASKS_BASE = fs.existsSync('/home/node/worktrees/tasks')
-  ? '/home/node/worktrees/tasks'
-  : path.join(os.homedir(), 'tasks');
+let _config;
+try { _config = require(path.join(__dirname, '..', '..', 'lib', 'config')); } catch { _config = null; }
+const TASKS_BASE = _config?.TASKS_BASE || `${process.env.HOME}/worktrees/tasks`;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 

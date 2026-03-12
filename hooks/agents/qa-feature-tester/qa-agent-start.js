@@ -37,7 +37,10 @@ async function main() {
   const ticketId = ticketMatch ? ticketMatch[1] : null;
 
   if (ticketId) {
-    const screenshotDir = `/home/node/worktrees/tasks/${ticketId}/screenshots`;
+    let _config;
+    try { _config = require(path.join(__dirname, '..', '..', '..', 'lib', 'config')); } catch { _config = null; }
+    const tasksBase = _config?.TASKS_BASE || `${process.env.HOME}/worktrees/tasks`;
+    const screenshotDir = path.join(tasksBase, ticketId, 'screenshots');
 
     if (fs.existsSync(screenshotDir)) {
       // Recursively clean all files in screenshots folder

@@ -53,7 +53,10 @@ async function main() {
   }
 
   // Check if it's a QA task screenshot (in global tasks directory)
-  const isTaskScreenshot = filename.includes('/home/node/worktrees/tasks/') && filename.includes('screenshots/');
+  let _config;
+  try { _config = require(require('path').join(__dirname, '..', '..', '..', 'lib', 'config')); } catch { _config = null; }
+  const tasksBase = _config?.TASKS_BASE || `${process.env.HOME}/worktrees/tasks`;
+  const isTaskScreenshot = filename.includes(tasksBase + '/') && filename.includes('screenshots/');
 
   if (!isTaskScreenshot) {
     // Not a task screenshot, approve without validation

@@ -12,7 +12,9 @@ const fs = require('fs');
 const path = require('path');
 
 const HOOK_PATH = path.join(__dirname, '..', 'enforce-step-workflow.js');
-const TASKS_BASE = '/home/node/worktrees/tasks';
+let _config;
+try { _config = require(path.join(__dirname, '..', '..', 'lib', 'config')); } catch { _config = null; }
+const TASKS_BASE = _config?.TASKS_BASE || `${process.env.HOME}/worktrees/tasks`;
 
 // Use a unique ticket ID per test run to avoid interference
 const TEST_TICKET = `TEST-${process.pid}`;

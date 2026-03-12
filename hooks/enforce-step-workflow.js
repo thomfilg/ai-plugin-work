@@ -50,8 +50,10 @@ try {
 
 // ─── Configuration ──────────────────────────────────────────────────────────
 
-const WORKTREES_BASE = '/home/node/worktrees';
-const TASKS_BASE = path.join(WORKTREES_BASE, 'tasks');
+let _config;
+try { _config = require(path.join(__dirname, '..', 'lib', 'config')); } catch { _config = null; }
+const WORKTREES_BASE = _config?.WORKTREES_BASE || `${process.env.HOME}/worktrees`;
+const TASKS_BASE = _config?.TASKS_BASE || path.join(WORKTREES_BASE, 'tasks');
 
 // ─── Workflow Definitions ───────────────────────────────────────────────────
 //
