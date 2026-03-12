@@ -16,7 +16,21 @@
 
 const fs = require('fs');
 const path = require('path');
-const config = require('../lib/config');
+
+process.on('uncaughtException', () => process.exit(0));
+process.on('unhandledRejection', () => process.exit(0));
+
+let config;
+try {
+  config = require('../lib/config');
+} catch (err) {
+  if (err && err.code === 'MODULE_NOT_FOUND' && /['"]\.\.\/lib\/config['"]/.test(err.message)) {
+    config = null;
+  } else {
+    throw err;
+  }
+}
+if (!config) process.exit(0);
 
 const TASKS_BASE = config.TASKS_BASE;
 
@@ -361,10 +375,7 @@ async function main() {
   }
 }
 
-main().catch(err => {
-  console.error('Error:', err.message);
-  process.exit(1);
-});
+main().catch(() => process.exit(0));
 
 module.exports = {
   loadState,

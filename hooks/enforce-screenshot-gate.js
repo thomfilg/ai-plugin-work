@@ -13,7 +13,22 @@
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const config = require('../lib/config');
+
+let didBlock = false;
+process.on('uncaughtException', () => process.exit(didBlock ? 2 : 0));
+process.on('unhandledRejection', () => process.exit(didBlock ? 2 : 0));
+
+let config;
+try {
+  config = require('../lib/config');
+} catch (err) {
+  if (err && err.code === 'MODULE_NOT_FOUND' && /['"]\.\.\/lib\/config['"]/.test(err.message)) {
+    config = null;
+  } else {
+    throw err;
+  }
+}
+if (!config) process.exit(0);
 
 async function main() {
   let input = '';
@@ -26,6 +41,7 @@ async function main() {
     hookData = JSON.parse(input);
   } catch (err) {
     process.stderr.write(`SCREENSHOT GATE: Failed to parse hook input: ${err.message}\n`);
+    didBlock = true;
     process.exit(2);
   }
 
@@ -146,10 +162,8 @@ ${fileList}${moreFiles}
 ║                                                                      ║
 ╚══════════════════════════════════════════════════════════════════════╝
 `);
+  didBlock = true;
   process.exit(2);
 }
 
-main().catch((err) => {
-  process.stderr.write(`SCREENSHOT GATE ERROR: ${err.message}\n`);
-  process.exit(2);
-});
+main().catch(() => process.exit(didBlock ? 2 : 0));

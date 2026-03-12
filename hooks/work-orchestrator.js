@@ -36,8 +36,37 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { appendAction, loadActions, analyzeActions } = require(path.join(__dirname, '..', 'lib', 'work-actions'));
-const tp = require(path.join(__dirname, '..', 'lib', 'ticket-provider'));
+
+process.on('uncaughtException', () => process.exit(0));
+process.on('unhandledRejection', () => process.exit(0));
+
+let appendAction, loadActions, analyzeActions;
+try {
+  const wa = require(path.join(__dirname, '..', 'lib', 'work-actions'));
+  appendAction = wa.appendAction;
+  loadActions = wa.loadActions;
+  analyzeActions = wa.analyzeActions;
+} catch (err) {
+  if (err && err.code === 'MODULE_NOT_FOUND' && /['"].*lib\/work-actions['"]/.test(err.message)) {
+    appendAction = () => {};
+    loadActions = () => [];
+    analyzeActions = () => ({});
+  } else {
+    throw err;
+  }
+}
+
+let tp;
+try {
+  tp = require(path.join(__dirname, '..', 'lib', 'ticket-provider'));
+} catch (err) {
+  if (err && err.code === 'MODULE_NOT_FOUND' && /['"].*lib\/ticket-provider['"]/.test(err.message)) {
+    tp = null;
+  } else {
+    throw err;
+  }
+}
+if (!tp) process.exit(0);
 
 // ─── Configuration ───────────────────────────────────────────────────────────
 

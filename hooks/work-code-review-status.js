@@ -13,7 +13,22 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
-const config = require('../lib/config');
+
+let didBlock = false;
+process.on('uncaughtException', () => process.exit(didBlock ? 2 : 0));
+process.on('unhandledRejection', () => process.exit(didBlock ? 2 : 0));
+
+let config;
+try {
+  config = require('../lib/config');
+} catch (err) {
+  if (err && err.code === 'MODULE_NOT_FOUND' && /['"]\.\.\/lib\/config['"]/.test(err.message)) {
+    config = null;
+  } else {
+    throw err;
+  }
+}
+if (!config) process.exit(0);
 
 // Get current task ID from cwd or git branch
 function getCurrentTaskId(cwd) {
@@ -464,13 +479,11 @@ async function main() {
 
   if (warnings.length > 0) {
     process.stderr.write(warnings.join('\n\n---\n\n') + '\n');
+    didBlock = true;
     process.exit(2);
   } else {
     process.exit(0);
   }
 }
 
-main().catch(err => {
-  console.error('Hook error:', err.message);
-  process.exit(0);
-});
+main().catch(() => process.exit(didBlock ? 2 : 0));
