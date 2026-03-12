@@ -13,6 +13,20 @@ const assert = require('node:assert/strict');
 const HOOK_PATH = path.join(__dirname, '..', 'enforce-screenshot-requirement.js');
 const MARKER_DIR = '/tmp';
 
+function getRepoRoot() {
+  try {
+    const { execSync } = require('child_process');
+    return execSync('git rev-parse --show-toplevel 2>/dev/null', { encoding: 'utf8' }).trim();
+  } catch {
+    return process.cwd();
+  }
+}
+
+function getScreenshotDir(ticketId) {
+  const repoRoot = getRepoRoot();
+  return path.join(path.dirname(repoRoot), 'tasks', ticketId, 'screenshots');
+}
+
 function runHook(hookData, hookType = 'PreToolUse') {
   return new Promise((resolve, reject) => {
     const proc = spawn('node', [HOOK_PATH], {
@@ -52,14 +66,14 @@ function cleanupMarker(ticketId) {
 }
 
 function createFakeScreenshot(ticketId) {
-  const dir = `/home/node/worktrees/tasks/${ticketId}/screenshots`;
+  const dir = getScreenshotDir(ticketId);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'test.png'), 'fake');
   return dir;
 }
 
 function cleanupScreenshots(ticketId) {
-  const dir = `/home/node/worktrees/tasks/${ticketId}/screenshots`;
+  const dir = getScreenshotDir(ticketId);
   try {
     if (fs.existsSync(dir)) {
       for (const f of fs.readdirSync(dir)) fs.unlinkSync(path.join(dir, f));
