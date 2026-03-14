@@ -198,7 +198,8 @@ mcp__playwright__browser_navigate(url: "https://www.google.com")
 ╚══════════════════════════════════════════════════════════════════════╝
 ```
 
-**If Playwright fails:** Transition to `8_output`: `node ${CLAUDE_PLUGIN_ROOT}/lib/workflow-engine.js check transition ${INSTANCE_ID} 8_output`
+**If Playwright fails:** This is a BLOCKING error. Do NOT skip QA. Report INFRASTRUCTURE_FAILURE and transition to `8_output`: `node ${CLAUDE_PLUGIN_ROOT}/lib/workflow-engine.js check transition ${INSTANCE_ID} 8_output`
+The /check result MUST show NEEDS_WORK with infrastructure failure — QA cannot be skipped.
 **If Playwright works:** Continue to Step 4_phase1_agents.
 
 ---
@@ -302,9 +303,10 @@ Commands to run (use LOW_CONCURRENCY=1):
 Status: APPROVED (all pass) or NEEDS_WORK (any failures)
 ```
 
-### Agent 3.x: QA Testing (one per impacted app)
+### Agent 3.x: QA Testing (MANDATORY — one per impacted app)
 
-**Use `/check-qa` command** for each app in IMPACTED_APPS, ALL IN PARALLEL.
+**QA is NOT optional.** Use `/check-qa` command for each app in IMPACTED_APPS, ALL IN PARALLEL.
+If `IMPACTED_APPS` is empty (e.g., only packages changed), launch QA for ALL known web apps: `as-dashboard`, `as-dashboard-admin`, `status-site`, `status-site-admin`.
 
 For each app in `IMPACTED_APPS`, invoke the `/check-qa` skill with JSON parameters:
 

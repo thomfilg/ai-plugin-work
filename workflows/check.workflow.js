@@ -39,12 +39,24 @@ function safeExec(cmd, options = {}) {
   }
 }
 
+function getBaseBranch() {
+  const headRef = safeExec('git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null');
+  if (headRef) return headRef.replace('refs/remotes/', '');
+
+  for (const branch of ['origin/main', 'origin/dev', 'origin/master']) {
+    if (safeExec(`git rev-parse --verify ${branch} 2>/dev/null`)) return branch;
+  }
+
+  return 'origin/main';
+}
+
 function getReportFolder(instanceId) {
   return path.join(TASKS_BASE, instanceId);
 }
 
 function getCurrentChangesHash() {
-  const diff = safeExec('git diff origin/main...HEAD -w');
+  const baseBranch = getBaseBranch();
+  const diff = safeExec(`git diff ${baseBranch}...HEAD -w`);
   if (!diff) return 'no-changes';
   const crypto = require('crypto');
   return crypto.createHash('sha256').update(diff).digest('hex').substring(0, 12);
@@ -63,18 +75,29 @@ function reportHasMatchingHash(folder, filename, hash) {
 }
 
 function getImpactedApps() {
-  const output = safeExec('git diff --name-only origin/main...HEAD');
+  const baseBranch = getBaseBranch();
+  const output = safeExec(`git diff --name-only ${baseBranch}...HEAD`);
   if (!output) return [];
   const apps = new Set();
+  const packages = [];
   for (const line of output.split('\n')) {
-    const match = line.match(/^apps\/([^/]+)\//);
-    if (match) apps.add(match[1]);
+    const appMatch = line.match(/^apps\/([^/]+)\//);
+    if (appMatch) apps.add(appMatch[1]);
+    const pkgMatch = line.match(/^packages\/([^/]+)\//);
+    if (pkgMatch) packages.push(pkgMatch[1]);
   }
+
+  // If no direct app changes but packages changed, all web apps may be affected
+  if (apps.size === 0 && packages.length > 0) {
+    return ['as-dashboard', 'as-dashboard-admin', 'status-site', 'status-site-admin'];
+  }
+
   return Array.from(apps).sort();
 }
 
 function hasBackendChanges() {
-  const output = safeExec('git diff --name-only origin/main...HEAD');
+  const baseBranch = getBaseBranch();
+  const output = safeExec(`git diff --name-only ${baseBranch}...HEAD`);
   if (!output) return false;
   const backendPatterns = [
     /worker\//,

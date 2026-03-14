@@ -331,8 +331,13 @@ async function main() {
   // Wait a bit for database to be fully ready
   await new Promise(resolve => setTimeout(resolve, 5000));
 
-  // Start only web apps that were impacted
-  const webAppsToStart = IMPACTED_APPS.filter(app => WEB_APPS[app]);
+  // Start web apps — if none directly impacted, start all for QA coverage
+  let webAppsToStart = IMPACTED_APPS.filter(app => WEB_APPS[app]);
+
+  if (webAppsToStart.length === 0) {
+    console.error('No directly impacted apps detected — starting all web apps for mandatory QA');
+    webAppsToStart = Object.keys(WEB_APPS);
+  }
 
   for (const appName of webAppsToStart) {
     const config = WEB_APPS[appName];

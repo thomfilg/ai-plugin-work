@@ -36,6 +36,21 @@ function exec(cmd, options = {}) {
 }
 
 /**
+ * Detect the correct base branch for the repository.
+ * Checks origin/HEAD symbolic ref, then falls back to common branch names.
+ */
+function getBaseBranch() {
+  const headRef = exec('git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null');
+  if (headRef) return headRef.replace('refs/remotes/', '');
+
+  for (const branch of ['origin/main', 'origin/dev', 'origin/master']) {
+    if (exec(`git rev-parse --verify ${branch} 2>/dev/null`)) return branch;
+  }
+
+  return 'origin/main';
+}
+
+/**
  * Get the main worktree path
  */
 function getMainWorktreePath() {
@@ -58,7 +73,8 @@ function getBranchName() {
  */
 function generateChangesHash() {
   // Use -w to ignore whitespace changes (prevents false cache misses)
-  const diff = exec('git diff origin/main...HEAD -w');
+  const baseBranch = getBaseBranch();
+  const diff = exec(`git diff ${baseBranch}...HEAD -w`);
   if (!diff) {
     // No changes, use empty hash
     return 'no-changes';
@@ -140,17 +156,29 @@ function setupReportFolder(reportFolder) {
  * Analyze which apps were changed
  */
 function getImpactedApps() {
-  const output = exec('git diff --name-only origin/main...HEAD');
+  const baseBranch = getBaseBranch();
+  const output = exec(`git diff --name-only ${baseBranch}...HEAD`);
   if (!output) return [];
 
   const apps = new Set();
+  const packages = [];
   const lines = output.split('\n');
 
   for (const line of lines) {
-    const match = line.match(/^apps\/([^/]+)\//);
-    if (match) {
-      apps.add(match[1]);
+    const appMatch = line.match(/^apps\/([^/]+)\//);
+    if (appMatch) {
+      apps.add(appMatch[1]);
     }
+    const pkgMatch = line.match(/^packages\/([^/]+)\//);
+    if (pkgMatch) {
+      packages.push(pkgMatch[1]);
+    }
+  }
+
+  // If no direct app changes but packages changed, all web apps may be affected
+  if (apps.size === 0 && packages.length > 0) {
+    console.error(`No direct app changes but ${packages.length} package(s) changed — including all web apps for QA`);
+    return ['as-dashboard', 'as-dashboard-admin', 'status-site', 'status-site-admin'];
   }
 
   return Array.from(apps).sort();
@@ -161,7 +189,8 @@ function getImpactedApps() {
  * Used by QA agents to trace dependencies
  */
 function getAffectedFiles() {
-  const output = exec('git diff --name-only origin/main...HEAD');
+  const baseBranch = getBaseBranch();
+  const output = exec(`git diff --name-only ${baseBranch}...HEAD`);
   if (!output) return { apps: {}, packages: [] };
 
   const result = { apps: {}, packages: [] };
