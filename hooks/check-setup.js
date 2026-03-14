@@ -17,6 +17,7 @@
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const config = require(path.join(__dirname, '..', 'lib', 'config'));
 
 // Get Jira ticket ID from args or environment
 const JIRA_TICKET_ID = process.argv[2] || process.env.JIRA_TICKET_ID || '';
@@ -176,9 +177,10 @@ function getImpactedApps() {
   }
 
   // If no direct app changes but packages changed, all web apps may be affected
-  if (apps.size === 0 && packages.length > 0) {
+  const webAppNames = config.webAppNames();
+  if (apps.size === 0 && packages.length > 0 && webAppNames.length > 0) {
     console.error(`No direct app changes but ${packages.length} package(s) changed — including all web apps for QA`);
-    return ['as-dashboard', 'as-dashboard-admin', 'status-site', 'status-site-admin'];
+    return webAppNames;
   }
 
   return Array.from(apps).sort();

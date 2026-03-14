@@ -306,7 +306,7 @@ Status: APPROVED (all pass) or NEEDS_WORK (any failures)
 ### Agent 3.x: QA Testing (MANDATORY — one per impacted app)
 
 **QA is NOT optional.** Use `/check-qa` command for each app in IMPACTED_APPS, ALL IN PARALLEL.
-If `IMPACTED_APPS` is empty (e.g., only packages changed), launch QA for ALL known web apps: `as-dashboard`, `as-dashboard-admin`, `status-site`, `status-site-admin`.
+When only packages are changed (no direct app changes), `IMPACTED_APPS` automatically includes all web apps defined in the repo's `WEB_APPS` config. If `IMPACTED_APPS` is still empty after detection, report a configuration error — the repo may need a `WEB_APPS` entry in its `.env`.
 
 For each app in `IMPACTED_APPS`, invoke the `/check-qa` skill with JSON parameters:
 

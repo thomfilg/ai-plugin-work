@@ -88,8 +88,9 @@ function getImpactedApps() {
   }
 
   // If no direct app changes but packages changed, all web apps may be affected
-  if (apps.size === 0 && packages.length > 0) {
-    return ['as-dashboard', 'as-dashboard-admin', 'status-site', 'status-site-admin'];
+  const webAppNames = config.webAppNames();
+  if (apps.size === 0 && packages.length > 0 && webAppNames.length > 0) {
+    return webAppNames;
   }
 
   return Array.from(apps).sort();
