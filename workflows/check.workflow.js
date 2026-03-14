@@ -40,9 +40,14 @@ function safeExec(cmd, options = {}) {
 }
 
 function getBaseBranch() {
+  // 1. Explicit repo config (highest priority)
+  if (config.BASE_BRANCH) return `origin/${config.BASE_BRANCH}`;
+
+  // 2. Git symbolic ref detection
   const headRef = safeExec('git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null');
   if (headRef) return headRef.replace('refs/remotes/', '');
 
+  // 3. Probe common branch names
   for (const branch of ['origin/main', 'origin/dev', 'origin/master']) {
     if (safeExec(`git rev-parse --verify ${branch} 2>/dev/null`)) return branch;
   }

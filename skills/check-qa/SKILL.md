@@ -113,8 +113,9 @@ This prevents running QA on apps that are only "transitively affected" but don't
 ```bash
 # Get files changed in shared packages
 # NOTE: Detect base branch dynamically (origin/main, origin/dev, origin/master)
-BASE_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/||')
-BASE_BRANCH=${BASE_BRANCH:-origin/main}
+# Detect base branch: repo config → git symbolic-ref → fallback to main
+BASE_BRANCH="${BASE_BRANCH:-$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/||')}"
+BASE_BRANCH="${BASE_BRANCH:-origin/main}"
 CHANGED_FILES=$(git diff --name-only ${BASE_BRANCH}...HEAD)
 
 # Extract component names from shared-ui/ui changes
@@ -209,8 +210,9 @@ Final QA targets: [status-site]
 
 1. **Run this Bash command to extract changed components:**
 ```bash
-BASE_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/||')
-BASE_BRANCH=${BASE_BRANCH:-origin/main}
+# Detect base branch: repo config → git symbolic-ref → fallback to main
+BASE_BRANCH="${BASE_BRANCH:-$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/||')}"
+BASE_BRANCH="${BASE_BRANCH:-origin/main}"
 git diff --name-only ${BASE_BRANCH}...HEAD | grep -E "packages/(shared-ui|ui)/src/components/[^/]+/" | sed 's|.*/components/||' | cut -d'/' -f1 | sort -u
 ```
 

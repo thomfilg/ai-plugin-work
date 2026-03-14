@@ -41,9 +41,14 @@ function exec(cmd, options = {}) {
  * Checks origin/HEAD symbolic ref, then falls back to common branch names.
  */
 function getBaseBranch() {
+  // 1. Explicit repo config (highest priority)
+  if (config.BASE_BRANCH) return `origin/${config.BASE_BRANCH}`;
+
+  // 2. Git symbolic ref detection
   const headRef = exec('git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null');
   if (headRef) return headRef.replace('refs/remotes/', '');
 
+  // 3. Probe common branch names
   for (const branch of ['origin/main', 'origin/dev', 'origin/master']) {
     if (exec(`git rev-parse --verify ${branch} 2>/dev/null`)) return branch;
   }
