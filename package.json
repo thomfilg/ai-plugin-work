@@ -8,7 +8,7 @@
     "url": "https://github.com/user/claude-plugin-work"
   },
   "scripts": {
-    "test": "node --test hooks/__tests__/*.test.js lib/__tests__/*.test.js workflows/__tests__/*.test.js",
+    "test": "node --test hooks/__tests__/*.test.js lib/__tests__/*.test.js workflows/__tests__/*.test.js scripts/__tests__/*.test.js",
     "test:enforce": "node --test hooks/__tests__/enforce-step-workflow.test.js",
     "test:orchestrator": "node --test hooks/__tests__/work-orchestrator.test.js",
     "test:work-pr": "node --test workflows/__tests__/work-pr.workflow.test.js",

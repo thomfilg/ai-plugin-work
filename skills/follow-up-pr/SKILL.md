@@ -9,6 +9,24 @@ allowed-tools: Task, Bash, Read, Write, Edit, Grep, Glob, TodoWrite, AskUserQues
 
 Monitor the current PR's CI status and review comments (from humans and AI reviewers), automatically diagnose and fix failures, address review feedback, and retry until CI passes and reviews are resolved.
 
+```
+╔══════════════════════════════════════════════════════════════════════╗
+║  COMPLETION RULE:                                                    ║
+║                                                                      ║
+║  This workflow is NOT complete until the script outputs:             ║
+║                                                                      ║
+║    ═══════════════════════════════════════                            ║
+║      PR READY TO REVIEW                                              ║
+║    ═══════════════════════════════════════                            ║
+║                                                                      ║
+║  If you do NOT see "PR READY TO REVIEW" → keep running the script.  ║
+║  Fix what it reports, push, and run the script AGAIN.               ║
+║  Repeat as many times as needed. There is no shortcut.              ║
+║                                                                      ║
+║  You CANNOT declare /follow-up-pr complete without this output.     ║
+╚══════════════════════════════════════════════════════════════════════╝
+```
+
 ---
 
 ## Configuration
@@ -27,7 +45,19 @@ FOLLOW_UP_PR_POLL_REVIEWS=true   # Set to false in .env to disable review pollin
 
 ## Step 1: Run the Monitor Script
 
-The `scripts/follow-up-pr.js` script handles all deterministic polling (CI checks, review fetching, bot review detection, state persistence). Run it first to get the current status:
+The `scripts/follow-up-pr.js` script handles all deterministic polling (CI checks, review fetching, bot review detection, state persistence). It loops internally, waiting 60s between attempts, so **YOU do not need to manage any loop or sleep**. The script exits only when there is something actionable or when all checks pass.
+
+```
+╔══════════════════════════════════════════════════════════════════════╗
+║  CRITICAL: NEVER use --once flag here.                              ║
+║                                                                      ║
+║  The script's built-in loop is the WHOLE POINT — it waits for       ║
+║  pending CI checks so YOU don't consume context polling manually.   ║
+║                                                                      ║
+║  --once is ONLY for debugging/manual terminal use, NEVER in this    ║
+║  skill workflow.                                                     ║
+╚══════════════════════════════════════════════════════════════════════╝
+```
 
 ```bash
 # Determine script path (plugin root or project root)
@@ -40,17 +70,19 @@ if [ "${FOLLOW_UP_PR_POLL_REVIEWS:-true}" = "false" ]; then
   REVIEW_FLAG="--no-reviews"
 fi
 
-# Single check (don't let the script loop — we handle the loop with fixes)
-node "$SCRIPT_PATH" --once $REVIEW_FLAG 2>&1
+# Let the script loop and wait for CI — do NOT add --once
+node "$SCRIPT_PATH" $REVIEW_FLAG 2>&1
 ```
 
 ### 1.1 Interpret Exit Codes
 
 | Exit Code | Meaning | Action |
 |-----------|---------|--------|
-| **0** | CI passed, reviews clear, no conflicts | Go to Step 6 (Success Summary) |
-| **1** | Failures detected (CI failed, actionable reviews, or conflicts) | Read the output, then go to Step 2 |
+| **0** | "PR READY TO REVIEW" — CI passed, no blocking reviews, no conflicts | Go to Step 6 (Success Summary). Workflow DONE. |
+| **1** | Failures detected (CI failed, blocking reviews, or conflicts) | Read output → Step 2 → fix → push → **run script AGAIN** |
 | **2** | Error (no PR found, gh CLI failed) | Inform user and exit |
+
+**Exit 1 means: fix the issue, push, and run the script AGAIN. Keep doing this until you get exit 0.**
 
 ### 1.2 Read the State File
 
@@ -84,40 +116,70 @@ If the output shows `CONFLICTS: Merge conflicts detected`:
 4. Force push: `git push --force-with-lease`
 5. Return to Step 1 (re-run script)
 
-### 2.3 Actionable Reviews
-If the output shows `Reviews: N actionable`:
-- Note reviewer names, states, file paths and comment previews
+### 2.3 Blocking Reviews
+If the output shows `Reviews: N BLOCKING`:
+- These are medium/high priority comments that MUST be addressed
+- Note reviewer names, priority tags ([HIGH] or [MEDIUM]), file paths, and comment previews
 - Go to Step 5 (Address Review Feedback)
+- **Non-blocking reviews** (nitpicks/low priority) are shown as informational but do NOT block "PR READY TO REVIEW"
 
 ### 2.4 Pending Bot Reviews
 If the output shows `Reviews: Awaiting bot reviews`:
-- Wait 60 seconds, then return to Step 1 (re-run script)
+- The script handles waiting automatically (it loops internally)
+- If you used the script correctly (without --once), it will wait and re-check
 
 ---
 
-## Step 3: Loop Until Resolved
+## Step 3: Loop Until "PR READY TO REVIEW"
 
 After fixing issues (Steps 4 or 5), push and re-run the monitor:
 
 ```bash
 git push
-node "$SCRIPT_PATH" --once $REVIEW_FLAG 2>&1
+# Do NOT use --once — let the script wait for CI to finish
+node "$SCRIPT_PATH" $REVIEW_FLAG 2>&1
 ```
 
-Repeat this loop up to MAX_ATTEMPTS (10) times. If the script exits 0, go to Step 6.
+```
+╔══════════════════════════════════════════════════════════════════════╗
+║  YOU MUST KEEP RUNNING THIS LOOP:                                    ║
+║                                                                      ║
+║  1. Run script → reads exit code                                     ║
+║  2. Exit 1? → fix the issue → push → go to 1                       ║
+║  3. Exit 0? → "PR READY TO REVIEW" appeared → DONE                 ║
+║                                                                      ║
+║  Run the script as many times as needed (up to 10 attempts).        ║
+║  Each run, the script waits for CI internally — you just fix and    ║
+║  re-run. There is NO shortcut. Do NOT stop early.                   ║
+╚══════════════════════════════════════════════════════════════════════╝
+```
 
-**Important:** The script handles all the polling logic. You only need to:
-1. Run the script (Step 1)
+**The script handles all polling/waiting internally. Your job is simple:**
+1. Run the script (Step 1) — it waits for pending CI automatically
 2. Fix what it reports (Steps 4/5)
-3. Push and re-run (Step 3)
+3. Push and re-run (Step 3) — it waits for CI again
+4. **Repeat until the script outputs "PR READY TO REVIEW" (exit 0)**
 
 ---
 
 ## Step 5: Address Review Feedback
 
+### Review Priority System
+
+The script automatically classifies review comments by priority:
+
+| Reviewer | Blocking (must fix) | Non-blocking (ignore) |
+|----------|--------------------|-----------------------|
+| **Cursor** (`cursor-ai[bot]`) | severity: critical/high/major/medium/moderate | severity: minor/low/nitpick/trivial/suggestion |
+| **Copilot** (`copilot-pull-request-reviewer`) | `[critical]`, `[high]`, `[medium]`, or no tag | `[low]` or `[nitpick]` tags |
+| **Human reviewers** | Always blocking | — |
+
+- **Blocking reviews** (medium/high priority) → you MUST fix these
+- **Non-blocking reviews** (low/nitpick) → shown as informational, do NOT block "PR READY TO REVIEW"
+
 ### 5.1 Read and Understand Feedback
 
-For each actionable review comment:
+For each **blocking** review comment:
 
 1. Read the comment body and understand what change is requested
 2. If it's an inline comment, read the referenced file and line(s)
@@ -373,11 +435,11 @@ If 10 attempts are reached without success:
 User: `/follow-up-pr`
 
 Claude will:
-1. Run `node scripts/follow-up-pr.js --once` → exit 1 (CI failing: unit-tests)
-2. Diagnose: coverage report glob pattern issue
-3. Fix: update glob pattern in ci.yml
+1. Run `node scripts/follow-up-pr.js` → script waits for CI → exit 1 (CI failing: lint)
+2. Diagnose: unused import in src/utils.ts
+3. Fix: remove the unused import
 4. Commit and push
-5. Re-run script → exit 1 (CI now passes, but 2 inline review comments)
-6. Address review feedback, commit and push
-7. Re-run script → exit 0 (CI passing, reviews clear)
-8. Report success with all fixes and reviews addressed
+5. Re-run script → script waits for CI → exit 1 (CI passes, but 2 blocking review comments [MEDIUM])
+6. Address blocking review feedback, commit and push
+7. Re-run script → script waits for CI → exit 0 → output shows "PR READY TO REVIEW"
+8. Workflow complete — report success with all fixes and reviews addressed
