@@ -82,7 +82,7 @@ Options:
   --pr <number>         PR number (default: auto-detect from branch)
   --max-attempts <n>    Max polling attempts (default: 10)
   --interval <seconds>  Wait between attempts (default: 60)
-  --once                Single check, no loop
+  --once                Single check, no loop (for manual debugging only)
   --no-reviews          Skip review polling
   -h, --help            Show this help`);
         process.exit(0);
@@ -249,6 +249,57 @@ function getBotReviewers() {
   return raw.split(',').map((s) => s.trim()).filter(Boolean);
 }
 
+// ── Review Priority Classification ──────────────────────────────────────────
+//
+// Priority levels: 'high' | 'medium' | 'low'
+// Blocking = high or medium (requires agent to fix before PR is ready)
+// Non-blocking = low (nitpicks, suggestions — shown but don't block)
+//
+// Cursor (cursor-ai[bot]):  uses **severity**: <level> in comment body
+//   high/critical/major → high (blocking)
+//   medium/moderate     → medium (blocking)
+//   minor/low/nitpick/trivial/suggestion → low (non-blocking)
+//
+// Copilot (copilot-pull-request-reviewer): uses [nitpick] tag
+//   [nitpick] present  → low (non-blocking)
+//   no tag             → medium (blocking)
+//
+// Human reviewers: always high (blocking)
+
+function classifyCommentPriority(author, body) {
+  const lower = (body || '').toLowerCase();
+
+  // Copilot: [severity] tags (from copilot-instructions.md) or [nitpick] flag
+  if (author === 'copilot-pull-request-reviewer' || author === 'Copilot') {
+    if (/\[nitpick\]/i.test(body) || /\[low\]/i.test(body)) return 'low';
+    if (/\[critical\]/i.test(body) || /\[high\]/i.test(body)) return 'high';
+    if (/\[medium\]/i.test(body)) return 'medium';
+    return 'medium';
+  }
+
+  // Cursor: parse **severity**: <level> pattern
+  if (author === 'cursor-ai[bot]') {
+    const severityMatch = lower.match(
+      /\*{0,2}severity\*{0,2}\s*[:：]\s*(critical|high|major|medium|moderate|minor|low|nitpick|trivial|suggestion)/
+    );
+    if (severityMatch) {
+      const level = severityMatch[1];
+      if (['critical', 'high', 'major'].includes(level)) return 'high';
+      if (['medium', 'moderate'].includes(level)) return 'medium';
+      return 'low'; // minor, low, nitpick, trivial, suggestion
+    }
+    // No severity marker found — default to medium (blocking)
+    return 'medium';
+  }
+
+  // Human reviewers: always blocking
+  return 'high';
+}
+
+function isBlockingPriority(priority) {
+  return priority === 'high' || priority === 'medium';
+}
+
 function getReviews(prNumber) {
   const prArg = prNumber ? `${prNumber}` : '';
   const data = ghExec(`pr view ${prArg} --json reviews,statusCheckRollup`);
@@ -270,12 +321,18 @@ function getReviews(prNumber) {
     while (true) {
       const pageData = ghExec(['api', `repos/${repo}/pulls/${prNumber}/comments?per_page=${perPage}&page=${page}`]);
       if (!Array.isArray(pageData) || pageData.length === 0) break;
-      comments.push(...pageData.map((cm) => ({
+      // Filter out stale comments: line=null AND original_line exists means
+      // the code changed since the comment was made. Keep file-level comments
+      // (both line and original_line null) and current-line comments.
+      const activeComments = pageData.filter(
+        (cm) => !(cm.line === null && cm.original_line != null)
+      );
+      comments.push(...activeComments.map((cm) => ({
         id: cm.id,
         author: cm.user?.login || 'unknown',
         body: (cm.body || '').trim(),
         path: cm.path || null,
-        line: cm.line || cm.original_line || null,
+        line: cm.line || null,
         state: 'COMMENTED',
       })));
       if (pageData.length < perPage) break;
@@ -285,34 +342,77 @@ function getReviews(prNumber) {
     // Non-critical — inline comments are supplementary
   }
 
-  // Detect pending bot reviews
+  // Detect pending bot reviews via GitHub REST API (requested_reviewers)
+  // gh pr view --json reviewRequests doesn't reliably include bots,
+  // so we use the REST API which correctly lists pending bot reviewers.
   const botReviewers = getBotReviewers();
-  const reviewedByBots = new Set(reviews.map((r) => r.author));
-  const checksRunning = (data.statusCheckRollup || []).some(
-    (ck) => ck.status !== 'COMPLETED'
-  );
-
-  const pendingBots = [];
-  for (const bot of botReviewers) {
-    if (!reviewedByBots.has(bot)) {
-      if (checksRunning) {
+  let pendingBots = [];
+  try {
+    const repoInfo = ghExec('repo view --json nameWithOwner');
+    const repo = repoInfo.nameWithOwner;
+    const requested = ghExec(['api', `repos/${repo}/pulls/${prNumber}/requested_reviewers`]);
+    const requestedLogins = (requested.users || []).map((u) => u.login.toLowerCase());
+    // Map known bot display names to their reviewer login names
+    const botLoginAliases = {
+      'copilot-pull-request-reviewer': ['copilot', 'copilot-pull-request-reviewer'],
+      'cursor-ai[bot]': ['cursor-ai[bot]', 'cursor-ai'],
+    };
+    for (const bot of botReviewers) {
+      const aliases = botLoginAliases[bot] || [bot.toLowerCase()];
+      const isPending = requestedLogins.some((login) =>
+        aliases.some((alias) => login === alias || login.includes(alias))
+      );
+      if (isPending) {
         pendingBots.push(bot);
       }
-      // If all checks done and bot hasn't reviewed, it wasn't requested — skip
+    }
+  } catch {
+    // Fallback: use the old heuristic (CI still running + bot hasn't reviewed)
+    const reviewedByBots = new Set(reviews.map((r) => r.author));
+    const checksRunning = (data.statusCheckRollup || []).some(
+      (ck) => ck.status !== 'COMPLETED'
+    );
+    for (const bot of botReviewers) {
+      if (!reviewedByBots.has(bot) && checksRunning) {
+        pendingBots.push(bot);
+      }
     }
   }
 
-  // Actionable reviews: CHANGES_REQUESTED or COMMENTED with body
+  // Actionable reviews:
+  // - CHANGES_REQUESTED: always actionable (human or bot)
+  // - COMMENTED with body: actionable for humans, but bot COMMENTED reviews
+  //   are typically informational summaries (not action items) — skip them.
+  const isBotAuthor = (author) => botReviewers.includes(author);
   const actionable = reviews.filter(
-    (r) => r.state === 'CHANGES_REQUESTED' || (r.state === 'COMMENTED' && r.body)
-  );
+    (r) => r.state === 'CHANGES_REQUESTED' || (r.state === 'COMMENTED' && r.body && !isBotAuthor(r.author))
+  ).map((r) => {
+    const priority = classifyCommentPriority(r.author, r.body);
+    // CHANGES_REQUESTED is always at least medium (blocking), regardless of severity tags
+    const effectivePriority = (r.state === 'CHANGES_REQUESTED' && priority === 'low') ? 'medium' : priority;
+    return { ...r, priority: effectivePriority };
+  });
+
+  // Classify inline comments by priority
+  const classifiedComments = comments.map((cm) => ({
+    ...cm,
+    priority: classifyCommentPriority(cm.author, cm.body),
+  }));
+
+  // Split into blocking (medium/high) and non-blocking (low/nitpick)
+  const allItems = [...actionable, ...classifiedComments];
+  const blocking = allItems.filter((item) => isBlockingPriority(item.priority));
+  const nonBlocking = allItems.filter((item) => !isBlockingPriority(item.priority));
 
   return {
     all: reviews,
-    comments,
+    comments: classifiedComments,
     actionable,
+    blocking,
+    nonBlocking,
     pendingBots,
-    hasActionable: actionable.length > 0 || comments.length > 0,
+    hasBlocking: blocking.length > 0,
+    hasActionable: actionable.length > 0 || classifiedComments.length > 0,
   };
 }
 
@@ -437,24 +537,22 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
       for (const bot of reviews.pendingBots) {
         lines.push(`  ${c.yellow('⏳')} ${bot} — review pending`);
       }
-    } else if (reviews.hasActionable) {
-      const count = reviews.actionable.length + reviews.comments.length;
-      lines.push(c.yellow(`Reviews: ${count} actionable`));
-      for (const r of reviews.actionable) {
-        lines.push(`  • ${c.cyan('@' + r.author)} [${r.state}]`);
-        if (r.body) {
-          const preview = r.body.length > 80 ? r.body.slice(0, 77) + '...' : r.body;
+    } else if (reviews.hasBlocking) {
+      lines.push(c.red(`Reviews: ${reviews.blocking.length} BLOCKING`));
+      for (const item of reviews.blocking) {
+        const priorityTag = item.priority === 'high' ? c.red('[HIGH]') : c.yellow('[MEDIUM]');
+        const loc = item.path ? ` ${c.dim(item.path + (item.line ? ':' + item.line : ''))}` : '';
+        lines.push(`  ${c.red('✗')} ${c.cyan('@' + item.author)} ${priorityTag}${loc}`);
+        if (item.body) {
+          const preview = item.body.length > 80 ? item.body.slice(0, 77) + '...' : item.body;
           lines.push(`    ${c.dim('"' + preview + '"')}`);
         }
       }
-      for (const cm of reviews.comments) {
-        const loc = cm.path ? `${cm.path}${cm.line ? ':' + cm.line : ''}` : '';
-        lines.push(`  • ${c.cyan('@' + cm.author)} [COMMENTED] ${c.dim(loc)}`);
-        if (cm.body) {
-          const preview = cm.body.length > 80 ? cm.body.slice(0, 77) + '...' : cm.body;
-          lines.push(`    ${c.dim('"' + preview + '"')}`);
-        }
+      if (reviews.nonBlocking.length > 0) {
+        lines.push(c.dim(`  + ${reviews.nonBlocking.length} non-blocking (nitpick/low priority — ignored)`));
       }
+    } else if (reviews.nonBlocking.length > 0) {
+      lines.push(c.green(`Reviews: CLEAR (${reviews.nonBlocking.length} non-blocking nitpicks — ignored)`));
     } else {
       lines.push(c.green('Reviews: CLEAR'));
     }
@@ -464,15 +562,19 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
   lines.push('');
   if (ci.status === 'failing') {
     lines.push(`→ Fix the failure, push, then re-run: ${c.dim('node scripts/follow-up-pr.js')}`);
-  } else if (ci.status === 'passing' && !opts.noReviews && reviews.hasActionable) {
-    lines.push(`→ Address reviews, push, then re-run: ${c.dim('node scripts/follow-up-pr.js')}`);
+  } else if (ci.status === 'passing' && !opts.noReviews && reviews.hasBlocking) {
+    lines.push(`→ Address blocking reviews, push, then re-run: ${c.dim('node scripts/follow-up-pr.js')}`);
   } else if (isConflicting) {
     lines.push(`→ Resolve conflicts, push, then re-run: ${c.dim('node scripts/follow-up-pr.js')}`);
   } else if (!isMergeReady) {
     lines.push(`→ Merge status not ready (${prInfo.mergeable || 'UNKNOWN'}). Waiting...`);
-  } else if (ci.status === 'passing' && (!reviews.hasActionable || opts.noReviews) && isMergeReady) {
+  } else if (ci.status === 'passing' && (!reviews.hasBlocking || opts.noReviews) && reviews.pendingBots.length === 0 && isMergeReady) {
+    lines.push(c.green('═══════════════════════════════════════'));
+    lines.push(c.green('  PR READY TO REVIEW'));
+    lines.push(c.green('═══════════════════════════════════════'));
+    lines.push('');
     lines.push(c.green(`CI: PASSED | Reviews: ${opts.noReviews ? 'SKIPPED' : 'CLEAR'} | Conflicts: NONE`));
-    lines.push(c.green(`PR #${prInfo.number} is ready for merge!`));
+    lines.push(c.green(`PR #${prInfo.number} is ready for review/merge!`));
   } else if (ci.status === 'pending') {
     lines.push(`→ Waiting ${opts.interval}s for checks... (attempt ${attempt}/${maxAttempts})`);
   } else if (!opts.noReviews && reviews.pendingBots.length > 0) {
@@ -550,7 +652,7 @@ async function main() {
     }
 
     // Check reviews (unless --no-reviews)
-    let reviews = { all: [], comments: [], actionable: [], pendingBots: [], hasActionable: false };
+    let reviews = { all: [], comments: [], actionable: [], blocking: [], nonBlocking: [], pendingBots: [], hasBlocking: false, hasActionable: false };
     if (!opts.noReviews) {
       try {
         reviews = getReviews(prInfo.number);
@@ -566,7 +668,8 @@ async function main() {
       ciStatus: ci.status,
       failedChecks: ci.failed.map((ck) => ({ name: ck.name, category: ck.category })),
       pendingReviews: reviews.pendingBots,
-      actionableReviews: reviews.actionable.map((r) => ({ id: r.id, author: r.author, state: r.state })),
+      blockingReviews: reviews.blocking.map((r) => ({ id: r.id, author: r.author, priority: r.priority })),
+      nonBlockingReviews: reviews.nonBlocking.length,
     });
     saveState(state);
 
@@ -586,7 +689,8 @@ async function main() {
     const isConflicting = prInfo.mergeable === 'CONFLICTING' || prInfo.mergeStateStatus === 'DIRTY';
     const isMergeReady = prInfo.mergeable === 'MERGEABLE' && (!prInfo.mergeStateStatus || prInfo.mergeStateStatus === 'CLEAN' || prInfo.mergeStateStatus === 'HAS_HOOKS' || prInfo.mergeStateStatus === 'UNSTABLE');
     const ciPassed = ci.status === 'passing';
-    const reviewsClear = opts.noReviews || (!reviews.hasActionable && reviews.pendingBots.length === 0);
+    // Non-blocking reviews (nitpicks/low priority) do NOT prevent "ready" status
+    const reviewsClear = opts.noReviews || (!reviews.hasBlocking && reviews.pendingBots.length === 0);
 
     if (ciPassed && reviewsClear && isMergeReady) {
       state.finalStatus = 'ready';
@@ -594,9 +698,9 @@ async function main() {
       process.exit(0);
     }
 
-    // Actionable reviews or conflicts → exit 1 (user needs to act)
-    if (ciPassed && (reviews.hasActionable || !isMergeReady)) {
-      state.finalStatus = reviews.hasActionable ? 'reviews-pending' : 'conflicting';
+    // Blocking reviews or conflicts → exit 1 (agent needs to fix)
+    if (ciPassed && (reviews.hasBlocking || !isMergeReady)) {
+      state.finalStatus = reviews.hasBlocking ? 'reviews-blocking' : 'conflicting';
       saveState(state);
       process.exit(1);
     }
@@ -614,7 +718,12 @@ async function main() {
   process.exit(1);
 }
 
-main().catch((err) => {
-  console.error(c.red(`Unexpected error: ${err.message}`));
-  process.exit(2);
-});
+// Export for testing; guard main() so it only runs when executed directly
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(c.red(`Unexpected error: ${err.message}`));
+    process.exit(2);
+  });
+}
+
+module.exports = { classifyCommentPriority, isBlockingPriority };
