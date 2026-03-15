@@ -39,12 +39,16 @@ function safeExec(cmd, options = {}) {
   }
 }
 
+// Use centralized getBaseBranch() from config
+const getBaseBranch = config.getBaseBranch;
+
 function getReportFolder(instanceId) {
   return path.join(TASKS_BASE, instanceId);
 }
 
 function getCurrentChangesHash() {
-  const diff = safeExec('git diff origin/main...HEAD -w');
+  const baseBranch = getBaseBranch();
+  const diff = safeExec(`git diff ${baseBranch}...HEAD -w`);
   if (!diff) return 'no-changes';
   const crypto = require('crypto');
   return crypto.createHash('sha256').update(diff).digest('hex').substring(0, 12);
@@ -63,18 +67,30 @@ function reportHasMatchingHash(folder, filename, hash) {
 }
 
 function getImpactedApps() {
-  const output = safeExec('git diff --name-only origin/main...HEAD');
+  const baseBranch = getBaseBranch();
+  const output = safeExec(`git diff --name-only ${baseBranch}...HEAD`);
   if (!output) return [];
   const apps = new Set();
+  const packages = new Set();
   for (const line of output.split('\n')) {
-    const match = line.match(/^apps\/([^/]+)\//);
-    if (match) apps.add(match[1]);
+    const appMatch = line.match(/^apps\/([^/]+)\//);
+    if (appMatch) apps.add(appMatch[1]);
+    const pkgMatch = line.match(/^packages\/([^/]+)\//);
+    if (pkgMatch) packages.add(pkgMatch[1]);
   }
+
+  // If no direct app changes but packages changed, all web apps may be affected
+  const webAppNames = config.webAppNames();
+  if (apps.size === 0 && packages.size > 0 && webAppNames.length > 0) {
+    return webAppNames;
+  }
+
   return Array.from(apps).sort();
 }
 
 function hasBackendChanges() {
-  const output = safeExec('git diff --name-only origin/main...HEAD');
+  const baseBranch = getBaseBranch();
+  const output = safeExec(`git diff --name-only ${baseBranch}...HEAD`);
   if (!output) return false;
   const backendPatterns = [
     /worker\//,
