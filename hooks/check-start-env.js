@@ -14,6 +14,8 @@
 
 const { spawn, execSync } = require('child_process');
 const fs = require('fs');
+const path = require('path');
+const config = require(path.join(__dirname, '..', 'lib', 'config'));
 
 process.on('uncaughtException', () => { console.log(JSON.stringify({ error: 'uncaught exception', apps: {} })); process.exit(0); });
 process.on('unhandledRejection', () => { console.log(JSON.stringify({ error: 'unhandled rejection', apps: {} })); process.exit(0); });
@@ -35,14 +37,9 @@ function getTicketPrefix() {
 }
 const TICKET_PREFIX = getTicketPrefix();
 
-// App configurations - which apps are web apps that need to be started
-// Ports match Vite/Remix defaults configured in each app
-const WEB_APPS = {
-  'as-dashboard': { defaultPort: 5173, type: 'vite' },
-  'as-dashboard-admin': { defaultPort: 5174, type: 'vite' },
-  'status-site': { defaultPort: 5175, type: 'remix' },
-  'status-site-admin': { defaultPort: 5176, type: 'remix' }
-};
+// App configurations - loaded from repo .env via config
+// Each repo defines WEB_APPS as JSON in .env
+const WEB_APPS = config.webAppsMap();
 
 // Database environment variables for integration tests (port will be detected dynamically)
 const DB_ENV = {
@@ -331,8 +328,18 @@ async function main() {
   // Wait a bit for database to be fully ready
   await new Promise(resolve => setTimeout(resolve, 5000));
 
-  // Start only web apps that were impacted
-  const webAppsToStart = IMPACTED_APPS.filter(app => WEB_APPS[app]);
+  // Start web apps — if none directly impacted, start all for QA coverage
+  let webAppsToStart = IMPACTED_APPS.filter(app => WEB_APPS[app]);
+
+  if (webAppsToStart.length === 0) {
+    const allWebApps = Object.keys(WEB_APPS);
+    if (allWebApps.length === 0) {
+      console.error('No impacted apps and no WEB_APPS configured in .env — nothing to start');
+    } else {
+      console.error(`No directly impacted apps detected — starting all ${allWebApps.length} web apps for mandatory QA`);
+      webAppsToStart = allWebApps;
+    }
+  }
 
   for (const appName of webAppsToStart) {
     const config = WEB_APPS[appName];

@@ -17,6 +17,7 @@
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const config = require(path.join(__dirname, '..', 'lib', 'config'));
 
 // Get Jira ticket ID from args or environment
 const JIRA_TICKET_ID = process.argv[2] || process.env.JIRA_TICKET_ID || '';
@@ -34,6 +35,9 @@ function exec(cmd, options = {}) {
     throw error;
   }
 }
+
+// Use centralized getBaseBranch() from config
+const getBaseBranch = config.getBaseBranch;
 
 /**
  * Get the main worktree path
@@ -58,7 +62,8 @@ function getBranchName() {
  */
 function generateChangesHash() {
   // Use -w to ignore whitespace changes (prevents false cache misses)
-  const diff = exec('git diff origin/main...HEAD -w');
+  const baseBranch = getBaseBranch();
+  const diff = exec(`git diff ${baseBranch}...HEAD -w`);
   if (!diff) {
     // No changes, use empty hash
     return 'no-changes';
@@ -140,17 +145,30 @@ function setupReportFolder(reportFolder) {
  * Analyze which apps were changed
  */
 function getImpactedApps() {
-  const output = exec('git diff --name-only origin/main...HEAD');
+  const baseBranch = getBaseBranch();
+  const output = exec(`git diff --name-only ${baseBranch}...HEAD`);
   if (!output) return [];
 
   const apps = new Set();
+  const packages = new Set();
   const lines = output.split('\n');
 
   for (const line of lines) {
-    const match = line.match(/^apps\/([^/]+)\//);
-    if (match) {
-      apps.add(match[1]);
+    const appMatch = line.match(/^apps\/([^/]+)\//);
+    if (appMatch) {
+      apps.add(appMatch[1]);
     }
+    const pkgMatch = line.match(/^packages\/([^/]+)\//);
+    if (pkgMatch) {
+      packages.add(pkgMatch[1]);
+    }
+  }
+
+  // If no direct app changes but packages changed, all web apps may be affected
+  const webAppNames = config.webAppNames();
+  if (apps.size === 0 && packages.size > 0 && webAppNames.length > 0) {
+    console.error(`No direct app changes but ${packages.size} package(s) changed — including all web apps for QA`);
+    return webAppNames;
   }
 
   return Array.from(apps).sort();
@@ -161,7 +179,8 @@ function getImpactedApps() {
  * Used by QA agents to trace dependencies
  */
 function getAffectedFiles() {
-  const output = exec('git diff --name-only origin/main...HEAD');
+  const baseBranch = getBaseBranch();
+  const output = exec(`git diff --name-only ${baseBranch}...HEAD`);
   if (!output) return { apps: {}, packages: [] };
 
   const result = { apps: {}, packages: [] };

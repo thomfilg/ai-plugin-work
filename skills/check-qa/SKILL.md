@@ -112,7 +112,12 @@ This prevents running QA on apps that are only "transitively affected" but don't
 
 ```bash
 # Get files changed in shared packages
-CHANGED_FILES=$(git diff --name-only origin/main...HEAD)
+# NOTE: Detect base branch dynamically (origin/main, origin/dev, origin/master)
+# Detect base branch (set BASE_BRANCH in .env for repos not using main)
+# Priority: $BASE_BRANCH env var → git symbolic-ref → origin/main
+BASE_BRANCH="${BASE_BRANCH:-$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/||')}"
+BASE_BRANCH="${BASE_BRANCH:-origin/main}"
+CHANGED_FILES=$(git diff --name-only ${BASE_BRANCH}...HEAD)
 
 # Extract component names from shared-ui/ui changes
 # Pattern: packages/shared-ui/src/components/ComponentName/
@@ -206,7 +211,11 @@ Final QA targets: [status-site]
 
 1. **Run this Bash command to extract changed components:**
 ```bash
-git diff --name-only origin/main...HEAD | grep -E "packages/(shared-ui|ui)/src/components/[^/]+/" | sed 's|.*/components/||' | cut -d'/' -f1 | sort -u
+# Detect base branch (set BASE_BRANCH in .env for repos not using main)
+# Priority: $BASE_BRANCH env var → git symbolic-ref → origin/main
+BASE_BRANCH="${BASE_BRANCH:-$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/||')}"
+BASE_BRANCH="${BASE_BRANCH:-origin/main}"
+git diff --name-only ${BASE_BRANCH}...HEAD | grep -E "packages/(shared-ui|ui)/src/components/[^/]+/" | sed 's|.*/components/||' | cut -d'/' -f1 | sort -u
 ```
 
 2. **For each QA-testable app, check usage:**
