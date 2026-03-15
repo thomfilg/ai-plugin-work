@@ -16,7 +16,7 @@ find_repo_root() {
   git rev-parse --show-toplevel 2>/dev/null || { echo "Not a git repo" >&2; exit 1; }
 }
 
-ROOT_DIR="$(find_repo_root)"
+ROOT_DIR="${ROOT_DIR:-$(find_repo_root)}"
 
 # ─── Detect base branch ───
 detect_base_branch() {
@@ -47,7 +47,7 @@ detect_base_branch() {
   fi
 }
 
-BASE_BRANCH="$(detect_base_branch)"
+BASE_BRANCH="${BASE_BRANCH:-$(detect_base_branch)}"
 
 # ─── Detect monorepo ───
 is_monorepo() {
@@ -147,7 +147,7 @@ detect_test_runner() {
     return
   fi
 
-  # Check for vitest/jest in deps first
+  # Check for vitest/jest in package.json first
   local tool
   tool=$(detect_tool "$pkg_json" "vitest" "jest")
   if [ -n "$tool" ]; then

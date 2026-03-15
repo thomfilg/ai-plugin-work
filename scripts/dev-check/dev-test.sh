@@ -94,7 +94,7 @@ run_tests() {
       fi
       local abs_test_files
       abs_test_files=$(echo "$test_files" | sed "s|^|$dir/|")
-      (cd "$dir" && printf '%s\0' $abs_test_files | xargs -0 node --test) || {
+      (cd "$dir" && echo "$abs_test_files" | tr '\n' '\0' | xargs -0 node --test --) || {
         echo -e "${RED}Tests failed in $dir${NC}"
         return 1
       }

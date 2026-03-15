@@ -23,18 +23,11 @@ function runBashFunction(fnCall, env = {}) {
   // We source common.sh in a subshell with set +e to avoid git failures in temp dirs
   const script = `
     set +e
-    # Stub out git-dependent globals so sourcing doesn't fail
-    find_repo_root() { echo "/tmp"; }
-    detect_base_branch() { echo "main"; }
-    ROOT_DIR="/tmp"
-    BASE_BRANCH="main"
+    # Pre-set ROOT_DIR/BASE_BRANCH so common.sh skips git-dependent discovery
+    export ROOT_DIR="/tmp"
+    export BASE_BRANCH="main"
 
-    # Source only the functions (skip the top-level assignments by redefining before source)
     source "${COMMON_SH}"
-
-    # Override ROOT_DIR/BASE_BRANCH again after source
-    ROOT_DIR="/tmp"
-    BASE_BRANCH="main"
 
     ${fnCall}
   `;
