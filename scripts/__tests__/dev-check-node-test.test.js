@@ -23,9 +23,9 @@ function runBashFunction(fnCall, env = {}) {
   // We source common.sh in a subshell with set +e to avoid git failures in temp dirs
   const script = `
     set +e
-    # Pre-set ROOT_DIR/BASE_BRANCH so common.sh skips git-dependent discovery
-    export ROOT_DIR="/tmp"
-    export BASE_BRANCH="main"
+    # Pre-set namespaced overrides so common.sh skips git-dependent discovery
+    export _DEV_CHECK_ROOT="/tmp"
+    export _DEV_CHECK_BASE="main"
 
     source "${COMMON_SH}"
 
