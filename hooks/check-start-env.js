@@ -328,16 +328,26 @@ async function main() {
   // Wait a bit for database to be fully ready
   await new Promise(resolve => setTimeout(resolve, 5000));
 
-  // Start web apps — if none directly impacted, start all for QA coverage
+  // Start web apps — if none directly impacted, start all for mandatory QA coverage
+  // (e.g., when only shared packages changed, all consumers must be QA'd)
   let webAppsToStart = IMPACTED_APPS.filter(app => WEB_APPS[app]);
 
-  if (webAppsToStart.length === 0) {
+  if (webAppsToStart.length === 0 && IMPACTED_APPS.length > 0) {
+    // Non-web apps or packages changed — start all web apps for mandatory QA
+    const allWebApps = Object.keys(WEB_APPS);
+    if (allWebApps.length > 0) {
+      console.error(`Package/non-web changes detected (${IMPACTED_APPS.join(', ')}) — starting all ${allWebApps.length} web apps for mandatory QA`);
+      webAppsToStart = allWebApps;
+    } else {
+      console.error(`Impacted changes detected (${IMPACTED_APPS.join(', ')}) but no WEB_APPS configured in .env — cannot start apps for QA`);
+    }
+  } else if (webAppsToStart.length === 0) {
+    // No impacted apps at all — nothing to start
     const allWebApps = Object.keys(WEB_APPS);
     if (allWebApps.length === 0) {
       console.error('No impacted apps and no WEB_APPS configured in .env — nothing to start');
     } else {
-      console.error(`No directly impacted apps detected — starting all ${allWebApps.length} web apps for mandatory QA`);
-      webAppsToStart = allWebApps;
+      console.error('No impacted apps detected — skipping web app startup');
     }
   }
 

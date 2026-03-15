@@ -39,8 +39,8 @@ function safeExec(cmd, options = {}) {
   }
 }
 
-// Use centralized getBaseBranch() from config
-const getBaseBranch = config.getBaseBranch;
+// Use centralized getBaseBranch() from config, bound to repo directory
+const getBaseBranch = () => config.getBaseBranch({ cwd: REPO_DIR });
 
 function getReportFolder(instanceId) {
   return path.join(TASKS_BASE, instanceId);
