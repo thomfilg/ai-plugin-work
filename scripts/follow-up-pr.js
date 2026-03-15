@@ -699,7 +699,8 @@ async function main() {
     }
 
     // Blocking reviews or conflicts → exit 1 (agent needs to fix)
-    if (ciPassed && (reviews.hasBlocking || !isMergeReady)) {
+    // But if only pending bot reviews, keep polling — don't exit yet
+    if (ciPassed && (reviews.hasBlocking || (isConflicting && reviews.pendingBots.length === 0))) {
       state.finalStatus = reviews.hasBlocking ? 'reviews-blocking' : 'conflicting';
       saveState(state);
       process.exit(1);
