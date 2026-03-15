@@ -72,7 +72,7 @@ if (!tp) process.exit(0);
 
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.join(__dirname, '..');
 const MAIN_WORKTREE_FOLDER = process.env.REPO_NAME || 'my-project';
-const WORKTREES_BASE = `${process.env.HOME}/worktrees`;
+const WORKTREES_BASE = process.env.WORKTREES_BASE || `${process.env.HOME}/worktrees`;
 const TASKS_BASE = path.join(WORKTREES_BASE, 'tasks');
 
 // ─── State Machine ───────────────────────────────────────────────────────────
