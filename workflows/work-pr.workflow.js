@@ -121,7 +121,9 @@ module.exports = {
     }
 
     // TSX/JSX changes vs main (from ticket worktree)
-    data.tsxChanged = safeExec("git diff --name-only origin/main...HEAD -- '*.tsx' '*.jsx'", { cwd: worktreeDir });
+    let baseBranch = 'origin/main';
+    try { baseBranch = require(path.join(__dirname, '..', 'lib', 'config')).getBaseBranch({ cwd: worktreeDir }); } catch { /* */ }
+    data.tsxChanged = safeExec(`git diff --name-only ${baseBranch}...HEAD -- '*.tsx' '*.jsx'`, { cwd: worktreeDir });
     data.hasTsxChanges = data.tsxChanged.length > 0;
 
     // Screenshot count

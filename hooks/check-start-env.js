@@ -342,12 +342,14 @@ async function main() {
       console.error(`Impacted changes detected (${IMPACTED_APPS.join(', ')}) but no WEB_APPS configured in .env — cannot start apps for QA`);
     }
   } else if (webAppsToStart.length === 0) {
-    // No impacted apps at all — nothing to start
+    // No impacted apps at all — start all web apps to avoid enforce-env-start-failure
+    // treating empty runningApps as a failure
     const allWebApps = Object.keys(WEB_APPS);
     if (allWebApps.length === 0) {
       console.error('No impacted apps and no WEB_APPS configured in .env — nothing to start');
     } else {
-      console.error('No impacted apps detected — skipping web app startup');
+      console.error(`No impacted apps detected — starting all ${allWebApps.length} web apps as default`);
+      webAppsToStart = allWebApps;
     }
   }
 

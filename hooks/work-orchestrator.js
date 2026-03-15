@@ -224,7 +224,9 @@ function inspect(ticket) {
     const c = s.worktreeDir;
     s.branch = run(`git -C "${c}" branch --show-current`);
     s.headSha = run(`git -C "${c}" rev-parse HEAD`);
-    const diff = run(`git -C "${c}" diff --shortstat origin/main -- . 2>/dev/null`);
+    let baseBranch = 'origin/main';
+    try { baseBranch = require(path.join(__dirname, '..', 'lib', 'config')).getBaseBranch({ cwd: c }); } catch { /* */ }
+    const diff = run(`git -C "${c}" diff --shortstat ${baseBranch} -- . 2>/dev/null`);
     s.hasDiffVsMain = diff !== '';
     s.diffSummary = diff || 'no changes';
     s.lastCommitMsg = run(`git -C "${c}" log -1 --format="%s" 2>/dev/null`);

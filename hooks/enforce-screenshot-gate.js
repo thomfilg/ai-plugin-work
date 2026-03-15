@@ -74,7 +74,8 @@ async function main() {
   // Check for TSX/JSX source file changes (exclude test files)
   let tsxChanged = [];
   try {
-    const diff = execSync('git diff --name-only origin/main...HEAD -- "*.tsx" "*.jsx"', {
+    const baseBranch = config ? config.getBaseBranch({ cwd: gitRoot }) : 'origin/main';
+    const diff = execSync(`git diff --name-only ${baseBranch}...HEAD -- "*.tsx" "*.jsx"`, {
       encoding: 'utf8',
       timeout: 10000,
       cwd: gitRoot,
