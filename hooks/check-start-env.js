@@ -338,6 +338,8 @@ async function main() {
     if (allWebApps.length > 0) {
       console.error(`Package/non-web changes detected (${IMPACTED_APPS.join(', ')}) — starting all ${allWebApps.length} web apps for mandatory QA`);
       webAppsToStart = allWebApps;
+    } else {
+      console.error(`Impacted changes detected (${IMPACTED_APPS.join(', ')}) but no WEB_APPS configured in .env — cannot start apps for QA`);
     }
   } else if (webAppsToStart.length === 0) {
     // No impacted apps at all — nothing to start
