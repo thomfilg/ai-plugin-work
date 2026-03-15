@@ -112,10 +112,14 @@ This prevents running QA on apps that are only "transitively affected" but don't
 
 ```bash
 # Get files changed in shared packages
-# NOTE: Detect base branch dynamically (origin/main, origin/dev, origin/master)
-# Detect base branch (set BASE_BRANCH in .env for repos not using main)
-# Priority: $BASE_BRANCH env var → git symbolic-ref → origin/main
+# Detect base branch dynamically (origin/main, origin/dev, origin/master)
+# Priority: $BASE_BRANCH env var → git symbolic-ref → probe common names → fallback
 BASE_BRANCH="${BASE_BRANCH:-$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/||')}"
+if [ -z "$BASE_BRANCH" ]; then
+  for b in origin/main origin/dev origin/master; do
+    if git rev-parse --verify "$b" >/dev/null 2>&1; then BASE_BRANCH="$b"; break; fi
+  done
+fi
 BASE_BRANCH="${BASE_BRANCH:-origin/main}"
 CHANGED_FILES=$(git diff --name-only ${BASE_BRANCH}...HEAD)
 
@@ -211,9 +215,14 @@ Final QA targets: [status-site]
 
 1. **Run this Bash command to extract changed components:**
 ```bash
-# Detect base branch (set BASE_BRANCH in .env for repos not using main)
-# Priority: $BASE_BRANCH env var → git symbolic-ref → origin/main
+# Detect base branch dynamically
+# Priority: $BASE_BRANCH env var → git symbolic-ref → probe common names → fallback
 BASE_BRANCH="${BASE_BRANCH:-$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/||')}"
+if [ -z "$BASE_BRANCH" ]; then
+  for b in origin/main origin/dev origin/master; do
+    if git rev-parse --verify "$b" >/dev/null 2>&1; then BASE_BRANCH="$b"; break; fi
+  done
+fi
 BASE_BRANCH="${BASE_BRANCH:-origin/main}"
 git diff --name-only ${BASE_BRANCH}...HEAD | grep -E "packages/(shared-ui|ui)/src/components/[^/]+/" | sed 's|.*/components/||' | cut -d'/' -f1 | sort -u
 ```
