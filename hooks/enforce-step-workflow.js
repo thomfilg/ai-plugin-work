@@ -298,6 +298,23 @@ function handlePreToolUse(hookData) {
   const ticketId = getTicketId();
   if (!ticketId) return; // No ticket context → allow
 
+  // Rule 3: Block Write/Edit on workflow state files
+  // Prevents agents from bypassing the state machine by directly editing state files
+  if (toolName === 'Write' || toolName === 'Edit') {
+    const filePath = toolInput?.file_path || '';
+    const protectedFiles = WORKFLOWS.map(wf => wf.stateFile);
+    const basename = path.basename(filePath);
+    if (protectedFiles.includes(basename)) {
+      didBlock = true;
+      process.stderr.write(
+        `BLOCKED: Direct ${toolName} to ${basename} is not allowed.\n` +
+        `State files must only be modified through the orchestrator/workflow-engine scripts.\n` +
+        `Use: node work-orchestrator.js transition ${ticketId} <step>\n`
+      );
+      process.exit(2);
+    }
+  }
+
   // 2. Check each workflow independently
   for (const wf of WORKFLOWS) {
     const state = loadStateFile(ticketId, wf.stateFile);
