@@ -315,7 +315,7 @@ const resumeInfo = JSON.parse(RESUME_INFO);
 **YOU MUST launch the qa-feature-tester agent using Task tool.**
 
 ```
-Task(subagent_type: "qa-feature-tester", prompt: "
+Task(subagent_type: "work-workflow:qa-feature-tester", prompt: "
 Test ${APP_NAME} application.
 
 ## SERVER IS ALREADY RUNNING — DO NOT START ANY DEV SERVERS
