@@ -1192,4 +1192,226 @@ describe('enforce-step-workflow', () => {
       assert.ok(hookSource.includes('.pr-update-sha'), 'Should reference .pr-update-sha file');
     });
   });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Rule 3: Block direct state file writes
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe('Rule 3: Block direct state file writes', () => {
+
+    const PROTECTED_FILES = [
+      '.work-state.json',
+      '.workflow-state.json',
+      '.step-evidence.json',
+      '.step-evidence-work-pr.json',
+      '.work-actions.json',
+      '.pr-update-sha',
+    ];
+
+    // ── Block Write to all protected files ──────────────────────────────────
+
+    for (const filename of PROTECTED_FILES) {
+      it(`blocks Write to ${filename}`, async () => {
+        writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+
+        const { code, stderr } = await runHook(
+          { tool_name: 'Write', tool_input: { file_path: `/tmp/tasks/TEST-1/${filename}`, content: '{}' } },
+          'PreToolUse',
+        );
+        assert.equal(code, 2, `Should block Write to ${filename}`);
+        assert.ok(stderr.includes('BLOCKED'), `stderr should contain BLOCKED for ${filename}`);
+        assert.ok(stderr.includes(filename), `stderr should mention ${filename}`);
+      });
+    }
+
+    // ── Block Edit to representative protected files ────────────────────────
+
+    for (const filename of ['.work-state.json', '.step-evidence.json']) {
+      it(`blocks Edit to ${filename}`, async () => {
+        writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+
+        const { code, stderr } = await runHook(
+          { tool_name: 'Edit', tool_input: { file_path: `/home/user/tasks/PROJ-99/${filename}`, old_string: 'a', new_string: 'b' } },
+          'PreToolUse',
+        );
+        assert.equal(code, 2, `Should block Edit to ${filename}`);
+        assert.ok(stderr.includes('BLOCKED'), `stderr should contain BLOCKED`);
+        assert.ok(stderr.includes('Edit'), `stderr should mention Edit tool`);
+      });
+    }
+
+    // ── Block MultiEdit to representative protected files ───────────────────
+
+    for (const filename of ['.work-state.json', '.step-evidence.json']) {
+      it(`blocks MultiEdit to ${filename}`, async () => {
+        writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+
+        const { code, stderr } = await runHook(
+          { tool_name: 'MultiEdit', tool_input: { file_path: `/home/user/tasks/PROJ-99/${filename}`, edits: [] } },
+          'PreToolUse',
+        );
+        assert.equal(code, 2, `Should block MultiEdit to ${filename}`);
+        assert.ok(stderr.includes('BLOCKED'), `stderr should contain BLOCKED`);
+        assert.ok(stderr.includes('MultiEdit'), `stderr should mention MultiEdit tool`);
+      });
+    }
+
+    // ── Allow non-protected files ───────────────────────────────────────────
+
+    for (const filename of ['package.json', 'index.js', 'app.ts']) {
+      it(`allows Write to non-protected file ${filename}`, async () => {
+        writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+
+        const { code } = await runHook(
+          { tool_name: 'Write', tool_input: { file_path: `/home/user/project/${filename}`, content: '{}' } },
+          'PreToolUse',
+        );
+        assert.equal(code, 0, `Should allow Write to ${filename}`);
+      });
+
+      it(`allows Edit to non-protected file ${filename}`, async () => {
+        writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+
+        const { code } = await runHook(
+          { tool_name: 'Edit', tool_input: { file_path: `/home/user/project/${filename}`, old_string: 'a', new_string: 'b' } },
+          'PreToolUse',
+        );
+        assert.equal(code, 0, `Should allow Edit to ${filename}`);
+      });
+
+      it(`allows MultiEdit to non-protected file ${filename}`, async () => {
+        writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+
+        const { code } = await runHook(
+          { tool_name: 'MultiEdit', tool_input: { file_path: `/home/user/project/${filename}`, edits: [] } },
+          'PreToolUse',
+        );
+        assert.equal(code, 0, `Should allow MultiEdit to ${filename}`);
+      });
+    }
+
+    // ── Edge cases ──────────────────────────────────────────────────────────
+
+    it('blocks .work-state.json even at a different path like /tmp/random/', async () => {
+      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Write', tool_input: { file_path: '/tmp/random/.work-state.json', content: '{}' } },
+        'PreToolUse',
+      );
+      assert.equal(code, 2, 'Should block based on basename regardless of path');
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+
+    it('allows when ENFORCE_HOOK_TICKET_ID is empty (fail-open)', async () => {
+      const { code } = await runHook(
+        { tool_name: 'Write', tool_input: { file_path: '/tmp/.work-state.json', content: '{}' } },
+        'PreToolUse',
+        { ENFORCE_HOOK_TICKET_ID: '' },
+      );
+      assert.equal(code, 0, 'Should allow when no ticket context (fail-open)');
+    });
+
+    it('allows when file_path is empty (fail-open)', async () => {
+      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+
+      const { code } = await runHook(
+        { tool_name: 'Write', tool_input: { file_path: '', content: '{}' } },
+        'PreToolUse',
+      );
+      assert.equal(code, 0, 'Should allow when file_path is empty');
+    });
+
+    // ── Bash write detection ───────────────────────────────────────────────
+
+    it('blocks Bash redirect (>) to .work-state.json', async () => {
+      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: 'echo "{}" > /home/node/worktrees/tasks/TEST-1/.work-state.json' } },
+        'PreToolUse',
+      );
+      assert.equal(code, 2, 'Should block Bash redirect to state file');
+      assert.ok(stderr.includes('BLOCKED'));
+      assert.ok(stderr.includes('.work-state.json'));
+    });
+
+    it('blocks Bash tee to .step-evidence.json', async () => {
+      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: 'echo "{}" | tee /tmp/.step-evidence.json' } },
+        'PreToolUse',
+      );
+      assert.equal(code, 2, 'Should block Bash tee to evidence file');
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+
+    it('blocks Bash cp to .workflow-state.json', async () => {
+      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: 'cp /tmp/fake.json /tasks/.workflow-state.json' } },
+        'PreToolUse',
+      );
+      assert.equal(code, 2, 'Should block Bash cp to state file');
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+
+    it('blocks Bash append (>>) to .work-actions.json', async () => {
+      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: 'echo "action" >> /tmp/.work-actions.json' } },
+        'PreToolUse',
+      );
+      assert.equal(code, 2, 'Should block Bash append to actions file');
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+
+    it('blocks Bash mv to .pr-update-sha', async () => {
+      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: 'mv /tmp/sha .pr-update-sha' } },
+        'PreToolUse',
+      );
+      assert.equal(code, 2, 'Should block Bash mv to pr-update-sha');
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+
+    it('allows Bash read-only commands referencing state files', async () => {
+      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+
+      const { code } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: 'cat /home/node/worktrees/tasks/TEST-1/.work-state.json' } },
+        'PreToolUse',
+      );
+      assert.equal(code, 0, 'Should allow read-only cat of state file');
+    });
+
+    it('allows Bash redirect to non-protected file', async () => {
+      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+
+      const { code } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: 'echo "test" > /tmp/output.json' } },
+        'PreToolUse',
+      );
+      assert.equal(code, 0, 'Should allow redirect to non-protected file');
+    });
+
+    // ── Source verification ─────────────────────────────────────────────────
+
+    it('source uses createFileProtector from protect-state-files lib', () => {
+      const hookSource = fs.readFileSync(HOOK_PATH, 'utf-8');
+      assert.ok(hookSource.includes('createFileProtector'), 'Should use createFileProtector');
+      assert.ok(hookSource.includes('PROTECTED_STATE_BASENAMES'), 'Should define PROTECTED_STATE_BASENAMES');
+    });
+
+    it('protect-state-files lib covers MultiEdit in FILE_WRITE_TOOLS', () => {
+      const libPath = path.join(__dirname, '..', '..', 'lib', 'protect-state-files.js');
+      const libSource = fs.readFileSync(libPath, 'utf-8');
+      assert.ok(libSource.includes("'MultiEdit'"), 'Library should cover MultiEdit');
+    });
+  });
 });
