@@ -26,7 +26,7 @@ if (!mode || !worktreePath || !branchName || !ticketId) {
 
 function run(bin, cmdArgs) {
   console.log(`$ ${bin} ${cmdArgs.join(' ')}`);
-  return execFileSync(bin, cmdArgs, { cwd: worktreePath, encoding: 'utf-8', stdio: 'inherit' });
+  execFileSync(bin, cmdArgs, { cwd: worktreePath, stdio: 'inherit' });
 }
 
 if (mode === '--commit') {

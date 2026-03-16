@@ -98,7 +98,7 @@ cd "$WORKTREE_PATH"
 pnpm install
 ```
 
-### Step 7: Create initial commit and push
+### Step 7: Create initial commit and push (if enabled)
 
 ```bash
 cd "$WORKTREE_PATH"
