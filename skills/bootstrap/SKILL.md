@@ -98,34 +98,23 @@ cd "$WORKTREE_PATH"
 pnpm install
 ```
 
-### Step 7: Create initial commit (empty or README update)
+### Step 7: Create initial commit and push (if enabled)
 
 ```bash
 cd "$WORKTREE_PATH"
-git commit --allow-empty -m "chore: bootstrap ${TICKET_ID}"
-git push -u origin "$BRANCH_NAME"
+node "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap-publish.js" --commit "$WORKTREE_PATH" "$BRANCH_NAME" "$TICKET_ID"
 ```
+
+Skips entirely if `ENABLE_EMPTY_COMMIT` is not set.
 
 ### Step 8: Create draft PR
 
 ```bash
-gh pr create \
-  --title "${TICKET_ID} - chore: bootstrap task" \
-  --body "$(cat <<'EOF'
-## Summary
-Bootstrap PR for ${TICKET_ID}
-
-## Jira
-- [${TICKET_ID}](https://your-org.atlassian.net/browse/${TICKET_ID})
-
-## Status
-- [ ] Implementation in progress
-- [ ] Tests passing
-- [ ] Ready for review
-EOF
-)" \
-  --draft
+cd "$WORKTREE_PATH"
+node "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap-publish.js" --pr "$WORKTREE_PATH" "$BRANCH_NAME" "$TICKET_ID"
 ```
+
+Skips if `ENABLE_EMPTY_COMMIT` or `ENABLE_DRAFT_PR` is not set (no commit means no PR).
 
 ### Step 9: Report results
 
@@ -183,8 +172,8 @@ Next steps:
 | 4 | Create worktree + branch |
 | 5 | Copy credentials, .claude, symlink CLAUDE.md, symlink .env files, create .env.local |
 | 6 | pnpm install |
-| 7 | Initial commit + push |
-| 8 | Create draft PR |
+| 7 | Initial commit + push (empty commit if `ENABLE_EMPTY_COMMIT`) |
+| 8 | Create draft PR (if `ENABLE_EMPTY_COMMIT` + `ENABLE_DRAFT_PR`) |
 | 9 | Display summary |
 
 ## Notes
@@ -193,5 +182,6 @@ Next steps:
 - Default project key: configured via `JIRA_PROJECT_KEY` env var
 - Worktree path: `../$REPO_NAME-<TICKET-ID>`
 - Branch format: `<TICKET-ID>-<kebab-case-description>`
-- PRs are created as drafts
+- Draft PRs created when both `ENABLE_EMPTY_COMMIT` and `ENABLE_DRAFT_PR` are set
+- Empty bootstrap commits when `ENABLE_EMPTY_COMMIT` is set
 - `.env.local` is created for `as-dashboard` with `VITE_TITLE_PREFIX` to identify browser tabs per agent
