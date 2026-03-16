@@ -306,8 +306,10 @@ function handlePreToolUse(hookData) {
   const ticketId = getTicketId();
   if (!ticketId) return; // No ticket context → allow
 
-  // Rule 3: Block Write/Edit/MultiEdit on workflow state files
+  // Rule 3: Block direct writes to workflow state files
   // Prevents agents from bypassing the state machine by directly editing state files
+
+  // 3a. Edit/Write/MultiEdit — check file_path basename
   if (toolName === 'Write' || toolName === 'Edit' || toolName === 'MultiEdit') {
     const filePath = toolInput?.file_path || '';
     const basename = path.basename(filePath);
@@ -321,6 +323,25 @@ function handlePreToolUse(hookData) {
       process.exit(2);
     }
     return; // Edit/Write/MultiEdit only need Rule 3 — skip per-workflow loop
+  }
+
+  // 3b. Bash — detect shell write operators targeting protected state files
+  if (toolName === 'Bash') {
+    const cmd = String(toolInput?.command || '');
+    const hasWriteOp = /(?:>{1,2}|\btee\b|\bcp\b|\bmv\b|\bdd\b.*\bof=)/.test(cmd);
+    if (hasWriteOp) {
+      for (const basename of PROTECTED_STATE_BASENAMES) {
+        if (cmd.includes(basename)) {
+          didBlock = true;
+          process.stderr.write(
+            `BLOCKED: Bash command writes to protected state file ${basename}.\n` +
+            `State files must only be modified through the orchestrator/workflow-engine scripts.\n` +
+            `Use: node work-orchestrator.js transition ${ticketId} <step>\n`
+          );
+          process.exit(2);
+        }
+      }
+    }
   }
 
   // 2. Check each workflow independently

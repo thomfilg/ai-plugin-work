@@ -1322,6 +1322,84 @@ describe('enforce-step-workflow', () => {
       assert.equal(code, 0, 'Should allow when file_path is empty');
     });
 
+    // ── Bash write detection ───────────────────────────────────────────────
+
+    it('blocks Bash redirect (>) to .work-state.json', async () => {
+      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: 'echo "{}" > /home/node/worktrees/tasks/TEST-1/.work-state.json' } },
+        'PreToolUse',
+      );
+      assert.equal(code, 2, 'Should block Bash redirect to state file');
+      assert.ok(stderr.includes('BLOCKED'));
+      assert.ok(stderr.includes('.work-state.json'));
+    });
+
+    it('blocks Bash tee to .step-evidence.json', async () => {
+      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: 'echo "{}" | tee /tmp/.step-evidence.json' } },
+        'PreToolUse',
+      );
+      assert.equal(code, 2, 'Should block Bash tee to evidence file');
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+
+    it('blocks Bash cp to .workflow-state.json', async () => {
+      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: 'cp /tmp/fake.json /tasks/.workflow-state.json' } },
+        'PreToolUse',
+      );
+      assert.equal(code, 2, 'Should block Bash cp to state file');
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+
+    it('blocks Bash append (>>) to .work-actions.json', async () => {
+      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: 'echo "action" >> /tmp/.work-actions.json' } },
+        'PreToolUse',
+      );
+      assert.equal(code, 2, 'Should block Bash append to actions file');
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+
+    it('blocks Bash mv to .pr-update-sha', async () => {
+      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: 'mv /tmp/sha .pr-update-sha' } },
+        'PreToolUse',
+      );
+      assert.equal(code, 2, 'Should block Bash mv to pr-update-sha');
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+
+    it('allows Bash read-only commands referencing state files', async () => {
+      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+
+      const { code } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: 'cat /home/node/worktrees/tasks/TEST-1/.work-state.json' } },
+        'PreToolUse',
+      );
+      assert.equal(code, 0, 'Should allow read-only cat of state file');
+    });
+
+    it('allows Bash redirect to non-protected file', async () => {
+      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+
+      const { code } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: 'echo "test" > /tmp/output.json' } },
+        'PreToolUse',
+      );
+      assert.equal(code, 0, 'Should allow redirect to non-protected file');
+    });
+
     // ── Source verification ─────────────────────────────────────────────────
 
     it('source defines PROTECTED_STATE_BASENAMES Set', () => {
