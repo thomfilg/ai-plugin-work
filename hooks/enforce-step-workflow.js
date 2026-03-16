@@ -120,6 +120,25 @@ const WORKFLOWS = [
   },
 ];
 
+// Protected state file basenames — block direct Edit/Write/MultiEdit/Bash writes
+const { buildProtectedBasenames, basenameProtector, createFileProtector } = require(path.join(__dirname, '..', 'lib', 'protect-state-files'));
+const PROTECTED_STATE_BASENAMES = buildProtectedBasenames(WORKFLOWS, ['.work-actions.json', '.pr-update-sha']);
+
+// Map each protected basename to its workflow's transition hint
+const BASENAME_TO_HINT = {};
+for (const wf of WORKFLOWS) {
+  for (const bn of [path.basename(wf.stateFile), path.basename(wf.evidenceFile)]) {
+    BASENAME_TO_HINT[bn] = wf.transitionHint;
+  }
+}
+
+const stateFileProtector = createFileProtector({
+  isProtected: basenameProtector(PROTECTED_STATE_BASENAMES),
+  formatMessage: (match, vector) =>
+    `BLOCKED: Direct ${vector} to ${match} is not allowed.\n` +
+    `State files must only be modified through the orchestrator/workflow-engine scripts.\n`,
+});
+
 // (Patch 7) Validate workflow config at startup
 function validateWorkflow(wf) {
   const stepSet = new Set(wf.steps);
@@ -181,9 +200,9 @@ function resolveGitHead() {
 function getTicketId() {
   if (_ticketIdResolved) return _cachedTicketId;
   _ticketIdResolved = true;
-  // Allow override for testing
-  if (process.env.ENFORCE_HOOK_TICKET_ID) {
-    _cachedTicketId = process.env.ENFORCE_HOOK_TICKET_ID;
+  // Allow override for testing — empty string explicitly opts out (no git fallback)
+  if ('ENFORCE_HOOK_TICKET_ID' in process.env) {
+    _cachedTicketId = process.env.ENFORCE_HOOK_TICKET_ID || null;
     return _cachedTicketId;
   }
   // (Patch 6+9) Worktree-aware .git/HEAD read — no subprocess spawn
@@ -298,22 +317,19 @@ function handlePreToolUse(hookData) {
   const ticketId = getTicketId();
   if (!ticketId) return; // No ticket context → allow
 
-  // Rule 3: Block Write/Edit on workflow state files
+  // Rule 3: Block direct writes to workflow state files
   // Prevents agents from bypassing the state machine by directly editing state files
-  if (toolName === 'Write' || toolName === 'Edit') {
-    const filePath = toolInput?.file_path || '';
-    const protectedFiles = WORKFLOWS.map(wf => wf.stateFile);
-    const basename = path.basename(filePath);
-    if (protectedFiles.includes(basename)) {
-      didBlock = true;
-      process.stderr.write(
-        `BLOCKED: Direct ${toolName} to ${basename} is not allowed.\n` +
-        `State files must only be modified through the orchestrator/workflow-engine scripts.\n` +
-        `Use: node work-orchestrator.js transition ${ticketId} <step>\n`
-      );
-      process.exit(2);
-    }
+  const rule3 = stateFileProtector.check(toolName, toolInput);
+  if (rule3.blocked) {
+    didBlock = true;
+    const hint = BASENAME_TO_HINT[rule3.match] || WORKFLOWS[0].transitionHint;
+    process.stderr.write(
+      rule3.message +
+      `Use: ${hint} ${ticketId} <step>\n`
+    );
+    process.exit(2);
   }
+  if (rule3.skipRemainingChecks) return; // Edit/Write/MultiEdit — skip per-workflow loop
 
   // 2. Check each workflow independently
   for (const wf of WORKFLOWS) {
