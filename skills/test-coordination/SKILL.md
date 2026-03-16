@@ -56,10 +56,14 @@ Clear any stale feedback files from previous runs in the task directory.
 
 ## Step 5: Run Test Enhancement in Parallel
 
-Launch both commands in parallel using background agents:
+**CRITICAL: `/tests-review` and `/tests-create` are SKILLS, NOT agent types.**
+- Use `Skill("tests-review")` and `Skill("tests-create")` — via the Skill tool
+- Do NOT use `Task(subagent_type="work-workflow:tests-review")` or `Task(subagent_type="work-workflow:tests-create")` — these agent types DO NOT EXIST
 
-1. Launch /tests-review in background - iterates and writes feedback
-2. Launch /tests-create in background - reads feedback and implements
+Launch both skills in parallel using the Skill tool:
+
+1. **Skill("tests-review")** in background — iterates and writes feedback to `tests-feedback.jsonl`
+2. **Skill("tests-create")** in background — reads feedback and implements missing edge cases
 
 Both communicate via JSONL files in the task folder.
 
