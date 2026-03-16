@@ -58,7 +58,7 @@ Clear any stale feedback files from previous runs in the task directory.
 
 **CRITICAL: `/tests-review` and `/tests-create` are SKILLS, NOT agent types.**
 - Use `Skill("tests-review")` and `Skill("tests-create")` — via the Skill tool
-- Do NOT use `Task(work-workflow:tests-review)` or `Task(work-workflow:tests-create)` — these agent types DO NOT EXIST
+- Do NOT use `Task(subagent_type="work-workflow:tests-review")` or `Task(subagent_type="work-workflow:tests-create")` — these agent types DO NOT EXIST
 
 Launch both skills in parallel using the Skill tool:
 
