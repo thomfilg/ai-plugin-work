@@ -726,7 +726,9 @@ function decideNextAction(ciStatus, prInfo, reviews, noReviews) {
   if (isConflicting) {
     return { action: 'exit-fail', finalStatus: 'conflicting' };
   }
-  if (!noReviews && reviews.hasBlocking) {
+  // Only fail-fast on blocking reviews when no bot reviews are pending.
+  // When bots are still reviewing, old blocking comments may become stale after the new review.
+  if (!noReviews && reviews.hasBlocking && reviews.pendingBots.length === 0) {
     return { action: 'exit-fail', finalStatus: 'reviews-blocking' };
   }
 
@@ -739,6 +741,7 @@ function decideNextAction(ciStatus, prInfo, reviews, noReviews) {
   const reasons = [];
   if (!ciPassed) reasons.push('CI checks pending');
   if (!noReviews && reviews.pendingBots.length > 0) reasons.push('bot reviews pending');
+  if (!noReviews && reviews.hasBlocking && reviews.pendingBots.length > 0) reasons.push('blocking reviews may become stale after bot review');
   if (!isMergeReady && !isConflicting) reasons.push(`merge status: ${prInfo.mergeStateStatus || 'UNKNOWN'}`);
 
   return {
