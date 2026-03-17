@@ -667,6 +667,50 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
   return lines.join('\n');
 }
 
+// ── Decision Logic ──────────────────────────────────────────────────────────
+
+/**
+ * Pure function that decides the next action based on current PR state.
+ * Returns { action, finalStatus, waitReason? }
+ *   action: 'exit-fail' | 'exit-success' | 'poll'
+ *   finalStatus: string for state persistence
+ *   waitReason: human-readable reason when action is 'poll'
+ */
+function decideNextAction(ciStatus, prInfo, reviews, noReviews) {
+  const isConflicting = prInfo.mergeable === 'CONFLICTING' || prInfo.mergeStateStatus === 'DIRTY';
+  const isMergeReady = prInfo.mergeable === 'MERGEABLE' && (!prInfo.mergeStateStatus || prInfo.mergeStateStatus === 'CLEAN' || prInfo.mergeStateStatus === 'HAS_HOOKS' || prInfo.mergeStateStatus === 'UNSTABLE');
+  const ciPassed = ciStatus === 'passing';
+  const reviewsClear = noReviews || (!reviews.hasBlocking && reviews.pendingBots.length === 0);
+
+  // Fail-fast exits (ordered by priority)
+  if (ciStatus === 'failing') {
+    return { action: 'exit-fail', finalStatus: 'ci-failing' };
+  }
+  if (isConflicting) {
+    return { action: 'exit-fail', finalStatus: 'conflicting' };
+  }
+  if (!noReviews && reviews.hasBlocking) {
+    return { action: 'exit-fail', finalStatus: 'reviews-blocking' };
+  }
+
+  // Success
+  if (ciPassed && reviewsClear && isMergeReady) {
+    return { action: 'exit-success', finalStatus: 'ready' };
+  }
+
+  // Continue polling — determine why
+  const reasons = [];
+  if (!ciPassed) reasons.push('CI checks pending');
+  if (!noReviews && reviews.pendingBots.length > 0) reasons.push('bot reviews pending');
+  if (!isMergeReady && !isConflicting) reasons.push(`merge status: ${prInfo.mergeStateStatus || 'UNKNOWN'}`);
+
+  return {
+    action: 'poll',
+    finalStatus: 'timeout',
+    waitReason: reasons.join(', ') || 'unknown',
+  };
+}
+
 // ── Sleep ───────────────────────────────────────────────────────────────────
 
 function sleep(seconds) {
@@ -761,52 +805,30 @@ async function main() {
     console.log(formatReport(prInfo, ci, reviews, attempt, maxAttempts, { ...opts, interval: opts.interval }));
     console.log('');
 
-    // Derive status flags
-    const isConflicting = prInfo.mergeable === 'CONFLICTING' || prInfo.mergeStateStatus === 'DIRTY';
-    const isMergeReady = prInfo.mergeable === 'MERGEABLE' && (!prInfo.mergeStateStatus || prInfo.mergeStateStatus === 'CLEAN' || prInfo.mergeStateStatus === 'HAS_HOOKS' || prInfo.mergeStateStatus === 'UNSTABLE');
-    const ciPassed = ci.status === 'passing';
-    // Non-blocking reviews (nitpicks/low priority) do NOT prevent "ready" status
-    const reviewsClear = opts.noReviews || (!reviews.hasBlocking && reviews.pendingBots.length === 0);
+    // Decide next action using extracted pure function
+    const decision = decideNextAction(ci.status, prInfo, reviews, opts.noReviews);
 
-    // ── Fail-fast exits (don't wait for anything else) ──
-
-    // 1. CI failure → immediate exit
-    if (ci.status === 'failing') {
-      state.finalStatus = 'ci-failing';
+    if (decision.action === 'exit-fail') {
+      state.finalStatus = decision.finalStatus;
       saveState(state);
       process.exit(1);
     }
 
-    // 2. Merge conflicts → immediate exit (don't wait for CI)
-    if (isConflicting) {
-      state.finalStatus = 'conflicting';
-      saveState(state);
-      process.exit(1);
-    }
-
-    // 3. Blocking reviews → immediate exit (don't wait for CI)
-    if (!opts.noReviews && reviews.hasBlocking) {
-      state.finalStatus = 'reviews-blocking';
-      saveState(state);
-      process.exit(1);
-    }
-
-    // ── Success exit ──
-
-    if (ciPassed && reviewsClear && isMergeReady) {
-      state.finalStatus = 'ready';
+    if (decision.action === 'exit-success') {
+      state.finalStatus = decision.finalStatus;
       saveState(state);
       process.exit(0);
     }
 
-    // ── Continue polling for pending CI or pending bot reviews ──
+    // Continue polling
     if (attempt < maxAttempts) {
       await sleep(opts.interval);
     }
   }
 
-  // Exhausted attempts
-  console.log(c.yellow(`Max attempts (${maxAttempts}) reached. CI checks still pending.`));
+  // Exhausted attempts — report what we were waiting on
+  const lastDecision = decideNextAction(ci.status, prInfo, reviews, opts.noReviews);
+  console.log(c.yellow(`Max attempts (${maxAttempts}) reached. Still waiting: ${lastDecision.waitReason || 'unknown'}`));
   state.finalStatus = 'timeout';
   saveState(state);
   process.exit(1);
@@ -820,4 +842,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { classifyCommentPriority, isBlockingPriority, getResolvedCommentIds };
+module.exports = { classifyCommentPriority, isBlockingPriority, getResolvedCommentIds, decideNextAction };

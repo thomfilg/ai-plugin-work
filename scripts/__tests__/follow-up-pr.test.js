@@ -1,6 +1,6 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { classifyCommentPriority, isBlockingPriority, getResolvedCommentIds } = require('../follow-up-pr.js');
+const { classifyCommentPriority, isBlockingPriority, getResolvedCommentIds, decideNextAction } = require('../follow-up-pr.js');
 
 describe('classifyCommentPriority', () => {
   describe('Copilot (copilot-pull-request-reviewer)', () => {
@@ -285,5 +285,68 @@ describe('getResolvedCommentIds', () => {
     };
     const ids = getResolvedCommentIds('owner/repo', 1, exec);
     assert.equal(ids.size, 0, 'should return empty set on partial failure');
+  });
+});
+
+describe('decideNextAction', () => {
+  const mergeReady = { mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN' };
+  const conflicting = { mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY' };
+  const notReady = { mergeable: 'UNKNOWN', mergeStateStatus: 'BEHIND' };
+  const noReviews = { hasBlocking: false, pendingBots: [], nonBlocking: [] };
+  const blockingReviews = { hasBlocking: true, pendingBots: [], blocking: [{ author: 'user' }] };
+  const pendingBots = { hasBlocking: false, pendingBots: ['copilot-pull-request-reviewer'] };
+
+  it('returns exit-fail with ci-failing when CI fails', () => {
+    const result = decideNextAction('failing', mergeReady, noReviews, false);
+    assert.equal(result.action, 'exit-fail');
+    assert.equal(result.finalStatus, 'ci-failing');
+  });
+
+  it('CI failure takes precedence over conflicts', () => {
+    const result = decideNextAction('failing', conflicting, blockingReviews, false);
+    assert.equal(result.action, 'exit-fail');
+    assert.equal(result.finalStatus, 'ci-failing');
+  });
+
+  it('returns exit-fail with conflicting when merge conflicts exist (even with pending CI)', () => {
+    const result = decideNextAction('pending', conflicting, noReviews, false);
+    assert.equal(result.action, 'exit-fail');
+    assert.equal(result.finalStatus, 'conflicting');
+  });
+
+  it('returns exit-fail with reviews-blocking when blocking reviews exist (even with pending CI)', () => {
+    const result = decideNextAction('pending', mergeReady, blockingReviews, false);
+    assert.equal(result.action, 'exit-fail');
+    assert.equal(result.finalStatus, 'reviews-blocking');
+  });
+
+  it('skips review check when noReviews is true', () => {
+    const result = decideNextAction('passing', mergeReady, blockingReviews, true);
+    assert.equal(result.action, 'exit-success');
+    assert.equal(result.finalStatus, 'ready');
+  });
+
+  it('returns exit-success when CI passes, reviews clear, merge ready', () => {
+    const result = decideNextAction('passing', mergeReady, noReviews, false);
+    assert.equal(result.action, 'exit-success');
+    assert.equal(result.finalStatus, 'ready');
+  });
+
+  it('returns poll with CI reason when CI is pending', () => {
+    const result = decideNextAction('pending', mergeReady, noReviews, false);
+    assert.equal(result.action, 'poll');
+    assert.match(result.waitReason, /CI checks pending/);
+  });
+
+  it('returns poll with bot reason when bots are pending', () => {
+    const result = decideNextAction('passing', mergeReady, pendingBots, false);
+    assert.equal(result.action, 'poll');
+    assert.match(result.waitReason, /bot reviews pending/);
+  });
+
+  it('returns poll with merge status reason when not merge-ready', () => {
+    const result = decideNextAction('passing', notReady, noReviews, false);
+    assert.equal(result.action, 'poll');
+    assert.match(result.waitReason, /merge status: BEHIND/);
   });
 });
