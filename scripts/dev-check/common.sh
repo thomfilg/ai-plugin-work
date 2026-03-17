@@ -16,7 +16,7 @@ find_repo_root() {
   git rev-parse --show-toplevel 2>/dev/null || { echo "Not a git repo" >&2; exit 1; }
 }
 
-ROOT_DIR="$(find_repo_root)"
+ROOT_DIR="${_DEV_CHECK_ROOT:-$(find_repo_root)}"
 
 # ─── Detect base branch ───
 detect_base_branch() {
@@ -47,7 +47,7 @@ detect_base_branch() {
   fi
 }
 
-BASE_BRANCH="$(detect_base_branch)"
+BASE_BRANCH="${_DEV_CHECK_BASE:-$(detect_base_branch)}"
 
 # ─── Detect monorepo ───
 is_monorepo() {
@@ -135,4 +135,77 @@ has_bin() {
   local dir="$1"
   local cmd="$2"
   [ -x "$dir/node_modules/.bin/$cmd" ] || command -v "$cmd" &>/dev/null
+}
+
+# ─── Detect test runner (vitest > jest > node --test) ───
+# Like detect_tool but also checks if the "test" script uses `node --test`
+detect_test_runner() {
+  local pkg_json="$1"
+
+  if [ ! -f "$pkg_json" ]; then
+    echo ""
+    return
+  fi
+
+  # Check for vitest/jest in package.json first
+  local tool
+  tool=$(detect_tool "$pkg_json" "vitest" "jest")
+  if [ -n "$tool" ]; then
+    echo "$tool"
+    return
+  fi
+
+  # Fall back: check if "test" script contains "node --test"
+  local test_script
+  test_script=$(node -e "try{const p=JSON.parse(require('fs').readFileSync(process.argv[1],'utf8'));console.log((p.scripts&&p.scripts.test)||'')}catch{console.log('')}" "$pkg_json" 2>/dev/null)
+  if echo "$test_script" | grep -q 'node --test'; then
+    echo "node-test"
+    return
+  fi
+
+  echo ""
+}
+
+# ─── Map source files to their __tests__/*.test.js counterparts ───
+# Files already in __tests__/ are passed through. Source files are mapped
+# to __tests__/<basename>.test.js counterparts. Files with no matching
+# test are silently skipped.
+# Args: files (newline-separated, relative to root), root dir
+map_to_test_files() {
+  local files="$1"
+  local root="$2"
+  local result=""
+
+  while IFS= read -r f; do
+    [ -z "$f" ] && continue
+
+    # Already a test file — pass through if it exists
+    if echo "$f" | grep -qE '(^|/)__tests__/.*\.test\.[jt]sx?$'; then
+      if [ -f "$root/$f" ]; then
+        result="${result}${f}"$'\n'
+      fi
+      continue
+    fi
+
+    # Map source → __tests__/basename.test.{js,ts,jsx,tsx}
+    local dir base test_path prefix
+    dir=$(dirname "$f")
+    base=$(basename "$f" | sed -E 's/\.[^.]+$//')
+    # Handle root-level files where dirname returns "."
+    if [ "$dir" = "." ]; then
+      prefix=""
+    else
+      prefix="${dir}/"
+    fi
+    for ext in js ts jsx tsx; do
+      test_path="${prefix}__tests__/${base}.test.${ext}"
+      if [ -f "$root/$test_path" ]; then
+        result="${result}${test_path}"$'\n'
+        break
+      fi
+    done
+  done <<< "$files"
+
+  # Deduplicate and trim trailing newline
+  echo "$result" | sort -u | sed '/^$/d'
 }

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Run unit tests related to changed files
-# Auto-detects: vitest, jest
+# Auto-detects: vitest, jest, node --test
 # Monorepo: runs tests per-package; Single-repo: runs at root
 #
 # Usage:
@@ -56,10 +56,10 @@ if [ -z "$CHANGED_FILES" ]; then
 fi
 
 # Detect test runner
-RUNNER=$(detect_tool "$ROOT_DIR/package.json" "vitest" "jest")
+RUNNER=$(detect_test_runner "$ROOT_DIR/package.json")
 
 if [ -z "$RUNNER" ]; then
-  echo -e "${YELLOW}No test runner found in package.json (checked: vitest, jest)${NC}"
+  echo -e "${YELLOW}No test runner found in package.json (checked: vitest, jest, node --test)${NC}"
   exit 0
 fi
 
@@ -78,6 +78,23 @@ run_tests() {
       ;;
     jest)
       (cd "$dir" && echo "$files" | xargs npx jest --findRelatedTests --passWithNoTests) || {
+        echo -e "${RED}Tests failed in $dir${NC}"
+        return 1
+      }
+      ;;
+    node-test)
+      # Normalize space-separated paths (from monorepo mode) to newline-separated
+      local normalized_files
+      normalized_files=$(echo "$files" | tr ' ' '\n' | sed '/^$/d')
+      local test_files
+      test_files=$(map_to_test_files "$normalized_files" "$dir")
+      if [ -z "$test_files" ]; then
+        echo -e "${YELLOW}No matching test files found for changed files${NC}"
+        return 0
+      fi
+      local abs_test_files
+      abs_test_files=$(echo "$test_files" | sed "s|^|$dir/|")
+      (cd "$dir" && echo "$abs_test_files" | tr '\n' '\0' | xargs -0 node --test --) || {
         echo -e "${RED}Tests failed in $dir${NC}"
         return 1
       }
