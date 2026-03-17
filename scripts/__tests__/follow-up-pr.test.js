@@ -1,6 +1,6 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { classifyCommentPriority, isBlockingPriority, getResolvedCommentIds, decideNextAction } = require('../follow-up-pr.js');
+const { classifyCommentPriority, isBlockingPriority, getResolvedCommentIds, dismissOutdatedThreads, decideNextAction } = require('../follow-up-pr.js');
 
 describe('classifyCommentPriority', () => {
   describe('Copilot (copilot-pull-request-reviewer)', () => {
@@ -141,9 +141,9 @@ describe('isBlockingPriority', () => {
 });
 
 describe('getResolvedCommentIds', () => {
-  function makeComments(ids, hasNextPage = false, endCursor = null) {
+  function makeComments(ids) {
     return {
-      pageInfo: { hasNextPage, endCursor },
+      totalCount: ids.length,
       nodes: ids.map((id) => ({ databaseId: id })),
     };
   }
@@ -165,8 +165,8 @@ describe('getResolvedCommentIds', () => {
 
   it('returns empty set when no threads exist', () => {
     const exec = () => makeGraphQLResponse([]);
-    const ids = getResolvedCommentIds('owner/repo', 1, exec);
-    assert.equal(ids.size, 0);
+    const { resolved } = getResolvedCommentIds('owner/repo', 1, exec);
+    assert.equal(resolved.size, 0);
   });
 
   it('collects comment IDs from resolved threads', () => {
@@ -174,29 +174,29 @@ describe('getResolvedCommentIds', () => {
       { isResolved: true, isOutdated: false, comments: makeComments([100, 101]) },
       { isResolved: false, isOutdated: false, comments: makeComments([200]) },
     ]);
-    const ids = getResolvedCommentIds('owner/repo', 1, exec);
-    assert.equal(ids.has(100), true);
-    assert.equal(ids.has(101), true);
-    assert.equal(ids.has(200), false);
+    const { resolved } = getResolvedCommentIds('owner/repo', 1, exec);
+    assert.equal(resolved.has(100), true);
+    assert.equal(resolved.has(101), true);
+    assert.equal(resolved.has(200), false);
   });
 
   it('collects comment IDs from outdated threads', () => {
     const exec = () => makeGraphQLResponse([
-      { isResolved: false, isOutdated: true, comments: makeComments([300]) },
+      { id: 'PRRT_1', isResolved: false, isOutdated: true, comments: makeComments([300]) },
     ]);
-    const ids = getResolvedCommentIds('owner/repo', 1, exec);
-    assert.equal(ids.has(300), true);
+    const { resolved } = getResolvedCommentIds('owner/repo', 1, exec);
+    assert.equal(resolved.has(300), true);
   });
 
   it('collects all comments per thread (not just first)', () => {
     const exec = () => makeGraphQLResponse([
       { isResolved: true, isOutdated: false, comments: makeComments([1, 2, 3]) },
     ]);
-    const ids = getResolvedCommentIds('owner/repo', 1, exec);
-    assert.equal(ids.size, 3);
-    assert.equal(ids.has(1), true);
-    assert.equal(ids.has(2), true);
-    assert.equal(ids.has(3), true);
+    const { resolved } = getResolvedCommentIds('owner/repo', 1, exec);
+    assert.equal(resolved.size, 3);
+    assert.equal(resolved.has(1), true);
+    assert.equal(resolved.has(2), true);
+    assert.equal(resolved.has(3), true);
   });
 
   it('paginates through multiple pages of threads', () => {
@@ -213,23 +213,24 @@ describe('getResolvedCommentIds', () => {
         [{ isResolved: true, isOutdated: false, comments: makeComments([20]) }],
       );
     };
-    const ids = getResolvedCommentIds('owner/repo', 1, exec);
-    assert.equal(ids.size, 2);
-    assert.equal(ids.has(10), true);
-    assert.equal(ids.has(20), true);
+    const { resolved } = getResolvedCommentIds('owner/repo', 1, exec);
+    assert.equal(resolved.size, 2);
+    assert.equal(resolved.has(10), true);
+    assert.equal(resolved.has(20), true);
     assert.equal(callCount, 2);
   });
 
   it('returns empty set on GraphQL failure (graceful fallback)', () => {
     const exec = () => { throw new Error('GraphQL failed'); };
-    const ids = getResolvedCommentIds('owner/repo', 1, exec);
-    assert.equal(ids.size, 0);
+    const { resolved, outdatedThreadIds } = getResolvedCommentIds('owner/repo', 1, exec);
+    assert.equal(resolved.size, 0);
+    assert.equal(outdatedThreadIds.length, 0);
   });
 
   it('returns empty set when GraphQL returns errors without data', () => {
     const exec = () => ({ errors: [{ message: 'Rate limited' }] });
-    const ids = getResolvedCommentIds('owner/repo', 1, exec);
-    assert.equal(ids.size, 0);
+    const { resolved } = getResolvedCommentIds('owner/repo', 1, exec);
+    assert.equal(resolved.size, 0);
   });
 
   it('processes partial data when GraphQL returns errors with data', () => {
@@ -246,8 +247,8 @@ describe('getResolvedCommentIds', () => {
         },
       },
     });
-    const ids = getResolvedCommentIds('owner/repo', 1, exec);
-    assert.equal(ids.has(42), true);
+    const { resolved } = getResolvedCommentIds('owner/repo', 1, exec);
+    assert.equal(resolved.has(42), true);
   });
 
   it('handles threads with missing comments gracefully', () => {
@@ -256,8 +257,8 @@ describe('getResolvedCommentIds', () => {
       { isResolved: true, isOutdated: false, comments: null },
       { isResolved: true, isOutdated: false },
     ]);
-    const ids = getResolvedCommentIds('owner/repo', 1, exec);
-    assert.equal(ids.size, 0);
+    const { resolved } = getResolvedCommentIds('owner/repo', 1, exec);
+    assert.equal(resolved.size, 0);
   });
 
   it('does not pass cursor arg on first request', () => {
@@ -283,8 +284,52 @@ describe('getResolvedCommentIds', () => {
       }
       throw new Error('Network error mid-pagination');
     };
-    const ids = getResolvedCommentIds('owner/repo', 1, exec);
-    assert.equal(ids.size, 0, 'should return empty set on partial failure');
+    const { resolved } = getResolvedCommentIds('owner/repo', 1, exec);
+    assert.equal(resolved.size, 0, 'should return empty set on partial failure');
+  });
+
+  it('returns outdated thread IDs for threads that are outdated but not resolved', () => {
+    const exec = () => makeGraphQLResponse([
+      { id: 'PRRT_outdated1', isResolved: false, isOutdated: true, comments: makeComments([500]) },
+      { id: 'PRRT_resolved', isResolved: true, isOutdated: true, comments: makeComments([501]) },
+      { id: 'PRRT_active', isResolved: false, isOutdated: false, comments: makeComments([502]) },
+    ]);
+    const { outdatedThreadIds } = getResolvedCommentIds('owner/repo', 1, exec);
+    assert.equal(outdatedThreadIds.length, 1);
+    assert.equal(outdatedThreadIds[0], 'PRRT_outdated1');
+  });
+});
+
+describe('dismissOutdatedThreads', () => {
+  it('calls resolveReviewThread mutation for each thread ID', () => {
+    const calls = [];
+    const exec = (args) => {
+      calls.push(args);
+      return { data: { resolveReviewThread: { thread: { isResolved: true } } } };
+    };
+    const dismissed = dismissOutdatedThreads(['PRRT_1', 'PRRT_2'], exec);
+    assert.equal(dismissed, 2);
+    assert.equal(calls.length, 2);
+    assert.ok(calls[0].includes('threadId=PRRT_1'));
+    assert.ok(calls[1].includes('threadId=PRRT_2'));
+  });
+
+  it('returns 0 for empty array', () => {
+    const exec = () => { throw new Error('should not be called'); };
+    const dismissed = dismissOutdatedThreads([], exec);
+    assert.equal(dismissed, 0);
+  });
+
+  it('continues on individual thread failure and returns partial count', () => {
+    let callCount = 0;
+    const exec = () => {
+      callCount++;
+      if (callCount === 2) throw new Error('Permission denied');
+      return { data: { resolveReviewThread: { thread: { isResolved: true } } } };
+    };
+    const dismissed = dismissOutdatedThreads(['PRRT_1', 'PRRT_2', 'PRRT_3'], exec);
+    assert.equal(dismissed, 2);
+    assert.equal(callCount, 3);
   });
 });
 

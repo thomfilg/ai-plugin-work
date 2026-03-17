@@ -302,9 +302,10 @@ function isBlockingPriority(priority) {
 
 function getResolvedCommentIds(repo, prNumber, execFn = ghExec) {
   const resolved = new Set();
+  const outdatedThreadIds = []; // thread IDs that are outdated but not yet resolved
   try {
     const [owner, name] = repo.split('/');
-    const query = `query($owner:String!,$name:String!,$pr:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$pr){reviewThreads(first:100,after:$cursor){pageInfo{hasNextPage endCursor}nodes{isResolved isOutdated comments(first:100){totalCount nodes{databaseId}}}}}}}`;
+    const query = `query($owner:String!,$name:String!,$pr:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$pr){reviewThreads(first:100,after:$cursor){pageInfo{hasNextPage endCursor}nodes{id isResolved isOutdated comments(first:100){totalCount nodes{databaseId}}}}}}}`;
     let cursor = null;
     do {
       const args = [
@@ -338,6 +339,10 @@ function getResolvedCommentIds(repo, prNumber, execFn = ghExec) {
           if (comments.totalCount > nodes.length) {
             console.error(c.dim(`  ⚠ Resolved thread has ${comments.totalCount} comments (fetched ${nodes.length}) — some may not be filtered`));
           }
+          // Track outdated-but-not-resolved threads for optional dismissal
+          if (thread.isOutdated && !thread.isResolved && thread.id) {
+            outdatedThreadIds.push(thread.id);
+          }
         }
       }
       const pageInfo = threadData?.pageInfo;
@@ -346,8 +351,30 @@ function getResolvedCommentIds(repo, prNumber, execFn = ghExec) {
   } catch (err) {
     console.error(c.dim(`  ⚠ GraphQL thread query failed: ${err.message || 'unknown'} — falling back to REST-only filtering`));
     resolved.clear();
+    outdatedThreadIds.length = 0;
   }
-  return resolved;
+  return { resolved, outdatedThreadIds };
+}
+
+/**
+ * Resolve outdated review threads on GitHub via GraphQL mutation.
+ * Only called when ENABLE_DISMISS_OUTDATED_COMMENTS=true.
+ */
+function dismissOutdatedThreads(threadIds, execFn = ghExec) {
+  let dismissed = 0;
+  for (const threadId of threadIds) {
+    try {
+      const mutation = `mutation($threadId:ID!){resolveReviewThread(input:{threadId:$threadId}){thread{isResolved}}}`;
+      execFn(['api', 'graphql', '-f', `query=${mutation}`, '-f', `threadId=${threadId}`]);
+      dismissed++;
+    } catch (err) {
+      console.error(c.dim(`  ⚠ Failed to resolve thread ${threadId}: ${err.message || 'unknown'}`));
+    }
+  }
+  if (dismissed > 0) {
+    console.error(c.dim(`  ✓ Resolved ${dismissed} outdated review thread(s)`));
+  }
+  return dismissed;
 }
 
 function getReviews(prNumber) {
@@ -380,7 +407,12 @@ function getReviews(prNumber) {
 
     // Get resolved/outdated thread comment IDs via GraphQL
     // REST API doesn't expose thread resolution status
-    const resolvedCommentIds = getResolvedCommentIds(repo, prNumber);
+    const { resolved: resolvedCommentIds, outdatedThreadIds } = getResolvedCommentIds(repo, prNumber);
+
+    // Optionally resolve outdated threads on GitHub
+    if (process.env.ENABLE_DISMISS_OUTDATED_COMMENTS === 'true' && outdatedThreadIds.length > 0) {
+      dismissOutdatedThreads(outdatedThreadIds);
+    }
 
     const isActiveComment = (cm) => {
       if (cm.line === null && cm.original_line != null) return false;
@@ -842,4 +874,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { classifyCommentPriority, isBlockingPriority, getResolvedCommentIds, decideNextAction };
+module.exports = { classifyCommentPriority, isBlockingPriority, getResolvedCommentIds, dismissOutdatedThreads, decideNextAction };
