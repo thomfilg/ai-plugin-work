@@ -761,19 +761,37 @@ async function main() {
     console.log(formatReport(prInfo, ci, reviews, attempt, maxAttempts, { ...opts, interval: opts.interval }));
     console.log('');
 
-    // Fail-fast: CI failure → immediate exit
+    // Derive status flags
+    const isConflicting = prInfo.mergeable === 'CONFLICTING' || prInfo.mergeStateStatus === 'DIRTY';
+    const isMergeReady = prInfo.mergeable === 'MERGEABLE' && (!prInfo.mergeStateStatus || prInfo.mergeStateStatus === 'CLEAN' || prInfo.mergeStateStatus === 'HAS_HOOKS' || prInfo.mergeStateStatus === 'UNSTABLE');
+    const ciPassed = ci.status === 'passing';
+    // Non-blocking reviews (nitpicks/low priority) do NOT prevent "ready" status
+    const reviewsClear = opts.noReviews || (!reviews.hasBlocking && reviews.pendingBots.length === 0);
+
+    // ── Fail-fast exits (don't wait for anything else) ──
+
+    // 1. CI failure → immediate exit
     if (ci.status === 'failing') {
       state.finalStatus = 'ci-failing';
       saveState(state);
       process.exit(1);
     }
 
-    // All clear?
-    const isConflicting = prInfo.mergeable === 'CONFLICTING' || prInfo.mergeStateStatus === 'DIRTY';
-    const isMergeReady = prInfo.mergeable === 'MERGEABLE' && (!prInfo.mergeStateStatus || prInfo.mergeStateStatus === 'CLEAN' || prInfo.mergeStateStatus === 'HAS_HOOKS' || prInfo.mergeStateStatus === 'UNSTABLE');
-    const ciPassed = ci.status === 'passing';
-    // Non-blocking reviews (nitpicks/low priority) do NOT prevent "ready" status
-    const reviewsClear = opts.noReviews || (!reviews.hasBlocking && reviews.pendingBots.length === 0);
+    // 2. Merge conflicts → immediate exit (don't wait for CI)
+    if (isConflicting) {
+      state.finalStatus = 'conflicting';
+      saveState(state);
+      process.exit(1);
+    }
+
+    // 3. Blocking reviews → immediate exit (don't wait for CI)
+    if (!opts.noReviews && reviews.hasBlocking) {
+      state.finalStatus = 'reviews-blocking';
+      saveState(state);
+      process.exit(1);
+    }
+
+    // ── Success exit ──
 
     if (ciPassed && reviewsClear && isMergeReady) {
       state.finalStatus = 'ready';
@@ -781,16 +799,7 @@ async function main() {
       process.exit(0);
     }
 
-    // Blocking reviews or conflicts → exit 1 (agent needs to fix)
-    // Only keep polling for pending bots when the PR is otherwise fully mergeable
-    const hasPendingBotsOnly = reviews.pendingBots.length > 0 && !reviews.hasBlocking && !isConflicting && isMergeReady;
-    if (ciPassed && !hasPendingBotsOnly && (reviews.hasBlocking || !isMergeReady)) {
-      state.finalStatus = reviews.hasBlocking ? 'reviews-blocking' : isConflicting ? 'conflicting' : 'not-merge-ready';
-      saveState(state);
-      process.exit(1);
-    }
-
-    // Still pending — wait and retry
+    // ── Continue polling for pending CI or pending bot reviews ──
     if (attempt < maxAttempts) {
       await sleep(opts.interval);
     }
