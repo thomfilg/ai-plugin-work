@@ -73,6 +73,13 @@ function hasUnsafeMetachars(s) {
     const ch = s[i];
     if (ch === "'" && !inDouble) { inSingle = !inSingle; continue; }
     if (ch === '"' && !inSingle) { inDouble = !inDouble; continue; }
+
+    // Command substitution ($(), backtick) executes even inside double quotes —
+    // only single quotes suppress execution, so reject these unless in single quotes.
+    if (ch === '`' && !inSingle) return true;
+    if (ch === '$' && s[i + 1] === '(' && !inSingle) return true;
+
+    // Remaining metacharacters are safe inside any quotes
     if (inSingle || inDouble) continue;
 
     // Allow 2>/dev/null or >/dev/null (safe stderr/stdout suppression)
@@ -81,8 +88,6 @@ function hasUnsafeMetachars(s) {
       continue;
     }
     if (ch === '>' || ch === '<') return true;
-    if (ch === '`') return true;
-    if (ch === '$' && s[i + 1] === '(') return true;
     if (ch === '&' && s[i - 1] !== '&' && s[i + 1] !== '&') return true;
   }
   return false;

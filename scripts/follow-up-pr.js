@@ -685,7 +685,8 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
   } else if (isConflicting) {
     lines.push(`→ Resolve conflicts, push, then re-run: ${c.dim('node scripts/follow-up-pr.js')}`);
   } else if (!opts.noReviews && reviews.hasBlocking && reviews.pendingBots.length > 0) {
-    lines.push(`→ Waiting ${opts.interval}s for bot reviews (blocking comments may become stale)... (attempt ${attempt}/${maxAttempts})`);
+    const blockCount = reviews.blocking ? reviews.blocking.length : 0;
+    lines.push(`→ Waiting ${opts.interval}s for bot reviews (${blockCount} blocking comment${blockCount !== 1 ? 's' : ''} may become stale)... (attempt ${attempt}/${maxAttempts})`);
   } else if (!opts.noReviews && reviews.hasBlocking) {
     lines.push(`→ Address blocking reviews, push, then re-run: ${c.dim('node scripts/follow-up-pr.js')}`);
   } else if (ci.status === 'passing' && (!reviews.hasBlocking || opts.noReviews) && reviews.pendingBots.length === 0 && isMergeReady) {

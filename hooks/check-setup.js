@@ -234,7 +234,7 @@ function loadDocsFromPaths(envVarName, csvPaths, repoRoot) {
     }
     // Reject secret/sensitive files by name (denylist + pattern match)
     const basename = path.basename(relPath);
-    if (DOCS_DENYLIST.includes(basename) || /^\.env(\.|$)/i.test(basename) || /\.(pem|key|pfx|p12|secret|token|credentials)$/i.test(basename)) {
+    if (DOCS_DENYLIST.includes(basename) || /^\.env(\.|$)/i.test(basename) || /\.(pem|key|pfx|p12|secrets?|tokens?|credentials)$/i.test(basename)) {
       console.error(`Warning: ${envVarName} rejects sensitive file: ${relPath}`);
       continue;
     }
