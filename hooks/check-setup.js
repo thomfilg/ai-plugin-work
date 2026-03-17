@@ -256,7 +256,7 @@ function loadDocsFromPaths(envVarName, csvPaths, repoRoot) {
         continue;
       }
       docs += `\n--- ${relPath} ---\n${fs.readFileSync(realPath, 'utf8')}\n`;
-    } catch { // DOCS_DENYLIST + realpathSync guards above prevent secret leakage
+    } catch { // DOCS_DENYLIST + realpathSync + regex pattern guard against secret file leakage
       console.error(`Warning: ${envVarName} could not read file: ${relPath}`);
     }
   }
