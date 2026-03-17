@@ -96,7 +96,8 @@ POST_PR_SHA_FILE="${TASKS_DIR}/.post-pr-update-sha"
 CURRENT_SHA=$(git rev-parse HEAD)
 mkdir -p "$TASKS_DIR"
 
-# Load PR_DOCS from READ_DOCS_ON_PR env var (comma-separated relative paths, loaded at runtime)
+# Load PR_DOCS from READ_DOCS_ON_PR env var (comma-separated relative paths)
+# Note: Claude Code exports .env vars to child processes; for manual use, export READ_DOCS_ON_PR first
 PR_DOCS=""
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 if [ -n "${READ_DOCS_ON_PR:-}" ]; then
@@ -140,7 +141,7 @@ Task(pr-generator):
   IMPORTANT: Apply these project-specific rules when creating/updating the PR description.
 
   ${PR_DOCS}
-  ` : ''  /* PR_DOCS loaded from READ_DOCS_ON_PR in Step 2_setup (lines 100-112) */}
+  ` : ''  /* PR_DOCS loaded from READ_DOCS_ON_PR in Step 2_setup */}
 
   IMPORTANT: After completion, confirm success by outputting:
   "PR_UPDATE_RESULT: SUCCESS" or "PR_UPDATE_RESULT: FAILED"

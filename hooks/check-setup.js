@@ -215,6 +215,10 @@ function getAffectedFiles() {
  * @param {string} repoRoot - Absolute path to repo root
  * @returns {string} Concatenated file contents with headers, or empty string
  */
+// Denylist of filename patterns that should never be injected into agent prompts
+const DOCS_DENYLIST = ['.env', '.env.local', '.env.production', '.env.staging',
+  'id_rsa', 'id_ed25519', 'credentials.json', 'service-account.json'];
+
 function loadDocsFromPaths(envVarName, csvPaths, repoRoot) {
   const docPaths = (csvPaths || '').split(',').map(p => p.trim()).filter(Boolean);
   if (docPaths.length === 0) return '';
@@ -227,6 +231,12 @@ function loadDocsFromPaths(envVarName, csvPaths, repoRoot) {
       console.error(`Warning: ${envVarName} rejects absolute path: ${relPath}`);
       continue;
     }
+    // Reject secret/sensitive files by name
+    const basename = path.basename(relPath);
+    if (DOCS_DENYLIST.includes(basename) || /\.(pem|key|pfx|p12)$/i.test(basename)) {
+      console.error(`Warning: ${envVarName} rejects sensitive file: ${relPath}`);
+      continue;
+    }
     // Resolve and ensure path stays within repo root
     const absPath = path.resolve(resolvedRoot, relPath);
     if (!absPath.startsWith(resolvedRoot + path.sep) && absPath !== resolvedRoot) {
@@ -234,7 +244,7 @@ function loadDocsFromPaths(envVarName, csvPaths, repoRoot) {
       continue;
     }
     try {
-      // Resolve symlinks and re-check the real path stays within repo root
+      // Resolve symlinks to prevent symlink-based path traversal, then re-check
       const realPath = fs.realpathSync(absPath);
       if (!realPath.startsWith(resolvedRoot + path.sep)) {
         console.error(`Warning: ${envVarName} symlink escapes repo root: ${relPath}`);
@@ -246,7 +256,7 @@ function loadDocsFromPaths(envVarName, csvPaths, repoRoot) {
         continue;
       }
       docs += `\n--- ${relPath} ---\n${fs.readFileSync(realPath, 'utf8')}\n`;
-    } catch { // fs.realpathSync above resolves symlinks to prevent symlink-based path traversal
+    } catch {
       console.error(`Warning: ${envVarName} file not found: ${relPath}`);
     }
   }
@@ -277,12 +287,14 @@ function main() {
   const affectedFiles = getAffectedFiles();
 
   // Load project-specific docs for each agent type (always include all keys for stable schema)
+  // Use current worktree root (not mainWorktreePath) so docs reflect the feature branch
+  const currentRepoRoot = exec('git rev-parse --show-toplevel') || process.cwd();
   const docVars = ['READ_DOCS_ON_REVIEW', 'READ_DOCS_ON_QA', 'READ_DOCS_ON_DEV',
     'READ_DOCS_ON_E2E', 'READ_DOCS_ON_TEST', 'READ_DOCS_ON_STORYBOOK', 'READ_DOCS_ON_PR'];
   const loadedDocs = {};
   for (const varName of docVars) {
     const key = varName.replace('READ_DOCS_ON_', '').toLowerCase() + 'Docs';
-    loadedDocs[key] = loadDocsFromPaths(varName, config[varName], mainWorktreePath);
+    loadedDocs[key] = loadDocsFromPaths(varName, config[varName], currentRepoRoot);
   }
 
   // Output result

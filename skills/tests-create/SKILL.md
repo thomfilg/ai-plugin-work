@@ -28,7 +28,8 @@ tests_lib_require_jq
 tests_lib_init "$ARGUMENTS"
 tests_lib_print_context
 
-# Load TEST_DOCS from READ_DOCS_ON_TEST env var (comma-separated relative paths, loaded at runtime)
+# Load TEST_DOCS from READ_DOCS_ON_TEST env var (comma-separated relative paths)
+# Note: Claude Code exports .env vars to child processes; for manual use, export READ_DOCS_ON_TEST first
 TEST_DOCS=""
 REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 if [ -n "${READ_DOCS_ON_TEST:-}" ]; then
@@ -210,7 +211,7 @@ Task(${AGENT_TYPE}):
   IMPORTANT: Apply these project-specific testing rules when writing tests.
 
   ${TEST_DOCS}
-  ` : ''  /* TEST_DOCS loaded from READ_DOCS_ON_TEST in Step 0 (lines 32-44) */}
+  ` : ''  /* TEST_DOCS loaded from READ_DOCS_ON_TEST in Step 0 */}
 
   ## Instructions
 
