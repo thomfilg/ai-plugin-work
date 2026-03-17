@@ -343,8 +343,8 @@ function getResolvedCommentIds(repo, prNumber, execFn = ghExec) {
       const pageInfo = threadData?.pageInfo;
       cursor = pageInfo?.hasNextPage ? pageInfo.endCursor : null;
     } while (cursor);
-  } catch {
-    // Non-critical — clear partial results and fall back to REST-only filtering
+  } catch (err) {
+    console.error(c.dim(`  ⚠ GraphQL thread query failed: ${err.message || 'unknown'} — falling back to REST-only filtering`));
     resolved.clear();
   }
   return resolved;
