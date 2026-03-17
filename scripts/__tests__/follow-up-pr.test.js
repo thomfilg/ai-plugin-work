@@ -389,6 +389,13 @@ describe('decideNextAction', () => {
     assert.match(result.waitReason, /bot reviews pending/);
   });
 
+  it('returns poll (not exit-fail) when blocking reviews exist but bot reviews are pending', () => {
+    const blockingWithPendingBots = { hasBlocking: true, pendingBots: ['copilot-pull-request-reviewer'], blocking: [{ author: 'copilot' }] };
+    const result = decideNextAction('passing', mergeReady, blockingWithPendingBots, false);
+    assert.equal(result.action, 'poll');
+    assert.match(result.waitReason, /blocking reviews may become stale/);
+  });
+
   it('returns poll with merge status reason when not merge-ready', () => {
     const result = decideNextAction('passing', notReady, noReviews, false);
     assert.equal(result.action, 'poll');

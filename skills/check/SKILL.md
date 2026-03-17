@@ -106,6 +106,11 @@ Parse the JSON output to get:
 - `CHANGES_HASH` - Hash for cache validation
 - `IMPACTED_APPS` - Array of changed apps
 - `AFFECTED_FILES` - Object with `apps` (files per app) and `packages` (changed packages)
+- `REVIEW_DOCS` - Project-specific review docs (from `READ_DOCS_ON_REVIEW`)
+- `QA_DOCS` - Project-specific QA docs (from `READ_DOCS_ON_QA`)
+- `DEV_DOCS` - Project-specific dev docs (from `READ_DOCS_ON_DEV`)
+- `E2E_DOCS` - Project-specific E2E testing docs (from `READ_DOCS_ON_E2E`)
+- `TEST_DOCS` - Project-specific unit testing docs (from `READ_DOCS_ON_TEST`, used by tests-review/tests-create skills)
 - `cache.cached` - Whether reports are up-to-date
 
 **If `cache.cached` is true:**
@@ -243,6 +248,15 @@ Review all recent changes in the current working directory.
 REPORT_FOLDER: ${REPORT_FOLDER}
 CHANGES_HASH: ${CHANGES_HASH}
 
+${REVIEW_DOCS ? `
+## Project-Specific Review Rules
+
+IMPORTANT: Apply these project-specific rules as PRIMARY review criteria.
+Flag violations of these rules with higher priority than generic best practices.
+
+${REVIEW_DOCS}
+` : ''}
+
 🚫 See FORBIDDEN_COMMANDS above (quality-checker handles those)
 
 ✅ YOUR JOB - READ and ANALYZE code only:
@@ -319,7 +333,9 @@ const qaParams = {
   appUrl: RUNNING_APPS[APP_NAME].url,
   screenshotsFolder: `${REPORT_FOLDER}/screenshots/${APP_NAME}/`,
   affectedFiles: AFFECTED_FILES.apps[APP_NAME] || [],
-  affectedPackages: AFFECTED_FILES.packages || []
+  affectedPackages: AFFECTED_FILES.packages || [],
+  qaDocs: QA_DOCS || '',  // Project-specific QA docs from READ_DOCS_ON_QA
+  e2eDocs: E2E_DOCS || ''  // E2E docs extracted from check-setup JSON output field 'e2eDocs' (READ_DOCS_ON_E2E)
 };
 
 // Invoke skill:
@@ -399,6 +415,14 @@ CHANGES_HASH: ${CHANGES_HASH}
 JIRA_TICKET_ID: ${JIRA_TICKET_ID}
 AFFECTED_FILES: ${JSON.stringify(AFFECTED_FILES)}
 DB_ENV: ${JSON.stringify(DB_ENV)}
+
+${QA_DOCS ? `
+## Project-Specific QA Rules
+
+IMPORTANT: Apply these project-specific QA rules as PRIMARY testing criteria.
+
+${QA_DOCS}
+` : ''}
 
 Focus on:
 1. Changed API endpoints (routes/controllers)
@@ -653,6 +677,15 @@ JIRA_TICKET_ID: ${JIRA_TICKET_ID}
 ITERATION: ${iteration}
 INVOLVED_DEVELOPERS: ${INVOLVED_DEVELOPERS.join(', ')}
 
+${REVIEW_DOCS ? `
+## Project-Specific Review Rules
+
+IMPORTANT: Apply these project-specific rules as PRIMARY review criteria.
+Validate developers' decisions against these rules in addition to Jira requirements.
+
+${REVIEW_DOCS}
+` : ''}
+
 ## Your Role
 
 You made suggestions in code-review.check.md. Developers have now responded with their decisions.
@@ -728,6 +761,15 @@ REPORT_FOLDER: ${REPORT_FOLDER}
 CHANGES_HASH: ${CHANGES_HASH}
 JIRA_TICKET_ID: ${JIRA_TICKET_ID}
 DEVELOPER_TYPE: ${DEVELOPER_TYPE}  // e.g., "developer-nodejs-tdd"
+
+${DEV_DOCS ? `
+## Project-Specific Development Rules
+
+IMPORTANT: Apply these project-specific rules when evaluating suggestions and implementing fixes.
+Suggestions that align with these rules should be prioritized for implementation.
+
+${DEV_DOCS}
+` : ''}
 ITERATION: ${iteration}  // 1, 2, or 3
 OTHER_DEVELOPERS: ${INVOLVED_DEVELOPERS.filter(d => d !== DEVELOPER_TYPE)}
 
@@ -1063,3 +1105,8 @@ fi
 | `DB_ENV` | Database environment variables |
 | `INVOLVED_DEVELOPERS` | Array of developer agents to involve in code review |
 | `NEEDS_CONSENSUS` | Boolean - true if multiple developers need consensus |
+| `REVIEW_DOCS` | Project-specific review docs (from `READ_DOCS_ON_REVIEW`) |
+| `QA_DOCS` | Project-specific QA docs (from `READ_DOCS_ON_QA`) |
+| `DEV_DOCS` | Project-specific dev docs (from `READ_DOCS_ON_DEV`) |
+| `E2E_DOCS` | Project-specific E2E testing docs (from `READ_DOCS_ON_E2E`) |
+| `TEST_DOCS` | Project-specific unit testing docs (from `READ_DOCS_ON_TEST`) |

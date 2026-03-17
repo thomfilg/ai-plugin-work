@@ -209,6 +209,79 @@ function getAffectedFiles() {
 }
 
 /**
+ * Load project-specific docs from a comma-separated env var.
+ * @param {string} envVarName - Name of the env var (for warning messages)
+ * @param {string} csvPaths - Comma-separated relative paths
+ * @param {string} repoRoot - Absolute path to repo root
+ * @returns {string} Concatenated file contents with headers, or empty string
+ */
+// Denylist of filename patterns that should never be injected into agent prompts
+const DOCS_DENYLIST = ['.env', '.env.local', '.env.production', '.env.staging',
+  'id_rsa', 'id_ed25519', 'credentials.json', 'service-account.json',
+  '.secrets', '.tokens'];
+
+function loadDocsFromPaths(envVarName, csvPaths, repoRoot) {
+  const docPaths = (csvPaths || '').split(',').map(p => p.trim()).filter(Boolean);
+  if (docPaths.length === 0) return '';
+
+  const resolvedRoot = path.resolve(repoRoot);
+  let docs = '';
+  for (const relPath of docPaths) {
+    // Reject absolute paths
+    if (path.isAbsolute(relPath)) {
+      console.error(`Warning: ${envVarName} rejects absolute path: ${relPath}`);
+      continue;
+    }
+    // Reject secret/sensitive files by name (denylist + pattern match)
+    const basename = path.basename(relPath);
+    if (DOCS_DENYLIST.includes(basename) || /^\.env(\.|$)/i.test(basename) || /\.(pem|key|pfx|p12|secrets?|tokens?|credentials)$/i.test(basename)) {
+      console.error(`Warning: ${envVarName} rejects sensitive file: ${relPath}`);
+      continue;
+    }
+    // Resolve and ensure path stays within repo root
+    const absPath = path.resolve(resolvedRoot, relPath);
+    if (!absPath.startsWith(resolvedRoot + path.sep) && absPath !== resolvedRoot) {
+      console.error(`Warning: ${envVarName} path escapes repo root: ${relPath}`);
+      continue;
+    }
+    try {
+      // Resolve symlinks to prevent symlink-based path traversal, then re-check
+      const realPath = fs.realpathSync(absPath);
+      if (!realPath.startsWith(resolvedRoot + path.sep)) {
+        console.error(`Warning: ${envVarName} symlink escapes repo root: ${relPath}`);
+        continue;
+      }
+      const stat = fs.statSync(realPath);
+      if (!stat.isFile()) {
+        console.error(`Warning: ${envVarName} path is not a file: ${relPath}`);
+        continue;
+      }
+      const MAX_DOC_BYTES = 256 * 1024; // 256 KB cap — prevent injecting huge files into agent prompts
+      if (stat.size > MAX_DOC_BYTES) {
+        console.error(`Warning: ${envVarName} file too large (${stat.size} bytes, max ${MAX_DOC_BYTES}): ${relPath}`);
+        continue;
+      }
+      // Reject untracked/gitignored files — use repo-relative path since git ls-files expects pathspecs relative to repo root
+      const repoRelPath = path.relative(resolvedRoot, realPath);
+      try {
+        execSync(`git -C ${JSON.stringify(resolvedRoot)} ls-files --error-unmatch -- ${JSON.stringify(repoRelPath)}`, { stdio: 'ignore' });
+      } catch {
+        console.error(`Warning: ${envVarName} rejects untracked/gitignored file: ${relPath}`);
+        continue;
+      }
+      // Guards passed: DOCS_DENYLIST + .env regex + resolve-prefix + realpathSync + isFile + 256KB + git-ls-files
+      docs += `\n--- ${relPath} ---\n${fs.readFileSync(realPath, 'utf8')}\n`;
+    } catch (readErr) {
+      // Guard chain applied above: DOCS_DENYLIST → .env regex → path.resolve prefix →
+      // realpathSync → stat.isFile → 256 KB size cap → git ls-files (repo-relative)
+      const reason = readErr.code || readErr.message;
+      console.error(`Warning: ${envVarName} skipped (${reason}): ${relPath}`);
+    }
+  }
+  return docs;
+}
+
+/**
  * Main execution
  */
 function main() {
@@ -231,6 +304,17 @@ function main() {
   // Get affected files for QA dependency tracing
   const affectedFiles = getAffectedFiles();
 
+  // Load project-specific docs for each agent type (always include all keys for stable schema)
+  // Use current worktree root (not mainWorktreePath) so docs reflect the feature branch
+  const currentRepoRoot = exec('git rev-parse --show-toplevel') || process.cwd();
+  const docVars = ['READ_DOCS_ON_REVIEW', 'READ_DOCS_ON_QA', 'READ_DOCS_ON_DEV',
+    'READ_DOCS_ON_E2E', 'READ_DOCS_ON_TEST', 'READ_DOCS_ON_STORYBOOK', 'READ_DOCS_ON_PR'];
+  const loadedDocs = {};
+  for (const varName of docVars) {
+    const key = varName.replace('READ_DOCS_ON_', '').toLowerCase() + 'Docs';
+    loadedDocs[key] = loadDocsFromPaths(varName, config[varName], currentRepoRoot);
+  }
+
   // Output result
   const result = {
     mainWorktreePath,
@@ -243,6 +327,15 @@ function main() {
     affectedFiles,
     screenshotsFolder: path.join(reportFolder, 'screenshots')
   };
+
+  // Always include all doc keys for stable JSON schema
+  result.reviewDocs = loadedDocs.reviewDocs;
+  result.qaDocs = loadedDocs.qaDocs;
+  result.devDocs = loadedDocs.devDocs;
+  result.e2eDocs = loadedDocs.e2eDocs;
+  result.testDocs = loadedDocs.testDocs;
+  result.storybookDocs = loadedDocs.storybookDocs;
+  result.prDocs = loadedDocs.prDocs;
 
   // If not cached, setup the folder
   if (!cacheResult.cached) {

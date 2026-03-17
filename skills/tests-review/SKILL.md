@@ -28,6 +28,41 @@ tests_lib_require_jq
 tests_lib_init "$ARGUMENTS"
 tests_lib_print_context
 
+# Load TEST_DOCS from READ_DOCS_ON_TEST env var (comma-separated relative paths)
+# Note: Claude Code exports .env vars to child processes; for manual use, export READ_DOCS_ON_TEST first
+TEST_DOCS=""
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+if [ -n "${READ_DOCS_ON_TEST:-}" ]; then
+  IFS=',' read -ra DOC_PATHS <<< "$READ_DOCS_ON_TEST"
+  for doc_path in "${DOC_PATHS[@]}"; do
+    doc_path=$(echo "$doc_path" | xargs)
+    [ -z "$doc_path" ] && continue
+    [[ "$doc_path" = /* ]] && continue  # reject absolute paths
+    # Denylist: skip sensitive files by name
+    case "$(basename "$doc_path")" in .env|.env.*|*.pem|*.key|*.pfx|*.p12|*.secret|*.secrets|*.token|*.tokens|*.credentials|id_rsa|id_ed25519|credentials.json|service-account.json) continue ;; esac
+    # Portable path resolution (no realpath -m — GNU-only): resolve only if file exists
+    full_path="$REPO_ROOT/$doc_path"
+    [ -f "$full_path" ] || continue  # file must exist
+    resolved="$(cd "$(dirname "$full_path")" && pwd -P)/$(basename "$full_path")"  # quoted to preserve spaces/globs
+    [[ "$resolved" != "$REPO_ROOT"/* ]] && continue  # reject directory path traversal (pwd -P resolves dir symlinks)
+    # Reject file-level symlinks pointing outside repo
+    if [ -L "$resolved" ]; then
+      real_target=$(readlink -f "$resolved" 2>/dev/null \
+        || python3 -c "import os,sys;print(os.path.realpath(sys.argv[1]))" "$resolved" 2>/dev/null)
+      [ -z "$real_target" ] && continue
+      [[ "$real_target" != "$REPO_ROOT"/* ]] && continue
+      resolved="$real_target"
+    fi
+    # Size cap: 256 KB
+    file_size=$(wc -c < "$resolved" 2>/dev/null || echo 0)
+    [ "$file_size" -gt 262144 ] && continue
+    # Guard: reject untracked/gitignored — use resolved path (repo-relative) so symlink targets are also checked
+    resolved_rel="${resolved#"$REPO_ROOT"/}"
+    git -C "$REPO_ROOT" ls-files --error-unmatch -- "$resolved_rel" >/dev/null 2>&1 || continue
+    TEST_DOCS="$(printf '%s\n--- %s ---\n%s\n' "$TEST_DOCS" "$doc_path" "$(cat "$resolved")")"  # pwd -P resolves dir symlinks; readlink resolves file symlinks; git-ls-files ensures tracked
+  done
+fi
+
 # Initialize iteration tracking
 LAST_MODIFIED=0
 NO_CHANGE_COUNT=0
@@ -161,6 +196,14 @@ Task(qa-feature-tester):
   Iteration: ${ITERATION}
   Lines added since last: ${LINES_ADDED}
   Previous rating: ${PREV_RATING}
+
+  ${TEST_DOCS ? `
+  ## Project-Specific Testing Rules
+
+  IMPORTANT: Apply these project-specific testing rules when evaluating coverage.
+
+  ${TEST_DOCS}
+  ` : ''  /* TEST_DOCS loaded from READ_DOCS_ON_TEST in Step 0 */}
 
   ## Edge Case Categories
 

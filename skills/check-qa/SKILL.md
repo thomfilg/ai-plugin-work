@@ -52,6 +52,8 @@ const CHANGES_HASH = options.changesHash || 'NO_HASH';
 const SCREENSHOTS_FOLDER = options.screenshotsFolder || `${TASK_FOLDER}/screenshots/{APP_NAME}`;
 const AFFECTED_FILES = options.affectedFiles || [];
 const AFFECTED_PACKAGES = options.affectedPackages || [];
+const QA_DOCS = options.qaDocs || '';   // from READ_DOCS_ON_QA via check-setup.js
+const E2E_DOCS = options.e2eDocs || ''; // from READ_DOCS_ON_E2E via check-setup.js
 
 // Default URLs
 const APP_URL = options.appUrl || {
@@ -365,6 +367,21 @@ ${AFFECTED_FILES.join('\n') || 'None specified'}
 
 ## Packages Changed
 ${AFFECTED_PACKAGES.join('\n') || 'None specified'}
+
+${QA_DOCS ? `
+## Project-Specific QA Rules
+
+IMPORTANT: Apply these project-specific QA rules as PRIMARY testing criteria.
+
+${QA_DOCS}
+` : ''}
+${E2E_DOCS ? `
+## Project-Specific E2E Testing Rules
+
+IMPORTANT: Apply these E2E testing rules when writing and running E2E tests.
+
+${E2E_DOCS}
+` : ''  /* E2E_DOCS loaded from options.e2eDocs (line 56) */}
 ")
 ```
 

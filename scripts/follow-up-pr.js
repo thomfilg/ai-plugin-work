@@ -660,6 +660,11 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
           const preview = normalized.length > 80 ? normalized.slice(0, 77) + '...' : normalized;
           lines.push(`    ${c.dim('"' + preview + '"')}`);
         }
+        if (item.path && item.line) {
+          lines.push(`    ${c.yellow('→ Alter line ' + item.line + ' in ' + item.path + ' to address this comment (touch the exact line to invalidate stale review)')}`);
+        } else if (item.path) {
+          lines.push(`    ${c.yellow('→ Alter ' + item.path + ' to address this comment')}`);
+        }
       }
       if (reviews.nonBlocking.length > 0) {
         lines.push(`  + ${reviews.nonBlocking.length} non-blocking (nitpick/low — assess whether to address):`);
@@ -679,6 +684,9 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
     lines.push(`→ Fix the failure, push, then re-run: ${c.dim('node scripts/follow-up-pr.js')}`);
   } else if (isConflicting) {
     lines.push(`→ Resolve conflicts, push, then re-run: ${c.dim('node scripts/follow-up-pr.js')}`);
+  } else if (!opts.noReviews && reviews.hasBlocking && reviews.pendingBots.length > 0) {
+    const blockCount = reviews.blocking ? reviews.blocking.length : 0;
+    lines.push(`→ Waiting ${opts.interval}s for bot reviews (${blockCount} blocking comment${blockCount !== 1 ? 's' : ''} may become stale)... (attempt ${attempt}/${maxAttempts})`);
   } else if (!opts.noReviews && reviews.hasBlocking) {
     lines.push(`→ Address blocking reviews, push, then re-run: ${c.dim('node scripts/follow-up-pr.js')}`);
   } else if (ci.status === 'passing' && (!reviews.hasBlocking || opts.noReviews) && reviews.pendingBots.length === 0 && isMergeReady) {
@@ -721,7 +729,9 @@ function decideNextAction(ciStatus, prInfo, reviews, noReviews) {
   if (isConflicting) {
     return { action: 'exit-fail', finalStatus: 'conflicting' };
   }
-  if (!noReviews && reviews.hasBlocking) {
+  // Only fail-fast on blocking reviews when no bot reviews are pending.
+  // When bots are still reviewing, old blocking comments may become stale after the new review.
+  if (!noReviews && reviews.hasBlocking && reviews.pendingBots.length === 0) {
     return { action: 'exit-fail', finalStatus: 'reviews-blocking' };
   }
 
@@ -730,10 +740,11 @@ function decideNextAction(ciStatus, prInfo, reviews, noReviews) {
     return { action: 'exit-success', finalStatus: 'ready' };
   }
 
-  // Continue polling — determine why
+  // Still polling — build list of reasons (tested in follow-up-pr.test.js)
   const reasons = [];
   if (!ciPassed) reasons.push('CI checks pending');
   if (!noReviews && reviews.pendingBots.length > 0) reasons.push('bot reviews pending');
+  if (!noReviews && reviews.hasBlocking && reviews.pendingBots.length > 0) reasons.push('blocking reviews may become stale after bot review');
   if (!isMergeReady && !isConflicting) reasons.push(`merge status: ${prInfo.mergeStateStatus || 'UNKNOWN'}`);
 
   return {

@@ -220,4 +220,13 @@ The implementation demonstrates solid understanding of [technology] patterns wit
 - **Long-term**: Consider refactoring towards [suggested pattern]
 ```
 
+## Project-Specific Review Rules
+
+When **REVIEW_DOCS** are provided in the prompt, these project-specific rules take precedence over generic heuristics. Specifically:
+
+- Read all provided review docs carefully before starting the analysis
+- Flag violations of project-specific rules as 🔴 CRITICAL or 🟡 IMPORTANT (not 🟢 SUGGESTION)
+- When a project rule conflicts with a generic best practice, follow the project rule
+- Reference the specific doc and rule name when flagging violations (e.g., "Per code-quality.md: ...")
+
 When analyzing code, always consider the context, project constraints, and team capabilities. Provide practical, implementable suggestions that truly improve code quality while respecting the existing codebase's patterns and conventions.

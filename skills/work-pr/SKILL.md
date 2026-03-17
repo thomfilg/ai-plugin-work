@@ -95,6 +95,41 @@ PR_SHA_FILE="${TASKS_DIR}/.pr-update-sha"
 POST_PR_SHA_FILE="${TASKS_DIR}/.post-pr-update-sha"
 CURRENT_SHA=$(git rev-parse HEAD)
 mkdir -p "$TASKS_DIR"
+
+# Load PR_DOCS from READ_DOCS_ON_PR env var (comma-separated relative paths)
+# Note: READ_DOCS_ON_PR is sourced from .env by Claude Code automatically; for manual use: export READ_DOCS_ON_PR=<paths>
+PR_DOCS=""
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)  # use feature branch root, not main worktree
+if [ -n "${READ_DOCS_ON_PR:-}" ]; then
+  IFS=',' read -ra DOC_PATHS <<< "$READ_DOCS_ON_PR"
+  for doc_path in "${DOC_PATHS[@]}"; do
+    doc_path=$(echo "$doc_path" | xargs)  # trim whitespace
+    [ -z "$doc_path" ] && continue
+    [[ "$doc_path" = /* ]] && continue  # reject absolute paths
+    # Denylist: skip sensitive files by name
+    case "$(basename "$doc_path")" in .env|.env.*|*.pem|*.key|*.pfx|*.p12|*.secret|*.secrets|*.token|*.tokens|*.credentials|id_rsa|id_ed25519|credentials.json|service-account.json) continue ;; esac
+    # Portable path resolution (no realpath -m — GNU-only): resolve only if file exists
+    full_path="$REPO_ROOT/$doc_path"
+    [ -f "$full_path" ] || continue  # file must exist
+    resolved="$(cd "$(dirname "$full_path")" && pwd -P)/$(basename "$full_path")"  # quoted to preserve spaces/globs
+    [[ "$resolved" != "$REPO_ROOT"/* ]] && continue  # reject directory path traversal (pwd -P resolves dir symlinks)
+    # Reject file-level symlinks pointing outside repo
+    if [ -L "$resolved" ]; then
+      real_target=$(readlink -f "$resolved" 2>/dev/null \
+        || python3 -c "import os,sys;print(os.path.realpath(sys.argv[1]))" "$resolved" 2>/dev/null)
+      [ -z "$real_target" ] && continue
+      [[ "$real_target" != "$REPO_ROOT"/* ]] && continue
+      resolved="$real_target"
+    fi
+    # Size cap: 256 KB
+    file_size=$(wc -c < "$resolved" 2>/dev/null || echo 0)
+    [ "$file_size" -gt 262144 ] && continue
+    # Guard: reject untracked/gitignored — use resolved path (repo-relative) so symlink targets are also checked
+    resolved_rel="${resolved#"$REPO_ROOT"/}"
+    git -C "$REPO_ROOT" ls-files --error-unmatch -- "$resolved_rel" >/dev/null 2>&1 || continue
+    PR_DOCS="$(printf '%s\n--- %s ---\n%s\n' "$PR_DOCS" "$doc_path" "$(cat "$resolved")")"  # pwd -P resolves dir symlinks; readlink resolves file symlinks; git-ls-files ensures tracked
+  done
+fi
 ```
 
 Check the plan to determine next transition:
@@ -119,6 +154,13 @@ Task(pr-generator):
   Jira ticket: ${TICKET_ID}
   Status: Implementation complete, all checks passing
 
+  ${PR_DOCS ? `
+  ## Project-Specific PR Rules
+
+  IMPORTANT: Apply these project-specific rules when creating/updating the PR description.
+
+  ${PR_DOCS}
+  ` : ''  /* PR_DOCS: set in Step 2_setup from READ_DOCS_ON_PR; empty string when unset */}
   IMPORTANT: After completion, confirm success by outputting:
   "PR_UPDATE_RESULT: SUCCESS" or "PR_UPDATE_RESULT: FAILED"
 ```
