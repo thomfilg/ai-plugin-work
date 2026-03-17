@@ -139,20 +139,34 @@ describe('unsafe git commands → exit 2 (block)', () => {
     ['git add', 'git add apps/foo.tsx'],
     ['git add (chained)', 'git add . && git commit -m "test"'],
     ['git reset', 'git reset HEAD~1'],
+    ['git reset --soft', 'git reset --soft HEAD~1'],
     ['git checkout', 'git checkout -- .'],
     ['git stash', 'git stash pop'],
     ['git rebase', 'git rebase main'],
+    ['git revert', 'git revert HEAD'],
     ['git merge', 'git merge feature'],
     ['git clean', 'git clean -fd'],
     ['git rm', 'git rm file.txt'],
+    ['git restore', 'git restore --staged .'],
+    ['git cherry-pick', 'git cherry-pick abc123'],
+    ['git push --force', 'git push --force origin main'],
+    ['git push -f', 'git push -f origin main'],
+    ['git branch -D', 'git branch -D feature'],
+    ['git branch -d', 'git branch -d feature'],
+    ['destructive after safe (&&)', 'git diff --staged && git reset --soft HEAD~1'],
+    ['destructive after safe (;)', 'git log --oneline; git rebase main'],
+    ['git add hidden in chain', 'git commit -m "test" && git add .'],
+    ['safe git + non-git (&&)', 'git status && rm -rf /'],
+    ['safe git + non-git (;)', 'git push origin main; echo pwned'],
+    ['safe git + non-git (|)', 'git log | head -5'],
   ];
 
   for (const [name, cmd] of unsafeCommands) {
     it(`should block ${name}`, () => {
       const r = execHook({ tool_name: 'Bash', tool_input: { command: cmd } });
-      assert.strictEqual(r.exitCode, 2, `Expected exit 2, got ${r.exitCode}`);
+      assert.strictEqual(r.exitCode, 2, `Expected exit 2 for "${cmd}", got ${r.exitCode}`);
       assert.match(r.stderr, /COMMIT-WRITER GUARD/, `stderr should contain guard message`);
-      assert.match(r.stderr, /Blocked/, `stderr should mention "Blocked"`);
+      assert.match(r.stderr, /[Bb]locked/, `stderr should mention "Blocked"`);
     });
   }
 });
@@ -212,6 +226,11 @@ describe('edge cases', () => {
   it('should allow git command with leading whitespace', () => {
     const r = execHook({ tool_name: 'Bash', tool_input: { command: '  git status' } });
     assert.strictEqual(r.exitCode, 0);
+  });
+
+  it('should allow git log with --grep containing destructive keyword', () => {
+    const r = execHook({ tool_name: 'Bash', tool_input: { command: 'git log --grep="git reset"' } });
+    assert.strictEqual(r.exitCode, 0, `Should not false-positive on argument content. stderr: ${r.stderr}`);
   });
 
   it('should produce no stdout on allow (clean exit)', () => {

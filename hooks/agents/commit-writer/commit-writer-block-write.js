@@ -35,46 +35,73 @@ async function main() {
   if (toolName === 'Bash') {
     const command = (hookData.tool_input?.command || '').trim();
 
-    // Setup chain for commitlint/cz detection
-    if (/^\s*(grep\s.*package\.json|ls\s\.commitlintrc)/.test(command)) {
-      process.exit(0);
+    if (!command) {
+      process.stderr.write('COMMIT-WRITER GUARD: Empty command blocked.\n');
+      process.exit(2);
     }
 
-    // Allowlist of safe git subcommands
-    const safeGitCommands = [
-      'git commit',
-      'git status',
-      'git diff',
-      'git log',
-      'git show',
-      'git rev-parse',
-      'git branch',
-      'git remote',
-      'git config',
-      'git push',
-      'git tag',
-      'git ls-files',
-      'git cat-file',
-      'git describe',
-      'git shortlog',
-      'git name-rev',
-      'git for-each-ref',
+    // Destructive git patterns — checked per-segment (start of segment only)
+    // to avoid false positives from arguments like git log --grep="git reset"
+    const destructivePatterns = [
+      /^\s*git\s+(reset|rebase|revert|checkout|restore|clean|stash|cherry-pick|merge|am|apply)\b/,
+      /^\s*git\s+add\b/,
+      /^\s*git\s+rm\b/,
+      /^\s*git\s+branch\s+-[dD]\b/,
+      /^\s*git\s+tag\s+-d\b/,
+      /^\s*git\s+push\s+.*--force\b/,
+      /^\s*git\s+push\s+.*-f\b/,
     ];
 
-    const isSafeGit = safeGitCommands.some(cmd => {
-      const pattern = new RegExp(`^\\s*${cmd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$)`);
-      return pattern.test(command);
-    });
+    // Write commands: ONLY git commit and git push (no --force)
+    // Read-only commands: safe for inspection only
+    const safeGitCommands = [
+      'git commit', 'git push',
+      'git status', 'git diff', 'git log', 'git show',
+      'git rev-parse', 'git branch', 'git remote', 'git config',
+      'git ls-files', 'git cat-file', 'git describe', 'git shortlog',
+      'git name-rev', 'git for-each-ref', 'git tag',
+    ];
 
-    if (isSafeGit) {
-      process.exit(0);
+    // Split by shell separators (&&, ||, ;, |) to validate each segment
+    const segments = command.split(/\s*(?:&&|\|\||[;|])\s*/).filter(s => s.trim());
+
+    if (segments.length === 0) {
+      process.stderr.write('COMMIT-WRITER GUARD: Empty command blocked.\n');
+      process.exit(2);
     }
 
-    // Block unsafe Bash commands
-    process.stderr.write(
-      `COMMIT-WRITER GUARD: Only safe git commands allowed (commit, status, diff, log, show, push, branch, remote, config). Blocked: ${command.substring(0, 100)}\n`
-    );
-    process.exit(2);
+    for (const segment of segments) {
+      const trimmed = segment.trim();
+
+      // Setup chain for commitlint/cz detection
+      if (/^\s*(grep\s.*package\.json|ls\s\.commitlintrc)/.test(trimmed)) {
+        continue;
+      }
+
+      // Block destructive git commands at start of segment
+      if (destructivePatterns.some(p => p.test(trimmed))) {
+        process.stderr.write(
+          `COMMIT-WRITER GUARD: Destructive git command blocked. Only git commit and git push (write), plus read-only git commands allowed. Blocked: ${trimmed.substring(0, 100)}\n`
+        );
+        process.exit(2);
+      }
+
+      // Check if segment starts with a safe git command
+      const isSafe = safeGitCommands.some(cmd => {
+        const pattern = new RegExp(`^\\s*${cmd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$)`);
+        return pattern.test(trimmed);
+      });
+
+      if (!isSafe) {
+        process.stderr.write(
+          `COMMIT-WRITER GUARD: Only git commit, git push, and read-only git commands allowed. Blocked: ${trimmed.substring(0, 100)}\n`
+        );
+        process.exit(2);
+      }
+    }
+
+    // All segments are safe
+    process.exit(0);
   }
 
   // Block everything else (Write, Edit, Task, Skill, etc.)
