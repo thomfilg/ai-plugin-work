@@ -95,6 +95,17 @@ PR_SHA_FILE="${TASKS_DIR}/.pr-update-sha"
 POST_PR_SHA_FILE="${TASKS_DIR}/.post-pr-update-sha"
 CURRENT_SHA=$(git rev-parse HEAD)
 mkdir -p "$TASKS_DIR"
+
+# Load PR_DOCS from READ_DOCS_ON_PR env var (comma-separated relative paths)
+PR_DOCS=""
+if [ -n "${READ_DOCS_ON_PR:-}" ]; then
+  IFS=',' read -ra DOC_PATHS <<< "$READ_DOCS_ON_PR"
+  for doc_path in "${DOC_PATHS[@]}"; do
+    doc_path=$(echo "$doc_path" | xargs)  # trim whitespace
+    [ -z "$doc_path" ] && continue
+    [ -f "$doc_path" ] && PR_DOCS="${PR_DOCS}\n--- ${doc_path} ---\n$(cat "$doc_path")\n"
+  done
+fi
 ```
 
 Check the plan to determine next transition:

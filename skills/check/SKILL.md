@@ -332,7 +332,8 @@ const qaParams = {
   screenshotsFolder: `${REPORT_FOLDER}/screenshots/${APP_NAME}/`,
   affectedFiles: AFFECTED_FILES.apps[APP_NAME] || [],
   affectedPackages: AFFECTED_FILES.packages || [],
-  qaDocs: QA_DOCS || ''  // Project-specific QA docs from READ_DOCS_ON_QA
+  qaDocs: QA_DOCS || '',  // Project-specific QA docs from READ_DOCS_ON_QA
+  e2eDocs: E2E_DOCS || ''  // Project-specific E2E docs from READ_DOCS_ON_E2E
 };
 
 // Invoke skill:

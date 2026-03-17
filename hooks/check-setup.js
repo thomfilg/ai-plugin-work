@@ -216,17 +216,32 @@ function getAffectedFiles() {
  * @returns {string} Concatenated file contents with headers, or empty string
  */
 function loadDocsFromPaths(envVarName, csvPaths, repoRoot) {
-  const docPaths = (csvPaths || '').split(',').filter(Boolean);
+  const docPaths = (csvPaths || '').split(',').map(p => p.trim()).filter(Boolean);
   if (docPaths.length === 0) return '';
 
+  const resolvedRoot = path.resolve(repoRoot);
   let docs = '';
   for (const relPath of docPaths) {
-    const trimmedPath = relPath.trim();
-    const absPath = path.join(repoRoot, trimmedPath);
-    if (fs.existsSync(absPath)) {
-      docs += `\n--- ${trimmedPath} ---\n${fs.readFileSync(absPath, 'utf8')}\n`;
-    } else {
-      console.error(`Warning: ${envVarName} file not found: ${trimmedPath}`);
+    // Reject absolute paths
+    if (path.isAbsolute(relPath)) {
+      console.error(`Warning: ${envVarName} rejects absolute path: ${relPath}`);
+      continue;
+    }
+    // Resolve and ensure path stays within repo root
+    const absPath = path.resolve(resolvedRoot, relPath);
+    if (!absPath.startsWith(resolvedRoot + path.sep) && absPath !== resolvedRoot) {
+      console.error(`Warning: ${envVarName} path escapes repo root: ${relPath}`);
+      continue;
+    }
+    try {
+      const stat = fs.statSync(absPath);
+      if (!stat.isFile()) {
+        console.error(`Warning: ${envVarName} path is not a file: ${relPath}`);
+        continue;
+      }
+      docs += `\n--- ${relPath} ---\n${fs.readFileSync(absPath, 'utf8')}\n`;
+    } catch {
+      console.error(`Warning: ${envVarName} file not found: ${relPath}`);
     }
   }
   return docs;
@@ -255,17 +270,13 @@ function main() {
   // Get affected files for QA dependency tracing
   const affectedFiles = getAffectedFiles();
 
-  // Load project-specific docs for each agent type
+  // Load project-specific docs for each agent type (always include all keys for stable schema)
   const docVars = ['READ_DOCS_ON_REVIEW', 'READ_DOCS_ON_QA', 'READ_DOCS_ON_DEV',
     'READ_DOCS_ON_E2E', 'READ_DOCS_ON_TEST', 'READ_DOCS_ON_STORYBOOK', 'READ_DOCS_ON_PR'];
   const loadedDocs = {};
   for (const varName of docVars) {
-    const content = loadDocsFromPaths(varName, config[varName], mainWorktreePath);
-    if (content) {
-      // e.g. READ_DOCS_ON_REVIEW -> reviewDocs, READ_DOCS_ON_QA -> qaDocs
-      const key = varName.replace('READ_DOCS_ON_', '').toLowerCase() + 'Docs';
-      loadedDocs[key] = content;
-    }
+    const key = varName.replace('READ_DOCS_ON_', '').toLowerCase() + 'Docs';
+    loadedDocs[key] = loadDocsFromPaths(varName, config[varName], mainWorktreePath);
   }
 
   // Output result
@@ -281,8 +292,14 @@ function main() {
     screenshotsFolder: path.join(reportFolder, 'screenshots')
   };
 
-  // Include all loaded docs in result
-  Object.assign(result, loadedDocs);
+  // Always include all doc keys for stable JSON schema
+  result.reviewDocs = loadedDocs.reviewDocs;
+  result.qaDocs = loadedDocs.qaDocs;
+  result.devDocs = loadedDocs.devDocs;
+  result.e2eDocs = loadedDocs.e2eDocs;
+  result.testDocs = loadedDocs.testDocs;
+  result.storybookDocs = loadedDocs.storybookDocs;
+  result.prDocs = loadedDocs.prDocs;
 
   // If not cached, setup the folder
   if (!cacheResult.cached) {

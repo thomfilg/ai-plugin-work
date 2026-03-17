@@ -27,6 +27,17 @@ tests_lib_strict_mode
 tests_lib_require_jq
 tests_lib_init "$ARGUMENTS"
 tests_lib_print_context
+
+# Load TEST_DOCS from READ_DOCS_ON_TEST env var (comma-separated relative paths)
+TEST_DOCS=""
+if [ -n "${READ_DOCS_ON_TEST:-}" ]; then
+  IFS=',' read -ra DOC_PATHS <<< "$READ_DOCS_ON_TEST"
+  for doc_path in "${DOC_PATHS[@]}"; do
+    doc_path=$(echo "$doc_path" | xargs)
+    [ -z "$doc_path" ] && continue
+    [ -f "$doc_path" ] && TEST_DOCS="${TEST_DOCS}\n--- ${doc_path} ---\n$(cat "$doc_path")\n"
+  done
+fi
 ```
 
 ---
