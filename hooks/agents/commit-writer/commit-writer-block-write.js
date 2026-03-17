@@ -124,7 +124,7 @@ function checkSegment(segment) {
     // git push — shell metacharacters already rejected by pre-check above; only force-push blocked here
     if (sub === 'push') {
       if (/--force\b|--force-with-lease\b|\s-f\b/.test(s)) block(`'git push --force/-f' is not allowed. Blocked: ${s.slice(0, 100)}`);
-      return;
+      return; // safe: hasUnsafeMetachars() pre-check above rejects >, <, `, $(), & outside quotes
     }
 
     // git tag — only listing (no -d, -a, -m, no creation)
@@ -170,10 +170,10 @@ function checkSegment(segment) {
       return; // allowed: --get, --list, or single-key read query
     }
 
-    // Read-only subcommands — block --output/-o that could write files to the filesystem
+    // Read-only subcommands — block --output/-o to prevent filesystem writes
     if (ALLOWED_GIT_READ.has(sub)) {
-      if (/\s(--output[\s=]|-o\s)/.test(s)) block(`'git ${sub}' with file-output flags is not allowed. Blocked: ${s.slice(0, 100)}`);
-      return; // read-only: diff, status, log, show, rev-parse, ls-files, etc.
+      if (/\s(--output[\s=]|-o\s)/.test(s)) block(`'git ${sub} --output/-o' writes files — not allowed. Blocked: ${s.slice(0, 100)}`);
+      return; // safe: diff, status, log, show, rev-parse, ls-files, etc.
     }
 
     // Everything else (reset, rebase, checkout, fetch, pull, add, rm, stash, merge, etc.) — BLOCKED
