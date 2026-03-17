@@ -40,25 +40,32 @@ async function main() {
       process.exit(0);
     }
 
-    // Allowlist of safe git subcommands
+    // Block destructive git commands ANYWHERE in the command (catches chained commands)
+    const destructivePatterns = [
+      /\bgit\s+(reset|rebase|revert|checkout|restore|clean|stash|cherry-pick|merge|am|apply)\b/,
+      /\bgit\s+add\b/,
+      /\bgit\s+rm\b/,
+      /\bgit\s+branch\s+-[dD]\b/,
+      /\bgit\s+tag\s+-d\b/,
+      /\bgit\s+push\s+[^|;&&]*--force\b/,
+      /\bgit\s+push\s+[^|;&&]*-f\b/,
+    ];
+
+    if (destructivePatterns.some(p => p.test(command))) {
+      process.stderr.write(
+        `COMMIT-WRITER GUARD: Destructive git command blocked. Only git commit and git push (write), plus read-only git commands allowed. Blocked: ${command.substring(0, 100)}\n`
+      );
+      process.exit(2);
+    }
+
+    // Write commands: ONLY git commit and git push (no --force)
+    // Read-only commands: safe for inspection only
     const safeGitCommands = [
-      'git commit',
-      'git status',
-      'git diff',
-      'git log',
-      'git show',
-      'git rev-parse',
-      'git branch',
-      'git remote',
-      'git config',
-      'git push',
-      'git tag',
-      'git ls-files',
-      'git cat-file',
-      'git describe',
-      'git shortlog',
-      'git name-rev',
-      'git for-each-ref',
+      'git commit', 'git push',
+      'git status', 'git diff', 'git log', 'git show',
+      'git rev-parse', 'git branch', 'git remote', 'git config',
+      'git ls-files', 'git cat-file', 'git describe', 'git shortlog',
+      'git name-rev', 'git for-each-ref', 'git tag',
     ];
 
     const isSafeGit = safeGitCommands.some(cmd => {
@@ -70,9 +77,9 @@ async function main() {
       process.exit(0);
     }
 
-    // Block unsafe Bash commands
+    // Block everything else
     process.stderr.write(
-      `COMMIT-WRITER GUARD: Only safe git commands allowed (commit, status, diff, log, show, push, branch, remote, config). Blocked: ${command.substring(0, 100)}\n`
+      `COMMIT-WRITER GUARD: Only git commit, git push, and read-only git commands allowed. Blocked: ${command.substring(0, 100)}\n`
     );
     process.exit(2);
   }
