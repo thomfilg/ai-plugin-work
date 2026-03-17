@@ -30,12 +30,16 @@ tests_lib_print_context
 
 # Load TEST_DOCS from READ_DOCS_ON_TEST env var (comma-separated relative paths, loaded at runtime)
 TEST_DOCS=""
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 if [ -n "${READ_DOCS_ON_TEST:-}" ]; then
   IFS=',' read -ra DOC_PATHS <<< "$READ_DOCS_ON_TEST"
   for doc_path in "${DOC_PATHS[@]}"; do
     doc_path=$(echo "$doc_path" | xargs)
     [ -z "$doc_path" ] && continue
-    [ -f "$doc_path" ] && TEST_DOCS="${TEST_DOCS}\n--- ${doc_path} ---\n$(cat "$doc_path")\n"
+    [[ "$doc_path" = /* ]] && continue  # reject absolute paths
+    resolved=$(realpath -m "$REPO_ROOT/$doc_path" 2>/dev/null)
+    [[ "$resolved" != "$REPO_ROOT"/* ]] && continue  # reject path traversal
+    [ -f "$resolved" ] && TEST_DOCS="$(printf '%s\n--- %s ---\n%s\n' "$TEST_DOCS" "$doc_path" "$(cat "$resolved")")"
   done
 fi
 

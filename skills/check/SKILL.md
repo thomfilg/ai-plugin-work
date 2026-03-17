@@ -109,6 +109,8 @@ Parse the JSON output to get:
 - `REVIEW_DOCS` - Project-specific review docs (from `READ_DOCS_ON_REVIEW`)
 - `QA_DOCS` - Project-specific QA docs (from `READ_DOCS_ON_QA`)
 - `DEV_DOCS` - Project-specific dev docs (from `READ_DOCS_ON_DEV`)
+- `E2E_DOCS` - Project-specific E2E testing docs (from `READ_DOCS_ON_E2E`)
+- `TEST_DOCS` - Project-specific unit testing docs (from `READ_DOCS_ON_TEST`)
 - `cache.cached` - Whether reports are up-to-date
 
 **If `cache.cached` is true:**

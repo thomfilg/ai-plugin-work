@@ -234,12 +234,18 @@ function loadDocsFromPaths(envVarName, csvPaths, repoRoot) {
       continue;
     }
     try {
-      const stat = fs.statSync(absPath);
+      // Resolve symlinks and re-check the real path stays within repo root
+      const realPath = fs.realpathSync(absPath);
+      if (!realPath.startsWith(resolvedRoot + path.sep)) {
+        console.error(`Warning: ${envVarName} symlink escapes repo root: ${relPath}`);
+        continue;
+      }
+      const stat = fs.statSync(realPath);
       if (!stat.isFile()) {
         console.error(`Warning: ${envVarName} path is not a file: ${relPath}`);
         continue;
       }
-      docs += `\n--- ${relPath} ---\n${fs.readFileSync(absPath, 'utf8')}\n`;
+      docs += `\n--- ${relPath} ---\n${fs.readFileSync(realPath, 'utf8')}\n`;
     } catch {
       console.error(`Warning: ${envVarName} file not found: ${relPath}`);
     }

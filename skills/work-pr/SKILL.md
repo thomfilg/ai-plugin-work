@@ -98,12 +98,16 @@ mkdir -p "$TASKS_DIR"
 
 # Load PR_DOCS from READ_DOCS_ON_PR env var (comma-separated relative paths, loaded at runtime)
 PR_DOCS=""
+REPO_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 if [ -n "${READ_DOCS_ON_PR:-}" ]; then
   IFS=',' read -ra DOC_PATHS <<< "$READ_DOCS_ON_PR"
   for doc_path in "${DOC_PATHS[@]}"; do
     doc_path=$(echo "$doc_path" | xargs)  # trim whitespace
     [ -z "$doc_path" ] && continue
-    [ -f "$doc_path" ] && PR_DOCS="${PR_DOCS}\n--- ${doc_path} ---\n$(cat "$doc_path")\n"
+    [[ "$doc_path" = /* ]] && continue  # reject absolute paths
+    resolved=$(realpath -m "$REPO_ROOT/$doc_path" 2>/dev/null)
+    [[ "$resolved" != "$REPO_ROOT"/* ]] && continue  # reject path traversal
+    [ -f "$resolved" ] && PR_DOCS="$(printf '%s\n--- %s ---\n%s\n' "$PR_DOCS" "$doc_path" "$(cat "$resolved")")"
   done
 fi
 ```
