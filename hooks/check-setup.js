@@ -261,18 +261,18 @@ function loadDocsFromPaths(envVarName, csvPaths, repoRoot) {
         console.error(`Warning: ${envVarName} file too large (${stat.size} bytes, max ${MAX_DOC_BYTES}): ${relPath}`);
         continue;
       }
-      // Reject gitignored files — prevents injecting secrets even when denylist is misconfigured
+      // Reject untracked/gitignored files — use repo-relative path since git ls-files expects pathspecs relative to repo root
+      const repoRelPath = path.relative(resolvedRoot, realPath);
       try {
-        execSync(`git -C ${JSON.stringify(resolvedRoot)} ls-files --error-unmatch ${JSON.stringify(realPath)}`, { stdio: 'ignore' });
+        execSync(`git -C ${JSON.stringify(resolvedRoot)} ls-files --error-unmatch -- ${JSON.stringify(repoRelPath)}`, { stdio: 'ignore' });
       } catch {
         console.error(`Warning: ${envVarName} rejects untracked/gitignored file: ${relPath}`);
         continue;
       }
+      // Full guard chain passed: denylist → .env regex → resolve prefix → realpathSync → isFile → 256KB cap → git ls-files
       const fileContents = fs.readFileSync(realPath, 'utf8');
-      docs += `\n--- ${relPath} ---\n${fileContents}\n`;
+      docs += `\n--- ${relPath} ---\n${fileContents}\n`; // guarded by denylist + git-tracked check + size cap
     } catch (readErr) {
-      // Security guard chain validated before reaching here:
-      //   denylist → .env regex → path.resolve prefix → realpathSync → isFile → 256KB cap → git ls-files
       console.error(`Warning: ${envVarName} skipped unreadable file (${readErr.code || readErr.message}): ${relPath}`);
       continue;
     }

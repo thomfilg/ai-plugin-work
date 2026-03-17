@@ -57,7 +57,9 @@ if [ -n "${READ_DOCS_ON_TEST:-}" ]; then
     # Size cap: skip files larger than 256 KB to prevent injecting huge files into prompts
     file_size=$(wc -c < "$resolved" 2>/dev/null || echo 0)
     [ "$file_size" -gt 262144 ] && continue
-    TEST_DOCS="$(printf '%s\n--- %s ---\n%s\n' "$TEST_DOCS" "$doc_path" "$(cat "$resolved")")"  # resolved: dir symlinks via pwd -P + file symlinks via readlink -f
+    # Guard: reject untracked/gitignored files — prevents secret exfiltration even if denylist misses something
+    git -C "$REPO_ROOT" ls-files --error-unmatch -- "$doc_path" >/dev/null 2>&1 || continue
+    TEST_DOCS="$(printf '%s\n--- %s ---\n%s\n' "$TEST_DOCS" "$doc_path" "$(cat "$resolved")")"  # full guard chain: denylist + resolve + symlink + size + git-tracked
   done
 fi
 ```

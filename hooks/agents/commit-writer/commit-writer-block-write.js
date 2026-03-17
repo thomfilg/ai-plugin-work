@@ -36,6 +36,13 @@ function checkSegment(segment) {
   const s = segment.trim();
   if (!s) return; // skip empty segments from splits
 
+  // ── Pre-check: reject shell injection features in ALL segments ────────────
+  // Block command substitution ($(...), `...`), redirections (>, >>, <, <<), and
+  // process substitution (<(...), >(...)) that could execute or write despite an "allowed" prefix
+  if (/\$\(|`|>>|<<|>\(|<\(/.test(s) || /(?:^|[^-])>(?!\()/.test(s) || /(?:^|[^<])<(?!\()/.test(s)) {
+    block(`Shell injection features (redirections, command/process substitution) are forbidden. Blocked: ${s.slice(0, 100)}`);
+  }
+
   // ── git commands ──────────────────────────────────────────────────────────
   if (/^git\b/.test(s)) {
     const parts = s.split(/\s+/);
@@ -43,20 +50,26 @@ function checkSegment(segment) {
 
     if (!sub) block(`Bare 'git' command not allowed. Blocked: ${s.slice(0, 100)}`);
 
-    // git commit — allowed (but not --amend to prevent history rewriting)
+    // git commit — allowed, but restrict flags that stage files or rewrite history
     if (sub === 'commit') {
       if (/--amend\b/.test(s)) {
         block(`'git commit --amend' is not allowed. Blocked: ${s.slice(0, 100)}`);
       }
-      return; // allowed
+      if (/\s(-a|--all)\b/.test(s)) {
+        block(`'git commit -a/--all' is not allowed — commit only staged files. Blocked: ${s.slice(0, 100)}`);
+      }
+      if (/\s(-o|--only)\b/.test(s)) {
+        block(`'git commit --only' is not allowed — commit only staged files. Blocked: ${s.slice(0, 100)}`);
+      }
+      return; // allowed: commit staged files with -m
     }
 
-    // git push — allowed, but never --force or -f
+    // git push — allowed, but never --force, --force-with-lease, or -f
     if (sub === 'push') {
-      if (/--force\b|-f\b/.test(s)) {
+      if (/--force\b|--force-with-lease\b|-f\b/.test(s)) {
         block(`'git push --force' is not allowed. Blocked: ${s.slice(0, 100)}`);
       }
-      return; // allowed
+      return; // allowed: push to remote
     }
 
     // git tag — only listing (no -d, -a, -m, no creation)
