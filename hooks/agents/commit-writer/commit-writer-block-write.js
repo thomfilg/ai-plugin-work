@@ -40,10 +40,12 @@ async function main() {
       process.exit(2);
     }
 
-    // Destructive git patterns — checked per-segment (start of segment only)
+    // Destructive/mutating git patterns — checked per-segment (start of segment only)
     // to avoid false positives from arguments like git log --grep="git reset"
+    // commit-writer ONLY commits and pushes. Everything else is blocked.
     const destructivePatterns = [
       /^\s*git\s+(reset|rebase|revert|checkout|restore|clean|stash|cherry-pick|merge|am|apply)\b/,
+      /^\s*git\s+(fetch|pull|switch)\b/,
       /^\s*git\s+add\b/,
       /^\s*git\s+rm\b/,
       /^\s*git\s+branch\s+-[dD]\b/,
