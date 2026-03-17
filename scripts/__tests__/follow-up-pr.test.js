@@ -141,6 +141,13 @@ describe('isBlockingPriority', () => {
 });
 
 describe('getResolvedCommentIds', () => {
+  function makeComments(ids, hasNextPage = false, endCursor = null) {
+    return {
+      pageInfo: { hasNextPage, endCursor },
+      nodes: ids.map((id) => ({ databaseId: id })),
+    };
+  }
+
   function makeGraphQLResponse(threads, hasNextPage = false, endCursor = null) {
     return {
       data: {
@@ -164,8 +171,8 @@ describe('getResolvedCommentIds', () => {
 
   it('collects comment IDs from resolved threads', () => {
     const exec = () => makeGraphQLResponse([
-      { isResolved: true, isOutdated: false, comments: { nodes: [{ databaseId: 100 }, { databaseId: 101 }] } },
-      { isResolved: false, isOutdated: false, comments: { nodes: [{ databaseId: 200 }] } },
+      { isResolved: true, isOutdated: false, comments: makeComments([100, 101]) },
+      { isResolved: false, isOutdated: false, comments: makeComments([200]) },
     ]);
     const ids = getResolvedCommentIds('owner/repo', 1, exec);
     assert.equal(ids.has(100), true);
@@ -175,7 +182,7 @@ describe('getResolvedCommentIds', () => {
 
   it('collects comment IDs from outdated threads', () => {
     const exec = () => makeGraphQLResponse([
-      { isResolved: false, isOutdated: true, comments: { nodes: [{ databaseId: 300 }] } },
+      { isResolved: false, isOutdated: true, comments: makeComments([300]) },
     ]);
     const ids = getResolvedCommentIds('owner/repo', 1, exec);
     assert.equal(ids.has(300), true);
@@ -183,7 +190,7 @@ describe('getResolvedCommentIds', () => {
 
   it('collects all comments per thread (not just first)', () => {
     const exec = () => makeGraphQLResponse([
-      { isResolved: true, isOutdated: false, comments: { nodes: [{ databaseId: 1 }, { databaseId: 2 }, { databaseId: 3 }] } },
+      { isResolved: true, isOutdated: false, comments: makeComments([1, 2, 3]) },
     ]);
     const ids = getResolvedCommentIds('owner/repo', 1, exec);
     assert.equal(ids.size, 3);
@@ -198,12 +205,12 @@ describe('getResolvedCommentIds', () => {
       callCount++;
       if (callCount === 1) {
         return makeGraphQLResponse(
-          [{ isResolved: true, isOutdated: false, comments: { nodes: [{ databaseId: 10 }] } }],
+          [{ isResolved: true, isOutdated: false, comments: makeComments([10]) }],
           true, 'cursor-abc',
         );
       }
       return makeGraphQLResponse(
-        [{ isResolved: true, isOutdated: false, comments: { nodes: [{ databaseId: 20 }] } }],
+        [{ isResolved: true, isOutdated: false, comments: makeComments([20]) }],
       );
     };
     const ids = getResolvedCommentIds('owner/repo', 1, exec);
@@ -219,13 +226,65 @@ describe('getResolvedCommentIds', () => {
     assert.equal(ids.size, 0);
   });
 
+  it('returns empty set when GraphQL returns errors field', () => {
+    const exec = () => ({ errors: [{ message: 'Rate limited' }] });
+    const ids = getResolvedCommentIds('owner/repo', 1, exec);
+    assert.equal(ids.size, 0);
+  });
+
   it('handles threads with missing comments gracefully', () => {
     const exec = () => makeGraphQLResponse([
-      { isResolved: true, isOutdated: false, comments: { nodes: [] } },
+      { isResolved: true, isOutdated: false, comments: makeComments([]) },
       { isResolved: true, isOutdated: false, comments: null },
       { isResolved: true, isOutdated: false },
     ]);
     const ids = getResolvedCommentIds('owner/repo', 1, exec);
     assert.equal(ids.size, 0);
+  });
+
+  it('does not pass cursor arg on first request', () => {
+    let capturedArgs = null;
+    const exec = (args) => {
+      if (!capturedArgs) capturedArgs = args;
+      return makeGraphQLResponse([]);
+    };
+    getResolvedCommentIds('owner/repo', 1, exec);
+    const hasCursorArg = capturedArgs.some((a) => typeof a === 'string' && a.startsWith('cursor='));
+    assert.equal(hasCursorArg, false);
+  });
+
+  it('paginates comments within a thread when hasNextPage is true', () => {
+    let callCount = 0;
+    const exec = (args) => {
+      callCount++;
+      const queryArg = args.find((a) => a.startsWith('query=')) || '';
+      if (callCount === 1) {
+        // First call: thread query — thread with paginated comments
+        return makeGraphQLResponse([
+          {
+            isResolved: true, isOutdated: false,
+            comments: { pageInfo: { hasNextPage: true, endCursor: 'cmt-cursor' }, nodes: [{ databaseId: 50 }] },
+          },
+        ]);
+      }
+      // Second call: comment pagination query
+      return {
+        data: {
+          repository: {
+            pullRequest: {
+              reviewThreads: {
+                nodes: [{
+                  comments: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [{ databaseId: 51 }] },
+                }],
+              },
+            },
+          },
+        },
+      };
+    };
+    const ids = getResolvedCommentIds('owner/repo', 1, exec);
+    assert.equal(ids.has(50), true);
+    assert.equal(ids.has(51), true);
+    assert.equal(callCount, 2);
   });
 });

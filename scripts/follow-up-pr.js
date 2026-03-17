@@ -304,7 +304,7 @@ function getResolvedCommentIds(repo, prNumber, execFn = ghExec) {
   const resolved = new Set();
   try {
     const [owner, name] = repo.split('/');
-    const query = `query($owner:String!,$name:String!,$pr:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$pr){reviewThreads(first:100,after:$cursor){pageInfo{hasNextPage endCursor}nodes{isResolved isOutdated comments(first:100){nodes{databaseId}}}}}}}`;
+    const query = `query($owner:String!,$name:String!,$pr:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$pr){reviewThreads(first:100,after:$cursor){pageInfo{hasNextPage endCursor}nodes{isResolved isOutdated comments(first:100){pageInfo{hasNextPage endCursor}nodes{databaseId}}}}}}}`;
     let cursor = null;
     do {
       const args = [
@@ -316,16 +316,37 @@ function getResolvedCommentIds(repo, prNumber, execFn = ghExec) {
       ];
       if (cursor) {
         args.push('-f', `cursor=${cursor}`);
-      } else {
-        args.push('-f', 'cursor=');
       }
       const graphqlResult = execFn(args);
+      if (graphqlResult?.errors?.length) {
+        throw new Error(graphqlResult.errors[0].message || 'GraphQL error');
+      }
       const threadData = graphqlResult?.data?.repository?.pullRequest?.reviewThreads;
       const threads = threadData?.nodes || [];
       for (const thread of threads) {
         if (thread.isResolved || thread.isOutdated) {
           for (const comment of (thread.comments?.nodes || [])) {
             if (comment?.databaseId) resolved.add(comment.databaseId);
+          }
+          // Paginate comments if the thread has more than 100
+          let commentPageInfo = thread.comments?.pageInfo;
+          while (commentPageInfo?.hasNextPage) {
+            const commentQuery = `query($owner:String!,$name:String!,$pr:Int!,$threadCursor:String,$commentCursor:String!){repository(owner:$owner,name:$name){pullRequest(number:$pr){reviewThreads(first:1,after:$threadCursor){nodes{comments(first:100,after:$commentCursor){pageInfo{hasNextPage endCursor}nodes{databaseId}}}}}}}`;
+            const commentArgs = [
+              'api', 'graphql',
+              '-f', `query=${commentQuery}`,
+              '-f', `owner=${owner}`,
+              '-f', `name=${name}`,
+              '-F', `pr=${prNumber}`,
+              '-f', `commentCursor=${commentPageInfo.endCursor}`,
+            ];
+            const commentResult = execFn(commentArgs);
+            if (commentResult?.errors?.length) break;
+            const nextComments = commentResult?.data?.repository?.pullRequest?.reviewThreads?.nodes?.[0]?.comments;
+            for (const comment of (nextComments?.nodes || [])) {
+              if (comment?.databaseId) resolved.add(comment.databaseId);
+            }
+            commentPageInfo = nextComments?.pageInfo;
           }
         }
       }
