@@ -83,16 +83,20 @@ function checkSegment(segment) {
       return; // allowed (show, get-url, -v, etc.)
     }
 
-    // git config — read-only (--get/--list/--get-all/--get-regexp); block any write flags
+    // git config — read-only queries only
+    // Allowed: git config --get <key>, git config --list, git config <section.key> (single positional arg = read)
+    // Blocked: write flags, or 2+ positional args (git config <key> <value> = write)
     if (sub === 'config') {
-      if (/\s(--add|--unset|--unset-all|--remove-section|--rename-section|--global|--system|--worktree)\b/.test(s) ||
-          !/\s(--get\b|--list\b|-l\b|--get-all\b|--get-regexp\b|--get-urlmatch\b)/.test(s)) {
-        // Only allow if it explicitly uses a read flag; anything else could be a write
-        if (!/^git\s+config\s+(--get\b|--list\b|-l\b|--get-all\b|--get-regexp\b|--get-urlmatch\b)/.test(s)) {
-          block(`'git config' is only allowed for reading (--get, --list). Blocked: ${s.slice(0, 100)}`);
-        }
+      // Block write/mutation flags
+      if (/\s(--add|--unset|--unset-all|--remove-section|--rename-section|--global|--system|--worktree|--local|--file|--blob)\b/.test(s)) {
+        block(`'git config' write flags are not allowed. Blocked: ${s.slice(0, 100)}`);
       }
-      return; // allowed
+      // Block write form: git config <key> <value> (two or more positional non-flag args)
+      const configParts = s.replace(/^git\s+config/, '').trim().split(/\s+/).filter((a) => a && !a.startsWith('-'));
+      if (configParts.length >= 2) {
+        block(`'git config <key> <value>' (write form) is not allowed. Blocked: ${s.slice(0, 100)}`);
+      }
+      return; // allowed: --get, --list, or single-key read query
     }
 
     // All other allowed read-only subcommands
@@ -104,12 +108,14 @@ function checkSegment(segment) {
     block(`'git ${sub}' is not allowed. commit-writer only does: git commit, git push, and read-only git commands. Blocked: ${s.slice(0, 100)}`);
   }
 
-  // ── grep — only for setup detection (package.json / commitlintrc) ─────────
+  // ── grep — only for commitlint/cz setup detection in known config files ─────
   if (/^grep\b/.test(s)) {
-    if (/package\.json|commitlintrc/.test(s)) {
+    // Allow only: grep <pattern> package.json  OR  any grep mentioning .commitlintrc
+    // Require package.json to appear at the end (as the target file, not just mentioned anywhere)
+    if (/(?:^|\s)package\.json(\s|$)/.test(s) || /\.commitlintrc/.test(s)) {
       return; // allowed
     }
-    block(`grep is only allowed for commitlint/cz setup detection. Blocked: ${s.slice(0, 100)}`);
+    block(`grep is only allowed for commitlint/cz setup detection in package.json or .commitlintrc. Blocked: ${s.slice(0, 100)}`);
   }
 
   // ── ls — only for commitlintrc check ─────────────────────────────────────
@@ -120,8 +126,12 @@ function checkSegment(segment) {
     block(`ls is only allowed for commitlintrc detection. Blocked: ${s.slice(0, 100)}`);
   }
 
-  // ── echo — only harmless informational output ─────────────────────────────
+  // ── echo — only harmless informational output (no redirections or pipes) ─────
   if (/^echo\b/.test(s)) {
+    // Block redirections and command substitutions that could write to files or execute commands
+    if (/[>|`]/.test(s)) {
+      block(`'echo' with redirections, pipes, or command substitutions is not allowed. Blocked: ${s.slice(0, 100)}`);
+    }
     return; // allowed
   }
 
@@ -142,8 +152,8 @@ async function main() {
 
   const toolName = hookData.tool_name || '';
 
-  // Allow read-only tools unconditionally
-  if (['Read', 'Grep', 'Glob', 'LS'].includes(toolName)) {
+  // Allow read-only tools unconditionally (LS is the list-directory tool in some hook contexts)
+  if (['Read', 'Grep', 'Glob', 'LS', 'Ls'].includes(toolName)) {
     process.exit(0);
   }
 

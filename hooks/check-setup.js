@@ -270,9 +270,9 @@ function loadDocsFromPaths(envVarName, csvPaths, repoRoot) {
       }
       const fileContents = fs.readFileSync(realPath, 'utf8');
       docs += `\n--- ${relPath} ---\n${fileContents}\n`;
-    } catch {
-      // DOCS_DENYLIST (incl. *.secret/*.token/*.credentials) + realpathSync + regex guard against secret file leakage
-      console.error(`Warning: ${envVarName} could not read file: ${relPath}`);
+    } catch (readErr) {
+      // Protections applied before this point: denylist, .env regex, realpathSync, isFile, size cap, git ls-files
+      console.error(`Warning: ${envVarName} could not read file (${readErr.code || readErr.message}): ${relPath}`);
     }
   }
   return docs;

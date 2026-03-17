@@ -47,7 +47,10 @@ if [ -n "${READ_DOCS_ON_TEST:-}" ]; then
     [[ "$resolved" != "$REPO_ROOT"/* ]] && continue  # reject directory path traversal (pwd -P resolves dir symlinks)
     # Also reject if the file itself is a symlink pointing outside repo (file-level symlink check)
     if [ -L "$resolved" ]; then
-      real_target=$(readlink -f "$resolved" 2>/dev/null); [ -z "$real_target" ] && continue
+      # readlink -f is GNU/Linux only; python3 fallback handles macOS
+      real_target=$(readlink -f "$resolved" 2>/dev/null \
+        || python3 -c "import os,sys;print(os.path.realpath(sys.argv[1]))" "$resolved" 2>/dev/null)
+      [ -z "$real_target" ] && continue
       [[ "$real_target" != "$REPO_ROOT"/* ]] && continue  # reject file-level symlink traversal
       resolved="$real_target"
     fi
