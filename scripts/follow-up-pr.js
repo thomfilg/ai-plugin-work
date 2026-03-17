@@ -302,9 +302,10 @@ function isBlockingPriority(priority) {
 
 function getResolvedCommentIds(repo, prNumber, execFn = ghExec) {
   const resolved = new Set();
+  const outdatedThreadIds = []; // thread IDs that are outdated but not yet resolved
   try {
     const [owner, name] = repo.split('/');
-    const query = `query($owner:String!,$name:String!,$pr:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$pr){reviewThreads(first:100,after:$cursor){pageInfo{hasNextPage endCursor}nodes{isResolved isOutdated comments(first:100){totalCount nodes{databaseId}}}}}}}`;
+    const query = `query($owner:String!,$name:String!,$pr:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$pr){reviewThreads(first:100,after:$cursor){pageInfo{hasNextPage endCursor}nodes{id isResolved isOutdated comments(first:100){totalCount nodes{databaseId}}}}}}}`;
     let cursor = null;
     do {
       const args = [
@@ -338,6 +339,10 @@ function getResolvedCommentIds(repo, prNumber, execFn = ghExec) {
           if (comments.totalCount > nodes.length) {
             console.error(c.dim(`  ⚠ Resolved thread has ${comments.totalCount} comments (fetched ${nodes.length}) — some may not be filtered`));
           }
+          // Track outdated-but-not-resolved threads for optional dismissal
+          if (thread.isOutdated && !thread.isResolved && thread.id) {
+            outdatedThreadIds.push(thread.id);
+          }
         }
       }
       const pageInfo = threadData?.pageInfo;
@@ -346,8 +351,30 @@ function getResolvedCommentIds(repo, prNumber, execFn = ghExec) {
   } catch (err) {
     console.error(c.dim(`  ⚠ GraphQL thread query failed: ${err.message || 'unknown'} — falling back to REST-only filtering`));
     resolved.clear();
+    outdatedThreadIds.length = 0;
   }
-  return resolved;
+  return { resolved, outdatedThreadIds };
+}
+
+/**
+ * Resolve outdated review threads on GitHub via GraphQL mutation.
+ * Only called when ENABLE_RESOLVE_OUTDATED_COMMENTS=true.
+ */
+function resolveOutdatedThreads(threadIds, execFn = ghExec) {
+  let dismissed = 0;
+  for (const threadId of threadIds) {
+    try {
+      const mutation = `mutation($threadId:ID!){resolveReviewThread(input:{threadId:$threadId}){thread{isResolved}}}`;
+      execFn(['api', 'graphql', '-f', `query=${mutation}`, '-f', `threadId=${threadId}`]);
+      dismissed++;
+    } catch (err) {
+      console.error(c.dim(`  ⚠ Failed to resolve thread ${threadId}: ${err.message || 'unknown'}`));
+    }
+  }
+  if (dismissed > 0) {
+    console.error(c.dim(`  ✓ Resolved ${dismissed} outdated review thread(s)`));
+  }
+  return dismissed;
 }
 
 function getReviews(prNumber) {
@@ -380,7 +407,12 @@ function getReviews(prNumber) {
 
     // Get resolved/outdated thread comment IDs via GraphQL
     // REST API doesn't expose thread resolution status
-    const resolvedCommentIds = getResolvedCommentIds(repo, prNumber);
+    const { resolved: resolvedCommentIds, outdatedThreadIds } = getResolvedCommentIds(repo, prNumber);
+
+    // Optionally resolve outdated threads on GitHub
+    if (process.env.ENABLE_RESOLVE_OUTDATED_COMMENTS === 'true' && outdatedThreadIds.length > 0) {
+      resolveOutdatedThreads(outdatedThreadIds);
+    }
 
     const isActiveComment = (cm) => {
       if (cm.line === null && cm.original_line != null) return false;
@@ -641,16 +673,14 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
     }
   }
 
-  // Action hint
+  // Action hint — order matches fail-fast exit priority
   lines.push('');
   if (ci.status === 'failing') {
     lines.push(`→ Fix the failure, push, then re-run: ${c.dim('node scripts/follow-up-pr.js')}`);
-  } else if (ci.status === 'passing' && !opts.noReviews && reviews.hasBlocking) {
-    lines.push(`→ Address blocking reviews, push, then re-run: ${c.dim('node scripts/follow-up-pr.js')}`);
   } else if (isConflicting) {
     lines.push(`→ Resolve conflicts, push, then re-run: ${c.dim('node scripts/follow-up-pr.js')}`);
-  } else if (!isMergeReady) {
-    lines.push(`→ Merge status not ready (${prInfo.mergeable || 'UNKNOWN'}). Waiting...`);
+  } else if (!opts.noReviews && reviews.hasBlocking) {
+    lines.push(`→ Address blocking reviews, push, then re-run: ${c.dim('node scripts/follow-up-pr.js')}`);
   } else if (ci.status === 'passing' && (!reviews.hasBlocking || opts.noReviews) && reviews.pendingBots.length === 0 && isMergeReady) {
     lines.push(c.green('═══════════════════════════════════════'));
     lines.push(c.green('  PR READY TO REVIEW'));
@@ -662,9 +692,55 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
     lines.push(`→ Waiting ${opts.interval}s for checks... (attempt ${attempt}/${maxAttempts})`);
   } else if (!opts.noReviews && reviews.pendingBots.length > 0) {
     lines.push(`→ Waiting ${opts.interval}s for bot reviews... (attempt ${attempt}/${maxAttempts})`);
+  } else if (!isMergeReady) {
+    lines.push(`→ Merge status not ready (${prInfo.mergeable || 'UNKNOWN'}). Waiting...`);
   }
 
   return lines.join('\n');
+}
+
+// ── Decision Logic ──────────────────────────────────────────────────────────
+
+/**
+ * Pure function that decides the next action based on current PR state.
+ * Returns { action, finalStatus, waitReason? }
+ *   action: 'exit-fail' | 'exit-success' | 'poll'
+ *   finalStatus: string for state persistence
+ *   waitReason: human-readable reason when action is 'poll'
+ */
+function decideNextAction(ciStatus, prInfo, reviews, noReviews) {
+  const isConflicting = prInfo.mergeable === 'CONFLICTING' || prInfo.mergeStateStatus === 'DIRTY';
+  const isMergeReady = prInfo.mergeable === 'MERGEABLE' && (!prInfo.mergeStateStatus || prInfo.mergeStateStatus === 'CLEAN' || prInfo.mergeStateStatus === 'HAS_HOOKS' || prInfo.mergeStateStatus === 'UNSTABLE');
+  const ciPassed = ciStatus === 'passing';
+  const reviewsClear = noReviews || (!reviews.hasBlocking && reviews.pendingBots.length === 0);
+
+  // Fail-fast exits (ordered by priority)
+  if (ciStatus === 'failing') {
+    return { action: 'exit-fail', finalStatus: 'ci-failing' };
+  }
+  if (isConflicting) {
+    return { action: 'exit-fail', finalStatus: 'conflicting' };
+  }
+  if (!noReviews && reviews.hasBlocking) {
+    return { action: 'exit-fail', finalStatus: 'reviews-blocking' };
+  }
+
+  // Success
+  if (ciPassed && reviewsClear && isMergeReady) {
+    return { action: 'exit-success', finalStatus: 'ready' };
+  }
+
+  // Continue polling — determine why
+  const reasons = [];
+  if (!ciPassed) reasons.push('CI checks pending');
+  if (!noReviews && reviews.pendingBots.length > 0) reasons.push('bot reviews pending');
+  if (!isMergeReady && !isConflicting) reasons.push(`merge status: ${prInfo.mergeStateStatus || 'UNKNOWN'}`);
+
+  return {
+    action: 'poll',
+    finalStatus: 'timeout',
+    waitReason: reasons.join(', ') || 'unknown',
+  };
 }
 
 // ── Sleep ───────────────────────────────────────────────────────────────────
@@ -716,6 +792,8 @@ async function main() {
   });
 
   const maxAttempts = opts.once ? 1 : opts.maxAttempts;
+  let ci;
+  let reviews = { all: [], comments: [], actionable: [], blocking: [], nonBlocking: [], pendingBots: [], hasBlocking: false, hasActionable: false };
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     // Refresh PR info each attempt (mergeable status may change)
@@ -726,7 +804,6 @@ async function main() {
     }
 
     // Check CI
-    let ci;
     try {
       ci = checkCI(prInfo.number);
     } catch (err) {
@@ -735,7 +812,7 @@ async function main() {
     }
 
     // Check reviews (unless --no-reviews)
-    let reviews = { all: [], comments: [], actionable: [], blocking: [], nonBlocking: [], pendingBots: [], hasBlocking: false, hasActionable: false };
+    reviews = { all: [], comments: [], actionable: [], blocking: [], nonBlocking: [], pendingBots: [], hasBlocking: false, hasActionable: false };
     if (!opts.noReviews) {
       try {
         reviews = getReviews(prInfo.number);
@@ -761,43 +838,30 @@ async function main() {
     console.log(formatReport(prInfo, ci, reviews, attempt, maxAttempts, { ...opts, interval: opts.interval }));
     console.log('');
 
-    // Fail-fast: CI failure → immediate exit
-    if (ci.status === 'failing') {
-      state.finalStatus = 'ci-failing';
+    // Decide next action using extracted pure function
+    const decision = decideNextAction(ci.status, prInfo, reviews, opts.noReviews);
+
+    if (decision.action === 'exit-fail') {
+      state.finalStatus = decision.finalStatus;
       saveState(state);
       process.exit(1);
     }
 
-    // All clear?
-    const isConflicting = prInfo.mergeable === 'CONFLICTING' || prInfo.mergeStateStatus === 'DIRTY';
-    const isMergeReady = prInfo.mergeable === 'MERGEABLE' && (!prInfo.mergeStateStatus || prInfo.mergeStateStatus === 'CLEAN' || prInfo.mergeStateStatus === 'HAS_HOOKS' || prInfo.mergeStateStatus === 'UNSTABLE');
-    const ciPassed = ci.status === 'passing';
-    // Non-blocking reviews (nitpicks/low priority) do NOT prevent "ready" status
-    const reviewsClear = opts.noReviews || (!reviews.hasBlocking && reviews.pendingBots.length === 0);
-
-    if (ciPassed && reviewsClear && isMergeReady) {
-      state.finalStatus = 'ready';
+    if (decision.action === 'exit-success') {
+      state.finalStatus = decision.finalStatus;
       saveState(state);
       process.exit(0);
     }
 
-    // Blocking reviews or conflicts → exit 1 (agent needs to fix)
-    // Only keep polling for pending bots when the PR is otherwise fully mergeable
-    const hasPendingBotsOnly = reviews.pendingBots.length > 0 && !reviews.hasBlocking && !isConflicting && isMergeReady;
-    if (ciPassed && !hasPendingBotsOnly && (reviews.hasBlocking || !isMergeReady)) {
-      state.finalStatus = reviews.hasBlocking ? 'reviews-blocking' : isConflicting ? 'conflicting' : 'not-merge-ready';
-      saveState(state);
-      process.exit(1);
-    }
-
-    // Still pending — wait and retry
+    // Continue polling
     if (attempt < maxAttempts) {
       await sleep(opts.interval);
     }
   }
 
-  // Exhausted attempts
-  console.log(c.yellow(`Max attempts (${maxAttempts}) reached. CI checks still pending.`));
+  // Exhausted attempts — report what we were waiting on
+  const lastDecision = decideNextAction(ci.status, prInfo, reviews, opts.noReviews);
+  console.log(c.yellow(`Max attempts (${maxAttempts}) reached. Still waiting: ${lastDecision.waitReason || 'unknown'}`));
   state.finalStatus = 'timeout';
   saveState(state);
   process.exit(1);
@@ -811,4 +875,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { classifyCommentPriority, isBlockingPriority, getResolvedCommentIds };
+module.exports = { classifyCommentPriority, isBlockingPriority, getResolvedCommentIds, resolveOutdatedThreads, decideNextAction };
