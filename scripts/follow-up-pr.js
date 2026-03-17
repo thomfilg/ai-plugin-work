@@ -300,6 +300,44 @@ function isBlockingPriority(priority) {
   return priority === 'high' || priority === 'medium';
 }
 
+function getResolvedCommentIds(repo, prNumber, execFn = ghExec) {
+  const resolved = new Set();
+  try {
+    const [owner, name] = repo.split('/');
+    const query = `query($owner:String!,$name:String!,$pr:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$pr){reviewThreads(first:100,after:$cursor){pageInfo{hasNextPage endCursor}nodes{isResolved isOutdated comments(first:100){nodes{databaseId}}}}}}}`;
+    let cursor = null;
+    do {
+      const args = [
+        'api', 'graphql',
+        '-f', `query=${query}`,
+        '-f', `owner=${owner}`,
+        '-f', `name=${name}`,
+        '-F', `pr=${prNumber}`,
+      ];
+      if (cursor) {
+        args.push('-f', `cursor=${cursor}`);
+      } else {
+        args.push('-f', 'cursor=');
+      }
+      const graphqlResult = execFn(args);
+      const threadData = graphqlResult?.data?.repository?.pullRequest?.reviewThreads;
+      const threads = threadData?.nodes || [];
+      for (const thread of threads) {
+        if (thread.isResolved || thread.isOutdated) {
+          for (const comment of (thread.comments?.nodes || [])) {
+            if (comment?.databaseId) resolved.add(comment.databaseId);
+          }
+        }
+      }
+      const pageInfo = threadData?.pageInfo;
+      cursor = pageInfo?.hasNextPage ? pageInfo.endCursor : null;
+    } while (cursor);
+  } catch {
+    // Non-critical — fall back to REST-only filtering
+  }
+  return resolved;
+}
+
 function getReviews(prNumber) {
   const prArg = prNumber ? `${prNumber}` : '';
   const data = ghExec(`pr view ${prArg} --json reviews,statusCheckRollup`);
@@ -330,28 +368,8 @@ function getReviews(prNumber) {
 
     // Get resolved/outdated thread comment IDs via GraphQL
     // REST API doesn't expose thread resolution status
-    let resolvedCommentIds = new Set();
-    try {
-      const [owner, name] = repo.split('/');
-      const query = `query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){pullRequest(number:$pr){reviewThreads(first:100){nodes{isResolved isOutdated comments(first:1){nodes{databaseId}}}}}}}`;
-      const graphqlResult = ghExec([
-        'api', 'graphql',
-        '-f', `query=${query}`,
-        '-f', `owner=${owner}`,
-        '-f', `name=${name}`,
-        '-F', `pr=${prNumber}`,
-      ]);
-      const threads = graphqlResult?.data?.repository?.pullRequest?.reviewThreads?.nodes || [];
-      for (const thread of threads) {
-        if (thread.isResolved || thread.isOutdated) {
-          for (const comment of (thread.comments?.nodes || [])) {
-            if (comment?.databaseId) resolvedCommentIds.add(comment.databaseId);
-          }
-        }
-      }
-    } catch {
-      // Non-critical — fall back to REST-only filtering
-    }
+    const resolvedCommentIds = getResolvedCommentIds(repo, prNumber);
+
 
     const perPage = 100;
     let page = 1;
@@ -769,4 +787,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { classifyCommentPriority, isBlockingPriority };
+module.exports = { classifyCommentPriority, isBlockingPriority, getResolvedCommentIds };
