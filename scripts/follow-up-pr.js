@@ -300,6 +300,56 @@ function isBlockingPriority(priority) {
   return priority === 'high' || priority === 'medium';
 }
 
+function getResolvedCommentIds(repo, prNumber, execFn = ghExec) {
+  const resolved = new Set();
+  try {
+    const [owner, name] = repo.split('/');
+    const query = `query($owner:String!,$name:String!,$pr:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$pr){reviewThreads(first:100,after:$cursor){pageInfo{hasNextPage endCursor}nodes{isResolved isOutdated comments(first:100){totalCount nodes{databaseId}}}}}}}`;
+    let cursor = null;
+    do {
+      const args = [
+        'api', 'graphql',
+        '-f', `query=${query}`,
+        '-f', `owner=${owner}`,
+        '-f', `name=${name}`,
+        '-F', `pr=${prNumber}`,
+      ];
+      if (cursor) {
+        args.push('-f', `cursor=${cursor}`);
+      }
+      const graphqlResult = execFn(args);
+      const hasErrors = graphqlResult?.errors?.length > 0;
+      const hasData = Boolean(graphqlResult?.data);
+      if (hasErrors && !hasData) {
+        throw new Error(graphqlResult.errors[0].message || 'GraphQL error');
+      }
+      if (hasErrors && hasData) {
+        console.error(c.dim(`  ⚠ GraphQL partial error: ${graphqlResult.errors[0].message || 'unknown'} — continuing with available data`));
+      }
+      const threadData = graphqlResult?.data?.repository?.pullRequest?.reviewThreads;
+      const threads = threadData?.nodes || [];
+      for (const thread of threads) {
+        if (thread.isResolved || thread.isOutdated) {
+          const comments = thread.comments || {};
+          const nodes = comments.nodes || [];
+          for (const comment of nodes) {
+            if (comment?.databaseId) resolved.add(comment.databaseId);
+          }
+          if (comments.totalCount > nodes.length) {
+            console.error(c.dim(`  ⚠ Resolved thread has ${comments.totalCount} comments (fetched ${nodes.length}) — some may not be filtered`));
+          }
+        }
+      }
+      const pageInfo = threadData?.pageInfo;
+      cursor = pageInfo?.hasNextPage ? pageInfo.endCursor : null;
+    } while (cursor);
+  } catch (err) {
+    console.error(c.dim(`  ⚠ GraphQL thread query failed: ${err.message || 'unknown'} — falling back to REST-only filtering`));
+    resolved.clear();
+  }
+  return resolved;
+}
+
 function getReviews(prNumber) {
   const prArg = prNumber ? `${prNumber}` : '';
   const data = ghExec(`pr view ${prArg} --json reviews,statusCheckRollup`);
@@ -328,19 +378,23 @@ function getReviews(prNumber) {
       console.error(c.dim(`  (could not fetch branch commits: ${err.message?.slice(0, 80)})`));
     }
 
+    // Get resolved/outdated thread comment IDs via GraphQL
+    // REST API doesn't expose thread resolution status
+    const resolvedCommentIds = getResolvedCommentIds(repo, prNumber);
+
+    const isActiveComment = (cm) => {
+      if (cm.line === null && cm.original_line != null) return false;
+      if (branchCommits.size > 0 && cm.commit_id && !branchCommits.has(cm.commit_id)) return false;
+      if (resolvedCommentIds.has(cm.id)) return false;
+      return true;
+    };
+
     const perPage = 100;
     let page = 1;
     while (true) {
       const pageData = ghExec(['api', `repos/${repo}/pulls/${prNumber}/comments?per_page=${perPage}&page=${page}`]);
       if (!Array.isArray(pageData) || pageData.length === 0) break;
-      // Filter out stale comments:
-      // 1. line=null AND original_line exists = code changed since comment
-      // 2. commit_id not in branch commits = comment from pre-force-push
-      const activeComments = pageData.filter((cm) => {
-        if (cm.line === null && cm.original_line != null) return false;
-        if (branchCommits.size > 0 && cm.commit_id && !branchCommits.has(cm.commit_id)) return false;
-        return true;
-      });
+      const activeComments = pageData.filter(isActiveComment);
       comments.push(...activeComments.map((cm) => ({
         id: cm.id,
         author: cm.user?.login || 'unknown',
@@ -474,6 +528,18 @@ function initState(prInfo) {
 
 // ── Report Formatting ───────────────────────────────────────────────────────
 
+function formatNonBlockingItems(items, lines) {
+  for (const item of items) {
+    const loc = item.path ? ` ${c.dim(item.path + (item.line ? ':' + item.line : ''))}` : '';
+    lines.push(`  ${c.dim('○')} ${c.cyan('@' + item.author)} ${c.dim('[LOW]')}${loc}`);
+    if (item.body) {
+      const normalized = item.body.replace(/\s+/g, ' ');
+      const preview = normalized.length > 80 ? normalized.slice(0, 77) + '...' : normalized;
+      lines.push(`    ${c.dim('"' + preview + '"')}`);
+    }
+  }
+}
+
 function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
   const lines = [];
 
@@ -558,15 +624,18 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
         const loc = item.path ? ` ${c.dim(item.path + (item.line ? ':' + item.line : ''))}` : '';
         lines.push(`  ${c.red('✗')} ${c.cyan('@' + item.author)} ${priorityTag}${loc}`);
         if (item.body) {
-          const preview = item.body.length > 80 ? item.body.slice(0, 77) + '...' : item.body;
+          const normalized = item.body.replace(/\s+/g, ' ');
+          const preview = normalized.length > 80 ? normalized.slice(0, 77) + '...' : normalized;
           lines.push(`    ${c.dim('"' + preview + '"')}`);
         }
       }
       if (reviews.nonBlocking.length > 0) {
-        lines.push(c.dim(`  + ${reviews.nonBlocking.length} non-blocking (nitpick/low priority — ignored)`));
+        lines.push(`  + ${reviews.nonBlocking.length} non-blocking (nitpick/low — assess whether to address):`);
+        formatNonBlockingItems(reviews.nonBlocking, lines);
       }
     } else if (reviews.nonBlocking.length > 0) {
-      lines.push(c.green(`Reviews: CLEAR (${reviews.nonBlocking.length} non-blocking nitpicks — ignored)`));
+      lines.push(c.green(`Reviews: CLEAR`) + ` (${reviews.nonBlocking.length} non-blocking — assess whether to address):`);
+      formatNonBlockingItems(reviews.nonBlocking, lines);
     } else {
       lines.push(c.green('Reviews: CLEAR'));
     }
@@ -742,4 +811,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { classifyCommentPriority, isBlockingPriority };
+module.exports = { classifyCommentPriority, isBlockingPriority, getResolvedCommentIds };
