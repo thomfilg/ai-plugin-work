@@ -106,6 +106,7 @@ Parse the JSON output to get:
 - `CHANGES_HASH` - Hash for cache validation
 - `IMPACTED_APPS` - Array of changed apps
 - `AFFECTED_FILES` - Object with `apps` (files per app) and `packages` (changed packages)
+- `REVIEW_DOCS` - Project-specific review docs content (optional, from `READ_DOCS_ON_REVIEW` env var)
 - `cache.cached` - Whether reports are up-to-date
 
 **If `cache.cached` is true:**
@@ -242,6 +243,15 @@ Review all recent changes in the current working directory.
 
 REPORT_FOLDER: ${REPORT_FOLDER}
 CHANGES_HASH: ${CHANGES_HASH}
+
+${REVIEW_DOCS ? `
+## Project-Specific Review Rules
+
+IMPORTANT: Apply these project-specific rules as PRIMARY review criteria.
+Flag violations of these rules with higher priority than generic best practices.
+
+${REVIEW_DOCS}
+` : ''}
 
 🚫 See FORBIDDEN_COMMANDS above (quality-checker handles those)
 
@@ -653,6 +663,15 @@ JIRA_TICKET_ID: ${JIRA_TICKET_ID}
 ITERATION: ${iteration}
 INVOLVED_DEVELOPERS: ${INVOLVED_DEVELOPERS.join(', ')}
 
+${REVIEW_DOCS ? `
+## Project-Specific Review Rules
+
+IMPORTANT: Apply these project-specific rules as PRIMARY review criteria.
+Validate developers' decisions against these rules in addition to Jira requirements.
+
+${REVIEW_DOCS}
+` : ''}
+
 ## Your Role
 
 You made suggestions in code-review.check.md. Developers have now responded with their decisions.
@@ -1063,3 +1082,4 @@ fi
 | `DB_ENV` | Database environment variables |
 | `INVOLVED_DEVELOPERS` | Array of developer agents to involve in code review |
 | `NEEDS_CONSENSUS` | Boolean - true if multiple developers need consensus |
+| `REVIEW_DOCS` | Project-specific review docs content (from `READ_DOCS_ON_REVIEW` env var) |

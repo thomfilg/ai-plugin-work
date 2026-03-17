@@ -209,6 +209,27 @@ function getAffectedFiles() {
 }
 
 /**
+ * Read project-specific review docs specified by READ_DOCS_ON_REVIEW env var.
+ * Returns concatenated file contents with headers, or empty string if none configured.
+ */
+function loadReviewDocs(repoRoot) {
+  const docPaths = (config.READ_DOCS_ON_REVIEW || '').split(',').filter(Boolean);
+  if (docPaths.length === 0) return '';
+
+  let reviewDocs = '';
+  for (const relPath of docPaths) {
+    const trimmedPath = relPath.trim();
+    const absPath = path.join(repoRoot, trimmedPath);
+    if (fs.existsSync(absPath)) {
+      reviewDocs += `\n--- ${trimmedPath} ---\n${fs.readFileSync(absPath, 'utf8')}\n`;
+    } else {
+      console.error(`Warning: READ_DOCS_ON_REVIEW file not found: ${trimmedPath}`);
+    }
+  }
+  return reviewDocs;
+}
+
+/**
  * Main execution
  */
 function main() {
@@ -231,6 +252,9 @@ function main() {
   // Get affected files for QA dependency tracing
   const affectedFiles = getAffectedFiles();
 
+  // Load project-specific review docs
+  const reviewDocs = loadReviewDocs(mainWorktreePath);
+
   // Output result
   const result = {
     mainWorktreePath,
@@ -243,6 +267,11 @@ function main() {
     affectedFiles,
     screenshotsFolder: path.join(reportFolder, 'screenshots')
   };
+
+  // Only include reviewDocs if non-empty
+  if (reviewDocs) {
+    result.reviewDocs = reviewDocs;
+  }
 
   // If not cached, setup the folder
   if (!cacheResult.cached) {
