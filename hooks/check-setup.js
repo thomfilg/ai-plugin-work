@@ -209,24 +209,27 @@ function getAffectedFiles() {
 }
 
 /**
- * Read project-specific review docs specified by READ_DOCS_ON_REVIEW env var.
- * Returns concatenated file contents with headers, or empty string if none configured.
+ * Load project-specific docs from a comma-separated env var.
+ * @param {string} envVarName - Name of the env var (for warning messages)
+ * @param {string} csvPaths - Comma-separated relative paths
+ * @param {string} repoRoot - Absolute path to repo root
+ * @returns {string} Concatenated file contents with headers, or empty string
  */
-function loadReviewDocs(repoRoot) {
-  const docPaths = (config.READ_DOCS_ON_REVIEW || '').split(',').filter(Boolean);
+function loadDocsFromPaths(envVarName, csvPaths, repoRoot) {
+  const docPaths = (csvPaths || '').split(',').filter(Boolean);
   if (docPaths.length === 0) return '';
 
-  let reviewDocs = '';
+  let docs = '';
   for (const relPath of docPaths) {
     const trimmedPath = relPath.trim();
     const absPath = path.join(repoRoot, trimmedPath);
     if (fs.existsSync(absPath)) {
-      reviewDocs += `\n--- ${trimmedPath} ---\n${fs.readFileSync(absPath, 'utf8')}\n`;
+      docs += `\n--- ${trimmedPath} ---\n${fs.readFileSync(absPath, 'utf8')}\n`;
     } else {
-      console.error(`Warning: READ_DOCS_ON_REVIEW file not found: ${trimmedPath}`);
+      console.error(`Warning: ${envVarName} file not found: ${trimmedPath}`);
     }
   }
-  return reviewDocs;
+  return docs;
 }
 
 /**
@@ -252,8 +255,18 @@ function main() {
   // Get affected files for QA dependency tracing
   const affectedFiles = getAffectedFiles();
 
-  // Load project-specific review docs
-  const reviewDocs = loadReviewDocs(mainWorktreePath);
+  // Load project-specific docs for each agent type
+  const docVars = ['READ_DOCS_ON_REVIEW', 'READ_DOCS_ON_QA', 'READ_DOCS_ON_DEV',
+    'READ_DOCS_ON_E2E', 'READ_DOCS_ON_TEST', 'READ_DOCS_ON_STORYBOOK', 'READ_DOCS_ON_PR'];
+  const loadedDocs = {};
+  for (const varName of docVars) {
+    const content = loadDocsFromPaths(varName, config[varName], mainWorktreePath);
+    if (content) {
+      // e.g. READ_DOCS_ON_REVIEW -> reviewDocs, READ_DOCS_ON_QA -> qaDocs
+      const key = varName.replace('READ_DOCS_ON_', '').toLowerCase() + 'Docs';
+      loadedDocs[key] = content;
+    }
+  }
 
   // Output result
   const result = {
@@ -268,10 +281,8 @@ function main() {
     screenshotsFolder: path.join(reportFolder, 'screenshots')
   };
 
-  // Only include reviewDocs if non-empty
-  if (reviewDocs) {
-    result.reviewDocs = reviewDocs;
-  }
+  // Include all loaded docs in result
+  Object.assign(result, loadedDocs);
 
   // If not cached, setup the folder
   if (!cacheResult.cached) {

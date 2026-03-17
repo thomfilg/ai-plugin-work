@@ -119,6 +119,14 @@ Task(pr-generator):
   Jira ticket: ${TICKET_ID}
   Status: Implementation complete, all checks passing
 
+  ${PR_DOCS ? `
+  ## Project-Specific PR Rules
+
+  IMPORTANT: Apply these project-specific rules when creating/updating the PR description.
+
+  ${PR_DOCS}
+  ` : ''}
+
   IMPORTANT: After completion, confirm success by outputting:
   "PR_UPDATE_RESULT: SUCCESS" or "PR_UPDATE_RESULT: FAILED"
 ```

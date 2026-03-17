@@ -162,6 +162,14 @@ Task(qa-feature-tester):
   Lines added since last: ${LINES_ADDED}
   Previous rating: ${PREV_RATING}
 
+  ${TEST_DOCS ? `
+  ## Project-Specific Testing Rules
+
+  IMPORTANT: Apply these project-specific testing rules when evaluating coverage.
+
+  ${TEST_DOCS}
+  ` : ''}
+
   ## Edge Case Categories
 
   | Category | Priority | Look For |

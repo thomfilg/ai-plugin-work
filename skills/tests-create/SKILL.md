@@ -189,6 +189,14 @@ Task(${AGENT_TYPE}):
   - Extreme values (MAX_SAFE_INTEGER, long strings)
   - Concurrency (race conditions)
 
+  ${TEST_DOCS ? `
+  ## Project-Specific Testing Rules
+
+  IMPORTANT: Apply these project-specific testing rules when writing tests.
+
+  ${TEST_DOCS}
+  ` : ''}
+
   ## Instructions
 
   1. Read source file to understand what needs testing
