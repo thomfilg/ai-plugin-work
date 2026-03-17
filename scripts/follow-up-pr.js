@@ -328,17 +328,44 @@ function getReviews(prNumber) {
       console.error(c.dim(`  (could not fetch branch commits: ${err.message?.slice(0, 80)})`));
     }
 
+    // Get resolved/outdated thread comment IDs via GraphQL
+    // REST API doesn't expose thread resolution status
+    let resolvedCommentIds = new Set();
+    try {
+      const [owner, name] = repo.split('/');
+      const query = `query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){pullRequest(number:$pr){reviewThreads(first:100){nodes{isResolved isOutdated comments(first:1){nodes{databaseId}}}}}}}`;
+      const graphqlResult = ghExec([
+        'api', 'graphql',
+        '-f', `query=${query}`,
+        '-f', `owner=${owner}`,
+        '-f', `name=${name}`,
+        '-F', `pr=${prNumber}`,
+      ]);
+      const threads = graphqlResult?.data?.repository?.pullRequest?.reviewThreads?.nodes || [];
+      for (const thread of threads) {
+        if (thread.isResolved || thread.isOutdated) {
+          for (const comment of (thread.comments?.nodes || [])) {
+            if (comment?.databaseId) resolvedCommentIds.add(comment.databaseId);
+          }
+        }
+      }
+    } catch {
+      // Non-critical — fall back to REST-only filtering
+    }
+
     const perPage = 100;
     let page = 1;
     while (true) {
       const pageData = ghExec(['api', `repos/${repo}/pulls/${prNumber}/comments?per_page=${perPage}&page=${page}`]);
       if (!Array.isArray(pageData) || pageData.length === 0) break;
-      // Filter out stale comments:
+      // Filter out stale/resolved comments:
       // 1. line=null AND original_line exists = code changed since comment
       // 2. commit_id not in branch commits = comment from pre-force-push
+      // 3. comment belongs to a resolved or outdated thread (via GraphQL)
       const activeComments = pageData.filter((cm) => {
         if (cm.line === null && cm.original_line != null) return false;
         if (branchCommits.size > 0 && cm.commit_id && !branchCommits.has(cm.commit_id)) return false;
+        if (resolvedCommentIds.has(cm.id)) return false;
         return true;
       });
       comments.push(...activeComments.map((cm) => ({
