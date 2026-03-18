@@ -40,7 +40,7 @@ function parseArgs(argv = process.argv.slice(2)) {
   const args = {
     pr: null,
     maxAttempts: 10,
-    interval: 60,
+    interval: null, // null = adaptive (auto); set explicitly via --interval to override
     once: false,
     noReviews: false,
   };
@@ -81,7 +81,7 @@ function parseArgs(argv = process.argv.slice(2)) {
 Options:
   --pr <number>         PR number (default: auto-detect from branch)
   --max-attempts <n>    Max polling attempts (default: 10)
-  --interval <seconds>  Wait between attempts (default: 60)
+  --interval <seconds>  Fixed wait between attempts (default: adaptive)
   --once                Single check, no loop (for manual debugging only)
   --no-reviews          Skip review polling
   -h, --help            Show this help`);
@@ -483,10 +483,23 @@ function getReviews(prNumber) {
   // - CHANGES_REQUESTED: always actionable (human or bot)
   // - COMMENTED with body: actionable for humans, but bot COMMENTED reviews
   //   are typically informational summaries (not action items) — skip them.
-  const isBotAuthor = (author) => botReviewers.includes(author);
-  const actionable = reviews.filter(
-    (r) => r.state === 'CHANGES_REQUESTED' || (r.state === 'COMMENTED' && r.body && !isBotAuthor(r.author))
-  ).map((r) => {
+  // - Also detect bot reviews by HTML comment markers (e.g. <!-- BUGBOT_REVIEW -->)
+  // Bot author detection: match configured bot reviewers (case-insensitive) and
+  // known bot login variants used by classifyCommentPriority (Copilot, cursor-ai[bot]).
+  const botReviewersLower = botReviewers.map((b) => b.toLowerCase());
+  const BOT_BODY_MARKERS = /<!--\s*(BUGBOT_REVIEW|COPILOT_REVIEW)\s*-->/;
+  const isBotAuthor = (author) => {
+    const lower = (author || '').toLowerCase();
+    // Exact match against configured bot reviewers (case-insensitive)
+    if (botReviewersLower.includes(lower)) return true;
+    // Match known aliases used by classifyCommentPriority
+    if (lower === 'copilot' || lower === 'cursor-ai[bot]') return true;
+    // Fuzzy match: strip [bot] suffix from configured names
+    return botReviewersLower.some((bot) => bot.includes('[bot]') && lower === bot.replace('[bot]', ''));
+  };
+  const isBotReview = (r) => isBotAuthor(r.author) || BOT_BODY_MARKERS.test(r.body || '');
+  const isActionableReview = (r) => r.state === 'CHANGES_REQUESTED' || (r.state === 'COMMENTED' && r.body && !isBotReview(r));
+  const actionable = reviews.filter(isActionableReview).map((r) => {
     const priority = classifyCommentPriority(r.author, r.body);
     // CHANGES_REQUESTED is always at least medium (blocking), regardless of severity tags
     const effectivePriority = (r.state === 'CHANGES_REQUESTED' && priority === 'low') ? 'medium' : priority;
@@ -626,6 +639,14 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
     for (const ck of ci.passed) {
       lines.push(`  ${c.green('✓')} ${ck.name} — passed`);
     }
+  } else if (ci.status === 'cancelled') {
+    lines.push(c.yellow(`CI: CANCELLED (${ci.cancelled.length} cancelled, ${ci.passed.length} passed)`));
+    for (const ck of ci.cancelled) {
+      lines.push(`  ${c.yellow('⊘')} ${ck.name} — cancelled`);
+    }
+    for (const ck of ci.passed) {
+      lines.push(`  ${c.green('✓')} ${ck.name} — passed`);
+    }
   } else {
     lines.push(c.dim('CI: No checks found'));
   }
@@ -680,21 +701,25 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
 
   // Action hint — order matches fail-fast exit priority
   lines.push('');
+  const ciAcceptable = ci.status === 'passing' || ci.status === 'no-checks';
   if (ci.status === 'failing') {
     lines.push(`→ Fix the failure, push, then re-run: ${c.dim('node scripts/follow-up-pr.js')}`);
   } else if (isConflicting) {
     lines.push(`→ Resolve conflicts, push, then re-run: ${c.dim('node scripts/follow-up-pr.js')}`);
+  } else if (ci.status === 'cancelled') {
+    lines.push(`→ CI was cancelled. Re-push or re-run the workflow: ${c.dim('gh run rerun <run-id>')}`);
   } else if (!opts.noReviews && reviews.hasBlocking && reviews.pendingBots.length > 0) {
     const blockCount = reviews.blocking ? reviews.blocking.length : 0;
     lines.push(`→ Waiting ${opts.interval}s for bot reviews (${blockCount} blocking comment${blockCount !== 1 ? 's' : ''} may become stale)... (attempt ${attempt}/${maxAttempts})`);
   } else if (!opts.noReviews && reviews.hasBlocking) {
     lines.push(`→ Address blocking reviews, push, then re-run: ${c.dim('node scripts/follow-up-pr.js')}`);
-  } else if (ci.status === 'passing' && (!reviews.hasBlocking || opts.noReviews) && reviews.pendingBots.length === 0 && isMergeReady) {
+  } else if (ciAcceptable && (!reviews.hasBlocking || opts.noReviews) && reviews.pendingBots.length === 0 && isMergeReady) {
     lines.push(c.green('═══════════════════════════════════════'));
     lines.push(c.green('  PR READY TO REVIEW'));
     lines.push(c.green('═══════════════════════════════════════'));
     lines.push('');
-    lines.push(c.green(`CI: PASSED | Reviews: ${opts.noReviews ? 'SKIPPED' : 'CLEAR'} | Conflicts: NONE`));
+    const ciLabel = ci.status === 'no-checks' ? 'NO CHECKS' : 'PASSED';
+    lines.push(c.green(`CI: ${ciLabel} | Reviews: ${opts.noReviews ? 'SKIPPED' : 'CLEAR'} | Conflicts: NONE`));
     lines.push(c.green(`PR #${prInfo.number} is ready for review/merge!`));
   } else if (ci.status === 'pending') {
     lines.push(`→ Waiting ${opts.interval}s for checks... (attempt ${attempt}/${maxAttempts})`);
@@ -719,31 +744,40 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
 function decideNextAction(ciStatus, prInfo, reviews, noReviews) {
   const isConflicting = prInfo.mergeable === 'CONFLICTING' || prInfo.mergeStateStatus === 'DIRTY';
   const isMergeReady = prInfo.mergeable === 'MERGEABLE' && (!prInfo.mergeStateStatus || prInfo.mergeStateStatus === 'CLEAN' || prInfo.mergeStateStatus === 'HAS_HOOKS' || prInfo.mergeStateStatus === 'UNSTABLE');
-  const ciPassed = ciStatus === 'passing';
+  const ciAcceptable = ciStatus === 'passing' || ciStatus === 'no-checks';
+  const ciFinished = ciAcceptable || ciStatus === 'cancelled';
   const reviewsClear = noReviews || (!reviews.hasBlocking && reviews.pendingBots.length === 0);
 
   // Fail-fast exits (ordered by priority)
+  // Only CI failures, conflicts, and cancelled CI cause immediate exit.
+  // Reviews never cause fail-fast while CI is pending — wait for CI to finish first,
+  // since stale/outdated comments may be invalidated by new pushes.
   if (ciStatus === 'failing') {
     return { action: 'exit-fail', finalStatus: 'ci-failing' };
   }
   if (isConflicting) {
     return { action: 'exit-fail', finalStatus: 'conflicting' };
   }
-  // Only fail-fast on blocking reviews when no bot reviews are pending.
+  if (ciStatus === 'cancelled') {
+    return { action: 'exit-fail', finalStatus: 'ci-cancelled' };
+  }
+  // Only exit on blocking reviews AFTER CI has fully completed (not pending).
+  // When CI is still running, stale review comments may become outdated.
   // When bots are still reviewing, old blocking comments may become stale after the new review.
-  if (!noReviews && reviews.hasBlocking && reviews.pendingBots.length === 0) {
+  if (!noReviews && reviews.hasBlocking && reviews.pendingBots.length === 0 && ciFinished) {
     return { action: 'exit-fail', finalStatus: 'reviews-blocking' };
   }
 
-  // Success
-  if (ciPassed && reviewsClear && isMergeReady) {
+  // Success — CI acceptable (passing or no-checks), reviews clear, merge ready
+  if (ciAcceptable && reviewsClear && isMergeReady) {
     return { action: 'exit-success', finalStatus: 'ready' };
   }
 
   // Still polling — build list of reasons (tested in follow-up-pr.test.js)
   const reasons = [];
-  if (!ciPassed) reasons.push('CI checks pending');
+  if (!ciFinished) reasons.push('CI checks pending');
   if (!noReviews && reviews.pendingBots.length > 0) reasons.push('bot reviews pending');
+  if (!noReviews && reviews.hasBlocking && !ciFinished) reasons.push('waiting for CI to finish before evaluating reviews');
   if (!noReviews && reviews.hasBlocking && reviews.pendingBots.length > 0) reasons.push('blocking reviews may become stale after bot review');
   if (!isMergeReady && !isConflicting) reasons.push(`merge status: ${prInfo.mergeStateStatus || 'UNKNOWN'}`);
 
@@ -752,6 +786,37 @@ function decideNextAction(ciStatus, prInfo, reviews, noReviews) {
     finalStatus: 'timeout',
     waitReason: reasons.join(', ') || 'unknown',
   };
+}
+
+// ── Adaptive Polling ────────────────────────────────────────────────────────
+
+/**
+ * Compute poll interval based on attempt number and CI completion progress.
+ *
+ * Strategy:
+ *   - Attempt 1: 10s (quick check for obvious issues like conflicts)
+ *   - Until ~80% of CI steps complete:
+ *       >5 total steps → 60s polls
+ *       ≤5 total steps → 30s polls
+ *   - After 80% completion: 20s polls (finish line)
+ *
+ * Returns interval in seconds.
+ */
+function getAdaptiveInterval(attempt, ci) {
+  // First poll: quick sanity check
+  if (attempt === 1) return 10;
+
+  const total = ci.total || 0;
+  const completed = (ci.passed ? ci.passed.length : 0)
+    + (ci.failed ? ci.failed.length : 0)
+    + (ci.cancelled ? ci.cancelled.length : 0);
+  const completionRatio = total > 0 ? completed / total : 0;
+
+  // Finish line — most steps done, poll faster
+  if (completionRatio >= 0.8) return 20;
+
+  // Bulk wait — longer polls for many steps, shorter for few
+  return total > 5 ? 60 : 30;
 }
 
 // ── Sleep ───────────────────────────────────────────────────────────────────
@@ -844,9 +909,12 @@ async function main() {
     });
     saveState(state);
 
+    // Use explicit --interval if set, otherwise compute adaptive interval
+    const interval = opts.interval !== null ? opts.interval : getAdaptiveInterval(attempt, ci);
+
     // Print report
     console.log('');
-    console.log(formatReport(prInfo, ci, reviews, attempt, maxAttempts, { ...opts, interval: opts.interval }));
+    console.log(formatReport(prInfo, ci, reviews, attempt, maxAttempts, { ...opts, interval }));
     console.log('');
 
     // Decide next action using extracted pure function
@@ -864,9 +932,9 @@ async function main() {
       process.exit(0);
     }
 
-    // Continue polling
+    // Continue polling with adaptive interval
     if (attempt < maxAttempts) {
-      await sleep(opts.interval);
+      await sleep(interval);
     }
   }
 
@@ -886,4 +954,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { classifyCommentPriority, isBlockingPriority, getResolvedCommentIds, resolveOutdatedThreads, decideNextAction };
+module.exports = { classifyCommentPriority, isBlockingPriority, getResolvedCommentIds, resolveOutdatedThreads, decideNextAction, getAdaptiveInterval };
