@@ -1,6 +1,6 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { classifyCommentPriority, isBlockingPriority, getResolvedCommentIds, resolveOutdatedThreads, decideNextAction } = require('../follow-up-pr.js');
+const { classifyCommentPriority, isBlockingPriority, getResolvedCommentIds, resolveOutdatedThreads, decideNextAction, getAdaptiveInterval } = require('../follow-up-pr.js');
 
 describe('classifyCommentPriority', () => {
   describe('Copilot (copilot-pull-request-reviewer)', () => {
@@ -359,8 +359,32 @@ describe('decideNextAction', () => {
     assert.equal(result.finalStatus, 'conflicting');
   });
 
-  it('returns exit-fail with reviews-blocking when blocking reviews exist (even with pending CI)', () => {
+  it('returns poll (not exit-fail) when blocking reviews exist but CI is still pending', () => {
     const result = decideNextAction('pending', mergeReady, blockingReviews, false);
+    assert.equal(result.action, 'poll');
+    assert.match(result.waitReason, /waiting for CI to finish before evaluating reviews/);
+  });
+
+  it('exits reviews-blocking after CI passes with blocking reviews', () => {
+    const result = decideNextAction('passing', mergeReady, blockingReviews, false);
+    assert.equal(result.action, 'exit-fail');
+    assert.equal(result.finalStatus, 'reviews-blocking');
+  });
+
+  it('exits with ci-cancelled when CI is cancelled', () => {
+    const result = decideNextAction('cancelled', mergeReady, noReviews, false);
+    assert.equal(result.action, 'exit-fail');
+    assert.equal(result.finalStatus, 'ci-cancelled');
+  });
+
+  it('returns exit-success when CI has no checks, reviews clear, merge ready', () => {
+    const result = decideNextAction('no-checks', mergeReady, noReviews, false);
+    assert.equal(result.action, 'exit-success');
+    assert.equal(result.finalStatus, 'ready');
+  });
+
+  it('returns exit-fail with reviews-blocking when no-checks CI and blocking reviews', () => {
+    const result = decideNextAction('no-checks', mergeReady, blockingReviews, false);
     assert.equal(result.action, 'exit-fail');
     assert.equal(result.finalStatus, 'reviews-blocking');
   });
@@ -400,5 +424,51 @@ describe('decideNextAction', () => {
     const result = decideNextAction('passing', notReady, noReviews, false);
     assert.equal(result.action, 'poll');
     assert.match(result.waitReason, /merge status: BEHIND/);
+  });
+});
+
+describe('getAdaptiveInterval', () => {
+  const makeCi = (passed, running, failed = [], cancelled = []) => ({
+    total: passed.length + running.length + failed.length + cancelled.length,
+    passed: passed.map((n) => ({ name: n })),
+    running: running.map((n) => ({ name: n })),
+    failed: failed.map((n) => ({ name: n })),
+    cancelled: cancelled.map((n) => ({ name: n })),
+  });
+
+  it('returns 10s on first attempt (quick sanity check)', () => {
+    const ci = makeCi(['lint'], ['test', 'build', 'e2e', 'security', 'coverage']);
+    assert.equal(getAdaptiveInterval(1, ci), 10);
+  });
+
+  it('returns 60s for >5 steps with low completion', () => {
+    const ci = makeCi(['lint'], ['test', 'build', 'e2e', 'security', 'coverage']);
+    assert.equal(getAdaptiveInterval(2, ci), 60);
+  });
+
+  it('returns 30s for <=5 steps with low completion', () => {
+    const ci = makeCi(['lint'], ['test', 'build']);
+    assert.equal(getAdaptiveInterval(2, ci), 30);
+  });
+
+  it('returns 20s when >=80% of steps are complete (>5 steps)', () => {
+    const ci = makeCi(['lint', 'test', 'build', 'e2e', 'security'], ['coverage']);
+    assert.equal(getAdaptiveInterval(3, ci), 20);
+  });
+
+  it('returns 20s when >=80% of steps are complete (<=5 steps)', () => {
+    const ci = makeCi(['lint', 'test', 'build', 'e2e'], ['security']);
+    assert.equal(getAdaptiveInterval(3, ci), 20);
+  });
+
+  it('counts failed and cancelled steps as completed for ratio', () => {
+    const ci = makeCi(['lint', 'test'], ['e2e'], ['build'], ['security']);
+    // 4/5 = 80% completed
+    assert.equal(getAdaptiveInterval(2, ci), 20);
+  });
+
+  it('returns 30s when no checks exist (total=0, attempt>1)', () => {
+    const ci = makeCi([], []);
+    assert.equal(getAdaptiveInterval(2, ci), 30);
   });
 });
