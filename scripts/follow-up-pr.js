@@ -484,9 +484,12 @@ function getReviews(prNumber) {
   // - COMMENTED with body: actionable for humans, but bot COMMENTED reviews
   //   are typically informational summaries (not action items) — skip them.
   // - Also detect bot reviews by HTML comment markers (e.g. <!-- BUGBOT_REVIEW -->)
+  // Known bot aliases that may appear as review authors (case-insensitive)
+  const BOT_ALIASES = ['copilot', 'cursor'];
   const botReviewersLower = botReviewers.map((b) => b.toLowerCase());
   const isBotAuthor = (author) => {
     const lower = (author || '').toLowerCase();
+    if (BOT_ALIASES.includes(lower)) return true;
     return botReviewersLower.some((bot) => lower === bot || lower.includes(bot.replace('[bot]', '')));
   };
   const isBotReview = (r) => isBotAuthor(r.author) || /<!--\s*(BUGBOT_REVIEW|COPILOT_REVIEW)\s*-->/.test(r.body || '');
@@ -631,6 +634,14 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
     for (const ck of ci.passed) {
       lines.push(`  ${c.green('✓')} ${ck.name} — passed`);
     }
+  } else if (ci.status === 'cancelled') {
+    lines.push(c.yellow(`CI: CANCELLED (${ci.cancelled.length} cancelled, ${ci.passed.length} passed)`));
+    for (const ck of ci.cancelled) {
+      lines.push(`  ${c.yellow('⊘')} ${ck.name} — cancelled`);
+    }
+    for (const ck of ci.passed) {
+      lines.push(`  ${c.green('✓')} ${ck.name} — passed`);
+    }
   } else {
     lines.push(c.dim('CI: No checks found'));
   }
@@ -685,21 +696,25 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
 
   // Action hint — order matches fail-fast exit priority
   lines.push('');
+  const ciAcceptable = ci.status === 'passing' || ci.status === 'no-checks';
   if (ci.status === 'failing') {
     lines.push(`→ Fix the failure, push, then re-run: ${c.dim('node scripts/follow-up-pr.js')}`);
   } else if (isConflicting) {
     lines.push(`→ Resolve conflicts, push, then re-run: ${c.dim('node scripts/follow-up-pr.js')}`);
+  } else if (ci.status === 'cancelled') {
+    lines.push(`→ CI was cancelled. Re-push or re-run the workflow: ${c.dim('gh run rerun <run-id>')}`);
   } else if (!opts.noReviews && reviews.hasBlocking && reviews.pendingBots.length > 0) {
     const blockCount = reviews.blocking ? reviews.blocking.length : 0;
     lines.push(`→ Waiting ${opts.interval}s for bot reviews (${blockCount} blocking comment${blockCount !== 1 ? 's' : ''} may become stale)... (attempt ${attempt}/${maxAttempts})`);
   } else if (!opts.noReviews && reviews.hasBlocking) {
     lines.push(`→ Address blocking reviews, push, then re-run: ${c.dim('node scripts/follow-up-pr.js')}`);
-  } else if (ci.status === 'passing' && (!reviews.hasBlocking || opts.noReviews) && reviews.pendingBots.length === 0 && isMergeReady) {
+  } else if (ciAcceptable && (!reviews.hasBlocking || opts.noReviews) && reviews.pendingBots.length === 0 && isMergeReady) {
     lines.push(c.green('═══════════════════════════════════════'));
     lines.push(c.green('  PR READY TO REVIEW'));
     lines.push(c.green('═══════════════════════════════════════'));
     lines.push('');
-    lines.push(c.green(`CI: PASSED | Reviews: ${opts.noReviews ? 'SKIPPED' : 'CLEAR'} | Conflicts: NONE`));
+    const ciLabel = ci.status === 'no-checks' ? 'NO CHECKS' : 'PASSED';
+    lines.push(c.green(`CI: ${ciLabel} | Reviews: ${opts.noReviews ? 'SKIPPED' : 'CLEAR'} | Conflicts: NONE`));
     lines.push(c.green(`PR #${prInfo.number} is ready for review/merge!`));
   } else if (ci.status === 'pending') {
     lines.push(`→ Waiting ${opts.interval}s for checks... (attempt ${attempt}/${maxAttempts})`);
