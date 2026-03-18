@@ -492,7 +492,8 @@ function getReviews(prNumber) {
     if (BOT_ALIASES.includes(lower)) return true;
     return botReviewersLower.some((bot) => lower === bot || lower.includes(bot.replace('[bot]', '')));
   };
-  const isBotReview = (r) => isBotAuthor(r.author) || /<!--\s*(BUGBOT_REVIEW|COPILOT_REVIEW)\s*-->/.test(r.body || '');
+  const BOT_BODY_MARKERS = /<!--\s*(BUGBOT_REVIEW|COPILOT_REVIEW)\s*-->/;
+  const isBotReview = (r) => isBotAuthor(r.author) || BOT_BODY_MARKERS.test(r.body || '');
   const isActionableReview = (r) => r.state === 'CHANGES_REQUESTED' || (r.state === 'COMMENTED' && r.body && !isBotReview(r));
   const actionable = reviews.filter(isActionableReview).map((r) => {
     const priority = classifyCommentPriority(r.author, r.body);
@@ -739,9 +740,7 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
 function decideNextAction(ciStatus, prInfo, reviews, noReviews) {
   const isConflicting = prInfo.mergeable === 'CONFLICTING' || prInfo.mergeStateStatus === 'DIRTY';
   const isMergeReady = prInfo.mergeable === 'MERGEABLE' && (!prInfo.mergeStateStatus || prInfo.mergeStateStatus === 'CLEAN' || prInfo.mergeStateStatus === 'HAS_HOOKS' || prInfo.mergeStateStatus === 'UNSTABLE');
-  // CI is "acceptable" when passing or when there are no checks configured
   const ciAcceptable = ciStatus === 'passing' || ciStatus === 'no-checks';
-  // CI is "finished" when it won't change anymore (not pending)
   const ciFinished = ciAcceptable || ciStatus === 'cancelled';
   const reviewsClear = noReviews || (!reviews.hasBlocking && reviews.pendingBots.length === 0);
 
