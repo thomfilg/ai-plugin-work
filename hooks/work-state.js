@@ -70,7 +70,11 @@ function getStatePath(ticketId) {
 function loadState(ticketId) {
   const statePath = getStatePath(ticketId);
   if (fs.existsSync(statePath)) {
-    return JSON.parse(fs.readFileSync(statePath, 'utf8'));
+    try {
+      return JSON.parse(fs.readFileSync(statePath, 'utf8'));
+    } catch {
+      return null;
+    }
   }
   return null;
 }
@@ -94,6 +98,11 @@ function saveState(ticketId, state) {
  * Initialize a new work state
  */
 function initState(ticketId, description = '') {
+  // Idempotent: return existing state if already initialized.
+  // loadState() safely returns null on corrupt JSON (try-catch guarded).
+  const existing = loadState(ticketId);
+  if (existing) return existing;
+
   const stepStatus = {};
   STEPS.forEach(step => {
     stepStatus[step] = 'pending';
@@ -125,6 +134,10 @@ function initState(ticketId, description = '') {
  * Set step status
  */
 function setStepStatus(ticketId, step, status) {
+  if (!STEPS.includes(step)) {
+    return { error: true, message: `Invalid step name: "${step}". Valid steps: ${STEPS.join(', ')}` };
+  }
+
   let state = loadState(ticketId);
   if (!state) {
     state = initState(ticketId);
@@ -323,6 +336,10 @@ async function main() {
 
     case 'set-step':
       result = setStepStatus(ticketId, args[2], args[3]);
+      if (result && result.error) {
+        console.error(JSON.stringify(result));
+        process.exit(1);
+      }
       console.log(JSON.stringify({ success: true, step: args[2], status: args[3] }));
       break;
 
