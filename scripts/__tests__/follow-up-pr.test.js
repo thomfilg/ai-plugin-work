@@ -365,7 +365,7 @@ describe('decideNextAction', () => {
     assert.match(result.waitReason, /waiting for CI to finish before evaluating reviews/);
   });
 
-  it('returns exit-fail with reviews-blocking when blocking reviews exist and CI has passed', () => {
+  it('returns exit-fail with reviews-blocking when blocking reviews exist and CI passed', () => {
     const result = decideNextAction('passing', mergeReady, blockingReviews, false);
     assert.equal(result.action, 'exit-fail');
     assert.equal(result.finalStatus, 'reviews-blocking');

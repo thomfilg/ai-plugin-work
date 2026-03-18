@@ -490,9 +490,8 @@ function getReviews(prNumber) {
     return botReviewersLower.some((bot) => lower === bot || lower.includes(bot.replace('[bot]', '')));
   };
   const isBotReview = (r) => isBotAuthor(r.author) || /<!--\s*(BUGBOT_REVIEW|COPILOT_REVIEW)\s*-->/.test(r.body || '');
-  const actionable = reviews.filter(
-    (r) => r.state === 'CHANGES_REQUESTED' || (r.state === 'COMMENTED' && r.body && !isBotReview(r))
-  ).map((r) => {
+  const isActionableReview = (r) => r.state === 'CHANGES_REQUESTED' || (r.state === 'COMMENTED' && r.body && !isBotReview(r));
+  const actionable = reviews.filter(isActionableReview).map((r) => {
     const priority = classifyCommentPriority(r.author, r.body);
     // CHANGES_REQUESTED is always at least medium (blocking), regardless of severity tags
     const effectivePriority = (r.state === 'CHANGES_REQUESTED' && priority === 'low') ? 'medium' : priority;
