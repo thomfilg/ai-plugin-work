@@ -303,7 +303,7 @@ function recordTddEvidence(ticketId, stepId, flags) {
       exceptionReason: flags.exception.trim(),
     };
   } else {
-    if (!flags.cmd) return { error: 'missing_flag', message: '--cmd is required in normal TDD mode' };
+    if (!flags.cmd || (typeof flags.cmd === 'string' && flags.cmd.trim() === '')) return { error: 'missing_flag', message: '--cmd is required in normal TDD mode' };
     if (!flags.red) return { error: 'missing_flag', message: '--red is required in normal TDD mode' };
     if (!flags.green) return { error: 'missing_flag', message: '--green is required in normal TDD mode' };
     if (!flags.files) return { error: 'missing_flag', message: '--files is required in normal TDD mode' };
@@ -326,9 +326,10 @@ function recordTddEvidence(ticketId, stepId, flags) {
   const dir = path.dirname(evidencePath);
   if (!fileExists(dir)) fs.mkdirSync(dir, { recursive: true });
 
-  // Atomic write: temp file → rename
+  // Atomic write: temp file → rename (remove existing first for Windows compat)
   const tmpPath = evidencePath + '.tmp.' + process.pid;
   fs.writeFileSync(tmpPath, JSON.stringify(evidence, null, 2));
+  try { fs.unlinkSync(evidencePath); } catch (e) { if (e && e.code !== 'ENOENT') throw e; }
   fs.renameSync(tmpPath, evidencePath);
 
   return { recorded: true, path: evidencePath };
@@ -685,7 +686,12 @@ function transitionStep(ticket, targetStep) {
 
   // Stale evidence cleanup: delete evidence when transitioning INTO a gated step
   if (tddEnforce && TDD_GATED_STEPS.includes(targetStep)) {
-    try { fs.unlinkSync(getTddEvidencePath(ticket, targetStep)); } catch (e) { if (e.code !== 'ENOENT') throw e; }
+    try {
+      const evidencePath = getTddEvidencePath(ticket, targetStep);
+      fs.unlinkSync(evidencePath);
+    } catch (e) {
+      if (e && e.code !== 'ENOENT') { /* ignore path-traversal or missing file errors */ }
+    }
   }
 
   // Initialize state if needed
