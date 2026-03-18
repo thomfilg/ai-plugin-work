@@ -23,6 +23,39 @@ This keeps your context window lean: just plan JSON + transition outputs + agent
 
 ---
 
+## TDD Execution Policy
+
+When `WORK_TDD_ENFORCE=1` is set, `/work` enforces TDD for all implementation work entering `3_implement` or `8_test_enhancement`.
+
+Delegated agents must follow this loop:
+
+1. Identify the smallest behavior change to prove
+2. Find the nearest existing test file or create one
+3. Write the smallest focused failing test set first (usually 1-3 tests)
+4. Run the smallest relevant test command and confirm RED
+5. Implement the minimum production change needed
+6. Re-run the same tests and confirm GREEN
+7. Refactor only after GREEN
+8. Record TDD evidence via `work-orchestrator.js record-tdd` CLI
+9. Run broader quality checks after targeted tests pass
+
+Enforcement: The orchestrator blocks transitions out of `3_implement` and `8_test_enhancement`
+unless a valid TDD evidence file exists. This is a hard gate, not a suggestion.
+
+Toggle: TDD enforcement is controlled by `WORK_TDD_ENFORCE=1` in `.envrc`. When unset
+or `0`, the workflow runs without TDD gates — useful during initial rollout or for
+projects that haven't adopted TDD yet.
+
+Allowed exception: For mechanical refactors, file moves, or non-testable config-only changes,
+the agent must set `exceptionReason` in the evidence file explaining why literal RED-first
+was not appropriate.
+
+Why only these two steps: Other steps in the workflow don't produce new application code —
+they commit, verify, generate PRs, or package work that was already validated by TDD-gated
+steps. Gating `3_implement` and `8_test_enhancement` covers all code-producing transitions.
+
+---
+
 ## Step 1: FIRST TOOL CALL - Get the Plan
 
 **MANDATORY: Your first action must be running the orchestrator.**
@@ -116,6 +149,17 @@ Task(general-purpose):
   prompt: <agentPrompt from plan>
 ```
 
+### TDD augmentation for implementation steps
+
+For `3_implement` and `8_test_enhancement`, the orchestrator automatically appends TDD protocol
+instructions to the `agentPrompt`. The delegated agent must:
+- Write focused failing tests before implementation when the change is behavior-testable
+- Run the smallest relevant test command first and confirm failure
+- Implement the minimum fix
+- Re-run the same test command and confirm pass
+- Record evidence via `work-orchestrator.js record-tdd` CLI before completing
+- Refactor only after the targeted tests pass
+
 ### 2c. Check Agent Result
 
 After each agent returns:
@@ -203,6 +247,8 @@ Skip edges (forward):
 6. **Never claim completion without plan showing all done** — The orchestrator is truth
 7. **Only run inline**: orchestrator commands, transitions, and reading plan output
 8. **Don't process large outputs** — Agent summaries are enough for decision-making
+9. `3_implement` and `8_test_enhancement` enforce TDD — transitions out are blocked without
+   recorded TDD evidence proving GREEN or providing an explicit exception reason
 
 ---
 
@@ -235,3 +281,4 @@ Agent: [Task(Bash) description="10_ready mark PR ready"]  ← delegated
 | `work-orchestrator.js transition TICKET STEP` | Validate & record step change |
 | `work-orchestrator.js transitions TICKET` | Show allowed next steps |
 | `work-orchestrator.js graph` | Show full state machine |
+| `work-orchestrator.js record-tdd TICKET STEP [flags]` | Record TDD evidence (atomic write) |

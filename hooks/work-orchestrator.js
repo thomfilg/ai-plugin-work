@@ -196,6 +196,145 @@ function getCurrentStep(workState) {
   return '13_complete';
 }
 
+// ─── TDD Enforcement ────────────────────────────────────────────────────────
+
+const TDD_GATED_STEPS = ['3_implement', '8_test_enhancement'];
+
+const TDD_PROTOCOL = `
+TDD protocol (mandatory for this step):
+1. Identify the smallest behavior change.
+2. Find the nearest existing test file or create one.
+3. Write the smallest focused failing test set first (usually 1-3 tests) when behavior is testable.
+4. Run the smallest relevant test command and confirm RED.
+5. Implement the minimum production change required.
+6. Re-run the same targeted tests and confirm GREEN.
+7. Refactor only after GREEN.
+8. Record TDD evidence using the orchestrator CLI before completing:
+   node <ORCHESTRATOR_PATH> record-tdd <TICKET_ID> <step_id> \\
+     --cmd "<exact test command run>" \\
+     --red \\
+     --green \\
+     --files "file1.test.ts,file2.test.ts"
+   Or for exceptions (no RED/GREEN cycle):
+   node <ORCHESTRATOR_PATH> record-tdd <TICKET_ID> <step_id> \\
+     --exception "config-only change, no testable behavior"
+9. If literal RED-first is not appropriate (mechanical refactor, pure config, file move), set exceptionReason and use the nearest-test approach instead.
+10. Do NOT make local git commits during the RED/GREEN cycle. Leave all changes uncommitted — the \`5_commit\` step handles commits with proper message formatting.
+`.trim();
+
+function getTddEvidencePath(ticketId, stepId) {
+  const baseResolved = path.resolve(TASKS_BASE);
+  const evidencePath = path.resolve(baseResolved, ticketId, `.tdd-evidence-${stepId}.json`);
+  if (!evidencePath.startsWith(baseResolved + path.sep)) {
+    throw new Error(`Invalid ticket id for TDD evidence path: ${ticketId}`);
+  }
+  return evidencePath;
+}
+
+function readTddEvidence(ticketId, stepId) {
+  let p;
+  try {
+    p = getTddEvidencePath(ticketId, stepId);
+  } catch {
+    return { exists: false, parseError: true, evidence: null };
+  }
+  if (!fileExists(p)) return { exists: false, parseError: false, evidence: null };
+  try {
+    const evidence = JSON.parse(fs.readFileSync(p, 'utf-8'));
+    return { exists: true, parseError: false, evidence };
+  } catch {
+    return { exists: true, parseError: true, evidence: null };
+  }
+}
+
+function validateTddEvidence(evidence, expectedStepId) {
+  if (!evidence || typeof evidence !== 'object') return { valid: false, reason: 'Evidence is null or not an object' };
+  if (evidence.step !== expectedStepId) return { valid: false, reason: `Step mismatch: expected "${expectedStepId}", got "${evidence.step}"` };
+  if (typeof evidence.redConfirmed !== 'boolean') return { valid: false, reason: 'redConfirmed must be a boolean' };
+  if (typeof evidence.greenConfirmed !== 'boolean') return { valid: false, reason: 'greenConfirmed must be a boolean' };
+  if (!Array.isArray(evidence.testFilesChanged)) return { valid: false, reason: 'testFilesChanged must be an array' };
+
+  const hasException = typeof evidence.exceptionReason === 'string' && evidence.exceptionReason.trim() !== '';
+  // In normal TDD mode, at least one test file must be listed
+  if (!hasException && evidence.testFilesChanged.length === 0) {
+    return { valid: false, reason: 'testFilesChanged must contain at least one file when no exceptionReason' };
+  }
+  if (!hasException) {
+    const targetedCmd = typeof evidence.targetedTestCommand === 'string'
+      ? evidence.targetedTestCommand.trim()
+      : evidence.targetedTestCommand;
+    if (typeof targetedCmd !== 'string' || targetedCmd === '') {
+      return { valid: false, reason: 'targetedTestCommand must be a non-empty string when no exceptionReason' };
+    }
+    if (evidence.redConfirmed !== true) {
+      return { valid: false, reason: 'redConfirmed must be true when no exceptionReason' };
+    }
+    if (evidence.greenConfirmed !== true) {
+      return { valid: false, reason: 'greenConfirmed must be true when no exceptionReason' };
+    }
+  }
+
+  return { valid: true, reason: '' };
+}
+
+function recordTddEvidence(ticketId, stepId, flags) {
+  if (!TDD_GATED_STEPS.includes(stepId)) {
+    return { error: 'invalid_step', message: `Step "${stepId}" is not a TDD-gated step. Valid: ${TDD_GATED_STEPS.join(', ')}` };
+  }
+
+  const hasException = flags.exception !== undefined;
+  const hasNormalFlags = flags.cmd !== undefined || flags.red || flags.green || flags.files !== undefined;
+
+  if (hasException && hasNormalFlags) {
+    return { error: 'mixed_modes', message: 'Cannot mix --exception with --cmd/--red/--green/--files' };
+  }
+
+  let evidence;
+  if (hasException) {
+    if (typeof flags.exception !== 'string' || flags.exception.trim() === '') {
+      return { error: 'invalid_exception', message: '--exception must be a non-empty string' };
+    }
+    evidence = {
+      step: stepId,
+      targetedTestCommand: '',
+      redConfirmed: false,
+      greenConfirmed: false,
+      testFilesChanged: [],
+      exceptionReason: flags.exception.trim(),
+    };
+  } else {
+    if (!flags.cmd || (typeof flags.cmd === 'string' && flags.cmd.trim() === '')) return { error: 'missing_flag', message: '--cmd is required in normal TDD mode' };
+    if (!flags.red) return { error: 'missing_flag', message: '--red is required in normal TDD mode' };
+    if (!flags.green) return { error: 'missing_flag', message: '--green is required in normal TDD mode' };
+    if (!flags.files) return { error: 'missing_flag', message: '--files is required in normal TDD mode' };
+
+    const testFiles = String(flags.files).split(',').map(f => f.trim()).filter(Boolean);
+    if (testFiles.length === 0) {
+      return { error: 'invalid_files', message: '--files must list at least one test file in normal TDD mode' };
+    }
+    evidence = {
+      step: stepId,
+      targetedTestCommand: flags.cmd.trim(),
+      redConfirmed: true,
+      greenConfirmed: true,
+      testFilesChanged: testFiles,
+      exceptionReason: '',
+    };
+  }
+
+  const evidencePath = getTddEvidencePath(ticketId, stepId);
+  const dir = path.dirname(evidencePath);
+  if (!fileExists(dir)) fs.mkdirSync(dir, { recursive: true });
+
+  // Atomic write: temp file → rename (remove existing first for Windows compat)
+  const tmpPath = evidencePath + '.tmp.' + process.pid;
+  fs.writeFileSync(tmpPath, JSON.stringify(evidence, null, 2));
+  try { fs.unlinkSync(evidencePath); } catch (e) { if (e && e.code !== 'ENOENT') throw e; }
+  fs.renameSync(tmpPath, evidencePath);
+
+  return { recorded: true, path: evidencePath };
+}
+
 // ─── Reports ─────────────────────────────────────────────────────────────────
 
 const REQUIRED_REPORTS = [
@@ -315,7 +454,17 @@ function generatePlan(ticket, description, s, rework) {
   const worktreeDir = s?.worktreeDir || `${WORKTREES_BASE}/${MAIN_WORKTREE_FOLDER}-${t}`;
   const tasksDir = s?.tasksDir || `${TASKS_BASE}/${t}`;
 
+  const tddEnforce = process.env.WORK_TDD_ENFORCE === '1';
+
   function add(stepName, action, command, reason, extra = {}) {
+    // Augment TDD-gated steps with protocol instructions
+    if (tddEnforce && TDD_GATED_STEPS.includes(stepName) && extra.agentPrompt && action === 'RUN') {
+      const resolvedProtocol = TDD_PROTOCOL
+        .replace(/<ORCHESTRATOR_PATH>/g, path.join(__dirname, 'work-orchestrator.js'))
+        .replace(/<TICKET_ID>/g, t)
+        .replace(/<step_id>/g, stepName);
+      extra.agentPrompt = `${extra.agentPrompt}\n\n${resolvedProtocol}`;
+    }
     plan.push({ step: stepName, action, ...(command ? { command } : {}), reason, ...extra });
   }
 
@@ -520,6 +669,31 @@ function transitionStep(ticket, targetStep) {
     };
   }
 
+  // TDD gate: require evidence before leaving gated steps
+  const tddEnforce = process.env.WORK_TDD_ENFORCE === '1';
+  if (tddEnforce && TDD_GATED_STEPS.includes(currentStep) && currentStep !== targetStep) {
+    const { exists, parseError, evidence } = readTddEvidence(ticket, currentStep);
+    if (!exists || parseError) {
+      const orchPath = path.resolve(__dirname, 'work-orchestrator.js');
+      const msg = `Cannot leave ${currentStep} without TDD evidence. Record it via:\n  node ${orchPath} record-tdd ${ticket} ${currentStep} --cmd "<test command>" --red --green --files "<test files>"\nOr for exceptions:\n  node ${orchPath} record-tdd ${ticket} ${currentStep} --exception "<reason>"`;
+      return { error: true, message: msg };
+    }
+    const validation = validateTddEvidence(evidence, currentStep);
+    if (!validation.valid) {
+      return { error: true, message: `TDD evidence invalid: ${validation.reason}` };
+    }
+  }
+
+  // Stale evidence cleanup: delete evidence when transitioning INTO a gated step
+  if (tddEnforce && TDD_GATED_STEPS.includes(targetStep)) {
+    try {
+      const evidencePath = getTddEvidencePath(ticket, targetStep);
+      fs.unlinkSync(evidencePath);
+    } catch (e) {
+      if (e && e.code !== 'ENOENT') { /* ignore path-traversal or missing file errors */ }
+    }
+  }
+
   // Initialize state if needed
   if (!ws) {
     ws = {
@@ -589,7 +763,7 @@ function main() {
     process.exit(1);
   }
 
-  const subcommands = ['plan', 'transition', 'transitions', 'graph', 'actions'];
+  const subcommands = ['plan', 'transition', 'transitions', 'graph', 'actions', 'record-tdd'];
   const command = subcommands.includes(args[0]) ? args[0] : 'plan';
   const rest = subcommands.includes(args[0]) ? args.slice(1) : args;
 
@@ -666,6 +840,38 @@ function main() {
         const analysis = analyzeActions(actions);
         console.log(JSON.stringify({ ticket, analysis, actions }, null, 2));
       }
+      break;
+    }
+
+    case 'record-tdd': {
+      if (rest.length < 2) {
+        console.error(JSON.stringify({ error: 'usage', message: 'Usage: record-tdd <TICKET_ID> <STEP_ID> [--cmd "..." --red --green --files "..."] [--exception "..."]' }));
+        process.exit(1);
+      }
+      const ticket = rest[0].toUpperCase();
+      const stepId = rest[1];
+      // Parse flags — missing values for --cmd/--files/--exception fall through
+      // to recordTddEvidence() validation which returns clear error messages.
+      const flags = {};
+      for (let i = 2; i < rest.length; i++) {
+        if (rest[i] === '--cmd' && rest[i + 1]) { flags.cmd = rest[++i]; }
+        else if (rest[i] === '--red') { flags.red = true; }
+        else if (rest[i] === '--green') { flags.green = true; }
+        else if (rest[i] === '--files' && rest[i + 1]) { flags.files = rest[++i]; }
+        else if (rest[i] === '--exception' && rest[i + 1]) { flags.exception = rest[++i]; }
+      }
+      let result;
+      try {
+        result = recordTddEvidence(ticket, stepId, flags);
+      } catch (e) {
+        console.error(JSON.stringify({ error: 'invalid_path', message: e.message }));
+        process.exit(1);
+      }
+      if (result.error) {
+        console.error(JSON.stringify(result));
+        process.exit(1);
+      }
+      console.log(JSON.stringify(result));
       break;
     }
   }

@@ -83,6 +83,35 @@ TodoWrite([
 ])
 ```
 
+### Step 2.5: Mandatory TDD Loop
+
+Before changing production code:
+
+1. Locate the closest existing test file for the affected behavior
+2. Add or update the smallest focused test set that expresses the expected behavior (usually 1-3 tests)
+3. Run the smallest relevant test command and confirm the new test fails (RED)
+4. Implement the minimum production change required
+5. Re-run the same targeted test command and confirm it passes (GREEN)
+6. Refactor only after the targeted test is green
+7. Record evidence via CLI:
+   `node <ORCHESTRATOR_PATH> record-tdd <TICKET_ID> 3_implement --cmd "<test command>" --red --green --files "<test files>"`
+   `<ORCHESTRATOR_PATH>` and `<TICKET_ID>` are provided by the `/work` orchestrator in the
+   delegated prompt context. When running `/work-implement` standalone (outside `/work`),
+   use the concrete path: `node ${CLAUDE_PLUGIN_ROOT}/hooks/work-orchestrator.js` and the
+   ticket ID from the current branch (`git branch --show-current | grep -oE '[A-Z]+-[0-9]+'`).
+8. Record the RED and GREEN evidence in `implement.md`
+
+Important: Do NOT make local git commits during the TDD loop. Leave all changes (test files
+and production code) uncommitted. The commit step (`5_commit`) handles commits with proper
+message formatting and squashing.
+
+If the change is mechanical or not meaningfully behavior-testable:
+- Record exception via CLI:
+  `node <ORCHESTRATOR_PATH> record-tdd <TICKET_ID> 3_implement --exception "<reason>"`
+  (Same path resolution as above.)
+- Add or update the closest relevant tests where possible
+- Continue with the smallest safe change
+
 ### Step 3: Select and invoke the appropriate agent
 
 ```
@@ -116,12 +145,22 @@ Task(<agent-name>):
   Constraints:
   - Follow existing code patterns
   - Keep changes focused on the request
+  - Use TDD by default:
+    - Write focused failing tests first when behavior is testable
+    - Run targeted tests and confirm RED
+    - Implement the minimum fix
+    - Rerun targeted tests and confirm GREEN
+    - Record TDD evidence via `record-tdd` CLI before completing
+    - Refactor after GREEN
   - Add appropriate tests
 ```
 
-### Step 4: Run quality checks
+### Step 4: Run targeted tests first, then broader quality checks
 
 After agent completes:
+
+1. Re-run the exact targeted tests used in the RED/GREEN loop
+2. Then run broader checks:
 
 ```bash
 # Quick checks on changed files only (preferred during development)
