@@ -145,10 +145,26 @@
         ]
       }
     ],
+    "PreCompact": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CLAUDE_HOOK_TYPE=PreCompact node ${CLAUDE_PLUGIN_ROOT}/hooks/session-guard.js"
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "matcher": ".*",
         "hooks": [
+          {
+            "type": "command",
+            "command": "CLAUDE_HOOK_TYPE=Stop node ${CLAUDE_PLUGIN_ROOT}/hooks/session-guard.js",
+            "timeout": 10
+          },
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/enforce-completion-protocol.js"

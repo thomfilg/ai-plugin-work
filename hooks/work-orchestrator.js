@@ -32,7 +32,7 @@
  *   9_pr, 10_ready, 11_ci, 12_reports, 13_complete
  */
 
-const { execSync } = require('child_process');
+const { execSync, execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -456,6 +456,15 @@ function generatePlan(ticket, description, s, rework) {
 
   const tddEnforce = process.env.WORK_TDD_ENFORCE === '1';
 
+  // Initialize session guard for workflow locking (skip when explicitly disabled)
+  if (ticket && process.env.SESSION_GUARD_ENABLED !== '0') {
+    try {
+      const guardPath = path.join(__dirname, 'session-guard.js');
+      // init is idempotent: reuses existing session if one exists for this ticket
+      execFileSync(process.execPath, [guardPath, 'init', ticket, '/work'], { stdio: 'pipe', timeout: 5000 });
+    } catch { /* fail-open: session-guard init failure must not block plan generation */ }
+  }
+
   function add(stepName, action, command, reason, extra = {}) {
     // Augment TDD-gated steps with protocol instructions
     if (tddEnforce && TDD_GATED_STEPS.includes(stepName) && extra.agentPrompt && action === 'RUN') {
@@ -640,10 +649,18 @@ function generatePlan(ticket, description, s, rework) {
     agentType: 'Bash',
     agentPrompt: `Verify and consolidate reports in ${tasksDir}. List all *.check.md files and confirm they exist. Report the count and status of each.`,
   });
+  const guardPath = path.join(__dirname, 'session-guard.js');
   add('13_complete', 'RUN', 'Task(Bash)', 'Finish', {
     agentType: 'Bash',
-    agentPrompt: `Run: node ~/.claude/hooks/work-state.js complete ${t}`,
-  });
+    agentPrompt: [
+      `Run these commands in sequence:`,
+      `1. node "${path.join(__dirname, 'work-state.js')}" complete ${t}`,
+      `2. node "${guardPath}" finish ${t}`,
+      ``,
+      `Step 1 marks the workflow as complete (exits 0 on success).`,
+      `Step 2 is an atomic teardown: reveals the session passphrase (unlocking the Stop hook) and removes the session file. Exits 0 when no session exists (guard disabled or already cleaned up). Exits 1 only if called without a ticket ID (programming error).`,
+    ].join('\n'),
+  }); // 13_complete — must run after all other steps
 
   return { ticket: ticket || `TBD ("${description}")`, mode, plan };
 }
