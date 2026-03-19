@@ -81,20 +81,24 @@ function readSessionFile(ticketId) {
   }
 }
 
+/**
+ * Write session data atomically: write to tmp → unlink existing target → rename tmp → target.
+ * Ensures SESSION_DIR exists, handles Windows (where rename fails if target exists),
+ * and cleans up the tmp file on any error.
+ */
 function writeSessionAtomic(ticketId, data) {
   const target = sessionFilePath(ticketId);
-  const dir = path.dirname(target);
-  fs.mkdirSync(dir, { recursive: true });
+  // Ensure the directory exists (SESSION_GUARD_DIR may point to a non-default/non-existent path)
+  fs.mkdirSync(path.dirname(target), { recursive: true });
   const tmp = `${target}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
   try {
-    fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
-    // Remove existing target first for Windows compatibility (renameSync fails if target exists)
-    try { fs.unlinkSync(target); } catch { /* target doesn't exist yet — fine */ }
+    // Unlink existing target before rename (required on Windows where rename fails if target exists)
+    try { fs.unlinkSync(target); } catch { /* ENOENT — target doesn't exist yet */ }
     fs.renameSync(tmp, target);
-  } catch (err) {
-    // Clean up orphaned tmp file on failure, then re-throw
-    try { fs.unlinkSync(tmp); } catch { /* tmp never created or already gone */ }
-    throw err;
+  } catch (renameErr) {
+    try { fs.unlinkSync(tmp); } catch { /* cleanup best-effort */ }
+    throw renameErr;
   }
 }
 
