@@ -88,8 +88,10 @@ function writeSessionAtomic(ticketId, data) {
   try {
     fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
     fs.renameSync(tmp, target);
-  } finally {
-    try { fs.unlinkSync(tmp); } catch { /* tmp already renamed or never created */ }
+  } catch (err) {
+    // Clean up orphaned tmp file on failure, then re-throw
+    try { fs.unlinkSync(tmp); } catch { /* tmp never created or already gone */ }
+    throw err;
   }
 }
 

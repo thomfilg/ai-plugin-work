@@ -164,12 +164,7 @@
             "type": "command",
             "command": "CLAUDE_HOOK_TYPE=Stop node ${CLAUDE_PLUGIN_ROOT}/hooks/session-guard.js",
             "timeout": 10
-          }
-        ]
-      },
-      {
-        "matcher": ".*",
-        "hooks": [
+          },
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/enforce-completion-protocol.js"
