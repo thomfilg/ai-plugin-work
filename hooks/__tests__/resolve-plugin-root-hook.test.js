@@ -114,6 +114,22 @@ describe('resolve-plugin-root-hook', () => {
     assert.strictEqual(stderr, '');
   });
 
+  it('should ALLOW escaped \\$CLAUDE_PLUGIN_ROOT (not rewrite)', async () => {
+    const { code, stderr } = await runHook({
+      tool_input: { command: 'grep \\$CLAUDE_PLUGIN_ROOT file.txt' },
+    });
+    assert.strictEqual(code, 0);
+    assert.strictEqual(stderr, '');
+  });
+
+  it('should ALLOW escaped \\${CLAUDE_PLUGIN_ROOT} with braces', async () => {
+    const { code, stderr } = await runHook({
+      tool_input: { command: 'echo \\${CLAUDE_PLUGIN_ROOT}' },
+    });
+    assert.strictEqual(code, 0);
+    assert.strictEqual(stderr, '');
+  });
+
   it('should handle $ special sequences in PLUGIN_ROOT path safely', async () => {
     const { code, stderr } = await runHook(
       { tool_input: { command: 'node ${CLAUDE_PLUGIN_ROOT}/hooks/test.js' } },

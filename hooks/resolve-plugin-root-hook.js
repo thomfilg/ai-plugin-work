@@ -36,12 +36,12 @@ async function main() {
     process.exit(0); // allow — nothing to resolve
   }
 
-  // Replace variable with actual path (use replacer function to avoid $ special sequences)
+  // Replace unescaped variable refs with actual path (negative lookbehind skips escaped \$)
   const fixed = command
-    .replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, () => PLUGIN_ROOT)
-    .replace(/\$CLAUDE_PLUGIN_ROOT\b/g, () => PLUGIN_ROOT);
+    .replace(/(?<!\\)\$\{CLAUDE_PLUGIN_ROOT\}/g, () => PLUGIN_ROOT)
+    .replace(/(?<!\\)\$CLAUDE_PLUGIN_ROOT\b/g, () => PLUGIN_ROOT);
 
-  // Guard against false positives (e.g. $CLAUDE_PLUGIN_ROOT_DIR where \b prevents replacement)
+  // No actual replacement made (e.g. escaped \$, or similar var name like _DIR) — allow through
   if (fixed === command) process.exit(0);
 
   process.stderr.write(
