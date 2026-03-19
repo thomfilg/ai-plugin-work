@@ -23,9 +23,13 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-// Fail-open: never block due to our own bugs
-process.on('uncaughtException', () => process.exit(0));
-process.on('unhandledRejection', () => process.exit(0));
+// Fail-open in hook mode: never block due to our own bugs
+// CLI mode surfaces errors with non-zero exit codes for debuggability
+const isHookMode = !!process.env.CLAUDE_HOOK_TYPE;
+if (isHookMode) {
+  process.on('uncaughtException', () => process.exit(0));
+  process.on('unhandledRejection', () => process.exit(0));
+}
 
 const SESSION_DIR = process.env.SESSION_GUARD_DIR || '/tmp';
 
@@ -43,9 +47,10 @@ const NATO_WORDS = [
 function sanitizeTicketId(ticketId) {
   // Strip path separators and null bytes to prevent path traversal
   const sanitized = String(ticketId).replace(/[/\\:\0]/g, '_');
-  const resolved = path.join(SESSION_DIR, `claude-session-guard-${sanitized}.json`);
+  const baseDir = path.resolve(SESSION_DIR);
+  const resolved = path.resolve(baseDir, `claude-session-guard-${sanitized}.json`);
   // Verify resolved path stays under SESSION_DIR
-  if (!resolved.startsWith(SESSION_DIR + path.sep)) {
+  if (!resolved.startsWith(baseDir + path.sep) && resolved !== baseDir) {
     throw new Error(`Invalid ticketId: resolved path escapes SESSION_DIR`);
   }
   return resolved;
