@@ -27,11 +27,11 @@ function getScreenshotDir(ticketId) {
   return path.join(path.dirname(repoRoot), 'tasks', ticketId, 'screenshots');
 }
 
-function runHook(hookData, hookType = 'PreToolUse') {
+function runHookWithEnv(hookData, hookType = 'PreToolUse', extraEnv = {}) {
   return new Promise((resolve, reject) => {
     const proc = spawn('node', [HOOK_PATH], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, CLAUDE_HOOK_TYPE: hookType },
+      env: { ...process.env, ...extraEnv, CLAUDE_HOOK_TYPE: hookType }, // hookType always wins over extraEnv
     });
 
     let stdout = '';
@@ -44,6 +44,10 @@ function runHook(hookData, hookType = 'PreToolUse') {
     proc.stdin.write(JSON.stringify(hookData));
     proc.stdin.end();
   });
+}
+
+function runHook(hookData, hookType = 'PreToolUse') {
+  return runHookWithEnv(hookData, hookType);
 }
 
 function getTicketId() {
@@ -269,6 +273,36 @@ describe('enforce-screenshot-requirement', () => {
       if (!ticketId) return;
       await runHook({ tool_name: 'AskUserQuestion', tool_input: {}, tool_output: 'Abort' }, 'PostToolUse');
       assert.ok(!fs.existsSync(skipMarkerPath(ticketId)));
+    });
+  });
+
+  // ─── Fail-open behavior ───
+
+  describe('Fail-open — does NOT block when git state is unclear', () => {
+    const FAKE_TICKET = 'FAKE-999';
+    const testEnv = { NODE_ENV: 'test', TEST_FORCE_TICKET_ID: FAKE_TICKET };
+
+    beforeEach(() => { cleanupMarker(FAKE_TICKET); });
+    afterEach(() => { cleanupMarker(FAKE_TICKET); });
+
+    it('does not block when resolveBaseRef fails', async () => {
+      const r = await runHookWithEnv(
+        { tool_name: 'Task', tool_input: { subagent_type: 'pr-generator', prompt: 'create PR' } },
+        'PreToolUse',
+        { ...testEnv, TEST_FORCE_BASE_REF_FAIL: '1' }
+      );
+      assert.equal(r.code, 0, 'should exit 0 (fail-open) when base ref unavailable');
+      assert.match(r.stderr, /could not resolve base ref/);
+    });
+
+    it('does not block when git diff fails', async () => {
+      const r = await runHookWithEnv(
+        { tool_name: 'Task', tool_input: { subagent_type: 'pr-generator', prompt: 'create PR' } },
+        'PreToolUse',
+        { ...testEnv, TEST_FORCE_DIFF_FAIL: '1' }
+      );
+      assert.equal(r.code, 0, 'should exit 0 (fail-open) when git diff unavailable');
+      assert.match(r.stderr, /git diff failed/);
     });
   });
 
