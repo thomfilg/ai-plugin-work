@@ -7,14 +7,18 @@
  * the shell variable is unset in the AI's Bash environment. This hook:
  * 1. Detects the unresolved variable in the command
  * 2. Resolves the actual path using process.env.CLAUDE_PLUGIN_ROOT, falling back to __dirname
- * 3. Blocks and provides the corrected command with the resolved absolute path
+ * 3. Blocks and provides the corrected command with the resolved path (parent of __dirname)
  *
  * The AI then re-runs the corrected command — zero guessing needed.
  */
 
 const path = require('path');
 
-// Resolved by Claude Code when running hooks; falls back to __dirname for direct invocation
+// Fail-open: unexpected errors should never block unrelated commands
+process.on('uncaughtException', () => process.exit(0));
+process.on('unhandledRejection', () => process.exit(0));
+
+// Resolved by Claude Code when running hooks; falls back to parent of __dirname for direct invocation
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.join(__dirname, '..');
 
 async function main() {
