@@ -653,14 +653,14 @@ function generatePlan(ticket, description, s, rework) {
   add('13_complete', 'RUN', 'Task(Bash)', 'Finish', {
     agentType: 'Bash',
     agentPrompt: [
-      `Run these commands in sequence:`,
-      `1. node ~/.claude/hooks/work-state.js complete ${t}`,
+      `Run these commands in sequence (each exits 0 on success or missing guard state):`,
+      `1. node "${path.join(__dirname, 'work-state.js')}" complete ${t}`,
       `2. node "${guardPath}" reveal ${t}`,
       `3. node "${guardPath}" complete ${t}`,
       ``,
-      `Step 1 marks the workflow as complete.`,
-      `Step 2 reveals the session passphrase (unlocking the Stop hook) — exits 0 even if no guard session exists.`,
-      `Step 3 cleans up the session file. Guard is only unlocked after workflow is marked complete.`,
+      `Step 1 marks the workflow as complete — must succeed before unlocking the guard.`,
+      `Step 2 reveals the session passphrase (unlocking the Stop hook). Exits 0 if no guard session exists (guard may be disabled).`,
+      `Step 3 cleans up the session guard file. All three commands are tolerant of missing guard state.`,
     ].join('\n'),
   });
 

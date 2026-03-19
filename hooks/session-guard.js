@@ -82,6 +82,8 @@ function readSessionFile(ticketId) {
 
 function writeSessionAtomic(ticketId, data) {
   const target = sessionFilePath(ticketId);
+  const dir = path.dirname(target);
+  fs.mkdirSync(dir, { recursive: true });
   const tmp = `${target}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
   fs.renameSync(tmp, target);
@@ -102,8 +104,11 @@ function findActiveSessions() {
         if (!fullPath.startsWith(baseDir + path.sep)) continue;
         const data = JSON.parse(fs.readFileSync(fullPath, 'utf8'));
         // Only trust files owned by current user (prevent local DoS via planted files)
-        const stat = fs.statSync(fullPath);
-        if (stat.uid !== process.getuid()) continue;
+        // Skip ownership check on platforms without getuid (e.g. Windows)
+        if (typeof process.getuid === 'function') {
+          const stat = fs.statSync(fullPath);
+          if (stat.uid !== process.getuid()) continue;
+        }
         if (data && data.ticketId) sessions.push(data);
       } catch { /* skip corrupt or inaccessible files */ }
     }

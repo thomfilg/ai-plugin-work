@@ -23,6 +23,7 @@ function runOrchestrator(args = [], opts = {}) {
   return new Promise((resolve, reject) => {
     const proc = spawn('node', [HOOK_PATH, ...args], {
       stdio: ['pipe', 'pipe', 'pipe'],
+      // Disable session guard so orchestrator tests don't create /tmp files; session-guard.test.js covers guard logic
       env: { ...process.env, SESSION_GUARD_ENABLED: '0', ...opts.env },
       cwd: opts.cwd,
     });
@@ -439,7 +440,8 @@ describe('work-orchestrator.js', () => {
       const { result } = await runOrchestrator([TEST_TICKET]);
       const completeStep = result.plan.find((s) => s.step === '13_complete');
       assert.equal(completeStep.agentType, 'Bash');
-      assert.ok(completeStep.agentPrompt.includes('work-state.js complete'));
+      assert.ok(completeStep.agentPrompt.includes('work-state.js'));
+      assert.ok(completeStep.agentPrompt.includes('complete'));
     });
 
     it('should use Bash agent for 12_reports', async () => {
