@@ -28,6 +28,10 @@
         "hooks": [
           {
             "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/resolve-plugin-root-hook.js"
+          },
+          {
+            "type": "command",
             "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/hooks/enforce-step-workflow.js"
           }
         ]
