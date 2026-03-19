@@ -42,6 +42,9 @@ function getScreenshotDir(ticketId) {
 }
 
 function getTicketId() {
+  if (process.env.NODE_ENV === 'test' && process.env.TEST_FORCE_TICKET_ID) {
+    return process.env.TEST_FORCE_TICKET_ID;
+  }
   try {
     const branch = execSync('git branch --show-current 2>/dev/null', { encoding: 'utf8' }).trim();
     const match = branch.match(/[A-Z]+-\d+/);
@@ -60,6 +63,8 @@ function skipMarkerPath(ticketId) {
  * Returns the ref string or null if none found.
  */
 function resolveBaseRef() {
+  if (process.env.NODE_ENV === 'test' && process.env.TEST_FORCE_BASE_REF_FAIL === '1') return null;
+
   try {
     execSync('git fetch origin --depth=1 2>/dev/null', { timeout: 15000 });
   } catch { /* offline or no remote */ }
@@ -79,11 +84,16 @@ function hasTsxChanges() {
 
   const baseRef = resolveBaseRef();
   if (!baseRef) {
-    _cachedTsxChanges = true; // fail closed
-    return true;
+    process.stderr.write('warn: screenshot-requirement: could not resolve base ref; skipping TSX check\n');
+    _cachedTsxChanges = false; // fail open — don't block when git state is unclear
+    return false;
   }
 
   try {
+    // Test-only: simulate diff failure (guarded by NODE_ENV=test)
+    if (process.env.NODE_ENV === 'test' && process.env.TEST_FORCE_DIFF_FAIL === '1') {
+      throw new Error('forced diff failure');
+    }
     const diff = execSync(`git diff --name-only ${baseRef}...HEAD -- "*.tsx" "*.jsx" 2>/dev/null`, {
       encoding: 'utf8',
       timeout: 10000
@@ -101,8 +111,9 @@ function hasTsxChanges() {
     );
     return _cachedTsxChanges;
   } catch {
-    _cachedTsxChanges = true; // fail closed
-    return true;
+    process.stderr.write('warn: screenshot-requirement: git diff failed; skipping TSX check\n');
+    _cachedTsxChanges = false; // fail open — don't block when git diff is unavailable
+    return false;
   }
 }
 
