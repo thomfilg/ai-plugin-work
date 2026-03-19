@@ -18,8 +18,7 @@ const path = require('path');
 process.on('uncaughtException', () => process.exit(0));
 process.on('unhandledRejection', () => process.exit(0));
 
-// process.env.CLAUDE_PLUGIN_ROOT is set by the hook system; path.join(__dirname, '..') is the fallback
-const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.join(__dirname, '..');
+const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(__dirname, '..');
 
 async function main() {
   let input = ''; // read hook JSON from stdin
@@ -41,12 +40,13 @@ async function main() {
     .replace(/(?<!\\)\$\{CLAUDE_PLUGIN_ROOT\}/g, () => PLUGIN_ROOT)
     .replace(/(?<!\\)\$CLAUDE_PLUGIN_ROOT\b/g, () => PLUGIN_ROOT);
 
-  // No actual replacement made (e.g. escaped \$, or similar var name like _DIR) — allow through
-  if (fixed === command) process.exit(0);
+  // No match (escaped \$, similar var like _DIR) — allow the command unchanged
+  if (fixed === command) {
+    process.exit(0);
+  }
 
-  process.stderr.write(
-    `CLAUDE_PLUGIN_ROOT resolved → ${PLUGIN_ROOT}\n\nRun this instead:\n${fixed}\n`
-  );
+  const message = `CLAUDE_PLUGIN_ROOT resolved → ${PLUGIN_ROOT}\n\nRun this instead:\n${fixed}\n`;
+  process.stderr.write(message);
   process.exit(2); // block — AI should retry with the corrected command
 }
 
