@@ -39,7 +39,7 @@ const c = {
 function parseArgs(argv = process.argv.slice(2)) {
   const args = {
     pr: null,
-    maxAttempts: 10,
+    maxAttempts: 40,
     interval: null, // null = adaptive (auto); set explicitly via --interval to override
     once: false,
     noReviews: false,
