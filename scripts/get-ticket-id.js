@@ -9,10 +9,16 @@
 const { execSync } = require('child_process');
 
 const TICKET_PATTERN = /([A-Z]+-\d+)/i;
-const NUMERIC_PATTERN = /(\d+)/;
+const GH_PATTERN = /GH-(\d+)/i;
 
 function getCurrentTaskId(cwd = process.cwd()) {
-  // Try to get from worktree folder name
+  // Try GH-XX pattern first (for GitHub Issues worktree paths like my-project-GH-56)
+  const ghMatch = cwd.match(GH_PATTERN);
+  if (ghMatch) {
+    return '#' + ghMatch[1];
+  }
+
+  // Try to get from worktree folder name (Jira/Linear: PROJ-123)
   const worktreeMatch = cwd.match(TICKET_PATTERN);
   if (worktreeMatch) {
     return worktreeMatch[1].toUpperCase();
@@ -25,6 +31,11 @@ function getCurrentTaskId(cwd = process.cwd()) {
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe']
     }).trim();
+    // Check GH-XX pattern in branch name
+    const branchGhMatch = branch.match(GH_PATTERN);
+    if (branchGhMatch) {
+      return '#' + branchGhMatch[1];
+    }
     const branchMatch = branch.match(TICKET_PATTERN);
     if (branchMatch) {
       return branchMatch[1].toUpperCase();
@@ -33,17 +44,19 @@ function getCurrentTaskId(cwd = process.cwd()) {
     // Ignore git errors
   }
 
-  // Fallback: try numeric pattern for GitHub Issues provider
+  // Fallback: try numeric suffix for GitHub Issues provider
+  // Only match trailing number after a separator to avoid false positives
+  // (e.g. version numbers, user IDs embedded in paths)
   try {
     const tp = require('../lib/ticket-provider');
     const providerConfig = tp.getProviderConfig({ skipPrompt: true });
     if (providerConfig && providerConfig.provider === 'github') {
-      const numericMatch = cwd.match(NUMERIC_PATTERN);
-      if (numericMatch) return '#' + numericMatch[1];
+      const trailingNum = cwd.match(/[-/](\d+)\/?$/);
+      if (trailingNum) return '#' + trailingNum[1];
       try {
         const branch = execSync('git branch --show-current', { cwd, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
-        const branchNum = branch.match(NUMERIC_PATTERN);
-        if (branchNum) return '#' + branchNum[1];
+        const branchTrailingNum = branch.match(/[-/](\d+)$/);
+        if (branchTrailingNum) return '#' + branchTrailingNum[1];
       } catch {}
     }
   } catch {}

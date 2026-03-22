@@ -345,15 +345,16 @@ const REQUIRED_REPORTS = [
 
 // ─── State Inspection ────────────────────────────────────────────────────────
 
-function inspect(ticket) {
+function inspect(ticket, providerConfig) {
   const s = {};
+  const safeName = tp.sanitizeTicketIdForPath(ticket, providerConfig);
 
-  s.worktreeDir = path.join(WORKTREES_BASE, `${MAIN_WORKTREE_FOLDER}-${ticket}`);
-  s.tasksDir = path.join(TASKS_BASE, ticket);
+  s.worktreeDir = path.join(WORKTREES_BASE, `${MAIN_WORKTREE_FOLDER}-${safeName}`);
+  s.tasksDir = path.join(TASKS_BASE, safeName);
   s.worktreeExists = fileExists(s.worktreeDir);
   s.tasksDirExists = fileExists(s.tasksDir);
 
-  s.workState = loadWorkState(ticket);
+  s.workState = loadWorkState(safeName);
   s.hasStateFile = s.workState !== null;
   s.currentStep = getCurrentStep(s.workState);
   s.stepIs = (step) => s.workState?.stepStatus?.[step] || 'unknown';
@@ -447,12 +448,13 @@ function inspect(ticket) {
 
 // ─── Plan Generation ─────────────────────────────────────────────────────────
 
-function generatePlan(ticket, description, s, rework) {
+function generatePlan(ticket, description, s, rework, callerProviderCfg) {
   const plan = [];
   const mode = rework ? 'rework' : 'resume';
   const t = ticket || '{TICKET}';
-  const worktreeDir = s?.worktreeDir || `${WORKTREES_BASE}/${MAIN_WORKTREE_FOLDER}-${t}`;
-  const tasksDir = s?.tasksDir || `${TASKS_BASE}/${t}`;
+  const safeName = ticket ? tp.sanitizeTicketIdForPath(t, callerProviderCfg) : t;
+  const worktreeDir = s?.worktreeDir || `${WORKTREES_BASE}/${MAIN_WORKTREE_FOLDER}-${safeName}`;
+  const tasksDir = s?.tasksDir || `${TASKS_BASE}/${safeName}`;
 
   const tddEnforce = process.env.WORK_TDD_ENFORCE === '1';
 
@@ -654,8 +656,8 @@ function generatePlan(ticket, description, s, rework) {
     agentType: 'Bash',
     agentPrompt: [
       `Run these commands in sequence:`,
-      `1. node "${path.join(__dirname, 'work-state.js')}" complete ${t}`,
-      `2. node "${guardPath}" finish ${t}`,
+      `1. node "${path.join(__dirname, 'work-state.js')}" complete ${safeName}`,
+      `2. node "${guardPath}" finish ${safeName}`,
       ``,
       `Step 1 marks the workflow as complete (exits 0 on success).`,
       `Step 2 is an atomic teardown: reveals the session passphrase (unlocking the Stop hook) and removes the session file. Exits 0 when no session exists (guard disabled or already cleaned up). Exits 1 only if called without a ticket ID (programming error).`,
@@ -787,14 +789,41 @@ function main() {
   switch (command) {
     case 'plan': {
       const rework = rest.includes('--rework');
-      const raw = rest.filter(a => a !== '--rework').join(' ').trim();
+      let raw = rest.filter(a => a !== '--rework').join(' ').trim();
       if (!raw) { console.log(JSON.stringify({ error: true, message: 'Provide ticket ID or description' })); process.exit(1); }
-      const isTicket = /^[A-Z]+-\d+$/i.test(raw) || (/^#?\d+$/.test(raw) && tp.getProviderConfig({ skipPrompt: true })?.provider === 'github');
-      const ticket = isTicket ? raw.toUpperCase() : null;
-      const state = ticket ? inspect(ticket) : null;
-      const result = generatePlan(ticket, isTicket ? null : raw, state, rework);
+
+      const providerConfig = tp.getProviderConfig({ skipPrompt: true });
+      const isGitHub = providerConfig?.provider === 'github';
+
+      // Detect GitHub issue URLs — only when provider is GitHub or auto-detect from URL
+      let ghUrlMeta = null;
+      const ghParsed = tp.parseGitHubUrl(raw);
+      if (ghParsed && (isGitHub || !providerConfig)) {
+        ghUrlMeta = ghParsed;
+        raw = '#' + ghParsed.number;
+      }
+      const isTicket = /^[A-Z]+-\d+$/i.test(raw)
+        || (/^#?\d+$/.test(raw) && isGitHub)
+        || (/^GH-\d+$/i.test(raw) && isGitHub);
+      let ticket = isTicket ? raw.toUpperCase() : null;
+      // For GitHub provider, normalize to canonical #N form
+      if (isTicket && isGitHub) {
+        const num = raw.replace(/^#|^GH-/i, '');
+        ticket = '#' + num;
+      }
+      // Enrich provider config with owner/repo from parsed URL for ticketUrl generation
+      // Thread owner/repo from parsed URL into providerConfig for ticketUrl()
+      if (ghUrlMeta && isGitHub) {
+        providerConfig.owner = ghUrlMeta.owner;
+        providerConfig.repo = ghUrlMeta.repo;
+      }
+      const state = ticket ? inspect(ticket, providerConfig) : null;
+      const result = generatePlan(ticket, isTicket ? null : raw, state, rework, providerConfig);
 
       result.timestamp = new Date().toISOString();
+      if (ghUrlMeta && providerConfig) {
+        result.ticketUrl = tp.ticketUrl(ticket, providerConfig);
+      }
       if (state) {
         result.currentStep = state.currentStep;
         result.allowedTransitions = STEP_TRANSITIONS[state.currentStep] || [];
@@ -828,13 +857,20 @@ function main() {
         console.log(JSON.stringify({ error: true, message: 'Usage: transition <TICKET> <step>', validSteps: ALL_STEPS }));
         process.exit(1);
       }
-      console.log(JSON.stringify(transitionStep(rest[0].toUpperCase(), rest[1]), null, 2));
+      const transProviderCfg = tp.getProviderConfig({ skipPrompt: true });
+      // Normalize: uppercase for Jira/Linear, then sanitize for GitHub path safety
+      const transTicket = transProviderCfg?.provider === 'github' ? rest[0] : rest[0].toUpperCase();
+      const safeTransTicket = tp.sanitizeTicketIdForPath(transTicket, transProviderCfg);
+      console.log(JSON.stringify(transitionStep(safeTransTicket, rest[1]), null, 2));
       break;
     }
 
     case 'transitions': {
       if (!rest[0]) { console.log(JSON.stringify({ error: true, message: 'Usage: transitions <TICKET>' })); process.exit(1); }
-      console.log(JSON.stringify(getAvailableTransitions(rest[0].toUpperCase()), null, 2));
+      const transitionsProviderCfg = tp.getProviderConfig({ skipPrompt: true });
+      const transitionsTicket = transitionsProviderCfg?.provider === 'github' ? rest[0] : rest[0].toUpperCase();
+      const safeTransitionsTicket = tp.sanitizeTicketIdForPath(transitionsTicket, transitionsProviderCfg);
+      console.log(JSON.stringify(getAvailableTransitions(safeTransitionsTicket), null, 2));
       break;
     }
 
@@ -848,7 +884,8 @@ function main() {
         console.log(JSON.stringify({ error: true, message: 'Usage: actions <TICKET> [--raw]' }));
         process.exit(1);
       }
-      const ticket = rest[0].toUpperCase();
+      const actionsProviderCfg = tp.getProviderConfig({ skipPrompt: true });
+      const ticket = tp.sanitizeTicketIdForPath(actionsProviderCfg?.provider === 'github' ? rest[0] : rest[0].toUpperCase(), actionsProviderCfg);
       const raw = rest.includes('--raw');
       const actions = loadActions(ticket);
       if (raw) {
@@ -865,7 +902,8 @@ function main() {
         console.error(JSON.stringify({ error: 'usage', message: 'Usage: record-tdd <TICKET_ID> <STEP_ID> [--cmd "..." --red --green --files "..."] [--exception "..."]' }));
         process.exit(1);
       }
-      const ticket = rest[0].toUpperCase();
+      const tddProviderCfg = tp.getProviderConfig({ skipPrompt: true });
+      const ticket = tp.sanitizeTicketIdForPath(tddProviderCfg?.provider === 'github' ? rest[0] : rest[0].toUpperCase(), tddProviderCfg);
       const stepId = rest[1];
       // Parse flags — missing values for --cmd/--files/--exception fall through
       // to recordTddEvidence() validation which returns clear error messages.
