@@ -225,6 +225,8 @@ function loadDocsFromPaths(envVarName, csvPaths, repoRoot) {
   if (docPaths.length === 0) return '';
 
   const resolvedRoot = path.resolve(repoRoot);
+  // When WORKTREES_BASE is set, allow paths within it (enables shared docs across worktrees)
+  const worktreesBase = process.env.WORKTREES_BASE ? path.resolve(process.env.WORKTREES_BASE) : null;
   let docs = '';
   for (const relPath of docPaths) {
     // Reject absolute paths
@@ -238,17 +240,21 @@ function loadDocsFromPaths(envVarName, csvPaths, repoRoot) {
       console.error(`Warning: ${envVarName} rejects sensitive file: ${relPath}`);
       continue;
     }
-    // Resolve and ensure path stays within repo root
+    // Resolve and check path boundaries
     const absPath = path.resolve(resolvedRoot, relPath);
-    if (!absPath.startsWith(resolvedRoot + path.sep) && absPath !== resolvedRoot) {
+    const withinRepo = absPath.startsWith(resolvedRoot + path.sep) || absPath === resolvedRoot;
+    const withinWorktreesBase = worktreesBase && (absPath.startsWith(worktreesBase + path.sep) || absPath === worktreesBase);
+    if (!withinRepo && !withinWorktreesBase) {
       console.error(`Warning: ${envVarName} path escapes repo root: ${relPath}`);
       continue;
     }
     try {
-      // Resolve symlinks to prevent symlink-based path traversal, then re-check
+      // Resolve symlinks to prevent symlink-based path traversal, then re-check boundaries
       const realPath = fs.realpathSync(absPath);
-      if (!realPath.startsWith(resolvedRoot + path.sep)) {
-        console.error(`Warning: ${envVarName} symlink escapes repo root: ${relPath}`);
+      const realWithinRepo = realPath.startsWith(resolvedRoot + path.sep);
+      const realWithinWorktreesBase = worktreesBase && (realPath.startsWith(worktreesBase + path.sep) || realPath === worktreesBase);
+      if (!realWithinRepo && !realWithinWorktreesBase) {
+        console.error(`Warning: ${envVarName} symlink escapes allowed boundary: ${relPath}`);
         continue;
       }
       const stat = fs.statSync(realPath);
@@ -261,19 +267,20 @@ function loadDocsFromPaths(envVarName, csvPaths, repoRoot) {
         console.error(`Warning: ${envVarName} file too large (${stat.size} bytes, max ${MAX_DOC_BYTES}): ${relPath}`);
         continue;
       }
-      // Reject untracked/gitignored files — use repo-relative path since git ls-files expects pathspecs relative to repo root
-      const repoRelPath = path.relative(resolvedRoot, realPath);
-      try {
-        execSync(`git -C ${JSON.stringify(resolvedRoot)} ls-files --error-unmatch -- ${JSON.stringify(repoRelPath)}`, { stdio: 'ignore' });
-      } catch {
-        console.error(`Warning: ${envVarName} rejects untracked/gitignored file: ${relPath}`);
-        continue;
+      // Only run git ls-files check for files within the repo root.
+      // Files outside the repo (shared docs in WORKTREES_BASE) are not git-tracked.
+      if (realWithinRepo) {
+        const repoRelPath = path.relative(resolvedRoot, realPath);
+        try {
+          execSync(`git -C ${JSON.stringify(resolvedRoot)} ls-files --error-unmatch -- ${JSON.stringify(repoRelPath)}`, { stdio: 'ignore' });
+        } catch {
+          console.error(`Warning: ${envVarName} rejects untracked/gitignored file: ${relPath}`);
+          continue;
+        }
       }
-      // Guards passed: DOCS_DENYLIST + .env regex + resolve-prefix + realpathSync + isFile + 256KB + git-ls-files
+      // Guards passed: DOCS_DENYLIST + .env regex + boundary check + realpathSync + isFile + 256KB + git-ls-files (repo files only)
       docs += `\n--- ${relPath} ---\n${fs.readFileSync(realPath, 'utf8')}\n`;
     } catch (readErr) {
-      // Guard chain applied above: DOCS_DENYLIST → .env regex → path.resolve prefix →
-      // realpathSync → stat.isFile → 256 KB size cap → git ls-files (repo-relative)
       const reason = readErr.code || readErr.message;
       console.error(`Warning: ${envVarName} skipped (${reason}): ${relPath}`);
     }
@@ -350,4 +357,9 @@ function main() {
   // The calling code will check result.cache.cached
 }
 
-main();
+// Allow importing individual functions for testing
+if (require.main === module) {
+  main();
+} else {
+  module.exports = { loadDocsFromPaths, DOCS_DENYLIST };
+}
