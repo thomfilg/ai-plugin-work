@@ -163,6 +163,7 @@ function checkCI(prNumber) {
   // gh pr checks --json fields: bucket, completedAt, description, event, link, name, startedAt, state, workflow
   // bucket: pass | fail | pending | skipping | cancel
   let raw;
+  let usedFallback = false;
   try {
     raw = ghExec(`pr checks ${prArg} --json name,bucket,state,link,workflow`, { allowNonZero: true });
   } catch (err) {
@@ -171,6 +172,7 @@ function checkCI(prNumber) {
     if (err.message) {
       // Fallback: use pr view --json statusCheckRollup
       try {
+        usedFallback = true;
         const data = ghExec(`pr view ${prArg} --json statusCheckRollup`);
         raw = (data.statusCheckRollup || []).map((check) => {
           let bucket;
@@ -179,8 +181,10 @@ function checkCI(prNumber) {
           } else {
             switch (check.conclusion) {
               case 'SUCCESS':
-              case 'NEUTRAL':
                 bucket = 'pass';
+                break;
+              case 'NEUTRAL':
+                bucket = 'neutral';
                 break;
               case 'FAILURE':
               case 'TIMED_OUT':
@@ -216,17 +220,42 @@ function checkCI(prNumber) {
 
   if (!Array.isArray(raw)) raw = [];
 
-  const checks = raw.map((check) => ({
-    name: check.name || 'unknown',
-    bucket: (check.bucket || 'pending').toLowerCase(),
-    state: check.state || '',
-    category: categorizeCheck(check.name || ''),
-    url: check.link || null,
-  }));
+  // Enrich with conclusion data from statusCheckRollup to detect NEUTRAL checks
+  // (gh pr checks --json maps NEUTRAL to 'pass' bucket, losing the distinction)
+  // Skip when fallback path already handles NEUTRAL correctly
+  let neutralNames = new Set();
+  if (!usedFallback) try {
+    const rollup = ghExec(`pr view ${prArg} --json statusCheckRollup`);
+    if (rollup && rollup.statusCheckRollup) {
+      for (const check of rollup.statusCheckRollup) {
+        if (check.conclusion === 'NEUTRAL') {
+          neutralNames.add(check.name || check.context || '');
+        }
+      }
+    }
+  } catch {
+    // If rollup fetch fails, proceed without neutral detection
+  }
+
+  const checks = raw.map((check) => {
+    let bucket = (check.bucket || 'pending').toLowerCase();
+    // Reclassify pass → neutral if statusCheckRollup says NEUTRAL
+    if (bucket === 'pass' && neutralNames.has(check.name || 'unknown')) {
+      bucket = 'neutral';
+    }
+    return {
+      name: check.name || 'unknown',
+      bucket,
+      state: check.state || '',
+      category: categorizeCheck(check.name || ''),
+      url: check.link || null,
+    };
+  });
 
   const failed = checks.filter((ck) => ck.bucket === 'fail');
   const running = checks.filter((ck) => ck.bucket === 'pending');
   const passed = checks.filter((ck) => ck.bucket === 'pass' || ck.bucket === 'skipping');
+  const neutral = checks.filter((ck) => ck.bucket === 'neutral');
   const cancelled = checks.filter((ck) => ck.bucket === 'cancel');
 
   let status;
@@ -236,7 +265,7 @@ function checkCI(prNumber) {
   else if (cancelled.length > 0) status = 'cancelled';
   else status = 'passing';
 
-  return { status, checks, failed, running, passed, cancelled, total: checks.length };
+  return { status, checks, failed, running, passed, neutral, cancelled, total: checks.length };
 }
 
 // ── Reviews ─────────────────────────────────────────────────────────────────
@@ -610,6 +639,9 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
     for (const ck of ci.passed) {
       lines.push(`  ${c.green('✓')} ${ck.name} — passed`);
     }
+    for (const ck of ci.neutral) {
+      lines.push(`  ${c.dim('○')} ${ck.name} — neutral`);
+    }
 
     // Coverage special case
     const hasCoverageFailure = ci.failed.some((ck) => ck.category === 'coverage');
@@ -634,10 +666,16 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
     for (const ck of ci.passed) {
       lines.push(`  ${c.green('✓')} ${ck.name} — passed`);
     }
+    for (const ck of ci.neutral) {
+      lines.push(`  ${c.dim('○')} ${ck.name} — neutral`);
+    }
   } else if (ci.status === 'passing') {
     lines.push(c.green(`CI: PASSED (all ${ci.total} checks)`));
     for (const ck of ci.passed) {
       lines.push(`  ${c.green('✓')} ${ck.name} — passed`);
+    }
+    for (const ck of ci.neutral) {
+      lines.push(`  ${c.dim('○')} ${ck.name} — neutral`);
     }
   } else if (ci.status === 'cancelled') {
     lines.push(c.yellow(`CI: CANCELLED (${ci.cancelled.length} cancelled, ${ci.passed.length} passed)`));
@@ -646,6 +684,9 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
     }
     for (const ck of ci.passed) {
       lines.push(`  ${c.green('✓')} ${ck.name} — passed`);
+    }
+    for (const ck of ci.neutral) {
+      lines.push(`  ${c.dim('○')} ${ck.name} — neutral`);
     }
   } else {
     lines.push(c.dim('CI: No checks found'));
@@ -808,6 +849,7 @@ function getAdaptiveInterval(attempt, ci) {
 
   const total = ci.total || 0;
   const completed = (ci.passed ? ci.passed.length : 0)
+    + (ci.neutral ? ci.neutral.length : 0)
     + (ci.failed ? ci.failed.length : 0)
     + (ci.cancelled ? ci.cancelled.length : 0);
   const completionRatio = total > 0 ? completed / total : 0;
