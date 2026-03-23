@@ -802,18 +802,23 @@ function main() {
         ghUrlMeta = ghParsed;
         raw = '#' + ghParsed.number;
       }
+      // Auto-detect GitHub provider from #N shorthand (unambiguous — no other provider uses #)
+      if (/^#\d+$/.test(raw) && !isGitHub && !providerConfig) {
+        providerConfig = { provider: 'github', projectKey: '' };
+      }
+      const isGitHubEffective = providerConfig?.provider === 'github';
       const isTicket = /^[A-Z]+-\d+$/i.test(raw)
-        || (/^#?\d+$/.test(raw) && isGitHub)
-        || (/^GH-\d+$/i.test(raw) && isGitHub);
+        || (/^#?\d+$/.test(raw) && isGitHubEffective)
+        || (/^GH-\d+$/i.test(raw) && isGitHubEffective);
       let ticket = isTicket ? raw.toUpperCase() : null;
       // For GitHub provider, normalize to canonical #N form
-      if (isTicket && isGitHub) {
+      if (isTicket && isGitHubEffective) {
         const num = raw.replace(/^#|^GH-/i, '');
         ticket = '#' + num;
       }
       // Enrich provider config with owner/repo from parsed URL for ticketUrl generation
       // Thread owner/repo from parsed URL into providerConfig for ticketUrl()
-      if (ghUrlMeta && isGitHub) {
+      if (ghUrlMeta && isGitHubEffective) {
         providerConfig.owner = ghUrlMeta.owner;
         providerConfig.repo = ghUrlMeta.repo;
       }
