@@ -803,13 +803,15 @@ function main() {
         raw = '#' + ghParsed.number;
       }
       // Auto-detect GitHub provider from #N shorthand (unambiguous — no other provider uses #)
+      // providerConfig is `let` so it can be assigned here when auto-detected
       if (/^#\d+$/.test(raw) && !isGitHub && !providerConfig) {
         providerConfig = { provider: 'github', projectKey: '' };
       }
       const isGitHubEffective = providerConfig?.provider === 'github';
-      const isTicket = /^[A-Z]+-\d+$/i.test(raw)
-        || (/^#?\d+$/.test(raw) && isGitHubEffective)
-        || (/^GH-\d+$/i.test(raw) && isGitHubEffective);
+      const isJiraTicket = /^[A-Z]+-\d+$/i.test(raw);
+      const isGitHubIssue = /^#?\d+$/.test(raw) && isGitHubEffective;
+      const isGitHubPrefixed = /^GH-\d+$/i.test(raw) && isGitHubEffective;
+      const isTicket = isJiraTicket || isGitHubIssue || isGitHubPrefixed;
       let ticket = isTicket ? raw.toUpperCase() : null;
       // For GitHub provider, normalize to canonical #N form
       if (isTicket && isGitHubEffective) {
