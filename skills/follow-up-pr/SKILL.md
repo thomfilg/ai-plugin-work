@@ -399,6 +399,10 @@ This command will:
 </For each>
 <If no reviews addressed: "No review comments required changes.">
 
+### Skipped AI Review Comments (Conflict With User Intent)
+<If any skipped comments, list each with comment text, why you disagree, and evidence>
+<If none: omit this section>
+
 ### CI Checks (Final)
 <List all passing checks>
 
@@ -438,6 +442,10 @@ This command will:
 <For each review in summary.reviewsAddressed>
 - @<AUTHOR>: "<COMMENT_SUMMARY>" → <FIX>
 </For each>
+
+### Skipped AI Review Comments (Conflict With User Intent)
+<If any skipped comments, list each with comment text, why you disagree, and evidence>
+<If none: omit this section>
 
 ### Unresolved Review Comments
 <List any review comments that could not be addressed>
