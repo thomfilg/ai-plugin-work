@@ -792,7 +792,7 @@ function main() {
       let raw = rest.filter(a => a !== '--rework').join(' ').trim();
       if (!raw) { console.log(JSON.stringify({ error: true, message: 'Provide ticket ID or description' })); process.exit(1); }
 
-      const providerConfig = tp.getProviderConfig({ skipPrompt: true });
+      let providerConfig = tp.getProviderConfig({ skipPrompt: true });
       const isGitHub = providerConfig?.provider === 'github';
 
       // Detect GitHub issue URLs — only when provider is GitHub or auto-detect from URL
@@ -802,18 +802,25 @@ function main() {
         ghUrlMeta = ghParsed;
         raw = '#' + ghParsed.number;
       }
-      const isTicket = /^[A-Z]+-\d+$/i.test(raw)
-        || (/^#?\d+$/.test(raw) && isGitHub)
-        || (/^GH-\d+$/i.test(raw) && isGitHub);
+      // Auto-detect GitHub provider from #N shorthand when no provider is configured.
+      // providerConfig is declared as `let` (line 795) to allow this reassignment.
+      if (/^#\d+$/.test(raw) && !isGitHub && !providerConfig) {
+        providerConfig = { provider: 'github', projectKey: '' }; // auto-detected
+      }
+      const isGitHubEffective = providerConfig?.provider === 'github';
+      const isJiraTicket = /^[A-Z]+-\d+$/i.test(raw);
+      const isGitHubIssue = /^#?\d+$/.test(raw) && isGitHubEffective;
+      const isGitHubPrefixed = /^GH-\d+$/i.test(raw) && isGitHubEffective;
+      const isTicket = isJiraTicket || isGitHubIssue || isGitHubPrefixed;
       let ticket = isTicket ? raw.toUpperCase() : null;
       // For GitHub provider, normalize to canonical #N form
-      if (isTicket && isGitHub) {
+      if (isTicket && isGitHubEffective) {
         const num = raw.replace(/^#|^GH-/i, '');
         ticket = '#' + num;
       }
       // Enrich provider config with owner/repo from parsed URL for ticketUrl generation
       // Thread owner/repo from parsed URL into providerConfig for ticketUrl()
-      if (ghUrlMeta && isGitHub) {
+      if (ghUrlMeta && isGitHubEffective) {
         providerConfig.owner = ghUrlMeta.owner;
         providerConfig.repo = ghUrlMeta.repo;
       }
