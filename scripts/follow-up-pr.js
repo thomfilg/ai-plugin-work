@@ -298,11 +298,16 @@ function getBotReviewers() {
 function classifyCommentPriority(author, body) {
   const lower = (body || '').toLowerCase();
 
-  // Copilot: [severity] tags (from copilot-instructions.md) or [nitpick] flag
+  // Copilot: [severity] tags at the START of the comment body (from copilot-instructions.md)
+  // IMPORTANT: Only match tags at the beginning to avoid false matches from tag mentions in body text
   if (author === 'copilot-pull-request-reviewer' || author === 'Copilot') {
-    if (/\[nitpick\]/i.test(body) || /\[low\]/i.test(body)) return 'low';
-    if (/\[critical\]/i.test(body) || /\[high\]/i.test(body)) return 'high';
-    if (/\[medium\]/i.test(body)) return 'medium';
+    const tagMatch = (body || '').match(/^\s*\[(\w+)\]/i);
+    if (tagMatch) {
+      const tag = tagMatch[1].toLowerCase();
+      if (tag === 'nitpick' || tag === 'low') return 'low';
+      if (tag === 'critical' || tag === 'high') return 'high';
+      if (tag === 'medium') return 'medium';
+    }
     return 'medium';
   }
 

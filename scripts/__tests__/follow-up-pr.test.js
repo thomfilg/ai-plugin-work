@@ -57,6 +57,11 @@ describe('classifyCommentPriority', () => {
     it('returns medium when no severity tag', () => {
       assert.equal(classifyCommentPriority(author, 'This needs fixing'), 'medium');
     });
+
+    it('does not false-match [low] tag appearing inside body text (not at start)', () => {
+      const body = '[critical] Step 5.4 says to "skip the comment entirely"...\n```suggestion\n1. If the conflicting AI comment is non-blocking ([low] or [nitpick]):\n```';
+      assert.equal(classifyCommentPriority(author, body), 'high');
+    });
   });
 
   describe('Cursor (cursor-ai[bot])', () => {
