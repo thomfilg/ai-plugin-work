@@ -195,13 +195,21 @@ describe('work-orchestrator.js', () => {
       fs.mkdirSync(tmpWb, { recursive: true });
       try {
         const { result, code } = await runOrchestrator(['#42'], {
-          env: { TICKET_PROVIDER: '', HOME: tmpHome, USERPROFILE: tmpHome, WORKTREES_BASE: tmpWb },
+          env: {
+            TICKET_PROVIDER: '',
+            HOME: tmpHome,
+            USERPROFILE: tmpHome,
+            WORKTREES_BASE: tmpWb,
+            JIRA_PROJECT_KEY: '',
+            JIRA_BASE_URL: '',
+            TICKET_PROJECT_KEY: '',
+          },
           cwd: tmpBase,
         });
         assert.equal(code, 0);
         assert.equal(result.ticket, '#42');
       } finally {
-        fs.rmSync(tmpBase, { recursive: true, force: true });
+        try { fs.rmSync(tmpBase, { recursive: true, force: true }); } catch {}
       }
     });
   });
