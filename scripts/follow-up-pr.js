@@ -308,7 +308,8 @@ function classifyCommentPriority(author, body) {
       if (tag === 'critical' || tag === 'high') return 'high';
       if (tag === 'medium') return 'medium';
     }
-    return 'medium'; // no recognized tag → default to blocking
+    // No recognized severity tag at start of comment — default to medium (blocking)
+    return 'medium';
   }
 
   // Cursor: parse **severity**: <level> pattern (can appear anywhere in body, unlike Copilot tags)
