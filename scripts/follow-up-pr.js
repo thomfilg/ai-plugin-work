@@ -298,15 +298,21 @@ function getBotReviewers() {
 function classifyCommentPriority(author, body) {
   const lower = (body || '').toLowerCase();
 
-  // Copilot: [severity] tags (from copilot-instructions.md) or [nitpick] flag
+  // Copilot: [severity] tags at the START of the comment body (from copilot-instructions.md)
+  // IMPORTANT: Only match tags at the beginning to avoid false matches from tag mentions in body text
   if (author === 'copilot-pull-request-reviewer' || author === 'Copilot') {
-    if (/\[nitpick\]/i.test(body) || /\[low\]/i.test(body)) return 'low';
-    if (/\[critical\]/i.test(body) || /\[high\]/i.test(body)) return 'high';
-    if (/\[medium\]/i.test(body)) return 'medium';
+    const tagMatch = (body || '').match(/^\s*\[(\w+)\]/i);
+    if (tagMatch) {
+      const tag = tagMatch[1].toLowerCase();
+      if (tag === 'nitpick' || tag === 'low') return 'low';
+      if (tag === 'critical' || tag === 'high') return 'high';
+      if (tag === 'medium') return 'medium';
+    }
+    // No recognized severity tag at start of comment — default to medium (blocking)
     return 'medium';
   }
 
-  // Cursor: parse **severity**: <level> pattern
+  // Cursor: parse **severity**: <level> pattern (can appear anywhere in body, unlike Copilot tags)
   if (author === 'cursor-ai[bot]') {
     const severityMatch = lower.match(
       /\*{0,2}severity\*{0,2}\s*[:：]\s*(critical|high|major|medium|moderate|minor|low|nitpick|trivial|suggestion)/

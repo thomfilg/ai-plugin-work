@@ -210,9 +210,57 @@ For each group of related feedback:
 - **If the same reviewer keeps requesting changes**, consider asking the user if they want to continue or discuss directly with the reviewer
 - **After addressing reviews**, the reviewer may add new comments — that's why we re-enter the loop
 
+### 5.4 Skip AI Comments That Conflict With User Intent
+
+Sometimes AI reviewers (Cursor, Copilot) suggest reverting or undoing changes that the user explicitly requested. When you identify such comments:
+
+1. **Do NOT implement the suggested change** — skip it entirely
+2. **Fix all other legitimate review comments** normally (Steps 5.1–5.3)
+3. **Report all skipped comments** to the user in the summary (see Step 6 templates) using this format:
+
+```
+### Skipped AI Review Comments (Conflict With User Intent)
+
+I didn't address these comments:
+
+**Comment 1:**
+> {exact comment text}
+
+**Why I disagree:**
+{Detailed explanation of how exactly what the AI reviewer asked goes against
+what the user requested. Be thorough — explain the conflict fully.}
+Disagreed because of: {path to supporting document or quote of user instruction}
+```
+
+**Where to find evidence to support your disagreement:**
+1. **Tasks folder** — Look in `${TASKS_BASE}/<TICKET_ID>/` for pre-planning docs, requirements, or design docs that justify the change
+2. **User's direct instructions** — Quote what the user explicitly asked for in the conversation that triggered the work
+3. **Ticket description** — Reference the Jira/Linear ticket requirements if they support the implementation
+
+**Example:**
+```
+**Comment 1:**
+> "Remove the error boundary wrapper, it adds unnecessary complexity"
+
+**Why I disagree:**
+Cursor is asking to remove the error boundary component that wraps the tips settings panel.
+However, the user explicitly requested error boundaries to be added for resilience — this was
+a deliberate architectural decision to prevent individual panel crashes from taking down the
+entire settings page. Removing it would undo the core requirement of the task.
+Disagreed because of: '${TASKS_BASE}/TICKET-123/tips-settings/pre-planning.md' — section "Error Handling"
+specifies error boundaries as a requirement.
+```
+
+**How to identify conflicting comments:**
+- The AI suggests removing/reverting code that implements a feature the user asked for
+- The AI suggests a different approach that contradicts the user's explicit instructions or pre-planning docs
+- The AI flags as "unnecessary" something that the user specifically requested
+
+**When in doubt:** If you're unsure whether a comment conflicts with user intent, use AskUserQuestion to ask.
+
 ---
 
-## Step 4: Diagnose and Fix Failures
+## Step 4: Diagnose and Fix Failures (ordered after Step 5 intentionally — reviews are triaged first)
 
 ### 4.1 Get Failure Details
 
@@ -351,6 +399,10 @@ This command will:
 </For each>
 <If no reviews addressed: "No review comments required changes.">
 
+### Skipped AI Review Comments (Conflict With User Intent)
+<If any skipped comments, list each with comment text, why you disagree, and evidence>
+<If none: omit this section>
+
 ### CI Checks (Final)
 <List all passing checks>
 
@@ -390,6 +442,10 @@ This command will:
 <For each review in summary.reviewsAddressed>
 - @<AUTHOR>: "<COMMENT_SUMMARY>" → <FIX>
 </For each>
+
+### Skipped AI Review Comments (Conflict With User Intent)
+<If any skipped comments, list each with comment text, why you disagree, and evidence>
+<If none: omit this section>
 
 ### Unresolved Review Comments
 <List any review comments that could not be addressed>
