@@ -327,6 +327,130 @@ describe('enforce-step-workflow', () => {
         assert.equal(code, 0);
       });
     });
+
+    describe('Agent tool recognition and evidence recording', () => {
+      it('Agent with description "1_ticket" is recognized and records evidence', async () => {
+        writeWorkState(makeStepStatus('1_ticket', WORK_STEPS));
+        const input = { tool_name: 'Agent', tool_input: { subagent_type: 'general-purpose', description: '1_ticket fetch ticket details', prompt: 'fetch ticket' } };
+
+        const pre = await runHook(input);
+        assert.equal(pre.code, 0, 'PreToolUse should allow Agent');
+
+        const post = await runHook(input, 'PostToolUse');
+        assert.equal(post.code, 0);
+        const evidence = readEvidence();
+        assert.ok(evidence['1_ticket']?.executed, 'Should record evidence for 1_ticket');
+        assert.equal(evidence['1_ticket']?.tool, 'Agent');
+      });
+
+      it('Agent(quality-checker) via subagent_type is recognized and records evidence', async () => {
+        writeWorkState(makeStepStatus('4_quality', WORK_STEPS));
+        const input = { tool_name: 'Agent', tool_input: { subagent_type: 'quality-checker', description: 'run checks', prompt: 'run checks' } };
+
+        const pre = await runHook(input);
+        assert.equal(pre.code, 0, 'PreToolUse should allow Agent');
+
+        const post = await runHook(input, 'PostToolUse');
+        assert.equal(post.code, 0);
+        const evidence = readEvidence();
+        assert.ok(evidence['4_quality']?.executed, 'Should record evidence for 4_quality');
+        assert.equal(evidence['4_quality']?.tool, 'Agent');
+      });
+
+      it('Agent with work-workflow:quality-checker prefix records 4_quality evidence via PostToolUse', async () => {
+        writeWorkState(makeStepStatus('4_quality', WORK_STEPS));
+        const hookData = { tool_name: 'Agent', tool_input: { subagent_type: 'work-workflow:quality-checker', description: 'run checks', prompt: 'run checks' } };
+        const pre = await runHook(hookData);
+        assert.equal(pre.code, 0, 'PreToolUse allows Agent with work-workflow: prefix');
+        const post = await runHook(hookData, 'PostToolUse');
+        assert.equal(post.code, 0);
+        const ev = readEvidence();
+        assert.ok(ev['4_quality']?.executed, 'PostToolUse must record evidence for 4_quality');
+      });
+
+      it('Agent with description "4_quality" records evidence via PostToolUse', async () => {
+        writeWorkState(makeStepStatus('4_quality', WORK_STEPS));
+        const hookData = { tool_name: 'Agent', tool_input: { subagent_type: 'general-purpose', description: '4_quality run dev:check', prompt: 'run checks' } };
+        const pre = await runHook(hookData);
+        assert.equal(pre.code, 0, 'PreToolUse allows Agent with description match');
+        const post = await runHook(hookData, 'PostToolUse');
+        assert.equal(post.code, 0);
+        const ev = readEvidence();
+        assert.ok(ev['4_quality']?.executed, 'PostToolUse must record evidence for 4_quality');
+      });
+
+      it('Agent(commit-writer) via subagent_type is recognized and records evidence', async () => {
+        writeWorkState(makeStepStatus('5_commit', WORK_STEPS));
+        const input = { tool_name: 'Agent', tool_input: { subagent_type: 'commit-writer', description: 'commit changes', prompt: 'commit' } };
+
+        const pre = await runHook(input);
+        assert.equal(pre.code, 0, 'PreToolUse should allow Agent');
+
+        const post = await runHook(input, 'PostToolUse');
+        assert.equal(post.code, 0);
+        const evidence = readEvidence();
+        assert.ok(evidence['5_commit']?.executed, 'Should record evidence for 5_commit');
+        assert.equal(evidence['5_commit']?.tool, 'Agent');
+      });
+
+      it('Agent with description "7_cleanup" is recognized and records evidence', async () => {
+        writeWorkState(makeStepStatus('7_cleanup', WORK_STEPS));
+        const input = { tool_name: 'Agent', tool_input: { subagent_type: 'general-purpose', description: '7_cleanup kill dev session', prompt: 'kill session' } };
+
+        const pre = await runHook(input);
+        assert.equal(pre.code, 0, 'PreToolUse should allow Agent');
+
+        const post = await runHook(input, 'PostToolUse');
+        assert.equal(post.code, 0);
+        const evidence = readEvidence();
+        assert.ok(evidence['7_cleanup']?.executed, 'Should record evidence for 7_cleanup');
+        assert.equal(evidence['7_cleanup']?.tool, 'Agent');
+      });
+
+      it('Agent with description "10_ready" is recognized and records evidence', async () => {
+        writeWorkState(makeStepStatus('10_ready', WORK_STEPS));
+        const input = { tool_name: 'Agent', tool_input: { subagent_type: 'general-purpose', description: '10_ready mark PR ready', prompt: 'gh pr ready' } };
+        const pre = await runHook(input);
+        assert.equal(pre.code, 0);
+        const post = await runHook(input, 'PostToolUse');
+        assert.equal(post.code, 0);
+        const evidence = readEvidence();
+        assert.ok(evidence['10_ready']?.executed, 'Should record evidence for 10_ready');
+      });
+
+      it('Agent with description "11_ci" is recognized and records evidence', async () => {
+        writeWorkState(makeStepStatus('11_ci', WORK_STEPS));
+        const input = { tool_name: 'Agent', tool_input: { subagent_type: 'general-purpose', description: '11_ci watch CI', prompt: 'gh pr checks' } };
+        const pre = await runHook(input);
+        assert.equal(pre.code, 0);
+        const post = await runHook(input, 'PostToolUse');
+        assert.equal(post.code, 0);
+        const evidence = readEvidence();
+        assert.ok(evidence['11_ci']?.executed, 'Should record evidence for 11_ci');
+      });
+
+      it('Agent with description "12_reports" is recognized and records evidence', async () => {
+        writeWorkState(makeStepStatus('12_reports', WORK_STEPS));
+        const input = { tool_name: 'Agent', tool_input: { subagent_type: 'general-purpose', description: '12_reports consolidate', prompt: 'consolidate reports' } };
+        const pre = await runHook(input);
+        assert.equal(pre.code, 0);
+        const post = await runHook(input, 'PostToolUse');
+        assert.equal(post.code, 0);
+        const evidence = readEvidence();
+        assert.ok(evidence['12_reports']?.executed, 'Should record evidence for 12_reports');
+      });
+
+      it('Agent with description "13_complete" is recognized and records evidence', async () => {
+        writeWorkState(makeStepStatus('13_complete', WORK_STEPS));
+        const input = { tool_name: 'Agent', tool_input: { subagent_type: 'general-purpose', description: '13_complete finish', prompt: 'mark complete' } };
+        const pre = await runHook(input);
+        assert.equal(pre.code, 0);
+        const post = await runHook(input, 'PostToolUse');
+        assert.equal(post.code, 0);
+        const evidence = readEvidence();
+        assert.ok(evidence['13_complete']?.executed, 'Should record evidence for 13_complete');
+      });
+    });
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -398,6 +522,40 @@ describe('enforce-step-workflow', () => {
           tool_input: { subagent_type: 'pr-post-generator', prompt: 'add screenshots' },
         });
         assert.equal(code, 0);
+      });
+
+      it('Agent(pr-generator) is recognized and records evidence for 3_pr_gen', async () => {
+        writeWorkflowState(
+          makeStepStatus('3_pr_gen', ['1_preflight', '2_setup', '3_pr_gen', '4_screenshot_gate', '5_post_pr_gen', '6_summary']),
+          'work-pr',
+        );
+        const input = { tool_name: 'Agent', tool_input: { subagent_type: 'pr-generator', prompt: 'update PR' } };
+
+        const pre = await runHook(input);
+        assert.equal(pre.code, 0, 'PreToolUse should allow Agent');
+
+        const post = await runHook(input, 'PostToolUse');
+        assert.equal(post.code, 0);
+        const evidence = readEvidence('.step-evidence-work-pr.json');
+        assert.ok(evidence['3_pr_gen']?.executed, 'Should record evidence for 3_pr_gen');
+        assert.equal(evidence['3_pr_gen']?.tool, 'Agent');
+      });
+
+      it('Agent(pr-post-generator) is recognized and records evidence for 5_post_pr_gen', async () => {
+        writeWorkflowState(
+          makeStepStatus('5_post_pr_gen', ['1_preflight', '2_setup', '3_pr_gen', '4_screenshot_gate', '5_post_pr_gen', '6_summary']),
+          'work-pr',
+        );
+        const input = { tool_name: 'Agent', tool_input: { subagent_type: 'pr-post-generator', prompt: 'add screenshots' } };
+
+        const pre = await runHook(input);
+        assert.equal(pre.code, 0, 'PreToolUse should allow Agent');
+
+        const post = await runHook(input, 'PostToolUse');
+        assert.equal(post.code, 0);
+        const evidence = readEvidence('.step-evidence-work-pr.json');
+        assert.ok(evidence['5_post_pr_gen']?.executed, 'Should record evidence for 5_post_pr_gen');
+        assert.equal(evidence['5_post_pr_gen']?.tool, 'Agent');
       });
     });
 
