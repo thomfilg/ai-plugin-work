@@ -73,20 +73,30 @@ const WORKFLOWS = [
     ],
     softSteps: new Set(['1_ticket', '10_ready', '12_reports']),
     commandMap: [
+      // Note: Some runtimes/models emit Agent instead of Task. Accept both names
+      // so evidence is recorded regardless of which tool name is used.
       { step: '1_ticket',           tool: 'Task',  field: 'description',    pattern: /^1_ticket/i },
+      { step: '1_ticket',           tool: 'Agent', field: 'description',    pattern: /^1_ticket/i },
       { step: '3_implement',        tool: 'Skill', field: 'skill',          pattern: /^work-implement$/ },
       { step: '4_quality',          tool: 'Task',  field: 'subagent_type',  pattern: /^(work-workflow:)?quality-checker$/ },
+      { step: '4_quality',          tool: 'Agent', field: 'subagent_type',  pattern: /^(work-workflow:)?quality-checker$/ },
       { step: '4_quality',          tool: 'Task',  field: 'description',    pattern: /^4_quality/i },
+      { step: '4_quality',          tool: 'Agent', field: 'description',    pattern: /^4_quality/i },
       { step: '4_quality',          tool: 'Bash',  field: 'command',        pattern: /^\s*(LOW_CONCURRENCY=\d+\s+)?((pnpm|npm)\s+(run\s+)?dev:check\b|([\w./-]*\/)?dev-check\.sh(\s+--[\w-]+)*)/ },
       { step: '5_commit',           tool: 'Task',  field: 'subagent_type',  pattern: /^(work-workflow:)?commit-writer$/ },
+      { step: '5_commit',           tool: 'Agent', field: 'subagent_type',  pattern: /^(work-workflow:)?commit-writer$/ },
       { step: '6_check',            tool: 'Skill', field: 'skill',          pattern: /^check$/ },
       { step: '7_cleanup',          tool: 'Task',  field: 'description',    pattern: /^7_cleanup/i },
-      { step: '8_test_enhancement', tool: 'Skill', field: 'skill',          pattern: /^test-coordination$/ },
+      { step: '7_cleanup',          tool: 'Agent', field: 'description',    pattern: /^7_cleanup/i },       { step: '8_test_enhancement', tool: 'Skill', field: 'skill',          pattern: /^test-coordination$/ },
       { step: '9_pr',               tool: 'Skill', field: 'skill',          pattern: /^work-pr$/ },
       { step: '10_ready',           tool: 'Task',  field: 'description',    pattern: /^10_ready/i },
+      { step: '10_ready',           tool: 'Agent', field: 'description',    pattern: /^10_ready/i },
       { step: '11_ci',              tool: 'Task',  field: 'description',    pattern: /^11_ci/i },
+      { step: '11_ci',              tool: 'Agent', field: 'description',    pattern: /^11_ci/i },
       { step: '12_reports',         tool: 'Task',  field: 'description',    pattern: /^12_reports/i },
+      { step: '12_reports',         tool: 'Agent', field: 'description',    pattern: /^12_reports/i },
       { step: '13_complete',        tool: 'Task',  field: 'description',    pattern: /^13_complete/i },
+      { step: '13_complete',        tool: 'Agent', field: 'description',    pattern: /^13_complete/i },
     ],
     transitionPattern: /work-orchestrator\.js\s+transition\s+(\S+)\s+(\S+)/,
     exemptPatterns: [
@@ -107,10 +117,11 @@ const WORKFLOWS = [
     softSteps: new Set(['1_preflight', '2_setup', '4_screenshot_gate', '6_summary']),
     commandMap: [
       { step: '3_pr_gen',       tool: 'Task',  field: 'subagent_type', pattern: /^(work-workflow:)?pr-generator$/ },
+      { step: '3_pr_gen',       tool: 'Agent', field: 'subagent_type', pattern: /^(work-workflow:)?pr-generator$/ },
       { step: '3_pr_gen',       tool: 'Bash',  field: 'command', pattern: /gh\s+pr\s+create/ },
       { step: '3_pr_gen',       tool: 'Bash',  field: 'command', pattern: /gh\s+pr\s+edit/ },
       { step: '5_post_pr_gen',  tool: 'Task',  field: 'subagent_type', pattern: /^(work-workflow:)?pr-post-generator$/ },
-    ],
+      { step: '5_post_pr_gen',  tool: 'Agent', field: 'subagent_type', pattern: /^(work-workflow:)?pr-post-generator$/ },     ],
     transitionPattern: /workflow-engine\.js\s+work-pr\s+transition\s+(\S+)\s+(\S+)/,
     exemptPatterns: [
       /workflow-engine\.js\s+work-pr\s+(plan|transitions|graph)/,
@@ -498,8 +509,9 @@ function handlePostToolUse(hookData) {
       let what;
       if (toolName === 'Skill') {
         what = `Skill(${toolInput?.skill || 'unknown'})`;
-      } else if (toolName === 'Task') {
-        what = `Task(${toolInput?.subagent_type || 'unknown'})`;
+      } else if (toolName === 'Task' || toolName === 'Agent') {
+        const label = toolInput?.subagent_type || String(toolInput?.description || 'unknown').substring(0, 60);
+        what = `${toolName}(${label})`;
       } else if (toolName === 'Bash') {
         what = String(toolInput?.command || '').substring(0, 80);
       } else {
