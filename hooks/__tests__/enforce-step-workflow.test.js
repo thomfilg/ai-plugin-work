@@ -357,30 +357,26 @@ describe('enforce-step-workflow', () => {
         assert.equal(evidence['4_quality']?.tool, 'Agent');
       });
 
-      it('Agent with work-workflow: prefix records evidence as 4_quality', async () => {
+      it('Agent with work-workflow:quality-checker prefix records 4_quality evidence via PostToolUse', async () => {
         writeWorkState(makeStepStatus('4_quality', WORK_STEPS));
-        const input = { tool_name: 'Agent', tool_input: { subagent_type: 'work-workflow:quality-checker', description: 'run checks', prompt: 'run checks' } };
-
-        const pre = await runHook(input);
-        assert.equal(pre.code, 0);
-
-        const post = await runHook(input, 'PostToolUse');
+        const hookData = { tool_name: 'Agent', tool_input: { subagent_type: 'work-workflow:quality-checker', description: 'run checks', prompt: 'run checks' } };
+        const pre = await runHook(hookData);
+        assert.equal(pre.code, 0, 'PreToolUse allows Agent with work-workflow: prefix');
+        const post = await runHook(hookData, 'PostToolUse');
         assert.equal(post.code, 0);
-        const evidence = readEvidence();
-        assert.ok(evidence['4_quality']?.executed, 'Should record evidence for 4_quality');
+        const ev = readEvidence();
+        assert.ok(ev['4_quality']?.executed, 'PostToolUse must record evidence for 4_quality');
       });
 
-      it('Agent with description "4_quality" is recognized and records evidence', async () => {
+      it('Agent with description "4_quality" records evidence via PostToolUse', async () => {
         writeWorkState(makeStepStatus('4_quality', WORK_STEPS));
-        const input = { tool_name: 'Agent', tool_input: { subagent_type: 'general-purpose', description: '4_quality run dev:check', prompt: 'run checks' } };
-
-        const pre = await runHook(input);
-        assert.equal(pre.code, 0);
-
-        const post = await runHook(input, 'PostToolUse');
+        const hookData = { tool_name: 'Agent', tool_input: { subagent_type: 'general-purpose', description: '4_quality run dev:check', prompt: 'run checks' } };
+        const pre = await runHook(hookData);
+        assert.equal(pre.code, 0, 'PreToolUse allows Agent with description match');
+        const post = await runHook(hookData, 'PostToolUse');
         assert.equal(post.code, 0);
-        const evidence = readEvidence();
-        assert.ok(evidence['4_quality']?.executed, 'Should record evidence for 4_quality');
+        const ev = readEvidence();
+        assert.ok(ev['4_quality']?.executed, 'PostToolUse must record evidence for 4_quality');
       });
 
       it('Agent(commit-writer) via subagent_type is recognized and records evidence', async () => {
