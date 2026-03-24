@@ -233,7 +233,7 @@ Disagreed because of: {path to supporting document or quote of user's instructio
 ```
 
 **Where to find evidence to support your disagreement:**
-1. **Tasks folder** — Look in the project's `tasks/` folder for pre-planning docs, requirements, or design docs that justify the change
+1. **Tasks folder** — Look in `${WORKTREES_BASE:-$HOME/worktrees}/tasks/<TICKET_ID>/` for pre-planning docs, requirements, or design docs that justify the change
 2. **User's direct instructions** — Quote what the user explicitly asked for in the conversation that triggered the work
 3. **Ticket description** — Reference the Jira/Linear ticket requirements if they support the implementation
 
@@ -247,7 +247,7 @@ Cursor is asking to remove the error boundary component that wraps the tips sett
 However, the user explicitly requested error boundaries to be added for resilience — this was
 a deliberate architectural decision to prevent individual panel crashes from taking down the
 entire settings page. Removing it would undo the core requirement of the task.
-Disagreed because of: 'tasks/TICKET-123/tips-settings/pre-planning.md' — section "Error Handling"
+Disagreed because of: '$HOME/worktrees/tasks/TICKET-123/tips-settings/pre-planning.md' — section "Error Handling"
 specifies error boundaries as a requirement.
 ```
 
