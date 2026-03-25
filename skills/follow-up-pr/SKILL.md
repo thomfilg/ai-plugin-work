@@ -86,10 +86,10 @@ node "$SCRIPT_PATH" $REVIEW_FLAG 2>&1
 
 ### 1.2 Read the State File
 
-The script persists state to `/tmp/follow-up-pr-<repo>-<PR_NUMBER>.json`. Read it for structured data:
+The script persists state to `/tmp/.claude/follow-up-pr-<repo>-<PR_NUMBER>.json`. Read it for structured data:
 
 ```bash
-cat /tmp/follow-up-pr-*-<PR_NUMBER>.json
+cat /tmp/.claude/follow-up-pr-*-<PR_NUMBER>.json
 ```
 
 The state file contains: `prNumber`, `prUrl`, `branch`, `startTime`, `attempts[]`, and `finalStatus`.
