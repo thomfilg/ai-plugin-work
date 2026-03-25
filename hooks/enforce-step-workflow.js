@@ -74,7 +74,10 @@ const WORKFLOWS = [
     // Soft steps allow transition without evidence — these are optional or metadata-only steps.
     // 3_brief and 4_spec are soft because they're toggleable via WORK_BRIEF_ENABLED/WORK_SPEC_ENABLED
     // and produce documentation artifacts, not code that requires enforcement.
-    softSteps: new Set(['1_ticket', '3_brief', '4_spec', '12_ready', '14_reports']),
+    softSteps: new Set([
+      '1_ticket', '3_brief', '4_spec', // optional/metadata steps (see comment above)
+      '12_ready', '14_reports',         // operational steps without code changes
+    ]),
     commandMap: [
       // Note: tool can be a string or array. Some runtimes/models emit Agent
       // instead of Task — accept both so evidence is recorded regardless.
