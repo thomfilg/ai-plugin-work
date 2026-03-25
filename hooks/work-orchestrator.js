@@ -26,10 +26,10 @@
  *   # Show full state machine graph
  *   node work-orchestrator.js graph
  *
- * Step names (aligned with work-state.js):
- *   1_ticket, 2_bootstrap, 3_brief, 4_spec, 5_implement, 6_quality,
- *   7_commit, 8_check, 9_cleanup, 10_test_enhancement,
- *   11_pr, 12_ready, 13_ci, 14_reports, 15_complete
+ * Step names (from lib/step-registry.js):
+ *   ticket, bootstrap, implement, quality,
+ *   commit, check, test_enhancement,
+ *   pr, ready, ci, cleanup, reports, complete
  */
 
 const { execSync, execFileSync } = require('child_process');
@@ -72,85 +72,22 @@ if (!tp) process.exit(0);
 
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.join(__dirname, '..');
 const MAIN_WORKTREE_FOLDER = process.env.REPO_NAME || 'my-project';
-const WORKTREES_BASE = process.env.WORKTREES_BASE || `${process.env.HOME}/worktrees`;
-const TASKS_BASE = path.join(WORKTREES_BASE, 'tasks');
+const getConfig = require(path.join(__dirname, '..', 'lib', 'get-config'));
+const WORKTREES_BASE = getConfig('WORKTREES_BASE') || '';
+const TASKS_BASE = getConfig('TASKS_BASE') || (WORKTREES_BASE ? path.join(WORKTREES_BASE, 'tasks') : '');
 
-// ─── State Machine ───────────────────────────────────────────────────────────
-// Ported from the TypeScript pattern: createStatusTransitions + canTransition
-// See: IStateMachine.ts, createStatusTransitions.ts, canTransition.ts
-
-/**
- * @param {Array<{source: string, targets: string[]}>} transitions
- * @returns {{[key: string]: string[]}}
- */
-function createStatusTransitions(transitions) {
-  const statusTransitions = {};
-  const definedStates = new Set(transitions.map(t => t.source));
-
-  transitions.forEach(t => {
-    statusTransitions[t.source] = t.targets.filter(
-      target => definedStates.has(target) && target !== t.source,
-    );
-  });
-
-  return statusTransitions;
+function requirePaths() {
+  const missing = [];
+  if (!WORKTREES_BASE) missing.push('WORKTREES_BASE');
+  if (!TASKS_BASE) missing.push('TASKS_BASE');
+  if (missing.length) {
+    console.log(JSON.stringify({ error: true, message: `${missing.join(', ')} not set. Set in env or ensure lib/config.js is loadable.` }));
+    process.exit(1);
+  }
 }
 
-/**
- * @param {{[key: string]: string[]}} statusTransitions
- * @returns {(current: string, next: string) => boolean}
- */
-function canTransition(statusTransitions) {
-  return (currentStatus, newStatus) => {
-    const validNext = statusTransitions[currentStatus] || [];
-    return validNext.includes(newStatus);
-  };
-}
-
-// ─── Step Transition Graph ───────────────────────────────────────────────────
-//
-//  Happy path:  1→2→3→4→5→6→7→8→9→10→11→12→13→14→15
-//
-//  Retry loops (backward edges):
-//    6_quality   → 5_implement   (quality failed, re-implement)
-//    7_commit    → 6_quality     (re-verify quality after commit)
-//    8_check     → 5_implement   (check failed, fix code)
-//    8_check     → 6_quality     (check needs quality re-run)
-//    10_test_enh → 7_commit      (enhanced tests need committing)
-//    10_test_enh → 6_quality     (new tests need quality check)
-//    10_test_enh → 5_implement   (tests reveal implementation flaw)
-//    13_ci       → 5_implement   (CI failed, fix code)
-//    13_ci       → 10_test_enh   (coverage failed)
-//
-//  Skip edges (forward jumps):
-//    2_bootstrap → 5_implement   (skip brief/spec)
-//    2_bootstrap → 6_quality     (resume: code exists)
-//    2_bootstrap → 7_commit      (resume: code + quality done)
-//    2_bootstrap → 8_check       (resume: committed, need check)
-//    3_brief     → 5_implement   (skip spec)
-//    8_check     → 10_test_enh   (no cleanup needed)
-//    11_pr       → 13_ci         (PR already ready, skip 12_ready)
-
-const STEP_TRANSITIONS = createStatusTransitions([
-  { source: '1_ticket',            targets: ['2_bootstrap'] },
-  { source: '2_bootstrap',         targets: ['3_brief', '5_implement', '6_quality', '7_commit', '8_check'] },
-  { source: '3_brief',             targets: ['4_spec', '5_implement'] },
-  { source: '4_spec',              targets: ['5_implement'] },
-  { source: '5_implement',         targets: ['6_quality'] },
-  { source: '6_quality',           targets: ['7_commit', '5_implement'] },
-  { source: '7_commit',            targets: ['8_check', '6_quality'] },
-  { source: '8_check',             targets: ['9_cleanup', '10_test_enhancement', '5_implement', '6_quality'] },
-  { source: '9_cleanup',           targets: ['10_test_enhancement'] },
-  { source: '10_test_enhancement', targets: ['11_pr', '7_commit', '6_quality', '5_implement'] },
-  { source: '11_pr',               targets: ['12_ready', '13_ci'] },
-  { source: '12_ready',            targets: ['13_ci'] },
-  { source: '13_ci',               targets: ['14_reports', '5_implement', '10_test_enhancement'] },
-  { source: '14_reports',          targets: ['15_complete'] },
-  { source: '15_complete',         targets: [] },
-]);
-
-const workflowCanTransition = canTransition(STEP_TRANSITIONS);
-const ALL_STEPS = Object.keys(STEP_TRANSITIONS);
+// ─── Step Registry ───────────────────────────────────────────────────────────
+const { STEPS, STEP_TRANSITIONS, ALL_STEPS, workflowCanTransition, createStatusTransitions, canTransition } = require(path.join(__dirname, '..', 'lib', 'step-registry'));
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -190,19 +127,19 @@ function saveWorkState(ticket, state) {
 }
 
 function getCurrentStep(workState) {
-  if (!workState?.stepStatus) return '1_ticket';
+  if (!workState?.stepStatus) return STEPS.ticket;
   for (const step of ALL_STEPS) {
     if (workState.stepStatus[step] === 'in_progress') return step;
   }
   for (const step of ALL_STEPS) {
     if (workState.stepStatus[step] !== 'completed') return step;
   }
-  return '15_complete';
+  return STEPS.complete;
 }
 
 // ─── TDD Enforcement ────────────────────────────────────────────────────────
 
-const TDD_GATED_STEPS = ['5_implement', '10_test_enhancement'];
+const TDD_GATED_STEPS = [STEPS.implement, STEPS.test_enhancement];
 
 const TDD_PROTOCOL = `
 TDD protocol (mandatory for this step):
@@ -223,7 +160,7 @@ TDD protocol (mandatory for this step):
    node <ORCHESTRATOR_PATH> record-tdd <TICKET_ID> <step_id> \\
      --exception "config-only change, no testable behavior"
 9. If literal RED-first is not appropriate (mechanical refactor, pure config, file move), set exceptionReason and use the nearest-test approach instead.
-10. Do NOT make local git commits during the RED/GREEN cycle. Leave all changes uncommitted — the \`7_commit\` step handles commits with proper message formatting.
+10. Do NOT make local git commits during the RED/GREEN cycle. Leave all changes uncommitted — the \`commit\` step handles commits with proper message formatting.
 `.trim();
 
 function getTddEvidencePath(ticketId, stepId) {
@@ -444,8 +381,7 @@ function inspect(ticket, providerConfig) {
   s.testEnhancement = te || null;
   s.hasBrief = fileExists(path.join(s.tasksDir, 'brief.md'));
   s.hasSpec = fileExists(path.join(s.tasksDir, 'spec.md'));
-
-  s.testEnhancementDone = s.stepIs('10_test_enhancement') === 'completed' || te?.skipped === true;
+  s.testEnhancementDone = s.stepIs(STEPS.test_enhancement) === 'completed' || te?.skipped === true;
 
   // Dev session
   s.hasDevSession = run(`tmux has-session -t "${ticket}-dev" 2>/dev/null && echo yes`) === 'yes';
@@ -486,33 +422,33 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
     plan.push({ step: stepName, action, ...(command ? { command } : {}), reason, ...extra });
   }
 
-  // 1_ticket
+  // ticket
   const providerConfig = tp.getProviderConfig({ skipPrompt: true });
   if (!ticket) {
     const createAgent = tp.getCreateTicketAgentType(providerConfig) || 'general-purpose';
     const createPrompt = tp.getCreateTicketPrompt(description, providerConfig) || `Create a ticket from this description: "${description}"`;
-    add('1_ticket', 'RUN', `Task(${createAgent})`, `Create ticket from: "${description}"`, {
+    add(STEPS.ticket, 'RUN', `Task(${createAgent})`, `Create ticket from: "${description}"`, {
       agentType: createAgent,
       agentPrompt: createPrompt,
     });
   } else {
     const fetchPrompt = tp.getFetchTicketPrompt(ticket, providerConfig) || `Fetch ticket ${ticket} details. Return the summary, description, status, and acceptance criteria.`;
-    add('1_ticket', 'RUN', 'Task(general-purpose)', 'Fetch ticket details', {
+    add(STEPS.ticket, 'RUN', 'Task(general-purpose)', 'Fetch ticket details', {
       agentType: 'general-purpose',
       agentPrompt: fetchPrompt,
     });
   }
 
-  // 2_bootstrap
+  // bootstrap
   if (s?.worktreeExists && s?.pr) {
-    add('2_bootstrap', 'SKIP', null, `Worktree + PR #${s.pr.number} exist`);
+    add(STEPS.bootstrap, 'SKIP', null, `Worktree + PR #${s.pr.number} exist`);
   } else if (s?.worktreeExists) {
-    add('2_bootstrap', 'RUN', `/bootstrap ${ticket}`, 'Worktree exists but no PR', {
+    add(STEPS.bootstrap, 'RUN', `/bootstrap ${ticket}`, 'Worktree exists but no PR', {
       agentType: 'skill',
       agentPrompt: `/bootstrap ${ticket}`,
     });
   } else {
-    add('2_bootstrap', 'RUN', `/bootstrap ${t}`, 'No worktree found', {
+    add(STEPS.bootstrap, 'RUN', `/bootstrap ${t}`, 'No worktree found', {
       agentType: 'skill',
       agentPrompt: `/bootstrap ${t}`,
     });
@@ -538,16 +474,16 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
     return `\n\nRead these docs before starting (from ${envVar}):\n${paths.map(p => `- ${p}`).join('\n')}`;
   }
 
-  // 3_brief
+  // brief
   const briefEnabled = process.env.WORK_BRIEF_ENABLED !== '0'; // on by default
   const specEnabled = process.env.WORK_SPEC_ENABLED !== '0';   // on by default
 
   if (!briefEnabled) {
-    add('3_brief', 'SKIP', null, 'Brief generation disabled (WORK_BRIEF_ENABLED=0)');
+    add(STEPS.brief, 'SKIP', null, 'Brief generation disabled (WORK_BRIEF_ENABLED=0)');
   } else if (s?.hasBrief) {
-    add('3_brief', 'SKIP', null, 'brief.md already exists');
+    add(STEPS.brief, 'SKIP', null, 'brief.md already exists');
   } else {
-    add('3_brief', 'RUN', 'Task(brief-writer)', 'Generate product brief from ticket requirements', {
+    add(STEPS.brief, 'RUN', 'Task(brief-writer)', 'Generate product brief from ticket requirements', {
       agentType: 'brief-writer',
       agentPrompt: `Generate a product brief for ticket ${t} based on the ticket requirements fetched in the previous step.\n\nSave the brief to: ${path.join(tasksDir, 'brief.md')}\n\nStructure it with: Problem Statement, Goal, Target Users, Requirements (P0/P1/P2), Constraints, Out of Scope, Success Metrics, Open Questions.${getDocsPrompt('READ_DOCS_ON_BRIEF')}`,
     });
@@ -560,87 +496,85 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
   let prePlanningFiles = [];
   if (fileExists(tasksDir)) {
     try {
-      // Recursive search for pre-planning.md at any depth under tasksDir
       const found = run(`find "${tasksDir}" -name "pre-planning.md" -type f 2>/dev/null`);
       if (found) prePlanningFiles = found.split('\n').filter(Boolean);
     } catch { /* race: tasksDir removed between exists-check and find */ }
   }
-  // Build planning context: include existing files AND expected paths when stages are enabled
   const planningDocs = [];
   if (fileExists(briefPath)) {
     planningDocs.push(`- Brief: ${briefPath}`);
   } else if (briefEnabled) {
-    planningDocs.push(`- Brief (if present after 3_brief): ${briefPath}`);
+    planningDocs.push(`- Brief (if present after brief step): ${briefPath}`);
   }
   if (fileExists(specPath)) {
     planningDocs.push(`- Spec: ${specPath}`);
   } else if (specEnabled) {
-    planningDocs.push(`- Spec (if present after 4_spec): ${specPath}`);
+    planningDocs.push(`- Spec (if present after spec step): ${specPath}`);
   }
   prePlanningFiles.forEach(f => planningDocs.push(`- Pre-planning: ${f}`));
   const planningContext = planningDocs.length > 0
     ? `\n\nPlanning documents — read these if they exist for requirements, test scenarios, reusable components:\n${planningDocs.join('\n')}`
     : '';
 
-  // 4_spec
+  // spec
   if (!specEnabled) {
-    add('4_spec', 'SKIP', null, 'Spec generation disabled (WORK_SPEC_ENABLED=0)');
+    add(STEPS.spec, 'SKIP', null, 'Spec generation disabled (WORK_SPEC_ENABLED=0)');
   } else if (s?.hasSpec) {
-    add('4_spec', 'SKIP', null, 'spec.md already exists');
+    add(STEPS.spec, 'SKIP', null, 'spec.md already exists');
   } else {
     const briefRef = fileExists(briefPath) || (briefEnabled && !s?.hasBrief)
       ? `\n\nRead the product brief at: ${briefPath}`
       : '';
-    add('4_spec', 'RUN', 'Task(spec-writer)', 'Generate technical specification', {
+    add(STEPS.spec, 'RUN', 'Task(spec-writer)', 'Generate technical specification', {
       agentType: 'spec-writer',
       agentPrompt: `Analyze the codebase in ${worktreeDir} and generate a technical specification for ticket ${t}.${briefRef}\n\nSave the spec to: ${specPath}\n\nThe spec MUST include:\n1. Summary\n2. Architecture decisions (reference specific files)\n3. Data model changes\n4. API/interface changes\n5. Security considerations\n6. Test scenarios in Given/When/Then format (5-10 scenarios)\n7. Implementation phases\n8. Files to create/modify${getDocsPrompt('READ_DOCS_ON_SPEC')}`,
     });
   }
 
-  // 5_implement
+  // implement
   if (s?.hasDiffVsMain) {
-    add('5_implement', 'SKIP', null, `Changes exist: ${s.diffSummary}`);
+    add(STEPS.implement, 'SKIP', null, `Changes exist: ${s.diffSummary}`);
   } else {
-    add('5_implement', 'RUN', '/work-implement <requirements>', 'No changes vs main', {
+    add(STEPS.implement, 'RUN', '/work-implement <requirements>', 'No changes vs main', {
       agentType: 'skill',
       agentPrompt: `/work-implement <requirements>${planningContext}`,
     });
   }
 
-  // 6_quality
-  if (s?.hasDiffVsMain && s?.stepIs('6_quality') === 'completed') {
-    add('6_quality', 'SKIP', null, 'Previously passed');
+  // quality
+  if (s?.hasDiffVsMain && s?.stepIs(STEPS.quality) === 'completed') {
+    add(STEPS.quality, 'SKIP', null, 'Previously passed');
   } else if (!s?.hasDiffVsMain) {
-    add('6_quality', 'PENDING', null, 'Depends on 5_implement');
+    add(STEPS.quality, 'PENDING', null, 'Depends on implement');
   } else {
-    add('6_quality', 'RUN', 'Task(quality-checker)', 'Lint + typecheck + test', {
+    add(STEPS.quality, 'RUN', 'Task(quality-checker)', 'Lint + typecheck + test', {
       agentType: 'quality-checker',
       agentPrompt: `Run quality checks in ${worktreeDir}:\nUse pnpm dev:check if available. If it doesn't exist, run ${PLUGIN_ROOT}/scripts/dev-check/dev-check.sh as fallback. If that also fails, use pnpm lint && pnpm typecheck && pnpm test.\n\nReturn PASS or FAIL with summary.${planningContext}`,
     });
   }
 
-  // 7_commit
+  // commit
   if (s?.hasUncommitted) {
-    add('7_commit', 'RUN', 'Task(commit-writer)', `${s.uncommittedCount} uncommitted file(s)`, {
+    add(STEPS.commit, 'RUN', 'Task(commit-writer)', `${s.uncommittedCount} uncommitted file(s)`, {
       agentType: 'commit-writer',
       agentPrompt: `autonomous - commit staged changes for ${t}`,
     });
   } else if (s?.hasCommitWithTicket) {
-    add('7_commit', 'SKIP', null, `Latest: "${s.lastCommitMsg}"`);
+    add(STEPS.commit, 'SKIP', null, `Latest: "${s.lastCommitMsg}"`);
   } else if (!s?.hasDiffVsMain) {
-    add('7_commit', 'PENDING', null, 'Depends on 5_implement');
+    add(STEPS.commit, 'PENDING', null, 'Depends on implement');
   } else {
-    add('7_commit', 'RUN', 'Task(commit-writer)', 'Commit missing ticket ID', {
+    add(STEPS.commit, 'RUN', 'Task(commit-writer)', 'Commit missing ticket ID', {
       agentType: 'commit-writer',
       agentPrompt: `autonomous - commit staged changes for ${t}`,
     });
   }
 
-  // 8_check
+  // check
   if (rework) {
-    add('8_check', 'RUN', '/check', 'REWORK: Always re-run', {
+    add(STEPS.check, 'RUN', '/check', 'REWORK: Always re-run', {
       agentType: 'skill',
-      agentPrompt: `/check${planningContext}`,
+      agentPrompt: '/check',
       preCommands: [
         `rm -f "${tasksDir}"/*.check.md`,
         `rm -f "${tasksDir}"/.pr-update-sha`,
@@ -648,85 +582,86 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
       ],
     });
   } else if (s?.allReportsPass && Object.keys(s.reports).length >= 3) {
-    add('8_check', 'SKIP', null, `RESUME: All ${Object.keys(s.reports).length} reports PASS`);
+    add(STEPS.check, 'SKIP', null, `RESUME: All ${Object.keys(s.reports).length} reports PASS`);
   } else {
     const p = [];
     if (s?.missingReports?.length) p.push(`missing: ${s.missingReports.join(', ')}`);
     if (s?.failedReports?.length) p.push(`failed: ${s.failedReports.join(', ')}`);
-    add('8_check', 'RUN', '/check', p.length ? p.join('; ') : 'No reports found', {
+    add(STEPS.check, 'RUN', '/check', p.length ? p.join('; ') : 'No reports found', {
       agentType: 'skill',
-      agentPrompt: `/check${planningContext}`,
+      agentPrompt: '/check',
     });
   }
 
-  // 9_cleanup
-  if (s?.hasDevSession) {
-    add('9_cleanup', 'RUN', `Task(Bash)`, 'Dev session running', {
-      agentType: 'Bash',
-      agentPrompt: `Run: tmux kill-session -t "${ticket}-dev" 2>/dev/null; echo "Cleanup done"`,
-    });
-  } else {
-    add('9_cleanup', 'SKIP', null, 'No dev session');
-  }
-
-  // 10_test_enhancement
+  // test_enhancement
   if (rework) {
-    add('10_test_enhancement', 'RUN', `Skill(test-coordination): ${ticket}`, 'REWORK: Re-run', {
+    add(STEPS.test_enhancement, 'RUN', `Skill(test-coordination): ${ticket}`, 'REWORK: Re-run', {
       agentType: 'skill',
-      agentPrompt: `/test-coordination ${ticket}${planningContext}`,
+      agentPrompt: `/test-coordination ${ticket}`,
     });
   } else if (s?.testEnhancementDone) {
     const te = s.testEnhancement;
     const d = te?.skipped ? `Skipped: ${te.skipReason || '?'}` : `Rating ${te?.finalRating || '?'}/10`;
-    add('10_test_enhancement', 'SKIP', null, d);
+    add(STEPS.test_enhancement, 'SKIP', null, d);
   } else {
-    add('10_test_enhancement', 'RUN', `Skill(test-coordination): ${t}`, 'Not yet run', {
+    add(STEPS.test_enhancement, 'RUN', `Skill(test-coordination): ${t}`, 'Not yet run', {
       agentType: 'skill',
-      agentPrompt: `/test-coordination ${t}${planningContext}`,
+      agentPrompt: `/test-coordination ${t}`,
     });
   }
 
-  // 11_pr
+  // pr
   if (rework) {
-    add('11_pr', 'RUN', `/work-pr ${ticket} --force`, 'REWORK: Force update', {
+    add(STEPS.pr, 'RUN', `/work-pr ${ticket} --force`, 'REWORK: Force update', {
       agentType: 'skill',
       agentPrompt: `/work-pr ${ticket} --force`,
     });
   } else if (s?.prShaMatch && s?.prEverUpdated && (s?.postPrShaMatch || !s?.contentSha)) {
-    add('11_pr', 'SKIP', null, `SHA match (${s.headSha?.substring(0, 8)}, content: ${s?.postPrShaMatch ? 'match' : 'n/a'})`);
+    add(STEPS.pr, 'SKIP', null, `SHA match (${s.headSha?.substring(0, 8)}, content: ${s?.postPrShaMatch ? 'match' : 'n/a'})`);
   } else if (s?.prEverUpdated) {
-    add('11_pr', 'RUN', `/work-pr ${ticket}`, `HEAD: ${s.prUpdateSha?.substring(0, 8) || '?'} → ${s.headSha?.substring(0, 8) || '?'}`, {
+    add(STEPS.pr, 'RUN', `/work-pr ${ticket}`, `HEAD: ${s.prUpdateSha?.substring(0, 8) || '?'} → ${s.headSha?.substring(0, 8) || '?'}`, {
       agentType: 'skill',
       agentPrompt: `/work-pr ${ticket}`,
     });
   } else {
-    add('11_pr', 'RUN', `/work-pr ${t}`, 'Must run once', {
+    add(STEPS.pr, 'RUN', `/work-pr ${t}`, 'Must run once', {
       agentType: 'skill',
       agentPrompt: `/work-pr ${t}`,
     });
   }
 
-  // 12_ready
+  // ready
   if (s?.pr && !s.pr.isDraft) {
-    add('12_ready', 'SKIP', null, 'Already ready');
+    add(STEPS.ready, 'SKIP', null, 'Already ready');
   } else {
-    add('12_ready', 'RUN', 'Task(Bash)', 'Mark PR ready', {
+    add(STEPS.ready, 'RUN', 'Task(Bash)', 'Mark PR ready', {
       agentType: 'Bash',
       agentPrompt: `Run in ${worktreeDir}: gh pr ready`,
     });
   }
 
-  // 13_ci → 15_complete
-  add('13_ci', 'RUN', 'Task(Bash)', 'Wait for CI', {
+  // ci → cleanup → reports → complete
+  add(STEPS.ci, 'RUN', 'Task(Bash)', 'Wait for CI', {
     agentType: 'Bash',
     agentPrompt: `Run in ${worktreeDir}: gh pr checks --watch --interval 60\n\nReturn PASS if all checks pass, FAIL with details if any fail.`,
   });
-  add('14_reports', 'RUN', 'Task(Bash)', 'Move reports to tasks/', {
+
+  // cleanup (after CI, before reports)
+  if (s?.hasDevSession) {
+    add(STEPS.cleanup, 'RUN', `Task(Bash)`, 'Dev session running', {
+      agentType: 'Bash',
+      agentPrompt: `Run: tmux kill-session -t "${ticket}-dev" 2>/dev/null; echo "Cleanup done"`,
+    });
+  } else {
+    add(STEPS.cleanup, 'SKIP', null, 'No dev session');
+  }
+
+  add(STEPS.reports, 'RUN', 'Task(Bash)', 'Move reports to tasks/', {
     agentType: 'Bash',
     agentPrompt: `Verify and consolidate reports in ${tasksDir}. List all *.check.md files and confirm they exist. Report the count and status of each.`,
   });
   const guardPath = path.join(__dirname, 'session-guard.js');
-  add('15_complete', 'RUN', 'Task(Bash)', 'Finish', {
+  add(STEPS.complete, 'RUN', 'Task(Bash)', 'Finish', {
     agentType: 'Bash',
     agentPrompt: [
       `Run these commands in sequence:`,
@@ -736,7 +671,7 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
       `Step 1 marks the workflow as complete (exits 0 on success).`,
       `Step 2 is an atomic teardown: reveals the session passphrase (unlocking the Stop hook) and removes the session file. Exits 0 when no session exists (guard disabled or already cleaned up). Exits 1 only if called without a ticket ID (programming error).`,
     ].join('\n'),
-  }); // 15_complete — must run after all other steps
+  }); // complete — must run after all other steps
 
   return { ticket: ticket || `TBD ("${description}")`, mode, plan };
 }
@@ -796,7 +731,7 @@ function transitionStep(ticket, targetStep) {
       errors: [], startTime: new Date().toISOString(), lastUpdate: new Date().toISOString(),
     };
     ALL_STEPS.forEach(s => { ws.stepStatus[s] = 'pending'; });
-    appendAction(ticket, { step: '1_ticket', what: 'workflow started' });
+    appendAction(ticket, { step: STEPS.ticket, what: 'workflow started' });
   }
 
   const currentIdx = ALL_STEPS.indexOf(currentStep);
@@ -862,6 +797,7 @@ function main() {
 
   switch (command) {
     case 'plan': {
+      requirePaths();
       const rework = rest.includes('--rework');
       let raw = rest.filter(a => a !== '--rework').join(' ').trim();
       if (!raw) { console.log(JSON.stringify({ error: true, message: 'Provide ticket ID or description' })); process.exit(1); }
@@ -934,6 +870,7 @@ function main() {
     }
 
     case 'transition': {
+      requirePaths();
       if (rest.length < 2) {
         console.log(JSON.stringify({ error: true, message: 'Usage: transition <TICKET> <step>', validSteps: ALL_STEPS }));
         process.exit(1);
@@ -947,6 +884,7 @@ function main() {
     }
 
     case 'transitions': {
+      requirePaths();
       if (!rest[0]) { console.log(JSON.stringify({ error: true, message: 'Usage: transitions <TICKET>' })); process.exit(1); }
       const transitionsProviderCfg = tp.getProviderConfig({ skipPrompt: true });
       const transitionsTicket = transitionsProviderCfg?.provider === 'github' ? rest[0] : rest[0].toUpperCase();
@@ -961,6 +899,7 @@ function main() {
     }
 
     case 'actions': {
+      requirePaths();
       if (!rest[0]) {
         console.log(JSON.stringify({ error: true, message: 'Usage: actions <TICKET> [--raw]' }));
         process.exit(1);
@@ -979,6 +918,7 @@ function main() {
     }
 
     case 'record-tdd': {
+      requirePaths();
       if (rest.length < 2) {
         console.error(JSON.stringify({ error: 'usage', message: 'Usage: record-tdd <TICKET_ID> <STEP_ID> [--cmd "..." --red --green --files "..."] [--exception "..."]' }));
         process.exit(1);

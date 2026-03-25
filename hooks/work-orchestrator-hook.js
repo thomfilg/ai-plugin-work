@@ -47,7 +47,7 @@ function main() {
     if (plan.ticket && !plan.ticket.startsWith('TBD')) {
       const runCount = plan.summary?.run || 0;
       const mode = plan.mode || 'unknown';
-      const currentStep = plan.currentStep || '1_ticket';
+      const currentStep = plan.currentStep || 'ticket';
       appendAction(plan.ticket, {
         step: currentStep,
         what: `plan generated (${mode}, ${runCount} RUN)`,

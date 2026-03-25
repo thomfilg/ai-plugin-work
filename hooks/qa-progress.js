@@ -4,7 +4,7 @@
  * QA Progress Checkpointing Helper
  *
  * Tracks QA testing progress incrementally to enable resume on context loss.
- * Progress is stored in: $HOME/worktrees/tasks/{TICKET_ID}/.qa-progress-{APP}.json
+ * Progress is stored in: $TASKS_BASE/{TICKET_ID}/.qa-progress-{APP}.json
  *
  * Usage:
  *   node qa-progress.js init PROJ-815 as-dashboard http://host.docker.internal:5173
@@ -22,7 +22,8 @@ const path = require('path');
 process.on('uncaughtException', () => process.exit(0));
 process.on('unhandledRejection', () => process.exit(0));
 
-const TASKS_BASE = `${process.env.HOME}/worktrees/tasks`;
+const getConfig = require(path.join(__dirname, '..', 'lib', 'get-config'));
+const TASKS_BASE = getConfig.orExit('TASKS_BASE');
 
 /**
  * Get progress file path for a ticket/app

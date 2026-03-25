@@ -16,7 +16,7 @@
  *   Clears evidence on backward transitions.
  *
  * Both /work and /work-pr can be active simultaneously (work-pr runs inside
- * /work at step 11_pr). Each workflow is checked independently.
+ * /work at step pr). Each workflow is checked independently.
  *
  * Fail-open: Any error → exit 0 (allow).
  */
@@ -50,15 +50,18 @@ try {
 
 // ─── Configuration ──────────────────────────────────────────────────────────
 
-let _config;
-try { _config = require(path.join(__dirname, '..', 'lib', 'config')); } catch { _config = null; }
-const WORKTREES_BASE = _config?.WORKTREES_BASE || `${process.env.HOME}/worktrees`;
-const TASKS_BASE = _config?.TASKS_BASE || path.join(WORKTREES_BASE, 'tasks');
+const getConfig = require(path.join(__dirname, '..', 'lib', 'get-config'));
+const TASKS_BASE = getConfig('TASKS_BASE') || (() => {
+  const wb = getConfig.orExit('WORKTREES_BASE'); // only required if TASKS_BASE isn't set
+  return path.join(wb, 'tasks');
+})();
 
 // ─── Workflow Definitions ───────────────────────────────────────────────────
 //
 // Each workflow defines its own state file, step-to-command mapping,
 // transition pattern, exemptions, and soft steps.
+
+const { STEPS, ALL_STEPS: WORK_STEPS } = require(path.join(__dirname, '..', 'lib', 'step-registry'));
 
 const WORKFLOWS = [
   {
@@ -66,38 +69,34 @@ const WORKFLOWS = [
     stateFile: '.work-state.json',
     evidenceFile: '.step-evidence.json',
     isActive: (state) => state?.status === 'in_progress',
-    steps: [
-      '1_ticket', '2_bootstrap', '3_brief', '4_spec', '5_implement', '6_quality',
-      '7_commit', '8_check', '9_cleanup', '10_test_enhancement',
-      '11_pr', '12_ready', '13_ci', '14_reports', '15_complete',
-    ],
+    steps: WORK_STEPS,
     // Soft steps allow transition without evidence — these are optional or metadata-only steps.
-    // 3_brief and 4_spec are soft because they're toggleable via WORK_BRIEF_ENABLED/WORK_SPEC_ENABLED
+    // brief and spec are soft because they're toggleable via WORK_BRIEF_ENABLED/WORK_SPEC_ENABLED
     // and produce documentation artifacts, not code that requires enforcement.
     softSteps: new Set([
-      '1_ticket', '3_brief', '4_spec', // optional/metadata steps (see comment above)
-      '12_ready', '14_reports',         // operational steps — no code changes to enforce
+      STEPS.ticket, STEPS.brief, STEPS.spec, // optional/metadata steps
+      STEPS.ready, STEPS.reports,             // operational steps — no code changes to enforce
     ]),
     // Tool can be a string or array — some runtimes emit Agent instead of Task.
     commandMap: [
-      { step: '1_ticket',            tool: ['Task', 'Agent'], field: 'description',   pattern: /^1_ticket/i },
-      { step: '3_brief',             tool: ['Task', 'Agent'], field: 'subagent_type', pattern: /^(work-workflow:)?brief-writer$/ },
-      { step: '3_brief',             tool: ['Task', 'Agent'], field: 'description',   pattern: /^3_brief/i },
-      { step: '4_spec',              tool: ['Task', 'Agent'], field: 'subagent_type', pattern: /^(work-workflow:)?spec-writer$/ },
-      { step: '4_spec',              tool: ['Task', 'Agent'], field: 'description',   pattern: /^4_spec/i },
-      { step: '5_implement',         tool: 'Skill',           field: 'skill',         pattern: /^work-implement$/ },
-      { step: '6_quality',           tool: ['Task', 'Agent'], field: 'subagent_type', pattern: /^(work-workflow:)?quality-checker$/ },
-      { step: '6_quality',           tool: ['Task', 'Agent'], field: 'description',   pattern: /^6_quality/i },
-      { step: '6_quality',           tool: 'Bash',            field: 'command',       pattern: /^\s*(LOW_CONCURRENCY=\d+\s+)?((pnpm|npm)\s+(run\s+)?dev:check\b|([\w./-]*\/)?dev-check\.sh(\s+--[\w-]+)*)/ },
-      { step: '7_commit',            tool: ['Task', 'Agent'], field: 'subagent_type', pattern: /^(work-workflow:)?commit-writer$/ },
-      { step: '8_check',             tool: 'Skill',           field: 'skill',         pattern: /^check$/ },
-      { step: '9_cleanup',           tool: ['Task', 'Agent'], field: 'description',   pattern: /^9_cleanup/i },
-      { step: '10_test_enhancement', tool: 'Skill',           field: 'skill',         pattern: /^test-coordination$/ },
-      { step: '11_pr',               tool: 'Skill',           field: 'skill',         pattern: /^work-pr$/ },
-      { step: '12_ready',            tool: ['Task', 'Agent'], field: 'description',   pattern: /^12_ready/i },
-      { step: '13_ci',               tool: ['Task', 'Agent'], field: 'description',   pattern: /^13_ci/i },
-      { step: '14_reports',          tool: ['Task', 'Agent'], field: 'description',   pattern: /^14_reports/i },
-      { step: '15_complete',         tool: ['Task', 'Agent'], field: 'description',   pattern: /^15_complete/i },
+      { step: STEPS.ticket,           tool: ['Task', 'Agent'], field: 'description',   pattern: new RegExp(`^${STEPS.ticket}\\b`, 'i') },
+      { step: STEPS.brief,            tool: ['Task', 'Agent'], field: 'subagent_type', pattern: /^(work-workflow:)?brief-writer$/ },
+      { step: STEPS.brief,            tool: ['Task', 'Agent'], field: 'description',   pattern: new RegExp(`^${STEPS.brief}\\b`, 'i') },
+      { step: STEPS.spec,             tool: ['Task', 'Agent'], field: 'subagent_type', pattern: /^(work-workflow:)?spec-writer$/ },
+      { step: STEPS.spec,             tool: ['Task', 'Agent'], field: 'description',   pattern: new RegExp(`^${STEPS.spec}\\b`, 'i') },
+      { step: STEPS.implement,        tool: 'Skill',           field: 'skill',         pattern: /^work-implement$/ },
+      { step: STEPS.quality,          tool: ['Task', 'Agent'], field: 'subagent_type', pattern: /^(work-workflow:)?quality-checker$/ },
+      { step: STEPS.quality,          tool: ['Task', 'Agent'], field: 'description',   pattern: new RegExp(`^${STEPS.quality}\\b`, 'i') },
+      { step: STEPS.quality,          tool: 'Bash',            field: 'command',       pattern: /^\s*(LOW_CONCURRENCY=\d+\s+)?((pnpm|npm)\s+(run\s+)?dev:check\b|([\w./-]*\/)?dev-check\.sh(\s+--[\w-]+)*)/ },
+      { step: STEPS.commit,           tool: ['Task', 'Agent'], field: 'subagent_type', pattern: /^(work-workflow:)?commit-writer$/ },
+      { step: STEPS.check,            tool: 'Skill',           field: 'skill',         pattern: /^check$/ },
+      { step: STEPS.cleanup,          tool: ['Task', 'Agent'], field: 'description',   pattern: new RegExp(`^${STEPS.cleanup}\\b`, 'i') },
+      { step: STEPS.test_enhancement, tool: 'Skill',           field: 'skill',         pattern: /^test-coordination$/ },
+      { step: STEPS.pr,               tool: 'Skill',           field: 'skill',         pattern: /^work-pr$/ },
+      { step: STEPS.ready,            tool: ['Task', 'Agent'], field: 'description',   pattern: new RegExp(`^${STEPS.ready}\\b`, 'i') },
+      { step: STEPS.ci,               tool: ['Task', 'Agent'], field: 'description',   pattern: new RegExp(`^${STEPS.ci}\\b`, 'i') },
+      { step: STEPS.reports,          tool: ['Task', 'Agent'], field: 'description',   pattern: new RegExp(`^${STEPS.reports}\\b`, 'i') },
+      { step: STEPS.complete,         tool: ['Task', 'Agent'], field: 'description',   pattern: new RegExp(`^${STEPS.complete}\\b`, 'i') },
     ],
     transitionPattern: /work-orchestrator\.js\s+transition\s+(\S+)\s+(\S+)/,
     exemptPatterns: [
@@ -492,8 +491,8 @@ function handlePostToolUse(hookData) {
     const matchedStep = matchToolToStep(toolName, toolInput, wf.commandIndex);
     if (!matchedStep) continue;
 
-    // (Patch 14) Strengthen 11_pr evidence: verify .pr-update-sha matches HEAD
-    if (wf.name === 'work' && matchedStep === '11_pr') {
+    // (Patch 14) Strengthen pr evidence: verify .pr-update-sha matches HEAD
+    if (wf.name === 'work' && matchedStep === STEPS.pr) {
       const tasksDir = path.join(TASKS_BASE, ticketId);
       const prShaFile = path.join(tasksDir, '.pr-update-sha');
       let prShaOk = false;
@@ -515,7 +514,7 @@ function handlePostToolUse(hookData) {
         prShaOk = false;
       }
       if (!prShaOk) {
-        if (DEBUG) process.stderr.write(`[enforce] 11_pr: pr-update-sha missing or stale\n`);
+        if (DEBUG) process.stderr.write(`[enforce] pr: pr-update-sha missing or stale\n`);
         continue; // Skip evidence recording — PR wasn't actually updated
       }
     }

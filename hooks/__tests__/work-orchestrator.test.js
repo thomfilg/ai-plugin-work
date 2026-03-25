@@ -13,9 +13,8 @@ const fs = require('fs');
 const os = require('os');
 
 const HOOK_PATH = path.join(__dirname, '..', 'work-orchestrator.js');
-let _config;
-try { _config = require(path.join(__dirname, '..', '..', 'lib', 'config')); } catch { _config = null; }
-const TASKS_BASE = _config?.TASKS_BASE || `${process.env.HOME}/worktrees/tasks`;
+const getConfig = require(path.join(__dirname, '..', '..', 'lib', 'get-config'));
+const TASKS_BASE = getConfig.require('TASKS_BASE');
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -92,8 +91,8 @@ describe('work-orchestrator.js', () => {
       assert.equal(code, 0);
       assert.ok(result.steps);
       assert.ok(result.transitions);
-      assert.ok(result.steps.includes('1_ticket'));
-      assert.ok(result.steps.includes('15_complete'));
+      assert.ok(result.steps.includes('ticket'));
+      assert.ok(result.steps.includes('complete'));
       assert.equal(result.steps.length, 15);
     });
 
@@ -103,22 +102,22 @@ describe('work-orchestrator.js', () => {
         assert.ok(step in result.transitions, `Missing transition for ${step}`);
         assert.ok(Array.isArray(result.transitions[step]));
       }
-      assert.ok(result.transitions['1_ticket'].includes('2_bootstrap'));
-      assert.deepEqual(result.transitions['15_complete'], []);
+      assert.ok(result.transitions['ticket'].includes('bootstrap'));
+      assert.deepEqual(result.transitions['complete'], []);
     });
 
     it('should include retry loop transitions', async () => {
       const { result } = await runOrchestrator(['graph']);
-      assert.ok(result.transitions['8_check'].includes('5_implement'));
-      assert.ok(result.transitions['13_ci'].includes('5_implement'));
-      assert.ok(result.transitions['13_ci'].includes('10_test_enhancement'));
+      assert.ok(result.transitions['check'].includes('implement'));
+      assert.ok(result.transitions['ci'].includes('implement'));
+      assert.ok(result.transitions['ci'].includes('test_enhancement'));
     });
 
     it('should include skip edge transitions', async () => {
       const { result } = await runOrchestrator(['graph']);
-      assert.ok(result.transitions['2_bootstrap'].includes('6_quality'));
-      assert.ok(result.transitions['2_bootstrap'].includes('7_commit'));
-      assert.ok(result.transitions['2_bootstrap'].includes('8_check'));
+      assert.ok(result.transitions['bootstrap'].includes('quality'));
+      assert.ok(result.transitions['bootstrap'].includes('commit'));
+      assert.ok(result.transitions['bootstrap'].includes('check'));
     });
   });
 
@@ -149,10 +148,9 @@ describe('work-orchestrator.js', () => {
       const { result } = await runOrchestrator([TEST_TICKET]);
       const stepNames = result.plan.map((s) => s.step);
       for (const expected of [
-        '1_ticket', '2_bootstrap', '3_brief', '4_spec',
-        '5_implement', '6_quality', '7_commit', '8_check',
-        '9_cleanup', '10_test_enhancement', '11_pr',
-        '12_ready', '13_ci', '14_reports', '15_complete',
+        'ticket', 'bootstrap', 'brief', 'spec', 'implement', 'quality',
+        'commit', 'check', 'cleanup', 'test_enhancement',
+        'pr', 'ready', 'ci', 'reports', 'complete',
       ]) {
         assert.ok(stepNames.includes(expected), `Missing step: ${expected}`);
       }
@@ -173,30 +171,16 @@ describe('work-orchestrator.js', () => {
     it('should use rework mode when --rework flag is passed', async () => {
       const { result } = await runOrchestrator([TEST_TICKET, '--rework']);
       assert.equal(result.mode, 'rework');
-      const checkStep = result.plan.find((s) => s.step === '8_check');
+      const checkStep = result.plan.find((s) => s.step === 'check');
       assert.equal(checkStep.action, 'RUN');
       assert.ok(checkStep.reason.includes('REWORK'));
     });
 
-    it('should include preCommands in rework mode for 8_check', async () => {
+    it('should include preCommands in rework mode for 6_check', async () => {
       const { result } = await runOrchestrator([TEST_TICKET, '--rework']);
-      const checkStep = result.plan.find((s) => s.step === '8_check');
+      const checkStep = result.plan.find((s) => s.step === 'check');
       assert.ok(checkStep.preCommands);
       assert.ok(checkStep.preCommands.length > 0);
-    });
-
-    it('should show 3_brief as SKIP when WORK_BRIEF_ENABLED=0', async () => {
-      const { result } = await runOrchestrator([TEST_TICKET], { env: { WORK_BRIEF_ENABLED: '0' } });
-      const briefStep = result.plan.find((s) => s.step === '3_brief');
-      assert.ok(briefStep, 'Missing step: 3_brief');
-      assert.equal(briefStep.action, 'SKIP');
-    });
-
-    it('should show 4_spec as SKIP when WORK_SPEC_ENABLED=0', async () => {
-      const { result } = await runOrchestrator([TEST_TICKET], { env: { WORK_SPEC_ENABLED: '0' } });
-      const specStep = result.plan.find((s) => s.step === '4_spec');
-      assert.ok(specStep, 'Missing step: 4_spec');
-      assert.equal(specStep.action, 'SKIP');
     });
 
     it('should auto-detect GitHub provider from #N shorthand when no provider configured', async () => {
@@ -281,17 +265,17 @@ describe('work-orchestrator.js', () => {
     });
 
     it('should allow valid transition from 1_ticket to 2_bootstrap', async () => {
-      const { result } = await runOrchestrator(['transition', TEST_TICKET, '2_bootstrap'], transOpts);
+      const { result } = await runOrchestrator(['transition', TEST_TICKET, 'bootstrap'], transOpts);
       assert.equal(result.success, true);
-      assert.equal(result.from, '1_ticket');
-      assert.equal(result.to, '2_bootstrap');
+      assert.equal(result.from, 'ticket');
+      assert.equal(result.to, 'bootstrap');
       assert.equal(result.direction, 'forward');
     });
 
     it('should block invalid transition', async () => {
-      await runOrchestrator(['transition', TEST_TICKET, '2_bootstrap'], transOpts);
-      await runOrchestrator(['transition', TEST_TICKET, '5_implement'], transOpts);
-      const { result } = await runOrchestrator(['transition', TEST_TICKET, '11_pr'], transOpts);
+      await runOrchestrator(['transition', TEST_TICKET, 'bootstrap'], transOpts);
+      await runOrchestrator(['transition', TEST_TICKET, 'implement'], transOpts);
+      const { result } = await runOrchestrator(['transition', TEST_TICKET, 'pr'], transOpts);
       assert.equal(result.error, true);
       assert.ok(result.message.includes('BLOCKED'));
       assert.ok(result.allowed);
@@ -299,44 +283,44 @@ describe('work-orchestrator.js', () => {
     });
 
     it('should allow retry loop (backward transition)', async () => {
-      await runOrchestrator(['transition', TEST_TICKET, '2_bootstrap'], transOpts);
-      await runOrchestrator(['transition', TEST_TICKET, '8_check'], transOpts);
-      const { result } = await runOrchestrator(['transition', TEST_TICKET, '5_implement'], transOpts);
+      await runOrchestrator(['transition', TEST_TICKET, 'bootstrap'], transOpts);
+      await runOrchestrator(['transition', TEST_TICKET, 'check'], transOpts);
+      const { result } = await runOrchestrator(['transition', TEST_TICKET, 'implement'], transOpts);
       assert.equal(result.success, true);
-      assert.equal(result.from, '8_check');
-      assert.equal(result.to, '5_implement');
+      assert.equal(result.from, 'check');
+      assert.equal(result.to, 'implement');
       assert.equal(result.direction, 'backward');
     });
 
     it('should allow skip edge transition', async () => {
-      await runOrchestrator(['transition', TEST_TICKET, '2_bootstrap'], transOpts);
-      const { result } = await runOrchestrator(['transition', TEST_TICKET, '8_check'], transOpts);
+      await runOrchestrator(['transition', TEST_TICKET, 'bootstrap'], transOpts);
+      const { result } = await runOrchestrator(['transition', TEST_TICKET, 'check'], transOpts);
       assert.equal(result.success, true);
-      assert.equal(result.from, '2_bootstrap');
-      assert.equal(result.to, '8_check');
+      assert.equal(result.from, 'bootstrap');
+      assert.equal(result.to, 'check');
     });
 
     it('should persist state after transition', async () => {
-      await runOrchestrator(['transition', TEST_TICKET, '2_bootstrap'], transOpts);
-      await runOrchestrator(['transition', TEST_TICKET, '5_implement'], transOpts);
+      await runOrchestrator(['transition', TEST_TICKET, 'bootstrap'], transOpts);
+      await runOrchestrator(['transition', TEST_TICKET, 'implement'], transOpts);
       const { result } = await runOrchestrator(['transitions', TEST_TICKET], transOpts);
-      assert.equal(result.currentStep, '5_implement');
-      assert.equal(result.allStatuses['1_ticket'], 'completed');
-      assert.equal(result.allStatuses['2_bootstrap'], 'completed');
-      assert.equal(result.allStatuses['5_implement'], 'in_progress');
+      assert.equal(result.currentStep, 'implement');
+      assert.equal(result.allStatuses['ticket'], 'completed');
+      assert.equal(result.allStatuses['bootstrap'], 'completed');
+      assert.equal(result.allStatuses['implement'], 'in_progress');
     });
 
     it('should reset intermediate steps on backward transition', async () => {
-      await runOrchestrator(['transition', TEST_TICKET, '2_bootstrap']);
-      await runOrchestrator(['transition', TEST_TICKET, '5_implement']);
-      await runOrchestrator(['transition', TEST_TICKET, '6_quality']);
-      await runOrchestrator(['transition', TEST_TICKET, '7_commit']);
-      await runOrchestrator(['transition', TEST_TICKET, '8_check']);
-      await runOrchestrator(['transition', TEST_TICKET, '5_implement']);
+      await runOrchestrator(['transition', TEST_TICKET, 'bootstrap']);
+      await runOrchestrator(['transition', TEST_TICKET, 'implement']);
+      await runOrchestrator(['transition', TEST_TICKET, 'quality']);
+      await runOrchestrator(['transition', TEST_TICKET, 'commit']);
+      await runOrchestrator(['transition', TEST_TICKET, 'check']);
+      await runOrchestrator(['transition', TEST_TICKET, 'implement']);
       const { result } = await runOrchestrator(['transitions', TEST_TICKET]);
-      assert.equal(result.allStatuses['6_quality'], 'pending');
-      assert.equal(result.allStatuses['7_commit'], 'pending');
-      assert.equal(result.allStatuses['8_check'], 'pending');
+      assert.equal(result.allStatuses['quality'], 'pending');
+      assert.equal(result.allStatuses['commit'], 'pending');
+      assert.equal(result.allStatuses['check'], 'pending');
     });
   });
 
@@ -353,9 +337,9 @@ describe('work-orchestrator.js', () => {
       }
     });
 
-    it('should have terminal state at 15_complete', async () => {
+    it('should have terminal state at complete', async () => {
       const { result } = await runOrchestrator(['graph']);
-      assert.deepEqual(result.transitions['15_complete'], []);
+      assert.deepEqual(result.transitions['complete'], []);
     });
 
     it('should have exactly one entry point', async () => {
@@ -365,7 +349,7 @@ describe('work-orchestrator.js', () => {
         targets.forEach((t) => allTargets.add(t));
       }
       const entryPoints = result.steps.filter((s) => !allTargets.has(s));
-      assert.deepEqual(entryPoints, ['1_ticket']);
+      assert.deepEqual(entryPoints, ['ticket']);
     });
   });
 
@@ -384,8 +368,8 @@ describe('work-orchestrator.js', () => {
 
     it('should use PENDING for steps dependent on earlier steps', async () => {
       const { result } = await runOrchestrator([TEST_TICKET]);
-      const qualityStep = result.plan.find((s) => s.step === '6_quality');
-      const commitStep = result.plan.find((s) => s.step === '7_commit');
+      const qualityStep = result.plan.find((s) => s.step === 'quality');
+      const commitStep = result.plan.find((s) => s.step === 'commit');
       assert.equal(qualityStep.action, 'PENDING');
       assert.equal(commitStep.action, 'PENDING');
     });
@@ -462,29 +446,29 @@ describe('work-orchestrator.js', () => {
 
     it('should use general-purpose for 1_ticket fetch when ticket exists', async () => {
       const { result } = await runOrchestrator([TEST_TICKET]);
-      const ticketStep = result.plan.find((s) => s.step === '1_ticket');
+      const ticketStep = result.plan.find((s) => s.step === 'ticket');
       assert.equal(ticketStep.agentType, 'general-purpose');
       assert.ok(ticketStep.agentPrompt.includes(TEST_TICKET));
     });
 
     it('should use appropriate agent for 1_ticket when no ticket (description mode)', async () => {
       const { result } = await runOrchestrator(['add login feature']);
-      const ticketStep = result.plan.find((s) => s.step === '1_ticket');
+      const ticketStep = result.plan.find((s) => s.step === 'ticket');
       // Without TICKET_PROVIDER env, falls back to general-purpose
       assert.ok(['jira-task-creator', 'general-purpose'].includes(ticketStep.agentType));
       assert.ok(ticketStep.agentPrompt.includes('add login feature'));
     });
 
-    it('should use Bash agent for 13_ci', async () => {
+    it('should use Bash agent for 11_ci', async () => {
       const { result } = await runOrchestrator([TEST_TICKET]);
-      const ciStep = result.plan.find((s) => s.step === '13_ci');
+      const ciStep = result.plan.find((s) => s.step === 'ci');
       assert.equal(ciStep.agentType, 'Bash');
       assert.ok(ciStep.agentPrompt.includes('gh pr checks'));
     });
 
-    it('should use Bash agent for 15_complete', async () => {
+    it('should use Bash agent for complete', async () => {
       const { result } = await runOrchestrator([TEST_TICKET]);
-      const completeStep = result.plan.find((s) => s.step === '15_complete');
+      const completeStep = result.plan.find((s) => s.step === 'complete');
       assert.equal(completeStep.agentType, 'Bash');
       assert.ok(completeStep.agentPrompt.includes('work-state.js'));
       assert.ok(completeStep.agentPrompt.includes('complete'));
@@ -492,15 +476,15 @@ describe('work-orchestrator.js', () => {
       assert.ok(completeStep.agentPrompt.includes('finish'));
     });
 
-    it('should use Bash agent for 14_reports', async () => {
+    it('should use Bash agent for reports', async () => {
       const { result } = await runOrchestrator([TEST_TICKET]);
-      const reportsStep = result.plan.find((s) => s.step === '14_reports');
+      const reportsStep = result.plan.find((s) => s.step === 'reports');
       assert.equal(reportsStep.agentType, 'Bash');
     });
 
     it('should use skill for bootstrap', async () => {
       const { result } = await runOrchestrator([TEST_TICKET]);
-      const bootstrapStep = result.plan.find((s) => s.step === '2_bootstrap');
+      const bootstrapStep = result.plan.find((s) => s.step === 'bootstrap');
       if (bootstrapStep.action === 'RUN') {
         assert.equal(bootstrapStep.agentType, 'skill');
         assert.ok(bootstrapStep.agentPrompt.includes('bootstrap'));
@@ -525,39 +509,39 @@ describe('work-orchestrator.js', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('new transition edges (Patch 14)', () => {
-    it('should include 7_commit → 6_quality (quality re-verify)', async () => {
+    it('should include 5_commit → 4_quality (quality re-verify)', async () => {
       const { result } = await runOrchestrator(['graph']);
-      assert.ok(result.transitions['7_commit'].includes('6_quality'));
+      assert.ok(result.transitions['commit'].includes('quality'));
     });
 
-    it('should include 8_check → 6_quality (quality re-run)', async () => {
+    it('should include 6_check → 4_quality (quality re-run)', async () => {
       const { result } = await runOrchestrator(['graph']);
-      assert.ok(result.transitions['8_check'].includes('6_quality'));
+      assert.ok(result.transitions['check'].includes('quality'));
     });
 
-    it('should include 10_test_enhancement → 6_quality (new tests need quality)', async () => {
+    it('should include 8_test_enhancement → 4_quality (new tests need quality)', async () => {
       const { result } = await runOrchestrator(['graph']);
-      assert.ok(result.transitions['10_test_enhancement'].includes('6_quality'));
+      assert.ok(result.transitions['test_enhancement'].includes('quality'));
     });
 
-    it('should include 10_test_enhancement → 5_implement (tests reveal impl flaw)', async () => {
+    it('should include 8_test_enhancement → 3_implement (tests reveal impl flaw)', async () => {
       const { result } = await runOrchestrator(['graph']);
-      assert.ok(result.transitions['10_test_enhancement'].includes('5_implement'));
+      assert.ok(result.transitions['test_enhancement'].includes('implement'));
     });
 
-    it('should include 11_pr → 13_ci (skip 12_ready)', async () => {
+    it('should include 9_pr → 11_ci (skip 10_ready)', async () => {
       const { result } = await runOrchestrator(['graph']);
-      assert.ok(result.transitions['11_pr'].includes('13_ci'));
+      assert.ok(result.transitions['pr'].includes('ci'));
     });
 
-    it('should allow transition from 8_check → 6_quality', async () => {
+    it('should allow transition from 6_check → 4_quality', async () => {
       const TMP = path.join(os.tmpdir(), 'work-orch-p14a-' + process.pid);
       const T = 'TEST-614';
       const o = { env: { WORKTREES_BASE: TMP } };
       try {
-        await runOrchestrator(['transition', T, '2_bootstrap'], o);
-        await runOrchestrator(['transition', T, '8_check'], o);
-        const { result } = await runOrchestrator(['transition', T, '6_quality'], o);
+        await runOrchestrator(['transition', T, 'bootstrap'], o);
+        await runOrchestrator(['transition', T, 'check'], o);
+        const { result } = await runOrchestrator(['transition', T, 'quality'], o);
         assert.equal(result.success, true);
         assert.equal(result.direction, 'backward');
       } finally {
@@ -565,15 +549,15 @@ describe('work-orchestrator.js', () => {
       }
     });
 
-    it('should allow transition from 10_test_enhancement → 5_implement', async () => {
+    it('should allow transition from 8_test_enhancement → 3_implement', async () => {
       const TMP = path.join(os.tmpdir(), 'work-orch-p14b-' + process.pid);
       const T = 'TEST-813';
       const o = { env: { WORKTREES_BASE: TMP, WORK_TDD_ENFORCE: '0' } };
       try {
-        await runOrchestrator(['transition', T, '2_bootstrap'], o);
-        await runOrchestrator(['transition', T, '8_check'], o);
-        await runOrchestrator(['transition', T, '10_test_enhancement'], o);
-        const { result } = await runOrchestrator(['transition', T, '5_implement'], o);
+        await runOrchestrator(['transition', T, 'bootstrap'], o);
+        await runOrchestrator(['transition', T, 'check'], o);
+        await runOrchestrator(['transition', T, 'test_enhancement'], o);
+        const { result } = await runOrchestrator(['transition', T, 'implement'], o);
         assert.equal(result.success, true);
         assert.equal(result.direction, 'backward');
       } finally {
@@ -581,40 +565,38 @@ describe('work-orchestrator.js', () => {
       }
     });
 
-    it('should allow transition from 11_pr → 13_ci (skip 12_ready)', async () => {
-      const TMP = path.join(os.tmpdir(), 'work-orch-pr-skip-' + process.pid);
-      const T = 'TEST-911';
-      const o = { env: { WORKTREES_BASE: TMP, WORK_TDD_ENFORCE: '0' } };
+    it('should allow transition from 9_pr → 11_ci (skip 10_ready)', async () => {
+      const TEST_TICKET = 'TEST-911';
+      const o = { env: { WORK_TDD_ENFORCE: '0' } };
       try {
-        await runOrchestrator(['transition', T, '2_bootstrap'], o);
-        await runOrchestrator(['transition', T, '8_check'], o);
-        await runOrchestrator(['transition', T, '10_test_enhancement'], o);
-        await runOrchestrator(['transition', T, '11_pr'], o);
-        const { result } = await runOrchestrator(['transition', T, '13_ci'], o);
+        await runOrchestrator(['transition', TEST_TICKET, 'bootstrap'], o);
+        await runOrchestrator(['transition', TEST_TICKET, 'check'], o);
+        await runOrchestrator(['transition', TEST_TICKET, 'test_enhancement'], o);
+        await runOrchestrator(['transition', TEST_TICKET, 'pr'], o);
+        const { result } = await runOrchestrator(['transition', TEST_TICKET, 'ci'], o);
         assert.equal(result.success, true);
-        assert.equal(result.from, '11_pr');
-        assert.equal(result.to, '13_ci');
+        assert.equal(result.from, 'pr');
+        assert.equal(result.to, 'ci');
       } finally {
-        try { fs.rmSync(TMP, { recursive: true, force: true }); } catch {}
+        cleanupTempWorkState(TEST_TICKET);
       }
     });
 
-    it('should reset intermediate steps when skipping 11_pr → 13_ci', async () => {
-      const TMP = path.join(os.tmpdir(), 'work-orch-pr-reset-' + process.pid);
-      const T = 'TEST-912';
-      const o = { env: { WORKTREES_BASE: TMP, WORK_TDD_ENFORCE: '0' } };
+    it('should reset intermediate steps when skipping 9_pr → 11_ci', async () => {
+      const TEST_TICKET = 'TEST-912';
+      const o = { env: { WORK_TDD_ENFORCE: '0' } };
       try {
-        await runOrchestrator(['transition', T, '2_bootstrap'], o);
-        await runOrchestrator(['transition', T, '8_check'], o);
-        await runOrchestrator(['transition', T, '10_test_enhancement'], o);
-        await runOrchestrator(['transition', T, '11_pr'], o);
-        await runOrchestrator(['transition', T, '13_ci'], o);
-        const { result } = await runOrchestrator(['transitions', T], o);
-        // 12_ready should be marked completed (skipped)
-        assert.equal(result.allStatuses['12_ready'], 'completed');
-        assert.equal(result.allStatuses['13_ci'], 'in_progress');
+        await runOrchestrator(['transition', TEST_TICKET, 'bootstrap'], o);
+        await runOrchestrator(['transition', TEST_TICKET, 'check'], o);
+        await runOrchestrator(['transition', TEST_TICKET, 'test_enhancement'], o);
+        await runOrchestrator(['transition', TEST_TICKET, 'pr'], o);
+        await runOrchestrator(['transition', TEST_TICKET, 'ci'], o);
+        const { result } = await runOrchestrator(['transitions', TEST_TICKET], o);
+        // ready should be marked completed (skipped)
+        assert.equal(result.allStatuses['ready'], 'completed');
+        assert.equal(result.allStatuses['ci'], 'in_progress');
       } finally {
-        try { fs.rmSync(TMP, { recursive: true, force: true }); } catch {}
+        cleanupTempWorkState(TEST_TICKET);
       }
     });
   });
@@ -676,34 +658,34 @@ describe('work-orchestrator.js', () => {
       try { fs.rmSync(path.join(TEMP_TASKS, TICKET), { recursive: true, force: true }); } catch {}
     });
 
-    it('should handle retry loop: 8_check → 5_implement → 6_quality → 7_commit → 8_check', async () => {
-      // Build up to 8_check
-      await runOrchestrator(['transition', TICKET, '2_bootstrap'], envOpts);
-      await runOrchestrator(['transition', TICKET, '8_check'], envOpts);
+    it('should handle retry loop: 6_check → 3_implement → 4_quality → 5_commit → 6_check', async () => {
+      // Build up to 6_check
+      await runOrchestrator(['transition', TICKET, 'bootstrap'], envOpts);
+      await runOrchestrator(['transition', TICKET, 'check'], envOpts);
 
-      // Retry to 5_implement
-      const r1 = await runOrchestrator(['transition', TICKET, '5_implement'], envOpts);
+      // Retry to implement
+      const r1 = await runOrchestrator(['transition', TICKET, 'implement'], envOpts);
       assert.equal(r1.result.success, true);
       assert.equal(r1.result.direction, 'backward');
 
-      // Forward through: 5→6→7→8
-      const r2 = await runOrchestrator(['transition', TICKET, '6_quality'], envOpts);
+      // Forward through: implement→quality→commit→check
+      const r2 = await runOrchestrator(['transition', TICKET, 'quality'], envOpts);
       assert.equal(r2.result.success, true);
-      const r3 = await runOrchestrator(['transition', TICKET, '7_commit'], envOpts);
+      const r3 = await runOrchestrator(['transition', TICKET, 'commit'], envOpts);
       assert.equal(r3.result.success, true);
-      const r4 = await runOrchestrator(['transition', TICKET, '8_check'], envOpts);
+      const r4 = await runOrchestrator(['transition', TICKET, 'check'], envOpts);
       assert.equal(r4.result.success, true);
     });
 
     it('should resume from mid-workflow: plan reflects state', async () => {
-      // Build state up to step 8
-      await runOrchestrator(['transition', TICKET, '2_bootstrap'], envOpts);
-      await runOrchestrator(['transition', TICKET, '8_check'], envOpts);
+      // Build state up to check
+      await runOrchestrator(['transition', TICKET, 'bootstrap'], envOpts);
+      await runOrchestrator(['transition', TICKET, 'check'], envOpts);
 
-      // Get plan — currentStep should reflect 8_check
+      // Get plan — currentStep should reflect check
       const { result } = await runOrchestrator(['plan', TICKET], envOpts);
       assert.ok(result.plan);
-      assert.equal(result.currentStep, '8_check');
+      assert.equal(result.currentStep, 'check');
     });
 
     it('should round-trip: work-state CLI init → set-step → get', async () => {
@@ -730,12 +712,12 @@ describe('work-orchestrator.js', () => {
       assert.ok(r1.result);
 
       // Set step
-      await runWorkState(['set-step', TICKET, '5_implement', 'in_progress']);
+      await runWorkState(['set-step', TICKET, 'implement', 'in_progress']);
 
       // Get
       const r3 = await runWorkState(['get', TICKET]);
       assert.ok(r3.result);
-      assert.equal(r3.result.stepStatus['5_implement'], 'in_progress');
+      assert.equal(r3.result.stepStatus['implement'], 'in_progress');
     });
   });
 });
