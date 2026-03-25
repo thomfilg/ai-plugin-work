@@ -77,8 +77,11 @@ const WORKTREES_BASE = getConfig('WORKTREES_BASE') || '';
 const TASKS_BASE = getConfig('TASKS_BASE') || (WORKTREES_BASE ? path.join(WORKTREES_BASE, 'tasks') : '');
 
 function requirePaths() {
-  if (!WORKTREES_BASE || !TASKS_BASE) {
-    console.log(JSON.stringify({ error: true, message: 'WORKTREES_BASE not set. Set it in env or ensure lib/config.js is loadable.' }));
+  const missing = [];
+  if (!WORKTREES_BASE) missing.push('WORKTREES_BASE');
+  if (!TASKS_BASE) missing.push('TASKS_BASE');
+  if (missing.length) {
+    console.log(JSON.stringify({ error: true, message: `${missing.join(', ')} not set. Set in env or ensure lib/config.js is loadable.` }));
     process.exit(1);
   }
 }

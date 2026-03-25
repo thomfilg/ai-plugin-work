@@ -81,8 +81,8 @@ function baseEnv(extra = {}) {
 async function transitionTo(ticket, targetStep, envExtra = {}) {
   const steps = [
     'bootstrap', 'brief', 'spec', 'implement', 'quality', 'commit',
-    'check', 'cleanup', 'test_enhancement', 'pr',
-    'ready', 'ci', 'reports', 'complete',
+    'check', 'test_enhancement', 'pr',
+    'ready', 'ci', 'cleanup', 'reports', 'complete',
   ];
   const idx = steps.indexOf(targetStep);
   if (idx === -1) throw new Error(`Unknown target step: ${targetStep}`);
