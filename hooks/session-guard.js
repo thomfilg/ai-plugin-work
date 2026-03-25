@@ -295,12 +295,20 @@ function handlePreCompact() {
  */
 function isCheckWorkflowActive(ticketId) {
   try {
+    // Sanitize ticketId to prevent path traversal
+    if (!ticketId || /[/\\:\0]/.test(ticketId)) return false;
+
     let _config;
     try { _config = require(path.join(__dirname, '..', 'lib', 'config')); } catch { _config = null; }
     const worktreesBase = _config?.WORKTREES_BASE || process.env.WORKTREES_BASE || `${process.env.HOME}/worktrees`;
     const tasksBase = _config?.TASKS_BASE || process.env.TASKS_BASE || path.join(worktreesBase, 'tasks');
     const statePath = path.join(tasksBase, ticketId, '.workflow-state.json');
-    const state = JSON.parse(fs.readFileSync(statePath, 'utf-8'));
+
+    // Verify resolved path stays under tasksBase
+    const resolved = path.resolve(statePath);
+    if (!resolved.startsWith(path.resolve(tasksBase) + path.sep)) return false;
+
+    const state = JSON.parse(fs.readFileSync(resolved, 'utf-8'));
     return state?.workflow === 'check' && state?.status === 'in_progress';
   } catch {
     return false;
@@ -328,13 +336,14 @@ function handleStop(hookData) {
     return;
   }
 
-  // Allow stop during /check — it has its own quality gates
-  const session = unrevealed[0];
-  if (isCheckWorkflowActive(session.ticketId)) {
-    process.exit(0);
+  // Allow stop only if ALL unrevealed sessions have /check active
+  const nonCheckSessions = unrevealed.filter(s => !isCheckWorkflowActive(s.ticketId));
+  if (nonCheckSessions.length === 0) {
+    process.exit(0); // All sessions are under /check — allow stop
     return;
   }
 
+  const session = nonCheckSessions[0];
   process.stderr.write(
     `BLOCKED: Active workflow session for ${session.ticketId} (${session.workflow}). ` +
     `Complete all ${session.workflow} steps to unlock, or type 'abort workflow' to force-stop.\n`

@@ -1591,17 +1591,18 @@ describe('enforce-step-workflow', () => {
       assert.equal(code, 0, 'quality-checker should be allowed when /check is active');
     });
 
-    it('allows code-checker when /check is active and /work is at 13_complete', async () => {
+    it('allows quality-checker via Task when /check is active and /work is at 13_complete', async () => {
       writeWorkState(makeStepStatus('13_complete', WORK_STEPS));
       writeWorkflowState(
         { '1_setup': 'completed', '4_phase1_agents': 'in_progress' },
         'check',
       );
+      // quality-checker maps to /work's 4_quality step — would be blocked without /check bypass
       const { code } = await runHook({
         tool_name: 'Task',
-        tool_input: { subagent_type: 'code-checker', description: 'review code' },
+        tool_input: { subagent_type: 'work-workflow:quality-checker', description: 'run tests' },
       });
-      assert.equal(code, 0, 'code-checker should be allowed when /check is active');
+      assert.equal(code, 0, 'quality-checker should be allowed when /check is active');
     });
 
     it('still blocks quality-checker when /check is NOT active', async () => {
