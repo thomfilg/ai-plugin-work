@@ -1572,4 +1572,74 @@ describe('enforce-step-workflow', () => {
       assert.ok(libSource.includes("'MultiEdit'"), 'Library should cover MultiEdit');
     });
   });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // /check workflow interaction (issue #67)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe('/check workflow interaction', () => {
+    it('allows quality-checker when /check is active and /work is at 13_complete', async () => {
+      writeWorkState(makeStepStatus('13_complete', WORK_STEPS));
+      writeWorkflowState(
+        { '1_setup': 'completed', '4_phase1_agents': 'in_progress' },
+        'check',
+      );
+      const { code } = await runHook({
+        tool_name: 'Agent',
+        tool_input: { subagent_type: 'work-workflow:quality-checker', description: 'run tests' },
+      });
+      assert.equal(code, 0, 'quality-checker should be allowed when /check is active');
+    });
+
+    it('allows code-checker when /check is active and /work is at 13_complete', async () => {
+      writeWorkState(makeStepStatus('13_complete', WORK_STEPS));
+      writeWorkflowState(
+        { '1_setup': 'completed', '4_phase1_agents': 'in_progress' },
+        'check',
+      );
+      const { code } = await runHook({
+        tool_name: 'Task',
+        tool_input: { subagent_type: 'code-checker', description: 'review code' },
+      });
+      assert.equal(code, 0, 'code-checker should be allowed when /check is active');
+    });
+
+    it('still blocks quality-checker when /check is NOT active', async () => {
+      writeWorkState(makeStepStatus('13_complete', WORK_STEPS));
+      // No /check workflow state written
+      const { code, stderr } = await runHook({
+        tool_name: 'Agent',
+        tool_input: { subagent_type: 'work-workflow:quality-checker', description: 'run tests' },
+      });
+      assert.equal(code, 2, 'quality-checker should be blocked without /check active');
+      assert.ok(stderr.includes('BLOCKED'), 'should include BLOCKED message');
+    });
+
+    it('still blocks non-check agents even when /check is active', async () => {
+      writeWorkState(makeStepStatus('13_complete', WORK_STEPS));
+      writeWorkflowState(
+        { '1_setup': 'completed', '4_phase1_agents': 'in_progress' },
+        'check',
+      );
+      const { code, stderr } = await runHook({
+        tool_name: 'Agent',
+        tool_input: { subagent_type: 'work-workflow:commit-writer', description: 'commit' },
+      });
+      assert.equal(code, 2, 'commit-writer should still be blocked');
+      assert.ok(stderr.includes('BLOCKED'), 'should include BLOCKED message');
+    });
+
+    it('allows quality-checker when /check is active and /work is at mid-step', async () => {
+      writeWorkState(makeStepStatus('5_commit', WORK_STEPS));
+      writeWorkflowState(
+        { '1_setup': 'completed', '4_phase1_agents': 'in_progress' },
+        'check',
+      );
+      const { code } = await runHook({
+        tool_name: 'Agent',
+        tool_input: { subagent_type: 'quality-checker', description: 'run tests' },
+      });
+      assert.equal(code, 0, 'quality-checker should be allowed when /check is active regardless of /work step');
+    });
+  });
 });

@@ -399,6 +399,22 @@ function handlePreToolUse(hookData) {
     const matchedStep = matchToolToStep(toolName, toolInput, wf.commandIndex);
     if (!matchedStep) continue; // Not a step command for this workflow → skip
 
+    // Skip /work blocking for agents legitimately used by /check
+    if (wf.name === 'work' && matchedStep !== currentStep) {
+      const checkState = loadStateFile(ticketId, '.workflow-state.json');
+      if (checkState?.workflow === 'check' && checkState?.status === 'in_progress') {
+        const CHECK_AGENTS = new Set([
+          'quality-checker', 'work-workflow:quality-checker',
+          'code-checker', 'work-workflow:code-checker',
+          'completion-checker', 'work-workflow:completion-checker',
+          'qa-feature-tester', 'work-workflow:qa-feature-tester',
+          'qa-api-tester', 'work-workflow:qa-api-tester',
+        ]);
+        const agentType = toolInput?.subagent_type || '';
+        if (CHECK_AGENTS.has(agentType)) continue; // Allow — /check owns this agent
+      }
+    }
+
     // Rule 1: Block if matched step ≠ currentStep
     if (matchedStep !== currentStep) {
       const cmdDesc = toolInput?.command || toolInput?.skill || toolInput?.subagent_type || '(unknown)';
