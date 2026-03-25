@@ -197,8 +197,8 @@ node ${CLAUDE_PLUGIN_ROOT}/hooks/work-orchestrator.js PROJ-XXX
 | `1_ticket` (create) | `jira-task-creator` | `Task(jira-task-creator)` — creates new ticket |
 | `2_bootstrap` | `skill` | `Skill(bootstrap)` |
 | `2b_transition` | `general-purpose` | `Task(general-purpose)` — transitions Jira status |
-| `3_brief` | `general-purpose` | `Task(general-purpose)` — generates product brief from ticket |
-| `4_spec` | `general-purpose` | `Task(general-purpose)` — generates technical spec from brief |
+| `3_brief` | `brief-writer` | `Task(brief-writer)` — generates product brief from ticket requirements |
+| `4_spec` | `spec-writer` | `Task(spec-writer)` — generates technical spec with test scenarios from brief + codebase |
 | `5_implement` | `skill` | `Skill(work-implement)` |
 | `6_quality` | `quality-checker` | `Task(quality-checker)` — runs quality checks (dev:check → bundled scripts → lint/typecheck/test) |
 | `7_commit` | `commit-writer` | `Task(commit-writer)` |

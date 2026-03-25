@@ -49,7 +49,7 @@ const STEPS = [
   '12_ready',
   '13_ci',
   '14_reports',
-  '15_complete'
+  '15_complete'  // Migration note: old 13-step states are not auto-migrated; in-progress workflows should restart
 ];
 
 const CHECK_AGENTS = [
