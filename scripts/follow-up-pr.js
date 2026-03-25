@@ -339,12 +339,13 @@ function deduplicateBlockingBotComments(blocking, nonBlocking, addressedBotComme
   }
 
   const addressedHashes = new Set(addressedBotComments.map((a) => a.hash));
+  const botReviewers = getBotReviewers();
 
   const stillBlocking = [];
   const movedToNonBlocking = [];
 
   for (const item of blocking) {
-    if (!isBotAuthorLogin(item.author)) {
+    if (!isBotAuthorLogin(item.author, botReviewers)) {
       // Human comments are NEVER deduplicated
       stillBlocking.push(item);
       continue;
@@ -1068,8 +1069,9 @@ async function main() {
       // Recording here (not during polling) prevents premature dedup
       // within the same run across multiple poll iterations.
       const existingHashes = new Set((state.addressedBotComments || []).map((a) => a.hash));
+      const botReviewersForRecord = getBotReviewers();
       for (const item of reviews.blocking) {
-        if (!isBotAuthorLogin(item.author)) continue;
+        if (!isBotAuthorLogin(item.author, botReviewersForRecord)) continue;
         // Only dedup inline comments (with a file path). Review-level
         // items (CHANGES_REQUESTED, COMMENTED) lack a path and would
         // produce body-only hashes that risk false dedup matches.
