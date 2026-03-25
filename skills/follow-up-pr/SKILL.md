@@ -436,6 +436,18 @@ Reason: Addressed in <file> <function/method> line <line>, commit <short_sha>.
         <Brief description of what was changed to address it.>
 ```
 
+**For ACKNOWLEDGED comments (skipped per section 5.4 — conflicts with user intent):**
+```
+Comment N: <full comment text>
+File: <file:line>
+Author: @<author>
+Status: ACKNOWLEDGED — intentionally skipped, conflicts with user intent
+Reason: <Explain the conflict. Reference the specific requirement, ticket,
+        or user instruction that this comment contradicts.
+        E.g., "Copilot suggests removing the error boundary, but the user
+        explicitly requested it in TICKET-123 acceptance criteria.">
+```
+
 To find "where addressed" for DEDUPED comments:
 1. Read the comment's suggestion
 2. Search the branch commits (`git log --oneline main..HEAD`) for the fix
