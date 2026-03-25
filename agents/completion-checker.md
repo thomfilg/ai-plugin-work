@@ -100,6 +100,24 @@ Consider COMPLETE if ANY of these are true:
 - **Organization**: Items listed? Structure clear?
 - **Analysis**: Conclusions drawn? Data reviewed?
 
+### Planning Artifact Validation
+
+When checking ticket work, look for planning documents in the tasks folder:
+```
+${TASKS_BASE}/${TICKET_ID}/brief.md
+${TASKS_BASE}/${TICKET_ID}/spec.md
+${TASKS_BASE}/${TICKET_ID}/**/pre-planning.md
+```
+
+If these files exist, cross-reference them against the implementation:
+- **Components to Create** — Were all listed new components created?
+- **Reusable Components** — Were listed existing components imported (not duplicated)?
+- **Endpoints** — Were all listed API endpoints implemented?
+- **E2E Test Scenarios** — Were tests written for the listed scenarios?
+- **Implementation Phases** — Were all phases completed?
+
+Report gaps between what was planned and what was delivered.
+
 ### Final Guidelines
 6. WHEN IN DOUBT, mark COMPLETE - better to pass than block unnecessarily
 7. If assistant provided the requested information/action → COMPLETE

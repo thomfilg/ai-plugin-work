@@ -16,7 +16,7 @@
  *   Clears evidence on backward transitions.
  *
  * Both /work and /work-pr can be active simultaneously (work-pr runs inside
- * /work at step 9_pr). Each workflow is checked independently.
+ * /work at step 11_pr). Each workflow is checked independently.
  *
  * Fail-open: Any error → exit 0 (allow).
  */
@@ -67,36 +67,37 @@ const WORKFLOWS = [
     evidenceFile: '.step-evidence.json',
     isActive: (state) => state?.status === 'in_progress',
     steps: [
-      '1_ticket', '2_bootstrap', '3_implement', '4_quality',
-      '5_commit', '6_check', '7_cleanup', '8_test_enhancement',
-      '9_pr', '10_ready', '11_ci', '12_reports', '13_complete',
+      '1_ticket', '2_bootstrap', '3_brief', '4_spec', '5_implement', '6_quality',
+      '7_commit', '8_check', '9_cleanup', '10_test_enhancement',
+      '11_pr', '12_ready', '13_ci', '14_reports', '15_complete',
     ],
-    softSteps: new Set(['1_ticket', '10_ready', '12_reports']),
+    // Soft steps allow transition without evidence — these are optional or metadata-only steps.
+    // 3_brief and 4_spec are soft because they're toggleable via WORK_BRIEF_ENABLED/WORK_SPEC_ENABLED
+    // and produce documentation artifacts, not code that requires enforcement.
+    softSteps: new Set([
+      '1_ticket', '3_brief', '4_spec', // optional/metadata steps (see comment above)
+      '12_ready', '14_reports',         // operational steps — no code changes to enforce
+    ]),
+    // Tool can be a string or array — some runtimes emit Agent instead of Task.
     commandMap: [
-      // Note: Some runtimes/models emit Agent instead of Task. Accept both names
-      // so evidence is recorded regardless of which tool name is used.
-      { step: '1_ticket',           tool: 'Task',  field: 'description',    pattern: /^1_ticket/i },
-      { step: '1_ticket',           tool: 'Agent', field: 'description',    pattern: /^1_ticket/i },
-      { step: '3_implement',        tool: 'Skill', field: 'skill',          pattern: /^work-implement$/ },
-      { step: '4_quality',          tool: 'Task',  field: 'subagent_type',  pattern: /^(work-workflow:)?quality-checker$/ },
-      { step: '4_quality',          tool: 'Agent', field: 'subagent_type',  pattern: /^(work-workflow:)?quality-checker$/ },
-      { step: '4_quality',          tool: 'Task',  field: 'description',    pattern: /^4_quality/i },
-      { step: '4_quality',          tool: 'Agent', field: 'description',    pattern: /^4_quality/i },
-      { step: '4_quality',          tool: 'Bash',  field: 'command',        pattern: /^\s*(LOW_CONCURRENCY=\d+\s+)?((pnpm|npm)\s+(run\s+)?dev:check\b|([\w./-]*\/)?dev-check\.sh(\s+--[\w-]+)*)/ },
-      { step: '5_commit',           tool: 'Task',  field: 'subagent_type',  pattern: /^(work-workflow:)?commit-writer$/ },
-      { step: '5_commit',           tool: 'Agent', field: 'subagent_type',  pattern: /^(work-workflow:)?commit-writer$/ },
-      { step: '6_check',            tool: 'Skill', field: 'skill',          pattern: /^check$/ },
-      { step: '7_cleanup',          tool: 'Task',  field: 'description',    pattern: /^7_cleanup/i },
-      { step: '7_cleanup',          tool: 'Agent', field: 'description',    pattern: /^7_cleanup/i },       { step: '8_test_enhancement', tool: 'Skill', field: 'skill',          pattern: /^test-coordination$/ },
-      { step: '9_pr',               tool: 'Skill', field: 'skill',          pattern: /^work-pr$/ },
-      { step: '10_ready',           tool: 'Task',  field: 'description',    pattern: /^10_ready/i },
-      { step: '10_ready',           tool: 'Agent', field: 'description',    pattern: /^10_ready/i },
-      { step: '11_ci',              tool: 'Task',  field: 'description',    pattern: /^11_ci/i },
-      { step: '11_ci',              tool: 'Agent', field: 'description',    pattern: /^11_ci/i },
-      { step: '12_reports',         tool: 'Task',  field: 'description',    pattern: /^12_reports/i },
-      { step: '12_reports',         tool: 'Agent', field: 'description',    pattern: /^12_reports/i },
-      { step: '13_complete',        tool: 'Task',  field: 'description',    pattern: /^13_complete/i },
-      { step: '13_complete',        tool: 'Agent', field: 'description',    pattern: /^13_complete/i },
+      { step: '1_ticket',            tool: ['Task', 'Agent'], field: 'description',   pattern: /^1_ticket/i },
+      { step: '3_brief',             tool: ['Task', 'Agent'], field: 'subagent_type', pattern: /^(work-workflow:)?brief-writer$/ },
+      { step: '3_brief',             tool: ['Task', 'Agent'], field: 'description',   pattern: /^3_brief/i },
+      { step: '4_spec',              tool: ['Task', 'Agent'], field: 'subagent_type', pattern: /^(work-workflow:)?spec-writer$/ },
+      { step: '4_spec',              tool: ['Task', 'Agent'], field: 'description',   pattern: /^4_spec/i },
+      { step: '5_implement',         tool: 'Skill',           field: 'skill',         pattern: /^work-implement$/ },
+      { step: '6_quality',           tool: ['Task', 'Agent'], field: 'subagent_type', pattern: /^(work-workflow:)?quality-checker$/ },
+      { step: '6_quality',           tool: ['Task', 'Agent'], field: 'description',   pattern: /^6_quality/i },
+      { step: '6_quality',           tool: 'Bash',            field: 'command',       pattern: /^\s*(LOW_CONCURRENCY=\d+\s+)?((pnpm|npm)\s+(run\s+)?dev:check\b|([\w./-]*\/)?dev-check\.sh(\s+--[\w-]+)*)/ },
+      { step: '7_commit',            tool: ['Task', 'Agent'], field: 'subagent_type', pattern: /^(work-workflow:)?commit-writer$/ },
+      { step: '8_check',             tool: 'Skill',           field: 'skill',         pattern: /^check$/ },
+      { step: '9_cleanup',           tool: ['Task', 'Agent'], field: 'description',   pattern: /^9_cleanup/i },
+      { step: '10_test_enhancement', tool: 'Skill',           field: 'skill',         pattern: /^test-coordination$/ },
+      { step: '11_pr',               tool: 'Skill',           field: 'skill',         pattern: /^work-pr$/ },
+      { step: '12_ready',            tool: ['Task', 'Agent'], field: 'description',   pattern: /^12_ready/i },
+      { step: '13_ci',               tool: ['Task', 'Agent'], field: 'description',   pattern: /^13_ci/i },
+      { step: '14_reports',          tool: ['Task', 'Agent'], field: 'description',   pattern: /^14_reports/i },
+      { step: '15_complete',         tool: ['Task', 'Agent'], field: 'description',   pattern: /^15_complete/i },
     ],
     transitionPattern: /work-orchestrator\.js\s+transition\s+(\S+)\s+(\S+)/,
     exemptPatterns: [
@@ -184,8 +185,11 @@ const CHECK_AGENTS = new Set([
 function buildCommandIndex(commandMap) {
   const index = {};
   for (const mapping of commandMap) {
-    if (!index[mapping.tool]) index[mapping.tool] = [];
-    index[mapping.tool].push(mapping);
+    const tools = Array.isArray(mapping.tool) ? mapping.tool : [mapping.tool];
+    for (const tool of tools) {
+      if (!index[tool]) index[tool] = [];
+      index[tool].push(mapping);
+    }
   }
   return index;
 }
@@ -381,9 +385,10 @@ function handlePreToolUse(hookData) {
       const expectedMappings = wf.commandMap.filter(m => m.step === currentStep);
       const expectedLines = expectedMappings.length > 0
         ? expectedMappings.map(m => {
-            if (m.field == null) return `${m.tool} (any call)`;
+            const toolName = Array.isArray(m.tool) ? m.tool.join('/') : m.tool;
+            if (m.field == null) return `${toolName} (any call)`;
             const pat = m.pattern ? m.pattern.toString() : '(any)';
-            return `${m.tool}.${m.field} matches ${pat}`;
+            return `${toolName}.${m.field} matches ${pat}`;
           })
         : ['expected command'];
 
@@ -487,8 +492,8 @@ function handlePostToolUse(hookData) {
     const matchedStep = matchToolToStep(toolName, toolInput, wf.commandIndex);
     if (!matchedStep) continue;
 
-    // (Patch 14) Strengthen 9_pr evidence: verify .pr-update-sha matches HEAD
-    if (wf.name === 'work' && matchedStep === '9_pr') {
+    // (Patch 14) Strengthen 11_pr evidence: verify .pr-update-sha matches HEAD
+    if (wf.name === 'work' && matchedStep === '11_pr') {
       const tasksDir = path.join(TASKS_BASE, ticketId);
       const prShaFile = path.join(tasksDir, '.pr-update-sha');
       let prShaOk = false;
@@ -510,7 +515,7 @@ function handlePostToolUse(hookData) {
         prShaOk = false;
       }
       if (!prShaOk) {
-        if (DEBUG) process.stderr.write(`[enforce] 9_pr: pr-update-sha missing or stale\n`);
+        if (DEBUG) process.stderr.write(`[enforce] 11_pr: pr-update-sha missing or stale\n`);
         continue; // Skip evidence recording — PR wasn't actually updated
       }
     }

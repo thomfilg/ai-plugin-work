@@ -25,7 +25,7 @@ This keeps your context window lean: just plan JSON + transition outputs + agent
 
 ## TDD Execution Policy
 
-When `WORK_TDD_ENFORCE=1` is set, `/work` enforces TDD for all implementation work entering `3_implement` or `8_test_enhancement`.
+When `WORK_TDD_ENFORCE=1` is set, `/work` enforces TDD for all implementation work entering `5_implement` or `10_test_enhancement`.
 
 Delegated agents must follow this loop:
 
@@ -39,7 +39,7 @@ Delegated agents must follow this loop:
 8. Record TDD evidence via `work-orchestrator.js record-tdd` CLI
 9. Run broader quality checks after targeted tests pass
 
-Enforcement: The orchestrator blocks transitions out of `3_implement` and `8_test_enhancement`
+Enforcement: The orchestrator blocks transitions out of `5_implement` and `10_test_enhancement`
 unless a valid TDD evidence file exists. This is a hard gate, not a suggestion.
 
 Toggle: TDD enforcement is controlled by `WORK_TDD_ENFORCE=1` in `.envrc`. When unset
@@ -52,7 +52,7 @@ was not appropriate.
 
 Why only these two steps: Other steps in the workflow don't produce new application code —
 they commit, verify, generate PRs, or package work that was already validated by TDD-gated
-steps. Gating `3_implement` and `8_test_enhancement` covers all code-producing transitions.
+steps. Gating `5_implement` and `10_test_enhancement` covers all code-producing transitions.
 
 ---
 
@@ -72,15 +72,15 @@ Parse the JSON output. This is your roadmap. Each RUN step includes `agentType` 
 {
   "ticket": "PROJ-881",
   "mode": "resume",
-  "currentStep": "6_check",
+  "currentStep": "8_check",
   "plan": [
     { "step": "1_ticket", "action": "SKIP", "reason": "Fetched" },
-    { "step": "4_quality", "action": "RUN", "command": "Task(quality-checker)",
+    { "step": "6_quality", "action": "RUN", "command": "Task(quality-checker)",
       "agentType": "quality-checker",
       "agentPrompt": "Run quality checks in /home/node/worktrees/...\nUse pnpm dev:check if available, bundled dev-check scripts as fallback, or pnpm lint && pnpm typecheck && pnpm test as last resort.\n\nReturn PASS or FAIL with summary.",
       "reason": "Lint + typecheck + test" }
   ],
-  "summary": { "total": 14, "run": 4, "skip": 10, "firstAction": "6_check" }
+  "summary": { "total": 16, "run": 4, "skip": 12, "firstAction": "8_check" }
 }
 ```
 
@@ -114,30 +114,30 @@ Use the plan's `agentType` and `agentPrompt` to delegate. **NEVER run step comma
 |-----------|----------------|------------------------------|
 | `general-purpose` | `Task(general-purpose)` | `"<step_name> <short description>"` |
 | `jira-task-creator` | `Task(jira-task-creator)` | `"1_ticket create ticket"` |
-| `quality-checker` | `Task(quality-checker)` | `"4_quality run checks"` |
-| `commit-writer` | `Task(commit-writer)` | `"5_commit changes"` |
+| `quality-checker` | `Task(quality-checker)` | `"6_quality run checks"` |
+| `commit-writer` | `Task(commit-writer)` | `"7_commit changes"` |
 | `Bash` | `Task(Bash)` | `"<step_name> <short description>"` |
 | `skill` | `Skill(<skill_name>)` | N/A (use Skill tool directly) |
 
-**CRITICAL**: For Task-based delegations, the `description` field MUST start with the step name (e.g., `"7_cleanup kill dev session"`). This is how the enforcement hook identifies which step the Task belongs to.
+**CRITICAL**: For Task-based delegations, the `description` field MUST start with the step name (e.g., `"9_cleanup kill dev session"`). This is how the enforcement hook identifies which step the Task belongs to.
 
 #### Delegation Examples
 
-**Task-based step (e.g., 4_quality):**
+**Task-based step (e.g., 6_quality):**
 ```
 Task(quality-checker):
-  description: "4_quality run checks"
+  description: "6_quality run checks"
   prompt: <agentPrompt from plan>
 ```
 
-**Task-based Bash step (e.g., 10_ready):**
+**Task-based Bash step (e.g., 12_ready):**
 ```
 Task(Bash):
-  description: "10_ready mark PR ready"
+  description: "12_ready mark PR ready"
   prompt: <agentPrompt from plan>
 ```
 
-**Skill-based step (e.g., 6_check):**
+**Skill-based step (e.g., 8_check):**
 ```
 Skill(check)
 ```
@@ -151,7 +151,7 @@ Task(general-purpose):
 
 ### TDD augmentation for implementation steps
 
-For `3_implement` and `8_test_enhancement`, the orchestrator automatically appends TDD protocol
+For `5_implement` and `10_test_enhancement`, the orchestrator automatically appends TDD protocol
 instructions to the `agentPrompt`. The delegated agent must:
 - Write focused failing tests before implementation when the change is behavior-testable
 - Run the smallest relevant test command first and confirm failure
@@ -168,10 +168,10 @@ After each agent returns:
 
 ### 2d. Pre-Commands (if present)
 
-Some steps include `preCommands` (e.g., rework mode for 6_check). Run these via `Task(Bash)` before the main delegation:
+Some steps include `preCommands` (e.g., rework mode for 8_check). Run these via `Task(Bash)` before the main delegation:
 ```
 Task(Bash):
-  description: "6_check pre-cleanup"
+  description: "8_check pre-cleanup"
   prompt: "Run these commands:\n<preCommands from plan>"
 ```
 
@@ -197,42 +197,46 @@ node ${CLAUDE_PLUGIN_ROOT}/hooks/work-orchestrator.js PROJ-XXX
 | `1_ticket` (create) | `jira-task-creator` | `Task(jira-task-creator)` — creates new ticket |
 | `2_bootstrap` | `skill` | `Skill(bootstrap)` |
 | `2b_transition` | `general-purpose` | `Task(general-purpose)` — transitions Jira status |
-| `3_implement` | `skill` | `Skill(work-implement)` |
-| `4_quality` | `quality-checker` | `Task(quality-checker)` — runs quality checks (dev:check → bundled scripts → lint/typecheck/test) |
-| `5_commit` | `commit-writer` | `Task(commit-writer)` |
-| `6_check` | `skill` | `Skill(check)` |
-| `7_cleanup` | `Bash` | `Task(Bash)` — kills tmux dev session |
-| `8_test_enhancement` | `skill` | `Skill(test-coordination)` |
-| `9_pr` | `skill` | `Skill(work-pr)` |
-| `10_ready` | `Bash` | `Task(Bash)` — runs `gh pr ready` |
-| `11_ci` | `Bash` | `Task(Bash)` — watches CI with `gh pr checks` |
-| `12_reports` | `Bash` | `Task(Bash)` — consolidates reports |
-| `13_complete` | `Bash` | `Task(Bash)` — marks workflow complete |
+| `3_brief` | `brief-writer` | `Task(brief-writer)` — generates product brief from ticket requirements |
+| `4_spec` | `spec-writer` | `Task(spec-writer)` — generates technical spec with test scenarios from brief + codebase |
+| `5_implement` | `skill` | `Skill(work-implement)` |
+| `6_quality` | `quality-checker` | `Task(quality-checker)` — runs quality checks (dev:check → bundled scripts → lint/typecheck/test) |
+| `7_commit` | `commit-writer` | `Task(commit-writer)` |
+| `8_check` | `skill` | `Skill(check)` |
+| `9_cleanup` | `Bash` | `Task(Bash)` — kills tmux dev session |
+| `10_test_enhancement` | `skill` | `Skill(test-coordination)` |
+| `11_pr` | `skill` | `Skill(work-pr)` |
+| `12_ready` | `Bash` | `Task(Bash)` — runs `gh pr ready` |
+| `13_ci` | `Bash` | `Task(Bash)` — watches CI with `gh pr checks` |
+| `14_reports` | `Bash` | `Task(Bash)` — consolidates reports |
+| `15_complete` | `Bash` | `Task(Bash)` — marks workflow complete |
 
 ---
 
 ## State Machine Transitions
 
 ```
-Happy path:  1→2→3→4→5→6→7→8→9→10→11→12→13
+Happy path:  1→2→3→4→5→6→7→8→9→10→11→12→13→14→15
 
 Retry loops (backward):
-  4_quality   → 3_implement   (quality failed)
-  5_commit    → 4_quality     (re-verify after commit)
-  6_check     → 3_implement   (check found issues)
-  6_check     → 4_quality     (check needs quality re-run)
-  8_test_enh  → 5_commit      (new tests need commit)
-  8_test_enh  → 4_quality     (new tests need quality check)
-  8_test_enh  → 3_implement   (tests reveal implementation flaw)
-  11_ci       → 3_implement   (CI failed)
-  11_ci       → 8_test_enh    (coverage failed)
+  6_quality   → 5_implement   (quality failed)
+  7_commit    → 6_quality     (re-verify after commit)
+  8_check     → 5_implement   (check found issues)
+  8_check     → 6_quality     (check needs quality re-run)
+  10_test_enh → 7_commit      (new tests need commit)
+  10_test_enh → 6_quality     (new tests need quality check)
+  10_test_enh → 5_implement   (tests reveal implementation flaw)
+  13_ci       → 5_implement   (CI failed)
+  13_ci       → 10_test_enh   (coverage failed)
 
 Skip edges (forward):
-  2_bootstrap → 4_quality     (code exists)
-  2_bootstrap → 5_commit      (quality done)
-  2_bootstrap → 6_check       (committed)
-  6_check     → 8_test_enh    (no cleanup needed)
-  9_pr        → 11_ci         (PR already ready, skip 10_ready)
+  2_bootstrap → 5_implement   (brief/spec disabled or done)
+  2_bootstrap → 6_quality     (code exists)
+  2_bootstrap → 7_commit      (quality done)
+  2_bootstrap → 8_check       (committed)
+  3_brief     → 5_implement   (spec disabled, skip to implement)
+  8_check     → 10_test_enh   (no cleanup needed)
+  11_pr       → 13_ci         (skip 12_ready — PR already marked ready)
 ```
 
 ---
@@ -242,12 +246,12 @@ Skip edges (forward):
 1. **FIRST tool call = orchestrator** — No text-only responses before getting the plan
 2. **Call transition before each RUN step** — Validates the move is legal
 3. **NEVER run step commands directly** — Always delegate via Task() or Skill()
-4. **Task description MUST start with step name** — e.g., `"7_cleanup kill dev session"`
+4. **Task description MUST start with step name** — e.g., `"9_cleanup kill dev session"`
 5. **Re-run orchestrator after any failure** — Fresh state inspection
 6. **Never claim completion without plan showing all done** — The orchestrator is truth
 7. **Only run inline**: orchestrator commands, transitions, and reading plan output
 8. **Don't process large outputs** — Agent summaries are enough for decision-making
-9. `3_implement` and `8_test_enhancement` enforce TDD — transitions out are blocked without
+9. `5_implement` and `10_test_enhancement` enforce TDD — transitions out are blocked without
    recorded TDD evidence proving GREEN or providing an explicit exception reason
 
 ---
@@ -260,14 +264,14 @@ User: /work PROJ-881
 Agent: [Runs orchestrator — gets plan JSON]
 Plan shows:
   - 1_ticket: SKIP
-  - 6_check: RUN (agentType: "skill", agentPrompt: "/check")
-  - 10_ready: RUN (agentType: "Bash", agentPrompt: "gh pr ready")
+  - 8_check: RUN (agentType: "skill", agentPrompt: "/check")
+  - 12_ready: RUN (agentType: "Bash", agentPrompt: "gh pr ready")
 
-Agent: [Transition to 6_check]
+Agent: [Transition to 8_check]
 Agent: [Skill(check)]  ← delegated, not inline
-Agent: [Transition to 10_ready]
-Agent: [Task(Bash) description="10_ready mark PR ready"]  ← delegated
-... continues until 13_complete
+Agent: [Transition to 12_ready]
+Agent: [Task(Bash) description="12_ready mark PR ready"]  ← delegated
+... continues until 15_complete
 ```
 
 ---

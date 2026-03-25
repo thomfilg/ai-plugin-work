@@ -108,9 +108,10 @@ function makeStepStatus(currentStep, allSteps) {
 }
 
 const WORK_STEPS = [
-  '1_ticket', '2_bootstrap', '3_implement', '4_quality',
-  '5_commit', '6_check', '7_cleanup', '8_test_enhancement',
-  '9_pr', '10_ready', '11_ci', '12_reports', '13_complete',
+  '1_ticket', '2_bootstrap', '3_brief', '4_spec',
+  '5_implement', '6_quality', '7_commit', '8_check',
+  '9_cleanup', '10_test_enhancement', '11_pr',
+  '12_ready', '13_ci', '14_reports', '15_complete',
 ];
 
 const WORK_PR_STEPS = [
@@ -213,7 +214,23 @@ describe('enforce-step-workflow', () => {
     });
 
     describe('step command matching', () => {
-      it('recognizes commit-writer as 5_commit', async () => {
+      it('recognizes brief-writer as 3_brief', async () => {
+        const { code } = await runHook({
+          tool_name: 'Task',
+          tool_input: { subagent_type: 'brief-writer', prompt: 'write brief' },
+        });
+        assert.equal(code, 0);
+      });
+
+      it('recognizes spec-writer as 4_spec', async () => {
+        const { code } = await runHook({
+          tool_name: 'Task',
+          tool_input: { subagent_type: 'spec-writer', prompt: 'write spec' },
+        });
+        assert.equal(code, 0);
+      });
+
+      it('recognizes commit-writer as 7_commit', async () => {
         const { code } = await runHook({
           tool_name: 'Task',
           tool_input: { subagent_type: 'commit-writer', prompt: 'commit changes' },
@@ -221,7 +238,7 @@ describe('enforce-step-workflow', () => {
         assert.equal(code, 0);
       });
 
-      it('recognizes work-implement skill as 3_implement', async () => {
+      it('recognizes work-implement skill as 5_implement', async () => {
         const { code } = await runHook({
           tool_name: 'Skill',
           tool_input: { skill: 'work-implement' },
@@ -229,7 +246,7 @@ describe('enforce-step-workflow', () => {
         assert.equal(code, 0);
       });
 
-      it('recognizes check skill as 6_check', async () => {
+      it('recognizes check skill as 8_check', async () => {
         const { code } = await runHook({
           tool_name: 'Skill',
           tool_input: { skill: 'check' },
@@ -237,7 +254,7 @@ describe('enforce-step-workflow', () => {
         assert.equal(code, 0);
       });
 
-      it('recognizes test-coordination skill as 8_test_enhancement', async () => {
+      it('recognizes test-coordination skill as 10_test_enhancement', async () => {
         const { code } = await runHook({
           tool_name: 'Skill',
           tool_input: { skill: 'test-coordination' },
@@ -245,7 +262,7 @@ describe('enforce-step-workflow', () => {
         assert.equal(code, 0);
       });
 
-      it('recognizes work-pr skill as 9_pr', async () => {
+      it('recognizes work-pr skill as 11_pr', async () => {
         const { code } = await runHook({
           tool_name: 'Skill',
           tool_input: { skill: 'work-pr' },
@@ -263,58 +280,58 @@ describe('enforce-step-workflow', () => {
         assert.equal(code, 0);
       });
 
-      it('recognizes Task(quality-checker) via subagent_type as 4_quality', async () => {
+      it('recognizes Task(quality-checker) via subagent_type as 6_quality', async () => {
         const { code } = await runHook({
           tool_name: 'Task',
-          tool_input: { subagent_type: 'quality-checker', description: '4_quality run checks', prompt: 'run checks' },
+          tool_input: { subagent_type: 'quality-checker', description: '6_quality run checks', prompt: 'run checks' },
         });
         assert.equal(code, 0);
       });
 
-      it('recognizes Task with description "4_quality" as 4_quality', async () => {
+      it('recognizes Task with description "6_quality" as 6_quality', async () => {
         const { code } = await runHook({
           tool_name: 'Task',
-          tool_input: { subagent_type: 'Bash', description: '4_quality run dev:check', prompt: 'run checks' },
+          tool_input: { subagent_type: 'Bash', description: '6_quality run dev:check', prompt: 'run checks' },
         });
         assert.equal(code, 0);
       });
 
-      it('recognizes Task with description "7_cleanup" as 7_cleanup', async () => {
+      it('recognizes Task with description "9_cleanup" as 9_cleanup', async () => {
         const { code } = await runHook({
           tool_name: 'Task',
-          tool_input: { subagent_type: 'Bash', description: '7_cleanup kill dev session', prompt: 'kill session' },
+          tool_input: { subagent_type: 'Bash', description: '9_cleanup kill dev session', prompt: 'kill session' },
         });
         assert.equal(code, 0);
       });
 
-      it('recognizes Task with description "10_ready" as 10_ready', async () => {
+      it('recognizes Task with description "12_ready" as 12_ready', async () => {
         const { code } = await runHook({
           tool_name: 'Task',
-          tool_input: { subagent_type: 'Bash', description: '10_ready mark PR ready', prompt: 'gh pr ready' },
+          tool_input: { subagent_type: 'Bash', description: '12_ready mark PR ready', prompt: 'gh pr ready' },
         });
         assert.equal(code, 0);
       });
 
-      it('recognizes Task with description "11_ci" as 11_ci', async () => {
+      it('recognizes Task with description "13_ci" as 13_ci', async () => {
         const { code } = await runHook({
           tool_name: 'Task',
-          tool_input: { subagent_type: 'Bash', description: '11_ci watch CI', prompt: 'gh pr checks' },
+          tool_input: { subagent_type: 'Bash', description: '13_ci watch CI', prompt: 'gh pr checks' },
         });
         assert.equal(code, 0);
       });
 
-      it('recognizes Task with description "12_reports" as 12_reports', async () => {
+      it('recognizes Task with description "14_reports" as 14_reports', async () => {
         const { code } = await runHook({
           tool_name: 'Task',
-          tool_input: { subagent_type: 'Bash', description: '12_reports consolidate', prompt: 'consolidate reports' },
+          tool_input: { subagent_type: 'Bash', description: '14_reports consolidate', prompt: 'consolidate reports' },
         });
         assert.equal(code, 0);
       });
 
-      it('recognizes Task with description "13_complete" as 13_complete', async () => {
+      it('recognizes Task with description "15_complete" as 15_complete', async () => {
         const { code } = await runHook({
           tool_name: 'Task',
-          tool_input: { subagent_type: 'Bash', description: '13_complete finish', prompt: 'mark complete' },
+          tool_input: { subagent_type: 'Bash', description: '15_complete finish', prompt: 'mark complete' },
         });
         assert.equal(code, 0);
       });
@@ -322,7 +339,7 @@ describe('enforce-step-workflow', () => {
       it('description matching is case-insensitive', async () => {
         const { code } = await runHook({
           tool_name: 'Task',
-          tool_input: { subagent_type: 'Bash', description: '7_CLEANUP kill dev session', prompt: 'kill session' },
+          tool_input: { subagent_type: 'Bash', description: '9_CLEANUP kill dev session', prompt: 'kill session' },
         });
         assert.equal(code, 0);
       });
@@ -344,7 +361,7 @@ describe('enforce-step-workflow', () => {
       });
 
       it('Agent(quality-checker) via subagent_type is recognized and records evidence', async () => {
-        writeWorkState(makeStepStatus('4_quality', WORK_STEPS));
+        writeWorkState(makeStepStatus('6_quality', WORK_STEPS));
         const input = { tool_name: 'Agent', tool_input: { subagent_type: 'quality-checker', description: 'run checks', prompt: 'run checks' } };
 
         const pre = await runHook(input);
@@ -353,34 +370,34 @@ describe('enforce-step-workflow', () => {
         const post = await runHook(input, 'PostToolUse');
         assert.equal(post.code, 0);
         const evidence = readEvidence();
-        assert.ok(evidence['4_quality']?.executed, 'Should record evidence for 4_quality');
-        assert.equal(evidence['4_quality']?.tool, 'Agent');
+        assert.ok(evidence['6_quality']?.executed, 'Should record evidence for 6_quality');
+        assert.equal(evidence['6_quality']?.tool, 'Agent');
       });
 
-      it('Agent with work-workflow:quality-checker prefix records 4_quality evidence via PostToolUse', async () => {
-        writeWorkState(makeStepStatus('4_quality', WORK_STEPS));
+      it('Agent with work-workflow:quality-checker prefix records 6_quality evidence via PostToolUse', async () => {
+        writeWorkState(makeStepStatus('6_quality', WORK_STEPS));
         const hookData = { tool_name: 'Agent', tool_input: { subagent_type: 'work-workflow:quality-checker', description: 'run checks', prompt: 'run checks' } };
         const pre = await runHook(hookData);
         assert.equal(pre.code, 0, 'PreToolUse allows Agent with work-workflow: prefix');
         const post = await runHook(hookData, 'PostToolUse');
         assert.equal(post.code, 0);
         const ev = readEvidence();
-        assert.ok(ev['4_quality']?.executed, 'PostToolUse must record evidence for 4_quality');
+        assert.ok(ev['6_quality']?.executed, 'PostToolUse must record evidence for 6_quality');
       });
 
-      it('Agent with description "4_quality" records evidence via PostToolUse', async () => {
-        writeWorkState(makeStepStatus('4_quality', WORK_STEPS));
-        const hookData = { tool_name: 'Agent', tool_input: { subagent_type: 'general-purpose', description: '4_quality run dev:check', prompt: 'run checks' } };
+      it('Agent with description "6_quality" records evidence via PostToolUse', async () => {
+        writeWorkState(makeStepStatus('6_quality', WORK_STEPS));
+        const hookData = { tool_name: 'Agent', tool_input: { subagent_type: 'general-purpose', description: '6_quality run dev:check', prompt: 'run checks' } };
         const pre = await runHook(hookData);
         assert.equal(pre.code, 0, 'PreToolUse allows Agent with description match');
         const post = await runHook(hookData, 'PostToolUse');
         assert.equal(post.code, 0);
         const ev = readEvidence();
-        assert.ok(ev['4_quality']?.executed, 'PostToolUse must record evidence for 4_quality');
+        assert.ok(ev['6_quality']?.executed, 'PostToolUse must record evidence for 6_quality');
       });
 
       it('Agent(commit-writer) via subagent_type is recognized and records evidence', async () => {
-        writeWorkState(makeStepStatus('5_commit', WORK_STEPS));
+        writeWorkState(makeStepStatus('7_commit', WORK_STEPS));
         const input = { tool_name: 'Agent', tool_input: { subagent_type: 'commit-writer', description: 'commit changes', prompt: 'commit' } };
 
         const pre = await runHook(input);
@@ -389,13 +406,13 @@ describe('enforce-step-workflow', () => {
         const post = await runHook(input, 'PostToolUse');
         assert.equal(post.code, 0);
         const evidence = readEvidence();
-        assert.ok(evidence['5_commit']?.executed, 'Should record evidence for 5_commit');
-        assert.equal(evidence['5_commit']?.tool, 'Agent');
+        assert.ok(evidence['7_commit']?.executed, 'Should record evidence for 7_commit');
+        assert.equal(evidence['7_commit']?.tool, 'Agent');
       });
 
-      it('Agent with description "7_cleanup" is recognized and records evidence', async () => {
-        writeWorkState(makeStepStatus('7_cleanup', WORK_STEPS));
-        const input = { tool_name: 'Agent', tool_input: { subagent_type: 'general-purpose', description: '7_cleanup kill dev session', prompt: 'kill session' } };
+      it('Agent with description "9_cleanup" is recognized and records evidence', async () => {
+        writeWorkState(makeStepStatus('9_cleanup', WORK_STEPS));
+        const input = { tool_name: 'Agent', tool_input: { subagent_type: 'general-purpose', description: '9_cleanup kill dev session', prompt: 'kill session' } };
 
         const pre = await runHook(input);
         assert.equal(pre.code, 0, 'PreToolUse should allow Agent');
@@ -403,52 +420,52 @@ describe('enforce-step-workflow', () => {
         const post = await runHook(input, 'PostToolUse');
         assert.equal(post.code, 0);
         const evidence = readEvidence();
-        assert.ok(evidence['7_cleanup']?.executed, 'Should record evidence for 7_cleanup');
-        assert.equal(evidence['7_cleanup']?.tool, 'Agent');
+        assert.ok(evidence['9_cleanup']?.executed, 'Should record evidence for 9_cleanup');
+        assert.equal(evidence['9_cleanup']?.tool, 'Agent');
       });
 
-      it('Agent with description "10_ready" is recognized and records evidence', async () => {
-        writeWorkState(makeStepStatus('10_ready', WORK_STEPS));
-        const input = { tool_name: 'Agent', tool_input: { subagent_type: 'general-purpose', description: '10_ready mark PR ready', prompt: 'gh pr ready' } };
+      it('Agent with description "12_ready" is recognized and records evidence', async () => {
+        writeWorkState(makeStepStatus('12_ready', WORK_STEPS));
+        const input = { tool_name: 'Agent', tool_input: { subagent_type: 'general-purpose', description: '12_ready mark PR ready', prompt: 'gh pr ready' } };
         const pre = await runHook(input);
         assert.equal(pre.code, 0);
         const post = await runHook(input, 'PostToolUse');
         assert.equal(post.code, 0);
         const evidence = readEvidence();
-        assert.ok(evidence['10_ready']?.executed, 'Should record evidence for 10_ready');
+        assert.ok(evidence['12_ready']?.executed, 'Should record evidence for 12_ready');
       });
 
-      it('Agent with description "11_ci" is recognized and records evidence', async () => {
-        writeWorkState(makeStepStatus('11_ci', WORK_STEPS));
-        const input = { tool_name: 'Agent', tool_input: { subagent_type: 'general-purpose', description: '11_ci watch CI', prompt: 'gh pr checks' } };
+      it('Agent with description "13_ci" is recognized and records evidence', async () => {
+        writeWorkState(makeStepStatus('13_ci', WORK_STEPS));
+        const input = { tool_name: 'Agent', tool_input: { subagent_type: 'general-purpose', description: '13_ci watch CI', prompt: 'gh pr checks' } };
         const pre = await runHook(input);
         assert.equal(pre.code, 0);
         const post = await runHook(input, 'PostToolUse');
         assert.equal(post.code, 0);
         const evidence = readEvidence();
-        assert.ok(evidence['11_ci']?.executed, 'Should record evidence for 11_ci');
+        assert.ok(evidence['13_ci']?.executed, 'Should record evidence for 13_ci');
       });
 
-      it('Agent with description "12_reports" is recognized and records evidence', async () => {
-        writeWorkState(makeStepStatus('12_reports', WORK_STEPS));
-        const input = { tool_name: 'Agent', tool_input: { subagent_type: 'general-purpose', description: '12_reports consolidate', prompt: 'consolidate reports' } };
+      it('Agent with description "14_reports" is recognized and records evidence', async () => {
+        writeWorkState(makeStepStatus('14_reports', WORK_STEPS));
+        const input = { tool_name: 'Agent', tool_input: { subagent_type: 'general-purpose', description: '14_reports consolidate', prompt: 'consolidate reports' } };
         const pre = await runHook(input);
         assert.equal(pre.code, 0);
         const post = await runHook(input, 'PostToolUse');
         assert.equal(post.code, 0);
         const evidence = readEvidence();
-        assert.ok(evidence['12_reports']?.executed, 'Should record evidence for 12_reports');
+        assert.ok(evidence['14_reports']?.executed, 'Should record evidence for 14_reports');
       });
 
-      it('Agent with description "13_complete" is recognized and records evidence', async () => {
-        writeWorkState(makeStepStatus('13_complete', WORK_STEPS));
-        const input = { tool_name: 'Agent', tool_input: { subagent_type: 'general-purpose', description: '13_complete finish', prompt: 'mark complete' } };
+      it('Agent with description "15_complete" is recognized and records evidence', async () => {
+        writeWorkState(makeStepStatus('15_complete', WORK_STEPS));
+        const input = { tool_name: 'Agent', tool_input: { subagent_type: 'general-purpose', description: '15_complete finish', prompt: 'mark complete' } };
         const pre = await runHook(input);
         assert.equal(pre.code, 0);
         const post = await runHook(input, 'PostToolUse');
         assert.equal(post.code, 0);
         const evidence = readEvidence();
-        assert.ok(evidence['13_complete']?.executed, 'Should record evidence for 13_complete');
+        assert.ok(evidence['15_complete']?.executed, 'Should record evidence for 15_complete');
       });
     });
   });
@@ -601,7 +618,7 @@ describe('enforce-step-workflow', () => {
 
   describe('multi-workflow coexistence', () => {
     it('both workflows can have state files simultaneously', () => {
-      writeWorkState(makeStepStatus('9_pr', WORK_STEPS));
+      writeWorkState(makeStepStatus('11_pr', WORK_STEPS));
       writeWorkflowState(makeStepStatus('3_pr_gen', WORK_PR_STEPS));
 
       const workState = JSON.parse(
@@ -611,14 +628,14 @@ describe('enforce-step-workflow', () => {
         fs.readFileSync(path.join(TASKS_DIR, '.workflow-state.json'), 'utf-8'),
       );
 
-      assert.equal(workState.stepStatus['9_pr'], 'in_progress');
+      assert.equal(workState.stepStatus['11_pr'], 'in_progress');
       assert.equal(workPrState.stepStatus['3_pr_gen'], 'in_progress');
       assert.equal(workPrState.workflow, 'work-pr');
     });
 
     it('evidence files are separate per workflow', () => {
       writeEvidence(
-        { '9_pr': { executed: true, tool: 'Skill', timestamp: new Date().toISOString() } },
+        { '11_pr': { executed: true, tool: 'Skill', timestamp: new Date().toISOString() } },
         '.step-evidence.json',
       );
       writeEvidence(
@@ -629,10 +646,10 @@ describe('enforce-step-workflow', () => {
       const workEvidence = readEvidence('.step-evidence.json');
       const workPrEvidence = readEvidence('.step-evidence-work-pr.json');
 
-      assert.ok(workEvidence['9_pr']?.executed);
+      assert.ok(workEvidence['11_pr']?.executed);
       assert.ok(!workEvidence['3_pr_gen']);
       assert.ok(workPrEvidence['3_pr_gen']?.executed);
-      assert.ok(!workPrEvidence['9_pr']);
+      assert.ok(!workPrEvidence['11_pr']);
     });
   });
 
@@ -691,12 +708,12 @@ describe('enforce-step-workflow', () => {
 
   describe('makeStepStatus helper', () => {
     it('correctly marks /work steps', () => {
-      const status = makeStepStatus('4_quality', WORK_STEPS);
+      const status = makeStepStatus('6_quality', WORK_STEPS);
       assert.equal(status['1_ticket'], 'completed');
-      assert.equal(status['3_implement'], 'completed');
-      assert.equal(status['4_quality'], 'in_progress');
-      assert.equal(status['5_commit'], 'pending');
-      assert.equal(status['13_complete'], 'pending');
+      assert.equal(status['5_implement'], 'completed');
+      assert.equal(status['6_quality'], 'in_progress');
+      assert.equal(status['7_commit'], 'pending');
+      assert.equal(status['15_complete'], 'pending');
     });
 
     it('correctly marks /work-pr steps', () => {
@@ -734,7 +751,7 @@ describe('enforce-step-workflow', () => {
       const { code } = await runHook(
         {
           tool_name: 'Bash',
-          tool_input: { command: 'node /path/to/work-orchestrator.js transition PROJ-123 4_quality' },
+          tool_input: { command: 'node /path/to/work-orchestrator.js transition PROJ-123 6_quality' },
         },
         'PostToolUse',
       );
@@ -748,40 +765,40 @@ describe('enforce-step-workflow', () => {
 
   describe('ticket-aware transition enforcement', () => {
     it('allows transition command targeting a different ticket (PreToolUse)', async () => {
-      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+      writeWorkState(makeStepStatus('5_implement', WORK_STEPS));
 
       const { code } = await runHook({
         tool_name: 'Bash',
-        tool_input: { command: 'node /path/to/work-orchestrator.js transition OTHER-999 4_quality' },
+        tool_input: { command: 'node /path/to/work-orchestrator.js transition OTHER-999 6_quality' },
       });
       assert.equal(code, 0);
     });
 
     it('blocks transition command targeting the SAME ticket without evidence', async () => {
-      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+      writeWorkState(makeStepStatus('5_implement', WORK_STEPS));
 
       const { code, stderr } = await runHook({
         tool_name: 'Bash',
-        tool_input: { command: `node /path/to/work-orchestrator.js transition ${TEST_TICKET} 4_quality` },
+        tool_input: { command: `node /path/to/work-orchestrator.js transition ${TEST_TICKET} 6_quality` },
       });
       assert.equal(code, 2);
       assert.ok(stderr.includes('BLOCKED'));
     });
 
     it('PostToolUse skips evidence clearing for different ticket transition (Patch 3)', async () => {
-      writeWorkState(makeStepStatus('7_cleanup', WORK_STEPS));
+      writeWorkState(makeStepStatus('9_cleanup', WORK_STEPS));
       writeEvidence({
-        '4_quality': { executed: true, tool: 'Task', timestamp: new Date().toISOString() },
-        '5_commit': { executed: true, tool: 'Task', timestamp: new Date().toISOString() },
-        '6_check': { executed: true, tool: 'Skill', timestamp: new Date().toISOString() },
-        '7_cleanup': { executed: true, tool: 'Task', timestamp: new Date().toISOString() },
+        '6_quality': { executed: true, tool: 'Task', timestamp: new Date().toISOString() },
+        '7_commit': { executed: true, tool: 'Task', timestamp: new Date().toISOString() },
+        '8_check': { executed: true, tool: 'Skill', timestamp: new Date().toISOString() },
+        '9_cleanup': { executed: true, tool: 'Task', timestamp: new Date().toISOString() },
       });
 
       // Transition for a DIFFERENT ticket — should NOT touch our evidence
       const { code } = await runHook(
         {
           tool_name: 'Bash',
-          tool_input: { command: 'node /path/to/work-orchestrator.js transition OTHER-999 4_quality' },
+          tool_input: { command: 'node /path/to/work-orchestrator.js transition OTHER-999 6_quality' },
         },
         'PostToolUse',
       );
@@ -789,58 +806,58 @@ describe('enforce-step-workflow', () => {
 
       // All evidence should remain untouched
       const evidence = readEvidence();
-      assert.ok(evidence['4_quality']?.executed, 'Evidence should be untouched');
-      assert.ok(evidence['5_commit']?.executed, 'Evidence should be untouched');
-      assert.ok(evidence['6_check']?.executed, 'Evidence should be untouched');
-      assert.ok(evidence['7_cleanup']?.executed, 'Evidence should be untouched');
+      assert.ok(evidence['6_quality']?.executed, 'Evidence should be untouched');
+      assert.ok(evidence['7_commit']?.executed, 'Evidence should be untouched');
+      assert.ok(evidence['8_check']?.executed, 'Evidence should be untouched');
+      assert.ok(evidence['9_cleanup']?.executed, 'Evidence should be untouched');
     });
   });
 
   describe('backward transition range fix', () => {
     it('preserves target step evidence on backward transition', async () => {
-      writeWorkState(makeStepStatus('7_cleanup', WORK_STEPS));
+      writeWorkState(makeStepStatus('9_cleanup', WORK_STEPS));
       writeEvidence({
-        '3_implement': { executed: true, tool: 'Skill', timestamp: new Date().toISOString() },
-        '4_quality': { executed: true, tool: 'Task', timestamp: new Date().toISOString() },
-        '5_commit': { executed: true, tool: 'Task', timestamp: new Date().toISOString() },
-        '6_check': { executed: true, tool: 'Skill', timestamp: new Date().toISOString() },
-        '7_cleanup': { executed: true, tool: 'Task', timestamp: new Date().toISOString() },
+        '5_implement': { executed: true, tool: 'Skill', timestamp: new Date().toISOString() },
+        '6_quality': { executed: true, tool: 'Task', timestamp: new Date().toISOString() },
+        '7_commit': { executed: true, tool: 'Task', timestamp: new Date().toISOString() },
+        '8_check': { executed: true, tool: 'Skill', timestamp: new Date().toISOString() },
+        '9_cleanup': { executed: true, tool: 'Task', timestamp: new Date().toISOString() },
       });
 
       const { code } = await runHook(
         {
           tool_name: 'Bash',
-          tool_input: { command: `node /path/to/work-orchestrator.js transition ${TEST_TICKET} 4_quality` },
+          tool_input: { command: `node /path/to/work-orchestrator.js transition ${TEST_TICKET} 6_quality` },
         },
         'PostToolUse',
       );
       assert.equal(code, 0);
 
       const evidence = readEvidence();
-      assert.ok(evidence['4_quality']?.executed, 'Target step evidence should be preserved');
-      assert.equal(evidence['5_commit'], undefined, 'Step after target should be cleared');
-      assert.equal(evidence['6_check'], undefined, 'Step after target should be cleared');
-      assert.equal(evidence['7_cleanup'], undefined, 'Current step should be cleared');
-      assert.ok(evidence['3_implement']?.executed, 'Step before target should be preserved');
+      assert.ok(evidence['6_quality']?.executed, 'Target step evidence should be preserved');
+      assert.equal(evidence['7_commit'], undefined, 'Step after target should be cleared');
+      assert.equal(evidence['8_check'], undefined, 'Step after target should be cleared');
+      assert.equal(evidence['9_cleanup'], undefined, 'Current step should be cleared');
+      assert.ok(evidence['5_implement']?.executed, 'Step before target should be preserved');
     });
   });
 
   describe('multi-command expected hint (Patch 5)', () => {
-    it('shows all valid commands with field names for 4_quality', async () => {
-      writeWorkState(makeStepStatus('4_quality', WORK_STEPS));
+    it('shows all valid commands with field names for 6_quality', async () => {
+      writeWorkState(makeStepStatus('6_quality', WORK_STEPS));
 
       const { code, stderr } = await runHook({
         tool_name: 'Bash',
-        tool_input: { command: `node /path/to/work-orchestrator.js transition ${TEST_TICKET} 5_commit` },
+        tool_input: { command: `node /path/to/work-orchestrator.js transition ${TEST_TICKET} 7_commit` },
       });
       assert.equal(code, 2);
 
       // Patch 5: new format includes field names and "Expected one of:"
       assert.ok(stderr.includes('Expected one of:'), 'Should use "Expected one of:" header');
-      assert.ok(stderr.includes('Task.subagent_type matches'), 'Should include field name subagent_type');
+      assert.ok(stderr.includes('.subagent_type matches'), 'Should include field name subagent_type');
       assert.ok(stderr.includes('quality-checker'), 'Should mention quality-checker pattern');
-      assert.ok(stderr.includes('Task.description matches'), 'Should include field name description');
-      assert.ok(stderr.includes('4_quality'), 'Should mention 4_quality pattern');
+      assert.ok(stderr.includes('.description matches'), 'Should include field name description');
+      assert.ok(stderr.includes('6_quality'), 'Should mention 6_quality pattern');
     });
 
     it('shows all valid commands for 3_pr_gen in work-pr', async () => {
@@ -860,9 +877,9 @@ describe('enforce-step-workflow', () => {
 
   describe('attempted command in block message', () => {
     it('includes the attempted transition command via transition.raw (Patch 4)', async () => {
-      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+      writeWorkState(makeStepStatus('5_implement', WORK_STEPS));
 
-      const transitionCmd = `node /path/to/work-orchestrator.js transition ${TEST_TICKET} 4_quality`;
+      const transitionCmd = `node /path/to/work-orchestrator.js transition ${TEST_TICKET} 6_quality`;
       const { code, stderr } = await runHook({
         tool_name: 'Bash',
         tool_input: { command: transitionCmd },
@@ -875,8 +892,8 @@ describe('enforce-step-workflow', () => {
 
   describe('dual in_progress detection', () => {
     it('warns on stderr when multiple steps are in_progress', async () => {
-      const stepStatus = makeStepStatus('4_quality', WORK_STEPS);
-      stepStatus['6_check'] = 'in_progress';
+      const stepStatus = makeStepStatus('6_quality', WORK_STEPS);
+      stepStatus['8_check'] = 'in_progress';
       writeWorkState(stepStatus);
 
       const { code, stderr } = await runHook(
@@ -885,18 +902,18 @@ describe('enforce-step-workflow', () => {
       );
       assert.equal(code, 0);
       assert.ok(stderr.includes('WARNING: Multiple steps in_progress'), 'Should warn about multiple in_progress');
-      assert.ok(stderr.includes('4_quality'), 'Should mention first in_progress step');
-      assert.ok(stderr.includes('6_check'), 'Should mention second in_progress step');
+      assert.ok(stderr.includes('6_quality'), 'Should mention first in_progress step');
+      assert.ok(stderr.includes('8_check'), 'Should mention second in_progress step');
     });
 
     it('still functions correctly — picks the first in_progress step', async () => {
-      const stepStatus = makeStepStatus('4_quality', WORK_STEPS);
-      stepStatus['6_check'] = 'in_progress';
+      const stepStatus = makeStepStatus('6_quality', WORK_STEPS);
+      stepStatus['8_check'] = 'in_progress';
       writeWorkState(stepStatus);
 
       const { code } = await runHook({
         tool_name: 'Task',
-        tool_input: { subagent_type: 'quality-checker', description: '4_quality run checks', prompt: 'run checks' },
+        tool_input: { subagent_type: 'quality-checker', description: '6_quality run checks', prompt: 'run checks' },
       });
       assert.equal(code, 0);
     });
@@ -930,7 +947,7 @@ describe('enforce-step-workflow', () => {
 
   describe('atomic evidence writes', () => {
     it('evidence file is written correctly after PostToolUse', async () => {
-      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+      writeWorkState(makeStepStatus('5_implement', WORK_STEPS));
 
       const { code } = await runHook(
         {
@@ -942,8 +959,8 @@ describe('enforce-step-workflow', () => {
       assert.equal(code, 0);
 
       const evidence = readEvidence();
-      assert.ok(evidence['3_implement']?.executed, 'Evidence should be recorded');
-      assert.equal(evidence['3_implement']?.tool, 'Skill');
+      assert.ok(evidence['5_implement']?.executed, 'Evidence should be recorded');
+      assert.equal(evidence['5_implement']?.tool, 'Skill');
 
       const files = fs.readdirSync(TASKS_DIR);
       const tmpFiles = files.filter(f => f.includes('.tmp.'));
@@ -1079,7 +1096,7 @@ describe('enforce-step-workflow', () => {
 
   describe('transition target validation (Patch 10)', () => {
     it('allows transition with unknown target step (PreToolUse — not a real transition)', async () => {
-      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+      writeWorkState(makeStepStatus('5_implement', WORK_STEPS));
       writeEvidence({});
 
       // Transition to a step that doesn't exist in the workflow — should be ignored
@@ -1092,23 +1109,23 @@ describe('enforce-step-workflow', () => {
     });
 
     it('blocks transition with valid target step (PreToolUse — real transition without evidence)', async () => {
-      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+      writeWorkState(makeStepStatus('5_implement', WORK_STEPS));
       writeEvidence({});
 
       const { code, stderr } = await runHook({
         tool_name: 'Bash',
-        tool_input: { command: `node /path/to/work-orchestrator.js transition ${TEST_TICKET} 4_quality` },
+        tool_input: { command: `node /path/to/work-orchestrator.js transition ${TEST_TICKET} 6_quality` },
       });
       assert.equal(code, 2);
       assert.ok(stderr.includes('BLOCKED'));
     });
 
     it('PostToolUse ignores transition with unknown target step', async () => {
-      writeWorkState(makeStepStatus('5_commit', WORK_STEPS));
+      writeWorkState(makeStepStatus('7_commit', WORK_STEPS));
       writeEvidence({
-        '3_implement': { executed: true, tool: 'Skill', timestamp: new Date().toISOString() },
-        '4_quality': { executed: true, tool: 'Task', timestamp: new Date().toISOString() },
-        '5_commit': { executed: true, tool: 'Task', timestamp: new Date().toISOString() },
+        '5_implement': { executed: true, tool: 'Skill', timestamp: new Date().toISOString() },
+        '6_quality': { executed: true, tool: 'Task', timestamp: new Date().toISOString() },
+        '7_commit': { executed: true, tool: 'Task', timestamp: new Date().toISOString() },
       });
 
       // Backward transition to unknown step — should be ignored, evidence untouched
@@ -1122,9 +1139,9 @@ describe('enforce-step-workflow', () => {
       assert.equal(code, 0);
 
       const evidence = readEvidence();
-      assert.ok(evidence['3_implement']?.executed, 'Evidence should be untouched');
-      assert.ok(evidence['4_quality']?.executed, 'Evidence should be untouched');
-      assert.ok(evidence['5_commit']?.executed, 'Evidence should be untouched');
+      assert.ok(evidence['5_implement']?.executed, 'Evidence should be untouched');
+      assert.ok(evidence['6_quality']?.executed, 'Evidence should be untouched');
+      assert.ok(evidence['7_commit']?.executed, 'Evidence should be untouched');
     });
   });
 
@@ -1168,19 +1185,19 @@ describe('enforce-step-workflow', () => {
     });
 
     it('always shows BLOCKED messages regardless of DEBUG', async () => {
-      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+      writeWorkState(makeStepStatus('5_implement', WORK_STEPS));
 
       const { code, stderr } = await runHook({
         tool_name: 'Bash',
-        tool_input: { command: `node /path/to/work-orchestrator.js transition ${TEST_TICKET} 4_quality` },
+        tool_input: { command: `node /path/to/work-orchestrator.js transition ${TEST_TICKET} 6_quality` },
       });
       assert.equal(code, 2);
       assert.ok(stderr.includes('BLOCKED'), 'BLOCKED messages always visible');
     });
 
     it('always shows WARNING messages regardless of DEBUG', async () => {
-      const stepStatus = makeStepStatus('4_quality', WORK_STEPS);
-      stepStatus['6_check'] = 'in_progress';
+      const stepStatus = makeStepStatus('6_quality', WORK_STEPS);
+      stepStatus['8_check'] = 'in_progress';
       writeWorkState(stepStatus);
 
       const { code, stderr } = await runHook(
@@ -1193,24 +1210,24 @@ describe('enforce-step-workflow', () => {
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // Patch 14: Bash dev:check command matching for 4_quality
+  // Patch 14: Bash dev:check command matching for 6_quality
   // ═══════════════════════════════════════════════════════════════════════════
 
-  describe('Bash dev:check → 4_quality command matching (Patch 14)', () => {
-    it('blocks pnpm dev:check when step is NOT 4_quality', async () => {
-      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+  describe('Bash dev:check → 6_quality command matching (Patch 14)', () => {
+    it('blocks pnpm dev:check when step is NOT 6_quality', async () => {
+      writeWorkState(makeStepStatus('5_implement', WORK_STEPS));
 
       const { code, stderr } = await runHook({
         tool_name: 'Bash',
         tool_input: { command: 'pnpm dev:check' },
       });
       assert.equal(code, 2);
-      assert.ok(stderr.includes('BLOCKED'), 'Should block dev:check outside 4_quality');
-      assert.ok(stderr.includes('4_quality'), 'Should mention 4_quality');
+      assert.ok(stderr.includes('BLOCKED'), 'Should block dev:check outside 6_quality');
+      assert.ok(stderr.includes('6_quality'), 'Should mention 6_quality');
     });
 
-    it('allows pnpm dev:check when step IS 4_quality', async () => {
-      writeWorkState(makeStepStatus('4_quality', WORK_STEPS));
+    it('allows pnpm dev:check when step IS 6_quality', async () => {
+      writeWorkState(makeStepStatus('6_quality', WORK_STEPS));
 
       const { code } = await runHook({
         tool_name: 'Bash',
@@ -1219,8 +1236,8 @@ describe('enforce-step-workflow', () => {
       assert.equal(code, 0);
     });
 
-    it('blocks LOW_CONCURRENCY=1 pnpm dev:check outside 4_quality', async () => {
-      writeWorkState(makeStepStatus('6_check', WORK_STEPS));
+    it('blocks LOW_CONCURRENCY=1 pnpm dev:check outside 6_quality', async () => {
+      writeWorkState(makeStepStatus('8_check', WORK_STEPS));
 
       const { code, stderr } = await runHook({
         tool_name: 'Bash',
@@ -1230,8 +1247,8 @@ describe('enforce-step-workflow', () => {
       assert.ok(stderr.includes('BLOCKED'));
     });
 
-    it('allows LOW_CONCURRENCY=1 pnpm dev:check during 4_quality', async () => {
-      writeWorkState(makeStepStatus('4_quality', WORK_STEPS));
+    it('allows LOW_CONCURRENCY=1 pnpm dev:check during 6_quality', async () => {
+      writeWorkState(makeStepStatus('6_quality', WORK_STEPS));
 
       const { code } = await runHook({
         tool_name: 'Bash',
@@ -1240,8 +1257,8 @@ describe('enforce-step-workflow', () => {
       assert.equal(code, 0);
     });
 
-    it('blocks npm run dev:check outside 4_quality', async () => {
-      writeWorkState(makeStepStatus('5_commit', WORK_STEPS));
+    it('blocks npm run dev:check outside 6_quality', async () => {
+      writeWorkState(makeStepStatus('7_commit', WORK_STEPS));
 
       const { code, stderr } = await runHook({
         tool_name: 'Bash',
@@ -1251,8 +1268,8 @@ describe('enforce-step-workflow', () => {
       assert.ok(stderr.includes('BLOCKED'));
     });
 
-    it('records evidence for pnpm dev:check via PostToolUse during 4_quality', async () => {
-      writeWorkState(makeStepStatus('4_quality', WORK_STEPS));
+    it('records evidence for pnpm dev:check via PostToolUse during 6_quality', async () => {
+      writeWorkState(makeStepStatus('6_quality', WORK_STEPS));
 
       const { code } = await runHook(
         { tool_name: 'Bash', tool_input: { command: 'pnpm dev:check' } },
@@ -1261,35 +1278,35 @@ describe('enforce-step-workflow', () => {
       assert.equal(code, 0);
 
       const evidence = readEvidence();
-      assert.ok(evidence['4_quality']?.executed, 'Should record evidence for 4_quality');
-      assert.equal(evidence['4_quality']?.tool, 'Bash');
+      assert.ok(evidence['6_quality']?.executed, 'Should record evidence for 6_quality');
+      assert.equal(evidence['6_quality']?.tool, 'Bash');
     });
 
-    it('matches pnpm dev:check-types as 4_quality (\\b matches at hyphen)', async () => {
-      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+    it('matches pnpm dev:check-types as 6_quality (\\b matches at hyphen)', async () => {
+      writeWorkState(makeStepStatus('5_implement', WORK_STEPS));
 
       const { code, stderr } = await runHook({
         tool_name: 'Bash',
         tool_input: { command: 'pnpm dev:check-types' },
       });
-      // \b matches at word boundary before hyphen — this IS caught as 4_quality
+      // \b matches at word boundary before hyphen — this IS caught as 6_quality
       assert.equal(code, 2);
       assert.ok(stderr.includes('BLOCKED'));
     });
 
-    it('blocks bundled dev-check.sh outside 4_quality', async () => {
-      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+    it('blocks bundled dev-check.sh outside 6_quality', async () => {
+      writeWorkState(makeStepStatus('5_implement', WORK_STEPS));
 
       const { code, stderr } = await runHook({
         tool_name: 'Bash',
         tool_input: { command: '/home/node/claude-plugin-work/scripts/dev-check/dev-check.sh' },
       });
       assert.equal(code, 2);
-      assert.ok(stderr.includes('BLOCKED'), 'Should block bundled dev-check.sh outside 4_quality');
+      assert.ok(stderr.includes('BLOCKED'), 'Should block bundled dev-check.sh outside 6_quality');
     });
 
-    it('allows bundled dev-check.sh during 4_quality', async () => {
-      writeWorkState(makeStepStatus('4_quality', WORK_STEPS));
+    it('allows bundled dev-check.sh during 6_quality', async () => {
+      writeWorkState(makeStepStatus('6_quality', WORK_STEPS));
 
       const { code } = await runHook({
         tool_name: 'Bash',
@@ -1300,38 +1317,38 @@ describe('enforce-step-workflow', () => {
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // Patch 14: 10_ready as soft step
+  // Patch 14: 12_ready as soft step
   // ═══════════════════════════════════════════════════════════════════════════
 
-  describe('10_ready soft step (Patch 14)', () => {
-    it('allows transition from 10_ready without evidence', async () => {
-      writeWorkState(makeStepStatus('10_ready', WORK_STEPS));
-      // No evidence written for 10_ready
+  describe('12_ready soft step (Patch 14)', () => {
+    it('allows transition from 12_ready without evidence', async () => {
+      writeWorkState(makeStepStatus('12_ready', WORK_STEPS));
+      // No evidence written for 12_ready
 
       const { code } = await runHook({
         tool_name: 'Bash',
-        tool_input: { command: `node /path/to/work-orchestrator.js transition ${TEST_TICKET} 11_ci` },
+        tool_input: { command: `node /path/to/work-orchestrator.js transition ${TEST_TICKET} 13_ci` },
       });
       // Soft step → should allow transition without evidence
       assert.equal(code, 0);
     });
 
-    it('source confirms 10_ready is in softSteps set', () => {
+    it('source confirms 12_ready is in softSteps set', () => {
       const hookSource = fs.readFileSync(HOOK_PATH, 'utf-8');
-      // Check that softSteps contains 10_ready
+      // Check that softSteps contains 12_ready
       const softStepsMatch = hookSource.match(/softSteps:\s*new Set\(\[([^\]]+)\]\)/);
       assert.ok(softStepsMatch, 'Should have softSteps declaration');
-      assert.ok(softStepsMatch[1].includes("'10_ready'"), 'softSteps should include 10_ready');
+      assert.ok(softStepsMatch[1].includes("'12_ready'"), 'softSteps should include 12_ready');
     });
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // Patch 14: 9_pr evidence validation
+  // Patch 14: 11_pr evidence validation
   // ═══════════════════════════════════════════════════════════════════════════
 
-  describe('9_pr evidence validation (Patch 14)', () => {
-    it('does NOT record evidence for 9_pr when .pr-update-sha is missing', async () => {
-      writeWorkState(makeStepStatus('9_pr', WORK_STEPS));
+  describe('11_pr evidence validation (Patch 14)', () => {
+    it('does NOT record evidence for 11_pr when .pr-update-sha is missing', async () => {
+      writeWorkState(makeStepStatus('11_pr', WORK_STEPS));
       // Do NOT create .pr-update-sha file
 
       const { code } = await runHook(
@@ -1341,12 +1358,12 @@ describe('enforce-step-workflow', () => {
       assert.equal(code, 0);
 
       const evidence = readEvidence();
-      assert.equal(evidence['9_pr'], undefined, 'Should NOT record evidence without .pr-update-sha');
+      assert.equal(evidence['11_pr'], undefined, 'Should NOT record evidence without .pr-update-sha');
     });
 
     it('source has Patch 14 evidence validation block', () => {
       const hookSource = fs.readFileSync(HOOK_PATH, 'utf-8');
-      assert.ok(hookSource.includes("(Patch 14) Strengthen 9_pr evidence"), 'Should have Patch 14 comment');
+      assert.ok(hookSource.includes("(Patch 14) Strengthen 11_pr evidence"), 'Should have Patch 14 comment');
       assert.ok(hookSource.includes('.pr-update-sha'), 'Should reference .pr-update-sha file');
     });
   });
@@ -1370,7 +1387,7 @@ describe('enforce-step-workflow', () => {
 
     for (const filename of PROTECTED_FILES) {
       it(`blocks Write to ${filename}`, async () => {
-        writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+        writeWorkState(makeStepStatus('5_implement', WORK_STEPS));
 
         const { code, stderr } = await runHook(
           { tool_name: 'Write', tool_input: { file_path: `/tmp/tasks/TEST-1/${filename}`, content: '{}' } },
@@ -1386,7 +1403,7 @@ describe('enforce-step-workflow', () => {
 
     for (const filename of ['.work-state.json', '.step-evidence.json']) {
       it(`blocks Edit to ${filename}`, async () => {
-        writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+        writeWorkState(makeStepStatus('5_implement', WORK_STEPS));
 
         const { code, stderr } = await runHook(
           { tool_name: 'Edit', tool_input: { file_path: `/home/user/tasks/PROJ-99/${filename}`, old_string: 'a', new_string: 'b' } },
@@ -1402,7 +1419,7 @@ describe('enforce-step-workflow', () => {
 
     for (const filename of ['.work-state.json', '.step-evidence.json']) {
       it(`blocks MultiEdit to ${filename}`, async () => {
-        writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+        writeWorkState(makeStepStatus('5_implement', WORK_STEPS));
 
         const { code, stderr } = await runHook(
           { tool_name: 'MultiEdit', tool_input: { file_path: `/home/user/tasks/PROJ-99/${filename}`, edits: [] } },
@@ -1418,7 +1435,7 @@ describe('enforce-step-workflow', () => {
 
     for (const filename of ['package.json', 'index.js', 'app.ts']) {
       it(`allows Write to non-protected file ${filename}`, async () => {
-        writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+        writeWorkState(makeStepStatus('5_implement', WORK_STEPS));
 
         const { code } = await runHook(
           { tool_name: 'Write', tool_input: { file_path: `/home/user/project/${filename}`, content: '{}' } },
@@ -1428,7 +1445,7 @@ describe('enforce-step-workflow', () => {
       });
 
       it(`allows Edit to non-protected file ${filename}`, async () => {
-        writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+        writeWorkState(makeStepStatus('5_implement', WORK_STEPS));
 
         const { code } = await runHook(
           { tool_name: 'Edit', tool_input: { file_path: `/home/user/project/${filename}`, old_string: 'a', new_string: 'b' } },
@@ -1438,7 +1455,7 @@ describe('enforce-step-workflow', () => {
       });
 
       it(`allows MultiEdit to non-protected file ${filename}`, async () => {
-        writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+        writeWorkState(makeStepStatus('5_implement', WORK_STEPS));
 
         const { code } = await runHook(
           { tool_name: 'MultiEdit', tool_input: { file_path: `/home/user/project/${filename}`, edits: [] } },
@@ -1451,7 +1468,7 @@ describe('enforce-step-workflow', () => {
     // ── Edge cases ──────────────────────────────────────────────────────────
 
     it('blocks .work-state.json even at a different path like /tmp/random/', async () => {
-      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+      writeWorkState(makeStepStatus('5_implement', WORK_STEPS));
 
       const { code, stderr } = await runHook(
         { tool_name: 'Write', tool_input: { file_path: '/tmp/random/.work-state.json', content: '{}' } },
@@ -1471,7 +1488,7 @@ describe('enforce-step-workflow', () => {
     });
 
     it('allows when file_path is empty (fail-open)', async () => {
-      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+      writeWorkState(makeStepStatus('5_implement', WORK_STEPS));
 
       const { code } = await runHook(
         { tool_name: 'Write', tool_input: { file_path: '', content: '{}' } },
@@ -1483,7 +1500,7 @@ describe('enforce-step-workflow', () => {
     // ── Bash write detection ───────────────────────────────────────────────
 
     it('blocks Bash redirect (>) to .work-state.json', async () => {
-      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+      writeWorkState(makeStepStatus('5_implement', WORK_STEPS));
 
       const { code, stderr } = await runHook(
         { tool_name: 'Bash', tool_input: { command: 'echo "{}" > /home/node/worktrees/tasks/TEST-1/.work-state.json' } },
@@ -1495,7 +1512,7 @@ describe('enforce-step-workflow', () => {
     });
 
     it('blocks Bash tee to .step-evidence.json', async () => {
-      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+      writeWorkState(makeStepStatus('5_implement', WORK_STEPS));
 
       const { code, stderr } = await runHook(
         { tool_name: 'Bash', tool_input: { command: 'echo "{}" | tee /tmp/.step-evidence.json' } },
@@ -1506,7 +1523,7 @@ describe('enforce-step-workflow', () => {
     });
 
     it('blocks Bash cp to .workflow-state.json', async () => {
-      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+      writeWorkState(makeStepStatus('5_implement', WORK_STEPS));
 
       const { code, stderr } = await runHook(
         { tool_name: 'Bash', tool_input: { command: 'cp /tmp/fake.json /tasks/.workflow-state.json' } },
@@ -1517,7 +1534,7 @@ describe('enforce-step-workflow', () => {
     });
 
     it('blocks Bash append (>>) to .work-actions.json', async () => {
-      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+      writeWorkState(makeStepStatus('5_implement', WORK_STEPS));
 
       const { code, stderr } = await runHook(
         { tool_name: 'Bash', tool_input: { command: 'echo "action" >> /tmp/.work-actions.json' } },
@@ -1528,7 +1545,7 @@ describe('enforce-step-workflow', () => {
     });
 
     it('blocks Bash mv to .pr-update-sha', async () => {
-      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+      writeWorkState(makeStepStatus('5_implement', WORK_STEPS));
 
       const { code, stderr } = await runHook(
         { tool_name: 'Bash', tool_input: { command: 'mv /tmp/sha .pr-update-sha' } },
@@ -1539,7 +1556,7 @@ describe('enforce-step-workflow', () => {
     });
 
     it('allows Bash read-only commands referencing state files', async () => {
-      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+      writeWorkState(makeStepStatus('5_implement', WORK_STEPS));
 
       const { code } = await runHook(
         { tool_name: 'Bash', tool_input: { command: 'cat /home/node/worktrees/tasks/TEST-1/.work-state.json' } },
@@ -1549,7 +1566,7 @@ describe('enforce-step-workflow', () => {
     });
 
     it('allows Bash redirect to non-protected file', async () => {
-      writeWorkState(makeStepStatus('3_implement', WORK_STEPS));
+      writeWorkState(makeStepStatus('5_implement', WORK_STEPS));
 
       const { code } = await runHook(
         { tool_name: 'Bash', tool_input: { command: 'echo "test" > /tmp/output.json' } },
@@ -1578,8 +1595,8 @@ describe('enforce-step-workflow', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('/check workflow interaction', () => {
-    it('allows quality-checker when /check is active and /work is at 13_complete', async () => {
-      writeWorkState(makeStepStatus('13_complete', WORK_STEPS));
+    it('allows quality-checker when /check is active and /work is at 15_complete', async () => {
+      writeWorkState(makeStepStatus('15_complete', WORK_STEPS));
       writeWorkflowState(
         { '1_setup': 'completed', '4_phase1_agents': 'in_progress' },
         'check',
@@ -1591,8 +1608,8 @@ describe('enforce-step-workflow', () => {
       assert.equal(code, 0, 'quality-checker should be allowed when /check is active');
     });
 
-    it('allows quality-checker via Task when /check is active and /work is at 13_complete', async () => {
-      writeWorkState(makeStepStatus('13_complete', WORK_STEPS));
+    it('allows quality-checker via Task when /check is active and /work is at 15_complete', async () => {
+      writeWorkState(makeStepStatus('15_complete', WORK_STEPS));
       writeWorkflowState(
         { '1_setup': 'completed', '4_phase1_agents': 'in_progress' },
         'check',
@@ -1606,7 +1623,7 @@ describe('enforce-step-workflow', () => {
     });
 
     it('still blocks quality-checker when /check is NOT active', async () => {
-      writeWorkState(makeStepStatus('13_complete', WORK_STEPS));
+      writeWorkState(makeStepStatus('15_complete', WORK_STEPS));
       // No /check workflow state written
       const { code, stderr } = await runHook({
         tool_name: 'Agent',
@@ -1617,7 +1634,7 @@ describe('enforce-step-workflow', () => {
     });
 
     it('still blocks non-check agents even when /check is active', async () => {
-      writeWorkState(makeStepStatus('13_complete', WORK_STEPS));
+      writeWorkState(makeStepStatus('15_complete', WORK_STEPS));
       writeWorkflowState(
         { '1_setup': 'completed', '4_phase1_agents': 'in_progress' },
         'check',
@@ -1631,7 +1648,7 @@ describe('enforce-step-workflow', () => {
     });
 
     it('allows completion-checker when /check is active', async () => {
-      writeWorkState(makeStepStatus('13_complete', WORK_STEPS));
+      writeWorkState(makeStepStatus('15_complete', WORK_STEPS));
       writeWorkflowState(
         { '1_setup': 'completed', '4_phase1_agents': 'in_progress' },
         'check',

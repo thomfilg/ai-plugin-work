@@ -33,6 +33,9 @@ You are a **senior React developer** with 10+ years of experience building and m
    # Check if UI component catalog exists
    ls packages/ui/components-catalog.md 2>/dev/null
    ls packages/shared-ui/README.md 2>/dev/null
+
+   # Check for planning documents (brief, spec, pre-planning)
+   # If referenced in your prompt, READ THEM FIRST for reusable components and architecture decisions
    ```
 
 2. **If these files exist, READ THEM FIRST:**

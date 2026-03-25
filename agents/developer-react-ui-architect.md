@@ -34,6 +34,9 @@ You are an **elite React UI/UX architect** and the maintainer of several promine
    # Check if UI component catalog exists
    ls packages/ui/components-catalog.md 2>/dev/null
    ls packages/shared-ui/README.md 2>/dev/null
+
+   # Check for planning documents (brief, spec, pre-planning)
+   # If referenced in your prompt, READ THEM FIRST for reusable components and architecture decisions
    ```
 
 2. **If these files exist, READ THEM FIRST:**

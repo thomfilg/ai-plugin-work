@@ -69,6 +69,19 @@ hooks:
 - You ARE the qa-feature-tester agent - do the work directly
 - Calling yourself creates infinite recursion loops
 
+# Planning Artifact Awareness
+
+Before creating your test plan, check for planning documents in the tasks folder:
+```
+${TASKS_BASE}/${TICKET_ID}/brief.md
+${TASKS_BASE}/${TICKET_ID}/spec.md
+${TASKS_BASE}/${TICKET_ID}/**/pre-planning.md
+```
+
+If a **pre-planning.md** exists with E2E test scenarios (typically section 3.7), use those as your **structured test plan**. Execute each numbered scenario step-by-step via Playwright, checking the expected results listed. This replaces ad-hoc test exploration with structured coverage.
+
+If a **spec.md** exists with Given/When/Then test scenarios, use those as test targets.
+
 # CONTEXT LOSS PROTECTION: Progress Tracking (MANDATORY)
 
 ```

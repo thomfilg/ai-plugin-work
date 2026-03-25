@@ -37,17 +37,19 @@ const TASKS_BASE = config.TASKS_BASE;
 const STEPS = [
   '1_ticket',
   '2_bootstrap',
-  '3_implement',
-  '4_quality',
-  '5_commit',
-  '6_check',
-  '7_cleanup',
-  '8_test_enhancement',  // Test enhancement loop (after /check, before PR)
-  '9_pr',
-  '10_ready',
-  '11_ci',
-  '12_reports',
-  '13_complete'
+  '3_brief',
+  '4_spec',
+  '5_implement',
+  '6_quality',
+  '7_commit',
+  '8_check',
+  '9_cleanup',
+  '10_test_enhancement',
+  '11_pr',
+  '12_ready',
+  '13_ci',
+  '14_reports',
+  '15_complete'  // Migration note: old 13-step states are not auto-migrated; in-progress workflows should restart
 ];
 
 const CHECK_AGENTS = [

@@ -27,9 +27,9 @@
  *   node work-orchestrator.js graph
  *
  * Step names (aligned with work-state.js):
- *   1_ticket, 2_bootstrap, 3_implement, 4_quality,
- *   5_commit, 6_check, 7_cleanup, 8_test_enhancement,
- *   9_pr, 10_ready, 11_ci, 12_reports, 13_complete
+ *   1_ticket, 2_bootstrap, 3_brief, 4_spec, 5_implement, 6_quality,
+ *   7_commit, 8_check, 9_cleanup, 10_test_enhancement,
+ *   11_pr, 12_ready, 13_ci, 14_reports, 15_complete
  */
 
 const { execSync, execFileSync } = require('child_process');
@@ -109,40 +109,44 @@ function canTransition(statusTransitions) {
 
 // ─── Step Transition Graph ───────────────────────────────────────────────────
 //
-//  Happy path:  1→2→3→4→5→6→7→8→9→10→11→12→13
+//  Happy path:  1→2→3→4→5→6→7→8→9→10→11→12→13→14→15
 //
 //  Retry loops (backward edges):
-//    4_quality   → 3_implement   (quality failed, re-implement)
-//    5_commit    → 4_quality     (re-verify quality after commit)
-//    6_check     → 3_implement   (check failed, fix code)
-//    6_check     → 4_quality     (check needs quality re-run)
-//    8_test_enh  → 5_commit      (enhanced tests need committing)
-//    8_test_enh  → 4_quality     (new tests need quality check)
-//    8_test_enh  → 3_implement   (tests reveal implementation flaw)
-//    11_ci       → 3_implement   (CI failed, fix code)
-//    11_ci       → 8_test_enh    (coverage failed)
+//    6_quality   → 5_implement   (quality failed, re-implement)
+//    7_commit    → 6_quality     (re-verify quality after commit)
+//    8_check     → 5_implement   (check failed, fix code)
+//    8_check     → 6_quality     (check needs quality re-run)
+//    10_test_enh → 7_commit      (enhanced tests need committing)
+//    10_test_enh → 6_quality     (new tests need quality check)
+//    10_test_enh → 5_implement   (tests reveal implementation flaw)
+//    13_ci       → 5_implement   (CI failed, fix code)
+//    13_ci       → 10_test_enh   (coverage failed)
 //
 //  Skip edges (forward jumps):
-//    2_bootstrap → 4_quality     (resume: code exists)
-//    2_bootstrap → 5_commit      (resume: code + quality done)
-//    2_bootstrap → 6_check       (resume: committed, need check)
-//    6_check     → 8_test_enh    (no cleanup needed)
-//    9_pr        → 11_ci         (PR already ready, skip 10_ready)
+//    2_bootstrap → 5_implement   (skip brief/spec)
+//    2_bootstrap → 6_quality     (resume: code exists)
+//    2_bootstrap → 7_commit      (resume: code + quality done)
+//    2_bootstrap → 8_check       (resume: committed, need check)
+//    3_brief     → 5_implement   (skip spec)
+//    8_check     → 10_test_enh   (no cleanup needed)
+//    11_pr       → 13_ci         (PR already ready, skip 12_ready)
 
 const STEP_TRANSITIONS = createStatusTransitions([
   { source: '1_ticket',            targets: ['2_bootstrap'] },
-  { source: '2_bootstrap',         targets: ['3_implement', '4_quality', '5_commit', '6_check'] },
-  { source: '3_implement',         targets: ['4_quality'] },
-  { source: '4_quality',           targets: ['5_commit', '3_implement'] },
-  { source: '5_commit',            targets: ['6_check', '4_quality'] },
-  { source: '6_check',             targets: ['7_cleanup', '8_test_enhancement', '3_implement', '4_quality'] },
-  { source: '7_cleanup',           targets: ['8_test_enhancement'] },
-  { source: '8_test_enhancement',  targets: ['9_pr', '5_commit', '4_quality', '3_implement'] },
-  { source: '9_pr',                targets: ['10_ready', '11_ci'] },
-  { source: '10_ready',            targets: ['11_ci'] },
-  { source: '11_ci',               targets: ['12_reports', '3_implement', '8_test_enhancement'] },
-  { source: '12_reports',          targets: ['13_complete'] },
-  { source: '13_complete',         targets: [] },
+  { source: '2_bootstrap',         targets: ['3_brief', '5_implement', '6_quality', '7_commit', '8_check'] },
+  { source: '3_brief',             targets: ['4_spec', '5_implement'] },
+  { source: '4_spec',              targets: ['5_implement'] },
+  { source: '5_implement',         targets: ['6_quality'] },
+  { source: '6_quality',           targets: ['7_commit', '5_implement'] },
+  { source: '7_commit',            targets: ['8_check', '6_quality'] },
+  { source: '8_check',             targets: ['9_cleanup', '10_test_enhancement', '5_implement', '6_quality'] },
+  { source: '9_cleanup',           targets: ['10_test_enhancement'] },
+  { source: '10_test_enhancement', targets: ['11_pr', '7_commit', '6_quality', '5_implement'] },
+  { source: '11_pr',               targets: ['12_ready', '13_ci'] },
+  { source: '12_ready',            targets: ['13_ci'] },
+  { source: '13_ci',               targets: ['14_reports', '5_implement', '10_test_enhancement'] },
+  { source: '14_reports',          targets: ['15_complete'] },
+  { source: '15_complete',         targets: [] },
 ]);
 
 const workflowCanTransition = canTransition(STEP_TRANSITIONS);
@@ -193,12 +197,12 @@ function getCurrentStep(workState) {
   for (const step of ALL_STEPS) {
     if (workState.stepStatus[step] !== 'completed') return step;
   }
-  return '13_complete';
+  return '15_complete';
 }
 
 // ─── TDD Enforcement ────────────────────────────────────────────────────────
 
-const TDD_GATED_STEPS = ['3_implement', '8_test_enhancement'];
+const TDD_GATED_STEPS = ['5_implement', '10_test_enhancement'];
 
 const TDD_PROTOCOL = `
 TDD protocol (mandatory for this step):
@@ -219,7 +223,7 @@ TDD protocol (mandatory for this step):
    node <ORCHESTRATOR_PATH> record-tdd <TICKET_ID> <step_id> \\
      --exception "config-only change, no testable behavior"
 9. If literal RED-first is not appropriate (mechanical refactor, pure config, file move), set exceptionReason and use the nearest-test approach instead.
-10. Do NOT make local git commits during the RED/GREEN cycle. Leave all changes uncommitted — the \`5_commit\` step handles commits with proper message formatting.
+10. Do NOT make local git commits during the RED/GREEN cycle. Leave all changes uncommitted — the \`7_commit\` step handles commits with proper message formatting.
 `.trim();
 
 function getTddEvidencePath(ticketId, stepId) {
@@ -438,7 +442,10 @@ function inspect(ticket, providerConfig) {
   // Test enhancement
   const te = s.workState?.testEnhancement;
   s.testEnhancement = te || null;
-  s.testEnhancementDone = s.stepIs('8_test_enhancement') === 'completed' || te?.skipped === true;
+  s.hasBrief = fileExists(path.join(s.tasksDir, 'brief.md'));
+  s.hasSpec = fileExists(path.join(s.tasksDir, 'spec.md'));
+
+  s.testEnhancementDone = s.stepIs('10_test_enhancement') === 'completed' || te?.skipped === true;
 
   // Dev session
   s.hasDevSession = run(`tmux has-session -t "${ticket}-dev" 2>/dev/null && echo yes`) === 'yes';
@@ -523,50 +530,117 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
     add('2b_transition', 'SKIP', null, 'No ticket transition for this provider');
   }
 
-  // 3_implement
+  // ─── Docs Injection Helper ──────────────────────────────────────────────
+  function getDocsPrompt(envVar) {
+    const docs = process.env[envVar] || '';
+    if (!docs.trim()) return '';
+    const paths = docs.split(',').map(p => p.trim()).filter(Boolean);
+    return `\n\nRead these docs before starting (from ${envVar}):\n${paths.map(p => `- ${p}`).join('\n')}`;
+  }
+
+  // 3_brief
+  const briefEnabled = process.env.WORK_BRIEF_ENABLED !== '0'; // on by default
+  const specEnabled = process.env.WORK_SPEC_ENABLED !== '0';   // on by default
+
+  if (!briefEnabled) {
+    add('3_brief', 'SKIP', null, 'Brief generation disabled (WORK_BRIEF_ENABLED=0)');
+  } else if (s?.hasBrief) {
+    add('3_brief', 'SKIP', null, 'brief.md already exists');
+  } else {
+    add('3_brief', 'RUN', 'Task(brief-writer)', 'Generate product brief from ticket requirements', {
+      agentType: 'brief-writer',
+      agentPrompt: `Generate a product brief for ticket ${t} based on the ticket requirements fetched in the previous step.\n\nSave the brief to: ${path.join(tasksDir, 'brief.md')}\n\nStructure it with: Problem Statement, Goal, Target Users, Requirements (P0/P1/P2), Constraints, Out of Scope, Success Metrics, Open Questions.${getDocsPrompt('READ_DOCS_ON_BRIEF')}`,
+    });
+  }
+
+  // ─── Planning Docs Discovery ────────────────────────────────────────────
+  // Build a context string for agents that should consume planning artifacts
+  const briefPath = path.join(tasksDir, 'brief.md');
+  const specPath = path.join(tasksDir, 'spec.md');
+  let prePlanningFiles = [];
+  if (fileExists(tasksDir)) {
+    try {
+      // Recursive search for pre-planning.md at any depth under tasksDir
+      const found = run(`find "${tasksDir}" -name "pre-planning.md" -type f 2>/dev/null`);
+      if (found) prePlanningFiles = found.split('\n').filter(Boolean);
+    } catch { /* race: tasksDir removed between exists-check and find */ }
+  }
+  // Build planning context: include existing files AND expected paths when stages are enabled
+  const planningDocs = [];
+  if (fileExists(briefPath)) {
+    planningDocs.push(`- Brief: ${briefPath}`);
+  } else if (briefEnabled) {
+    planningDocs.push(`- Brief (if present after 3_brief): ${briefPath}`);
+  }
+  if (fileExists(specPath)) {
+    planningDocs.push(`- Spec: ${specPath}`);
+  } else if (specEnabled) {
+    planningDocs.push(`- Spec (if present after 4_spec): ${specPath}`);
+  }
+  prePlanningFiles.forEach(f => planningDocs.push(`- Pre-planning: ${f}`));
+  const planningContext = planningDocs.length > 0
+    ? `\n\nPlanning documents — read these if they exist for requirements, test scenarios, reusable components:\n${planningDocs.join('\n')}`
+    : '';
+
+  // 4_spec
+  if (!specEnabled) {
+    add('4_spec', 'SKIP', null, 'Spec generation disabled (WORK_SPEC_ENABLED=0)');
+  } else if (s?.hasSpec) {
+    add('4_spec', 'SKIP', null, 'spec.md already exists');
+  } else {
+    const briefRef = fileExists(briefPath) || (briefEnabled && !s?.hasBrief)
+      ? `\n\nRead the product brief at: ${briefPath}`
+      : '';
+    add('4_spec', 'RUN', 'Task(spec-writer)', 'Generate technical specification', {
+      agentType: 'spec-writer',
+      agentPrompt: `Analyze the codebase in ${worktreeDir} and generate a technical specification for ticket ${t}.${briefRef}\n\nSave the spec to: ${specPath}\n\nThe spec MUST include:\n1. Summary\n2. Architecture decisions (reference specific files)\n3. Data model changes\n4. API/interface changes\n5. Security considerations\n6. Test scenarios in Given/When/Then format (5-10 scenarios)\n7. Implementation phases\n8. Files to create/modify${getDocsPrompt('READ_DOCS_ON_SPEC')}`,
+    });
+  }
+
+  // 5_implement
   if (s?.hasDiffVsMain) {
-    add('3_implement', 'SKIP', null, `Changes exist: ${s.diffSummary}`);
+    add('5_implement', 'SKIP', null, `Changes exist: ${s.diffSummary}`);
   } else {
-    add('3_implement', 'RUN', '/work-implement <requirements>', 'No changes vs main', {
+    add('5_implement', 'RUN', '/work-implement <requirements>', 'No changes vs main', {
       agentType: 'skill',
-      agentPrompt: '/work-implement <requirements>',
+      agentPrompt: `/work-implement <requirements>${planningContext}`,
     });
   }
 
-  // 4_quality
-  if (s?.hasDiffVsMain && s?.stepIs('4_quality') === 'completed') {
-    add('4_quality', 'SKIP', null, 'Previously passed');
+  // 6_quality
+  if (s?.hasDiffVsMain && s?.stepIs('6_quality') === 'completed') {
+    add('6_quality', 'SKIP', null, 'Previously passed');
   } else if (!s?.hasDiffVsMain) {
-    add('4_quality', 'PENDING', null, 'Depends on 3_implement');
+    add('6_quality', 'PENDING', null, 'Depends on 5_implement');
   } else {
-    add('4_quality', 'RUN', 'Task(quality-checker)', 'Lint + typecheck + test', {
+    add('6_quality', 'RUN', 'Task(quality-checker)', 'Lint + typecheck + test', {
       agentType: 'quality-checker',
-      agentPrompt: `Run quality checks in ${worktreeDir}:\nUse pnpm dev:check if available. If it doesn't exist, run ${PLUGIN_ROOT}/scripts/dev-check/dev-check.sh as fallback. If that also fails, use pnpm lint && pnpm typecheck && pnpm test.\n\nReturn PASS or FAIL with summary.`,
+      agentPrompt: `Run quality checks in ${worktreeDir}:\nUse pnpm dev:check if available. If it doesn't exist, run ${PLUGIN_ROOT}/scripts/dev-check/dev-check.sh as fallback. If that also fails, use pnpm lint && pnpm typecheck && pnpm test.\n\nReturn PASS or FAIL with summary.${planningContext}`,
     });
   }
 
-  // 5_commit
+  // 7_commit
   if (s?.hasUncommitted) {
-    add('5_commit', 'RUN', 'Task(commit-writer)', `${s.uncommittedCount} uncommitted file(s)`, {
+    add('7_commit', 'RUN', 'Task(commit-writer)', `${s.uncommittedCount} uncommitted file(s)`, {
       agentType: 'commit-writer',
       agentPrompt: `autonomous - commit staged changes for ${t}`,
     });
   } else if (s?.hasCommitWithTicket) {
-    add('5_commit', 'SKIP', null, `Latest: "${s.lastCommitMsg}"`);
+    add('7_commit', 'SKIP', null, `Latest: "${s.lastCommitMsg}"`);
   } else if (!s?.hasDiffVsMain) {
-    add('5_commit', 'PENDING', null, 'Depends on 3_implement');
+    add('7_commit', 'PENDING', null, 'Depends on 5_implement');
   } else {
-    add('5_commit', 'RUN', 'Task(commit-writer)', 'Commit missing ticket ID', {
+    add('7_commit', 'RUN', 'Task(commit-writer)', 'Commit missing ticket ID', {
       agentType: 'commit-writer',
       agentPrompt: `autonomous - commit staged changes for ${t}`,
     });
   }
 
-  // 6_check
+  // 8_check
   if (rework) {
-    add('6_check', 'RUN', '/check', 'REWORK: Always re-run', {
+    add('8_check', 'RUN', '/check', 'REWORK: Always re-run', {
       agentType: 'skill',
-      agentPrompt: '/check',
+      agentPrompt: `/check${planningContext}`,
       preCommands: [
         `rm -f "${tasksDir}"/*.check.md`,
         `rm -f "${tasksDir}"/.pr-update-sha`,
@@ -574,85 +648,85 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
       ],
     });
   } else if (s?.allReportsPass && Object.keys(s.reports).length >= 3) {
-    add('6_check', 'SKIP', null, `RESUME: All ${Object.keys(s.reports).length} reports PASS`);
+    add('8_check', 'SKIP', null, `RESUME: All ${Object.keys(s.reports).length} reports PASS`);
   } else {
     const p = [];
     if (s?.missingReports?.length) p.push(`missing: ${s.missingReports.join(', ')}`);
     if (s?.failedReports?.length) p.push(`failed: ${s.failedReports.join(', ')}`);
-    add('6_check', 'RUN', '/check', p.length ? p.join('; ') : 'No reports found', {
+    add('8_check', 'RUN', '/check', p.length ? p.join('; ') : 'No reports found', {
       agentType: 'skill',
-      agentPrompt: '/check',
+      agentPrompt: `/check${planningContext}`,
     });
   }
 
-  // 7_cleanup
+  // 9_cleanup
   if (s?.hasDevSession) {
-    add('7_cleanup', 'RUN', `Task(Bash)`, 'Dev session running', {
+    add('9_cleanup', 'RUN', `Task(Bash)`, 'Dev session running', {
       agentType: 'Bash',
       agentPrompt: `Run: tmux kill-session -t "${ticket}-dev" 2>/dev/null; echo "Cleanup done"`,
     });
   } else {
-    add('7_cleanup', 'SKIP', null, 'No dev session');
+    add('9_cleanup', 'SKIP', null, 'No dev session');
   }
 
-  // 8_test_enhancement
+  // 10_test_enhancement
   if (rework) {
-    add('8_test_enhancement', 'RUN', `Skill(test-coordination): ${ticket}`, 'REWORK: Re-run', {
+    add('10_test_enhancement', 'RUN', `Skill(test-coordination): ${ticket}`, 'REWORK: Re-run', {
       agentType: 'skill',
-      agentPrompt: `/test-coordination ${ticket}`,
+      agentPrompt: `/test-coordination ${ticket}${planningContext}`,
     });
   } else if (s?.testEnhancementDone) {
     const te = s.testEnhancement;
     const d = te?.skipped ? `Skipped: ${te.skipReason || '?'}` : `Rating ${te?.finalRating || '?'}/10`;
-    add('8_test_enhancement', 'SKIP', null, d);
+    add('10_test_enhancement', 'SKIP', null, d);
   } else {
-    add('8_test_enhancement', 'RUN', `Skill(test-coordination): ${t}`, 'Not yet run', {
+    add('10_test_enhancement', 'RUN', `Skill(test-coordination): ${t}`, 'Not yet run', {
       agentType: 'skill',
-      agentPrompt: `/test-coordination ${t}`,
+      agentPrompt: `/test-coordination ${t}${planningContext}`,
     });
   }
 
-  // 9_pr
+  // 11_pr
   if (rework) {
-    add('9_pr', 'RUN', `/work-pr ${ticket} --force`, 'REWORK: Force update', {
+    add('11_pr', 'RUN', `/work-pr ${ticket} --force`, 'REWORK: Force update', {
       agentType: 'skill',
       agentPrompt: `/work-pr ${ticket} --force`,
     });
   } else if (s?.prShaMatch && s?.prEverUpdated && (s?.postPrShaMatch || !s?.contentSha)) {
-    add('9_pr', 'SKIP', null, `SHA match (${s.headSha?.substring(0, 8)}, content: ${s?.postPrShaMatch ? 'match' : 'n/a'})`);
+    add('11_pr', 'SKIP', null, `SHA match (${s.headSha?.substring(0, 8)}, content: ${s?.postPrShaMatch ? 'match' : 'n/a'})`);
   } else if (s?.prEverUpdated) {
-    add('9_pr', 'RUN', `/work-pr ${ticket}`, `HEAD: ${s.prUpdateSha?.substring(0, 8) || '?'} → ${s.headSha?.substring(0, 8) || '?'}`, {
+    add('11_pr', 'RUN', `/work-pr ${ticket}`, `HEAD: ${s.prUpdateSha?.substring(0, 8) || '?'} → ${s.headSha?.substring(0, 8) || '?'}`, {
       agentType: 'skill',
       agentPrompt: `/work-pr ${ticket}`,
     });
   } else {
-    add('9_pr', 'RUN', `/work-pr ${t}`, 'Must run once', {
+    add('11_pr', 'RUN', `/work-pr ${t}`, 'Must run once', {
       agentType: 'skill',
       agentPrompt: `/work-pr ${t}`,
     });
   }
 
-  // 10_ready
+  // 12_ready
   if (s?.pr && !s.pr.isDraft) {
-    add('10_ready', 'SKIP', null, 'Already ready');
+    add('12_ready', 'SKIP', null, 'Already ready');
   } else {
-    add('10_ready', 'RUN', 'Task(Bash)', 'Mark PR ready', {
+    add('12_ready', 'RUN', 'Task(Bash)', 'Mark PR ready', {
       agentType: 'Bash',
       agentPrompt: `Run in ${worktreeDir}: gh pr ready`,
     });
   }
 
-  // 11_ci → 13_complete
-  add('11_ci', 'RUN', 'Task(Bash)', 'Wait for CI', {
+  // 13_ci → 15_complete
+  add('13_ci', 'RUN', 'Task(Bash)', 'Wait for CI', {
     agentType: 'Bash',
     agentPrompt: `Run in ${worktreeDir}: gh pr checks --watch --interval 60\n\nReturn PASS if all checks pass, FAIL with details if any fail.`,
   });
-  add('12_reports', 'RUN', 'Task(Bash)', 'Move reports to tasks/', {
+  add('14_reports', 'RUN', 'Task(Bash)', 'Move reports to tasks/', {
     agentType: 'Bash',
     agentPrompt: `Verify and consolidate reports in ${tasksDir}. List all *.check.md files and confirm they exist. Report the count and status of each.`,
   });
   const guardPath = path.join(__dirname, 'session-guard.js');
-  add('13_complete', 'RUN', 'Task(Bash)', 'Finish', {
+  add('15_complete', 'RUN', 'Task(Bash)', 'Finish', {
     agentType: 'Bash',
     agentPrompt: [
       `Run these commands in sequence:`,
@@ -662,7 +736,7 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
       `Step 1 marks the workflow as complete (exits 0 on success).`,
       `Step 2 is an atomic teardown: reveals the session passphrase (unlocking the Stop hook) and removes the session file. Exits 0 when no session exists (guard disabled or already cleaned up). Exits 1 only if called without a ticket ID (programming error).`,
     ].join('\n'),
-  }); // 13_complete — must run after all other steps
+  }); // 15_complete — must run after all other steps
 
   return { ticket: ticket || `TBD ("${description}")`, mode, plan };
 }

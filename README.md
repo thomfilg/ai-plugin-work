@@ -7,7 +7,9 @@ A Claude Code plugin that provides deterministic workflow orchestration for Jira
 - **Deterministic Workflow Engine** - State machine-driven step execution with forward/backward transitions
 - **Jira Integration** - Automatically fetches task details, transitions issue status, and links PRs
 - **Quality Enforcement** - Built-in hooks enforce screenshot requirements, step ordering, and code review
-- **Parallel Agent Orchestration** - Delegates work to specialized sub-agents (TDD, React, DevOps, QA) while keeping the orchestrator context lean
+- **Brief & Spec Generation** - Optional stages that produce a product brief and technical spec (with Given/When/Then test scenarios) before implementation
+- **Planning Artifact Discovery** - Agents auto-discover brief.md, spec.md, and pre-planning.md to validate deliverables, reuse components, and structure QA tests
+- **Parallel Agent Orchestration** - Delegates work to 18 specialized sub-agents (TDD, React, DevOps, QA, brief-writer, spec-writer) while keeping the orchestrator context lean
 - **Multi-task Support** - Bootstrap and orchestrate multiple Jira tasks across isolated git worktrees
 
 ## Installation
@@ -87,6 +89,12 @@ claude-plugin-work/
 │   ├── workflow-engine.js # Reusable state machine engine
 │   ├── workflow-state.js  # Workflow state persistence
 │   └── work-actions.js    # Step action implementations
+├── agents/                # Agent definitions (18 specialized agents)
+│   ├── brief-writer.md    # Product brief generation
+│   ├── spec-writer.md     # Technical spec generation
+│   ├── developer-nodejs-tdd.md
+│   ├── code-checker.md
+│   └── ...
 ├── skills/                # Slash command definitions (SKILL.md per command)
 │   ├── work/
 │   ├── check/
