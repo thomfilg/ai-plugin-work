@@ -185,20 +185,31 @@ describe('work-orchestrator.js', () => {
     });
 
     it('should auto-detect GitHub provider from #N shorthand when no provider configured', async () => {
-      // Use a non-git temp dir as cwd so getRemoteOriginUrl() returns null,
-      // preventing ticket-providers.json lookup from interfering.
-      const tmpCwd = path.join(os.tmpdir(), 'work-orch-nogit-' + process.pid);
-      fs.mkdirSync(tmpCwd, { recursive: true });
+      // Fully isolate: fake HOME prevents reading real ~/.claude/ticket-providers.json,
+      // non-git cwd prevents getRemoteOriginUrl() from matching, and temp WORKTREES_BASE
+      // prevents cleanup from touching real tasks directories.
+      const tmpBase = path.join(os.tmpdir(), 'work-orch-gh-shorthand-' + process.pid);
+      const tmpHome = path.join(tmpBase, 'home');
+      const tmpWb = path.join(tmpBase, 'worktrees');
+      fs.mkdirSync(tmpHome, { recursive: true });
+      fs.mkdirSync(tmpWb, { recursive: true });
       try {
         const { result, code } = await runOrchestrator(['#42'], {
-          env: { TICKET_PROVIDER: '' },
-          cwd: tmpCwd,
+          env: {
+            TICKET_PROVIDER: '',
+            HOME: tmpHome,
+            USERPROFILE: tmpHome,
+            WORKTREES_BASE: tmpWb,
+            JIRA_PROJECT_KEY: '',
+            JIRA_BASE_URL: '',
+            TICKET_PROJECT_KEY: '',
+          },
+          cwd: tmpBase,
         });
         assert.equal(code, 0);
         assert.equal(result.ticket, '#42');
       } finally {
-        cleanupTempWorkState('#42');
-        fs.rmSync(tmpCwd, { recursive: true, force: true });
+        try { fs.rmSync(tmpBase, { recursive: true, force: true }); } catch {}
       }
     });
   });
