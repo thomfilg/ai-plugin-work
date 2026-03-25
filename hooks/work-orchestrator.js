@@ -444,7 +444,6 @@ function inspect(ticket, providerConfig) {
   s.testEnhancement = te || null;
   s.hasBrief = fileExists(path.join(s.tasksDir, 'brief.md'));
   s.hasSpec = fileExists(path.join(s.tasksDir, 'spec.md'));
-  s.hasPrePlanning = s.tasksDirExists && listFiles(s.tasksDir, /pre-planning\.md$/).length > 0;
 
   s.testEnhancementDone = s.stepIs('10_test_enhancement') === 'completed' || te?.skipped === true;
 
