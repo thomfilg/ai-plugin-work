@@ -78,9 +78,8 @@ const WORKFLOWS = [
       '1_ticket', '3_brief', '4_spec', // optional/metadata steps (see comment above)
       '12_ready', '14_reports',         // operational steps — no code changes to enforce
     ]),
+    // Tool can be a string or array — some runtimes emit Agent instead of Task.
     commandMap: [
-      // Note: tool can be a string or array. Some runtimes/models emit Agent
-      // instead of Task — accept both so evidence is recorded regardless.
       { step: '1_ticket',            tool: ['Task', 'Agent'], field: 'description',   pattern: /^1_ticket/i },
       { step: '3_brief',             tool: ['Task', 'Agent'], field: 'subagent_type', pattern: /^(work-workflow:)?brief-writer$/ },
       { step: '3_brief',             tool: ['Task', 'Agent'], field: 'description',   pattern: /^3_brief/i },

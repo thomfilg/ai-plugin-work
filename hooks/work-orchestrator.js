@@ -563,7 +563,7 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
       // Recursive search for pre-planning.md at any depth under tasksDir
       const found = run(`find "${tasksDir}" -name "pre-planning.md" -type f 2>/dev/null`);
       if (found) prePlanningFiles = found.split('\n').filter(Boolean);
-    } catch { /* tasksDir may be removed between check and read */ }
+    } catch { /* race: tasksDir removed between exists-check and find */ }
   }
   // Build planning context: include existing files AND expected paths when stages are enabled
   const planningDocs = [];

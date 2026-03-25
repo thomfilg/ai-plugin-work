@@ -1595,7 +1595,7 @@ describe('enforce-step-workflow', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('/check workflow interaction', () => {
-    it('allows quality-checker when /check is active and /work is at 13_complete', async () => {
+    it('allows quality-checker when /check is active and /work is at 15_complete', async () => {
       writeWorkState(makeStepStatus('15_complete', WORK_STEPS));
       writeWorkflowState(
         { '1_setup': 'completed', '4_phase1_agents': 'in_progress' },
@@ -1608,7 +1608,7 @@ describe('enforce-step-workflow', () => {
       assert.equal(code, 0, 'quality-checker should be allowed when /check is active');
     });
 
-    it('allows quality-checker via Task when /check is active and /work is at 13_complete', async () => {
+    it('allows quality-checker via Task when /check is active and /work is at 15_complete', async () => {
       writeWorkState(makeStepStatus('15_complete', WORK_STEPS));
       writeWorkflowState(
         { '1_setup': 'completed', '4_phase1_agents': 'in_progress' },

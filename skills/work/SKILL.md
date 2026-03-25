@@ -236,7 +236,7 @@ Skip edges (forward):
   2_bootstrap → 8_check       (committed)
   3_brief     → 5_implement   (spec disabled, skip to implement)
   8_check     → 10_test_enh   (no cleanup needed)
-  11_pr       → 13_ci         (PR already ready, skip 12_ready)
+  11_pr       → 13_ci         (skip 12_ready — PR already marked ready)
 ```
 
 ---
