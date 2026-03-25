@@ -130,11 +130,9 @@ describe('TDD enforcement', () => {
       assert.doesNotMatch(implStep.agentPrompt || '', /confirm RED/i);
     });
 
-    it('with WORK_TDD_ENFORCE unset: agentPrompt for 3_implement does NOT include TDD protocol', async () => {
-      // Explicitly remove WORK_TDD_ENFORCE from env
-      const env = baseEnv();
-      delete env.WORK_TDD_ENFORCE;
-      const { result } = await runOrchestrator(['plan', TICKET], { env });
+    it('with WORK_TDD_ENFORCE empty: agentPrompt for 3_implement does NOT include TDD protocol', async () => {
+      // Set WORK_TDD_ENFORCE to empty string to override any inherited env value
+      const { result } = await runOrchestrator(['plan', TICKET], { env: baseEnv({ WORK_TDD_ENFORCE: '' }) });
       const implStep = result.plan.find(s => s.step === '3_implement');
       assert.ok(implStep, '3_implement step must exist in plan');
       assert.doesNotMatch(implStep.agentPrompt || '', /confirm RED/i);
@@ -159,13 +157,11 @@ describe('TDD enforcement', () => {
       assert.equal(result.success, true);
     });
 
-    it('with WORK_TDD_ENFORCE unset: transition 3_implement -> 4_quality ALLOWED without evidence', async () => {
-      const env = baseEnv();
-      delete env.WORK_TDD_ENFORCE;
-      await transitionTo(TICKET, '3_implement', env);
+    it('with WORK_TDD_ENFORCE empty: transition 3_implement -> 4_quality ALLOWED without evidence', async () => {
+      await transitionTo(TICKET, '3_implement', { WORK_TDD_ENFORCE: '' });
       const { result } = await runOrchestrator(
         ['transition', TICKET, '4_quality'],
-        { env },
+        { env: baseEnv({ WORK_TDD_ENFORCE: '' }) },
       );
       assert.equal(result.success, true);
     });
@@ -708,6 +704,41 @@ describe('TDD enforcement', () => {
       // Verify no file written outside tasks dir
       const outsidePath = path.resolve(tempTasksBase, '../../etc', '.tdd-evidence-3_implement.json');
       assert.ok(!fs.existsSync(outsidePath), 'No file should be written outside tasks dir');
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Transition graph enforcement for TDD-gated steps
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe('transition graph enforcement for 8_test_enhancement', () => {
+    const TICKET = 'TDDT-500';
+    afterEach(() => { cleanupTempWorkState(TICKET); });
+
+    it('transition graph prevents skipping 8_test_enhancement from 7_cleanup', async () => {
+      // 7_cleanup can only go to 8_test_enhancement (graph enforces it)
+      await transitionTo(TICKET, '7_cleanup', { WORK_TDD_ENFORCE: '0' });
+
+      const { result } = await runOrchestrator(
+        ['transition', TICKET, '9_pr'],
+        { env: baseEnv({ WORK_TDD_ENFORCE: '0' }) },
+      );
+      assert.ok(result.error, 'Graph should block 7_cleanup → 9_pr');
+      assert.ok(result.message.includes('BLOCKED'), 'Should include BLOCKED');
+    });
+
+    it('TDD gate blocks leaving 8_test_enhancement without evidence', async () => {
+      // Walk to 8_test_enhancement via skip edge (2_bootstrap → 6_check → 8_test_enhancement)
+      await runOrchestrator(['transition', TICKET, '2_bootstrap'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
+      await runOrchestrator(['transition', TICKET, '6_check'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
+      await runOrchestrator(['transition', TICKET, '8_test_enhancement'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
+
+      const { result } = await runOrchestrator(
+        ['transition', TICKET, '9_pr'],
+        { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) },
+      );
+      assert.ok(result.error, 'Should block leaving 8_test_enhancement without evidence');
+      assert.match(result.message, /TDD evidence/i);
     });
   });
 });

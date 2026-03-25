@@ -203,13 +203,14 @@ describe('work-orchestrator.js', () => {
             JIRA_PROJECT_KEY: '',
             JIRA_BASE_URL: '',
             TICKET_PROJECT_KEY: '',
+            LINEAR_TEAM_ID: '',
           },
-          cwd: tmpBase,
+          cwd: tmpHome,
         });
         assert.equal(code, 0);
         assert.equal(result.ticket, '#42');
       } finally {
-        try { fs.rmSync(tmpBase, { recursive: true, force: true }); } catch {}
+        try { fs.rmSync(tmpBase, { recursive: true, force: true }); } catch (e) { console.warn('cleanup failed:', e.message); }
       }
     });
   });

@@ -24,6 +24,17 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
+// Cached TASKS_BASE resolution — loaded once per invocation
+let _tasksBase;
+function getTasksBase() {
+  if (_tasksBase) return _tasksBase;
+  let _config;
+  try { _config = require(path.join(__dirname, '..', 'lib', 'config')); } catch { _config = null; }
+  const worktreesBase = _config?.WORKTREES_BASE || process.env.WORKTREES_BASE || `${process.env.HOME}/worktrees`;
+  _tasksBase = _config?.TASKS_BASE || process.env.TASKS_BASE || path.join(worktreesBase, 'tasks');
+  return _tasksBase;
+}
+
 // Allow disabling session guard entirely via env var
 if (process.env.SESSION_GUARD_ENABLED === '0') {
   process.exit(0);
@@ -288,6 +299,28 @@ function handlePreCompact() {
   process.exit(0);
 }
 
+/**
+ * Check if the /check workflow is actively running for a ticket.
+ * When /check is active, the session guard should not block stops
+ * because /check has its own quality gates and state management.
+ */
+function isCheckWorkflowActive(ticketId) {
+  try {
+    // Validate ticketId to prevent path traversal
+    if (!ticketId || /[/\\:\0]/.test(ticketId)) return false;
+
+    const tasksBase = getTasksBase();
+    const resolved = path.resolve(tasksBase, ticketId, '.workflow-state.json');
+    // Guard against path traversal — resolved path must stay under tasksBase
+    if (!resolved.startsWith(path.resolve(tasksBase) + path.sep)) return false;
+
+    const state = JSON.parse(fs.readFileSync(resolved, 'utf-8'));
+    return state?.workflow === 'check' && state?.status === 'in_progress';
+  } catch {
+    return false;
+  }
+}
+
 function handleStop(hookData) {
   const sessions = findActiveSessions();
   if (sessions.length === 0) {
@@ -309,7 +342,14 @@ function handleStop(hookData) {
     return;
   }
 
-  const session = unrevealed[0];
+  // Allow stop only if ALL unrevealed sessions have /check active
+  const nonCheckSessions = unrevealed.filter(s => !isCheckWorkflowActive(s.ticketId));
+  if (nonCheckSessions.length === 0) {
+    process.exit(0); // All sessions are under /check — allow stop
+    return;
+  }
+
+  const session = nonCheckSessions[0];
   process.stderr.write(
     `BLOCKED: Active workflow session for ${session.ticketId} (${session.workflow}). ` +
     `Complete all ${session.workflow} steps to unlock, or type 'abort workflow' to force-stop.\n`

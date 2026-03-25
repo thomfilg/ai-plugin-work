@@ -390,4 +390,53 @@ describe('session-guard', () => {
       assert.ok(r.code !== 0, 'should fail on unknown command');
     });
   });
+
+  // ─── /check workflow interaction ───
+
+  describe('/check workflow suppresses stop blocking', () => {
+    const TEMP_WB = path.join(require('os').tmpdir(), 'sg-check-test-' + process.pid);
+    const TEMP_TASKS = path.join(TEMP_WB, 'tasks');
+    const CHECK_TICKET = 'CHECK-777';
+
+    before(() => { fs.mkdirSync(path.join(TEMP_TASKS, CHECK_TICKET), { recursive: true }); });
+    after(() => { try { fs.rmSync(TEMP_WB, { recursive: true, force: true }); } catch {} });
+
+    function writeCheckState(workflow, status) {
+      const statePath = path.join(TEMP_TASKS, CHECK_TICKET, '.workflow-state.json');
+      fs.writeFileSync(statePath, JSON.stringify({ workflow, instanceId: CHECK_TICKET, status, stepStatus: {} }));
+    }
+
+    function removeCheckState() {
+      try { fs.unlinkSync(path.join(TEMP_TASKS, CHECK_TICKET, '.workflow-state.json')); } catch {}
+    }
+
+    afterEach(() => {
+      cleanupAllSessions();
+      removeCheckState();
+    });
+
+    it('allows stop when /check workflow is active', async () => {
+      await runCli(['init', CHECK_TICKET, '/work'], { WORKTREES_BASE: TEMP_WB });
+      writeCheckState('check', 'in_progress');
+
+      const r = await runHook({ stop_message: '' }, 'Stop', { WORKTREES_BASE: TEMP_WB });
+      assert.equal(r.code, 0, 'should allow stop when /check is active');
+    });
+
+    it('still blocks stop when /check is NOT active', async () => {
+      await runCli(['init', CHECK_TICKET, '/work'], { WORKTREES_BASE: TEMP_WB });
+      // No check state written
+
+      const r = await runHook({ stop_message: '' }, 'Stop', { WORKTREES_BASE: TEMP_WB });
+      assert.equal(r.code, 2, 'should block stop without /check');
+    });
+
+    it('still blocks stop when /check has completed', async () => {
+      await runCli(['init', CHECK_TICKET, '/work'], { WORKTREES_BASE: TEMP_WB });
+      writeCheckState('check', 'completed');
+
+      const r = await runHook({ stop_message: '' }, 'Stop', { WORKTREES_BASE: TEMP_WB });
+      assert.equal(r.code, 2, 'should block stop when /check completed');
+    });
+  });
 });
