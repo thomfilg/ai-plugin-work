@@ -302,9 +302,10 @@ function isCheckWorkflowActive(ticketId) {
     try { _config = require(path.join(__dirname, '..', 'lib', 'config')); } catch { _config = null; }
     const worktreesBase = _config?.WORKTREES_BASE || process.env.WORKTREES_BASE || `${process.env.HOME}/worktrees`;
     const tasksBase = _config?.TASKS_BASE || process.env.TASKS_BASE || path.join(worktreesBase, 'tasks');
+    // ticketId already sanitized above — safe to join
     const statePath = path.join(tasksBase, ticketId, '.workflow-state.json');
 
-    // Verify resolved path stays under tasksBase
+    // Double-check: verify resolved path stays under tasksBase
     const resolved = path.resolve(statePath);
     if (!resolved.startsWith(path.resolve(tasksBase) + path.sep)) return false;
 
