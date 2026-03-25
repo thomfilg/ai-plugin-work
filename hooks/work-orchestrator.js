@@ -550,14 +550,16 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
   // Build a context string for agents that should consume planning artifacts
   const briefPath = path.join(tasksDir, 'brief.md');
   const specPath = path.join(tasksDir, 'spec.md');
-  const prePlanningFiles = fileExists(tasksDir)
-    ? listFiles(tasksDir, /pre-planning\.md$/).concat(
-        // Also check one level deep (e.g., tasks/TICKET/feature-name/pre-planning.md)
+  let prePlanningFiles = [];
+  if (fileExists(tasksDir)) {
+    try {
+      prePlanningFiles = listFiles(tasksDir, /pre-planning\.md$/).concat(
         fs.readdirSync(tasksDir, { withFileTypes: true })
           .filter(d => d.isDirectory())
           .flatMap(d => listFiles(path.join(tasksDir, d.name), /pre-planning\.md$/))
-      )
-    : [];
+      );
+    } catch { /* tasksDir may be removed between check and read */ }
+  }
   const planningDocs = [];
   if (fileExists(briefPath)) planningDocs.push(`- Brief: ${briefPath}`);
   if (fileExists(specPath)) planningDocs.push(`- Spec: ${specPath}`);

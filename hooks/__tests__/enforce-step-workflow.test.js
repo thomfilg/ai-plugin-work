@@ -854,9 +854,9 @@ describe('enforce-step-workflow', () => {
 
       // Patch 5: new format includes field names and "Expected one of:"
       assert.ok(stderr.includes('Expected one of:'), 'Should use "Expected one of:" header');
-      assert.ok(stderr.includes('Task.subagent_type matches'), 'Should include field name subagent_type');
+      assert.ok(stderr.includes('.subagent_type matches'), 'Should include field name subagent_type');
       assert.ok(stderr.includes('quality-checker'), 'Should mention quality-checker pattern');
-      assert.ok(stderr.includes('Task.description matches'), 'Should include field name description');
+      assert.ok(stderr.includes('.description matches'), 'Should include field name description');
       assert.ok(stderr.includes('6_quality'), 'Should mention 6_quality pattern');
     });
 
@@ -1596,7 +1596,7 @@ describe('enforce-step-workflow', () => {
 
   describe('/check workflow interaction', () => {
     it('allows quality-checker when /check is active and /work is at 13_complete', async () => {
-      writeWorkState(makeStepStatus('13_complete', WORK_STEPS));
+      writeWorkState(makeStepStatus('15_complete', WORK_STEPS));
       writeWorkflowState(
         { '1_setup': 'completed', '4_phase1_agents': 'in_progress' },
         'check',
@@ -1609,7 +1609,7 @@ describe('enforce-step-workflow', () => {
     });
 
     it('allows quality-checker via Task when /check is active and /work is at 13_complete', async () => {
-      writeWorkState(makeStepStatus('13_complete', WORK_STEPS));
+      writeWorkState(makeStepStatus('15_complete', WORK_STEPS));
       writeWorkflowState(
         { '1_setup': 'completed', '4_phase1_agents': 'in_progress' },
         'check',
@@ -1623,7 +1623,7 @@ describe('enforce-step-workflow', () => {
     });
 
     it('still blocks quality-checker when /check is NOT active', async () => {
-      writeWorkState(makeStepStatus('13_complete', WORK_STEPS));
+      writeWorkState(makeStepStatus('15_complete', WORK_STEPS));
       // No /check workflow state written
       const { code, stderr } = await runHook({
         tool_name: 'Agent',
@@ -1634,7 +1634,7 @@ describe('enforce-step-workflow', () => {
     });
 
     it('still blocks non-check agents even when /check is active', async () => {
-      writeWorkState(makeStepStatus('13_complete', WORK_STEPS));
+      writeWorkState(makeStepStatus('15_complete', WORK_STEPS));
       writeWorkflowState(
         { '1_setup': 'completed', '4_phase1_agents': 'in_progress' },
         'check',
@@ -1648,7 +1648,7 @@ describe('enforce-step-workflow', () => {
     });
 
     it('allows completion-checker when /check is active', async () => {
-      writeWorkState(makeStepStatus('13_complete', WORK_STEPS));
+      writeWorkState(makeStepStatus('15_complete', WORK_STEPS));
       writeWorkflowState(
         { '1_setup': 'completed', '4_phase1_agents': 'in_progress' },
         'check',

@@ -73,33 +73,26 @@ const WORKFLOWS = [
     ],
     softSteps: new Set(['1_ticket', '3_brief', '4_spec', '12_ready', '14_reports']),
     commandMap: [
-      // Note: Some runtimes/models emit Agent instead of Task. Accept both names
-      // so evidence is recorded regardless of which tool name is used.
-      { step: '1_ticket',            tool: 'Task',  field: 'description',    pattern: /^1_ticket/i },
-      { step: '1_ticket',            tool: 'Agent', field: 'description',    pattern: /^1_ticket/i },
-      { step: '3_brief',             tool: 'Task',  field: 'subagent_type',  pattern: /^(work-workflow:)?brief-writer$/ },
-      { step: '4_spec',              tool: 'Task',  field: 'subagent_type',  pattern: /^(work-workflow:)?spec-writer$/ },
-      { step: '5_implement',         tool: 'Skill', field: 'skill',          pattern: /^work-implement$/ },
-      { step: '6_quality',           tool: 'Task',  field: 'subagent_type',  pattern: /^(work-workflow:)?quality-checker$/ },
-      { step: '6_quality',           tool: 'Agent', field: 'subagent_type',  pattern: /^(work-workflow:)?quality-checker$/ },
-      { step: '6_quality',           tool: 'Task',  field: 'description',    pattern: /^6_quality/i },
-      { step: '6_quality',           tool: 'Agent', field: 'description',    pattern: /^6_quality/i },
-      { step: '6_quality',           tool: 'Bash',  field: 'command',        pattern: /^\s*(LOW_CONCURRENCY=\d+\s+)?((pnpm|npm)\s+(run\s+)?dev:check\b|([\w./-]*\/)?dev-check\.sh(\s+--[\w-]+)*)/ },
-      { step: '7_commit',            tool: 'Task',  field: 'subagent_type',  pattern: /^(work-workflow:)?commit-writer$/ },
-      { step: '7_commit',            tool: 'Agent', field: 'subagent_type',  pattern: /^(work-workflow:)?commit-writer$/ },
-      { step: '8_check',             tool: 'Skill', field: 'skill',          pattern: /^check$/ },
-      { step: '9_cleanup',           tool: 'Task',  field: 'description',    pattern: /^9_cleanup/i },
-      { step: '9_cleanup',           tool: 'Agent', field: 'description',    pattern: /^9_cleanup/i },
-      { step: '10_test_enhancement', tool: 'Skill', field: 'skill',          pattern: /^test-coordination$/ },
-      { step: '11_pr',               tool: 'Skill', field: 'skill',          pattern: /^work-pr$/ },
-      { step: '12_ready',            tool: 'Task',  field: 'description',    pattern: /^12_ready/i },
-      { step: '12_ready',            tool: 'Agent', field: 'description',    pattern: /^12_ready/i },
-      { step: '13_ci',               tool: 'Task',  field: 'description',    pattern: /^13_ci/i },
-      { step: '13_ci',               tool: 'Agent', field: 'description',    pattern: /^13_ci/i },
-      { step: '14_reports',          tool: 'Task',  field: 'description',    pattern: /^14_reports/i },
-      { step: '14_reports',          tool: 'Agent', field: 'description',    pattern: /^14_reports/i },
-      { step: '15_complete',         tool: 'Task',  field: 'description',    pattern: /^15_complete/i },
-      { step: '15_complete',         tool: 'Agent', field: 'description',    pattern: /^15_complete/i },
+      // Note: tool can be a string or array. Some runtimes/models emit Agent
+      // instead of Task — accept both so evidence is recorded regardless.
+      { step: '1_ticket',            tool: ['Task', 'Agent'], field: 'description',   pattern: /^1_ticket/i },
+      { step: '3_brief',             tool: ['Task', 'Agent'], field: 'subagent_type', pattern: /^(work-workflow:)?brief-writer$/ },
+      { step: '3_brief',             tool: ['Task', 'Agent'], field: 'description',   pattern: /^3_brief/i },
+      { step: '4_spec',              tool: ['Task', 'Agent'], field: 'subagent_type', pattern: /^(work-workflow:)?spec-writer$/ },
+      { step: '4_spec',              tool: ['Task', 'Agent'], field: 'description',   pattern: /^4_spec/i },
+      { step: '5_implement',         tool: 'Skill',           field: 'skill',         pattern: /^work-implement$/ },
+      { step: '6_quality',           tool: ['Task', 'Agent'], field: 'subagent_type', pattern: /^(work-workflow:)?quality-checker$/ },
+      { step: '6_quality',           tool: ['Task', 'Agent'], field: 'description',   pattern: /^6_quality/i },
+      { step: '6_quality',           tool: 'Bash',            field: 'command',       pattern: /^\s*(LOW_CONCURRENCY=\d+\s+)?((pnpm|npm)\s+(run\s+)?dev:check\b|([\w./-]*\/)?dev-check\.sh(\s+--[\w-]+)*)/ },
+      { step: '7_commit',            tool: ['Task', 'Agent'], field: 'subagent_type', pattern: /^(work-workflow:)?commit-writer$/ },
+      { step: '8_check',             tool: 'Skill',           field: 'skill',         pattern: /^check$/ },
+      { step: '9_cleanup',           tool: ['Task', 'Agent'], field: 'description',   pattern: /^9_cleanup/i },
+      { step: '10_test_enhancement', tool: 'Skill',           field: 'skill',         pattern: /^test-coordination$/ },
+      { step: '11_pr',               tool: 'Skill',           field: 'skill',         pattern: /^work-pr$/ },
+      { step: '12_ready',            tool: ['Task', 'Agent'], field: 'description',   pattern: /^12_ready/i },
+      { step: '13_ci',               tool: ['Task', 'Agent'], field: 'description',   pattern: /^13_ci/i },
+      { step: '14_reports',          tool: ['Task', 'Agent'], field: 'description',   pattern: /^14_reports/i },
+      { step: '15_complete',         tool: ['Task', 'Agent'], field: 'description',   pattern: /^15_complete/i },
     ],
     transitionPattern: /work-orchestrator\.js\s+transition\s+(\S+)\s+(\S+)/,
     exemptPatterns: [
@@ -187,8 +180,11 @@ const CHECK_AGENTS = new Set([
 function buildCommandIndex(commandMap) {
   const index = {};
   for (const mapping of commandMap) {
-    if (!index[mapping.tool]) index[mapping.tool] = [];
-    index[mapping.tool].push(mapping);
+    const tools = Array.isArray(mapping.tool) ? mapping.tool : [mapping.tool];
+    for (const tool of tools) {
+      if (!index[tool]) index[tool] = [];
+      index[tool].push(mapping);
+    }
   }
   return index;
 }
@@ -384,9 +380,10 @@ function handlePreToolUse(hookData) {
       const expectedMappings = wf.commandMap.filter(m => m.step === currentStep);
       const expectedLines = expectedMappings.length > 0
         ? expectedMappings.map(m => {
-            if (m.field == null) return `${m.tool} (any call)`;
+            const toolName = Array.isArray(m.tool) ? m.tool.join('/') : m.tool;
+            if (m.field == null) return `${toolName} (any call)`;
             const pat = m.pattern ? m.pattern.toString() : '(any)';
-            return `${m.tool}.${m.field} matches ${pat}`;
+            return `${toolName}.${m.field} matches ${pat}`;
           })
         : ['expected command'];
 
