@@ -83,10 +83,9 @@ describe('work-state.js', () => {
 
       // Verify exact step names
       const expectedSteps = [
-        '1_ticket', '2_bootstrap', '3_brief', '4_spec',
-        '5_implement', '6_quality', '7_commit', '8_check',
-        '9_cleanup', '10_test_enhancement', '11_pr',
-        '12_ready', '13_ci', '14_reports', '15_complete',
+        'ticket', 'bootstrap', 'brief', 'spec', 'implement', 'quality',
+        'commit', 'check', 'test_enhancement',
+        'pr', 'ready', 'ci', 'cleanup', 'reports', 'complete',
       ];
       assert.deepEqual(steps, expectedSteps);
     });
@@ -100,7 +99,7 @@ describe('work-state.js', () => {
       const { result, code } = await runWorkState(['init', TICKET_CORRUPT]);
       assert.equal(code, 0);
       assert.ok(result);
-      assert.equal(result.stepStatus['1_ticket'], 'pending');
+      assert.equal(result.stepStatus['ticket'], 'pending');
 
       cleanupTempWorkState(TICKET_CORRUPT);
     });
@@ -126,7 +125,7 @@ describe('work-state.js', () => {
       assert.equal(code, 0);
       assert.equal(result.ticketId, TICKET_EXISTS);
       assert.equal(result.status, 'in_progress');
-      assert.equal(Object.keys(result.stepStatus).length, 15);
+      assert.equal(Object.keys(result.stepStatus).length, 13);
       for (const step of Object.keys(result.stepStatus)) {
         assert.equal(result.stepStatus[step], 'pending');
       }
@@ -141,18 +140,18 @@ describe('work-state.js', () => {
       await runWorkState(['init', TICKET]);
 
       const { result: setResult, code: setCode } = await runWorkState([
-        'set-step', TICKET, '5_implement', 'in_progress',
+        'set-step', TICKET, 'implement', 'in_progress',
       ]);
       assert.equal(setCode, 0);
       assert.equal(setResult.success, true);
-      assert.equal(setResult.step, '5_implement');
+      assert.equal(setResult.step, 'implement');
       assert.equal(setResult.status, 'in_progress');
 
       // Verify persistence
       const { result: getResult } = await runWorkState(['get', TICKET]);
-      assert.equal(getResult.stepStatus['5_implement'], 'in_progress');
-      // currentStep should be updated to 5 (index 4 + 1)
-      assert.equal(getResult.currentStep, 5);
+      assert.equal(getResult.stepStatus['implement'], 'in_progress');
+      // currentStep should be updated to 3 (index 2 + 1)
+      assert.equal(getResult.currentStep, 3);
     });
 
     it('should reject invalid step name with exit code 1', async () => {
@@ -283,22 +282,22 @@ describe('work-state.js', () => {
       await runWorkState(['init', TICKET]);
 
       // Modify state: set a step to in_progress
-      await runWorkState(['set-step', TICKET, '5_implement', 'in_progress']);
+      await runWorkState(['set-step', TICKET, 'implement', 'in_progress']);
 
       // Verify the modification persisted
       const { result: beforeSecondInit } = await runWorkState(['get', TICKET]);
-      assert.equal(beforeSecondInit.stepStatus['5_implement'], 'in_progress');
+      assert.equal(beforeSecondInit.stepStatus['implement'], 'in_progress');
 
       // Second init — should return existing state unchanged
       const { result: secondInitResult } = await runWorkState(['init', TICKET]);
       assert.equal(secondInitResult.status, 'in_progress');
-      assert.equal(secondInitResult.stepStatus['5_implement'], 'in_progress',
+      assert.equal(secondInitResult.stepStatus['implement'], 'in_progress',
         'Second init should preserve existing step status');
 
       // Verify persistence is unchanged
       const { result: afterSecondInit } = await runWorkState(['get', TICKET]);
       assert.equal(
-        afterSecondInit.stepStatus['5_implement'],
+        afterSecondInit.stepStatus['implement'],
         'in_progress',
         'Second init must not reset existing state',
       );

@@ -15,7 +15,11 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
-const APPS_DIR = process.env.APPS_DIR || `${process.env.HOME}/worktrees/${process.env.REPO_NAME || 'my-project'}/apps`;
+const getConfig = require(path.join(__dirname, '..', '..', '..', 'lib', 'get-config'));
+const WORKTREES_BASE = getConfig.orExit('WORKTREES_BASE');
+const REPO_NAME = getConfig('REPO_NAME') || 'my-project';
+const REPO_DIR = path.join(WORKTREES_BASE, REPO_NAME);
+const APPS_DIR = process.env.APPS_DIR || path.join(REPO_DIR, 'apps');
 
 /**
  * Check if an app is a frontend app by looking for react-router.config.ts
@@ -45,12 +49,12 @@ function getAllFrontendApps() {
  */
 function getAffectedApps() {
   try {
-    const scriptPath = `${process.env.HOME}/worktrees/${process.env.REPO_NAME || 'my-project'}/scripts/get-affected.js`;
+    const scriptPath = path.join(REPO_DIR, 'scripts', 'get-affected.js');
     const result = execSync(`node "${scriptPath}" main json`, {
       encoding: 'utf8',
       timeout: 30000,
       stdio: ['pipe', 'pipe', 'pipe'],
-      cwd: `${process.env.HOME}/worktrees/${process.env.REPO_NAME || 'my-project'}`
+      cwd: REPO_DIR
     });
     return JSON.parse(result.trim());
   } catch (e) {

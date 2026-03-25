@@ -53,9 +53,9 @@ async function main() {
   }
 
   // Check if it's a QA task screenshot (in global tasks directory)
-  let _config;
-  try { _config = require(require('path').join(__dirname, '..', '..', '..', 'lib', 'config')); } catch { _config = null; }
-  const tasksBase = _config?.TASKS_BASE || `${process.env.HOME}/worktrees/tasks`;
+  const getConfig = require(require('path').join(__dirname, '..', '..', '..', 'lib', 'get-config'));
+  const tasksBase = getConfig('TASKS_BASE');
+  if (!tasksBase) return filename; // can't resolve without config
   const isTaskScreenshot = filename.includes(tasksBase + '/') && filename.includes('screenshots/');
 
   if (!isTaskScreenshot) {

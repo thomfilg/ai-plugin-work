@@ -22,7 +22,9 @@ const { execSync } = require('child_process');
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
-const TASKS_BASE = `${process.env.HOME}/worktrees/tasks`;
+const getConfig = require(path.join(__dirname, '..', 'lib', 'get-config'));
+const WORKTREES_BASE = getConfig.require('WORKTREES_BASE');
+const TASKS_BASE = getConfig('TASKS_BASE') || path.join(WORKTREES_BASE, 'tasks');
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -32,7 +34,7 @@ function getTasksDir(ticketId) {
 
 function getWorktreeDir(ticketId) {
   const repo = process.env.REPO_NAME || 'my-project';
-  return path.join(process.env.HOME, 'worktrees', `${repo}-${ticketId}`);
+  return path.join(WORKTREES_BASE, `${repo}-${ticketId}`);
 }
 
 function safeExec(cmd, options = {}) {

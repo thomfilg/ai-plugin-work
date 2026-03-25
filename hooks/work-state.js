@@ -9,7 +9,7 @@
  * Usage:
  *   node work-state.js init PROJ-815
  *   node work-state.js get PROJ-815
- *   node work-state.js set-step PROJ-815 3_implement in_progress
+ *   node work-state.js set-step PROJ-815 implement in_progress
  *   node work-state.js set-check PROJ-815 qa_as_dashboard in_progress
  *   node work-state.js complete PROJ-815
  */
@@ -34,23 +34,7 @@ if (!config) process.exit(0);
 
 const TASKS_BASE = config.TASKS_BASE;
 
-const STEPS = [
-  '1_ticket',
-  '2_bootstrap',
-  '3_brief',
-  '4_spec',
-  '5_implement',
-  '6_quality',
-  '7_commit',
-  '8_check',
-  '9_cleanup',
-  '10_test_enhancement',
-  '11_pr',
-  '12_ready',
-  '13_ci',
-  '14_reports',
-  '15_complete'  // Migration note: old 13-step states are not auto-migrated; in-progress workflows should restart
-];
+const { ALL_STEPS: STEPS } = require(path.join(__dirname, '..', 'lib', 'step-registry'));
 
 const CHECK_AGENTS = [
   'quality_checker',

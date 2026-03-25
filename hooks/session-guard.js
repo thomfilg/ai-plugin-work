@@ -25,13 +25,12 @@ const path = require('path');
 const crypto = require('crypto');
 
 // Cached TASKS_BASE resolution — loaded once per invocation
+const getConfig = require(path.join(__dirname, '..', 'lib', 'get-config'));
+
 let _tasksBase;
 function getTasksBase() {
   if (_tasksBase) return _tasksBase;
-  let _config;
-  try { _config = require(path.join(__dirname, '..', 'lib', 'config')); } catch { _config = null; }
-  const worktreesBase = _config?.WORKTREES_BASE || process.env.WORKTREES_BASE || `${process.env.HOME}/worktrees`;
-  _tasksBase = _config?.TASKS_BASE || process.env.TASKS_BASE || path.join(worktreesBase, 'tasks');
+  _tasksBase = getConfig.orExit('TASKS_BASE');
   return _tasksBase;
 }
 
@@ -191,7 +190,7 @@ function cmdReveal(ticketId) {
   const session = readSessionFile(ticketId);
   if (!session) {
     process.stderr.write(`No active session for ${ticketId} (skipping reveal)\n`);
-    process.exit(0); // fail-open: don't break 13_complete if guard wasn't initialized
+    process.exit(0); // fail-open: don't break complete step if guard wasn't initialized
   }
 
   // Output passphrase to stdout

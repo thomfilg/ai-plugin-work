@@ -37,9 +37,8 @@ async function main() {
   const ticketId = ticketMatch ? ticketMatch[1] : null;
 
   if (ticketId) {
-    let _config;
-    try { _config = require(path.join(__dirname, '..', '..', '..', 'lib', 'config')); } catch { _config = null; }
-    const tasksBase = _config?.TASKS_BASE || `${process.env.HOME}/worktrees/tasks`;
+    const getConfig = require(path.join(__dirname, '..', '..', '..', 'lib', 'get-config'));
+    const tasksBase = getConfig.orExit('TASKS_BASE');
     const screenshotDir = path.join(tasksBase, ticketId, 'screenshots');
 
     if (fs.existsSync(screenshotDir)) {
