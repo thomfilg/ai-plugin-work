@@ -1,6 +1,6 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { computeCommentHash, deduplicateBlockingBotComments, initState } = require('../follow-up-pr.js');
+const { computeCommentHash, deduplicateBlockingBotComments, initState, getChangedPaths } = require('../follow-up-pr.js');
 
 // ── computeCommentHash ──────────────────────────────────────────────────────
 
@@ -270,5 +270,110 @@ describe('initState includes previousRunBotHashes', () => {
     assert.equal(state.addressedBotComments, undefined);
     assert.equal(state.seenBotComments, undefined);
     assert.equal(state.seenAtHead, undefined);
+  });
+});
+
+// ── Phase 1: Fresh-review dedup bug (currentHead) ──────────────────────────
+
+describe('deduplicateBlockingBotComments — currentHead guard', () => {
+  const CURRENT_HEAD = 'abc1234567890abcdef1234567890abcdef123456';
+  const STALE_COMMIT = 'def0000000000000000000000000000000000000';
+
+  const makeBotComment = (path, body, overrides = {}) => ({
+    id: Math.random(),
+    author: 'copilot-pull-request-reviewer',
+    body,
+    path,
+    line: 10,
+    state: 'COMMENTED',
+    priority: 'medium',
+    ...overrides,
+  });
+
+  const makeHumanComment = (path, body, overrides = {}) => ({
+    id: Math.random(),
+    author: 'octocat',
+    body,
+    path,
+    line: 10,
+    state: 'COMMENTED',
+    priority: 'high',
+    ...overrides,
+  });
+
+  it('fresh review (commit_id === currentHead) with matching hash remains blocking', () => {
+    const comment = makeBotComment('src/index.js', 'Fix this bug', { commit_id: CURRENT_HEAD });
+    const hash = computeCommentHash('src/index.js', 'Fix this bug');
+
+    const result = deduplicateBlockingBotComments([comment], [], [hash], { currentHead: CURRENT_HEAD });
+    assert.equal(result.blocking.length, 1, 'fresh review must NOT be deduped');
+    assert.equal(result.nonBlocking.length, 0);
+  });
+
+  it('mixed: fresh + stale comments — only stale deduped', () => {
+    const fresh = makeBotComment('src/a.js', 'Issue A', { commit_id: CURRENT_HEAD });
+    const stale = makeBotComment('src/b.js', 'Issue B', { commit_id: STALE_COMMIT });
+    const hashA = computeCommentHash('src/a.js', 'Issue A');
+    const hashB = computeCommentHash('src/b.js', 'Issue B');
+
+    const result = deduplicateBlockingBotComments([fresh, stale], [], [hashA, hashB], { currentHead: CURRENT_HEAD });
+    assert.equal(result.blocking.length, 1, 'only fresh comment stays blocking');
+    assert.equal(result.blocking[0].body, 'Issue A');
+    assert.equal(result.nonBlocking.length, 1, 'stale comment deduped');
+    assert.equal(result.nonBlocking[0].deduplicated, true);
+  });
+
+  it('currentHead = null → backward compat, dedup proceeds normally', () => {
+    const comment = makeBotComment('src/index.js', 'Fix this bug', { commit_id: CURRENT_HEAD });
+    const hash = computeCommentHash('src/index.js', 'Fix this bug');
+
+    // No currentHead passed — should dedup as before
+    const result = deduplicateBlockingBotComments([comment], [], [hash]);
+    assert.equal(result.blocking.length, 0, 'dedup proceeds when currentHead is null');
+    assert.equal(result.nonBlocking.length, 1);
+    assert.equal(result.nonBlocking[0].deduplicated, true);
+  });
+
+  it('human comment with commit_id === currentHead still stays blocking', () => {
+    const human = makeHumanComment('src/index.js', 'Fix this bug', { commit_id: CURRENT_HEAD });
+    const hash = computeCommentHash('src/index.js', 'Fix this bug');
+
+    const result = deduplicateBlockingBotComments([human], [], [hash], { currentHead: CURRENT_HEAD });
+    assert.equal(result.blocking.length, 1, 'human comment never deduped');
+    assert.equal(result.nonBlocking.length, 0);
+  });
+});
+
+// ── Phase 2: getChangedPaths ────────────────────────────────────────────────
+
+describe('getChangedPaths', () => {
+  it('returns a Set of changed file paths between two refs', () => {
+    // Use actual git refs from this repo for a real integration test
+    const { execSync } = require('child_process');
+    const headSha = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim();
+    // Diff HEAD against itself should yield empty set
+    const result = getChangedPaths(headSha, headSha);
+    assert.ok(result instanceof Set, 'must return a Set');
+    assert.equal(result.size, 0, 'identical refs produce empty Set');
+  });
+
+  it('returns null on invalid ref (graceful fallback)', () => {
+    const result = getChangedPaths('invalid_ref_aaa', 'invalid_ref_bbb');
+    assert.equal(result, null, 'should return null on git error');
+  });
+
+  it('returns non-empty Set when refs differ and files changed', () => {
+    // Use HEAD~1..HEAD which should have at least one file changed
+    const { execSync } = require('child_process');
+    let parentSha;
+    try {
+      parentSha = execSync('git rev-parse HEAD~1', { encoding: 'utf8' }).trim();
+    } catch {
+      // Shallow clone or single-commit repo — skip
+      return;
+    }
+    const result = getChangedPaths(parentSha, 'HEAD');
+    assert.ok(result instanceof Set, 'must return a Set');
+    assert.ok(result.size > 0, 'HEAD~1..HEAD should have at least one changed file');
   });
 });

@@ -189,14 +189,15 @@ For each **blocking** review comment:
 
 For each group of related feedback:
 
-1. Make the requested code changes
-2. Stage changes: `git add <files>`
-3. Commit using commit-writer agent with "autonomous" flag
-   - Use message format: `fix(review): <description of what was addressed>`
+1. Formulate a review-fix description: reviewer name, comment text, file path, line number, and what change is requested
+2. Invoke: `Skill(work-implement): fix(review): <description with full comment context, file path, and line number>`
+3. After /work-implement completes, run: `Skill(check)`
 4. Record in `summary.reviewsAddressed`:
    ```javascript
    { author: "<reviewer>", comment: "<summary>", fix: "<what was changed>" }
    ```
+
+If /work-implement fails, use AskUserQuestion to ask the user for guidance before retrying.
 
 ### 5.3 Push and Re-enter Loop
 
@@ -360,12 +361,14 @@ This command will:
 
 ### 4.4 Apply Fix (Non-Coverage Issues)
 
-1. Make the necessary code changes
-2. Stage changes: `git add <files>`
-3. Commit using commit-writer agent with "autonomous" flag
+1. Formulate a clear fix description including: what failed, root cause, file(s) to change
+2. Invoke: `Skill(work-implement): fix(ci): <fix description with file paths and context>`
+3. After /work-implement completes, run: `Skill(check)`
 4. Push: `git push`
 5. Record the fix in summary.fixes array
-6. Push and return to Step 1 (re-run the monitor script)
+6. Return to Step 1 (re-run monitor script)
+
+If /work-implement fails, use AskUserQuestion to ask the user for guidance before retrying.
 
 ---
 

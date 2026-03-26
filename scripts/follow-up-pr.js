@@ -336,7 +336,7 @@ function computeCommentHash(filePath, body) {
  * @param {string[]} previousRunBotHashes - hash strings from previous run
  * @returns {{ blocking: Array, nonBlocking: Array }}
  */
-function deduplicateBlockingBotComments(blocking, nonBlocking, previousRunBotHashes) {
+function deduplicateBlockingBotComments(blocking, nonBlocking, previousRunBotHashes, { currentHead = null } = {}) {
   if (!previousRunBotHashes || previousRunBotHashes.length === 0) {
     return { blocking, nonBlocking };
   }
@@ -359,6 +359,12 @@ function deduplicateBlockingBotComments(blocking, nonBlocking, previousRunBotHas
       stillBlocking.push(item);
       continue;
     }
+    // Fresh reviews against current HEAD are NOT deduped — they are new
+    // reviews posted against the code we just pushed, not stale re-posts.
+    if (currentHead && item.commit_id === currentHead) {
+      stillBlocking.push(item);
+      continue;
+    }
     const hash = computeCommentHash(item.path, item.body);
     if (addressedHashes.has(hash)) {
       movedToNonBlocking.push({ ...item, deduplicated: true });
@@ -373,6 +379,23 @@ function deduplicateBlockingBotComments(blocking, nonBlocking, previousRunBotHas
     blocking: stillBlocking,
     nonBlocking: [...nonBlocking, ...movedToNonBlocking],
   };
+}
+
+/**
+ * Get file paths changed between two commits.
+ * @param {string|null} fromRef - base commit SHA
+ * @param {string} toRef - head commit SHA
+ * @returns {Set<string>|null} set of changed file paths, or null on error
+ */
+function getChangedPaths(fromRef, toRef) {
+  if (!fromRef || !toRef) return null;
+  try {
+    const output = execSync(`git diff --name-only ${fromRef}..${toRef}`, { encoding: 'utf8' });
+    const paths = output.trim().split('\n').filter(Boolean);
+    return new Set(paths);
+  } catch {
+    return null;
+  }
 }
 
 // ── Review Priority Classification ──────────────────────────────────────────
@@ -1051,6 +1074,14 @@ async function main() {
       : (state.addressedBotComments || []).map(a => a.hash)
   ).slice();
 
+  // Obtain current HEAD SHA for fresh-review detection in dedup
+  let currentHead = null;
+  try {
+    currentHead = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim();
+  } catch {
+    // Non-fatal: dedup will proceed without the currentHead guard
+  }
+
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     // Refresh PR info each attempt (mergeable status may change)
     try {
@@ -1074,7 +1105,7 @@ async function main() {
         reviews = getReviews(prInfo.number);
         // Apply single-generation dedup after fetching reviews
         if (previousRunBotHashes.length > 0) {
-          const deduped = deduplicateBlockingBotComments(reviews.blocking, reviews.nonBlocking, previousRunBotHashes);
+          const deduped = deduplicateBlockingBotComments(reviews.blocking, reviews.nonBlocking, previousRunBotHashes, { currentHead });
           reviews.blocking = deduped.blocking;
           reviews.nonBlocking = deduped.nonBlocking;
           reviews.hasBlocking = reviews.blocking.length > 0;
@@ -1111,12 +1142,17 @@ async function main() {
     if (decision.action === 'exit-fail') {
       // Single-generation dedup: record current blocking bot hashes on
       // reviews-blocking exit. REPLACE (not append) to prevent accumulation.
+      // Only record hashes for comments whose file was actually modified
+      // (so we don't falsely promote unaddressed comments next run).
       if (decision.finalStatus === 'reviews-blocking' && reviews.hasBlocking) {
         const botReviewersForRecord = getBotReviewers();
+        const changedPaths = getChangedPaths(state.headAtLastExit || null, currentHead);
         state.previousRunBotHashes = reviews.blocking
           .filter((item) => isBotAuthorLogin(item.author, botReviewersForRecord) && item.path)
+          .filter((item) => !changedPaths || changedPaths.has(item.path))
           .map((item) => computeCommentHash(item.path, item.body));
       }
+      state.headAtLastExit = currentHead;
       state.finalStatus = decision.finalStatus;
       saveState(state);
       process.exit(1);
@@ -1134,7 +1170,7 @@ async function main() {
           recheck = getReviews(prInfo.number);
           // Apply dedup to recheck results too
           if (previousRunBotHashes.length > 0) {
-            const deduped = deduplicateBlockingBotComments(recheck.blocking, recheck.nonBlocking, previousRunBotHashes);
+            const deduped = deduplicateBlockingBotComments(recheck.blocking, recheck.nonBlocking, previousRunBotHashes, { currentHead });
             recheck.blocking = deduped.blocking;
             recheck.nonBlocking = deduped.nonBlocking;
             recheck.hasBlocking = recheck.blocking.length > 0;
@@ -1149,10 +1185,14 @@ async function main() {
           console.log(formatReport(prInfo, ci, reviews, attempt, maxAttempts, { ...opts, interval }));
           console.log('');
           // Record blocking bot hashes for late-arriving comments
+          // Only record hashes for comments on files that were actually modified.
           const recheckBotReviewers = getBotReviewers();
+          const recheckChangedPaths = getChangedPaths(state.headAtLastExit || null, currentHead);
           state.previousRunBotHashes = recheck.blocking
             .filter((item) => isBotAuthorLogin(item.author, recheckBotReviewers) && item.path)
+            .filter((item) => !recheckChangedPaths || recheckChangedPaths.has(item.path))
             .map((item) => computeCommentHash(item.path, item.body));
+          state.headAtLastExit = currentHead;
           state.finalStatus = 'reviews-blocking';
           saveState(state);
           process.exit(1);
@@ -1160,6 +1200,7 @@ async function main() {
       }
       // Clear hashes on success
       state.previousRunBotHashes = [];
+      state.headAtLastExit = currentHead;
       state.finalStatus = decision.finalStatus;
       saveState(state);
       process.exit(0);
@@ -1187,4 +1228,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { classifyCommentPriority, isBlockingPriority, getResolvedCommentIds, resolveOutdatedThreads, decideNextAction, getAdaptiveInterval, computeCommentHash, deduplicateBlockingBotComments, initState };
+module.exports = { classifyCommentPriority, isBlockingPriority, getResolvedCommentIds, resolveOutdatedThreads, decideNextAction, getAdaptiveInterval, computeCommentHash, deduplicateBlockingBotComments, getChangedPaths, initState };
