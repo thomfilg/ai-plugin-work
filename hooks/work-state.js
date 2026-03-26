@@ -36,6 +36,8 @@ const TASKS_BASE = config.TASKS_BASE;
 
 const { ALL_STEPS: STEPS } = require(path.join(__dirname, '..', 'lib', 'step-registry'));
 
+const SUBTASK_STEPS = ['implement', 'quality', 'commit'];
+
 const CHECK_AGENTS = [
   'quality_checker',
   'code_checker',
@@ -291,6 +293,162 @@ Steps:
   return output;
 }
 
+// ─── Subtask State Functions ─────────────────────────────────────────────────
+
+/**
+ * Get the next available subtask state file path.
+ * Scans {TASKS_BASE}/{ticketId}/ for .work-state-{ticketId}-subtask-*.json
+ * and returns the path with the next N.
+ *
+ * @param {string} ticketId
+ * @returns {{ path: string, index: number }}
+ */
+function getNextSubtaskStatePath(ticketId) {
+  const taskDir = path.join(TASKS_BASE, ticketId);
+  const prefix = `.work-state-${ticketId}-subtask-`;
+  let maxIndex = 0;
+
+  if (fs.existsSync(taskDir)) {
+    const files = fs.readdirSync(taskDir);
+    for (const file of files) {
+      if (file.startsWith(prefix) && file.endsWith('.json')) {
+        const numStr = file.slice(prefix.length, -5); // remove prefix and .json
+        const num = parseInt(numStr, 10);
+        if (!isNaN(num) && num > maxIndex) {
+          maxIndex = num;
+        }
+      }
+    }
+  }
+
+  const nextIndex = maxIndex + 1;
+  return {
+    path: path.join(taskDir, `${prefix}${nextIndex}.json`),
+    index: nextIndex,
+  };
+}
+
+/**
+ * Initialize a subtask state (minimal step set: implement, quality, commit).
+ *
+ * @param {string} ticketId - parent ticket ID
+ * @param {string} description
+ * @returns {object} the initialized subtask state
+ */
+function initSubtaskState(ticketId, description = '') {
+  const { path: statePath, index } = getNextSubtaskStatePath(ticketId);
+  const taskDir = path.join(TASKS_BASE, ticketId);
+
+  if (!fs.existsSync(taskDir)) {
+    fs.mkdirSync(taskDir, { recursive: true });
+  }
+
+  const stepStatus = {};
+  SUBTASK_STEPS.forEach(step => {
+    stepStatus[step] = 'pending';
+  });
+
+  const state = {
+    ticketId,
+    isSubtask: true,
+    parentTicketId: ticketId,
+    subtaskIndex: index,
+    description,
+    status: 'in_progress',
+    stepStatus,
+    checkProgress: {},
+    testEnhancement: {
+      initialRating: 0,
+      finalRating: 0,
+      iterations: 0,
+      skipped: true,
+      skipReason: 'subtask',
+    },
+    errors: [],
+    startTime: new Date().toISOString(),
+    lastUpdate: new Date().toISOString(),
+  };
+
+  fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
+  return state;
+}
+
+/**
+ * Load the most recent subtask state for a ticket (highest N that is not completed).
+ * Returns null if no active subtask exists.
+ *
+ * @param {string} ticketId
+ * @returns {object|null}
+ */
+function loadActiveSubtaskState(ticketId) {
+  const taskDir = path.join(TASKS_BASE, ticketId);
+  const prefix = `.work-state-${ticketId}-subtask-`;
+
+  if (!fs.existsSync(taskDir)) return null;
+
+  const files = fs.readdirSync(taskDir);
+  let bestState = null;
+  let bestIndex = -1;
+
+  for (const file of files) {
+    if (!file.startsWith(prefix) || !file.endsWith('.json')) continue;
+
+    const numStr = file.slice(prefix.length, -5);
+    const num = parseInt(numStr, 10);
+    if (isNaN(num)) continue;
+
+    try {
+      const content = fs.readFileSync(path.join(taskDir, file), 'utf8');
+      const state = JSON.parse(content);
+      if (state.status === 'in_progress' && num > bestIndex) {
+        bestState = state;
+        bestIndex = num;
+      }
+    } catch {
+      // Skip corrupt JSON files gracefully
+      continue;
+    }
+  }
+
+  return bestState;
+}
+
+/**
+ * Mark a subtask as completed.
+ *
+ * @param {string} ticketId
+ * @param {number} subtaskIndex
+ * @returns {object} the completed subtask state
+ */
+function completeSubtask(ticketId, subtaskIndex) {
+  const taskDir = path.join(TASKS_BASE, ticketId);
+  const prefix = `.work-state-${ticketId}-subtask-`;
+  const statePath = path.join(taskDir, `${prefix}${subtaskIndex}.json`);
+
+  if (!fs.existsSync(statePath)) {
+    throw new Error(`Subtask state file not found: ${statePath}`);
+  }
+
+  let content, state;
+  try {
+    content = fs.readFileSync(statePath, 'utf8');
+    state = JSON.parse(content);
+  } catch (err) {
+    throw new Error(`Failed to read subtask state: ${err.message}`);
+  }
+
+  state.status = 'completed';
+  state.completedTime = new Date().toISOString();
+  state.lastUpdate = new Date().toISOString();
+
+  SUBTASK_STEPS.forEach(step => {
+    state.stepStatus[step] = 'completed';
+  });
+
+  fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
+  return state;
+}
+
 // CLI handler
 async function main() {
   const args = process.argv.slice(2);
@@ -299,7 +457,7 @@ async function main() {
 
   if (!command) {
     console.error('Usage: node work-state.js <command> <ticket-id> [args...]');
-    console.error('Commands: init, get, set-step, set-check, set-test-enhancement, add-error, complete, resume-info');
+    console.error('Commands: init, get, set-step, set-check, set-test-enhancement, add-error, complete, resume-info, init-subtask, complete-subtask, active-subtask');
     process.exit(1);
   }
 
@@ -372,6 +530,21 @@ async function main() {
       console.log(JSON.stringify(result, null, 2));
       break;
 
+    case 'init-subtask':
+      result = initSubtaskState(ticketId, args[2] || '');
+      console.log(JSON.stringify(result, null, 2));
+      break;
+
+    case 'complete-subtask':
+      result = completeSubtask(ticketId, parseInt(args[2], 10));
+      console.log(JSON.stringify(result, null, 2));
+      break;
+
+    case 'active-subtask':
+      result = loadActiveSubtaskState(ticketId);
+      console.log(JSON.stringify(result, null, 2));
+      break;
+
     default:
       console.error(`Unknown command: ${command}`);
       process.exit(1);
@@ -389,6 +562,11 @@ module.exports = {
   addError,
   completeWork,
   getResumeInfo,
+  getNextSubtaskStatePath,
+  initSubtaskState,
+  loadActiveSubtaskState,
+  completeSubtask,
   STEPS,
+  SUBTASK_STEPS,
   CHECK_AGENTS
 };

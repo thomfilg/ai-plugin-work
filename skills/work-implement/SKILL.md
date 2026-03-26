@@ -14,12 +14,14 @@ Quick implementation without the full /work workflow. Use when you already have 
 
 ```
 /work-implement <description of what to implement>
+/work-implement --subtask <TICKET_ID> <description>
 ```
 
 **Examples:**
 - `/work-implement add email categorization for CD notifications`
 - `/work-implement fix the weekend activities loading bug`
 - `/work-implement create a new Button variant with loading state`
+- `/work-implement --subtask GH-83 fix(ci): resolve lint error in src/utils.js`
 
 ## Instructions
 
@@ -34,6 +36,29 @@ TASK_DIR="$HOME/worktrees/tasks/${TICKET_ID}"
 # Create task folder
 mkdir -p "$TASK_DIR"
 ```
+
+**Parse --subtask flag (if present):**
+
+If the arguments contain `--subtask <TICKET_ID>`, this is a subtask invocation from `/follow-up-pr`:
+
+```bash
+# Parse --subtask flag (portable — no grep -P dependency)
+SUBTASK_PARENT=""
+case "$ARGS" in
+  *--subtask*)
+    SUBTASK_PARENT=$(echo "$ARGS" | sed -n 's/.*--subtask[[:space:]]\+\([^[:space:]]\+\).*/\1/p')
+    DESCRIPTION=$(echo "$ARGS" | sed 's/--subtask[[:space:]]\+[^[:space:]]\+//')
+    ;;
+esac
+```
+
+When `--subtask` is present:
+- Use `SUBTASK_PARENT` as the ticket ID (skip branch/worktree detection)
+- Initialize subtask state: `node ${CLAUDE_PLUGIN_ROOT}/hooks/work-state.js init-subtask <TICKET_ID> "<description>"`
+- Skip `implement.md` creation (subtask state file replaces it)
+- The subtask state tracks only three steps: `implement`, `quality`, `commit`
+
+When `--subtask` is NOT present, proceed normally:
 
 **Save implementation tracking file:**
 ```markdown
@@ -176,6 +201,15 @@ Fix any issues before completing.
 
 ### Step 5: Update task file and report completion
 
+**When in subtask mode (`--subtask` was set):**
+
+1. Commit changes using commit-writer agent (subtasks commit before returning, unlike normal mode)
+2. Mark subtask as completed: `node ${CLAUDE_PLUGIN_ROOT}/hooks/work-state.js complete-subtask <TICKET_ID> <N>`
+   (where `<N>` is the subtask index from the init-subtask output)
+3. Report completion briefly and return control to the parent workflow
+
+**When in normal mode (no `--subtask`):**
+
 **Update the implementation tracking file:**
 ```bash
 # Update $HOME/worktrees/tasks/${TICKET_ID}/implement.md with results
@@ -214,7 +248,9 @@ Next steps:
 ## Notes
 
 - This command does NOT create commits - use `commit-writer` agent after reviewing
+  - **Exception:** In `--subtask` mode, the subtask commits before returning
 - This command does NOT run /check - use `/check` separately if needed
 - This command does NOT create PRs - use `/work` for full workflow
 - For complex multi-step features, consider using `/work` instead
 - **Agent delegation is MANDATORY** - direct Write/Edit is blocked
+- **Subtask mode** (`--subtask <TICKET_ID>`): Skips branch/worktree creation, uses subtask state tracking, commits on completion, and returns control to parent workflow

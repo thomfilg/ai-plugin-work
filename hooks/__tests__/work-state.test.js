@@ -303,4 +303,143 @@ describe('work-state.js', () => {
       );
     });
   });
+
+  // ─── Subtask State Tests ────────────────────────────────────────────────────
+
+  describe('init-subtask', () => {
+    const TICKET = 'TEST-SUBTASK-INIT';
+    after(() => { cleanupTempWorkState(TICKET); });
+
+    it('should create subtask state with correct schema and counter=1', async () => {
+      const { result, code } = await runWorkState(['init-subtask', TICKET, 'fix lint error']);
+      assert.equal(code, 0);
+      assert.equal(result.ticketId, TICKET);
+      assert.equal(result.isSubtask, true);
+      assert.equal(result.parentTicketId, TICKET);
+      assert.equal(result.subtaskIndex, 1);
+      assert.equal(result.status, 'in_progress');
+      assert.equal(result.description, 'fix lint error');
+      assert.ok(result.startTime);
+      assert.ok(result.lastUpdate);
+
+      // Only implement, quality, commit steps
+      const steps = Object.keys(result.stepStatus);
+      assert.deepEqual(steps, ['implement', 'quality', 'commit']);
+      for (const step of steps) {
+        assert.equal(result.stepStatus[step], 'pending', `Step ${step} should be pending`);
+      }
+
+      // Verify file was written
+      const stateFile = path.join(TEMP_TASKS_BASE, TICKET, `.work-state-${TICKET}-subtask-1.json`);
+      assert.ok(fs.existsSync(stateFile), 'Subtask state file should exist on disk');
+    });
+
+    it('should increment counter to 2 on second call', async () => {
+      const { result, code } = await runWorkState(['init-subtask', TICKET, 'fix type error']);
+      assert.equal(code, 0);
+      assert.equal(result.subtaskIndex, 2);
+      assert.equal(result.description, 'fix type error');
+
+      // Verify file was written
+      const stateFile = path.join(TEMP_TASKS_BASE, TICKET, `.work-state-${TICKET}-subtask-2.json`);
+      assert.ok(fs.existsSync(stateFile), 'Second subtask state file should exist on disk');
+    });
+
+    it('should auto-create task directory if missing', async () => {
+      const TICKET_NEW = 'TEST-SUBTASK-NEWDIR';
+      const taskDir = path.join(TEMP_TASKS_BASE, TICKET_NEW);
+
+      // Ensure directory does not exist
+      assert.ok(!fs.existsSync(taskDir), 'Task directory should not exist before init');
+
+      const { result, code } = await runWorkState(['init-subtask', TICKET_NEW, 'new dir test']);
+      assert.equal(code, 0);
+      assert.equal(result.subtaskIndex, 1);
+      assert.ok(fs.existsSync(taskDir), 'Task directory should be created');
+
+      cleanupTempWorkState(TICKET_NEW);
+    });
+  });
+
+  describe('active-subtask', () => {
+    const TICKET = 'TEST-SUBTASK-ACTIVE';
+    after(() => { cleanupTempWorkState(TICKET); });
+
+    it('should return the in-progress subtask', async () => {
+      // Create a subtask
+      await runWorkState(['init-subtask', TICKET, 'active test']);
+
+      const { result, code } = await runWorkState(['active-subtask', TICKET]);
+      assert.equal(code, 0);
+      assert.equal(result.subtaskIndex, 1);
+      assert.equal(result.status, 'in_progress');
+    });
+
+    it('should return null when all subtasks are completed', async () => {
+      // Complete the existing subtask
+      await runWorkState(['complete-subtask', TICKET, '1']);
+
+      const { result, code } = await runWorkState(['active-subtask', TICKET]);
+      assert.equal(code, 0);
+      assert.equal(result, null);
+    });
+
+    it('should return the most recent in-progress subtask when multiple exist', async () => {
+      // Uses same TICKET as prior tests (sequential within describe block).
+      // Each test builds on prior state: subtask-1 exists from earlier test.
+      await runWorkState(['init-subtask', TICKET, 'second subtask']);
+      await runWorkState(['complete-subtask', TICKET, '2']);
+      await runWorkState(['init-subtask', TICKET, 'third subtask']);
+
+      const { result, code } = await runWorkState(['active-subtask', TICKET]);
+      assert.equal(code, 0);
+      assert.equal(result.subtaskIndex, 3);
+      assert.equal(result.status, 'in_progress');
+      assert.equal(result.description, 'third subtask');
+    });
+
+    it('should skip corrupt JSON files gracefully', async () => {
+      const TICKET_CORRUPT = 'TEST-SUBTASK-CORRUPT';
+      const taskDir = path.join(TEMP_TASKS_BASE, TICKET_CORRUPT);
+      fs.mkdirSync(taskDir, { recursive: true });
+
+      // Write a corrupt subtask state file
+      fs.writeFileSync(
+        path.join(taskDir, `.work-state-${TICKET_CORRUPT}-subtask-1.json`),
+        '{corrupt!!!'
+      );
+
+      const { result, code } = await runWorkState(['active-subtask', TICKET_CORRUPT]);
+      assert.equal(code, 0);
+      assert.equal(result, null, 'Should return null when only corrupt files exist');
+
+      cleanupTempWorkState(TICKET_CORRUPT);
+    });
+  });
+
+  describe('complete-subtask', () => {
+    const TICKET = 'TEST-SUBTASK-COMPLETE';
+    after(() => { cleanupTempWorkState(TICKET); });
+
+    it('should mark the correct subtask as completed', async () => {
+      // Create a subtask
+      await runWorkState(['init-subtask', TICKET, 'complete test']);
+
+      const { result, code } = await runWorkState(['complete-subtask', TICKET, '1']);
+      assert.equal(code, 0);
+      assert.equal(result.status, 'completed');
+      assert.equal(result.subtaskIndex, 1);
+      assert.ok(result.completedTime);
+
+      // All step statuses should be completed
+      for (const step of Object.keys(result.stepStatus)) {
+        assert.equal(result.stepStatus[step], 'completed', `Step ${step} should be completed`);
+      }
+
+      // Verify persistence
+      const stateFile = path.join(TEMP_TASKS_BASE, TICKET, `.work-state-${TICKET}-subtask-1.json`);
+      const persisted = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+      assert.equal(persisted.status, 'completed');
+    });
+  });
 });
