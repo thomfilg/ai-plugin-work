@@ -640,9 +640,10 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
     });
   }
 
-  // follow_up
+  // follow_up — SKIP when no PR or draft PR (plan is re-generated at each step,
+  // so this becomes RUN after pr/ready steps create and mark the PR ready)
   if (!s?.pr || s.pr.isDraft) {
-    add(STEPS.follow_up, 'SKIP', null, !s?.pr ? 'No PR exists' : 'PR is draft');
+    add(STEPS.follow_up, 'SKIP', null, !s?.pr ? 'No PR exists' : 'PR is still draft');
   } else {
     add(STEPS.follow_up, 'RUN', 'Skill(follow-up-pr)', 'Address bot review comments and CI issues', {
       agentType: 'skill',

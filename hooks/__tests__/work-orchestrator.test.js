@@ -704,7 +704,8 @@ describe('work-orchestrator.js', () => {
   describe('follow_up transitions (GH-81)', () => {
     const TEMP_WB = path.join(os.tmpdir(), 'work-orch-fu-' + process.pid);
     const T = 'TEST-811';
-    const o = { env: { WORKTREES_BASE: TEMP_WB, WORK_TDD_ENFORCE: '0' } };
+    const TEMP_TASKS = path.join(TEMP_WB, 'tasks');
+    const o = { env: { WORKTREES_BASE: TEMP_WB, TASKS_BASE: TEMP_TASKS, WORK_TDD_ENFORCE: '0' } };
     after(() => { try { fs.rmSync(TEMP_WB, { recursive: true, force: true }); } catch {} });
 
     it('should allow transition follow_up → ci (forward)', async () => {
@@ -736,7 +737,7 @@ describe('work-orchestrator.js', () => {
         assert.equal(result.to, 'implement');
         assert.equal(result.direction, 'backward');
       } finally {
-        try { fs.rmSync(path.join(TEMP_WB, 'tasks', T2), { recursive: true, force: true }); } catch {}
+        try { fs.rmSync(path.join(TEMP_TASKS, T2), { recursive: true, force: true }); } catch {}
       }
     });
 
@@ -755,7 +756,7 @@ describe('work-orchestrator.js', () => {
         assert.equal(result.to, 'test_enhancement');
         assert.equal(result.direction, 'backward');
       } finally {
-        try { fs.rmSync(path.join(TEMP_WB, 'tasks', T3), { recursive: true, force: true }); } catch {}
+        try { fs.rmSync(path.join(TEMP_TASKS, T3), { recursive: true, force: true }); } catch {}
       }
     });
 
@@ -774,7 +775,7 @@ describe('work-orchestrator.js', () => {
         assert.equal(result.to, 'cleanup');
         assert.equal(result.direction, 'forward');
       } finally {
-        try { fs.rmSync(path.join(TEMP_WB, 'tasks', T4), { recursive: true, force: true }); } catch {}
+        try { fs.rmSync(path.join(TEMP_TASKS, T4), { recursive: true, force: true }); } catch {}
       }
     });
 
@@ -791,7 +792,7 @@ describe('work-orchestrator.js', () => {
         assert.equal(result.error, true);
         assert.ok(result.message.includes('BLOCKED'));
       } finally {
-        try { fs.rmSync(path.join(TEMP_WB, 'tasks', T5), { recursive: true, force: true }); } catch {}
+        try { fs.rmSync(path.join(TEMP_TASKS, T5), { recursive: true, force: true }); } catch {}
       }
     });
   });
