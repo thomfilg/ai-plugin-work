@@ -144,8 +144,59 @@ for (const wf of WORKFLOWS) {
   }
 }
 
+// Exempt orchestrator and workflow-engine scripts from Vector 3 (script bypass detection)
+// These are the legitimate writers of state files.
+const EXEMPT_SCRIPTS = new Set([
+  'work-orchestrator.js',
+  'workflow-engine.js',
+  'work-state.js',
+  'workflow-state.js',
+  'session-guard.js',
+]);
+
+// Trusted directories where exempt scripts are allowed to live.
+// Only scripts resolved under these paths are exempt — prevents basename spoofing.
+const TRUSTED_SCRIPT_DIRS = [
+  path.resolve(__dirname),                           // hooks/
+  path.resolve(__dirname, '..', 'lib'),              // lib/
+  path.resolve(__dirname, '..', 'scripts'),          // scripts/
+];
+
 const stateFileProtector = createFileProtector({
   isProtected: basenameProtector(PROTECTED_STATE_BASENAMES),
+  isExempt: (toolName, toolInput) => {
+    if (toolName !== 'Bash') return false;
+    const cmd = String(toolInput?.command || '').trim();
+    if (!cmd) return false;
+
+    // Never exempt commands that directly target a protected basename.
+    // This prevents bypass via: echo "work-orchestrator.js" > .work-state.json
+    for (const bn of PROTECTED_STATE_BASENAMES) {
+      if (cmd.includes(bn)) return false;
+    }
+
+    // Only exempt actual execution of exempt scripts via Node.
+    // Handles: cd ... && node ..., env prefixes, Node flags, quoted paths
+    // Not anchored to ^ so it matches node anywhere in a chained command
+    const nodePattern =
+      /(?:^|&&|;|\|)\s*(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|\S+)\s+)*(?:node|nodejs)\s+(?:-[^\s]+\s+)*(?:"([^"]+)"|'([^']+)'|(\S+))/;
+    const nodeMatch = cmd.match(nodePattern);
+    if (nodeMatch) {
+      const scriptPath = nodeMatch[1] || nodeMatch[2] || nodeMatch[3];
+      const scriptBase = path.basename(scriptPath);
+      if (!EXEMPT_SCRIPTS.has(scriptBase)) return false;
+
+      // Verify the script lives in a trusted directory (prevents basename spoofing)
+      // Use realpathSync to resolve symlinks — a symlink under a trusted dir pointing outside is denied
+      try {
+        const resolved = fs.realpathSync(path.resolve(scriptPath));
+        if (TRUSTED_SCRIPT_DIRS.some(dir => resolved.startsWith(dir + path.sep))) return true;
+      } catch { /* realpathSync failed (file doesn't exist) — deny */ }
+      return false;
+    }
+
+    return false; // Tests: Vector 3 exempt scripts + trusted path + untrusted path + env prefix + quoted path
+  },
   formatMessage: (match, vector) =>
     `BLOCKED: Direct ${vector} to ${match} is not allowed.\n` +
     `State files must only be modified through the orchestrator/workflow-engine scripts.\n`,

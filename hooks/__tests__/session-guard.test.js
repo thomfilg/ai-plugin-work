@@ -439,4 +439,55 @@ describe('session-guard', () => {
       assert.equal(r.code, 2, 'should block stop when /check completed');
     });
   });
+
+  describe('cwd-based session scoping', () => {
+    afterEach(() => cleanupAllSessions());
+
+    it('blocks stop when session cwd matches current cwd', async () => {
+      // Create session with current cwd
+      const sessionData = {
+        ticketId: 'CWD-1',
+        workflow: '/work',
+        passphrase: 'FAKE-ALPHA-0001',
+        cwd: process.cwd(),
+        startTime: new Date().toISOString(),
+        revealed: false,
+      };
+      fs.writeFileSync(sessionFilePath('CWD-1'), JSON.stringify(sessionData));
+
+      const r = await runHook({ stop_message: '' }, 'Stop');
+      assert.equal(r.code, 2, 'should block when cwd matches');
+    });
+
+    it('allows stop when session cwd does NOT match current cwd', async () => {
+      // Create session with a different cwd
+      const sessionData = {
+        ticketId: 'CWD-2',
+        workflow: '/work',
+        passphrase: 'FAKE-BRAVO-0002',
+        cwd: '/some/other/directory',
+        startTime: new Date().toISOString(),
+        revealed: false,
+      };
+      fs.writeFileSync(sessionFilePath('CWD-2'), JSON.stringify(sessionData));
+
+      const r = await runHook({ stop_message: '' }, 'Stop');
+      assert.equal(r.code, 0, 'should allow stop when cwd does not match');
+    });
+
+    it('blocks stop for legacy sessions without cwd (backward compat)', async () => {
+      // Legacy session without cwd field
+      const sessionData = {
+        ticketId: 'LEGACY-1',
+        workflow: '/work',
+        passphrase: 'FAKE-CHARLIE-0003',
+        startTime: new Date().toISOString(),
+        revealed: false,
+      };
+      fs.writeFileSync(sessionFilePath('LEGACY-1'), JSON.stringify(sessionData));
+
+      const r = await runHook({ stop_message: '' }, 'Stop');
+      assert.equal(r.code, 2, 'should block for legacy sessions without cwd');
+    });
+  });
 });
