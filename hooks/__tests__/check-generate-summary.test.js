@@ -101,6 +101,13 @@ describe('getReportStatus', () => {
       '"Failed: 3" should trigger NEEDS_WORK');
   });
 
+  it('triggers NEEDS_WORK for QA "Status: FAIL" (matches check-validate-reports.js)', () => {
+    const content = '## QA Report\nStatus: FAIL\nSome tests failed';
+    const result = getReportStatus(content, 'qa');
+    assert.equal(result.status, 'NEEDS_WORK',
+      '"Status: FAIL" should trigger NEEDS_WORK to align with validator');
+  });
+
   // ── Null and empty content ───────────────────────────────────────────────
 
   it('returns MISSING for null content', () => {

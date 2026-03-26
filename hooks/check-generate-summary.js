@@ -65,7 +65,7 @@ function getReportStatus(content, type) {
     },
     qa: {
       pass: ['✅ PASS', 'All tests passed', 'SUCCESS'],
-      fail: ['❌ FAIL', 'FAILED:\\s*[1-9]', 'failures:\\s*[1-9]']
+      fail: ['❌ FAIL', 'FAILED:\\s*[1-9]', 'failures:\\s*[1-9]', 'Status:\\s*FAIL']
     },
     completion: {
       pass: ['COMPLETE', 'DELIVERED'],
