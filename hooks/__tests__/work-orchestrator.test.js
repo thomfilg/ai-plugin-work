@@ -711,6 +711,53 @@ describe('work-orchestrator.js', () => {
       assert.ok(!implStep.agentPrompt.includes('READ_DOCS_ON_DEV'), 'agentPrompt should NOT mention READ_DOCS_ON_DEV when empty');
     });
 
+    it('should trim whitespace in READ_DOCS_ON_DEV paths', async () => {
+      const docs = ' docs/guide.md , docs/api.md ';
+      const { result, code } = await runOrchestrator([TICKET], {
+        env: { ...envOpts.env, READ_DOCS_ON_DEV: docs },
+      });
+      assert.equal(code, 0);
+      const implStep = result.plan.find((s) => s.step === 'implement');
+      assert.equal(implStep.action, 'RUN');
+      assert.ok(implStep.agentPrompt.includes('- docs/guide.md'), 'should have trimmed "- docs/guide.md"');
+      assert.ok(implStep.agentPrompt.includes('- docs/api.md'), 'should have trimmed "- docs/api.md"');
+      // Ensure no leading/trailing spaces in the paths
+      assert.ok(!implStep.agentPrompt.includes('-  docs/guide.md'), 'should not have extra space before path');
+    });
+
+    it('should SKIP implement step with no agentPrompt when hasDiffVsMain is true', async () => {
+      const { execSync } = require('child_process');
+      const REPO_NAME = process.env.REPO_NAME || 'my-project';
+      const worktreeDir = path.join(TEMP_WB, `${REPO_NAME}-${TICKET}`);
+
+      // Create a mock git repo that has a diff vs origin/main
+      const gitCmd = (cmd) => execSync(cmd, { cwd: worktreeDir, stdio: 'pipe' });
+      const commitCmd = ['git', 'commit', '-m'].join(' ');
+      fs.mkdirSync(worktreeDir, { recursive: true });
+      gitCmd('git init');
+      gitCmd('git checkout -b main');
+      fs.writeFileSync(path.join(worktreeDir, 'file.txt'), 'initial');
+      gitCmd(`git add . && ${commitCmd} "init"`);
+      // Create a local "origin/main" ref so git diff origin/main works
+      gitCmd('git checkout -b fake-branch');
+      gitCmd('git update-ref refs/remotes/origin/main main');
+      // Add a change so there's a diff vs origin/main
+      fs.writeFileSync(path.join(worktreeDir, 'new-file.txt'), 'new content');
+      gitCmd(`git add . && ${commitCmd} "add new file"`);
+
+      try {
+        const { result, code } = await runOrchestrator([TICKET], {
+          env: { ...envOpts.env, READ_DOCS_ON_DEV: 'docs/guide.md' },
+        });
+        assert.equal(code, 0);
+        const implStep = result.plan.find((s) => s.step === 'implement');
+        assert.equal(implStep.action, 'SKIP', 'implement step should be SKIP when hasDiffVsMain');
+        assert.ok(!implStep.agentPrompt, 'agentPrompt should not be present on SKIP step');
+      } finally {
+        fs.rmSync(worktreeDir, { recursive: true, force: true });
+      }
+    });
+
     it('should round-trip: work-state CLI init → set-step → get', async () => {
       const WORK_STATE_PATH = path.join(__dirname, '..', 'work-state.js');
       const stateEnv = { env: { TASKS_BASE: TEMP_TASKS, WORKTREES_BASE: TEMP_WB } };

@@ -15,7 +15,7 @@ const DEVELOPER_AGENTS = [
   'developer-react-senior',
   'developer-react-ui-architect',
   'developer-devops',
-  'code-architect'
+  ...(process.env.WORK_ARCHITECT_ENABLED === '1' ? ['code-architect'] : []),
 ];
 
 // Tools that require agent invocation first
@@ -140,6 +140,9 @@ async function main() {
   }
 
   // Block the operation
+  const architectLine = process.env.WORK_ARCHITECT_ENABLED === '1'
+    ? `  subagent_type: "code-architect",            // Architecture\n`
+    : '';
   process.stderr.write(
     `/work-implement requires agent delegation\n\n` +
     `Direct ${toolName} blocked. Use a developer agent first:\n\n` +
@@ -148,7 +151,7 @@ async function main() {
     `  subagent_type: "developer-react-senior",    // React logic\n` +
     `  subagent_type: "developer-react-ui-architect", // UI design\n` +
     `  subagent_type: "developer-devops",          // Infrastructure\n` +
-    `  subagent_type: "code-architect",            // Architecture\n` +
+    architectLine +
     `  prompt: "Implement: <your task>"\n` +
     `})\n\n` +
     `Or for simple config changes, edit allowed files:\n` +
