@@ -8,6 +8,7 @@
 const { describe, it, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const { spawn } = require('child_process');
+const os = require('os');
 const fs = require('fs');
 const path = require('path');
 
@@ -1653,6 +1654,95 @@ describe('enforce-step-workflow', () => {
         tool_input: { subagent_type: 'quality-checker', description: 'run tests' },
       });
       assert.equal(code, 0, 'quality-checker should be allowed when /check is active regardless of /work step');
+    });
+  });
+
+  describe('Vector 3 exempt scripts', () => {
+    // Use the actual hooks directory (trusted path) for exempt script tests
+    const HOOKS_DIR = path.join(__dirname, '..');
+    const LIB_DIR = path.join(__dirname, '..', '..', 'lib');
+    const ORCHESTRATOR_PATH = path.join(HOOKS_DIR, 'work-orchestrator.js');
+    const ENGINE_PATH = path.join(LIB_DIR, 'workflow-engine.js');
+
+    it('allows node work-orchestrator.js transition command (trusted path)', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node ${ORCHESTRATOR_PATH} transition TEST-1 quality` } },
+        'PreToolUse',
+      );
+      assert.equal(code, 0, 'orchestrator transition should be allowed from trusted path');
+    });
+
+    it('allows node workflow-engine.js check transition command (trusted path)', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node ${ENGINE_PATH} check transition TEST-1 setup` } },
+        'PreToolUse',
+      );
+      assert.equal(code, 0, 'workflow-engine transition should be allowed from trusted path');
+    });
+
+    it('allows orchestrator with env prefix and node flags', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `SESSION_GUARD_ENABLED=0 node --no-warnings ${ORCHESTRATOR_PATH} transition TEST-1 quality` } },
+        'PreToolUse',
+      );
+      assert.equal(code, 0, 'orchestrator with env prefix and flags should be allowed');
+    });
+
+    it('allows orchestrator with quoted script path', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node "${ORCHESTRATOR_PATH}" transition TEST-1 quality` } },
+        'PreToolUse',
+      );
+      assert.equal(code, 0, 'orchestrator with quoted path should be allowed');
+    });
+
+    it('allows orchestrator after cd && (chained command)', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `cd /some/dir && node ${ORCHESTRATOR_PATH} transition TEST-1 quality` } },
+        'PreToolUse',
+      );
+      assert.equal(code, 0, 'orchestrator after cd && should be allowed');
+    });
+
+    it('blocks exempt script name from untrusted path', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      // Create a fake work-orchestrator.js in /tmp (untrusted)
+      const fakePath = path.join(os.tmpdir(), 'work-orchestrator.js');
+      fs.writeFileSync(fakePath, 'const fs = require("fs"); fs.writeFileSync(".work-state.json", "{}");');
+
+      try {
+        const { code, stderr } = await runHook(
+          { tool_name: 'Bash', tool_input: { command: `node ${fakePath} transition TEST-1 quality` } },
+          'PreToolUse',
+        );
+        // Should be blocked because /tmp is not a trusted directory
+        assert.equal(code, 2, 'should block exempt script name from untrusted path');
+        assert.ok(stderr.includes('BLOCKED'));
+      } finally {
+        try { fs.unlinkSync(fakePath); } catch { /* cleanup */ }
+      }
+    });
+
+    it('still blocks non-exempt script that references protected files', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: 'echo "work-orchestrator.js" > /tmp/.work-state.json' } },
+        'PreToolUse',
+      );
+      assert.equal(code, 2, 'should block redirect even if command mentions exempt script name');
+      assert.ok(stderr.includes('BLOCKED'));
     });
   });
 });

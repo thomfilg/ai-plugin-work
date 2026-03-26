@@ -163,7 +163,15 @@ function cmdInit(ticketId, workflow) {
   // Idempotent: reuse existing session if one exists for this ticket
   const existing = readSessionFile(ticketId);
   if (existing && existing.ticketId === ticketId) {
-    process.stderr.write(`Session guard already active for ${ticketId} (${existing.workflow}). Reusing existing session.\n`);
+    // Update cwd if it changed (same ticket, different directory)
+    const currentCwd = process.cwd();
+    if (existing.cwd !== currentCwd) {
+      existing.cwd = currentCwd;
+      writeSessionAtomic(ticketId, existing);
+      process.stderr.write(`Session guard for ${ticketId} updated cwd to ${currentCwd}.\n`);
+    } else {
+      process.stderr.write(`Session guard already active for ${ticketId} (${existing.workflow}). Reusing existing session.\n`);
+    }
     process.exit(0);
   }
 
@@ -172,6 +180,7 @@ function cmdInit(ticketId, workflow) {
     ticketId,
     workflow,
     passphrase,
+    cwd: process.cwd(),
     startTime: new Date().toISOString(),
     revealed: false,
   };
@@ -334,8 +343,13 @@ function handleStop(hookData) {
     return;
   }
 
-  // Check if any session is unrevealed
-  const unrevealed = sessions.filter(s => !s.revealed);
+  // Only consider sessions owned by this working directory
+  const currentCwd = process.cwd();
+  // Treat sessions missing cwd (legacy sessions) as owned, so they still enforce the lock
+  const ownedSessions = sessions.filter(s => !s.cwd || s.cwd === currentCwd);
+
+  // Check if any owned session is unrevealed (tests: cwd match, no-match, legacy without cwd)
+  const unrevealed = ownedSessions.filter(s => !s.revealed);
   if (unrevealed.length === 0) {
     process.exit(0);
     return;
