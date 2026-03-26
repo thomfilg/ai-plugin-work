@@ -724,7 +724,8 @@ function saveState(state) {
 }
 
 function initState(prInfo) {
-  return { // State persisted to /tmp/.claude/follow-up-pr-<repo>-<PR>.json
+  // Schema for state file at stateFilePath(prInfo.number)
+  return {
     prNumber: prInfo.number,
     prUrl: prInfo.url,
     branch: prInfo.branch,
@@ -1078,7 +1079,9 @@ async function main() {
       : (state.addressedBotComments || []).map(a => a.hash)
   ).slice();
 
-  // Obtain current HEAD SHA for fresh-review detection in dedup
+  // Obtain current HEAD SHA for fresh-review detection in dedup.
+  // Local HEAD is correct here: the script runs locally after a push,
+  // so local HEAD === the PR head SHA that bot reviewers target.
   let currentHead = null;
   try {
     currentHead = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim();

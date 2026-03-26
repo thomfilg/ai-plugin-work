@@ -385,7 +385,8 @@ describe('work-state.js', () => {
     });
 
     it('should return the most recent in-progress subtask when multiple exist', async () => {
-      // Create two more subtasks; complete the first
+      // Uses same TICKET as prior tests (sequential within describe block).
+      // Each test builds on prior state: subtask-1 exists from earlier test.
       await runWorkState(['init-subtask', TICKET, 'second subtask']);
       await runWorkState(['complete-subtask', TICKET, '2']);
       await runWorkState(['init-subtask', TICKET, 'third subtask']);
