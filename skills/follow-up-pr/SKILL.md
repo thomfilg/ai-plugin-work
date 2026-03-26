@@ -86,13 +86,13 @@ node "$SCRIPT_PATH" $REVIEW_FLAG 2>&1
 
 ### 1.2 Read the State File
 
-The script persists state to `/tmp/follow-up-pr-<repo>-<PR_NUMBER>.json`. Read it for structured data:
+The script persists state to `/tmp/.claude/follow-up-pr-<repo>-<PR_NUMBER>.json`. Read it for structured data:
 
 ```bash
-cat /tmp/follow-up-pr-*-<PR_NUMBER>.json
+cat /tmp/.claude/follow-up-pr-*-<PR_NUMBER>.json
 ```
 
-The state file contains: `prNumber`, `prUrl`, `branch`, `startTime`, `attempts[]`, and `finalStatus`.
+The state file contains: `prNumber`, `prUrl`, `branch`, `startTime`, `attempts[]`, `finalStatus`, and `previousRunBotHashes` (hash strings from the last exit-fail run, replaced each run, cleared on success).
 
 ---
 
@@ -402,6 +402,56 @@ This command will:
 ### Skipped AI Review Comments (Conflict With User Intent)
 <If any skipped comments, list each with comment text, why you disagree, and evidence>
 <If none: omit this section>
+
+### Non-Blocking Comments Report
+
+```
+╔══════════════════════════════════════════════════════════════════════╗
+║  MANDATORY: You MUST present this report to the user.               ║
+║  Do NOT summarize. Enrich each comment with Reason as shown below. ║
+╚══════════════════════════════════════════════════════════════════════╝
+```
+
+For each comment in the script's "Non-Blocking Comments Report", output:
+
+**For NOT ADDRESSED comments:**
+```
+Comment N: <full comment text>
+File: <file:line>
+Author: @<author>
+Status: NOT ADDRESSED
+Reason: <Explain WHY this is not worth addressing. "Low priority" is not a reason.
+        State the specific technical justification — e.g., "The duplicate listing
+        only appears during the ready-to-review path which runs once per PR cycle,
+        so the visual redundancy has no functional impact.">
+```
+
+**For DEDUPED comments:**
+```
+Comment N: <full comment text>
+File: <file:line>
+Author: @<author>
+Status: DEDUPED — previously addressed, re-posted after force-push
+Reason: Addressed in <file> <function/method> line <line>, commit <short_sha>.
+        <Brief description of what was changed to address it.>
+```
+
+**For ACKNOWLEDGED comments (skipped per section 5.4 — conflicts with user intent):**
+```
+Comment N: <full comment text>
+File: <file:line>
+Author: @<author>
+Status: ACKNOWLEDGED — intentionally skipped, conflicts with user intent
+Reason: <Explain the conflict. Reference the specific requirement, ticket,
+        or user instruction that this comment contradicts.
+        E.g., "Copilot suggests removing the error boundary, but the user
+        explicitly requested it in TICKET-123 acceptance criteria.">
+```
+
+To find "where addressed" for DEDUPED comments:
+1. Read the comment's suggestion
+2. Search the branch commits (`git log --oneline main..HEAD`) for the fix
+3. Identify the file, function, line, and commit that addressed it
 
 ### CI Checks (Final)
 <List all passing checks>

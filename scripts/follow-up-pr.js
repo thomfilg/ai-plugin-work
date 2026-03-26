@@ -18,6 +18,7 @@
  */
 
 const { execSync, execFileSync } = require('child_process');
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -278,6 +279,102 @@ function getBotReviewers() {
   return raw.split(',').map((s) => s.trim()).filter(Boolean);
 }
 
+/**
+ * Determine whether an author login belongs to a known bot reviewer.
+ * Uses case-insensitive matching against configured bot reviewers,
+ * hardcoded aliases (copilot, cursor-ai[bot]), and fuzzy [bot]-stripping.
+ *
+ * @param {string} author - GitHub login
+ * @param {string[]} [botReviewers] - optional pre-fetched list (defaults to getBotReviewers())
+ * @returns {boolean}
+ */
+function isBotAuthorLogin(author, botReviewers) {
+  const reviewers = (botReviewers || getBotReviewers()).map((b) => b.toLowerCase());
+  const lower = (author || '').toLowerCase();
+  // Exact match against configured bot reviewers (case-insensitive)
+  if (reviewers.includes(lower)) return true;
+  // Match known aliases used by classifyCommentPriority
+  if (lower === 'copilot' || lower === 'cursor-ai[bot]') return true;
+  // Fuzzy match: strip [bot] suffix from configured names
+  return reviewers.some((bot) => bot.includes('[bot]') && lower === bot.replace('[bot]', ''));
+}
+
+// ── Bot Comment Deduplication ────────────────────────────────────────────────
+//
+// After a force-push (rebase), bot reviewers (Copilot, Cursor) re-review
+// the entire PR and post brand-new comments with current commit SHAs.
+// Without dedup, these re-posted comments are treated as fresh blocking
+// reviews — causing an infinite fix loop.
+//
+// We track addressed bot comments by content hash (body + file path).
+// On subsequent runs, if a bot comment matches a previously-addressed one,
+// it is moved from blocking to nonBlocking instead of blocking the PR.
+
+/**
+ * Compute a stable fingerprint for a review comment based on its file path
+ * and body text. Used to detect re-posted bot comments after force-push.
+ */
+function computeCommentHash(filePath, body) {
+  const normalizedPath = (filePath || '').trim();
+  const normalizedBody = (body || '').trim();
+  // Hash is path + body only. Line numbers are NOT included because
+  // they shift after force-push, which would break dedup matching.
+  return crypto
+    .createHash('sha256')
+    .update(`${normalizedPath}\0${normalizedBody}`)
+    .digest('hex')
+    .slice(0, 16); // 16 hex chars = 64 bits — sufficient for dedup
+}
+
+/**
+ * Move previously-seen bot comments from blocking to nonBlocking.
+ * Single-generation dedup: only hashes from the immediately previous run
+ * are candidates. Human comments are NEVER deduplicated.
+ *
+ * @param {Array} blocking - current blocking items
+ * @param {Array} nonBlocking - current non-blocking items
+ * @param {string[]} previousRunBotHashes - hash strings from previous run
+ * @returns {{ blocking: Array, nonBlocking: Array }}
+ */
+function deduplicateBlockingBotComments(blocking, nonBlocking, previousRunBotHashes) {
+  if (!previousRunBotHashes || previousRunBotHashes.length === 0) {
+    return { blocking, nonBlocking };
+  }
+
+  const addressedHashes = new Set(previousRunBotHashes);
+  const botReviewers = getBotReviewers();
+
+  const stillBlocking = [];
+  const movedToNonBlocking = [];
+
+  for (const item of blocking) {
+    if (!isBotAuthorLogin(item.author, botReviewers)) {
+      // Human comments are NEVER deduplicated
+      stillBlocking.push(item);
+      continue;
+    }
+    // Review-level items (CHANGES_REQUESTED, COMMENTED) lack a path.
+    // Skip dedup for these — body-only hashes risk false matches.
+    if (!item.path) {
+      stillBlocking.push(item);
+      continue;
+    }
+    const hash = computeCommentHash(item.path, item.body);
+    if (addressedHashes.has(hash)) {
+      movedToNonBlocking.push({ ...item, deduplicated: true });
+    } else {
+      stillBlocking.push(item);
+    }
+  }
+
+  console.log(c.dim(`  Dedup: ${movedToNonBlocking.length} re-posted bot comment(s) moved to non-blocking, ${stillBlocking.length} kept blocking`));
+
+  return {
+    blocking: stillBlocking,
+    nonBlocking: [...nonBlocking, ...movedToNonBlocking],
+  };
+}
+
 // ── Review Priority Classification ──────────────────────────────────────────
 //
 // Priority levels: 'high' | 'medium' | 'low'
@@ -425,12 +522,12 @@ function getReviews(prNumber) {
 
   // Get review comments (inline comments) with pagination
   let comments = [];
+  let branchCommits = new Set();
   try {
     const repoData = ghExec('repo view --json nameWithOwner');
     const repo = repoData.nameWithOwner;
 
     // Get current branch commit SHAs to detect stale comments from force-pushes
-    let branchCommits = new Set();
     try {
       const prData = ghExec(['pr', 'view', String(prNumber), '--json', 'commits']);
       if (prData.commits) {
@@ -449,9 +546,9 @@ function getReviews(prNumber) {
       resolveOutdatedThreads(outdatedThreadIds);
     }
 
-    const isActiveComment = (cm) => {
-      if (cm.line === null && cm.original_line != null) return false;
-      if (branchCommits.size > 0 && cm.commit_id && !branchCommits.has(cm.commit_id)) return false;
+    const isVisibleComment = (cm) => {
+      // Only filter resolved/dismissed comments.
+      // All other comments visible on the PR are included.
       if (resolvedCommentIds.has(cm.id)) return false;
       return true;
     };
@@ -461,13 +558,15 @@ function getReviews(prNumber) {
     while (true) {
       const pageData = ghExec(['api', `repos/${repo}/pulls/${prNumber}/comments?per_page=${perPage}&page=${page}`]);
       if (!Array.isArray(pageData) || pageData.length === 0) break;
-      const activeComments = pageData.filter(isActiveComment);
-      comments.push(...activeComments.map((cm) => ({
+      const visibleComments = pageData.filter(isVisibleComment);
+      comments.push(...visibleComments.map((cm) => ({
         id: cm.id,
         author: cm.user?.login || 'unknown',
         body: (cm.body || '').trim(),
         path: cm.path || null,
         line: cm.line || null,
+        original_line: cm.original_line || null,
+        commit_id: cm.commit_id || null,
         state: 'COMMENTED',
       })));
       if (pageData.length < perPage) break;
@@ -523,16 +622,7 @@ function getReviews(prNumber) {
   // known bot login variants used by classifyCommentPriority (Copilot, cursor-ai[bot]).
   const botReviewersLower = botReviewers.map((b) => b.toLowerCase());
   const BOT_BODY_MARKERS = /<!--\s*(BUGBOT_REVIEW|COPILOT_REVIEW)\s*-->/;
-  const isBotAuthor = (author) => {
-    const lower = (author || '').toLowerCase();
-    // Exact match against configured bot reviewers (case-insensitive)
-    if (botReviewersLower.includes(lower)) return true;
-    // Match known aliases used by classifyCommentPriority
-    if (lower === 'copilot' || lower === 'cursor-ai[bot]') return true;
-    // Fuzzy match: strip [bot] suffix from configured names
-    return botReviewersLower.some((bot) => bot.includes('[bot]') && lower === bot.replace('[bot]', ''));
-  };
-  const isBotReview = (r) => isBotAuthor(r.author) || BOT_BODY_MARKERS.test(r.body || '');
+  const isBotReview = (r) => isBotAuthorLogin(r.author, botReviewersLower) || BOT_BODY_MARKERS.test(r.body || '');
   const isActionableReview = (r) => r.state === 'CHANGES_REQUESTED' || (r.state === 'COMMENTED' && r.body && !isBotReview(r));
   const actionable = reviews.filter(isActionableReview).map((r) => {
     const priority = classifyCommentPriority(r.author, r.body);
@@ -547,10 +637,20 @@ function getReviews(prNumber) {
     priority: classifyCommentPriority(cm.author, cm.body),
   }));
 
+  // Mark stale comments as non-blocking
+  for (const item of [...actionable, ...classifiedComments]) {
+    const isOutdated = item.line === null && item.original_line != null;
+    const isOldCommit = branchCommits.size > 0 && item.commit_id && !branchCommits.has(item.commit_id);
+    if (isOutdated || isOldCommit) {
+      item.priority = 'low';
+      item.stale = true;
+    }
+  }
+
   // Split into blocking (medium/high) and non-blocking (low/nitpick)
   const allItems = [...actionable, ...classifiedComments];
-  const blocking = allItems.filter((item) => isBlockingPriority(item.priority));
-  const nonBlocking = allItems.filter((item) => !isBlockingPriority(item.priority));
+  let blocking = allItems.filter((item) => isBlockingPriority(item.priority));
+  let nonBlocking = allItems.filter((item) => !isBlockingPriority(item.priority));
 
   return {
     all: reviews,
@@ -578,7 +678,7 @@ function getRepoSlug() {
 }
 
 function stateFilePath(prNumber) {
-  return path.join(os.tmpdir(), `follow-up-pr-${getRepoSlug()}-${prNumber}.json`);
+  return path.join(os.tmpdir(), '.claude', `follow-up-pr-${getRepoSlug()}-${prNumber}.json`);
 }
 
 function loadState(prNumber) {
@@ -592,6 +692,8 @@ function loadState(prNumber) {
 
 function saveState(state) {
   const filePath = stateFilePath(state.prNumber);
+  const dir = path.dirname(filePath);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(filePath, JSON.stringify(state, null, 2) + '\n');
 }
 
@@ -603,6 +705,7 @@ function initState(prInfo) {
     startTime: new Date().toISOString(),
     attempts: [],
     finalStatus: null,
+    previousRunBotHashes: [],
   };
 }
 
@@ -611,7 +714,8 @@ function initState(prInfo) {
 function formatNonBlockingItems(items, lines) {
   for (const item of items) {
     const loc = item.path ? ` ${c.dim(item.path + (item.line ? ':' + item.line : ''))}` : '';
-    lines.push(`  ${c.dim('○')} ${c.cyan('@' + item.author)} ${c.dim('[LOW]')}${loc}`);
+    const priorityTag = item.deduplicated ? `[${(item.priority || 'low').toUpperCase()}→DEDUPED]` : '[LOW]';
+    lines.push(`  ${c.dim('○')} ${c.cyan('@' + item.author)} ${c.dim(priorityTag)}${loc}`);
     if (item.body) {
       const normalized = item.body.replace(/\s+/g, ' ');
       const preview = normalized.length > 80 ? normalized.slice(0, 77) + '...' : normalized;
@@ -761,6 +865,27 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
   } else if (!opts.noReviews && reviews.hasBlocking) {
     lines.push(`→ Address blocking reviews, push, then re-run: ${c.dim('node scripts/follow-up-pr.js')}`);
   } else if (ciAcceptable && (!reviews.hasBlocking || opts.noReviews) && reviews.pendingBots.length === 0 && isMergeReady) {
+    // Non-blocking comments report (before the banner)
+    if (reviews.nonBlocking && reviews.nonBlocking.length > 0) {
+      lines.push('');
+      lines.push(c.bold('--- Non-Blocking Comments Report ---'));
+      reviews.nonBlocking.forEach((item, i) => {
+        const loc = item.path ? `${item.path}${item.line ? ':' + item.line : ''}` : '';
+        const fullText = item.body ? item.body.trim() : '';
+        lines.push('');
+        lines.push(`  Comment ${i + 1}: ${fullText}`);
+        lines.push(`  File: ${loc || 'N/A'}`);
+        lines.push(`  Author: @${item.author}`);
+        if (item.deduplicated) {
+          lines.push(`  Status: ${c.cyan('DEDUPED')} — previously addressed, re-posted after force-push`);
+        } else {
+          lines.push(`  Status: ${c.dim('NOT ADDRESSED')} — low priority`);
+        }
+      });
+      lines.push('');
+      lines.push(c.dim('---'));
+    }
+    lines.push('');
     lines.push(c.green('═══════════════════════════════════════'));
     lines.push(c.green('  PR READY TO REVIEW'));
     lines.push(c.green('═══════════════════════════════════════'));
@@ -919,6 +1044,13 @@ async function main() {
   let ci;
   let reviews = { all: [], comments: [], actionable: [], blocking: [], nonBlocking: [], pendingBots: [], hasBlocking: false, hasActionable: false };
 
+  // Single-generation dedup: capture previous run's bot hashes (backward compat with old state files)
+  const previousRunBotHashes = (
+    (state.previousRunBotHashes && state.previousRunBotHashes.length > 0)
+      ? state.previousRunBotHashes
+      : (state.addressedBotComments || []).map(a => a.hash)
+  ).slice();
+
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     // Refresh PR info each attempt (mergeable status may change)
     try {
@@ -940,6 +1072,13 @@ async function main() {
     if (!opts.noReviews) {
       try {
         reviews = getReviews(prInfo.number);
+        // Apply single-generation dedup after fetching reviews
+        if (previousRunBotHashes.length > 0) {
+          const deduped = deduplicateBlockingBotComments(reviews.blocking, reviews.nonBlocking, previousRunBotHashes);
+          reviews.blocking = deduped.blocking;
+          reviews.nonBlocking = deduped.nonBlocking;
+          reviews.hasBlocking = reviews.blocking.length > 0;
+        }
       } catch (err) {
         console.error(c.yellow(`Warning: Could not fetch reviews: ${err.message}`));
       }
@@ -955,6 +1094,7 @@ async function main() {
       blockingReviews: reviews.blocking.map((r) => ({ id: r.id, author: r.author, priority: r.priority })),
       nonBlockingReviews: reviews.nonBlocking.length,
     });
+
     saveState(state);
 
     // Use explicit --interval if set, otherwise compute adaptive interval
@@ -969,12 +1109,57 @@ async function main() {
     const decision = decideNextAction(ci.status, prInfo, reviews, opts.noReviews);
 
     if (decision.action === 'exit-fail') {
+      // Single-generation dedup: record current blocking bot hashes on
+      // reviews-blocking exit. REPLACE (not append) to prevent accumulation.
+      if (decision.finalStatus === 'reviews-blocking' && reviews.hasBlocking) {
+        const botReviewersForRecord = getBotReviewers();
+        state.previousRunBotHashes = reviews.blocking
+          .filter((item) => isBotAuthorLogin(item.author, botReviewersForRecord) && item.path)
+          .map((item) => computeCommentHash(item.path, item.body));
+      }
       state.finalStatus = decision.finalStatus;
       saveState(state);
       process.exit(1);
     }
 
     if (decision.action === 'exit-success') {
+      // Guard against GitHub API eventual consistency: after bot review
+      // status clears, new comments may take a few seconds to appear.
+      // Re-fetch reviews after a brief delay to catch late-arriving comments.
+      // Skip recheck when --no-reviews (reviews aren't being polled).
+      if (!opts.noReviews) {
+        await sleep(10);
+        let recheck;
+        try {
+          recheck = getReviews(prInfo.number);
+          // Apply dedup to recheck results too
+          if (previousRunBotHashes.length > 0) {
+            const deduped = deduplicateBlockingBotComments(recheck.blocking, recheck.nonBlocking, previousRunBotHashes);
+            recheck.blocking = deduped.blocking;
+            recheck.nonBlocking = deduped.nonBlocking;
+            recheck.hasBlocking = recheck.blocking.length > 0;
+          }
+        } catch {
+          // If recheck fails, proceed with exit-success — the primary check passed.
+          recheck = { hasBlocking: false };
+        }
+        if (recheck.hasBlocking) {
+          reviews = recheck;
+          console.log('');
+          console.log(formatReport(prInfo, ci, reviews, attempt, maxAttempts, { ...opts, interval }));
+          console.log('');
+          // Record blocking bot hashes for late-arriving comments
+          const recheckBotReviewers = getBotReviewers();
+          state.previousRunBotHashes = recheck.blocking
+            .filter((item) => isBotAuthorLogin(item.author, recheckBotReviewers) && item.path)
+            .map((item) => computeCommentHash(item.path, item.body));
+          state.finalStatus = 'reviews-blocking';
+          saveState(state);
+          process.exit(1);
+        }
+      }
+      // Clear hashes on success
+      state.previousRunBotHashes = [];
       state.finalStatus = decision.finalStatus;
       saveState(state);
       process.exit(0);
@@ -1002,4 +1187,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { classifyCommentPriority, isBlockingPriority, getResolvedCommentIds, resolveOutdatedThreads, decideNextAction, getAdaptiveInterval };
+module.exports = { classifyCommentPriority, isBlockingPriority, getResolvedCommentIds, resolveOutdatedThreads, decideNextAction, getAdaptiveInterval, computeCommentHash, deduplicateBlockingBotComments, initState };
