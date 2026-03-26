@@ -389,6 +389,9 @@ function deduplicateBlockingBotComments(blocking, nonBlocking, previousRunBotHas
  */
 function getChangedPaths(fromRef, toRef) {
   if (!fromRef || !toRef) return null;
+  // Validate refs as hex SHAs to prevent command injection from state file
+  const shaPattern = /^[0-9a-f]{4,40}$/i;
+  if (!shaPattern.test(fromRef) || !shaPattern.test(toRef)) return null;
   try {
     const output = execSync(`git diff --name-only ${fromRef}..${toRef}`, { encoding: 'utf8' });
     const paths = output.trim().split('\n').filter(Boolean);
@@ -729,6 +732,7 @@ function initState(prInfo) {
     attempts: [],
     finalStatus: null,
     previousRunBotHashes: [],
+    headAtLastExit: null,
   };
 }
 
@@ -1139,6 +1143,9 @@ async function main() {
     // Decide next action using extracted pure function
     const decision = decideNextAction(ci.status, prInfo, reviews, opts.noReviews);
 
+    // Compute changed paths once for both exit-fail and exit-success branches
+    const changedPaths = getChangedPaths(state.headAtLastExit || null, currentHead);
+
     if (decision.action === 'exit-fail') {
       // Single-generation dedup: record current blocking bot hashes on
       // reviews-blocking exit. REPLACE (not append) to prevent accumulation.
@@ -1146,7 +1153,6 @@ async function main() {
       // (so we don't falsely promote unaddressed comments next run).
       if (decision.finalStatus === 'reviews-blocking' && reviews.hasBlocking) {
         const botReviewersForRecord = getBotReviewers();
-        const changedPaths = getChangedPaths(state.headAtLastExit || null, currentHead);
         state.previousRunBotHashes = reviews.blocking
           .filter((item) => isBotAuthorLogin(item.author, botReviewersForRecord) && item.path)
           .filter((item) => !changedPaths || changedPaths.has(item.path))
@@ -1187,10 +1193,9 @@ async function main() {
           // Record blocking bot hashes for late-arriving comments
           // Only record hashes for comments on files that were actually modified.
           const recheckBotReviewers = getBotReviewers();
-          const recheckChangedPaths = getChangedPaths(state.headAtLastExit || null, currentHead);
           state.previousRunBotHashes = recheck.blocking
             .filter((item) => isBotAuthorLogin(item.author, recheckBotReviewers) && item.path)
-            .filter((item) => !recheckChangedPaths || recheckChangedPaths.has(item.path))
+            .filter((item) => !changedPaths || changedPaths.has(item.path))
             .map((item) => computeCommentHash(item.path, item.body));
           state.headAtLastExit = currentHead;
           state.finalStatus = 'reviews-blocking';

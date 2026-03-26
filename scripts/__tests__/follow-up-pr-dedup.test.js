@@ -372,8 +372,75 @@ describe('getChangedPaths', () => {
       // Shallow clone or single-commit repo — skip
       return;
     }
-    const result = getChangedPaths(parentSha, 'HEAD');
+    const headSha = require('child_process').execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim();
+    const result = getChangedPaths(parentSha, headSha);
     assert.ok(result instanceof Set, 'must return a Set');
     assert.ok(result.size > 0, 'HEAD~1..HEAD should have at least one changed file');
+  });
+
+  it('returns null when ref is not a valid SHA (injection prevention)', () => {
+    const result = getChangedPaths('HEAD', 'HEAD');
+    assert.equal(result, null, 'non-hex refs should be rejected');
+  });
+
+  it('returns null when fromRef is null', () => {
+    const result = getChangedPaths(null, 'abc123');
+    assert.equal(result, null, 'null fromRef should return null');
+  });
+});
+
+// ── Promotion path-filter logic (spec tests 6 & 7) ─────────────────────────
+
+describe('hash-recording path filter logic', () => {
+  // These tests verify the filtering logic used when recording bot comment
+  // hashes in state.previousRunBotHashes. The production code filters by:
+  //   .filter((item) => !changedPaths || changedPaths.has(item.path))
+  // We test this filter directly to ensure correct behavior.
+
+  const makeBotComment = (filePath, body) => ({
+    id: Math.random(),
+    author: 'copilot-pull-request-reviewer',
+    body,
+    path: filePath,
+    line: 10,
+    state: 'COMMENTED',
+    priority: 'medium',
+  });
+
+  it('bot comment on unmodified file — hash NOT recorded (spec test 6)', () => {
+    const changedPaths = new Set(['src/index.js']);
+    const comment = makeBotComment('src/utils.js', 'Fix this');
+
+    // Simulate the production filter
+    const filtered = [comment]
+      .filter((item) => item.path)
+      .filter((item) => !changedPaths || changedPaths.has(item.path));
+
+    assert.equal(filtered.length, 0, 'comment on unmodified file must be excluded');
+  });
+
+  it('bot comment on modified file — hash IS recorded (spec test 7)', () => {
+    const changedPaths = new Set(['src/index.js']);
+    const comment = makeBotComment('src/index.js', 'Fix this');
+
+    const filtered = [comment]
+      .filter((item) => item.path)
+      .filter((item) => !changedPaths || changedPaths.has(item.path));
+
+    assert.equal(filtered.length, 1, 'comment on modified file must be included');
+    const hash = computeCommentHash(filtered[0].path, filtered[0].body);
+    assert.match(hash, /^[a-f0-9]+$/, 'hash must be recorded');
+  });
+
+  it('changedPaths is null (fallback) — all bot comments recorded', () => {
+    const changedPaths = null;
+    const c1 = makeBotComment('src/a.js', 'Issue A');
+    const c2 = makeBotComment('src/b.js', 'Issue B');
+
+    const filtered = [c1, c2]
+      .filter((item) => item.path)
+      .filter((item) => !changedPaths || changedPaths.has(item.path));
+
+    assert.equal(filtered.length, 2, 'null changedPaths falls back to recording all');
   });
 });
