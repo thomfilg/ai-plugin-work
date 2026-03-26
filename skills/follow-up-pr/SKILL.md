@@ -189,7 +189,7 @@ For each **blocking** review comment:
 
 For each group of related feedback:
 
-1. Determine `<TICKET_ID>` from the current branch: `git branch --show-current | grep -oE '[A-Z]+-[0-9]+|GH-[0-9]+'`
+1. Determine `<TICKET_ID>` from the current branch: `git branch --show-current | grep -oE '[A-Z]+-[0-9]+|GH-[0-9]+' || echo "unknown"`
 2. Formulate a review-fix description: reviewer name, comment text, file path, line number, and what change is requested
 3. Invoke: `Skill(work-implement): --subtask <TICKET_ID> fix(review): <description with full comment context, file path, and line number>`
 4. After /work-implement completes, run: `Skill(check)`
@@ -362,7 +362,7 @@ This command will:
 
 ### 4.4 Apply Fix (Non-Coverage Issues)
 
-1. Determine `<TICKET_ID>` from the current branch: `git branch --show-current | grep -oE '[A-Z]+-[0-9]+|GH-[0-9]+'`
+1. Determine `<TICKET_ID>` from the current branch: `git branch --show-current | grep -oE '[A-Z]+-[0-9]+|GH-[0-9]+' || echo "unknown"`
 2. Formulate a clear fix description including: what failed, root cause, file(s) to change
 3. Invoke: `Skill(work-implement): --subtask <TICKET_ID> fix(ci): <fix description with file paths and context>`
 4. After /work-implement completes, run: `Skill(check)`

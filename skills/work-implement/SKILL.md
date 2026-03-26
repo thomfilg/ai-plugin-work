@@ -42,12 +42,14 @@ mkdir -p "$TASK_DIR"
 If the arguments contain `--subtask <TICKET_ID>`, this is a subtask invocation from `/follow-up-pr`:
 
 ```bash
-# Parse --subtask flag
+# Parse --subtask flag (portable — no grep -P dependency)
 SUBTASK_PARENT=""
-if echo "$ARGS" | grep -q -- '--subtask'; then
-  SUBTASK_PARENT=$(echo "$ARGS" | grep -oP '(?<=--subtask\s)\S+')
-  DESCRIPTION=$(echo "$ARGS" | sed 's/--subtask\s\+\S\+//')
-fi
+case "$ARGS" in
+  *--subtask*)
+    SUBTASK_PARENT=$(echo "$ARGS" | sed -n 's/.*--subtask[[:space:]]\+\([^[:space:]]\+\).*/\1/p')
+    DESCRIPTION=$(echo "$ARGS" | sed 's/--subtask[[:space:]]\+[^[:space:]]\+//')
+    ;;
+esac
 ```
 
 When `--subtask` is present:

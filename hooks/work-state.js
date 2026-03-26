@@ -425,8 +425,17 @@ function completeSubtask(ticketId, subtaskIndex) {
   const prefix = `.work-state-${ticketId}-subtask-`;
   const statePath = path.join(taskDir, `${prefix}${subtaskIndex}.json`);
 
-  const content = fs.readFileSync(statePath, 'utf8');
-  const state = JSON.parse(content);
+  if (!fs.existsSync(statePath)) {
+    throw new Error(`Subtask state file not found: ${statePath}`);
+  }
+
+  let content, state;
+  try {
+    content = fs.readFileSync(statePath, 'utf8');
+    state = JSON.parse(content);
+  } catch (err) {
+    throw new Error(`Failed to read subtask state: ${err.message}`);
+  }
 
   state.status = 'completed';
   state.completedTime = new Date().toISOString();
@@ -448,7 +457,7 @@ async function main() {
 
   if (!command) {
     console.error('Usage: node work-state.js <command> <ticket-id> [args...]');
-    console.error('Commands: init, get, set-step, set-check, set-test-enhancement, add-error, complete, resume-info');
+    console.error('Commands: init, get, set-step, set-check, set-test-enhancement, add-error, complete, resume-info, init-subtask, complete-subtask, active-subtask');
     process.exit(1);
   }
 

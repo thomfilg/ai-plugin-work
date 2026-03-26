@@ -390,7 +390,7 @@ function deduplicateBlockingBotComments(blocking, nonBlocking, previousRunBotHas
 function getChangedPaths(fromRef, toRef) {
   if (!fromRef || !toRef) return null;
   // Validate refs as hex SHAs to prevent command injection from state file
-  const shaPattern = /^[0-9a-f]{4,40}$/i;
+  const shaPattern = /^[0-9a-f]{7,40}$/i;
   if (!shaPattern.test(fromRef) || !shaPattern.test(toRef)) return null;
   try {
     const output = execSync(`git diff --name-only ${fromRef}..${toRef}`, { encoding: 'utf8' });

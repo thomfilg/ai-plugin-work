@@ -357,9 +357,14 @@ describe('getChangedPaths', () => {
     assert.equal(result.size, 0, 'identical refs produce empty Set');
   });
 
-  it('returns null on invalid ref (graceful fallback)', () => {
+  it('returns null on non-hex ref (SHA regex rejection)', () => {
     const result = getChangedPaths('invalid_ref_aaa', 'invalid_ref_bbb');
-    assert.equal(result, null, 'should return null on git error');
+    assert.equal(result, null, 'non-hex refs should be rejected by SHA pattern');
+  });
+
+  it('returns null when hex ref is shorter than 7 characters', () => {
+    const result = getChangedPaths('abcdef', 'abcdef');
+    assert.equal(result, null, '6-char hex ref should be rejected (minimum is 7)');
   });
 
   it('returns non-empty Set when refs differ and files changed', () => {
