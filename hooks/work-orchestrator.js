@@ -537,7 +537,7 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
   } else {
     add(STEPS.implement, 'RUN', '/work-implement <requirements>', 'No changes vs main', {
       agentType: 'skill',
-      agentPrompt: `/work-implement <requirements>${planningContext}`,
+      agentPrompt: `/work-implement <requirements>${planningContext}${getDocsPrompt('READ_DOCS_ON_DEV')}`,
     });
   }
 

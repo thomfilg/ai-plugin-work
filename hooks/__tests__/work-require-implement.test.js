@@ -28,6 +28,24 @@ function runHook(input) {
   });
 }
 
+function runHookWithEnv(input, envOverrides = {}) {
+  return new Promise((resolve, reject) => {
+    const proc = spawn('node', [HOOK_PATH], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, ...envOverrides },
+    });
+    let stdout = '', stderr = '';
+    proc.stdout.on('data', (d) => { stdout += d.toString(); });
+    proc.stderr.on('data', (d) => { stderr += d.toString(); });
+    proc.on('close', (code) => {
+      resolve({ result: { decision: code === 2 ? 'block' : 'approve', reason: stderr.trim() || undefined }, stderr, code, stdout });
+    });
+    proc.on('error', reject);
+    proc.stdin.write(JSON.stringify(input));
+    proc.stdin.end();
+  });
+}
+
 describe('work-require-implement hook', () => {
   it('should APPROVE non-blocked tools', async () => {
     const { result } = await runHook({ tool_name: 'Read', tool_input: {} });
@@ -107,5 +125,71 @@ describe('work-require-implement hook', () => {
       transcript_path: tp
     });
     assert.strictEqual(result.decision, 'approve');
+  });
+
+  it('should APPROVE when inside developer agent with work-workflow: prefix', async () => {
+    const tp = path.join(os.tmpdir(), `test-wri-prefix-${Date.now()}.jsonl`);
+    fs.writeFileSync(tp, [
+      '# Start Work Command',
+      '/bootstrap PROJ-123',
+      'Worktree created',
+      '"subagent_type": "work-workflow:developer-nodejs-tdd"'
+    ].join('\n'));
+    const { result } = await runHook({
+      tool_name: 'Edit',
+      tool_input: { file_path: '/home/node/project/src/app.ts' },
+      transcript_path: tp
+    });
+    assert.strictEqual(result.decision, 'approve');
+  });
+
+  it('should APPROVE when inside code-architect agent with work-workflow: prefix (with gate enabled)', async () => {
+    const tp = path.join(os.tmpdir(), `test-wri-ca-prefix-${Date.now()}.jsonl`);
+    fs.writeFileSync(tp, [
+      '# Start Work Command',
+      '/bootstrap PROJ-123',
+      'Worktree created',
+      '"subagent_type": "work-workflow:code-architect"'
+    ].join('\n'));
+    const { result } = await runHookWithEnv({
+      tool_name: 'Edit',
+      tool_input: { file_path: '/home/node/project/src/app.ts' },
+      transcript_path: tp
+    }, { WORK_ARCHITECT_ENABLED: '1' });
+    assert.strictEqual(result.decision, 'approve');
+  });
+
+  describe('WORK_ARCHITECT_ENABLED gate', () => {
+    it('should BLOCK code-architect when WORK_ARCHITECT_ENABLED is not set', async () => {
+      const tp = path.join(os.tmpdir(), `test-wri-ca-gate-${Date.now()}.jsonl`);
+      fs.writeFileSync(tp, [
+        '# Start Work Command',
+        '/bootstrap PROJ-123',
+        'Worktree created',
+        '"subagent_type": "code-architect"'
+      ].join('\n'));
+      const { result } = await runHookWithEnv({
+        tool_name: 'Edit',
+        tool_input: { file_path: '/home/node/project/src/app.ts' },
+        transcript_path: tp
+      }, { WORK_ARCHITECT_ENABLED: '' });
+      assert.strictEqual(result.decision, 'block');
+    });
+
+    it('should APPROVE code-architect when WORK_ARCHITECT_ENABLED=1', async () => {
+      const tp = path.join(os.tmpdir(), `test-wri-ca-gate2-${Date.now()}.jsonl`);
+      fs.writeFileSync(tp, [
+        '# Start Work Command',
+        '/bootstrap PROJ-123',
+        'Worktree created',
+        '"subagent_type": "code-architect"'
+      ].join('\n'));
+      const { result } = await runHookWithEnv({
+        tool_name: 'Edit',
+        tool_input: { file_path: '/home/node/project/src/app.ts' },
+        transcript_path: tp
+      }, { WORK_ARCHITECT_ENABLED: '1' });
+      assert.strictEqual(result.decision, 'approve');
+    });
   });
 });

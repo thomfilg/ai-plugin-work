@@ -93,6 +93,7 @@ function isInsideSubagent(transcriptPath) {
       'developer-react-senior',
       'developer-react-ui-architect',
       'developer-devops',
+      ...(process.env.WORK_ARCHITECT_ENABLED === '1' ? ['code-architect'] : []),
       'code-checker',
       'commit-writer',
       'pr-generator',

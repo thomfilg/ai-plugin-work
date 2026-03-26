@@ -155,6 +155,7 @@ Based on the implementation type:
 | React components with complex logic | `developer-react-senior` |
 | React UI with visual design focus | `developer-react-ui-architect` |
 | Infrastructure/DevOps | `developer-devops` |
+| Architecture-first / complex design | `code-architect` (requires `WORK_ARCHITECT_ENABLED=1`) |
 
 **Invoke the agent:**
 

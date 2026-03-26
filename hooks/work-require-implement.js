@@ -156,6 +156,7 @@ function isInsideDeveloperAgent(transcriptPath, opts = {}) {
       'developer-react-senior',
       'developer-react-ui-architect',
       'developer-devops',
+      ...(process.env.WORK_ARCHITECT_ENABLED === '1' ? ['code-architect'] : []),
     ];
 
     // Check if we're inside a developer agent
@@ -165,7 +166,7 @@ function isInsideDeveloperAgent(transcriptPath, opts = {}) {
         return true;
       }
       // Also check if agent was invoked via Task
-      const taskPattern = new RegExp(`"subagent_type"\\s*:\\s*"${agent}"`, 'i');
+      const taskPattern = new RegExp(`"subagent_type"\\s*:\\s*"(work-workflow:)?${agent}"`, 'i');
       if (taskPattern.test(content)) {
         return true;
       }
