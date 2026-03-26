@@ -546,12 +546,9 @@ function getReviews(prNumber) {
       resolveOutdatedThreads(outdatedThreadIds);
     }
 
-    const isActiveComment = (cm) => {
-      // Filter 1: stale line positions (line nulled out after force-push)
-      if (cm.line === null && cm.original_line != null) return false;
-      // Filter 2: comments from non-branch commits (stale after force-push)
-      if (branchCommits.size > 0 && cm.commit_id && !branchCommits.has(cm.commit_id)) return false;
-      // Filter 3: resolved/outdated threads
+    const isVisibleComment = (cm) => {
+      // Only filter resolved/dismissed comments.
+      // All other comments visible on the PR are included.
       if (resolvedCommentIds.has(cm.id)) return false;
       return true;
     };
@@ -561,13 +558,15 @@ function getReviews(prNumber) {
     while (true) {
       const pageData = ghExec(['api', `repos/${repo}/pulls/${prNumber}/comments?per_page=${perPage}&page=${page}`]);
       if (!Array.isArray(pageData) || pageData.length === 0) break;
-      const activeComments = pageData.filter(isActiveComment);
-      comments.push(...activeComments.map((cm) => ({
+      const visibleComments = pageData.filter(isVisibleComment);
+      comments.push(...visibleComments.map((cm) => ({
         id: cm.id,
         author: cm.user?.login || 'unknown',
         body: (cm.body || '').trim(),
         path: cm.path || null,
         line: cm.line || null,
+        original_line: cm.original_line || null,
+        commit_id: cm.commit_id || null,
         state: 'COMMENTED',
       })));
       if (pageData.length < perPage) break;
@@ -637,6 +636,16 @@ function getReviews(prNumber) {
     ...cm,
     priority: classifyCommentPriority(cm.author, cm.body),
   }));
+
+  // Mark stale comments as non-blocking
+  for (const item of [...actionable, ...classifiedComments]) {
+    const isOutdated = item.line === null && item.original_line != null;
+    const isOldCommit = branchCommits.size > 0 && item.commit_id && !branchCommits.has(item.commit_id);
+    if (isOutdated || isOldCommit) {
+      item.priority = 'low';
+      item.stale = true;
+    }
+  }
 
   // Split into blocking (medium/high) and non-blocking (low/nitpick)
   const allItems = [...actionable, ...classifiedComments];
