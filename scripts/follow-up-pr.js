@@ -550,8 +550,13 @@ function getReviews(prNumber, addressedBotComments, headSha) {
     }
 
     const isActiveComment = (cm) => {
+      // Comment lost its line position (outdated by code changes)
       if (cm.line === null && cm.original_line != null) return false;
-      if (branchCommits.size > 0 && cm.commit_id && !branchCommits.has(cm.commit_id)) return false;
+      // Skip commit_id filtering — after force-push/squash, old SHAs
+      // are gone but comments with valid line positions are still
+      // relevant. GitHub keeps comments visible when they still map
+      // to valid code positions. Rely on line === null check above
+      // and resolvedCommentIds below for filtering instead.
       if (resolvedCommentIds.has(cm.id)) return false;
       return true;
     };
