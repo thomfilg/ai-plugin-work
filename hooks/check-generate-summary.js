@@ -4,7 +4,7 @@
  *
  * Generates the final README.md summary report after all agents complete.
  *
- * Usage: node check-generate-summary.js <REPORT_FOLDER> <CHANGES_HASH> <JIRA_TICKET_ID> <IMPACTED_APPS_JSON>
+ * Usage: node check-generate-summary.js <REPORT_FOLDER> <CHANGES_HASH> [JIRA_TICKET_ID] [IMPACTED_APPS_JSON]
  *
  * Output: Writes README.md to report folder
  */
@@ -12,15 +12,27 @@
 const fs = require('fs');
 const path = require('path');
 
-// Get args
-const REPORT_FOLDER = process.argv[2];
-const CHANGES_HASH = process.argv[3];
-const JIRA_TICKET_ID = process.argv[4] || '';
-const IMPACTED_APPS = JSON.parse(process.argv[5] || '[]');
+// Get args (only when run as CLI)
+let REPORT_FOLDER, CHANGES_HASH, JIRA_TICKET_ID, IMPACTED_APPS;
+if (require.main === module) {
+  REPORT_FOLDER = process.argv[2];
+  CHANGES_HASH = process.argv[3];
+  JIRA_TICKET_ID = process.argv[4] || '';
+  try {
+    IMPACTED_APPS = JSON.parse(process.argv[5] || '[]');
+    if (!Array.isArray(IMPACTED_APPS)) {
+      console.error('Error: IMPACTED_APPS_JSON must be a JSON array (e.g. \'["app1","app2"]\')');
+      process.exit(1);
+    }
+  } catch {
+    console.error('Error: IMPACTED_APPS_JSON must be valid JSON (e.g. \'["app1","app2"]\')');
+    process.exit(1);
+  }
 
-if (!REPORT_FOLDER || !CHANGES_HASH) {
-  console.error('Usage: node check-generate-summary.js <REPORT_FOLDER> <CHANGES_HASH> [JIRA_TICKET_ID] [IMPACTED_APPS_JSON]');
-  process.exit(1);
+  if (!REPORT_FOLDER || !CHANGES_HASH) {
+    console.error('Usage: node check-generate-summary.js <REPORT_FOLDER> <CHANGES_HASH> [JIRA_TICKET_ID] [IMPACTED_APPS_JSON]');
+    process.exit(1);
+  }
 }
 
 /**
@@ -49,15 +61,15 @@ function getReportStatus(content, type) {
   const statusChecks = {
     tests: {
       pass: ['✅ PASS', 'APPROVED', 'All.*pass'],
-      fail: ['❌ FAIL', 'NEEDS_WORK', 'failed']
+      fail: ['❌ FAIL', 'NEEDS_WORK', 'fail [1-9]\\d*']
     },
     codeReview: {
       pass: ['APPROVED', 'No critical', 'No issues'],
       fail: ['CRITICAL', 'NEEDS_WORK']
     },
     qa: {
-      pass: ['✅ PASS', 'All tests passed', 'SUCCESS'],
-      fail: ['❌ FAIL', 'FAILED']
+      pass: ['✅ PASS', 'All tests passed', 'SUCCESS', 'Status:\\s*APPROVED'],
+      fail: ['❌ FAIL', 'FAILED:\\s*[1-9]', 'failures:\\s*[1-9]', 'Status:\\s*FAIL', 'Status:\\s*NEEDS_WORK']
     },
     completion: {
       pass: ['COMPLETE', 'DELIVERED'],
@@ -68,7 +80,8 @@ function getReportStatus(content, type) {
   const checks = statusChecks[type];
   if (!checks) return { status: 'UNKNOWN', icon: '❓' };
 
-  // Check for failures first
+  // Check for failures first — fail markers take precedence to avoid false negatives
+  // (pass-first ordering would silence explicit NEEDS_WORK when a pass pattern also matches)
   for (const pattern of checks.fail) {
     if (new RegExp(pattern, 'i').test(content)) {
       return { status: 'NEEDS_WORK', icon: '❌' };
@@ -220,4 +233,8 @@ ${actionItems.map(item => `- ${item}`).join('\n')}` : '✅ All checks passed! Re
   }, null, 2));
 }
 
-generateSummary();
+if (require.main === module) {
+  generateSummary();
+}
+
+module.exports = { getReportStatus };
