@@ -646,7 +646,7 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
   } else {
     add(STEPS.follow_up, 'RUN', 'Skill(follow-up-pr)', 'Address bot review comments and CI issues', {
       agentType: 'skill',
-      agentPrompt: `/follow-up-pr ${ticket}`,
+      agentPrompt: `/follow-up-pr`,
     });
   }
 
