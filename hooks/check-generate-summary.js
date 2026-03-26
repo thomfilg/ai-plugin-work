@@ -71,17 +71,18 @@ function getReportStatus(content, type) {
   const checks = statusChecks[type];
   if (!checks) return { status: 'UNKNOWN', icon: '❓' };
 
-  // Check for pass first (defense-in-depth: explicit pass markers take precedence)
-  for (const pattern of checks.pass) {
-    if (new RegExp(pattern, 'i').test(content)) {
-      return { status: 'APPROVED', icon: '✅' };
-    }
-  }
-
-  // Check for failures
+  // Check for failures first — fail markers take precedence to avoid false negatives
+  // (pass-first ordering would silence explicit NEEDS_WORK when a pass pattern also matches)
   for (const pattern of checks.fail) {
     if (new RegExp(pattern, 'i').test(content)) {
       return { status: 'NEEDS_WORK', icon: '❌' };
+    }
+  }
+
+  // Check for pass
+  for (const pattern of checks.pass) {
+    if (new RegExp(pattern, 'i').test(content)) {
+      return { status: 'APPROVED', icon: '✅' };
     }
   }
 

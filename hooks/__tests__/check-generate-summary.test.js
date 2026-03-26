@@ -104,12 +104,12 @@ describe('getReportStatus', () => {
     assert.equal(result.status, 'NEEDS_WORK');
   });
 
-  // ── Pass-first evaluation: both markers present ──────────────────────────
+  // ── Fail-first evaluation: explicit fail markers take precedence ──────────
 
-  it('returns APPROVED when both pass and fail markers are present (pass-first)', () => {
+  it('returns NEEDS_WORK when both pass and fail markers are present (fail-first)', () => {
     const content = '✅ PASS\n❌ FAIL\nSome mixed signals';
     const result = getReportStatus(content, 'tests');
-    assert.equal(result.status, 'APPROVED',
-      'Pass markers should take precedence over fail markers');
+    assert.equal(result.status, 'NEEDS_WORK',
+      'Fail markers should take precedence over pass markers to avoid false negatives');
   });
 });
