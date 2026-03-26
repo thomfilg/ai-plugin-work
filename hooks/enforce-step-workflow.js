@@ -92,6 +92,7 @@ const WORKFLOWS = [
       { step: STEPS.check,            tool: 'Skill',           field: 'skill',         pattern: /^check$/ },
       { step: STEPS.cleanup,          tool: ['Task', 'Agent'], field: 'description',   pattern: new RegExp(`^${STEPS.cleanup}\\b`, 'i') },
       { step: STEPS.test_enhancement, tool: 'Skill',           field: 'skill',         pattern: /^test-coordination$/ },
+      { step: STEPS.follow_up,        tool: 'Skill',           field: 'skill',         pattern: /^follow-up-pr$/ },
       { step: STEPS.pr,               tool: 'Skill',           field: 'skill',         pattern: /^work-pr$/ },
       { step: STEPS.ready,            tool: ['Task', 'Agent'], field: 'description',   pattern: new RegExp(`^${STEPS.ready}\\b`, 'i') },
       { step: STEPS.ci,               tool: ['Task', 'Agent'], field: 'description',   pattern: new RegExp(`^${STEPS.ci}\\b`, 'i') },

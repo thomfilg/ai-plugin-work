@@ -93,7 +93,30 @@ describe('work-orchestrator.js', () => {
       assert.ok(result.transitions);
       assert.ok(result.steps.includes('ticket'));
       assert.ok(result.steps.includes('complete'));
-      assert.equal(result.steps.length, 15);
+      assert.equal(result.steps.length, 16);
+    });
+
+    it('should include follow_up in steps', async () => {
+      const { result } = await runOrchestrator(['graph']);
+      assert.ok(result.steps.includes('follow_up'));
+    });
+
+    it('should have ready transitions including follow_up', async () => {
+      const { result } = await runOrchestrator(['graph']);
+      assert.ok(result.transitions['ready'].includes('follow_up'));
+    });
+
+    it('should have follow_up transitions including ci, cleanup, implement, test_enhancement', async () => {
+      const { result } = await runOrchestrator(['graph']);
+      assert.ok(result.transitions['follow_up'].includes('ci'));
+      assert.ok(result.transitions['follow_up'].includes('cleanup'));
+      assert.ok(result.transitions['follow_up'].includes('implement'));
+      assert.ok(result.transitions['follow_up'].includes('test_enhancement'));
+    });
+
+    it('should NOT have ci transitions including follow_up (no backward from ci)', async () => {
+      const { result } = await runOrchestrator(['graph']);
+      assert.ok(!result.transitions['ci'].includes('follow_up'));
     });
 
     it('should have valid transitions for each step', async () => {
@@ -150,7 +173,7 @@ describe('work-orchestrator.js', () => {
       for (const expected of [
         'ticket', 'bootstrap', 'brief', 'spec', 'implement', 'quality',
         'commit', 'check', 'cleanup', 'test_enhancement',
-        'pr', 'ready', 'ci', 'reports', 'complete',
+        'pr', 'ready', 'follow_up', 'ci', 'reports', 'complete',
       ]) {
         assert.ok(stepNames.includes(expected), `Missing step: ${expected}`);
       }
@@ -325,9 +348,9 @@ describe('work-orchestrator.js', () => {
   });
 
   describe('state machine logic', () => {
-    it('should have 15 steps total', async () => {
+    it('should have 16 steps total', async () => {
       const { result } = await runOrchestrator(['graph']);
-      assert.equal(result.steps.length, 15);
+      assert.equal(result.steps.length, 16);
     });
 
     it('should not allow self-transitions', async () => {
@@ -638,6 +661,138 @@ describe('work-orchestrator.js', () => {
         assert.equal(result.summary.firstAction, result.summary.stepsToRun[0]);
       } else {
         assert.equal(result.summary.firstAction, 'none');
+      }
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // GH-81: follow_up step
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe('follow_up step (GH-81)', () => {
+    const TEST_TICKET = 'TEST-810';
+    afterEach(() => { cleanupTempWorkState(TEST_TICKET); });
+
+    it('should mark follow_up as SKIP when no PR exists (new ticket)', async () => {
+      const { result } = await runOrchestrator([TEST_TICKET]);
+      const followUpStep = result.plan.find((s) => s.step === 'follow_up');
+      assert.ok(followUpStep, 'follow_up step should exist in plan');
+      assert.equal(followUpStep.action, 'SKIP');
+      assert.ok(followUpStep.reason.includes('No PR'));
+    });
+
+    it('should SKIP follow_up with no agentType when no PR exists', async () => {
+      const { result } = await runOrchestrator([TEST_TICKET]);
+      const followUpStep = result.plan.find((s) => s.step === 'follow_up');
+      assert.ok(followUpStep, 'follow_up step should exist in plan');
+      assert.equal(followUpStep.action, 'SKIP');
+      assert.equal(followUpStep.agentType, undefined);
+      assert.equal(followUpStep.agentPrompt, undefined);
+    });
+
+    it('should appear between ready and ci in plan order', async () => {
+      const { result } = await runOrchestrator([TEST_TICKET]);
+      const stepNames = result.plan.map((s) => s.step);
+      const readyIdx = stepNames.indexOf('ready');
+      const followUpIdx = stepNames.indexOf('follow_up');
+      const ciIdx = stepNames.indexOf('ci');
+      assert.ok(readyIdx < followUpIdx, 'follow_up should come after ready');
+      assert.ok(followUpIdx < ciIdx, 'follow_up should come before ci');
+    });
+  });
+
+  describe('follow_up transitions (GH-81)', () => {
+    const TEMP_WB = path.join(os.tmpdir(), 'work-orch-fu-' + process.pid);
+    const T = 'TEST-811';
+    const TEMP_TASKS = path.join(TEMP_WB, 'tasks');
+    const o = { env: { WORKTREES_BASE: TEMP_WB, TASKS_BASE: TEMP_TASKS, WORK_TDD_ENFORCE: '0' } };
+    after(() => { try { fs.rmSync(TEMP_WB, { recursive: true, force: true }); } catch {} });
+
+    it('should allow transition follow_up → ci (forward)', async () => {
+      await runOrchestrator(['transition', T, 'bootstrap'], o);
+      await runOrchestrator(['transition', T, 'check'], o);
+      await runOrchestrator(['transition', T, 'test_enhancement'], o);
+      await runOrchestrator(['transition', T, 'pr'], o);
+      await runOrchestrator(['transition', T, 'ready'], o);
+      await runOrchestrator(['transition', T, 'follow_up'], o);
+      const { result } = await runOrchestrator(['transition', T, 'ci'], o);
+      assert.equal(result.success, true);
+      assert.equal(result.from, 'follow_up');
+      assert.equal(result.to, 'ci');
+      assert.equal(result.direction, 'forward');
+    });
+
+    it('should allow transition follow_up → implement (backward)', async () => {
+      const T2 = 'TEST-812';
+      try {
+        await runOrchestrator(['transition', T2, 'bootstrap'], o);
+        await runOrchestrator(['transition', T2, 'check'], o);
+        await runOrchestrator(['transition', T2, 'test_enhancement'], o);
+        await runOrchestrator(['transition', T2, 'pr'], o);
+        await runOrchestrator(['transition', T2, 'ready'], o);
+        await runOrchestrator(['transition', T2, 'follow_up'], o);
+        const { result } = await runOrchestrator(['transition', T2, 'implement'], o);
+        assert.equal(result.success, true);
+        assert.equal(result.from, 'follow_up');
+        assert.equal(result.to, 'implement');
+        assert.equal(result.direction, 'backward');
+      } finally {
+        try { fs.rmSync(path.join(TEMP_TASKS, T2), { recursive: true, force: true }); } catch {} // TASKS_BASE isolation via TEMP_TASKS
+      }
+    });
+
+    it('should allow transition follow_up → test_enhancement (backward)', async () => {
+      const T3 = 'TEST-813B';
+      try {
+        await runOrchestrator(['transition', T3, 'bootstrap'], o);
+        await runOrchestrator(['transition', T3, 'check'], o);
+        await runOrchestrator(['transition', T3, 'test_enhancement'], o);
+        await runOrchestrator(['transition', T3, 'pr'], o);
+        await runOrchestrator(['transition', T3, 'ready'], o);
+        await runOrchestrator(['transition', T3, 'follow_up'], o);
+        const { result } = await runOrchestrator(['transition', T3, 'test_enhancement'], o);
+        assert.equal(result.success, true);
+        assert.equal(result.from, 'follow_up');
+        assert.equal(result.to, 'test_enhancement');
+        assert.equal(result.direction, 'backward');
+      } finally {
+        try { fs.rmSync(path.join(TEMP_TASKS, T3), { recursive: true, force: true }); } catch {}
+      }
+    });
+
+    it('should allow transition follow_up → cleanup (forward skip)', async () => {
+      const T4 = 'TEST-814';
+      try {
+        await runOrchestrator(['transition', T4, 'bootstrap'], o);
+        await runOrchestrator(['transition', T4, 'check'], o);
+        await runOrchestrator(['transition', T4, 'test_enhancement'], o);
+        await runOrchestrator(['transition', T4, 'pr'], o);
+        await runOrchestrator(['transition', T4, 'ready'], o);
+        await runOrchestrator(['transition', T4, 'follow_up'], o);
+        const { result } = await runOrchestrator(['transition', T4, 'cleanup'], o);
+        assert.equal(result.success, true);
+        assert.equal(result.from, 'follow_up');
+        assert.equal(result.to, 'cleanup');
+        assert.equal(result.direction, 'forward');
+      } finally {
+        try { fs.rmSync(path.join(TEMP_TASKS, T4), { recursive: true, force: true }); } catch {}
+      }
+    });
+
+    it('should BLOCK transition follow_up → reports (not in targets)', async () => {
+      const T5 = 'TEST-815';
+      try {
+        await runOrchestrator(['transition', T5, 'bootstrap'], o);
+        await runOrchestrator(['transition', T5, 'check'], o);
+        await runOrchestrator(['transition', T5, 'test_enhancement'], o);
+        await runOrchestrator(['transition', T5, 'pr'], o);
+        await runOrchestrator(['transition', T5, 'ready'], o);
+        await runOrchestrator(['transition', T5, 'follow_up'], o);
+        const { result } = await runOrchestrator(['transition', T5, 'reports'], o);
+        assert.equal(result.error, true);
+        assert.ok(result.message.includes('BLOCKED'));
+      } finally {
+        try { fs.rmSync(path.join(TEMP_TASKS, T5), { recursive: true, force: true }); } catch {}
       }
     });
   });
