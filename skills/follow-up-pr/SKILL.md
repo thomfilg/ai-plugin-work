@@ -92,7 +92,7 @@ The script persists state to `/tmp/.claude/follow-up-pr-<repo>-<PR_NUMBER>.json`
 cat /tmp/.claude/follow-up-pr-*-<PR_NUMBER>.json
 ```
 
-The state file contains: `prNumber`, `prUrl`, `branch`, `startTime`, `attempts[]`, `finalStatus`, `addressedBotComments`, `seenBotComments`, and `seenAtHead`.
+The state file contains: `prNumber`, `prUrl`, `branch`, `startTime`, `attempts[]`, `finalStatus`, and `previousRunBotHashes` (hash strings from the last exit-fail run, replaced each run, cleared on success).
 
 ---
 
