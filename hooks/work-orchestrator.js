@@ -640,6 +640,16 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
     });
   }
 
+  // follow_up
+  if (!s?.pr) {
+    add(STEPS.follow_up, 'SKIP', null, 'No PR exists');
+  } else {
+    add(STEPS.follow_up, 'RUN', 'Skill(follow-up-pr)', 'Address bot review comments and CI issues', {
+      agentType: 'skill',
+      agentPrompt: `/follow-up-pr`,
+    });
+  }
+
   // ci → cleanup → reports → complete
   add(STEPS.ci, 'RUN', 'Task(Bash)', 'Wait for CI', {
     agentType: 'Bash',
