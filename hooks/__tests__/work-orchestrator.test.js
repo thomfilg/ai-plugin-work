@@ -63,6 +63,14 @@ after(() => {
       }
     }
   } catch {}
+  // Safety-net: clean up leaked session guard files created by THIS suite only (TEST-* tickets)
+  try {
+    const tmpDir = require('os').tmpdir();
+    const tmpFiles = fs.readdirSync(tmpDir).filter(f => f.startsWith('claude-session-guard-TEST-'));
+    for (const f of tmpFiles) {
+      try { fs.unlinkSync(path.join(tmpDir, f)); } catch {}
+    }
+  } catch { /* ignore if tmpdir unreadable */ }
 });
 
 // ─── Tests ──────────────────────────────────────────────────────────────────

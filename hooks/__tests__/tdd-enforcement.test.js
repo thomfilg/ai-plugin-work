@@ -33,6 +33,14 @@ before(() => {
 
 after(() => {
   try { fs.rmSync(tempWorktreesBase, { recursive: true, force: true }); } catch {}
+  // Safety-net: clean up leaked session guard files created by THIS suite only (TDD* tickets)
+  try {
+    const tmpDir = require('os').tmpdir();
+    const tmpFiles = fs.readdirSync(tmpDir).filter(f => f.startsWith('claude-session-guard-TDD'));
+    for (const f of tmpFiles) {
+      try { fs.unlinkSync(path.join(tmpDir, f)); } catch {}
+    }
+  } catch { /* ignore if tmpdir unreadable */ }
 });
 
 // ─── Helpers ────────────────────────────────────────────────────────────────

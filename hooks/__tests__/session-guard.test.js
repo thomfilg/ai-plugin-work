@@ -246,7 +246,8 @@ describe('session-guard', () => {
 
       const r = await runHook(
         { session_id: 'test-session', cwd: '/tmp' },
-        'PreCompact'
+        'PreCompact',
+        { SESSION_GUARD_TICKET_ID: TEST_TICKET }
       );
       assert.equal(r.code, 0);
       assert.ok(r.stdout.includes(TEST_TICKET), 'should mention ticket ID');
@@ -263,7 +264,8 @@ describe('session-guard', () => {
     it('is silent when no active session', async () => {
       const r = await runHook(
         { session_id: 'test-session', cwd: '/tmp' },
-        'PreCompact'
+        'PreCompact',
+        { SESSION_GUARD_TICKET_ID: TEST_TICKET }
       );
       assert.equal(r.code, 0);
       assert.equal(r.stdout.trim(), '', 'should produce no stdout when no session');
@@ -273,7 +275,8 @@ describe('session-guard', () => {
       await runCli(['init', TEST_TICKET, TEST_WORKFLOW]);
       const r = await runHook(
         { session_id: 'test-session', cwd: '/tmp' },
-        'PreCompact'
+        'PreCompact',
+        { SESSION_GUARD_TICKET_ID: TEST_TICKET }
       );
       assert.equal(r.code, 0, 'PreCompact must always exit 0');
     });
@@ -287,7 +290,8 @@ describe('session-guard', () => {
 
       const r = await runHook(
         { session_id: 'test-session', transcript_path: '/tmp/fake-transcript.jsonl' },
-        'Stop'
+        'Stop',
+        { SESSION_GUARD_TICKET_ID: TEST_TICKET }
       );
       assert.equal(r.code, 2, 'should exit 2 to block stop');
       assert.ok(r.stderr.includes('BLOCKED'), 'should contain BLOCKED');
@@ -300,7 +304,8 @@ describe('session-guard', () => {
 
       const r = await runHook(
         { session_id: 'test-session', transcript_path: '/tmp/fake-transcript.jsonl' },
-        'Stop'
+        'Stop',
+        { SESSION_GUARD_TICKET_ID: TEST_TICKET }
       );
       assert.equal(r.code, 0, 'should exit 0 when passphrase revealed');
     });
@@ -308,7 +313,8 @@ describe('session-guard', () => {
     it('allows when no active session', async () => {
       const r = await runHook(
         { session_id: 'test-session', transcript_path: '/tmp/fake-transcript.jsonl' },
-        'Stop'
+        'Stop',
+        { SESSION_GUARD_TICKET_ID: TEST_TICKET }
       );
       assert.equal(r.code, 0, 'should exit 0 when no session');
     });
@@ -322,7 +328,8 @@ describe('session-guard', () => {
           transcript_path: '/tmp/fake-transcript.jsonl',
           stop_message: 'User said: abort workflow please',
         },
-        'Stop'
+        'Stop',
+        { SESSION_GUARD_TICKET_ID: TEST_TICKET }
       );
       assert.equal(r.code, 0, 'should allow stop when abort workflow detected');
     });
@@ -336,7 +343,8 @@ describe('session-guard', () => {
           transcript_path: '/tmp/fake-transcript.jsonl',
           stop_message: 'ABORT WORKFLOW',
         },
-        'Stop'
+        'Stop',
+        { SESSION_GUARD_TICKET_ID: TEST_TICKET }
       );
       assert.equal(r.code, 0, 'should allow case-insensitive abort');
     });
@@ -350,7 +358,8 @@ describe('session-guard', () => {
           transcript_path: '/tmp/fake-transcript.jsonl',
           stop_message: 'I am done with this task',
         },
-        'Stop'
+        'Stop',
+        { SESSION_GUARD_TICKET_ID: TEST_TICKET }
       );
       assert.equal(r.code, 2, 'should block without abort keyword');
     });
@@ -419,7 +428,7 @@ describe('session-guard', () => {
       await runCli(['init', CHECK_TICKET, '/work'], { WORKTREES_BASE: TEMP_WB });
       writeCheckState('check', 'in_progress');
 
-      const r = await runHook({ stop_message: '' }, 'Stop', { WORKTREES_BASE: TEMP_WB });
+      const r = await runHook({ stop_message: '' }, 'Stop', { WORKTREES_BASE: TEMP_WB, SESSION_GUARD_TICKET_ID: CHECK_TICKET });
       assert.equal(r.code, 0, 'should allow stop when /check is active');
     });
 
@@ -427,7 +436,7 @@ describe('session-guard', () => {
       await runCli(['init', CHECK_TICKET, '/work'], { WORKTREES_BASE: TEMP_WB });
       // No check state written
 
-      const r = await runHook({ stop_message: '' }, 'Stop', { WORKTREES_BASE: TEMP_WB });
+      const r = await runHook({ stop_message: '' }, 'Stop', { WORKTREES_BASE: TEMP_WB, SESSION_GUARD_TICKET_ID: CHECK_TICKET });
       assert.equal(r.code, 2, 'should block stop without /check');
     });
 
@@ -435,7 +444,7 @@ describe('session-guard', () => {
       await runCli(['init', CHECK_TICKET, '/work'], { WORKTREES_BASE: TEMP_WB });
       writeCheckState('check', 'completed');
 
-      const r = await runHook({ stop_message: '' }, 'Stop', { WORKTREES_BASE: TEMP_WB });
+      const r = await runHook({ stop_message: '' }, 'Stop', { WORKTREES_BASE: TEMP_WB, SESSION_GUARD_TICKET_ID: CHECK_TICKET });
       assert.equal(r.code, 2, 'should block stop when /check completed');
     });
   });
@@ -448,14 +457,15 @@ describe('session-guard', () => {
       const sessionData = {
         ticketId: 'CWD-1',
         workflow: '/work',
-        passphrase: 'FAKE-ALPHA-0001',
+        passphrase: 'TEST-ONLY-ALPHA',
         cwd: process.cwd(),
         startTime: new Date().toISOString(),
         revealed: false,
       };
       fs.writeFileSync(sessionFilePath('CWD-1'), JSON.stringify(sessionData));
 
-      const r = await runHook({ stop_message: '' }, 'Stop');
+      // Disable ticket-based matching to test cwd fallback
+      const r = await runHook({ stop_message: '' }, 'Stop', { SESSION_GUARD_TICKET_ID: '' });
       assert.equal(r.code, 2, 'should block when cwd matches');
     });
 
@@ -464,14 +474,15 @@ describe('session-guard', () => {
       const sessionData = {
         ticketId: 'CWD-2',
         workflow: '/work',
-        passphrase: 'FAKE-BRAVO-0002',
+        passphrase: 'TEST-ONLY-BRAVO',
         cwd: '/some/other/directory',
         startTime: new Date().toISOString(),
         revealed: false,
       };
       fs.writeFileSync(sessionFilePath('CWD-2'), JSON.stringify(sessionData));
 
-      const r = await runHook({ stop_message: '' }, 'Stop');
+      // Disable ticket-based matching to test cwd fallback
+      const r = await runHook({ stop_message: '' }, 'Stop', { SESSION_GUARD_TICKET_ID: '' });
       assert.equal(r.code, 0, 'should allow stop when cwd does not match');
     });
 
@@ -480,14 +491,150 @@ describe('session-guard', () => {
       const sessionData = {
         ticketId: 'LEGACY-1',
         workflow: '/work',
-        passphrase: 'FAKE-CHARLIE-0003',
+        passphrase: 'TEST-ONLY-CHARLIE',
         startTime: new Date().toISOString(),
         revealed: false,
       };
       fs.writeFileSync(sessionFilePath('LEGACY-1'), JSON.stringify(sessionData));
 
-      const r = await runHook({ stop_message: '' }, 'Stop');
+      // Disable ticket-based matching to test cwd fallback
+      const r = await runHook({ stop_message: '' }, 'Stop', { SESSION_GUARD_TICKET_ID: '' });
       assert.equal(r.code, 2, 'should block for legacy sessions without cwd');
+    });
+  });
+
+  // ─── Ticket-based session scoping ───
+
+  describe('ticket-based session scoping', () => {
+    afterEach(() => cleanupAllSessions());
+
+    it('blocks stop when session ticketId matches SESSION_GUARD_TICKET_ID', async () => {
+      const sessionData = {
+        ticketId: 'TICKET-A',
+        workflow: '/work',
+        passphrase: 'TEST-ONLY-ALPHA',
+        cwd: '/irrelevant/path',
+        startTime: new Date().toISOString(),
+        revealed: false,
+      };
+      fs.writeFileSync(sessionFilePath('TICKET-A'), JSON.stringify(sessionData));
+
+      const r = await runHook({ stop_message: '' }, 'Stop', { SESSION_GUARD_TICKET_ID: 'TICKET-A' });
+      assert.equal(r.code, 2, 'should block when ticket matches');
+    });
+
+    it('allows stop when session ticketId does NOT match SESSION_GUARD_TICKET_ID', async () => {
+      const sessionData = {
+        ticketId: 'TICKET-A',
+        workflow: '/work',
+        passphrase: 'TEST-ONLY-ALPHA',
+        cwd: '/irrelevant/path',
+        startTime: new Date().toISOString(),
+        revealed: false,
+      };
+      fs.writeFileSync(sessionFilePath('TICKET-A'), JSON.stringify(sessionData));
+
+      const r = await runHook({ stop_message: '' }, 'Stop', { SESSION_GUARD_TICKET_ID: 'TICKET-B' });
+      assert.equal(r.code, 0, 'should allow stop when ticket does not match');
+    });
+
+    it('ignores unrelated tickets, only blocks matching', async () => {
+      // Create two sessions with different tickets, both unrevealed
+      const sessionA = {
+        ticketId: 'TICKET-A',
+        workflow: '/work',
+        passphrase: 'TEST-ONLY-ALPHA',
+        cwd: '/irrelevant/path',
+        startTime: new Date().toISOString(),
+        revealed: false,
+      };
+      const sessionB = {
+        ticketId: 'TICKET-B',
+        workflow: '/work',
+        passphrase: 'TEST-ONLY-BRAVO',
+        cwd: '/irrelevant/path',
+        startTime: new Date().toISOString(),
+        revealed: false,
+      };
+      fs.writeFileSync(sessionFilePath('TICKET-A'), JSON.stringify(sessionA));
+      fs.writeFileSync(sessionFilePath('TICKET-B'), JSON.stringify(sessionB));
+
+      const r = await runHook({ stop_message: '' }, 'Stop', { SESSION_GUARD_TICKET_ID: 'TICKET-B' });
+      assert.equal(r.code, 2, 'should block for matching TICKET-B');
+    });
+
+    it('allows stop when matching ticket session is revealed', async () => {
+      const sessionData = {
+        ticketId: 'TICKET-A',
+        workflow: '/work',
+        passphrase: 'TEST-ONLY-ALPHA',
+        cwd: '/irrelevant/path',
+        startTime: new Date().toISOString(),
+        revealed: true,
+      };
+      fs.writeFileSync(sessionFilePath('TICKET-A'), JSON.stringify(sessionData));
+
+      const r = await runHook({ stop_message: '' }, 'Stop', { SESSION_GUARD_TICKET_ID: 'TICKET-A' });
+      assert.equal(r.code, 0, 'should allow stop when matching session is revealed');
+    });
+
+    it('falls back to cwd filter when no ticket context', async () => {
+      // Session with a different cwd — should not block when no ticket context
+      const sessionData = {
+        ticketId: 'TICKET-X',
+        workflow: '/work',
+        passphrase: 'TEST-ONLY-DELTA',
+        cwd: '/some/other/dir',
+        startTime: new Date().toISOString(),
+        revealed: false,
+      };
+      fs.writeFileSync(sessionFilePath('TICKET-X'), JSON.stringify(sessionData));
+
+      // Empty string opts out of ticket matching, falls back to cwd
+      const r = await runHook({ stop_message: '' }, 'Stop', { SESSION_GUARD_TICKET_ID: '' });
+      assert.equal(r.code, 0, 'should allow stop when cwd does not match (no ticket context)');
+    });
+
+    it('treats empty SESSION_GUARD_TICKET_ID as no ticket context (falls back to cwd)', async () => {
+      // Session with current cwd — should block via cwd fallback
+      const sessionData = {
+        ticketId: 'TICKET-Y',
+        workflow: '/work',
+        passphrase: 'TEST-ONLY-NOT-SECRET',
+        cwd: process.cwd(),
+        startTime: new Date().toISOString(),
+        revealed: false,
+      };
+      fs.writeFileSync(sessionFilePath('TICKET-Y'), JSON.stringify(sessionData));
+
+      const r = await runHook({ stop_message: '' }, 'Stop', { SESSION_GUARD_TICKET_ID: '' });
+      assert.equal(r.code, 2, 'should block via cwd fallback when SESSION_GUARD_TICKET_ID is empty');
+    });
+
+    it('PreCompact only shows reminders for matching ticket', async () => {
+      const sessionA = {
+        ticketId: 'TICKET-A',
+        workflow: '/work',
+        passphrase: 'TEST-ONLY-ALPHA',
+        cwd: '/irrelevant/path',
+        startTime: new Date().toISOString(),
+        revealed: false,
+      };
+      const sessionB = {
+        ticketId: 'TICKET-B',
+        workflow: '/work',
+        passphrase: 'TEST-ONLY-BRAVO',
+        cwd: '/irrelevant/path',
+        startTime: new Date().toISOString(),
+        revealed: false,
+      };
+      fs.writeFileSync(sessionFilePath('TICKET-A'), JSON.stringify(sessionA));
+      fs.writeFileSync(sessionFilePath('TICKET-B'), JSON.stringify(sessionB));
+
+      const r = await runHook({}, 'PreCompact', { SESSION_GUARD_TICKET_ID: 'TICKET-A' });
+      assert.equal(r.code, 0);
+      assert.ok(r.stdout.includes('TICKET-A'), 'should mention TICKET-A');
+      assert.ok(!r.stdout.includes('TICKET-B'), 'should NOT mention TICKET-B');
     });
   });
 });
