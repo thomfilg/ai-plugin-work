@@ -74,12 +74,14 @@ const TASKS_BASE = getConfig('TASKS_BASE') || (() => {
 const { STEPS, ALL_STEPS: WORK_STEPS } = require(path.join(__dirname, '..', 'lib', 'step-registry'));
 
 function verifyBootstrap(ticketId) {
-  // Bootstrap is proven if we're in the correct worktree with the correct branch
+  // Bootstrap is proven if the current branch contains the ticket ID
   try {
-    const dotgit = fs.readFileSync('.git', 'utf-8').trim();
-    if (!dotgit.startsWith('gitdir: ')) return false;
     let head;
-    try { head = resolveGitHead(); } catch {
+    try {
+      // Worktree: .git is a file containing "gitdir: <path>"
+      head = resolveGitHead();
+    } catch {
+      // Normal repo: .git is a directory
       head = fs.readFileSync(path.join('.git', 'HEAD'), 'utf-8').trim();
     }
     const ref = head.startsWith('ref: ') ? head.slice(5) : head;
