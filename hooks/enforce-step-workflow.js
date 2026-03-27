@@ -126,6 +126,8 @@ const WORKFLOWS = [
           const evidence = JSON.parse(fs.readFileSync(
             path.join(TASKS_BASE, ticketId, '.tdd-evidence-implement.json'), 'utf-8'
           ));
+          // Normal TDD: refactorConfirmed must be true (full red-green-refactor cycle)
+          // Exception mode: refactorConfirmed=false is OK when exceptionReason is set (config-only, no testable behavior)
           return evidence.refactorConfirmed === true
             || (evidence.refactorConfirmed === false && !!evidence.exceptionReason);
         } catch { return false; }

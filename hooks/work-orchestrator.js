@@ -760,7 +760,7 @@ function transitionStep(ticket, targetStep) {
   }
 
   // TDD gate: require evidence before leaving gated steps
-  const tddEnforce = detectTestSetup();
+  const tddEnforce = detectTestSetup(process.cwd());
   if (tddEnforce && TDD_GATED_STEPS.includes(currentStep) && currentStep !== targetStep) {
     const { exists, parseError, evidence } = readTddEvidence(ticket, currentStep);
     if (!exists || parseError) {
