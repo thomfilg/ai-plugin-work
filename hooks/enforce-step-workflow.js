@@ -42,12 +42,7 @@ process.on('unhandledRejection', (err) => {
 
 // (Patch 1) Lazy-load appendAction with fallback
 // Agent detection for report file protection
-let isRunningInAgent;
-try {
-  isRunningInAgent = require(path.join(process.env.HOME, '.claude', 'hooks', 'lib', 'agent-detection')).isRunningInAgent;
-} catch {
-  isRunningInAgent = () => true; // fail-open if agent detection unavailable
-}
+const { isRunningInAgent } = require(path.join(__dirname, '..', 'lib', 'agent-detection'));
 
 const { createArtifactProtector } = require(path.join(__dirname, '..', 'lib', 'protect-artifact-files'));
 
@@ -204,18 +199,40 @@ const WORKFLOWS = [
           return pr.number > 0 && pr.state === 'OPEN';
         } catch { return false; }
       }},
-      { step: STEPS.follow_up, verify: () => {
-        // Follow-up is proven if follow-up-pr state file shows finalStatus 'ready'
+      { step: STEPS.follow_up, verify: (ticketId) => {
         try {
           const { execFileSync } = require('child_process');
           const os = require('os');
-          const opts = { encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] };
-          // Get repo slug and PR number to find state file
+          const opts = { encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] };
+
+          // 1. follow-up-pr state must show finalStatus 'ready'
           const slug = execFileSync('gh', ['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'], opts).trim().replace('/', '-');
           const prNum = execFileSync('gh', ['pr', 'view', '--json', 'number', '-q', '.number'], opts).trim();
           const stateFile = path.join(os.tmpdir(), '.claude', `follow-up-pr-${slug}-${prNum}.json`);
           const state = JSON.parse(fs.readFileSync(stateFile, 'utf-8'));
-          return state.finalStatus === 'ready';
+          if (state.finalStatus !== 'ready') return false;
+
+          // 2. Review accountability: every PR comment must be accounted for
+          const commentCount = parseInt(
+            execFileSync('gh', ['api', `repos/{owner}/{repo}/pulls/${prNum}/comments`, '--jq', 'length'], opts).trim(),
+            10
+          );
+          if (commentCount > 0) {
+            const accountabilityFile = path.join(TASKS_BASE, ticketId, 'review-accountability.json');
+            if (!fs.existsSync(accountabilityFile)) return false;
+            const entries = JSON.parse(fs.readFileSync(accountabilityFile, 'utf-8'));
+            if (!Array.isArray(entries) || entries.length < commentCount) return false;
+            // Every entry must have disposition and reason
+            if (!entries.every(e => e.disposition && e.reason)) return false;
+            // 3. "acknowledged" entries (AI justifying a skip) require user approval
+            // Agent must call AskUserQuestion and record the user's decision
+            const acknowledged = entries.filter(e => e.disposition === 'acknowledged');
+            if (acknowledged.length > 0) {
+              if (!acknowledged.every(e => e.userApproval === true)) return false;
+            }
+          }
+
+          return true;
         } catch { return false; }
       }},
       { step: STEPS.ready,            tool: ['Task', 'Agent'], field: 'description',   pattern: new RegExp(`^${STEPS.ready}\\b`, 'i') },
