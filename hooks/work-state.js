@@ -36,7 +36,7 @@ const TASKS_BASE = config.TASKS_BASE;
 
 const { ALL_STEPS: STEPS } = require(path.join(__dirname, '..', 'lib', 'step-registry'));
 
-const SUBTASK_STEPS = ['implement', 'quality', 'commit'];
+const SUBTASK_STEPS = ['implement', 'commit'];
 
 const CHECK_AGENTS = [
   'quality_checker',
@@ -329,7 +329,7 @@ function getNextSubtaskStatePath(ticketId) {
 }
 
 /**
- * Initialize a subtask state (minimal step set: implement, quality, commit).
+ * Initialize a subtask state (minimal step set: implement, commit).
  *
  * @param {string} ticketId - parent ticket ID
  * @param {string} description
