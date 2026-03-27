@@ -146,10 +146,11 @@ const TDD_GATED_STEPS = [STEPS.implement];
  * TDD is mandatory when tests are available.
  * WORK_TDD_ENFORCE=0 explicitly disables (for testing/debugging only).
  */
-function detectTestSetup() {
+function detectTestSetup(dir) {
   if (process.env.WORK_TDD_ENFORCE === '0') return false;
+  if (process.env.WORK_TDD_ENFORCE === '1') return true;
   try {
-    const cwd = process.cwd();
+    const cwd = (dir && fileExists(dir)) ? dir : process.cwd();
     const pkgPath = path.join(cwd, 'package.json');
 
     // Check package.json for test-related scripts
@@ -310,7 +311,7 @@ function recordTddEvidence(ticketId, stepId, flags) {
     }
 
     // Run quality checks when --refactored is set — can't be faked
-    const devCheckScript = path.join(__dirname, '..', 'scripts', 'dev-check', 'dev-check.sh');
+    const devCheckScript = process.env.DEV_CHECK_SCRIPT || path.join(__dirname, '..', 'scripts', 'dev-check', 'dev-check.sh');
     let qualityOutput = '';
     let qualityExitCode = 1;
     try {
@@ -478,7 +479,7 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
   const worktreeDir = s?.worktreeDir || `${WORKTREES_BASE}/${MAIN_WORKTREE_FOLDER}-${safeName}`;
   const tasksDir = s?.tasksDir || `${TASKS_BASE}/${safeName}`;
 
-  const tddEnforce = detectTestSetup();
+  const tddEnforce = detectTestSetup(worktreeDir);
 
   // Initialize session guard for workflow locking (skip when explicitly disabled)
   if (ticket && process.env.SESSION_GUARD_ENABLED !== '0') {

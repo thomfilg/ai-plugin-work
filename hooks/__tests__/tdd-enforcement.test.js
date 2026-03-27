@@ -139,8 +139,8 @@ describe('TDD enforcement', () => {
     });
 
     it('with WORK_TDD_ENFORCE empty: auto-detection kicks in and agentPrompt for 3_implement includes TDD protocol', async () => {
-      // Empty string no longer means "disabled" — it falls through to auto-detection
-      // which returns true because this project has test scripts in package.json
+      // Empty string falls through to auto-detection which checks the worktree dir,
+      // then falls back to process.cwd() (this project has test scripts in package.json)
       const { result } = await runOrchestrator(['plan', TICKET], { env: baseEnv({ WORK_TDD_ENFORCE: '' }) });
       const implStep = result.plan.find(s => s.step === 'implement');
       assert.ok(implStep, '3_implement step must exist in plan');
@@ -576,13 +576,8 @@ it('agentPrompt for 3_implement contains instruction not to make local commits',
     it('record-tdd with normal flags creates valid evidence file', async () => {
       const { result, code, stderr } = await runOrchestrator(
         ['record-tdd', TICKET, 'implement', '--cmd', 'pnpm test', '--red', '--green', '--refactored', '--files', 'a.test.ts'],
-        { env: baseEnv() },
+        { env: { ...baseEnv(), DEV_CHECK_SCRIPT: '/dev/null' } },
       );
-      // dev-check.sh runs quality checks; if they fail, quality_failed is expected
-      if (code !== 0 && result && result.error === 'quality_failed') {
-        // Quality checks failed in test env — acceptable, skip remaining assertions
-        return;
-      }
       assert.equal(code, 0);
       assert.equal(result.recorded, true);
 
