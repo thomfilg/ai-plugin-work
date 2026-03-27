@@ -143,9 +143,11 @@ const TDD_GATED_STEPS = [STEPS.implement];
 
 /**
  * Auto-detect if the project has a test setup.
- * TDD is mandatory when tests are available — no opt-out env var.
+ * TDD is mandatory when tests are available.
+ * WORK_TDD_ENFORCE=0 explicitly disables (for testing/debugging only).
  */
 function detectTestSetup() {
+  if (process.env.WORK_TDD_ENFORCE === '0') return false;
   try {
     const cwd = process.cwd();
     const pkgPath = path.join(cwd, 'package.json');
