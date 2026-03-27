@@ -87,6 +87,46 @@ function generatePassphrase() {
   return `${w1}-${w2}-${num}`;
 }
 
+// ─── Ticket context resolution ──────────────────────────────────────────────
+
+let _cachedTicketId;
+let _ticketIdResolved = false;
+
+function resolveGitHead() {
+  const dotgitPath = '.git';
+  const dotgit = fs.readFileSync(dotgitPath, 'utf-8').trim();
+  if (dotgit.startsWith('gitdir: ')) {
+    const rawGitdir = dotgit.slice('gitdir: '.length);
+    const gitdir = path.resolve(path.dirname(dotgitPath), rawGitdir);
+    return fs.readFileSync(path.join(gitdir, 'HEAD'), 'utf-8').trim();
+  }
+  throw new Error('unexpected .git content');
+}
+
+function getTicketId() {
+  if (_ticketIdResolved) return _cachedTicketId;
+  _ticketIdResolved = true;
+  if ('SESSION_GUARD_TICKET_ID' in process.env) {
+    _cachedTicketId = process.env.SESSION_GUARD_TICKET_ID || null;
+    return _cachedTicketId;
+  }
+  try {
+    let head;
+    try {
+      head = resolveGitHead();
+    } catch {
+      head = fs.readFileSync(path.join('.git', 'HEAD'), 'utf-8').trim();
+    }
+    const ref = head.startsWith('ref: ') ? head.slice(5) : head;
+    const match = ref.match(/[A-Z]+-\d+/);
+    _cachedTicketId = match ? match[0] : null;
+  } catch {
+    _cachedTicketId = null;
+  }
+  return _cachedTicketId;
+}
+
+
 function readSessionFile(ticketId) {
   try {
     const filePath = sessionFilePath(ticketId);
@@ -292,8 +332,15 @@ function handlePreCompact() {
     return;
   }
 
+  // Only show reminders for sessions belonging to the current ticket context
+  const currentTicket = getTicketId();
+  const relevant = currentTicket
+    ? sessions.filter(s => s.ticketId === currentTicket)
+    : sessions;
+  if (relevant.length === 0) { process.exit(0); return; }
+
   const lines = [];
-  for (const session of sessions) {
+  for (const session of relevant) {
     lines.push(
       `ACTIVE WORKFLOW SESSION - DO NOT ABANDON`,
       `Workflow: ${session.workflow} | Ticket: ${session.ticketId}`,
@@ -343,10 +390,12 @@ function handleStop(hookData) {
     return;
   }
 
-  // Only consider sessions owned by this working directory
+  // Only consider sessions owned by this ticket context (or cwd as fallback)
+  const currentTicket = getTicketId();
   const currentCwd = process.cwd();
-  // Treat sessions missing cwd (legacy sessions) as owned, so they still enforce the lock
-  const ownedSessions = sessions.filter(s => !s.cwd || s.cwd === currentCwd);
+  const ownedSessions = currentTicket
+    ? sessions.filter(s => s.ticketId === currentTicket)
+    : sessions.filter(s => !s.cwd || s.cwd === currentCwd);  // fallback to cwd filter
 
   // Check if any owned session is unrevealed (tests: cwd match, no-match, legacy without cwd)
   const unrevealed = ownedSessions.filter(s => !s.revealed);
