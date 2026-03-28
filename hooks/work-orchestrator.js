@@ -27,9 +27,9 @@
  *   node work-orchestrator.js graph
  *
  * Step names (from lib/step-registry.js):
- *   ticket, bootstrap, implement, quality,
- *   commit, check, test_enhancement,
- *   pr, ready, ci, cleanup, reports, complete
+ *   ticket, bootstrap, implement,
+ *   commit, check, pr, ready,
+ *   ci, cleanup, reports, complete
  */
 
 const { execSync, execFileSync } = require('child_process');
@@ -139,28 +139,80 @@ function getCurrentStep(workState) {
 
 // ─── TDD Enforcement ────────────────────────────────────────────────────────
 
-const TDD_GATED_STEPS = [STEPS.implement, STEPS.test_enhancement];
+const TDD_GATED_STEPS = [STEPS.implement];
+
+/**
+ * Auto-detect if the project has a test setup.
+ * TDD is mandatory when tests are available.
+ * WORK_TDD_ENFORCE=0 explicitly disables (for testing/debugging only).
+ */
+function detectTestSetup(dir) {
+  if (process.env.WORK_TDD_ENFORCE === '0') return false;
+  if (process.env.WORK_TDD_ENFORCE === '1') return true;
+  try {
+    const cwd = (dir && fileExists(dir)) ? dir : process.cwd();
+    const pkgPath = path.join(cwd, 'package.json');
+
+    // Check package.json for test-related scripts
+    if (fileExists(pkgPath)) {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+      const scripts = pkg.scripts || {};
+      const hasTestScript = Object.keys(scripts).some(k =>
+        /^(test|dev:test|test:unit|test:integration|vitest|jest)$/i.test(k)
+      );
+      if (hasTestScript) return true;
+    }
+
+    // Check for test config files
+    const testConfigs = [
+      'jest.config.js', 'jest.config.ts', 'jest.config.mjs',
+      'vitest.config.js', 'vitest.config.ts', 'vitest.config.mts',
+      '.mocharc.yml', '.mocharc.json',
+    ];
+    if (testConfigs.some(f => fileExists(path.join(cwd, f)))) return true;
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
 
 const TDD_PROTOCOL = `
 TDD protocol (mandatory for this step):
+
+RED phase:
 1. Identify the smallest behavior change.
 2. Find the nearest existing test file or create one.
 3. Write the smallest focused failing test set first (usually 1-3 tests) when behavior is testable.
 4. Run the smallest relevant test command and confirm RED.
+
+GREEN phase:
 5. Implement the minimum production change required.
 6. Re-run the same targeted tests and confirm GREEN.
-7. Refactor only after GREEN.
-8. Record TDD evidence using the orchestrator CLI before completing:
+
+REFACTOR phase:
+7. Review all modified source files for coverage gaps (files changed but not directly tested).
+8. Add edge-case tests for error paths, boundary conditions, and integration points.
+9. Run full test suite for modified files: pnpm dev:test (or targeted test command).
+10. Confirm all tests pass after refactor — no regressions.
+
+Record evidence:
+11. Record TDD evidence using the orchestrator CLI before completing:
    node <ORCHESTRATOR_PATH> record-tdd <TICKET_ID> <step_id> \\
      --cmd "<exact test command run>" \\
      --red \\
      --green \\
+     --refactored \\
      --files "file1.test.ts,file2.test.ts"
    Or for exceptions (no RED/GREEN cycle):
    node <ORCHESTRATOR_PATH> record-tdd <TICKET_ID> <step_id> \\
      --exception "config-only change, no testable behavior"
-9. If literal RED-first is not appropriate (mechanical refactor, pure config, file move), set exceptionReason and use the nearest-test approach instead.
-10. Do NOT make local git commits during the RED/GREEN cycle. Leave all changes uncommitted — the \`commit\` step handles commits with proper message formatting.
+
+Rules:
+- If literal RED-first is not appropriate (mechanical refactor, pure config, file move), set exceptionReason and use the nearest-test approach instead.
+- Do NOT make local git commits during the RED/GREEN/REFACTOR cycle. Leave all changes uncommitted — the \`commit\` step handles commits with proper message formatting.
+- The refactor phase includes all coverage improvement.
 `.trim();
 
 function getTddEvidencePath(ticketId, stepId) {
@@ -213,6 +265,9 @@ function validateTddEvidence(evidence, expectedStepId) {
     if (evidence.greenConfirmed !== true) {
       return { valid: false, reason: 'greenConfirmed must be true when no exceptionReason' };
     }
+    if (evidence.refactorConfirmed !== true) {
+      return { valid: false, reason: 'refactorConfirmed must be true when no exceptionReason — run coverage review and edge-case tests before recording' };
+    }
   }
 
   return { valid: true, reason: '' };
@@ -224,10 +279,10 @@ function recordTddEvidence(ticketId, stepId, flags) {
   }
 
   const hasException = flags.exception !== undefined;
-  const hasNormalFlags = flags.cmd !== undefined || flags.red || flags.green || flags.files !== undefined;
+  const hasNormalFlags = flags.cmd !== undefined || flags.red || flags.green || flags.refactored || flags.files !== undefined;
 
   if (hasException && hasNormalFlags) {
-    return { error: 'mixed_modes', message: 'Cannot mix --exception with --cmd/--red/--green/--files' };
+    return { error: 'mixed_modes', message: 'Cannot mix --exception with --cmd/--red/--green/--refactored/--files' };
   }
 
   let evidence;
@@ -247,17 +302,46 @@ function recordTddEvidence(ticketId, stepId, flags) {
     if (!flags.cmd || (typeof flags.cmd === 'string' && flags.cmd.trim() === '')) return { error: 'missing_flag', message: '--cmd is required in normal TDD mode' };
     if (!flags.red) return { error: 'missing_flag', message: '--red is required in normal TDD mode' };
     if (!flags.green) return { error: 'missing_flag', message: '--green is required in normal TDD mode' };
+    if (!flags.refactored) return { error: 'missing_flag', message: '--refactored is required in normal TDD mode (confirms coverage gaps reviewed and edge-case tests added)' };
     if (!flags.files) return { error: 'missing_flag', message: '--files is required in normal TDD mode' };
 
     const testFiles = String(flags.files).split(',').map(f => f.trim()).filter(Boolean);
     if (testFiles.length === 0) {
       return { error: 'invalid_files', message: '--files must list at least one test file in normal TDD mode' };
     }
+
+    // Run quality checks when --refactored is set — can't be faked
+    const devCheckScript = process.env.DEV_CHECK_SCRIPT || path.join(__dirname, '..', 'scripts', 'dev-check', 'dev-check.sh');
+    let qualityOutput = '';
+    let qualityExitCode = 1;
+    try {
+      qualityOutput = execSync(`bash "${devCheckScript}" --main`, {
+        encoding: 'utf-8',
+        timeout: 120000,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        cwd: process.cwd(),
+      });
+      qualityExitCode = 0;
+    } catch (e) {
+      qualityOutput = (e.stdout || '') + '\n' + (e.stderr || '');
+      qualityExitCode = e.status || 1;
+    }
+
+    if (qualityExitCode !== 0) {
+      return {
+        error: 'quality_failed',
+        message: `--refactored requires passing quality checks (lint + typecheck + test).\ndev-check.sh exited with code ${qualityExitCode}.\nOutput:\n${qualityOutput.slice(-2000)}`,
+      };
+    }
+
     evidence = {
       step: stepId,
       targetedTestCommand: flags.cmd.trim(),
       redConfirmed: true,
       greenConfirmed: true,
+      refactorConfirmed: true,
+      qualityCheckPassed: true,
+      qualityCheckOutput: qualityOutput.slice(-1000),
       testFilesChanged: testFiles,
       exceptionReason: '',
     };
@@ -376,12 +460,8 @@ function inspect(ticket, providerConfig) {
     s.postPrShaMatch = !!(s.contentSha && s.contentSha === s.postPrUpdateSha);
   }
 
-  // Test enhancement
-  const te = s.workState?.testEnhancement;
-  s.testEnhancement = te || null;
   s.hasBrief = fileExists(path.join(s.tasksDir, 'brief.md'));
   s.hasSpec = fileExists(path.join(s.tasksDir, 'spec.md'));
-  s.testEnhancementDone = s.stepIs(STEPS.test_enhancement) === 'completed' || te?.skipped === true;
 
   // Dev session
   s.hasDevSession = run(`tmux has-session -t "${ticket}-dev" 2>/dev/null && echo yes`) === 'yes';
@@ -399,7 +479,7 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
   const worktreeDir = s?.worktreeDir || `${WORKTREES_BASE}/${MAIN_WORKTREE_FOLDER}-${safeName}`;
   const tasksDir = s?.tasksDir || `${TASKS_BASE}/${safeName}`;
 
-  const tddEnforce = process.env.WORK_TDD_ENFORCE === '1';
+  const tddEnforce = detectTestSetup(worktreeDir);
 
   // Initialize session guard for workflow locking (skip when explicitly disabled)
   if (ticket && process.env.SESSION_GUARD_ENABLED !== '0') {
@@ -541,18 +621,6 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
     });
   }
 
-  // quality
-  if (s?.hasDiffVsMain && s?.stepIs(STEPS.quality) === 'completed') {
-    add(STEPS.quality, 'SKIP', null, 'Previously passed');
-  } else if (!s?.hasDiffVsMain) {
-    add(STEPS.quality, 'PENDING', null, 'Depends on implement');
-  } else {
-    add(STEPS.quality, 'RUN', 'Task(quality-checker)', 'Lint + typecheck + test', {
-      agentType: 'quality-checker',
-      agentPrompt: `Run quality checks in ${worktreeDir}:\nUse pnpm dev:check if available. If it doesn't exist, run ${PLUGIN_ROOT}/scripts/dev-check/dev-check.sh as fallback. If that also fails, use pnpm lint && pnpm typecheck && pnpm test.\n\nReturn PASS or FAIL with summary.${planningContext}`,
-    });
-  }
-
   // commit
   if (s?.hasUncommitted) {
     add(STEPS.commit, 'RUN', 'Task(commit-writer)', `${s.uncommittedCount} uncommitted file(s)`, {
@@ -590,23 +658,6 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
     add(STEPS.check, 'RUN', '/check', p.length ? p.join('; ') : 'No reports found', {
       agentType: 'skill',
       agentPrompt: '/check',
-    });
-  }
-
-  // test_enhancement
-  if (rework) {
-    add(STEPS.test_enhancement, 'RUN', `Skill(test-coordination): ${ticket}`, 'REWORK: Re-run', {
-      agentType: 'skill',
-      agentPrompt: `/test-coordination ${ticket}`,
-    });
-  } else if (s?.testEnhancementDone) {
-    const te = s.testEnhancement;
-    const d = te?.skipped ? `Skipped: ${te.skipReason || '?'}` : `Rating ${te?.finalRating || '?'}/10`;
-    add(STEPS.test_enhancement, 'SKIP', null, d);
-  } else {
-    add(STEPS.test_enhancement, 'RUN', `Skill(test-coordination): ${t}`, 'Not yet run', {
-      agentType: 'skill',
-      agentPrompt: `/test-coordination ${t}`,
     });
   }
 
@@ -709,12 +760,12 @@ function transitionStep(ticket, targetStep) {
   }
 
   // TDD gate: require evidence before leaving gated steps
-  const tddEnforce = process.env.WORK_TDD_ENFORCE === '1';
+  const tddEnforce = detectTestSetup(process.cwd());
   if (tddEnforce && TDD_GATED_STEPS.includes(currentStep) && currentStep !== targetStep) {
     const { exists, parseError, evidence } = readTddEvidence(ticket, currentStep);
     if (!exists || parseError) {
       const orchPath = path.resolve(__dirname, 'work-orchestrator.js');
-      const msg = `Cannot leave ${currentStep} without TDD evidence. Record it via:\n  node ${orchPath} record-tdd ${ticket} ${currentStep} --cmd "<test command>" --red --green --files "<test files>"\nOr for exceptions:\n  node ${orchPath} record-tdd ${ticket} ${currentStep} --exception "<reason>"`;
+      const msg = `Cannot leave ${currentStep} without TDD evidence. Record it via:\n  node ${orchPath} record-tdd ${ticket} ${currentStep} --cmd "<test command>" --red --green --refactored --files "<test files>"\nOr for exceptions:\n  node ${orchPath} record-tdd ${ticket} ${currentStep} --exception "<reason>"`;
       return { error: true, message: msg };
     }
     const validation = validateTddEvidence(evidence, currentStep);
@@ -866,7 +917,6 @@ function main() {
           reports: state.reports, allReportsPass: state.allReportsPass,
           missingReports: state.missingReports, failedReports: state.failedReports,
           prEverUpdated: state.prEverUpdated, prShaMatch: state.prShaMatch,
-          testEnhancement: state.testEnhancement, testEnhancementDone: state.testEnhancementDone,
           hasDevSession: state.hasDevSession, workStateStatus: state.workState?.status || null,
         };
       }
@@ -931,7 +981,7 @@ function main() {
     case 'record-tdd': {
       requirePaths();
       if (rest.length < 2) {
-        console.error(JSON.stringify({ error: 'usage', message: 'Usage: record-tdd <TICKET_ID> <STEP_ID> [--cmd "..." --red --green --files "..."] [--exception "..."]' }));
+        console.error(JSON.stringify({ error: 'usage', message: 'Usage: record-tdd <TICKET_ID> <STEP_ID> [--cmd "..." --red --green --refactored --files "..."] [--exception "..."]' }));
         process.exit(1);
       }
       const tddProviderCfg = tp.getProviderConfig({ skipPrompt: true });
@@ -944,6 +994,7 @@ function main() {
         if (rest[i] === '--cmd' && rest[i + 1]) { flags.cmd = rest[++i]; }
         else if (rest[i] === '--red') { flags.red = true; }
         else if (rest[i] === '--green') { flags.green = true; }
+        else if (rest[i] === '--refactored') { flags.refactored = true; }
         else if (rest[i] === '--files' && rest[i + 1]) { flags.files = rest[++i]; }
         else if (rest[i] === '--exception' && rest[i + 1]) { flags.exception = rest[++i]; }
       }

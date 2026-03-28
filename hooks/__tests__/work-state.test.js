@@ -65,7 +65,7 @@ describe('work-state.js', () => {
     const TICKET = 'TEST-INIT-001';
     after(() => { cleanupTempWorkState(TICKET); });
 
-    it('should create state with all 16 steps as pending', async () => {
+    it('should create state with all 14 steps as pending', async () => {
       const { result, code } = await runWorkState(['init', TICKET]);
       assert.equal(code, 0);
       assert.equal(result.ticketId, TICKET);
@@ -76,15 +76,15 @@ describe('work-state.js', () => {
       assert.equal(result.errors.length, 0);
 
       const steps = Object.keys(result.stepStatus);
-      assert.equal(steps.length, 16);
+      assert.equal(steps.length, 14);
       for (const step of steps) {
         assert.equal(result.stepStatus[step], 'pending', `Step ${step} should be pending`);
       }
 
       // Verify exact step names
       const expectedSteps = [
-        'ticket', 'bootstrap', 'brief', 'spec', 'implement', 'quality',
-        'commit', 'check', 'test_enhancement',
+        'ticket', 'bootstrap', 'brief', 'spec', 'implement',
+        'commit', 'check',
         'pr', 'ready', 'follow_up', 'ci', 'cleanup', 'reports', 'complete',
       ];
       assert.deepEqual(steps, expectedSteps);
@@ -125,7 +125,7 @@ describe('work-state.js', () => {
       assert.equal(code, 0);
       assert.equal(result.ticketId, TICKET_EXISTS);
       assert.equal(result.status, 'in_progress');
-      assert.equal(Object.keys(result.stepStatus).length, 16);
+      assert.equal(Object.keys(result.stepStatus).length, 14);
       for (const step of Object.keys(result.stepStatus)) {
         assert.equal(result.stepStatus[step], 'pending');
       }
@@ -322,9 +322,9 @@ describe('work-state.js', () => {
       assert.ok(result.startTime);
       assert.ok(result.lastUpdate);
 
-      // Only implement, quality, commit steps
+      // Only implement, commit steps
       const steps = Object.keys(result.stepStatus);
-      assert.deepEqual(steps, ['implement', 'quality', 'commit']);
+      assert.deepEqual(steps, ['implement', 'commit']);
       for (const step of steps) {
         assert.equal(result.stepStatus[step], 'pending', `Step ${step} should be pending`);
       }

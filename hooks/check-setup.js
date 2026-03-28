@@ -171,6 +171,28 @@ function getImpactedApps() {
     return webAppNames;
   }
 
+  // Single-app repo fallback: files changed but none under apps/ or packages/
+  // Detect app from package.json name or repo directory name
+  if (apps.size === 0 && packages.size === 0 && lines.length > 0) {
+    // Try WEB_APPS config first
+    if (webAppNames.length > 0) {
+      console.error(`Single-app repo detected — ${lines.length} file(s) changed outside apps/ — including all web apps for QA`);
+      return webAppNames;
+    }
+    // Fallback: detect from package.json
+    try {
+      const pkg = JSON.parse(require('fs').readFileSync('package.json', 'utf-8'));
+      const appName = pkg.name?.replace(/^@[^/]+\//, '') || path.basename(process.cwd());
+      console.error(`Single-app repo detected — using "${appName}" from package.json`);
+      return [appName];
+    } catch {
+      // Last resort: use directory name
+      const dirName = path.basename(process.cwd());
+      console.error(`Single-app repo detected — using directory name "${dirName}"`);
+      return [dirName];
+    }
+  }
+
   return Array.from(apps).sort();
 }
 

@@ -41,6 +41,11 @@ process.on('unhandledRejection', (err) => {
 });
 
 // (Patch 1) Lazy-load appendAction with fallback
+// Agent detection for report file protection
+const { isRunningInAgent } = require(path.join(__dirname, '..', 'lib', 'agent-detection'));
+
+const { createArtifactProtector } = require(path.join(__dirname, '..', 'lib', 'protect-artifact-files'));
+
 let appendAction;
 try {
   appendAction = require(path.join(__dirname, '..', 'lib', 'work-actions')).appendAction;
@@ -63,6 +68,22 @@ const TASKS_BASE = getConfig('TASKS_BASE') || (() => {
 
 const { STEPS, ALL_STEPS: WORK_STEPS } = require(path.join(__dirname, '..', 'lib', 'step-registry'));
 
+function verifyBootstrap(ticketId) {
+  // Bootstrap is proven if the current branch contains the ticket ID
+  try {
+    let head;
+    try {
+      // Worktree: .git is a file containing "gitdir: <path>"
+      head = resolveGitHead();
+    } catch {
+      // Normal repo: .git is a directory
+      head = fs.readFileSync(path.join('.git', 'HEAD'), 'utf-8').trim();
+    }
+    const ref = head.startsWith('ref: ') ? head.slice(5) : head;
+    return ref.includes(ticketId);
+  } catch { return false; }
+}
+
 const WORKFLOWS = [
   {
     name: 'work',
@@ -71,33 +92,202 @@ const WORKFLOWS = [
     isActive: (state) => state?.status === 'in_progress',
     steps: WORK_STEPS,
     // Soft steps allow transition without evidence — these are optional or metadata-only steps.
-    // brief and spec are soft because they're toggleable via WORK_BRIEF_ENABLED/WORK_SPEC_ENABLED
-    // and produce documentation artifacts, not code that requires enforcement.
     softSteps: new Set([
-      STEPS.ticket, STEPS.brief, STEPS.spec, // optional/metadata steps
+      STEPS.ticket,                           // optional/metadata step
       STEPS.ready, STEPS.reports,             // operational steps — no code changes to enforce
     ]),
     // Tool can be a string or array — some runtimes emit Agent instead of Task.
     commandMap: [
-      { step: STEPS.ticket,           tool: ['Task', 'Agent'], field: 'description',   pattern: new RegExp(`^${STEPS.ticket}\\b`, 'i') },
-      { step: STEPS.brief,            tool: ['Task', 'Agent'], field: 'subagent_type', pattern: /^(work-workflow:)?brief-writer$/ },
-      { step: STEPS.brief,            tool: ['Task', 'Agent'], field: 'description',   pattern: new RegExp(`^${STEPS.brief}\\b`, 'i') },
-      { step: STEPS.spec,             tool: ['Task', 'Agent'], field: 'subagent_type', pattern: /^(work-workflow:)?spec-writer$/ },
-      { step: STEPS.spec,             tool: ['Task', 'Agent'], field: 'description',   pattern: new RegExp(`^${STEPS.spec}\\b`, 'i') },
-      { step: STEPS.implement,        tool: 'Skill',           field: 'skill',         pattern: /^work-implement$/ },
-      { step: STEPS.quality,          tool: ['Task', 'Agent'], field: 'subagent_type', pattern: /^(work-workflow:)?quality-checker$/ },
-      { step: STEPS.quality,          tool: ['Task', 'Agent'], field: 'description',   pattern: new RegExp(`^${STEPS.quality}\\b`, 'i') },
-      { step: STEPS.quality,          tool: 'Bash',            field: 'command',       pattern: /^\s*(LOW_CONCURRENCY=\d+\s+)?((pnpm|npm)\s+(run\s+)?dev:check\b|([\w./-]*\/)?dev-check\.sh(\s+--[\w-]+)*)/ },
-      { step: STEPS.commit,           tool: ['Task', 'Agent'], field: 'subagent_type', pattern: /^(work-workflow:)?commit-writer$/ },
-      { step: STEPS.check,            tool: 'Skill',           field: 'skill',         pattern: /^check$/ },
+      { step: STEPS.bootstrap, verify: verifyBootstrap },
+      { step: STEPS.ticket, verify: (ticketId) => {
+        // Ticket is proven if the work state file exists and is active for this ticket
+        try {
+          const stateFile = path.join(TASKS_BASE, ticketId, '.work-state.json');
+          const state = JSON.parse(fs.readFileSync(stateFile, 'utf-8'));
+          return state?.status === 'in_progress' && state?.ticketId === ticketId;
+        } catch { return false; }
+      }},
+      { step: STEPS.brief, verify: (ticketId) => {
+        try { return fs.existsSync(path.join(TASKS_BASE, ticketId, 'brief.md')); }
+        catch { return false; }
+      }},
+      { step: STEPS.spec, verify: (ticketId) => {
+        try { return fs.existsSync(path.join(TASKS_BASE, ticketId, 'spec.md')); }
+        catch { return false; }
+      }},
+      { step: STEPS.implement, verify: (ticketId) => {
+        // Implement is proven if TDD evidence confirms green (or exception)
+        try {
+          const evidence = JSON.parse(fs.readFileSync(
+            path.join(TASKS_BASE, ticketId, '.tdd-evidence-implement.json'), 'utf-8'
+          ));
+          // Normal TDD: refactorConfirmed must be true (full red-green-refactor cycle)
+          // Exception mode: refactorConfirmed=false is OK when exceptionReason is set (config-only, no testable behavior)
+          return evidence.refactorConfirmed === true
+            || (evidence.refactorConfirmed === false && !!evidence.exceptionReason);
+        } catch { return false; }
+      }},
+      { step: STEPS.commit, verify: (ticketId) => {
+        // Commit is proven if HEAD has new commits with ticketId (not empty commits)
+        try {
+          const { execFileSync } = require('child_process');
+          const opts = { encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] };
+          const shaFile = path.join(TASKS_BASE, ticketId, '.last-commit-sha');
+          const headSha = execFileSync('git', ['rev-parse', 'HEAD'], opts).trim();
+
+          let baseBranch = 'origin/main';
+          try {
+            const getBaseBranch = require(path.join(__dirname, '..', 'lib', 'config')).getBaseBranch;
+            baseBranch = getBaseBranch({ cwd: process.cwd() });
+          } catch { /* fallback to origin/main */ }
+
+          // 1. If saved SHA exists and HEAD differs → new commit was made
+          try {
+            const savedSha = fs.readFileSync(shaFile, 'utf-8').trim();
+            if (savedSha && headSha !== savedSha) {
+              // Verify it's not an empty commit (must have file changes)
+              const diff = execFileSync('git', ['diff', '--shortstat', savedSha, headSha], opts).trim();
+              if (!diff) return false; // Empty commit — reject
+              fs.writeFileSync(shaFile, headSha);
+              return true;
+            }
+          } catch { /* no saved SHA — first run */ }
+
+          // 2. No saved SHA → check for commits with ticketId not on main
+          const log = execFileSync('git', ['log', '--oneline', `${baseBranch}..HEAD`, '--grep', ticketId], opts).trim();
+          if (log) {
+            // Verify diff vs main is non-empty
+            const diff = execFileSync('git', ['diff', '--shortstat', baseBranch, 'HEAD'], opts).trim();
+            if (!diff) return false; // No actual changes — reject
+            fs.writeFileSync(shaFile, headSha);
+            return true;
+          }
+
+          // 3. No commits with ticketId → not committed yet
+          return false;
+        } catch { return false; }
+      }},
+      { step: STEPS.check, verify: (ticketId) => {
+        // Check is proven if all required report files exist
+        try {
+          const dir = path.join(TASKS_BASE, ticketId);
+          const required = ['code-review.check.md', 'tests.check.md', 'completion.check.md', 'README.md'];
+          if (!required.every(f => fs.existsSync(path.join(dir, f)))) return false;
+          // At least one QA report must exist (qa-*.check.md)
+          const files = fs.readdirSync(dir);
+          return files.some(f => /^qa-.*\.check\.md$/.test(f));
+        } catch { return false; }
+      }},
+      { step: STEPS.check,            tool: 'Skill',           field: 'skill',         pattern: /^(work-workflow:)?check$/ },
       { step: STEPS.cleanup,          tool: ['Task', 'Agent'], field: 'description',   pattern: new RegExp(`^${STEPS.cleanup}\\b`, 'i') },
-      { step: STEPS.test_enhancement, tool: 'Skill',           field: 'skill',         pattern: /^test-coordination$/ },
-      { step: STEPS.follow_up,        tool: 'Skill',           field: 'skill',         pattern: /^follow-up-pr$/ },
-      { step: STEPS.pr,               tool: 'Skill',           field: 'skill',         pattern: /^work-pr$/ },
+      { step: STEPS.cleanup, verify: (ticketId) => {
+        // Cleanup is proven if no dev tmux session exists for this ticket
+        try {
+          const { execFileSync } = require('child_process');
+          const result = execFileSync('tmux', ['has-session', '-t', `${ticketId}-dev`], {
+            encoding: 'utf-8', timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'],
+          });
+          return false; // Session still exists — not cleaned up
+        } catch { return true; } // Exit code 1 = session doesn't exist = cleaned up
+      }},
+      { step: STEPS.pr, verify: (ticketId) => {
+        // PR is proven if an open PR exists for the current branch
+        try {
+          const { execFileSync } = require('child_process');
+          const opts = { encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] };
+          const pr = JSON.parse(execFileSync('gh', ['pr', 'view', '--json', 'number,state'], opts).trim());
+          return pr.number > 0 && pr.state === 'OPEN';
+        } catch { return false; }
+      }},
+      { step: STEPS.follow_up, verify: (ticketId) => {
+        try {
+          const { execFileSync } = require('child_process');
+          const os = require('os');
+          const opts = { encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] };
+
+          // 1. follow-up-pr state must show finalStatus 'ready'
+          const slug = execFileSync('gh', ['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'], opts).trim().replace('/', '-');
+          const prNum = execFileSync('gh', ['pr', 'view', '--json', 'number', '-q', '.number'], opts).trim();
+          const stateFile = path.join(os.tmpdir(), '.claude', `follow-up-pr-${slug}-${prNum}.json`);
+          const state = JSON.parse(fs.readFileSync(stateFile, 'utf-8'));
+          if (state.finalStatus !== 'ready') return false;
+
+          // 2. Review accountability: every PR comment must be accounted for
+          const commentCount = parseInt(
+            execFileSync('gh', ['api', `repos/{owner}/{repo}/pulls/${prNum}/comments`, '--jq', 'length'], opts).trim(),
+            10
+          );
+          if (commentCount > 0) {
+            const accountabilityFile = path.join(TASKS_BASE, ticketId, 'review-accountability.json');
+            if (!fs.existsSync(accountabilityFile)) return false;
+            const entries = JSON.parse(fs.readFileSync(accountabilityFile, 'utf-8'));
+            if (!Array.isArray(entries) || entries.length < commentCount) return false;
+            // Every entry must have disposition and reason
+            if (!entries.every(e => e.disposition && e.reason)) return false;
+            // 3. "acknowledged" entries (AI justifying a skip) require user approval
+            // Agent must call AskUserQuestion and record the user's decision
+            const acknowledged = entries.filter(e => e.disposition === 'acknowledged');
+            if (acknowledged.length > 0) {
+              if (!acknowledged.every(e => e.userApproval === true)) return false;
+            }
+          }
+
+          return true;
+        } catch { return false; }
+      }},
       { step: STEPS.ready,            tool: ['Task', 'Agent'], field: 'description',   pattern: new RegExp(`^${STEPS.ready}\\b`, 'i') },
       { step: STEPS.ci,               tool: ['Task', 'Agent'], field: 'description',   pattern: new RegExp(`^${STEPS.ci}\\b`, 'i') },
+      { step: STEPS.ci, verify: () => {
+        // CI is proven if all PR checks are passing (same as follow_up verify)
+        try {
+          const { execFileSync } = require('child_process');
+          const opts = { encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] };
+          const checks = JSON.parse(execFileSync('gh', ['pr', 'checks', '--json', 'state'], opts).trim());
+          return checks.length > 0 && checks.every(c => c.state === 'SUCCESS' || c.state === 'SKIPPED');
+        } catch { return false; }
+      }},
       { step: STEPS.reports,          tool: ['Task', 'Agent'], field: 'description',   pattern: new RegExp(`^${STEPS.reports}\\b`, 'i') },
+      { step: STEPS.reports, verify: (ticketId) => {
+        // Reports is proven if all required check files exist and show APPROVED/COMPLETE
+        try {
+          const dir = path.join(TASKS_BASE, ticketId);
+          const required = [
+            { file: 'tests.check.md',       pattern: /Status:\s*APPROVED/i },
+            { file: 'code-review.check.md',  pattern: /Status:\s*APPROVED/i },
+            { file: 'completion.check.md',   pattern: /Status:\s*(COMPLETE|APPROVED)/i },
+          ];
+          for (const r of required) {
+            const fp = path.join(dir, r.file);
+            if (!fs.existsSync(fp)) return false;
+            if (!r.pattern.test(fs.readFileSync(fp, 'utf-8'))) return false;
+          }
+          // At least one QA report must exist and pass
+          const files = fs.readdirSync(dir).filter(f => /^qa-.*\.check\.md$/.test(f));
+          if (files.length === 0) return false;
+          return files.every(f => /Status:\s*APPROVED/i.test(fs.readFileSync(path.join(dir, f), 'utf-8')));
+        } catch { return false; }
+      }},
       { step: STEPS.complete,         tool: ['Task', 'Agent'], field: 'description',   pattern: new RegExp(`^${STEPS.complete}\\b`, 'i') },
+      { step: STEPS.complete, verify: (ticketId) => {
+        // Complete is proven if: PR exists + CI passing + all reports approved
+        try {
+          const { execFileSync } = require('child_process');
+          const opts = { encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] };
+          // PR must exist and be open
+          const pr = JSON.parse(execFileSync('gh', ['pr', 'view', '--json', 'number,state'], opts).trim());
+          if (!pr.number || pr.state !== 'OPEN') return false;
+          // CI must be passing
+          const checks = JSON.parse(execFileSync('gh', ['pr', 'checks', '--json', 'state'], opts).trim());
+          if (checks.length === 0 || !checks.every(c => c.state === 'SUCCESS' || c.state === 'SKIPPED')) return false;
+          // All required reports must exist and pass
+          const dir = path.join(TASKS_BASE, ticketId);
+          const required = ['tests.check.md', 'code-review.check.md', 'completion.check.md'];
+          if (!required.every(f => fs.existsSync(path.join(dir, f)))) return false;
+          // At least one QA report
+          const qaFiles = fs.readdirSync(dir).filter(f => /^qa-.*\.check\.md$/.test(f));
+          return qaFiles.length > 0;
+        } catch { return false; }
+      }},
     ],
     transitionPattern: /work-orchestrator\.js\s+transition\s+(\S+)\s+(\S+)/,
     exemptPatterns: [
@@ -132,6 +322,18 @@ const WORKFLOWS = [
   },
 ];
 
+// Step-gated artifact files — only writable during their owning step
+const ARTIFACT_RULES = [
+  { basename: 'brief.md',          step: STEPS.brief, agents: ['brief-writer', 'work-workflow:brief-writer'] },
+  { basename: 'spec.md',           step: STEPS.spec,  agents: ['spec-writer', 'work-workflow:spec-writer'] },
+  { basename: '.last-commit-sha',  step: STEPS.commit },
+  { basename: 'code-review.check.md',  step: STEPS.check, agents: ['code-checker', 'work-workflow:code-checker'] },
+  { basename: 'tests.check.md',        step: STEPS.check, agents: ['quality-checker', 'work-workflow:quality-checker'] },
+  { basename: 'completion.check.md',   step: STEPS.check, agents: ['completion-checker', 'work-workflow:completion-checker'] },
+  { pattern: /^qa-.*\.check\.md$/,     step: STEPS.check, agents: ['qa-feature-tester', 'work-workflow:qa-feature-tester', 'qa-api-tester', 'work-workflow:qa-api-tester'] },
+  { basename: 'code-review-reply.check.md', step: STEPS.check, agents: ['developer-nodejs-tdd', 'work-workflow:developer-nodejs-tdd', 'developer-react-senior', 'work-workflow:developer-react-senior', 'developer-devops', 'work-workflow:developer-devops'] },
+];
+
 // Protected state file basenames — block direct Edit/Write/MultiEdit/Bash writes
 const { buildProtectedBasenames, basenameProtector, createFileProtector } = require(path.join(__dirname, '..', 'lib', 'protect-state-files'));
 const PROTECTED_STATE_BASENAMES = buildProtectedBasenames(WORKFLOWS, ['.work-actions.json', '.pr-update-sha']);
@@ -143,6 +345,18 @@ for (const wf of WORKFLOWS) {
     BASENAME_TO_HINT[bn] = wf.transitionHint;
   }
 }
+
+const artifactProtector = createArtifactProtector({
+  artifacts: ARTIFACT_RULES,
+  getStepInProgress: (ticketId) => {
+    const state = loadStateFile(ticketId, '.work-state.json');
+    return state?.stepStatus
+      ? WORK_STEPS.find(s => state.stepStatus[s] === 'in_progress') || null
+      : null;
+  },
+  isRunningInAgent,
+  getTicketId: () => getTicketId(),
+});
 
 // Exempt orchestrator and workflow-engine scripts from Vector 3 (script bypass detection)
 // These are the legitimate writers of state files.
@@ -212,7 +426,10 @@ function validateWorkflow(wf) {
 
   for (const m of wf.commandMap) {
     if (!stepSet.has(m.step)) throw new Error(`[${wf.name}] commandMap references unknown step: ${m.step}`);
-    if (m.field === undefined) throw new Error(`[${wf.name}] commandMap missing field for step: ${m.step}`);
+    // Entries must have either a verify function or a field for pattern matching
+    if (m.field === undefined && typeof m.verify !== 'function') {
+      throw new Error(`[${wf.name}] commandMap missing field or verify for step: ${m.step}`);
+    }
   }
 }
 
@@ -236,6 +453,7 @@ const CHECK_AGENTS = new Set([
 function buildCommandIndex(commandMap) {
   const index = {};
   for (const mapping of commandMap) {
+    if (!mapping.tool) continue; // Skip verify-only entries (no tool to match)
     const tools = Array.isArray(mapping.tool) ? mapping.tool : [mapping.tool];
     for (const tool of tools) {
       if (!index[tool]) index[tool] = [];
@@ -404,6 +622,15 @@ function handlePreToolUse(hookData) {
     );
     process.exit(2);
   }
+  // Rule 4: Block writes to step-gated artifact files outside their owning step/agent
+  // Must run BEFORE skipRemainingChecks — Edit/Write/MultiEdit need artifact protection
+  const rule4 = artifactProtector.check(toolName, toolInput, hookData);
+  if (rule4.blocked) {
+    didBlock = true;
+    process.stderr.write(rule4.message);
+    process.exit(2);
+  }
+
   if (rule3.skipRemainingChecks) return; // Edit/Write/MultiEdit — skip per-workflow loop
 
   // 2. Check each workflow independently
@@ -432,16 +659,21 @@ function handlePreToolUse(hookData) {
       const evidence = loadEvidence(ticketId, wf.evidenceFile);
       if (evidence[currentStep]?.executed) continue; // Evidence exists → allow
 
+      // Inferred evidence: check verify() functions for this step
+      const verifiers = wf.commandMap.filter(m => m.step === currentStep && typeof m.verify === 'function');
+      if (verifiers.some(m => m.verify(ticketId))) continue;
+
       // (Patch 5) Multi-command expected hint — show all valid commands with field names
       const expectedMappings = wf.commandMap.filter(m => m.step === currentStep);
       const expectedLines = expectedMappings.length > 0
         ? expectedMappings.map(m => {
-            const toolName = Array.isArray(m.tool) ? m.tool.join('/') : m.tool;
-            if (m.field == null) return `${toolName} (any call)`;
+            if (typeof m.verify === 'function') return `${m.step} (inferred via verify)`;
+            const toolLabel = Array.isArray(m.tool) ? m.tool.join('/') : m.tool;
+            if (m.field == null) return `${toolLabel} (any call)`;
             const pat = m.pattern ? m.pattern.toString() : '(any)';
-            return `${toolName}.${m.field} matches ${pat}`;
+            return `${toolLabel}.${m.field} matches ${pat}`;
           })
-        : ['expected command'];
+        : [`No registered command for step '${currentStep}' — add to softSteps or commandMap.`];
 
       // (Patch 4) Use transition.raw for attempted command
       const transitionCmd = transition.raw || '(unknown)';

@@ -43,12 +43,31 @@ detect_pm() {
 
 PM=$(detect_pm)
 
-run_step() {
-  local script_name="$1"
-  local bundled_script="$2"
-  shift 2
+source "$SCRIPT_DIR/common.sh"
 
-  if has_script "$script_name"; then
+run_step() {
+  local env_override="$1"
+  local script_name="$2"
+  local bundled_script="$3"
+  local ext_pattern="$4"
+  shift 4
+
+  # Get changed files for this step
+  local changed=""
+  if [ -n "$ext_pattern" ]; then
+    changed=$(get_changed_files "$ext_pattern")
+  fi
+
+  # Priority: env var override > package.json script > bundled script
+  if [ -n "$env_override" ]; then
+    if [ -z "$changed" ]; then
+      echo "No matching files changed — skipping $env_override"
+      return
+    fi
+    # Export CHANGED_FILES so custom commands can use it
+    echo "→ $env_override (custom, $(echo "$changed" | wc -l | tr -d ' ') files)"
+    (cd "$ROOT_DIR" && CHANGED_FILES="$changed" eval "$env_override")
+  elif has_script "$script_name"; then
     echo "→ $PM run $script_name"
     (cd "$ROOT_DIR" && $PM run "$script_name")
   else
@@ -56,9 +75,11 @@ run_step() {
   fi
 }
 
-# Pass through all arguments
-run_step "dev:lint" "$SCRIPT_DIR/dev-lint.sh" "$@"
+# Custom commands via env vars: LINT_COMMAND, TYPECHECK_COMMAND, TEST_COMMAND
+# Custom commands receive CHANGED_FILES env var with changed file paths (one per line)
+# and only run when matching files exist
+run_step "$LINT_COMMAND" "dev:lint" "$SCRIPT_DIR/dev-lint.sh" '\.(js|jsx|ts|tsx)$' "$@"
 echo ""
-run_step "dev:typecheck" "$SCRIPT_DIR/dev-typecheck.sh" "$@"
+run_step "$TYPECHECK_COMMAND" "dev:typecheck" "$SCRIPT_DIR/dev-typecheck.sh" '\.(ts|tsx)$' "$@"
 echo ""
-run_step "dev:test" "$SCRIPT_DIR/dev-test.sh" "$@"
+run_step "$TEST_COMMAND" "dev:test" "$SCRIPT_DIR/dev-test.sh" '\.(js|jsx|ts|tsx)$' "$@"
