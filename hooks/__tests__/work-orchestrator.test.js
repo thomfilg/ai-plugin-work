@@ -1055,29 +1055,27 @@ describe('work-orchestrator.js', () => {
     });
 
     // 8. Error case: tmux session for code-checker running
-    it('should block check → pr when a check agent tmux session is running', async () => {
+    it('should block check → pr when a check agent tmux session is running', async (t) => {
       await advanceToCheck();
       writeAllApprovedReports();
       // Create a real tmux session that mimics a running agent
       const sessionName = `${TICKET}-code-checker`;
-      let tmuxCreated = false;
       try {
         require('child_process').execFileSync('tmux', ['new-session', '-d', '-s', sessionName, 'cat'], {
           timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'],
         });
-        tmuxCreated = true;
       } catch {
-        // tmux not available in CI — skip this test
+        // tmux not available in this environment — explicitly skip
+        t.skip('tmux not available in this environment');
+        return;
       }
-      if (tmuxCreated) {
-        try {
-          const { result } = await runOrchestrator(['transition', TICKET, 'pr'], gateOpts);
-          assert.equal(result.error, true);
-          assert.equal(result.gate, 'check-to-pr');
-          assert.ok(result.reasons.some(r => r.includes('code-checker')));
-        } finally {
-          try { require('child_process').execFileSync('tmux', ['kill-session', '-t', sessionName], { timeout: 3000, stdio: 'pipe' }); } catch {}
-        }
+      try {
+        const { result } = await runOrchestrator(['transition', TICKET, 'pr'], gateOpts);
+        assert.equal(result.error, true);
+        assert.equal(result.gate, 'check-to-pr');
+        assert.ok(result.reasons.some(r => r.includes('code-checker')));
+      } finally {
+        try { require('child_process').execFileSync('tmux', ['kill-session', '-t', sessionName], { timeout: 3000, stdio: 'pipe' }); } catch {}
       }
     });
 
