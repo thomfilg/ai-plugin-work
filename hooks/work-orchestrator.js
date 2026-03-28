@@ -773,7 +773,7 @@ function validateCheckGate(ticket) {
     }
     const content = readFile(fp);
     if (!req.pattern.test(content)) {
-      reasons.push(`Report ${req.file} does not contain required status (expected pattern: ${req.pattern})`);
+      reasons.push(`Report ${req.file} does not contain the required Status: line`);
     }
   }
 
@@ -801,13 +801,14 @@ function validateCheckGate(ticket) {
       // exit 0 means session exists → agent is running
       reasons.push(`Check agent still running: ${agent} (tmux session: ${sessionName})`);
     } catch (err) {
-      // exit code 1 = session not found, which is expected and fine
-      if (err && typeof err.status === 'number' && err.status !== 1) {
-        // Unexpected failure (timeout, tmux missing, etc.) — log but don't block
+      // exit code 1 = session not found, which is expected and fine.
+      // For unexpected failures (ENOENT, ETIMEDOUT, other exit codes), log for debugging.
+      const isSessionNotFound = err && typeof err.status === 'number' && err.status === 1;
+      if (!isSessionNotFound && err) {
         const details = [];
         if (err.status != null) details.push(`status=${err.status}`);
         if (err.signal != null) details.push(`signal=${err.signal}`);
-        if (err.code != null) details.push(`code=${err.code}`);
+        if (err.code) details.push(`code=${err.code}`);
         process.stderr.write(
           `work-orchestrator: tmux has-session check failed for ${sessionName}` +
           (details.length ? ` (${details.join(', ')})` : '') + '\n'
