@@ -89,7 +89,7 @@ const CHECK_GATE_RULES = [
           }
         }
       }
-      return reasons;
+      return reasons; // tmux session-found path covered by work-orchestrator.test.js scenario 8
     },
   },
 ];
