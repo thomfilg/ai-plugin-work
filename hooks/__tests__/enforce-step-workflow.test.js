@@ -55,7 +55,6 @@ function writeWorkState(stepStatus, status = 'in_progress') {
     status,
     stepStatus,
     checkProgress: {},
-    testEnhancement: { initialRating: 0, finalRating: 0, iterations: 0, skipped: false, skipReason: null },
     errors: [],
     startTime: new Date().toISOString(),
     lastUpdate: new Date().toISOString(),

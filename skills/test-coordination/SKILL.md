@@ -1,12 +1,12 @@
 ---
 name: test-coordination
 argument-hint: [ticket-id]
-description: Coordinate test enhancement - runs /tests-review and /tests-create in parallel until coverage is adequate
+description: Coordinate test coverage improvement - runs /tests-review and /tests-create in parallel until coverage is adequate
 user-invocable: true
 allowed-tools: Task, Bash, Read, Write, Edit, Grep, Glob, Skill
 ---
 
-# /test-coordination - Test Enhancement Coordination
+# /test-coordination - Test Coverage Coordination
 
 Coordinate parallel execution of /tests-review and /tests-create to ensure adequate test coverage for modified files.
 
@@ -19,7 +19,7 @@ Coordinate parallel execution of /tests-review and /tests-create to ensure adequ
 ## When to Use
 
 This command should be invoked when:
-1. From /work - Step 7b test enhancement
+1. From /work - When test coverage needs improvement
 2. From /follow-up-pr - When Check modified files coverage fails
 3. Directly - When you need to improve test coverage for modified files
 
@@ -34,7 +34,7 @@ Get ticket ID from args or derive from branch. Create task directory for output 
 ## Step 2: Find Modified Source Files
 
 Get modified source files (excluding tests, configs, docs) using git diff.
-If no source files modified, exit early - no test enhancement needed.
+If no source files modified, exit early - no test coverage improvement needed.
 
 ---
 
@@ -54,7 +54,7 @@ Clear any stale feedback files from previous runs in the task directory.
 
 ---
 
-## Step 5: Run Test Enhancement in Parallel
+## Step 5: Run Test Coverage Improvement in Parallel
 
 **CRITICAL: `/tests-review` and `/tests-create` are SKILLS, NOT agent types.**
 - Use `Skill("tests-review")` and `Skill("tests-create")` — via the Skill tool
@@ -100,7 +100,7 @@ If tests were modified, prompt to commit using commit-writer agent.
 
 ## Integration Points
 
-### From /work (Step 7b)
+### From /work
 Invoke: Skill(test-coordination): TICKET_ID
 
 ### From /follow-up-pr (coverage failure)

@@ -103,13 +103,6 @@ function initState(ticketId, description = '') {
     status: 'in_progress',
     stepStatus,
     checkProgress: {},
-    testEnhancement: {
-      initialRating: 0,
-      finalRating: 0,
-      iterations: 0,
-      skipped: false,
-      skipReason: null
-    },
     errors: [],
     startTime: new Date().toISOString(),
     lastUpdate: new Date().toISOString()
@@ -357,13 +350,6 @@ function initSubtaskState(ticketId, description = '') {
     status: 'in_progress',
     stepStatus,
     checkProgress: {},
-    testEnhancement: {
-      initialRating: 0,
-      finalRating: 0,
-      iterations: 0,
-      skipped: true,
-      skipReason: 'subtask',
-    },
     errors: [],
     startTime: new Date().toISOString(),
     lastUpdate: new Date().toISOString(),
@@ -457,7 +443,7 @@ async function main() {
 
   if (!command) {
     console.error('Usage: node work-state.js <command> <ticket-id> [args...]');
-    console.error('Commands: init, get, set-step, set-check, set-test-enhancement, add-error, complete, resume-info, init-subtask, complete-subtask, active-subtask');
+    console.error('Commands: init, get, set-step, set-check, add-error, complete, resume-info, init-subtask, complete-subtask, active-subtask');
     process.exit(1);
   }
 
@@ -490,29 +476,6 @@ async function main() {
     case 'set-check':
       result = setCheckProgress(ticketId, args[2], args[3], args[4] ? JSON.parse(args[4]) : null);
       console.log(JSON.stringify({ success: true, agent: args[2], status: args[3] }));
-      break;
-
-    case 'set-test-enhancement':
-      {
-        let state = loadState(ticketId);
-        if (!state) state = initState(ticketId);
-        if (!state.testEnhancement) state.testEnhancement = {};
-
-        const field = args[2];
-        const value = args[3];
-        // Handle boolean values
-        if (value === 'true') {
-          state.testEnhancement[field] = true;
-        } else if (value === 'false') {
-          state.testEnhancement[field] = false;
-        } else if (value === 'null') {
-          state.testEnhancement[field] = null;
-        } else {
-          state.testEnhancement[field] = isNaN(value) ? value : Number(value);
-        }
-        saveState(ticketId, state);
-        console.log(JSON.stringify({ success: true, field, value: state.testEnhancement[field] }));
-      }
       break;
 
     case 'add-error':
