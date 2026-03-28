@@ -739,84 +739,85 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
 }
 
 // ─── Check-to-PR Gate (GH-121) ──────────────────────────────────────────────
+// Declarative array of checks — each returns an array of failure reasons (empty = pass).
+// Mirrors the { step, verify } pattern used in enforce-step-workflow.js.
 
-const CHECK_AGENTS = ['code-checker', 'quality-checker', 'completion-checker', 'qa-feature-tester', 'qa-api-tester'];
-
-const REQUIRED_CHECK_REPORTS = [
-  { file: 'tests.check.md',       pattern: /Status:\s*APPROVED/i },
-  { file: 'code-review.check.md', pattern: /Status:\s*APPROVED/i },
-  { file: 'completion.check.md',  pattern: /Status:\s*(COMPLETE|APPROVED)/i },
+const CHECK_GATE_RULES = [
+  {
+    name: 'required-reports',
+    description: 'All required .check.md reports must exist with approved status',
+    check(dir) {
+      const required = [
+        { file: 'tests.check.md',       pattern: /Status:\s*APPROVED/i },
+        { file: 'code-review.check.md', pattern: /Status:\s*APPROVED/i },
+        { file: 'completion.check.md',  pattern: /Status:\s*(COMPLETE|APPROVED)/i },
+      ];
+      const reasons = [];
+      for (const req of required) {
+        const fp = path.join(dir, req.file);
+        if (!fileExists(fp)) { reasons.push(`Missing report: ${req.file}`); continue; }
+        if (!req.pattern.test(readFile(fp))) {
+          reasons.push(`Report ${req.file} does not contain the required Status: line`);
+        }
+      }
+      return reasons;
+    },
+  },
+  {
+    name: 'qa-reports',
+    description: 'At least one qa-*.check.md must exist, all must have Status: APPROVED',
+    check(dir) {
+      const qaFiles = listFiles(dir, /^qa-.*\.check\.md$/);
+      if (qaFiles.length === 0) return ['No QA reports found (need at least one qa-*.check.md)'];
+      return qaFiles
+        .filter(f => !/Status:\s*APPROVED/i.test(readFile(f)))
+        .map(f => `QA report ${path.basename(f)} does not have Status: APPROVED`);
+    },
+  },
+  {
+    name: 'running-agents',
+    description: 'No check-agent tmux sessions may be running',
+    check(_dir, ticket) {
+      const agents = ['code-checker', 'quality-checker', 'completion-checker', 'qa-feature-tester', 'qa-api-tester'];
+      const reasons = [];
+      for (const agent of agents) {
+        const sessionName = `${ticket}-${agent}`;
+        try {
+          execFileSync('tmux', ['has-session', '-t', sessionName], {
+            timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'],
+          });
+          reasons.push(`Check agent still running: ${agent} (tmux session: ${sessionName})`);
+        } catch (err) {
+          // exit code 1 = session not found (expected). Log other failures for debugging.
+          const isSessionNotFound = err && typeof err.status === 'number' && err.status === 1;
+          if (!isSessionNotFound && err) {
+            const details = [];
+            if (err.status != null) details.push(`status=${err.status}`);
+            if (err.signal != null) details.push(`signal=${err.signal}`);
+            if (err.code) details.push(`code=${err.code}`);
+            process.stderr.write(
+              `work-orchestrator: tmux has-session check failed for ${sessionName}` +
+              (details.length ? ` (${details.join(', ')})` : '') + '\n'
+            );
+          }
+        }
+      }
+      return reasons;
+    },
+  },
 ];
 
 /**
  * Validates whether all quality-gate prerequisites are met before
- * transitioning from `check` to `pr`.
- *
- * Checks:
- *  1. All required .check.md reports exist and contain the expected status.
- *  2. All qa-*.check.md reports must have Status: APPROVED (at least one must exist).
- *  3. No check-agent tmux sessions are still running for this ticket.
+ * transitioning from `check` to `pr`. Iterates CHECK_GATE_RULES and
+ * collects all failure reasons.
  *
  * @param {string} ticket - The ticket ID (e.g. "PROJ-123")
  * @returns {{ valid: boolean, reasons: string[] }}
  */
 function validateCheckGate(ticket) {
-  const reasons = [];
-  const ticketDir = path.join(TASKS_BASE, ticket);
-
-  // 1. Check required reports
-  for (const req of REQUIRED_CHECK_REPORTS) {
-    const fp = path.join(ticketDir, req.file);
-    if (!fileExists(fp)) {
-      reasons.push(`Missing report: ${req.file}`);
-      continue;
-    }
-    const content = readFile(fp);
-    if (!req.pattern.test(content)) {
-      reasons.push(`Report ${req.file} does not contain the required Status: line`);
-    }
-  }
-
-  // 2. All qa-*.check.md reports must have Status: APPROVED (at least one must exist)
-  const qaFiles = listFiles(ticketDir, /^qa-.*\.check\.md$/);
-  if (qaFiles.length === 0) {
-    reasons.push('No QA reports found (need at least one qa-*.check.md)');
-  } else {
-    for (const qaFile of qaFiles) {
-      const content = readFile(qaFile);
-      if (!/Status:\s*APPROVED/i.test(content)) {
-        reasons.push(`QA report ${path.basename(qaFile)} does not have Status: APPROVED`);
-      }
-    }
-  }
-
-  // 3. Check for running tmux agent sessions
-  for (const agent of CHECK_AGENTS) {
-    const sessionName = `${ticket}-${agent}`;
-    try {
-      execFileSync('tmux', ['has-session', '-t', sessionName], {
-        timeout: 3000,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-      // exit 0 means session exists → agent is running
-      reasons.push(`Check agent still running: ${agent} (tmux session: ${sessionName})`);
-    } catch (err) {
-      // exit code 1 = session not found, which is expected and fine.
-      // For unexpected failures (ENOENT, ETIMEDOUT, other exit codes), log for debugging.
-      const isSessionNotFound = err && typeof err.status === 'number' && err.status === 1;
-      if (!isSessionNotFound && err) {
-        const details = [];
-        if (err.status != null) details.push(`status=${err.status}`);
-        if (err.signal != null) details.push(`signal=${err.signal}`);
-        if (err.code) details.push(`code=${err.code}`);
-        process.stderr.write(
-          `work-orchestrator: tmux has-session check failed for ${sessionName}` +
-          (details.length ? ` (${details.join(', ')})` : '') + '\n'
-        );
-      }
-    }
-  }
-
+  const dir = path.join(TASKS_BASE, ticket);
+  const reasons = CHECK_GATE_RULES.flatMap(rule => rule.check(dir, ticket));
   return { valid: reasons.length === 0, reasons };
 }
 
