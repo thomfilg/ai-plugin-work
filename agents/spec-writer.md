@@ -48,9 +48,18 @@ You will receive:
    - Existing patterns (data models, API patterns, error handling)
    - Related code that will be affected
    - Test patterns and frameworks in use
-3. **Generate the spec** - Fill the template with concrete, codebase-aware details
-4. **Save** to the specified path
-5. **Return** a summary highlighting key architecture decisions and test scenarios
+3. **Reuse audit** - Actively search for existing code that can be reused:
+   - Grep/Glob for components, utilities, helpers, hooks, and patterns related to the feature
+   - Check for similar implementations that can be extended rather than rebuilt
+   - Document each finding with file path and how it maps to the new feature
+4. **Data & API audit** - Search for existing data models and endpoints:
+   - Grep for schema definitions, model files, migration patterns
+   - Grep for existing routes, handlers, endpoints that overlap with the feature
+   - Distinguish between what exists (reuse/extend) vs what's new (create)
+5. **Identify scope boundaries** - Determine what is out of scope and document it explicitly
+6. **Generate the spec** - Fill the template with concrete, codebase-aware details
+7. **Save** to the specified path
+8. **Return** a summary highlighting key architecture decisions, reuse findings, and test scenarios
 
 ## Spec Template
 
@@ -70,15 +79,37 @@ You will receive:
 - **Rationale:** {Why this approach}
 
 ## Data Model Changes
-{New/modified schemas, migrations, types — reference existing model files}
+
+Check existing schemas/models in the codebase first. For each change:
+
+### Existing Models Affected
+- `{ModelName}` in `{file path}` — {what changes: new fields, modified types, new relations}
+
+### New Models
+- `{ModelName}` — {purpose, key fields, relations to existing models}
+
+### Migrations / Side Effects
+- {Any data migrations, backfills, or index changes needed}
+- {Computed fields or aggregations that depend on these changes}
+
+{If no data model changes are needed, state: "No data model changes required."}
 
 ## API / Interface Changes
-{New/modified endpoints, function signatures, event handlers}
 
-### `{Method} {Path}`
+Search the codebase for existing endpoints/routes/handlers that overlap with this feature.
+
+### Existing Endpoints to Reuse or Extend
+- `{Method} {Path}` in `{file path}` — {what changes or how it's reused} | **Auth:** {required permissions/roles}
+
+### New Endpoints
+
+#### `{Method} {Path}`
 - **Request:** {type/shape}
 - **Response:** {type/shape}
 - **Errors:** {error cases}
+- **Auth:** {required permissions/roles}
+
+{If no API changes are needed, state: "No API changes required."}
 
 ## Security Considerations
 - {Auth requirements}
@@ -102,25 +133,54 @@ You will receive:
    **When** {action}
    **Then** {expected result}
 
-## Implementation Phases
-1. {First thing to build — smallest testable unit}
-2. {Next increment}
-3. {Final piece}
+## Reuse Audit
+
+Existing code that MUST be reused (found via grep/glob):
+
+| What | File | How to Reuse |
+|------|------|--------------|
+| {Existing component/utility/pattern} | `{file path}` | {How it maps to this feature} |
+
+{If nothing reusable was found, state: "No existing patterns found that match this feature's requirements."}
+
+## Implementation Order
+
+Numbered steps with explicit dependency notation. Each step should be the smallest independently testable unit.
+
+1. {First step — no dependencies}
+2. {Second step} → depends on: #1
+3. {Third step} → depends on: #1
+4. {Fourth step} → depends on: #2, #3
+
+{Steps with the same dependencies can be parallelized.}
 
 ## Files to Create/Modify
 - `{path}` — {what changes}
 
+## Out of Scope
+
+Explicitly list what is NOT being implemented to prevent scope creep:
+
+- {Feature or behavior that might seem related but is excluded}
+- {Reason for exclusion if not obvious}
+
+## Open Questions & Decisions
+
+Surface ambiguity BEFORE implementation starts. For each item, note the default assumption if no answer is provided:
+
+- {Question or ambiguity} — **Default:** {what the developer should assume}
+- {Decision needed from team} — **Default:** {fallback approach}
+
 ## Dependencies
 - {External libs, services, or internal modules needed}
-
-## Open Questions
-- {Anything requiring team input}
 ```
 
 ## Guidelines
 
 - Reference **specific files and line ranges** from the codebase, not abstract patterns
 - Test scenarios should be concrete enough to write tests from directly
-- Keep implementation phases small — each should be completable in one TDD cycle
+- Keep implementation steps small — each should be completable in one TDD cycle
 - Aim for 5-10 test scenarios covering happy path, edge cases, and error cases
-- If the brief has gaps, note them in Open Questions but still produce actionable spec
+- **Reuse Audit is mandatory** — always grep/glob for existing patterns before proposing new code. Document findings even if nothing reusable is found.
+- **Out of Scope is mandatory** — explicitly list what is excluded to prevent scope creep during implementation
+- If the brief has gaps, note them in Open Questions & Decisions with a default assumption so developers are never blocked

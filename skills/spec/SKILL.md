@@ -75,8 +75,12 @@ Task(spec-writer):
   4. API/interface changes
   5. Security considerations
   6. Test scenarios in Given/When/Then format (5-10 scenarios)
-  7. Implementation phases
-  8. Files to create/modify
+  7. Reuse Audit — grep/glob for existing patterns, components, utilities that can be reused
+  8. Implementation Order — numbered steps with explicit dependency notation (e.g., "→ depends on: #1, #3")
+  9. Files to create/modify
+  10. Out of Scope — explicitly list what is NOT being implemented
+  11. Open Questions & Decisions — surface ambiguity with default assumptions
+  12. Dependencies — external libs, services, or internal modules needed
 
   ${IF READ_DOCS_ON_SPEC: Read these docs before starting: ${comma-separated paths}}
 ```

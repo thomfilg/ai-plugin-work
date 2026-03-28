@@ -114,7 +114,7 @@ If these files exist, cross-reference them against the implementation:
 - **Reusable Components** — Were listed existing components imported (not duplicated)?
 - **Endpoints** — Were all listed API endpoints implemented?
 - **E2E Test Scenarios** — Were tests written for the listed scenarios?
-- **Implementation Phases** — Were all phases completed?
+- **Implementation Order** — Were all steps completed?
 
 Report gaps between what was planned and what was delivered.
 
