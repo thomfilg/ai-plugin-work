@@ -738,6 +738,88 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
   return { ticket: ticket || `TBD ("${description}")`, mode, plan };
 }
 
+// ─── Check-to-PR Gate (GH-121) ──────────────────────────────────────────────
+
+const CHECK_AGENTS = ['code-checker', 'quality-checker', 'completion-checker', 'qa-feature-tester', 'qa-api-tester'];
+
+const REQUIRED_CHECK_REPORTS = [
+  { file: 'tests.check.md',       pattern: /Status:\s*APPROVED/i },
+  { file: 'code-review.check.md', pattern: /Status:\s*APPROVED/i },
+  { file: 'completion.check.md',  pattern: /Status:\s*(COMPLETE|APPROVED)/i },
+];
+
+/**
+ * Validates whether all quality-gate prerequisites are met before
+ * transitioning from `check` to `pr`.
+ *
+ * Checks:
+ *  1. All required .check.md reports exist and contain the expected status.
+ *  2. All qa-*.check.md reports must have Status: APPROVED (at least one must exist).
+ *  3. No check-agent tmux sessions are still running for this ticket.
+ *
+ * @param {string} ticket - The ticket ID (e.g. "PROJ-123")
+ * @returns {{ valid: boolean, reasons: string[] }}
+ */
+function validateCheckGate(ticket) {
+  const reasons = [];
+  const ticketDir = path.join(TASKS_BASE, ticket);
+
+  // 1. Check required reports
+  for (const req of REQUIRED_CHECK_REPORTS) {
+    const fp = path.join(ticketDir, req.file);
+    if (!fileExists(fp)) {
+      reasons.push(`Missing report: ${req.file}`);
+      continue;
+    }
+    const content = readFile(fp);
+    if (!req.pattern.test(content)) {
+      reasons.push(`Report ${req.file} does not contain the required Status: line`);
+    }
+  }
+
+  // 2. All qa-*.check.md reports must have Status: APPROVED (at least one must exist)
+  const qaFiles = listFiles(ticketDir, /^qa-.*\.check\.md$/);
+  if (qaFiles.length === 0) {
+    reasons.push('No QA reports found (need at least one qa-*.check.md)');
+  } else {
+    for (const qaFile of qaFiles) {
+      const content = readFile(qaFile);
+      if (!/Status:\s*APPROVED/i.test(content)) {
+        reasons.push(`QA report ${path.basename(qaFile)} does not have Status: APPROVED`);
+      }
+    }
+  }
+
+  // 3. Check for running tmux agent sessions
+  for (const agent of CHECK_AGENTS) {
+    const sessionName = `${ticket}-${agent}`;
+    try {
+      execFileSync('tmux', ['has-session', '-t', sessionName], {
+        timeout: 3000,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      // exit 0 means session exists → agent is running
+      reasons.push(`Check agent still running: ${agent} (tmux session: ${sessionName})`);
+    } catch (err) {
+      // exit code 1 = session not found, which is expected and fine.
+      // For unexpected failures (ENOENT, ETIMEDOUT, other exit codes), log for debugging.
+      const isSessionNotFound = err && typeof err.status === 'number' && err.status === 1;
+      if (!isSessionNotFound && err) {
+        const details = [];
+        if (err.status != null) details.push(`status=${err.status}`);
+        if (err.signal != null) details.push(`signal=${err.signal}`);
+        if (err.code) details.push(`code=${err.code}`);
+        process.stderr.write(
+          `work-orchestrator: tmux has-session check failed for ${sessionName}` +
+          (details.length ? ` (${details.join(', ')})` : '') + '\n'
+        );
+      }
+    }
+  }
+
+  return { valid: reasons.length === 0, reasons };
+}
+
 // ─── Transition Command ──────────────────────────────────────────────────────
 
 function transitionStep(ticket, targetStep) {
@@ -771,6 +853,22 @@ function transitionStep(ticket, targetStep) {
     const validation = validateTddEvidence(evidence, currentStep);
     if (!validation.valid) {
       return { error: true, message: `TDD evidence invalid: ${validation.reason}` };
+    }
+  }
+
+  // Check-to-PR gate (GH-121): mandatory quality safeguard — always enabled, no toggle.
+  // Blocks check→pr unless all reports exist, pass, and no agents are running.
+  const isCheckToPr = currentStep === STEPS.check && targetStep === STEPS.pr;
+  if (isCheckToPr) {
+    const checkGate = validateCheckGate(ticket);
+    if (!checkGate.valid) {
+      return {
+        error: true,
+        message: `BLOCKED: check -> pr -- quality gate not satisfied`,
+        gate: 'check-to-pr',
+        reasons: checkGate.reasons,
+        hint: 'Wait for all check agents to finish and ensure reports pass before transitioning to pr.',
+      };
     }
   }
 

@@ -73,6 +73,20 @@ after(() => {
   } catch { /* ignore if tmpdir unreadable */ }
 });
 
+/**
+ * Write all required check reports (APPROVED) for a ticket so the check→pr gate passes.
+ * @param {string} tasksBase - The tasks base directory
+ * @param {string} ticket - The ticket ID
+ */
+function writeCheckReports(tasksBase, ticket) {
+  const dir = path.join(tasksBase, ticket);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'tests.check.md'), '# Tests\nStatus: APPROVED\n');
+  fs.writeFileSync(path.join(dir, 'code-review.check.md'), '# Code Review\nStatus: APPROVED\n');
+  fs.writeFileSync(path.join(dir, 'completion.check.md'), '# Completion\nStatus: APPROVED\n');
+  fs.writeFileSync(path.join(dir, 'qa-feature.check.md'), '# QA\nStatus: APPROVED\n');
+}
+
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe('work-orchestrator.js', () => {
@@ -569,6 +583,7 @@ describe('work-orchestrator.js', () => {
       try {
         await runOrchestrator(['transition', TEST_TICKET, 'bootstrap'], o);
         await runOrchestrator(['transition', TEST_TICKET, 'check'], o);
+        writeCheckReports(TASKS_BASE, TEST_TICKET);
         await runOrchestrator(['transition', TEST_TICKET, 'pr'], o);
         const { result } = await runOrchestrator(['transition', TEST_TICKET, 'ci'], o);
         assert.equal(result.success, true);
@@ -585,6 +600,7 @@ describe('work-orchestrator.js', () => {
       try {
         await runOrchestrator(['transition', TEST_TICKET, 'bootstrap'], o);
         await runOrchestrator(['transition', TEST_TICKET, 'check'], o);
+        writeCheckReports(TASKS_BASE, TEST_TICKET);
         await runOrchestrator(['transition', TEST_TICKET, 'pr'], o);
         await runOrchestrator(['transition', TEST_TICKET, 'pr'], o);
         await runOrchestrator(['transition', TEST_TICKET, 'ci'], o);
@@ -685,6 +701,7 @@ describe('work-orchestrator.js', () => {
     it('should allow transition follow_up → ci (forward)', async () => {
       await runOrchestrator(['transition', T, 'bootstrap'], o);
       await runOrchestrator(['transition', T, 'check'], o);
+      writeCheckReports(TEMP_TASKS, T);
       await runOrchestrator(['transition', T, 'pr'], o);
       await runOrchestrator(['transition', T, 'pr'], o);
       await runOrchestrator(['transition', T, 'ready'], o);
@@ -701,6 +718,7 @@ describe('work-orchestrator.js', () => {
       try {
         await runOrchestrator(['transition', T2, 'bootstrap'], o);
         await runOrchestrator(['transition', T2, 'check'], o);
+        writeCheckReports(TEMP_TASKS, T2);
         await runOrchestrator(['transition', T2, 'pr'], o);
         await runOrchestrator(['transition', T2, 'ready'], o);
         await runOrchestrator(['transition', T2, 'follow_up'], o);
@@ -719,6 +737,7 @@ describe('work-orchestrator.js', () => {
       try {
         await runOrchestrator(['transition', T3, 'bootstrap'], o);
         await runOrchestrator(['transition', T3, 'check'], o);
+        writeCheckReports(TEMP_TASKS, T3);
         await runOrchestrator(['transition', T3, 'pr'], o);
         await runOrchestrator(['transition', T3, 'ready'], o);
         await runOrchestrator(['transition', T3, 'follow_up'], o);
@@ -737,6 +756,7 @@ describe('work-orchestrator.js', () => {
       try {
         await runOrchestrator(['transition', T4, 'bootstrap'], o);
         await runOrchestrator(['transition', T4, 'check'], o);
+        writeCheckReports(TEMP_TASKS, T4);
         await runOrchestrator(['transition', T4, 'pr'], o);
         await runOrchestrator(['transition', T4, 'pr'], o);
         await runOrchestrator(['transition', T4, 'ready'], o);
@@ -756,6 +776,7 @@ describe('work-orchestrator.js', () => {
       try {
         await runOrchestrator(['transition', T5, 'bootstrap'], o);
         await runOrchestrator(['transition', T5, 'check'], o);
+        writeCheckReports(TEMP_TASKS, T5);
         await runOrchestrator(['transition', T5, 'pr'], o);
         await runOrchestrator(['transition', T5, 'pr'], o);
         await runOrchestrator(['transition', T5, 'ready'], o);
@@ -913,6 +934,177 @@ describe('work-orchestrator.js', () => {
       const r3 = await runWorkState(['get', TICKET]);
       assert.ok(r3.result);
       assert.equal(r3.result.stepStatus['implement'], 'in_progress');
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // GH-121: check-to-pr gate
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe('check-to-pr gate (GH-121)', () => {
+    const TEMP_WB = path.join(os.tmpdir(), 'work-orch-gh121-' + process.pid);
+    const TEMP_TASKS = path.join(TEMP_WB, 'tasks');
+    const TICKET = 'TEST-121';
+    const gateOpts = { env: { WORKTREES_BASE: TEMP_WB, TASKS_BASE: TEMP_TASKS, WORK_TDD_ENFORCE: '0' } };
+
+    function ticketDir() { return path.join(TEMP_TASKS, TICKET); }
+
+    function writeReport(name, content) {
+      const dir = ticketDir();
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, name), content);
+    }
+
+    function writeAllApprovedReports() {
+      writeReport('tests.check.md', '# Tests\nStatus: APPROVED\nAll good.');
+      writeReport('code-review.check.md', '# Code Review\nStatus: APPROVED\nLGTM.');
+      writeReport('completion.check.md', '# Completion\nStatus: APPROVED\nDone.');
+      writeReport('qa-feature.check.md', '# QA Feature\nStatus: APPROVED\nPassed.');
+    }
+
+    // Shortcut: bootstrap → check skips intermediate steps (implement, commit, etc.)
+    // because the orchestrator allows forward jumps when no gate blocks the target step.
+    async function advanceToCheck() {
+      await runOrchestrator(['transition', TICKET, 'bootstrap'], gateOpts);
+      await runOrchestrator(['transition', TICKET, 'check'], gateOpts);
+    }
+
+    after(() => { try { fs.rmSync(TEMP_WB, { recursive: true, force: true }); } catch {} });
+    afterEach(() => {
+      try { fs.rmSync(path.join(TEMP_TASKS, TICKET), { recursive: true, force: true }); } catch {}
+    });
+
+    // 1. Happy path: all reports APPROVED, no agents running
+    it('should allow check → pr when all reports exist with APPROVED status and no agents running', async () => {
+      await advanceToCheck();
+      writeAllApprovedReports();
+      const { result } = await runOrchestrator(['transition', TICKET, 'pr'], gateOpts);
+      assert.equal(result.success, true);
+      assert.equal(result.from, 'check');
+      assert.equal(result.to, 'pr');
+    });
+
+    // 2. Happy path: completion.check.md with COMPLETE (alternative)
+    it('should allow check → pr when completion.check.md has Status: COMPLETE', async () => {
+      await advanceToCheck();
+      writeReport('tests.check.md', '# Tests\nStatus: APPROVED\nAll good.');
+      writeReport('code-review.check.md', '# Code Review\nStatus: APPROVED\nLGTM.');
+      writeReport('completion.check.md', '# Completion\nStatus: COMPLETE\nDone.');
+      writeReport('qa-feature.check.md', '# QA Feature\nStatus: APPROVED\nPassed.');
+      const { result } = await runOrchestrator(['transition', TICKET, 'pr'], gateOpts);
+      assert.equal(result.success, true);
+      assert.equal(result.from, 'check');
+      assert.equal(result.to, 'pr');
+    });
+
+    // 3. Edge case: check → implement (backward) — gate NOT evaluated
+    it('should NOT evaluate check gate on backward transition check → implement', async () => {
+      await advanceToCheck();
+      // No reports written — gate would block if evaluated
+      const { result } = await runOrchestrator(['transition', TICKET, 'implement'], gateOpts);
+      assert.equal(result.success, true);
+      assert.equal(result.from, 'check');
+      assert.equal(result.to, 'implement');
+      assert.equal(result.direction, 'backward');
+    });
+
+    // 4. Edge case: implement → commit — gate NOT evaluated (different step)
+    it('should NOT evaluate check gate on implement → commit transition', async () => {
+      await runOrchestrator(['transition', TICKET, 'bootstrap'], gateOpts);
+      await runOrchestrator(['transition', TICKET, 'implement'], gateOpts);
+      const { result } = await runOrchestrator(['transition', TICKET, 'commit'], gateOpts);
+      assert.equal(result.success, true);
+      assert.equal(result.from, 'implement');
+      assert.equal(result.to, 'commit');
+    });
+
+    // 5. Edge case: no agent tmux sessions running — succeeds
+    it('should allow check → pr when all reports are approved (no agents running)', async () => {
+      await advanceToCheck();
+      writeAllApprovedReports();
+      // tmux has-session for non-agent names will fail (session doesn't exist)
+      // so this should pass — we only check specific agent session names
+      const { result } = await runOrchestrator(['transition', TICKET, 'pr'], gateOpts);
+      assert.equal(result.success, true);
+    });
+
+    // 6. Error case: missing tests.check.md
+    it('should block check → pr when tests.check.md is missing', async () => {
+      await advanceToCheck();
+      writeReport('code-review.check.md', '# Code Review\nStatus: APPROVED\nLGTM.');
+      writeReport('completion.check.md', '# Completion\nStatus: APPROVED\nDone.');
+      writeReport('qa-feature.check.md', '# QA Feature\nStatus: APPROVED\nPassed.');
+      const { result } = await runOrchestrator(['transition', TICKET, 'pr'], gateOpts);
+      assert.equal(result.error, true);
+      assert.ok(result.message.includes('BLOCKED'));
+      assert.equal(result.gate, 'check-to-pr');
+      assert.ok(result.reasons.some(r => r.includes('tests.check.md')));
+    });
+
+    // 7. Error case: code-review.check.md has FAILED status
+    it('should block check → pr when code-review.check.md has Status: FAILED', async () => {
+      await advanceToCheck();
+      writeReport('tests.check.md', '# Tests\nStatus: APPROVED\nAll good.');
+      writeReport('code-review.check.md', '# Code Review\nStatus: FAILED\nIssues found.');
+      writeReport('completion.check.md', '# Completion\nStatus: APPROVED\nDone.');
+      writeReport('qa-feature.check.md', '# QA Feature\nStatus: APPROVED\nPassed.');
+      const { result } = await runOrchestrator(['transition', TICKET, 'pr'], gateOpts);
+      assert.equal(result.error, true);
+      assert.equal(result.gate, 'check-to-pr');
+      assert.ok(result.reasons.some(r => r.includes('code-review.check.md')));
+    });
+
+    // 8. Error case: tmux session for code-checker running
+    it('should block check → pr when a check agent tmux session is running', async (t) => {
+      await advanceToCheck();
+      writeAllApprovedReports();
+      // Create a real tmux session that mimics a running agent
+      const sessionName = `${TICKET}-code-checker`;
+      try {
+        require('child_process').execFileSync('tmux', ['new-session', '-d', '-s', sessionName, 'cat'], {
+          timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'],
+        });
+      } catch {
+        // tmux not available in this environment — explicitly skip
+        t.skip('tmux not available in this environment');
+        return;
+      }
+      try {
+        const { result } = await runOrchestrator(['transition', TICKET, 'pr'], gateOpts);
+        assert.equal(result.error, true);
+        assert.equal(result.gate, 'check-to-pr');
+        assert.ok(result.reasons.some(r => r.includes('code-checker')));
+      } finally {
+        try { require('child_process').execFileSync('tmux', ['kill-session', '-t', sessionName], { timeout: 3000, stdio: 'pipe' }); } catch {}
+      }
+    });
+
+    // 9. Error case: no qa-*.check.md files
+    it('should block check → pr when no qa-*.check.md files exist', async () => {
+      await advanceToCheck();
+      writeReport('tests.check.md', '# Tests\nStatus: APPROVED\nAll good.');
+      writeReport('code-review.check.md', '# Code Review\nStatus: APPROVED\nLGTM.');
+      writeReport('completion.check.md', '# Completion\nStatus: APPROVED\nDone.');
+      // No qa-*.check.md files
+      const { result } = await runOrchestrator(['transition', TICKET, 'pr'], gateOpts);
+      assert.equal(result.error, true);
+      assert.equal(result.gate, 'check-to-pr');
+      assert.ok(result.reasons.some(r => r.toLowerCase().includes('qa')));
+    });
+
+    // 10. Error case: multiple failures simultaneously
+    it('should list all reasons when multiple failures occur', async () => {
+      await advanceToCheck();
+      // Only write code-review with FAILED, missing tests + completion + qa
+      writeReport('code-review.check.md', '# Code Review\nStatus: FAILED\nBad.');
+      const { result } = await runOrchestrator(['transition', TICKET, 'pr'], gateOpts);
+      assert.equal(result.error, true);
+      assert.equal(result.gate, 'check-to-pr');
+      assert.ok(result.reasons.length >= 3, `Expected at least 3 reasons, got ${result.reasons.length}: ${JSON.stringify(result.reasons)}`);
+      // Should mention tests.check.md, completion.check.md, and qa
+      assert.ok(result.reasons.some(r => r.includes('tests.check.md')));
+      assert.ok(result.reasons.some(r => r.includes('completion.check.md')));
+      assert.ok(result.reasons.some(r => r.toLowerCase().includes('qa')));
     });
   });
 });
