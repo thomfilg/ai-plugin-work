@@ -475,7 +475,7 @@ it('agentPrompt for 3_implement contains instruction not to make local commits',
       await transitionTo(TICKET, 'implement', { WORK_TDD_ENFORCE: '1' });
       const evidencePath = path.join(tempTasksBase, TICKET, '.tdd-evidence-implement.json');
       fs.writeFileSync(evidencePath, JSON.stringify({
-        step: 'test_enhancement',
+        step: 'wrong_step',
         targetedTestCommand: 'pnpm test',
         redConfirmed: true,
         greenConfirmed: true,

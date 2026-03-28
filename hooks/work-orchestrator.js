@@ -789,7 +789,6 @@ function transitionStep(ticket, targetStep) {
     ws = {
       ticketId: ticket, description: '', currentStep: 1, status: 'in_progress',
       stepStatus: {}, checkProgress: {},
-      testEnhancement: { initialRating: 0, finalRating: 0, iterations: 0, skipped: false, skipReason: null },
       errors: [], startTime: new Date().toISOString(), lastUpdate: new Date().toISOString(),
     };
     ALL_STEPS.forEach(s => { ws.stepStatus[s] = 'pending'; });

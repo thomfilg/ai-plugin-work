@@ -50,7 +50,7 @@ For local development, point to a local directory instead:
 
 | Command | Description |
 |---------|-------------|
-| `/test-coordination` | Coordinate test enhancement: reviews coverage and creates missing tests in parallel |
+| `/test-coordination` | Coordinate test coverage improvement: reviews coverage and creates missing tests in parallel |
 | `/tests-review` | Review test edge case coverage iteratively |
 | `/tests-create` | Implement missing test edge cases using the appropriate developer agent |
 

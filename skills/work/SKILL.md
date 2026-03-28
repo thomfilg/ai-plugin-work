@@ -25,7 +25,7 @@ This keeps your context window lean: just plan JSON + transition outputs + agent
 
 ## TDD Execution Policy
 
-When `WORK_TDD_ENFORCE=1` is set, `/work` enforces TDD for all implementation work entering `implement` or `test_enhancement`.
+When `WORK_TDD_ENFORCE=1` is set, `/work` enforces TDD for all implementation work entering `implement`.
 
 Delegated agents must follow this loop:
 
@@ -39,7 +39,7 @@ Delegated agents must follow this loop:
 8. Record TDD evidence via `work-orchestrator.js record-tdd` CLI
 9. Run broader quality checks after targeted tests pass
 
-Enforcement: The orchestrator blocks transitions out of `implement` and `test_enhancement`
+Enforcement: The orchestrator blocks transitions out of `implement`
 unless a valid TDD evidence file exists. This is a hard gate, not a suggestion.
 
 Toggle: TDD enforcement is controlled by `WORK_TDD_ENFORCE=1` in `.envrc`. When unset
@@ -50,9 +50,9 @@ Allowed exception: For mechanical refactors, file moves, or non-testable config-
 the agent must set `exceptionReason` in the evidence file explaining why literal RED-first
 was not appropriate.
 
-Why only these two steps: Other steps in the workflow don't produce new application code —
-they commit, verify, generate PRs, or package work that was already validated by TDD-gated
-steps. Gating `implement` and `test_enhancement` covers all code-producing transitions.
+Why only this step: Other steps in the workflow don't produce new application code —
+they commit, verify, generate PRs, or package work that was already validated by the TDD-gated
+`implement` step.
 
 ---
 
@@ -75,12 +75,12 @@ Parse the JSON output. This is your roadmap. Each RUN step includes `agentType` 
   "currentStep": "check",
   "plan": [
     { "step": "ticket", "action": "SKIP", "reason": "Fetched" },
-    { "step": "quality", "action": "RUN", "command": "Task(quality-checker)",
-      "agentType": "quality-checker",
-      "agentPrompt": "Run quality checks in /home/node/worktrees/...\nUse pnpm dev:check if available, bundled dev-check scripts as fallback, or pnpm lint && pnpm typecheck && pnpm test as last resort.\n\nReturn PASS or FAIL with summary.",
-      "reason": "Lint + typecheck + test" }
+    { "step": "check", "action": "RUN", "command": "/check",
+      "agentType": "skill",
+      "agentPrompt": "/check",
+      "reason": "Quality checks + code review" }
   ],
-  "summary": { "total": 16, "run": 4, "skip": 12, "firstAction": "check" }
+  "summary": { "total": 14, "run": 4, "skip": 10, "firstAction": "check" }
 }
 ```
 
@@ -114,21 +114,13 @@ Use the plan's `agentType` and `agentPrompt` to delegate. **NEVER run step comma
 |-----------|----------------|------------------------------|
 | `general-purpose` | `Task(general-purpose)` | `"<step_name> <short description>"` |
 | `jira-task-creator` | `Task(jira-task-creator)` | `"ticket create ticket"` |
-| `quality-checker` | `Task(quality-checker)` | `"quality run checks"` |
+| `skill` | `Skill(<skill_name>)` | N/A (agentPrompt is usually a literal command like `/check` or `/bootstrap`) |
 | `commit-writer` | `Task(commit-writer)` | `"commit changes"` |
 | `Bash` | `Task(Bash)` | `"<step_name> <short description>"` |
-| `skill` | `Skill(<skill_name>)` | N/A (use Skill tool directly) |
 
 **CRITICAL**: For Task-based delegations, the `description` field MUST start with the step name (e.g., `"cleanup kill dev session"`). This is how the enforcement hook identifies which step the Task belongs to.
 
 #### Delegation Examples
-
-**Task-based step (e.g., quality):**
-```
-Task(quality-checker):
-  description: "quality run checks"
-  prompt: <agentPrompt from plan>
-```
 
 **Task-based Bash step (e.g., ready):**
 ```
@@ -151,7 +143,7 @@ Task(general-purpose):
 
 ### TDD augmentation for implementation steps
 
-For `implement` and `test_enhancement`, the orchestrator automatically appends TDD protocol
+For `implement`, the orchestrator automatically appends TDD protocol
 instructions to the `agentPrompt`. The delegated agent must:
 - Write focused failing tests before implementation when the change is behavior-testable
 - Run the smallest relevant test command first and confirm failure
@@ -200,11 +192,9 @@ node ${CLAUDE_PLUGIN_ROOT}/hooks/work-orchestrator.js PROJ-XXX
 | `brief` | `brief-writer` | `Task(brief-writer)` — generates product brief from ticket requirements |
 | `spec` | `spec-writer` | `Task(spec-writer)` — generates technical spec with test scenarios from brief + codebase |
 | `implement` | `skill` | `Skill(work-implement)` |
-| `quality` | `quality-checker` | `Task(quality-checker)` — runs quality checks (dev:check → bundled scripts → lint/typecheck/test) |
 | `commit` | `commit-writer` | `Task(commit-writer)` |
 | `check` | `skill` | `Skill(check)` |
 | `cleanup` | `Bash` | `Task(Bash)` — kills tmux dev session |
-| `test_enhancement` | `skill` | `Skill(test-coordination)` |
 | `pr` | `skill` | `Skill(work-pr)` |
 | `ready` | `Bash` | `Task(Bash)` — runs `gh pr ready` |
 | `ci` | `Bash` | `Task(Bash)` — watches CI with `gh pr checks` |
@@ -216,27 +206,24 @@ node ${CLAUDE_PLUGIN_ROOT}/hooks/work-orchestrator.js PROJ-XXX
 ## State Machine Transitions
 
 ```
-Happy path:  ticket→bootstrap→brief→spec→implement→quality→commit→check→test_enhancement→pr→ready→ci→cleanup→reports→complete
+Happy path:  ticket→bootstrap→brief→spec→implement→commit→check→pr→ready→follow_up→ci→cleanup→reports→complete
 
 Retry loops (backward):
-  quality   → implement   (quality failed)
-  commit    → quality     (re-verify after commit)
   check     → implement   (check found issues)
-  check     → quality     (check needs quality re-run)
-  test_enh  → commit      (new tests need commit)
-  test_enh  → quality     (new tests need quality check)
-  test_enh  → implement   (tests reveal implementation flaw)
-  ci       → implement   (CI failed)
-  ci       → test_enh    (coverage failed)
+  follow_up → implement   (follow-up requires code changes)
+  ci        → implement   (CI failed)
 
 Skip edges (forward):
+  bootstrap → spec        (brief disabled, skip to spec)
   bootstrap → implement   (brief/spec disabled or done)
-  bootstrap → quality     (code exists)
-  bootstrap → commit      (quality done)
-  bootstrap → check       (committed)
+  bootstrap → commit      (resume: code already done)
+  bootstrap → check       (resume: committed, need check)
   brief     → implement   (spec disabled, skip to implement)
-  check     → test_enh    (no cleanup needed)
-  pr        → ci         (PR already ready, skip ready)
+  check     → pr          (check passed, go to PR)
+  pr        → ci          (PR already ready, skip ready)
+  ready     → ci          (follow_up skipped)
+  follow_up → ci          (skip to CI)
+  follow_up → cleanup     (skip CI)
 ```
 
 ---
@@ -251,7 +238,7 @@ Skip edges (forward):
 6. **Never claim completion without plan showing all done** — The orchestrator is truth
 7. **Only run inline**: orchestrator commands, transitions, and reading plan output
 8. **Don't process large outputs** — Agent summaries are enough for decision-making
-9. `implement` and `test_enhancement` enforce TDD — transitions out are blocked without
+9. `implement` enforces TDD — transitions out are blocked without
    recorded TDD evidence proving GREEN or providing an explicit exception reason
 
 ---

@@ -56,7 +56,7 @@ When `--subtask` is present:
 - Use `SUBTASK_PARENT` as the ticket ID (skip branch/worktree detection)
 - Initialize subtask state: `node ${CLAUDE_PLUGIN_ROOT}/hooks/work-state.js init-subtask <TICKET_ID> "<description>"`
 - Skip `implement.md` creation (subtask state file replaces it)
-- The subtask state tracks only three steps: `implement`, `quality`, `commit`
+- The subtask state tracks only two steps: `implement`, `commit`
 
 When `--subtask` is NOT present, proceed normally:
 
