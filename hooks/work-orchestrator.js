@@ -856,9 +856,10 @@ function transitionStep(ticket, targetStep) {
     }
   }
 
-  // Check-to-PR gate (GH-121): require all check reports before moving to PR.
-  // Always enabled — no toggle. This gate is a mandatory quality safeguard (see GH-121).
-  if (currentStep === STEPS.check && targetStep === STEPS.pr) {
+  // Check-to-PR gate (GH-121): mandatory quality safeguard — always enabled, no toggle.
+  // Blocks check→pr unless all reports exist, pass, and no agents are running.
+  const isCheckToPr = currentStep === STEPS.check && targetStep === STEPS.pr;
+  if (isCheckToPr) {
     const checkGate = validateCheckGate(ticket);
     if (!checkGate.valid) {
       return {
