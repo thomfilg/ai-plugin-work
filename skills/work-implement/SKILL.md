@@ -209,7 +209,20 @@ Fix any issues before completing.
    (where `<N>` is the subtask index from the init-subtask output)
 3. Report completion briefly and return control to the parent workflow
 
-**When in normal mode (no `--subtask`):**
+**When called from `/work` orchestrator (orchestrator plan exists with subsequent steps):**
+
+Return a brief completion signal and hand control back to the orchestrator. Do NOT prompt the user for next steps or display a "Next steps" list.
+
+```
+IMPLEMENT_COMPLETE
+
+Agent used: <agent-name>
+Changes: <brief summary>
+Files modified: <count> files
+Quality: dev:check PASS
+```
+
+**When in normal mode (standalone invocation, no `--subtask`, not called from `/work`):**
 
 **Update the implementation tracking file:**
 ```bash
@@ -255,3 +268,4 @@ Next steps:
 - For complex multi-step features, consider using `/work` instead
 - **Agent delegation is MANDATORY** - direct Write/Edit is blocked
 - **Subtask mode** (`--subtask <TICKET_ID>`): Skips branch/worktree creation, uses subtask state tracking, commits on completion, and returns control to parent workflow
+- **Orchestrator mode**: When invoked by `/work`, returns a brief completion signal instead of prompting the user — the orchestrator handles subsequent steps (commit, check, PR)
