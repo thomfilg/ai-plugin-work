@@ -754,7 +754,7 @@ const REQUIRED_CHECK_REPORTS = [
  *
  * Checks:
  *  1. All required .check.md reports exist and contain the expected status.
- *  2. At least one qa-*.check.md report exists with APPROVED status.
+ *  2. All qa-*.check.md reports must have Status: APPROVED (at least one must exist).
  *  3. No check-agent tmux sessions are still running for this ticket.
  *
  * @param {string} ticket - The ticket ID (e.g. "PROJ-123")
@@ -777,7 +777,7 @@ function validateCheckGate(ticket) {
     }
   }
 
-  // 2. Check QA reports (at least one qa-*.check.md with APPROVED)
+  // 2. All qa-*.check.md reports must have Status: APPROVED (at least one must exist)
   const qaFiles = listFiles(ticketDir, /^qa-.*\.check\.md$/);
   if (qaFiles.length === 0) {
     reasons.push('No QA reports found (need at least one qa-*.check.md)');

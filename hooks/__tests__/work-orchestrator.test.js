@@ -962,6 +962,8 @@ describe('work-orchestrator.js', () => {
       writeReport('qa-feature.check.md', '# QA Feature\nStatus: APPROVED\nPassed.');
     }
 
+    // Shortcut: bootstrap → check skips intermediate steps (implement, commit, etc.)
+    // because the orchestrator allows forward jumps when no gate blocks the target step.
     async function advanceToCheck() {
       await runOrchestrator(['transition', TICKET, 'bootstrap'], gateOpts);
       await runOrchestrator(['transition', TICKET, 'check'], gateOpts);
@@ -1016,8 +1018,8 @@ describe('work-orchestrator.js', () => {
       assert.equal(result.to, 'commit');
     });
 
-    // 5. Edge case: dev tmux session exists (not a check agent) — succeeds
-    it('should allow check → pr when non-agent tmux sessions exist', async () => {
+    // 5. Edge case: no agent tmux sessions running — succeeds
+    it('should allow check → pr when all reports are approved (no agents running)', async () => {
       await advanceToCheck();
       writeAllApprovedReports();
       // tmux has-session for non-agent names will fail (session doesn't exist)
