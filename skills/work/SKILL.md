@@ -103,8 +103,7 @@ node ${CLAUDE_PLUGIN_ROOT}/hooks/work-orchestrator.js <TICKET_ID>
 Check the step's action in the **new** plan:
 - If now `RUN` → proceed with delegation using the **new plan's** agentType/agentPrompt
 - If now `SKIP` → skip the step and transition to the next one
-
-DEFER always resolves to RUN or SKIP on re-plan. It never stays DEFER because the re-plan evaluates current state which produces a definitive answer.
+- If still `DEFER` → execute using the DEFER step's agentType/agentPrompt (included as fallback)
 
 For each step where `action = "RUN"` (or DEFER resolved to RUN):
 

@@ -474,12 +474,12 @@ describe('work-orchestrator.js', () => {
       }
     });
 
-    it('should not include agentType for DEFER steps (GH-130)', async () => {
+    it('should include agentType for DEFER steps as fallback (GH-130)', async () => {
       const { result } = await runOrchestrator([TEST_TICKET]);
       const deferSteps = result.plan.filter((s) => s.action === 'DEFER');
       for (const step of deferSteps) {
-        assert.equal(step.agentType, undefined, `DEFER step ${step.step} should not have agentType`);
-        assert.equal(step.agentPrompt, undefined, `DEFER step ${step.step} should not have agentPrompt`);
+        assert.ok(step.agentType, `DEFER step ${step.step} should have agentType as fallback`);
+        assert.ok(step.agentPrompt, `DEFER step ${step.step} should have agentPrompt as fallback`);
       }
     });
 
@@ -683,13 +683,13 @@ describe('work-orchestrator.js', () => {
       assert.ok(followUpStep.reason.includes('No PR'));
     });
 
-    it('should DEFER follow_up with no agentType when no PR exists (GH-130)', async () => {
+    it('should DEFER follow_up with fallback agentType when no PR exists (GH-130)', async () => {
       const { result } = await runOrchestrator([TEST_TICKET]);
       const followUpStep = result.plan.find((s) => s.step === 'follow_up');
       assert.ok(followUpStep, 'follow_up step should exist in plan');
       assert.equal(followUpStep.action, 'DEFER');
-      assert.equal(followUpStep.agentType, undefined);
-      assert.equal(followUpStep.agentPrompt, undefined);
+      assert.ok(followUpStep.agentType, "DEFER follow_up should have fallback agentType");
+      assert.ok(followUpStep.agentPrompt, "DEFER follow_up should have fallback agentPrompt");
     });
 
     it('should appear between ready and ci in plan order', async () => {
@@ -962,7 +962,7 @@ describe('work-orchestrator.js', () => {
         assert.equal(code, 0);
         const implStep = result.plan.find((s) => s.step === 'implement');
         assert.equal(implStep.action, 'DEFER', 'implement step should be DEFER when hasDiffVsMain (GH-130)');
-        assert.ok(!implStep.agentPrompt, 'agentPrompt should not be present on DEFER step');
+        assert.ok(implStep.agentPrompt, 'DEFER implement should have fallback agentPrompt');
       } finally {
         fs.rmSync(worktreeDir, { recursive: true, force: true });
       }

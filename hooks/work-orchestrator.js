@@ -662,13 +662,14 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
   }
 
   // implement
+  const implementMeta = {
+    agentType: 'skill',
+    agentPrompt: `/work-implement <requirements>${planningContext}${getDocsPrompt('READ_DOCS_ON_DEV')}`,
+  };
   if (s?.hasDiffVsMain) {
-    add(STEPS.implement, 'DEFER', null, `Changes exist: ${s.diffSummary}`);
+    add(STEPS.implement, 'DEFER', '/work-implement <requirements>', `Changes exist: ${s.diffSummary}`, implementMeta);
   } else {
-    add(STEPS.implement, 'RUN', '/work-implement <requirements>', 'No changes vs main', {
-      agentType: 'skill',
-      agentPrompt: `/work-implement <requirements>${planningContext}${getDocsPrompt('READ_DOCS_ON_DEV')}`,
-    });
+    add(STEPS.implement, 'RUN', '/work-implement <requirements>', 'No changes vs main', implementMeta);
   }
 
   // commit
@@ -678,7 +679,10 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
       agentPrompt: `autonomous - commit staged changes for ${t}`,
     });
   } else if (s?.hasCommitWithTicket) {
-    add(STEPS.commit, 'DEFER', null, `Latest: "${s.lastCommitMsg}"`);
+    add(STEPS.commit, 'DEFER', 'Task(commit-writer)', `Latest: "${s.lastCommitMsg}"`, {
+      agentType: 'commit-writer',
+      agentPrompt: `autonomous - commit staged changes for ${t}`,
+    });
   } else if (!s?.hasDiffVsMain) {
     add(STEPS.commit, 'PENDING', null, 'Depends on implement');
   } else {
@@ -700,7 +704,10 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
       ],
     });
   } else if (s?.allReportsPass && Object.keys(s.reports).length >= 3) {
-    add(STEPS.check, 'DEFER', null, `RESUME: All ${Object.keys(s.reports).length} reports PASS`);
+    add(STEPS.check, 'DEFER', '/check', `RESUME: All ${Object.keys(s.reports).length} reports PASS`, {
+      agentType: 'skill',
+      agentPrompt: '/check',
+    });
   } else {
     const p = [];
     if (s?.missingReports?.length) p.push(`missing: ${s.missingReports.join(', ')}`);
@@ -718,7 +725,10 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
       agentPrompt: `/work-pr ${ticket} --force`,
     });
   } else if (s?.prShaMatch && s?.prEverUpdated && (s?.postPrShaMatch || !s?.contentSha)) {
-    add(STEPS.pr, 'DEFER', null, `SHA match (${s.headSha?.substring(0, 8)}, content: ${s?.postPrShaMatch ? 'match' : 'n/a'})`);
+    add(STEPS.pr, 'DEFER', `/work-pr ${ticket || t}`, `SHA match (${s.headSha?.substring(0, 8)}, content: ${s?.postPrShaMatch ? 'match' : 'n/a'})`, {
+      agentType: 'skill',
+      agentPrompt: `/work-pr ${ticket || t}`,
+    });
   } else if (s?.prEverUpdated) {
     add(STEPS.pr, 'RUN', `/work-pr ${ticket}`, `HEAD: ${s.prUpdateSha?.substring(0, 8) || '?'} → ${s.headSha?.substring(0, 8) || '?'}`, {
       agentType: 'skill',
@@ -743,7 +753,10 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
 
   // follow_up
   if (!s?.pr || s.pr.isDraft) {
-    add(STEPS.follow_up, 'DEFER', null, !s?.pr ? 'No PR exists' : 'PR is still draft');
+    add(STEPS.follow_up, 'DEFER', 'Skill(follow-up-pr)', !s?.pr ? 'No PR exists' : 'PR is still draft', {
+      agentType: 'skill',
+      agentPrompt: `/follow-up-pr`,
+    });
   } else {
     add(STEPS.follow_up, 'RUN', 'Skill(follow-up-pr)', 'Address bot review comments and CI issues', {
       agentType: 'skill',
