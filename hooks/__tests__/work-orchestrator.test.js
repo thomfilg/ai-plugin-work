@@ -227,7 +227,7 @@ describe('work-orchestrator.js', () => {
     });
 
     it('should auto-detect GitHub provider from #N shorthand when no provider configured', async () => {
-      // Fully isolate: fake HOME prevents reading real ~/.claude/ticket-providers.json,
+      // Fully isolate: fake HOME prevents reading real ticket-providers.json,
       // non-git cwd prevents getRemoteOriginUrl() from matching, and temp WORKTREES_BASE
       // prevents cleanup from touching real tasks directories.
       const tmpBase = path.join(os.tmpdir(), 'work-orch-gh-shorthand-' + process.pid);

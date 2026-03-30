@@ -6,7 +6,7 @@ description: |
 
   <example>
   Context: The /work orchestrator needs a brief for a Jira ticket
-  user: "Generate a product brief for APPSUPEN-123"
+  user: "Generate a product brief for PROJ-123"
   assistant: "I'll use the brief-writer agent to structure the ticket requirements into a product brief"
   <commentary>
   The brief-writer reads ticket details and produces a structured brief.md that feeds into the spec stage.

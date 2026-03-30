@@ -79,7 +79,7 @@ describe('work-implement-enforce hook', () => {
     fs.writeFileSync(tp, '# Implement Command\n');
     const { result } = await runHook({
       tool_name: 'Write',
-      tool_input: { file_path: '/home/node/.claude/hooks/test.js' },
+      tool_input: { file_path: '/tmp/project/.claude/hooks/test.js' },
       transcript_path: tp
     });
     assert.strictEqual(result.decision, 'approve');

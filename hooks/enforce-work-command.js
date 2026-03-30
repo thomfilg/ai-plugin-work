@@ -6,8 +6,8 @@
  * Blocks Edit/Write/MultiEdit when a work-state folder exists for the
  * current branch, meaning /work has been initiated and should manage edits.
  *
- * State directory: ~/.claude/work-state/<branch-name>/
- * Transition file: ~/.claude/work-state/<branch-name>/active
+ * State directory: $HOME/.claude/work-state/<branch-name>/
+ * Transition file: $HOME/.claude/work-state/<branch-name>/active
  *
  * The /work command creates the state folder. This hook enforces it.
  * No state folder = no enforcement (free edits allowed).

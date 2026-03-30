@@ -1,7 +1,7 @@
 /**
  * Tests for pr-generator-validator.js hook
  *
- * Run with: cd ~/.claude && pnpm test:hooks
+ * Run with: node --test hooks/agents/pr-generator/__tests__/pr-generator-validator.test.js
  */
 
 const { spawn } = require('child_process');

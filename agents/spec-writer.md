@@ -6,7 +6,7 @@ description: |
 
   <example>
   Context: The /work orchestrator needs a technical spec before implementation
-  user: "Generate a technical spec for APPSUPEN-123"
+  user: "Generate a technical spec for PROJ-123"
   assistant: "I'll use the spec-writer agent to analyze the codebase and create a technical specification"
   <commentary>
   The spec-writer reads the brief, explores the codebase, and produces spec.md with test scenarios for TDD.

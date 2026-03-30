@@ -60,7 +60,7 @@ describe('enforce-work-command hook', () => {
   it('should APPROVE .claude folder files', async () => {
     const { result } = await runHook({
       tool_name: 'Write',
-      tool_input: { file_path: '/home/node/.claude/hooks/test.js' }
+      tool_input: { file_path: '/tmp/project/.claude/hooks/test.js' }
     });
     assert.strictEqual(result.decision, 'approve');
   });

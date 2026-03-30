@@ -7,7 +7,7 @@
  *   exit 0  = allow (no stdout needed)
  *   exit 2  = block (stderr contains reason)
  *
- * Run: node ~/.claude/hooks/commit-writer/commit-writer-block-write.spec.js
+ * Run: node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/commit-writer/commit-writer-block-write.spec.js
  */
 
 const { execSync } = require('child_process');
