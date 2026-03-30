@@ -413,6 +413,7 @@ function parseArgs(args) {
       options.mainPath = args[++i];
     }
   }
+  // Available flags: --check, --env, --claude, --dry-run, --main <path>
 
   return options;
 }
@@ -424,6 +425,7 @@ function main() {
   const args = process.argv.slice(2);
   const options = parseArgs(args);
 
+  // TODO: Add tests for worktree detection and symlink operations
   const worktreeRoot = getWorktreeRoot();
   console.log(`\n📂 Current worktree: ${worktreeRoot}`);
 

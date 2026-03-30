@@ -897,7 +897,7 @@ mcp__playwright__browser_take_screenshot(
 2. Run the validation script:
    ```bash
    cd /home/node/worktrees/${REPO_NAME}-${JIRA_TICKET_ID} && \
-   echo '{"hook_type":"stop"}' | node ${CLAUDE_PLUGIN_ROOT}/hooks/work-code-review-status.js
+   echo '{"hook_type":"stop"}' | node "${CLAUDE_PLUGIN_ROOT}/hooks/work-code-review-status.js"
    ```
 3. If blocked → Read the error message and fix the report format
 4. Re-run validation until it passes
