@@ -935,7 +935,7 @@ describe('work-orchestrator.js', () => {
       assert.ok(!implStep.agentPrompt.includes('-  docs/guide.md'), 'should not have extra space before path');
     });
 
-    it('should DEFER implement step with no agentPrompt when hasDiffVsMain is true (GH-130)', async () => {
+    it('should RUN implement when hasDiffVsMain but implement not previously completed (GH-130)', async () => {
       const { execSync } = require('child_process');
       const REPO_NAME = process.env.REPO_NAME || 'my-project';
       const worktreeDir = path.join(TEMP_WB, `${REPO_NAME}-${TICKET}`);
@@ -961,8 +961,52 @@ describe('work-orchestrator.js', () => {
         });
         assert.equal(code, 0);
         const implStep = result.plan.find((s) => s.step === 'implement');
-        assert.equal(implStep.action, 'DEFER', 'implement step should be DEFER when hasDiffVsMain (GH-130)');
+        // GH-130: diffs alone should NOT cause DEFER — implement must be previously completed
+        assert.equal(implStep.action, 'RUN', 'implement should RUN when not previously completed, even with diffs');
+        assert.ok(implStep.agentPrompt, 'implement should have agentPrompt');
+      } finally {
+        fs.rmSync(worktreeDir, { recursive: true, force: true });
+      }
+    });
+
+    it('should DEFER implement when previously completed AND hasDiffVsMain (GH-130)', async () => {
+      const { execSync } = require('child_process');
+      const REPO_NAME = process.env.REPO_NAME || 'my-project';
+      const worktreeDir = path.join(TEMP_WB, `${REPO_NAME}-${TICKET}`);
+
+      // Create a mock git repo that has a diff vs origin/main
+      const gitCmd = (cmd) => execSync(cmd, { cwd: worktreeDir, stdio: 'pipe' });
+      const commitCmd = ['git', 'commit', '-m'].join(' ');
+      fs.mkdirSync(worktreeDir, { recursive: true });
+      gitCmd('git init && git config user.name "Test User" && git config user.email "test@example.com"');
+      gitCmd('git checkout -b main');
+      fs.writeFileSync(path.join(worktreeDir, 'file.txt'), 'initial');
+      gitCmd(`git add . && ${commitCmd} "init"`);
+      gitCmd('git checkout -b fake-branch');
+      gitCmd('git update-ref refs/remotes/origin/main main');
+      fs.writeFileSync(path.join(worktreeDir, 'new-file.txt'), 'new content');
+      gitCmd(`git add . && ${commitCmd} "add new file"`);
+
+      // Set work state to show implement was previously completed
+      const safeName = TICKET;
+      const stateDir = path.join(TEMP_TASKS, safeName);
+      fs.mkdirSync(stateDir, { recursive: true });
+      const stateFile = path.join(stateDir, '.work-state.json');
+      const workState = {
+        ticket: TICKET, status: 'in_progress',
+        stepStatus: { implement: 'completed' },
+      };
+      fs.writeFileSync(stateFile, JSON.stringify(workState));
+
+      try {
+        const { result, code } = await runOrchestrator([TICKET], {
+          env: { ...envOpts.env },
+        });
+        assert.equal(code, 0);
+        const implStep = result.plan.find((s) => s.step === 'implement');
+        assert.equal(implStep.action, 'DEFER', 'implement should DEFER when previously completed with diffs');
         assert.ok(implStep.agentPrompt, 'DEFER implement should have fallback agentPrompt');
+        assert.ok(implStep.reason.includes('Previously completed'), 'reason should mention previously completed');
       } finally {
         fs.rmSync(worktreeDir, { recursive: true, force: true });
       }

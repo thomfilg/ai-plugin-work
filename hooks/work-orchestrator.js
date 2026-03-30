@@ -668,11 +668,13 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
     agentType: 'skill',
     agentPrompt: `/work-implement <requirements>${planningContext}${getDocsPrompt('READ_DOCS_ON_DEV')}`,
   };
-  if (s?.hasDiffVsMain) {
-    // DEFER with full metadata — add() augments TDD protocol for both RUN and DEFER
-    add(STEPS.implement, 'DEFER', '/work-implement <requirements>', `Changes exist: ${s.diffSummary}`, implementMeta);
+  const implementPreviouslyCompleted = s?.stepIs(STEPS.implement) === 'completed';
+  if (implementPreviouslyCompleted && s?.hasDiffVsMain) {
+    // DEFER only when implement was previously completed AND diffs exist (GH-130)
+    // Previously: any diff triggered DEFER, even if unrelated to current task
+    add(STEPS.implement, 'DEFER', '/work-implement <requirements>', `Previously completed; changes exist: ${s.diffSummary}`, implementMeta);
   } else {
-    add(STEPS.implement, 'RUN', '/work-implement <requirements>', 'No changes vs main', implementMeta);
+    add(STEPS.implement, 'RUN', '/work-implement <requirements>', s?.hasDiffVsMain ? `Changes exist but implement not yet completed` : 'No changes vs main', implementMeta);
   }
 
   // commit
