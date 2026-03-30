@@ -103,12 +103,6 @@ function detectMainWorktree(worktrees, currentRoot) {
     return worktrees[0].path;
   }
 
-  // Get base name of current worktree to find pattern
-  const currentBasename = path.basename(currentRoot);
-
-  // Find the common prefix among all worktrees
-  const basenames = worktrees.map(w => path.basename(w.path));
-
   // Sort by length - shortest is likely the main worktree
   const sorted = [...worktrees].sort((a, b) => {
     const aName = path.basename(a.path);
@@ -118,7 +112,7 @@ function detectMainWorktree(worktrees, currentRoot) {
 
   // Check if the shortest one is on main/master branch
   const shortest = sorted[0];
-  if (shortest.branch && (shortest.branch.includes('main') || shortest.branch.includes('master'))) {
+  if (shortest.branch && (shortest.branch === 'refs/heads/main' || shortest.branch === 'refs/heads/master')) {
     return shortest.path;
   }
 
@@ -140,34 +134,6 @@ function detectMainWorktree(worktrees, currentRoot) {
  */
 function isMainWorktree(worktreeRoot, mainWorktreePath) {
   return path.resolve(worktreeRoot) === path.resolve(mainWorktreePath);
-}
-
-/**
- * Find all files matching a pattern in a directory
- */
-function findFiles(dir, pattern, maxDepth = 3, currentDepth = 0) {
-  const results = [];
-
-  if (currentDepth >= maxDepth || !fs.existsSync(dir)) {
-    return results;
-  }
-
-  try {
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
-    for (const entry of entries) {
-      const fullPath = path.join(dir, entry.name);
-
-      if (entry.isFile() && pattern.test(entry.name)) {
-        results.push(fullPath);
-      } else if (entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== 'node_modules') {
-        results.push(...findFiles(fullPath, pattern, maxDepth, currentDepth + 1));
-      }
-    }
-  } catch (error) {
-    // Skip directories we can't read
-  }
-
-  return results;
 }
 
 /**
@@ -260,7 +226,7 @@ function createSymlink(targetPath, sourcePath, dryRun = false) {
     if (!dryRun) {
       fs.unlinkSync(targetPath);
     }
-    console.log(`  Removing broken/incorrect symlink: ${targetPath}`);
+    console.log(`  ${dryRun ? 'Would remove' : 'Removing'} broken/incorrect symlink: ${targetPath}`);
   }
 
   // If a regular file exists, don't overwrite
@@ -278,7 +244,7 @@ function createSymlink(targetPath, sourcePath, dryRun = false) {
     fs.symlinkSync(sourcePath, targetPath);
   }
 
-  return { action: 'created', sourcePath };
+  return { action: dryRun ? 'would_create' : 'created', sourcePath };
 }
 
 /**
@@ -316,6 +282,9 @@ function fixEnvSymlinks(worktreeRoot, mainWorktreePath, dryRun = false) {
     if (result.action === 'created') {
       console.log(`  ✅ ${envFile.relativePath}: Created symlink`);
       console.log(`     ${targetPath} -> ${envFile.sourcePath}`);
+    } else if (result.action === 'would_create') {
+      console.log(`  🔍 ${envFile.relativePath}: Would create symlink`);
+      console.log(`     ${targetPath} -> ${envFile.sourcePath}`);
     } else if (result.action === 'skip') {
       console.log(`  ⏭️  ${envFile.relativePath}: ${result.reason}`);
     }
@@ -343,6 +312,9 @@ function fixClaudeSymlink(worktreeRoot, mainWorktreePath, dryRun = false) {
 
   if (result.action === 'created') {
     console.log(`  ✅ .claude: Created symlink`);
+    console.log(`     ${targetPath} -> ${sourcePath}`);
+  } else if (result.action === 'would_create') {
+    console.log(`  🔍 .claude: Would create symlink`);
     console.log(`     ${targetPath} -> ${sourcePath}`);
   } else if (result.action === 'skip') {
     console.log(`  ⏭️  .claude: ${result.reason}`);
