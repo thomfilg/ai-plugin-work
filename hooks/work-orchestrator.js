@@ -112,6 +112,58 @@ function listFiles(dir, pattern) {
   } catch { return []; }
 }
 
+// ─── Artifact Archival (GH-130) ─────────────────────────────────────────────
+// Maps steps to glob patterns of artifacts that should be archived on backward
+// transitions. When the workflow loops back (e.g. check→implement), stale
+// artifacts are moved to runs/runN/ so DEFER re-evaluation sees fresh state.
+
+const STEP_ARTIFACTS = {
+  [STEPS.check]:  [/^.*\.check\.md$/],
+  [STEPS.pr]:     [/^\.pr-update-sha$/, /^\.post-pr-update-sha$/],
+};
+
+function archiveStepArtifacts(tasksDir, stepsToArchive) {
+  if (!fileExists(tasksDir)) return null;
+
+  // Determine next run number
+  const runsDir = path.join(tasksDir, 'runs');
+  let runNum = 1;
+  if (fileExists(runsDir)) {
+    try {
+      const existing = fs.readdirSync(runsDir)
+        .filter(d => /^run\d+$/.test(d))
+        .map(d => parseInt(d.replace('run', ''), 10))
+        .filter(n => !isNaN(n));
+      if (existing.length > 0) runNum = Math.max(...existing) + 1;
+    } catch { /* ignore */ }
+  }
+
+  let archived = false;
+  const runDir = path.join(runsDir, `run${runNum}`);
+
+  for (const step of stepsToArchive) {
+    const patterns = STEP_ARTIFACTS[step];
+    if (!patterns) continue;
+
+    const files = patterns.flatMap(p => listFiles(tasksDir, p));
+    if (files.length === 0) continue;
+
+    if (!archived) {
+      fs.mkdirSync(runDir, { recursive: true });
+      archived = true;
+    }
+
+    for (const filePath of files) {
+      const dest = path.join(runDir, path.basename(filePath));
+      try { fs.renameSync(filePath, dest); } catch (e) {
+        process.stderr.write(`work-orchestrator: failed to archive ${path.basename(filePath)}: ${e?.message || e}\n`);
+      }
+    }
+  }
+
+  return archived ? `runs/run${runNum}` : null;
+}
+
 function loadWorkState(ticket) {
   const p = path.join(TASKS_BASE, ticket, '.work-state.json');
   if (!fileExists(p)) return null;
@@ -492,7 +544,7 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
 
   function add(stepName, action, command, reason, extra = {}) {
     // Augment TDD-gated steps with protocol instructions
-    if (tddEnforce && TDD_GATED_STEPS.includes(stepName) && extra.agentPrompt && action === 'RUN') {
+    if (tddEnforce && TDD_GATED_STEPS.includes(stepName) && extra.agentPrompt && (action === 'RUN' || action === 'DEFER')) {
       const resolvedProtocol = TDD_PROTOCOL
         .replace(/<ORCHESTRATOR_PATH>/g, path.join(__dirname, 'work-orchestrator.js'))
         .replace(/<TICKET_ID>/g, t)
@@ -612,13 +664,15 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
   }
 
   // implement
+  const implementMeta = {
+    agentType: 'skill',
+    agentPrompt: `/work-implement <requirements>${planningContext}${getDocsPrompt('READ_DOCS_ON_DEV')}`,
+  };
   if (s?.hasDiffVsMain) {
-    add(STEPS.implement, 'SKIP', null, `Changes exist: ${s.diffSummary}`);
+    // DEFER with full metadata — add() augments TDD protocol for both RUN and DEFER
+    add(STEPS.implement, 'DEFER', '/work-implement <requirements>', `Changes exist: ${s.diffSummary}`, implementMeta);
   } else {
-    add(STEPS.implement, 'RUN', '/work-implement <requirements>', 'No changes vs main', {
-      agentType: 'skill',
-      agentPrompt: `/work-implement <requirements>${planningContext}${getDocsPrompt('READ_DOCS_ON_DEV')}`,
-    });
+    add(STEPS.implement, 'RUN', '/work-implement <requirements>', 'No changes vs main', implementMeta);
   }
 
   // commit
@@ -628,7 +682,10 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
       agentPrompt: `autonomous - commit staged changes for ${t}`,
     });
   } else if (s?.hasCommitWithTicket) {
-    add(STEPS.commit, 'SKIP', null, `Latest: "${s.lastCommitMsg}"`);
+    add(STEPS.commit, 'DEFER', 'Task(commit-writer)', `Latest: "${s.lastCommitMsg}"`, {
+      agentType: 'commit-writer',
+      agentPrompt: `autonomous - commit staged changes for ${t}`,
+    });
   } else if (!s?.hasDiffVsMain) {
     add(STEPS.commit, 'PENDING', null, 'Depends on implement');
   } else {
@@ -650,7 +707,10 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
       ],
     });
   } else if (s?.allReportsPass && Object.keys(s.reports).length >= 3) {
-    add(STEPS.check, 'SKIP', null, `RESUME: All ${Object.keys(s.reports).length} reports PASS`);
+    add(STEPS.check, 'DEFER', '/check', `RESUME: All ${Object.keys(s.reports).length} reports PASS`, {
+      agentType: 'skill',
+      agentPrompt: '/check',
+    });
   } else {
     const p = [];
     if (s?.missingReports?.length) p.push(`missing: ${s.missingReports.join(', ')}`);
@@ -668,7 +728,10 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
       agentPrompt: `/work-pr ${ticket} --force`,
     });
   } else if (s?.prShaMatch && s?.prEverUpdated && (s?.postPrShaMatch || !s?.contentSha)) {
-    add(STEPS.pr, 'SKIP', null, `SHA match (${s.headSha?.substring(0, 8)}, content: ${s?.postPrShaMatch ? 'match' : 'n/a'})`);
+    add(STEPS.pr, 'DEFER', `/work-pr ${ticket || t}`, `SHA match (${s.headSha?.substring(0, 8)}, content: ${s?.postPrShaMatch ? 'match' : 'n/a'})`, {
+      agentType: 'skill',
+      agentPrompt: `/work-pr ${ticket || t}`,
+    });
   } else if (s?.prEverUpdated) {
     add(STEPS.pr, 'RUN', `/work-pr ${ticket}`, `HEAD: ${s.prUpdateSha?.substring(0, 8) || '?'} → ${s.headSha?.substring(0, 8) || '?'}`, {
       agentType: 'skill',
@@ -691,10 +754,12 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
     });
   }
 
-  // follow_up — SKIP when no PR or draft PR (plan is re-generated at each step,
-  // so this becomes RUN after pr/ready steps create and mark the PR ready)
+  // follow_up
   if (!s?.pr || s.pr.isDraft) {
-    add(STEPS.follow_up, 'SKIP', null, !s?.pr ? 'No PR exists' : 'PR is still draft');
+    add(STEPS.follow_up, 'DEFER', 'Skill(follow-up-pr)', !s?.pr ? 'No PR exists' : 'PR is still draft', {
+      agentType: 'skill',
+      agentPrompt: `/follow-up-pr`,
+    });
   } else {
     add(STEPS.follow_up, 'RUN', 'Skill(follow-up-pr)', 'Address bot review comments and CI issues', {
       agentType: 'skill',
@@ -907,10 +972,17 @@ function transitionStep(ticket, targetStep) {
   ws.currentStep = targetIdx + 1;
 
   if (targetIdx < currentIdx) {
-    // Going backward (retry loop) — reset intermediate steps to pending
+    // Going backward (retry loop) — reset intermediate steps and archive artifacts
+    const stepsToReset = [];
     for (let i = targetIdx + 1; i <= currentIdx; i++) {
       ws.stepStatus[ALL_STEPS[i]] = 'pending';
+      stepsToReset.push(ALL_STEPS[i]);
       appendAction(ticket, { step: ALL_STEPS[i], what: 'step reset' });
+    }
+    const tasksDir = path.join(TASKS_BASE, ticket);
+    const archivePath = archiveStepArtifacts(tasksDir, stepsToReset);
+    if (archivePath) {
+      appendAction(ticket, { step: currentStep, what: `artifacts archived to ${archivePath}` });
     }
   } else {
     // Going forward — mark skipped intermediates as completed
@@ -1020,9 +1092,12 @@ function main() {
       }
       const by = (a) => result.plan.filter(s => s.action === a);
       result.summary = {
-        total: result.plan.length, run: by('RUN').length, skip: by('SKIP').length, pending: by('PENDING').length,
-        firstAction: by('RUN')[0]?.step || 'none',
-        stepsToRun: by('RUN').map(s => s.step), stepsSkipped: by('SKIP').map(s => s.step),
+        total: result.plan.length,
+        run: by('RUN').length, skip: by('SKIP').length, defer: by('DEFER').length, pending: by('PENDING').length,
+        firstAction: by('RUN')[0]?.step || by('DEFER')[0]?.step || 'none',
+        stepsToRun: by('RUN').map(s => s.step),
+        stepsDeferred: by('DEFER').map(s => s.step), // separate from stepsToRun: agent re-plans before executing
+        stepsSkipped: by('SKIP').map(s => s.step),
       };
       console.log(JSON.stringify(result, null, 2));
       break;
