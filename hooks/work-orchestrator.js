@@ -611,9 +611,9 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
     });
   }
 
-  // implement
+  // implement — DEFER instead of SKIP: the diff may be unrelated to this task (GH-130)
   if (s?.hasDiffVsMain) {
-    add(STEPS.implement, 'SKIP', null, `Changes exist: ${s.diffSummary}`);
+    add(STEPS.implement, 'DEFER', null, `Changes exist: ${s.diffSummary} — re-check at execution time`);
   } else {
     add(STEPS.implement, 'RUN', '/work-implement <requirements>', 'No changes vs main', {
       agentType: 'skill',
@@ -628,7 +628,7 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
       agentPrompt: `autonomous - commit staged changes for ${t}`,
     });
   } else if (s?.hasCommitWithTicket) {
-    add(STEPS.commit, 'SKIP', null, `Latest: "${s.lastCommitMsg}"`);
+    add(STEPS.commit, 'DEFER', null, `Latest: "${s.lastCommitMsg}" — re-check after implement`);
   } else if (!s?.hasDiffVsMain) {
     add(STEPS.commit, 'PENDING', null, 'Depends on implement');
   } else {
@@ -650,7 +650,7 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
       ],
     });
   } else if (s?.allReportsPass && Object.keys(s.reports).length >= 3) {
-    add(STEPS.check, 'SKIP', null, `RESUME: All ${Object.keys(s.reports).length} reports PASS`);
+    add(STEPS.check, 'DEFER', null, `RESUME: All ${Object.keys(s.reports).length} reports PASS — re-check after implement`);
   } else {
     const p = [];
     if (s?.missingReports?.length) p.push(`missing: ${s.missingReports.join(', ')}`);
@@ -668,7 +668,7 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
       agentPrompt: `/work-pr ${ticket} --force`,
     });
   } else if (s?.prShaMatch && s?.prEverUpdated && (s?.postPrShaMatch || !s?.contentSha)) {
-    add(STEPS.pr, 'SKIP', null, `SHA match (${s.headSha?.substring(0, 8)}, content: ${s?.postPrShaMatch ? 'match' : 'n/a'})`);
+    add(STEPS.pr, 'DEFER', null, `SHA match (${s.headSha?.substring(0, 8)}, content: ${s?.postPrShaMatch ? 'match' : 'n/a'}) — re-check after commit`);
   } else if (s?.prEverUpdated) {
     add(STEPS.pr, 'RUN', `/work-pr ${ticket}`, `HEAD: ${s.prUpdateSha?.substring(0, 8) || '?'} → ${s.headSha?.substring(0, 8) || '?'}`, {
       agentType: 'skill',
@@ -691,10 +691,9 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
     });
   }
 
-  // follow_up — SKIP when no PR or draft PR (plan is re-generated at each step,
-  // so this becomes RUN after pr/ready steps create and mark the PR ready)
+  // follow_up — DEFER instead of SKIP: PR will be created by earlier steps (GH-130)
   if (!s?.pr || s.pr.isDraft) {
-    add(STEPS.follow_up, 'SKIP', null, !s?.pr ? 'No PR exists' : 'PR is still draft');
+    add(STEPS.follow_up, 'DEFER', null, !s?.pr ? 'No PR yet — re-check after pr/ready steps' : 'PR is still draft — re-check after ready step');
   } else {
     add(STEPS.follow_up, 'RUN', 'Skill(follow-up-pr)', 'Address bot review comments and CI issues', {
       agentType: 'skill',
@@ -1020,9 +1019,9 @@ function main() {
       }
       const by = (a) => result.plan.filter(s => s.action === a);
       result.summary = {
-        total: result.plan.length, run: by('RUN').length, skip: by('SKIP').length, pending: by('PENDING').length,
-        firstAction: by('RUN')[0]?.step || 'none',
-        stepsToRun: by('RUN').map(s => s.step), stepsSkipped: by('SKIP').map(s => s.step),
+        total: result.plan.length, run: by('RUN').length, skip: by('SKIP').length, defer: by('DEFER').length, pending: by('PENDING').length,
+        firstAction: by('RUN')[0]?.step || by('DEFER')[0]?.step || 'none',
+        stepsToRun: [...by('RUN'), ...by('DEFER')].map(s => s.step), stepsSkipped: by('SKIP').map(s => s.step),
       };
       console.log(JSON.stringify(result, null, 2));
       break;

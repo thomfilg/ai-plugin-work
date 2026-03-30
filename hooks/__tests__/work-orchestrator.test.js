@@ -207,7 +207,8 @@ describe('work-orchestrator.js', () => {
       assert.ok('firstAction' in result.summary);
       assert.ok('stepsToRun' in result.summary);
       assert.ok('stepsSkipped' in result.summary);
-      assert.equal(result.summary.total, result.summary.run + result.summary.skip + result.summary.pending);
+      assert.ok('defer' in result.summary);
+      assert.equal(result.summary.total, result.summary.run + result.summary.skip + result.summary.defer + result.summary.pending);
     });
 
     it('should use rework mode when --rework flag is passed', async () => {
@@ -473,6 +474,15 @@ describe('work-orchestrator.js', () => {
       }
     });
 
+    it('should not include agentType for DEFER steps (GH-130)', async () => {
+      const { result } = await runOrchestrator([TEST_TICKET]);
+      const deferSteps = result.plan.filter((s) => s.action === 'DEFER');
+      for (const step of deferSteps) {
+        assert.equal(step.agentType, undefined, `DEFER step ${step.step} should not have agentType`);
+        assert.equal(step.agentPrompt, undefined, `DEFER step ${step.step} should not have agentPrompt`);
+      }
+    });
+
     it('should not include agentType for PENDING steps', async () => {
       const { result } = await runOrchestrator([TEST_TICKET]);
       const pendingSteps = result.plan.filter((s) => s.action === 'PENDING');
@@ -636,7 +646,7 @@ describe('work-orchestrator.js', () => {
     it('should include stepsToRun array', async () => {
       const { result } = await runOrchestrator([TEST_TICKET]);
       assert.ok(Array.isArray(result.summary.stepsToRun));
-      assert.equal(result.summary.stepsToRun.length, result.summary.run);
+      assert.equal(result.summary.stepsToRun.length, result.summary.run + result.summary.defer);
     });
 
     it('should include stepsSkipped array', async () => {
@@ -663,19 +673,19 @@ describe('work-orchestrator.js', () => {
     const TEST_TICKET = 'TEST-810';
     afterEach(() => { cleanupTempWorkState(TEST_TICKET); });
 
-    it('should mark follow_up as SKIP when no PR exists (new ticket)', async () => {
+    it('should mark follow_up as DEFER when no PR exists (new ticket) (GH-130)', async () => {
       const { result } = await runOrchestrator([TEST_TICKET]);
       const followUpStep = result.plan.find((s) => s.step === 'follow_up');
       assert.ok(followUpStep, 'follow_up step should exist in plan');
-      assert.equal(followUpStep.action, 'SKIP');
-      assert.ok(followUpStep.reason.includes('No PR'));
+      assert.equal(followUpStep.action, 'DEFER');
+      assert.ok(followUpStep.reason.includes('No PR yet'));
     });
 
-    it('should SKIP follow_up with no agentType when no PR exists', async () => {
+    it('should DEFER follow_up with no agentType when no PR exists (GH-130)', async () => {
       const { result } = await runOrchestrator([TEST_TICKET]);
       const followUpStep = result.plan.find((s) => s.step === 'follow_up');
       assert.ok(followUpStep, 'follow_up step should exist in plan');
-      assert.equal(followUpStep.action, 'SKIP');
+      assert.equal(followUpStep.action, 'DEFER');
       assert.equal(followUpStep.agentType, undefined);
       assert.equal(followUpStep.agentPrompt, undefined);
     });
@@ -871,7 +881,7 @@ describe('work-orchestrator.js', () => {
       assert.ok(!implStep.agentPrompt.includes('-  docs/guide.md'), 'should not have extra space before path');
     });
 
-    it('should SKIP implement step with no agentPrompt when hasDiffVsMain is true', async () => {
+    it('should DEFER implement step with no agentPrompt when hasDiffVsMain is true (GH-130)', async () => {
       const { execSync } = require('child_process');
       const REPO_NAME = process.env.REPO_NAME || 'my-project';
       const worktreeDir = path.join(TEMP_WB, `${REPO_NAME}-${TICKET}`);
@@ -897,8 +907,8 @@ describe('work-orchestrator.js', () => {
         });
         assert.equal(code, 0);
         const implStep = result.plan.find((s) => s.step === 'implement');
-        assert.equal(implStep.action, 'SKIP', 'implement step should be SKIP when hasDiffVsMain');
-        assert.ok(!implStep.agentPrompt, 'agentPrompt should not be present on SKIP step');
+        assert.equal(implStep.action, 'DEFER', 'implement step should be DEFER when hasDiffVsMain (GH-130)');
+        assert.ok(!implStep.agentPrompt, 'agentPrompt should not be present on DEFER step');
       } finally {
         fs.rmSync(worktreeDir, { recursive: true, force: true });
       }

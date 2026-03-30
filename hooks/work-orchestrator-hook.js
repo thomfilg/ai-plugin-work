@@ -99,7 +99,8 @@ function formatPlan(plan) {
   lines.push('  PLAN:');
   for (const step of plan.plan) {
     const icon = step.action === 'RUN' ? '🔄' :
-                 step.action === 'SKIP' ? '⏭️' : '⏳';
+                 step.action === 'SKIP' ? '⏭️' :
+                 step.action === 'DEFER' ? '🔮' : '⏳';
     const cmd = step.command ? ` → ${step.command}` : '';
     lines.push(`    ${icon} ${step.step.padEnd(20)} ${step.action.padEnd(7)} ${step.reason}${cmd}`);
   }
@@ -107,7 +108,7 @@ function formatPlan(plan) {
 
   // Summary
   if (plan.summary) {
-    lines.push(`  SUMMARY: ${plan.summary.run} RUN, ${plan.summary.skip} SKIP, ${plan.summary.pending} PENDING`);
+    lines.push(`  SUMMARY: ${plan.summary.run} RUN, ${plan.summary.defer || 0} DEFER, ${plan.summary.skip} SKIP, ${plan.summary.pending} PENDING`);
     lines.push(`  FIRST ACTION: ${plan.summary.firstAction}`);
     if (plan.summary.stepsToRun.length > 0) {
       lines.push(`  STEPS TO RUN: ${plan.summary.stepsToRun.join(' → ')}`);
