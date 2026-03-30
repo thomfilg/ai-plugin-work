@@ -885,7 +885,7 @@ mcp__playwright__browser_take_screenshot(
 ║                                                                              ║
 ║  After writing your QA report, run this command to validate it:              ║
 ║                                                                              ║
-║  echo '{"hook_type":"stop"}' | node ~/.claude/hooks/work-code-review-status.js
+║  echo '{"hook_type":"stop"}' | node ${CLAUDE_PLUGIN_ROOT}/hooks/work-code-review-status.js
 ║                                                                              ║
 ║  If it outputs: {"decision":"approve"} → You can finish                      ║
 ║  If it outputs: {"decision":"block",...} → FIX the issues first!             ║
@@ -897,7 +897,7 @@ mcp__playwright__browser_take_screenshot(
 2. Run the validation script:
    ```bash
    cd /home/node/worktrees/${REPO_NAME}-${JIRA_TICKET_ID} && \
-   echo '{"hook_type":"stop"}' | node ~/.claude/hooks/work-code-review-status.js
+   echo '{"hook_type":"stop"}' | node "${CLAUDE_PLUGIN_ROOT}/hooks/work-code-review-status.js"
    ```
 3. If blocked → Read the error message and fix the report format
 4. Re-run validation until it passes

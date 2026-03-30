@@ -137,8 +137,8 @@ module.exports = {
   stateDir: TASKS_BASE,
 
   steps: [
-    { id: '1_setup',             name: 'Setup & cache check',     command: 'node ~/.claude/hooks/check-setup.js' },
-    { id: '2_start_env',         name: 'Start dev environment',   command: 'node ~/.claude/hooks/check-start-env.js' },
+    { id: '1_setup',             name: 'Setup & cache check',     command: 'node "${CLAUDE_PLUGIN_ROOT}/hooks/check-setup.js"' },
+    { id: '2_start_env',         name: 'Start dev environment',   command: 'node "${CLAUDE_PLUGIN_ROOT}/hooks/check-start-env.js"' },
     { id: '3_verify_playwright', name: 'Verify Playwright',       command: 'mcp__playwright__browser_navigate' },
     { id: '4_phase1_agents',     name: 'Phase 1 parallel agents', command: 'Task(code-checker, quality-checker, qa-*, completion-checker)' },
     { id: '5_phase2_consensus',  name: 'Phase 2 consensus loop',  command: 'Task(developer-*, code-checker)' },
@@ -275,7 +275,7 @@ module.exports = {
         return {
           action: 'RUN',
           reason: `Start dev environment for ${d.impactedApps?.length || 0} app(s)`,
-          command: 'node ~/.claude/hooks/check-start-env.js',
+          command: 'node "${CLAUDE_PLUGIN_ROOT}/hooks/check-start-env.js"',
         };
 
       case '3_verify_playwright':

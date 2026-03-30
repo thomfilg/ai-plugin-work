@@ -78,7 +78,7 @@ ln -s ../$REPO_NAME/.claude .claude
 ln -s GEMINI.md CLAUDE.md
 
 # Fix .env symlinks using the symlink helper script (uses absolute paths)
-node ~/.claude/scripts/symlink.js --env
+node "${CLAUDE_PLUGIN_ROOT}/external_scripts/symlink.js" --env
 
 # Create .env.local for as-dashboard with title prefix (helps identify browser tabs)
 cat > apps/as-dashboard/.env.local << EOF

@@ -65,7 +65,7 @@ hooks:
 **At the START of every test run, determine the JIRA ticket ID:**
 
 1. **From prompt** (primary): Look for a Jira ticket ID (e.g., `PROJ-XXX`) in the task prompt you received
-2. **From worktree/branch** (secondary): Run: `node ~/.claude/scripts/get-ticket-id.js`
+2. **From worktree/branch** (secondary): Run: `node "${CLAUDE_PLUGIN_ROOT}/scripts/get-ticket-id.js"`
 
 **Report path:** `/home/node/worktrees/tasks/${TICKET_ID}/qa-api.md`
 

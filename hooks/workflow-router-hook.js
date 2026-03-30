@@ -4,7 +4,7 @@
  * workflow-router-hook.js
  *
  * Single UserPromptSubmit hook that routes slash commands to the workflow engine.
- * Scans ~/.claude/workflows/*.workflow.js to find matching commands.
+ * Scans plugin workflows/ and $HOME/.claude/workflows/ for matching commands.
  *
  * When a match is found, runs the workflow engine's `plan` subcommand
  * and injects the formatted plan into the chat context.

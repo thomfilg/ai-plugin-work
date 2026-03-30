@@ -189,7 +189,7 @@ describe('enforce-step-workflow', () => {
       it('allows orchestrator plan commands', async () => {
         const { code } = await runHook({
           tool_name: 'Bash',
-          tool_input: { command: 'node ~/.claude/hooks/work-orchestrator.js plan PROJ-123' },
+          tool_input: { command: 'node ${CLAUDE_PLUGIN_ROOT}/hooks/work-orchestrator.js plan PROJ-123' },
         });
         assert.equal(code, 0);
       });
@@ -197,7 +197,7 @@ describe('enforce-step-workflow', () => {
       it('allows orchestrator transitions command', async () => {
         const { code } = await runHook({
           tool_name: 'Bash',
-          tool_input: { command: 'node ~/.claude/hooks/work-orchestrator.js transitions PROJ-123' },
+          tool_input: { command: 'node ${CLAUDE_PLUGIN_ROOT}/hooks/work-orchestrator.js transitions PROJ-123' },
         });
         assert.equal(code, 0);
       });
@@ -205,7 +205,7 @@ describe('enforce-step-workflow', () => {
       it('allows work-state.js get command', async () => {
         const { code } = await runHook({
           tool_name: 'Bash',
-          tool_input: { command: 'node ~/.claude/hooks/work-state.js get PROJ-123' },
+          tool_input: { command: 'node ${CLAUDE_PLUGIN_ROOT}/hooks/work-state.js get PROJ-123' },
         });
         assert.equal(code, 0);
       });
