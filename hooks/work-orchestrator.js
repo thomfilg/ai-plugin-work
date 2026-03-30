@@ -669,6 +669,7 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
     agentPrompt: `/work-implement <requirements>${planningContext}${getDocsPrompt('READ_DOCS_ON_DEV')}`,
   };
   if (s?.hasDiffVsMain) {
+    // DEFER with full metadata — add() augments TDD protocol for both RUN and DEFER
     add(STEPS.implement, 'DEFER', '/work-implement <requirements>', `Changes exist: ${s.diffSummary}`, implementMeta);
   } else {
     add(STEPS.implement, 'RUN', '/work-implement <requirements>', 'No changes vs main', implementMeta);
@@ -1095,7 +1096,7 @@ function main() {
         run: by('RUN').length, skip: by('SKIP').length, defer: by('DEFER').length, pending: by('PENDING').length,
         firstAction: by('RUN')[0]?.step || by('DEFER')[0]?.step || 'none',
         stepsToRun: by('RUN').map(s => s.step),
-        stepsDeferred: by('DEFER').map(s => s.step),
+        stepsDeferred: by('DEFER').map(s => s.step), // separate from stepsToRun: agent re-plans before executing
         stepsSkipped: by('SKIP').map(s => s.step),
       };
       console.log(JSON.stringify(result, null, 2));
