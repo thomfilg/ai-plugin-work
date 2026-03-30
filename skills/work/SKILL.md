@@ -87,13 +87,25 @@ Parse the JSON output. This is your roadmap. Each RUN step includes `agentType` 
 **Action Types:**
 - `RUN` - Delegate this step to a sub-agent
 - `SKIP` - Already done, move on
+- `DEFER` - Re-evaluate when you reach this step (state may change during workflow). Re-run the orchestrator plan command to get the current action before executing.
 - `PENDING` - Depends on earlier steps
 
 ---
 
-## Step 2: Execute RUN Steps in Order
+## Step 2: Execute RUN and DEFER Steps in Order
 
-For each step where `action = "RUN"`:
+For each step where `action = "RUN"` or `action = "DEFER"`:
+
+**DEFER steps:** Before executing, re-run the orchestrator plan with the same flags used originally (e.g. include `--rework` if the workflow was started with it):
+```bash
+node ${CLAUDE_PLUGIN_ROOT}/hooks/work-orchestrator.js <TICKET_ID> [--rework]
+```
+Check the step's action in the **new** plan:
+- If now `RUN` → proceed with delegation using the **new plan's** agentType/agentPrompt
+- If now `SKIP` → skip the step and transition to the next one
+- If still `DEFER` → execute using the DEFER step's agentType/agentPrompt (included as fallback metadata)
+
+For each `RUN` step (or DEFER resolved to RUN):
 
 ### 2a. Validate the Transition First
 

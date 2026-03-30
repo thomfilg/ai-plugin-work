@@ -207,7 +207,8 @@ describe('work-orchestrator.js', () => {
       assert.ok('firstAction' in result.summary);
       assert.ok('stepsToRun' in result.summary);
       assert.ok('stepsSkipped' in result.summary);
-      assert.equal(result.summary.total, result.summary.run + result.summary.skip + result.summary.pending);
+      assert.ok('defer' in result.summary);
+      assert.equal(result.summary.total, result.summary.run + result.summary.skip + result.summary.defer + result.summary.pending);
     });
 
     it('should use rework mode when --rework flag is passed', async () => {
@@ -473,6 +474,15 @@ describe('work-orchestrator.js', () => {
       }
     });
 
+    it('should include agentType for DEFER steps as fallback (GH-130)', async () => {
+      const { result } = await runOrchestrator([TEST_TICKET]);
+      const deferSteps = result.plan.filter((s) => s.action === 'DEFER');
+      for (const step of deferSteps) {
+        assert.ok(step.agentType, `DEFER step ${step.step} should have agentType as fallback`);
+        assert.ok(step.agentPrompt, `DEFER step ${step.step} should have agentPrompt as fallback`);
+      }
+    });
+
     it('should not include agentType for PENDING steps', async () => {
       const { result } = await runOrchestrator([TEST_TICKET]);
       const pendingSteps = result.plan.filter((s) => s.action === 'PENDING');
@@ -637,6 +647,8 @@ describe('work-orchestrator.js', () => {
       const { result } = await runOrchestrator([TEST_TICKET]);
       assert.ok(Array.isArray(result.summary.stepsToRun));
       assert.equal(result.summary.stepsToRun.length, result.summary.run);
+      assert.ok(Array.isArray(result.summary.stepsDeferred));
+      assert.equal(result.summary.stepsDeferred.length, result.summary.defer);
     });
 
     it('should include stepsSkipped array', async () => {
@@ -663,21 +675,21 @@ describe('work-orchestrator.js', () => {
     const TEST_TICKET = 'TEST-810';
     afterEach(() => { cleanupTempWorkState(TEST_TICKET); });
 
-    it('should mark follow_up as SKIP when no PR exists (new ticket)', async () => {
+    it('should mark follow_up as DEFER when no PR exists (new ticket) (GH-130)', async () => {
       const { result } = await runOrchestrator([TEST_TICKET]);
       const followUpStep = result.plan.find((s) => s.step === 'follow_up');
       assert.ok(followUpStep, 'follow_up step should exist in plan');
-      assert.equal(followUpStep.action, 'SKIP');
+      assert.equal(followUpStep.action, 'DEFER');
       assert.ok(followUpStep.reason.includes('No PR'));
     });
 
-    it('should SKIP follow_up with no agentType when no PR exists', async () => {
+    it('should DEFER follow_up with fallback agentType when no PR exists (GH-130)', async () => {
       const { result } = await runOrchestrator([TEST_TICKET]);
       const followUpStep = result.plan.find((s) => s.step === 'follow_up');
       assert.ok(followUpStep, 'follow_up step should exist in plan');
-      assert.equal(followUpStep.action, 'SKIP');
-      assert.equal(followUpStep.agentType, undefined);
-      assert.equal(followUpStep.agentPrompt, undefined);
+      assert.equal(followUpStep.action, 'DEFER');
+      assert.ok(followUpStep.agentType, "DEFER follow_up should have fallback agentType");
+      assert.ok(followUpStep.agentPrompt, "DEFER follow_up should have fallback agentPrompt");
     });
 
     it('should appear between ready and ci in plan order', async () => {
@@ -748,6 +760,58 @@ describe('work-orchestrator.js', () => {
         assert.equal(result.direction, 'backward');
       } finally {
         try { fs.rmSync(path.join(TEMP_TASKS, T3), { recursive: true, force: true }); } catch {}
+      }
+    });
+
+    it('should archive check artifacts to runs/runN on backward transition (GH-130)', async () => {
+      const T_ARCHIVE = 'TEST-ARCHIVE-1';
+      const ticketDir = path.join(TEMP_TASKS, T_ARCHIVE);
+      try {
+        await runOrchestrator(['transition', T_ARCHIVE, 'bootstrap'], o);
+        await runOrchestrator(['transition', T_ARCHIVE, 'check'], o);
+        writeCheckReports(TEMP_TASKS, T_ARCHIVE);
+
+        // Verify reports exist before backward transition
+        assert.ok(fs.existsSync(path.join(ticketDir, 'tests.check.md')));
+        assert.ok(fs.existsSync(path.join(ticketDir, 'code-review.check.md')));
+
+        // Backward: check → implement (should archive check artifacts)
+        const { result } = await runOrchestrator(['transition', T_ARCHIVE, 'implement'], o);
+        assert.equal(result.success, true);
+        assert.equal(result.direction, 'backward');
+
+        // Reports should be moved to runs/run1/
+        assert.ok(!fs.existsSync(path.join(ticketDir, 'tests.check.md')), 'reports should be archived');
+        assert.ok(fs.existsSync(path.join(ticketDir, 'runs', 'run1', 'tests.check.md')), 'reports should be in run1');
+        assert.ok(fs.existsSync(path.join(ticketDir, 'runs', 'run1', 'code-review.check.md')));
+        assert.ok(fs.existsSync(path.join(ticketDir, 'runs', 'run1', 'completion.check.md')));
+        assert.ok(fs.existsSync(path.join(ticketDir, 'runs', 'run1', 'qa-feature.check.md')));
+      } finally {
+        try { fs.rmSync(ticketDir, { recursive: true, force: true }); } catch {}
+      }
+    });
+
+    it('should increment run number on subsequent backward transitions (GH-130)', async () => {
+      const T_RUNS = 'TEST-RUNS-1';
+      const ticketDir = path.join(TEMP_TASKS, T_RUNS);
+      try {
+        // First pass: bootstrap → check, write reports, check → implement (backward)
+        await runOrchestrator(['transition', T_RUNS, 'bootstrap'], o);
+        await runOrchestrator(['transition', T_RUNS, 'check'], o);
+        writeCheckReports(TEMP_TASKS, T_RUNS);
+        await runOrchestrator(['transition', T_RUNS, 'implement'], o);
+
+        assert.ok(fs.existsSync(path.join(ticketDir, 'runs', 'run1')), 'run1 should exist');
+
+        // Second pass: implement → commit → check, write reports, check → implement (backward again)
+        await runOrchestrator(['transition', T_RUNS, 'commit'], o);
+        await runOrchestrator(['transition', T_RUNS, 'check'], o);
+        writeCheckReports(TEMP_TASKS, T_RUNS);
+        await runOrchestrator(['transition', T_RUNS, 'implement'], o);
+
+        assert.ok(fs.existsSync(path.join(ticketDir, 'runs', 'run2')), 'run2 should exist');
+      } finally {
+        try { fs.rmSync(ticketDir, { recursive: true, force: true }); } catch {}
       }
     });
 
@@ -871,7 +935,7 @@ describe('work-orchestrator.js', () => {
       assert.ok(!implStep.agentPrompt.includes('-  docs/guide.md'), 'should not have extra space before path');
     });
 
-    it('should SKIP implement step with no agentPrompt when hasDiffVsMain is true', async () => {
+    it('should DEFER implement step with no agentPrompt when hasDiffVsMain is true (GH-130)', async () => {
       const { execSync } = require('child_process');
       const REPO_NAME = process.env.REPO_NAME || 'my-project';
       const worktreeDir = path.join(TEMP_WB, `${REPO_NAME}-${TICKET}`);
@@ -897,8 +961,8 @@ describe('work-orchestrator.js', () => {
         });
         assert.equal(code, 0);
         const implStep = result.plan.find((s) => s.step === 'implement');
-        assert.equal(implStep.action, 'SKIP', 'implement step should be SKIP when hasDiffVsMain');
-        assert.ok(!implStep.agentPrompt, 'agentPrompt should not be present on SKIP step');
+        assert.equal(implStep.action, 'DEFER', 'implement step should be DEFER when hasDiffVsMain (GH-130)');
+        assert.ok(implStep.agentPrompt, 'DEFER implement should have fallback agentPrompt');
       } finally {
         fs.rmSync(worktreeDir, { recursive: true, force: true });
       }
