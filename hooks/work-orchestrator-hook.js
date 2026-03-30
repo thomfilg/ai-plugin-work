@@ -113,6 +113,9 @@ function formatPlan(plan) {
     if (plan.summary.stepsToRun.length > 0) {
       lines.push(`  STEPS TO RUN: ${plan.summary.stepsToRun.join(' → ')}`);
     }
+    if (plan.summary.stepsDeferred && plan.summary.stepsDeferred.length > 0) {
+      lines.push(`  STEPS DEFERRED: ${plan.summary.stepsDeferred.join(' → ')}`);
+    }
   }
 
   lines.push('');
