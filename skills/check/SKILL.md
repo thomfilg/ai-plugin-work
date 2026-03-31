@@ -483,7 +483,7 @@ git diff origin/main...HEAD
 
 ## Step 1: Identify requirements
 
-- Fetch ticket details using the configured provider's MCP tool (issue_key: "${TICKET_ID}")
+- Fetch ticket details using the configured provider's MCP tool for ticket "${TICKET_ID}"
 - Extract acceptance criteria
 - Note any sub-tasks or linked issues
 
@@ -696,7 +696,7 @@ Your job is to AGREE or DISAGREE with each decision, **especially validating aga
 
 1. Read your original suggestions from ${REPORT_FOLDER}/code-review.check.md
 2. **⚠️ CRITICAL: Read ticket requirements:**
-   - Fetch ticket details using the configured provider's MCP tool (issue_key: "${TICKET_ID}")
+   - Fetch ticket details using the configured provider's MCP tool for ticket "${TICKET_ID}"
    - Extract Acceptance Criteria and Testing Requirements
    - Use these to validate DEFERRED decisions
 3. Read each developer's reply:
@@ -794,7 +794,7 @@ For suggestions OUTSIDE your domain, you may:
 1. Read ${REPORT_FOLDER}/code-review.check.md
 2. EXTRACT the **Changes Hash:** - you MUST use this exact hash
 3. **⚠️ CRITICAL: Read ticket requirements:**
-   - Fetch ticket details using the configured provider's MCP tool (issue_key: "${TICKET_ID}")
+   - Fetch ticket details using the configured provider's MCP tool for ticket "${TICKET_ID}"
    - Extract Acceptance Criteria and Testing Requirements
    - You CANNOT defer suggestions that match explicit ticket requirements
 4. ${iteration > 1 ? `Read other developers' replies: ${OTHER_DEVELOPERS.map(d => `${d}-reply-v${iteration-1}.md`)}` : ''}
@@ -1067,7 +1067,7 @@ if [ -n "$ENV_RESULT" ]; then
 fi
 
 # Kill only YOUR ticket's tmux session (NEVER pkill - it kills other agents!)
-TICKET_ID="${TICKET_ID:-}"
+TICKET_ID="${TICKET_ID:-${JIRA_TICKET_ID:-}}"
 if [ -n "$TICKET_ID" ]; then
   tmux kill-session -t "${TICKET_ID}-dev" 2>/dev/null || true
 fi
