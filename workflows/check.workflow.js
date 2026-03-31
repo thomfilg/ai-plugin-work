@@ -150,7 +150,7 @@ module.exports = {
 
   transitions: [
     { source: '1_setup',             targets: ['2_start_env', '8_output'] },
-    { source: '2_start_env',         targets: ['3_verify_playwright'] },
+    { source: '2_start_env',         targets: ['3_verify_playwright', '4_phase1_agents'] },
     { source: '3_verify_playwright', targets: ['4_phase1_agents', '8_output'] },
     { source: '4_phase1_agents',     targets: ['5_phase2_consensus', '7_validate_summary'] },
     { source: '5_phase2_consensus',  targets: ['6_quality_recheck', '7_validate_summary'] },
@@ -194,6 +194,7 @@ module.exports = {
       changesHash,
       impactedApps,
       hasBackendChanges: hasBackendChanges(),
+      hasWebApps: config.webAppNames().length > 0,
     };
 
     // README.md cache check
@@ -281,6 +282,9 @@ module.exports = {
       case '3_verify_playwright':
         if (d.readmeHashMatch) {
           return { action: 'SKIP', reason: 'Cache valid — skipping Playwright check' };
+        }
+        if (d.hasWebApps === false) {
+          return { action: 'SKIP', reason: 'No web apps configured — Playwright not needed' };
         }
         return {
           action: 'RUN',
