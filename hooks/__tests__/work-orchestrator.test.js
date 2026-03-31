@@ -856,7 +856,7 @@ describe('work-orchestrator.js', () => {
       }
     });
 
-    it('should block transition follow_up → cleanup (must go through ci)', async () => {
+    it('should block follow_up → cleanup (linear graph requires ci in between)', async () => {
       const T4 = 'TEST-814';
       try {
         await runOrchestrator(['transition', T4, 'bootstrap'], o);
