@@ -369,8 +369,8 @@ function main() {
   const result = {
     mainWorktreePath,
     branchName,
-    ticketId: TICKET_ID || null,
-    jiraTicketId: TICKET_ID || null, // deprecated: use ticketId instead
+    ticketId: taskId,
+    jiraTicketId: taskId, // deprecated: use ticketId instead
     reportFolder,
     changesHash,
     cache: cacheResult,

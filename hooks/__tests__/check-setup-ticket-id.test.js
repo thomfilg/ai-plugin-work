@@ -44,7 +44,8 @@ describe('resolveTicketId', () => {
   });
 
   it('returns empty string when no source provides a value', () => {
-    assert.equal(resolveTicketId([], {}), '');
+    const result = resolveTicketId([], {});
+    assert.equal(result, '');
   });
 
   it('returns empty string for undefined/null argv entries', () => {
