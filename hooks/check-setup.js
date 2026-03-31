@@ -19,7 +19,9 @@ const fs = require('fs');
 const path = require('path');
 const config = require(path.join(__dirname, '..', 'lib', 'config'));
 
-// Get ticket ID from args or environment (TICKET_ID preferred, JIRA_TICKET_ID for backward compat)
+// Get ticket ID from args or environment
+// Precedence: CLI arg > TICKET_ID env > JIRA_TICKET_ID env (backward compat)
+// See hooks/__tests__/check-setup-ticket-id.test.js for coverage
 const TICKET_ID = process.argv[2] || process.env.TICKET_ID || process.env.JIRA_TICKET_ID || '';
 
 /**
