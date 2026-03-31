@@ -90,13 +90,13 @@ async function transitionTo(ticket, targetStep, envExtra = {}) {
   const steps = [
     'bootstrap', 'brief', 'spec', 'implement', 'commit',
     'check', 'pr',
-    'ready', 'ci', 'cleanup', 'reports', 'complete',
+    'ready', 'follow_up', 'ci', 'cleanup', 'reports', 'complete',
   ];
   const idx = steps.indexOf(targetStep);
   if (idx === -1) throw new Error(`Unknown target step: ${targetStep}`);
 
   let lastResult;
-  // Walk step by step. Some steps require skip edges; use the direct path.
+  // Walk step by step through the linear graph.
   for (let i = 0; i <= idx; i++) {
     const { result } = await runOrchestrator(
       ['transition', ticket, steps[i]],
@@ -185,8 +185,10 @@ describe('TDD enforcement', () => {
       fs.writeFileSync(evidencePath, JSON.stringify({ step: 'implement', stale: true }));
       assert.ok(fs.existsSync(evidencePath), 'Stale evidence should exist before transition');
 
-      // Transition to 2_bootstrap first, then to 3_implement
+      // Transition linearly to 3_implement
       await runOrchestrator(['transition', TICKET, 'bootstrap'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
+      await runOrchestrator(['transition', TICKET, 'brief'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
+      await runOrchestrator(['transition', TICKET, 'spec'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
       await runOrchestrator(['transition', TICKET, 'implement'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
 
       assert.ok(!fs.existsSync(evidencePath), 'Stale evidence should be deleted when entering 3_implement');
@@ -199,6 +201,8 @@ describe('TDD enforcement', () => {
       fs.writeFileSync(evidencePath, JSON.stringify({ step: 'implement', kept: true }));
 
       await runOrchestrator(['transition', TICKET, 'bootstrap'], { env: baseEnv({ WORK_TDD_ENFORCE: '0' }) });
+      await runOrchestrator(['transition', TICKET, 'brief'], { env: baseEnv({ WORK_TDD_ENFORCE: '0' }) });
+      await runOrchestrator(['transition', TICKET, 'spec'], { env: baseEnv({ WORK_TDD_ENFORCE: '0' }) });
       await runOrchestrator(['transition', TICKET, 'implement'], { env: baseEnv({ WORK_TDD_ENFORCE: '0' }) });
 
       assert.ok(fs.existsSync(evidencePath), 'Evidence file should NOT be deleted when WORK_TDD_ENFORCE=0');
@@ -423,8 +427,10 @@ it('agentPrompt for 3_implement contains instruction not to make local commits',
     });
 
     it('transition INTO 3_implement (from 6_check) deletes existing .tdd-evidence-implement.json', async () => {
-      // Walk to 6_check
+      // Walk to implement linearly
       await runOrchestrator(['transition', TICKET, 'bootstrap'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
+      await runOrchestrator(['transition', TICKET, 'brief'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
+      await runOrchestrator(['transition', TICKET, 'spec'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
       await runOrchestrator(['transition', TICKET, 'implement'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
 
       // Record evidence so we can leave 3_implement (use exception mode to avoid dev-check.sh)
@@ -447,6 +453,8 @@ it('agentPrompt for 3_implement contains instruction not to make local commits',
 
     it('transition INTO 3_implement with no prior evidence file does not error (ENOENT handled)', async () => {
       await runOrchestrator(['transition', TICKET, 'bootstrap'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
+      await runOrchestrator(['transition', TICKET, 'brief'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
+      await runOrchestrator(['transition', TICKET, 'spec'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
       // Make sure no evidence file exists
       const evidencePath = path.join(tempTasksBase, TICKET, '.tdd-evidence-implement.json');
       try { fs.unlinkSync(evidencePath); } catch {}
