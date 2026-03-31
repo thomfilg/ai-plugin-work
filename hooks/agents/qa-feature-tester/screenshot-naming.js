@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const fs = require('fs');
+const { logHookError } = require(require('path').join(__dirname, '..', '..', '..', 'lib', 'hook-error-log'));
 
 /**
  * PreToolUse hook to enforce screenshot naming conventions for QA testing.
@@ -98,6 +99,6 @@ async function main() {
 }
 
 main().catch(err => {
-  console.error('Hook error:', err.message);
+  logHookError(__filename, err);
   process.exit(0);
 });

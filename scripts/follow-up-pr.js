@@ -73,7 +73,8 @@ function parseArgs(argv = process.argv.slice(2)) {
         args.once = true;
         break;
       case '--no-reviews':
-        args.noReviews = true;
+        // REMOVED: --no-reviews flag disabled. Reviews must always be checked.
+        // args.noReviews = true;
         break;
       case '--help':
       case '-h':
@@ -81,10 +82,10 @@ function parseArgs(argv = process.argv.slice(2)) {
 
 Options:
   --pr <number>         PR number (default: auto-detect from branch)
-  --max-attempts <n>    Max polling attempts (default: 10)
+  --max-attempts <n>    Max polling attempts (default: 40)
   --interval <seconds>  Fixed wait between attempts (default: adaptive)
   --once                Single check, no loop (for manual debugging only)
-  --no-reviews          Skip review polling
+  --no-reviews          (disabled — reviews are always checked)
   -h, --help            Show this help`);
         process.exit(0);
         break;

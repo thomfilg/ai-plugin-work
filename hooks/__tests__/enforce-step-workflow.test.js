@@ -784,7 +784,7 @@ describe('enforce-step-workflow', () => {
   });
 
   describe('dual in_progress detection', () => {
-    it('warns on stderr when multiple steps are in_progress', async () => {
+    it('warns on stderr when multiple steps are in_progress (with DEBUG)', async () => {
       const stepStatus = makeStepStatus('implement', WORK_STEPS);
       stepStatus['check'] = 'in_progress';
       writeWorkState(stepStatus);
@@ -792,6 +792,7 @@ describe('enforce-step-workflow', () => {
       const { code, stderr } = await runHook(
         { tool_name: 'Bash', tool_input: { command: 'echo hello' } },
         'PreToolUse',
+        { ENFORCE_HOOK_DEBUG: '1' },
       );
       assert.equal(code, 0);
       assert.ok(stderr.includes('WARNING: Multiple steps in_progress'), 'Should warn about multiple in_progress');
@@ -978,7 +979,7 @@ describe('enforce-step-workflow', () => {
       assert.ok(hookSource.includes('if (DEBUG) process.stderr.write(`[enforce-step-workflow] fatal:'), 'fatal gated');
       // BLOCKED and WARNING messages should NOT be gated
       assert.ok(!hookSource.includes('if (DEBUG) process.stderr.write(`BLOCKED'), 'BLOCKED messages must not be gated');
-      assert.ok(!hookSource.includes('if (DEBUG) process.stderr.write(`WARNING'), 'WARNING messages must not be gated');
+      assert.ok(hookSource.includes('if (DEBUG) process.stderr.write(`WARNING'), 'WARNING messages must be gated');
     });
   });
 
@@ -1086,7 +1087,7 @@ describe('enforce-step-workflow', () => {
       assert.ok(stderr.includes('BLOCKED'), 'BLOCKED messages always visible');
     });
 
-    it('always shows WARNING messages regardless of DEBUG', async () => {
+    it('hides WARNING messages when DEBUG is off', async () => {
       const stepStatus = makeStepStatus('implement', WORK_STEPS);
       stepStatus['check'] = 'in_progress';
       writeWorkState(stepStatus);
@@ -1096,7 +1097,7 @@ describe('enforce-step-workflow', () => {
         'PreToolUse',
       );
       assert.equal(code, 0);
-      assert.ok(stderr.includes('WARNING: Multiple steps in_progress'), 'WARNING always visible');
+      assert.ok(!stderr.includes('WARNING: Multiple steps in_progress'), 'WARNING hidden without DEBUG');
     });
   });
 

@@ -12,6 +12,8 @@
  * If it fails, the agent must stop — not fix anything.
  */
 
+const { logHookError } = require(require('path').join(__dirname, '..', '..', '..', 'lib', 'hook-error-log'));
+
 // Patterns for commands that modify files
 const FILE_MODIFY_PATTERNS = [
   // Direct file write/edit via shell
@@ -125,7 +127,7 @@ async function main() {
 }
 
 main().catch(err => {
-  console.error('Hook error:', err.message);
+  logHookError(__filename, err);
   // On error, approve to avoid blocking
   process.exit(0);
 });

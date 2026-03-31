@@ -8,6 +8,7 @@
  */
 
 const fs = require('fs');
+const { logHookError } = require(require('path').join(__dirname, '..', 'lib', 'hook-error-log'));
 
 // Developer agents that satisfy the requirement
 const DEVELOPER_AGENTS = [
@@ -161,7 +162,7 @@ async function main() {
 }
 
 main().catch(err => {
-  console.error('Hook error:', err.message);
+  logHookError(__filename, err);
   // On error, approve to avoid blocking legitimate operations
   process.exit(0);
 });

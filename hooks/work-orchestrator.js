@@ -775,14 +775,17 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
     agentPrompt: `Run in ${worktreeDir}: gh pr checks --watch --interval 60\n\nReturn PASS if all checks pass, FAIL with details if any fail.`,
   });
 
-  // cleanup (after CI, before reports)
+  // cleanup (after CI, before reports) — DEFER when no session yet, it may start during implement
   if (s?.hasDevSession) {
     add(STEPS.cleanup, 'RUN', `Task(Bash)`, 'Dev session running', {
       agentType: 'Bash',
       agentPrompt: `Run: tmux kill-session -t "${ticket}-dev" 2>/dev/null; echo "Cleanup done"`,
     });
   } else {
-    add(STEPS.cleanup, 'SKIP', null, 'No dev session');
+    add(STEPS.cleanup, 'DEFER', `Task(Bash)`, 'No dev session yet — re-check at step time', {
+      agentType: 'Bash',
+      agentPrompt: `Run: tmux kill-session -t "${ticket}-dev" 2>/dev/null; echo "Cleanup done (or no session)"`,
+    });
   }
 
   add(STEPS.reports, 'RUN', 'Task(Bash)', 'Move reports to tasks/', {

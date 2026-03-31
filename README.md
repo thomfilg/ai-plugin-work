@@ -88,7 +88,8 @@ claude-plugin-work/
 ├── lib/                   # Core engine
 │   ├── workflow-engine.js # Reusable state machine engine
 │   ├── workflow-state.js  # Workflow state persistence
-│   └── work-actions.js    # Step action implementations
+│   ├── work-actions.js    # Step action implementations
+│   └── hook-error-log.js  # Hook error file logger (see Debugging Hooks)
 ├── agents/                # Agent definitions (18 specialized agents)
 │   ├── brief-writer.md    # Product brief generation
 │   ├── spec-writer.md     # Technical spec generation
@@ -114,6 +115,33 @@ The workflow engine (`lib/workflow-engine.js`) provides:
 - **State transitions** - Records forward/backward step transitions with validation
 - **Workflow graph** - Defines step dependencies and execution order
 - **Step state detection** - Automatically determines which steps are already complete (e.g., branch exists, PR is open)
+
+## Debugging Hooks
+
+Hook errors are logged to a file instead of stderr to prevent false "hook error" noise in Claude Code.
+
+**Log locations:**
+- **Plugin hooks:** `/tmp/claude-hook-errors.log` (default)
+- **Personal hooks (`~/.claude/hooks/`):** Same file — `/tmp/claude-hook-errors.log`
+- **Custom path:** Set `HOOK_ERROR_LOG=/path/to/file.log`
+
+**Log format:**
+```
+[2026-03-30T18:33:01.123Z] enforce-work-command.js | pid=12345 branch=feature/PROJ-123 cwd=/repo/path | WORKTREES_BASE: env var not set
+```
+
+**To enable verbose stderr output (shows errors in Claude Code):**
+```bash
+export ENFORCE_HOOK_DEBUG=1
+```
+
+**Auto-rotation:** Log file is truncated when it exceeds 1MB.
+
+**Race conditions:** Each log line includes PID. Writes use `O_APPEND` with short lines (~3.8KB max). On Linux ext4/xfs, these are effectively atomic across concurrent instances.
+
+**Source files:**
+- `lib/hook-error-log.js` (plugin hooks)
+- `~/.claude/hooks/lib/hook-error-log.js` (personal hooks — identical copy)
 
 ## Prerequisites
 

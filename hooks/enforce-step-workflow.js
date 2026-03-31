@@ -436,7 +436,7 @@ function validateWorkflow(wf) {
 try {
   for (const wf of WORKFLOWS) validateWorkflow(wf);
 } catch (e) {
-  process.stderr.write(`WARNING: workflow config invalid: ${String(e?.message || e)}\n`);
+  if (DEBUG) process.stderr.write(`WARNING: workflow config invalid: ${String(e?.message || e)}\n`);
   // fail-open: config errors don't block tool use
 }
 
@@ -531,7 +531,7 @@ function getCurrentStep(state, steps) {
   if (!state?.stepStatus) return null;
   const active = steps.filter(s => state.stepStatus[s] === 'in_progress');
   if (active.length > 1) {
-    process.stderr.write(`WARNING: Multiple steps in_progress: ${active.join(', ')}. Using first.\n`);
+    if (DEBUG) process.stderr.write(`WARNING: Multiple steps in_progress: ${active.join(', ')}. Using first.\n`);
   }
   return active[0] || null;
 }
