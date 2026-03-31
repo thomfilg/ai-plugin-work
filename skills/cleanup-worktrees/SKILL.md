@@ -2,7 +2,7 @@
 name: cleanup-worktrees
 description: Safely clean up git worktrees by verifying code has been merged to main
 user-invocable: true
-allowed-tools: Bash, Read, Grep, Glob, AskUserQuestion, mcp__atlassian__jira_search, mcp__atlassian__jira_get_issue, mcp__linear__get_issue
+allowed-tools: Bash, Read, Grep, Glob, AskUserQuestion, mcp__atlassian__jira_search, mcp__atlassian__jira_get_issue, mcp__atlassian__jira_get_transitions, mcp__atlassian__jira_transition_issue, mcp__linear__get_issue
 ---
 # Cleanup Worktrees Command
 
@@ -85,7 +85,7 @@ if [ -n "$branch" ]; then
 fi
 ```
 
-### Step 4: Extract Jira task ID and check status
+### Step 4: Extract ticket task ID and check status
 
 #### 4.1 Extract task ID from branch name or folder
 ```bash
@@ -98,8 +98,8 @@ folder_name=$(basename "$(pwd)")
 task_id=$(echo "$folder_name" | grep -oE '[A-Z]+-[0-9]+')
 ```
 
-#### 4.2 Check Jira task status
-Use `mcp__atlassian__jira_get_issue` with the task ID to check:
+#### 4.2 Check ticket task status
+Use the configured ticket provider's MCP tool (e.g., `mcp__atlassian__jira_get_issue` for Jira, `mcp__linear__get_issue` for Linear) with the task ID to check:
 - **Backlog/To Do**: DO NOT DELETE - work hasn't started or is planned
 - **In Progress**: DO NOT DELETE - actively being worked on
 - **In Review/QA**: DO NOT DELETE - work may still need changes
@@ -132,7 +132,7 @@ git diff --stat HEAD~5..HEAD 2>/dev/null || git diff --stat
 
 Create a detailed table for each worktree:
 
-| Worktree | Branch | Jira Status | Uncommitted | Unpushed | PR Status | Code in Main | Safe |
+| Worktree | Branch | Ticket Status | Uncommitted | Unpushed | PR Status | Code in Main | Safe |
 |----------|--------|-------------|-------------|----------|-----------|--------------|------|
 | path     | name   | status      | Yes/No      | Yes/No   | state     | Verified/No  | ?    |
 
@@ -143,14 +143,14 @@ Create a detailed table for each worktree:
 - ✅ No stashes (`git stash list` empty)
 - ✅ No unpushed commits OR PR is merged
 - ✅ **Code verified to exist in main** (not just PR name match)
-- ✅ Jira task is Done/Closed (if task ID found)
+- ✅ Ticket task is Done/Closed (if task ID found)
 
 **NOT SAFE / UNCERTAIN** (ANY of these = DO NOT DELETE):
 - ❌ Has uncommitted changes
 - ❌ Has stashes
 - ❌ Has unpushed commits without merged PR
 - ❌ PR is open or in review
-- ❌ Jira task is not Done/Closed
+- ❌ Ticket task is not Done/Closed
 - ❌ Cannot verify code exists in main
 - ❌ Detached HEAD with recent file modifications
 - ❌ No branch and no clear PR history
@@ -169,7 +169,7 @@ SAFE TO DELETE (code verified in main):
 ─────────────────────────────────────────
 1. /path/to/worktree-1
    Branch: feature-xyz
-   Jira: PROJ-123 (Done)
+   Ticket: PROJ-123 (Done)
    PR: #456 (Merged on 2024-01-15)
    Verification: Key changes found in main at commit abc123
 
@@ -181,7 +181,7 @@ NOT SAFE (do not delete):
 
 2. /path/to/worktree-3
    Branch: (none - detached HEAD)
-   Reason: Jira PROJ-456 is "In Progress"
+   Reason: Ticket PROJ-456 is "In Progress"
 
 UNCERTAIN (keeping to be safe):
 ─────────────────────────────────────────
@@ -212,32 +212,32 @@ git branch -D <branch-name>
 git push origin --delete <branch-name> 2>/dev/null || true
 ```
 
-### Step 10.5: Transition Jira tasks to "In Testing" (for merged PRs)
+### Step 10.5: Transition ticket tasks to "In Testing" (for merged PRs)
 
-For each deleted worktree where the **PR was merged**, transition the Jira task to "In Testing":
+For each deleted worktree where the **PR was merged**, transition the ticket task to "In Testing":
 
-#### 10.5.1 Extract Jira task ID from branch name
+#### 10.5.1 Extract ticket task ID from branch name
 ```bash
 # Branch names follow pattern: PROJ-XXX-description
 task_id=$(echo "$branch_name" | grep -oE '[A-Z]+-[0-9]+')
 ```
 
 #### 10.5.2 Check if task exists and get available transitions
-Use `mcp__atlassian__jira_get_transitions` with the task ID to get available transitions.
+Use the configured ticket provider's transition tool (e.g., `mcp__atlassian__jira_get_transitions` for Jira) with the task ID to get available transitions.
 
 #### 10.5.3 Find "In Testing" transition
 Look for a transition with name containing "In Testing", "Testing", or "QA".
 
 #### 10.5.4 Transition the task
-Use `mcp__atlassian__jira_transition_issue` with:
-- `issue_key`: The Jira task ID (e.g., PROJ-123)
+Use the configured ticket provider's transition tool (e.g., `mcp__atlassian__jira_transition_issue` for Jira) with:
+- The ticket task ID (e.g., PROJ-123)
 - `transition_id`: The ID of the "In Testing" transition
 - `comment`: "Code merged to main and deployed. Ready for testing."
 
 #### 10.5.5 Report transitions made
 ```
 ═══════════════════════════════════════════════════════════
-                JIRA TASK TRANSITIONS
+                TICKET TASK TRANSITIONS
 ═══════════════════════════════════════════════════════════
 
 TRANSITIONED TO "IN TESTING":
@@ -441,7 +441,7 @@ NOTE: If git stashes exist, run `git stash list` to review
 ## CRITICAL RULES
 
 1. **NEVER delete without verifying code is in main** - PR name match is NOT enough
-2. **NEVER delete worktrees with Jira tasks not in Done/Closed status**
+2. **NEVER delete worktrees with ticket tasks not in Done/Closed status**
 3. **NEVER delete worktrees in detached HEAD with recent modifications**
 4. **NEVER delete without explicit user confirmation**
 5. **ALWAYS prefer false negatives** - keep uncertain worktrees
@@ -470,14 +470,14 @@ gh pr list --state merged --search "PROJ-123"
 
 ### Worktree with work in progress (no commits yet)
 - Check file modification times
-- Check Jira task status
+- Check ticket task status
 - Default: DO NOT DELETE
 
 ### Branch pushed but PR not created
 - Code may be important work
 - Default: DO NOT DELETE
 
-### Old worktree with Done Jira but code not found in main
+### Old worktree with Done ticket but code not found in main
 - May have been closed without merge
 - Investigate before deleting
 - Default: DO NOT DELETE (could be closed as won't-fix but has useful code)

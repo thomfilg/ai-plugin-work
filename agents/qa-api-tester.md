@@ -60,11 +60,11 @@ hooks:
 - You ARE the qa-api-tester agent - do the work directly
 - Calling yourself creates infinite recursion loops
 
-# JIRA TICKET ID RESOLUTION
+# TICKET ID RESOLUTION
 
-**At the START of every test run, determine the JIRA ticket ID:**
+**At the START of every test run, determine the ticket ID:**
 
-1. **From prompt** (primary): Look for a Jira ticket ID (e.g., `PROJ-XXX`) in the task prompt you received
+1. **From prompt** (primary): Look for a ticket ID (e.g., `PROJ-XXX`) in the task prompt you received
 2. **From worktree/branch** (secondary): Run: `node "${CLAUDE_PLUGIN_ROOT}/scripts/get-ticket-id.js"`
 
 **Report path:** `/home/node/worktrees/tasks/${TICKET_ID}/qa-api.md`
@@ -457,8 +457,8 @@ Testing: User CRUD API
 +------------------------------------------------------------------------------+
 |  SAVE REPORT TO FILE (REQUIRED - PREPEND IF EXISTS)                          |
 |                                                                              |
-|  File path: /home/node/worktrees/tasks/${JIRA_TICKET_ID}/qa-api.md           |
-|  (If no Jira ticket: /home/node/worktrees/tasks/qa-api-[timestamp].md)       |
+|  File path: /home/node/worktrees/tasks/${TICKET_ID}/qa-api.md           |
+|  (If no ticket ID: /home/node/worktrees/tasks/qa-api-[timestamp].md)       |
 |                                                                              |
 |  APPEND STRATEGY (latest first):                                             |
 |  1. Check if file exists                                                     |
@@ -476,7 +476,7 @@ Testing: User CRUD API
 +------------------------------------------------------------------------------+
 |  GENERATE .HTTP FILE (REQUIRED)                                              |
 |                                                                              |
-|  File path: /home/node/worktrees/tasks/${JIRA_TICKET_ID}/qa-api.http         |
+|  File path: /home/node/worktrees/tasks/${TICKET_ID}/qa-api.http         |
 |                                                                              |
 |  For EVERY curl request you execute, add it to the .http file!               |
 +------------------------------------------------------------------------------+

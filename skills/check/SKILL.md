@@ -1,9 +1,9 @@
 ---
 name: check
-argument-hint: jira-ticket-id
+argument-hint: ticket-id
 description: Run full quality check - QA testing, code review, and requirements verification in parallel
 user-invocable: true
-allowed-tools: Task, Bash, Read, Write, Edit, Grep, Glob, TodoWrite, Skill, AskUserQuestion, mcp__atlassian__jira_get_issue, mcp__playwright__browser_navigate, mcp__playwright__browser_snapshot, mcp__playwright__browser_click, mcp__playwright__browser_type, mcp__playwright__browser_fill_form, mcp__playwright__browser_take_screenshot
+allowed-tools: Task, Bash, Read, Write, Edit, Grep, Glob, TodoWrite, Skill, AskUserQuestion, mcp__atlassian__jira_get_issue, mcp__linear__get_issue, mcp__playwright__browser_navigate, mcp__playwright__browser_snapshot, mcp__playwright__browser_click, mcp__playwright__browser_type, mcp__playwright__browser_fill_form, mcp__playwright__browser_take_screenshot
 ---
 
 # /check - Full Quality Check (Workflow Engine)
@@ -23,8 +23,8 @@ Run all verification agents in parallel: quality-checker (lint, typecheck, tests
 
 ## Arguments
 
-- `$ARGUMENTS` - Optional Jira ticket ID (e.g., PROJ-123)
-- If not provided, will check current changes without Jira context
+- `$ARGUMENTS` - Optional ticket ID (e.g., PROJ-123)
+- If not provided, will check current changes without ticket context
 
 ---
 
@@ -104,6 +104,7 @@ Parse the JSON output to get:
 - `MAIN_WORKTREE_PATH` - Path to main worktree
 - `REPORT_FOLDER` - Where to save reports
 - `CHANGES_HASH` - Hash for cache validation
+- `TICKET_ID` - From `ticketId` field in setup JSON output
 - `IMPACTED_APPS` - Array of changed apps
 - `AFFECTED_FILES` - Object with `apps` (files per app) and `packages` (changed packages)
 - `REVIEW_DOCS` - Project-specific review docs (from `READ_DOCS_ON_REVIEW`)
@@ -327,7 +328,7 @@ For each app in `IMPACTED_APPS`, invoke the `/check-qa` skill with JSON paramete
 ```javascript
 // For each APP_NAME in IMPACTED_APPS:
 const qaParams = {
-  jiraTicketId: JIRA_TICKET_ID,
+  ticketId: TICKET_ID,
   reportPath: `${REPORT_FOLDER}/qa-${APP_NAME}.check.md`,
   changesHash: CHANGES_HASH,
   appUrl: RUNNING_APPS[APP_NAME].url,
@@ -346,10 +347,10 @@ Skill("check-qa", args: `${APP_NAME} ${JSON.stringify(qaParams)}`)
 
 ```
 # For status-site
-Skill("check-qa", args: "status-site {\"jiraTicketId\":\"PROJ-856\",\"reportPath\":\"${HOME}/worktrees/tasks/PROJ-856/qa-status-site.check.md\",\"changesHash\":\"e44af95d\",\"appUrl\":\"http://host.docker.internal:5175\",\"screenshotsFolder\":\"${HOME}/worktrees/tasks/PROJ-856/screenshots/status-site/\",\"affectedFiles\":[],\"affectedPackages\":[\"@$REPO_NAME/ui\"]}")
+Skill("check-qa", args: "status-site {\"ticketId\":\"PROJ-856\",\"reportPath\":\"${HOME}/worktrees/tasks/PROJ-856/qa-status-site.check.md\",\"changesHash\":\"e44af95d\",\"appUrl\":\"http://host.docker.internal:5175\",\"screenshotsFolder\":\"${HOME}/worktrees/tasks/PROJ-856/screenshots/status-site/\",\"affectedFiles\":[],\"affectedPackages\":[\"@$REPO_NAME/ui\"]}")
 
 # For as-dashboard
-Skill("check-qa", args: "as-dashboard {\"jiraTicketId\":\"PROJ-856\",\"reportPath\":\"${HOME}/worktrees/tasks/PROJ-856/qa-as-dashboard.check.md\",\"changesHash\":\"e44af95d\",\"appUrl\":\"http://host.docker.internal:5178\",\"screenshotsFolder\":\"${HOME}/worktrees/tasks/PROJ-856/screenshots/as-dashboard/\",\"affectedFiles\":[\"apps/as-dashboard/src/EmailPreview.tsx\"],\"affectedPackages\":[]}")
+Skill("check-qa", args: "as-dashboard {\"ticketId\":\"PROJ-856\",\"reportPath\":\"${HOME}/worktrees/tasks/PROJ-856/qa-as-dashboard.check.md\",\"changesHash\":\"e44af95d\",\"appUrl\":\"http://host.docker.internal:5178\",\"screenshotsFolder\":\"${HOME}/worktrees/tasks/PROJ-856/screenshots/as-dashboard/\",\"affectedFiles\":[\"apps/as-dashboard/src/EmailPreview.tsx\"],\"affectedPackages\":[]}")
 ```
 
 **What /check-qa does:**
@@ -412,7 +413,7 @@ Test backend APIs affected by the changes.
 
 REPORT_FOLDER: ${REPORT_FOLDER}
 CHANGES_HASH: ${CHANGES_HASH}
-JIRA_TICKET_ID: ${JIRA_TICKET_ID}
+TICKET_ID: ${TICKET_ID}
 AFFECTED_FILES: ${JSON.stringify(AFFECTED_FILES)}
 DB_ENV: ${JSON.stringify(DB_ENV)}
 
@@ -451,7 +452,7 @@ Verify all requirements have been delivered.
 
 REPORT_FOLDER: ${REPORT_FOLDER}
 CHANGES_HASH: ${CHANGES_HASH}
-JIRA_TICKET_ID: ${JIRA_TICKET_ID}
+TICKET_ID: ${TICKET_ID}
 
 🚫 See FORBIDDEN_COMMANDS above
 
@@ -470,7 +471,7 @@ JIRA_TICKET_ID: ${JIRA_TICKET_ID}
 
 **Find and verify PR:**
 # Find PR for this ticket
-gh pr list --search "${JIRA_TICKET_ID}" --json number,headRefName
+gh pr list --search "${TICKET_ID}" --json number,headRefName
 
 # Use PR diff as source of truth
 gh pr diff <PR_NUMBER>
@@ -482,7 +483,7 @@ git diff origin/main...HEAD
 
 ## Step 1: Identify requirements
 
-- Read Jira ticket: mcp__atlassian__jira_get_issue(issue_key: "${JIRA_TICKET_ID}")
+- Fetch ticket details using the configured provider's MCP tool for ticket "${TICKET_ID}"
 - Extract acceptance criteria
 - Note any sub-tasks or linked issues
 
@@ -513,7 +514,7 @@ gh pr diff <PR_NUMBER> -- path/to/expected/file.ts
 For each requirement:
 | Requirement | Status | Evidence |
 |-------------|--------|----------|
-| [from Jira] | DELIVERED / PENDING | [file/line from PR diff] |
+| [from ticket] | DELIVERED / PENDING | [file/line from PR diff] |
 
 **Final verdict:** COMPLETE or INCOMPLETE
 
@@ -673,7 +674,7 @@ Validate developers' decisions on your code review suggestions.
 
 REPORT_FOLDER: ${REPORT_FOLDER}
 CHANGES_HASH: ${CHANGES_HASH}
-JIRA_TICKET_ID: ${JIRA_TICKET_ID}
+TICKET_ID: ${TICKET_ID}
 ITERATION: ${iteration}
 INVOLVED_DEVELOPERS: ${INVOLVED_DEVELOPERS.join(', ')}
 
@@ -681,7 +682,7 @@ ${REVIEW_DOCS ? `
 ## Project-Specific Review Rules
 
 IMPORTANT: Apply these project-specific rules as PRIMARY review criteria.
-Validate developers' decisions against these rules in addition to Jira requirements.
+Validate developers' decisions against these rules in addition to ticket requirements.
 
 ${REVIEW_DOCS}
 ` : ''}
@@ -689,20 +690,20 @@ ${REVIEW_DOCS}
 ## Your Role
 
 You made suggestions in code-review.check.md. Developers have now responded with their decisions.
-Your job is to AGREE or DISAGREE with each decision, **especially validating against Jira requirements**.
+Your job is to AGREE or DISAGREE with each decision, **especially validating against ticket requirements**.
 
 ## Your Task
 
 1. Read your original suggestions from ${REPORT_FOLDER}/code-review.check.md
-2. **⚠️ CRITICAL: Read Jira ticket requirements:**
-   - mcp__atlassian__jira_get_issue(issue_key: "${JIRA_TICKET_ID}")
+2. **⚠️ CRITICAL: Read ticket requirements:**
+   - Fetch ticket details using the configured provider's MCP tool for ticket "${TICKET_ID}"
    - Extract Acceptance Criteria and Testing Requirements
    - Use these to validate DEFERRED decisions
 3. Read each developer's reply:
    ${INVOLVED_DEVELOPERS.map(d => `- ${REPORT_FOLDER}/${d}-reply-v${iteration}.md`).join('\n   ')}
 4. For EACH suggestion, evaluate the developer's decision:
    - IMPLEMENTED → Did they actually implement it correctly?
-   - DEFERRED → **Does this suggestion match Jira acceptance criteria?**
+   - DEFERRED → **Does this suggestion match ticket acceptance criteria?**
      - If YES → You MUST DISAGREE (cannot defer required work)
      - If NO → Is the deferral reason valid?
    - NOT_APPLICABLE → Do you agree it's not applicable?
@@ -739,13 +740,13 @@ Create ${REPORT_FOLDER}/code-checker-consensus-v${iteration}.md:
 
 ## Rules
 
-- ✅ Be fair - if deferral reason is valid AND does not contradict Jira requirements, accept it
+- ✅ Be fair - if deferral reason is valid AND does not contradict ticket requirements, accept it
 - ✅ Check IMPLEMENTED suggestions were actually implemented correctly
 - ✅ Provide specific technical reasons for any disagreement
-- ✅ **Cross-reference EVERY DEFERRED decision against Jira acceptance criteria**
+- ✅ **Cross-reference EVERY DEFERRED decision against ticket acceptance criteria**
 - ❌ Don't be pedantic - minor deviations from your suggestion are OK
 - ❌ Don't insist on suggestions you marked as 🟢 Nice-to-Have if developers have good reasons to defer
-- ❌ **NEVER accept DEFERRED for suggestions that match Jira requirements - you MUST DISAGREE**
+- ❌ **NEVER accept DEFERRED for suggestions that match ticket requirements - you MUST DISAGREE**
 
 📁 Save to: ${REPORT_FOLDER}/code-checker-consensus-v${iteration}.md
 ```
@@ -759,7 +760,7 @@ Evaluate code review suggestions and create your reply.
 
 REPORT_FOLDER: ${REPORT_FOLDER}
 CHANGES_HASH: ${CHANGES_HASH}
-JIRA_TICKET_ID: ${JIRA_TICKET_ID}
+TICKET_ID: ${TICKET_ID}
 DEVELOPER_TYPE: ${DEVELOPER_TYPE}  // e.g., "developer-nodejs-tdd"
 
 ${DEV_DOCS ? `
@@ -792,14 +793,14 @@ For suggestions OUTSIDE your domain, you may:
 
 1. Read ${REPORT_FOLDER}/code-review.check.md
 2. EXTRACT the **Changes Hash:** - you MUST use this exact hash
-3. **⚠️ CRITICAL: Read Jira ticket requirements:**
-   - mcp__atlassian__jira_get_issue(issue_key: "${JIRA_TICKET_ID}")
+3. **⚠️ CRITICAL: Read ticket requirements:**
+   - Fetch ticket details using the configured provider's MCP tool for ticket "${TICKET_ID}"
    - Extract Acceptance Criteria and Testing Requirements
-   - You CANNOT defer suggestions that match explicit Jira requirements
+   - You CANNOT defer suggestions that match explicit ticket requirements
 4. ${iteration > 1 ? `Read other developers' replies: ${OTHER_DEVELOPERS.map(d => `${d}-reply-v${iteration-1}.md`)}` : ''}
 5. For EACH suggestion (🟢 SUGGESTION or 🔵 Nice-to-Have), evaluate:
    - Is this in YOUR domain of expertise?
-   - **Does this match any Jira acceptance criteria or testing requirements?**
+   - **Does this match any ticket acceptance criteria or testing requirements?**
    - Can this be implemented quickly (< 5 minutes)?
    - Is it within scope of this PR?
    - Does it add real value?
@@ -808,12 +809,12 @@ For suggestions OUTSIDE your domain, you may:
    - **ACTUALLY IMPLEMENT THEM** in the codebase
    - Mark as IMPLEMENTED in the reply
 
-7. **⚠️ CRITICAL: For suggestions that MATCH Jira requirements:**
+7. **⚠️ CRITICAL: For suggestions that MATCH ticket requirements:**
    - You **CANNOT** mark as DEFERRED
    - You MUST either IMPLEMENT or explain why NOT_APPLICABLE
-   - "Out of scope" is NOT valid if Jira ticket explicitly requires it
+   - "Out of scope" is NOT valid if the ticket explicitly requires it
 
-8. For complex suggestions that do NOT match Jira requirements:
+8. For complex suggestions that do NOT match ticket requirements:
    - Mark as DEFERRED with specific reason
    - Explain WHY it's deferred
 
@@ -870,13 +871,13 @@ After reviewing other developers' decisions:
 ## Rules
 
 - ❌ DO NOT just mark everything as DEFERRED
-- ❌ **NEVER defer suggestions that match Jira acceptance criteria or testing requirements**
+- ❌ **NEVER defer suggestions that match ticket acceptance criteria or testing requirements**
 - ✅ Actually try to implement quick fixes IN YOUR DOMAIN
 - ✅ Provide specific technical reasons
 - ✅ If you implement something, run lint to verify it compiles
 - ✅ Be respectful of other developers' domain expertise
 - ✅ Flag cross-cutting concerns even outside your domain
-- ✅ **Cross-reference every DEFERRED decision against Jira requirements**
+- ✅ **Cross-reference every DEFERRED decision against ticket requirements**
 
 📁 Save to: ${REPORT_FOLDER}/${DEVELOPER_TYPE}-reply-v${iteration}.md
 ```
@@ -996,7 +997,7 @@ Exit with INFRASTRUCTURE_FAILURE status (not APPROVED).
 node ${CLAUDE_PLUGIN_ROOT}/hooks/check-validate-reports.js "${REPORT_FOLDER}" '${JSON.stringify(IMPACTED_APPS)}'
 
 # Generate summary README.md
-node ${CLAUDE_PLUGIN_ROOT}/hooks/check-generate-summary.js "${REPORT_FOLDER}" "${CHANGES_HASH}" "${JIRA_TICKET_ID}" '${JSON.stringify(IMPACTED_APPS)}'
+node ${CLAUDE_PLUGIN_ROOT}/hooks/check-generate-summary.js "${REPORT_FOLDER}" "${CHANGES_HASH}" "${TICKET_ID}" '${JSON.stringify(IMPACTED_APPS)}'
 ```
 
 **Validation rules (causes NEEDS_WORK):**
@@ -1066,7 +1067,7 @@ if [ -n "$ENV_RESULT" ]; then
 fi
 
 # Kill only YOUR ticket's tmux session (NEVER pkill - it kills other agents!)
-TICKET_ID="${JIRA_TICKET_ID:-}"
+TICKET_ID="${TICKET_ID:-${JIRA_TICKET_ID:-}}"
 if [ -n "$TICKET_ID" ]; then
   tmux kill-session -t "${TICKET_ID}-dev" 2>/dev/null || true
 fi

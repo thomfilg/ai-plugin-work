@@ -1,6 +1,6 @@
 ---
 name: work-pr
-description: Updates PR description and adds visual documentation for a Jira task
+description: Updates PR description and adds visual documentation for a ticket task
 argument-hint: <ticket-id> [--force]
 user-invocable: true
 allowed-tools: Task, Bash, Read, Write, Edit, Grep, Glob, AskUserQuestion
@@ -8,7 +8,7 @@ allowed-tools: Task, Bash, Read, Write, Edit, Grep, Glob, AskUserQuestion
 
 # Work PR Command
 
-Updates PR description and adds visual documentation for a Jira task. Uses the workflow engine for state tracking, resumability, and SHA-based caching.
+Updates PR description and adds visual documentation for a ticket task. Uses the workflow engine for state tracking, resumability, and SHA-based caching.
 
 ## Usage
 
@@ -151,7 +151,7 @@ Then run pr-generator:
 ```
 Task(pr-generator):
   Update PR for current branch with implementation details.
-  Jira ticket: ${TICKET_ID}
+  Ticket: ${TICKET_ID}
   Status: Implementation complete, all checks passing
 
   ${PR_DOCS ? `

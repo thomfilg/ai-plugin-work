@@ -6,7 +6,7 @@ user-invocable: true
 allowed-tools: Task, Bash, Read, Write, Edit, Grep, Glob, mcp__atlassian__jira_get_issue, mcp__linear__get_issue
 ---
 
-# Setup multiple Jira tasks - creates worktrees, symlinks configs, and opens draft PRs
+# Setup multiple ticket tasks - creates worktrees, symlinks configs, and opens draft PRs
 
 ## Usage
 
@@ -23,7 +23,7 @@ allowed-tools: Task, Bash, Read, Write, Edit, Grep, Glob, mcp__atlassian__jira_g
 
 ### Step 1: Parse task IDs
 
-Extract task IDs from input. If only numbers provided, prefix with your Jira project key:
+Extract task IDs from input. If only numbers provided, prefix with your project key:
 
 ```bash
 # Input: "123 456 789" or "PROJ-123 PROJ-456"
@@ -34,11 +34,9 @@ Extract task IDs from input. If only numbers provided, prefix with your Jira pro
 
 Loop through each task ID and perform Steps 3-9.
 
-### Step 3: Fetch Jira ticket details
+### Step 3: Fetch ticket details
 
-```
-mcp__atlassian__jira_get_issue(issue_key: "PROJ-XXX")
-```
+Fetch ticket details using the appropriate MCP tool for your configured ticket provider (see TICKET_PROVIDER config). For Jira: `mcp__atlassian__jira_get_issue`. For Linear: `mcp__linear__get_issue`. For GitHub: `gh issue view`.
 
 Extract:
 - Summary (for branch name)
@@ -150,9 +148,9 @@ Next steps:
     Skipping...
 ```
 
-### Task not found in Jira
+### Task not found in ticket provider
 ```
-❌ PROJ-999: Task not found in Jira
+❌ PROJ-999: Task not found in ticket provider
    Skipping...
 ```
 
@@ -168,7 +166,7 @@ Next steps:
 |------|--------|
 | 1 | Parse task IDs |
 | 2 | Loop through tasks |
-| 3 | Fetch Jira details |
+| 3 | Fetch ticket details |
 | 4 | Create worktree + branch |
 | 5 | Copy credentials, .claude, symlink CLAUDE.md, symlink .env files, create .env.local |
 | 6 | pnpm install |
@@ -179,7 +177,7 @@ Next steps:
 ## Notes
 
 - Task IDs can be numbers only (123) or full IDs (PROJ-123)
-- Default project key: configured via `JIRA_PROJECT_KEY` env var
+- Default project key: configured via `TICKET_PROJECT_KEY` env var (falls back to `JIRA_PROJECT_KEY`)
 - Worktree path: `../$REPO_NAME-<TICKET-ID>`
 - Branch format: `<TICKET-ID>-<kebab-case-description>`
 - Draft PRs created when both `ENABLE_EMPTY_COMMIT` and `ENABLE_DRAFT_PR` are set

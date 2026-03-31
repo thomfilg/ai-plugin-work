@@ -44,12 +44,12 @@ const APP_NAME = args[0];
 const options = args[1] ? JSON.parse(args[1]) : {};
 
 // Defaults
-const JIRA_TICKET_ID = options.jiraTicketId || ''; // Extract from branch if empty
+const TICKET_ID = options.ticketId || options.jiraTicketId || ''; // Extract from branch if empty (jiraTicketId accepted for backward compat)
 const GLOBAL_TASKS = `${process.env.HOME}/worktrees/tasks`;
-const TASK_FOLDER = `${GLOBAL_TASKS}/${JIRA_TICKET_ID || 'unknown'}`;
+const TASK_FOLDER = `${GLOBAL_TASKS}/${TICKET_ID || 'unknown'}`;
 const REPORT_PATH = options.reportPath || `${TASK_FOLDER}/qa-${APP_NAME}.md`;
 const CHANGES_HASH = options.changesHash || 'NO_HASH';
-const SCREENSHOTS_FOLDER = options.screenshotsFolder || `${TASK_FOLDER}/screenshots/{APP_NAME}`;
+const SCREENSHOTS_FOLDER = options.screenshotsFolder || `${TASK_FOLDER}/screenshots/${APP_NAME}`;
 const AFFECTED_FILES = options.affectedFiles || [];
 const AFFECTED_PACKAGES = options.affectedPackages || [];
 const QA_DOCS = options.qaDocs || '';   // from READ_DOCS_ON_QA via check-setup.js
@@ -285,16 +285,16 @@ This creates a checkpoint file that enables resume on context loss.
 
 ```bash
 # Initialize QA progress tracking
-node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js init "${JIRA_TICKET_ID}" "${APP_NAME}" "${APP_URL}"
+node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js init "${TICKET_ID}" "${APP_NAME}" "${APP_URL}"
 
 echo "✅ QA progress tracking initialized"
-echo "   Progress file: $HOME/worktrees/tasks/${JIRA_TICKET_ID}/.qa-progress-${APP_NAME}.json"
+echo "   Progress file: $HOME/worktrees/tasks/${TICKET_ID}/.qa-progress-${APP_NAME}.json"
 ```
 
 **Check for existing progress (resume detection):**
 ```bash
 # Check if we can resume from previous run
-RESUME_INFO=$(node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js resume-info "${JIRA_TICKET_ID}" "${APP_NAME}")
+RESUME_INFO=$(node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js resume-info "${TICKET_ID}" "${APP_NAME}")
 CAN_RESUME=$(echo "$RESUME_INFO" | jq -r '.canResume')
 COMPLETED_TESTS=$(echo "$RESUME_INFO" | jq -r '.completedTests | length')
 
@@ -344,7 +344,7 @@ If the page does not load, report INFRASTRUCTURE_FAILURE.
 Do NOT attempt to start a server yourself.
 
 ## Context Variables
-- JIRA_TICKET_ID: ${JIRA_TICKET_ID}
+- TICKET_ID: ${TICKET_ID}
 - REPORT_PATH: ${REPORT_PATH}
 - CHANGES_HASH: ${CHANGES_HASH}
 - APP_URL: ${APP_URL}
@@ -353,11 +353,11 @@ Do NOT attempt to start a server yourself.
 ## Progress Tracking (CRITICAL - enables resume on context loss)
 - PROGRESS_SCRIPT: ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js
 - Use these commands to track progress:
-  - Start test: node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js start-test ${JIRA_TICKET_ID} ${APP_NAME} 'test_name'
-  - Complete test: node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js complete-test ${JIRA_TICKET_ID} ${APP_NAME} 'test_name' pass 'screenshot.png'
-  - Fail test: node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js fail-test ${JIRA_TICKET_ID} ${APP_NAME} 'test_name' 'error message'
-  - Playwright status: node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js set-playwright ${JIRA_TICKET_ID} ${APP_NAME} true/false
-  - Infrastructure failure: node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js infrastructure-failure ${JIRA_TICKET_ID} ${APP_NAME} 'error'
+  - Start test: node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js start-test ${TICKET_ID} ${APP_NAME} 'test_name'
+  - Complete test: node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js complete-test ${TICKET_ID} ${APP_NAME} 'test_name' pass 'screenshot.png'
+  - Fail test: node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js fail-test ${TICKET_ID} ${APP_NAME} 'test_name' 'error message'
+  - Playwright status: node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js set-playwright ${TICKET_ID} ${APP_NAME} true/false
+  - Infrastructure failure: node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js infrastructure-failure ${TICKET_ID} ${APP_NAME} 'error'
 
 ## Resume Info (skip already-completed tests)
 ${JSON.stringify(resumeInfo || { completedTests: [] })}
@@ -405,7 +405,7 @@ ${E2E_DOCS}
 
 ### With options (from /check)
 ```
-/check-qa as-dashboard {"jiraTicketId":"PROJ-856","reportPath":"$HOME/worktrees/tasks/PROJ-856/qa-as-dashboard.md","changesHash":"abc123","appUrl":"http://host.docker.internal:5178"}
+/check-qa as-dashboard {"ticketId":"PROJ-856","reportPath":"$HOME/worktrees/tasks/PROJ-856/qa-as-dashboard.md","changesHash":"abc123","appUrl":"http://host.docker.internal:5178"}
 ```
 
 ### No arguments (auto-discover)

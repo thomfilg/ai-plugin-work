@@ -9,7 +9,7 @@
  * - Creating folders and cleaning old files
  * - Analyzing impacted apps
  *
- * Usage: node check-setup.js [JIRA_TICKET_ID]
+ * Usage: node check-setup.js [TICKET_ID]
  *
  * Output: JSON object with setup variables
  */
@@ -19,8 +19,16 @@ const fs = require('fs');
 const path = require('path');
 const config = require(path.join(__dirname, '..', 'lib', 'config'));
 
-// Get Jira ticket ID from args or environment
-const JIRA_TICKET_ID = process.argv[2] || process.env.JIRA_TICKET_ID || '';
+/**
+ * Resolve ticket ID from CLI args and environment.
+ * Precedence: CLI arg > TICKET_ID env > JIRA_TICKET_ID env (backward compat)
+ * See hooks/__tests__/check-setup-ticket-id.test.js for coverage.
+ */
+function resolveTicketId(argv = [], env = {}) {
+  return argv[0] || env.TICKET_ID || env.JIRA_TICKET_ID || '';
+}
+
+const TICKET_ID = resolveTicketId(process.argv.slice(2), process.env);
 
 /**
  * Execute a shell command and return trimmed output
@@ -330,7 +338,8 @@ function main() {
   const branchName = getBranchName();
 
   // Determine report folder - use parent of main worktree + tasks
-  const taskId = JIRA_TICKET_ID || branchName;
+  // Sanitize branch name fallback: replace path separators to avoid nested directories
+  const taskId = TICKET_ID || branchName.replace(/\//g, '-');
   const reportFolder = path.join(mainWorktreePath, '..', 'tasks', taskId);
 
   // Generate changes hash
@@ -360,7 +369,8 @@ function main() {
   const result = {
     mainWorktreePath,
     branchName,
-    jiraTicketId: JIRA_TICKET_ID || null,
+    ticketId: taskId,
+    jiraTicketId: taskId, // deprecated: use ticketId instead
     reportFolder,
     changesHash,
     cache: cacheResult,
@@ -395,5 +405,5 @@ function main() {
 if (require.main === module) {
   main();
 } else {
-  module.exports = { loadDocsFromPaths, DOCS_DENYLIST };
+  module.exports = { loadDocsFromPaths, DOCS_DENYLIST, resolveTicketId };
 }

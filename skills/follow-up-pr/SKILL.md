@@ -237,7 +237,7 @@ Disagreed because of: {path to supporting document or quote of user instruction}
 **Where to find evidence to support your disagreement:**
 1. **Tasks folder** — Look in `${TASKS_BASE}/<TICKET_ID>/` for pre-planning docs, requirements, or design docs that justify the change
 2. **User's direct instructions** — Quote what the user explicitly asked for in the conversation that triggered the work
-3. **Ticket description** — Reference the Jira/Linear ticket requirements if they support the implementation
+3. **Ticket description** — Reference the ticket requirements from your configured provider if they support the implementation
 
 **Example:**
 ```

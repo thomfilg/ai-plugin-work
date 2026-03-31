@@ -8,7 +8,7 @@ allowed-tools: Task, Bash, Read, Write, Grep, Glob, AskUserQuestion, Skill, mcp_
 
 # Orchestrate Command
 
-Runs `/work` for multiple Jira tasks sequentially, completing one before starting the next.
+Runs `/work` for multiple ticket tasks sequentially, completing one before starting the next.
 **Each task runs in its own worktree with isolated Claude session history.**
 
 ## Usage
@@ -26,7 +26,7 @@ Runs `/work` for multiple Jira tasks sequentially, completing one before startin
 
 ### Step 1: Parse task IDs
 
-Extract task IDs from input. If only numbers provided, prefix with your Jira project key:
+Extract task IDs from input. If only numbers provided, prefix with your project key:
 
 ```bash
 # Input: "851 853 899" or "PROJ-851 PROJ-853"
@@ -221,7 +221,7 @@ tail -f /tmp/claude-orchestrate-PROJ-853.log
 
 ## Notes
 
-- Default project key: configured via `JIRA_PROJECT_KEY` env var
+- Default project key: configured via `TICKET_PROJECT_KEY` env var (falls back to `JIRA_PROJECT_KEY`)
 - Each task gets its own worktree via `/bootstrap`
 - Each task runs in a **separate Claude CLI session**
 - Session history is stored in each worktree's `.claude/` folder

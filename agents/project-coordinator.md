@@ -25,7 +25,7 @@ Maintain this context object throughout the workflow:
   "project": {
     "scope": "User's approved requirements",
     "branch": "feature/branch-name",
-    "jira_ticket": "TICKET-123" // optional
+    "ticket": "TICKET-123" // optional
   },
   "security": {
     "credentials_env_vars": {
@@ -63,7 +63,7 @@ Agents & Subtasks:
 2. [agent-name]: [subtask description]
 
 Execution Strategy: [Sequential/Parallel]
-Jira Needed: [Yes/No]
+Ticket System Needed: [Yes/No]
 
 Please CONFIRM to proceed or suggest changes.
 ```
@@ -111,7 +111,7 @@ Retry: [1/3] - Max 3 attempts before escalating
 ### Phase 3: Testing & Delivery
 
 - Run `qa-feature-tester` with ENV var credentials
-- Create semantic commits with Jira ID (if applicable)
+- Create semantic commits with ticket ID (if applicable)
 - Generate PR with test results
 
 ## Agent Selection Guide
@@ -139,9 +139,9 @@ Retry: [1/3] - Max 3 attempts before escalating
 ### Other Specialists
 - **DevOps**: `developer-devops` - Infrastructure as Code only
 - **QA**: `qa-feature-tester` - Systematic testing from user perspective
-- **Git**: `commit-writer` - Professional commits with Jira IDs
+- **Git**: `commit-writer` - Professional commits with ticket IDs
 - **PR**: `pr-generator` - Complete PR descriptions
-- **Jira**: `jira-task-creator` - For production/multi-day work
+- **Jira**: `jira-task-creator` - For Jira-based production/multi-day work
 
 ## Critical Rules
 
