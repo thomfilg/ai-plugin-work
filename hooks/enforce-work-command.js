@@ -16,7 +16,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
-const { logHookError } = require(require('path').join(__dirname, '..', 'lib', 'hook-error-log'));
+const { logHookError } = require(path.join(__dirname, '..', 'lib', 'hook-error-log'));
 
 const WORK_STATE_DIR = path.join(process.env.HOME, '.claude', 'work-state');
 

@@ -17,7 +17,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { logHookError } = require(require('path').join(__dirname, '..', '..', 'lib', 'hook-error-log'));
+const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
 
 // UI documentation files that indicate a project has its own UI package
 const UI_DOC_FILES = [

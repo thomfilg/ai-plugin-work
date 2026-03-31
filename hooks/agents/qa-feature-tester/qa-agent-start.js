@@ -5,7 +5,7 @@
  */
 const fs = require('fs');
 const path = require('path');
-const { logHookError } = require(require('path').join(__dirname, '..', '..', '..', 'lib', 'hook-error-log'));
+const { logHookError } = require(path.join(__dirname, '..', '..', '..', 'lib', 'hook-error-log'));
 
 const MARKER_FILE = '/tmp/qa-agent-active';
 const MARKER_FRESHNESS_MS = 30 * 60 * 1000; // 30 minutes

@@ -15,7 +15,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
-const { logHookError } = require(require('path').join(__dirname, '..', 'lib', 'hook-error-log'));
+const { logHookError } = require(path.join(__dirname, '..', 'lib', 'hook-error-log'));
 
 // Completion phrases to detect
 const COMPLETION_PHRASES = [
