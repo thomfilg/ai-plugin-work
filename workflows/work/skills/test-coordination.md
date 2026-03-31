@@ -1,0 +1,1 @@
+../../skills/test-coordination/SKILL.md
