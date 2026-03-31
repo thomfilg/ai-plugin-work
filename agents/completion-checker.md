@@ -79,7 +79,7 @@ git diff main...HEAD --name-only
 grep -r "pattern" <paths>
 ```
 
-### If checking Jira ticket work:
+### If checking ticket work:
 1. Find the associated PR: `gh pr list --search "TICKET-123"`
 2. Then check the PR diff, NOT the main branch
 

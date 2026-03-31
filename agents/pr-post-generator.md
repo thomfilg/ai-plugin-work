@@ -38,14 +38,14 @@ You enhance PR descriptions with visual documentation and test results AFTER the
 ### Step 1: Find task reports and screenshots
 
 ```bash
-# Extract Jira-style ticket ID (PROJECT-123 format) from branch name
+# Extract ticket ID (PROJECT-123 format) from branch name
 # Falls back to sanitized branch name if no ticket ID found
 BRANCH_NAME=$(git branch --show-current)
 TICKET_ID=$(echo "$BRANCH_NAME" | grep -oE '[A-Z]+-[0-9]+' | head -1)
 if [ -z "$TICKET_ID" ]; then
   # No ticket ID - use sanitized branch name as identifier
   TICKET_ID=$(echo "$BRANCH_NAME" | sed 's/[^a-zA-Z0-9-]/-/g')
-  echo "No Jira ticket found, using branch name: ${TICKET_ID}"
+  echo "No ticket ID found, using branch name: ${TICKET_ID}"
 fi
 
 TASK_DIR="/home/node/worktrees/tasks/${TICKET_ID}"  # Global tasks folder
@@ -92,7 +92,7 @@ cat ${TASK_DIR}/qa*.check.md
 ```
 
 **Identify the PRIMARY FEATURE from:**
-1. The Jira ticket ID in the branch name
+1. The ticket ID in the branch name
 2. The QA report headers mentioning "Feature Testing" vs "Regression Testing"
 3. Screenshot filenames that match the feature
 

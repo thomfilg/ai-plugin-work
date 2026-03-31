@@ -91,24 +91,24 @@ If a **spec.md** exists with Given/When/Then test scenarios, use those as test t
 ║  You MUST call qa-progress.js at EACH step of testing:                       ║
 ║                                                                              ║
 ║  STEP 1: Check Playwright (IMMEDIATELY, BEFORE ANYTHING ELSE)                ║
-║  node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js set-playwright ${JIRA_TICKET_ID} ${APP} true/false
+║  node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js set-playwright ${TICKET_ID} ${APP} true/false
 ║                                                                              ║
 ║  STEP 2: Mark app reachability                                               ║
-║  node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js set-reachable ${JIRA_TICKET_ID} ${APP} true/false
+║  node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js set-reachable ${TICKET_ID} ${APP} true/false
 ║                                                                              ║
 ║  STEP 3: For EACH test:                                                      ║
 ║  - Start test:                                                               ║
-║    node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js start-test ${JIRA_TICKET_ID} ${APP} "test_name"
+║    node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js start-test ${TICKET_ID} ${APP} "test_name"
 ║  - Complete test:                                                            ║
-║    node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js complete-test ${JIRA_TICKET_ID} ${APP} "test_name" pass "screenshot.png"
+║    node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js complete-test ${TICKET_ID} ${APP} "test_name" pass "screenshot.png"
 ║  - Fail test:                                                                ║
-║    node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js fail-test ${JIRA_TICKET_ID} ${APP} "test_name" "error"
+║    node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js fail-test ${TICKET_ID} ${APP} "test_name" "error"
 ║                                                                              ║
 ║  STEP 4: On infrastructure failure                                           ║
-║  node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js infrastructure-failure ${JIRA_TICKET_ID} ${APP} "error"
+║  node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js infrastructure-failure ${TICKET_ID} ${APP} "error"
 ║                                                                              ║
 ║  STEP 5: On completion                                                       ║
-║  node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js complete ${JIRA_TICKET_ID} ${APP} pass/fail
+║  node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js complete ${TICKET_ID} ${APP} pass/fail
 ║                                                                              ║
 ║  WHY: If interrupted, the next agent can resume from progress file           ║
 ╚══════════════════════════════════════════════════════════════════════════════╝
@@ -120,7 +120,7 @@ If a **spec.md** exists with Given/When/Then test scenarios, use those as test t
 
 ```bash
 # Check for existing progress
-RESUME=$(node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js resume-info ${JIRA_TICKET_ID} ${APP_NAME})
+RESUME=$(node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js resume-info ${TICKET_ID} ${APP_NAME})
 COMPLETED=$(echo "$RESUME" | jq -r '.completedTests[]')
 
 if [ -n "$COMPLETED" ]; then
@@ -347,7 +347,7 @@ Optional (for API testing):
 
 ### Step 1: Start the app (if not already running)
 - [ ] Check if app is running: `curl -s http://host.docker.internal:${PORT}/health`
-- [ ] If NOT running: `cd /home/node/worktrees/${REPO_NAME}-${JIRA_TICKET_ID} && pnpm dev-local`
+- [ ] If NOT running: `cd /home/node/worktrees/${REPO_NAME}-${TICKET_ID} && pnpm dev-local`
 - [ ] Wait for app to be ready (check health endpoint with curl)
 - [ ] **DO NOT use `make` - it's interactive and will hang**
 
@@ -441,7 +441,7 @@ curl -s -H "Authorization: Bearer $TOKEN" http://host.docker.internal:3000/api/e
 ```bash
 # Start app with LOCAL database (REQUIRED for QA testing)
 # DO NOT use `make` - it's interactive and will hang!
-cd /home/node/worktrees/${REPO_NAME}-${JIRA_TICKET_ID}
+cd /home/node/worktrees/${REPO_NAME}-${TICKET_ID}
 pnpm dev-local
 
 # This runs the app with a local database so your tests don't affect shared environments.
@@ -896,7 +896,7 @@ mcp__playwright__browser_take_screenshot(
 1. Write your QA report to the tasks folder
 2. Run the validation script:
    ```bash
-   cd /home/node/worktrees/${REPO_NAME}-${JIRA_TICKET_ID} && \
+   cd /home/node/worktrees/${REPO_NAME}-${TICKET_ID} && \
    echo '{"hook_type":"stop"}' | node "${CLAUDE_PLUGIN_ROOT}/hooks/work-code-review-status.js"
    ```
 3. If blocked → Read the error message and fix the report format
@@ -911,8 +911,8 @@ mcp__playwright__browser_take_screenshot(
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║  📄 SAVE REPORT TO FILE (REQUIRED - PREPEND IF EXISTS)                       ║
 ║                                                                              ║
-║  File path: /home/node/worktrees/tasks/${JIRA_TICKET_ID}/qa.md              ║
-║  (If no Jira ticket: /home/node/worktrees/tasks/qa-report-[timestamp].md)   ║
+║  File path: /home/node/worktrees/tasks/${TICKET_ID}/qa.md              ║
+║  (If no ticket ID: /home/node/worktrees/tasks/qa-report-[timestamp].md)   ║
 ║                                                                              ║
 ║  ⚠️  APPEND STRATEGY (latest first):                                          ║
 ║  1. Check if file exists                                                     ║

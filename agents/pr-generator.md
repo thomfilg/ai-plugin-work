@@ -193,8 +193,8 @@ The diff you analyze depends on how the PR is being created:
 8. IMPORTANT: Only include Visual Documentation section if the PR contains UI/UX changes
 9. NEVER include placeholder text like "[TO BE ADDED AFTER PR CREATION]" in the initial PR
 
-## CRITICAL: GITHUB MARKDOWN FORMATTING (NO JIRA-STYLE ESCAPING)
-GitHub Markdown does NOT require Jira-style character escaping. NEVER use:
+## CRITICAL: GITHUB MARKDOWN FORMATTING (NO TICKET-SYSTEM-STYLE ESCAPING)
+GitHub Markdown does NOT require ticket-system-style character escaping. NEVER use:
 - `\`` (escaped backtick) → use plain ` instead
 - `\|` (escaped pipe) → use plain | instead
 - `\{` or `\}` (escaped braces) → use plain { } instead
@@ -206,7 +206,7 @@ GitHub Markdown does NOT require Jira-style character escaping. NEVER use:
 - WRONG: `value \| default` → CORRECT: `value | default`
 - WRONG: `\{key: value\}` → CORRECT: `{key: value}`
 
-This is CRITICAL - the PR will be rejected if Jira-style escaping is detected.
+This is CRITICAL - the PR will be rejected if ticket-system-style escaping is detected.
 
 ## TEMPLATE TO COMPLETE
 ```markdown

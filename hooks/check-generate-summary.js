@@ -4,7 +4,7 @@
  *
  * Generates the final README.md summary report after all agents complete.
  *
- * Usage: node check-generate-summary.js <REPORT_FOLDER> <CHANGES_HASH> [JIRA_TICKET_ID] [IMPACTED_APPS_JSON]
+ * Usage: node check-generate-summary.js <REPORT_FOLDER> <CHANGES_HASH> [TICKET_ID] [IMPACTED_APPS_JSON]
  *
  * Output: Writes README.md to report folder
  */

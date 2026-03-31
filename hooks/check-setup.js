@@ -9,7 +9,7 @@
  * - Creating folders and cleaning old files
  * - Analyzing impacted apps
  *
- * Usage: node check-setup.js [JIRA_TICKET_ID]
+ * Usage: node check-setup.js [TICKET_ID]
  *
  * Output: JSON object with setup variables
  */
@@ -19,8 +19,8 @@ const fs = require('fs');
 const path = require('path');
 const config = require(path.join(__dirname, '..', 'lib', 'config'));
 
-// Get Jira ticket ID from args or environment
-const JIRA_TICKET_ID = process.argv[2] || process.env.JIRA_TICKET_ID || '';
+// Get ticket ID from args or environment (TICKET_ID preferred, JIRA_TICKET_ID for backward compat)
+const TICKET_ID = process.argv[2] || process.env.TICKET_ID || process.env.JIRA_TICKET_ID || '';
 
 /**
  * Execute a shell command and return trimmed output
@@ -330,7 +330,7 @@ function main() {
   const branchName = getBranchName();
 
   // Determine report folder - use parent of main worktree + tasks
-  const taskId = JIRA_TICKET_ID || branchName;
+  const taskId = TICKET_ID || branchName;
   const reportFolder = path.join(mainWorktreePath, '..', 'tasks', taskId);
 
   // Generate changes hash
@@ -360,7 +360,8 @@ function main() {
   const result = {
     mainWorktreePath,
     branchName,
-    jiraTicketId: JIRA_TICKET_ID || null,
+    ticketId: TICKET_ID || null,
+    jiraTicketId: TICKET_ID || null, // deprecated: use ticketId instead
     reportFolder,
     changesHash,
     cache: cacheResult,
