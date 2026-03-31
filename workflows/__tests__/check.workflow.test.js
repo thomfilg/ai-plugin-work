@@ -161,6 +161,30 @@ describe('check.workflow.js', () => {
       const r = wf.detectStepState('99_unknown', 'X-1', null, makeInspect());
       assert.equal(r.action, 'RUN');
     });
+
+    // ─── GH-120: Skip Playwright when no web apps ───────────────────
+
+    it('3_verify_playwright: SKIP when hasWebApps=false and cache invalid', () => {
+      const r = wf.detectStepState('3_verify_playwright', 'X-1', null, makeInspect({
+        readmeHashMatch: false,
+        hasWebApps: false,
+      }));
+      assert.equal(r.action, 'SKIP');
+      assert.match(r.reason, /no web apps/i);
+    });
+
+    it('3_verify_playwright: RUN when hasWebApps=true and cache invalid', () => {
+      const r = wf.detectStepState('3_verify_playwright', 'X-1', null, makeInspect({
+        readmeHashMatch: false,
+        hasWebApps: true,
+      }));
+      assert.equal(r.action, 'RUN');
+    });
+
+    it('3_verify_playwright: defaults to RUN when inspectData is null', () => {
+      const r = wf.detectStepState('3_verify_playwright', 'X-1', null, null);
+      assert.equal(r.action, 'RUN');
+    });
   });
 
   // ─── Transition Graph ──────────────────────────────────────────────
@@ -207,6 +231,15 @@ describe('check.workflow.js', () => {
       const t = wf.transitions.find(tr => tr.source === lastStepId);
       assert.ok(t, `No transition entry for terminal step ${lastStepId}`);
       assert.deepEqual(t.targets, []);
+    });
+
+    // ─── GH-120: Skip edge from 2_start_env to 4_phase1_agents ──────
+
+    it('2_start_env can transition to both 3_verify_playwright and 4_phase1_agents', () => {
+      const t = wf.transitions.find(tr => tr.source === '2_start_env');
+      assert.ok(t, 'No transition entry for 2_start_env');
+      assert.ok(t.targets.includes('3_verify_playwright'), 'Missing target: 3_verify_playwright');
+      assert.ok(t.targets.includes('4_phase1_agents'), 'Missing target: 4_phase1_agents');
     });
 
     it('no orphaned steps — every step ID appears as a source or target in transitions', () => {
