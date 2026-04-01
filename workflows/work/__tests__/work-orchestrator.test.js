@@ -1279,7 +1279,7 @@ const { parseTicketInput } = require(path.join(__dirname, '..', 'work.workflow.j
 describe('parseTicketInput', () => {
   it('should parse GH-prefixed ticket with suffix', () => {
     const result = parseTicketInput('GH-145/phase1');
-    assert.deepStrictEqual(result, { ticketBase: 'GH-145', suffix: 'phase1' });
+    assert.deepStrictEqual(result, { ticketBase: 'GH-145', suffix: 'phase1', separator: '/' });
   });
 
   it('should parse flat ticket ID (no suffix)', () => {
@@ -1289,7 +1289,7 @@ describe('parseTicketInput', () => {
 
   it('should parse Jira ticket with suffix', () => {
     const result = parseTicketInput('PROJ-123/migration-step');
-    assert.deepStrictEqual(result, { ticketBase: 'PROJ-123', suffix: 'migration-step' });
+    assert.deepStrictEqual(result, { ticketBase: 'PROJ-123', suffix: 'migration-step', separator: '/' });
   });
 
   it('should not parse URLs', () => {
@@ -1319,7 +1319,7 @@ describe('parseTicketInput', () => {
 
   it('should parse hash-prefixed GitHub issue with suffix', () => {
     const result = parseTicketInput('#42/phase1');
-    assert.deepStrictEqual(result, { ticketBase: '#42', suffix: 'phase1' });
+    assert.deepStrictEqual(result, { ticketBase: '#42', suffix: 'phase1', separator: '/' });
   });
 
   it('should reject path traversal in suffix', () => {
@@ -1336,7 +1336,7 @@ describe('parseTicketInput', () => {
 
   it('should support underscores and hyphens in suffix', () => {
     const result = parseTicketInput('GH-145/step_2-alpha');
-    assert.deepStrictEqual(result, { ticketBase: 'GH-145', suffix: 'step_2-alpha' });
+    assert.deepStrictEqual(result, { ticketBase: 'GH-145', suffix: 'step_2-alpha', separator: '/' });
   });
 
   it('should reject nested suffixes', () => {

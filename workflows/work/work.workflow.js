@@ -115,38 +115,7 @@ function listFiles(dir, pattern) {
   } catch { return []; }
 }
 
-// ─── Ticket Input Parsing (GH-146) ──────────────────────────────────────────
-// Parses "GH-145/phase1" into { ticketBase: "GH-145", suffix: "phase1" }.
-// URLs are returned as-is (no suffix parsing). Flat ticket IDs return suffix: null.
-
-function parseTicketInput(raw) {
-  if (!raw || typeof raw !== 'string') return { ticketBase: raw, suffix: null };
-
-  // Don't parse URLs - suffix syntax only for ticket ID shorthand
-  if (raw.startsWith('http://') || raw.startsWith('https://')) {
-    return { ticketBase: raw, suffix: null };
-  }
-
-  // Split on first /
-  const slashIdx = raw.indexOf('/');
-  if (slashIdx === -1) return { ticketBase: raw, suffix: null };
-
-  const ticketBase = raw.substring(0, slashIdx);
-  const suffix = raw.substring(slashIdx + 1);
-
-  // Only treat as suffix syntax if the part before '/' looks like a ticket ID
-  // (PROJ-123, GH-145, or #42). Bare numbers are excluded to avoid confusion
-  // with dates ("2024/report") or numeric paths ("123/phase1").
-  const looksLikeTicket = /^[A-Z]+-\d+$/i.test(ticketBase) || /^#\d+$/.test(ticketBase);
-  if (!looksLikeTicket) return { ticketBase: raw, suffix: null };
-
-  // Validate suffix: alphanumeric, hyphens, underscores only, single level
-  if (!suffix || !/^[a-zA-Z0-9_-]+$/.test(suffix)) {
-    throw new Error(`invalid suffix "${suffix}". Must match /^[a-zA-Z0-9_-]+$/ (alphanumeric, hyphens, underscores only, no nested paths).`);
-  }
-
-  return { ticketBase, suffix };
-}
+const { parseTicketInput } = require(path.join(__dirname, '..', 'lib', 'ticket-provider'));
 
 // ─── Artifact Archival (GH-130) ─────────────────────────────────────────────
 // Maps steps to glob patterns of artifacts that should be archived on backward
@@ -1208,4 +1177,5 @@ if (require.main === module) {
   main();
 }
 
+// Re-export for backward compatibility (consumers can also import from workflows/lib/ticket-provider)
 module.exports = { parseTicketInput };

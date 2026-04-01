@@ -26,6 +26,7 @@ const { execSync } = require('child_process');
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 const config = require(path.join(__dirname, '..', 'lib', 'config'));
+const { normalizeTicketId } = require(path.join(__dirname, '..', 'lib', 'ticket-provider'));
 const TASKS_BASE = config.TASKS_BASE;
 const REPO_DIR = config.repoDir();
 
@@ -175,7 +176,8 @@ module.exports = {
       ticketId = `${process.env.TICKET_PROJECT_KEY || process.env.JIRA_PROJECT_KEY || 'PROJ'}-${ticketId}`;
     }
 
-    ticketId = ticketId.toUpperCase();
+    // Uppercase only the ticket base, preserve suffix case (GH-146)
+    ticketId = normalizeTicketId(ticketId);
 
     return { instanceId: ticketId, ticketId };
   },

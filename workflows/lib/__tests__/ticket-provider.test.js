@@ -411,4 +411,76 @@ describe('ticket-provider', () => {
       assert.equal(url, 'https://github.com/org/repo/issues/56');
     });
   });
+
+  // ─── parseTicketInput (GH-146) ──────────────────────────────────────
+
+  describe('parseTicketInput', () => {
+    it('parses hyphenated suffix', () => {
+      const tp = freshRequire('../ticket-provider');
+      assert.deepStrictEqual(tp.parseTicketInput('JUL-1397-bugfix'), {
+        ticketBase: 'JUL-1397', suffix: 'bugfix', separator: '-',
+      });
+    });
+
+    it('parses slash suffix', () => {
+      const tp = freshRequire('../ticket-provider');
+      assert.deepStrictEqual(tp.parseTicketInput('GH-145/phase1'), {
+        ticketBase: 'GH-145', suffix: 'phase1', separator: '/',
+      });
+    });
+
+    it('returns null suffix for plain ticket IDs', () => {
+      const tp = freshRequire('../ticket-provider');
+      const r = tp.parseTicketInput('PROJ-123');
+      assert.equal(r.ticketBase, 'PROJ-123');
+      assert.equal(r.suffix, null);
+    });
+
+    it('passes through URLs without parsing', () => {
+      const tp = freshRequire('../ticket-provider');
+      const r = tp.parseTicketInput('https://github.com/org/repo/issues/42');
+      assert.equal(r.suffix, null);
+      assert.ok(r.ticketBase.startsWith('https://'));
+    });
+
+    it('throws on invalid hyphen suffix chars', () => {
+      const tp = freshRequire('../ticket-provider');
+      assert.throws(() => tp.parseTicketInput('PROJ-123-bad path!'), /invalid suffix/);
+    });
+
+    it('throws on invalid slash suffix chars', () => {
+      const tp = freshRequire('../ticket-provider');
+      assert.throws(() => tp.parseTicketInput('PROJ-123/bad path!'), /invalid suffix/);
+    });
+
+    it('handles null/undefined gracefully', () => {
+      const tp = freshRequire('../ticket-provider');
+      assert.equal(tp.parseTicketInput(null).suffix, null);
+      assert.equal(tp.parseTicketInput(undefined).suffix, null);
+    });
+  });
+
+  // ─── normalizeTicketId (GH-146) ─────────────────────────────────────
+
+  describe('normalizeTicketId', () => {
+    it('uppercases only base for hyphenated suffix', () => {
+      const tp = freshRequire('../ticket-provider');
+      assert.equal(tp.normalizeTicketId('jul-1397-bugfix'), 'JUL-1397-bugfix');
+    });
+
+    it('uppercases only base for slash suffix', () => {
+      const tp = freshRequire('../ticket-provider');
+      assert.equal(tp.normalizeTicketId('proj-99/phase1'), 'PROJ-99/phase1');
+    });
+
+    it('uppercases plain ticket ID', () => {
+      const tp = freshRequire('../ticket-provider');
+      assert.equal(tp.normalizeTicketId('proj-123'), 'PROJ-123');
+    });
+
+    it('preserves already-uppercase input', () => {
+      const tp = freshRequire('../ticket-provider');
+      assert.equal(tp.normalizeTicketId('PROJ-123-bugfix'), 'PROJ-123-bugfix');
+    });
+  });
 });
