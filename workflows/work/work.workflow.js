@@ -37,8 +37,11 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
-process.on('uncaughtException', () => process.exit(0));
-process.on('unhandledRejection', () => process.exit(0));
+// Only install fail-safe handlers when running as CLI (not when require()'d for tests)
+if (require.main === module) {
+  process.on('uncaughtException', () => process.exit(0));
+  process.on('unhandledRejection', () => process.exit(0));
+}
 
 let appendAction, loadActions, analyzeActions;
 try {
@@ -110,6 +113,39 @@ function listFiles(dir, pattern) {
       .filter(f => pattern instanceof RegExp ? pattern.test(f) : f.includes(pattern))
       .map(f => path.join(dir, f));
   } catch { return []; }
+}
+
+// ─── Ticket Input Parsing (GH-146) ──────────────────────────────────────────
+// Parses "GH-145/phase1" into { ticketBase: "GH-145", suffix: "phase1" }.
+// URLs are returned as-is (no suffix parsing). Flat ticket IDs return suffix: null.
+
+function parseTicketInput(raw) {
+  if (!raw || typeof raw !== 'string') return { ticketBase: raw, suffix: null };
+
+  // Don't parse URLs - suffix syntax only for ticket ID shorthand
+  if (raw.startsWith('http://') || raw.startsWith('https://')) {
+    return { ticketBase: raw, suffix: null };
+  }
+
+  // Split on first /
+  const slashIdx = raw.indexOf('/');
+  if (slashIdx === -1) return { ticketBase: raw, suffix: null };
+
+  const ticketBase = raw.substring(0, slashIdx);
+  const suffix = raw.substring(slashIdx + 1);
+
+  // Only treat as suffix syntax if the part before '/' looks like a ticket ID
+  // (PROJ-123, GH-145, or #42). Bare numbers are excluded to avoid confusion
+  // with dates ("2024/report") or numeric paths ("123/phase1").
+  const looksLikeTicket = /^[A-Z]+-\d+$/i.test(ticketBase) || /^#\d+$/.test(ticketBase);
+  if (!looksLikeTicket) return { ticketBase: raw, suffix: null };
+
+  // Validate suffix: alphanumeric, hyphens, underscores only, single level
+  if (!suffix || !/^[a-zA-Z0-9_-]+$/.test(suffix)) {
+    throw new Error(`invalid suffix "${suffix}". Must match /^[a-zA-Z0-9_-]+$/ (alphanumeric, hyphens, underscores only, no nested paths).`);
+  }
+
+  return { ticketBase, suffix };
 }
 
 // ─── Artifact Archival (GH-130) ─────────────────────────────────────────────
@@ -422,12 +458,13 @@ const REQUIRED_REPORTS = [
 
 // ─── State Inspection ────────────────────────────────────────────────────────
 
-function inspect(ticket, providerConfig) {
+function inspect(ticket, providerConfig, suffix) {
   const s = {};
-  const safeName = tp.sanitizeTicketIdForPath(ticket, providerConfig);
+  const safeBase = tp.sanitizeTicketIdForPath(ticket, providerConfig);
+  const safeName = suffix ? safeBase + '/' + suffix : safeBase;
 
-  s.worktreeDir = path.join(WORKTREES_BASE, `${MAIN_WORKTREE_FOLDER}-${safeName}`);
-  s.tasksDir = path.join(TASKS_BASE, safeName);
+  s.worktreeDir = path.join(WORKTREES_BASE, `${MAIN_WORKTREE_FOLDER}-${safeBase}`);  // shared across phases
+  s.tasksDir = path.join(TASKS_BASE, safeName);  // isolated per phase
   s.worktreeExists = fileExists(s.worktreeDir);
   s.tasksDirExists = fileExists(s.tasksDir);
 
@@ -523,12 +560,13 @@ function inspect(ticket, providerConfig) {
 
 // ─── Plan Generation ─────────────────────────────────────────────────────────
 
-function generatePlan(ticket, description, s, rework, callerProviderCfg) {
+function generatePlan(ticket, description, s, rework, callerProviderCfg, suffix) {
   const plan = [];
   const mode = rework ? 'rework' : 'resume';
   const t = ticket || '{TICKET}';
-  const safeName = ticket ? tp.sanitizeTicketIdForPath(t, callerProviderCfg) : t;
-  const worktreeDir = s?.worktreeDir || `${WORKTREES_BASE}/${MAIN_WORKTREE_FOLDER}-${safeName}`;
+  const safeBase = ticket ? tp.sanitizeTicketIdForPath(t, callerProviderCfg) : t;
+  const safeName = suffix ? safeBase + '/' + suffix : safeBase;
+  const worktreeDir = s?.worktreeDir || `${WORKTREES_BASE}/${MAIN_WORKTREE_FOLDER}-${safeBase}`;
   const tasksDir = s?.tasksDir || `${TASKS_BASE}/${safeName}`;
 
   const tddEnforce = detectTestSetup(worktreeDir);
@@ -538,7 +576,8 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
     try {
       const guardPath = path.join(__dirname, '..', 'lib', 'hooks', 'session-guard.js');
       // init is idempotent: reuses existing session if one exists for this ticket
-      execFileSync(process.execPath, [guardPath, 'init', ticket, '/work'], { stdio: 'pipe', timeout: 5000 });
+      // Use safeBase (not raw ticket or safeName) so init/finish use the same ID
+      execFileSync(process.execPath, [guardPath, 'init', safeBase, '/work'], { stdio: 'pipe', timeout: 5000 });
     } catch { /* fail-open: session-guard init failure must not block plan generation */ }
   }
 
@@ -798,14 +837,19 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg) {
     agentPrompt: [
       `Run these commands in sequence:`,
       `1. node "${path.join(__dirname, 'work-state.js')}" complete ${safeName}`,
-      `2. node "${guardPath}" finish ${safeName}`,
+      `2. node "${guardPath}" finish ${safeBase}`,
       ``,
       `Step 1 marks the workflow as complete (exits 0 on success).`,
       `Step 2 is an atomic teardown: reveals the session passphrase (unlocking the Stop hook) and removes the session file. Exits 0 when no session exists (guard disabled or already cleaned up). Exits 1 only if called without a ticket ID (programming error).`,
     ].join('\n'),
   }); // complete — must run after all other steps
 
-  return { ticket: ticket || `TBD ("${description}")`, mode, plan };
+  const planResult = { ticket: ticket || `TBD ("${description}")`, mode, plan };
+  if (suffix) {
+    planResult.suffix = suffix;
+    planResult.fullTicket = planResult.ticket + '/' + suffix;
+  }
+  return planResult;
 }
 
 // ─── Check-to-PR Gate (GH-121) ──────────────────────────────────────────────
@@ -961,6 +1005,17 @@ function main() {
       let raw = rest.filter(a => a !== '--rework').join(' ').trim();
       if (!raw) { console.log(JSON.stringify({ error: true, message: 'Provide ticket ID or description' })); process.exit(1); }
 
+      // Parse suffix/phase syntax (e.g., "GH-145/phase1" -> ticketBase="GH-145", suffix="phase1")
+      let suffix = null;
+      try {
+        const parsed = parseTicketInput(raw);
+        raw = parsed.ticketBase;  // regex checks run against ticketBase only
+        suffix = parsed.suffix;
+      } catch (err) {
+        console.log(JSON.stringify({ error: true, message: err.message }));
+        process.exit(1);
+      }
+
       let providerConfig = tp.getProviderConfig({ skipPrompt: true });
       const isGitHub = providerConfig?.provider === 'github';
 
@@ -993,8 +1048,8 @@ function main() {
         providerConfig.owner = ghUrlMeta.owner;
         providerConfig.repo = ghUrlMeta.repo;
       }
-      const state = ticket ? inspect(ticket, providerConfig) : null;
-      const result = generatePlan(ticket, isTicket ? null : raw, state, rework, providerConfig);
+      const state = ticket ? inspect(ticket, providerConfig, suffix) : null;
+      const result = generatePlan(ticket, isTicket ? null : raw, state, rework, providerConfig, suffix);
 
       result.timestamp = new Date().toISOString();
       if (ghUrlMeta && providerConfig) {
@@ -1037,9 +1092,16 @@ function main() {
         process.exit(1);
       }
       const transProviderCfg = tp.getProviderConfig({ skipPrompt: true });
-      // Normalize: uppercase for Jira/Linear, then sanitize for GitHub path safety
-      const transTicket = transProviderCfg?.provider === 'github' ? rest[0] : rest[0].toUpperCase();
-      const safeTransTicket = tp.sanitizeTicketIdForPath(transTicket, transProviderCfg);
+      // Normalize: uppercase only ticketBase for Jira/Linear, preserve suffix case (GH-146)
+      let transParsed;
+      try {
+        transParsed = parseTicketInput(rest[0]);
+      } catch (e) {
+        console.log(JSON.stringify({ error: true, message: e.message }));
+        process.exit(1);
+      }
+      const transBase = transProviderCfg?.provider === 'github' ? transParsed.ticketBase : transParsed.ticketBase.toUpperCase();
+      const safeTransTicket = tp.sanitizeTicketIdForPath(transBase, transProviderCfg) + (transParsed.suffix ? '/' + transParsed.suffix : '');
       console.log(JSON.stringify(transitionStep(safeTransTicket, rest[1]), null, 2));
       break;
     }
@@ -1048,8 +1110,16 @@ function main() {
       requirePaths();
       if (!rest[0]) { console.log(JSON.stringify({ error: true, message: 'Usage: transitions <TICKET>' })); process.exit(1); }
       const transitionsProviderCfg = tp.getProviderConfig({ skipPrompt: true });
-      const transitionsTicket = transitionsProviderCfg?.provider === 'github' ? rest[0] : rest[0].toUpperCase();
-      const safeTransitionsTicket = tp.sanitizeTicketIdForPath(transitionsTicket, transitionsProviderCfg);
+      // Normalize: uppercase only ticketBase, preserve suffix case (GH-146)
+      let transParsed2;
+      try {
+        transParsed2 = parseTicketInput(rest[0]);
+      } catch (e) {
+        console.log(JSON.stringify({ error: true, message: e.message }));
+        process.exit(1);
+      }
+      const transBase2 = transitionsProviderCfg?.provider === 'github' ? transParsed2.ticketBase : transParsed2.ticketBase.toUpperCase();
+      const safeTransitionsTicket = tp.sanitizeTicketIdForPath(transBase2, transitionsProviderCfg) + (transParsed2.suffix ? '/' + transParsed2.suffix : '');
       console.log(JSON.stringify(getAvailableTransitions(safeTransitionsTicket), null, 2));
       break;
     }
@@ -1066,7 +1136,16 @@ function main() {
         process.exit(1);
       }
       const actionsProviderCfg = tp.getProviderConfig({ skipPrompt: true });
-      const ticket = tp.sanitizeTicketIdForPath(actionsProviderCfg?.provider === 'github' ? rest[0] : rest[0].toUpperCase(), actionsProviderCfg);
+      // Normalize: uppercase only ticketBase, preserve suffix case (GH-146)
+      let actionsParsed;
+      try {
+        actionsParsed = parseTicketInput(rest[0]);
+      } catch (e) {
+        console.log(JSON.stringify({ error: true, message: e.message }));
+        process.exit(1);
+      }
+      const actionsBase = actionsProviderCfg?.provider === 'github' ? actionsParsed.ticketBase : actionsParsed.ticketBase.toUpperCase();
+      const ticket = tp.sanitizeTicketIdForPath(actionsBase, actionsProviderCfg) + (actionsParsed.suffix ? '/' + actionsParsed.suffix : '');
       const raw = rest.includes('--raw');
       const actions = loadActions(ticket);
       if (raw) {
@@ -1085,7 +1164,16 @@ function main() {
         process.exit(1);
       }
       const tddProviderCfg = tp.getProviderConfig({ skipPrompt: true });
-      const ticket = tp.sanitizeTicketIdForPath(tddProviderCfg?.provider === 'github' ? rest[0] : rest[0].toUpperCase(), tddProviderCfg);
+      // Normalize: uppercase only ticketBase, preserve suffix case (GH-146)
+      let tddParsed;
+      try {
+        tddParsed = parseTicketInput(rest[0]);
+      } catch (e) {
+        console.error(JSON.stringify({ error: true, message: e.message }));
+        process.exit(1);
+      }
+      const tddBase = tddProviderCfg?.provider === 'github' ? tddParsed.ticketBase : tddParsed.ticketBase.toUpperCase();
+      const ticket = tp.sanitizeTicketIdForPath(tddBase, tddProviderCfg) + (tddParsed.suffix ? '/' + tddParsed.suffix : '');
       const stepId = rest[1];
       // Parse flags — missing values for --cmd/--files/--exception fall through
       // to recordTddEvidence() validation which returns clear error messages.
@@ -1115,6 +1203,9 @@ function main() {
   }
 }
 
+// Export for testing; run main() only when executed directly
 if (require.main === module) {
   main();
 }
+
+module.exports = { parseTicketInput };

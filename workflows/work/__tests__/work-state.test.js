@@ -417,6 +417,68 @@ describe('work-state.js', () => {
     });
   });
 
+  // ─── Suffix-aware state tests (GH-146) ──────────────────────────────────────
+
+  describe('suffix-aware state (GH-146)', () => {
+    const TICKET_BASE = 'TEST-SUFFIX-STATE';
+    const TICKET_SUFFIXED = 'TEST-SUFFIX-STATE/phase1';
+
+    after(() => {
+      cleanupTempWorkState(TICKET_BASE);
+    });
+
+    it('should create state in nested directory for suffixed ticket', async () => {
+      const { result, code } = await runWorkState(['init', TICKET_SUFFIXED, 'Phase 1 work']);
+      assert.equal(code, 0);
+      assert.ok(result, 'init should return a result');
+      assert.equal(result.ticketId, TICKET_SUFFIXED);
+
+      // Verify file was created in the nested path
+      const statePath = path.join(TEMP_TASKS_BASE, TICKET_BASE, 'phase1', '.work-state.json');
+      assert.ok(fs.existsSync(statePath), `State file should exist at ${statePath}`);
+    });
+
+    it('should not interfere with flat ticket state', async () => {
+      // Init flat ticket
+      await runWorkState(['init', TICKET_BASE, 'Flat ticket work']);
+
+      // Verify flat state
+      const flatPath = path.join(TEMP_TASKS_BASE, TICKET_BASE, '.work-state.json');
+      assert.ok(fs.existsSync(flatPath), 'Flat state file should exist');
+
+      // Verify suffixed state still exists
+      const suffixedPath = path.join(TEMP_TASKS_BASE, TICKET_BASE, 'phase1', '.work-state.json');
+      assert.ok(fs.existsSync(suffixedPath), 'Suffixed state file should still exist');
+
+      // Verify they have different ticketIds
+      const flatState = JSON.parse(fs.readFileSync(flatPath, 'utf-8'));
+      const suffixedState = JSON.parse(fs.readFileSync(suffixedPath, 'utf-8'));
+      assert.equal(flatState.ticketId, TICKET_BASE);
+      assert.equal(suffixedState.ticketId, TICKET_SUFFIXED);
+    });
+
+    it('should load state correctly for suffixed ticket', async () => {
+      const { result, code } = await runWorkState(['get', TICKET_SUFFIXED]);
+      assert.equal(code, 0);
+      assert.ok(result, 'get should return state');
+      assert.equal(result.ticketId, TICKET_SUFFIXED);
+    });
+
+    it('should support multiple suffixes under same base ticket', async () => {
+      const TICKET_PHASE2 = 'TEST-SUFFIX-STATE/phase2';
+
+      const { result, code } = await runWorkState(['init', TICKET_PHASE2, 'Phase 2 work']);
+      assert.equal(code, 0);
+      assert.equal(result.ticketId, TICKET_PHASE2);
+
+      // Both phases should have separate state files
+      const phase1Path = path.join(TEMP_TASKS_BASE, TICKET_BASE, 'phase1', '.work-state.json');
+      const phase2Path = path.join(TEMP_TASKS_BASE, TICKET_BASE, 'phase2', '.work-state.json');
+      assert.ok(fs.existsSync(phase1Path), 'Phase 1 state should exist');
+      assert.ok(fs.existsSync(phase2Path), 'Phase 2 state should exist');
+    });
+  });
+
   describe('complete-subtask', () => {
     const TICKET = 'TEST-SUBTASK-COMPLETE';
     after(() => { cleanupTempWorkState(TICKET); });
