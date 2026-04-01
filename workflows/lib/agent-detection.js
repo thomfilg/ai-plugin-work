@@ -201,8 +201,11 @@ function isSubagentFromInitialPrompt(transcriptPath, agentAliases) {
               : '';
 
           for (const alias of agentAliases) {
-            // Match "subagent_type": "code-checker" or similar patterns
-            if (text.toLowerCase().includes(normalizeAgentName(alias))) {
+            // Match agent name with word boundaries to avoid false positives
+            // from incidental substring matches (e.g. "qa" matching "quality")
+            const normalized = normalizeAgentName(alias);
+            const boundary = new RegExp(`(?:^|[\\s"':,])${normalized.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:$|[\\s"':,])`, 'i');
+            if (boundary.test(text)) {
               return true;
             }
           }
