@@ -21,7 +21,7 @@ Run QA testing for a specific application by launching the `qa-feature-tester` a
 
 ## Context Loss Protection
 
-This command uses `${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js` to track progress incrementally.
+This command uses `${CLAUDE_PLUGIN_ROOT}/workflows/check/hooks/qa-progress.js` to track progress incrementally.
 If interrupted, QA can resume from where it left off.
 
 **Progress file:** `$HOME/worktrees/tasks/{TICKET_ID}/.qa-progress-{APP_NAME}.json`
@@ -285,7 +285,7 @@ This creates a checkpoint file that enables resume on context loss.
 
 ```bash
 # Initialize QA progress tracking
-node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js init "${TICKET_ID}" "${APP_NAME}" "${APP_URL}"
+node ${CLAUDE_PLUGIN_ROOT}/workflows/check/hooks/qa-progress.js init "${TICKET_ID}" "${APP_NAME}" "${APP_URL}"
 
 echo "✅ QA progress tracking initialized"
 echo "   Progress file: $HOME/worktrees/tasks/${TICKET_ID}/.qa-progress-${APP_NAME}.json"
@@ -294,7 +294,7 @@ echo "   Progress file: $HOME/worktrees/tasks/${TICKET_ID}/.qa-progress-${APP_NA
 **Check for existing progress (resume detection):**
 ```bash
 # Check if we can resume from previous run
-RESUME_INFO=$(node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js resume-info "${TICKET_ID}" "${APP_NAME}")
+RESUME_INFO=$(node ${CLAUDE_PLUGIN_ROOT}/workflows/check/hooks/qa-progress.js resume-info "${TICKET_ID}" "${APP_NAME}")
 CAN_RESUME=$(echo "$RESUME_INFO" | jq -r '.canResume')
 COMPLETED_TESTS=$(echo "$RESUME_INFO" | jq -r '.completedTests | length')
 
@@ -351,13 +351,13 @@ Do NOT attempt to start a server yourself.
 - SCREENSHOTS_FOLDER: ${SCREENSHOTS_FOLDER}
 
 ## Progress Tracking (CRITICAL - enables resume on context loss)
-- PROGRESS_SCRIPT: ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js
+- PROGRESS_SCRIPT: ${CLAUDE_PLUGIN_ROOT}/workflows/check/hooks/qa-progress.js
 - Use these commands to track progress:
-  - Start test: node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js start-test ${TICKET_ID} ${APP_NAME} 'test_name'
-  - Complete test: node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js complete-test ${TICKET_ID} ${APP_NAME} 'test_name' pass 'screenshot.png'
-  - Fail test: node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js fail-test ${TICKET_ID} ${APP_NAME} 'test_name' 'error message'
-  - Playwright status: node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js set-playwright ${TICKET_ID} ${APP_NAME} true/false
-  - Infrastructure failure: node ${CLAUDE_PLUGIN_ROOT}/hooks/qa-progress.js infrastructure-failure ${TICKET_ID} ${APP_NAME} 'error'
+  - Start test: node ${CLAUDE_PLUGIN_ROOT}/workflows/check/hooks/qa-progress.js start-test ${TICKET_ID} ${APP_NAME} 'test_name'
+  - Complete test: node ${CLAUDE_PLUGIN_ROOT}/workflows/check/hooks/qa-progress.js complete-test ${TICKET_ID} ${APP_NAME} 'test_name' pass 'screenshot.png'
+  - Fail test: node ${CLAUDE_PLUGIN_ROOT}/workflows/check/hooks/qa-progress.js fail-test ${TICKET_ID} ${APP_NAME} 'test_name' 'error message'
+  - Playwright status: node ${CLAUDE_PLUGIN_ROOT}/workflows/check/hooks/qa-progress.js set-playwright ${TICKET_ID} ${APP_NAME} true/false
+  - Infrastructure failure: node ${CLAUDE_PLUGIN_ROOT}/workflows/check/hooks/qa-progress.js infrastructure-failure ${TICKET_ID} ${APP_NAME} 'error'
 
 ## Resume Info (skip already-completed tests)
 ${JSON.stringify(resumeInfo || { completedTests: [] })}
@@ -419,7 +419,7 @@ ${E2E_DOCS}
 
 ## Enforcement
 
-Reports are validated by SubagentStop hook: `${CLAUDE_PLUGIN_ROOT}/hooks/validate-qa-report.js`
+Reports are validated by SubagentStop hook: `${CLAUDE_PLUGIN_ROOT}/workflows/check/agents/qa-feature-tester/validate-qa-report.js`
 
 **Blocked if:**
 - Missing report file

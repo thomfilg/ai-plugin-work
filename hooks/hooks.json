@@ -19,7 +19,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/hooks/enforce-step-workflow.js"
+            "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/enforce-step-workflow.js"
           }
         ]
       },
@@ -28,11 +28,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/resolve-plugin-root-hook.js"
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/resolve-plugin-root-hook.js"
           },
           {
             "type": "command",
-            "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/hooks/enforce-step-workflow.js"
+            "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/enforce-step-workflow.js"
           }
         ]
       },
@@ -41,7 +41,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/hooks/enforce-step-workflow.js"
+            "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/enforce-step-workflow.js"
           }
         ]
       },
@@ -50,19 +50,19 @@
         "hooks": [
           {
             "type": "command",
-            "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/hooks/enforce-step-workflow.js"
+            "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/enforce-step-workflow.js"
           },
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/enforce-work-command.js"
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/work/hooks/enforce-work-command.js"
           },
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/work-implement-enforce.js"
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/work-implement/hooks/work-implement-enforce.js"
           },
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/work-require-implement.js"
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/work/hooks/work-require-implement.js"
           }
         ]
       },
@@ -71,11 +71,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/hooks/enforce-env-start-failure.js"
+            "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/workflows/check/hooks/enforce-env-start-failure.js"
           },
           {
             "type": "command",
-            "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/hooks/enforce-screenshot-requirement.js"
+            "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/enforce-screenshot-requirement.js"
           }
         ]
       },
@@ -84,7 +84,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/hooks/work-enforce-steps.js"
+            "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/workflows/work/hooks/work-enforce-steps.js"
           }
         ]
       },
@@ -93,7 +93,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/commit-writer/commit-writer-preflight.js"
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/work/agents/commit-writer/commit-writer-preflight.js"
           }
         ]
       }
@@ -104,7 +104,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "CLAUDE_HOOK_TYPE=PostToolUse node ${CLAUDE_PLUGIN_ROOT}/hooks/enforce-step-workflow.js"
+            "command": "CLAUDE_HOOK_TYPE=PostToolUse node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/enforce-step-workflow.js"
           }
         ]
       },
@@ -113,7 +113,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "CLAUDE_HOOK_TYPE=PostToolUse node ${CLAUDE_PLUGIN_ROOT}/hooks/enforce-step-workflow.js"
+            "command": "CLAUDE_HOOK_TYPE=PostToolUse node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/enforce-step-workflow.js"
           }
         ]
       },
@@ -122,7 +122,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "CLAUDE_HOOK_TYPE=PostToolUse node ${CLAUDE_PLUGIN_ROOT}/hooks/work-enforce-steps.js"
+            "command": "CLAUDE_HOOK_TYPE=PostToolUse node ${CLAUDE_PLUGIN_ROOT}/workflows/work/hooks/work-enforce-steps.js"
           }
         ]
       },
@@ -131,11 +131,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "CLAUDE_HOOK_TYPE=PostToolUse node ${CLAUDE_PLUGIN_ROOT}/hooks/enforce-env-start-failure.js"
+            "command": "CLAUDE_HOOK_TYPE=PostToolUse node ${CLAUDE_PLUGIN_ROOT}/workflows/check/hooks/enforce-env-start-failure.js"
           },
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/enforce-coverage-fix.js"
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/work/hooks/enforce-coverage-fix.js"
           }
         ]
       },
@@ -144,7 +144,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "CLAUDE_HOOK_TYPE=PostToolUse node ${CLAUDE_PLUGIN_ROOT}/hooks/enforce-env-start-failure.js"
+            "command": "CLAUDE_HOOK_TYPE=PostToolUse node ${CLAUDE_PLUGIN_ROOT}/workflows/check/hooks/enforce-env-start-failure.js"
           }
         ]
       }
@@ -155,7 +155,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "CLAUDE_HOOK_TYPE=PreCompact node ${CLAUDE_PLUGIN_ROOT}/hooks/session-guard.js"
+            "command": "CLAUDE_HOOK_TYPE=PreCompact node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/session-guard.js"
           }
         ]
       }
@@ -166,12 +166,12 @@
         "hooks": [
           {
             "type": "command",
-            "command": "CLAUDE_HOOK_TYPE=Stop node ${CLAUDE_PLUGIN_ROOT}/hooks/session-guard.js",
+            "command": "CLAUDE_HOOK_TYPE=Stop node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/session-guard.js",
             "timeout": 10
           },
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/enforce-completion-protocol.js"
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/enforce-completion-protocol.js"
           }
         ]
       },
@@ -180,11 +180,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/work-code-review-status.js"
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/work/hooks/work-code-review-status.js"
           },
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/work-suggestion-replies.js"
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/work/hooks/work-suggestion-replies.js"
           }
         ]
       }

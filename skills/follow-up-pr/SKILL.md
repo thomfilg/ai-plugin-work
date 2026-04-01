@@ -45,7 +45,7 @@ FOLLOW_UP_PR_POLL_REVIEWS=true   # Set to false in .env to disable review pollin
 
 ## Step 1: Run the Monitor Script
 
-The `scripts/follow-up-pr.js` script handles all deterministic polling (CI checks, review fetching, bot review detection, state persistence). It loops internally, waiting 60s between attempts, so **YOU do not need to manage any loop or sleep**. The script exits only when there is something actionable or when all checks pass.
+The `workflows/work/scripts/follow-up-pr.js` script handles all deterministic polling (CI checks, review fetching, bot review detection, state persistence). It loops internally, waiting 60s between attempts, so **YOU do not need to manage any loop or sleep**. The script exits only when there is something actionable or when all checks pass.
 
 ```
 ╔══════════════════════════════════════════════════════════════════════╗
@@ -62,7 +62,7 @@ The `scripts/follow-up-pr.js` script handles all deterministic polling (CI check
 ```bash
 # Determine script path (plugin root or project root)
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
-SCRIPT_PATH="$PLUGIN_ROOT/scripts/follow-up-pr.js"
+SCRIPT_PATH="$PLUGIN_ROOT/workflows/work/scripts/follow-up-pr.js"
 
 # Build flags
 REVIEW_FLAG=""
@@ -546,7 +546,7 @@ If 10 attempts are reached without success:
 User: `/follow-up-pr`
 
 Claude will:
-1. Run `node scripts/follow-up-pr.js` → script waits for CI → exit 1 (CI failing: lint)
+1. Run `node workflows/work/scripts/follow-up-pr.js` → script waits for CI → exit 1 (CI failing: lint)
 2. Diagnose: unused import in src/utils.ts
 3. Fix: remove the unused import
 4. Commit and push
