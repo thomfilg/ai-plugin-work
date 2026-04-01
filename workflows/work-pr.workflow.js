@@ -26,6 +26,28 @@ const getConfig = require(path.join(__dirname, '..', 'lib', 'get-config'));
 const WORKTREES_BASE = getConfig.require('WORKTREES_BASE');
 const TASKS_BASE = getConfig('TASKS_BASE') || path.join(WORKTREES_BASE, 'tasks');
 
+// ─── Ticket Input Parsing (GH-146) ──────────────────────────────────────────
+
+// Parses "JUL-1397-bugfix" → { ticketBase: "JUL-1397", suffix: "bugfix", separator: "-" }
+// Parses "GH-145/phase1" → { ticketBase: "GH-145", suffix: "phase1", separator: "/" }
+// Plain ticket IDs return suffix: null.
+function parseTicketInput(raw) {
+  if (!raw || typeof raw !== 'string') return { ticketBase: raw, suffix: null };
+  if (raw.startsWith('http://') || raw.startsWith('https://')) return { ticketBase: raw, suffix: null };
+  const hyphenMatch = raw.match(/^([A-Z]+-\d+)-(.+)$/i);
+  if (hyphenMatch && /^[a-zA-Z0-9_-]+$/.test(hyphenMatch[2])) {
+    return { ticketBase: hyphenMatch[1], suffix: hyphenMatch[2], separator: '-' };
+  }
+  const slashIdx = raw.indexOf('/');
+  if (slashIdx === -1) return { ticketBase: raw, suffix: null };
+  const base = raw.substring(0, slashIdx);
+  const suf = raw.substring(slashIdx + 1);
+  if (/^[A-Z]+-\d+$/i.test(base) || /^#\d+$/.test(base)) {
+    if (suf && /^[a-zA-Z0-9_-]+$/.test(suf)) return { ticketBase: base, suffix: suf, separator: '/' };
+  }
+  return { ticketBase: raw, suffix: null };
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function getTasksDir(ticketId) {
@@ -89,8 +111,12 @@ module.exports = {
     if (/^\d+$/.test(ticketId)) {
       ticketId = `${process.env.TICKET_PROJECT_KEY || process.env.JIRA_PROJECT_KEY || 'PROJ'}-${ticketId}`;
     }
-    // Ensure uppercase
-    ticketId = ticketId.toUpperCase();
+
+    // Parse suffix and only uppercase the ticket base, preserve suffix case (GH-146)
+    const parsed = parseTicketInput(ticketId);
+    const base = parsed.ticketBase ? parsed.ticketBase.toUpperCase() : ticketId.toUpperCase();
+    const sep = parsed.separator || '/';
+    ticketId = parsed.suffix ? base + sep + parsed.suffix : base;
 
     return { instanceId: ticketId, ticketId, force };
   },

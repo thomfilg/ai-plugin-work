@@ -183,6 +183,21 @@ describe('work-pr.workflow.js', () => {
     it('throws on empty args', () => {
       assert.throws(() => wf.params(''), /Usage/);
     });
+
+    it('preserves suffix case for hyphenated ticket IDs (GH-146)', () => {
+      const p = wf.params('JUL-1397-bugfix');
+      assert.equal(p.ticketId, 'JUL-1397-bugfix');
+    });
+
+    it('uppercases only the base for hyphenated suffix', () => {
+      const p = wf.params('jul-1397-monitoring');
+      assert.equal(p.ticketId, 'JUL-1397-monitoring');
+    });
+
+    it('preserves suffix case for slash-separated ticket IDs', () => {
+      const p = wf.params('PROJ-99/phase1');
+      assert.equal(p.ticketId, 'PROJ-99/phase1');
+    });
   });
 
   // ─── detectStepState() ──────────────────────────────────────────────
