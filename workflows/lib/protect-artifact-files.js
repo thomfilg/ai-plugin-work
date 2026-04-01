@@ -16,7 +16,7 @@
  *       { pattern: /\.check\.md$/, step: 'check', agents: ['code-checker', 'qa-feature-tester'] },
  *     ],
  *     getStepInProgress: (ticketId) => currentStep,  // returns step name or null
- *     isRunningInAgent: (transcriptPath, agents) => boolean,
+ *     isRunningInAgent: (transcriptPath, agents, hookData) => boolean,
  *     getTicketId: () => string|null,  // returns current ticket ID
  *   });
  *
@@ -71,8 +71,9 @@ function matchesRule(basename, rule) {
  * @param {ArtifactRule[]} opts.artifacts — list of protected artifact rules
  * @param {(ticketId: string) => string|null} opts.getStepInProgress
  *   Returns the currently in_progress step name for the given ticket, or null.
- * @param {(transcriptPath: string, agents: string[]) => boolean} [opts.isRunningInAgent]
+ * @param {(transcriptPath: string, agents: string[], hookData?: object) => boolean} [opts.isRunningInAgent]
  *   Returns true if the current context is inside one of the specified agents.
+ *   Receives hookData as third arg for hookData-based agent detection.
  *   Only needed if any artifact rule has `agents`. Defaults to () => true (fail-open).
  * @param {(hookData: object) => string|null} [opts.getTicketId]
  *   Extracts ticket ID from hook data or environment. If omitted, checks are skipped.
