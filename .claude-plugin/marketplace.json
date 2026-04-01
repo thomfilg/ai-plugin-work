@@ -1,0 +1,26 @@
+{
+  "name": "work-workflow",
+  "owner": {
+    "name": "Custom",
+    "email": "custom@local"
+  },
+  "metadata": {
+    "description": "Deterministic workflow orchestrator for Jira task implementation with state machine validation.",
+    "version": "2.7.25"
+  },
+  "plugins": [
+    {
+      "name": "work-workflow",
+      "source": "./",
+      "description": "Orchestrated /work command with pre-computed action plans",
+      "category": "workflow",
+      "tags": [
+        "workflow",
+        "jira",
+        "orchestrator",
+        "state-machine",
+        "automation"
+      ]
+    }
+  ]
+}

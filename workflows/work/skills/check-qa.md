@@ -1,0 +1,1 @@
+../../skills/check-qa/SKILL.md

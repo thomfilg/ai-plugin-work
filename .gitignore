@@ -1,0 +1,6 @@
+# Override global .claude* exclusion for this plugin repo
+!.claude-plugin/
+
+# Environment config (user-specific)
+.env
+.envrc

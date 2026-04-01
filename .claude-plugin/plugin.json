@@ -1,0 +1,22 @@
+{
+  "name": "work-workflow",
+  "version": "2.7.25",
+  "description": "Self-contained workflow plugin with agents, hooks, skills, and orchestration. Includes 18 specialized agents, agent-specific hooks, and 25 skills.",
+  "author": {
+    "name": "Custom",
+    "email": "custom@local"
+  },
+  "keywords": [
+    "workflow",
+    "jira",
+    "orchestrator",
+    "state-machine",
+    "automation",
+    "agents",
+    "hooks",
+    "skills",
+    "qa-testing",
+    "code-review",
+    "pr-management"
+  ]
+}
