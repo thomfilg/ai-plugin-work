@@ -26,6 +26,8 @@ const getConfig = require(path.join(__dirname, '..', 'lib', 'get-config'));
 const WORKTREES_BASE = getConfig.require('WORKTREES_BASE');
 const TASKS_BASE = getConfig('TASKS_BASE') || path.join(WORKTREES_BASE, 'tasks');
 
+const { normalizeTicketId } = require(path.join(__dirname, '..', 'lib', 'ticket-provider'));
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function getTasksDir(ticketId) {
@@ -89,8 +91,8 @@ module.exports = {
     if (/^\d+$/.test(ticketId)) {
       ticketId = `${process.env.TICKET_PROJECT_KEY || process.env.JIRA_PROJECT_KEY || 'PROJ'}-${ticketId}`;
     }
-    // Ensure uppercase
-    ticketId = ticketId.toUpperCase();
+    // Uppercase only the ticket base, preserve suffix case (GH-146)
+    ticketId = normalizeTicketId(ticketId);
 
     return { instanceId: ticketId, ticketId, force };
   },

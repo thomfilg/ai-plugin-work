@@ -122,6 +122,50 @@ function sanitizeTicketIdForPath(ticketId, providerConfig) {
   return ticketId;
 }
 
+/**
+ * Parse ticket input with optional suffix/phase syntax.
+ * "JUL-1397-bugfix" → { ticketBase: "JUL-1397", suffix: "bugfix", separator: "-" }
+ * "GH-145/phase1"  → { ticketBase: "GH-145",   suffix: "phase1", separator: "/" }
+ * Plain IDs return suffix: null.
+ */
+function parseTicketInput(raw) {
+  if (!raw || typeof raw !== 'string') return { ticketBase: raw, suffix: null };
+  if (raw.startsWith('http://') || raw.startsWith('https://')) return { ticketBase: raw, suffix: null };
+  // Hyphenated suffix: PROJ-123-suffix
+  const hyphenMatch = raw.match(/^([A-Z]+-\d+)-(.+)$/i);
+  if (hyphenMatch) {
+    const suffix = hyphenMatch[2];
+    if (!suffix || !/^[a-zA-Z0-9_-]+$/.test(suffix)) {
+      throw new Error(`invalid suffix "${suffix}". Must match /^[a-zA-Z0-9_-]+$/ (alphanumeric, hyphens, underscores only, no nested paths).`);
+    }
+    return { ticketBase: hyphenMatch[1], suffix, separator: '-' };
+  }
+  // Slash suffix: PROJ-123/phase1
+  const slashIdx = raw.indexOf('/');
+  if (slashIdx === -1) return { ticketBase: raw, suffix: null };
+  const ticketBase = raw.substring(0, slashIdx);
+  const suffix = raw.substring(slashIdx + 1);
+  const looksLikeTicket = /^[A-Z]+-\d+$/i.test(ticketBase) || /^#\d+$/.test(ticketBase);
+  if (!looksLikeTicket) return { ticketBase: raw, suffix: null };
+  if (!suffix || !/^[a-zA-Z0-9_-]+$/.test(suffix)) {
+    throw new Error(`invalid suffix "${suffix}". Must match /^[a-zA-Z0-9_-]+$/ (alphanumeric, hyphens, underscores only, no nested paths).`);
+  }
+  return { ticketBase, suffix, separator: '/' };
+}
+
+/**
+ * Normalize a ticket ID: uppercase only the base, preserve suffix case.
+ * "jul-1397-bugfix" → "JUL-1397-bugfix"
+ * "proj-123/phase1" → "PROJ-123/phase1"
+ * "PROJ-123"        → "PROJ-123"
+ */
+function normalizeTicketId(raw) {
+  const parsed = parseTicketInput(raw);
+  const base = parsed.ticketBase ? String(parsed.ticketBase).toUpperCase() : String(raw).toUpperCase();
+  if (!parsed.suffix) return base;
+  return base + parsed.separator + parsed.suffix;
+}
+
 function ticketUrl(ticketId, providerConfig) {
   if (!providerConfig || !ticketId) return null;
   const num = String(ticketId).replace(/^#|^GH-/i, '');
@@ -222,6 +266,6 @@ module.exports = {
   ticketUrl, prefixTicketId, getTicketPattern,
   getFetchTicketPrompt, getTransitionPrompt, getCreateTicketPrompt,
   getAllowedMcpTools, getCreateTicketAgentType,
-  parseGitHubUrl, sanitizeTicketIdForPath,
+  parseGitHubUrl, sanitizeTicketIdForPath, parseTicketInput, normalizeTicketId,
   VALID_PROVIDERS, PROVIDERS_FILE,
 };
