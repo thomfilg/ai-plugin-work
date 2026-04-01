@@ -9,11 +9,11 @@
 
 const { execSync } = require('child_process');
 const path = require('path');
-const { appendAction } = require(path.join(__dirname, '..', 'lib', 'work-actions'));
+const { appendAction } = require(path.join(__dirname, '..', 'workflows', 'work', 'work-actions'));
 
 // Use CLAUDE_PLUGIN_ROOT if available, otherwise fallback to __dirname
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.dirname(__dirname);
-const ORCHESTRATOR_PATH = path.join(PLUGIN_ROOT, 'hooks', 'work-orchestrator.js');
+const ORCHESTRATOR_PATH = path.join(PLUGIN_ROOT, 'workflows', 'work', 'work.workflow.js');
 
 function main() {
   const userPrompt = process.env.CLAUDE_USER_PROMPT || '';
@@ -121,7 +121,7 @@ function formatPlan(plan) {
   lines.push('');
   lines.push('═══════════════════════════════════════════════════════════════════');
   lines.push('  INSTRUCTIONS: Execute RUN steps in order. DEFER steps: re-run plan first to resolve to RUN/SKIP.');
-  lines.push(`  TRANSITION: node ${PLUGIN_ROOT}/hooks/work-orchestrator.js transition ${plan.ticket} <step>`);
+  lines.push(`  TRANSITION: node ${PLUGIN_ROOT}/workflows/work/work.workflow.js transition ${plan.ticket} <step>`);
   lines.push('═══════════════════════════════════════════════════════════════════');
   lines.push('');
 

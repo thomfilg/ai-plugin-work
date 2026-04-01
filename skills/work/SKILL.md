@@ -61,7 +61,7 @@ they commit, verify, generate PRs, or package work that was already validated by
 **MANDATORY: Your first action must be running the orchestrator.**
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/hooks/work-orchestrator.js "$ARGUMENTS"
+node ${CLAUDE_PLUGIN_ROOT}/workflows/work/work.workflow.js "$ARGUMENTS"
 ```
 
 Parse the JSON output. This is your roadmap. Each RUN step includes `agentType` and `agentPrompt` — use these directly.
@@ -98,7 +98,7 @@ For each step where `action = "RUN"` or `action = "DEFER"`:
 
 **DEFER steps:** Before executing, re-run the orchestrator plan with the same flags used originally (e.g. include `--rework` if the workflow was started with it):
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/hooks/work-orchestrator.js <TICKET_ID> [--rework]
+node ${CLAUDE_PLUGIN_ROOT}/workflows/work/work.workflow.js <TICKET_ID> [--rework]
 ```
 Check the step's action in the **new** plan:
 - If now `RUN` → proceed with delegation using the **new plan's** agentType/agentPrompt
@@ -110,7 +110,7 @@ For each `RUN` step (or DEFER resolved to RUN):
 ### 2a. Validate the Transition First
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/hooks/work-orchestrator.js transition PROJ-XXX <target_step>
+node ${CLAUDE_PLUGIN_ROOT}/workflows/work/work.workflow.js transition PROJ-XXX <target_step>
 ```
 
 **If success:** Proceed with delegation.
@@ -187,7 +187,7 @@ If a step fails:
 1. Do NOT reason about the failure in your context — the agent's summary is sufficient
 2. Re-run the orchestrator for a fresh plan:
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/hooks/work-orchestrator.js PROJ-XXX
+node ${CLAUDE_PLUGIN_ROOT}/workflows/work/work.workflow.js PROJ-XXX
 ```
 3. Continue from the new plan
 

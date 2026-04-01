@@ -8,14 +8,15 @@
     "url": "https://github.com/user/claude-plugin-work"
   },
   "scripts": {
-    "test": "node --test hooks/__tests__/*.test.js lib/__tests__/*.test.js workflows/__tests__/*.test.js scripts/__tests__/*.test.js",
-    "test:enforce": "node --test hooks/__tests__/enforce-step-workflow.test.js",
-    "test:orchestrator": "node --test hooks/__tests__/work-orchestrator.test.js",
-    "test:work-pr": "node --test workflows/__tests__/work-pr.workflow.test.js",
-    "bump": "node scripts/bump-version.js",
-    "dev:lint": "./scripts/dev-check/dev-lint.sh",
-    "dev:typecheck": "./scripts/dev-check/dev-typecheck.sh",
-    "dev:test": "./scripts/dev-check/dev-test.sh",
-    "dev:check": "pnpm dev:lint && pnpm dev:typecheck && pnpm dev:test"
+    "test": "node --test workflows/lib/__tests__/*.test.js workflows/work/__tests__/*.test.js workflows/check/__tests__/*.test.js workflows/check/agents/pr-reviewer/__tests__/*.test.js workflows/work-pr/__tests__/*.test.js workflows/work-pr/agents/pr-generator/__tests__/*.test.js workflows/work-implement/__tests__/*.test.js workflows/lib/scripts/__tests__/*.test.js workflows/work/scripts/__tests__/*.test.js workflows/work/agents/commit-writer/*.spec.js",
+    "test:enforce": "node --test workflows/lib/__tests__/enforce-step-workflow.test.js",
+    "test:orchestrator": "node --test workflows/work/__tests__/work-orchestrator.test.js",
+    "test:work-pr": "node --test workflows/work-pr/__tests__/work-pr.workflow.test.js",
+    "bump": "node workflows/lib/scripts/bump-version.js",
+    "dev:lint": "./workflows/lib/scripts/dev-check/dev-lint.sh",
+    "dev:typecheck": "./workflows/lib/scripts/dev-check/dev-typecheck.sh",
+    "dev:test": "./workflows/lib/scripts/dev-check/dev-test.sh",
+    "dev:check": "pnpm dev:lint && pnpm dev:typecheck && pnpm dev:test",
+    "dev:test:main": "./workflows/lib/scripts/dev-check/dev-test.sh --main"
   }
 }

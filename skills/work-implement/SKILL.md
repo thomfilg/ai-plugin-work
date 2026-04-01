@@ -54,7 +54,7 @@ esac
 
 When `--subtask` is present:
 - Use `SUBTASK_PARENT` as the ticket ID (skip branch/worktree detection)
-- Initialize subtask state: `node ${CLAUDE_PLUGIN_ROOT}/hooks/work-state.js init-subtask <TICKET_ID> "<description>"`
+- Initialize subtask state: `node ${CLAUDE_PLUGIN_ROOT}/workflows/work/work-state.js init-subtask <TICKET_ID> "<description>"`
 - Skip `implement.md` creation (subtask state file replaces it)
 - The subtask state tracks only two steps: `implement`, `commit`
 
@@ -122,7 +122,7 @@ Before changing production code:
    `node <ORCHESTRATOR_PATH> record-tdd <TICKET_ID> 5_implement --cmd "<test command>" --red --green --files "<test files>"`
    `<ORCHESTRATOR_PATH>` and `<TICKET_ID>` are provided by the `/work` orchestrator in the
    delegated prompt context. When running `/work-implement` standalone (outside `/work`),
-   use the concrete path: `node ${CLAUDE_PLUGIN_ROOT}/hooks/work-orchestrator.js` and the
+   use the concrete path: `node ${CLAUDE_PLUGIN_ROOT}/workflows/work/work.workflow.js` and the
    ticket ID from the current branch (`git branch --show-current | grep -oE '[A-Z]+-[0-9]+'`).
 8. Record the RED and GREEN evidence in `implement.md`
 
@@ -205,7 +205,7 @@ Fix any issues before completing.
 **When in subtask mode (`--subtask` was set):**
 
 1. Commit changes using commit-writer agent (subtasks commit before returning, unlike normal mode)
-2. Mark subtask as completed: `node ${CLAUDE_PLUGIN_ROOT}/hooks/work-state.js complete-subtask <TICKET_ID> <N>`
+2. Mark subtask as completed: `node ${CLAUDE_PLUGIN_ROOT}/workflows/work/work-state.js complete-subtask <TICKET_ID> <N>`
    (where `<N>` is the subtask index from the init-subtask output)
 3. Report completion briefly and return control to the parent workflow
 

@@ -100,7 +100,7 @@ pnpm install
 
 ```bash
 cd "$WORKTREE_PATH"
-node "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap-publish.js" --commit "$WORKTREE_PATH" "$BRANCH_NAME" "$TICKET_ID"
+node "${CLAUDE_PLUGIN_ROOT}/workflows/work/scripts/bootstrap-publish.js" --commit "$WORKTREE_PATH" "$BRANCH_NAME" "$TICKET_ID"
 ```
 
 Skips entirely if `ENABLE_EMPTY_COMMIT` is not set.
@@ -109,7 +109,7 @@ Skips entirely if `ENABLE_EMPTY_COMMIT` is not set.
 
 ```bash
 cd "$WORKTREE_PATH"
-node "${CLAUDE_PLUGIN_ROOT}/scripts/bootstrap-publish.js" --pr "$WORKTREE_PATH" "$BRANCH_NAME" "$TICKET_ID"
+node "${CLAUDE_PLUGIN_ROOT}/workflows/work/scripts/bootstrap-publish.js" --pr "$WORKTREE_PATH" "$BRANCH_NAME" "$TICKET_ID"
 ```
 
 Skips if `ENABLE_EMPTY_COMMIT` or `ENABLE_DRAFT_PR` is not set (no commit means no PR).
