@@ -92,7 +92,7 @@ describe('pr-review-validator hook', () => {
         agent_output: 'Some output',
       });
 
-      expect(result.decision).toBe('approve');
+      assert.strictEqual(result.decision, 'approve');
     });
 
     it('should APPROVE pr-generator agent', async () => {
@@ -101,7 +101,7 @@ describe('pr-review-validator hook', () => {
         agent_output: 'PR description content',
       });
 
-      expect(result.decision).toBe('approve');
+      assert.strictEqual(result.decision, 'approve');
     });
 
     it('should validate pr-reviewer agent', async () => {
@@ -110,7 +110,7 @@ describe('pr-review-validator hook', () => {
         agent_output: createReview(),
       });
 
-      expect(result.decision).toBe('approve');
+      assert.strictEqual(result.decision, 'approve');
     });
 
     it('should validate via subagent_type field', async () => {
@@ -119,7 +119,7 @@ describe('pr-review-validator hook', () => {
         agent_output: createReview(),
       });
 
-      expect(result.decision).toBe('approve');
+      assert.strictEqual(result.decision, 'approve');
     });
   });
 
@@ -132,7 +132,7 @@ describe('pr-review-validator hook', () => {
         }),
       });
 
-      expect(result.decision).toBe('approve');
+      assert.strictEqual(result.decision, 'approve');
     });
 
     it('should APPROVE when critical issues and REQUEST_CHANGES', async () => {
@@ -145,7 +145,7 @@ describe('pr-review-validator hook', () => {
         }),
       });
 
-      expect(result.decision).toBe('approve');
+      assert.strictEqual(result.decision, 'approve');
     });
 
     it('should APPROVE when critical issues section is empty', async () => {
@@ -157,7 +157,7 @@ describe('pr-review-validator hook', () => {
         }),
       });
 
-      expect(result.decision).toBe('approve');
+      assert.strictEqual(result.decision, 'approve');
     });
 
     it('should APPROVE when critical issues section says N/A', async () => {
@@ -169,7 +169,7 @@ describe('pr-review-validator hook', () => {
         }),
       });
 
-      expect(result.decision).toBe('approve');
+      assert.strictEqual(result.decision, 'approve');
     });
 
     it('should APPROVE when critical issues section is just a dash', async () => {
@@ -181,7 +181,7 @@ describe('pr-review-validator hook', () => {
         }),
       });
 
-      expect(result.decision).toBe('approve');
+      assert.strictEqual(result.decision, 'approve');
     });
 
     it('should APPROVE NEEDS_CLARIFICATION with questions', async () => {
@@ -193,7 +193,7 @@ describe('pr-review-validator hook', () => {
         }),
       });
 
-      expect(result.decision).toBe('approve');
+      assert.strictEqual(result.decision, 'approve');
     });
   });
 
@@ -208,9 +208,9 @@ describe('pr-review-validator hook', () => {
         }),
       });
 
-      expect(result.decision).toBe('block');
-      expect(result.reason).toContain('Critical Issues');
-      expect(result.reason).toContain('APPROVE');
+      assert.strictEqual(result.decision, 'block');
+      assert.ok(result.reason.includes('Critical Issues'), 'expected to contain: Critical Issues');
+      assert.ok(result.reason.includes('APPROVE'), 'expected to contain: APPROVE');
     });
 
     it('should BLOCK when blocking issue mentioned inline with APPROVE', async () => {
@@ -229,7 +229,7 @@ Minor issues can be addressed later.`;
         agent_output: review,
       });
 
-      expect(result.decision).toBe('block');
+      assert.strictEqual(result.decision, 'block');
     });
 
     it('should BLOCK when critical bug mentioned with APPROVE', async () => {
@@ -248,7 +248,7 @@ Ship it!`;
         agent_output: review,
       });
 
-      expect(result.decision).toBe('block');
+      assert.strictEqual(result.decision, 'block');
     });
   });
 
@@ -259,7 +259,7 @@ Ship it!`;
         agent_output: 'Too short',
       });
 
-      expect(result.decision).toBe('approve');
+      assert.strictEqual(result.decision, 'approve');
     });
 
     it('should handle empty output', async () => {
@@ -268,7 +268,7 @@ Ship it!`;
         agent_output: '',
       });
 
-      expect(result.decision).toBe('approve');
+      assert.strictEqual(result.decision, 'approve');
     });
 
     it('should handle missing output field', async () => {
@@ -276,7 +276,7 @@ Ship it!`;
         agent_name: 'pr-reviewer',
       });
 
-      expect(result.decision).toBe('approve');
+      assert.strictEqual(result.decision, 'approve');
     });
 
     it('should handle array-style content (Claude API format)', async () => {
@@ -288,7 +288,7 @@ Ship it!`;
         ],
       });
 
-      expect(result.decision).toBe('approve');
+      assert.strictEqual(result.decision, 'approve');
     });
 
     it('should handle response field instead of agent_output', async () => {
@@ -297,7 +297,7 @@ Ship it!`;
         response: createReview(),
       });
 
-      expect(result.decision).toBe('approve');
+      assert.strictEqual(result.decision, 'approve');
     });
 
     it('should handle result field instead of agent_output', async () => {
@@ -306,7 +306,7 @@ Ship it!`;
         result: createReview(),
       });
 
-      expect(result.decision).toBe('approve');
+      assert.strictEqual(result.decision, 'approve');
     });
   });
 
@@ -325,7 +325,7 @@ Final Recommendation: APPROVE`;
         agent_output: review,
       });
 
-      expect(result.decision).toBe('block');
+      assert.strictEqual(result.decision, 'block');
     });
 
     it('should detect REQUEST_CHANGES with underscore', async () => {
@@ -337,7 +337,7 @@ Final Recommendation: APPROVE`;
         }),
       });
 
-      expect(result.decision).toBe('approve');
+      assert.strictEqual(result.decision, 'approve');
     });
 
     it('should detect REQUEST CHANGES with space', async () => {
@@ -349,7 +349,7 @@ Final Recommendation: APPROVE`;
         }),
       });
 
-      expect(result.decision).toBe('approve');
+      assert.strictEqual(result.decision, 'approve');
     });
   });
 
@@ -370,7 +370,7 @@ Final Recommendation: APPROVE`;
         proc.stdin.end();
       });
 
-      expect(code).not.toBe(2);
+      assert.notStrictEqual(code, 2);
     });
 
     it('should BLOCK inconsistent reviews even when agent_name is missing', async () => {
@@ -382,7 +382,7 @@ Final Recommendation: APPROVE`;
       });
 
       // Hook validates content regardless of agent_name
-      expect(result.decision).toBe('block');
+      assert.strictEqual(result.decision, 'block');
     });
   });
 });

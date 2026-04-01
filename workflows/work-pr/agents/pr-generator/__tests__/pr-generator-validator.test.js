@@ -86,7 +86,7 @@ describe('pr-generator-validator hook', () => {
         agent_output: 'Some output',
       });
 
-      expect(result.decision).toBe('approve');
+      assert.strictEqual(result.decision, 'approve');
     });
 
     it('should APPROVE pr-post-generator agent', async () => {
@@ -95,7 +95,7 @@ describe('pr-generator-validator hook', () => {
         agent_output: 'Some output',
       });
 
-      expect(result.decision).toBe('approve');
+      assert.strictEqual(result.decision, 'approve');
     });
 
     it('should validate pr-generator agent', async () => {
@@ -104,7 +104,7 @@ describe('pr-generator-validator hook', () => {
         agent_output: createValidPR(),
       });
 
-      expect(result.decision).toBe('approve');
+      assert.strictEqual(result.decision, 'approve');
     });
 
     it('should validate via subagent_type field', async () => {
@@ -113,7 +113,7 @@ describe('pr-generator-validator hook', () => {
         agent_output: createValidPR(),
       });
 
-      expect(result.decision).toBe('approve');
+      assert.strictEqual(result.decision, 'approve');
     });
   });
 
@@ -124,8 +124,8 @@ describe('pr-generator-validator hook', () => {
         agent_output: 'Too short',
       });
 
-      expect(result.decision).toBe('block');
-      expect(result.reason).toContain('OUTPUT TOO SHORT');
+      assert.strictEqual(result.decision, 'block');
+      assert.ok(result.reason.includes('OUTPUT TOO SHORT'), 'expected to contain: OUTPUT TOO SHORT');
     });
 
     it('should BLOCK when output is empty', async () => {
@@ -134,7 +134,7 @@ describe('pr-generator-validator hook', () => {
         agent_output: '',
       });
 
-      expect(result.decision).toBe('block');
+      assert.strictEqual(result.decision, 'block');
     });
 
     it('should BLOCK when output is missing', async () => {
@@ -142,7 +142,7 @@ describe('pr-generator-validator hook', () => {
         agent_name: 'pr-generator',
       });
 
-      expect(result.decision).toBe('block');
+      assert.strictEqual(result.decision, 'block');
     });
   });
 
@@ -153,7 +153,7 @@ describe('pr-generator-validator hook', () => {
         agent_output: createValidPR(),
       });
 
-      expect(result.decision).toBe('approve');
+      assert.strictEqual(result.decision, 'approve');
     });
 
     it('should BLOCK when Existing Behavior missing', async () => {
@@ -163,8 +163,8 @@ describe('pr-generator-validator hook', () => {
         agent_output: pr,
       });
 
-      expect(result.decision).toBe('block');
-      expect(result.reason).toContain('Missing section: "Existing Behavior"');
+      assert.strictEqual(result.decision, 'block');
+      assert.ok(result.reason.includes('Missing section: "Existing Behavior"'), 'expected to contain: Missing section: "Existing Behavior"');
     });
 
     it('should BLOCK when Intended New Behavior missing', async () => {
@@ -174,8 +174,8 @@ describe('pr-generator-validator hook', () => {
         agent_output: pr,
       });
 
-      expect(result.decision).toBe('block');
-      expect(result.reason).toContain('Missing section: "Intended New Behavior"');
+      assert.strictEqual(result.decision, 'block');
+      assert.ok(result.reason.includes('Missing section: "Intended New Behavior"'), 'expected to contain: Missing section: "Intended New Behavior"');
     });
 
     it('should BLOCK when Dev Checks missing', async () => {
@@ -185,8 +185,8 @@ describe('pr-generator-validator hook', () => {
         agent_output: pr,
       });
 
-      expect(result.decision).toBe('block');
-      expect(result.reason).toContain('Missing section: "Dev Checks"');
+      assert.strictEqual(result.decision, 'block');
+      assert.ok(result.reason.includes('Missing section: "Dev Checks"'), 'expected to contain: Missing section: "Dev Checks"');
     });
 
     it('should BLOCK when Testing Plan missing', async () => {
@@ -196,8 +196,8 @@ describe('pr-generator-validator hook', () => {
         agent_output: pr,
       });
 
-      expect(result.decision).toBe('block');
-      expect(result.reason).toContain('Missing section: "Testing Plan"');
+      assert.strictEqual(result.decision, 'block');
+      assert.ok(result.reason.includes('Missing section: "Testing Plan"'), 'expected to contain: Missing section: "Testing Plan"');
     });
 
     it('should APPROVE with # instead of ## for sections', async () => {
@@ -207,7 +207,7 @@ describe('pr-generator-validator hook', () => {
         agent_output: pr,
       });
 
-      expect(result.decision).toBe('approve');
+      assert.strictEqual(result.decision, 'approve');
     });
 
     it('should APPROVE with varied spacing in section headers', async () => {
@@ -219,7 +219,7 @@ describe('pr-generator-validator hook', () => {
         agent_output: pr,
       });
 
-      expect(result.decision).toBe('approve');
+      assert.strictEqual(result.decision, 'approve');
     });
   });
 
@@ -233,8 +233,8 @@ describe('pr-generator-validator hook', () => {
         agent_output: pr,
       });
 
-      expect(result.decision).toBe('block');
-      expect(result.reason).toContain('Placeholder text');
+      assert.strictEqual(result.decision, 'block');
+      assert.ok(result.reason.includes('Placeholder text'), 'expected to contain: Placeholder text');
     });
 
     it('should BLOCK placeholder text TBD]', async () => {
@@ -246,8 +246,8 @@ describe('pr-generator-validator hook', () => {
         agent_output: pr,
       });
 
-      expect(result.decision).toBe('block');
-      expect(result.reason).toContain('Placeholder text');
+      assert.strictEqual(result.decision, 'block');
+      assert.ok(result.reason.includes('Placeholder text'), 'expected to contain: Placeholder text');
     });
 
     it('should BLOCK placeholder text [PLACEHOLDER]', async () => {
@@ -259,8 +259,8 @@ describe('pr-generator-validator hook', () => {
         agent_output: pr,
       });
 
-      expect(result.decision).toBe('block');
-      expect(result.reason).toContain('Placeholder text');
+      assert.strictEqual(result.decision, 'block');
+      assert.ok(result.reason.includes('Placeholder text'), 'expected to contain: Placeholder text');
     });
 
     it('should BLOCK TODO: markers', async () => {
@@ -272,8 +272,8 @@ describe('pr-generator-validator hook', () => {
         agent_output: pr,
       });
 
-      expect(result.decision).toBe('block');
-      expect(result.reason).toContain('Placeholder text');
+      assert.strictEqual(result.decision, 'block');
+      assert.ok(result.reason.includes('Placeholder text'), 'expected to contain: Placeholder text');
     });
 
     it('should BLOCK [Your analysis here] markers', async () => {
@@ -285,8 +285,8 @@ describe('pr-generator-validator hook', () => {
         agent_output: pr,
       });
 
-      expect(result.decision).toBe('block');
-      expect(result.reason).toContain('Empty section markers');
+      assert.strictEqual(result.decision, 'block');
+      assert.ok(result.reason.includes('Empty section markers'), 'expected to contain: Empty section markers');
     });
   });
 
@@ -297,7 +297,7 @@ describe('pr-generator-validator hook', () => {
         agent_output: createValidPR(),
       });
 
-      expect(result.decision).toBe('approve');
+      assert.strictEqual(result.decision, 'approve');
     });
 
     it('should APPROVE [ ] checkboxes', async () => {
@@ -312,7 +312,7 @@ describe('pr-generator-validator hook', () => {
         agent_output: pr,
       });
 
-      expect(result.decision).toBe('approve');
+      assert.strictEqual(result.decision, 'approve');
     });
 
     it('should BLOCK [x] checkboxes (lowercase)', async () => {
@@ -327,8 +327,8 @@ describe('pr-generator-validator hook', () => {
         agent_output: pr,
       });
 
-      expect(result.decision).toBe('block');
-      expect(result.reason).toContain('Wrong checkbox format');
+      assert.strictEqual(result.decision, 'block');
+      assert.ok(result.reason.includes('Wrong checkbox format'), 'expected to contain: Wrong checkbox format');
     });
 
     it('should BLOCK [X] checkboxes (uppercase)', async () => {
@@ -343,8 +343,8 @@ describe('pr-generator-validator hook', () => {
         agent_output: pr,
       });
 
-      expect(result.decision).toBe('block');
-      expect(result.reason).toContain('Wrong checkbox format');
+      assert.strictEqual(result.decision, 'block');
+      assert.ok(result.reason.includes('Wrong checkbox format'), 'expected to contain: Wrong checkbox format');
     });
 
     it('should BLOCK mixed valid/invalid checkboxes', async () => {
@@ -359,8 +359,8 @@ describe('pr-generator-validator hook', () => {
         agent_output: pr,
       });
 
-      expect(result.decision).toBe('block');
-      expect(result.reason).toContain('invalid checkbox format');
+      assert.strictEqual(result.decision, 'block');
+      assert.ok(result.reason.includes('invalid checkbox format'), 'expected to contain: invalid checkbox format');
     });
   });
 
@@ -371,7 +371,7 @@ describe('pr-generator-validator hook', () => {
         agent_output: createValidPR(),
       });
 
-      expect(result.decision).toBe('approve');
+      assert.strictEqual(result.decision, 'approve');
     });
 
     it('should BLOCK empty Testing Plan', async () => {
@@ -383,8 +383,8 @@ describe('pr-generator-validator hook', () => {
         agent_output: pr,
       });
 
-      expect(result.decision).toBe('block');
-      expect(result.reason).toContain('Testing Plan section lacks substantive content');
+      assert.strictEqual(result.decision, 'block');
+      assert.ok(result.reason.includes('Testing Plan section lacks substantive content'), 'expected to contain: Testing Plan section lacks substantive content');
     });
 
     it('should BLOCK Testing Plan with only whitespace', async () => {
@@ -396,8 +396,8 @@ describe('pr-generator-validator hook', () => {
         agent_output: pr,
       });
 
-      expect(result.decision).toBe('block');
-      expect(result.reason).toContain('Testing Plan section lacks substantive content');
+      assert.strictEqual(result.decision, 'block');
+      assert.ok(result.reason.includes('Testing Plan section lacks substantive content'), 'expected to contain: Testing Plan section lacks substantive content');
     });
 
     it('should BLOCK Testing Plan with only list markers', async () => {
@@ -412,8 +412,8 @@ describe('pr-generator-validator hook', () => {
         agent_output: pr,
       });
 
-      expect(result.decision).toBe('block');
-      expect(result.reason).toContain('Testing Plan section lacks substantive content');
+      assert.strictEqual(result.decision, 'block');
+      assert.ok(result.reason.includes('Testing Plan section lacks substantive content'), 'expected to contain: Testing Plan section lacks substantive content');
     });
 
     it('should BLOCK Testing Plan with too little content', async () => {
@@ -425,8 +425,8 @@ describe('pr-generator-validator hook', () => {
         agent_output: pr,
       });
 
-      expect(result.decision).toBe('block');
-      expect(result.reason).toContain('Testing Plan section lacks substantive content');
+      assert.strictEqual(result.decision, 'block');
+      assert.ok(result.reason.includes('Testing Plan section lacks substantive content'), 'expected to contain: Testing Plan section lacks substantive content');
     });
 
     it('should APPROVE Testing Plan with 30+ chars of content', async () => {
@@ -438,7 +438,7 @@ describe('pr-generator-validator hook', () => {
         agent_output: pr,
       });
 
-      expect(result.decision).toBe('approve');
+      assert.strictEqual(result.decision, 'approve');
     });
   });
 
@@ -449,7 +449,7 @@ describe('pr-generator-validator hook', () => {
         agent_output: createValidPR(),
       });
 
-      expect(result.decision).toBe('approve');
+      assert.strictEqual(result.decision, 'approve');
     });
 
     it('should BLOCK PR with emojis in content', async () => {
@@ -461,8 +461,8 @@ describe('pr-generator-validator hook', () => {
         agent_output: pr,
       });
 
-      expect(result.decision).toBe('block');
-      expect(result.reason).toContain('emojis');
+      assert.strictEqual(result.decision, 'block');
+      assert.ok(result.reason.includes('emojis'), 'expected to contain: emojis');
     });
 
     it('should BLOCK PR with multiple emojis', async () => {
@@ -474,8 +474,8 @@ describe('pr-generator-validator hook', () => {
         agent_output: pr,
       });
 
-      expect(result.decision).toBe('block');
-      expect(result.reason).toContain('emojis');
+      assert.strictEqual(result.decision, 'block');
+      assert.ok(result.reason.includes('emojis'), 'expected to contain: emojis');
     });
 
     it('should BLOCK PR with warning emoji', async () => {
@@ -487,8 +487,8 @@ describe('pr-generator-validator hook', () => {
         agent_output: pr,
       });
 
-      expect(result.decision).toBe('block');
-      expect(result.reason).toContain('emojis');
+      assert.strictEqual(result.decision, 'block');
+      assert.ok(result.reason.includes('emojis'), 'expected to contain: emojis');
     });
   });
 
@@ -511,11 +511,11 @@ This is great 🎉
         agent_output: pr,
       });
 
-      expect(result.decision).toBe('block');
-      expect(result.reason).toContain('Empty section markers');
-      expect(result.reason).toContain('emojis');
-      expect(result.reason).toContain('Wrong checkbox format');
-      expect(result.reason).toContain('Testing Plan section lacks substantive content');
+      assert.strictEqual(result.decision, 'block');
+      assert.ok(result.reason.includes('Empty section markers'), 'expected to contain: Empty section markers');
+      assert.ok(result.reason.includes('emojis'), 'expected to contain: emojis');
+      assert.ok(result.reason.includes('Wrong checkbox format'), 'expected to contain: Wrong checkbox format');
+      assert.ok(result.reason.includes('Testing Plan section lacks substantive content'), 'expected to contain: Testing Plan section lacks substantive content');
     });
   });
 
@@ -536,8 +536,8 @@ This is great 🎉
         proc.stdin.end();
       });
 
-      expect(code).toBe(2);
-      expect(stderr).toContain('PR-GENERATOR VALIDATOR: Failed to parse hook input');
+      assert.strictEqual(code, 2);
+      assert.ok(stderr.includes('PR-GENERATOR VALIDATOR: Failed to parse hook input'), 'expected to contain: PR-GENERATOR VALIDATOR: Failed to parse hook input');
     });
 
     it('should APPROVE when agent_name is missing', async () => {
@@ -545,7 +545,7 @@ This is great 🎉
         agent_output: createValidPR(),
       });
 
-      expect(result.decision).toBe('approve');
+      assert.strictEqual(result.decision, 'approve');
     });
   });
 
@@ -574,7 +574,7 @@ After this change, Y happens.
         agent_output: pr,
       });
 
-      expect(result.decision).toBe('approve');
+      assert.strictEqual(result.decision, 'approve');
     });
 
     it('should handle sections with extra newlines', async () => {
@@ -584,7 +584,7 @@ After this change, Y happens.
         agent_output: pr,
       });
 
-      expect(result.decision).toBe('approve');
+      assert.strictEqual(result.decision, 'approve');
     });
   });
 });

