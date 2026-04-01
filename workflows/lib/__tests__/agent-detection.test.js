@@ -154,6 +154,41 @@ describe('isRunningInAgent — fallback', () => {
   });
 });
 
+// ─── Frontmatter detection ──────────────────────────────────────────────────
+
+describe('isRunningInAgent — frontmatter detection', () => {
+  const fs = require('fs');
+  const os = require('os');
+  const path = require('path');
+  const savedAgent = process.env.CLAUDE_CURRENT_AGENT;
+
+  beforeEach(() => { delete process.env.CLAUDE_CURRENT_AGENT; });
+  afterEach(() => {
+    if (savedAgent !== undefined) process.env.CLAUDE_CURRENT_AGENT = savedAgent;
+    else delete process.env.CLAUDE_CURRENT_AGENT;
+  });
+
+  it('matches prefixed frontmatter name against bare alias', () => {
+    const tmp = path.join(os.tmpdir(), `agent-detect-fm-${process.pid}.txt`);
+    fs.writeFileSync(tmp, 'name: work-workflow:quality-checker\n');
+    try {
+      assert.ok(isRunningInAgent(tmp, ['quality-checker']));
+    } finally {
+      fs.unlinkSync(tmp);
+    }
+  });
+
+  it('matches bare frontmatter name against bare alias', () => {
+    const tmp = path.join(os.tmpdir(), `agent-detect-fm2-${process.pid}.txt`);
+    fs.writeFileSync(tmp, 'name: quality-checker\n');
+    try {
+      assert.ok(isRunningInAgent(tmp, ['quality-checker']));
+    } finally {
+      fs.unlinkSync(tmp);
+    }
+  });
+});
+
 // ─── Debug logging ───────────────────────────────────────────────────────────
 
 describe('isRunningInAgent — debug logging', () => {

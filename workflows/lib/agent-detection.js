@@ -160,7 +160,8 @@ function isRunningInAgent(transcriptPath, agentAliases, hookData) {
     const content = fs.readFileSync(transcriptPath, 'utf8');
     for (const alias of agentAliases) {
       const normalized = normalizeAgentName(alias);
-      const frontmatterPattern = new RegExp(`^name:\\s*${normalized}\\s*$`, 'mi');
+      // Allow optional namespace prefix (e.g. "name: work-workflow:quality-checker")
+      const frontmatterPattern = new RegExp(`^name:\\s*(?:[\\w-]+:)?${normalized}\\s*$`, 'mi');
       if (frontmatterPattern.test(content)) {
         return true;
       }
