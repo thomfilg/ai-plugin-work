@@ -324,14 +324,14 @@ const WORKFLOWS = [
 
 // Step-gated artifact files — only writable during their owning step
 const ARTIFACT_RULES = [
-  { basename: 'brief.md',          step: STEPS.brief, agents: ['brief-writer', 'work-workflow:brief-writer'] },
-  { basename: 'spec.md',           step: STEPS.spec,  agents: ['spec-writer', 'work-workflow:spec-writer'] },
+  { basename: 'brief.md',          step: STEPS.brief, agents: ['brief-writer'] },
+  { basename: 'spec.md',           step: STEPS.spec,  agents: ['spec-writer'] },
   { basename: '.last-commit-sha',  step: STEPS.commit },
-  { basename: 'code-review.check.md',  step: STEPS.check, agents: ['code-checker', 'work-workflow:code-checker'] },
-  { basename: 'tests.check.md',        step: STEPS.check, agents: ['quality-checker', 'work-workflow:quality-checker'] },
-  { basename: 'completion.check.md',   step: STEPS.check, agents: ['completion-checker', 'work-workflow:completion-checker'] },
-  { pattern: /^qa-.*\.check\.md$/,     step: STEPS.check, agents: ['qa-feature-tester', 'work-workflow:qa-feature-tester', 'qa-api-tester', 'work-workflow:qa-api-tester'] },
-  { basename: 'code-review-reply.check.md', step: STEPS.check, agents: ['developer-nodejs-tdd', 'work-workflow:developer-nodejs-tdd', 'developer-react-senior', 'work-workflow:developer-react-senior', 'developer-devops', 'work-workflow:developer-devops'] },
+  { basename: 'code-review.check.md',  step: STEPS.check, agents: ['code-checker'] },
+  { basename: 'tests.check.md',        step: STEPS.check, agents: ['quality-checker'] },
+  { basename: 'completion.check.md',   step: STEPS.check, agents: ['completion-checker'] },
+  { pattern: /^qa-.*\.check\.md$/,     step: STEPS.check, agents: ['qa-feature-tester', 'qa-api-tester'] },
+  { basename: 'code-review-reply.check.md', step: STEPS.check, agents: ['developer-nodejs-tdd', 'developer-react-senior', 'developer-devops'] },
 ];
 
 // Protected state file basenames — block direct Edit/Write/MultiEdit/Bash writes

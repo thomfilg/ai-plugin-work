@@ -203,6 +203,20 @@ describe('createArtifactProtector', () => {
     assert.deepEqual(capturedAgents, ['spec-writer']);
   });
 
+  it('passes full hookData as third arg to isRunningInAgent', () => {
+    let capturedHookData = null;
+    const p = makeProtector({
+      currentStep: 'spec',
+      isRunningInAgent: (tp, agents, hd) => { capturedHookData = hd; return true; },
+    });
+    const hookData = {
+      transcript_path: '/tmp/transcript.json',
+      tool_input: { subagent_type: 'spec-writer' },
+    };
+    p.check('Write', { file_path: `/tasks/${TICKET}/spec.md` }, hookData);
+    assert.deepEqual(capturedHookData, hookData);
+  });
+
   // ── Step message includes current step ──
 
   it('includes current step in block message', () => {
