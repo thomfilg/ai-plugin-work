@@ -1271,3 +1271,90 @@ describe('work-orchestrator.js', () => {
     });
   });
 });
+
+// ─── parseTicketInput tests ──────────────────────────────────────────────────
+// parseTicketInput is exported from work.workflow.js for testing.
+const { parseTicketInput } = require(path.join(__dirname, '..', 'work.workflow.js'));
+
+describe('parseTicketInput', () => {
+  it('should parse GH-prefixed ticket with suffix', () => {
+    const result = parseTicketInput('GH-145/phase1');
+    assert.deepStrictEqual(result, { ticketBase: 'GH-145', suffix: 'phase1' });
+  });
+
+  it('should parse flat ticket ID (no suffix)', () => {
+    const result = parseTicketInput('GH-145');
+    assert.deepStrictEqual(result, { ticketBase: 'GH-145', suffix: null });
+  });
+
+  it('should parse Jira ticket with suffix', () => {
+    const result = parseTicketInput('PROJ-123/migration-step');
+    assert.deepStrictEqual(result, { ticketBase: 'PROJ-123', suffix: 'migration-step' });
+  });
+
+  it('should not parse URLs', () => {
+    const result = parseTicketInput('https://github.com/org/repo/issues/56');
+    assert.deepStrictEqual(result, { ticketBase: 'https://github.com/org/repo/issues/56', suffix: null });
+  });
+
+  it('should not parse http URLs', () => {
+    const result = parseTicketInput('http://example.com/path/to/resource');
+    assert.deepStrictEqual(result, { ticketBase: 'http://example.com/path/to/resource', suffix: null });
+  });
+
+  it('should not parse description inputs containing slashes', () => {
+    const result = parseTicketInput('add login/signup page');
+    assert.deepStrictEqual(result, { ticketBase: 'add login/signup page', suffix: null });
+  });
+
+  it('should not parse non-ticket patterns with slashes', () => {
+    const result = parseTicketInput('some-feature/phase1');
+    assert.deepStrictEqual(result, { ticketBase: 'some-feature/phase1', suffix: null });
+  });
+
+  it('should not parse bare numbers with slashes (avoids date/path confusion)', () => {
+    const result = parseTicketInput('123/phase1');
+    assert.deepStrictEqual(result, { ticketBase: '123/phase1', suffix: null });
+  });
+
+  it('should parse hash-prefixed GitHub issue with suffix', () => {
+    const result = parseTicketInput('#42/phase1');
+    assert.deepStrictEqual(result, { ticketBase: '#42', suffix: 'phase1' });
+  });
+
+  it('should reject path traversal in suffix', () => {
+    assert.throws(() => parseTicketInput('GH-145/../etc'), /invalid suffix/);
+  });
+
+  it('should reject invalid characters in suffix', () => {
+    assert.throws(() => parseTicketInput('GH-145/phase 1!@#'), /invalid suffix/);
+  });
+
+  it('should reject empty suffix after slash', () => {
+    assert.throws(() => parseTicketInput('GH-145/'), /invalid suffix/);
+  });
+
+  it('should support underscores and hyphens in suffix', () => {
+    const result = parseTicketInput('GH-145/step_2-alpha');
+    assert.deepStrictEqual(result, { ticketBase: 'GH-145', suffix: 'step_2-alpha' });
+  });
+
+  it('should reject nested suffixes', () => {
+    assert.throws(() => parseTicketInput('GH-145/phase1/subtask'), /invalid suffix/);
+  });
+
+  it('should handle null input', () => {
+    const result = parseTicketInput(null);
+    assert.deepStrictEqual(result, { ticketBase: null, suffix: null });
+  });
+
+  it('should handle undefined input', () => {
+    const result = parseTicketInput(undefined);
+    assert.deepStrictEqual(result, { ticketBase: undefined, suffix: null });
+  });
+
+  it('should handle non-string input', () => {
+    const result = parseTicketInput(123);
+    assert.deepStrictEqual(result, { ticketBase: 123, suffix: null });
+  });
+});

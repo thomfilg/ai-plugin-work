@@ -498,6 +498,11 @@ function getTicketId() {
   // Allow override for testing — empty string explicitly opts out (no git fallback)
   if ('ENFORCE_HOOK_TICKET_ID' in process.env) {
     _cachedTicketId = process.env.ENFORCE_HOOK_TICKET_ID || null;
+    // Compose with suffix when present (GH-146: phase-aware state paths)
+    // Only append if ticketId doesn't already contain a '/' (prevent double-suffixing)
+    if (_cachedTicketId && !_cachedTicketId.includes('/') && process.env.ENFORCE_HOOK_SUFFIX && /^[a-zA-Z0-9_-]+$/.test(process.env.ENFORCE_HOOK_SUFFIX)) {
+      _cachedTicketId = _cachedTicketId + '/' + process.env.ENFORCE_HOOK_SUFFIX;
+    }
     return _cachedTicketId;
   }
   // (Patch 6+9) Worktree-aware .git/HEAD read — no subprocess spawn
@@ -515,6 +520,11 @@ function getTicketId() {
     _cachedTicketId = match ? match[0] : null;
   } catch {
     _cachedTicketId = null;
+  }
+  // Compose with suffix when present (GH-146: phase-aware state paths)
+  // Only append if ticketId doesn't already contain a '/' (prevent double-suffixing)
+  if (_cachedTicketId && !_cachedTicketId.includes('/') && process.env.ENFORCE_HOOK_SUFFIX && /^[a-zA-Z0-9_-]+$/.test(process.env.ENFORCE_HOOK_SUFFIX)) {
+    _cachedTicketId = _cachedTicketId + '/' + process.env.ENFORCE_HOOK_SUFFIX;
   }
   return _cachedTicketId;
 }

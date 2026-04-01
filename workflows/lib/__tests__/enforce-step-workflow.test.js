@@ -1590,4 +1590,127 @@ describe('enforce-step-workflow', () => {
       assert.ok(stderr.includes('BLOCKED'));
     });
   });
+  // ─── ENFORCE_HOOK_SUFFIX tests (GH-146) ───────────────────────────────────
+
+  describe('ENFORCE_HOOK_SUFFIX (GH-146)', () => {
+    const SUFFIX_TICKET = `TEST-SUFFIX-${process.pid}`;
+    const SUFFIX = 'phase1';
+    const SUFFIX_TASKS_DIR = path.join(TASKS_BASE, SUFFIX_TICKET, SUFFIX);
+
+    afterEach(() => {
+      // Clean up both flat and suffixed dirs
+      try { fs.rmSync(path.join(TASKS_BASE, SUFFIX_TICKET), { recursive: true, force: true }); } catch {}
+    });
+
+    function writeSuffixWorkState(stepStatus, status = 'in_progress') {
+      fs.mkdirSync(SUFFIX_TASKS_DIR, { recursive: true });
+      const state = {
+        ticketId: `${SUFFIX_TICKET}/${SUFFIX}`,
+        description: '',
+        currentStep: 1,
+        status,
+        stepStatus,
+        checkProgress: {},
+        errors: [],
+        startTime: new Date().toISOString(),
+        lastUpdate: new Date().toISOString(),
+      };
+      fs.writeFileSync(path.join(SUFFIX_TASKS_DIR, '.work-state.json'), JSON.stringify(state, null, 2));
+    }
+
+    function writeSuffixEvidence(evidence) {
+      fs.mkdirSync(SUFFIX_TASKS_DIR, { recursive: true });
+      fs.writeFileSync(path.join(SUFFIX_TASKS_DIR, '.step-evidence.json'), JSON.stringify(evidence, null, 2));
+    }
+
+    it('should resolve suffixed ticket path when ENFORCE_HOOK_SUFFIX is set', async () => {
+      writeSuffixWorkState(makeStepStatus('implement', WORK_STEPS));
+      writeSuffixEvidence({});
+
+      // With suffix, the hook should find state at SUFFIX_TICKET/phase1/
+      const { code } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: 'echo hello' } },
+        'PreToolUse',
+        {
+          ENFORCE_HOOK_TICKET_ID: SUFFIX_TICKET,
+          ENFORCE_HOOK_SUFFIX: SUFFIX,
+        },
+      );
+      // Should allow (not block) since implement is in_progress and echo is not a protected command
+      assert.equal(code, 0, 'should allow non-protected command in suffixed state');
+    });
+
+    it('should fail-open when suffixed state path does not exist', async () => {
+      // No state file created — hook should fail-open
+      const { code } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: 'echo hello' } },
+        'PreToolUse',
+        {
+          ENFORCE_HOOK_TICKET_ID: SUFFIX_TICKET,
+          ENFORCE_HOOK_SUFFIX: SUFFIX,
+        },
+      );
+      assert.equal(code, 0, 'should fail-open when no state exists for suffixed path');
+    });
+
+    it('should ignore invalid ENFORCE_HOOK_SUFFIX (path traversal prevention)', async () => {
+      // Create state only in flat path
+      const flatDir = path.join(TASKS_BASE, SUFFIX_TICKET);
+      fs.mkdirSync(flatDir, { recursive: true });
+      const flatState = {
+        ticketId: SUFFIX_TICKET,
+        description: '',
+        currentStep: 1,
+        status: 'in_progress',
+        stepStatus: makeStepStatus('implement', WORK_STEPS),
+        checkProgress: {},
+        errors: [],
+        startTime: new Date().toISOString(),
+        lastUpdate: new Date().toISOString(),
+      };
+      fs.writeFileSync(path.join(flatDir, '.work-state.json'), JSON.stringify(flatState, null, 2));
+      fs.writeFileSync(path.join(flatDir, '.step-evidence.json'), JSON.stringify({}, null, 2));
+
+      // Invalid suffix should be ignored — hook falls back to flat path
+      const { code } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: 'echo hello' } },
+        'PreToolUse',
+        {
+          ENFORCE_HOOK_TICKET_ID: SUFFIX_TICKET,
+          ENFORCE_HOOK_SUFFIX: '../../../etc',
+        },
+      );
+      assert.equal(code, 0, 'should ignore invalid suffix and fall back to flat path');
+    });
+
+    it('should use flat ticket path when ENFORCE_HOOK_SUFFIX is not set', async () => {
+      // Create state only in flat path, not suffixed
+      const flatDir = path.join(TASKS_BASE, SUFFIX_TICKET);
+      fs.mkdirSync(flatDir, { recursive: true });
+      const flatState = {
+        ticketId: SUFFIX_TICKET,
+        description: '',
+        currentStep: 1,
+        status: 'in_progress',
+        stepStatus: makeStepStatus('implement', WORK_STEPS),
+        checkProgress: {},
+        errors: [],
+        startTime: new Date().toISOString(),
+        lastUpdate: new Date().toISOString(),
+      };
+      fs.writeFileSync(path.join(flatDir, '.work-state.json'), JSON.stringify(flatState, null, 2));
+      fs.writeFileSync(path.join(flatDir, '.step-evidence.json'), JSON.stringify({}, null, 2));
+
+      // Without suffix env, hook should look in flat path
+      const { code } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: 'echo hello' } },
+        'PreToolUse',
+        {
+          ENFORCE_HOOK_TICKET_ID: SUFFIX_TICKET,
+          // No ENFORCE_HOOK_SUFFIX
+        },
+      );
+      assert.equal(code, 0, 'should use flat path when suffix env is not set');
+    });
+  });
 });
