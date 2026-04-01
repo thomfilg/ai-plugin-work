@@ -1550,4 +1550,44 @@ describe('enforce-step-workflow', () => {
       assert.ok(stderr.includes('BLOCKED'));
     });
   });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Agent allowlist prefix normalization (GH-149)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe('agent allowlist prefix normalization', () => {
+    it('allows quality-checker via bare CLAUDE_CURRENT_AGENT during check step', async () => {
+      writeWorkState(makeStepStatus('check', WORK_STEPS));
+
+      const { code } = await runHook(
+        { tool_name: 'Write', tool_input: { file_path: `${TASKS_DIR}/tests.check.md`, content: '# Check report' } },
+        'PreToolUse',
+        { CLAUDE_CURRENT_AGENT: 'quality-checker' },
+      );
+      assert.equal(code, 0, 'bare agent name should be allowed');
+    });
+
+    it('allows work-workflow:quality-checker via prefixed CLAUDE_CURRENT_AGENT during check step', async () => {
+      writeWorkState(makeStepStatus('check', WORK_STEPS));
+
+      const { code } = await runHook(
+        { tool_name: 'Write', tool_input: { file_path: `${TASKS_DIR}/tests.check.md`, content: '# Check report' } },
+        'PreToolUse',
+        { CLAUDE_CURRENT_AGENT: 'work-workflow:quality-checker' },
+      );
+      assert.equal(code, 0, 'prefixed agent name should be normalized and allowed');
+    });
+
+    it('blocks unauthorized agent during check step', async () => {
+      writeWorkState(makeStepStatus('check', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Write', tool_input: { file_path: `${TASKS_DIR}/tests.check.md`, content: '# Check report' } },
+        'PreToolUse',
+        { CLAUDE_CURRENT_AGENT: 'unauthorized-agent' },
+      );
+      assert.equal(code, 2, 'unauthorized agent should be blocked');
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+  });
 });

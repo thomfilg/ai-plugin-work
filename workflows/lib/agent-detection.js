@@ -8,6 +8,20 @@
 const fs = require('fs');
 
 /**
+ * Normalize an agent name by stripping optional namespace prefixes and lowercasing.
+ * e.g. 'work-workflow:quality-checker' → 'quality-checker'
+ */
+function normalizeAgentName(name) {
+  return String(name || '').replace(/^[\w-]+:/, '').toLowerCase();
+}
+
+function debugLog(method, msg) {
+  if (process.env.ENFORCE_HOOK_DEBUG) {
+    process.stderr.write(`[agent-detection] ${method}: ${msg}\n`);
+  }
+}
+
+/**
  * Check if we're running inside a subagent by scanning the transcript
  * for the MOST RECENT Task tool invocation that matches our agent.
  *
@@ -46,7 +60,7 @@ function isSubagentFromTranscript(transcriptPath, agentAliases) {
             if (item.type === 'tool_use' && (item.name === 'Task' || item.name === 'Agent')) {
               const subagentType = item.input?.subagent_type || '';
               if (agentAliases.some(alias =>
-                alias.toLowerCase() === subagentType.toLowerCase()
+                normalizeAgentName(alias) === normalizeAgentName(subagentType)
               )) {
                 // Check if there's a corresponding tool_result in subsequent lines
                 const hasResult = recentLines.slice(i + 1).some(line => {
@@ -99,14 +113,26 @@ function isSubagentFromTranscript(transcriptPath, agentAliases) {
  * @param {string[]} agentAliases - Agent names to check for
  * @returns {boolean} true if running inside one of the specified agents
  */
-function isRunningInAgent(transcriptPath, agentAliases) {
+function isRunningInAgent(transcriptPath, agentAliases, hookData) {
   // Primary: Check environment variable
   const currentAgent = process.env.CLAUDE_CURRENT_AGENT;
   if (currentAgent && agentAliases.some(alias =>
-    alias.toLowerCase() === currentAgent.toLowerCase()
+    normalizeAgentName(alias) === normalizeAgentName(currentAgent)
   )) {
+    debugLog('env', `matched CLAUDE_CURRENT_AGENT=${currentAgent}`);
     return true;
   }
+  if (currentAgent) debugLog('env', `no match for CLAUDE_CURRENT_AGENT=${currentAgent}`);
+
+  // Secondary: Check hookData for subagent_type (available when parent invokes Task/Agent)
+  const subagentType = hookData?.tool_input?.subagent_type;
+  if (subagentType && agentAliases.some(alias =>
+    normalizeAgentName(alias) === normalizeAgentName(subagentType)
+  )) {
+    debugLog('hookData', `matched subagent_type=${subagentType}`);
+    return true;
+  }
+  if (subagentType) debugLog('hookData', `no match for subagent_type=${subagentType}`);
 
   // Quick check: If this is a subagent process, its transcript initial
   // prompt will mention the agent type. Check this early since it's fast
@@ -176,7 +202,7 @@ function isSubagentFromInitialPrompt(transcriptPath, agentAliases) {
 
           for (const alias of agentAliases) {
             // Match "subagent_type": "code-checker" or similar patterns
-            if (text.toLowerCase().includes(alias.toLowerCase())) {
+            if (text.toLowerCase().includes(normalizeAgentName(alias))) {
               return true;
             }
           }
@@ -189,4 +215,4 @@ function isSubagentFromInitialPrompt(transcriptPath, agentAliases) {
   }
 }
 
-module.exports = { isRunningInAgent, isSubagentFromTranscript, isSubagentFromInitialPrompt };
+module.exports = { isRunningInAgent, isSubagentFromTranscript, isSubagentFromInitialPrompt, normalizeAgentName };

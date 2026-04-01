@@ -152,7 +152,7 @@ function createArtifactProtector(opts) {
     // Check 2: Agent must be authorized (if agents specified)
     if (rule.agents && rule.agents.length > 0) {
       const transcriptPath = hookData?.transcript_path;
-      if (!isRunningInAgent(transcriptPath, rule.agents)) {
+      if (!isRunningInAgent(transcriptPath, rule.agents, hookData)) {
         return {
           blocked: true,
           file: bn,
