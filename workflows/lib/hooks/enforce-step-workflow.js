@@ -298,7 +298,7 @@ const WORKFLOWS = [
   },
   {
     name: 'work-pr',
-    stateFile: '.workflow-state.json',
+    stateFile: '.work-pr.workflow-state.json',
     evidenceFile: '.step-evidence-work-pr.json',
     isActive: (state) => state?.status === 'in_progress' && state?.workflow === 'work-pr',
     steps: [
@@ -336,7 +336,7 @@ const ARTIFACT_RULES = [
 
 // Protected state file basenames — block direct Edit/Write/MultiEdit/Bash writes
 const { buildProtectedBasenames, basenameProtector, createFileProtector } = require(path.join(__dirname, '..', 'protect-state-files'));
-const PROTECTED_STATE_BASENAMES = buildProtectedBasenames(WORKFLOWS, ['.work-actions.json', '.pr-update-sha']);
+const PROTECTED_STATE_BASENAMES = buildProtectedBasenames(WORKFLOWS, ['.work-actions.json', '.pr-update-sha', '.workflow-state.json', '.check.workflow-state.json']);
 
 // Map each protected basename to its workflow's transition hint
 const BASENAME_TO_HINT = {};
@@ -534,6 +534,18 @@ function loadStateFile(ticketId, stateFile) {
   try {
     return JSON.parse(fs.readFileSync(p, 'utf-8'));
   } catch {
+    // Legacy fallback: per-workflow files (e.g. .work-pr.workflow-state.json)
+    // may not exist if the state was written before per-workflow split.
+    // Try the legacy .workflow-state.json and check the workflow field matches.
+    if (stateFile !== '.workflow-state.json' && stateFile.endsWith('.workflow-state.json')) {
+      const legacyPath = path.join(TASKS_BASE, ticketId, '.workflow-state.json');
+      try {
+        const legacy = JSON.parse(fs.readFileSync(legacyPath, 'utf-8'));
+        // Derive expected workflow name from stateFile: .work-pr.workflow-state.json -> work-pr
+        const expectedWorkflow = stateFile.replace(/^\./, '').replace(/\.workflow-state\.json$/, '');
+        if (legacy?.workflow === expectedWorkflow) return legacy;
+      } catch {} /* no legacy file either */
+    }
     return null;
   }
 }
@@ -712,7 +724,11 @@ function handlePreToolUse(hookData) {
     if (wf.name === 'work' && matchedStep !== currentStep) {
       const agentType = toolInput?.subagent_type || '';
       if (CHECK_AGENTS.has(agentType)) {
-        const checkState = loadStateFile(ticketId, '.workflow-state.json');
+        let checkState = loadStateFile(ticketId, '.check.workflow-state.json');
+        if (!checkState) {
+          const legacyState = loadStateFile(ticketId, '.workflow-state.json');
+          if (legacyState?.workflow === 'check') checkState = legacyState; // legacy compat
+        }
         if (checkState?.workflow === 'check' && checkState?.status === 'in_progress') {
           continue; // Allow — /check owns this agent
         }

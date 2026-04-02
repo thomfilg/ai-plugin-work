@@ -36,14 +36,26 @@ class WorkflowState {
 
   /** Get state file path for an instance */
   _statePath(instanceId) {
-    return path.join(this.stateDir, instanceId, '.workflow-state.json');
+    const safeName = path.basename(this.workflowName).replace(/[^a-zA-Z0-9._-]/g, '');
+    if (!safeName) throw new Error('Invalid workflow name');
+    return path.join(this.stateDir, instanceId, `.${safeName}.workflow-state.json`);
   }
 
   /** Load state for an instance (returns null if not found) */
   load(instanceId) {
     const p = this._statePath(instanceId);
-    if (!fs.existsSync(p)) return null;
-    try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
+    if (fs.existsSync(p)) {
+      try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
+    }
+    // Legacy fallback — load .workflow-state.json only when workflow field matches (tested)
+    const legacyPath = path.join(this.stateDir, instanceId, '.workflow-state.json');
+    if (fs.existsSync(legacyPath)) {
+      try {
+        const state = JSON.parse(fs.readFileSync(legacyPath, 'utf8'));
+        if (state?.workflow === this.workflowName) return state;
+      } catch { /* ignore */ }
+    }
+    return null;
   }
 
   /** Save state for an instance */

@@ -74,7 +74,8 @@ function writeWorkflowState(stepStatus, workflow = 'work-pr', status = 'in_progr
     startTime: new Date().toISOString(),
     lastUpdate: new Date().toISOString(),
   };
-  fs.writeFileSync(path.join(TASKS_DIR, '.workflow-state.json'), JSON.stringify(state, null, 2));
+  const stateFile = `.${workflow}.workflow-state.json`;
+  fs.writeFileSync(path.join(TASKS_DIR, stateFile), JSON.stringify(state, null, 2));
 }
 
 function writeEvidence(evidence, evidenceFile = '.step-evidence.json') {
@@ -519,7 +520,7 @@ describe('enforce-step-workflow', () => {
         fs.readFileSync(path.join(TASKS_DIR, '.work-state.json'), 'utf-8'),
       );
       const workPrState = JSON.parse(
-        fs.readFileSync(path.join(TASKS_DIR, '.workflow-state.json'), 'utf-8'),
+        fs.readFileSync(path.join(TASKS_DIR, '.work-pr.workflow-state.json'), 'utf-8'),
       );
 
       assert.equal(workState.stepStatus['pr'], 'in_progress');
@@ -591,7 +592,7 @@ describe('enforce-step-workflow', () => {
 
     it('handles corrupt workflow-state file gracefully', () => {
       if (!fs.existsSync(TASKS_DIR)) fs.mkdirSync(TASKS_DIR, { recursive: true });
-      fs.writeFileSync(path.join(TASKS_DIR, '.workflow-state.json'), 'corrupted');
+      fs.writeFileSync(path.join(TASKS_DIR, '.work-pr.workflow-state.json'), 'corrupted');
       // Should not crash — fail-open
     });
   });
@@ -1162,7 +1163,7 @@ describe('enforce-step-workflow', () => {
 
     const PROTECTED_FILES = [
       '.work-state.json',
-      '.workflow-state.json',
+      '.work-pr.workflow-state.json',
       '.step-evidence.json',
       '.step-evidence-work-pr.json',
       '.work-actions.json',
@@ -1308,11 +1309,11 @@ describe('enforce-step-workflow', () => {
       assert.ok(stderr.includes('BLOCKED'));
     });
 
-    it('blocks Bash cp to .workflow-state.json', async () => {
+    it('blocks Bash cp to .work-pr.workflow-state.json', async () => {
       writeWorkState(makeStepStatus('implement', WORK_STEPS));
 
       const { code, stderr } = await runHook(
-        { tool_name: 'Bash', tool_input: { command: 'cp /tmp/fake.json /tasks/.workflow-state.json' } },
+        { tool_name: 'Bash', tool_input: { command: 'cp /tmp/fake.json /tasks/.work-pr.workflow-state.json' } },
         'PreToolUse',
       );
       assert.equal(code, 2, 'Should block Bash cp to state file');

@@ -10,6 +10,7 @@ const CONFIG_KEYS = [
   'TICKET_PROVIDER', 'TICKET_PROJECT_KEY',
   'REPO_NAME', 'GITHUB_ORG', 'WORKTREES_BASE', 'TASKS_BASE',
   'FOLLOW_UP_PR_POLL_REVIEWS', 'BASE_BRANCH', 'WEB_APPS',
+  'ENABLE_SYMLINK',
 ];
 
 // Defaults matching config.js fallback values — used to block .env file loading.
@@ -28,6 +29,7 @@ const CONFIG_DEFAULTS = {
   FOLLOW_UP_PR_POLL_REVIEWS: 'true',
   BASE_BRANCH: '',
   WEB_APPS: '[]',
+  ENABLE_SYMLINK: '0',
 };
 
 function resetEnv() {
@@ -165,6 +167,26 @@ describe('config', () => {
       const map = config.webAppsMap();
       assert.equal(Object.getPrototypeOf(map), null);
     });
+  });
+
+  // ─── ENABLE_SYMLINK ─────────────────────────────────────────────────────
+
+  describe('ENABLE_SYMLINK', () => {
+    it('defaults to 0 when not set', () => {
+      const config = freshRequire();
+      assert.equal(config.ENABLE_SYMLINK, '0');
+    });
+
+    it('preserves 0 when explicitly set', () => {
+      const config = freshRequire({ ENABLE_SYMLINK: '0' });
+      assert.equal(config.ENABLE_SYMLINK, '0');
+    });
+
+    it('preserves 1 when explicitly set', () => {
+      const config = freshRequire({ ENABLE_SYMLINK: '1' });
+      assert.equal(config.ENABLE_SYMLINK, '1');
+    });
+
   });
 
   // ─── getBaseBranch ──────────────────────────────────────────────────────

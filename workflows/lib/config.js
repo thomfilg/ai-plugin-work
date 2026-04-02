@@ -72,6 +72,7 @@ const config = {
     }
   })(),
   TASKS_BASE: null, // set below after WORKTREES_BASE is resolved
+  ENABLE_SYMLINK: process.env.ENABLE_SYMLINK ?? '0',
   FOLLOW_UP_PR_POLL_REVIEWS: (process.env.FOLLOW_UP_PR_POLL_REVIEWS || 'true').toLowerCase() === 'true',
 
   // Comma-separated relative paths to docs agents should read during their workflows

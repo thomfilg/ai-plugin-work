@@ -59,7 +59,7 @@ describe('WorkflowState', () => {
       }
 
       // State file should exist on disk
-      const filePath = path.join(TEST_BASE, INSTANCE, '.workflow-state.json');
+      const filePath = path.join(TEST_BASE, INSTANCE, '.test-workflow.workflow-state.json');
       assert.ok(fs.existsSync(filePath));
     });
   });
@@ -89,7 +89,7 @@ describe('WorkflowState', () => {
       // Create the instance directory and write corrupt JSON
       const instanceDir = path.join(TEST_BASE, INSTANCE);
       fs.mkdirSync(instanceDir, { recursive: true });
-      fs.writeFileSync(path.join(instanceDir, '.workflow-state.json'), '{not valid json!!!');
+      fs.writeFileSync(path.join(instanceDir, '.test-workflow.workflow-state.json'), '{not valid json!!!');
 
       const result = ws.load(INSTANCE);
       assert.strictEqual(result, null);
@@ -110,7 +110,7 @@ describe('WorkflowState', () => {
         startTime: '2025-01-01T00:00:00.000Z',
       };
       fs.writeFileSync(
-        path.join(instanceDir, '.workflow-state.json'),
+        path.join(instanceDir, '.test-workflow.workflow-state.json'),
         JSON.stringify(legacyState, null, 2),
       );
 
@@ -145,7 +145,7 @@ describe('WorkflowState', () => {
       assert.ok(saved.lastUpdate <= afterSave, 'lastUpdate should be <= time after save');
 
       // Verify it was written to disk
-      const filePath = path.join(TEST_BASE, INSTANCE, '.workflow-state.json');
+      const filePath = path.join(TEST_BASE, INSTANCE, '.test-workflow.workflow-state.json');
       const onDisk = JSON.parse(fs.readFileSync(filePath, 'utf8'));
       assert.strictEqual(onDisk.lastUpdate, saved.lastUpdate);
     });
@@ -338,6 +338,37 @@ describe('WorkflowState', () => {
       ws = createWs();
       const output = ws.formatState('nonexistent');
       assert.strictEqual(output, 'No state found');
+    });
+  });
+
+  // ─── legacy fallback ────────────────────────────────────────────────────────
+
+  describe('legacy fallback', () => {
+    it('loads legacy .workflow-state.json when workflow matches', () => {
+      const ws = new WorkflowState('test-workflow', TEST_BASE);
+      const instanceDir = path.join(TEST_BASE, INSTANCE);
+      if (!fs.existsSync(instanceDir)) fs.mkdirSync(instanceDir, { recursive: true });
+
+      // Write only the legacy file
+      const legacyState = { workflow: 'test-workflow', status: 'in_progress', stepStatus: { step1: 'completed' } };
+      fs.writeFileSync(path.join(instanceDir, '.workflow-state.json'), JSON.stringify(legacyState));
+
+      const loaded = ws.load(INSTANCE);
+      assert.ok(loaded, 'Should load from legacy file');
+      assert.strictEqual(loaded.workflow, 'test-workflow');
+    });
+
+    it('returns null when legacy file workflow does not match', () => {
+      const ws = new WorkflowState('test-workflow', TEST_BASE);
+      const instanceDir = path.join(TEST_BASE, INSTANCE);
+      if (!fs.existsSync(instanceDir)) fs.mkdirSync(instanceDir, { recursive: true });
+
+      // Write legacy file with different workflow name
+      const legacyState = { workflow: 'other-workflow', status: 'in_progress', stepStatus: {} };
+      fs.writeFileSync(path.join(instanceDir, '.workflow-state.json'), JSON.stringify(legacyState));
+
+      const loaded = ws.load(INSTANCE);
+      assert.strictEqual(loaded, null, 'Should not load mismatched workflow');
     });
   });
 });
