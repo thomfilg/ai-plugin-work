@@ -201,6 +201,7 @@ module.exports = {
         const fetchedRef = `${remote}/${branch}`;
         const behind = safeExec(`git rev-list --count --max-count=${fetchDepth} HEAD..${fetchedRef}`, { cwd: worktreeDir });
         data.commitsBehindMain = parseInt(behind || '0', 10);
+        data.commitsBehindMainCapped = data.commitsBehindMain >= fetchDepth;
       }
     }
 
@@ -274,7 +275,7 @@ module.exports = {
         if (d.commitsBehindMain > threshold) {
           return {
             action: 'BLOCKED',
-            reason: `Worktree is ${d.commitsBehindMain} commit(s) behind ${d.baseBranch || 'origin/main'}. Rebase before creating PR.`,
+            reason: `Worktree is ${d.commitsBehindMainCapped ? '>= ' : ''}${d.commitsBehindMain} commit(s) behind ${d.baseBranch || 'origin/main'}. Rebase before creating PR.`,
           };
         }
         if (!force && d.prUpToDate) {

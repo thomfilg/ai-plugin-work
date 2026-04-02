@@ -291,13 +291,14 @@ function defaultFormatPlan(workflow, instanceId, plan, summary) {
   for (const step of plan) {
     const icon = step.action === 'RUN' ? '\uD83D\uDD04' :
                  step.action === 'SKIP' ? '\u23ED\uFE0F' :
-                 step.action === 'DEFER' ? '\uD83D\uDD2E' : '\u23F3';
+                 step.action === 'DEFER' ? '\uD83D\uDD2E' :
+                 step.action === 'BLOCKED' ? '\uD83D\uDED1' : '\u23F3';
     const cmd = step.command ? ` \u2192 ${step.command}` : '';
     lines.push(`    ${icon} ${step.step.padEnd(20)} ${step.action.padEnd(7)} ${step.reason}${cmd}`);
   }
 
   lines.push('');
-  lines.push(`  SUMMARY: ${summary.run} RUN, ${summary.defer || 0} DEFER, ${summary.skip} SKIP, ${summary.pending} PENDING`);
+  lines.push(`  SUMMARY: ${summary.run} RUN, ${summary.blocked || 0} BLOCKED, ${summary.defer || 0} DEFER, ${summary.skip} SKIP, ${summary.pending} PENDING`);
   if (summary.firstAction !== 'none') {
     lines.push(`  FIRST ACTION: ${summary.firstAction}`);
   }
@@ -306,6 +307,9 @@ function defaultFormatPlan(workflow, instanceId, plan, summary) {
   }
   if (summary.stepsDeferred && summary.stepsDeferred.length > 0) {
     lines.push(`  STEPS DEFERRED: ${summary.stepsDeferred.join(' \u2192 ')}`);
+  }
+  if (summary.stepsBlocked && summary.stepsBlocked.length > 0) {
+    lines.push(`  STEPS BLOCKED: ${summary.stepsBlocked.join(' \u2192 ')}`);
   }
   lines.push('');
   lines.push('\u2550'.repeat(67));
