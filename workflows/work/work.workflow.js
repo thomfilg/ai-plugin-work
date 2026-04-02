@@ -502,7 +502,7 @@ function inspect(ticket, providerConfig, suffix) {
   s.postPrUpdateSha = fileExists(path.join(s.tasksDir, '.post-pr-update-sha'))
     ? readFile(path.join(s.tasksDir, '.post-pr-update-sha')).trim() : null;
   s.prEverUpdated = s.prUpdateSha !== null;
-  s.prShaMatch = !!(s.headSha && s.prUpdateSha && s.headSha === s.prUpdateSha);
+  s.prShaMatch = !!(s.headSha && s.prUpdateSha && s.headSha === s.prUpdateSha.split('|')[0]);
 
   // Content SHA
   if (s.tasksDirExists) {
