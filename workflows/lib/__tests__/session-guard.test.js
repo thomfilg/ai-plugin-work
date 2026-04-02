@@ -411,12 +411,12 @@ describe('session-guard', () => {
     after(() => { try { fs.rmSync(TEMP_WB, { recursive: true, force: true }); } catch {} });
 
     function writeCheckState(workflow, status) {
-      const statePath = path.join(TEMP_TASKS, CHECK_TICKET, '.workflow-state.json');
+      const statePath = path.join(TEMP_TASKS, CHECK_TICKET, '.check.workflow-state.json');
       fs.writeFileSync(statePath, JSON.stringify({ workflow, instanceId: CHECK_TICKET, status, stepStatus: {} }));
     }
 
     function removeCheckState() {
-      try { fs.unlinkSync(path.join(TEMP_TASKS, CHECK_TICKET, '.workflow-state.json')); } catch {}
+      try { fs.unlinkSync(path.join(TEMP_TASKS, CHECK_TICKET, '.check.workflow-state.json')); } catch {}
     }
 
     afterEach(() => {
