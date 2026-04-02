@@ -1,0 +1,1 @@
+/home/thomfilg/p/w-claude-plugin/claude-plugin-work/workflows/work/agents/developer-react-ui-architect.md

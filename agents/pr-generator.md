@@ -1,0 +1,1 @@
+/home/thomfilg/p/w-claude-plugin/claude-plugin-work/workflows/work-pr/agents/pr-generator/pr-generator.md

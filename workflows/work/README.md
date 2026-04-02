@@ -8,18 +8,13 @@ Orchestrated workflow for ticket tasks with deterministic step execution.
 workflows/work/
   README.md              ← this file
   check-gate.js          ← check→pr transition gate (extracted from orchestrator)
-  skills/                ← symlinks to skill definitions
-    work.md              → skills/work/SKILL.md
-    work-implement.md    → skills/work-implement/SKILL.md
-    work-pr.md           → skills/work-pr/SKILL.md
-    check.md             → skills/check/SKILL.md
-    check-qa.md          → skills/check-qa/SKILL.md
-    check-browser.md     → skills/check-browser/SKILL.md
-    bootstrap.md         → skills/bootstrap/SKILL.md
-    brief.md             → skills/brief/SKILL.md
-    spec.md              → skills/spec/SKILL.md
-    follow-up-pr.md      → skills/follow-up-pr/SKILL.md
-    test-coordination.md → skills/test-coordination/SKILL.md
+  skills/                ← skill definitions (source of truth)
+    work.md              ← skills/work/SKILL.md (symlink)
+    bootstrap.md         ← skills/bootstrap/SKILL.md (symlink)
+    brief.md             ← skills/brief/SKILL.md (symlink)
+    spec.md              ← skills/spec/SKILL.md (symlink)
+    follow-up-pr.md      ← skills/follow-up-pr/SKILL.md (symlink)
+    orchestrate.md       ← skills/orchestrate/SKILL.md (symlink)
 ```
 
 ## Hooks

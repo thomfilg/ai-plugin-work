@@ -1,0 +1,1 @@
+/home/thomfilg/p/w-claude-plugin/claude-plugin-work/workflows/check/agents/qa-feature-tester/qa-feature-tester.md
