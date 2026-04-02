@@ -198,6 +198,9 @@ function transitionStep(workflow, stateInstance, instanceId, targetStep) {
     ws = stateInstance.init(instanceId, allSteps);
   }
 
+  // Snapshot state before mutations — used for full rollback if onTransition fails
+  const preTransitionState = structuredClone(ws);
+
   const currentIdx = allSteps.indexOf(currentStep);
   const targetIdx = allSteps.indexOf(targetStep);
 
@@ -228,6 +231,26 @@ function transitionStep(workflow, stateInstance, instanceId, targetStep) {
   }
 
   stateInstance.save(instanceId, ws);
+
+  // Invoke workflow's onTransition callback if defined
+  if (typeof workflow.onTransition === 'function') {
+    try {
+      workflow.onTransition(currentStep, targetStep, instanceId, { stateInstance });
+    } catch (err) {
+      // onTransition failed — full rollback to pre-transition state
+      const msg = err?.message || String(err);
+      process.stderr.write(`[workflow-engine] onTransition error (rolling back): ${msg}\n`);
+      if (err?.stack) process.stderr.write(`[workflow-engine] ${err.stack}\n`);
+      stateInstance.save(instanceId, preTransitionState);
+      return {
+        error: true,
+        message: `Transition ${currentStep} → ${targetStep} reverted: onTransition failed — ${msg}`,
+        from: currentStep,
+        to: targetStep,
+        rollback: true,
+      }; // full state snapshot restored
+    }
+  }
 
   return {
     success: true,
@@ -268,13 +291,14 @@ function defaultFormatPlan(workflow, instanceId, plan, summary) {
   for (const step of plan) {
     const icon = step.action === 'RUN' ? '\uD83D\uDD04' :
                  step.action === 'SKIP' ? '\u23ED\uFE0F' :
-                 step.action === 'DEFER' ? '\uD83D\uDD2E' : '\u23F3';
+                 step.action === 'DEFER' ? '\uD83D\uDD2E' :
+                 step.action === 'BLOCKED' ? '\uD83D\uDED1' : '\u23F3';
     const cmd = step.command ? ` \u2192 ${step.command}` : '';
     lines.push(`    ${icon} ${step.step.padEnd(20)} ${step.action.padEnd(7)} ${step.reason}${cmd}`);
   }
 
   lines.push('');
-  lines.push(`  SUMMARY: ${summary.run} RUN, ${summary.defer || 0} DEFER, ${summary.skip} SKIP, ${summary.pending} PENDING`);
+  lines.push(`  SUMMARY: ${summary.run} RUN, ${summary.blocked || 0} BLOCKED, ${summary.defer || 0} DEFER, ${summary.skip} SKIP, ${summary.pending} PENDING`);
   if (summary.firstAction !== 'none') {
     lines.push(`  FIRST ACTION: ${summary.firstAction}`);
   }
@@ -283,6 +307,9 @@ function defaultFormatPlan(workflow, instanceId, plan, summary) {
   }
   if (summary.stepsDeferred && summary.stepsDeferred.length > 0) {
     lines.push(`  STEPS DEFERRED: ${summary.stepsDeferred.join(' \u2192 ')}`);
+  }
+  if (summary.stepsBlocked && summary.stepsBlocked.length > 0) {
+    lines.push(`  STEPS BLOCKED: ${summary.stepsBlocked.join(' \u2192 ')}`);
   }
   lines.push('');
   lines.push('\u2550'.repeat(67));
@@ -362,11 +389,13 @@ function main() {
         skip: byAction('SKIP').length,
         defer: byAction('DEFER').length,
         pending: byAction('PENDING').length,
-        // firstAction: first actionable step (RUN preferred, DEFER as fallback — DEFER steps include execution metadata)
-        firstAction: byAction('RUN')[0]?.step || byAction('DEFER')[0]?.step || 'none',
+        blocked: byAction('BLOCKED').length,
+        // firstAction: BLOCKED takes priority (must resolve before proceeding), then RUN, then DEFER
+        firstAction: byAction('BLOCKED')[0]?.step || byAction('RUN')[0]?.step || byAction('DEFER')[0]?.step || 'none',
         stepsToRun: byAction('RUN').map(s => s.step),
-        stepsDeferred: byAction('DEFER').map(s => s.step), // separate from stepsToRun: re-plan before executing
+        stepsDeferred: byAction('DEFER').map(s => s.step),
         stepsSkipped: byAction('SKIP').map(s => s.step),
+        stepsBlocked: byAction('BLOCKED').map(s => s.step), // rendered with stop sign icon in formatPlan
       };
 
       // Format output

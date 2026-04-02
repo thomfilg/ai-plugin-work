@@ -801,7 +801,7 @@ function handlePostToolUse(hookData) {
         // For ref pointers, we can't easily get the SHA without git — skip validation
         if (/^[0-9a-f]{40}$/.test(ref)) {
           const storedSha = fs.readFileSync(prShaFile, 'utf-8').trim();
-          prShaOk = storedSha === ref;
+          prShaOk = storedSha.split('|')[0] === ref;
         } else {
           // Can't compare ref to SHA — trust the file exists
           prShaOk = fs.existsSync(prShaFile);

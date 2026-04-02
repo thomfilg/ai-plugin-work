@@ -165,17 +165,6 @@ Task(pr-generator):
   "PR_UPDATE_RESULT: SUCCESS" or "PR_UPDATE_RESULT: FAILED"
 ```
 
-On success, record compound key (HEAD SHA + screenshot hash):
-```bash
-SCREENSHOT_DIR="${TASKS_DIR}/screenshots"
-SCREENSHOT_HASH="none"
-if [ -d "$SCREENSHOT_DIR" ] && [ "$(find "$SCREENSHOT_DIR" -type f 2>/dev/null | head -1)" ]; then
-  SCREENSHOT_HASH=$(find "$SCREENSHOT_DIR" -type f -print0 2>/dev/null | sort -z | xargs -0 sha256sum 2>/dev/null | sha256sum | cut -d' ' -f1)
-fi
-echo "${CURRENT_SHA}|${SCREENSHOT_HASH}" > "$PR_SHA_FILE"
-echo "✅ PR updated. Recorded key: ${CURRENT_SHA}|${SCREENSHOT_HASH}"
-```
-
 Check plan for next transition:
 - If `4_screenshot_gate` is RUN → transition to `4_screenshot_gate`
 - If `5_post_pr_gen` is SKIP → transition to `6_summary`
