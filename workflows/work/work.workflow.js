@@ -976,7 +976,7 @@ function main() {
               stepStatus: {}, checkProgress: {},
               errors: [], startTime: new Date().toISOString(),
               lastPlanTimestamp: result.timestamp,
-              deferredSteps: deferSteps,
+              deferredSteps: deferSteps, // ticketId uses safeName_plan to match on-disk path
             };
             ALL_STEPS.forEach(s => { minimalState.stepStatus[s] = 'pending'; });
             saveWorkState(safeName_plan, minimalState);
