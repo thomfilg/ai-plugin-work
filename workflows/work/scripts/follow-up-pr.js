@@ -419,6 +419,47 @@ function getChangedPaths(fromRef, toRef) {
 //
 // Human reviewers: always high (blocking)
 
+/**
+ * Read a few lines of code context around a specific line number.
+ * Returns formatted string with line numbers, or null if file can't be read.
+ * @param {string} filePath — relative file path from repo root
+ * @param {number} line — 1-based line number
+ * @param {number} [contextLines=3] — lines to show before and after
+ * @returns {string|null}
+ */
+// In-memory cache for file contents (avoids re-reading the same file for multiple comments)
+const _fileCache = new Map();
+
+function getCodeContext(filePath, line, contextLines = 3) {
+  try {
+    // Reject absolute paths and path traversal
+    if (path.isAbsolute(filePath) || filePath.includes('..')) return null;
+
+    // Resolve relative to repo root (cwd) and verify it stays inside
+    const resolved = path.resolve(filePath);
+    const cwd = process.cwd();
+    if (!resolved.startsWith(cwd + path.sep) && resolved !== cwd) return null;
+
+    let content = _fileCache.get(resolved);
+    if (content === undefined) {
+      content = fs.readFileSync(resolved, 'utf8');
+      _fileCache.set(resolved, content);
+    }
+    const lines = content.split(/\r?\n/);
+    const start = Math.max(0, line - 1 - contextLines);
+    const end = Math.min(lines.length, line + contextLines);
+    const result = [];
+    for (let i = start; i < end; i++) {
+      const lineNum = i + 1;
+      const marker = lineNum === line ? '>>>' : '   ';
+      result.push(`${marker} ${String(lineNum).padStart(4)}: ${lines[i]}`);
+    }
+    return result.join('\n');
+  } catch {
+    return null;
+  }
+}
+
 function classifyCommentPriority(author, body) {
   const lower = (body || '').toLowerCase();
 
@@ -863,6 +904,14 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
         }
         if (item.path && item.line) {
           lines.push(`    ${c.yellow('→ Alter line ' + item.line + ' in ' + item.path + ' to address this comment (touch the exact line to invalidate stale review)')}`);
+          // Show actual code at the referenced line so the agent can verify if already fixed
+          const codeCtx = getCodeContext(item.path, item.line);
+          if (codeCtx) {
+            lines.push(`    ${c.dim('Current code at ' + item.path + ':' + item.line + ':')}`);
+            for (const ctxLine of codeCtx.split('\n')) {
+              lines.push(`    ${c.dim(ctxLine)}`);
+            }
+          }
         } else if (item.path) {
           lines.push(`    ${c.yellow('→ Alter ' + item.path + ' to address this comment')}`);
         }
@@ -1241,4 +1290,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { classifyCommentPriority, isBlockingPriority, getResolvedCommentIds, resolveOutdatedThreads, decideNextAction, getAdaptiveInterval, computeCommentHash, deduplicateBlockingBotComments, getChangedPaths, initState };
+module.exports = { classifyCommentPriority, isBlockingPriority, getResolvedCommentIds, resolveOutdatedThreads, decideNextAction, getAdaptiveInterval, computeCommentHash, deduplicateBlockingBotComments, getChangedPaths, initState, getCodeContext };

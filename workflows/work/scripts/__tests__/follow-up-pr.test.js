@@ -1,6 +1,6 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { classifyCommentPriority, isBlockingPriority, getResolvedCommentIds, resolveOutdatedThreads, decideNextAction, getAdaptiveInterval } = require('../follow-up-pr.js');
+const { classifyCommentPriority, isBlockingPriority, getResolvedCommentIds, resolveOutdatedThreads, decideNextAction, getAdaptiveInterval, getCodeContext } = require('../follow-up-pr.js');
 
 describe('classifyCommentPriority', () => {
   describe('Copilot (copilot-pull-request-reviewer)', () => {
@@ -475,5 +475,54 @@ describe('getAdaptiveInterval', () => {
   it('returns 30s when no checks exist (total=0, attempt>1)', () => {
     const ci = makeCi([], []);
     assert.equal(getAdaptiveInterval(2, ci), 30);
+  });
+});
+
+// ── getCodeContext ─────────────────────────────────────────────────────────────
+describe('getCodeContext', () => {
+  it('returns context lines around the target line', () => {
+    // Use this test file itself as a known file
+    const result = getCodeContext('workflows/work/scripts/__tests__/follow-up-pr.test.js', 1, 1);
+    assert.ok(result, 'should return context');
+    assert.ok(result.includes('>>>'), 'should have a marker on the target line');
+    assert.ok(result.includes('1:'), 'should have line number 1');
+  });
+
+  it('marks the correct line with >>>', () => {
+    const result = getCodeContext('workflows/work/scripts/__tests__/follow-up-pr.test.js', 3, 1);
+    assert.ok(result);
+    const lines = result.split('\n');
+    const markedLine = lines.find(l => l.startsWith('>>>'));
+    assert.ok(markedLine, 'should have a >>> marker');
+    assert.ok(markedLine.includes('3:'), 'marker should be on line 3');
+  });
+
+  it('returns null for non-existent file', () => {
+    const result = getCodeContext('non-existent-file-that-does-not-exist.js', 1);
+    assert.equal(result, null);
+  });
+
+  it('returns null for absolute paths', () => {
+    const result = getCodeContext('/etc/passwd', 1);
+    assert.equal(result, null);
+  });
+
+  it('returns null for path traversal attempts', () => {
+    const result = getCodeContext('../../../etc/passwd', 1);
+    assert.equal(result, null);
+  });
+
+  it('handles out-of-range line numbers gracefully', () => {
+    const result = getCodeContext('workflows/work/scripts/__tests__/follow-up-pr.test.js', 999999, 1);
+    // Should return some content (the last lines of the file) or empty, not crash
+    assert.ok(result !== undefined);
+  });
+
+  it('handles line 1 without negative index', () => {
+    const result = getCodeContext('workflows/work/scripts/__tests__/follow-up-pr.test.js', 1, 3);
+    assert.ok(result, 'should return context');
+    assert.ok(result.includes('>>>'), 'should have marker');
+    // Should not have negative line numbers
+    assert.ok(!result.includes('-1:'), 'no negative line numbers');
   });
 });
