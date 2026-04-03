@@ -108,34 +108,55 @@ TodoWrite([
 ])
 ```
 
-### Step 2.5: Mandatory TDD Loop
+### Step 2.5: TDD Phase Loop (Hook-Enforced)
 
-Before changing production code:
+The TDD loop is enforced by hooks — not by agent discipline. File restrictions are automatic per phase.
 
-1. Locate the closest existing test file for the affected behavior
-2. Add or update the smallest focused test set that expresses the expected behavior (usually 1-3 tests)
-3. Run the smallest relevant test command and confirm the new test fails (RED)
-4. Implement the minimum production change required
-5. Re-run the same targeted test command and confirm it passes (GREEN)
-6. Refactor only after the targeted test is green
-7. Record evidence via CLI:
-   `node <ORCHESTRATOR_PATH> record-tdd <TICKET_ID> 5_implement --cmd "<test command>" --red --green --files "<test files>"`
-   `<ORCHESTRATOR_PATH>` and `<TICKET_ID>` are provided by the `/work` orchestrator in the
-   delegated prompt context. When running `/work-implement` standalone (outside `/work`),
-   use the concrete path: `node ${CLAUDE_PLUGIN_ROOT}/workflows/work/work.workflow.js` and the
-   ticket ID from the current branch (`git branch --show-current | grep -oE '[A-Z]+-[0-9]+'`).
-8. Record the RED and GREEN evidence in `implement.md`
+**Initialize TDD state:**
+```bash
+node ${CLAUDE_PLUGIN_ROOT}/workflows/work-implement/tdd-phase-state.js init <TICKET_ID>
+```
 
-Important: Do NOT make local git commits during the TDD loop. Leave all changes (test files
-and production code) uncommitted. The commit step (`7_commit`) handles commits with proper
-message formatting and squashing.
+**For each behavior change, cycle through RED → GREEN → REFACTOR:**
 
-If the change is mechanical or not meaningfully behavior-testable:
-- Record exception via CLI:
-  `node <ORCHESTRATOR_PATH> record-tdd <TICKET_ID> 5_implement --exception "<reason>"`
-  (Same path resolution as above.)
-- Add or update the closest relevant tests where possible
-- Continue with the smallest safe change
+#### RED Phase (write failing tests)
+- The hook BLOCKS Write/Edit to any non `.test`/`.spec` file
+- Write focused tests that express the expected behavior (1-3 tests)
+- When done, record evidence and transition:
+```bash
+node ${CLAUDE_PLUGIN_ROOT}/workflows/work-implement/tdd-phase-state.js record-red <TICKET_ID> --cmd "<targeted test command>"
+# Script runs git diff to find changed test files
+# Script runs the test command — tests MUST FAIL (exit non-zero)
+node ${CLAUDE_PLUGIN_ROOT}/workflows/work-implement/tdd-phase-state.js transition <TICKET_ID> green
+```
+
+#### GREEN Phase (make tests pass)
+- The hook BLOCKS Write/Edit to `.test`/`.spec` files (prevents cheating)
+- Test helpers are allowed: `__mocks__/`, `__fixtures__/`, `test-utils`, `*.mock.*`, `*.fixture.*`
+- Write minimum production code to make the failing tests pass
+- When done, record evidence and transition:
+```bash
+node ${CLAUDE_PLUGIN_ROOT}/workflows/work-implement/tdd-phase-state.js record-green <TICKET_ID> --cmd "<same test command>"
+# Script runs the test command — tests MUST PASS (exit zero)
+node ${CLAUDE_PLUGIN_ROOT}/workflows/work-implement/tdd-phase-state.js transition <TICKET_ID> refactor
+```
+
+#### REFACTOR Phase (clean up)
+- No file restrictions — touch any files
+- Refactor both test and production code for clarity
+- When done, record evidence and transition back to RED (or proceed to Step 3):
+```bash
+node ${CLAUDE_PLUGIN_ROOT}/workflows/work-implement/tdd-phase-state.js record-refactor <TICKET_ID> --cmd "<broader test command>"
+# Script runs the test command — tests MUST still PASS
+# If more behaviors to implement:
+node ${CLAUDE_PLUGIN_ROOT}/workflows/work-implement/tdd-phase-state.js transition <TICKET_ID> red
+# If done with all behaviors: proceed to Step 3
+```
+
+**Important:**
+- Evidence is recorded by the SCRIPT, not by agents — the script runs `git diff` and test commands itself
+- Do NOT make local git commits during the TDD loop — the commit step handles that
+- If the change is purely mechanical (config-only, no behavior change), skip the TDD loop entirely
 
 ### Step 3: Select and invoke the appropriate agent
 
@@ -171,13 +192,11 @@ Task(<agent-name>):
   Constraints:
   - Follow existing code patterns
   - Keep changes focused on the request
-  - Use TDD by default:
-    - Write focused failing tests first when behavior is testable
-    - Run targeted tests and confirm RED
-    - Implement the minimum fix
-    - Rerun targeted tests and confirm GREEN
-    - Record TDD evidence via `record-tdd` CLI before completing
-    - Refactor after GREEN
+  - TDD is enforced by hooks:
+    - RED phase: only test files can be modified
+    - GREEN phase: only production code can be modified
+    - REFACTOR phase: no restrictions
+    - Use tdd-phase-state.js CLI for evidence recording and phase transitions
   - Add appropriate tests
 ```
 
@@ -185,17 +204,15 @@ Task(<agent-name>):
 
 After agent completes:
 
-1. Re-run the exact targeted tests used in the RED/GREEN loop
-2. Then run broader checks:
-
+1. Verify TDD phase evidence exists:
 ```bash
-# Quick checks on changed files only (preferred during development)
-pnpm dev:check   # Runs: dev:lint → dev:typecheck → dev:test
+node ${CLAUDE_PLUGIN_ROOT}/workflows/work-implement/tdd-phase-state.js current <TICKET_ID>
+# Should show the current phase and cycle count
+```
 
-# Or run individually:
-pnpm dev:lint      # Lint only changed JS/TS files
-pnpm dev:typecheck # Typecheck only changed TS files
-pnpm dev:test      # Unit tests for changed files (excludes smoke/e2e)
+2. Then run broader checks:
+```bash
+pnpm dev:check   # Runs: dev:lint → dev:typecheck → dev:test
 ```
 
 Fix any issues before completing.
@@ -211,7 +228,7 @@ Fix any issues before completing.
 
 **When called from `/work` orchestrator (orchestrator plan exists with subsequent steps):**
 
-Still update `$HOME/worktrees/tasks/${TICKET_ID}/implement.md` with results (same as normal mode) and record TDD evidence.
+Still update `$HOME/worktrees/tasks/${TICKET_ID}/implement.md` with results (same as normal mode).
 
 Then return a brief completion signal and hand control back to the orchestrator. Do NOT prompt the user for next steps or display a "Next steps" list.
 

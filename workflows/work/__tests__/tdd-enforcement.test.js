@@ -5,10 +5,9 @@
  *   - WORK_TDD_ENFORCE toggle behavior
  *   - Prompt augmentation (TDD_PROTOCOL injection)
  *   - Gate enforcement (transition blocking without evidence)
- *   - record-tdd subcommand
  *
  * Uses node:test + node:assert/strict.
- * Run: node --test hooks/__tests__/tdd-enforcement.test.js
+ * Run: node --test workflows/work/__tests__/tdd-enforcement.test.js
  */
 
 const { describe, it, after, afterEach, before } = require('node:test');
@@ -108,6 +107,68 @@ async function transitionTo(ticket, targetStep, envExtra = {}) {
   return lastResult;
 }
 
+/**
+ * Write a valid tdd-phase.json with a complete cycle (red + green + refactor).
+ */
+function writeValidPhaseState(ticket) {
+  const ticketDir = path.join(tempTasksBase, ticket);
+  fs.mkdirSync(ticketDir, { recursive: true });
+  const phasePath = path.join(ticketDir, 'tdd-phase.json');
+  const state = {
+    currentPhase: 'red',
+    currentCycle: 2,
+    cycles: [
+      {
+        cycle: 1,
+        red: {
+          testFiles: ['a.test.ts'],
+          testCommand: 'pnpm test',
+          testExitCode: 1,
+          timestamp: new Date().toISOString(),
+        },
+        green: {
+          testCommand: 'pnpm test',
+          testExitCode: 0,
+          timestamp: new Date().toISOString(),
+        },
+        refactor: {
+          testCommand: 'pnpm test',
+          testExitCode: 0,
+          timestamp: new Date().toISOString(),
+        },
+      },
+    ],
+  };
+  fs.writeFileSync(phasePath, JSON.stringify(state, null, 2));
+  return phasePath;
+}
+
+/**
+ * Write a partial tdd-phase.json with only red evidence (no green/refactor).
+ */
+function writePartialPhaseState(ticket) {
+  const ticketDir = path.join(tempTasksBase, ticket);
+  fs.mkdirSync(ticketDir, { recursive: true });
+  const phasePath = path.join(ticketDir, 'tdd-phase.json');
+  const state = {
+    currentPhase: 'green',
+    currentCycle: 1,
+    cycles: [
+      {
+        cycle: 1,
+        red: {
+          testFiles: ['a.test.ts'],
+          testCommand: 'pnpm test',
+          testExitCode: 1,
+          timestamp: new Date().toISOString(),
+        },
+      },
+    ],
+  };
+  fs.writeFileSync(phasePath, JSON.stringify(state, null, 2));
+  return phasePath;
+}
+
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe('TDD enforcement', () => {
@@ -126,7 +187,7 @@ describe('TDD enforcement', () => {
       });
       const implStep = result.plan.find(s => s.step === 'implement');
       assert.ok(implStep, '3_implement step must exist in plan');
-      assert.match(implStep.agentPrompt, /confirm RED/i);
+      assert.match(implStep.agentPrompt, /hook-enforced/i);
     });
 
     it('with WORK_TDD_ENFORCE=0: agentPrompt for 3_implement does NOT include TDD protocol', async () => {
@@ -135,16 +196,14 @@ describe('TDD enforcement', () => {
       });
       const implStep = result.plan.find(s => s.step === 'implement');
       assert.ok(implStep, '3_implement step must exist in plan');
-      assert.doesNotMatch(implStep.agentPrompt || '', /confirm RED/i);
+      assert.doesNotMatch(implStep.agentPrompt || '', /hook-enforced/i);
     });
 
     it('with WORK_TDD_ENFORCE empty: auto-detection kicks in and agentPrompt for 3_implement includes TDD protocol', async () => {
-      // Empty string falls through to auto-detection which checks the worktree dir,
-      // then falls back to process.cwd() (this project has test scripts in package.json)
       const { result } = await runOrchestrator(['plan', TICKET], { env: baseEnv({ WORK_TDD_ENFORCE: '' }) });
       const implStep = result.plan.find(s => s.step === 'implement');
       assert.ok(implStep, '3_implement step must exist in plan');
-      assert.match(implStep.agentPrompt, /confirm RED/i);
+      assert.match(implStep.agentPrompt, /hook-enforced/i);
     });
 
     it('with WORK_TDD_ENFORCE=1: transition 3_implement -> commit BLOCKED without evidence', async () => {
@@ -177,13 +236,13 @@ describe('TDD enforcement', () => {
       assert.match(result.message, /TDD evidence/i);
     });
 
-    it('with WORK_TDD_ENFORCE=1: transition INTO 3_implement deletes stale evidence', async () => {
-      // Setup: create a stale evidence file
+    it('with WORK_TDD_ENFORCE=1: transition INTO 3_implement deletes stale tdd-phase.json', async () => {
+      // Setup: create a stale phase state file
       const ticketDir = path.join(tempTasksBase, TICKET);
       fs.mkdirSync(ticketDir, { recursive: true });
-      const evidencePath = path.join(ticketDir, '.tdd-evidence-implement.json');
-      fs.writeFileSync(evidencePath, JSON.stringify({ step: 'implement', stale: true }));
-      assert.ok(fs.existsSync(evidencePath), 'Stale evidence should exist before transition');
+      const phasePath = path.join(ticketDir, 'tdd-phase.json');
+      fs.writeFileSync(phasePath, JSON.stringify({ currentPhase: 'red', currentCycle: 1, cycles: [] }));
+      assert.ok(fs.existsSync(phasePath), 'Stale phase state should exist before transition');
 
       // Transition linearly to 3_implement
       await runOrchestrator(['transition', TICKET, 'bootstrap'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
@@ -191,32 +250,21 @@ describe('TDD enforcement', () => {
       await runOrchestrator(['transition', TICKET, 'spec'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
       await runOrchestrator(['transition', TICKET, 'implement'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
 
-      assert.ok(!fs.existsSync(evidencePath), 'Stale evidence should be deleted when entering 3_implement');
+      assert.ok(!fs.existsSync(phasePath), 'Stale phase state should be deleted when entering 3_implement');
     });
 
-    it('with WORK_TDD_ENFORCE=0: transition INTO 3_implement does NOT delete existing evidence files', async () => {
+    it('with WORK_TDD_ENFORCE=0: transition INTO 3_implement does NOT delete existing tdd-phase.json', async () => {
       const ticketDir = path.join(tempTasksBase, TICKET);
       fs.mkdirSync(ticketDir, { recursive: true });
-      const evidencePath = path.join(ticketDir, '.tdd-evidence-implement.json');
-      fs.writeFileSync(evidencePath, JSON.stringify({ step: 'implement', kept: true }));
+      const phasePath = path.join(ticketDir, 'tdd-phase.json');
+      fs.writeFileSync(phasePath, JSON.stringify({ currentPhase: 'red', currentCycle: 1, cycles: [] }));
 
       await runOrchestrator(['transition', TICKET, 'bootstrap'], { env: baseEnv({ WORK_TDD_ENFORCE: '0' }) });
       await runOrchestrator(['transition', TICKET, 'brief'], { env: baseEnv({ WORK_TDD_ENFORCE: '0' }) });
       await runOrchestrator(['transition', TICKET, 'spec'], { env: baseEnv({ WORK_TDD_ENFORCE: '0' }) });
       await runOrchestrator(['transition', TICKET, 'implement'], { env: baseEnv({ WORK_TDD_ENFORCE: '0' }) });
 
-      assert.ok(fs.existsSync(evidencePath), 'Evidence file should NOT be deleted when WORK_TDD_ENFORCE=0');
-    });
-
-    it('record-tdd works regardless of WORK_TDD_ENFORCE value (always writes evidence)', async () => {
-      const { result, code } = await runOrchestrator(
-        ['record-tdd', TICKET, 'implement', '--exception', 'config only change'],
-        { env: baseEnv({ WORK_TDD_ENFORCE: '0' }) },
-      );
-      assert.equal(code, 0);
-      assert.equal(result.recorded, true);
-      const evidencePath = path.join(tempTasksBase, TICKET, '.tdd-evidence-implement.json');
-      assert.ok(fs.existsSync(evidencePath), 'Evidence should be written even with WORK_TDD_ENFORCE=0');
+      assert.ok(fs.existsSync(phasePath), 'Phase state file should NOT be deleted when WORK_TDD_ENFORCE=0');
     });
   });
 
@@ -236,7 +284,7 @@ describe('TDD enforcement', () => {
       assert.ok(implStep.agentPrompt.includes('TDD protocol'), 'Should include TDD protocol header');
     });
 
-it('agentPrompt for 3_implement contains instruction not to make local commits', async () => {
+    it('agentPrompt for 3_implement contains instruction not to make local commits', async () => {
       const { result } = await runOrchestrator(['plan', TICKET], {
         env: baseEnv({ WORK_TDD_ENFORCE: '1' }),
       });
@@ -246,13 +294,13 @@ it('agentPrompt for 3_implement contains instruction not to make local commits',
       assert.ok(hasNoCommit, 'agentPrompt should instruct not to make local commits');
     });
 
-    it('agentPrompt for 3_implement contains the real orchestrator path', async () => {
+    it('agentPrompt for 3_implement contains the real tdd-phase-state.js path', async () => {
       const { result } = await runOrchestrator(['plan', TICKET], {
         env: baseEnv({ WORK_TDD_ENFORCE: '1' }),
       });
       const implStep = result.plan.find(s => s.step === 'implement');
-      const realPath = path.join(__dirname, '..', 'work.workflow.js');
-      assert.ok(implStep.agentPrompt.includes(realPath), 'Should contain the real orchestrator path');
+      const tddStatePath = path.join(__dirname, '..', '..', 'work-implement', 'tdd-phase-state.js');
+      assert.ok(implStep.agentPrompt.includes(tddStatePath), 'Should contain the real tdd-phase-state.js path');
     });
 
     it('agentPrompt for 3_implement contains the real ticket ID', async () => {
@@ -263,12 +311,12 @@ it('agentPrompt for 3_implement contains instruction not to make local commits',
       assert.ok(implStep.agentPrompt.includes(TICKET), 'Should contain the real ticket ID');
     });
 
-    it('agentPrompt for 3_implement does not contain literal <ORCHESTRATOR_PATH>', async () => {
+    it('agentPrompt for 3_implement does not contain literal <TDD_STATE_PATH>', async () => {
       const { result } = await runOrchestrator(['plan', TICKET], {
         env: baseEnv({ WORK_TDD_ENFORCE: '1' }),
       });
       const implStep = result.plan.find(s => s.step === 'implement');
-      assert.doesNotMatch(implStep.agentPrompt, /<ORCHESTRATOR_PATH>/);
+      assert.doesNotMatch(implStep.agentPrompt, /<TDD_STATE_PATH>/);
     });
 
     it('agentPrompt for 3_implement does not contain literal <TICKET_ID>', async () => {
@@ -279,21 +327,14 @@ it('agentPrompt for 3_implement contains instruction not to make local commits',
       assert.doesNotMatch(implStep.agentPrompt, /<TICKET_ID>/);
     });
 
-    it('agentPrompt for 3_implement does not contain literal <step_id>', async () => {
+    it('agentPrompt for 3_implement contains record-red command reference', async () => {
       const { result } = await runOrchestrator(['plan', TICKET], {
         env: baseEnv({ WORK_TDD_ENFORCE: '1' }),
       });
       const implStep = result.plan.find(s => s.step === 'implement');
-      assert.doesNotMatch(implStep.agentPrompt, /<step_id>/);
-    });
-
-    it('agentPrompt for 3_implement contains literal string 3_implement in the record-tdd command', async () => {
-      const { result } = await runOrchestrator(['plan', TICKET], {
-        env: baseEnv({ WORK_TDD_ENFORCE: '1' }),
-      });
-      const implStep = result.plan.find(s => s.step === 'implement');
-      assert.ok(implStep.agentPrompt.includes('record-tdd'), 'Should contain record-tdd command');
-      assert.ok(implStep.agentPrompt.includes('implement'), 'Should contain 3_implement in record-tdd');
+      assert.ok(implStep.agentPrompt.includes('record-red'), 'Should contain record-red command');
+      assert.ok(implStep.agentPrompt.includes('record-green'), 'Should contain record-green command');
+      assert.ok(implStep.agentPrompt.includes('record-refactor'), 'Should contain record-refactor command');
     });
 
   });
@@ -316,13 +357,9 @@ it('agentPrompt for 3_implement contains instruction not to make local commits',
       assert.match(result.message, /TDD evidence/i);
     });
 
-    it('transition 3_implement -> commit ALLOWED with valid evidence file', async () => {
+    it('transition 3_implement -> commit ALLOWED with valid tdd-phase.json (complete cycle)', async () => {
       await transitionTo(TICKET, 'implement', { WORK_TDD_ENFORCE: '1' });
-      // Record valid evidence via exception mode (avoids dev-check.sh in test env)
-      await runOrchestrator(
-        ['record-tdd', TICKET, 'implement', '--exception', 'test validation'],
-        { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) },
-      );
+      writeValidPhaseState(TICKET);
       const { result } = await runOrchestrator(
         ['transition', TICKET, 'commit'],
         { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) },
@@ -331,13 +368,20 @@ it('agentPrompt for 3_implement contains instruction not to make local commits',
       assert.equal(result.to, 'commit');
     });
 
-    it('transition 3_implement -> commit ALLOWED with exception evidence', async () => {
+    it('transition 3_implement -> commit ALLOWED with partial cycle (red + green, no refactor)', async () => {
       await transitionTo(TICKET, 'implement', { WORK_TDD_ENFORCE: '1' });
-      // Record exception evidence
-      await runOrchestrator(
-        ['record-tdd', TICKET, 'implement', '--exception', 'config only change'],
-        { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) },
-      );
+      const ticketDir = path.join(tempTasksBase, TICKET);
+      fs.mkdirSync(ticketDir, { recursive: true });
+      const phasePath = path.join(ticketDir, 'tdd-phase.json');
+      fs.writeFileSync(phasePath, JSON.stringify({
+        currentPhase: 'refactor',
+        currentCycle: 1,
+        cycles: [{
+          cycle: 1,
+          red: { testFiles: ['a.test.ts'], testCommand: 'pnpm test', testExitCode: 1, timestamp: new Date().toISOString() },
+          green: { testCommand: 'pnpm test', testExitCode: 0, timestamp: new Date().toISOString() },
+        }],
+      }));
       const { result } = await runOrchestrator(
         ['transition', TICKET, 'commit'],
         { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) },
@@ -346,118 +390,64 @@ it('agentPrompt for 3_implement contains instruction not to make local commits',
       assert.equal(result.to, 'commit');
     });
 
-    it('evidence with redConfirmed: false, greenConfirmed: true, no exception -> BLOCKED', async () => {
+    it('phase state with only red evidence (no green) -> BLOCKED', async () => {
       await transitionTo(TICKET, 'implement', { WORK_TDD_ENFORCE: '1' });
-      const evidencePath = path.join(tempTasksBase, TICKET, '.tdd-evidence-implement.json');
-      fs.writeFileSync(evidencePath, JSON.stringify({
-        step: 'implement',
-        targetedTestCommand: 'pnpm test',
-        redConfirmed: false,
-        greenConfirmed: true,
-        testFilesChanged: ['a.test.ts'],
-        exceptionReason: '',
-      }));
-
+      writePartialPhaseState(TICKET);
       const { result } = await runOrchestrator(
         ['transition', TICKET, 'commit'],
         { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) },
       );
       assert.equal(result.error, true);
-      assert.match(result.message, /redConfirmed/i);
+      assert.match(result.message, /RED.*GREEN/i);
     });
 
-    it('evidence with whitespace-only targetedTestCommand -> BLOCKED', async () => {
+    it('phase state with empty cycles array -> BLOCKED', async () => {
       await transitionTo(TICKET, 'implement', { WORK_TDD_ENFORCE: '1' });
-      const evidencePath = path.join(tempTasksBase, TICKET, '.tdd-evidence-implement.json');
-      fs.writeFileSync(evidencePath, JSON.stringify({
-        step: 'implement',
-        targetedTestCommand: '   ',
-        redConfirmed: true,
-        greenConfirmed: true,
-        testFilesChanged: ['a.test.ts'],
-        exceptionReason: '',
+      const ticketDir = path.join(tempTasksBase, TICKET);
+      fs.mkdirSync(ticketDir, { recursive: true });
+      const phasePath = path.join(ticketDir, 'tdd-phase.json');
+      fs.writeFileSync(phasePath, JSON.stringify({
+        currentPhase: 'red',
+        currentCycle: 1,
+        cycles: [],
       }));
-
       const { result } = await runOrchestrator(
         ['transition', TICKET, 'commit'],
         { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) },
       );
       assert.equal(result.error, true);
-      assert.match(result.message, /targetedTestCommand/i);
+      assert.match(result.message, /No TDD cycles/i);
     });
 
-    it('evidence with empty testFilesChanged and no exception -> BLOCKED', async () => {
-      await transitionTo(TICKET, 'implement', { WORK_TDD_ENFORCE: '1' });
-      const evidencePath = path.join(tempTasksBase, TICKET, '.tdd-evidence-implement.json');
-      fs.writeFileSync(evidencePath, JSON.stringify({
-        step: 'implement',
-        targetedTestCommand: 'pnpm test',
-        redConfirmed: true,
-        greenConfirmed: true,
-        testFilesChanged: [],
-        exceptionReason: '',
-      }));
-
-      const { result } = await runOrchestrator(
-        ['transition', TICKET, 'commit'],
-        { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) },
-      );
-      assert.equal(result.error, true);
-      assert.match(result.message, /testFilesChanged/i);
-    });
-
-    it('evidence with greenConfirmed: false and no exceptionReason is BLOCKED', async () => {
-      await transitionTo(TICKET, 'implement', { WORK_TDD_ENFORCE: '1' });
-      const evidencePath = path.join(tempTasksBase, TICKET, '.tdd-evidence-implement.json');
-      fs.writeFileSync(evidencePath, JSON.stringify({
-        step: 'implement',
-        targetedTestCommand: 'pnpm test',
-        redConfirmed: true,
-        greenConfirmed: false,
-        testFilesChanged: ['a.test.ts'],
-        exceptionReason: '',
-      }));
-
-      const { result } = await runOrchestrator(
-        ['transition', TICKET, 'commit'],
-        { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) },
-      );
-      assert.equal(result.error, true);
-      assert.match(result.message, /greenConfirmed/i);
-    });
-
-    it('transition INTO 3_implement (from 6_check) deletes existing .tdd-evidence-implement.json', async () => {
+    it('transition INTO 3_implement (from 6_check) deletes existing tdd-phase.json', async () => {
       // Walk to implement linearly
       await runOrchestrator(['transition', TICKET, 'bootstrap'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
       await runOrchestrator(['transition', TICKET, 'brief'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
       await runOrchestrator(['transition', TICKET, 'spec'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
       await runOrchestrator(['transition', TICKET, 'implement'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
 
-      // Record evidence so we can leave 3_implement (use exception mode to avoid dev-check.sh)
-      await runOrchestrator(
-        ['record-tdd', TICKET, 'implement', '--exception', 'test setup'],
-        { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) },
-      );
+      // Record valid evidence so we can leave 3_implement
+      writeValidPhaseState(TICKET);
       await runOrchestrator(['transition', TICKET, 'commit'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
       await runOrchestrator(['transition', TICKET, 'check'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
 
-      // Now create a stale evidence file for 3_implement
-      const evidencePath = path.join(tempTasksBase, TICKET, '.tdd-evidence-implement.json');
-      fs.writeFileSync(evidencePath, JSON.stringify({ step: 'implement', stale: true }));
-      assert.ok(fs.existsSync(evidencePath));
+      // Now create a stale phase state file for 3_implement
+      const phasePath = path.join(tempTasksBase, TICKET, 'tdd-phase.json');
+      fs.writeFileSync(phasePath, JSON.stringify({ currentPhase: 'red', currentCycle: 1, cycles: [] }));
+      assert.ok(fs.existsSync(phasePath));
 
       // Transition back INTO 3_implement
       await runOrchestrator(['transition', TICKET, 'implement'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
-      assert.ok(!fs.existsSync(evidencePath), 'Evidence file should be deleted on entry to 3_implement');
+      assert.ok(!fs.existsSync(phasePath), 'Phase state file should be deleted on entry to 3_implement');
     });
 
-    it('transition INTO 3_implement with no prior evidence file does not error (ENOENT handled)', async () => {
+    it('transition INTO 3_implement with no prior tdd-phase.json does not error (ENOENT handled)', async () => {
       await runOrchestrator(['transition', TICKET, 'bootstrap'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
       await runOrchestrator(['transition', TICKET, 'brief'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
       await runOrchestrator(['transition', TICKET, 'spec'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
-      // Make sure no evidence file exists
-      const evidencePath = path.join(tempTasksBase, TICKET, '.tdd-evidence-implement.json');
-      try { fs.unlinkSync(evidencePath); } catch {}
+      // Make sure no phase state file exists
+      const phasePath = path.join(tempTasksBase, TICKET, 'tdd-phase.json');
+      try { fs.unlinkSync(phasePath); } catch {}
 
       const { result } = await runOrchestrator(
         ['transition', TICKET, 'implement'],
@@ -466,10 +456,10 @@ it('agentPrompt for 3_implement contains instruction not to make local commits',
       assert.equal(result.success, true);
     });
 
-    it('corrupt JSON evidence file -> BLOCKED', async () => {
+    it('corrupt JSON tdd-phase.json -> BLOCKED', async () => {
       await transitionTo(TICKET, 'implement', { WORK_TDD_ENFORCE: '1' });
-      const evidencePath = path.join(tempTasksBase, TICKET, '.tdd-evidence-implement.json');
-      fs.writeFileSync(evidencePath, '{corrupt json!!!');
+      const phasePath = path.join(tempTasksBase, TICKET, 'tdd-phase.json');
+      fs.writeFileSync(phasePath, '{corrupt json!!!');
 
       const { result } = await runOrchestrator(
         ['transition', TICKET, 'commit'],
@@ -479,32 +469,24 @@ it('agentPrompt for 3_implement contains instruction not to make local commits',
       assert.match(result.message, /TDD evidence/i);
     });
 
-    it('evidence file with wrong step value -> BLOCKED', async () => {
+    it('phase state with null evidence -> BLOCKED', async () => {
       await transitionTo(TICKET, 'implement', { WORK_TDD_ENFORCE: '1' });
-      const evidencePath = path.join(tempTasksBase, TICKET, '.tdd-evidence-implement.json');
-      fs.writeFileSync(evidencePath, JSON.stringify({
-        step: 'wrong_step',
-        targetedTestCommand: 'pnpm test',
-        redConfirmed: true,
-        greenConfirmed: true,
-        testFilesChanged: ['a.test.ts'],
-        exceptionReason: '',
-      }));
+      const phasePath = path.join(tempTasksBase, TICKET, 'tdd-phase.json');
+      fs.writeFileSync(phasePath, 'null');
 
       const { result } = await runOrchestrator(
         ['transition', TICKET, 'commit'],
         { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) },
       );
       assert.equal(result.error, true);
-      assert.match(result.message, /Step mismatch/i);
     });
 
-    it('evidence file with missing required keys -> BLOCKED', async () => {
+    it('phase state without cycles key -> BLOCKED', async () => {
       await transitionTo(TICKET, 'implement', { WORK_TDD_ENFORCE: '1' });
-      const evidencePath = path.join(tempTasksBase, TICKET, '.tdd-evidence-implement.json');
-      fs.writeFileSync(evidencePath, JSON.stringify({
-        step: 'implement',
-        // Missing: targetedTestCommand, redConfirmed, greenConfirmed, testFilesChanged
+      const phasePath = path.join(tempTasksBase, TICKET, 'tdd-phase.json');
+      fs.writeFileSync(phasePath, JSON.stringify({
+        currentPhase: 'red',
+        currentCycle: 1,
       }));
 
       const { result } = await runOrchestrator(
@@ -512,55 +494,30 @@ it('agentPrompt for 3_implement contains instruction not to make local commits',
         { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) },
       );
       assert.equal(result.error, true);
-      assert.match(result.message, /invalid/i);
+      assert.match(result.message, /No TDD cycles/i);
     });
 
-    it('evidence file with greenConfirmed: "true" (string instead of boolean) -> BLOCKED', async () => {
+    it('transition 3_implement -> commit ALLOWED with exception-based tdd-phase.json', async () => {
       await transitionTo(TICKET, 'implement', { WORK_TDD_ENFORCE: '1' });
-      const evidencePath = path.join(tempTasksBase, TICKET, '.tdd-evidence-implement.json');
-      fs.writeFileSync(evidencePath, JSON.stringify({
-        step: 'implement',
-        targetedTestCommand: 'pnpm test',
-        redConfirmed: 'true',
-        greenConfirmed: 'true',
-        testFilesChanged: ['a.test.ts'],
-        exceptionReason: '',
+      const ticketDir = path.join(tempTasksBase, TICKET);
+      fs.mkdirSync(ticketDir, { recursive: true });
+      const phasePath = path.join(ticketDir, 'tdd-phase.json');
+      fs.writeFileSync(phasePath, JSON.stringify({
+        currentPhase: 'exception',
+        exception: 'config-only change, no testable behavior',
+        cycles: [],
       }));
-
       const { result } = await runOrchestrator(
         ['transition', TICKET, 'commit'],
         { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) },
       );
-      assert.equal(result.error, true);
-      assert.match(result.message, /boolean/i);
-    });
-
-    it('evidence file with exceptionReason: "  " (whitespace-only after trim) -> BLOCKED', async () => {
-      await transitionTo(TICKET, 'implement', { WORK_TDD_ENFORCE: '1' });
-      const evidencePath = path.join(tempTasksBase, TICKET, '.tdd-evidence-implement.json');
-      fs.writeFileSync(evidencePath, JSON.stringify({
-        step: 'implement',
-        targetedTestCommand: '',
-        redConfirmed: false,
-        greenConfirmed: false,
-        testFilesChanged: [],
-        exceptionReason: '   ',
-      }));
-
-      const { result } = await runOrchestrator(
-        ['transition', TICKET, 'commit'],
-        { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) },
-      );
-      assert.equal(result.error, true);
+      assert.equal(result.success, true);
+      assert.equal(result.to, 'commit');
     });
 
     it('current commit -> check does not consult TDD evidence (non-gated step)', async () => {
       await transitionTo(TICKET, 'implement', { WORK_TDD_ENFORCE: '1' });
-      // Record evidence so we can leave 3_implement (use exception mode to avoid dev-check.sh)
-      await runOrchestrator(
-        ['record-tdd', TICKET, 'implement', '--exception', 'test setup'],
-        { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) },
-      );
+      writeValidPhaseState(TICKET);
       await runOrchestrator(['transition', TICKET, 'commit'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
 
       // Now try commit -> check without any evidence for commit (non-gated)
@@ -570,125 +527,6 @@ it('agentPrompt for 3_implement contains instruction not to make local commits',
       );
       assert.equal(result.success, true);
       assert.equal(result.to, 'check');
-    });
-  });
-
-  // ═══════════════════════════════════════════════════════════════════════════
-  // record-tdd subcommand tests
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  describe('record-tdd subcommand', () => {
-    const TICKET = 'TDDR-400';
-    afterEach(() => { cleanupTempWorkState(TICKET); });
-
-    it('record-tdd with normal flags creates valid evidence file', async () => {
-      const { result, code, stderr } = await runOrchestrator(
-        ['record-tdd', TICKET, 'implement', '--cmd', 'pnpm test', '--red', '--green', '--refactored', '--files', 'a.test.ts'],
-        { env: { ...baseEnv(), DEV_CHECK_SCRIPT: '/dev/null' } },
-      );
-      assert.equal(code, 0);
-      assert.equal(result.recorded, true);
-
-      // Read the file and validate
-      const evidencePath = path.join(tempTasksBase, TICKET, '.tdd-evidence-implement.json');
-      const evidence = JSON.parse(fs.readFileSync(evidencePath, 'utf-8'));
-      assert.equal(evidence.step, 'implement');
-      assert.equal(evidence.targetedTestCommand, 'pnpm test');
-      assert.equal(evidence.redConfirmed, true);
-      assert.equal(evidence.greenConfirmed, true);
-      assert.equal(evidence.refactorConfirmed, true);
-      assert.equal(evidence.qualityCheckPassed, true);
-      assert.deepEqual(evidence.testFilesChanged, ['a.test.ts']);
-      assert.equal(evidence.exceptionReason, '');
-    });
-
-    it('record-tdd with --exception creates valid exception evidence file', async () => {
-      const { result, code } = await runOrchestrator(
-        ['record-tdd', TICKET, 'implement', '--exception', 'config only'],
-        { env: baseEnv() },
-      );
-      assert.equal(code, 0);
-      assert.equal(result.recorded, true);
-
-      const evidencePath = path.join(tempTasksBase, TICKET, '.tdd-evidence-implement.json');
-      const evidence = JSON.parse(fs.readFileSync(evidencePath, 'utf-8'));
-      assert.equal(evidence.step, 'implement');
-      assert.equal(evidence.exceptionReason, 'config only');
-      assert.equal(evidence.redConfirmed, false);
-      assert.equal(evidence.greenConfirmed, false);
-      assert.deepEqual(evidence.testFilesChanged, []);
-    });
-
-    it('record-tdd for non-gated step rejects (exit code 1)', async () => {
-      const { code, stderr } = await runOrchestrator(
-        ['record-tdd', TICKET, 'commit', '--cmd', 'pnpm test', '--red', '--green', '--refactored', '--files', 'a.test.ts'],
-        { env: baseEnv() },
-      );
-      assert.equal(code, 1);
-      assert.ok(stderr.includes('invalid_step') || stderr.includes('not a TDD-gated step'));
-    });
-
-    it('record-tdd without required flags returns error on stderr (exit code 1)', async () => {
-      const { code, stderr } = await runOrchestrator(
-        ['record-tdd', TICKET, 'implement'],
-        { env: baseEnv() },
-      );
-      assert.equal(code, 1);
-      assert.ok(stderr.includes('missing_flag') || stderr.includes('required'));
-    });
-
-    it('record-tdd with --green but without --cmd returns error', async () => {
-      const { code, stderr } = await runOrchestrator(
-        ['record-tdd', TICKET, 'implement', '--green', '--red', '--files', 'a.test.ts'],
-        { env: baseEnv() },
-      );
-      assert.equal(code, 1);
-      assert.ok(stderr.includes('--cmd') || stderr.includes('missing_flag'));
-    });
-
-    it('record-tdd with empty --files (comma-only) returns error', async () => {
-      const { code, stderr } = await runOrchestrator(
-        ['record-tdd', 'TEST-EMPTY', 'implement', '--cmd', 'pnpm test', '--red', '--green', '--refactored', '--files', ','],
-        { env: baseEnv() },
-      );
-      assert.equal(code, 1);
-      assert.ok(stderr.includes('at least one test file'));
-    });
-
-    it('calling record-tdd twice overwrites previous evidence cleanly', async () => {
-      // Use exception mode to avoid dev-check.sh dependency
-      // First call
-      await runOrchestrator(
-        ['record-tdd', TICKET, 'implement', '--exception', 'first pass'],
-        { env: baseEnv() },
-      );
-
-      // Second call with different values
-      const { result, code } = await runOrchestrator(
-        ['record-tdd', TICKET, 'implement', '--exception', 'second pass'],
-        { env: baseEnv() },
-      );
-      assert.equal(code, 0);
-      assert.equal(result.recorded, true);
-
-      // Verify it was overwritten
-      const evidencePath = path.join(tempTasksBase, TICKET, '.tdd-evidence-implement.json');
-      const evidence = JSON.parse(fs.readFileSync(evidencePath, 'utf-8'));
-      assert.equal(evidence.exceptionReason, 'second pass');
-    });
-
-    it('record-tdd with path-traversal ticket ID returns error, no file outside tasks dir', async () => {
-      const { code, stderr } = await runOrchestrator(
-        ['record-tdd', '../../etc', 'implement', '--exception', 'test'],
-        { env: baseEnv() },
-      );
-      assert.equal(code, 1);
-      assert.ok(stderr.includes('Invalid ticket id') || stderr.includes('invalid'),
-        'Should reject path-traversal ticket ID');
-
-      // Verify no file written outside tasks dir
-      const outsidePath = path.resolve(tempTasksBase, '../../etc', '.tdd-evidence-implement.json');
-      assert.ok(!fs.existsSync(outsidePath), 'No file should be written outside tasks dir');
     });
   });
 

@@ -201,6 +201,18 @@ describe('work-implement-enforce hook', () => {
     });
   });
 
+  it('should BLOCK direct edits to tdd-phase.json even when /work-implement active', async () => {
+    const tp = path.join(os.tmpdir(), `test-wie-tdd-${Date.now()}.jsonl`);
+    fs.writeFileSync(tp, '# Implement Command\n');
+    const { result } = await runHook({
+      tool_name: 'Write',
+      tool_input: { file_path: '/home/node/project/tasks/TEST-123/tdd-phase.json' },
+      transcript_path: tp
+    });
+    assert.strictEqual(result.decision, 'block');
+    assert.ok(result.reason.includes('tdd-phase.json'), 'Should mention tdd-phase.json in block message');
+  });
+
   it('should APPROVE on parse error (JSON.parse in main fails, main().catch fires)', async () => {
     const proc = spawn('node', [HOOK_PATH], { stdio: ['pipe', 'pipe', 'pipe'] });
     const exitCode = await new Promise((resolve) => {
@@ -211,5 +223,127 @@ describe('work-implement-enforce hook', () => {
     // work-implement-enforce uses raw JSON.parse (no try/catch), so invalid JSON
     // throws and is caught by main().catch which exits 0 to avoid blocking
     assert.strictEqual(exitCode === 2 ? 'block' : 'approve', 'approve');
+  });
+
+  describe('TDD phase enforcement', () => {
+    let tempTasksBase;
+
+    function createTddPhaseState(ticketId, phase) {
+      const ticketDir = path.join(tempTasksBase, ticketId);
+      fs.mkdirSync(ticketDir, { recursive: true });
+      const statePath = path.join(ticketDir, 'tdd-phase.json');
+      fs.writeFileSync(statePath, JSON.stringify({
+        currentPhase: phase,
+        currentCycle: 1,
+        cycles: [],
+      }));
+      return statePath;
+    }
+
+    function makeTranscript() {
+      const tp = path.join(os.tmpdir(), `test-wie-tdd-${Date.now()}-${Math.random().toString(36).slice(2)}.jsonl`);
+      fs.writeFileSync(tp, '# Implement Command\n"subagent_type": "developer-nodejs-tdd"\n');
+      return tp;
+    }
+
+    it('should BLOCK production file during RED phase', async () => {
+      tempTasksBase = fs.mkdtempSync(path.join(os.tmpdir(), 'tdd-enforce-'));
+      const ticketId = 'TDD-HOOK-1';
+      createTddPhaseState(ticketId, 'red');
+      const tp = makeTranscript();
+
+      const { result } = await runHookWithEnv({
+        tool_name: 'Write',
+        tool_input: { file_path: '/home/node/project/src/app.ts' },
+        transcript_path: tp,
+      }, { TASKS_BASE: tempTasksBase, TICKET_ID: ticketId });
+
+      assert.strictEqual(result.decision, 'block');
+      assert.ok(result.reason.includes('RED phase'), 'Should mention RED phase in block message');
+      fs.rmSync(tempTasksBase, { recursive: true, force: true });
+    });
+
+    it('should APPROVE test file during RED phase', async () => {
+      tempTasksBase = fs.mkdtempSync(path.join(os.tmpdir(), 'tdd-enforce-'));
+      const ticketId = 'TDD-HOOK-2';
+      createTddPhaseState(ticketId, 'red');
+      const tp = makeTranscript();
+
+      const { result } = await runHookWithEnv({
+        tool_name: 'Write',
+        tool_input: { file_path: '/home/node/project/src/app.test.ts' },
+        transcript_path: tp,
+      }, { TASKS_BASE: tempTasksBase, TICKET_ID: ticketId });
+
+      assert.strictEqual(result.decision, 'approve');
+      fs.rmSync(tempTasksBase, { recursive: true, force: true });
+    });
+
+    it('should BLOCK test file during GREEN phase', async () => {
+      tempTasksBase = fs.mkdtempSync(path.join(os.tmpdir(), 'tdd-enforce-'));
+      const ticketId = 'TDD-HOOK-3';
+      createTddPhaseState(ticketId, 'green');
+      const tp = makeTranscript();
+
+      const { result } = await runHookWithEnv({
+        tool_name: 'Write',
+        tool_input: { file_path: '/home/node/project/src/app.test.ts' },
+        transcript_path: tp,
+      }, { TASKS_BASE: tempTasksBase, TICKET_ID: ticketId });
+
+      assert.strictEqual(result.decision, 'block');
+      assert.ok(result.reason.includes('GREEN phase'), 'Should mention GREEN phase in block message');
+      fs.rmSync(tempTasksBase, { recursive: true, force: true });
+    });
+
+    it('should APPROVE production file during GREEN phase', async () => {
+      tempTasksBase = fs.mkdtempSync(path.join(os.tmpdir(), 'tdd-enforce-'));
+      const ticketId = 'TDD-HOOK-4';
+      createTddPhaseState(ticketId, 'green');
+      const tp = makeTranscript();
+
+      const { result } = await runHookWithEnv({
+        tool_name: 'Write',
+        tool_input: { file_path: '/home/node/project/src/app.ts' },
+        transcript_path: tp,
+      }, { TASKS_BASE: tempTasksBase, TICKET_ID: ticketId });
+
+      assert.strictEqual(result.decision, 'approve');
+      fs.rmSync(tempTasksBase, { recursive: true, force: true });
+    });
+
+    it('should APPROVE test helper (__mocks__) during GREEN phase', async () => {
+      tempTasksBase = fs.mkdtempSync(path.join(os.tmpdir(), 'tdd-enforce-'));
+      const ticketId = 'TDD-HOOK-5';
+      createTddPhaseState(ticketId, 'green');
+      const tp = makeTranscript();
+
+      const { result } = await runHookWithEnv({
+        tool_name: 'Write',
+        tool_input: { file_path: '/home/node/project/__mocks__/foo.js' },
+        transcript_path: tp,
+      }, { TASKS_BASE: tempTasksBase, TICKET_ID: ticketId });
+
+      assert.strictEqual(result.decision, 'approve');
+      fs.rmSync(tempTasksBase, { recursive: true, force: true });
+    });
+
+    it('should fall through to existing logic when no tdd-phase.json exists', async () => {
+      tempTasksBase = fs.mkdtempSync(path.join(os.tmpdir(), 'tdd-enforce-'));
+      const ticketId = 'TDD-HOOK-6';
+      // Do NOT create tdd-phase.json
+      const tp = makeTranscript();
+
+      const { result } = await runHookWithEnv({
+        tool_name: 'Write',
+        tool_input: { file_path: '/home/node/project/src/app.ts' },
+        transcript_path: tp,
+      }, { TASKS_BASE: tempTasksBase, TICKET_ID: ticketId });
+
+      // With developer agent in transcript and no TDD state, production files
+      // should be approved by the existing agent-check logic
+      assert.strictEqual(result.decision, 'approve');
+      fs.rmSync(tempTasksBase, { recursive: true, force: true });
+    });
   });
 });

@@ -116,15 +116,16 @@ const WORKFLOWS = [
         catch { return false; }
       }},
       { step: STEPS.implement, verify: (ticketId) => {
-        // Implement is proven if TDD evidence confirms green (or exception)
+        // Implement is proven if tdd-phase.json has at least one cycle with red + green evidence
         try {
-          const evidence = JSON.parse(fs.readFileSync(
-            path.join(TASKS_BASE, ticketId, '.tdd-evidence-implement.json'), 'utf-8'
+          const state = JSON.parse(fs.readFileSync(
+            path.join(TASKS_BASE, ticketId, 'tdd-phase.json'), 'utf-8'
           ));
-          // Normal TDD: refactorConfirmed must be true (full red-green-refactor cycle)
-          // Exception mode: refactorConfirmed=false is OK when exceptionReason is set (config-only, no testable behavior)
-          return evidence.refactorConfirmed === true
-            || (evidence.refactorConfirmed === false && !!evidence.exceptionReason);
+          // Exception mode: config-only or mechanical changes that skip TDD
+          if (typeof state.exception === 'string' && state.exception.trim() !== '') return true;
+          if (!Array.isArray(state.cycles) || state.cycles.length === 0) return false;
+          // At least one cycle must have both red and green evidence
+          return state.cycles.some(c => c.red && c.green);
         } catch { return false; }
       }},
       { step: STEPS.commit, verify: (ticketId) => {
@@ -377,6 +378,7 @@ const TRUSTED_SCRIPT_DIRS = [
   path.resolve(__dirname, '..', 'scripts'),          // workflows/lib/scripts/
   path.resolve(__dirname, '..', '..', 'work'),       // workflows/work/
   path.resolve(__dirname, '..', '..', 'check', 'scripts'), // workflows/check/scripts/
+  path.resolve(__dirname, '..', '..', 'work-implement'),   // workflows/work-implement/
 ];
 
 // Agent-gated writer scripts — map script basename to authorized agents.
@@ -387,6 +389,7 @@ const AGENT_GATED_SCRIPTS = {
   'write-tests-report.js':      ['quality-checker'],
   'write-code-review.js':       ['code-checker'],
   'write-completion-report.js':  ['completion-checker'],
+  'tdd-phase-state.js':         ['developer-nodejs-tdd', 'developer-react-senior', 'developer-react-ui-architect', 'developer-devops'],
 };
 
 const stateFileProtector = createFileProtector({
