@@ -1,1 +1,1 @@
-/home/thomfilg/p/w-claude-plugin/claude-plugin-work/workflows/work/skills/spec.md
+../../workflows/work/skills/spec.md

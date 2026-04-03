@@ -1,1 +1,1 @@
-/home/thomfilg/p/w-claude-plugin/claude-plugin-work/workflows/work-implement/skills/work-implement.md
+../../workflows/work-implement/skills/work-implement.md

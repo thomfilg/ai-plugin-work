@@ -730,7 +730,10 @@ function transitionStep(ticket, targetStep) {
     return { error: true, message: `Invalid step: "${targetStep}"`, validSteps: ALL_STEPS };
   }
 
-  let ws = loadWorkState(ticket);
+  const providerConfig = tp.getProviderConfig({ skipPrompt: true });
+  const safeTicket = tp.sanitizeTicketIdForPath(ticket, providerConfig);
+
+  let ws = loadWorkState(safeTicket);
   const currentStep = getCurrentStep(ws);
 
   if (!workflowCanTransition(currentStep, targetStep)) {
@@ -747,10 +750,10 @@ function transitionStep(ticket, targetStep) {
   // TDD gate: require evidence before leaving gated steps
   const tddEnforce = detectTestSetup(process.cwd());
   if (tddEnforce && TDD_GATED_STEPS.includes(currentStep) && currentStep !== targetStep) {
-    const { exists, parseError, evidence } = readTddEvidence(ticket, currentStep);
+    const { exists, parseError, evidence } = readTddEvidence(safeTicket, currentStep);
     if (!exists || parseError) {
       const tddStatePath = path.resolve(__dirname, '..', 'work-implement', 'tdd-phase-state.js');
-      const msg = `Cannot leave ${currentStep} without TDD evidence. Use the TDD phase system:\n  node ${tddStatePath} init ${ticket}\n  node ${tddStatePath} record-red ${ticket} --cmd "<test command>"\n  node ${tddStatePath} record-green ${ticket} --cmd "<test command>"\n  node ${tddStatePath} record-refactor ${ticket} --cmd "<test command>"`;
+      const msg = `Cannot leave ${currentStep} without TDD evidence. Use the TDD phase system:\n  node ${tddStatePath} init ${safeTicket}\n  node ${tddStatePath} record-red ${safeTicket} --cmd "<test command>"\n  node ${tddStatePath} record-green ${safeTicket} --cmd "<test command>"\n  node ${tddStatePath} record-refactor ${safeTicket} --cmd "<test command>"`;
       return { error: true, message: msg };
     }
     const validation = validateTddEvidence(evidence);
@@ -791,7 +794,7 @@ function transitionStep(ticket, targetStep) {
   // Blocks check→pr unless all reports exist, pass, and no agents are running.
   const isCheckToPr = currentStep === STEPS.check && targetStep === STEPS.pr;
   if (isCheckToPr) {
-    const checkGate = validateCheckGate(ticket);
+    const checkGate = validateCheckGate(safeTicket);
     if (!checkGate.valid) {
       return {
         error: true,
@@ -806,7 +809,7 @@ function transitionStep(ticket, targetStep) {
   // Stale evidence cleanup: reset TDD phase state when transitioning INTO a gated step
   if (tddEnforce && TDD_GATED_STEPS.includes(targetStep)) {
     try {
-      const phasePath = path.join(TASKS_BASE, ticket, 'tdd-phase.json');
+      const phasePath = path.join(TASKS_BASE, safeTicket, 'tdd-phase.json');
       fs.unlinkSync(phasePath);
     } catch (e) {
       if (e && e.code !== 'ENOENT') { /* ignore errors */ }
@@ -816,12 +819,12 @@ function transitionStep(ticket, targetStep) {
   // Initialize state if needed
   if (!ws) {
     ws = {
-      ticketId: ticket, description: '', currentStep: 1, status: 'in_progress',
+      ticketId: safeTicket, description: '', currentStep: 1, status: 'in_progress',
       stepStatus: {}, checkProgress: {},
       errors: [], startTime: new Date().toISOString(), lastUpdate: new Date().toISOString(),
     };
     ALL_STEPS.forEach(s => { ws.stepStatus[s] = 'pending'; });
-    appendAction(ticket, { step: STEPS.ticket, what: 'workflow started' });
+    appendAction(safeTicket, { step: STEPS.ticket, what: 'workflow started' });
   }
 
   const currentIdx = ALL_STEPS.indexOf(currentStep);
@@ -829,10 +832,10 @@ function transitionStep(ticket, targetStep) {
 
   // Mark current as completed
   ws.stepStatus[currentStep] = 'completed';
-  appendAction(ticket, { step: currentStep, what: 'step completed' });
+  appendAction(safeTicket, { step: currentStep, what: 'step completed' });
 
   ws.stepStatus[targetStep] = 'in_progress';
-  appendAction(ticket, { step: targetStep, what: 'step started' });
+  appendAction(safeTicket, { step: targetStep, what: 'step started' });
 
   ws.currentStep = targetIdx + 1;
 
@@ -842,12 +845,12 @@ function transitionStep(ticket, targetStep) {
     for (let i = targetIdx + 1; i <= currentIdx; i++) {
       ws.stepStatus[ALL_STEPS[i]] = 'pending';
       stepsToReset.push(ALL_STEPS[i]);
-      appendAction(ticket, { step: ALL_STEPS[i], what: 'step reset' });
+      appendAction(safeTicket, { step: ALL_STEPS[i], what: 'step reset' });
     }
-    const tasksDir = path.join(TASKS_BASE, ticket);
+    const tasksDir = path.join(TASKS_BASE, safeTicket);
     const archivePath = archiveStepArtifacts(tasksDir, stepsToReset);
     if (archivePath) {
-      appendAction(ticket, { step: currentStep, what: `artifacts archived to ${archivePath}` });
+      appendAction(safeTicket, { step: currentStep, what: `artifacts archived to ${archivePath}` });
     }
     // Clear stale DEFER metadata on backward transition (GH-154)
     ws.deferredSteps = [];
@@ -857,7 +860,7 @@ function transitionStep(ticket, targetStep) {
     for (let i = currentIdx + 1; i < targetIdx; i++) {
       if (ws.stepStatus[ALL_STEPS[i]] === 'pending') {
         ws.stepStatus[ALL_STEPS[i]] = 'completed';
-        appendAction(ticket, { step: ALL_STEPS[i], what: 'step skipped' });
+        appendAction(safeTicket, { step: ALL_STEPS[i], what: 'step skipped' });
       }
     }
   }
@@ -865,7 +868,7 @@ function transitionStep(ticket, targetStep) {
   // Track transition timestamp for DEFER re-evaluation gate (GH-154)
   ws.lastTransitionTimestamp = new Date().toISOString();
 
-  saveWorkState(ticket, ws);
+  saveWorkState(safeTicket, ws);
 
   return {
     success: true, from: currentStep, to: targetStep,
@@ -875,7 +878,9 @@ function transitionStep(ticket, targetStep) {
 }
 
 function getAvailableTransitions(ticket) {
-  const ws = loadWorkState(ticket);
+  const providerConfig = tp.getProviderConfig({ skipPrompt: true });
+  const safeTicket = tp.sanitizeTicketIdForPath(ticket, providerConfig);
+  const ws = loadWorkState(safeTicket);
   const current = getCurrentStep(ws);
   return {
     ticket, currentStep: current,

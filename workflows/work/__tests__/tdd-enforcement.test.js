@@ -530,4 +530,92 @@ describe('TDD enforcement', () => {
     });
   });
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // GitHub ticket ID sanitization in transitionStep
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe('GitHub ticket ID sanitization in transitionStep', () => {
+    const RAW_TICKET = '#154';
+    const SAFE_TICKET = 'GH-154';
+
+    afterEach(() => {
+      cleanupTempWorkState(RAW_TICKET);
+      cleanupTempWorkState(SAFE_TICKET);
+    });
+
+    const ghEnv = (extra = {}) => ({ TICKET_PROVIDER: 'github', ...extra });
+
+    it('transition with #NNN ticket finds work state written to GH-NNN/ directory', async () => {
+      // Walk to bootstrap using raw #154 ticket
+      const { result } = await runOrchestrator(
+        ['transition', RAW_TICKET, 'bootstrap'],
+        { env: baseEnv(ghEnv()) },
+      );
+      assert.equal(result.success, true, 'Transition should succeed');
+
+      // Work state should be saved under GH-154/, not #154/
+      const safeDir = path.join(tempTasksBase, SAFE_TICKET);
+      const rawDir = path.join(tempTasksBase, RAW_TICKET);
+      assert.ok(fs.existsSync(path.join(safeDir, '.work-state.json')), 'Work state should exist under GH-154/');
+      assert.ok(!fs.existsSync(path.join(rawDir, '.work-state.json')), 'Work state should NOT exist under #154/');
+    });
+
+    it('transition with #NNN ticket finds TDD evidence in GH-NNN/ directory (TDD gate passes)', async () => {
+      // Walk to implement
+      await transitionTo(RAW_TICKET, 'implement', ghEnv({ WORK_TDD_ENFORCE: '1' }));
+
+      // Write valid TDD evidence to the sanitized directory
+      writeValidPhaseState(SAFE_TICKET);
+
+      // Transition out of implement should pass because evidence is in GH-154/
+      const { result } = await runOrchestrator(
+        ['transition', RAW_TICKET, 'commit'],
+        { env: baseEnv(ghEnv({ WORK_TDD_ENFORCE: '1' })) },
+      );
+      assert.equal(result.success, true, 'Transition should succeed with TDD evidence in GH-NNN/');
+      assert.equal(result.to, 'commit');
+    });
+
+    it('transition with #NNN ticket and TDD enforcement blocks when no evidence in GH-NNN/', async () => {
+      // Walk to implement
+      await transitionTo(RAW_TICKET, 'implement', ghEnv({ WORK_TDD_ENFORCE: '1' }));
+
+      // No TDD evidence written — should block
+      const { result } = await runOrchestrator(
+        ['transition', RAW_TICKET, 'commit'],
+        { env: baseEnv(ghEnv({ WORK_TDD_ENFORCE: '1' })) },
+      );
+      assert.equal(result.error, true);
+      assert.match(result.message, /TDD evidence/i);
+    });
+
+    it('already-sanitized GH-NNN ticket works (idempotent)', async () => {
+      // Use already-sanitized ticket ID
+      const { result } = await runOrchestrator(
+        ['transition', SAFE_TICKET, 'bootstrap'],
+        { env: baseEnv(ghEnv()) },
+      );
+      assert.equal(result.success, true);
+
+      // Work state should exist under GH-154/
+      const safeDir = path.join(tempTasksBase, SAFE_TICKET);
+      assert.ok(fs.existsSync(path.join(safeDir, '.work-state.json')), 'Work state should exist under GH-154/');
+    });
+
+    it('getAvailableTransitions(#NNN) correctly reads work state from GH-NNN/', async () => {
+      // First set up some state via transition
+      await transitionTo(RAW_TICKET, 'brief', ghEnv());
+
+      // Now query available transitions with raw ticket
+      const { result } = await runOrchestrator(
+        ['transitions', RAW_TICKET],
+        { env: baseEnv(ghEnv()) },
+      );
+
+      // Should find the state (currently at brief, can go to spec or implement)
+      assert.equal(result.currentStep, 'brief', 'Should find current step from GH-NNN/ state');
+      assert.ok(result.allowed.length > 0, 'Should have available transitions');
+    });
+  });
+
 });

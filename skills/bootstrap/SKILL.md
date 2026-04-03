@@ -1,1 +1,1 @@
-/home/thomfilg/p/w-claude-plugin/claude-plugin-work/workflows/work/skills/bootstrap.md
+../../workflows/work/skills/bootstrap.md

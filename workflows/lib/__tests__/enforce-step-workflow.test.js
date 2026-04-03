@@ -1714,4 +1714,233 @@ describe('enforce-step-workflow', () => {
       assert.equal(code, 0, 'should use flat path when suffix env is not set');
     });
   });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // follow_up verify function (live GitHub state checks)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe('follow_up verify function', () => {
+    // These tests verify that transitioning FROM follow_up uses the verify()
+    // function which checks live GitHub state via `gh` CLI commands.
+    // We mock `gh` by creating a fake script and prepending its dir to PATH.
+
+    const FAKE_GH_DIR = path.join(os.tmpdir(), `fake-gh-${process.pid}`);
+    const FAKE_GH_PATH = path.join(FAKE_GH_DIR, 'gh');
+    const ORCHESTRATOR_PATH = path.join(__dirname, '..', '..', 'work', 'work.workflow.js');
+
+    function writeFakeGh(responseMap) {
+      // responseMap: { 'pr view --json number': '42', 'pr checks': '[...]', ... }
+      // The fake gh script matches args and returns the corresponding response.
+      if (!fs.existsSync(FAKE_GH_DIR)) fs.mkdirSync(FAKE_GH_DIR, { recursive: true });
+
+      // Build a bash script that checks arguments
+      let script = '#!/bin/bash\nARGS="$*"\n';
+      for (const [pattern, response] of Object.entries(responseMap)) {
+        if (response === 'EXIT1') {
+          script += `if echo "$ARGS" | grep -q "${pattern}"; then exit 1; fi\n`;
+        } else {
+          script += `if echo "$ARGS" | grep -q "${pattern}"; then echo '${response.replace(/'/g, "'\\''")}'; exit 0; fi\n`;
+        }
+      }
+      script += 'exit 1\n'; // Default: fail
+      fs.writeFileSync(FAKE_GH_PATH, script, { mode: 0o755 });
+    }
+
+    function cleanupFakeGh() {
+      try { fs.rmSync(FAKE_GH_DIR, { recursive: true, force: true }); } catch {}
+    }
+
+    function transitionFromFollowUp(extraEnv = {}) {
+      return runHook(
+        {
+          tool_name: 'Bash',
+          tool_input: { command: `node ${ORCHESTRATOR_PATH} transition ${TEST_TICKET} ci` },
+        },
+        'PreToolUse',
+        { PATH: `${FAKE_GH_DIR}:${process.env.PATH}`, ...extraEnv },
+      );
+    }
+
+    beforeEach(() => {
+      // Set up work state at follow_up step
+      writeWorkState(makeStepStatus('follow_up', WORK_STEPS));
+    });
+
+    afterEach(() => {
+      cleanupFakeGh();
+    });
+
+    it('allows transition when CI passes, no blocking reviews, no comments', async () => {
+      writeFakeGh({
+        'pr view --json number -q .number': '42',
+        'pr checks 42 --json': '[{"state":"SUCCESS","name":"build"}]',
+        'pr view 42 --json reviewDecision': '{"reviewDecision":"APPROVED"}',
+        'repos/{owner}/{repo}/pulls/42/comments': '0',
+      });
+
+      const { code } = await transitionFromFollowUp();
+      assert.equal(code, 0, 'Should allow transition when all checks pass');
+    });
+
+    it('blocks transition when CI has failures', async () => {
+      writeFakeGh({
+        'pr view --json number -q .number': '42',
+        'pr checks 42 --json': '[{"state":"FAILURE","name":"build"}]',
+        'pr view 42 --json reviewDecision': '{"reviewDecision":"APPROVED"}',
+        'repos/{owner}/{repo}/pulls/42/comments': '0',
+      });
+
+      const { code, stderr } = await transitionFromFollowUp();
+      assert.equal(code, 2, 'Should block transition when CI has failures');
+      assert.ok(stderr.includes('BLOCKED'), 'stderr should contain BLOCKED');
+    });
+
+    it('blocks transition when CI is pending', async () => {
+      writeFakeGh({
+        'pr view --json number -q .number': '42',
+        'pr checks 42 --json': '[{"state":"PENDING","name":"build"}]',
+        'pr view 42 --json reviewDecision': '{"reviewDecision":"APPROVED"}',
+        'repos/{owner}/{repo}/pulls/42/comments': '0',
+      });
+
+      const { code, stderr } = await transitionFromFollowUp();
+      assert.equal(code, 2, 'Should block transition when CI is pending');
+      assert.ok(stderr.includes('BLOCKED'), 'stderr should contain BLOCKED');
+    });
+
+    it('blocks transition when review is CHANGES_REQUESTED', async () => {
+      writeFakeGh({
+        'pr view --json number -q .number': '42',
+        'pr checks 42 --json': '[{"state":"SUCCESS","name":"build"}]',
+        'pr view 42 --json reviewDecision': '{"reviewDecision":"CHANGES_REQUESTED"}',
+        'repos/{owner}/{repo}/pulls/42/comments': '0',
+      });
+
+      const { code, stderr } = await transitionFromFollowUp();
+      assert.equal(code, 2, 'Should block transition when review has changes requested');
+      assert.ok(stderr.includes('BLOCKED'), 'stderr should contain BLOCKED');
+    });
+
+    it('allows transition when comments exist with valid accountability', async () => {
+      writeFakeGh({
+        'pr view --json number -q .number': '42',
+        'pr checks 42 --json': '[{"state":"SUCCESS","name":"build"}]',
+        'pr view 42 --json reviewDecision': '{"reviewDecision":"APPROVED"}',
+        'repos/{owner}/{repo}/pulls/42/comments': '2',
+      });
+
+      // Write review-accountability.json with valid entries
+      if (!fs.existsSync(TASKS_DIR)) fs.mkdirSync(TASKS_DIR, { recursive: true });
+      const accountability = [
+        { disposition: 'resolved', reason: 'Fixed in latest commit' },
+        { disposition: 'resolved', reason: 'Updated per feedback' },
+      ];
+      fs.writeFileSync(
+        path.join(TASKS_DIR, 'review-accountability.json'),
+        JSON.stringify(accountability, null, 2),
+      );
+
+      const { code } = await transitionFromFollowUp();
+      assert.equal(code, 0, 'Should allow transition when comments have valid accountability');
+    });
+
+    it('blocks transition when comments exist but no accountability file', async () => {
+      writeFakeGh({
+        'pr view --json number -q .number': '42',
+        'pr checks 42 --json': '[{"state":"SUCCESS","name":"build"}]',
+        'pr view 42 --json reviewDecision': '{"reviewDecision":"APPROVED"}',
+        'repos/{owner}/{repo}/pulls/42/comments': '2',
+      });
+
+      // Do NOT write review-accountability.json
+
+      const { code, stderr } = await transitionFromFollowUp();
+      assert.equal(code, 2, 'Should block transition when comments exist without accountability');
+      assert.ok(stderr.includes('BLOCKED'), 'stderr should contain BLOCKED');
+    });
+
+    it('blocks transition when gh pr view fails (no PR)', async () => {
+      writeFakeGh({
+        'pr view --json number -q .number': 'EXIT1',
+      });
+
+      const { code, stderr } = await transitionFromFollowUp();
+      assert.equal(code, 2, 'Should block transition when no PR exists');
+      assert.ok(stderr.includes('BLOCKED'), 'stderr should contain BLOCKED');
+    });
+
+    it('allows transition when no CI checks exist (empty array)', async () => {
+      writeFakeGh({
+        'pr view --json number -q .number': '42',
+        'pr checks 42 --json': '[]',
+        'pr view 42 --json reviewDecision': '{"reviewDecision":""}',
+        'repos/{owner}/{repo}/pulls/42/comments': '0',
+      });
+
+      const { code } = await transitionFromFollowUp();
+      assert.equal(code, 0, 'Should allow transition when no CI checks exist');
+    });
+
+    it('blocks when accountability entries lack disposition/reason', async () => {
+      writeFakeGh({
+        'pr view --json number -q .number': '42',
+        'pr checks 42 --json': '[{"state":"SUCCESS","name":"build"}]',
+        'pr view 42 --json reviewDecision': '{"reviewDecision":"APPROVED"}',
+        'repos/{owner}/{repo}/pulls/42/comments': '1',
+      });
+
+      // Write accountability with missing fields
+      if (!fs.existsSync(TASKS_DIR)) fs.mkdirSync(TASKS_DIR, { recursive: true });
+      const accountability = [{ disposition: 'resolved' }]; // missing reason
+      fs.writeFileSync(
+        path.join(TASKS_DIR, 'review-accountability.json'),
+        JSON.stringify(accountability, null, 2),
+      );
+
+      const { code, stderr } = await transitionFromFollowUp();
+      assert.equal(code, 2, 'Should block when accountability entries are incomplete');
+      assert.ok(stderr.includes('BLOCKED'), 'stderr should contain BLOCKED');
+    });
+
+    it('blocks when acknowledged entries lack userApproval', async () => {
+      writeFakeGh({
+        'pr view --json number -q .number': '42',
+        'pr checks 42 --json': '[{"state":"SUCCESS","name":"build"}]',
+        'pr view 42 --json reviewDecision': '{"reviewDecision":"APPROVED"}',
+        'repos/{owner}/{repo}/pulls/42/comments': '1',
+      });
+
+      // Write accountability with acknowledged but no userApproval
+      if (!fs.existsSync(TASKS_DIR)) fs.mkdirSync(TASKS_DIR, { recursive: true });
+      const accountability = [{ disposition: 'acknowledged', reason: 'Known issue' }];
+      fs.writeFileSync(
+        path.join(TASKS_DIR, 'review-accountability.json'),
+        JSON.stringify(accountability, null, 2),
+      );
+
+      const { code, stderr } = await transitionFromFollowUp();
+      assert.equal(code, 2, 'Should block when acknowledged entries lack userApproval');
+      assert.ok(stderr.includes('BLOCKED'), 'stderr should contain BLOCKED');
+    });
+
+    it('allows when acknowledged entries have userApproval=true', async () => {
+      writeFakeGh({
+        'pr view --json number -q .number': '42',
+        'pr checks 42 --json': '[{"state":"SUCCESS","name":"build"}]',
+        'pr view 42 --json reviewDecision': '{"reviewDecision":"APPROVED"}',
+        'repos/{owner}/{repo}/pulls/42/comments': '1',
+      });
+
+      // Write accountability with acknowledged + userApproval
+      if (!fs.existsSync(TASKS_DIR)) fs.mkdirSync(TASKS_DIR, { recursive: true });
+      const accountability = [{ disposition: 'acknowledged', reason: 'Known issue', userApproval: true }];
+      fs.writeFileSync(
+        path.join(TASKS_DIR, 'review-accountability.json'),
+        JSON.stringify(accountability, null, 2),
+      );
+
+      const { code } = await transitionFromFollowUp();
+      assert.equal(code, 0, 'Should allow when acknowledged entries have userApproval');
+    });
+  });
 });

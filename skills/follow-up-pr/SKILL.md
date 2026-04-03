@@ -1,1 +1,1 @@
-/home/thomfilg/p/w-claude-plugin/claude-plugin-work/workflows/work/skills/follow-up-pr.md
+../../workflows/work/skills/follow-up-pr.md
