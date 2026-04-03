@@ -762,12 +762,13 @@ function transitionStep(ticket, targetStep) {
   // DEFER re-evaluation gate (GH-154): block forward transitions past DEFER steps
   // unless the plan has been re-run since the last transition.
   const isForward = ALL_STEPS.indexOf(targetStep) > ALL_STEPS.indexOf(currentStep);
-  if (isForward && ws?.deferredSteps?.length > 0) {
-    const currentIdx_g = ALL_STEPS.indexOf(currentStep);
-    const targetIdx_g = ALL_STEPS.indexOf(targetStep);
-    const deferredInRange = ws.deferredSteps.filter(ds => {
+  const deferredSteps = Array.isArray(ws?.deferredSteps) ? ws.deferredSteps : [];
+  if (isForward && deferredSteps.length > 0) {
+    const currentIdxGate = ALL_STEPS.indexOf(currentStep);
+    const targetIdxGate = ALL_STEPS.indexOf(targetStep);
+    const deferredInRange = deferredSteps.filter(ds => {
       const idx = ALL_STEPS.indexOf(ds);
-      return idx > currentIdx_g && idx <= targetIdx_g;
+      return idx > currentIdxGate && idx <= targetIdxGate;
     });
 
     if (deferredInRange.length > 0) {
