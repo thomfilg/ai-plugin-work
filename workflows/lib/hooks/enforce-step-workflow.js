@@ -324,7 +324,7 @@ const WORKFLOWS = [
     transitionPattern: /workflow-engine\.js\s+work-pr\s+transition\s+(\S+)\s+(\S+)/,
     exemptPatterns: [
       /workflow-engine\.js\s+work-pr\s+(plan|transitions|graph)/,
-      /workflow-state\.js\s+work-pr\s+(get|resume-info|init)/,
+      /workflow-state\.js\s+work-pr\s+(get|resume-info)/,
     ],
     transitionHint: `node ${path.join(__dirname, '..', 'workflow-engine.js')} work-pr transition`,
   },
@@ -378,6 +378,15 @@ const EXEMPT_SCRIPTS = new Set([
   'session-guard.js',
 ]);
 
+// Sub-command filtering for state scripts (GH-89).
+// work-state.js: exempt for get, resume-info, init, active-subtask, add-error.
+// workflow-state.js: exempt for get, resume-info, add-error (init blocked — not idempotent).
+// Mutating sub-commands (set-step, set-check, complete, etc.) must go through the orchestrator.
+const SAFE_SUBCOMMANDS = {
+  'work-state.js': new Set(['get', 'resume-info', 'init', 'active-subtask', 'add-error']),
+  'workflow-state.js': new Set(['get', 'resume-info', 'add-error']), // init excluded: not idempotent (resets all steps). exemptPatterns (line ~327) aligned.
+};
+
 // Trusted directories where exempt scripts are allowed to live.
 // Only scripts resolved under these paths are exempt — prevents basename spoofing.
 const TRUSTED_SCRIPT_DIRS = [
@@ -388,6 +397,18 @@ const TRUSTED_SCRIPT_DIRS = [
   path.resolve(__dirname, '..', '..', 'check', 'scripts'), // workflows/check/scripts/
   path.resolve(__dirname, '..', '..', 'work-implement'),   // workflows/work-implement/
 ];
+
+// Shared regex source for detecting node script invocations in Bash commands (GH-89).
+// Handles: cd && node ..., env prefixes, Node flags (including multi-arg like --require <path>),
+// quoted paths. --eval/--print/-e/-p excluded (inline code, not file paths).
+// Use getNodeInvocations() helper to catch ALL invocations in chained commands.
+const NODE_INVOKE_PATTERN_SRC =
+  '(?:^|&&|;|\\|)\\s*(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|\'[^\']*\'|\\S+)\\s+)*(?:node|nodejs)\\s+(?:(?:--(?:require|loader|experimental-loader|import|input-type|conditions|inspect-brk|inspect|inspect-port)|-[rCi])\\s+\\S+\\s+|(?:-[^\\s]+\\s+))*(?:"([^"]+)"|\'([^\']+)\'|(\\S+))';
+
+/** Return all node-script invocations from a command string. */
+function getNodeInvocations(cmd) {
+  return [...cmd.matchAll(new RegExp(NODE_INVOKE_PATTERN_SRC, 'g'))];
+}
 
 // Agent-gated writer scripts — map script basename to authorized agents.
 // When a Bash command invokes one of these scripts, the hook verifies agent identity.
@@ -416,24 +437,40 @@ const stateFileProtector = createFileProtector({
     // Only exempt actual execution of exempt scripts via Node.
     // Handles: cd ... && node ..., env prefixes, Node flags, quoted paths
     // Not anchored to ^ so it matches node anywhere in a chained command
-    const nodePattern =
-      /(?:^|&&|;|\|)\s*(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|\S+)\s+)*(?:node|nodejs)\s+(?:-[^\s]+\s+)*(?:"([^"]+)"|'([^']+)'|(\S+))/;
-    const nodeMatch = cmd.match(nodePattern);
-    if (nodeMatch) {
+    const matches = getNodeInvocations(cmd);
+    if (matches.length === 0) return false; // no node invocations found
+
+    // Every node invocation must be exempt — one unsafe call blocks the whole command (GH-89).
+    // AGENT_GATED_SCRIPTS (Rule 5) also uses matchAll for chained-command safety.
+    for (const nodeMatch of matches) { // check every node invocation
       const scriptPath = nodeMatch[1] || nodeMatch[2] || nodeMatch[3];
       const scriptBase = path.basename(scriptPath);
       if (!EXEMPT_SCRIPTS.has(scriptBase)) return false;
 
       // Verify the script lives in a trusted directory (prevents basename spoofing)
       // Use realpathSync to resolve symlinks — a symlink under a trusted dir pointing outside is denied
+      let trusted = false;
       try {
         const resolved = fs.realpathSync(path.resolve(scriptPath));
-        if (TRUSTED_SCRIPT_DIRS.some(dir => resolved.startsWith(dir + path.sep))) return true;
+        trusted = TRUSTED_SCRIPT_DIRS.some(dir => resolved.startsWith(dir + path.sep));
       } catch { /* realpathSync failed (file doesn't exist) — deny */ }
-      return false;
+      if (!trusted) return false;
+
+      // Sub-command filtering (GH-89): for state scripts, only allow safe sub-commands
+      const safeSet = SAFE_SUBCOMMANDS[scriptBase];
+      if (safeSet) {
+        // Extract args after the script path from the command segment
+        const afterScript = cmd.slice(nodeMatch.index + nodeMatch[0].length).trim();
+        const args = afterScript.split(/\s+/).filter(a => a && !a.startsWith('-'));
+        // For workflow-state.js the sub-command is the 2nd arg (1st is workflow name)
+        const subCmdIndex = scriptBase === 'workflow-state.js' ? 1 : 0;
+        const rawSubCmd = args[subCmdIndex] || '';
+        const subCmd = rawSubCmd.replace(/^['"]|['"]$/g, '');
+        if (!safeSet.has(subCmd)) return false;
+      }
     }
 
-    return false; // Tests: Vector 3 exempt scripts + trusted path + untrusted path + env prefix + quoted path
+    return true; // All invocations passed exempt + trusted + sub-command checks
   },
   formatMessage: (match, vector) =>
     `BLOCKED: Direct ${vector} to ${match} is not allowed.\n` +
@@ -672,6 +709,50 @@ function handlePreToolUse(hookData) {
     );
     process.exit(2);
   }
+  // Rule 3b: Block unsafe sub-commands on state scripts invoked via node (GH-89)
+  // Defense-in-depth: the stateFileProtector's isExempt/Vector 3 may miss the script when
+  // multi-arg flags (--require, -r, etc.) cause INTERPRETER_PATTERN to capture the flag
+  // argument instead of the actual script. This rule uses the improved nodePattern directly.
+  if (toolName === 'Bash') {
+    const cmd = String(toolInput?.command || '').trim();
+    const stateMatches = getNodeInvocations(cmd);
+    for (const m of stateMatches) {
+      const scriptPath = m[1] || m[2] || m[3];
+      const scriptBase = path.basename(scriptPath);
+      const safeSet = SAFE_SUBCOMMANDS[scriptBase];
+      if (safeSet) {
+        // Expand $CLAUDE_PLUGIN_ROOT which is not resolved in hook context
+        let resolvedPath = scriptPath;
+        if (process.env.CLAUDE_PLUGIN_ROOT) {
+          resolvedPath = resolvedPath
+            .replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, process.env.CLAUDE_PLUGIN_ROOT)
+            .replace(/\$CLAUDE_PLUGIN_ROOT/g, process.env.CLAUDE_PLUGIN_ROOT);
+        }
+        // Verify trusted directory - skip untrusted (Vector 3 handles those)
+        let trusted = false;
+        try {
+          const resolved = fs.realpathSync(path.resolve(resolvedPath));
+          trusted = TRUSTED_SCRIPT_DIRS.some(dir => resolved.startsWith(dir + path.sep));
+        } catch { /* realpathSync failed - untrusted */ }
+        if (!trusted) continue; // basename match but untrusted path - Vector 3 will block
+
+        const afterScript = cmd.slice(m.index + m[0].length).trim();
+        const args = afterScript.split(/\s+/).filter(a => a && !a.startsWith('-'));
+        const subCmdIndex = scriptBase === 'workflow-state.js' ? 1 : 0;
+        const rawSubCmd = args[subCmdIndex] || '';
+        const subCmd = rawSubCmd.replace(/^['"]|['"]$/g, '');
+        if (!safeSet.has(subCmd)) {
+          didBlock = true;
+          process.stderr.write(
+            `BLOCKED: Direct Bash call to ${scriptBase} with sub-command '${subCmd}' is not allowed.\n` +
+            `State files must only be modified through the orchestrator/workflow-engine scripts.\n`
+          );
+          process.exit(2);
+        }
+      }
+    }
+  }
+
   // Rule 4: Block writes to step-gated artifact files outside their owning step/agent
   // Must run BEFORE skipRemainingChecks — Edit/Write/MultiEdit need artifact protection
   const rule4 = artifactProtector.check(toolName, toolInput, hookData);
@@ -688,10 +769,8 @@ function handlePreToolUse(hookData) {
   if (toolName === 'Bash') {
     const cmd = String(toolInput?.command || '');
     // Reuse the same robust nodePattern as exempt script detection (handles env prefixes, flags, quotes)
-    const writerNodePattern =
-      /(?:^|&&|;|\|)\s*(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|\S+)\s+)*(?:node|nodejs)\s+(?:-[^\s]+\s+)*(?:"([^"]+)"|'([^']+)'|(\S+))/;
-    const nodeExec = cmd.match(writerNodePattern);
-    if (nodeExec) {
+    const nodeMatches = getNodeInvocations(cmd);
+    for (const nodeExec of nodeMatches) {
       let scriptPath = nodeExec[1] || nodeExec[2] || nodeExec[3];
       // Expand common shell variables that won't be expanded in hook context
       if (process.env.CLAUDE_PLUGIN_ROOT) {
