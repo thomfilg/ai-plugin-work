@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Deterministic workflow orchestrator for Jira task implementation with state machine validation.",
-    "version": "2.7.26"
+    "version": "2.7.27"
   },
   "plugins": [
     {
