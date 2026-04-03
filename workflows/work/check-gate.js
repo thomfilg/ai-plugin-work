@@ -107,7 +107,17 @@ const CHECK_GATE_RULES = [
           .filter(c => !c.passed)
           .map(c => `Spec verification failed: ${c.type} ${Array.isArray(c.args) ? c.args.join(' ') : ''} — ${c.reason || 'check failed'}`);
       } catch (err) {
-        // Script error (exit code 2) or parse error
+        // Exit code 1 = checks failed (stdout has JSON), exit code 2 = script error
+        if (err.stdout) {
+          try {
+            const result = JSON.parse(err.stdout);
+            if (typeof result.success === 'boolean' && !result.success && Array.isArray(result.checks)) {
+              return result.checks
+                .filter(c => !c.passed)
+                .map(c => `Spec verification failed: ${c.type} ${Array.isArray(c.args) ? c.args.join(' ') : ''} — ${c.reason || 'check failed'}`);
+            }
+          } catch { /* parse error, fall through */ }
+        }
         return [`Spec verification script error: ${err.message || 'unknown error'}`];
       }
     },

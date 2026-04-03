@@ -93,7 +93,7 @@ describe('check-gate (unit)', () => {
       '# Spec\n\n## Verification Checklist\n- FILE_EXISTS src/nonexistent-file.js\n');
     const result = validateCheckGate(TEMP, testTicket);
     assert.equal(result.valid, false);
-    assert.ok(result.reasons.some(r => r.includes('spec verification') || r.includes('Spec verification')));
+    assert.ok(result.reasons.some(r => r.includes('Spec verification failed') && r.includes('FILE_EXISTS') && r.includes('nonexistent-file.js')));
   });
 
   it('spec-verification rule passes when spec has no checklist (scenario 12)', () => {
