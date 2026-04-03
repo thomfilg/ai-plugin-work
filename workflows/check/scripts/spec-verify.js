@@ -5,8 +5,11 @@
  * Parses a `## Verification Checklist` section from a spec.md file and runs
  * machine-checkable assertions. Supports FILE_EXISTS, GREP, TEST_COUNT, REUSES.
  *
- * Usage: node spec-verify.js <spec-path> [--json]
+ * Usage: node spec-verify.js <spec-path> [--json] [--root <worktree-dir>]
  * Exit codes: 0 = pass (or no checklist), 1 = failures, 2 = script error
+ *
+ * --root overrides automatic worktree detection (used by check-gate.js
+ * when spec.md lives outside the git worktree, e.g. in a tasks directory).
  */
 
 'use strict';
@@ -32,10 +35,10 @@ function getWorktreeRoot(specPath) {
       stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
   } catch {
-    // Fallback: use spec file's directory (callers can bypass via --root flag)
+    // Fallback: use spec file's directory; callers should use --root to override
     return cwd;
   }
-}
+} // getWorktreeRoot — overridden by --root CLI flag when called from check-gate
 
 /**
  * Validate a path argument: reject absolute paths and `..` traversal.
@@ -56,9 +59,9 @@ function validatePath(p) {
   if (segments.some(seg => seg === '..')) {
     return { valid: false, reason: `Path traversal rejected: ${p}` };
   }
-  // Note: path.isAbsolute above handles POSIX paths only (Linux/macOS); Windows drive paths not supported
+  // path.isAbsolute covers POSIX absolute paths; Windows drive-relative paths (C:foo) are out of scope
   return { valid: true, resolved: normalized };
-}
+} // validatePath — segment-based '..' check + POSIX absolute rejection
 
 /** Directories to skip during glob traversal to avoid slow/flaky gate checks */
 const GLOB_SKIP_DIRS = new Set(['.git', 'node_modules', '.next', 'dist', 'build', 'coverage']);
