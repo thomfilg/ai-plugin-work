@@ -42,7 +42,7 @@ function runScript(specPath, opts = {}) {
     });
     return { exitCode: 0, stdout };
   } catch (err) {
-    return { exitCode: err.status, stdout: err.stdout || '', stderr: err.stderr || '' };
+    return { exitCode: err.status ?? 1, stdout: err.stdout?.toString() || '', stderr: err.stderr?.toString() || '' };
   }
 }
 
@@ -160,6 +160,15 @@ describe('spec-verify.js', () => {
     assert.ok(unknown, 'unknown marker should appear in checks');
     assert.equal(unknown.passed, false, 'unknown marker should fail');
     assert.ok(unknown.reason.includes('Unknown marker type'), 'reason should mention unknown type');
+  });
+
+  it('empty checklist (header but no markers) fails', () => {
+    const specPath = writeSpec([]);
+    const result = runScript(specPath, { json: true });
+    assert.equal(result.exitCode, 1);
+    const json = JSON.parse(result.stdout);
+    assert.equal(json.hasChecklist, true);
+    assert.equal(json.success, false);
   });
 
   // ── Security ────────────────────────────────────────────────────────────

@@ -29,15 +29,16 @@ function readFile(p) { try { return fs.readFileSync(p, 'utf-8'); } catch { retur
  * @returns {string[]}
  */
 function parseSpecVerifyError(err) {
-  const stdout = typeof err.stdout === 'string' ? err.stdout : '';
-  const stderr = typeof err.stderr === 'string' ? err.stderr.trim() : '';
+  const stdout = typeof err.stdout === 'string' ? err.stdout : (Buffer.isBuffer(err.stdout) ? err.stdout.toString() : '');
+  const stderr = typeof err.stderr === 'string' ? err.stderr.trim() : (Buffer.isBuffer(err.stderr) ? err.stderr.toString().trim() : '');
   if (stdout) {
     try {
       const result = JSON.parse(stdout);
       if (typeof result.success === 'boolean' && !result.success && Array.isArray(result.checks)) {
-        return result.checks
+        const failures = result.checks
           .filter(c => !c.passed)
           .map(c => `Spec verification failed: ${c.type} ${Array.isArray(c.args) ? c.args.join(' ') : ''} — ${c.reason || 'check failed'}`);
+        return failures.length > 0 ? failures : ['Spec verification failed but no specific check details available'];
       }
     } catch { /* stdout wasn't valid JSON, fall through to generic error */ }
   }

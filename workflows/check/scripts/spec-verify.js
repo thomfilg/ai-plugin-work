@@ -192,7 +192,7 @@ function parseMarkerLine(line) {
     if (regexStart !== -1) {
       const filePath = rest.slice(0, regexStart);
       const regexPart = rest.slice(regexStart + 1);
-      return { type, args: [filePath, regexPart] };
+      return { type, args: [filePath.trim(), regexPart] };
     }
   }
 
@@ -343,7 +343,7 @@ function checkReuses(args, root) {
   // Matches: import { X } from, import X from, const { X } = require(...), const X = require(...)
   const escaped = escapeRegex(importPattern);
   const importRegex = new RegExp(
-    `(import\\s+.*${escaped}|${escaped}.*require\\s*\\(|require\\s*\\(.*${escaped})`,
+    `(import\\s[\\s\\S]*?${escaped}|${escaped}[\\s\\S]*?require\\s*\\(|require\\s*\\([\\s\\S]*?${escaped})`,
     'm'
   );
   if (importRegex.test(content)) {
