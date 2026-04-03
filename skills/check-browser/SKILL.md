@@ -1,1 +1,1 @@
-/home/thomfilg/p/w-claude-plugin/claude-plugin-work/workflows/check/skills/check-browser.md
+../../workflows/check/skills/check-browser.md
