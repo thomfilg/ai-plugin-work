@@ -121,6 +121,8 @@ const WORKFLOWS = [
           const state = JSON.parse(fs.readFileSync(
             path.join(TASKS_BASE, ticketId, 'tdd-phase.json'), 'utf-8'
           ));
+          // Exception mode: config-only or mechanical changes that skip TDD
+          if (typeof state.exception === 'string' && state.exception.trim() !== '') return true;
           if (!Array.isArray(state.cycles) || state.cycles.length === 0) return false;
           // At least one cycle must have both red and green evidence
           return state.cycles.some(c => c.red && c.green);

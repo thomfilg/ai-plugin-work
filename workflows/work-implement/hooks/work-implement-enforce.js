@@ -184,19 +184,20 @@ async function main() {
     process.exit(2);
   }
 
-  // Allow config/non-code files
-  if (isFileAllowed(filePath)) {
-    process.exit(0);
-  }
-
-  // ── TDD Phase enforcement ──────────────────────────────────────────────
-  // If TDD phase state exists, enforce phase-specific file restrictions
+  // ── TDD Phase enforcement (BEFORE allowlist) ─────────────────────────
+  // Must run before isFileAllowed() because ALLOWED_PATTERNS includes test
+  // files (.test.*, .spec.*) which would bypass GREEN-phase blocking
   const tddPhaseResult = checkTddPhase(filePath);
   if (tddPhaseResult === 'block') {
     // Block message already written by checkTddPhase
     process.exit(2);
   }
-  // If tddPhaseResult === 'no-state', fall through to existing logic
+  // If tddPhaseResult === 'no-state' or 'allow', fall through to existing logic
+
+  // Allow config/non-code files
+  if (isFileAllowed(filePath)) {
+    process.exit(0);
+  }
 
   // Check if a developer agent has been invoked
   if (hasDeveloperAgentBeenInvoked(transcriptPath)) {

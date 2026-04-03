@@ -326,10 +326,15 @@ describe('tdd-phase-state CLI', () => {
       assert.ok(stderr.includes('Invalid ticket ID'), `Expected invalid ticket ID error, got: ${stderr}`);
     });
 
-    it('rejects ticket ID with /', () => {
-      const { exitCode, stderr } = runCli('init foo/bar', homeDir);
-      assert.strictEqual(exitCode, 1);
-      assert.ok(stderr.includes('Invalid ticket ID'), `Expected invalid ticket ID error, got: ${stderr}`);
+    it('allows ticket ID with single slash suffix (e.g. GH-145/phase1)', () => {
+      const { stdout, exitCode } = runCli('init GH-145/phase1', homeDir);
+      assert.strictEqual(exitCode, 0);
+      const result = JSON.parse(stdout);
+      assert.strictEqual(result.ok, true);
+      assert.strictEqual(result.phase, 'red');
+
+      const state = readState(homeDir, 'GH-145/phase1');
+      assert.strictEqual(state.currentPhase, 'red');
     });
 
     it('rejects ticket ID with backslash', () => {
