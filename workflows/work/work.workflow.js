@@ -287,7 +287,7 @@ function readTddEvidence(ticketId, stepId) {
   }
 }
 
-function validateTddEvidence(evidence, expectedStepId) {
+function validateTddEvidence(evidence) {
   if (!evidence || typeof evidence !== 'object') return { valid: false, reason: 'Evidence is null or not an object' };
 
   // Exception mode: config-only or mechanical changes that skip TDD
@@ -295,13 +295,13 @@ function validateTddEvidence(evidence, expectedStepId) {
     return { valid: true, reason: '' };
   }
 
-  // Must have at least one completed cycle with all three phases
+  // Must have at least one completed cycle with RED + GREEN (REFACTOR is recommended but optional)
   const cycles = evidence.cycles;
   if (!Array.isArray(cycles) || cycles.length === 0) {
-    return { valid: false, reason: 'No TDD cycles found. Run at least one RED → GREEN → REFACTOR cycle.' };
+    return { valid: false, reason: 'No TDD cycles found. Run at least one RED → GREEN cycle (REFACTOR is recommended but optional).' };
   }
 
-  // Check that at least one cycle has all three phases recorded
+  // Check that at least one cycle has RED + GREEN recorded (REFACTOR is optional)
   const completeCycle = cycles.find(c => c.red && c.green && c.refactor);
   if (!completeCycle) {
     // Check if there's a cycle with at least red + green (refactor in progress is ok)
@@ -753,7 +753,7 @@ function transitionStep(ticket, targetStep) {
       const msg = `Cannot leave ${currentStep} without TDD evidence. Use the TDD phase system:\n  node ${tddStatePath} init ${ticket}\n  node ${tddStatePath} record-red ${ticket} --cmd "<test command>"\n  node ${tddStatePath} record-green ${ticket} --cmd "<test command>"\n  node ${tddStatePath} record-refactor ${ticket} --cmd "<test command>"`;
       return { error: true, message: msg };
     }
-    const validation = validateTddEvidence(evidence, currentStep);
+    const validation = validateTddEvidence(evidence);
     if (!validation.valid) {
       return { error: true, message: `TDD evidence invalid: ${validation.reason}` };
     }

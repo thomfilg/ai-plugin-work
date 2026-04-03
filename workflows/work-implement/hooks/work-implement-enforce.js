@@ -112,13 +112,20 @@ function isFileAllowed(filePath) {
  */
 function checkTddPhase(filePath) {
   try {
-    // Get ticket ID from env or branch
+    // Get ticket ID from env or shared resolver
     const ticketId = process.env.TICKET_ID || (() => {
       try {
-        const branch = require('child_process').execSync('git branch --show-current', { encoding: 'utf8' }).trim();
-        const match = branch.match(/[A-Z]+-[0-9]+/);
-        return match ? match[0] : null;
-      } catch { return null; }
+        const { getCurrentTaskId } = require(require('path').join(__dirname, '..', '..', 'lib', 'scripts', 'get-ticket-id.js'));
+        const id = getCurrentTaskId();
+        return id || null;
+      } catch {
+        // Fallback: extract from branch name (supports GH-123, PROJ-123, lowercase)
+        try {
+          const branch = require('child_process').execSync('git branch --show-current', { encoding: 'utf8' }).trim();
+          const match = branch.match(/[A-Za-z]+-[0-9]+/i);
+          return match ? match[0] : null;
+        } catch { return null; }
+      }
     })();
 
     if (!ticketId) return 'no-state';
@@ -126,8 +133,11 @@ function checkTddPhase(filePath) {
     let taskBase;
     try {
       const cfg = require(require('path').join(__dirname, '..', '..', 'lib', 'config'));
-      taskBase = cfg.TASKS_BASE;
+      taskBase = process.env.TASKS_BASE || cfg.TASKS_BASE || null;
     } catch {
+      taskBase = process.env.TASKS_BASE || null;
+    }
+    if (!taskBase) {
       taskBase = require('path').join(process.env.HOME, 'worktrees', 'tasks');
     }
     // Use TASKS_BASE from env, config module, or default HOME-based fallback

@@ -86,9 +86,12 @@ function parseCmd(args) {
 
 function runTestCommand(cmd) {
   try {
-    execSync(cmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+    execSync(cmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 300000 });
     return 0;
   } catch (err) {
+    if (err.killed) {
+      process.stderr.write(`Test command timed out after 5 minutes: ${cmd}\n`);
+    }
     return err.status || 1;
   }
 }
