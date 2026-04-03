@@ -106,6 +106,41 @@ function isFileAllowed(filePath) {
   return ALLOWED_PATTERNS.some(pattern => pattern.test(filePath));
 }
 
+/**
+ * Check TDD phase restrictions for a file path.
+ * Returns 'block', 'allow', or 'no-state'.
+ */
+function checkTddPhase(filePath) {
+  try {
+    // Get ticket ID from env or branch
+    const ticketId = process.env.TICKET_ID || (() => {
+      try {
+        const branch = require('child_process').execSync('git branch --show-current', { encoding: 'utf8' }).trim();
+        const match = branch.match(/[A-Z]+-[0-9]+/);
+        return match ? match[0] : null;
+      } catch { return null; }
+    })();
+
+    if (!ticketId) return 'no-state';
+
+    const statePath = require('path').join(process.env.HOME, 'worktrees', 'tasks', ticketId, 'tdd-phase.json');
+    if (!require('fs').existsSync(statePath)) return 'no-state';
+
+    const state = JSON.parse(require('fs').readFileSync(statePath, 'utf8'));
+    const { PHASE_HOOKS } = require(require('path').join(__dirname, '..', 'tdd-phase-registry'));
+    const hook = PHASE_HOOKS[state.currentPhase];
+
+    if (hook && hook.shouldBlock(filePath)) {
+      process.stderr.write(hook.blockMessage + '\n');
+      return 'block';
+    }
+
+    return 'allow';
+  } catch {
+    return 'no-state'; // On error, don't block
+  }
+}
+
 async function main() {
   let input = '';
   for await (const chunk of process.stdin) {
@@ -134,6 +169,15 @@ async function main() {
   if (isFileAllowed(filePath)) {
     process.exit(0);
   }
+
+  // ── TDD Phase enforcement ──────────────────────────────────────────────
+  // If TDD phase state exists, enforce phase-specific file restrictions
+  const tddPhaseResult = checkTddPhase(filePath);
+  if (tddPhaseResult === 'block') {
+    // Block message already written by checkTddPhase
+    process.exit(2);
+  }
+  // If tddPhaseResult === 'no-state', fall through to existing logic
 
   // Check if a developer agent has been invoked
   if (hasDeveloperAgentBeenInvoked(transcriptPath)) {

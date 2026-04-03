@@ -36,7 +36,7 @@ Delegated agents must follow this loop:
 5. Implement the minimum production change needed
 6. Re-run the same tests and confirm GREEN
 7. Refactor only after GREEN
-8. Record TDD evidence via `work-orchestrator.js record-tdd` CLI
+8. Use `tdd-phase-state.js` CLI for evidence recording and phase transitions
 9. Run broader quality checks after targeted tests pass
 
 Enforcement: The orchestrator blocks transitions out of `implement`
@@ -161,7 +161,7 @@ instructions to the `agentPrompt`. The delegated agent must:
 - Run the smallest relevant test command first and confirm failure
 - Implement the minimum fix
 - Re-run the same test command and confirm pass
-- Record evidence via `work-orchestrator.js record-tdd` CLI before completing
+- Use `tdd-phase-state.js` CLI for evidence recording and phase transitions
 - Refactor only after the targeted tests pass
 
 ### 2c. Check Agent Result
@@ -284,4 +284,4 @@ Agent: [Task(Bash) description="ready mark PR ready"]  ← delegated
 | `work-orchestrator.js transition TICKET STEP` | Validate & record step change |
 | `work-orchestrator.js transitions TICKET` | Show allowed next steps |
 | `work-orchestrator.js graph` | Show full state machine |
-| `work-orchestrator.js record-tdd TICKET STEP [flags]` | Record TDD evidence (atomic write) |
+| `tdd-phase-state.js init/record-red/record-green/record-refactor/transition TICKET` | TDD phase state management (hook-enforced) |
