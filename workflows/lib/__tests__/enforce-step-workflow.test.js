@@ -1550,6 +1550,293 @@ describe('enforce-step-workflow', () => {
       assert.equal(code, 2, 'should block redirect even if command mentions exempt script name');
       assert.ok(stderr.includes('BLOCKED'));
     });
+
+    // ─── GH-89: Sub-command filtering for state scripts ──────────────────────
+    const WORK_STATE_PATH = path.join(WORK_DIR, 'work-state.js');
+    const WORKFLOW_STATE_PATH = path.join(LIB_DIR, 'workflow-state.js');
+
+    // Blocked mutating sub-commands
+    it('blocks direct work-state.js set-step call', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node ${WORK_STATE_PATH} set-step TEST-1 check completed` } },
+        'PreToolUse',
+      );
+      assert.equal(code, 2, 'direct set-step should be blocked');
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+
+    it('blocks direct work-state.js set-check call', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node ${WORK_STATE_PATH} set-check TEST-1 quality_checker completed` } },
+        'PreToolUse',
+      );
+      assert.equal(code, 2, 'direct set-check should be blocked');
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+
+    it('blocks direct work-state.js complete call', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node ${WORK_STATE_PATH} complete TEST-1` } },
+        'PreToolUse',
+      );
+      assert.equal(code, 2, 'direct complete should be blocked');
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+
+    it('blocks work-state.js init-subtask command', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node ${WORK_STATE_PATH} init-subtask TEST-1 "description"` } },
+        'PreToolUse',
+      );
+      assert.equal(code, 2, 'init-subtask should be blocked');
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+
+    it('blocks work-state.js complete-subtask command', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node ${WORK_STATE_PATH} complete-subtask TEST-1 0` } },
+        'PreToolUse',
+      );
+      assert.equal(code, 2, 'complete-subtask should be blocked');
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+
+    // Blocked with chained/env-prefix bypass attempts
+    it('blocks set-step with chained cd command', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `cd /some/dir && node ${WORK_STATE_PATH} set-step TEST-1 implement completed` } },
+        'PreToolUse',
+      );
+      assert.equal(code, 2, 'set-step after cd && should be blocked');
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+
+    it('blocks set-step with env prefix', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `SESSION_GUARD_ENABLED=0 node ${WORK_STATE_PATH} set-step TEST-1 implement completed` } },
+        'PreToolUse',
+      );
+      assert.equal(code, 2, 'set-step with env prefix should be blocked');
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+
+    it('blocks chained command that sneaks set-step after safe get', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node ${WORK_STATE_PATH} get TEST-1 && node ${WORK_STATE_PATH} set-step TEST-1 implement completed` } },
+        'PreToolUse',
+      );
+      assert.equal(code, 2, 'chained get+set-step should be blocked');
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+
+    it('blocks semicolon-chained bypass after safe get', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node ${WORK_STATE_PATH} get TEST-1; node ${WORK_STATE_PATH} set-step TEST-1 implement completed` } },
+        'PreToolUse',
+      );
+      assert.equal(code, 2, 'semicolon-chained get+set-step should be blocked');
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+    // ─── GH-89: pipe and flag-arg bypass tests are at the end of this block ─
+    // Allowed safe (read-only) sub-commands
+    it('allows work-state.js get command', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node ${WORK_STATE_PATH} get TEST-1` } },
+        'PreToolUse',
+      );
+      assert.equal(code, 0, 'get should be allowed');
+    });
+
+    it('allows work-state.js resume-info command', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node ${WORK_STATE_PATH} resume-info TEST-1` } },
+        'PreToolUse',
+      );
+      assert.equal(code, 0, 'resume-info should be allowed');
+    });
+
+    it('allows work-state.js init command', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node ${WORK_STATE_PATH} init TEST-1` } },
+        'PreToolUse',
+      );
+      assert.equal(code, 0, 'init should be allowed');
+    });
+
+    it('allows work-state.js add-error command', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node ${WORK_STATE_PATH} add-error TEST-1 "something failed"` } },
+        'PreToolUse',
+      );
+      assert.equal(code, 0, 'add-error should be allowed');
+    });
+
+    it('allows work-state.js active-subtask command', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node ${WORK_STATE_PATH} active-subtask TEST-1` } },
+        'PreToolUse',
+      );
+      assert.equal(code, 0, 'active-subtask should be allowed');
+    });
+
+    it('allows work-state.js quoted subcommand get', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node ${WORK_STATE_PATH} 'get' TEST-1` } },
+        'PreToolUse',
+      );
+      assert.equal(code, 0, 'quoted get should be allowed');
+    });
+
+    // workflow-state.js parity
+    it('blocks workflow-state.js set-step call', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node ${WORKFLOW_STATE_PATH} work-pr set-step TEST-1 3_pr_gen in_progress` } },
+        'PreToolUse',
+      );
+      assert.equal(code, 2, 'workflow-state.js set-step should be blocked');
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+
+    it('blocks workflow-state.js complete call', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node ${WORKFLOW_STATE_PATH} work-pr complete TEST-1` } },
+        'PreToolUse',
+      );
+      assert.equal(code, 2, 'workflow-state.js complete should be blocked');
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+
+    it('blocks workflow-state.js init call (not idempotent)', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node ${WORKFLOW_STATE_PATH} work-pr init TEST-1` } },
+        'PreToolUse',
+      );
+      assert.equal(code, 2, 'workflow-state.js init should be blocked (not idempotent, resets progress)');
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+
+    it('allows workflow-state.js get call', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node ${WORKFLOW_STATE_PATH} work-pr get TEST-1` } },
+        'PreToolUse',
+      );
+      assert.equal(code, 0, 'workflow-state.js get should be allowed');
+    });
+
+    it('allows workflow-state.js resume-info call', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node ${WORKFLOW_STATE_PATH} work-pr resume-info TEST-1` } },
+        'PreToolUse',
+      );
+      assert.equal(code, 0, 'workflow-state.js resume-info should be allowed');
+    });
+
+    it('allows workflow-state.js add-error call', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node ${WORKFLOW_STATE_PATH} work-pr add-error TEST-1 "something failed"` } },
+        'PreToolUse',
+      );
+      assert.equal(code, 0, 'workflow-state.js add-error should be allowed');
+    });
+
+    // ─── GH-89: Node flags with separate arguments ──────────────────────────
+    it('node flag with argument does not bypass exempt check (--require)', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node --require ./noop.js ${WORK_STATE_PATH} get TEST-1` } },
+        'PreToolUse',
+      );
+      assert.equal(code, 0, 'node --require <arg> followed by safe get should be allowed');
+    });
+
+    it('node -r short flag with argument does not bypass exempt check', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node -r ./noop.js ${WORK_STATE_PATH} get TEST-1` } },
+        'PreToolUse',
+      );
+      assert.equal(code, 0, 'node -r <arg> followed by safe get should be allowed');
+    });
+
+    it('node --require with unsafe sub-command is blocked', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node --require ./noop.js ${WORK_STATE_PATH} set-step TEST-1 check completed` } },
+        'PreToolUse',
+      );
+      assert.equal(code, 2, 'node --require <arg> followed by set-step should be blocked');
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+
+    it('node -e inline code is not treated as multi-arg flag (GH-89)', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      // node -e runs inline code; remaining args are just process.argv, not executed files.
+      // With -e removed from multi-arg flags, the regex captures the inline code string
+      // as the "script path" (which doesn't exist on disk), so the command is allowed.
+      // This is correct: work-state.js is NOT being executed here.
+      const { code } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node -e "console.log('hi')" ${WORK_STATE_PATH} set-step TEST-1 check completed` } },
+        'PreToolUse',
+      );
+      assert.equal(code, 0, 'node -e with trailing argv args is not executing work-state.js');
+    });
+
+    it('pipe-chained command blocks unsafe second invocation', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node ${WORK_STATE_PATH} get TEST-1 | node ${WORK_STATE_PATH} set-step TEST-1 check completed` } },
+        'PreToolUse',
+      );
+      assert.equal(code, 2, 'pipe-chained get + set-step should be blocked');
+      assert.ok(stderr.includes('BLOCKED'));
+    }); // end pipe-chain bypass test
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
