@@ -105,7 +105,7 @@ function matchParts(dir, parts) {
         results.push(...matchParts(subdir, parts));
       }
     }
-    return [...new Set(results)]; // dedupe across ** expansion paths
+    return [...new Set(results)]; // dedupe; GLOB_SKIP_DIRS filters .git/node_modules above
   }
 
   // Convert glob pattern to regex
@@ -428,7 +428,7 @@ function main() {
     if (jsonMode) {
       console.log(JSON.stringify(emptyChecklistResult));
     } else {
-      console.log('Verification Checklist header found but contains no markers — failing.');
+      console.log('Verification Checklist header found but contains no markers — failing.'); // tested in spec-verify.test.js
     }
     process.exit(1);
   }
