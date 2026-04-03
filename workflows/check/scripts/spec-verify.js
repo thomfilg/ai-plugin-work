@@ -32,7 +32,7 @@ function getWorktreeRoot(specPath) {
       stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
   } catch {
-    // Fallback: use spec file's directory
+    // Fallback: use spec file's directory (callers can bypass via --root flag)
     return cwd;
   }
 }
@@ -56,6 +56,7 @@ function validatePath(p) {
   if (segments.some(seg => seg === '..')) {
     return { valid: false, reason: `Path traversal rejected: ${p}` };
   }
+  // Note: path.isAbsolute above handles POSIX paths only (Linux/macOS); Windows drive paths not supported
   return { valid: true, resolved: normalized };
 }
 
@@ -110,7 +111,7 @@ function matchParts(dir, parts) {
 
   // Convert glob pattern to regex
   const globRegex = new RegExp(
-    '^' + current.replace(/\./g, '\\.').replace(/\*/g, '[^/]*') + '$'
+    '^' + current.replace(/[.+^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*') + '$'
   );
 
   /** @type {string[]} */
@@ -397,7 +398,7 @@ function main() {
   const specPath = args.find((a, i) => !skipIndices.has(i) && a !== '--json');
 
   if (!specPath) {
-    process.stderr.write('Usage: node spec-verify.js <spec-path> [--json]\n');
+    process.stderr.write('Usage: node spec-verify.js <spec-path> [--json] [--root <dir>]\n');
     process.exit(2);
   }
 

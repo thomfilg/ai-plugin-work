@@ -11,7 +11,7 @@ TEST_FILES=$(find workflows -type f \( -name '*.test.js' -o -name '*.spec.js' \)
 if [ -f "$SKIP_FILE" ]; then
   while IFS= read -r pattern; do
     [[ -z "$pattern" || "$pattern" == \#* ]] && continue
-    TEST_FILES=$(echo "$TEST_FILES" | grep -v "$pattern")
+    TEST_FILES=$(echo "$TEST_FILES" | grep -v "$pattern" || true)
   done < "$SKIP_FILE"
 fi
 

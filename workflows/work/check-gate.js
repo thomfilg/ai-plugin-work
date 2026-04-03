@@ -127,7 +127,7 @@ const CHECK_GATE_RULES = [
         const stdout = execFileSync('node', [scriptPath, specPath, '--json', '--root', worktreeRoot], {
           encoding: 'utf-8',
           timeout: 30000,
-          stdio: ['pipe', 'pipe', 'pipe'],
+          stdio: ['pipe', 'pipe', 'pipe'], // worktree root resolved above via git rev-parse
         });
         const result = JSON.parse(stdout);
         if (typeof result.success !== 'boolean') return ['Spec verification returned unexpected output format'];
@@ -137,7 +137,7 @@ const CHECK_GATE_RULES = [
           .filter(c => !c.passed)
           .map(c => `Spec verification failed: ${c.type} ${Array.isArray(c.args) ? c.args.join(' ') : ''} — ${c.reason || 'check failed'}`);
       } catch (err) {
-        return parseSpecVerifyError(err);
+        return parseSpecVerifyError(err); // delegates error handling to parseSpecVerifyError
       }
     },
   },
