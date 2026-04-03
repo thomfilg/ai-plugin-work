@@ -42,7 +42,7 @@ process.on('unhandledRejection', (err) => {
 
 // (Patch 1) Lazy-load appendAction with fallback
 // Agent detection for report file protection
-const { isRunningInAgent } = require(path.join(__dirname, '..', 'agent-detection'));
+const { isRunningInAgent, normalizeAgentName } = require(path.join(__dirname, '..', 'agent-detection'));
 
 const { createArtifactProtector } = require(path.join(__dirname, '..', 'protect-artifact-files'));
 
@@ -376,7 +376,18 @@ const TRUSTED_SCRIPT_DIRS = [
   path.resolve(__dirname, '..'),                     // workflows/lib/
   path.resolve(__dirname, '..', 'scripts'),          // workflows/lib/scripts/
   path.resolve(__dirname, '..', '..', 'work'),       // workflows/work/
+  path.resolve(__dirname, '..', '..', 'check', 'scripts'), // workflows/check/scripts/
 ];
+
+// Agent-gated writer scripts — map script basename to authorized agents.
+// When a Bash command invokes one of these scripts, the hook verifies agent identity.
+// The script itself also validates, providing defense-in-depth.
+const AGENT_GATED_SCRIPTS = {
+  'write-qa-report.js':         ['qa-feature-tester', 'qa-api-tester'],
+  'write-tests-report.js':      ['quality-checker'],
+  'write-code-review.js':       ['code-checker'],
+  'write-completion-report.js':  ['completion-checker'],
+};
 
 const stateFileProtector = createFileProtector({
   isProtected: basenameProtector(PROTECTED_STATE_BASENAMES),
@@ -653,6 +664,112 @@ function handlePreToolUse(hookData) {
     didBlock = true;
     process.stderr.write(rule4.message);
     process.exit(2);
+  }
+
+  // Rule 5: Enforce agent identity for agent-gated writer scripts
+  // When a Bash command invokes a writer script (e.g. write-qa-report.js),
+  // verify the caller is an authorized agent. This provides defense-in-depth
+  // alongside the script's own identity check.
+  if (toolName === 'Bash') {
+    const cmd = String(toolInput?.command || '');
+    // Reuse the same robust nodePattern as exempt script detection (handles env prefixes, flags, quotes)
+    const writerNodePattern =
+      /(?:^|&&|;|\|)\s*(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|\S+)\s+)*(?:node|nodejs)\s+(?:-[^\s]+\s+)*(?:"([^"]+)"|'([^']+)'|(\S+))/;
+    const nodeExec = cmd.match(writerNodePattern);
+    if (nodeExec) {
+      let scriptPath = nodeExec[1] || nodeExec[2] || nodeExec[3];
+      // Expand common shell variables that won't be expanded in hook context
+      if (process.env.CLAUDE_PLUGIN_ROOT) {
+        scriptPath = scriptPath
+          .replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, process.env.CLAUDE_PLUGIN_ROOT)
+          .replace(/\$CLAUDE_PLUGIN_ROOT/g, process.env.CLAUDE_PLUGIN_ROOT);
+      }
+      const scriptBase = path.basename(scriptPath);
+      const allowedAgents = AGENT_GATED_SCRIPTS[scriptBase];
+      if (allowedAgents) {
+        // Verify script lives in a trusted directory
+        let trusted = false;
+        try {
+          const resolved = fs.realpathSync(path.resolve(scriptPath));
+          trusted = TRUSTED_SCRIPT_DIRS.some(dir => resolved.startsWith(dir + path.sep));
+        } catch { /* file not found */ }
+
+        if (!trusted) {
+          didBlock = true;
+          process.stderr.write(
+            `BLOCKED: Script ${scriptBase} is not in a trusted directory.\n` +
+            `Resolved path must be under a trusted workflows directory.\n`
+          );
+          process.exit(2);
+        }
+
+        // Verify agent identity
+        const transcriptPath = hookData?.transcript_path;
+        if (!isRunningInAgent(transcriptPath, allowedAgents, hookData)) {
+          didBlock = true;
+          process.stderr.write(
+            `BLOCKED: Cannot call ${scriptBase} — not running in an authorized agent.\n` +
+            `Allowed agents: ${allowedAgents.join(', ')}\n` +
+            `Only these agents may invoke this writer script.\n`
+          );
+          process.exit(2);
+        }
+        // Enforce step: only issue tokens during the 'check' step.
+        // Writer scripts bypass artifactProtector (they write via Bash, not Write tool),
+        // so we enforce step gating here at token issuance time.
+        if (ticketId) {
+          const state = loadStateFile(ticketId, '.work-state.json');
+          const currentStep = state?.stepStatus
+            ? WORK_STEPS.find(s => state.stepStatus[s] === 'in_progress') || null
+            : null;
+          if (currentStep && currentStep !== STEPS.check) {
+            didBlock = true;
+            process.stderr.write(
+              `BLOCKED: Cannot issue write token — step '${STEPS.check}' is not in_progress.\n` +
+              `Current step: ${currentStep}\n` +
+              `Report writer scripts can only be called during the check step.\n`
+            );
+            process.exit(2);
+          }
+        }
+
+        // Agent + step verified — issue a write token for the script to consume.
+        // The token file is the trusted bridge between the hook (which has
+        // access to Claude Code's hookData) and the script (which doesn't).
+        const { tokenPath, ensureTokenDir } = require(path.join(__dirname, '..', 'scripts', 'write-report'));
+        const detectedAgent = (() => {
+          // Determine which agent was detected (for the token)
+          const envAgent = process.env.CLAUDE_CURRENT_AGENT;
+          if (envAgent && allowedAgents.some(a => normalizeAgentName(a) === normalizeAgentName(envAgent))) return envAgent;
+          const hd = hookData?.tool_input?.subagent_type;
+          if (hd && allowedAgents.some(a => normalizeAgentName(a) === normalizeAgentName(hd))) return hd;
+          // Fallback: return first allowed agent (transcript detection confirmed match)
+          return allowedAgents[0];
+        })();
+        try {
+          ensureTokenDir();
+          const tp = tokenPath(scriptBase);
+          // Remove stale token if any, then create exclusively with 0600 perms
+          try { fs.unlinkSync(tp); } catch { /* may not exist */ }
+          const fd = fs.openSync(tp, 'wx', 0o600);
+          try {
+            // Bind ticketId + tasksBase into token so the script can validate reportPath scope
+            const tokenData = {
+              agent: normalizeAgentName(detectedAgent),
+              timestamp: Date.now(),
+              tasksBase: ticketId ? path.join(TASKS_BASE, ticketId) : null,
+            };
+            fs.writeSync(fd, JSON.stringify(tokenData));
+          } finally {
+            fs.closeSync(fd);
+          }
+        } catch (e) {
+          if (DEBUG) process.stderr.write(`WARNING: Failed to write token: ${e.message}\n`);
+        }
+        // Continue normal hook processing — don't skip workflow/transition checks
+        // for compound Bash commands that may include other operations.
+      }
+    }
   }
 
   if (rule3.skipRemainingChecks) return; // Edit/Write/MultiEdit — skip per-workflow loop
