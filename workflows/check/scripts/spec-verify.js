@@ -278,7 +278,7 @@ function checkTestCount(args, root) {
     return { type: 'TEST_COUNT', args, passed: false, reason: `Invalid minimum count: ${minStr}` };
   }
 
-  // Validate the glob pattern doesn't have traversal
+  // Validate the glob pattern doesn't contain path traversal
   const validation = validatePath(globPattern.split('*')[0] || '.');
   if (!validation.valid) {
     return { type: 'TEST_COUNT', args, passed: false, reason: validation.reason };
