@@ -228,6 +228,18 @@ function createReportWriter(config) {
       process.stderr.write(`[${name}] ERROR: "reportPath" must be an absolute path.\n`);
       process.exit(1);
     }
+    // Scope reportPath to the ticket's task folder (bound into token by hook)
+    if (token.tasksBase) {
+      const resolved = path.resolve(reportPath);
+      if (!resolved.startsWith(token.tasksBase + path.sep) && resolved !== token.tasksBase) {
+        process.stderr.write(
+          `[${name}] BLOCKED: reportPath is outside the ticket's task folder.\n` +
+          `  reportPath: ${resolved}\n` +
+          `  Allowed folder: ${token.tasksBase}/\n`
+        );
+        process.exit(2);
+      }
+    }
 
     const newContent = formatReport(input);
 

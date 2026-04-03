@@ -16,7 +16,7 @@ function writeToken(scriptBasename, agent, timestamp) {
   ensureTokenDir();
   const tp = tokenPath(scriptBasename);
   try { fs.unlinkSync(tp); } catch { /* ignore */ }
-  fs.writeFileSync(tp, JSON.stringify({ agent, timestamp }), { mode: 0o600 });
+  fs.writeFileSync(tp, JSON.stringify({ agent, timestamp, tasksBase: '/tmp' }), { mode: 0o600 });
 }
 
 function cleanupToken(scriptBasename) {

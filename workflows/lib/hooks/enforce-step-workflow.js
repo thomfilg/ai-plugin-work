@@ -753,7 +753,13 @@ function handlePreToolUse(hookData) {
           try { fs.unlinkSync(tp); } catch { /* may not exist */ }
           const fd = fs.openSync(tp, 'wx', 0o600);
           try {
-            fs.writeSync(fd, JSON.stringify({ agent: normalizeAgentName(detectedAgent), timestamp: Date.now() }));
+            // Bind ticketId + tasksBase into token so the script can validate reportPath scope
+            const tokenData = {
+              agent: normalizeAgentName(detectedAgent),
+              timestamp: Date.now(),
+              tasksBase: ticketId ? path.join(TASKS_BASE, ticketId) : null,
+            };
+            fs.writeSync(fd, JSON.stringify(tokenData));
           } finally {
             fs.closeSync(fd);
           }
