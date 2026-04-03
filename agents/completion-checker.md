@@ -2,7 +2,7 @@
 name: completion-checker
 tools: Bash, Read, Grep, Glob
 description: Checks that all user requirements have been met before finalizing the conversation.
-model: haiku
+model: sonnet
 color: cyan
 ---
 
@@ -118,7 +118,10 @@ If these files exist, cross-reference them against the implementation:
 
 Report gaps between what was planned and what was delivered.
 
+### Spec Verification Output
+
+If a spec-verify output exists for this ticket, read it. Spec-verify failures are deterministic checks — they MUST result in an INCOMPLETE status. These checks cannot be overridden by subjective judgment.
+
 ### Final Guidelines
-6. WHEN IN DOUBT, mark COMPLETE - better to pass than block unnecessarily
-7. If assistant provided the requested information/action → COMPLETE
+6. If assistant provided the requested information/action → COMPLETE
 8. If assistant said "ready", "done", "delivered", "implemented", "here is", "completed" → COMPLETE

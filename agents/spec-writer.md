@@ -175,6 +175,31 @@ Surface ambiguity BEFORE implementation starts. For each item, note the default 
 - {External libs, services, or internal modules needed}
 ```
 
+## Verification Checklist
+
+Machine-checkable markers for deterministic verification. Each line follows:
+`- MARKER_TYPE arg1 arg2`
+
+| Marker | Args | Semantics |
+|--------|------|-----------|
+| `FILE_EXISTS` | `<path>` | Assert file exists (relative to worktree root) |
+| `GREP` | `<path> /regex/[flags]` | Assert regex matches in file |
+| `TEST_COUNT` | `<glob> <min>` | Assert at least N `it()`/`test()` calls in matching files |
+| `REUSES` | `<path> <import>` | Assert file imports/requires the named module |
+
+Example:
+```
+- FILE_EXISTS src/components/Foo.tsx
+- GREP src/routes/api.ts /router\.get\(.*\/foo/
+- TEST_COUNT src/**/*.test.ts 5
+- REUSES src/pages/Dashboard.tsx useAuth
+```
+
+Notes:
+- Paths are relative to worktree root
+- Inline comments after ` # ` are stripped
+- Specs without this section pass verification (fail-open)
+
 ## Guidelines
 
 - Reference **specific files and line ranges** from the codebase, not abstract patterns

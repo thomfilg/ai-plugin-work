@@ -81,6 +81,7 @@ Task(spec-writer):
   10. Out of Scope — explicitly list what is NOT being implemented
   11. Open Questions & Decisions — surface ambiguity with default assumptions
   12. Dependencies — external libs, services, or internal modules needed
+  13. Verification Checklist — machine-checkable markers (FILE_EXISTS, GREP, TEST_COUNT, REUSES)
 
   ${IF READ_DOCS_ON_SPEC: Read these docs before starting: ${comma-separated paths}}
 ```
