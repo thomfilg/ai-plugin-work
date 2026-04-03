@@ -976,10 +976,11 @@ function main() {
               stepStatus: {}, checkProgress: {},
               errors: [], startTime: new Date().toISOString(),
               lastPlanTimestamp: result.timestamp,
-              deferredSteps: deferSteps, // ticketId uses safeName_plan to match on-disk path
+              deferredSteps: deferSteps,
             };
             ALL_STEPS.forEach(s => { minimalState.stepStatus[s] = 'pending'; });
             saveWorkState(safeName_plan, minimalState);
+            appendAction(safeName_plan, { step: STEPS.ticket, what: 'workflow started' });
           }
         }
       }
