@@ -6,18 +6,26 @@
 set -euo pipefail
 
 SKIP_FILE=".test-skip"
-TEST_FILES=$(find workflows -type f \( -name '*.test.js' -o -name '*.spec.js' \) | sort)
+
+# Build space-separated file list (node --test expects positional args, not newlines)
+mapfile -t FILES < <(find workflows -type f \( -name '*.test.js' -o -name '*.spec.js' \) | sort)
 
 if [ -f "$SKIP_FILE" ]; then
-  while IFS= read -r pattern; do
-    [[ -z "$pattern" || "$pattern" == \#* ]] && continue
-    TEST_FILES=$(echo "$TEST_FILES" | grep -v "$pattern" || true)
-  done < "$SKIP_FILE"
+  FILTERED=()
+  for f in "${FILES[@]}"; do
+    skip=false
+    while IFS= read -r pattern; do
+      [[ -z "$pattern" || "$pattern" == \#* ]] && continue
+      if [[ "$f" == *"$pattern"* ]]; then skip=true; break; fi
+    done < "$SKIP_FILE"
+    $skip || FILTERED+=("$f")
+  done
+  FILES=("${FILTERED[@]}")
 fi
 
-if [ -z "$TEST_FILES" ]; then
+if [ ${#FILES[@]} -eq 0 ]; then
   echo "No test files found"
   exit 0
 fi
 
-exec node --test $TEST_FILES
+exec node --test "${FILES[@]}"
