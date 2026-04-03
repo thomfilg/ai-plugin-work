@@ -21,8 +21,8 @@ beforeEach(() => { testTicket = `T-${++testCount}`; });
 
 describe('check-gate (unit)', () => {
 
-  it('CHECK_GATE_RULES has 3 rules with required shape', () => {
-    assert.equal(CHECK_GATE_RULES.length, 3);
+  it('CHECK_GATE_RULES has 4 rules with required shape', () => {
+    assert.equal(CHECK_GATE_RULES.length, 4);
     for (const rule of CHECK_GATE_RULES) {
       assert.ok(rule.name, 'rule must have a name');
       assert.ok(rule.description, 'rule must have a description');
@@ -76,6 +76,39 @@ describe('check-gate (unit)', () => {
   it('running-agents rule returns empty when no tmux sessions', () => {
     const rule = CHECK_GATE_RULES.find(r => r.name === 'running-agents');
     const reasons = rule.check(path.join(TEMP, testTicket), testTicket);
+    assert.equal(reasons.length, 0);
+  });
+
+  it('spec-verification rule fails when spec has failing checks (scenario 11)', () => {
+    // Write reports so other rules pass, plus a spec with a failing FILE_EXISTS
+    writeReport('tests.check.md', 'Status: APPROVED');
+    writeReport('code-review.check.md', 'Status: APPROVED');
+    writeReport('completion.check.md', 'Status: COMPLETE');
+    writeReport('qa-feature.check.md', 'Status: APPROVED');
+    // Initialize git in ticket dir so spec-verify can find worktree root
+    const ticketDir = path.join(TEMP, testTicket);
+    const { execFileSync: exec } = require('child_process');
+    exec('git', ['init'], { cwd: ticketDir, stdio: 'pipe' });
+    fs.writeFileSync(path.join(ticketDir, 'spec.md'),
+      '# Spec\n\n## Verification Checklist\n- FILE_EXISTS src/nonexistent-file.js\n');
+    const result = validateCheckGate(TEMP, testTicket);
+    assert.equal(result.valid, false);
+    assert.ok(result.reasons.some(r => r.includes('spec verification') || r.includes('Spec verification')));
+  });
+
+  it('spec-verification rule passes when spec has no checklist (scenario 12)', () => {
+    writeReport('tests.check.md', 'Status: APPROVED');
+    writeReport('code-review.check.md', 'Status: APPROVED');
+    writeReport('completion.check.md', 'Status: COMPLETE');
+    writeReport('qa-feature.check.md', 'Status: APPROVED');
+    const ticketDir = path.join(TEMP, testTicket);
+    fs.writeFileSync(path.join(ticketDir, 'spec.md'),
+      '# Spec\n\n## Summary\nLegacy spec without verification checklist\n');
+    const result = validateCheckGate(TEMP, testTicket);
+    // The spec-verification rule should pass (fail-open) since there's no checklist
+    // Note: running-agents may also pass since there are no tmux sessions for this test ticket
+    const specRule = CHECK_GATE_RULES.find(r => r.name === 'spec-verification');
+    const reasons = specRule.check(ticketDir, testTicket);
     assert.equal(reasons.length, 0);
   });
 });

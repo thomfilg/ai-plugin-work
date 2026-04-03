@@ -85,6 +85,31 @@ const CHECK_GATE_RULES = [
       }, []);
     },
   },
+  {
+    name: 'spec-verification',
+    description: 'Spec Verification Checklist markers must all pass (fail-open for legacy specs)',
+    check(dir) {
+      const specPath = path.join(dir, 'spec.md');
+      if (!fileExists(specPath)) return []; // fail-open: no spec = pass
+      const scriptPath = path.resolve(__dirname, '..', 'check', 'scripts', 'spec-verify.js');
+      try {
+        const stdout = execFileSync('node', [scriptPath, specPath, '--json'], {
+          encoding: 'utf-8',
+          timeout: 30000,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
+        const result = JSON.parse(stdout);
+        if (result.success) return [];
+        // Collect failure reasons from individual checks
+        return result.checks
+          .filter(c => !c.passed)
+          .map(c => `Spec verification failed: ${c.type} ${c.args.join(' ')} — ${c.reason || 'check failed'}`);
+      } catch (err) {
+        // Script error (exit code 2) or parse error
+        return [`Spec verification script error: ${err.message || 'unknown error'}`];
+      }
+    },
+  },
 ];
 
 // ─── Public API ─────────────────────────────────────────────────────────────

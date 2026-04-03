@@ -173,6 +173,32 @@ Surface ambiguity BEFORE implementation starts. For each item, note the default 
 
 ## Dependencies
 - {External libs, services, or internal modules needed}
+
+## Verification Checklist
+
+Machine-checkable markers that the check gate will verify automatically before allowing PR creation.
+Each line follows the format: `- MARKER_TYPE arg1 arg2 [# optional comment]`
+
+Supported markers:
+
+| Marker | Args | Semantics |
+|--------|------|-----------|
+| `FILE_EXISTS` | `<path>` | Assert file exists at path (relative to worktree root) |
+| `GREP` | `<path> /regex/[flags]` | Assert regex pattern matches in file |
+| `TEST_COUNT` | `<glob-pattern> <minimum>` | Assert at least N `it()`/`test()` calls in matching files |
+| `REUSES` | `<path> <import-pattern>` | Assert file contains import/require matching pattern |
+
+Examples:
+- FILE_EXISTS src/components/UserDashboard.tsx
+- GREP src/routes/api.ts /router\.get\(.*\/users/
+- TEST_COUNT src/__tests__/**/*.test.ts 5
+- REUSES src/pages/Dashboard.tsx useAuth
+
+Notes:
+- Paths are relative to the worktree root
+- Inline comments are supported: `- FILE_EXISTS src/foo.js # main entry point`
+- Legacy specs without this section will fail-open (pass the check gate)
+- Include at least FILE_EXISTS for each new file and GREP for key implementation patterns
 ```
 
 ## Guidelines

@@ -2,7 +2,7 @@
 name: completion-checker
 tools: Bash, Read, Grep, Glob
 description: Checks that all user requirements have been met before finalizing the conversation.
-model: haiku
+model: sonnet
 color: cyan
 ---
 
@@ -118,7 +118,17 @@ If these files exist, cross-reference them against the implementation:
 
 Report gaps between what was planned and what was delivered.
 
+### Spec Verification Output
+
+If a `spec-verify` report is available (passed as context or in the ticket directory), read its output carefully:
+- Any `[FAIL]` checks indicate concrete, machine-verified gaps in the implementation
+- Failed FILE_EXISTS checks mean required files were not created
+- Failed GREP checks mean expected patterns are missing from specific files
+- Failed TEST_COUNT checks mean insufficient tests were written
+- Failed REUSES checks mean required imports/reuse of existing code is missing
+
+**Spec-verify failures should ALWAYS result in an INCOMPLETE status** — these are deterministic checks that cannot be overridden by subjective judgment.
+
 ### Final Guidelines
-6. WHEN IN DOUBT, mark COMPLETE - better to pass than block unnecessarily
 7. If assistant provided the requested information/action → COMPLETE
 8. If assistant said "ready", "done", "delivered", "implemented", "here is", "completed" → COMPLETE
