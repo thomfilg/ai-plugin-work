@@ -210,6 +210,7 @@ const WORKFLOWS = [
           // 1. Get PR number
           const prNum = execFileSync('gh', ['pr', 'view', '--json', 'number', '-q', '.number'], opts).trim();
           if (!prNum) return false;
+          // Note: ticket ID sanitization (#NNN→GH-NNN) is handled in parseTransition() (GH-174)
 
           // 2. CI checks must all pass (or have no checks)
           const checksJson = execFileSync('gh', ['pr', 'checks', prNum, '--json', 'state,name'], opts).trim();
