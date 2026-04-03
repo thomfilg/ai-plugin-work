@@ -641,7 +641,11 @@ function parseTransition(toolName, toolInput, transitionPattern) {
   const cmd = String(toolInput?.command || '');
   const match = cmd.match(transitionPattern);
   if (match) {
-    return { isTransition: true, ticket: match[1], targetStep: match[2], raw: cmd };
+    // Sanitize ticket ID so #NNN matches GH-NNN from branch (GH-168/GH-174)
+    const tp = require(path.join(__dirname, '..', 'ticket-provider'));
+    const providerConfig = tp.getProviderConfig({ skipPrompt: true });
+    const safeTicket = tp.sanitizeTicketIdForPath(match[1], providerConfig);
+    return { isTransition: true, ticket: safeTicket, targetStep: match[2], raw: cmd };
   }
   return { isTransition: false };
 }
