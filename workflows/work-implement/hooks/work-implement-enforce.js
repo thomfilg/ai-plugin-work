@@ -106,6 +106,59 @@ function isFileAllowed(filePath) {
   return ALLOWED_PATTERNS.some(pattern => pattern.test(filePath));
 }
 
+/**
+ * Check TDD phase restrictions for a file path.
+ * Returns 'block', 'allow', or 'no-state'.
+ */
+function checkTddPhase(filePath) {
+  try {
+    // Get ticket ID from env or shared resolver
+    const ticketId = process.env.TICKET_ID || (() => {
+      try {
+        const { getCurrentTaskId } = require(require('path').join(__dirname, '..', '..', 'lib', 'scripts', 'get-ticket-id.js'));
+        const id = getCurrentTaskId();
+        return id || null;
+      } catch {
+        // Fallback: extract from branch name (supports GH-123, PROJ-123, lowercase)
+        try {
+          const branch = require('child_process').execSync('git branch --show-current', { encoding: 'utf8' }).trim();
+          const match = branch.match(/[A-Za-z]+-[0-9]+/i);
+          return match ? match[0] : null;
+        } catch { return null; }
+      }
+    })();
+
+    if (!ticketId) return 'no-state';
+
+    let taskBase;
+    try {
+      const cfg = require(require('path').join(__dirname, '..', '..', 'lib', 'config'));
+      taskBase = process.env.TASKS_BASE || cfg.TASKS_BASE || null;
+    } catch {
+      taskBase = process.env.TASKS_BASE || null;
+    }
+    if (!taskBase) {
+      taskBase = require('path').join(process.env.HOME, 'worktrees', 'tasks');
+    }
+    // Use TASKS_BASE from env, config module, or default HOME-based fallback
+    const statePath = require('path').join(taskBase, ticketId, 'tdd-phase.json');
+    if (!require('fs').existsSync(statePath)) return 'no-state';
+
+    const state = JSON.parse(require('fs').readFileSync(statePath, 'utf8'));
+    const { PHASE_HOOKS } = require(require('path').join(__dirname, '..', 'tdd-phase-registry'));
+    const hook = PHASE_HOOKS[state.currentPhase];
+
+    if (hook && hook.shouldBlock(filePath)) {
+      process.stderr.write(hook.blockMessage + '\n');
+      return 'block';
+    }
+
+    return 'allow';
+  } catch {
+    return 'no-state'; // On error, don't block
+  }
+}
+
 async function main() {
   let input = '';
   for await (const chunk of process.stdin) {
@@ -129,6 +182,27 @@ async function main() {
 
   // Get the file path being edited
   const filePath = toolInput.file_path || toolInput.path || '';
+
+  // tdd-phase.json is NOT allowed via the generic .json allowlist
+  // It must be protected by TDD phase hooks or blocked entirely
+  if (filePath && /tdd-phase\.json$/.test(filePath)) {
+    // Block direct edits to tdd-phase.json — only tdd-phase-state.js can write it
+    process.stderr.write(
+      'Direct edit of tdd-phase.json is blocked.\n' +
+      'Use tdd-phase-state.js CLI to manage TDD phase state.\n'
+    );
+    process.exit(2);
+  }
+
+  // ── TDD Phase enforcement (BEFORE allowlist) ─────────────────────────
+  // Must run before isFileAllowed() because ALLOWED_PATTERNS includes test
+  // files (.test.*, .spec.*) which would bypass GREEN-phase blocking
+  const tddPhaseResult = checkTddPhase(filePath);
+  if (tddPhaseResult === 'block') {
+    // Block message already written by checkTddPhase
+    process.exit(2);
+  }
+  // If tddPhaseResult === 'no-state' or 'allow', fall through to existing logic
 
   // Allow config/non-code files
   if (isFileAllowed(filePath)) {
