@@ -4,3 +4,4 @@
 # Environment config (user-specific)
 .env
 .envrc
+node_modules/
