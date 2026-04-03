@@ -22,6 +22,7 @@
  */
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 // (Patch 11) Gate transient stderr logging behind debug env var — declared early for use in handlers
