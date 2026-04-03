@@ -759,6 +759,33 @@ function transitionStep(ticket, targetStep) {
     }
   }
 
+  // DEFER re-evaluation gate (GH-154): block forward transitions past DEFER steps
+  // unless the plan has been re-run since the last transition.
+  const isForward = ALL_STEPS.indexOf(targetStep) > ALL_STEPS.indexOf(currentStep);
+  if (isForward && ws?.deferredSteps?.length > 0) {
+    const currentIdx_g = ALL_STEPS.indexOf(currentStep);
+    const targetIdx_g = ALL_STEPS.indexOf(targetStep);
+    const deferredInRange = ws.deferredSteps.filter(ds => {
+      const idx = ALL_STEPS.indexOf(ds);
+      return idx > currentIdx_g && idx <= targetIdx_g;
+    });
+
+    if (deferredInRange.length > 0) {
+      const planTs = ws.lastPlanTimestamp;
+      const transTs = ws.lastTransitionTimestamp;
+      // Block if: no plan timestamp, or plan is not fresher than last transition
+      if (!planTs || (transTs && planTs <= transTs)) {
+        return {
+          error: true,
+          message: `BLOCKED: Cannot transition past DEFER step '${deferredInRange[0]}' -- plan must be re-run first.`,
+          gate: 'defer-reeval',
+          deferStep: deferredInRange[0],
+          hint: `Re-run the plan to re-evaluate DEFER steps:\n  node ${path.resolve(__dirname, 'work.workflow.js')} plan ${ticket}`,
+        };
+      }
+    }
+  }
+
   // Check-to-PR gate (GH-121): mandatory quality safeguard — always enabled, no toggle.
   // Blocks check→pr unless all reports exist, pass, and no agents are running.
   const isCheckToPr = currentStep === STEPS.check && targetStep === STEPS.pr;
@@ -821,6 +848,9 @@ function transitionStep(ticket, targetStep) {
     if (archivePath) {
       appendAction(ticket, { step: currentStep, what: `artifacts archived to ${archivePath}` });
     }
+    // Clear stale DEFER metadata on backward transition (GH-154)
+    ws.deferredSteps = [];
+    ws.lastPlanTimestamp = null;
   } else {
     // Going forward — mark skipped intermediates as completed
     for (let i = currentIdx + 1; i < targetIdx; i++) {
@@ -830,6 +860,9 @@ function transitionStep(ticket, targetStep) {
       }
     }
   }
+
+  // Track transition timestamp for DEFER re-evaluation gate (GH-154)
+  ws.lastTransitionTimestamp = new Date().toISOString();
 
   saveWorkState(ticket, ws);
 
@@ -918,6 +951,21 @@ function main() {
       const result = generatePlan(ticket, isTicket ? null : raw, state, rework, providerConfig, suffix);
 
       result.timestamp = new Date().toISOString();
+
+      // Persist DEFER metadata into work state for transition guard (GH-154)
+      if (ticket) {
+        const safeBase_plan = tp.sanitizeTicketIdForPath(ticket, providerConfig);
+        const safeName_plan = suffix ? safeBase_plan + '/' + suffix : safeBase_plan;
+        const planState = loadWorkState(safeName_plan);
+        if (planState) {
+          planState.lastPlanTimestamp = result.timestamp;
+          planState.deferredSteps = result.plan
+            .filter(s => s.action === 'DEFER')
+            .map(s => s.step);
+          saveWorkState(safeName_plan, planState);
+        }
+      }
+
       if (ghUrlMeta && providerConfig) {
         result.ticketUrl = tp.ticketUrl(ticket, providerConfig);
       }
