@@ -1,0 +1,1 @@
+/home/thomfilg/p/w-claude-plugin/claude-plugin-work/workflows/create-jira/skills/create-jira-agents.md

@@ -1,0 +1,193 @@
+{
+  "description": "Work2 orchestrator hooks for deterministic workflow execution",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "matcher": "^\\s*/work\\s+",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/work-orchestrator-hook.js",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Task|Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/enforce-step-workflow.js"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/resolve-plugin-root-hook.js"
+          },
+          {
+            "type": "command",
+            "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/enforce-step-workflow.js"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__atlassian__jira_get_issue|mcp__linear__get_issue",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/enforce-step-workflow.js"
+          }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/enforce-step-workflow.js"
+          },
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/work/hooks/enforce-work-command.js"
+          },
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/work-implement/hooks/work-implement-enforce.js"
+          },
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/work/hooks/work-require-implement.js"
+          }
+        ]
+      },
+      {
+        "matcher": "Task|Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/workflows/check/hooks/enforce-env-start-failure.js"
+          },
+          {
+            "type": "command",
+            "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/enforce-screenshot-requirement.js"
+          }
+        ]
+      },
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/workflows/work/hooks/work-enforce-steps.js"
+          }
+        ]
+      },
+      {
+        "matcher": "Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/work/agents/commit-writer/commit-writer-preflight.js"
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Task|Skill|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CLAUDE_HOOK_TYPE=PostToolUse node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/enforce-step-workflow.js"
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__atlassian__jira_get_issue|mcp__linear__get_issue",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CLAUDE_HOOK_TYPE=PostToolUse node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/enforce-step-workflow.js"
+          }
+        ]
+      },
+      {
+        "matcher": "Skill",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CLAUDE_HOOK_TYPE=PostToolUse node ${CLAUDE_PLUGIN_ROOT}/workflows/work/hooks/work-enforce-steps.js"
+          }
+        ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CLAUDE_HOOK_TYPE=PostToolUse node ${CLAUDE_PLUGIN_ROOT}/workflows/check/hooks/enforce-env-start-failure.js"
+          },
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/work/hooks/enforce-coverage-fix.js"
+          }
+        ]
+      },
+      {
+        "matcher": "AskUserQuestion",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CLAUDE_HOOK_TYPE=PostToolUse node ${CLAUDE_PLUGIN_ROOT}/workflows/check/hooks/enforce-env-start-failure.js"
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CLAUDE_HOOK_TYPE=PreCompact node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/session-guard.js"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CLAUDE_HOOK_TYPE=Stop node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/session-guard.js",
+            "timeout": 10
+          },
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/enforce-completion-protocol.js"
+          }
+        ]
+      },
+      {
+        "matcher": ".*(/check|code.?review|quality.?check|APPROVED|PASS|tests?.?md|code-review.?md|qa.?md).*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/work/hooks/work-code-review-status.js"
+          },
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/work/hooks/work-suggestion-replies.js"
+          }
+        ]
+      }
+    ]
+  }
+}
