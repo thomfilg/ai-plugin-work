@@ -20,6 +20,30 @@ const { execFileSync } = require('child_process');
 function fileExists(p) { return fs.existsSync(p); }
 function readFile(p) { try { return fs.readFileSync(p, 'utf-8'); } catch { return ''; } }
 
+/**
+ * Parse execFileSync error from spec-verify.js execution.
+ * execFileSync throws on non-zero exit codes and attaches stdout/stderr
+ * to the error. Exit code 1 = checks ran but some failed (stdout has JSON),
+ * exit code 2 = script-level error.
+ * @param {Error & { stdout?: string, stderr?: string }} err
+ * @returns {string[]}
+ */
+function parseSpecVerifyError(err) {
+  const stdout = typeof err.stdout === 'string' ? err.stdout : '';
+  const stderr = typeof err.stderr === 'string' ? err.stderr.trim() : '';
+  if (stdout) {
+    try {
+      const result = JSON.parse(stdout);
+      if (typeof result.success === 'boolean' && !result.success && Array.isArray(result.checks)) {
+        return result.checks
+          .filter(c => !c.passed)
+          .map(c => `Spec verification failed: ${c.type} ${Array.isArray(c.args) ? c.args.join(' ') : ''} — ${c.reason || 'check failed'}`);
+      }
+    } catch { /* stdout wasn't valid JSON, fall through to generic error */ }
+  }
+  return [`Spec verification script error: ${stderr || err.message || 'unknown error'}`];
+}
+
 function listFiles(dir, pattern) {
   if (!fileExists(dir)) return [];
   try {
@@ -107,23 +131,7 @@ const CHECK_GATE_RULES = [
           .filter(c => !c.passed)
           .map(c => `Spec verification failed: ${c.type} ${Array.isArray(c.args) ? c.args.join(' ') : ''} — ${c.reason || 'check failed'}`);
       } catch (err) {
-        // execFileSync throws on non-zero exit codes and attaches stdout/stderr
-        // to the error object. Exit code 1 = checks ran but some failed (stdout
-        // contains JSON), exit code 2 = script-level error.
-        const stdout = typeof err.stdout === 'string' ? err.stdout : '';
-        const stderr = typeof err.stderr === 'string' ? err.stderr.trim() : '';
-        if (stdout) {
-          try {
-            const result = JSON.parse(stdout);
-            if (typeof result.success === 'boolean' && !result.success && Array.isArray(result.checks)) {
-              return result.checks
-                .filter(c => !c.passed)
-                .map(c => `Spec verification failed: ${c.type} ${Array.isArray(c.args) ? c.args.join(' ') : ''} — ${c.reason || 'check failed'}`);
-            }
-          } catch { /* stdout wasn't valid JSON, fall through to generic error */ }
-        }
-        const errorDetail = stderr || err.message || 'unknown error';
-        return [`Spec verification script error: ${errorDetail}`];
+        return parseSpecVerifyError(err);
       }
     },
   },

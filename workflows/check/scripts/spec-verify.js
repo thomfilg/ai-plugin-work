@@ -406,19 +406,22 @@ function main() {
   const root = getWorktreeRoot(specPath);
   const { hasChecklist, markers } = parseChecklist(content);
 
+  // No checklist header at all → fail-open for legacy specs without verification
   if (!hasChecklist) {
+    const noChecklistResult = { hasChecklist: false, checks: [], passed: 0, failed: 0, total: 0, success: true };
     if (jsonMode) {
-      console.log(JSON.stringify({ hasChecklist: false, checks: [], passed: 0, failed: 0, total: 0, success: true }));
+      console.log(JSON.stringify(noChecklistResult));
     } else {
       console.log('No Verification Checklist found — passing (fail-open).');
     }
     process.exit(0);
   }
 
+  // Checklist header present but empty → authoring error, require at least one marker
   if (markers.length === 0) {
-    // Checklist header exists but contains no markers — this is likely an error
+    const emptyChecklistResult = { hasChecklist: true, checks: [], passed: 0, failed: 1, total: 0, success: false };
     if (jsonMode) {
-      console.log(JSON.stringify({ hasChecklist: true, checks: [], passed: 0, failed: 1, total: 0, success: false }));
+      console.log(JSON.stringify(emptyChecklistResult));
     } else {
       console.log('Verification Checklist header found but contains no markers — failing.');
     }
