@@ -202,7 +202,16 @@ async function main() {
     // Block message already written by checkTddPhase
     process.exit(2);
   }
-  // If tddPhaseResult === 'no-state' or 'allow', fall through to existing logic
+  // Defense-in-depth: if TDD state doesn't exist and this is a production file,
+  // block until TDD is initialized. This catches cases where auto-init didn't run.
+  if (tddPhaseResult === 'no-state' && !isFileAllowed(filePath) && hasDeveloperAgentBeenInvoked(transcriptPath)) {
+    process.stderr.write(
+      'TDD not initialized. Production file writes are blocked until TDD state exists.\n' +
+      'Run: node tdd-phase-state.js init <TICKET_ID>\n' +
+      'Or use: node tdd-phase-state.js exception <TICKET_ID> --reason "<reason>"\n'
+    );
+    process.exit(2);
+  }
 
   // Allow config/non-code files
   if (isFileAllowed(filePath)) {

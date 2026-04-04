@@ -112,6 +112,48 @@ function initState(ticketId, description = '') {
 }
 
 /**
+ * Auto-detect if the project has a test setup (mirrors work.workflow.js detectTestSetup).
+ * WORK_TDD_ENFORCE=0 explicitly disables; WORK_TDD_ENFORCE=1 force-enables.
+ */
+function shouldEnforceTdd() {
+  if (process.env.WORK_TDD_ENFORCE === '0') return false;
+  if (process.env.WORK_TDD_ENFORCE === '1') return true;
+  try {
+    const pkgPath = path.join(process.cwd(), 'package.json');
+    if (fs.existsSync(pkgPath)) {
+      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+      const scripts = pkg.scripts || {};
+      if (Object.keys(scripts).some(k =>
+        /^(test|dev:test|test:unit|test:integration|vitest|jest)$/i.test(k)
+      )) return true;
+    }
+    const testConfigs = [
+      'jest.config.js', 'jest.config.ts', 'jest.config.mjs',
+      'vitest.config.js', 'vitest.config.ts', 'vitest.config.mts',
+      '.mocharc.yml', '.mocharc.json',
+    ];
+    if (testConfigs.some(f => fs.existsSync(path.join(process.cwd(), f)))) return true;
+    return false;
+  } catch { return false; }
+}
+
+/**
+ * Auto-initialize TDD phase state when entering the implement step.
+ * Creates tdd-phase.json with RED phase so the developer agent is forced
+ * to write tests first. Idempotent — skips if state already exists.
+ */
+function autoInitTdd(ticketId) {
+  try {
+    const tddStatePath = path.join(TASKS_BASE, ticketId, 'tdd-phase.json');
+    if (fs.existsSync(tddStatePath)) return; // already initialized
+    const dir = path.dirname(tddStatePath);
+    fs.mkdirSync(dir, { recursive: true });
+    const state = { currentPhase: 'red', currentCycle: 1, cycles: [] };
+    fs.writeFileSync(tddStatePath, JSON.stringify(state, null, 2));
+  } catch { /* fail-open: TDD init failure must not block step transition */ }
+}
+
+/**
  * Set step status
  */
 function setStepStatus(ticketId, step, status) {
@@ -130,6 +172,11 @@ function setStepStatus(ticketId, step, status) {
   const stepIndex = STEPS.indexOf(step);
   if (status === 'in_progress' && stepIndex >= 0) {
     state.currentStep = stepIndex + 1;
+  }
+
+  // Auto-init TDD when entering implement step
+  if (step === 'implement' && status === 'in_progress' && shouldEnforceTdd()) {
+    autoInitTdd(ticketId);
   }
 
   return saveState(ticketId, state);
@@ -529,6 +576,8 @@ module.exports = {
   initSubtaskState,
   loadActiveSubtaskState,
   completeSubtask,
+  shouldEnforceTdd,
+  autoInitTdd,
   STEPS,
   SUBTASK_STEPS,
   CHECK_AGENTS
