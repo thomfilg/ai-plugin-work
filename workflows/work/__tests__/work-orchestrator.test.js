@@ -1281,8 +1281,9 @@ describe('work-orchestrator.js', () => {
       writeReport('tests.check.md', '# Tests\nStatus: APPROVED\nAll good.');
       writeReport('code-review.check.md', '# Code Review\nStatus: APPROVED\nLGTM.');
       writeReport('completion.check.md', '# Completion\nStatus: APPROVED\nDone.');
-      // No qa-*.check.md files
-      const { result } = await runOrchestrator(['transition', TICKET, 'pr'], gateOpts);
+      // No qa-*.check.md files — set WEB_APPS so QA is required (GH-181: empty WEB_APPS skips QA)
+      const qaOpts = { env: { ...gateOpts.env, WEB_APPS: '[{"name":"test-app","defaultPort":3000,"type":"vite"}]' } };
+      const { result } = await runOrchestrator(['transition', TICKET, 'pr'], qaOpts);
       assert.equal(result.error, true);
       assert.equal(result.gate, 'check-to-pr');
       assert.ok(result.reasons.some(r => r.toLowerCase().includes('qa')));
@@ -1292,8 +1293,10 @@ describe('work-orchestrator.js', () => {
     it('should list all reasons when multiple failures occur', async () => {
       await advanceToCheck();
       // Only write code-review with FAILED, missing tests + completion + qa
+      // Set WEB_APPS so QA is required (GH-181: empty WEB_APPS skips QA)
       writeReport('code-review.check.md', '# Code Review\nStatus: FAILED\nBad.');
-      const { result } = await runOrchestrator(['transition', TICKET, 'pr'], gateOpts);
+      const qaOpts = { env: { ...gateOpts.env, WEB_APPS: '[{"name":"test-app","defaultPort":3000,"type":"vite"}]' } };
+      const { result } = await runOrchestrator(['transition', TICKET, 'pr'], qaOpts);
       assert.equal(result.error, true);
       assert.equal(result.gate, 'check-to-pr');
       assert.ok(result.reasons.length >= 3, `Expected at least 3 reasons, got ${result.reasons.length}: ${JSON.stringify(result.reasons)}`);

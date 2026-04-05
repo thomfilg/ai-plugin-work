@@ -82,6 +82,12 @@ function resolveBaseRef() {
 function hasTsxChanges() {
   if (_cachedTsxChanges !== undefined) return _cachedTsxChanges;
 
+  // Test-only: force TSX changes detection (guarded by NODE_ENV=test)
+  if (process.env.NODE_ENV === 'test' && process.env.TEST_FORCE_TSX_CHANGES === '1') {
+    _cachedTsxChanges = true;
+    return true;
+  }
+
   const baseRef = resolveBaseRef();
   if (!baseRef) {
     process.stderr.write('warn: screenshot-requirement: could not resolve base ref; skipping TSX check\n');
@@ -146,6 +152,17 @@ function hasScreenshots(ticketId) {
 function blockIfNoScreenshots(hookData) {
   const ticketId = getTicketId();
   if (!ticketId) return;
+  // Skip screenshot enforcement when no web apps are configured (GH-181)
+  // Use process.env.WEB_APPS directly to avoid circular dependencies in the hook
+  let webApps = [];
+  try {
+    webApps = JSON.parse(process.env.WEB_APPS || '[]');
+  } catch {
+    process.stderr.write('warn: screenshot-requirement: malformed WEB_APPS env var, treating as empty\n');
+  }
+  // Align with config.webAppNames() — require at least one entry with a name
+  const hasConfiguredWebApps = Array.isArray(webApps) && webApps.some(app => app && app.name);
+  if (!hasConfiguredWebApps) return;
   if (fs.existsSync(skipMarkerPath(ticketId))) return;
   if (!hasTsxChanges()) return;
   if (hasScreenshots(ticketId)) return;

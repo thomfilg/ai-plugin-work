@@ -331,6 +331,27 @@ function loadDocsFromPaths(envVarName, csvPaths, repoRoot) {
 }
 
 /**
+ * Derive taskId from TICKET_ID or branch name fallback.
+ * When TICKET_ID is provided (from orchestrator), use as-is — it may contain
+ * a suffix like GH-181/phase1 which creates a subdirectory (intended behavior).
+ * Only sanitize the branch name fallback: strip unsafe chars to avoid path issues.
+ */
+function deriveTaskId(ticketId, branchName) {
+  if (ticketId) {
+    // Validate: reject absolute paths, path traversal, and unsafe characters.
+    // Allow one optional suffix segment (e.g., GH-181/phase1) with safe chars.
+    if (path.isAbsolute(ticketId)) return branchName.replace(/[^a-zA-Z0-9._-]/g, '-');
+    if (/\.\./.test(ticketId)) return branchName.replace(/[^a-zA-Z0-9._-]/g, '-');
+    // Allow: alphanumeric, hyphens, underscores, dots, and one / for suffix
+    if (!/^[a-zA-Z0-9._-]+(\/[a-zA-Z0-9._-]+)?$/.test(ticketId)) {
+      return branchName.replace(/[^a-zA-Z0-9._-]/g, '-');
+    }
+    return ticketId;
+  }
+  return branchName.replace(/[^a-zA-Z0-9._-]/g, '-');
+}
+
+/**
  * Main execution
  */
 function main() {
@@ -338,8 +359,7 @@ function main() {
   const branchName = getBranchName();
 
   // Determine report folder - use parent of main worktree + tasks
-  // Sanitize branch name fallback: replace path separators to avoid nested directories
-  const taskId = TICKET_ID || branchName.replace(/\//g, '-');
+  const taskId = deriveTaskId(TICKET_ID, branchName);
   const reportFolder = path.join(mainWorktreePath, '..', 'tasks', taskId);
 
   // Generate changes hash
@@ -405,5 +425,5 @@ function main() {
 if (require.main === module) {
   main();
 } else {
-  module.exports = { loadDocsFromPaths, DOCS_DENYLIST, resolveTicketId };
+  module.exports = { loadDocsFromPaths, DOCS_DENYLIST, resolveTicketId, deriveTaskId };
 }
