@@ -14,7 +14,7 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
 
-const { resolveTicketId } = require(path.join(__dirname, '..', 'hooks', 'check-setup.js'));
+const { resolveTicketId, deriveTaskId } = require(path.join(__dirname, '..', 'hooks', 'check-setup.js'));
 
 describe('check-setup suffix preservation (GH-181)', () => {
 
@@ -29,7 +29,7 @@ describe('check-setup suffix preservation (GH-181)', () => {
   });
 
   it('suffixed TICKET_ID creates correct reportFolder path (subdirectory)', () => {
-    const taskId = resolveTicketId(['GH-181/phase1'], {});
+    const taskId = deriveTaskId('GH-181/phase1', 'feature/GH-181/phase1');
     const mainWorktree = '/home/user/worktrees/my-repo';
     const reportFolder = path.join(mainWorktree, '..', 'tasks', taskId);
     // The key assertion: reportFolder should resolve to a subdirectory
@@ -40,7 +40,7 @@ describe('check-setup suffix preservation (GH-181)', () => {
   });
 
   it('unsuffixed TICKET_ID creates correct reportFolder path', () => {
-    const taskId = resolveTicketId(['GH-181'], {});
+    const taskId = deriveTaskId('GH-181', 'GH-181-fix-something');
     const mainWorktree = '/home/user/worktrees/my-repo';
     const reportFolder = path.join(mainWorktree, '..', 'tasks', taskId);
     assert.equal(
@@ -49,17 +49,19 @@ describe('check-setup suffix preservation (GH-181)', () => {
     );
   });
 
-  it('branch name fallback sanitizes special characters', () => {
-    // When TICKET_ID is empty, branch name is used as fallback
-    // Branch names with / should be sanitized (replace unsafe chars)
-    const branchName = 'feature/GH-181/phase1';
-    const taskId = '' || branchName.replace(/[^a-zA-Z0-9._-]/g, '-');
+  it('branch name fallback sanitizes special characters via deriveTaskId', () => {
+    // When TICKET_ID is empty, deriveTaskId uses branch name with sanitization
+    const taskId = deriveTaskId('', 'feature/GH-181/phase1');
     assert.equal(taskId, 'feature-GH-181-phase1');
   });
 
   it('branch name fallback preserves dots, underscores, and hyphens', () => {
-    const branchName = 'GH-181_fix.check-gate';
-    const taskId = '' || branchName.replace(/[^a-zA-Z0-9._-]/g, '-');
+    const taskId = deriveTaskId('', 'GH-181_fix.check-gate');
     assert.equal(taskId, 'GH-181_fix.check-gate');
+  });
+
+  it('deriveTaskId prefers ticketId over branchName', () => {
+    const taskId = deriveTaskId('GH-181/phase1', 'some-branch');
+    assert.equal(taskId, 'GH-181/phase1');
   });
 });

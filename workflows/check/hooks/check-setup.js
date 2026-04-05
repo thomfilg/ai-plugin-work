@@ -331,6 +331,16 @@ function loadDocsFromPaths(envVarName, csvPaths, repoRoot) {
 }
 
 /**
+ * Derive taskId from TICKET_ID or branch name fallback.
+ * When TICKET_ID is provided (from orchestrator), use as-is — it may contain
+ * a suffix like GH-181/phase1 which creates a subdirectory (intended behavior).
+ * Only sanitize the branch name fallback: strip unsafe chars to avoid path issues.
+ */
+function deriveTaskId(ticketId, branchName) {
+  return ticketId || branchName.replace(/[^a-zA-Z0-9._-]/g, '-');
+}
+
+/**
  * Main execution
  */
 function main() {
@@ -338,10 +348,7 @@ function main() {
   const branchName = getBranchName();
 
   // Determine report folder - use parent of main worktree + tasks
-  // When TICKET_ID is provided (from orchestrator), use as-is — it may contain
-  // a suffix like GH-181/phase1 which creates a subdirectory (intended behavior).
-  // Only sanitize the branch name fallback: strip unsafe chars to avoid path issues.
-  const taskId = TICKET_ID || branchName.replace(/[^a-zA-Z0-9._-]/g, '-');
+  const taskId = deriveTaskId(TICKET_ID, branchName);
   const reportFolder = path.join(mainWorktreePath, '..', 'tasks', taskId);
 
   // Generate changes hash
@@ -407,5 +414,5 @@ function main() {
 if (require.main === module) {
   main();
 } else {
-  module.exports = { loadDocsFromPaths, DOCS_DENYLIST, resolveTicketId };
+  module.exports = { loadDocsFromPaths, DOCS_DENYLIST, resolveTicketId, deriveTaskId };
 }
