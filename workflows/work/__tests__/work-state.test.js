@@ -479,6 +479,70 @@ describe('work-state.js', () => {
     });
   });
 
+  describe('TDD auto-init on implement step', () => {
+    const TICKET = 'TEST-TDD-AUTOINIT';
+    after(() => { cleanupTempWorkState(TICKET); });
+
+    it('should create tdd-phase.json when setting implement to in_progress', async () => {
+      await runWorkState(['init', TICKET]);
+
+      const { code } = await runWorkState(
+        ['set-step', TICKET, 'implement', 'in_progress'],
+      );
+      assert.equal(code, 0);
+
+      // Verify tdd-phase.json was created
+      const tddPath = path.join(TEMP_TASKS_BASE, TICKET, 'tdd-phase.json');
+      assert.ok(fs.existsSync(tddPath), 'tdd-phase.json should be auto-created');
+
+      const tddState = JSON.parse(fs.readFileSync(tddPath, 'utf8'));
+      assert.equal(tddState.currentPhase, 'red');
+      assert.equal(tddState.currentCycle, 1);
+      assert.deepEqual(tddState.cycles, []);
+    });
+
+    it('should be idempotent — not overwrite existing tdd-phase.json', async () => {
+      const TICKET_EXISTING = 'TEST-TDD-EXISTING';
+      try {
+        await runWorkState(['init', TICKET_EXISTING]);
+
+        // Pre-create tdd-phase.json with green phase (simulating mid-cycle)
+        const tddDir = path.join(TEMP_TASKS_BASE, TICKET_EXISTING);
+        fs.mkdirSync(tddDir, { recursive: true });
+        const existingState = { currentPhase: 'green', currentCycle: 2, cycles: [{ cycle: 1, red: {}, green: {} }] };
+        fs.writeFileSync(path.join(tddDir, 'tdd-phase.json'), JSON.stringify(existingState));
+
+        // Now set implement to in_progress
+        await runWorkState(
+          ['set-step', TICKET_EXISTING, 'implement', 'in_progress'],
+        );
+
+        // Verify existing state was NOT overwritten
+        const tddState = JSON.parse(fs.readFileSync(path.join(tddDir, 'tdd-phase.json'), 'utf8'));
+        assert.equal(tddState.currentPhase, 'green', 'Should preserve existing phase');
+        assert.equal(tddState.currentCycle, 2, 'Should preserve existing cycle');
+      } finally {
+        cleanupTempWorkState(TICKET_EXISTING);
+      }
+    });
+
+    it('should NOT create tdd-phase.json for non-implement steps', async () => {
+      const TICKET_OTHER = 'TEST-TDD-OTHER-STEP';
+      try {
+        await runWorkState(['init', TICKET_OTHER]);
+
+        await runWorkState(
+          ['set-step', TICKET_OTHER, 'brief', 'in_progress'],
+        );
+
+        const tddPath = path.join(TEMP_TASKS_BASE, TICKET_OTHER, 'tdd-phase.json');
+        assert.ok(!fs.existsSync(tddPath), 'tdd-phase.json should NOT be created for brief step');
+      } finally {
+        cleanupTempWorkState(TICKET_OTHER);
+      }
+    });
+  });
+
   describe('complete-subtask', () => {
     const TICKET = 'TEST-SUBTASK-COMPLETE';
     after(() => { cleanupTempWorkState(TICKET); });

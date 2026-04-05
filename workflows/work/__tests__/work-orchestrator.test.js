@@ -22,9 +22,9 @@ function runOrchestrator(args = [], opts = {}) {
   return new Promise((resolve, reject) => {
     const proc = spawn('node', [HOOK_PATH, ...args], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      // Intentionally disable session guard + TDD gate to isolate orchestrator plan logic.
+      // Intentionally disable session guard to isolate orchestrator plan logic.
       // Session guard has dedicated tests in session-guard.test.js (26 tests covering all subcommands + hooks).
-      env: { ...process.env, SESSION_GUARD_ENABLED: '0', WORK_TDD_ENFORCE: '0', ...opts.env },
+      env: { ...process.env, SESSION_GUARD_ENABLED: '0', ...opts.env },
       cwd: opts.cwd,
     });
 
@@ -74,7 +74,7 @@ after(() => {
 });
 
 /**
- * Write all required check reports (APPROVED) for a ticket so the check→pr gate passes.
+ * Write all required check reports (APPROVED) for a ticket so the check->pr gate passes.
  * @param {string} tasksBase - The tasks base directory
  * @param {string} ticket - The ticket ID
  */
@@ -85,6 +85,22 @@ function writeCheckReports(tasksBase, ticket) {
   fs.writeFileSync(path.join(dir, 'code-review.check.md'), '# Code Review\nStatus: APPROVED\n');
   fs.writeFileSync(path.join(dir, 'completion.check.md'), '# Completion\nStatus: APPROVED\n');
   fs.writeFileSync(path.join(dir, 'qa-feature.check.md'), '# QA\nStatus: APPROVED\n');
+}
+
+/**
+ * Write a minimal TDD exception state so tests that don't care about TDD
+ * can transition past implement without full RED/GREEN cycles.
+ * @param {string} tasksBase - The tasks base directory
+ * @param {string} ticket - The ticket ID
+ */
+function writeTddException(tasksBase, ticket) {
+  const dir = path.join(tasksBase, ticket);
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'tdd-phase.json'), JSON.stringify({
+    currentPhase: 'exception',
+    exception: 'test helper',
+    cycles: [],
+  }));
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
@@ -333,6 +349,7 @@ describe('work-orchestrator.js', () => {
       await runOrchestrator(['transition', TEST_TICKET, 'brief'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'spec'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'implement'], transOpts);
+      writeTddException(TEMP_TASKS_DIR, TEST_TICKET);
       await runOrchestrator(['transition', TEST_TICKET, 'commit'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'check'], transOpts);
       const { result } = await runOrchestrator(['transition', TEST_TICKET, 'implement'], transOpts);
@@ -366,6 +383,7 @@ describe('work-orchestrator.js', () => {
       await runOrchestrator(['transition', TEST_TICKET, 'brief']);
       await runOrchestrator(['transition', TEST_TICKET, 'spec']);
       await runOrchestrator(['transition', TEST_TICKET, 'implement']);
+      writeTddException(TASKS_BASE, TEST_TICKET);
       await runOrchestrator(['transition', TEST_TICKET, 'commit']);
       await runOrchestrator(['transition', TEST_TICKET, 'check']);
       await runOrchestrator(['transition', TEST_TICKET, 'implement']);
@@ -592,6 +610,7 @@ describe('work-orchestrator.js', () => {
         await runOrchestrator(['transition', T, 'brief'], o);
         await runOrchestrator(['transition', T, 'spec'], o);
         await runOrchestrator(['transition', T, 'implement'], o);
+        writeTddException(path.join(TMP, 'tasks'), T);
         await runOrchestrator(['transition', T, 'commit'], o);
         await runOrchestrator(['transition', T, 'check'], o);
         const { result } = await runOrchestrator(['transition', T, 'implement'], o);
@@ -610,6 +629,7 @@ describe('work-orchestrator.js', () => {
         await runOrchestrator(['transition', TEST_TICKET, 'brief'], o);
         await runOrchestrator(['transition', TEST_TICKET, 'spec'], o);
         await runOrchestrator(['transition', TEST_TICKET, 'implement'], o);
+        writeTddException(TASKS_BASE, TEST_TICKET);
         await runOrchestrator(['transition', TEST_TICKET, 'commit'], o);
         await runOrchestrator(['transition', TEST_TICKET, 'check'], o);
         writeCheckReports(TASKS_BASE, TEST_TICKET);
@@ -624,12 +644,13 @@ describe('work-orchestrator.js', () => {
 
     it('should allow linear transition pr → ready → follow_up → ci', async () => {
       const TEST_TICKET = 'TEST-912';
-      const o = { env: { WORK_TDD_ENFORCE: '0' } };
+      const o = {};
       try {
         await runOrchestrator(['transition', TEST_TICKET, 'bootstrap'], o);
         await runOrchestrator(['transition', TEST_TICKET, 'brief'], o);
         await runOrchestrator(['transition', TEST_TICKET, 'spec'], o);
         await runOrchestrator(['transition', TEST_TICKET, 'implement'], o);
+        writeTddException(TASKS_BASE, TEST_TICKET);
         await runOrchestrator(['transition', TEST_TICKET, 'commit'], o);
         await runOrchestrator(['transition', TEST_TICKET, 'check'], o);
         writeCheckReports(TASKS_BASE, TEST_TICKET);
@@ -729,7 +750,7 @@ describe('work-orchestrator.js', () => {
     const TEMP_WB = path.join(os.tmpdir(), 'work-orch-fu-' + process.pid);
     const T = 'TEST-811';
     const TEMP_TASKS = path.join(TEMP_WB, 'tasks');
-    const o = { env: { WORKTREES_BASE: TEMP_WB, TASKS_BASE: TEMP_TASKS, WORK_TDD_ENFORCE: '0' } };
+    const o = { env: { WORKTREES_BASE: TEMP_WB, TASKS_BASE: TEMP_TASKS } };
     after(() => { try { fs.rmSync(TEMP_WB, { recursive: true, force: true }); } catch {} });
 
     it('should allow transition follow_up → ci (forward)', async () => {
@@ -737,6 +758,7 @@ describe('work-orchestrator.js', () => {
       await runOrchestrator(['transition', T, 'brief'], o);
       await runOrchestrator(['transition', T, 'spec'], o);
       await runOrchestrator(['transition', T, 'implement'], o);
+      writeTddException(TEMP_TASKS, T);
       await runOrchestrator(['transition', T, 'commit'], o);
       await runOrchestrator(['transition', T, 'check'], o);
       writeCheckReports(TEMP_TASKS, T);
@@ -757,6 +779,7 @@ describe('work-orchestrator.js', () => {
         await runOrchestrator(['transition', T2, 'brief'], o);
         await runOrchestrator(['transition', T2, 'spec'], o);
         await runOrchestrator(['transition', T2, 'implement'], o);
+        writeTddException(TEMP_TASKS, T2);
         await runOrchestrator(['transition', T2, 'commit'], o);
         await runOrchestrator(['transition', T2, 'check'], o);
         writeCheckReports(TEMP_TASKS, T2);
@@ -780,6 +803,7 @@ describe('work-orchestrator.js', () => {
         await runOrchestrator(['transition', T3, 'brief'], o);
         await runOrchestrator(['transition', T3, 'spec'], o);
         await runOrchestrator(['transition', T3, 'implement'], o);
+        writeTddException(TEMP_TASKS, T3);
         await runOrchestrator(['transition', T3, 'commit'], o);
         await runOrchestrator(['transition', T3, 'check'], o);
         writeCheckReports(TEMP_TASKS, T3);
@@ -804,6 +828,7 @@ describe('work-orchestrator.js', () => {
         await runOrchestrator(['transition', T_ARCHIVE, 'brief'], o);
         await runOrchestrator(['transition', T_ARCHIVE, 'spec'], o);
         await runOrchestrator(['transition', T_ARCHIVE, 'implement'], o);
+        writeTddException(TEMP_TASKS, T_ARCHIVE);
         await runOrchestrator(['transition', T_ARCHIVE, 'commit'], o);
         await runOrchestrator(['transition', T_ARCHIVE, 'check'], o);
         writeCheckReports(TEMP_TASKS, T_ARCHIVE);
@@ -837,6 +862,7 @@ describe('work-orchestrator.js', () => {
         await runOrchestrator(['transition', T_RUNS, 'brief'], o);
         await runOrchestrator(['transition', T_RUNS, 'spec'], o);
         await runOrchestrator(['transition', T_RUNS, 'implement'], o);
+        writeTddException(TEMP_TASKS, T_RUNS);
         await runOrchestrator(['transition', T_RUNS, 'commit'], o);
         await runOrchestrator(['transition', T_RUNS, 'check'], o);
         writeCheckReports(TEMP_TASKS, T_RUNS);
@@ -845,6 +871,7 @@ describe('work-orchestrator.js', () => {
         assert.ok(fs.existsSync(path.join(ticketDir, 'runs', 'run1')), 'run1 should exist');
 
         // Second pass: implement → commit → check, write reports, check → implement (backward again)
+        writeTddException(TEMP_TASKS, T_RUNS);
         await runOrchestrator(['transition', T_RUNS, 'commit'], o);
         await runOrchestrator(['transition', T_RUNS, 'check'], o);
         writeCheckReports(TEMP_TASKS, T_RUNS);
@@ -863,6 +890,7 @@ describe('work-orchestrator.js', () => {
         await runOrchestrator(['transition', T4, 'brief'], o);
         await runOrchestrator(['transition', T4, 'spec'], o);
         await runOrchestrator(['transition', T4, 'implement'], o);
+        writeTddException(TEMP_TASKS, T4);
         await runOrchestrator(['transition', T4, 'commit'], o);
         await runOrchestrator(['transition', T4, 'check'], o);
         writeCheckReports(TEMP_TASKS, T4);
@@ -902,7 +930,7 @@ describe('work-orchestrator.js', () => {
     const TEMP_WB = path.join(os.tmpdir(), 'work-orch-integ-' + process.pid);
     const TEMP_TASKS = path.join(TEMP_WB, 'tasks');
     const TICKET = 'TEST-8888';
-    const envOpts = { env: { WORKTREES_BASE: TEMP_WB, WORK_TDD_ENFORCE: '0' } };
+    const envOpts = { env: { WORKTREES_BASE: TEMP_WB } };
 
     after(() => {
       try { fs.rmSync(TEMP_WB, { recursive: true, force: true }); } catch {}
@@ -918,6 +946,7 @@ describe('work-orchestrator.js', () => {
       await runOrchestrator(['transition', TICKET, 'brief'], envOpts);
       await runOrchestrator(['transition', TICKET, 'spec'], envOpts);
       await runOrchestrator(['transition', TICKET, 'implement'], envOpts);
+      writeTddException(TEMP_TASKS, TICKET);
       await runOrchestrator(['transition', TICKET, 'commit'], envOpts);
       await runOrchestrator(['transition', TICKET, 'check'], envOpts);
 
@@ -927,6 +956,7 @@ describe('work-orchestrator.js', () => {
       assert.equal(r1.result.direction, 'backward');
 
       // Forward through: implement→commit→check
+      writeTddException(TEMP_TASKS, TICKET);
       const r2 = await runOrchestrator(['transition', TICKET, 'commit'], envOpts);
       assert.equal(r2.result.success, true);
       const r3 = await runOrchestrator(['transition', TICKET, 'check'], envOpts);
@@ -939,6 +969,7 @@ describe('work-orchestrator.js', () => {
       await runOrchestrator(['transition', TICKET, 'brief'], envOpts);
       await runOrchestrator(['transition', TICKET, 'spec'], envOpts);
       await runOrchestrator(['transition', TICKET, 'implement'], envOpts);
+      writeTddException(TEMP_TASKS, TICKET);
       await runOrchestrator(['transition', TICKET, 'commit'], envOpts);
       await runOrchestrator(['transition', TICKET, 'check'], envOpts);
 
@@ -1103,7 +1134,7 @@ describe('work-orchestrator.js', () => {
     const TEMP_WB = path.join(os.tmpdir(), 'work-orch-gh121-' + process.pid);
     const TEMP_TASKS = path.join(TEMP_WB, 'tasks');
     const TICKET = 'TEST-121';
-    const gateOpts = { env: { WORKTREES_BASE: TEMP_WB, TASKS_BASE: TEMP_TASKS, WORK_TDD_ENFORCE: '0' } };
+    const gateOpts = { env: { WORKTREES_BASE: TEMP_WB, TASKS_BASE: TEMP_TASKS } };
 
     function ticketDir() { return path.join(TEMP_TASKS, TICKET); }
 
@@ -1126,6 +1157,7 @@ describe('work-orchestrator.js', () => {
       await runOrchestrator(['transition', TICKET, 'brief'], gateOpts);
       await runOrchestrator(['transition', TICKET, 'spec'], gateOpts);
       await runOrchestrator(['transition', TICKET, 'implement'], gateOpts);
+      writeTddException(TEMP_TASKS, TICKET);
       await runOrchestrator(['transition', TICKET, 'commit'], gateOpts);
       await runOrchestrator(['transition', TICKET, 'check'], gateOpts);
     }
@@ -1175,6 +1207,7 @@ describe('work-orchestrator.js', () => {
       await runOrchestrator(['transition', TICKET, 'brief'], gateOpts);
       await runOrchestrator(['transition', TICKET, 'spec'], gateOpts);
       await runOrchestrator(['transition', TICKET, 'implement'], gateOpts);
+      writeTddException(TEMP_TASKS, TICKET);
       const { result } = await runOrchestrator(['transition', TICKET, 'commit'], gateOpts);
       assert.equal(result.success, true);
       assert.equal(result.from, 'implement');

@@ -25,7 +25,7 @@ This keeps your context window lean: just plan JSON + transition outputs + agent
 
 ## TDD Execution Policy
 
-When `WORK_TDD_ENFORCE=1` is set, `/work` enforces TDD for all implementation work entering `implement`.
+TDD is always enforced for all implementation work entering `implement`.
 
 Delegated agents must follow this loop:
 
@@ -42,12 +42,8 @@ Delegated agents must follow this loop:
 Enforcement: The orchestrator blocks transitions out of `implement`
 unless a valid TDD evidence file exists. This is a hard gate, not a suggestion.
 
-Toggle: TDD enforcement is controlled by `WORK_TDD_ENFORCE=1` in `.envrc`. When unset
-or `0`, the workflow runs without TDD gates — useful during initial rollout or for
-projects that haven't adopted TDD yet.
-
 Allowed exception: For mechanical refactors, file moves, or non-testable config-only changes,
-the agent must set `exceptionReason` in the evidence file explaining why literal RED-first
+use the `exception` subcommand of `tdd-phase-state.js` to record why literal RED-first
 was not appropriate.
 
 Why only this step: Other steps in the workflow don't produce new application code —

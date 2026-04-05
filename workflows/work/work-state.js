@@ -112,6 +112,39 @@ function initState(ticketId, description = '') {
 }
 
 /**
+ * Auto-initialize TDD phase state when entering the implement step.
+ * Creates tdd-phase.json with RED phase so the developer agent is forced
+ * to write tests first. Idempotent — skips if state already exists.
+ */
+function autoInitTdd(ticketId) {
+  let fd;
+  let created = false;
+  try {
+    // Validate ticketId — reject traversal chars and verify resolved path stays within TASKS_BASE
+    if (!ticketId || /\.\./.test(ticketId) || /\\/.test(ticketId)) return;
+    const tddStatePath = path.join(TASKS_BASE, ticketId, 'tdd-phase.json');
+    if (!path.resolve(tddStatePath).startsWith(path.resolve(TASKS_BASE) + path.sep)) return;
+    // Create directory and write initial RED phase state
+    fs.mkdirSync(path.dirname(tddStatePath), { recursive: true });
+    const state = { currentPhase: 'red', currentCycle: 1, cycles: [] };
+    // Atomic exclusive create: 'wx' flag fails with EEXIST if file exists (no TOCTOU)
+    fd = fs.openSync(tddStatePath, 'wx');
+    created = true;
+    fs.writeFileSync(fd, JSON.stringify(state, null, 2));
+  } catch (err) {
+    if (err && err.code === 'EEXIST') return; // already initialized
+    // fail-open: TDD init failure must not block step transition
+    if (created) {
+      try { fs.unlinkSync(path.join(TASKS_BASE, ticketId, 'tdd-phase.json')); } catch {}
+    }
+  } finally {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch {}
+    }
+  }
+}
+
+/**
  * Set step status
  */
 function setStepStatus(ticketId, step, status) {
@@ -130,6 +163,11 @@ function setStepStatus(ticketId, step, status) {
   const stepIndex = STEPS.indexOf(step);
   if (status === 'in_progress' && stepIndex >= 0) {
     state.currentStep = stepIndex + 1;
+  }
+
+  // Auto-init TDD when entering implement step (always enforced)
+  if (step === 'implement' && status === 'in_progress') {
+    autoInitTdd(ticketId);
   }
 
   return saveState(ticketId, state);
@@ -514,7 +552,9 @@ async function main() {
   }
 }
 
-main().catch(() => process.exit(0));
+if (require.main === module) {
+  main().catch(() => process.exit(0));
+}
 
 module.exports = {
   loadState,
@@ -529,6 +569,7 @@ module.exports = {
   initSubtaskState,
   loadActiveSubtaskState,
   completeSubtask,
+  autoInitTdd,
   STEPS,
   SUBTASK_STEPS,
   CHECK_AGENTS
