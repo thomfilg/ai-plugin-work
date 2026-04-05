@@ -117,28 +117,32 @@ function initState(ticketId, description = '') {
  * to write tests first. Idempotent — skips if state already exists.
  */
 function autoInitTdd(ticketId) {
+  let fd;
+  let created = false;
   try {
+    // Validate ticketId to prevent path traversal (mirrors tdd-phase-state.js)
+    if (!ticketId || /\.\./.test(ticketId) || /\\/.test(ticketId)) return;
     const tddStatePath = path.join(TASKS_BASE, ticketId, 'tdd-phase.json');
-    if (fs.existsSync(tddStatePath)) return; // already initialized
+    const resolved = path.resolve(tddStatePath);
+    if (!resolved.startsWith(path.resolve(TASKS_BASE) + path.sep)) return;
+
     const dir = path.dirname(tddStatePath);
     fs.mkdirSync(dir, { recursive: true });
     const state = { currentPhase: 'red', currentCycle: 1, cycles: [] };
-    const tmpPath = `${tddStatePath}.${process.pid}.${Date.now()}.tmp`;
-    fs.writeFileSync(tmpPath, JSON.stringify(state, null, 2));
-    fs.renameSync(tmpPath, tddStatePath);
-  } catch {
+    // Atomic exclusive create: 'wx' flag fails with EEXIST if file exists (no TOCTOU)
+    fd = fs.openSync(tddStatePath, 'wx');
+    created = true;
+    fs.writeFileSync(fd, JSON.stringify(state, null, 2));
+  } catch (err) {
+    if (err && err.code === 'EEXIST') return; // already initialized
     // fail-open: TDD init failure must not block step transition
-    // Clean up any leftover .tmp files from a failed atomic write
-    try {
-      const dir = path.join(TASKS_BASE, ticketId);
-      if (fs.existsSync(dir)) {
-        for (const f of fs.readdirSync(dir)) {
-          if (f.startsWith('tdd-phase.json.') && f.endsWith('.tmp')) {
-            fs.unlinkSync(path.join(dir, f));
-          }
-        }
-      }
-    } catch {}
+    if (created) {
+      try { fs.unlinkSync(path.join(TASKS_BASE, ticketId, 'tdd-phase.json')); } catch {}
+    }
+  } finally {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch {}
+    }
   }
 }
 
