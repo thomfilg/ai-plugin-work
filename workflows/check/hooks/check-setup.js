@@ -338,8 +338,10 @@ function main() {
   const branchName = getBranchName();
 
   // Determine report folder - use parent of main worktree + tasks
-  // Sanitize branch name fallback: replace path separators to avoid nested directories
-  const taskId = TICKET_ID || branchName.replace(/\//g, '-');
+  // When TICKET_ID is provided (from orchestrator), use as-is — it may contain
+  // a suffix like GH-181/phase1 which creates a subdirectory (intended behavior).
+  // Only sanitize the branch name fallback: strip unsafe chars to avoid path issues.
+  const taskId = TICKET_ID || branchName.replace(/[^a-zA-Z0-9._-]/g, '-');
   const reportFolder = path.join(mainWorktreePath, '..', 'tasks', taskId);
 
   // Generate changes hash

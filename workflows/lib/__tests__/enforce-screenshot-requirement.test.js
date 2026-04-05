@@ -280,7 +280,9 @@ describe('enforce-screenshot-requirement', () => {
 
   describe('Fail-open — does NOT block when git state is unclear', () => {
     const FAKE_TICKET = 'FAKE-999';
-    const testEnv = { NODE_ENV: 'test', TEST_FORCE_TICKET_ID: FAKE_TICKET };
+    // WEB_APPS must be non-empty to reach the hasTsxChanges() code path (GH-181)
+    const testEnv = { NODE_ENV: 'test', TEST_FORCE_TICKET_ID: FAKE_TICKET,
+      WEB_APPS: '[{"name":"test-app","defaultPort":3000,"type":"vite"}]' };
 
     beforeEach(() => { cleanupMarker(FAKE_TICKET); });
     afterEach(() => { cleanupMarker(FAKE_TICKET); });
@@ -303,6 +305,57 @@ describe('enforce-screenshot-requirement', () => {
       );
       assert.equal(r.code, 0, 'should exit 0 (fail-open) when git diff unavailable');
       assert.match(r.stderr, /git diff failed/);
+    });
+  });
+
+  // ─── GH-181: WEB_APPS empty skip ───
+
+  describe('WEB_APPS empty — does NOT block even with TSX changes (GH-181)', () => {
+    const FAKE_TICKET = 'FAKE-888';
+    const testEnv = {
+      NODE_ENV: 'test',
+      TEST_FORCE_TICKET_ID: FAKE_TICKET,
+      TEST_FORCE_TSX_CHANGES: '1',  // Force hasTsxChanges() to return true
+    };
+
+    beforeEach(() => { cleanupMarker(FAKE_TICKET); });
+    afterEach(() => { cleanupMarker(FAKE_TICKET); });
+
+    it('does not block pr-generator when WEB_APPS is empty array', async () => {
+      const r = await runHookWithEnv(
+        { tool_name: 'Task', tool_input: { subagent_type: 'pr-generator', prompt: 'create PR' } },
+        'PreToolUse',
+        { ...testEnv, WEB_APPS: '[]' }
+      );
+      assert.equal(r.code, 0, 'should exit 0 when WEB_APPS is empty');
+    });
+
+    it('does not block qa-feature-tester when WEB_APPS is empty string', async () => {
+      const r = await runHookWithEnv(
+        { tool_name: 'Task', tool_input: { subagent_type: 'qa-feature-tester', prompt: 'test' } },
+        'PreToolUse',
+        { ...testEnv, WEB_APPS: '' }
+      );
+      assert.equal(r.code, 0, 'should exit 0 when WEB_APPS is empty string');
+    });
+
+    it('does not block work-pr skill when WEB_APPS is empty string', async () => {
+      const r = await runHookWithEnv(
+        { tool_name: 'Skill', tool_input: { skill: 'work-pr', args: '' } },
+        'PreToolUse',
+        { ...testEnv, WEB_APPS: '' }
+      );
+      assert.equal(r.code, 0, 'should exit 0 when WEB_APPS is empty string');
+    });
+
+    it('still blocks pr-generator when WEB_APPS has entries and TSX changed', async () => {
+      const r = await runHookWithEnv(
+        { tool_name: 'Task', tool_input: { subagent_type: 'pr-generator', prompt: 'create PR' } },
+        'PreToolUse',
+        { ...testEnv, WEB_APPS: '[{"name":"my-app","defaultPort":3000,"type":"vite"}]' }
+      );
+      assert.equal(r.code, 2, 'should block when WEB_APPS has entries and TSX changed');
+      assert.match(r.stderr, /BLOCKED/);
     });
   });
 
