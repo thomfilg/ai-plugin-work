@@ -61,7 +61,7 @@ class WorkflowState {
             _legacyWarned.add(warnKey);
             process.stderr.write(`[workflow-state] DEPRECATED: loading from legacy .workflow-state.json for workflow "${this.workflowName}". Migrate to scoped file format.\n`);
           }
-          return state;
+          return state; // legacy fallback — warning emitted once per workflow+instanceId via _legacyWarned
         }
       } catch { /* ignore */ }
     }
