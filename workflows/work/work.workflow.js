@@ -767,7 +767,8 @@ function transitionStep(ticket, targetStep) {
     }
   }
 
-  // Stale evidence cleanup: reset TDD phase state when transitioning INTO a gated step
+  // Stale evidence cleanup: reset TDD phase state when transitioning INTO a gated step,
+  // then re-initialize in RED phase so the developer agent is forced to write tests first.
   if (TDD_GATED_STEPS.includes(targetStep)) {
     try {
       const phasePath = path.join(TASKS_BASE, safeTicket, 'tdd-phase.json');
@@ -775,6 +776,15 @@ function transitionStep(ticket, targetStep) {
     } catch (e) {
       if (e && e.code !== 'ENOENT') { /* ignore errors */ }
     }
+    // Re-initialize TDD in RED phase after cleanup so developer agent
+    // is forced to write tests first (mirrors autoInitTdd from work-state.js).
+    try {
+      const tddDir = path.join(TASKS_BASE, safeTicket);
+      fs.mkdirSync(tddDir, { recursive: true });
+      const initState = { currentPhase: 'red', currentCycle: 1, cycles: [] };
+      const tddPath = path.join(tddDir, 'tdd-phase.json');
+      fs.writeFileSync(tddPath, JSON.stringify(initState, null, 2), { flag: 'wx' });
+    } catch { /* fail-open: EEXIST or write error */ }
   }
 
   // Initialize state if needed

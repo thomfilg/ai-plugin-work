@@ -93,9 +93,19 @@ async function transitionTo(ticket, targetStep, envExtra = {}) {
   const idx = steps.indexOf(targetStep);
   if (idx === -1) throw new Error(`Unknown target step: ${targetStep}`);
 
+  // Determine the sanitized ticket for writing TDD evidence
+  const safeTicket = ticket.startsWith('#')
+    ? `GH-${ticket.slice(1)}`
+    : ticket;
+
   let lastResult;
   // Walk step by step through the linear graph.
   for (let i = 0; i <= idx; i++) {
+    // Before transitioning OUT of implement (i.e. to commit),
+    // write valid TDD evidence so the gate allows progression.
+    if (steps[i] === 'commit') {
+      writeValidPhaseState(safeTicket);
+    }
     const { result } = await runOrchestrator(
       ['transition', ticket, steps[i]],
       { env: baseEnv(envExtra) },
@@ -323,7 +333,7 @@ describe('TDD enforcement', () => {
       assert.match(result.message, /No TDD cycles/i);
     });
 
-    it('transition INTO 3_implement (from 6_check) deletes existing tdd-phase.json', async () => {
+    it('transition INTO 3_implement (from 6_check) resets tdd-phase.json to RED phase', async () => {
       // Walk to implement linearly
       await runOrchestrator(['transition', TICKET, 'bootstrap'], { env: baseEnv() });
       await runOrchestrator(['transition', TICKET, 'brief'], { env: baseEnv() });
@@ -337,12 +347,18 @@ describe('TDD enforcement', () => {
 
       // Now create a stale phase state file for 3_implement
       const phasePath = path.join(tempTasksBase, TICKET, 'tdd-phase.json');
-      fs.writeFileSync(phasePath, JSON.stringify({ currentPhase: 'red', currentCycle: 1, cycles: [] }));
+      fs.writeFileSync(phasePath, JSON.stringify({ currentPhase: 'green', currentCycle: 2, cycles: [{ cycle: 1 }] }));
       assert.ok(fs.existsSync(phasePath));
 
       // Transition back INTO 3_implement
       await runOrchestrator(['transition', TICKET, 'implement'], { env: baseEnv() });
-      assert.ok(!fs.existsSync(phasePath), 'Phase state file should be deleted on entry to 3_implement');
+
+      // tdd-phase.json should be re-created (not deleted) with fresh RED phase
+      assert.ok(fs.existsSync(phasePath), 'Phase state file should be re-created after transition into implement');
+      const state = JSON.parse(fs.readFileSync(phasePath, 'utf8'));
+      assert.equal(state.currentPhase, 'red', 'Phase should be reset to red');
+      assert.equal(state.currentCycle, 1, 'Cycle should be reset to 1');
+      assert.deepEqual(state.cycles, [], 'Cycles should be empty after reset');
     });
 
     it('transition INTO 3_implement with no prior tdd-phase.json does not error (ENOENT handled)', async () => {
