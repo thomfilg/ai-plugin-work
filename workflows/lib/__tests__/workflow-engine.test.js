@@ -4,7 +4,7 @@
  * Run with: node --test lib/__tests__/workflow-engine.test.js
  */
 
-const { describe, it, before, after } = require('node:test');
+const { describe, it, before, after, afterEach } = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
@@ -463,5 +463,86 @@ describe('getAvailableTransitions', () => {
     assert.ok(result.allStatuses, 'should include allStatuses');
     assert.strictEqual(result.allStatuses['step_a'], 'completed');
     assert.strictEqual(result.allStatuses['step_b'], 'in_progress');
+  });
+});
+
+// ─── cross-workflow isolation ─────────────────────────────────────────────────
+
+describe('cross-workflow isolation', () => {
+  const stateDir = path.join(TEST_BASE, 'isolation-state');
+
+  after(() => {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  });
+
+  afterEach(() => {
+    // Clean up instance directories between tests
+    for (const id of ['iso-1', 'iso-2']) {
+      const dir = path.join(stateDir, id);
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('transitionStep with no prior state for work-pr initializes fresh state without inheriting check state', () => {
+    const checkWf = mockWorkflow({ name: 'check', stateDir });
+    const workPrWf = mockWorkflow({ name: 'work-pr', stateDir });
+
+    const checkState = new WorkflowState('check', stateDir);
+    const workPrState = new WorkflowState('work-pr', stateDir);
+
+    // Progress check workflow to step_c
+    const steps = checkWf.steps.map(s => s.id);
+    checkState.init('iso-1', steps);
+    checkState.setStepStatus('iso-1', 'step_a', 'completed');
+    checkState.setStepStatus('iso-1', 'step_b', 'in_progress');
+
+    // Transition work-pr for the same instanceId — should get fresh state
+    const result = transitionStep(workPrWf, workPrState, 'iso-1', 'step_b');
+
+    assert.strictEqual(result.success, true);
+    const ws = workPrState.load('iso-1');
+    assert.strictEqual(ws.workflow, 'work-pr');
+    assert.strictEqual(ws.stepStatus['step_a'], 'completed');
+    assert.strictEqual(ws.stepStatus['step_b'], 'in_progress');
+
+    // Verify check state is untouched
+    const checkLoaded = checkState.load('iso-1');
+    assert.strictEqual(checkLoaded.workflow, 'check');
+    assert.strictEqual(checkLoaded.stepStatus['step_b'], 'in_progress');
+  });
+
+  it('both workflows progressed for same instanceId — transitioning one does not affect the other', () => {
+    const checkWf = mockWorkflow({ name: 'check', stateDir });
+    const workPrWf = mockWorkflow({ name: 'work-pr', stateDir });
+
+    const checkStateInst = new WorkflowState('check', stateDir);
+    const workPrStateInst = new WorkflowState('work-pr', stateDir);
+
+    const steps = checkWf.steps.map(s => s.id);
+
+    // Initialize both workflows for same instance
+    checkStateInst.init('iso-2', steps);
+    checkStateInst.setStepStatus('iso-2', 'step_a', 'in_progress');
+
+    workPrStateInst.init('iso-2', steps);
+    workPrStateInst.setStepStatus('iso-2', 'step_a', 'in_progress');
+
+    // Transition check to step_b
+    const checkResult = transitionStep(checkWf, checkStateInst, 'iso-2', 'step_b');
+    assert.strictEqual(checkResult.success, true);
+
+    // work-pr should still be at step_a
+    const workPrLoaded = workPrStateInst.load('iso-2');
+    assert.strictEqual(workPrLoaded.stepStatus['step_a'], 'in_progress');
+    assert.strictEqual(workPrLoaded.stepStatus['step_b'], 'pending');
+
+    // Transition work-pr to step_c (skip step_b)
+    const workPrResult = transitionStep(workPrWf, workPrStateInst, 'iso-2', 'step_c');
+    assert.strictEqual(workPrResult.success, true);
+
+    // check should still be at step_b
+    const checkLoaded = checkStateInst.load('iso-2');
+    assert.strictEqual(checkLoaded.stepStatus['step_b'], 'in_progress');
+    assert.strictEqual(checkLoaded.stepStatus['step_c'], 'pending');
   });
 });

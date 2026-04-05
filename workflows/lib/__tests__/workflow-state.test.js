@@ -10,7 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const { WorkflowState } = require('../workflow-state');
+const { WorkflowState, _resetLegacyWarnings } = require('../workflow-state');
 
 const TEST_BASE = path.join(os.tmpdir(), 'workflow-state-test-' + process.pid);
 const STEPS = ['1_parse', '2_draft', '3_review', '4_publish'];
@@ -369,6 +369,147 @@ describe('WorkflowState', () => {
 
       const loaded = ws.load(INSTANCE);
       assert.strictEqual(loaded, null, 'Should not load mismatched workflow');
+    });
+  });
+
+  // ─── cross-workflow isolation ──────────────────────────────────────────────
+
+  describe('cross-workflow isolation', () => {
+    const ISOLATION_DIR = path.join(os.tmpdir(), 'wf-isolation-test-' + process.pid);
+
+    before(() => {
+      fs.mkdirSync(ISOLATION_DIR, { recursive: true });
+    });
+
+    after(() => {
+      fs.rmSync(ISOLATION_DIR, { recursive: true, force: true });
+    });
+
+    afterEach(() => {
+      const instanceDir = path.join(ISOLATION_DIR, INSTANCE);
+      fs.rmSync(instanceDir, { recursive: true, force: true });
+      _resetLegacyWarnings();
+    });
+
+    it('two workflows with different names produce separate state files and load only their own state', () => {
+      const wsCheck = new WorkflowState('check', ISOLATION_DIR);
+      const wsWorkPr = new WorkflowState('work-pr', ISOLATION_DIR);
+
+      wsCheck.init(INSTANCE, STEPS);
+      wsWorkPr.init(INSTANCE, ['s1', 's2', 's3']);
+
+      const checkState = wsCheck.load(INSTANCE);
+      const workPrState = wsWorkPr.load(INSTANCE);
+
+      assert.strictEqual(checkState.workflow, 'check');
+      assert.deepStrictEqual(Object.keys(checkState.stepStatus), STEPS);
+
+      assert.strictEqual(workPrState.workflow, 'work-pr');
+      assert.deepStrictEqual(Object.keys(workPrState.stepStatus), ['s1', 's2', 's3']);
+    });
+
+    it('workflow check at step 9_cleanup — work-pr load() returns null', () => {
+      const wsCheck = new WorkflowState('check', ISOLATION_DIR);
+      const wsWorkPr = new WorkflowState('work-pr', ISOLATION_DIR);
+
+      const checkSteps = ['1_init', '9_cleanup'];
+      wsCheck.init(INSTANCE, checkSteps);
+      wsCheck.setStepStatus(INSTANCE, '9_cleanup', 'in_progress');
+
+      const loaded = wsWorkPr.load(INSTANCE);
+      assert.strictEqual(loaded, null, 'work-pr should not see check state');
+    });
+
+    it('workflow check at step 9_cleanup — work-pr getCurrentStep() returns null', () => {
+      const wsCheck = new WorkflowState('check', ISOLATION_DIR);
+      const wsWorkPr = new WorkflowState('work-pr', ISOLATION_DIR);
+
+      const checkSteps = ['1_init', '9_cleanup'];
+      wsCheck.init(INSTANCE, checkSteps);
+      wsCheck.setStepStatus(INSTANCE, '9_cleanup', 'in_progress');
+
+      const current = wsWorkPr.getCurrentStep(INSTANCE);
+      assert.strictEqual(current, null, 'work-pr getCurrentStep should return null');
+    });
+
+    it('work-pr has no state — setStepStatus() throws (not contaminated by other workflow)', () => {
+      const wsCheck = new WorkflowState('check', ISOLATION_DIR);
+      const wsWorkPr = new WorkflowState('work-pr', ISOLATION_DIR);
+
+      wsCheck.init(INSTANCE, STEPS);
+
+      assert.throws(
+        () => wsWorkPr.setStepStatus(INSTANCE, '1_parse', 'in_progress'),
+        (err) => {
+          assert.ok(err instanceof Error);
+          assert.ok(err.message.includes(INSTANCE));
+          return true;
+        },
+      );
+    });
+
+    it('check state exists but work-pr does not — getResumeInfo returns { exists: false }', () => {
+      const wsCheck = new WorkflowState('check', ISOLATION_DIR);
+      const wsWorkPr = new WorkflowState('work-pr', ISOLATION_DIR);
+
+      wsCheck.init(INSTANCE, STEPS);
+
+      const info = wsWorkPr.getResumeInfo(INSTANCE);
+      assert.deepStrictEqual(info, { exists: false });
+    });
+
+    it('legacy .workflow-state.json with workflow: "check" — work-pr load() returns null', () => {
+      const wsWorkPr = new WorkflowState('work-pr', ISOLATION_DIR);
+      const instanceDir = path.join(ISOLATION_DIR, INSTANCE);
+      fs.mkdirSync(instanceDir, { recursive: true });
+
+      const legacyState = { workflow: 'check', status: 'in_progress', stepStatus: { step1: 'completed' } };
+      fs.writeFileSync(path.join(instanceDir, '.workflow-state.json'), JSON.stringify(legacyState));
+
+      const loaded = wsWorkPr.load(INSTANCE);
+      assert.strictEqual(loaded, null, 'work-pr should not load legacy check state');
+    });
+
+    it('legacy .workflow-state.json with workflow: "check" — check load() returns state (legacy fallback)', () => {
+      const wsCheck = new WorkflowState('check', ISOLATION_DIR);
+      const instanceDir = path.join(ISOLATION_DIR, INSTANCE);
+      fs.mkdirSync(instanceDir, { recursive: true });
+
+      const legacyState = { workflow: 'check', status: 'in_progress', stepStatus: { step1: 'completed' } };
+      fs.writeFileSync(path.join(instanceDir, '.workflow-state.json'), JSON.stringify(legacyState));
+
+      const loaded = wsCheck.load(INSTANCE);
+      assert.ok(loaded, 'check should load from legacy file');
+      assert.strictEqual(loaded.workflow, 'check');
+    });
+
+    it('legacy fallback emits deprecation warning to stderr', () => {
+      const wsCheck = new WorkflowState('check', ISOLATION_DIR);
+      const instanceDir = path.join(ISOLATION_DIR, INSTANCE);
+      fs.mkdirSync(instanceDir, { recursive: true });
+
+      const legacyState = { workflow: 'check', status: 'in_progress', stepStatus: { step1: 'completed' } };
+      fs.writeFileSync(path.join(instanceDir, '.workflow-state.json'), JSON.stringify(legacyState));
+
+      // Capture stderr
+      const originalWrite = process.stderr.write;
+      let stderrOutput = '';
+      process.stderr.write = (chunk) => { stderrOutput += chunk; return true; };
+
+      try {
+        wsCheck.load(INSTANCE);
+        // Second load should NOT emit again (once-per-key)
+        wsCheck.load(INSTANCE);
+      } finally {
+        process.stderr.write = originalWrite;
+      }
+
+      assert.ok(stderrOutput.includes('DEPRECATED'), 'Should emit DEPRECATED warning');
+      assert.ok(stderrOutput.includes('legacy .workflow-state.json'), 'Should mention legacy file');
+      assert.ok(stderrOutput.includes('check'), 'Should mention workflow name');
+      // Warning should appear exactly once despite two load() calls
+      const count = (stderrOutput.match(/DEPRECATED/g) || []).length;
+      assert.strictEqual(count, 1, 'Deprecation warning should be emitted only once per workflow+instanceId');
     });
   });
 });

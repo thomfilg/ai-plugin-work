@@ -24,6 +24,9 @@
 const fs = require('fs');
 const path = require('path');
 
+/** Track legacy deprecation warnings to emit once per workflow+instanceId */
+const _legacyWarned = new Set();
+
 class WorkflowState {
   /**
    * @param {string} workflowName - Unique workflow identifier
@@ -52,7 +55,14 @@ class WorkflowState {
     if (fs.existsSync(legacyPath)) {
       try {
         const state = JSON.parse(fs.readFileSync(legacyPath, 'utf8'));
-        if (state?.workflow === this.workflowName) return state;
+        if (state?.workflow === this.workflowName) {
+          const warnKey = `${this.workflowName}:${instanceId}`;
+          if (!_legacyWarned.has(warnKey)) {
+            _legacyWarned.add(warnKey);
+            process.stderr.write(`[workflow-state] DEPRECATED: loading from legacy .workflow-state.json for workflow "${this.workflowName}". Migrate to scoped file format.\n`);
+          }
+          return state; // legacy fallback — warning emitted once per workflow+instanceId via _legacyWarned
+        }
       } catch { /* ignore */ }
     }
     return null;
@@ -309,4 +319,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { WorkflowState };
+module.exports = { WorkflowState, _resetLegacyWarnings: () => _legacyWarned.clear() };
