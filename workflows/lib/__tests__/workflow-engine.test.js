@@ -4,7 +4,7 @@
  * Run with: node --test lib/__tests__/workflow-engine.test.js
  */
 
-const { describe, it, before, after } = require('node:test');
+const { describe, it, before, after, afterEach } = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
@@ -473,6 +473,14 @@ describe('cross-workflow isolation', () => {
 
   after(() => {
     fs.rmSync(stateDir, { recursive: true, force: true });
+  });
+
+  afterEach(() => {
+    // Clean up instance directories between tests
+    for (const id of ['iso-1', 'iso-2']) {
+      const dir = path.join(stateDir, id);
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('transitionStep with no prior state for work-pr initializes fresh state without inheriting check state', () => {

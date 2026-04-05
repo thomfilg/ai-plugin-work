@@ -493,7 +493,7 @@ describe('WorkflowState', () => {
       // Capture stderr
       const originalWrite = process.stderr.write;
       let stderrOutput = '';
-      process.stderr.write = (chunk) => { stderrOutput += chunk; };
+      process.stderr.write = (chunk) => { stderrOutput += chunk; return true; };
 
       try {
         wsCheck.load(INSTANCE);
