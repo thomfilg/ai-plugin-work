@@ -160,7 +160,9 @@ function blockIfNoScreenshots(hookData) {
   } catch {
     process.stderr.write('warn: screenshot-requirement: malformed WEB_APPS env var, treating as empty\n');
   }
-  if (!Array.isArray(webApps) || webApps.length === 0) { return; }
+  // Align with config.webAppNames() — require at least one entry with a name
+  const hasConfiguredWebApps = Array.isArray(webApps) && webApps.some(app => app && app.name);
+  if (!hasConfiguredWebApps) return;
   if (fs.existsSync(skipMarkerPath(ticketId))) return;
   if (!hasTsxChanges()) return;
   if (hasScreenshots(ticketId)) return;
