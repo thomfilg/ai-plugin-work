@@ -126,7 +126,20 @@ function autoInitTdd(ticketId) {
     const tmpPath = `${tddStatePath}.${process.pid}.${Date.now()}.tmp`;
     fs.writeFileSync(tmpPath, JSON.stringify(state, null, 2));
     fs.renameSync(tmpPath, tddStatePath);
-  } catch { /* fail-open: TDD init failure must not block step transition */ }
+  } catch {
+    // fail-open: TDD init failure must not block step transition
+    // Clean up any leftover .tmp files from a failed atomic write
+    try {
+      const dir = path.join(TASKS_BASE, ticketId);
+      if (fs.existsSync(dir)) {
+        for (const f of fs.readdirSync(dir)) {
+          if (f.startsWith('tdd-phase.json.') && f.endsWith('.tmp')) {
+            fs.unlinkSync(path.join(dir, f));
+          }
+        }
+      }
+    } catch {}
+  }
 }
 
 /**
