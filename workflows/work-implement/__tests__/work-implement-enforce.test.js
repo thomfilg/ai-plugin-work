@@ -47,6 +47,17 @@ function runHookWithEnv(input, envOverrides = {}) {
 }
 
 describe('work-implement-enforce hook', () => {
+  // Helper: create a temp TDD state in green phase so production file writes are allowed
+  function createGreenTddState() {
+    const tempBase = fs.mkdtempSync(path.join(os.tmpdir(), 'tdd-green-'));
+    const ticketId = 'TDD-GREEN-' + Date.now();
+    const ticketDir = path.join(tempBase, ticketId);
+    fs.mkdirSync(ticketDir, { recursive: true });
+    fs.writeFileSync(path.join(ticketDir, 'tdd-phase.json'), JSON.stringify({
+      currentPhase: 'green', currentCycle: 1, cycles: [],
+    }));
+    return { tempBase, ticketId, cleanup: () => fs.rmSync(tempBase, { recursive: true, force: true }) };
+  }
   it('should APPROVE non-blocked tools (Read, Bash)', async () => {
     const { result } = await runHook({ tool_name: 'Read', tool_input: {} });
     assert.strictEqual(result.decision, 'approve');
@@ -100,44 +111,52 @@ describe('work-implement-enforce hook', () => {
   it('should APPROVE when developer agent has been invoked', async () => {
     const tp = path.join(os.tmpdir(), `test-wie5-${Date.now()}.jsonl`);
     fs.writeFileSync(tp, '# Implement Command\n"subagent_type": "developer-nodejs-tdd"\n');
-    const { result } = await runHook({
+    const tdd = createGreenTddState();
+    const { result } = await runHookWithEnv({
       tool_name: 'Edit',
       tool_input: { file_path: '/home/node/project/src/app.ts' },
       transcript_path: tp
-    });
+    }, { TASKS_BASE: tdd.tempBase, TICKET_ID: tdd.ticketId });
+    tdd.cleanup();
     assert.strictEqual(result.decision, 'approve');
   });
 
   it('should APPROVE when developer agent invoked with work-workflow: prefix', async () => {
     const tp = path.join(os.tmpdir(), `test-wie6-${Date.now()}.jsonl`);
     fs.writeFileSync(tp, '# Implement Command\n"subagent_type": "work-workflow:developer-nodejs-tdd"\n');
-    const { result } = await runHook({
+    const tdd = createGreenTddState();
+    const { result } = await runHookWithEnv({
       tool_name: 'Edit',
       tool_input: { file_path: '/home/node/project/src/app.ts' },
       transcript_path: tp
-    });
+    }, { TASKS_BASE: tdd.tempBase, TICKET_ID: tdd.ticketId });
+    tdd.cleanup();
     assert.strictEqual(result.decision, 'approve');
   });
 
   it('should APPROVE when code-architect agent has been invoked (with gate enabled)', async () => {
     const tp = path.join(os.tmpdir(), `test-wie-ca-${Date.now()}.jsonl`);
     fs.writeFileSync(tp, '# Implement Command\n"subagent_type": "code-architect"\n');
+    const tdd = createGreenTddState();
     const { result } = await runHookWithEnv({
       tool_name: 'Edit',
       tool_input: { file_path: '/home/node/project/src/app.ts' },
       transcript_path: tp
-    }, { WORK_ARCHITECT_ENABLED: '1' });
+    }, { WORK_ARCHITECT_ENABLED: '1', TASKS_BASE: tdd.tempBase, TICKET_ID: tdd.ticketId });
+    tdd.cleanup();
     assert.strictEqual(result.decision, 'approve');
   });
 
   it('should APPROVE when code-architect agent invoked with work-workflow: prefix (with gate enabled)', async () => {
     const tp = path.join(os.tmpdir(), `test-wie-ca2-${Date.now()}.jsonl`);
     fs.writeFileSync(tp, '# Implement Command\n"subagent_type": "work-workflow:code-architect"\n');
+    const tdd = createGreenTddState();
     const { result } = await runHookWithEnv({
       tool_name: 'Edit',
       tool_input: { file_path: '/home/node/project/src/app.ts' },
       transcript_path: tp
-    }, { WORK_ARCHITECT_ENABLED: '1' });
+    }, { WORK_ARCHITECT_ENABLED: '1', TASKS_BASE: tdd.tempBase, TICKET_ID: tdd.ticketId });
+    tdd.cleanup();
     assert.strictEqual(result.decision, 'approve');
   });
 
@@ -168,11 +187,13 @@ describe('work-implement-enforce hook', () => {
     it('should APPROVE code-architect when WORK_ARCHITECT_ENABLED=1', async () => {
       const tp = path.join(os.tmpdir(), `test-wie-gate2-${Date.now()}.jsonl`);
       fs.writeFileSync(tp, '# Implement Command\n"subagent_type": "code-architect"\n');
+      const tdd = createGreenTddState();
       const { result } = await runHookWithEnv({
         tool_name: 'Edit',
         tool_input: { file_path: '/home/node/project/src/app.ts' },
         transcript_path: tp
-      }, { WORK_ARCHITECT_ENABLED: '1' });
+      }, { WORK_ARCHITECT_ENABLED: '1', TASKS_BASE: tdd.tempBase, TICKET_ID: tdd.ticketId });
+      tdd.cleanup();
       assert.strictEqual(result.decision, 'approve');
     });
 
@@ -328,7 +349,7 @@ describe('work-implement-enforce hook', () => {
       fs.rmSync(tempTasksBase, { recursive: true, force: true });
     });
 
-    it('should fall through to existing logic when no tdd-phase.json exists', async () => {
+    it('should BLOCK production file when no tdd-phase.json exists and developer agent invoked', async () => {
       tempTasksBase = fs.mkdtempSync(path.join(os.tmpdir(), 'tdd-enforce-'));
       const ticketId = 'TDD-HOOK-6';
       // Do NOT create tdd-phase.json
@@ -340,9 +361,47 @@ describe('work-implement-enforce hook', () => {
         transcript_path: tp,
       }, { TASKS_BASE: tempTasksBase, TICKET_ID: ticketId });
 
-      // With developer agent in transcript and no TDD state, production files
-      // should be approved by the existing agent-check logic
+      // Defense-in-depth: production files should be blocked when TDD state doesn't exist
+      assert.strictEqual(result.decision, 'block');
+      assert.ok(result.reason.includes('TDD not initialized'), 'Should mention TDD not initialized');
+      fs.rmSync(tempTasksBase, { recursive: true, force: true });
+    });
+
+    it('should APPROVE allowed files (markdown) when no tdd-phase.json exists', async () => {
+      tempTasksBase = fs.mkdtempSync(path.join(os.tmpdir(), 'tdd-enforce-'));
+      const ticketId = 'TDD-HOOK-7';
+      // Do NOT create tdd-phase.json
+      const tp = makeTranscript();
+
+      const { result } = await runHookWithEnv({
+        tool_name: 'Write',
+        tool_input: { file_path: '/home/node/project/README.md' },
+        transcript_path: tp,
+      }, { TASKS_BASE: tempTasksBase, TICKET_ID: ticketId });
+
       assert.strictEqual(result.decision, 'approve');
+      fs.rmSync(tempTasksBase, { recursive: true, force: true });
+    });
+
+    it('should APPROVE production file when no tdd-phase.json and no developer agent', async () => {
+      tempTasksBase = fs.mkdtempSync(path.join(os.tmpdir(), 'tdd-enforce-'));
+      const ticketId = 'TDD-HOOK-8';
+      // Do NOT create tdd-phase.json
+      // Transcript WITHOUT developer agent
+      const tp = path.join(os.tmpdir(), `test-wie-tdd-noagent-${Date.now()}.jsonl`);
+      fs.writeFileSync(tp, '# Implement Command\n');
+
+      const { result } = await runHookWithEnv({
+        tool_name: 'Write',
+        tool_input: { file_path: '/home/node/project/src/app.ts' },
+        transcript_path: tp,
+      }, { TASKS_BASE: tempTasksBase, TICKET_ID: ticketId });
+
+      // No developer agent invoked, so the no-state defense-in-depth check doesn't trigger
+      // Instead it falls through to the "block: no agent" logic
+      assert.strictEqual(result.decision, 'block');
+      assert.ok(result.reason.includes('work-implement requires agent delegation'),
+        'Should block with agent delegation message, not TDD message');
       fs.rmSync(tempTasksBase, { recursive: true, force: true });
     });
   });

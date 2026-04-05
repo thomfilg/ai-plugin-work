@@ -2,7 +2,6 @@
  * Tests for TDD enforcement feature in work-orchestrator.js
  *
  * Covers:
- *   - WORK_TDD_ENFORCE toggle behavior
  *   - Prompt augmentation (TDD_PROTOCOL injection)
  *   - Gate enforcement (transition blocking without evidence)
  *
@@ -94,9 +93,19 @@ async function transitionTo(ticket, targetStep, envExtra = {}) {
   const idx = steps.indexOf(targetStep);
   if (idx === -1) throw new Error(`Unknown target step: ${targetStep}`);
 
+  // Determine the sanitized ticket for writing TDD evidence
+  const safeTicket = ticket.startsWith('#')
+    ? `GH-${ticket.slice(1)}`
+    : ticket;
+
   let lastResult;
   // Walk step by step through the linear graph.
   for (let i = 0; i <= idx; i++) {
+    // Before transitioning OUT of implement (i.e. to commit),
+    // write valid TDD evidence so the gate allows progression.
+    if (steps[i] === 'commit') {
+      writeValidPhaseState(safeTicket);
+    }
     const { result } = await runOrchestrator(
       ['transition', ticket, steps[i]],
       { env: baseEnv(envExtra) },
@@ -174,111 +183,16 @@ function writePartialPhaseState(ticket) {
 describe('TDD enforcement', () => {
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // WORK_TDD_ENFORCE toggle tests
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  describe('WORK_TDD_ENFORCE toggle', () => {
-    const TICKET = 'TDDT-100';
-    afterEach(() => { cleanupTempWorkState(TICKET); });
-
-    it('with WORK_TDD_ENFORCE=1: agentPrompt for 3_implement includes TDD protocol text', async () => {
-      const { result } = await runOrchestrator(['plan', TICKET], {
-        env: baseEnv({ WORK_TDD_ENFORCE: '1' }),
-      });
-      const implStep = result.plan.find(s => s.step === 'implement');
-      assert.ok(implStep, '3_implement step must exist in plan');
-      assert.match(implStep.agentPrompt, /hook-enforced/i);
-    });
-
-    it('with WORK_TDD_ENFORCE=0: agentPrompt for 3_implement does NOT include TDD protocol', async () => {
-      const { result } = await runOrchestrator(['plan', TICKET], {
-        env: baseEnv({ WORK_TDD_ENFORCE: '0' }),
-      });
-      const implStep = result.plan.find(s => s.step === 'implement');
-      assert.ok(implStep, '3_implement step must exist in plan');
-      assert.doesNotMatch(implStep.agentPrompt || '', /hook-enforced/i);
-    });
-
-    it('with WORK_TDD_ENFORCE empty: auto-detection kicks in and agentPrompt for 3_implement includes TDD protocol', async () => {
-      const { result } = await runOrchestrator(['plan', TICKET], { env: baseEnv({ WORK_TDD_ENFORCE: '' }) });
-      const implStep = result.plan.find(s => s.step === 'implement');
-      assert.ok(implStep, '3_implement step must exist in plan');
-      assert.match(implStep.agentPrompt, /hook-enforced/i);
-    });
-
-    it('with WORK_TDD_ENFORCE=1: transition 3_implement -> commit BLOCKED without evidence', async () => {
-      await transitionTo(TICKET, 'implement', { WORK_TDD_ENFORCE: '1' });
-      const { result } = await runOrchestrator(
-        ['transition', TICKET, 'commit'],
-        { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) },
-      );
-      assert.equal(result.error, true);
-      assert.match(result.message, /TDD evidence/i);
-    });
-
-    it('with WORK_TDD_ENFORCE=0: transition 3_implement -> commit ALLOWED without evidence', async () => {
-      await transitionTo(TICKET, 'implement', { WORK_TDD_ENFORCE: '0' });
-      const { result } = await runOrchestrator(
-        ['transition', TICKET, 'commit'],
-        { env: baseEnv({ WORK_TDD_ENFORCE: '0' }) },
-      );
-      assert.equal(result.success, true);
-    });
-
-    it('with WORK_TDD_ENFORCE empty: auto-detection blocks transition 3_implement -> commit without evidence', async () => {
-      await transitionTo(TICKET, 'implement', { WORK_TDD_ENFORCE: '' });
-      const { result } = await runOrchestrator(
-        ['transition', TICKET, 'commit'],
-        { env: baseEnv({ WORK_TDD_ENFORCE: '' }) },
-      );
-      // Empty string falls through to auto-detection which returns true (project has tests)
-      assert.equal(result.error, true);
-      assert.match(result.message, /TDD evidence/i);
-    });
-
-    it('with WORK_TDD_ENFORCE=1: transition INTO 3_implement deletes stale tdd-phase.json', async () => {
-      // Setup: create a stale phase state file
-      const ticketDir = path.join(tempTasksBase, TICKET);
-      fs.mkdirSync(ticketDir, { recursive: true });
-      const phasePath = path.join(ticketDir, 'tdd-phase.json');
-      fs.writeFileSync(phasePath, JSON.stringify({ currentPhase: 'red', currentCycle: 1, cycles: [] }));
-      assert.ok(fs.existsSync(phasePath), 'Stale phase state should exist before transition');
-
-      // Transition linearly to 3_implement
-      await runOrchestrator(['transition', TICKET, 'bootstrap'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
-      await runOrchestrator(['transition', TICKET, 'brief'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
-      await runOrchestrator(['transition', TICKET, 'spec'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
-      await runOrchestrator(['transition', TICKET, 'implement'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
-
-      assert.ok(!fs.existsSync(phasePath), 'Stale phase state should be deleted when entering 3_implement');
-    });
-
-    it('with WORK_TDD_ENFORCE=0: transition INTO 3_implement does NOT delete existing tdd-phase.json', async () => {
-      const ticketDir = path.join(tempTasksBase, TICKET);
-      fs.mkdirSync(ticketDir, { recursive: true });
-      const phasePath = path.join(ticketDir, 'tdd-phase.json');
-      fs.writeFileSync(phasePath, JSON.stringify({ currentPhase: 'red', currentCycle: 1, cycles: [] }));
-
-      await runOrchestrator(['transition', TICKET, 'bootstrap'], { env: baseEnv({ WORK_TDD_ENFORCE: '0' }) });
-      await runOrchestrator(['transition', TICKET, 'brief'], { env: baseEnv({ WORK_TDD_ENFORCE: '0' }) });
-      await runOrchestrator(['transition', TICKET, 'spec'], { env: baseEnv({ WORK_TDD_ENFORCE: '0' }) });
-      await runOrchestrator(['transition', TICKET, 'implement'], { env: baseEnv({ WORK_TDD_ENFORCE: '0' }) });
-
-      assert.ok(fs.existsSync(phasePath), 'Phase state file should NOT be deleted when WORK_TDD_ENFORCE=0');
-    });
-  });
-
-  // ═══════════════════════════════════════════════════════════════════════════
   // Prompt augmentation tests
   // ═══════════════════════════════════════════════════════════════════════════
 
-  describe('Prompt augmentation (WORK_TDD_ENFORCE=1)', () => {
+  describe('Prompt augmentation', () => {
     const TICKET = 'TDDP-200';
     afterEach(() => { cleanupTempWorkState(TICKET); });
 
     it('plan for 3_implement includes TDD instructions in agentPrompt', async () => {
       const { result } = await runOrchestrator(['plan', TICKET], {
-        env: baseEnv({ WORK_TDD_ENFORCE: '1' }),
+        env: baseEnv(),
       });
       const implStep = result.plan.find(s => s.step === 'implement');
       assert.ok(implStep.agentPrompt.includes('TDD protocol'), 'Should include TDD protocol header');
@@ -286,7 +200,7 @@ describe('TDD enforcement', () => {
 
     it('agentPrompt for 3_implement contains instruction not to make local commits', async () => {
       const { result } = await runOrchestrator(['plan', TICKET], {
-        env: baseEnv({ WORK_TDD_ENFORCE: '1' }),
+        env: baseEnv(),
       });
       const implStep = result.plan.find(s => s.step === 'implement');
       const prompt = implStep.agentPrompt;
@@ -296,7 +210,7 @@ describe('TDD enforcement', () => {
 
     it('agentPrompt for 3_implement contains the real tdd-phase-state.js path', async () => {
       const { result } = await runOrchestrator(['plan', TICKET], {
-        env: baseEnv({ WORK_TDD_ENFORCE: '1' }),
+        env: baseEnv(),
       });
       const implStep = result.plan.find(s => s.step === 'implement');
       const tddStatePath = path.join(__dirname, '..', '..', 'work-implement', 'tdd-phase-state.js');
@@ -305,7 +219,7 @@ describe('TDD enforcement', () => {
 
     it('agentPrompt for 3_implement contains the real ticket ID', async () => {
       const { result } = await runOrchestrator(['plan', TICKET], {
-        env: baseEnv({ WORK_TDD_ENFORCE: '1' }),
+        env: baseEnv(),
       });
       const implStep = result.plan.find(s => s.step === 'implement');
       assert.ok(implStep.agentPrompt.includes(TICKET), 'Should contain the real ticket ID');
@@ -313,7 +227,7 @@ describe('TDD enforcement', () => {
 
     it('agentPrompt for 3_implement does not contain literal <TDD_STATE_PATH>', async () => {
       const { result } = await runOrchestrator(['plan', TICKET], {
-        env: baseEnv({ WORK_TDD_ENFORCE: '1' }),
+        env: baseEnv(),
       });
       const implStep = result.plan.find(s => s.step === 'implement');
       assert.doesNotMatch(implStep.agentPrompt, /<TDD_STATE_PATH>/);
@@ -321,7 +235,7 @@ describe('TDD enforcement', () => {
 
     it('agentPrompt for 3_implement does not contain literal <TICKET_ID>', async () => {
       const { result } = await runOrchestrator(['plan', TICKET], {
-        env: baseEnv({ WORK_TDD_ENFORCE: '1' }),
+        env: baseEnv(),
       });
       const implStep = result.plan.find(s => s.step === 'implement');
       assert.doesNotMatch(implStep.agentPrompt, /<TICKET_ID>/);
@@ -329,7 +243,7 @@ describe('TDD enforcement', () => {
 
     it('agentPrompt for 3_implement contains record-red command reference', async () => {
       const { result } = await runOrchestrator(['plan', TICKET], {
-        env: baseEnv({ WORK_TDD_ENFORCE: '1' }),
+        env: baseEnv(),
       });
       const implStep = result.plan.find(s => s.step === 'implement');
       assert.ok(implStep.agentPrompt.includes('record-red'), 'Should contain record-red command');
@@ -343,33 +257,33 @@ describe('TDD enforcement', () => {
   // Gate enforcement tests
   // ═══════════════════════════════════════════════════════════════════════════
 
-  describe('Gate enforcement (WORK_TDD_ENFORCE=1)', () => {
+  describe('Gate enforcement', () => {
     const TICKET = 'TDDG-300';
     afterEach(() => { cleanupTempWorkState(TICKET); });
 
     it('transition 3_implement -> commit BLOCKED without evidence file', async () => {
-      await transitionTo(TICKET, 'implement', { WORK_TDD_ENFORCE: '1' });
+      await transitionTo(TICKET, 'implement');
       const { result } = await runOrchestrator(
         ['transition', TICKET, 'commit'],
-        { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) },
+        { env: baseEnv() },
       );
       assert.equal(result.error, true);
       assert.match(result.message, /TDD evidence/i);
     });
 
     it('transition 3_implement -> commit ALLOWED with valid tdd-phase.json (complete cycle)', async () => {
-      await transitionTo(TICKET, 'implement', { WORK_TDD_ENFORCE: '1' });
+      await transitionTo(TICKET, 'implement');
       writeValidPhaseState(TICKET);
       const { result } = await runOrchestrator(
         ['transition', TICKET, 'commit'],
-        { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) },
+        { env: baseEnv() },
       );
       assert.equal(result.success, true);
       assert.equal(result.to, 'commit');
     });
 
     it('transition 3_implement -> commit ALLOWED with partial cycle (red + green, no refactor)', async () => {
-      await transitionTo(TICKET, 'implement', { WORK_TDD_ENFORCE: '1' });
+      await transitionTo(TICKET, 'implement');
       const ticketDir = path.join(tempTasksBase, TICKET);
       fs.mkdirSync(ticketDir, { recursive: true });
       const phasePath = path.join(ticketDir, 'tdd-phase.json');
@@ -384,25 +298,25 @@ describe('TDD enforcement', () => {
       }));
       const { result } = await runOrchestrator(
         ['transition', TICKET, 'commit'],
-        { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) },
+        { env: baseEnv() },
       );
       assert.equal(result.success, true);
       assert.equal(result.to, 'commit');
     });
 
     it('phase state with only red evidence (no green) -> BLOCKED', async () => {
-      await transitionTo(TICKET, 'implement', { WORK_TDD_ENFORCE: '1' });
+      await transitionTo(TICKET, 'implement');
       writePartialPhaseState(TICKET);
       const { result } = await runOrchestrator(
         ['transition', TICKET, 'commit'],
-        { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) },
+        { env: baseEnv() },
       );
       assert.equal(result.error, true);
       assert.match(result.message, /RED.*GREEN/i);
     });
 
     it('phase state with empty cycles array -> BLOCKED', async () => {
-      await transitionTo(TICKET, 'implement', { WORK_TDD_ENFORCE: '1' });
+      await transitionTo(TICKET, 'implement');
       const ticketDir = path.join(tempTasksBase, TICKET);
       fs.mkdirSync(ticketDir, { recursive: true });
       const phasePath = path.join(ticketDir, 'tdd-phase.json');
@@ -413,76 +327,82 @@ describe('TDD enforcement', () => {
       }));
       const { result } = await runOrchestrator(
         ['transition', TICKET, 'commit'],
-        { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) },
+        { env: baseEnv() },
       );
       assert.equal(result.error, true);
       assert.match(result.message, /No TDD cycles/i);
     });
 
-    it('transition INTO 3_implement (from 6_check) deletes existing tdd-phase.json', async () => {
+    it('transition INTO 3_implement (from 6_check) resets tdd-phase.json to RED phase', async () => {
       // Walk to implement linearly
-      await runOrchestrator(['transition', TICKET, 'bootstrap'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
-      await runOrchestrator(['transition', TICKET, 'brief'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
-      await runOrchestrator(['transition', TICKET, 'spec'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
-      await runOrchestrator(['transition', TICKET, 'implement'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
+      await runOrchestrator(['transition', TICKET, 'bootstrap'], { env: baseEnv() });
+      await runOrchestrator(['transition', TICKET, 'brief'], { env: baseEnv() });
+      await runOrchestrator(['transition', TICKET, 'spec'], { env: baseEnv() });
+      await runOrchestrator(['transition', TICKET, 'implement'], { env: baseEnv() });
 
       // Record valid evidence so we can leave 3_implement
       writeValidPhaseState(TICKET);
-      await runOrchestrator(['transition', TICKET, 'commit'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
-      await runOrchestrator(['transition', TICKET, 'check'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
+      await runOrchestrator(['transition', TICKET, 'commit'], { env: baseEnv() });
+      await runOrchestrator(['transition', TICKET, 'check'], { env: baseEnv() });
 
       // Now create a stale phase state file for 3_implement
       const phasePath = path.join(tempTasksBase, TICKET, 'tdd-phase.json');
-      fs.writeFileSync(phasePath, JSON.stringify({ currentPhase: 'red', currentCycle: 1, cycles: [] }));
+      fs.writeFileSync(phasePath, JSON.stringify({ currentPhase: 'green', currentCycle: 2, cycles: [{ cycle: 1 }] }));
       assert.ok(fs.existsSync(phasePath));
 
       // Transition back INTO 3_implement
-      await runOrchestrator(['transition', TICKET, 'implement'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
-      assert.ok(!fs.existsSync(phasePath), 'Phase state file should be deleted on entry to 3_implement');
+      await runOrchestrator(['transition', TICKET, 'implement'], { env: baseEnv() });
+
+      // tdd-phase.json should be re-created (not deleted) with fresh RED phase
+      assert.ok(fs.existsSync(phasePath), 'Phase state file should be re-created after transition into implement');
+      const state = JSON.parse(fs.readFileSync(phasePath, 'utf8'));
+      assert.equal(state.currentPhase, 'red', 'Phase should be reset to red');
+      assert.equal(state.currentCycle, 1, 'Cycle should be reset to 1');
+      assert.deepEqual(state.cycles, [], 'Cycles should be empty after reset');
     });
 
     it('transition INTO 3_implement with no prior tdd-phase.json does not error (ENOENT handled)', async () => {
-      await runOrchestrator(['transition', TICKET, 'bootstrap'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
-      await runOrchestrator(['transition', TICKET, 'brief'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
-      await runOrchestrator(['transition', TICKET, 'spec'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
+      await runOrchestrator(['transition', TICKET, 'bootstrap'], { env: baseEnv() });
+      await runOrchestrator(['transition', TICKET, 'brief'], { env: baseEnv() });
+      await runOrchestrator(['transition', TICKET, 'spec'], { env: baseEnv() });
       // Make sure no phase state file exists
       const phasePath = path.join(tempTasksBase, TICKET, 'tdd-phase.json');
       try { fs.unlinkSync(phasePath); } catch {}
 
       const { result } = await runOrchestrator(
         ['transition', TICKET, 'implement'],
-        { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) },
+        { env: baseEnv() },
       );
       assert.equal(result.success, true);
     });
 
     it('corrupt JSON tdd-phase.json -> BLOCKED', async () => {
-      await transitionTo(TICKET, 'implement', { WORK_TDD_ENFORCE: '1' });
+      await transitionTo(TICKET, 'implement');
       const phasePath = path.join(tempTasksBase, TICKET, 'tdd-phase.json');
       fs.writeFileSync(phasePath, '{corrupt json!!!');
 
       const { result } = await runOrchestrator(
         ['transition', TICKET, 'commit'],
-        { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) },
+        { env: baseEnv() },
       );
       assert.equal(result.error, true);
       assert.match(result.message, /TDD evidence/i);
     });
 
     it('phase state with null evidence -> BLOCKED', async () => {
-      await transitionTo(TICKET, 'implement', { WORK_TDD_ENFORCE: '1' });
+      await transitionTo(TICKET, 'implement');
       const phasePath = path.join(tempTasksBase, TICKET, 'tdd-phase.json');
       fs.writeFileSync(phasePath, 'null');
 
       const { result } = await runOrchestrator(
         ['transition', TICKET, 'commit'],
-        { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) },
+        { env: baseEnv() },
       );
       assert.equal(result.error, true);
     });
 
     it('phase state without cycles key -> BLOCKED', async () => {
-      await transitionTo(TICKET, 'implement', { WORK_TDD_ENFORCE: '1' });
+      await transitionTo(TICKET, 'implement');
       const phasePath = path.join(tempTasksBase, TICKET, 'tdd-phase.json');
       fs.writeFileSync(phasePath, JSON.stringify({
         currentPhase: 'red',
@@ -491,14 +411,14 @@ describe('TDD enforcement', () => {
 
       const { result } = await runOrchestrator(
         ['transition', TICKET, 'commit'],
-        { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) },
+        { env: baseEnv() },
       );
       assert.equal(result.error, true);
       assert.match(result.message, /No TDD cycles/i);
     });
 
     it('transition 3_implement -> commit ALLOWED with exception-based tdd-phase.json', async () => {
-      await transitionTo(TICKET, 'implement', { WORK_TDD_ENFORCE: '1' });
+      await transitionTo(TICKET, 'implement');
       const ticketDir = path.join(tempTasksBase, TICKET);
       fs.mkdirSync(ticketDir, { recursive: true });
       const phasePath = path.join(ticketDir, 'tdd-phase.json');
@@ -509,21 +429,21 @@ describe('TDD enforcement', () => {
       }));
       const { result } = await runOrchestrator(
         ['transition', TICKET, 'commit'],
-        { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) },
+        { env: baseEnv() },
       );
       assert.equal(result.success, true);
       assert.equal(result.to, 'commit');
     });
 
     it('current commit -> check does not consult TDD evidence (non-gated step)', async () => {
-      await transitionTo(TICKET, 'implement', { WORK_TDD_ENFORCE: '1' });
+      await transitionTo(TICKET, 'implement');
       writeValidPhaseState(TICKET);
-      await runOrchestrator(['transition', TICKET, 'commit'], { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) });
+      await runOrchestrator(['transition', TICKET, 'commit'], { env: baseEnv() });
 
       // Now try commit -> check without any evidence for commit (non-gated)
       const { result } = await runOrchestrator(
         ['transition', TICKET, 'check'],
-        { env: baseEnv({ WORK_TDD_ENFORCE: '1' }) },
+        { env: baseEnv() },
       );
       assert.equal(result.success, true);
       assert.equal(result.to, 'check');
@@ -562,7 +482,7 @@ describe('TDD enforcement', () => {
 
     it('transition with #NNN ticket finds TDD evidence in GH-NNN/ directory (TDD gate passes)', async () => {
       // Walk to implement
-      await transitionTo(RAW_TICKET, 'implement', ghEnv({ WORK_TDD_ENFORCE: '1' }));
+      await transitionTo(RAW_TICKET, 'implement', ghEnv());
 
       // Write valid TDD evidence to the sanitized directory
       writeValidPhaseState(SAFE_TICKET);
@@ -570,7 +490,7 @@ describe('TDD enforcement', () => {
       // Transition out of implement should pass because evidence is in GH-154/
       const { result } = await runOrchestrator(
         ['transition', RAW_TICKET, 'commit'],
-        { env: baseEnv(ghEnv({ WORK_TDD_ENFORCE: '1' })) },
+        { env: baseEnv(ghEnv()) },
       );
       assert.equal(result.success, true, 'Transition should succeed with TDD evidence in GH-NNN/');
       assert.equal(result.to, 'commit');
@@ -578,12 +498,12 @@ describe('TDD enforcement', () => {
 
     it('transition with #NNN ticket and TDD enforcement blocks when no evidence in GH-NNN/', async () => {
       // Walk to implement
-      await transitionTo(RAW_TICKET, 'implement', ghEnv({ WORK_TDD_ENFORCE: '1' }));
+      await transitionTo(RAW_TICKET, 'implement', ghEnv());
 
       // No TDD evidence written — should block
       const { result } = await runOrchestrator(
         ['transition', RAW_TICKET, 'commit'],
-        { env: baseEnv(ghEnv({ WORK_TDD_ENFORCE: '1' })) },
+        { env: baseEnv(ghEnv()) },
       );
       assert.equal(result.error, true);
       assert.match(result.message, /TDD evidence/i);
