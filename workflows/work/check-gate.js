@@ -79,8 +79,8 @@ const CHECK_GATE_RULES = [
     name: 'qa-reports',
     description: 'At least one qa-*.check.md must exist when web apps are configured; all must have Status: APPROVED',
     check(dir) {
-      // When no web apps are configured, QA is not required (GH-181)
-      if (config.webAppNames().length === 0) return [];
+      // Skip QA requirement when no web apps are configured (GH-181)
+      if (config.webAppNames().length === 0) { return []; }
       const qaFiles = listFiles(dir, /^qa-.*\.check\.md$/);
       if (qaFiles.length === 0) return ['No QA reports found (need at least one qa-*.check.md)'];
       return qaFiles
