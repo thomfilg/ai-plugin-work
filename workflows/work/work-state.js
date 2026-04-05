@@ -123,7 +123,9 @@ function autoInitTdd(ticketId) {
     const dir = path.dirname(tddStatePath);
     fs.mkdirSync(dir, { recursive: true });
     const state = { currentPhase: 'red', currentCycle: 1, cycles: [] };
-    fs.writeFileSync(tddStatePath, JSON.stringify(state, null, 2));
+    const tmpPath = `${tddStatePath}.${process.pid}.${Date.now()}.tmp`;
+    fs.writeFileSync(tmpPath, JSON.stringify(state, null, 2));
+    fs.renameSync(tmpPath, tddStatePath);
   } catch { /* fail-open: TDD init failure must not block step transition */ }
 }
 
