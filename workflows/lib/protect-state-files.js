@@ -45,6 +45,15 @@ const SCRIPT_WRITE_OPS = /\b(?:writeFileSync|appendFileSync|writeFile|createWrit
 /** Interpreter patterns to extract script paths from Bash commands */
 const INTERPRETER_PATTERN = /\b(?:node|python[23]?|ruby|perl|bash|sh)\s+(?:--?\w[\w-]*(?:=\S+)?\s+)*["']?([/\w._-]+\.(?:js|mjs|cjs|py|rb|pl|sh))["']?/g;
 
+/** Inline interpreter invocations: python3 -c, ruby -e, perl -e (with optional /usr/bin/env prefix) */
+const INLINE_INTERPRETER_PATTERN = /(?:\/usr\/bin\/env\s+)?(?:python[23]?)\s+-c\b|(?:\/usr\/bin\/env\s+)?(?:ruby|perl)\s+-e\b/;
+
+/** Write operations in inline interpreter code */
+const INLINE_INTERPRETER_WRITES = /\bopen\(|\bFile\.write\b|\bIO\.write\b|\bos\.rename\b|\bshutil\.copy\b|\bshutil\.move\b/;
+
+/** Base64 evasion patterns */
+const BASE64_EVASION_PATTERN = /\bbase64\b|\bb64decode\b|\bb64encode\b|\batob\b|\bbtoa\b/;
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 /**
@@ -165,6 +174,10 @@ function createFileProtector(opts) {
       // ── Vector 3: Script bypass — node/python/etc script with write ops ──
       const scriptResult = checkScriptBypass(cmd, toolInput, hookData);
       if (scriptResult.blocked) return scriptResult;
+
+      // ── Vector 4: Inline interpreter bypass — python3 -c, ruby -e, perl -e ──
+      const inlineResult = checkInlineInterpreterBypass(cmd, toolInput, hookData);
+      if (inlineResult.blocked) return inlineResult;
     }
 
     return { blocked: false, skipRemainingChecks: false };
@@ -229,6 +242,63 @@ function createFileProtector(opts) {
     return { blocked: false, skipRemainingChecks: false };
   }
 
+  /**
+   * Vector 4: Inline interpreter bypass detection.
+   * Checks if a Bash command uses an inline interpreter (python3 -c, ruby -e, perl -e)
+   * to write to protected files.
+   *
+   * @param {string} cmd — Bash command string
+   * @param {object} toolInput
+   * @param {object} [hookData]
+   * @returns {CheckResult}
+   */
+  function checkInlineInterpreterBypass(cmd, toolInput, hookData) {
+    const interpreterMatch = cmd.match(INLINE_INTERPRETER_PATTERN);
+    if (!interpreterMatch) return { blocked: false, skipRemainingChecks: false };
+
+    // Extract the interpreter name and flag from the match (e.g. "python3 -c", "ruby -e")
+    const matchStr = interpreterMatch[0].trim();
+    // Remove /usr/bin/env prefix if present to get bare interpreter + flag
+    const bareInterpreter = matchStr.replace(/^\/usr\/bin\/env\s+/, '');
+
+    // Check if any protected filename appears as a token in the full command
+    const rawTokens = cmd.match(/[^\s"'|;&()]+/g) || [];
+    const tokens = rawTokens.flatMap(t => {
+      const redirectSplit = t.split(/>{1,2}|</);
+      return redirectSplit.flatMap(part => part.split('=')).filter(Boolean);
+    });
+
+    // Check for direct protected filename reference + write operation
+    const hasWriteOp = INLINE_INTERPRETER_WRITES.test(cmd);
+    for (const token of tokens) {
+      const match = isProtected(token);
+      if (match && hasWriteOp && !isExempt('Bash', toolInput, hookData)) {
+        return {
+          blocked: true,
+          match,
+          vector: `Bash(${bareInterpreter})`,
+          message: fmt(match, `Bash(${bareInterpreter})`),
+          skipRemainingChecks: false,
+        };
+      }
+    }
+
+    // Check for base64 evasion: interpreter + base64 + write op (no visible filename needed)
+    if (BASE64_EVASION_PATTERN.test(cmd) && hasWriteOp) {
+      if (!isExempt('Bash', toolInput, hookData)) {
+        return {
+          blocked: true,
+          match: '(base64-encoded)',
+          vector: `Bash(${bareInterpreter} base64)`,
+          message: fmt('(base64-encoded)', `Bash(${bareInterpreter} base64)`),
+          skipRemainingChecks: false,
+        };
+      }
+    }
+
+    return { blocked: false, skipRemainingChecks: false };
+  }
+
   return { check, checkScriptBypass };
 }
 
@@ -237,6 +307,9 @@ module.exports = {
   BASH_WRITE_OPS,
   NODE_FS_WRITES,
   SCRIPT_WRITE_OPS,
+  INLINE_INTERPRETER_PATTERN,
+  INLINE_INTERPRETER_WRITES,
+  BASE64_EVASION_PATTERN,
   buildProtectedBasenames,
   basenameProtector,
   createFileProtector,

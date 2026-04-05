@@ -12,6 +12,9 @@ const {
   FILE_WRITE_TOOLS,
   BASH_WRITE_OPS,
   NODE_FS_WRITES,
+  INLINE_INTERPRETER_PATTERN,
+  INLINE_INTERPRETER_WRITES,
+  BASE64_EVASION_PATTERN,
   buildProtectedBasenames,
   basenameProtector,
   createFileProtector,
@@ -223,6 +226,100 @@ describe('createFileProtector — script bypass', () => {
   });
 });
 
+// ─── createFileProtector — inline interpreter bypass ─────────────────────────
+
+describe('createFileProtector — inline interpreter bypass', () => {
+  const protector = createFileProtector({
+    isProtected: basenameProtector(new Set(['.state.json'])),
+  });
+
+  it('blocks python3 -c writing to protected file', () => {
+    const result = protector.check('Bash', {
+      command: 'python3 -c "open(\'.state.json\',\'w\').write(\'{}\')"',
+    });
+    assert.equal(result.blocked, true);
+    assert.equal(result.match, '.state.json');
+    assert.equal(result.vector, 'Bash(python3 -c)');
+    assert.equal(result.skipRemainingChecks, false);
+  });
+
+  it('blocks ruby -e writing to protected file', () => {
+    const result = protector.check('Bash', {
+      command: 'ruby -e "File.write(\'.state.json\', \'{}\')"',
+    });
+    assert.equal(result.blocked, true);
+    assert.equal(result.match, '.state.json');
+    assert.equal(result.vector, 'Bash(ruby -e)');
+  });
+
+  it('blocks perl -e writing to protected file', () => {
+    const result = protector.check('Bash', {
+      command: 'perl -e "open(my $fh, \'.state.json\'); print $fh \'{}\'"',
+    });
+    assert.equal(result.blocked, true);
+    assert.equal(result.match, '.state.json');
+    assert.equal(result.vector, 'Bash(perl -e)');
+  });
+
+  it('blocks /usr/bin/env python3 -c (env prefix)', () => {
+    const result = protector.check('Bash', {
+      command: '/usr/bin/env python3 -c "open(\'.state.json\',\'w\').write(\'{}\')"',
+    });
+    assert.equal(result.blocked, true);
+    assert.equal(result.match, '.state.json');
+    assert.equal(result.vector, 'Bash(python3 -c)');
+  });
+
+  it('blocks python3 -c os.rename to protected file', () => {
+    const result = protector.check('Bash', {
+      command: 'python3 -c "import os; os.rename(\'/tmp/x\', \'.state.json\')"',
+    });
+    assert.equal(result.blocked, true);
+    assert.equal(result.match, '.state.json');
+  });
+
+  it('blocks python3 -c with base64 evasion', () => {
+    const result = protector.check('Bash', {
+      command: 'python3 -c "import base64; open(base64.b64decode(\'LnN0YXRlLmpzb24=\').decode(),\'w\').write(\'{}\')"',
+    });
+    assert.equal(result.blocked, true);
+    assert.ok(result.vector.includes('base64'));
+  });
+
+  it('allows benign python3 -c (no write, no protected file)', () => {
+    const result = protector.check('Bash', {
+      command: 'python3 -c "print(\'hello\')"',
+    });
+    assert.equal(result.blocked, false);
+  });
+
+  it('allows benign python3 -c with os usage but no write', () => {
+    const result = protector.check('Bash', {
+      command: 'python3 -c "import os,sys;print(os.path.realpath(sys.argv[1]))" somefile',
+    });
+    assert.equal(result.blocked, false);
+  });
+
+  it('allows when isExempt returns true', () => {
+    const exemptProtector = createFileProtector({
+      isProtected: basenameProtector(new Set(['.state.json'])),
+      isExempt: () => true,
+    });
+    const result = exemptProtector.check('Bash', {
+      command: 'python3 -c "open(\'.state.json\',\'w\').write(\'{}\')"',
+    });
+    assert.equal(result.blocked, false);
+  });
+
+  it('blocks piped stdin python3 -c writing to protected file', () => {
+    const result = protector.check('Bash', {
+      command: 'echo "data" | python3 -c "import sys; open(\'.state.json\',\'w\').write(sys.stdin.read())"',
+    });
+    assert.equal(result.blocked, true);
+    assert.equal(result.match, '.state.json');
+  });
+});
+
 // ─── createFileProtector — isExempt ─────────────────────────────────────────
 
 describe('createFileProtector — exemptions', () => {
@@ -338,5 +435,35 @@ describe('exported constants', () => {
     assert.ok(NODE_FS_WRITES.test('createWriteStream'));
     assert.ok(!NODE_FS_WRITES.test('readFileSync'));
     assert.ok(!NODE_FS_WRITES.test('existsSync'));
+  });
+
+  it('INLINE_INTERPRETER_PATTERN matches inline interpreter invocations', () => {
+    assert.ok(INLINE_INTERPRETER_PATTERN.test('python3 -c "print(1)"'));
+    assert.ok(INLINE_INTERPRETER_PATTERN.test('python -c "print(1)"'));
+    assert.ok(INLINE_INTERPRETER_PATTERN.test('python2 -c "print(1)"'));
+    assert.ok(INLINE_INTERPRETER_PATTERN.test('ruby -e "puts 1"'));
+    assert.ok(INLINE_INTERPRETER_PATTERN.test('perl -e "print 1"'));
+    assert.ok(INLINE_INTERPRETER_PATTERN.test('/usr/bin/env python3 -c "x"'));
+    assert.ok(!INLINE_INTERPRETER_PATTERN.test('node -e "console.log(1)"'));
+    assert.ok(!INLINE_INTERPRETER_PATTERN.test('python3 script.py'));
+  });
+
+  it('INLINE_INTERPRETER_WRITES matches write operations', () => {
+    assert.ok(INLINE_INTERPRETER_WRITES.test('open('));
+    assert.ok(INLINE_INTERPRETER_WRITES.test('File.write'));
+    assert.ok(INLINE_INTERPRETER_WRITES.test('IO.write'));
+    assert.ok(INLINE_INTERPRETER_WRITES.test('os.rename'));
+    assert.ok(INLINE_INTERPRETER_WRITES.test('shutil.copy'));
+    assert.ok(INLINE_INTERPRETER_WRITES.test('shutil.move'));
+    assert.ok(!INLINE_INTERPRETER_WRITES.test('print("hello")'));
+  });
+
+  it('BASE64_EVASION_PATTERN matches base64 references', () => {
+    assert.ok(BASE64_EVASION_PATTERN.test('base64'));
+    assert.ok(BASE64_EVASION_PATTERN.test('b64decode'));
+    assert.ok(BASE64_EVASION_PATTERN.test('b64encode'));
+    assert.ok(BASE64_EVASION_PATTERN.test('atob'));
+    assert.ok(BASE64_EVASION_PATTERN.test('btoa'));
+    assert.ok(!BASE64_EVASION_PATTERN.test('print("hello")'));
   });
 });
