@@ -308,6 +308,20 @@ describe('createFileProtector — inline interpreter bypass', () => {
     assert.equal(result.blocked, false, 'read-only open() should not be blocked');
   });
 
+  it('allows python3 -c open() with binary read mode br', () => {
+    const result = protector.check('Bash', {
+      command: 'python3 -c "data = open(\'.state.json\',\'br\').read()"',
+    });
+    assert.equal(result.blocked, false, 'binary read mode br should not be blocked');
+  });
+
+  it('allows python3 -c open() with binary read mode rb', () => {
+    const result = protector.check('Bash', {
+      command: 'python3 -c "data = open(\'.state.json\',\'rb\').read()"',
+    });
+    assert.equal(result.blocked, false, 'binary read mode rb should not be blocked');
+  });
+
   it('blocks python3 -c open() with explicit write mode', () => {
     const result = protector.check('Bash', {
       command: 'python3 -c "open(\'.state.json\',\'w\').write(\'{}\')"',
@@ -481,6 +495,10 @@ describe('exported constants', () => {
     assert.ok(!INLINE_INTERPRETER_WRITES.test('print("hello")'));
     assert.ok(!INLINE_INTERPRETER_WRITES.test("open('.state.json')"), 'read-only open() should NOT match');
     assert.ok(!INLINE_INTERPRETER_WRITES.test("open('.state.json').read()"), 'open().read() should NOT match');
+    assert.ok(!INLINE_INTERPRETER_WRITES.test("open('.state.json','br')"), 'open with binary read mode should NOT match');
+    assert.ok(!INLINE_INTERPRETER_WRITES.test("open('.state.json','rb')"), 'open with rb mode should NOT match');
+    assert.ok(!INLINE_INTERPRETER_WRITES.test("open('.state.json','r')"), 'open with r mode should NOT match');
+    assert.ok(!INLINE_INTERPRETER_WRITES.test("open('.state.json','b')"), 'open with bare binary mode should NOT match');
   });
 
   it('BASE64_EVASION_PATTERN matches base64 references', () => {
