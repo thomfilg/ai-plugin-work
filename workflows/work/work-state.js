@@ -112,32 +112,6 @@ function initState(ticketId, description = '') {
 }
 
 /**
- * Auto-detect if the project has a test setup (mirrors work.workflow.js detectTestSetup).
- * WORK_TDD_ENFORCE=0 explicitly disables; WORK_TDD_ENFORCE=1 force-enables.
- */
-function shouldEnforceTdd() {
-  if (process.env.WORK_TDD_ENFORCE === '0') return false;
-  if (process.env.WORK_TDD_ENFORCE === '1') return true;
-  try {
-    const pkgPath = path.join(process.cwd(), 'package.json');
-    if (fs.existsSync(pkgPath)) {
-      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
-      const scripts = pkg.scripts || {};
-      if (Object.keys(scripts).some(k =>
-        /^(test|dev:test|test:unit|test:integration|vitest|jest)$/i.test(k)
-      )) return true;
-    }
-    const testConfigs = [
-      'jest.config.js', 'jest.config.ts', 'jest.config.mjs',
-      'vitest.config.js', 'vitest.config.ts', 'vitest.config.mts',
-      '.mocharc.yml', '.mocharc.json',
-    ];
-    if (testConfigs.some(f => fs.existsSync(path.join(process.cwd(), f)))) return true;
-    return false;
-  } catch { return false; }
-}
-
-/**
  * Auto-initialize TDD phase state when entering the implement step.
  * Creates tdd-phase.json with RED phase so the developer agent is forced
  * to write tests first. Idempotent — skips if state already exists.
@@ -174,8 +148,8 @@ function setStepStatus(ticketId, step, status) {
     state.currentStep = stepIndex + 1;
   }
 
-  // Auto-init TDD when entering implement step
-  if (step === 'implement' && status === 'in_progress' && shouldEnforceTdd()) {
+  // Auto-init TDD when entering implement step (always enforced)
+  if (step === 'implement' && status === 'in_progress') {
     autoInitTdd(ticketId);
   }
 
@@ -576,7 +550,6 @@ module.exports = {
   initSubtaskState,
   loadActiveSubtaskState,
   completeSubtask,
-  shouldEnforceTdd,
   autoInitTdd,
   STEPS,
   SUBTASK_STEPS,

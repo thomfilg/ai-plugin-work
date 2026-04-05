@@ -483,12 +483,11 @@ describe('work-state.js', () => {
     const TICKET = 'TEST-TDD-AUTOINIT';
     after(() => { cleanupTempWorkState(TICKET); });
 
-    it('should create tdd-phase.json when setting implement to in_progress with TDD enforced', async () => {
-      await runWorkState(['init', TICKET], { env: { WORK_TDD_ENFORCE: '1' } });
+    it('should create tdd-phase.json when setting implement to in_progress', async () => {
+      await runWorkState(['init', TICKET]);
 
       const { code } = await runWorkState(
         ['set-step', TICKET, 'implement', 'in_progress'],
-        { env: { WORK_TDD_ENFORCE: '1' } }
       );
       assert.equal(code, 0);
 
@@ -502,27 +501,10 @@ describe('work-state.js', () => {
       assert.deepEqual(tddState.cycles, []);
     });
 
-    it('should NOT create tdd-phase.json when TDD is explicitly disabled', async () => {
-      const TICKET_NO_TDD = 'TEST-TDD-DISABLED';
-      try {
-        await runWorkState(['init', TICKET_NO_TDD], { env: { WORK_TDD_ENFORCE: '0' } });
-
-        await runWorkState(
-          ['set-step', TICKET_NO_TDD, 'implement', 'in_progress'],
-          { env: { WORK_TDD_ENFORCE: '0' } }
-        );
-
-        const tddPath = path.join(TEMP_TASKS_BASE, TICKET_NO_TDD, 'tdd-phase.json');
-        assert.ok(!fs.existsSync(tddPath), 'tdd-phase.json should NOT be created when TDD disabled');
-      } finally {
-        cleanupTempWorkState(TICKET_NO_TDD);
-      }
-    });
-
     it('should be idempotent — not overwrite existing tdd-phase.json', async () => {
       const TICKET_EXISTING = 'TEST-TDD-EXISTING';
       try {
-        await runWorkState(['init', TICKET_EXISTING], { env: { WORK_TDD_ENFORCE: '1' } });
+        await runWorkState(['init', TICKET_EXISTING]);
 
         // Pre-create tdd-phase.json with green phase (simulating mid-cycle)
         const tddDir = path.join(TEMP_TASKS_BASE, TICKET_EXISTING);
@@ -533,7 +515,6 @@ describe('work-state.js', () => {
         // Now set implement to in_progress
         await runWorkState(
           ['set-step', TICKET_EXISTING, 'implement', 'in_progress'],
-          { env: { WORK_TDD_ENFORCE: '1' } }
         );
 
         // Verify existing state was NOT overwritten
@@ -548,11 +529,10 @@ describe('work-state.js', () => {
     it('should NOT create tdd-phase.json for non-implement steps', async () => {
       const TICKET_OTHER = 'TEST-TDD-OTHER-STEP';
       try {
-        await runWorkState(['init', TICKET_OTHER], { env: { WORK_TDD_ENFORCE: '1' } });
+        await runWorkState(['init', TICKET_OTHER]);
 
         await runWorkState(
           ['set-step', TICKET_OTHER, 'brief', 'in_progress'],
-          { env: { WORK_TDD_ENFORCE: '1' } }
         );
 
         const tddPath = path.join(TEMP_TASKS_BASE, TICKET_OTHER, 'tdd-phase.json');

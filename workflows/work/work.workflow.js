@@ -198,42 +198,6 @@ function getCurrentStep(workState) {
 
 const TDD_GATED_STEPS = [STEPS.implement];
 
-/**
- * Auto-detect if the project has a test setup.
- * TDD is mandatory when tests are available.
- * WORK_TDD_ENFORCE=0 explicitly disables (for testing/debugging only).
- */
-function detectTestSetup(dir) {
-  if (process.env.WORK_TDD_ENFORCE === '0') return false;
-  if (process.env.WORK_TDD_ENFORCE === '1') return true;
-  try {
-    const cwd = (dir && fileExists(dir)) ? dir : process.cwd();
-    const pkgPath = path.join(cwd, 'package.json');
-
-    // Check package.json for test-related scripts
-    if (fileExists(pkgPath)) {
-      const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
-      const scripts = pkg.scripts || {};
-      const hasTestScript = Object.keys(scripts).some(k =>
-        /^(test|dev:test|test:unit|test:integration|vitest|jest)$/i.test(k)
-      );
-      if (hasTestScript) return true;
-    }
-
-    // Check for test config files
-    const testConfigs = [
-      'jest.config.js', 'jest.config.ts', 'jest.config.mjs',
-      'vitest.config.js', 'vitest.config.ts', 'vitest.config.mts',
-      '.mocharc.yml', '.mocharc.json',
-    ];
-    if (testConfigs.some(f => fileExists(path.join(cwd, f)))) return true;
-
-    return false;
-  } catch {
-    return false;
-  }
-}
-
 
 const TDD_PROTOCOL = `
 TDD protocol (hook-enforced for this step):
@@ -435,8 +399,6 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg, suffix)
   const worktreeDir = s?.worktreeDir || `${WORKTREES_BASE}/${MAIN_WORKTREE_FOLDER}-${safeBase}`;
   const tasksDir = s?.tasksDir || `${TASKS_BASE}/${safeName}`;
 
-  const tddEnforce = detectTestSetup(worktreeDir);
-
   // Initialize session guard for workflow locking (skip when explicitly disabled)
   if (ticket && process.env.SESSION_GUARD_ENABLED !== '0') {
     try {
@@ -448,8 +410,8 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg, suffix)
   }
 
   function add(stepName, action, command, reason, extra = {}) {
-    // Augment TDD-gated steps with protocol instructions
-    if (tddEnforce && TDD_GATED_STEPS.includes(stepName) && extra.agentPrompt && (action === 'RUN' || action === 'DEFER')) {
+    // Augment TDD-gated steps with protocol instructions (always enforced)
+    if (TDD_GATED_STEPS.includes(stepName) && extra.agentPrompt && (action === 'RUN' || action === 'DEFER')) {
       const tddStatePath = path.join(__dirname, '..', 'work-implement', 'tdd-phase-state.js');
       const resolvedProtocol = TDD_PROTOCOL
         .replace(/<TDD_STATE_PATH>/g, tddStatePath)
@@ -747,9 +709,8 @@ function transitionStep(ticket, targetStep) {
     };
   }
 
-  // TDD gate: require evidence before leaving gated steps
-  const tddEnforce = detectTestSetup(process.cwd());
-  if (tddEnforce && TDD_GATED_STEPS.includes(currentStep) && currentStep !== targetStep) {
+  // TDD gate: require evidence before leaving gated steps (always enforced)
+  if (TDD_GATED_STEPS.includes(currentStep) && currentStep !== targetStep) {
     const { exists, parseError, evidence } = readTddEvidence(safeTicket, currentStep);
     if (!exists || parseError) {
       const tddStatePath = path.resolve(__dirname, '..', 'work-implement', 'tdd-phase-state.js');
@@ -807,7 +768,7 @@ function transitionStep(ticket, targetStep) {
   }
 
   // Stale evidence cleanup: reset TDD phase state when transitioning INTO a gated step
-  if (tddEnforce && TDD_GATED_STEPS.includes(targetStep)) {
+  if (TDD_GATED_STEPS.includes(targetStep)) {
     try {
       const phasePath = path.join(TASKS_BASE, safeTicket, 'tdd-phase.json');
       fs.unlinkSync(phasePath);
