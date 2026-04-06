@@ -45,6 +45,16 @@ const SCRIPT_WRITE_OPS = /\b(?:writeFileSync|appendFileSync|writeFile|createWrit
 /** Interpreter patterns to extract script paths from Bash commands */
 const INTERPRETER_PATTERN = /\b(?:node|python[23]?|ruby|perl|bash|sh)\s+(?:--?\w[\w-]*(?:=\S+)?\s+)*["']?([/\w._-]+\.(?:js|mjs|cjs|py|rb|pl|sh))["']?/g;
 
+/** Inline interpreter invocations: python3 -c, ruby -e, perl -e (with optional /usr/bin/env prefix) */
+const INLINE_INTERPRETER_PATTERN = /(?:\/usr\/bin\/env\s+)?\b(?:python[23]?)\s+-c\b|(?:\/usr\/bin\/env\s+)?\b(?:ruby|perl)\s+-e\b/;
+
+/** Write operations in inline interpreter code (w/a/x/r+/rb+ modes, File.write, os.rename, etc.)
+ *  open() pattern uses (?:[^()]*|\([^()]*\))* to allow one level of nested parens (e.g. b64decode())
+ *  without matching across statement boundaries like open(...).read(); print('w'). */
+const INLINE_INTERPRETER_WRITES = /open\((?:[^()]*|\([^()]*\))*['"](?:[wWaAxX>]|[wWaAxX][bB]?[+]?|[bB][wWaAxX]|[rR][bB]?[+])|\bFile\.write\b|\bIO\.write\b|\bos\.rename\b|\bshutil\.copy\b|\bshutil\.move\b/;
+/** Base64 evasion patterns (case-insensitive to catch MIME::Base64, Base64.decode64, etc.) */
+const BASE64_EVASION_PATTERN = /\bbase64\b|\bb64decode\b|\bb64encode\b|\batob\b|\bbtoa\b/i;
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 /**
@@ -139,15 +149,7 @@ function createFileProtector(opts) {
       if (hasShellWrite || hasNodeWrite) {
         // Extract tokens, then normalize by stripping operator prefixes
         // Handles: ">>.state.json", "of=.state.json", ">.state.json", "x>>.state.json"
-        const rawTokens = cmd.match(/[^\s"'|;&()]+/g) || [];
-        const tokens = rawTokens.flatMap(t => {
-          // Split on redirect operators (keeping what's after them)
-          // "x>>.state.json" → ["x", ".state.json"]
-          // ">>.state.json" → [".state.json"]
-          const redirectSplit = t.split(/>{1,2}|</);
-          // Split on = for dd of=path patterns
-          return redirectSplit.flatMap(part => part.split('=')).filter(Boolean);
-        });
+        const tokens = extractTokens(cmd);
         for (const token of tokens) {
           const match = isProtected(token);
           if (match && !isExempt(toolName, toolInput, hookData)) {
@@ -165,6 +167,10 @@ function createFileProtector(opts) {
       // ── Vector 3: Script bypass — node/python/etc script with write ops ──
       const scriptResult = checkScriptBypass(cmd, toolInput, hookData);
       if (scriptResult.blocked) return scriptResult;
+
+      // ── Vector 4: Inline interpreter bypass — python3 -c, ruby -e, perl -e ──
+      const inlineResult = checkInlineInterpreterBypass(cmd, toolInput, hookData);
+      if (inlineResult.blocked) return inlineResult;
     }
 
     return { blocked: false, skipRemainingChecks: false };
@@ -229,7 +235,97 @@ function createFileProtector(opts) {
     return { blocked: false, skipRemainingChecks: false };
   }
 
-  return { check, checkScriptBypass };
+  /**
+   * Vector 4: Inline interpreter bypass detection.
+   * Checks if a Bash command uses an inline interpreter (python3 -c, ruby -e, perl -e)
+   * to write to protected files.
+   *
+   * @param {string} cmd — Bash command string
+   * @param {object} toolInput
+   * @param {object} [hookData]
+   * @returns {CheckResult}
+   */
+  /**
+   * Extract tokens from a string, splitting on whitespace, quotes, shell operators,
+   * redirect operators, and '=' (for dd of=path patterns).
+   * @param {string} str
+   * @returns {string[]}
+   */
+  function extractTokens(str) {
+    const rawTokens = str.match(/[^\s"'|;&()]+/g) || [];
+    return rawTokens.flatMap(t => {
+      const redirectSplit = t.split(/>{1,2}|</);
+      return redirectSplit.flatMap(part => part.split('=')).filter(Boolean);
+    });
+  }
+
+  function checkInlineInterpreterBypass(cmd, toolInput, hookData) {
+    // Use global scan to check ALL inline interpreter occurrences in compound commands
+    // (e.g. `python3 -c "print(1)"; python3 -c "open('.state.json','w')..."`)
+    const globalPattern = new RegExp(INLINE_INTERPRETER_PATTERN.source, 'g');
+    const allMatches = [...cmd.matchAll(globalPattern)];
+    if (allMatches.length === 0) return { blocked: false, skipRemainingChecks: false };
+
+    for (const interpreterMatch of allMatches) {
+
+    // Extract the interpreter name and flag from the match (e.g. "python3 -c", "ruby -e")
+    const matchStr = interpreterMatch[0].trim();
+    // Remove /usr/bin/env prefix if present to get bare interpreter + flag
+    const bareInterpreter = matchStr.replace(/^\/usr\/bin\/env\s+/, '');
+
+    // Extract the inline code portion (everything after -c/-e flag).
+    // This scopes filename and base64 checks to only the interpreter code,
+    // avoiding false positives when protected filenames or base64 appear
+    // in other command segments (e.g. `echo .state.json; python3 -c "..."`)
+    // or in pipeline stages (e.g. `python3 -c "print('hello')" | base64`).
+    const flagIdx = interpreterMatch.index;
+    const afterFlag = cmd.slice(flagIdx);
+    // Try to extract the quoted code argument first (respects quotes around inline code).
+    // If unquoted, capture up to the first unquoted shell operator (|, ;, &&, ||).
+    const quotedMatch = afterFlag.match(/\s-[ce]\s+(["'])([\s\S]*?)\1/);
+    const unquotedMatch = !quotedMatch && afterFlag.match(/\s-[ce]\s+(.*?)(?:\s*(?:\||;|&&|\|\|)\s|$)/s);
+    const inlineCode = quotedMatch ? quotedMatch[2] : (unquotedMatch ? unquotedMatch[1] : cmd); // fallback to full cmd
+
+    // Check tokens from inline code only (not full cmd)
+    const tokens = extractTokens(inlineCode);
+
+    // Check for direct protected filename reference + write operation (scoped to inline code)
+    const hasWriteOp = INLINE_INTERPRETER_WRITES.test(inlineCode);
+    for (const token of tokens) {
+      const match = isProtected(token);
+      if (match && hasWriteOp && !isExempt('Bash', toolInput, hookData)) {
+        return {
+          blocked: true,
+          match,
+          vector: `Bash(${bareInterpreter})`,
+          message: fmt(match, `Bash(${bareInterpreter})`),
+          skipRemainingChecks: false,
+        };
+      }
+    }
+
+    // Base64 evasion: block when all three signals present (interpreter + base64 keyword + write op)
+    // even without a visible protected filename, since the filename may be base64-encoded.
+    // This is an intentional over-blocking tradeoff — see GH-107 spec "Open Questions" section.
+    // False positives on non-protected file writes are accepted to prevent evasion.
+    // Scoped to inline code only — base64 CLI usage outside the -c/-e code is not flagged.
+    if (BASE64_EVASION_PATTERN.test(inlineCode) && hasWriteOp) {
+      if (!isExempt('Bash', toolInput, hookData)) {
+        return {
+          blocked: true,
+          match: '(base64-encoded)',
+          vector: `Bash(${bareInterpreter} base64)`,
+          message: fmt('(base64-encoded)', `Bash(${bareInterpreter} base64)`),
+          skipRemainingChecks: false,
+        };
+      }
+    } // end base64 evasion check
+    } // end for each interpreter match
+
+    return { blocked: false, skipRemainingChecks: false };
+  }
+
+  return { check, checkScriptBypass, checkInlineInterpreterBypass };
 }
 
 module.exports = {
@@ -237,6 +333,9 @@ module.exports = {
   BASH_WRITE_OPS,
   NODE_FS_WRITES,
   SCRIPT_WRITE_OPS,
+  INLINE_INTERPRETER_PATTERN,
+  INLINE_INTERPRETER_WRITES,
+  BASE64_EVASION_PATTERN,
   buildProtectedBasenames,
   basenameProtector,
   createFileProtector,

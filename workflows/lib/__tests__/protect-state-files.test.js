@@ -12,6 +12,9 @@ const {
   FILE_WRITE_TOOLS,
   BASH_WRITE_OPS,
   NODE_FS_WRITES,
+  INLINE_INTERPRETER_PATTERN,
+  INLINE_INTERPRETER_WRITES,
+  BASE64_EVASION_PATTERN,
   buildProtectedBasenames,
   basenameProtector,
   createFileProtector,
@@ -223,6 +226,202 @@ describe('createFileProtector — script bypass', () => {
   });
 });
 
+// ─── createFileProtector — inline interpreter bypass ─────────────────────────
+
+describe('createFileProtector — inline interpreter bypass', () => {
+  const protector = createFileProtector({
+    isProtected: basenameProtector(new Set(['.state.json'])),
+  });
+
+  it('blocks python3 -c writing to protected file', () => {
+    const result = protector.check('Bash', {
+      command: 'python3 -c "open(\'.state.json\',\'w\').write(\'{}\')"',
+    });
+    assert.equal(result.blocked, true);
+    assert.equal(result.match, '.state.json');
+    assert.equal(result.vector, 'Bash(python3 -c)');
+    assert.equal(result.skipRemainingChecks, false);
+  });
+
+  it('blocks ruby -e writing to protected file', () => {
+    const result = protector.check('Bash', {
+      command: 'ruby -e "File.write(\'.state.json\', \'{}\')"',
+    });
+    assert.equal(result.blocked, true);
+    assert.equal(result.match, '.state.json');
+    assert.equal(result.vector, 'Bash(ruby -e)');
+  });
+
+  it('blocks perl -e writing to protected file', () => {
+    const result = protector.check('Bash', {
+      command: 'perl -e "open(my $fh, \'>\', \'.state.json\'); print $fh \'{}\'"',
+    });
+    assert.equal(result.blocked, true);
+    assert.equal(result.match, '.state.json');
+    // Vector may be 'Bash' (shell redirect detection) or 'Bash(perl -e)' depending on detection order
+    assert.ok(result.vector.startsWith('Bash'));
+  });
+
+  it('blocks /usr/bin/env python3 -c (env prefix)', () => {
+    const result = protector.check('Bash', {
+      command: '/usr/bin/env python3 -c "open(\'.state.json\',\'w\').write(\'{}\')"',
+    });
+    assert.equal(result.blocked, true);
+    assert.equal(result.match, '.state.json');
+    assert.equal(result.vector, 'Bash(python3 -c)');
+  });
+
+  it('blocks python3 -c os.rename to protected file', () => {
+    const result = protector.check('Bash', {
+      command: 'python3 -c "import os; os.rename(\'/tmp/x\', \'.state.json\')"',
+    });
+    assert.equal(result.blocked, true);
+    assert.equal(result.match, '.state.json');
+  });
+
+  it('blocks python3 -c with base64 evasion', () => {
+    const result = protector.check('Bash', {
+      command: 'python3 -c "import base64; open(base64.b64decode(\'LnN0YXRlLmpzb24=\').decode(),\'w\').write(\'{}\')"',
+    });
+    assert.equal(result.blocked, true);
+    assert.ok(result.vector.includes('base64'));
+  });
+  // Tests below verify non-blocking cases for inline interpreter detection
+  it('allows benign python3 -c (no write, no protected file)', () => {
+    const result = protector.check('Bash', {
+      command: 'python3 -c "print(\'hello\')"',
+    });
+    assert.equal(result.blocked, false);
+  });
+
+  it('allows benign python3 -c with os usage but no write', () => {
+    const result = protector.check('Bash', {
+      command: 'python3 -c "import os,sys;print(os.path.realpath(sys.argv[1]))" somefile',
+    });
+    assert.equal(result.blocked, false);
+  });
+
+  it('allows benign read-only python3 -c open() with no write mode', () => {
+    const result = protector.check('Bash', {
+      command: 'python3 -c "data = open(\'.state.json\').read()"',
+    });
+    assert.equal(result.blocked, false, 'read-only open() should not be blocked — regression test for greedy open() FP');
+    assert.equal(result.skipRemainingChecks, false);
+  }); // open() read-only false-positive regression covered above
+
+  it('allows python3 -c open() with binary read mode br', () => {
+    const result = protector.check('Bash', {
+      command: 'python3 -c "data = open(\'.state.json\',\'br\').read()"',
+    });
+    assert.equal(result.blocked, false, 'binary read mode br should not be blocked');
+  });
+
+  it('allows python3 -c open() with binary read mode rb', () => {
+    const result = protector.check('Bash', {
+      command: 'python3 -c "data = open(\'.state.json\',\'rb\').read()"',
+    });
+    assert.equal(result.blocked, false, 'binary read mode rb should not be blocked');
+  });
+
+  it('blocks python3 -c open() with explicit write mode', () => {
+    const result = protector.check('Bash', {
+      command: 'python3 -c "open(\'.state.json\',\'w\').write(\'{}\')"',
+    });
+    assert.equal(result.blocked, true);
+    assert.equal(result.match, '.state.json');
+  });
+
+  it('allows when isExempt returns true', () => {
+    const exemptProtector = createFileProtector({
+      isProtected: basenameProtector(new Set(['.state.json'])),
+      isExempt: () => true,
+    });
+    const result = exemptProtector.check('Bash', {
+      command: 'python3 -c "open(\'.state.json\',\'w\').write(\'{}\')"',
+    });
+    assert.equal(result.blocked, false);
+  });
+
+  it('exposes checkInlineInterpreterBypass for testability', () => {
+    assert.equal(typeof protector.checkInlineInterpreterBypass, 'function');
+  });
+
+  it('blocks python3 -c open() with exclusive create mode x', () => {
+    const result = protector.check('Bash', {
+      command: "python3 -c \"open('.state.json','x').write('{}')\"",
+    });
+    assert.equal(result.blocked, true);
+    assert.equal(result.match, '.state.json');
+  });
+
+  it('blocks python3 -c open() with read+write mode r+', () => {
+    const result = protector.check('Bash', {
+      command: "python3 -c \"open('.state.json','r+').write('{}')\"",
+    });
+    assert.equal(result.blocked, true);
+    assert.equal(result.match, '.state.json');
+  });
+
+  it('blocks piped stdin python3 -c writing to protected file', () => {
+    const result = protector.check('Bash', {
+      command: 'echo "data" | python3 -c "import sys; open(\'.state.json\',\'w\').write(sys.stdin.read())"',
+    });
+    assert.equal(result.blocked, true);
+    assert.equal(result.match, '.state.json');
+  });
+
+  // ── Scoped inline code extraction (false positive prevention) ──────────
+
+  it('allows when protected filename appears outside inline code', () => {
+    // .state.json is in the echo segment, NOT in the python3 -c code
+    const result = protector.check('Bash', {
+      command: 'echo .state.json; python3 -c "open(\'x\',\'w\').write(\'test\')"',
+    });
+    assert.equal(result.blocked, false, 'protected filename outside inline code should not trigger block');
+  });
+
+  it('allows base64 outside inline python3 -c code', () => {
+    // base64 is a CLI command piped into python, not inside the -c code
+    const result = protector.check('Bash', {
+      command: 'base64 somefile | python3 -c "open(\'output.txt\',\'w\').write(\'x\')"',
+    });
+    assert.equal(result.blocked, false, 'base64 outside inline -c code should not trigger base64 evasion blocking');
+  });
+
+  it('allows python3 -c open().read() with print containing w (Fix 2)', () => {
+    // open('.state.json').read() is read-only; the 'w' in print('w') is not a write mode
+    const result = protector.check('Bash', {
+      command: "python3 -c \"open('.state.json').read(); print('w')\"",
+    });
+    assert.equal(result.blocked, false, 'read-only open() with print("w") should not be blocked');
+  });
+
+  it('does not trigger base64 evasion when base64 is piped after -c code (Fix 1)', () => {
+    // base64 is a separate command in the pipeline, not part of the inline code
+    const result = protector.check('Bash', {
+      command: 'python3 -c "print(\'hello\')" | base64',
+    });
+    assert.equal(result.blocked, false, 'base64 in pipeline after -c code should not trigger base64 evasion');
+  });
+
+  it('still blocks base64 evasion inside inline python3 -c code', () => {
+    const result = protector.check('Bash', {
+      command: 'python3 -c "import base64; open(base64.b64decode(\'LnN0YXRlLmpzb24=\').decode(),\'w\').write(\'{}\')"',
+    });
+    assert.equal(result.blocked, true);
+    assert.ok(result.vector.includes('base64'));
+  });
+
+  it('blocks second interpreter in compound command', () => {
+    // First python3 -c is benign, second writes to protected file
+    const result = protector.check('Bash', {
+      command: 'python3 -c "print(1)"; python3 -c "open(\'.state.json\',\'w\').write(\'x\')"',
+    });
+    assert.equal(result.blocked, true, 'should detect write in second interpreter invocation');
+    assert.equal(result.vector, 'Bash(python3 -c)');
+  });
+});
+
 // ─── createFileProtector — isExempt ─────────────────────────────────────────
 
 describe('createFileProtector — exemptions', () => {
@@ -338,5 +537,72 @@ describe('exported constants', () => {
     assert.ok(NODE_FS_WRITES.test('createWriteStream'));
     assert.ok(!NODE_FS_WRITES.test('readFileSync'));
     assert.ok(!NODE_FS_WRITES.test('existsSync'));
+  });
+
+  it('INLINE_INTERPRETER_PATTERN matches inline interpreter invocations', () => {
+    assert.ok(INLINE_INTERPRETER_PATTERN.test('python3 -c "print(1)"'));
+    assert.ok(INLINE_INTERPRETER_PATTERN.test('python -c "print(1)"'));
+    assert.ok(INLINE_INTERPRETER_PATTERN.test('python2 -c "print(1)"'));
+    assert.ok(INLINE_INTERPRETER_PATTERN.test('ruby -e "puts 1"'));
+    assert.ok(INLINE_INTERPRETER_PATTERN.test('perl -e "print 1"'));
+    assert.ok(INLINE_INTERPRETER_PATTERN.test('/usr/bin/env python3 -c "x"'));
+    assert.ok(!INLINE_INTERPRETER_PATTERN.test('node -e "console.log(1)"'), 'node not covered by this pattern');
+    assert.ok(!INLINE_INTERPRETER_PATTERN.test('python3 script.py'), 'script execution not inline');
+    assert.ok(!INLINE_INTERPRETER_PATTERN.test('echo hello'), 'non-interpreter command');
+  }); // interpreter pattern coverage: python2/3, ruby, perl, /usr/bin/env prefix
+
+  it('INLINE_INTERPRETER_WRITES does not false-positive on open().read() followed by print with w (Fix 2)', () => {
+    // open(.*['"]w is greedy — "open('.state.json').read(); print('w')" should NOT match
+    // because the 'w' is in print(), not in open()'s mode argument
+    assert.ok(
+      !INLINE_INTERPRETER_WRITES.test("open('.state.json').read(); print('w')"),
+      'greedy open() should not match w in print() after close-paren'
+    );
+  });
+
+  it('INLINE_INTERPRETER_WRITES matches write operations', () => {
+    assert.ok(INLINE_INTERPRETER_WRITES.test("open('.state.json','w')"), 'open with write mode');
+    assert.ok(INLINE_INTERPRETER_WRITES.test("open('.state.json','W')"), 'open with uppercase W mode');
+    assert.ok(INLINE_INTERPRETER_WRITES.test("open('.state.json','a')"), 'open with append mode');
+    assert.ok(INLINE_INTERPRETER_WRITES.test("open('.state.json','wb')"), 'open with binary write mode');
+    assert.ok(INLINE_INTERPRETER_WRITES.test('File.write'));
+    assert.ok(INLINE_INTERPRETER_WRITES.test('IO.write'));
+    assert.ok(INLINE_INTERPRETER_WRITES.test('os.rename'));
+    assert.ok(INLINE_INTERPRETER_WRITES.test('shutil.copy'));
+    assert.ok(INLINE_INTERPRETER_WRITES.test('shutil.move'));
+    assert.ok(!INLINE_INTERPRETER_WRITES.test('print("hello")'));
+    assert.ok(!INLINE_INTERPRETER_WRITES.test("open('.state.json')"), 'read-only open() should NOT match');
+    assert.ok(!INLINE_INTERPRETER_WRITES.test("open('.state.json').read()"), 'open().read() should NOT match');
+    assert.ok(!INLINE_INTERPRETER_WRITES.test("open('.state.json','br')"), 'open with binary read mode should NOT match');
+    assert.ok(!INLINE_INTERPRETER_WRITES.test("open('.state.json','rb')"), 'open with rb mode should NOT match');
+    assert.ok(!INLINE_INTERPRETER_WRITES.test("open('.state.json','r')"), 'open with r mode should NOT match');
+    assert.ok(!INLINE_INTERPRETER_WRITES.test("open('.state.json','b')"), 'open with bare binary mode should NOT match');
+
+    // Write-capable modes added for Fix 2
+    assert.ok(INLINE_INTERPRETER_WRITES.test("open('.state.json','x')"), 'open with exclusive create mode x');
+    assert.ok(INLINE_INTERPRETER_WRITES.test("open('.state.json','xb')"), 'open with exclusive binary create mode xb');
+    assert.ok(INLINE_INTERPRETER_WRITES.test("open('.state.json','r+')"), 'open with read+write mode r+');
+    assert.ok(INLINE_INTERPRETER_WRITES.test("open('.state.json','rb+')"), 'open with binary read+write mode rb+');
+    assert.ok(INLINE_INTERPRETER_WRITES.test("open('.state.json','w+')"), 'open with write+read mode w+');
+    assert.ok(INLINE_INTERPRETER_WRITES.test("open('.state.json','a+')"), 'open with append+read mode a+');
+    assert.ok(INLINE_INTERPRETER_WRITES.test("open('.state.json','x+')"), 'open with exclusive create+read mode x+');
+  });
+
+  it('BASE64_EVASION_PATTERN matches base64 references', () => {
+    assert.ok(BASE64_EVASION_PATTERN.test('base64'));
+    assert.ok(BASE64_EVASION_PATTERN.test('b64decode'));
+    assert.ok(BASE64_EVASION_PATTERN.test('b64encode'));
+    assert.ok(BASE64_EVASION_PATTERN.test('atob'));
+    assert.ok(BASE64_EVASION_PATTERN.test('btoa'));
+    assert.ok(!BASE64_EVASION_PATTERN.test('print("hello")'));
+  });
+
+  it('BASE64_EVASION_PATTERN is case-insensitive (Fix 3)', () => {
+    assert.ok(BASE64_EVASION_PATTERN.test('Base64'), 'mixed case Base64');
+    assert.ok(BASE64_EVASION_PATTERN.test('BASE64'), 'uppercase BASE64');
+    assert.ok(BASE64_EVASION_PATTERN.test('B64decode'), 'mixed case B64decode');
+    assert.ok(BASE64_EVASION_PATTERN.test('B64ENCODE'), 'uppercase B64ENCODE');
+    assert.ok(BASE64_EVASION_PATTERN.test('Atob'), 'mixed case Atob');
+    assert.ok(BASE64_EVASION_PATTERN.test('BTOA'), 'uppercase BTOA');
   });
 });
