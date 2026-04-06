@@ -224,6 +224,77 @@ describe('createFileProtector — script bypass', () => {
     const result = protector.check('Bash', { command: 'node /tmp/nonexistent-12345.js' });
     assert.equal(result.blocked, false);
   });
+
+  // ── Test-path exclusion (GH-191 Fix 3) ──────────────────────────────────
+
+  it('allows git-tracked test file in __tests__/ that references protected state files (GH-191)', () => {
+    // Use real git-tracked test files from the repo — this is the exact false-positive scenario
+    // These files contain writeFileSync + state file references in their source
+    const repoRoot = require('child_process').execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+    const testScript = path.join(repoRoot, 'workflows', 'work', '__tests__', 'work-state.test.js');
+    // This file is git-tracked and in __tests__/ — should be exempt from Vector 3
+    const result = protector.check('Bash', { command: `node ${testScript}` });
+    assert.equal(result.blocked, false, 'Git-tracked files in __tests__/ should skip Vector 3');
+  });
+
+  it('allows git-tracked test file in nested __tests__/ directory (GH-191)', () => {
+    const repoRoot = require('child_process').execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+    const testScript = path.join(repoRoot, 'workflows', 'lib', '__tests__', 'protect-state-files.test.js');
+    const result = protector.check('Bash', { command: `node ${testScript}` });
+    assert.equal(result.blocked, false, 'Git-tracked test files in nested __tests__/ should skip Vector 3');
+  });
+
+  it('blocks untracked script in __tests__/ directory (GH-191)', () => {
+    // Create an untracked file in a temp __tests__/ dir — should be blocked (not git-tracked)
+    const repoRoot = require('child_process').execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+    const tempBase = path.join(repoRoot, `__tests__-gh191-temp-${process.pid}`);
+    const testDir = path.join(tempBase, '__tests__');
+    fs.mkdirSync(testDir, { recursive: true });
+    const untrackedScript = path.join(testDir, 'malicious.js');
+    fs.writeFileSync(untrackedScript, 'const fs = require("fs"); fs.writeFileSync(".state.json", "{}");');
+    try {
+      const result = protector.check('Bash', { command: `node ${untrackedScript}` });
+      assert.equal(result.blocked, true, 'Untracked scripts in __tests__/ should still be blocked');
+    } finally {
+      fs.rmSync(tempBase, { recursive: true, force: true });
+    }
+  });
+
+  it('blocks script with test suffix outside __tests__/ or __mocks__/ (GH-191)', () => {
+    const evilScript = path.join(os.tmpdir(), `evil.test.js`);
+    fs.writeFileSync(evilScript, 'const fs = require("fs"); fs.writeFileSync(".state.json", "{}");');
+    try {
+      const result = protector.check('Bash', { command: `node ${evilScript}` });
+      assert.equal(result.blocked, true, 'Scripts with test suffix outside trusted dirs should be blocked');
+    } finally {
+      fs.unlinkSync(evilScript);
+    }
+  });
+
+  it('blocks script outside repo root even if in __tests__/ directory (GH-191)', () => {
+    const baseDir = path.join(os.tmpdir(), `outside-repo-${Date.now()}`);
+    const testDir = path.join(baseDir, '__tests__');
+    fs.mkdirSync(testDir, { recursive: true });
+    const evilScript = path.join(testDir, 'sneaky.test.js');
+    fs.writeFileSync(evilScript, 'const fs = require("fs"); fs.writeFileSync(".state.json", "{}");');
+    try {
+      const result = protector.check('Bash', { command: `node ${evilScript}` });
+      assert.equal(result.blocked, true, '__tests__/ outside repo root should still be blocked');
+    } finally {
+      fs.rmSync(baseDir, { recursive: true, force: true });
+    }
+  });
+
+  it('still blocks non-test script that writes to protected file (GH-191)', () => {
+    const evilScript = path.join(os.tmpdir(), `evil-script.js`);
+    fs.writeFileSync(evilScript, 'const fs = require("fs"); fs.writeFileSync(".state.json", "{}");');
+    try {
+      const result = protector.check('Bash', { command: `node ${evilScript}` });
+      assert.equal(result.blocked, true, 'Non-test scripts should still be blocked by Vector 3');
+    } finally {
+      fs.unlinkSync(evilScript);
+    }
+  });
 });
 
 // ─── createFileProtector — inline interpreter bypass ─────────────────────────

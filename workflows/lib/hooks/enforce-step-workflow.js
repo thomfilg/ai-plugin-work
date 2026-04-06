@@ -165,7 +165,23 @@ const WORKFLOWS = [
             return true;
           }
 
-          // 3. No commits with ticketId → not committed yet
+          // 3. Branch-name fallback: branch contains ticketId + committed changes exist (GH-191)
+          try {
+            const branch = execFileSync('git', ['branch', '--show-current'], opts).trim();
+            const escapedTicketId = ticketId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const branchTicketPattern = new RegExp(`(?:^|[/-])${escapedTicketId}(?:$|[/-])`);
+            if (branch && branchTicketPattern.test(branch)) {
+              const diff = execFileSync('git', ['diff', '--shortstat', baseBranch, 'HEAD'], opts).trim();
+              if (diff) {
+                if (process.env.ENFORCE_HOOK_DEBUG) {
+                  process.stderr.write(`[enforce-hook] commit verify: branch-name fallback matched (branch=${branch}, ticketId=${ticketId})\n`);
+                }
+                fs.writeFileSync(shaFile, headSha);
+                return true;
+              }
+            }
+          } catch { /* detached HEAD or other error — skip fallback */ }
+
           return false;
         } catch { return false; }
       }},
@@ -197,7 +213,15 @@ const WORKFLOWS = [
         try {
           const { execFileSync } = require('child_process');
           const opts = { encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] };
-          const pr = JSON.parse(execFileSync('gh', ['pr', 'view', '--json', 'number,state'], opts).trim());
+
+          // Resolve branch for --head flag to support worktree contexts (GH-191)
+          let ghArgs = ['pr', 'view', '--json', 'number,state'];
+          try {
+            const branch = execFileSync('git', ['branch', '--show-current'], opts).trim();
+            if (branch) ghArgs = ['pr', 'view', '--head', branch, '--json', 'number,state'];
+          } catch { /* detached HEAD — fall back to no --head */ }
+
+          const pr = JSON.parse(execFileSync('gh', ghArgs, opts).trim());
           return pr.number > 0 && pr.state === 'OPEN';
         } catch { return false; }
       }},
@@ -208,8 +232,15 @@ const WORKFLOWS = [
           const { execFileSync } = require('child_process');
           const opts = { encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] };
 
+          // Resolve branch once for --head flag to support worktree contexts (GH-191)
+          let prViewArgs = ['pr', 'view', '--json', 'number', '-q', '.number'];
+          try {
+            const branch = execFileSync('git', ['branch', '--show-current'], opts).trim();
+            if (branch) prViewArgs = ['pr', 'view', '--head', branch, '--json', 'number', '-q', '.number'];
+          } catch { /* detached HEAD — fall back to no --head */ }
+
           // 1. Get PR number
-          const prNum = execFileSync('gh', ['pr', 'view', '--json', 'number', '-q', '.number'], opts).trim();
+          const prNum = execFileSync('gh', prViewArgs, opts).trim();
           if (!prNum) return false;
 
           // 2. CI checks must all pass (or have no checks)

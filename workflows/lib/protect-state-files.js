@@ -202,9 +202,64 @@ function createFileProtector(opts) {
    * @param {object} [hookData]
    * @returns {CheckResult}
    */
+  /**
+   * Check if a script path is a trusted test/mock file (GH-191).
+   * Only trusts scripts under __tests__/ or __mocks__/ directories,
+   * and verifies the path resolves within the current repo/worktree root.
+   * Suffix-based patterns (.test.js, .spec.js) are intentionally excluded
+   * as they could be exploited by placing malicious scripts with test suffixes.
+   *
+   * @param {string} scriptPath
+   * @returns {boolean}
+   */
+  // Cache repo root (lazy init) to avoid calling git rev-parse on every invocation
+  let _cachedRepoRoot;
+  function getRepoRoot() {
+    if (_cachedRepoRoot !== undefined) return _cachedRepoRoot;
+    try {
+      _cachedRepoRoot = require('child_process')
+        .execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' })
+        .trim();
+    } catch {
+      _cachedRepoRoot = process.cwd();
+    }
+    return _cachedRepoRoot;
+  }
+
+  function isTrustedTestScript(scriptPath) {
+    // Resolve symlinks for safety — if realpathSync fails (file doesn't exist), untrusted
+    let resolved;
+    try {
+      resolved = fs.realpathSync(scriptPath);
+    } catch {
+      return false;
+    }
+    // Script must resolve within the repo root
+    const repoRoot = getRepoRoot();
+    const rel = path.relative(repoRoot, resolved);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) return false;
+    // Check that __tests__ or __mocks__ appears as a path segment
+    const segments = rel.split(path.sep);
+    if (!segments.includes('__tests__') && !segments.includes('__mocks__')) return false;
+    // Only trust git-tracked files — newly-created/untracked scripts are not exempt
+    try {
+      require('child_process').execFileSync(
+        'git', ['ls-files', '--error-unmatch', '--', rel],
+        { encoding: 'utf8', cwd: repoRoot, stdio: ['pipe', 'pipe', 'pipe'] }
+      );
+      return true;
+    } catch {
+      return false; // Not tracked by git — untrusted
+    }
+  }
+
   function checkScriptBypass(cmd, toolInput, hookData) {
     const scripts = extractScriptPaths(cmd);
     for (const scriptPath of scripts) {
+      // Skip Vector 3 for trusted in-repo test/mock files (GH-191).
+      // Scoped to __tests__/__mocks__ dirs within repo root; symlink-safe via realpathSync.
+      if (isTrustedTestScript(scriptPath)) continue;
+
       let content;
       try {
         if (!fs.existsSync(scriptPath)) continue;
