@@ -17,8 +17,23 @@
 const fs = require('fs');
 const path = require('path');
 
-process.on('uncaughtException', () => process.exit(0));
-process.on('unhandledRejection', () => process.exit(0));
+// GH-106: Exit 1 for 'complete' command so failures surface instead of being swallowed.
+// Other commands retain exit 0 (fail-open) to avoid breaking existing callers.
+const _cliCommand = process.argv[2];
+process.on('uncaughtException', (err) => {
+  if (_cliCommand === 'complete') {
+    process.stderr.write(`[work-state] uncaught exception in complete: ${err?.message || err}\n`);
+    process.exit(1);
+  }
+  process.exit(0);
+});
+process.on('unhandledRejection', (err) => {
+  if (_cliCommand === 'complete') {
+    process.stderr.write(`[work-state] unhandled rejection in complete: ${err?.message || err}\n`);
+    process.exit(1);
+  }
+  process.exit(0);
+});
 
 let config;
 try {
@@ -210,12 +225,19 @@ function addError(ticketId, step, error) {
 }
 
 /**
- * Mark work as complete
+ * Mark work as complete.
+ * GH-106: Made idempotent — if already completed, returns existing state.
+ * Returns { error: ... } when no state found (caller must check).
  */
 function completeWork(ticketId) {
   let state = loadState(ticketId);
   if (!state) {
     return { error: 'No state found' };
+  }
+
+  // Idempotent: already completed, return as-is
+  if (state.status === 'completed') {
+    return state;
   }
 
   state.status = 'completed';
@@ -523,6 +545,10 @@ async function main() {
 
     case 'complete':
       result = completeWork(ticketId);
+      if (result && result.error) {
+        console.error(JSON.stringify(result));
+        process.exit(1);
+      }
       console.log(JSON.stringify(result, null, 2));
       break;
 
@@ -553,7 +579,14 @@ async function main() {
 }
 
 if (require.main === module) {
-  main().catch(() => process.exit(0));
+  main().catch((err) => {
+    // GH-106: Surface errors for complete command
+    if (_cliCommand === 'complete') {
+      process.stderr.write(`[work-state] complete failed: ${err?.message || err}\n`);
+      process.exit(1);
+    }
+    process.exit(0);
+  });
 }
 
 module.exports = {
