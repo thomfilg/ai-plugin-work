@@ -122,10 +122,13 @@ const { parseTicketInput } = require(path.join(__dirname, '..', 'lib', 'ticket-p
 // transitions. When the workflow loops back (e.g. check→implement), stale
 // artifacts are moved to runs/runN/ so DEFER re-evaluation sees fresh state.
 
+// Artifact patterns per step — used by archiveStepArtifacts() on backward transitions.
+// Note: complete has no entry here because complete->complete is a self-transition (same index),
+// which does not trigger archival. Recovery archival is handled by unstick-complete.js directly.
 const STEP_ARTIFACTS = {
-  [STEPS.check]:  [/^.*\.check\.md$/],
-  [STEPS.pr]:     [/^\.pr-update-sha$/, /^\.post-pr-update-sha$/],
-};
+  [STEPS.check]: [/^.*\.check\.md$/],
+  [STEPS.pr]:    [/^\.pr-update-sha$/, /^\.post-pr-update-sha$/],
+}; // complete excluded: self-transition (same index) never triggers archival; recovery uses unstick-complete.js
 
 function archiveStepArtifacts(tasksDir, stepsToArchive) {
   if (!fileExists(tasksDir)) return null;
@@ -666,9 +669,11 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg, suffix)
       `Run these commands in sequence:`,
       `1. node "${path.join(__dirname, 'work-state.js')}" complete ${safeName}`,
       `2. node "${guardPath}" finish ${safeBase}`,
+      `3. Archive enforcement artifacts: move *.check.md, .work-actions.json, tdd-phase.json, .step-evidence.json from ${tasksDir} to ${tasksDir}/archive/`,
       ``,
-      `Step 1 marks the workflow as complete (exits 0 on success).`,
+      `Step 1 marks the workflow as complete (exits 0 on success, exits 1 on failure — do NOT ignore failures).`,
       `Step 2 is an atomic teardown: reveals the session passphrase (unlocking the Stop hook) and removes the session file. Exits 0 when no session exists (guard disabled or already cleaned up). Exits 1 only if called without a ticket ID (programming error).`,
+      `Step 3 archives workflow artifacts so they are preserved but do not interfere with future runs.`,
     ].join('\n'),
   }); // complete — must run after all other steps
 

@@ -95,6 +95,7 @@ const WORKFLOWS = [
     softSteps: new Set([
       STEPS.ticket,                           // optional/metadata step
       STEPS.ready, STEPS.reports,             // operational steps — no code changes to enforce
+      STEPS.complete,                         // GH-106: terminal step — all gates already passed at ci/check/reports
     ]),
     // Tool can be a string or array — some runtimes emit Agent instead of Task.
     commandMap: [
@@ -276,26 +277,10 @@ const WORKFLOWS = [
         } catch { return false; }
       }},
       { step: STEPS.complete,         tool: ['Task', 'Agent'], field: 'description',   pattern: new RegExp(`^${STEPS.complete}\\b`, 'i') },
-      { step: STEPS.complete, verify: (ticketId) => {
-        // Complete is proven if: PR exists + CI passing + all reports approved
-        try {
-          const { execFileSync } = require('child_process');
-          const opts = { encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] };
-          // PR must exist and be open
-          const pr = JSON.parse(execFileSync('gh', ['pr', 'view', '--json', 'number,state'], opts).trim());
-          if (!pr.number || pr.state !== 'OPEN') return false;
-          // CI must be passing
-          const checks = JSON.parse(execFileSync('gh', ['pr', 'checks', '--json', 'state'], opts).trim());
-          if (checks.length === 0 || !checks.every(c => c.state === 'SUCCESS' || c.state === 'SKIPPED')) return false;
-          // All required reports must exist and pass
-          const dir = path.join(TASKS_BASE, ticketId);
-          const required = ['tests.check.md', 'code-review.check.md', 'completion.check.md'];
-          if (!required.every(f => fs.existsSync(path.join(dir, f)))) return false;
-          // At least one QA report
-          const qaFiles = fs.readdirSync(dir).filter(f => /^qa-.*\.check\.md$/.test(f));
-          return qaFiles.length > 0;
-        } catch { return false; }
-      }},
+      // GH-106: Removed strict verify gate for complete step. CI/PR checks are
+      // already enforced at the ci and check steps. The complete step is a soft
+      // step, so no verify function is needed. This prevents deadlocks when CI
+      // re-runs or PR state changes transiently after reaching the terminal step.
     ],
     transitionPattern: /work(?:-orchestrator|.workflow)\.js\s+transition\s+(\S+)\s+(\S+)/,
     exemptPatterns: [

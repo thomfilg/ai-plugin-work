@@ -163,7 +163,7 @@ describe('work-orchestrator.js', () => {
         assert.ok(Array.isArray(result.transitions[step]));
       }
       assert.ok(result.transitions['ticket'].includes('bootstrap'));
-      assert.deepEqual(result.transitions['complete'], []);
+      assert.deepEqual(result.transitions['complete'], ['complete']);
     });
 
     it('should include retry loop transitions', async () => {
@@ -399,16 +399,18 @@ describe('work-orchestrator.js', () => {
       assert.equal(result.steps.length, 14);
     });
 
-    it('should not allow self-transitions', async () => {
+    it('should not allow self-transitions (except complete)', async () => {
       const { result } = await runOrchestrator(['graph']);
+      const allowedSelfTransitions = ['complete'];
       for (const step of result.steps) {
+        if (allowedSelfTransitions.includes(step)) continue;
         assert.ok(!result.transitions[step].includes(step), `${step} has self-transition`);
       }
     });
 
-    it('should have terminal state at complete', async () => {
+    it('should have complete self-transition for retry on failure', async () => {
       const { result } = await runOrchestrator(['graph']);
-      assert.deepEqual(result.transitions['complete'], []);
+      assert.deepEqual(result.transitions['complete'], ['complete']);
     });
 
     it('should have exactly one entry point', async () => {
