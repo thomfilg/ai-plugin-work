@@ -155,8 +155,8 @@ const WORKFLOWS = [
             }
           } catch { /* no saved SHA — first run */ }
 
-          // 2. No saved SHA → check for commits with ticketId not on main
-          const log = execFileSync('git', ['log', '--oneline', `${baseBranch}..HEAD`, '--grep', ticketId], opts).trim();
+          // 2. No saved SHA → check for any commits on branch (not on main)
+          const log = execFileSync('git', ['log', '--oneline', `${baseBranch}..HEAD`], opts).trim();
           if (log) {
             // Verify diff vs main is non-empty
             const diff = execFileSync('git', ['diff', '--shortstat', baseBranch, 'HEAD'], opts).trim();
