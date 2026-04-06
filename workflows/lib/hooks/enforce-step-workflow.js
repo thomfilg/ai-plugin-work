@@ -821,9 +821,9 @@ function handlePreToolUse(hookData) {
             ? WORK_STEPS.find(s => state.stepStatus[s] === 'in_progress') || null
             : null;
           const requiredStep = gatedEntry.step;
-          // Block when a different step is active. When no step is in_progress
-          // (currentStep is null), gating is skipped — no active workflow means
-          // no constraint applies.
+          // Only block when a *different* step is currently active.
+          // null currentStep (no workflow running) deliberately skips gating —
+          // scripts are unrestricted outside of an active workflow.
           if (currentStep && currentStep !== requiredStep) {
             didBlock = true;
             process.stderr.write(
