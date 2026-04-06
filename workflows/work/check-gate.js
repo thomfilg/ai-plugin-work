@@ -85,7 +85,7 @@ const CHECK_GATE_RULES = [
       if (qaFiles.length === 0) return ['No QA reports found (need at least one qa-*.check.md)'];
       return qaFiles
         .filter(f => !/Status:\s*\*{0,2}\s*APPROVED/i.test(readFile(f)))
-        .map(f => `QA report ${path.basename(f)} does not have Status: APPROVED`);
+        .map(f => `QA report ${path.basename(f)} does not have Status: APPROVED`); // regex on line above handles bold markdown
     },
   },
   {
