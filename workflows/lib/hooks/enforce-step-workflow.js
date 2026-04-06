@@ -168,7 +168,9 @@ const WORKFLOWS = [
           // 3. Branch-name fallback: branch contains ticketId + committed changes exist (GH-191)
           try {
             const branch = execFileSync('git', ['branch', '--show-current'], opts).trim();
-            if (branch && branch.includes(ticketId)) {
+            const escapedTicketId = ticketId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const branchTicketPattern = new RegExp(`(?:^|[/-])${escapedTicketId}(?:$|[/-])`);
+            if (branch && branchTicketPattern.test(branch)) {
               const diff = execFileSync('git', ['diff', '--shortstat', baseBranch, 'HEAD'], opts).trim();
               if (diff) {
                 if (process.env.ENFORCE_HOOK_DEBUG) {

@@ -202,14 +202,40 @@ function createFileProtector(opts) {
    * @param {object} [hookData]
    * @returns {CheckResult}
    */
-  /** Test file path pattern — skip Vector 3 for test/mock files (GH-191) */
-  const TEST_PATH_PATTERN = /(?:__tests__|__mocks__)[\\/]|\.(?:test|spec)\.[cm]?[jt]sx?$/;
+  /**
+   * Check if a script path is a trusted test/mock file (GH-191).
+   * Only trusts scripts under __tests__/ or __mocks__/ directories,
+   * and verifies the path resolves within the current repo/worktree root.
+   * Suffix-based patterns (.test.js, .spec.js) are intentionally excluded
+   * as they could be exploited by placing malicious scripts with test suffixes.
+   *
+   * @param {string} scriptPath
+   * @returns {boolean}
+   */
+  function isTrustedTestScript(scriptPath) {
+    const resolved = path.resolve(scriptPath);
+    // Determine repo root via git or fall back to cwd
+    let repoRoot;
+    try {
+      repoRoot = require('child_process')
+        .execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' })
+        .trim();
+    } catch {
+      repoRoot = process.cwd();
+    }
+    // Script must resolve within the repo root
+    const rel = path.relative(repoRoot, resolved);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) return false;
+    // Check that __tests__ or __mocks__ appears as a path segment
+    const segments = rel.split(path.sep);
+    return segments.includes('__tests__') || segments.includes('__mocks__');
+  }
 
   function checkScriptBypass(cmd, toolInput, hookData) {
     const scripts = extractScriptPaths(cmd);
     for (const scriptPath of scripts) {
       // Skip Vector 3 for test/mock files — they are not attack vectors (GH-191)
-      if (TEST_PATH_PATTERN.test(scriptPath)) continue;
+      if (isTrustedTestScript(scriptPath)) continue;
 
       let content;
       try {

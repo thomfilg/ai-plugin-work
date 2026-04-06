@@ -227,71 +227,91 @@ describe('createFileProtector — script bypass', () => {
 
   // ── Test-path exclusion (GH-191 Fix 3) ──────────────────────────────────
 
-  it('allows test file in __tests__/ that writes to protected file (GH-191)', () => {
-    // Create a proper __tests__/ subdirectory to test the directory pattern (not just .test.js suffix)
-    const baseDir = path.join(os.tmpdir(), `test-dir-${process.pid}`);
-    const testDir = path.join(baseDir, '__tests__');
+  it('allows test file in __tests__/ within repo root that writes to protected file (GH-191)', () => {
+    const repoRoot = require('child_process').execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+    const testDir = path.join(repoRoot, '__tests__');
     fs.mkdirSync(testDir, { recursive: true });
     // Use a non-.test.js filename to specifically test the __tests__/ directory pattern
     const testScript = path.join(testDir, 'work-state-helper.js');
     fs.writeFileSync(testScript, 'const fs = require("fs"); fs.writeFileSync(".state.json", "{}");');
     try {
       const result = protector.check('Bash', { command: `node ${testScript}` });
-      assert.equal(result.blocked, false, 'Files in __tests__/ should skip Vector 3');
+      assert.equal(result.blocked, false, 'Files in __tests__/ within repo should skip Vector 3');
     } finally {
-      fs.rmSync(baseDir, { recursive: true, force: true });
+      fs.rmSync(testDir, { recursive: true, force: true });
     }
   });
 
-  it('allows test file in __mocks__/ that writes to protected file (GH-191)', () => {
-    const baseDir = path.join(os.tmpdir(), `mock-test-${process.pid}`);
-    const mockDir = path.join(baseDir, '__mocks__');
+  it('allows test file in __mocks__/ within repo root that writes to protected file (GH-191)', () => {
+    const repoRoot = require('child_process').execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+    const mockDir = path.join(repoRoot, '__mocks__');
     fs.mkdirSync(mockDir, { recursive: true });
     const mockScript = path.join(mockDir, 'state-helper.js');
     fs.writeFileSync(mockScript, 'const fs = require("fs"); fs.writeFileSync(".state.json", "{}");');
     try {
       const result = protector.check('Bash', { command: `node ${mockScript}` });
-      assert.equal(result.blocked, false, 'Mock files in __mocks__/ should skip Vector 3');
+      assert.equal(result.blocked, false, 'Mock files in __mocks__/ within repo should skip Vector 3');
+    } finally {
+      fs.rmSync(mockDir, { recursive: true, force: true });
+    }
+  });
+
+  it('allows script in __tests__/ directory that writes to protected file (GH-191)', () => {
+    // Use a __tests__/ directory inside the repo root so isTrustedTestScript accepts it
+    const repoRoot = require('child_process').execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+    const testDir = path.join(repoRoot, '__tests__');
+    fs.mkdirSync(testDir, { recursive: true });
+    const testScript = path.join(testDir, 'protect-state.test.js');
+    fs.writeFileSync(testScript, 'const fs = require("fs"); fs.writeFileSync(".state.json", "{}");');
+    try {
+      const result = protector.check('Bash', { command: `node ${testScript}` });
+      assert.equal(result.blocked, false, 'Scripts in __tests__/ should skip Vector 3');
+    } finally {
+      fs.rmSync(testDir, { recursive: true, force: true });
+    }
+  });
+
+  it('allows script in nested __tests__/ directory (GH-191)', () => {
+    const repoRoot = require('child_process').execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+    const testDir = path.join(repoRoot, 'src', '__tests__');
+    fs.mkdirSync(testDir, { recursive: true });
+    const testScript = path.join(testDir, 'helper.spec.mjs');
+    fs.writeFileSync(testScript, 'import fs from "fs"; fs.writeFileSync(".state.json", "{}");');
+    try {
+      const result = protector.check('Bash', { command: `node ${testScript}` });
+      assert.equal(result.blocked, false, 'Scripts in nested __tests__/ should skip Vector 3');
+    } finally {
+      fs.rmSync(path.join(repoRoot, 'src', '__tests__'), { recursive: true, force: true });
+    }
+  });
+
+  it('blocks script with test suffix outside __tests__/ or __mocks__/ (GH-191)', () => {
+    const evilScript = path.join(os.tmpdir(), `evil.test.js`);
+    fs.writeFileSync(evilScript, 'const fs = require("fs"); fs.writeFileSync(".state.json", "{}");');
+    try {
+      const result = protector.check('Bash', { command: `node ${evilScript}` });
+      assert.equal(result.blocked, true, 'Scripts with test suffix outside trusted dirs should be blocked');
+    } finally {
+      fs.unlinkSync(evilScript);
+    }
+  });
+
+  it('blocks script outside repo root even if in __tests__/ directory (GH-191)', () => {
+    const baseDir = path.join(os.tmpdir(), `outside-repo-${Date.now()}`);
+    const testDir = path.join(baseDir, '__tests__');
+    fs.mkdirSync(testDir, { recursive: true });
+    const evilScript = path.join(testDir, 'sneaky.test.js');
+    fs.writeFileSync(evilScript, 'const fs = require("fs"); fs.writeFileSync(".state.json", "{}");');
+    try {
+      const result = protector.check('Bash', { command: `node ${evilScript}` });
+      assert.equal(result.blocked, true, '__tests__/ outside repo root should still be blocked');
     } finally {
       fs.rmSync(baseDir, { recursive: true, force: true });
     }
   });
 
-  it('allows *.test.js file that writes to protected file (GH-191)', () => {
-    const testScript = path.join(os.tmpdir(), `protect-state.test.js`);
-    fs.writeFileSync(testScript, 'const fs = require("fs"); fs.writeFileSync(".state.json", "{}");');
-    try {
-      const result = protector.check('Bash', { command: `node ${testScript}` });
-      assert.equal(result.blocked, false, '*.test.js files should skip Vector 3');
-    } finally {
-      fs.unlinkSync(testScript);
-    }
-  });
-
-  it('allows *.spec.mjs file that writes to protected file (GH-191)', () => {
-    const testScript = path.join(os.tmpdir(), `protect-state.spec.mjs`);
-    fs.writeFileSync(testScript, 'import fs from "fs"; fs.writeFileSync(".state.json", "{}");');
-    try {
-      const result = protector.check('Bash', { command: `node ${testScript}` });
-      assert.equal(result.blocked, false, '*.spec.mjs files should skip Vector 3');
-    } finally {
-      fs.unlinkSync(testScript);
-    }
-  });
-
-  it('allows *.test.ts file that writes to protected file (GH-191)', () => {
-    const testScript = path.join(os.tmpdir(), `protect-state.test.ts`);
-    fs.writeFileSync(testScript, 'import fs from "fs"; fs.writeFileSync(".state.json", "{}");');
-    try {
-      const result = protector.check('Bash', { command: `node ${testScript}` });
-      assert.equal(result.blocked, false, '*.test.ts files should skip Vector 3');
-    } finally {
-      fs.unlinkSync(testScript);
-    }
-  });
-
   it('still blocks non-test script that writes to protected file (GH-191)', () => {
-    const evilScript = path.join(os.tmpdir(), `evil-test.js`);
+    const evilScript = path.join(os.tmpdir(), `evil-script.js`);
     fs.writeFileSync(evilScript, 'const fs = require("fs"); fs.writeFileSync(".state.json", "{}");');
     try {
       const result = protector.check('Bash', { command: `node ${evilScript}` });
