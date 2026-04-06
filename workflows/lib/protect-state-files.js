@@ -240,7 +240,17 @@ function createFileProtector(opts) {
     if (rel.startsWith('..') || path.isAbsolute(rel)) return false;
     // Check that __tests__ or __mocks__ appears as a path segment
     const segments = rel.split(path.sep);
-    return segments.includes('__tests__') || segments.includes('__mocks__');
+    if (!segments.includes('__tests__') && !segments.includes('__mocks__')) return false;
+    // Only trust git-tracked files — newly-created/untracked scripts are not exempt
+    try {
+      require('child_process').execFileSync(
+        'git', ['ls-files', '--error-unmatch', '--', rel],
+        { encoding: 'utf8', cwd: repoRoot, stdio: ['pipe', 'pipe', 'pipe'] }
+      );
+      return true;
+    } catch {
+      return false; // Not tracked by git — untrusted
+    }
   }
 
   function checkScriptBypass(cmd, toolInput, hookData) {

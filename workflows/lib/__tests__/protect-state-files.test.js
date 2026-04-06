@@ -227,63 +227,34 @@ describe('createFileProtector — script bypass', () => {
 
   // ── Test-path exclusion (GH-191 Fix 3) ──────────────────────────────────
 
-  it('allows test file in __tests__/ within repo root that writes to protected file (GH-191)', () => {
+  it('allows git-tracked test file in __tests__/ that references protected state files (GH-191)', () => {
+    // Use real git-tracked test files from the repo — this is the exact false-positive scenario
+    // These files contain writeFileSync + state file references in their source
+    const repoRoot = require('child_process').execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+    const testScript = path.join(repoRoot, 'workflows', 'work', '__tests__', 'work-state.test.js');
+    // This file is git-tracked and in __tests__/ — should be exempt from Vector 3
+    const result = protector.check('Bash', { command: `node ${testScript}` });
+    assert.equal(result.blocked, false, 'Git-tracked files in __tests__/ should skip Vector 3');
+  });
+
+  it('allows git-tracked test file in nested __tests__/ directory (GH-191)', () => {
+    const repoRoot = require('child_process').execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
+    const testScript = path.join(repoRoot, 'workflows', 'lib', '__tests__', 'protect-state-files.test.js');
+    const result = protector.check('Bash', { command: `node ${testScript}` });
+    assert.equal(result.blocked, false, 'Git-tracked test files in nested __tests__/ should skip Vector 3');
+  });
+
+  it('blocks untracked script in __tests__/ directory (GH-191)', () => {
+    // Create an untracked file in a temp __tests__/ dir — should be blocked (not git-tracked)
     const repoRoot = require('child_process').execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
     const tempBase = path.join(repoRoot, `__tests__-gh191-temp-${process.pid}`);
     const testDir = path.join(tempBase, '__tests__');
     fs.mkdirSync(testDir, { recursive: true });
-    // Use a non-.test.js filename to specifically test the __tests__/ directory pattern
-    const testScript = path.join(testDir, 'work-state-helper.js');
-    fs.writeFileSync(testScript, 'const fs = require("fs"); fs.writeFileSync(".state.json", "{}");');
+    const untrackedScript = path.join(testDir, 'malicious.js');
+    fs.writeFileSync(untrackedScript, 'const fs = require("fs"); fs.writeFileSync(".state.json", "{}");');
     try {
-      const result = protector.check('Bash', { command: `node ${testScript}` });
-      assert.equal(result.blocked, false, 'Files in __tests__/ within repo should skip Vector 3');
-    } finally {
-      fs.rmSync(tempBase, { recursive: true, force: true }); // pid-scoped temp dir, no repo pollution
-    }
-  });
-
-  it('allows test file in __mocks__/ within repo root that writes to protected file (GH-191)', () => {
-    const repoRoot = require('child_process').execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
-    const tempBase = path.join(repoRoot, `__mocks__-gh191-temp-${process.pid}`);
-    const mockDir = path.join(tempBase, '__mocks__');
-    fs.mkdirSync(mockDir, { recursive: true });
-    const mockScript = path.join(mockDir, 'state-helper.js');
-    fs.writeFileSync(mockScript, 'const fs = require("fs"); fs.writeFileSync(".state.json", "{}");');
-    try {
-      const result = protector.check('Bash', { command: `node ${mockScript}` });
-      assert.equal(result.blocked, false, 'Mock files in __mocks__/ within repo should skip Vector 3');
-    } finally {
-      fs.rmSync(tempBase, { recursive: true, force: true });
-    }
-  });
-
-  it('allows script in __tests__/ directory that writes to protected file (GH-191)', () => {
-    // Use a __tests__/ directory inside the repo root so isTrustedTestScript accepts it
-    const repoRoot = require('child_process').execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
-    const tempBase = path.join(repoRoot, `__tests__-gh191-temp2-${process.pid}`);
-    const testDir = path.join(tempBase, '__tests__');
-    fs.mkdirSync(testDir, { recursive: true });
-    const testScript = path.join(testDir, 'protect-state.test.js');
-    fs.writeFileSync(testScript, 'const fs = require("fs"); fs.writeFileSync(".state.json", "{}");');
-    try {
-      const result = protector.check('Bash', { command: `node ${testScript}` });
-      assert.equal(result.blocked, false, 'Scripts in __tests__/ should skip Vector 3');
-    } finally {
-      fs.rmSync(tempBase, { recursive: true, force: true });
-    }
-  });
-
-  it('allows script in nested __tests__/ directory (GH-191)', () => {
-    const repoRoot = require('child_process').execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
-    const tempBase = path.join(repoRoot, `__tests__-gh191-nested-${process.pid}`);
-    const testDir = path.join(tempBase, 'src', '__tests__');
-    fs.mkdirSync(testDir, { recursive: true });
-    const testScript = path.join(testDir, 'helper.spec.mjs');
-    fs.writeFileSync(testScript, 'import fs from "fs"; fs.writeFileSync(".state.json", "{}");');
-    try {
-      const result = protector.check('Bash', { command: `node ${testScript}` });
-      assert.equal(result.blocked, false, 'Scripts in nested __tests__/ should skip Vector 3');
+      const result = protector.check('Bash', { command: `node ${untrackedScript}` });
+      assert.equal(result.blocked, true, 'Untracked scripts in __tests__/ should still be blocked');
     } finally {
       fs.rmSync(tempBase, { recursive: true, force: true });
     }
