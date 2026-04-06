@@ -2780,4 +2780,131 @@ describe('enforce-step-workflow', () => {
       assert.ok(!stderr.includes('Report writer scripts'), 'should not use generic report writer message');
     });
   });
+
+  describe('commit verifier fallback (GH-144)', () => {
+    // These tests validate that the commit verifier accepts commits even when
+    // the commit message does NOT contain the ticket ID.
+    // Requires a real git repo to exercise the git log/diff commands.
+
+    const { execSync } = require('child_process');
+    const WORK_ORCH_PATH = path.join(__dirname, '..', '..', 'work', 'work.workflow.js');
+    let gitRepoDir;
+    let bareDir;
+    let tmpTasksBase;
+    const COMMIT_TICKET = `COMMITV-${process.pid}`;
+
+    function runHookInRepo(hookData, hookType = 'PreToolUse', env = {}) {
+      return new Promise((resolve, reject) => {
+        const proc = spawn('node', [HOOK_PATH], {
+          stdio: ['pipe', 'pipe', 'pipe'],
+          cwd: gitRepoDir,
+          env: {
+            ...process.env,
+            CLAUDE_HOOK_TYPE: hookType,
+            ENFORCE_HOOK_TICKET_ID: COMMIT_TICKET,
+            TASKS_BASE: tmpTasksBase,
+            ...env,
+          },
+        });
+        let stdout = '';
+        let stderr = '';
+        proc.stdout.on('data', (d) => { stdout += d.toString(); });
+        proc.stderr.on('data', (d) => { stderr += d.toString(); });
+        proc.on('close', (code) => { resolve({ code, stdout, stderr }); });
+        proc.on('error', reject);
+        proc.stdin.write(JSON.stringify(hookData));
+        proc.stdin.end();
+      });
+    }
+
+    function writeCommitWorkState(stepStatus, status = 'in_progress') {
+      const taskDir = path.join(tmpTasksBase, COMMIT_TICKET);
+      if (!fs.existsSync(taskDir)) fs.mkdirSync(taskDir, { recursive: true });
+      const state = {
+        ticketId: COMMIT_TICKET,
+        description: '',
+        currentStep: 1,
+        status,
+        stepStatus,
+        checkProgress: {},
+        errors: [],
+        startTime: new Date().toISOString(),
+        lastUpdate: new Date().toISOString(),
+      };
+      fs.writeFileSync(path.join(taskDir, '.work-state.json'), JSON.stringify(state, null, 2));
+    }
+
+    beforeEach(() => {
+      // Create a bare repo as "origin" with default branch "main"
+      bareDir = fs.mkdtempSync(path.join(os.tmpdir(), 'commit-verify-bare-'));
+      execSync('git init --bare --initial-branch=main', { cwd: bareDir, stdio: 'pipe' });
+
+      // Clone bare repo — default branch is explicitly "main" (set via --initial-branch above)
+      gitRepoDir = fs.mkdtempSync(path.join(os.tmpdir(), 'commit-verify-work-')); // branch guaranteed "main"
+      execSync(`git clone "${bareDir}" .`, { cwd: gitRepoDir, stdio: 'pipe' });
+      execSync('git config user.email "test@test.com"', { cwd: gitRepoDir, stdio: 'pipe' });
+      execSync('git config user.name "Test"', { cwd: gitRepoDir, stdio: 'pipe' });
+
+      // Create initial file, stage, and save on main, push to origin
+      fs.writeFileSync(path.join(gitRepoDir, 'README.md'), '# test');
+      execSync('git add README.md', { cwd: gitRepoDir, stdio: 'pipe' });
+      execSync('git commit -m "initial"', { cwd: gitRepoDir, stdio: 'pipe' });
+      execSync('git push origin main', { cwd: gitRepoDir, stdio: 'pipe' });
+
+      // Create feature branch with a file change that does NOT contain the ticket ID in message
+      execSync('git checkout -b feature-branch', { cwd: gitRepoDir, stdio: 'pipe' });
+      fs.writeFileSync(path.join(gitRepoDir, 'feature.js'), 'const x = 1;');
+      execSync('git add feature.js', { cwd: gitRepoDir, stdio: 'pipe' });
+      execSync('git commit -m "fix: improve reliability"', { cwd: gitRepoDir, stdio: 'pipe' });
+
+      // Create temp tasks base
+      tmpTasksBase = fs.mkdtempSync(path.join(os.tmpdir(), 'commit-verify-tasks-'));
+    });
+
+    afterEach(() => {
+      if (gitRepoDir) fs.rmSync(gitRepoDir, { recursive: true, force: true });
+      if (bareDir) fs.rmSync(bareDir, { recursive: true, force: true });
+      if (tmpTasksBase) fs.rmSync(tmpTasksBase, { recursive: true, force: true });
+    });
+
+    it('accepts transition to check when commits exist without ticket ID in message', async () => {
+      // State: commit step is in_progress, no .last-commit-sha exists,
+      // commit message does NOT contain the ticket ID.
+      // The verifier should detect commits on the branch even without ticket ID.
+      const stepStatus = {};
+      for (const s of WORK_STEPS) stepStatus[s] = 'pending';
+      stepStatus['commit'] = 'in_progress';
+      writeCommitWorkState(stepStatus);
+
+      // Transition from commit → check triggers the verify function
+      const transitionCmd = `node ${WORK_ORCH_PATH} transition ${COMMIT_TICKET} check`;
+      const { code, stderr } = await runHookInRepo({
+        tool_name: 'Bash',
+        tool_input: { command: transitionCmd },
+      });
+
+      // The hook should allow (exit 0) because the commit verifier
+      // detects commits on the branch even without ticket ID in message
+      assert.equal(code, 0, `Hook should allow transition when commits exist. stderr: ${stderr}`);
+    });
+
+    it('blocks transition to check when no commits exist on branch', async () => {
+      // Reset the feature branch to match main (no unique commits)
+      execSync('git reset --hard origin/main', { cwd: gitRepoDir, stdio: 'pipe' });
+
+      const stepStatus = {};
+      for (const s of WORK_STEPS) stepStatus[s] = 'pending';
+      stepStatus['commit'] = 'in_progress';
+      writeCommitWorkState(stepStatus);
+
+      const transitionCmd = `node ${WORK_ORCH_PATH} transition ${COMMIT_TICKET} check`;
+      const { code } = await runHookInRepo({
+        tool_name: 'Bash',
+        tool_input: { command: transitionCmd },
+      });
+
+      // Should block because there are no commits on the branch
+      assert.notEqual(code, 0, 'Hook should block transition when no commits exist');
+    });
+  });
 });

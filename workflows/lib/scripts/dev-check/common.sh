@@ -73,7 +73,12 @@ get_changed_files() {
   local ext_pattern="${1:-}"
   local files
 
-  files=$(git diff --name-only --diff-filter=d "origin/${BASE_BRANCH}...HEAD" 2>/dev/null || true)
+  files=$( {
+    git diff --name-only --diff-filter=d "origin/${BASE_BRANCH}...HEAD" 2>/dev/null || true
+    git diff --name-only --diff-filter=d --cached 2>/dev/null || true
+    git diff --name-only --diff-filter=d 2>/dev/null || true
+    git ls-files --others --exclude-standard 2>/dev/null || true
+  } | sort -u )
 
   # Filter by extension if pattern provided
   if [ -n "$ext_pattern" ]; then
