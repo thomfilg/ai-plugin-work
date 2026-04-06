@@ -17,8 +17,28 @@
 const fs = require('fs');
 const path = require('path');
 
-process.on('uncaughtException', () => process.exit(0));
-process.on('unhandledRejection', () => process.exit(0));
+// GH-106: CLI command is used by both the global handlers and main().catch()
+// Declared at module scope so both if(require.main) blocks can access it.
+const _cliCommand = require.main === module ? process.argv[2] : null;
+
+// Scope global handlers to CLI execution only so require()ing this module
+// from other scripts doesn't change their failure semantics.
+if (require.main === module) {
+  process.on('uncaughtException', (err) => {
+    if (_cliCommand === 'complete') {
+      process.stderr.write(JSON.stringify({ error: `uncaught exception: ${err?.message || err}` }) + '\n');
+      process.exit(1);
+    }
+    process.exit(0);
+  });
+  process.on('unhandledRejection', (err) => {
+    if (_cliCommand === 'complete') {
+      process.stderr.write(JSON.stringify({ error: `unhandled rejection: ${err?.message || err}` }) + '\n');
+      process.exit(1);
+    }
+    process.exit(0);
+  });
+}
 
 let config;
 try {
@@ -210,12 +230,19 @@ function addError(ticketId, step, error) {
 }
 
 /**
- * Mark work as complete
+ * Mark work as complete.
+ * GH-106: Made idempotent — if already completed, returns existing state.
+ * Returns { error: ... } when no state found (caller must check).
  */
 function completeWork(ticketId) {
   let state = loadState(ticketId);
   if (!state) {
     return { error: 'No state found' };
+  }
+
+  // Idempotent: already completed, return as-is
+  if (state.status === 'completed') {
+    return state;
   }
 
   state.status = 'completed';
@@ -523,6 +550,10 @@ async function main() {
 
     case 'complete':
       result = completeWork(ticketId);
+      if (result && result.error) {
+        console.error(JSON.stringify(result));
+        process.exit(1);
+      }
       console.log(JSON.stringify(result, null, 2));
       break;
 
@@ -553,7 +584,13 @@ async function main() {
 }
 
 if (require.main === module) {
-  main().catch(() => process.exit(0));
+  main().catch((err) => {
+    if (_cliCommand === 'complete') {
+      process.stderr.write(JSON.stringify({ error: `complete failed: ${err?.message || err}` }) + '\n');
+      process.exit(1);
+    }
+    process.exit(0);
+  }); // _cliCommand is module-scoped — see top of file
 }
 
 module.exports = {

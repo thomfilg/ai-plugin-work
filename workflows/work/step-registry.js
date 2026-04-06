@@ -103,6 +103,16 @@ const STEP_TRANSITIONS = createStatusTransitions(
   })),
 );
 
+// GH-106: Add complete -> complete self-transition for retry.
+// createStatusTransitions filters self-edges (target !== source), so we add it
+// after generation. This allows the terminal step to be retried on partial failure.
+if (!STEP_TRANSITIONS[STEPS.complete]) {
+  STEP_TRANSITIONS[STEPS.complete] = [];
+}
+if (!STEP_TRANSITIONS[STEPS.complete].includes(STEPS.complete)) {
+  STEP_TRANSITIONS[STEPS.complete].push(STEPS.complete);
+}
+
 // ALL_STEPS derived from STEP_ORDER to guarantee ordering consistency
 const ALL_STEPS = [...STEP_ORDER];
 
