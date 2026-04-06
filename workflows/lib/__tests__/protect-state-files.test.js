@@ -552,6 +552,9 @@ describe('checkScriptBypass — test file exclusion', () => {
     }
   });
 
+  // Note: Skipping Vector 3 (script content scanning) for test files does NOT
+  // skip Vectors 1-2 (direct state file path detection). Test files that directly
+  // target state files are still blocked by those earlier vectors.
   it('skips scanning files in __tests__/ directories', () => {
     const tmpDir = path.join(os.tmpdir(), `test-fp-dir-${process.pid}`, '__tests__');
     fs.mkdirSync(tmpDir, { recursive: true });

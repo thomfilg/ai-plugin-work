@@ -3442,6 +3442,8 @@ describe('enforce-step-workflow', () => {
     });
 
     it('allows node --test of workflow-state.test.js', async () => {
+      // The hook inspects the command string at PreToolUse time (before execution).
+      // It does not need the file to exist — it only checks the pattern.
       const { code } = await runHook({
         tool_name: 'Bash',
         tool_input: { command: 'node --test workflow-state.test.js' },
