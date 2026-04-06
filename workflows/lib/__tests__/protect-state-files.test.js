@@ -239,7 +239,7 @@ describe('createFileProtector — script bypass', () => {
       const result = protector.check('Bash', { command: `node ${testScript}` });
       assert.equal(result.blocked, false, 'Files in __tests__/ within repo should skip Vector 3');
     } finally {
-      fs.rmSync(tempBase, { recursive: true, force: true });
+      fs.rmSync(tempBase, { recursive: true, force: true }); // pid-scoped temp dir, no repo pollution
     }
   });
 

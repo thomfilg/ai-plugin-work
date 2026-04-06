@@ -2517,8 +2517,7 @@ describe('enforce-step-workflow', () => {
         'pr checks 42 --json': '[{"state":"SUCCESS","name":"build"}]',
         'pr view 42 --json reviewDecision': '{"reviewDecision":"APPROVED"}',
         'repos/{owner}/{repo}/pulls/42/comments': '0',
-      });
-      // Fake git ensures non-detached HEAD for --head resolution (CI-safe)
+      }); // fake git (writeFakeGit above) provides deterministic branch for --head (CI-safe)
       const { code } = await transitionFromFollowUp();
       assert.equal(code, 0, 'Should use --head flag for initial PR number resolution');
     });

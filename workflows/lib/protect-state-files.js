@@ -246,7 +246,8 @@ function createFileProtector(opts) {
   function checkScriptBypass(cmd, toolInput, hookData) {
     const scripts = extractScriptPaths(cmd);
     for (const scriptPath of scripts) {
-      // Skip Vector 3 for test/mock files — they are not attack vectors (GH-191)
+      // Skip Vector 3 for trusted in-repo test/mock files (GH-191).
+      // Scoped to __tests__/__mocks__ dirs within repo root; symlink-safe via realpathSync.
       if (isTrustedTestScript(scriptPath)) continue;
 
       let content;
