@@ -147,15 +147,7 @@ function createFileProtector(opts) {
       if (hasShellWrite || hasNodeWrite) {
         // Extract tokens, then normalize by stripping operator prefixes
         // Handles: ">>.state.json", "of=.state.json", ">.state.json", "x>>.state.json"
-        const rawTokens = cmd.match(/[^\s"'|;&()]+/g) || [];
-        const tokens = rawTokens.flatMap(t => {
-          // Split on redirect operators (keeping what's after them)
-          // "x>>.state.json" → ["x", ".state.json"]
-          // ">>.state.json" → [".state.json"]
-          const redirectSplit = t.split(/>{1,2}|</);
-          // Split on = for dd of=path patterns
-          return redirectSplit.flatMap(part => part.split('=')).filter(Boolean);
-        });
+        const tokens = extractTokens(cmd);
         for (const token of tokens) {
           const match = isProtected(token);
           if (match && !isExempt(toolName, toolInput, hookData)) {
@@ -251,6 +243,20 @@ function createFileProtector(opts) {
    * @param {object} [hookData]
    * @returns {CheckResult}
    */
+  /**
+   * Extract tokens from a string, splitting on whitespace, quotes, shell operators,
+   * redirect operators, and '=' (for dd of=path patterns).
+   * @param {string} str
+   * @returns {string[]}
+   */
+  function extractTokens(str) {
+    const rawTokens = str.match(/[^\s"'|;&()]+/g) || [];
+    return rawTokens.flatMap(t => {
+      const redirectSplit = t.split(/>{1,2}|</);
+      return redirectSplit.flatMap(part => part.split('=')).filter(Boolean);
+    });
+  }
+
   function checkInlineInterpreterBypass(cmd, toolInput, hookData) {
     const interpreterMatch = cmd.match(INLINE_INTERPRETER_PATTERN);
     if (!interpreterMatch) return { blocked: false, skipRemainingChecks: false };
@@ -260,15 +266,20 @@ function createFileProtector(opts) {
     // Remove /usr/bin/env prefix if present to get bare interpreter + flag
     const bareInterpreter = matchStr.replace(/^\/usr\/bin\/env\s+/, '');
 
-    // Check if any protected filename appears as a token in the full command
-    const rawTokens = cmd.match(/[^\s"'|;&()]+/g) || [];
-    const tokens = rawTokens.flatMap(t => {
-      const redirectSplit = t.split(/>{1,2}|</);
-      return redirectSplit.flatMap(part => part.split('=')).filter(Boolean);
-    });
+    // Extract the inline code portion (everything after -c/-e flag)
+    // This scopes filename and base64 checks to only the interpreter code,
+    // avoiding false positives when protected filenames or base64 appear
+    // in other command segments (e.g. `echo .state.json; python3 -c "..."`)
+    const flagIdx = cmd.indexOf(interpreterMatch[0]);
+    const afterFlag = cmd.slice(flagIdx);
+    const codeMatch = afterFlag.match(/\s-[ce]\s+(.*)/s);
+    const inlineCode = codeMatch ? codeMatch[1] : cmd; // fallback to full cmd
 
-    // Check for direct protected filename reference + write operation
-    const hasWriteOp = INLINE_INTERPRETER_WRITES.test(cmd);
+    // Check tokens from inline code only (not full cmd)
+    const tokens = extractTokens(inlineCode);
+
+    // Check for direct protected filename reference + write operation (scoped to inline code)
+    const hasWriteOp = INLINE_INTERPRETER_WRITES.test(inlineCode);
     for (const token of tokens) {
       const match = isProtected(token);
       if (match && hasWriteOp && !isExempt('Bash', toolInput, hookData)) {
@@ -286,7 +297,8 @@ function createFileProtector(opts) {
     // even without a visible protected filename, since the filename may be base64-encoded.
     // This is an intentional over-blocking tradeoff — see GH-107 spec "Open Questions" section.
     // False positives on non-protected file writes are accepted to prevent evasion.
-    if (BASE64_EVASION_PATTERN.test(cmd) && hasWriteOp) {
+    // Scoped to inline code only — base64 CLI usage outside the -c/-e code is not flagged.
+    if (BASE64_EVASION_PATTERN.test(inlineCode) && hasWriteOp) {
       if (!isExempt('Bash', toolInput, hookData)) {
         return {
           blocked: true,

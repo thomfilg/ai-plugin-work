@@ -368,6 +368,32 @@ describe('createFileProtector — inline interpreter bypass', () => {
     assert.equal(result.blocked, true);
     assert.equal(result.match, '.state.json');
   });
+
+  // ── Scoped inline code extraction (false positive prevention) ──────────
+
+  it('allows when protected filename appears outside inline code', () => {
+    // .state.json is in the echo segment, NOT in the python3 -c code
+    const result = protector.check('Bash', {
+      command: 'echo .state.json; python3 -c "open(\'x\',\'w\').write(\'test\')"',
+    });
+    assert.equal(result.blocked, false, 'protected filename outside inline code should not trigger block');
+  });
+
+  it('allows base64 outside inline python3 -c code', () => {
+    // base64 is a CLI command piped into python, not inside the -c code
+    const result = protector.check('Bash', {
+      command: 'base64 somefile | python3 -c "open(\'output.txt\',\'w\').write(\'x\')"',
+    });
+    assert.equal(result.blocked, false, 'base64 outside inline -c code should not trigger base64 evasion blocking');
+  });
+
+  it('still blocks base64 evasion inside inline python3 -c code', () => {
+    const result = protector.check('Bash', {
+      command: 'python3 -c "import base64; open(base64.b64decode(\'LnN0YXRlLmpzb24=\').decode(),\'w\').write(\'{}\')"',
+    });
+    assert.equal(result.blocked, true);
+    assert.ok(result.vector.includes('base64'));
+  });
 });
 
 // ─── createFileProtector — isExempt ─────────────────────────────────────────
