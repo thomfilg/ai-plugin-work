@@ -230,122 +230,99 @@ describe('GH-106: complete step deadlock fix', () => {
     });
   });
 
-  // ─── Test 8: unstick-complete.js helper unit tests ───────────────────────
+  // ─── Tests 8-10: unstick-complete.js helper unit tests ─────────────────────
+  //
+  // Load the module once with env vars set so config resolves.
+  // If the module cannot load, the setup test FAILS (not silently skipped).
 
-  describe('8. unstick-complete.js: sanitizeTicketId', () => {
-    // Load with TASKS_BASE pointing to our temp dir
-    let sanitizeTicketId;
+  describe('8-10. unstick-complete.js helpers', () => {
+    let sanitizeTicketId, isStuckInComplete, archiveArtifacts;
     const origEnv = { ...process.env };
 
-    it('setup — load module with TASKS_BASE', () => {
+    it('setup — require unstick-complete.js', () => {
       process.env.TASKS_BASE = TEMP_TASKS_BASE;
       process.env.WORKTREES_BASE = TEMP_TASKS_BASE;
       process.env.REPO_NAME = 'test';
-      // Clear module cache to pick up env
       delete require.cache[require.resolve('../unstick-complete')];
-      try {
-        ({ sanitizeTicketId } = require('../unstick-complete'));
-      } catch {
-        // Config may not resolve — skip gracefully
-      }
+      // Must not throw — if it does, all subsequent tests in this block fail visibly
+      const mod = require('../unstick-complete');
+      sanitizeTicketId = mod.sanitizeTicketId;
+      isStuckInComplete = mod.isStuckInComplete;
+      archiveArtifacts = mod.archiveArtifacts;
+      assert.ok(sanitizeTicketId, 'sanitizeTicketId must be exported');
+      assert.ok(isStuckInComplete, 'isStuckInComplete must be exported');
+      assert.ok(archiveArtifacts, 'archiveArtifacts must be exported');
     });
 
-    it('accepts valid ticket IDs', () => {
-      if (!sanitizeTicketId) return; // skip if module failed to load
+    // ─── sanitizeTicketId ──────────────────────────────────────────────────
+
+    it('sanitize: accepts valid ticket IDs', () => {
       assert.equal(sanitizeTicketId('GH-106'), 'GH-106');
       assert.equal(sanitizeTicketId('PROJ-123'), 'PROJ-123');
       assert.equal(sanitizeTicketId('ticket_1'), 'ticket_1');
     });
 
-    it('accepts suffix tickets', () => {
-      if (!sanitizeTicketId) return;
+    it('sanitize: accepts suffix tickets', () => {
       assert.equal(sanitizeTicketId('GH-145/phase1'), 'GH-145/phase1');
     });
 
-    it('rejects path traversal', () => {
-      if (!sanitizeTicketId) return;
+    it('sanitize: rejects path traversal', () => {
       assert.equal(sanitizeTicketId('../etc'), null);
       assert.equal(sanitizeTicketId('..'), null);
       assert.equal(sanitizeTicketId('foo/../../bar'), null);
     });
 
-    it('rejects backslashes', () => {
-      if (!sanitizeTicketId) return;
+    it('sanitize: rejects backslashes', () => {
       assert.equal(sanitizeTicketId('foo\\bar'), null);
     });
 
-    it('rejects empty and non-string', () => {
-      if (!sanitizeTicketId) return;
+    it('sanitize: rejects empty and non-string', () => {
       assert.equal(sanitizeTicketId(''), null);
       assert.equal(sanitizeTicketId(null), null);
       assert.equal(sanitizeTicketId(undefined), null);
       assert.equal(sanitizeTicketId(123), null);
     });
 
-    it('rejects too many segments', () => {
-      if (!sanitizeTicketId) return;
+    it('sanitize: rejects too many segments', () => {
       assert.equal(sanitizeTicketId('a/b/c'), null);
     });
 
-    after(() => {
-      Object.assign(process.env, origEnv);
-    });
-  });
+    // ─── isStuckInComplete ─────────────────────────────────────────────────
 
-  describe('9. unstick-complete.js: isStuckInComplete', () => {
-    let isStuckInComplete;
-    try {
-      ({ isStuckInComplete } = require('../unstick-complete'));
-    } catch { /* module may not load without config */ }
-
-    it('returns false for null/undefined state', () => {
-      if (!isStuckInComplete) return;
+    it('stuck: returns false for null/undefined state', () => {
       assert.equal(isStuckInComplete(null), false);
       assert.equal(isStuckInComplete(undefined), false);
     });
 
-    it('returns false for completed tickets', () => {
-      if (!isStuckInComplete) return;
+    it('stuck: returns false for completed tickets', () => {
       assert.equal(isStuckInComplete({ status: 'completed', stepStatus: { complete: 'completed' } }), false);
     });
 
-    it('returns true when complete step is in_progress', () => {
-      if (!isStuckInComplete) return;
+    it('stuck: returns true when complete step is in_progress', () => {
       assert.equal(isStuckInComplete({ status: 'in_progress', stepStatus: { complete: 'in_progress' } }), true);
     });
 
-    it('returns true when all other steps completed but complete is pending', () => {
-      if (!isStuckInComplete) return;
-      const state = {
+    it('stuck: returns true when all other steps completed but complete is pending', () => {
+      assert.equal(isStuckInComplete({
         status: 'in_progress',
         stepStatus: { ticket: 'completed', implement: 'completed', check: 'completed', complete: 'pending' },
-      };
-      assert.equal(isStuckInComplete(state), true);
+      }), true);
     });
 
-    it('returns false when other steps are still in progress', () => {
-      if (!isStuckInComplete) return;
-      const state = {
+    it('stuck: returns false when other steps are still in progress', () => {
+      assert.equal(isStuckInComplete({
         status: 'in_progress',
         stepStatus: { ticket: 'completed', implement: 'in_progress', complete: 'pending' },
-      };
-      assert.equal(isStuckInComplete(state), false);
+      }), false);
     });
-  });
 
-  describe('10. unstick-complete.js: archiveArtifacts', () => {
-    let archiveArtifacts;
-    try {
-      ({ archiveArtifacts } = require('../unstick-complete'));
-    } catch { /* module may not load */ }
+    // ─── archiveArtifacts ──────────────────────────────────────────────────
 
-    it('returns empty array for invalid ticket', () => {
-      if (!archiveArtifacts) return;
+    it('archive: returns empty array for invalid ticket', () => {
       assert.deepEqual(archiveArtifacts('../invalid'), []);
     });
 
-    it('archives matching files to archive/ subdir', () => {
-      if (!archiveArtifacts) return;
+    it('archive: moves matching files to archive/ subdir', () => {
       const ticket = 'ARCHIVE-TEST-' + Date.now();
       const dir = path.join(TEMP_TASKS_BASE, ticket);
       fs.mkdirSync(dir, { recursive: true });
@@ -353,18 +330,14 @@ describe('GH-106: complete step deadlock fix', () => {
       fs.writeFileSync(path.join(dir, 'keep-me.txt'), 'keep');
 
       const archived = archiveArtifacts(ticket);
-      // Module may use a different TASKS_BASE — skip if sanitization rejected the ticket
-      if (archived.length === 0) return;
-      assert.ok(archived.includes('tests.check.md'));
-      assert.ok(!archived.includes('keep-me.txt'));
+      assert.ok(archived.includes('tests.check.md'), 'tests.check.md should be archived');
+      assert.ok(!archived.includes('keep-me.txt'), 'keep-me.txt should not be archived');
       assert.ok(fs.existsSync(path.join(dir, 'archive', 'tests.check.md')));
       assert.ok(fs.existsSync(path.join(dir, 'keep-me.txt')));
-
       fs.rmSync(dir, { recursive: true, force: true });
     });
 
-    it('handles duplicate archive with timestamp suffix', () => {
-      if (!archiveArtifacts) return;
+    it('archive: handles duplicate with timestamp suffix', () => {
       const ticket = 'ARCHIVE-DUP-' + Date.now();
       const dir = path.join(TEMP_TASKS_BASE, ticket);
       const archiveDir = path.join(dir, 'archive');
@@ -373,14 +346,13 @@ describe('GH-106: complete step deadlock fix', () => {
       fs.writeFileSync(path.join(dir, 'tests.check.md'), 'new');
 
       const archived = archiveArtifacts(ticket);
-      // If sanitizeTicketId rejects the dynamic name, skip assertions
-      if (archived.length === 0) return;
       assert.ok(archived.includes('tests.check.md'));
       assert.equal(fs.readFileSync(path.join(archiveDir, 'tests.check.md'), 'utf-8'), 'old');
       const files = fs.readdirSync(archiveDir);
-      assert.ok(files.length >= 2, 'Should have at least 2 files (original + timestamped)');
-
+      assert.ok(files.length >= 2, 'Should have original + timestamped file');
       fs.rmSync(dir, { recursive: true, force: true });
     });
+
+    after(() => { Object.assign(process.env, origEnv); });
   });
 });

@@ -43,6 +43,7 @@ const SESSION_GUARD_PATH = require('path').resolve(__dirname, '..', 'lib', 'hook
  */
 function sanitizeTicketId(ticketId) {
   if (!ticketId || typeof ticketId !== 'string') return null;
+  if (!TASKS_BASE || typeof TASKS_BASE !== 'string') return null;
   if (ticketId.includes('\\')) return null;
   const parts = ticketId.split('/');
   if (parts.length < 1 || parts.length > 2) return null;
@@ -50,7 +51,7 @@ function sanitizeTicketId(ticketId) {
   const baseResolved = path.resolve(TASKS_BASE);
   const resolved = path.resolve(TASKS_BASE, ...parts);
   if (resolved !== baseResolved && !resolved.startsWith(baseResolved + path.sep)) return null;
-  return ticketId;
+  return ticketId; // validated: alphanumeric with optional single /suffix, resolves within TASKS_BASE
 }
 
 /**
