@@ -119,10 +119,8 @@ function finishSessionGuard(ticketId) {
   const baseId = safe.split('/')[0];
   try {
     execFileSync('node', [SESSION_GUARD_PATH, 'finish', baseId], { encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] });
-    return { ok: true };
-  } catch (err) {
-    return { ok: false, error: err.message };
-  }
+    return { ok: true }; // baseId extracted from safe (split('/')[0]) to match session-guard init/finish pairing
+  } catch (err) { return { ok: false, error: err.message }; }
 }
 
 /**
