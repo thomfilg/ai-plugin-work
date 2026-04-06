@@ -464,6 +464,30 @@ const stateFileProtector = createFileProtector({
     `State files must only be modified through the orchestrator/workflow-engine scripts.\n`,
 });
 
+// Protected follow-up PR state files — only the follow-up-pr agent during follow_up step
+const followUpStateProtector = createFileProtector({
+  isProtected: (filePath) => {
+    const bn = path.basename(filePath);
+    return /^follow-up-pr-.+\.json$/.test(bn) ? bn : null;
+  },
+  isExempt: (_toolName, _toolInput, hookData) => {
+    try {
+      const ticketId = getTicketId();
+      if (!ticketId) return true; // fail-open: no ticket context means not in a work workflow
+      const state = loadStateFile(ticketId, '.work-state.json');
+      if (!state?.stepStatus) return true; // fail-open: no active work workflow
+      const stepInProgress = state.stepStatus[STEPS.follow_up] === 'in_progress';
+      if (!stepInProgress) return false;
+      return isRunningInAgent(hookData?.transcript_path, ['follow-up-pr'], hookData); // Note: review-accountability.json is protected separately by Rule 4 (ARTIFACT_RULES)
+    } catch {
+      return true; // fail-open
+    }
+  },
+  formatMessage: (match, vector) =>
+    `BLOCKED: Direct ${vector} to ${match} is not allowed.\n` +
+    `Follow-up PR state files can only be written by the follow-up-pr agent during the follow_up step.\n`,
+});
+
 // (Patch 7) Validate workflow config at startup
 function validateWorkflow(wf) {
   const stepSet = new Set(wf.steps);
@@ -738,6 +762,14 @@ function handlePreToolUse(hookData) {
         }
       }
     }
+  }
+
+  // Rule 3c: Block direct writes to follow-up PR state files
+  const rule3c = followUpStateProtector.check(toolName, toolInput, hookData);
+  if (rule3c.blocked) {
+    didBlock = true;
+    process.stderr.write(rule3c.message);
+    process.exit(2);
   }
 
   // Rule 4: Block writes to step-gated artifact files outside their owning step/agent

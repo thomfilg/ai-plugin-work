@@ -1378,6 +1378,158 @@ describe('enforce-step-workflow', () => {
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // Rule 3c: Block follow-up PR state file writes
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe('Rule 3c: Block follow-up PR state file writes', () => {
+
+    it('blocks Write to follow-up-pr state file when not in follow_up step', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Write', tool_input: { file_path: '/tmp/.claude/follow-up-pr-my-repo-42.json', content: '{}' } },
+        'PreToolUse',
+      );
+      assert.equal(code, 2, 'Should block Write to follow-up-pr state file');
+      assert.ok(stderr.includes('BLOCKED'), 'stderr should contain BLOCKED');
+      assert.ok(stderr.includes('follow-up-pr-my-repo-42.json'), 'stderr should mention the file');
+    }); // fail-open test for missing .work-state.json is covered below
+
+    it('blocks Edit to follow-up-pr state file when not in follow_up step', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Edit', tool_input: { file_path: '/tmp/.claude/follow-up-pr-my-repo-42.json', old_string: 'a', new_string: 'b' } },
+        'PreToolUse',
+      );
+      assert.equal(code, 2, 'Should block Edit to follow-up-pr state file');
+      assert.ok(stderr.includes('BLOCKED'), 'stderr should contain BLOCKED');
+    });
+
+    it('blocks MultiEdit to follow-up-pr state file', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'MultiEdit', tool_input: { file_path: '/tmp/.claude/follow-up-pr-my-repo-42.json', edits: [] } },
+        'PreToolUse',
+      );
+      assert.equal(code, 2, 'Should block MultiEdit to follow-up-pr state file');
+      assert.ok(stderr.includes('BLOCKED'), 'stderr should contain BLOCKED');
+    });
+
+    it('blocks Bash redirect to follow-up-pr state file', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: 'echo \'{}\' > /tmp/.claude/follow-up-pr-my-repo-42.json' } },
+        'PreToolUse',
+      );
+      assert.equal(code, 2, 'Should block Bash redirect to follow-up-pr state file');
+      assert.ok(stderr.includes('BLOCKED'), 'stderr should contain BLOCKED');
+    });
+
+    it('allows Write from follow-up-pr agent during follow_up step', async () => {
+      writeWorkState(makeStepStatus('follow_up', WORK_STEPS));
+
+      const { code } = await runHook(
+        { tool_name: 'Write', tool_input: { file_path: '/tmp/.claude/follow-up-pr-my-repo-42.json', content: '{}' } },
+        'PreToolUse',
+        { CLAUDE_CURRENT_AGENT: 'follow-up-pr' },
+      );
+      assert.equal(code, 0, 'Should allow Write from follow-up-pr agent during follow_up step');
+    });
+
+    it('allows Write from follow-up-pr agent during follow_up step (hookData path)', async () => {
+      writeWorkState(makeStepStatus('follow_up', WORK_STEPS));
+
+      const { code } = await runHook(
+        {
+          tool_name: 'Write',
+          tool_input: { file_path: '/tmp/.claude/follow-up-pr-my-repo-42.json', content: '{}', subagent_type: 'follow-up-pr' },
+          transcript_path: '/tmp/fake-transcript.txt',
+        },
+        'PreToolUse',
+      );
+      assert.equal(code, 0, 'Should allow Write from follow-up-pr agent via hookData during follow_up step');
+    });
+
+    it('allows Bash from follow-up-pr agent during follow_up step', async () => {
+      writeWorkState(makeStepStatus('follow_up', WORK_STEPS));
+
+      const { code } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: 'echo \'{}\' > /tmp/.claude/follow-up-pr-my-repo-42.json' } },
+        'PreToolUse',
+        { CLAUDE_CURRENT_AGENT: 'follow-up-pr' },
+      );
+      assert.equal(code, 0, 'Should allow Bash from follow-up-pr agent during follow_up step');
+    });
+
+    it('blocks when agent is follow-up-pr but step is NOT follow_up', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Write', tool_input: { file_path: '/tmp/.claude/follow-up-pr-my-repo-42.json', content: '{}' } },
+        'PreToolUse',
+        { CLAUDE_CURRENT_AGENT: 'follow-up-pr' },
+      );
+      assert.equal(code, 2, 'Should block even from follow-up-pr agent if not in follow_up step');
+      assert.ok(stderr.includes('BLOCKED'), 'stderr should contain BLOCKED');
+    });
+
+    it('allows Write when no .work-state.json exists (fail-open)', async () => {
+      // Do NOT call writeWorkState — simulates no active work workflow
+      const { code } = await runHook(
+        { tool_name: 'Write', tool_input: { file_path: '/tmp/.claude/follow-up-pr-my-repo-42.json', content: '{}' } },
+        'PreToolUse',
+      );
+      assert.equal(code, 0, 'Should allow when no work state exists (fail-open)');
+    });
+
+    it('allows Write to non-matching files', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code } = await runHook(
+        { tool_name: 'Write', tool_input: { file_path: '/tmp/.claude/other-file.json', content: '{}' } },
+        'PreToolUse',
+      );
+      assert.equal(code, 0, 'Should allow Write to non-matching files');
+    });
+
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Rule 4 verification: review-accountability.json Bash protection
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe('Rule 4 verification: review-accountability.json Bash protection', () => {
+    // These tests verify that the existing artifactProtector (Rule 4) correctly
+    // blocks Bash writes to review-accountability.json. The file is protected
+    // via ARTIFACT_RULES, not followUpStateProtector (Rule 3c).
+
+    it('blocks Bash redirect to review-accountability.json from non-follow-up-pr agent', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `echo '{"userApproval":true}' > ${TASKS_DIR}/review-accountability.json` } },
+        'PreToolUse',
+      );
+      assert.equal(code, 2, 'Should block Bash redirect to review-accountability.json outside follow_up step');
+      assert.ok(stderr.includes('BLOCKED'), 'stderr should contain BLOCKED');
+    });
+
+    it('allows Bash to review-accountability.json from follow-up-pr agent during follow_up step', async () => {
+      writeWorkState(makeStepStatus('follow_up', WORK_STEPS));
+
+      const { code } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `echo '{"userApproval":true}' > ${TASKS_DIR}/review-accountability.json` } },
+        'PreToolUse',
+        { CLAUDE_CURRENT_AGENT: 'follow-up-pr' },
+      );
+      assert.equal(code, 0, 'Should allow Bash to review-accountability.json from follow-up-pr agent during follow_up step');
+    }); // Verified: these tests are under Rule 4, not Rule 3c (moved per copilot review)
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // /check workflow interaction (issue #67)
   // ═══════════════════════════════════════════════════════════════════════════
 
