@@ -115,9 +115,11 @@ function archiveArtifacts(ticketId) {
 function finishSessionGuard(ticketId) {
   const safe = sanitizeTicketId(ticketId);
   if (!safe) return { ok: false, error: 'Invalid ticket ID' };
+  // session-guard uses base ticket ID (no suffix) to match init/finish pairing
+  const baseId = safe.split('/')[0];
   try {
-    execFileSync('node', [SESSION_GUARD_PATH, 'finish', safe], { encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] });
-    return { ok: true }; // ticketId is sanitized at function entry
+    execFileSync('node', [SESSION_GUARD_PATH, 'finish', baseId], { encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] });
+    return { ok: true };
   } catch (err) {
     return { ok: false, error: err.message };
   }

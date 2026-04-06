@@ -17,21 +17,23 @@
 const fs = require('fs');
 const path = require('path');
 
-// GH-106: Scope global handlers to CLI execution only so require()ing this module
-// from other scripts (work.workflow.js, unstick-complete.js) doesn't change their
-// failure semantics.
+// GH-106: CLI command is used by both the global handlers and main().catch()
+// Declared at module scope so both if(require.main) blocks can access it.
+const _cliCommand = require.main === module ? process.argv[2] : null;
+
+// Scope global handlers to CLI execution only so require()ing this module
+// from other scripts doesn't change their failure semantics.
 if (require.main === module) {
-  const _cliCommand = process.argv[2];
   process.on('uncaughtException', (err) => {
     if (_cliCommand === 'complete') {
-      process.stderr.write(`[work-state] uncaught exception in complete: ${err?.message || err}\n`);
+      process.stderr.write(JSON.stringify({ error: `uncaught exception: ${err?.message || err}` }) + '\n');
       process.exit(1);
     }
     process.exit(0);
   });
   process.on('unhandledRejection', (err) => {
     if (_cliCommand === 'complete') {
-      process.stderr.write(`[work-state] unhandled rejection in complete: ${err?.message || err}\n`);
+      process.stderr.write(JSON.stringify({ error: `unhandled rejection: ${err?.message || err}` }) + '\n');
       process.exit(1);
     }
     process.exit(0);
@@ -583,9 +585,8 @@ async function main() {
 
 if (require.main === module) {
   main().catch((err) => {
-    // GH-106: Surface errors for complete command
     if (_cliCommand === 'complete') {
-      process.stderr.write(`[work-state] complete failed: ${err?.message || err}\n`);
+      process.stderr.write(JSON.stringify({ error: `complete failed: ${err?.message || err}` }) + '\n');
       process.exit(1);
     }
     process.exit(0);
