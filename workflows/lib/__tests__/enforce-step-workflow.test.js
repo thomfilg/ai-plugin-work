@@ -2994,6 +2994,35 @@ describe('enforce-step-workflow', () => {
     });
   });
 
+  describe('commit -> check transition (#95)', () => {
+    const ORCHESTRATOR_PATH = path.join(__dirname, '..', '..', 'work', 'work.workflow.js');
+
+    it('allows forward transition from commit to check with evidence (new commits exist)', async () => {
+      writeWorkState(makeStepStatus('commit', WORK_STEPS));
+      writeEvidence({
+        'commit': { executed: true, tool: 'Task', timestamp: new Date().toISOString() },
+      });
+
+      const { code } = await runHook({
+        tool_name: 'Bash',
+        tool_input: { command: `node ${ORCHESTRATOR_PATH} transition ${TEST_TICKET} check` },
+      });
+      assert.equal(code, 0, 'Should allow forward transition from commit to check with evidence');
+    });
+
+    it('blocks forward transition from commit to check without evidence (no new commits)', async () => {
+      writeWorkState(makeStepStatus('commit', WORK_STEPS));
+      // No evidence — commit verify checks for new commits with ticket ID
+
+      const { code, stderr } = await runHook({
+        tool_name: 'Bash',
+        tool_input: { command: `node ${ORCHESTRATOR_PATH} transition ${TEST_TICKET} check` },
+      });
+      assert.equal(code, 2, 'Should block forward transition without evidence');
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+  });
+
   describe('check -> pr and check -> implement (#95)', () => {
     const ORCHESTRATOR_PATH = path.join(__dirname, '..', '..', 'work', 'work.workflow.js');
 
@@ -3137,26 +3166,6 @@ describe('enforce-step-workflow', () => {
 
   describe('follow_up -> ci and follow_up -> implement (#103)', () => {
     const ORCHESTRATOR_PATH = path.join(__dirname, '..', '..', 'work', 'work.workflow.js');
-    const FAKE_GH_DIR = path.join(os.tmpdir(), `fake-gh-fu-${process.pid}`);
-    const FAKE_GH_PATH = path.join(FAKE_GH_DIR, 'gh');
-
-    function writeFakeGhForFollowUp(responseMap) {
-      if (!fs.existsSync(FAKE_GH_DIR)) fs.mkdirSync(FAKE_GH_DIR, { recursive: true });
-      let script = '#!/bin/bash\nARGS="$*"\n';
-      for (const [pattern, response] of Object.entries(responseMap)) {
-        if (response === 'EXIT1') {
-          script += `if echo "$ARGS" | grep -q "${pattern}"; then exit 1; fi\n`;
-        } else {
-          script += `if echo "$ARGS" | grep -q "${pattern}"; then echo '${response.replace(/'/g, "'\\''")}'; exit 0; fi\n`;
-        }
-      }
-      script += 'exit 1\n';
-      fs.writeFileSync(FAKE_GH_PATH, script, { mode: 0o755 });
-    }
-
-    afterEach(() => {
-      try { fs.rmSync(FAKE_GH_DIR, { recursive: true, force: true }); } catch {}
-    });
 
     it('allows backward transition from follow_up to implement (retry loop)', async () => {
       writeWorkState(makeStepStatus('follow_up', WORK_STEPS));
@@ -3262,9 +3271,9 @@ describe('enforce-step-workflow', () => {
         tool_name: 'Bash',
         tool_input: { command: `node ${ORCHESTRATOR_PATH} transition ${TEST_TICKET} reports` },
       });
-      // verify function will return true if no tmux session for this ticket exists
-      // This is effectively an integration test — we accept the verify result
-      assert.ok(code === 0 || code === 2, 'Should either pass via verify or block without evidence');
+      // The cleanup verify function checks for tmux session absence.
+      // In test environment, no tmux session exists for this ticket, so verify passes.
+      assert.equal(code, 0, 'Should pass via verify — no tmux session exists in test environment');
     });
   });
 
@@ -3370,18 +3379,10 @@ describe('enforce-step-workflow', () => {
         tool_name: 'Bash',
         tool_input: { command: `node ${ORCHESTRATOR_PATH} transition ${TEST_TICKET} pr` },
       });
-      // commit -> pr is not a valid transition (must go commit -> check -> pr)
-      // Patch 10: target is a real step but not in STEP_TRANSITIONS[commit]
-      // The hook skips this transition (continue) so code=0 would mean it passed through
-      // Wait - Patch 10 says: if target not in wf.steps, continue (skip)
-      // But pr IS in wf.steps. The issue is the transition is parsed, target is valid,
-      // but the transition itself isn't in the transition graph.
       // The hook's Rule 2 only checks if evidence exists for currentStep, not if the
-      // target is reachable. So if commit has evidence, the transition is allowed.
-      // This means anti-skip is NOT enforced at the hook level for forward transitions
-      // with evidence — the orchestrator enforces it instead.
-      // Let's test what actually happens:
-      assert.ok(code === 0 || code === 2, 'Transition from commit to pr');
+      // target is reachable. With commit evidence, the hook allows the transition.
+      // Anti-skip enforcement is the orchestrator's responsibility, not the hook's.
+      assert.equal(code, 0, 'Hook allows transition with evidence — anti-skip is orchestrator concern');
     });
 
     it('blocks transition from implement to pr (skipping commit and check)', async () => {
@@ -3395,8 +3396,9 @@ describe('enforce-step-workflow', () => {
         tool_name: 'Bash',
         tool_input: { command: `node ${ORCHESTRATOR_PATH} transition ${TEST_TICKET} pr` },
       });
-      // Same as above - the hook checks evidence, not transition graph validity
-      assert.ok(code === 0 || code === 2, 'Transition from implement to pr');
+      // The hook checks evidence, not transition graph validity.
+      // With TDD evidence, the hook allows the transition through.
+      assert.equal(code, 0, 'Hook allows transition with evidence — anti-skip is orchestrator concern');
     });
 
     it('blocks transition from implement to ci (skipping multiple steps)', async () => {
@@ -3409,7 +3411,8 @@ describe('enforce-step-workflow', () => {
         tool_name: 'Bash',
         tool_input: { command: `node ${ORCHESTRATOR_PATH} transition ${TEST_TICKET} ci` },
       });
-      assert.ok(code === 0 || code === 2, 'Transition from implement to ci');
+      // With TDD evidence, the hook allows the transition through.
+      assert.equal(code, 0, 'Hook allows transition with evidence — anti-skip is orchestrator concern');
     });
 
     it('blocks transition from bootstrap to implement (skipping brief and spec)', async () => {
@@ -3422,7 +3425,8 @@ describe('enforce-step-workflow', () => {
         tool_name: 'Bash',
         tool_input: { command: `node ${ORCHESTRATOR_PATH} transition ${TEST_TICKET} implement` },
       });
-      assert.ok(code === 0 || code === 2, 'Transition from bootstrap to implement');
+      // With bootstrap evidence, the hook allows the transition through.
+      assert.equal(code, 0, 'Hook allows transition with evidence — anti-skip is orchestrator concern');
     });
   });
 
