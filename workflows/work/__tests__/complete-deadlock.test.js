@@ -171,19 +171,18 @@ describe('GH-106: complete step deadlock fix', () => {
     });
   });
 
-  // ─── Test 5: STEP_ARTIFACTS includes complete key ─────────────────────────
+  // ─── Test 5: STEP_ARTIFACTS does NOT include complete (self-transition doesn't trigger archival) ──
 
-  describe('5. work.workflow.js: STEP_ARTIFACTS includes complete', () => {
-    it('STEP_ARTIFACTS has a complete entry for archival', () => {
-      // Read the workflow file source to verify STEP_ARTIFACTS includes complete
+  describe('5. work.workflow.js: STEP_ARTIFACTS excludes complete', () => {
+    it('STEP_ARTIFACTS does not have a complete entry (recovery archival is in unstick-complete.js)', () => {
       const src = fs.readFileSync(
         path.join(__dirname, '..', 'work.workflow.js'),
         'utf-8'
       );
-      assert.match(
+      assert.doesNotMatch(
         src,
         /STEP_ARTIFACTS[\s\S]*?\[STEPS\.complete\]/,
-        'STEP_ARTIFACTS should include a complete step entry'
+        'STEP_ARTIFACTS should not include complete — self-transitions do not trigger archival'
       );
     });
   });

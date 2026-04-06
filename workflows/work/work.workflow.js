@@ -122,10 +122,12 @@ const { parseTicketInput } = require(path.join(__dirname, '..', 'lib', 'ticket-p
 // transitions. When the workflow loops back (e.g. check→implement), stale
 // artifacts are moved to runs/runN/ so DEFER re-evaluation sees fresh state.
 
+// Artifact patterns per step — used by archiveStepArtifacts() on backward transitions.
+// Note: complete has no entry here because complete->complete is a self-transition (same index),
+// which does not trigger archival. Recovery archival is handled by unstick-complete.js directly.
 const STEP_ARTIFACTS = {
   [STEPS.check]:    [/^.*\.check\.md$/],
   [STEPS.pr]:       [/^\.pr-update-sha$/, /^\.post-pr-update-sha$/],
-  [STEPS.complete]: [/^.*\.check\.md$/, /^\.work-actions\.json$/, /^tdd-phase\.json$/, /^\.step-evidence\.json$/], // patterns used by unstick-complete.js for manual recovery archival
 };
 
 function archiveStepArtifacts(tasksDir, stepsToArchive) {
