@@ -352,7 +352,7 @@ describe('tdd-phase-state CLI', () => {
         // Init with #144 format
         const { exitCode: initExit } = runCli('init "#144"', homeDir);
         assert.strictEqual(initExit, 0);
-
+        // TICKET_PROVIDER=github is set at line 350, so sanitizeTicketIdForPath converts #N → GH-N
         // The state should be stored under GH-144, not #144
         const ghState = readState(homeDir, 'GH-144');
         assert.strictEqual(ghState.currentPhase, 'red');
