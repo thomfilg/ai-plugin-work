@@ -118,6 +118,7 @@ const WORKFLOWS = [
         catch { return false; }
       }},
       { step: STEPS.spec, verify: (ticketId) => {
+        // safeTicketPath() converts #N → GH-N via cached config.safeTicketId()
         try { return fs.existsSync(path.join(TASKS_BASE, safeTicketPath(ticketId), 'spec.md')); }
         catch { return false; }
       }},

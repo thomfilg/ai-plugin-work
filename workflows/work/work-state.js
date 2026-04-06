@@ -65,6 +65,7 @@ const CHECK_AGENTS = [
   // QA agents are dynamic based on impacted apps
 ];
 
+// Delegates to config.safeTicketId() — provider config is cached, resolved once per process
 const safeId = config.safeTicketId;
 
 /**

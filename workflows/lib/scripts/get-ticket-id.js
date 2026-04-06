@@ -13,6 +13,7 @@ const GH_PATTERN = /GH-(\d+)/i;
 
 function getCurrentTaskId(cwd = process.cwd()) {
   // Try GH-XX pattern first (for GitHub Issues worktree paths like my-project-GH-56)
+  // Return GH-N (path-safe) instead of #N to avoid filesystem issues with # in directory names
   const ghMatch = cwd.match(GH_PATTERN);
   if (ghMatch) {
     return 'GH-' + ghMatch[1];
