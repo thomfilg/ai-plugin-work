@@ -212,18 +212,30 @@ function createFileProtector(opts) {
    * @param {string} scriptPath
    * @returns {boolean}
    */
-  function isTrustedTestScript(scriptPath) {
-    const resolved = path.resolve(scriptPath);
-    // Determine repo root via git or fall back to cwd
-    let repoRoot;
+  // Cache repo root (lazy init) to avoid calling git rev-parse on every invocation
+  let _cachedRepoRoot;
+  function getRepoRoot() {
+    if (_cachedRepoRoot !== undefined) return _cachedRepoRoot;
     try {
-      repoRoot = require('child_process')
+      _cachedRepoRoot = require('child_process')
         .execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' })
         .trim();
     } catch {
-      repoRoot = process.cwd();
+      _cachedRepoRoot = process.cwd();
+    }
+    return _cachedRepoRoot;
+  }
+
+  function isTrustedTestScript(scriptPath) {
+    // Resolve symlinks for safety — if realpathSync fails (file doesn't exist), untrusted
+    let resolved;
+    try {
+      resolved = fs.realpathSync(scriptPath);
+    } catch {
+      return false;
     }
     // Script must resolve within the repo root
+    const repoRoot = getRepoRoot();
     const rel = path.relative(repoRoot, resolved);
     if (rel.startsWith('..') || path.isAbsolute(rel)) return false;
     // Check that __tests__ or __mocks__ appears as a path segment

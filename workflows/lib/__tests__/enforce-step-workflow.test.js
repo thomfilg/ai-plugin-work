@@ -2437,7 +2437,7 @@ describe('enforce-step-workflow', () => {
       writeFakeGh({
         'pr view --head': '{"number":42,"state":"OPEN"}',
       });
-
+      // Fake git provides deterministic branch name for --head flag (CI-safe)
       const { code } = await transitionFromPr();
       assert.equal(code, 0, 'Should pass transition when --head flag resolves the PR');
     });
@@ -2518,7 +2518,7 @@ describe('enforce-step-workflow', () => {
         'pr view 42 --json reviewDecision': '{"reviewDecision":"APPROVED"}',
         'repos/{owner}/{repo}/pulls/42/comments': '0',
       });
-
+      // Fake git ensures non-detached HEAD for --head resolution (CI-safe)
       const { code } = await transitionFromFollowUp();
       assert.equal(code, 0, 'Should use --head flag for initial PR number resolution');
     });

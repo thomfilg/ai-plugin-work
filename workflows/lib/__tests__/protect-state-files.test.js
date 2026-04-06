@@ -229,7 +229,8 @@ describe('createFileProtector — script bypass', () => {
 
   it('allows test file in __tests__/ within repo root that writes to protected file (GH-191)', () => {
     const repoRoot = require('child_process').execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
-    const testDir = path.join(repoRoot, '__tests__');
+    const tempBase = path.join(repoRoot, `__tests__-gh191-temp-${process.pid}`);
+    const testDir = path.join(tempBase, '__tests__');
     fs.mkdirSync(testDir, { recursive: true });
     // Use a non-.test.js filename to specifically test the __tests__/ directory pattern
     const testScript = path.join(testDir, 'work-state-helper.js');
@@ -238,13 +239,14 @@ describe('createFileProtector — script bypass', () => {
       const result = protector.check('Bash', { command: `node ${testScript}` });
       assert.equal(result.blocked, false, 'Files in __tests__/ within repo should skip Vector 3');
     } finally {
-      fs.rmSync(testDir, { recursive: true, force: true });
+      fs.rmSync(tempBase, { recursive: true, force: true });
     }
   });
 
   it('allows test file in __mocks__/ within repo root that writes to protected file (GH-191)', () => {
     const repoRoot = require('child_process').execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
-    const mockDir = path.join(repoRoot, '__mocks__');
+    const tempBase = path.join(repoRoot, `__mocks__-gh191-temp-${process.pid}`);
+    const mockDir = path.join(tempBase, '__mocks__');
     fs.mkdirSync(mockDir, { recursive: true });
     const mockScript = path.join(mockDir, 'state-helper.js');
     fs.writeFileSync(mockScript, 'const fs = require("fs"); fs.writeFileSync(".state.json", "{}");');
@@ -252,14 +254,15 @@ describe('createFileProtector — script bypass', () => {
       const result = protector.check('Bash', { command: `node ${mockScript}` });
       assert.equal(result.blocked, false, 'Mock files in __mocks__/ within repo should skip Vector 3');
     } finally {
-      fs.rmSync(mockDir, { recursive: true, force: true });
+      fs.rmSync(tempBase, { recursive: true, force: true });
     }
   });
 
   it('allows script in __tests__/ directory that writes to protected file (GH-191)', () => {
     // Use a __tests__/ directory inside the repo root so isTrustedTestScript accepts it
     const repoRoot = require('child_process').execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
-    const testDir = path.join(repoRoot, '__tests__');
+    const tempBase = path.join(repoRoot, `__tests__-gh191-temp2-${process.pid}`);
+    const testDir = path.join(tempBase, '__tests__');
     fs.mkdirSync(testDir, { recursive: true });
     const testScript = path.join(testDir, 'protect-state.test.js');
     fs.writeFileSync(testScript, 'const fs = require("fs"); fs.writeFileSync(".state.json", "{}");');
@@ -267,13 +270,14 @@ describe('createFileProtector — script bypass', () => {
       const result = protector.check('Bash', { command: `node ${testScript}` });
       assert.equal(result.blocked, false, 'Scripts in __tests__/ should skip Vector 3');
     } finally {
-      fs.rmSync(testDir, { recursive: true, force: true });
+      fs.rmSync(tempBase, { recursive: true, force: true });
     }
   });
 
   it('allows script in nested __tests__/ directory (GH-191)', () => {
     const repoRoot = require('child_process').execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' }).trim();
-    const testDir = path.join(repoRoot, 'src', '__tests__');
+    const tempBase = path.join(repoRoot, `__tests__-gh191-nested-${process.pid}`);
+    const testDir = path.join(tempBase, 'src', '__tests__');
     fs.mkdirSync(testDir, { recursive: true });
     const testScript = path.join(testDir, 'helper.spec.mjs');
     fs.writeFileSync(testScript, 'import fs from "fs"; fs.writeFileSync(".state.json", "{}");');
@@ -281,7 +285,7 @@ describe('createFileProtector — script bypass', () => {
       const result = protector.check('Bash', { command: `node ${testScript}` });
       assert.equal(result.blocked, false, 'Scripts in nested __tests__/ should skip Vector 3');
     } finally {
-      fs.rmSync(path.join(repoRoot, 'src', '__tests__'), { recursive: true, force: true });
+      fs.rmSync(tempBase, { recursive: true, force: true });
     }
   });
 
