@@ -517,6 +517,81 @@ describe('createFileProtector — exemptions', () => {
   });
 });
 
+// ─── Vector 3: Test file exclusion (GH-141 false-positive fix) ──────────────
+
+describe('checkScriptBypass — test file exclusion', () => {
+  const os = require('os');
+  const protector = createFileProtector({
+    isProtected: basenameProtector(new Set(['.state.json', '.work-state.json', '.step-evidence.json'])),
+  });
+
+  it('skips scanning *.test.js files (node --test false-positive fix)', () => {
+    // Create a test file that writes to protected files (as all test files do)
+    const tmpDir = path.join(os.tmpdir(), `test-fp-${process.pid}`);
+    fs.mkdirSync(tmpDir, { recursive: true });
+    const testFile = path.join(tmpDir, 'workflow-state.test.js');
+    fs.writeFileSync(testFile, 'const fs = require("fs"); fs.writeFileSync(".work-state.json", "{}");');
+    try {
+      const result = protector.check('Bash', { command: `node --test ${testFile}` });
+      assert.equal(result.blocked, false, 'node --test of .test.js file should not be blocked');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('skips scanning *.spec.js files', () => {
+    const tmpDir = path.join(os.tmpdir(), `test-fp-spec-${process.pid}`);
+    fs.mkdirSync(tmpDir, { recursive: true });
+    const specFile = path.join(tmpDir, 'my-module.spec.js');
+    fs.writeFileSync(specFile, 'const fs = require("fs"); fs.writeFileSync(".state.json", "{}");');
+    try {
+      const result = protector.check('Bash', { command: `node ${specFile}` });
+      assert.equal(result.blocked, false, '*.spec.js files should be skipped by Vector 3');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('skips scanning files in __tests__/ directories', () => {
+    const tmpDir = path.join(os.tmpdir(), `test-fp-dir-${process.pid}`, '__tests__');
+    fs.mkdirSync(tmpDir, { recursive: true });
+    const testFile = path.join(tmpDir, 'helper.js');
+    fs.writeFileSync(testFile, 'const fs = require("fs"); fs.writeFileSync(".state.json", "{}");');
+    try {
+      const result = protector.check('Bash', { command: `node ${testFile}` });
+      assert.equal(result.blocked, false, 'files in __tests__/ should be skipped by Vector 3');
+    } finally {
+      fs.rmSync(path.join(os.tmpdir(), `test-fp-dir-${process.pid}`), { recursive: true, force: true });
+    }
+  });
+
+  it('still blocks non-test scripts that write to protected files', () => {
+    const tmpDir = path.join(os.tmpdir(), `test-fp-prod-${process.pid}`);
+    fs.mkdirSync(tmpDir, { recursive: true });
+    const prodScript = path.join(tmpDir, 'evil-script.js');
+    fs.writeFileSync(prodScript, 'const fs = require("fs"); fs.writeFileSync(".state.json", "{}");');
+    try {
+      const result = protector.check('Bash', { command: `node ${prodScript}` });
+      assert.equal(result.blocked, true, 'non-test scripts should still be blocked');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('skips scanning *.test.mjs files', () => {
+    const tmpDir = path.join(os.tmpdir(), `test-fp-mjs-${process.pid}`);
+    fs.mkdirSync(tmpDir, { recursive: true });
+    const testFile = path.join(tmpDir, 'module.test.mjs');
+    fs.writeFileSync(testFile, 'import fs from "fs"; fs.writeFileSync(".state.json", "{}");');
+    try {
+      const result = protector.check('Bash', { command: `node --test ${testFile}` });
+      assert.equal(result.blocked, false, '*.test.mjs files should be skipped by Vector 3');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
 // ─── createFileProtector — formatMessage ────────────────────────────────────
 
 describe('createFileProtector — custom message', () => {
