@@ -260,8 +260,13 @@ function createFileProtector(opts) {
   }
 
   function checkInlineInterpreterBypass(cmd, toolInput, hookData) {
-    const interpreterMatch = cmd.match(INLINE_INTERPRETER_PATTERN);
-    if (!interpreterMatch) return { blocked: false, skipRemainingChecks: false };
+    // Use global scan to check ALL inline interpreter occurrences in compound commands
+    // (e.g. `python3 -c "print(1)"; python3 -c "open('.state.json','w')..."`)
+    const globalPattern = new RegExp(INLINE_INTERPRETER_PATTERN.source, 'g');
+    const allMatches = [...cmd.matchAll(globalPattern)];
+    if (allMatches.length === 0) return { blocked: false, skipRemainingChecks: false };
+
+    for (const interpreterMatch of allMatches) {
 
     // Extract the interpreter name and flag from the match (e.g. "python3 -c", "ruby -e")
     const matchStr = interpreterMatch[0].trim();
@@ -273,7 +278,7 @@ function createFileProtector(opts) {
     // avoiding false positives when protected filenames or base64 appear
     // in other command segments (e.g. `echo .state.json; python3 -c "..."`)
     // or in pipeline stages (e.g. `python3 -c "print('hello')" | base64`).
-    const flagIdx = cmd.indexOf(interpreterMatch[0]);
+    const flagIdx = interpreterMatch.index;
     const afterFlag = cmd.slice(flagIdx);
     // Try to extract the quoted code argument first (respects quotes around inline code).
     // If unquoted, capture up to the first unquoted shell operator (|, ;, &&, ||).
@@ -315,6 +320,7 @@ function createFileProtector(opts) {
         };
       }
     } // end base64 evasion check
+    } // end for each interpreter match
 
     return { blocked: false, skipRemainingChecks: false };
   }

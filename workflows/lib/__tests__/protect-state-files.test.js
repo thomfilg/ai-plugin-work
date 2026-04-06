@@ -411,6 +411,15 @@ describe('createFileProtector — inline interpreter bypass', () => {
     assert.equal(result.blocked, true);
     assert.ok(result.vector.includes('base64'));
   });
+
+  it('blocks second interpreter in compound command', () => {
+    // First python3 -c is benign, second writes to protected file
+    const result = protector.check('Bash', {
+      command: 'python3 -c "print(1)"; python3 -c "open(\'.state.json\',\'w\').write(\'x\')"',
+    });
+    assert.equal(result.blocked, true, 'should detect write in second interpreter invocation');
+    assert.equal(result.vector, 'Bash(python3 -c)');
+  });
 });
 
 // ─── createFileProtector — isExempt ─────────────────────────────────────────
