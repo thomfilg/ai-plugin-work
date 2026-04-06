@@ -105,11 +105,9 @@ function archiveArtifacts(ticketId) {
       if (fs.existsSync(dest)) { dest = path.join(archiveDir, `${Date.now()}-${file}`); }
       fs.renameSync(path.join(dir, file), dest);
       archived.push(file);
-    } catch (err) {
-      process.stderr.write(`Warning: could not archive ${file}: ${err.message}\n`);
-    }
+    } catch (err) { process.stderr.write(`Warning: could not archive ${file}: ${err.message}\n`); }
   }
-  return archived;
+  return archived; // idempotent: existing dest files get timestamped suffix
 }
 
 /**

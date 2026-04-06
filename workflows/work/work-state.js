@@ -585,10 +585,13 @@ async function main() {
 
 // _cliCommand is defined at module scope (line 22) so it's accessible here
 if (require.main === module) {
+  // _cliCommand is at module scope (line 22) — accessible in this closure
   main().catch((err) => {
-    // GH-106: complete exits 1 with JSON on stderr; other commands fail-open
-    if (_cliCommand === 'complete') { process.stderr.write(JSON.stringify({ error: `complete failed: ${err?.message || err}` }) + '\n'); process.exit(1); }
-    process.exit(0);
+    if (_cliCommand === 'complete') {
+      process.stderr.write(JSON.stringify({ error: `complete failed: ${err?.message || err}` }) + '\n');
+      process.exit(1);
+    }
+    process.exit(0); // fail-open for non-complete commands
   });
 }
 
