@@ -125,10 +125,10 @@ const { parseTicketInput } = require(path.join(__dirname, '..', 'lib', 'ticket-p
 // Artifact patterns per step — used by archiveStepArtifacts() on backward transitions.
 // Note: complete has no entry here because complete->complete is a self-transition (same index),
 // which does not trigger archival. Recovery archival is handled by unstick-complete.js directly.
-const STEP_ARTIFACTS = { // complete is intentionally absent — see unstick-complete.js
-  [STEPS.check]:    [/^.*\.check\.md$/],
-  [STEPS.pr]:       [/^\.pr-update-sha$/, /^\.post-pr-update-sha$/],
-}; // no complete entry: self-transitions don't trigger archiveStepArtifacts
+const STEP_ARTIFACTS = {
+  [STEPS.check]: [/^.*\.check\.md$/],
+  [STEPS.pr]:    [/^\.pr-update-sha$/, /^\.post-pr-update-sha$/],
+}; // complete excluded: self-transition (same index) never triggers archival; recovery uses unstick-complete.js
 
 function archiveStepArtifacts(tasksDir, stepsToArchive) {
   if (!fileExists(tasksDir)) return null;

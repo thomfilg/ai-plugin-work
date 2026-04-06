@@ -132,30 +132,35 @@ function unstickTicket(ticketId) {
   if (!safe) return { ticketId, actions: [], success: false, error: 'Invalid ticket ID' };
   const result = { ticketId: safe, actions: [] };
 
-  // Step 1: Complete work state
-  const completeResult = completeWork(safe);
+  // Step 1: Complete work state (try/catch protects against unexpected throws)
+  let completeResult;
+  try {
+    completeResult = completeWork(safe);
+  } catch (err) {
+    completeResult = { error: err.message };
+  }
   if (completeResult && completeResult.error) {
     result.actions.push({ step: 'completeWork', ok: false, error: completeResult.error });
-    // Short-circuit: no state means no ticket to unstick — skip remaining steps
-    if (completeResult.error === 'No state found') {
-      result.success = false;
-      return result;
-    }
-    addError(safe, 'complete', `unstick-complete: completeWork failed — ${completeResult.error}`);
-  } else { result.actions.push({ step: 'completeWork', ok: true }); }
+    if (completeResult.error === 'No state found') { result.success = false; return result; }
+    try { addError(safe, 'complete', `unstick-complete: completeWork failed — ${completeResult.error}`); } catch { /* best-effort */ }
+  } else {
+    result.actions.push({ step: 'completeWork', ok: true });
+  }
 
-  // Step 2: Finish session guard (safe is validated, addError only called when state exists)
+  // Step 2: Finish session guard
   const guardResult = finishSessionGuard(safe);
   result.actions.push({ step: 'sessionGuard', ...guardResult });
-  if (!guardResult.ok && completeResult && !completeResult.error) { addError(safe, 'complete', `unstick-complete: session-guard finish failed — ${guardResult.error}`); }
+  if (!guardResult.ok && completeResult && !completeResult.error) {
+    try { addError(safe, 'complete', `unstick-complete: session-guard finish failed — ${guardResult.error}`); } catch { /* best-effort */ }
+  }
 
-  // Step 3: Archive artifacts (only for existing tickets with state)
+  // Step 3: Archive artifacts
   const archived = archiveArtifacts(safe);
   result.actions.push({ step: 'archive', ok: true, files: archived });
 
   result.success = result.actions.every(a => a.ok !== false);
-  return result; // tested via complete-deadlock.test.js (isStuckInComplete, sanitizeTicketId, state transitions)
-} // unstickTicket — recovery logic is covered by regression tests in __tests__/complete-deadlock.test.js
+  return result;
+}
 
 // ─── CLI ─────────────────────────────────────────────────────────────────────
 
