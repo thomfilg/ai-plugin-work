@@ -109,7 +109,9 @@ const STEP_TRANSITIONS = createStatusTransitions(
 if (!STEP_TRANSITIONS[STEPS.complete]) {
   STEP_TRANSITIONS[STEPS.complete] = [];
 }
-STEP_TRANSITIONS[STEPS.complete].push(STEPS.complete);
+if (!STEP_TRANSITIONS[STEPS.complete].includes(STEPS.complete)) {
+  STEP_TRANSITIONS[STEPS.complete].push(STEPS.complete);
+}
 
 // ALL_STEPS derived from STEP_ORDER to guarantee ordering consistency
 const ALL_STEPS = [...STEP_ORDER];

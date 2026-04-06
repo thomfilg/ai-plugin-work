@@ -39,13 +39,17 @@ const SESSION_GUARD_PATH = require('path').resolve(__dirname, '..', 'lib', 'hook
 
 /**
  * Validate and sanitize a ticket ID to prevent path traversal.
- * Only allows alphanumeric, hyphens, and underscores.
+ * Allows base ticket IDs (e.g. GH-106) and suffix tickets (e.g. GH-145/phase1).
  */
 function sanitizeTicketId(ticketId) {
   if (!ticketId || typeof ticketId !== 'string') return null;
-  if (!/^[A-Za-z0-9_-]+$/.test(ticketId)) return null;
-  const resolved = path.resolve(TASKS_BASE, ticketId);
-  if (!resolved.startsWith(path.resolve(TASKS_BASE) + path.sep)) return null;
+  if (ticketId.includes('\\')) return null;
+  const parts = ticketId.split('/');
+  if (parts.length < 1 || parts.length > 2) return null;
+  if (parts.some(part => !part || !/^[A-Za-z0-9_-]+$/.test(part))) return null;
+  const baseResolved = path.resolve(TASKS_BASE);
+  const resolved = path.resolve(TASKS_BASE, ...parts);
+  if (resolved !== baseResolved && !resolved.startsWith(baseResolved + path.sep)) return null;
   return ticketId;
 }
 
@@ -131,16 +135,18 @@ function unstickTicket(ticketId) {
   const completeResult = completeWork(safe);
   if (completeResult && completeResult.error) {
     result.actions.push({ step: 'completeWork', ok: false, error: completeResult.error });
-    // Don't call addError for 'No state found' — it would create state for a nonexistent ticket
-    if (completeResult.error !== 'No state found') {
-      addError(safe, 'complete', `unstick-complete: completeWork failed — ${completeResult.error}`);
+    // Short-circuit: no state means no ticket to unstick — skip remaining steps
+    if (completeResult.error === 'No state found') {
+      result.success = false;
+      return result;
     }
+    addError(safe, 'complete', `unstick-complete: completeWork failed — ${completeResult.error}`);
   } else { result.actions.push({ step: 'completeWork', ok: true }); }
 
   // Step 2: Finish session guard (ticketId already sanitized)
   const guardResult = finishSessionGuard(safe);
   result.actions.push({ step: 'sessionGuard', ...guardResult });
-  if (!guardResult.ok) {
+  if (!guardResult.ok && completeResult && !completeResult.error) {
     addError(safe, 'complete', `unstick-complete: session-guard finish failed — ${guardResult.error}`);
   }
 
@@ -182,11 +188,26 @@ function main() {
   }
 
   for (const dir of dirs) {
+    // Check base ticket
     const state = loadState(dir);
     if (isStuckInComplete(state)) {
       process.stderr.write(`Found stuck ticket: ${dir}\n`);
       results.push(unstickTicket(dir));
     }
+    // Check suffix tickets (e.g. GH-145/phase1)
+    const subDir = path.join(TASKS_BASE, dir);
+    try {
+      const subs = fs.readdirSync(subDir, { withFileTypes: true });
+      for (const sub of subs) {
+        if (!sub.isDirectory()) continue;
+        const suffixId = `${dir}/${sub.name}`;
+        const suffixState = loadState(suffixId);
+        if (isStuckInComplete(suffixState)) {
+          process.stderr.write(`Found stuck suffix ticket: ${suffixId}\n`);
+          results.push(unstickTicket(suffixId));
+        }
+      }
+    } catch { /* not a directory or not readable */ }
   }
 
   if (results.length === 0) {

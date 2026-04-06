@@ -17,23 +17,26 @@
 const fs = require('fs');
 const path = require('path');
 
-// GH-106: Exit 1 for 'complete' command so failures surface instead of being swallowed.
-// Other commands retain exit 0 (fail-open) to avoid breaking existing callers.
-const _cliCommand = process.argv[2];
-process.on('uncaughtException', (err) => {
-  if (_cliCommand === 'complete') {
-    process.stderr.write(`[work-state] uncaught exception in complete: ${err?.message || err}\n`);
-    process.exit(1);
-  }
-  process.exit(0);
-});
-process.on('unhandledRejection', (err) => {
-  if (_cliCommand === 'complete') {
-    process.stderr.write(`[work-state] unhandled rejection in complete: ${err?.message || err}\n`);
-    process.exit(1);
-  }
-  process.exit(0);
-});
+// GH-106: Scope global handlers to CLI execution only so require()ing this module
+// from other scripts (work.workflow.js, unstick-complete.js) doesn't change their
+// failure semantics.
+if (require.main === module) {
+  const _cliCommand = process.argv[2];
+  process.on('uncaughtException', (err) => {
+    if (_cliCommand === 'complete') {
+      process.stderr.write(`[work-state] uncaught exception in complete: ${err?.message || err}\n`);
+      process.exit(1);
+    }
+    process.exit(0);
+  });
+  process.on('unhandledRejection', (err) => {
+    if (_cliCommand === 'complete') {
+      process.stderr.write(`[work-state] unhandled rejection in complete: ${err?.message || err}\n`);
+      process.exit(1);
+    }
+    process.exit(0);
+  });
+}
 
 let config;
 try {
