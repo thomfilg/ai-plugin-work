@@ -100,7 +100,10 @@ function archiveArtifacts(ticketId) {
   const archived = [];
   for (const file of files) {
     try {
-      fs.renameSync(path.join(dir, file), path.join(archiveDir, file));
+      let dest = path.join(archiveDir, file);
+      // Avoid overwriting existing archived files — append timestamp suffix
+      if (fs.existsSync(dest)) { dest = path.join(archiveDir, `${Date.now()}-${file}`); }
+      fs.renameSync(path.join(dir, file), dest);
       archived.push(file);
     } catch (err) {
       process.stderr.write(`Warning: could not archive ${file}: ${err.message}\n`);
