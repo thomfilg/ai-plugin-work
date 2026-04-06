@@ -517,6 +517,45 @@ describe('createFileProtector — exemptions', () => {
   });
 });
 
+// ─── Vector 3: isTrustedTestScript integration (GH-141 + GH-191) ────────────
+// The false-positive fix for GH-141 is now handled by isTrustedTestScript (GH-191),
+// which skips Vector 3 for in-repo, git-tracked files inside __tests__/ or __mocks__/.
+// Dedicated isTrustedTestScript tests exist above (GH-191 block). Here we verify
+// that the integration with checkScriptBypass works end-to-end using real repo files.
+
+describe('checkScriptBypass — isTrustedTestScript integration (GH-141)', () => {
+  const protector = createFileProtector({
+    isProtected: basenameProtector(new Set(['.state.json', '.work-state.json', '.step-evidence.json'])),
+  });
+
+  it('skips scanning in-repo test files that reference protected filenames (GH-141 false-positive)', () => {
+    // Use THIS test file — it's in __tests__/, git-tracked, and contains writeFileSync calls
+    const thisTestFile = path.resolve(__dirname, 'protect-state-files.test.js');
+    const result = protector.check('Bash', { command: `node --test ${thisTestFile}` });
+    assert.equal(result.blocked, false, 'In-repo __tests__/ files should be skipped by isTrustedTestScript');
+  });
+
+  it('skips scanning in-repo enforce-step-workflow test file', () => {
+    const enforceTest = path.resolve(__dirname, 'enforce-step-workflow.test.js');
+    const result = protector.check('Bash', { command: `node --test ${enforceTest}` });
+    assert.equal(result.blocked, false, 'In-repo __tests__/ files should be skipped');
+  });
+
+  it('still blocks non-test scripts outside the repo that write to protected files', () => {
+    const os = require('os');
+    const tmpDir = path.join(os.tmpdir(), `test-fp-prod-${process.pid}`);
+    fs.mkdirSync(tmpDir, { recursive: true });
+    const prodScript = path.join(tmpDir, 'evil-script.js');
+    fs.writeFileSync(prodScript, 'const fs = require("fs"); fs.writeFileSync(".state.json", "{}");');
+    try {
+      const result = protector.check('Bash', { command: `node ${prodScript}` });
+      assert.equal(result.blocked, true, 'non-test scripts should still be blocked');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+});
+
 // ─── createFileProtector — formatMessage ────────────────────────────────────
 
 describe('createFileProtector — custom message', () => {

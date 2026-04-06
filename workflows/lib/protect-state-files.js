@@ -256,8 +256,10 @@ function createFileProtector(opts) {
   function checkScriptBypass(cmd, toolInput, hookData) {
     const scripts = extractScriptPaths(cmd);
     for (const scriptPath of scripts) {
-      // Skip Vector 3 for trusted in-repo test/mock files (GH-191).
+      // Skip Vector 3 for trusted in-repo test/mock files (GH-191 + GH-141).
       // Scoped to __tests__/__mocks__ dirs within repo root; symlink-safe via realpathSync.
+      // Resolves the GH-141 false positive: `node --test workflow-state.test.js` is no longer
+      // blocked because the test file is in __tests__/, within the repo root, and git-tracked.
       if (isTrustedTestScript(scriptPath)) continue;
 
       let content;

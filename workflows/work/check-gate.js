@@ -60,9 +60,9 @@ const CHECK_GATE_RULES = [
     description: 'All required .check.md reports must exist with accepted status (APPROVED or COMPLETE)',
     check(dir) {
       const required = [
-        { file: 'tests.check.md',       pattern: /Status:\s*APPROVED/i },
-        { file: 'code-review.check.md', pattern: /Status:\s*APPROVED/i },
-        { file: 'completion.check.md',  pattern: /Status:\s*(COMPLETE|APPROVED)/i },
+        { file: 'tests.check.md',       pattern: /Status:\s*\*{0,2}\s*APPROVED/i },
+        { file: 'code-review.check.md', pattern: /Status:\s*\*{0,2}\s*APPROVED/i },
+        { file: 'completion.check.md',  pattern: /Status:\s*\*{0,2}\s*(COMPLETE|APPROVED)/i },
       ];
       const reasons = [];
       for (const req of required) {
@@ -84,8 +84,8 @@ const CHECK_GATE_RULES = [
       const qaFiles = listFiles(dir, /^qa-.*\.check\.md$/);
       if (qaFiles.length === 0) return ['No QA reports found (need at least one qa-*.check.md)'];
       return qaFiles
-        .filter(f => !/Status:\s*APPROVED/i.test(readFile(f)))
-        .map(f => `QA report ${path.basename(f)} does not have Status: APPROVED`);
+        .filter(f => !/Status:\s*\*{0,2}\s*APPROVED/i.test(readFile(f)))
+        .map(f => `QA report ${path.basename(f)} does not have Status: APPROVED`); // regex on line above handles bold markdown
     },
   },
   {
