@@ -2230,4 +2230,110 @@ describe('enforce-step-workflow', () => {
       assert.equal(code, 0, 'Should allow when acknowledged entries have userApproval');
     });
   });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Per-script step gating for AGENT_GATED_SCRIPTS (GH-184)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe('per-script step gating (GH-184)', () => {
+    // Resolve real script paths so they pass trusted-directory checks
+    const TDD_SCRIPT = path.resolve(__dirname, '..', '..', 'work-implement', 'tdd-phase-state.js');
+    const QA_REPORT_SCRIPT = path.resolve(__dirname, '..', '..', 'check', 'scripts', 'write-qa-report.js');
+
+    afterEach(() => {
+      // Clean up any tokens that may have been written
+      const TOKEN_DIR = '/tmp/.claude-write-tokens';
+      try { fs.unlinkSync(path.join(TOKEN_DIR, 'tdd-phase-state.js')); } catch {}
+      try { fs.unlinkSync(path.join(TOKEN_DIR, 'write-qa-report.js')); } catch {}
+    });
+
+    it('tdd-phase-state.js token issuance succeeds during implement step', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node "${TDD_SCRIPT}" init ${TEST_TICKET}` } },
+        'PreToolUse',
+        { CLAUDE_CURRENT_AGENT: 'developer-nodejs-tdd' },
+      );
+      assert.equal(code, 0, `tdd-phase-state.js should be allowed during implement step. stderr: ${stderr}`);
+    });
+
+    it('tdd-phase-state.js token issuance blocked during check step (wrong step)', async () => {
+      writeWorkState(makeStepStatus('check', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node "${TDD_SCRIPT}" init ${TEST_TICKET}` } },
+        'PreToolUse',
+        { CLAUDE_CURRENT_AGENT: 'developer-nodejs-tdd' },
+      );
+      assert.equal(code, 2, 'tdd-phase-state.js should be blocked during check step');
+      assert.ok(stderr.includes('BLOCKED'), 'should contain BLOCKED message');
+      assert.ok(stderr.includes('implement'), 'error should mention the required step (implement)');
+    });
+
+    it('write-qa-report.js succeeds during check step', async () => {
+      writeWorkState(makeStepStatus('check', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node "${QA_REPORT_SCRIPT}" --ticket ${TEST_TICKET}` } },
+        'PreToolUse',
+        { CLAUDE_CURRENT_AGENT: 'qa-feature-tester' },
+      );
+      assert.equal(code, 0, `write-qa-report.js should be allowed during check step. stderr: ${stderr}`);
+    });
+
+    it('write-qa-report.js blocked during implement step (wrong step)', async () => {
+      writeWorkState(makeStepStatus('implement', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node "${QA_REPORT_SCRIPT}" --ticket ${TEST_TICKET}` } },
+        'PreToolUse',
+        { CLAUDE_CURRENT_AGENT: 'qa-feature-tester' },
+      );
+      assert.equal(code, 2, 'write-qa-report.js should be blocked during implement step');
+      assert.ok(stderr.includes('BLOCKED'), 'should contain BLOCKED message');
+      assert.ok(stderr.includes('check'), 'error should mention the required step (check)');
+    });
+
+    it('tdd-phase-state.js allowed when no step is active (null currentStep)', async () => {
+      // All steps pending — no step is in_progress → currentStep resolves to null
+      const allPending = {};
+      for (const s of WORK_STEPS) allPending[s] = 'pending';
+      writeWorkState(allPending);
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node "${TDD_SCRIPT}" init ${TEST_TICKET}` } },
+        'PreToolUse',
+        { CLAUDE_CURRENT_AGENT: 'developer-nodejs-tdd' },
+      );
+      assert.equal(code, 0, `tdd-phase-state.js should be allowed when no step is active (null currentStep). stderr: ${stderr}`);
+    });
+
+    it('write-qa-report.js from unauthorized agent is blocked', async () => {
+      writeWorkState(makeStepStatus('check', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node "${QA_REPORT_SCRIPT}" --ticket ${TEST_TICKET}` } },
+        'PreToolUse',
+        { CLAUDE_CURRENT_AGENT: 'developer-nodejs-tdd' },
+      );
+      assert.equal(code, 2, 'write-qa-report.js should be blocked from unauthorized agent');
+      assert.ok(stderr.includes('BLOCKED'), 'should contain BLOCKED message');
+      assert.ok(stderr.includes('not running in an authorized agent'), 'should mention unauthorized agent');
+    });
+
+    it('error message includes the per-script required step dynamically', async () => {
+      writeWorkState(makeStepStatus('check', WORK_STEPS));
+
+      const { stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node "${TDD_SCRIPT}" init ${TEST_TICKET}` } },
+        'PreToolUse',
+        { CLAUDE_CURRENT_AGENT: 'developer-nodejs-tdd' },
+      );
+      // Error should say 'check' is active (not 'implement'), and reference the required step
+      assert.ok(stderr.includes("'check' is active"), 'error should show current active step');
+      assert.ok(stderr.includes("'implement'"), 'error should reference required implement step');
+      assert.ok(!stderr.includes('Report writer scripts'), 'should not use generic report writer message');
+    });
+  });
 });
