@@ -24,12 +24,16 @@ process.on('unhandledRejection', () => process.exit(0));
 
 const getConfig = require(path.join(__dirname, '..', '..', 'lib', 'get-config'));
 const TASKS_BASE = getConfig.orExit('TASKS_BASE');
+function safeId(ticketId) {
+  try { return require(path.join(__dirname, '..', '..', 'lib', 'config')).safeTicketId(ticketId); }
+  catch { return ticketId; }
+}
 
 /**
  * Get progress file path for a ticket/app
  */
 function getProgressPath(ticketId, appName) {
-  return path.join(TASKS_BASE, ticketId, `.qa-progress-${appName}.json`);
+  return path.join(TASKS_BASE, safeId(ticketId), `.qa-progress-${appName}.json`);
 }
 
 /**
@@ -47,7 +51,7 @@ function loadProgress(ticketId, appName) {
  * Save progress for a ticket/app
  */
 function saveProgress(ticketId, appName, progress) {
-  const taskDir = path.join(TASKS_BASE, ticketId);
+  const taskDir = path.join(TASKS_BASE, safeId(ticketId));
   if (!fs.existsSync(taskDir)) {
     fs.mkdirSync(taskDir, { recursive: true });
   }
@@ -62,7 +66,7 @@ function saveProgress(ticketId, appName, progress) {
  * Initialize QA progress for an app
  */
 function initProgress(ticketId, appName, appUrl, testPlan = []) {
-  const screenshotsDir = path.join(TASKS_BASE, ticketId, 'screenshots', appName);
+  const screenshotsDir = path.join(TASKS_BASE, safeId(ticketId), 'screenshots', appName);
   if (!fs.existsSync(screenshotsDir)) {
     fs.mkdirSync(screenshotsDir, { recursive: true });
   }

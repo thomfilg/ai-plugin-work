@@ -65,11 +65,14 @@ const CHECK_AGENTS = [
   // QA agents are dynamic based on impacted apps
 ];
 
+// Delegates to config.safeTicketId() — provider config is cached, resolved once per process
+const safeId = config.safeTicketId;
+
 /**
  * Get state file path for a ticket
  */
 function getStatePath(ticketId) {
-  return path.join(TASKS_BASE, ticketId, '.work-state.json');
+  return path.join(TASKS_BASE, safeId(ticketId), '.work-state.json');
 }
 
 /**
@@ -91,7 +94,7 @@ function loadState(ticketId) {
  * Save state for a ticket
  */
 function saveState(ticketId, state) {
-  const taskDir = path.join(TASKS_BASE, ticketId);
+  const taskDir = path.join(TASKS_BASE, safeId(ticketId));
   if (!fs.existsSync(taskDir)) {
     fs.mkdirSync(taskDir, { recursive: true });
   }
@@ -142,7 +145,7 @@ function autoInitTdd(ticketId) {
   try {
     // Validate ticketId — reject traversal chars and verify resolved path stays within TASKS_BASE
     if (!ticketId || /\.\./.test(ticketId) || /\\/.test(ticketId)) return;
-    const tddStatePath = path.join(TASKS_BASE, ticketId, 'tdd-phase.json');
+    const tddStatePath = path.join(TASKS_BASE, safeId(ticketId), 'tdd-phase.json');
     if (!path.resolve(tddStatePath).startsWith(path.resolve(TASKS_BASE) + path.sep)) return;
     // Create directory and write initial RED phase state
     fs.mkdirSync(path.dirname(tddStatePath), { recursive: true });
@@ -155,7 +158,7 @@ function autoInitTdd(ticketId) {
     if (err && err.code === 'EEXIST') return; // already initialized
     // fail-open: TDD init failure must not block step transition
     if (created) {
-      try { fs.unlinkSync(path.join(TASKS_BASE, ticketId, 'tdd-phase.json')); } catch {}
+      try { fs.unlinkSync(path.join(TASKS_BASE, safeId(ticketId), 'tdd-phase.json')); } catch {}
     }
   } finally {
     if (fd !== undefined) {
@@ -362,8 +365,8 @@ Steps:
  * @returns {{ path: string, index: number }}
  */
 function getNextSubtaskStatePath(ticketId) {
-  const taskDir = path.join(TASKS_BASE, ticketId);
-  const prefix = `.work-state-${ticketId}-subtask-`;
+  const taskDir = path.join(TASKS_BASE, safeId(ticketId));
+  const prefix = `.work-state-${safeId(ticketId)}-subtask-`;
   let maxIndex = 0;
 
   if (fs.existsSync(taskDir)) {
@@ -395,7 +398,7 @@ function getNextSubtaskStatePath(ticketId) {
  */
 function initSubtaskState(ticketId, description = '') {
   const { path: statePath, index } = getNextSubtaskStatePath(ticketId);
-  const taskDir = path.join(TASKS_BASE, ticketId);
+  const taskDir = path.join(TASKS_BASE, safeId(ticketId));
 
   if (!fs.existsSync(taskDir)) {
     fs.mkdirSync(taskDir, { recursive: true });
@@ -432,8 +435,8 @@ function initSubtaskState(ticketId, description = '') {
  * @returns {object|null}
  */
 function loadActiveSubtaskState(ticketId) {
-  const taskDir = path.join(TASKS_BASE, ticketId);
-  const prefix = `.work-state-${ticketId}-subtask-`;
+  const taskDir = path.join(TASKS_BASE, safeId(ticketId));
+  const prefix = `.work-state-${safeId(ticketId)}-subtask-`;
 
   if (!fs.existsSync(taskDir)) return null;
 
@@ -472,8 +475,8 @@ function loadActiveSubtaskState(ticketId) {
  * @returns {object} the completed subtask state
  */
 function completeSubtask(ticketId, subtaskIndex) {
-  const taskDir = path.join(TASKS_BASE, ticketId);
-  const prefix = `.work-state-${ticketId}-subtask-`;
+  const taskDir = path.join(TASKS_BASE, safeId(ticketId));
+  const prefix = `.work-state-${safeId(ticketId)}-subtask-`;
   const statePath = path.join(taskDir, `${prefix}${subtaskIndex}.json`);
 
   if (!fs.existsSync(statePath)) {

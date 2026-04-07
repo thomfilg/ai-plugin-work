@@ -35,13 +35,19 @@ const TOKEN_MAX_AGE_MS = 10_000; // 10 seconds
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
+function sanitizeId(ticketId) {
+  try { return require('../lib/config').safeTicketId(ticketId); }
+  catch { return ticketId; }
+}
+
 function getStatePath(ticketId) {
   if (!ticketId || /\.\./.test(ticketId) || /\\/.test(ticketId)) {
     throw new Error(`Invalid ticket ID: ${ticketId}`);
   }
   // Resolve from TASKS_BASE env, config module, or default HOME-based path
   const base = process.env.TASKS_BASE || (config && config.TASKS_BASE) || path.join(process.env.HOME, 'worktrees', 'tasks');
-  const resolved = path.resolve(base, ticketId, 'tdd-phase.json');
+  const safeId = sanitizeId(ticketId);
+  const resolved = path.resolve(base, safeId, 'tdd-phase.json');
   // Validate resolved path stays within TASKS_BASE (prevents traversal)
   if (!resolved.startsWith(path.resolve(base) + path.sep)) {
     throw new Error(`Invalid ticket ID: ${ticketId}`);

@@ -141,7 +141,9 @@ function checkTddPhase(filePath) {
       taskBase = require('path').join(process.env.HOME, 'worktrees', 'tasks');
     }
     // Use TASKS_BASE from env, config module, or default HOME-based fallback
-    const statePath = require('path').join(taskBase, ticketId, 'tdd-phase.json');
+    let safeTicketId = ticketId;
+    try { safeTicketId = require(require('path').join(__dirname, '..', '..', 'lib', 'config')).safeTicketId(ticketId); } catch {}
+    const statePath = require('path').join(taskBase, safeTicketId, 'tdd-phase.json');
     if (!require('fs').existsSync(statePath)) return 'no-file';
 
     const state = JSON.parse(require('fs').readFileSync(statePath, 'utf8'));

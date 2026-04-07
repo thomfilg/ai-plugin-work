@@ -61,6 +61,11 @@ const TASKS_BASE = getConfig('TASKS_BASE') || (() => {
   return path.join(wb, 'tasks');
 })();
 
+function safeTicketPath(ticketId) {
+  try { return require(path.join(__dirname, '..', 'config')).safeTicketId(ticketId); }
+  catch { return ticketId; }
+}
+
 // ─── Workflow Definitions ───────────────────────────────────────────────────
 //
 // Each workflow defines its own state file, step-to-command mapping,
@@ -103,24 +108,25 @@ const WORKFLOWS = [
       { step: STEPS.ticket, verify: (ticketId) => {
         // Ticket is proven if the work state file exists and is active for this ticket
         try {
-          const stateFile = path.join(TASKS_BASE, ticketId, '.work-state.json');
+          const stateFile = path.join(TASKS_BASE, safeTicketPath(ticketId), '.work-state.json');
           const state = JSON.parse(fs.readFileSync(stateFile, 'utf-8'));
-          return state?.status === 'in_progress' && state?.ticketId === ticketId;
+          return state?.status === 'in_progress' && (state?.ticketId === ticketId || state?.ticketId === safeTicketPath(ticketId));
         } catch { return false; }
       }},
       { step: STEPS.brief, verify: (ticketId) => {
-        try { return fs.existsSync(path.join(TASKS_BASE, ticketId, 'brief.md')); }
+        try { return fs.existsSync(path.join(TASKS_BASE, safeTicketPath(ticketId), 'brief.md')); }
         catch { return false; }
       }},
       { step: STEPS.spec, verify: (ticketId) => {
-        try { return fs.existsSync(path.join(TASKS_BASE, ticketId, 'spec.md')); }
+        // safeTicketPath() converts #N → GH-N via cached config.safeTicketId()
+        try { return fs.existsSync(path.join(TASKS_BASE, safeTicketPath(ticketId), 'spec.md')); }
         catch { return false; }
       }},
       { step: STEPS.implement, verify: (ticketId) => {
         // Implement is proven if tdd-phase.json has at least one cycle with red + green evidence
         try {
           const state = JSON.parse(fs.readFileSync(
-            path.join(TASKS_BASE, ticketId, 'tdd-phase.json'), 'utf-8'
+            path.join(TASKS_BASE, safeTicketPath(ticketId), 'tdd-phase.json'), 'utf-8'
           ));
           // Exception mode: config-only or mechanical changes that skip TDD
           if (typeof state.exception === 'string' && state.exception.trim() !== '') return true;
@@ -134,7 +140,7 @@ const WORKFLOWS = [
         try {
           const { execFileSync } = require('child_process');
           const opts = { encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'] };
-          const shaFile = path.join(TASKS_BASE, ticketId, '.last-commit-sha');
+          const shaFile = path.join(TASKS_BASE, safeTicketPath(ticketId), '.last-commit-sha');
           const headSha = execFileSync('git', ['rev-parse', 'HEAD'], opts).trim();
 
           let baseBranch = 'origin/main';
@@ -188,7 +194,7 @@ const WORKFLOWS = [
       { step: STEPS.check, verify: (ticketId) => {
         // Check is proven if all required report files exist
         try {
-          const dir = path.join(TASKS_BASE, ticketId);
+          const dir = path.join(TASKS_BASE, safeTicketPath(ticketId));
           const required = ['code-review.check.md', 'tests.check.md', 'completion.check.md', 'README.md'];
           if (!required.every(f => fs.existsSync(path.join(dir, f)))) return false;
           // At least one QA report must exist (qa-*.check.md)
@@ -260,7 +266,7 @@ const WORKFLOWS = [
             10
           );
           if (commentCount > 0) {
-            const accountabilityFile = path.join(TASKS_BASE, ticketId, 'review-accountability.json');
+            const accountabilityFile = path.join(TASKS_BASE, safeTicketPath(ticketId), 'review-accountability.json');
             if (!fs.existsSync(accountabilityFile)) return false;
             const entries = JSON.parse(fs.readFileSync(accountabilityFile, 'utf-8'));
             if (!Array.isArray(entries) || entries.length < commentCount) return false;
@@ -290,7 +296,7 @@ const WORKFLOWS = [
       { step: STEPS.reports, verify: (ticketId) => {
         // Reports is proven if all required check files exist and show APPROVED/COMPLETE
         try {
-          const dir = path.join(TASKS_BASE, ticketId);
+          const dir = path.join(TASKS_BASE, safeTicketPath(ticketId));
           const required = [
             { file: 'tests.check.md',       pattern: /Status:\s*APPROVED/i },
             { file: 'code-review.check.md',  pattern: /Status:\s*APPROVED/i },
@@ -631,7 +637,7 @@ function getTicketId() {
 }
 
 function loadStateFile(ticketId, stateFile) {
-  const p = path.join(TASKS_BASE, ticketId, stateFile);
+  const p = path.join(TASKS_BASE, safeTicketPath(ticketId), stateFile);
   try {
     return JSON.parse(fs.readFileSync(p, 'utf-8'));
   } catch {
@@ -639,7 +645,7 @@ function loadStateFile(ticketId, stateFile) {
     // may not exist if the state was written before per-workflow split.
     // Try the legacy .workflow-state.json and check the workflow field matches.
     if (stateFile !== '.workflow-state.json' && stateFile.endsWith('.workflow-state.json')) {
-      const legacyPath = path.join(TASKS_BASE, ticketId, '.workflow-state.json');
+      const legacyPath = path.join(TASKS_BASE, safeTicketPath(ticketId), '.workflow-state.json');
       try {
         const legacy = JSON.parse(fs.readFileSync(legacyPath, 'utf-8'));
         // Derive expected workflow name from stateFile: .work-pr.workflow-state.json -> work-pr
@@ -662,7 +668,7 @@ function getCurrentStep(state, steps) {
 }
 
 function loadEvidence(ticketId, evidenceFile) {
-  const p = path.join(TASKS_BASE, ticketId, evidenceFile);
+  const p = path.join(TASKS_BASE, safeTicketPath(ticketId), evidenceFile);
   try {
     return JSON.parse(fs.readFileSync(p, 'utf-8'));
   } catch {
@@ -672,7 +678,7 @@ function loadEvidence(ticketId, evidenceFile) {
 
 // Atomic evidence writes — write to tmp then rename
 function saveEvidence(ticketId, evidenceFile, evidence) {
-  const dir = path.join(TASKS_BASE, ticketId);
+  const dir = path.join(TASKS_BASE, safeTicketPath(ticketId));
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
   const target = path.join(dir, evidenceFile);
   const tmp = `${target}.tmp.${process.pid}`;
@@ -907,7 +913,7 @@ function handlePreToolUse(hookData) {
             const tokenData = {
               agent: normalizeAgentName(detectedAgent),
               timestamp: Date.now(),
-              tasksBase: ticketId ? path.join(TASKS_BASE, ticketId) : null,
+              tasksBase: ticketId ? path.join(TASKS_BASE, safeTicketPath(ticketId)) : null,
             };
             fs.writeSync(fd, JSON.stringify(tokenData));
           } finally {
@@ -1072,7 +1078,7 @@ function handlePostToolUse(hookData) {
 
     // (Patch 14) Strengthen pr evidence: verify .pr-update-sha matches HEAD
     if (wf.name === 'work' && matchedStep === STEPS.pr) {
-      const tasksDir = path.join(TASKS_BASE, ticketId);
+      const tasksDir = path.join(TASKS_BASE, safeTicketPath(ticketId));
       const prShaFile = path.join(tasksDir, '.pr-update-sha');
       let prShaOk = false;
       try {

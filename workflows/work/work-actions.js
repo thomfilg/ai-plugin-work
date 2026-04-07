@@ -21,6 +21,11 @@ function getTasksBase() {
 }
 // TASKS_BASE is lazy-resolved on first use via getTasksBase() — safe at require() time
 
+function safeId(ticketId) {
+  try { return require('../lib/config').safeTicketId(ticketId); }
+  catch { return ticketId; }
+}
+
 /**
  * Load actions from .work-actions.json for a given ticket.
  * @param {string} ticketId
@@ -28,7 +33,7 @@ function getTasksBase() {
  */
 function loadActions(ticketId) {
   try {
-    const filePath = path.join(getTasksBase(), ticketId, '.work-actions.json');
+    const filePath = path.join(getTasksBase(), safeId(ticketId), '.work-actions.json');
     return JSON.parse(fs.readFileSync(filePath, 'utf-8'));
   } catch {
     return [];
@@ -42,7 +47,7 @@ function loadActions(ticketId) {
  */
 function appendAction(ticketId, action) {
   try {
-    const dir = path.join(getTasksBase(), ticketId);
+    const dir = path.join(getTasksBase(), safeId(ticketId));
     const filePath = path.join(dir, '.work-actions.json');
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 

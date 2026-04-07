@@ -344,6 +344,33 @@ describe('tdd-phase-state CLI', () => {
     });
   });
 
+  describe('GitHub Issues ticket ID sanitization', () => {
+    it('#NNN ticket IDs resolve to the same path as GH-NNN', () => {
+      const origProvider = process.env.TICKET_PROVIDER;
+      process.env.TICKET_PROVIDER = 'github';
+      try {
+        // Init with #144 format
+        const { exitCode: initExit } = runCli('init "#144"', homeDir);
+        assert.strictEqual(initExit, 0);
+        // TICKET_PROVIDER=github is set at line 350, so sanitizeTicketIdForPath converts #N → GH-N
+        // The state should be stored under GH-144, not #144
+        const ghState = readState(homeDir, 'GH-144');
+        assert.strictEqual(ghState.currentPhase, 'red');
+        assert.strictEqual(ghState.currentCycle, 1);
+
+        // Reading current with #144 should find the same state
+        const { stdout, exitCode } = runCli('current "#144"', homeDir);
+        assert.strictEqual(exitCode, 0);
+        const result = JSON.parse(stdout);
+        assert.strictEqual(result.phase, 'red');
+        assert.strictEqual(result.cycle, 1);
+      } finally {
+        if (origProvider === undefined) delete process.env.TICKET_PROVIDER;
+        else process.env.TICKET_PROVIDER = origProvider;
+      }
+    });
+  });
+
   describe('token gating', () => {
     it('record-red fails without token when WORK_TDD_TOKEN_SKIP is not set', () => {
       runCli('init TEST-TOK', homeDir);

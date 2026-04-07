@@ -26,18 +26,18 @@ describe('get-ticket-id GH-pattern support', () => {
   beforeEach(() => { resetEnv(); });
   after(() => { Object.assign(process.env, originalEnv); });
 
-  it('extracts GH-56 from worktree path as #56', () => {
+  it('extracts GH-56 from worktree path as GH-56', () => {
     process.env.TICKET_PROVIDER = 'github';
     const { getCurrentTaskId } = freshRequire('../get-ticket-id');
     const result = getCurrentTaskId('/home/user/worktrees/my-project-GH-56');
-    assert.equal(result, '#56');
+    assert.equal(result, 'GH-56');
   });
 
   it('extracts GH-123 from worktree path (case insensitive)', () => {
     process.env.TICKET_PROVIDER = 'github';
     const { getCurrentTaskId } = freshRequire('../get-ticket-id');
     const result = getCurrentTaskId('/home/user/worktrees/my-project-gh-123');
-    assert.equal(result, '#123');
+    assert.equal(result, 'GH-123');
   });
 
   it('still extracts PROJ-123 (Jira) from path when not github provider', () => {
@@ -53,6 +53,6 @@ describe('get-ticket-id GH-pattern support', () => {
     const { getCurrentTaskId } = freshRequire('../get-ticket-id');
     // GH-56 should match before the numeric fallback
     const result = getCurrentTaskId('/home/user/worktrees/my-project-GH-56');
-    assert.equal(result, '#56');
+    assert.equal(result, 'GH-56');
   });
 });
