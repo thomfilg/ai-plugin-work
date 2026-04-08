@@ -1,16 +1,22 @@
 #!/usr/bin/env node
 /**
- * PreToolUse Hook: Block QA Agent from Reading Source Code
+ * PreToolUse Hook: Restrict QA Agent Source Code Access
  *
  * This hook only runs in qa-feature-tester context (defined in agent frontmatter).
  * No agent detection needed - we're always in QA context when this executes.
  *
- * ALLOWED: .md, .json, .yaml, .txt, configs, screenshots, reports
+ * POLICY: No validation via code — reading code to decide PASS/FAIL is forbidden.
+ * Navigation hints are allowed (route defs, configs, seeds, docs).
+ *
+ * ALLOWED:
+ * - .md, .json, .yaml, .yml, .txt, .env files (configs, data, docs)
+ * - Route definition files (routes.ts, router.ts, etc.) — for URL discovery
+ * - Seed/fixture/migration files — for test data understanding
+ * - Screenshots, reports, logs
  *
  * BLOCKED:
- * - Extensions: .ts, .tsx, .js, .jsx, .vue, .svelte, .mjs, .cjs
- * - Directories: /src/, /components/, /hooks/, /utils/, /lib/, /services/, /routes/, /pages/, /api/
- * - Bash commands: git diff, git show, cat, head, tail (when targeting code)
+ * - General .ts/.tsx/.js/.jsx source code files (components, services, hooks, utils)
+ * - git diff, git show, git blame (shows implementation)
  */
 
 const fs = require('fs');
@@ -82,6 +88,30 @@ const GIT_CODE_COMMANDS = [
   /\bgit\s+blame\b/,
 ];
 
+// Navigation hints: allowed even if they match blocked extensions/directories
+// These help QA discover URLs, ports, feature flags, and test data — not validate code
+const ALLOWED_FILE_PATTERNS = [
+  /routes?\.(ts|js|tsx|jsx)$/i,          // Route definitions (URL discovery)
+  /router\.(ts|js|tsx|jsx)$/i,           // Router config
+  /\.env/i,                               // Environment files
+  /\.config\.(ts|js|mjs|cjs)$/i,         // Config files (vite, next, etc.)
+  /seed/i,                                // Seed files (test data)
+  /fixture/i,                             // Fixture files (test data)
+  /migration/i,                           // Migration files (schema understanding)
+  /mock/i,                                // Mock data files
+  /\.json$/i,                             // JSON data files
+  /\.yaml$/i,                             // YAML config files
+  /\.yml$/i,                              // YML config files
+  /\.md$/i,                               // Documentation
+  /\.txt$/i,                              // Text files
+  /README/i,                              // README files
+  /package\.json$/i,                      // Package manifest
+];
+
+function isAllowedNavHint(filePath) {
+  return ALLOWED_FILE_PATTERNS.some(p => p.test(filePath));
+}
+
 function checkFileOperation(toolName, toolInput) {
   let targetPath = '';
 
@@ -92,6 +122,11 @@ function checkFileOperation(toolName, toolInput) {
   } else if (toolName === 'Grep') {
     targetPath = toolInput.path || '';
   } else {
+    return null;
+  }
+
+  // Allow navigation hint files even in blocked directories
+  if (isAllowedNavHint(targetPath)) {
     return null;
   }
 
@@ -110,7 +145,19 @@ function checkFileOperation(toolName, toolInput) {
 
   if (!blockReason) return null;
 
-  return `QA: BLOCKED reading ${targetPath} (${blockReason})\n\nUse Playwright to test the running app, not read source code.\nAllowed: mcp__playwright__browser_navigate, browser_snapshot, browser_click\nAllowed: curl for API testing\nAllowed: .md files for documentation`;
+  // Soft-block: directory is blocked but file extension is not code — warn instead of block
+  if (blockReason === 'source code directory') {
+    const hasBlockedExtension = BLOCKED_EXTENSIONS.some(p => p.test(targetPath));
+    if (!hasBlockedExtension) {
+      process.stderr.write(
+        `QA: WARNING — ${targetPath} is in a source directory but doesn't have a code extension.\n` +
+        `Allowing read, but remember: use Playwright to verify behavior, not code inspection.\n`
+      );
+      return null; // Allow through with warning
+    }
+  }
+
+  return `QA: BLOCKED reading ${targetPath} (${blockReason})\n\nYou may read route/config/seed files for URL discovery, but not source code for validation.\nUse Playwright or Chrome MCP to test the running app.\nAllowed: route files, .env, .json, .yaml, .md, seed/fixture files`;
 }
 
 function checkBashCommand(toolInput) {
