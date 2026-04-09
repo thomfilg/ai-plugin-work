@@ -91,7 +91,7 @@ Using the extracted requirement list as your guide, decompose the spec into task
 Each task must modify ONE logical component (e.g., one service, one UI module, one infrastructure unit) and produce ONE verifiable outcome (e.g., an API endpoint works, an agent classifies correctly, a DB table is created). If a task spans multiple components or produces multiple unrelated outcomes, split it.
 
 **Rule 2 — Requirement Coverage:**
-Every requirement from your Step 4.0 list must appear in at least one task's `Requirements Covered` section. Orphan requirements (in spec but not in any task) are a failure. Orphan tasks (no requirement mapping) are a failure.
+Every requirement from your Step 4.0 list must appear in at least one task's `Requirements Covered` section. Orphan requirements (in spec but not in any task) and orphan tasks (no requirement mapping) must be resolved in Step 4.2 before proceeding — add missing mappings or create/merge tasks until coverage is complete.
 
 **Rule 3 — Independent Testability:**
 Every task must be testable in isolation. If you can't write a test for it, it's not a task — it's part of another task.
