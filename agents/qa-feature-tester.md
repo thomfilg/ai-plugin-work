@@ -53,14 +53,14 @@ hooks:
       hooks:
         - type: command
           command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/qa-feature-tester/track-navigated-url.js"
+    - matcher: "mcp__playwright__browser_take_screenshot"
+      hooks:
+        - type: command
+          command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/qa-feature-tester/screenshot-size-validator.js"
     - matcher: "mcp__playwright__browser_snapshot|mcp__chrome-devtools__take_snapshot"
       hooks:
         - type: command
           command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/qa-feature-tester/qa-screenshot-validator.js"
-    - matcher: "mcp__playwright__browser_take_screenshot"
-      hooks: # Validates screenshot file size (warns >150KB, deletes >200KB)
-        - type: command
-          command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/qa-feature-tester/screenshot-size-validator.js"
   Stop:
     - hooks:
         - type: command

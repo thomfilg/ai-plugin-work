@@ -42,11 +42,11 @@ async function main() {
     }
 
     // Check: Evidence of browser MCP usage — require tool name + "Result:" on same line
-    const browserToolPattern = /`?mcp__(playwright(__headed)?|claude-in-chrome)__\w+`?\s*[-–—]\s*Result:\s*(SUCCESS|FAIL)/i;
+    const browserToolPattern = /`?mcp__(playwright|claude-in-chrome)__\w+`?\s*[-–—]\s*Result:\s*(SUCCESS|FAIL)/i;
     const hasBrowserMCP = browserToolPattern.test(content);
 
     if (!hasBrowserMCP && !content.includes('INFRASTRUCTURE_FAILURE')) {
-      issues.push('No structured browser tool evidence — expected `mcp__playwright__...`, `mcp__playwright__headed__...`, or `mcp__claude-in-chrome__...`, and each tool must show "Result: SUCCESS" or "Result: FAIL"');
+      issues.push('No structured browser tool evidence — expected `mcp__playwright__...` or `mcp__claude-in-chrome__...` tool calls, each with "Result: SUCCESS" or "Result: FAIL"');
     }
 
     // Check: If INFRASTRUCTURE_FAILURE, must have MCP diagnostics
