@@ -67,7 +67,7 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
         try { return fs.existsSync(path.join(TASKS_BASE, safeTicketPath(ticketId), 'spec.md')); }
         catch { return false; }
       }},
-      { step: STEPS.tasks, verify: (ticketId) => { // verify remains active even though tasks is in softSteps -- used by evidence checks
+      { step: STEPS.tasks, verify: (ticketId) => { // verify remains active -- used by evidence checks
         try { return fs.existsSync(path.join(TASKS_BASE, safeTicketPath(ticketId), 'tasks.md')); }
         catch { return false; } // fail-safe: assume tasks not generated
       }}, // verify-only entry; tool-pattern mapping follows on next line
@@ -288,7 +288,7 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
     { pattern: /^qa-.*\.check\.md$/,     step: STEPS.check, agents: ['qa-feature-tester', 'qa-api-tester'] },
     { basename: 'code-review-reply.check.md', step: STEPS.check, agents: ['developer-nodejs-tdd', 'developer-react-senior', 'developer-devops'] },
     { basename: 'review-accountability.json', step: STEPS.follow_up, agents: ['follow-up-pr'] },
-  ];
+  ]; // end artifactRules
 
   return { workflow, artifactRules };
 };

@@ -106,6 +106,7 @@ function discoverWorkflows() {
 
 const { workflows: WORKFLOWS, artifactRules: ARTIFACT_RULES } = discoverWorkflows();
 
+// all workflow definitions auto-discovered above
 // Protected state file basenames — block direct Edit/Write/MultiEdit/Bash writes
 const { buildProtectedBasenames, basenameProtector, createFileProtector } = require(path.join(__dirname, '..', 'protect-state-files'));
 const PROTECTED_STATE_BASENAMES = buildProtectedBasenames(WORKFLOWS, ['.work-actions.json', '.pr-update-sha', '.workflow-state.json', '.check.workflow-state.json']);

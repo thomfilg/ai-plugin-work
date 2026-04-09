@@ -663,7 +663,9 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg, suffix)
   if (taskData && !taskState && s?.workState) {
     try {
       const wsPath = path.join(__dirname, 'work-state.js');
-      run(`node "${wsPath}" task-init "${safeName}" ${taskData.length}`);
+      execFileSync(process.execPath, [wsPath, 'task-init', safeName, String(taskData.length)], {
+        encoding: 'utf-8', timeout: 5000, stdio: 'pipe',
+      });
     } catch { /* fail-open: task tracking init failure should not block plan */ }
   }
 
@@ -742,7 +744,7 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg, suffix)
     if (checkEntry) {
       checkEntry.nextAction = 'advance_task'; // consumed by /work SKILL.md agent logic, not orchestrator code
       checkEntry.taskInfo = { // metadata for agent to display progress
-        current: currentTaskIdx + 1,
+        current: currentTaskIdx + 1, // 1-based display index
         total: taskData.length,
         nextTask: taskData[currentTaskIdx + 1]?.title || 'unknown', // only set when more tasks remain
       };
