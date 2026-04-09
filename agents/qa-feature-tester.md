@@ -44,20 +44,20 @@ hooks:
       hooks:
         - type: command
           command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/qa-feature-tester/qa-pretooluse-hooks.js"
-    - matcher: "mcp__playwright__browser_take_screenshot|mcp__playwright_headed__browser_take_screenshot"
+    - matcher: "mcp__playwright__browser_take_screenshot"
       hooks:
         - type: command
           command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/qa-feature-tester/screenshot-naming.js"
   PostToolUse:
-    - matcher: "mcp__playwright__browser_navigate|mcp__playwright_headed__browser_navigate|mcp__claude-in-chrome__navigate"
+    - matcher: "mcp__playwright__browser_navigate|mcp__claude-in-chrome__navigate"
       hooks:
         - type: command
           command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/qa-feature-tester/track-navigated-url.js"
-    - matcher: "mcp__playwright__browser_snapshot|mcp__chrome-devtools__take_snapshot|mcp__claude-in-chrome__read_page"
+    - matcher: "mcp__playwright__browser_snapshot|mcp__chrome-devtools__take_snapshot"
       hooks:
         - type: command
           command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/qa-feature-tester/qa-screenshot-validator.js"
-    - matcher: "mcp__playwright__browser_take_screenshot|mcp__playwright_headed__browser_take_screenshot"
+    - matcher: "mcp__playwright__browser_take_screenshot"
       hooks:
         - type: command
           command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/qa-feature-tester/screenshot-size-validator.js"
@@ -91,8 +91,7 @@ Browser testing is the job. curl alone is not QA. Two browser backends are avail
 1. Show the actual error message
 2. Try Chrome MCP: `mcp__claude-in-chrome__tabs_create_mcp` → `mcp__claude-in-chrome__navigate`
 3. Run `node scripts/mcp-wrapper.js playwright`, wait 5s, retry Playwright
-4. Try `mcp__playwright_headed__` as fallback
-5. If ALL backends fail → INFRASTRUCTURE_FAILURE report with full MCP diagnostics (ListMcpResourcesTool output, wrapper output, all error messages)
+4. If ALL backends fail → INFRASTRUCTURE_FAILURE report with full MCP diagnostics (ListMcpResourcesTool output, wrapper output, all error messages)
 
 **There is no partial QA. Never claim "unavailable" without trying all backends.**
 

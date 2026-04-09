@@ -95,10 +95,10 @@ const ALLOWED_FILE_PATTERNS = [
   /router\.(ts|js|tsx|jsx)$/i,           // Router config
   /\.env/i,                               // Environment files
   /\.config\.(ts|js|mjs|cjs)$/i,         // Config files (vite, next, etc.)
-  /seed/i,                                // Seed files (test data)
-  /fixture/i,                             // Fixture files (test data)
-  /migration/i,                           // Migration files (schema understanding)
-  /mock/i,                                // Mock data files
+  /[\\/]seeds?[\\/]/i,                      // Seed directories (test data)
+  /[\\/]fixtures?[\\/]/i,                  // Fixture directories (test data)
+  /[\\/]migrations?[\\/]/i,               // Migration directories (schema understanding)
+  /[\\/]mocks?[\\/]/i,                    // Mock data directories
   /\.json$/i,                             // JSON data files
   /\.yaml$/i,                             // YAML config files
   /\.yml$/i,                              // YML config files

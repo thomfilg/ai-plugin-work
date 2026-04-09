@@ -46,7 +46,7 @@ async function main() {
     const hasBrowserMCP = browserToolPattern.test(content);
 
     if (!hasBrowserMCP && !content.includes('INFRASTRUCTURE_FAILURE')) {
-      issues.push('No structured browser tool evidence — each tool must show "Result: SUCCESS" or "Result: FAIL"');
+      issues.push('No structured browser tool evidence — expected `mcp__playwright__...`, `mcp__playwright__headed__...`, or `mcp__claude-in-chrome__...`, and each tool must show "Result: SUCCESS" or "Result: FAIL"');
     }
 
     // Check: If INFRASTRUCTURE_FAILURE, must have MCP diagnostics

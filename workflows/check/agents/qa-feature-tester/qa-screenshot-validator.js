@@ -1,7 +1,6 @@
 #!/usr/bin/env node
 
 const fs = require('fs');
-const path = require('path');
 
 /**
  * PostToolUse hook to validate QA screenshots
@@ -186,7 +185,15 @@ async function main() {
     }
 
     let actionLines;
-    if (!isTransient) {
+    if (errors.length === 0 && warnings.length > 0) {
+      // Warning-only (e.g., loading indicators): suggest waiting, not failing
+      actionLines = [
+        'LOADING/WARNING detected — content may not have fully loaded:',
+        '  • Wait a few seconds for the page to finish loading',
+        '  • Take a new snapshot to verify content rendered',
+        '  • Only mark FAIL if content never loads after retrying',
+      ];
+    } else if (!isTransient) {
       // Non-transient: fail immediately, no retry
       actionLines = [
         'NON-TRANSIENT ERROR — mark FAIL immediately, do NOT retry:',
