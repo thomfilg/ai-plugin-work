@@ -72,7 +72,7 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
         catch { return false; } // fail-safe: assume tasks not generated
       }}, // verify-only entry; tool-pattern mapping follows on next line
       { step: STEPS.tasks, tool: 'Skill', field: 'skill', pattern: /^(work-workflow:)?split-in-tasks$/ },
-      { step: STEPS.implement, verify: (ticketId) => {
+      { step: STEPS.implement, verify: (ticketId) => { // tasks step gating is orchestrator-controlled via SKIP/RUN plan actions
         // Implement is proven if tdd-phase.json has at least one cycle with red + green evidence
         try {
           const state = JSON.parse(fs.readFileSync(

@@ -187,7 +187,7 @@ function parseTasks(tasksDir) {
     }); // push parsed task into array
   } // end task parsing loop
 
-  return tasks.length > 0 ? tasks : null;
+  return tasks.length > 0 ? tasks : null; // null signals no tasks parsed (empty file handled at line 126)
 }
 
 function buildTaskPrompt(task, tasksDir) {
