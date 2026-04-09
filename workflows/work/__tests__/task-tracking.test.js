@@ -231,7 +231,7 @@ Verify all prior tasks are correctly implemented.
         stdio: ['pipe', 'pipe', 'pipe'],
         env: {
           ...process.env,
-          TASKS_BASE: TEMP_TASKS_BASE,
+          TASKS_BASE: TEMP_TASKS_BASE, // both base paths use temp dir for isolation
           WORKTREES_BASE: TEMP_TASKS_BASE,
           SESSION_GUARD_ENABLED: '0',
         },
