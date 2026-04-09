@@ -269,4 +269,57 @@ Verify all prior tasks are correctly implemented.
       'implement should reference Task 1'
     );
   });
+
+  it('should DEFER tasks step when spec.md is missing', async () => {
+    const tasksDir = path.join(TEMP_TASKS_BASE, 'GH-501');
+    fs.mkdirSync(tasksDir, { recursive: true });
+
+    // Create brief but NO spec.md and NO tasks.md
+    fs.writeFileSync(path.join(tasksDir, 'brief.md'), '# Brief\nSome brief content');
+
+    // Init work state
+    fs.writeFileSync(path.join(tasksDir, '.work-state.json'), JSON.stringify({
+      ticketId: 'GH-501',
+      status: 'in_progress',
+      stepStatus: {},
+      checkProgress: {},
+      errors: [],
+      startTime: new Date().toISOString(),
+      lastUpdate: new Date().toISOString(),
+    }));
+
+    const ORCH_PATH = path.join(__dirname, '..', 'work.workflow.js');
+    const { result } = await new Promise((resolve, reject) => {
+      const proc = spawn('node', [ORCH_PATH, 'GH-501'], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: {
+          ...process.env,
+          TASKS_BASE: TEMP_TASKS_BASE,
+          WORKTREES_BASE: TEMP_TASKS_BASE,
+          SESSION_GUARD_ENABLED: '0',
+        },
+      });
+      let stdout = '';
+      let stderr = '';
+      proc.stdout.on('data', (d) => { stdout += d.toString(); });
+      proc.stderr.on('data', (d) => { stderr += d.toString(); });
+      proc.on('close', (code) => {
+        try {
+          resolve({ result: JSON.parse(stdout.trim()), code });
+        } catch (e) {
+          resolve({ result: null, stdout, stderr, code, parseError: e.message });
+        }
+      });
+      proc.on('error', reject);
+    });
+
+    assert.ok(result, 'Orchestrator should return a plan');
+    assert.ok(result.plan, 'Plan should exist');
+
+    const tasksStep = result.plan.find(p => p.step === 'tasks');
+    assert.ok(tasksStep, 'tasks step should exist in plan');
+    assert.equal(tasksStep.action, 'DEFER', 'tasks should DEFER when spec.md is missing');
+    assert.equal(tasksStep.agentType, 'skill', 'DEFER tasks should have agentType');
+    assert.ok(tasksStep.agentPrompt, 'DEFER tasks should have agentPrompt');
+  });
 });
