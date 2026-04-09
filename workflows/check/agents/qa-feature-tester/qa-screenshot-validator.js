@@ -5,15 +5,13 @@ const fs = require('fs');
 /**
  * PostToolUse hook to validate QA screenshots
  *
- * After browser_snapshot is taken, checks for error patterns:
- * - "Application Error"
- * - "TypeError:", "Error:", stack traces
- * - Loading spinners that never resolved
- *
- * Warns the agent but doesn't block (allows documenting errors)
+ * After browser_snapshot is taken:
+ * 1. Checks for error patterns in page content
+ * 2. Classifies errors as transient vs non-transient
+ * 3. Tracks retry attempts for transient errors (max 3)
+ * 4. Warns the agent with appropriate guidance
  *
  * EXCEPTION: Skips warning if QA is intentionally testing error scenarios
- * (detected via context clues in recent conversation)
  */
 
 // function logExecution(data) {
@@ -40,7 +38,16 @@ const TESTING_ERRORS_PATTERNS = [
   /failure.*case/i,
 ];
 
-const ERROR_PATTERNS = [
+// Transient errors: worth retrying (build/HMR issues, blank pages, connection refused)
+const TRANSIENT_ERROR_PATTERNS = [
+  /Module not found/i,
+  /Cannot find module/i,
+  /Compilation error/i,
+  /HMR/i,
+  /ECONNREFUSED/i,
+  /Connection refused/i,
+  /Unhandled Runtime Error/i,
+  /Something went wrong/i,
   /Application Error/i,
   /TypeError:/,
   /ReferenceError:/,
@@ -49,12 +56,24 @@ const ERROR_PATTERNS = [
   /undefined is not/i,
   /null is not/i,
   /at\s+\w+\s+\(http/,  // Stack trace pattern
-  /Unhandled Runtime Error/i,
-  /Something went wrong/i,
-  /500 Internal Server Error/i,
-  /404 Not Found/i,
   /Network Error/i,
 ];
+
+// Non-transient errors: do NOT retry, mark FAIL immediately
+const NON_TRANSIENT_ERROR_PATTERNS = [
+  /404 Not Found/i,
+  /401 Unauthorized/i,
+  /403 Forbidden/i,
+  /500 Internal Server Error/i,
+  /Database.*error/i,
+  /ECONNRESET/i,
+];
+
+// Combined for backward compat
+const ERROR_PATTERNS = [...TRANSIENT_ERROR_PATTERNS, ...NON_TRANSIENT_ERROR_PATTERNS];
+
+const RETRY_STATE_FILE = '/tmp/qa-snapshot-retry-state.json';
+const LAST_URL_FILE = '/tmp/qa-last-navigated-url';
 
 const LOADING_PATTERNS = [
   /Loading\.\.\./i,
@@ -91,9 +110,14 @@ async function main() {
   //   preview: toolOutput.substring(0, 200)
   // });
 
-  // Only check browser_snapshot results
-  if (toolName !== 'mcp__playwright__browser_snapshot' &&
-      toolName !== 'mcp__chrome-devtools__take_snapshot') {
+  // Only check snapshot/page-read results
+  const VALIDATED_TOOLS = [
+    'mcp__playwright__browser_snapshot',
+    'mcp__chrome-devtools__take_snapshot',
+    'mcp__claude-in-chrome__read_page',
+    'mcp__claude-in-chrome__get_page_text',
+  ];
+  if (!VALIDATED_TOOLS.includes(toolName)) {
     console.log(JSON.stringify({}));
     return;
   }
@@ -137,26 +161,106 @@ async function main() {
   }
 
   if (errors.length > 0 || warnings.length > 0) {
+    // Classify: is this a transient or non-transient error?
+    const isTransient = errors.some(e =>
+      TRANSIENT_ERROR_PATTERNS.some(p => e.includes(p.toString()))
+    ) && !errors.some(e =>
+      NON_TRANSIENT_ERROR_PATTERNS.some(p => e.includes(p.toString()))
+    );
+    const isWarningOnly = errors.length === 0 && warnings.length > 0;
+    // Track retry state for transient errors (only for actual errors, not warnings)
+    let retryCount = 0;
+    let currentUrl = 'unknown';
+    try {
+      currentUrl = fs.readFileSync(LAST_URL_FILE, 'utf8').trim();
+    } catch {
+      // No URL tracked yet — fall back to 'unknown'
+    }
+    if (isTransient) {
+      try {
+        const state = fs.existsSync(RETRY_STATE_FILE)
+          ? JSON.parse(fs.readFileSync(RETRY_STATE_FILE, 'utf8'))
+          : {};
+        retryCount = (state[currentUrl] || 0) + 1;
+        state[currentUrl] = retryCount;
+        fs.writeFileSync(RETRY_STATE_FILE, JSON.stringify(state));
+      } catch {
+        retryCount = 1;
+      }
+    }
+
+    let actionLines;
+    if (isWarningOnly) {
+      // Warning-only (e.g., loading indicators): suggest waiting, not failing
+      actionLines = [
+        'LOADING/WARNING detected — content may not have fully loaded:',
+        '  • Wait a few seconds for the page to finish loading',
+        '  • Take a new snapshot to verify content rendered',
+        '  • Only mark FAIL if content never loads after retrying',
+      ];
+    } else if (!isTransient) {
+      // Non-transient: fail immediately, no retry
+      actionLines = [
+        'NON-TRANSIENT ERROR — mark FAIL immediately, do NOT retry:',
+        '  • Document this error in your QA report',
+        '  • Mark the test as FAIL',
+        '  • Check console messages for details',
+      ];
+    } else if (retryCount < 3) {
+      // Transient: suggest retry
+      actionLines = [
+        `TRANSIENT ERROR — retry attempt ${retryCount}/3:`,
+        '  • Wait 30 seconds, then refresh the page',
+        '  • Take a new snapshot to check if error persists',
+        '  • Dev servers often fail on first render',
+      ];
+    } else {
+      // Transient but exhausted retries
+      actionLines = [
+        'TRANSIENT ERROR — all 3 retries exhausted:',
+        '  • Mark this test as FAIL',
+        '  • Document error in QA report with retry history',
+        '  • Check console messages for root cause',
+      ];
+      // Reset retry state for this URL
+      try {
+        const state = JSON.parse(fs.readFileSync(RETRY_STATE_FILE, 'utf8'));
+        delete state[currentUrl];
+        fs.writeFileSync(RETRY_STATE_FILE, JSON.stringify(state));
+      } catch { /* ignore */ }
+    }
+
     const message = [
       '',
-      '⚠️  QA SCREENSHOT VALIDATION',
-      '═'.repeat(50),
-      ...errors.map(e => `❌ ${e}`),
-      ...warnings.map(w => `⚡ ${w}`),
+      'QA SNAPSHOT VALIDATION',
+      '─'.repeat(50),
+      ...errors.map(e => `  ${e}`),
+      ...warnings.map(w => `  ${w}`),
       '',
-      'ACTION REQUIRED:',
-      '  • Document this error in your QA report',
-      '  • Do NOT mark this test as "passed"',
-      '  • Check console messages for details',
-      '═'.repeat(50),
+      ...actionLines,
+      '─'.repeat(50),
     ].join('\n');
 
-    // Return as advisory message, don't block
-    console.log(JSON.stringify({
-      message: message
-    }));
+    console.log(JSON.stringify({ message }));
     return;
   }
+
+  // No errors — clear retry state for the current URL only (preserve other URLs' retry history)
+  try {
+    if (fs.existsSync(RETRY_STATE_FILE)) {
+      let currentUrl = 'unknown';
+      try {
+        currentUrl = fs.readFileSync(LAST_URL_FILE, 'utf8').trim();
+      } catch { /* no URL tracked */ }
+      const retryState = JSON.parse(fs.readFileSync(RETRY_STATE_FILE, 'utf8'));
+      delete retryState[currentUrl];
+      if (Object.keys(retryState).length === 0) {
+        fs.unlinkSync(RETRY_STATE_FILE);
+      } else {
+        fs.writeFileSync(RETRY_STATE_FILE, JSON.stringify(retryState));
+      }
+    }
+  } catch { /* ignore */ }
 
   console.log(JSON.stringify({}));
 }
