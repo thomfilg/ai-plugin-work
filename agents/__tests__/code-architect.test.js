@@ -173,7 +173,7 @@ describe('Working Principles #1 enhancement', () => {
 
 describe('Working Principles #4 enhancement', () => {
   it('contains "BEFORE" and "AFTER" and "breaking changes"', () => {
-    const wp4Line = lines.find((l) => l.match(/^4\.\s+\*\*Consider Dependencies/));
+    const wp4Line = lines.find((l) => l.match(/^4\.\s+\*\*Map Dependencies/));
     assert.ok(wp4Line, 'Working Principles #4 must exist');
     assert.ok(wp4Line.includes('BEFORE'), '#4 must contain "BEFORE"');
     assert.ok(wp4Line.includes('AFTER'), '#4 must contain "AFTER"');
