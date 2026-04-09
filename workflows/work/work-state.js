@@ -517,6 +517,11 @@ function initTasksMeta(ticketId, taskCount) {
   let state = loadState(ticketId);
   if (!state) state = initState(ticketId);
 
+  // Idempotent: return existing task tracking if already initialized
+  if (state?.tasksMeta) {
+    return { success: true, tasksMeta: state.tasksMeta, idempotent: true };
+  }
+
   const tasks = [];
   for (let i = 0; i < taskCount; i++) {
     tasks.push({ id: `task_${i + 1}`, status: 'pending' });
