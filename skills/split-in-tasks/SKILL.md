@@ -30,7 +30,7 @@ Resolve the tasks folder:
 1. If an argument is provided and looks like a ticket ID (e.g., `PROJ-123`, `#42`): sanitize it for use as folder name (e.g., `#42` → `GH-42`) to match how other workflow commands resolve task paths
 2. If an argument is provided and is a slug/folder name: use directly
 3. If no argument: detect from current branch — `git branch --show-current | grep -oE '[A-Z]+-[0-9]+'`
-4. If detection fails: stop with error "Could not determine ticket ID. Provide one as argument."
+4. If detection fails: stop with error — "Could not determine ticket ID. Provide one as argument."
 
 Resolve the tasks base directory using the workflow config module (same as `/brief` and `/spec`):
 
