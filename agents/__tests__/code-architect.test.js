@@ -2,7 +2,7 @@
  * Tests for agents/code-architect.md — hardened prompt with specificity
  * constraints and anti-overengineering guards.
  *
- * Run: node --test agents/__tests__/code-architect.test.js
+ * Run: node --test agents/__tests__/code-architect.test.js (also discovered by scripts/run-tests.sh)
  */
 
 const { describe, it } = require('node:test');
