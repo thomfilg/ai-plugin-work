@@ -183,7 +183,7 @@ function parseTasks(tasksDir) {
       suggestedScope,
       rawContent: `## Task ${num}${body}`, // reconstructs original "## Task N — title" header
     });
-  }
+  } // end task parsing loop
 
   return tasks.length > 0 ? tasks : null;
 }
@@ -735,7 +735,7 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg, suffix)
     const checkEntry = plan.find(p => p.step === STEPS.check);
     if (checkEntry) {
       checkEntry.nextAction = 'advance_task'; // consumed by /work SKILL.md agent logic, not orchestrator code
-      checkEntry.taskInfo = {
+      checkEntry.taskInfo = { // metadata for agent to display progress
         current: currentTaskIdx + 1,
         total: taskData.length,
         nextTask: taskData[currentTaskIdx + 1]?.title || 'unknown',
