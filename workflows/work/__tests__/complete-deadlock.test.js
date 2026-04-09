@@ -100,7 +100,7 @@ describe('GH-106: complete step deadlock fix', () => {
     it('complete is in the softSteps set for the work workflow', () => {
       // We read the file and check that 'complete' appears in the softSteps definition
       const src = fs.readFileSync(
-        path.join(__dirname, '..', '..', 'lib', 'hooks', 'enforce-step-workflow.js'),
+        path.join(__dirname, '..', 'workflow-definition.js'),
         'utf-8'
       );
       // The softSteps set should include STEPS.complete

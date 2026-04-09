@@ -199,7 +199,8 @@ node ${CLAUDE_PLUGIN_ROOT}/workflows/work/work.workflow.js PROJ-XXX
 | `2b_transition` | `general-purpose` | `Task(general-purpose)` — transitions Jira status |
 | `brief` | `brief-writer` | `Task(brief-writer)` — generates product brief from ticket requirements |
 | `spec` | `spec-writer` | `Task(spec-writer)` — generates technical spec with test scenarios from brief + codebase |
-| `implement` | `skill` | `Skill(work-implement)` |
+| `tasks` | `skill` | `Skill(split-in-tasks)` — splits spec into ordered implementation tasks |
+| `implement` | `skill` | `Skill(work-implement)` — task-scoped when tasks.md exists |
 | `commit` | `commit-writer` | `Task(commit-writer)` |
 | `check` | `skill` | `Skill(check)` |
 | `cleanup` | `Bash` | `Task(Bash)` — kills tmux dev session |
@@ -214,7 +215,10 @@ node ${CLAUDE_PLUGIN_ROOT}/workflows/work/work.workflow.js PROJ-XXX
 ## State Machine Transitions
 
 ```
-Happy path:  ticket→bootstrap→brief→spec→implement→commit→check→pr→ready→follow_up→ci→cleanup→reports→complete
+Happy path:  ticket→bootstrap→brief→spec→tasks→implement→commit→check→pr→ready→follow_up→ci→cleanup→reports→complete
+
+Task loop (when tasks.md exists):
+  check → implement   (advance to next task after check passes, via nextAction: advance_task)
 
 Retry loops (backward):
   check     → implement   (check found issues)
@@ -223,8 +227,9 @@ Retry loops (backward):
 
 Skip edges (forward):
   bootstrap → spec        (brief disabled, skip to spec)
-  bootstrap → implement   (brief/spec disabled or done)
-  bootstrap → commit      (resume: code already done)
+  spec      → implement   (tasks disabled, skip to implement)
+  bootstrap → implement   (brief/spec/tasks disabled or done)
+  bootstrap → commit      (resume: code already implemented)
   bootstrap → check       (resume: committed, need check)
   brief     → implement   (spec disabled, skip to implement)
   check     → pr          (check passed, go to PR)
@@ -248,6 +253,9 @@ Skip edges (forward):
 8. **Don't process large outputs** — Agent summaries are enough for decision-making
 9. `implement` enforces TDD — transitions out are blocked without
    recorded TDD evidence proving GREEN or providing an explicit exception reason
+10. When `tasks.md` exists, implement ONE task per `implement → commit → check` cycle.
+    After `check` passes and plan has `nextAction: advance_task`:
+    run `node work-state.js task-advance <TICKET_ID>`, then transition to `implement`.
 
 ---
 

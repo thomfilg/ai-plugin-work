@@ -31,7 +31,16 @@ Run all applicable automated tests and report the results with actual output.
 
 ## Planning Artifact Awareness
 
-If planning documents are referenced in your prompt (brief.md, spec.md, pre-planning.md), read them to understand what tests should exist. After running tests, note if the test count seems low relative to the planned E2E scenarios or components.
+If planning documents are referenced in your prompt, read them to understand what tests should exist:
+
+```
+${TASKS_BASE}/${TICKET_ID}/brief.md
+${TASKS_BASE}/${TICKET_ID}/spec.md
+${TASKS_BASE}/${TICKET_ID}/tasks.md
+${TASKS_BASE}/${TICKET_ID}/**/pre-planning.md
+```
+
+If `tasks.md` exists, each task's `Test:` lines and acceptance criteria define the expected test coverage. After running tests, note if the test count seems low relative to the planned scenarios or components.
 
 ## What You DO (Run These Commands)
 

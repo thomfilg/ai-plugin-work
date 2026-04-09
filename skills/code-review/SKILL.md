@@ -86,7 +86,7 @@ Changed files:
 ${CHANGED_FILES}
 
 Follow your full pre-review workflow:
-1. Read task documents (brief.md, spec.md) if they exist
+1. Read task documents (brief.md, spec.md, tasks.md) if they exist
 2. Review all changed implementation files
 3. Review all changed test files
 4. Verify file coverage

@@ -503,6 +503,120 @@ function completeSubtask(ticketId, subtaskIndex) {
   return state;
 }
 
+// ─── Task Progress Functions ─────────────────────────────────────────────────
+
+/**
+ * Initialize task tracking from tasks.md parsed data.
+ * Called after tasks step completes.
+ */
+function initTasksMeta(ticketId, taskCount) {
+  if (!Number.isInteger(taskCount) || taskCount <= 0) {
+    return { error: `Invalid taskCount: ${taskCount}. Must be a positive integer.` };
+  }
+
+  let state = loadState(ticketId);
+  if (!state) state = initState(ticketId);
+
+  // Idempotent: return existing task tracking if already initialized
+  if (state?.tasksMeta) {
+    return { success: true, tasksMeta: state.tasksMeta, idempotent: true };
+  }
+
+  const tasks = [];
+  for (let i = 0; i < taskCount; i++) {
+    tasks.push({ id: `task_${i + 1}`, status: 'pending' });
+  }
+
+  state.tasksMeta = {
+    totalTasks: taskCount,
+    currentTaskIndex: 0,
+    tasks,
+  };
+
+  return saveState(ticketId, state);
+} // initTasksMeta validates taskCount > 0 and initializes state if missing (line 513-515)
+
+/**
+ * Get the current task info.
+ */
+function getTaskCurrent(ticketId) {
+  const state = loadState(ticketId);
+  if (!state?.tasksMeta) return { error: 'No task tracking initialized' };
+
+  const meta = state.tasksMeta;
+  const idx = meta.currentTaskIndex;
+  if (idx >= meta.tasks.length) return { done: true, message: 'All tasks completed' };
+
+  return {
+    id: meta.tasks[idx].id,
+    index: idx,
+    status: meta.tasks[idx].status,
+    total: meta.totalTasks,
+  };
+}
+
+/**
+ * Advance to the next task. Marks current as completed, moves pointer.
+ * Returns the next task info or { done: true } if all tasks are complete.
+ */
+function advanceTask(ticketId) {
+  let state = loadState(ticketId);
+  if (!state?.tasksMeta) return { error: 'No task tracking initialized' };
+
+  const meta = state.tasksMeta;
+  const idx = meta.currentTaskIndex;
+
+  // Already past the end — idempotent return
+  if (idx >= meta.tasks.length) {
+    return { done: true, message: 'All tasks already completed' };
+  }
+
+  // Mark current task as completed
+  if (idx < meta.tasks.length) {
+    meta.tasks[idx].status = 'completed';
+  }
+
+  // Advance pointer
+  meta.currentTaskIndex = idx + 1;
+
+  saveState(ticketId, state);
+
+  if (meta.currentTaskIndex >= meta.tasks.length) {
+    return { done: true, message: 'All tasks completed', completedTask: idx }; // terminal — all tasks done
+  }
+  // Normal advance — mark current completed, move to next
+  return {
+    done: false,
+    completedTask: idx,
+    nextTask: {
+      id: meta.tasks[meta.currentTaskIndex].id,
+      index: meta.currentTaskIndex,
+      status: meta.tasks[meta.currentTaskIndex].status,
+      total: meta.totalTasks,
+    },
+  };
+}
+
+/**
+ * Get a specific task by index.
+ */
+function getTaskByIndex(ticketId, taskIndex) {
+  const state = loadState(ticketId);
+  if (!state?.tasksMeta) return { error: 'No task tracking initialized' };
+
+  const idx = parseInt(taskIndex, 10);
+  if (isNaN(idx) || idx < 0 || idx >= state.tasksMeta.tasks.length) {
+    return { error: `Invalid task index: ${taskIndex}. Valid range: 0-${state.tasksMeta.tasks.length - 1}` };
+  }
+
+  return {
+    id: state.tasksMeta.tasks[idx].id,
+    index: idx,
+    status: state.tasksMeta.tasks[idx].status,
+    total: state.tasksMeta.totalTasks,
+  };
+}
+
 // CLI handler
 async function main() {
   const args = process.argv.slice(2);
@@ -511,7 +625,7 @@ async function main() {
 
   if (!command) {
     console.error('Usage: node work-state.js <command> <ticket-id> [args...]');
-    console.error('Commands: init, get, set-step, set-check, add-error, complete, resume-info, init-subtask, complete-subtask, active-subtask');
+    console.error('Commands: init, get, set-step, set-check, add-error, complete, resume-info, init-subtask, complete-subtask, active-subtask, task-init, task-current, task-advance, task-get');
     process.exit(1);
   }
 
@@ -580,6 +694,42 @@ async function main() {
       console.log(JSON.stringify(result, null, 2));
       break;
 
+    case 'task-init':
+      result = initTasksMeta(ticketId, parseInt(args[2], 10));
+      if (result && result.error) {
+        console.error(JSON.stringify(result));
+        process.exit(1);
+      }
+      console.log(JSON.stringify({ success: true, tasksMeta: result.tasksMeta }));
+      break;
+
+    case 'task-current':
+      result = getTaskCurrent(ticketId);
+      if (result && result.error) {
+        console.error(JSON.stringify(result));
+        process.exit(1);
+      }
+      console.log(JSON.stringify(result, null, 2));
+      break;
+
+    case 'task-advance':
+      result = advanceTask(ticketId);
+      if (result && result.error) {
+        console.error(JSON.stringify(result));
+        process.exit(1);
+      }
+      console.log(JSON.stringify(result, null, 2));
+      break;
+
+    case 'task-get':
+      result = getTaskByIndex(ticketId, args[2]);
+      if (result && result.error) {
+        console.error(JSON.stringify(result));
+        process.exit(1);
+      }
+      console.log(JSON.stringify(result, null, 2));
+      break;
+
     default:
       console.error(`Unknown command: ${command}`);
       process.exit(1);
@@ -610,6 +760,10 @@ module.exports = {
   loadActiveSubtaskState,
   completeSubtask,
   autoInitTdd,
+  initTasksMeta,
+  getTaskCurrent,
+  advanceTask,
+  getTaskByIndex,
   STEPS,
   SUBTASK_STEPS,
   CHECK_AGENTS

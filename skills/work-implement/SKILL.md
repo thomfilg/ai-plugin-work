@@ -95,9 +95,18 @@ Branch: <branch-name>
    - Look for similar implementations in the codebase
    - Follow established conventions
 
+4. **Check for task plan:**
+   - Look for `${TASKS_BASE}/${TICKET_ID}/tasks.md`
+   - If it exists and your prompt specifies a task (e.g., "Task 3 — ..."), use it as the implementation roadmap
+   - Implement ONLY the deliverables listed in the specified task
+   - Reference the `_Requirements:_` annotations to ensure nothing is missed
+   - After completing each deliverable, verify its `Test:` acceptance criterion is met
+
 ### Step 2: Plan with TodoWrite
 
-Break the implementation into 3-7 subtasks:
+If `tasks.md` exists and a specific task is referenced in your prompt, derive TodoWrite items directly from that task's deliverables instead of creating a plan from scratch. This ensures the implementation follows the pre-planned decomposition.
+
+Otherwise, break the implementation into 3-7 subtasks:
 
 ```
 TodoWrite([

@@ -131,7 +131,7 @@ describe('work-orchestrator.js', () => {
       assert.ok(result.transitions);
       assert.ok(result.steps.includes('ticket'));
       assert.ok(result.steps.includes('complete'));
-      assert.equal(result.steps.length, 14);
+      assert.equal(result.steps.length, 15);
     });
 
     it('should include follow_up in steps', async () => {
@@ -336,6 +336,7 @@ describe('work-orchestrator.js', () => {
       await runOrchestrator(['transition', TEST_TICKET, 'bootstrap'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'brief'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'spec'], transOpts);
+      await runOrchestrator(['transition', TEST_TICKET, 'tasks'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'implement'], transOpts);
       const { result } = await runOrchestrator(['transition', TEST_TICKET, 'pr'], transOpts);
       assert.equal(result.error, true);
@@ -348,6 +349,7 @@ describe('work-orchestrator.js', () => {
       await runOrchestrator(['transition', TEST_TICKET, 'bootstrap'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'brief'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'spec'], transOpts);
+      await runOrchestrator(['transition', TEST_TICKET, 'tasks'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'implement'], transOpts);
       writeTddException(TEMP_TASKS_DIR, TEST_TICKET);
       await runOrchestrator(['transition', TEST_TICKET, 'commit'], transOpts);
@@ -370,6 +372,7 @@ describe('work-orchestrator.js', () => {
       await runOrchestrator(['transition', TEST_TICKET, 'bootstrap'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'brief'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'spec'], transOpts);
+      await runOrchestrator(['transition', TEST_TICKET, 'tasks'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'implement'], transOpts);
       const { result } = await runOrchestrator(['transitions', TEST_TICKET], transOpts);
       assert.equal(result.currentStep, 'implement');
@@ -382,6 +385,7 @@ describe('work-orchestrator.js', () => {
       await runOrchestrator(['transition', TEST_TICKET, 'bootstrap']);
       await runOrchestrator(['transition', TEST_TICKET, 'brief']);
       await runOrchestrator(['transition', TEST_TICKET, 'spec']);
+      await runOrchestrator(['transition', TEST_TICKET, 'tasks']);
       await runOrchestrator(['transition', TEST_TICKET, 'implement']);
       writeTddException(TASKS_BASE, TEST_TICKET);
       await runOrchestrator(['transition', TEST_TICKET, 'commit']);
@@ -396,7 +400,7 @@ describe('work-orchestrator.js', () => {
   describe('state machine logic', () => {
     it('should have 14 steps total', async () => {
       const { result } = await runOrchestrator(['graph']);
-      assert.equal(result.steps.length, 14);
+      assert.equal(result.steps.length, 15);
     });
 
     it('should not allow self-transitions (except complete)', async () => {
@@ -611,6 +615,7 @@ describe('work-orchestrator.js', () => {
         await runOrchestrator(['transition', T, 'bootstrap'], o);
         await runOrchestrator(['transition', T, 'brief'], o);
         await runOrchestrator(['transition', T, 'spec'], o);
+        await runOrchestrator(['transition', T, 'tasks'], o);
         await runOrchestrator(['transition', T, 'implement'], o);
         writeTddException(path.join(TMP, 'tasks'), T);
         await runOrchestrator(['transition', T, 'commit'], o);
@@ -630,6 +635,7 @@ describe('work-orchestrator.js', () => {
         await runOrchestrator(['transition', TEST_TICKET, 'bootstrap'], o);
         await runOrchestrator(['transition', TEST_TICKET, 'brief'], o);
         await runOrchestrator(['transition', TEST_TICKET, 'spec'], o);
+        await runOrchestrator(['transition', TEST_TICKET, 'tasks'], o);
         await runOrchestrator(['transition', TEST_TICKET, 'implement'], o);
         writeTddException(TASKS_BASE, TEST_TICKET);
         await runOrchestrator(['transition', TEST_TICKET, 'commit'], o);
@@ -651,6 +657,7 @@ describe('work-orchestrator.js', () => {
         await runOrchestrator(['transition', TEST_TICKET, 'bootstrap'], o);
         await runOrchestrator(['transition', TEST_TICKET, 'brief'], o);
         await runOrchestrator(['transition', TEST_TICKET, 'spec'], o);
+        await runOrchestrator(['transition', TEST_TICKET, 'tasks'], o);
         await runOrchestrator(['transition', TEST_TICKET, 'implement'], o);
         writeTddException(TASKS_BASE, TEST_TICKET);
         await runOrchestrator(['transition', TEST_TICKET, 'commit'], o);
@@ -759,6 +766,7 @@ describe('work-orchestrator.js', () => {
       await runOrchestrator(['transition', T, 'bootstrap'], o);
       await runOrchestrator(['transition', T, 'brief'], o);
       await runOrchestrator(['transition', T, 'spec'], o);
+      await runOrchestrator(['transition', T, 'tasks'], o);
       await runOrchestrator(['transition', T, 'implement'], o);
       writeTddException(TEMP_TASKS, T);
       await runOrchestrator(['transition', T, 'commit'], o);
@@ -780,6 +788,7 @@ describe('work-orchestrator.js', () => {
         await runOrchestrator(['transition', T2, 'bootstrap'], o);
         await runOrchestrator(['transition', T2, 'brief'], o);
         await runOrchestrator(['transition', T2, 'spec'], o);
+        await runOrchestrator(['transition', T2, 'tasks'], o);
         await runOrchestrator(['transition', T2, 'implement'], o);
         writeTddException(TEMP_TASKS, T2);
         await runOrchestrator(['transition', T2, 'commit'], o);
@@ -804,6 +813,7 @@ describe('work-orchestrator.js', () => {
         await runOrchestrator(['transition', T3, 'bootstrap'], o);
         await runOrchestrator(['transition', T3, 'brief'], o);
         await runOrchestrator(['transition', T3, 'spec'], o);
+        await runOrchestrator(['transition', T3, 'tasks'], o);
         await runOrchestrator(['transition', T3, 'implement'], o);
         writeTddException(TEMP_TASKS, T3);
         await runOrchestrator(['transition', T3, 'commit'], o);
@@ -829,6 +839,7 @@ describe('work-orchestrator.js', () => {
         await runOrchestrator(['transition', T_ARCHIVE, 'bootstrap'], o);
         await runOrchestrator(['transition', T_ARCHIVE, 'brief'], o);
         await runOrchestrator(['transition', T_ARCHIVE, 'spec'], o);
+        await runOrchestrator(['transition', T_ARCHIVE, 'tasks'], o);
         await runOrchestrator(['transition', T_ARCHIVE, 'implement'], o);
         writeTddException(TEMP_TASKS, T_ARCHIVE);
         await runOrchestrator(['transition', T_ARCHIVE, 'commit'], o);
@@ -863,6 +874,7 @@ describe('work-orchestrator.js', () => {
         await runOrchestrator(['transition', T_RUNS, 'bootstrap'], o);
         await runOrchestrator(['transition', T_RUNS, 'brief'], o);
         await runOrchestrator(['transition', T_RUNS, 'spec'], o);
+        await runOrchestrator(['transition', T_RUNS, 'tasks'], o);
         await runOrchestrator(['transition', T_RUNS, 'implement'], o);
         writeTddException(TEMP_TASKS, T_RUNS);
         await runOrchestrator(['transition', T_RUNS, 'commit'], o);
@@ -891,6 +903,7 @@ describe('work-orchestrator.js', () => {
         await runOrchestrator(['transition', T4, 'bootstrap'], o);
         await runOrchestrator(['transition', T4, 'brief'], o);
         await runOrchestrator(['transition', T4, 'spec'], o);
+        await runOrchestrator(['transition', T4, 'tasks'], o);
         await runOrchestrator(['transition', T4, 'implement'], o);
         writeTddException(TEMP_TASKS, T4);
         await runOrchestrator(['transition', T4, 'commit'], o);
@@ -947,6 +960,7 @@ describe('work-orchestrator.js', () => {
       await runOrchestrator(['transition', TICKET, 'bootstrap'], envOpts);
       await runOrchestrator(['transition', TICKET, 'brief'], envOpts);
       await runOrchestrator(['transition', TICKET, 'spec'], envOpts);
+      await runOrchestrator(['transition', TICKET, 'tasks'], envOpts);
       await runOrchestrator(['transition', TICKET, 'implement'], envOpts);
       writeTddException(TEMP_TASKS, TICKET);
       await runOrchestrator(['transition', TICKET, 'commit'], envOpts);
@@ -970,6 +984,7 @@ describe('work-orchestrator.js', () => {
       await runOrchestrator(['transition', TICKET, 'bootstrap'], envOpts);
       await runOrchestrator(['transition', TICKET, 'brief'], envOpts);
       await runOrchestrator(['transition', TICKET, 'spec'], envOpts);
+      await runOrchestrator(['transition', TICKET, 'tasks'], envOpts);
       await runOrchestrator(['transition', TICKET, 'implement'], envOpts);
       writeTddException(TEMP_TASKS, TICKET);
       await runOrchestrator(['transition', TICKET, 'commit'], envOpts);
@@ -1158,6 +1173,7 @@ describe('work-orchestrator.js', () => {
       await runOrchestrator(['transition', TICKET, 'bootstrap'], gateOpts);
       await runOrchestrator(['transition', TICKET, 'brief'], gateOpts);
       await runOrchestrator(['transition', TICKET, 'spec'], gateOpts);
+      await runOrchestrator(['transition', TICKET, 'tasks'], gateOpts);
       await runOrchestrator(['transition', TICKET, 'implement'], gateOpts);
       writeTddException(TEMP_TASKS, TICKET);
       await runOrchestrator(['transition', TICKET, 'commit'], gateOpts);
@@ -1208,6 +1224,7 @@ describe('work-orchestrator.js', () => {
       await runOrchestrator(['transition', TICKET, 'bootstrap'], gateOpts);
       await runOrchestrator(['transition', TICKET, 'brief'], gateOpts);
       await runOrchestrator(['transition', TICKET, 'spec'], gateOpts);
+      await runOrchestrator(['transition', TICKET, 'tasks'], gateOpts);
       await runOrchestrator(['transition', TICKET, 'implement'], gateOpts);
       writeTddException(TEMP_TASKS, TICKET);
       const { result } = await runOrchestrator(['transition', TICKET, 'commit'], gateOpts);

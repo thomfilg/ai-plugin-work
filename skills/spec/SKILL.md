@@ -92,4 +92,4 @@ After the agent completes:
 - Confirm the file was saved
 - Show the path
 - Highlight key sections: architecture decisions and test scenario count
-- Suggest next step: "Run `/work ${FOLDER_NAME}` to start implementation, or `/work-implement` for quick implementation."
+- Suggest next step: "Run `/split-in-tasks ${FOLDER_NAME}` to decompose the spec into implementation tasks, or `/work ${FOLDER_NAME}` to start the full workflow."

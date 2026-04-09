@@ -65,7 +65,7 @@ describe('work-state.js', () => {
     const TICKET = 'TEST-INIT-001';
     after(() => { cleanupTempWorkState(TICKET); });
 
-    it('should create state with all 14 steps as pending', async () => {
+    it('should create state with all 15 steps as pending', async () => {
       const { result, code } = await runWorkState(['init', TICKET]);
       assert.equal(code, 0);
       assert.equal(result.ticketId, TICKET);
@@ -76,14 +76,14 @@ describe('work-state.js', () => {
       assert.equal(result.errors.length, 0);
 
       const steps = Object.keys(result.stepStatus);
-      assert.equal(steps.length, 14);
+      assert.equal(steps.length, 15);
       for (const step of steps) {
         assert.equal(result.stepStatus[step], 'pending', `Step ${step} should be pending`);
       }
 
       // Verify exact step names
       const expectedSteps = [
-        'ticket', 'bootstrap', 'brief', 'spec', 'implement',
+        'ticket', 'bootstrap', 'brief', 'spec', 'tasks', 'implement',
         'commit', 'check',
         'pr', 'ready', 'follow_up', 'ci', 'cleanup', 'reports', 'complete',
       ];
@@ -125,7 +125,7 @@ describe('work-state.js', () => {
       assert.equal(code, 0);
       assert.equal(result.ticketId, TICKET_EXISTS);
       assert.equal(result.status, 'in_progress');
-      assert.equal(Object.keys(result.stepStatus).length, 14);
+      assert.equal(Object.keys(result.stepStatus).length, 15);
       for (const step of Object.keys(result.stepStatus)) {
         assert.equal(result.stepStatus[step], 'pending');
       }
@@ -150,8 +150,8 @@ describe('work-state.js', () => {
       // Verify persistence
       const { result: getResult } = await runWorkState(['get', TICKET]);
       assert.equal(getResult.stepStatus['implement'], 'in_progress');
-      // currentStep should be updated to 5 (index 4 + 1, after ticket/bootstrap/brief/spec)
-      assert.equal(getResult.currentStep, 5);
+      // currentStep should be updated to 6 (index 5 + 1, after ticket/bootstrap/brief/spec/tasks)
+      assert.equal(getResult.currentStep, 6);
     });
 
     it('should reject invalid step name with exit code 1', async () => {

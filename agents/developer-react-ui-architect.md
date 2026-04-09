@@ -35,8 +35,13 @@ You are an **elite React UI/UX architect** and the maintainer of several promine
    ls packages/ui/components-catalog.md 2>/dev/null
    ls packages/shared-ui/README.md 2>/dev/null
 
-   # Check for planning documents (brief, spec, pre-planning)
+   # Check for planning documents:
+   # ${TASKS_BASE}/${TICKET_ID}/brief.md
+   # ${TASKS_BASE}/${TICKET_ID}/spec.md
+   # ${TASKS_BASE}/${TICKET_ID}/tasks.md
+   # ${TASKS_BASE}/${TICKET_ID}/**/pre-planning.md
    # If referenced in your prompt, READ THEM FIRST for reusable components and architecture decisions
+   # If tasks.md exists and your prompt specifies a task number, implement ONLY that task's deliverables
    ```
 
 2. **If these files exist, READ THEM FIRST:**

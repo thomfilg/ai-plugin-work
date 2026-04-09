@@ -86,7 +86,7 @@ function baseEnv(extra = {}) {
  */
 async function transitionTo(ticket, targetStep, envExtra = {}) {
   const steps = [
-    'bootstrap', 'brief', 'spec', 'implement', 'commit',
+    'bootstrap', 'brief', 'spec', 'tasks', 'implement', 'commit',
     'check', 'pr',
     'ready', 'follow_up', 'ci', 'cleanup', 'reports', 'complete',
   ];
@@ -338,6 +338,7 @@ describe('TDD enforcement', () => {
       await runOrchestrator(['transition', TICKET, 'bootstrap'], { env: baseEnv() });
       await runOrchestrator(['transition', TICKET, 'brief'], { env: baseEnv() });
       await runOrchestrator(['transition', TICKET, 'spec'], { env: baseEnv() });
+      await runOrchestrator(['transition', TICKET, 'tasks'], { env: baseEnv() });
       await runOrchestrator(['transition', TICKET, 'implement'], { env: baseEnv() });
 
       // Record valid evidence so we can leave 3_implement
@@ -365,6 +366,7 @@ describe('TDD enforcement', () => {
       await runOrchestrator(['transition', TICKET, 'bootstrap'], { env: baseEnv() });
       await runOrchestrator(['transition', TICKET, 'brief'], { env: baseEnv() });
       await runOrchestrator(['transition', TICKET, 'spec'], { env: baseEnv() });
+      await runOrchestrator(['transition', TICKET, 'tasks'], { env: baseEnv() });
       // Make sure no phase state file exists
       const phasePath = path.join(tempTasksBase, TICKET, 'tdd-phase.json');
       try { fs.unlinkSync(phasePath); } catch {}

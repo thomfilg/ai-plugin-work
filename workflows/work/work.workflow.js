@@ -27,7 +27,7 @@
  *   node work-orchestrator.js graph
  *
  * Step names (from lib/step-registry.js):
- *   ticket, bootstrap, implement,
+ *   ticket, bootstrap, brief, spec, tasks, implement,
  *   commit, check, pr, ready,
  *   ci, cleanup, reports, complete
  */
@@ -116,6 +116,102 @@ function listFiles(dir, pattern) {
 }
 
 const { parseTicketInput } = require(path.join(__dirname, '..', 'lib', 'ticket-provider'));
+
+// ─── Task Parsing ────────────────────────────────────────────────────────────
+
+function parseTasks(tasksDir) {
+  const tasksFile = path.join(tasksDir, 'tasks.md');
+  if (!fileExists(tasksFile)) return null;
+
+  const content = readFile(tasksFile);
+  if (!content.trim()) return null;
+
+  const tasks = [];
+  // Split on ## Task N pattern — captures the task number
+  const parts = content.split(/^## Task (\d+)/m);
+  // parts[0] = preamble, then pairs of [taskNum, taskBody]
+  for (let i = 1; i < parts.length; i += 2) {
+    const num = parseInt(parts[i], 10);
+    const rawBody = (parts[i + 1] || '').trim();
+
+    // Strip trailing non-task ## sections (e.g. ## Requirement Coverage, ## Extracted Requirements)
+    const body = rawBody.replace(/\n## (?!Task\s)\S[\s\S]*$/, '').trim();
+
+    // Extract title from first line: " — <title>", "— <title>", or "- <title>"
+    const titleMatch = body.match(/^[\s]*[—–-]+\s*(.+?)$/m);
+    // Fallback: use the first non-empty line as title if no dash pattern found
+    const firstLine = body.split('\n')[0]?.trim(); // fallback: first line of body (e.g., "— Title")
+    const title = titleMatch ? titleMatch[1].trim() : (firstLine || `Task ${num}`);
+    // Title resolved — proceed to section extraction
+    // Extract ### Type section
+    const typeMatch = body.match(/### Type\s*\n([^\n#]+)/);
+    const type = typeMatch ? typeMatch[1].trim().toLowerCase() : 'unknown';
+
+    // Extract ### Dependencies section
+    const depsMatch = body.match(/### Dependencies\s*\n([\s\S]*?)(?=\n###|\n## |$)/);
+    const depsText = depsMatch ? depsMatch[1].trim() : '';
+    const dependencies = [];
+    const depNums = depsText.match(/Task\s+(\d+)/g);
+    if (depNums) {
+      depNums.forEach(d => {
+        const n = parseInt(d.replace(/Task\s+/, ''), 10);
+        if (!isNaN(n)) dependencies.push(n);
+      });
+    }
+
+    // Extract ### Requirements Covered
+    const reqMatch = body.match(/### Requirements Covered\s*\n([\s\S]*?)(?=\n###|\n## |$)/);
+    const requirementsCovered = reqMatch ? reqMatch[1].trim() : '';
+
+    // Extract ### Acceptance Criteria
+    const acMatch = body.match(/### Acceptance Criteria\s*\n([\s\S]*?)(?=\n###|\n## |$)/);
+    const acceptanceCriteria = acMatch ? acMatch[1].trim() : '';
+
+    // Extract ### Suggested Scope
+    const scopeMatch = body.match(/### Suggested Scope[^\n]*\n([\s\S]*?)(?=\n###|\n## |$)/);
+    const suggestedScope = scopeMatch ? scopeMatch[1].trim() : '';
+
+    const isCheckpoint = type === 'checkpoint' || /checkpoint/i.test(title);
+
+    tasks.push({
+      id: `task_${num}`,
+      num,
+      title,
+      type,
+      isCheckpoint,
+      dependencies,
+      requirementsCovered,
+      acceptanceCriteria,
+      suggestedScope,
+      rawContent: `## Task ${num} ${body}`, // reconstructs original "## Task N — title" header (space needed because trim() strips leading space from body)
+    }); // push parsed task into array
+  } // end task parsing loop
+
+  return tasks.length > 0 ? tasks : null; // null signals no tasks parsed (empty file handled at line 126)
+}
+
+function buildTaskPrompt(task, tasksDir) {
+  const lines = [];
+  lines.push(`## Current Task: Task ${task.num} — ${task.title}`);
+  lines.push('');
+  lines.push('You are implementing ONE task from the task plan. Do NOT implement other tasks.');
+  lines.push('');
+  lines.push('### Task Details');
+  lines.push(task.rawContent);
+  lines.push('');
+  lines.push('### Rules');
+  lines.push('- Implement ONLY the deliverables listed in this task');
+  lines.push('- Do NOT modify files outside this task\'s suggested scope unless necessary for this task\'s deliverables');
+  lines.push('- Every acceptance criterion must be met before this task is complete');
+  lines.push('');
+  lines.push('### Reference Documents');
+  lines.push('The full brief and spec are available for context but your scope is LIMITED to this task:');
+  lines.push(`- Brief: ${path.join(tasksDir, 'brief.md')}`);
+  lines.push(`- Spec: ${path.join(tasksDir, 'spec.md')}`);
+  lines.push(`- Full task plan: ${path.join(tasksDir, 'tasks.md')}`);
+
+  return lines.join('\n');
+}
 
 // ─── Artifact Archival (GH-130) ─────────────────────────────────────────────
 // Maps steps to glob patterns of artifacts that should be archived on backward
@@ -384,6 +480,7 @@ function inspect(ticket, providerConfig, suffix) {
 
   s.hasBrief = fileExists(path.join(s.tasksDir, 'brief.md'));
   s.hasSpec = fileExists(path.join(s.tasksDir, 'spec.md'));
+  s.hasTasks = fileExists(path.join(s.tasksDir, 'tasks.md'));
 
   // Dev session
   s.hasDevSession = run(`tmux has-session -t "${ticket}-dev" 2>/dev/null && echo yes`) === 'yes';
@@ -479,6 +576,7 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg, suffix)
   // brief
   const briefEnabled = process.env.WORK_BRIEF_ENABLED !== '0'; // on by default
   const specEnabled = process.env.WORK_SPEC_ENABLED !== '0';   // on by default
+  const tasksEnabled = process.env.WORK_TASKS_ENABLED !== '0'; // on by default
 
   if (!briefEnabled) {
     add(STEPS.brief, 'SKIP', null, 'Brief generation disabled (WORK_BRIEF_ENABLED=0)');
@@ -513,6 +611,12 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg, suffix)
   } else if (specEnabled) {
     planningDocs.push(`- Spec (if present after spec step): ${specPath}`);
   }
+  const tasksPath = path.join(tasksDir, 'tasks.md');
+  if (fileExists(tasksPath)) {
+    planningDocs.push(`- Tasks: ${tasksPath}`);
+  } else if (tasksEnabled) {
+    planningDocs.push(`- Tasks (if present after tasks step): ${tasksPath}`);
+  }
   prePlanningFiles.forEach(f => planningDocs.push(`- Pre-planning: ${f}`));
   const planningContext = planningDocs.length > 0
     ? `\n\nPlanning documents — read these if they exist for requirements, test scenarios, reusable components:\n${planningDocs.join('\n')}`
@@ -533,18 +637,59 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg, suffix)
     });
   }
 
+  // tasks
+  if (!tasksEnabled) {
+    add(STEPS.tasks, 'SKIP', null, 'Task splitting disabled (WORK_TASKS_ENABLED=0)');
+  } else if (s?.hasTasks) {
+    add(STEPS.tasks, 'SKIP', null, 'tasks.md already exists');
+  } else if (!fileExists(specPath)) {
+    add(STEPS.tasks, 'SKIP', null, 'No spec.md — cannot generate tasks');
+  } else { // spec.md exists and tasks not yet generated — plan is re-evaluated after each step
+    add(STEPS.tasks, 'RUN', 'Skill(split-in-tasks)', 'Generate tasks from spec', {
+      agentType: 'skill',
+      agentPrompt: `/split-in-tasks ${safeName} --force`,
+    });
+  }
+
   // implement
+  const taskData = s?.hasTasks ? parseTasks(tasksDir) : null;
+  const taskState = s?.workState?.tasksMeta;
+  const rawTaskIdx = taskState?.currentTaskIndex ?? 0;
+  const allTasksDone = taskData && rawTaskIdx >= taskData.length;
+  const currentTaskIdx = taskData ? Math.min(rawTaskIdx, taskData.length - 1) : rawTaskIdx;
+  const currentTask = allTasksDone ? null : taskData?.[currentTaskIdx];
+  // Task-scoped implementation: scope agent prompt to current task (allTasksDone handled above)
+  // Auto-initialize task tracking if tasks.md exists but tasksMeta doesn't
+  if (taskData && !taskState && s?.workState) {
+    try {
+      const wsPath = path.join(__dirname, 'work-state.js');
+      execFileSync(process.execPath, [wsPath, 'task-init', safeName, String(taskData.length)], {
+        encoding: 'utf-8', timeout: 5000, stdio: 'pipe',
+      });
+    } catch { /* fail-open: task tracking init failure should not block plan */ }
+  }
+
   const implementMeta = {
     agentType: 'skill',
-    agentPrompt: `/work-implement <requirements>${planningContext}${getDocsPrompt('READ_DOCS_ON_DEV')}`,
+    agentPrompt: currentTask
+      ? `/work-implement ${buildTaskPrompt(currentTask, tasksDir)}${getDocsPrompt('READ_DOCS_ON_DEV')}`
+      : `/work-implement <requirements>${planningContext}${getDocsPrompt('READ_DOCS_ON_DEV')}`,
   };
-  const implementPreviouslyCompleted = s?.stepIs(STEPS.implement) === 'completed';
-  if (implementPreviouslyCompleted && s?.hasDiffVsMain) {
-    // DEFER only when implement was previously completed AND diffs exist (GH-130)
-    // Previously: any diff triggered DEFER, even if unrelated to current task
-    add(STEPS.implement, 'DEFER', '/work-implement <requirements>', `Previously completed; changes exist: ${s.diffSummary}`, implementMeta);
+
+  if (allTasksDone) {
+    add(STEPS.implement, 'SKIP', null, 'All tasks completed');
+  } else if (currentTask?.isCheckpoint) {
+    add(STEPS.implement, 'SKIP', null, `Task ${currentTask.num} is a checkpoint — no implementation needed`);
   } else {
-    add(STEPS.implement, 'RUN', '/work-implement <requirements>', s?.hasDiffVsMain ? `Changes exist but implement not yet completed` : 'No changes vs main', implementMeta);
+    const implementPreviouslyCompleted = s?.stepIs(STEPS.implement) === 'completed';
+    if (implementPreviouslyCompleted && s?.hasDiffVsMain) {
+      add(STEPS.implement, 'DEFER', '/work-implement <requirements>', `Previously completed; changes exist: ${s.diffSummary}`, implementMeta);
+    } else {
+      const reason = currentTask
+        ? `Task ${currentTaskIdx + 1}/${taskData.length}: ${currentTask.title}`
+        : (s?.hasDiffVsMain ? `Changes exist but implement not yet completed` : 'No changes vs main');
+      add(STEPS.implement, 'RUN', '/work-implement <requirements>', reason, implementMeta);
+    }
   }
 
   // commit
@@ -591,6 +736,32 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg, suffix)
       agentType: 'skill',
       agentPrompt: '/check',
     });
+  }
+
+  // Task-advance: signal to the agent that more tasks remain after check passes
+  if (taskData && !allTasksDone && currentTaskIdx < taskData.length - 1) {
+    const checkEntry = plan.find(p => p.step === STEPS.check);
+    if (checkEntry) {
+      checkEntry.nextAction = 'advance_task'; // consumed by /work SKILL.md agent logic, not orchestrator code
+      checkEntry.taskInfo = { // metadata for agent to display progress
+        current: currentTaskIdx + 1, // 1-based display index
+        total: taskData.length,
+        nextTask: taskData[currentTaskIdx + 1]?.title || 'unknown', // only set when more tasks remain
+      };
+    }
+  }
+
+  // Mark final task completion when this is the last task
+  if (taskData && !allTasksDone && currentTaskIdx === taskData.length - 1) {
+    const checkEntry = plan.find(p => p.step === STEPS.check);
+    if (checkEntry) {
+      checkEntry.finalTaskAction = 'complete_last_task'; // agent should call task-advance one final time
+      checkEntry.taskInfo = { // last task: currentTaskIdx is still valid (not past end)
+        current: currentTaskIdx + 1,
+        total: taskData.length,
+        isLast: true,
+      };
+    }
   }
 
   // pr
@@ -1076,4 +1247,4 @@ if (require.main === module) {
 }
 
 // Re-export for backward compatibility (consumers can also import from workflows/lib/ticket-provider)
-module.exports = { parseTicketInput };
+module.exports = { parseTicketInput, parseTasks, buildTaskPrompt };

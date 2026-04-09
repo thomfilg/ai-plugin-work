@@ -499,10 +499,12 @@ describe('enforce-step-workflow', () => {
 
     describe('soft steps for work-pr', () => {
       it('1_preflight, 2_setup, 6_summary are defined as soft', () => {
-        const hookSource = fs.readFileSync(HOOK_PATH, 'utf-8');
-        assert.ok(hookSource.includes("'1_preflight'"));
-        assert.ok(hookSource.includes("'2_setup'"));
-        assert.ok(hookSource.includes("'6_summary'"));
+        // After OCP refactor, work-pr definition lives in its own file
+        const defPath = path.join(__dirname, '..', '..', 'work-pr', 'workflow-definition.js');
+        const defSource = fs.readFileSync(defPath, 'utf-8');
+        assert.ok(defSource.includes("'1_preflight'"));
+        assert.ok(defSource.includes("'2_setup'"));
+        assert.ok(defSource.includes("'6_summary'"));
       });
     });
   });
@@ -1121,9 +1123,10 @@ describe('enforce-step-workflow', () => {
     });
 
     it('source confirms ready is in softSteps set', () => {
-      const hookSource = fs.readFileSync(HOOK_PATH, 'utf-8');
-      // Check that softSteps contains STEPS.ready (uses central registry)
-      const softStepsMatch = hookSource.match(/softSteps:\s*new Set\(\[([^\]]+)\]\)/);
+      // After OCP refactor, work workflow definition lives in its own file
+      const defPath = path.join(__dirname, '..', '..', 'work', 'workflow-definition.js');
+      const defSource = fs.readFileSync(defPath, 'utf-8');
+      const softStepsMatch = defSource.match(/softSteps:\s*new Set\(\[([^\]]+)\]\)/);
       assert.ok(softStepsMatch, 'Should have softSteps declaration');
       assert.ok(softStepsMatch[1].includes('STEPS.ready'), 'softSteps should include STEPS.ready');
     });
