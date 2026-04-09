@@ -741,7 +741,7 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg, suffix)
       checkEntry.taskInfo = { // metadata for agent to display progress
         current: currentTaskIdx + 1,
         total: taskData.length,
-        nextTask: taskData[currentTaskIdx + 1]?.title || 'unknown',
+        nextTask: taskData[currentTaskIdx + 1]?.title || 'unknown', // only set when more tasks remain
       };
     }
   }
