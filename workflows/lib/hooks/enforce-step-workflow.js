@@ -146,7 +146,7 @@ const EXEMPT_SCRIPTS = new Set([
 // workflow-state.js: exempt for get, resume-info, add-error (init blocked — not idempotent).
 // Mutating sub-commands (set-step, set-check, complete, etc.) must go through the orchestrator.
 const SAFE_SUBCOMMANDS = {
-  'work-state.js': new Set(['get', 'resume-info', 'init', 'active-subtask', 'add-error']),
+  'work-state.js': new Set(['get', 'resume-info', 'init', 'active-subtask', 'add-error', 'task-init', 'task-current', 'task-advance', 'task-get']),
   'workflow-state.js': new Set(['get', 'resume-info', 'add-error']), // init excluded: not idempotent (resets all steps). exemptPatterns (line ~327) aligned.
 };
 
