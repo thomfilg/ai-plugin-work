@@ -142,7 +142,7 @@ function parseTasks(tasksDir) {
     // Fallback: use the first non-empty line as title if no dash pattern found
     const firstLine = body.split('\n')[0]?.trim(); // fallback: first line of body (e.g., "— Title")
     const title = titleMatch ? titleMatch[1].trim() : (firstLine || `Task ${num}`);
-
+    // Title resolved — proceed to section extraction
     // Extract ### Type section
     const typeMatch = body.match(/### Type\s*\n([^\n#]+)/);
     const type = typeMatch ? typeMatch[1].trim().toLowerCase() : 'unknown';
@@ -754,7 +754,7 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg, suffix)
     const checkEntry = plan.find(p => p.step === STEPS.check);
     if (checkEntry) {
       checkEntry.finalTaskAction = 'complete_last_task'; // agent should call task-advance one final time
-      checkEntry.taskInfo = {
+      checkEntry.taskInfo = { // last task: currentTaskIdx is still valid (not past end)
         current: currentTaskIdx + 1,
         total: taskData.length,
         isLast: true,
