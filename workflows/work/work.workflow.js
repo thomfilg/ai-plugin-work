@@ -137,9 +137,11 @@ function parseTasks(tasksDir) {
     // Strip trailing non-task ## sections (e.g. ## Requirement Coverage, ## Extracted Requirements)
     const body = rawBody.replace(/\n## (?!Task\s)\S[\s\S]*$/, '').trim();
 
-    // Extract title from first line: " — <title>" or "— <title>"
+    // Extract title from first line: " — <title>", "— <title>", or "- <title>"
     const titleMatch = body.match(/^[\s]*[—–-]+\s*(.+?)$/m);
-    const title = titleMatch ? titleMatch[1].trim() : `Task ${num}`;
+    // Fallback: use the first non-empty line as title if no dash pattern found
+    const firstLine = body.split('\n')[0]?.trim();
+    const title = titleMatch ? titleMatch[1].trim() : (firstLine || `Task ${num}`);
 
     // Extract ### Type section
     const typeMatch = body.match(/### Type\s*\n([^\n#]+)/);
@@ -652,7 +654,8 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg, suffix)
   // implement
   const taskData = s?.hasTasks ? parseTasks(tasksDir) : null;
   const taskState = s?.workState?.tasksMeta;
-  const currentTaskIdx = taskState?.currentTaskIndex ?? 0;
+  const rawTaskIdx = taskState?.currentTaskIndex ?? 0;
+  const currentTaskIdx = taskData ? Math.min(rawTaskIdx, taskData.length - 1) : rawTaskIdx;
   const currentTask = taskData?.[currentTaskIdx];
   // Task-scoped implementation: scope agent prompt to current task
   // Auto-initialize task tracking if tasks.md exists but tasksMeta doesn't
@@ -739,6 +742,19 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg, suffix)
         current: currentTaskIdx + 1,
         total: taskData.length,
         nextTask: taskData[currentTaskIdx + 1]?.title || 'unknown',
+      };
+    }
+  }
+
+  // Mark final task completion when this is the last task
+  if (taskData && currentTaskIdx === taskData.length - 1) {
+    const checkEntry = plan.find(p => p.step === STEPS.check);
+    if (checkEntry) {
+      checkEntry.finalTaskAction = 'complete_last_task'; // agent should call task-advance one final time
+      checkEntry.taskInfo = {
+        current: currentTaskIdx + 1,
+        total: taskData.length,
+        isLast: true,
       };
     }
   }

@@ -100,7 +100,7 @@ const WORKFLOWS = [
     softSteps: new Set([
       STEPS.ticket,                           // optional/metadata step
       STEPS.tasks,                            // optional generation step: can be disabled (WORK_TASKS_ENABLED=0) or skipped (no spec.md); verify() still checks tasks.md existence
-      STEPS.ready, STEPS.reports,             // operational steps — no code changes to enforce
+      STEPS.ready, STEPS.reports,             // operational steps — no code changes to enforce; tasks is soft because WORK_TASKS_ENABLED=0 can skip it
       STEPS.complete,                         // GH-106: terminal step — all gates already passed at ci/check/reports
     ]),
     // Tool can be a string or array — some runtimes emit Agent instead of Task.
@@ -127,6 +127,7 @@ const WORKFLOWS = [
         try { return fs.existsSync(path.join(TASKS_BASE, safeTicketPath(ticketId), 'tasks.md')); }
         catch { return false; } // fail-safe: assume tasks not generated
       }},
+      { step: STEPS.tasks, tool: 'Skill', field: 'skill', pattern: /^(work-workflow:)?split-in-tasks$/ },
       { step: STEPS.implement, verify: (ticketId) => {
         // Implement is proven if tdd-phase.json has at least one cycle with red + green evidence
         try {
