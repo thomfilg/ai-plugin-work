@@ -27,11 +27,18 @@ Look for planning documents in the current task folder:
 **Primary (required if they exist):**
 - `${TASKS_BASE}/${TICKET_ID}/brief.md`
 - `${TASKS_BASE}/${TICKET_ID}/spec.md`
+- `${TASKS_BASE}/${TICKET_ID}/tasks.md`
 
 **Optional:**
 - `${TASKS_BASE}/${TICKET_ID}/**/pre-planning.md`
 
 If `brief.md` or `spec.md` exist, they are **required review inputs**, not optional context.
+
+**If `tasks.md` exists**, it is the most granular requirements source. Each task has explicit deliverables, acceptance criteria, and requirement traceability (`_Requirements:_` annotations). Use it to:
+- Verify each task's deliverables were implemented
+- Check that acceptance criteria are met
+- Confirm the `Requirement Coverage` table has no gaps
+- Scope your review to what the current task requires (if the agent prompt specifies a task number)
 
 **From these documents, extract what is available:**
 - Problem statement and goals

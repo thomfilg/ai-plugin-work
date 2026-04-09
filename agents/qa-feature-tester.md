@@ -160,8 +160,11 @@ Before creating your test plan, check for planning documents:
 ```
 ${TASKS_BASE}/${TICKET_ID}/brief.md
 ${TASKS_BASE}/${TICKET_ID}/spec.md
+${TASKS_BASE}/${TICKET_ID}/tasks.md
 ${TASKS_BASE}/${TICKET_ID}/**/pre-planning.md
 ```
+
+If a **tasks.md** exists, it contains the most granular breakdown of deliverables and acceptance criteria. Each task has a `Test:` line per subtask and `### Acceptance Criteria` — use these as your primary test plan. Focus on the current task if the agent prompt specifies a task number.
 
 If a **pre-planning.md** exists with E2E test scenarios (typically section 3.7), use those as your structured test plan. Execute each numbered scenario step-by-step via Playwright, checking the expected results listed.
 

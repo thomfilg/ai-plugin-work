@@ -106,6 +106,7 @@ When checking ticket work, look for planning documents in the tasks folder:
 ```
 ${TASKS_BASE}/${TICKET_ID}/brief.md
 ${TASKS_BASE}/${TICKET_ID}/spec.md
+${TASKS_BASE}/${TICKET_ID}/tasks.md
 ${TASKS_BASE}/${TICKET_ID}/**/pre-planning.md
 ```
 
@@ -115,6 +116,12 @@ If these files exist, cross-reference them against the implementation:
 - **Endpoints** — Were all listed API endpoints implemented?
 - **E2E Test Scenarios** — Were tests written for the listed scenarios?
 - **Implementation Order** — Were all steps completed?
+
+**If `tasks.md` exists**, it is the most granular source of truth. Check each task's deliverables and acceptance criteria:
+- Walk through each `## Task N` section
+- For each `- [ ] N.X` deliverable, verify the artifact exists and works
+- Check that each task's `### Acceptance Criteria` are met
+- Use the `## Requirement Coverage` table at the bottom to ensure no requirement was missed
 
 Report gaps between what was planned and what was delivered.
 
