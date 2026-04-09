@@ -125,7 +125,7 @@ const WORKFLOWS = [
       }},
       { step: STEPS.tasks, verify: (ticketId) => { // verify remains active even though tasks is in softSteps — used by evidence checks
         try { return fs.existsSync(path.join(TASKS_BASE, safeTicketPath(ticketId), 'tasks.md')); }
-        catch { return false; }
+        catch { return false; } // fail-safe: assume tasks not generated
       }},
       { step: STEPS.implement, verify: (ticketId) => {
         // Implement is proven if tdd-phase.json has at least one cycle with red + green evidence

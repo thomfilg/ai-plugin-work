@@ -579,7 +579,7 @@ function advanceTask(ticketId) {
   if (meta.currentTaskIndex >= meta.tasks.length) {
     return { done: true, message: 'All tasks completed', completedTask: idx }; // terminal — all tasks done
   }
-
+  // Normal advance — mark current completed, move to next
   return {
     done: false,
     completedTask: idx,

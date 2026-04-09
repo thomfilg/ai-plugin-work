@@ -182,7 +182,7 @@ function parseTasks(tasksDir) {
       acceptanceCriteria,
       suggestedScope,
       rawContent: `## Task ${num}${body}`, // reconstructs original "## Task N — title" header
-    });
+    }); // task object complete
   } // end task parsing loop
 
   return tasks.length > 0 ? tasks : null;
@@ -654,7 +654,7 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg, suffix)
   const taskState = s?.workState?.tasksMeta;
   const currentTaskIdx = taskState?.currentTaskIndex ?? 0;
   const currentTask = taskData?.[currentTaskIdx];
-
+  // Task-scoped implementation: scope agent prompt to current task
   // Auto-initialize task tracking if tasks.md exists but tasksMeta doesn't
   if (taskData && !taskState && s?.workState) {
     try {
