@@ -102,7 +102,7 @@ const WORKFLOWS = [
       STEPS.tasks,                            // optional generation step: can be disabled (WORK_TASKS_ENABLED=0) or skipped (no spec.md); verify() still checks tasks.md existence
       STEPS.ready, STEPS.reports,             // operational steps — no code changes to enforce; tasks is soft because WORK_TASKS_ENABLED=0 can skip it
       STEPS.complete,                         // GH-106: terminal step — all gates already passed at ci/check/reports
-    ]),
+    ]), // end softSteps
     // Tool can be a string or array — some runtimes emit Agent instead of Task.
     commandMap: [
       { step: STEPS.bootstrap, verify: verifyBootstrap },

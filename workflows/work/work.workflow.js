@@ -140,7 +140,7 @@ function parseTasks(tasksDir) {
     // Extract title from first line: " — <title>", "— <title>", or "- <title>"
     const titleMatch = body.match(/^[\s]*[—–-]+\s*(.+?)$/m);
     // Fallback: use the first non-empty line as title if no dash pattern found
-    const firstLine = body.split('\n')[0]?.trim();
+    const firstLine = body.split('\n')[0]?.trim(); // fallback: first line of body (e.g., "— Title")
     const title = titleMatch ? titleMatch[1].trim() : (firstLine || `Task ${num}`);
 
     // Extract ### Type section
@@ -183,7 +183,7 @@ function parseTasks(tasksDir) {
       requirementsCovered,
       acceptanceCriteria,
       suggestedScope,
-      rawContent: `## Task ${num}${body}`, // reconstructs original "## Task N — title" header
+      rawContent: `## Task ${num} ${body}`, // reconstructs original "## Task N — title" header (space needed because trim() strips leading space from body)
     }); // task object complete
   } // end task parsing loop
 
