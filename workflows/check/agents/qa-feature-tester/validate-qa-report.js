@@ -41,12 +41,13 @@ async function main() {
       issues.push('Missing "## Playwright Verification" section');
     }
 
-    // Check: Evidence of Playwright MCP usage
-    const hasPlaywrightMCP = content.includes('mcp__playwright__') ||
-                             content.includes('mcp__playwright_headed__');
+    // Check: Evidence of browser MCP usage — require tool name and "Result:" on the same line,
+    // allowing common separators like whitespace, colon, or dash variants
+    const browserToolPattern = /`?mcp__(playwright|claude-in-chrome)__\w+`?\s*(?:[-–—:]?\s*)Result:\s*(SUCCESS|FAIL)/i;
+    const hasBrowserMCP = browserToolPattern.test(content);
 
-    if (!hasPlaywrightMCP && !content.includes('INFRASTRUCTURE_FAILURE')) {
-      issues.push('No evidence of Playwright MCP tool usage');
+    if (!hasBrowserMCP && !content.includes('INFRASTRUCTURE_FAILURE')) {
+      issues.push('No structured browser tool evidence — expected `mcp__playwright__...` or `mcp__claude-in-chrome__...` tool calls, each with "Result: SUCCESS" or "Result: FAIL"');
     }
 
     // Check: If INFRASTRUCTURE_FAILURE, must have MCP diagnostics
@@ -64,9 +65,12 @@ async function main() {
       issues.push('No screenshot references found');
     }
 
-    // Check: Has test results
-    if (!content.includes('PASS') && !content.includes('FAIL') && !content.includes('INFRASTRUCTURE_FAILURE')) {
-      issues.push('Missing test status (PASS/FAIL)');
+    // Check: Has structured test results (in table rows or after "Status:" labels)
+    const hasTestStatus = /\|\s*(PASS|FAIL)\s*\|/i.test(content) ||
+                          /Status:\s*(PASS|FAIL)/i.test(content) ||
+                          content.includes('INFRASTRUCTURE_FAILURE');
+    if (!hasTestStatus) {
+      issues.push('Missing test status — PASS/FAIL must appear in a results table or after "Status:"');
     }
   }
 
