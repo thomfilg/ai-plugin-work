@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const SKILL_PATH = path.resolve(__dirname, '..', 'SKILL.md');
-const content = fs.readFileSync(SKILL_PATH, 'utf-8');
+const content = fs.readFileSync(SKILL_PATH, 'utf-8'); // discoverable via scripts/run-tests.sh (skills/ included)
 
 describe('split-in-tasks SKILL.md — TDD ordering enforcement', () => {
 
@@ -24,6 +24,12 @@ describe('split-in-tasks SKILL.md — TDD ordering enforcement', () => {
       'Deliverables template must include **GREEN:** prefix');
     assert.match(section, /\*\*REFACTOR:\*\*/,
       'Deliverables template must include **REFACTOR:** prefix');
+    // Verify ordering: RED before GREEN before REFACTOR
+    const redIdx = section.indexOf('**RED:**');
+    const greenIdx = section.indexOf('**GREEN:**');
+    const refactorIdx = section.indexOf('**REFACTOR:**');
+    assert.ok(redIdx < greenIdx, 'RED must appear before GREEN in deliverables template');
+    assert.ok(greenIdx < refactorIdx, 'GREEN must appear before REFACTOR in deliverables template');
   });
 
   it('contains TDD protocol metadata line in file header template', () => {

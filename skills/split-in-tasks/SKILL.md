@@ -152,7 +152,7 @@ Review all generated tasks and check:
 - Dependencies are minimal (prefer independent tasks where possible)
 - Parallelization is maximized safely (any task marked `No` that could be `Yes`?)
 - Checkpoint tasks are present after every 3 implementation tasks or subsystem boundary
-- TDD ordering is correct (RED before GREEN before REFACTOR in every implementation task)
+- TDD ordering is correct (RED before GREEN before REFACTOR in every non-exempt implementation task — see Rule 10 for exemptions)
 - Anti-patterns are absent
 
 Refactor tasks if any issues are found. Re-validate coverage after any refactoring.
