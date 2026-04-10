@@ -121,6 +121,9 @@ A task can be marked `Parallel: Yes` ONLY if ALL of these are true:
 - It does not require outputs (code, config, data) from any incomplete task
 Otherwise mark `Parallel: No` or `Parallel: Partial` with explanation.
 
+**Rule 10 — TDD Ordering:**
+Implementation tasks MUST order deliverables following the TDD cycle: RED (write failing tests) -> GREEN (implement to pass) -> REFACTOR (clean up). Each deliverable gets a bold phase prefix: `**RED:**`, `**GREEN:**`, `**REFACTOR:**`. When a task covers multiple behaviors, each behavior gets its own RED/GREEN/REFACTOR triplet. Checkpoint tasks and config-only infrastructure tasks are exempt from this rule.
+
 **Anti-patterns — DO NOT generate tasks like these:**
 - "Implement backend logic" (too vague, spans multiple components)
 - "Setup everything" (not atomic, no single verifiable outcome)
@@ -147,6 +150,7 @@ Review all generated tasks and check:
 - Dependencies are minimal (prefer independent tasks where possible)
 - Parallelization is maximized safely (any task marked `No` that could be `Yes`?)
 - Checkpoint tasks are present after every 3 implementation tasks or subsystem boundary
+- TDD ordering is correct (RED before GREEN before REFACTOR in every implementation task)
 - Anti-patterns are absent
 
 Refactor tasks if any issues are found. Re-validate coverage after any refactoring.
@@ -184,12 +188,15 @@ After saving, output:
 - <requirement ID from Step 4.0>
 
 ### Deliverables
-- [ ] N.1 <subtask description>
-  - Test: <acceptance criterion>
-  - _Requirements: <requirement ID> (<context>), <requirement ID> (<context>)_
-- [ ] N.2 <subtask description>
-  - Test: <acceptance criterion>
-  - _Requirements: <requirement ID> (<context>), <requirement ID> (<context>)_
+- [ ] N.1 **RED:** Write failing tests for <behavior>
+  - Test: Tests fail — <expected behavior> is not yet implemented
+  - _Requirements: <requirement ID> (<context>)_
+- [ ] N.2 **GREEN:** Implement <behavior> to pass tests
+  - Test: All tests from N.1 pass
+  - _Requirements: <requirement ID> (<context>)_
+- [ ] N.3 **REFACTOR:** Refactor <component> for clarity
+  - Test: All tests still pass after refactoring
+  - _Requirements: <requirement ID> (<context>)_
 
 ### Acceptance Criteria
 - <criterion 1>
@@ -236,6 +243,7 @@ Verify all prior tasks are correctly implemented and integrated.
 
 _Generated from: brief.md, spec.md_
 _Ticket: <TICKET_ID>_
+_TDD Protocol: Every implementation task follows RED -> GREEN -> REFACTOR ordering in deliverables._
 
 ## Extracted Requirements
 
@@ -265,5 +273,6 @@ _Ticket: <TICKET_ID>_
 - Every subtask has a `Test:` line (acceptance criterion) and a `_Requirements:_` line with context annotations (e.g., `_Requirements: R1 (validation logic), R3 (error handling)_`)
 - Each deliverable must correspond to a concrete artifact: a file, function/class, API endpoint, CLI command, infrastructure resource, or configuration entry. Do not list abstract outcomes like "improved performance" as deliverables.
 - Dependencies reference task numbers, not subtask numbers
+- Implementation task deliverables use bold phase prefixes: `**RED:**`, `**GREEN:**`, `**REFACTOR:**` — each behavior gets its own triplet
 - The file starts with `# Tasks`, metadata, and the extracted requirements list
 - The file ends with the Requirement Coverage table
