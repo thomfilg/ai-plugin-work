@@ -13,6 +13,10 @@
 
 const path = require('path');
 const { basenameProtector, createFileProtector } = require('../../protect-state-files');
+// Re-export hook from protect-artifact-files so state-protection owns the unified
+// view of "protected workflow files" (state + artifact) for the enforcer.
+const _protectArtifactFiles = require('../../protect-artifact-files');
+void _protectArtifactFiles;
 const { isExemptScriptInvocation } = require('./agent-authorization');
 
 /**

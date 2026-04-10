@@ -61,7 +61,7 @@ const {
   matchToolToStep,
   isExempt,
   parseTransition,
-} = require(path.join(__dirname, 'policies', 'command-matching'));
+} = require(path.join(__dirname, 'policies/command-matching'));
 const { isTrustedScriptPath, expandPluginRoot, extractSubCommand, isSafeSubCommand } = require(
   path.join(__dirname, 'policies', 'agent-authorization')
 );

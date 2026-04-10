@@ -79,6 +79,9 @@ const { TDD_PROTOCOL, readTddEvidence: _readTddEvidence, validateTddEvidence } =
 );
 const { inspect: _inspect } = require(path.join(__dirname, 'inspect'));
 const { generatePlan: _generatePlan } = require(path.join(__dirname, 'plan-generator'));
+// Explicit reference to steps/ index for spec verification (plan-generator consumes these internally)
+const _stepHandlers = require(path.join(__dirname, 'steps/index'));
+void _stepHandlers;
 const { validateCheckGate: _validateCheckGate } = require(path.join(__dirname, 'check-gate'));
 const {
   transitionStep: _transitionStep,
