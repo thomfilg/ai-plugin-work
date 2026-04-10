@@ -8,7 +8,7 @@ const originalEnv = { ...process.env };
 // Helper to reset env
 function resetEnv() {
   // Remove all TICKET_ and JIRA_ vars
-  Object.keys(process.env).forEach(key => {
+  Object.keys(process.env).forEach((key) => {
     if (key.startsWith('TICKET_') || key.startsWith('JIRA_') || key.startsWith('LINEAR_')) {
       delete process.env[key];
     }
@@ -162,7 +162,10 @@ describe('ticket-provider', () => {
 
     it('returns uppercase for non-numeric jira input', () => {
       const tp = freshRequire('../ticket-provider');
-      assert.equal(tp.prefixTicketId('proj-123', { provider: 'jira', projectKey: 'PROJ' }), 'PROJ-123');
+      assert.equal(
+        tp.prefixTicketId('proj-123', { provider: 'jira', projectKey: 'PROJ' }),
+        'PROJ-123'
+      );
     });
   });
 
@@ -326,12 +329,18 @@ describe('ticket-provider', () => {
 
     it('returns Jira ticket as-is', () => {
       const tp = freshRequire('../ticket-provider');
-      assert.equal(tp.sanitizeTicketIdForPath('PROJ-123', { provider: 'jira', projectKey: 'PROJ' }), 'PROJ-123');
+      assert.equal(
+        tp.sanitizeTicketIdForPath('PROJ-123', { provider: 'jira', projectKey: 'PROJ' }),
+        'PROJ-123'
+      );
     });
 
     it('returns Linear ticket as-is', () => {
       const tp = freshRequire('../ticket-provider');
-      assert.equal(tp.sanitizeTicketIdForPath('ENG-456', { provider: 'linear', projectKey: 'ENG' }), 'ENG-456');
+      assert.equal(
+        tp.sanitizeTicketIdForPath('ENG-456', { provider: 'linear', projectKey: 'ENG' }),
+        'ENG-456'
+      );
     });
 
     it('returns as-is when no provider config', () => {
@@ -371,12 +380,18 @@ describe('ticket-provider', () => {
 
     it('rejects invalid/non-numeric input and returns as-is', () => {
       const tp = freshRequire('../ticket-provider');
-      assert.equal(tp.sanitizeTicketIdForPath('not-a-ticket', { provider: 'github' }), 'not-a-ticket');
+      assert.equal(
+        tp.sanitizeTicketIdForPath('not-a-ticket', { provider: 'github' }),
+        'not-a-ticket'
+      );
     });
 
     it('extracts number from GitHub URL input', () => {
       const tp = freshRequire('../ticket-provider');
-      assert.equal(tp.sanitizeTicketIdForPath('https://github.com/org/repo/issues/42', { provider: 'github' }), 'GH-42');
+      assert.equal(
+        tp.sanitizeTicketIdForPath('https://github.com/org/repo/issues/42', { provider: 'github' }),
+        'GH-42'
+      );
     });
   });
 
@@ -418,14 +433,18 @@ describe('ticket-provider', () => {
     it('parses hyphenated suffix', () => {
       const tp = freshRequire('../ticket-provider');
       assert.deepStrictEqual(tp.parseTicketInput('JUL-1397-bugfix'), {
-        ticketBase: 'JUL-1397', suffix: 'bugfix', separator: '-',
+        ticketBase: 'JUL-1397',
+        suffix: 'bugfix',
+        separator: '-',
       });
     });
 
     it('parses slash suffix', () => {
       const tp = freshRequire('../ticket-provider');
       assert.deepStrictEqual(tp.parseTicketInput('GH-145/phase1'), {
-        ticketBase: 'GH-145', suffix: 'phase1', separator: '/',
+        ticketBase: 'GH-145',
+        suffix: 'phase1',
+        separator: '/',
       });
     });
 

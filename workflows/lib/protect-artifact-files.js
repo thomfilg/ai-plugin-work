@@ -81,12 +81,7 @@ function matchesRule(basename, rule) {
  * @returns {{ check: (toolName: string, toolInput: object, hookData?: object) => ArtifactCheckResult }}
  */
 function createArtifactProtector(opts) {
-  const {
-    artifacts,
-    getStepInProgress,
-    isRunningInAgent = () => true,
-    getTicketId,
-  } = opts;
+  const { artifacts, getStepInProgress, isRunningInAgent = () => true, getTicketId } = opts;
 
   function check(toolName, toolInput, hookData) {
     let bn, filePath, rule;
@@ -96,12 +91,13 @@ function createArtifactProtector(opts) {
       filePath = toolInput?.file_path || '';
       if (!filePath) return { blocked: false };
       bn = path.basename(filePath);
-      rule = artifacts.find(a => matchesRule(bn, a));
+      rule = artifacts.find((a) => matchesRule(bn, a));
       if (!rule) return { blocked: false };
     } else if (toolName === 'Bash') {
       // Vector 2: Bash shell writes (>, >>, tee, cp, mv, sed -i, cat >, node -e writeFileSync)
       const cmd = String(toolInput?.command || '');
-      const hasWrite = BASH_WRITE_OPS.test(cmd) || NODE_FS_WRITES.test(cmd) || /\bsed\s+-i\b/.test(cmd);
+      const hasWrite =
+        BASH_WRITE_OPS.test(cmd) || NODE_FS_WRITES.test(cmd) || /\bsed\s+-i\b/.test(cmd);
       if (!hasWrite) return { blocked: false };
 
       // Check if any artifact basename appears in the command
@@ -115,7 +111,7 @@ function createArtifactProtector(opts) {
         if (a.pattern) {
           // Extract potential filenames from command tokens
           const tokens = cmd.match(/[\w.-]+\.(?:md|json|txt)/g) || [];
-          const match = tokens.find(t => a.pattern.test(t));
+          const match = tokens.find((t) => a.pattern.test(t));
           if (match) {
             bn = match;
             filePath = cmd;
@@ -134,7 +130,8 @@ function createArtifactProtector(opts) {
     if (!ticketId) return { blocked: false }; // No ticket context → allow (fail-open)
 
     // Only protect files within the ticket's folder (use path separator to avoid partial matches)
-    if (!filePath.includes(`/${ticketId}/`) && !filePath.endsWith(`/${ticketId}`)) return { blocked: false };
+    if (!filePath.includes(`/${ticketId}/`) && !filePath.endsWith(`/${ticketId}`))
+      return { blocked: false };
 
     // Check 1: Step must be in_progress
     const currentStep = getStepInProgress(ticketId);

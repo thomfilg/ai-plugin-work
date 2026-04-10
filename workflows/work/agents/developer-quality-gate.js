@@ -17,7 +17,9 @@
 
 const { execSync } = require('child_process');
 const path = require('path');
-const { runQualityCheck, describeStrategy } = require(path.join(__dirname, '..', '..', 'lib', 'quality-check'));
+const { runQualityCheck, describeStrategy } = require(
+  path.join(__dirname, '..', '..', 'lib', 'quality-check')
+);
 
 /**
  * Check if there are actual code changes to validate.
@@ -33,9 +35,7 @@ function hasCodeChanges() {
     if (!diff) return false;
 
     const codeExtensions = ['.ts', '.tsx', '.js', '.jsx'];
-    return diff.split('\n').some(file =>
-      codeExtensions.some(ext => file.endsWith(ext))
-    );
+    return diff.split('\n').some((file) => codeExtensions.some((ext) => file.endsWith(ext)));
   } catch {
     // If git fails, try to run dev:check anyway
     return true;
@@ -59,7 +59,6 @@ async function main() {
   // Check if this is a developer agent
   const agentName = (hookData.agent_name || hookData.subagent_type || '').toLowerCase();
 
-
   // Skip if no code changes to validate
   if (!hasCodeChanges()) {
     process.exit(0);
@@ -76,7 +75,9 @@ async function main() {
     process.exit(0);
   } else {
     const summary = result.output.slice(-1500);
-    process.stderr.write(`QUALITY GATE FAILED for ${agentName}\n\nQuality checks failed using ${strategyLabel}. The developer agent's changes have issues that must be fixed.\n\nDo NOT accept this agent's work as complete. Fix the issues below, then re-run quality checks.\n\nOutput:\n${summary}\n`);
+    process.stderr.write(
+      `QUALITY GATE FAILED for ${agentName}\n\nQuality checks failed using ${strategyLabel}. The developer agent's changes have issues that must be fixed.\n\nDo NOT accept this agent's work as complete. Fix the issues below, then re-run quality checks.\n\nOutput:\n${summary}\n`
+    );
     process.exit(2);
   }
 }

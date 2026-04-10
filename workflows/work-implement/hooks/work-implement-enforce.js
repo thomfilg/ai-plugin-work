@@ -8,7 +8,9 @@
  */
 
 const fs = require('fs');
-const { logHookError } = require(require('path').join(__dirname, '..', '..', 'lib', 'hook-error-log'));
+const { logHookError } = require(
+  require('path').join(__dirname, '..', '..', 'lib', 'hook-error-log')
+);
 
 // Developer agents that satisfy the requirement
 const DEVELOPER_AGENTS = [
@@ -24,20 +26,20 @@ const BLOCKED_TOOLS = ['Write', 'Edit', 'MultiEdit'];
 
 // Files that are allowed without agent (config, non-code files)
 const ALLOWED_PATTERNS = [
-  /\.md$/,           // Markdown files
-  /\.json$/,         // JSON config files
-  /\.ya?ml$/,        // YAML files
-  /\.env/,           // Environment files
-  /\.gitignore$/,    // Git ignore
-  /\.eslintrc/,      // ESLint config
-  /\.prettierrc/,    // Prettier config
-  /package\.json$/,  // Package files
-  /tsconfig/,        // TypeScript config
-  /\/\.claude\//,    // Files in .claude folder (hooks, commands, agents)
-  /\/__tests__\//,        // Test directories
-  /\.test\.[jt]sx?$/,     // .test.js, .test.ts, .test.tsx
-  /\.spec\.[jt]sx?$/,     // .spec.js, .spec.ts, .spec.tsx
-  /work-implement-enforce\.js$/,  // This file specifically
+  /\.md$/, // Markdown files
+  /\.json$/, // JSON config files
+  /\.ya?ml$/, // YAML files
+  /\.env/, // Environment files
+  /\.gitignore$/, // Git ignore
+  /\.eslintrc/, // ESLint config
+  /\.prettierrc/, // Prettier config
+  /package\.json$/, // Package files
+  /tsconfig/, // TypeScript config
+  /\/\.claude\//, // Files in .claude folder (hooks, commands, agents)
+  /\/__tests__\//, // Test directories
+  /\.test\.[jt]sx?$/, // .test.js, .test.ts, .test.tsx
+  /\.spec\.[jt]sx?$/, // .spec.js, .spec.ts, .spec.tsx
+  /work-implement-enforce\.js$/, // This file specifically
 ];
 
 /**
@@ -56,10 +58,10 @@ function isWorkImplementActive(transcriptPath) {
     const patterns = [
       /<command-name>\/work-implement<\/command-name>/,
       /"skill"\s*:\s*"work-implement"/,
-      /# Implement Command/  // The command's header from work-implement.md
+      /# Implement Command/, // The command's header from work-implement.md
     ];
 
-    return patterns.some(pattern => pattern.test(content));
+    return patterns.some((pattern) => pattern.test(content));
   } catch {
     return false;
   }
@@ -103,7 +105,7 @@ function hasDeveloperAgentBeenInvoked(transcriptPath) {
  */
 function isFileAllowed(filePath) {
   if (!filePath) return false;
-  return ALLOWED_PATTERNS.some(pattern => pattern.test(filePath));
+  return ALLOWED_PATTERNS.some((pattern) => pattern.test(filePath));
 }
 
 /**
@@ -113,20 +115,28 @@ function isFileAllowed(filePath) {
 function checkTddPhase(filePath) {
   try {
     // Get ticket ID from env or shared resolver
-    const ticketId = process.env.TICKET_ID || (() => {
-      try {
-        const { getCurrentTaskId } = require(require('path').join(__dirname, '..', '..', 'lib', 'scripts', 'get-ticket-id.js'));
-        const id = getCurrentTaskId();
-        return id || null;
-      } catch {
-        // Fallback: extract from branch name (supports GH-123, PROJ-123, lowercase)
+    const ticketId =
+      process.env.TICKET_ID ||
+      (() => {
         try {
-          const branch = require('child_process').execSync('git branch --show-current', { encoding: 'utf8' }).trim();
-          const match = branch.match(/[A-Za-z]+-[0-9]+/i);
-          return match ? match[0] : null;
-        } catch { return null; }
-      }
-    })();
+          const { getCurrentTaskId } = require(
+            require('path').join(__dirname, '..', '..', 'lib', 'scripts', 'get-ticket-id.js')
+          );
+          const id = getCurrentTaskId();
+          return id || null;
+        } catch {
+          // Fallback: extract from branch name (supports GH-123, PROJ-123, lowercase)
+          try {
+            const branch = require('child_process')
+              .execSync('git branch --show-current', { encoding: 'utf8' })
+              .trim();
+            const match = branch.match(/[A-Za-z]+-[0-9]+/i);
+            return match ? match[0] : null;
+          } catch {
+            return null;
+          }
+        }
+      })();
 
     if (!ticketId) return 'no-state';
 
@@ -142,7 +152,11 @@ function checkTddPhase(filePath) {
     }
     // Use TASKS_BASE from env, config module, or default HOME-based fallback
     let safeTicketId = ticketId;
-    try { safeTicketId = require(require('path').join(__dirname, '..', '..', 'lib', 'config')).safeTicketId(ticketId); } catch {}
+    try {
+      safeTicketId = require(
+        require('path').join(__dirname, '..', '..', 'lib', 'config')
+      ).safeTicketId(ticketId);
+    } catch {}
     const statePath = require('path').join(taskBase, safeTicketId, 'tdd-phase.json');
     if (!require('fs').existsSync(statePath)) return 'no-file';
 
@@ -191,7 +205,7 @@ async function main() {
     // Block direct edits to tdd-phase.json — only tdd-phase-state.js can write it
     process.stderr.write(
       'Direct edit of tdd-phase.json is blocked.\n' +
-      'Use tdd-phase-state.js CLI to manage TDD phase state.\n'
+        'Use tdd-phase-state.js CLI to manage TDD phase state.\n'
     );
     process.exit(2);
   }
@@ -206,7 +220,11 @@ async function main() {
   }
   // Defense-in-depth: if TDD state doesn't exist and this is a production file,
   // block until TDD is initialized. This catches cases where auto-init didn't run.
-  if (tddPhaseResult === 'no-file' && !isFileAllowed(filePath) && hasDeveloperAgentBeenInvoked(transcriptPath)) {
+  if (
+    tddPhaseResult === 'no-file' &&
+    !isFileAllowed(filePath) &&
+    hasDeveloperAgentBeenInvoked(transcriptPath)
+  ) {
     const tddScript = require('path').join(__dirname, '..', 'tdd-phase-state.js');
     const msg =
       'TDD not initialized. Production file writes are blocked until TDD state exists.\n' +
@@ -227,27 +245,28 @@ async function main() {
   }
 
   // Block the operation
-  const architectLine = process.env.WORK_ARCHITECT_ENABLED === '1'
-    ? `  subagent_type: "code-architect",            // Architecture\n`
-    : '';
+  const architectLine =
+    process.env.WORK_ARCHITECT_ENABLED === '1'
+      ? `  subagent_type: "code-architect",            // Architecture\n`
+      : '';
   process.stderr.write(
     `/work-implement requires agent delegation\n\n` +
-    `Direct ${toolName} blocked. Use a developer agent first:\n\n` +
-    `Task({\n` +
-    `  subagent_type: "developer-nodejs-tdd",      // Backend\n` +
-    `  subagent_type: "developer-react-senior",    // React logic\n` +
-    `  subagent_type: "developer-react-ui-architect", // UI design\n` +
-    `  subagent_type: "developer-devops",          // Infrastructure\n` +
-    architectLine +
-    `  prompt: "Implement: <your task>"\n` +
-    `})\n\n` +
-    `Or for simple config changes, edit allowed files:\n` +
-    `(.md, .json, .yml, .env, package.json, tsconfig.*, etc.)\n`
+      `Direct ${toolName} blocked. Use a developer agent first:\n\n` +
+      `Task({\n` +
+      `  subagent_type: "developer-nodejs-tdd",      // Backend\n` +
+      `  subagent_type: "developer-react-senior",    // React logic\n` +
+      `  subagent_type: "developer-react-ui-architect", // UI design\n` +
+      `  subagent_type: "developer-devops",          // Infrastructure\n` +
+      architectLine +
+      `  prompt: "Implement: <your task>"\n` +
+      `})\n\n` +
+      `Or for simple config changes, edit allowed files:\n` +
+      `(.md, .json, .yml, .env, package.json, tsconfig.*, etc.)\n`
   );
   process.exit(2);
 }
 
-main().catch(err => {
+main().catch((err) => {
   logHookError(__filename, err);
   // On error, approve to avoid blocking legitimate operations
   process.exit(0);

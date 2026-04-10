@@ -30,15 +30,21 @@ before(() => {
 });
 
 after(() => {
-  try { fs.rmSync(tempWorktreesBase, { recursive: true, force: true }); } catch {}
+  try {
+    fs.rmSync(tempWorktreesBase, { recursive: true, force: true });
+  } catch {}
   // Safety-net: clean up leaked session guard files created by THIS suite only (TDD* tickets)
   try {
     const tmpDir = require('os').tmpdir();
-    const tmpFiles = fs.readdirSync(tmpDir).filter(f => f.startsWith('claude-session-guard-TDD'));
+    const tmpFiles = fs.readdirSync(tmpDir).filter((f) => f.startsWith('claude-session-guard-TDD'));
     for (const f of tmpFiles) {
-      try { fs.unlinkSync(path.join(tmpDir, f)); } catch {}
+      try {
+        fs.unlinkSync(path.join(tmpDir, f));
+      } catch {}
     }
-  } catch { /* ignore if tmpdir unreadable */ }
+  } catch {
+    /* ignore if tmpdir unreadable */
+  }
 });
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -54,8 +60,12 @@ function runOrchestrator(args = [], opts = {}) {
     let stdout = '';
     let stderr = '';
 
-    proc.stdout.on('data', (data) => { stdout += data.toString(); });
-    proc.stderr.on('data', (data) => { stderr += data.toString(); });
+    proc.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
+    proc.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
 
     proc.on('close', (code) => {
       try {
@@ -72,12 +82,19 @@ function runOrchestrator(args = [], opts = {}) {
 
 function cleanupTempWorkState(ticket) {
   const dir = path.join(tempTasksBase, ticket);
-  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+  } catch {}
 }
 
 /** Shared env that isolates file I/O to temp dirs */
 function baseEnv(extra = {}) {
-  return { WORKTREES_BASE: tempWorktreesBase, TASKS_BASE: tempTasksBase, SESSION_GUARD_ENABLED: '0', ...extra };
+  return {
+    WORKTREES_BASE: tempWorktreesBase,
+    TASKS_BASE: tempTasksBase,
+    SESSION_GUARD_ENABLED: '0',
+    ...extra,
+  };
 }
 
 /**
@@ -86,17 +103,26 @@ function baseEnv(extra = {}) {
  */
 async function transitionTo(ticket, targetStep, envExtra = {}) {
   const steps = [
-    'bootstrap', 'brief', 'spec', 'tasks', 'implement', 'commit',
-    'check', 'pr',
-    'ready', 'follow_up', 'ci', 'cleanup', 'reports', 'complete',
+    'bootstrap',
+    'brief',
+    'spec',
+    'tasks',
+    'implement',
+    'commit',
+    'check',
+    'pr',
+    'ready',
+    'follow_up',
+    'ci',
+    'cleanup',
+    'reports',
+    'complete',
   ];
   const idx = steps.indexOf(targetStep);
   if (idx === -1) throw new Error(`Unknown target step: ${targetStep}`);
 
   // Determine the sanitized ticket for writing TDD evidence
-  const safeTicket = ticket.startsWith('#')
-    ? `GH-${ticket.slice(1)}`
-    : ticket;
+  const safeTicket = ticket.startsWith('#') ? `GH-${ticket.slice(1)}` : ticket;
 
   let lastResult;
   // Walk step by step through the linear graph.
@@ -106,10 +132,9 @@ async function transitionTo(ticket, targetStep, envExtra = {}) {
     if (steps[i] === 'commit') {
       writeValidPhaseState(safeTicket);
     }
-    const { result } = await runOrchestrator(
-      ['transition', ticket, steps[i]],
-      { env: baseEnv(envExtra) },
-    );
+    const { result } = await runOrchestrator(['transition', ticket, steps[i]], {
+      env: baseEnv(envExtra),
+    });
     lastResult = result;
     if (result?.error) break;
   }
@@ -181,28 +206,32 @@ function writePartialPhaseState(ticket) {
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe('TDD enforcement', () => {
-
   // ═══════════════════════════════════════════════════════════════════════════
   // Prompt augmentation tests
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('Prompt augmentation', () => {
     const TICKET = 'TDDP-200';
-    afterEach(() => { cleanupTempWorkState(TICKET); });
+    afterEach(() => {
+      cleanupTempWorkState(TICKET);
+    });
 
     it('plan for 3_implement includes TDD instructions in agentPrompt', async () => {
       const { result } = await runOrchestrator(['plan', TICKET], {
         env: baseEnv(),
       });
-      const implStep = result.plan.find(s => s.step === 'implement');
-      assert.ok(implStep.agentPrompt.includes('TDD protocol'), 'Should include TDD protocol header');
+      const implStep = result.plan.find((s) => s.step === 'implement');
+      assert.ok(
+        implStep.agentPrompt.includes('TDD protocol'),
+        'Should include TDD protocol header'
+      );
     });
 
     it('agentPrompt for 3_implement contains instruction not to make local commits', async () => {
       const { result } = await runOrchestrator(['plan', TICKET], {
         env: baseEnv(),
       });
-      const implStep = result.plan.find(s => s.step === 'implement');
+      const implStep = result.plan.find((s) => s.step === 'implement');
       const prompt = implStep.agentPrompt;
       const hasNoCommit = /do not.*commit/i.test(prompt) || /leave.*uncommitted/i.test(prompt);
       assert.ok(hasNoCommit, 'agentPrompt should instruct not to make local commits');
@@ -212,16 +241,19 @@ describe('TDD enforcement', () => {
       const { result } = await runOrchestrator(['plan', TICKET], {
         env: baseEnv(),
       });
-      const implStep = result.plan.find(s => s.step === 'implement');
+      const implStep = result.plan.find((s) => s.step === 'implement');
       const tddStatePath = path.join(__dirname, '..', '..', 'work-implement', 'tdd-phase-state.js');
-      assert.ok(implStep.agentPrompt.includes(tddStatePath), 'Should contain the real tdd-phase-state.js path');
+      assert.ok(
+        implStep.agentPrompt.includes(tddStatePath),
+        'Should contain the real tdd-phase-state.js path'
+      );
     });
 
     it('agentPrompt for 3_implement contains the real ticket ID', async () => {
       const { result } = await runOrchestrator(['plan', TICKET], {
         env: baseEnv(),
       });
-      const implStep = result.plan.find(s => s.step === 'implement');
+      const implStep = result.plan.find((s) => s.step === 'implement');
       assert.ok(implStep.agentPrompt.includes(TICKET), 'Should contain the real ticket ID');
     });
 
@@ -229,7 +261,7 @@ describe('TDD enforcement', () => {
       const { result } = await runOrchestrator(['plan', TICKET], {
         env: baseEnv(),
       });
-      const implStep = result.plan.find(s => s.step === 'implement');
+      const implStep = result.plan.find((s) => s.step === 'implement');
       assert.doesNotMatch(implStep.agentPrompt, /<TDD_STATE_PATH>/);
     });
 
@@ -237,7 +269,7 @@ describe('TDD enforcement', () => {
       const { result } = await runOrchestrator(['plan', TICKET], {
         env: baseEnv(),
       });
-      const implStep = result.plan.find(s => s.step === 'implement');
+      const implStep = result.plan.find((s) => s.step === 'implement');
       assert.doesNotMatch(implStep.agentPrompt, /<TICKET_ID>/);
     });
 
@@ -245,12 +277,17 @@ describe('TDD enforcement', () => {
       const { result } = await runOrchestrator(['plan', TICKET], {
         env: baseEnv(),
       });
-      const implStep = result.plan.find(s => s.step === 'implement');
+      const implStep = result.plan.find((s) => s.step === 'implement');
       assert.ok(implStep.agentPrompt.includes('record-red'), 'Should contain record-red command');
-      assert.ok(implStep.agentPrompt.includes('record-green'), 'Should contain record-green command');
-      assert.ok(implStep.agentPrompt.includes('record-refactor'), 'Should contain record-refactor command');
+      assert.ok(
+        implStep.agentPrompt.includes('record-green'),
+        'Should contain record-green command'
+      );
+      assert.ok(
+        implStep.agentPrompt.includes('record-refactor'),
+        'Should contain record-refactor command'
+      );
     });
-
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -259,14 +296,15 @@ describe('TDD enforcement', () => {
 
   describe('Gate enforcement', () => {
     const TICKET = 'TDDG-300';
-    afterEach(() => { cleanupTempWorkState(TICKET); });
+    afterEach(() => {
+      cleanupTempWorkState(TICKET);
+    });
 
     it('transition 3_implement -> commit BLOCKED without evidence file', async () => {
       await transitionTo(TICKET, 'implement');
-      const { result } = await runOrchestrator(
-        ['transition', TICKET, 'commit'],
-        { env: baseEnv() },
-      );
+      const { result } = await runOrchestrator(['transition', TICKET, 'commit'], {
+        env: baseEnv(),
+      });
       assert.equal(result.error, true);
       assert.match(result.message, /TDD evidence/i);
     });
@@ -274,10 +312,9 @@ describe('TDD enforcement', () => {
     it('transition 3_implement -> commit ALLOWED with valid tdd-phase.json (complete cycle)', async () => {
       await transitionTo(TICKET, 'implement');
       writeValidPhaseState(TICKET);
-      const { result } = await runOrchestrator(
-        ['transition', TICKET, 'commit'],
-        { env: baseEnv() },
-      );
+      const { result } = await runOrchestrator(['transition', TICKET, 'commit'], {
+        env: baseEnv(),
+      });
       assert.equal(result.success, true);
       assert.equal(result.to, 'commit');
     });
@@ -287,19 +324,32 @@ describe('TDD enforcement', () => {
       const ticketDir = path.join(tempTasksBase, TICKET);
       fs.mkdirSync(ticketDir, { recursive: true });
       const phasePath = path.join(ticketDir, 'tdd-phase.json');
-      fs.writeFileSync(phasePath, JSON.stringify({
-        currentPhase: 'refactor',
-        currentCycle: 1,
-        cycles: [{
-          cycle: 1,
-          red: { testFiles: ['a.test.ts'], testCommand: 'pnpm test', testExitCode: 1, timestamp: new Date().toISOString() },
-          green: { testCommand: 'pnpm test', testExitCode: 0, timestamp: new Date().toISOString() },
-        }],
-      }));
-      const { result } = await runOrchestrator(
-        ['transition', TICKET, 'commit'],
-        { env: baseEnv() },
+      fs.writeFileSync(
+        phasePath,
+        JSON.stringify({
+          currentPhase: 'refactor',
+          currentCycle: 1,
+          cycles: [
+            {
+              cycle: 1,
+              red: {
+                testFiles: ['a.test.ts'],
+                testCommand: 'pnpm test',
+                testExitCode: 1,
+                timestamp: new Date().toISOString(),
+              },
+              green: {
+                testCommand: 'pnpm test',
+                testExitCode: 0,
+                timestamp: new Date().toISOString(),
+              },
+            },
+          ],
+        })
       );
+      const { result } = await runOrchestrator(['transition', TICKET, 'commit'], {
+        env: baseEnv(),
+      });
       assert.equal(result.success, true);
       assert.equal(result.to, 'commit');
     });
@@ -307,10 +357,9 @@ describe('TDD enforcement', () => {
     it('phase state with only red evidence (no green) -> BLOCKED', async () => {
       await transitionTo(TICKET, 'implement');
       writePartialPhaseState(TICKET);
-      const { result } = await runOrchestrator(
-        ['transition', TICKET, 'commit'],
-        { env: baseEnv() },
-      );
+      const { result } = await runOrchestrator(['transition', TICKET, 'commit'], {
+        env: baseEnv(),
+      });
       assert.equal(result.error, true);
       assert.match(result.message, /RED.*GREEN/i);
     });
@@ -320,15 +369,17 @@ describe('TDD enforcement', () => {
       const ticketDir = path.join(tempTasksBase, TICKET);
       fs.mkdirSync(ticketDir, { recursive: true });
       const phasePath = path.join(ticketDir, 'tdd-phase.json');
-      fs.writeFileSync(phasePath, JSON.stringify({
-        currentPhase: 'red',
-        currentCycle: 1,
-        cycles: [],
-      }));
-      const { result } = await runOrchestrator(
-        ['transition', TICKET, 'commit'],
-        { env: baseEnv() },
+      fs.writeFileSync(
+        phasePath,
+        JSON.stringify({
+          currentPhase: 'red',
+          currentCycle: 1,
+          cycles: [],
+        })
       );
+      const { result } = await runOrchestrator(['transition', TICKET, 'commit'], {
+        env: baseEnv(),
+      });
       assert.equal(result.error, true);
       assert.match(result.message, /No TDD cycles/i);
     });
@@ -348,14 +399,20 @@ describe('TDD enforcement', () => {
 
       // Now create a stale phase state file for 3_implement
       const phasePath = path.join(tempTasksBase, TICKET, 'tdd-phase.json');
-      fs.writeFileSync(phasePath, JSON.stringify({ currentPhase: 'green', currentCycle: 2, cycles: [{ cycle: 1 }] }));
+      fs.writeFileSync(
+        phasePath,
+        JSON.stringify({ currentPhase: 'green', currentCycle: 2, cycles: [{ cycle: 1 }] })
+      );
       assert.ok(fs.existsSync(phasePath));
 
       // Transition back INTO 3_implement
       await runOrchestrator(['transition', TICKET, 'implement'], { env: baseEnv() });
 
       // tdd-phase.json should be re-created (not deleted) with fresh RED phase
-      assert.ok(fs.existsSync(phasePath), 'Phase state file should be re-created after transition into implement');
+      assert.ok(
+        fs.existsSync(phasePath),
+        'Phase state file should be re-created after transition into implement'
+      );
       const state = JSON.parse(fs.readFileSync(phasePath, 'utf8'));
       assert.equal(state.currentPhase, 'red', 'Phase should be reset to red');
       assert.equal(state.currentCycle, 1, 'Cycle should be reset to 1');
@@ -369,12 +426,13 @@ describe('TDD enforcement', () => {
       await runOrchestrator(['transition', TICKET, 'tasks'], { env: baseEnv() });
       // Make sure no phase state file exists
       const phasePath = path.join(tempTasksBase, TICKET, 'tdd-phase.json');
-      try { fs.unlinkSync(phasePath); } catch {}
+      try {
+        fs.unlinkSync(phasePath);
+      } catch {}
 
-      const { result } = await runOrchestrator(
-        ['transition', TICKET, 'implement'],
-        { env: baseEnv() },
-      );
+      const { result } = await runOrchestrator(['transition', TICKET, 'implement'], {
+        env: baseEnv(),
+      });
       assert.equal(result.success, true);
     });
 
@@ -383,10 +441,9 @@ describe('TDD enforcement', () => {
       const phasePath = path.join(tempTasksBase, TICKET, 'tdd-phase.json');
       fs.writeFileSync(phasePath, '{corrupt json!!!');
 
-      const { result } = await runOrchestrator(
-        ['transition', TICKET, 'commit'],
-        { env: baseEnv() },
-      );
+      const { result } = await runOrchestrator(['transition', TICKET, 'commit'], {
+        env: baseEnv(),
+      });
       assert.equal(result.error, true);
       assert.match(result.message, /TDD evidence/i);
     });
@@ -396,25 +453,26 @@ describe('TDD enforcement', () => {
       const phasePath = path.join(tempTasksBase, TICKET, 'tdd-phase.json');
       fs.writeFileSync(phasePath, 'null');
 
-      const { result } = await runOrchestrator(
-        ['transition', TICKET, 'commit'],
-        { env: baseEnv() },
-      );
+      const { result } = await runOrchestrator(['transition', TICKET, 'commit'], {
+        env: baseEnv(),
+      });
       assert.equal(result.error, true);
     });
 
     it('phase state without cycles key -> BLOCKED', async () => {
       await transitionTo(TICKET, 'implement');
       const phasePath = path.join(tempTasksBase, TICKET, 'tdd-phase.json');
-      fs.writeFileSync(phasePath, JSON.stringify({
-        currentPhase: 'red',
-        currentCycle: 1,
-      }));
-
-      const { result } = await runOrchestrator(
-        ['transition', TICKET, 'commit'],
-        { env: baseEnv() },
+      fs.writeFileSync(
+        phasePath,
+        JSON.stringify({
+          currentPhase: 'red',
+          currentCycle: 1,
+        })
       );
+
+      const { result } = await runOrchestrator(['transition', TICKET, 'commit'], {
+        env: baseEnv(),
+      });
       assert.equal(result.error, true);
       assert.match(result.message, /No TDD cycles/i);
     });
@@ -424,15 +482,17 @@ describe('TDD enforcement', () => {
       const ticketDir = path.join(tempTasksBase, TICKET);
       fs.mkdirSync(ticketDir, { recursive: true });
       const phasePath = path.join(ticketDir, 'tdd-phase.json');
-      fs.writeFileSync(phasePath, JSON.stringify({
-        currentPhase: 'exception',
-        exception: 'config-only change, no testable behavior',
-        cycles: [],
-      }));
-      const { result } = await runOrchestrator(
-        ['transition', TICKET, 'commit'],
-        { env: baseEnv() },
+      fs.writeFileSync(
+        phasePath,
+        JSON.stringify({
+          currentPhase: 'exception',
+          exception: 'config-only change, no testable behavior',
+          cycles: [],
+        })
       );
+      const { result } = await runOrchestrator(['transition', TICKET, 'commit'], {
+        env: baseEnv(),
+      });
       assert.equal(result.success, true);
       assert.equal(result.to, 'commit');
     });
@@ -443,10 +503,7 @@ describe('TDD enforcement', () => {
       await runOrchestrator(['transition', TICKET, 'commit'], { env: baseEnv() });
 
       // Now try commit -> check without any evidence for commit (non-gated)
-      const { result } = await runOrchestrator(
-        ['transition', TICKET, 'check'],
-        { env: baseEnv() },
-      );
+      const { result } = await runOrchestrator(['transition', TICKET, 'check'], { env: baseEnv() });
       assert.equal(result.success, true);
       assert.equal(result.to, 'check');
     });
@@ -469,17 +526,22 @@ describe('TDD enforcement', () => {
 
     it('transition with #NNN ticket finds work state written to GH-NNN/ directory', async () => {
       // Walk to bootstrap using raw #154 ticket
-      const { result } = await runOrchestrator(
-        ['transition', RAW_TICKET, 'bootstrap'],
-        { env: baseEnv(ghEnv()) },
-      );
+      const { result } = await runOrchestrator(['transition', RAW_TICKET, 'bootstrap'], {
+        env: baseEnv(ghEnv()),
+      });
       assert.equal(result.success, true, 'Transition should succeed');
 
       // Work state should be saved under GH-154/, not #154/
       const safeDir = path.join(tempTasksBase, SAFE_TICKET);
       const rawDir = path.join(tempTasksBase, RAW_TICKET);
-      assert.ok(fs.existsSync(path.join(safeDir, '.work-state.json')), 'Work state should exist under GH-154/');
-      assert.ok(!fs.existsSync(path.join(rawDir, '.work-state.json')), 'Work state should NOT exist under #154/');
+      assert.ok(
+        fs.existsSync(path.join(safeDir, '.work-state.json')),
+        'Work state should exist under GH-154/'
+      );
+      assert.ok(
+        !fs.existsSync(path.join(rawDir, '.work-state.json')),
+        'Work state should NOT exist under #154/'
+      );
     });
 
     it('transition with #NNN ticket finds TDD evidence in GH-NNN/ directory (TDD gate passes)', async () => {
@@ -490,10 +552,9 @@ describe('TDD enforcement', () => {
       writeValidPhaseState(SAFE_TICKET);
 
       // Transition out of implement should pass because evidence is in GH-154/
-      const { result } = await runOrchestrator(
-        ['transition', RAW_TICKET, 'commit'],
-        { env: baseEnv(ghEnv()) },
-      );
+      const { result } = await runOrchestrator(['transition', RAW_TICKET, 'commit'], {
+        env: baseEnv(ghEnv()),
+      });
       assert.equal(result.success, true, 'Transition should succeed with TDD evidence in GH-NNN/');
       assert.equal(result.to, 'commit');
     });
@@ -503,25 +564,26 @@ describe('TDD enforcement', () => {
       await transitionTo(RAW_TICKET, 'implement', ghEnv());
 
       // No TDD evidence written — should block
-      const { result } = await runOrchestrator(
-        ['transition', RAW_TICKET, 'commit'],
-        { env: baseEnv(ghEnv()) },
-      );
+      const { result } = await runOrchestrator(['transition', RAW_TICKET, 'commit'], {
+        env: baseEnv(ghEnv()),
+      });
       assert.equal(result.error, true);
       assert.match(result.message, /TDD evidence/i);
     });
 
     it('already-sanitized GH-NNN ticket works (idempotent)', async () => {
       // Use already-sanitized ticket ID
-      const { result } = await runOrchestrator(
-        ['transition', SAFE_TICKET, 'bootstrap'],
-        { env: baseEnv(ghEnv()) },
-      );
+      const { result } = await runOrchestrator(['transition', SAFE_TICKET, 'bootstrap'], {
+        env: baseEnv(ghEnv()),
+      });
       assert.equal(result.success, true);
 
       // Work state should exist under GH-154/
       const safeDir = path.join(tempTasksBase, SAFE_TICKET);
-      assert.ok(fs.existsSync(path.join(safeDir, '.work-state.json')), 'Work state should exist under GH-154/');
+      assert.ok(
+        fs.existsSync(path.join(safeDir, '.work-state.json')),
+        'Work state should exist under GH-154/'
+      );
     });
 
     it('getAvailableTransitions(#NNN) correctly reads work state from GH-NNN/', async () => {
@@ -529,15 +591,13 @@ describe('TDD enforcement', () => {
       await transitionTo(RAW_TICKET, 'brief', ghEnv());
 
       // Now query available transitions with raw ticket
-      const { result } = await runOrchestrator(
-        ['transitions', RAW_TICKET],
-        { env: baseEnv(ghEnv()) },
-      );
+      const { result } = await runOrchestrator(['transitions', RAW_TICKET], {
+        env: baseEnv(ghEnv()),
+      });
 
       // Should find the state (currently at brief, can go to spec or implement)
       assert.equal(result.currentStep, 'brief', 'Should find current step from GH-NNN/ state');
       assert.ok(result.allowed.length > 0, 'Should have available transitions');
     });
   });
-
 });

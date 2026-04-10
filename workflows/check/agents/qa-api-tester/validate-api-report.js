@@ -13,6 +13,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { logHookError } = require(path.join(__dirname, '..', '..', '..', 'lib', 'hook-error-log'));
 
 async function main() {
   let input = '';
@@ -30,16 +31,18 @@ async function main() {
   let taskDir = null;
 
   try {
-    const dirs = fs.readdirSync(tasksDir).filter(d => {
+    const dirs = fs.readdirSync(tasksDir).filter((d) => {
       const stat = fs.statSync(path.join(tasksDir, d));
       return stat.isDirectory();
     });
 
     // Look for qa-api.md in task directories (sorted by modification time, newest first)
-    const dirsWithTime = dirs.map(d => ({
-      name: d,
-      mtime: fs.statSync(path.join(tasksDir, d)).mtime.getTime()
-    })).sort((a, b) => b.mtime - a.mtime);
+    const dirsWithTime = dirs
+      .map((d) => ({
+        name: d,
+        mtime: fs.statSync(path.join(tasksDir, d)).mtime.getTime(),
+      }))
+      .sort((a, b) => b.mtime - a.mtime);
 
     for (const dir of dirsWithTime) {
       const qaPath = path.join(tasksDir, dir.name, 'qa-api.md');
@@ -70,25 +73,32 @@ async function main() {
   const issues = [];
 
   // Check: API Connectivity Verification section
-  if (!reportContent.includes('## API Connectivity Verification') &&
-      !reportContent.includes('### Service Health Check')) {
+  if (
+    !reportContent.includes('## API Connectivity Verification') &&
+    !reportContent.includes('### Service Health Check')
+  ) {
     issues.push('Missing "## API Connectivity Verification" section');
   }
 
   // Check: Evidence of curl usage or database query
   const hasCurl = reportContent.includes('curl ') || reportContent.includes('curl -');
-  const hasDbQuery = reportContent.includes('mcp__pg_') ||
-                     reportContent.includes('SELECT ') ||
-                     reportContent.includes('INSERT ') ||
-                     reportContent.includes('UPDATE ') ||
-                     reportContent.includes('DELETE ');
+  const hasDbQuery =
+    reportContent.includes('mcp__pg_') ||
+    reportContent.includes('SELECT ') ||
+    reportContent.includes('INSERT ') ||
+    reportContent.includes('UPDATE ') ||
+    reportContent.includes('DELETE ');
 
   if (!hasCurl && !hasDbQuery) {
     issues.push('No evidence of API testing (curl) or database verification');
   }
 
   // Check: Has test results
-  if (!reportContent.includes('PASS') && !reportContent.includes('FAIL') && !reportContent.includes('BLOCKED')) {
+  if (
+    !reportContent.includes('PASS') &&
+    !reportContent.includes('FAIL') &&
+    !reportContent.includes('BLOCKED')
+  ) {
     issues.push('Missing test status (PASS/FAIL/BLOCKED)');
   }
 
@@ -107,7 +117,9 @@ async function main() {
   }
 
   if (issues.length > 0) {
-    process.stderr.write(`API QA Report Validation Issues:\n\n${issues.map((i, n) => `${n + 1}. ${i}`).join('\n')}\n\nReport: ${reportPath}${httpPath ? `\nHTTP File: ${httpPath}` : ''}\n`);
+    process.stderr.write(
+      `API QA Report Validation Issues:\n\n${issues.map((i, n) => `${n + 1}. ${i}`).join('\n')}\n\nReport: ${reportPath}${httpPath ? `\nHTTP File: ${httpPath}` : ''}\n`
+    );
     process.exit(2);
   }
 
@@ -132,7 +144,8 @@ function validateHttpFile(content) {
   }
 
   // Check: Has base URL or direct URLs
-  const hasBaseUrl = content.includes('@baseUrl') || content.includes('http://') || content.includes('https://');
+  const hasBaseUrl =
+    content.includes('@baseUrl') || content.includes('http://') || content.includes('https://');
   if (!hasBaseUrl) {
     issues.push('.http file missing URLs');
   }
@@ -144,7 +157,9 @@ function validateHttpFile(content) {
   }
 
   // Warning check: Secrets potentially exposed (non-blocking, just warn)
-  const hasPotentialSecrets = /(Authorization|X-API-Key|Cookie):\s*[^<\n]+[^REDACTED\n]/i.test(content);
+  const hasPotentialSecrets = /(Authorization|X-API-Key|Cookie):\s*[^<\n]+[^REDACTED\n]/i.test(
+    content
+  );
   if (hasPotentialSecrets) {
     // This is a warning, not a blocking issue - just check it's not obviously a real token
     const hasRealToken = /Authorization:\s*Bearer\s+ey[A-Za-z0-9]/i.test(content);
@@ -156,6 +171,7 @@ function validateHttpFile(content) {
   return issues;
 }
 
-main().catch(() => {
+main().catch((err) => {
+  logHookError(__filename, err);
   process.exit(0);
 });

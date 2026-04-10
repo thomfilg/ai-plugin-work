@@ -1,6 +1,6 @@
 {
   "name": "work-workflow",
-  "version": "2.7.51",
+  "version": "3.0.0",
   "description": "Deterministic workflow orchestrator for Jira task implementation with state machine validation.",
   "license": "MIT",
   "repository": {
@@ -17,6 +17,11 @@
     "dev:typecheck": "./workflows/lib/scripts/dev-check/dev-typecheck.sh",
     "dev:test": "./workflows/lib/scripts/dev-check/dev-test.sh",
     "dev:check": "pnpm dev:lint && pnpm dev:typecheck && pnpm dev:test",
-    "dev:test:main": "./workflows/lib/scripts/dev-check/dev-test.sh --main"
+    "dev:test:main": "./workflows/lib/scripts/dev-check/dev-test.sh --main",
+    "format": "biome format --write .",
+    "format:check": "biome format ."
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.4.11"
   }
 }

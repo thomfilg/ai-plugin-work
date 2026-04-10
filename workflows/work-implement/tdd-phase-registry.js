@@ -10,22 +10,18 @@
 
 // ─── Phase IDs ──────────────────────────────────────────────────────────────
 const TDD_PHASES = Object.freeze({
-  red:      'red',
-  green:    'green',
+  red: 'red',
+  green: 'green',
   refactor: 'refactor',
 });
 
 // ─── Canonical phase ordering ───────────────────────────────────────────────
-const TDD_PHASE_ORDER = Object.freeze([
-  TDD_PHASES.red,
-  TDD_PHASES.green,
-  TDD_PHASES.refactor,
-]);
+const TDD_PHASE_ORDER = Object.freeze([TDD_PHASES.red, TDD_PHASES.green, TDD_PHASES.refactor]);
 
 // ─── Phase Transition Graph (cyclic) ────────────────────────────────────────
 const TDD_PHASE_TRANSITIONS = Object.freeze({
-  [TDD_PHASES.red]:      [TDD_PHASES.green],
-  [TDD_PHASES.green]:    [TDD_PHASES.refactor],
+  [TDD_PHASES.red]: [TDD_PHASES.green],
+  [TDD_PHASES.green]: [TDD_PHASES.refactor],
   [TDD_PHASES.refactor]: [TDD_PHASES.red],
 });
 
@@ -40,10 +36,7 @@ function tddCanTransition(current, next) {
 }
 
 // ─── Test File Patterns ─────────────────────────────────────────────────────
-const TEST_FILE_PATTERNS = Object.freeze([
-  /\.test\.[jt]sx?$/,
-  /\.spec\.[jt]sx?$/,
-]);
+const TEST_FILE_PATTERNS = Object.freeze([/\.test\.[jt]sx?$/, /\.spec\.[jt]sx?$/]);
 
 const TEST_HELPER_PATTERNS = Object.freeze([
   /(^|\/)__mocks__\//,
@@ -61,7 +54,7 @@ const TEST_HELPER_PATTERNS = Object.freeze([
  * @returns {boolean}
  */
 function isTestFile(filePath) {
-  return TEST_FILE_PATTERNS.some(p => p.test(filePath));
+  return TEST_FILE_PATTERNS.some((p) => p.test(filePath));
 }
 
 /**
@@ -70,7 +63,7 @@ function isTestFile(filePath) {
  */
 function isTestHelper(filePath) {
   if (isTestFile(filePath)) return false;
-  return TEST_HELPER_PATTERNS.some(p => p.test(filePath));
+  return TEST_HELPER_PATTERNS.some((p) => p.test(filePath));
 }
 
 // ─── Phase Hook Rules ───────────────────────────────────────────────────────
@@ -79,13 +72,15 @@ const PHASE_HOOKS = Object.freeze({
     shouldBlock(filePath) {
       return !isTestFile(filePath);
     },
-    blockMessage: 'TDD RED phase: only .test or .spec files can be modified. Write failing tests first.',
+    blockMessage:
+      'TDD RED phase: only .test or .spec files can be modified. Write failing tests first.',
   }),
   [TDD_PHASES.green]: Object.freeze({
     shouldBlock(filePath) {
       return isTestFile(filePath) && !isTestHelper(filePath);
     },
-    blockMessage: 'TDD GREEN phase: test files cannot be modified. Make the tests pass by changing production code.',
+    blockMessage:
+      'TDD GREEN phase: test files cannot be modified. Make the tests pass by changing production code.',
   }),
   [TDD_PHASES.refactor]: Object.freeze({
     shouldBlock() {

@@ -28,12 +28,7 @@ const writer = createReportWriter({
 
   allowedAgents: ['quality-checker'],
 
-  requiredFields: [
-    'reportPath',
-    'changesHash',
-    'qualityGate',
-    'unitTests',
-  ],
+  requiredFields: ['reportPath', 'changesHash', 'qualityGate', 'unitTests'],
 
   validate(input) {
     const errors = [];
@@ -48,7 +43,9 @@ const writer = createReportWriter({
 
     // Unit tests must have status
     if (!['pass', 'fail', 'na'].includes(input.unitTests.status)) {
-      errors.push(`unitTests.status must be "pass", "fail", or "na" (got "${input.unitTests.status}")`);
+      errors.push(
+        `unitTests.status must be "pass", "fail", or "na" (got "${input.unitTests.status}")`
+      );
     }
 
     // Report path must be tests.check.md
@@ -64,7 +61,8 @@ const writer = createReportWriter({
     const lines = [];
     const timestamp = new Date().toISOString();
 
-    const verdict = input.verdict || (input.unitTests.status === 'pass' ? 'APPROVED' : 'NEEDS_WORK');
+    const verdict =
+      input.verdict || (input.unitTests.status === 'pass' ? 'APPROVED' : 'NEEDS_WORK');
     lines.push(`**Changes Hash:** ${input.changesHash}`);
     lines.push(`Status: ${verdict}`);
     lines.push('');
@@ -93,7 +91,9 @@ const writer = createReportWriter({
       lines.push(ut.output);
       lines.push('```');
     }
-    lines.push(`- Status: ${ut.status === 'pass' ? '✅ PASS' : ut.status === 'fail' ? '❌ FAIL' : 'N/A'}`);
+    lines.push(
+      `- Status: ${ut.status === 'pass' ? '✅ PASS' : ut.status === 'fail' ? '❌ FAIL' : 'N/A'}`
+    );
     lines.push(`- Count: ${ut.count || 'N/A'}`);
     lines.push(`- Exit code: ${ut.exitCode ?? 'N/A'}`);
     lines.push('');
@@ -137,9 +137,15 @@ const writer = createReportWriter({
     lines.push('');
     lines.push('| Test Type | Status | Count |');
     lines.push('|-----------|--------|-------|');
-    lines.push(`| Unit | ${ut.status === 'pass' ? '✅' : ut.status === 'fail' ? '❌' : 'N/A'} | ${ut.count || 'N/A'} |`);
-    lines.push(`| Integration | ${it?.status === 'pass' ? '✅' : it?.status === 'fail' ? '❌' : 'N/A'} | ${it?.count || 'N/A'} |`);
-    lines.push(`| Smoke | ${st?.status === 'pass' ? '✅' : st?.status === 'fail' ? '❌' : 'N/A'} | ${st?.count || 'N/A'} |`);
+    lines.push(
+      `| Unit | ${ut.status === 'pass' ? '✅' : ut.status === 'fail' ? '❌' : 'N/A'} | ${ut.count || 'N/A'} |`
+    );
+    lines.push(
+      `| Integration | ${it?.status === 'pass' ? '✅' : it?.status === 'fail' ? '❌' : 'N/A'} | ${it?.count || 'N/A'} |`
+    );
+    lines.push(
+      `| Smoke | ${st?.status === 'pass' ? '✅' : st?.status === 'fail' ? '❌' : 'N/A'} | ${st?.count || 'N/A'} |`
+    );
     lines.push('');
 
     // Verdict (reuse verdict from top of formatReport)
@@ -152,7 +158,7 @@ const writer = createReportWriter({
   },
 });
 
-writer.run().catch(err => {
+writer.run().catch((err) => {
   process.stderr.write(`[Tests Report Writer] Unexpected error: ${err.message}\n`);
   process.exit(1);
 });

@@ -16,13 +16,26 @@ const { spawn, execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const config = require(path.join(__dirname, '..', '..', 'lib', 'config'));
+const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
 
-process.on('uncaughtException', () => { console.log(JSON.stringify({ error: 'uncaught exception', apps: {} })); process.exit(0); });
-process.on('unhandledRejection', () => { console.log(JSON.stringify({ error: 'unhandled rejection', apps: {} })); process.exit(0); });
+process.on('uncaughtException', (err) => {
+  logHookError(__filename, err);
+  console.log(JSON.stringify({ error: 'uncaught exception', apps: {} }));
+  process.exit(0);
+});
+process.on('unhandledRejection', (err) => {
+  logHookError(__filename, err);
+  console.log(JSON.stringify({ error: 'unhandled rejection', apps: {} }));
+  process.exit(0);
+});
 
 // Get impacted apps from args
 let IMPACTED_APPS;
-try { IMPACTED_APPS = JSON.parse(process.argv[2] || '[]'); } catch { IMPACTED_APPS = []; }
+try {
+  IMPACTED_APPS = JSON.parse(process.argv[2] || '[]');
+} catch {
+  IMPACTED_APPS = [];
+}
 
 /**
  * Derive ticket prefix (e.g., PROJ-964) from current worktree path or git branch.
@@ -47,7 +60,7 @@ const DB_ENV = {
   DATABASE_PORT: '5432', // Will be updated by detectDatabasePort()
   DATABASE_NAME: 'status-site',
   DATABASE_MASTER_USER_NAME: 'postgres',
-  DATABASE_MASTER_PASSWORD: 'mypassword'
+  DATABASE_MASTER_PASSWORD: 'mypassword',
 };
 
 // Database container mappings - which container serves which app's database
@@ -55,7 +68,7 @@ const DB_CONTAINERS = {
   'status-site': { containerName: 'status-site', dbName: 'status-site' },
   'status-site-admin': { containerName: 'status-site', dbName: 'status-site' },
   'as-dashboard': { containerName: 'as-dashboard', dbName: 'as-dashboard' },
-  'as-dashboard-admin': { containerName: 'as-dashboard', dbName: 'as-dashboard' }
+  'as-dashboard-admin': { containerName: 'as-dashboard', dbName: 'as-dashboard' },
 };
 
 /**
@@ -123,7 +136,9 @@ function detectDatabaseConfig(impactedApps) {
 
   // If no container found, check if any postgres container is running
   if (config.DATABASE_PORT === '5432') {
-    const postgresPort = exec('docker ps --filter "expose=5432" --format "{{.Ports}}" | grep -oE "[0-9]+->5432" | head -1 | cut -d"-" -f1');
+    const postgresPort = exec(
+      'docker ps --filter "expose=5432" --format "{{.Ports}}" | grep -oE "[0-9]+->5432" | head -1 | cut -d"-" -f1'
+    );
     if (postgresPort) {
       config.DATABASE_PORT = postgresPort;
       console.error(`Detected generic postgres on port ${postgresPort}`);
@@ -150,9 +165,9 @@ function findOurTmuxPort(appName) {
   if (!TICKET_PREFIX) return null;
   const sessions = exec('tmux list-sessions -F "#{session_name}" 2>/dev/null');
   if (!sessions) return null;
-  const ourSession = sessions.split('\n').find(s =>
-    s.startsWith(TICKET_PREFIX) && s.includes('dev')
-  );
+  const ourSession = sessions
+    .split('\n')
+    .find((s) => s.startsWith(TICKET_PREFIX) && s.includes('dev'));
   if (!ourSession) return null;
   const paneOutput = exec(`tmux capture-pane -t "${ourSession}" -p 2>/dev/null`);
   if (!paneOutput) return null;
@@ -190,7 +205,7 @@ async function startDatabase() {
       cwd: process.cwd(),
       shell: true,
       stdio: ['ignore', 'pipe', 'pipe'],
-      detached: true
+      detached: true,
     });
 
     let output = '';
@@ -234,7 +249,7 @@ async function startApp(appName, config) {
         name: appName,
         port: config.defaultPort,
         url: `http://host.docker.internal:${config.defaultPort}`,
-        alreadyRunning: true
+        alreadyRunning: true,
       };
     }
     // Another ticket's server occupies the default port — find an alternate
@@ -250,7 +265,7 @@ async function startApp(appName, config) {
       cwd: process.cwd(),
       env: { ...process.env, PORT: port.toString() },
       stdio: ['ignore', 'pipe', 'pipe'],
-      detached: true
+      detached: true,
     });
 
     let output = '';
@@ -270,7 +285,7 @@ async function startApp(appName, config) {
           port: actualPort,
           url: `http://host.docker.internal:${actualPort}`,
           pid: proc.pid,
-          started: true
+          started: true,
         });
       }
     };
@@ -289,13 +304,13 @@ async function startApp(appName, config) {
             url: `http://host.docker.internal:${port}`,
             pid: proc.pid,
             started: true,
-            note: 'Started but did not detect URL output'
+            note: 'Started but did not detect URL output',
           });
         } else {
           resolve({
             name: appName,
             error: 'Timeout waiting for app to start',
-            started: false
+            started: false,
           });
         }
       }
@@ -316,7 +331,7 @@ async function main() {
     database: null,
     apps: {},
     env: detectedDbConfig,
-    runningApps: {}
+    runningApps: {},
   };
 
   // Start database
@@ -324,26 +339,30 @@ async function main() {
 
   // Re-detect after starting database (in case it wasn't running before)
   if (result.database.started) {
-    await new Promise(resolve => setTimeout(resolve, 3000)); // Wait for container to be ready
+    await new Promise((resolve) => setTimeout(resolve, 3000)); // Wait for container to be ready
     const updatedConfig = detectDatabaseConfig(IMPACTED_APPS);
     result.env = updatedConfig;
   }
 
   // Wait a bit for database to be fully ready
-  await new Promise(resolve => setTimeout(resolve, 5000));
+  await new Promise((resolve) => setTimeout(resolve, 5000));
 
   // Start web apps — if none directly impacted, start all for mandatory QA coverage
   // (e.g., when only shared packages changed, all consumers must be QA'd)
-  let webAppsToStart = IMPACTED_APPS.filter(app => WEB_APPS[app]);
+  let webAppsToStart = IMPACTED_APPS.filter((app) => WEB_APPS[app]);
 
   if (webAppsToStart.length === 0 && IMPACTED_APPS.length > 0) {
     // Non-web apps or packages changed — start all web apps for mandatory QA
     const allWebApps = Object.keys(WEB_APPS);
     if (allWebApps.length > 0) {
-      console.error(`Package/non-web changes detected (${IMPACTED_APPS.join(', ')}) — starting all ${allWebApps.length} web apps for mandatory QA`);
+      console.error(
+        `Package/non-web changes detected (${IMPACTED_APPS.join(', ')}) — starting all ${allWebApps.length} web apps for mandatory QA`
+      );
       webAppsToStart = allWebApps;
     } else {
-      console.error(`Impacted changes detected (${IMPACTED_APPS.join(', ')}) but no WEB_APPS configured in .env — cannot start apps for QA`);
+      console.error(
+        `Impacted changes detected (${IMPACTED_APPS.join(', ')}) but no WEB_APPS configured in .env — cannot start apps for QA`
+      );
     }
   } else if (webAppsToStart.length === 0) {
     // No impacted apps at all — start all web apps to avoid enforce-env-start-failure
@@ -352,7 +371,9 @@ async function main() {
     if (allWebApps.length === 0) {
       console.error('No impacted apps and no WEB_APPS configured in .env — nothing to start');
     } else {
-      console.error(`No impacted apps detected — starting all ${allWebApps.length} web apps as default`);
+      console.error(
+        `No impacted apps detected — starting all ${allWebApps.length} web apps as default`
+      );
       webAppsToStart = allWebApps;
     }
   }
@@ -365,7 +386,7 @@ async function main() {
     if (appResult.started || appResult.alreadyRunning) {
       result.runningApps[appName] = {
         port: appResult.port,
-        url: appResult.url
+        url: appResult.url,
       };
     }
   }
@@ -374,4 +395,7 @@ async function main() {
   console.log(JSON.stringify(result, null, 2));
 }
 
-main().catch(() => process.exit(0));
+main().catch((err) => {
+  logHookError(__filename, err);
+  process.exit(0);
+});

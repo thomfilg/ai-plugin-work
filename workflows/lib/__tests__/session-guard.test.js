@@ -20,7 +20,11 @@ function sessionFilePath(ticketId) {
 }
 
 function cleanupSession(ticketId) {
-  try { fs.unlinkSync(sessionFilePath(ticketId)); } catch { /* */ }
+  try {
+    fs.unlinkSync(sessionFilePath(ticketId));
+  } catch {
+    /* */
+  }
 }
 
 /**
@@ -32,10 +36,16 @@ function cleanupAllSessions() {
     const files = fs.readdirSync(SESSION_DIR);
     for (const f of files) {
       if (f.startsWith('claude-session-guard-') && f.endsWith('.json')) {
-        try { fs.unlinkSync(path.join(SESSION_DIR, f)); } catch { /* */ }
+        try {
+          fs.unlinkSync(path.join(SESSION_DIR, f));
+        } catch {
+          /* */
+        }
       }
     }
-  } catch { /* ignore dir read errors */ }
+  } catch {
+    /* ignore dir read errors */
+  }
 }
 
 function readSession(ticketId) {
@@ -58,8 +68,12 @@ function runCli(args = [], extraEnv = {}) {
 
     let stdout = '';
     let stderr = '';
-    proc.stdout.on('data', (d) => { stdout += d.toString(); });
-    proc.stderr.on('data', (d) => { stderr += d.toString(); });
+    proc.stdout.on('data', (d) => {
+      stdout += d.toString();
+    });
+    proc.stderr.on('data', (d) => {
+      stderr += d.toString();
+    });
     proc.on('close', (code) => resolve({ stdout, stderr, code }));
     proc.on('error', reject);
 
@@ -74,13 +88,22 @@ function runHook(hookData, hookType, extraEnv = {}) {
   return new Promise((resolve, reject) => {
     const proc = spawn('node', [HOOK_PATH], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, SESSION_GUARD_DIR: SESSION_DIR, ...extraEnv, CLAUDE_HOOK_TYPE: hookType },
+      env: {
+        ...process.env,
+        SESSION_GUARD_DIR: SESSION_DIR,
+        ...extraEnv,
+        CLAUDE_HOOK_TYPE: hookType,
+      },
     });
 
     let stdout = '';
     let stderr = '';
-    proc.stdout.on('data', (d) => { stdout += d.toString(); });
-    proc.stderr.on('data', (d) => { stderr += d.toString(); });
+    proc.stdout.on('data', (d) => {
+      stdout += d.toString();
+    });
+    proc.stderr.on('data', (d) => {
+      stderr += d.toString();
+    });
     proc.on('close', (code) => resolve({ stdout, stderr, code }));
     proc.on('error', reject);
 
@@ -90,8 +113,18 @@ function runHook(hookData, hookType, extraEnv = {}) {
 }
 
 describe('session-guard', () => {
-  before(() => { fs.mkdirSync(SESSION_DIR, { recursive: true }); cleanupAllSessions(); });
-  after(() => { cleanupAllSessions(); try { fs.rmdirSync(SESSION_DIR); } catch { /* */ } });
+  before(() => {
+    fs.mkdirSync(SESSION_DIR, { recursive: true });
+    cleanupAllSessions();
+  });
+  after(() => {
+    cleanupAllSessions();
+    try {
+      fs.rmdirSync(SESSION_DIR);
+    } catch {
+      /* */
+    }
+  });
 
   beforeEach(() => {
     cleanupAllSessions();
@@ -123,8 +156,11 @@ describe('session-guard', () => {
       const session = readSession(TEST_TICKET);
       assert.ok(session);
       // Passphrase should match pattern: WORD-WORD-NNNN (NATO-style)
-      assert.match(session.passphrase, /^[A-Z]+-[A-Z]+-\d{4}$/,
-        `passphrase "${session.passphrase}" should match WORD-WORD-NNNN format`);
+      assert.match(
+        session.passphrase,
+        /^[A-Z]+-[A-Z]+-\d{4}$/,
+        `passphrase "${session.passphrase}" should match WORD-WORD-NNNN format`
+      );
     });
 
     it('generates unique passphrases on repeated calls', async () => {
@@ -162,8 +198,10 @@ describe('session-guard', () => {
 
       const r = await runCli(['reveal', TEST_TICKET]);
       assert.equal(r.code, 0);
-      assert.ok(r.stdout.includes(session.passphrase),
-        `stdout should contain passphrase "${session.passphrase}"`);
+      assert.ok(
+        r.stdout.includes(session.passphrase),
+        `stdout should contain passphrase "${session.passphrase}"`
+      );
 
       const updated = readSession(TEST_TICKET);
       assert.equal(updated.revealed, true);
@@ -233,8 +271,10 @@ describe('session-guard', () => {
     it('outputs no-session message when session does not exist', async () => {
       const r = await runCli(['status', 'NONEXISTENT-123']);
       assert.equal(r.code, 0);
-      assert.ok(r.stdout.includes('no active') || r.stdout.includes('No active'),
-        'should indicate no active session');
+      assert.ok(
+        r.stdout.includes('no active') || r.stdout.includes('No active'),
+        'should indicate no active session'
+      );
     });
   });
 
@@ -244,40 +284,36 @@ describe('session-guard', () => {
     it('outputs workflow reminder when active session exists', async () => {
       await runCli(['init', TEST_TICKET, TEST_WORKFLOW]);
 
-      const r = await runHook(
-        { session_id: 'test-session', cwd: '/tmp' },
-        'PreCompact',
-        { SESSION_GUARD_TICKET_ID: TEST_TICKET }
-      );
+      const r = await runHook({ session_id: 'test-session', cwd: '/tmp' }, 'PreCompact', {
+        SESSION_GUARD_TICKET_ID: TEST_TICKET,
+      });
       assert.equal(r.code, 0);
       assert.ok(r.stdout.includes(TEST_TICKET), 'should mention ticket ID');
-      assert.ok(r.stdout.includes(TEST_WORKFLOW) || r.stdout.includes('/work'),
-        'should mention workflow');
+      assert.ok(
+        r.stdout.includes(TEST_WORKFLOW) || r.stdout.includes('/work'),
+        'should mention workflow'
+      );
       assert.ok(
         r.stdout.toLowerCase().includes('must continue') ||
-        r.stdout.toLowerCase().includes('do not abandon') ||
-        r.stdout.toLowerCase().includes('active workflow'),
+          r.stdout.toLowerCase().includes('do not abandon') ||
+          r.stdout.toLowerCase().includes('active workflow'),
         'should contain reminder language'
       );
     });
 
     it('is silent when no active session', async () => {
-      const r = await runHook(
-        { session_id: 'test-session', cwd: '/tmp' },
-        'PreCompact',
-        { SESSION_GUARD_TICKET_ID: TEST_TICKET }
-      );
+      const r = await runHook({ session_id: 'test-session', cwd: '/tmp' }, 'PreCompact', {
+        SESSION_GUARD_TICKET_ID: TEST_TICKET,
+      });
       assert.equal(r.code, 0);
       assert.equal(r.stdout.trim(), '', 'should produce no stdout when no session');
     });
 
     it('always exits 0 (never blocks)', async () => {
       await runCli(['init', TEST_TICKET, TEST_WORKFLOW]);
-      const r = await runHook(
-        { session_id: 'test-session', cwd: '/tmp' },
-        'PreCompact',
-        { SESSION_GUARD_TICKET_ID: TEST_TICKET }
-      );
+      const r = await runHook({ session_id: 'test-session', cwd: '/tmp' }, 'PreCompact', {
+        SESSION_GUARD_TICKET_ID: TEST_TICKET,
+      });
       assert.equal(r.code, 0, 'PreCompact must always exit 0');
     });
   });
@@ -372,10 +408,7 @@ describe('session-guard', () => {
       // Write invalid JSON to session file
       fs.writeFileSync(sessionFilePath(TEST_TICKET), 'not valid json{{{');
 
-      const r = await runHook(
-        { session_id: 'test-session', cwd: '/tmp' },
-        'PreCompact'
-      );
+      const r = await runHook({ session_id: 'test-session', cwd: '/tmp' }, 'PreCompact');
       assert.equal(r.code, 0, 'should exit 0 on corrupt session');
     });
 
@@ -407,16 +440,27 @@ describe('session-guard', () => {
     const TEMP_TASKS = path.join(TEMP_WB, 'tasks');
     const CHECK_TICKET = 'CHECK-777';
 
-    before(() => { fs.mkdirSync(path.join(TEMP_TASKS, CHECK_TICKET), { recursive: true }); });
-    after(() => { try { fs.rmSync(TEMP_WB, { recursive: true, force: true }); } catch {} });
+    before(() => {
+      fs.mkdirSync(path.join(TEMP_TASKS, CHECK_TICKET), { recursive: true });
+    });
+    after(() => {
+      try {
+        fs.rmSync(TEMP_WB, { recursive: true, force: true });
+      } catch {}
+    });
 
     function writeCheckState(workflow, status) {
       const statePath = path.join(TEMP_TASKS, CHECK_TICKET, '.check.workflow-state.json');
-      fs.writeFileSync(statePath, JSON.stringify({ workflow, instanceId: CHECK_TICKET, status, stepStatus: {} }));
+      fs.writeFileSync(
+        statePath,
+        JSON.stringify({ workflow, instanceId: CHECK_TICKET, status, stepStatus: {} })
+      );
     }
 
     function removeCheckState() {
-      try { fs.unlinkSync(path.join(TEMP_TASKS, CHECK_TICKET, '.check.workflow-state.json')); } catch {}
+      try {
+        fs.unlinkSync(path.join(TEMP_TASKS, CHECK_TICKET, '.check.workflow-state.json'));
+      } catch {}
     }
 
     afterEach(() => {
@@ -428,7 +472,10 @@ describe('session-guard', () => {
       await runCli(['init', CHECK_TICKET, '/work'], { WORKTREES_BASE: TEMP_WB });
       writeCheckState('check', 'in_progress');
 
-      const r = await runHook({ stop_message: '' }, 'Stop', { WORKTREES_BASE: TEMP_WB, SESSION_GUARD_TICKET_ID: CHECK_TICKET });
+      const r = await runHook({ stop_message: '' }, 'Stop', {
+        WORKTREES_BASE: TEMP_WB,
+        SESSION_GUARD_TICKET_ID: CHECK_TICKET,
+      });
       assert.equal(r.code, 0, 'should allow stop when /check is active');
     });
 
@@ -436,7 +483,10 @@ describe('session-guard', () => {
       await runCli(['init', CHECK_TICKET, '/work'], { WORKTREES_BASE: TEMP_WB });
       // No check state written
 
-      const r = await runHook({ stop_message: '' }, 'Stop', { WORKTREES_BASE: TEMP_WB, SESSION_GUARD_TICKET_ID: CHECK_TICKET });
+      const r = await runHook({ stop_message: '' }, 'Stop', {
+        WORKTREES_BASE: TEMP_WB,
+        SESSION_GUARD_TICKET_ID: CHECK_TICKET,
+      });
       assert.equal(r.code, 2, 'should block stop without /check');
     });
 
@@ -444,7 +494,10 @@ describe('session-guard', () => {
       await runCli(['init', CHECK_TICKET, '/work'], { WORKTREES_BASE: TEMP_WB });
       writeCheckState('check', 'completed');
 
-      const r = await runHook({ stop_message: '' }, 'Stop', { WORKTREES_BASE: TEMP_WB, SESSION_GUARD_TICKET_ID: CHECK_TICKET });
+      const r = await runHook({ stop_message: '' }, 'Stop', {
+        WORKTREES_BASE: TEMP_WB,
+        SESSION_GUARD_TICKET_ID: CHECK_TICKET,
+      });
       assert.equal(r.code, 2, 'should block stop when /check completed');
     });
   });
@@ -519,7 +572,9 @@ describe('session-guard', () => {
       };
       fs.writeFileSync(sessionFilePath('TICKET-A'), JSON.stringify(sessionData));
 
-      const r = await runHook({ stop_message: '' }, 'Stop', { SESSION_GUARD_TICKET_ID: 'TICKET-A' });
+      const r = await runHook({ stop_message: '' }, 'Stop', {
+        SESSION_GUARD_TICKET_ID: 'TICKET-A',
+      });
       assert.equal(r.code, 2, 'should block when ticket matches');
     });
 
@@ -534,7 +589,9 @@ describe('session-guard', () => {
       };
       fs.writeFileSync(sessionFilePath('TICKET-A'), JSON.stringify(sessionData));
 
-      const r = await runHook({ stop_message: '' }, 'Stop', { SESSION_GUARD_TICKET_ID: 'TICKET-B' });
+      const r = await runHook({ stop_message: '' }, 'Stop', {
+        SESSION_GUARD_TICKET_ID: 'TICKET-B',
+      });
       assert.equal(r.code, 0, 'should allow stop when ticket does not match');
     });
 
@@ -559,7 +616,9 @@ describe('session-guard', () => {
       fs.writeFileSync(sessionFilePath('TICKET-A'), JSON.stringify(sessionA));
       fs.writeFileSync(sessionFilePath('TICKET-B'), JSON.stringify(sessionB));
 
-      const r = await runHook({ stop_message: '' }, 'Stop', { SESSION_GUARD_TICKET_ID: 'TICKET-B' });
+      const r = await runHook({ stop_message: '' }, 'Stop', {
+        SESSION_GUARD_TICKET_ID: 'TICKET-B',
+      });
       assert.equal(r.code, 2, 'should block for matching TICKET-B');
     });
 
@@ -574,7 +633,9 @@ describe('session-guard', () => {
       };
       fs.writeFileSync(sessionFilePath('TICKET-A'), JSON.stringify(sessionData));
 
-      const r = await runHook({ stop_message: '' }, 'Stop', { SESSION_GUARD_TICKET_ID: 'TICKET-A' });
+      const r = await runHook({ stop_message: '' }, 'Stop', {
+        SESSION_GUARD_TICKET_ID: 'TICKET-A',
+      });
       assert.equal(r.code, 0, 'should allow stop when matching session is revealed');
     });
 
@@ -608,7 +669,11 @@ describe('session-guard', () => {
       fs.writeFileSync(sessionFilePath('TICKET-Y'), JSON.stringify(sessionData));
 
       const r = await runHook({ stop_message: '' }, 'Stop', { SESSION_GUARD_TICKET_ID: '' });
-      assert.equal(r.code, 2, 'should block via cwd fallback when SESSION_GUARD_TICKET_ID is empty');
+      assert.equal(
+        r.code,
+        2,
+        'should block via cwd fallback when SESSION_GUARD_TICKET_ID is empty'
+      );
     });
 
     it('PreCompact only shows reminders for matching ticket', async () => {

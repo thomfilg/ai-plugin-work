@@ -34,7 +34,7 @@ function isFrontendApp(appName) {
  */
 function getAllFrontendApps() {
   try {
-    const apps = fs.readdirSync(APPS_DIR).filter(dir => {
+    const apps = fs.readdirSync(APPS_DIR).filter((dir) => {
       const appPath = path.join(APPS_DIR, dir);
       return fs.statSync(appPath).isDirectory() && isFrontendApp(dir);
     });
@@ -54,7 +54,7 @@ function getAffectedApps() {
       encoding: 'utf8',
       timeout: 30000,
       stdio: ['pipe', 'pipe', 'pipe'],
-      cwd: REPO_DIR
+      cwd: REPO_DIR,
     });
     return JSON.parse(result.trim());
   } catch (e) {
@@ -67,7 +67,7 @@ function getAffectedApps() {
  */
 function getAffectedFrontendApps(affectedApps) {
   if (!affectedApps || affectedApps.length === 0) return [];
-  return affectedApps.filter(app => isFrontendApp(app));
+  return affectedApps.filter((app) => isFrontendApp(app));
 }
 
 /**
@@ -78,7 +78,7 @@ function getPRBody() {
     const result = execSync('gh pr view --json body -q ".body"', {
       encoding: 'utf8',
       timeout: 10000,
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['pipe', 'pipe', 'pipe'],
     });
     return result.trim();
   } catch (e) {
@@ -106,14 +106,18 @@ async function main() {
   try {
     hookData = JSON.parse(input);
   } catch (err) {
-    process.stderr.write(`PR-POST-GENERATOR VALIDATOR: Failed to parse hook input: ${err.message}\n`);
+    process.stderr.write(
+      `PR-POST-GENERATOR VALIDATOR: Failed to parse hook input: ${err.message}\n`
+    );
     process.exit(2);
   }
 
   // Only validate pr-post-generator subagent
   const agentName = hookData.agent_name || hookData.subagent_type || '';
-  if (!agentName.toLowerCase().includes('pr-post-generator') &&
-      !agentName.toLowerCase().includes('post-pr')) {
+  if (
+    !agentName.toLowerCase().includes('pr-post-generator') &&
+    !agentName.toLowerCase().includes('post-pr')
+  ) {
     process.exit(0);
   }
 
@@ -153,7 +157,9 @@ async function main() {
     const hasLink = hasWikiLink(prBody);
 
     if (!hasLink) {
-      issues.push(`PR body has no wiki link for visual documentation (frontend apps affected: ${affectedFrontendApps.join(', ')}). Add a wiki link.`);
+      issues.push(
+        `PR body has no wiki link for visual documentation (frontend apps affected: ${affectedFrontendApps.join(', ')}). Add a wiki link.`
+      );
     }
   } else {
     warnings.push('Could not fetch PR body to verify visual documentation');
@@ -180,7 +186,7 @@ async function main() {
     /gh pr edit/i,
     /pull request.*updated/i,
   ];
-  const hasPRUpdate = prUpdatePatterns.some(p => p.test(agentOutput));
+  const hasPRUpdate = prUpdatePatterns.some((p) => p.test(agentOutput));
   if (!hasPRUpdate) {
     warnings.push('No PR update confirmation found');
   }
@@ -192,7 +198,7 @@ async function main() {
     /Theme toggle.*PASS/i,
     /Common functionality/i,
   ];
-  const hasGenericTests = genericTestPatterns.some(p => p.test(agentOutput));
+  const hasGenericTests = genericTestPatterns.some((p) => p.test(agentOutput));
   if (hasGenericTests) {
     warnings.push('Contains generic page tests (should focus on feature-specific)');
   }
@@ -203,8 +209,8 @@ async function main() {
 ║  POST-PR-GENERATOR: VALIDATION FAILED                               ║
 ╠══════════════════════════════════════════════════════════════════════╣
 ║                                                                      ║
-${issues.map(i => `║  ${i.padEnd(66)}║`).join('\n')}
-${warnings.length > 0 ? warnings.map(w => `║  ${w.padEnd(66)}║`).join('\n') : ''}
+${issues.map((i) => `║  ${i.padEnd(66)}║`).join('\n')}
+${warnings.length > 0 ? warnings.map((w) => `║  ${w.padEnd(66)}║`).join('\n') : ''}
 ║                                                                      ║
 ║  Ensure screenshots are uploaded to wiki and PR has a wiki link.     ║
 ║                                                                      ║

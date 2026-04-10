@@ -23,10 +23,20 @@ const { tddCanTransition, isTestFile } = require('./tdd-phase-registry');
 const { consumeToken, tokenPath } = require('../lib/scripts/write-report');
 const { normalizeAgentName } = require('../lib/agent-detection');
 
-let config; try { config = require('../lib/config'); } catch { config = null; }
+let config;
+try {
+  config = require('../lib/config');
+} catch {
+  config = null;
+}
 
 // Agents authorized to call gated subcommands
-const ALLOWED_AGENTS = ['developer-nodejs-tdd', 'developer-react-senior', 'developer-react-ui-architect', 'developer-devops'];
+const ALLOWED_AGENTS = [
+  'developer-nodejs-tdd',
+  'developer-react-senior',
+  'developer-react-ui-architect',
+  'developer-devops',
+];
 
 // Subcommands that require token verification
 const GATED_SUBCOMMANDS = ['record-red', 'record-green', 'record-refactor', 'transition'];
@@ -36,8 +46,11 @@ const TOKEN_MAX_AGE_MS = 10_000; // 10 seconds
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function sanitizeId(ticketId) {
-  try { return require('../lib/config').safeTicketId(ticketId); }
-  catch { return ticketId; }
+  try {
+    return require('../lib/config').safeTicketId(ticketId);
+  } catch {
+    return ticketId;
+  }
 }
 
 function getStatePath(ticketId) {
@@ -45,7 +58,10 @@ function getStatePath(ticketId) {
     throw new Error(`Invalid ticket ID: ${ticketId}`);
   }
   // Resolve from TASKS_BASE env, config module, or default HOME-based path
-  const base = process.env.TASKS_BASE || (config && config.TASKS_BASE) || path.join(process.env.HOME, 'worktrees', 'tasks');
+  const base =
+    process.env.TASKS_BASE ||
+    (config && config.TASKS_BASE) ||
+    path.join(process.env.HOME, 'worktrees', 'tasks');
   const safeId = sanitizeId(ticketId);
   const resolved = path.resolve(base, safeId, 'tdd-phase.json');
   // Validate resolved path stays within TASKS_BASE (prevents traversal)
@@ -69,7 +85,11 @@ function writeState(ticketId, state) {
   fs.mkdirSync(dir, { recursive: true });
   const tmpPath = `${statePath}.${process.pid}.${Date.now()}.tmp`;
   fs.writeFileSync(tmpPath, JSON.stringify(state, null, 2));
-  try { fs.unlinkSync(statePath); } catch (e) { if (e && e.code !== 'ENOENT') throw e; }
+  try {
+    fs.unlinkSync(statePath);
+  } catch (e) {
+    if (e && e.code !== 'ENOENT') throw e;
+  }
   fs.renameSync(tmpPath, statePath);
 }
 
@@ -103,7 +123,7 @@ function runTestCommand(cmd) {
 }
 
 function getCurrentCycleRecord(state) {
-  let record = state.cycles.find(c => c.cycle === state.currentCycle);
+  let record = state.cycles.find((c) => c.cycle === state.currentCycle);
   if (!record) {
     record = { cycle: state.currentCycle };
     state.cycles.push(record);
@@ -118,7 +138,9 @@ function verifyToken() {
   const token = consumeToken(scriptBasename);
 
   if (!token) {
-    errorExit('No valid write token found. This script can only be called through Claude Code\'s agent system.');
+    errorExit(
+      "No valid write token found. This script can only be called through Claude Code's agent system."
+    );
   }
 
   if (typeof token.timestamp !== 'number' || !Number.isFinite(token.timestamp)) {
@@ -139,11 +161,13 @@ function verifyToken() {
   }
 
   const agentMatch = ALLOWED_AGENTS.some(
-    a => normalizeAgentName(a) === normalizeAgentName(token.agent)
+    (a) => normalizeAgentName(a) === normalizeAgentName(token.agent)
   );
 
   if (!agentMatch) {
-    errorExit(`Token agent "${token.agent}" is not authorized. Allowed: ${ALLOWED_AGENTS.join(', ')}`);
+    errorExit(
+      `Token agent "${token.agent}" is not authorized. Allowed: ${ALLOWED_AGENTS.join(', ')}`
+    );
   }
 }
 
@@ -181,19 +205,30 @@ function cmdRecordRed(ticketId, args) {
   const state = readState(ticketId);
   if (!state) errorExit('No TDD phase state found. Run "init" first.');
   // Enforce phase consistency: record-red only allowed during red phase
-  if (state.currentPhase !== 'red') errorExit('Cannot record RED evidence: current phase is "' + state.currentPhase + '". Transition to red first.');
+  if (state.currentPhase !== 'red')
+    errorExit(
+      'Cannot record RED evidence: current phase is "' +
+        state.currentPhase +
+        '". Transition to red first.'
+    );
 
   // Detect changed test files via git diff
   let allChanged = [];
   try {
     const diff = execSync('git diff --name-only', { encoding: 'utf8' }).trim();
     const staged = execSync('git diff --cached --name-only', { encoding: 'utf8' }).trim();
-    const untracked = execSync('git ls-files --others --exclude-standard', { encoding: 'utf8' }).trim();
-    allChanged = [...new Set([...diff.split('\n'), ...staged.split('\n'), ...untracked.split('\n')].filter(Boolean))];
+    const untracked = execSync('git ls-files --others --exclude-standard', {
+      encoding: 'utf8',
+    }).trim();
+    allChanged = [
+      ...new Set(
+        [...diff.split('\n'), ...staged.split('\n'), ...untracked.split('\n')].filter(Boolean)
+      ),
+    ];
   } catch {
     // git not available or not a repo
   }
-  const testFiles = allChanged.filter(f => isTestFile(f));
+  const testFiles = allChanged.filter((f) => isTestFile(f));
 
   if (testFiles.length === 0) {
     errorExit('No test files changed. RED phase requires modified .test or .spec files.');
@@ -214,7 +249,13 @@ function cmdRecordRed(ticketId, args) {
     timestamp: new Date().toISOString(),
   };
   writeState(ticketId, state);
-  successOut({ ok: true, phase: 'red', cycle: state.currentCycle, testFiles, testExitCode: exitCode });
+  successOut({
+    ok: true,
+    phase: 'red',
+    cycle: state.currentCycle,
+    testFiles,
+    testExitCode: exitCode,
+  });
 }
 
 function cmdRecordGreen(ticketId, args) {
@@ -225,7 +266,12 @@ function cmdRecordGreen(ticketId, args) {
   const state = readState(ticketId);
   if (!state) errorExit('No TDD phase state found. Run "init" first.');
   // Enforce phase consistency: record-green only allowed during green phase
-  if (state.currentPhase !== 'green') errorExit('Cannot record GREEN evidence: current phase is "' + state.currentPhase + '". Transition to green first.');
+  if (state.currentPhase !== 'green')
+    errorExit(
+      'Cannot record GREEN evidence: current phase is "' +
+        state.currentPhase +
+        '". Transition to green first.'
+    );
 
   const exitCode = runTestCommand(cmd);
   if (exitCode !== 0) {
@@ -250,7 +296,12 @@ function cmdRecordRefactor(ticketId, args) {
   const state = readState(ticketId);
   if (!state) errorExit('No TDD phase state found. Run "init" first.');
   // Enforce phase consistency: record-refactor only allowed during refactor phase
-  if (state.currentPhase !== 'refactor') errorExit('Cannot record REFACTOR evidence: current phase is "' + state.currentPhase + '". Transition to refactor first.');
+  if (state.currentPhase !== 'refactor')
+    errorExit(
+      'Cannot record REFACTOR evidence: current phase is "' +
+        state.currentPhase +
+        '". Transition to refactor first.'
+    );
 
   const exitCode = runTestCommand(cmd);
   if (exitCode !== 0) {
@@ -276,15 +327,19 @@ function cmdTransition(ticketId, targetPhase) {
 
   // Validate transition
   if (!tddCanTransition(state.currentPhase, targetPhase)) {
-    errorExit(`Invalid transition: ${state.currentPhase} -> ${targetPhase}. ` +
-      `Valid transitions: red->green, green->refactor, refactor->red.`);
+    errorExit(
+      `Invalid transition: ${state.currentPhase} -> ${targetPhase}. ` +
+        `Valid transitions: red->green, green->refactor, refactor->red.`
+    );
   }
 
   // Validate evidence exists for current phase
-  const currentCycleRecord = state.cycles.find(c => c.cycle === state.currentCycle);
+  const currentCycleRecord = state.cycles.find((c) => c.cycle === state.currentCycle);
   if (!currentCycleRecord || !currentCycleRecord[state.currentPhase]) {
-    errorExit(`No evidence recorded for ${state.currentPhase} phase. ` +
-      `Run "record-${state.currentPhase}" first.`);
+    errorExit(
+      `No evidence recorded for ${state.currentPhase} phase. ` +
+        `Run "record-${state.currentPhase}" first.`
+    );
   }
 
   // Update phase
@@ -303,7 +358,9 @@ function cmdException(ticketId, args) {
   if (!ticketId) errorExit('Missing ticket ID.');
   const reasonIdx = args.indexOf('--reason');
   if (reasonIdx === -1 || reasonIdx + 1 >= args.length) {
-    errorExit('Missing --reason argument. Usage: node tdd-phase-state.js exception <TICKET_ID> --reason "<reason>"');
+    errorExit(
+      'Missing --reason argument. Usage: node tdd-phase-state.js exception <TICKET_ID> --reason "<reason>"'
+    );
   }
   const reason = args[reasonIdx + 1];
   if (!reason || !reason.trim()) {
@@ -354,6 +411,8 @@ switch (subcommand) {
     cmdException(ticketId, args.slice(2));
     break;
   default:
-    errorExit(`Unknown subcommand: ${subcommand}. ` +
-      'Valid: init, current, record-red, record-green, record-refactor, transition, exception');
+    errorExit(
+      `Unknown subcommand: ${subcommand}. ` +
+        'Valid: init, current, record-red, record-green, record-refactor, transition, exception'
+    );
 }

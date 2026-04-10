@@ -11,16 +11,28 @@
  */
 
 const fs = require('fs');
+const path = require('path');
+const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
 
 let didBlock = false;
-process.on('uncaughtException', () => process.exit(didBlock ? 2 : 0));
-process.on('unhandledRejection', () => process.exit(didBlock ? 2 : 0));
+process.on('uncaughtException', (err) => {
+  logHookError(__filename, err);
+  process.exit(didBlock ? 2 : 0);
+});
+process.on('unhandledRejection', (err) => {
+  logHookError(__filename, err);
+  process.exit(didBlock ? 2 : 0);
+});
 
 let config;
 try {
   config = require('../../lib/config');
 } catch (err) {
-  if (err && err.code === 'MODULE_NOT_FOUND' && /['"]\.\.\/\.\.\/lib\/config['"]/.test(err.message)) {
+  if (
+    err &&
+    err.code === 'MODULE_NOT_FOUND' &&
+    /['"]\.\.\/\.\.\/lib\/config['"]/.test(err.message)
+  ) {
     config = null;
   } else {
     throw err;
@@ -43,26 +55,26 @@ const PROTECTED_WORK_IMPLEMENT_PATTERNS = [
 
 // Files that are allowed without /work-implement (config, non-code files)
 const ALLOWED_PATTERNS = [
-  /\.md$/,           // Markdown files
-  /\.json$/,         // JSON config files
-  /\.ya?ml$/,        // YAML files
-  /\.env/,           // Environment files
-  /\.gitignore$/,    // Git ignore
-  /\.eslintrc/,      // ESLint config
-  /\.prettierrc/,    // Prettier config
-  /package\.json$/,  // Package files
-  /tsconfig/,        // TypeScript config
-  new RegExp(config.TASKS_BASE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),  // Global task tracking files
-  /\.task-/,         // Task files
-  /\/__tests__\//,        // Test directories
-  /\.test\.[jt]sx?$/,     // .test.js, .test.ts, .test.tsx
-  /\.spec\.[jt]sx?$/,     // .spec.js, .spec.ts, .spec.tsx
-  /work-implement-enforce\.js$/,  // This file specifically
+  /\.md$/, // Markdown files
+  /\.json$/, // JSON config files
+  /\.ya?ml$/, // YAML files
+  /\.env/, // Environment files
+  /\.gitignore$/, // Git ignore
+  /\.eslintrc/, // ESLint config
+  /\.prettierrc/, // Prettier config
+  /package\.json$/, // Package files
+  /tsconfig/, // TypeScript config
+  new RegExp(config.TASKS_BASE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), // Global task tracking files
+  /\.task-/, // Task files
+  /\/__tests__\//, // Test directories
+  /\.test\.[jt]sx?$/, // .test.js, .test.ts, .test.tsx
+  /\.spec\.[jt]sx?$/, // .spec.js, .spec.ts, .spec.tsx
+  /work-implement-enforce\.js$/, // This file specifically
 ];
 
 function isProtectedWorkImplementFile(filePath) {
   if (!filePath) return false;
-  return PROTECTED_WORK_IMPLEMENT_PATTERNS.some(p => p.test(filePath));
+  return PROTECTED_WORK_IMPLEMENT_PATTERNS.some((p) => p.test(filePath));
 }
 
 function hasUnlockPhrase(transcriptPath, phrase) {
@@ -89,20 +101,21 @@ function isWorkCommandActive(transcriptPath) {
     // Look for /work invocation (but not /work-implement or /work-pr)
     const workPatterns = [
       /<command-name>\/work<\/command-name>/,
-      /"skill"\s*:\s*"work"[^-]/,  // "work" but not "work-implement" or "work-pr"
-      /# Start Work Command/  // The command's header from work.md
+      /"skill"\s*:\s*"work"[^-]/, // "work" but not "work-implement" or "work-pr"
+      /# Start Work Command/, // The command's header from work.md
     ];
 
     // Check if /work is active
-    const hasWork = workPatterns.some(pattern => pattern.test(content));
+    const hasWork = workPatterns.some((pattern) => pattern.test(content));
 
     if (!hasWork) return false;
 
     // Check if we're past Step 3 (bootstrap) but before Step 6 (commit)
     // Look for signs that bootstrap is done
-    const bootstrapDone = new RegExp('\\/bootstrap\\s+' + config.TICKET_PROJECT_KEY + '-\\d+').test(content) ||
-                          /Worktree.*created|worktree.*exists/i.test(content) ||
-                          /draft PR.*created/i.test(content);
+    const bootstrapDone =
+      new RegExp('\\/bootstrap\\s+' + config.TICKET_PROJECT_KEY + '-\\d+').test(content) ||
+      /Worktree.*created|worktree.*exists/i.test(content) ||
+      /draft PR.*created/i.test(content);
 
     // Check if commit step has been reached
     const commitReached = /commit-writer|Step 6.*commit/i.test(content);
@@ -129,10 +142,10 @@ function hasWorkImplementBeenInvoked(transcriptPath) {
     const patterns = [
       /<command-name>\/work-implement<\/command-name>/,
       /"skill"\s*:\s*"work-implement"/,
-      /# Implement Command/  // The command's header
+      /# Implement Command/, // The command's header
     ];
 
-    return patterns.some(pattern => pattern.test(content));
+    return patterns.some((pattern) => pattern.test(content));
   } catch {
     return false;
   }
@@ -183,7 +196,7 @@ function isInsideDeveloperAgent(transcriptPath, opts = {}) {
  */
 function isFileAllowed(filePath) {
   if (!filePath) return false;
-  return ALLOWED_PATTERNS.some(pattern => pattern.test(filePath));
+  return ALLOWED_PATTERNS.some((pattern) => pattern.test(filePath));
 }
 
 async function main() {
@@ -217,12 +230,12 @@ async function main() {
     if (!unlocked || !insideNodejsTdd) {
       process.stderr.write(
         `/work-implement protection\n\n` +
-        `Direct ${toolName} blocked for protected /work-implement assets:\n` +
-        `  ${filePath}\n\n` +
-        `To edit these files you must:\n` +
-        `  1) include the exact unlock phrase in the prompt:\n` +
-        `     "${WORK_IMPLEMENT_UNLOCK_PHRASE}"\n` +
-        `  2) delegate via developer-nodejs-tdd\n`
+          `Direct ${toolName} blocked for protected /work-implement assets:\n` +
+          `  ${filePath}\n\n` +
+          `To edit these files you must:\n` +
+          `  1) include the exact unlock phrase in the prompt:\n` +
+          `     "${WORK_IMPLEMENT_UNLOCK_PHRASE}"\n` +
+          `  2) delegate via developer-nodejs-tdd\n`
       );
       didBlock = true;
       process.exit(2);
@@ -254,17 +267,20 @@ async function main() {
   // Block the operation
   process.stderr.write(
     `/work Step 4 requires /work-implement\n\n` +
-    `Direct ${toolName} blocked during /work implementation phase.\n\n` +
-    `You MUST invoke /work-implement first:\n\n` +
-    `  /work-implement <summary of ticket requirements>\n\n` +
-    `This ensures:\n` +
-    `  - Proper agent delegation (developer-*)\n` +
-    `  - TodoWrite planning\n` +
-    `  - Quality checks before proceeding\n\n` +
-    `See /work Step 4 for details.\n`
+      `Direct ${toolName} blocked during /work implementation phase.\n\n` +
+      `You MUST invoke /work-implement first:\n\n` +
+      `  /work-implement <summary of ticket requirements>\n\n` +
+      `This ensures:\n` +
+      `  - Proper agent delegation (developer-*)\n` +
+      `  - TodoWrite planning\n` +
+      `  - Quality checks before proceeding\n\n` +
+      `See /work Step 4 for details.\n`
   );
   didBlock = true;
   process.exit(2);
 }
 
-main().catch(() => process.exit(didBlock ? 2 : 0));
+main().catch((err) => {
+  logHookError(__filename, err);
+  process.exit(didBlock ? 2 : 0);
+});

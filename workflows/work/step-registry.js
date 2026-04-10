@@ -12,21 +12,21 @@
 
 // ─── Step IDs (order-independent) ───────────────────────────────────────────
 const STEPS = Object.freeze({
-  ticket:           'ticket',
-  bootstrap:        'bootstrap',
-  brief:            'brief',
-  spec:             'spec',
-  tasks:            'tasks',
-  implement:        'implement',
-  commit:           'commit',
-  check:            'check',
-  pr:               'pr',
-  ready:            'ready',
-  follow_up:        'follow_up',
-  ci:               'ci',
-  cleanup:          'cleanup',
-  reports:          'reports',
-  complete:         'complete',
+  ticket: 'ticket',
+  bootstrap: 'bootstrap',
+  brief: 'brief',
+  spec: 'spec',
+  tasks: 'tasks',
+  implement: 'implement',
+  commit: 'commit',
+  check: 'check',
+  pr: 'pr',
+  ready: 'ready',
+  follow_up: 'follow_up',
+  ci: 'ci',
+  cleanup: 'cleanup',
+  reports: 'reports',
+  complete: 'complete',
 });
 
 // ─── Canonical step ordering ────────────────────────────────────────────────
@@ -58,11 +58,11 @@ const STEP_ORDER = Object.freeze([
  */
 function createStatusTransitions(transitions) {
   const statusTransitions = {};
-  const definedStates = new Set(transitions.map(t => t.source));
+  const definedStates = new Set(transitions.map((t) => t.source));
 
-  transitions.forEach(t => {
+  transitions.forEach((t) => {
     statusTransitions[t.source] = t.targets.filter(
-      target => definedStates.has(target) && target !== t.source,
+      (target) => definedStates.has(target) && target !== t.source
     );
   });
 
@@ -89,9 +89,9 @@ function canTransition(statusTransitions) {
 
 // Retry loops: backward edges for failure recovery
 const RETRY_EDGES = {
-  [STEPS.check]:     [STEPS.implement], // check failed, fix code
+  [STEPS.check]: [STEPS.implement], // check failed, fix code
   [STEPS.follow_up]: [STEPS.implement], // follow-up requires code changes
-  [STEPS.ci]:        [STEPS.implement], // CI failed, fix code
+  [STEPS.ci]: [STEPS.implement], // CI failed, fix code
 };
 
 // Generate linear forward edges from STEP_ORDER, merge retry edges
@@ -102,7 +102,7 @@ const STEP_TRANSITIONS = createStatusTransitions(
       ...(i < STEP_ORDER.length - 1 ? [STEP_ORDER[i + 1]] : []),
       ...(RETRY_EDGES[step] || []),
     ],
-  })),
+  }))
 );
 
 // GH-106: Add complete -> complete self-transition for retry.

@@ -112,7 +112,10 @@ function detectMainWorktree(worktrees, currentRoot) {
 
   // Check if the shortest one is on main/master branch
   const shortest = sorted[0];
-  if (shortest.branch && (shortest.branch === 'refs/heads/main' || shortest.branch === 'refs/heads/master')) {
+  if (
+    shortest.branch &&
+    (shortest.branch === 'refs/heads/main' || shortest.branch === 'refs/heads/master')
+  ) {
     return shortest.path;
   }
 
@@ -162,7 +165,7 @@ function findMainEnvFiles(mainWorktreePath) {
           envFiles.push({
             appName: dirent.name,
             relativePath: path.join('apps', dirent.name, '.env'),
-            sourcePath: envPath
+            sourcePath: envPath,
           });
         }
       }
@@ -189,14 +192,14 @@ function checkSymlink(targetPath) {
         isSymlink: true,
         linkTarget,
         resolvedPath,
-        targetExists: exists
+        targetExists: exists,
       };
     } else {
       return {
         exists: true,
         isSymlink: false,
         isFile: stats.isFile(),
-        isDirectory: stats.isDirectory()
+        isDirectory: stats.isDirectory(),
       };
     }
   } catch (error) {
@@ -226,7 +229,9 @@ function createSymlink(targetPath, sourcePath, dryRun = false) {
     if (!dryRun) {
       fs.unlinkSync(targetPath);
     }
-    console.log(`  ${dryRun ? 'Would remove' : 'Removing'} broken/incorrect symlink: ${targetPath}`);
+    console.log(
+      `  ${dryRun ? 'Would remove' : 'Removing'} broken/incorrect symlink: ${targetPath}`
+    );
   }
 
   // If a regular file exists, don't overwrite
@@ -271,7 +276,7 @@ function fixEnvSymlinks(worktreeRoot, mainWorktreePath, dryRun = false) {
       results.push({
         relativePath: envFile.relativePath,
         status: 'skipped',
-        reason: 'Directory does not exist in worktree'
+        reason: 'Directory does not exist in worktree',
       });
       continue;
     }
@@ -339,7 +344,10 @@ function checkAllSymlinks(worktreeRoot, mainWorktreePath) {
     console.log(`  Symlink: ${claudeStatus.linkTarget}`);
     console.log(`  Resolves to: ${claudeStatus.resolvedPath}`);
     console.log(`  Target exists: ${claudeStatus.targetExists ? '✅' : '❌'}`);
-    if (claudeStatus.targetExists && path.resolve(claudeStatus.resolvedPath) === path.resolve(claudeSourcePath)) {
+    if (
+      claudeStatus.targetExists &&
+      path.resolve(claudeStatus.resolvedPath) === path.resolve(claudeSourcePath)
+    ) {
       console.log(`  Correct: ✅`);
     } else if (claudeStatus.targetExists) {
       console.log(`  Correct: ⚠️  Points to different location`);
@@ -371,7 +379,10 @@ function checkAllSymlinks(worktreeRoot, mainWorktreePath) {
       console.log(`    Symlink: ${status.linkTarget}`);
       console.log(`    Resolves to: ${status.resolvedPath}`);
       console.log(`    Target exists: ${status.targetExists ? '✅' : '❌'}`);
-      if (status.targetExists && path.resolve(status.resolvedPath) === path.resolve(envFile.sourcePath)) {
+      if (
+        status.targetExists &&
+        path.resolve(status.resolvedPath) === path.resolve(envFile.sourcePath)
+      ) {
         console.log(`    Correct: ✅`);
       } else if (status.targetExists) {
         console.log(`    Correct: ⚠️  Points to different file`);
@@ -396,7 +407,7 @@ function parseArgs(args) {
     envOnly: false,
     claudeOnly: false,
     dryRun: false,
-    mainPath: null
+    mainPath: null,
   };
 
   for (let i = 0; i < args.length; i++) {

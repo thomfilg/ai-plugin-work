@@ -51,7 +51,9 @@ const writer = createReportWriter({
 
     // Status must be valid
     if (!ALLOWED_STATUSES.includes(input.status)) {
-      errors.push(`Invalid status "${input.status}". Must be one of: ${ALLOWED_STATUSES.join(', ')}`);
+      errors.push(
+        `Invalid status "${input.status}". Must be one of: ${ALLOWED_STATUSES.join(', ')}`
+      );
     }
 
     // Playwright verification structure
@@ -76,8 +78,10 @@ const writer = createReportWriter({
           errors.push(`tests[${i}] must be a non-null object`);
           continue;
         }
-        if (typeof t.name !== 'string' || !t.name) errors.push(`tests[${i}].name is required (string)`);
-        if (typeof t.status !== 'string' || !t.status) errors.push(`tests[${i}].status is required (pass/fail/skip)`);
+        if (typeof t.name !== 'string' || !t.name)
+          errors.push(`tests[${i}].name is required (string)`);
+        if (typeof t.status !== 'string' || !t.status)
+          errors.push(`tests[${i}].status is required (pass/fail/skip)`);
       }
     }
 
@@ -108,7 +112,8 @@ const writer = createReportWriter({
 
     // Header with changes hash (required for cache validation)
     // Status line for downstream gate compatibility (check-generate-summary.js)
-    const gateStatus = input.status === 'PASS' ? 'APPROVED' : input.status === 'FAIL' ? 'NEEDS_WORK' : input.status;
+    const gateStatus =
+      input.status === 'PASS' ? 'APPROVED' : input.status === 'FAIL' ? 'NEEDS_WORK' : input.status;
     lines.push(`**Changes Hash:** ${input.changesHash}`);
     lines.push(`Status: ${gateStatus}`);
     lines.push('');
@@ -156,7 +161,9 @@ const writer = createReportWriter({
       if (typeof tool === 'string') {
         lines.push(`- \`${tool}\` - Result: SUCCESS`);
       } else if (tool.name) {
-        lines.push(`- \`${tool.name}\` - Result: ${tool.result || 'SUCCESS'}${tool.detail ? ' - ' + tool.detail : ''}`);
+        lines.push(
+          `- \`${tool.name}\` - Result: ${tool.result || 'SUCCESS'}${tool.detail ? ' - ' + tool.detail : ''}`
+        );
       }
     }
     lines.push('');
@@ -166,19 +173,23 @@ const writer = createReportWriter({
     lines.push('');
 
     const tests = input.tests || [];
-    const passed = tests.filter(t => t.status === 'pass').length;
-    const failed = tests.filter(t => t.status === 'fail').length;
-    const skipped = tests.filter(t => t.status === 'skip').length;
+    const passed = tests.filter((t) => t.status === 'pass').length;
+    const failed = tests.filter((t) => t.status === 'fail').length;
+    const skipped = tests.filter((t) => t.status === 'skip').length;
 
     lines.push(`| # | Test | Status | Details |`);
     lines.push(`|---|------|--------|---------|`);
     for (let i = 0; i < tests.length; i++) {
       const t = tests[i];
       const icon = t.status === 'pass' ? '✅' : t.status === 'fail' ? '❌' : '⏭️';
-      lines.push(`| ${i + 1} | ${t.name} | ${icon} ${t.status.toUpperCase()} | ${t.details || ''} |`);
+      lines.push(
+        `| ${i + 1} | ${t.name} | ${icon} ${t.status.toUpperCase()} | ${t.details || ''} |`
+      );
     }
     lines.push('');
-    lines.push(`**Total:** ${passed} passed, ${failed} failed, ${skipped} skipped out of ${tests.length}`);
+    lines.push(
+      `**Total:** ${passed} passed, ${failed} failed, ${skipped} skipped out of ${tests.length}`
+    );
     lines.push('');
 
     // Screenshots
@@ -207,14 +218,16 @@ const writer = createReportWriter({
     // Final verdict
     lines.push('## Final Verdict');
     lines.push('');
-    lines.push(`**${input.status}**${input.status === 'PASS' ? ' - All tests passed' : input.status === 'FAIL' ? ` - ${failed} test(s) failing` : ''}`);
+    lines.push(
+      `**${input.status}**${input.status === 'PASS' ? ' - All tests passed' : input.status === 'FAIL' ? ` - ${failed} test(s) failing` : ''}`
+    );
     lines.push('');
 
     return lines.join('\n');
   },
 });
 
-writer.run().catch(err => {
+writer.run().catch((err) => {
   process.stderr.write(`[QA Report Writer] Unexpected error: ${err.message}\n`);
   process.exit(1);
 });

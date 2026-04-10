@@ -33,8 +33,12 @@ function runWorkState(args = [], opts = {}) {
     let stdout = '';
     let stderr = '';
 
-    proc.stdout.on('data', (data) => { stdout += data.toString(); });
-    proc.stderr.on('data', (data) => { stderr += data.toString(); });
+    proc.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
+    proc.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
 
     proc.on('close', (code) => {
       try {
@@ -62,19 +66,22 @@ function readState(ticketId) {
 
 function cleanupTicket(ticketId) {
   const dir = path.join(TEMP_TASKS_BASE, ticketId);
-  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+  } catch {}
 }
 
 // ─── Global Cleanup ─────────────────────────────────────────────────────────
 
 after(() => {
-  try { fs.rmSync(TEMP_TASKS_BASE, { recursive: true, force: true }); } catch {}
+  try {
+    fs.rmSync(TEMP_TASKS_BASE, { recursive: true, force: true });
+  } catch {}
 });
 
 // ─── Test 1: complete -> complete self-transition exists ─────────────────────
 
 describe('GH-106: complete step deadlock fix', () => {
-
   describe('1. step-registry: complete -> complete self-transition', () => {
     it('STEP_TRANSITIONS allows complete -> complete', () => {
       const { STEP_TRANSITIONS } = require(path.join(__dirname, '..', 'step-registry'));
@@ -99,10 +106,7 @@ describe('GH-106: complete step deadlock fix', () => {
   describe('2. enforce-step-workflow: complete is a soft step', () => {
     it('complete is in the softSteps set for the work workflow', () => {
       // We read the file and check that 'complete' appears in the softSteps definition
-      const src = fs.readFileSync(
-        path.join(__dirname, '..', 'workflow-definition.js'),
-        'utf-8'
-      );
+      const src = fs.readFileSync(path.join(__dirname, '..', 'workflow-definition.js'), 'utf-8');
       // The softSteps set should include STEPS.complete
       // Check for the pattern: softSteps containing complete
       assert.match(
@@ -116,7 +120,6 @@ describe('GH-106: complete step deadlock fix', () => {
   // ─── Test 3: work-state.js complete command error handling ────────────────
 
   describe('3. work-state.js: complete command error handling', () => {
-
     it('complete exits 1 when no state exists (not silent exit 0)', async () => {
       const ticket = 'DEADLOCK-NO-STATE';
       cleanupTicket(ticket);
@@ -156,7 +159,6 @@ describe('GH-106: complete step deadlock fix', () => {
   // ─── Test 4: exception handler exits 1 for complete command ──────────────
 
   describe('4. work-state.js: exception handler exits 1 for complete', () => {
-
     it('exits 1 when work-state.js complete encounters corrupt JSON', async () => {
       const ticket = 'DEADLOCK-CORRUPT';
       const dir = path.join(TEMP_TASKS_BASE, ticket);
@@ -175,10 +177,7 @@ describe('GH-106: complete step deadlock fix', () => {
 
   describe('5. work.workflow.js: STEP_ARTIFACTS excludes complete', () => {
     it('STEP_ARTIFACTS does not have a complete entry (recovery archival is in unstick-complete.js)', () => {
-      const src = fs.readFileSync(
-        path.join(__dirname, '..', 'work.workflow.js'),
-        'utf-8'
-      );
+      const src = fs.readFileSync(path.join(__dirname, '..', 'work.workflow.js'), 'utf-8');
       assert.doesNotMatch(
         src,
         /STEP_ARTIFACTS[\s\S]*?\[STEPS\.complete\]/,
@@ -189,17 +188,14 @@ describe('GH-106: complete step deadlock fix', () => {
 
   // ─── Test 6: complete step prompt includes archival ───────────────────────
 
-  describe('6. work.workflow.js: complete step prompt includes archival', () => {
+  describe('6. workflows/work/steps/complete.js: complete step prompt includes archival', () => {
     it('complete step agentPrompt mentions archiving artifacts', () => {
       const src = fs.readFileSync(
-        path.join(__dirname, '..', 'work.workflow.js'),
+        path.join(__dirname, '..', 'steps', 'complete.js'),
         'utf-8'
       );
-      // The complete step prompt should mention archiving or archive
-      const completeSection = src.match(/add\(STEPS\.complete[\s\S]*?\);.*?complete/);
-      assert.ok(completeSection, 'complete step definition should exist');
       assert.match(
-        completeSection[0],
+        src,
         /archive|archiv/i,
         'complete step prompt should reference archiving artifacts'
       );
@@ -216,7 +212,9 @@ describe('GH-106: complete step deadlock fix', () => {
       );
       // The old verify function for complete checked CI via gh pr checks
       // After the fix, there should be no verify function for complete that calls gh pr checks
-      const completeVerifyMatch = src.match(/step:\s*STEPS\.complete[^}]*verify:\s*\(ticketId\)\s*=>\s*\{[\s\S]*?\}\}/g);
+      const completeVerifyMatch = src.match(
+        /step:\s*STEPS\.complete[^}]*verify:\s*\(ticketId\)\s*=>\s*\{[\s\S]*?\}\}/g
+      );
       if (completeVerifyMatch) {
         // If a verify exists, it must NOT call 'gh pr checks'
         for (const match of completeVerifyMatch) {
@@ -295,25 +293,42 @@ describe('GH-106: complete step deadlock fix', () => {
     });
 
     it('stuck: returns false for completed tickets', () => {
-      assert.equal(isStuckInComplete({ status: 'completed', stepStatus: { complete: 'completed' } }), false);
+      assert.equal(
+        isStuckInComplete({ status: 'completed', stepStatus: { complete: 'completed' } }),
+        false
+      );
     });
 
     it('stuck: returns true when complete step is in_progress', () => {
-      assert.equal(isStuckInComplete({ status: 'in_progress', stepStatus: { complete: 'in_progress' } }), true);
+      assert.equal(
+        isStuckInComplete({ status: 'in_progress', stepStatus: { complete: 'in_progress' } }),
+        true
+      );
     });
 
     it('stuck: returns true when all other steps completed but complete is pending', () => {
-      assert.equal(isStuckInComplete({
-        status: 'in_progress',
-        stepStatus: { ticket: 'completed', implement: 'completed', check: 'completed', complete: 'pending' },
-      }), true);
+      assert.equal(
+        isStuckInComplete({
+          status: 'in_progress',
+          stepStatus: {
+            ticket: 'completed',
+            implement: 'completed',
+            check: 'completed',
+            complete: 'pending',
+          },
+        }),
+        true
+      );
     });
 
     it('stuck: returns false when other steps are still in progress', () => {
-      assert.equal(isStuckInComplete({
-        status: 'in_progress',
-        stepStatus: { ticket: 'completed', implement: 'in_progress', complete: 'pending' },
-      }), false);
+      assert.equal(
+        isStuckInComplete({
+          status: 'in_progress',
+          stepStatus: { ticket: 'completed', implement: 'in_progress', complete: 'pending' },
+        }),
+        false
+      );
     });
 
     // ─── archiveArtifacts ──────────────────────────────────────────────────
@@ -353,6 +368,8 @@ describe('GH-106: complete step deadlock fix', () => {
       fs.rmSync(dir, { recursive: true, force: true });
     });
 
-    after(() => { Object.assign(process.env, origEnv); });
+    after(() => {
+      Object.assign(process.env, origEnv);
+    });
   });
 });

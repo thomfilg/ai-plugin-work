@@ -33,8 +33,12 @@ function runOrchestrator(args = [], opts = {}) {
     let stdout = '';
     let stderr = '';
 
-    proc.stdout.on('data', (data) => { stdout += data.toString(); });
-    proc.stderr.on('data', (data) => { stderr += data.toString(); });
+    proc.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
+    proc.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
 
     proc.on('close', (code) => {
       try {
@@ -97,7 +101,9 @@ function buildState(ticketId, currentStep, overrides = {}) {
 
 function cleanupTicket(ticket) {
   const dir = path.join(TASKS_BASE, ticket);
-  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+  } catch {}
 }
 
 // ─── Global Cleanup ─────────────────────────────────────────────────────────
@@ -113,9 +119,13 @@ after(() => {
   } catch {}
   try {
     const tmpDir = require('os').tmpdir();
-    const tmpFiles = fs.readdirSync(tmpDir).filter(f => f.startsWith('claude-session-guard-TEST-DEFER-'));
+    const tmpFiles = fs
+      .readdirSync(tmpDir)
+      .filter((f) => f.startsWith('claude-session-guard-TEST-DEFER-'));
     for (const f of tmpFiles) {
-      try { fs.unlinkSync(path.join(tmpDir, f)); } catch {}
+      try {
+        fs.unlinkSync(path.join(tmpDir, f));
+      } catch {}
     }
   } catch {}
 });
@@ -123,7 +133,6 @@ after(() => {
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe('DEFER step re-evaluation guard (GH-154)', () => {
-
   it('1. forward transition past DEFER step succeeds when plan was re-run', async () => {
     const ticket = 'TEST-DEFER-001';
     const state = buildState(ticket, 'ready', {
@@ -275,7 +284,10 @@ describe('DEFER step re-evaluation guard (GH-154)', () => {
 
     // follow_up -> ci: ci is NOT in deferredSteps, should succeed
     const { result: r2 } = await runOrchestrator(['transition', ticket, 'ci']);
-    assert.ok(r2.success, `follow_up -> ci should succeed (ci not deferred): ${JSON.stringify(r2)}`);
+    assert.ok(
+      r2.success,
+      `follow_up -> ci should succeed (ci not deferred): ${JSON.stringify(r2)}`
+    );
 
     // ci -> cleanup: cleanup IS in deferredSteps, plan is now stale — should block
     const { result: r3 } = await runOrchestrator(['transition', ticket, 'cleanup']);
@@ -332,7 +344,10 @@ describe('DEFER step re-evaluation guard (GH-154)', () => {
 
     const updatedState = getWorkState(ticket);
     assert.ok(updatedState.lastTransitionTimestamp, 'lastTransitionTimestamp should be set');
-    assert.ok(updatedState.lastTransitionTimestamp >= before, 'lastTransitionTimestamp should be recent');
+    assert.ok(
+      updatedState.lastTransitionTimestamp >= before,
+      'lastTransitionTimestamp should be recent'
+    );
 
     cleanupTicket(ticket);
   });

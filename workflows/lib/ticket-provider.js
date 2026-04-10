@@ -23,11 +23,15 @@ const VALID_PROVIDERS = ['jira', 'linear', 'github', 'none'];
 function getRemoteOriginUrl(cwd = process.cwd()) {
   try {
     const url = execSync('git remote get-url origin', {
-      cwd, encoding: 'utf-8', timeout: 5000,
+      cwd,
+      encoding: 'utf-8',
+      timeout: 5000,
       stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
     return normalizeRemoteUrl(url);
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 function normalizeRemoteUrl(url) {
@@ -81,11 +85,20 @@ function getProviderConfig({ cwd, skipPrompt } = {}) {
 function buildConfigFromEnv(provider) {
   const projectKey = process.env.TICKET_PROJECT_KEY || process.env.JIRA_PROJECT_KEY || 'PROJ';
   switch (provider) {
-    case 'jira': return { provider: 'jira', projectKey, baseUrl: process.env.JIRA_BASE_URL || 'your-org.atlassian.net' };
-    case 'linear': return { provider: 'linear', projectKey, teamId: process.env.LINEAR_TEAM_ID || '' };
-    case 'github': return { provider: 'github', projectKey: '' };
-    case 'none': return { provider: 'none' };
-    default: return null;
+    case 'jira':
+      return {
+        provider: 'jira',
+        projectKey,
+        baseUrl: process.env.JIRA_BASE_URL || 'your-org.atlassian.net',
+      };
+    case 'linear':
+      return { provider: 'linear', projectKey, teamId: process.env.LINEAR_TEAM_ID || '' };
+    case 'github':
+      return { provider: 'github', projectKey: '' };
+    case 'none':
+      return { provider: 'none' };
+    default:
+      return null;
   }
 }
 
@@ -130,13 +143,16 @@ function sanitizeTicketIdForPath(ticketId, providerConfig) {
  */
 function parseTicketInput(raw) {
   if (!raw || typeof raw !== 'string') return { ticketBase: raw, suffix: null };
-  if (raw.startsWith('http://') || raw.startsWith('https://')) return { ticketBase: raw, suffix: null };
+  if (raw.startsWith('http://') || raw.startsWith('https://'))
+    return { ticketBase: raw, suffix: null };
   // Hyphenated suffix: PROJ-123-suffix
   const hyphenMatch = raw.match(/^([A-Z]+-\d+)-(.+)$/i);
   if (hyphenMatch) {
     const suffix = hyphenMatch[2];
     if (!suffix || !/^[a-zA-Z0-9_-]+$/.test(suffix)) {
-      throw new Error(`invalid suffix "${suffix}". Must match /^[a-zA-Z0-9_-]+$/ (alphanumeric, hyphens, underscores only, no nested paths).`);
+      throw new Error(
+        `invalid suffix "${suffix}". Must match /^[a-zA-Z0-9_-]+$/ (alphanumeric, hyphens, underscores only, no nested paths).`
+      );
     }
     return { ticketBase: hyphenMatch[1], suffix, separator: '-' };
   }
@@ -148,7 +164,9 @@ function parseTicketInput(raw) {
   const looksLikeTicket = /^[A-Z]+-\d+$/i.test(ticketBase) || /^#\d+$/.test(ticketBase);
   if (!looksLikeTicket) return { ticketBase: raw, suffix: null };
   if (!suffix || !/^[a-zA-Z0-9_-]+$/.test(suffix)) {
-    throw new Error(`invalid suffix "${suffix}". Must match /^[a-zA-Z0-9_-]+$/ (alphanumeric, hyphens, underscores only, no nested paths).`);
+    throw new Error(
+      `invalid suffix "${suffix}". Must match /^[a-zA-Z0-9_-]+$/ (alphanumeric, hyphens, underscores only, no nested paths).`
+    );
   }
   return { ticketBase, suffix, separator: '/' };
 }
@@ -161,7 +179,9 @@ function parseTicketInput(raw) {
  */
 function normalizeTicketId(raw) {
   const parsed = parseTicketInput(raw);
-  const base = parsed.ticketBase ? String(parsed.ticketBase).toUpperCase() : String(raw).toUpperCase();
+  const base = parsed.ticketBase
+    ? String(parsed.ticketBase).toUpperCase()
+    : String(raw).toUpperCase();
   if (!parsed.suffix) return base;
   return base + parsed.separator + parsed.suffix;
 }
@@ -170,14 +190,24 @@ function ticketUrl(ticketId, providerConfig) {
   if (!providerConfig || !ticketId) return null;
   const num = String(ticketId).replace(/^#|^GH-/i, '');
   switch (providerConfig.provider) {
-    case 'jira': return 'https://' + providerConfig.baseUrl + '/browse/' + ticketId;
-    case 'linear': return 'https://linear.app/issue/' + ticketId;
+    case 'jira':
+      return 'https://' + providerConfig.baseUrl + '/browse/' + ticketId;
+    case 'linear':
+      return 'https://linear.app/issue/' + ticketId;
     case 'github':
       if (providerConfig.owner && providerConfig.repo) {
-        return 'https://github.com/' + providerConfig.owner + '/' + providerConfig.repo + '/issues/' + num;
+        return (
+          'https://github.com/' +
+          providerConfig.owner +
+          '/' +
+          providerConfig.repo +
+          '/issues/' +
+          num
+        );
       }
       return '#' + num;
-    default: return null;
+    default:
+      return null;
   }
 }
 
@@ -192,7 +222,8 @@ function prefixTicketId(input, providerConfig) {
     case 'github':
       if (/^\d+$/.test(input)) return '#' + input;
       return input;
-    default: return input;
+    default:
+      return input;
   }
 }
 
@@ -200,72 +231,159 @@ function getTicketPattern(providerConfig) {
   if (!providerConfig) return /([A-Z]+-\d+)/i;
   switch (providerConfig.provider) {
     case 'jira':
-    case 'linear': return /([A-Z]+-\d+)/i;
-    case 'github': return /#?(\d+)/;
-    default: return /([A-Z]+-\d+)/i;
+    case 'linear':
+      return /([A-Z]+-\d+)/i;
+    case 'github':
+      return /#?(\d+)/;
+    default:
+      return /([A-Z]+-\d+)/i;
   }
 }
 
 function getFetchTicketPrompt(ticketId, providerConfig) {
   if (!providerConfig) return null;
   switch (providerConfig.provider) {
-    case 'jira': return 'Fetch Jira ticket ' + ticketId + ' using mcp__atlassian__jira_get_issue with issue_key "' + ticketId + '". Return the ticket summary, description, status, and acceptance criteria.';
-    case 'linear': return 'Fetch Linear issue ' + ticketId + ' using mcp__linear__get_issue with id "' + ticketId + '". Return the issue title, description, status, and any labels or acceptance criteria.';
-    case 'github': return 'Fetch GitHub issue ' + ticketId + ' by running: gh issue view ' + ticketId.replace(/^#/, '') + ' --json title,body,state,labels. Return the issue title, body, state, and labels.';
-    case 'none': return null;
-    default: return null;
+    case 'jira':
+      return (
+        'Fetch Jira ticket ' +
+        ticketId +
+        ' using mcp__atlassian__jira_get_issue with issue_key "' +
+        ticketId +
+        '". Return the ticket summary, description, status, and acceptance criteria.'
+      );
+    case 'linear':
+      return (
+        'Fetch Linear issue ' +
+        ticketId +
+        ' using mcp__linear__get_issue with id "' +
+        ticketId +
+        '". Return the issue title, description, status, and any labels or acceptance criteria.'
+      );
+    case 'github':
+      return (
+        'Fetch GitHub issue ' +
+        ticketId +
+        ' by running: gh issue view ' +
+        ticketId.replace(/^#/, '') +
+        ' --json title,body,state,labels. Return the issue title, body, state, and labels.'
+      );
+    case 'none':
+      return null;
+    default:
+      return null;
   }
 }
 
 function getTransitionPrompt(ticketId, status, providerConfig) {
   if (!providerConfig) return null;
   switch (providerConfig.provider) {
-    case 'jira': return 'Transition Jira ticket ' + ticketId + ' to "' + status + '" (idempotent). Use mcp__atlassian__jira_get_transitions to get available transitions for ' + ticketId + ', then use mcp__atlassian__jira_transition_issue to move it to "' + status + '". If already in that status, report success.';
-    case 'linear': return 'Update Linear issue ' + ticketId + ' status to "' + status + '" using mcp__linear__save_issue with id "' + ticketId + '" and state "' + status + '". If already in that status, report success.';
+    case 'jira':
+      return (
+        'Transition Jira ticket ' +
+        ticketId +
+        ' to "' +
+        status +
+        '" (idempotent). Use mcp__atlassian__jira_get_transitions to get available transitions for ' +
+        ticketId +
+        ', then use mcp__atlassian__jira_transition_issue to move it to "' +
+        status +
+        '". If already in that status, report success.'
+      );
+    case 'linear':
+      return (
+        'Update Linear issue ' +
+        ticketId +
+        ' status to "' +
+        status +
+        '" using mcp__linear__save_issue with id "' +
+        ticketId +
+        '" and state "' +
+        status +
+        '". If already in that status, report success.'
+      );
     case 'github':
-    case 'none': return null;
-    default: return null;
+    case 'none':
+      return null;
+    default:
+      return null;
   }
 }
 
 function getCreateTicketPrompt(description, providerConfig) {
   if (!providerConfig) return null;
   switch (providerConfig.provider) {
-    case 'jira': return 'Create a Jira ticket from this description: "' + description + '"';
-    case 'linear': return 'Create a Linear issue from this description: "' + description + '" using mcp__linear__save_issue with a clear title and the description as the body.';
-    case 'github': return 'Create a GitHub issue from this description: "' + description + '" by running: gh issue create --title "<title>" --body "<body>"';
-    case 'none': return null;
-    default: return null;
+    case 'jira':
+      return 'Create a Jira ticket from this description: "' + description + '"';
+    case 'linear':
+      return (
+        'Create a Linear issue from this description: "' +
+        description +
+        '" using mcp__linear__save_issue with a clear title and the description as the body.'
+      );
+    case 'github':
+      return (
+        'Create a GitHub issue from this description: "' +
+        description +
+        '" by running: gh issue create --title "<title>" --body "<body>"'
+      );
+    case 'none':
+      return null;
+    default:
+      return null;
   }
 }
 
 function getAllowedMcpTools(providerConfig) {
   if (!providerConfig) return [];
   switch (providerConfig.provider) {
-    case 'jira': return ['mcp__atlassian__jira_get_issue', 'mcp__atlassian__jira_get_transitions', 'mcp__atlassian__jira_transition_issue'];
-    case 'linear': return ['mcp__linear__get_issue', 'mcp__linear__save_issue', 'mcp__linear__list_issues'];
+    case 'jira':
+      return [
+        'mcp__atlassian__jira_get_issue',
+        'mcp__atlassian__jira_get_transitions',
+        'mcp__atlassian__jira_transition_issue',
+      ];
+    case 'linear':
+      return ['mcp__linear__get_issue', 'mcp__linear__save_issue', 'mcp__linear__list_issues'];
     case 'github':
-    case 'none': return [];
-    default: return [];
+    case 'none':
+      return [];
+    default:
+      return [];
   }
 }
 
 function getCreateTicketAgentType(providerConfig) {
   if (!providerConfig) return 'general-purpose';
   switch (providerConfig.provider) {
-    case 'jira': return 'jira-task-creator';
+    case 'jira':
+      return 'jira-task-creator';
     case 'linear':
-    case 'github': return 'general-purpose';
-    case 'none': return null;
-    default: return 'general-purpose';
+    case 'github':
+      return 'general-purpose';
+    case 'none':
+      return null;
+    default:
+      return 'general-purpose';
   }
 }
 
 module.exports = {
-  getProviderConfig, saveProviderConfig, getRemoteOriginUrl, normalizeRemoteUrl,
-  ticketUrl, prefixTicketId, getTicketPattern,
-  getFetchTicketPrompt, getTransitionPrompt, getCreateTicketPrompt,
-  getAllowedMcpTools, getCreateTicketAgentType,
-  parseGitHubUrl, sanitizeTicketIdForPath, parseTicketInput, normalizeTicketId,
-  VALID_PROVIDERS, PROVIDERS_FILE,
+  getProviderConfig,
+  saveProviderConfig,
+  getRemoteOriginUrl,
+  normalizeRemoteUrl,
+  ticketUrl,
+  prefixTicketId,
+  getTicketPattern,
+  getFetchTicketPrompt,
+  getTransitionPrompt,
+  getCreateTicketPrompt,
+  getAllowedMcpTools,
+  getCreateTicketAgentType,
+  parseGitHubUrl,
+  sanitizeTicketIdForPath,
+  parseTicketInput,
+  normalizeTicketId,
+  VALID_PROVIDERS,
+  PROVIDERS_FILE,
 };

@@ -131,7 +131,10 @@ describe('echo commands → exit 0 (allow)', () => {
 
 describe('setup chain commands → exit 0 (allow)', () => {
   it('should allow grep package.json', () => {
-    const r = execHook({ tool_name: 'Bash', tool_input: { command: 'grep commitizen package.json' } });
+    const r = execHook({
+      tool_name: 'Bash',
+      tool_input: { command: 'grep commitizen package.json' },
+    });
     assert.strictEqual(r.exitCode, 0);
   });
 
@@ -236,8 +239,15 @@ describe('edge cases', () => {
   });
 
   it('should allow git log with --grep containing destructive keyword', () => {
-    const r = execHook({ tool_name: 'Bash', tool_input: { command: 'git log --grep="git reset"' } });
-    assert.strictEqual(r.exitCode, 0, `Should not false-positive on argument content. stderr: ${r.stderr}`);
+    const r = execHook({
+      tool_name: 'Bash',
+      tool_input: { command: 'git log --grep="git reset"' },
+    });
+    assert.strictEqual(
+      r.exitCode,
+      0,
+      `Should not false-positive on argument content. stderr: ${r.stderr}`
+    );
   });
 
   it('should produce no stdout on allow (clean exit)', () => {

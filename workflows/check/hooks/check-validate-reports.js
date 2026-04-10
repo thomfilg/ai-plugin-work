@@ -49,14 +49,15 @@ function validateQAReport(filePath, appName) {
     return {
       exists: false,
       valid: false,
-      error: `QA report not found: ${filePath}`
+      error: `QA report not found: ${filePath}`,
     };
   }
 
   const issues = [];
 
   // Check for infrastructure failure FIRST
-  const hasInfraFailure = content.includes('INFRASTRUCTURE_FAILURE') ||
+  const hasInfraFailure =
+    content.includes('INFRASTRUCTURE_FAILURE') ||
     content.includes('PLAYWRIGHT_UNAVAILABLE') ||
     content.includes('PLAYWRIGHT UNAVAILABLE');
   if (hasInfraFailure) {
@@ -65,7 +66,7 @@ function validateQAReport(filePath, appName) {
       valid: false,
       infrastructureFailure: true,
       issues: ['Infrastructure failure - Playwright unavailable'],
-      failed: true
+      failed: true,
     };
   }
 
@@ -101,7 +102,7 @@ function validateQAReport(filePath, appName) {
     issues,
     failed,
     hasScreenshots,
-    infrastructureFailure: false
+    infrastructureFailure: false,
   };
 }
 
@@ -116,7 +117,7 @@ function validateCodeReview(reportFolder) {
     return {
       exists: false,
       valid: false,
-      error: 'Code review report not found'
+      error: 'Code review report not found',
     };
   }
 
@@ -132,7 +133,9 @@ function validateCodeReview(reportFolder) {
   const hasCritical = criticalMatches && criticalMatches.length > 0;
 
   // Check for IMPORTANT issues
-  const importantMatches = content.match(/🟡\s*IMPORTANT|IMPORTANT.*should fix|severity.*important/gi);
+  const importantMatches = content.match(
+    /🟡\s*IMPORTANT|IMPORTANT.*should fix|severity.*important/gi
+  );
   const hasImportant = importantMatches && importantMatches.length > 0;
 
   // Check if there's a reply file addressing the issues
@@ -146,7 +149,7 @@ function validateCodeReview(reportFolder) {
     hasImportant,
     hasReply,
     issues,
-    requiresAction: hasCritical || hasImportant
+    requiresAction: hasCritical || hasImportant,
   };
 }
 
@@ -161,7 +164,7 @@ function validateTestsReport(reportFolder) {
     return {
       exists: false,
       valid: false,
-      error: 'Tests report not found'
+      error: 'Tests report not found',
     };
   }
 
@@ -184,7 +187,7 @@ function validateTestsReport(reportFolder) {
     valid: hasPass && !hasFail,
     passed: hasPass && !hasFail,
     hasSkipped,
-    issues
+    issues,
   };
 }
 
@@ -199,7 +202,7 @@ function validateCompletionReport(reportFolder) {
     return {
       exists: false,
       valid: false,
-      error: 'Completion report not found'
+      error: 'Completion report not found',
     };
   }
 
@@ -219,7 +222,7 @@ function validateCompletionReport(reportFolder) {
     valid: isComplete,
     complete: isComplete,
     incomplete: isIncomplete,
-    issues
+    issues,
   };
 }
 
@@ -235,8 +238,8 @@ function main() {
       valid: true,
       issues: [],
       status: 'APPROVED',
-      infrastructureFailure: false
-    }
+      infrastructureFailure: false,
+    },
   };
 
   // Validate QA reports for each impacted app
@@ -316,7 +319,12 @@ function main() {
   }
 
   // Check if all required files exist
-  const requiredFiles = ['tests.check.md', 'code-review.check.md', 'completion.check.md', 'README.md'];
+  const requiredFiles = [
+    'tests.check.md',
+    'code-review.check.md',
+    'completion.check.md',
+    'README.md',
+  ];
   for (const file of requiredFiles) {
     if (!fileExists(path.join(REPORT_FOLDER, file))) {
       results.overall.issues.push(`Missing required file: ${file}`);

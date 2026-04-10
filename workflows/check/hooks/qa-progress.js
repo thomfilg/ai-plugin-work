@@ -18,15 +18,25 @@
 
 const fs = require('fs');
 const path = require('path');
+const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
 
-process.on('uncaughtException', () => process.exit(0));
-process.on('unhandledRejection', () => process.exit(0));
+process.on('uncaughtException', (err) => {
+  logHookError(__filename, err);
+  process.exit(0);
+});
+process.on('unhandledRejection', (err) => {
+  logHookError(__filename, err);
+  process.exit(0);
+});
 
 const getConfig = require(path.join(__dirname, '..', '..', 'lib', 'get-config'));
 const TASKS_BASE = getConfig.orExit('TASKS_BASE');
 function safeId(ticketId) {
-  try { return require(path.join(__dirname, '..', '..', 'lib', 'config')).safeTicketId(ticketId); }
-  catch { return ticketId; }
+  try {
+    return require(path.join(__dirname, '..', '..', 'lib', 'config')).safeTicketId(ticketId);
+  } catch {
+    return ticketId;
+  }
 }
 
 /**
@@ -79,7 +89,7 @@ function initProgress(ticketId, appName, appUrl, testPlan = []) {
     infrastructure: {
       playwrightChecked: false,
       playwrightOk: null,
-      appReachable: null
+      appReachable: null,
     },
     testPlan,
     testsCompleted: [],
@@ -88,7 +98,7 @@ function initProgress(ticketId, appName, appUrl, testPlan = []) {
     screenshots: [],
     errors: [],
     startTime: new Date().toISOString(),
-    lastUpdate: new Date().toISOString()
+    lastUpdate: new Date().toISOString(),
   };
 
   return saveProgress(ticketId, appName, progress);
@@ -111,7 +121,7 @@ function setPlaywrightStatus(ticketId, appName, ok, error = null) {
     progress.errors.push({
       type: 'playwright',
       error: error || 'Playwright unavailable',
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     });
   } else {
     progress.status = 'playwright_ready';
@@ -136,7 +146,7 @@ function setAppReachable(ticketId, appName, reachable, error = null) {
     progress.errors.push({
       type: 'app_unreachable',
       error: error || 'Application not reachable',
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
     });
   } else {
     progress.status = 'ready_to_test';
@@ -157,7 +167,7 @@ function startTest(ticketId, appName, testName) {
   progress.status = 'testing';
   progress.testsInProgress = {
     name: testName,
-    startTime: new Date().toISOString()
+    startTime: new Date().toISOString(),
   };
 
   return saveProgress(ticketId, appName, progress);
@@ -176,7 +186,7 @@ function completeTest(ticketId, appName, testName, result, screenshot = null) {
     name: testName,
     result,
     screenshot,
-    completedAt: new Date().toISOString()
+    completedAt: new Date().toISOString(),
   };
 
   progress.testsCompleted.push(completedTest);
@@ -187,7 +197,7 @@ function completeTest(ticketId, appName, testName, result, screenshot = null) {
   }
 
   // Remove from test plan if it was there
-  progress.testPlan = progress.testPlan.filter(t => t !== testName);
+  progress.testPlan = progress.testPlan.filter((t) => t !== testName);
 
   return saveProgress(ticketId, appName, progress);
 }
@@ -205,7 +215,7 @@ function failTest(ticketId, appName, testName, error, screenshot = null) {
     name: testName,
     error,
     screenshot,
-    failedAt: new Date().toISOString()
+    failedAt: new Date().toISOString(),
   };
 
   progress.testsFailed.push(failedTest);
@@ -214,7 +224,7 @@ function failTest(ticketId, appName, testName, error, screenshot = null) {
     type: 'test_failure',
     test: testName,
     error,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
   });
 
   if (screenshot) {
@@ -237,7 +247,7 @@ function infrastructureFailure(ticketId, appName, error) {
   progress.errors.push({
     type: 'infrastructure',
     error,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
   });
 
   return saveProgress(ticketId, appName, progress);
@@ -272,14 +282,14 @@ function getResumeInfo(ticketId, appName) {
     exists: true,
     status: progress.status,
     canResume: ['testing', 'ready_to_test', 'playwright_ready'].includes(progress.status),
-    completedTests: progress.testsCompleted.map(t => t.name),
+    completedTests: progress.testsCompleted.map((t) => t.name),
     remainingTests: progress.testPlan,
     currentTest: progress.testsInProgress?.name || null,
-    failedTests: progress.testsFailed.map(t => t.name),
+    failedTests: progress.testsFailed.map((t) => t.name),
     hasInfraFailure: progress.status === 'infrastructure_failure',
     lastError: progress.errors.length > 0 ? progress.errors[progress.errors.length - 1] : null,
     screenshots: progress.screenshots,
-    lastUpdate: progress.lastUpdate
+    lastUpdate: progress.lastUpdate,
   };
 }
 
@@ -292,13 +302,13 @@ function formatProgress(progress) {
   }
 
   const statusIcon = {
-    'initializing': '🔄',
-    'infrastructure_failure': '❌',
-    'playwright_ready': '✅',
-    'ready_to_test': '✅',
-    'testing': '🔄',
-    'completed_pass': '✅',
-    'completed_fail': '❌'
+    initializing: '🔄',
+    infrastructure_failure: '❌',
+    playwright_ready: '✅',
+    ready_to_test: '✅',
+    testing: '🔄',
+    completed_pass: '✅',
+    completed_fail: '❌',
   };
 
   let output = `
@@ -317,7 +327,7 @@ Infrastructure:
 Tests Completed (${progress.testsCompleted.length}):
 `;
 
-  progress.testsCompleted.forEach(t => {
+  progress.testsCompleted.forEach((t) => {
     output += `  ✅ ${t.name}${t.screenshot ? ` [${t.screenshot}]` : ''}\n`;
   });
 
@@ -327,21 +337,21 @@ Tests Completed (${progress.testsCompleted.length}):
 
   if (progress.testsFailed.length > 0) {
     output += `\nFailed Tests (${progress.testsFailed.length}):\n`;
-    progress.testsFailed.forEach(t => {
+    progress.testsFailed.forEach((t) => {
       output += `  ❌ ${t.name}: ${t.error}\n`;
     });
   }
 
   if (progress.testPlan.length > 0) {
     output += `\nRemaining Tests (${progress.testPlan.length}):\n`;
-    progress.testPlan.forEach(t => {
+    progress.testPlan.forEach((t) => {
       output += `  ⏳ ${t}\n`;
     });
   }
 
   if (progress.errors.length > 0) {
     output += `\nRecent Errors:\n`;
-    progress.errors.slice(-3).forEach(e => {
+    progress.errors.slice(-3).forEach((e) => {
       output += `  - [${e.type}] ${e.error}\n`;
     });
   }
@@ -358,7 +368,9 @@ async function main() {
 
   if (!command) {
     console.error('Usage: node qa-progress.js <command> <ticket-id> <app-name> [args...]');
-    console.error('Commands: init, set-playwright, set-reachable, start-test, complete-test, fail-test, infrastructure-failure, complete, get, resume-info');
+    console.error(
+      'Commands: init, set-playwright, set-reachable, start-test, complete-test, fail-test, infrastructure-failure, complete, get, resume-info'
+    );
     process.exit(1);
   }
 
@@ -426,7 +438,10 @@ async function main() {
   }
 }
 
-main().catch(() => process.exit(0));
+main().catch((err) => {
+  logHookError(__filename, err);
+  process.exit(0);
+});
 
 module.exports = {
   loadProgress,
@@ -439,5 +454,5 @@ module.exports = {
   failTest,
   infrastructureFailure,
   completeQA,
-  getResumeInfo
+  getResumeInfo,
 };

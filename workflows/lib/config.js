@@ -19,10 +19,7 @@ const path = require('path');
 // ─── .env Loader ────────────────────────────────────────────────────────────
 
 function loadEnvFile() {
-  const locations = [
-    path.join(__dirname, '..', '..', '.env'),
-    path.join(process.cwd(), '.env'),
-  ];
+  const locations = [path.join(__dirname, '..', '..', '.env'), path.join(process.cwd(), '.env')];
 
   for (const envPath of locations) {
     if (fs.existsSync(envPath)) {
@@ -34,8 +31,10 @@ function loadEnvFile() {
         if (eqIdx === -1) continue;
         const key = trimmed.slice(0, eqIdx).trim();
         let value = trimmed.slice(eqIdx + 1).trim();
-        if ((value.startsWith('"') && value.endsWith('"')) ||
-            (value.startsWith("'") && value.endsWith("'"))) {
+        if (
+          (value.startsWith('"') && value.endsWith('"')) ||
+          (value.startsWith("'") && value.endsWith("'"))
+        ) {
           value = value.slice(1, -1);
         }
         if (!process.env[key]) {
@@ -63,17 +62,23 @@ const config = {
 
   REPO_NAME: process.env.REPO_NAME || 'my-project',
   GITHUB_ORG: process.env.GITHUB_ORG || '',
-  WORKTREES_BASE: process.env.WORKTREES_BASE || (() => {
-    try {
-      const repoRoot = execSync('git rev-parse --show-toplevel', { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
-      return path.dirname(repoRoot);
-    } catch {
-      return null; // Fail open — downstream helpers are null-safe, hooks use getConfig.orExit()
-    }
-  })(),
+  WORKTREES_BASE:
+    process.env.WORKTREES_BASE ||
+    (() => {
+      try {
+        const repoRoot = execSync('git rev-parse --show-toplevel', {
+          encoding: 'utf8',
+          stdio: ['pipe', 'pipe', 'pipe'],
+        }).trim();
+        return path.dirname(repoRoot);
+      } catch {
+        return null; // Fail open — downstream helpers are null-safe, hooks use getConfig.orExit()
+      }
+    })(),
   TASKS_BASE: null, // set below after WORKTREES_BASE is resolved
   ENABLE_SYMLINK: process.env.ENABLE_SYMLINK ?? '0',
-  FOLLOW_UP_PR_POLL_REVIEWS: (process.env.FOLLOW_UP_PR_POLL_REVIEWS || 'true').toLowerCase() === 'true',
+  FOLLOW_UP_PR_POLL_REVIEWS:
+    (process.env.FOLLOW_UP_PR_POLL_REVIEWS || 'true').toLowerCase() === 'true',
 
   // Comma-separated relative paths to docs agents should read during their workflows
   // Example: .rulesync/rules/code-quality.md,.rulesync/rules/types.md
@@ -117,10 +122,11 @@ const config = {
 };
 
 // Derive TASKS_BASE from resolved WORKTREES_BASE — null-safe (hooks use getConfig.orExit)
-config.TASKS_BASE = process.env.TASKS_BASE || (config.WORKTREES_BASE ? path.join(config.WORKTREES_BASE, 'tasks') : null);
+config.TASKS_BASE =
+  process.env.TASKS_BASE ||
+  (config.WORKTREES_BASE ? path.join(config.WORKTREES_BASE, 'tasks') : null);
 
-config.jiraBrowseUrl = (ticketId) =>
-  `https://${config.JIRA_BASE_URL}/browse/${ticketId}`;
+config.jiraBrowseUrl = (ticketId) => `https://${config.JIRA_BASE_URL}/browse/${ticketId}`;
 
 config.ticketBrowseUrl = (ticketId) => {
   const tp = require('./ticket-provider');
@@ -130,7 +136,9 @@ config.ticketBrowseUrl = (ticketId) => {
 };
 
 config.worktreeDir = (ticketId) =>
-  config.WORKTREES_BASE ? path.join(config.WORKTREES_BASE, `${config.REPO_NAME}-${ticketId}`) : null;
+  config.WORKTREES_BASE
+    ? path.join(config.WORKTREES_BASE, `${config.REPO_NAME}-${ticketId}`)
+    : null;
 
 config.repoDir = () =>
   config.WORKTREES_BASE ? path.join(config.WORKTREES_BASE, config.REPO_NAME) : null;
@@ -150,7 +158,9 @@ config.safeTicketId = (ticketId) => {
     }
     const tp = require('./ticket-provider');
     return tp.sanitizeTicketIdForPath(ticketId, _cachedProviderConfig);
-  } catch { return ticketId; }
+  } catch {
+    return ticketId;
+  }
 };
 
 config.tasksDir = (ticketId) => {
@@ -158,8 +168,7 @@ config.tasksDir = (ticketId) => {
   return path.join(config.TASKS_BASE, config.safeTicketId(ticketId));
 };
 
-config.webAppNames = () =>
-  config.WEB_APPS.filter(app => app && app.name).map(app => app.name);
+config.webAppNames = () => config.WEB_APPS.filter((app) => app && app.name).map((app) => app.name);
 
 config.webAppsMap = () => {
   const map = Object.create(null);
@@ -179,13 +188,16 @@ config.webAppsMap = () => {
 config.getBaseBranch = (options = {}) => {
   const cwd = options.cwd || undefined;
   const safeExec = (cmd) => {
-    try { return execSync(cmd, { encoding: 'utf8', cwd }).trim(); } catch { return ''; }
+    try {
+      return execSync(cmd, { encoding: 'utf8', cwd }).trim();
+    } catch {
+      return '';
+    }
   };
 
   // 1. Explicit repo config (highest priority) — sanitize to prevent shell injection
   if (config.BASE_BRANCH) {
-    const sanitized = config.BASE_BRANCH
-      .replace(/^refs\/remotes\//, '')
+    const sanitized = config.BASE_BRANCH.replace(/^refs\/remotes\//, '')
       .replace(/^origin\//, '')
       .replace(/[^a-zA-Z0-9._\-/]/g, '')
       .replace(/\.{2,}/g, ''); // reject git revspec operators (.., ...)

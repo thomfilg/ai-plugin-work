@@ -29,13 +29,7 @@ const writer = createReportWriter({
 
   allowedAgents: ['completion-checker'],
 
-  requiredFields: [
-    'reportPath',
-    'changesHash',
-    'originalRequest',
-    'deliverables',
-    'finalStatus',
-  ],
+  requiredFields: ['reportPath', 'changesHash', 'originalRequest', 'deliverables', 'finalStatus'],
 
   validate(input) {
     const errors = [];
@@ -50,7 +44,8 @@ const writer = createReportWriter({
       for (let i = 0; i < input.deliverables.length; i++) {
         const d = input.deliverables[i];
         if (!d.requirement) errors.push(`deliverables[${i}].requirement is required`);
-        if (d.delivered === undefined) errors.push(`deliverables[${i}].delivered is required (boolean)`);
+        if (d.delivered === undefined)
+          errors.push(`deliverables[${i}].delivered is required (boolean)`);
         if (!d.description) errors.push(`deliverables[${i}].description is required`);
       }
     }
@@ -128,7 +123,7 @@ const writer = createReportWriter({
   },
 });
 
-writer.run().catch(err => {
+writer.run().catch((err) => {
   process.stderr.write(`[Completion Report Writer] Unexpected error: ${err.message}\n`);
   process.exit(1);
 });

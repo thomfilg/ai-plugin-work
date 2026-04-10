@@ -22,8 +22,12 @@ function runWorkState(args = [], opts = {}) {
     });
     let stdout = '';
     let stderr = '';
-    proc.stdout.on('data', (d) => { stdout += d.toString(); });
-    proc.stderr.on('data', (d) => { stderr += d.toString(); });
+    proc.stdout.on('data', (d) => {
+      stdout += d.toString();
+    });
+    proc.stderr.on('data', (d) => {
+      stderr += d.toString();
+    });
     proc.on('close', (code) => {
       try {
         const result = stdout.trim() ? JSON.parse(stdout.trim()) : null;
@@ -37,7 +41,9 @@ function runWorkState(args = [], opts = {}) {
 }
 
 after(() => {
-  try { fs.rmSync(TEMP_TASKS_BASE, { recursive: true, force: true }); } catch {}
+  try {
+    fs.rmSync(TEMP_TASKS_BASE, { recursive: true, force: true });
+  } catch {}
 });
 
 describe('task tracking', () => {
@@ -139,7 +145,9 @@ describe('parseTasks', () => {
     // Create minimal spec.md and tasks.md
     fs.writeFileSync(path.join(tasksDir, 'spec.md'), '# Spec\nSome spec content');
     fs.writeFileSync(path.join(tasksDir, 'brief.md'), '# Brief\nSome brief content');
-    fs.writeFileSync(path.join(tasksDir, 'tasks.md'), `# Tasks
+    fs.writeFileSync(
+      path.join(tasksDir, 'tasks.md'),
+      `# Tasks
 
 _Generated from: brief.md, spec.md_
 _Ticket: GH-500_
@@ -213,18 +221,22 @@ Verify all prior tasks are correctly implemented.
 - Task 1, Task 2
 
 ---
-`);
+`
+    );
 
     // Init work state
-    fs.writeFileSync(path.join(tasksDir, '.work-state.json'), JSON.stringify({
-      ticketId: 'GH-500',
-      status: 'in_progress',
-      stepStatus: {},
-      checkProgress: {},
-      errors: [],
-      startTime: new Date().toISOString(),
-      lastUpdate: new Date().toISOString(),
-    }));
+    fs.writeFileSync(
+      path.join(tasksDir, '.work-state.json'),
+      JSON.stringify({
+        ticketId: 'GH-500',
+        status: 'in_progress',
+        stepStatus: {},
+        checkProgress: {},
+        errors: [],
+        startTime: new Date().toISOString(),
+        lastUpdate: new Date().toISOString(),
+      })
+    );
 
     // Run orchestrator
     const ORCH_PATH = path.join(__dirname, '..', 'work.workflow.js');
@@ -240,8 +252,12 @@ Verify all prior tasks are correctly implemented.
       });
       let stdout = '';
       let stderr = '';
-      proc.stdout.on('data', (d) => { stdout += d.toString(); });
-      proc.stderr.on('data', (d) => { stderr += d.toString(); });
+      proc.stdout.on('data', (d) => {
+        stdout += d.toString();
+      });
+      proc.stderr.on('data', (d) => {
+        stderr += d.toString();
+      });
       proc.on('close', (code) => {
         try {
           resolve({ result: JSON.parse(stdout.trim()), code });
@@ -256,12 +272,12 @@ Verify all prior tasks are correctly implemented.
     assert.ok(result.plan, 'Plan should exist');
 
     // Find the tasks step
-    const tasksStep = result.plan.find(p => p.step === 'tasks');
+    const tasksStep = result.plan.find((p) => p.step === 'tasks');
     assert.ok(tasksStep, 'tasks step should exist in plan');
     assert.equal(tasksStep.action, 'SKIP', 'tasks.md already exists so should be SKIP');
 
     // Find implement step — should reference Task 1
-    const implStep = result.plan.find(p => p.step === 'implement');
+    const implStep = result.plan.find((p) => p.step === 'implement');
     assert.ok(implStep, 'implement step should exist');
     // The prompt should mention Task 1 since tasks.md exists and currentTaskIndex defaults to 0
     assert.ok(
@@ -278,15 +294,18 @@ Verify all prior tasks are correctly implemented.
     fs.writeFileSync(path.join(tasksDir, 'brief.md'), '# Brief\nSome brief content');
 
     // Init work state
-    fs.writeFileSync(path.join(tasksDir, '.work-state.json'), JSON.stringify({
-      ticketId: 'GH-501',
-      status: 'in_progress',
-      stepStatus: {},
-      checkProgress: {},
-      errors: [],
-      startTime: new Date().toISOString(),
-      lastUpdate: new Date().toISOString(),
-    }));
+    fs.writeFileSync(
+      path.join(tasksDir, '.work-state.json'),
+      JSON.stringify({
+        ticketId: 'GH-501',
+        status: 'in_progress',
+        stepStatus: {},
+        checkProgress: {},
+        errors: [],
+        startTime: new Date().toISOString(),
+        lastUpdate: new Date().toISOString(),
+      })
+    );
 
     const ORCH_PATH = path.join(__dirname, '..', 'work.workflow.js');
     const { result } = await new Promise((resolve, reject) => {
@@ -301,8 +320,12 @@ Verify all prior tasks are correctly implemented.
       });
       let stdout = '';
       let stderr = '';
-      proc.stdout.on('data', (d) => { stdout += d.toString(); });
-      proc.stderr.on('data', (d) => { stderr += d.toString(); });
+      proc.stdout.on('data', (d) => {
+        stdout += d.toString();
+      });
+      proc.stderr.on('data', (d) => {
+        stderr += d.toString();
+      });
       proc.on('close', (code) => {
         try {
           resolve({ result: JSON.parse(stdout.trim()), code });
@@ -316,7 +339,7 @@ Verify all prior tasks are correctly implemented.
     assert.ok(result, 'Orchestrator should return a plan');
     assert.ok(result.plan, 'Plan should exist');
 
-    const tasksStep = result.plan.find(p => p.step === 'tasks');
+    const tasksStep = result.plan.find((p) => p.step === 'tasks');
     assert.ok(tasksStep, 'tasks step should exist in plan');
     assert.equal(tasksStep.action, 'DEFER', 'tasks should DEFER when spec.md is missing');
     assert.equal(tasksStep.agentType, 'skill', 'DEFER tasks should have agentType');

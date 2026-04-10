@@ -25,18 +25,14 @@ const UI_DOC_FILES = [
   'packages/ui/README.md',
   'packages/shared-ui/README.md',
   'docs/ui-component-examples.md',
-  'docs/ui-component-variations.md'
+  'docs/ui-component-variations.md',
 ];
 
 // Folders where ALL MUI imports are allowed (building the core UI foundation)
-const FULLY_ALLOWED_FOLDERS = [
-  'packages/ui'
-];
+const FULLY_ALLOWED_FOLDERS = ['packages/ui'];
 
 // Folders with expanded primitives (building app-shell components)
-const SHARED_UI_FOLDERS = [
-  'packages/shared-ui'
-];
+const SHARED_UI_FOLDERS = ['packages/shared-ui'];
 
 // Known UI frameworks that should be checked
 const UI_FRAMEWORKS = [
@@ -44,7 +40,7 @@ const UI_FRAMEWORKS = [
   '@chakra-ui/react',
   'antd',
   '@mantine/core',
-  '@fluentui/react'
+  '@fluentui/react',
 ];
 
 // Allowed MUI imports for apps (only true primitives/utilities - no components with UI)
@@ -72,7 +68,7 @@ const ALLOWED_MUI_IMPORTS_APPS = [
   'Theme',
   'Palette',
   'PaletteColor',
-  'TypographyVariant'
+  'TypographyVariant',
 ];
 
 // Expanded allowed MUI imports for shared-ui (app-shell layout primitives)
@@ -91,7 +87,7 @@ const ALLOWED_MUI_IMPORTS_SHARED_UI = [
   // IconButton for Header actions
   'IconButton',
   // Divider for layout separation
-  'Divider'
+  'Divider',
 ];
 
 /**
@@ -187,8 +183,13 @@ function extractForbiddenImports(content, allowedImports) {
       const importList = match[1];
       const components = importList
         .split(',')
-        .map(s => s.trim().split(/\s+as\s+/)[0].trim()) // Handle "X as Y" aliases
-        .filter(s => s && !allowedImports.includes(s));
+        .map((s) =>
+          s
+            .trim()
+            .split(/\s+as\s+/)[0]
+            .trim()
+        ) // Handle "X as Y" aliases
+        .filter((s) => s && !allowedImports.includes(s));
 
       if (components.length > 0) {
         forbidden.push({ framework, components });
@@ -233,7 +234,7 @@ function getContentFromToolInput(toolName, toolInput) {
     case 'MultiEdit':
       // MultiEdit has an array of edits
       if (Array.isArray(toolInput?.edits)) {
-        return toolInput.edits.map(e => e.new_string || '').join('\n');
+        return toolInput.edits.map((e) => e.new_string || '').join('\n');
       }
       return '';
     default:
@@ -252,7 +253,7 @@ function getFilePathFromToolInput(toolName, toolInput) {
     case 'MultiEdit':
       // For MultiEdit, check all files
       if (Array.isArray(toolInput?.edits)) {
-        return toolInput.edits.map(e => e.file_path).filter(Boolean);
+        return toolInput.edits.map((e) => e.file_path).filter(Boolean);
       }
       return '';
     default:
@@ -283,7 +284,7 @@ async function main() {
   const pathsToCheck = Array.isArray(filePaths) ? filePaths : [filePaths];
 
   // Filter to only React files
-  const reactFiles = pathsToCheck.filter(p => p && isReactFile(p));
+  const reactFiles = pathsToCheck.filter((p) => p && isReactFile(p));
 
   if (reactFiles.length === 0) {
     // Not a React file, approve
@@ -306,14 +307,14 @@ async function main() {
   }
 
   // Check if all files are in fully allowed folders (packages/ui)
-  const allInFullyAllowed = reactFiles.every(fp => isInFullyAllowedFolder(fp, gitRoot));
+  const allInFullyAllowed = reactFiles.every((fp) => isInFullyAllowedFolder(fp, gitRoot));
   if (allInFullyAllowed) {
     // Working in packages/ui, allow ALL imports
     process.exit(0);
   }
 
   // Determine which allowed list to use based on folder
-  const isSharedUI = reactFiles.some(fp => isInSharedUIFolder(fp, gitRoot));
+  const isSharedUI = reactFiles.some((fp) => isInSharedUIFolder(fp, gitRoot));
   const allowedImports = isSharedUI ? ALLOWED_MUI_IMPORTS_SHARED_UI : ALLOWED_MUI_IMPORTS_APPS;
   const folderContext = isSharedUI ? 'shared-ui' : 'apps';
 
@@ -327,7 +328,7 @@ async function main() {
 
   // Build detailed error message
   const importsList = forbiddenImports
-    .map(f => `  - ${f.framework}: ${f.components.join(', ')}`)
+    .map((f) => `  - ${f.framework}: ${f.components.join(', ')}`)
     .join('\n');
 
   const allowedList = allowedImports.slice(0, 10).join(', ') + '...';
@@ -370,7 +371,7 @@ ${importsList}
   process.exit(2);
 }
 
-main().catch(err => {
+main().catch((err) => {
   logHookError(__filename, err);
   // On error, approve to avoid blocking legitimate operations
   process.exit(0);

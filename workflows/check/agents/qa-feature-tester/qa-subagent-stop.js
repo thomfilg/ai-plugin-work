@@ -4,6 +4,8 @@
  * (Only runs in qa-feature-tester context - no detection needed)
  */
 const fs = require('fs');
+const path = require('path');
+const { logHookError } = require(path.join(__dirname, '..', '..', '..', 'lib', 'hook-error-log'));
 
 async function main() {
   let input = '';
@@ -14,11 +16,14 @@ async function main() {
   // Remove marker file
   try {
     fs.unlinkSync('/tmp/qa-agent-active');
-  } catch { /* file may not exist */ }
+  } catch {
+    /* file may not exist */
+  }
 
   console.log(JSON.stringify({}));
 }
 
-main().catch(() => {
+main().catch((err) => {
+  logHookError(__filename, err);
   console.log(JSON.stringify({}));
 });

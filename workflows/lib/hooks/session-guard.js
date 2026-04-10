@@ -26,6 +26,7 @@ const crypto = require('crypto');
 
 // Cached TASKS_BASE resolution — loaded once per invocation
 const getConfig = require(path.join(__dirname, '..', 'get-config'));
+const { logHookError } = require(path.join(__dirname, '..', 'hook-error-log'));
 
 let _tasksBase;
 function getTasksBase() {
@@ -43,8 +44,14 @@ if (process.env.SESSION_GUARD_ENABLED === '0') {
 // CLI mode surfaces errors with non-zero exit codes for debuggability
 const isHookMode = Boolean(process.env.CLAUDE_HOOK_TYPE);
 if (isHookMode) {
-  process.on('uncaughtException', () => process.exit(0));
-  process.on('unhandledRejection', () => process.exit(0));
+  process.on('uncaughtException', (err) => {
+    logHookError(__filename, err);
+    process.exit(0);
+  });
+  process.on('unhandledRejection', (err) => {
+    logHookError(__filename, err);
+    process.exit(0);
+  });
 }
 
 // Session files live in /tmp by default. Files are created with mode 0o600 and
@@ -54,11 +61,32 @@ const SESSION_DIR = process.env.SESSION_GUARD_DIR || '/tmp';
 
 // NATO phonetic alphabet words for passphrase generation
 const NATO_WORDS = [
-  'ALPHA', 'BRAVO', 'CHARLIE', 'DELTA', 'ECHO', 'FOXTROT',
-  'GOLF', 'HOTEL', 'INDIA', 'JULIET', 'KILO', 'LIMA',
-  'MIKE', 'NOVEMBER', 'OSCAR', 'PAPA', 'QUEBEC', 'ROMEO',
-  'SIERRA', 'TANGO', 'UNIFORM', 'VICTOR', 'WHISKEY', 'XRAY',
-  'YANKEE', 'ZULU',
+  'ALPHA',
+  'BRAVO',
+  'CHARLIE',
+  'DELTA',
+  'ECHO',
+  'FOXTROT',
+  'GOLF',
+  'HOTEL',
+  'INDIA',
+  'JULIET',
+  'KILO',
+  'LIMA',
+  'MIKE',
+  'NOVEMBER',
+  'OSCAR',
+  'PAPA',
+  'QUEBEC',
+  'ROMEO',
+  'SIERRA',
+  'TANGO',
+  'UNIFORM',
+  'VICTOR',
+  'WHISKEY',
+  'XRAY',
+  'YANKEE',
+  'ZULU',
 ];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -126,7 +154,6 @@ function getTicketId() {
   return _cachedTicketId;
 }
 
-
 function readSessionFile(ticketId) {
   try {
     const filePath = sessionFilePath(ticketId);
@@ -154,10 +181,18 @@ function writeSessionAtomic(ticketId, data) {
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
   try {
     // Unlink existing target before rename (required on Windows where rename fails if target exists)
-    try { fs.unlinkSync(target); } catch { /* ENOENT — target doesn't exist yet */ }
+    try {
+      fs.unlinkSync(target);
+    } catch {
+      /* ENOENT — target doesn't exist yet */
+    }
     fs.renameSync(tmp, target);
   } catch (renameErr) {
-    try { fs.unlinkSync(tmp); } catch { /* cleanup best-effort */ }
+    try {
+      fs.unlinkSync(tmp);
+    } catch {
+      /* cleanup best-effort */
+    }
     throw renameErr;
   }
 }
@@ -186,9 +221,13 @@ function findActiveSessions() {
         const data = JSON.parse(fs.readFileSync(fullPath, 'utf8'));
         // Validate schema: must have ticketId + workflow + passphrase to be a real session
         if (data?.ticketId && data?.workflow && data?.passphrase) sessions.push(data);
-      } catch { /* skip corrupt or inaccessible files */ }
+      } catch {
+        /* skip corrupt or inaccessible files */
+      }
     }
-  } catch { /* can't read SESSION_DIR — fail open */ }
+  } catch {
+    /* can't read SESSION_DIR — fail open */
+  }
   return sessions;
 }
 
@@ -210,7 +249,9 @@ function cmdInit(ticketId, workflow) {
       writeSessionAtomic(ticketId, existing);
       process.stderr.write(`Session guard for ${ticketId} updated cwd to ${currentCwd}.\n`);
     } else {
-      process.stderr.write(`Session guard already active for ${ticketId} (${existing.workflow}). Reusing existing session.\n`);
+      process.stderr.write(
+        `Session guard already active for ${ticketId} (${existing.workflow}). Reusing existing session.\n`
+      );
     }
     process.exit(0);
   }
@@ -226,7 +267,9 @@ function cmdInit(ticketId, workflow) {
   };
 
   writeSessionAtomic(ticketId, session);
-  process.stderr.write(`Session guard active for ${ticketId} (${workflow}). Locked until all steps complete.\n`);
+  process.stderr.write(
+    `Session guard active for ${ticketId} (${workflow}). Locked until all steps complete.\n`
+  );
   process.exit(0);
 }
 
@@ -259,7 +302,9 @@ function cmdComplete(ticketId) {
 
   try {
     fs.unlinkSync(sessionFilePath(ticketId));
-  } catch { /* already gone — fine */ }
+  } catch {
+    /* already gone — fine */
+  }
   process.stderr.write(`Session guard cleared for ${ticketId}\n`);
   process.exit(0);
 }
@@ -289,7 +334,9 @@ function cmdFinish(ticketId) {
   // Clean up session file
   try {
     fs.unlinkSync(sessionFilePath(ticketId));
-  } catch { /* already gone — fine */ }
+  } catch {
+    /* already gone — fine */
+  }
   process.stderr.write(`Session guard finished for ${ticketId}\n`);
   process.exit(0);
 }
@@ -298,12 +345,18 @@ function cmdStatus(ticketId) {
   if (ticketId) {
     const session = readSessionFile(ticketId);
     if (session) {
-      process.stdout.write(JSON.stringify({
-        ticketId: session.ticketId,
-        workflow: session.workflow,
-        startTime: session.startTime,
-        revealed: session.revealed,
-      }, null, 2) + '\n');
+      process.stdout.write(
+        JSON.stringify(
+          {
+            ticketId: session.ticketId,
+            workflow: session.workflow,
+            startTime: session.startTime,
+            revealed: session.revealed,
+          },
+          null,
+          2
+        ) + '\n'
+      );
     } else {
       process.stdout.write(`No active session for ${ticketId}\n`);
     }
@@ -312,12 +365,18 @@ function cmdStatus(ticketId) {
     if (sessions.length === 0) {
       process.stdout.write('No active sessions\n');
     } else {
-      process.stdout.write(JSON.stringify(sessions.map(s => ({
-        ticketId: s.ticketId,
-        workflow: s.workflow,
-        startTime: s.startTime,
-        revealed: s.revealed,
-      })), null, 2) + '\n');
+      process.stdout.write(
+        JSON.stringify(
+          sessions.map((s) => ({
+            ticketId: s.ticketId,
+            workflow: s.workflow,
+            startTime: s.startTime,
+            revealed: s.revealed,
+          })),
+          null,
+          2
+        ) + '\n'
+      );
     }
   }
   process.exit(0);
@@ -334,10 +393,11 @@ function handlePreCompact() {
 
   // Only show reminders for sessions belonging to the current ticket context
   const currentTicket = getTicketId();
-  const relevant = currentTicket
-    ? sessions.filter(s => s.ticketId === currentTicket)
-    : sessions;
-  if (relevant.length === 0) { process.exit(0); return; }
+  const relevant = currentTicket ? sessions.filter((s) => s.ticketId === currentTicket) : sessions;
+  if (relevant.length === 0) {
+    process.exit(0);
+    return;
+  }
 
   const lines = [];
   for (const session of relevant) {
@@ -366,7 +426,9 @@ function isCheckWorkflowActive(ticketId) {
 
     const tasksBase = getTasksBase();
     let safeId = ticketId;
-    try { safeId = require(path.join(__dirname, '..', 'config')).safeTicketId(ticketId); } catch {}
+    try {
+      safeId = require(path.join(__dirname, '..', 'config')).safeTicketId(ticketId);
+    } catch {}
     const resolved = path.resolve(tasksBase, safeId, '.check.workflow-state.json');
     // Guard against path traversal — resolved path must stay under tasksBase
     if (!resolved.startsWith(path.resolve(tasksBase) + path.sep)) return false;
@@ -396,18 +458,18 @@ function handleStop(hookData) {
   const currentTicket = getTicketId();
   const currentCwd = process.cwd();
   const ownedSessions = currentTicket
-    ? sessions.filter(s => s.ticketId === currentTicket)
-    : sessions.filter(s => !s.cwd || s.cwd === currentCwd);  // fallback to cwd filter
+    ? sessions.filter((s) => s.ticketId === currentTicket)
+    : sessions.filter((s) => !s.cwd || s.cwd === currentCwd); // fallback to cwd filter
 
   // Check if any owned session is unrevealed (tests: cwd match, no-match, legacy without cwd)
-  const unrevealed = ownedSessions.filter(s => !s.revealed);
+  const unrevealed = ownedSessions.filter((s) => !s.revealed);
   if (unrevealed.length === 0) {
     process.exit(0);
     return;
   }
 
   // Allow stop only if ALL unrevealed sessions have /check active
-  const nonCheckSessions = unrevealed.filter(s => !isCheckWorkflowActive(s.ticketId));
+  const nonCheckSessions = unrevealed.filter((s) => !isCheckWorkflowActive(s.ticketId));
   if (nonCheckSessions.length === 0) {
     process.exit(0); // All sessions are under /check — allow stop
     return;
@@ -416,7 +478,7 @@ function handleStop(hookData) {
   const session = nonCheckSessions[0];
   process.stderr.write(
     `BLOCKED: Active workflow session for ${session.ticketId} (${session.workflow}). ` +
-    `Complete all ${session.workflow} steps to unlock, or type 'abort workflow' to force-stop.\n`
+      `Complete all ${session.workflow} steps to unlock, or type 'abort workflow' to force-stop.\n`
   );
   process.exit(2);
 }
@@ -434,7 +496,11 @@ async function main() {
     }
 
     let hookData = {};
-    try { hookData = JSON.parse(input); } catch { /* empty/invalid — use default */ }
+    try {
+      hookData = JSON.parse(input);
+    } catch {
+      /* empty/invalid — use default */
+    }
 
     // Prevent infinite loops in Stop hooks
     if (hookType === 'Stop' && hookData.stop_hook_active) {
@@ -478,11 +544,11 @@ async function main() {
     default:
       process.stderr.write(
         'Usage: session-guard.js <init|reveal|complete|finish|status> [args]\n' +
-        '  init <ticketId> <workflow>  — Start session guard\n' +
-        '  reveal <ticketId>           — Reveal passphrase\n' +
-        '  complete <ticketId>         — Clear session\n' +
-        '  finish <ticketId>           — Reveal + complete (atomic teardown)\n' +
-        '  status [ticketId]           — Show session info\n'
+          '  init <ticketId> <workflow>  — Start session guard\n' +
+          '  reveal <ticketId>           — Reveal passphrase\n' +
+          '  complete <ticketId>         — Clear session\n' +
+          '  finish <ticketId>           — Reveal + complete (atomic teardown)\n' +
+          '  status [ticketId]           — Show session info\n'
       );
       process.exit(1);
   }
@@ -490,6 +556,7 @@ async function main() {
 
 main().catch((err) => {
   if (isHookMode) {
+    logHookError(__filename, err);
     process.exit(0); // fail-open in hook mode
   } else {
     process.stderr.write(`session-guard error: ${err.message}\n`);

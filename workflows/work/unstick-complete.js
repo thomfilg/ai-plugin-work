@@ -35,7 +35,13 @@ try {
 const TASKS_BASE = config.TASKS_BASE;
 const { loadState, completeWork, addError } = require(path.join(__dirname, 'work-state'));
 // session-guard is a CLI-only script (no exports), executed via execFileSync
-const SESSION_GUARD_PATH = require('path').resolve(__dirname, '..', 'lib', 'hooks', 'session-guard.js');
+const SESSION_GUARD_PATH = require('path').resolve(
+  __dirname,
+  '..',
+  'lib',
+  'hooks',
+  'session-guard.js'
+);
 
 /**
  * Validate and sanitize a ticket ID to prevent path traversal.
@@ -47,7 +53,7 @@ function sanitizeTicketId(ticketId) {
   if (ticketId.includes('\\')) return null;
   const parts = ticketId.split('/');
   if (parts.length < 1 || parts.length > 2) return null;
-  if (parts.some(part => !part || !/^[A-Za-z0-9_-]+$/.test(part))) return null;
+  if (parts.some((part) => !part || !/^[A-Za-z0-9_-]+$/.test(part))) return null;
   const baseResolved = path.resolve(TASKS_BASE);
   const resolved = path.resolve(TASKS_BASE, ...parts);
   if (resolved !== baseResolved && !resolved.startsWith(baseResolved + path.sep)) return null;
@@ -67,8 +73,7 @@ function isStuckInComplete(state) {
   if (completeStatus === 'in_progress') return true;
 
   // All other steps completed but complete is still pending
-  const otherSteps = Object.entries(state.stepStatus || {})
-    .filter(([step]) => step !== 'complete');
+  const otherSteps = Object.entries(state.stepStatus || {}).filter(([step]) => step !== 'complete');
   const allOthersCompleted = otherSteps.every(([, status]) => status === 'completed');
   return allOthersCompleted && (completeStatus === 'pending' || completeStatus === 'in_progress');
 }
@@ -83,17 +88,24 @@ function archiveArtifacts(ticketId) {
   const archiveDir = path.join(dir, 'archive');
 
   // Enforcement artifact patterns to archive (ticketId is sanitized above)
-  const patterns = [/^.*\.check\.md$/, /^\.work-actions\.json$/, /^tdd-phase\.json$/, /^\.step-evidence\.json$/];
+  const patterns = [
+    /^.*\.check\.md$/,
+    /^\.work-actions\.json$/,
+    /^tdd-phase\.json$/,
+    /^\.step-evidence\.json$/,
+  ];
 
   const files = [];
   try {
     const entries = fs.readdirSync(dir);
     for (const entry of entries) {
-      if (patterns.some(p => p.test(entry))) {
+      if (patterns.some((p) => p.test(entry))) {
         files.push(entry);
       }
     }
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 
   if (files.length === 0) return [];
 
@@ -103,10 +115,14 @@ function archiveArtifacts(ticketId) {
     try {
       let dest = path.join(archiveDir, file);
       // Avoid overwriting existing archived files — append timestamp suffix
-      if (fs.existsSync(dest)) { dest = path.join(archiveDir, `${Date.now()}-${file}`); }
+      if (fs.existsSync(dest)) {
+        dest = path.join(archiveDir, `${Date.now()}-${file}`);
+      }
       fs.renameSync(path.join(dir, file), dest);
       archived.push(file);
-    } catch (err) { process.stderr.write(`Warning: could not archive ${file}: ${err.message}\n`); }
+    } catch (err) {
+      process.stderr.write(`Warning: could not archive ${file}: ${err.message}\n`);
+    }
   }
   return archived; // idempotent: existing dest files get timestamped suffix
 }
@@ -120,9 +136,15 @@ function finishSessionGuard(ticketId) {
   // session-guard uses base ticket ID (no suffix) to match init/finish pairing
   const baseId = safe.split('/')[0];
   try {
-    execFileSync('node', [SESSION_GUARD_PATH, 'finish', baseId], { encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] });
+    execFileSync('node', [SESSION_GUARD_PATH, 'finish', baseId], {
+      encoding: 'utf-8',
+      timeout: 10000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
     return { ok: true }; // baseId extracted from safe (split('/')[0]) to match session-guard init/finish pairing
-  } catch (err) { return { ok: false, error: err.message }; }
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
 }
 
 /**
@@ -142,8 +164,15 @@ function unstickTicket(ticketId) {
   }
   if (completeResult && completeResult.error) {
     result.actions.push({ step: 'completeWork', ok: false, error: completeResult.error });
-    if (completeResult.error === 'No state found') { result.success = false; return result; }
-    try { addError(safe, 'complete', `unstick-complete: completeWork failed — ${completeResult.error}`); } catch { /* best-effort */ }
+    if (completeResult.error === 'No state found') {
+      result.success = false;
+      return result;
+    }
+    try {
+      addError(safe, 'complete', `unstick-complete: completeWork failed — ${completeResult.error}`);
+    } catch {
+      /* best-effort */
+    }
   } else {
     result.actions.push({ step: 'completeWork', ok: true });
   }
@@ -152,14 +181,22 @@ function unstickTicket(ticketId) {
   const guardResult = finishSessionGuard(safe);
   result.actions.push({ step: 'sessionGuard', ...guardResult });
   if (!guardResult.ok && completeResult && !completeResult.error) {
-    try { addError(safe, 'complete', `unstick-complete: session-guard finish failed — ${guardResult.error}`); } catch { /* best-effort */ }
+    try {
+      addError(
+        safe,
+        'complete',
+        `unstick-complete: session-guard finish failed — ${guardResult.error}`
+      );
+    } catch {
+      /* best-effort */
+    }
   }
 
   // Step 3: Archive artifacts
   const archived = archiveArtifacts(safe);
   result.actions.push({ step: 'archive', ok: true, files: archived });
 
-  result.success = result.actions.every(a => a.ok !== false);
+  result.success = result.actions.every((a) => a.ok !== false);
   return result;
 }
 
@@ -195,7 +232,10 @@ function main() {
   for (const dir of dirs) {
     // Check base ticket (sanitized by unstickTicket internally)
     const state = loadState(dir);
-    if (isStuckInComplete(state)) { process.stderr.write(`Found stuck ticket: ${dir}\n`); results.push(unstickTicket(dir)); }
+    if (isStuckInComplete(state)) {
+      process.stderr.write(`Found stuck ticket: ${dir}\n`);
+      results.push(unstickTicket(dir));
+    }
     // Also check suffix tickets (e.g. GH-145/phase1) stored under subdirectories
     const subDir = path.join(TASKS_BASE, dir);
     try {
@@ -209,7 +249,9 @@ function main() {
           results.push(unstickTicket(suffixId));
         }
       }
-    } catch { /* not a directory or not readable */ }
+    } catch {
+      /* not a directory or not readable */
+    }
   }
 
   if (results.length === 0) {
@@ -219,7 +261,7 @@ function main() {
   }
 
   console.log(JSON.stringify({ unstuck: results, total: results.length }, null, 2));
-  const allOk = results.every(r => r.success);
+  const allOk = results.every((r) => r.success);
   process.exit(allOk ? 0 : 1);
 }
 
@@ -227,4 +269,10 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { isStuckInComplete, unstickTicket, archiveArtifacts, finishSessionGuard, sanitizeTicketId };
+module.exports = {
+  isStuckInComplete,
+  unstickTicket,
+  archiveArtifacts,
+  finishSessionGuard,
+  sanitizeTicketId,
+};

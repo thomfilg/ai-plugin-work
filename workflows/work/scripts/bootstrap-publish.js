@@ -33,7 +33,18 @@ function buildPrCommands(ticketId) {
     '- [ ] Ready for review',
   ].join('\n');
   return [
-    { bin: 'gh', args: ['pr', 'create', '--title', `${ticketId} - chore: bootstrap task`, '--body', body, '--draft'] },
+    {
+      bin: 'gh',
+      args: [
+        'pr',
+        'create',
+        '--title',
+        `${ticketId} - chore: bootstrap task`,
+        '--body',
+        body,
+        '--draft',
+      ],
+    },
   ];
 }
 
@@ -54,7 +65,9 @@ if (require.main === module) {
   const [worktreePath, branchName, ticketId] = args.slice(1);
 
   if (!mode || !worktreePath || !branchName || !ticketId) {
-    console.error('Usage: bootstrap-publish.js --commit|--pr <worktree-path> <branch-name> <ticket-id>');
+    console.error(
+      'Usage: bootstrap-publish.js --commit|--pr <worktree-path> <branch-name> <ticket-id>'
+    );
     process.exit(1);
   }
 

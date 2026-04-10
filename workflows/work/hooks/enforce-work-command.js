@@ -37,10 +37,7 @@ const ALLOWED_PATTERNS = [
   /plan[-_]?\w*\./i,
 ];
 
-const WORK_PATTERNS = [
-  /<command-name>\/work<\/command-name>/,
-  /"skill"\s*:\s*"work"/,
-];
+const WORK_PATTERNS = [/<command-name>\/work<\/command-name>/, /"skill"\s*:\s*"work"/];
 
 function getCurrentBranch() {
   try {
@@ -64,7 +61,7 @@ function isWorkActiveInTranscript(transcriptPath) {
   if (!transcriptPath || !fs.existsSync(transcriptPath)) return false;
   try {
     const content = fs.readFileSync(transcriptPath, 'utf8');
-    return WORK_PATTERNS.some(p => p.test(content));
+    return WORK_PATTERNS.some((p) => p.test(content));
   } catch {
     return false;
   }
@@ -72,7 +69,7 @@ function isWorkActiveInTranscript(transcriptPath) {
 
 function isFileAllowed(filePath) {
   if (!filePath) return false;
-  return ALLOWED_PATTERNS.some(p => p.test(filePath));
+  return ALLOWED_PATTERNS.some((p) => p.test(filePath));
 }
 
 function hasSkipWorkBypass(transcriptPath) {
@@ -101,7 +98,8 @@ function isInsideSubagent(transcriptPath) {
     ];
     for (const agent of agentTypes) {
       if (new RegExp(`^name:\\s*${agent}`, 'm').test(content)) return true;
-      if (new RegExp(`"subagent_type"\\s*:\\s*"(work-workflow:)?${agent}"`, 'i').test(content)) return true;
+      if (new RegExp(`"subagent_type"\\s*:\\s*"(work-workflow:)?${agent}"`, 'i').test(content))
+        return true;
     }
     return false;
   } catch {
@@ -171,7 +169,7 @@ async function main() {
   process.exit(2);
 }
 
-main().catch(err => {
+main().catch((err) => {
   logHookError(__filename, err);
   process.exit(0);
 });

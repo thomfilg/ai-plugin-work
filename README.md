@@ -79,37 +79,36 @@ The plugin registers hooks that enforce workflow discipline:
 
 ```
 claude-plugin-work/
-├── .claude-plugin/        # Plugin metadata (plugin.json, marketplace.json)
-├── hooks/                 # Event hooks for workflow enforcement
-│   ├── hooks.json         # Hook registration config
-│   ├── enforce-step-workflow.js
-│   ├── enforce-screenshot-requirement.js
+├── .claude-plugin/               # Plugin metadata (plugin.json, marketplace.json)
+├── hooks/                        # Top-level event hooks
+│   ├── hooks.json                # Hook registration config
 │   └── work-orchestrator-hook.js
-├── lib/                   # Core engine
-│   ├── workflow-engine.js # Reusable state machine engine
-│   ├── workflow-state.js  # Workflow state persistence
-│   ├── work-actions.js    # Step action implementations
-│   └── hook-error-log.js  # Hook error file logger (see Debugging Hooks)
-├── agents/                # Agent definitions (18 specialized agents)
-│   ├── brief-writer.md    # Product brief generation
-│   ├── spec-writer.md     # Technical spec generation
+├── workflows/                    # Workflow definitions and core engine
+│   ├── lib/                      # Core engine and shared hook utilities
+│   │   ├── workflow-engine.js    # Reusable state machine engine
+│   │   ├── workflow-state.js     # Workflow state persistence
+│   │   ├── hook-error-log.js     # Hook error file logger (see Debugging Hooks)
+│   │   └── hooks/                # Shared hooks (enforce-step-workflow, etc.)
+│   ├── work/                     # /work orchestrator workflow
+│   ├── check/                    # /check workflow
+│   └── work-pr/                  # /work-pr workflow
+├── agents/                       # Agent definitions (18 specialized agents)
+│   ├── brief-writer.md           # Product brief generation
+│   ├── spec-writer.md            # Technical spec generation
 │   ├── developer-nodejs-tdd.md
 │   ├── code-checker.md
 │   └── ...
-├── skills/                # Slash command definitions (SKILL.md per command)
+├── skills/                       # Slash command definitions (SKILL.md per command)
 │   ├── work/
 │   ├── check/
 │   ├── bootstrap/
 │   └── ...
-├── workflows/             # Workflow definitions (step graphs + state detection)
-│   ├── check.workflow.js
-│   └── work-pr.workflow.js
 └── package.json
 ```
 
 ### Workflow Engine
 
-The workflow engine (`lib/workflow-engine.js`) provides:
+The workflow engine (`workflows/lib/workflow-engine.js`) provides:
 
 - **Plan generation** - Detects current state and computes remaining steps
 - **State transitions** - Records forward/backward step transitions with validation
@@ -140,7 +139,7 @@ export ENFORCE_HOOK_DEBUG=1
 **Race conditions:** Each log line includes PID. Writes use `O_APPEND` with short lines (~3.8KB max). On Linux ext4/xfs, these are effectively atomic across concurrent instances.
 
 **Source files:**
-- `lib/hook-error-log.js` (plugin hooks)
+- `workflows/lib/hook-error-log.js` (plugin hooks)
 - `~/.claude/hooks/lib/hook-error-log.js` (personal hooks — identical copy)
 
 ## Prerequisites

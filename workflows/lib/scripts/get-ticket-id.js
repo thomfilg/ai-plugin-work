@@ -30,7 +30,7 @@ function getCurrentTaskId(cwd = process.cwd()) {
     const branch = execSync('git branch --show-current', {
       cwd,
       encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
     // Check GH-XX pattern in branch name
     const branchGhMatch = branch.match(GH_PATTERN);
@@ -55,7 +55,11 @@ function getCurrentTaskId(cwd = process.cwd()) {
       const trailingNum = cwd.match(/[-/](\d+)\/?$/);
       if (trailingNum) return 'GH-' + trailingNum[1];
       try {
-        const branch = execSync('git branch --show-current', { cwd, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+        const branch = execSync('git branch --show-current', {
+          cwd,
+          encoding: 'utf8',
+          stdio: ['pipe', 'pipe', 'pipe'],
+        }).trim();
         const branchTrailingNum = branch.match(/[-/](\d+)$/);
         if (branchTrailingNum) return 'GH-' + branchTrailingNum[1];
       } catch {}

@@ -18,11 +18,21 @@ let GIT_ROOT;
 function runHook(input) {
   return new Promise((resolve, reject) => {
     const proc = spawn('node', [HOOK_PATH], { stdio: ['pipe', 'pipe', 'pipe'] });
-    let stdout = '', stderr = '';
-    proc.stdout.on('data', (d) => { stdout += d.toString(); });
-    proc.stderr.on('data', (d) => { stderr += d.toString(); });
+    let stdout = '',
+      stderr = '';
+    proc.stdout.on('data', (d) => {
+      stdout += d.toString();
+    });
+    proc.stderr.on('data', (d) => {
+      stderr += d.toString();
+    });
     proc.on('close', (code) => {
-      resolve({ result: { decision: code === 2 ? 'block' : 'approve', reason: stderr.trim() || undefined }, stderr, code, stdout });
+      resolve({
+        result: { decision: code === 2 ? 'block' : 'approve', reason: stderr.trim() || undefined },
+        stderr,
+        code,
+        stdout,
+      });
     });
     proc.on('error', reject);
     proc.stdin.write(JSON.stringify(input));
@@ -31,8 +41,11 @@ function runHook(input) {
 }
 
 function createTranscript(entries) {
-  const tmpFile = path.join(os.tmpdir(), `test-completion-tx-${Date.now()}-${Math.random().toString(36).slice(2)}.jsonl`);
-  fs.writeFileSync(tmpFile, entries.map(e => JSON.stringify(e)).join('\n'));
+  const tmpFile = path.join(
+    os.tmpdir(),
+    `test-completion-tx-${Date.now()}-${Math.random().toString(36).slice(2)}.jsonl`
+  );
+  fs.writeFileSync(tmpFile, entries.map((e) => JSON.stringify(e)).join('\n'));
   return tmpFile;
 }
 
@@ -69,14 +82,21 @@ describe('enforce-completion-protocol hook', () => {
     const tp = createTranscript([
       {
         type: 'assistant',
-        message: { role: 'assistant', content: [
-          { type: 'tool_use', name: 'Edit', input: { file_path: `${GIT_ROOT}/apps/as-dashboard-worker/src/index.ts` } }
-        ] }
-      }
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              name: 'Edit',
+              input: { file_path: `${GIT_ROOT}/apps/as-dashboard-worker/src/index.ts` },
+            },
+          ],
+        },
+      },
     ]);
     const { result } = await runHook({
       transcript_path: tp,
-      assistant_message: { content: 'Let me now run the tests to verify.' }
+      assistant_message: { content: 'Let me now run the tests to verify.' },
     });
     assert.strictEqual(result.decision, 'approve');
   });
@@ -85,21 +105,28 @@ describe('enforce-completion-protocol hook', () => {
     const tp = createTranscript([
       {
         type: 'assistant',
-        message: { role: 'assistant', content: [
-          { type: 'tool_use', name: 'Edit', input: { file_path: `${GIT_ROOT}/apps/as-dashboard-worker/src/index.ts` } }
-        ] }
-      }
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              name: 'Edit',
+              input: { file_path: `${GIT_ROOT}/apps/as-dashboard-worker/src/index.ts` },
+            },
+          ],
+        },
+      },
     ]);
     const { result } = await runHook({
       transcript_path: tp,
-      assistant_message: { content: 'Let me now run the tests to check if this is complete.' }
+      assistant_message: { content: 'Let me now run the tests to check if this is complete.' },
     });
     assert.strictEqual(result.decision, 'approve');
   });
 
   it('should APPROVE when no transcript_path provided', async () => {
     const { result } = await runHook({
-      assistant_message: { content: 'The task is complete.' }
+      assistant_message: { content: 'The task is complete.' },
     });
     assert.strictEqual(result.decision, 'approve');
   });
@@ -108,14 +135,21 @@ describe('enforce-completion-protocol hook', () => {
     const tp = createTranscript([
       {
         type: 'assistant',
-        message: { role: 'assistant', content: [
-          { type: 'tool_use', name: 'Edit', input: { file_path: `${GIT_ROOT}/apps/as-dashboard-worker/src/index.ts` } }
-        ] }
-      }
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              name: 'Edit',
+              input: { file_path: `${GIT_ROOT}/apps/as-dashboard-worker/src/index.ts` },
+            },
+          ],
+        },
+      },
     ]);
     const { result } = await runHook({
       transcript_path: tp,
-      assistant_message: { content: 'The implementation is complete.' }
+      assistant_message: { content: 'The implementation is complete.' },
     });
     assert.strictEqual(result.decision, 'block');
     assert.ok(result.reason.includes('Completion Protocol'));
@@ -125,18 +159,25 @@ describe('enforce-completion-protocol hook', () => {
     const tp = createTranscript([
       {
         type: 'assistant',
-        message: { role: 'assistant', content: [
-          { type: 'tool_use', name: 'Edit', input: { file_path: `${GIT_ROOT}/apps/as-dashboard-worker/src/index.ts` } },
-          { type: 'tool_use', name: 'Bash', input: { command: 'pnpm lint' } },
-          { type: 'tool_use', name: 'Bash', input: { command: 'pnpm typecheck' } },
-          { type: 'tool_use', name: 'Bash', input: { command: 'pnpm test' } },
-          { type: 'tool_use', name: 'Task', input: { subagent_type: 'requirements-verifier' } }
-        ] }
-      }
+        message: {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              name: 'Edit',
+              input: { file_path: `${GIT_ROOT}/apps/as-dashboard-worker/src/index.ts` },
+            },
+            { type: 'tool_use', name: 'Bash', input: { command: 'pnpm lint' } },
+            { type: 'tool_use', name: 'Bash', input: { command: 'pnpm typecheck' } },
+            { type: 'tool_use', name: 'Bash', input: { command: 'pnpm test' } },
+            { type: 'tool_use', name: 'Task', input: { subagent_type: 'requirements-verifier' } },
+          ],
+        },
+      },
     ]);
     const { result } = await runHook({
       transcript_path: tp,
-      assistant_message: { content: 'The task is complete.' }
+      assistant_message: { content: 'The task is complete.' },
     });
     assert.strictEqual(result.decision, 'approve');
   });
@@ -145,15 +186,18 @@ describe('enforce-completion-protocol hook', () => {
     const tp = createTranscript([
       {
         type: 'assistant',
-        message: { role: 'assistant', content: [
-          { type: 'tool_use', name: 'Edit', input: { file_path: `${GIT_ROOT}/docs/guide.md` } },
-          { type: 'tool_use', name: 'Task', input: { subagent_type: 'requirements-verifier' } }
-        ] }
-      }
+        message: {
+          role: 'assistant',
+          content: [
+            { type: 'tool_use', name: 'Edit', input: { file_path: `${GIT_ROOT}/docs/guide.md` } },
+            { type: 'tool_use', name: 'Task', input: { subagent_type: 'requirements-verifier' } },
+          ],
+        },
+      },
     ]);
     const { result } = await runHook({
       transcript_path: tp,
-      assistant_message: { content: 'The documentation is complete.' }
+      assistant_message: { content: 'The documentation is complete.' },
     });
     assert.strictEqual(result.decision, 'approve');
   });

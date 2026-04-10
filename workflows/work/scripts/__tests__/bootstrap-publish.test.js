@@ -50,17 +50,26 @@ describe('bootstrap-publish.js', () => {
 
   describe('--pr mode', () => {
     it('skips when ENABLE_DRAFT_PR is not set', () => {
-      const output = run(['--pr', '/tmp', 'branch', 'TICKET-1'], { ENABLE_EMPTY_COMMIT: '1', ENABLE_DRAFT_PR: '' });
+      const output = run(['--pr', '/tmp', 'branch', 'TICKET-1'], {
+        ENABLE_EMPTY_COMMIT: '1',
+        ENABLE_DRAFT_PR: '',
+      });
       assert.match(output, /skipping/i);
     });
 
     it('skips when ENABLE_EMPTY_COMMIT is not set', () => {
-      const output = run(['--pr', '/tmp', 'branch', 'TICKET-1'], { ENABLE_EMPTY_COMMIT: '', ENABLE_DRAFT_PR: '1' });
+      const output = run(['--pr', '/tmp', 'branch', 'TICKET-1'], {
+        ENABLE_EMPTY_COMMIT: '',
+        ENABLE_DRAFT_PR: '1',
+      });
       assert.match(output, /skipping/i);
     });
 
     it('skips when both env vars are not set', () => {
-      const output = run(['--pr', '/tmp', 'branch', 'TICKET-1'], { ENABLE_EMPTY_COMMIT: '', ENABLE_DRAFT_PR: '' });
+      const output = run(['--pr', '/tmp', 'branch', 'TICKET-1'], {
+        ENABLE_EMPTY_COMMIT: '',
+        ENABLE_DRAFT_PR: '',
+      });
       assert.match(output, /skipping/i);
     });
   });
@@ -71,7 +80,12 @@ describe('bootstrap-publish.js', () => {
       assert.equal(cmds.length, 2);
 
       assert.equal(cmds[0].bin, 'git');
-      assert.deepEqual(cmds[0].args, ['commit', '--allow-empty', '-m', 'chore: bootstrap PROJ-123']);
+      assert.deepEqual(cmds[0].args, [
+        'commit',
+        '--allow-empty',
+        '-m',
+        'chore: bootstrap PROJ-123',
+      ]);
 
       assert.equal(cmds[1].bin, 'git');
       assert.deepEqual(cmds[1].args, ['push', '-u', 'origin', 'my-branch']);

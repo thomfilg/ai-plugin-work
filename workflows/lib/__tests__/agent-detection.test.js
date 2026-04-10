@@ -6,10 +6,7 @@
 
 const { describe, it, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
-const {
-  normalizeAgentName,
-  isRunningInAgent,
-} = require('../agent-detection');
+const { normalizeAgentName, isRunningInAgent } = require('../agent-detection');
 
 // ─── normalizeAgentName ──────────────────────────────────────────────────────
 
@@ -162,7 +159,9 @@ describe('isRunningInAgent — frontmatter detection', () => {
   const path = require('path');
   const savedAgent = process.env.CLAUDE_CURRENT_AGENT;
 
-  beforeEach(() => { delete process.env.CLAUDE_CURRENT_AGENT; });
+  beforeEach(() => {
+    delete process.env.CLAUDE_CURRENT_AGENT;
+  });
   afterEach(() => {
     if (savedAgent !== undefined) process.env.CLAUDE_CURRENT_AGENT = savedAgent;
     else delete process.env.CLAUDE_CURRENT_AGENT;
@@ -203,7 +202,10 @@ describe('isRunningInAgent — debug logging', () => {
     delete process.env.ENFORCE_HOOK_DEBUG;
     stderrOutput = '';
     originalWrite = process.stderr.write;
-    process.stderr.write = (chunk) => { stderrOutput += chunk; return true; };
+    process.stderr.write = (chunk) => {
+      stderrOutput += chunk;
+      return true;
+    };
   });
 
   afterEach(() => {

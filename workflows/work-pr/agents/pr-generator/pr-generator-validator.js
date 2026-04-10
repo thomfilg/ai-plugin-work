@@ -45,7 +45,10 @@ async function main() {
 
   // Only validate pr-generator subagent
   const agentName = hookData.agent_name || hookData.subagent_type || '';
-  if (!agentName.toLowerCase().includes('pr-generator') || agentName.toLowerCase().includes('post')) {
+  if (
+    !agentName.toLowerCase().includes('pr-generator') ||
+    agentName.toLowerCase().includes('post')
+  ) {
     process.exit(0);
   }
 
@@ -105,7 +108,7 @@ async function main() {
   if (devChecksMatch) {
     const devChecksContent = devChecksMatch[1];
     const checkboxes = devChecksContent.match(/\[.\]/g) || [];
-    const validCheckboxes = checkboxes.filter(cb => cb === '[Y]' || cb === '[ ]');
+    const validCheckboxes = checkboxes.filter((cb) => cb === '[Y]' || cb === '[ ]');
     if (checkboxes.length > 0 && validCheckboxes.length !== checkboxes.length) {
       issues.push('Dev Checks has invalid checkbox format (use [Y] or [ ] only)');
     }
@@ -117,7 +120,7 @@ async function main() {
 ║  🛑 PR-GENERATOR: VALIDATION FAILED                                  ║
 ╠══════════════════════════════════════════════════════════════════════╣
 ║                                                                      ║
-${issues.map(i => `║  ❌ ${i.padEnd(64)}║`).join('\n')}
+${issues.map((i) => `║  ❌ ${i.padEnd(64)}║`).join('\n')}
 ║                                                                      ║
 ║  Fix these issues and regenerate the PR description.                 ║
 ║                                                                      ║

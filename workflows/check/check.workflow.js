@@ -103,9 +103,7 @@ function hasBackendChanges() {
     /\.sql$/,
     /migrations\//,
   ];
-  return output.split('\n').some(line =>
-    backendPatterns.some(pattern => pattern.test(line))
-  );
+  return output.split('\n').some((line) => backendPatterns.some((pattern) => pattern.test(line)));
 }
 
 function codeReviewHasSuggestions(folder) {
@@ -138,27 +136,55 @@ module.exports = {
   stateDir: TASKS_BASE,
 
   steps: [
-    { id: '1_setup',             name: 'Setup & cache check',     command: 'node "${CLAUDE_PLUGIN_ROOT}/hooks/check-setup.js"' },
-    { id: '2_start_env',         name: 'Start dev environment',   command: 'node "${CLAUDE_PLUGIN_ROOT}/hooks/check-start-env.js"' },
-    { id: '3_verify_playwright', name: 'Verify Playwright',       command: 'mcp__playwright__browser_navigate' },
-    { id: '4_phase1_agents',     name: 'Phase 1 parallel agents', command: 'Task(code-checker, quality-checker, qa-*, completion-checker)' },
-    { id: '5_phase2_consensus',  name: 'Phase 2 consensus loop',  command: 'Task(developer-*, code-checker)' },
-    { id: '6_quality_recheck',   name: 'Quality re-check',        command: 'Task(quality-checker) — affected files' },
-    { id: '7_validate_summary',  name: 'Validate & generate summary', command: 'node check-validate-reports.js + check-generate-summary.js' },
-    { id: '8_output',            name: 'Final output',            command: 'internal' },
-    { id: '9_cleanup',           name: 'Cleanup',                 command: 'internal — kill dev servers' },
+    {
+      id: '1_setup',
+      name: 'Setup & cache check',
+      command: 'node "${CLAUDE_PLUGIN_ROOT}/hooks/check-setup.js"',
+    },
+    {
+      id: '2_start_env',
+      name: 'Start dev environment',
+      command: 'node "${CLAUDE_PLUGIN_ROOT}/hooks/check-start-env.js"',
+    },
+    {
+      id: '3_verify_playwright',
+      name: 'Verify Playwright',
+      command: 'mcp__playwright__browser_navigate',
+    },
+    {
+      id: '4_phase1_agents',
+      name: 'Phase 1 parallel agents',
+      command: 'Task(code-checker, quality-checker, qa-*, completion-checker)',
+    },
+    {
+      id: '5_phase2_consensus',
+      name: 'Phase 2 consensus loop',
+      command: 'Task(developer-*, code-checker)',
+    },
+    {
+      id: '6_quality_recheck',
+      name: 'Quality re-check',
+      command: 'Task(quality-checker) — affected files',
+    },
+    {
+      id: '7_validate_summary',
+      name: 'Validate & generate summary',
+      command: 'node check-validate-reports.js + check-generate-summary.js',
+    },
+    { id: '8_output', name: 'Final output', command: 'internal' },
+    { id: '9_cleanup', name: 'Cleanup', command: 'internal — kill dev servers' },
   ],
 
   transitions: [
-    { source: '1_setup',             targets: ['2_start_env', '8_output'] },
-    { source: '2_start_env',         targets: ['3_verify_playwright', '4_phase1_agents'] },
+    { source: '1_setup', targets: ['2_start_env', '8_output'] },
+    { source: '2_start_env', targets: ['3_verify_playwright', '4_phase1_agents'] },
     { source: '3_verify_playwright', targets: ['4_phase1_agents', '8_output'] },
-    { source: '4_phase1_agents',     targets: ['5_phase2_consensus', '7_validate_summary'] },
-    { source: '5_phase2_consensus',  targets: ['6_quality_recheck', '7_validate_summary'] },
-    { source: '6_quality_recheck',   targets: ['7_validate_summary'] },
-    { source: '7_validate_summary',  targets: ['8_output'] },
-    { source: '8_output',            targets: ['9_cleanup'] },
-    { source: '9_cleanup',           targets: [] },
+    { source: '4_phase1_agents', targets: ['5_phase2_consensus', '7_validate_summary'] },
+    { source: '5_phase2_consensus', targets: ['6_quality_recheck', '7_validate_summary'] },
+    { source: '6_quality_recheck', targets: ['7_validate_summary'] },
+    { source: '7_validate_summary', targets: ['8_output'] },
+    { source: '8_output', targets: ['9_cleanup'] },
+    { source: '9_cleanup', targets: [] },
   ],
 
   /**
@@ -208,7 +234,9 @@ module.exports = {
         const content = fs.readFileSync(readmePath, 'utf8');
         const match = content.match(/\*\*Changes Hash:\*\*\s*([a-f0-9]{12}|no-changes)/);
         data.readmeHashMatch = match && match[1] === changesHash;
-      } catch { /* */ }
+      } catch {
+        /* */
+      }
     }
 
     // Per-report existence with hash matching
@@ -240,8 +268,14 @@ module.exports = {
     // Phase 2 state
     data.codeReviewHasSuggestions = codeReviewHasSuggestions(reportFolder);
     data.replyExists = fs.existsSync(path.join(reportFolder, 'code-review-reply.check.md'));
-    data.replyHashMatch = reportHasMatchingHash(reportFolder, 'code-review-reply.check.md', changesHash);
-    data.consensusLogExists = fs.existsSync(path.join(reportFolder, 'code-review-consensus-log.md'));
+    data.replyHashMatch = reportHasMatchingHash(
+      reportFolder,
+      'code-review-reply.check.md',
+      changesHash
+    );
+    data.consensusLogExists = fs.existsSync(
+      path.join(reportFolder, 'code-review-consensus-log.md')
+    );
     data.replyHasImplementations = codeReviewReplyHasImplementations(reportFolder);
 
     // Missing Phase 1 reports
@@ -273,7 +307,10 @@ module.exports = {
 
       case '2_start_env':
         if (d.readmeHashMatch) {
-          return { action: 'SKIP', reason: `Cache valid — hash ${d.changesHash} matches README.md` };
+          return {
+            action: 'SKIP',
+            reason: `Cache valid — hash ${d.changesHash} matches README.md`,
+          };
         }
         return {
           action: 'RUN',
@@ -327,7 +364,10 @@ module.exports = {
 
       case '6_quality_recheck':
         if (!d.replyHasImplementations) {
-          return { action: 'SKIP', reason: 'No IMPLEMENTED suggestions in reply — no re-check needed' };
+          return {
+            action: 'SKIP',
+            reason: 'No IMPLEMENTED suggestions in reply — no re-check needed',
+          };
         }
         return {
           action: 'RUN',

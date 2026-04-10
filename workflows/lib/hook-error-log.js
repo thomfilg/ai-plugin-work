@@ -69,9 +69,12 @@ let _branch;
 function getBranch() {
   if (_branch !== undefined) return _branch;
   try {
-    _branch = execSync('git branch --show-current 2>/dev/null', {
-      encoding: 'utf8', timeout: 2000, stdio: ['pipe', 'pipe', 'pipe'],
-    }).trim() || null;
+    _branch =
+      execSync('git branch --show-current 2>/dev/null', {
+        encoding: 'utf8',
+        timeout: 2000,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }).trim() || null;
   } catch {
     _branch = null;
   }
@@ -103,9 +106,10 @@ function logHookError(sourceFile, err, context) {
   if (context?.input?.file_path) parts.push(`file=${context.input.file_path}`);
   if (context?.input?.command) {
     // Truncate long commands to keep the line under PIPE_BUF for atomic writes
-    const cmd = context.input.command.length > 200
-      ? context.input.command.slice(0, 200) + '...'
-      : context.input.command;
+    const cmd =
+      context.input.command.length > 200
+        ? context.input.command.slice(0, 200) + '...'
+        : context.input.command;
     parts.push(`cmd=${cmd}`);
   }
   if (context?.input?.skill) parts.push(`skill=${context.input.skill}`);

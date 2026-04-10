@@ -196,9 +196,17 @@ describe('createArtifactProtector', () => {
     let capturedAgents = null;
     const p = makeProtector({
       currentStep: 'spec',
-      isRunningInAgent: (tp, agents) => { capturedPath = tp; capturedAgents = agents; return true; },
+      isRunningInAgent: (tp, agents) => {
+        capturedPath = tp;
+        capturedAgents = agents;
+        return true;
+      },
     });
-    p.check('Write', { file_path: `/tasks/${TICKET}/spec.md` }, { transcript_path: '/tmp/transcript.json' });
+    p.check(
+      'Write',
+      { file_path: `/tasks/${TICKET}/spec.md` },
+      { transcript_path: '/tmp/transcript.json' }
+    );
     assert.equal(capturedPath, '/tmp/transcript.json');
     assert.deepEqual(capturedAgents, ['spec-writer']);
   });
@@ -207,7 +215,10 @@ describe('createArtifactProtector', () => {
     let capturedHookData = null;
     const p = makeProtector({
       currentStep: 'spec',
-      isRunningInAgent: (tp, agents, hd) => { capturedHookData = hd; return true; },
+      isRunningInAgent: (tp, agents, hd) => {
+        capturedHookData = hd;
+        return true;
+      },
     });
     const hookData = {
       transcript_path: '/tmp/transcript.json',
@@ -248,7 +259,9 @@ describe('createArtifactProtector', () => {
 
   it('blocks Bash cp to check report outside step', () => {
     const p = makeProtector({ currentStep: 'implement' });
-    const result = p.check('Bash', { command: `cp /tmp/report.md /tasks/${TICKET}/tests.check.md` });
+    const result = p.check('Bash', {
+      command: `cp /tmp/report.md /tasks/${TICKET}/tests.check.md`,
+    });
     assert.equal(result.blocked, true);
   });
 
@@ -260,7 +273,9 @@ describe('createArtifactProtector', () => {
 
   it('blocks Bash node writeFileSync to brief.md outside step', () => {
     const p = makeProtector({ currentStep: 'implement' });
-    const result = p.check('Bash', { command: `node -e "require('fs').writeFileSync('/tasks/${TICKET}/brief.md', 'hacked')"` });
+    const result = p.check('Bash', {
+      command: `node -e "require('fs').writeFileSync('/tasks/${TICKET}/brief.md', 'hacked')"`,
+    });
     assert.equal(result.blocked, true);
   });
 

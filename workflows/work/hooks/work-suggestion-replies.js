@@ -13,16 +13,27 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
 
 let didBlock = false;
-process.on('uncaughtException', () => process.exit(didBlock ? 2 : 0));
-process.on('unhandledRejection', () => process.exit(didBlock ? 2 : 0));
+process.on('uncaughtException', (err) => {
+  logHookError(__filename, err);
+  process.exit(didBlock ? 2 : 0);
+});
+process.on('unhandledRejection', (err) => {
+  logHookError(__filename, err);
+  process.exit(didBlock ? 2 : 0);
+});
 
 let config;
 try {
   config = require('../../lib/config');
 } catch (err) {
-  if (err && err.code === 'MODULE_NOT_FOUND' && /['"]\.\.\/\.\.\/lib\/config['"]/.test(err.message)) {
+  if (
+    err &&
+    err.code === 'MODULE_NOT_FOUND' &&
+    /['"]\.\.\/\.\.\/lib\/config['"]/.test(err.message)
+  ) {
     config = null;
   } else {
     throw err;
@@ -43,7 +54,7 @@ function getCurrentTaskId(cwd) {
     const branch = execSync('git branch --show-current', {
       cwd,
       encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
     const branchMatch = branch.match(new RegExp(config.TICKET_PROJECT_KEY + '-(\\d+)', 'i'));
     if (branchMatch) {
@@ -61,17 +72,20 @@ function extractIssuesFromSection(content, sectionPattern, stopPattern) {
   const issues = [];
 
   // Find the section
-  const sectionMatch = content.match(new RegExp(
-    sectionPattern + '[^\\n]*\\n([\\s\\S]*?)(?=' + stopPattern + '|$)',
-    'i'
-  ));
+  const sectionMatch = content.match(
+    new RegExp(sectionPattern + '[^\\n]*\\n([\\s\\S]*?)(?=' + stopPattern + '|$)', 'i')
+  );
 
   if (!sectionMatch) return issues;
 
   const sectionContent = sectionMatch[1];
 
   // Check for "none found" or similar
-  if (/none\s*found|no\s*(critical|important|issues?)|0\s*issues/i.test(sectionContent.substring(0, 200))) {
+  if (
+    /none\s*found|no\s*(critical|important|issues?)|0\s*issues/i.test(
+      sectionContent.substring(0, 200)
+    )
+  ) {
     return [];
   }
 
@@ -82,9 +96,9 @@ function extractIssuesFromSection(content, sectionPattern, stopPattern) {
   // - **Title**: description
   // 1. **Title**: description
   const patterns = [
-    /\*\*(?:🔴|🟡|🟢)?\s*([^*\n]+)\*\*/g,  // **Title** or **🔴 Title**
-    /[-*]\s*\*\*([^*:]+)\*\*\s*:/g,        // - **Title**:
-    /\d+\.\s*\*\*([^*:]+)\*\*\s*:/g,       // 1. **Title**:
+    /\*\*(?:🔴|🟡|🟢)?\s*([^*\n]+)\*\*/g, // **Title** or **🔴 Title**
+    /[-*]\s*\*\*([^*:]+)\*\*\s*:/g, // - **Title**:
+    /\d+\.\s*\*\*([^*:]+)\*\*\s*:/g, // 1. **Title**:
   ];
 
   for (const pattern of patterns) {
@@ -92,9 +106,11 @@ function extractIssuesFromSection(content, sectionPattern, stopPattern) {
     while ((match = pattern.exec(sectionContent)) !== null) {
       const title = match[1].trim();
       // Filter out non-issue items and headers
-      if (title.length > 3 &&
-          !title.match(/^(none|n\/a|no\s+|issues?\s*found|CRITICAL|IMPORTANT|NICE-TO-HAVE)/i) &&
-          !title.match(/^(File|Description|Impact|Recommendation):/i)) {
+      if (
+        title.length > 3 &&
+        !title.match(/^(none|n\/a|no\s+|issues?\s*found|CRITICAL|IMPORTANT|NICE-TO-HAVE)/i) &&
+        !title.match(/^(File|Description|Impact|Recommendation):/i)
+      ) {
         issues.push(title);
       }
     }
@@ -108,7 +124,7 @@ function extractAllIssues(content) {
   const allIssues = {
     critical: [],
     important: [],
-    suggestions: []
+    suggestions: [],
   };
 
   // Extract CRITICAL issues
@@ -141,14 +157,17 @@ function extractAllIssues(content) {
 // Check if a suggestion has a reply
 function findReplyForSuggestion(replyContent, suggestionTitle) {
   // Normalize the title for comparison
-  const normalizedTitle = suggestionTitle.toLowerCase().replace(/[^\w\s]/g, '').trim();
+  const normalizedTitle = suggestionTitle
+    .toLowerCase()
+    .replace(/[^\w\s]/g, '')
+    .trim();
 
   // Look for "## Suggestion: [title]" or similar patterns
   const patterns = [
     new RegExp(`##\\s*Suggestion:\\s*${escapeRegex(suggestionTitle)}`, 'i'),
     new RegExp(`##\\s*${escapeRegex(suggestionTitle)}`, 'i'),
     new RegExp(`\\*\\*Suggestion:\\*\\*\\s*${escapeRegex(suggestionTitle)}`, 'i'),
-    new RegExp(`[-*]\\s*\\*\\*${escapeRegex(suggestionTitle)}\\*\\*`, 'i')
+    new RegExp(`[-*]\\s*\\*\\*${escapeRegex(suggestionTitle)}\\*\\*`, 'i'),
   ];
 
   for (const pattern of patterns) {
@@ -158,7 +177,7 @@ function findReplyForSuggestion(replyContent, suggestionTitle) {
   }
 
   // Fuzzy match - check if similar words appear
-  const titleWords = normalizedTitle.split(/\s+/).filter(w => w.length > 3);
+  const titleWords = normalizedTitle.split(/\s+/).filter((w) => w.length > 3);
   const contentNormalized = replyContent.toLowerCase().replace(/[^\w\s]/g, '');
 
   // If most words from the title appear near each other in the reply
@@ -188,7 +207,7 @@ function isRecentlyModified(filePath) {
     const now = Date.now();
     const mtime = stats.mtimeMs;
     const tenMinutes = 10 * 60 * 1000;
-    return (now - mtime) < tenMinutes;
+    return now - mtime < tenMinutes;
   } catch {
     return false;
   }
@@ -247,21 +266,21 @@ async function main() {
       const issuesList = [];
       if (totalCritical > 0) {
         issuesList.push(`CRITICAL (${totalCritical}):`);
-        allIssues.critical.slice(0, 3).forEach(s => {
+        allIssues.critical.slice(0, 3).forEach((s) => {
           issuesList.push(`  - ${s.substring(0, 55)}${s.length > 55 ? '...' : ''}`);
         });
         if (totalCritical > 3) issuesList.push(`  ... and ${totalCritical - 3} more`);
       }
       if (totalImportant > 0) {
         issuesList.push(`IMPORTANT (${totalImportant}):`);
-        allIssues.important.slice(0, 3).forEach(s => {
+        allIssues.important.slice(0, 3).forEach((s) => {
           issuesList.push(`  - ${s.substring(0, 55)}${s.length > 55 ? '...' : ''}`);
         });
         if (totalImportant > 3) issuesList.push(`  ... and ${totalImportant - 3} more`);
       }
       if (totalSuggestions > 0) {
         issuesList.push(`SUGGESTIONS (${totalSuggestions}):`);
-        allIssues.suggestions.slice(0, 2).forEach(s => {
+        allIssues.suggestions.slice(0, 2).forEach((s) => {
           issuesList.push(`  - ${s.substring(0, 55)}${s.length > 55 ? '...' : ''}`);
         });
         if (totalSuggestions > 2) issuesList.push(`  ... and ${totalSuggestions - 2} more`);
@@ -269,16 +288,16 @@ async function main() {
 
       process.stderr.write(
         `MISSING CODE REVIEW REPLY\n\n` +
-        `Task: ${currentTaskId}\n` +
-        `Found ${totalIssues} issue(s) in code-review.check.md:\n` +
-        `  ${totalCritical} CRITICAL | ${totalImportant} IMPORTANT | ${totalSuggestions} suggestions\n\n` +
-        `code-review-reply.check.md does not exist\n\n` +
-        `${issuesList.join('\n')}\n\n` +
-        `You MUST create code-review-reply.check.md with responses.\n` +
-        `Each issue needs:\n` +
-        `  ## Issue: [title]\n` +
-        `  **Decision:** FIXED | DEFERRED | NOT_APPLICABLE\n` +
-        `  **Reason:** [specific justification]\n`
+          `Task: ${currentTaskId}\n` +
+          `Found ${totalIssues} issue(s) in code-review.check.md:\n` +
+          `  ${totalCritical} CRITICAL | ${totalImportant} IMPORTANT | ${totalSuggestions} suggestions\n\n` +
+          `code-review-reply.check.md does not exist\n\n` +
+          `${issuesList.join('\n')}\n\n` +
+          `You MUST create code-review-reply.check.md with responses.\n` +
+          `Each issue needs:\n` +
+          `  ## Issue: [title]\n` +
+          `  **Decision:** FIXED | DEFERRED | NOT_APPLICABLE\n` +
+          `  **Reason:** [specific justification]\n`
       );
       didBlock = true;
       process.exit(2);
@@ -294,14 +313,14 @@ async function main() {
     if (reviewHash && replyHash && reviewHash !== replyHash) {
       process.stderr.write(
         `CODE REVIEW REPLY SHA MISMATCH\n\n` +
-        `Task: ${currentTaskId}\n\n` +
-        `The Changes Hash in code-review-reply.check.md does not match\n` +
-        `the Changes Hash in code-review.check.md:\n\n` +
-        `  code-review.check.md:       ${reviewHash}\n` +
-        `  code-review-reply.check.md: ${replyHash}\n\n` +
-        `This means the reply is outdated and needs to be regenerated.\n\n` +
-        `ACTION: Re-run the developer agent to generate a new reply\n` +
-        `        based on the current code-review.check.md\n`
+          `Task: ${currentTaskId}\n\n` +
+          `The Changes Hash in code-review-reply.check.md does not match\n` +
+          `the Changes Hash in code-review.check.md:\n\n` +
+          `  code-review.check.md:       ${reviewHash}\n` +
+          `  code-review-reply.check.md: ${replyHash}\n\n` +
+          `This means the reply is outdated and needs to be regenerated.\n\n` +
+          `ACTION: Re-run the developer agent to generate a new reply\n` +
+          `        based on the current code-review.check.md\n`
       );
       didBlock = true;
       process.exit(2);
@@ -310,55 +329,58 @@ async function main() {
     if (reviewHash && !replyHash) {
       process.stderr.write(
         `CODE REVIEW REPLY MISSING CHANGES HASH\n\n` +
-        `Task: ${currentTaskId}\n\n` +
-        `code-review-reply.check.md is missing **Changes Hash:** header.\n\n` +
-        `Expected hash: ${reviewHash}\n\n` +
-        `ACTION: Add the following line at top of code-review-reply.check.md:\n\n` +
-        `  **Changes Hash:** ${reviewHash}\n`
+          `Task: ${currentTaskId}\n\n` +
+          `code-review-reply.check.md is missing **Changes Hash:** header.\n\n` +
+          `Expected hash: ${reviewHash}\n\n` +
+          `ACTION: Add the following line at top of code-review-reply.check.md:\n\n` +
+          `  **Changes Hash:** ${reviewHash}\n`
       );
       didBlock = true;
       process.exit(2);
     }
 
     const missingIssues = {
-      critical: allIssues.critical.filter(s => !findReplyForSuggestion(replyContent, s)),
-      important: allIssues.important.filter(s => !findReplyForSuggestion(replyContent, s)),
-      suggestions: allIssues.suggestions.filter(s => !findReplyForSuggestion(replyContent, s))
+      critical: allIssues.critical.filter((s) => !findReplyForSuggestion(replyContent, s)),
+      important: allIssues.important.filter((s) => !findReplyForSuggestion(replyContent, s)),
+      suggestions: allIssues.suggestions.filter((s) => !findReplyForSuggestion(replyContent, s)),
     };
 
-    const totalMissing = missingIssues.critical.length + missingIssues.important.length + missingIssues.suggestions.length;
+    const totalMissing =
+      missingIssues.critical.length +
+      missingIssues.important.length +
+      missingIssues.suggestions.length;
 
     if (totalMissing > 0) {
       // Build missing issues list for display
       const missingList = [];
       if (missingIssues.critical.length > 0) {
         missingList.push(`CRITICAL (missing ${missingIssues.critical.length}):`);
-        missingIssues.critical.forEach(s => {
+        missingIssues.critical.forEach((s) => {
           missingList.push(`  - ${s.substring(0, 55)}${s.length > 55 ? '...' : ''}`);
         });
       }
       if (missingIssues.important.length > 0) {
         missingList.push(`IMPORTANT (missing ${missingIssues.important.length}):`);
-        missingIssues.important.forEach(s => {
+        missingIssues.important.forEach((s) => {
           missingList.push(`  - ${s.substring(0, 55)}${s.length > 55 ? '...' : ''}`);
         });
       }
       if (missingIssues.suggestions.length > 0) {
         missingList.push(`SUGGESTIONS (missing ${missingIssues.suggestions.length}):`);
-        missingIssues.suggestions.forEach(s => {
+        missingIssues.suggestions.forEach((s) => {
           missingList.push(`  - ${s.substring(0, 55)}${s.length > 55 ? '...' : ''}`);
         });
       }
 
       process.stderr.write(
         `INCOMPLETE CODE REVIEW REPLY\n\n` +
-        `Task: ${currentTaskId}\n` +
-        `Missing replies for ${totalMissing}/${totalIssues} issue(s)\n\n` +
-        `${missingList.join('\n')}\n\n` +
-        `Add to code-review-reply.check.md:\n` +
-        `  ## Issue: [exact title from above]\n` +
-        `  **Decision:** FIXED | DEFERRED | NOT_APPLICABLE\n` +
-        `  **Reason:** [specific justification]\n`
+          `Task: ${currentTaskId}\n` +
+          `Missing replies for ${totalMissing}/${totalIssues} issue(s)\n\n` +
+          `${missingList.join('\n')}\n\n` +
+          `Add to code-review-reply.check.md:\n` +
+          `  ## Issue: [exact title from above]\n` +
+          `  **Decision:** FIXED | DEFERRED | NOT_APPLICABLE\n` +
+          `  **Reason:** [specific justification]\n`
       );
       didBlock = true;
       process.exit(2);
@@ -368,4 +390,7 @@ async function main() {
   process.exit(0);
 }
 
-main().catch(() => process.exit(didBlock ? 2 : 0));
+main().catch((err) => {
+  logHookError(__filename, err);
+  process.exit(didBlock ? 2 : 0);
+});

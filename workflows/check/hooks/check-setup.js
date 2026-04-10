@@ -106,7 +106,7 @@ function checkReportsCache(reportFolder, currentHash) {
     return {
       cached: true,
       cachedHash,
-      readme: content
+      readme: content,
     };
   }
 
@@ -114,7 +114,7 @@ function checkReportsCache(reportFolder, currentHash) {
     cached: false,
     reason: 'Hash mismatch',
     previousHash: cachedHash,
-    currentHash
+    currentHash,
   };
 }
 
@@ -175,7 +175,9 @@ function getImpactedApps() {
   // If no direct app changes but packages changed, all web apps may be affected
   const webAppNames = config.webAppNames();
   if (apps.size === 0 && packages.size > 0 && webAppNames.length > 0) {
-    console.error(`No direct app changes but ${packages.size} package(s) changed — including all web apps for QA`);
+    console.error(
+      `No direct app changes but ${packages.size} package(s) changed — including all web apps for QA`
+    );
     return webAppNames;
   }
 
@@ -184,7 +186,9 @@ function getImpactedApps() {
   if (apps.size === 0 && packages.size === 0 && lines.length > 0) {
     // Try WEB_APPS config first
     if (webAppNames.length > 0) {
-      console.error(`Single-app repo detected — ${lines.length} file(s) changed outside apps/ — including all web apps for QA`);
+      console.error(
+        `Single-app repo detected — ${lines.length} file(s) changed outside apps/ — including all web apps for QA`
+      );
       return webAppNames;
     }
     // Fallback: detect from package.json
@@ -246,12 +250,24 @@ function getAffectedFiles() {
  * @returns {string} Concatenated file contents with headers, or empty string
  */
 // Denylist of filename patterns that should never be injected into agent prompts
-const DOCS_DENYLIST = ['.env', '.env.local', '.env.production', '.env.staging',
-  'id_rsa', 'id_ed25519', 'credentials.json', 'service-account.json',
-  '.secrets', '.tokens'];
+const DOCS_DENYLIST = [
+  '.env',
+  '.env.local',
+  '.env.production',
+  '.env.staging',
+  'id_rsa',
+  'id_ed25519',
+  'credentials.json',
+  'service-account.json',
+  '.secrets',
+  '.tokens',
+];
 
 function loadDocsFromPaths(envVarName, csvPaths, repoRoot) {
-  const docPaths = (csvPaths || '').split(',').map(p => p.trim()).filter(Boolean);
+  const docPaths = (csvPaths || '')
+    .split(',')
+    .map((p) => p.trim())
+    .filter(Boolean);
   if (docPaths.length === 0) return '';
 
   const resolvedRoot = path.resolve(repoRoot);
@@ -278,14 +294,19 @@ function loadDocsFromPaths(envVarName, csvPaths, repoRoot) {
     }
     // Reject secret/sensitive files by name (denylist + pattern match)
     const basename = path.basename(relPath);
-    if (DOCS_DENYLIST.includes(basename) || /^\.env(\.|$)/i.test(basename) || /\.(pem|key|pfx|p12|secrets?|tokens?|credentials)$/i.test(basename)) {
+    if (
+      DOCS_DENYLIST.includes(basename) ||
+      /^\.env(\.|$)/i.test(basename) ||
+      /\.(pem|key|pfx|p12|secrets?|tokens?|credentials)$/i.test(basename)
+    ) {
       console.error(`Warning: ${envVarName} rejects sensitive file: ${relPath}`);
       continue;
     }
     // Resolve and check path boundaries
     const absPath = path.resolve(resolvedRoot, relPath);
     const withinRepo = absPath.startsWith(resolvedRoot + path.sep) || absPath === resolvedRoot;
-    const withinWorktreesBase = worktreesBase && (absPath.startsWith(worktreesBase + path.sep) || absPath === worktreesBase);
+    const withinWorktreesBase =
+      worktreesBase && (absPath.startsWith(worktreesBase + path.sep) || absPath === worktreesBase);
     if (!withinRepo && !withinWorktreesBase) {
       console.error(`Warning: ${envVarName} path escapes allowed boundary: ${relPath}`);
       continue;
@@ -294,7 +315,9 @@ function loadDocsFromPaths(envVarName, csvPaths, repoRoot) {
       // Resolve symlinks to prevent symlink-based path traversal, then re-check boundaries
       const realPath = fs.realpathSync(absPath);
       const realWithinRepo = realPath.startsWith(resolvedRoot + path.sep);
-      const realWithinWorktreesBase = worktreesBase && (realPath.startsWith(worktreesBase + path.sep) || realPath === worktreesBase);
+      const realWithinWorktreesBase =
+        worktreesBase &&
+        (realPath.startsWith(worktreesBase + path.sep) || realPath === worktreesBase);
       if (!realWithinRepo && !realWithinWorktreesBase) {
         console.error(`Warning: ${envVarName} symlink escapes allowed boundary: ${relPath}`);
         continue;
@@ -306,7 +329,9 @@ function loadDocsFromPaths(envVarName, csvPaths, repoRoot) {
       }
       const MAX_DOC_BYTES = 256 * 1024; // 256 KB cap — prevent injecting huge files into agent prompts
       if (stat.size > MAX_DOC_BYTES) {
-        console.error(`Warning: ${envVarName} file too large (${stat.size} bytes, max ${MAX_DOC_BYTES}): ${relPath}`);
+        console.error(
+          `Warning: ${envVarName} file too large (${stat.size} bytes, max ${MAX_DOC_BYTES}): ${relPath}`
+        );
         continue;
       }
       // Only run git ls-files check for files within the repo root.
@@ -314,7 +339,10 @@ function loadDocsFromPaths(envVarName, csvPaths, repoRoot) {
       if (realWithinRepo) {
         const repoRelPath = path.relative(resolvedRoot, realPath);
         try {
-          execSync(`git -C ${JSON.stringify(resolvedRoot)} ls-files --error-unmatch -- ${JSON.stringify(repoRelPath)}`, { stdio: 'ignore' });
+          execSync(
+            `git -C ${JSON.stringify(resolvedRoot)} ls-files --error-unmatch -- ${JSON.stringify(repoRelPath)}`,
+            { stdio: 'ignore' }
+          );
         } catch {
           console.error(`Warning: ${envVarName} rejects untracked/gitignored file: ${relPath}`);
           continue;
@@ -377,8 +405,15 @@ function main() {
   // Load project-specific docs for each agent type (always include all keys for stable schema)
   // Use current worktree root (not mainWorktreePath) so docs reflect the feature branch
   const currentRepoRoot = exec('git rev-parse --show-toplevel') || process.cwd();
-  const docVars = ['READ_DOCS_ON_REVIEW', 'READ_DOCS_ON_QA', 'READ_DOCS_ON_DEV',
-    'READ_DOCS_ON_E2E', 'READ_DOCS_ON_TEST', 'READ_DOCS_ON_STORYBOOK', 'READ_DOCS_ON_PR'];
+  const docVars = [
+    'READ_DOCS_ON_REVIEW',
+    'READ_DOCS_ON_QA',
+    'READ_DOCS_ON_DEV',
+    'READ_DOCS_ON_E2E',
+    'READ_DOCS_ON_TEST',
+    'READ_DOCS_ON_STORYBOOK',
+    'READ_DOCS_ON_PR',
+  ];
   const loadedDocs = {};
   for (const varName of docVars) {
     const key = varName.replace('READ_DOCS_ON_', '').toLowerCase() + 'Docs';
@@ -396,7 +431,7 @@ function main() {
     cache: cacheResult,
     impactedApps,
     affectedFiles,
-    screenshotsFolder: path.join(reportFolder, 'screenshots')
+    screenshotsFolder: path.join(reportFolder, 'screenshots'),
   };
 
   // Always include all doc keys for stable JSON schema

@@ -48,7 +48,11 @@ class WorkflowState {
   load(instanceId) {
     const p = this._statePath(instanceId);
     if (fs.existsSync(p)) {
-      try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
+      try {
+        return JSON.parse(fs.readFileSync(p, 'utf8'));
+      } catch {
+        return null;
+      }
     }
     // Legacy fallback — load .workflow-state.json only when workflow field matches (tested)
     const legacyPath = path.join(this.stateDir, instanceId, '.workflow-state.json');
@@ -59,11 +63,15 @@ class WorkflowState {
           const warnKey = `${this.workflowName}:${instanceId}`;
           if (!_legacyWarned.has(warnKey)) {
             _legacyWarned.add(warnKey);
-            process.stderr.write(`[workflow-state] DEPRECATED: loading from legacy .workflow-state.json for workflow "${this.workflowName}". Migrate to scoped file format.\n`);
+            process.stderr.write(
+              `[workflow-state] DEPRECATED: loading from legacy .workflow-state.json for workflow "${this.workflowName}". Migrate to scoped file format.\n`
+            );
           }
           return state; // legacy fallback — warning emitted once per workflow+instanceId via _legacyWarned
         }
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
     return null;
   }
@@ -85,7 +93,9 @@ class WorkflowState {
    */
   init(instanceId, steps, extraFields = {}) {
     const stepStatus = {};
-    steps.forEach(step => { stepStatus[step] = 'pending'; });
+    steps.forEach((step) => {
+      stepStatus[step] = 'pending';
+    });
 
     const state = {
       workflow: this.workflowName,
@@ -135,7 +145,9 @@ class WorkflowState {
 
     state.status = 'completed';
     state.completedTime = new Date().toISOString();
-    Object.keys(state.stepStatus).forEach(s => { state.stepStatus[s] = 'completed'; });
+    Object.keys(state.stepStatus).forEach((s) => {
+      state.stepStatus[s] = 'completed';
+    });
     return this.save(instanceId, state);
   }
 
@@ -179,7 +191,7 @@ class WorkflowState {
       currentStep: state.currentStep,
       resumeStep,
       resumeStepIndex,
-      completedSteps: steps.filter(s => state.stepStatus[s] === 'completed'),
+      completedSteps: steps.filter((s) => state.stepStatus[s] === 'completed'),
       lastError: state.errors.length > 0 ? state.errors[state.errors.length - 1] : null,
       lastUpdate: state.lastUpdate,
     };
@@ -201,15 +213,20 @@ class WorkflowState {
 
     steps.forEach((step, index) => {
       const status = state.stepStatus[step];
-      const icon = status === 'completed' ? '\u2705' :
-                   status === 'in_progress' ? '\uD83D\uDD04' :
-                   status === 'failed' ? '\u274C' : '\u23F3';
+      const icon =
+        status === 'completed'
+          ? '\u2705'
+          : status === 'in_progress'
+            ? '\uD83D\uDD04'
+            : status === 'failed'
+              ? '\u274C'
+              : '\u23F3';
       output += `  ${index + 1}. ${icon} ${step}: ${status}\n`;
     });
 
     if (state.errors.length > 0) {
       output += '\nRecent Errors:\n';
-      state.errors.slice(-3).forEach(err => {
+      state.errors.slice(-3).forEach((err) => {
         output += `  - [${err.step}] ${err.error}\n`;
       });
     }
@@ -231,7 +248,6 @@ function main() {
     console.error('Commands: init, get, set-step, add-error, complete, resume-info');
     process.exit(1);
   }
-
 
   // Search plugin workflows first (including subdirectories), then global
   function findWorkflowFile(name) {
@@ -257,7 +273,9 @@ function main() {
       const wf = require(wfPath);
       stateDir = wf.stateDir || stateDir;
     }
-  } catch { /* use default */ }
+  } catch {
+    /* use default */
+  }
 
   const ws = new WorkflowState(workflowName, stateDir);
 
@@ -270,9 +288,11 @@ function main() {
           const wfPath = findWorkflowFile(workflowName);
           if (!wfPath) throw new Error('Not found');
           const wf = require(wfPath);
-          steps = wf.steps.map(s => s.id);
+          steps = wf.steps.map((s) => s.id);
         } catch {
-          console.error('Cannot determine steps. Pass steps JSON as 4th arg or ensure workflow definition exists.');
+          console.error(
+            'Cannot determine steps. Pass steps JSON as 4th arg or ensure workflow definition exists.'
+          );
           process.exit(1);
         }
       }

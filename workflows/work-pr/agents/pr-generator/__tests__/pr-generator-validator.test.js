@@ -125,7 +125,10 @@ describe('pr-generator-validator hook', () => {
       });
 
       assert.strictEqual(result.decision, 'block');
-      assert.ok(result.reason.includes('OUTPUT TOO SHORT'), 'expected to contain: OUTPUT TOO SHORT');
+      assert.ok(
+        result.reason.includes('OUTPUT TOO SHORT'),
+        'expected to contain: OUTPUT TOO SHORT'
+      );
     });
 
     it('should BLOCK when output is empty', async () => {
@@ -164,7 +167,10 @@ describe('pr-generator-validator hook', () => {
       });
 
       assert.strictEqual(result.decision, 'block');
-      assert.ok(result.reason.includes('Missing section: "Existing Behavior"'), 'expected to contain: Missing section: "Existing Behavior"');
+      assert.ok(
+        result.reason.includes('Missing section: "Existing Behavior"'),
+        'expected to contain: Missing section: "Existing Behavior"'
+      );
     });
 
     it('should BLOCK when Intended New Behavior missing', async () => {
@@ -175,7 +181,10 @@ describe('pr-generator-validator hook', () => {
       });
 
       assert.strictEqual(result.decision, 'block');
-      assert.ok(result.reason.includes('Missing section: "Intended New Behavior"'), 'expected to contain: Missing section: "Intended New Behavior"');
+      assert.ok(
+        result.reason.includes('Missing section: "Intended New Behavior"'),
+        'expected to contain: Missing section: "Intended New Behavior"'
+      );
     });
 
     it('should BLOCK when Dev Checks missing', async () => {
@@ -186,7 +195,10 @@ describe('pr-generator-validator hook', () => {
       });
 
       assert.strictEqual(result.decision, 'block');
-      assert.ok(result.reason.includes('Missing section: "Dev Checks"'), 'expected to contain: Missing section: "Dev Checks"');
+      assert.ok(
+        result.reason.includes('Missing section: "Dev Checks"'),
+        'expected to contain: Missing section: "Dev Checks"'
+      );
     });
 
     it('should BLOCK when Testing Plan missing', async () => {
@@ -197,7 +209,10 @@ describe('pr-generator-validator hook', () => {
       });
 
       assert.strictEqual(result.decision, 'block');
-      assert.ok(result.reason.includes('Missing section: "Testing Plan"'), 'expected to contain: Missing section: "Testing Plan"');
+      assert.ok(
+        result.reason.includes('Missing section: "Testing Plan"'),
+        'expected to contain: Missing section: "Testing Plan"'
+      );
     });
 
     it('should APPROVE with # instead of ## for sections', async () => {
@@ -234,7 +249,10 @@ describe('pr-generator-validator hook', () => {
       });
 
       assert.strictEqual(result.decision, 'block');
-      assert.ok(result.reason.includes('Placeholder text'), 'expected to contain: Placeholder text');
+      assert.ok(
+        result.reason.includes('Placeholder text'),
+        'expected to contain: Placeholder text'
+      );
     });
 
     it('should BLOCK placeholder text TBD]', async () => {
@@ -247,12 +265,16 @@ describe('pr-generator-validator hook', () => {
       });
 
       assert.strictEqual(result.decision, 'block');
-      assert.ok(result.reason.includes('Placeholder text'), 'expected to contain: Placeholder text');
+      assert.ok(
+        result.reason.includes('Placeholder text'),
+        'expected to contain: Placeholder text'
+      );
     });
 
     it('should BLOCK placeholder text [PLACEHOLDER]', async () => {
       const pr = createValidPR({
-        intendedNewBehavior: '[PLACEHOLDER] This section needs to be filled in with implementation details.',
+        intendedNewBehavior:
+          '[PLACEHOLDER] This section needs to be filled in with implementation details.',
       });
       const { result } = await runHook({
         agent_name: 'pr-generator',
@@ -260,7 +282,10 @@ describe('pr-generator-validator hook', () => {
       });
 
       assert.strictEqual(result.decision, 'block');
-      assert.ok(result.reason.includes('Placeholder text'), 'expected to contain: Placeholder text');
+      assert.ok(
+        result.reason.includes('Placeholder text'),
+        'expected to contain: Placeholder text'
+      );
     });
 
     it('should BLOCK TODO: markers', async () => {
@@ -273,7 +298,10 @@ describe('pr-generator-validator hook', () => {
       });
 
       assert.strictEqual(result.decision, 'block');
-      assert.ok(result.reason.includes('Placeholder text'), 'expected to contain: Placeholder text');
+      assert.ok(
+        result.reason.includes('Placeholder text'),
+        'expected to contain: Placeholder text'
+      );
     });
 
     it('should BLOCK [Your analysis here] markers', async () => {
@@ -286,7 +314,10 @@ describe('pr-generator-validator hook', () => {
       });
 
       assert.strictEqual(result.decision, 'block');
-      assert.ok(result.reason.includes('Empty section markers'), 'expected to contain: Empty section markers');
+      assert.ok(
+        result.reason.includes('Empty section markers'),
+        'expected to contain: Empty section markers'
+      );
     });
   });
 
@@ -328,7 +359,10 @@ describe('pr-generator-validator hook', () => {
       });
 
       assert.strictEqual(result.decision, 'block');
-      assert.ok(result.reason.includes('Wrong checkbox format'), 'expected to contain: Wrong checkbox format');
+      assert.ok(
+        result.reason.includes('Wrong checkbox format'),
+        'expected to contain: Wrong checkbox format'
+      );
     });
 
     it('should BLOCK [X] checkboxes (uppercase)', async () => {
@@ -344,7 +378,10 @@ describe('pr-generator-validator hook', () => {
       });
 
       assert.strictEqual(result.decision, 'block');
-      assert.ok(result.reason.includes('Wrong checkbox format'), 'expected to contain: Wrong checkbox format');
+      assert.ok(
+        result.reason.includes('Wrong checkbox format'),
+        'expected to contain: Wrong checkbox format'
+      );
     });
 
     it('should BLOCK mixed valid/invalid checkboxes', async () => {
@@ -360,7 +397,10 @@ describe('pr-generator-validator hook', () => {
       });
 
       assert.strictEqual(result.decision, 'block');
-      assert.ok(result.reason.includes('invalid checkbox format'), 'expected to contain: invalid checkbox format');
+      assert.ok(
+        result.reason.includes('invalid checkbox format'),
+        'expected to contain: invalid checkbox format'
+      );
     });
   });
 
@@ -384,7 +424,10 @@ describe('pr-generator-validator hook', () => {
       });
 
       assert.strictEqual(result.decision, 'block');
-      assert.ok(result.reason.includes('Testing Plan section lacks substantive content'), 'expected to contain: Testing Plan section lacks substantive content');
+      assert.ok(
+        result.reason.includes('Testing Plan section lacks substantive content'),
+        'expected to contain: Testing Plan section lacks substantive content'
+      );
     });
 
     it('should BLOCK Testing Plan with only whitespace', async () => {
@@ -397,7 +440,10 @@ describe('pr-generator-validator hook', () => {
       });
 
       assert.strictEqual(result.decision, 'block');
-      assert.ok(result.reason.includes('Testing Plan section lacks substantive content'), 'expected to contain: Testing Plan section lacks substantive content');
+      assert.ok(
+        result.reason.includes('Testing Plan section lacks substantive content'),
+        'expected to contain: Testing Plan section lacks substantive content'
+      );
     });
 
     it('should BLOCK Testing Plan with only list markers', async () => {
@@ -413,7 +459,10 @@ describe('pr-generator-validator hook', () => {
       });
 
       assert.strictEqual(result.decision, 'block');
-      assert.ok(result.reason.includes('Testing Plan section lacks substantive content'), 'expected to contain: Testing Plan section lacks substantive content');
+      assert.ok(
+        result.reason.includes('Testing Plan section lacks substantive content'),
+        'expected to contain: Testing Plan section lacks substantive content'
+      );
     });
 
     it('should BLOCK Testing Plan with too little content', async () => {
@@ -426,7 +475,10 @@ describe('pr-generator-validator hook', () => {
       });
 
       assert.strictEqual(result.decision, 'block');
-      assert.ok(result.reason.includes('Testing Plan section lacks substantive content'), 'expected to contain: Testing Plan section lacks substantive content');
+      assert.ok(
+        result.reason.includes('Testing Plan section lacks substantive content'),
+        'expected to contain: Testing Plan section lacks substantive content'
+      );
     });
 
     it('should APPROVE Testing Plan with 30+ chars of content', async () => {
@@ -512,10 +564,19 @@ This is great 🎉
       });
 
       assert.strictEqual(result.decision, 'block');
-      assert.ok(result.reason.includes('Empty section markers'), 'expected to contain: Empty section markers');
+      assert.ok(
+        result.reason.includes('Empty section markers'),
+        'expected to contain: Empty section markers'
+      );
       assert.ok(result.reason.includes('emojis'), 'expected to contain: emojis');
-      assert.ok(result.reason.includes('Wrong checkbox format'), 'expected to contain: Wrong checkbox format');
-      assert.ok(result.reason.includes('Testing Plan section lacks substantive content'), 'expected to contain: Testing Plan section lacks substantive content');
+      assert.ok(
+        result.reason.includes('Wrong checkbox format'),
+        'expected to contain: Wrong checkbox format'
+      );
+      assert.ok(
+        result.reason.includes('Testing Plan section lacks substantive content'),
+        'expected to contain: Testing Plan section lacks substantive content'
+      );
     });
   });
 
@@ -537,7 +598,10 @@ This is great 🎉
       });
 
       assert.strictEqual(code, 2);
-      assert.ok(stderr.includes('PR-GENERATOR VALIDATOR: Failed to parse hook input'), 'expected to contain: PR-GENERATOR VALIDATOR: Failed to parse hook input');
+      assert.ok(
+        stderr.includes('PR-GENERATOR VALIDATOR: Failed to parse hook input'),
+        'expected to contain: PR-GENERATOR VALIDATOR: Failed to parse hook input'
+      );
     });
 
     it('should APPROVE when agent_name is missing', async () => {

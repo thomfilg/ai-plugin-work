@@ -12,7 +12,9 @@
  * If it fails, the agent must stop — not fix anything.
  */
 
-const { logHookError } = require(require('path').join(__dirname, '..', '..', '..', 'lib', 'hook-error-log'));
+const { logHookError } = require(
+  require('path').join(__dirname, '..', '..', '..', 'lib', 'hook-error-log')
+);
 
 // Patterns for commands that modify files
 const FILE_MODIFY_PATTERNS = [
@@ -45,12 +47,12 @@ const FIX_ATTEMPT_PATTERNS = [
 
 // Explicitly allowed commands (quality gate + git/gh)
 const ALLOWED_COMMANDS = [
-  /^\s*pnpm\s+dev:check\b/,  // Quality gate — read-only verification
-  /^\s*(\w+=\S+\s+)*([\w./-]*\/)?dev-check\.sh(\s+[-\w=./]+)*\s*$/,  // Bundled dev-check scripts — plugin fallback (anchored, no shell chaining)
+  /^\s*pnpm\s+dev:check\b/, // Quality gate — read-only verification
+  /^\s*(\w+=\S+\s+)*([\w./-]*\/)?dev-check\.sh(\s+[-\w=./]+)*\s*$/, // Bundled dev-check scripts — plugin fallback (anchored, no shell chaining)
   /^\s*git\b/,
   /^\s*gh\b/,
   /^\s*DEFAULT_BRANCH=/,
-  /^\s*echo\s+"/,  // echo for display only (no redirect)
+  /^\s*echo\s+"/, // echo for display only (no redirect)
 ];
 
 function isAllowedCommand(command) {
@@ -98,7 +100,10 @@ async function main() {
 
   // Only guard pr-generator agent
   const agentName = hookData.agent_name || hookData.subagent_type || '';
-  if (!agentName.toLowerCase().includes('pr-generator') || agentName.toLowerCase().includes('post')) {
+  if (
+    !agentName.toLowerCase().includes('pr-generator') ||
+    agentName.toLowerCase().includes('post')
+  ) {
     process.exit(0);
   }
 
@@ -118,7 +123,9 @@ async function main() {
   // Check for blocked patterns
   const blockReason = isBlockedCommand(command);
   if (blockReason) {
-    process.stderr.write(`PR-GENERATOR READ-ONLY GUARD: ${blockReason}. The pr-generator agent is read-only and cannot modify files or run test/lint/fix commands. Report the issue and return control to the parent agent.\n`);
+    process.stderr.write(
+      `PR-GENERATOR READ-ONLY GUARD: ${blockReason}. The pr-generator agent is read-only and cannot modify files or run test/lint/fix commands. Report the issue and return control to the parent agent.\n`
+    );
     process.exit(2);
   }
 
@@ -126,7 +133,7 @@ async function main() {
   process.exit(0);
 }
 
-main().catch(err => {
+main().catch((err) => {
   logHookError(__filename, err);
   // On error, approve to avoid blocking
   process.exit(0);

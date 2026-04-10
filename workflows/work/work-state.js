@@ -26,14 +26,18 @@ const _cliCommand = require.main === module ? process.argv[2] : null;
 if (require.main === module) {
   process.on('uncaughtException', (err) => {
     if (_cliCommand === 'complete') {
-      process.stderr.write(JSON.stringify({ error: `uncaught exception: ${err?.message || err}` }) + '\n');
+      process.stderr.write(
+        JSON.stringify({ error: `uncaught exception: ${err?.message || err}` }) + '\n'
+      );
       process.exit(1);
     }
     process.exit(0);
   });
   process.on('unhandledRejection', (err) => {
     if (_cliCommand === 'complete') {
-      process.stderr.write(JSON.stringify({ error: `unhandled rejection: ${err?.message || err}` }) + '\n');
+      process.stderr.write(
+        JSON.stringify({ error: `unhandled rejection: ${err?.message || err}` }) + '\n'
+      );
       process.exit(1);
     }
     process.exit(0);
@@ -61,7 +65,7 @@ const SUBTASK_STEPS = ['implement', 'commit'];
 const CHECK_AGENTS = [
   'quality_checker',
   'code_checker',
-  'completion_checker'
+  'completion_checker',
   // QA agents are dynamic based on impacted apps
 ];
 
@@ -115,7 +119,7 @@ function initState(ticketId, description = '') {
   if (existing) return existing;
 
   const stepStatus = {};
-  STEPS.forEach(step => {
+  STEPS.forEach((step) => {
     stepStatus[step] = 'pending';
   });
 
@@ -128,7 +132,7 @@ function initState(ticketId, description = '') {
     checkProgress: {},
     errors: [],
     startTime: new Date().toISOString(),
-    lastUpdate: new Date().toISOString()
+    lastUpdate: new Date().toISOString(),
   };
 
   return saveState(ticketId, state);
@@ -158,11 +162,15 @@ function autoInitTdd(ticketId) {
     if (err && err.code === 'EEXIST') return; // already initialized
     // fail-open: TDD init failure must not block step transition
     if (created) {
-      try { fs.unlinkSync(path.join(TASKS_BASE, safeId(ticketId), 'tdd-phase.json')); } catch {}
+      try {
+        fs.unlinkSync(path.join(TASKS_BASE, safeId(ticketId), 'tdd-phase.json'));
+      } catch {}
     }
   } finally {
     if (fd !== undefined) {
-      try { fs.closeSync(fd); } catch {}
+      try {
+        fs.closeSync(fd);
+      } catch {}
     }
   }
 }
@@ -172,7 +180,10 @@ function autoInitTdd(ticketId) {
  */
 function setStepStatus(ticketId, step, status) {
   if (!STEPS.includes(step)) {
-    return { error: true, message: `Invalid step name: "${step}". Valid steps: ${STEPS.join(', ')}` };
+    return {
+      error: true,
+      message: `Invalid step name: "${step}". Valid steps: ${STEPS.join(', ')}`,
+    };
   }
 
   let state = loadState(ticketId);
@@ -208,7 +219,7 @@ function setCheckProgress(ticketId, agent, status, details = null) {
   state.checkProgress[agent] = {
     status,
     details,
-    lastUpdate: new Date().toISOString()
+    lastUpdate: new Date().toISOString(),
   };
 
   return saveState(ticketId, state);
@@ -226,7 +237,7 @@ function addError(ticketId, step, error) {
   state.errors.push({
     step,
     error,
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
   });
 
   return saveState(ticketId, state);
@@ -250,7 +261,7 @@ function completeWork(ticketId) {
 
   state.status = 'completed';
   state.completedTime = new Date().toISOString();
-  STEPS.forEach(step => {
+  STEPS.forEach((step) => {
     state.stepStatus[step] = 'completed';
   });
 
@@ -300,10 +311,10 @@ function getResumeInfo(ticketId) {
     currentStep: state.currentStep,
     resumeStep,
     resumeStepIndex,
-    completedSteps: STEPS.filter(s => state.stepStatus[s] === 'completed'),
+    completedSteps: STEPS.filter((s) => state.stepStatus[s] === 'completed'),
     incompleteChecks,
     lastError: state.errors.length > 0 ? state.errors[state.errors.length - 1] : null,
-    lastUpdate: state.lastUpdate
+    lastUpdate: state.lastUpdate,
   };
 }
 
@@ -328,25 +339,35 @@ Steps:
 
   STEPS.forEach((step, index) => {
     const status = state.stepStatus[step];
-    const icon = status === 'completed' ? '✅' :
-                 status === 'in_progress' ? '🔄' :
-                 status === 'failed' ? '❌' : '⏳';
+    const icon =
+      status === 'completed'
+        ? '✅'
+        : status === 'in_progress'
+          ? '🔄'
+          : status === 'failed'
+            ? '❌'
+            : '⏳';
     output += `  ${index + 1}. ${icon} ${step}: ${status}\n`;
   });
 
   if (Object.keys(state.checkProgress).length > 0) {
     output += '\nCheck Agents:\n';
     for (const [agent, progress] of Object.entries(state.checkProgress)) {
-      const icon = progress.status === 'completed' ? '✅' :
-                   progress.status === 'in_progress' ? '🔄' :
-                   progress.status === 'failed' ? '❌' : '⏳';
+      const icon =
+        progress.status === 'completed'
+          ? '✅'
+          : progress.status === 'in_progress'
+            ? '🔄'
+            : progress.status === 'failed'
+              ? '❌'
+              : '⏳';
       output += `  ${icon} ${agent}: ${progress.status}\n`;
     }
   }
 
   if (state.errors.length > 0) {
     output += '\nRecent Errors:\n';
-    state.errors.slice(-3).forEach(err => {
+    state.errors.slice(-3).forEach((err) => {
       output += `  - [${err.step}] ${err.error}\n`;
     });
   }
@@ -405,7 +426,7 @@ function initSubtaskState(ticketId, description = '') {
   }
 
   const stepStatus = {};
-  SUBTASK_STEPS.forEach(step => {
+  SUBTASK_STEPS.forEach((step) => {
     stepStatus[step] = 'pending';
   });
 
@@ -495,7 +516,7 @@ function completeSubtask(ticketId, subtaskIndex) {
   state.completedTime = new Date().toISOString();
   state.lastUpdate = new Date().toISOString();
 
-  SUBTASK_STEPS.forEach(step => {
+  SUBTASK_STEPS.forEach((step) => {
     state.stepStatus[step] = 'completed';
   });
 
@@ -606,7 +627,9 @@ function getTaskByIndex(ticketId, taskIndex) {
 
   const idx = parseInt(taskIndex, 10);
   if (isNaN(idx) || idx < 0 || idx >= state.tasksMeta.tasks.length) {
-    return { error: `Invalid task index: ${taskIndex}. Valid range: 0-${state.tasksMeta.tasks.length - 1}` };
+    return {
+      error: `Invalid task index: ${taskIndex}. Valid range: 0-${state.tasksMeta.tasks.length - 1}`,
+    };
   }
 
   return {
@@ -625,7 +648,9 @@ async function main() {
 
   if (!command) {
     console.error('Usage: node work-state.js <command> <ticket-id> [args...]');
-    console.error('Commands: init, get, set-step, set-check, add-error, complete, resume-info, init-subtask, complete-subtask, active-subtask, task-init, task-current, task-advance, task-get');
+    console.error(
+      'Commands: init, get, set-step, set-check, add-error, complete, resume-info, init-subtask, complete-subtask, active-subtask, task-init, task-current, task-advance, task-get'
+    );
     process.exit(1);
   }
 
@@ -739,7 +764,9 @@ async function main() {
 if (require.main === module) {
   main().catch((err) => {
     if (_cliCommand === 'complete') {
-      process.stderr.write(JSON.stringify({ error: `complete failed: ${err?.message || err}` }) + '\n');
+      process.stderr.write(
+        JSON.stringify({ error: `complete failed: ${err?.message || err}` }) + '\n'
+      );
       process.exit(1);
     }
     process.exit(0);
@@ -766,5 +793,5 @@ module.exports = {
   getTaskByIndex,
   STEPS,
   SUBTASK_STEPS,
-  CHECK_AGENTS
+  CHECK_AGENTS,
 };

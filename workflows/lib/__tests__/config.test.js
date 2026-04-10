@@ -6,10 +6,18 @@ const originalEnv = { ...process.env };
 
 // Keys set by config.js that we need to clean between tests
 const CONFIG_KEYS = [
-  'JIRA_PROJECT_KEY', 'JIRA_BASE_URL', 'JIRA_ASSIGNEE_EMAIL',
-  'TICKET_PROVIDER', 'TICKET_PROJECT_KEY',
-  'REPO_NAME', 'GITHUB_ORG', 'WORKTREES_BASE', 'TASKS_BASE',
-  'FOLLOW_UP_PR_POLL_REVIEWS', 'BASE_BRANCH', 'WEB_APPS',
+  'JIRA_PROJECT_KEY',
+  'JIRA_BASE_URL',
+  'JIRA_ASSIGNEE_EMAIL',
+  'TICKET_PROVIDER',
+  'TICKET_PROJECT_KEY',
+  'REPO_NAME',
+  'GITHUB_ORG',
+  'WORKTREES_BASE',
+  'TASKS_BASE',
+  'FOLLOW_UP_PR_POLL_REVIEWS',
+  'BASE_BRANCH',
+  'WEB_APPS',
   'ENABLE_SYMLINK',
 ];
 
@@ -44,7 +52,11 @@ function freshRequire(envOverrides = {}) {
   // Clear module caches
   const resolved = require.resolve('../config');
   delete require.cache[resolved];
-  try { delete require.cache[require.resolve('../ticket-provider')]; } catch { /* */ }
+  try {
+    delete require.cache[require.resolve('../ticket-provider')];
+  } catch {
+    /* */
+  }
 
   // Block .env by pre-setting all keys to defaults
   for (const [key, val] of Object.entries(CONFIG_DEFAULTS)) {
@@ -141,9 +153,7 @@ describe('config', () => {
   describe('webAppsMap', () => {
     it('builds map from valid entries', () => {
       const config = freshRequire({
-        WEB_APPS: JSON.stringify([
-          { name: 'app-a', defaultPort: 3000, type: 'vite' },
-        ]),
+        WEB_APPS: JSON.stringify([{ name: 'app-a', defaultPort: 3000, type: 'vite' }]),
       });
       const map = config.webAppsMap();
       assert.deepEqual(map['app-a'], { defaultPort: 3000, type: 'vite' });
@@ -186,7 +196,6 @@ describe('config', () => {
       const config = freshRequire({ ENABLE_SYMLINK: '1' });
       assert.equal(config.ENABLE_SYMLINK, '1');
     });
-
   });
 
   // ─── getBaseBranch ──────────────────────────────────────────────────────

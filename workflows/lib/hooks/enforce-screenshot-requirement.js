@@ -14,6 +14,7 @@
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { logHookError } = require(path.join(__dirname, '..', 'hook-error-log'));
 
 const MARKER_DIR = '/tmp';
 const IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp']);
@@ -25,7 +26,9 @@ let _cachedRepoRoot = undefined;
 function getRepoRoot() {
   if (_cachedRepoRoot !== undefined) return _cachedRepoRoot;
   try {
-    _cachedRepoRoot = execSync('git rev-parse --show-toplevel 2>/dev/null', { encoding: 'utf8' }).trim();
+    _cachedRepoRoot = execSync('git rev-parse --show-toplevel 2>/dev/null', {
+      encoding: 'utf8',
+    }).trim();
   } catch {
     _cachedRepoRoot = null;
   }
@@ -67,14 +70,18 @@ function resolveBaseRef() {
 
   try {
     execSync('git fetch origin --depth=1 2>/dev/null', { timeout: 15000 });
-  } catch { /* offline or no remote */ }
+  } catch {
+    /* offline or no remote */
+  }
 
   const candidates = ['origin/main', 'origin/HEAD', 'main', 'master'];
   for (const ref of candidates) {
     try {
       execSync(`git rev-parse --verify ${ref} 2>/dev/null`, { encoding: 'utf8', timeout: 5000 });
       return ref;
-    } catch { /* try next */ }
+    } catch {
+      /* try next */
+    }
   }
   return null;
 }
@@ -90,7 +97,9 @@ function hasTsxChanges() {
 
   const baseRef = resolveBaseRef();
   if (!baseRef) {
-    process.stderr.write('warn: screenshot-requirement: could not resolve base ref; skipping TSX check\n');
+    process.stderr.write(
+      'warn: screenshot-requirement: could not resolve base ref; skipping TSX check\n'
+    );
     _cachedTsxChanges = false; // fail open — don't block when git state is unclear
     return false;
   }
@@ -102,19 +111,22 @@ function hasTsxChanges() {
     }
     const diff = execSync(`git diff --name-only ${baseRef}...HEAD -- "*.tsx" "*.jsx" 2>/dev/null`, {
       encoding: 'utf8',
-      timeout: 10000
+      timeout: 10000,
     }).trim();
     if (!diff) {
       _cachedTsxChanges = false;
       return false;
     }
-    _cachedTsxChanges = diff.split('\n').some(f =>
-      !f.includes('.test.') &&
-      !f.includes('.spec.') &&
-      !f.includes('.stories.') &&
-      !f.includes('__tests__') &&
-      !f.includes('.d.ts')
-    );
+    _cachedTsxChanges = diff
+      .split('\n')
+      .some(
+        (f) =>
+          !f.includes('.test.') &&
+          !f.includes('.spec.') &&
+          !f.includes('.stories.') &&
+          !f.includes('__tests__') &&
+          !f.includes('.d.ts')
+      );
     return _cachedTsxChanges;
   } catch {
     process.stderr.write('warn: screenshot-requirement: git diff failed; skipping TSX check\n');
@@ -158,10 +170,12 @@ function blockIfNoScreenshots(hookData) {
   try {
     webApps = JSON.parse(process.env.WEB_APPS || '[]');
   } catch {
-    process.stderr.write('warn: screenshot-requirement: malformed WEB_APPS env var, treating as empty\n');
+    process.stderr.write(
+      'warn: screenshot-requirement: malformed WEB_APPS env var, treating as empty\n'
+    );
   }
   // Align with config.webAppNames() — require at least one entry with a name
-  const hasConfiguredWebApps = Array.isArray(webApps) && webApps.some(app => app && app.name);
+  const hasConfiguredWebApps = Array.isArray(webApps) && webApps.some((app) => app && app.name);
   if (!hasConfiguredWebApps) return;
   if (fs.existsSync(skipMarkerPath(ticketId))) return;
   if (!hasTsxChanges()) return;
@@ -173,29 +187,27 @@ function blockIfNoScreenshots(hookData) {
   const subagentType = hookData.tool_input?.subagent_type || '';
   const normalizedSubagentType = subagentType.replace(/^work-workflow:/, '');
 
-  const isQaAgent = toolName === 'Task' && (
-    normalizedSubagentType === 'qa-feature-tester' ||
-    normalizedSubagentType === 'pr-generator' ||
-    normalizedSubagentType === 'pr-post-generator' ||
-    /screenshot|qa.*report/i.test(prompt)
-  );
+  const isQaAgent =
+    toolName === 'Task' &&
+    (normalizedSubagentType === 'qa-feature-tester' ||
+      normalizedSubagentType === 'pr-generator' ||
+      normalizedSubagentType === 'pr-post-generator' ||
+      /screenshot|qa.*report/i.test(prompt));
 
-  const isCompletingSkill = toolName === 'Skill' && (
-    /work-pr|check-qa|check-browser/i.test(skill)
-  );
+  const isCompletingSkill = toolName === 'Skill' && /work-pr|check-qa|check-browser/i.test(skill);
 
   if (!isQaAgent && !isCompletingSkill) return;
 
   const screenshotDir = getScreenshotDir(ticketId);
   process.stderr.write(
     'BLOCKED: TSX/JSX files changed but NO screenshots found in ' +
-    `${screenshotDir}/. ` +
-    'You MUST capture screenshots before completing QA or creating a PR. ' +
-    'Call AskUserQuestion with options: ' +
-    '"Capture screenshots now" (use Playwright to take screenshots) | ' +
-    '"Skip screenshots" (continue without, mark as SKIPPED) | ' +
-    '"Abort" (stop workflow). ' +
-    'Do NOT proceed without user input.\n'
+      `${screenshotDir}/. ` +
+      'You MUST capture screenshots before completing QA or creating a PR. ' +
+      'Call AskUserQuestion with options: ' +
+      '"Capture screenshots now" (use Playwright to take screenshots) | ' +
+      '"Skip screenshots" (continue without, mark as SKIPPED) | ' +
+      '"Abort" (stop workflow). ' +
+      'Do NOT proceed without user input.\n'
   );
   process.exit(2);
 }
@@ -211,10 +223,13 @@ function unblockAfterChoice(hookData) {
 
   const choseSkip = /skip/i.test(outputStr) && /screenshot/i.test(outputStr);
   if (choseSkip) {
-    fs.writeFileSync(skipMarkerPath(ticketId), JSON.stringify({
-      ticketId,
-      timestamp: new Date().toISOString()
-    }));
+    fs.writeFileSync(
+      skipMarkerPath(ticketId),
+      JSON.stringify({
+        ticketId,
+        timestamp: new Date().toISOString(),
+      })
+    );
     process.stderr.write('Skip-screenshots marker written. Workflow unblocked.\n');
   }
 }
@@ -236,4 +251,6 @@ async function main() {
   }
 }
 
-main().catch(() => {});
+main().catch((err) => {
+  logHookError(__filename, err);
+});

@@ -22,11 +22,21 @@ let GIT_ROOT;
 function runHook(input) {
   return new Promise((resolve, reject) => {
     const proc = spawn('node', [HOOK_PATH], { stdio: ['pipe', 'pipe', 'pipe'] });
-    let stdout = '', stderr = '';
-    proc.stdout.on('data', (d) => { stdout += d.toString(); });
-    proc.stderr.on('data', (d) => { stderr += d.toString(); });
+    let stdout = '',
+      stderr = '';
+    proc.stdout.on('data', (d) => {
+      stdout += d.toString();
+    });
+    proc.stderr.on('data', (d) => {
+      stderr += d.toString();
+    });
     proc.on('close', (code) => {
-      resolve({ result: { decision: code === 2 ? 'block' : 'approve', reason: stderr.trim() || undefined }, stderr, code, stdout });
+      resolve({
+        result: { decision: code === 2 ? 'block' : 'approve', reason: stderr.trim() || undefined },
+        stderr,
+        code,
+        stdout,
+      });
     });
     proc.on('error', reject);
     proc.stdin.write(JSON.stringify(input));
@@ -34,7 +44,9 @@ function runHook(input) {
   });
 }
 
-describe('enforce-ui-imports hook', { skip: !HOOK_EXISTS && 'hook not present in this repo' }, () => {
+describe('enforce-ui-imports hook', {
+  skip: !HOOK_EXISTS && 'hook not present in this repo',
+}, () => {
   before(() => {
     GIT_ROOT = path.join(os.tmpdir(), `test-ui-imports-${process.pid}-${Date.now()}`);
     fs.mkdirSync(path.join(GIT_ROOT, '.git'), { recursive: true });
@@ -51,14 +63,17 @@ describe('enforce-ui-imports hook', { skip: !HOOK_EXISTS && 'hook not present in
   });
 
   it('should APPROVE non-Write/Edit tools', async () => {
-    const { result } = await runHook({ tool_name: 'Read', tool_input: { file_path: '/some/file.tsx' } });
+    const { result } = await runHook({
+      tool_name: 'Read',
+      tool_input: { file_path: '/some/file.tsx' },
+    });
     assert.strictEqual(result.decision, 'approve');
   });
 
   it('should APPROVE non-React files', async () => {
     const { result } = await runHook({
       tool_name: 'Write',
-      tool_input: { file_path: `${GIT_ROOT}/apps/status-site/config.json`, content: '{}' }
+      tool_input: { file_path: `${GIT_ROOT}/apps/status-site/config.json`, content: '{}' },
     });
     assert.strictEqual(result.decision, 'approve');
   });
@@ -68,8 +83,8 @@ describe('enforce-ui-imports hook', { skip: !HOOK_EXISTS && 'hook not present in
       tool_name: 'Write',
       tool_input: {
         file_path: `${GIT_ROOT}/packages/ui/src/Button.tsx`,
-        content: 'import { Button } from "@mui/material";'
-      }
+        content: 'import { Button } from "@mui/material";',
+      },
     });
     assert.strictEqual(result.decision, 'approve');
   });
@@ -79,8 +94,8 @@ describe('enforce-ui-imports hook', { skip: !HOOK_EXISTS && 'hook not present in
       tool_name: 'Write',
       tool_input: {
         file_path: `${GIT_ROOT}/apps/as-dashboard-worker/src/component.tsx`,
-        content: 'import { Box, Stack, styled } from "@mui/material";'
-      }
+        content: 'import { Box, Stack, styled } from "@mui/material";',
+      },
     });
     assert.strictEqual(result.decision, 'approve');
   });
@@ -90,8 +105,8 @@ describe('enforce-ui-imports hook', { skip: !HOOK_EXISTS && 'hook not present in
       tool_name: 'Write',
       tool_input: {
         file_path: `${GIT_ROOT}/apps/as-dashboard-worker/src/component.tsx`,
-        content: 'import { Button, Card } from "@mui/material";'
-      }
+        content: 'import { Button, Card } from "@mui/material";',
+      },
     });
     assert.strictEqual(result.decision, 'block');
     assert.ok(result.reason.includes('FORBIDDEN UI FRAMEWORK IMPORTS'));
@@ -102,8 +117,8 @@ describe('enforce-ui-imports hook', { skip: !HOOK_EXISTS && 'hook not present in
       tool_name: 'Write',
       tool_input: {
         file_path: `${GIT_ROOT}/apps/as-dashboard-worker/src/component.tsx`,
-        content: 'import type { SxProps } from "@mui/material";'
-      }
+        content: 'import type { SxProps } from "@mui/material";',
+      },
     });
     assert.strictEqual(result.decision, 'approve');
   });
@@ -113,8 +128,8 @@ describe('enforce-ui-imports hook', { skip: !HOOK_EXISTS && 'hook not present in
       tool_name: 'Edit',
       tool_input: {
         file_path: `${GIT_ROOT}/apps/as-dashboard-worker/src/component.tsx`,
-        new_string: 'import { Box } from "@mui/material";'
-      }
+        new_string: 'import { Box } from "@mui/material";',
+      },
     });
     assert.strictEqual(result.decision, 'approve');
   });
@@ -124,8 +139,8 @@ describe('enforce-ui-imports hook', { skip: !HOOK_EXISTS && 'hook not present in
       tool_name: 'Write',
       tool_input: {
         file_path: `${GIT_ROOT}/packages/shared-ui/src/Header.tsx`,
-        content: 'import { AppBar, Toolbar, IconButton } from "@mui/material";'
-      }
+        content: 'import { AppBar, Toolbar, IconButton } from "@mui/material";',
+      },
     });
     assert.strictEqual(result.decision, 'approve');
   });

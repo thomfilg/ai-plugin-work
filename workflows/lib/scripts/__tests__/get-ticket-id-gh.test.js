@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const originalEnv = { ...process.env };
 
 function resetEnv() {
-  Object.keys(process.env).forEach(key => {
+  Object.keys(process.env).forEach((key) => {
     if (key.startsWith('TICKET_') || key.startsWith('JIRA_') || key.startsWith('LINEAR_')) {
       delete process.env[key];
     }
@@ -23,8 +23,12 @@ function freshRequire(mod) {
 }
 
 describe('get-ticket-id GH-pattern support', () => {
-  beforeEach(() => { resetEnv(); });
-  after(() => { Object.assign(process.env, originalEnv); });
+  beforeEach(() => {
+    resetEnv();
+  });
+  after(() => {
+    Object.assign(process.env, originalEnv);
+  });
 
   it('extracts GH-56 from worktree path as GH-56', () => {
     process.env.TICKET_PROVIDER = 'github';

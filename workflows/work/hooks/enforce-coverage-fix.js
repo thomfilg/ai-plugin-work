@@ -12,15 +12,27 @@
  */
 
 const fs = require('fs');
+const path = require('path');
+const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
 
-process.on('uncaughtException', () => process.exit(0));
-process.on('unhandledRejection', () => process.exit(0));
+process.on('uncaughtException', (err) => {
+  logHookError(__filename, err);
+  process.exit(0);
+});
+process.on('unhandledRejection', (err) => {
+  logHookError(__filename, err);
+  process.exit(0);
+});
 
 let config;
 try {
   config = require('../../lib/config');
 } catch (err) {
-  if (err && err.code === 'MODULE_NOT_FOUND' && /['"]\.\.\/\.\.\/lib\/config['"]/.test(err.message)) {
+  if (
+    err &&
+    err.code === 'MODULE_NOT_FOUND' &&
+    /['"]\.\.\/\.\.\/lib\/config['"]/.test(err.message)
+  ) {
     config = null;
   } else {
     throw err;
@@ -62,7 +74,7 @@ async function main() {
   const command = hookData.tool_input?.command || '';
 
   // Only trigger on CI-checking commands
-  const isCICheck = CI_CHECK_COMMANDS.some(p => p.test(command));
+  const isCICheck = CI_CHECK_COMMANDS.some((p) => p.test(command));
   if (!isCICheck) {
     return;
   }
@@ -85,9 +97,8 @@ async function main() {
         const entry = JSON.parse(line);
         // tool_result entries contain the output
         if (entry.type === 'tool_result' || entry.content) {
-          const text = typeof entry.content === 'string'
-            ? entry.content
-            : JSON.stringify(entry.content || '');
+          const text =
+            typeof entry.content === 'string' ? entry.content : JSON.stringify(entry.content || '');
           output += text + '\n';
         }
       } catch {
@@ -99,7 +110,7 @@ async function main() {
   }
 
   // Check if output contains coverage failure patterns
-  const hasCoverageFailure = COVERAGE_FAILURE_PATTERNS.some(p => p.test(output));
+  const hasCoverageFailure = COVERAGE_FAILURE_PATTERNS.some((p) => p.test(output));
 
   if (hasCoverageFailure) {
     // Determine ticket ID from branch
@@ -109,7 +120,9 @@ async function main() {
       const branch = execSync('git branch --show-current', { encoding: 'utf8' }).trim();
       const match = branch.match(new RegExp(config.TICKET_PROJECT_KEY + '-\\d+', 'i'));
       if (match) ticketId = match[0].toUpperCase();
-    } catch { /* */ }
+    } catch {
+      /* */
+    }
 
     console.log(`🛑 COVERAGE FAILURE DETECTED IN CI OUTPUT
 
@@ -129,4 +142,7 @@ Per /follow-up-pr section 4.3: ANY coverage-related CI failure → /test-coordin
   }
 }
 
-main().catch(() => process.exit(0));
+main().catch((err) => {
+  logHookError(__filename, err);
+  process.exit(0);
+});

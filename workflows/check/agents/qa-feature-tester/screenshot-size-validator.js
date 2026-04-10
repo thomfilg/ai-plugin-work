@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { logHookError } = require(path.join(__dirname, '..', '..', '..', 'lib', 'hook-error-log'));
 
 /**
  * PostToolUse hook: Validates screenshot file sizes after capture.
@@ -90,6 +91,7 @@ async function main() {
   console.log(JSON.stringify({}));
 }
 
-main().catch(() => {
+main().catch((err) => {
+  logHookError(__filename, err);
   console.log(JSON.stringify({}));
 });

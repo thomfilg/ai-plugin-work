@@ -19,18 +19,40 @@ const path = require('path');
 const ROOT = path.join(__dirname, '..', '..', '..');
 
 const FILES = [
-  { path: 'package.json', get: (j) => j.version, set: (j, v) => { j.version = v; } },
-  { path: '.claude-plugin/plugin.json', get: (j) => j.version, set: (j, v) => { j.version = v; } },
-  { path: '.claude-plugin/marketplace.json', get: (j) => j.metadata?.version, set: (j, v) => { j.metadata.version = v; } },
+  {
+    path: 'package.json',
+    get: (j) => j.version,
+    set: (j, v) => {
+      j.version = v;
+    },
+  },
+  {
+    path: '.claude-plugin/plugin.json',
+    get: (j) => j.version,
+    set: (j, v) => {
+      j.version = v;
+    },
+  },
+  {
+    path: '.claude-plugin/marketplace.json',
+    get: (j) => j.metadata?.version,
+    set: (j, v) => {
+      j.metadata.version = v;
+    },
+  },
 ];
 
 function bumpSemver(current, type) {
   const [major, minor, patch] = current.split('.').map(Number);
   switch (type) {
-    case 'major': return `${major + 1}.0.0`;
-    case 'minor': return `${major}.${minor + 1}.0`;
-    case 'patch': return `${major}.${minor}.${patch + 1}`;
-    default: return null;
+    case 'major':
+      return `${major + 1}.0.0`;
+    case 'minor':
+      return `${major}.${minor + 1}.0`;
+    case 'patch':
+      return `${major}.${minor}.${patch + 1}`;
+    default:
+      return null;
   }
 }
 

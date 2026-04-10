@@ -23,8 +23,8 @@ describe('work-pr.workflow.js', () => {
     });
 
     it('should define transitions for all steps', () => {
-      const stepIds = wf.steps.map(s => s.id);
-      const transitionSources = wf.transitions.map(t => t.source);
+      const stepIds = wf.steps.map((s) => s.id);
+      const transitionSources = wf.transitions.map((t) => t.source);
       for (const id of stepIds) {
         assert.ok(transitionSources.includes(id), `Missing transition for ${id}`);
       }
@@ -32,60 +32,60 @@ describe('work-pr.workflow.js', () => {
 
     // 2_setup edges
     it('2_setup → 3_pr_gen (happy path)', () => {
-      const t = wf.transitions.find(t => t.source === '2_setup');
+      const t = wf.transitions.find((t) => t.source === '2_setup');
       assert.ok(t.targets.includes('3_pr_gen'));
     });
 
     it('2_setup → 4_screenshot_gate (pr_gen SKIP, screenshot gate RUN)', () => {
-      const t = wf.transitions.find(t => t.source === '2_setup');
+      const t = wf.transitions.find((t) => t.source === '2_setup');
       assert.ok(t.targets.includes('4_screenshot_gate'));
     });
 
     it('2_setup → 5_post_pr_gen (pr_gen SKIP, post_pr_gen RUN)', () => {
-      const t = wf.transitions.find(t => t.source === '2_setup');
+      const t = wf.transitions.find((t) => t.source === '2_setup');
       assert.ok(t.targets.includes('5_post_pr_gen'));
     });
 
     it('2_setup → 6_summary (all SKIP)', () => {
-      const t = wf.transitions.find(t => t.source === '2_setup');
+      const t = wf.transitions.find((t) => t.source === '2_setup');
       assert.ok(t.targets.includes('6_summary'));
     });
 
     // 3_pr_gen edges
     it('3_pr_gen → 4_screenshot_gate (happy path)', () => {
-      const t = wf.transitions.find(t => t.source === '3_pr_gen');
+      const t = wf.transitions.find((t) => t.source === '3_pr_gen');
       assert.ok(t.targets.includes('4_screenshot_gate'));
     });
 
     it('3_pr_gen → 5_post_pr_gen (screenshot_gate SKIP)', () => {
-      const t = wf.transitions.find(t => t.source === '3_pr_gen');
+      const t = wf.transitions.find((t) => t.source === '3_pr_gen');
       assert.ok(t.targets.includes('5_post_pr_gen'));
     });
 
     it('3_pr_gen → 6_summary (screenshot_gate + post_pr_gen both SKIP)', () => {
-      const t = wf.transitions.find(t => t.source === '3_pr_gen');
+      const t = wf.transitions.find((t) => t.source === '3_pr_gen');
       assert.ok(t.targets.includes('6_summary'));
     });
 
     // 4_screenshot_gate edges
     it('4_screenshot_gate → 5_post_pr_gen (forward)', () => {
-      const t = wf.transitions.find(t => t.source === '4_screenshot_gate');
+      const t = wf.transitions.find((t) => t.source === '4_screenshot_gate');
       assert.ok(t.targets.includes('5_post_pr_gen'));
     });
 
     it('4_screenshot_gate → 3_pr_gen (backward retry)', () => {
-      const t = wf.transitions.find(t => t.source === '4_screenshot_gate');
+      const t = wf.transitions.find((t) => t.source === '4_screenshot_gate');
       assert.ok(t.targets.includes('3_pr_gen'));
     });
 
     it('4_screenshot_gate → 6_summary (post_pr_gen SKIP)', () => {
-      const t = wf.transitions.find(t => t.source === '4_screenshot_gate');
+      const t = wf.transitions.find((t) => t.source === '4_screenshot_gate');
       assert.ok(t.targets.includes('6_summary'));
     });
 
     // Terminal
     it('6_summary is terminal', () => {
-      const t = wf.transitions.find(t => t.source === '6_summary');
+      const t = wf.transitions.find((t) => t.source === '6_summary');
       assert.deepEqual(t.targets, []);
     });
   });
@@ -106,7 +106,7 @@ describe('work-pr.workflow.js', () => {
         if (current === to) return true;
         if (visited.has(current)) continue;
         visited.add(current);
-        for (const next of (transitionMap[current] || [])) {
+        for (const next of transitionMap[current] || []) {
           queue.push(next);
         }
       }
@@ -228,32 +228,47 @@ describe('work-pr.workflow.js', () => {
 
     it('3_pr_gen: SKIP when compound key matches', () => {
       const key = 'abc12345|none';
-      const r = wf.detectStepState('3_pr_gen', 'X-1', null, makeInspect({
-        prKey: key,
-        lastPrSha: key,
-        prUpToDate: true,
-      }));
+      const r = wf.detectStepState(
+        '3_pr_gen',
+        'X-1',
+        null,
+        makeInspect({
+          prKey: key,
+          lastPrSha: key,
+          prUpToDate: true,
+        })
+      );
       assert.equal(r.action, 'SKIP');
       assert.match(r.reason, /Compound key matches/);
     });
 
     it('3_pr_gen: RUN when compound key changed', () => {
-      const r = wf.detectStepState('3_pr_gen', 'X-1', null, makeInspect({
-        prKey: 'newsha|none',
-        lastPrSha: 'oldsha|none',
-        prUpToDate: false,
-      }));
+      const r = wf.detectStepState(
+        '3_pr_gen',
+        'X-1',
+        null,
+        makeInspect({
+          prKey: 'newsha|none',
+          lastPrSha: 'oldsha|none',
+          prUpToDate: false,
+        })
+      );
       assert.equal(r.action, 'RUN');
       assert.match(r.reason, /Key changed/);
     });
 
     it('3_pr_gen: RUN with force even when up-to-date', () => {
       const key = 'abc|none';
-      const r = wf.detectStepState('3_pr_gen', 'X-1', { force: true }, makeInspect({
-        prKey: key,
-        lastPrSha: key,
-        prUpToDate: true,
-      }));
+      const r = wf.detectStepState(
+        '3_pr_gen',
+        'X-1',
+        { force: true },
+        makeInspect({
+          prKey: key,
+          lastPrSha: key,
+          prUpToDate: true,
+        })
+      );
       assert.equal(r.action, 'RUN');
       assert.match(r.reason, /Force mode/);
     });
@@ -263,9 +278,14 @@ describe('work-pr.workflow.js', () => {
       const orig = process.env.REBASE_GUARD_THRESHOLD;
       process.env.REBASE_GUARD_THRESHOLD = '0';
       try {
-        const r = wf.detectStepState('3_pr_gen', 'X-1', null, makeInspect({
-          commitsBehindMain: 5,
-        }));
+        const r = wf.detectStepState(
+          '3_pr_gen',
+          'X-1',
+          null,
+          makeInspect({
+            commitsBehindMain: 5,
+          })
+        );
         assert.equal(r.action, 'BLOCKED');
         assert.match(r.reason, /behind/);
       } finally {
@@ -278,9 +298,14 @@ describe('work-pr.workflow.js', () => {
       const orig = process.env.REBASE_GUARD_THRESHOLD;
       process.env.REBASE_GUARD_THRESHOLD = '0';
       try {
-        const r = wf.detectStepState('3_pr_gen', 'X-1', null, makeInspect({
-          commitsBehindMain: 0,
-        }));
+        const r = wf.detectStepState(
+          '3_pr_gen',
+          'X-1',
+          null,
+          makeInspect({
+            commitsBehindMain: 0,
+          })
+        );
         assert.notEqual(r.action, 'BLOCKED');
       } finally {
         if (orig === undefined) delete process.env.REBASE_GUARD_THRESHOLD;
@@ -289,94 +314,139 @@ describe('work-pr.workflow.js', () => {
     });
 
     it('3_pr_gen: compound key includes screenshot hash', () => {
-      const r = wf.detectStepState('3_pr_gen', 'X-1', null, makeInspect({
-        headSha: 'aaa',
-        screenshotHash: 'bbb',
-        prKey: 'aaa|bbb',
-        lastPrSha: 'aaa|none',
-        prUpToDate: false,
-      }));
+      const r = wf.detectStepState(
+        '3_pr_gen',
+        'X-1',
+        null,
+        makeInspect({
+          headSha: 'aaa',
+          screenshotHash: 'bbb',
+          prKey: 'aaa|bbb',
+          lastPrSha: 'aaa|none',
+          prUpToDate: false,
+        })
+      );
       assert.equal(r.action, 'RUN');
       assert.match(r.reason, /Key changed/);
     });
 
     // 4_screenshot_gate — no force bypass (B4)
     it('4_screenshot_gate: SKIP when no TSX changes', () => {
-      const r = wf.detectStepState('4_screenshot_gate', 'X-1', null, makeInspect({
-        hasTsxChanges: false,
-      }));
+      const r = wf.detectStepState(
+        '4_screenshot_gate',
+        'X-1',
+        null,
+        makeInspect({
+          hasTsxChanges: false,
+        })
+      );
       assert.equal(r.action, 'SKIP');
       assert.match(r.reason, /No TSX/);
     });
 
     it('4_screenshot_gate: SKIP when screenshots exist', () => {
-      const r = wf.detectStepState('4_screenshot_gate', 'X-1', null, makeInspect({
-        hasTsxChanges: true,
-        screenshotsExist: true,
-        screenshotCount: 3,
-      }));
+      const r = wf.detectStepState(
+        '4_screenshot_gate',
+        'X-1',
+        null,
+        makeInspect({
+          hasTsxChanges: true,
+          screenshotsExist: true,
+          screenshotCount: 3,
+        })
+      );
       assert.equal(r.action, 'SKIP');
       assert.match(r.reason, /3 screenshot/);
     });
 
     it('4_screenshot_gate: RUN when TSX changed but no screenshots', () => {
-      const r = wf.detectStepState('4_screenshot_gate', 'X-1', null, makeInspect({
-        hasTsxChanges: true,
-        screenshotsExist: false,
-        screenshotCount: 0,
-      }));
+      const r = wf.detectStepState(
+        '4_screenshot_gate',
+        'X-1',
+        null,
+        makeInspect({
+          hasTsxChanges: true,
+          screenshotsExist: false,
+          screenshotCount: 0,
+        })
+      );
       assert.equal(r.action, 'RUN');
       assert.match(r.reason, /gate required/);
     });
 
     it('4_screenshot_gate: NO force bypass — still RUN with force when gate needed', () => {
-      const r = wf.detectStepState('4_screenshot_gate', 'X-1', { force: true }, makeInspect({
-        hasTsxChanges: true,
-        screenshotsExist: false,
-        screenshotCount: 0,
-      }));
+      const r = wf.detectStepState(
+        '4_screenshot_gate',
+        'X-1',
+        { force: true },
+        makeInspect({
+          hasTsxChanges: true,
+          screenshotsExist: false,
+          screenshotCount: 0,
+        })
+      );
       assert.equal(r.action, 'RUN', 'Force should NOT bypass screenshot gate');
     });
 
     // 5_post_pr_gen
     it('5_post_pr_gen: SKIP when no content (empty SHA)', () => {
-      const r = wf.detectStepState('5_post_pr_gen', 'X-1', null, makeInspect({
-        hasContent: false,
-        contentSha: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-      }));
+      const r = wf.detectStepState(
+        '5_post_pr_gen',
+        'X-1',
+        null,
+        makeInspect({
+          hasContent: false,
+          contentSha: 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+        })
+      );
       assert.equal(r.action, 'SKIP');
       assert.match(r.reason, /No content/);
     });
 
     it('5_post_pr_gen: SKIP when content SHA matches', () => {
-      const r = wf.detectStepState('5_post_pr_gen', 'X-1', null, makeInspect({
-        hasContent: true,
-        contentSha: 'abc123',
-        lastPostPrSha: 'abc123',
-        postPrUpToDate: true,
-      }));
+      const r = wf.detectStepState(
+        '5_post_pr_gen',
+        'X-1',
+        null,
+        makeInspect({
+          hasContent: true,
+          contentSha: 'abc123',
+          lastPostPrSha: 'abc123',
+          postPrUpToDate: true,
+        })
+      );
       assert.equal(r.action, 'SKIP');
       assert.match(r.reason, /Content SHA matches/);
     });
 
     it('5_post_pr_gen: RUN when content changed', () => {
-      const r = wf.detectStepState('5_post_pr_gen', 'X-1', null, makeInspect({
-        hasContent: true,
-        contentSha: 'new123',
-        lastPostPrSha: 'old456',
-        postPrUpToDate: false,
-      }));
+      const r = wf.detectStepState(
+        '5_post_pr_gen',
+        'X-1',
+        null,
+        makeInspect({
+          hasContent: true,
+          contentSha: 'new123',
+          lastPostPrSha: 'old456',
+          postPrUpToDate: false,
+        })
+      );
       assert.equal(r.action, 'RUN');
       assert.match(r.reason, /Content changed/);
     });
 
     it('5_post_pr_gen: RUN with force even when up-to-date', () => {
-      const r = wf.detectStepState('5_post_pr_gen', 'X-1', { force: true }, makeInspect({
-        hasContent: true,
-        contentSha: 'abc',
-        lastPostPrSha: 'abc',
-        postPrUpToDate: true,
-      }));
+      const r = wf.detectStepState(
+        '5_post_pr_gen',
+        'X-1',
+        { force: true },
+        makeInspect({
+          hasContent: true,
+          contentSha: 'abc',
+          lastPostPrSha: 'abc',
+          postPrUpToDate: true,
+        })
+      );
       assert.equal(r.action, 'RUN');
       assert.match(r.reason, /Force mode/);
     });
@@ -426,8 +496,14 @@ describe('work-pr.workflow.js', () => {
       const fakeTasks = path.join(tmpDir, 'TEST-SHA');
       fs.mkdirSync(fakeWorktree, { recursive: true });
       fs.mkdirSync(fakeTasks, { recursive: true });
-      execSync('git init && git config user.email "test@test.com" && git config user.name "Test" && git commit --allow-empty -m "init"', { cwd: fakeWorktree, stdio: 'pipe' });
-      const expectedSha = execSync('git rev-parse HEAD', { cwd: fakeWorktree, encoding: 'utf8' }).trim(); // git user configured above
+      execSync(
+        'git init && git config user.email "test@test.com" && git config user.name "Test" && git commit --allow-empty -m "init"',
+        { cwd: fakeWorktree, stdio: 'pipe' }
+      );
+      const expectedSha = execSync('git rev-parse HEAD', {
+        cwd: fakeWorktree,
+        encoding: 'utf8',
+      }).trim(); // git user configured above
 
       // Override module-level constants via env vars
       // Note: getConfig caches values, so we need to work with the module's existing resolution.
@@ -454,7 +530,10 @@ describe('work-pr.workflow.js', () => {
         const shaFile = path.join(fakeTasks, '.pr-update-sha');
         assert.ok(fs.existsSync(shaFile), '.pr-update-sha should be written');
         const content = fs.readFileSync(shaFile, 'utf8').trim();
-        assert.ok(content.startsWith(expectedSha), `Should start with HEAD SHA ${expectedSha.slice(0,8)}, got: ${content.slice(0,8)}`);
+        assert.ok(
+          content.startsWith(expectedSha),
+          `Should start with HEAD SHA ${expectedSha.slice(0, 8)}, got: ${content.slice(0, 8)}`
+        );
         assert.ok(content.includes('|'), 'Should contain pipe separator for compound key');
       } finally {
         // Restore env and clear cache
@@ -470,7 +549,7 @@ describe('work-pr.workflow.js', () => {
     });
 
     it('does not throw for any step combination', () => {
-      const steps = wf.steps.map(s => s.id);
+      const steps = wf.steps.map((s) => s.id);
       for (const from of steps) {
         for (const to of steps) {
           assert.doesNotThrow(() => {
@@ -514,7 +593,9 @@ describe('work-pr.workflow.js', () => {
     const tmpBase = path.join(os.tmpdir(), 'screenshot-hash-test-' + process.pid);
 
     after(() => {
-      try { fs.rmSync(tmpBase, { recursive: true, force: true }); } catch {}
+      try {
+        fs.rmSync(tmpBase, { recursive: true, force: true });
+      } catch {}
     });
 
     // Access internal function via test-only export

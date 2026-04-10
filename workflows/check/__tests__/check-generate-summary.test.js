@@ -48,8 +48,11 @@ describe('getReportStatus', () => {
     ].join('\n');
 
     const result = getReportStatus(content, 'tests');
-    assert.equal(result.status, 'APPROVED',
-      'Should not match "failed" in test names when ✅ PASS is present');
+    assert.equal(
+      result.status,
+      'APPROVED',
+      'Should not match "failed" in test names when ✅ PASS is present'
+    );
   });
 
   it('returns APPROVED when "FAILED" appears in QA scenario names but SUCCESS is present (GH-80)', () => {
@@ -64,8 +67,11 @@ describe('getReportStatus', () => {
     ].join('\n');
 
     const result = getReportStatus(content, 'qa');
-    assert.equal(result.status, 'APPROVED',
-      'Should not match "FAILED" in scenario names when SUCCESS is present');
+    assert.equal(
+      result.status,
+      'APPROVED',
+      'Should not match "FAILED" in scenario names when SUCCESS is present'
+    );
   });
 
   // ── fail 0 should NOT trigger NEEDS_WORK ─────────────────────────────────
@@ -74,8 +80,7 @@ describe('getReportStatus', () => {
     const content = 'Tests complete\nfail 0\npass 10';
     const result = getReportStatus(content, 'tests');
     // fail 0 should not match the fail pattern; no pass marker either → UNKNOWN
-    assert.notEqual(result.status, 'NEEDS_WORK',
-      '"fail 0" must not trigger NEEDS_WORK');
+    assert.notEqual(result.status, 'NEEDS_WORK', '"fail 0" must not trigger NEEDS_WORK');
   });
 
   // ── QA "Failed: 0" / "Failures: 0" should NOT trigger NEEDS_WORK ────────
@@ -83,29 +88,33 @@ describe('getReportStatus', () => {
   it('does not trigger NEEDS_WORK for QA "Failed: 0" summary line', () => {
     const content = '## QA Report\nSUCCESS\n- Passed: 5\n- Failed: 0\n- Skipped: 0';
     const result = getReportStatus(content, 'qa');
-    assert.equal(result.status, 'APPROVED',
-      '"Failed: 0" in QA summary must not trigger NEEDS_WORK');
+    assert.equal(
+      result.status,
+      'APPROVED',
+      '"Failed: 0" in QA summary must not trigger NEEDS_WORK'
+    );
   });
 
   it('does not trigger NEEDS_WORK for QA "failures: 0"', () => {
     const content = 'QA complete\nfailures: 0\npasses: 10';
     const result = getReportStatus(content, 'qa');
-    assert.notEqual(result.status, 'NEEDS_WORK',
-      '"failures: 0" must not trigger NEEDS_WORK');
+    assert.notEqual(result.status, 'NEEDS_WORK', '"failures: 0" must not trigger NEEDS_WORK');
   });
 
   it('triggers NEEDS_WORK for QA "Failed: 3"', () => {
     const content = '## QA Report\n- Passed: 2\n- Failed: 3';
     const result = getReportStatus(content, 'qa');
-    assert.equal(result.status, 'NEEDS_WORK',
-      '"Failed: 3" should trigger NEEDS_WORK');
+    assert.equal(result.status, 'NEEDS_WORK', '"Failed: 3" should trigger NEEDS_WORK');
   });
 
   it('triggers NEEDS_WORK for QA "Status: FAIL" (matches check-validate-reports.js)', () => {
     const content = '## QA Report\nStatus: FAIL\nSome tests failed';
     const result = getReportStatus(content, 'qa');
-    assert.equal(result.status, 'NEEDS_WORK',
-      '"Status: FAIL" should trigger NEEDS_WORK to align with validator');
+    assert.equal(
+      result.status,
+      'NEEDS_WORK',
+      '"Status: FAIL" should trigger NEEDS_WORK to align with validator'
+    );
   });
 
   // ── Null and empty content ───────────────────────────────────────────────
@@ -139,7 +148,10 @@ describe('getReportStatus', () => {
   it('returns NEEDS_WORK when both pass and fail markers are present (fail-first)', () => {
     const content = '✅ PASS\n❌ FAIL\nSome mixed signals';
     const result = getReportStatus(content, 'tests');
-    assert.equal(result.status, 'NEEDS_WORK',
-      'Fail markers should take precedence over pass markers to avoid false negatives');
+    assert.equal(
+      result.status,
+      'NEEDS_WORK',
+      'Fail markers should take precedence over pass markers to avoid false negatives'
+    );
   });
 });

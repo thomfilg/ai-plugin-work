@@ -202,7 +202,8 @@ describe('pr-review-validator hook', () => {
       const { result } = await runHook({
         agent_name: 'pr-reviewer',
         agent_output: createReview({
-          criticalIssues: '- Missing Vault validation in config.ts:23\n- Skipped test handling bug in runner.ts:45',
+          criticalIssues:
+            '- Missing Vault validation in config.ts:23\n- Skipped test handling bug in runner.ts:45',
           recommendation: '✅ APPROVE',
           recommendationReason: 'Looks good overall.',
         }),

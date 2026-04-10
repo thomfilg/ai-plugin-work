@@ -21,9 +21,17 @@
 
 // Allowed git subcommands that are purely read-only and require no further scrutiny
 const ALLOWED_GIT_READ = new Set([
-  'diff', 'status', 'log', 'show', 'rev-parse',
-  'ls-files', 'cat-file', 'describe',
-  'shortlog', 'name-rev', 'for-each-ref',
+  'diff',
+  'status',
+  'log',
+  'show',
+  'rev-parse',
+  'ls-files',
+  'cat-file',
+  'describe',
+  'shortlog',
+  'name-rev',
+  'for-each-ref',
 ]);
 // Note: branch, remote, config are handled separately below with flag restrictions
 
@@ -44,20 +52,53 @@ function shellSplitSegments(command) {
 
   for (let i = 0; i < command.length; i++) {
     const ch = command[i];
-    if (ch === "'" && !inDouble) { inSingle = !inSingle; current += ch; continue; }
-    if (ch === '"' && !inSingle) { inDouble = !inDouble; current += ch; continue; }
-    if (inSingle || inDouble) { current += ch; continue; }
+    if (ch === "'" && !inDouble) {
+      inSingle = !inSingle;
+      current += ch;
+      continue;
+    }
+    if (ch === '"' && !inSingle) {
+      inDouble = !inDouble;
+      current += ch;
+      continue;
+    }
+    if (inSingle || inDouble) {
+      current += ch;
+      continue;
+    }
 
     // Outside quotes — check for operators
-    if (ch === '&' && command[i + 1] === '&') { segments.push(current); current = ''; i++; continue; }
-    if (ch === '|' && command[i + 1] === '|') { segments.push(current); current = ''; i++; continue; }
-    if (ch === ';' || ch === '\n') { segments.push(current); current = ''; continue; }
-    if (ch === '|') { segments.push(current); current = ''; continue; }
-    if (ch === '&') { segments.push(current); current = ''; continue; } // single & (background)
+    if (ch === '&' && command[i + 1] === '&') {
+      segments.push(current);
+      current = '';
+      i++;
+      continue;
+    }
+    if (ch === '|' && command[i + 1] === '|') {
+      segments.push(current);
+      current = '';
+      i++;
+      continue;
+    }
+    if (ch === ';' || ch === '\n') {
+      segments.push(current);
+      current = '';
+      continue;
+    }
+    if (ch === '|') {
+      segments.push(current);
+      current = '';
+      continue;
+    }
+    if (ch === '&') {
+      segments.push(current);
+      current = '';
+      continue;
+    } // single & (background)
     current += ch;
   }
   if (current.trim()) segments.push(current);
-  return segments.map(s => s.trim()).filter(Boolean);
+  return segments.map((s) => s.trim()).filter(Boolean);
 }
 
 /**
@@ -71,8 +112,14 @@ function hasUnsafeMetachars(s) {
 
   for (let i = 0; i < s.length; i++) {
     const ch = s[i];
-    if (ch === "'" && !inDouble) { inSingle = !inSingle; continue; }
-    if (ch === '"' && !inSingle) { inDouble = !inDouble; continue; }
+    if (ch === "'" && !inDouble) {
+      inSingle = !inSingle;
+      continue;
+    }
+    if (ch === '"' && !inSingle) {
+      inDouble = !inDouble;
+      continue;
+    }
 
     // Command substitution ($(), backtick) executes even inside double quotes —
     // only single quotes suppress execution, so reject these unless in single quotes.
@@ -83,7 +130,10 @@ function hasUnsafeMetachars(s) {
     if (inSingle || inDouble) continue;
 
     // Allow 2>/dev/null or >/dev/null (safe stderr/stdout suppression)
-    if ((ch === '>' || (ch >= '0' && ch <= '9' && s[i + 1] === '>')) && /^[0-9]?>\s*\/dev\/null/.test(s.slice(i))) {
+    if (
+      (ch === '>' || (ch >= '0' && ch <= '9' && s[i + 1] === '>')) &&
+      /^[0-9]?>\s*\/dev\/null/.test(s.slice(i))
+    ) {
       i = s.indexOf('/dev/null', i) + 8; // skip past /dev/null
       continue;
     }
@@ -102,7 +152,9 @@ function checkSegment(segment) {
   // Quote-aware: characters inside single/double quotes are safe (e.g. grep patterns).
   // Allows safe redirections to /dev/null (e.g. 2>/dev/null).
   if (hasUnsafeMetachars(s)) {
-    block(`Shell metacharacters (>, <, \`, $(), &) outside quotes are forbidden. Blocked: ${s.slice(0, 100)}`);
+    block(
+      `Shell metacharacters (>, <, \`, $(), &) outside quotes are forbidden. Blocked: ${s.slice(0, 100)}`
+    );
   }
 
   // ── git commands ──────────────────────────────────────────────────────────
@@ -118,17 +170,22 @@ function checkSegment(segment) {
         block(`'git commit --amend' is not allowed. Blocked: ${s.slice(0, 100)}`);
       }
       if (/\s(-a|--all)\b/.test(s)) {
-        block(`'git commit -a/--all' is not allowed — commit only staged files. Blocked: ${s.slice(0, 100)}`);
+        block(
+          `'git commit -a/--all' is not allowed — commit only staged files. Blocked: ${s.slice(0, 100)}`
+        );
       }
       if (/\s(-o|--only)\b/.test(s)) {
-        block(`'git commit --only' is not allowed — commit only staged files. Blocked: ${s.slice(0, 100)}`);
+        block(
+          `'git commit --only' is not allowed — commit only staged files. Blocked: ${s.slice(0, 100)}`
+        );
       }
       return; // allowed: commit staged files with -m
     }
 
     // git push — shell metacharacters already rejected by pre-check above; only force-push blocked here
     if (sub === 'push') {
-      if (/--force\b|--force-with-lease\b|\s-f\b/.test(s)) block(`'git push --force/-f' is not allowed. Blocked: ${s.slice(0, 100)}`);
+      if (/--force\b|--force-with-lease\b|\s-f\b/.test(s))
+        block(`'git push --force/-f' is not allowed. Blocked: ${s.slice(0, 100)}`);
       return; // safe: hasUnsafeMetachars() pre-check above rejects >, <, `, $(), & outside quotes
     }
 
@@ -142,7 +199,9 @@ function checkSegment(segment) {
 
     // git branch — listing only; block mutation flags (-d/-D/-m/-M/-c/-C/--set-upstream/--delete)
     if (sub === 'branch') {
-      if (/\s(-d|-D|-m|-M|-c|-C|--delete|--move|--copy|--set-upstream|--unset-upstream)\b/.test(s)) {
+      if (
+        /\s(-d|-D|-m|-M|-c|-C|--delete|--move|--copy|--set-upstream|--unset-upstream)\b/.test(s)
+      ) {
         block(`'git branch' mutation flags are not allowed. Blocked: ${s.slice(0, 100)}`);
       }
       return; // allowed (list only)
@@ -151,10 +210,16 @@ function checkSegment(segment) {
     // git remote — strict allowlist: only bare `git remote`, `-v`, `show <name>`, `get-url <name>`
     if (sub === 'remote') {
       const remoteArgs = s.replace(/^git\s+remote\s*/, '').trim();
-      if (!remoteArgs || /^(-v|--verbose)$/.test(remoteArgs) || /^(show|get-url)\s+\S/.test(remoteArgs)) {
+      if (
+        !remoteArgs ||
+        /^(-v|--verbose)$/.test(remoteArgs) ||
+        /^(show|get-url)\s+\S/.test(remoteArgs)
+      ) {
         return; // allowed: list, verbose list, show, get-url
       }
-      block(`'git remote ${remoteArgs.split(/\s/)[0]}' is not allowed — only list/show/get-url permitted. Blocked: ${s.slice(0, 100)}`);
+      block(
+        `'git remote ${remoteArgs.split(/\s/)[0]}' is not allowed — only list/show/get-url permitted. Blocked: ${s.slice(0, 100)}`
+      );
     }
 
     // git config — read-only queries only
@@ -162,41 +227,60 @@ function checkSegment(segment) {
     // Blocked: write flags, or 2+ positional args (git config <key> <value> = write)
     if (sub === 'config') {
       // Block write/mutation flags
-      if (/\s(--add|--unset|--unset-all|--remove-section|--rename-section|--global|--system|--worktree|--local|--file|--blob)\b/.test(s)) {
+      if (
+        /\s(--add|--unset|--unset-all|--remove-section|--rename-section|--global|--system|--worktree|--local|--file|--blob)\b/.test(
+          s
+        )
+      ) {
         block(`'git config' write flags are not allowed. Blocked: ${s.slice(0, 100)}`);
       }
       // Block write form: 2+ positional (non-flag) args means a value is being set
       // e.g. "git config user.email foo@bar.com" → ["user.email","foo@bar.com"] → blocked
       // e.g. "git config user.email"             → ["user.email"]              → allowed (read)
-      const positionalArgs = s.replace(/^git\s+config/, '').trim().split(/\s+/).filter((a) => a && !a.startsWith('-'));
+      const positionalArgs = s
+        .replace(/^git\s+config/, '')
+        .trim()
+        .split(/\s+/)
+        .filter((a) => a && !a.startsWith('-'));
       if (positionalArgs.length >= 2) {
-        block(`'git config <key> <value>' (write form) is not allowed. Blocked: ${s.slice(0, 100)}`);
+        block(
+          `'git config <key> <value>' (write form) is not allowed. Blocked: ${s.slice(0, 100)}`
+        );
       }
       return; // allowed: --get, --list, or single-key read query
     }
 
     // Read-only subcommands — block --output/-o to prevent filesystem writes
     if (ALLOWED_GIT_READ.has(sub)) {
-      if (/\s(--output[\s=]|-o\s)/.test(s)) block(`'git ${sub} --output/-o' writes files — not allowed. Blocked: ${s.slice(0, 100)}`);
+      if (/\s(--output[\s=]|-o\s)/.test(s))
+        block(`'git ${sub} --output/-o' writes files — not allowed. Blocked: ${s.slice(0, 100)}`);
       return; // safe: diff, status, log, show, rev-parse, ls-files, etc.
     }
 
     // Everything else (reset, rebase, checkout, fetch, pull, add, rm, stash, merge, etc.) — BLOCKED
-    block(`'git ${sub}' is not allowed. commit-writer only does: git commit, git push, and read-only git commands. Blocked: ${s.slice(0, 100)}`);
+    block(
+      `'git ${sub}' is not allowed. commit-writer only does: git commit, git push, and read-only git commands. Blocked: ${s.slice(0, 100)}`
+    );
   }
 
   // ── grep — commitlint/cz setup detection only (package.json or .commitlintrc) ──
   if (/^grep\b/.test(s)) {
     // Extract non-flag arguments (skip -E, -i, -q, etc. and their values)
     const grepParts = s.replace(/^grep\s+/, '').split(/\s+/);
-    const nonFlags = grepParts.filter(a => !a.startsWith('-'));
+    const nonFlags = grepParts.filter((a) => !a.startsWith('-'));
     // First non-flag is the pattern, rest are file operands — ALL must be allowed filenames
     const fileArgs = nonFlags.slice(1);
     const allowedFiles = /^(\.\/)?package\.json$|^\.commitlintrc/;
-    if (fileArgs.length > 0 && fileArgs.every(f => allowedFiles.test(f)) && !fileArgs.some(f => f.startsWith('/') || f.includes('..'))) {
+    if (
+      fileArgs.length > 0 &&
+      fileArgs.every((f) => allowedFiles.test(f)) &&
+      !fileArgs.some((f) => f.startsWith('/') || f.includes('..'))
+    ) {
       return; // allowed: all file operands are package.json or .commitlintrc variants
     }
-    block(`grep is only allowed for commitlint/cz setup detection targeting package.json or .commitlintrc. Blocked: ${s.slice(0, 100)}`);
+    block(
+      `grep is only allowed for commitlint/cz setup detection targeting package.json or .commitlintrc. Blocked: ${s.slice(0, 100)}`
+    );
   }
 
   // ── ls — only for commitlintrc check ─────────────────────────────────────
@@ -211,13 +295,17 @@ function checkSegment(segment) {
   if (/^echo\b/.test(s)) {
     // Block redirections and command substitutions that could write to files or execute commands
     if (/[>|`]/.test(s)) {
-      block(`'echo' with redirections, pipes, or command substitutions is not allowed. Blocked: ${s.slice(0, 100)}`);
+      block(
+        `'echo' with redirections, pipes, or command substitutions is not allowed. Blocked: ${s.slice(0, 100)}`
+      );
     }
     return; // allowed
   }
 
   // ── Everything else is BLOCKED ────────────────────────────────────────────
-  block(`Command not in whitelist. commit-writer only runs git commit, git push, and read-only git commands. Blocked: ${s.slice(0, 100)}`);
+  block(
+    `Command not in whitelist. commit-writer only runs git commit, git push, and read-only git commands. Blocked: ${s.slice(0, 100)}`
+  );
 }
 
 async function main() {
@@ -256,10 +344,12 @@ async function main() {
   }
 
   // Everything else (Write, Edit, Task, Skill, MultiEdit, etc.) — BLOCKED
-  block(`Tool '${toolName}' is not allowed. commit-writer only uses: Read, Grep, Glob, and whitelisted Bash commands.`);
+  block(
+    `Tool '${toolName}' is not allowed. commit-writer only uses: Read, Grep, Glob, and whitelisted Bash commands.`
+  );
 }
 
-main().catch(err => {
+main().catch((err) => {
   process.stderr.write(`COMMIT-WRITER GUARD ERROR: ${err.message}\n`);
   process.exit(2);
 });

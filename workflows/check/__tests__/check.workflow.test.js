@@ -122,17 +122,27 @@ describe('check.workflow.js', () => {
     }
 
     it('returns SKIP when cache hash matches (readmeHashMatch=true)', () => {
-      const r = wf.detectStepState('2_start_env', 'X-1', null, makeInspect({
-        readmeHashMatch: true,
-      }));
+      const r = wf.detectStepState(
+        '2_start_env',
+        'X-1',
+        null,
+        makeInspect({
+          readmeHashMatch: true,
+        })
+      );
       assert.equal(r.action, 'SKIP');
       assert.match(r.reason, /Cache valid/i);
     });
 
     it('returns RUN when hash mismatch (readmeHashMatch=false)', () => {
-      const r = wf.detectStepState('2_start_env', 'X-1', null, makeInspect({
-        readmeHashMatch: false,
-      }));
+      const r = wf.detectStepState(
+        '2_start_env',
+        'X-1',
+        null,
+        makeInspect({
+          readmeHashMatch: false,
+        })
+      );
       assert.equal(r.action, 'RUN');
     });
 
@@ -142,18 +152,28 @@ describe('check.workflow.js', () => {
     });
 
     it('4_phase1_agents: SKIP when all reports match', () => {
-      const r = wf.detectStepState('4_phase1_agents', 'X-1', null, makeInspect({
-        allPhase1ReportsMatch: true,
-        missingReports: [],
-      }));
+      const r = wf.detectStepState(
+        '4_phase1_agents',
+        'X-1',
+        null,
+        makeInspect({
+          allPhase1ReportsMatch: true,
+          missingReports: [],
+        })
+      );
       assert.equal(r.action, 'SKIP');
     });
 
     it('4_phase1_agents: RUN when reports are missing', () => {
-      const r = wf.detectStepState('4_phase1_agents', 'X-1', null, makeInspect({
-        allPhase1ReportsMatch: false,
-        missingReports: ['code-review.check.md'],
-      }));
+      const r = wf.detectStepState(
+        '4_phase1_agents',
+        'X-1',
+        null,
+        makeInspect({
+          allPhase1ReportsMatch: false,
+          missingReports: ['code-review.check.md'],
+        })
+      );
       assert.equal(r.action, 'RUN');
     });
 
@@ -170,19 +190,29 @@ describe('check.workflow.js', () => {
     // ─── GH-120: Skip Playwright when no web apps ───────────────────
 
     it('3_verify_playwright: SKIP when hasWebApps=false and cache invalid', () => {
-      const r = wf.detectStepState('3_verify_playwright', 'X-1', null, makeInspect({
-        readmeHashMatch: false,
-        hasWebApps: false,
-      }));
+      const r = wf.detectStepState(
+        '3_verify_playwright',
+        'X-1',
+        null,
+        makeInspect({
+          readmeHashMatch: false,
+          hasWebApps: false,
+        })
+      );
       assert.equal(r.action, 'SKIP');
       assert.match(r.reason, /no web apps/i);
     });
 
     it('3_verify_playwright: RUN when hasWebApps=true and cache invalid', () => {
-      const r = wf.detectStepState('3_verify_playwright', 'X-1', null, makeInspect({
-        readmeHashMatch: false,
-        hasWebApps: true,
-      }));
+      const r = wf.detectStepState(
+        '3_verify_playwright',
+        'X-1',
+        null,
+        makeInspect({
+          readmeHashMatch: false,
+          hasWebApps: true,
+        })
+      );
       assert.equal(r.action, 'RUN');
     });
 
@@ -200,7 +230,7 @@ describe('check.workflow.js', () => {
     for (const t of wf.transitions) {
       transitionMap[t.source] = t.targets;
     }
-    const stepIds = wf.steps.map(s => s.id);
+    const stepIds = wf.steps.map((s) => s.id);
 
     it('all steps are reachable from step 1', () => {
       function reachable(start) {
@@ -210,7 +240,7 @@ describe('check.workflow.js', () => {
           const current = queue.shift();
           if (visited.has(current)) continue;
           visited.add(current);
-          for (const next of (transitionMap[current] || [])) {
+          for (const next of transitionMap[current] || []) {
             queue.push(next);
           }
         }
@@ -225,16 +255,13 @@ describe('check.workflow.js', () => {
 
     it('no self-transitions', () => {
       for (const t of wf.transitions) {
-        assert.ok(
-          !t.targets.includes(t.source),
-          `Step ${t.source} has a self-transition`
-        );
+        assert.ok(!t.targets.includes(t.source), `Step ${t.source} has a self-transition`);
       }
     });
 
     it('terminal state has empty targets', () => {
       const lastStepId = stepIds[stepIds.length - 1];
-      const t = wf.transitions.find(tr => tr.source === lastStepId);
+      const t = wf.transitions.find((tr) => tr.source === lastStepId);
       assert.ok(t, `No transition entry for terminal step ${lastStepId}`);
       assert.deepEqual(t.targets, []);
     });
@@ -242,7 +269,7 @@ describe('check.workflow.js', () => {
     // ─── GH-120: Skip edge from 2_start_env to 4_phase1_agents ──────
 
     it('2_start_env can transition to both 3_verify_playwright and 4_phase1_agents', () => {
-      const t = wf.transitions.find(tr => tr.source === '2_start_env');
+      const t = wf.transitions.find((tr) => tr.source === '2_start_env');
       assert.ok(t, 'No transition entry for 2_start_env');
       assert.ok(t.targets.includes('3_verify_playwright'), 'Missing target: 3_verify_playwright');
       assert.ok(t.targets.includes('4_phase1_agents'), 'Missing target: 4_phase1_agents');

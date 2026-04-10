@@ -14,10 +14,11 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
 
-const { resolveTicketId, deriveTaskId } = require(path.join(__dirname, '..', 'hooks', 'check-setup.js'));
+const { resolveTicketId, deriveTaskId } = require(
+  path.join(__dirname, '..', 'hooks', 'check-setup.js')
+);
 
 describe('check-setup suffix preservation (GH-181)', () => {
-
   it('TICKET_ID with suffix is used as-is (preserves /)', () => {
     const result = resolveTicketId(['GH-181/phase1'], {});
     assert.equal(result, 'GH-181/phase1');
@@ -43,10 +44,7 @@ describe('check-setup suffix preservation (GH-181)', () => {
     const taskId = deriveTaskId('GH-181', 'GH-181-fix-something');
     const mainWorktree = '/home/user/worktrees/my-repo';
     const reportFolder = path.join(mainWorktree, '..', 'tasks', taskId);
-    assert.equal(
-      path.resolve(reportFolder),
-      path.resolve('/home/user/worktrees/tasks/GH-181')
-    );
+    assert.equal(path.resolve(reportFolder), path.resolve('/home/user/worktrees/tasks/GH-181'));
   });
 
   it('branch name fallback sanitizes special characters via deriveTaskId', () => {

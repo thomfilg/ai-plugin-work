@@ -95,7 +95,10 @@ before(() => {
 
   // Create shared docs outside the repo but inside worktrees base
   fs.writeFileSync(path.join(sharedDocsDir, 'ui.md'), '# UI Guidelines\nUse design tokens.');
-  fs.writeFileSync(path.join(sharedDocsDir, 'team-conventions.md'), '# Team Conventions\nReview all PRs.');
+  fs.writeFileSync(
+    path.join(sharedDocsDir, 'team-conventions.md'),
+    '# Team Conventions\nReview all PRs.'
+  );
 
   // Create a sensitive file that should be rejected by denylist
   fs.writeFileSync(path.join(sharedDocsDir, '.env.local'), 'SECRET=bad');
@@ -113,31 +116,56 @@ after(() => {
 describe('loadDocsFromPaths', () => {
   describe('existing behavior (no WORKTREES_BASE)', () => {
     it('loads a git-tracked file within repo root', () => {
-      const result = callWithEnv({ WORKTREES_BASE: undefined }, 'READ_DOCS_ON_DEV', 'tracked-doc.md', repoRoot);
+      const result = callWithEnv(
+        { WORKTREES_BASE: undefined },
+        'READ_DOCS_ON_DEV',
+        'tracked-doc.md',
+        repoRoot
+      );
       assert.ok(result.includes('# Tracked Doc'), 'should contain tracked doc content');
       assert.ok(result.includes('--- tracked-doc.md ---'), 'should contain file header');
     });
 
     it('rejects paths that escape repo root when WORKTREES_BASE is not set', () => {
-      const result = callWithEnv({ WORKTREES_BASE: undefined }, 'READ_DOCS_ON_DEV', '../rules/ui.md', repoRoot);
+      const result = callWithEnv(
+        { WORKTREES_BASE: undefined },
+        'READ_DOCS_ON_DEV',
+        '../rules/ui.md',
+        repoRoot
+      );
       assert.equal(result, '', 'should return empty string for path escaping repo root');
     });
 
     it('rejects absolute paths', () => {
       const absPath = path.join(sharedDocsDir, 'ui.md');
-      const result = callWithEnv({ WORKTREES_BASE: undefined }, 'READ_DOCS_ON_DEV', absPath, repoRoot);
+      const result = callWithEnv(
+        { WORKTREES_BASE: undefined },
+        'READ_DOCS_ON_DEV',
+        absPath,
+        repoRoot
+      );
       assert.equal(result, '', 'should reject absolute paths');
     });
 
     it('rejects sensitive files by denylist', () => {
-      const result = callWithEnv({ WORKTREES_BASE: undefined }, 'READ_DOCS_ON_DEV', '.env.local', repoRoot);
+      const result = callWithEnv(
+        { WORKTREES_BASE: undefined },
+        'READ_DOCS_ON_DEV',
+        '.env.local',
+        repoRoot
+      );
       assert.equal(result, '', 'should reject .env.local');
     });
   });
 
   describe('WORKTREES_BASE boundary expansion', () => {
     it('allows paths that resolve within WORKTREES_BASE but outside repo root', () => {
-      const result = callWithEnv({ WORKTREES_BASE: worktreesBase }, 'READ_DOCS_ON_DEV', '../rules/ui.md', repoRoot);
+      const result = callWithEnv(
+        { WORKTREES_BASE: worktreesBase },
+        'READ_DOCS_ON_DEV',
+        '../rules/ui.md',
+        repoRoot
+      );
       assert.ok(result.includes('# UI Guidelines'), 'should contain shared doc content');
       assert.ok(result.includes('--- ../rules/ui.md ---'), 'should contain file header');
     });
@@ -154,47 +182,88 @@ describe('loadDocsFromPaths', () => {
     });
 
     it('still loads git-tracked files within repo root', () => {
-      const result = callWithEnv({ WORKTREES_BASE: worktreesBase }, 'READ_DOCS_ON_DEV', 'tracked-doc.md', repoRoot);
+      const result = callWithEnv(
+        { WORKTREES_BASE: worktreesBase },
+        'READ_DOCS_ON_DEV',
+        'tracked-doc.md',
+        repoRoot
+      );
       assert.ok(result.includes('# Tracked Doc'), 'should still load repo files');
     });
 
     it('rejects paths that escape WORKTREES_BASE', () => {
       // ../../ goes above worktreesBase
-      const result = callWithEnv({ WORKTREES_BASE: worktreesBase }, 'READ_DOCS_ON_DEV', '../../etc/passwd', repoRoot);
+      const result = callWithEnv(
+        { WORKTREES_BASE: worktreesBase },
+        'READ_DOCS_ON_DEV',
+        '../../etc/passwd',
+        repoRoot
+      );
       assert.equal(result, '', 'should reject path escaping WORKTREES_BASE');
     });
 
     it('still rejects sensitive files in WORKTREES_BASE', () => {
-      const result = callWithEnv({ WORKTREES_BASE: worktreesBase }, 'READ_DOCS_ON_DEV', '../rules/.env.local', repoRoot);
+      const result = callWithEnv(
+        { WORKTREES_BASE: worktreesBase },
+        'READ_DOCS_ON_DEV',
+        '../rules/.env.local',
+        repoRoot
+      );
       assert.equal(result, '', 'should reject sensitive files even within WORKTREES_BASE');
     });
 
     it('still rejects oversized files in WORKTREES_BASE', () => {
-      const result = callWithEnv({ WORKTREES_BASE: worktreesBase }, 'READ_DOCS_ON_DEV', '../rules/huge-file.md', repoRoot);
+      const result = callWithEnv(
+        { WORKTREES_BASE: worktreesBase },
+        'READ_DOCS_ON_DEV',
+        '../rules/huge-file.md',
+        repoRoot
+      );
       assert.equal(result, '', 'should reject files exceeding 256KB');
     });
 
     it('still rejects absolute paths even with WORKTREES_BASE set', () => {
       const absPath = path.join(sharedDocsDir, 'ui.md');
-      const result = callWithEnv({ WORKTREES_BASE: worktreesBase }, 'READ_DOCS_ON_DEV', absPath, repoRoot);
+      const result = callWithEnv(
+        { WORKTREES_BASE: worktreesBase },
+        'READ_DOCS_ON_DEV',
+        absPath,
+        repoRoot
+      );
       assert.equal(result, '', 'should reject absolute paths');
     });
 
     it('skips git ls-files check for files outside repo but within WORKTREES_BASE', () => {
       // The shared docs are NOT git-tracked. If git ls-files were checked,
       // they would be rejected. This test verifies they load successfully.
-      const result = callWithEnv({ WORKTREES_BASE: worktreesBase }, 'READ_DOCS_ON_DEV', '../rules/ui.md', repoRoot);
-      assert.ok(result.includes('# UI Guidelines'),
-        'should load non-git-tracked files within WORKTREES_BASE');
+      const result = callWithEnv(
+        { WORKTREES_BASE: worktreesBase },
+        'READ_DOCS_ON_DEV',
+        '../rules/ui.md',
+        repoRoot
+      );
+      assert.ok(
+        result.includes('# UI Guidelines'),
+        'should load non-git-tracked files within WORKTREES_BASE'
+      );
     });
 
     it('handles symlinks within WORKTREES_BASE correctly', () => {
       // Create a symlink inside worktreesBase pointing to a file within worktreesBase
       const symlinkPath = path.join(sharedDocsDir, 'ui-link.md');
-      try { fs.unlinkSync(symlinkPath); } catch { /* ignore */ }
+      try {
+        fs.unlinkSync(symlinkPath);
+      } catch {
+        /* ignore */
+      }
       fs.symlinkSync(path.join(sharedDocsDir, 'ui.md'), symlinkPath);
 
-      const result = callWithEnv({ WORKTREES_BASE: worktreesBase }, 'READ_DOCS_ON_DEV', '../rules/ui-link.md', repoRoot);
+      const result = callWithEnv(
+        { WORKTREES_BASE: worktreesBase },
+        'READ_DOCS_ON_DEV',
+        '../rules/ui-link.md',
+        repoRoot
+      );
       assert.ok(result.includes('# UI Guidelines'), 'should follow symlinks within WORKTREES_BASE');
 
       fs.unlinkSync(symlinkPath);
@@ -205,10 +274,19 @@ describe('loadDocsFromPaths', () => {
       const escapePath = path.join(os.tmpdir(), 'escape-target.md');
       fs.writeFileSync(escapePath, 'escaped content');
       const symlinkPath = path.join(sharedDocsDir, 'escape-link.md');
-      try { fs.unlinkSync(symlinkPath); } catch { /* ignore */ }
+      try {
+        fs.unlinkSync(symlinkPath);
+      } catch {
+        /* ignore */
+      }
       fs.symlinkSync(escapePath, symlinkPath);
 
-      const result = callWithEnv({ WORKTREES_BASE: worktreesBase }, 'READ_DOCS_ON_DEV', '../rules/escape-link.md', repoRoot);
+      const result = callWithEnv(
+        { WORKTREES_BASE: worktreesBase },
+        'READ_DOCS_ON_DEV',
+        '../rules/escape-link.md',
+        repoRoot
+      );
       assert.equal(result, '', 'should reject symlinks escaping WORKTREES_BASE');
 
       fs.unlinkSync(symlinkPath);
@@ -216,7 +294,12 @@ describe('loadDocsFromPaths', () => {
     });
 
     it('handles non-existent files gracefully', () => {
-      const result = callWithEnv({ WORKTREES_BASE: worktreesBase }, 'READ_DOCS_ON_DEV', '../rules/missing.md', repoRoot);
+      const result = callWithEnv(
+        { WORKTREES_BASE: worktreesBase },
+        'READ_DOCS_ON_DEV',
+        '../rules/missing.md',
+        repoRoot
+      );
       assert.equal(result, '', 'should return empty for non-existent files');
     });
   });

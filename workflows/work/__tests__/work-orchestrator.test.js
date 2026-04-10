@@ -31,8 +31,12 @@ function runOrchestrator(args = [], opts = {}) {
     let stdout = '';
     let stderr = '';
 
-    proc.stdout.on('data', (data) => { stdout += data.toString(); });
-    proc.stderr.on('data', (data) => { stderr += data.toString(); });
+    proc.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
+    proc.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
 
     proc.on('close', (code) => {
       try {
@@ -49,7 +53,9 @@ function runOrchestrator(args = [], opts = {}) {
 
 function cleanupTempWorkState(ticket) {
   const dir = path.join(TASKS_BASE, ticket);
-  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+  } catch {}
 }
 
 // ─── Global Cleanup ─────────────────────────────────────────────────────────
@@ -66,11 +72,17 @@ after(() => {
   // Safety-net: clean up leaked session guard files created by THIS suite only (TEST-* tickets)
   try {
     const tmpDir = require('os').tmpdir();
-    const tmpFiles = fs.readdirSync(tmpDir).filter(f => f.startsWith('claude-session-guard-TEST-'));
+    const tmpFiles = fs
+      .readdirSync(tmpDir)
+      .filter((f) => f.startsWith('claude-session-guard-TEST-'));
     for (const f of tmpFiles) {
-      try { fs.unlinkSync(path.join(tmpDir, f)); } catch {}
+      try {
+        fs.unlinkSync(path.join(tmpDir, f));
+      } catch {}
     }
-  } catch { /* ignore if tmpdir unreadable */ }
+  } catch {
+    /* ignore if tmpdir unreadable */
+  }
 });
 
 /**
@@ -96,17 +108,19 @@ function writeCheckReports(tasksBase, ticket) {
 function writeTddException(tasksBase, ticket) {
   const dir = path.join(tasksBase, ticket);
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, 'tdd-phase.json'), JSON.stringify({
-    currentPhase: 'exception',
-    exception: 'test helper',
-    cycles: [],
-  }));
+  fs.writeFileSync(
+    path.join(dir, 'tdd-phase.json'),
+    JSON.stringify({
+      currentPhase: 'exception',
+      exception: 'test helper',
+      cycles: [],
+    })
+  );
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe('work-orchestrator.js', () => {
-
   describe('CLI usage', () => {
     it('should show error when no arguments provided', async () => {
       const { result, code } = await runOrchestrator([]);
@@ -148,7 +162,10 @@ describe('work-orchestrator.js', () => {
       const { result } = await runOrchestrator(['graph']);
       assert.ok(result.transitions['follow_up'].includes('ci'));
       assert.ok(result.transitions['follow_up'].includes('implement'));
-      assert.ok(!result.transitions['follow_up'].includes('cleanup'), 'follow_up should NOT skip to cleanup');
+      assert.ok(
+        !result.transitions['follow_up'].includes('cleanup'),
+        'follow_up should NOT skip to cleanup'
+      );
     });
 
     it('should NOT have ci transitions including follow_up (no backward from ci)', async () => {
@@ -174,15 +191,27 @@ describe('work-orchestrator.js', () => {
 
     it('should have linear transitions (no skip edges)', async () => {
       const { result } = await runOrchestrator(['graph']);
-      assert.ok(!result.transitions['bootstrap'].includes('commit'), 'bootstrap should NOT skip to commit');
-      assert.ok(!result.transitions['bootstrap'].includes('check'), 'bootstrap should NOT skip to check');
-      assert.deepEqual(result.transitions['bootstrap'], ['brief'], 'bootstrap should only go to brief');
+      assert.ok(
+        !result.transitions['bootstrap'].includes('commit'),
+        'bootstrap should NOT skip to commit'
+      );
+      assert.ok(
+        !result.transitions['bootstrap'].includes('check'),
+        'bootstrap should NOT skip to check'
+      );
+      assert.deepEqual(
+        result.transitions['bootstrap'],
+        ['brief'],
+        'bootstrap should only go to brief'
+      );
     });
   });
 
   describe('plan command', () => {
     const TEST_TICKET = 'TEST-999';
-    afterEach(() => { cleanupTempWorkState(TEST_TICKET); });
+    afterEach(() => {
+      cleanupTempWorkState(TEST_TICKET);
+    });
 
     it('should generate a plan for a new ticket', async () => {
       const { result, code } = await runOrchestrator([TEST_TICKET]);
@@ -207,9 +236,20 @@ describe('work-orchestrator.js', () => {
       const { result } = await runOrchestrator([TEST_TICKET]);
       const stepNames = result.plan.map((s) => s.step);
       for (const expected of [
-        'ticket', 'bootstrap', 'brief', 'spec', 'implement',
-        'commit', 'check',
-        'pr', 'ready', 'follow_up', 'ci', 'cleanup', 'reports', 'complete',
+        'ticket',
+        'bootstrap',
+        'brief',
+        'spec',
+        'implement',
+        'commit',
+        'check',
+        'pr',
+        'ready',
+        'follow_up',
+        'ci',
+        'cleanup',
+        'reports',
+        'complete',
       ]) {
         assert.ok(stepNames.includes(expected), `Missing step: ${expected}`);
       }
@@ -225,7 +265,10 @@ describe('work-orchestrator.js', () => {
       assert.ok('stepsToRun' in result.summary);
       assert.ok('stepsSkipped' in result.summary);
       assert.ok('defer' in result.summary);
-      assert.equal(result.summary.total, result.summary.run + result.summary.skip + result.summary.defer + result.summary.pending);
+      assert.equal(
+        result.summary.total,
+        result.summary.run + result.summary.skip + result.summary.defer + result.summary.pending
+      );
     });
 
     it('should use rework mode when --rework flag is passed', async () => {
@@ -269,14 +312,20 @@ describe('work-orchestrator.js', () => {
         assert.equal(code, 0);
         assert.equal(result.ticket, '#42');
       } finally {
-        try { fs.rmSync(tmpBase, { recursive: true, force: true }); } catch (e) { console.warn('cleanup failed:', e.message); }
+        try {
+          fs.rmSync(tmpBase, { recursive: true, force: true });
+        } catch (e) {
+          console.warn('cleanup failed:', e.message);
+        }
       }
     });
   });
 
   describe('transitions command', () => {
     const TEST_TICKET = 'TEST-888';
-    afterEach(() => { cleanupTempWorkState(TEST_TICKET); });
+    afterEach(() => {
+      cleanupTempWorkState(TEST_TICKET);
+    });
 
     it('should show error when no ticket provided', async () => {
       const { result, code } = await runOrchestrator(['transitions']);
@@ -304,9 +353,15 @@ describe('work-orchestrator.js', () => {
     const TEMP_WB = path.join(os.tmpdir(), 'work-orch-trans-' + process.pid);
     const TEMP_TASKS_DIR = path.join(TEMP_WB, 'tasks');
     const transOpts = { env: { WORKTREES_BASE: TEMP_WB } };
-    after(() => { try { fs.rmSync(TEMP_WB, { recursive: true, force: true }); } catch {} });
+    after(() => {
+      try {
+        fs.rmSync(TEMP_WB, { recursive: true, force: true });
+      } catch {}
+    });
     afterEach(() => {
-      try { fs.rmSync(path.join(TEMP_TASKS_DIR, TEST_TICKET), { recursive: true, force: true }); } catch {}
+      try {
+        fs.rmSync(path.join(TEMP_TASKS_DIR, TEST_TICKET), { recursive: true, force: true });
+      } catch {}
     });
 
     it('should show error when missing arguments', async () => {
@@ -430,7 +485,9 @@ describe('work-orchestrator.js', () => {
 
   describe('plan action types', () => {
     const TEST_TICKET = 'TEST-666';
-    afterEach(() => { cleanupTempWorkState(TEST_TICKET); });
+    afterEach(() => {
+      cleanupTempWorkState(TEST_TICKET);
+    });
 
     it('should use RUN for steps that need execution', async () => {
       const { result } = await runOrchestrator([TEST_TICKET]);
@@ -483,7 +540,9 @@ describe('work-orchestrator.js', () => {
 
   describe('agentType and agentPrompt fields', () => {
     const TEST_TICKET = 'TEST-444';
-    afterEach(() => { cleanupTempWorkState(TEST_TICKET); });
+    afterEach(() => {
+      cleanupTempWorkState(TEST_TICKET);
+    });
 
     it('should include agentType and agentPrompt for RUN steps', async () => {
       const { result } = await runOrchestrator([TEST_TICKET]);
@@ -579,7 +638,10 @@ describe('work-orchestrator.js', () => {
       // May be SKIP (no provider) or RUN (jira/linear)
       if (transStep.action === 'RUN') {
         assert.equal(transStep.agentType, 'general-purpose');
-        assert.ok(transStep.agentPrompt.includes('transition') || transStep.agentPrompt.includes('Transition'));
+        assert.ok(
+          transStep.agentPrompt.includes('transition') ||
+            transStep.agentPrompt.includes('Transition')
+        );
       } else {
         assert.equal(transStep.action, 'SKIP');
       }
@@ -624,7 +686,9 @@ describe('work-orchestrator.js', () => {
         assert.equal(result.success, true);
         assert.equal(result.direction, 'backward');
       } finally {
-        try { fs.rmSync(TMP, { recursive: true, force: true }); } catch {}
+        try {
+          fs.rmSync(TMP, { recursive: true, force: true });
+        } catch {}
       }
     });
 
@@ -693,7 +757,9 @@ describe('work-orchestrator.js', () => {
 
   describe('summary output', () => {
     const TEST_TICKET = 'TEST-555';
-    afterEach(() => { cleanupTempWorkState(TEST_TICKET); });
+    afterEach(() => {
+      cleanupTempWorkState(TEST_TICKET);
+    });
 
     it('should include stepsToRun array', async () => {
       const { result } = await runOrchestrator([TEST_TICKET]);
@@ -725,7 +791,9 @@ describe('work-orchestrator.js', () => {
 
   describe('follow_up step (GH-81)', () => {
     const TEST_TICKET = 'TEST-810';
-    afterEach(() => { cleanupTempWorkState(TEST_TICKET); });
+    afterEach(() => {
+      cleanupTempWorkState(TEST_TICKET);
+    });
 
     it('should mark follow_up as DEFER when no PR exists (new ticket) (GH-130)', async () => {
       const { result } = await runOrchestrator([TEST_TICKET]);
@@ -740,8 +808,8 @@ describe('work-orchestrator.js', () => {
       const followUpStep = result.plan.find((s) => s.step === 'follow_up');
       assert.ok(followUpStep, 'follow_up step should exist in plan');
       assert.equal(followUpStep.action, 'DEFER');
-      assert.ok(followUpStep.agentType, "DEFER follow_up should have fallback agentType");
-      assert.ok(followUpStep.agentPrompt, "DEFER follow_up should have fallback agentPrompt");
+      assert.ok(followUpStep.agentType, 'DEFER follow_up should have fallback agentType');
+      assert.ok(followUpStep.agentPrompt, 'DEFER follow_up should have fallback agentPrompt');
     });
 
     it('should appear between ready and ci in plan order', async () => {
@@ -760,7 +828,11 @@ describe('work-orchestrator.js', () => {
     const T = 'TEST-811';
     const TEMP_TASKS = path.join(TEMP_WB, 'tasks');
     const o = { env: { WORKTREES_BASE: TEMP_WB, TASKS_BASE: TEMP_TASKS } };
-    after(() => { try { fs.rmSync(TEMP_WB, { recursive: true, force: true }); } catch {} });
+    after(() => {
+      try {
+        fs.rmSync(TEMP_WB, { recursive: true, force: true });
+      } catch {}
+    });
 
     it('should allow transition follow_up → ci (forward)', async () => {
       await runOrchestrator(['transition', T, 'bootstrap'], o);
@@ -803,7 +875,9 @@ describe('work-orchestrator.js', () => {
         assert.equal(result.to, 'implement');
         assert.equal(result.direction, 'backward');
       } finally {
-        try { fs.rmSync(path.join(TEMP_TASKS, T2), { recursive: true, force: true }); } catch {}
+        try {
+          fs.rmSync(path.join(TEMP_TASKS, T2), { recursive: true, force: true });
+        } catch {}
       }
     });
 
@@ -828,7 +902,9 @@ describe('work-orchestrator.js', () => {
         assert.equal(result.to, 'implement');
         assert.equal(result.direction, 'backward');
       } finally {
-        try { fs.rmSync(path.join(TEMP_TASKS, T3), { recursive: true, force: true }); } catch {}
+        try {
+          fs.rmSync(path.join(TEMP_TASKS, T3), { recursive: true, force: true });
+        } catch {}
       }
     });
 
@@ -856,13 +932,21 @@ describe('work-orchestrator.js', () => {
         assert.equal(result.direction, 'backward');
 
         // Reports should be moved to runs/run1/
-        assert.ok(!fs.existsSync(path.join(ticketDir, 'tests.check.md')), 'reports should be archived');
-        assert.ok(fs.existsSync(path.join(ticketDir, 'runs', 'run1', 'tests.check.md')), 'reports should be in run1');
+        assert.ok(
+          !fs.existsSync(path.join(ticketDir, 'tests.check.md')),
+          'reports should be archived'
+        );
+        assert.ok(
+          fs.existsSync(path.join(ticketDir, 'runs', 'run1', 'tests.check.md')),
+          'reports should be in run1'
+        );
         assert.ok(fs.existsSync(path.join(ticketDir, 'runs', 'run1', 'code-review.check.md')));
         assert.ok(fs.existsSync(path.join(ticketDir, 'runs', 'run1', 'completion.check.md')));
         assert.ok(fs.existsSync(path.join(ticketDir, 'runs', 'run1', 'qa-feature.check.md')));
       } finally {
-        try { fs.rmSync(ticketDir, { recursive: true, force: true }); } catch {}
+        try {
+          fs.rmSync(ticketDir, { recursive: true, force: true });
+        } catch {}
       }
     });
 
@@ -893,7 +977,9 @@ describe('work-orchestrator.js', () => {
 
         assert.ok(fs.existsSync(path.join(ticketDir, 'runs', 'run2')), 'run2 should exist');
       } finally {
-        try { fs.rmSync(ticketDir, { recursive: true, force: true }); } catch {}
+        try {
+          fs.rmSync(ticketDir, { recursive: true, force: true });
+        } catch {}
       }
     });
 
@@ -916,7 +1002,9 @@ describe('work-orchestrator.js', () => {
         assert.equal(result.error, true);
         assert.ok(result.message.includes('BLOCKED'));
       } finally {
-        try { fs.rmSync(path.join(TEMP_TASKS, T4), { recursive: true, force: true }); } catch {}
+        try {
+          fs.rmSync(path.join(TEMP_TASKS, T4), { recursive: true, force: true });
+        } catch {}
       }
     });
 
@@ -934,7 +1022,9 @@ describe('work-orchestrator.js', () => {
         assert.equal(result.error, true);
         assert.ok(result.message.includes('BLOCKED'));
       } finally {
-        try { fs.rmSync(path.join(TEMP_TASKS, T5), { recursive: true, force: true }); } catch {}
+        try {
+          fs.rmSync(path.join(TEMP_TASKS, T5), { recursive: true, force: true });
+        } catch {}
       }
     });
   });
@@ -948,11 +1038,15 @@ describe('work-orchestrator.js', () => {
     const envOpts = { env: { WORKTREES_BASE: TEMP_WB } };
 
     after(() => {
-      try { fs.rmSync(TEMP_WB, { recursive: true, force: true }); } catch {}
+      try {
+        fs.rmSync(TEMP_WB, { recursive: true, force: true });
+      } catch {}
     });
 
     afterEach(() => {
-      try { fs.rmSync(path.join(TEMP_TASKS, TICKET), { recursive: true, force: true }); } catch {}
+      try {
+        fs.rmSync(path.join(TEMP_TASKS, TICKET), { recursive: true, force: true });
+      } catch {}
     });
 
     it('should handle retry loop: 5_check → 3_implement → 4_commit → 5_check', async () => {
@@ -1004,9 +1098,18 @@ describe('work-orchestrator.js', () => {
       assert.equal(code, 0);
       const implStep = result.plan.find((s) => s.step === 'implement');
       assert.equal(implStep.action, 'RUN');
-      assert.ok(implStep.agentPrompt.includes('READ_DOCS_ON_DEV'), 'agentPrompt should mention READ_DOCS_ON_DEV');
-      assert.ok(implStep.agentPrompt.includes('docs/coding-standards.md'), 'agentPrompt should include first doc path');
-      assert.ok(implStep.agentPrompt.includes('docs/api-guide.md'), 'agentPrompt should include second doc path');
+      assert.ok(
+        implStep.agentPrompt.includes('READ_DOCS_ON_DEV'),
+        'agentPrompt should mention READ_DOCS_ON_DEV'
+      );
+      assert.ok(
+        implStep.agentPrompt.includes('docs/coding-standards.md'),
+        'agentPrompt should include first doc path'
+      );
+      assert.ok(
+        implStep.agentPrompt.includes('docs/api-guide.md'),
+        'agentPrompt should include second doc path'
+      );
     });
 
     it('should NOT inject READ_DOCS_ON_DEV into implement step agentPrompt when unset', async () => {
@@ -1016,7 +1119,10 @@ describe('work-orchestrator.js', () => {
       assert.equal(code, 0);
       const implStep = result.plan.find((s) => s.step === 'implement');
       assert.equal(implStep.action, 'RUN');
-      assert.ok(!implStep.agentPrompt.includes('READ_DOCS_ON_DEV'), 'agentPrompt should NOT mention READ_DOCS_ON_DEV when empty');
+      assert.ok(
+        !implStep.agentPrompt.includes('READ_DOCS_ON_DEV'),
+        'agentPrompt should NOT mention READ_DOCS_ON_DEV when empty'
+      );
     });
 
     it('should trim whitespace in READ_DOCS_ON_DEV paths', async () => {
@@ -1027,10 +1133,19 @@ describe('work-orchestrator.js', () => {
       assert.equal(code, 0);
       const implStep = result.plan.find((s) => s.step === 'implement');
       assert.equal(implStep.action, 'RUN');
-      assert.ok(implStep.agentPrompt.includes('- docs/guide.md'), 'should have trimmed "- docs/guide.md"');
-      assert.ok(implStep.agentPrompt.includes('- docs/api.md'), 'should have trimmed "- docs/api.md"');
+      assert.ok(
+        implStep.agentPrompt.includes('- docs/guide.md'),
+        'should have trimmed "- docs/guide.md"'
+      );
+      assert.ok(
+        implStep.agentPrompt.includes('- docs/api.md'),
+        'should have trimmed "- docs/api.md"'
+      );
       // Ensure no leading/trailing spaces in the paths
-      assert.ok(!implStep.agentPrompt.includes('-  docs/guide.md'), 'should not have extra space before path');
+      assert.ok(
+        !implStep.agentPrompt.includes('-  docs/guide.md'),
+        'should not have extra space before path'
+      );
     });
 
     it('should RUN implement when hasDiffVsMain but implement not previously completed (GH-130)', async () => {
@@ -1042,7 +1157,9 @@ describe('work-orchestrator.js', () => {
       const gitCmd = (cmd) => execSync(cmd, { cwd: worktreeDir, stdio: 'pipe' });
       const commitCmd = ['git', 'commit', '-m'].join(' ');
       fs.mkdirSync(worktreeDir, { recursive: true });
-      gitCmd('git init && git config user.name "Test User" && git config user.email "test@example.com"');
+      gitCmd(
+        'git init && git config user.name "Test User" && git config user.email "test@example.com"'
+      );
       gitCmd('git checkout -b main');
       fs.writeFileSync(path.join(worktreeDir, 'file.txt'), 'initial');
       gitCmd(`git add . && ${commitCmd} "init"`);
@@ -1060,7 +1177,11 @@ describe('work-orchestrator.js', () => {
         assert.equal(code, 0);
         const implStep = result.plan.find((s) => s.step === 'implement');
         // GH-130: diffs alone should NOT cause DEFER — implement must be previously completed
-        assert.equal(implStep.action, 'RUN', 'implement should RUN when not previously completed, even with diffs');
+        assert.equal(
+          implStep.action,
+          'RUN',
+          'implement should RUN when not previously completed, even with diffs'
+        );
         assert.ok(implStep.agentPrompt, 'implement should have agentPrompt');
       } finally {
         fs.rmSync(worktreeDir, { recursive: true, force: true });
@@ -1076,7 +1197,9 @@ describe('work-orchestrator.js', () => {
       const gitCmd = (cmd) => execSync(cmd, { cwd: worktreeDir, stdio: 'pipe' });
       const commitCmd = ['git', 'commit', '-m'].join(' ');
       fs.mkdirSync(worktreeDir, { recursive: true });
-      gitCmd('git init && git config user.name "Test User" && git config user.email "test@example.com"');
+      gitCmd(
+        'git init && git config user.name "Test User" && git config user.email "test@example.com"'
+      );
       gitCmd('git checkout -b main');
       fs.writeFileSync(path.join(worktreeDir, 'file.txt'), 'initial');
       gitCmd(`git add . && ${commitCmd} "init"`);
@@ -1091,7 +1214,8 @@ describe('work-orchestrator.js', () => {
       fs.mkdirSync(stateDir, { recursive: true });
       const stateFile = path.join(stateDir, '.work-state.json');
       const workState = {
-        ticket: TICKET, status: 'in_progress',
+        ticket: TICKET,
+        status: 'in_progress',
         stepStatus: { implement: 'completed' },
       };
       fs.writeFileSync(stateFile, JSON.stringify(workState));
@@ -1102,9 +1226,16 @@ describe('work-orchestrator.js', () => {
         });
         assert.equal(code, 0);
         const implStep = result.plan.find((s) => s.step === 'implement');
-        assert.equal(implStep.action, 'DEFER', 'implement should DEFER when previously completed with diffs');
+        assert.equal(
+          implStep.action,
+          'DEFER',
+          'implement should DEFER when previously completed with diffs'
+        );
         assert.ok(implStep.agentPrompt, 'DEFER implement should have fallback agentPrompt');
-        assert.ok(implStep.reason.includes('Previously completed'), 'reason should mention previously completed');
+        assert.ok(
+          implStep.reason.includes('Previously completed'),
+          'reason should mention previously completed'
+        );
       } finally {
         fs.rmSync(worktreeDir, { recursive: true, force: true });
       }
@@ -1121,10 +1252,15 @@ describe('work-orchestrator.js', () => {
             env: { ...process.env, ...stateEnv.env },
           });
           let out = '';
-          proc.stdout.on('data', d => { out += d.toString(); });
+          proc.stdout.on('data', (d) => {
+            out += d.toString();
+          });
           proc.on('close', (code) => {
-            try { resolve({ result: JSON.parse(out.trim()), code }); }
-            catch { resolve({ result: null, raw: out, code }); }
+            try {
+              resolve({ result: JSON.parse(out.trim()), code });
+            } catch {
+              resolve({ result: null, raw: out, code });
+            }
           });
         });
       }
@@ -1153,7 +1289,9 @@ describe('work-orchestrator.js', () => {
     const TICKET = 'TEST-121';
     const gateOpts = { env: { WORKTREES_BASE: TEMP_WB, TASKS_BASE: TEMP_TASKS } };
 
-    function ticketDir() { return path.join(TEMP_TASKS, TICKET); }
+    function ticketDir() {
+      return path.join(TEMP_TASKS, TICKET);
+    }
 
     function writeReport(name, content) {
       const dir = ticketDir();
@@ -1180,9 +1318,15 @@ describe('work-orchestrator.js', () => {
       await runOrchestrator(['transition', TICKET, 'check'], gateOpts);
     }
 
-    after(() => { try { fs.rmSync(TEMP_WB, { recursive: true, force: true }); } catch {} });
+    after(() => {
+      try {
+        fs.rmSync(TEMP_WB, { recursive: true, force: true });
+      } catch {}
+    });
     afterEach(() => {
-      try { fs.rmSync(path.join(TEMP_TASKS, TICKET), { recursive: true, force: true }); } catch {}
+      try {
+        fs.rmSync(path.join(TEMP_TASKS, TICKET), { recursive: true, force: true });
+      } catch {}
     });
 
     // 1. Happy path: all reports APPROVED, no agents running
@@ -1253,7 +1397,7 @@ describe('work-orchestrator.js', () => {
       assert.equal(result.error, true);
       assert.ok(result.message.includes('BLOCKED'));
       assert.equal(result.gate, 'check-to-pr');
-      assert.ok(result.reasons.some(r => r.includes('tests.check.md')));
+      assert.ok(result.reasons.some((r) => r.includes('tests.check.md')));
     });
 
     // 7. Error case: code-review.check.md has FAILED status
@@ -1266,7 +1410,7 @@ describe('work-orchestrator.js', () => {
       const { result } = await runOrchestrator(['transition', TICKET, 'pr'], gateOpts);
       assert.equal(result.error, true);
       assert.equal(result.gate, 'check-to-pr');
-      assert.ok(result.reasons.some(r => r.includes('code-review.check.md')));
+      assert.ok(result.reasons.some((r) => r.includes('code-review.check.md')));
     });
 
     // 8. Error case: tmux session for code-checker running
@@ -1276,9 +1420,14 @@ describe('work-orchestrator.js', () => {
       // Create a real tmux session that mimics a running agent
       const sessionName = `${TICKET}-code-checker`;
       try {
-        require('child_process').execFileSync('tmux', ['new-session', '-d', '-s', sessionName, 'cat'], {
-          timeout: 3000, stdio: ['pipe', 'pipe', 'pipe'],
-        });
+        require('child_process').execFileSync(
+          'tmux',
+          ['new-session', '-d', '-s', sessionName, 'cat'],
+          {
+            timeout: 3000,
+            stdio: ['pipe', 'pipe', 'pipe'],
+          }
+        );
       } catch {
         // tmux not available in this environment — explicitly skip
         t.skip('tmux not available in this environment');
@@ -1288,9 +1437,14 @@ describe('work-orchestrator.js', () => {
         const { result } = await runOrchestrator(['transition', TICKET, 'pr'], gateOpts);
         assert.equal(result.error, true);
         assert.equal(result.gate, 'check-to-pr');
-        assert.ok(result.reasons.some(r => r.includes('code-checker')));
+        assert.ok(result.reasons.some((r) => r.includes('code-checker')));
       } finally {
-        try { require('child_process').execFileSync('tmux', ['kill-session', '-t', sessionName], { timeout: 3000, stdio: 'pipe' }); } catch {}
+        try {
+          require('child_process').execFileSync('tmux', ['kill-session', '-t', sessionName], {
+            timeout: 3000,
+            stdio: 'pipe',
+          });
+        } catch {}
       }
     });
 
@@ -1301,11 +1455,16 @@ describe('work-orchestrator.js', () => {
       writeReport('code-review.check.md', '# Code Review\nStatus: APPROVED\nLGTM.');
       writeReport('completion.check.md', '# Completion\nStatus: APPROVED\nDone.');
       // No qa-*.check.md files — set WEB_APPS so QA is required (GH-181: empty WEB_APPS skips QA)
-      const qaOpts = { env: { ...gateOpts.env, WEB_APPS: '[{"name":"test-app","defaultPort":3000,"type":"vite"}]' } };
+      const qaOpts = {
+        env: {
+          ...gateOpts.env,
+          WEB_APPS: '[{"name":"test-app","defaultPort":3000,"type":"vite"}]',
+        },
+      };
       const { result } = await runOrchestrator(['transition', TICKET, 'pr'], qaOpts);
       assert.equal(result.error, true);
       assert.equal(result.gate, 'check-to-pr');
-      assert.ok(result.reasons.some(r => r.toLowerCase().includes('qa')));
+      assert.ok(result.reasons.some((r) => r.toLowerCase().includes('qa')));
     });
 
     // 10. Error case: multiple failures simultaneously
@@ -1314,15 +1473,23 @@ describe('work-orchestrator.js', () => {
       // Only write code-review with FAILED, missing tests + completion + qa
       // Set WEB_APPS so QA is required (GH-181: empty WEB_APPS skips QA)
       writeReport('code-review.check.md', '# Code Review\nStatus: FAILED\nBad.');
-      const qaOpts = { env: { ...gateOpts.env, WEB_APPS: '[{"name":"test-app","defaultPort":3000,"type":"vite"}]' } };
+      const qaOpts = {
+        env: {
+          ...gateOpts.env,
+          WEB_APPS: '[{"name":"test-app","defaultPort":3000,"type":"vite"}]',
+        },
+      };
       const { result } = await runOrchestrator(['transition', TICKET, 'pr'], qaOpts);
       assert.equal(result.error, true);
       assert.equal(result.gate, 'check-to-pr');
-      assert.ok(result.reasons.length >= 3, `Expected at least 3 reasons, got ${result.reasons.length}: ${JSON.stringify(result.reasons)}`);
+      assert.ok(
+        result.reasons.length >= 3,
+        `Expected at least 3 reasons, got ${result.reasons.length}: ${JSON.stringify(result.reasons)}`
+      );
       // Should mention tests.check.md, completion.check.md, and qa
-      assert.ok(result.reasons.some(r => r.includes('tests.check.md')));
-      assert.ok(result.reasons.some(r => r.includes('completion.check.md')));
-      assert.ok(result.reasons.some(r => r.toLowerCase().includes('qa')));
+      assert.ok(result.reasons.some((r) => r.includes('tests.check.md')));
+      assert.ok(result.reasons.some((r) => r.includes('completion.check.md')));
+      assert.ok(result.reasons.some((r) => r.toLowerCase().includes('qa')));
     });
   });
 });
@@ -1344,17 +1511,27 @@ describe('parseTicketInput', () => {
 
   it('should parse Jira ticket with suffix', () => {
     const result = parseTicketInput('PROJ-123/migration-step');
-    assert.deepStrictEqual(result, { ticketBase: 'PROJ-123', suffix: 'migration-step', separator: '/' });
+    assert.deepStrictEqual(result, {
+      ticketBase: 'PROJ-123',
+      suffix: 'migration-step',
+      separator: '/',
+    });
   });
 
   it('should not parse URLs', () => {
     const result = parseTicketInput('https://github.com/org/repo/issues/56');
-    assert.deepStrictEqual(result, { ticketBase: 'https://github.com/org/repo/issues/56', suffix: null });
+    assert.deepStrictEqual(result, {
+      ticketBase: 'https://github.com/org/repo/issues/56',
+      suffix: null,
+    });
   });
 
   it('should not parse http URLs', () => {
     const result = parseTicketInput('http://example.com/path/to/resource');
-    assert.deepStrictEqual(result, { ticketBase: 'http://example.com/path/to/resource', suffix: null });
+    assert.deepStrictEqual(result, {
+      ticketBase: 'http://example.com/path/to/resource',
+      suffix: null,
+    });
   });
 
   it('should not parse description inputs containing slashes', () => {
@@ -1391,7 +1568,11 @@ describe('parseTicketInput', () => {
 
   it('should support underscores and hyphens in suffix', () => {
     const result = parseTicketInput('GH-145/step_2-alpha');
-    assert.deepStrictEqual(result, { ticketBase: 'GH-145', suffix: 'step_2-alpha', separator: '/' });
+    assert.deepStrictEqual(result, {
+      ticketBase: 'GH-145',
+      suffix: 'step_2-alpha',
+      separator: '/',
+    });
   });
 
   it('should reject nested suffixes', () => {

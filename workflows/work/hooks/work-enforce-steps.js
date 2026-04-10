@@ -11,16 +11,27 @@
 
 const fs = require('fs');
 const path = require('path');
+const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
 
 let didBlock = false;
-process.on('uncaughtException', () => process.exit(didBlock ? 2 : 0));
-process.on('unhandledRejection', () => process.exit(didBlock ? 2 : 0));
+process.on('uncaughtException', (err) => {
+  logHookError(__filename, err);
+  process.exit(didBlock ? 2 : 0);
+});
+process.on('unhandledRejection', (err) => {
+  logHookError(__filename, err);
+  process.exit(didBlock ? 2 : 0);
+});
 
 let config;
 try {
   config = require('../../lib/config');
 } catch (err) {
-  if (err && err.code === 'MODULE_NOT_FOUND' && /['"]\.\.\/\.\.\/lib\/config['"]/.test(err.message)) {
+  if (
+    err &&
+    err.code === 'MODULE_NOT_FOUND' &&
+    /['"]\.\.\/\.\.\/lib\/config['"]/.test(err.message)
+  ) {
     config = null;
   } else {
     throw err;
@@ -29,7 +40,11 @@ try {
 if (!config) process.exit(0);
 
 let toolInput;
-try { toolInput = JSON.parse(process.env.TOOL_INPUT || '{}'); } catch { toolInput = {}; }
+try {
+  toolInput = JSON.parse(process.env.TOOL_INPUT || '{}');
+} catch {
+  toolInput = {};
+}
 const hookType = process.env.CLAUDE_HOOK_TYPE || 'PostToolUse'; // PreToolUse or PostToolUse
 
 // Only handle work and work-pr skills
@@ -66,7 +81,7 @@ if (hookType === 'PreToolUse') {
     const sessionData = {
       startedAt: new Date().toISOString(),
       ticketId,
-      workPrExecuted: false
+      workPrExecuted: false,
     };
     fs.writeFileSync(SESSION_FILE, JSON.stringify(sessionData, null, 2));
 
@@ -82,14 +97,13 @@ if (hookType === 'PreToolUse') {
     // /work-pr being called - mark it as executed
     const executedData = {
       executedAt: new Date().toISOString(),
-      ticketId
+      ticketId,
     };
     fs.writeFileSync(WORK_PR_EXECUTED_FILE, JSON.stringify(executedData, null, 2));
     console.log(`✅ /work-pr marked as executed for ${ticketId}`);
   }
 
   process.exit(0);
-
 } else {
   // ========== POST TOOL USE ==========
 

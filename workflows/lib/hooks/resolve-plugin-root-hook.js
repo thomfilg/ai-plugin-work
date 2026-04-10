@@ -13,10 +13,17 @@
  */
 
 const path = require('path');
+const { logHookError } = require(path.join(__dirname, '..', 'hook-error-log'));
 
 // Fail-open: unexpected errors should never block unrelated commands
-process.on('uncaughtException', () => process.exit(0));
-process.on('unhandledRejection', () => process.exit(0));
+process.on('uncaughtException', (err) => {
+  logHookError(__filename, err);
+  process.exit(0);
+});
+process.on('unhandledRejection', (err) => {
+  logHookError(__filename, err);
+  process.exit(0);
+});
 
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(__dirname, '..', '..', '..');
 
@@ -28,10 +35,7 @@ async function main() {
   const command = hookData?.tool_input?.command || '';
 
   // Check if command contains unresolved CLAUDE_PLUGIN_ROOT
-  if (
-    !command.includes('${CLAUDE_PLUGIN_ROOT}') &&
-    !command.includes('$CLAUDE_PLUGIN_ROOT')
-  ) {
+  if (!command.includes('${CLAUDE_PLUGIN_ROOT}') && !command.includes('$CLAUDE_PLUGIN_ROOT')) {
     process.exit(0); // allow — nothing to resolve
   }
 
@@ -50,4 +54,7 @@ async function main() {
   process.exit(2);
 }
 
-main().catch(() => process.exit(0));
+main().catch((err) => {
+  logHookError(__filename, err);
+  process.exit(0);
+});

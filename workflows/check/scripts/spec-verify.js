@@ -56,7 +56,7 @@ function validatePath(p) {
   // Check each path segment individually — only reject literal '..' segments,
   // not paths that merely contain '..' as part of a name (e.g., '..cache')
   const segments = normalized.split(path.sep);
-  if (segments.some(seg => seg === '..')) {
+  if (segments.some((seg) => seg === '..')) {
     return { valid: false, reason: `Path traversal rejected: ${p}` };
   }
   // path.isAbsolute covers POSIX absolute paths; Windows drive-relative paths (C:foo) are out of scope
@@ -218,7 +218,12 @@ function parseMarkerLine(line) {
 function checkFileExists(args, root) {
   const [filePath] = args;
   if (!filePath) {
-    return { type: 'FILE_EXISTS', args, passed: false, reason: 'FILE_EXISTS requires one argument: <path>' };
+    return {
+      type: 'FILE_EXISTS',
+      args,
+      passed: false,
+      reason: 'FILE_EXISTS requires one argument: <path>',
+    };
   }
   const validation = validatePath(filePath);
   if (!validation.valid) {
@@ -228,7 +233,12 @@ function checkFileExists(args, root) {
   if (fs.existsSync(full)) {
     return { type: 'FILE_EXISTS', args, passed: true };
   }
-  return { type: 'FILE_EXISTS', args, passed: false, reason: `Expected file ${filePath} to exist — not found` };
+  return {
+    type: 'FILE_EXISTS',
+    args,
+    passed: false,
+    reason: `Expected file ${filePath} to exist — not found`,
+  };
 }
 
 /**
@@ -240,7 +250,12 @@ function checkFileExists(args, root) {
 function checkGrep(args, root) {
   const [filePath, patternStr] = args;
   if (!filePath || !patternStr) {
-    return { type: 'GREP', args, passed: false, reason: 'GREP requires two arguments: <path> <pattern>' };
+    return {
+      type: 'GREP',
+      args,
+      passed: false,
+      reason: 'GREP requires two arguments: <path> <pattern>',
+    };
   }
   const validation = validatePath(filePath);
   if (!validation.valid) {
@@ -250,7 +265,12 @@ function checkGrep(args, root) {
   // Parse /regex/flags
   const match = /^\/(.+)\/([gimsuy]*)$/.exec(patternStr);
   if (!match) {
-    return { type: 'GREP', args, passed: false, reason: `Invalid regex pattern: ${String(patternStr)} — must use /regex/ delimiters` };
+    return {
+      type: 'GREP',
+      args,
+      passed: false,
+      reason: `Invalid regex pattern: ${String(patternStr)} — must use /regex/ delimiters`,
+    };
   }
 
   /** @type {RegExp} */
@@ -273,7 +293,12 @@ function checkGrep(args, root) {
   if (regex.test(content)) {
     return { type: 'GREP', args, passed: true };
   }
-  return { type: 'GREP', args, passed: false, reason: `Expected pattern ${patternStr} in ${filePath} — no match found` };
+  return {
+    type: 'GREP',
+    args,
+    passed: false,
+    reason: `Expected pattern ${patternStr} in ${filePath} — no match found`,
+  };
 }
 
 /**
@@ -285,7 +310,12 @@ function checkGrep(args, root) {
 function checkTestCount(args, root) {
   const [globPattern, minStr] = args;
   if (!globPattern || minStr == null) {
-    return { type: 'TEST_COUNT', args, passed: false, reason: 'TEST_COUNT requires two arguments: <glob-pattern> <minimum>' };
+    return {
+      type: 'TEST_COUNT',
+      args,
+      passed: false,
+      reason: 'TEST_COUNT requires two arguments: <glob-pattern> <minimum>',
+    };
   }
   // Validate the glob pattern prefix (before any wildcards) doesn't contain path traversal.
   // globPattern is guaranteed to be a non-empty string by the guard above.
@@ -315,7 +345,12 @@ function checkTestCount(args, root) {
   if (count >= minimum) {
     return { type: 'TEST_COUNT', args, passed: true };
   }
-  return { type: 'TEST_COUNT', args, passed: false, reason: `Expected at least ${minimum} test()/it() calls in ${globPattern} — found ${count}` };
+  return {
+    type: 'TEST_COUNT',
+    args,
+    passed: false,
+    reason: `Expected at least ${minimum} test()/it() calls in ${globPattern} — found ${count}`,
+  };
 }
 
 /**
@@ -327,7 +362,12 @@ function checkTestCount(args, root) {
 function checkReuses(args, root) {
   const [filePath, importPattern] = args;
   if (!filePath || !importPattern) {
-    return { type: 'REUSES', args, passed: false, reason: 'REUSES requires two arguments: <path> <import-pattern>' };
+    return {
+      type: 'REUSES',
+      args,
+      passed: false,
+      reason: 'REUSES requires two arguments: <path> <import-pattern>',
+    };
   }
   const validation = validatePath(filePath);
   if (!validation.valid) {
@@ -346,13 +386,18 @@ function checkReuses(args, root) {
   // Check for import or require containing the pattern (line-by-line to avoid cross-line false positives)
   const escaped = escapeRegex(importPattern);
   const importRegex = new RegExp(
-    `(import\\s.*${escaped}|${escaped}.*require\\s*\\(|require\\s*\\(.*${escaped})`,
+    `(import\\s.*${escaped}|${escaped}.*require\\s*\\(|require\\s*\\(.*${escaped})`
   );
   const lines = content.split(/\r?\n/);
-  if (lines.some(line => importRegex.test(line))) {
+  if (lines.some((line) => importRegex.test(line))) {
     return { type: 'REUSES', args, passed: true };
   }
-  return { type: 'REUSES', args, passed: false, reason: `Expected import matching "${importPattern}" in ${filePath} — not found` };
+  return {
+    type: 'REUSES',
+    args,
+    passed: false,
+    reason: `Expected import matching "${importPattern}" in ${filePath} — not found`,
+  };
 }
 
 /**
@@ -384,7 +429,12 @@ function runChecks(markers, root) {
   return markers.map(({ type, args }) => {
     const checker = CHECKERS[type];
     if (!checker) {
-      return { type, args, passed: false, reason: `Unknown marker type "${type}" — supported types: ${Object.keys(CHECKERS).join(', ')}` };
+      return {
+        type,
+        args,
+        passed: false,
+        reason: `Unknown marker type "${type}" — supported types: ${Object.keys(CHECKERS).join(', ')}`,
+      };
     }
     return checker(args, root);
   });
@@ -419,7 +469,14 @@ function main() {
 
   // No checklist header at all → fail-open for legacy specs without verification
   if (!hasChecklist) {
-    const noChecklistResult = { hasChecklist: false, checks: [], passed: 0, failed: 0, total: 0, success: true };
+    const noChecklistResult = {
+      hasChecklist: false,
+      checks: [],
+      passed: 0,
+      failed: 0,
+      total: 0,
+      success: true,
+    };
     if (jsonMode) {
       console.log(JSON.stringify(noChecklistResult));
     } else {
@@ -430,7 +487,21 @@ function main() {
 
   // Checklist header present but empty → authoring error, require at least one marker
   if (markers.length === 0) {
-    const emptyChecklistResult = { hasChecklist: true, checks: [{ type: 'EMPTY_CHECKLIST', args: [], passed: false, reason: 'Verification Checklist header found but contains no markers' }], passed: 0, failed: 1, total: 1, success: false };
+    const emptyChecklistResult = {
+      hasChecklist: true,
+      checks: [
+        {
+          type: 'EMPTY_CHECKLIST',
+          args: [],
+          passed: false,
+          reason: 'Verification Checklist header found but contains no markers',
+        },
+      ],
+      passed: 0,
+      failed: 1,
+      total: 1,
+      success: false,
+    };
     if (jsonMode) {
       console.log(JSON.stringify(emptyChecklistResult));
     } else {
@@ -440,8 +511,8 @@ function main() {
   }
 
   const checks = runChecks(markers, root);
-  const passed = checks.filter(c => c.passed).length;
-  const failed = checks.filter(c => !c.passed).length;
+  const passed = checks.filter((c) => c.passed).length;
+  const failed = checks.filter((c) => !c.passed).length;
   const total = checks.length;
   const success = failed === 0;
 
@@ -458,7 +529,9 @@ function main() {
         console.log(`  Warning: unknown marker type`);
       }
     }
-    console.log(`\nResult: ${passed}/${total} checks passed${failed > 0 ? `, ${failed} failed` : ''}`);
+    console.log(
+      `\nResult: ${passed}/${total} checks passed${failed > 0 ? `, ${failed} failed` : ''}`
+    );
   }
 
   process.exit(success ? 0 : 1);

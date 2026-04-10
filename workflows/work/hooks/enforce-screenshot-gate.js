@@ -13,16 +13,27 @@
 const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
 
 let didBlock = false;
-process.on('uncaughtException', () => process.exit(didBlock ? 2 : 0));
-process.on('unhandledRejection', () => process.exit(didBlock ? 2 : 0));
+process.on('uncaughtException', (err) => {
+  logHookError(__filename, err);
+  process.exit(didBlock ? 2 : 0);
+});
+process.on('unhandledRejection', (err) => {
+  logHookError(__filename, err);
+  process.exit(didBlock ? 2 : 0);
+});
 
 let config;
 try {
   config = require('../../lib/config');
 } catch (err) {
-  if (err && err.code === 'MODULE_NOT_FOUND' && /['"]\.\.\/\.\.\/lib\/config['"]/.test(err.message)) {
+  if (
+    err &&
+    err.code === 'MODULE_NOT_FOUND' &&
+    /['"]\.\.\/\.\.\/lib\/config['"]/.test(err.message)
+  ) {
     config = null;
   } else {
     throw err;
@@ -65,7 +76,7 @@ async function main() {
     gitRoot = execSync('git rev-parse --show-toplevel', {
       encoding: 'utf8',
       timeout: 5000,
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
   } catch {
     process.exit(0);
@@ -79,17 +90,20 @@ async function main() {
       encoding: 'utf8',
       timeout: 10000,
       cwd: gitRoot,
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
 
     if (diff) {
-      tsxChanged = diff.split('\n').filter(f =>
-        !f.includes('.test.') &&
-        !f.includes('.spec.') &&
-        !f.includes('.stories.') &&
-        !f.includes('__tests__') &&
-        !f.includes('.d.ts')
-      );
+      tsxChanged = diff
+        .split('\n')
+        .filter(
+          (f) =>
+            !f.includes('.test.') &&
+            !f.includes('.spec.') &&
+            !f.includes('.stories.') &&
+            !f.includes('__tests__') &&
+            !f.includes('.d.ts')
+        );
     }
   } catch {
     process.exit(0);
@@ -106,7 +120,7 @@ async function main() {
     const branch = execSync('git branch --show-current', {
       encoding: 'utf8',
       timeout: 5000,
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
     const match = branch.match(new RegExp(config.TICKET_PROJECT_KEY + '-\\d+'));
     ticketId = match ? match[0] : null;
@@ -123,7 +137,7 @@ async function main() {
     try {
       if (fs.existsSync(screenshotDir)) {
         const files = fs.readdirSync(screenshotDir, { recursive: true });
-        screenshotCount = files.filter(f => {
+        screenshotCount = files.filter((f) => {
           const ext = path.extname(String(f)).toLowerCase();
           return ['.png', '.jpg', '.jpeg', '.gif', '.webp'].includes(ext);
         }).length;
@@ -138,7 +152,10 @@ async function main() {
   }
 
   // BLOCK: TSX changed but no screenshots
-  const fileList = tsxChanged.slice(0, 10).map(f => `  - ${f}`).join('\n');
+  const fileList = tsxChanged
+    .slice(0, 10)
+    .map((f) => `  - ${f}`)
+    .join('\n');
   const moreFiles = tsxChanged.length > 10 ? `\n  ... and ${tsxChanged.length - 10} more` : '';
 
   process.stderr.write(`
@@ -167,4 +184,7 @@ ${fileList}${moreFiles}
   process.exit(2);
 }
 
-main().catch(() => process.exit(didBlock ? 2 : 0));
+main().catch((err) => {
+  logHookError(__filename, err);
+  process.exit(didBlock ? 2 : 0);
+});

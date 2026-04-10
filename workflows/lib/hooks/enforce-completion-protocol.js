@@ -17,6 +17,11 @@ const path = require('path');
 const { execSync } = require('child_process');
 const { logHookError } = require(path.join(__dirname, '..', 'hook-error-log'));
 
+// Allow disabling via env var
+if (process.env.DISABLE_COMPLETION_CHECK === '1') {
+  process.exit(0);
+}
+
 // Completion phrases to detect
 const COMPLETION_PHRASES = [
   /\bimplementation\s+(?:is\s+)?complete/i,
@@ -52,8 +57,30 @@ const ONGOING_PHRASES = [
 
 // File extensions and their categories
 const FILE_CATEGORIES = {
-  code: ['.ts', '.tsx', '.js', '.jsx', '.py', '.java', '.go', '.rs', '.cpp', '.c', '.cs', '.php', '.rb'],
-  config: ['vite.config', 'webpack.config', 'tsconfig', 'eslint', 'prettier', 'jest.config', 'vitest.config'],
+  code: [
+    '.ts',
+    '.tsx',
+    '.js',
+    '.jsx',
+    '.py',
+    '.java',
+    '.go',
+    '.rs',
+    '.cpp',
+    '.c',
+    '.cs',
+    '.php',
+    '.rb',
+  ],
+  config: [
+    'vite.config',
+    'webpack.config',
+    'tsconfig',
+    'eslint',
+    'prettier',
+    'jest.config',
+    'vitest.config',
+  ],
   docs: ['.md', '.mdx', '.txt', '.rst'],
   ci: ['.yml', '.yaml', '.github'],
   test: ['.test.', '.spec.', '__tests__', 'test/', 'tests/'],
@@ -95,32 +122,32 @@ function categorizeFile(filePath) {
   const lowerPath = filePath.toLowerCase();
 
   // Check for migration files first
-  if (FILE_CATEGORIES.migration.some(pattern => lowerPath.includes(pattern))) {
+  if (FILE_CATEGORIES.migration.some((pattern) => lowerPath.includes(pattern))) {
     return 'migration';
   }
 
   // Check for test files
-  if (FILE_CATEGORIES.test.some(pattern => lowerPath.includes(pattern))) {
+  if (FILE_CATEGORIES.test.some((pattern) => lowerPath.includes(pattern))) {
     return 'test';
   }
 
   // Check for CI files
-  if (FILE_CATEGORIES.ci.some(pattern => lowerPath.includes(pattern))) {
+  if (FILE_CATEGORIES.ci.some((pattern) => lowerPath.includes(pattern))) {
     return 'ci';
   }
 
   // Check for docs
-  if (FILE_CATEGORIES.docs.some(ext => lowerPath.endsWith(ext))) {
+  if (FILE_CATEGORIES.docs.some((ext) => lowerPath.endsWith(ext))) {
     return 'docs';
   }
 
   // Check for config files
-  if (FILE_CATEGORIES.config.some(pattern => lowerPath.includes(pattern))) {
+  if (FILE_CATEGORIES.config.some((pattern) => lowerPath.includes(pattern))) {
     return 'config';
   }
 
   // Check for code files
-  if (FILE_CATEGORIES.code.some(ext => lowerPath.endsWith(ext))) {
+  if (FILE_CATEGORIES.code.some((ext) => lowerPath.endsWith(ext))) {
     return 'code';
   }
 
@@ -181,7 +208,7 @@ function parseTranscript(transcriptPath) {
     'migration-test': false,
     'requirements-verifier': false,
     'code-checker': false,
-    'steps-done': false,  // Always marked as done if we got this far (assistant is declaring completion)
+    'steps-done': false, // Always marked as done if we got this far (assistant is declaring completion)
   };
 
   // Evidence patterns
@@ -242,7 +269,11 @@ function parseTranscript(transcriptPath) {
             // Check for requirements-verifier agent call
             if (block.name === 'Task' && block.input?.subagent_type) {
               const agentType = block.input.subagent_type.toLowerCase();
-              if (agentType.includes('requirements') || agentType.includes('verifier') || agentType.includes('completion-checker')) {
+              if (
+                agentType.includes('requirements') ||
+                agentType.includes('verifier') ||
+                agentType.includes('completion-checker')
+              ) {
                 checks['requirements-verifier'] = true;
               }
               if (agentType.includes('code-checker') || agentType.includes('quality')) {
@@ -254,16 +285,16 @@ function parseTranscript(transcriptPath) {
             if (block.name === 'Bash' && block.input?.command) {
               const cmd = block.input.command;
 
-              if (lintPatterns.some(p => p.test(cmd))) {
+              if (lintPatterns.some((p) => p.test(cmd))) {
                 checks.lint = true;
               }
-              if (typecheckPatterns.some(p => p.test(cmd))) {
+              if (typecheckPatterns.some((p) => p.test(cmd))) {
                 checks.typecheck = true;
               }
-              if (testPatterns.some(p => p.test(cmd))) {
+              if (testPatterns.some((p) => p.test(cmd))) {
                 checks.test = true;
               }
-              if (migrationPatterns.some(p => p.test(cmd))) {
+              if (migrationPatterns.some((p) => p.test(cmd))) {
                 checks['migration-test'] = true;
               }
             }
@@ -273,19 +304,19 @@ function parseTranscript(transcriptPath) {
 
       // Also check tool results for success indicators
       if (entry.type === 'tool_result') {
-        const resultStr = typeof entry.content === 'string' ? entry.content : JSON.stringify(entry.content || '');
+        const resultStr =
+          typeof entry.content === 'string' ? entry.content : JSON.stringify(entry.content || '');
 
-        if (lintPatterns.some(p => p.test(resultStr))) {
+        if (lintPatterns.some((p) => p.test(resultStr))) {
           checks.lint = true;
         }
-        if (typecheckPatterns.some(p => p.test(resultStr))) {
+        if (typecheckPatterns.some((p) => p.test(resultStr))) {
           checks.typecheck = true;
         }
-        if (testPatterns.some(p => p.test(resultStr))) {
+        if (testPatterns.some((p) => p.test(resultStr))) {
           checks.test = true;
         }
       }
-
     } catch (e) {
       // Skip malformed lines
     }
@@ -383,7 +414,7 @@ async function main() {
   const { modifiedFiles: allModifiedFiles, checks } = parseTranscript(transcriptPath);
 
   // Filter to only files inside git repositories
-  const modifiedFiles = allModifiedFiles.filter(f => isInsideGitRepo(f));
+  const modifiedFiles = allModifiedFiles.filter((f) => isInsideGitRepo(f));
 
   // If no files modified in git repos, allow completion
   if (modifiedFiles.length === 0) {
@@ -394,20 +425,20 @@ async function main() {
   const requiredChecks = determineRequiredChecks(modifiedFiles);
 
   // Filter out checks that aren't required for docs-only changes
-  const allDocs = modifiedFiles.every(f => categorizeFile(f) === 'docs');
+  const allDocs = modifiedFiles.every((f) => categorizeFile(f) === 'docs');
   if (allDocs) {
     // For docs-only, just need requirements-verifier
-    const docsRequired = requiredChecks.filter(c => c === 'requirements-verifier');
+    const docsRequired = requiredChecks.filter((c) => c === 'requirements-verifier');
     requiredChecks.length = 0;
     requiredChecks.push(...docsRequired);
   }
 
   // Determine what categories of files we have
-  const hasCodeFiles = modifiedFiles.some(f => {
+  const hasCodeFiles = modifiedFiles.some((f) => {
     const cat = categorizeFile(f);
     return cat === 'code' || cat === 'test' || cat === 'config';
   });
-  const hasMigrationFiles = modifiedFiles.some(f => categorizeFile(f) === 'migration');
+  const hasMigrationFiles = modifiedFiles.some((f) => categorizeFile(f) === 'migration');
 
   // Build the checklist items with status
   const checklist = [];
@@ -463,9 +494,11 @@ async function main() {
   }
 
   if (missing.length > 0) {
-    const fileCategories = modifiedFiles.map(f => `  - ${f} (${categorizeFile(f)})`).join('\n');
+    const fileCategories = modifiedFiles.map((f) => `  - ${f} (${categorizeFile(f)})`).join('\n');
 
-    process.stderr.write(`BLOCKED: Task Completion Protocol Violation\n\nYou declared the task complete, but verification is missing!\n\nFiles Modified:\n${fileCategories}\n\nVerification Checklist:\n${checklist.join('\n')}\n\nMissing: ${missing.join(', ')}\n\nREQUIRED: Complete all unchecked items above, then declare the task done.\n`);
+    process.stderr.write(
+      `BLOCKED: Task Completion Protocol Violation\n\nYou declared the task complete, but verification is missing!\n\nFiles Modified:\n${fileCategories}\n\nVerification Checklist:\n${checklist.join('\n')}\n\nMissing: ${missing.join(', ')}\n\nREQUIRED: Complete all unchecked items above, then declare the task done.\n`
+    );
     process.exit(2);
   }
 
@@ -473,7 +506,7 @@ async function main() {
   process.exit(0);
 }
 
-main().catch(err => {
+main().catch((err) => {
   logHookError(__filename, err);
   process.exit(0);
 });

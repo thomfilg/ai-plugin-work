@@ -89,7 +89,10 @@ describe('WorkflowState', () => {
       // Create the instance directory and write corrupt JSON
       const instanceDir = path.join(TEST_BASE, INSTANCE);
       fs.mkdirSync(instanceDir, { recursive: true });
-      fs.writeFileSync(path.join(instanceDir, '.test-workflow.workflow-state.json'), '{not valid json!!!');
+      fs.writeFileSync(
+        path.join(instanceDir, '.test-workflow.workflow-state.json'),
+        '{not valid json!!!'
+      );
 
       const result = ws.load(INSTANCE);
       assert.strictEqual(result, null);
@@ -111,7 +114,7 @@ describe('WorkflowState', () => {
       };
       fs.writeFileSync(
         path.join(instanceDir, '.test-workflow.workflow-state.json'),
-        JSON.stringify(legacyState, null, 2),
+        JSON.stringify(legacyState, null, 2)
       );
 
       const loaded = ws.load(INSTANCE);
@@ -150,8 +153,10 @@ describe('WorkflowState', () => {
       assert.strictEqual(onDisk.lastUpdate, saved.lastUpdate);
     });
 
-    (process.platform === 'win32' || (typeof process.getuid === 'function' && process.getuid() === 0)
-      ? it.skip : it)('handles EACCES permission error on state directory gracefully', () => {
+    (process.platform === 'win32' ||
+      (typeof process.getuid === 'function' && process.getuid() === 0)
+      ? it.skip
+      : it)('handles EACCES permission error on state directory gracefully', () => {
       ws = createWs();
       // Point to a directory we cannot write to
       const readOnlyDir = path.join(TEST_BASE, 'readonly-dir');
@@ -167,12 +172,15 @@ describe('WorkflowState', () => {
         errors: [],
       };
 
-      assert.throws(() => {
-        readOnlyWs.save('blocked', state);
-      }, (err) => {
-        // Should throw a filesystem error (EACCES or EPERM depending on OS)
-        return err.code === 'EACCES' || err.code === 'EPERM';
-      });
+      assert.throws(
+        () => {
+          readOnlyWs.save('blocked', state);
+        },
+        (err) => {
+          // Should throw a filesystem error (EACCES or EPERM depending on OS)
+          return err.code === 'EACCES' || err.code === 'EPERM';
+        }
+      );
 
       // Restore permissions so cleanup works
       fs.chmodSync(readOnlyDir, 0o755);
@@ -204,7 +212,7 @@ describe('WorkflowState', () => {
           assert.ok(err instanceof Error);
           assert.ok(err.message.includes('ghost-instance'));
           return true;
-        },
+        }
       );
     });
   });
@@ -319,9 +327,9 @@ describe('WorkflowState', () => {
       assert.ok(output.includes('Steps:'), 'should contain Steps label');
 
       // Status icons (completed, in_progress, pending)
-      assert.ok(output.includes('\u2705'), 'should contain completed icon');  // checkmark
-      assert.ok(output.includes('\uD83D\uDD04'), 'should contain in_progress icon');  // arrows
-      assert.ok(output.includes('\u23F3'), 'should contain pending icon');    // hourglass
+      assert.ok(output.includes('\u2705'), 'should contain completed icon'); // checkmark
+      assert.ok(output.includes('\uD83D\uDD04'), 'should contain in_progress icon'); // arrows
+      assert.ok(output.includes('\u23F3'), 'should contain pending icon'); // hourglass
 
       // Step names
       assert.ok(output.includes('1_parse'), 'should list 1_parse step');
@@ -350,7 +358,11 @@ describe('WorkflowState', () => {
       if (!fs.existsSync(instanceDir)) fs.mkdirSync(instanceDir, { recursive: true });
 
       // Write only the legacy file
-      const legacyState = { workflow: 'test-workflow', status: 'in_progress', stepStatus: { step1: 'completed' } };
+      const legacyState = {
+        workflow: 'test-workflow',
+        status: 'in_progress',
+        stepStatus: { step1: 'completed' },
+      };
       fs.writeFileSync(path.join(instanceDir, '.workflow-state.json'), JSON.stringify(legacyState));
 
       const loaded = ws.load(INSTANCE);
@@ -444,7 +456,7 @@ describe('WorkflowState', () => {
           assert.ok(err instanceof Error);
           assert.ok(err.message.includes(INSTANCE));
           return true;
-        },
+        }
       );
     });
 
@@ -463,7 +475,11 @@ describe('WorkflowState', () => {
       const instanceDir = path.join(ISOLATION_DIR, INSTANCE);
       fs.mkdirSync(instanceDir, { recursive: true });
 
-      const legacyState = { workflow: 'check', status: 'in_progress', stepStatus: { step1: 'completed' } };
+      const legacyState = {
+        workflow: 'check',
+        status: 'in_progress',
+        stepStatus: { step1: 'completed' },
+      };
       fs.writeFileSync(path.join(instanceDir, '.workflow-state.json'), JSON.stringify(legacyState));
 
       const loaded = wsWorkPr.load(INSTANCE);
@@ -475,7 +491,11 @@ describe('WorkflowState', () => {
       const instanceDir = path.join(ISOLATION_DIR, INSTANCE);
       fs.mkdirSync(instanceDir, { recursive: true });
 
-      const legacyState = { workflow: 'check', status: 'in_progress', stepStatus: { step1: 'completed' } };
+      const legacyState = {
+        workflow: 'check',
+        status: 'in_progress',
+        stepStatus: { step1: 'completed' },
+      };
       fs.writeFileSync(path.join(instanceDir, '.workflow-state.json'), JSON.stringify(legacyState));
 
       const loaded = wsCheck.load(INSTANCE);
@@ -488,13 +508,20 @@ describe('WorkflowState', () => {
       const instanceDir = path.join(ISOLATION_DIR, INSTANCE);
       fs.mkdirSync(instanceDir, { recursive: true });
 
-      const legacyState = { workflow: 'check', status: 'in_progress', stepStatus: { step1: 'completed' } };
+      const legacyState = {
+        workflow: 'check',
+        status: 'in_progress',
+        stepStatus: { step1: 'completed' },
+      };
       fs.writeFileSync(path.join(instanceDir, '.workflow-state.json'), JSON.stringify(legacyState));
 
       // Capture stderr
       const originalWrite = process.stderr.write;
       let stderrOutput = '';
-      process.stderr.write = (chunk) => { stderrOutput += chunk; return true; };
+      process.stderr.write = (chunk) => {
+        stderrOutput += chunk;
+        return true;
+      };
 
       try {
         wsCheck.load(INSTANCE);
@@ -509,7 +536,11 @@ describe('WorkflowState', () => {
       assert.ok(stderrOutput.includes('check'), 'Should mention workflow name');
       // Warning should appear exactly once despite two load() calls
       const count = (stderrOutput.match(/DEPRECATED/g) || []).length;
-      assert.strictEqual(count, 1, 'Deprecation warning should be emitted only once per workflow+instanceId');
+      assert.strictEqual(
+        count,
+        1,
+        'Deprecation warning should be emitted only once per workflow+instanceId'
+      );
     });
   });
 });

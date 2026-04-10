@@ -1,13 +1,24 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { classifyCommentPriority, isBlockingPriority, getResolvedCommentIds, resolveOutdatedThreads, decideNextAction, getAdaptiveInterval, getCodeContext } = require('../follow-up-pr.js');
+const {
+  classifyCommentPriority,
+  isBlockingPriority,
+  getResolvedCommentIds,
+  resolveOutdatedThreads,
+  decideNextAction,
+  getAdaptiveInterval,
+  getCodeContext,
+} = require('../follow-up-pr.js');
 
 describe('classifyCommentPriority', () => {
   describe('Copilot (copilot-pull-request-reviewer)', () => {
     const author = 'copilot-pull-request-reviewer';
 
     it('returns low for [nitpick] comments', () => {
-      assert.equal(classifyCommentPriority(author, '[nitpick] Consider renaming this variable'), 'low');
+      assert.equal(
+        classifyCommentPriority(author, '[nitpick] Consider renaming this variable'),
+        'low'
+      );
     });
 
     it('returns low for [NITPICK] (case-insensitive)', () => {
@@ -27,7 +38,10 @@ describe('classifyCommentPriority', () => {
     });
 
     it('returns high for [critical] tag', () => {
-      assert.equal(classifyCommentPriority(author, '[critical] Security vulnerability in auth'), 'high');
+      assert.equal(
+        classifyCommentPriority(author, '[critical] Security vulnerability in auth'),
+        'high'
+      );
     });
 
     it('returns high for [high] tag', () => {
@@ -59,7 +73,8 @@ describe('classifyCommentPriority', () => {
     });
 
     it('does not false-match [low] tag appearing inside body text (not at start)', () => {
-      const body = '[critical] Step 5.4 says to "skip the comment entirely"...\n```suggestion\n1. If the conflicting AI comment is non-blocking ([low] or [nitpick]):\n```';
+      const body =
+        '[critical] Step 5.4 says to "skip the comment entirely"...\n```suggestion\n1. If the conflicting AI comment is non-blocking ([low] or [nitpick]):\n```';
       assert.equal(classifyCommentPriority(author, body), 'high');
     });
   });
@@ -68,11 +83,17 @@ describe('classifyCommentPriority', () => {
     const author = 'cursor-ai[bot]';
 
     it('returns high for **severity**: critical', () => {
-      assert.equal(classifyCommentPriority(author, '**severity**: critical\nThis is a security issue'), 'high');
+      assert.equal(
+        classifyCommentPriority(author, '**severity**: critical\nThis is a security issue'),
+        'high'
+      );
     });
 
     it('returns high for **severity**: high', () => {
-      assert.equal(classifyCommentPriority(author, '**severity**: high\nMissing error handling'), 'high');
+      assert.equal(
+        classifyCommentPriority(author, '**severity**: high\nMissing error handling'),
+        'high'
+      );
     });
 
     it('returns high for severity: major', () => {
@@ -80,15 +101,24 @@ describe('classifyCommentPriority', () => {
     });
 
     it('returns medium for **severity**: medium', () => {
-      assert.equal(classifyCommentPriority(author, '**severity**: medium\nConsider refactoring'), 'medium');
+      assert.equal(
+        classifyCommentPriority(author, '**severity**: medium\nConsider refactoring'),
+        'medium'
+      );
     });
 
     it('returns medium for severity: moderate', () => {
-      assert.equal(classifyCommentPriority(author, 'severity: moderate — could be cleaner'), 'medium');
+      assert.equal(
+        classifyCommentPriority(author, 'severity: moderate — could be cleaner'),
+        'medium'
+      );
     });
 
     it('returns low for **severity**: minor', () => {
-      assert.equal(classifyCommentPriority(author, '**severity**: minor\nNaming suggestion'), 'low');
+      assert.equal(
+        classifyCommentPriority(author, '**severity**: minor\nNaming suggestion'),
+        'low'
+      );
     });
 
     it('returns low for severity: low', () => {
@@ -126,7 +156,10 @@ describe('classifyCommentPriority', () => {
     });
 
     it('returns high regardless of body content', () => {
-      assert.equal(classifyCommentPriority('reviewer123', '[nitpick] even with nitpick tag'), 'high');
+      assert.equal(
+        classifyCommentPriority('reviewer123', '[nitpick] even with nitpick tag'),
+        'high'
+      );
     });
   });
 });
@@ -175,10 +208,11 @@ describe('getResolvedCommentIds', () => {
   });
 
   it('collects comment IDs from resolved threads', () => {
-    const exec = () => makeGraphQLResponse([
-      { isResolved: true, isOutdated: false, comments: makeComments([100, 101]) },
-      { isResolved: false, isOutdated: false, comments: makeComments([200]) },
-    ]);
+    const exec = () =>
+      makeGraphQLResponse([
+        { isResolved: true, isOutdated: false, comments: makeComments([100, 101]) },
+        { isResolved: false, isOutdated: false, comments: makeComments([200]) },
+      ]);
     const { resolved } = getResolvedCommentIds('owner/repo', 1, exec);
     assert.equal(resolved.has(100), true);
     assert.equal(resolved.has(101), true);
@@ -186,17 +220,19 @@ describe('getResolvedCommentIds', () => {
   });
 
   it('collects comment IDs from outdated threads', () => {
-    const exec = () => makeGraphQLResponse([
-      { id: 'PRRT_1', isResolved: false, isOutdated: true, comments: makeComments([300]) },
-    ]);
+    const exec = () =>
+      makeGraphQLResponse([
+        { id: 'PRRT_1', isResolved: false, isOutdated: true, comments: makeComments([300]) },
+      ]);
     const { resolved } = getResolvedCommentIds('owner/repo', 1, exec);
     assert.equal(resolved.has(300), true);
   });
 
   it('collects all comments per thread (not just first)', () => {
-    const exec = () => makeGraphQLResponse([
-      { isResolved: true, isOutdated: false, comments: makeComments([1, 2, 3]) },
-    ]);
+    const exec = () =>
+      makeGraphQLResponse([
+        { isResolved: true, isOutdated: false, comments: makeComments([1, 2, 3]) },
+      ]);
     const { resolved } = getResolvedCommentIds('owner/repo', 1, exec);
     assert.equal(resolved.size, 3);
     assert.equal(resolved.has(1), true);
@@ -211,12 +247,13 @@ describe('getResolvedCommentIds', () => {
       if (callCount === 1) {
         return makeGraphQLResponse(
           [{ isResolved: true, isOutdated: false, comments: makeComments([10]) }],
-          true, 'cursor-abc',
+          true,
+          'cursor-abc'
         );
       }
-      return makeGraphQLResponse(
-        [{ isResolved: true, isOutdated: false, comments: makeComments([20]) }],
-      );
+      return makeGraphQLResponse([
+        { isResolved: true, isOutdated: false, comments: makeComments([20]) },
+      ]);
     };
     const { resolved } = getResolvedCommentIds('owner/repo', 1, exec);
     assert.equal(resolved.size, 2);
@@ -226,7 +263,9 @@ describe('getResolvedCommentIds', () => {
   });
 
   it('returns empty set on GraphQL failure (graceful fallback)', () => {
-    const exec = () => { throw new Error('GraphQL failed'); };
+    const exec = () => {
+      throw new Error('GraphQL failed');
+    };
     const { resolved, outdatedThreadIds } = getResolvedCommentIds('owner/repo', 1, exec);
     assert.equal(resolved.size, 0);
     assert.equal(outdatedThreadIds.length, 0);
@@ -257,11 +296,12 @@ describe('getResolvedCommentIds', () => {
   });
 
   it('handles threads with missing comments gracefully', () => {
-    const exec = () => makeGraphQLResponse([
-      { isResolved: true, isOutdated: false, comments: makeComments([]) },
-      { isResolved: true, isOutdated: false, comments: null },
-      { isResolved: true, isOutdated: false },
-    ]);
+    const exec = () =>
+      makeGraphQLResponse([
+        { isResolved: true, isOutdated: false, comments: makeComments([]) },
+        { isResolved: true, isOutdated: false, comments: null },
+        { isResolved: true, isOutdated: false },
+      ]);
     const { resolved } = getResolvedCommentIds('owner/repo', 1, exec);
     assert.equal(resolved.size, 0);
   });
@@ -284,7 +324,8 @@ describe('getResolvedCommentIds', () => {
       if (callCount === 1) {
         return makeGraphQLResponse(
           [{ isResolved: true, isOutdated: false, comments: makeComments([10]) }],
-          true, 'cursor-abc',
+          true,
+          'cursor-abc'
         );
       }
       throw new Error('Network error mid-pagination');
@@ -294,11 +335,17 @@ describe('getResolvedCommentIds', () => {
   });
 
   it('returns outdated thread IDs for threads that are outdated but not resolved', () => {
-    const exec = () => makeGraphQLResponse([
-      { id: 'PRRT_outdated1', isResolved: false, isOutdated: true, comments: makeComments([500]) },
-      { id: 'PRRT_resolved', isResolved: true, isOutdated: true, comments: makeComments([501]) },
-      { id: 'PRRT_active', isResolved: false, isOutdated: false, comments: makeComments([502]) },
-    ]);
+    const exec = () =>
+      makeGraphQLResponse([
+        {
+          id: 'PRRT_outdated1',
+          isResolved: false,
+          isOutdated: true,
+          comments: makeComments([500]),
+        },
+        { id: 'PRRT_resolved', isResolved: true, isOutdated: true, comments: makeComments([501]) },
+        { id: 'PRRT_active', isResolved: false, isOutdated: false, comments: makeComments([502]) },
+      ]);
     const { outdatedThreadIds } = getResolvedCommentIds('owner/repo', 1, exec);
     assert.equal(outdatedThreadIds.length, 1);
     assert.equal(outdatedThreadIds[0], 'PRRT_outdated1');
@@ -320,7 +367,9 @@ describe('resolveOutdatedThreads', () => {
   });
 
   it('returns 0 for empty array', () => {
-    const exec = () => { throw new Error('should not be called'); };
+    const exec = () => {
+      throw new Error('should not be called');
+    };
     const dismissed = resolveOutdatedThreads([], exec);
     assert.equal(dismissed, 0);
   });
@@ -419,7 +468,11 @@ describe('decideNextAction', () => {
   });
 
   it('returns poll (not exit-fail) when blocking reviews exist but bot reviews are pending', () => {
-    const blockingWithPendingBots = { hasBlocking: true, pendingBots: ['copilot-pull-request-reviewer'], blocking: [{ author: 'copilot' }] };
+    const blockingWithPendingBots = {
+      hasBlocking: true,
+      pendingBots: ['copilot-pull-request-reviewer'],
+      blocking: [{ author: 'copilot' }],
+    };
     const result = decideNextAction('passing', mergeReady, blockingWithPendingBots, false);
     assert.equal(result.action, 'poll');
     assert.match(result.waitReason, /blocking reviews may become stale/);
@@ -492,7 +545,7 @@ describe('getCodeContext', () => {
     const result = getCodeContext('workflows/work/scripts/__tests__/follow-up-pr.test.js', 3, 1);
     assert.ok(result);
     const lines = result.split('\n');
-    const markedLine = lines.find(l => l.startsWith('>>>'));
+    const markedLine = lines.find((l) => l.startsWith('>>>'));
     assert.ok(markedLine, 'should have a >>> marker');
     assert.ok(markedLine.includes('3:'), 'marker should be on line 3');
   });
@@ -513,7 +566,11 @@ describe('getCodeContext', () => {
   });
 
   it('handles out-of-range line numbers gracefully', () => {
-    const result = getCodeContext('workflows/work/scripts/__tests__/follow-up-pr.test.js', 999999, 1);
+    const result = getCodeContext(
+      'workflows/work/scripts/__tests__/follow-up-pr.test.js',
+      999999,
+      1
+    );
     // Should return some content (the last lines of the file) or empty, not crash
     assert.ok(result !== undefined);
   });

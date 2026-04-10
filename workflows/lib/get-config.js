@@ -48,7 +48,10 @@ function getConfig(key) {
  */
 getConfig.require = function (key) {
   const val = getConfig(key);
-  if (!val) throw new Error(`${key} not configured. Set it as env var or ensure lib/config.js is loadable.`);
+  if (!val)
+    throw new Error(
+      `${key} not configured. Set it as env var or ensure lib/config.js is loadable.`
+    );
   return val;
 };
 

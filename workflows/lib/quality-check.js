@@ -23,7 +23,14 @@ const fs = require('fs');
 const path = require('path');
 
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.join(__dirname, '..', '..');
-const BUNDLED_DEV_CHECK = path.join(PLUGIN_ROOT, 'workflows', 'lib', 'scripts', 'dev-check', 'dev-check.sh');
+const BUNDLED_DEV_CHECK = path.join(
+  PLUGIN_ROOT,
+  'workflows',
+  'lib',
+  'scripts',
+  'dev-check',
+  'dev-check.sh'
+);
 
 /**
  * Read scripts from a repo's package.json
@@ -45,7 +52,9 @@ function getAvailableScripts(repoRoot) {
 function findRepoRoot(cwd) {
   try {
     return execSync('git rev-parse --show-toplevel', {
-      stdio: 'pipe', cwd, encoding: 'utf8',
+      stdio: 'pipe',
+      cwd,
+      encoding: 'utf8',
     }).trim();
   } catch {
     return cwd;
@@ -86,9 +95,9 @@ function resolveQualityCommand(repoRoot) {
   }
 
   // Tier 3: Standard scripts (run whichever exist)
-  const standardScripts = ['lint', 'typecheck', 'test'].filter(s => s in scripts);
+  const standardScripts = ['lint', 'typecheck', 'test'].filter((s) => s in scripts);
   if (standardScripts.length > 0) {
-    const command = standardScripts.map(s => `pnpm run ${s}`).join(' && ');
+    const command = standardScripts.map((s) => `pnpm run ${s}`).join(' && ');
     return { command, strategy: 'standard-scripts', scripts: standardScripts };
   }
 
@@ -141,7 +150,7 @@ function runQualityCheck(options = {}) {
     }
 
     if (failures.length > 0) {
-      const details = failures.map(f => `[${f.script}]\n${f.output}`).join('\n\n');
+      const details = failures.map((f) => `[${f.script}]\n${f.output}`).join('\n\n');
       return {
         success: false,
         output: `${failures.length}/${scripts.length} check(s) failed:\n${details}`,

@@ -12,15 +12,29 @@
  * Pattern follows work2-orchestrator-hook.js.
  */
 
-const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
+const { logHookError } = require(path.join(__dirname, '..', 'hook-error-log'));
+const { safeExec } = require(path.join(__dirname, '..', 'safe-exec'));
 
-process.on('uncaughtException', () => process.exit(0));
-process.on('unhandledRejection', () => process.exit(0));
+process.on('uncaughtException', (err) => {
+  logHookError(__filename, err);
+  process.exit(0);
+});
+process.on('unhandledRejection', (err) => {
+  logHookError(__filename, err);
+  process.exit(0);
+});
 
 const WORKFLOWS_DIR = path.join(__dirname, '..', '..');
 const ENGINE_PATH = path.join(__dirname, '..', 'workflow-engine.js');
+
+// Tokenize args string into positional single-token values.
+// Quoted multi-word args are NOT supported by design — matches pre-execFileSync
+// shell tokenization behavior. Used by both /work and /work2 slash commands.
+function tokenizeArgs(rawArgs) {
+  return rawArgs.split(/\s+/).filter((token) => token.length > 0);
+}
 
 function main() {
   const userPrompt = process.env.CLAUDE_USER_PROMPT || '';
@@ -51,30 +65,43 @@ function main() {
     process.exit(0); // Not a workflow command, pass through
   }
 
+  // Tokenize via the named helper to make the intent obvious at the call site.
+  // See tokenizeArgs() above for the scope-constraint rationale.
+  const parsedArgs = tokenizeArgs(args);
+
+  // Run the workflow engine via safeExec (uses execFileSync internally, no shell).
+  // Use a null fallback so we can distinguish a failure from empty output.
+  const result = safeExec(process.execPath, [ENGINE_PATH, matched, 'plan', ...parsedArgs], {
+    timeout: 30000,
+    fallback: null,
+  });
+
+  if (result === null) {
+    logHookError(__filename, new Error('workflow engine invocation failed'));
+    console.log('WORKFLOW ENGINE FAILED: command returned null');
+    process.exit(0);
+  }
+
+  let plan;
   try {
-    // Run the workflow engine
-    const result = execSync(
-      `node "${ENGINE_PATH}" ${matched} plan ${args}`,
-      { encoding: 'utf-8', timeout: 30000, stdio: ['pipe', 'pipe', 'pipe'] }
-    );
-
-    const plan = JSON.parse(result);
-
-    if (plan.error) {
-      console.log(`WORKFLOW ENGINE ERROR: ${plan.message}`);
-      process.exit(0);
-    }
-
-    // Use the formatted output from the engine
-    if (plan.formatted) {
-      console.log(plan.formatted);
-    } else {
-      // Fallback: output raw JSON
-      console.log(JSON.stringify(plan, null, 2));
-    }
-
+    plan = JSON.parse(result);
   } catch (err) {
+    logHookError(__filename, err);
     console.log(`WORKFLOW ENGINE FAILED: ${err.message}`);
+    process.exit(0);
+  }
+
+  if (plan.error) {
+    console.log(`WORKFLOW ENGINE ERROR: ${plan.message}`);
+    process.exit(0);
+  }
+
+  // Use the formatted output from the engine
+  if (plan.formatted) {
+    console.log(plan.formatted);
+  } else {
+    // Fallback: output raw JSON
+    console.log(JSON.stringify(plan, null, 2));
   }
 
   process.exit(0);
@@ -92,13 +119,19 @@ function buildCommandMap() {
   // Scan the workflows dir and one level of subdirectories for *.workflow.js
   const searchDirs = [WORKFLOWS_DIR];
   for (const entry of fs.readdirSync(WORKFLOWS_DIR, { withFileTypes: true })) {
-    if (entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== 'node_modules' && entry.name !== 'lib' && entry.name !== '__tests__') {
+    if (
+      entry.isDirectory() &&
+      !entry.name.startsWith('.') &&
+      entry.name !== 'node_modules' &&
+      entry.name !== 'lib' &&
+      entry.name !== '__tests__'
+    ) {
       searchDirs.push(path.join(WORKFLOWS_DIR, entry.name));
     }
   }
 
   for (const dir of searchDirs) {
-    const files = fs.readdirSync(dir).filter(f => f.endsWith('.workflow.js'));
+    const files = fs.readdirSync(dir).filter((f) => f.endsWith('.workflow.js'));
     for (const file of files) {
       try {
         const wf = require(path.join(dir, file));
@@ -114,4 +147,8 @@ function buildCommandMap() {
   return map;
 }
 
-try { main(); } catch { process.exit(0); }
+try {
+  main();
+} catch {
+  process.exit(0);
+}

@@ -28,8 +28,12 @@ function runWorkState(args = [], opts = {}) {
     let stdout = '';
     let stderr = '';
 
-    proc.stdout.on('data', (data) => { stdout += data.toString(); });
-    proc.stderr.on('data', (data) => { stderr += data.toString(); });
+    proc.stdout.on('data', (data) => {
+      stdout += data.toString();
+    });
+    proc.stderr.on('data', (data) => {
+      stderr += data.toString();
+    });
 
     proc.on('close', (code) => {
       try {
@@ -46,7 +50,9 @@ function runWorkState(args = [], opts = {}) {
 
 function cleanupTempWorkState(ticket) {
   const dir = path.join(TEMP_TASKS_BASE, ticket);
-  try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  try {
+    fs.rmSync(dir, { recursive: true, force: true });
+  } catch {}
 }
 
 // ─── Global Cleanup ─────────────────────────────────────────────────────────
@@ -60,10 +66,11 @@ after(() => {
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe('work-state.js', () => {
-
   describe('init', () => {
     const TICKET = 'TEST-INIT-001';
-    after(() => { cleanupTempWorkState(TICKET); });
+    after(() => {
+      cleanupTempWorkState(TICKET);
+    });
 
     it('should create state with all 15 steps as pending', async () => {
       const { result, code } = await runWorkState(['init', TICKET]);
@@ -83,9 +90,21 @@ describe('work-state.js', () => {
 
       // Verify exact step names
       const expectedSteps = [
-        'ticket', 'bootstrap', 'brief', 'spec', 'tasks', 'implement',
-        'commit', 'check',
-        'pr', 'ready', 'follow_up', 'ci', 'cleanup', 'reports', 'complete',
+        'ticket',
+        'bootstrap',
+        'brief',
+        'spec',
+        'tasks',
+        'implement',
+        'commit',
+        'check',
+        'pr',
+        'ready',
+        'follow_up',
+        'ci',
+        'cleanup',
+        'reports',
+        'complete',
       ];
       assert.deepEqual(steps, expectedSteps);
     });
@@ -134,13 +153,18 @@ describe('work-state.js', () => {
 
   describe('set-step', () => {
     const TICKET = 'TEST-SETSTEP-001';
-    after(() => { cleanupTempWorkState(TICKET); });
+    after(() => {
+      cleanupTempWorkState(TICKET);
+    });
 
     it('should update step status and persist', async () => {
       await runWorkState(['init', TICKET]);
 
       const { result: setResult, code: setCode } = await runWorkState([
-        'set-step', TICKET, 'implement', 'in_progress',
+        'set-step',
+        TICKET,
+        'implement',
+        'in_progress',
       ]);
       assert.equal(setCode, 0);
       assert.equal(setResult.success, true);
@@ -159,15 +183,25 @@ describe('work-state.js', () => {
 
       await runWorkState(['init', TICKET_INVALID]);
 
-      const { code, stderr } = await runWorkState(['set-step', TICKET_INVALID, 'nonexistent_step', 'in_progress']);
+      const { code, stderr } = await runWorkState([
+        'set-step',
+        TICKET_INVALID,
+        'nonexistent_step',
+        'in_progress',
+      ]);
       assert.equal(code, 1, 'Should exit with code 1 for invalid step');
-      assert.ok(stderr.includes('Invalid step name') || stderr.includes('nonexistent_step'),
-        'Error should mention the invalid step name');
+      assert.ok(
+        stderr.includes('Invalid step name') || stderr.includes('nonexistent_step'),
+        'Error should mention the invalid step name'
+      );
 
       // Verify invalid key is NOT persisted in state
       const { result: afterResult } = await runWorkState(['get', TICKET_INVALID]);
-      assert.equal(afterResult.stepStatus['nonexistent_step'], undefined,
-        'Invalid step name must not be persisted in state');
+      assert.equal(
+        afterResult.stepStatus['nonexistent_step'],
+        undefined,
+        'Invalid step name must not be persisted in state'
+      );
 
       cleanupTempWorkState(TICKET_INVALID);
     });
@@ -175,14 +209,19 @@ describe('work-state.js', () => {
 
   describe('set-check', () => {
     const TICKET = 'TEST-SETCHECK-001';
-    after(() => { cleanupTempWorkState(TICKET); });
+    after(() => {
+      cleanupTempWorkState(TICKET);
+    });
 
     it('should update check sub-state and accumulate multiple checks', async () => {
       await runWorkState(['init', TICKET]);
 
       // Set lint check to pass
       const { result: lintResult, code: lintCode } = await runWorkState([
-        'set-check', TICKET, 'lint', 'pass',
+        'set-check',
+        TICKET,
+        'lint',
+        'pass',
       ]);
       assert.equal(lintCode, 0);
       assert.equal(lintResult.success, true);
@@ -251,17 +290,20 @@ describe('work-state.js', () => {
 
         // Load ALL_STEPS from work-orchestrator.js via graph subcommand
         const orchestratorSteps = await new Promise((resolve, reject) => {
-          const proc = spawn('node', [
-            path.join(__dirname, '..', 'work.workflow.js'), 'graph',
-          ], {
+          const proc = spawn('node', [path.join(__dirname, '..', 'work.workflow.js'), 'graph'], {
             stdio: ['pipe', 'pipe', 'pipe'],
             env: { ...process.env, TASKS_BASE: TEMP_TASKS_BASE },
           });
           let stdout = '';
-          proc.stdout.on('data', (d) => { stdout += d.toString(); });
+          proc.stdout.on('data', (d) => {
+            stdout += d.toString();
+          });
           proc.on('close', () => {
-            try { resolve(JSON.parse(stdout.trim()).steps); }
-            catch { resolve(null); }
+            try {
+              resolve(JSON.parse(stdout.trim()).steps);
+            } catch {
+              resolve(null);
+            }
           });
           proc.on('error', reject);
         });
@@ -276,7 +318,9 @@ describe('work-state.js', () => {
 
   describe('init idempotency', () => {
     const TICKET = 'TEST-IDEMPOTENT-001';
-    after(() => { cleanupTempWorkState(TICKET); });
+    after(() => {
+      cleanupTempWorkState(TICKET);
+    });
 
     it('should be idempotent — second init preserves existing state', async () => {
       // First init
@@ -292,15 +336,18 @@ describe('work-state.js', () => {
       // Second init — should return existing state unchanged
       const { result: secondInitResult } = await runWorkState(['init', TICKET]);
       assert.equal(secondInitResult.status, 'in_progress');
-      assert.equal(secondInitResult.stepStatus['implement'], 'in_progress',
-        'Second init should preserve existing step status');
+      assert.equal(
+        secondInitResult.stepStatus['implement'],
+        'in_progress',
+        'Second init should preserve existing step status'
+      );
 
       // Verify persistence is unchanged
       const { result: afterSecondInit } = await runWorkState(['get', TICKET]);
       assert.equal(
         afterSecondInit.stepStatus['implement'],
         'in_progress',
-        'Second init must not reset existing state',
+        'Second init must not reset existing state'
       );
     });
   });
@@ -309,7 +356,9 @@ describe('work-state.js', () => {
 
   describe('init-subtask', () => {
     const TICKET = 'TEST-SUBTASK-INIT';
-    after(() => { cleanupTempWorkState(TICKET); });
+    after(() => {
+      cleanupTempWorkState(TICKET);
+    });
 
     it('should create subtask state with correct schema and counter=1', async () => {
       const { result, code } = await runWorkState(['init-subtask', TICKET, 'fix lint error']);
@@ -364,7 +413,9 @@ describe('work-state.js', () => {
 
   describe('active-subtask', () => {
     const TICKET = 'TEST-SUBTASK-ACTIVE';
-    after(() => { cleanupTempWorkState(TICKET); });
+    after(() => {
+      cleanupTempWorkState(TICKET);
+    });
 
     it('should return the in-progress subtask', async () => {
       // Create a subtask
@@ -482,14 +533,14 @@ describe('work-state.js', () => {
 
   describe('TDD auto-init on implement step', () => {
     const TICKET = 'TEST-TDD-AUTOINIT';
-    after(() => { cleanupTempWorkState(TICKET); });
+    after(() => {
+      cleanupTempWorkState(TICKET);
+    });
 
     it('should create tdd-phase.json when setting implement to in_progress', async () => {
       await runWorkState(['init', TICKET]);
 
-      const { code } = await runWorkState(
-        ['set-step', TICKET, 'implement', 'in_progress'],
-      );
+      const { code } = await runWorkState(['set-step', TICKET, 'implement', 'in_progress']);
       assert.equal(code, 0);
 
       // Verify tdd-phase.json was created
@@ -510,13 +561,15 @@ describe('work-state.js', () => {
         // Pre-create tdd-phase.json with green phase (simulating mid-cycle)
         const tddDir = path.join(TEMP_TASKS_BASE, TICKET_EXISTING);
         fs.mkdirSync(tddDir, { recursive: true });
-        const existingState = { currentPhase: 'green', currentCycle: 2, cycles: [{ cycle: 1, red: {}, green: {} }] };
+        const existingState = {
+          currentPhase: 'green',
+          currentCycle: 2,
+          cycles: [{ cycle: 1, red: {}, green: {} }],
+        };
         fs.writeFileSync(path.join(tddDir, 'tdd-phase.json'), JSON.stringify(existingState));
 
         // Now set implement to in_progress
-        await runWorkState(
-          ['set-step', TICKET_EXISTING, 'implement', 'in_progress'],
-        );
+        await runWorkState(['set-step', TICKET_EXISTING, 'implement', 'in_progress']);
 
         // Verify existing state was NOT overwritten
         const tddState = JSON.parse(fs.readFileSync(path.join(tddDir, 'tdd-phase.json'), 'utf8'));
@@ -532,9 +585,7 @@ describe('work-state.js', () => {
       try {
         await runWorkState(['init', TICKET_OTHER]);
 
-        await runWorkState(
-          ['set-step', TICKET_OTHER, 'brief', 'in_progress'],
-        );
+        await runWorkState(['set-step', TICKET_OTHER, 'brief', 'in_progress']);
 
         const tddPath = path.join(TEMP_TASKS_BASE, TICKET_OTHER, 'tdd-phase.json');
         assert.ok(!fs.existsSync(tddPath), 'tdd-phase.json should NOT be created for brief step');
@@ -546,7 +597,9 @@ describe('work-state.js', () => {
 
   describe('complete-subtask', () => {
     const TICKET = 'TEST-SUBTASK-COMPLETE';
-    after(() => { cleanupTempWorkState(TICKET); });
+    after(() => {
+      cleanupTempWorkState(TICKET);
+    });
 
     it('should mark the correct subtask as completed', async () => {
       // Create a subtask

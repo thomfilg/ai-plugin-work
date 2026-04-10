@@ -36,9 +36,9 @@ const WORKFLOWS_DIR = PLUGIN_WORKFLOWS_DIR; // Primary location
  */
 function createStatusTransitions(transitions) {
   const map = {};
-  const defined = new Set(transitions.map(t => t.source));
-  transitions.forEach(t => {
-    map[t.source] = t.targets.filter(target => defined.has(target) && target !== t.source);
+  const defined = new Set(transitions.map((t) => t.source));
+  transitions.forEach((t) => {
+    map[t.source] = t.targets.filter((target) => defined.has(target) && target !== t.source);
   });
   return map;
 }
@@ -66,12 +66,18 @@ function discoverWorkflows() {
     // Scan both the directory itself and one level of subdirectories
     const searchDirs = [dir];
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== 'node_modules' && entry.name !== 'lib' && entry.name !== '__tests__') {
+      if (
+        entry.isDirectory() &&
+        !entry.name.startsWith('.') &&
+        entry.name !== 'node_modules' &&
+        entry.name !== 'lib' &&
+        entry.name !== '__tests__'
+      ) {
         searchDirs.push(path.join(dir, entry.name));
       }
     }
     for (const searchDir of searchDirs) {
-      for (const f of fs.readdirSync(searchDir).filter(f => f.endsWith('.workflow.js'))) {
+      for (const f of fs.readdirSync(searchDir).filter((f) => f.endsWith('.workflow.js'))) {
         if (seen.has(f)) continue; // plugin version takes precedence
         seen.add(f);
         try {
@@ -102,13 +108,21 @@ function loadWorkflow(name) {
     if (!fs.existsSync(baseDir)) continue;
     // Check directly in the base dir
     const directPath = path.join(baseDir, fileName);
-    if (fs.existsSync(directPath)) { filePath = directPath; break; }
+    if (fs.existsSync(directPath)) {
+      filePath = directPath;
+      break;
+    }
     // Check in subdirectory named after the workflow (e.g. workflows/check/check.workflow.js)
     const subDirPath = path.join(baseDir, name, fileName);
-    if (fs.existsSync(subDirPath)) { filePath = subDirPath; break; }
+    if (fs.existsSync(subDirPath)) {
+      filePath = subDirPath;
+      break;
+    }
   }
   if (!filePath) {
-    throw new Error(`Workflow "${name}" not found in ${PLUGIN_WORKFLOWS_DIR} or ${GLOBAL_WORKFLOWS_DIR}`);
+    throw new Error(
+      `Workflow "${name}" not found in ${PLUGIN_WORKFLOWS_DIR} or ${GLOBAL_WORKFLOWS_DIR}`
+    );
   }
   const wf = require(filePath);
 
@@ -172,7 +186,7 @@ function defaultPlanGenerator(workflow, instanceId, args, stateInstance) {
 
 function transitionStep(workflow, stateInstance, instanceId, targetStep) {
   const transitionMap = createStatusTransitions(workflow.transitions);
-  const allSteps = workflow.steps.map(s => s.id);
+  const allSteps = workflow.steps.map((s) => s.id);
   const validator = canTransition(transitionMap);
 
   if (!allSteps.includes(targetStep)) {
@@ -289,16 +303,24 @@ function defaultFormatPlan(workflow, instanceId, plan, summary) {
   lines.push('  PLAN:');
 
   for (const step of plan) {
-    const icon = step.action === 'RUN' ? '\uD83D\uDD04' :
-                 step.action === 'SKIP' ? '\u23ED\uFE0F' :
-                 step.action === 'DEFER' ? '\uD83D\uDD2E' :
-                 step.action === 'BLOCKED' ? '\uD83D\uDED1' : '\u23F3';
+    const icon =
+      step.action === 'RUN'
+        ? '\uD83D\uDD04'
+        : step.action === 'SKIP'
+          ? '\u23ED\uFE0F'
+          : step.action === 'DEFER'
+            ? '\uD83D\uDD2E'
+            : step.action === 'BLOCKED'
+              ? '\uD83D\uDED1'
+              : '\u23F3';
     const cmd = step.command ? ` \u2192 ${step.command}` : '';
     lines.push(`    ${icon} ${step.step.padEnd(20)} ${step.action.padEnd(7)} ${step.reason}${cmd}`);
   }
 
   lines.push('');
-  lines.push(`  SUMMARY: ${summary.run} RUN, ${summary.blocked || 0} BLOCKED, ${summary.defer || 0} DEFER, ${summary.skip} SKIP, ${summary.pending} PENDING`);
+  lines.push(
+    `  SUMMARY: ${summary.run} RUN, ${summary.blocked || 0} BLOCKED, ${summary.defer || 0} DEFER, ${summary.skip} SKIP, ${summary.pending} PENDING`
+  );
   if (summary.firstAction !== 'none') {
     lines.push(`  FIRST ACTION: ${summary.firstAction}`);
   }
@@ -313,7 +335,9 @@ function defaultFormatPlan(workflow, instanceId, plan, summary) {
   }
   lines.push('');
   lines.push('\u2550'.repeat(67));
-  lines.push('  INSTRUCTIONS: Execute RUN steps in order. DEFER steps: re-run plan first to resolve to RUN/SKIP.');
+  lines.push(
+    '  INSTRUCTIONS: Execute RUN steps in order. DEFER steps: re-run plan first to resolve to RUN/SKIP.'
+  );
   lines.push(`  TRANSITION: node ${__filename} ${workflow.name} transition ${instanceId} <step>`);
   lines.push('\u2550'.repeat(67));
   lines.push('');
@@ -327,7 +351,12 @@ function main() {
   const args = process.argv.slice(2);
 
   if (args.length === 0) {
-    console.log(JSON.stringify({ error: true, message: 'Usage: workflow-engine.js <workflow-name> <command> [args...] | list' }));
+    console.log(
+      JSON.stringify({
+        error: true,
+        message: 'Usage: workflow-engine.js <workflow-name> <command> [args...] | list',
+      })
+    );
     process.exit(1);
   }
 
@@ -352,13 +381,18 @@ function main() {
 
   const stateInstance = new WorkflowState(workflow.name, workflow.stateDir);
   const transitionMap = createStatusTransitions(workflow.transitions);
-  const allSteps = workflow.steps.map(s => s.id);
+  const allSteps = workflow.steps.map((s) => s.id);
 
   switch (command) {
     case 'plan': {
       const rawArgs = rest.join(' ').trim();
       if (!rawArgs) {
-        console.log(JSON.stringify({ error: true, message: `Usage: workflow-engine.js ${workflowName} plan <args>` }));
+        console.log(
+          JSON.stringify({
+            error: true,
+            message: `Usage: workflow-engine.js ${workflowName} plan <args>`,
+          })
+        );
         process.exit(1);
       }
 
@@ -382,7 +416,7 @@ function main() {
       }
 
       // Build summary
-      const byAction = (a) => plan.filter(s => s.action === a);
+      const byAction = (a) => plan.filter((s) => s.action === a);
       const summary = {
         total: plan.length,
         run: byAction('RUN').length,
@@ -391,11 +425,15 @@ function main() {
         pending: byAction('PENDING').length,
         blocked: byAction('BLOCKED').length,
         // firstAction: BLOCKED takes priority (must resolve before proceeding), then RUN, then DEFER
-        firstAction: byAction('BLOCKED')[0]?.step || byAction('RUN')[0]?.step || byAction('DEFER')[0]?.step || 'none',
-        stepsToRun: byAction('RUN').map(s => s.step),
-        stepsDeferred: byAction('DEFER').map(s => s.step),
-        stepsSkipped: byAction('SKIP').map(s => s.step),
-        stepsBlocked: byAction('BLOCKED').map(s => s.step), // rendered with stop sign icon in formatPlan
+        firstAction:
+          byAction('BLOCKED')[0]?.step ||
+          byAction('RUN')[0]?.step ||
+          byAction('DEFER')[0]?.step ||
+          'none',
+        stepsToRun: byAction('RUN').map((s) => s.step),
+        stepsDeferred: byAction('DEFER').map((s) => s.step),
+        stepsSkipped: byAction('SKIP').map((s) => s.step),
+        stepsBlocked: byAction('BLOCKED').map((s) => s.step), // rendered with stop sign icon in formatPlan
       };
 
       // Format output
@@ -408,7 +446,8 @@ function main() {
         summary,
         timestamp: new Date().toISOString(),
         currentStep: stateInstance.getCurrentStep(instanceId),
-        allowedTransitions: transitionMap[stateInstance.getCurrentStep(instanceId) || allSteps[0]] || [],
+        allowedTransitions:
+          transitionMap[stateInstance.getCurrentStep(instanceId) || allSteps[0]] || [],
       };
 
       // Add formatted text
@@ -421,11 +460,13 @@ function main() {
 
     case 'transition': {
       if (rest.length < 2) {
-        console.log(JSON.stringify({
-          error: true,
-          message: `Usage: workflow-engine.js ${workflowName} transition <instanceId> <step>`,
-          validSteps: allSteps,
-        }));
+        console.log(
+          JSON.stringify({
+            error: true,
+            message: `Usage: workflow-engine.js ${workflowName} transition <instanceId> <step>`,
+            validSteps: allSteps,
+          })
+        );
         process.exit(1);
       }
       const result = transitionStep(workflow, stateInstance, rest[0], rest[1]);
@@ -435,7 +476,12 @@ function main() {
 
     case 'transitions': {
       if (!rest[0]) {
-        console.log(JSON.stringify({ error: true, message: `Usage: workflow-engine.js ${workflowName} transitions <instanceId>` }));
+        console.log(
+          JSON.stringify({
+            error: true,
+            message: `Usage: workflow-engine.js ${workflowName} transitions <instanceId>`,
+          })
+        );
         process.exit(1);
       }
       const result = getAvailableTransitions(workflow, stateInstance, rest[0]);
@@ -444,11 +490,17 @@ function main() {
     }
 
     case 'graph': {
-      console.log(JSON.stringify({
-        workflow: workflow.name,
-        steps: allSteps,
-        transitions: transitionMap,
-      }, null, 2));
+      console.log(
+        JSON.stringify(
+          {
+            workflow: workflow.name,
+            steps: allSteps,
+            transitions: transitionMap,
+          },
+          null,
+          2
+        )
+      );
       break;
     }
 

@@ -12,7 +12,9 @@ const fs = require('fs');
  * e.g. 'work-workflow:quality-checker' → 'quality-checker'
  */
 function normalizeAgentName(name) {
-  return String(name || '').replace(/^[\w-]+:/, '').toLowerCase();
+  return String(name || '')
+    .replace(/^[\w-]+:/, '')
+    .toLowerCase();
 }
 
 function debugLog(method, msg) {
@@ -59,22 +61,26 @@ function isSubagentFromTranscript(transcriptPath, agentAliases) {
           for (const item of contentItems) {
             if (item.type === 'tool_use' && (item.name === 'Task' || item.name === 'Agent')) {
               const subagentType = item.input?.subagent_type || '';
-              if (agentAliases.some(alias =>
-                normalizeAgentName(alias) === normalizeAgentName(subagentType)
-              )) {
+              if (
+                agentAliases.some(
+                  (alias) => normalizeAgentName(alias) === normalizeAgentName(subagentType)
+                )
+              ) {
                 // Check if there's a corresponding tool_result in subsequent lines
-                const hasResult = recentLines.slice(i + 1).some(line => {
+                const hasResult = recentLines.slice(i + 1).some((line) => {
                   try {
                     const laterEntry = JSON.parse(line);
                     if (laterEntry.type === 'user' && laterEntry.message?.content) {
                       const laterItems = Array.isArray(laterEntry.message.content)
                         ? laterEntry.message.content
                         : [laterEntry.message.content];
-                      return laterItems.some(li =>
-                        li.type === 'tool_result' && li.tool_use_id === item.id
+                      return laterItems.some(
+                        (li) => li.type === 'tool_result' && li.tool_use_id === item.id
                       );
                     }
-                  } catch { /* ignore */ }
+                  } catch {
+                    /* ignore */
+                  }
                   return false;
                 });
 
@@ -121,9 +127,10 @@ function isSubagentFromTranscript(transcriptPath, agentAliases) {
 function isRunningInAgent(transcriptPath, agentAliases, hookData) {
   // Primary: Check environment variable
   const currentAgent = process.env.CLAUDE_CURRENT_AGENT;
-  if (currentAgent && agentAliases.some(alias =>
-    normalizeAgentName(alias) === normalizeAgentName(currentAgent)
-  )) {
+  if (
+    currentAgent &&
+    agentAliases.some((alias) => normalizeAgentName(alias) === normalizeAgentName(currentAgent))
+  ) {
     debugLog('env', `matched CLAUDE_CURRENT_AGENT=${currentAgent}`);
     return true;
   }
@@ -131,9 +138,10 @@ function isRunningInAgent(transcriptPath, agentAliases, hookData) {
 
   // Secondary: Check hookData for subagent_type (available when parent invokes Task/Agent)
   const subagentType = hookData?.tool_input?.subagent_type;
-  if (subagentType && agentAliases.some(alias =>
-    normalizeAgentName(alias) === normalizeAgentName(subagentType)
-  )) {
+  if (
+    subagentType &&
+    agentAliases.some((alias) => normalizeAgentName(alias) === normalizeAgentName(subagentType))
+  ) {
     debugLog('hookData', `matched subagent_type=${subagentType}`);
     return true;
   }
@@ -201,23 +209,29 @@ function isSubagentFromInitialPrompt(transcriptPath, agentAliases) {
         // System messages may contain subagent_type
         if (entry.type === 'system' || entry.type === 'user') {
           const msgContent = entry.message?.content;
-          const text = typeof msgContent === 'string'
-            ? msgContent
-            : Array.isArray(msgContent)
-              ? msgContent.map(i => i.text || '').join(' ')
-              : '';
+          const text =
+            typeof msgContent === 'string'
+              ? msgContent
+              : Array.isArray(msgContent)
+                ? msgContent.map((i) => i.text || '').join(' ')
+                : '';
 
           for (const alias of agentAliases) {
             // Match agent name with word boundaries to avoid false positives
             // from incidental substring matches (e.g. "qa" matching "quality")
             const normalized = normalizeAgentName(alias);
-            const boundary = new RegExp(`(?:^|[\\s"':,])${normalized.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:$|[\\s"':,])`, 'i');
+            const boundary = new RegExp(
+              `(?:^|[\\s"':,])${normalized.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:$|[\\s"':,])`,
+              'i'
+            );
             if (boundary.test(text)) {
               return true;
             }
           }
         }
-      } catch { /* skip non-JSON lines */ }
+      } catch {
+        /* skip non-JSON lines */
+      }
     }
     return false;
   } catch {
@@ -225,4 +239,9 @@ function isSubagentFromInitialPrompt(transcriptPath, agentAliases) {
   }
 }
 
-module.exports = { isRunningInAgent, isSubagentFromTranscript, isSubagentFromInitialPrompt, normalizeAgentName };
+module.exports = {
+  isRunningInAgent,
+  isSubagentFromTranscript,
+  isSubagentFromInitialPrompt,
+  normalizeAgentName,
+};

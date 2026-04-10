@@ -21,10 +21,12 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
 
 const DEBUG = !!process.env.ENFORCE_HOOK_DEBUG;
 
 process.on('uncaughtException', (err) => {
+  logHookError(__filename, err);
   if (DEBUG) process.stderr.write(`[enforce-review-accountability] uncaught: ${err?.message}\n`);
   process.exit(0); // fail-open
 });
@@ -60,7 +62,9 @@ async function main() {
         const match = ref.match(/[A-Z]+-\d+|GH-\d+/i);
         ticketId = match ? match[0] : null;
       }
-    } catch { ticketId = null; }
+    } catch {
+      ticketId = null;
+    }
   }
 
   if (!ticketId) return; // No ticket context → allow
@@ -68,7 +72,10 @@ async function main() {
   // Check if PR has any review comments
   let prComments;
   try {
-    const prJson = execSync('gh pr view --json number', { encoding: 'utf-8', timeout: 10000 }).trim();
+    const prJson = execSync('gh pr view --json number', {
+      encoding: 'utf-8',
+      timeout: 10000,
+    }).trim();
     const pr = JSON.parse(prJson);
     if (!pr.number) return;
 
@@ -85,23 +92,28 @@ async function main() {
 
   // Check for accountability file
   const getConfig = require(path.join(__dirname, '..', '..', 'lib', 'get-config'));
-  const TASKS_BASE = getConfig('TASKS_BASE') || path.join(getConfig.orExit('WORKTREES_BASE'), 'tasks');
+  const TASKS_BASE =
+    getConfig('TASKS_BASE') || path.join(getConfig.orExit('WORKTREES_BASE'), 'tasks');
   let safeTicketId = ticketId;
-  try { safeTicketId = require(path.join(__dirname, '..', '..', 'lib', 'config')).safeTicketId(ticketId); } catch {}
+  try {
+    safeTicketId = require(path.join(__dirname, '..', '..', 'lib', 'config')).safeTicketId(
+      ticketId
+    );
+  } catch {}
   const accountabilityFile = path.join(TASKS_BASE, safeTicketId, 'review-accountability.json');
 
   if (!fs.existsSync(accountabilityFile)) {
     process.stderr.write(
       `BLOCKED: PR has ${prComments} review comment(s) but no review-accountability.json found.\n` +
-      `Before declaring "PR READY TO REVIEW", you must create:\n` +
-      `  ${accountabilityFile}\n\n` +
-      `Format: JSON array where each entry has:\n` +
-      `  { "file": "path/to/file.js", "line": 42, "disposition": "addressed|acknowledged|outdated", "reason": "..." }\n\n` +
-      `Dispositions:\n` +
-      `  - "addressed" — code changed to fix it (include commit SHA in reason)\n` +
-      `  - "acknowledged" — intentionally skipped (reason MUST be shown to user)\n` +
-      `  - "outdated" — comment refers to code that no longer exists\n\n` +
-      `Every comment visible on the PR "Files changed" tab must be accounted for.\n`
+        `Before declaring "PR READY TO REVIEW", you must create:\n` +
+        `  ${accountabilityFile}\n\n` +
+        `Format: JSON array where each entry has:\n` +
+        `  { "file": "path/to/file.js", "line": 42, "disposition": "addressed|acknowledged|outdated", "reason": "..." }\n\n` +
+        `Dispositions:\n` +
+        `  - "addressed" — code changed to fix it (include commit SHA in reason)\n` +
+        `  - "acknowledged" — intentionally skipped (reason MUST be shown to user)\n` +
+        `  - "outdated" — comment refers to code that no longer exists\n\n` +
+        `Every comment visible on the PR "Files changed" tab must be accounted for.\n`
     );
     process.exit(2);
   }
@@ -117,7 +129,7 @@ async function main() {
     if (accountability.length < prComments) {
       process.stderr.write(
         `BLOCKED: PR has ${prComments} review comment(s) but review-accountability.json only has ${accountability.length} entries.\n` +
-        `Every comment must be accounted for. Missing ${prComments - accountability.length} entries.\n`
+          `Every comment must be accounted for. Missing ${prComments - accountability.length} entries.\n`
       );
       process.exit(2);
     }
@@ -134,7 +146,7 @@ async function main() {
       if (!['addressed', 'acknowledged', 'outdated'].includes(entry.disposition)) {
         process.stderr.write(
           `BLOCKED: review-accountability.json entry ${i} has invalid disposition "${entry.disposition}".\n` +
-          `Must be: addressed, acknowledged, or outdated.\n`
+            `Must be: addressed, acknowledged, or outdated.\n`
         );
         process.exit(2);
       }
@@ -146,5 +158,6 @@ async function main() {
 }
 
 main().catch((err) => {
+  logHookError(__filename, err);
   if (DEBUG) process.stderr.write(`[enforce-review-accountability] fatal: ${err?.message}\n`);
 });

@@ -20,16 +20,11 @@
  */
 
 const fs = require('fs');
+const path = require('path');
+const { logHookError } = require(path.join(__dirname, '..', '..', '..', 'lib', 'hook-error-log'));
 
 // Block source code file extensions
-const BLOCKED_EXTENSIONS = [
-  /\.tsx?$/,
-  /\.jsx?$/,
-  /\.vue$/,
-  /\.svelte$/,
-  /\.mjs$/,
-  /\.cjs$/,
-];
+const BLOCKED_EXTENSIONS = [/\.tsx?$/, /\.jsx?$/, /\.vue$/, /\.svelte$/, /\.mjs$/, /\.cjs$/];
 
 // Block glob patterns that would match code files
 const BLOCKED_GLOB_PATTERNS = [
@@ -91,25 +86,25 @@ const GIT_CODE_COMMANDS = [
 // Navigation hints: allowed even if they match blocked extensions/directories
 // These help QA discover URLs, ports, feature flags, and test data — not validate code
 const ALLOWED_FILE_PATTERNS = [
-  /routes?\.(ts|js|tsx|jsx)$/i,          // Route definitions (URL discovery)
-  /router\.(ts|js|tsx|jsx)$/i,           // Router config
-  /\.env/i,                               // Environment files
-  /\.config\.(ts|js|mjs|cjs)$/i,         // Config files (vite, next, etc.)
-  /[\\/]seeds?[\\/]/i,                      // Seed directories (test data)
-  /[\\/]fixtures?[\\/]/i,                  // Fixture directories (test data)
-  /[\\/]migrations?[\\/]/i,               // Migration directories (schema understanding)
-  /[\\/]mocks?[\\/]/i,                    // Mock data directories
-  /\.json$/i,                             // JSON data files
-  /\.yaml$/i,                             // YAML config files
-  /\.yml$/i,                              // YML config files
-  /\.md$/i,                               // Documentation
-  /\.txt$/i,                              // Text files
-  /README/i,                              // README files
-  /package\.json$/i,                      // Package manifest
+  /routes?\.(ts|js|tsx|jsx)$/i, // Route definitions (URL discovery)
+  /router\.(ts|js|tsx|jsx)$/i, // Router config
+  /\.env/i, // Environment files
+  /\.config\.(ts|js|mjs|cjs)$/i, // Config files (vite, next, etc.)
+  /[\\/]seeds?[\\/]/i, // Seed directories (test data)
+  /[\\/]fixtures?[\\/]/i, // Fixture directories (test data)
+  /[\\/]migrations?[\\/]/i, // Migration directories (schema understanding)
+  /[\\/]mocks?[\\/]/i, // Mock data directories
+  /\.json$/i, // JSON data files
+  /\.yaml$/i, // YAML config files
+  /\.yml$/i, // YML config files
+  /\.md$/i, // Documentation
+  /\.txt$/i, // Text files
+  /README/i, // README files
+  /package\.json$/i, // Package manifest
 ]; // All patterns are directory-anchored or extension-specific to prevent overly broad matching
 
 function isAllowedNavHint(filePath) {
-  return ALLOWED_FILE_PATTERNS.some(p => p.test(filePath));
+  return ALLOWED_FILE_PATTERNS.some((p) => p.test(filePath));
 }
 
 function checkFileOperation(toolName, toolInput) {
@@ -130,9 +125,9 @@ function checkFileOperation(toolName, toolInput) {
     return null;
   }
 
-  const isBlockedExtension = BLOCKED_EXTENSIONS.some(p => p.test(targetPath));
-  const isBlockedGlobPattern = BLOCKED_GLOB_PATTERNS.some(p => p.test(targetPath));
-  const isBlockedDirectory = BLOCKED_DIRECTORIES.some(p => p.test(targetPath));
+  const isBlockedExtension = BLOCKED_EXTENSIONS.some((p) => p.test(targetPath));
+  const isBlockedGlobPattern = BLOCKED_GLOB_PATTERNS.some((p) => p.test(targetPath));
+  const isBlockedDirectory = BLOCKED_DIRECTORIES.some((p) => p.test(targetPath));
 
   let blockReason = null;
   if (isBlockedExtension) {
@@ -147,11 +142,11 @@ function checkFileOperation(toolName, toolInput) {
 
   // Soft-block: directory is blocked but file extension is not code — warn instead of block
   if (blockReason === 'source code directory') {
-    const hasBlockedExtension = BLOCKED_EXTENSIONS.some(p => p.test(targetPath));
+    const hasBlockedExtension = BLOCKED_EXTENSIONS.some((p) => p.test(targetPath));
     if (!hasBlockedExtension) {
       process.stderr.write(
         `QA: WARNING — ${targetPath} is in a source directory but doesn't have a code extension.\n` +
-        `Allowing read, but remember: use Playwright to verify behavior, not code inspection.\n`
+          `Allowing read, but remember: use Playwright to verify behavior, not code inspection.\n`
       );
       return null; // Allow through with warning
     }
@@ -163,14 +158,15 @@ function checkFileOperation(toolName, toolInput) {
 function checkBashCommand(toolInput) {
   const command = toolInput?.command || '';
 
-  const isGitCodeCommand = GIT_CODE_COMMANDS.some(p => p.test(command));
+  const isGitCodeCommand = GIT_CODE_COMMANDS.some((p) => p.test(command));
   if (isGitCodeCommand) {
     return `QA: BLOCKED git command that shows code\n\nUse Playwright to test the running app instead.`;
   }
 
-  const isReadCommand = READ_COMMANDS.some(p => p.test(command));
-  const hasCodeTarget = BLOCKED_EXTENSIONS.some(p => p.test(command)) ||
-                        CODE_DIRECTORIES.some(p => p.test(command));
+  const isReadCommand = READ_COMMANDS.some((p) => p.test(command));
+  const hasCodeTarget =
+    BLOCKED_EXTENSIONS.some((p) => p.test(command)) ||
+    CODE_DIRECTORIES.some((p) => p.test(command));
 
   if (isReadCommand && hasCodeTarget) {
     return `QA: BLOCKED reading source code via Bash\n\nUse Playwright to test the running app instead.`;
@@ -210,6 +206,7 @@ async function main() {
   process.exit(0);
 }
 
-main().catch(() => {
+main().catch((err) => {
+  logHookError(__filename, err);
   process.exit(0);
 });

@@ -65,7 +65,7 @@ async function main() {
   process.exit(0);
 }
 
-main().catch(err => {
+main().catch((err) => {
   logHookError(__filename, err);
   process.exit(0);
 });

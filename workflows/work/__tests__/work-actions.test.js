@@ -80,7 +80,11 @@ describe('work-actions', () => {
     });
 
     it('should include meta when provided', () => {
-      appendAction(TEST_TICKET, { step: 'check', what: 'BLOCKED: Skill(check)', meta: { rule: 1 } });
+      appendAction(TEST_TICKET, {
+        step: 'check',
+        what: 'BLOCKED: Skill(check)',
+        meta: { rule: 1 },
+      });
 
       const actions = loadActions(TEST_TICKET);
       assert.deepStrictEqual(actions[0].meta, { rule: 1 });
@@ -106,7 +110,11 @@ describe('work-actions', () => {
     it('should compute per-step duration', () => {
       const actions = [
         { step: 'ticket', timestamp: '2026-02-26T20:00:00.000Z', what: 'step started' },
-        { step: 'ticket', timestamp: '2026-02-26T20:00:30.000Z', what: 'mcp__atlassian__jira_get_issue' },
+        {
+          step: 'ticket',
+          timestamp: '2026-02-26T20:00:30.000Z',
+          what: 'mcp__atlassian__jira_get_issue',
+        },
         { step: 'ticket', timestamp: '2026-02-26T20:01:00.000Z', what: 'step completed' },
         { step: 'bootstrap', timestamp: '2026-02-26T20:01:00.000Z', what: 'step started' },
         { step: 'bootstrap', timestamp: '2026-02-26T20:02:00.000Z', what: 'Skill(bootstrap)' },
@@ -139,15 +147,23 @@ describe('work-actions', () => {
     it('should count blocks and retries', () => {
       const actions = [
         { step: 'check', timestamp: '2026-02-26T20:00:00.000Z', what: 'step started' },
-        { step: 'check', timestamp: '2026-02-26T20:01:00.000Z', what: 'BLOCKED: Skill(check) not in_progress' },
-        { step: 'check', timestamp: '2026-02-26T20:02:00.000Z', what: 'BLOCKED: transition without evidence' },
+        {
+          step: 'check',
+          timestamp: '2026-02-26T20:01:00.000Z',
+          what: 'BLOCKED: Skill(check) not in_progress',
+        },
+        {
+          step: 'check',
+          timestamp: '2026-02-26T20:02:00.000Z',
+          what: 'BLOCKED: transition without evidence',
+        },
         { step: 'check', timestamp: '2026-02-26T20:03:00.000Z', what: 'step reset' },
         { step: 'check', timestamp: '2026-02-26T20:05:00.000Z', what: 'Skill(check)' },
         { step: 'check', timestamp: '2026-02-26T20:10:00.000Z', what: 'step completed' },
       ];
 
       const result = analyzeActions(actions);
-      const checkStep = result.steps.find(s => s.step === 'check');
+      const checkStep = result.steps.find((s) => s.step === 'check');
       assert.strictEqual(checkStep.blockCount, 2);
       assert.strictEqual(checkStep.retryCount, 1);
       assert.strictEqual(checkStep.commandCount, 1);

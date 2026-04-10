@@ -30,7 +30,9 @@ if (require.main === module) {
   }
 
   if (!REPORT_FOLDER || !CHANGES_HASH) {
-    console.error('Usage: node check-generate-summary.js <REPORT_FOLDER> <CHANGES_HASH> [TICKET_ID] [IMPACTED_APPS_JSON]');
+    console.error(
+      'Usage: node check-generate-summary.js <REPORT_FOLDER> <CHANGES_HASH> [TICKET_ID] [IMPACTED_APPS_JSON]'
+    );
     process.exit(1);
   }
 }
@@ -51,9 +53,11 @@ function getReportStatus(content, type) {
 
   // Check for infrastructure failure FIRST (for QA reports)
   if (type === 'qa') {
-    if (content.includes('INFRASTRUCTURE_FAILURE') ||
-        content.includes('PLAYWRIGHT_UNAVAILABLE') ||
-        content.includes('PLAYWRIGHT UNAVAILABLE')) {
+    if (
+      content.includes('INFRASTRUCTURE_FAILURE') ||
+      content.includes('PLAYWRIGHT_UNAVAILABLE') ||
+      content.includes('PLAYWRIGHT UNAVAILABLE')
+    ) {
       return { status: 'INFRASTRUCTURE_FAILURE', icon: '🛑' };
     }
   }
@@ -61,20 +65,26 @@ function getReportStatus(content, type) {
   const statusChecks = {
     tests: {
       pass: ['✅ PASS', 'APPROVED', 'All.*pass'],
-      fail: ['❌ FAIL', 'NEEDS_WORK', 'fail [1-9]\\d*']
+      fail: ['❌ FAIL', 'NEEDS_WORK', 'fail [1-9]\\d*'],
     },
     codeReview: {
       pass: ['APPROVED', 'No critical', 'No issues'],
-      fail: ['CRITICAL', 'NEEDS_WORK']
+      fail: ['CRITICAL', 'NEEDS_WORK'],
     },
     qa: {
       pass: ['✅ PASS', 'All tests passed', 'SUCCESS', 'Status:\\s*APPROVED'],
-      fail: ['❌ FAIL', 'FAILED:\\s*[1-9]', 'failures:\\s*[1-9]', 'Status:\\s*FAIL', 'Status:\\s*NEEDS_WORK']
+      fail: [
+        '❌ FAIL',
+        'FAILED:\\s*[1-9]',
+        'failures:\\s*[1-9]',
+        'Status:\\s*FAIL',
+        'Status:\\s*NEEDS_WORK',
+      ],
     },
     completion: {
       pass: ['COMPLETE', 'DELIVERED'],
-      fail: ['INCOMPLETE', 'PENDING']
-    }
+      fail: ['INCOMPLETE', 'PENDING'],
+    },
   };
 
   const checks = statusChecks[type];
@@ -146,7 +156,9 @@ function generateSummary() {
   // Infrastructure failure takes precedence
   if (hasInfraFailure) {
     overallStatus = 'INFRASTRUCTURE_FAILURE';
-    actionItems.unshift('⚠️ FIX INFRASTRUCTURE: Playwright MCP unavailable - fix before re-running /check');
+    actionItems.unshift(
+      '⚠️ FIX INFRASTRUCTURE: Playwright MCP unavailable - fix before re-running /check'
+    );
   }
   if (testsStatus.status === 'NEEDS_WORK') {
     overallStatus = overallStatus === 'INFRASTRUCTURE_FAILURE' ? overallStatus : 'NEEDS_WORK';
@@ -166,15 +178,15 @@ function generateSummary() {
   }
 
   // Build QA rows
-  const qaRows = IMPACTED_APPS.map(app => {
+  const qaRows = IMPACTED_APPS.map((app) => {
     const status = qaStatuses[app] || { status: 'MISSING', icon: '❓' };
     return `| QA Tester (${app}) | ${status.icon} ${status.status} |`;
   }).join('\n');
 
   // Build QA links
-  const qaLinks = IMPACTED_APPS.map(app =>
-    `- [qa-${app}.check.md](./qa-${app}.check.md)`
-  ).join('\n');
+  const qaLinks = IMPACTED_APPS.map((app) => `- [qa-${app}.check.md](./qa-${app}.check.md)`).join(
+    '\n'
+  );
 
   // Generate markdown
   const markdown = `# Quality Check Report
@@ -212,25 +224,35 @@ ${hasReplyFile ? '- [code-review-reply.check.md](./code-review-reply.check.md)\n
 ## Overall Status
 **${overallStatus}**
 
-${actionItems.length > 0 ? `## Action Items
-${actionItems.map(item => `- ${item}`).join('\n')}` : '✅ All checks passed! Ready for PR.'}
+${
+  actionItems.length > 0
+    ? `## Action Items
+${actionItems.map((item) => `- ${item}`).join('\n')}`
+    : '✅ All checks passed! Ready for PR.'
+}
 `;
 
   // Write README.md
   const readmePath = path.join(REPORT_FOLDER, 'README.md');
   fs.writeFileSync(readmePath, markdown);
 
-  console.log(JSON.stringify({
-    readmePath,
-    overallStatus,
-    infrastructureFailure: hasInfraFailure,
-    testsStatus: testsStatus.status,
-    codeReviewStatus: codeReviewStatus.status,
-    qaStatus: overallQAStatus.status,
-    completionStatus: completionStatus.status,
-    hasReplyFile,
-    actionItems
-  }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        readmePath,
+        overallStatus,
+        infrastructureFailure: hasInfraFailure,
+        testsStatus: testsStatus.status,
+        codeReviewStatus: codeReviewStatus.status,
+        qaStatus: overallQAStatus.status,
+        completionStatus: completionStatus.status,
+        hasReplyFile,
+        actionItems,
+      },
+      null,
+      2
+    )
+  );
 }
 
 if (require.main === module) {

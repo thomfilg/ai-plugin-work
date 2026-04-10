@@ -27,12 +27,12 @@ const os = require('os');
 
 const isColorEnabled = process.stdout.isTTY === true && !process.env.NO_COLOR;
 const c = {
-  red: (s) => isColorEnabled ? `\x1b[31m${s}\x1b[0m` : s,
-  green: (s) => isColorEnabled ? `\x1b[32m${s}\x1b[0m` : s,
-  yellow: (s) => isColorEnabled ? `\x1b[33m${s}\x1b[0m` : s,
-  cyan: (s) => isColorEnabled ? `\x1b[36m${s}\x1b[0m` : s,
-  bold: (s) => isColorEnabled ? `\x1b[1m${s}\x1b[0m` : s,
-  dim: (s) => isColorEnabled ? `\x1b[2m${s}\x1b[0m` : s,
+  red: (s) => (isColorEnabled ? `\x1b[31m${s}\x1b[0m` : s),
+  green: (s) => (isColorEnabled ? `\x1b[32m${s}\x1b[0m` : s),
+  yellow: (s) => (isColorEnabled ? `\x1b[33m${s}\x1b[0m` : s),
+  cyan: (s) => (isColorEnabled ? `\x1b[36m${s}\x1b[0m` : s),
+  bold: (s) => (isColorEnabled ? `\x1b[1m${s}\x1b[0m` : s),
+  dim: (s) => (isColorEnabled ? `\x1b[2m${s}\x1b[0m` : s),
 };
 
 // ── CLI Argument Parsing ────────────────────────────────────────────────────
@@ -113,7 +113,11 @@ function ghExec(ghArgs, { json = true, allowNonZero = false } = {}) {
     if (allowNonZero && err.stdout) {
       const stdout = err.stdout.toString().trim();
       if (json && stdout) {
-        try { return JSON.parse(stdout); } catch { /* fall through */ }
+        try {
+          return JSON.parse(stdout);
+        } catch {
+          /* fall through */
+        }
       }
       if (!json && stdout) return stdout;
     }
@@ -167,7 +171,9 @@ function checkCI(prNumber) {
   let raw;
   let usedFallback = false;
   try {
-    raw = ghExec(`pr checks ${prArg} --json name,bucket,state,link,workflow`, { allowNonZero: true });
+    raw = ghExec(`pr checks ${prArg} --json name,bucket,state,link,workflow`, {
+      allowNonZero: true,
+    });
   } catch (err) {
     // gh pr checks exits 1 when checks fail, exit 8 when pending
     // Try to extract JSON from stderr/stdout
@@ -226,18 +232,19 @@ function checkCI(prNumber) {
   // (gh pr checks --json maps NEUTRAL to 'pass' bucket, losing the distinction)
   // Skip when fallback path already handles NEUTRAL correctly
   let neutralNames = new Set();
-  if (!usedFallback) try {
-    const rollup = ghExec(`pr view ${prArg} --json statusCheckRollup`);
-    if (rollup && rollup.statusCheckRollup) {
-      for (const check of rollup.statusCheckRollup) {
-        if (check.conclusion === 'NEUTRAL') {
-          neutralNames.add(check.name || check.context || '');
+  if (!usedFallback)
+    try {
+      const rollup = ghExec(`pr view ${prArg} --json statusCheckRollup`);
+      if (rollup && rollup.statusCheckRollup) {
+        for (const check of rollup.statusCheckRollup) {
+          if (check.conclusion === 'NEUTRAL') {
+            neutralNames.add(check.name || check.context || '');
+          }
         }
       }
+    } catch {
+      // If rollup fetch fails, proceed without neutral detection
     }
-  } catch {
-    // If rollup fetch fails, proceed without neutral detection
-  }
 
   const checks = raw.map((check) => {
     let bucket = (check.bucket || 'pending').toLowerCase();
@@ -277,7 +284,10 @@ const DEFAULT_BOT_REVIEWERS = 'copilot-pull-request-reviewer,cursor-ai[bot]';
 function getBotReviewers() {
   const env = process.env.FOLLOW_UP_PR_BOT_REVIEWERS;
   const raw = env !== undefined ? env : DEFAULT_BOT_REVIEWERS;
-  return raw.split(',').map((s) => s.trim()).filter(Boolean);
+  return raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
 }
 
 /**
@@ -337,7 +347,12 @@ function computeCommentHash(filePath, body) {
  * @param {string[]} previousRunBotHashes - hash strings from previous run
  * @returns {{ blocking: Array, nonBlocking: Array }}
  */
-function deduplicateBlockingBotComments(blocking, nonBlocking, previousRunBotHashes, { currentHead = null } = {}) {
+function deduplicateBlockingBotComments(
+  blocking,
+  nonBlocking,
+  previousRunBotHashes,
+  { currentHead = null } = {}
+) {
   if (!previousRunBotHashes || previousRunBotHashes.length === 0) {
     return { blocking, nonBlocking };
   }
@@ -374,7 +389,11 @@ function deduplicateBlockingBotComments(blocking, nonBlocking, previousRunBotHas
     }
   }
 
-  console.log(c.dim(`  Dedup: ${movedToNonBlocking.length} re-posted bot comment(s) moved to non-blocking, ${stillBlocking.length} kept blocking`));
+  console.log(
+    c.dim(
+      `  Dedup: ${movedToNonBlocking.length} re-posted bot comment(s) moved to non-blocking, ${stillBlocking.length} kept blocking`
+    )
+  );
 
   return {
     blocking: stillBlocking,
@@ -509,11 +528,16 @@ function getResolvedCommentIds(repo, prNumber, execFn = ghExec) {
     let cursor = null;
     do {
       const args = [
-        'api', 'graphql',
-        '-f', `query=${query}`,
-        '-f', `owner=${owner}`,
-        '-f', `name=${name}`,
-        '-F', `pr=${prNumber}`,
+        'api',
+        'graphql',
+        '-f',
+        `query=${query}`,
+        '-f',
+        `owner=${owner}`,
+        '-f',
+        `name=${name}`,
+        '-F',
+        `pr=${prNumber}`,
       ];
       if (cursor) {
         args.push('-f', `cursor=${cursor}`);
@@ -525,7 +549,11 @@ function getResolvedCommentIds(repo, prNumber, execFn = ghExec) {
         throw new Error(graphqlResult.errors[0].message || 'GraphQL error');
       }
       if (hasErrors && hasData) {
-        console.error(c.dim(`  ⚠ GraphQL partial error: ${graphqlResult.errors[0].message || 'unknown'} — continuing with available data`));
+        console.error(
+          c.dim(
+            `  ⚠ GraphQL partial error: ${graphqlResult.errors[0].message || 'unknown'} — continuing with available data`
+          )
+        );
       }
       const threadData = graphqlResult?.data?.repository?.pullRequest?.reviewThreads;
       const threads = threadData?.nodes || [];
@@ -537,7 +565,11 @@ function getResolvedCommentIds(repo, prNumber, execFn = ghExec) {
             if (comment?.databaseId) resolved.add(comment.databaseId);
           }
           if (comments.totalCount > nodes.length) {
-            console.error(c.dim(`  ⚠ Resolved thread has ${comments.totalCount} comments (fetched ${nodes.length}) — some may not be filtered`));
+            console.error(
+              c.dim(
+                `  ⚠ Resolved thread has ${comments.totalCount} comments (fetched ${nodes.length}) — some may not be filtered`
+              )
+            );
           }
           // Track outdated-but-not-resolved threads for optional dismissal
           if (thread.isOutdated && !thread.isResolved && thread.id) {
@@ -549,7 +581,11 @@ function getResolvedCommentIds(repo, prNumber, execFn = ghExec) {
       cursor = pageInfo?.hasNextPage ? pageInfo.endCursor : null;
     } while (cursor);
   } catch (err) {
-    console.error(c.dim(`  ⚠ GraphQL thread query failed: ${err.message || 'unknown'} — falling back to REST-only filtering`));
+    console.error(
+      c.dim(
+        `  ⚠ GraphQL thread query failed: ${err.message || 'unknown'} — falling back to REST-only filtering`
+      )
+    );
     resolved.clear();
     outdatedThreadIds.length = 0;
   }
@@ -607,7 +643,10 @@ function getReviews(prNumber) {
 
     // Get resolved/outdated thread comment IDs via GraphQL
     // REST API doesn't expose thread resolution status
-    const { resolved: resolvedCommentIds, outdatedThreadIds } = getResolvedCommentIds(repo, prNumber);
+    const { resolved: resolvedCommentIds, outdatedThreadIds } = getResolvedCommentIds(
+      repo,
+      prNumber
+    );
 
     // Optionally resolve outdated threads on GitHub
     if (process.env.ENABLE_RESOLVE_OUTDATED_COMMENTS === 'true' && outdatedThreadIds.length > 0) {
@@ -624,19 +663,24 @@ function getReviews(prNumber) {
     const perPage = 100;
     let page = 1;
     while (true) {
-      const pageData = ghExec(['api', `repos/${repo}/pulls/${prNumber}/comments?per_page=${perPage}&page=${page}`]);
+      const pageData = ghExec([
+        'api',
+        `repos/${repo}/pulls/${prNumber}/comments?per_page=${perPage}&page=${page}`,
+      ]);
       if (!Array.isArray(pageData) || pageData.length === 0) break;
       const visibleComments = pageData.filter(isVisibleComment);
-      comments.push(...visibleComments.map((cm) => ({
-        id: cm.id,
-        author: cm.user?.login || 'unknown',
-        body: (cm.body || '').trim(),
-        path: cm.path || null,
-        line: cm.line || null,
-        original_line: cm.original_line || null,
-        commit_id: cm.commit_id || null,
-        state: 'COMMENTED',
-      })));
+      comments.push(
+        ...visibleComments.map((cm) => ({
+          id: cm.id,
+          author: cm.user?.login || 'unknown',
+          body: (cm.body || '').trim(),
+          path: cm.path || null,
+          line: cm.line || null,
+          original_line: cm.original_line || null,
+          commit_id: cm.commit_id || null,
+          state: 'COMMENTED',
+        }))
+      );
       if (pageData.length < perPage) break;
       page++;
     }
@@ -671,9 +715,7 @@ function getReviews(prNumber) {
   } catch {
     // Fallback: use the old heuristic (CI still running + bot hasn't reviewed)
     const reviewedByBots = new Set(reviews.map((r) => r.author));
-    const checksRunning = (data.statusCheckRollup || []).some(
-      (ck) => ck.status !== 'COMPLETED'
-    );
+    const checksRunning = (data.statusCheckRollup || []).some((ck) => ck.status !== 'COMPLETED');
     for (const bot of botReviewers) {
       if (!reviewedByBots.has(bot) && checksRunning) {
         pendingBots.push(bot);
@@ -690,12 +732,15 @@ function getReviews(prNumber) {
   // known bot login variants used by classifyCommentPriority (Copilot, cursor-ai[bot]).
   const botReviewersLower = botReviewers.map((b) => b.toLowerCase());
   const BOT_BODY_MARKERS = /<!--\s*(BUGBOT_REVIEW|COPILOT_REVIEW)\s*-->/;
-  const isBotReview = (r) => isBotAuthorLogin(r.author, botReviewersLower) || BOT_BODY_MARKERS.test(r.body || '');
-  const isActionableReview = (r) => r.state === 'CHANGES_REQUESTED' || (r.state === 'COMMENTED' && r.body && !isBotReview(r));
+  const isBotReview = (r) =>
+    isBotAuthorLogin(r.author, botReviewersLower) || BOT_BODY_MARKERS.test(r.body || '');
+  const isActionableReview = (r) =>
+    r.state === 'CHANGES_REQUESTED' || (r.state === 'COMMENTED' && r.body && !isBotReview(r));
   const actionable = reviews.filter(isActionableReview).map((r) => {
     const priority = classifyCommentPriority(r.author, r.body);
     // CHANGES_REQUESTED is always at least medium (blocking), regardless of severity tags
-    const effectivePriority = (r.state === 'CHANGES_REQUESTED' && priority === 'low') ? 'medium' : priority;
+    const effectivePriority =
+      r.state === 'CHANGES_REQUESTED' && priority === 'low' ? 'medium' : priority;
     return { ...r, priority: effectivePriority };
   });
 
@@ -708,7 +753,8 @@ function getReviews(prNumber) {
   // Mark stale comments as non-blocking
   for (const item of [...actionable, ...classifiedComments]) {
     const isOutdated = item.line === null && item.original_line != null;
-    const isOldCommit = branchCommits.size > 0 && item.commit_id && !branchCommits.has(item.commit_id);
+    const isOldCommit =
+      branchCommits.size > 0 && item.commit_id && !branchCommits.has(item.commit_id);
     if (isOutdated || isOldCommit) {
       item.priority = 'low';
       item.stale = true;
@@ -736,9 +782,15 @@ function getReviews(prNumber) {
 
 function getRepoSlug() {
   try {
-    const result = execFileSync('gh', ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'], {
-      encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 5000,
-    }).trim();
+    const result = execFileSync(
+      'gh',
+      ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'],
+      {
+        encoding: 'utf8',
+        stdio: ['pipe', 'pipe', 'pipe'],
+        timeout: 5000,
+      }
+    ).trim();
     return result.replace(/[^\w.-]/g, '_');
   } catch {
     return 'local';
@@ -784,7 +836,9 @@ function initState(prInfo) {
 function formatNonBlockingItems(items, lines) {
   for (const item of items) {
     const loc = item.path ? ` ${c.dim(item.path + (item.line ? ':' + item.line : ''))}` : '';
-    const priorityTag = item.deduplicated ? `[${(item.priority || 'low').toUpperCase()}→DEDUPED]` : '[LOW]';
+    const priorityTag = item.deduplicated
+      ? `[${(item.priority || 'low').toUpperCase()}→DEDUPED]`
+      : '[LOW]';
     lines.push(`  ${c.dim('○')} ${c.cyan('@' + item.author)} ${c.dim(priorityTag)}${loc}`);
     if (item.body) {
       const normalized = item.body.replace(/\s+/g, ' ');
@@ -798,17 +852,14 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
   const lines = [];
 
   lines.push(c.bold('=== Follow-up PR Monitor ==='));
-  lines.push(
-    `PR: ${c.cyan('#' + prInfo.number)} — ${prInfo.title}`
-  );
-  lines.push(
-    `Branch: ${c.dim(prInfo.branch)} | Attempt: ${attempt}/${maxAttempts}`
-  );
+  lines.push(`PR: ${c.cyan('#' + prInfo.number)} — ${prInfo.title}`);
+  lines.push(`Branch: ${c.dim(prInfo.branch)} | Attempt: ${attempt}/${maxAttempts}`);
   lines.push('');
 
   // CI status
   if (ci.status === 'failing') {
-    const failFastNote = ci.running.length > 0 ? ' (fail-fast — not waiting for remaining checks)' : '';
+    const failFastNote =
+      ci.running.length > 0 ? ' (fail-fast — not waiting for remaining checks)' : '';
     lines.push(c.red(`CI: FAILING${failFastNote}`));
     for (const ck of ci.failed) {
       lines.push(`  ${c.red('✗')} ${ck.name} ${c.dim(`[${ck.category}]`)} — FAILED`);
@@ -858,7 +909,9 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
       lines.push(`  ${c.dim('○')} ${ck.name} — neutral`);
     }
   } else if (ci.status === 'cancelled') {
-    lines.push(c.yellow(`CI: CANCELLED (${ci.cancelled.length} cancelled, ${ci.passed.length} passed)`));
+    lines.push(
+      c.yellow(`CI: CANCELLED (${ci.cancelled.length} cancelled, ${ci.passed.length} passed)`)
+    );
     for (const ck of ci.cancelled) {
       lines.push(`  ${c.yellow('⊘')} ${ck.name} — cancelled`);
     }
@@ -874,13 +927,22 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
 
   // Merge status
   const isConflicting = prInfo.mergeable === 'CONFLICTING' || prInfo.mergeStateStatus === 'DIRTY';
-  const isMergeReady = prInfo.mergeable === 'MERGEABLE' && (!prInfo.mergeStateStatus || prInfo.mergeStateStatus === 'CLEAN' || prInfo.mergeStateStatus === 'HAS_HOOKS' || prInfo.mergeStateStatus === 'UNSTABLE');
+  const isMergeReady =
+    prInfo.mergeable === 'MERGEABLE' &&
+    (!prInfo.mergeStateStatus ||
+      prInfo.mergeStateStatus === 'CLEAN' ||
+      prInfo.mergeStateStatus === 'HAS_HOOKS' ||
+      prInfo.mergeStateStatus === 'UNSTABLE');
   if (isConflicting) {
     lines.push('');
     lines.push(c.red('CONFLICTS: Merge conflicts detected — rebase required'));
   } else if (!isMergeReady) {
     lines.push('');
-    lines.push(c.yellow(`MERGE STATUS: ${prInfo.mergeable || 'UNKNOWN'} (${prInfo.mergeStateStatus || 'UNKNOWN'}) — not yet mergeable`));
+    lines.push(
+      c.yellow(
+        `MERGE STATUS: ${prInfo.mergeable || 'UNKNOWN'} (${prInfo.mergeStateStatus || 'UNKNOWN'}) — not yet mergeable`
+      )
+    );
   }
 
   // Reviews
@@ -903,7 +965,9 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
           lines.push(`    ${c.dim('"' + preview + '"')}`);
         }
         if (item.path && item.line) {
-          lines.push(`    ${c.yellow('→ Alter line ' + item.line + ' in ' + item.path + ' to address this comment (touch the exact line to invalidate stale review)')}`);
+          lines.push(
+            `    ${c.yellow('→ Alter line ' + item.line + ' in ' + item.path + ' to address this comment (touch the exact line to invalidate stale review)')}`
+          );
           // Show actual code at the referenced line so the agent can verify if already fixed
           const codeCtx = getCodeContext(item.path, item.line);
           if (codeCtx) {
@@ -917,11 +981,16 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
         }
       }
       if (reviews.nonBlocking.length > 0) {
-        lines.push(`  + ${reviews.nonBlocking.length} non-blocking (nitpick/low — assess whether to address):`);
+        lines.push(
+          `  + ${reviews.nonBlocking.length} non-blocking (nitpick/low — assess whether to address):`
+        );
         formatNonBlockingItems(reviews.nonBlocking, lines);
       }
     } else if (reviews.nonBlocking.length > 0) {
-      lines.push(c.green(`Reviews: CLEAR`) + ` (${reviews.nonBlocking.length} non-blocking — assess whether to address):`);
+      lines.push(
+        c.green(`Reviews: CLEAR`) +
+          ` (${reviews.nonBlocking.length} non-blocking — assess whether to address):`
+      );
       formatNonBlockingItems(reviews.nonBlocking, lines);
     } else {
       lines.push(c.green('Reviews: CLEAR'));
@@ -936,13 +1005,24 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
   } else if (isConflicting) {
     lines.push(`→ Resolve conflicts, push, then re-run: ${c.dim('node scripts/follow-up-pr.js')}`);
   } else if (ci.status === 'cancelled') {
-    lines.push(`→ CI was cancelled. Re-push or re-run the workflow: ${c.dim('gh run rerun <run-id>')}`);
+    lines.push(
+      `→ CI was cancelled. Re-push or re-run the workflow: ${c.dim('gh run rerun <run-id>')}`
+    );
   } else if (!opts.noReviews && reviews.hasBlocking && reviews.pendingBots.length > 0) {
     const blockCount = reviews.blocking ? reviews.blocking.length : 0;
-    lines.push(`→ Waiting ${opts.interval}s for bot reviews (${blockCount} blocking comment${blockCount !== 1 ? 's' : ''} may become stale)... (attempt ${attempt}/${maxAttempts})`);
+    lines.push(
+      `→ Waiting ${opts.interval}s for bot reviews (${blockCount} blocking comment${blockCount !== 1 ? 's' : ''} may become stale)... (attempt ${attempt}/${maxAttempts})`
+    );
   } else if (!opts.noReviews && reviews.hasBlocking) {
-    lines.push(`→ Address blocking reviews, push, then re-run: ${c.dim('node scripts/follow-up-pr.js')}`);
-  } else if (ciAcceptable && (!reviews.hasBlocking || opts.noReviews) && reviews.pendingBots.length === 0 && isMergeReady) {
+    lines.push(
+      `→ Address blocking reviews, push, then re-run: ${c.dim('node scripts/follow-up-pr.js')}`
+    );
+  } else if (
+    ciAcceptable &&
+    (!reviews.hasBlocking || opts.noReviews) &&
+    reviews.pendingBots.length === 0 &&
+    isMergeReady
+  ) {
     // Non-blocking comments report (before the banner)
     if (reviews.nonBlocking && reviews.nonBlocking.length > 0) {
       lines.push('');
@@ -955,7 +1035,9 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
         lines.push(`  File: ${loc || 'N/A'}`);
         lines.push(`  Author: @${item.author}`);
         if (item.deduplicated) {
-          lines.push(`  Status: ${c.cyan('DEDUPED')} — previously addressed, re-posted after force-push`);
+          lines.push(
+            `  Status: ${c.cyan('DEDUPED')} — previously addressed, re-posted after force-push`
+          );
         } else {
           lines.push(`  Status: ${c.dim('NOT ADDRESSED')} — low priority`);
         }
@@ -969,12 +1051,16 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
     lines.push(c.green('═══════════════════════════════════════'));
     lines.push('');
     const ciLabel = ci.status === 'no-checks' ? 'NO CHECKS' : 'PASSED';
-    lines.push(c.green(`CI: ${ciLabel} | Reviews: ${opts.noReviews ? 'SKIPPED' : 'CLEAR'} | Conflicts: NONE`));
+    lines.push(
+      c.green(`CI: ${ciLabel} | Reviews: ${opts.noReviews ? 'SKIPPED' : 'CLEAR'} | Conflicts: NONE`)
+    );
     lines.push(c.green(`PR #${prInfo.number} is ready for review/merge!`));
   } else if (ci.status === 'pending') {
     lines.push(`→ Waiting ${opts.interval}s for checks... (attempt ${attempt}/${maxAttempts})`);
   } else if (!opts.noReviews && reviews.pendingBots.length > 0) {
-    lines.push(`→ Waiting ${opts.interval}s for bot reviews... (attempt ${attempt}/${maxAttempts})`);
+    lines.push(
+      `→ Waiting ${opts.interval}s for bot reviews... (attempt ${attempt}/${maxAttempts})`
+    );
   } else if (!isMergeReady) {
     lines.push(`→ Merge status not ready (${prInfo.mergeable || 'UNKNOWN'}). Waiting...`);
   }
@@ -993,7 +1079,12 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
  */
 function decideNextAction(ciStatus, prInfo, reviews, noReviews) {
   const isConflicting = prInfo.mergeable === 'CONFLICTING' || prInfo.mergeStateStatus === 'DIRTY';
-  const isMergeReady = prInfo.mergeable === 'MERGEABLE' && (!prInfo.mergeStateStatus || prInfo.mergeStateStatus === 'CLEAN' || prInfo.mergeStateStatus === 'HAS_HOOKS' || prInfo.mergeStateStatus === 'UNSTABLE');
+  const isMergeReady =
+    prInfo.mergeable === 'MERGEABLE' &&
+    (!prInfo.mergeStateStatus ||
+      prInfo.mergeStateStatus === 'CLEAN' ||
+      prInfo.mergeStateStatus === 'HAS_HOOKS' ||
+      prInfo.mergeStateStatus === 'UNSTABLE');
   const ciAcceptable = ciStatus === 'passing' || ciStatus === 'no-checks';
   const ciFinished = ciAcceptable || ciStatus === 'cancelled';
   const reviewsClear = noReviews || (!reviews.hasBlocking && reviews.pendingBots.length === 0);
@@ -1027,9 +1118,12 @@ function decideNextAction(ciStatus, prInfo, reviews, noReviews) {
   const reasons = [];
   if (!ciFinished) reasons.push('CI checks pending');
   if (!noReviews && reviews.pendingBots.length > 0) reasons.push('bot reviews pending');
-  if (!noReviews && reviews.hasBlocking && !ciFinished) reasons.push('waiting for CI to finish before evaluating reviews');
-  if (!noReviews && reviews.hasBlocking && reviews.pendingBots.length > 0) reasons.push('blocking reviews may become stale after bot review');
-  if (!isMergeReady && !isConflicting) reasons.push(`merge status: ${prInfo.mergeStateStatus || 'UNKNOWN'}`);
+  if (!noReviews && reviews.hasBlocking && !ciFinished)
+    reasons.push('waiting for CI to finish before evaluating reviews');
+  if (!noReviews && reviews.hasBlocking && reviews.pendingBots.length > 0)
+    reasons.push('blocking reviews may become stale after bot review');
+  if (!isMergeReady && !isConflicting)
+    reasons.push(`merge status: ${prInfo.mergeStateStatus || 'UNKNOWN'}`);
 
   return {
     action: 'poll',
@@ -1057,10 +1151,11 @@ function getAdaptiveInterval(attempt, ci) {
   if (attempt === 1) return 10;
 
   const total = ci.total || 0;
-  const completed = (ci.passed ? ci.passed.length : 0)
-    + (ci.neutral ? ci.neutral.length : 0)
-    + (ci.failed ? ci.failed.length : 0)
-    + (ci.cancelled ? ci.cancelled.length : 0);
+  const completed =
+    (ci.passed ? ci.passed.length : 0) +
+    (ci.neutral ? ci.neutral.length : 0) +
+    (ci.failed ? ci.failed.length : 0) +
+    (ci.cancelled ? ci.cancelled.length : 0);
   const completionRatio = total > 0 ? completed / total : 0;
 
   // Finish line — most steps done, poll faster
@@ -1097,7 +1192,9 @@ async function main() {
   }
 
   if (prInfo.state === 'CLOSED' || prInfo.state === 'MERGED') {
-    console.log(c.dim(`PR #${prInfo.number} is ${prInfo.state.toLowerCase()}. Nothing to monitor.`));
+    console.log(
+      c.dim(`PR #${prInfo.number} is ${prInfo.state.toLowerCase()}. Nothing to monitor.`)
+    );
     process.exit(0);
   }
 
@@ -1120,13 +1217,22 @@ async function main() {
 
   const maxAttempts = opts.once ? 1 : opts.maxAttempts;
   let ci;
-  let reviews = { all: [], comments: [], actionable: [], blocking: [], nonBlocking: [], pendingBots: [], hasBlocking: false, hasActionable: false };
+  let reviews = {
+    all: [],
+    comments: [],
+    actionable: [],
+    blocking: [],
+    nonBlocking: [],
+    pendingBots: [],
+    hasBlocking: false,
+    hasActionable: false,
+  };
 
   // Single-generation dedup: capture previous run's bot hashes (backward compat with old state files)
   const previousRunBotHashes = (
-    (state.previousRunBotHashes && state.previousRunBotHashes.length > 0)
+    state.previousRunBotHashes && state.previousRunBotHashes.length > 0
       ? state.previousRunBotHashes
-      : (state.addressedBotComments || []).map(a => a.hash)
+      : (state.addressedBotComments || []).map((a) => a.hash)
   ).slice();
 
   // Obtain current HEAD SHA for fresh-review detection in dedup.
@@ -1156,13 +1262,27 @@ async function main() {
     }
 
     // Check reviews (unless --no-reviews)
-    reviews = { all: [], comments: [], actionable: [], blocking: [], nonBlocking: [], pendingBots: [], hasBlocking: false, hasActionable: false };
+    reviews = {
+      all: [],
+      comments: [],
+      actionable: [],
+      blocking: [],
+      nonBlocking: [],
+      pendingBots: [],
+      hasBlocking: false,
+      hasActionable: false,
+    };
     if (!opts.noReviews) {
       try {
         reviews = getReviews(prInfo.number);
         // Apply single-generation dedup after fetching reviews
         if (previousRunBotHashes.length > 0) {
-          const deduped = deduplicateBlockingBotComments(reviews.blocking, reviews.nonBlocking, previousRunBotHashes, { currentHead });
+          const deduped = deduplicateBlockingBotComments(
+            reviews.blocking,
+            reviews.nonBlocking,
+            previousRunBotHashes,
+            { currentHead }
+          );
           reviews.blocking = deduped.blocking;
           reviews.nonBlocking = deduped.nonBlocking;
           reviews.hasBlocking = reviews.blocking.length > 0;
@@ -1179,7 +1299,11 @@ async function main() {
       ciStatus: ci.status,
       failedChecks: ci.failed.map((ck) => ({ name: ck.name, category: ck.category })),
       pendingReviews: reviews.pendingBots,
-      blockingReviews: reviews.blocking.map((r) => ({ id: r.id, author: r.author, priority: r.priority })),
+      blockingReviews: reviews.blocking.map((r) => ({
+        id: r.id,
+        author: r.author,
+        priority: r.priority,
+      })),
       nonBlockingReviews: reviews.nonBlocking.length,
     });
 
@@ -1201,7 +1325,7 @@ async function main() {
     // An empty Set means headAtLastExit === currentHead (re-run without push) — fall back
     // to recording all hashes so dedup still works on the next run.
     const rawChangedPaths = getChangedPaths(state.headAtLastExit || null, currentHead);
-    const changedPaths = (rawChangedPaths && rawChangedPaths.size === 0) ? null : rawChangedPaths;
+    const changedPaths = rawChangedPaths && rawChangedPaths.size === 0 ? null : rawChangedPaths;
 
     if (decision.action === 'exit-fail') {
       // Single-generation dedup: record current blocking bot hashes on
@@ -1233,7 +1357,12 @@ async function main() {
           recheck = getReviews(prInfo.number);
           // Apply dedup to recheck results too
           if (previousRunBotHashes.length > 0) {
-            const deduped = deduplicateBlockingBotComments(recheck.blocking, recheck.nonBlocking, previousRunBotHashes, { currentHead });
+            const deduped = deduplicateBlockingBotComments(
+              recheck.blocking,
+              recheck.nonBlocking,
+              previousRunBotHashes,
+              { currentHead }
+            );
             recheck.blocking = deduped.blocking;
             recheck.nonBlocking = deduped.nonBlocking;
             recheck.hasBlocking = recheck.blocking.length > 0;
@@ -1245,7 +1374,9 @@ async function main() {
         if (recheck.hasBlocking) {
           reviews = recheck;
           console.log('');
-          console.log(formatReport(prInfo, ci, reviews, attempt, maxAttempts, { ...opts, interval }));
+          console.log(
+            formatReport(prInfo, ci, reviews, attempt, maxAttempts, { ...opts, interval })
+          );
           console.log('');
           // Record blocking bot hashes for late-arriving comments
           // Only record hashes for comments on files that were actually modified.
@@ -1270,15 +1401,21 @@ async function main() {
       try {
         const getConfig = require(path.join(__dirname, '..', '..', 'lib', 'get-config'));
         const tasksBase = getConfig('TASKS_BASE');
-        const getTicketId = require(path.join(__dirname, '..', '..', 'lib', 'scripts', 'get-ticket-id.js'));
+        const getTicketId = require(
+          path.join(__dirname, '..', '..', 'lib', 'scripts', 'get-ticket-id.js')
+        );
         const ticketId = getTicketId.getCurrentTaskId();
         if (tasksBase && ticketId) {
           const allComments = [...(reviews.blocking || []), ...(reviews.nonBlocking || [])];
-          const entries = allComments.map(item => ({
+          const entries = allComments.map((item) => ({
             id: item.id || null,
             author: item.author || 'unknown',
             comment: (item.body || '').slice(0, 120),
-            disposition: item.deduplicated ? 'addressed' : (reviews.blocking || []).includes(item) ? 'addressed' : 'deferred',
+            disposition: item.deduplicated
+              ? 'addressed'
+              : (reviews.blocking || []).includes(item)
+                ? 'addressed'
+                : 'deferred',
             reason: item.deduplicated
               ? 'Previously addressed, re-posted after force-push'
               : (reviews.blocking || []).includes(item)
@@ -1286,8 +1423,16 @@ async function main() {
                 : 'Non-blocking low-priority comment',
           }));
           let safeTicketId = ticketId;
-          try { safeTicketId = require(path.join(__dirname, '..', '..', 'lib', 'config')).safeTicketId(ticketId); } catch {}
-          const accountabilityPath = path.join(tasksBase, safeTicketId, 'review-accountability.json');
+          try {
+            safeTicketId = require(path.join(__dirname, '..', '..', 'lib', 'config')).safeTicketId(
+              ticketId
+            );
+          } catch {}
+          const accountabilityPath = path.join(
+            tasksBase,
+            safeTicketId,
+            'review-accountability.json'
+          );
           fs.mkdirSync(path.dirname(accountabilityPath), { recursive: true });
           fs.writeFileSync(accountabilityPath, JSON.stringify(entries, null, 2));
         }
@@ -1306,7 +1451,11 @@ async function main() {
 
   // Exhausted attempts — report what we were waiting on
   const lastDecision = decideNextAction(ci.status, prInfo, reviews, opts.noReviews);
-  console.log(c.yellow(`Max attempts (${maxAttempts}) reached. Still waiting: ${lastDecision.waitReason || 'unknown'}`));
+  console.log(
+    c.yellow(
+      `Max attempts (${maxAttempts}) reached. Still waiting: ${lastDecision.waitReason || 'unknown'}`
+    )
+  );
   state.finalStatus = 'timeout';
   saveState(state);
   process.exit(1);
@@ -1320,4 +1469,16 @@ if (require.main === module) {
   });
 }
 
-module.exports = { classifyCommentPriority, isBlockingPriority, getResolvedCommentIds, resolveOutdatedThreads, decideNextAction, getAdaptiveInterval, computeCommentHash, deduplicateBlockingBotComments, getChangedPaths, initState, getCodeContext };
+module.exports = {
+  classifyCommentPriority,
+  isBlockingPriority,
+  getResolvedCommentIds,
+  resolveOutdatedThreads,
+  decideNextAction,
+  getAdaptiveInterval,
+  computeCommentHash,
+  deduplicateBlockingBotComments,
+  getChangedPaths,
+  initState,
+  getCodeContext,
+};

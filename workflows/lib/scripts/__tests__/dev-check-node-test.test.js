@@ -42,8 +42,12 @@ function runBashFunction(fnCall, env = {}) {
 describe('detect_test_runner', () => {
   let tmpDir;
 
-  beforeEach(() => { tmpDir = makeTempDir(); });
-  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+  beforeEach(() => {
+    tmpDir = makeTempDir();
+  });
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
 
   it('returns vitest when vitest is in devDependencies', () => {
     const pkg = { devDependencies: { vitest: '^1.0.0' } };
@@ -105,8 +109,12 @@ describe('detect_test_runner', () => {
 describe('map_to_test_files', () => {
   let tmpDir;
 
-  beforeEach(() => { tmpDir = makeTempDir(); });
-  afterEach(() => { fs.rmSync(tmpDir, { recursive: true, force: true }); });
+  beforeEach(() => {
+    tmpDir = makeTempDir();
+  });
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
 
   it('passes through test files that exist', () => {
     const testDir = path.join(tmpDir, 'lib', '__tests__');
@@ -270,8 +278,12 @@ function runGetChangedFiles(repoDir, extPattern = '') {
 describe('get_changed_files', () => {
   let repoDir;
 
-  beforeEach(() => { repoDir = initGitRepo(); });
-  afterEach(() => { fs.rmSync(repoDir, { recursive: true, force: true }); });
+  beforeEach(() => {
+    repoDir = initGitRepo();
+  });
+  afterEach(() => {
+    fs.rmSync(repoDir, { recursive: true, force: true });
+  });
 
   it('detects staged files', () => {
     const run = (cmd) => execSync(cmd, { cwd: repoDir, encoding: 'utf8', stdio: 'pipe' });
@@ -314,7 +326,7 @@ describe('get_changed_files', () => {
     fs.writeFileSync(path.join(repoDir, 'dup.ts'), 'v2');
 
     const result = runGetChangedFiles(repoDir, '\\.(ts|tsx)$');
-    const lines = result.split('\n').filter(l => l === 'dup.ts');
+    const lines = result.split('\n').filter((l) => l === 'dup.ts');
     assert.equal(lines.length, 1, `Expected exactly one occurrence of dup.ts, got ${lines.length}`);
   });
 

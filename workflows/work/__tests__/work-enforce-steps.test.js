@@ -21,12 +21,17 @@ function runHook(toolInput, hookType = 'PostToolUse') {
       env: {
         ...process.env,
         TOOL_INPUT: JSON.stringify(toolInput),
-        CLAUDE_HOOK_TYPE: hookType
-      }
+        CLAUDE_HOOK_TYPE: hookType,
+      },
     });
-    let stdout = '', stderr = '';
-    proc.stdout.on('data', (d) => { stdout += d.toString(); });
-    proc.stderr.on('data', (d) => { stderr += d.toString(); });
+    let stdout = '',
+      stderr = '';
+    proc.stdout.on('data', (d) => {
+      stdout += d.toString();
+    });
+    proc.stderr.on('data', (d) => {
+      stderr += d.toString();
+    });
     proc.on('close', (code) => {
       resolve({ code, stdout, stderr });
     });
@@ -48,10 +53,7 @@ describe('work-enforce-steps hook', () => {
 
   it('should create session file on PreToolUse for /work', async () => {
     const ticketId = `PROJ-${Date.now()}`;
-    const { code } = await runHook(
-      { skill: 'work', args: ticketId },
-      'PreToolUse'
-    );
+    const { code } = await runHook({ skill: 'work', args: ticketId }, 'PreToolUse');
     assert.strictEqual(code, 0);
 
     // Check session file was created
@@ -68,10 +70,7 @@ describe('work-enforce-steps hook', () => {
     const tasksDir = config.tasksDir(ticketId);
     fs.mkdirSync(tasksDir, { recursive: true });
 
-    const { code } = await runHook(
-      { skill: 'work-pr', args: ticketId },
-      'PreToolUse'
-    );
+    const { code } = await runHook({ skill: 'work-pr', args: ticketId }, 'PreToolUse');
     assert.strictEqual(code, 0);
 
     const prFile = path.join(tasksDir, '.work-pr-executed');

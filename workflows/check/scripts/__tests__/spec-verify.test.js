@@ -42,7 +42,11 @@ function runScript(specPath, opts = {}) {
     });
     return { exitCode: 0, stdout };
   } catch (err) {
-    return { exitCode: err.status ?? 1, stdout: err.stdout?.toString() || '', stderr: err.stderr?.toString() || '' };
+    return {
+      exitCode: err.status ?? 1,
+      stdout: err.stdout?.toString() || '',
+      stderr: err.stderr?.toString() || '',
+    };
   }
 }
 
@@ -50,7 +54,6 @@ after(() => fs.rmSync(TEMP, { recursive: true, force: true }));
 beforeEach(() => setupWorktree());
 
 describe('spec-verify.js', () => {
-
   // ── Happy Path ──────────────────────────────────────────────────────────
 
   it('scenario 1: FILE_EXISTS passes when file exists', () => {
@@ -74,7 +77,10 @@ describe('spec-verify.js', () => {
   });
 
   it('scenario 3: TEST_COUNT passes when enough tests exist', () => {
-    writeFile('src/__tests__/a.test.js', 'test("a", () => {}); test("b", () => {}); test("c", () => {});');
+    writeFile(
+      'src/__tests__/a.test.js',
+      'test("a", () => {}); test("b", () => {}); test("c", () => {});'
+    );
     writeFile('src/__tests__/b.test.js', 'it("d", () => {}); it("e", () => {});');
     const specPath = writeSpec(['- TEST_COUNT src/__tests__/*.test.js 3']);
     const result = runScript(specPath, { json: true });
@@ -141,22 +147,22 @@ describe('spec-verify.js', () => {
     assert.equal(result.exitCode, 1);
     const json = JSON.parse(result.stdout);
     assert.equal(json.checks[0].passed, false);
-    assert.ok(json.checks[0].reason.toLowerCase().includes('regex') || json.checks[0].reason.toLowerCase().includes('invalid'));
+    assert.ok(
+      json.checks[0].reason.toLowerCase().includes('regex') ||
+        json.checks[0].reason.toLowerCase().includes('invalid')
+    );
   });
 
   it('scenario 10: unknown marker type fails with descriptive reason', () => {
     writeFile('src/foo.js', 'content');
-    const specPath = writeSpec([
-      '- FILE_EXISTS src/foo.js',
-      '- ROUTE_EXISTS /api/foo',
-    ]);
+    const specPath = writeSpec(['- FILE_EXISTS src/foo.js', '- ROUTE_EXISTS /api/foo']);
     const result = runScript(specPath, { json: true });
     assert.equal(result.exitCode, 1);
     const json = JSON.parse(result.stdout);
     // The known check should pass
     assert.equal(json.checks[0].passed, true);
     // The unknown marker should fail with a descriptive reason
-    const unknown = json.checks.find(c => c.type === 'ROUTE_EXISTS');
+    const unknown = json.checks.find((c) => c.type === 'ROUTE_EXISTS');
     assert.ok(unknown, 'unknown marker should appear in checks');
     assert.equal(unknown.passed, false, 'unknown marker should fail');
     assert.ok(unknown.reason.includes('Unknown marker type'), 'reason should mention unknown type');
@@ -179,7 +185,9 @@ describe('spec-verify.js', () => {
     assert.equal(result.exitCode, 1);
     const json = JSON.parse(result.stdout);
     assert.equal(json.checks[0].passed, false);
-    assert.ok(json.checks[0].reason.includes('traversal') || json.checks[0].reason.includes('rejected'));
+    assert.ok(
+      json.checks[0].reason.includes('traversal') || json.checks[0].reason.includes('rejected')
+    );
   });
 
   it('rejects absolute paths in marker args', () => {
@@ -194,10 +202,7 @@ describe('spec-verify.js', () => {
 
   it('produces human-readable output by default (no --json)', () => {
     writeFile('src/foo.js', 'module.exports = {}');
-    const specPath = writeSpec([
-      '- FILE_EXISTS src/foo.js',
-      '- FILE_EXISTS src/bar.js',
-    ]);
+    const specPath = writeSpec(['- FILE_EXISTS src/foo.js', '- FILE_EXISTS src/bar.js']);
     const result = runScript(specPath);
     assert.equal(result.exitCode, 1);
     assert.ok(result.stdout.includes('[PASS]'));

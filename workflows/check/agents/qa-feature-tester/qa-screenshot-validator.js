@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 const fs = require('fs');
+const path = require('path');
+const { logHookError } = require(path.join(__dirname, '..', '..', '..', 'lib', 'hook-error-log'));
 
 /**
  * PostToolUse hook to validate QA screenshots
@@ -55,7 +57,7 @@ const TRANSIENT_ERROR_PATTERNS = [
   /Cannot read propert/i,
   /undefined is not/i,
   /null is not/i,
-  /at\s+\w+\s+\(http/,  // Stack trace pattern
+  /at\s+\w+\s+\(http/, // Stack trace pattern
   /Network Error/i,
 ];
 
@@ -75,11 +77,7 @@ const ERROR_PATTERNS = [...TRANSIENT_ERROR_PATTERNS, ...NON_TRANSIENT_ERROR_PATT
 const RETRY_STATE_FILE = '/tmp/qa-snapshot-retry-state.json';
 const LAST_URL_FILE = '/tmp/qa-last-navigated-url';
 
-const LOADING_PATTERNS = [
-  /Loading\.\.\./i,
-  /Please wait/i,
-  /Fetching/i,
-];
+const LOADING_PATTERNS = [/Loading\.\.\./i, /Please wait/i, /Fetching/i];
 
 async function main() {
   let input = '';
@@ -99,7 +97,8 @@ async function main() {
 
   const toolName = hookData.tool_name;
   const rawResponse = hookData.tool_response;
-  const toolOutput = typeof rawResponse === 'string' ? rawResponse : JSON.stringify(rawResponse || '');
+  const toolOutput =
+    typeof rawResponse === 'string' ? rawResponse : JSON.stringify(rawResponse || '');
 
   // Log disabled - uncomment logExecution function and this to debug
   // logExecution({
@@ -154,19 +153,19 @@ async function main() {
 
   // Skip warning if QA is intentionally testing error scenarios
   if (isTestingErrors && errors.length > 0) {
-    console.log(JSON.stringify({
-      message: '\n✓ Error state detected (expected - testing error scenario)\n'
-    }));
+    console.log(
+      JSON.stringify({
+        message: '\n✓ Error state detected (expected - testing error scenario)\n',
+      })
+    );
     return;
   }
 
   if (errors.length > 0 || warnings.length > 0) {
     // Classify: is this a transient or non-transient error?
-    const isTransient = errors.some(e =>
-      TRANSIENT_ERROR_PATTERNS.some(p => e.includes(p.toString()))
-    ) && !errors.some(e =>
-      NON_TRANSIENT_ERROR_PATTERNS.some(p => e.includes(p.toString()))
-    );
+    const isTransient =
+      errors.some((e) => TRANSIENT_ERROR_PATTERNS.some((p) => e.includes(p.toString()))) &&
+      !errors.some((e) => NON_TRANSIENT_ERROR_PATTERNS.some((p) => e.includes(p.toString())));
     const isWarningOnly = errors.length === 0 && warnings.length > 0;
     // Track retry state for transient errors (only for actual errors, not warnings)
     let retryCount = 0;
@@ -227,15 +226,17 @@ async function main() {
         const state = JSON.parse(fs.readFileSync(RETRY_STATE_FILE, 'utf8'));
         delete state[currentUrl];
         fs.writeFileSync(RETRY_STATE_FILE, JSON.stringify(state));
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
     }
 
     const message = [
       '',
       'QA SNAPSHOT VALIDATION',
       '─'.repeat(50),
-      ...errors.map(e => `  ${e}`),
-      ...warnings.map(w => `  ${w}`),
+      ...errors.map((e) => `  ${e}`),
+      ...warnings.map((w) => `  ${w}`),
       '',
       ...actionLines,
       '─'.repeat(50),
@@ -251,7 +252,9 @@ async function main() {
       let currentUrl = 'unknown';
       try {
         currentUrl = fs.readFileSync(LAST_URL_FILE, 'utf8').trim();
-      } catch { /* no URL tracked */ }
+      } catch {
+        /* no URL tracked */
+      }
       const retryState = JSON.parse(fs.readFileSync(RETRY_STATE_FILE, 'utf8'));
       delete retryState[currentUrl];
       if (Object.keys(retryState).length === 0) {
@@ -260,12 +263,15 @@ async function main() {
         fs.writeFileSync(RETRY_STATE_FILE, JSON.stringify(retryState));
       }
     }
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   console.log(JSON.stringify({}));
 }
 
-main().catch(err => {
+main().catch((err) => {
+  logHookError(__filename, err);
   console.error('QA validator error:', err.message);
   console.log(JSON.stringify({}));
 });

@@ -22,8 +22,11 @@ function getTasksBase() {
 // TASKS_BASE is lazy-resolved on first use via getTasksBase() — safe at require() time
 
 function safeId(ticketId) {
-  try { return require('../lib/config').safeTicketId(ticketId); }
-  catch { return ticketId; }
+  try {
+    return require('../lib/config').safeTicketId(ticketId);
+  } catch {
+    return ticketId;
+  }
 }
 
 /**
@@ -72,14 +75,26 @@ function appendAction(ticketId, action) {
  */
 function analyzeActions(actions) {
   if (!actions || actions.length === 0) {
-    return { steps: [], totalDuration: '0s', bottleneck: null, bottleneckDuration: '0s', actionCount: 0 };
+    return {
+      steps: [],
+      totalDuration: '0s',
+      bottleneck: null,
+      bottleneckDuration: '0s',
+      actionCount: 0,
+    };
   }
 
   const stepMap = new Map();
 
   for (const action of actions) {
     if (!stepMap.has(action.step)) {
-      stepMap.set(action.step, { startTime: null, endTime: null, commands: 0, blocks: 0, retries: 0 });
+      stepMap.set(action.step, {
+        startTime: null,
+        endTime: null,
+        commands: 0,
+        blocks: 0,
+        retries: 0,
+      });
     }
     const entry = stepMap.get(action.step);
     const ts = new Date(action.timestamp).getTime();
@@ -102,9 +117,8 @@ function analyzeActions(actions) {
   let bottleneck = null;
 
   for (const [step, data] of stepMap) {
-    const duration = (data.startTime && data.endTime)
-      ? Math.round((data.endTime - data.startTime) / 1000)
-      : 0;
+    const duration =
+      data.startTime && data.endTime ? Math.round((data.endTime - data.startTime) / 1000) : 0;
 
     steps.push({
       step,
@@ -134,4 +148,11 @@ function analyzeActions(actions) {
   };
 }
 
-module.exports = { appendAction, loadActions, analyzeActions, get TASKS_BASE() { return getTasksBase(); } };
+module.exports = {
+  appendAction,
+  loadActions,
+  analyzeActions,
+  get TASKS_BASE() {
+    return getTasksBase();
+  },
+};

@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 
 const fs = require('fs');
-const { logHookError } = require(require('path').join(__dirname, '..', '..', '..', 'lib', 'hook-error-log'));
+const { logHookError } = require(
+  require('path').join(__dirname, '..', '..', '..', 'lib', 'hook-error-log')
+);
 
 /**
  * PreToolUse hook to enforce screenshot naming conventions for QA testing.
@@ -74,16 +76,16 @@ async function main() {
   if (!validPattern.test(basename)) {
     process.stderr.write(
       `Screenshot naming violation!\n\n` +
-      `Expected format: {N}-{scenario}-{state}.png\n` +
-      `Got: ${basename}\n\n` +
-      `Examples:\n` +
-      `  OK: 1-impersonate-role-menu.png\n` +
-      `  OK: 2-impersonate-role-modal-empty.png\n` +
-      `  OK: 3-login-form-filled.png\n\n` +
-      `  BAD: screenshot.png\n` +
-      `  BAD: modal.png\n` +
-      `  BAD: impersonate-role.png (missing number prefix)\n\n` +
-      `Fix the filename to follow the convention.\n`
+        `Expected format: {N}-{scenario}-{state}.png\n` +
+        `Got: ${basename}\n\n` +
+        `Examples:\n` +
+        `  OK: 1-impersonate-role-menu.png\n` +
+        `  OK: 2-impersonate-role-modal-empty.png\n` +
+        `  OK: 3-login-form-filled.png\n\n` +
+        `  BAD: screenshot.png\n` +
+        `  BAD: modal.png\n` +
+        `  BAD: impersonate-role.png (missing number prefix)\n\n` +
+        `Fix the filename to follow the convention.\n`
     );
     process.exit(2);
   }
@@ -91,14 +93,16 @@ async function main() {
   // Validate number prefix is reasonable (1-99)
   const numberPrefix = parseInt(basename.split('-')[0], 10);
   if (numberPrefix < 1 || numberPrefix > 99) {
-    process.stderr.write(`Screenshot number prefix out of range: ${numberPrefix}\nExpected: 1-99\nFix the filename to use a valid step number.\n`);
+    process.stderr.write(
+      `Screenshot number prefix out of range: ${numberPrefix}\nExpected: 1-99\nFix the filename to use a valid step number.\n`
+    );
     process.exit(2);
   }
 
   process.exit(0);
 }
 
-main().catch(err => {
+main().catch((err) => {
   logHookError(__filename, err);
   process.exit(0);
 });

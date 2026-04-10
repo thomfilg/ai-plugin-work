@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 const fs = require('fs');
+const path = require('path');
+const { logHookError } = require(path.join(__dirname, '..', '..', '..', 'lib', 'hook-error-log'));
 
 /**
  * PostToolUse hook: Tracks the last URL navigated to by browser_navigate.
@@ -34,6 +36,7 @@ async function main() {
   console.log(JSON.stringify({}));
 }
 
-main().catch(() => {
+main().catch((err) => {
+  logHookError(__filename, err);
   console.log(JSON.stringify({}));
 });

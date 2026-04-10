@@ -5,3 +5,6 @@
 .env
 .envrc
 node_modules/
+
+# Runtime-generated hook artifacts
+.claude-code-check-request.json

@@ -1,6 +1,11 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { computeCommentHash, deduplicateBlockingBotComments, initState, getChangedPaths } = require('../follow-up-pr.js');
+const {
+  computeCommentHash,
+  deduplicateBlockingBotComments,
+  initState,
+  getChangedPaths,
+} = require('../follow-up-pr.js');
 
 // ── computeCommentHash ──────────────────────────────────────────────────────
 
@@ -151,7 +156,9 @@ describe('deduplicateBlockingBotComments', () => {
   });
 
   it('works with cursor-ai[bot] comments', () => {
-    const comment = makeBotComment('x.js', '**severity**: medium\nFix this', { author: 'cursor-ai[bot]' });
+    const comment = makeBotComment('x.js', '**severity**: medium\nFix this', {
+      author: 'cursor-ai[bot]',
+    });
     const hash = computeCommentHash('x.js', '**severity**: medium\nFix this');
 
     const result = deduplicateBlockingBotComments([comment], [], [hash]);
@@ -232,7 +239,7 @@ describe('3-run dedup flow', () => {
 
     // Run 2: User fixes A and C. Copilot re-posts B (identical) and new D.
     const cB2 = makeBotComment('b.js', 'Issue B'); // identical re-post
-    const cD = makeBotComment('d.js', 'Issue D');   // new comment
+    const cD = makeBotComment('d.js', 'Issue D'); // new comment
     const run2 = deduplicateBlockingBotComments([cB2, cD], [], run1Hashes);
     assert.equal(run2.blocking.length, 1, 'Run 2: only D is blocking');
     assert.equal(run2.blocking[0].body, 'Issue D');
@@ -305,7 +312,9 @@ describe('deduplicateBlockingBotComments — currentHead guard', () => {
     const comment = makeBotComment('src/index.js', 'Fix this bug', { commit_id: CURRENT_HEAD });
     const hash = computeCommentHash('src/index.js', 'Fix this bug');
 
-    const result = deduplicateBlockingBotComments([comment], [], [hash], { currentHead: CURRENT_HEAD });
+    const result = deduplicateBlockingBotComments([comment], [], [hash], {
+      currentHead: CURRENT_HEAD,
+    });
     assert.equal(result.blocking.length, 1, 'fresh review must NOT be deduped');
     assert.equal(result.nonBlocking.length, 0);
   });
@@ -316,7 +325,9 @@ describe('deduplicateBlockingBotComments — currentHead guard', () => {
     const hashA = computeCommentHash('src/a.js', 'Issue A');
     const hashB = computeCommentHash('src/b.js', 'Issue B');
 
-    const result = deduplicateBlockingBotComments([fresh, stale], [], [hashA, hashB], { currentHead: CURRENT_HEAD });
+    const result = deduplicateBlockingBotComments([fresh, stale], [], [hashA, hashB], {
+      currentHead: CURRENT_HEAD,
+    });
     assert.equal(result.blocking.length, 1, 'only fresh comment stays blocking');
     assert.equal(result.blocking[0].body, 'Issue A');
     assert.equal(result.nonBlocking.length, 1, 'stale comment deduped');
@@ -338,7 +349,9 @@ describe('deduplicateBlockingBotComments — currentHead guard', () => {
     const human = makeHumanComment('src/index.js', 'Fix this bug', { commit_id: CURRENT_HEAD });
     const hash = computeCommentHash('src/index.js', 'Fix this bug');
 
-    const result = deduplicateBlockingBotComments([human], [], [hash], { currentHead: CURRENT_HEAD });
+    const result = deduplicateBlockingBotComments([human], [], [hash], {
+      currentHead: CURRENT_HEAD,
+    });
     assert.equal(result.blocking.length, 1, 'human comment never deduped');
     assert.equal(result.nonBlocking.length, 0);
   });
@@ -377,7 +390,9 @@ describe('getChangedPaths', () => {
       // Shallow clone or single-commit repo — skip
       return;
     }
-    const headSha = require('child_process').execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim();
+    const headSha = require('child_process')
+      .execSync('git rev-parse HEAD', { encoding: 'utf8' })
+      .trim();
     const result = getChangedPaths(parentSha, headSha);
     assert.ok(result instanceof Set, 'must return a Set');
     assert.ok(result.size > 0, 'HEAD~1..HEAD should have at least one changed file');

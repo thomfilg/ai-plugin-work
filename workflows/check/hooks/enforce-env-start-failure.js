@@ -20,16 +20,27 @@
 
 const fs = require('fs');
 const path = require('path');
+const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
 
 let didBlock = false;
-process.on('uncaughtException', () => process.exit(didBlock ? 2 : 0));
-process.on('unhandledRejection', () => process.exit(didBlock ? 2 : 0));
+process.on('uncaughtException', (err) => {
+  logHookError(__filename, err);
+  process.exit(didBlock ? 2 : 0);
+});
+process.on('unhandledRejection', (err) => {
+  logHookError(__filename, err);
+  process.exit(didBlock ? 2 : 0);
+});
 
 let config;
 try {
   config = require('../../lib/config');
 } catch (err) {
-  if (err && err.code === 'MODULE_NOT_FOUND' && /['"]\.\.\/\.\.\/lib\/config['"]/.test(err.message)) {
+  if (
+    err &&
+    err.code === 'MODULE_NOT_FOUND' &&
+    /['"]\.\.\/\.\.\/lib\/config['"]/.test(err.message)
+  ) {
     config = null;
   } else {
     throw err;
@@ -75,34 +86,43 @@ function phase1_detectFailure(hookData) {
       try {
         const entry = JSON.parse(line);
         if (entry.type === 'tool_result' || entry.content) {
-          const text = typeof entry.content === 'string'
-            ? entry.content
-            : JSON.stringify(entry.content || '');
+          const text =
+            typeof entry.content === 'string' ? entry.content : JSON.stringify(entry.content || '');
           output += text + '\n';
         }
-      } catch { /* skip */ }
+      } catch {
+        /* skip */
+      }
     }
-  } catch { return; }
+  } catch {
+    return;
+  }
 
-  const hasFail = /"started":\s*false/.test(output)
-    || /Timeout waiting for app to start/.test(output);
-  const hasEmptyApps = /"runningApps":\s*\{\s*\}/.test(output)
-    && /"apps":\s*\{/.test(output);
+  const hasFail =
+    /"started":\s*false/.test(output) || /Timeout waiting for app to start/.test(output);
+  const hasEmptyApps = /"runningApps":\s*\{\s*\}/.test(output) && /"apps":\s*\{/.test(output);
 
   const ticketId = getTicketId();
   const mp = markerPath(ticketId);
 
   if (hasFail || hasEmptyApps) {
     const failedMatches = output.match(/"name":\s*"([^"]+)"[^}]*"started":\s*false/g) || [];
-    const failedApps = failedMatches.map(m => {
+    const failedApps = failedMatches.map((m) => {
       const n = m.match(/"name":\s*"([^"]+)"/);
       return n ? n[1] : 'unknown';
     });
 
-    fs.writeFileSync(mp, JSON.stringify({ failedApps, timestamp: new Date().toISOString(), ticketId }));
+    fs.writeFileSync(
+      mp,
+      JSON.stringify({ failedApps, timestamp: new Date().toISOString(), ticketId })
+    );
     process.stderr.write(`ENV_FAILURE: marker written (${failedApps.join(', ')})\n`);
   } else {
-    try { fs.unlinkSync(mp); } catch { /* */ }
+    try {
+      fs.unlinkSync(mp);
+    } catch {
+      /* */
+    }
   }
 }
 
@@ -115,13 +135,17 @@ function phase2_blockUntilUserChoice(hookData) {
   if (!fs.existsSync(mp)) return; // No failure, allow
 
   let failInfo = {};
-  try { failInfo = JSON.parse(fs.readFileSync(mp, 'utf8')); } catch { /* */ }
+  try {
+    failInfo = JSON.parse(fs.readFileSync(mp, 'utf8'));
+  } catch {
+    /* */
+  }
   const appList = (failInfo.failedApps || []).join(', ') || 'apps';
 
   process.stderr.write(
     `BLOCKED: Dev apps failed to start (${appList}). ` +
-    'Call AskUserQuestion with options: "Retry" | "Start manually" | "Skip QA" | "Abort /check". ' +
-    `Marker: ${mp}\n`
+      'Call AskUserQuestion with options: "Retry" | "Start manually" | "Skip QA" | "Abort /check". ' +
+      `Marker: ${mp}\n`
   );
   didBlock = true;
   process.exit(2);
@@ -136,7 +160,11 @@ function phase3_unblockAfterChoice(hookData) {
   if (!fs.existsSync(mp)) return; // No marker, nothing to do
 
   // Delete the block marker — user has been consulted
-  try { fs.unlinkSync(mp); } catch { /* */ }
+  try {
+    fs.unlinkSync(mp);
+  } catch {
+    /* */
+  }
   process.stderr.write(`ENV_FAILURE: marker cleared after AskUserQuestion\n`);
 
   // Check if user chose to skip QA (look at transcript for the answer)
@@ -147,10 +175,15 @@ function phase3_unblockAfterChoice(hookData) {
       const lines = content.split('\n').filter(Boolean);
       const recent = lines.slice(-10).join(' ');
       if (/skip\s*qa/i.test(recent)) {
-        fs.writeFileSync(skipQaMarkerPath(ticketId), JSON.stringify({ ticketId, timestamp: new Date().toISOString() }));
+        fs.writeFileSync(
+          skipQaMarkerPath(ticketId),
+          JSON.stringify({ ticketId, timestamp: new Date().toISOString() })
+        );
         process.stderr.write('Skip-QA marker written. QA agents will be skipped.\n');
       }
-    } catch { /* */ }
+    } catch {
+      /* */
+    }
   }
 }
 
@@ -182,4 +215,7 @@ async function main() {
   }
 }
 
-main().catch(() => process.exit(didBlock ? 2 : 0));
+main().catch((err) => {
+  logHookError(__filename, err);
+  process.exit(didBlock ? 2 : 0);
+});

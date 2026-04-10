@@ -8,29 +8,48 @@ const WRITE_REPORT = path.join(__dirname, '..', 'write-report.js');
 const { tokenPath, ensureTokenDir, TOKEN_MAX_AGE_MS } = require(WRITE_REPORT);
 
 const QA_SCRIPT = path.join(__dirname, '..', '..', '..', 'check', 'scripts', 'write-qa-report.js');
-const TESTS_SCRIPT = path.join(__dirname, '..', '..', '..', 'check', 'scripts', 'write-tests-report.js');
+const TESTS_SCRIPT = path.join(
+  __dirname,
+  '..',
+  '..',
+  '..',
+  'check',
+  'scripts',
+  'write-tests-report.js'
+);
 
 const REPORT_PATH = '/tmp/write-report-test-output.check.md';
 
 function writeToken(scriptBasename, agent, timestamp) {
   ensureTokenDir();
   const tp = tokenPath(scriptBasename);
-  try { fs.unlinkSync(tp); } catch { /* ignore */ }
+  try {
+    fs.unlinkSync(tp);
+  } catch {
+    /* ignore */
+  }
   fs.writeFileSync(tp, JSON.stringify({ agent, timestamp, tasksBase: '/tmp' }), { mode: 0o600 });
 }
 
 function cleanupToken(scriptBasename) {
-  try { fs.unlinkSync(tokenPath(scriptBasename)); } catch { /* ignore */ }
+  try {
+    fs.unlinkSync(tokenPath(scriptBasename));
+  } catch {
+    /* ignore */
+  }
 }
 
 function runScript(scriptPath, input, env = {}) {
   const fullEnv = { ...process.env, ...env };
   try {
-    const stdout = execSync(`echo '${JSON.stringify(input).replace(/'/g, "'\\''")}' | node "${scriptPath}" 2>&1`, {
-      env: fullEnv,
-      encoding: 'utf8',
-      timeout: 5000,
-    });
+    const stdout = execSync(
+      `echo '${JSON.stringify(input).replace(/'/g, "'\\''")}' | node "${scriptPath}" 2>&1`,
+      {
+        env: fullEnv,
+        encoding: 'utf8',
+        timeout: 5000,
+      }
+    );
     return { exitCode: 0, output: stdout };
   } catch (e) {
     return { exitCode: e.status, output: e.stdout || e.stderr || '' };
@@ -56,8 +75,16 @@ describe('write-report', () => {
   afterEach(() => {
     cleanupToken('write-qa-report.js');
     cleanupToken('write-tests-report.js');
-    try { fs.unlinkSync('/tmp/qa-test-runner.check.md'); } catch { /* ignore */ }
-    try { fs.unlinkSync('/tmp/tests-test-runner.check.md'); } catch { /* ignore */ }
+    try {
+      fs.unlinkSync('/tmp/qa-test-runner.check.md');
+    } catch {
+      /* ignore */
+    }
+    try {
+      fs.unlinkSync('/tmp/tests-test-runner.check.md');
+    } catch {
+      /* ignore */
+    }
   });
 
   describe('tokenPath', () => {
@@ -98,7 +125,11 @@ describe('write-report', () => {
     it('blocks when token has missing timestamp', () => {
       ensureTokenDir();
       const tp = tokenPath('write-qa-report.js');
-      try { fs.unlinkSync(tp); } catch { /* ignore */ }
+      try {
+        fs.unlinkSync(tp);
+      } catch {
+        /* ignore */
+      }
       fs.writeFileSync(tp, JSON.stringify({ agent: 'qa-feature-tester' }), { mode: 0o600 });
       const result = runScript(QA_SCRIPT, validQAInput);
       assert.equal(result.exitCode, 2);
@@ -108,7 +139,11 @@ describe('write-report', () => {
     it('blocks when token has missing agent', () => {
       ensureTokenDir();
       const tp = tokenPath('write-qa-report.js');
-      try { fs.unlinkSync(tp); } catch { /* ignore */ }
+      try {
+        fs.unlinkSync(tp);
+      } catch {
+        /* ignore */
+      }
       fs.writeFileSync(tp, JSON.stringify({ timestamp: Date.now() }), { mode: 0o600 });
       const result = runScript(QA_SCRIPT, validQAInput);
       assert.equal(result.exitCode, 2);

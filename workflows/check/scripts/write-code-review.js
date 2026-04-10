@@ -25,7 +25,12 @@
 
 const { createReportWriter } = require('../../lib/scripts/write-report');
 
-const VALID_VERDICTS = ['Well-Implemented', 'Needs Minor Fixes', 'Needs Major Refactoring', 'Critical Issues'];
+const VALID_VERDICTS = [
+  'Well-Implemented',
+  'Needs Minor Fixes',
+  'Needs Major Refactoring',
+  'Critical Issues',
+];
 const VALID_PRIORITIES = ['critical', 'important', 'nice-to-have'];
 
 const writer = createReportWriter({
@@ -33,19 +38,15 @@ const writer = createReportWriter({
 
   allowedAgents: ['code-checker'],
 
-  requiredFields: [
-    'reportPath',
-    'changesHash',
-    'verdict',
-    'strengths',
-    'issues',
-  ],
+  requiredFields: ['reportPath', 'changesHash', 'verdict', 'strengths', 'issues'],
 
   validate(input) {
     const errors = [];
 
     if (!VALID_VERDICTS.includes(input.verdict)) {
-      errors.push(`Invalid verdict "${input.verdict}". Must be one of: ${VALID_VERDICTS.join(', ')}`);
+      errors.push(
+        `Invalid verdict "${input.verdict}". Must be one of: ${VALID_VERDICTS.join(', ')}`
+      );
     }
 
     if (!Array.isArray(input.strengths) || input.strengths.length === 0) {
@@ -55,7 +56,8 @@ const writer = createReportWriter({
     if (!Array.isArray(input.issues)) {
       errors.push('issues must be an array');
     } else {
-      for (let i = 0; i < input.issues.length; i++) { // validate each issue entry
+      for (let i = 0; i < input.issues.length; i++) {
+        // validate each issue entry
         const issue = input.issues[i];
         if (!issue || typeof issue !== 'object') {
           errors.push(`issues[${i}] must be a non-null object`);
@@ -81,7 +83,10 @@ const writer = createReportWriter({
     const lines = [];
     const timestamp = new Date().toISOString();
 
-    const gateStatus = input.verdict === 'Well-Implemented' || input.verdict === 'Needs Minor Fixes' ? 'APPROVED' : 'NEEDS_WORK';
+    const gateStatus =
+      input.verdict === 'Well-Implemented' || input.verdict === 'Needs Minor Fixes'
+        ? 'APPROVED'
+        : 'NEEDS_WORK';
     lines.push(`**Changes Hash:** ${input.changesHash}`);
     lines.push(`Status: ${gateStatus}`);
     lines.push('');
@@ -91,12 +96,13 @@ const writer = createReportWriter({
     lines.push('');
 
     // Overall Assessment
-    const verdictIcon = {
-      'Well-Implemented': '✅',
-      'Needs Minor Fixes': '⚠️',
-      'Needs Major Refactoring': '🔧',
-      'Critical Issues': '❌',
-    }[input.verdict] || '';
+    const verdictIcon =
+      {
+        'Well-Implemented': '✅',
+        'Needs Minor Fixes': '⚠️',
+        'Needs Major Refactoring': '🔧',
+        'Critical Issues': '❌',
+      }[input.verdict] || '';
 
     lines.push('## Overall Assessment');
     lines.push('');
@@ -135,7 +141,9 @@ const writer = createReportWriter({
     } else {
       const priorityIcon = { critical: '🔴', important: '🟡', 'nice-to-have': '🔵' };
       for (const issue of issues) {
-        lines.push(`**[${priorityIcon[issue.priority] || ''} ${issue.priority.charAt(0).toUpperCase() + issue.priority.slice(1)}] ${issue.title}**`);
+        lines.push(
+          `**[${priorityIcon[issue.priority] || ''} ${issue.priority.charAt(0).toUpperCase() + issue.priority.slice(1)}] ${issue.title}**`
+        );
         if (issue.file) {
           lines.push(`- File: \`${issue.file}${issue.line ? ':' + issue.line : ''}\``);
         }
@@ -167,16 +175,18 @@ const writer = createReportWriter({
     // Final verdict
     lines.push('## Final Verdict');
     lines.push('');
-    const criticalCount = issues.filter(i => i.priority === 'critical').length;
-    const importantCount = issues.filter(i => i.priority === 'important').length;
-    lines.push(`**${input.verdict}** — ${criticalCount} critical, ${importantCount} important issue(s)`);
+    const criticalCount = issues.filter((i) => i.priority === 'critical').length;
+    const importantCount = issues.filter((i) => i.priority === 'important').length;
+    lines.push(
+      `**${input.verdict}** — ${criticalCount} critical, ${importantCount} important issue(s)`
+    );
     lines.push('');
 
     return lines.join('\n');
   },
 });
 
-writer.run().catch(err => {
+writer.run().catch((err) => {
   process.stderr.write(`[Code Review Writer] Unexpected error: ${err.message}\n`);
   process.exit(1);
 });

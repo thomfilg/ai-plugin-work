@@ -36,8 +36,12 @@ function runHookWithEnv(hookData, hookType = 'PreToolUse', extraEnv = {}) {
 
     let stdout = '';
     let stderr = '';
-    proc.stdout.on('data', (d) => { stdout += d.toString(); });
-    proc.stderr.on('data', (d) => { stderr += d.toString(); });
+    proc.stdout.on('data', (d) => {
+      stdout += d.toString();
+    });
+    proc.stderr.on('data', (d) => {
+      stderr += d.toString();
+    });
     proc.on('close', (code) => resolve({ stdout, stderr, code }));
     proc.on('error', reject);
 
@@ -66,7 +70,11 @@ function skipMarkerPath(ticketId) {
 }
 
 function cleanupMarker(ticketId) {
-  try { fs.unlinkSync(skipMarkerPath(ticketId)); } catch { /* */ }
+  try {
+    fs.unlinkSync(skipMarkerPath(ticketId));
+  } catch {
+    /* */
+  }
 }
 
 function createFakeScreenshot(ticketId) {
@@ -83,7 +91,9 @@ function cleanupScreenshots(ticketId) {
       for (const f of fs.readdirSync(dir)) fs.unlinkSync(path.join(dir, f));
       fs.rmdirSync(dir);
     }
-  } catch { /* */ }
+  } catch {
+    /* */
+  }
 }
 
 describe('enforce-screenshot-requirement', () => {
@@ -108,45 +118,66 @@ describe('enforce-screenshot-requirement', () => {
   describe('PreToolUse — blocks QA agents', () => {
     it('blocks pr-generator', async () => {
       if (!ticketId) return;
-      const r = await runHook({ tool_name: 'Task', tool_input: { subagent_type: 'pr-generator', prompt: 'create PR' } });
+      const r = await runHook({
+        tool_name: 'Task',
+        tool_input: { subagent_type: 'pr-generator', prompt: 'create PR' },
+      });
       assert.equal(r.code, 2);
       assert.match(r.stderr, /BLOCKED/);
     });
 
     it('does NOT block completion-checker (code quality, not screenshots)', async () => {
       if (!ticketId) return;
-      const r = await runHook({ tool_name: 'Task', tool_input: { subagent_type: 'completion-checker', prompt: 'verify' } });
+      const r = await runHook({
+        tool_name: 'Task',
+        tool_input: { subagent_type: 'completion-checker', prompt: 'verify' },
+      });
       assert.equal(r.code, 0);
     });
 
     it('blocks qa-feature-tester', async () => {
       if (!ticketId) return;
-      const r = await runHook({ tool_name: 'Task', tool_input: { subagent_type: 'qa-feature-tester', prompt: 'test' } });
+      const r = await runHook({
+        tool_name: 'Task',
+        tool_input: { subagent_type: 'qa-feature-tester', prompt: 'test' },
+      });
       assert.equal(r.code, 2);
     });
 
     it('blocks pr-post-generator', async () => {
       if (!ticketId) return;
-      const r = await runHook({ tool_name: 'Task', tool_input: { subagent_type: 'pr-post-generator', prompt: 'post' } });
+      const r = await runHook({
+        tool_name: 'Task',
+        tool_input: { subagent_type: 'pr-post-generator', prompt: 'post' },
+      });
       assert.equal(r.code, 2);
     });
 
     it('blocks work-workflow:pr-generator (prefixed subagent_type)', async () => {
       if (!ticketId) return;
-      const r = await runHook({ tool_name: 'Task', tool_input: { subagent_type: 'work-workflow:pr-generator', prompt: 'create PR' } });
+      const r = await runHook({
+        tool_name: 'Task',
+        tool_input: { subagent_type: 'work-workflow:pr-generator', prompt: 'create PR' },
+      });
       assert.equal(r.code, 2);
       assert.match(r.stderr, /BLOCKED/);
     });
 
     it('blocks work-workflow:qa-feature-tester (prefixed subagent_type)', async () => {
       if (!ticketId) return;
-      const r = await runHook({ tool_name: 'Task', tool_input: { subagent_type: 'work-workflow:qa-feature-tester', prompt: 'test' } });
+      const r = await runHook({
+        tool_name: 'Task',
+        tool_input: { subagent_type: 'work-workflow:qa-feature-tester', prompt: 'test' },
+      });
       assert.equal(r.code, 2);
     });
 
     it('blocks work-workflow:pr-post-generator (prefixed subagent_type)', async () => {
       if (!ticketId) return;
-      const r = await runHook({ tool_name: 'Task', tool_input: { subagent_type: 'work-workflow:pr-post-generator', prompt: 'post' } });
+      const r = await runHook({
+        tool_name: 'Task',
+        tool_input: { subagent_type: 'work-workflow:pr-post-generator', prompt: 'post' },
+      });
       assert.equal(r.code, 2);
     });
 
@@ -164,19 +195,28 @@ describe('enforce-screenshot-requirement', () => {
 
     it('blocks check-browser skill', async () => {
       if (!ticketId) return;
-      const r = await runHook({ tool_name: 'Skill', tool_input: { skill: 'check-browser', args: '' } });
+      const r = await runHook({
+        tool_name: 'Skill',
+        tool_input: { skill: 'check-browser', args: '' },
+      });
       assert.equal(r.code, 2);
     });
 
     it('allows prompt matching "requirements verif" (not screenshot-related)', async () => {
       if (!ticketId) return;
-      const r = await runHook({ tool_name: 'Task', tool_input: { subagent_type: 'general-purpose', prompt: 'requirements verification' } });
+      const r = await runHook({
+        tool_name: 'Task',
+        tool_input: { subagent_type: 'general-purpose', prompt: 'requirements verification' },
+      });
       assert.equal(r.code, 0);
     });
 
     it('blocks prompt matching "screenshot"', async () => {
       if (!ticketId) return;
-      const r = await runHook({ tool_name: 'Task', tool_input: { subagent_type: 'general-purpose', prompt: 'take screenshot of the app' } });
+      const r = await runHook({
+        tool_name: 'Task',
+        tool_input: { subagent_type: 'general-purpose', prompt: 'take screenshot of the app' },
+      });
       assert.equal(r.code, 2);
     });
   });
@@ -185,17 +225,26 @@ describe('enforce-screenshot-requirement', () => {
 
   describe('PreToolUse — allows non-QA agents', () => {
     it('allows developer-nodejs-tdd', async () => {
-      const r = await runHook({ tool_name: 'Task', tool_input: { subagent_type: 'developer-nodejs-tdd', prompt: 'implement' } });
+      const r = await runHook({
+        tool_name: 'Task',
+        tool_input: { subagent_type: 'developer-nodejs-tdd', prompt: 'implement' },
+      });
       assert.equal(r.code, 0);
     });
 
     it('allows code-checker', async () => {
-      const r = await runHook({ tool_name: 'Task', tool_input: { subagent_type: 'code-checker', prompt: 'review' } });
+      const r = await runHook({
+        tool_name: 'Task',
+        tool_input: { subagent_type: 'code-checker', prompt: 'review' },
+      });
       assert.equal(r.code, 0);
     });
 
     it('allows commit-writer', async () => {
-      const r = await runHook({ tool_name: 'Task', tool_input: { subagent_type: 'commit-writer', prompt: 'commit' } });
+      const r = await runHook({
+        tool_name: 'Task',
+        tool_input: { subagent_type: 'commit-writer', prompt: 'commit' },
+      });
       assert.equal(r.code, 0);
     });
 
@@ -214,7 +263,10 @@ describe('enforce-screenshot-requirement', () => {
     it('allows pr-generator when screenshots present', async () => {
       if (!ticketId) return;
       createFakeScreenshot(ticketId);
-      const r = await runHook({ tool_name: 'Task', tool_input: { subagent_type: 'pr-generator', prompt: 'create PR' } });
+      const r = await runHook({
+        tool_name: 'Task',
+        tool_input: { subagent_type: 'pr-generator', prompt: 'create PR' },
+      });
       assert.equal(r.code, 0);
     });
   });
@@ -223,7 +275,10 @@ describe('enforce-screenshot-requirement', () => {
     it('allows pr-generator when skip marker present', async () => {
       if (!ticketId) return;
       fs.writeFileSync(skipMarkerPath(ticketId), JSON.stringify({ ticketId }));
-      const r = await runHook({ tool_name: 'Task', tool_input: { subagent_type: 'pr-generator', prompt: 'create PR' } });
+      const r = await runHook({
+        tool_name: 'Task',
+        tool_input: { subagent_type: 'pr-generator', prompt: 'create PR' },
+      });
       assert.equal(r.code, 0);
     });
   });
@@ -233,7 +288,10 @@ describe('enforce-screenshot-requirement', () => {
   describe('PostToolUse — skip detection', () => {
     it('writes skip marker for "Skip screenshots"', async () => {
       if (!ticketId) return;
-      const r = await runHook({ tool_name: 'AskUserQuestion', tool_input: {}, tool_output: 'Skip screenshots' }, 'PostToolUse');
+      const r = await runHook(
+        { tool_name: 'AskUserQuestion', tool_input: {}, tool_output: 'Skip screenshots' },
+        'PostToolUse'
+      );
       assert.equal(r.code, 0);
       assert.match(r.stderr, /Skip-screenshots marker/);
       assert.ok(fs.existsSync(skipMarkerPath(ticketId)));
@@ -241,37 +299,59 @@ describe('enforce-screenshot-requirement', () => {
 
     it('writes skip marker for "SKIP SCREENSHOTS"', async () => {
       if (!ticketId) return;
-      const r = await runHook({ tool_name: 'AskUserQuestion', tool_input: {}, tool_output: 'SKIP SCREENSHOTS' }, 'PostToolUse');
+      const r = await runHook(
+        { tool_name: 'AskUserQuestion', tool_input: {}, tool_output: 'SKIP SCREENSHOTS' },
+        'PostToolUse'
+      );
       assert.ok(fs.existsSync(skipMarkerPath(ticketId)));
     });
 
     it('writes skip marker from JSON-structured output', async () => {
       if (!ticketId) return;
-      const r = await runHook({ tool_name: 'AskUserQuestion', tool_input: {}, tool_output: { selected: 'Skip screenshots' } }, 'PostToolUse');
+      const r = await runHook(
+        {
+          tool_name: 'AskUserQuestion',
+          tool_input: {},
+          tool_output: { selected: 'Skip screenshots' },
+        },
+        'PostToolUse'
+      );
       assert.ok(fs.existsSync(skipMarkerPath(ticketId)));
     });
 
     it('writes skip marker from tool_result fallback', async () => {
       if (!ticketId) return;
-      const r = await runHook({ tool_name: 'AskUserQuestion', tool_input: {}, tool_result: 'Skip screenshots' }, 'PostToolUse');
+      const r = await runHook(
+        { tool_name: 'AskUserQuestion', tool_input: {}, tool_result: 'Skip screenshots' },
+        'PostToolUse'
+      );
       assert.ok(fs.existsSync(skipMarkerPath(ticketId)));
     });
 
     it('writes skip marker from tool_response fallback', async () => {
       if (!ticketId) return;
-      const r = await runHook({ tool_name: 'AskUserQuestion', tool_input: {}, tool_response: 'skip the screenshot step' }, 'PostToolUse');
+      const r = await runHook(
+        { tool_name: 'AskUserQuestion', tool_input: {}, tool_response: 'skip the screenshot step' },
+        'PostToolUse'
+      );
       assert.ok(fs.existsSync(skipMarkerPath(ticketId)));
     });
 
     it('does NOT write marker for "Capture screenshots now"', async () => {
       if (!ticketId) return;
-      await runHook({ tool_name: 'AskUserQuestion', tool_input: {}, tool_output: 'Capture screenshots now' }, 'PostToolUse');
+      await runHook(
+        { tool_name: 'AskUserQuestion', tool_input: {}, tool_output: 'Capture screenshots now' },
+        'PostToolUse'
+      );
       assert.ok(!fs.existsSync(skipMarkerPath(ticketId)));
     });
 
     it('does NOT write marker for "Abort"', async () => {
       if (!ticketId) return;
-      await runHook({ tool_name: 'AskUserQuestion', tool_input: {}, tool_output: 'Abort' }, 'PostToolUse');
+      await runHook(
+        { tool_name: 'AskUserQuestion', tool_input: {}, tool_output: 'Abort' },
+        'PostToolUse'
+      );
       assert.ok(!fs.existsSync(skipMarkerPath(ticketId)));
     });
   });
@@ -281,11 +361,18 @@ describe('enforce-screenshot-requirement', () => {
   describe('Fail-open — does NOT block when git state is unclear', () => {
     const FAKE_TICKET = 'FAKE-999';
     // WEB_APPS must be non-empty to reach the hasTsxChanges() code path (GH-181)
-    const testEnv = { NODE_ENV: 'test', TEST_FORCE_TICKET_ID: FAKE_TICKET,
-      WEB_APPS: '[{"name":"test-app","defaultPort":3000,"type":"vite"}]' };
+    const testEnv = {
+      NODE_ENV: 'test',
+      TEST_FORCE_TICKET_ID: FAKE_TICKET,
+      WEB_APPS: '[{"name":"test-app","defaultPort":3000,"type":"vite"}]',
+    };
 
-    beforeEach(() => { cleanupMarker(FAKE_TICKET); });
-    afterEach(() => { cleanupMarker(FAKE_TICKET); });
+    beforeEach(() => {
+      cleanupMarker(FAKE_TICKET);
+    });
+    afterEach(() => {
+      cleanupMarker(FAKE_TICKET);
+    });
 
     it('does not block when resolveBaseRef fails', async () => {
       const r = await runHookWithEnv(
@@ -315,11 +402,15 @@ describe('enforce-screenshot-requirement', () => {
     const testEnv = {
       NODE_ENV: 'test',
       TEST_FORCE_TICKET_ID: FAKE_TICKET,
-      TEST_FORCE_TSX_CHANGES: '1',  // Force hasTsxChanges() to return true
+      TEST_FORCE_TSX_CHANGES: '1', // Force hasTsxChanges() to return true
     };
 
-    beforeEach(() => { cleanupMarker(FAKE_TICKET); });
-    afterEach(() => { cleanupMarker(FAKE_TICKET); });
+    beforeEach(() => {
+      cleanupMarker(FAKE_TICKET);
+    });
+    afterEach(() => {
+      cleanupMarker(FAKE_TICKET);
+    });
 
     it('does not block pr-generator when WEB_APPS is empty array', async () => {
       const r = await runHookWithEnv(
@@ -373,7 +464,10 @@ describe('enforce-screenshot-requirement', () => {
     });
 
     it('ignores PostToolUse on non-AskUserQuestion', async () => {
-      const r = await runHook({ tool_name: 'Bash', tool_input: { command: 'test' } }, 'PostToolUse');
+      const r = await runHook(
+        { tool_name: 'Bash', tool_input: { command: 'test' } },
+        'PostToolUse'
+      );
       assert.equal(r.code, 0);
     });
   });

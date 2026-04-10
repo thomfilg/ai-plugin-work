@@ -47,7 +47,6 @@ function safeExec(cmd, options = {}) {
   }
 }
 
-
 /**
  * Compute a deterministic hash of screenshot files in a directory.
  * Uses Node.js crypto to avoid shell injection risks entirely.
@@ -62,9 +61,13 @@ function computeScreenshotHash(screenshotDir) {
   function walkDir(dir, base) {
     let results = [];
     let entries;
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
-    catch (err) {
-      if (err.code !== 'ENOENT') process.stderr.write(`[work-pr] computeScreenshotHash: cannot read ${dir}: ${err.message}\n`);
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch (err) {
+      if (err.code !== 'ENOENT')
+        process.stderr.write(
+          `[work-pr] computeScreenshotHash: cannot read ${dir}: ${err.message}\n`
+        );
       return results;
     }
     for (const entry of entries) {
@@ -100,7 +103,9 @@ function computeScreenshotHash(screenshotDir) {
       } finally {
         fs.closeSync(fd);
       }
-    } catch { /* skip unreadable files */ }
+    } catch {
+      /* skip unreadable files */
+    }
   }
   if (filesHashed === 0) return 'none';
   return hash.digest('hex');
@@ -113,21 +118,21 @@ module.exports = {
   stateDir: path.join(TASKS_BASE),
 
   steps: [
-    { id: '1_preflight',       name: 'Memory & zombie check',  command: 'bash pre-flight script' },
-    { id: '2_setup',           name: 'Parse args, set variables', command: 'internal' },
-    { id: '3_pr_gen',          name: 'Run pr-generator',       command: 'Task(pr-generator)' },
-    { id: '4_screenshot_gate', name: 'Screenshot gate',        command: 'internal + AskUserQuestion' },
-    { id: '5_post_pr_gen',     name: 'Run pr-post-generator',  command: 'Task(pr-post-generator)' },
-    { id: '6_summary',         name: 'Print summary',          command: 'internal' },
+    { id: '1_preflight', name: 'Memory & zombie check', command: 'bash pre-flight script' },
+    { id: '2_setup', name: 'Parse args, set variables', command: 'internal' },
+    { id: '3_pr_gen', name: 'Run pr-generator', command: 'Task(pr-generator)' },
+    { id: '4_screenshot_gate', name: 'Screenshot gate', command: 'internal + AskUserQuestion' },
+    { id: '5_post_pr_gen', name: 'Run pr-post-generator', command: 'Task(pr-post-generator)' },
+    { id: '6_summary', name: 'Print summary', command: 'internal' },
   ],
 
   transitions: [
-    { source: '1_preflight',       targets: ['2_setup'] },
-    { source: '2_setup',           targets: ['3_pr_gen', '4_screenshot_gate', '5_post_pr_gen', '6_summary'] },
-    { source: '3_pr_gen',          targets: ['4_screenshot_gate', '5_post_pr_gen', '6_summary'] },
+    { source: '1_preflight', targets: ['2_setup'] },
+    { source: '2_setup', targets: ['3_pr_gen', '4_screenshot_gate', '5_post_pr_gen', '6_summary'] },
+    { source: '3_pr_gen', targets: ['4_screenshot_gate', '5_post_pr_gen', '6_summary'] },
     { source: '4_screenshot_gate', targets: ['5_post_pr_gen', '3_pr_gen', '6_summary'] },
-    { source: '5_post_pr_gen',     targets: ['6_summary'] },
-    { source: '6_summary',         targets: [] },
+    { source: '5_post_pr_gen', targets: ['6_summary'] },
+    { source: '6_summary', targets: [] },
   ],
 
   /**
@@ -179,13 +184,25 @@ module.exports = {
     data.prShaFile = prShaFile;
     data.lastPrSha = '';
     if (fs.existsSync(prShaFile)) {
-      try { data.lastPrSha = fs.readFileSync(prShaFile, 'utf8').trim(); } catch { /* */ }
+      try {
+        data.lastPrSha = fs.readFileSync(prShaFile, 'utf8').trim();
+      } catch {
+        /* */
+      }
     }
 
     // TSX/JSX changes vs main (from ticket worktree)
     let baseBranch = 'origin/main';
-    try { baseBranch = require(path.join(__dirname, '..', 'lib', 'config')).getBaseBranch({ cwd: worktreeDir }); } catch { /* */ }
-    data.tsxChanged = safeExec(`git diff --name-only ${baseBranch}...HEAD -- '*.tsx' '*.jsx'`, { cwd: worktreeDir });
+    try {
+      baseBranch = require(path.join(__dirname, '..', 'lib', 'config')).getBaseBranch({
+        cwd: worktreeDir,
+      });
+    } catch {
+      /* */
+    }
+    data.tsxChanged = safeExec(`git diff --name-only ${baseBranch}...HEAD -- '*.tsx' '*.jsx'`, {
+      cwd: worktreeDir,
+    });
     data.hasTsxChanges = data.tsxChanged.length > 0;
 
     // Rebase guard: count commits behind base branch (opt-in via REBASE_GUARD_ENABLED=1)
@@ -198,13 +215,21 @@ module.exports = {
       // Validate remote/branch to prevent command injection
       const validRef = /^[a-zA-Z0-9_\-./]+$/.test(remote) && /^[a-zA-Z0-9_\-./]+$/.test(branch);
       if (!validRef) {
-        process.stderr.write(`[work-pr] rebase guard: invalid baseBranch "${baseBranch}" — skipping\n`);
+        process.stderr.write(
+          `[work-pr] rebase guard: invalid baseBranch "${baseBranch}" — skipping\n`
+        );
       } else {
         const guardThreshold = parseInt(process.env.REBASE_GUARD_THRESHOLD || '0', 10);
         const fetchDepth = Math.max((Number.isFinite(guardThreshold) ? guardThreshold : 0) + 2, 2);
-        safeExec(`git fetch ${remote} ${branch} --quiet --depth=${fetchDepth} --no-tags`, { cwd: worktreeDir, timeout: 5000 });
+        safeExec(`git fetch ${remote} ${branch} --quiet --depth=${fetchDepth} --no-tags`, {
+          cwd: worktreeDir,
+          timeout: 5000,
+        });
         const fetchedRef = `${remote}/${branch}`;
-        const behind = safeExec(`git rev-list --count --max-count=${fetchDepth} HEAD..${fetchedRef}`, { cwd: worktreeDir });
+        const behind = safeExec(
+          `git rev-list --count --max-count=${fetchDepth} HEAD..${fetchedRef}`,
+          { cwd: worktreeDir }
+        );
         data.commitsBehindMain = parseInt(behind || '0', 10); // capped by fetchDepth, flagged via commitsBehindMainCapped
         data.commitsBehindMainCapped = data.commitsBehindMain >= fetchDepth;
       }
@@ -216,9 +241,13 @@ module.exports = {
     data.screenshotCount = 0;
     if (fs.existsSync(screenshotDir)) {
       try {
-        const files = safeExec(`find "${screenshotDir}" -type f \\( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.gif' -o -name '*.webp' \\) 2>/dev/null`);
+        const files = safeExec(
+          `find "${screenshotDir}" -type f \\( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.gif' -o -name '*.webp' \\) 2>/dev/null`
+        );
         data.screenshotCount = files ? files.split('\n').filter(Boolean).length : 0;
-      } catch { /* */ }
+      } catch {
+        /* */
+      }
     }
     data.screenshotsExist = data.screenshotCount > 0;
 
@@ -243,12 +272,19 @@ module.exports = {
     data.postPrShaFile = postPrShaFile;
     data.lastPostPrSha = '';
     if (fs.existsSync(postPrShaFile)) {
-      try { data.lastPostPrSha = fs.readFileSync(postPrShaFile, 'utf8').trim(); } catch { /* */ }
+      try {
+        data.lastPostPrSha = fs.readFileSync(postPrShaFile, 'utf8').trim();
+      } catch {
+        /* */
+      }
     }
     data.postPrUpToDate = !!(data.contentSha && data.contentSha === data.lastPostPrSha);
 
     // SKIP 5_post_pr_gen if no content to post
-    data.hasContent = !!(data.contentSha && data.contentSha !== 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
+    data.hasContent = !!(
+      data.contentSha &&
+      data.contentSha !== 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
+    );
 
     return data;
   },
@@ -291,9 +327,11 @@ module.exports = {
         }
         return {
           action: 'RUN',
-          reason: force ? 'Force mode — regenerating PR description' :
-            d.lastPrSha ? `Key changed: ${d.lastPrSha?.slice(0, 16)}… → ${d.prKey?.slice(0, 16)}…` :
-            'No previous PR update recorded',
+          reason: force
+            ? 'Force mode — regenerating PR description'
+            : d.lastPrSha
+              ? `Key changed: ${d.lastPrSha?.slice(0, 16)}… → ${d.prKey?.slice(0, 16)}…`
+              : 'No previous PR update recorded',
           command: 'Task(pr-generator)',
         };
       }
@@ -329,9 +367,11 @@ module.exports = {
         }
         return {
           action: 'RUN',
-          reason: force ? 'Force mode — regenerating post-PR content' :
-            d.lastPostPrSha ? 'Content changed since last run' :
-            'No previous post-PR update recorded',
+          reason: force
+            ? 'Force mode — regenerating post-PR content'
+            : d.lastPostPrSha
+              ? 'Content changed since last run'
+              : 'No previous post-PR update recorded',
           command: 'Task(pr-post-generator)',
         };
 
@@ -357,7 +397,9 @@ module.exports = {
       const worktreeDir = getWorktreeDir(instanceId);
       const headSha = safeExec('git rev-parse HEAD', { cwd: worktreeDir });
       if (!headSha) {
-        process.stderr.write(`[work-pr] onTransition: cannot determine HEAD for ${instanceId} (worktree: ${worktreeDir}) — skipping .pr-update-sha write\n`);
+        process.stderr.write(
+          `[work-pr] onTransition: cannot determine HEAD for ${instanceId} (worktree: ${worktreeDir}) — skipping .pr-update-sha write\n`
+        );
         return;
       }
       const screenshotDir = path.join(tasksDir, 'screenshots');

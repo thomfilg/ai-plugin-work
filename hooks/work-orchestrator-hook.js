@@ -7,13 +7,21 @@
  * when /work2 is invoked, injecting the plan into the context.
  */
 
-const { execSync } = require('child_process');
 const path = require('path');
 const { appendAction } = require(path.join(__dirname, '..', 'workflows', 'work', 'work-actions'));
+const { logHookError } = require(path.join(__dirname, '..', 'workflows', 'lib', 'hook-error-log'));
+const { safeExec } = require(path.join(__dirname, '..', 'workflows', 'lib', 'safe-exec'));
 
 // Use CLAUDE_PLUGIN_ROOT if available, otherwise fallback to __dirname
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.dirname(__dirname);
 const ORCHESTRATOR_PATH = path.join(PLUGIN_ROOT, 'workflows', 'work', 'work.workflow.js');
+
+// Tokenize args string into positional single-token values.
+// Quoted multi-word args are NOT supported by design — matches pre-execFileSync
+// shell tokenization behavior. Used by both /work and /work2 slash commands.
+function tokenizeArgs(rawArgs) {
+  return rawArgs.split(/\s+/).filter((token) => token.length > 0);
+}
 
 function main() {
   const userPrompt = process.env.CLAUDE_USER_PROMPT || '';
@@ -26,41 +34,51 @@ function main() {
   }
 
   const args = work2Match[1].trim();
+  // Tokenize via the named helper to make the intent obvious at the call site.
+  // See tokenizeArgs() above for the scope-constraint rationale.
+  const parsedArgs = tokenizeArgs(args);
 
-  try {
-    // Run the orchestrator
-    const result = execSync(`node "${ORCHESTRATOR_PATH}" ${args}`, {
-      encoding: 'utf-8',
-      timeout: 30000,
-      stdio: ['pipe', 'pipe', 'pipe']
-    });
+  // Run the orchestrator via safeExec (uses execFileSync internally, no shell).
+  // Use a null fallback so we can distinguish a failure from empty output.
+  const result = safeExec(process.execPath, [ORCHESTRATOR_PATH, ...parsedArgs], {
+    timeout: 30000,
+    fallback: null,
+  });
 
-    // Parse the result
-    const plan = JSON.parse(result);
-
-    if (plan.error) {
-      console.log(`ORCHESTRATOR ERROR: ${plan.message}`);
-      process.exit(0);
-    }
-
-    // Log plan generation action
-    if (plan.ticket && !plan.ticket.startsWith('TBD')) {
-      const runCount = plan.summary?.run || 0;
-      const mode = plan.mode || 'unknown';
-      const currentStep = plan.currentStep || 'ticket';
-      appendAction(plan.ticket, {
-        step: currentStep,
-        what: `plan generated (${mode}, ${runCount} RUN)`,
-      });
-    }
-
-    // Format the plan for injection
-    const output = formatPlan(plan);
-    console.log(output);
-
-  } catch (err) {
-    console.log(`ORCHESTRATOR FAILED: ${err.message}`);
+  if (result === null) {
+    logHookError(__filename, new Error('orchestrator invocation failed'));
+    console.log('ORCHESTRATOR FAILED: command returned null');
+    process.exit(0);
   }
+
+  let plan;
+  try {
+    plan = JSON.parse(result);
+  } catch (err) {
+    logHookError(__filename, err);
+    console.log(`ORCHESTRATOR FAILED: ${err.message}`);
+    process.exit(0);
+  }
+
+  if (plan.error) {
+    console.log(`ORCHESTRATOR ERROR: ${plan.message}`);
+    process.exit(0);
+  }
+
+  // Log plan generation action
+  if (plan.ticket && !plan.ticket.startsWith('TBD')) {
+    const runCount = plan.summary?.run || 0;
+    const mode = plan.mode || 'unknown';
+    const currentStep = plan.currentStep || 'ticket';
+    appendAction(plan.ticket, {
+      step: currentStep,
+      what: `plan generated (${mode}, ${runCount} RUN)`,
+    });
+  }
+
+  // Format the plan for injection
+  const output = formatPlan(plan);
+  console.log(output);
 
   process.exit(0);
 }
@@ -98,9 +116,14 @@ function formatPlan(plan) {
   // Plan steps
   lines.push('  PLAN:');
   for (const step of plan.plan) {
-    const icon = step.action === 'RUN' ? '🔄' :
-                 step.action === 'SKIP' ? '⏭️' :
-                 step.action === 'DEFER' ? '🔮' : '⏳';
+    const icon =
+      step.action === 'RUN'
+        ? '🔄'
+        : step.action === 'SKIP'
+          ? '⏭️'
+          : step.action === 'DEFER'
+            ? '🔮'
+            : '⏳';
     const cmd = step.command ? ` → ${step.command}` : '';
     lines.push(`    ${icon} ${step.step.padEnd(20)} ${step.action.padEnd(7)} ${step.reason}${cmd}`);
   }
@@ -108,7 +131,9 @@ function formatPlan(plan) {
 
   // Summary
   if (plan.summary) {
-    lines.push(`  SUMMARY: ${plan.summary.run} RUN, ${plan.summary.defer || 0} DEFER, ${plan.summary.skip} SKIP, ${plan.summary.pending} PENDING`);
+    lines.push(
+      `  SUMMARY: ${plan.summary.run} RUN, ${plan.summary.defer || 0} DEFER, ${plan.summary.skip} SKIP, ${plan.summary.pending} PENDING`
+    );
     lines.push(`  FIRST ACTION: ${plan.summary.firstAction}`);
     if (plan.summary.stepsToRun.length > 0) {
       lines.push(`  STEPS TO RUN: ${plan.summary.stepsToRun.join(' → ')}`);
@@ -120,8 +145,12 @@ function formatPlan(plan) {
 
   lines.push('');
   lines.push('═══════════════════════════════════════════════════════════════════');
-  lines.push('  INSTRUCTIONS: Execute RUN steps in order. DEFER steps: re-run plan first to resolve to RUN/SKIP.');
-  lines.push(`  TRANSITION: node ${PLUGIN_ROOT}/workflows/work/work.workflow.js transition ${plan.ticket} <step>`);
+  lines.push(
+    '  INSTRUCTIONS: Execute RUN steps in order. DEFER steps: re-run plan first to resolve to RUN/SKIP.'
+  );
+  lines.push(
+    `  TRANSITION: node ${PLUGIN_ROOT}/workflows/work/work.workflow.js transition ${plan.ticket} <step>`
+  );
   lines.push('═══════════════════════════════════════════════════════════════════');
   lines.push('');
 

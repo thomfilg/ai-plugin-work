@@ -5,12 +5,15 @@
  * Blocks if review contains "Critical Issues" but recommends "APPROVE"
  */
 
+const path = require('path');
+const { logHookError } = require(path.join(__dirname, '..', '..', '..', 'lib', 'hook-error-log'));
+
 function extractTextContent(content) {
   if (typeof content === 'string') return content;
   if (Array.isArray(content)) {
     return content
-      .filter(block => block.type === 'text')
-      .map(block => block.text)
+      .filter((block) => block.type === 'text')
+      .map((block) => block.text)
       .join('\n');
   }
   return '';
@@ -22,7 +25,8 @@ function hasCriticalIssuesContent(text) {
 
   if (!match) {
     const hasInlineMention = /(?:critical|blocking)\s+(?:issue|problem|bug)/i.test(text);
-    const isNegation = /\b(no|without|zero|0)\s+(?:critical|blocking)\s+(?:issue|problem|bug)/i.test(text);
+    const isNegation =
+      /\b(no|without|zero|0)\s+(?:critical|blocking)\s+(?:issue|problem|bug)/i.test(text);
     return hasInlineMention && !isNegation;
   }
 
@@ -33,13 +37,14 @@ function hasCriticalIssuesContent(text) {
 }
 
 function hasApproveRecommendation(text) {
-  return /✅\s*APPROVE/i.test(text) ||
-         /Final\s*Recommendation[:\s]*.*APPROVE/i.test(text);
+  return /✅\s*APPROVE/i.test(text) || /Final\s*Recommendation[:\s]*.*APPROVE/i.test(text);
 }
 
 function hasRequestChangesRecommendation(text) {
-  return /❌\s*REQUEST[_\s]?CHANGES/i.test(text) ||
-         /Final\s*Recommendation[:\s]*.*REQUEST[_\s]?CHANGES/i.test(text);
+  return (
+    /❌\s*REQUEST[_\s]?CHANGES/i.test(text) ||
+    /Final\s*Recommendation[:\s]*.*REQUEST[_\s]?CHANGES/i.test(text)
+  );
 }
 
 async function main() {
@@ -74,6 +79,7 @@ Either:
   process.exit(0);
 }
 
-main().catch(() => {
+main().catch((err) => {
+  logHookError(__filename, err);
   process.exit(0);
 });

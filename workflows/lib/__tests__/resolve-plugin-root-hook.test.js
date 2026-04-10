@@ -21,8 +21,12 @@ function runHook(input, env = {}) {
     });
     let stdout = '';
     let stderr = '';
-    proc.stdout.on('data', (d) => { stdout += d.toString(); });
-    proc.stderr.on('data', (d) => { stderr += d.toString(); });
+    proc.stdout.on('data', (d) => {
+      stdout += d.toString();
+    });
+    proc.stderr.on('data', (d) => {
+      stderr += d.toString();
+    });
     proc.on('close', (code) => {
       resolve({ code, stdout, stderr });
     });
@@ -69,11 +73,14 @@ describe('resolve-plugin-root-hook', () => {
   it('should resolve multiple occurrences in one command', async () => {
     const { code, stderr } = await runHook({
       tool_input: {
-        command: 'node ${CLAUDE_PLUGIN_ROOT}/lib/engine.js && node ${CLAUDE_PLUGIN_ROOT}/hooks/test.js',
+        command:
+          'node ${CLAUDE_PLUGIN_ROOT}/lib/engine.js && node ${CLAUDE_PLUGIN_ROOT}/hooks/test.js',
       },
     });
     assert.strictEqual(code, 2);
-    assert.ok(stderr.includes(`node ${FAKE_ROOT}/lib/engine.js && node ${FAKE_ROOT}/hooks/test.js`));
+    assert.ok(
+      stderr.includes(`node ${FAKE_ROOT}/lib/engine.js && node ${FAKE_ROOT}/hooks/test.js`)
+    );
   });
 
   it('should handle empty command gracefully', async () => {
@@ -92,7 +99,7 @@ describe('resolve-plugin-root-hook', () => {
     const expectedRoot = path.join(__dirname, '..', '..', '..');
     const { code, stderr } = await runHook(
       { tool_input: { command: 'node ${CLAUDE_PLUGIN_ROOT}/hooks/test.js' } },
-      { CLAUDE_PLUGIN_ROOT: '' },
+      { CLAUDE_PLUGIN_ROOT: '' }
     );
     assert.strictEqual(code, 2);
     assert.ok(stderr.includes(expectedRoot));
@@ -133,7 +140,7 @@ describe('resolve-plugin-root-hook', () => {
   it('should handle $ special sequences in PLUGIN_ROOT path safely', async () => {
     const { code, stderr } = await runHook(
       { tool_input: { command: 'node ${CLAUDE_PLUGIN_ROOT}/hooks/test.js' } },
-      { CLAUDE_PLUGIN_ROOT: '/path/with/$pecial/chars' },
+      { CLAUDE_PLUGIN_ROOT: '/path/with/$pecial/chars' }
     );
     assert.strictEqual(code, 2);
     assert.ok(stderr.includes('/path/with/$pecial/chars'));

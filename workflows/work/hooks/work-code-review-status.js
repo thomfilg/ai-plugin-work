@@ -13,16 +13,27 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
 
 let didBlock = false;
-process.on('uncaughtException', () => process.exit(didBlock ? 2 : 0));
-process.on('unhandledRejection', () => process.exit(didBlock ? 2 : 0));
+process.on('uncaughtException', (err) => {
+  logHookError(__filename, err);
+  process.exit(didBlock ? 2 : 0);
+});
+process.on('unhandledRejection', (err) => {
+  logHookError(__filename, err);
+  process.exit(didBlock ? 2 : 0);
+});
 
 let config;
 try {
   config = require('../../lib/config');
 } catch (err) {
-  if (err && err.code === 'MODULE_NOT_FOUND' && /['"]\.\.\/\.\.\/lib\/config['"]/.test(err.message)) {
+  if (
+    err &&
+    err.code === 'MODULE_NOT_FOUND' &&
+    /['"]\.\.\/\.\.\/lib\/config['"]/.test(err.message)
+  ) {
     config = null;
   } else {
     throw err;
@@ -43,7 +54,7 @@ function getCurrentTaskId(cwd) {
     const branch = execSync('git branch --show-current', {
       cwd,
       encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
     const branchMatch = branch.match(new RegExp(`${config.TICKET_PROJECT_KEY}-(\\d+)`, 'i'));
     if (branchMatch) {
@@ -82,8 +93,8 @@ function findQaReportsForTask(baseDir, taskId) {
 
   const files = fs.readdirSync(taskFolder);
   return files
-    .filter(f => f.startsWith('qa') && f.endsWith('.check.md'))
-    .map(f => path.join(taskFolder, f));
+    .filter((f) => f.startsWith('qa') && f.endsWith('.check.md'))
+    .map((f) => path.join(taskFolder, f));
 }
 
 // Check QA report for Playwright verification
@@ -97,7 +108,7 @@ function checkQaReport(filePath) {
       hasHealthCheck: false,
       hasScreenshots: false,
       hasForbiddenExcuse: false,
-      claimsPass: false
+      claimsPass: false,
     };
 
     // Check for NEW Connectivity Verification section (MANDATORY)
@@ -110,8 +121,10 @@ function checkQaReport(filePath) {
       issues.hasGoogleTest = true;
     }
     // Alternative: check for google.com URL with status
-    if (/google\.com.*Status:\s*(✅|SUCCESS|FAILED|❌)/i.test(content) ||
-        /Status:.*google\.com/i.test(content)) {
+    if (
+      /google\.com.*Status:\s*(✅|SUCCESS|FAILED|❌)/i.test(content) ||
+      /Status:.*google\.com/i.test(content)
+    ) {
       issues.hasGoogleTest = true;
     }
 
@@ -120,8 +133,10 @@ function checkQaReport(filePath) {
       issues.hasHealthCheck = true;
     }
     // Alternative: check for health endpoint or app URL with status
-    if (/\/health.*Status:\s*(✅|SUCCESS|FAILED|❌)/i.test(content) ||
-        /host\.docker\.internal.*Status:/i.test(content)) {
+    if (
+      /\/health.*Status:\s*(✅|SUCCESS|FAILED|❌)/i.test(content) ||
+      /host\.docker\.internal.*Status:/i.test(content)
+    ) {
       issues.hasHealthCheck = true;
     }
 
@@ -131,7 +146,10 @@ function checkQaReport(filePath) {
     }
 
     // Check for actual Playwright tool calls in report
-    if (/mcp__playwright__browser_navigate/i.test(content) && /Result:\s*(SUCCESS|Page loaded)/i.test(content)) {
+    if (
+      /mcp__playwright__browser_navigate/i.test(content) &&
+      /Result:\s*(SUCCESS|Page loaded)/i.test(content)
+    ) {
       issues.hasPlaywrightVerification = true;
     }
 
@@ -150,7 +168,7 @@ function checkQaReport(filePath) {
       /didn'?t\s*use\s*Playwright/i,
       /Playwright\s*not\s*used/i,
       /Playwright\s*(MCP\s*)?tools?\s*unavailable/i,
-      /skipped\s*browser\s*test/i
+      /skipped\s*browser\s*test/i,
     ];
 
     for (const pattern of forbiddenExcuses) {
@@ -175,7 +193,7 @@ function checkQaReport(filePath) {
 function isRecentlyModified(filePath) {
   try {
     const stats = fs.statSync(filePath);
-    const tenMinutesAgo = Date.now() - (10 * 60 * 1000);
+    const tenMinutesAgo = Date.now() - 10 * 60 * 1000;
     return stats.mtimeMs > tenMinutesAgo;
   } catch {
     return false;
@@ -194,7 +212,7 @@ function checkCodeReview(filePath) {
       hasBlocked: false,
       claimsApproved: false,
       criticalCount: 0,
-      importantCount: 0
+      importantCount: 0,
     };
 
     // Check for CRITICAL issues - but verify they're actual issues, not just headers
@@ -205,10 +223,15 @@ function checkCodeReview(filePath) {
       // Check for CRITICAL section
       if (/CRITICAL/i.test(line) && /###|🔴|\*\*/.test(line)) {
         // Check next few lines to see if there are actual issues
-        const nextLines = lines.slice(i + 1, i + 5).join(' ').toLowerCase();
+        const nextLines = lines
+          .slice(i + 1, i + 5)
+          .join(' ')
+          .toLowerCase();
 
         // If next lines say "none found", "no critical", "0 issues" - skip
-        if (/none\s*found|no\s*critical|no\s*issues|0\s*issues|\*\*0\*\*|:\s*0($|\s)/i.test(nextLines)) {
+        if (
+          /none\s*found|no\s*critical|no\s*issues|0\s*issues|\*\*0\*\*|:\s*0($|\s)/i.test(nextLines)
+        ) {
           continue;
         }
 
@@ -222,10 +245,17 @@ function checkCodeReview(filePath) {
       // Check for IMPORTANT section
       if (/IMPORTANT/i.test(line) && /###|🟡|\*\*/.test(line)) {
         // Check next few lines to see if there are actual issues
-        const nextLines = lines.slice(i + 1, i + 5).join(' ').toLowerCase();
+        const nextLines = lines
+          .slice(i + 1, i + 5)
+          .join(' ')
+          .toLowerCase();
 
         // If next lines say "none found", "no important", "0 issues" - skip
-        if (/none\s*found|no\s*important|no\s*issues|0\s*issues|\*\*0\*\*|:\s*0($|\s)/i.test(nextLines)) {
+        if (
+          /none\s*found|no\s*important|no\s*issues|0\s*issues|\*\*0\*\*|:\s*0($|\s)/i.test(
+            nextLines
+          )
+        ) {
           continue;
         }
 
@@ -275,7 +305,7 @@ function checkCodeReview(filePath) {
       /screenshots?\s*not\s*required/i,
       /didn'?t\s*use\s*Playwright/i,
       /Playwright\s*not\s*used/i,
-      /skipped\s*browser\s*test/i
+      /skipped\s*browser\s*test/i,
     ];
 
     for (const pattern of forbiddenExcuses) {
@@ -345,17 +375,17 @@ async function main() {
     if (issues.hasCritical && !hasReplyFile) {
       warnings.push(
         `CODE REVIEW: CRITICAL ISSUES REQUIRE RESPONSE\n\n` +
-        `Task: ${currentTaskId}\n` +
-        `File: ${currentTaskId}/code-review.check.md\n\n` +
-        `Report contains ${issues.criticalCount} CRITICAL issue(s)\n` +
-        `No code-review-reply.check.md found\n\n` +
-        `You MUST either:\n` +
-        `1. Fix all CRITICAL issues in code, OR\n` +
-        `2. Create code-review-reply.check.md with responses for each issue\n\n` +
-        `Reply format for each issue:\n` +
-        `  ## Issue: [title]\n` +
-        `  **Decision:** FIXED | DEFERRED | NOT_APPLICABLE\n` +
-        `  **Reason:** [specific justification]`
+          `Task: ${currentTaskId}\n` +
+          `File: ${currentTaskId}/code-review.check.md\n\n` +
+          `Report contains ${issues.criticalCount} CRITICAL issue(s)\n` +
+          `No code-review-reply.check.md found\n\n` +
+          `You MUST either:\n` +
+          `1. Fix all CRITICAL issues in code, OR\n` +
+          `2. Create code-review-reply.check.md with responses for each issue\n\n` +
+          `Reply format for each issue:\n` +
+          `  ## Issue: [title]\n` +
+          `  **Decision:** FIXED | DEFERRED | NOT_APPLICABLE\n` +
+          `  **Reason:** [specific justification]`
       );
     }
 
@@ -363,41 +393,41 @@ async function main() {
     if (issues.hasImportant && !hasReplyFile) {
       warnings.push(
         `CODE REVIEW: IMPORTANT ISSUES REQUIRE RESPONSE\n\n` +
-        `Task: ${currentTaskId}\n` +
-        `File: ${currentTaskId}/code-review.check.md\n\n` +
-        `Report contains ${issues.importantCount} IMPORTANT issue(s)\n` +
-        `No code-review-reply.check.md found\n\n` +
-        `You MUST either:\n` +
-        `1. Fix all IMPORTANT issues in code, OR\n` +
-        `2. Create code-review-reply.check.md with responses for each issue\n\n` +
-        `Reply format for each issue:\n` +
-        `  ## Issue: [title]\n` +
-        `  **Decision:** FIXED | DEFERRED | NOT_APPLICABLE\n` +
-        `  **Reason:** [specific justification]`
+          `Task: ${currentTaskId}\n` +
+          `File: ${currentTaskId}/code-review.check.md\n\n` +
+          `Report contains ${issues.importantCount} IMPORTANT issue(s)\n` +
+          `No code-review-reply.check.md found\n\n` +
+          `You MUST either:\n` +
+          `1. Fix all IMPORTANT issues in code, OR\n` +
+          `2. Create code-review-reply.check.md with responses for each issue\n\n` +
+          `Reply format for each issue:\n` +
+          `  ## Issue: [title]\n` +
+          `  **Decision:** FIXED | DEFERRED | NOT_APPLICABLE\n` +
+          `  **Reason:** [specific justification]`
       );
     }
 
     if (issues.hasBlocked) {
       warnings.push(
         `BLOCKED TESTS DETECTED\n\n` +
-        `Task: ${currentTaskId}\n` +
-        `File: ${currentTaskId}/code-review.check.md\n\n` +
-        `Report contains BLOCKED tests\n` +
-        `BLOCKED = FAIL, not PASS\n\n` +
-        `Fix the blocking issue (likely Playwright MCP) and re-run /check.`
+          `Task: ${currentTaskId}\n` +
+          `File: ${currentTaskId}/code-review.check.md\n\n` +
+          `Report contains BLOCKED tests\n` +
+          `BLOCKED = FAIL, not PASS\n\n` +
+          `Fix the blocking issue (likely Playwright MCP) and re-run /check.`
       );
     }
 
     if (issues.hasForbiddenExcuse) {
       warnings.push(
         `QA REPORT CONTAINS FORBIDDEN EXCUSE\n\n` +
-        `Task: ${currentTaskId}\n` +
-        `File: ${currentTaskId}/code-review.check.md\n\n` +
-        `Report uses a forbidden excuse to skip Playwright testing\n` +
-        `"CI tests provide coverage" is NOT acceptable\n` +
-        `"Deferred to automated tests" is NOT acceptable\n\n` +
-        `QA MUST use Playwright browser tools - no exceptions.\n` +
-        `Re-run /check with proper Playwright browser testing.`
+          `Task: ${currentTaskId}\n` +
+          `File: ${currentTaskId}/code-review.check.md\n\n` +
+          `Report uses a forbidden excuse to skip Playwright testing\n` +
+          `"CI tests provide coverage" is NOT acceptable\n` +
+          `"Deferred to automated tests" is NOT acceptable\n\n` +
+          `QA MUST use Playwright browser tools - no exceptions.\n` +
+          `Re-run /check with proper Playwright browser testing.`
       );
     }
   }
@@ -418,13 +448,13 @@ async function main() {
       if (qaIssues.hasForbiddenExcuse) {
         warnings.push(
           `QA REPORT CONTAINS FORBIDDEN EXCUSE\n\n` +
-          `Task: ${currentTaskId}\n` +
-          `File: ${currentTaskId}/${fileName}\n\n` +
-          `Report uses a forbidden excuse to skip Playwright testing\n` +
-          `"CI tests provide coverage" is NOT acceptable\n` +
-          `"Playwright unavailable" is NOT acceptable without trying\n\n` +
-          `QA MUST use Playwright browser tools - no exceptions.\n` +
-          `Re-run /check with proper Playwright browser testing.`
+            `Task: ${currentTaskId}\n` +
+            `File: ${currentTaskId}/${fileName}\n\n` +
+            `Report uses a forbidden excuse to skip Playwright testing\n` +
+            `"CI tests provide coverage" is NOT acceptable\n` +
+            `"Playwright unavailable" is NOT acceptable without trying\n\n` +
+            `QA MUST use Playwright browser tools - no exceptions.\n` +
+            `Re-run /check with proper Playwright browser testing.`
         );
       }
 
@@ -432,14 +462,14 @@ async function main() {
       if (qaIssues.claimsPass && !qaIssues.hasPlaywrightVerification) {
         warnings.push(
           `QA REPORT MISSING PLAYWRIGHT VERIFICATION\n\n` +
-          `Task: ${currentTaskId}\n` +
-          `File: ${currentTaskId}/${fileName}\n\n` +
-          `Report claims PASS but has no Playwright verification\n` +
-          `Missing "## Playwright Verification" section\n\n` +
-          `QA reports MUST include Playwright verification showing:\n` +
-          `- mcp__playwright__browser_navigate call\n` +
-          `- Result: SUCCESS with page title\n\n` +
-          `Re-run /check with proper Playwright browser testing.`
+            `Task: ${currentTaskId}\n` +
+            `File: ${currentTaskId}/${fileName}\n\n` +
+            `Report claims PASS but has no Playwright verification\n` +
+            `Missing "## Playwright Verification" section\n\n` +
+            `QA reports MUST include Playwright verification showing:\n` +
+            `- mcp__playwright__browser_navigate call\n` +
+            `- Result: SUCCESS with page title\n\n` +
+            `Re-run /check with proper Playwright browser testing.`
         );
       }
 
@@ -447,16 +477,16 @@ async function main() {
       if (!qaIssues.hasConnectivityVerification && !qaIssues.hasGoogleTest) {
         warnings.push(
           `QA REPORT MISSING CONNECTIVITY VERIFICATION\n\n` +
-          `Task: ${currentTaskId}\n` +
-          `File: ${currentTaskId}/${fileName}\n\n` +
-          `Report is MISSING mandatory connectivity verification\n` +
-          `Must include "## Playwright Connectivity Verification" section\n\n` +
-          `QA reports MUST include:\n` +
-          `1. External Connectivity (google.com) - test with screenshot\n` +
-          `2. App Health Check - test with screenshot\n\n` +
-          `This proves Playwright actually works BEFORE claiming any result.\n` +
-          `Re-run /check - QA agent MUST call mcp__playwright__browser_navigate\n` +
-          `on google.com FIRST, then on app health endpoint.`
+            `Task: ${currentTaskId}\n` +
+            `File: ${currentTaskId}/${fileName}\n\n` +
+            `Report is MISSING mandatory connectivity verification\n` +
+            `Must include "## Playwright Connectivity Verification" section\n\n` +
+            `QA reports MUST include:\n` +
+            `1. External Connectivity (google.com) - test with screenshot\n` +
+            `2. App Health Check - test with screenshot\n\n` +
+            `This proves Playwright actually works BEFORE claiming any result.\n` +
+            `Re-run /check - QA agent MUST call mcp__playwright__browser_navigate\n` +
+            `on google.com FIRST, then on app health endpoint.`
         );
       }
 
@@ -464,14 +494,14 @@ async function main() {
       if (qaIssues.hasGoogleTest && !qaIssues.hasHealthCheck) {
         warnings.push(
           `QA REPORT MISSING APP HEALTH CHECK\n\n` +
-          `Task: ${currentTaskId}\n` +
-          `File: ${currentTaskId}/${fileName}\n\n` +
-          `External connectivity (google.com) verified\n` +
-          `But App Health Check is missing\n\n` +
-          `QA reports MUST include App Health Check showing:\n` +
-          `- Navigate to app URL/health or app URL\n` +
-          `- Screenshot of the health check result\n\n` +
-          `Re-run /check with app health verification.`
+            `Task: ${currentTaskId}\n` +
+            `File: ${currentTaskId}/${fileName}\n\n` +
+            `External connectivity (google.com) verified\n` +
+            `But App Health Check is missing\n\n` +
+            `QA reports MUST include App Health Check showing:\n` +
+            `- Navigate to app URL/health or app URL\n` +
+            `- Screenshot of the health check result\n\n` +
+            `Re-run /check with app health verification.`
         );
       }
     }
@@ -486,4 +516,7 @@ async function main() {
   }
 }
 
-main().catch(() => process.exit(didBlock ? 2 : 0));
+main().catch((err) => {
+  logHookError(__filename, err);
+  process.exit(didBlock ? 2 : 0);
+});

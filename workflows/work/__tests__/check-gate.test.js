@@ -17,10 +17,11 @@ function writeReport(name, content) {
 }
 
 after(() => fs.rmSync(TEMP, { recursive: true, force: true }));
-beforeEach(() => { testTicket = `T-${++testCount}`; });
+beforeEach(() => {
+  testTicket = `T-${++testCount}`;
+});
 
 describe('check-gate (unit)', () => {
-
   it('CHECK_GATE_RULES has 4 rules with required shape', () => {
     assert.equal(CHECK_GATE_RULES.length, 4);
     for (const rule of CHECK_GATE_RULES) {
@@ -44,14 +45,14 @@ describe('check-gate (unit)', () => {
     const result = validateCheckGate(TEMP, testTicket);
     assert.equal(result.valid, false);
     assert.ok(result.reasons.length >= 3);
-    assert.ok(result.reasons.some(r => r.includes('tests.check.md')));
+    assert.ok(result.reasons.some((r) => r.includes('tests.check.md')));
   });
 
   it('required-reports rule detects bad status', () => {
     writeReport('tests.check.md', 'Status: FAILED');
     writeReport('code-review.check.md', 'Status: APPROVED');
     writeReport('completion.check.md', 'Status: APPROVED');
-    const rule = CHECK_GATE_RULES.find(r => r.name === 'required-reports');
+    const rule = CHECK_GATE_RULES.find((r) => r.name === 'required-reports');
     const reasons = rule.check(path.join(TEMP, testTicket));
     assert.equal(reasons.length, 1);
     assert.ok(reasons[0].includes('tests.check.md'));
@@ -66,7 +67,7 @@ describe('check-gate (unit)', () => {
       delete require.cache[configPath];
       delete require.cache[gatePath];
       const { CHECK_GATE_RULES: freshRules } = require('../check-gate');
-      const rule = freshRules.find(r => r.name === 'qa-reports');
+      const rule = freshRules.find((r) => r.name === 'qa-reports');
       fs.mkdirSync(path.join(TEMP, testTicket), { recursive: true });
       const reasons = rule.check(path.join(TEMP, testTicket));
       assert.equal(reasons.length, 1);
@@ -89,7 +90,7 @@ describe('check-gate (unit)', () => {
       delete require.cache[gatePath];
       const { CHECK_GATE_RULES: freshRules } = require('../check-gate');
       writeReport('qa-feature.check.md', 'Status: FAILED');
-      const rule = freshRules.find(r => r.name === 'qa-reports');
+      const rule = freshRules.find((r) => r.name === 'qa-reports');
       const reasons = rule.check(path.join(TEMP, testTicket));
       assert.equal(reasons.length, 1);
       assert.ok(reasons[0].includes('qa-feature.check.md'));
@@ -102,7 +103,7 @@ describe('check-gate (unit)', () => {
   });
 
   it('running-agents rule returns empty when no tmux sessions', () => {
-    const rule = CHECK_GATE_RULES.find(r => r.name === 'running-agents');
+    const rule = CHECK_GATE_RULES.find((r) => r.name === 'running-agents');
     const reasons = rule.check(path.join(TEMP, testTicket), testTicket);
     assert.equal(reasons.length, 0);
   });
@@ -115,11 +116,20 @@ describe('check-gate (unit)', () => {
     const ticketDir = path.join(TEMP, testTicket);
     const { execFileSync: exec } = require('child_process');
     exec('git', ['init'], { cwd: ticketDir, stdio: 'pipe' });
-    fs.writeFileSync(path.join(ticketDir, 'spec.md'),
-      '# Spec\n\n## Verification Checklist\n- FILE_EXISTS src/nonexistent-file.js\n');
+    fs.writeFileSync(
+      path.join(ticketDir, 'spec.md'),
+      '# Spec\n\n## Verification Checklist\n- FILE_EXISTS src/nonexistent-file.js\n'
+    );
     const result = validateCheckGate(TEMP, testTicket);
     assert.equal(result.valid, false);
-    assert.ok(result.reasons.some(r => r.includes('Spec verification failed') && r.includes('FILE_EXISTS') && r.includes('nonexistent-file.js')));
+    assert.ok(
+      result.reasons.some(
+        (r) =>
+          r.includes('Spec verification failed') &&
+          r.includes('FILE_EXISTS') &&
+          r.includes('nonexistent-file.js')
+      )
+    );
   });
 
   // ─── GH-181: qa-reports rule skips when WEB_APPS is empty ───────────────
@@ -135,7 +145,7 @@ describe('check-gate (unit)', () => {
       delete require.cache[configPath];
       delete require.cache[gatePath];
       const { CHECK_GATE_RULES: freshRules } = require('../check-gate');
-      const rule = freshRules.find(r => r.name === 'qa-reports');
+      const rule = freshRules.find((r) => r.name === 'qa-reports');
       fs.mkdirSync(path.join(TEMP, testTicket), { recursive: true });
       const reasons = rule.check(path.join(TEMP, testTicket));
       assert.deepStrictEqual(reasons, [], 'qa-reports should pass when WEB_APPS is empty');
@@ -159,7 +169,7 @@ describe('check-gate (unit)', () => {
       delete require.cache[configPath];
       delete require.cache[gatePath];
       const { CHECK_GATE_RULES: freshRules } = require('../check-gate');
-      const rule = freshRules.find(r => r.name === 'qa-reports');
+      const rule = freshRules.find((r) => r.name === 'qa-reports');
       fs.mkdirSync(path.join(TEMP, testTicket), { recursive: true });
       const reasons = rule.check(path.join(TEMP, testTicket));
       assert.deepStrictEqual(reasons, [], 'qa-reports should pass when WEB_APPS is unset');
@@ -182,10 +192,14 @@ describe('check-gate (unit)', () => {
       delete require.cache[configPath];
       delete require.cache[gatePath];
       const { CHECK_GATE_RULES: freshRules } = require('../check-gate');
-      const rule = freshRules.find(r => r.name === 'qa-reports');
+      const rule = freshRules.find((r) => r.name === 'qa-reports');
       fs.mkdirSync(path.join(TEMP, testTicket), { recursive: true });
       const reasons = rule.check(path.join(TEMP, testTicket));
-      assert.equal(reasons.length, 1, 'qa-reports should still require QA when WEB_APPS has entries');
+      assert.equal(
+        reasons.length,
+        1,
+        'qa-reports should still require QA when WEB_APPS has entries'
+      );
       assert.ok(reasons[0].toLowerCase().includes('qa'));
     } finally {
       if (savedWebApps === undefined) delete process.env.WEB_APPS;
@@ -212,8 +226,12 @@ describe('check-gate (unit)', () => {
       // No qa-*.check.md files — should still pass
       const result = freshValidate(TEMP, testTicket);
       // Filter out running-agents and spec-verification failures (tmux/git dependent)
-      const qaReasons = result.reasons.filter(r => r.toLowerCase().includes('qa'));
-      assert.deepStrictEqual(qaReasons, [], 'should have no QA-related failures when WEB_APPS is empty');
+      const qaReasons = result.reasons.filter((r) => r.toLowerCase().includes('qa'));
+      assert.deepStrictEqual(
+        qaReasons,
+        [],
+        'should have no QA-related failures when WEB_APPS is empty'
+      );
     } finally {
       if (savedWebApps === undefined) delete process.env.WEB_APPS;
       else process.env.WEB_APPS = savedWebApps;
@@ -230,11 +248,13 @@ describe('check-gate (unit)', () => {
     writeReport('completion.check.md', 'Status: COMPLETE');
     writeReport('qa-feature.check.md', 'Status: APPROVED');
     const ticketDir = path.join(TEMP, testTicket);
-    fs.writeFileSync(path.join(ticketDir, 'spec.md'),
-      '# Spec\n\n## Summary\nLegacy spec without verification checklist\n');
+    fs.writeFileSync(
+      path.join(ticketDir, 'spec.md'),
+      '# Spec\n\n## Summary\nLegacy spec without verification checklist\n'
+    );
     const result = validateCheckGate(TEMP, testTicket);
     assert.equal(result.valid, true);
-    const specRule = CHECK_GATE_RULES.find(r => r.name === 'spec-verification');
+    const specRule = CHECK_GATE_RULES.find((r) => r.name === 'spec-verification');
     const reasons = specRule.check(ticketDir, testTicket);
     assert.equal(reasons.length, 0);
   });

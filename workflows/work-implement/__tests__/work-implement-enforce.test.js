@@ -16,11 +16,21 @@ const HOOK_PATH = path.join(__dirname, '..', 'hooks', 'work-implement-enforce.js
 function runHook(input) {
   return new Promise((resolve, reject) => {
     const proc = spawn('node', [HOOK_PATH], { stdio: ['pipe', 'pipe', 'pipe'] });
-    let stdout = '', stderr = '';
-    proc.stdout.on('data', (d) => { stdout += d.toString(); });
-    proc.stderr.on('data', (d) => { stderr += d.toString(); });
+    let stdout = '',
+      stderr = '';
+    proc.stdout.on('data', (d) => {
+      stdout += d.toString();
+    });
+    proc.stderr.on('data', (d) => {
+      stderr += d.toString();
+    });
     proc.on('close', (code) => {
-      resolve({ result: { decision: code === 2 ? 'block' : 'approve', reason: stderr.trim() || undefined }, stderr, code, stdout });
+      resolve({
+        result: { decision: code === 2 ? 'block' : 'approve', reason: stderr.trim() || undefined },
+        stderr,
+        code,
+        stdout,
+      });
     });
     proc.on('error', reject);
     proc.stdin.write(JSON.stringify(input));
@@ -34,11 +44,21 @@ function runHookWithEnv(input, envOverrides = {}) {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, ...envOverrides },
     });
-    let stdout = '', stderr = '';
-    proc.stdout.on('data', (d) => { stdout += d.toString(); });
-    proc.stderr.on('data', (d) => { stderr += d.toString(); });
+    let stdout = '',
+      stderr = '';
+    proc.stdout.on('data', (d) => {
+      stdout += d.toString();
+    });
+    proc.stderr.on('data', (d) => {
+      stderr += d.toString();
+    });
     proc.on('close', (code) => {
-      resolve({ result: { decision: code === 2 ? 'block' : 'approve', reason: stderr.trim() || undefined }, stderr, code, stdout });
+      resolve({
+        result: { decision: code === 2 ? 'block' : 'approve', reason: stderr.trim() || undefined },
+        stderr,
+        code,
+        stdout,
+      });
     });
     proc.on('error', reject);
     proc.stdin.write(JSON.stringify(input));
@@ -53,10 +73,19 @@ describe('work-implement-enforce hook', () => {
     const ticketId = 'TDD-GREEN-' + Date.now();
     const ticketDir = path.join(tempBase, ticketId);
     fs.mkdirSync(ticketDir, { recursive: true });
-    fs.writeFileSync(path.join(ticketDir, 'tdd-phase.json'), JSON.stringify({
-      currentPhase: 'green', currentCycle: 1, cycles: [],
-    }));
-    return { tempBase, ticketId, cleanup: () => fs.rmSync(tempBase, { recursive: true, force: true }) };
+    fs.writeFileSync(
+      path.join(ticketDir, 'tdd-phase.json'),
+      JSON.stringify({
+        currentPhase: 'green',
+        currentCycle: 1,
+        cycles: [],
+      })
+    );
+    return {
+      tempBase,
+      ticketId,
+      cleanup: () => fs.rmSync(tempBase, { recursive: true, force: true }),
+    };
   }
   it('should APPROVE non-blocked tools (Read, Bash)', async () => {
     const { result } = await runHook({ tool_name: 'Read', tool_input: {} });
@@ -69,7 +98,7 @@ describe('work-implement-enforce hook', () => {
     const { result } = await runHook({
       tool_name: 'Write',
       tool_input: { file_path: '/home/node/project/src/app.ts' },
-      transcript_path: tp
+      transcript_path: tp,
     });
     assert.strictEqual(result.decision, 'approve');
   });
@@ -80,7 +109,7 @@ describe('work-implement-enforce hook', () => {
     const { result } = await runHook({
       tool_name: 'Write',
       tool_input: { file_path: '/home/node/project/README.md' },
-      transcript_path: tp
+      transcript_path: tp,
     });
     assert.strictEqual(result.decision, 'approve');
   });
@@ -91,7 +120,7 @@ describe('work-implement-enforce hook', () => {
     const { result } = await runHook({
       tool_name: 'Write',
       tool_input: { file_path: '/tmp/project/.claude/hooks/test.js' },
-      transcript_path: tp
+      transcript_path: tp,
     });
     assert.strictEqual(result.decision, 'approve');
   });
@@ -102,7 +131,7 @@ describe('work-implement-enforce hook', () => {
     const { result } = await runHook({
       tool_name: 'Edit',
       tool_input: { file_path: '/home/node/project/src/app.ts' },
-      transcript_path: tp
+      transcript_path: tp,
     });
     assert.strictEqual(result.decision, 'block');
     assert.ok(result.reason.includes('work-implement requires agent delegation'));
@@ -112,24 +141,33 @@ describe('work-implement-enforce hook', () => {
     const tp = path.join(os.tmpdir(), `test-wie5-${Date.now()}.jsonl`);
     fs.writeFileSync(tp, '# Implement Command\n"subagent_type": "developer-nodejs-tdd"\n');
     const tdd = createGreenTddState();
-    const { result } = await runHookWithEnv({
-      tool_name: 'Edit',
-      tool_input: { file_path: '/home/node/project/src/app.ts' },
-      transcript_path: tp
-    }, { TASKS_BASE: tdd.tempBase, TICKET_ID: tdd.ticketId });
+    const { result } = await runHookWithEnv(
+      {
+        tool_name: 'Edit',
+        tool_input: { file_path: '/home/node/project/src/app.ts' },
+        transcript_path: tp,
+      },
+      { TASKS_BASE: tdd.tempBase, TICKET_ID: tdd.ticketId }
+    );
     tdd.cleanup();
     assert.strictEqual(result.decision, 'approve');
   });
 
   it('should APPROVE when developer agent invoked with work-workflow: prefix', async () => {
     const tp = path.join(os.tmpdir(), `test-wie6-${Date.now()}.jsonl`);
-    fs.writeFileSync(tp, '# Implement Command\n"subagent_type": "work-workflow:developer-nodejs-tdd"\n');
+    fs.writeFileSync(
+      tp,
+      '# Implement Command\n"subagent_type": "work-workflow:developer-nodejs-tdd"\n'
+    );
     const tdd = createGreenTddState();
-    const { result } = await runHookWithEnv({
-      tool_name: 'Edit',
-      tool_input: { file_path: '/home/node/project/src/app.ts' },
-      transcript_path: tp
-    }, { TASKS_BASE: tdd.tempBase, TICKET_ID: tdd.ticketId });
+    const { result } = await runHookWithEnv(
+      {
+        tool_name: 'Edit',
+        tool_input: { file_path: '/home/node/project/src/app.ts' },
+        transcript_path: tp,
+      },
+      { TASKS_BASE: tdd.tempBase, TICKET_ID: tdd.ticketId }
+    );
     tdd.cleanup();
     assert.strictEqual(result.decision, 'approve');
   });
@@ -138,11 +176,14 @@ describe('work-implement-enforce hook', () => {
     const tp = path.join(os.tmpdir(), `test-wie-ca-${Date.now()}.jsonl`);
     fs.writeFileSync(tp, '# Implement Command\n"subagent_type": "code-architect"\n');
     const tdd = createGreenTddState();
-    const { result } = await runHookWithEnv({
-      tool_name: 'Edit',
-      tool_input: { file_path: '/home/node/project/src/app.ts' },
-      transcript_path: tp
-    }, { WORK_ARCHITECT_ENABLED: '1', TASKS_BASE: tdd.tempBase, TICKET_ID: tdd.ticketId });
+    const { result } = await runHookWithEnv(
+      {
+        tool_name: 'Edit',
+        tool_input: { file_path: '/home/node/project/src/app.ts' },
+        transcript_path: tp,
+      },
+      { WORK_ARCHITECT_ENABLED: '1', TASKS_BASE: tdd.tempBase, TICKET_ID: tdd.ticketId }
+    );
     tdd.cleanup();
     assert.strictEqual(result.decision, 'approve');
   });
@@ -151,11 +192,14 @@ describe('work-implement-enforce hook', () => {
     const tp = path.join(os.tmpdir(), `test-wie-ca2-${Date.now()}.jsonl`);
     fs.writeFileSync(tp, '# Implement Command\n"subagent_type": "work-workflow:code-architect"\n');
     const tdd = createGreenTddState();
-    const { result } = await runHookWithEnv({
-      tool_name: 'Edit',
-      tool_input: { file_path: '/home/node/project/src/app.ts' },
-      transcript_path: tp
-    }, { WORK_ARCHITECT_ENABLED: '1', TASKS_BASE: tdd.tempBase, TICKET_ID: tdd.ticketId });
+    const { result } = await runHookWithEnv(
+      {
+        tool_name: 'Edit',
+        tool_input: { file_path: '/home/node/project/src/app.ts' },
+        transcript_path: tp,
+      },
+      { WORK_ARCHITECT_ENABLED: '1', TASKS_BASE: tdd.tempBase, TICKET_ID: tdd.ticketId }
+    );
     tdd.cleanup();
     assert.strictEqual(result.decision, 'approve');
   });
@@ -163,24 +207,33 @@ describe('work-implement-enforce hook', () => {
   it('should include code-architect in error message when blocking (with gate enabled)', async () => {
     const tp = path.join(os.tmpdir(), `test-wie-ca3-${Date.now()}.jsonl`);
     fs.writeFileSync(tp, '# Implement Command\n');
-    const { result } = await runHookWithEnv({
-      tool_name: 'Edit',
-      tool_input: { file_path: '/home/node/project/src/app.ts' },
-      transcript_path: tp
-    }, { WORK_ARCHITECT_ENABLED: '1' });
+    const { result } = await runHookWithEnv(
+      {
+        tool_name: 'Edit',
+        tool_input: { file_path: '/home/node/project/src/app.ts' },
+        transcript_path: tp,
+      },
+      { WORK_ARCHITECT_ENABLED: '1' }
+    );
     assert.strictEqual(result.decision, 'block');
-    assert.ok(result.reason.includes('code-architect'), 'error message should mention code-architect');
+    assert.ok(
+      result.reason.includes('code-architect'),
+      'error message should mention code-architect'
+    );
   });
 
   describe('WORK_ARCHITECT_ENABLED gate', () => {
     it('should BLOCK code-architect when WORK_ARCHITECT_ENABLED is not set', async () => {
       const tp = path.join(os.tmpdir(), `test-wie-gate-${Date.now()}.jsonl`);
       fs.writeFileSync(tp, '# Implement Command\n"subagent_type": "code-architect"\n');
-      const { result } = await runHookWithEnv({
-        tool_name: 'Edit',
-        tool_input: { file_path: '/home/node/project/src/app.ts' },
-        transcript_path: tp
-      }, { WORK_ARCHITECT_ENABLED: '' });
+      const { result } = await runHookWithEnv(
+        {
+          tool_name: 'Edit',
+          tool_input: { file_path: '/home/node/project/src/app.ts' },
+          transcript_path: tp,
+        },
+        { WORK_ARCHITECT_ENABLED: '' }
+      );
       assert.strictEqual(result.decision, 'block');
     });
 
@@ -188,11 +241,14 @@ describe('work-implement-enforce hook', () => {
       const tp = path.join(os.tmpdir(), `test-wie-gate2-${Date.now()}.jsonl`);
       fs.writeFileSync(tp, '# Implement Command\n"subagent_type": "code-architect"\n');
       const tdd = createGreenTddState();
-      const { result } = await runHookWithEnv({
-        tool_name: 'Edit',
-        tool_input: { file_path: '/home/node/project/src/app.ts' },
-        transcript_path: tp
-      }, { WORK_ARCHITECT_ENABLED: '1', TASKS_BASE: tdd.tempBase, TICKET_ID: tdd.ticketId });
+      const { result } = await runHookWithEnv(
+        {
+          tool_name: 'Edit',
+          tool_input: { file_path: '/home/node/project/src/app.ts' },
+          transcript_path: tp,
+        },
+        { WORK_ARCHITECT_ENABLED: '1', TASKS_BASE: tdd.tempBase, TICKET_ID: tdd.ticketId }
+      );
       tdd.cleanup();
       assert.strictEqual(result.decision, 'approve');
     });
@@ -200,25 +256,37 @@ describe('work-implement-enforce hook', () => {
     it('should NOT include code-architect in error message when WORK_ARCHITECT_ENABLED is not set', async () => {
       const tp = path.join(os.tmpdir(), `test-wie-gate3-${Date.now()}.jsonl`);
       fs.writeFileSync(tp, '# Implement Command\n');
-      const { result } = await runHookWithEnv({
-        tool_name: 'Edit',
-        tool_input: { file_path: '/home/node/project/src/app.ts' },
-        transcript_path: tp
-      }, { WORK_ARCHITECT_ENABLED: '' });
+      const { result } = await runHookWithEnv(
+        {
+          tool_name: 'Edit',
+          tool_input: { file_path: '/home/node/project/src/app.ts' },
+          transcript_path: tp,
+        },
+        { WORK_ARCHITECT_ENABLED: '' }
+      );
       assert.strictEqual(result.decision, 'block');
-      assert.ok(!result.reason.includes('code-architect'), 'error message should NOT mention code-architect when disabled');
+      assert.ok(
+        !result.reason.includes('code-architect'),
+        'error message should NOT mention code-architect when disabled'
+      );
     });
 
     it('should include code-architect in error message when WORK_ARCHITECT_ENABLED=1', async () => {
       const tp = path.join(os.tmpdir(), `test-wie-gate4-${Date.now()}.jsonl`);
       fs.writeFileSync(tp, '# Implement Command\n');
-      const { result } = await runHookWithEnv({
-        tool_name: 'Edit',
-        tool_input: { file_path: '/home/node/project/src/app.ts' },
-        transcript_path: tp
-      }, { WORK_ARCHITECT_ENABLED: '1' });
+      const { result } = await runHookWithEnv(
+        {
+          tool_name: 'Edit',
+          tool_input: { file_path: '/home/node/project/src/app.ts' },
+          transcript_path: tp,
+        },
+        { WORK_ARCHITECT_ENABLED: '1' }
+      );
       assert.strictEqual(result.decision, 'block');
-      assert.ok(result.reason.includes('code-architect'), 'error message should mention code-architect when enabled');
+      assert.ok(
+        result.reason.includes('code-architect'),
+        'error message should mention code-architect when enabled'
+      );
     });
   });
 
@@ -228,10 +296,13 @@ describe('work-implement-enforce hook', () => {
     const { result } = await runHook({
       tool_name: 'Write',
       tool_input: { file_path: '/home/node/project/tasks/TEST-123/tdd-phase.json' },
-      transcript_path: tp
+      transcript_path: tp,
     });
     assert.strictEqual(result.decision, 'block');
-    assert.ok(result.reason.includes('tdd-phase.json'), 'Should mention tdd-phase.json in block message');
+    assert.ok(
+      result.reason.includes('tdd-phase.json'),
+      'Should mention tdd-phase.json in block message'
+    );
   });
 
   it('should APPROVE on parse error (JSON.parse in main fails, main().catch fires)', async () => {
@@ -253,16 +324,22 @@ describe('work-implement-enforce hook', () => {
       const ticketDir = path.join(tempTasksBase, ticketId);
       fs.mkdirSync(ticketDir, { recursive: true });
       const statePath = path.join(ticketDir, 'tdd-phase.json');
-      fs.writeFileSync(statePath, JSON.stringify({
-        currentPhase: phase,
-        currentCycle: 1,
-        cycles: [],
-      }));
+      fs.writeFileSync(
+        statePath,
+        JSON.stringify({
+          currentPhase: phase,
+          currentCycle: 1,
+          cycles: [],
+        })
+      );
       return statePath;
     }
 
     function makeTranscript() {
-      const tp = path.join(os.tmpdir(), `test-wie-tdd-${Date.now()}-${Math.random().toString(36).slice(2)}.jsonl`);
+      const tp = path.join(
+        os.tmpdir(),
+        `test-wie-tdd-${Date.now()}-${Math.random().toString(36).slice(2)}.jsonl`
+      );
       fs.writeFileSync(tp, '# Implement Command\n"subagent_type": "developer-nodejs-tdd"\n');
       return tp;
     }
@@ -273,11 +350,14 @@ describe('work-implement-enforce hook', () => {
       createTddPhaseState(ticketId, 'red');
       const tp = makeTranscript();
 
-      const { result } = await runHookWithEnv({
-        tool_name: 'Write',
-        tool_input: { file_path: '/home/node/project/src/app.ts' },
-        transcript_path: tp,
-      }, { TASKS_BASE: tempTasksBase, TICKET_ID: ticketId });
+      const { result } = await runHookWithEnv(
+        {
+          tool_name: 'Write',
+          tool_input: { file_path: '/home/node/project/src/app.ts' },
+          transcript_path: tp,
+        },
+        { TASKS_BASE: tempTasksBase, TICKET_ID: ticketId }
+      );
 
       assert.strictEqual(result.decision, 'block');
       assert.ok(result.reason.includes('RED phase'), 'Should mention RED phase in block message');
@@ -290,11 +370,14 @@ describe('work-implement-enforce hook', () => {
       createTddPhaseState(ticketId, 'red');
       const tp = makeTranscript();
 
-      const { result } = await runHookWithEnv({
-        tool_name: 'Write',
-        tool_input: { file_path: '/home/node/project/src/app.test.ts' },
-        transcript_path: tp,
-      }, { TASKS_BASE: tempTasksBase, TICKET_ID: ticketId });
+      const { result } = await runHookWithEnv(
+        {
+          tool_name: 'Write',
+          tool_input: { file_path: '/home/node/project/src/app.test.ts' },
+          transcript_path: tp,
+        },
+        { TASKS_BASE: tempTasksBase, TICKET_ID: ticketId }
+      );
 
       assert.strictEqual(result.decision, 'approve');
       fs.rmSync(tempTasksBase, { recursive: true, force: true });
@@ -306,14 +389,20 @@ describe('work-implement-enforce hook', () => {
       createTddPhaseState(ticketId, 'green');
       const tp = makeTranscript();
 
-      const { result } = await runHookWithEnv({
-        tool_name: 'Write',
-        tool_input: { file_path: '/home/node/project/src/app.test.ts' },
-        transcript_path: tp,
-      }, { TASKS_BASE: tempTasksBase, TICKET_ID: ticketId });
+      const { result } = await runHookWithEnv(
+        {
+          tool_name: 'Write',
+          tool_input: { file_path: '/home/node/project/src/app.test.ts' },
+          transcript_path: tp,
+        },
+        { TASKS_BASE: tempTasksBase, TICKET_ID: ticketId }
+      );
 
       assert.strictEqual(result.decision, 'block');
-      assert.ok(result.reason.includes('GREEN phase'), 'Should mention GREEN phase in block message');
+      assert.ok(
+        result.reason.includes('GREEN phase'),
+        'Should mention GREEN phase in block message'
+      );
       fs.rmSync(tempTasksBase, { recursive: true, force: true });
     });
 
@@ -323,11 +412,14 @@ describe('work-implement-enforce hook', () => {
       createTddPhaseState(ticketId, 'green');
       const tp = makeTranscript();
 
-      const { result } = await runHookWithEnv({
-        tool_name: 'Write',
-        tool_input: { file_path: '/home/node/project/src/app.ts' },
-        transcript_path: tp,
-      }, { TASKS_BASE: tempTasksBase, TICKET_ID: ticketId });
+      const { result } = await runHookWithEnv(
+        {
+          tool_name: 'Write',
+          tool_input: { file_path: '/home/node/project/src/app.ts' },
+          transcript_path: tp,
+        },
+        { TASKS_BASE: tempTasksBase, TICKET_ID: ticketId }
+      );
 
       assert.strictEqual(result.decision, 'approve');
       fs.rmSync(tempTasksBase, { recursive: true, force: true });
@@ -339,11 +431,14 @@ describe('work-implement-enforce hook', () => {
       createTddPhaseState(ticketId, 'green');
       const tp = makeTranscript();
 
-      const { result } = await runHookWithEnv({
-        tool_name: 'Write',
-        tool_input: { file_path: '/home/node/project/__mocks__/foo.js' },
-        transcript_path: tp,
-      }, { TASKS_BASE: tempTasksBase, TICKET_ID: ticketId });
+      const { result } = await runHookWithEnv(
+        {
+          tool_name: 'Write',
+          tool_input: { file_path: '/home/node/project/__mocks__/foo.js' },
+          transcript_path: tp,
+        },
+        { TASKS_BASE: tempTasksBase, TICKET_ID: ticketId }
+      );
 
       assert.strictEqual(result.decision, 'approve');
       fs.rmSync(tempTasksBase, { recursive: true, force: true });
@@ -355,15 +450,21 @@ describe('work-implement-enforce hook', () => {
       // Do NOT create tdd-phase.json
       const tp = makeTranscript();
 
-      const { result } = await runHookWithEnv({
-        tool_name: 'Write',
-        tool_input: { file_path: '/home/node/project/src/app.ts' },
-        transcript_path: tp,
-      }, { TASKS_BASE: tempTasksBase, TICKET_ID: ticketId });
+      const { result } = await runHookWithEnv(
+        {
+          tool_name: 'Write',
+          tool_input: { file_path: '/home/node/project/src/app.ts' },
+          transcript_path: tp,
+        },
+        { TASKS_BASE: tempTasksBase, TICKET_ID: ticketId }
+      );
 
       // Defense-in-depth: production files should be blocked when TDD state doesn't exist
       assert.strictEqual(result.decision, 'block');
-      assert.ok(result.reason.includes('TDD not initialized'), 'Should mention TDD not initialized');
+      assert.ok(
+        result.reason.includes('TDD not initialized'),
+        'Should mention TDD not initialized'
+      );
       fs.rmSync(tempTasksBase, { recursive: true, force: true });
     });
 
@@ -373,11 +474,14 @@ describe('work-implement-enforce hook', () => {
       // Do NOT create tdd-phase.json
       const tp = makeTranscript();
 
-      const { result } = await runHookWithEnv({
-        tool_name: 'Write',
-        tool_input: { file_path: '/home/node/project/README.md' },
-        transcript_path: tp,
-      }, { TASKS_BASE: tempTasksBase, TICKET_ID: ticketId });
+      const { result } = await runHookWithEnv(
+        {
+          tool_name: 'Write',
+          tool_input: { file_path: '/home/node/project/README.md' },
+          transcript_path: tp,
+        },
+        { TASKS_BASE: tempTasksBase, TICKET_ID: ticketId }
+      );
 
       assert.strictEqual(result.decision, 'approve');
       fs.rmSync(tempTasksBase, { recursive: true, force: true });
@@ -391,17 +495,22 @@ describe('work-implement-enforce hook', () => {
       const tp = path.join(os.tmpdir(), `test-wie-tdd-noagent-${Date.now()}.jsonl`);
       fs.writeFileSync(tp, '# Implement Command\n');
 
-      const { result } = await runHookWithEnv({
-        tool_name: 'Write',
-        tool_input: { file_path: '/home/node/project/src/app.ts' },
-        transcript_path: tp,
-      }, { TASKS_BASE: tempTasksBase, TICKET_ID: ticketId });
+      const { result } = await runHookWithEnv(
+        {
+          tool_name: 'Write',
+          tool_input: { file_path: '/home/node/project/src/app.ts' },
+          transcript_path: tp,
+        },
+        { TASKS_BASE: tempTasksBase, TICKET_ID: ticketId }
+      );
 
       // No developer agent invoked, so the no-state defense-in-depth check doesn't trigger
       // Instead it falls through to the "block: no agent" logic
       assert.strictEqual(result.decision, 'block');
-      assert.ok(result.reason.includes('work-implement requires agent delegation'),
-        'Should block with agent delegation message, not TDD message');
+      assert.ok(
+        result.reason.includes('work-implement requires agent delegation'),
+        'Should block with agent delegation message, not TDD message'
+      );
       fs.rmSync(tempTasksBase, { recursive: true, force: true });
     });
   });

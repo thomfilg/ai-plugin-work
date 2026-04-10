@@ -20,7 +20,9 @@ describe('hook-error-log', () => {
 
   afterEach(() => {
     // Re-require to get a reference so we can clean up, then clear cache
-    try { fs.unlinkSync(tmpFile); } catch {}
+    try {
+      fs.unlinkSync(tmpFile);
+    } catch {}
     if (savedDebug === undefined) delete process.env.ENFORCE_HOOK_DEBUG;
     else process.env.ENFORCE_HOOK_DEBUG = savedDebug;
     if (savedLogFile === undefined) delete process.env.HOOK_ERROR_LOG;
@@ -67,7 +69,10 @@ describe('hook-error-log', () => {
     const content = fs.readFileSync(tmpFile, 'utf8');
     const line = content.trim();
     // Line including prefix must stay under 3800 bytes
-    assert.ok(Buffer.byteLength(line + '\n', 'utf8') <= 3800, `line should be truncated (got ${Buffer.byteLength(line + '\n', 'utf8')} bytes)`);
+    assert.ok(
+      Buffer.byteLength(line + '\n', 'utf8') <= 3800,
+      `line should be truncated (got ${Buffer.byteLength(line + '\n', 'utf8')} bytes)`
+    );
     assert.ok(line.endsWith('...'), 'truncated line should end with ...');
   });
 
@@ -78,7 +83,10 @@ describe('hook-error-log', () => {
     // Capture stderr output
     let stderrOutput = '';
     const originalWrite = process.stderr.write;
-    process.stderr.write = (chunk) => { stderrOutput += chunk; return true; };
+    process.stderr.write = (chunk) => {
+      stderrOutput += chunk;
+      return true;
+    };
     try {
       logHookError(__filename, new Error('debug error'));
     } finally {
@@ -89,7 +97,10 @@ describe('hook-error-log', () => {
     // File should NOT exist or not contain the debug error (fd is never opened in debug mode)
     if (fs.existsSync(tmpFile)) {
       const content = fs.readFileSync(tmpFile, 'utf8');
-      assert.ok(!content.includes('debug error'), 'file should not contain the error in debug mode');
+      assert.ok(
+        !content.includes('debug error'),
+        'file should not contain the error in debug mode'
+      );
     }
   });
 
@@ -119,7 +130,9 @@ describe('hook-error-log', () => {
       // Target file should be untouched
       assert.strictEqual(fs.readFileSync(targetFile, 'utf8'), 'target content');
     } finally {
-      try { fs.unlinkSync(targetFile); } catch {}
+      try {
+        fs.unlinkSync(targetFile);
+      } catch {}
     }
   });
 });

@@ -30,10 +30,7 @@ describe('resolveTicketId', () => {
   });
 
   it('falls back to JIRA_TICKET_ID env for backward compatibility', () => {
-    assert.equal(
-      resolveTicketId([], { JIRA_TICKET_ID: 'LEGACY-100' }),
-      'LEGACY-100'
-    );
+    assert.equal(resolveTicketId([], { JIRA_TICKET_ID: 'LEGACY-100' }), 'LEGACY-100');
   });
 
   it('CLI arg takes precedence over all env vars', () => {

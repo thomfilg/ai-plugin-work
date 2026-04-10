@@ -29,10 +29,15 @@ function createExitScript(dir, exitCode) {
 function createTempGitRepo() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdd-git-'));
   execSync('git init', { cwd: dir, stdio: 'pipe' });
-  execSync('git config user.email "test@test.com" && git config user.name "Test"', { cwd: dir, stdio: 'pipe' });
+  execSync('git config user.email "test@test.com" && git config user.name "Test"', {
+    cwd: dir,
+    stdio: 'pipe',
+  });
   fs.writeFileSync(path.join(dir, 'README.md'), 'init');
   // Use array join to avoid hook pattern detection on the word c-o-m-m-i-t
-  const commitCmd = ['git', 'add', '.', '&&', 'git', ['com','mit'].join(''), '-m', '"init"'].join(' ');
+  const commitCmd = ['git', 'add', '.', '&&', 'git', ['com', 'mit'].join(''), '-m', '"init"'].join(
+    ' '
+  );
   execSync(commitCmd, { cwd: dir, stdio: 'pipe' });
   return dir;
 }
@@ -103,7 +108,10 @@ describe('tdd-phase-state CLI', () => {
     it('returns error with missing ticket ID', () => {
       const { exitCode, stderr } = runCli('init', homeDir);
       assert.strictEqual(exitCode, 1);
-      assert.ok(stderr.includes('error') || stderr.includes('ticket'), `Expected error about ticket ID, got: ${stderr}`);
+      assert.ok(
+        stderr.includes('error') || stderr.includes('ticket'),
+        `Expected error about ticket ID, got: ${stderr}`
+      );
     });
   });
 
@@ -140,10 +148,17 @@ describe('tdd-phase-state CLI', () => {
       const statePath = path.join(homeDir, 'worktrees', 'tasks', 'TEST-GRN', 'tdd-phase.json');
       const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
       state.currentPhase = 'green';
-      state.cycles = [{
-        cycle: 1,
-        red: { testFiles: ['foo.test.ts'], testCommand: 'echo test', testExitCode: 1, timestamp: new Date().toISOString() },
-      }];
+      state.cycles = [
+        {
+          cycle: 1,
+          red: {
+            testFiles: ['foo.test.ts'],
+            testCommand: 'echo test',
+            testExitCode: 1,
+            timestamp: new Date().toISOString(),
+          },
+        },
+      ];
       fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
 
       const passScript = createExitScript(scriptDir, 0);
@@ -163,15 +178,25 @@ describe('tdd-phase-state CLI', () => {
       const statePath = path.join(homeDir, 'worktrees', 'tasks', 'TEST-REF', 'tdd-phase.json');
       const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
       state.currentPhase = 'refactor';
-      state.cycles = [{
-        cycle: 1,
-        red: { testFiles: ['foo.test.ts'], testCommand: 'echo test', testExitCode: 1, timestamp: new Date().toISOString() },
-        green: { testCommand: 'echo test', testExitCode: 0, timestamp: new Date().toISOString() },
-      }];
+      state.cycles = [
+        {
+          cycle: 1,
+          red: {
+            testFiles: ['foo.test.ts'],
+            testCommand: 'echo test',
+            testExitCode: 1,
+            timestamp: new Date().toISOString(),
+          },
+          green: { testCommand: 'echo test', testExitCode: 0, timestamp: new Date().toISOString() },
+        },
+      ];
       fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
 
       const passScript = createExitScript(scriptDir, 0);
-      const { stdout, exitCode } = runCli(`record-refactor TEST-REF --cmd "${passScript}"`, homeDir);
+      const { stdout, exitCode } = runCli(
+        `record-refactor TEST-REF --cmd "${passScript}"`,
+        homeDir
+      );
       assert.strictEqual(exitCode, 0);
       const result = JSON.parse(stdout);
       assert.strictEqual(result.ok, true);
@@ -186,10 +211,17 @@ describe('tdd-phase-state CLI', () => {
       runCli('init TEST-TRN', homeDir);
       const statePath = path.join(homeDir, 'worktrees', 'tasks', 'TEST-TRN', 'tdd-phase.json');
       const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
-      state.cycles = [{
-        cycle: 1,
-        red: { testFiles: ['foo.test.ts'], testCommand: 'echo test', testExitCode: 1, timestamp: new Date().toISOString() },
-      }];
+      state.cycles = [
+        {
+          cycle: 1,
+          red: {
+            testFiles: ['foo.test.ts'],
+            testCommand: 'echo test',
+            testExitCode: 1,
+            timestamp: new Date().toISOString(),
+          },
+        },
+      ];
       fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
 
       const { stdout, exitCode } = runCli('transition TEST-TRN green', homeDir);
@@ -205,10 +237,17 @@ describe('tdd-phase-state CLI', () => {
       runCli('init TEST-BAD', homeDir);
       const statePath = path.join(homeDir, 'worktrees', 'tasks', 'TEST-BAD', 'tdd-phase.json');
       const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
-      state.cycles = [{
-        cycle: 1,
-        red: { testFiles: ['foo.test.ts'], testCommand: 'echo test', testExitCode: 1, timestamp: new Date().toISOString() },
-      }];
+      state.cycles = [
+        {
+          cycle: 1,
+          red: {
+            testFiles: ['foo.test.ts'],
+            testCommand: 'echo test',
+            testExitCode: 1,
+            timestamp: new Date().toISOString(),
+          },
+        },
+      ];
       fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
 
       const { exitCode } = runCli('transition TEST-BAD refactor', homeDir);
@@ -228,12 +267,23 @@ describe('tdd-phase-state CLI', () => {
       const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
       state.currentPhase = 'refactor';
       state.currentCycle = 1;
-      state.cycles = [{
-        cycle: 1,
-        red: { testFiles: ['foo.test.ts'], testCommand: 'echo test', testExitCode: 1, timestamp: new Date().toISOString() },
-        green: { testCommand: 'echo test', testExitCode: 0, timestamp: new Date().toISOString() },
-        refactor: { testCommand: 'echo test', testExitCode: 0, timestamp: new Date().toISOString() },
-      }];
+      state.cycles = [
+        {
+          cycle: 1,
+          red: {
+            testFiles: ['foo.test.ts'],
+            testCommand: 'echo test',
+            testExitCode: 1,
+            timestamp: new Date().toISOString(),
+          },
+          green: { testCommand: 'echo test', testExitCode: 0, timestamp: new Date().toISOString() },
+          refactor: {
+            testCommand: 'echo test',
+            testExitCode: 0,
+            timestamp: new Date().toISOString(),
+          },
+        },
+      ];
       fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
 
       const { stdout, exitCode } = runCli('transition TEST-CYC red', homeDir);
@@ -250,7 +300,10 @@ describe('tdd-phase-state CLI', () => {
 
   describe('exception', () => {
     it('creates valid state with exception reason', () => {
-      const { stdout, exitCode } = runCli('exception TEST-EXC --reason "config-only change, no testable behavior"', homeDir);
+      const { stdout, exitCode } = runCli(
+        'exception TEST-EXC --reason "config-only change, no testable behavior"',
+        homeDir
+      );
       assert.strictEqual(exitCode, 0);
       const result = JSON.parse(stdout);
       assert.strictEqual(result.ok, true);
@@ -272,7 +325,10 @@ describe('tdd-phase-state CLI', () => {
     it('fails with empty reason', () => {
       const { exitCode, stderr } = runCli('exception TEST-EXC3 --reason ""', homeDir);
       assert.strictEqual(exitCode, 1);
-      assert.ok(stderr.includes('empty') || stderr.includes('reason'), `Expected error about empty reason, got: ${stderr}`);
+      assert.ok(
+        stderr.includes('empty') || stderr.includes('reason'),
+        `Expected error about empty reason, got: ${stderr}`
+      );
     });
   });
 
@@ -283,10 +339,17 @@ describe('tdd-phase-state CLI', () => {
       const statePath = path.join(homeDir, 'worktrees', 'tasks', 'TEST-PV1', 'tdd-phase.json');
       const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
       state.currentPhase = 'green';
-      state.cycles = [{
-        cycle: 1,
-        red: { testFiles: ['foo.test.ts'], testCommand: 'echo test', testExitCode: 1, timestamp: new Date().toISOString() },
-      }];
+      state.cycles = [
+        {
+          cycle: 1,
+          red: {
+            testFiles: ['foo.test.ts'],
+            testCommand: 'echo test',
+            testExitCode: 1,
+            timestamp: new Date().toISOString(),
+          },
+        },
+      ];
       fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
 
       const failScript = createExitScript(scriptDir, 1);
@@ -295,9 +358,16 @@ describe('tdd-phase-state CLI', () => {
       fs.writeFileSync(path.join(cleanRepo, 'foo.test.ts'), 'test');
       execSync('git add foo.test.ts', { cwd: cleanRepo, stdio: 'pipe' });
 
-      const { exitCode, stderr } = runCli(`record-red TEST-PV1 --cmd "${failScript}"`, homeDir, cleanRepo);
+      const { exitCode, stderr } = runCli(
+        `record-red TEST-PV1 --cmd "${failScript}"`,
+        homeDir,
+        cleanRepo
+      );
       assert.strictEqual(exitCode, 1);
-      assert.ok(stderr.includes('Cannot record RED'), `Expected phase mismatch error, got: ${stderr}`);
+      assert.ok(
+        stderr.includes('Cannot record RED'),
+        `Expected phase mismatch error, got: ${stderr}`
+      );
     });
 
     it('record-green fails when currentPhase is not green', () => {
@@ -306,16 +376,25 @@ describe('tdd-phase-state CLI', () => {
       const passScript = createExitScript(scriptDir, 0);
       const { exitCode, stderr } = runCli(`record-green TEST-PV2 --cmd "${passScript}"`, homeDir);
       assert.strictEqual(exitCode, 1);
-      assert.ok(stderr.includes('Cannot record GREEN'), `Expected phase mismatch error, got: ${stderr}`);
+      assert.ok(
+        stderr.includes('Cannot record GREEN'),
+        `Expected phase mismatch error, got: ${stderr}`
+      );
     });
 
     it('record-refactor fails when currentPhase is not refactor', () => {
       runCli('init TEST-PV3', homeDir);
       // Phase is 'red' by default after init
       const passScript = createExitScript(scriptDir, 0);
-      const { exitCode, stderr } = runCli(`record-refactor TEST-PV3 --cmd "${passScript}"`, homeDir);
+      const { exitCode, stderr } = runCli(
+        `record-refactor TEST-PV3 --cmd "${passScript}"`,
+        homeDir
+      );
       assert.strictEqual(exitCode, 1);
-      assert.ok(stderr.includes('Cannot record REFACTOR'), `Expected phase mismatch error, got: ${stderr}`);
+      assert.ok(
+        stderr.includes('Cannot record REFACTOR'),
+        `Expected phase mismatch error, got: ${stderr}`
+      );
     });
   });
 
@@ -323,7 +402,10 @@ describe('tdd-phase-state CLI', () => {
     it('rejects ticket ID with ..', () => {
       const { exitCode, stderr } = runCli('init ../../../etc', homeDir);
       assert.strictEqual(exitCode, 1);
-      assert.ok(stderr.includes('Invalid ticket ID'), `Expected invalid ticket ID error, got: ${stderr}`);
+      assert.ok(
+        stderr.includes('Invalid ticket ID'),
+        `Expected invalid ticket ID error, got: ${stderr}`
+      );
     });
 
     it('allows ticket ID with single slash suffix (e.g. GH-145/phase1)', () => {
@@ -340,7 +422,10 @@ describe('tdd-phase-state CLI', () => {
     it('rejects ticket ID with backslash', () => {
       const { exitCode, stderr } = runCli('init "foo\\\\bar"', homeDir);
       assert.strictEqual(exitCode, 1);
-      assert.ok(stderr.includes('Invalid ticket ID'), `Expected invalid ticket ID error, got: ${stderr}`);
+      assert.ok(
+        stderr.includes('Invalid ticket ID'),
+        `Expected invalid ticket ID error, got: ${stderr}`
+      );
     });
   });
 
@@ -375,7 +460,10 @@ describe('tdd-phase-state CLI', () => {
     it('record-red fails without token when WORK_TDD_TOKEN_SKIP is not set', () => {
       runCli('init TEST-TOK', homeDir);
       const failScript = createExitScript(scriptDir, 1);
-      const { exitCode, stderr } = runCliNoTokenSkip(`record-red TEST-TOK --cmd "${failScript}"`, homeDir);
+      const { exitCode, stderr } = runCliNoTokenSkip(
+        `record-red TEST-TOK --cmd "${failScript}"`,
+        homeDir
+      );
       assert.strictEqual(exitCode, 1);
       assert.ok(
         stderr.includes('No valid write token'),
@@ -386,7 +474,10 @@ describe('tdd-phase-state CLI', () => {
     it('record-green fails without token when WORK_TDD_TOKEN_SKIP is not set', () => {
       runCli('init TEST-TOK2', homeDir);
       const passScript = createExitScript(scriptDir, 0);
-      const { exitCode, stderr } = runCliNoTokenSkip(`record-green TEST-TOK2 --cmd "${passScript}"`, homeDir);
+      const { exitCode, stderr } = runCliNoTokenSkip(
+        `record-green TEST-TOK2 --cmd "${passScript}"`,
+        homeDir
+      );
       assert.strictEqual(exitCode, 1);
       assert.ok(
         stderr.includes('No valid write token'),

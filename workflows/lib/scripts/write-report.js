@@ -93,7 +93,11 @@ function consumeToken(scriptBasename) {
 
     const raw = fs.readFileSync(tp, 'utf8');
     // Delete immediately to prevent reuse
-    try { fs.unlinkSync(tp); } catch { /* already deleted — race is fine */ }
+    try {
+      fs.unlinkSync(tp);
+    } catch {
+      /* already deleted — race is fine */
+    }
     return JSON.parse(raw);
   } catch {
     return null;
@@ -147,24 +151,20 @@ function createReportWriter(config) {
     if (!token) {
       process.stderr.write(
         `[${name}] BLOCKED: No valid write token found.\n` +
-        `  Expected token at: ${tokenPath(scriptBasename)}\n` +
-        `  The PreToolUse hook must approve this call first.\n` +
-        `  This script can only be called through Claude Code's agent system.\n`
+          `  Expected token at: ${tokenPath(scriptBasename)}\n` +
+          `  The PreToolUse hook must approve this call first.\n` +
+          `  This script can only be called through Claude Code's agent system.\n`
       );
       process.exit(2);
     }
 
     // Validate token structure: timestamp must be a finite number, agent must be a string
     if (typeof token.timestamp !== 'number' || !Number.isFinite(token.timestamp)) {
-      process.stderr.write(
-        `[${name}] BLOCKED: Token has invalid or missing timestamp.\n`
-      );
+      process.stderr.write(`[${name}] BLOCKED: Token has invalid or missing timestamp.\n`);
       process.exit(2);
     }
     if (typeof token.agent !== 'string' || !token.agent) {
-      process.stderr.write(
-        `[${name}] BLOCKED: Token has invalid or missing agent field.\n`
-      );
+      process.stderr.write(`[${name}] BLOCKED: Token has invalid or missing agent field.\n`);
       process.exit(2);
     }
 
@@ -174,7 +174,7 @@ function createReportWriter(config) {
     if (age < 0 || age > TOKEN_MAX_AGE_MS) {
       process.stderr.write(
         `[${name}] BLOCKED: Write token expired (${age}ms old, max ${TOKEN_MAX_AGE_MS}ms).\n` +
-        `  Token was issued at ${new Date(token.timestamp).toISOString()}\n`
+          `  Token was issued at ${new Date(token.timestamp).toISOString()}\n`
       );
       process.exit(2);
     }
@@ -182,14 +182,14 @@ function createReportWriter(config) {
     // Check agent in token matches allowedAgents
     verifiedAgent = token.agent;
     const agentMatch = allowedAgents.some(
-      a => normalizeAgentName(a) === normalizeAgentName(verifiedAgent)
+      (a) => normalizeAgentName(a) === normalizeAgentName(verifiedAgent)
     );
 
     if (!agentMatch) {
       process.stderr.write(
         `[${name}] BLOCKED: Token agent "${verifiedAgent}" is not authorized.\n` +
-        `  Allowed agents: ${allowedAgents.join(', ')}\n` +
-        `  Only these agents can use this writer.\n`
+          `  Allowed agents: ${allowedAgents.join(', ')}\n` +
+          `  Only these agents can use this writer.\n`
       );
       process.exit(2);
     }
@@ -212,7 +212,8 @@ function createReportWriter(config) {
     if (errors.length > 0) {
       process.stderr.write(
         `[${name}] VALIDATION FAILED:\n` +
-        errors.map((e, i) => `  ${i + 1}. ${e}`).join('\n') + '\n'
+          errors.map((e, i) => `  ${i + 1}. ${e}`).join('\n') +
+          '\n'
       );
       process.exit(1);
     }
@@ -234,8 +235,8 @@ function createReportWriter(config) {
       if (!resolved.startsWith(token.tasksBase + path.sep) && resolved !== token.tasksBase) {
         process.stderr.write(
           `[${name}] BLOCKED: reportPath is outside the ticket's task folder.\n` +
-          `  reportPath: ${resolved}\n` +
-          `  Allowed folder: ${token.tasksBase}/\n`
+            `  reportPath: ${resolved}\n` +
+            `  Allowed folder: ${token.tasksBase}/\n`
         );
         process.exit(2);
       }
@@ -258,7 +259,9 @@ function createReportWriter(config) {
         process.stderr.write(`[${name}] BLOCKED: reportPath is a symlink — refusing to write.\n`);
         process.exit(2);
       }
-    } catch { /* file doesn't exist yet — fine */ }
+    } catch {
+      /* file doesn't exist yet — fine */
+    }
 
     // Atomic write: write to tmp then rename (prevents partial reads)
     const dir = path.dirname(reportPath);

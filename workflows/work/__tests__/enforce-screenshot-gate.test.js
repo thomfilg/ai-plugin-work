@@ -15,11 +15,21 @@ const HOOK_PATH = path.join(__dirname, '..', 'hooks', 'enforce-screenshot-gate.j
 function runHook(input) {
   return new Promise((resolve, reject) => {
     const proc = spawn('node', [HOOK_PATH], { stdio: ['pipe', 'pipe', 'pipe'] });
-    let stdout = '', stderr = '';
-    proc.stdout.on('data', (d) => { stdout += d.toString(); });
-    proc.stderr.on('data', (d) => { stderr += d.toString(); });
+    let stdout = '',
+      stderr = '';
+    proc.stdout.on('data', (d) => {
+      stdout += d.toString();
+    });
+    proc.stderr.on('data', (d) => {
+      stderr += d.toString();
+    });
     proc.on('close', (code) => {
-      resolve({ result: { decision: code === 2 ? 'block' : 'approve', reason: stderr.trim() || undefined }, stderr, code, stdout });
+      resolve({
+        result: { decision: code === 2 ? 'block' : 'approve', reason: stderr.trim() || undefined },
+        stderr,
+        code,
+        stdout,
+      });
     });
     proc.on('error', reject);
     proc.stdin.write(JSON.stringify(input));
@@ -34,14 +44,17 @@ describe('enforce-screenshot-gate hook', () => {
   });
 
   it('should APPROVE for non-work-pr skills', async () => {
-    const { result } = await runHook({ tool_name: 'Skill', tool_input: { skill: 'work-implement' } });
+    const { result } = await runHook({
+      tool_name: 'Skill',
+      tool_input: { skill: 'work-implement' },
+    });
     assert.strictEqual(result.decision, 'approve');
   });
 
   it('should APPROVE when --force flag is passed', async () => {
     const { result } = await runHook({
       tool_name: 'Skill',
-      tool_input: { skill: 'work-pr', args: 'PROJ-123 --force' }
+      tool_input: { skill: 'work-pr', args: 'PROJ-123 --force' },
     });
     assert.strictEqual(result.decision, 'approve');
   });
@@ -49,7 +62,9 @@ describe('enforce-screenshot-gate hook', () => {
   it('should BLOCK on invalid JSON (fail-fast)', async () => {
     const proc = spawn('node', [HOOK_PATH], { stdio: ['pipe', 'pipe', 'pipe'] });
     let stderr = '';
-    proc.stderr.on('data', (d) => { stderr += d.toString(); });
+    proc.stderr.on('data', (d) => {
+      stderr += d.toString();
+    });
     const exitCode = await new Promise((resolve) => {
       proc.on('close', resolve);
       proc.stdin.write('not json');
