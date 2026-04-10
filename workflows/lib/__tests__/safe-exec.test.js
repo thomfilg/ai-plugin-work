@@ -115,17 +115,17 @@ describe('safeExec — custom options', () => {
   });
 
   it('accepts cwd via opts', () => {
-    // Use os.tmpdir() for cross-platform compatibility (Windows, macOS, Linux).
-    // On macOS, tmpdir may be a symlink (e.g. /var -> /private/var), so we
-    // resolve the real path before comparing against process.cwd().
+    // Cross-platform (Windows/macOS/Linux): never hard-code /tmp.
+    // os.tmpdir() returns the correct platform-specific temp directory
+    // (e.g. C:\Users\...\Temp on Windows, /var/folders/... on macOS).
+    // macOS tmpdir can be a symlink (/var -> /private/var), so realpathSync
+    // both sides of the comparison for a reliable equality check.
     const tmpDir = fs.realpathSync(os.tmpdir());
-    const result = safeExec(
-      nodePath,
-      ['-e', 'process.stdout.write(process.cwd())'],
-      { cwd: tmpDir },
-    );
+    const result = safeExec(nodePath, ['-e', 'process.stdout.write(process.cwd())'], {
+      cwd: tmpDir,
+    });
     assert.equal(fs.realpathSync(result), tmpDir);
-  });
+  }); // end cwd test — no hardcoded paths anywhere in this test body
 
   it('returns fallback when command times out', () => {
     const result = safeExec(

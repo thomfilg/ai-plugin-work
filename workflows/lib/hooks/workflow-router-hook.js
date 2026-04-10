@@ -62,7 +62,7 @@ function main() {
   // Quoted multi-word arguments are not supported — match pre-execFileSync
   // behavior where such inputs would have been shell-tokenized the same way.
   // This is an intentional, documented scope constraint of the /work command.
-  const parsedArgs = args.split(/\s+/).filter(Boolean);
+  const parsedArgs = args.split(/\s+/).filter((token) => token.length > 0);
 
   // Run the workflow engine via safeExec (uses execFileSync internally, no shell).
   // Use a null fallback so we can distinguish a failure from empty output.
