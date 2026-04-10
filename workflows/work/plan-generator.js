@@ -142,7 +142,10 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg, suffix,
     workStatePath: path.join(__dirname, 'work-state.js'),
   };
 
-  // Execute step pipeline — each handler may call add() and/or mutate ctx/plan
+  // Execute step pipeline — each handler may call add() and/or mutate ctx/plan.
+  // GH-215: briefGateStep sits between briefStep and specStep in STEP_PIPELINE,
+  // emitting a `brief_gate` plan entry that gates the brief → spec transition on
+  // unresolved cross-ticket / architectural open questions in brief.md.
   for (const stepHandler of STEP_PIPELINE) {
     stepHandler(add, s, ctx);
   }

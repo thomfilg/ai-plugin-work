@@ -10,6 +10,7 @@ const ticketStep = require('./ticket');
 const bootstrapStep = require('./bootstrap');
 const transitionStep = require('./transition');
 const briefStep = require('./brief');
+const briefGateStep = require('./brief-gate');
 const specStep = require('./spec');
 const tasksStep = require('./tasks');
 const implementStep = require('./implement');
@@ -36,6 +37,7 @@ const STEP_PIPELINE = [
   bootstrapStep,
   transitionStep,
   briefStep,
+  briefGateStep,
   specStep,
   tasksStep,
   implementStep,
@@ -51,4 +53,12 @@ const STEP_PIPELINE = [
   completeStep,
 ];
 
-module.exports = { STEP_PIPELINE };
+module.exports = {
+  STEP_PIPELINE,
+  // GH-215 Task 6.1: export briefGateStep as a named handle so external
+  // consumers (and tests) can reference the gate without knowing its
+  // position in STEP_PIPELINE. The gate runs immediately after briefStep
+  // and before specStep to block the brief → spec transition on unresolved
+  // cross-ticket / architectural open questions.
+  briefGateStep,
+};
