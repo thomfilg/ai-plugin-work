@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Discovers and runs all test files under workflows/
+# Discovers and runs all test files under workflows/ and skills/
 # Works on Node 20+ without glob support in `node --test`
 #
 # To skip a broken test, add its path to .test-skip (one per line).
@@ -8,7 +8,7 @@ set -euo pipefail
 SKIP_FILE=".test-skip"
 
 # Build space-separated file list (node --test expects positional args, not newlines)
-mapfile -t FILES < <(find workflows -type f \( -name '*.test.js' -o -name '*.spec.js' \) | sort)
+mapfile -t FILES < <(find workflows skills -type f \( -name '*.test.js' -o -name '*.spec.js' \) | sort)
 
 if [ -f "$SKIP_FILE" ]; then
   FILTERED=()
