@@ -17,14 +17,27 @@ const HOOK_PATH = path.join(__dirname, '..', 'work.workflow.js');
 // Isolate all filesystem side effects to a temp dir so the real tasks/
 // directory never accumulates orphan ticket dirs when an assertion fails
 // before cleanup runs. Must be set BEFORE loading get-config (which caches
-// TASKS_BASE from env at module init).
+// config.js at require time).
+//
+// Note: we override ONLY WORKTREES_BASE and explicitly clear TASKS_BASE so
+// config.js derives TASKS_BASE = WORKTREES_BASE/tasks. Inner describe blocks
+// set their own WORKTREES_BASE via opts.env for per-suite isolation and rely
+// on the same derivation — if we set TASKS_BASE directly it would leak into
+// those child processes (since spread inherits process.env) and cause the
+// child's config to point at a different dir than the inner suite's tasks/.
+const ORIG_ENV = {
+  WORKTREES_BASE: process.env.WORKTREES_BASE,
+  TASKS_BASE: process.env.TASKS_BASE,
+};
 const TEMP_WORKTREES_BASE = fs.mkdtempSync(path.join(os.tmpdir(), 'work-orchestrator-test-'));
 const TEMP_TASKS_BASE = path.join(TEMP_WORKTREES_BASE, 'tasks');
 fs.mkdirSync(TEMP_TASKS_BASE, { recursive: true });
 process.env.WORKTREES_BASE = TEMP_WORKTREES_BASE;
-process.env.TASKS_BASE = TEMP_TASKS_BASE;
+delete process.env.TASKS_BASE;
 
-const getConfig = require(path.join(__dirname, '..', '..', 'lib', 'get-config'));
+const GET_CONFIG_PATH = path.join(__dirname, '..', '..', 'lib', 'get-config');
+const CONFIG_PATH = path.join(__dirname, '..', '..', 'lib', 'config');
+const getConfig = require(GET_CONFIG_PATH);
 const TASKS_BASE = getConfig.require('TASKS_BASE');
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -84,9 +97,19 @@ after(() => {
         fs.unlinkSync(path.join(tmpDir, f));
       } catch {}
     }
-  } catch {
-    /* ignore if tmpdir unreadable */
-  }
+  } catch { /* ignore if tmpdir unreadable */ }
+  // Restore original env so sibling test files loaded in the same Node
+  // process (node --test runs many files in one process) don't see our
+  // temp overrides leak through inherited env.
+  if (ORIG_ENV.WORKTREES_BASE === undefined) delete process.env.WORKTREES_BASE;
+  else process.env.WORKTREES_BASE = ORIG_ENV.WORKTREES_BASE;
+  if (ORIG_ENV.TASKS_BASE === undefined) delete process.env.TASKS_BASE;
+  else process.env.TASKS_BASE = ORIG_ENV.TASKS_BASE;
+  // Clear require.cache for get-config / config so sibling test files get a
+  // fresh module re-read with the restored env instead of our cached temp
+  // derivation.
+  try { delete require.cache[require.resolve(GET_CONFIG_PATH)]; } catch {}
+  try { delete require.cache[require.resolve(CONFIG_PATH)]; } catch {}
 });
 
 /**

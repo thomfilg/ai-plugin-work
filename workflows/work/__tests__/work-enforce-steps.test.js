@@ -5,7 +5,7 @@
  * Run with: node --test hooks/__tests__/work-enforce-steps.test.js
  */
 
-const { describe, it, before, after } = require('node:test');
+const { describe, it, after } = require('node:test');
 const assert = require('node:assert');
 const { spawn } = require('child_process');
 const path = require('path');
@@ -27,11 +27,19 @@ function nextTicketId() {
   return `${TICKET_PROJECT_KEY}-${process.pid}${ticketCounter}`;
 }
 
+// Capture original env so we can restore it in after() — node --test runs
+// many files in one process and sibling tests must not see our overrides.
+const ORIG_ENV = {
+  TASKS_BASE: process.env.TASKS_BASE,
+  TICKET_PROJECT_KEY: process.env.TICKET_PROJECT_KEY,
+};
+
 // config.js reads TASKS_BASE/TICKET_PROJECT_KEY at require time, so we must
 // set them before requiring it.
 process.env.TASKS_BASE = TEMP_TASKS_BASE;
 process.env.TICKET_PROJECT_KEY = TICKET_PROJECT_KEY;
-const config = require('../../lib/config');
+const CONFIG_PATH = '../../lib/config';
+const config = require(CONFIG_PATH);
 
 function runHook(toolInput, hookType = 'PostToolUse') {
   return new Promise((resolve, reject) => {
@@ -64,6 +72,15 @@ function runHook(toolInput, hookType = 'PostToolUse') {
 describe('work-enforce-steps hook', () => {
   after(() => {
     try { fs.rmSync(TEMP_TASKS_BASE, { recursive: true, force: true }); } catch {}
+    // Restore original env so sibling test files in the same Node process
+    // don't inherit our temp base / test project key.
+    if (ORIG_ENV.TASKS_BASE === undefined) delete process.env.TASKS_BASE;
+    else process.env.TASKS_BASE = ORIG_ENV.TASKS_BASE;
+    if (ORIG_ENV.TICKET_PROJECT_KEY === undefined) delete process.env.TICKET_PROJECT_KEY;
+    else process.env.TICKET_PROJECT_KEY = ORIG_ENV.TICKET_PROJECT_KEY;
+    // Clear require.cache for config.js so sibling tests re-read it under
+    // restored env instead of reusing our cached temp derivation.
+    try { delete require.cache[require.resolve(CONFIG_PATH)]; } catch {}
   });
 
   it('should exit 0 for non-work/work-pr skills', async () => {
