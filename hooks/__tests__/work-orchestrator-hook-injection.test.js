@@ -3,8 +3,8 @@
  *
  * Verifies:
  * 1. execSync with string interpolation is NOT used (injection vector removed)
- * 2. execFileSync is used with array args (safe from shell injection)
- * 3. logHookError is imported and invoked in the catch path
+ * 2. safeExec (which wraps execFileSync) is used with array args (safe from shell injection)
+ * 3. logHookError is imported and invoked on failure paths
  * 4. Existing /work2 routing behaviour is preserved
  *
  * Run with: node --test hooks/__tests__/work-orchestrator-hook-injection.test.js
@@ -29,22 +29,38 @@ describe('work-orchestrator-hook source hardening', () => {
     assert.strictEqual(
       hasUnsafeExecSync,
       false,
-      'execSync call found — replace with execFileSync to prevent shell injection'
+      'execSync call found — replace with safeExec to prevent shell injection'
     );
   });
 
-  it('should import execFileSync from child_process', () => {
-    const hasExecFileSync = /execFileSync/.test(src);
-    assert.strictEqual(hasExecFileSync, true, 'execFileSync import is missing');
+  it('should NOT import execFileSync directly from child_process', () => {
+    // Hooks must delegate to safeExec, which owns execFileSync internally
+    const hasDirectExecFileSync = /require\([^)]*child_process[^)]*\)[\s\S]*execFileSync/.test(src);
+    const destructuredExecFileSync = /\{\s*execFileSync\s*\}\s*=\s*require/.test(src);
+    assert.strictEqual(
+      hasDirectExecFileSync || destructuredExecFileSync,
+      false,
+      'execFileSync should not be imported directly — use safeExec from workflows/lib/safe-exec'
+    );
   });
 
-  it('should call execFileSync with process.execPath and array args', () => {
-    // Verify the call pattern: execFileSync(process.execPath, [...])
-    const hasCorrectPattern = /execFileSync\s*\(\s*process\.execPath/.test(src);
+  it('should import safeExec from workflows/lib/safe-exec', () => {
+    const hasSafeExecImport = /\{\s*safeExec\s*\}\s*=\s*require/.test(src);
+    const referencesSafeExecModule = /safe-exec/.test(src);
+    assert.strictEqual(
+      hasSafeExecImport && referencesSafeExecModule,
+      true,
+      'safeExec import from workflows/lib/safe-exec is missing'
+    );
+  });
+
+  it('should call safeExec with process.execPath and array args', () => {
+    // Verify the call pattern: safeExec(process.execPath, [...])
+    const hasCorrectPattern = /safeExec\s*\(\s*process\.execPath\s*,\s*\[/.test(src);
     assert.strictEqual(
       hasCorrectPattern,
       true,
-      'execFileSync should be called with process.execPath as the executable'
+      'safeExec should be called with process.execPath as the executable and array args'
     );
   });
 
@@ -60,7 +76,7 @@ describe('work-orchestrator-hook source hardening', () => {
 
   it('should NOT have backtick-interpolated command strings in child_process calls', () => {
     // Catch any remaining `node "${...}" ${...}` patterns
-    const hasBacktickCmd = /exec(?:Sync|FileSync)\s*\(\s*`/.test(src);
+    const hasBacktickCmd = /(?:exec(?:Sync|FileSync)|safeExec)\s*\(\s*`/.test(src);
     assert.strictEqual(
       hasBacktickCmd,
       false,

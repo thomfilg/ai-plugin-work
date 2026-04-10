@@ -7,10 +7,10 @@
  * when /work2 is invoked, injecting the plan into the context.
  */
 
-const { execFileSync } = require('child_process');
 const path = require('path');
 const { appendAction } = require(path.join(__dirname, '..', 'workflows', 'work', 'work-actions'));
 const { logHookError } = require(path.join(__dirname, '..', 'workflows', 'lib', 'hook-error-log'));
+const { safeExec } = require(path.join(__dirname, '..', 'workflows', 'lib', 'safe-exec'));
 
 // Use CLAUDE_PLUGIN_ROOT if available, otherwise fallback to __dirname
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.dirname(__dirname);
@@ -31,40 +31,47 @@ function main() {
   // Quoted multi-word arguments are not supported by this CLI interface.
   const parsedArgs = args.split(/\s+/).filter(Boolean);
 
+  // Run the orchestrator via safeExec (uses execFileSync internally, no shell).
+  // Use a null fallback so we can distinguish a failure from empty output.
+  const result = safeExec(process.execPath, [ORCHESTRATOR_PATH, ...parsedArgs], {
+    timeout: 30000,
+    fallback: null,
+  });
+
+  if (result === null) {
+    logHookError(__filename, new Error('orchestrator invocation failed'));
+    console.log('ORCHESTRATOR FAILED: command returned null');
+    process.exit(0);
+  }
+
+  let plan;
   try {
-    // Run the orchestrator — execFileSync avoids shell injection
-    const result = execFileSync(process.execPath, [ORCHESTRATOR_PATH, ...parsedArgs], {
-      encoding: 'utf-8',
-      timeout: 30000,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-
-    // Parse the result
-    const plan = JSON.parse(result);
-
-    if (plan.error) {
-      console.log(`ORCHESTRATOR ERROR: ${plan.message}`);
-      process.exit(0);
-    }
-
-    // Log plan generation action
-    if (plan.ticket && !plan.ticket.startsWith('TBD')) {
-      const runCount = plan.summary?.run || 0;
-      const mode = plan.mode || 'unknown';
-      const currentStep = plan.currentStep || 'ticket';
-      appendAction(plan.ticket, {
-        step: currentStep,
-        what: `plan generated (${mode}, ${runCount} RUN)`,
-      });
-    }
-
-    // Format the plan for injection
-    const output = formatPlan(plan);
-    console.log(output);
+    plan = JSON.parse(result);
   } catch (err) {
     logHookError(__filename, err);
     console.log(`ORCHESTRATOR FAILED: ${err.message}`);
+    process.exit(0);
   }
+
+  if (plan.error) {
+    console.log(`ORCHESTRATOR ERROR: ${plan.message}`);
+    process.exit(0);
+  }
+
+  // Log plan generation action
+  if (plan.ticket && !plan.ticket.startsWith('TBD')) {
+    const runCount = plan.summary?.run || 0;
+    const mode = plan.mode || 'unknown';
+    const currentStep = plan.currentStep || 'ticket';
+    appendAction(plan.ticket, {
+      step: currentStep,
+      what: `plan generated (${mode}, ${runCount} RUN)`,
+    });
+  }
+
+  // Format the plan for injection
+  const output = formatPlan(plan);
+  console.log(output);
 
   process.exit(0);
 }

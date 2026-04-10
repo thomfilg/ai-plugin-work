@@ -12,10 +12,10 @@
  * Pattern follows work2-orchestrator-hook.js.
  */
 
-const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const { logHookError } = require(path.join(__dirname, '..', 'hook-error-log'));
+const { safeExec } = require(path.join(__dirname, '..', 'safe-exec'));
 
 process.on('uncaughtException', (err) => {
   logHookError(__filename, err);
@@ -64,31 +64,39 @@ function main() {
   // This is an intentional, documented scope constraint of the /work command.
   const parsedArgs = args.split(/\s+/).filter(Boolean);
 
+  // Run the workflow engine via safeExec (uses execFileSync internally, no shell).
+  // Use a null fallback so we can distinguish a failure from empty output.
+  const result = safeExec(process.execPath, [ENGINE_PATH, matched, 'plan', ...parsedArgs], {
+    timeout: 30000,
+    fallback: null,
+  });
+
+  if (result === null) {
+    logHookError(__filename, new Error('workflow engine invocation failed'));
+    console.log('WORKFLOW ENGINE FAILED: command returned null');
+    process.exit(0);
+  }
+
+  let plan;
   try {
-    // Run the workflow engine — execFileSync avoids shell injection
-    const result = execFileSync(process.execPath, [ENGINE_PATH, matched, 'plan', ...parsedArgs], {
-      encoding: 'utf-8',
-      timeout: 30000,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-
-    const plan = JSON.parse(result);
-
-    if (plan.error) {
-      console.log(`WORKFLOW ENGINE ERROR: ${plan.message}`);
-      process.exit(0);
-    }
-
-    // Use the formatted output from the engine
-    if (plan.formatted) {
-      console.log(plan.formatted);
-    } else {
-      // Fallback: output raw JSON
-      console.log(JSON.stringify(plan, null, 2));
-    }
+    plan = JSON.parse(result);
   } catch (err) {
     logHookError(__filename, err);
     console.log(`WORKFLOW ENGINE FAILED: ${err.message}`);
+    process.exit(0);
+  }
+
+  if (plan.error) {
+    console.log(`WORKFLOW ENGINE ERROR: ${plan.message}`);
+    process.exit(0);
+  }
+
+  // Use the formatted output from the engine
+  if (plan.formatted) {
+    console.log(plan.formatted);
+  } else {
+    // Fallback: output raw JSON
+    console.log(JSON.stringify(plan, null, 2));
   }
 
   process.exit(0);
