@@ -191,6 +191,7 @@ After saving, output:
 
 ### Deliverables
 - [ ] N.1 <subtask description>
+  - Test: <acceptance criterion>
   - [ ] N.1.1 **RED:** Write failing tests for <behavior>
     - Test: Tests fail — <expected behavior> is not yet implemented
   - [ ] N.1.2 **GREEN:** Implement <behavior> to pass tests
@@ -199,6 +200,7 @@ After saving, output:
     - Test: All tests still pass after refactoring
   - _Requirements: <requirement ID> (<context>), <requirement ID> (<context>)_
 - [ ] N.2 <subtask description>
+  - Test: <acceptance criterion>
   - [ ] N.2.1 **RED:** Write failing tests for <behavior>
     - Test: Tests fail — <expected behavior> is not yet implemented
   - [ ] N.2.2 **GREEN:** Implement <behavior> to pass tests
