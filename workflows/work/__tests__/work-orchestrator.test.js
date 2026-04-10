@@ -19,12 +19,13 @@ const HOOK_PATH = path.join(__dirname, '..', 'work.workflow.js');
 // before cleanup runs. Must be set BEFORE loading get-config (which caches
 // config.js at require time).
 //
-// Note: we override ONLY WORKTREES_BASE and explicitly clear TASKS_BASE so
-// config.js derives TASKS_BASE = WORKTREES_BASE/tasks. Inner describe blocks
-// set their own WORKTREES_BASE via opts.env for per-suite isolation and rely
-// on the same derivation — if we set TASKS_BASE directly it would leak into
-// those child processes (since spread inherits process.env) and cause the
-// child's config to point at a different dir than the inner suite's tasks/.
+// Both WORKTREES_BASE and TASKS_BASE are set *explicitly* (rather than
+// deleting TASKS_BASE and relying on derivation), because config.js's
+// loadEnvFile() repopulates missing env vars from a repo-level .env file
+// at require time — deleting would be undone on developer machines that
+// have TASKS_BASE in .env. Inner describe blocks that override only
+// WORKTREES_BASE get their TASKS_BASE derived inside runOrchestrator()
+// below, so per-suite isolation still works.
 const ORIG_ENV = {
   WORKTREES_BASE: process.env.WORKTREES_BASE,
   TASKS_BASE: process.env.TASKS_BASE,
@@ -33,23 +34,31 @@ const TEMP_WORKTREES_BASE = fs.mkdtempSync(path.join(os.tmpdir(), 'work-orchestr
 const TEMP_TASKS_BASE = path.join(TEMP_WORKTREES_BASE, 'tasks');
 fs.mkdirSync(TEMP_TASKS_BASE, { recursive: true });
 process.env.WORKTREES_BASE = TEMP_WORKTREES_BASE;
-delete process.env.TASKS_BASE;
+process.env.TASKS_BASE = TEMP_TASKS_BASE;
 
 const GET_CONFIG_PATH = path.join(__dirname, '..', '..', 'lib', 'get-config');
 const CONFIG_PATH = path.join(__dirname, '..', '..', 'lib', 'config');
 const getConfig = require(GET_CONFIG_PATH);
 const TASKS_BASE = getConfig.require('TASKS_BASE');
-// Env/cache restoration happens in the global after() hook further down.
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function runOrchestrator(args = [], opts = {}) {
+  // If an inner describe block overrides WORKTREES_BASE without also
+  // overriding TASKS_BASE, derive TASKS_BASE from the inner WORKTREES_BASE
+  // so the child doesn't inherit the top-level TASKS_BASE (which would
+  // point at a different dir than the inner suite's per-suite tasks/).
+  const optsEnv = opts.env || {};
+  const derivedEnv = { ...optsEnv };
+  if (optsEnv.WORKTREES_BASE && !Object.prototype.hasOwnProperty.call(optsEnv, 'TASKS_BASE')) {
+    derivedEnv.TASKS_BASE = path.join(optsEnv.WORKTREES_BASE, 'tasks');
+  }
   return new Promise((resolve, reject) => {
     const proc = spawn('node', [HOOK_PATH, ...args], {
       stdio: ['pipe', 'pipe', 'pipe'],
       // Intentionally disable session guard to isolate orchestrator plan logic.
       // Session guard has dedicated tests in session-guard.test.js (26 tests covering all subcommands + hooks).
-      env: { ...process.env, SESSION_GUARD_ENABLED: '0', ...opts.env },
+      env: { ...process.env, SESSION_GUARD_ENABLED: '0', ...derivedEnv },
       cwd: opts.cwd,
     });
 
