@@ -96,11 +96,12 @@ function createFollowUpStateProtector(opts) {
   });
 }
 
-// Re-export createArtifactProtector so state-protection owns the unified
-// view of "protected workflow files" (state + artifact) for the enforcer.
+// Single module.exports assignment (no prior partial assignment to overwrite).
+// Re-exports createArtifactProtector so this module owns the unified view of
+// protected workflow files (state + artifact) for the enforcer.
 module.exports = {
-  buildBasenameToHintMap,
-  createStateFileProtector,
-  createFollowUpStateProtector,
-  createArtifactProtector,
+  buildBasenameToHintMap, // map protected basename → transition hint
+  createStateFileProtector, // state/evidence file protector
+  createFollowUpStateProtector, // follow-up PR state files
+  createArtifactProtector, // re-export from protect-artifact-files
 };

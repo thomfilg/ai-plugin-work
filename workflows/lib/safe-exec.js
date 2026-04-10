@@ -30,9 +30,9 @@ function safeExec(command, args = [], opts = {}) {
     ...execOpts,
     // Enforced after spread — callers cannot override. Shell invocation
     // is impossible because execFileSync does not spawn a shell.
-    shell: false,
-    stdio: ['pipe', 'pipe', 'pipe'],
-  };
+    shell: false, // execFileSync does not spawn a shell; this is defense-in-depth
+    stdio: ['pipe', 'pipe', 'pipe'], // enforced after spread — no override
+  }; // safeExec cannot be turned into a shell invocation: shell is forced false
 
   try {
     return execFileSync(command, args, finalOpts).trim();
