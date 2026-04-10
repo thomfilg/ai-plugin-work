@@ -17,8 +17,14 @@ const fs = require('fs');
 const path = require('path');
 const { logHookError } = require(path.join(__dirname, '..', 'hook-error-log'));
 
-process.on('uncaughtException', () => process.exit(0));
-process.on('unhandledRejection', () => process.exit(0));
+process.on('uncaughtException', (err) => {
+  logHookError(__filename, err);
+  process.exit(0);
+});
+process.on('unhandledRejection', (err) => {
+  logHookError(__filename, err);
+  process.exit(0);
+});
 
 const WORKFLOWS_DIR = path.join(__dirname, '..', '..');
 const ENGINE_PATH = path.join(__dirname, '..', 'workflow-engine.js');
@@ -52,8 +58,10 @@ function main() {
     process.exit(0); // Not a workflow command, pass through
   }
 
-  // Args are positional single-token values (ticket IDs, flags).
-  // Quoted multi-word arguments are not supported by this CLI interface.
+  // Args are positional single-token values (ticket IDs, flags only).
+  // Quoted multi-word arguments are not supported — match pre-execFileSync
+  // behavior where such inputs would have been shell-tokenized the same way.
+  // This is an intentional, documented scope constraint of the /work command.
   const parsedArgs = args.split(/\s+/).filter(Boolean);
 
   try {
