@@ -15,6 +15,9 @@ const STEPS = Object.freeze({
   ticket: 'ticket',
   bootstrap: 'bootstrap',
   brief: 'brief',
+  // GH-215: gate step that blocks spec until unresolved cross-ticket /
+  // architectural open questions in brief.md have been answered.
+  brief_gate: 'brief_gate',
   spec: 'spec',
   tasks: 'tasks',
   implement: 'implement',
@@ -36,6 +39,7 @@ const STEP_ORDER = Object.freeze([
   STEPS.ticket,
   STEPS.bootstrap,
   STEPS.brief,
+  STEPS.brief_gate, // GH-215: must sit between brief and spec
   STEPS.spec,
   STEPS.tasks,
   STEPS.implement,

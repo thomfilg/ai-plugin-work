@@ -145,7 +145,8 @@ describe('work-orchestrator.js', () => {
       assert.ok(result.transitions);
       assert.ok(result.steps.includes('ticket'));
       assert.ok(result.steps.includes('complete'));
-      assert.equal(result.steps.length, 15);
+      // GH-215: added brief_gate between brief and spec.
+      assert.equal(result.steps.length, 16);
     });
 
     it('should include follow_up in steps', async () => {
@@ -390,6 +391,7 @@ describe('work-orchestrator.js', () => {
     it('should block invalid transition', async () => {
       await runOrchestrator(['transition', TEST_TICKET, 'bootstrap'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'brief'], transOpts);
+      await runOrchestrator(['transition', TEST_TICKET, 'brief_gate'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'spec'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'tasks'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'implement'], transOpts);
@@ -403,6 +405,7 @@ describe('work-orchestrator.js', () => {
     it('should allow retry loop (backward transition)', async () => {
       await runOrchestrator(['transition', TEST_TICKET, 'bootstrap'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'brief'], transOpts);
+      await runOrchestrator(['transition', TEST_TICKET, 'brief_gate'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'spec'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'tasks'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'implement'], transOpts);
@@ -426,6 +429,7 @@ describe('work-orchestrator.js', () => {
     it('should persist state after transition', async () => {
       await runOrchestrator(['transition', TEST_TICKET, 'bootstrap'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'brief'], transOpts);
+      await runOrchestrator(['transition', TEST_TICKET, 'brief_gate'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'spec'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'tasks'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'implement'], transOpts);
@@ -439,6 +443,7 @@ describe('work-orchestrator.js', () => {
     it('should reset intermediate steps on backward transition', async () => {
       await runOrchestrator(['transition', TEST_TICKET, 'bootstrap']);
       await runOrchestrator(['transition', TEST_TICKET, 'brief']);
+      await runOrchestrator(['transition', TEST_TICKET, 'brief_gate']);
       await runOrchestrator(['transition', TEST_TICKET, 'spec']);
       await runOrchestrator(['transition', TEST_TICKET, 'tasks']);
       await runOrchestrator(['transition', TEST_TICKET, 'implement']);
@@ -453,9 +458,10 @@ describe('work-orchestrator.js', () => {
   });
 
   describe('state machine logic', () => {
-    it('should have 14 steps total', async () => {
+    it('should have 16 steps total', async () => {
       const { result } = await runOrchestrator(['graph']);
-      assert.equal(result.steps.length, 15);
+      // GH-215: added brief_gate between brief and spec.
+      assert.equal(result.steps.length, 16);
     });
 
     it('should not allow self-transitions (except complete)', async () => {
@@ -676,6 +682,7 @@ describe('work-orchestrator.js', () => {
       try {
         await runOrchestrator(['transition', T, 'bootstrap'], o);
         await runOrchestrator(['transition', T, 'brief'], o);
+        await runOrchestrator(['transition', T, 'brief_gate'], o);
         await runOrchestrator(['transition', T, 'spec'], o);
         await runOrchestrator(['transition', T, 'tasks'], o);
         await runOrchestrator(['transition', T, 'implement'], o);
@@ -698,6 +705,7 @@ describe('work-orchestrator.js', () => {
       try {
         await runOrchestrator(['transition', TEST_TICKET, 'bootstrap'], o);
         await runOrchestrator(['transition', TEST_TICKET, 'brief'], o);
+        await runOrchestrator(['transition', TEST_TICKET, 'brief_gate'], o);
         await runOrchestrator(['transition', TEST_TICKET, 'spec'], o);
         await runOrchestrator(['transition', TEST_TICKET, 'tasks'], o);
         await runOrchestrator(['transition', TEST_TICKET, 'implement'], o);
@@ -720,6 +728,7 @@ describe('work-orchestrator.js', () => {
       try {
         await runOrchestrator(['transition', TEST_TICKET, 'bootstrap'], o);
         await runOrchestrator(['transition', TEST_TICKET, 'brief'], o);
+        await runOrchestrator(['transition', TEST_TICKET, 'brief_gate'], o);
         await runOrchestrator(['transition', TEST_TICKET, 'spec'], o);
         await runOrchestrator(['transition', TEST_TICKET, 'tasks'], o);
         await runOrchestrator(['transition', TEST_TICKET, 'implement'], o);
@@ -837,6 +846,7 @@ describe('work-orchestrator.js', () => {
     it('should allow transition follow_up → ci (forward)', async () => {
       await runOrchestrator(['transition', T, 'bootstrap'], o);
       await runOrchestrator(['transition', T, 'brief'], o);
+      await runOrchestrator(['transition', T, 'brief_gate'], o);
       await runOrchestrator(['transition', T, 'spec'], o);
       await runOrchestrator(['transition', T, 'tasks'], o);
       await runOrchestrator(['transition', T, 'implement'], o);
@@ -859,6 +869,7 @@ describe('work-orchestrator.js', () => {
       try {
         await runOrchestrator(['transition', T2, 'bootstrap'], o);
         await runOrchestrator(['transition', T2, 'brief'], o);
+        await runOrchestrator(['transition', T2, 'brief_gate'], o);
         await runOrchestrator(['transition', T2, 'spec'], o);
         await runOrchestrator(['transition', T2, 'tasks'], o);
         await runOrchestrator(['transition', T2, 'implement'], o);
@@ -886,6 +897,7 @@ describe('work-orchestrator.js', () => {
       try {
         await runOrchestrator(['transition', T3, 'bootstrap'], o);
         await runOrchestrator(['transition', T3, 'brief'], o);
+        await runOrchestrator(['transition', T3, 'brief_gate'], o);
         await runOrchestrator(['transition', T3, 'spec'], o);
         await runOrchestrator(['transition', T3, 'tasks'], o);
         await runOrchestrator(['transition', T3, 'implement'], o);
@@ -914,6 +926,7 @@ describe('work-orchestrator.js', () => {
       try {
         await runOrchestrator(['transition', T_ARCHIVE, 'bootstrap'], o);
         await runOrchestrator(['transition', T_ARCHIVE, 'brief'], o);
+        await runOrchestrator(['transition', T_ARCHIVE, 'brief_gate'], o);
         await runOrchestrator(['transition', T_ARCHIVE, 'spec'], o);
         await runOrchestrator(['transition', T_ARCHIVE, 'tasks'], o);
         await runOrchestrator(['transition', T_ARCHIVE, 'implement'], o);
@@ -957,6 +970,7 @@ describe('work-orchestrator.js', () => {
         // First pass: bootstrap → ... → check, write reports, check → implement (backward)
         await runOrchestrator(['transition', T_RUNS, 'bootstrap'], o);
         await runOrchestrator(['transition', T_RUNS, 'brief'], o);
+        await runOrchestrator(['transition', T_RUNS, 'brief_gate'], o);
         await runOrchestrator(['transition', T_RUNS, 'spec'], o);
         await runOrchestrator(['transition', T_RUNS, 'tasks'], o);
         await runOrchestrator(['transition', T_RUNS, 'implement'], o);
@@ -988,6 +1002,7 @@ describe('work-orchestrator.js', () => {
       try {
         await runOrchestrator(['transition', T4, 'bootstrap'], o);
         await runOrchestrator(['transition', T4, 'brief'], o);
+        await runOrchestrator(['transition', T4, 'brief_gate'], o);
         await runOrchestrator(['transition', T4, 'spec'], o);
         await runOrchestrator(['transition', T4, 'tasks'], o);
         await runOrchestrator(['transition', T4, 'implement'], o);
@@ -1053,6 +1068,7 @@ describe('work-orchestrator.js', () => {
       // Build up to check linearly
       await runOrchestrator(['transition', TICKET, 'bootstrap'], envOpts);
       await runOrchestrator(['transition', TICKET, 'brief'], envOpts);
+      await runOrchestrator(['transition', TICKET, 'brief_gate'], envOpts);
       await runOrchestrator(['transition', TICKET, 'spec'], envOpts);
       await runOrchestrator(['transition', TICKET, 'tasks'], envOpts);
       await runOrchestrator(['transition', TICKET, 'implement'], envOpts);
@@ -1077,6 +1093,7 @@ describe('work-orchestrator.js', () => {
       // Build state up to check linearly
       await runOrchestrator(['transition', TICKET, 'bootstrap'], envOpts);
       await runOrchestrator(['transition', TICKET, 'brief'], envOpts);
+      await runOrchestrator(['transition', TICKET, 'brief_gate'], envOpts);
       await runOrchestrator(['transition', TICKET, 'spec'], envOpts);
       await runOrchestrator(['transition', TICKET, 'tasks'], envOpts);
       await runOrchestrator(['transition', TICKET, 'implement'], envOpts);
@@ -1310,6 +1327,7 @@ describe('work-orchestrator.js', () => {
     async function advanceToCheck() {
       await runOrchestrator(['transition', TICKET, 'bootstrap'], gateOpts);
       await runOrchestrator(['transition', TICKET, 'brief'], gateOpts);
+      await runOrchestrator(['transition', TICKET, 'brief_gate'], gateOpts);
       await runOrchestrator(['transition', TICKET, 'spec'], gateOpts);
       await runOrchestrator(['transition', TICKET, 'tasks'], gateOpts);
       await runOrchestrator(['transition', TICKET, 'implement'], gateOpts);
@@ -1367,6 +1385,7 @@ describe('work-orchestrator.js', () => {
     it('should NOT evaluate check gate on implement → commit transition', async () => {
       await runOrchestrator(['transition', TICKET, 'bootstrap'], gateOpts);
       await runOrchestrator(['transition', TICKET, 'brief'], gateOpts);
+      await runOrchestrator(['transition', TICKET, 'brief_gate'], gateOpts);
       await runOrchestrator(['transition', TICKET, 'spec'], gateOpts);
       await runOrchestrator(['transition', TICKET, 'tasks'], gateOpts);
       await runOrchestrator(['transition', TICKET, 'implement'], gateOpts);

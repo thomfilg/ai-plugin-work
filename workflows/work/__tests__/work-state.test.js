@@ -72,7 +72,7 @@ describe('work-state.js', () => {
       cleanupTempWorkState(TICKET);
     });
 
-    it('should create state with all 15 steps as pending', async () => {
+    it('should create state with all 16 steps as pending', async () => {
       const { result, code } = await runWorkState(['init', TICKET]);
       assert.equal(code, 0);
       assert.equal(result.ticketId, TICKET);
@@ -83,7 +83,8 @@ describe('work-state.js', () => {
       assert.equal(result.errors.length, 0);
 
       const steps = Object.keys(result.stepStatus);
-      assert.equal(steps.length, 15);
+      // GH-215: 16 steps — added brief_gate between brief and spec.
+      assert.equal(steps.length, 16);
       for (const step of steps) {
         assert.equal(result.stepStatus[step], 'pending', `Step ${step} should be pending`);
       }
@@ -93,6 +94,7 @@ describe('work-state.js', () => {
         'ticket',
         'bootstrap',
         'brief',
+        'brief_gate', // GH-215
         'spec',
         'tasks',
         'implement',
@@ -144,7 +146,8 @@ describe('work-state.js', () => {
       assert.equal(code, 0);
       assert.equal(result.ticketId, TICKET_EXISTS);
       assert.equal(result.status, 'in_progress');
-      assert.equal(Object.keys(result.stepStatus).length, 15);
+      // GH-215: 16 steps — added brief_gate between brief and spec.
+      assert.equal(Object.keys(result.stepStatus).length, 16);
       for (const step of Object.keys(result.stepStatus)) {
         assert.equal(result.stepStatus[step], 'pending');
       }
@@ -174,8 +177,9 @@ describe('work-state.js', () => {
       // Verify persistence
       const { result: getResult } = await runWorkState(['get', TICKET]);
       assert.equal(getResult.stepStatus['implement'], 'in_progress');
-      // currentStep should be updated to 6 (index 5 + 1, after ticket/bootstrap/brief/spec/tasks)
-      assert.equal(getResult.currentStep, 6);
+      // currentStep should be updated to 7 (index 6 + 1, after ticket/bootstrap/brief/brief_gate/spec/tasks)
+      // GH-215: brief_gate inserted between brief and spec shifts implement from index 5 to 6.
+      assert.equal(getResult.currentStep, 7);
     });
 
     it('should reject invalid step name with exit code 1', async () => {
