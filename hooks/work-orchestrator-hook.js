@@ -27,8 +27,10 @@ function main() {
   }
 
   const args = work2Match[1].trim();
-  // Args are positional single-token values (ticket IDs, flags).
-  // Quoted multi-word arguments are not supported by this CLI interface.
+  // Args are positional single-token values (ticket IDs, flags only).
+  // Quoted multi-word arguments are not supported — match pre-execFileSync
+  // behavior where such inputs would have been shell-tokenized the same way.
+  // This is an intentional, documented scope constraint of the /work2 command.
   const parsedArgs = args.split(/\s+/).filter(Boolean);
 
   // Run the orchestrator via safeExec (uses execFileSync internally, no shell).

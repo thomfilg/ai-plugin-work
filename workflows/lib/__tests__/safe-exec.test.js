@@ -10,6 +10,8 @@
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
 const { safeExec } = require('../safe-exec');
 
 const nodePath = process.execPath;
@@ -113,12 +115,16 @@ describe('safeExec — custom options', () => {
   });
 
   it('accepts cwd via opts', () => {
+    // Use os.tmpdir() for cross-platform compatibility (Windows, macOS, Linux).
+    // On macOS, tmpdir may be a symlink (e.g. /var -> /private/var), so we
+    // resolve the real path before comparing against process.cwd().
+    const tmpDir = fs.realpathSync(os.tmpdir());
     const result = safeExec(
       nodePath,
       ['-e', 'process.stdout.write(process.cwd())'],
-      { cwd: '/tmp' },
+      { cwd: tmpDir },
     );
-    assert.equal(result, '/tmp');
+    assert.equal(fs.realpathSync(result), tmpDir);
   });
 
   it('returns fallback when command times out', () => {

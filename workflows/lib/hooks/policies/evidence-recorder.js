@@ -30,7 +30,17 @@ function saveEvidence({ tasksBase, ticketId, evidenceFile, evidence, safeTicketP
   const target = path.join(dir, evidenceFile);
   const tmp = `${target}.tmp.${process.pid}`;
   fs.writeFileSync(tmp, JSON.stringify(evidence, null, 2));
-  fs.renameSync(tmp, target);
+  try {
+    fs.renameSync(tmp, target);
+  } catch (err) {
+    // Windows fs.renameSync can fail when target exists — use copy+unlink as fallback
+    if (err.code === 'EEXIST' || err.code === 'EPERM') {
+      fs.copyFileSync(tmp, target);
+      fs.unlinkSync(tmp);
+    } else {
+      throw err;
+    }
+  }
 }
 
 /**
