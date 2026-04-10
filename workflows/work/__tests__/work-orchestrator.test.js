@@ -13,6 +13,17 @@ const fs = require('fs');
 const os = require('os');
 
 const HOOK_PATH = path.join(__dirname, '..', 'work.workflow.js');
+
+// Isolate all filesystem side effects to a temp dir so the real tasks/
+// directory never accumulates orphan ticket dirs when an assertion fails
+// before cleanup runs. Must be set BEFORE loading get-config (which caches
+// TASKS_BASE from env at module init).
+const TEMP_WORKTREES_BASE = fs.mkdtempSync(path.join(os.tmpdir(), 'work-orchestrator-test-'));
+const TEMP_TASKS_BASE = path.join(TEMP_WORKTREES_BASE, 'tasks');
+fs.mkdirSync(TEMP_TASKS_BASE, { recursive: true });
+process.env.WORKTREES_BASE = TEMP_WORKTREES_BASE;
+process.env.TASKS_BASE = TEMP_TASKS_BASE;
+
 const getConfig = require(path.join(__dirname, '..', '..', 'lib', 'get-config'));
 const TASKS_BASE = getConfig.require('TASKS_BASE');
 
@@ -61,20 +72,13 @@ function cleanupTempWorkState(ticket) {
 // ─── Global Cleanup ─────────────────────────────────────────────────────────
 
 after(() => {
-  try {
-    const entries = fs.readdirSync(TASKS_BASE);
-    for (const entry of entries) {
-      if (entry.startsWith('TEST-')) {
-        fs.rmSync(path.join(TASKS_BASE, entry), { recursive: true, force: true });
-      }
-    }
-  } catch {}
+  // Nuke the whole temp base — no selective cleanup needed since everything
+  // the suite touches lives under TEMP_WORKTREES_BASE.
+  try { fs.rmSync(TEMP_WORKTREES_BASE, { recursive: true, force: true }); } catch {}
   // Safety-net: clean up leaked session guard files created by THIS suite only (TEST-* tickets)
   try {
-    const tmpDir = require('os').tmpdir();
-    const tmpFiles = fs
-      .readdirSync(tmpDir)
-      .filter((f) => f.startsWith('claude-session-guard-TEST-'));
+    const tmpDir = os.tmpdir();
+    const tmpFiles = fs.readdirSync(tmpDir).filter(f => f.startsWith('claude-session-guard-TEST-'));
     for (const f of tmpFiles) {
       try {
         fs.unlinkSync(path.join(tmpDir, f));
