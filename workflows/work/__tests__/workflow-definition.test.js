@@ -248,3 +248,85 @@ describe('workflow-definition: verify[STEPS.brief_gate]', () => {
     }
   });
 });
+
+// ─── GH-211 Task 6: task_review verify entry + softSteps ─────────────────────
+describe('workflow-definition: verify[STEPS.task_review]', () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-def-taskreview-'));
+  const ticketId = 'GH-211';
+  const ticketDir = path.join(tmpRoot, ticketId);
+  fs.mkdirSync(ticketDir, { recursive: true });
+
+  const deps = {
+    TASKS_BASE: tmpRoot,
+    safeTicketPath: (id) => id,
+    resolveGitHead: () => 'ref: refs/heads/stub',
+  };
+  const { workflow: trWf } = createWorkflowDefinition(deps);
+
+  function getTaskReviewVerify() {
+    const entries = trWf.commandMap.filter(
+      (e) => e.step === STEPS.task_review && typeof e.verify === 'function'
+    );
+    return entries.length > 0 ? entries[0].verify : undefined;
+  }
+
+  after(() => {
+    try {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    } catch {
+      /* best-effort cleanup */
+    }
+  });
+
+  it('registers a verify function for STEPS.task_review on the commandMap', () => {
+    const verify = getTaskReviewVerify();
+    assert.equal(typeof verify, 'function', 'expected verify[STEPS.task_review] to be a function');
+  });
+
+  it('returns false when no review artifacts exist', () => {
+    const verify = getTaskReviewVerify();
+    assert.equal(verify(ticketId), false);
+  });
+
+  it('returns true when task-review-tests.md exists', () => {
+    fs.writeFileSync(path.join(ticketDir, 'task-review-tests.md'), '# Test Review\nAll good');
+    const verify = getTaskReviewVerify();
+    assert.equal(verify(ticketId), true);
+    fs.unlinkSync(path.join(ticketDir, 'task-review-tests.md'));
+  });
+
+  it('returns true when task-review-code.md exists', () => {
+    fs.writeFileSync(path.join(ticketDir, 'task-review-code.md'), '# Code Review\nAll good');
+    const verify = getTaskReviewVerify();
+    assert.equal(verify(ticketId), true);
+    fs.unlinkSync(path.join(ticketDir, 'task-review-code.md'));
+  });
+
+  it('returns true when both review artifacts exist', () => {
+    fs.writeFileSync(path.join(ticketDir, 'task-review-tests.md'), '# Test Review');
+    fs.writeFileSync(path.join(ticketDir, 'task-review-code.md'), '# Code Review');
+    const verify = getTaskReviewVerify();
+    assert.equal(verify(ticketId), true);
+    fs.unlinkSync(path.join(ticketDir, 'task-review-tests.md'));
+    fs.unlinkSync(path.join(ticketDir, 'task-review-code.md'));
+  });
+
+  it('returns false gracefully when tasksDir does not exist', () => {
+    const badDeps = {
+      TASKS_BASE: '/tmp/nonexistent-workflow-def-test',
+      safeTicketPath: (id) => id,
+      resolveGitHead: () => 'ref: refs/heads/stub',
+    };
+    const { workflow: badWf } = createWorkflowDefinition(badDeps);
+    const entries = badWf.commandMap.filter(
+      (e) => e.step === STEPS.task_review && typeof e.verify === 'function'
+    );
+    assert.equal(entries[0].verify('NONEXISTENT'), false);
+  });
+});
+
+describe('workflow-definition: softSteps includes task_review', () => {
+  it('has task_review in softSteps set', () => {
+    assert.ok(workflow.softSteps.has(STEPS.task_review), 'task_review should be in softSteps');
+  });
+});

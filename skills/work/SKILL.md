@@ -202,6 +202,7 @@ node ${CLAUDE_PLUGIN_ROOT}/workflows/work/work.workflow.js PROJ-XXX
 | `tasks` | `skill` | `Skill(split-in-tasks)` — splits spec into ordered implementation tasks |
 | `implement` | `skill` | `Skill(work-implement)` — task-scoped when tasks.md exists |
 | `commit` | `commit-writer` | `Task(commit-writer)` |
+| `task_review` | `skill` | `Skill(tests-review)` + `Skill(code-review)` in parallel |
 | `check` | `skill` | `Skill(check)` |
 | `cleanup` | `Bash` | `Task(Bash)` — kills tmux dev session |
 | `pr` | `skill` | `Skill(work-pr)` |
@@ -215,10 +216,12 @@ node ${CLAUDE_PLUGIN_ROOT}/workflows/work/work.workflow.js PROJ-XXX
 ## State Machine Transitions
 
 ```
-Happy path:  ticket→bootstrap→brief→spec→tasks→implement→commit→check→pr→ready→follow_up→ci→cleanup→reports→complete
+Happy path:  ticket→bootstrap→brief→spec→tasks→implement→commit→task_review→check→pr→ready→follow_up→ci→cleanup→reports→complete
 
 Task loop (when tasks.md exists):
-  check → implement   (advance to next task after check passes, via nextAction: advance_task)
+  task_review → implement   (review found issues, fix code)
+  task_review → check       (review passed, proceed to quality checks)
+  check → implement         (advance to next task after check passes, via nextAction: advance_task)
 
 Retry loops (backward):
   check     → implement   (check found issues)
@@ -253,8 +256,8 @@ Skip edges (forward):
 8. **Don't process large outputs** — Agent summaries are enough for decision-making
 9. `implement` enforces TDD — transitions out are blocked without
    recorded TDD evidence proving GREEN or providing an explicit exception reason
-10. When `tasks.md` exists, implement ONE task per `implement → commit → check` cycle.
-    After `check` passes and plan has `nextAction: advance_task`:
+10. When `tasks.md` exists, implement ONE task per `implement → commit → task_review → check` cycle.
+    After `task_review` passes and plan has `nextAction: advance_task`:
     run `node work-state.js task-advance <TICKET_ID>`, then transition to `implement`.
 
 ---

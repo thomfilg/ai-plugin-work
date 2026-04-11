@@ -86,6 +86,7 @@ describe('step modules', () => {
       'tasks',
       'implement',
       'commit',
+      'task-review',
       'check',
       'task-advance',
       'pr',

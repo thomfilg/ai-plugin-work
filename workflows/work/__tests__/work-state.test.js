@@ -83,8 +83,8 @@ describe('work-state.js', () => {
       assert.equal(result.errors.length, 0);
 
       const steps = Object.keys(result.stepStatus);
-      // GH-215: 16 steps — added brief_gate between brief and spec.
-      assert.equal(steps.length, 16);
+      // GH-211: 17 steps — added task_review between commit and check.
+      assert.equal(steps.length, 17);
       for (const step of steps) {
         assert.equal(result.stepStatus[step], 'pending', `Step ${step} should be pending`);
       }
@@ -99,6 +99,7 @@ describe('work-state.js', () => {
         'tasks',
         'implement',
         'commit',
+        'task_review', // GH-211
         'check',
         'pr',
         'ready',
@@ -146,8 +147,8 @@ describe('work-state.js', () => {
       assert.equal(code, 0);
       assert.equal(result.ticketId, TICKET_EXISTS);
       assert.equal(result.status, 'in_progress');
-      // GH-215: 16 steps — added brief_gate between brief and spec.
-      assert.equal(Object.keys(result.stepStatus).length, 16);
+      // GH-211: 17 steps — added task_review between commit and check.
+      assert.equal(Object.keys(result.stepStatus).length, 17);
       for (const step of Object.keys(result.stepStatus)) {
         assert.equal(result.stepStatus[step], 'pending');
       }
@@ -178,7 +179,7 @@ describe('work-state.js', () => {
       const { result: getResult } = await runWorkState(['get', TICKET]);
       assert.equal(getResult.stepStatus['implement'], 'in_progress');
       // currentStep should be updated to 7 (index 6 + 1, after ticket/bootstrap/brief/brief_gate/spec/tasks)
-      // GH-215: brief_gate inserted between brief and spec shifts implement from index 5 to 6.
+      // GH-215: brief_gate shifts implement to index 6. GH-211: task_review after commit doesn't affect implement index.
       assert.equal(getResult.currentStep, 7);
     });
 
@@ -624,6 +625,126 @@ describe('work-state.js', () => {
       const stateFile = path.join(TEMP_TASKS_BASE, TICKET, `.work-state-${TICKET}-subtask-1.json`);
       const persisted = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
       assert.equal(persisted.status, 'completed');
+    });
+  });
+
+  // ─── Task Review Fix-Round Tracking (GH-211) ──────────────────────────────
+
+  describe('task review fix-round tracking (GH-211)', () => {
+    const TICKET = 'TEST-FIXROUND-001';
+    after(() => {
+      cleanupTempWorkState(TICKET);
+    });
+
+    it('getTaskReviewFixRounds returns 0 for a task without prior fix rounds', async () => {
+      // Initialize state with task tracking
+      await runWorkState(['init', TICKET]);
+      await runWorkState(['task-init', TICKET, '3']);
+
+      const { result, code } = await runWorkState(['task-review-fix-rounds', TICKET]);
+      assert.equal(code, 0);
+      assert.equal(result.fixRounds, 0);
+    });
+
+    it('incrementTaskReviewFixRounds increases count by 1 and persists', async () => {
+      const { result: incResult, code: incCode } = await runWorkState([
+        'task-review-fix-rounds-increment',
+        TICKET,
+      ]);
+      assert.equal(incCode, 0);
+      assert.equal(incResult.fixRounds, 1);
+
+      // Verify persistence
+      const { result: getResult } = await runWorkState(['task-review-fix-rounds', TICKET]);
+      assert.equal(getResult.fixRounds, 1);
+
+      // Increment again
+      const { result: incResult2 } = await runWorkState([
+        'task-review-fix-rounds-increment',
+        TICKET,
+      ]);
+      assert.equal(incResult2.fixRounds, 2);
+
+      // Verify persistence again
+      const { result: getResult2 } = await runWorkState(['task-review-fix-rounds', TICKET]);
+      assert.equal(getResult2.fixRounds, 2);
+    });
+
+    it('resetTaskReviewFixRounds resets count to 0 and persists', async () => {
+      // Currently at 2 from previous test
+      const { result: resetResult, code: resetCode } = await runWorkState([
+        'task-review-fix-rounds-reset',
+        TICKET,
+      ]);
+      assert.equal(resetCode, 0);
+      assert.equal(resetResult.fixRounds, 0);
+
+      // Verify persistence
+      const { result: getResult } = await runWorkState(['task-review-fix-rounds', TICKET]);
+      assert.equal(getResult.fixRounds, 0);
+    });
+
+    it('stores fixRounds in tasksMeta.tasks[N].taskReviewFixRounds', async () => {
+      // Increment once to set a value
+      await runWorkState(['task-review-fix-rounds-increment', TICKET]);
+
+      // Read raw state to verify field location
+      const { result: rawState } = await runWorkState(['get', TICKET]);
+      const currentIdx = rawState.tasksMeta.currentTaskIndex;
+      assert.equal(
+        rawState.tasksMeta.tasks[currentIdx].taskReviewFixRounds,
+        1,
+        'taskReviewFixRounds should be stored in tasksMeta.tasks[N]'
+      );
+    });
+
+    it('TASK_REVIEW_MAX_FIXES env var controls max rounds (default 2)', async () => {
+      // Reset and set to 1
+      await runWorkState(['task-review-fix-rounds-reset', TICKET]);
+      await runWorkState(['task-review-fix-rounds-increment', TICKET]);
+
+      // With default max (2), should not be at max yet
+      const { result: notMax } = await runWorkState(['task-review-fix-rounds', TICKET]);
+      assert.equal(notMax.fixRounds, 1);
+      assert.equal(notMax.maxFixRounds, 2);
+      assert.equal(notMax.maxReached, false);
+
+      // Increment to 2 — should be at max
+      await runWorkState(['task-review-fix-rounds-increment', TICKET]);
+      const { result: atMax } = await runWorkState(['task-review-fix-rounds', TICKET]);
+      assert.equal(atMax.fixRounds, 2);
+      assert.equal(atMax.maxReached, true);
+    });
+
+    it('TASK_REVIEW_MAX_FIXES env var overrides default', async () => {
+      // Reset to 1
+      await runWorkState(['task-review-fix-rounds-reset', TICKET]);
+      await runWorkState(['task-review-fix-rounds-increment', TICKET]);
+
+      // With TASK_REVIEW_MAX_FIXES=5, should not be at max
+      const { result } = await runWorkState(['task-review-fix-rounds', TICKET], {
+        env: { TASK_REVIEW_MAX_FIXES: '5' },
+      });
+      assert.equal(result.fixRounds, 1);
+      assert.equal(result.maxFixRounds, 5);
+      assert.equal(result.maxReached, false);
+    });
+
+    it('returns error when task tracking is not initialized', async () => {
+      const TICKET_NO_TASKS = 'TEST-FIXROUND-NOTASK';
+      try {
+        await runWorkState(['init', TICKET_NO_TASKS]);
+
+        const { code, stderr } = await runWorkState([
+          'task-review-fix-rounds',
+          TICKET_NO_TASKS,
+        ]);
+        assert.equal(code, 1);
+        const errResult = JSON.parse(stderr.trim());
+        assert.ok(errResult.error);
+      } finally {
+        cleanupTempWorkState(TICKET_NO_TASKS);
+      }
     });
   });
 });

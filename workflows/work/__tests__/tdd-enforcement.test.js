@@ -397,6 +397,7 @@ describe('TDD enforcement', () => {
       // Record valid evidence so we can leave 3_implement
       writeValidPhaseState(TICKET);
       await runOrchestrator(['transition', TICKET, 'commit'], { env: baseEnv() });
+      await runOrchestrator(['transition', TICKET, 'task_review'], { env: baseEnv() });
       await runOrchestrator(['transition', TICKET, 'check'], { env: baseEnv() });
 
       // Now create a stale phase state file for 3_implement
@@ -500,12 +501,13 @@ describe('TDD enforcement', () => {
       assert.equal(result.to, 'commit');
     });
 
-    it('current commit -> check does not consult TDD evidence (non-gated step)', async () => {
+    it('current commit -> task_review -> check does not consult TDD evidence (non-gated steps)', async () => {
       await transitionTo(TICKET, 'implement');
       writeValidPhaseState(TICKET);
       await runOrchestrator(['transition', TICKET, 'commit'], { env: baseEnv() });
 
-      // Now try commit -> check without any evidence for commit (non-gated)
+      // commit -> task_review -> check without any evidence for these (non-gated)
+      await runOrchestrator(['transition', TICKET, 'task_review'], { env: baseEnv() });
       const { result } = await runOrchestrator(['transition', TICKET, 'check'], { env: baseEnv() });
       assert.equal(result.success, true);
       assert.equal(result.to, 'check');
