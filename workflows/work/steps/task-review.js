@@ -18,13 +18,14 @@
 
 const path = require('path');
 const { appendAction } = require(path.join(__dirname, '..', 'work-actions'));
+const { computeTaskDiff } = require('../task-review-gate');
 
 /**
  * @param {Function} add
  * @param {object} s
  * @param {object} ctx
  */
-function taskReviewStep(add, s, ctx) {
+module.exports = function taskReviewStep(add, s, ctx) {
   const { STEPS } = ctx;
 
   // Decision 1: disabled via env
@@ -94,5 +95,4 @@ function taskReviewStep(add, s, ctx) {
   });
 }
 
-module.exports = taskReviewStep;
-module.exports.taskReviewStep = taskReviewStep;
+module.exports.taskReviewStep = module.exports;
