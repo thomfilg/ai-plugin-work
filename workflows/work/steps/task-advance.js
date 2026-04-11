@@ -19,7 +19,10 @@ module.exports = function taskAdvanceStep(add, s, ctx) {
 
   if (!taskData || !plan) return;
 
-  // GH-211: Reset fix-round counter whenever task-advance runs (new task boundary)
+  // GH-211: Reset fix-round counter whenever task-advance runs (new task boundary).
+  // ctx._ticketId and ctx._resetTaskReviewFixRounds are injected by the orchestrator
+  // at runtime (see work-state.js resetTaskReviewFixRounds). The typeof guard ensures
+  // graceful no-op when running during plan-generation where these are not wired.
   if (!allTasksDone && typeof ctx._resetTaskReviewFixRounds === 'function') {
     ctx._resetTaskReviewFixRounds(ctx._ticketId);
   }

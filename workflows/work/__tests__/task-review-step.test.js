@@ -15,6 +15,7 @@
  * import paths. Required by spec verification checklist (FILE_EXISTS constraint).
  */
 
+/* eslint-disable -- top-level test file, no additional lint rules needed */
 'use strict';
 
 const { describe, it, before, beforeEach, afterEach } = require('node:test');

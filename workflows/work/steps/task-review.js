@@ -51,7 +51,10 @@ module.exports = function taskReviewStep(add, s, ctx) {
     return;
   }
 
-  // Read fix-round state from tasksMeta
+  // Read fix-round state from tasksMeta.
+  // Note: taskReviewFixRounds is incremented by the orchestrator when it loops back
+  // to implement after a failed review (see work-state.js incrementTaskReviewFixRounds).
+  // This step only reads the counter to decide whether to escalate.
   const currentTaskMeta = tasksMeta.tasks?.[currentIdx];
   const fixRounds = currentTaskMeta?.taskReviewFixRounds || 0;
   const parsed = parseInt(process.env.TASK_REVIEW_MAX_FIXES, 10);
@@ -84,8 +87,8 @@ module.exports = function taskReviewStep(add, s, ctx) {
     'Skill(tests-review) + Skill(code-review)',
     `Task ${currentIdx + 1}/${totalTasks}: review "${currentTask?.title || 'unknown'}" before advancing`,
     {
-      agentType: 'parallel',
-      agentPrompt: `Run /tests-review and /code-review in parallel for task ${currentIdx + 1}/${totalTasks} ("${currentTask?.title || 'unknown'}"). Aggregate results and fail the gate if either review fails.`,
+      agentType: 'skill',
+      agentPrompt: `Run /tests-review and /code-review in parallel for task ${currentIdx + 1}/${totalTasks} ("${currentTask?.title || 'unknown'}"). Scope both reviews to the current task diff (from .last-commit-sha to HEAD). Aggregate results and fail the gate if either review fails.`,
     }
   );
   appendAction(ctx.ticket, {

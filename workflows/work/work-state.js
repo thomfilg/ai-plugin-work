@@ -642,6 +642,7 @@ function getTaskReviewFixRounds(ticketId) {
   const parsed = parseInt(process.env.TASK_REVIEW_MAX_FIXES, 10);
   const maxFixRounds = Number.isFinite(parsed) && parsed >= 0 ? parsed : 2;
 
+  // Task review fix-round status — consumed by task-review step for escalation decisions
   return {
     fixRounds,
     maxFixRounds,
