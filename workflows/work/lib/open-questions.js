@@ -468,7 +468,7 @@ function applyResolutions(markdown, resolutions) {
     // don't disturb downstream content.
     const blockLines = lines.slice(q.startLine, q.endLine + 1);
     const resolutionLine = buildResolutionLine(blockLines, escaped);
-    lines.splice(q.endLine + 1, 0, resolutionLine);
+    lines.splice(q.endLine + 1, 0, resolutionLine); // append after resolved:true insertion (if any)
   }
 
   return lines.join('\n');

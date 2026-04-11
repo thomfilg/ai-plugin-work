@@ -78,7 +78,7 @@ function briefGateStep(add, s, ctx) {
     // would create a confusing mismatch ("gate skipped" yet transition
     // blocked). RUN with a helpful message signals the issue clearly.
     add(STEPS.brief_gate, 'RUN', null, 'brief.md unreadable — regenerate brief before proceeding');
-    return;
+    return; // fail-closed: verify() also returns false on read errors — aligned
   }
 
   const questions = openQuestions.parse(markdown);
