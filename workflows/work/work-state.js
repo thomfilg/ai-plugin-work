@@ -600,6 +600,11 @@ function advanceTask(ticketId) {
   // Advance pointer
   meta.currentTaskIndex = idx + 1;
 
+  // GH-211: Reset fix-round counter on the NEW task so each task starts fresh
+  if (meta.currentTaskIndex < meta.tasks.length) {
+    meta.tasks[meta.currentTaskIndex].taskReviewFixRounds = 0;
+  }
+
   saveState(ticketId, state);
 
   if (meta.currentTaskIndex >= meta.tasks.length) {
@@ -615,6 +620,80 @@ function advanceTask(ticketId) {
       status: meta.tasks[meta.currentTaskIndex].status,
       total: meta.totalTasks,
     },
+  };
+}
+
+// ─── Task Review Fix-Round Tracking (GH-211) ────────────────────────────────
+
+/**
+ * Get the current fix-round count for the current task.
+ * Returns 0 when the field is absent (new task).
+ * Also returns maxFixRounds and whether max is reached.
+ */
+function getTaskReviewFixRounds(ticketId) {
+  const state = loadState(ticketId);
+  if (!state?.tasksMeta) return { error: 'No task tracking initialized' };
+
+  const meta = state.tasksMeta;
+  const idx = meta.currentTaskIndex;
+  if (idx >= meta.tasks.length) return { error: 'All tasks completed, no current task' };
+
+  const fixRounds = meta.tasks[idx].taskReviewFixRounds || 0;
+  const parsed = parseInt(process.env.TASK_REVIEW_MAX_FIXES, 10);
+  const maxFixRounds = Number.isFinite(parsed) && parsed >= 0 ? parsed : 2;
+
+  // Task review fix-round status — consumed by task-review step for escalation decisions
+  return {
+    fixRounds,
+    maxFixRounds,
+    maxReached: fixRounds >= maxFixRounds, // true when no more fix attempts allowed
+    taskIndex: idx,
+    taskId: meta.tasks[idx].id,
+  };
+}
+
+/**
+ * Increment the fix-round counter for the current task by 1 and persist.
+ */
+function incrementTaskReviewFixRounds(ticketId) {
+  const state = loadState(ticketId);
+  if (!state?.tasksMeta) return { error: 'No task tracking initialized' };
+
+  const meta = state.tasksMeta;
+  const idx = meta.currentTaskIndex;
+  if (idx >= meta.tasks.length) return { error: 'All tasks completed, no current task' };
+
+  const current = meta.tasks[idx].taskReviewFixRounds || 0;
+  meta.tasks[idx].taskReviewFixRounds = current + 1;
+
+  saveState(ticketId, state);
+
+  return {
+    fixRounds: meta.tasks[idx].taskReviewFixRounds,
+    taskIndex: idx,
+    taskId: meta.tasks[idx].id,
+  };
+}
+
+/**
+ * Reset the fix-round counter for the current task to 0 and persist.
+ */
+function resetTaskReviewFixRounds(ticketId) {
+  const state = loadState(ticketId);
+  if (!state?.tasksMeta) return { error: 'No task tracking initialized' };
+
+  const meta = state.tasksMeta;
+  const idx = meta.currentTaskIndex;
+  if (idx >= meta.tasks.length) return { error: 'All tasks completed, no current task' };
+
+  meta.tasks[idx].taskReviewFixRounds = 0;
+
+  saveState(ticketId, state);
+
+  return {
+    fixRounds: 0,
+    taskIndex: idx,
+    taskId: meta.tasks[idx].id,
   };
 }
 
@@ -649,7 +728,7 @@ async function main() {
   if (!command) {
     console.error('Usage: node work-state.js <command> <ticket-id> [args...]');
     console.error(
-      'Commands: init, get, set-step, set-check, add-error, complete, resume-info, init-subtask, complete-subtask, active-subtask, task-init, task-current, task-advance, task-get'
+      'Commands: init, get, set-step, set-check, add-error, complete, resume-info, init-subtask, complete-subtask, active-subtask, task-init, task-current, task-advance, task-get, task-review-fix-rounds, task-review-fix-rounds-increment, task-review-fix-rounds-reset'
     );
     process.exit(1);
   }
@@ -755,6 +834,33 @@ async function main() {
       console.log(JSON.stringify(result, null, 2));
       break;
 
+    case 'task-review-fix-rounds':
+      result = getTaskReviewFixRounds(ticketId);
+      if (result && result.error) {
+        console.error(JSON.stringify(result));
+        process.exit(1);
+      }
+      console.log(JSON.stringify(result, null, 2));
+      break;
+
+    case 'task-review-fix-rounds-increment':
+      result = incrementTaskReviewFixRounds(ticketId);
+      if (result && result.error) {
+        console.error(JSON.stringify(result));
+        process.exit(1);
+      }
+      console.log(JSON.stringify(result, null, 2));
+      break;
+
+    case 'task-review-fix-rounds-reset':
+      result = resetTaskReviewFixRounds(ticketId);
+      if (result && result.error) {
+        console.error(JSON.stringify(result));
+        process.exit(1);
+      }
+      console.log(JSON.stringify(result, null, 2));
+      break;
+
     default:
       console.error(`Unknown command: ${command}`);
       process.exit(1);
@@ -791,6 +897,9 @@ module.exports = {
   getTaskCurrent,
   advanceTask,
   getTaskByIndex,
+  getTaskReviewFixRounds,
+  incrementTaskReviewFixRounds,
+  resetTaskReviewFixRounds,
   STEPS,
   SUBTASK_STEPS,
   CHECK_AGENTS,

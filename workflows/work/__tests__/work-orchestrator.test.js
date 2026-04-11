@@ -146,7 +146,7 @@ describe('work-orchestrator.js', () => {
       assert.ok(result.steps.includes('ticket'));
       assert.ok(result.steps.includes('complete'));
       // GH-215: added brief_gate between brief and spec.
-      assert.equal(result.steps.length, 16);
+      assert.equal(result.steps.length, 17);
     });
 
     it('should include follow_up in steps', async () => {
@@ -353,7 +353,7 @@ describe('work-orchestrator.js', () => {
     const TEST_TICKET = 'TEST-777';
     const TEMP_WB = path.join(os.tmpdir(), 'work-orch-trans-' + process.pid);
     const TEMP_TASKS_DIR = path.join(TEMP_WB, 'tasks');
-    const transOpts = { env: { WORKTREES_BASE: TEMP_WB } };
+    const transOpts = { env: { WORKTREES_BASE: TEMP_WB, TASKS_BASE: TEMP_TASKS_DIR } };
     after(() => {
       try {
         fs.rmSync(TEMP_WB, { recursive: true, force: true });
@@ -411,6 +411,7 @@ describe('work-orchestrator.js', () => {
       await runOrchestrator(['transition', TEST_TICKET, 'implement'], transOpts);
       writeTddException(TEMP_TASKS_DIR, TEST_TICKET);
       await runOrchestrator(['transition', TEST_TICKET, 'commit'], transOpts);
+      await runOrchestrator(['transition', TEST_TICKET, 'task_review'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'check'], transOpts);
       const { result } = await runOrchestrator(['transition', TEST_TICKET, 'implement'], transOpts);
       assert.equal(result.success, true);
@@ -449,19 +450,21 @@ describe('work-orchestrator.js', () => {
       await runOrchestrator(['transition', TEST_TICKET, 'implement']);
       writeTddException(TASKS_BASE, TEST_TICKET);
       await runOrchestrator(['transition', TEST_TICKET, 'commit']);
+      await runOrchestrator(['transition', TEST_TICKET, 'task_review']);
       await runOrchestrator(['transition', TEST_TICKET, 'check']);
       await runOrchestrator(['transition', TEST_TICKET, 'implement']);
       const { result } = await runOrchestrator(['transitions', TEST_TICKET]);
       assert.equal(result.allStatuses['commit'], 'pending');
+      assert.equal(result.allStatuses['task_review'], 'pending');
       assert.equal(result.allStatuses['check'], 'pending');
     });
   });
 
   describe('state machine logic', () => {
-    it('should have 16 steps total', async () => {
+    it('should have 17 steps total', async () => {
       const { result } = await runOrchestrator(['graph']);
       // GH-215: added brief_gate between brief and spec.
-      assert.equal(result.steps.length, 16);
+      assert.equal(result.steps.length, 17);
     });
 
     it('should not allow self-transitions (except complete)', async () => {
@@ -678,7 +681,7 @@ describe('work-orchestrator.js', () => {
     it('should allow transition from 6_check → 3_implement (backward)', async () => {
       const TMP = path.join(os.tmpdir(), 'work-orch-p14a-' + process.pid);
       const T = 'TEST-614';
-      const o = { env: { WORKTREES_BASE: TMP } };
+      const o = { env: { WORKTREES_BASE: TMP, TASKS_BASE: path.join(TMP, 'tasks') } };
       try {
         await runOrchestrator(['transition', T, 'bootstrap'], o);
         await runOrchestrator(['transition', T, 'brief'], o);
@@ -688,6 +691,7 @@ describe('work-orchestrator.js', () => {
         await runOrchestrator(['transition', T, 'implement'], o);
         writeTddException(path.join(TMP, 'tasks'), T);
         await runOrchestrator(['transition', T, 'commit'], o);
+        await runOrchestrator(['transition', T, 'task_review'], o);
         await runOrchestrator(['transition', T, 'check'], o);
         const { result } = await runOrchestrator(['transition', T, 'implement'], o);
         assert.equal(result.success, true);
@@ -734,6 +738,7 @@ describe('work-orchestrator.js', () => {
         await runOrchestrator(['transition', TEST_TICKET, 'implement'], o);
         writeTddException(TASKS_BASE, TEST_TICKET);
         await runOrchestrator(['transition', TEST_TICKET, 'commit'], o);
+        await runOrchestrator(['transition', TEST_TICKET, 'task_review'], o);
         await runOrchestrator(['transition', TEST_TICKET, 'check'], o);
         writeCheckReports(TASKS_BASE, TEST_TICKET);
         await runOrchestrator(['transition', TEST_TICKET, 'pr'], o);
@@ -852,6 +857,7 @@ describe('work-orchestrator.js', () => {
       await runOrchestrator(['transition', T, 'implement'], o);
       writeTddException(TEMP_TASKS, T);
       await runOrchestrator(['transition', T, 'commit'], o);
+      await runOrchestrator(['transition', T, 'task_review'], o);
       await runOrchestrator(['transition', T, 'check'], o);
       writeCheckReports(TEMP_TASKS, T);
       await runOrchestrator(['transition', T, 'pr'], o);
@@ -875,6 +881,7 @@ describe('work-orchestrator.js', () => {
         await runOrchestrator(['transition', T2, 'implement'], o);
         writeTddException(TEMP_TASKS, T2);
         await runOrchestrator(['transition', T2, 'commit'], o);
+        await runOrchestrator(['transition', T2, 'task_review'], o);
         await runOrchestrator(['transition', T2, 'check'], o);
         writeCheckReports(TEMP_TASKS, T2);
         await runOrchestrator(['transition', T2, 'pr'], o);
@@ -903,6 +910,7 @@ describe('work-orchestrator.js', () => {
         await runOrchestrator(['transition', T3, 'implement'], o);
         writeTddException(TEMP_TASKS, T3);
         await runOrchestrator(['transition', T3, 'commit'], o);
+        await runOrchestrator(['transition', T3, 'task_review'], o);
         await runOrchestrator(['transition', T3, 'check'], o);
         writeCheckReports(TEMP_TASKS, T3);
         await runOrchestrator(['transition', T3, 'pr'], o);
@@ -932,6 +940,7 @@ describe('work-orchestrator.js', () => {
         await runOrchestrator(['transition', T_ARCHIVE, 'implement'], o);
         writeTddException(TEMP_TASKS, T_ARCHIVE);
         await runOrchestrator(['transition', T_ARCHIVE, 'commit'], o);
+        await runOrchestrator(['transition', T_ARCHIVE, 'task_review'], o);
         await runOrchestrator(['transition', T_ARCHIVE, 'check'], o);
         writeCheckReports(TEMP_TASKS, T_ARCHIVE);
 
@@ -976,15 +985,17 @@ describe('work-orchestrator.js', () => {
         await runOrchestrator(['transition', T_RUNS, 'implement'], o);
         writeTddException(TEMP_TASKS, T_RUNS);
         await runOrchestrator(['transition', T_RUNS, 'commit'], o);
+        await runOrchestrator(['transition', T_RUNS, 'task_review'], o);
         await runOrchestrator(['transition', T_RUNS, 'check'], o);
         writeCheckReports(TEMP_TASKS, T_RUNS);
         await runOrchestrator(['transition', T_RUNS, 'implement'], o);
 
         assert.ok(fs.existsSync(path.join(ticketDir, 'runs', 'run1')), 'run1 should exist');
 
-        // Second pass: implement → commit → check, write reports, check → implement (backward again)
+        // Second pass: implement → commit → task_review → check, write reports, check → implement (backward again)
         writeTddException(TEMP_TASKS, T_RUNS);
         await runOrchestrator(['transition', T_RUNS, 'commit'], o);
+        await runOrchestrator(['transition', T_RUNS, 'task_review'], o);
         await runOrchestrator(['transition', T_RUNS, 'check'], o);
         writeCheckReports(TEMP_TASKS, T_RUNS);
         await runOrchestrator(['transition', T_RUNS, 'implement'], o);
@@ -1008,6 +1019,7 @@ describe('work-orchestrator.js', () => {
         await runOrchestrator(['transition', T4, 'implement'], o);
         writeTddException(TEMP_TASKS, T4);
         await runOrchestrator(['transition', T4, 'commit'], o);
+        await runOrchestrator(['transition', T4, 'task_review'], o);
         await runOrchestrator(['transition', T4, 'check'], o);
         writeCheckReports(TEMP_TASKS, T4);
         await runOrchestrator(['transition', T4, 'pr'], o);
@@ -1050,7 +1062,7 @@ describe('work-orchestrator.js', () => {
     const TEMP_WB = path.join(os.tmpdir(), 'work-orch-integ-' + process.pid);
     const TEMP_TASKS = path.join(TEMP_WB, 'tasks');
     const TICKET = 'TEST-8888';
-    const envOpts = { env: { WORKTREES_BASE: TEMP_WB } };
+    const envOpts = { env: { WORKTREES_BASE: TEMP_WB, TASKS_BASE: TEMP_TASKS } };
 
     after(() => {
       try {
@@ -1074,6 +1086,7 @@ describe('work-orchestrator.js', () => {
       await runOrchestrator(['transition', TICKET, 'implement'], envOpts);
       writeTddException(TEMP_TASKS, TICKET);
       await runOrchestrator(['transition', TICKET, 'commit'], envOpts);
+      await runOrchestrator(['transition', TICKET, 'task_review'], envOpts);
       await runOrchestrator(['transition', TICKET, 'check'], envOpts);
 
       // Retry to implement
@@ -1081,10 +1094,12 @@ describe('work-orchestrator.js', () => {
       assert.equal(r1.result.success, true);
       assert.equal(r1.result.direction, 'backward');
 
-      // Forward through: implement→commit→check
+      // Forward through: implement→commit→task_review→check
       writeTddException(TEMP_TASKS, TICKET);
       const r2 = await runOrchestrator(['transition', TICKET, 'commit'], envOpts);
       assert.equal(r2.result.success, true);
+      const r2b = await runOrchestrator(['transition', TICKET, 'task_review'], envOpts);
+      assert.equal(r2b.result.success, true);
       const r3 = await runOrchestrator(['transition', TICKET, 'check'], envOpts);
       assert.equal(r3.result.success, true);
     });
@@ -1099,6 +1114,7 @@ describe('work-orchestrator.js', () => {
       await runOrchestrator(['transition', TICKET, 'implement'], envOpts);
       writeTddException(TEMP_TASKS, TICKET);
       await runOrchestrator(['transition', TICKET, 'commit'], envOpts);
+      await runOrchestrator(['transition', TICKET, 'task_review'], envOpts);
       await runOrchestrator(['transition', TICKET, 'check'], envOpts);
 
       // Get plan — currentStep should reflect check
@@ -1323,7 +1339,7 @@ describe('work-orchestrator.js', () => {
       writeReport('qa-feature.check.md', '# QA Feature\nStatus: APPROVED\nPassed.');
     }
 
-    // Linear path: bootstrap → brief → spec → implement → commit → check
+    // Linear path: bootstrap → brief → spec → implement → commit → task_review → check
     async function advanceToCheck() {
       await runOrchestrator(['transition', TICKET, 'bootstrap'], gateOpts);
       await runOrchestrator(['transition', TICKET, 'brief'], gateOpts);
@@ -1333,6 +1349,7 @@ describe('work-orchestrator.js', () => {
       await runOrchestrator(['transition', TICKET, 'implement'], gateOpts);
       writeTddException(TEMP_TASKS, TICKET);
       await runOrchestrator(['transition', TICKET, 'commit'], gateOpts);
+      await runOrchestrator(['transition', TICKET, 'task_review'], gateOpts);
       await runOrchestrator(['transition', TICKET, 'check'], gateOpts);
     }
 
@@ -1611,5 +1628,192 @@ describe('parseTicketInput', () => {
   it('should handle non-string input', () => {
     const result = parseTicketInput(123);
     assert.deepStrictEqual(result, { ticketBase: 123, suffix: null });
+  });
+});
+
+// ─── GH-211: Integration tests for task_review in plan generation ───────────
+
+describe('GH-211: task_review in plan generation', () => {
+  const TEST_TICKET = 'TEST-211';
+  // Isolated temp environment to avoid GitHub provider mangling ticket IDs.
+  // When TICKET_PROVIDER is github (as in this repo), TEST-211 becomes #TEST-211,
+  // so we force a clean provider context via fake HOME + empty TICKET_PROVIDER.
+  const TEMP_BASE = path.join(os.tmpdir(), 'work-orch-gh211-' + process.pid);
+  const TEMP_HOME = path.join(TEMP_BASE, 'home');
+  const TEMP_WB = path.join(TEMP_BASE, 'worktrees');
+  const TEMP_TASKS = path.join(TEMP_WB, 'tasks');
+
+  /** Env overrides that isolate the subprocess from the real provider config. */
+  function isolatedEnv(extra = {}) {
+    return {
+      env: {
+        TICKET_PROVIDER: '',
+        HOME: TEMP_HOME,
+        USERPROFILE: TEMP_HOME,
+        WORKTREES_BASE: TEMP_WB,
+        TASKS_BASE: TEMP_TASKS,
+        JIRA_PROJECT_KEY: '',
+        JIRA_BASE_URL: '',
+        TICKET_PROJECT_KEY: '',
+        LINEAR_TEAM_ID: '',
+        ...extra,
+      },
+      cwd: TEMP_HOME,
+    };
+  }
+
+  /**
+   * Helper: write a tasks.md with the given number of tasks.
+   */
+  function writeTasksMd(tasksBase, ticket, taskCount) {
+    const dir = path.join(tasksBase, ticket);
+    fs.mkdirSync(dir, { recursive: true });
+    let content = '# Task Plan\n\n';
+    for (let i = 1; i <= taskCount; i++) {
+      content += `## Task ${i}\n`;
+      content += `— Task ${i} title\n\n`;
+      content += `### Type\nimplementation\n\n`;
+      content += `### Deliverables\n- ${i}.1 Deliverable\n\n`;
+    }
+    fs.writeFileSync(path.join(dir, 'tasks.md'), content);
+  }
+
+  /**
+   * Helper: write a .work-state.json with tasksMeta for multi-task plans.
+   * @param {object} opts - { currentTaskIndex, fixRounds, totalTasks }
+   */
+  function writeWorkStateWithTasks(tasksBase, ticket, opts = {}) {
+    const dir = path.join(tasksBase, ticket);
+    fs.mkdirSync(dir, { recursive: true });
+    const totalTasks = opts.totalTasks || 3;
+    const currentTaskIndex = opts.currentTaskIndex ?? 0;
+    const tasks = [];
+    for (let i = 0; i < totalTasks; i++) {
+      const task = { id: `task_${i + 1}`, status: i < currentTaskIndex ? 'completed' : 'pending' };
+      if (i === currentTaskIndex && opts.fixRounds != null) {
+        task.taskReviewFixRounds = opts.fixRounds;
+      }
+      tasks.push(task);
+    }
+
+    const stepStatus = {};
+    const allSteps = [
+      'ticket', 'bootstrap', 'brief', 'brief_gate', 'spec', 'tasks',
+      'implement', 'commit', 'task_review', 'check', 'pr', 'ready',
+      'follow_up', 'ci', 'cleanup', 'reports', 'complete',
+    ];
+    for (const step of allSteps) {
+      stepStatus[step] = 'pending';
+    }
+
+    const state = {
+      ticketId: ticket,
+      description: '',
+      currentStep: 1,
+      status: 'in_progress',
+      stepStatus,
+      checkProgress: {},
+      errors: [],
+      tasksMeta: {
+        totalTasks,
+        currentTaskIndex,
+        tasks,
+      },
+      startTime: new Date().toISOString(),
+      lastUpdate: new Date().toISOString(),
+    };
+    fs.writeFileSync(path.join(dir, '.work-state.json'), JSON.stringify(state, null, 2));
+  }
+
+  after(() => {
+    try {
+      fs.rmSync(TEMP_BASE, { recursive: true, force: true });
+    } catch {}
+  });
+
+  afterEach(() => {
+    try {
+      fs.rmSync(path.join(TEMP_TASKS, TEST_TICKET), { recursive: true, force: true });
+    } catch {}
+  });
+
+  // 9.1: Multi-task plan includes task_review RUN entry after commit (for non-final tasks)
+  it('multi-task plan includes task_review RUN entry after commit', async () => {
+    fs.mkdirSync(TEMP_HOME, { recursive: true });
+    writeTasksMd(TEMP_TASKS, TEST_TICKET, 3);
+    writeWorkStateWithTasks(TEMP_TASKS, TEST_TICKET, { totalTasks: 3, currentTaskIndex: 0 });
+    writeTddException(TEMP_TASKS, TEST_TICKET);
+
+    const { result, code } = await runOrchestrator([TEST_TICKET], isolatedEnv());
+    assert.equal(code, 0);
+
+    const stepNames = result.plan.map((s) => s.step);
+    assert.ok(stepNames.includes('task_review'), 'plan must include task_review step');
+
+    const taskReviewEntry = result.plan.find((s) => s.step === 'task_review');
+    assert.equal(taskReviewEntry.action, 'RUN', 'task_review must be RUN for non-final task in multi-task plan');
+
+    // task_review should come after commit in pipeline order
+    const commitIdx = stepNames.indexOf('commit');
+    const taskReviewIdx = stepNames.indexOf('task_review');
+    assert.ok(taskReviewIdx > commitIdx, 'task_review must come after commit in plan');
+  });
+
+  // 9.1: Single-task plan skips task_review (final task -- /check handles review)
+  it('single-task plan skips task_review', async () => {
+    fs.mkdirSync(TEMP_HOME, { recursive: true });
+    writeTasksMd(TEMP_TASKS, TEST_TICKET, 1);
+    writeWorkStateWithTasks(TEMP_TASKS, TEST_TICKET, { totalTasks: 1, currentTaskIndex: 0 });
+    writeTddException(TEMP_TASKS, TEST_TICKET);
+
+    const { result, code } = await runOrchestrator([TEST_TICKET], isolatedEnv());
+    assert.equal(code, 0);
+
+    const taskReviewEntry = result.plan.find((s) => s.step === 'task_review');
+    assert.ok(taskReviewEntry, 'plan must include task_review step even when skipped');
+    assert.equal(taskReviewEntry.action, 'SKIP', 'task_review must be SKIP for single-task (final task)');
+  });
+
+  // 9.1: TASK_REVIEW_ENABLED=0 skips task_review
+  it('TASK_REVIEW_ENABLED=0 skips task_review', async () => {
+    fs.mkdirSync(TEMP_HOME, { recursive: true });
+    writeTasksMd(TEMP_TASKS, TEST_TICKET, 3);
+    writeWorkStateWithTasks(TEMP_TASKS, TEST_TICKET, { totalTasks: 3, currentTaskIndex: 0 });
+    writeTddException(TEMP_TASKS, TEST_TICKET);
+
+    const { result, code } = await runOrchestrator([TEST_TICKET], isolatedEnv({ TASK_REVIEW_ENABLED: '0' }));
+    assert.equal(code, 0);
+
+    const taskReviewEntry = result.plan.find((s) => s.step === 'task_review');
+    assert.ok(taskReviewEntry, 'plan must include task_review step entry');
+    assert.equal(taskReviewEntry.action, 'SKIP', 'task_review must be SKIP when TASK_REVIEW_ENABLED=0');
+    assert.ok(
+      taskReviewEntry.reason.includes('disabled') || taskReviewEntry.reason.includes('TASK_REVIEW_ENABLED'),
+      'reason should mention disabled/env flag'
+    );
+  });
+
+  // 9.2: Fix-round escalation -- after max fix rounds exhausted, plan shows escalation
+  it('fix-round exhaustion triggers escalation (not another implement loop)', async () => {
+    fs.mkdirSync(TEMP_HOME, { recursive: true });
+    writeTasksMd(TEMP_TASKS, TEST_TICKET, 3);
+    writeWorkStateWithTasks(TEMP_TASKS, TEST_TICKET, {
+      totalTasks: 3,
+      currentTaskIndex: 0,
+      fixRounds: 2, // default max is 2, so >= max triggers escalation
+    });
+    writeTddException(TEMP_TASKS, TEST_TICKET);
+
+    const { result, code } = await runOrchestrator([TEST_TICKET], isolatedEnv({ TASK_REVIEW_MAX_FIXES: '2' }));
+    assert.equal(code, 0);
+
+    const taskReviewEntry = result.plan.find((s) => s.step === 'task_review');
+    assert.ok(taskReviewEntry, 'plan must include task_review step entry');
+    assert.equal(taskReviewEntry.action, 'RUN', 'escalation entry should be RUN');
+    assert.ok(
+      taskReviewEntry.reason.includes('exhausted') || taskReviewEntry.reason.includes('escalat'),
+      'reason should mention exhaustion or escalation'
+    );
+    assert.equal(taskReviewEntry.command, 'AskUserQuestion', 'escalation should use AskUserQuestion command');
   });
 });

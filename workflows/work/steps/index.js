@@ -15,6 +15,7 @@ const specStep = require('./spec');
 const tasksStep = require('./tasks');
 const implementStep = require('./implement');
 const commitStep = require('./commit');
+const taskReviewStep = require('./task-review');
 const checkStep = require('./check');
 const taskAdvanceStep = require('./task-advance');
 const prStep = require('./pr');
@@ -42,6 +43,7 @@ const STEP_PIPELINE = [
   tasksStep,
   implementStep,
   commitStep,
+  taskReviewStep,
   checkStep,
   taskAdvanceStep,
   prStep,
@@ -61,4 +63,9 @@ module.exports = {
   // and before specStep to block the brief → spec transition on unresolved
   // cross-ticket / architectural open questions.
   briefGateStep,
+  // GH-211 Task 5.2: export taskReviewStep as a named handle so external
+  // consumers (and tests) can reference the per-task review gate without
+  // knowing its position in STEP_PIPELINE. The gate runs between commitStep
+  // and checkStep to block check until intermediate task review passes.
+  taskReviewStep,
 };

@@ -119,6 +119,7 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
     softSteps: new Set([
       STEPS.ticket, // optional/metadata step
       STEPS.ready,
+      STEPS.task_review, // GH-211: advisory per-task review gate (soft — does not block)
       STEPS.reports, // operational steps -- no code changes to enforce
       STEPS.complete, // GH-106: terminal step -- all gates already passed at ci/check/reports
     ]),
@@ -296,6 +297,23 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
         },
       },
       {
+        // GH-211: Per-task review gate. Soft check — advisory, not blocking.
+        // Verified iff at least one review artifact (task-review-tests.md or
+        // task-review-code.md) exists in the ticket's tasks dir.
+        step: STEPS.task_review,
+        verify: (ticketId) => {
+          try {
+            const dir = path.join(TASKS_BASE, safeTicketPath(ticketId));
+            return (
+              fs.existsSync(path.join(dir, 'task-review-tests.md')) ||
+              fs.existsSync(path.join(dir, 'task-review-code.md'))
+            );
+          } catch {
+            return false;
+          }
+        },
+      },
+      {
         step: STEPS.check,
         verify: (ticketId) => {
           // Check is proven if all required report files exist.
@@ -348,14 +366,32 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
 
             // Resolve branch for --head flag to support worktree contexts (GH-191)
             let ghArgs = ['pr', 'view', '--json', 'number,state'];
+            let branch = '';
             try {
-              const branch = execFileSync('git', ['branch', '--show-current'], opts).trim();
+              branch = execFileSync('git', ['branch', '--show-current'], opts).trim();
               if (branch) ghArgs = ['pr', 'view', '--head', branch, '--json', 'number,state'];
             } catch {
               /* detached HEAD -- fall back to no --head */
             }
 
-            const pr = JSON.parse(execFileSync('gh', ghArgs, opts).trim());
+            // Try --head first (GH-191), fall back to branch arg if gh doesn't support --head
+            let pr;
+            try {
+              pr = JSON.parse(execFileSync('gh', ghArgs, opts).trim());
+            } catch {
+              // Some gh versions don't support --head on `pr view`; fall back to positional branch
+              if (branch) {
+                pr = JSON.parse(
+                  execFileSync(
+                    'gh',
+                    ['pr', 'view', branch, '--json', 'number,state'],
+                    opts
+                  ).trim()
+                );
+              } else {
+                pr = JSON.parse(execFileSync('gh', ['pr', 'view', '--json', 'number,state'], opts).trim());
+              }
+            }
             return pr.number > 0 && pr.state === 'OPEN';
           } catch {
             return false;

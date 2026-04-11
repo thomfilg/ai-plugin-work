@@ -22,6 +22,8 @@ const STEPS = Object.freeze({
   tasks: 'tasks',
   implement: 'implement',
   commit: 'commit',
+  // GH-211: per-task review gate that blocks check until review passes.
+  task_review: 'task_review',
   check: 'check',
   pr: 'pr',
   ready: 'ready',
@@ -44,6 +46,7 @@ const STEP_ORDER = Object.freeze([
   STEPS.tasks,
   STEPS.implement,
   STEPS.commit,
+  STEPS.task_review, // GH-211: must sit between commit and check
   STEPS.check,
   STEPS.pr,
   STEPS.ready,
@@ -93,6 +96,7 @@ function canTransition(statusTransitions) {
 
 // Retry loops: backward edges for failure recovery
 const RETRY_EDGES = {
+  [STEPS.task_review]: [STEPS.implement], // GH-211: review failed, fix code
   [STEPS.check]: [STEPS.implement], // check failed, fix code
   [STEPS.follow_up]: [STEPS.implement], // follow-up requires code changes
   [STEPS.ci]: [STEPS.implement], // CI failed, fix code

@@ -13,7 +13,7 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
 
-const { STEPS, ALL_STEPS, STEP_ORDER } = require(path.join(__dirname, '..', 'step-registry'));
+const { STEPS, ALL_STEPS, STEP_ORDER, STEP_TRANSITIONS } = require(path.join(__dirname, '..', 'step-registry'));
 
 describe('step-registry', () => {
   describe('STEPS constant map', () => {
@@ -52,6 +52,55 @@ describe('step-registry', () => {
       const specIdx = STEP_ORDER.indexOf('spec');
       assert.equal(gateIdx, briefIdx + 1);
       assert.equal(specIdx, gateIdx + 1);
+    });
+  });
+
+  // GH-211: task_review step — per-task review gate between commit and check
+  describe('task_review step (GH-211)', () => {
+    it('declares task_review identifier in STEPS', () => {
+      assert.equal(STEPS.task_review, 'task_review');
+    });
+
+    it('includes task_review in ALL_STEPS', () => {
+      assert.ok(ALL_STEPS.includes('task_review'), 'ALL_STEPS should contain task_review');
+    });
+
+    it('inserts task_review immediately after commit in STEP_ORDER', () => {
+      const commitIdx = STEP_ORDER.indexOf('commit');
+      const reviewIdx = STEP_ORDER.indexOf('task_review');
+      assert.ok(commitIdx >= 0, 'commit must exist in STEP_ORDER');
+      assert.ok(reviewIdx >= 0, 'task_review must exist in STEP_ORDER');
+      assert.equal(reviewIdx, commitIdx + 1);
+    });
+
+    it('inserts task_review immediately before check in STEP_ORDER', () => {
+      const checkIdx = STEP_ORDER.indexOf('check');
+      const reviewIdx = STEP_ORDER.indexOf('task_review');
+      assert.ok(checkIdx >= 0, 'check must exist in STEP_ORDER');
+      assert.equal(reviewIdx, checkIdx - 1);
+    });
+
+    it('STEP_ORDER reflects commit -> task_review -> check sequence', () => {
+      const commitIdx = STEP_ORDER.indexOf('commit');
+      const reviewIdx = STEP_ORDER.indexOf('task_review');
+      const checkIdx = STEP_ORDER.indexOf('check');
+      assert.equal(reviewIdx, commitIdx + 1);
+      assert.equal(checkIdx, reviewIdx + 1);
+    });
+
+    it('RETRY_EDGES maps task_review to implement', () => {
+      // task_review can transition back to implement (retry on review failure)
+      assert.ok(
+        STEP_TRANSITIONS['task_review'].includes('implement'),
+        'task_review should have a retry edge to implement'
+      );
+    });
+
+    it('task_review can transition forward to check', () => {
+      assert.ok(
+        STEP_TRANSITIONS['task_review'].includes('check'),
+        'task_review should transition forward to check'
+      );
     });
   });
 });

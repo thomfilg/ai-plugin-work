@@ -84,7 +84,7 @@ function main(deps) {
       const isGitHubPrefixed = /^GH-\d+$/i.test(raw) && isGitHubEffective;
       const isTicket = isJiraTicket || isGitHubIssue || isGitHubPrefixed;
       let ticket = isTicket ? raw.toUpperCase() : null;
-      if (isTicket && isGitHubEffective) {
+      if ((isGitHubIssue || isGitHubPrefixed) && isGitHubEffective) {
         const num = raw.replace(/^#|^GH-/i, '');
         ticket = '#' + num;
       }
@@ -202,10 +202,7 @@ function main(deps) {
         console.log(JSON.stringify({ error: true, message: e.message }));
         process.exit(1);
       }
-      const transBase =
-        transProviderCfg?.provider === 'github'
-          ? transParsed.ticketBase
-          : transParsed.ticketBase.toUpperCase();
+      const transBase = String(transParsed.ticketBase).toUpperCase();
       const safeTransTicket =
         tp.sanitizeTicketIdForPath(transBase, transProviderCfg) +
         (transParsed.suffix ? '/' + transParsed.suffix : '');
@@ -227,10 +224,7 @@ function main(deps) {
         console.log(JSON.stringify({ error: true, message: e.message }));
         process.exit(1);
       }
-      const transBase2 =
-        transitionsProviderCfg?.provider === 'github'
-          ? transParsed2.ticketBase
-          : transParsed2.ticketBase.toUpperCase();
+      const transBase2 = String(transParsed2.ticketBase).toUpperCase();
       const safeTransitionsTicket =
         tp.sanitizeTicketIdForPath(transBase2, transitionsProviderCfg) +
         (transParsed2.suffix ? '/' + transParsed2.suffix : '');
@@ -257,10 +251,7 @@ function main(deps) {
         console.log(JSON.stringify({ error: true, message: e.message }));
         process.exit(1);
       }
-      const actionsBase =
-        actionsProviderCfg?.provider === 'github'
-          ? actionsParsed.ticketBase
-          : actionsParsed.ticketBase.toUpperCase();
+      const actionsBase = String(actionsParsed.ticketBase).toUpperCase();
       const ticket =
         tp.sanitizeTicketIdForPath(actionsBase, actionsProviderCfg) +
         (actionsParsed.suffix ? '/' + actionsParsed.suffix : '');
