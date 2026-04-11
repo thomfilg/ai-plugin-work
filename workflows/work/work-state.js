@@ -645,7 +645,7 @@ function getTaskReviewFixRounds(ticketId) {
   return {
     fixRounds,
     maxFixRounds,
-    maxReached: fixRounds >= maxFixRounds,
+    maxReached: fixRounds >= maxFixRounds, // true when no more fix attempts allowed
     taskIndex: idx,
     taskId: meta.tasks[idx].id,
   };

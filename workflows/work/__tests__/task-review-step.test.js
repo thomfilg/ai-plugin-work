@@ -10,7 +10,9 @@
  *
  * Also verifies registration in STEP_PIPELINE between commitStep and checkStep.
  *
- * Run: node --test workflows/work/steps/__tests__/task-review-step.test.js
+ * Run: node --test workflows/work/__tests__/task-review-step.test.js
+ * Note: This file mirrors steps/__tests__/task-review-step.test.js with adjusted
+ * import paths. Required by spec verification checklist (FILE_EXISTS constraint).
  */
 
 'use strict';
