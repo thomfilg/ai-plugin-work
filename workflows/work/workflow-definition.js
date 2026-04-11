@@ -36,6 +36,25 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
     }
   }
 
+  // GH-215: Helper for STEPS.brief_gate verify. Returns true iff brief.md
+  // exists for `ticketId` AND openQuestions.findBlocking(parse(brief)) is
+  // empty. Fail-closed on any read/parse error — we never claim verified
+  // unless we can prove it. Extracted out of the commandMap entry so the
+  // verify declaration reads as a single expression (parallel to
+  // `verifyBootstrap` above).
+  function verifyBriefGate(ticketId) {
+    try {
+      const briefPath = path.join(TASKS_BASE, safeTicketPath(ticketId), 'brief.md');
+      if (!fs.existsSync(briefPath)) return false;
+      const openQuestions = require(path.join(__dirname, 'lib', 'open-questions'));
+      const markdown = fs.readFileSync(briefPath, 'utf-8');
+      const blocking = openQuestions.findBlocking(openQuestions.parse(markdown));
+      return Array.isArray(blocking) && blocking.length === 0;
+    } catch {
+      return false;
+    }
+  }
+
   // ─── Declarative policy config (GH-206 Task 12) ───────────────────────────
   //
   // Artifact patterns per step — consumed by artifact-archival.js on backward
@@ -131,6 +150,13 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
             return false;
           }
         },
+      },
+      {
+        // GH-215: Gate between `brief` and `spec`. Verified iff brief.md exists
+        // AND every blocking open question (cross-ticket / architectural scope,
+        // resolved: false) has been answered.
+        step: STEPS.brief_gate,
+        verify: verifyBriefGate,
       },
       {
         step: STEPS.spec,

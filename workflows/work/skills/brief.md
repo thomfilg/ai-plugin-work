@@ -20,8 +20,10 @@ Generate a structured product brief from a ticket or feature description. The br
 ## What It Does
 
 1. **Resolve input** — If a ticket ID is provided, fetch ticket details (title, description, acceptance criteria). If a description is provided, use it directly.
-2. **Delegate to brief-writer agent** — The agent structures the information into a product brief.
+2. **Delegate to brief-writer agent** — The agent structures the information into a product brief, classifying every Open Question with `scope: local | cross-ticket | architectural`.
 3. **Save output** — Brief is saved to `${TASKS_BASE}/${FOLDER_NAME}/brief.md`.
+
+After the brief is written, the workflow runs a `brief_gate` step between `brief` and `spec`. This gate scans the brief's Open Questions and interactively prompts (via `AskUserQuestion`) for any unresolved `cross-ticket` or `architectural` questions before allowing the `spec` step to run; `local` questions are allowed to pass through the gate unanswered.
 
 ## Execution
 
