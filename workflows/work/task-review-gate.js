@@ -13,6 +13,7 @@
 const path = require('path');
 const fs = require('fs');
 const config = require(path.join(__dirname, '..', 'lib', 'config'));
+const { appendAction } = require(path.join(__dirname, 'work-actions'));
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -144,12 +145,22 @@ function executeTaskReview(tasksDir, ticketId, deps) {
     `# Task Code Review — ${ticketId}\n\nStatus: ${codeResult.passed ? 'PASSED' : 'FAILED'}\n\n${codeResult.summary}\n`
   );
 
-  return {
+  const result = {
     passed: reasons.length === 0,
     testsResult,
     codeResult,
     reasons,
   };
+
+  // Audit trail: log task review outcome
+  appendAction(ticketId, {
+    step: 'task_review',
+    what: result.passed
+      ? 'task review passed (tests + code)'
+      : `task review failed: ${reasons.join('; ')}`,
+  });
+
+  return result;
 }
 
 // ─── Public API ─────────────────────────────────────────────────────────────

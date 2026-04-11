@@ -600,6 +600,11 @@ function advanceTask(ticketId) {
   // Advance pointer
   meta.currentTaskIndex = idx + 1;
 
+  // GH-211: Reset fix-round counter on the NEW task so each task starts fresh
+  if (meta.currentTaskIndex < meta.tasks.length) {
+    meta.tasks[meta.currentTaskIndex].taskReviewFixRounds = 0;
+  }
+
   saveState(ticketId, state);
 
   if (meta.currentTaskIndex >= meta.tasks.length) {

@@ -16,6 +16,9 @@
 
 'use strict';
 
+const path = require('path');
+const { appendAction } = require(path.join(__dirname, '..', 'work-actions'));
+
 /**
  * @param {Function} add
  * @param {object} s
@@ -66,6 +69,10 @@ function taskReviewStep(add, s, ctx) {
         agentPrompt: `Task ${currentIdx + 1} has exhausted ${fixRounds}/${maxFixRounds} fix rounds. Use AskUserQuestion to ask the user whether to continue fixing, skip the review, or abort.`,
       }
     );
+    appendAction(ctx.ticket, {
+      step: STEPS.task_review,
+      what: `task ${currentIdx + 1}/${totalTasks} fix rounds exhausted (${fixRounds}/${maxFixRounds}) -- escalating`,
+    });
     return;
   }
 
@@ -81,6 +88,10 @@ function taskReviewStep(add, s, ctx) {
       agentPrompt: `Run /tests-review and /code-review in parallel for task ${currentIdx + 1}/${totalTasks} ("${currentTask?.title || 'unknown'}"). Aggregate results and fail the gate if either review fails.`,
     }
   );
+  appendAction(ctx.ticket, {
+    step: STEPS.task_review,
+    what: `task ${currentIdx + 1}/${totalTasks} review scheduled for "${currentTask?.title || 'unknown'}"`,
+  });
 }
 
 module.exports = taskReviewStep;
