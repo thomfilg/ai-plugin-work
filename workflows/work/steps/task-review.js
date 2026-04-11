@@ -18,6 +18,8 @@
 
 const path = require('path');
 const { appendAction } = require(path.join(__dirname, '..', 'work-actions'));
+const { computeTaskDiff } = require('../task-review-gate');
+
 /**
  * @param {Function} add
  * @param {object} s
@@ -81,6 +83,17 @@ module.exports = function taskReviewStep(add, s, ctx) {
 
   // Decision 5: intermediate task -- run parallel tests-review + code-review
   const currentTask = taskData[currentIdx];
+  // Compute task-scoped diff range via computeTaskDiff (reads .last-commit-sha,
+  // validates, falls back to base branch on missing/invalid SHA). The range is
+  // passed to the orchestrator in plan-entry metadata so /tests-review and
+  // /code-review receive the task-specific diff, not the full branch diff.
+  const tasksDir = path.join(ctx.tasksBase || '', ctx.ticket || '');
+  let diffRange;
+  try {
+    diffRange = computeTaskDiff(tasksDir, ctx.ticket);
+  } catch (_e) {
+    diffRange = null;
+  }
   add(
     STEPS.task_review,
     'RUN',
@@ -88,7 +101,8 @@ module.exports = function taskReviewStep(add, s, ctx) {
     `Task ${currentIdx + 1}/${totalTasks}: review "${currentTask?.title || 'unknown'}" before advancing`,
     {
       agentType: 'skill',
-      agentPrompt: `Run /tests-review and /code-review in parallel for task ${currentIdx + 1}/${totalTasks} ("${currentTask?.title || 'unknown'}"). Scope both reviews to the current task diff (from .last-commit-sha to HEAD). Aggregate results and fail the gate if either review fails.`,
+      agentPrompt: `Run /tests-review and /code-review in parallel for task ${currentIdx + 1}/${totalTasks} ("${currentTask?.title || 'unknown'}"). Scope both reviews to the task diff range${diffRange ? ` (base=${diffRange.base}, head=${diffRange.head})` : ' (computed from .last-commit-sha)'}. Aggregate results and fail the gate if either review fails.`,
+      diffRange,
     }
   );
   appendAction(ctx.ticket, {
