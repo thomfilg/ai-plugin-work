@@ -525,6 +525,26 @@ describe('open-questions: applyResolutions', () => {
     assert.equal(parsed[0].resolution, undefined);
   });
 
+  it('inserts resolved: true when the block has no resolved: subfield', () => {
+    // FIXTURE_MISSING_RESOLVED has `scope: architectural` and `rationale:`
+    // but NO `resolved:` subfield. The parser defaults to resolved: false.
+    // applyResolutions must insert a `resolved: true` line (not just flip
+    // an existing one) AND append the Resolution line.
+    const resolutions = new Map([
+      ['Structured block without resolved field', 'Resolved by inserting the subfield.'],
+    ]);
+    const result = applyResolutions(FIXTURE_MISSING_RESOLVED, resolutions);
+    const parsed = parse(result);
+
+    assert.equal(parsed.length, 1);
+    assert.equal(parsed[0].resolved, true, 'block must be resolved after applyResolutions');
+    assert.equal(
+      parsed[0].resolution,
+      'Resolved by inserting the subfield.',
+      'resolution text must be set'
+    );
+  });
+
   it('is a no-op when the answer is pure whitespace that collapses to empty', () => {
     // `escapeResolution('## ')` also returns `''`; same contract applies.
     const resolutions = new Map([

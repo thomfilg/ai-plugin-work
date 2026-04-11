@@ -9,7 +9,7 @@
  * Decision matrix:
  *   1. `WORK_BRIEF_ENABLED=0`                  → SKIP "Brief disabled"
  *   2. `!s.hasBrief`                           → SKIP "No brief.md present"
- *   3. `brief.md` unreadable (fail-open)       → SKIP "brief.md unreadable"
+ *   3. `brief.md` unreadable (fail-closed)      → RUN  "brief.md unreadable — regenerate brief"
  *   4. Parser returns zero blocking questions  → SKIP "All blocking questions resolved"
  *   5. Otherwise                               → RUN with an AskUserQuestion
  *                                                payload + `onResolve: 'rewrite brief.md'`
@@ -73,9 +73,11 @@ function briefGateStep(add, s, ctx) {
   try {
     markdown = fs.readFileSync(briefPath, 'utf8');
   } catch (_e) {
-    // Fail-open: do not crash the planner on unreadable brief — upstream
-    // verify already covers missing/corrupt brief cases.
-    add(STEPS.brief_gate, 'SKIP', null, 'brief.md unreadable');
+    // Emit RUN so the planner shows the gate needs attention — verify
+    // returns false on read errors (fail-closed), so emitting SKIP here
+    // would create a confusing mismatch ("gate skipped" yet transition
+    // blocked). RUN with a helpful message signals the issue clearly.
+    add(STEPS.brief_gate, 'RUN', null, 'brief.md unreadable — regenerate brief before proceeding');
     return;
   }
 

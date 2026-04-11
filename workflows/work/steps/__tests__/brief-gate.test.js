@@ -172,14 +172,15 @@ describe('brief-gate step', () => {
     assert.equal(entry.onResolve, 'rewrite brief.md');
   });
 
-  it('SKIPs (fail-open) when brief.md is unreadable', () => {
+  it('emits RUN (not SKIP) when brief.md is unreadable so planner shows gate needs attention', () => {
     const dir = makeTmpTasksDir(null); // no brief.md file
     createdDirs.push(dir);
     // But s.hasBrief is true — simulates stale state where brief vanished.
     const { add, entries } = makeAdd();
     briefGateStep(add, makeState({ hasBrief: true }), makeCtx({ tasksDir: dir }));
     assert.equal(entries.length, 1);
-    assert.equal(entries[0].action, 'SKIP');
+    assert.equal(entries[0].action, 'RUN', 'unreadable brief must emit RUN, not SKIP');
+    assert.match(entries[0].reason, /unreadable|regenerate/i);
   });
 
   describe('applyBriefResolutions (post-resolve handler)', () => {

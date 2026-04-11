@@ -440,12 +440,27 @@ function applyResolutions(markdown, resolutions) {
 
     // Flip the block's `resolved: false` line (if any) to `resolved: true`,
     // modifying the original `lines` array in place.
+    let resolvedLineFlipped = false;
     for (let j = q.startLine; j <= q.endLine; j++) {
       const flipped = flipResolvedLine(lines[j]);
       if (flipped !== lines[j]) {
         lines[j] = flipped;
+        resolvedLineFlipped = true;
         break;
       }
+    }
+
+    // If the block had no `resolved:` subfield at all (the parser defaults
+    // to resolved: false), we must insert one so re-parsing yields
+    // `resolved: true`. Use the same indentation as sibling subfields.
+    if (!resolvedLineFlipped) {
+      const blockLines = lines.slice(q.startLine, q.endLine + 1);
+      let indent = '  ';
+      for (const bl of blockLines) {
+        const m = bl.match(/^(\s{2,})-\s+/);
+        if (m) { indent = m[1]; break; }
+      }
+      lines.splice(q.endLine + 1, 0, `${indent}- \`resolved: true\``);
     }
 
     // Append a `- **Resolution:** ...` line right after the block's last
