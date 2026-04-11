@@ -618,6 +618,78 @@ function advanceTask(ticketId) {
   };
 }
 
+// ─── Task Review Fix-Round Tracking (GH-211) ────────────────────────────────
+
+/**
+ * Get the current fix-round count for the current task.
+ * Returns 0 when the field is absent (new task).
+ * Also returns maxFixRounds and whether max is reached.
+ */
+function getTaskReviewFixRounds(ticketId) {
+  const state = loadState(ticketId);
+  if (!state?.tasksMeta) return { error: 'No task tracking initialized' };
+
+  const meta = state.tasksMeta;
+  const idx = meta.currentTaskIndex;
+  if (idx >= meta.tasks.length) return { error: 'All tasks completed, no current task' };
+
+  const fixRounds = meta.tasks[idx].taskReviewFixRounds || 0;
+  const maxFixRounds = parseInt(process.env.TASK_REVIEW_MAX_FIXES, 10) || 2;
+
+  return {
+    fixRounds,
+    maxFixRounds,
+    maxReached: fixRounds >= maxFixRounds,
+    taskIndex: idx,
+    taskId: meta.tasks[idx].id,
+  };
+}
+
+/**
+ * Increment the fix-round counter for the current task by 1 and persist.
+ */
+function incrementTaskReviewFixRounds(ticketId) {
+  const state = loadState(ticketId);
+  if (!state?.tasksMeta) return { error: 'No task tracking initialized' };
+
+  const meta = state.tasksMeta;
+  const idx = meta.currentTaskIndex;
+  if (idx >= meta.tasks.length) return { error: 'All tasks completed, no current task' };
+
+  const current = meta.tasks[idx].taskReviewFixRounds || 0;
+  meta.tasks[idx].taskReviewFixRounds = current + 1;
+
+  saveState(ticketId, state);
+
+  return {
+    fixRounds: meta.tasks[idx].taskReviewFixRounds,
+    taskIndex: idx,
+    taskId: meta.tasks[idx].id,
+  };
+}
+
+/**
+ * Reset the fix-round counter for the current task to 0 and persist.
+ */
+function resetTaskReviewFixRounds(ticketId) {
+  const state = loadState(ticketId);
+  if (!state?.tasksMeta) return { error: 'No task tracking initialized' };
+
+  const meta = state.tasksMeta;
+  const idx = meta.currentTaskIndex;
+  if (idx >= meta.tasks.length) return { error: 'All tasks completed, no current task' };
+
+  meta.tasks[idx].taskReviewFixRounds = 0;
+
+  saveState(ticketId, state);
+
+  return {
+    fixRounds: 0,
+    taskIndex: idx,
+    taskId: meta.tasks[idx].id,
+  };
+}
+
 /**
  * Get a specific task by index.
  */
@@ -649,7 +721,7 @@ async function main() {
   if (!command) {
     console.error('Usage: node work-state.js <command> <ticket-id> [args...]');
     console.error(
-      'Commands: init, get, set-step, set-check, add-error, complete, resume-info, init-subtask, complete-subtask, active-subtask, task-init, task-current, task-advance, task-get'
+      'Commands: init, get, set-step, set-check, add-error, complete, resume-info, init-subtask, complete-subtask, active-subtask, task-init, task-current, task-advance, task-get, task-review-fix-rounds, task-review-fix-rounds-increment, task-review-fix-rounds-reset'
     );
     process.exit(1);
   }
@@ -755,6 +827,33 @@ async function main() {
       console.log(JSON.stringify(result, null, 2));
       break;
 
+    case 'task-review-fix-rounds':
+      result = getTaskReviewFixRounds(ticketId);
+      if (result && result.error) {
+        console.error(JSON.stringify(result));
+        process.exit(1);
+      }
+      console.log(JSON.stringify(result, null, 2));
+      break;
+
+    case 'task-review-fix-rounds-increment':
+      result = incrementTaskReviewFixRounds(ticketId);
+      if (result && result.error) {
+        console.error(JSON.stringify(result));
+        process.exit(1);
+      }
+      console.log(JSON.stringify(result, null, 2));
+      break;
+
+    case 'task-review-fix-rounds-reset':
+      result = resetTaskReviewFixRounds(ticketId);
+      if (result && result.error) {
+        console.error(JSON.stringify(result));
+        process.exit(1);
+      }
+      console.log(JSON.stringify(result, null, 2));
+      break;
+
     default:
       console.error(`Unknown command: ${command}`);
       process.exit(1);
@@ -791,6 +890,9 @@ module.exports = {
   getTaskCurrent,
   advanceTask,
   getTaskByIndex,
+  getTaskReviewFixRounds,
+  incrementTaskReviewFixRounds,
+  resetTaskReviewFixRounds,
   STEPS,
   SUBTASK_STEPS,
   CHECK_AGENTS,
