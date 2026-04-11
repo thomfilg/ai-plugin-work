@@ -19,7 +19,7 @@ const { describe, it, before, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
 
-const { STEPS } = require('../../step-registry');
+const { STEPS } = require('../step-registry');
 
 // ─── Test doubles ────────────────────────────────────────────────────────────
 
@@ -60,7 +60,7 @@ describe('task-review step', () => {
   const savedEnv = {};
 
   before(() => {
-    taskReviewStep = require(path.join(__dirname, '..', 'task-review.js'));
+    taskReviewStep = require(path.join(__dirname, '..', 'steps', 'task-review.js'));
   });
 
   beforeEach(() => {
@@ -329,10 +329,10 @@ describe('task-review step', () => {
 
   describe('STEP_PIPELINE registration', () => {
     it('taskReviewStep is in STEP_PIPELINE between commitStep and checkStep', () => {
-      const barrel = require(path.join(__dirname, '..', 'index.js'));
-      const commitStep = require(path.join(__dirname, '..', 'commit.js'));
-      const checkStep = require(path.join(__dirname, '..', 'check.js'));
-      const taskReview = require(path.join(__dirname, '..', 'task-review.js'));
+      const barrel = require(path.join(__dirname, '..', 'steps', 'index.js'));
+      const commitStep = require(path.join(__dirname, '..', 'steps', 'commit.js'));
+      const checkStep = require(path.join(__dirname, '..', 'steps', 'check.js'));
+      const taskReview = require(path.join(__dirname, '..', 'steps', 'task-review.js'));
 
       assert.ok(Array.isArray(barrel.STEP_PIPELINE), 'STEP_PIPELINE should be an array');
 
@@ -348,7 +348,7 @@ describe('task-review step', () => {
     });
 
     it('exports taskReviewStep as a named export', () => {
-      const barrel = require(path.join(__dirname, '..', 'index.js'));
+      const barrel = require(path.join(__dirname, '..', 'steps', 'index.js'));
       assert.equal(typeof barrel.taskReviewStep, 'function', 'steps/index.js should export taskReviewStep');
     });
   });
