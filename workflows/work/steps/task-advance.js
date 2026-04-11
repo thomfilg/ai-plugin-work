@@ -19,13 +19,10 @@ module.exports = function taskAdvanceStep(add, s, ctx) {
 
   if (!taskData || !plan) return;
 
-  // GH-211: Reset fix-round counter whenever task-advance runs (new task boundary).
-  // ctx._ticketId and ctx._resetTaskReviewFixRounds are injected by the orchestrator
-  // at runtime (see work-state.js resetTaskReviewFixRounds). The typeof guard ensures
-  // graceful no-op when running during plan-generation where these are not wired.
-  if (!allTasksDone && typeof ctx._resetTaskReviewFixRounds === 'function') {
-    ctx._resetTaskReviewFixRounds(ctx._ticketId);
-  }
+  // GH-211: Fix-round counter reset is handled by work-state.js advanceTask()
+  // directly (see line ~605), which is invoked by the `work-state task-advance`
+  // CLI command during actual task advancement. This step module only mutates
+  // the plan entries; it does NOT perform state mutations during plan generation.
 
   // Signal to the agent that more tasks remain after check passes
   if (!allTasksDone && currentTaskIdx < taskData.length - 1) {

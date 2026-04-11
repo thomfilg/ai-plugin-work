@@ -9,7 +9,7 @@
 
 'use strict';
 
-const { describe, it, beforeEach } = require('node:test');
+const { describe, it } = require('node:test');
 const assert = require('node:assert');
 const path = require('path');
 
@@ -123,73 +123,6 @@ describe('task-advance: mutates task_review plan entry', () => {
   });
 });
 
-describe('task-advance: resetTaskReviewFixRounds on advance', () => {
-  it('calls resetTaskReviewFixRounds when more tasks remain', () => {
-    let resetCalled = false;
-    let resetTicketId = null;
-
-    const plan = [
-      { step: STEPS.check },
-      { step: STEPS.task_review },
-    ];
-    const ctx = {
-      STEPS,
-      plan,
-      _taskData: [{ title: 'Task 1' }, { title: 'Task 2' }],
-      _allTasksDone: false,
-      _currentTaskIdx: 0,
-      _ticketId: 'GH-211',
-      _resetTaskReviewFixRounds: (ticketId) => {
-        resetCalled = true;
-        resetTicketId = ticketId;
-      },
-    };
-
-    taskAdvanceStep(() => {}, {}, ctx);
-
-    assert.ok(resetCalled, 'resetTaskReviewFixRounds should be called');
-    assert.equal(resetTicketId, 'GH-211');
-  });
-
-  it('calls resetTaskReviewFixRounds on final task too', () => {
-    let resetCalled = false;
-
-    const plan = [
-      { step: STEPS.check },
-      { step: STEPS.task_review },
-    ];
-    const ctx = {
-      STEPS,
-      plan,
-      _taskData: [{ title: 'Task 1' }],
-      _allTasksDone: false,
-      _currentTaskIdx: 0,
-      _ticketId: 'GH-211',
-      _resetTaskReviewFixRounds: () => {
-        resetCalled = true;
-      },
-    };
-
-    taskAdvanceStep(() => {}, {}, ctx);
-
-    assert.ok(resetCalled, 'resetTaskReviewFixRounds should be called even on final task');
-  });
-
-  it('does not crash when _resetTaskReviewFixRounds is not provided', () => {
-    const plan = [
-      { step: STEPS.check },
-      { step: STEPS.task_review },
-    ];
-    const ctx = {
-      STEPS,
-      plan,
-      _taskData: [{ title: 'Task 1' }, { title: 'Task 2' }],
-      _allTasksDone: false,
-      _currentTaskIdx: 0,
-      _ticketId: 'GH-211',
-    };
-
-    // Should not throw
-    taskAdvanceStep(() => {}, {}, ctx);
-  });
-});
+// Note: Fix-round reset is performed by work-state.js advanceTask() directly
+// (see work-state.test.js for coverage), NOT by this step module.
+// This step module only mutates plan entries during plan generation.

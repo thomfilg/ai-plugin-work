@@ -87,10 +87,10 @@ module.exports = function taskReviewStep(add, s, ctx) {
   // validates, falls back to base branch on missing/invalid SHA). The range is
   // passed to the orchestrator in plan-entry metadata so /tests-review and
   // /code-review receive the task-specific diff, not the full branch diff.
-  const tasksDir = path.join(ctx.tasksBase || '', ctx.ticket || '');
+  // ctx.tasksDir is injected by plan-generator.js (see plan-generator.js line 129).
   let diffRange;
   try {
-    diffRange = computeTaskDiff(tasksDir, ctx.ticket);
+    diffRange = computeTaskDiff(ctx.tasksDir, ctx.ticket);
   } catch (_e) {
     diffRange = null;
   }
