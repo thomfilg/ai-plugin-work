@@ -9,9 +9,11 @@
  * GH-206 Task 12: Extract declarative workflow policy config.
  */
 
-const { describe, it } = require('node:test');
+const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert');
 const path = require('path');
+const fs = require('fs');
+const os = require('os');
 
 const createWorkflowDefinition = require(path.join(__dirname, '..', 'workflow-definition'));
 const { STEPS } = require(path.join(__dirname, '..', 'step-registry'));
@@ -133,5 +135,116 @@ describe('workflow-definition: agentGatedScripts', () => {
     assert.ok(entry.agents.includes('developer-react-senior'));
     assert.ok(entry.agents.includes('developer-devops'));
     assert.equal(entry.step, STEPS.implement);
+  });
+});
+
+// ─── GH-215 Task 7: brief_gate verify entry ─────────────────────────────────
+//
+// The verify function for STEPS.brief_gate must return true iff:
+//   (1) brief.md exists under the ticket's tasks dir, AND
+//   (2) openQuestions.findBlocking(parse(brief)) returns an empty array.
+// It must never throw — any read/parse failure is a fail-closed `false`.
+describe('workflow-definition: verify[STEPS.brief_gate]', () => {
+  // Create a throwaway tasks base so each test can stage its own brief.md
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-def-briefgate-'));
+  const ticketId = 'GH-215';
+  const ticketDir = path.join(tmpRoot, ticketId);
+  fs.mkdirSync(ticketDir, { recursive: true });
+
+  const deps = {
+    TASKS_BASE: tmpRoot,
+    safeTicketPath: (id) => id,
+    resolveGitHead: () => 'ref: refs/heads/stub',
+  };
+  const { workflow: briefGateWf } = createWorkflowDefinition(deps);
+
+  // Locate the verify function on the commandMap.
+  function getBriefGateVerify() {
+    const entries = briefGateWf.commandMap.filter(
+      (e) => e.step === STEPS.brief_gate && typeof e.verify === 'function'
+    );
+    return entries.length > 0 ? entries[0].verify : undefined;
+  }
+
+  function writeBrief(contents) {
+    fs.writeFileSync(path.join(ticketDir, 'brief.md'), contents, 'utf-8');
+  }
+  function removeBrief() {
+    const p = path.join(ticketDir, 'brief.md');
+    if (fs.existsSync(p)) fs.unlinkSync(p);
+  }
+
+  after(() => {
+    try {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    } catch {
+      /* best-effort cleanup */
+    }
+  });
+
+  it('registers a verify function for STEPS.brief_gate on the commandMap', () => {
+    const verify = getBriefGateVerify();
+    assert.equal(typeof verify, 'function', 'expected verify[STEPS.brief_gate] to be a function');
+  });
+
+  it('returns false when brief.md is missing (fail-closed)', () => {
+    removeBrief();
+    const verify = getBriefGateVerify();
+    assert.equal(verify(ticketId), false);
+  });
+
+  it('returns false when brief has an unresolved architectural question', () => {
+    writeBrief(
+      [
+        '# Brief',
+        '',
+        '## Open Questions',
+        '',
+        '- **Question:** Should we change the auth model?',
+        '  - `scope: architectural`',
+        '  - `rationale: touches session handling`',
+        '  - `resolved: false`',
+        '',
+      ].join('\n')
+    );
+    const verify = getBriefGateVerify();
+    assert.equal(verify(ticketId), false);
+  });
+
+  it('returns true when all questions are local or resolved', () => {
+    writeBrief(
+      [
+        '# Brief',
+        '',
+        '## Open Questions',
+        '',
+        '- **Question:** What name should this helper use?',
+        '  - `scope: local`',
+        '  - `rationale: naming only, no cross-cutting impact`',
+        '  - `resolved: false`',
+        '',
+        '- **Question:** Should we change the auth model?',
+        '  - `scope: architectural`',
+        '  - `rationale: resolved during planning`',
+        '  - `resolved: true`',
+        '  - **Resolution:** Keep existing model.',
+        '',
+      ].join('\n')
+    );
+    const verify = getBriefGateVerify();
+    assert.equal(verify(ticketId), true);
+  });
+
+  it('returns false for a malformed brief read error (fail-closed)', () => {
+    // Remove the brief and place a directory at its path so read/parse fails.
+    removeBrief();
+    const briefPath = path.join(ticketDir, 'brief.md');
+    fs.mkdirSync(briefPath);
+    try {
+      const verify = getBriefGateVerify();
+      assert.equal(verify(ticketId), false);
+    } finally {
+      fs.rmdirSync(briefPath);
+    }
   });
 });

@@ -105,6 +105,7 @@ async function transitionTo(ticket, targetStep, envExtra = {}) {
   const steps = [
     'bootstrap',
     'brief',
+    'brief_gate', // GH-215
     'spec',
     'tasks',
     'implement',
@@ -388,6 +389,7 @@ describe('TDD enforcement', () => {
       // Walk to implement linearly
       await runOrchestrator(['transition', TICKET, 'bootstrap'], { env: baseEnv() });
       await runOrchestrator(['transition', TICKET, 'brief'], { env: baseEnv() });
+      await runOrchestrator(['transition', TICKET, 'brief_gate'], { env: baseEnv() });
       await runOrchestrator(['transition', TICKET, 'spec'], { env: baseEnv() });
       await runOrchestrator(['transition', TICKET, 'tasks'], { env: baseEnv() });
       await runOrchestrator(['transition', TICKET, 'implement'], { env: baseEnv() });
@@ -422,6 +424,7 @@ describe('TDD enforcement', () => {
     it('transition INTO 3_implement with no prior tdd-phase.json does not error (ENOENT handled)', async () => {
       await runOrchestrator(['transition', TICKET, 'bootstrap'], { env: baseEnv() });
       await runOrchestrator(['transition', TICKET, 'brief'], { env: baseEnv() });
+      await runOrchestrator(['transition', TICKET, 'brief_gate'], { env: baseEnv() });
       await runOrchestrator(['transition', TICKET, 'spec'], { env: baseEnv() });
       await runOrchestrator(['transition', TICKET, 'tasks'], { env: baseEnv() });
       // Make sure no phase state file exists

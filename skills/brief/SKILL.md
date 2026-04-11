@@ -76,3 +76,22 @@ After the agent completes:
 - Confirm the file was saved
 - Show the path
 - Suggest next step: "Run `/spec ${FOLDER_NAME}` to generate a technical specification from this brief."
+
+## Open Questions: Scope Classification and the Brief Gate
+
+Every entry under `## Open Questions` in the generated brief is emitted as a structured bullet with an explicit `scope:` classification. The scope tells downstream tooling whether the question is safe to defer or whether it must be answered before the spec step runs.
+
+### Scope categories
+
+- **`local`** — Implementation detail contained within this ticket; the answer does not change sibling work and has zero blast radius outside this brief.
+- **`cross-ticket`** — Decision affects siblings (parallel tickets, shared modules, or downstream consumers) and must be resolved before those siblings can safely proceed.
+- **`architectural`** — Systemic or foundational choice affecting siblings, platform conventions, or long-lived contracts (data models, public APIs, auth, infra shape); requires explicit sign-off, not a default.
+
+### Brief gate behavior
+
+Between the `brief` step and the `spec` step, the workflow runs a `brief_gate` check over the brief's Open Questions:
+
+- Unresolved questions with `scope: cross-ticket` or `scope: architectural` **block** the transition from brief to spec. The planner emits a `RUN` action that prompts you interactively via `AskUserQuestion`; your answer is written back into the brief as a `Resolution:` line and the question is flipped to `resolved: true`. The gate re-runs until no blocking questions remain.
+- Unresolved questions with `scope: local` **do not block** the gate. They are clarifications that do not affect sibling tickets or architecture, so they can carry forward into spec and be resolved in context.
+
+If a question was mis-classified at emission time, you can downgrade it to `local` with a written justification (or upgrade it) by editing the brief directly before re-running the gate.

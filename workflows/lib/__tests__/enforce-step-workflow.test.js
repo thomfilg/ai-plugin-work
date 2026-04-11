@@ -115,6 +115,12 @@ const WORK_STEPS = [
   'ticket',
   'bootstrap',
   'brief',
+  // GH-215: brief_gate sits between `brief` and `spec` so the hook can block
+  // the transition into `spec` until every cross-ticket/architectural open
+  // question in brief.md has been resolved. The ordering here must mirror
+  // workflows/work/step-registry.js:ALL_STEPS so tests that rely on
+  // makeStepStatus() see an authentic in-progress/pending split.
+  'brief_gate',
   'spec',
   'implement',
   'commit',
@@ -3489,6 +3495,179 @@ describe('enforce-step-workflow', () => {
       });
       assert.equal(code, 2, 'Should block when tdd-phase.json is absent');
       assert.ok(stderr.includes('BLOCKED'));
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // GH-215: brief_gate transition (brief_gate -> spec)
+  // ═══════════════════════════════════════════════════════════════════════════
+  //
+  // These tests exercise the end-to-end enforce-step-workflow hook against the
+  // verify entry wired up in workflow-definition.js for STEPS.brief_gate. They
+  // simulate a planner asking the orchestrator to advance the workflow from
+  // `brief_gate` to `spec`. The hook must:
+  //   - allow the transition when brief.md has no blocking open questions
+  //     (only-local questions, or architectural questions already resolved),
+  //   - block the transition with a BLOCKED message when one or more
+  //     architectural / cross-ticket questions remain unresolved, and
+  //   - behave idempotently: running two consecutive transitions against an
+  //     already-resolved brief must leave brief.md byte-equal and succeed both
+  //     times.
+  //
+  // Shared helpers for building fixture briefs live at the top of this block
+  // so all four scenarios use identical framing (same heading placement, same
+  // subfield indentation, same trailing newline) — that isolates the gate's
+  // behavior from any whitespace noise in the fixtures.
+  describe('brief_gate -> spec transition (GH-215)', () => {
+    const ORCHESTRATOR_PATH = path.join(__dirname, '..', '..', 'work', 'work.workflow.js');
+    const BRIEF_PATH = () => path.join(TASKS_DIR, 'brief.md');
+
+    // Minimal brief.md containing a single structured Open Question of the
+    // requested scope + resolved state. Kept deliberately small so a diff of a
+    // failing byte-equality assertion is readable.
+    function buildBrief({ scope, resolved, withResolution = false }) {
+      const lines = [
+        '# Brief',
+        '',
+        '## Open Questions',
+        '',
+        '- **Question:** Does this change affect the shared auth layer?',
+        '  - `scope: ' + scope + '`',
+        '  - `resolved: ' + (resolved ? 'true' : 'false') + '`',
+        '  - `rationale: gate-scenario fixture`',
+      ];
+      if (withResolution) {
+        lines.push('  - **Resolution:** No — stays confined to this module.');
+      }
+      lines.push(''); // trailing newline for POSIX-friendly files
+      return lines.join('\n');
+    }
+
+    function writeBrief(markdown) {
+      if (!fs.existsSync(TASKS_DIR)) fs.mkdirSync(TASKS_DIR, { recursive: true });
+      fs.writeFileSync(BRIEF_PATH(), markdown);
+    }
+
+    it('allows brief_gate -> spec when brief has only scope: local questions', async () => {
+      // Scenario 1 (spec §Test Scenarios): only-local questions never block.
+      writeWorkState(makeStepStatus('brief_gate', WORK_STEPS));
+      writeBrief(buildBrief({ scope: 'local', resolved: false }));
+
+      const { code, stderr } = await runHook({
+        tool_name: 'Bash',
+        tool_input: { command: `node ${ORCHESTRATOR_PATH} transition ${TEST_TICKET} spec` },
+      });
+      assert.equal(
+        code,
+        0,
+        `Should allow brief_gate -> spec for only-local brief. stderr: ${stderr}`
+      );
+    });
+
+    it('blocks brief_gate -> spec when brief has unresolved architectural question', async () => {
+      // Scenario 2: unresolved architectural must block with a reason.
+      writeWorkState(makeStepStatus('brief_gate', WORK_STEPS));
+      writeBrief(buildBrief({ scope: 'architectural', resolved: false }));
+
+      const { code, stderr } = await runHook({
+        tool_name: 'Bash',
+        tool_input: { command: `node ${ORCHESTRATOR_PATH} transition ${TEST_TICKET} spec` },
+      });
+      assert.equal(
+        code,
+        2,
+        'Should block brief_gate -> spec when architectural question is unresolved'
+      );
+      assert.ok(stderr.includes('BLOCKED'), 'stderr should contain BLOCKED marker');
+      // Tightened assertion: the block reason must reference the gate or the
+      // open questions it guards so the user understands what to fix.
+      assert.match(
+        stderr,
+        /brief[_-]gate|open questions|unresolved/i,
+        `stderr should mention brief_gate / open questions / unresolved. stderr: ${stderr}`
+      );
+    });
+
+    it('blocks brief_gate -> spec when brief has unresolved cross-ticket question', async () => {
+      // Scenario 2 (cross-ticket counterpart): the gate must also block on
+      // scope: cross-ticket unresolved questions. This locks in that BOTH
+      // blocking scopes (architectural + cross-ticket) are handled at the
+      // integration level, not just architectural.
+      writeWorkState(makeStepStatus('brief_gate', WORK_STEPS));
+      writeBrief(buildBrief({ scope: 'cross-ticket', resolved: false }));
+
+      const { code, stderr } = await runHook({
+        tool_name: 'Bash',
+        tool_input: { command: `node ${ORCHESTRATOR_PATH} transition ${TEST_TICKET} spec` },
+      });
+      assert.equal(
+        code,
+        2,
+        'Should block brief_gate -> spec when cross-ticket question is unresolved'
+      );
+      assert.ok(stderr.includes('BLOCKED'), 'stderr should contain BLOCKED marker');
+      assert.match(
+        stderr,
+        /brief[_-]gate|open questions|unresolved/i,
+        `stderr should mention brief_gate / open questions / unresolved. stderr: ${stderr}`
+      );
+    });
+
+    it('allows brief_gate -> spec when architectural question is resolved', async () => {
+      // Scenario 4 (first half): architectural question with resolved: true
+      // and a Resolution: subfield must pass cleanly.
+      writeWorkState(makeStepStatus('brief_gate', WORK_STEPS));
+      writeBrief(buildBrief({ scope: 'architectural', resolved: true, withResolution: true }));
+
+      const { code, stderr } = await runHook({
+        tool_name: 'Bash',
+        tool_input: { command: `node ${ORCHESTRATOR_PATH} transition ${TEST_TICKET} spec` },
+      });
+      assert.equal(
+        code,
+        0,
+        `Should allow brief_gate -> spec for resolved architectural brief. stderr: ${stderr}`
+      );
+    });
+
+    it('is idempotent: two consecutive runs leave brief.md byte-equal and both pass', async () => {
+      // Scenario 6: re-running the gate on an already-resolved brief must not
+      // mutate the file (byte-equal) and must not re-prompt — both transitions
+      // succeed. This guards against accidental rewriter side-effects in the
+      // verify path and against duplicate Resolution lines.
+      writeWorkState(makeStepStatus('brief_gate', WORK_STEPS));
+      const initial = buildBrief({
+        scope: 'architectural',
+        resolved: true,
+        withResolution: true,
+      });
+      writeBrief(initial);
+
+      const first = await runHook({
+        tool_name: 'Bash',
+        tool_input: { command: `node ${ORCHESTRATOR_PATH} transition ${TEST_TICKET} spec` },
+      });
+      assert.equal(first.code, 0, `First run should pass. stderr: ${first.stderr}`);
+      const afterFirst = fs.readFileSync(BRIEF_PATH(), 'utf-8');
+      assert.equal(
+        afterFirst,
+        initial,
+        'brief.md must be byte-equal after the first gate run (verify is read-only)'
+      );
+
+      // Re-arm the state as the orchestrator would on a subsequent /work pass.
+      writeWorkState(makeStepStatus('brief_gate', WORK_STEPS));
+      const second = await runHook({
+        tool_name: 'Bash',
+        tool_input: { command: `node ${ORCHESTRATOR_PATH} transition ${TEST_TICKET} spec` },
+      });
+      assert.equal(second.code, 0, `Second run should also pass. stderr: ${second.stderr}`);
+      const afterSecond = fs.readFileSync(BRIEF_PATH(), 'utf-8');
+      assert.equal(
+        afterSecond,
+        initial,
+        'brief.md must remain byte-equal after the second gate run (idempotent)'
+      );
     });
   });
 

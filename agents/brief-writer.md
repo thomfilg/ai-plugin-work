@@ -80,8 +80,22 @@ Generate a markdown document with this structure:
 - {How do we measure success?}
 
 ## Open Questions
-- {Anything that needs clarification}
+
+- **Question:** {question text}
+  - `scope: local | cross-ticket | architectural`
+  - `rationale: {why this classification}`
+  - `resolved: false`
 ```
+
+### Open Questions — Classification Guidance
+
+Every open question MUST be emitted as a structured bullet with an explicit `scope` classification. Use these definitions to choose the correct category at emission time:
+
+- **`local`** — Implementation detail contained within this ticket; the answer does not change sibling work and has zero blast radius outside this brief.
+- **`cross-ticket`** — Blast radius extends beyond this ticket; the decision affects siblings (parallel tickets, shared modules, or downstream consumers) and must be resolved before those siblings can safely proceed.
+- **`architectural`** — Systemic or foundational choice whose blast radius affects siblings, platform conventions, or long-lived contracts (data models, public APIs, auth, infra shape); requires explicit sign-off, not just a default.
+
+Always emit `resolved: false` on creation. Only `local` questions may remain unresolved when handing off; `cross-ticket` and `architectural` questions block the downstream gate and must be resolved (or explicitly downgraded to `local` with a justification) before the spec step runs.
 
 ## Workflow
 

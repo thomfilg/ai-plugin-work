@@ -81,6 +81,7 @@ describe('step modules', () => {
       'bootstrap',
       'transition',
       'brief',
+      'brief-gate',
       'spec',
       'tasks',
       'implement',
@@ -102,6 +103,36 @@ describe('step modules', () => {
         assert.equal(typeof stepModule, 'function', `${mod}.js should export a function`);
       });
     }
+  });
+
+  // GH-215 Task 6.1: briefGateStep must be exposed as a named export on
+  // workflows/work/steps/index.js so the pipeline (and any external consumer
+  // that imports the steps barrel) can pick it up alongside briefStep/specStep.
+  describe('steps/index.js barrel (GH-215)', () => {
+    it('exports briefGateStep as a function', () => {
+      const barrel = require(path.join(__dirname, '..', 'index.js'));
+      assert.equal(
+        typeof barrel.briefGateStep,
+        'function',
+        'steps/index.js should re-export briefGateStep'
+      );
+    });
+
+    it('includes briefGateStep in STEP_PIPELINE between briefStep and specStep', () => {
+      const barrel = require(path.join(__dirname, '..', 'index.js'));
+      assert.ok(Array.isArray(barrel.STEP_PIPELINE), 'STEP_PIPELINE should be an array');
+      const briefStep = require(path.join(__dirname, '..', 'brief.js'));
+      const specStep = require(path.join(__dirname, '..', 'spec.js'));
+      const briefGateStep = require(path.join(__dirname, '..', 'brief-gate.js'));
+      const briefIdx = barrel.STEP_PIPELINE.indexOf(briefStep);
+      const gateIdx = barrel.STEP_PIPELINE.indexOf(briefGateStep);
+      const specIdx = barrel.STEP_PIPELINE.indexOf(specStep);
+      assert.ok(briefIdx >= 0, 'briefStep must be in STEP_PIPELINE');
+      assert.ok(gateIdx >= 0, 'briefGateStep must be in STEP_PIPELINE');
+      assert.ok(specIdx >= 0, 'specStep must be in STEP_PIPELINE');
+      assert.equal(gateIdx, briefIdx + 1, 'briefGateStep must come directly after briefStep');
+      assert.equal(specIdx, gateIdx + 1, 'specStep must come directly after briefGateStep');
+    });
   });
 
   describe('ticket step', () => {
