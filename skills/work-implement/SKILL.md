@@ -162,6 +162,15 @@ node ${CLAUDE_PLUGIN_ROOT}/workflows/work-implement/tdd-phase-state.js transitio
 # If done with all behaviors: proceed to Step 3
 ```
 
+**REFACTOR is developer-owned self-cleanup only.** `/tests-review` and `/code-review` are NOT run during REFACTOR — they run as a separate post-commit gate via `workflows/work/steps/task-review.js` (GH-211). The developer agent's responsibility in REFACTOR ends at producing clean, still-green code; reviewer agents take over afterwards against the committed diff.
+
+**REFACTOR exit checklist (advisory):**
+- tests still green
+- no dead code
+- naming consistent
+
+_Why this split?_ Reviews run as a different agent against a committed artifact, which keeps the core workflow aligned to the three-phase TDD loop (RED/GREEN/REFACTOR) and ensures reviewers never see half-refactored work. See `workflows/work/steps/task-review.js` (GH-211) for the post-commit review gate.
+
 **Important:**
 - Evidence is recorded by the SCRIPT, not by agents — the script runs `git diff` and test commands itself
 - Do NOT make local git commits during the TDD loop — the commit step handles that
