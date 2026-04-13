@@ -6,6 +6,17 @@
  * CLI script for managing TDD phase state.
  * This is the ONLY way evidence gets recorded — agents never self-report.
  *
+ * Scope boundary (GH-212):
+ *   REFACTOR evidence recorded here is developer self-cleanup only. The
+ *   external review gate (/tests-review + /code-review) is NOT part of
+ *   REFACTOR and is NOT invoked by this CLI. The post-commit review gate
+ *   lives in workflows/work/steps/task-review.js (GH-211) and runs after
+ *   the commit step, against the committed diff. Keeping reviews out of
+ *   the TDD phase state machine means the normal TDD loop preserves the
+ *   clean RED / GREEN / REFACTOR flow, while exception handling remains
+ *   an out-of-band state, and ensures reviewers never see
+ *   half-refactored work.
+ *
  * Usage:
  *   node tdd-phase-state.js init <TICKET_ID>
  *   node tdd-phase-state.js current <TICKET_ID>
@@ -288,6 +299,10 @@ function cmdRecordGreen(ticketId, args) {
   successOut({ ok: true, phase: 'green', cycle: state.currentCycle, testExitCode: exitCode });
 }
 
+// cmdRecordRefactor: records re-run evidence only; does NOT invoke
+// /tests-review or /code-review. Those reviewer commands run as a separate
+// post-commit gate owned by workflows/work/steps/task-review.js (GH-211),
+// not by this CLI and not by the developer agent driving the TDD loop.
 function cmdRecordRefactor(ticketId, args) {
   if (!ticketId) errorExit('Missing ticket ID.');
   const cmd = parseCmd(args);
