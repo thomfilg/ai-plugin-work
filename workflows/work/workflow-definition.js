@@ -372,7 +372,7 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
               if (branch) ghArgs = ['pr', 'view', branch, '--json', 'number,state'];
             } catch { /* branch detection failed -- fall back to no branch arg */ }
 
-            const pr = JSON.parse(execFileSync('gh', ghArgs, opts).trim());
+            const pr = JSON.parse(execFileSync('gh', ghArgs, opts).trim()); // GH-203: positional arg, not --head
             return pr.number > 0 && pr.state === 'OPEN';
           } catch {
             return false;

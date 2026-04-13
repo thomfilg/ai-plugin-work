@@ -1,10 +1,8 @@
-/**
- * Tests for agents/code-architect.md — hardened prompt with specificity
- * constraints and anti-overengineering guards.
- *
- * Discovered by scripts/run-tests.sh which searches: workflows/, agents/, skills/
- * Manual: node --test agents/__tests__/code-architect.test.js
- */
+// Tests for agents/code-architect.md — hardened prompt with specificity
+// constraints and anti-overengineering guards.
+//
+// Discovered by scripts/run-tests.sh which searches: workflows/, agents/, skills/
+// Manual: node --test agents/__tests__/code-architect.test.js
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
