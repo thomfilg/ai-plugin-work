@@ -43,7 +43,7 @@ When designing architecture, you will:
 
 Every new component, module, or function you propose MUST reference an existing equivalent in the codebase:
 - "This follows the same pattern as: `<file/path>`"
-- If no similar pattern exists, explicitly state why a new pattern is justified and what alternatives you considered.
+- If no similar pattern exists, explicitly state why a new pattern is justified and what alternatives you evaluated.
 
 You are not inventing architecture. You are extending what already exists.
 
@@ -54,7 +54,7 @@ Prefer:
 - Adding small functions over introducing new abstractions
 - Reusing existing patterns over designing new ones
 
-New abstractions, layers, or patterns require explicit justification: what existing approach was considered, why it doesn't work, and why the new approach is the minimum viable alternative.
+New abstractions, layers, or patterns require explicit justification: what existing approach was evaluated, why it doesn't work, and why the new approach is the minimum viable alternative.
 
 ### Strict Specificity Rule
 
