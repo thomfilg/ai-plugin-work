@@ -72,7 +72,7 @@ function findCodeReviewForTask(baseDir, taskId) {
   if (!taskId) return null;
 
   const tasksDir = path.join(baseDir, 'tasks');
-  const taskFolder = path.join(tasksDir, taskId);
+  const taskFolder = path.join(tasksDir, config.safeTicketId(taskId));
   const reviewFile = path.join(taskFolder, 'code-review.check.md');
 
   if (fs.existsSync(reviewFile)) {
@@ -87,7 +87,7 @@ function findQaReportsForTask(baseDir, taskId) {
   if (!taskId) return [];
 
   const tasksDir = path.join(baseDir, 'tasks');
-  const taskFolder = path.join(tasksDir, taskId);
+  const taskFolder = path.join(tasksDir, config.safeTicketId(taskId));
 
   if (!fs.existsSync(taskFolder)) return [];
 

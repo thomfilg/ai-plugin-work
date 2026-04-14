@@ -364,34 +364,15 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
             const { execFileSync } = require('child_process');
             const opts = { encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] };
 
-            // Resolve branch for --head flag to support worktree contexts (GH-191)
+            // Resolve branch to support worktree contexts (GH-191, GH-203)
+            // Note: gh pr view uses positional branch arg, not --head flag
             let ghArgs = ['pr', 'view', '--json', 'number,state'];
-            let branch = '';
             try {
-              branch = execFileSync('git', ['branch', '--show-current'], opts).trim();
-              if (branch) ghArgs = ['pr', 'view', '--head', branch, '--json', 'number,state'];
-            } catch {
-              /* detached HEAD -- fall back to no --head */
-            }
+              const branch = execFileSync('git', ['branch', '--show-current'], opts).trim();
+              if (branch) ghArgs = ['pr', 'view', branch, '--json', 'number,state'];
+            } catch { /* branch detection failed -- fall back to no branch arg */ }
 
-            // Try --head first (GH-191), fall back to branch arg if gh doesn't support --head
-            let pr;
-            try {
-              pr = JSON.parse(execFileSync('gh', ghArgs, opts).trim());
-            } catch {
-              // Some gh versions don't support --head on `pr view`; fall back to positional branch
-              if (branch) {
-                pr = JSON.parse(
-                  execFileSync(
-                    'gh',
-                    ['pr', 'view', branch, '--json', 'number,state'],
-                    opts
-                  ).trim()
-                );
-              } else {
-                pr = JSON.parse(execFileSync('gh', ['pr', 'view', '--json', 'number,state'], opts).trim());
-              }
-            }
+            const pr = JSON.parse(execFileSync('gh', ghArgs, opts).trim()); // GH-203: positional arg, not --head
             return pr.number > 0 && pr.state === 'OPEN';
           } catch {
             return false;
@@ -407,15 +388,12 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
             const { execFileSync } = require('child_process');
             const opts = { encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] };
 
-            // Resolve branch once for --head flag to support worktree contexts (GH-191)
+            // Resolve branch to support worktree contexts (GH-191, GH-203)
             let prViewArgs = ['pr', 'view', '--json', 'number', '-q', '.number'];
             try {
               const branch = execFileSync('git', ['branch', '--show-current'], opts).trim();
-              if (branch)
-                prViewArgs = ['pr', 'view', '--head', branch, '--json', 'number', '-q', '.number'];
-            } catch {
-              /* detached HEAD -- fall back to no --head */
-            }
+              if (branch) prViewArgs = ['pr', 'view', branch, '--json', 'number', '-q', '.number'];
+            } catch { /* branch detection failed -- fall back to no branch arg */ }
 
             // 1. Get PR number
             const prNum = execFileSync('gh', prViewArgs, opts).trim();
