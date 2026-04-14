@@ -45,19 +45,22 @@ const SESSION_GUARD_PATH = require('path').resolve(
 
 /**
  * Validate and sanitize a ticket ID to prevent path traversal.
+ * Delegates ID sanitization to config.safeTicketId, then validates
+ * the resolved path stays within TASKS_BASE.
  * Allows base ticket IDs (e.g. GH-106) and suffix tickets (e.g. GH-145/phase1).
  */
 function sanitizeTicketId(ticketId) {
   if (!ticketId || typeof ticketId !== 'string') return null;
   if (!TASKS_BASE || typeof TASKS_BASE !== 'string') return null;
   if (ticketId.includes('\\')) return null;
-  const parts = ticketId.split('/');
+  const safeId = config.safeTicketId(ticketId);
+  const parts = safeId.split('/');
   if (parts.length < 1 || parts.length > 2) return null;
   if (parts.some((part) => !part || !/^[A-Za-z0-9_-]+$/.test(part))) return null;
   const baseResolved = path.resolve(TASKS_BASE);
   const resolved = path.resolve(TASKS_BASE, ...parts);
   if (resolved !== baseResolved && !resolved.startsWith(baseResolved + path.sep)) return null;
-  return ticketId; // validated: alphanumeric with optional single /suffix, resolves within TASKS_BASE
+  return safeId; // validated: alphanumeric with optional single /suffix, resolves within TASKS_BASE
 }
 
 /**

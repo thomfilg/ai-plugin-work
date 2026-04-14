@@ -520,8 +520,10 @@ describe('work-pr.workflow.js', () => {
       // Clear require cache to pick up new env vars
       const wfPath = require.resolve(path.join(__dirname, '..', 'work-pr.workflow.js'));
       const configPath = require.resolve(path.join(__dirname, '..', '..', 'lib', 'get-config.js'));
+      const libConfigPath = require.resolve(path.join(__dirname, '..', '..', 'lib', 'config.js'));
       delete require.cache[wfPath];
       delete require.cache[configPath];
+      delete require.cache[libConfigPath];
 
       try {
         const freshWf = require(wfPath);
@@ -544,6 +546,7 @@ describe('work-pr.workflow.js', () => {
         }
         delete require.cache[wfPath];
         delete require.cache[configPath];
+        delete require.cache[libConfigPath];
         fs.rmSync(tmpDir, { recursive: true, force: true });
       }
     });

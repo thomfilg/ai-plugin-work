@@ -44,7 +44,7 @@ function safeExec(cmd, options = {}) {
 const getBaseBranch = () => config.getBaseBranch({ cwd: REPO_DIR });
 
 function getReportFolder(instanceId) {
-  return path.join(TASKS_BASE, instanceId);
+  return config.tasksDir(instanceId) || path.join(TASKS_BASE, instanceId);
 }
 
 function getCurrentChangesHash() {

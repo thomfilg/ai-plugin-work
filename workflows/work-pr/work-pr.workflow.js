@@ -22,21 +22,22 @@ const { execSync } = require('child_process');
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
+const config = require(path.join(__dirname, '..', 'lib', 'config'));
 const getConfig = require(path.join(__dirname, '..', 'lib', 'get-config'));
 const WORKTREES_BASE = getConfig.require('WORKTREES_BASE');
 const TASKS_BASE = getConfig('TASKS_BASE') || path.join(WORKTREES_BASE, 'tasks');
 const { normalizeTicketId } = require(path.join(__dirname, '..', 'lib', 'ticket-provider'));
-const safeTicketId = require(path.join(__dirname, '..', 'lib', 'config')).safeTicketId;
+const safeTicketId = config.safeTicketId;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 function getTasksDir(ticketId) {
-  return path.join(TASKS_BASE, safeTicketId(ticketId));
+  return config.tasksDir(ticketId) || path.join(TASKS_BASE, safeTicketId(ticketId));
 }
 
 function getWorktreeDir(ticketId) {
-  const repo = process.env.REPO_NAME || 'my-project';
-  return path.join(WORKTREES_BASE, `${repo}-${ticketId}`);
+  const safe = safeTicketId(ticketId);
+  return config.worktreeDir(safe) || path.join(WORKTREES_BASE, `${config.REPO_NAME}-${safe}`);
 }
 
 function safeExec(cmd, options = {}) {

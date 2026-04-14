@@ -2960,10 +2960,10 @@ describe('enforce-step-workflow', () => {
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // PR verify: --head branch flag (GH-191)
+  // PR verify: branch positional arg (GH-191, GH-203)
   // ═══════════════════════════════════════════════════════════════════════════
 
-  describe('PR verify --head branch flag (GH-191)', () => {
+  describe('PR verify branch positional arg (GH-191, GH-203)', () => {
     const FAKE_GIT_DIR = path.join(os.tmpdir(), `fake-git-pr-191-${process.pid}`);
     const FAKE_GIT_PATH = path.join(FAKE_GIT_DIR, 'git');
     const FAKE_GH_DIR = path.join(os.tmpdir(), `fake-gh-pr-191-${process.pid}`);
@@ -2973,7 +2973,7 @@ describe('enforce-step-workflow', () => {
 
     function writeFakeGit() {
       if (!fs.existsSync(FAKE_GIT_DIR)) fs.mkdirSync(FAKE_GIT_DIR, { recursive: true });
-      // Provide controlled branch name so --head flag is always added,
+      // Provide controlled branch name so positional arg is always added,
       // even in CI where the checkout may be in detached HEAD state.
       const script = [
         '#!/bin/bash',
@@ -3031,22 +3031,22 @@ describe('enforce-step-workflow', () => {
       cleanup();
     });
 
-    it('passes --head flag with current branch name to gh pr view', async () => {
-      // The fake gh should receive --head with the branch name
+    it('passes branch as positional arg to gh pr view', async () => {
+      // The fake gh should receive the branch name as positional arg (not --head)
       writeFakeGh({
-        'pr view --head': '{"number":42,"state":"OPEN"}',
+        [`pr view ${PR_TEST_BRANCH}`]: '{"number":42,"state":"OPEN"}',
       });
-      // Fake git provides deterministic branch name for --head flag (CI-safe)
+      // Fake git provides deterministic branch name for positional arg (CI-safe)
       const { code } = await transitionFromPr();
-      assert.equal(code, 0, 'Should pass transition when --head flag resolves the PR');
+      assert.equal(code, 0, 'Should pass transition when branch positional arg resolves the PR');
     });
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
-  // follow_up verify: --head branch flag (GH-191)
+  // follow_up verify: branch positional arg (GH-191, GH-203)
   // ═══════════════════════════════════════════════════════════════════════════
 
-  describe('follow_up verify --head branch flag (GH-191)', () => {
+  describe('follow_up verify branch positional arg (GH-191, GH-203)', () => {
     const FAKE_GIT_DIR = path.join(os.tmpdir(), `fake-git-followup-191-${process.pid}`);
     const FAKE_GIT_PATH = path.join(FAKE_GIT_DIR, 'git');
     const FAKE_GH_DIR = path.join(os.tmpdir(), `fake-gh-followup-191-${process.pid}`);
@@ -3056,7 +3056,7 @@ describe('enforce-step-workflow', () => {
 
     function writeFakeGit() {
       if (!fs.existsSync(FAKE_GIT_DIR)) fs.mkdirSync(FAKE_GIT_DIR, { recursive: true });
-      // Provide controlled branch name so --head flag is always added,
+      // Provide controlled branch name so positional arg is always added,
       // even in CI where the checkout may be in detached HEAD state.
       const script = [
         '#!/bin/bash',
@@ -3114,15 +3114,16 @@ describe('enforce-step-workflow', () => {
       cleanup();
     });
 
-    it('passes --head flag to initial gh pr view in follow_up verify', async () => {
+    it('passes branch as positional arg to gh pr view in follow_up verify', async () => {
       writeFakeGh({
-        'pr view --head': '42',
+        [`pr view ${FOLLOWUP_TEST_BRANCH}`]: '42',
         'pr checks 42 --json': '[{"state":"SUCCESS","name":"build"}]',
+        'pr checks 42': 'build\tpass\t1s\thttps://example.com',
         'pr view 42 --json reviewDecision': '{"reviewDecision":"APPROVED"}',
         'repos/{owner}/{repo}/pulls/42/comments': '0',
-      }); // fake git (writeFakeGit above) provides deterministic branch for --head (CI-safe)
+      }); // fake git (writeFakeGit above) provides deterministic branch for positional arg (CI-safe)
       const { code } = await transitionFromFollowUp();
-      assert.equal(code, 0, 'Should use --head flag for initial PR number resolution');
+      assert.equal(code, 0, 'Should use branch positional arg for initial PR number resolution');
     });
   });
 

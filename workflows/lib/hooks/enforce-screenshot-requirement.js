@@ -36,11 +36,14 @@ function getRepoRoot() {
 }
 
 function getScreenshotDir(ticketId) {
+  const config = require('../config');
+  const tasksDir = config.tasksDir(ticketId);
+  if (tasksDir) return path.join(tasksDir, 'screenshots');
+  // Fallback: use repo root or cwd parent
   const repoRoot = getRepoRoot();
   if (repoRoot) {
     return path.join(path.dirname(repoRoot), 'tasks', ticketId, 'screenshots');
   }
-  // Fallback: use cwd parent
   return path.join(process.cwd(), '..', 'tasks', ticketId, 'screenshots');
 }
 
