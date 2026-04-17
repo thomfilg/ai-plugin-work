@@ -3,8 +3,13 @@
 /**
  * PreToolUse hook to enforce /work-implement usage during /work command.
  *
- * When /work is active (after bootstrap, before commit), blocks direct
- * Write/Edit operations unless /work-implement has been invoked.
+ * GH-219 Task 13: Rewritten to use state-based detection via
+ * `loadEnforcementContext` + `runPreflight` instead of transcript-based
+ * `isWorkCommandActive` / `hasWorkImplementBeenInvoked`.
+ *
+ * When /work is active (state: in_progress) and the implement step has been
+ * reached but /work-implement has not been invoked, blocks direct
+ * Write/Edit operations.
  *
  * Also provides hard protection for /work-implement assets themselves,
  * preventing escape-hatch edits via allowed patterns.
@@ -40,6 +45,12 @@ try {
 }
 if (!config) process.exit(0);
 
+// ─── Imports: adapter, preflight, audit (GH-219 Task 13) ─────────────────
+const { loadEnforcementContext } = require('../work-enforcement-context');
+const { runPreflight } = require('../../lib/preflight');
+const { appendEnforcementAudit } = require('../work-actions');
+const { getCurrentTaskId } = require('../../lib/scripts/get-ticket-id');
+
 // Tools that require /work-implement first
 const BLOCKED_TOOLS = ['Write', 'Edit', 'MultiEdit'];
 
@@ -64,7 +75,7 @@ const ALLOWED_PATTERNS = [
   /\.prettierrc/, // Prettier config
   /package\.json$/, // Package files
   /tsconfig/, // TypeScript config
-  new RegExp(config.TASKS_BASE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), // Global task tracking files
+  new RegExp(config.TASKS_BASE ? config.TASKS_BASE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : '__NO_TASKS_BASE__'), // Global task tracking files
   /\.task-/, // Task files
   /\/__tests__\//, // Test directories
   /\.test\.[jt]sx?$/, // .test.js, .test.ts, .test.tsx
@@ -82,70 +93,6 @@ function hasUnlockPhrase(transcriptPath, phrase) {
   try {
     const content = fs.readFileSync(transcriptPath, 'utf8');
     return content.includes(phrase);
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Check if /work command is active in the transcript
- */
-function isWorkCommandActive(transcriptPath) {
-  if (!transcriptPath || !fs.existsSync(transcriptPath)) {
-    return false;
-  }
-
-  try {
-    const content = fs.readFileSync(transcriptPath, 'utf8');
-
-    // Look for /work invocation (but not /work-implement or /work-pr)
-    const workPatterns = [
-      /<command-name>\/work<\/command-name>/,
-      /"skill"\s*:\s*"work"[^-]/, // "work" but not "work-implement" or "work-pr"
-      /# Start Work Command/, // The command's header from work.md
-    ];
-
-    // Check if /work is active
-    const hasWork = workPatterns.some((pattern) => pattern.test(content));
-
-    if (!hasWork) return false;
-
-    // Check if we're past Step 3 (bootstrap) but before Step 6 (commit)
-    // Look for signs that bootstrap is done
-    const bootstrapDone =
-      new RegExp('\\/bootstrap\\s+' + config.TICKET_PROJECT_KEY + '-\\d+').test(content) ||
-      /Worktree.*created|worktree.*exists/i.test(content) ||
-      /draft PR.*created/i.test(content);
-
-    // Check if commit step has been reached
-    const commitReached = /commit-writer|Step 6.*commit/i.test(content);
-
-    // Only enforce during implementation phase (after bootstrap, before commit)
-    return bootstrapDone && !commitReached;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Check if /work-implement has been invoked
- */
-function hasWorkImplementBeenInvoked(transcriptPath) {
-  if (!transcriptPath || !fs.existsSync(transcriptPath)) {
-    return false;
-  }
-
-  try {
-    const content = fs.readFileSync(transcriptPath, 'utf8');
-
-    // Check for /work-implement invocation
-    const patterns = [
-      /<command-name>\/work-implement<\/command-name>/,
-      /"skill"\s*:\s*"work-implement"/,
-      /# Implement Command/, // The command's header
-    ];
-
-    return patterns.some((pattern) => pattern.test(content));
   } catch {
     return false;
   }
@@ -199,6 +146,75 @@ function isFileAllowed(filePath) {
   return ALLOWED_PATTERNS.some((pattern) => pattern.test(filePath));
 }
 
+// ─── State-based phase detection (GH-219 R1) ─────────────────────────────
+
+/**
+ * Determine if the workflow is in the implement phase using canonical state.
+ * Replaces transcript-based `isWorkCommandActive`.
+ *
+ * Returns true when:
+ *   - workflow is active (status === 'in_progress')
+ *   - bootstrap step is completed
+ *   - commit step has NOT been reached (not completed or in_progress)
+ *
+ * Uses step statuses rather than currentStep index for robustness
+ * against step-registry additions.
+ *
+ * @param {object} ctx - EnforcementContext from loadEnforcementContext
+ * @returns {boolean}
+ */
+function isInImplementPhase(ctx) {
+  if (!ctx || !ctx.hasWorkflow) return false;
+  const state = ctx.state;
+  if (!state || state.status !== 'in_progress') return false;
+
+  const stepStatus = state.stepStatus || {};
+  const bootstrapDone = stepStatus.bootstrap === 'completed';
+  const commitReached = stepStatus.commit === 'completed' || stepStatus.commit === 'in_progress';
+
+  // After bootstrap is done, before commit is reached
+  return bootstrapDone && !commitReached;
+}
+
+/**
+ * Check if /work-implement has been invoked using canonical state.
+ * Replaces transcript-based `hasWorkImplementBeenInvoked`.
+ *
+ * Returns true when the implement step status is 'completed' or 'in_progress'.
+ *
+ * @param {object} ctx - EnforcementContext from loadEnforcementContext
+ * @returns {boolean}
+ */
+function hasImplementBeenInvoked(ctx) {
+  if (!ctx || !ctx.state) return false;
+  const stepStatus = ctx.state.stepStatus || {};
+  return stepStatus.implement === 'completed' || stepStatus.implement === 'in_progress';
+}
+
+/**
+ * Create the audit callback for preflight (R13).
+ * Wraps appendEnforcementAudit with the ticket ID and action context.
+ *
+ * @param {string} ticketId
+ * @param {string} toolName
+ * @param {string} filePath
+ * @param {object} ctx - EnforcementContext
+ * @returns {function}
+ */
+function createAuditCallback(ticketId, toolName, filePath, ctx) {
+  return (entry) => {
+    appendEnforcementAudit(ticketId, {
+      origin: entry.origin || ctx.origin || 'user',
+      task: null,
+      phase: null,
+      action: `${toolName}:${filePath || 'unknown'}`,
+      allow: entry.decision === 'allow',
+      reason: (entry.reasons || []).join('; ') || (entry.decision === 'allow' ? 'allowed' : 'denied'),
+      outputPath: filePath || null,
+    });
+  };
+}
+
 async function main() {
   let input = '';
   for await (const chunk of process.stdin) {
@@ -218,7 +234,7 @@ async function main() {
   // Get the file path being edited
   const filePath = toolInput.file_path || toolInput.path || '';
 
-  // ── Hard protection: /work-implement assets ────────────────────────────────
+  // ── Hard protection: /work-implement assets ────────────────────────────
   // This runs regardless of /work being active, so it can't be used as an escape hatch.
   if (isProtectedWorkImplementFile(filePath)) {
     const unlocked = hasUnlockPhrase(transcriptPath, WORK_IMPLEMENT_UNLOCK_PHRASE);
@@ -244,18 +260,32 @@ async function main() {
     process.exit(0);
   }
 
-  // Check if /work command is active in implementation phase
-  if (!isWorkCommandActive(transcriptPath)) {
+  // ── State-based workflow detection (GH-219 R1) ─────────────────────────
+  // Load enforcement context via adapter instead of reading transcript
+  const ticketId = getCurrentTaskId();
+
+  // If no ticket ID can be derived, no workflow to enforce
+  if (!ticketId) {
     process.exit(0);
   }
 
-  // Allow config/non-code files
+  const ctx = loadEnforcementContext(ticketId);
+
+  // Check if we're in the implement phase using state
+  if (!isInImplementPhase(ctx)) {
+    process.exit(0);
+  }
+
+  // Allow config/non-code files (preserved from original)
   if (isFileAllowed(filePath)) {
     process.exit(0);
   }
 
-  // Check if /work-implement has been invoked
-  if (hasWorkImplementBeenInvoked(transcriptPath)) {
+  // Check if /work-implement has been invoked (state-based)
+  if (hasImplementBeenInvoked(ctx)) {
+    // ── Audit: allow path (R13) ────────────────────────────────────────
+    const auditCb = createAuditCallback(ticketId, toolName, filePath, ctx);
+    runPreflight(ctx, { audit: auditCb });
     process.exit(0);
   }
 
@@ -264,7 +294,13 @@ async function main() {
     process.exit(0);
   }
 
-  // Block the operation
+  // ── Block with audit (R13) ───────────────────────────────────────────
+  const auditCb = createAuditCallback(ticketId, toolName, filePath, ctx);
+  runPreflight(
+    { ...ctx, error: { code: 'IMPLEMENT_REQUIRED', message: '/work-implement not invoked', remediation: ['Invoke /work-implement first'] } },
+    { audit: auditCb }
+  );
+
   process.stderr.write(
     `/work Step 4 requires /work-implement\n\n` +
       `Direct ${toolName} blocked during /work implementation phase.\n\n` +
