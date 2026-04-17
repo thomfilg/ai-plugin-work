@@ -527,12 +527,245 @@ function completeSubtask(ticketId, subtaskIndex) {
 // ─── Task Progress Functions ─────────────────────────────────────────────────
 
 /**
- * Initialize task tracking from tasks.md parsed data.
- * Called after tasks step completes.
+ * @typedef {Object} TaskGraphError
+ * @property {string} code
+ *   Stable identifier for the violation. One of:
+ *   `UNKNOWN_DEPENDENCY`, `SELF_DEPENDENCY`, `DEPENDENCY_CYCLE`,
+ *   `INVALID_TASK_GRAPH`, `INVALID_TASK_ENTRY`. Used as rule id by preflight.
+ * @property {string|null} taskId
+ *   Task id (`task_${num}`) the violation belongs to, or null when the input
+ *   is not an array / not shaped as a task list.
+ * @property {string} message    Human-readable description.
+ * @property {string[]} remediation
+ *   Actionable fix steps (R18 explainability). Non-empty for every error.
  */
-function initTasksMeta(ticketId, taskCount) {
+
+/**
+ * @typedef {Object} TaskGraphValidation
+ * @property {boolean} valid
+ * @property {TaskGraphError[]} errors
+ *   All detected violations. Self-dependency errors are reported as
+ *   `SELF_DEPENDENCY` (not `DEPENDENCY_CYCLE`) for actionable remediation.
+ */
+
+/**
+ * Validate a task dependency graph.
+ *
+ * Pure function — no filesystem I/O. Intended to be shared by:
+ *   1. `initTasksMeta` (this file) — called BEFORE persisting tasksMeta so
+ *      invalid graphs never reach disk (R4).
+ *   2. Task 12 preflight in `workflows/lib/preflight.js` — re-runs on every
+ *      enforcement decision without duplicating validation logic (see
+ *      acceptance criteria: "`validateTaskGraph` exports a stable API for
+ *      reuse by Task 12").
+ *
+ * Accepts an array of task descriptors (from `task-parser.js` `parseTasks`).
+ * Each task must have a numeric `num`. A missing `dependencies` field is
+ * treated as `[]` (no error) to support legacy / partially-annotated plans.
+ *
+ * Violations detected:
+ *   - `SELF_DEPENDENCY`    — task declares itself as a dependency
+ *   - `UNKNOWN_DEPENDENCY` — dependency id has no matching task
+ *   - `DEPENDENCY_CYCLE`   — directed cycle in the remaining edges after
+ *                             self-edges are stripped (DFS coloring)
+ *
+ * @param {Array<{num:number, dependencies?:number[]}>} tasks
+ * @returns {TaskGraphValidation}
+ */
+function validateTaskGraph(tasks) {
+  if (!Array.isArray(tasks)) {
+    return {
+      valid: false,
+      errors: [
+        {
+          code: 'INVALID_TASK_GRAPH',
+          taskId: null,
+          message: `validateTaskGraph expected an array of tasks, received ${tasks === null ? 'null' : typeof tasks}.`,
+          remediation: [
+            'Pass the result of parseTasks(tasksDir) from task-parser.js.',
+            'Verify tasks.md exists and has at least one `## Task N` section.',
+          ],
+        },
+      ],
+    };
+  }
+
+  const errors = [];
+
+  // Build task-number set and adjacency list in a single pass. Skip tasks
+  // whose `num` is not a positive integer — report once but keep going so
+  // we can surface every detectable error in one call.
+  const taskNums = new Set();
+  for (const task of tasks) {
+    if (task && Number.isInteger(task.num) && task.num > 0) {
+      taskNums.add(task.num);
+    } else {
+      errors.push({
+        code: 'INVALID_TASK_ENTRY',
+        taskId: null,
+        message: `Task entry missing a positive integer \`num\` field: ${JSON.stringify(task)}`,
+        remediation: [
+          'Ensure each `## Task N` heading in tasks.md uses a positive integer.',
+          'Re-run `parseTasks(tasksDir)` and inspect the output before passing to validateTaskGraph.',
+        ],
+      });
+    }
+  }
+
+  // adj[taskNum] = list of dep task nums (self-edges stripped; self-dep
+  // reported separately). Only includes edges where the target exists.
+  const adj = new Map();
+  for (const task of tasks) {
+    if (!task || !Number.isInteger(task.num)) continue;
+    const deps = Array.isArray(task.dependencies) ? task.dependencies : [];
+    const filteredDeps = [];
+    for (const dep of deps) {
+      if (!Number.isInteger(dep)) continue; // parseTasks only emits ints; defensive
+      if (dep === task.num) {
+        errors.push({
+          code: 'SELF_DEPENDENCY',
+          taskId: `task_${task.num}`,
+          message: `Task ${task.num} depends on itself.`,
+          remediation: [
+            `Remove the self-reference from Task ${task.num}'s \`### Dependencies\` section in tasks.md.`,
+            'A task cannot wait for its own completion.',
+          ],
+        });
+        continue; // strip from adjacency — don't double-report as cycle
+      }
+      if (!taskNums.has(dep)) {
+        errors.push({
+          code: 'UNKNOWN_DEPENDENCY',
+          taskId: `task_${task.num}`,
+          message: `Task ${task.num} depends on unknown Task ${dep}.`,
+          remediation: [
+            `Verify Task ${dep} exists in tasks.md under a \`## Task ${dep}\` heading.`,
+            `Update Task ${task.num}'s \`### Dependencies\` section to reference an existing task id.`,
+          ],
+        });
+        continue; // unknown edge cannot participate in cycle detection
+      }
+      filteredDeps.push(dep);
+    }
+    adj.set(task.num, filteredDeps);
+  }
+
+  // Cycle detection via DFS coloring (WHITE/GRAY/BLACK). A GRAY back-edge
+  // indicates a cycle; we reconstruct the cycle from the DFS path and dedupe
+  // on canonical rotation so A→B→A and B→A→B report once.
+  const WHITE = 0;
+  const GRAY = 1;
+  const BLACK = 2;
+  const color = new Map();
+  for (const num of taskNums) color.set(num, WHITE);
+
+  const reportedCycles = new Set();
+
+  function dfs(start) {
+    // Iterative DFS with explicit path tracking; avoids recursion depth limits
+    // on large graphs while preserving the back-edge detection semantics.
+    const stack = [{ node: start, depIndex: 0 }];
+    const path = [];
+    color.set(start, GRAY);
+    path.push(start);
+
+    while (stack.length > 0) {
+      const frame = stack[stack.length - 1];
+      const neighbors = adj.get(frame.node) || [];
+      if (frame.depIndex < neighbors.length) {
+        const next = neighbors[frame.depIndex++];
+        const c = color.get(next);
+        if (c === GRAY) {
+          // Back-edge → cycle. Extract cycle from path and dedupe.
+          const startIdx = path.indexOf(next);
+          const cycle = path.slice(startIdx);
+          const cycleKey = [...cycle].sort((a, b) => a - b).join(',');
+          if (!reportedCycles.has(cycleKey)) {
+            reportedCycles.add(cycleKey);
+            const display = [...cycle, next].map((n) => `Task ${n}`).join(' → ');
+            errors.push({
+              code: 'DEPENDENCY_CYCLE',
+              taskId: `task_${next}`,
+              message: `Dependency cycle detected: ${display}.`,
+              remediation: [
+                'Break the cycle by removing one dependency edge in tasks.md.',
+                `Review the \`### Dependencies\` section of each task in the cycle (${cycle
+                  .map((n) => `Task ${n}`)
+                  .join(', ')}).`,
+                'Tasks in a cycle can never start — at least one must drop its back-reference.',
+              ],
+            });
+          }
+        } else if (c === WHITE) {
+          color.set(next, GRAY);
+          path.push(next);
+          stack.push({ node: next, depIndex: 0 });
+        }
+        // BLACK: fully explored subtree — safe to skip (no new cycles reachable)
+      } else {
+        color.set(frame.node, BLACK);
+        path.pop();
+        stack.pop();
+      }
+    }
+  }
+
+  for (const num of taskNums) {
+    if (color.get(num) === WHITE) {
+      dfs(num);
+    }
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+  };
+}
+
+/**
+ * Initialize task tracking for a ticket.
+ *
+ * Accepts EITHER:
+ *   - a positive integer `taskCount` (LEGACY / R16 pre-IDEA2 form) — creates
+ *     tasks without a `dependencies` field, matching pre-IDEA2 wire format.
+ *     Callers (e.g. `implement.js` spawning `task-init COUNT` via CLI)
+ *     continue to work unchanged.
+ *   - an array of task descriptors from `parseTasks(tasksDir)` (NEW IDEA2
+ *     form) — runs `validateTaskGraph` BEFORE persisting. Invalid graphs
+ *     return `{ error, errors }` and never reach disk (R4 fail-closed).
+ *
+ * On success with the array form, each persisted `tasksMeta.tasks[i]` gains
+ * a `dependencies: number[]` copy of the source task's dependency list.
+ *
+ * Idempotent: if `tasksMeta` already exists, returns it unchanged.
+ *
+ * @param {string} ticketId
+ * @param {number | Array<{num:number, dependencies?:number[]}>} taskCountOrTasks
+ * @returns {object}
+ *   - `{ ...state }` on success (same shape as `saveState` return)
+ *   - `{ success: true, tasksMeta, idempotent: true }` on idempotent call
+ *   - `{ error: string, errors?: TaskGraphError[] }` on validation failure
+ */
+function initTasksMeta(ticketId, taskCountOrTasks) {
+  const isTaskArray = Array.isArray(taskCountOrTasks);
+  const tasksInput = isTaskArray ? taskCountOrTasks : null;
+  const taskCount = isTaskArray ? tasksInput.length : taskCountOrTasks;
+
   if (!Number.isInteger(taskCount) || taskCount <= 0) {
     return { error: `Invalid taskCount: ${taskCount}. Must be a positive integer.` };
+  }
+
+  // ─── R4: Graph validation BEFORE any persistence write ─────────────────
+  // Only validate when the caller opts into the IDEA2 form (array). Integer
+  // form preserves pre-IDEA2 semantics: no dependencies, no graph to check.
+  if (isTaskArray) {
+    const validation = validateTaskGraph(tasksInput);
+    if (!validation.valid) {
+      return {
+        error: 'Invalid task graph — see `errors` for details.',
+        errors: validation.errors,
+      };
+    }
   }
 
   let state = loadState(ticketId);
@@ -545,7 +778,15 @@ function initTasksMeta(ticketId, taskCount) {
 
   const tasks = [];
   for (let i = 0; i < taskCount; i++) {
-    tasks.push({ id: `task_${i + 1}`, status: 'pending' });
+    const entry = { id: `task_${i + 1}`, status: 'pending' };
+    if (isTaskArray) {
+      // Copy dependencies from parseTasks output. Match by `num` (1-indexed)
+      // so out-of-order task lists still produce the correct mapping.
+      const src = tasksInput.find((t) => t && t.num === i + 1);
+      const deps = src && Array.isArray(src.dependencies) ? src.dependencies : [];
+      entry.dependencies = deps.slice(); // defensive copy — callers can't mutate persisted state
+    }
+    tasks.push(entry);
   }
 
   state.tasksMeta = {
@@ -555,7 +796,77 @@ function initTasksMeta(ticketId, taskCount) {
   };
 
   return saveState(ticketId, state);
-} // initTasksMeta validates taskCount > 0 and initializes state if missing (line 513-515)
+}
+
+/**
+ * Check whether a task is ready to start, per its declared dependencies.
+ *
+ * Pure query — reads `loadState(ticketId).tasksMeta` only, no other I/O.
+ * Single source of truth for dependency readiness (R3) — Task 12 preflight
+ * imports this function; there must not be a second implementation
+ * elsewhere.
+ *
+ * Semantics:
+ *   - Task has no `dependencies` field (pre-IDEA2) → return `true`.
+ *     R16 default: preserves pre-IDEA2 sequential behavior where the
+ *     orchestrator drives order via `currentTaskIndex` and every task
+ *     is considered startable from the graph's point of view.
+ *   - Task has `dependencies: []`                → return `true`.
+ *   - Every declared dep exists in `tasksMeta.tasks` with
+ *     `status === 'completed'`                    → return `true`.
+ *   - Any dep is pending, missing, or the task itself is already completed
+ *                                                 → return `false` (fail-closed).
+ *
+ * The "completed task is not startable" rule mirrors advanceTask's idempotent
+ * terminal behavior — canStart is a forward-looking question about work that
+ * could still be begun, not about work that has been done.
+ *
+ * @param {string} ticketId
+ * @param {number} taskNum - 1-indexed task number (matches `task_${N}` id /
+ *                           `## Task N` heading in tasks.md).
+ * @returns {boolean}
+ */
+/**
+ * Find a persisted task entry by its 1-indexed task number.
+ * Returns null if the state is uninitialized or the number is out of range.
+ * @param {object} state - Full ticket state as returned by `loadState`.
+ * @param {number} taskNum - 1-indexed task number (maps to `task_${N}`).
+ * @returns {object|null}
+ */
+function findTaskByNum(state, taskNum) {
+  if (!state || !state.tasksMeta || !Array.isArray(state.tasksMeta.tasks)) return null;
+  if (!Number.isInteger(taskNum) || taskNum <= 0) return null;
+  const targetId = `task_${taskNum}`;
+  return state.tasksMeta.tasks.find((t) => t && t.id === targetId) || null;
+}
+
+function canStart(ticketId, taskNum) {
+  const state = loadState(ticketId);
+  const task = findTaskByNum(state, taskNum);
+  if (!task) return false; // uninitialized, bad input, or unknown task
+
+  // Already completed → not startable (forward-looking query)
+  if (task.status === 'completed') return false;
+
+  // R16 backward compat: missing `dependencies` field means the task was
+  // persisted under the pre-IDEA2 schema. Treat as empty deps — sequential
+  // orchestrator handles ordering.
+  if (!Array.isArray(task.dependencies)) return true;
+
+  // Empty deps → startable
+  if (task.dependencies.length === 0) return true;
+
+  // All declared deps must resolve to a completed task. Unknown dep →
+  // fail-closed (R4: validation should have prevented this, but belt-and-
+  // suspenders for state files that skipped the new initTasksMeta path).
+  for (const depNum of task.dependencies) {
+    const dep = findTaskByNum(state, depNum);
+    if (!dep) return false;
+    if (dep.status !== 'completed') return false;
+  }
+
+  return true;
+}
 
 /**
  * Get the current task info.
@@ -894,6 +1205,8 @@ module.exports = {
   completeSubtask,
   autoInitTdd,
   initTasksMeta,
+  validateTaskGraph,
+  canStart,
   getTaskCurrent,
   advanceTask,
   getTaskByIndex,
