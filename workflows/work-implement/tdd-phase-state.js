@@ -64,17 +64,94 @@ function sanitizeId(ticketId) {
   }
 }
 
-function getStatePath(ticketId) {
+/**
+ * Resolve TASKS_BASE from env, config, or HOME fallback.
+ * @returns {string}
+ */
+function resolveTasksBase() {
+  return (
+    process.env.TASKS_BASE ||
+    (config && config.TASKS_BASE) ||
+    path.join(process.env.HOME, 'worktrees', 'tasks')
+  );
+}
+
+/**
+ * Build the per-task state path: TASKS_BASE/<ticket>/task${N}/tdd-phase.json
+ * @param {string} base - Resolved TASKS_BASE
+ * @param {string} safeId - Sanitized ticket ID
+ * @param {number} taskNum - Task number (positive integer)
+ * @returns {string}
+ */
+function perTaskStatePath(base, safeId, taskNum) {
+  let taskSegmentFn;
+  try {
+    taskSegmentFn = require('../lib/allocate-output-folder').taskSegment;
+  } catch {
+    // fallback if allocator not available — inline the task${N} pattern
+    taskSegmentFn = (n) => `task${n}`;
+  }
+  return path.resolve(base, safeId, taskSegmentFn(taskNum), 'tdd-phase.json');
+}
+
+/**
+ * Build the legacy ticket-root state path: TASKS_BASE/<ticket>/tdd-phase.json
+ * @param {string} base - Resolved TASKS_BASE
+ * @param {string} safeId - Sanitized ticket ID
+ * @returns {string}
+ */
+function ticketRootStatePath(base, safeId) {
+  return path.resolve(base, safeId, 'tdd-phase.json');
+}
+
+/**
+ * Resolve the state file path for a ticket.
+ *
+ * When taskNum is provided:
+ *   - Write path: always per-task (TASKS_BASE/<ticket>/task${N}/tdd-phase.json)
+ *   - Read path: per-task first; if missing, fallback to legacy root path
+ *     (TASKS_BASE/<ticket>/tdd-phase.json) for backward compatibility.
+ *
+ * When taskNum is NOT provided:
+ *   - Uses the legacy root path (backward compat).
+ *
+ * @param {string} ticketId - Raw ticket ID
+ * @param {object} [opts] - Options
+ * @param {number} [opts.taskNum] - Task number for per-task resolution
+ * @param {boolean} [opts.forWrite] - If true, always return per-task path (no fallback)
+ * @returns {string} Absolute path to tdd-phase.json
+ */
+function getStatePath(ticketId, opts) {
   if (!ticketId || /\.\./.test(ticketId) || /\\/.test(ticketId)) {
     throw new Error(`Invalid ticket ID: ${ticketId}`);
   }
-  // Resolve from TASKS_BASE env, config module, or default HOME-based path
-  const base =
-    process.env.TASKS_BASE ||
-    (config && config.TASKS_BASE) ||
-    path.join(process.env.HOME, 'worktrees', 'tasks');
+  const base = resolveTasksBase();
   const safeId = sanitizeId(ticketId);
-  const resolved = path.resolve(base, safeId, 'tdd-phase.json');
+  const taskNum = opts && opts.taskNum;
+
+  let resolved;
+
+  if (taskNum != null && Number.isInteger(taskNum) && taskNum > 0) {
+    const perTask = perTaskStatePath(base, safeId, taskNum);
+
+    if (opts && opts.forWrite) {
+      // Writes always target per-task path
+      resolved = perTask;
+    } else {
+      // Reads: per-task first, then legacy root fallback
+      if (fs.existsSync(perTask)) {
+        resolved = perTask;
+      } else {
+        // Legacy fallback: check ticketRoot for backward compat
+        const root = ticketRootStatePath(base, safeId);
+        resolved = fs.existsSync(root) ? root : perTask;
+      }
+    }
+  } else {
+    // No task number — legacy root path
+    resolved = ticketRootStatePath(base, safeId);
+  }
+
   // Validate resolved path stays within TASKS_BASE (prevents traversal)
   if (!resolved.startsWith(path.resolve(base) + path.sep)) {
     throw new Error(`Invalid ticket ID: ${ticketId}`);
@@ -82,16 +159,16 @@ function getStatePath(ticketId) {
   return resolved;
 }
 
-function readState(ticketId) {
-  const statePath = getStatePath(ticketId);
+function readState(ticketId, opts) {
+  const statePath = getStatePath(ticketId, opts);
   if (!fs.existsSync(statePath)) {
     return null;
   }
   return JSON.parse(fs.readFileSync(statePath, 'utf8'));
 }
 
-function writeState(ticketId, state) {
-  const statePath = getStatePath(ticketId);
+function writeState(ticketId, state, opts) {
+  const statePath = getStatePath(ticketId, { ...opts, forWrite: true });
   const dir = path.dirname(statePath);
   fs.mkdirSync(dir, { recursive: true });
   const tmpPath = `${statePath}.${process.pid}.${Date.now()}.tmp`;
@@ -119,6 +196,15 @@ function parseCmd(args) {
     return null;
   }
   return args[cmdIdx + 1];
+}
+
+function parseTask(args) {
+  const taskIdx = args.indexOf('--task');
+  if (taskIdx === -1 || taskIdx + 1 >= args.length) {
+    return undefined;
+  }
+  const val = parseInt(args[taskIdx + 1], 10);
+  return Number.isInteger(val) && val > 0 ? val : undefined;
 }
 
 function runTestCommand(cmd) {
@@ -184,24 +270,28 @@ function verifyToken() {
 
 // ─── Subcommands ────────────────────────────────────────────────────────────
 
-function cmdInit(ticketId) {
+function cmdInit(ticketId, args) {
   if (!ticketId) {
     errorExit('Missing ticket ID. Usage: node tdd-phase-state.js init <TICKET_ID>');
   }
+  const taskNum = parseTask(args || []);
+  const opts = taskNum ? { taskNum } : undefined;
   const state = {
     currentPhase: 'red',
     currentCycle: 1,
     cycles: [],
   };
-  writeState(ticketId, state);
+  writeState(ticketId, state, opts);
   successOut({ ok: true, phase: 'red', cycle: 1 });
 }
 
-function cmdCurrent(ticketId) {
+function cmdCurrent(ticketId, args) {
   if (!ticketId) {
     errorExit('Missing ticket ID.');
   }
-  const state = readState(ticketId);
+  const taskNum = parseTask(args || []);
+  const opts = taskNum ? { taskNum } : undefined;
+  const state = readState(ticketId, opts);
   if (!state) {
     errorExit('No TDD phase state found. Run "init" first.');
   }
@@ -405,10 +495,10 @@ if (GATED_SUBCOMMANDS.includes(subcommand) && process.env.WORK_TDD_TOKEN_SKIP !=
 
 switch (subcommand) {
   case 'init':
-    cmdInit(ticketId);
+    cmdInit(ticketId, args.slice(2));
     break;
   case 'current':
-    cmdCurrent(ticketId);
+    cmdCurrent(ticketId, args.slice(2));
     break;
   case 'record-red':
     cmdRecordRed(ticketId, args.slice(2));

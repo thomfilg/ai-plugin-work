@@ -456,7 +456,51 @@ describe('tdd-phase-state CLI', () => {
     });
   });
 
-  describe('token gating', () => {
+  describe('per-task path with legacy root fallback (GH-219 Task 9)', () => {
+    it('init with --task writes to TASKS_BASE/<ticket>/task${N}/tdd-phase.json', () => {
+      const { stdout, exitCode } = runCli('init TEST-T9A --task 3', homeDir);
+      assert.strictEqual(exitCode, 0);
+      const result = JSON.parse(stdout);
+      assert.strictEqual(result.ok, true);
+
+      // Verify state file is at per-task path
+      const perTaskPath = path.join(homeDir, 'worktrees', 'tasks', 'TEST-T9A', 'task3', 'tdd-phase.json');
+      assert.ok(fs.existsSync(perTaskPath), `Expected per-task state at ${perTaskPath}`);
+      const state = JSON.parse(fs.readFileSync(perTaskPath, 'utf8'));
+      assert.strictEqual(state.currentPhase, 'red');
+    });
+
+    it('current with --task reads from per-task path when it exists', () => {
+      runCli('init TEST-T9B --task 5', homeDir);
+      const { stdout, exitCode } = runCli('current TEST-T9B --task 5', homeDir);
+      assert.strictEqual(exitCode, 0);
+      const result = JSON.parse(stdout);
+      assert.strictEqual(result.phase, 'red');
+    });
+
+    it('current with --task falls back to legacy root when per-task path missing', () => {
+      // Create state at root (legacy) path only
+      runCli('init TEST-T9C', homeDir);
+      // Now read with --task — per-task file does not exist, should fallback to root
+      const { stdout, exitCode } = runCli('current TEST-T9C --task 2', homeDir);
+      assert.strictEqual(exitCode, 0);
+      const result = JSON.parse(stdout);
+      assert.strictEqual(result.phase, 'red');
+    });
+
+    it('current with --task fails when neither per-task nor root exists', () => {
+      const { exitCode } = runCli('current TEST-T9D --task 1', homeDir);
+      assert.strictEqual(exitCode, 1);
+    });
+
+    it('init without --task writes to legacy root path (backward compat)', () => {
+      runCli('init TEST-T9E', homeDir);
+      const rootPath = path.join(homeDir, 'worktrees', 'tasks', 'TEST-T9E', 'tdd-phase.json');
+      assert.ok(fs.existsSync(rootPath), `Expected root state at ${rootPath}`);
+    });
+  });
+
+    describe('token gating', () => {
     it('record-red fails without token when WORK_TDD_TOKEN_SKIP is not set', () => {
       runCli('init TEST-TOK', homeDir);
       const failScript = createExitScript(scriptDir, 1);
