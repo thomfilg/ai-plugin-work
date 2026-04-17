@@ -22,6 +22,8 @@
  */
 'use strict';
 
+const path = require('path');
+
 /**
  * @typedef {import('../work/work-enforcement-context').EnforcementContext} EnforcementContext
  *
@@ -205,4 +207,238 @@ function runPreflight(context, options) {
   return result;
 }
 
-module.exports = { runPreflight };
+// ═══════════════════════════════════════════════════════════════════════════════
+// Task 12 — Preflight rules integration (graph, claim, paths)
+//
+// Built-in check factories and shared path predicate.
+//   - createGraphCheck()                → PreflightCheck  (R4)
+//   - createClaimCheck({ taskNum, ownerId }) → PreflightCheck  (R3, R6)
+//   - createPathCheck({ filePath, allowedPaths }) → PreflightCheck  (R6)
+//   - isWriteAllowedPath(filePath, allowedPaths) → boolean  (R6, R12)
+//
+// isWriteAllowedPath is the single implementation of the path predicate.
+// Tasks 13-14 hooks import it from here — no inline copies allowed.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── Shared-root whitelist (R6) ──────────────────────────────────────────────
+// Files at ticketRoot that any worker may write (coordination files).
+const SHARED_ROOT_WHITELIST = new Set([
+  'brief.md',
+  'spec.md',
+  'tasks.md',
+  '.work-state.json',
+  '.work-actions.json',
+]);
+
+/**
+ * Determine whether a file path is allowed for the current worker.
+ *
+ * This is the SINGLE implementation of the task-readiness edit gate (R6).
+ * Tasks 13-14 hooks must import this — no inline duplicates.
+ *
+ * Allowed paths:
+ *   - Under `allowedPaths.prDir`      (PR{N}/ worktree)
+ *   - Under `allowedPaths.taskDir`    (task${N}/ artifacts)
+ *   - Shared-root whitelist at `allowedPaths.ticketRoot`
+ *
+ * Fail-closed (R15): returns false when inputs are missing or malformed.
+ *
+ * @param {string} filePath     - Absolute path being written
+ * @param {object} allowedPaths - { prDir, taskDir, ticketRoot }
+ * @returns {boolean}
+ */
+function isWriteAllowedPath(filePath, allowedPaths) {
+  if (!filePath || typeof filePath !== 'string') return false;
+  if (!allowedPaths || typeof allowedPaths !== 'object') return false;
+
+  // Normalize to prevent path-traversal bypasses (R15)
+  const normalized = path.resolve(filePath);
+
+  // Check PR{N}/ directory
+  if (typeof allowedPaths.prDir === 'string' && allowedPaths.prDir.length > 0) {
+    const prResolved = path.resolve(allowedPaths.prDir);
+    if (normalized.startsWith(prResolved + path.sep) || normalized === prResolved) {
+      return true;
+    }
+  }
+
+  // Check task${N}/ directory
+  if (typeof allowedPaths.taskDir === 'string' && allowedPaths.taskDir.length > 0) {
+    const taskResolved = path.resolve(allowedPaths.taskDir);
+    if (normalized.startsWith(taskResolved + path.sep) || normalized === taskResolved) {
+      return true;
+    }
+  }
+
+  // Check shared-root whitelist at ticketRoot
+  if (typeof allowedPaths.ticketRoot === 'string' && allowedPaths.ticketRoot.length > 0) {
+    const ticketResolved = path.resolve(allowedPaths.ticketRoot);
+    // File must be directly at ticketRoot (not nested) and in the whitelist
+    const dir = path.dirname(normalized);
+    if (dir === ticketResolved) {
+      const basename = path.basename(normalized);
+      if (SHARED_ROOT_WHITELIST.has(basename)) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Create a graph validation check (R4).
+ *
+ * Validates `ctx.tasks` for unknown dependencies, self-dependencies, and
+ * cycles using `validateTaskGraph` from `work-state.js`. If tasks are null
+ * or missing, the check passes (no graph to validate).
+ *
+ * @returns {PreflightCheck}
+ */
+function createGraphCheck() {
+  return function graphCheck(ctx) {
+    if (!ctx.tasks || !Array.isArray(ctx.tasks)) return null;
+
+    // Lazy require to avoid module-level coupling with work-state.js.
+    // In production config is always available; if require fails, the
+    // enclosing runPreflight try/catch records PREFLIGHT_CHECK_ERROR.
+    const { validateTaskGraph } = require('../work/work-state');
+
+    const validation = validateTaskGraph(ctx.tasks);
+    if (validation.valid) return null;
+
+    // Aggregate all graph errors into reasons + remediation
+    const reasons = [];
+    const remediation = [];
+    for (const err of validation.errors) {
+      if (err.code && !reasons.includes(err.code)) {
+        reasons.push(err.code);
+      }
+      if (Array.isArray(err.remediation)) {
+        for (const step of err.remediation) {
+          remediation.push(step);
+        }
+      }
+    }
+
+    return { allow: false, reasons, remediation };
+  };
+}
+
+/**
+ * Create a claim + dependency readiness check (R3, R6).
+ *
+ * Validates that:
+ *   1. If taskNum is set, ownerId must also be set (unclaimed write → deny).
+ *   2. The task's dependencies are all completed (canStart semantics, R3).
+ *
+ * When no tasksMeta exists in the context state, the check passes (legacy
+ * mode, R16 backward compat).
+ *
+ * @param {object} params
+ * @param {number} [params.taskNum] - Task number being worked on
+ * @param {string} [params.ownerId] - PR{N} owner id from claim
+ * @returns {PreflightCheck}
+ */
+function createClaimCheck(params) {
+  const taskNum = params && params.taskNum;
+  const ownerId = params && params.ownerId;
+
+  return function claimCheck(ctx) {
+    // No state or no tasksMeta → legacy mode, allow (R16)
+    if (!ctx.state || !ctx.state.tasksMeta) return null;
+
+    // No taskNum requested → no claim enforcement needed
+    if (!taskNum) return null;
+
+    // R6: taskNum set but no ownerId → unclaimed task write
+    if (!ownerId) {
+      return {
+        allow: false,
+        reasons: ['UNCLAIMED_TASK_WRITE'],
+        remediation: [
+          `Task ${taskNum} has no claim. Run claimTask(ticketId, ${taskNum}, ownerId) before writing.`,
+          'Each worker must claim a task with its PR{N} owner id before modifying files.',
+        ],
+      };
+    }
+
+    // R3: Check dependency readiness using persisted tasksMeta
+    const tasksMeta = ctx.state.tasksMeta;
+    if (!Array.isArray(tasksMeta.tasks)) return null;
+
+    const targetId = `task_${taskNum}`;
+    const task = tasksMeta.tasks.find((t) => t && t.id === targetId);
+    if (!task) {
+      return {
+        allow: false,
+        reasons: ['UNKNOWN_TASK'],
+        remediation: [
+          `Task ${taskNum} not found in tasksMeta. Verify task number and re-run initTasksMeta.`,
+        ],
+      };
+    }
+
+    // Check dependency readiness (R3)
+    if (Array.isArray(task.dependencies) && task.dependencies.length > 0) {
+      for (const depNum of task.dependencies) {
+        const depId = `task_${depNum}`;
+        const dep = tasksMeta.tasks.find((t) => t && t.id === depId);
+        if (!dep || dep.status !== 'completed') {
+          return {
+            allow: false,
+            reasons: ['DEPENDENCY_NOT_READY'],
+            remediation: [
+              `Task ${taskNum} depends on Task ${depNum} which is not completed (status: ${dep ? dep.status : 'missing'}).`,
+              `Complete Task ${depNum} before starting Task ${taskNum}.`,
+              'Use canStart(ticketId, taskNum) to check readiness before claiming.',
+            ],
+          };
+        }
+      }
+    }
+
+    return null;
+  };
+}
+
+/**
+ * Create a path intent check (R6).
+ *
+ * If filePath is provided, validates it against the allowed paths using
+ * `isWriteAllowedPath`. If filePath is not provided, the check passes
+ * (no path intent to validate).
+ *
+ * @param {object} params
+ * @param {string} [params.filePath] - Absolute path being written
+ * @param {object} [params.allowedPaths] - { prDir, taskDir, ticketRoot }
+ * @returns {PreflightCheck}
+ */
+function createPathCheck(params) {
+  const filePath = params && params.filePath;
+  const allowedPaths = params && params.allowedPaths;
+
+  return function pathCheck() {
+    if (!filePath) return null;
+
+    if (isWriteAllowedPath(filePath, allowedPaths)) return null;
+
+    return {
+      allow: false,
+      reasons: ['PATH_NOT_ALLOWED'],
+      remediation: [
+        `Write to "${filePath}" is outside the allowed path set.`,
+        'Allowed paths: PR{N}/ worktree, task${N}/ artifacts, and shared-root whitelist (brief.md, spec.md, tasks.md, .work-state.json, .work-actions.json).',
+        'Verify the file path and ensure it falls under the claimed worker or task directory.',
+      ],
+    };
+  };
+}
+
+module.exports = {
+  runPreflight,
+  isWriteAllowedPath,
+  createGraphCheck,
+  createClaimCheck,
+  createPathCheck,
+};

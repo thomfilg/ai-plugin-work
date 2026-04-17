@@ -43,17 +43,17 @@ describe('preflight — module surface (R12)', () => {
     );
   });
 
-  it('has a stable public export shape (runPreflight only — no leaks of internals)', () => {
+  it('has a stable public export shape (Task 12 adds isWriteAllowedPath)', () => {
     const mod = require(MODULE_PATH);
     const exported = Object.keys(mod).sort();
 
-    // Snapshot: the public API for Task 3 is `runPreflight`. Later tasks
-    // (#12 — path predicate) may add more, but this test locks the initial
-    // contract so downstream tasks can't accidentally rely on private helpers.
+    // Task 3 exported only `runPreflight`. Task 12 adds `isWriteAllowedPath`
+    // as the shared path predicate consumed by hooks (Tasks 13-14).
+    // Also adds built-in check factories: `createGraphCheck`, `createClaimCheck`, `createPathCheck`.
     assert.deepEqual(
       exported,
-      ['runPreflight'],
-      `preflight module must export only { runPreflight } at Task 3; got: ${exported.join(', ')}`
+      ['createClaimCheck', 'createGraphCheck', 'createPathCheck', 'isWriteAllowedPath', 'runPreflight'],
+      `preflight module must export { createClaimCheck, createGraphCheck, createPathCheck, isWriteAllowedPath, runPreflight }; got: ${exported.join(', ')}`
     );
   });
 
@@ -559,5 +559,766 @@ describe('preflight — audit integration with checks', () => {
     assert.equal(audited.length, 1);
     assert.equal(audited[0].decision, 'allow');
     assert.deepEqual(audited[0].reasons, []);
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Task 12 — Preflight rules integration (graph, claim, paths)
+//
+// Requirements covered:
+//   R3  — Dependency readiness via canStart
+//   R4  — Graph validation (unknown deps, cycles, self-deps)
+//   R6  — Task-readiness edit gate (isWriteAllowedPath)
+//   R12 — Shared preflight library
+//   R13 — Audit on each decision
+//   R15 — Sanitized paths, fail closed
+//   R18 — Remediation text with ruleId
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// ─── 12.1 — isWriteAllowedPath export and behavior (R6, R12) ────────────────
+
+describe('preflight — isWriteAllowedPath export (R6, R12)', () => {
+  it('exports isWriteAllowedPath as a function', () => {
+    const { isWriteAllowedPath } = require(MODULE_PATH);
+    assert.equal(typeof isWriteAllowedPath, 'function', 'isWriteAllowedPath must be exported');
+  });
+
+  it('isWriteAllowedPath has arity 2 (filePath, allowedPaths)', () => {
+    const { isWriteAllowedPath } = require(MODULE_PATH);
+    assert.equal(isWriteAllowedPath.length, 2, 'isWriteAllowedPath(filePath, allowedPaths) needs 2 params');
+  });
+});
+
+describe('preflight — isWriteAllowedPath: PR{N}/ paths (R6)', () => {
+  it('allows paths under the claiming worker PR{N}/ directory', () => {
+    const { isWriteAllowedPath } = require(MODULE_PATH);
+
+    const allowed = {
+      prDir: '/tasks/GH-219/PR1',
+      taskDir: '/tasks/GH-219/task3',
+      ticketRoot: '/tasks/GH-219',
+    };
+
+    assert.equal(
+      isWriteAllowedPath('/tasks/GH-219/PR1/src/index.js', allowed),
+      true,
+      'files under PR{N}/ are allowed'
+    );
+    assert.equal(
+      isWriteAllowedPath('/tasks/GH-219/PR1/deep/nested/file.ts', allowed),
+      true,
+      'deeply nested files under PR{N}/ are allowed'
+    );
+  });
+
+  it('denies paths under a different PR slot', () => {
+    const { isWriteAllowedPath } = require(MODULE_PATH);
+
+    const allowed = {
+      prDir: '/tasks/GH-219/PR1',
+      taskDir: '/tasks/GH-219/task3',
+      ticketRoot: '/tasks/GH-219',
+    };
+
+    assert.equal(
+      isWriteAllowedPath('/tasks/GH-219/PR2/src/file.js', allowed),
+      false,
+      'files under a different PR slot must be denied'
+    );
+  });
+});
+
+describe('preflight — isWriteAllowedPath: task${N}/ paths (R6)', () => {
+  it('allows paths under the claimed task directory', () => {
+    const { isWriteAllowedPath } = require(MODULE_PATH);
+
+    const allowed = {
+      prDir: '/tasks/GH-219/PR1',
+      taskDir: '/tasks/GH-219/task3',
+      ticketRoot: '/tasks/GH-219',
+    };
+
+    assert.equal(
+      isWriteAllowedPath('/tasks/GH-219/task3/implement.md', allowed),
+      true,
+      'task artifact files under task${N}/ are allowed'
+    );
+    assert.equal(
+      isWriteAllowedPath('/tasks/GH-219/task3/tdd-phase.json', allowed),
+      true,
+      'tdd-phase.json under task${N}/ is allowed'
+    );
+  });
+
+  it('denies paths under a different task directory', () => {
+    const { isWriteAllowedPath } = require(MODULE_PATH);
+
+    const allowed = {
+      prDir: '/tasks/GH-219/PR1',
+      taskDir: '/tasks/GH-219/task3',
+      ticketRoot: '/tasks/GH-219',
+    };
+
+    assert.equal(
+      isWriteAllowedPath('/tasks/GH-219/task5/implement.md', allowed),
+      false,
+      'files under a different task directory must be denied'
+    );
+  });
+});
+
+describe('preflight — isWriteAllowedPath: shared-root whitelist (R6)', () => {
+  it('allows brief.md at ticket root', () => {
+    const { isWriteAllowedPath } = require(MODULE_PATH);
+    const allowed = {
+      prDir: '/tasks/GH-219/PR1',
+      taskDir: '/tasks/GH-219/task3',
+      ticketRoot: '/tasks/GH-219',
+    };
+
+    assert.equal(
+      isWriteAllowedPath('/tasks/GH-219/brief.md', allowed),
+      true,
+      'brief.md at ticket root is in the shared whitelist'
+    );
+  });
+
+  it('allows spec.md at ticket root', () => {
+    const { isWriteAllowedPath } = require(MODULE_PATH);
+    const allowed = {
+      prDir: '/tasks/GH-219/PR1',
+      taskDir: '/tasks/GH-219/task3',
+      ticketRoot: '/tasks/GH-219',
+    };
+
+    assert.equal(
+      isWriteAllowedPath('/tasks/GH-219/spec.md', allowed),
+      true,
+      'spec.md at ticket root is in the shared whitelist'
+    );
+  });
+
+  it('allows tasks.md at ticket root', () => {
+    const { isWriteAllowedPath } = require(MODULE_PATH);
+    const allowed = {
+      prDir: '/tasks/GH-219/PR1',
+      taskDir: '/tasks/GH-219/task3',
+      ticketRoot: '/tasks/GH-219',
+    };
+
+    assert.equal(
+      isWriteAllowedPath('/tasks/GH-219/tasks.md', allowed),
+      true,
+      'tasks.md at ticket root is in the shared whitelist'
+    );
+  });
+
+  it('allows .work-state.json at ticket root', () => {
+    const { isWriteAllowedPath } = require(MODULE_PATH);
+    const allowed = {
+      prDir: '/tasks/GH-219/PR1',
+      taskDir: '/tasks/GH-219/task3',
+      ticketRoot: '/tasks/GH-219',
+    };
+
+    assert.equal(
+      isWriteAllowedPath('/tasks/GH-219/.work-state.json', allowed),
+      true,
+      '.work-state.json at ticket root is in the shared whitelist'
+    );
+  });
+
+  it('allows .work-actions.json at ticket root', () => {
+    const { isWriteAllowedPath } = require(MODULE_PATH);
+    const allowed = {
+      prDir: '/tasks/GH-219/PR1',
+      taskDir: '/tasks/GH-219/task3',
+      ticketRoot: '/tasks/GH-219',
+    };
+
+    assert.equal(
+      isWriteAllowedPath('/tasks/GH-219/.work-actions.json', allowed),
+      true,
+      '.work-actions.json at ticket root is in the shared whitelist'
+    );
+  });
+});
+
+describe('preflight — isWriteAllowedPath: denied paths (R6, R15)', () => {
+  it('denies arbitrary paths outside allowed set', () => {
+    const { isWriteAllowedPath } = require(MODULE_PATH);
+    const allowed = {
+      prDir: '/tasks/GH-219/PR1',
+      taskDir: '/tasks/GH-219/task3',
+      ticketRoot: '/tasks/GH-219',
+    };
+
+    assert.equal(
+      isWriteAllowedPath('/some/random/file.js', allowed),
+      false,
+      'arbitrary paths outside PR{N}/, task${N}/, and whitelist are denied'
+    );
+  });
+
+  it('denies files at ticket root that are not in the whitelist', () => {
+    const { isWriteAllowedPath } = require(MODULE_PATH);
+    const allowed = {
+      prDir: '/tasks/GH-219/PR1',
+      taskDir: '/tasks/GH-219/task3',
+      ticketRoot: '/tasks/GH-219',
+    };
+
+    assert.equal(
+      isWriteAllowedPath('/tasks/GH-219/random-file.txt', allowed),
+      false,
+      'non-whitelisted files at ticket root are denied'
+    );
+  });
+
+  it('denies paths that are path-traversal attempts from ticket root', () => {
+    const { isWriteAllowedPath } = require(MODULE_PATH);
+    const allowed = {
+      prDir: '/tasks/GH-219/PR1',
+      taskDir: '/tasks/GH-219/task3',
+      ticketRoot: '/tasks/GH-219',
+    };
+
+    assert.equal(
+      isWriteAllowedPath('/tasks/GH-219/../GH-220/task1/file.js', allowed),
+      false,
+      'path traversal attempts are denied (R15)'
+    );
+  });
+
+  it('returns false (fail closed) when allowedPaths is missing fields', () => {
+    const { isWriteAllowedPath } = require(MODULE_PATH);
+
+    assert.equal(
+      isWriteAllowedPath('/tasks/GH-219/PR1/file.js', {}),
+      false,
+      'missing allowedPaths fields must fail closed'
+    );
+    assert.equal(
+      isWriteAllowedPath('/tasks/GH-219/PR1/file.js', null),
+      false,
+      'null allowedPaths must fail closed'
+    );
+  });
+});
+
+// ─── 12.2 — createGraphCheck (R4 — graph validation) ────────────────────────
+
+describe('preflight — createGraphCheck (R4 — graph validation)', () => {
+  it('exports createGraphCheck as a function', () => {
+    const { createGraphCheck } = require(MODULE_PATH);
+    assert.equal(typeof createGraphCheck, 'function');
+  });
+
+  it('returns a check function', () => {
+    const { createGraphCheck } = require(MODULE_PATH);
+    const check = createGraphCheck();
+    assert.equal(typeof check, 'function');
+  });
+
+  it('allows when context has no tasks (no graph to validate)', () => {
+    const { runPreflight, createGraphCheck } = require(MODULE_PATH);
+    const ctx = { ticketId: 'GH-1', origin: 'workflow', error: null, tasks: null };
+    const result = runPreflight(ctx, { checks: [createGraphCheck()] });
+    assert.equal(result.allow, true, 'null tasks means no graph to validate; allow');
+  });
+
+  it('allows when tasks have a valid graph (no errors)', () => {
+    const { runPreflight, createGraphCheck } = require(MODULE_PATH);
+    const ctx = {
+      ticketId: 'GH-1',
+      origin: 'workflow',
+      error: null,
+      tasks: [
+        { num: 1, dependencies: [] },
+        { num: 2, dependencies: [1] },
+      ],
+    };
+    const result = runPreflight(ctx, { checks: [createGraphCheck()] });
+    assert.equal(result.allow, true, 'valid graph passes');
+  });
+
+  it('denies when tasks have an unknown dependency (R4)', () => {
+    const { runPreflight, createGraphCheck } = require(MODULE_PATH);
+    const ctx = {
+      ticketId: 'GH-1',
+      origin: 'workflow',
+      error: null,
+      tasks: [
+        { num: 1, dependencies: [] },
+        { num: 2, dependencies: [99] },
+      ],
+    };
+    const result = runPreflight(ctx, { checks: [createGraphCheck()] });
+    assert.equal(result.allow, false, 'unknown dependency denies');
+    assert.ok(
+      result.reasons.some((r) => r === 'UNKNOWN_DEPENDENCY'),
+      'reason includes UNKNOWN_DEPENDENCY ruleId (R18)'
+    );
+    assert.ok(result.remediation.length > 0, 'remediation text is present (R18)');
+  });
+
+  it('denies when tasks have a self-dependency (R4)', () => {
+    const { runPreflight, createGraphCheck } = require(MODULE_PATH);
+    const ctx = {
+      ticketId: 'GH-1',
+      origin: 'workflow',
+      error: null,
+      tasks: [
+        { num: 1, dependencies: [1] },
+        { num: 2, dependencies: [] },
+      ],
+    };
+    const result = runPreflight(ctx, { checks: [createGraphCheck()] });
+    assert.equal(result.allow, false, 'self-dependency denies');
+    assert.ok(
+      result.reasons.some((r) => r === 'SELF_DEPENDENCY'),
+      'reason includes SELF_DEPENDENCY ruleId'
+    );
+  });
+
+  it('denies when tasks have a cycle (R4)', () => {
+    const { runPreflight, createGraphCheck } = require(MODULE_PATH);
+    const ctx = {
+      ticketId: 'GH-1',
+      origin: 'workflow',
+      error: null,
+      tasks: [
+        { num: 1, dependencies: [2] },
+        { num: 2, dependencies: [1] },
+      ],
+    };
+    const result = runPreflight(ctx, { checks: [createGraphCheck()] });
+    assert.equal(result.allow, false, 'cycle denies');
+    assert.ok(
+      result.reasons.some((r) => r === 'DEPENDENCY_CYCLE'),
+      'reason includes DEPENDENCY_CYCLE ruleId'
+    );
+  });
+
+  it('remediation on graph deny includes the ruleId for explainability (R18)', () => {
+    const { runPreflight, createGraphCheck } = require(MODULE_PATH);
+    const ctx = {
+      ticketId: 'GH-1',
+      origin: 'workflow',
+      error: null,
+      tasks: [
+        { num: 1, dependencies: [] },
+        { num: 2, dependencies: [99] },
+      ],
+    };
+    const result = runPreflight(ctx, { checks: [createGraphCheck()] });
+    assert.equal(result.allow, false);
+    // Each reason string IS the ruleId
+    for (const reason of result.reasons) {
+      assert.equal(typeof reason, 'string');
+      assert.ok(reason.length > 0, 'reason/ruleId is non-empty');
+    }
+  });
+});
+
+// ─── 12.3 — createClaimCheck (R3, R6 — dependency readiness + claim) ─────────
+
+describe('preflight — createClaimCheck (R3, R6 — unclaimed task write)', () => {
+  it('exports createClaimCheck as a function', () => {
+    const { createClaimCheck } = require(MODULE_PATH);
+    assert.equal(typeof createClaimCheck, 'function');
+  });
+
+  it('denies when taskNum is provided but no claim info (unclaimed write)', () => {
+    const { runPreflight, createClaimCheck } = require(MODULE_PATH);
+
+    const ctx = {
+      ticketId: 'GH-219',
+      origin: 'workflow',
+      error: null,
+      state: {
+        status: 'in_progress',
+        tasksMeta: {
+          totalTasks: 3,
+          currentTaskIndex: 1,
+          tasks: [
+            { id: 'task_1', status: 'completed', dependencies: [] },
+            { id: 'task_2', status: 'pending', dependencies: [1] },
+            { id: 'task_3', status: 'pending', dependencies: [2] },
+          ],
+        },
+      },
+      tasks: [
+        { num: 1, dependencies: [] },
+        { num: 2, dependencies: [1] },
+        { num: 3, dependencies: [2] },
+      ],
+      hasWorkflow: true,
+    };
+
+    // No claim: taskNum=2 but ownerId not provided
+    const check = createClaimCheck({ taskNum: 2 });
+    const result = runPreflight(ctx, { checks: [check] });
+
+    assert.equal(result.allow, false, 'unclaimed task write denied');
+    assert.ok(
+      result.reasons.some((r) => r === 'UNCLAIMED_TASK_WRITE'),
+      'reason includes UNCLAIMED_TASK_WRITE ruleId'
+    );
+    assert.ok(result.remediation.length > 0, 'remediation present');
+  });
+
+  it('allows when taskNum and ownerId are provided and task is startable (R3)', () => {
+    const { runPreflight, createClaimCheck } = require(MODULE_PATH);
+
+    const ctx = {
+      ticketId: 'GH-219',
+      origin: 'workflow',
+      error: null,
+      state: {
+        status: 'in_progress',
+        tasksMeta: {
+          totalTasks: 2,
+          currentTaskIndex: 1,
+          tasks: [
+            { id: 'task_1', status: 'completed', dependencies: [] },
+            { id: 'task_2', status: 'pending', dependencies: [1] },
+          ],
+        },
+      },
+      tasks: [
+        { num: 1, dependencies: [] },
+        { num: 2, dependencies: [1] },
+      ],
+      hasWorkflow: true,
+    };
+
+    const check = createClaimCheck({ taskNum: 2, ownerId: 'PR1' });
+    const result = runPreflight(ctx, { checks: [check] });
+
+    assert.equal(result.allow, true, 'claimed task with ready deps allows');
+  });
+
+  it('denies when task dependencies are not satisfied (R3)', () => {
+    const { runPreflight, createClaimCheck } = require(MODULE_PATH);
+
+    const ctx = {
+      ticketId: 'GH-219',
+      origin: 'workflow',
+      error: null,
+      state: {
+        status: 'in_progress',
+        tasksMeta: {
+          totalTasks: 3,
+          currentTaskIndex: 0,
+          tasks: [
+            { id: 'task_1', status: 'pending', dependencies: [] },
+            { id: 'task_2', status: 'pending', dependencies: [1] },
+            { id: 'task_3', status: 'pending', dependencies: [2] },
+          ],
+        },
+      },
+      tasks: [
+        { num: 1, dependencies: [] },
+        { num: 2, dependencies: [1] },
+        { num: 3, dependencies: [2] },
+      ],
+      hasWorkflow: true,
+    };
+
+    // Task 2 depends on Task 1, which is still pending
+    const check = createClaimCheck({ taskNum: 2, ownerId: 'PR1' });
+    const result = runPreflight(ctx, { checks: [check] });
+
+    assert.equal(result.allow, false, 'task with unsatisfied deps denied');
+    assert.ok(
+      result.reasons.some((r) => r === 'DEPENDENCY_NOT_READY'),
+      'reason includes DEPENDENCY_NOT_READY ruleId'
+    );
+  });
+
+  it('allows when no tasksMeta exists (legacy/pre-IDEA2 — R16 backward compat)', () => {
+    const { runPreflight, createClaimCheck } = require(MODULE_PATH);
+
+    const ctx = {
+      ticketId: 'GH-1',
+      origin: 'workflow',
+      error: null,
+      state: { status: 'in_progress' },
+      tasks: null,
+      hasWorkflow: true,
+    };
+
+    // No tasksMeta = legacy mode, no claim enforcement
+    const check = createClaimCheck({});
+    const result = runPreflight(ctx, { checks: [check] });
+
+    assert.equal(result.allow, true, 'legacy mode without tasksMeta allows (R16)');
+  });
+});
+
+// ─── 12.4 — createPathCheck (R6 — task-readiness edit gate) ──────────────────
+
+describe('preflight — createPathCheck (R6 — path intent check)', () => {
+  it('exports createPathCheck as a function', () => {
+    const { createPathCheck } = require(MODULE_PATH);
+    assert.equal(typeof createPathCheck, 'function');
+  });
+
+  it('allows writes to PR{N}/ for the claiming worker', () => {
+    const { runPreflight, createPathCheck } = require(MODULE_PATH);
+
+    const ctx = {
+      ticketId: 'GH-219',
+      origin: 'workflow',
+      error: null,
+      hasWorkflow: true,
+    };
+
+    const check = createPathCheck({
+      filePath: '/tasks/GH-219/PR1/src/index.js',
+      allowedPaths: {
+        prDir: '/tasks/GH-219/PR1',
+        taskDir: '/tasks/GH-219/task3',
+        ticketRoot: '/tasks/GH-219',
+      },
+    });
+
+    const result = runPreflight(ctx, { checks: [check] });
+    assert.equal(result.allow, true, 'writes to PR{N}/ are allowed');
+  });
+
+  it('denies writes outside the allowed set', () => {
+    const { runPreflight, createPathCheck } = require(MODULE_PATH);
+
+    const ctx = {
+      ticketId: 'GH-219',
+      origin: 'workflow',
+      error: null,
+      hasWorkflow: true,
+    };
+
+    const check = createPathCheck({
+      filePath: '/some/other/repo/file.js',
+      allowedPaths: {
+        prDir: '/tasks/GH-219/PR1',
+        taskDir: '/tasks/GH-219/task3',
+        ticketRoot: '/tasks/GH-219',
+      },
+    });
+
+    const result = runPreflight(ctx, { checks: [check] });
+    assert.equal(result.allow, false, 'writes outside allowed paths denied');
+    assert.ok(
+      result.reasons.some((r) => r === 'PATH_NOT_ALLOWED'),
+      'reason includes PATH_NOT_ALLOWED ruleId'
+    );
+  });
+
+  it('allows writes to shared-root whitelist files at ticket root', () => {
+    const { runPreflight, createPathCheck } = require(MODULE_PATH);
+
+    const ctx = {
+      ticketId: 'GH-219',
+      origin: 'workflow',
+      error: null,
+      hasWorkflow: true,
+    };
+
+    for (const file of ['brief.md', 'spec.md', 'tasks.md', '.work-state.json', '.work-actions.json']) {
+      const check = createPathCheck({
+        filePath: `/tasks/GH-219/${file}`,
+        allowedPaths: {
+          prDir: '/tasks/GH-219/PR1',
+          taskDir: '/tasks/GH-219/task3',
+          ticketRoot: '/tasks/GH-219',
+        },
+      });
+
+      const result = runPreflight(ctx, { checks: [check] });
+      assert.equal(result.allow, true, `shared-root whitelist file ${file} is allowed`);
+    }
+  });
+
+  it('skips path check when no filePath is provided (no path intent to validate)', () => {
+    const { runPreflight, createPathCheck } = require(MODULE_PATH);
+
+    const ctx = {
+      ticketId: 'GH-219',
+      origin: 'workflow',
+      error: null,
+      hasWorkflow: true,
+    };
+
+    const check = createPathCheck({
+      allowedPaths: {
+        prDir: '/tasks/GH-219/PR1',
+        taskDir: '/tasks/GH-219/task3',
+        ticketRoot: '/tasks/GH-219',
+      },
+    });
+
+    const result = runPreflight(ctx, { checks: [check] });
+    assert.equal(result.allow, true, 'no filePath means no path to deny');
+  });
+});
+
+// ─── 12.5 — Full preflight composition (happy path + deny) ──────────────────
+
+describe('preflight — full composition: graph + claim + path (R3, R4, R6)', () => {
+  it('happy path: valid graph, claimed task, matching paths → allow', () => {
+    const { runPreflight, createGraphCheck, createClaimCheck, createPathCheck } = require(MODULE_PATH);
+
+    const ctx = {
+      ticketId: 'GH-219',
+      origin: 'workflow',
+      error: null,
+      state: {
+        status: 'in_progress',
+        tasksMeta: {
+          totalTasks: 2,
+          currentTaskIndex: 1,
+          tasks: [
+            { id: 'task_1', status: 'completed', dependencies: [] },
+            { id: 'task_2', status: 'pending', dependencies: [1] },
+          ],
+        },
+      },
+      tasks: [
+        { num: 1, dependencies: [] },
+        { num: 2, dependencies: [1] },
+      ],
+      hasWorkflow: true,
+    };
+
+    const checks = [
+      createGraphCheck(),
+      createClaimCheck({ taskNum: 2, ownerId: 'PR1' }),
+      createPathCheck({
+        filePath: '/tasks/GH-219/PR1/src/main.js',
+        allowedPaths: {
+          prDir: '/tasks/GH-219/PR1',
+          taskDir: '/tasks/GH-219/task2',
+          ticketRoot: '/tasks/GH-219',
+        },
+      }),
+    ];
+
+    const result = runPreflight(ctx, { checks });
+    assert.equal(result.allow, true, 'full composition happy path allows');
+    assert.deepEqual(result.reasons, []);
+  });
+
+  it('audit callback is invoked with full decision on composed happy path', () => {
+    const { runPreflight, createGraphCheck, createClaimCheck, createPathCheck } = require(MODULE_PATH);
+
+    const audited = [];
+    const ctx = {
+      ticketId: 'GH-219',
+      origin: 'workflow',
+      error: null,
+      state: {
+        status: 'in_progress',
+        tasksMeta: {
+          totalTasks: 2,
+          currentTaskIndex: 1,
+          tasks: [
+            { id: 'task_1', status: 'completed', dependencies: [] },
+            { id: 'task_2', status: 'pending', dependencies: [1] },
+          ],
+        },
+      },
+      tasks: [
+        { num: 1, dependencies: [] },
+        { num: 2, dependencies: [1] },
+      ],
+      hasWorkflow: true,
+    };
+
+    const checks = [
+      createGraphCheck(),
+      createClaimCheck({ taskNum: 2, ownerId: 'PR1' }),
+    ];
+
+    runPreflight(ctx, { checks, audit: (e) => audited.push(e) });
+
+    assert.equal(audited.length, 1, 'audit called once');
+    assert.equal(audited[0].decision, 'allow');
+    assert.equal(audited[0].ticketId, 'GH-219');
+  });
+
+  it('composed deny: invalid graph + unclaimed → all reasons aggregated', () => {
+    const { runPreflight, createGraphCheck, createClaimCheck } = require(MODULE_PATH);
+
+    const ctx = {
+      ticketId: 'GH-219',
+      origin: 'workflow',
+      error: null,
+      state: {
+        status: 'in_progress',
+        tasksMeta: {
+          totalTasks: 2,
+          currentTaskIndex: 0,
+          tasks: [
+            { id: 'task_1', status: 'pending', dependencies: [99] },
+            { id: 'task_2', status: 'pending', dependencies: [1] },
+          ],
+        },
+      },
+      tasks: [
+        { num: 1, dependencies: [99] },
+        { num: 2, dependencies: [1] },
+      ],
+      hasWorkflow: true,
+    };
+
+    const checks = [
+      createGraphCheck(),
+      createClaimCheck({ taskNum: 1 }), // no ownerId → unclaimed
+    ];
+
+    const result = runPreflight(ctx, { checks });
+
+    assert.equal(result.allow, false, 'composed deny from multiple checks');
+    assert.ok(result.reasons.length >= 2, 'multiple deny reasons aggregated');
+    assert.ok(result.remediation.length > 0, 'aggregated remediation present');
+  });
+
+  it('remediation includes ruleId strings (R18 explainability)', () => {
+    const { runPreflight, createClaimCheck } = require(MODULE_PATH);
+
+    const ctx = {
+      ticketId: 'GH-219',
+      origin: 'workflow',
+      error: null,
+      state: {
+        status: 'in_progress',
+        tasksMeta: {
+          totalTasks: 2,
+          currentTaskIndex: 0,
+          tasks: [
+            { id: 'task_1', status: 'pending', dependencies: [] },
+            { id: 'task_2', status: 'pending', dependencies: [1] },
+          ],
+        },
+      },
+      tasks: [
+        { num: 1, dependencies: [] },
+        { num: 2, dependencies: [1] },
+      ],
+      hasWorkflow: true,
+    };
+
+    const check = createClaimCheck({ taskNum: 2, ownerId: 'PR1' });
+    const result = runPreflight(ctx, { checks: [check] });
+
+    assert.equal(result.allow, false, 'task 2 deps not ready');
+    // R18: every deny reason is a stable ruleId string
+    for (const reason of result.reasons) {
+      assert.equal(typeof reason, 'string', 'reason is a string ruleId');
+      assert.ok(reason.length > 0, 'ruleId is non-empty');
+      // ruleIds are SCREAMING_SNAKE_CASE
+      assert.match(reason, /^[A-Z][A-Z0-9_]+$/, `ruleId "${reason}" is SCREAMING_SNAKE_CASE`);
+    }
   });
 });
