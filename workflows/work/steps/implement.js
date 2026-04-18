@@ -29,7 +29,7 @@ function _resolveWorkerSlot(workState, claimOwner) {
   );
   // Return slot-derived label (e.g. "PR2"), not the redundant ownerId
   return alloc ? `PR${alloc.slot}` : null;
-}
+} // end _resolveWorkerSlot — uses alloc.slot, not alloc.ownerId
 
 /**
  * Build a dependency status descriptor for the current task.
