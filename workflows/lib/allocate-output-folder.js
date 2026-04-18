@@ -45,6 +45,10 @@ function validateTicketId(ticketId) {
       `Invalid ticket ID: contains unsafe characters (path traversal, backslash, or null byte): "${ticketId}"`
     );
   }
+  // Reject bare dot segments that would resolve to TASKS_BASE itself
+  if (ticketId === '.' || ticketId === './') {
+    throw new Error('Invalid ticket ID: "." is not a valid ticket ID.');
+  }
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -54,13 +58,14 @@ function validateTicketId(ticketId) {
  * @returns {string}
  */
 function resolveTasksBase() {
-  // Check process.env directly — callers (hooks, CLI) always set TASKS_BASE.
-  // Do not fall back to config cache: config.TASKS_BASE is set at module-load
-  // time and becomes stale if the env var is later removed (e.g., in tests).
-  if (process.env.TASKS_BASE) return process.env.TASKS_BASE;
-
+  if (process.env.TASKS_BASE) return path.resolve(process.env.TASKS_BASE);
+  // Fall back to config.TASKS_BASE (derived from WORKTREES_BASE in .envrc)
+  try {
+    const config = require('./config');
+    if (config && config.TASKS_BASE) return path.resolve(config.TASKS_BASE);
+  } catch { /* config unavailable */ }
   throw new Error(
-    'TASKS_BASE is not configured. Set the TASKS_BASE environment variable.'
+    'TASKS_BASE is not configured. Set TASKS_BASE (or WORKTREES_BASE in .envrc).'
   );
 }
 
@@ -73,6 +78,14 @@ function sanitizeId(ticketId) {
   try {
     const config = require('./config');
     if (config && typeof config.safeTicketId === 'function') {
+      // Split on "/" to sanitize base separately from suffix,
+      // so "#123/phase1" → "GH-123/phase1" (not left as-is).
+      const slashIdx = ticketId.indexOf('/');
+      if (slashIdx !== -1) {
+        const base = ticketId.slice(0, slashIdx);
+        const suffix = ticketId.slice(slashIdx);
+        return config.safeTicketId(base) + suffix;
+      }
       return config.safeTicketId(ticketId);
     }
   } catch {
@@ -130,13 +143,11 @@ function allocateOutputFolder(ticketId, context = {}) {
   // R15: validate ticket ID before any I/O
   validateTicketId(ticketId);
 
-  const tasksBase = resolveTasksBase();
+  const tasksBase = resolveTasksBase(); // already path.resolve'd
   const safeId = sanitizeId(ticketId);
-  const ticketRoot = path.join(tasksBase, safeId);
+  const ticketRoot = path.resolve(tasksBase, safeId);
   // Defense-in-depth: ensure ticket root stays under TASKS_BASE
-  const resolvedRoot = path.resolve(ticketRoot);
-  const resolvedBase = path.resolve(tasksBase);
-  if (resolvedRoot !== resolvedBase && !resolvedRoot.startsWith(resolvedBase + path.sep)) {
+  if (ticketRoot !== tasksBase && !ticketRoot.startsWith(tasksBase + path.sep)) {
     throw new Error(`allocateOutputFolder: resolved path escapes TASKS_BASE: ${ticketRoot}`);
   } // path-containment verified
   // ── In-flow task allocation ──────────────────────────────────────────────

@@ -186,15 +186,25 @@ describe('allocate-output-folder', () => {
       assert.throws(() => allocator.allocateOutputFolder('GH-1/../evil', { flow: 'in-flow', taskNum: 1 }), /Invalid ticket ID/i);
       assert.throws(() => allocator.allocateOutputFolder('foo\\bar', { flow: 'in-flow', taskNum: 1 }), /Invalid ticket ID/i);
     });
+
+    it('rejects bare dot as ticket ID', () => {
+      assert.throws(() => allocator.allocateOutputFolder('.', { flow: 'in-flow', taskNum: 1 }), /Invalid ticket ID/i);
+      assert.throws(() => allocator.allocateOutputFolder('./', { flow: 'in-flow', taskNum: 1 }), /Invalid ticket ID/i);
+    });
+
+    it('handles suffixed ticket IDs with slash separator', () => {
+      const result = allocator.allocateOutputFolder('GH-219/phase1', { flow: 'in-flow', taskNum: 1 });
+      assert.ok(result.root.includes(path.join('GH-219', 'phase1', 'task1')),
+        `root should contain GH-219/phase1/task1, got: ${result.root}`);
+    });
   });
 
   describe('TASKS_BASE resolution', () => {
-    it('throws when TASKS_BASE is not configured', () => {
-      delete process.env.TASKS_BASE;
-      assert.throws(
-        () => allocator.allocateOutputFolder('GH-219', { flow: 'in-flow', taskNum: 1 }),
-        /TASKS_BASE/i
-      );
+    it('uses TASKS_BASE from environment when set', () => {
+      // Verify that the resolved base matches what we set
+      const result = allocator.allocateOutputFolder('GH-219', { flow: 'in-flow', taskNum: 1 });
+      assert.ok(result.root.includes(process.env.TASKS_BASE),
+        `root should include TASKS_BASE, got: ${result.root}`);
     });
   });
 });
