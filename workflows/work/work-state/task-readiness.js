@@ -4,7 +4,9 @@
  * Task readiness helpers: initTasksMeta, findTaskByNum, canStart, canStartFromState.
  *
  * Extracted from work-state.js (GH-219). Re-exported by ../work-state.js so
- * all existing consumers are unaffected.
+ * all existing consumers are unaffected. `findTaskByNum` is intentionally
+ * exported for use by both this module and work-state.js directly (e.g. for
+ * task status lookups outside the readiness context).
  *
  * Uses lazy require for loadState/saveState/initState to avoid circular
  * dependency with the parent work-state.js module. IMPORTANT: we must NOT

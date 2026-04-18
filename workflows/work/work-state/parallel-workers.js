@@ -55,6 +55,23 @@ try {
 const TASKS_BASE = config ? config.TASKS_BASE : null;
 const safeId = config ? config.safeTicketId : null;
 
+/**
+ * Return TASKS_BASE or throw a clear error when it is null.
+ *
+ * config can be null (MODULE_NOT_FOUND path in test harnesses that bypass
+ * lib/config). Functions that build filesystem paths must call this instead
+ * of reading TASKS_BASE directly to avoid silent path corruption via
+ * `path.join(null, ...)`.
+ */
+function requireTasksBase() {
+  if (!TASKS_BASE) {
+    throw new Error(
+      'TASKS_BASE is not configured. Cannot manage parallel worker slots without a valid tasks directory.'
+    );
+  }
+  return TASKS_BASE;
+}
+
 const PARALLEL_OWNER_ID_RE = /^PR\d+$/;
 
 /**
@@ -146,7 +163,8 @@ function _validateParallelSlot(slot) {
  * Pure function — caller decides whether to `mkdirSync` it.
  */
 function _workerSlotDir(ticketId, slot) {
-  return path.join(TASKS_BASE, safeId(ticketId), `PR${slot}`);
+  const base = requireTasksBase();
+  return path.join(base, safeId(ticketId), `PR${slot}`);
 }
 
 /**
@@ -255,7 +273,7 @@ function releaseWorkerSlot(ticketId, slot) {
         message: `Slot ${slotInt} was never allocated on ticket ${ticketId}.`,
         remediation: [
           'Pass a slot number returned by a prior allocateWorkerSlot call.',
-          `Inspect ${path.join(TASKS_BASE, safeId(ticketId), '.work-state.json')} → parallelWorkers.allocations for the list of valid slot numbers.`,
+          `Inspect ${path.join(requireTasksBase(), safeId(ticketId), '.work-state.json')} → parallelWorkers.allocations for the list of valid slot numbers.`,
         ],
       },
     };

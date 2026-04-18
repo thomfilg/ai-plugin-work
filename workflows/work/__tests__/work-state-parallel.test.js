@@ -6,7 +6,9 @@
  *
  * Requirements covered:
  *   R14 — Parallel worker layout `${WORKTREES_BASE}/tasks/<ticketId>/PR{N}/`;
- *         sequential persisted slot allocation; reuse after clean completion.
+ *         sequential persisted slot allocation. Slot reuse after clean
+ *         completion is NOT tested here (monotonic-increment design means
+ *         released slots are never recycled; see releaseWorkerSlot tests).
  *   R5  — Owner id binding: PR{N} matches Task 6's owner pattern
  *         `OWNER_ID_RE = /^PR\d+$/` so allocated ids flow directly into
  *         `claimTask(ticketId, taskNum, ownerId)` without translation.
