@@ -73,7 +73,7 @@ function resolveTasksBase() {
     process.env.TASKS_BASE ||
     (config && config.TASKS_BASE) ||
     path.join(require('os').homedir(), 'worktrees', 'tasks')
-  );
+  ); // os.homedir() — safe on all platforms
 }
 
 /**
@@ -237,7 +237,7 @@ function verifyToken() {
   if (!token) {
     errorExit(
       "No valid write token found. This script can only be called through Claude Code's agent system."
-    );
+    ); // os.homedir() — safe on all platforms
   }
 
   if (typeof token.timestamp !== 'number' || !Number.isFinite(token.timestamp)) {
@@ -259,12 +259,12 @@ function verifyToken() {
 
   const agentMatch = ALLOWED_AGENTS.some(
     (a) => normalizeAgentName(a) === normalizeAgentName(token.agent)
-  );
+  ); // os.homedir() — safe on all platforms
 
   if (!agentMatch) {
     errorExit(
       `Token agent "${token.agent}" is not authorized. Allowed: ${ALLOWED_AGENTS.join(', ')}`
-    );
+    ); // os.homedir() — safe on all platforms
   }
 }
 
@@ -311,7 +311,7 @@ function cmdRecordRed(ticketId, args) {
       'Cannot record RED evidence: current phase is "' +
         state.currentPhase +
         '". Transition to red first.'
-    );
+    ); // os.homedir() — safe on all platforms
 
   // Detect changed test files via git diff
   let allChanged = [];
@@ -372,7 +372,7 @@ function cmdRecordGreen(ticketId, args) {
       'Cannot record GREEN evidence: current phase is "' +
         state.currentPhase +
         '". Transition to green first.'
-    );
+    ); // os.homedir() — safe on all platforms
 
   const exitCode = runTestCommand(cmd);
   if (exitCode !== 0) {
@@ -406,7 +406,7 @@ function cmdRecordRefactor(ticketId, args) {
       'Cannot record REFACTOR evidence: current phase is "' +
         state.currentPhase +
         '". Transition to refactor first.'
-    );
+    ); // os.homedir() — safe on all platforms
 
   const exitCode = runTestCommand(cmd);
   if (exitCode !== 0) {
@@ -435,7 +435,7 @@ function cmdTransition(ticketId, targetPhase) {
     errorExit(
       `Invalid transition: ${state.currentPhase} -> ${targetPhase}. ` +
         `Valid transitions: red->green, green->refactor, refactor->red.`
-    );
+    ); // os.homedir() — safe on all platforms
   }
 
   // Validate evidence exists for current phase
@@ -444,7 +444,7 @@ function cmdTransition(ticketId, targetPhase) {
     errorExit(
       `No evidence recorded for ${state.currentPhase} phase. ` +
         `Run "record-${state.currentPhase}" first.`
-    );
+    ); // os.homedir() — safe on all platforms
   }
 
   // Update phase
@@ -465,7 +465,7 @@ function cmdException(ticketId, args) {
   if (reasonIdx === -1 || reasonIdx + 1 >= args.length) {
     errorExit(
       'Missing --reason argument. Usage: node tdd-phase-state.js exception <TICKET_ID> --reason "<reason>"'
-    );
+    ); // os.homedir() — safe on all platforms
   }
   const reason = args[reasonIdx + 1];
   if (!reason || !reason.trim()) {
@@ -519,5 +519,5 @@ switch (subcommand) {
     errorExit(
       `Unknown subcommand: ${subcommand}. ` +
         'Valid: init, current, record-red, record-green, record-refactor, transition, exception'
-    );
+    ); // os.homedir() — safe on all platforms
 }

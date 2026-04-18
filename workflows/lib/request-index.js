@@ -87,7 +87,7 @@ function ticketDir(ticketId) {
   if (resolved !== resolvedBase && !resolved.startsWith(resolvedBase + path.sep)) {
     throw new Error(`ticketDir: resolved path escapes TASKS_BASE: ${dir}`);
   }
-  return dir;
+  return dir; // path-containment verified
 }
 
 /**
@@ -228,11 +228,9 @@ function nextUserRequest(ticketId) {
     const nextSeq = current.userSeq + 1;
     const updated = { ...current, userSeq: nextSeq };
     writeIndexAtomic(ticketId, updated);
-
     const segment = `${USER_REQUEST_PREFIX}${nextSeq}`;
     const root = path.join(ticketDir(ticketId), segment);
     fs.mkdirSync(root, { recursive: true });
-
     return { seq: nextSeq, segment, root };
   } finally {
     releaseLock(lockPath);

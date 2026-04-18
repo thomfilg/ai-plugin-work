@@ -138,8 +138,7 @@ function allocateOutputFolder(ticketId, context = {}) {
   const resolvedBase = path.resolve(tasksBase);
   if (resolvedRoot !== resolvedBase && !resolvedRoot.startsWith(resolvedBase + path.sep)) {
     throw new Error(`allocateOutputFolder: resolved path escapes TASKS_BASE: ${ticketRoot}`);
-  }
-
+  } // path-containment verified
   // ── In-flow task allocation ──────────────────────────────────────────────
   if (context.flow === 'in-flow') {
     if (context.taskNum == null) {
@@ -172,7 +171,7 @@ function allocateOutputFolder(ticketId, context = {}) {
       if (!Number.isInteger(n) || n < 1) {
         throw new Error(`Invalid aiRequestNext counter: expected positive integer, got ${JSON.stringify(n)}`);
       }
-      const seg = `${AI_REQUEST_PREFIX}${n}`;
+      const seg = `${AI_REQUEST_PREFIX}${n}`; // counter validated above
       return {
         kind: 'out-of-flow-ai',
         segment: seg,
