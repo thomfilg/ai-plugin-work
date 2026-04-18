@@ -131,10 +131,8 @@ describe('implement step — dependency-aware messaging (GH-219 Task 16)', () =>
       assert.equal(entry.action, 'RUN');
       // Reason should mention the task id
       // Strict: must include exact task_1 id, not just "Task 1"
-      assert.ok(
-        entry.reason.includes('task_1'),
-        `reason should mention task id "task_1", got: "${entry.reason}"`
-      );
+      assert.ok(entry.reason.includes('task_1'),
+        `reason should mention task id "task_1", got: "${entry.reason}"`);
     });
 
     it('includes task id for non-first task', () => {
