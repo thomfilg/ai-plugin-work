@@ -39,6 +39,9 @@ process.env.TASKS_BASE = TEMP_TASKS_BASE;
 // TEMP_TASKS_BASE override takes effect even if another test loaded them first.
 delete require.cache[require.resolve('../../lib/config')];
 delete require.cache[require.resolve('../work-state')];
+delete require.cache[require.resolve('../work-state/graph-validation')];
+delete require.cache[require.resolve('../work-state/task-readiness')];
+delete require.cache[require.resolve('../work-state/parallel-workers')];
 
 const { describe, it, after, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
@@ -76,6 +79,9 @@ after(() => {
   // Clear require.cache so other test files get fresh config
   delete require.cache[require.resolve('../../lib/config')];
   delete require.cache[require.resolve('../work-state')];
+  delete require.cache[require.resolve('../work-state/graph-validation')];
+  delete require.cache[require.resolve('../work-state/task-readiness')];
+  delete require.cache[require.resolve('../work-state/parallel-workers')];
   try {
     fs.rmSync(TEMP_TASKS_BASE, { recursive: true, force: true });
   } catch {

@@ -530,10 +530,7 @@ function completeSubtask(ticketId, subtaskIndex) {
 
 const { validateTaskGraph } = require('./work-state/graph-validation');
 const _taskReadiness = require('./work-state/task-readiness');
-// findTaskByNum is not re-exported from work-state.js — it is internal to
-// task-readiness.js (used by canStartFromState). Destructured here for
-// potential direct use within work-state.js (e.g. getTaskCurrent lookups).
-const { initTasksMeta, findTaskByNum, canStartFromState, canStart } = _taskReadiness;
+const { initTasksMeta, canStartFromState, canStart } = _taskReadiness;
 
 /**
  * Get the current task info.
@@ -872,12 +869,7 @@ try {
 // Extracted to work-state/parallel-workers.js. Re-imported here so all
 // existing consumers of work-state.js are unaffected.
 const _parallelWorkers = require('./work-state/parallel-workers');
-// PARALLEL_OWNER_ID_RE is not re-exported from work-state.js — it is
-// consumed internally by allocateWorkerSlot's defensive ownerId check.
-// Downstream consumers that need the regex should import from
-// ./work-state/parallel-workers directly.
 const {
-  PARALLEL_OWNER_ID_RE,
   allocateWorkerSlot,
   releaseWorkerSlot,
 } = _parallelWorkers;

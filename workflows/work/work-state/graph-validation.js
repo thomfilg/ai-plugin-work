@@ -13,7 +13,8 @@
  * @property {string} code
  *   Stable identifier for the violation. One of:
  *   `UNKNOWN_DEPENDENCY`, `SELF_DEPENDENCY`, `DEPENDENCY_CYCLE`,
- *   `DUPLICATE_TASK_NUM`, `INVALID_TASK_GRAPH`, `INVALID_TASK_ENTRY`.
+ *   `DUPLICATE_TASK_NUM`, `INVALID_TASK_GRAPH`, `INVALID_TASK_ENTRY`,
+ *   `INVALID_DEPENDENCY_TYPE`.
  *   Used as rule id by preflight.
  * @property {string|null} taskId
  *   Task id (`task_${num}`) the violation belongs to, or null when the input

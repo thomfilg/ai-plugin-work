@@ -216,7 +216,22 @@ function allocateWorkerSlot(ticketId, context = {}) {
   // ticketId before they reach this code path.
   state.parallelWorkers.nextSlot = slot + 1;
 
-  saveState(ticketId, state);
+  try {
+    saveState(ticketId, state);
+  } catch (saveErr) {
+    return {
+      success: false,
+      error: {
+        code: 'STATE_SAVE_FAILED',
+        message: `Failed to persist worker slot ${slot} for ${ticketId}: ${saveErr.message}`,
+        remediation: [
+          'Check filesystem permissions on the TASKS_BASE directory.',
+          'Verify sufficient disk space is available.',
+          'State was not persisted — retry the allocation.',
+        ],
+      },
+    };
+  }
 
   try {
     fs.mkdirSync(dir, { recursive: true });
