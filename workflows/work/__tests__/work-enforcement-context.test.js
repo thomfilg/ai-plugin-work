@@ -18,10 +18,9 @@
  * Run: node --test workflows/work/__tests__/work-enforcement-context.test.js
  */
 
-const { describe, it, beforeEach, afterEach } = require('node:test');
+const { describe, it, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
-const Module = require('module'); // module resolution helpers
 
 // Resolve target + dependency paths ONCE to match what the adapter will
 // receive from its own `require('./work-state')` / `require('./task-parser')`
@@ -293,7 +292,7 @@ describe('loadEnforcementContext — R15 ticket id validation', () => {
 
     const { loadEnforcementContext } = require(MODULE_PATH);
 
-    for (const bad of ['../../etc', 'GH-219/../secret', 'GH\\219', 'GH-219\u0000x']) {
+    for (const bad of ['../../etc', 'GH-219/../secret', 'GH\\219', 'GH-219\u0000x', '/etc/passwd']) {
       const ctx = loadEnforcementContext(bad);
       assert.ok(ctx.error, `path-traversal candidate "${bad}" must be rejected`);
       assert.match(ctx.error.code, /ticket/i);

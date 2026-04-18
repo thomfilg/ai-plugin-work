@@ -230,10 +230,15 @@ function analyzeActions(actions) {
     }
   }
 
-  // Total duration: first action to last action
-  const firstTs = new Date(actions[0].timestamp).getTime();
-  const lastTs = new Date(actions[actions.length - 1].timestamp).getTime();
-  const totalDuration = Math.round((lastTs - firstTs) / 1000);
+  // Total duration: first legacy action to last legacy action.
+  // Enforcement rows are excluded so they do not skew boundary timestamps.
+  const legacyActions = actions.filter(a => !(a && a.kind === ENFORCEMENT_KIND));
+  let totalDuration = 0;
+  if (legacyActions.length > 0) {
+    const firstTs = new Date(legacyActions[0].timestamp).getTime();
+    const lastTs = new Date(legacyActions[legacyActions.length - 1].timestamp).getTime();
+    totalDuration = Math.round((lastTs - firstTs) / 1000);
+  }
 
   return {
     steps,

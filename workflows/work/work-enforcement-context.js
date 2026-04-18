@@ -23,8 +23,12 @@ const path = require('path');
 let config;
 try {
   config = require('../lib/config');
-} catch {
-  config = null;
+} catch (err) {
+  if (err && err.code === 'MODULE_NOT_FOUND') {
+    config = null;
+  } else {
+    throw err;
+  }
 }
 
 const { loadState, loadActiveSubtaskState } = require('./work-state');
@@ -33,7 +37,7 @@ const { parseTasks } = require('./task-parser');
 // ─── Ticket ID validation (R15) ─────────────────────────────────────────────
 
 /** @type {RegExp} Reject path-traversal sequences, backslashes, and null bytes */
-const UNSAFE_TICKET_RE = /\.\.|[\\]|\x00/;
+const UNSAFE_TICKET_RE = /\.\.|[\\\/]|\x00/;
 
 /**
  * Validate a ticket ID. Returns null if valid, or an error descriptor if invalid.
@@ -57,9 +61,9 @@ function validateTicketId(ticketId) {
   if (UNSAFE_TICKET_RE.test(ticketId)) {
     return {
       code: 'INVALID_TICKET_ID',
-      message: `Ticket ID contains unsafe characters (path traversal, backslash, or null byte): "${ticketId}"`,
+      message: `Ticket ID contains unsafe characters (path traversal, slash, backslash, or null byte): "${ticketId}"`,
       remediation: [
-        'Remove "..", backslashes, and null bytes from the ticket ID.',
+        'Remove "..", slashes, backslashes, and null bytes from the ticket ID.',
         'Use a simple alphanumeric-with-hyphens format (e.g., "GH-219").',
       ],
     };
