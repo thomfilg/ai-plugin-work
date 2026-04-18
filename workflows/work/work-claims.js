@@ -262,8 +262,10 @@ function claimsDirFor(ticketId) {
     );
   }
   const dir = path.join(tasksBase, safeTicketFragment(ticketId), '.claims');
-  // Defense-in-depth: ensure computed path stays under TASKS_BASE
-  if (!path.resolve(dir).startsWith(path.resolve(tasksBase) + path.sep)) {
+  // Defense-in-depth: ensure computed path stays under TASKS_BASE.
+  const resolvedDir = path.resolve(dir);
+  const resolvedBase = path.resolve(tasksBase);
+  if (resolvedDir !== resolvedBase && !resolvedDir.startsWith(resolvedBase + path.sep)) {
     throw new Error(`claimsDirFor: computed path escapes TASKS_BASE: ${dir}`);
   }
   return dir;
