@@ -231,9 +231,11 @@ describe('claimTask — concurrency atomicity (R5)', () => {
     // parallelism is not needed here because atomicity is provided by the
     // kernel's link(2) syscall, not by application-level locking.
     const owners = ['PR1', 'PR2', 'PR3', 'PR4', 'PR5'];
-    const results = await Promise.all(
-      owners.map((id) => Promise.resolve().then(() => workClaims.claimTask(TICKET, 7, id))),
+    // Sequential microtask execution validates link(2) atomic semantics
+    const claimAll = owners.map((id) =>
+      Promise.resolve().then(() => workClaims.claimTask(TICKET, 7, id))
     );
+    const results = await Promise.all(claimAll);
 
     const successes = results.filter((r) => r.success === true);
     const failures = results.filter((r) => r.success === false);
@@ -353,7 +355,8 @@ describe('claimTask — R15 input validation (fail closed, no I/O)', () => {
       );
     }
     for (const ticketId of good) {
-      cleanupTicket(ticketId.split('/')[0]); // cleanup suffixed directories
+      const base = ticketId.split('/')[0];
+      cleanupTicket(base);
     }
   });
 

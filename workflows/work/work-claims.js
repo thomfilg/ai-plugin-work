@@ -75,8 +75,8 @@ function getTasksBase() {
   // between invocations still resolve to the isolated temp directory
   // (matches the work-state-graph.test.js contract — see its header
   // comment on module-load timing).
-  // TASKS_BASE from env (tests), then from config (which derives it from WORKTREES_BASE), then null.
-  return process.env.TASKS_BASE || (config && config.TASKS_BASE) || null;
+  const envBase = process.env.TASKS_BASE; // tests override this
+  return envBase || (config && config.TASKS_BASE) || null;
 }
 
 // ─── Input validation ──────────────────────────────────────────────────────
@@ -126,8 +126,9 @@ function validateTicketId(ticketId) {
   // with a slash suffix like "GH-219/phase1" (see parseTicketInput in
   // workflows/lib/ticket-provider.js).
   // Reject backslash, colon, null byte, and traversal sequences.
-  // Note: at this point ticketId === trimmed (whitespace already rejected above).
-  if (/[\\:\0]/.test(ticketId) || ticketId.includes('..')) {
+  // At this point ticketId === trimmed (whitespace rejected above).
+  const hasDangerousChars = /[\\:\0]/.test(ticketId) || ticketId.includes('..');
+  if (hasDangerousChars) {
     return {
       code: 'INVALID_TICKET_ID',
       message: `ticketId ${JSON.stringify(ticketId)} contains path separators or traversal sequences.`,
@@ -152,9 +153,9 @@ function validateTicketId(ticketId) {
   // Reject more than one slash — "A/B/C" must not pass even though it has
   // no leading slash or consecutive slashes.
   const slashCount = (ticketId.match(/\//g) || []).length;
-  if (slashCount > 1) { // "A/B/C" — only one "/" allowed
-    return {
-      code: 'INVALID_TICKET_ID',
+  if (slashCount > 1) {
+    // "A/B/C" — only one "/" allowed
+    return { code: 'INVALID_TICKET_ID',
       message: 'Only one "/" suffix separator is allowed.',
       remediation: ['Use format like "PROJ-123/phase1" — at most one "/".'],
     };
