@@ -3,14 +3,24 @@
 /**
  * PreToolUse hook to enforce agent usage during /work-implement command.
  *
- * When /work-implement is active, blocks direct Write/Edit operations
- * unless a developer-* agent has been invoked first.
+ * GH-219 Task 14: Rewritten for state-based activation via
+ * loadEnforcementContext (R1). No transcript grep for implement-active
+ * detection. Uses isWriteAllowedPath from Task 12 (R6, R12). Injects
+ * appendEnforcementAudit for audit records (R13). TDD phase resolution
+ * via allocator per-task path with legacy fallback (R7, R8).
+ *
+ * When /work-implement is active (state: implement step in_progress),
+ * blocks direct Write/Edit operations unless a developer-* agent has
+ * been invoked first.
  */
 
 const fs = require('fs');
-const { logHookError } = require(
-  require('path').join(__dirname, '..', '..', 'lib', 'hook-error-log')
-);
+const path = require('path');
+const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
+
+// --- Task 12 import: task-readiness path gate (R6, R12) ---
+const { isWriteAllowedPath } = require(path.join(__dirname, '..', '..', 'lib', 'preflight'));
+const { taskSegment } = require(path.join(__dirname, '..', '..', 'lib', 'allocate-output-folder'));
 
 // Developer agents that satisfy the requirement
 const DEVELOPER_AGENTS = [
@@ -42,33 +52,31 @@ const ALLOWED_PATTERNS = [
   /work-implement-enforce\.js$/, // This file specifically
 ];
 
+// ─── State-based activation (GH-219 R1) ──────────────────────────────────
+
 /**
- * Check if /work-implement command is active in the transcript
+ * Determine if the implement step is active using canonical state.
+ * Replaces transcript-based isWorkImplementActive.
+ *
+ * Returns true when:
+ *   - workflow is active (status === 'in_progress')
+ *   - implement step is 'in_progress'
+ *
+ * @param {object} ctx - EnforcementContext from loadEnforcementContext
+ * @returns {boolean}
  */
-function isWorkImplementActive(transcriptPath) {
-  if (!transcriptPath || !fs.existsSync(transcriptPath)) {
-    return false;
-  }
-
-  try {
-    const content = fs.readFileSync(transcriptPath, 'utf8');
-
-    // Look for /work-implement invocation
-    // Pattern: Skill tool with skill: "work-implement" or direct /work-implement mention
-    const patterns = [
-      /<command-name>\/work-implement<\/command-name>/,
-      /"skill"\s*:\s*"work-implement"/,
-      /# Implement Command/, // The command's header from work-implement.md
-    ];
-
-    return patterns.some((pattern) => pattern.test(content));
-  } catch {
-    return false;
-  }
+function isImplementActive(ctx) {
+  if (!ctx || !ctx.hasWorkflow) return false;
+  const state = ctx.state;
+  if (!state || state.status !== 'in_progress') return false;
+  const stepStatus = state.stepStatus || {};
+  return stepStatus.implement === 'in_progress';
 }
 
 /**
- * Check if a developer agent has been invoked
+ * Check if a developer agent has been invoked (transcript-based).
+ * This remains transcript-based because agent invocation is a session-level
+ * signal, not a persisted state.
  */
 function hasDeveloperAgentBeenInvoked(transcriptPath) {
   if (!transcriptPath || !fs.existsSync(transcriptPath)) {
@@ -109,59 +117,96 @@ function isFileAllowed(filePath) {
 }
 
 /**
- * Check TDD phase restrictions for a file path.
- * Returns 'block', 'allow', 'no-file' (tdd-phase.json missing), or 'no-state' (infrastructure issue).
+ * Resolve TASKS_BASE from environment or config.
+ * Shared by checkTddPhase and the R6 path gate.
  */
-function checkTddPhase(filePath) {
+function resolveTaskBase() {
+  let taskBase;
   try {
-    // Get ticket ID from env or shared resolver
-    const ticketId =
-      process.env.TICKET_ID ||
-      (() => {
-        try {
-          const { getCurrentTaskId } = require(
-            require('path').join(__dirname, '..', '..', 'lib', 'scripts', 'get-ticket-id.js')
-          );
-          const id = getCurrentTaskId();
-          return id || null;
-        } catch {
-          // Fallback: extract from branch name (supports GH-123, PROJ-123, lowercase)
-          try {
-            const branch = require('child_process')
-              .execSync('git branch --show-current', { encoding: 'utf8' })
-              .trim();
-            const match = branch.match(/[A-Za-z]+-[0-9]+/i);
-            return match ? match[0] : null;
-          } catch {
-            return null;
-          }
-        }
-      })();
+    const cfg = require(path.join(__dirname, '..', '..', 'lib', 'config'));
+    taskBase = process.env.TASKS_BASE || cfg.TASKS_BASE || null;
+  } catch {
+    taskBase = process.env.TASKS_BASE || null;
+  }
+  if (!taskBase) {
+    taskBase = path.join(process.env.HOME, 'worktrees', 'tasks');
+  }
+  return taskBase;
+}
 
+/**
+ * Sanitize a ticket ID via config.safeTicketId if available.
+ * Shared by checkTddPhase and the R6 path gate.
+ */
+function resolveSafeTicketId(ticketId) {
+  try {
+    return require(path.join(__dirname, '..', '..', 'lib', 'config')).safeTicketId(ticketId);
+  } catch {
+    return ticketId;
+  }
+}
+
+/**
+ * Resolve the TDD phase state path with per-task support (R7, R8).
+ *
+ * When WORK_TASK_NUM is set:
+ *   - Try per-task path first: TASKS_BASE/<ticket>/task${N}/tdd-phase.json
+ *   - Fall back to legacy root: TASKS_BASE/<ticket>/tdd-phase.json
+ *
+ * When WORK_TASK_NUM is NOT set:
+ *   - Use legacy root path
+ *
+ * @param {string} taskBase - Resolved TASKS_BASE
+ * @param {string} safeTicketId - Sanitized ticket ID
+ * @returns {string|null} Path to tdd-phase.json, or null if not found
+ */
+function resolveTddStatePath(taskBase, safeTicketId) {
+  const taskNum = process.env.WORK_TASK_NUM
+    ? parseInt(process.env.WORK_TASK_NUM, 10)
+    : null;
+
+  if (taskNum && Number.isInteger(taskNum) && taskNum > 0) {
+    // Try per-task path first
+    let segment;
+    try {
+      segment = taskSegment(taskNum);
+    } catch {
+      segment = `task${taskNum}`;
+    }
+    const perTaskPath = path.join(taskBase, safeTicketId, segment, 'tdd-phase.json');
+    if (fs.existsSync(perTaskPath)) {
+      return perTaskPath;
+    }
+  }
+
+  // Legacy root fallback
+  const rootPath = path.join(taskBase, safeTicketId, 'tdd-phase.json');
+  if (fs.existsSync(rootPath)) {
+    return rootPath;
+  }
+
+  return null;
+}
+
+/**
+ * Check TDD phase restrictions for a file path.
+ * Returns 'block', 'allow', 'no-file', or 'no-state'.
+ *
+ * Uses per-task tdd-phase.json resolution via allocator (R7, R8).
+ * PHASE_HOOKS behavior from tdd-phase-registry.js is UNCHANGED.
+ */
+function checkTddPhase(filePath, ticketId) {
+  try {
     if (!ticketId) return 'no-state';
 
-    let taskBase;
-    try {
-      const cfg = require(require('path').join(__dirname, '..', '..', 'lib', 'config'));
-      taskBase = process.env.TASKS_BASE || cfg.TASKS_BASE || null;
-    } catch {
-      taskBase = process.env.TASKS_BASE || null;
-    }
-    if (!taskBase) {
-      taskBase = require('path').join(process.env.HOME, 'worktrees', 'tasks');
-    }
-    // Use TASKS_BASE from env, config module, or default HOME-based fallback
-    let safeTicketId = ticketId;
-    try {
-      safeTicketId = require(
-        require('path').join(__dirname, '..', '..', 'lib', 'config')
-      ).safeTicketId(ticketId);
-    } catch {}
-    const statePath = require('path').join(taskBase, safeTicketId, 'tdd-phase.json');
-    if (!require('fs').existsSync(statePath)) return 'no-file';
+    const taskBase = resolveTaskBase();
+    const safeTicketId = resolveSafeTicketId(ticketId);
 
-    const state = JSON.parse(require('fs').readFileSync(statePath, 'utf8'));
-    const { PHASE_HOOKS } = require(require('path').join(__dirname, '..', 'tdd-phase-registry'));
+    const statePath = resolveTddStatePath(taskBase, safeTicketId);
+    if (!statePath) return 'no-file';
+
+    const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+    const { PHASE_HOOKS } = require(path.join(__dirname, '..', 'tdd-phase-registry'));
     const hook = PHASE_HOOKS[state.currentPhase];
 
     if (hook && hook.shouldBlock(filePath)) {
@@ -173,6 +218,65 @@ function checkTddPhase(filePath) {
   } catch {
     return 'no-state'; // On error, don't block
   }
+}
+
+/**
+ * Build the allowed-paths object for isWriteAllowedPath (R6).
+ * Only active when WORK_TASK_NUM is set (task-aware mode).
+ * Legacy mode (no WORK_TASK_NUM) skips the path gate entirely.
+ *
+ * @param {string} taskBase - Resolved TASKS_BASE
+ * @param {string} safeTicketId - Sanitized ticket ID
+ * @returns {{ prDir: string|null, taskDir: string|null, ticketRoot: string }|null}
+ */
+function buildAllowedPaths(taskBase, safeTicketId) {
+  const taskNum = process.env.WORK_TASK_NUM
+    ? parseInt(process.env.WORK_TASK_NUM, 10)
+    : null;
+
+  // No task num = legacy mode, skip path gate
+  if (!taskNum || !Number.isInteger(taskNum) || taskNum < 1) return null;
+
+  const ticketRoot = path.join(taskBase, safeTicketId);
+  let taskDir = null;
+  try {
+    taskDir = path.join(ticketRoot, taskSegment(taskNum));
+  } catch {
+    taskDir = path.join(ticketRoot, 'task' + taskNum);
+  }
+
+  // PR slot for worktree dir
+  const prSlot = process.env.WORK_PR_SLOT
+    ? parseInt(process.env.WORK_PR_SLOT, 10)
+    : null;
+  const prDir = prSlot && Number.isInteger(prSlot) && prSlot > 0
+    ? path.join(ticketRoot, 'PR' + prSlot)
+    : null;
+
+  return { prDir, taskDir, ticketRoot };
+}
+
+/**
+ * Create the audit callback for enforcement records (R13).
+ * Wraps appendEnforcementAudit with the ticket context.
+ */
+function createAuditCallback(ticketId, toolName, filePath, ctx) {
+  return (entry) => {
+    try {
+      const { appendEnforcementAudit } = require(path.join(__dirname, '..', '..', 'work', 'work-actions'));
+      appendEnforcementAudit(ticketId, {
+        origin: entry.origin || (ctx && ctx.origin) || 'user',
+        task: null,
+        phase: null,
+        action: `${toolName}:${filePath || 'unknown'}`,
+        allow: entry.decision === 'allow',
+        reason: (entry.reasons || []).join('; ') || (entry.decision === 'allow' ? 'allowed' : 'denied'),
+        outputPath: filePath || null,
+      });
+    } catch {
+      // Audit is fail-open: never break enforcement for logging
+    }
+  };
 }
 
 async function main() {
@@ -191,8 +295,48 @@ async function main() {
     process.exit(0);
   }
 
-  // Check if /work-implement is active
-  if (!isWorkImplementActive(transcriptPath)) {
+  // ── State-based activation (R1): load enforcement context ──────────────
+  // If TICKET_ID is explicitly set (even to empty), honor it; otherwise derive
+  const ticketId =
+    ('TICKET_ID' in process.env) ? (process.env.TICKET_ID || null) :
+    (() => {
+      try {
+        const { getCurrentTaskId } = require(
+          path.join(__dirname, '..', '..', 'lib', 'scripts', 'get-ticket-id.js')
+        );
+        const id = getCurrentTaskId();
+        return id || null;
+      } catch {
+        try {
+          const branch = require('child_process')
+            .execSync('git branch --show-current', { encoding: 'utf8' })
+            .trim();
+          const match = branch.match(/[A-Za-z]+-[0-9]+/i);
+          return match ? match[0] : null;
+        } catch {
+          return null;
+        }
+      }
+    })();
+
+  // No ticket ID => no workflow to enforce
+  if (!ticketId) {
+    process.exit(0);
+  }
+
+  let ctx;
+  try {
+    const { loadEnforcementContext } = require(
+      path.join(__dirname, '..', '..', 'work', 'work-enforcement-context')
+    );
+    ctx = loadEnforcementContext(ticketId);
+  } catch {
+    // If adapter not available, fail open
+    process.exit(0);
+  }
+
+  // Check if implement step is active using state (replaces transcript grep)
+  if (!isImplementActive(ctx)) {
     process.exit(0);
   }
 
@@ -200,37 +344,41 @@ async function main() {
   const filePath = toolInput.file_path || toolInput.path || '';
 
   // tdd-phase.json is NOT allowed via the generic .json allowlist
-  // It must be protected by TDD phase hooks or blocked entirely
   if (filePath && /tdd-phase\.json$/.test(filePath)) {
-    // Block direct edits to tdd-phase.json — only tdd-phase-state.js can write it
     process.stderr.write(
       'Direct edit of tdd-phase.json is blocked.\n' +
         'Use tdd-phase-state.js CLI to manage TDD phase state.\n'
     );
+    // Audit the block (R13)
+    const auditCb = createAuditCallback(ticketId, toolName, filePath, ctx);
+    auditCb({ decision: 'deny', reasons: ['TDD_STATE_DIRECT_EDIT'], origin: ctx.origin });
     process.exit(2);
   }
 
   // ── TDD Phase enforcement (BEFORE allowlist) ─────────────────────────
-  // Must run before isFileAllowed() because ALLOWED_PATTERNS includes test
-  // files (.test.*, .spec.*) which would bypass GREEN-phase blocking
-  const tddPhaseResult = checkTddPhase(filePath);
+  const tddPhaseResult = checkTddPhase(filePath, ticketId);
   if (tddPhaseResult === 'block') {
-    // Block message already written by checkTddPhase
+    // Audit the block (R13)
+    const auditCb = createAuditCallback(ticketId, toolName, filePath, ctx);
+    auditCb({ decision: 'deny', reasons: ['TDD_PHASE_VIOLATION'], origin: ctx.origin });
     process.exit(2);
   }
   // Defense-in-depth: if TDD state doesn't exist and this is a production file,
-  // block until TDD is initialized. This catches cases where auto-init didn't run.
+  // block until TDD is initialized.
   if (
     tddPhaseResult === 'no-file' &&
     !isFileAllowed(filePath) &&
     hasDeveloperAgentBeenInvoked(transcriptPath)
   ) {
-    const tddScript = require('path').join(__dirname, '..', 'tdd-phase-state.js');
+    const tddScript = path.join(__dirname, '..', 'tdd-phase-state.js');
     const msg =
       'TDD not initialized. Production file writes are blocked until TDD state exists.\n' +
       `Run: node ${tddScript} init <TICKET_ID>\n` +
       `Or use: node ${tddScript} exception <TICKET_ID> --reason "<reason>"\n`;
     process.stderr.write(msg);
+    // Audit the block (R13)
+    const auditCb = createAuditCallback(ticketId, toolName, filePath, ctx);
+    auditCb({ decision: 'deny', reasons: ['TDD_NOT_INITIALIZED'], origin: ctx.origin });
     process.exit(2);
   }
 
@@ -241,10 +389,28 @@ async function main() {
 
   // Check if a developer agent has been invoked
   if (hasDeveloperAgentBeenInvoked(transcriptPath)) {
+    // -- R6: Task-readiness path gate (when task-aware) --
+    // If WORK_TASK_NUM is set, enforce write paths via isWriteAllowedPath.
+    // Legacy mode (no WORK_TASK_NUM) skips the path gate.
+    const allowedPaths = buildAllowedPaths(resolveTaskBase(), resolveSafeTicketId(ticketId));
+    if (allowedPaths && filePath && !isWriteAllowedPath(filePath, allowedPaths)) {
+      process.stderr.write(
+        'Write to "' + filePath + '" is outside the allowed path set.\n' +
+        'Allowed: PR{N}/, task{N}/, shared whitelist at ticket root.\n' +
+        'Verify the file path falls under the claimed worker or task directory.\n'
+      );
+      const auditCb = createAuditCallback(ticketId, toolName, filePath, ctx);
+      auditCb({ decision: 'deny', reasons: ['PATH_NOT_ALLOWED'], origin: ctx.origin });
+      process.exit(2);
+    }
+
     process.exit(0);
   }
 
-  // Block the operation
+  // Block the operation — audit (R13)
+  const auditCb = createAuditCallback(ticketId, toolName, filePath, ctx);
+  auditCb({ decision: 'deny', reasons: ['AGENT_DELEGATION_REQUIRED'], origin: ctx.origin });
+
   const architectLine =
     process.env.WORK_ARCHITECT_ENABLED === '1'
       ? `  subagent_type: "code-architect",            // Architecture\n`
