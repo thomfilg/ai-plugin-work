@@ -33,6 +33,11 @@ const TEMP_TASKS_BASE = fs.mkdtempSync(path.join(os.tmpdir(), 'work-state-parall
 const ORIGINAL_TASKS_BASE = process.env.TASKS_BASE;
 process.env.TASKS_BASE = TEMP_TASKS_BASE;
 
+// Clear cached modules that read TASKS_BASE at require time so our
+// TEMP_TASKS_BASE override takes effect even if another test loaded them first.
+delete require.cache[require.resolve('../../lib/config')];
+delete require.cache[require.resolve('../work-state')];
+
 const { describe, it, after, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 
@@ -66,6 +71,9 @@ after(() => {
   } else {
     process.env.TASKS_BASE = ORIGINAL_TASKS_BASE;
   }
+  // Clear require.cache so other test files get fresh config
+  delete require.cache[require.resolve('../../lib/config')];
+  delete require.cache[require.resolve('../work-state')];
   try {
     fs.rmSync(TEMP_TASKS_BASE, { recursive: true, force: true });
   } catch {
