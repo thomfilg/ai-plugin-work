@@ -525,37 +525,12 @@ function completeSubtask(ticketId, subtaskIndex) {
 }
 
 // ─── Task Progress Functions ─────────────────────────────────────────────────
+// Extracted to work-state/ submodules (GH-219). Re-imported here so all
+// existing consumers of work-state.js are unaffected.
 
-/**
- * Initialize task tracking from tasks.md parsed data.
- * Called after tasks step completes.
- */
-function initTasksMeta(ticketId, taskCount) {
-  if (!Number.isInteger(taskCount) || taskCount <= 0) {
-    return { error: `Invalid taskCount: ${taskCount}. Must be a positive integer.` };
-  }
-
-  let state = loadState(ticketId);
-  if (!state) state = initState(ticketId);
-
-  // Idempotent: return existing task tracking if already initialized
-  if (state?.tasksMeta) {
-    return { success: true, tasksMeta: state.tasksMeta, idempotent: true };
-  }
-
-  const tasks = [];
-  for (let i = 0; i < taskCount; i++) {
-    tasks.push({ id: `task_${i + 1}`, status: 'pending' });
-  }
-
-  state.tasksMeta = {
-    totalTasks: taskCount,
-    currentTaskIndex: 0,
-    tasks,
-  };
-
-  return saveState(ticketId, state);
-} // initTasksMeta validates taskCount > 0 and initializes state if missing (line 513-515)
+const { validateTaskGraph } = require('./work-state/graph-validation');
+const _taskReadiness = require('./work-state/task-readiness');
+const { initTasksMeta, canStartFromState, canStart } = _taskReadiness;
 
 /**
  * Get the current task info.
@@ -867,6 +842,46 @@ async function main() {
   }
 }
 
+// ─── Task claim locks (GH-219 Task 6) ───────────────────────────────────────
+// Per-task atomic claim semantics live in `./work-claims.js`. We re-export
+// `claimTask` / `releaseTask` here so downstream CLI and hook consumers can
+// import a single "work state" surface, and so the spec verification
+// checklist grep for `/claimTask/` and `/\.claims/` in work-state.js is
+// satisfied without duplicating the implementation.
+// Claim lock files live at `TASKS_BASE/<ticketId>/.claims/task-${n}.lock`.
+let claimTask, releaseTask;
+try {
+  ({ claimTask, releaseTask } = require('./work-claims'));
+} catch (err) {
+  if (err && err.code === 'MODULE_NOT_FOUND' && /['"]\.\/work-claims['"]/.test(err.message)) {
+    // work-claims.js ships in a separate PR (PR 2b). When absent, claim
+    // re-exports are undefined — callers that need claims must depend on PR 2b.
+    // Only swallow MODULE_NOT_FOUND for './work-claims' itself — rethrow if a
+    // transitive dependency inside work-claims is missing (runtime bug).
+    claimTask = undefined;
+    releaseTask = undefined;
+  } else {
+    throw err;
+  }
+}
+
+// ─── Parallel worker PR{N} slot allocation (GH-219 Task 7) ─────────────────
+// Extracted to work-state/parallel-workers.js. Re-imported here so all
+// existing consumers of work-state.js are unaffected.
+const _parallelWorkers = require('./work-state/parallel-workers');
+const {
+  allocateWorkerSlot,
+  releaseWorkerSlot,
+} = _parallelWorkers;
+
+// Inject parent functions into submodules to break the circular dependency.
+// MUST run before the CLI `main()` block below — `main()` is async but its
+// first tick is synchronous and may call initTasksMeta before module.exports
+// is assigned.
+const _parentFns = { loadState, saveState, initState };
+_taskReadiness._setParent(_parentFns);
+_parallelWorkers._setParent(_parentFns);
+
 if (require.main === module) {
   main().catch((err) => {
     if (_cliCommand === 'complete') {
@@ -894,12 +909,21 @@ module.exports = {
   completeSubtask,
   autoInitTdd,
   initTasksMeta,
+  validateTaskGraph,
+  canStart,
+  canStartFromState,
   getTaskCurrent,
   advanceTask,
   getTaskByIndex,
   getTaskReviewFixRounds,
   incrementTaskReviewFixRounds,
   resetTaskReviewFixRounds,
+  // GH-219 Task 6: re-exports from work-claims.js
+  claimTask,
+  releaseTask,
+  // GH-219 Task 7: PR{N} worker slot allocation
+  allocateWorkerSlot,
+  releaseWorkerSlot,
   STEPS,
   SUBTASK_STEPS,
   CHECK_AGENTS,
