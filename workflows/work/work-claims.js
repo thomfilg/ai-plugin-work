@@ -108,6 +108,7 @@ function validateTicketId(ticketId) {
       ],
     };
   }
+  // Expects pre-normalized ticket ID (e.g. "GH-219", not a URL). Callers must normalize via safeTicketId first.
   // Reject path separators and traversal fragments before we compute any
   // filesystem path (no I/O / no mkdir until this passes). The `..`
   // substring check subsumes the stricter "`..` between separators" regex
@@ -281,7 +282,7 @@ function claimTask(ticketId, taskNum, ownerId) {
       fs.linkSync(tmpPath, lockPath);
       // We linked; the tmp file is now redundant. Remove it so the
       // acceptance-criterion test ("no .tmp-* artifacts") stays green.
-      fs.unlinkSync(tmpPath);
+      try { fs.unlinkSync(tmpPath); } catch { /* best-effort cleanup */ }
       tmpWritten = false;
       return { success: true, ownerId, lockPath };
     } catch (linkErr) {

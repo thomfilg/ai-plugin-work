@@ -755,6 +755,10 @@ function initTasksMeta(ticketId, taskCountOrTasks) {
     return { error: `Invalid taskCount: ${taskCount}. Must be a positive integer.` };
   }
 
+  if (isTaskArray && tasksInput.some(t => !t || typeof t.num !== 'number')) {
+    return { error: 'Invalid tasksInput: each element must have a numeric `num` field.' };
+  }
+
   // ─── R4: Graph validation BEFORE any persistence write ─────────────────
   // Only validate when the caller opts into the IDEA2 form (array). Integer
   // form preserves pre-IDEA2 semantics: no dependencies, no graph to check.
@@ -776,13 +780,21 @@ function initTasksMeta(ticketId, taskCountOrTasks) {
     return { success: true, tasksMeta: state.tasksMeta, idempotent: true };
   }
 
+  // Build a Map for O(1) lookup by task num (avoids O(n²) find-in-loop).
+  const taskMap = new Map();
+  if (tasksInput) {
+    for (const t of tasksInput) {
+      if (t && typeof t.num === 'number') taskMap.set(t.num, t);
+    }
+  }
+
   const tasks = [];
   for (let i = 0; i < taskCount; i++) {
     const entry = { id: `task_${i + 1}`, status: 'pending' };
     if (isTaskArray) {
       // Copy dependencies from parseTasks output. Match by `num` (1-indexed)
       // so out-of-order task lists still produce the correct mapping.
-      const src = tasksInput.find((t) => t && t.num === i + 1);
+      const src = taskMap.get(i + 1);
       const deps = src && Array.isArray(src.dependencies) ? src.dependencies : [];
       entry.dependencies = deps.slice(); // defensive copy — callers can't mutate persisted state
     }
@@ -801,7 +813,7 @@ function initTasksMeta(ticketId, taskCountOrTasks) {
 /**
  * Check whether a task is ready to start, per its declared dependencies.
  *
- * Pure query — reads `loadState(ticketId).tasksMeta` only, no other I/O.
+ * Reads state from disk via loadState — reads `loadState(ticketId).tasksMeta` only.
  * Single source of truth for dependency readiness (R3) — Task 12 preflight
  * imports this function; there must not be a second implementation
  * elsewhere.
@@ -1257,6 +1269,7 @@ function _validateParallelTicketId(ticketId) {
   }
   // Reject path separators and traversal fragments before any FS I/O so
   // the caller gets a structured rejection rather than a path-escape bug.
+  // Expects pre-normalized ticket ID (e.g. "GH-219", not a URL). Callers must normalize via safeTicketId first.
   if (/[\\/:\0]/.test(ticketId) || ticketId.includes('..')) {
     return {
       code: 'INVALID_TICKET_ID',
