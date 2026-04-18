@@ -13,7 +13,8 @@
  * @property {string} code
  *   Stable identifier for the violation. One of:
  *   `UNKNOWN_DEPENDENCY`, `SELF_DEPENDENCY`, `DEPENDENCY_CYCLE`,
- *   `INVALID_TASK_GRAPH`, `INVALID_TASK_ENTRY`. Used as rule id by preflight.
+ *   `DUPLICATE_TASK_NUM`, `INVALID_TASK_GRAPH`, `INVALID_TASK_ENTRY`.
+ *   Used as rule id by preflight.
  * @property {string|null} taskId
  *   Task id (`task_${num}`) the violation belongs to, or null when the input
  *   is not an array / not shaped as a task list.
@@ -34,7 +35,7 @@
  * Validate a task dependency graph.
  *
  * Pure function — no filesystem I/O. Intended to be shared by:
- *   1. `initTasksMeta` (this file) — called BEFORE persisting tasksMeta so
+ *   1. `initTasksMeta` (task-readiness.js) — called BEFORE persisting tasksMeta so
  *      invalid graphs never reach disk (R4).
  *   2. Task 12 preflight in `workflows/lib/preflight.js` — re-runs on every
  *      enforcement decision without duplicating validation logic (see

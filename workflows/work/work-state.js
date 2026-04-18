@@ -852,11 +852,15 @@ async function main() {
 let claimTask, releaseTask;
 try {
   ({ claimTask, releaseTask } = require('./work-claims'));
-} catch {
-  // work-claims.js ships in a separate PR (PR 2b). When absent, claim
-  // re-exports are undefined — callers that need claims must depend on PR 2b.
-  claimTask = undefined;
-  releaseTask = undefined;
+} catch (err) {
+  if (err && err.code === 'MODULE_NOT_FOUND') {
+    // work-claims.js ships in a separate PR (PR 2b). When absent, claim
+    // re-exports are undefined — callers that need claims must depend on PR 2b.
+    claimTask = undefined;
+    releaseTask = undefined;
+  } else {
+    throw err;
+  }
 }
 
 // ─── Parallel worker PR{N} slot allocation (GH-219 Task 7) ─────────────────

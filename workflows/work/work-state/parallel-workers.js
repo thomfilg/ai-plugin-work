@@ -155,7 +155,7 @@ function _workerSlotDir(ticketId, slot) {
  *
  * @param {string} ticketId
  * @param {{ taskNum?: number }} [context]
- * @returns {{ slot: number, ownerId: string, dir: string } | { success: false, error: object }}
+ * @returns {{ success: true, slot: number, ownerId: string, dir: string } | { success: false, error: object }}
  */
 function allocateWorkerSlot(ticketId, context = {}) {
   const { loadState, saveState, initState } = parent();
