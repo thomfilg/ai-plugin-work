@@ -114,7 +114,15 @@ function validateTaskGraph(tasks) {
     const deps = Array.isArray(task.dependencies) ? task.dependencies : [];
     const filteredDeps = [];
     for (const dep of deps) {
-      if (!Number.isInteger(dep)) continue; // parseTasks only emits ints; defensive
+      if (!Number.isInteger(dep)) {
+        errors.push({
+          code: 'INVALID_DEPENDENCY_TYPE',
+          taskId: `task_${task.num}`,
+          message: `Task ${task.num} has a non-integer dependency: ${JSON.stringify(dep)}`,
+          remediation: ['Dependencies must be integer task numbers.'],
+        });
+        continue;
+      }
       if (dep === task.num) {
         errors.push({
           code: 'SELF_DEPENDENCY',

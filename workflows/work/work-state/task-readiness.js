@@ -198,7 +198,7 @@ function initTasksMeta(ticketId, taskCountOrTasks) {
     const entry = { id: `task_${i + 1}`, status: 'pending' };
     if (isTaskArray) {
       const src = taskMap.get(i + 1);
-      const deps = src && Array.isArray(src.dependencies) ? src.dependencies : [];
+      const deps = src && Array.isArray(src.dependencies) ? src.dependencies.filter(d => Number.isInteger(d)) : [];
       entry.dependencies = deps.slice(); // defensive copy
     }
     tasks.push(entry);
