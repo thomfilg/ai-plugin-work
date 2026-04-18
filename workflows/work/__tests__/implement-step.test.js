@@ -130,6 +130,7 @@ describe('implement step — dependency-aware messaging (GH-219 Task 16)', () =>
       const entry = entries[0];
       assert.equal(entry.action, 'RUN');
       // Reason should mention the task id
+      // Strict: must include exact task_1 id, not just "Task 1"
       assert.ok(
         entry.reason.includes('task_1'),
         `reason should mention task id "task_1", got: "${entry.reason}"`
@@ -284,7 +285,7 @@ describe('implement step — dependency-aware messaging (GH-219 Task 16)', () =>
       const entries = captureStep(s, ctx);
 
       const entry = entries[0];
-      assert.equal(entry.action, 'RUN');
+      assert.equal(entry.action, 'RUN'); // verify step runs
       // No dependency phrase should appear when task has no dependencies
       assert.ok(
         !/dependenc/i.test(entry.reason),

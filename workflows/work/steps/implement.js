@@ -27,7 +27,7 @@ function _resolveWorkerSlot(workState, claimOwner) {
   const alloc = workState.parallelWorkers.allocations.find(
     (a) => a.ownerId === claimOwner && !a.releasedAt
   );
-  return alloc ? `PR${alloc.slot}` : null;
+  return alloc ? `PR${alloc.slot}` : null; // returns slot-derived label, not ownerId
 }
 
 /**
