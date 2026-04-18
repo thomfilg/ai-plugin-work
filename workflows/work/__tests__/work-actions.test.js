@@ -14,7 +14,7 @@ const os = require('os');
 const TEST_TASKS_BASE = path.join(os.tmpdir(), 'work-actions-test-' + process.pid);
 const FAKE_HOME = path.join(TEST_TASKS_BASE, 'fakehome');
 
-let appendAction, loadActions, analyzeActions;
+let appendAction, loadActions, analyzeActions, appendEnforcementAudit;
 
 describe('work-actions', () => {
   const TEST_TICKET = 'TEST-ACTIONS-001';
@@ -34,6 +34,7 @@ describe('work-actions', () => {
     appendAction = mod.appendAction;
     loadActions = mod.loadActions;
     analyzeActions = mod.analyzeActions;
+    appendEnforcementAudit = mod.appendEnforcementAudit;
   });
 
   after(() => {
@@ -178,6 +179,207 @@ describe('work-actions', () => {
       const result = analyzeActions(actions);
       assert.strictEqual(result.totalDuration, '2640s');
       assert.strictEqual(result.actionCount, 2);
+    });
+  });
+
+  // ─── IDEA2 / GH-219: Enforcement audit records ──────────────────────────────
+  // Task 1 — R13 (shape) + R16 (schema evolution without breaking readers).
+  // Enforcement records share the same `.work-actions.json` as legacy step rows
+  // and are separated by an explicit `kind: 'enforcement'` discriminator.
+  describe('appendEnforcementAudit', () => {
+    it('should expose appendEnforcementAudit as a module export', () => {
+      assert.strictEqual(
+        typeof appendEnforcementAudit,
+        'function',
+        'work-actions must export appendEnforcementAudit for enforcement hooks to audit decisions'
+      );
+    });
+
+    it('should write a record with all brief-required fields and kind discriminator', () => {
+      appendEnforcementAudit(TEST_TICKET, {
+        origin: 'workflow',
+        task: 1,
+        phase: 'red',
+        action: 'Write',
+        allow: true,
+        reason: 'write allowed: path matches claimed task artifact root',
+        outputPath: '/tmp/fake/tasks/GH-219/task1/implement.md',
+      });
+
+      const actions = loadActions(TEST_TICKET);
+      assert.strictEqual(actions.length, 1, 'one record should be appended');
+      const row = actions[0];
+
+      assert.strictEqual(row.kind, 'enforcement', 'discriminator must be kind: "enforcement"');
+      assert.ok(row.timestamp, 'must include timestamp');
+      assert.match(
+        row.timestamp,
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/,
+        'timestamp must be ISO 8601'
+      );
+      assert.strictEqual(row.origin, 'workflow', 'must record origin');
+      assert.strictEqual(row.task, 1, 'must record task');
+      assert.strictEqual(row.phase, 'red', 'must record phase');
+      assert.strictEqual(row.action, 'Write', 'must record action (tool name)');
+      assert.strictEqual(row.allow, true, 'must record allow/deny as a boolean');
+      assert.strictEqual(
+        row.reason,
+        'write allowed: path matches claimed task artifact root',
+        'must record reason'
+      );
+      assert.strictEqual(
+        row.outputPath,
+        '/tmp/fake/tasks/GH-219/task1/implement.md',
+        'must record outputPath'
+      );
+    });
+
+    it('should record deny decisions with allow=false and preserve reason/outputPath', () => {
+      appendEnforcementAudit(TEST_TICKET, {
+        origin: 'user',
+        task: null,
+        phase: null,
+        action: 'Edit',
+        allow: false,
+        reason: 'deny: unclaimed task write attempted by user origin',
+        outputPath: '/tmp/fake/repo/src/index.ts',
+      });
+
+      const actions = loadActions(TEST_TICKET);
+      assert.strictEqual(actions[0].kind, 'enforcement');
+      assert.strictEqual(actions[0].allow, false);
+      assert.strictEqual(actions[0].origin, 'user');
+      assert.strictEqual(actions[0].task, null);
+      assert.strictEqual(actions[0].phase, null);
+      assert.strictEqual(actions[0].action, 'Edit');
+      assert.match(actions[0].reason, /deny/);
+    });
+
+    it('should pass through optional meta without dropping required fields', () => {
+      appendEnforcementAudit(TEST_TICKET, {
+        origin: 'ai-subtask',
+        task: 2,
+        phase: 'green',
+        action: 'Bash',
+        allow: true,
+        reason: 'allow: command inside PR1 worker root',
+        outputPath: null,
+        meta: { ruleId: 'path-allowed', prSlot: 'PR1' },
+      });
+
+      const row = loadActions(TEST_TICKET)[0];
+      assert.strictEqual(row.kind, 'enforcement');
+      assert.deepStrictEqual(row.meta, { ruleId: 'path-allowed', prSlot: 'PR1' });
+      assert.strictEqual(row.outputPath, null);
+    });
+
+    it('should coexist with legacy appendAction rows in the same .work-actions.json', () => {
+      appendAction(TEST_TICKET, { step: 'implement', what: 'step started' });
+      appendEnforcementAudit(TEST_TICKET, {
+        origin: 'workflow',
+        task: 1,
+        phase: 'red',
+        action: 'Write',
+        allow: true,
+        reason: 'allow: claimed task write',
+        outputPath: '/tmp/fake/tasks/GH-219/task1/implement.md',
+      });
+      appendAction(TEST_TICKET, { step: 'implement', what: 'step completed' });
+
+      const rows = loadActions(TEST_TICKET);
+      assert.strictEqual(rows.length, 3);
+
+      const legacyRows = rows.filter((r) => r.kind !== 'enforcement');
+      const enforcementRows = rows.filter((r) => r.kind === 'enforcement');
+      assert.strictEqual(legacyRows.length, 2, 'legacy rows are not enforcement rows');
+      assert.strictEqual(enforcementRows.length, 1, 'enforcement rows are discriminated');
+      assert.strictEqual(legacyRows[0].step, 'implement');
+      assert.strictEqual(legacyRows[0].what, 'step started');
+      assert.strictEqual(legacyRows[1].what, 'step completed');
+    });
+  });
+
+  describe('loadActions / analyzeActions backward compatibility (R16)', () => {
+    // Fixture mirrors a pre-IDEA2 .work-actions.json: only legacy rows, no `kind` field.
+    const preIdea2Fixture = [
+      { step: 'ticket', timestamp: '2026-01-05T10:00:00.000Z', what: 'workflow started' },
+      { step: 'ticket', timestamp: '2026-01-05T10:00:00.500Z', what: 'step started' },
+      {
+        step: 'ticket',
+        timestamp: '2026-01-05T10:00:30.000Z',
+        what: 'mcp__atlassian__jira_get_issue',
+      },
+      { step: 'ticket', timestamp: '2026-01-05T10:01:00.000Z', what: 'step completed' },
+      { step: 'bootstrap', timestamp: '2026-01-05T10:01:00.000Z', what: 'step started' },
+      {
+        step: 'bootstrap',
+        timestamp: '2026-01-05T10:01:30.000Z',
+        what: 'BLOCKED: Skill(bootstrap)',
+      },
+      { step: 'bootstrap', timestamp: '2026-01-05T10:02:30.000Z', what: 'step reset' },
+      { step: 'bootstrap', timestamp: '2026-01-05T10:03:00.000Z', what: 'step completed' },
+    ];
+
+    it('loadActions parses a pre-IDEA2 .work-actions.json without throwing', () => {
+      const dir = path.join(FAKE_HOME, 'worktrees', 'tasks', TEST_TICKET);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(
+        path.join(dir, '.work-actions.json'),
+        JSON.stringify(preIdea2Fixture, null, 2)
+      );
+
+      const loaded = loadActions(TEST_TICKET);
+      assert.strictEqual(loaded.length, preIdea2Fixture.length);
+      assert.strictEqual(loaded[0].what, 'workflow started');
+      for (const row of loaded) {
+        assert.ok(!('kind' in row), 'legacy rows must not gain a kind field on read');
+      }
+    });
+
+    it('analyzeActions handles a pre-IDEA2 fixture without throwing and still computes steps', () => {
+      const result = analyzeActions(preIdea2Fixture);
+      assert.strictEqual(result.actionCount, preIdea2Fixture.length);
+      const ticketStep = result.steps.find((s) => s.step === 'ticket');
+      const bootstrapStep = result.steps.find((s) => s.step === 'bootstrap');
+      assert.ok(ticketStep, 'ticket step analysed');
+      assert.ok(bootstrapStep, 'bootstrap step analysed');
+      assert.strictEqual(ticketStep.duration, '60s');
+      assert.strictEqual(bootstrapStep.duration, '120s');
+      assert.strictEqual(bootstrapStep.blockCount, 1);
+      assert.strictEqual(bootstrapStep.retryCount, 1);
+    });
+
+    it('analyzeActions does not throw when enforcement rows are mixed with legacy rows', () => {
+      const mixed = [
+        ...preIdea2Fixture,
+        {
+          kind: 'enforcement',
+          timestamp: '2026-01-05T10:03:30.000Z',
+          origin: 'workflow',
+          task: 1,
+          phase: 'red',
+          action: 'Write',
+          allow: true,
+          reason: 'allow: claim matches',
+          outputPath: '/tmp/fake/tasks/GH-219/task1/implement.md',
+        },
+      ];
+
+      let result;
+      assert.doesNotThrow(() => {
+        result = analyzeActions(mixed);
+      });
+      assert.strictEqual(
+        result.actionCount,
+        mixed.length,
+        'enforcement rows counted but do not corrupt step analysis'
+      );
+      const ticketStep = result.steps.find((s) => s.step === 'ticket');
+      assert.strictEqual(
+        ticketStep && ticketStep.duration,
+        '60s',
+        'ticket step duration unchanged by enforcement row'
+      );
     });
   });
 });
