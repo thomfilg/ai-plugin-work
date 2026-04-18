@@ -287,17 +287,47 @@ describe('loadEnforcementContext — R15 ticket id validation', () => {
     }
   });
 
-  it('rejects path-traversal characters (.. / \\ null bytes)', () => {
+  it('rejects path-traversal characters (.. \\ null bytes) after normalization', () => {
     installMocks({ state: null });
 
     const { loadEnforcementContext } = require(MODULE_PATH);
 
-    for (const bad of ['../../etc', 'GH-219/../secret', 'GH\\219', 'GH-219\u0000x', '/etc/passwd']) {
+    // These contain "..", backslash, or null bytes — rejected after normalization
+    for (const bad of ['../../etc', 'GH-219/../secret', 'GH\\219', 'GH-219\u0000x']) {
       const ctx = loadEnforcementContext(bad);
       assert.ok(ctx.error, `path-traversal candidate "${bad}" must be rejected`);
       assert.match(ctx.error.code, /ticket/i);
       assert.equal(ctx.origin, null, 'invalid ticket id yields no origin');
     }
+  });
+
+  it('allows slash-containing inputs (e.g. URLs) that normalize to safe IDs', () => {
+    // safeTicketId mock normalizes URL-like input to a safe ID
+    installMocks({
+      state: null,
+      safeId: (id) => (id === '/etc/passwd' ? 'etc-passwd' : id),
+    });
+
+    const { loadEnforcementContext } = require(MODULE_PATH);
+    const ctx = loadEnforcementContext('/etc/passwd');
+
+    // After normalization to "etc-passwd", the ID is safe — no error
+    assert.equal(ctx.error, null, 'slash-containing input that normalizes safely should not be rejected');
+    assert.equal(ctx.ticketId, 'etc-passwd');
+  });
+
+  it('rejects slash-containing inputs whose normalized form is still unsafe', () => {
+    // safeTicketId mock returns an unsafe normalized form
+    installMocks({
+      state: null,
+      safeId: (id) => (id === 'foo/../../bar' ? '../bar' : id),
+    });
+
+    const { loadEnforcementContext } = require(MODULE_PATH);
+    const ctx = loadEnforcementContext('foo/../../bar');
+
+    assert.ok(ctx.error, 'normalized ID with ".." must still be rejected');
+    assert.match(ctx.error.code, /ticket/i);
   });
 
   it('rejects non-string ticket ids (number, null, undefined, object)', () => {

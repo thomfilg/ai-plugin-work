@@ -18,8 +18,6 @@
  * @module work-enforcement-context
  */
 
-const path = require('path');
-
 let config;
 try {
   config = require('../lib/config');
@@ -36,17 +34,23 @@ const { parseTasks } = require('./task-parser');
 
 // ─── Ticket ID validation (R15) ─────────────────────────────────────────────
 
-/** @type {RegExp} Reject path-traversal sequences, backslashes, and null bytes */
-const UNSAFE_TICKET_RE = /\.\.|[\\\/]|\x00/;
+/**
+ * @type {RegExp} Reject path-traversal sequences, backslashes, and null bytes
+ * in the NORMALIZED ticket ID. Slashes are not checked here because
+ * normalization (safeTicketId) handles URL-style inputs like
+ * "https://github.com/.../issues/123" → "GH-123" before this runs.
+ */
+const UNSAFE_NORMALIZED_RE = /\.\.|[\\]|\x00/;
 
 /**
- * Validate a ticket ID. Returns null if valid, or an error descriptor if invalid.
+ * Validate a raw ticket ID for basic type/emptiness.
+ * Returns null if the basic checks pass, or an error descriptor if invalid.
  * Fail-closed: invalid IDs produce no filesystem I/O.
  *
  * @param {unknown} ticketId
  * @returns {{ code: string, message: string, remediation: string[] } | null}
  */
-function validateTicketId(ticketId) {
+function validateTicketIdBasic(ticketId) {
   if (typeof ticketId !== 'string' || ticketId.length === 0) {
     return {
       code: 'INVALID_TICKET_ID',
@@ -58,18 +62,30 @@ function validateTicketId(ticketId) {
     };
   }
 
-  if (UNSAFE_TICKET_RE.test(ticketId)) {
+  return null; // basic checks passed
+}
+
+/**
+ * Validate a NORMALIZED ticket ID for path-traversal attacks.
+ * Called AFTER safeTicketId normalization so that URL-style inputs
+ * (containing slashes) have already been transformed to safe IDs.
+ *
+ * @param {string} normalizedId
+ * @returns {{ code: string, message: string, remediation: string[] } | null}
+ */
+function validateNormalizedId(normalizedId) {
+  if (UNSAFE_NORMALIZED_RE.test(normalizedId)) {
     return {
       code: 'INVALID_TICKET_ID',
-      message: `Ticket ID contains unsafe characters (path traversal, slash, backslash, or null byte): "${ticketId}"`,
+      message: `Ticket ID contains unsafe characters (path traversal, backslash, or null byte): "${normalizedId}"`,
       remediation: [
-        'Remove "..", slashes, backslashes, and null bytes from the ticket ID.',
+        'Remove "..", backslashes, and null bytes from the ticket ID.',
         'Use a simple alphanumeric-with-hyphens format (e.g., "GH-219").',
       ],
     };
   } // fail-closed: reject before any I/O
 
-  return null; // valid ticket ID
+  return null; // valid normalized ticket ID
 }
 
 // ─── EnforcementContext builder ──────────────────────────────────────────────
@@ -109,9 +125,9 @@ function loadEnforcementContext(ticketId, options = {}) {
   // Strip any caller-injected origin fields — origin is derived, never trusted
   const safeOptions = { subtask: Boolean(options?.subtask) };
 
-  // ─── R15: Validate ticket ID (fail-closed, no I/O) ─────────────────────
-  const idError = validateTicketId(ticketId);
-  if (idError) {
+  // ─── R15 Step 1: Basic type/emptiness check (fail-closed, no I/O) ─────
+  const basicError = validateTicketIdBasic(ticketId);
+  if (basicError) {
     return {
       ticketId: null,
       origin: null,
@@ -119,19 +135,33 @@ function loadEnforcementContext(ticketId, options = {}) {
       tasks: null,
       subtaskState: null,
       hasWorkflow: false,
-      error: idError,
+      error: basicError,
       options: safeOptions,
     };
   }
 
-  // safeTicketId transforms provider-specific IDs (e.g. #N → GH-N) — never introduces path separators
+  // ─── R15 Step 2: Normalize via provider-specific sanitizer ─────────────
+  // safeTicketId transforms provider-specific IDs (e.g. #N → GH-N, URLs → GH-N)
   const safeId = config && config.safeTicketId ? config.safeTicketId(ticketId) : ticketId;
+
+  // ─── R15 Step 3: Validate NORMALIZED result for traversal attacks ──────
+  const normalizedError = validateNormalizedId(safeId);
+  if (normalizedError) {
+    return {
+      ticketId: null,
+      origin: null,
+      state: null,
+      tasks: null,
+      subtaskState: null,
+      hasWorkflow: false,
+      error: normalizedError,
+      options: safeOptions,
+    };
+  }
 
   // ─── Load state and tasks ──────────────────────────────────────────────
   const state = loadState(safeId);
-  const tasksBase = config && config.TASKS_BASE ? config.TASKS_BASE : null;
-  // Derive tasksDir here (config.tasksDir not available — would require config.js changes in a separate PR)
-  const tasksDir = tasksBase ? path.join(tasksBase, safeId) : null;
+  const tasksDir = config && typeof config.tasksDir === 'function' ? config.tasksDir(safeId) : null;
   const tasks = tasksDir ? parseTasks(tasksDir) : null;
 
   // ─── Derive hasWorkflow ────────────────────────────────────────────────
