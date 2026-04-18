@@ -232,7 +232,7 @@ describe('claimTask — concurrency atomicity (R5)', () => {
     // kernel's link(2) syscall, not by application-level locking.
     const owners = ['PR1', 'PR2', 'PR3', 'PR4', 'PR5'];
     const results = await Promise.all(
-      owners.map((id) => Promise.resolve().then(() => workClaims.claimTask(TICKET, 7, id)))
+      owners.map((id) => Promise.resolve().then(() => workClaims.claimTask(TICKET, 7, id))),
     );
 
     const successes = results.filter((r) => r.success === true);
@@ -352,9 +352,8 @@ describe('claimTask — R15 input validation (fail closed, no I/O)', () => {
         `suffixed ticketId ${JSON.stringify(ticketId)} must be accepted`
       );
     }
-    // Cleanup suffixed ticket directories
     for (const ticketId of good) {
-      cleanupTicket(ticketId.split('/')[0]);
+      cleanupTicket(ticketId.split('/')[0]); // cleanup suffixed directories
     }
   });
 

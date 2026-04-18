@@ -75,6 +75,7 @@ function getTasksBase() {
   // between invocations still resolve to the isolated temp directory
   // (matches the work-state-graph.test.js contract — see its header
   // comment on module-load timing).
+  // TASKS_BASE from env (tests), then from config (which derives it from WORKTREES_BASE), then null.
   return process.env.TASKS_BASE || (config && config.TASKS_BASE) || null;
 }
 
@@ -124,7 +125,8 @@ function validateTicketId(ticketId) {
   // always a bare provider key like "GH-219" or "PROJ-123", optionally
   // with a slash suffix like "GH-219/phase1" (see parseTicketInput in
   // workflows/lib/ticket-provider.js).
-  // Reject backslash, colon, null byte, and traversal sequences (uses trimmed value).
+  // Reject backslash, colon, null byte, and traversal sequences.
+  // Note: at this point ticketId === trimmed (whitespace already rejected above).
   if (/[\\:\0]/.test(ticketId) || ticketId.includes('..')) {
     return {
       code: 'INVALID_TICKET_ID',
@@ -150,7 +152,7 @@ function validateTicketId(ticketId) {
   // Reject more than one slash — "A/B/C" must not pass even though it has
   // no leading slash or consecutive slashes.
   const slashCount = (ticketId.match(/\//g) || []).length;
-  if (slashCount > 1) {
+  if (slashCount > 1) { // "A/B/C" — only one "/" allowed
     return {
       code: 'INVALID_TICKET_ID',
       message: 'Only one "/" suffix separator is allowed.',
@@ -172,12 +174,12 @@ function validateOwnerId(ownerId) {
   if (typeof ownerId !== 'string' || !OWNER_ID_RE.test(ownerId)) {
     return {
       code: 'INVALID_OWNER_ID',
-      message: `ownerId ${JSON.stringify(ownerId)} does not match /^PR\\d+$/.`,
+      message: `ownerId ${JSON.stringify(ownerId)} does not match /^PR[1-9]\\d*$/ (positive integer required).`,
       remediation: [
         'Use the canonical slot id emitted by the PR{N} allocator (e.g. "PR1", "PR2").',
-        'Allocator: workflows/work/work-state.js (Task 7). Owner ids are sequential positive integers prefixed with "PR".',
+        'Owner ids are "PR" followed by a positive integer (PR0 is not valid).',
       ],
-    };
+    }; // end INVALID_OWNER_ID
   }
   return null;
 }
