@@ -353,7 +353,6 @@ describe('claimTask — R15 input validation (fail closed, no I/O)', () => {
       cleanupTicket(ticketId.split('/')[0]);
     }
   }); // end suffixed ticket id test
-
   it('normalizes suffixed ticket ids by splitting base from suffix before sanitizing', () => {
     // safeTicketFragment (internal to work-claims) splits ticketId on "/"
     // before calling config.safeTicketId, so "BASE/suffix" sanitizes only
