@@ -180,8 +180,8 @@ function analyzeActions(actions) {
   for (const action of actions) {
     // IDEA2 / GH-219: skip enforcement audit rows — they do not carry `step` /
     // `what` fields and would corrupt step-duration accounting. Their record
-    // count still feeds `actionCount` below. Boundary timestamps for
-    // totalDuration are also filtered to legacy rows only (see below).
+    // count still feeds `actionCount` below. Enforcement rows are also
+    // excluded from totalDuration boundary computation (see legacyActions filter ~line 236).
     if (action && action.kind === ENFORCEMENT_KIND) continue;
 
     if (!stepMap.has(action.step)) {
@@ -233,7 +233,7 @@ function analyzeActions(actions) {
 
   // Total duration: first legacy action to last legacy action.
   // Enforcement rows are excluded so they do not skew boundary timestamps.
-  const legacyActions = actions.filter(a => !(a && a.kind === ENFORCEMENT_KIND));
+  const legacyActions = actions.filter((a) => !(a && a.kind === ENFORCEMENT_KIND));
   let totalDuration = 0;
   if (legacyActions.length > 0) {
     const firstTs = new Date(legacyActions[0].timestamp).getTime();

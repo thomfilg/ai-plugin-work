@@ -107,7 +107,7 @@ function validateTicketId(ticketId) {
  */
 function loadEnforcementContext(ticketId, options = {}) {
   // Strip any caller-injected origin fields — origin is derived, never trusted
-  const safeOptions = { subtask: options?.subtask };
+  const safeOptions = { subtask: Boolean(options?.subtask) };
 
   // ─── R15: Validate ticket ID (fail-closed, no I/O) ─────────────────────
   const idError = validateTicketId(ticketId);
@@ -124,12 +124,13 @@ function loadEnforcementContext(ticketId, options = {}) {
     };
   }
 
-  // Sanitize via config.safeTicketId (R15)
+  // safeTicketId transforms provider-specific IDs (e.g. #N → GH-N) — never introduces path separators
   const safeId = config && config.safeTicketId ? config.safeTicketId(ticketId) : ticketId;
 
   // ─── Load state and tasks ──────────────────────────────────────────────
   const state = loadState(safeId);
   const tasksBase = config && config.TASKS_BASE ? config.TASKS_BASE : null;
+  // Derive tasksDir here (config.tasksDir not available — would require config.js changes in a separate PR)
   const tasksDir = tasksBase ? path.join(tasksBase, safeId) : null;
   const tasks = tasksDir ? parseTasks(tasksDir) : null;
 

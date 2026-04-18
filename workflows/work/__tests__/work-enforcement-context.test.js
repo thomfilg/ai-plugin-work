@@ -415,6 +415,6 @@ describe('loadEnforcementContext — context shape (Task 3 contract)', () => {
       assert.ok(key in ctx, `EnforcementContext must expose "${key}" for preflight consumer`);
     }
     assert.equal(ctx.ticketId, 'GH-219', 'ticketId is the sanitized id');
-    assert.equal(ctx.options.subtask, undefined, 'options are echoed for caller traceability');
+    assert.equal(ctx.options.subtask, false, 'options.subtask is coerced to boolean (undefined → false)');
   });
 });
