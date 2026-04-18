@@ -66,7 +66,7 @@ function resolveTasksBase() {
   } catch { /* config unavailable */ }
   throw new Error(
     'TASKS_BASE is not configured. Set TASKS_BASE (or WORKTREES_BASE in .envrc).'
-  ); // also checks config.TASKS_BASE as fallback above
+  ); // env → config.TASKS_BASE → throw
 }
 
 /**
@@ -78,20 +78,20 @@ function sanitizeId(ticketId) {
   try {
     const config = require('./config');
     if (config && typeof config.safeTicketId === 'function') {
-      // Split on "/" to sanitize base separately from suffix,
-      // so "#123/phase1" → "GH-123/phase1" (not left as-is).
-      const slashIdx = ticketId.indexOf('/');
-      if (slashIdx !== -1) {
+      // Only split on "/" when there's exactly one slash (suffix syntax).
+      // Multiple slashes indicate a URL or invalid input — pass through
+      // to safeTicketId which handles URL parsing internally.
+      const slashes = (ticketId.match(/\//g) || []).length;
+      if (slashes === 1) {
+        const slashIdx = ticketId.indexOf('/');
         const base = ticketId.slice(0, slashIdx);
         const suffix = ticketId.slice(slashIdx);
         return config.safeTicketId(base) + suffix;
       }
       return config.safeTicketId(ticketId);
     }
-  } catch {
-    // fallback to raw ID
-  }
-  return ticketId; // raw fallback when config unavailable
+  } catch { /* fallback to raw ID */ }
+  return ticketId;
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────────
@@ -161,9 +161,9 @@ function allocateOutputFolder(ticketId, context = {}) {
     return {
       kind: 'in-flow-task',
       segment: seg,
-      root: path.join(ticketRoot, seg), // absolute — tasksBase is resolved
+      root: path.resolve(ticketRoot, seg),
       ticketRoot,
-    };
+    }; // in-flow result — paths are absolute (tasksBase resolved)
   }
 
   // ── Out-of-flow allocation ───────────────────────────────────────────────
