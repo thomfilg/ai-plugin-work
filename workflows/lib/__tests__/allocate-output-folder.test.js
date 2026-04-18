@@ -197,7 +197,7 @@ describe('allocate-output-folder', () => {
       assert.ok(result.root.includes(path.join('GH-219', 'phase1', 'task1')),
         `root should contain GH-219/phase1/task1, got: ${result.root}`);
     });
-  });
+  }); // end ticket ID validation
 
   describe('TASKS_BASE resolution', () => {
     it('uses TASKS_BASE from environment when set', () => {

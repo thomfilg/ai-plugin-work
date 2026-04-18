@@ -44,7 +44,7 @@ function validateTicketId(ticketId) {
     throw new Error(
       `Invalid ticket ID: contains unsafe characters (path traversal, backslash, or null byte): "${ticketId}"`
     );
-  }
+  } // end unsafe char check
   // Reject bare dot segments that would resolve to TASKS_BASE itself
   if (ticketId === '.' || ticketId === './') {
     throw new Error('Invalid ticket ID: "." is not a valid ticket ID.');
@@ -66,7 +66,7 @@ function resolveTasksBase() {
   } catch { /* config unavailable */ }
   throw new Error(
     'TASKS_BASE is not configured. Set TASKS_BASE (or WORKTREES_BASE in .envrc).'
-  );
+  ); // also checks config.TASKS_BASE as fallback above
 }
 
 /**
@@ -91,7 +91,7 @@ function sanitizeId(ticketId) {
   } catch {
     // fallback to raw ID
   }
-  return ticketId;
+  return ticketId; // raw fallback when config unavailable
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────────
@@ -161,7 +161,7 @@ function allocateOutputFolder(ticketId, context = {}) {
     return {
       kind: 'in-flow-task',
       segment: seg,
-      root: path.join(ticketRoot, seg),
+      root: path.join(ticketRoot, seg), // absolute — tasksBase is resolved
       ticketRoot,
     };
   }
