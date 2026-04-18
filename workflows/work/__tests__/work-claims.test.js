@@ -106,8 +106,7 @@ describe('claimTask — happy path + lock payload (R5)', () => {
   beforeEach(() => {
     TICKET = freshTicket('TEST-CLAIM-OK');
   });
-  afterEach(() => cleanupTicket(TICKET));
-
+  afterEach(() => cleanupTicket(TICKET)); // cleanup each test's unique TICKET
   it('creates `.claims/task-${n}.lock` with canonical payload on fresh dir', () => {
     const result = workClaims.claimTask(TICKET, 1, 'PR1');
 
@@ -172,8 +171,7 @@ describe('claimTask — already-claimed semantics', () => {
   beforeEach(() => {
     TICKET = freshTicket('TEST-CLAIM-DUP');
   });
-  afterEach(() => cleanupTicket(TICKET));
-
+  afterEach(() => cleanupTicket(TICKET)); // cleanup each test's unique TICKET
   it('rejects second claim from a different owner without overwriting', () => {
     const first = workClaims.claimTask(TICKET, 1, 'PR1');
     assert.equal(first.success, true);
@@ -221,8 +219,7 @@ describe('claimTask — concurrency atomicity (R5)', () => {
   beforeEach(() => {
     TICKET = freshTicket('TEST-CLAIM-CONCURRENT');
   });
-  afterEach(() => cleanupTicket(TICKET));
-
+  afterEach(() => cleanupTicket(TICKET)); // cleanup each test's unique TICKET
   it('exactly one owner wins when multiple owners claim the same task', () => {
     // claimTask is synchronous and uses link(2) for atomic lock creation.
     // Atomicity is provided by the kernel's link(2) syscall: it rejects
@@ -270,8 +267,7 @@ describe('releaseTask', () => {
   beforeEach(() => {
     TICKET = freshTicket('TEST-RELEASE');
   });
-  afterEach(() => cleanupTicket(TICKET));
-
+  afterEach(() => cleanupTicket(TICKET)); // cleanup each test's unique TICKET
   it('removes the lock file when owner matches', () => {
     const claim = workClaims.claimTask(TICKET, 1, 'PR1');
     assert.equal(claim.success, true);

@@ -42,7 +42,7 @@
  *   Success:    { success: true, ownerId, lockPath, existingOwner?, idempotent?: true }
  *   Rejection:  { success: false, existingOwner?, lockPath?, error: { code, message, remediation[] } }
  *
- * Error codes:
+ * Error codes (returned as error.code):
  *   INVALID_TICKET_ID  — ticketId missing / empty / traversal / non-string
  *   INVALID_OWNER_ID   — owner id does not match /^PR[1-9]\d*$/
  *   INVALID_TASK_NUM   — task number is not a positive integer
