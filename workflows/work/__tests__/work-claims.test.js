@@ -358,6 +358,15 @@ describe('claimTask — R15 input validation (fail closed, no I/O)', () => {
     }
   });
 
+  it('rejects ticket ids with leading/trailing whitespace', () => {
+    const bad = [' GH-219', 'GH-219 ', ' GH-219 ', '\tGH-219', 'GH-219\n'];
+    for (const ticketId of bad) {
+      const result = workClaims.claimTask(ticketId, 1, 'PR1');
+      assert.equal(result.success, false, `whitespace-padded ${JSON.stringify(ticketId)} must fail`);
+      assert.equal(result.error.code, 'INVALID_TICKET_ID');
+    }
+  });
+
   it('rejects bad owner ids with INVALID_OWNER_ID; no lock written', () => {
     const TICKET = freshTicket('TEST-OWNER-BAD');
     const bad = ['', 'user', 'PR', 'PR-1', 'PRabc', 'pr1', 'PR 1', 'PR01a', null, 1];

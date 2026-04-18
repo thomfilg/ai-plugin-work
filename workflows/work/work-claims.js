@@ -108,6 +108,16 @@ function validateTicketId(ticketId) {
       ],
     };
   }
+  // Reject whitespace-padded inputs — callers must normalize before calling.
+  if (ticketId !== trimmed) {
+    return {
+      code: 'INVALID_TICKET_ID',
+      message: `ticketId ${JSON.stringify(ticketId)} contains leading/trailing whitespace.`,
+      remediation: [
+        'Trim the ticket id before passing it to claimTask/releaseTask.',
+      ],
+    };
+  }
   // Expects pre-normalized ticket ID (e.g. "GH-219", not a URL).
   // See loadEnforcementContext which normalizes URLs before calling
   // downstream modules — by the time we reach this point the ticketId is
@@ -214,10 +224,17 @@ function validateAll(ticketId, taskNum, ownerId) {
 
 function safeTicketFragment(ticketId) {
   // Reuse config.safeTicketId when available (handles provider-specific
-  // canonicalization like "#42" → "GH-42"). Fall back to the input
-  // unchanged when config is unavailable (already validated above).
+  // canonicalization like "#42" → "GH-42"). For suffixed ids like
+  // "#42/phase1", split on "/" and sanitize only the base so that
+  // sanitizeTicketIdForPath's regex can match the bare "#N" form.
   if (config && typeof config.safeTicketId === 'function') {
     try {
+      const slashIdx = ticketId.indexOf('/');
+      if (slashIdx !== -1) {
+        const base = ticketId.slice(0, slashIdx);
+        const suffix = ticketId.slice(slashIdx); // includes the "/"
+        return config.safeTicketId(base) + suffix;
+      }
       return config.safeTicketId(ticketId);
     } catch {
       return ticketId;
