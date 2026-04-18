@@ -312,7 +312,7 @@ describe('releaseTask', () => {
 
 describe('claimTask — R15 input validation (fail closed, no I/O)', () => {
   it('rejects bad ticket ids with INVALID_TICKET_ID; creates no directory', () => {
-    const bad = ['', '   ', null, undefined, '../x', '/etc/passwd', 'a/b', 'a\\b', 'a\0b'];
+    const bad = ['', '   ', null, undefined, '../x', '/etc/passwd', 'a\\b', 'a\0b', 'a//b', 'a:b'];
     for (const ticketId of bad) {
       const result = workClaims.claimTask(ticketId, 1, 'PR1');
       assert.equal(
@@ -337,6 +337,22 @@ describe('claimTask — R15 input validation (fail closed, no I/O)', () => {
       false,
       'traversal attempt must not create any directory outside TASKS_BASE'
     );
+  });
+
+  it('accepts suffixed ticket ids with a single slash (parseTicketInput compat)', () => {
+    const good = ['GH-219/phase1', 'PROJ-123/task_2', 'AB-1/my-suffix'];
+    for (const ticketId of good) {
+      const result = workClaims.claimTask(ticketId, 1, 'PR1');
+      assert.equal(
+        result.success,
+        true,
+        `suffixed ticketId ${JSON.stringify(ticketId)} must be accepted`
+      );
+    }
+    // Cleanup
+    for (const ticketId of good) {
+      cleanupTicket(ticketId.split('/')[0]);
+    }
   });
 
   it('rejects bad owner ids with INVALID_OWNER_ID; no lock written', () => {

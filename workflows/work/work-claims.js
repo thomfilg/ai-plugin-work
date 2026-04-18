@@ -111,19 +111,29 @@ function validateTicketId(ticketId) {
   // Expects pre-normalized ticket ID (e.g. "GH-219", not a URL).
   // See loadEnforcementContext which normalizes URLs before calling
   // downstream modules — by the time we reach this point the ticketId is
-  // always a bare provider key like "GH-219" or "PROJ-123".
-  // Reject path separators and traversal fragments before we compute any
-  // filesystem path (no I/O / no mkdir until this passes). The `..`
-  // substring check subsumes the stricter "`..` between separators" regex
-  // so we keep a single, wider rejection rule — ticket ids never contain
-  // `..` legitimately (provider keys are `GH-N`, `PROJ-NNN`, etc.).
-  if (/[\\/:\0]/.test(ticketId) || ticketId.includes('..')) {
+  // always a bare provider key like "GH-219" or "PROJ-123", optionally
+  // with a slash suffix like "GH-219/phase1" (see parseTicketInput in
+  // workflows/lib/ticket-provider.js).
+  // Reject backslash, colon, null byte, and traversal sequences.
+  if (/[\\:\0]/.test(ticketId) || ticketId.includes('..')) {
     return {
       code: 'INVALID_TICKET_ID',
       message: `ticketId ${JSON.stringify(ticketId)} contains path separators or traversal sequences.`,
       remediation: [
-        'Remove any "/", "\\", "..", or null bytes from the ticket id.',
+        'Remove any "\\", "..", colon, or null bytes from the ticket id.',
         'Ticket ids are bare provider keys like "GH-219" or "PROJ-123" — not paths.',
+      ],
+    };
+  }
+  // Reject absolute paths (starts with /) and multiple slashes.
+  // A single "/" is allowed for suffixed tickets like "GH-219/phase1".
+  if (/^\/|\/\//.test(ticketId)) {
+    return {
+      code: 'INVALID_TICKET_ID',
+      message: `ticketId ${JSON.stringify(ticketId)} contains path separators or traversal sequences.`,
+      remediation: [
+        'Ticket ids must not start with "/" or contain "//".',
+        'A single "/" is allowed only as a suffix separator (e.g. "GH-219/phase1").',
       ],
     };
   }

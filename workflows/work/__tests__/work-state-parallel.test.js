@@ -386,7 +386,7 @@ describe('releaseWorkerSlot — audit-trail release (R14)', () => {
 
 describe('allocateWorkerSlot — R15 input validation (fail closed, no I/O)', () => {
   it('rejects bad ticket ids with INVALID_TICKET_ID; creates no directory / no state', () => {
-    const bad = ['', '   ', null, undefined, '../x', '/etc/passwd', 'a/b', 'a\\b', 'a\0b'];
+    const bad = ['', '   ', null, undefined, '../x', '/etc/passwd', 'a\\b', 'a\0b', 'a//b', 'a:b'];
     for (const ticketId of bad) {
       const result = workState.allocateWorkerSlot(ticketId);
       assert.ok(result, 'even rejected calls must return a result object');
@@ -415,6 +415,23 @@ describe('allocateWorkerSlot — R15 input validation (fail closed, no I/O)', ()
       false,
       'traversal attempt must not escape TASKS_BASE'
     );
+  });
+
+  it('accepts suffixed ticket ids with a single slash (parseTicketInput compat)', () => {
+    const good = ['GH-219/phase1', 'PROJ-123/task_2', 'AB-1/my-suffix'];
+    for (const ticketId of good) {
+      const result = workState.allocateWorkerSlot(ticketId);
+      assert.equal(
+        result.success !== false,
+        true,
+        `suffixed ticketId ${JSON.stringify(ticketId)} must be accepted`
+      );
+      assert.equal(typeof result.slot, 'number', 'accepted ticket must return a slot');
+    }
+    // Cleanup: suffixed tickets create nested dirs under the base ticket
+    for (const ticketId of good) {
+      cleanupTicket(ticketId.split('/')[0]);
+    }
   });
 
   it('releaseWorkerSlot also rejects bad ticket ids before touching state', () => {

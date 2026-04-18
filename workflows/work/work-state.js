@@ -1269,17 +1269,29 @@ function _validateParallelTicketId(ticketId) {
   }
   // Reject path separators and traversal fragments before any FS I/O so
   // the caller gets a structured rejection rather than a path-escape bug.
-  // Expects pre-normalized ticket ID (e.g. "GH-219", not a URL).
-  // See loadEnforcementContext which normalizes URLs before calling
-  // downstream modules — by the time we reach this point the ticketId is
-  // always a bare provider key like "GH-219" or "PROJ-123".
-  if (/[\\/:\0]/.test(ticketId) || ticketId.includes('..')) {
+  // Expects pre-normalized ticket ID (e.g. "GH-219", not a URL), optionally
+  // with a slash suffix like "GH-219/phase1" (see parseTicketInput in
+  // workflows/lib/ticket-provider.js).
+  // Reject backslash, colon, null byte, and traversal sequences.
+  if (/[\\:\0]/.test(ticketId) || ticketId.includes('..')) {
     return {
       code: 'INVALID_TICKET_ID',
       message: `ticketId ${JSON.stringify(ticketId)} contains path separators or traversal sequences.`,
       remediation: [
-        'Remove any "/", "\\", "..", or null bytes from the ticket id.',
+        'Remove any "\\", "..", colon, or null bytes from the ticket id.',
         'Ticket ids are bare provider keys like "GH-219" or "PROJ-123" — not paths.',
+      ],
+    };
+  }
+  // Reject absolute paths (starts with /) and multiple slashes.
+  // A single "/" is allowed for suffixed tickets like "GH-219/phase1".
+  if (/^\/|\/\//.test(ticketId)) {
+    return {
+      code: 'INVALID_TICKET_ID',
+      message: `ticketId ${JSON.stringify(ticketId)} contains path separators or traversal sequences.`,
+      remediation: [
+        'Ticket ids must not start with "/" or contain "//".',
+        'A single "/" is allowed only as a suffix separator (e.g. "GH-219/phase1").',
       ],
     };
   }
