@@ -500,7 +500,7 @@ describe('tdd-phase-state CLI', () => {
     });
   });
 
-    describe('token gating', () => {
+  describe('token gating', () => {
     it('record-red fails without token when WORK_TDD_TOKEN_SKIP is not set', () => {
       runCli('init TEST-TOK', homeDir);
       const failScript = createExitScript(scriptDir, 1);
