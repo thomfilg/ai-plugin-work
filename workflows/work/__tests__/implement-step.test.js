@@ -131,8 +131,8 @@ describe('implement step — dependency-aware messaging (GH-219 Task 16)', () =>
       assert.equal(entry.action, 'RUN');
       // Reason should mention the task id
       assert.ok(
-        entry.reason.includes('task_1') || entry.reason.includes('Task 1'),
-        `reason should mention task id, got: "${entry.reason}"`
+        entry.reason.includes('task_1'),
+        `reason should mention task id "task_1", got: "${entry.reason}"`
       );
     });
 
@@ -162,8 +162,8 @@ describe('implement step — dependency-aware messaging (GH-219 Task 16)', () =>
       assert.equal(entry.action, 'RUN');
       // Must reference task_2
       assert.ok(
-        entry.reason.includes('task_2') || entry.reason.includes('Task 2'),
-        `reason should mention current task id, got: "${entry.reason}"`
+        entry.reason.includes('task_2'),
+        `reason should mention current task id "task_2", got: "${entry.reason}"`
       );
     });
   });
@@ -223,10 +223,14 @@ describe('implement step — dependency-aware messaging (GH-219 Task 16)', () =>
       const entries = captureStep(s, ctx);
 
       const entry = entries[0];
-      const text = (entry.reason || '') + (entry.meta?.agentPrompt || '');
+      const prompt = entry.meta?.agentPrompt || '';
       assert.ok(
-        text.includes('PR2'),
-        `output should mention PR slot PR2, got reason: "${entry.reason}"`
+        prompt.includes('Worker slot:'),
+        `agentPrompt should include "Worker slot:" line, got: "${prompt.substring(0, 300)}"`
+      );
+      assert.ok(
+        prompt.includes('PR2'),
+        `agentPrompt should mention PR slot PR2, got: "${prompt.substring(0, 300)}"`
       );
     });
   });
@@ -280,8 +284,16 @@ describe('implement step — dependency-aware messaging (GH-219 Task 16)', () =>
       const entries = captureStep(s, ctx);
 
       const entry = entries[0];
-      // No dependency phrase needed when task has no dependencies
       assert.equal(entry.action, 'RUN');
+      // No dependency phrase should appear when task has no dependencies
+      assert.ok(
+        !/dependenc/i.test(entry.reason),
+        `reason should not mention dependencies, got: "${entry.reason}"`
+      );
+      assert.ok(
+        !/### Dependencies/i.test(entry.meta?.agentPrompt || ''),
+        `agentPrompt should not include Dependencies section`
+      );
     });
   });
 

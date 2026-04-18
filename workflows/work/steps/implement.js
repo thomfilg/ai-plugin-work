@@ -27,7 +27,7 @@ function _resolveWorkerSlot(workState, claimOwner) {
   const alloc = workState.parallelWorkers.allocations.find(
     (a) => a.ownerId === claimOwner && !a.releasedAt
   );
-  return alloc ? alloc.ownerId : null;
+  return alloc ? `PR${alloc.slot}` : null;
 }
 
 /**
@@ -59,24 +59,25 @@ function _buildDependencyStatus(currentTask, taskState) {
  * @returns {string}
  */
 function _buildDependencyPrompt(depStatus, claimOwner, workerSlot) {
-  const parts = [];
+  const sections = [];
   if (claimOwner) {
-    parts.push(`\n\n### Worker Assignment`);
-    parts.push(`Claimed by: ${claimOwner}`);
+    const lines = [`### Worker Assignment`, `Claimed by: ${claimOwner}`];
     if (workerSlot) {
-      parts.push(`Worker slot: ${workerSlot}`);
+      lines.push(`Worker slot: ${workerSlot}`);
     }
+    sections.push(lines.join('\n'));
   }
   if (depStatus) {
-    parts.push(`\n\n### Dependencies`);
+    const lines = [`### Dependencies`];
     if (depStatus.allMet) {
-      parts.push(`All dependencies met. This task is ready to start.`);
+      lines.push(`All dependencies met. This task is ready to start.`);
     }
     depStatus.deps.forEach((d) => {
-      parts.push(`- Task ${d.num}: ${d.met ? 'completed' : 'pending'}`);
+      lines.push(`- Task ${d.num}: ${d.met ? 'completed' : 'pending'}`);
     });
+    sections.push(lines.join('\n'));
   }
-  return parts.length > 0 ? '\n' + parts.join('\n') : '';
+  return sections.length > 0 ? '\n\n' + sections.join('\n\n') : '';
 }
 
 /**
@@ -157,7 +158,10 @@ module.exports = function implementStep(add, s, ctx) {
   }
 
   // ─── GH-219 Task 16: dependency-aware context extraction ─────────────
-  const currentTaskMeta = taskState?.tasks?.[currentTaskIdx] ?? null;
+  const currentTaskId = currentTask?.id ?? null;
+  const currentTaskMeta = currentTaskId
+    ? (taskState?.tasks ?? []).find((t) => t.id === currentTaskId) ?? null
+    : null;
   const claimOwner = currentTaskMeta?.claimedBy ?? null;
   const workerSlot = _resolveWorkerSlot(s?.workState, claimOwner);
   const depStatus = _buildDependencyStatus(currentTask, taskState);
