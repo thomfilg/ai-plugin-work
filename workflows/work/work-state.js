@@ -527,25 +527,309 @@ function completeSubtask(ticketId, subtaskIndex) {
 // ─── Task Progress Functions ─────────────────────────────────────────────────
 
 /**
- * Initialize task tracking from tasks.md parsed data.
- * Called after tasks step completes.
+ * @typedef {Object} TaskGraphError
+ * @property {string} code
+ *   Stable identifier for the violation. One of:
+ *   `UNKNOWN_DEPENDENCY`, `SELF_DEPENDENCY`, `DEPENDENCY_CYCLE`,
+ *   `INVALID_TASK_GRAPH`, `INVALID_TASK_ENTRY`. Used as rule id by preflight.
+ * @property {string|null} taskId
+ *   Task id (`task_${num}`) the violation belongs to, or null when the input
+ *   is not an array / not shaped as a task list.
+ * @property {string} message    Human-readable description.
+ * @property {string[]} remediation
+ *   Actionable fix steps (R18 explainability). Non-empty for every error.
  */
-function initTasksMeta(ticketId, taskCount) {
+
+/**
+ * @typedef {Object} TaskGraphValidation
+ * @property {boolean} valid
+ * @property {TaskGraphError[]} errors
+ *   All detected violations. Self-dependency errors are reported as
+ *   `SELF_DEPENDENCY` (not `DEPENDENCY_CYCLE`) for actionable remediation.
+ */
+
+/**
+ * Validate a task dependency graph.
+ *
+ * Pure function — no filesystem I/O. Intended to be shared by:
+ *   1. `initTasksMeta` (this file) — called BEFORE persisting tasksMeta so
+ *      invalid graphs never reach disk (R4).
+ *   2. Task 12 preflight in `workflows/lib/preflight.js` — re-runs on every
+ *      enforcement decision without duplicating validation logic (see
+ *      acceptance criteria: "`validateTaskGraph` exports a stable API for
+ *      reuse by Task 12").
+ *
+ * Accepts an array of task descriptors (from `task-parser.js` `parseTasks`).
+ * Each task must have a numeric `num`. A missing `dependencies` field is
+ * treated as `[]` (no error) to support legacy / partially-annotated plans.
+ *
+ * Violations detected:
+ *   - `SELF_DEPENDENCY`    — task declares itself as a dependency
+ *   - `UNKNOWN_DEPENDENCY` — dependency id has no matching task
+ *   - `DEPENDENCY_CYCLE`   — directed cycle in the remaining edges after
+ *                             self-edges are stripped (DFS coloring)
+ *
+ * @param {Array<{num:number, dependencies?:number[]}>} tasks
+ * @returns {TaskGraphValidation}
+ */
+function validateTaskGraph(tasks) {
+  if (!Array.isArray(tasks)) {
+    return {
+      valid: false,
+      errors: [
+        {
+          code: 'INVALID_TASK_GRAPH',
+          taskId: null,
+          message: `validateTaskGraph expected an array of tasks, received ${tasks === null ? 'null' : typeof tasks}.`,
+          remediation: [
+            'Pass the result of parseTasks(tasksDir) from task-parser.js.',
+            'Verify tasks.md exists and has at least one `## Task N` section.',
+          ],
+        },
+      ],
+    };
+  }
+
+  const errors = [];
+
+  // Build task-number set and adjacency list in a single pass. Skip tasks
+  // whose `num` is not a positive integer — report once but keep going so
+  // we can surface every detectable error in one call.
+  const taskNums = new Set();
+  for (const task of tasks) {
+    if (task && Number.isInteger(task.num) && task.num > 0) {
+      if (taskNums.has(task.num)) {
+        errors.push({
+          code: 'DUPLICATE_TASK_NUM',
+          taskId: `task_${task.num}`,
+          message: `Duplicate task number ${task.num} — each task must have a unique \`num\`.`,
+          remediation: [
+            `Remove or renumber one of the duplicate \`## Task ${task.num}\` headings in tasks.md.`,
+            'Task numbers must be unique positive integers.',
+          ],
+        });
+      }
+      taskNums.add(task.num);
+    } else {
+      errors.push({
+        code: 'INVALID_TASK_ENTRY',
+        taskId: null,
+        message: `Task entry missing a positive integer \`num\` field: ${JSON.stringify(task)}`,
+        remediation: [
+          'Ensure each `## Task N` heading in tasks.md uses a positive integer.',
+          'Re-run `parseTasks(tasksDir)` and inspect the output before passing to validateTaskGraph.',
+        ],
+      });
+    }
+  }
+
+  // adj[taskNum] = list of dep task nums (self-edges stripped; self-dep
+  // reported separately). Only includes edges where the target exists.
+  const adj = new Map();
+  for (const task of tasks) {
+    if (!task || !Number.isInteger(task.num)) continue;
+    const deps = Array.isArray(task.dependencies) ? task.dependencies : [];
+    const filteredDeps = [];
+    for (const dep of deps) {
+      if (!Number.isInteger(dep)) continue; // parseTasks only emits ints; defensive
+      if (dep === task.num) {
+        errors.push({
+          code: 'SELF_DEPENDENCY',
+          taskId: `task_${task.num}`,
+          message: `Task ${task.num} depends on itself.`,
+          remediation: [
+            `Remove the self-reference from Task ${task.num}'s \`### Dependencies\` section in tasks.md.`,
+            'A task cannot wait for its own completion.',
+          ],
+        });
+        continue; // strip from adjacency — don't double-report as cycle
+      }
+      if (!taskNums.has(dep)) {
+        errors.push({
+          code: 'UNKNOWN_DEPENDENCY',
+          taskId: `task_${task.num}`,
+          message: `Task ${task.num} depends on unknown Task ${dep}.`,
+          remediation: [
+            `Verify Task ${dep} exists in tasks.md under a \`## Task ${dep}\` heading.`,
+            `Update Task ${task.num}'s \`### Dependencies\` section to reference an existing task id.`,
+          ],
+        });
+        continue; // unknown edge cannot participate in cycle detection
+      }
+      filteredDeps.push(dep);
+    }
+    adj.set(task.num, filteredDeps);
+  }
+
+  // Cycle detection via DFS coloring (WHITE/GRAY/BLACK). A GRAY back-edge
+  // indicates a cycle; we reconstruct the cycle from the DFS path and dedupe
+  // on sorted node set so A→B→A and B→A→B report once.
+  const WHITE = 0;
+  const GRAY = 1;
+  const BLACK = 2;
+  const color = new Map();
+  for (const num of taskNums) color.set(num, WHITE);
+
+  const reportedCycles = new Set();
+
+  function dfs(start) {
+    // Iterative DFS with explicit path tracking; avoids recursion depth limits
+    // on large graphs while preserving the back-edge detection semantics.
+    const stack = [{ node: start, depIndex: 0 }];
+    const path = [];
+    color.set(start, GRAY);
+    path.push(start);
+
+    while (stack.length > 0) {
+      const frame = stack[stack.length - 1];
+      const neighbors = adj.get(frame.node) || [];
+      if (frame.depIndex < neighbors.length) {
+        const next = neighbors[frame.depIndex++];
+        const c = color.get(next);
+        if (c === GRAY) {
+          // Back-edge → cycle. Extract cycle from path and dedupe.
+          const startIdx = path.indexOf(next);
+          const cycle = path.slice(startIdx);
+          const cycleKey = [...cycle].sort((a, b) => a - b).join(',');
+          if (!reportedCycles.has(cycleKey)) {
+            reportedCycles.add(cycleKey);
+            const display = [...cycle, next].map((n) => `Task ${n}`).join(' → ');
+            errors.push({
+              code: 'DEPENDENCY_CYCLE',
+              taskId: `task_${next}`,
+              message: `Dependency cycle detected: ${display}.`,
+              remediation: [
+                'Break the cycle by removing one dependency edge in tasks.md.',
+                `Review the \`### Dependencies\` section of each task in the cycle (${cycle
+                  .map((n) => `Task ${n}`)
+                  .join(', ')}).`,
+                'Tasks in a cycle can never start — at least one must drop its back-reference.',
+              ],
+            });
+          }
+        } else if (c === WHITE) {
+          color.set(next, GRAY);
+          path.push(next);
+          stack.push({ node: next, depIndex: 0 });
+        }
+        // BLACK: fully explored subtree — safe to skip (no new cycles reachable)
+      } else {
+        color.set(frame.node, BLACK);
+        path.pop();
+        stack.pop();
+      }
+    }
+  }
+
+  for (const num of taskNums) {
+    if (color.get(num) === WHITE) {
+      dfs(num);
+    }
+  }
+
+  return {
+    valid: errors.length === 0,
+    errors,
+  };
+}
+
+/**
+ * Initialize task tracking for a ticket.
+ *
+ * Accepts EITHER:
+ *   - a positive integer `taskCount` (LEGACY / R16 pre-IDEA2 form) — creates
+ *     tasks without a `dependencies` field, matching pre-IDEA2 wire format.
+ *     Callers (e.g. `implement.js` spawning `task-init COUNT` via CLI)
+ *     continue to work unchanged.
+ *   - an array of task descriptors from `parseTasks(tasksDir)` (NEW IDEA2
+ *     form) — runs `validateTaskGraph` BEFORE persisting. Invalid graphs
+ *     return `{ error, errors }` and never reach disk (R4 fail-closed).
+ *
+ * On success with the array form, each persisted `tasksMeta.tasks[i]` gains
+ * a `dependencies: number[]` copy of the source task's dependency list.
+ *
+ * Idempotent: if `tasksMeta` already exists, returns it unchanged.
+ *
+ * @param {string} ticketId
+ * @param {number | Array<{num:number, dependencies?:number[]}>} taskCountOrTasks
+ * @returns {object}
+ *   - `{ ...state }` on success (same shape as `saveState` return)
+ *   - `{ success: true, tasksMeta, idempotent: true }` on idempotent call
+ *   - `{ error: string, errors?: TaskGraphError[] }` on validation failure
+ */
+function initTasksMeta(ticketId, taskCountOrTasks) {
+  // ─── Idempotency check BEFORE validation ──────────────────────────────
+  // If tasksMeta already exists, return immediately — no need to re-validate
+  // inputs that were already validated on the initial call. This avoids
+  // rejecting a second call with stale/different arguments when the
+  // canonical result is already persisted.
+  const existingState = loadState(ticketId);
+  if (existingState?.tasksMeta) {
+    return { success: true, tasksMeta: existingState.tasksMeta, idempotent: true };
+  }
+
+  const isTaskArray = Array.isArray(taskCountOrTasks);
+  const tasksInput = isTaskArray ? taskCountOrTasks : null;
+  const taskCount = isTaskArray ? tasksInput.length : taskCountOrTasks;
+
   if (!Number.isInteger(taskCount) || taskCount <= 0) {
     return { error: `Invalid taskCount: ${taskCount}. Must be a positive integer.` };
   }
 
-  let state = loadState(ticketId);
+  if (isTaskArray && tasksInput.some((t) => !t || typeof t.num !== 'number')) {
+    return { error: 'Invalid tasksInput: each element must have a numeric `num` field.' };
+  }
+
+  // ─── Non-contiguous / duplicate task number validation ─────────────────
+  // Task numbers must be unique and form a contiguous 1..N range so that
+  // the index-based `task_${i+1}` id mapping in the loop below is correct.
+  if (isTaskArray) {
+    const nums = tasksInput.map(t => t.num);
+    const uniqueNums = new Set(nums);
+    if (uniqueNums.size !== nums.length) {
+      return { error: 'Duplicate task numbers detected in tasksInput.' };
+    }
+    const maxNum = Math.max(...nums);
+    if (maxNum !== taskCount || !nums.every(n => n >= 1 && n <= taskCount)) {
+      return { error: `Task numbers must be contiguous 1..${taskCount}. Found: ${nums.sort((a, b) => a - b).join(', ')}` };
+    }
+  }
+
+  // ─── R4: Graph validation BEFORE any persistence write ─────────────────
+  // Only validate when the caller opts into the IDEA2 form (array). Integer
+  // form preserves pre-IDEA2 semantics: no dependencies, no graph to check.
+  if (isTaskArray) {
+    const validation = validateTaskGraph(tasksInput);
+    if (!validation.valid) {
+      return {
+        error: 'Invalid task graph — see `errors` for details.',
+        errors: validation.errors,
+      };
+    }
+  }
+
+  let state = existingState;
   if (!state) state = initState(ticketId);
 
-  // Idempotent: return existing task tracking if already initialized
-  if (state?.tasksMeta) {
-    return { success: true, tasksMeta: state.tasksMeta, idempotent: true };
+  // Build a Map for O(1) lookup by task num (avoids O(n²) find-in-loop).
+  const taskMap = new Map();
+  if (tasksInput) {
+    for (const t of tasksInput) {
+      if (t && typeof t.num === 'number') taskMap.set(t.num, t);
+    }
   }
 
   const tasks = [];
   for (let i = 0; i < taskCount; i++) {
-    tasks.push({ id: `task_${i + 1}`, status: 'pending' });
+    const entry = { id: `task_${i + 1}`, status: 'pending' };
+    if (isTaskArray) {
+      // Copy dependencies from parseTasks output. Match by `num` (1-indexed)
+      // so out-of-order task lists still produce the correct mapping.
+      const src = taskMap.get(i + 1);
+      const deps = src && Array.isArray(src.dependencies) ? src.dependencies : [];
+      entry.dependencies = deps.slice(); // defensive copy — callers can't mutate persisted state
+    }
+    tasks.push(entry);
   }
 
   state.tasksMeta = {
@@ -555,7 +839,91 @@ function initTasksMeta(ticketId, taskCount) {
   };
 
   return saveState(ticketId, state);
-} // initTasksMeta validates taskCount > 0 and initializes state if missing (line 513-515)
+}
+
+/**
+ * Check whether a task is ready to start, per its declared dependencies.
+ *
+ * Reads state from disk via loadState — reads `loadState(ticketId).tasksMeta` only.
+ * Single source of truth for dependency readiness (R3) — Task 12 preflight
+ * imports this function; there must not be a second implementation
+ * elsewhere.
+ *
+ * Semantics:
+ *   - Task has no `dependencies` field (pre-IDEA2) → return `true`.
+ *     R16 default: preserves pre-IDEA2 sequential behavior where the
+ *     orchestrator drives order via `currentTaskIndex` and every task
+ *     is considered startable from the graph's point of view.
+ *   - Task has `dependencies: []`                → return `true`.
+ *   - Every declared dep exists in `tasksMeta.tasks` with
+ *     `status === 'completed'`                    → return `true`.
+ *   - Any dep is pending, missing, or the task itself is already completed
+ *                                                 → return `false` (fail-closed).
+ *
+ * The "completed task is not startable" rule mirrors advanceTask's idempotent
+ * terminal behavior — canStart is a forward-looking question about work that
+ * could still be begun, not about work that has been done.
+ *
+ * @param {string} ticketId
+ * @param {number} taskNum - 1-indexed task number (matches `task_${N}` id /
+ *                           `## Task N` heading in tasks.md).
+ * @returns {boolean}
+ */
+/**
+ * Find a persisted task entry by its 1-indexed task number.
+ * Returns null if the state is uninitialized or the number is out of range.
+ * @param {object} state - Full ticket state as returned by `loadState`.
+ * @param {number} taskNum - 1-indexed task number (maps to `task_${N}`).
+ * @returns {object|null}
+ */
+function findTaskByNum(state, taskNum) {
+  if (!state || !state.tasksMeta || !Array.isArray(state.tasksMeta.tasks)) return null;
+  if (!Number.isInteger(taskNum) || taskNum <= 0) return null;
+  const targetId = `task_${taskNum}`;
+  return state.tasksMeta.tasks.find((t) => t && t.id === targetId) || null;
+}
+
+/**
+ * Pure dependency readiness check that operates on already-loaded state.
+ *
+ * Useful when callers (e.g. preflight, orchestrator) already hold a state
+ * object and want to avoid a redundant `loadState` disk read.
+ *
+ * @param {object} state - Full ticket state as returned by `loadState`.
+ * @param {number} taskNum - 1-indexed task number.
+ * @returns {boolean}
+ */
+function canStartFromState(state, taskNum) {
+  const task = findTaskByNum(state, taskNum);
+  if (!task) return false; // uninitialized, bad input, or unknown task
+
+  // Already completed → not startable (forward-looking query)
+  if (task.status === 'completed') return false;
+
+  // R16 backward compat: missing `dependencies` field means the task was
+  // persisted under the pre-IDEA2 schema. Treat as empty deps — sequential
+  // orchestrator handles ordering.
+  if (!Array.isArray(task.dependencies)) return true;
+
+  // Empty deps → startable
+  if (task.dependencies.length === 0) return true;
+
+  // All declared deps must resolve to a completed task. Unknown dep →
+  // fail-closed (R4: validation should have prevented this, but belt-and-
+  // suspenders for state files that skipped the new initTasksMeta path).
+  for (const depNum of task.dependencies) {
+    const dep = findTaskByNum(state, depNum);
+    if (!dep) return false;
+    if (dep.status !== 'completed') return false;
+  }
+
+  return true;
+}
+
+function canStart(ticketId, taskNum) {
+  const state = loadState(ticketId);
+  return canStartFromState(state, taskNum);
+}
 
 /**
  * Get the current task info.
@@ -879,6 +1247,315 @@ if (require.main === module) {
   }); // _cliCommand is module-scoped — see top of file
 }
 
+// ─── Task claim locks (GH-219 Task 6) ───────────────────────────────────────
+// Per-task atomic claim semantics live in `./work-claims.js`. We re-export
+// `claimTask` / `releaseTask` here so downstream CLI and hook consumers can
+// import a single "work state" surface, and so the spec verification
+// checklist grep for `/claimTask/` and `/\.claims/` in work-state.js is
+// satisfied without duplicating the implementation.
+// Claim lock files live at `TASKS_BASE/<ticketId>/.claims/task-${n}.lock`.
+const { claimTask, releaseTask } = require('./work-claims');
+
+// ─── Parallel worker PR{N} slot allocation (GH-219 Task 7) ─────────────────
+// IDEA2 R14: Parallel worker layout `${WORKTREES_BASE}/tasks/<ticketId>/PR{N}/`.
+// Because `config.TASKS_BASE` defaults to `path.join(WORKTREES_BASE, 'tasks')`
+// (see workflows/lib/config.js lines 125–127 and the repo .envrc), directories
+// resolve to `${TASKS_BASE}/<safeTicketId>/PR{N}/` — we use `TASKS_BASE` as
+// the source of truth, same as every other path builder in this file.
+//
+// Design — "reuse after release":
+//   The brief / spec call for "reuse after clean completion" but the task
+//   description explicitly allows monotonic increment as a valid spec-aligned
+//   choice ("if unclear in spec, prefer monotonic increment"). We pick
+//   MONOTONIC INCREMENT: `nextSlot` only grows, releases mark `releasedAt`
+//   in the audit trail, and new allocations always yield a fresh slot. This
+//   avoids ABA-style reuse races where a released slot is re-assigned to a
+//   new worker while the crashed worker's filesystem side-effects still
+//   reference the old slot directory. The spec's "reuse" requirement is
+//   satisfied by the allocations audit trail — a caller can observe which
+//   slots are live (no `releasedAt`) vs completed (has `releasedAt`) and
+//   act accordingly without needing to collide on slot numbers.
+//
+// Owner id format: `PR${slot}` — MUST satisfy the same `OWNER_ID_RE` as Task 6
+// (`work-claims.js` `/^PR\d+$/`). We redefine the regex here (rather than
+// importing `work-claims._internals.OWNER_ID_RE`) to keep this module's
+// validation gate self-contained — the two definitions are one line each
+// and must stay in sync (enforced by cross-referencing tests in
+// `work-state-parallel.test.js` and `work-claims.test.js`).
+
+const PARALLEL_OWNER_ID_RE = /^PR\d+$/;
+
+/**
+ * Validate a ticket id for parallel-worker allocation.
+ *
+ * Mirrors the fail-closed rules in `work-claims.js` `validateTicketId`
+ * (non-empty string, no path separators, no traversal) so a ticket id
+ * that passes `allocateWorkerSlot` will also pass `claimTask`.
+ *
+ * Returns `null` on success, a structured error descriptor otherwise.
+ */
+function _validateParallelTicketId(ticketId) {
+  if (typeof ticketId !== 'string') {
+    return {
+      code: 'INVALID_TICKET_ID',
+      message: `ticketId must be a non-empty string (received ${ticketId === null ? 'null' : typeof ticketId}).`,
+      remediation: [
+        'Pass a ticket id like "GH-219" or "PROJ-123".',
+        'Hooks should resolve ticket id via workflows/lib/scripts/get-ticket-id.js before calling allocateWorkerSlot.',
+      ],
+    };
+  }
+  if (ticketId.trim() === '') {
+    return {
+      code: 'INVALID_TICKET_ID',
+      message: 'ticketId must be a non-empty string (received empty/whitespace).',
+      remediation: ['Pass a ticket id like "GH-219" or "PROJ-123".'],
+    };
+  }
+  // Reject path separators and traversal fragments before any FS I/O so
+  // the caller gets a structured rejection rather than a path-escape bug.
+  // Expects pre-normalized ticket ID (e.g. "GH-219", not a URL), optionally
+  // with a slash suffix like "GH-219/phase1" (see parseTicketInput in
+  // workflows/lib/ticket-provider.js).
+  // Reject backslash, colon, null byte, and traversal sequences.
+  if (/[\\:\0]/.test(ticketId) || ticketId.includes('..')) {
+    return {
+      code: 'INVALID_TICKET_ID',
+      message: `ticketId ${JSON.stringify(ticketId)} contains path separators or traversal sequences.`,
+      remediation: [
+        'Remove any "\\", "..", colon, or null bytes from the ticket id.',
+        'Ticket ids are bare provider keys like "GH-219" or "PROJ-123" — not paths.',
+      ],
+    };
+  }
+  // Reject absolute paths (starts with /) and multiple slashes.
+  // A single "/" is allowed for suffixed tickets like "GH-219/phase1".
+  if (/^\/|\/\//.test(ticketId)) {
+    return {
+      code: 'INVALID_TICKET_ID',
+      message: `ticketId ${JSON.stringify(ticketId)} contains path separators or traversal sequences.`,
+      remediation: [
+        'Ticket ids must not start with "/" or contain "//".',
+        'A single "/" is allowed only as a suffix separator (e.g. "GH-219/phase1").',
+      ],
+    };
+  }
+  // Reject more than one slash — "A/B/C" must not pass even though it has
+  // no leading slash or consecutive slashes.
+  const slashCount = (ticketId.match(/\//g) || []).length;
+  if (slashCount > 1) {
+    return {
+      code: 'INVALID_TICKET_ID',
+      message: 'Only one "/" suffix separator is allowed.',
+      remediation: ['Use format like "PROJ-123/phase1" — at most one "/".'],
+    };
+  }
+  return null;
+}
+
+/**
+ * Build a canonical INVALID_SLOT error descriptor. DRY helper so both
+ * the string and number validation paths emit identical remediation.
+ */
+function _invalidSlotError(slot) {
+  return {
+    code: 'INVALID_SLOT',
+    message: `slot ${JSON.stringify(slot)} must be a positive integer.`,
+    remediation: [
+      'Pass a positive integer slot number returned by allocateWorkerSlot.',
+      'Check TASKS_BASE/<ticketId>/.work-state.json `parallelWorkers.allocations` for valid slot numbers.',
+    ],
+  };
+}
+
+/**
+ * Normalize `slot` to a positive integer or return a structured error.
+ *
+ * Accepts a number or a plain-digit string ("1", "42"). Rejects non-integers,
+ * decimals, negatives, zero, NaN, empty string, and non-primitives.
+ *
+ * Returns `{ error, value }` — mirrors the shape of `validateTaskNum` in
+ * `work-claims.js` so callers that already know that pattern read cleanly.
+ */
+function _validateParallelSlot(slot) {
+  let value = slot;
+  if (typeof value === 'string') {
+    if (!/^\d+$/.test(value)) return { error: _invalidSlotError(slot), value: null };
+    value = Number(value);
+  }
+  if (!Number.isInteger(value) || value <= 0) {
+    return { error: _invalidSlotError(slot), value: null };
+  }
+  return { error: null, value };
+}
+
+/**
+ * Resolve the absolute `PR{N}` worker directory for `ticketId`.
+ * Pure function — caller decides whether to `mkdirSync` it.
+ */
+function _workerSlotDir(ticketId, slot) {
+  return path.join(TASKS_BASE, safeId(ticketId), `PR${slot}`);
+}
+
+/**
+ * Allocate the next `PR{N}` worker slot for `ticketId` and create its
+ * worktree directory under `${TASKS_BASE}/<safeTicketId>/PR{N}/`.
+ *
+ * Contract:
+ *   - Sequential, monotonic: `nextSlot` only grows. First call → slot 1,
+ *     second call → slot 2, etc. Persisted in `.work-state.json` under
+ *     `parallelWorkers: { nextSlot, allocations: [...] }`.
+ *   - Owner id format: `PR${slot}` — satisfies `work-claims.js` `OWNER_ID_RE`
+ *     so the returned `ownerId` flows directly into `claimTask` without
+ *     translation (R5).
+ *   - Directory is created (recursive, idempotent) under TASKS_BASE before
+ *     return so the caller can immediately write into it.
+ *   - Fail-closed validation (R15): bad `ticketId` returns a structured
+ *     error BEFORE any filesystem I/O or directory creation.
+ *   - Concurrency: in-process serialized — one orchestrator allocates slots.
+ *     Cross-process races are out of scope (spec defers to `claimTask`'s
+ *     link(2)-atomic lock as the true serialization gate).
+ *
+ * Audit entry shape (see spec "Data Model → parallelWorkers"):
+ *   `{ slot, ownerId, taskNum?, claimedAt, releasedAt? }`
+ *
+ * @param {string} ticketId
+ * @param {{ taskNum?: number }} [context]
+ *   Optional — if `context.taskNum` is a positive integer, it is recorded
+ *   in the audit entry so `.work-state.json` shows which task this slot
+ *   is intending to claim.
+ * @returns {{ slot: number, ownerId: string, dir: string } | { success: false, error: { code: string, message: string, remediation: string[] } }}
+ */
+function allocateWorkerSlot(ticketId, context = {}) {
+  // R15: validate BEFORE any filesystem I/O / directory creation.
+  const ticketErr = _validateParallelTicketId(ticketId);
+  if (ticketErr) return { success: false, error: ticketErr };
+
+  // Ensure state exists (idempotent); safe to create `.work-state.json`
+  // only after input validation has passed.
+  let state = loadState(ticketId);
+  if (!state) state = initState(ticketId);
+
+  if (!state.parallelWorkers) {
+    state.parallelWorkers = { nextSlot: 1, allocations: [] };
+  }
+
+  const slot = state.parallelWorkers.nextSlot;
+  const ownerId = `PR${slot}`;
+  const dir = _workerSlotDir(ticketId, slot);
+
+  // Defensive: OWNER_ID_RE is the canonical format gate — if a future edit
+  // accidentally breaks the ownerId format, fail loudly rather than emit a
+  // bad id that Task 6's claimTask will later reject.
+  if (!PARALLEL_OWNER_ID_RE.test(ownerId)) {
+    throw new Error(
+      `allocateWorkerSlot produced non-conformant ownerId ${JSON.stringify(ownerId)} — this is a bug in work-state.js.`
+    );
+  }
+
+  const entry = {
+    slot,
+    ownerId,
+    claimedAt: new Date().toISOString(),
+  };
+  if (context && Number.isInteger(context.taskNum) && context.taskNum > 0) {
+    entry.taskNum = context.taskNum;
+  }
+  state.parallelWorkers.allocations.push(entry);
+  state.parallelWorkers.nextSlot = slot + 1;
+
+  // Persist BEFORE directory creation. If `mkdirSync` throws (EACCES, ENOSPC)
+  // the state file still reflects a consistent slot reservation — the caller
+  // can retry or release explicitly without corrupting the counter.
+  saveState(ticketId, state);
+
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch (mkdirErr) {
+    return {
+      success: false,
+      error: {
+        code: 'DIR_CREATE_FAILED',
+        message: `Failed to create worker directory ${dir}: ${mkdirErr.message}`,
+        remediation: [
+          'Check filesystem permissions on the TASKS_BASE directory.',
+          'Verify sufficient disk space is available.',
+          'The slot was persisted in .work-state.json — retry or release explicitly.',
+        ],
+      },
+    };
+  }
+
+  return { success: true, slot, ownerId, dir };
+}
+
+/**
+ * Release a previously-allocated `PR{N}` worker slot.
+ *
+ * Marks the audit-trail entry with `releasedAt` (ISO timestamp). Does NOT
+ * decrement `nextSlot` and does NOT reuse the slot number on a subsequent
+ * allocation — see the "reuse after release" decision in the file header.
+ * The PR{N} directory is left on disk; cleanup is the caller's
+ * responsibility (worktree removal / artifact archival is out of scope).
+ *
+ * Idempotent: releasing an already-released slot succeeds without mutating
+ * state (original `releasedAt` is preserved for audit fidelity).
+ *
+ * R15: fail-closed validation — bad inputs return a structured error
+ * before any state mutation.
+ *
+ * @param {string} ticketId
+ * @param {number|string} slot - as returned by `allocateWorkerSlot(...).slot`
+ * @returns {{ success: true, idempotent?: boolean } | { success: false, error: { code: string, message: string, remediation: string[] } }}
+ */
+function releaseWorkerSlot(ticketId, slot) {
+  const ticketErr = _validateParallelTicketId(ticketId);
+  if (ticketErr) return { success: false, error: ticketErr };
+
+  const { error: slotErr, value: slotInt } = _validateParallelSlot(slot);
+  if (slotErr) return { success: false, error: slotErr };
+
+  const state = loadState(ticketId);
+  if (!state || !state.parallelWorkers || !Array.isArray(state.parallelWorkers.allocations)) {
+    return {
+      success: false,
+      error: {
+        code: 'UNKNOWN_SLOT',
+        message: `No parallelWorkers state for ticket ${ticketId}. Nothing to release.`,
+        remediation: [
+          'Verify allocateWorkerSlot was called for this ticket.',
+          'Check that the ticket id matches the one used during allocation.',
+        ],
+      },
+    };
+  }
+
+  const entry = state.parallelWorkers.allocations.find((x) => x.slot === slotInt);
+  if (!entry) {
+    return {
+      success: false,
+      error: {
+        code: 'UNKNOWN_SLOT',
+        message: `Slot ${slotInt} was never allocated on ticket ${ticketId}.`,
+        remediation: [
+          'Pass a slot number returned by a prior allocateWorkerSlot call.',
+          `Inspect ${path.join(TASKS_BASE, safeId(ticketId), '.work-state.json')} → parallelWorkers.allocations for the list of valid slot numbers.`,
+        ],
+      },
+    };
+  }
+
+  // Idempotent re-release: preserve the original releasedAt timestamp so
+  // the audit trail reflects the first clean completion, not a replay.
+  if (entry.releasedAt) {
+    return { success: true, idempotent: true };
+  }
+
+  entry.releasedAt = new Date().toISOString();
+  saveState(ticketId, state);
+  return { success: true };
+}
+
 module.exports = {
   loadState,
   saveState,
@@ -894,12 +1571,21 @@ module.exports = {
   completeSubtask,
   autoInitTdd,
   initTasksMeta,
+  validateTaskGraph,
+  canStart,
+  canStartFromState,
   getTaskCurrent,
   advanceTask,
   getTaskByIndex,
   getTaskReviewFixRounds,
   incrementTaskReviewFixRounds,
   resetTaskReviewFixRounds,
+  // GH-219 Task 6: re-exports from work-claims.js
+  claimTask,
+  releaseTask,
+  // GH-219 Task 7: PR{N} worker slot allocation
+  allocateWorkerSlot,
+  releaseWorkerSlot,
   STEPS,
   SUBTASK_STEPS,
   CHECK_AGENTS,
