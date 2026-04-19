@@ -1,6 +1,6 @@
 {
   "name": "work-workflow",
-  "version": "3.0.14",
+  "version": "3.0.15",
   "description": "Self-contained workflow plugin with agents, hooks, skills, and orchestration. Includes 18 specialized agents, agent-specific hooks, and 25 skills.",
   "author": {
     "name": "Custom",
