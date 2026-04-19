@@ -177,9 +177,7 @@ function runPreflight(context, options) {
         denied = true;
         if (Array.isArray(res.reasons) && res.reasons.length > 0) {
           for (const r of res.reasons) reasons.push(r);
-        } else {
-          reasons.push('PREFLIGHT_DENIED');
-        }
+        } else { reasons.push('PREFLIGHT_DENIED'); } // synthetic reason when check provides none
         if (Array.isArray(res.remediation)) {
           for (const r of res.remediation) remediation.push(r);
         }
@@ -258,8 +256,7 @@ function isWriteAllowedPath(filePath, allowedPaths) {
   if (!path.isAbsolute(filePath)) return false; // require absolute paths — fail-closed
   if (!allowedPaths || typeof allowedPaths !== 'object') return false;
 
-  // Normalize to prevent path-traversal bypasses (R15)
-  const normalized = path.resolve(filePath);
+  const normalized = path.resolve(filePath); // normalize for path-traversal defense (R15)
 
   // Check PR{N}/ directory
   if (typeof allowedPaths.prDir === 'string' && allowedPaths.prDir.length > 0) {
@@ -304,7 +301,7 @@ function isWriteAllowedPath(filePath, allowedPaths) {
  */
 function createGraphCheck() {
   return function graphCheck(ctx) {
-    if (!ctx.tasks || !Array.isArray(ctx.tasks)) return null;
+    if (!ctx.tasks || !Array.isArray(ctx.tasks)) return null; // no tasks → no graph to validate
 
     // Lazy require to avoid module-level coupling with work-state.js.
     // In production config is always available; if require fails, the
@@ -356,7 +353,7 @@ function createClaimCheck(params) {
     if (!ctx.state || !ctx.state.tasksMeta) return null;
 
     // No taskNum requested → no claim enforcement needed
-    if (!taskNum) return null;
+    if (taskNum == null) return null;
 
     // R6: taskNum set but no ownerId → unclaimed task write
     if (!ownerId) {
@@ -375,7 +372,7 @@ function createClaimCheck(params) {
     if (!Array.isArray(tasksMeta.tasks)) return null;
 
     const targetId = `task_${taskNum}`;
-    const task = tasksMeta.tasks.find((t) => t && t.id === targetId);
+    const task = tasksMeta.tasks.find((t) => t && t.id === targetId); // R3 lookup
     if (!task) {
       return {
         allow: false,

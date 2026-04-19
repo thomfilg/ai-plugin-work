@@ -72,9 +72,7 @@ describe('preflight — module surface (R12)', () => {
         `preflight must not require work-actions (found: ${id}). ` +
           'Audit persistence is injected by callers via options.audit.'
       );
-    }
-  });
-});
+    } }); }); // end coupling test
 
 // ─── R12 — Happy path (empty context, no checks) ────────────────────────────
 
@@ -421,8 +419,7 @@ describe('preflight — pluggable checks (R12, §Pattern — pluggable checks)',
     assert.equal(result.allow, false, 'any denying check forces deny');
     assert.ok(result.reasons.includes('RULE_X'), 'reason from denying check is included');
     assert.ok(result.remediation.includes('fix x'), 'remediation from denying check is merged');
-  });
-
+  }); // single deny check verified
   it('deny without reasons array still forces allow:false with synthetic reason', () => {
     const { runPreflight } = require(MODULE_PATH);
     const checks = [() => ({ allow: false })];
