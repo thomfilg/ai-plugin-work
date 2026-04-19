@@ -11,11 +11,31 @@
  * Uses node:test + node:assert/strict with in-memory fixture state.
  */
 
-const { describe, it } = require('node:test');
+const { describe, it, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
+const fs = require('fs');
+const os = require('os');
 
 const implementStep = require('../steps/implement');
+
+// ─── Lock file helpers (claim tests write real lock files) ──────────────────
+let _claimCleanupDirs = [];
+function writeClaim(tasksDir, taskNum, ownerId) {
+  const claimsDir = path.join(tasksDir, '.claims');
+  fs.mkdirSync(claimsDir, { recursive: true });
+  _claimCleanupDirs.push(claimsDir);
+  fs.writeFileSync(
+    path.join(claimsDir, `task-${taskNum}.lock`),
+    JSON.stringify({ ownerId, taskNum })
+  );
+}
+function cleanupClaims() {
+  for (const dir of _claimCleanupDirs) {
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  }
+  _claimCleanupDirs = [];
+}
 
 // ─── Test helpers ────────────────────────────────────────────────────────────
 
@@ -168,7 +188,12 @@ describe('implement step — dependency-aware messaging (GH-219 Task 16)', () =>
   });
 
   describe('claim and PR slot in output', () => {
+    afterEach(() => cleanupClaims());
+
     it('includes claim owner (PR{N}) in reason when claim is present', () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'impl-test-'));
+      _claimCleanupDirs.push(tmpDir);
+      writeClaim(tmpDir, 1, 'PR1');
       const taskData = makeTaskData([
         { num: 1, title: 'First task' },
       ]);
@@ -178,12 +203,12 @@ describe('implement step — dependency-aware messaging (GH-219 Task 16)', () =>
             totalTasks: 1,
             currentTaskIndex: 0,
             tasks: [
-              { id: 'task_1', status: 'pending', dependencies: [], claimedBy: 'PR1' },
+              { id: 'task_1', status: 'pending', dependencies: [] },
             ],
           },
         },
       });
-      const ctx = makeCtx({ taskData });
+      const ctx = makeCtx({ taskData, tasksDir: tmpDir });
       const entries = captureStep(s, ctx);
 
       const entry = entries[0];
@@ -197,6 +222,9 @@ describe('implement step — dependency-aware messaging (GH-219 Task 16)', () =>
     });
 
     it('includes PR slot in agentPrompt when worker slot is allocated', () => {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'impl-test-'));
+      _claimCleanupDirs.push(tmpDir);
+      writeClaim(tmpDir, 1, 'PR2');
       const taskData = makeTaskData([
         { num: 1, title: 'First task' },
       ]);
@@ -206,7 +234,7 @@ describe('implement step — dependency-aware messaging (GH-219 Task 16)', () =>
             totalTasks: 1,
             currentTaskIndex: 0,
             tasks: [
-              { id: 'task_1', status: 'pending', dependencies: [], claimedBy: 'PR2' },
+              { id: 'task_1', status: 'pending', dependencies: [] },
             ],
           },
           parallelWorkers: {
@@ -218,7 +246,7 @@ describe('implement step — dependency-aware messaging (GH-219 Task 16)', () =>
           },
         },
       });
-      const ctx = makeCtx({ taskData });
+      const ctx = makeCtx({ taskData, tasksDir: tmpDir });
       const entries = captureStep(s, ctx);
 
       const entry = entries[0];
@@ -229,7 +257,7 @@ describe('implement step — dependency-aware messaging (GH-219 Task 16)', () =>
       );
       assert.ok(
         prompt.includes('PR2'),
-        `agentPrompt should mention PR slot PR2, got: "${prompt.substring(0, 300)}"`
+        `agentPrompt should mention PR2, got: "${prompt.substring(0, 300)}"`
       );
     });
   });

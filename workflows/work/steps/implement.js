@@ -12,6 +12,22 @@
 const _taskParser = require('../task-parser');
 void _taskParser;
 
+const fs = require('fs');
+const pathMod = require('path');
+
+/**
+ * Read claim owner from lock file (single source of truth for task claims).
+ * Returns ownerId (e.g. "PR1") or null if no active claim.
+ */
+function _readClaimOwner(tasksDir, taskNum) {
+  try {
+    const lockPath = pathMod.join(tasksDir, '.claims', `task-${taskNum}.lock`);
+    const raw = fs.readFileSync(lockPath, 'utf8');
+    const parsed = JSON.parse(raw);
+    return parsed?.ownerId ?? null;
+  } catch { return null; }
+}
+
 // ─── GH-219 Task 16: Dependency-aware message builders ─────────────────────
 
 /**
@@ -27,9 +43,9 @@ function _resolveWorkerSlot(workState, claimOwner) {
   const alloc = workState.parallelWorkers.allocations.find(
     (a) => a.ownerId === claimOwner && !a.releasedAt
   );
-  // Return slot-derived label (e.g. "PR2"), not the redundant ownerId
-  return alloc ? `PR${alloc.slot}` : null;
-} // end _resolveWorkerSlot — uses alloc.slot, not alloc.ownerId
+  // Return numeric slot to avoid redundancy with ownerId (e.g. "claimed by PR2 [slot 2]")
+  return alloc ? String(alloc.slot) : null;
+} // end _resolveWorkerSlot — returns numeric slot
 
 /**
  * Build a dependency status descriptor for the current task.
@@ -110,7 +126,7 @@ function _buildTaskReason(currentTask, currentTaskIdx, taskData, claimOwner, wor
 
   // Claim + PR slot
   if (claimOwner) {
-    const slotInfo = workerSlot ? ` [${workerSlot}]` : '';
+    const slotInfo = workerSlot ? ` [slot ${workerSlot}]` : '';
     parts.push(`claimed by ${claimOwner}${slotInfo}`);
   }
 
@@ -167,7 +183,7 @@ module.exports = function implementStep(add, s, ctx) {
   const currentTaskMeta = currentTaskId
     ? (taskState?.tasks ?? []).find((t) => t.id === currentTaskId) ?? null
     : null;
-  const claimOwner = currentTaskMeta?.claimedBy ?? null;
+  const claimOwner = currentTask ? _readClaimOwner(tasksDir, currentTask.num) : null;
   const workerSlot = _resolveWorkerSlot(s?.workState, claimOwner);
   const depStatus = _buildDependencyStatus(currentTask, taskState);
 
