@@ -253,7 +253,7 @@ describe('work-require-implement hook', () => {
           tool_name: 'Write',
           tool_input: { file_path: taskFile },
         },
-        { TASKS_BASE: fixture.tasksBase, WORKTREES_BASE: path.dirname(fixture.tasksBase) }
+        { TASKS_BASE: fixture.tasksBase, WORKTREES_BASE: path.dirname(fixture.tasksBase), TICKET_ID: 'GH-219' }
       );
       assert.strictEqual(result.decision, 'approve');
     } finally {
@@ -448,7 +448,7 @@ describe('work-require-implement hook', () => {
           tool_name: 'Edit',
           tool_input: { file_path: '/home/node/project/src/app.ts' },
         },
-        { TASKS_BASE: fixture.tasksBase, WORKTREES_BASE: path.dirname(fixture.tasksBase) }
+        { TASKS_BASE: fixture.tasksBase, WORKTREES_BASE: path.dirname(fixture.tasksBase), TICKET_ID: 'GH-219' }
       );
 
       // Check that .work-actions.json was written with an enforcement audit record
@@ -477,7 +477,7 @@ describe('work-require-implement hook', () => {
           tool_name: 'Edit',
           tool_input: { file_path: '/home/node/project/src/app.ts' },
         },
-        { TASKS_BASE: fixture.tasksBase, WORKTREES_BASE: path.dirname(fixture.tasksBase) }
+        { TASKS_BASE: fixture.tasksBase, WORKTREES_BASE: path.dirname(fixture.tasksBase), TICKET_ID: 'GH-219' }
       );
 
       // Check that audit was written on allow path too
