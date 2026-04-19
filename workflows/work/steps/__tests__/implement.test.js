@@ -81,7 +81,7 @@ describe('implement step', () => {
     });
     implementStep(add, s, ctx);
     assert.equal(entries[0].action, 'RUN');
-    assert.match(entries[0].reason, /Task 1\/2: First task/);
+    assert.match(entries[0].reason, /Task 1\/2 \(task_1\): First task/);
     assert.match(entries[0].agentPrompt, /task 1: First task/);
   });
 
