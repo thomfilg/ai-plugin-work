@@ -278,8 +278,8 @@ function isWriteAllowedPath(filePath, allowedPaths) {
 
   // Check shared-root whitelist at ticketRoot
   if (typeof allowedPaths.ticketRoot === 'string' && allowedPaths.ticketRoot.length > 0) {
-    if (!path.isAbsolute(allowedPaths.ticketRoot)) return false;
-    const ticketResolved = path.resolve(allowedPaths.ticketRoot);
+    if (!path.isAbsolute(allowedPaths.ticketRoot)) return false; // require absolute
+    const ticketResolved = path.resolve(allowedPaths.ticketRoot); // normalize
     // File must be directly at ticketRoot (not nested) and in the whitelist
     const dir = path.dirname(normalized);
     if (dir === ticketResolved) {
