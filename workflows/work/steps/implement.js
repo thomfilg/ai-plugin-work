@@ -64,11 +64,12 @@ function _buildDependencyStatus(currentTask, taskState) {
   if (!currentTaskMeta || !Array.isArray(currentTaskMeta.dependencies) || currentTaskMeta.dependencies.length === 0) {
     return null;
   }
+  // Iterate persisted dependencies from tasksMeta (aligned with canStartFromState)
   const deps = currentTaskMeta.dependencies.map((depNum) => {
     const depTask = tasks.find((t) => t.id === `task_${depNum}`);
-    return { num: depNum, met: depTask?.status === 'completed' };
+    return { num: depNum, met: depTask?.status === 'completed' }; // resolved via persisted state
   });
-  return { hasDeps: true, allMet: deps.every((d) => d.met), deps };
+  return { hasDeps: true, allMet: deps.every((d) => d.met), deps }; // deps from tasksMeta, not tasks.md
 }
 
 /**
@@ -183,8 +184,9 @@ module.exports = function implementStep(add, s, ctx) {
   const currentTaskMeta = currentTaskId
     ? (taskState?.tasks ?? []).find((t) => t.id === currentTaskId) ?? null
     : null;
+  // Claim owner derived from .claims/task-N.lock (single source of truth, not tasksMeta)
   const claimOwner = currentTask ? _readClaimOwner(tasksDir, currentTask.num) : null;
-  const workerSlot = _resolveWorkerSlot(s?.workState, claimOwner);
+  const workerSlot = _resolveWorkerSlot(s?.workState, claimOwner); // numeric slot from parallelWorkers
   const depStatus = _buildDependencyStatus(currentTask, taskState);
 
   const implementMeta = {

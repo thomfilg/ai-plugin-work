@@ -193,7 +193,7 @@ describe('implement step — dependency-aware messaging (GH-219 Task 16)', () =>
     it('includes claim owner (PR{N}) in reason when claim is present', () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'impl-test-'));
       _claimCleanupDirs.push(tmpDir);
-      writeClaim(tmpDir, 1, 'PR1');
+      writeClaim(tmpDir, 1, 'PR1'); // claim via lock file, not tasksMeta.claimedBy
       const taskData = makeTaskData([
         { num: 1, title: 'First task' },
       ]);
@@ -202,13 +202,13 @@ describe('implement step — dependency-aware messaging (GH-219 Task 16)', () =>
           tasksMeta: {
             totalTasks: 1,
             currentTaskIndex: 0,
-            tasks: [
+            tasks: [ // no claimedBy — claim lives in lock file
               { id: 'task_1', status: 'pending', dependencies: [] },
-            ],
+            ], // claim ownership read from .claims/task-1.lock, not here
           },
         },
       });
-      const ctx = makeCtx({ taskData, tasksDir: tmpDir });
+      const ctx = makeCtx({ taskData, tasksDir: tmpDir }); // tasksDir points to tmpDir with lock file
       const entries = captureStep(s, ctx);
 
       const entry = entries[0];
@@ -224,7 +224,7 @@ describe('implement step — dependency-aware messaging (GH-219 Task 16)', () =>
     it('includes PR slot in agentPrompt when worker slot is allocated', () => {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'impl-test-'));
       _claimCleanupDirs.push(tmpDir);
-      writeClaim(tmpDir, 1, 'PR2');
+      writeClaim(tmpDir, 1, 'PR2'); // claim via lock file, not tasksMeta.claimedBy
       const taskData = makeTaskData([
         { num: 1, title: 'First task' },
       ]);
@@ -233,9 +233,9 @@ describe('implement step — dependency-aware messaging (GH-219 Task 16)', () =>
           tasksMeta: {
             totalTasks: 1,
             currentTaskIndex: 0,
-            tasks: [
+            tasks: [ // no claimedBy — claim lives in lock file
               { id: 'task_1', status: 'pending', dependencies: [] },
-            ],
+            ], // claim ownership read from .claims/task-1.lock, not here
           },
           parallelWorkers: {
             nextSlot: 3,
