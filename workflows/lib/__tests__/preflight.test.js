@@ -423,6 +423,22 @@ describe('preflight — pluggable checks (R12, §Pattern — pluggable checks)',
     assert.ok(result.remediation.includes('fix x'), 'remediation from denying check is merged');
   });
 
+  it('deny without reasons array still forces allow:false with synthetic reason', () => {
+    const { runPreflight } = require(MODULE_PATH);
+    const checks = [() => ({ allow: false })];
+    const result = runPreflight({}, { checks });
+    assert.equal(result.allow, false, 'must deny even without reasons');
+    assert.ok(result.reasons.length > 0, 'must have at least one synthetic reason');
+    assert.ok(result.reasons.includes('PREFLIGHT_DENIED'), 'synthetic reason should be PREFLIGHT_DENIED');
+  });
+
+  it('deny with empty reasons array still forces allow:false', () => {
+    const { runPreflight } = require(MODULE_PATH);
+    const checks = [() => ({ allow: false, reasons: [] })];
+    const result = runPreflight({}, { checks });
+    assert.equal(result.allow, false, 'must deny even with empty reasons');
+  });
+
   it('multiple denying checks → reasons aggregated, remediation merged', () => {
     const { runPreflight } = require(MODULE_PATH);
 

@@ -141,10 +141,12 @@ function runPreflight(context, options) {
 
   const reasons = [];
   const remediation = [];
+  let denied = false;
 
   // ─── 1. context.error → deny with error.code as the rule id ────────────
   const err = ctx.error;
   if (err && typeof err === 'object' && typeof err.code === 'string' && err.code.length > 0) {
+    denied = true;
     reasons.push(err.code);
     if (Array.isArray(err.remediation)) {
       for (const step of err.remediation) {
@@ -165,14 +167,18 @@ function runPreflight(context, options) {
         // Fail-closed on a crashing check — one buggy rule must not starve
         // the gate. The synthetic reason lets callers identify the failure
         // mode in audit records without leaking error internals.
+        denied = true;
         reasons.push('PREFLIGHT_CHECK_ERROR');
         continue;
       }
 
       if (!res || typeof res !== 'object') continue;
       if (res.allow === false) {
-        if (Array.isArray(res.reasons)) {
+        denied = true;
+        if (Array.isArray(res.reasons) && res.reasons.length > 0) {
           for (const r of res.reasons) reasons.push(r);
+        } else {
+          reasons.push('PREFLIGHT_DENIED');
         }
         if (Array.isArray(res.remediation)) {
           for (const r of res.remediation) remediation.push(r);
@@ -182,7 +188,7 @@ function runPreflight(context, options) {
   }
 
   // ─── 3. Final decision ─────────────────────────────────────────────────
-  const allow = reasons.length === 0;
+  const allow = !denied;
   const decision = allow ? 'allow' : 'deny';
   const result = { allow, reasons, remediation };
 
@@ -249,6 +255,7 @@ const SHARED_ROOT_WHITELIST = new Set([
  */
 function isWriteAllowedPath(filePath, allowedPaths) {
   if (!filePath || typeof filePath !== 'string') return false;
+  if (!path.isAbsolute(filePath)) return false; // require absolute paths — fail-closed
   if (!allowedPaths || typeof allowedPaths !== 'object') return false;
 
   // Normalize to prevent path-traversal bypasses (R15)
@@ -376,6 +383,15 @@ function createClaimCheck(params) {
         remediation: [
           `Task ${taskNum} not found in tasksMeta. Verify task number and re-run initTasksMeta.`,
         ],
+      };
+    }
+
+    // Reject already-completed tasks (matches canStartFromState behavior)
+    if (task.status === 'completed') {
+      return {
+        allow: false,
+        reasons: ['TASK_ALREADY_COMPLETED'],
+        remediation: [`Task ${taskNum} is already completed. Move to the next task.`],
       };
     }
 
