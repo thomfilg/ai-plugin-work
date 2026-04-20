@@ -342,8 +342,11 @@ async function main() {
   await new Promise((resolve) => setTimeout(resolve, 5000));
 
   // Discover apps from manifest via app-access module
+  // Filter out CLI apps since they don't have dev servers to start
   const discoveredApps = discoverApps();
-  const appsMap = Object.fromEntries(discoveredApps.map((a) => [a.name, a]));
+  const appsMap = Object.fromEntries(
+    discoveredApps.filter((a) => a.appType !== 'cli').map((a) => [a.name, a])
+  );
 
   // Start web apps — if none directly impacted, start all for mandatory QA coverage
   // (e.g., when only shared packages changed, all consumers must be QA'd)

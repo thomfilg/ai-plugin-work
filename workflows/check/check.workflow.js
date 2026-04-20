@@ -96,9 +96,9 @@ function getImpactedApps() {
  * @param {string} appName - Name of the app
  * @returns {{ agent: string, skip: boolean }} Agent to dispatch or skip flag
  */
-function getQaAgentForApp(appName) {
-  const manifestApps = discoverApps();
-  const entry = manifestApps.find(a => a.name === appName);
+function getQaAgentForApp(appName, manifestApps) {
+  const apps = manifestApps || discoverApps();
+  const entry = apps.find(a => a.name === appName);
   const appType = entry?.appType || 'web';
 
   switch (appType) {
@@ -274,9 +274,10 @@ module.exports = {
     }
 
     // QA reports per impacted app (with appType routing)
+    const manifestApps = discoverApps();
     data.qaReports = {};
     for (const app of impactedApps) {
-      const routing = getQaAgentForApp(app);
+      const routing = getQaAgentForApp(app, manifestApps);
       const filename = `qa-${app}.check.md`;
       data.qaReports[app] = {
         exists: fs.existsSync(path.join(reportFolder, filename)),

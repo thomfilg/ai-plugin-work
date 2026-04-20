@@ -22,7 +22,7 @@ function validateManifestEntry(entry) {
 
   // Shell injection prevention for startCommand
   if (entry.startCommand) {
-    const dangerousChars = /[;|<>`]|\$[\({]|&&|>>/;
+    const dangerousChars = /[;|<>`&\n\r]|\$[\({]/;
     if (dangerousChars.test(entry.startCommand)) {
       errors.push(`startCommand contains dangerous shell characters: ${entry.startCommand}`);
     }

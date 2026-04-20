@@ -1,6 +1,6 @@
 'use strict';
 
-const { describe, it, beforeEach, after } = require('node:test');
+const { describe, it, beforeEach, afterEach, after } = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('http');
 const config = require('../../../lib/config');
@@ -8,11 +8,17 @@ const AppAccessStatus = require('../app-access-status');
 
 describe('discoverApps', () => {
   let discoverApps;
+  let originalWebApps;
 
   beforeEach(() => {
+    originalWebApps = config.WEB_APPS;
     // Clear require cache so module re-reads config each time
     delete require.cache[require.resolve('../app-access')];
     discoverApps = require('../app-access').discoverApps;
+  });
+
+  afterEach(() => {
+    config.WEB_APPS = originalWebApps;
   });
 
   it('returns parsed entries with defaults from WEB_APPS config', () => {
@@ -169,6 +175,33 @@ describe('validateManifestEntry', () => {
     const result = validateManifestEntry({
       name: 'bad-app',
       startCommand: 'pnpm dev $(whoami)',
+    });
+    assert.equal(result.valid, false);
+    assert.ok(result.errors[0].includes('dangerous shell characters'));
+  });
+
+  it('rejects startCommand with single & (background exec)', () => {
+    const result = validateManifestEntry({
+      name: 'bad-app',
+      startCommand: 'pnpm dev & malicious-cmd',
+    });
+    assert.equal(result.valid, false);
+    assert.ok(result.errors[0].includes('dangerous shell characters'));
+  });
+
+  it('rejects startCommand with newline', () => {
+    const result = validateManifestEntry({
+      name: 'bad-app',
+      startCommand: 'pnpm dev\nrm -rf /',
+    });
+    assert.equal(result.valid, false);
+    assert.ok(result.errors[0].includes('dangerous shell characters'));
+  });
+
+  it('rejects startCommand with carriage return', () => {
+    const result = validateManifestEntry({
+      name: 'bad-app',
+      startCommand: 'pnpm dev\rmalicious',
     });
     assert.equal(result.valid, false);
     assert.ok(result.errors[0].includes('dangerous shell characters'));

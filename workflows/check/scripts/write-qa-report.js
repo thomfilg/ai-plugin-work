@@ -28,7 +28,7 @@
 
 const { createReportWriter } = require('../../lib/scripts/write-report');
 
-const ALLOWED_STATUSES = ['PASS', 'FAIL', 'INFRASTRUCTURE_FAILURE', 'BLOCKED'];
+const ALLOWED_STATUSES = ['PASS', 'FAIL', 'INFRASTRUCTURE_FAILURE', 'ACCESS_FAILED', 'BLOCKED'];
 
 const writer = createReportWriter({
   name: 'QA Report Writer',
@@ -86,15 +86,15 @@ const writer = createReportWriter({
     }
 
     // Screenshots: must have at least one (unless INFRASTRUCTURE_FAILURE)
-    if (input.status !== 'INFRASTRUCTURE_FAILURE' && input.status !== 'BLOCKED') {
+    if (input.status !== 'INFRASTRUCTURE_FAILURE' && input.status !== 'ACCESS_FAILED' && input.status !== 'BLOCKED') {
       if (!Array.isArray(input.screenshots) || input.screenshots.length === 0) {
         errors.push('At least one screenshot is required for PASS/FAIL reports');
       }
     }
 
-    // INFRASTRUCTURE_FAILURE requires MCP diagnostics
-    if (input.status === 'INFRASTRUCTURE_FAILURE' && !input.mcpDiagnostics) {
-      errors.push('mcpDiagnostics is required when status is INFRASTRUCTURE_FAILURE');
+    // INFRASTRUCTURE_FAILURE / ACCESS_FAILED requires MCP diagnostics
+    if ((input.status === 'INFRASTRUCTURE_FAILURE' || input.status === 'ACCESS_FAILED') && !input.mcpDiagnostics) {
+      errors.push('mcpDiagnostics is required when status is INFRASTRUCTURE_FAILURE or ACCESS_FAILED');
     }
 
     // Report path must match qa-*.check.md pattern
