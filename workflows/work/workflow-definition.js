@@ -63,7 +63,7 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
     if (process.env.WORK_SPEC_ENABLED === '0') return true;
     try {
       const specPath = path.join(TASKS_BASE, safeTicketPath(ticketId), 'spec.md');
-      if (!fs.existsSync(specPath)) return false;
+      if (!fs.existsSync(specPath)) return true; // No spec.md = gate trivially passes (step emits SKIP)
       const parseGherkin = require(path.join(__dirname, 'lib', 'parse-gherkin'));
       const markdown = fs.readFileSync(specPath, 'utf-8');
       const skipResult = parseGherkin.hasSkipOverride(markdown);
