@@ -1342,6 +1342,36 @@ async function main() {
       state.headAtLastExit = currentHead;
       state.finalStatus = decision.finalStatus;
       saveState(state);
+
+      // GH-248: Show full comment bodies for ALL comments on exit so the agent
+      // has complete context. Non-blocking comments must be evaluated too.
+      const allExitComments = [
+        ...(reviews.blocking || []).map((item) => ({ ...item, _section: 'BLOCKING' })),
+        ...(reviews.nonBlocking || []).map((item) => ({ ...item, _section: 'NON-BLOCKING' })),
+      ];
+      if (allExitComments.length > 0) {
+        console.log('');
+        console.log(c.bold('--- Full Comment Bodies (All Reviews) ---'));
+        let currentSection = '';
+        allExitComments.forEach((item, i) => {
+          if (item._section !== currentSection) {
+            currentSection = item._section;
+            console.log('');
+            console.log(c.bold(`  [${currentSection}]`));
+          }
+          const loc = item.path ? `${item.path}${item.line ? ':' + item.line : ''}` : 'N/A';
+          const priority = (item.priority || 'unknown').toUpperCase();
+          const staleTag = item.stale ? c.dim(' (stale)') : '';
+          const dedupTag = item.deduplicated ? c.dim(' (deduped)') : '';
+          console.log('');
+          console.log(`  ${c.cyan(`Comment ${i + 1}:`)} @${item.author} [${priority}]${staleTag}${dedupTag} ${loc}`);
+          console.log(`  ${c.dim('─'.repeat(60))}`);
+          console.log(`  ${(item.body || '').trim()}`);
+          console.log(`  ${c.dim('─'.repeat(60))}`);
+        });
+        console.log('');
+      }
+
       process.exit(1);
     }
 
