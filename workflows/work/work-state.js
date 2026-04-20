@@ -59,6 +59,7 @@ if (!config) process.exit(0);
 const TASKS_BASE = config.TASKS_BASE;
 
 const { ALL_STEPS: STEPS } = require(path.join(__dirname, 'step-registry'));
+const { taskSegment } = require('../lib/allocate-output-folder');
 
 const SUBTASK_STEPS = ['implement', 'commit'];
 
@@ -142,14 +143,21 @@ function initState(ticketId, description = '') {
  * Auto-initialize TDD phase state when entering the implement step.
  * Creates tdd-phase.json with RED phase so the developer agent is forced
  * to write tests first. Idempotent — skips if state already exists.
+ * @param {string} ticketId
+ * @param {number} [taskNum] - 1-indexed task number; when provided, writes to per-task path
  */
-function autoInitTdd(ticketId) {
+function autoInitTdd(ticketId, taskNum) {
   let fd;
   let created = false;
+  let tddStatePath;
   try {
     // Validate ticketId — reject traversal chars and verify resolved path stays within TASKS_BASE
     if (!ticketId || /\.\./.test(ticketId) || /\\/.test(ticketId)) return;
-    const tddStatePath = path.join(TASKS_BASE, safeId(ticketId), 'tdd-phase.json');
+    if (taskNum != null) {
+      tddStatePath = path.join(TASKS_BASE, safeId(ticketId), taskSegment(taskNum), 'tdd-phase.json');
+    } else {
+      tddStatePath = path.join(TASKS_BASE, safeId(ticketId), 'tdd-phase.json');
+    }
     if (!path.resolve(tddStatePath).startsWith(path.resolve(TASKS_BASE) + path.sep)) return;
     // Create directory and write initial RED phase state
     fs.mkdirSync(path.dirname(tddStatePath), { recursive: true });
@@ -161,9 +169,9 @@ function autoInitTdd(ticketId) {
   } catch (err) {
     if (err && err.code === 'EEXIST') return; // already initialized
     // fail-open: TDD init failure must not block step transition
-    if (created) {
+    if (created && tddStatePath) {
       try {
-        fs.unlinkSync(path.join(TASKS_BASE, safeId(ticketId), 'tdd-phase.json'));
+        fs.unlinkSync(tddStatePath);
       } catch {}
     }
   } finally {

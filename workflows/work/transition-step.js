@@ -12,6 +12,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { taskSegment } = require(path.join(__dirname, '..', 'lib', 'allocate-output-folder'));
 
 /**
  * @param {string} ticket
@@ -58,12 +59,18 @@ function transitionStep(ticket, targetStep, deps) {
     };
   }
 
+  // Extract 1-indexed task number from work state for per-task TDD paths (GH-219 Task 2)
+  const taskNum = ws?.tasksMeta?.currentTaskIndex != null
+    ? ws.tasksMeta.currentTaskIndex + 1
+    : undefined;
+
   // TDD gate: require evidence before leaving gated steps (always enforced)
   if (TDD_GATED_STEPS.includes(currentStep) && currentStep !== targetStep) {
-    const { exists, parseError, evidence } = readTddEvidence(safeTicket, currentStep);
+    const { exists, parseError, evidence } = readTddEvidence(safeTicket, currentStep, taskNum);
     if (!exists || parseError) {
       const tddStatePath = path.resolve(__dirname, '..', 'work-implement', 'tdd-phase-state.js');
-      const msg = `Cannot leave ${currentStep} without TDD evidence. Use the TDD phase system:\n  node ${tddStatePath} init ${safeTicket}\n  node ${tddStatePath} record-red ${safeTicket} --cmd "<test command>"\n  node ${tddStatePath} record-green ${safeTicket} --cmd "<test command>"\n  node ${tddStatePath} record-refactor ${safeTicket} --cmd "<test command>"`;
+      const taskFlag = taskNum ? ` --task ${taskNum}` : '';
+      const msg = `Cannot leave ${currentStep} without TDD evidence. Use the TDD phase system:\n  node ${tddStatePath} init ${safeTicket}${taskFlag}\n  node ${tddStatePath} record-red ${safeTicket}${taskFlag} --cmd "<test command>"\n  node ${tddStatePath} record-green ${safeTicket}${taskFlag} --cmd "<test command>"\n  node ${tddStatePath} record-refactor ${safeTicket}${taskFlag} --cmd "<test command>"`;
       return { error: true, message: msg };
     }
     const validation = validateTddEvidence(evidence);
@@ -116,7 +123,12 @@ function transitionStep(ticket, targetStep, deps) {
   // Stale evidence cleanup when transitioning INTO a gated step
   if (TDD_GATED_STEPS.includes(targetStep)) {
     try {
-      const phasePath = path.join(TASKS_BASE, safeTicket, 'tdd-phase.json');
+      let phasePath;
+      if (taskNum != null) {
+        phasePath = path.join(TASKS_BASE, safeTicket, taskSegment(taskNum), 'tdd-phase.json');
+      } else {
+        phasePath = path.join(TASKS_BASE, safeTicket, 'tdd-phase.json');
+      }
       fs.unlinkSync(phasePath);
     } catch (e) {
       if (e && e.code !== 'ENOENT') {
@@ -125,7 +137,7 @@ function transitionStep(ticket, targetStep, deps) {
     }
     try {
       const { autoInitTdd } = require(path.join(__dirname, 'work-state'));
-      autoInitTdd(safeTicket);
+      autoInitTdd(safeTicket, taskNum);
     } catch {
       /* fail-open */
     }

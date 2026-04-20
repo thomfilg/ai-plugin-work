@@ -515,6 +515,145 @@ describe('TDD enforcement', () => {
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
+  // Per-task TDD evidence (GH-219 Task 2)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe('readTddEvidence with taskNum (per-task paths)', () => {
+    const { readTddEvidence } = require('../tdd-enforcement');
+
+    it('reads from per-task path when taskNum is provided', () => {
+      const ticket = 'TDDT2-100';
+      const taskDir = path.join(tempTasksBase, ticket, 'task3');
+      fs.mkdirSync(taskDir, { recursive: true });
+      const state = {
+        currentPhase: 'red',
+        currentCycle: 2,
+        cycles: [{ cycle: 1, red: { testFiles: ['a.test.ts'] }, green: { testCommand: 'test' }, refactor: { testCommand: 'test' } }],
+      };
+      fs.writeFileSync(path.join(taskDir, 'tdd-phase.json'), JSON.stringify(state));
+
+      const result = readTddEvidence(tempTasksBase, ticket, 'implement', 3);
+      assert.equal(result.exists, true);
+      assert.equal(result.parseError, false);
+      assert.deepEqual(result.evidence.cycles.length, 1);
+
+      // Cleanup
+      fs.rmSync(path.join(tempTasksBase, ticket), { recursive: true, force: true });
+    });
+
+    it('returns exists:false when per-task file is missing (no fallback to ticket root)', () => {
+      const ticket = 'TDDT2-101';
+      const ticketDir = path.join(tempTasksBase, ticket);
+      fs.mkdirSync(ticketDir, { recursive: true });
+      // Write evidence at ticket root — should NOT be found when taskNum is given
+      fs.writeFileSync(
+        path.join(ticketDir, 'tdd-phase.json'),
+        JSON.stringify({ currentPhase: 'red', cycles: [] })
+      );
+
+      const result = readTddEvidence(tempTasksBase, ticket, 'implement', 2);
+      assert.equal(result.exists, false, 'Must not fall back to ticket root when taskNum is provided');
+
+      // Cleanup
+      fs.rmSync(ticketDir, { recursive: true, force: true });
+    });
+
+    it('still reads from ticket root when taskNum is NOT provided (backward compat)', () => {
+      const ticket = 'TDDT2-102';
+      const ticketDir = path.join(tempTasksBase, ticket);
+      fs.mkdirSync(ticketDir, { recursive: true });
+      const state = { currentPhase: 'red', cycles: [{ cycle: 1, red: {}, green: {}, refactor: {} }] };
+      fs.writeFileSync(path.join(ticketDir, 'tdd-phase.json'), JSON.stringify(state));
+
+      const result = readTddEvidence(tempTasksBase, ticket, 'implement');
+      assert.equal(result.exists, true, 'Should read from ticket root when no taskNum');
+
+      // Cleanup
+      fs.rmSync(ticketDir, { recursive: true, force: true });
+    });
+
+    it('returns parseError:true for corrupt JSON in per-task path', () => {
+      const ticket = 'TDDT2-103';
+      const taskDir = path.join(tempTasksBase, ticket, 'task1');
+      fs.mkdirSync(taskDir, { recursive: true });
+      fs.writeFileSync(path.join(taskDir, 'tdd-phase.json'), '{corrupt!!!');
+
+      const result = readTddEvidence(tempTasksBase, ticket, 'implement', 1);
+      assert.equal(result.exists, true);
+      assert.equal(result.parseError, true);
+
+      // Cleanup
+      fs.rmSync(path.join(tempTasksBase, ticket), { recursive: true, force: true });
+    });
+
+    it('uses taskSegment() for path construction (task5, not task-5)', () => {
+      const ticket = 'TDDT2-104';
+      // Create task5/ directory with evidence
+      const taskDir = path.join(tempTasksBase, ticket, 'task5');
+      fs.mkdirSync(taskDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(taskDir, 'tdd-phase.json'),
+        JSON.stringify({ currentPhase: 'red', cycles: [] })
+      );
+
+      const result = readTddEvidence(tempTasksBase, ticket, 'implement', 5);
+      assert.equal(result.exists, true, 'Should find file via taskSegment("task5")');
+
+      // Cleanup
+      fs.rmSync(path.join(tempTasksBase, ticket), { recursive: true, force: true });
+    });
+  });
+
+  describe('autoInitTdd with taskNum (per-task paths)', () => {
+    let origTasksBase;
+
+    afterEach(() => {
+      // Restore original TASKS_BASE (or delete if not originally set) and clear module cache
+      if (origTasksBase !== undefined) {
+        process.env.TASKS_BASE = origTasksBase;
+      } else {
+        delete process.env.TASKS_BASE;
+      }
+      delete require.cache[require.resolve('../work-state')];
+      delete require.cache[require.resolve('../../lib/config')];
+    });
+
+    it('creates tdd-phase.json at per-task path with red phase and empty cycles', () => {
+      const ticket = 'TEST-200';
+      const expectedDir = path.join(tempTasksBase, ticket, 'task2');
+      const expectedFile = path.join(expectedDir, 'tdd-phase.json');
+
+      // Point TASKS_BASE at our temp dir and reload config + work-state to pick it up
+      origTasksBase = process.env.TASKS_BASE;
+      process.env.TASKS_BASE = tempTasksBase;
+      delete require.cache[require.resolve('../../lib/config')];
+      delete require.cache[require.resolve('../work-state')];
+      // Also clear submodules that work-state requires (they cache parent fns)
+      try { delete require.cache[require.resolve('../work-state/task-readiness')]; } catch {}
+      try { delete require.cache[require.resolve('../work-state/parallel-workers')]; } catch {}
+      try { delete require.cache[require.resolve('../work-state/graph-validation')]; } catch {}
+      const { autoInitTdd } = require('../work-state');
+
+      // Call autoInitTdd with taskNum
+      autoInitTdd(ticket, 2);
+
+      // Assert file exists at per-task path
+      assert.ok(
+        fs.existsSync(expectedFile),
+        `Expected tdd-phase.json at ${expectedFile}`
+      );
+
+      // Assert file contents
+      const state = JSON.parse(fs.readFileSync(expectedFile, 'utf8'));
+      assert.equal(state.currentPhase, 'red', 'currentPhase should be red');
+      assert.deepEqual(state.cycles, [], 'cycles should be empty array');
+
+      // Cleanup
+      fs.rmSync(path.join(tempTasksBase, ticket), { recursive: true, force: true });
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
   // GitHub ticket ID sanitization in transitionStep
   // ═══════════════════════════════════════════════════════════════════════════
 
@@ -603,6 +742,177 @@ describe('TDD enforcement', () => {
       // Should find the state (currently at brief, can go to spec or implement)
       assert.equal(result.currentStep, 'brief', 'Should find current step from GH-NNN/ state');
       assert.ok(result.allowed.length > 0, 'Should have available transitions');
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // TDD_PROTOCOL text includes --task <N> in CLI examples (GH-219 Task 3)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe('TDD_PROTOCOL includes --task <N> in CLI examples', () => {
+    const { TDD_PROTOCOL } = require('../tdd-enforcement');
+
+    it('init command includes --task <N>', () => {
+      assert.match(TDD_PROTOCOL, /init <TICKET_ID> --task <N>/);
+    });
+
+    it('record-red command includes --task <N>', () => {
+      assert.match(TDD_PROTOCOL, /record-red <TICKET_ID> --task <N>/);
+    });
+
+    it('record-green command includes --task <N>', () => {
+      assert.match(TDD_PROTOCOL, /record-green <TICKET_ID> --task <N>/);
+    });
+
+    it('record-refactor command includes --task <N>', () => {
+      assert.match(TDD_PROTOCOL, /record-refactor <TICKET_ID> --task <N>/);
+    });
+
+    it('transition to green includes --task <N>', () => {
+      assert.match(TDD_PROTOCOL, /transition <TICKET_ID> green --task <N>/);
+    });
+
+    it('transition to refactor includes --task <N>', () => {
+      assert.match(TDD_PROTOCOL, /transition <TICKET_ID> refactor --task <N>/);
+    });
+
+    it('transition to red includes --task <N>', () => {
+      assert.match(TDD_PROTOCOL, /transition <TICKET_ID> red --task <N>/);
+    });
+
+    it('exception command includes --task <N>', () => {
+      assert.match(TDD_PROTOCOL, /exception <TICKET_ID> --task <N>/);
+    });
+  });
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // task-review uses per-task path when task context is available (GH-219 Task 3)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe('task-review uses per-task tasksDir', () => {
+    const taskReviewStep = require('../steps/task-review');
+    const { STEPS } = require('../step-registry');
+    const { taskSegment } = require('../../lib/allocate-output-folder');
+
+    function makeAdd() {
+      const entries = [];
+      const add = (step, action, command, reason, extra) => {
+        entries.push({ step, action, command, reason, ...(extra || {}) });
+      };
+      return { add, entries };
+    }
+
+    function makeCtx(overrides = {}) {
+      return {
+        STEPS,
+        ticket: 'TEST-TR-100',
+        tasksDir: '/tmp/tasks/TEST-TR-100',
+        path,
+        _taskData: null,
+        _allTasksDone: false,
+        _currentTaskIdx: 0,
+        ...overrides,
+      };
+    }
+
+    function makeState(overrides = {}) {
+      return {
+        hasTasks: false,
+        workState: null,
+        ...overrides,
+      };
+    }
+
+    it('overrides tasksDir to per-task path when _currentTaskIdx is set', () => {
+      const ticketTasksDir = path.join(tempTasksBase, 'TEST-TR-101');
+      const taskData = [
+        { num: 1, title: 'Task A' },
+        { num: 2, title: 'Task B' },
+        { num: 3, title: 'Task C' },
+      ];
+      const s = makeState({
+        hasTasks: true,
+        workState: {
+          tasksMeta: {
+            currentTaskIndex: 0,
+            tasks: [
+              { id: 'task-1', taskReviewFixRounds: 0 },
+              { id: 'task-2' },
+              { id: 'task-3' },
+            ],
+          },
+        },
+      });
+      // _currentTaskIdx is 0-indexed, task num is 1-indexed
+      const ctx = makeCtx({
+        _taskData: taskData,
+        _currentTaskIdx: 0,
+        tasksDir: ticketTasksDir,
+        ticket: 'TEST-TR-101',
+      });
+
+      // Create the per-task directory with .last-commit-sha so computeTaskDiff can find it
+      const perTaskDir = path.join(ticketTasksDir, taskSegment(1));
+      fs.mkdirSync(perTaskDir, { recursive: true });
+      fs.writeFileSync(path.join(perTaskDir, '.last-commit-sha'), 'a'.repeat(40));
+
+      const { add, entries } = makeAdd();
+      taskReviewStep(add, s, ctx);
+
+      assert.equal(entries.length, 1);
+      assert.equal(entries[0].action, 'RUN');
+      // The diffRange should have been computed from the per-task dir
+      // (not the ticket root). If it used the ticket root, .last-commit-sha
+      // would not be found and diffRange would be null.
+      assert.ok(entries[0].diffRange !== null, 'diffRange should be computed from per-task path');
+
+      // Cleanup
+      fs.rmSync(ticketTasksDir, { recursive: true, force: true });
+    });
+
+    it('falls back to ticket-level tasksDir when _currentTaskIdx is not set', () => {
+      const ticketTasksDir = path.join(tempTasksBase, 'TEST-TR-102');
+      const taskData = [
+        { num: 1, title: 'Task A' },
+        { num: 2, title: 'Task B' },
+      ];
+      const s = makeState({
+        hasTasks: true,
+        workState: {
+          tasksMeta: {
+            currentTaskIndex: 0,
+            tasks: [
+              { id: 'task-1', taskReviewFixRounds: 0 },
+              { id: 'task-2' },
+            ],
+          },
+        },
+      });
+      // _currentTaskIdx is explicitly undefined (not set by implement step)
+      const ctx = makeCtx({
+        _taskData: taskData,
+        _currentTaskIdx: undefined,
+        tasksDir: ticketTasksDir,
+        ticket: 'TEST-TR-102',
+      });
+
+      // Create .last-commit-sha at ticket root level (not per-task)
+      fs.mkdirSync(ticketTasksDir, { recursive: true });
+      fs.writeFileSync(path.join(ticketTasksDir, '.last-commit-sha'), 'b'.repeat(40));
+
+      const { add, entries } = makeAdd();
+      taskReviewStep(add, s, ctx);
+
+      // _currentTaskIdx is undefined, defaults to 0 in the step
+      // With default 0, it's still an intermediate task (0 < 2-1),
+      // but tasksDir should NOT be overridden to per-task path
+      assert.equal(entries.length, 1);
+      assert.equal(entries[0].action, 'RUN');
+      // diffRange should come from ticket root (where .last-commit-sha exists)
+      assert.ok(entries[0].diffRange !== null, 'diffRange should be computed from ticket root');
+
+      // Cleanup
+      fs.rmSync(ticketTasksDir, { recursive: true, force: true });
     });
   });
 });

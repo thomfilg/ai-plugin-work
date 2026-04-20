@@ -106,8 +106,8 @@ function saveWorkState(ticket, state) {
 function getCurrentStep(workState) {
   return helpers.getCurrentStep(workState, STEPS, ALL_STEPS);
 }
-function readTddEvidence(ticketId, stepId) {
-  return _readTddEvidence(TASKS_BASE, ticketId, stepId);
+function readTddEvidence(ticketId, stepId, taskNum) {
+  return _readTddEvidence(TASKS_BASE, ticketId, stepId, taskNum);
 }
 function validateCheckGate(ticket) {
   return _validateCheckGate(TASKS_BASE, ticket);

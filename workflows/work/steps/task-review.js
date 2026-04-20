@@ -19,6 +19,7 @@
 const path = require('path');
 const { appendAction } = require(path.join(__dirname, '..', 'work-actions'));
 const { computeTaskDiff } = require('../task-review-gate');
+const { taskSegment } = require('../../lib/allocate-output-folder');
 
 /**
  * @param {Function} add
@@ -83,14 +84,19 @@ module.exports = function taskReviewStep(add, s, ctx) {
 
   // Decision 5: intermediate task -- run parallel tests-review + code-review
   const currentTask = taskData[currentIdx];
+  // Override tasksDir to per-task subfolder when task context is available.
+  // ctx._currentTaskIdx is set by the implement step; when present (not undefined/null),
+  // use taskSegment() to construct the per-task path for artifact resolution.
+  const reviewTasksDir = ctx._currentTaskIdx != null
+    ? path.join(ctx.tasksDir, taskSegment(currentIdx + 1))
+    : ctx.tasksDir;
   // Compute task-scoped diff range via computeTaskDiff (reads .last-commit-sha,
   // validates, falls back to base branch on missing/invalid SHA). The range is
   // passed to the orchestrator in plan-entry metadata so /tests-review and
   // /code-review receive the task-specific diff, not the full branch diff.
-  // ctx.tasksDir is injected by plan-generator.js (see plan-generator.js line 129).
   let diffRange;
   try {
-    diffRange = computeTaskDiff(ctx.tasksDir, ctx.ticket);
+    diffRange = computeTaskDiff(reviewTasksDir, ctx.ticket);
   } catch (_e) {
     diffRange = null;
   }
