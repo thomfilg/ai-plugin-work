@@ -19,6 +19,7 @@ const STEPS = Object.freeze({
   // architectural open questions in brief.md have been answered.
   brief_gate: 'brief_gate',
   spec: 'spec',
+  spec_gate: 'spec_gate', // GH-244: Gherkin validation gate
   tasks: 'tasks',
   implement: 'implement',
   commit: 'commit',
@@ -43,6 +44,7 @@ const STEP_ORDER = Object.freeze([
   STEPS.brief,
   STEPS.brief_gate, // GH-215: must sit between brief and spec
   STEPS.spec,
+  STEPS.spec_gate, // GH-244: must sit between spec and tasks
   STEPS.tasks,
   STEPS.implement,
   STEPS.commit,
@@ -96,6 +98,7 @@ function canTransition(statusTransitions) {
 
 // Retry loops: backward edges for failure recovery
 const RETRY_EDGES = {
+  [STEPS.spec_gate]: [STEPS.spec], // GH-244: gate failed, regenerate spec
   [STEPS.task_review]: [STEPS.implement], // GH-211: review failed, fix code
   [STEPS.check]: [STEPS.implement], // check failed, fix code
   [STEPS.follow_up]: [STEPS.implement], // follow-up requires code changes

@@ -12,6 +12,7 @@ const transitionStep = require('./transition');
 const briefStep = require('./brief');
 const briefGateStep = require('./brief-gate');
 const specStep = require('./spec');
+const specGateStep = require('./spec-gate');
 const tasksStep = require('./tasks');
 const implementStep = require('./implement');
 const commitStep = require('./commit');
@@ -40,6 +41,7 @@ const STEP_PIPELINE = [
   briefStep,
   briefGateStep,
   specStep,
+  specGateStep,
   tasksStep,
   implementStep,
   commitStep,
@@ -63,6 +65,8 @@ module.exports = {
   // and before specStep to block the brief → spec transition on unresolved
   // cross-ticket / architectural open questions.
   briefGateStep,
+  // GH-244: export specGateStep as a named handle
+  specGateStep,
   // GH-211 Task 5.2: export taskReviewStep as a named handle so external
   // consumers (and tests) can reference the per-task review gate without
   // knowing its position in STEP_PIPELINE. The gate runs between commitStep

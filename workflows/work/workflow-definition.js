@@ -55,6 +55,25 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
     }
   }
 
+  // GH-244: Helper for STEPS.spec_gate verify. Returns true iff spec.md
+  // exists for `ticketId` AND either hasSkipOverride returns true OR
+  // parse() + validate() passes. Fail-closed on any read/parse error.
+  function verifySpecGate(ticketId) {
+    try {
+      const specPath = path.join(TASKS_BASE, safeTicketPath(ticketId), 'spec.md');
+      if (!fs.existsSync(specPath)) return false;
+      const parseGherkin = require(path.join(__dirname, 'lib', 'parse-gherkin'));
+      const markdown = fs.readFileSync(specPath, 'utf-8');
+      const skipResult = parseGherkin.hasSkipOverride(markdown);
+      if (skipResult.skip) return true;
+      const parsed = parseGherkin.parse(markdown);
+      const validation = parseGherkin.validate(parsed);
+      return validation.valid;
+    } catch {
+      return false;
+    }
+  }
+
   // ─── Declarative policy config (GH-206 Task 12) ───────────────────────────
   //
   // Artifact patterns per step — consumed by artifact-archival.js on backward
@@ -169,6 +188,12 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
             return false;
           }
         },
+      },
+      {
+        // GH-244: Gate between `spec` and `tasks`. Verified iff spec.md exists
+        // AND either gherkin-skip override is present OR parse() + validate() passes.
+        step: STEPS.spec_gate,
+        verify: verifySpecGate,
       },
       {
         step: STEPS.tasks,
