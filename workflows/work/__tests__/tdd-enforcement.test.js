@@ -107,6 +107,7 @@ async function transitionTo(ticket, targetStep, envExtra = {}) {
     'brief',
     'brief_gate', // GH-215
     'spec',
+    'spec_gate', // GH-244
     'tasks',
     'implement',
     'commit',
@@ -391,6 +392,7 @@ describe('TDD enforcement', () => {
       await runOrchestrator(['transition', TICKET, 'brief'], { env: baseEnv() });
       await runOrchestrator(['transition', TICKET, 'brief_gate'], { env: baseEnv() });
       await runOrchestrator(['transition', TICKET, 'spec'], { env: baseEnv() });
+      await runOrchestrator(['transition', TICKET, 'spec_gate'], { env: baseEnv() });
       await runOrchestrator(['transition', TICKET, 'tasks'], { env: baseEnv() });
       await runOrchestrator(['transition', TICKET, 'implement'], { env: baseEnv() });
 
@@ -427,6 +429,7 @@ describe('TDD enforcement', () => {
       await runOrchestrator(['transition', TICKET, 'brief'], { env: baseEnv() });
       await runOrchestrator(['transition', TICKET, 'brief_gate'], { env: baseEnv() });
       await runOrchestrator(['transition', TICKET, 'spec'], { env: baseEnv() });
+      await runOrchestrator(['transition', TICKET, 'spec_gate'], { env: baseEnv() });
       await runOrchestrator(['transition', TICKET, 'tasks'], { env: baseEnv() });
       // Make sure no phase state file exists
       const phasePath = path.join(tempTasksBase, TICKET, 'tdd-phase.json');
