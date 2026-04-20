@@ -382,59 +382,16 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
       {
         step: STEPS.follow_up,
         verify: (ticketId) => {
-          // Verify follow_up by checking LIVE GitHub state -- no fakeable state files.
-          // Checks: CI passing, no changes-requested reviews, all PR comments accounted for.
+          // Single source of truth: delegates to follow-up-pr.js isPRGateReady()
+          // which encapsulates CI, reviews, bot-comment dedup, and merge-state checks.
           try {
-            const { execFileSync } = require('child_process');
-            const opts = { encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] };
+            const { isPRGateReady } = require(path.join(__dirname, 'scripts', 'follow-up-pr.js'));
+            const result = isPRGateReady();
+            if (!result.ready) return false;
 
-            // Resolve branch to support worktree contexts (GH-191, GH-203)
-            let prViewArgs = ['pr', 'view', '--json', 'number', '-q', '.number'];
-            try {
-              const branch = execFileSync('git', ['branch', '--show-current'], opts).trim();
-              if (branch) prViewArgs = ['pr', 'view', branch, '--json', 'number', '-q', '.number'];
-            } catch { /* branch detection failed -- fall back to no branch arg */ }
-
-            // 1. Get PR number
-            const prNum = execFileSync('gh', prViewArgs, opts).trim();
-            if (!prNum) return false;
-
-            // 2. CI checks must all pass (or have no checks)
-            const checksJson = execFileSync(
-              'gh',
-              ['pr', 'checks', prNum, '--json', 'state,name'],
-              opts
-            ).trim();
-            const checks = JSON.parse(checksJson || '[]');
-            const badStates = new Set([
-              'FAILURE',
-              'ERROR',
-              'CANCELLED',
-              'ACTION_REQUIRED',
-              'PENDING',
-              'STARTUP_FAILURE',
-            ]);
-            if (checks.some((c) => badStates.has(c.state))) return false;
-
-            // 3. No blocking reviews (CHANGES_REQUESTED)
-            const reviewJson = execFileSync(
-              'gh',
-              ['pr', 'view', prNum, '--json', 'reviewDecision'],
-              opts
-            ).trim();
-            const reviewData = JSON.parse(reviewJson || '{}');
-            if (reviewData.reviewDecision === 'CHANGES_REQUESTED') return false;
-
-            // 4. Review accountability: every PR comment must be accounted for
-            const commentCount = parseInt(
-              execFileSync(
-                'gh',
-                ['api', `repos/{owner}/{repo}/pulls/${prNum}/comments`, '--jq', 'length'],
-                opts
-              ).trim(),
-              10
-            );
-            if (commentCount > 0) {
+            // Review accountability: every PR comment must be accounted for.
+            // Uses strictCommentCount (fail-closed) instead of reviews array length.
+            if (result.strictCommentCount > 0) {
               const accountabilityFile = path.join(
                 TASKS_BASE,
                 safeTicketPath(ticketId),
@@ -442,9 +399,8 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
               );
               if (!fs.existsSync(accountabilityFile)) return false;
               const entries = JSON.parse(fs.readFileSync(accountabilityFile, 'utf-8'));
-              if (!Array.isArray(entries) || entries.length < commentCount) return false;
+              if (!Array.isArray(entries) || entries.length < result.strictCommentCount) return false;
               if (!entries.every((e) => e.disposition && e.reason)) return false;
-              // "acknowledged" entries require user approval via AskUserQuestion
               const acknowledged = entries.filter((e) => e.disposition === 'acknowledged');
               if (acknowledged.length > 0) {
                 if (!acknowledged.every((e) => e.userApproval === true)) return false;
@@ -472,17 +428,13 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
       {
         step: STEPS.ci,
         verify: () => {
-          // CI is proven if all PR checks are passing (same as follow_up verify)
+          // Single source of truth: delegates to follow-up-pr.js functions
           try {
-            const { execFileSync } = require('child_process');
-            const opts = { encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] };
-            const checks = JSON.parse(
-              execFileSync('gh', ['pr', 'checks', '--json', 'state'], opts).trim()
-            );
-            return (
-              checks.length > 0 &&
-              checks.every((c) => c.state === 'SUCCESS' || c.state === 'SKIPPED')
-            );
+            const { getPRInfo, checkCI } = require(path.join(__dirname, 'scripts', 'follow-up-pr.js'));
+            const prInfo = getPRInfo();
+            if (!prInfo || !prInfo.number) return false;
+            const ci = checkCI(prInfo.number);
+            return ci.status === 'passing';
           } catch {
             return false;
           }

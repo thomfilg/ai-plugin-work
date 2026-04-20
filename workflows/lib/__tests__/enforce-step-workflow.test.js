@@ -2591,21 +2591,26 @@ describe('enforce-step-workflow', () => {
 
   describe('follow_up verify function', () => {
     // These tests verify that transitioning FROM follow_up uses the verify()
-    // function which checks live GitHub state via `gh` CLI commands.
+    // function which delegates to follow-up-pr.js functions (single source of truth).
     // We mock `gh` by creating a fake script and prepending its dir to PATH.
 
     const FAKE_GH_DIR = path.join(os.tmpdir(), `fake-gh-${process.pid}`);
     const FAKE_GH_PATH = path.join(FAKE_GH_DIR, 'gh');
     const ORCHESTRATOR_PATH = path.join(__dirname, '..', '..', 'work', 'work.workflow.js');
 
-    function writeFakeGh(responseMap) {
-      // responseMap: { 'pr view --json number': '42', 'pr checks': '[...]', ... }
-      // The fake gh script matches args and returns the corresponding response.
-      if (!fs.existsSync(FAKE_GH_DIR)) fs.mkdirSync(FAKE_GH_DIR, { recursive: true });
+    // The verify() function now delegates to follow-up-pr.js which calls:
+    //   getPRInfo():  gh pr view --json number,title,url,headRefName,mergeable,mergeStateStatus,state
+    //   checkCI():    gh pr checks <N> --json name,bucket,state,link,workflow
+    //                 gh pr view <N> --json statusCheckRollup  (NEUTRAL enrichment)
+    //   getReviews(): gh pr view <N> --json reviews,statusCheckRollup
+    //                 gh repo view --json nameWithOwner
+    //                 gh api repos/<owner>/<repo>/pulls/<N>/comments?per_page=100&page=1
+    //                 gh api graphql ...  (resolved thread IDs)
+    //                 gh pr view <N> --json commits
+    //                 gh api repos/<owner>/<repo>/pulls/<N>/requested_reviewers
 
-      // Build a bash script that checks arguments
-      // Use grep -qF (fixed string) with -- to prevent patterns starting with -- from
-      // being interpreted as grep options (GH-191: patterns now include --head, --json)
+    function writeFakeGh(responseMap) {
+      if (!fs.existsSync(FAKE_GH_DIR)) fs.mkdirSync(FAKE_GH_DIR, { recursive: true });
       let script = '#!/bin/bash\nARGS="$*"\n';
       for (const [pattern, response] of Object.entries(responseMap)) {
         if (response === 'EXIT1') {
@@ -2614,7 +2619,7 @@ describe('enforce-step-workflow', () => {
           script += `if echo "$ARGS" | grep -qF -- "${pattern}"; then echo '${response.replace(/'/g, "'\\''")}'; exit 0; fi\n`;
         }
       }
-      script += 'exit 1\n'; // Default: fail
+      script += 'exit 1\n';
       fs.writeFileSync(FAKE_GH_PATH, script, { mode: 0o755 });
     }
 
@@ -2635,8 +2640,71 @@ describe('enforce-step-workflow', () => {
       );
     }
 
+    // Helper: build gh mock responses for the full verify() flow.
+    // getPRInfo, checkCI, getReviews all need to succeed for transition to pass.
+    function buildGhResponses({
+      prState = 'OPEN',
+      mergeable = 'MERGEABLE',
+      mergeStateStatus = 'CLEAN',
+      ciBucket = 'pass',
+      ciState = 'completed',
+      reviewState = 'APPROVED',
+      reviewBody = '',
+      inlineComments = '[]',
+      commentCount = null, // auto-computed from inlineComments if not set
+      requestedReviewers = '{"users":[]}',
+      graphql = '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}',
+      commits = '{"commits":[]}',
+    } = {}) {
+      // Auto-compute comment count from inline comments JSON
+      const autoCount = commentCount != null
+        ? commentCount
+        : (JSON.parse(inlineComments).length || 0);
+      const prView = JSON.stringify({
+        number: 42,
+        title: 'Test PR',
+        url: 'https://github.com/test/repo/pull/42',
+        headRefName: 'test-branch',
+        mergeable,
+        mergeStateStatus,
+        state: prState,
+      });
+      const ciChecks = JSON.stringify([
+        { name: 'build', bucket: ciBucket, state: ciState, link: '', workflow: {} },
+      ]);
+      const statusCheckRollup = JSON.stringify({ statusCheckRollup: [] });
+      const reviews = JSON.stringify({
+        reviews: reviewState
+          ? [{ id: 1, author: { login: 'reviewer' }, state: reviewState, body: reviewBody }]
+          : [],
+        statusCheckRollup: [],
+      });
+
+      return {
+        // getPRInfo: gh pr view --json number,title,...
+        'pr view --json number,title,url,headRefName,mergeable,mergeStateStatus,state': prView,
+        // checkCI: gh pr checks 42 --json ...
+        'pr checks 42 --json name,bucket,state,link,workflow': ciChecks,
+        // checkCI: NEUTRAL enrichment fallback
+        'pr view 42 --json statusCheckRollup': statusCheckRollup,
+        // getReviews: gh pr view 42 --json reviews,...
+        'pr view 42 --json reviews,statusCheckRollup': reviews,
+        // getReviews: gh repo view
+        'repo view --json nameWithOwner': '{"nameWithOwner":"test/repo"}',
+        // isPRGateReady: strict comment count (--jq length, must match before general pattern)
+        '--jq length': String(autoCount),
+        // getReviews: inline comments (paginated)
+        'repos/test/repo/pulls/42/comments': inlineComments,
+        // getReviews: GraphQL resolved threads
+        'api graphql': graphql,
+        // getReviews: commits for stale detection
+        'pr view 42 --json commits': commits,
+        // getReviews: requested reviewers
+        'repos/test/repo/pulls/42/requested_reviewers': requestedReviewers,
+      };
+    }
+
     beforeEach(() => {
-      // Set up work state at follow_up step
       writeWorkState(makeStepStatus('follow_up', WORK_STEPS));
     });
 
@@ -2645,65 +2713,54 @@ describe('enforce-step-workflow', () => {
     });
 
     it('allows transition when CI passes, no blocking reviews, no comments', async () => {
-      writeFakeGh({
-        '--json number -q .number': '42',
-        'pr checks 42 --json': '[{"state":"SUCCESS","name":"build"}]',
-        'pr view 42 --json reviewDecision': '{"reviewDecision":"APPROVED"}',
-        'repos/{owner}/{repo}/pulls/42/comments': '0',
-      });
-
+      writeFakeGh(buildGhResponses());
       const { code } = await transitionFromFollowUp();
       assert.equal(code, 0, 'Should allow transition when all checks pass');
     });
 
     it('blocks transition when CI has failures', async () => {
-      writeFakeGh({
-        '--json number -q .number': '42',
-        'pr checks 42 --json': '[{"state":"FAILURE","name":"build"}]',
-        'pr view 42 --json reviewDecision': '{"reviewDecision":"APPROVED"}',
-        'repos/{owner}/{repo}/pulls/42/comments': '0',
-      });
-
+      writeFakeGh(buildGhResponses({ ciBucket: 'fail' }));
       const { code, stderr } = await transitionFromFollowUp();
       assert.equal(code, 2, 'Should block transition when CI has failures');
       assert.ok(stderr.includes('BLOCKED'), 'stderr should contain BLOCKED');
     });
 
     it('blocks transition when CI is pending', async () => {
-      writeFakeGh({
-        '--json number -q .number': '42',
-        'pr checks 42 --json': '[{"state":"PENDING","name":"build"}]',
-        'pr view 42 --json reviewDecision': '{"reviewDecision":"APPROVED"}',
-        'repos/{owner}/{repo}/pulls/42/comments': '0',
-      });
-
+      writeFakeGh(buildGhResponses({ ciBucket: 'pending', ciState: 'pending' }));
       const { code, stderr } = await transitionFromFollowUp();
       assert.equal(code, 2, 'Should block transition when CI is pending');
       assert.ok(stderr.includes('BLOCKED'), 'stderr should contain BLOCKED');
     });
 
     it('blocks transition when review is CHANGES_REQUESTED', async () => {
-      writeFakeGh({
-        '--json number -q .number': '42',
-        'pr checks 42 --json': '[{"state":"SUCCESS","name":"build"}]',
-        'pr view 42 --json reviewDecision': '{"reviewDecision":"CHANGES_REQUESTED"}',
-        'repos/{owner}/{repo}/pulls/42/comments': '0',
-      });
-
+      writeFakeGh(buildGhResponses({ reviewState: 'CHANGES_REQUESTED' }));
       const { code, stderr } = await transitionFromFollowUp();
       assert.equal(code, 2, 'Should block transition when review has changes requested');
       assert.ok(stderr.includes('BLOCKED'), 'stderr should contain BLOCKED');
     });
 
-    it('allows transition when comments exist with valid accountability', async () => {
-      writeFakeGh({
-        '--json number -q .number': '42',
-        'pr checks 42 --json': '[{"state":"SUCCESS","name":"build"}]',
-        'pr view 42 --json reviewDecision': '{"reviewDecision":"APPROVED"}',
-        'repos/{owner}/{repo}/pulls/42/comments': '2',
-      });
+    it('blocks transition when merge is conflicting', async () => {
+      writeFakeGh(buildGhResponses({ mergeable: 'CONFLICTING' }));
+      const { code, stderr } = await transitionFromFollowUp();
+      assert.equal(code, 2, 'Should block transition when PR has merge conflicts');
+      assert.ok(stderr.includes('BLOCKED'), 'stderr should contain BLOCKED');
+    });
 
-      // Write review-accountability.json with valid entries
+    it('blocks transition when merge state is DIRTY', async () => {
+      writeFakeGh(buildGhResponses({ mergeStateStatus: 'DIRTY' }));
+      const { code, stderr } = await transitionFromFollowUp();
+      assert.equal(code, 2, 'Should block transition when merge state is DIRTY');
+      assert.ok(stderr.includes('BLOCKED'), 'stderr should contain BLOCKED');
+    });
+
+    it('allows transition when non-blocking comments exist with valid accountability', async () => {
+      // Copilot [nitpick] comments → low priority (non-blocking)
+      const inlineComments = JSON.stringify([
+        { id: 1, user: { login: 'copilot-pull-request-reviewer' }, body: '[nitpick] Consider renaming', path: 'src/a.js', line: 10 },
+        { id: 2, user: { login: 'copilot-pull-request-reviewer' }, body: '[low] Minor style issue', path: 'src/b.js', line: 20 },
+      ]);
+      writeFakeGh(buildGhResponses({ inlineComments }));
+
       if (!fs.existsSync(TASKS_DIR)) fs.mkdirSync(TASKS_DIR, { recursive: true });
       const accountability = [
         { disposition: 'resolved', reason: 'Fixed in latest commit' },
@@ -2718,24 +2775,40 @@ describe('enforce-step-workflow', () => {
       assert.equal(code, 0, 'Should allow transition when comments have valid accountability');
     });
 
-    it('blocks transition when comments exist but no accountability file', async () => {
-      writeFakeGh({
-        '--json number -q .number': '42',
-        'pr checks 42 --json': '[{"state":"SUCCESS","name":"build"}]',
-        'pr view 42 --json reviewDecision': '{"reviewDecision":"APPROVED"}',
-        'repos/{owner}/{repo}/pulls/42/comments': '2',
-      });
-
-      // Do NOT write review-accountability.json
+    it('blocks transition when non-blocking comments exist but no accountability file', async () => {
+      const inlineComments = JSON.stringify([
+        { id: 1, user: { login: 'copilot-pull-request-reviewer' }, body: '[nitpick] Consider renaming', path: 'src/a.js', line: 10 },
+        { id: 2, user: { login: 'copilot-pull-request-reviewer' }, body: '[low] Minor style issue', path: 'src/b.js', line: 20 },
+      ]);
+      writeFakeGh(buildGhResponses({ inlineComments }));
 
       const { code, stderr } = await transitionFromFollowUp();
       assert.equal(code, 2, 'Should block transition when comments exist without accountability');
       assert.ok(stderr.includes('BLOCKED'), 'stderr should contain BLOCKED');
     });
 
+    it('blocks transition when blocking (human) comments exist even with accountability', async () => {
+      // Human comments are always high priority (blocking) — decideNextAction returns exit-fail
+      const inlineComments = JSON.stringify([
+        { id: 1, user: { login: 'reviewer1' }, body: 'Fix this bug', path: 'src/a.js', line: 10 },
+      ]);
+      writeFakeGh(buildGhResponses({ inlineComments }));
+
+      if (!fs.existsSync(TASKS_DIR)) fs.mkdirSync(TASKS_DIR, { recursive: true });
+      const accountability = [{ disposition: 'resolved', reason: 'Fixed' }];
+      fs.writeFileSync(
+        path.join(TASKS_DIR, 'review-accountability.json'),
+        JSON.stringify(accountability, null, 2)
+      );
+
+      const { code, stderr } = await transitionFromFollowUp();
+      assert.equal(code, 2, 'Should block when blocking human comments exist');
+      assert.ok(stderr.includes('BLOCKED'), 'stderr should contain BLOCKED');
+    });
+
     it('blocks transition when gh pr view fails (no PR)', async () => {
       writeFakeGh({
-        '--json number -q .number': 'EXIT1',
+        'pr view --json number,title,url,headRefName,mergeable,mergeStateStatus,state': 'EXIT1',
       });
 
       const { code, stderr } = await transitionFromFollowUp();
@@ -2744,26 +2817,21 @@ describe('enforce-step-workflow', () => {
     });
 
     it('allows transition when no CI checks exist (empty array)', async () => {
-      writeFakeGh({
-        '--json number -q .number': '42',
-        'pr checks 42 --json': '[]',
-        'pr view 42 --json reviewDecision': '{"reviewDecision":""}',
-        'repos/{owner}/{repo}/pulls/42/comments': '0',
-      });
+      // Override ciChecks to empty and set reviewState to empty
+      const responses = buildGhResponses({ reviewState: null });
+      responses['pr checks 42 --json name,bucket,state,link,workflow'] = '[]';
+      writeFakeGh(responses);
 
       const { code } = await transitionFromFollowUp();
       assert.equal(code, 0, 'Should allow transition when no CI checks exist');
     });
 
     it('blocks when accountability entries lack disposition/reason', async () => {
-      writeFakeGh({
-        '--json number -q .number': '42',
-        'pr checks 42 --json': '[{"state":"SUCCESS","name":"build"}]',
-        'pr view 42 --json reviewDecision': '{"reviewDecision":"APPROVED"}',
-        'repos/{owner}/{repo}/pulls/42/comments': '1',
-      });
+      const inlineComments = JSON.stringify([
+        { id: 1, user: { login: 'copilot-pull-request-reviewer' }, body: '[nitpick] Minor issue', path: 'src/a.js', line: 10 },
+      ]);
+      writeFakeGh(buildGhResponses({ inlineComments }));
 
-      // Write accountability with missing fields
       if (!fs.existsSync(TASKS_DIR)) fs.mkdirSync(TASKS_DIR, { recursive: true });
       const accountability = [{ disposition: 'resolved' }]; // missing reason
       fs.writeFileSync(
@@ -2777,14 +2845,11 @@ describe('enforce-step-workflow', () => {
     });
 
     it('blocks when acknowledged entries lack userApproval', async () => {
-      writeFakeGh({
-        '--json number -q .number': '42',
-        'pr checks 42 --json': '[{"state":"SUCCESS","name":"build"}]',
-        'pr view 42 --json reviewDecision': '{"reviewDecision":"APPROVED"}',
-        'repos/{owner}/{repo}/pulls/42/comments': '1',
-      });
+      const inlineComments = JSON.stringify([
+        { id: 1, user: { login: 'copilot-pull-request-reviewer' }, body: '[nitpick] Minor issue', path: 'src/a.js', line: 10 },
+      ]);
+      writeFakeGh(buildGhResponses({ inlineComments }));
 
-      // Write accountability with acknowledged but no userApproval
       if (!fs.existsSync(TASKS_DIR)) fs.mkdirSync(TASKS_DIR, { recursive: true });
       const accountability = [{ disposition: 'acknowledged', reason: 'Known issue' }];
       fs.writeFileSync(
@@ -2798,14 +2863,11 @@ describe('enforce-step-workflow', () => {
     });
 
     it('allows when acknowledged entries have userApproval=true', async () => {
-      writeFakeGh({
-        '--json number -q .number': '42',
-        'pr checks 42 --json': '[{"state":"SUCCESS","name":"build"}]',
-        'pr view 42 --json reviewDecision': '{"reviewDecision":"APPROVED"}',
-        'repos/{owner}/{repo}/pulls/42/comments': '1',
-      });
+      const inlineComments = JSON.stringify([
+        { id: 1, user: { login: 'copilot-pull-request-reviewer' }, body: '[nitpick] Minor issue', path: 'src/a.js', line: 10 },
+      ]);
+      writeFakeGh(buildGhResponses({ inlineComments }));
 
-      // Write accountability with acknowledged + userApproval
       if (!fs.existsSync(TASKS_DIR)) fs.mkdirSync(TASKS_DIR, { recursive: true });
       const accountability = [
         { disposition: 'acknowledged', reason: 'Known issue', userApproval: true },
@@ -3042,90 +3104,10 @@ describe('enforce-step-workflow', () => {
     });
   });
 
-  // ═══════════════════════════════════════════════════════════════════════════
-  // follow_up verify: branch positional arg (GH-191, GH-203)
-  // ═══════════════════════════════════════════════════════════════════════════
-
-  describe('follow_up verify branch positional arg (GH-191, GH-203)', () => {
-    const FAKE_GIT_DIR = path.join(os.tmpdir(), `fake-git-followup-191-${process.pid}`);
-    const FAKE_GIT_PATH = path.join(FAKE_GIT_DIR, 'git');
-    const FAKE_GH_DIR = path.join(os.tmpdir(), `fake-gh-followup-191-${process.pid}`);
-    const FAKE_GH_PATH = path.join(FAKE_GH_DIR, 'gh');
-    const ORCHESTRATOR_PATH = path.join(__dirname, '..', '..', 'work', 'work.workflow.js');
-    const FOLLOWUP_TEST_BRANCH = `${TEST_TICKET}-followup-test`;
-
-    function writeFakeGit() {
-      if (!fs.existsSync(FAKE_GIT_DIR)) fs.mkdirSync(FAKE_GIT_DIR, { recursive: true });
-      // Provide controlled branch name so positional arg is always added,
-      // even in CI where the checkout may be in detached HEAD state.
-      const script = [
-        '#!/bin/bash',
-        'ARGS="$*"',
-        `if echo "$ARGS" | grep -qF -- "branch --show-current"; then echo '${FOLLOWUP_TEST_BRANCH}'; exit 0; fi`,
-        `if echo "$ARGS" | grep -qF -- "rev-parse --show-toplevel"; then echo '${process.cwd()}'; exit 0; fi`,
-        // Let symbolic-ref / rev-parse --verify fail so getBaseBranch falls through
-        'if echo "$ARGS" | grep -qF -- "symbolic-ref"; then exit 1; fi',
-        'if echo "$ARGS" | grep -qF -- "rev-parse --verify"; then exit 1; fi',
-        'exit 1',
-      ].join('\n');
-      fs.writeFileSync(FAKE_GIT_PATH, script, { mode: 0o755 });
-    }
-
-    function writeFakeGh(responseMap) {
-      if (!fs.existsSync(FAKE_GH_DIR)) fs.mkdirSync(FAKE_GH_DIR, { recursive: true });
-      let script = '#!/bin/bash\nARGS="$*"\n';
-      for (const [pattern, response] of Object.entries(responseMap)) {
-        if (response === 'EXIT1') {
-          script += `if echo "$ARGS" | grep -qF -- "${pattern}"; then exit 1; fi\n`;
-        } else {
-          script += `if echo "$ARGS" | grep -qF -- "${pattern}"; then echo '${response.replace(/'/g, "'\\''")}'; exit 0; fi\n`;
-        }
-      }
-      script += 'exit 1\n';
-      fs.writeFileSync(FAKE_GH_PATH, script, { mode: 0o755 });
-    }
-
-    function cleanup() {
-      try {
-        fs.rmSync(FAKE_GIT_DIR, { recursive: true, force: true });
-      } catch {}
-      try {
-        fs.rmSync(FAKE_GH_DIR, { recursive: true, force: true });
-      } catch {}
-    }
-
-    function transitionFromFollowUp(extraEnv = {}) {
-      return runHook(
-        {
-          tool_name: 'Bash',
-          tool_input: { command: `node ${ORCHESTRATOR_PATH} transition ${TEST_TICKET} ci` },
-        },
-        'PreToolUse',
-        { PATH: `${FAKE_GIT_DIR}:${FAKE_GH_DIR}:${process.env.PATH}`, TASKS_BASE, ...extraEnv }
-      );
-    }
-
-    beforeEach(() => {
-      writeFakeGit();
-      writeWorkState(makeStepStatus('follow_up', WORK_STEPS));
-    });
-
-    afterEach(() => {
-      cleanup();
-    });
-
-    it('passes branch as positional arg to gh pr view in follow_up verify', async () => {
-      writeFakeGh({
-        [`pr view ${FOLLOWUP_TEST_BRANCH}`]: '42',
-        'pr checks 42 --json': '[{"state":"SUCCESS","name":"build"}]',
-        'pr checks 42': 'build\tpass\t1s\thttps://example.com',
-        'pr view 42 --json reviewDecision': '{"reviewDecision":"APPROVED"}',
-        'repos/{owner}/{repo}/pulls/42/comments': '0',
-      }); // fake git (writeFakeGit above) provides deterministic branch for positional arg (CI-safe)
-      const { code } = await transitionFromFollowUp();
-      assert.equal(code, 0, 'Should use branch positional arg for initial PR number resolution');
-    });
-  });
+  // follow_up verify branch positional arg (GH-191, GH-203) — REMOVED
+  // The verify() function now delegates to follow-up-pr.js's isPRGateReady() which
+  // relies on `gh pr view` auto-detecting the branch (gh's default behavior).
+  // No dedicated branch positional-arg test exists here; gh handles auto-detection.
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Per-script step gating for AGENT_GATED_SCRIPTS (GH-184)
@@ -3905,14 +3887,26 @@ describe('enforce-step-workflow', () => {
 
     it('blocks transition from ci to cleanup without evidence', async () => {
       writeWorkState(makeStepStatus('ci', WORK_STEPS));
-      // No evidence, no gh pr checks available
+      // No evidence — ci verify() delegates to follow-up-pr.js functions which call `gh`.
+      // Use a fake `gh` that fails so verify() returns false.
+      const fakeGhDir = path.join(os.tmpdir(), `fake-gh-ci-${process.pid}`);
+      fs.mkdirSync(fakeGhDir, { recursive: true });
+      fs.writeFileSync(path.join(fakeGhDir, 'gh'), '#!/bin/bash\nexit 1\n', { mode: 0o755 });
 
-      const { code, stderr } = await runHook({
-        tool_name: 'Bash',
-        tool_input: { command: `node ${ORCHESTRATOR_PATH} transition ${TEST_TICKET} cleanup` },
-      });
-      assert.equal(code, 2, 'Should block forward transition without evidence');
-      assert.ok(stderr.includes('BLOCKED'));
+      try {
+        const { code, stderr } = await runHook(
+          {
+            tool_name: 'Bash',
+            tool_input: { command: `node ${ORCHESTRATOR_PATH} transition ${TEST_TICKET} cleanup` },
+          },
+          'PreToolUse',
+          { PATH: `${fakeGhDir}:${process.env.PATH}` }
+        );
+        assert.equal(code, 2, 'Should block forward transition without evidence');
+        assert.ok(stderr.includes('BLOCKED'));
+      } finally {
+        fs.rmSync(fakeGhDir, { recursive: true, force: true });
+      }
     });
 
     it('allows backward transition from ci to implement (retry loop)', async () => {
