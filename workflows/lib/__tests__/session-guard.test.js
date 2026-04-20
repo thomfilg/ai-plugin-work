@@ -708,6 +708,8 @@ describe('session-guard', () => {
   describe('Hook: Stop — actionable /work message', () => {
     const TASKS_DIR = path.join(SESSION_DIR, 'tasks-base');
     const WORK_TICKET = 'WORK-100';
+    const { STEP_ORDER } = require(path.join(__dirname, '..', '..', 'work', 'step-registry'));
+    const BRIEF_GATE_INDEX = STEP_ORDER.indexOf('brief_gate');
 
     function writeWorkState(ticketId, state) {
       const dir = path.join(TASKS_DIR, ticketId);
@@ -731,8 +733,8 @@ describe('session-guard', () => {
     });
 
     it('outputs actionable message with step name when /work session active and .work-state.json exists', async () => {
-      // currentStep=3 should map to 'brief_gate' (index 3 in STEP_ORDER)
-      writeWorkState(WORK_TICKET, { currentStep: 3 });
+      // currentStep should map to 'brief_gate' per STEP_ORDER
+      writeWorkState(WORK_TICKET, { currentStep: BRIEF_GATE_INDEX });
       await runCli(['init', WORK_TICKET, '/work']);
 
       const r = await runHook({ stop_message: '' }, 'Stop', {

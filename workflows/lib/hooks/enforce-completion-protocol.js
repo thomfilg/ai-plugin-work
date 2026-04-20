@@ -36,7 +36,14 @@ function hasActiveWorkSession() {
     let currentTicket = process.env.SESSION_GUARD_TICKET_ID || null;
     if (!currentTicket) {
       try {
-        const head = fs.readFileSync(path.join('.git', 'HEAD'), 'utf-8').trim();
+        let head;
+        const dotgit = fs.readFileSync('.git', 'utf-8').trim();
+        if (dotgit.startsWith('gitdir: ')) {
+          const gitdir = path.resolve(dotgit.slice('gitdir: '.length));
+          head = fs.readFileSync(path.join(gitdir, 'HEAD'), 'utf-8').trim();
+        } else {
+          head = fs.readFileSync(path.join('.git', 'HEAD'), 'utf-8').trim();
+        }
         const ref = head.startsWith('ref: ') ? head.slice(5) : head;
         const match = ref.match(/[A-Z]+-\d+/);
         if (match) currentTicket = match[0];
@@ -46,6 +53,10 @@ function hasActiveWorkSession() {
     for (const f of files) {
       if (!f.startsWith(prefix) || !f.endsWith(suffix)) continue;
       try {
+        if (typeof process.getuid === 'function') {
+          const stat = fs.statSync(path.join(sessionDir, f));
+          if (stat.uid !== process.getuid()) continue;
+        }
         const data = JSON.parse(fs.readFileSync(path.join(sessionDir, f), 'utf8'));
         if (data?.workflow === '/work' && !data?.revealed) {
           // If we have a ticket context, match it
