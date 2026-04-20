@@ -435,3 +435,128 @@ describe('workflow-definition: brief.md contentGuard', () => {
     assert.equal(result.blocked, false);
   });
 });
+
+// ─── GH-244: spec_gate verify entry ──────────────────────────────────────────
+describe('workflow-definition: verify[STEPS.spec_gate]', () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-def-specgate-'));
+  const ticketId = 'GH-244';
+  const ticketDir = path.join(tmpRoot, ticketId);
+  fs.mkdirSync(ticketDir, { recursive: true });
+
+  const deps = {
+    TASKS_BASE: tmpRoot,
+    safeTicketPath: (id) => id,
+    resolveGitHead: () => 'ref: refs/heads/stub',
+  };
+  const { workflow: specGateWf } = createWorkflowDefinition(deps);
+
+  function getSpecGateVerify() {
+    const entries = specGateWf.commandMap.filter(
+      (e) => e.step === STEPS.spec_gate && typeof e.verify === 'function'
+    );
+    return entries.length > 0 ? entries[0].verify : undefined;
+  }
+
+  function writeSpec(contents) {
+    fs.writeFileSync(path.join(ticketDir, 'spec.md'), contents, 'utf-8');
+  }
+  function removeSpec() {
+    const p = path.join(ticketDir, 'spec.md');
+    if (fs.existsSync(p)) fs.unlinkSync(p);
+  }
+
+  after(() => {
+    try {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    } catch {
+      /* best-effort cleanup */
+    }
+    // Restore env
+    delete process.env.WORK_SPEC_ENABLED;
+  });
+
+  it('returns true when WORK_SPEC_ENABLED=0 (gate auto-verified)', () => {
+    process.env.WORK_SPEC_ENABLED = '0';
+    const verify = getSpecGateVerify();
+    assert.equal(verify(ticketId), true);
+    delete process.env.WORK_SPEC_ENABLED;
+  });
+
+  it('returns true when spec.md does not exist (nothing to validate)', () => {
+    removeSpec();
+    const verify = getSpecGateVerify();
+    assert.equal(verify(ticketId), true);
+  });
+
+  it('returns true when skip override <!-- gherkin-skip: reason --> is present', () => {
+    writeSpec(
+      [
+        '# Spec',
+        '<!-- gherkin-skip: trivial change -->',
+        '## Test Scenarios (Gherkin)',
+        'Feature: Test',
+        '  Scenario: Only one',
+        '    Given something',
+        '    When action',
+        '    Then result',
+      ].join('\n')
+    );
+    const verify = getSpecGateVerify();
+    assert.equal(verify(ticketId), true);
+  });
+
+  it('returns true when Gherkin validates (2+ scenarios with @integration)', () => {
+    writeSpec(
+      [
+        '# Spec',
+        '## Test Scenarios (Gherkin)',
+        'Feature: Test',
+        '  @integration',
+        '  Scenario: First',
+        '    Given something',
+        '    When action',
+        '    Then result',
+        '  @e2e',
+        '  Scenario: Second',
+        '    Given other',
+        '    When act',
+        '    Then done',
+      ].join('\n')
+    );
+    const verify = getSpecGateVerify();
+    assert.equal(verify(ticketId), true);
+  });
+
+  it('returns false when validation fails (1 scenario only)', () => {
+    writeSpec(
+      [
+        '# Spec',
+        '## Test Scenarios (Gherkin)',
+        'Feature: Test',
+        '  @integration',
+        '  Scenario: Only one',
+        '    Given something',
+        '    When action',
+        '    Then result',
+      ].join('\n')
+    );
+    const verify = getSpecGateVerify();
+    assert.equal(verify(ticketId), false);
+  });
+
+  it('returns false when parse has errors but validation would pass (malformed Gherkin)', () => {
+    // Write something that triggers parse errors — e.g. a Feature with no valid
+    // Scenario keyword (just gibberish lines after Feature:)
+    writeSpec(
+      [
+        '# Spec',
+        '## Test Scenarios (Gherkin)',
+        'Feature: Broken',
+        '  This is not a valid Gherkin line',
+        '  Another invalid line',
+      ].join('\n')
+    );
+    const verify = getSpecGateVerify();
+    assert.equal(verify(ticketId), false);
+  });
+});

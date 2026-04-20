@@ -83,6 +83,7 @@ describe('step modules', () => {
       'brief',
       'brief-gate',
       'spec',
+      'spec-gate',
       'tasks',
       'implement',
       'commit',

@@ -116,22 +116,43 @@ Search the codebase for existing endpoints/routes/handlers that overlap with thi
 - {Input validation}
 - {Data exposure risks}
 
-## Test Scenarios
+## Test Scenarios (Gherkin)
 
-### Happy Path
-1. **Given** {precondition}
-   **When** {action}
-   **Then** {expected result}
+Generate structured Gherkin scenarios with @integration or @e2e tags. The spec_gate step validates this section before allowing task generation.
 
-### Edge Cases
-2. **Given** {precondition}
-   **When** {action}
-   **Then** {expected result}
+**Requirements:**
+- Minimum 2 scenarios total
+- At least 1 scenario tagged @integration or @e2e
+- Use Feature/Scenario/Given/When/Then structure
+- Tag each scenario with @integration (tests internal logic/APIs) or @e2e (tests full user flows)
+- @unit tags are also accepted but not enforced by the gate
+- Existing specs using the old `## Test Scenarios` heading (without "(Gherkin)") are also accepted by the parser
 
-### Error Cases
-3. **Given** {precondition}
-   **When** {action}
-   **Then** {expected result}
+**Skip override:** If the spec is for a config-only or documentation change with no testable behavior, add `<!-- gherkin-skip: reason -->` instead of Gherkin scenarios.
+
+**Format:**
+
+Feature: {feature name}
+
+  @integration
+  Scenario: {happy path scenario}
+    Given {precondition}
+    When {action}
+    Then {expected result}
+
+  @integration
+  Scenario: {validation/error scenario}
+    Given {precondition}
+    When {invalid action}
+    Then {error handling behavior}
+
+  @e2e
+  Scenario: {end-to-end user flow}
+    Given {full system precondition}
+    When {user performs action}
+    Then {observable system outcome}
+
+{Generate 5-10 scenarios covering happy path, edge cases, and error cases. Each scenario must have at least one Given, one When, and one Then step. Use And/But for additional steps within a scenario.}
 
 ## Reuse Audit
 
