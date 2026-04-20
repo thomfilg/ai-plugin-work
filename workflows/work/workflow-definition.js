@@ -70,7 +70,7 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
       if (skipResult.skip) return true;
       const parsed = parseGherkin.parse(markdown);
       const validation = parseGherkin.validate(parsed);
-      return validation.valid;
+      return validation.valid && parsed.errors.length === 0;
     } catch {
       return false;
     }
