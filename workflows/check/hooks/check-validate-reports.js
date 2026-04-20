@@ -305,7 +305,9 @@ function main() {
     process.exit(2); // Special exit code for infra failure
   }
 
-  // Report access failures separately from test failures
+  // ACCESS_FAILED is tracked separately — it's an infrastructure issue, not a test failure.
+  // The overall result includes accessFailure info but doesn't set valid=false,
+  // allowing the workflow to proceed while reporting the access issue.
   if (hasAccessFailure) {
     results.overall.accessFailure = true;
     results.overall.accessFailedApps = accessFailedApps;

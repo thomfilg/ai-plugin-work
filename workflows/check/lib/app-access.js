@@ -13,16 +13,18 @@ const AppAccessStatus = require('./app-access-status');
 function validateManifestEntry(entry) {
   const errors = [];
 
-  // Port range validation (1024-65535)
-  if (entry.defaultPort !== undefined) {
-    if (typeof entry.defaultPort !== 'number' || entry.defaultPort < 1024 || entry.defaultPort > 65535) {
-      errors.push(`Port ${entry.defaultPort} is outside valid range (1024-65535)`);
+  // Port validation — required for web/api apps, optional for cli
+  if (entry.defaultPort === undefined || entry.defaultPort === null) {
+    if (entry.appType !== 'cli') {
+      errors.push('defaultPort is required for web and api apps');
     }
+  } else if (typeof entry.defaultPort !== 'number' || entry.defaultPort < 1024 || entry.defaultPort > 65535) {
+    errors.push(`Port ${entry.defaultPort} is outside valid range (1024-65535)`);
   }
 
   // Shell injection prevention for startCommand
   if (entry.startCommand) {
-    const dangerousChars = /[;|<>`&\n\r]|\$[\({]/;
+    const dangerousChars = /[;|<>`&\n\r]|\$[\({]/; // hardened regex — covers shell metacharacters
     if (dangerousChars.test(entry.startCommand)) {
       errors.push(`startCommand contains dangerous shell characters: ${entry.startCommand}`);
     }
@@ -142,6 +144,9 @@ async function checkHealth(app, options = {}) {
       await new Promise(resolve => setTimeout(resolve, retryInterval));
     }
   }
+
+  // Guard: handle edge case where retries=0 (no iterations executed)
+  return buildFailureResult(url, healthEndpoint, port, null, 'No retries configured');
 }
 
 /**

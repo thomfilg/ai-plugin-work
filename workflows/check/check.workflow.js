@@ -312,6 +312,7 @@ module.exports = {
       if (!info.hashMatch) missingReports.push(name);
     }
     for (const [app, info] of Object.entries(data.qaReports)) {
+      if (info.skip) continue; // cli apps don't produce QA reports
       if (!info.hashMatch) missingReports.push(`qa-${app}.check.md`);
     }
     if (data.hasBackendChanges && !data.apiReport.hashMatch) {

@@ -373,7 +373,7 @@ Test ${APP_NAME} application.
 Your FIRST action must be:
   mcp__playwright__browser_navigate(url: '${APP_URL}')
 
-If the page does not load, report ACCESS_FAILED.
+If the page does not load, report ACCESS_FAILED (infrastructure issue, not a test failure).
 Do NOT attempt to start a server yourself.
 
 ## Context Variables

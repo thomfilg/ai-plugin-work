@@ -17,7 +17,7 @@ describe('discoverApps', () => {
     discoverApps = require('../app-access').discoverApps;
   });
 
-  afterEach(() => {
+  afterEach(() => { // restore config to prevent test pollution
     config.WEB_APPS = originalWebApps;
   });
 
@@ -138,100 +138,111 @@ describe('validateManifestEntry', () => {
   it('rejects startCommand with semicolon', () => {
     const result = validateManifestEntry({
       name: 'bad-app',
+      defaultPort: 3000,
       startCommand: 'pnpm dev; rm -rf /',
     });
     assert.equal(result.valid, false);
-    assert.ok(result.errors[0].includes('dangerous shell characters'));
+    assert.ok(result.errors.some(e => e.includes('dangerous shell characters')));
   });
 
   it('rejects startCommand with pipe', () => {
     const result = validateManifestEntry({
       name: 'bad-app',
+      defaultPort: 3000,
       startCommand: 'pnpm dev | cat /etc/passwd',
     });
     assert.equal(result.valid, false);
-    assert.ok(result.errors[0].includes('dangerous shell characters'));
+    assert.ok(result.errors.some(e => e.includes('dangerous shell characters')));
   });
 
   it('rejects startCommand with &&', () => {
     const result = validateManifestEntry({
       name: 'bad-app',
+      defaultPort: 3000,
       startCommand: 'pnpm dev && rm -rf /',
     });
     assert.equal(result.valid, false);
-    assert.ok(result.errors[0].includes('dangerous shell characters'));
+    assert.ok(result.errors.some(e => e.includes('dangerous shell characters')));
   });
 
   it('rejects startCommand with backticks', () => {
     const result = validateManifestEntry({
       name: 'bad-app',
+      defaultPort: 3000,
       startCommand: 'pnpm dev `whoami`',
     });
     assert.equal(result.valid, false);
-    assert.ok(result.errors[0].includes('dangerous shell characters'));
+    assert.ok(result.errors.some(e => e.includes('dangerous shell characters')));
   });
 
   it('rejects startCommand with $()', () => {
     const result = validateManifestEntry({
       name: 'bad-app',
+      defaultPort: 3000,
       startCommand: 'pnpm dev $(whoami)',
     });
     assert.equal(result.valid, false);
-    assert.ok(result.errors[0].includes('dangerous shell characters'));
+    assert.ok(result.errors.some(e => e.includes('dangerous shell characters')));
   });
 
   it('rejects startCommand with single & (background exec)', () => {
     const result = validateManifestEntry({
       name: 'bad-app',
+      defaultPort: 3000,
       startCommand: 'pnpm dev & malicious-cmd',
     });
     assert.equal(result.valid, false);
-    assert.ok(result.errors[0].includes('dangerous shell characters'));
+    assert.ok(result.errors.some(e => e.includes('dangerous shell characters')));
   });
 
   it('rejects startCommand with newline', () => {
     const result = validateManifestEntry({
       name: 'bad-app',
+      defaultPort: 3000,
       startCommand: 'pnpm dev\nrm -rf /',
     });
     assert.equal(result.valid, false);
-    assert.ok(result.errors[0].includes('dangerous shell characters'));
+    assert.ok(result.errors.some(e => e.includes('dangerous shell characters')));
   });
 
   it('rejects startCommand with carriage return', () => {
     const result = validateManifestEntry({
       name: 'bad-app',
+      defaultPort: 3000,
       startCommand: 'pnpm dev\rmalicious',
     });
     assert.equal(result.valid, false);
-    assert.ok(result.errors[0].includes('dangerous shell characters'));
+    assert.ok(result.errors.some(e => e.includes('dangerous shell characters')));
   });
 
   it('rejects startCommand with > (output redirection)', () => {
     const result = validateManifestEntry({
       name: 'bad-app',
+      defaultPort: 3000,
       startCommand: 'pnpm dev > /tmp/out',
     });
     assert.equal(result.valid, false);
-    assert.ok(result.errors[0].includes('dangerous shell characters'));
+    assert.ok(result.errors.some(e => e.includes('dangerous shell characters')));
   });
 
   it('rejects startCommand with < (input redirection)', () => {
     const result = validateManifestEntry({
       name: 'bad-app',
+      defaultPort: 3000,
       startCommand: 'pnpm dev < /tmp/in',
     });
     assert.equal(result.valid, false);
-    assert.ok(result.errors[0].includes('dangerous shell characters'));
+    assert.ok(result.errors.some(e => e.includes('dangerous shell characters')));
   });
 
   it('rejects startCommand with ${VAR} (variable expansion)', () => {
     const result = validateManifestEntry({
       name: 'bad-app',
+      defaultPort: 3000,
       startCommand: 'pnpm dev ${HOME}',
     });
     assert.equal(result.valid, false);
-    assert.ok(result.errors[0].includes('dangerous shell characters'));
+    assert.ok(result.errors.some(e => e.includes('dangerous shell characters')));
   });
 
   // Port range tests
@@ -281,36 +292,63 @@ describe('validateManifestEntry', () => {
   it('rejects healthEndpoint starting with "//"', () => {
     const result = validateManifestEntry({
       name: 'bad-app',
+      defaultPort: 3000,
       healthEndpoint: '//evil.com',
     });
     assert.equal(result.valid, false);
-    assert.ok(result.errors[0].includes('must not start with "//"'));
+    assert.ok(result.errors.some(e => e.includes('must not start with "//"')));
   });
 
   it('rejects healthEndpoint with query strings', () => {
     const result = validateManifestEntry({
       name: 'bad-app',
+      defaultPort: 3000,
       healthEndpoint: '/health?token=abc',
     });
     assert.equal(result.valid, false);
-    assert.ok(result.errors[0].includes('must not contain query strings'));
+    assert.ok(result.errors.some(e => e.includes('must not contain query strings')));
   });
 
   it('rejects healthEndpoint not starting with "/"', () => {
     const result = validateManifestEntry({
       name: 'bad-app',
+      defaultPort: 3000,
       healthEndpoint: 'health',
     });
     assert.equal(result.valid, false);
-    assert.ok(result.errors[0].includes('must start with "/"'));
+    assert.ok(result.errors.some(e => e.includes('must start with "/"')));
   });
 
   it('accepts valid healthEndpoint', () => {
     const result = validateManifestEntry({
       name: 'good-app',
+      defaultPort: 3000,
       healthEndpoint: '/api/health',
     });
     assert.equal(result.valid, true);
+  });
+
+  it('requires defaultPort for web apps', () => {
+    const result = validateManifestEntry({ name: 'web-app', appType: 'web' });
+    assert.equal(result.valid, false);
+    assert.ok(result.errors.some(e => e.includes('defaultPort is required')));
+  });
+
+  it('requires defaultPort for api apps', () => {
+    const result = validateManifestEntry({ name: 'api-app', appType: 'api' });
+    assert.equal(result.valid, false);
+    assert.ok(result.errors.some(e => e.includes('defaultPort is required')));
+  });
+
+  it('allows missing defaultPort for cli apps', () => {
+    const result = validateManifestEntry({ name: 'cli-tool', appType: 'cli' });
+    assert.equal(result.valid, true);
+  });
+
+  it('requires defaultPort when appType is undefined (defaults to web)', () => {
+    const result = validateManifestEntry({ name: 'no-type-app' });
+    assert.equal(result.valid, false);
+    assert.ok(result.errors.some(e => e.includes('defaultPort is required')));
   });
 
   it('returns multiple errors for multiple violations', () => {
@@ -503,6 +541,13 @@ describe('checkHealth', () => {
     assert.equal(result.healthEndpoint, '/');
     await new Promise((resolve) => server.close(resolve));
     server = null;
+  });
+
+  it('returns ACCESS_FAILED when retries is 0', async () => {
+    const app = { name: 'test-app', defaultPort: 59997, healthEndpoint: '/' };
+    const result = await checkHealth(app, { host: '127.0.0.1', retries: 0, timeout: 1000 });
+    assert.equal(result.status, AppAccessStatus.ACCESS_FAILED);
+    assert.equal(result.error, 'No retries configured');
   });
 
   it('retries before failing on non-success status', async () => {

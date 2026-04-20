@@ -128,7 +128,7 @@ function setPlaywrightStatus(ticketId, appName, ok, error = null) {
     });
   } else {
     progress.status = 'playwright_ready';
-    progress.accessStatus = AppAccessStatus.READY;
+    progress.accessStatus = AppAccessStatus.READY; // correct: playwright success implies READY
   }
 
   return saveProgress(ticketId, appName, progress);
