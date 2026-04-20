@@ -154,13 +154,9 @@ echo "Running apps: $RUNNING_APPS"
 
 ⚠️ **CRITICAL:** Ports are NOT guaranteed to match defaults. Always use the values returned by `check-start-env.js`.
 
-**Default ports (reference only - actual ports may differ):**
-```
-as-dashboard:       5173 (default, may vary)
-as-dashboard-admin: 5174 (default, may vary)
-status-site:        5175 (default, may vary)
-status-site-admin:  5176 (default, may vary)
-```
+**Ports are assigned dynamically** — always use the values returned by `check-start-env.js`.
+The app manifest (via `discoverApps()`) defines default ports, but actual runtime ports may differ.
+Never hardcode port numbers; rely on the `RUNNING_APPS` payload.
 
 **Database env (shared across all agents):**
 ```
@@ -195,7 +191,7 @@ mcp__playwright__browser_navigate(url: "https://www.google.com")
 ║                                                                      ║
 ║  1. Try: node scripts/mcp-wrapper.js playwright                      ║
 ║  2. Check output for errors                                          ║
-║  3. Report INFRASTRUCTURE_FAILURE                                    ║
+║  3. Report ACCESS_FAILED                                    ║
 ║                                                                      ║
 ║  Transition to 8_output with error status.                           ║
 ║  QA agents will waste time if Playwright is broken.                  ║
@@ -204,7 +200,7 @@ mcp__playwright__browser_navigate(url: "https://www.google.com")
 ╚══════════════════════════════════════════════════════════════════════╝
 ```
 
-**If Playwright fails:** This is a BLOCKING error. Do NOT skip QA. Report INFRASTRUCTURE_FAILURE and transition to `8_output`: `node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/workflow-engine.js check transition ${INSTANCE_ID} 8_output`
+**If Playwright fails:** This is a BLOCKING error. Do NOT skip QA. Report ACCESS_FAILED and transition to `8_output`: `node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/workflow-engine.js check transition ${INSTANCE_ID} 8_output`
 The /check result MUST show NEEDS_WORK with infrastructure failure — QA cannot be skipped.
 **If Playwright works:** Continue to Step 4_phase1_agents.
 
@@ -321,7 +317,12 @@ Status: APPROVED (all pass) or NEEDS_WORK (any failures)
 ### Agent 3.x: QA Testing (MANDATORY — one per impacted app)
 
 **QA is NOT optional.** Use `/check-qa` command for each app in IMPACTED_APPS, ALL IN PARALLEL.
-When only packages are changed (no direct app changes), `IMPACTED_APPS` automatically includes all web apps defined in the repo's `WEB_APPS` config. If `IMPACTED_APPS` is still empty after detection, report a configuration error — the repo may need a `WEB_APPS` entry in its `.env`.
+When only packages are changed (no direct app changes), `IMPACTED_APPS` is populated from the app manifest via `discoverApps()`. If `IMPACTED_APPS` is still empty after detection, report a configuration error — the repo may need a `WEB_APPS` entry in its `.env`.
+
+**appType Routing:** Each app in the manifest has an `appType` field that determines which QA agent to use:
+- `web` apps → dispatch to `qa-feature-tester` (browser-based testing via Playwright/Chrome MCP)
+- `api` apps → dispatch to `qa-api-tester` (API testing via curl/HTTP)
+- `cli` apps → skip QA (tested only by quality-checker automated tests)
 
 For each app in `IMPACTED_APPS`, invoke the `/check-qa` skill with JSON parameters:
 
@@ -969,7 +970,7 @@ After all agents complete, validate reports and generate summary.
 
 ```bash
 # Check if any QA report indicates Playwright failure
-if grep -l "PLAYWRIGHT_UNAVAILABLE\|INFRASTRUCTURE_FAILURE" ${REPORT_FOLDER}/qa-*.check.md 2>/dev/null; then
+if grep -l "PLAYWRIGHT_UNAVAILABLE\|ACCESS_FAILED" ${REPORT_FOLDER}/qa-*.check.md 2>/dev/null; then
   echo "🛑 Infrastructure failure detected"
 fi
 ```
@@ -988,7 +989,7 @@ fi
 ║                                                                      ║
 ╚══════════════════════════════════════════════════════════════════════╝
 ```
-Exit with INFRASTRUCTURE_FAILURE status (not APPROVED).
+Exit with ACCESS_FAILED status (not APPROVED).
 
 **If no infrastructure failures:** Continue with validation:
 

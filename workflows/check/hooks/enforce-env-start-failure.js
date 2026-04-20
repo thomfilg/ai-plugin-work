@@ -21,6 +21,7 @@
 const fs = require('fs');
 const path = require('path');
 const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
+const { ACCESS_FAILED } = require(path.join(__dirname, '..', 'lib', 'app-access-status'));
 
 let didBlock = false;
 process.on('uncaughtException', (err) => {
@@ -112,11 +113,35 @@ function phase1_detectFailure(hookData) {
       return n ? n[1] : 'unknown';
     });
 
+    // Extract diagnostic details from the output for the marker payload
+    const portMatches = output.match(/"port":\s*(\d+)/g) || [];
+    const ports = portMatches.map((m) => {
+      const p = m.match(/(\d+)/);
+      return p ? parseInt(p[1], 10) : null;
+    }).filter(Boolean);
+
+    const urlMatches = output.match(/"url":\s*"([^"]+)"/g) || [];
+    const urls = urlMatches.map((m) => {
+      const u = m.match(/"url":\s*"([^"]+)"/);
+      return u ? u[1] : null;
+    }).filter(Boolean);
+
     fs.writeFileSync(
       mp,
-      JSON.stringify({ failedApps, timestamp: new Date().toISOString(), ticketId })
+      JSON.stringify({
+        failedApps,
+        status: ACCESS_FAILED,
+        timestamp: new Date().toISOString(),
+        ticketId,
+        diagnostic: {
+          ports,
+          urls,
+          hasEmptyApps,
+          hasFail,
+        },
+      })
     );
-    process.stderr.write(`ENV_FAILURE: marker written (${failedApps.join(', ')})\n`);
+    process.stderr.write(`ENV_FAILURE [${ACCESS_FAILED}]: marker written (${failedApps.join(', ')})\n`);
   } else {
     try {
       fs.unlinkSync(mp);

@@ -49,16 +49,16 @@ async function main() {
       /`?mcp__(playwright|claude-in-chrome)__\w+`?\s*(?:[-–—:]?\s*)Result:\s*(SUCCESS|FAIL)/i;
     const hasBrowserMCP = browserToolPattern.test(content);
 
-    if (!hasBrowserMCP && !content.includes('INFRASTRUCTURE_FAILURE')) {
+    if (!hasBrowserMCP && !content.includes('INFRASTRUCTURE_FAILURE') && !content.includes('ACCESS_FAILED')) {
       issues.push(
         'No structured browser tool evidence — expected `mcp__playwright__...` or `mcp__claude-in-chrome__...` tool calls, each with "Result: SUCCESS" or "Result: FAIL"'
       );
     }
 
-    // Check: If INFRASTRUCTURE_FAILURE, must have MCP diagnostics
-    if (content.includes('INFRASTRUCTURE_FAILURE')) {
+    // Check: If INFRASTRUCTURE_FAILURE or ACCESS_FAILED, must have MCP diagnostics
+    if (content.includes('INFRASTRUCTURE_FAILURE') || content.includes('ACCESS_FAILED')) {
       if (!content.includes('## MCP Diagnostics') && !content.includes('ListMcpResourcesTool')) {
-        issues.push('INFRASTRUCTURE_FAILURE report missing MCP diagnostics');
+        issues.push('INFRASTRUCTURE_FAILURE/ACCESS_FAILED report missing MCP diagnostics');
       }
     }
 
@@ -66,7 +66,7 @@ async function main() {
     const hasScreenshots =
       content.match(/!\[.*?\]\(.*?\.(png|jpg|jpeg)/i) || content.includes('screenshots/');
 
-    if (!hasScreenshots && !content.includes('INFRASTRUCTURE_FAILURE')) {
+    if (!hasScreenshots && !content.includes('INFRASTRUCTURE_FAILURE') && !content.includes('ACCESS_FAILED')) {
       issues.push('No screenshot references found');
     }
 
@@ -74,7 +74,8 @@ async function main() {
     const hasTestStatus =
       /\|\s*(PASS|FAIL)\s*\|/i.test(content) ||
       /Status:\s*(PASS|FAIL)/i.test(content) ||
-      content.includes('INFRASTRUCTURE_FAILURE');
+      content.includes('INFRASTRUCTURE_FAILURE') ||
+      content.includes('ACCESS_FAILED');
     if (!hasTestStatus) {
       issues.push(
         'Missing test status — PASS/FAIL must appear in a results table or after "Status:"'

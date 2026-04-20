@@ -151,12 +151,18 @@ describe('config', () => {
   // ─── webAppsMap ─────────────────────────────────────────────────────────
 
   describe('webAppsMap', () => {
-    it('builds map from valid entries', () => {
+    it('builds map from valid entries with default manifest fields', () => {
       const config = freshRequire({
         WEB_APPS: JSON.stringify([{ name: 'app-a', defaultPort: 3000, type: 'vite' }]),
       });
       const map = config.webAppsMap();
-      assert.deepEqual(map['app-a'], { defaultPort: 3000, type: 'vite' });
+      assert.deepEqual(map['app-a'], {
+        defaultPort: 3000,
+        type: 'vite',
+        appType: 'web',
+        healthEndpoint: '/',
+        startCommand: 'pnpm dev --filter=app-a',
+      });
     });
 
     it('skips malformed entries (null, missing name)', () => {
@@ -169,13 +175,72 @@ describe('config', () => {
       });
       const map = config.webAppsMap();
       assert.equal(Object.keys(map).length, 1);
-      assert.deepEqual(map['valid'], { defaultPort: 5000, type: 'remix' });
+      assert.deepEqual(map['valid'], {
+        defaultPort: 5000,
+        type: 'remix',
+        appType: 'web',
+        healthEndpoint: '/',
+        startCommand: 'pnpm dev --filter=valid',
+      });
     });
 
     it('returns prototype-free object', () => {
       const config = freshRequire();
       const map = config.webAppsMap();
       assert.equal(Object.getPrototypeOf(map), null);
+    });
+
+    it('defaults appType to "web"', () => {
+      const config = freshRequire({
+        WEB_APPS: JSON.stringify([{ name: 'my-app', defaultPort: 3000, type: 'vite' }]),
+      });
+      const map = config.webAppsMap();
+      assert.equal(map['my-app'].appType, 'web');
+    });
+
+    it('defaults healthEndpoint to "/" for web apps', () => {
+      const config = freshRequire({
+        WEB_APPS: JSON.stringify([{ name: 'web-app', defaultPort: 3000, type: 'vite' }]),
+      });
+      const map = config.webAppsMap();
+      assert.equal(map['web-app'].healthEndpoint, '/');
+    });
+
+    it('defaults healthEndpoint to "/health" for api apps', () => {
+      const config = freshRequire({
+        WEB_APPS: JSON.stringify([
+          { name: 'api-svc', defaultPort: 4000, type: 'node', appType: 'api' },
+        ]),
+      });
+      const map = config.webAppsMap();
+      assert.equal(map['api-svc'].healthEndpoint, '/health');
+    });
+
+    it('defaults startCommand to "pnpm dev --filter={name}"', () => {
+      const config = freshRequire({
+        WEB_APPS: JSON.stringify([{ name: 'dashboard', defaultPort: 3000, type: 'vite' }]),
+      });
+      const map = config.webAppsMap();
+      assert.equal(map['dashboard'].startCommand, 'pnpm dev --filter=dashboard');
+    });
+
+    it('preserves explicit healthEndpoint, startCommand, appType', () => {
+      const config = freshRequire({
+        WEB_APPS: JSON.stringify([
+          {
+            name: 'custom',
+            defaultPort: 8080,
+            type: 'express',
+            appType: 'cli',
+            healthEndpoint: '/status',
+            startCommand: 'node index.js',
+          },
+        ]),
+      });
+      const map = config.webAppsMap();
+      assert.equal(map['custom'].appType, 'cli');
+      assert.equal(map['custom'].healthEndpoint, '/status');
+      assert.equal(map['custom'].startCommand, 'node index.js');
     });
   });
 

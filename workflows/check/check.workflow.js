@@ -27,6 +27,7 @@ const { execSync } = require('child_process');
 
 const config = require(path.join(__dirname, '..', 'lib', 'config'));
 const { normalizeTicketId } = require(path.join(__dirname, '..', 'lib', 'ticket-provider'));
+const { discoverApps } = require(path.join(__dirname, 'lib', 'app-access'));
 const TASKS_BASE = config.TASKS_BASE;
 const REPO_DIR = config.repoDir();
 
@@ -80,13 +81,36 @@ function getImpactedApps() {
     if (pkgMatch) packages.add(pkgMatch[1]);
   }
 
-  // If no direct app changes but packages changed, all web apps may be affected
-  const webAppNames = config.webAppNames();
-  if (apps.size === 0 && packages.size > 0 && webAppNames.length > 0) {
-    return webAppNames;
+  // If no direct app changes but packages changed, use discoverApps() manifest
+  // to determine which apps may be affected (replaces hardcoded WEB_APPS list)
+  const manifestApps = discoverApps();
+  if (apps.size === 0 && packages.size > 0 && manifestApps.length > 0) {
+    return manifestApps.map(a => a.name).sort();
   }
 
   return Array.from(apps).sort();
+}
+
+/**
+ * Get the QA agent type for an app based on its appType from the manifest.
+ * @param {string} appName - Name of the app
+ * @returns {{ agent: string, skip: boolean }} Agent to dispatch or skip flag
+ */
+function getQaAgentForApp(appName, manifestApps) {
+  const apps = manifestApps || discoverApps();
+  const entry = apps.find(a => a.name === appName);
+  const appType = entry?.appType || 'web';
+
+  switch (appType) {
+    case 'web':
+      return { agent: 'qa-feature-tester', skip: false };
+    case 'api':
+      return { agent: 'qa-api-tester', skip: false };
+    case 'cli':
+      return { agent: null, skip: true };
+    default:
+      return { agent: 'qa-feature-tester', skip: false };
+  }
 }
 
 function hasBackendChanges() {
@@ -249,13 +273,17 @@ module.exports = {
       };
     }
 
-    // QA reports per impacted app
+    // QA reports per impacted app (with appType routing)
+    const manifestApps = discoverApps();
     data.qaReports = {};
     for (const app of impactedApps) {
+      const routing = getQaAgentForApp(app, manifestApps);
       const filename = `qa-${app}.check.md`;
       data.qaReports[app] = {
         exists: fs.existsSync(path.join(reportFolder, filename)),
         hashMatch: reportHasMatchingHash(reportFolder, filename, changesHash),
+        agent: routing.agent,
+        skip: routing.skip,
       };
     }
 
@@ -284,6 +312,7 @@ module.exports = {
       if (!info.hashMatch) missingReports.push(name);
     }
     for (const [app, info] of Object.entries(data.qaReports)) {
+      if (info.skip) continue; // cli apps don't produce QA reports
       if (!info.hashMatch) missingReports.push(`qa-${app}.check.md`);
     }
     if (data.hasBackendChanges && !data.apiReport.hashMatch) {

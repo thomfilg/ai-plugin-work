@@ -11,6 +11,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const AppAccessStatus = require(path.join(__dirname, '..', 'lib', 'app-access-status'));
 
 // Get args (only when run as CLI)
 let REPORT_FOLDER, CHANGES_HASH, TICKET_ID, IMPACTED_APPS;
@@ -51,7 +52,7 @@ function readFile(filePath) {
 function getReportStatus(content, type) {
   if (!content) return { status: 'MISSING', icon: '❓' };
 
-  // Check for infrastructure failure FIRST (for QA reports)
+  // Check for infrastructure/access failure FIRST (for QA reports)
   if (type === 'qa') {
     if (
       content.includes('INFRASTRUCTURE_FAILURE') ||
@@ -59,6 +60,9 @@ function getReportStatus(content, type) {
       content.includes('PLAYWRIGHT UNAVAILABLE')
     ) {
       return { status: 'INFRASTRUCTURE_FAILURE', icon: '🛑' };
+    }
+    if (content.includes(AppAccessStatus.ACCESS_FAILED)) {
+      return { status: AppAccessStatus.ACCESS_FAILED, icon: '🔒' };
     }
   }
 
@@ -131,6 +135,9 @@ function generateSummary() {
   const qaStatuses = {};
   let overallQAStatus = { status: 'APPROVED', icon: '✅' };
   let hasInfraFailure = false;
+  let hasAccessFailure = false;
+  const accessFailedApps = [];
+  const testFailedApps = [];
 
   for (const app of IMPACTED_APPS) {
     const qaContent = readFile(path.join(REPORT_FOLDER, `qa-${app}.check.md`));
@@ -139,7 +146,14 @@ function generateSummary() {
     if (qaStatuses[app].status === 'INFRASTRUCTURE_FAILURE') {
       hasInfraFailure = true;
       overallQAStatus = { status: 'INFRASTRUCTURE_FAILURE', icon: '🛑' };
+    } else if (qaStatuses[app].status === AppAccessStatus.ACCESS_FAILED) {
+      hasAccessFailure = true;
+      accessFailedApps.push(app);
+      if (!hasInfraFailure) {
+        overallQAStatus = { status: AppAccessStatus.ACCESS_FAILED, icon: '🔒' };
+      }
     } else if (qaStatuses[app].status === 'NEEDS_WORK' && !hasInfraFailure) {
+      testFailedApps.push(app);
       overallQAStatus = { status: 'NEEDS_WORK', icon: '❌' };
     } else if (qaStatuses[app].status === 'MISSING' && overallQAStatus.status === 'APPROVED') {
       overallQAStatus = { status: 'MISSING', icon: '❓' };
@@ -160,6 +174,14 @@ function generateSummary() {
       '⚠️ FIX INFRASTRUCTURE: Playwright MCP unavailable - fix before re-running /check'
     );
   }
+  if (hasAccessFailure) {
+    if (overallStatus !== 'INFRASTRUCTURE_FAILURE') {
+      overallStatus = AppAccessStatus.ACCESS_FAILED;
+    }
+    actionItems.push(
+      `🔒 ACCESS_FAILED: App(s) unreachable (${accessFailedApps.join(', ')}) - infrastructure issue, not a test failure`
+    );
+  }
   if (testsStatus.status === 'NEEDS_WORK') {
     overallStatus = overallStatus === 'INFRASTRUCTURE_FAILURE' ? overallStatus : 'NEEDS_WORK';
     actionItems.push('Fix failing tests (see tests.check.md)');
@@ -170,7 +192,9 @@ function generateSummary() {
   }
   if (overallQAStatus.status === 'NEEDS_WORK') {
     overallStatus = overallStatus === 'INFRASTRUCTURE_FAILURE' ? overallStatus : 'NEEDS_WORK';
-    actionItems.push('Fix QA test failures (see qa-*.check.md)');
+    actionItems.push(
+      `Fix QA test failures (${testFailedApps.length > 0 ? testFailedApps.join(', ') : 'see qa-*.check.md'})`
+    );
   }
   if (completionStatus.status === 'NEEDS_WORK') {
     overallStatus = overallStatus === 'INFRASTRUCTURE_FAILURE' ? overallStatus : 'NEEDS_WORK';
@@ -209,7 +233,7 @@ See: [tests.check.md](./tests.check.md)
 See: [code-review.check.md](./code-review.check.md)
 
 ## QA Test Reports
-${qaLinks}
+${accessFailedApps.length > 0 ? `### Access Failed (infrastructure issue)\n${accessFailedApps.map((app) => `- 🔒 **${app}** — ${AppAccessStatus.ACCESS_FAILED} (app unreachable, not a test failure)`).join('\n')}\n\n` : ''}${testFailedApps.length > 0 ? `### Test Failed\n${testFailedApps.map((app) => `- ❌ **${app}** — ${AppAccessStatus.TEST_FAILED}`).join('\n')}\n\n` : ''}${qaLinks}
 
 ## Completion Check
 See: [completion.check.md](./completion.check.md)
@@ -242,6 +266,9 @@ ${actionItems.map((item) => `- ${item}`).join('\n')}`
         readmePath,
         overallStatus,
         infrastructureFailure: hasInfraFailure,
+        accessFailure: hasAccessFailure,
+        accessFailedApps,
+        testFailedApps,
         testsStatus: testsStatus.status,
         codeReviewStatus: codeReviewStatus.status,
         qaStatus: overallQAStatus.status,

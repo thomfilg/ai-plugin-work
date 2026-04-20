@@ -91,12 +91,24 @@ Browser testing is the job. curl alone is not QA. Two browser backends are avail
 1. Show the actual error message
 2. Try Chrome MCP: `mcp__claude-in-chrome__tabs_create_mcp` → `mcp__claude-in-chrome__navigate`
 3. Run `node scripts/mcp-wrapper.js playwright`, wait 5s, retry Playwright
-4. If ALL backends fail → INFRASTRUCTURE_FAILURE report with full MCP diagnostics (ListMcpResourcesTool output, wrapper output, all error messages)
+4. If ALL backends fail → ACCESS_FAILED report with full MCP diagnostics (ListMcpResourcesTool output, wrapper output, all error messages)
 
 **There is no partial QA. Never claim "unavailable" without trying all backends.**
 
-Valid failure statuses: `INFRASTRUCTURE_FAILURE` (Playwright unavailable), `BLOCKED` (environment issue).
-Never use: ~~PARTIAL PASS~~, ~~PASS (API only)~~.
+### Status Taxonomy
+
+Report one of these five statuses for each app:
+
+| Status | Meaning |
+|--------|---------|
+| `READY` | App is accessible and ready for testing |
+| `NOT_CONFIGURED` | App has no manifest entry or is missing configuration |
+| `ACCESS_FAILED` | App could not be reached (Playwright unavailable, connection refused, etc.) |
+| `TEST_FAILED` | App is accessible but one or more tests failed |
+| `PASSED` | App is accessible and all tests passed |
+
+Valid failure statuses: `ACCESS_FAILED` (Playwright unavailable, connection refused), `BLOCKED` (environment issue).
+Deprecated statuses (never use): ~~PARTIAL PASS~~, ~~PASS (API only)~~, ~~INFRASTRUCTURE_FAILURE~~ (replaced by `ACCESS_FAILED`).
 
 **Forbidden test commands:** `pnpm test`, `vitest`, `jest`, `pnpm test:smoke`, `pnpm test:integration`, `pnpm test:e2e`. You are a manual tester using browser and curl.
 
@@ -274,12 +286,18 @@ curl -s http://host.docker.internal:3000/health || echo "App not running"
 
 ## URL Patterns
 
-When testing locally from Docker/WSL, use `host.docker.internal` instead of `localhost`:
+App URLs are provided dynamically by `check-start-env.js` via the `RUNNING_APPS` environment variable.
+Do NOT use hardcoded URLs. Parse the structured access payload to get each app's URL:
+
+```javascript
+const runningApps = JSON.parse(process.env.RUNNING_APPS || '{}');
+// Use runningApps[appName].url for the app URL
+// Use runningApps[appName].port for the port
+// Use runningApps[appName].appType to determine testing approach ('web' or 'api')
 ```
-http://host.docker.internal:3000   # status-site
-http://host.docker.internal:5173   # dashboard (vite)
-http://host.docker.internal:4000   # API server
-```
+
+When testing locally from Docker/WSL, use `host.docker.internal` instead of `localhost`.
+The actual host and port are provided in the access payload — never assume default ports.
 
 ## Testing Methodology
 
@@ -368,9 +386,9 @@ Separator: `\n\n---\n## Previous Run: [old-timestamp]\n---\n\n`
 
 Your task is NOT COMPLETE until the report file is written.
 
-### INFRASTRUCTURE_FAILURE Report Requirements
+### ACCESS_FAILED Report Requirements
 
-If marking as INFRASTRUCTURE_FAILURE, your report MUST include:
+If marking as ACCESS_FAILED, your report MUST include:
 1. ListMcpResourcesTool() output
 2. `node scripts/mcp-wrapper.js playwright` output
 3. All error messages from each attempt

@@ -14,6 +14,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const AppAccessStatus = require(path.join(__dirname, '..', 'lib', 'app-access-status'));
 
 // Get args
 const REPORT_FOLDER = process.argv[2];
@@ -65,8 +66,21 @@ function validateQAReport(filePath, appName) {
       exists: true,
       valid: false,
       infrastructureFailure: true,
+      accessFailed: false,
       issues: ['Infrastructure failure - Playwright unavailable'],
       failed: true,
+    };
+  }
+
+  // Check for ACCESS_FAILED (app unreachable — infrastructure issue, not a test failure)
+  if (content.includes(AppAccessStatus.ACCESS_FAILED)) {
+    return {
+      exists: true,
+      valid: false,
+      infrastructureFailure: false,
+      accessFailed: true,
+      issues: [`App access failed for ${appName} — app unreachable (infrastructure issue, not a test failure)`],
+      failed: false, // Not a test failure
     };
   }
 
@@ -103,6 +117,7 @@ function validateQAReport(filePath, appName) {
     failed,
     hasScreenshots,
     infrastructureFailure: false,
+    accessFailed: false,
   };
 }
 
@@ -246,6 +261,9 @@ function main() {
   results.reports.qa = {};
   let anyQAFailed = false;
   let hasInfrastructureFailure = false;
+  let hasAccessFailure = false;
+  const accessFailedApps = [];
+  const testFailedApps = [];
 
   for (const app of IMPACTED_APPS) {
     const qaPath = path.join(REPORT_FOLDER, `qa-${app}.check.md`);
@@ -256,16 +274,24 @@ function main() {
     if (validation.infrastructureFailure) {
       hasInfrastructureFailure = true;
       results.overall.issues.push(`Infrastructure failure detected in qa-${app}.check.md`);
+    } else if (validation.accessFailed) {
+      // ACCESS_FAILED is an infrastructure issue, not a test failure
+      hasAccessFailure = true;
+      accessFailedApps.push(app);
+      results.overall.issues.push(
+        `${AppAccessStatus.ACCESS_FAILED}: ${app} unreachable (infrastructure issue, not a test failure)`
+      );
     } else if (!validation.exists) {
       anyQAFailed = true;
       results.overall.issues.push(`QA report missing for ${app}`);
     } else if (!validation.valid || validation.failed) {
       anyQAFailed = true;
+      testFailedApps.push(app);
       if (validation.issues.length > 0) {
         results.overall.issues.push(`QA report for ${app}: ${validation.issues.join(', ')}`);
       }
       if (validation.failed) {
-        results.overall.issues.push(`QA tests failed for ${app}`);
+        results.overall.issues.push(`${AppAccessStatus.TEST_FAILED}: QA tests failed for ${app}`);
       }
     }
   }
@@ -277,6 +303,17 @@ function main() {
     results.overall.valid = false;
     console.log(JSON.stringify(results, null, 2));
     process.exit(2); // Special exit code for infra failure
+  }
+
+  // ACCESS_FAILED is tracked separately — it's an infrastructure issue, not a test failure.
+  // The overall result includes accessFailure info but doesn't set valid=false,
+  // allowing the workflow to proceed while reporting the access issue.
+  if (hasAccessFailure) {
+    results.overall.accessFailure = true;
+    results.overall.accessFailedApps = accessFailedApps;
+  }
+  if (testFailedApps.length > 0) {
+    results.overall.testFailedApps = testFailedApps;
   }
 
   // Validate code review

@@ -174,7 +174,14 @@ config.webAppsMap = () => {
   const map = Object.create(null);
   for (const app of config.WEB_APPS) {
     if (!app || !app.name) continue;
-    map[app.name] = { defaultPort: app.defaultPort, type: app.type };
+    const appType = app.appType || 'web';
+    map[app.name] = {
+      defaultPort: app.defaultPort,
+      type: app.type,
+      appType,
+      healthEndpoint: app.healthEndpoint || (appType === 'api' ? '/health' : '/'),
+      startCommand: app.startCommand || `pnpm dev --filter=${app.name}`,
+    };
   }
   return map;
 };

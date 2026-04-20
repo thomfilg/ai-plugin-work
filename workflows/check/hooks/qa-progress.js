@@ -30,6 +30,7 @@ process.on('unhandledRejection', (err) => {
 });
 
 const getConfig = require(path.join(__dirname, '..', '..', 'lib', 'get-config'));
+const AppAccessStatus = require(path.join(__dirname, '..', 'lib', 'app-access-status'));
 const TASKS_BASE = getConfig.orExit('TASKS_BASE');
 function safeId(ticketId) {
   try {
@@ -86,6 +87,7 @@ function initProgress(ticketId, appName, appUrl, testPlan = []) {
     appName,
     appUrl,
     status: 'initializing',
+    accessStatus: AppAccessStatus.NOT_CONFIGURED,
     infrastructure: {
       playwrightChecked: false,
       playwrightOk: null,
@@ -118,6 +120,7 @@ function setPlaywrightStatus(ticketId, appName, ok, error = null) {
 
   if (!ok) {
     progress.status = 'infrastructure_failure';
+    progress.accessStatus = AppAccessStatus.ACCESS_FAILED;
     progress.errors.push({
       type: 'playwright',
       error: error || 'Playwright unavailable',
@@ -125,6 +128,7 @@ function setPlaywrightStatus(ticketId, appName, ok, error = null) {
     });
   } else {
     progress.status = 'playwright_ready';
+    progress.accessStatus = AppAccessStatus.READY; // correct: playwright success implies READY
   }
 
   return saveProgress(ticketId, appName, progress);
@@ -143,6 +147,7 @@ function setAppReachable(ticketId, appName, reachable, error = null) {
 
   if (!reachable) {
     progress.status = 'infrastructure_failure';
+    progress.accessStatus = AppAccessStatus.ACCESS_FAILED;
     progress.errors.push({
       type: 'app_unreachable',
       error: error || 'Application not reachable',
@@ -150,6 +155,7 @@ function setAppReachable(ticketId, appName, reachable, error = null) {
     });
   } else {
     progress.status = 'ready_to_test';
+    progress.accessStatus = AppAccessStatus.READY;
   }
 
   return saveProgress(ticketId, appName, progress);
@@ -244,6 +250,7 @@ function infrastructureFailure(ticketId, appName, error) {
   }
 
   progress.status = 'infrastructure_failure';
+  progress.accessStatus = AppAccessStatus.ACCESS_FAILED;
   progress.errors.push({
     type: 'infrastructure',
     error,
@@ -263,6 +270,7 @@ function completeQA(ticketId, appName, overallResult) {
   }
 
   progress.status = overallResult === 'pass' ? 'completed_pass' : 'completed_fail';
+  progress.accessStatus = overallResult === 'pass' ? AppAccessStatus.PASSED : AppAccessStatus.TEST_FAILED;
   progress.completedTime = new Date().toISOString();
   progress.testsInProgress = null;
 
@@ -281,6 +289,7 @@ function getResumeInfo(ticketId, appName) {
   return {
     exists: true,
     status: progress.status,
+    accessStatus: progress.accessStatus || AppAccessStatus.NOT_CONFIGURED,
     canResume: ['testing', 'ready_to_test', 'playwright_ready'].includes(progress.status),
     completedTests: progress.testsCompleted.map((t) => t.name),
     remainingTests: progress.testPlan,
@@ -316,6 +325,7 @@ QA Progress: ${progress.appName}
 ════════════════════════════════════════════
 Ticket: ${progress.ticketId}
 Status: ${statusIcon[progress.status] || '❓'} ${progress.status}
+Access Status: ${progress.accessStatus || 'N/A'}
 URL: ${progress.appUrl}
 Started: ${progress.startTime}
 Last Update: ${progress.lastUpdate}

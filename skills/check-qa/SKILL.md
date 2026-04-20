@@ -55,13 +55,10 @@ const AFFECTED_PACKAGES = options.affectedPackages || [];
 const QA_DOCS = options.qaDocs || '';   // from READ_DOCS_ON_QA via check-setup.js
 const E2E_DOCS = options.e2eDocs || ''; // from READ_DOCS_ON_E2E via check-setup.js
 
-// Default URLs
-const APP_URL = options.appUrl || {
-  'status-site': 'http://host.docker.internal:5175',
-  'status-site-admin': 'http://host.docker.internal:5176',
-  'as-dashboard': 'http://host.docker.internal:5173',
-  'as-dashboard-admin': 'http://host.docker.internal:5174'
-}[APP_NAME] || 'http://host.docker.internal:3000';
+// App URL from structured access payload (provided by check-start-env.js via RUNNING_APPS)
+// RUNNING_APPS is set by the /check workflow; parse it to get the URL for each app.
+const runningApps = JSON.parse(process.env.RUNNING_APPS || '{}');
+const APP_URL = options.appUrl || (runningApps[APP_NAME] && runningApps[APP_NAME].url) || 'http://host.docker.internal:3000';
 ```
 
 ---
@@ -76,30 +73,66 @@ AFFECTED_APPS=$(node scripts/get-affected.js main json)
 echo "Affected apps: $AFFECTED_APPS"
 ```
 
-Parse and filter to QA-testable apps:
+Parse and filter to QA-testable apps using the app manifest (via `discoverApps`):
 ```javascript
+const path = require('path');
+const { discoverApps } = require(path.join(process.env.CLAUDE_PLUGIN_ROOT, 'workflows', 'check', 'lib', 'app-access'));
+
 const allAffected = JSON.parse(AFFECTED_APPS);
-const qaApps = allAffected.filter(app =>
-  ['status-site', 'status-site-admin', 'as-dashboard', 'as-dashboard-admin'].includes(app)
-);
+const manifest = discoverApps();
+
+// Filter affected apps to those in the manifest, then route by appType
+const qaApps = allAffected.filter(app => {
+  const entry = manifest.find(m => m.name === app);
+  if (!entry) return false;
+  // cli apps are tested by automated tests only — skip QA
+  if (entry.appType === 'cli') return false;
+  return true;
+});
+```
+
+### appType Routing
+
+The app manifest declares an `appType` for each app. Use it to select the correct QA agent:
+
+| appType | QA Agent | Testing Method |
+|---------|----------|----------------|
+| `web` | `qa-feature-tester` | Browser-based testing via Playwright MCP / Chrome MCP |
+| `api` | `qa-api-tester` | API testing via curl/HTTP requests |
+| `cli` | _(skip QA)_ | Tested only by quality-checker automated tests |
+
+```javascript
+for (const appName of qaApps) {
+  const entry = manifest.find(m => m.name === appName);
+  const appType = entry?.appType || 'web';
+
+  if (appType === 'web') {
+    // Launch qa-feature-tester (browser-based QA)
+    // See Step 3 below
+  } else if (appType === 'api') {
+    // Launch qa-api-tester (HTTP/curl-based QA)
+  }
+  // cli apps were already filtered out above
+}
 ```
 
 | Result | Action |
 |--------|--------|
-| 0 QA apps | Ask user to select |
+| 0 QA apps | Ask user to select from manifest entries |
 | 1 QA app | Launch agent for that app |
 | 2+ QA apps | **Go to Step 2.1 to verify actual usage** |
 
 **If no QA apps found:**
+```javascript
+// Build options dynamically from the manifest
+const manifestApps = discoverApps().filter(m => m.appType !== 'cli');
+// Present each app with its name and default port
+```
 ```
 AskUserQuestion:
   question: "No QA-testable apps affected. Which app to test?"
   header: "App"
-  options:
-    - label: "status-site" / description: "Port 5175"
-    - label: "as-dashboard" / description: "Port 5173"
-    - label: "status-site-admin" / description: "Port 5176"
-    - label: "as-dashboard-admin" / description: "Port 5174"
+  options: [dynamically built from discoverApps() manifest entries]
 ```
 
 ---
@@ -340,7 +373,7 @@ Test ${APP_NAME} application.
 Your FIRST action must be:
   mcp__playwright__browser_navigate(url: '${APP_URL}')
 
-If the page does not load, report INFRASTRUCTURE_FAILURE.
+If the page does not load, report ACCESS_FAILED (infrastructure issue, not a test failure).
 Do NOT attempt to start a server yourself.
 
 ## Context Variables
@@ -428,4 +461,4 @@ Reports are validated by SubagentStop hook: `${CLAUDE_PLUGIN_ROOT}/workflows/che
 - No `mcp__playwright__` tool evidence
 - Puppeteer scripts used instead of MCP
 - No screenshots
-- INFRASTRUCTURE_FAILURE without MCP diagnostics
+- ACCESS_FAILED without MCP diagnostics

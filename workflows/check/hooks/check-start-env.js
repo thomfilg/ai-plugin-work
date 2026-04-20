@@ -50,9 +50,9 @@ function getTicketPrefix() {
 }
 const TICKET_PREFIX = getTicketPrefix();
 
-// App configurations - loaded from repo .env via config
-// Each repo defines WEB_APPS as JSON in .env
-const WEB_APPS = config.webAppsMap();
+// App configurations - loaded from repo .env via app-access module
+const { discoverApps, checkHealth } = require(path.join(__dirname, '..', 'lib', 'app-access'));
+const { ACCESS_FAILED } = require(path.join(__dirname, '..', 'lib', 'app-access-status'));
 
 // Database environment variables for integration tests (port will be detected dynamically)
 const DB_ENV = {
@@ -61,14 +61,6 @@ const DB_ENV = {
   DATABASE_NAME: 'status-site',
   DATABASE_MASTER_USER_NAME: 'postgres',
   DATABASE_MASTER_PASSWORD: 'mypassword',
-};
-
-// Database container mappings - which container serves which app's database
-const DB_CONTAINERS = {
-  'status-site': { containerName: 'status-site', dbName: 'status-site' },
-  'status-site-admin': { containerName: 'status-site', dbName: 'status-site' },
-  'as-dashboard': { containerName: 'as-dashboard', dbName: 'as-dashboard' },
-  'as-dashboard-admin': { containerName: 'as-dashboard', dbName: 'as-dashboard' },
 };
 
 /**
@@ -239,30 +231,32 @@ async function startDatabase() {
 /**
  * Start a web app and capture its port
  */
-async function startApp(appName, config) {
-  if (isPortInUse(config.defaultPort)) {
+async function startApp(appName, appConfig) {
+  if (isPortInUse(appConfig.defaultPort)) {
     // Verify whether OUR ticket's tmux session owns this port
     const ourPort = findOurTmuxPort(appName);
-    if (ourPort === config.defaultPort) {
-      console.error(`Port ${config.defaultPort} is our ${TICKET_PREFIX} server — reusing`);
+    if (ourPort === appConfig.defaultPort) {
+      console.error(`Port ${appConfig.defaultPort} is our ${TICKET_PREFIX} server — reusing`);
       return {
         name: appName,
-        port: config.defaultPort,
-        url: `http://host.docker.internal:${config.defaultPort}`,
+        port: appConfig.defaultPort,
+        url: `http://host.docker.internal:${appConfig.defaultPort}`,
         alreadyRunning: true,
       };
     }
     // Another ticket's server occupies the default port — find an alternate
-    console.error(`Port ${config.defaultPort} owned by another ticket, finding alternate...`);
+    console.error(`Port ${appConfig.defaultPort} owned by another ticket, finding alternate...`);
   }
 
-  const port = findAvailablePort(config.defaultPort);
+  const port = findAvailablePort(appConfig.defaultPort);
 
   console.error(`Starting ${appName} on port ${port}...`);
 
   return new Promise((resolve) => {
-    const proc = spawn('pnpm', ['dev', `--filter=${appName}`], {
+    const startCmd = appConfig.startCommand || `pnpm dev --filter=${appName}`;
+    const proc = spawn(startCmd, {
       cwd: process.cwd(),
+      shell: true,
       env: { ...process.env, PORT: port.toString() },
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: true,
@@ -347,15 +341,22 @@ async function main() {
   // Wait a bit for database to be fully ready
   await new Promise((resolve) => setTimeout(resolve, 5000));
 
+  // Discover apps from manifest via app-access module
+  // Filter out CLI apps since they don't have dev servers to start
+  const discoveredApps = discoverApps();
+  const appsMap = Object.fromEntries(
+    discoveredApps.filter((a) => a.appType !== 'cli').map((a) => [a.name, a])
+  );
+
   // Start web apps — if none directly impacted, start all for mandatory QA coverage
   // (e.g., when only shared packages changed, all consumers must be QA'd)
-  let webAppsToStart = IMPACTED_APPS.filter((app) => WEB_APPS[app]);
+  let webAppsToStart = IMPACTED_APPS.filter((app) => appsMap[app]);
 
   if (webAppsToStart.length === 0 && IMPACTED_APPS.length > 0) {
     // Non-web apps or packages changed — start all web apps for mandatory QA
-    const allWebApps = Object.keys(WEB_APPS);
+    const allWebApps = Object.keys(appsMap);
     if (allWebApps.length > 0) {
-      console.error(
+      console.error( // cli apps are already filtered out of appsMap
         `Package/non-web changes detected (${IMPACTED_APPS.join(', ')}) — starting all ${allWebApps.length} web apps for mandatory QA`
       );
       webAppsToStart = allWebApps;
@@ -367,7 +368,7 @@ async function main() {
   } else if (webAppsToStart.length === 0) {
     // No impacted apps at all — start all web apps to avoid enforce-env-start-failure
     // treating empty runningApps as a failure
-    const allWebApps = Object.keys(WEB_APPS);
+    const allWebApps = Object.keys(appsMap);
     if (allWebApps.length === 0) {
       console.error('No impacted apps and no WEB_APPS configured in .env — nothing to start');
     } else {
@@ -379,15 +380,28 @@ async function main() {
   }
 
   for (const appName of webAppsToStart) {
-    const config = WEB_APPS[appName];
-    const appResult = await startApp(appName, config);
+    const appConfig = appsMap[appName];
+    const appResult = await startApp(appName, appConfig);
     result.apps[appName] = appResult;
 
     if (appResult.started || appResult.alreadyRunning) {
-      result.runningApps[appName] = {
-        port: appResult.port,
-        url: appResult.url,
-      };
+      // Health-check gate
+      const healthResult = await checkHealth(
+        { ...appConfig, defaultPort: appResult.port },
+        { host: 'localhost', retries: 3, retryInterval: 2000, timeout: 5000 }
+      );
+
+      if (healthResult.status === ACCESS_FAILED) {
+        console.error(`Health check failed for ${appName}: ${healthResult.error || 'unknown'}`);
+        result.apps[appName].healthCheckFailed = true;
+        result.apps[appName].diagnostics = healthResult.diagnostics;
+      } else {
+        result.runningApps[appName] = {
+          port: appResult.port,
+          url: appResult.url,
+          appType: appConfig.appType,
+        };
+      }
     }
   }
 
