@@ -184,6 +184,8 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
       {
         step: STEPS.spec,
         verify: (ticketId) => {
+          // GH-244: When spec is disabled, verify trivially passes (step emits SKIP)
+          if (process.env.WORK_SPEC_ENABLED === '0') return true;
           // safeTicketPath() converts #N -> GH-N via cached config.safeTicketId()
           try {
             return fs.existsSync(path.join(TASKS_BASE, safeTicketPath(ticketId), 'spec.md'));
@@ -193,8 +195,8 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
         },
       },
       {
-        // GH-244: Gate between `spec` and `tasks`. Verified iff spec.md exists
-        // AND either gherkin-skip override is present OR parse() + validate() passes.
+        // GH-244: Gate between `spec` and `tasks`. Verified iff spec is disabled,
+        // spec.md is missing, gherkin-skip override is present, or parse() + validate() passes.
         step: STEPS.spec_gate,
         verify: verifySpecGate,
       },
