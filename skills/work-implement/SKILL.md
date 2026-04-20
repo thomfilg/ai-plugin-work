@@ -295,6 +295,22 @@ Next steps:
 - Review the changes: git diff
 - Commit when ready: use commit-writer agent
 ```
+## Enforcement Infrastructure (GH-219)
+
+- **Task Claims**: `claimTask(ticketId, taskNum, ownerId)` / `releaseTask(...)` acquire atomic lock files at `TASKS_BASE/<ticketId>/.claims/task-${n}.lock`. Owner IDs use `PR{N}` format (e.g., PR1, PR42). Module: `workflows/work/work-claims.js`.
+
+- **PR{N} Worker Layout**: Parallel workers get assigned slots via `allocateWorkerSlot()`. Output goes to `TASKS_BASE/<ticketId>/PR{N}/`. Slot allocation is sequential and monotonic (no reuse). Module: `workflows/work/work-state/parallel-workers.js`.
+
+- **Per-Task Artifacts**: TDD phase state, `implement.md`, and check reports resolve to `task${N}/` subdirectories under the ticket folder. Legacy flat layout is still supported as fallback. Module: `workflows/work/work-state.js`.
+
+- **Preflight Gate**: `runPreflight(context, options)` evaluates enforcement rules before file writes. Returns `{ allow, reasons, remediation }`. Hooks call this instead of transcript-based detection. Module: `workflows/lib/preflight.js`.
+
+- **Enforcement Audit**: Decisions are logged to `.work-actions.json` via `appendEnforcementAudit()`. Records use `kind: 'enforcement'` discriminator (coexists with legacy step rows). Module: `workflows/work/work-actions.js`.
+
+- **Out-of-Flow Routing**: User requests go to `user-request-${n}/`, AI subtask requests to `ai-request-${n}/`. Atomic counter in `.request-index.json`. Modules: `workflows/lib/allocate-output-folder.js`, `workflows/lib/request-index.js`.
+
+- **P2 Deferred Features**: Task/phase/readiness status summary (R21) and dry-run preflight (R22) are deferred to v2. No configurable rule registry in v1 -- rules live in `preflight.js` as explicit code.
+
 
 ## Notes
 

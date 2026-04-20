@@ -64,6 +64,25 @@ workflows/work/
 | Module | Path | Purpose |
 |--------|------|---------|
 | check-gate | `workflows/work/check-gate.js` | Declarative CHECK_GATE_RULES array for check→pr validation |
+| work-state | `workflows/work/work-state.js` | Workflow state persistence (`.work-state.json`), task tracking, re-exports claim/worker APIs |
+| work-actions | `workflows/work/work-actions.js` | Action logging + enforcement audit records (`.work-actions.json`) |
+| work-claims | `workflows/work/work-claims.js` | Atomic per-task claim locks under `.claims/` |
+| task-readiness | `workflows/work/work-state/task-readiness.js` | Dependency readiness checks (`canStart`, `initTasksMeta`) |
+| graph-validation | `workflows/work/work-state/graph-validation.js` | Task dependency DAG validation (cycles, unknown deps, self-deps) |
+| parallel-workers | `workflows/work/work-state/parallel-workers.js` | PR{N} slot allocation and release |
+| preflight | `workflows/lib/preflight.js` | Unified enforcement gate with audit callback |
+| allocate-output-folder | `workflows/lib/allocate-output-folder.js` | Output folder routing (in-flow task${N}/, out-of-flow) |
+| request-index | `workflows/lib/request-index.js` | Atomic counter ledger for out-of-flow request allocation |
+| ticket-validation | `workflows/lib/ticket-validation.js` | Shared ticket ID validation and sanitization |
+
+## Enforcement Record Format
+
+Action records in `.work-actions.json` use a discriminator to distinguish legacy step rows from enforcement audit entries:
+
+```
+Legacy rows:    { step, timestamp, what, meta? }
+Enforcement:    { kind: 'enforcement', timestamp, origin, task, phase, action, allow, reason, outputPath, meta? }
+```
 
 ## Step Flow
 
