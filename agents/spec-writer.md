@@ -122,7 +122,7 @@ Generate structured Gherkin scenarios with @integration or @e2e tags. The spec_g
 
 **Requirements:**
 - Minimum 2 scenarios total
-- At least 1 scenario tagged @integration
+- At least 1 scenario tagged @integration or @e2e
 - Use Feature/Scenario/Given/When/Then structure
 - Tag each scenario with @integration (tests internal logic/APIs) or @e2e (tests full user flows)
 - @unit tags are also accepted but not enforced by the gate

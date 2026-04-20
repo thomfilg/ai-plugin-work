@@ -327,7 +327,7 @@ describe('parse-gherkin: validate', () => {
     assert.equal(result.valid, true);
   });
 
-  it('fails when required tag is missing', () => {
+  it('fails when neither @integration nor @e2e tag is present (default OR semantics)', () => {
     const parseResult = {
       features: [{
         name: 'F',
@@ -338,9 +338,39 @@ describe('parse-gherkin: validate', () => {
       }],
       errors: [],
     };
-    const result = validate(parseResult, { requireTags: ['@integration'] });
+    const result = validate(parseResult);
     assert.equal(result.valid, false);
-    assert.ok(result.errors.some((e) => e.includes('@integration')));
+    assert.ok(result.errors.some((e) => e.includes('@integration') && e.includes('@e2e')));
+  });
+
+  it('passes when only @integration is present (OR semantics)', () => {
+    const parseResult = {
+      features: [{
+        name: 'F',
+        scenarios: [
+          { name: 'S1', tags: ['@integration'], steps: [{ keyword: 'Given', text: 'x' }] },
+          { name: 'S2', tags: [], steps: [{ keyword: 'Given', text: 'y' }] },
+        ],
+      }],
+      errors: [],
+    };
+    const result = validate(parseResult);
+    assert.equal(result.valid, true);
+  });
+
+  it('passes when only @e2e is present (OR semantics)', () => {
+    const parseResult = {
+      features: [{
+        name: 'F',
+        scenarios: [
+          { name: 'S1', tags: ['@e2e'], steps: [{ keyword: 'Given', text: 'x' }] },
+          { name: 'S2', tags: [], steps: [{ keyword: 'Given', text: 'y' }] },
+        ],
+      }],
+      errors: [],
+    };
+    const result = validate(parseResult);
+    assert.equal(result.valid, true);
   });
 
   it('supports custom options override', () => {
@@ -366,14 +396,15 @@ describe('parse-gherkin: validate', () => {
     assert.ok(!result.errors[0].includes('scenario(s)'));
   });
 
-  it('reports one error per missing required tag', () => {
+  it('reports single error when none of the required tags are present (OR semantics)', () => {
     const parseResult = {
-      features: [{ name: 'F', scenarios: [{ name: 'S', tags: ['@integration'], steps: [{ keyword: 'Given', text: 'x' }] }] }],
+      features: [{ name: 'F', scenarios: [{ name: 'S', tags: ['@unit'], steps: [{ keyword: 'Given', text: 'x' }] }] }],
       errors: [],
     };
     const result = validate(parseResult, { minScenarios: 1, requireTags: ['@integration', '@e2e'] });
     assert.equal(result.valid, false);
     assert.equal(result.errors.length, 1);
+    assert.ok(result.errors[0].includes('@integration'));
     assert.ok(result.errors[0].includes('@e2e'));
   });
 
@@ -385,7 +416,7 @@ describe('parse-gherkin: validate', () => {
 
   it('uses DEFAULT_MIN_SCENARIOS and DEFAULT_REQUIRED_TAGS when no options given', () => {
     assert.equal(DEFAULT_MIN_SCENARIOS, 2);
-    assert.deepEqual(DEFAULT_REQUIRED_TAGS, ['@integration']);
+    assert.deepEqual(DEFAULT_REQUIRED_TAGS, ['@integration', '@e2e']);
   });
 });
 

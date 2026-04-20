@@ -9,7 +9,7 @@
  *   - validate(parseResult, options?): { valid: boolean, errors: string[] }
  *   - hasSkipOverride(markdown): { skip: boolean, reason?: string }
  *   - DEFAULT_MIN_SCENARIOS: number (2)
- *   - DEFAULT_REQUIRED_TAGS: string[] (['@integration'])
+ *   - DEFAULT_REQUIRED_TAGS: string[] (['@integration', '@e2e'])
  *
  * A Feature is: { name: string, scenarios: Scenario[] }
  * A Scenario is: { name: string, tags: string[], steps: Step[] }
@@ -21,7 +21,7 @@
 // ─── Constants ──────────────────────────────────────────────────────────────
 
 const DEFAULT_MIN_SCENARIOS = 2;
-const DEFAULT_REQUIRED_TAGS = ['@integration'];
+const DEFAULT_REQUIRED_TAGS = ['@integration', '@e2e'];
 
 const GHERKIN_SECTION_HEADING = /^##\s+Test Scenarios(?:\s*\(Gherkin\))?\s*$/;
 const ANY_HEADING = /^#{1,6}\s+/;
@@ -172,7 +172,7 @@ function parse(markdown) {
 /**
  * Validate a parse result against threshold and tag requirements.
  *
- * Default options: { minScenarios: 2, requireTags: ['@integration'] }
+ * Default options: { minScenarios: 2, requireTags: ['@integration', '@e2e'] }
  *
  * @param {{ features: Array, errors: string[] }} parseResult
  * @param {{ minScenarios?: number, requireTags?: string[] }} [options]
@@ -200,16 +200,14 @@ function validate(parseResult, options) {
     );
   }
 
-  // Check required tags — at least one scenario must have each required tag
-  const allTags = new Set(
-    parseResult.features
-      .flatMap((f) => f.scenarios)
-      .flatMap((s) => s.tags)
-  );
-
-  for (const tag of requireTags) {
-    if (!allTags.has(tag)) {
-      validationErrors.push(`No ${tag} tag found`);
+  // Check required tags — at least one of the required tags must be present (OR semantics)
+  if (requireTags.length > 0) {
+    const allScenarios = parseResult.features.flatMap((f) => f.scenarios);
+    const hasAnyRequiredTag = allScenarios.some((sc) =>
+      sc.tags.some((tag) => requireTags.includes(tag))
+    );
+    if (!hasAnyRequiredTag) {
+      validationErrors.push(`No ${requireTags.join(' or ')} tag found`);
     }
   }
 

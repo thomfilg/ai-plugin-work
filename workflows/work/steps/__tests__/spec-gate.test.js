@@ -205,6 +205,7 @@ describe('spec-gate step', () => {
     assert.match(entries[0].reason, /passed/i);
     assert.match(entries[0].reason, /2 scenarios/);
     assert.match(entries[0].reason, /1 @integration/);
+    assert.match(entries[0].reason, /0 @e2e/);
   });
 
   // Case 6: Validation fails
@@ -217,7 +218,7 @@ describe('spec-gate step', () => {
     assert.equal(entries[0].step, STEPS.spec_gate);
     assert.equal(entries[0].action, 'RUN');
     assert.equal(entries[0].command, '/spec');
-    assert.match(entries[0].reason, /need at least 2|No @integration/i);
+    assert.match(entries[0].reason, /need at least 2|No @integration or @e2e/i);
     assert.equal(entries[0].agentType, 'skill');
     assert.equal(entries[0].agentPrompt, '/spec');
   });
