@@ -55,6 +55,54 @@ describe('step-registry', () => {
     });
   });
 
+  // GH-244: spec_gate step — Gherkin validation gate between spec and tasks
+  describe('spec_gate step (GH-244)', () => {
+    it('declares spec_gate identifier in STEPS', () => {
+      assert.equal(STEPS.spec_gate, 'spec_gate');
+    });
+
+    it('includes spec_gate in ALL_STEPS', () => {
+      assert.ok(ALL_STEPS.includes('spec_gate'), 'ALL_STEPS should contain spec_gate');
+    });
+
+    it('inserts spec_gate immediately after spec in STEP_ORDER', () => {
+      const specIdx = STEP_ORDER.indexOf('spec');
+      const gateIdx = STEP_ORDER.indexOf('spec_gate');
+      assert.ok(specIdx >= 0, 'spec must exist in STEP_ORDER');
+      assert.ok(gateIdx >= 0, 'spec_gate must exist in STEP_ORDER');
+      assert.equal(gateIdx, specIdx + 1);
+    });
+
+    it('inserts spec_gate immediately before tasks in STEP_ORDER', () => {
+      const tasksIdx = STEP_ORDER.indexOf('tasks');
+      const gateIdx = STEP_ORDER.indexOf('spec_gate');
+      assert.ok(tasksIdx >= 0, 'tasks must exist in STEP_ORDER');
+      assert.equal(gateIdx, tasksIdx - 1);
+    });
+
+    it('STEP_ORDER reflects spec -> spec_gate -> tasks sequence', () => {
+      const specIdx = STEP_ORDER.indexOf('spec');
+      const gateIdx = STEP_ORDER.indexOf('spec_gate');
+      const tasksIdx = STEP_ORDER.indexOf('tasks');
+      assert.equal(gateIdx, specIdx + 1);
+      assert.equal(tasksIdx, gateIdx + 1);
+    });
+
+    it('RETRY_EDGES maps spec_gate to spec', () => {
+      assert.ok(
+        STEP_TRANSITIONS['spec_gate'].includes('spec'),
+        'spec_gate should have a retry edge to spec'
+      );
+    });
+
+    it('spec_gate can transition forward to tasks', () => {
+      assert.ok(
+        STEP_TRANSITIONS['spec_gate'].includes('tasks'),
+        'spec_gate should transition forward to tasks'
+      );
+    });
+  });
+
   // GH-211: task_review step — per-task review gate between commit and check
   describe('task_review step (GH-211)', () => {
     it('declares task_review identifier in STEPS', () => {

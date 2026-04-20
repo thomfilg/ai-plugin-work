@@ -55,6 +55,28 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
     }
   }
 
+  // GH-244: Helper for STEPS.spec_gate verify. Returns true if spec is
+  // disabled, spec.md is missing (step SKIPs), skip override is present,
+  // or parse() + validate() passes. Fail-closed on any read/parse error.
+  function verifySpecGate(ticketId) {
+    // If spec is disabled, gate is auto-verified (nothing to validate)
+    if (process.env.WORK_SPEC_ENABLED === '0') return true;
+    try {
+      const specPath = path.join(TASKS_BASE, safeTicketPath(ticketId), 'spec.md');
+      if (!fs.existsSync(specPath)) return true; // No spec.md = gate trivially passes (step emits SKIP)
+      const parseGherkin = require(path.join(__dirname, 'lib', 'parse-gherkin'));
+      const markdown = fs.readFileSync(specPath, 'utf-8');
+      const skipResult = parseGherkin.hasSkipOverride(markdown);
+      if (skipResult.skip) return true;
+      const parsed = parseGherkin.parse(markdown);
+      const validation = parseGherkin.validate(parsed);
+      return validation.valid && parsed.errors.length === 0;
+    } catch {
+      return false;
+    }
+  }
+  // GH-244: verifySpecGate tests added in workflow-definition.test.js
+
   // ─── Declarative policy config (GH-206 Task 12) ───────────────────────────
   //
   // Artifact patterns per step — consumed by artifact-archival.js on backward
@@ -162,6 +184,8 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
       {
         step: STEPS.spec,
         verify: (ticketId) => {
+          // GH-244: When spec is disabled, verify trivially passes (step emits SKIP)
+          if (process.env.WORK_SPEC_ENABLED === '0') return true;
           // safeTicketPath() converts #N -> GH-N via cached config.safeTicketId()
           try {
             return fs.existsSync(path.join(TASKS_BASE, safeTicketPath(ticketId), 'spec.md'));
@@ -169,6 +193,12 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
             return false;
           }
         },
+      },
+      {
+        // GH-244: Gate between `spec` and `tasks`. Verified iff spec is disabled,
+        // spec.md is missing, gherkin-skip override is present, or parse() + validate() passes.
+        step: STEPS.spec_gate,
+        verify: verifySpecGate,
       },
       {
         step: STEPS.tasks,

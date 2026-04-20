@@ -72,7 +72,7 @@ describe('work-state.js', () => {
       cleanupTempWorkState(TICKET);
     });
 
-    it('should create state with all 16 steps as pending', async () => {
+    it('should create state with all 18 steps as pending', async () => {
       const { result, code } = await runWorkState(['init', TICKET]);
       assert.equal(code, 0);
       assert.equal(result.ticketId, TICKET);
@@ -83,8 +83,8 @@ describe('work-state.js', () => {
       assert.equal(result.errors.length, 0);
 
       const steps = Object.keys(result.stepStatus);
-      // GH-211: 17 steps — added task_review between commit and check.
-      assert.equal(steps.length, 17);
+      // GH-244: 18 steps — added spec_gate between spec and tasks.
+      assert.equal(steps.length, 18);
       for (const step of steps) {
         assert.equal(result.stepStatus[step], 'pending', `Step ${step} should be pending`);
       }
@@ -96,6 +96,7 @@ describe('work-state.js', () => {
         'brief',
         'brief_gate', // GH-215
         'spec',
+        'spec_gate', // GH-244
         'tasks',
         'implement',
         'commit',
@@ -147,8 +148,8 @@ describe('work-state.js', () => {
       assert.equal(code, 0);
       assert.equal(result.ticketId, TICKET_EXISTS);
       assert.equal(result.status, 'in_progress');
-      // GH-211: 17 steps — added task_review between commit and check.
-      assert.equal(Object.keys(result.stepStatus).length, 17);
+      // GH-244: 18 steps — added spec_gate between spec and tasks.
+      assert.equal(Object.keys(result.stepStatus).length, 18);
       for (const step of Object.keys(result.stepStatus)) {
         assert.equal(result.stepStatus[step], 'pending');
       }
@@ -178,9 +179,9 @@ describe('work-state.js', () => {
       // Verify persistence
       const { result: getResult } = await runWorkState(['get', TICKET]);
       assert.equal(getResult.stepStatus['implement'], 'in_progress');
-      // currentStep should be updated to 7 (index 6 + 1, after ticket/bootstrap/brief/brief_gate/spec/tasks)
-      // GH-215: brief_gate shifts implement to index 6. GH-211: task_review after commit doesn't affect implement index.
-      assert.equal(getResult.currentStep, 7);
+      // currentStep should be updated to 8 (index 7 + 1, after ticket/bootstrap/brief/brief_gate/spec/spec_gate/tasks)
+      // GH-244: spec_gate shifts implement to index 7.
+      assert.equal(getResult.currentStep, 8);
     });
 
     it('should reject invalid step name with exit code 1', async () => {
