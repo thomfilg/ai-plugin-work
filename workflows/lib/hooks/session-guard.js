@@ -445,7 +445,7 @@ function readWorkState(ticketId) {
       if (zeroBasedIndex >= 0 && zeroBasedIndex < STEP_ORDER.length) {
         stepName = STEP_ORDER[zeroBasedIndex];
       }
-    } catch {}
+    } catch { /* step-registry not available — stepName stays null */ }
 
     if (!stepName) return null;
     return { stepName, ticketId };

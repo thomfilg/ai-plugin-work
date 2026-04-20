@@ -54,23 +54,24 @@ function hasActiveWorkSession() {
           const match = ref.match(/[A-Z]+-\d+/);
           if (match) currentTicket = match[0];
         }
-      } catch { /* no git context */ }
+      } catch { /* no git context — ticket matching will be skipped */ }
     }
 
     for (const f of files) {
       if (!f.startsWith(prefix) || !f.endsWith(suffix)) continue;
       try {
+        // Verify file ownership before reading (matches session-guard.js pattern)
         if (typeof process.getuid === 'function') {
           const stat = fs.statSync(path.join(sessionDir, f));
           if (stat.uid !== process.getuid()) continue;
         }
         const data = JSON.parse(fs.readFileSync(path.join(sessionDir, f), 'utf8'));
         if (data?.workflow === '/work' && !data?.revealed) {
-          // If we have a ticket context, match it
+          // Require ticket match when we have ticket context
           if (currentTicket && data.ticketId !== currentTicket) continue;
           return true;
         }
-      } catch { /* skip corrupt files */ }
+      } catch { /* skip corrupt or inaccessible files */ }
     }
   } catch { /* fail open */ }
   return false;
