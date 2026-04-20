@@ -165,9 +165,27 @@ function createArtifactProtector(opts) {
 
     // Check 3: Content guard (if specified on the rule)
     if (rule.contentGuard && ['Write', 'Edit', 'MultiEdit'].includes(toolName)) {
-      const newContent = toolInput?.content || toolInput?.new_string || '';
-      if (newContent) {
-        const guardResult = rule.contentGuard(newContent, currentStep);
+      let guardContent = '';
+      if (toolName === 'Write') {
+        guardContent = toolInput?.content || '';
+      } else if (toolName === 'Edit' || toolName === 'MultiEdit') {
+        // Read existing file and apply edit in memory to get resulting content
+        try {
+          const fs = require('fs');
+          const existing = fs.readFileSync(toolInput?.file_path, 'utf-8');
+          const oldStr = toolInput?.old_string || '';
+          const newStr = toolInput?.new_string || '';
+          if (oldStr && newStr) {
+            guardContent = existing.replace(oldStr, newStr);
+          } else {
+            guardContent = existing; // Can't simulate edit, check existing
+          }
+        } catch {
+          guardContent = toolInput?.new_string || ''; // File doesn't exist yet, fall back
+        }
+      }
+      if (guardContent) {
+        const guardResult = rule.contentGuard(guardContent, currentStep);
         if (guardResult.blocked) {
           return {
             blocked: true,
