@@ -28,6 +28,7 @@ const ANY_HEADING = /^#{1,6}\s+/;
 const FEATURE_LINE = /^Feature:\s*(.+)$/;
 const SCENARIO_LINE = /^\s+Scenario:\s*(.+)$/;
 const TAG_LINE = /^\s+(@\S+(?:\s+@\S+)*)$/;
+// Indentation is intentional — Gherkin standard nests Scenario/steps under Feature
 const STEP_LINE = /^\s+(Given|When|Then|And|But)\s+(.+)$/;
 const SKIP_COMMENT = /<!--\s*gherkin-skip:\s*(.+?)\s*-->/;
 
@@ -171,6 +172,8 @@ function parse(markdown) {
 
 /**
  * Validate a parse result against threshold and tag requirements.
+ *
+ * Note: This function validates the parse result structure only. Callers should also check parseResult.errors for parse-level issues.
  *
  * Default options: { minScenarios: 2, requireTags: ['@integration', '@e2e'] }
  *

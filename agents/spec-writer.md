@@ -126,6 +126,7 @@ Generate structured Gherkin scenarios with @integration or @e2e tags. The spec_g
 - Use Feature/Scenario/Given/When/Then structure
 - Tag each scenario with @integration (tests internal logic/APIs) or @e2e (tests full user flows)
 - @unit tags are also accepted but not enforced by the gate
+- Existing specs using the old `## Test Scenarios` heading (without "(Gherkin)") are also accepted by the parser
 
 **Skip override:** If the spec is for a config-only or documentation change with no testable behavior, add `<!-- gherkin-skip: reason -->` instead of Gherkin scenarios.
 
