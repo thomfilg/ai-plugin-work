@@ -12,6 +12,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const { taskSegment } = require(path.join(__dirname, '..', 'lib', 'allocate-output-folder'));
 
 /**
  * @param {string} ticket
@@ -123,7 +124,6 @@ function transitionStep(ticket, targetStep, deps) {
     try {
       let phasePath;
       if (taskNum != null) {
-        const { taskSegment } = require(path.join(__dirname, '..', 'lib', 'allocate-output-folder'));
         phasePath = path.join(TASKS_BASE, safeTicket, taskSegment(taskNum), 'tdd-phase.json');
       } else {
         phasePath = path.join(TASKS_BASE, safeTicket, 'tdd-phase.json');

@@ -605,27 +605,45 @@ describe('TDD enforcement', () => {
   });
 
   describe('autoInitTdd with taskNum (per-task paths)', () => {
-    // autoInitTdd requires the config module, so we test via the work-state module
-    // which has TASKS_BASE wired. We'll test the function directly by requiring it.
-    // However, autoInitTdd uses config.TASKS_BASE internally, so we need to test
-    // through the CLI or mock. For unit tests, we'll verify the file is created
-    // at the correct per-task path.
+    let origTasksBase;
 
-    it('creates tdd-phase.json in per-task directory when taskNum is provided', () => {
-      const ticket = 'TDDT2-200';
-      const taskDir = path.join(tempTasksBase, ticket, 'task2');
+    afterEach(() => {
+      // Restore original TASKS_BASE and clear module cache
+      if (origTasksBase !== undefined) {
+        process.env.TASKS_BASE = origTasksBase;
+      }
+      delete require.cache[require.resolve('../work-state')];
+    });
 
-      // We test autoInitTdd indirectly: the function writes to TASKS_BASE which
-      // is set from config. Since we can't easily override config in unit tests,
-      // we test readTddEvidence + the transition gate integration tests below.
-      // The unit-level validation of path construction is covered by readTddEvidence tests.
-      fs.mkdirSync(taskDir, { recursive: true });
-      // Verify taskSegment produces correct path
-      const { taskSegment } = require('../../lib/allocate-output-folder');
-      assert.equal(taskSegment(2), 'task2');
-      assert.equal(taskSegment(10), 'task10');
-      assert.throws(() => taskSegment(0), /positive integer/);
-      assert.throws(() => taskSegment(-1), /positive integer/);
+    it('creates tdd-phase.json at per-task path with red phase and empty cycles', () => {
+      const ticket = 'TEST-200';
+      const expectedDir = path.join(tempTasksBase, ticket, 'task2');
+      const expectedFile = path.join(expectedDir, 'tdd-phase.json');
+
+      // Point TASKS_BASE at our temp dir and reload config + work-state to pick it up
+      origTasksBase = process.env.TASKS_BASE;
+      process.env.TASKS_BASE = tempTasksBase;
+      delete require.cache[require.resolve('../../lib/config')];
+      delete require.cache[require.resolve('../work-state')];
+      // Also clear submodules that work-state requires (they cache parent fns)
+      try { delete require.cache[require.resolve('../work-state/task-readiness')]; } catch {}
+      try { delete require.cache[require.resolve('../work-state/parallel-workers')]; } catch {}
+      try { delete require.cache[require.resolve('../work-state/graph-validation')]; } catch {}
+      const { autoInitTdd } = require('../work-state');
+
+      // Call autoInitTdd with taskNum
+      autoInitTdd(ticket, 2);
+
+      // Assert file exists at per-task path
+      assert.ok(
+        fs.existsSync(expectedFile),
+        `Expected tdd-phase.json at ${expectedFile}`
+      );
+
+      // Assert file contents
+      const state = JSON.parse(fs.readFileSync(expectedFile, 'utf8'));
+      assert.equal(state.currentPhase, 'red', 'currentPhase should be red');
+      assert.deepEqual(state.cycles, [], 'cycles should be empty array');
 
       // Cleanup
       fs.rmSync(path.join(tempTasksBase, ticket), { recursive: true, force: true });

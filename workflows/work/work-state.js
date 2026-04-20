@@ -59,6 +59,7 @@ if (!config) process.exit(0);
 const TASKS_BASE = config.TASKS_BASE;
 
 const { ALL_STEPS: STEPS } = require(path.join(__dirname, 'step-registry'));
+const { taskSegment } = require('../lib/allocate-output-folder');
 
 const SUBTASK_STEPS = ['implement', 'commit'];
 
@@ -153,7 +154,6 @@ function autoInitTdd(ticketId, taskNum) {
     // Validate ticketId — reject traversal chars and verify resolved path stays within TASKS_BASE
     if (!ticketId || /\.\./.test(ticketId) || /\\/.test(ticketId)) return;
     if (taskNum != null) {
-      const { taskSegment } = require('../lib/allocate-output-folder');
       tddStatePath = path.join(TASKS_BASE, safeId(ticketId), taskSegment(taskNum), 'tdd-phase.json');
     } else {
       tddStatePath = path.join(TASKS_BASE, safeId(ticketId), 'tdd-phase.json');
