@@ -382,29 +382,16 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
       {
         step: STEPS.follow_up,
         verify: (ticketId) => {
-          // Single source of truth: delegates to follow-up-pr.js functions
-          // so the gate checks the exact same things the script checks.
+          // Single source of truth: delegates to follow-up-pr.js isPRGateReady()
+          // which encapsulates CI, reviews, bot-comment dedup, and merge-state checks.
           try {
-            const {
-              getPRInfo,
-              checkCI,
-              getReviews,
-              decideNextAction,
-            } = require(path.join(__dirname, 'scripts', 'follow-up-pr.js'));
+            const { isPRGateReady } = require(path.join(__dirname, 'scripts', 'follow-up-pr.js'));
+            const result = isPRGateReady();
+            if (!result.ready) return false;
 
-            const prInfo = getPRInfo();
-            if (!prInfo || !prInfo.number) return false;
-            if (prInfo.state === 'CLOSED' || prInfo.state === 'MERGED') return false;
-
-            const ci = checkCI(prInfo.number);
-            const reviews = getReviews(prInfo.number);
-            const decision = decideNextAction(ci.status, prInfo, reviews, false);
-
-            if (decision.action !== 'exit-success') return false;
-
-            // Review accountability: every PR comment must be accounted for
-            const totalComments = reviews.blocking.length + reviews.nonBlocking.length;
-            if (totalComments > 0) {
+            // Review accountability: every PR comment must be accounted for.
+            // Uses strictCommentCount (fail-closed) instead of reviews array length.
+            if (result.strictCommentCount > 0) {
               const accountabilityFile = path.join(
                 TASKS_BASE,
                 safeTicketPath(ticketId),
@@ -412,7 +399,7 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
               );
               if (!fs.existsSync(accountabilityFile)) return false;
               const entries = JSON.parse(fs.readFileSync(accountabilityFile, 'utf-8'));
-              if (!Array.isArray(entries) || entries.length < totalComments) return false;
+              if (!Array.isArray(entries) || entries.length < result.strictCommentCount) return false;
               if (!entries.every((e) => e.disposition && e.reason)) return false;
               const acknowledged = entries.filter((e) => e.disposition === 'acknowledged');
               if (acknowledged.length > 0) {

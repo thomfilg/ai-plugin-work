@@ -1461,6 +1461,82 @@ async function main() {
   process.exit(1);
 }
 
+/**
+ * isPRGateReady — workflow gate function (single source of truth).
+ *
+ * Called by workflow-definition.js verify() to determine if the follow_up step
+ * is complete. Encapsulates the same logic as the main loop:
+ *   1. Fetch PR info, CI, and reviews
+ *   2. Apply bot-comment deduplication using persisted state
+ *   3. Run decideNextAction with the deduped reviews
+ *   4. Fail-closed on transient errors (unlike getReviews which is lenient)
+ *
+ * @returns {{ ready: boolean, reviews: Object, decision: Object }}
+ */
+function isPRGateReady() {
+  const prInfo = getPRInfo();
+  if (!prInfo || !prInfo.number) return { ready: false };
+  if (prInfo.state === 'CLOSED' || prInfo.state === 'MERGED') return { ready: false };
+
+  const ci = checkCI(prInfo.number);
+  const reviews = getReviews(prInfo.number);
+
+  // Strict comment count: fail-closed if inline comments cannot be fetched.
+  // getReviews() swallows errors for inline comments (they are supplementary
+  // in the polling loop), but the gate must not allow transition if we can't
+  // confirm there are no unaccounted comments.
+  let strictCommentCount = 0;
+  try {
+    const repo = ghExec('repo view --json nameWithOwner').nameWithOwner;
+    const comments = ghExec([
+      'api',
+      `repos/${repo}/pulls/${prInfo.number}/comments`,
+      '--jq',
+      'length',
+    ], { json: false });
+    strictCommentCount = parseInt(comments, 10) || 0;
+  } catch {
+    // Cannot verify comment count — fail closed
+    return { ready: false };
+  }
+
+  // Apply bot-comment deduplication (same as main loop does before deciding)
+  let currentHead = null;
+  try {
+    currentHead = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim();
+  } catch { /* non-fatal */ }
+
+  const state = loadState(prInfo.number);
+  const previousRunBotHashes = state
+    ? (state.previousRunBotHashes && state.previousRunBotHashes.length > 0
+        ? state.previousRunBotHashes
+        : (state.addressedBotComments || []).map((a) => a.hash))
+    : [];
+
+  const deduped = deduplicateBlockingBotComments(
+    reviews.blocking,
+    reviews.nonBlocking,
+    previousRunBotHashes,
+    { currentHead }
+  );
+  const dedupedReviews = {
+    ...reviews,
+    blocking: deduped.blocking,
+    nonBlocking: deduped.nonBlocking,
+    hasBlocking: deduped.blocking.length > 0,
+  };
+
+  const decision = decideNextAction(ci.status, prInfo, dedupedReviews, false);
+
+  return {
+    ready: decision.action === 'exit-success',
+    reviews: dedupedReviews,
+    decision,
+    strictCommentCount,
+    prInfo,
+  };
+}
+
 // Export for testing; guard main() so it only runs when executed directly
 if (require.main === module) {
   main().catch((err) => {
@@ -1482,6 +1558,7 @@ module.exports = {
   initState,
   getCodeContext,
   // Gate-check exports: used by workflow-definition.js verify()
+  isPRGateReady,
   ghExec,
   getPRInfo,
   checkCI,

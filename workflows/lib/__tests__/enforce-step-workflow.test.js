@@ -2651,10 +2651,15 @@ describe('enforce-step-workflow', () => {
       reviewState = 'APPROVED',
       reviewBody = '',
       inlineComments = '[]',
+      commentCount = null, // auto-computed from inlineComments if not set
       requestedReviewers = '{"users":[]}',
       graphql = '{"data":{"repository":{"pullRequest":{"reviewThreads":{"nodes":[]}}}}}',
       commits = '{"commits":[]}',
     } = {}) {
+      // Auto-compute comment count from inline comments JSON
+      const autoCount = commentCount != null
+        ? commentCount
+        : (JSON.parse(inlineComments).length || 0);
       const prView = JSON.stringify({
         number: 42,
         title: 'Test PR',
@@ -2686,7 +2691,9 @@ describe('enforce-step-workflow', () => {
         'pr view 42 --json reviews,statusCheckRollup': reviews,
         // getReviews: gh repo view
         'repo view --json nameWithOwner': '{"nameWithOwner":"test/repo"}',
-        // getReviews: inline comments
+        // isPRGateReady: strict comment count (--jq length, must match before general pattern)
+        '--jq length': String(autoCount),
+        // getReviews: inline comments (paginated)
         'repos/test/repo/pulls/42/comments': inlineComments,
         // getReviews: GraphQL resolved threads
         'api graphql': graphql,
@@ -3098,9 +3105,9 @@ describe('enforce-step-workflow', () => {
   });
 
   // follow_up verify branch positional arg (GH-191, GH-203) — REMOVED
-  // The verify() function now delegates to follow-up-pr.js's getPRInfo() which
+  // The verify() function now delegates to follow-up-pr.js's isPRGateReady() which
   // relies on `gh pr view` auto-detecting the branch (gh's default behavior).
-  // Branch positional arg handling is tested in follow-up-pr.test.js.
+  // No dedicated branch positional-arg test exists here; gh handles auto-detection.
 
   // ═══════════════════════════════════════════════════════════════════════════
   // Per-script step gating for AGENT_GATED_SCRIPTS (GH-184)
