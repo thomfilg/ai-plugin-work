@@ -330,3 +330,108 @@ describe('workflow-definition: softSteps includes task_review', () => {
     assert.ok(workflow.softSteps.has(STEPS.task_review), 'task_review should be in softSteps');
   });
 });
+
+// ─── GH-219: brief.md contentGuard ───────────────────────────────────────────
+
+describe('workflow-definition: brief.md contentGuard', () => {
+  const { artifactRules } = createWorkflowDefinition(stubDeps);
+
+  function getBriefRule() {
+    return artifactRules.find((r) => r.basename === 'brief.md');
+  }
+
+  const BRIEF_WITH_RESOLVED_ARCHITECTURAL = [
+    '# Brief',
+    '',
+    '## Open Questions',
+    '',
+    '- **Question:** Should we change the auth model?',
+    '  - `scope: architectural`',
+    '  - `rationale: touches session handling`',
+    '  - `resolved: true`',
+    '  - **Resolution:** Yes, use OAuth.',
+    '',
+  ].join('\n');
+
+  const BRIEF_WITH_RESOLVED_CROSS_TICKET = [
+    '# Brief',
+    '',
+    '## Open Questions',
+    '',
+    '- **Question:** Does team X need to update their service?',
+    '  - `scope: cross-ticket`',
+    '  - `rationale: depends on external team`',
+    '  - `resolved: true`',
+    '  - **Resolution:** They will update independently.',
+    '',
+  ].join('\n');
+
+  const BRIEF_WITH_UNRESOLVED_ARCHITECTURAL = [
+    '# Brief',
+    '',
+    '## Open Questions',
+    '',
+    '- **Question:** Should we change the auth model?',
+    '  - `scope: architectural`',
+    '  - `rationale: touches session handling`',
+    '  - `resolved: false`',
+    '',
+  ].join('\n');
+
+  const BRIEF_WITH_RESOLVED_LOCAL = [
+    '# Brief',
+    '',
+    '## Open Questions',
+    '',
+    '- **Question:** What name should this helper use?',
+    '  - `scope: local`',
+    '  - `rationale: naming only`',
+    '  - `resolved: true`',
+    '  - **Resolution:** Use parseQuestions.',
+    '',
+  ].join('\n');
+
+  it('has a contentGuard on the brief.md artifact rule', () => {
+    const rule = getBriefRule();
+    assert.equal(typeof rule.contentGuard, 'function');
+  });
+
+  it('blocks resolved architectural questions during brief step', () => {
+    const rule = getBriefRule();
+    const result = rule.contentGuard(BRIEF_WITH_RESOLVED_ARCHITECTURAL, STEPS.brief);
+    assert.equal(result.blocked, true);
+    assert.ok(result.message.includes('BLOCKED'));
+    assert.ok(result.message.includes('1'));
+  });
+
+  it('blocks resolved cross-ticket questions during brief step', () => {
+    const rule = getBriefRule();
+    const result = rule.contentGuard(BRIEF_WITH_RESOLVED_CROSS_TICKET, STEPS.brief);
+    assert.equal(result.blocked, true);
+    assert.ok(result.message.includes('BLOCKED'));
+  });
+
+  it('allows resolved architectural questions during brief_gate step', () => {
+    const rule = getBriefRule();
+    const result = rule.contentGuard(BRIEF_WITH_RESOLVED_ARCHITECTURAL, STEPS.brief_gate);
+    assert.equal(result.blocked, false);
+  });
+
+  it('allows unresolved architectural questions during brief step', () => {
+    const rule = getBriefRule();
+    const result = rule.contentGuard(BRIEF_WITH_UNRESOLVED_ARCHITECTURAL, STEPS.brief);
+    assert.equal(result.blocked, false);
+  });
+
+  it('allows resolved local questions during brief step', () => {
+    const rule = getBriefRule();
+    const result = rule.contentGuard(BRIEF_WITH_RESOLVED_LOCAL, STEPS.brief);
+    assert.equal(result.blocked, false);
+  });
+
+  it('fails open when content has no open questions section', () => {
+    const rule = getBriefRule();
+    const result = rule.contentGuard('# Brief\n\nJust a normal brief.', STEPS.brief);
+    assert.equal(result.blocked, false);
+  });
+});

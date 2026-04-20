@@ -494,7 +494,35 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
   };
 
   const artifactRules = [
-    { basename: 'brief.md', step: STEPS.brief, agents: ['brief-writer'] },
+    {
+      basename: 'brief.md',
+      step: STEPS.brief,
+      agents: ['brief-writer'],
+      contentGuard: (content, currentStep) => {
+        // Only enforce during the 'brief' step — brief_gate is allowed to resolve questions
+        if (currentStep !== STEPS.brief) return { blocked: false };
+        try {
+          const openQuestions = require(path.join(__dirname, 'lib', 'open-questions'));
+          const questions = openQuestions.parse(content);
+          const resolvedBlocking = questions.filter(
+            (q) => q.resolved && (q.scope === 'cross-ticket' || q.scope === 'architectural')
+          );
+          if (resolvedBlocking.length > 0) {
+            return {
+              blocked: true,
+              message:
+                `BLOCKED: Cannot resolve blocking open questions during the brief step.\n` +
+                `Found ${resolvedBlocking.length} resolved architectural/cross-ticket question(s).\n` +
+                `Only the brief_gate step (via AskUserQuestion) can resolve blocking questions.\n` +
+                `Write the questions with resolved: false and let the brief_gate handle resolution.\n`,
+            };
+          }
+        } catch {
+          // fail-open on parse errors
+        }
+        return { blocked: false };
+      },
+    },
     { basename: 'spec.md', step: STEPS.spec, agents: ['spec-writer'] },
     { basename: 'tasks.md', step: STEPS.tasks, agents: [] },
     { basename: '.last-commit-sha', step: STEPS.commit },
