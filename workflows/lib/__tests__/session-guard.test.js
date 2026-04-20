@@ -702,4 +702,98 @@ describe('session-guard', () => {
       assert.ok(!r.stdout.includes('TICKET-B'), 'should NOT mention TICKET-B');
     });
   });
+
+  // ─── Hook: Stop — actionable /work message ───
+
+  describe('Hook: Stop — actionable /work message', () => {
+    const TASKS_DIR = path.join(SESSION_DIR, 'tasks-base');
+    const WORK_TICKET = 'WORK-100';
+    const { STEP_ORDER } = require(path.join(__dirname, '..', '..', 'work', 'step-registry'));
+    // currentStep in .work-state.json is 1-based (stepIndex + 1)
+    const BRIEF_GATE_STEP = STEP_ORDER.indexOf('brief_gate') + 1;
+
+    function writeWorkState(ticketId, state) {
+      const dir = path.join(TASKS_DIR, ticketId);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, '.work-state.json'), JSON.stringify(state));
+    }
+
+    function cleanupTasksDir() {
+      try {
+        fs.rmSync(TASKS_DIR, { recursive: true, force: true });
+      } catch { /* */ }
+    }
+
+    beforeEach(() => {
+      cleanupTasksDir();
+      fs.mkdirSync(TASKS_DIR, { recursive: true });
+    });
+
+    afterEach(() => {
+      cleanupTasksDir();
+    });
+
+    it('outputs actionable message with step name when /work session active and .work-state.json exists', async () => {
+      // currentStep should map to 'brief_gate' per STEP_ORDER
+      writeWorkState(WORK_TICKET, { currentStep: BRIEF_GATE_STEP });
+      await runCli(['init', WORK_TICKET, '/work']);
+
+      const r = await runHook({ stop_message: '' }, 'Stop', {
+        SESSION_GUARD_TICKET_ID: WORK_TICKET,
+        TASKS_BASE: TASKS_DIR,
+      });
+      assert.equal(r.code, 2, 'should exit 2 to block stop');
+      assert.ok(r.stderr.includes('mid-workflow'), 'should mention mid-workflow');
+      assert.ok(r.stderr.includes('Do NOT stop'), 'should contain Do NOT stop');
+      assert.ok(r.stderr.includes(WORK_TICKET), 'should mention ticket ID');
+      assert.ok(r.stderr.includes('brief_gate'), 'should include the step name');
+      assert.ok(
+        r.stderr.includes('work.workflow.js'),
+        'should include orchestrator command'
+      );
+    });
+
+    it('falls back to generic message when .work-state.json is missing', async () => {
+      // No writeWorkState — file does not exist
+      await runCli(['init', WORK_TICKET, '/work']);
+
+      const r = await runHook({ stop_message: '' }, 'Stop', {
+        SESSION_GUARD_TICKET_ID: WORK_TICKET,
+        TASKS_BASE: TASKS_DIR,
+      });
+      assert.equal(r.code, 2, 'should exit 2 to block stop');
+      assert.ok(r.stderr.includes('BLOCKED'), 'should contain BLOCKED');
+      assert.ok(r.stderr.includes('Complete all'), 'should use generic message');
+      assert.ok(!r.stderr.includes('mid-workflow'), 'should NOT use actionable message');
+    });
+
+    it('falls back to generic message when .work-state.json has invalid JSON', async () => {
+      const dir = path.join(TASKS_DIR, WORK_TICKET);
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, '.work-state.json'), '{not valid json!!!');
+      await runCli(['init', WORK_TICKET, '/work']);
+
+      const r = await runHook({ stop_message: '' }, 'Stop', {
+        SESSION_GUARD_TICKET_ID: WORK_TICKET,
+        TASKS_BASE: TASKS_DIR,
+      });
+      assert.equal(r.code, 2, 'should exit 2 to block stop');
+      assert.ok(r.stderr.includes('BLOCKED'), 'should contain BLOCKED');
+      assert.ok(r.stderr.includes('Complete all'), 'should use generic message');
+    });
+
+    it('non-/work sessions still get generic message', async () => {
+      writeWorkState(WORK_TICKET, { currentStep: 3 });
+      await runCli(['init', WORK_TICKET, '/deploy']);
+
+      const r = await runHook({ stop_message: '' }, 'Stop', {
+        SESSION_GUARD_TICKET_ID: WORK_TICKET,
+        TASKS_BASE: TASKS_DIR,
+      });
+      assert.equal(r.code, 2, 'should exit 2 to block stop');
+      assert.ok(r.stderr.includes('BLOCKED'), 'should contain BLOCKED');
+      assert.ok(r.stderr.includes('Complete all'), 'should use generic message');
+      assert.ok(!r.stderr.includes('mid-workflow'), 'should NOT use actionable /work message');
+    });
+  });
 });

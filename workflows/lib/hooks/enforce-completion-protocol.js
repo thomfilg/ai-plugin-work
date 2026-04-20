@@ -22,6 +22,65 @@ if (process.env.DISABLE_COMPLETION_CHECK === '1') {
   process.exit(0);
 }
 
+// Bypass during active /work session (GH-250)
+// When session-guard is already blocking stops, this hook's secondary
+// enforcement just adds confusion. Exit early to stay silent.
+function hasActiveWorkSession() {
+  try {
+    const sessionDir = process.env.SESSION_GUARD_DIR || '/tmp';
+    const prefix = 'claude-session-guard-';
+    const suffix = '.json';
+    const files = fs.readdirSync(sessionDir);
+
+    // Determine current ticket (same logic as session-guard.js getTicketId)
+    let currentTicket = process.env.SESSION_GUARD_TICKET_ID || null;
+    if (!currentTicket) {
+      try {
+        let head;
+        const dotgitStat = fs.lstatSync('.git');
+        if (dotgitStat.isFile()) {
+          // Worktree: .git is a file containing "gitdir: <path>"
+          const dotgit = fs.readFileSync('.git', 'utf-8').trim();
+          if (dotgit.startsWith('gitdir: ')) {
+            const gitdir = path.resolve(dotgit.slice('gitdir: '.length));
+            head = fs.readFileSync(path.join(gitdir, 'HEAD'), 'utf-8').trim();
+          }
+        } else {
+          // Normal repo: .git is a directory
+          head = fs.readFileSync(path.join('.git', 'HEAD'), 'utf-8').trim();
+        }
+        if (head) {
+          const ref = head.startsWith('ref: ') ? head.slice(5) : head;
+          const match = ref.match(/[A-Z]+-\d+/);
+          if (match) currentTicket = match[0];
+        }
+      } catch { /* no git context — ticket matching will be skipped */ }
+    }
+
+    for (const f of files) {
+      if (!f.startsWith(prefix) || !f.endsWith(suffix)) continue;
+      try {
+        // Verify file ownership before reading (matches session-guard.js pattern)
+        if (typeof process.getuid === 'function') {
+          const stat = fs.statSync(path.join(sessionDir, f));
+          if (stat.uid !== process.getuid()) continue;
+        }
+        const data = JSON.parse(fs.readFileSync(path.join(sessionDir, f), 'utf8'));
+        if (data?.workflow === '/work' && !data?.revealed) {
+          // Require ticket match when we have ticket context
+          if (currentTicket && data.ticketId !== currentTicket) continue;
+          return true;
+        }
+      } catch { /* skip corrupt or inaccessible files */ }
+    }
+  } catch { /* fail open */ }
+  return false;
+}
+
+if (hasActiveWorkSession()) {
+  process.exit(0);
+}
+
 // Completion phrases to detect
 const COMPLETION_PHRASES = [
   /\bimplementation\s+(?:is\s+)?complete/i,
