@@ -415,6 +415,46 @@ function handlePreCompact() {
 }
 
 /**
+ * Read the /work workflow state for a ticket to determine the current step.
+ * Returns { stepName, ticketId } or null on any failure.
+ */
+function readWorkState(ticketId) {
+  try {
+    const tasksBase = getTasksBase();
+    if (!tasksBase) return null;
+
+    let safeId = ticketId;
+    try {
+      safeId = require(path.join(__dirname, '..', 'config')).safeTicketId(ticketId);
+    } catch {}
+
+    const resolved = path.resolve(tasksBase, safeId, '.work-state.json');
+    // Guard against path traversal
+    if (!resolved.startsWith(path.resolve(tasksBase) + path.sep)) return null;
+
+    const raw = fs.readFileSync(resolved, 'utf-8');
+    const state = JSON.parse(raw);
+    const stepIndex = state?.currentStep;
+    if (typeof stepIndex !== 'number') return null;
+
+    let stepName;
+    try {
+      const { STEP_ORDER } = require(path.join(__dirname, '..', '..', 'work', 'step-registry'));
+      // currentStep in .work-state.json is 1-based (see work-state.js: stepIndex + 1)
+      const zeroBasedIndex = stepIndex - 1;
+      if (zeroBasedIndex >= 0 && zeroBasedIndex < STEP_ORDER.length) {
+        stepName = STEP_ORDER[zeroBasedIndex];
+      }
+    } catch { /* step-registry not available — stepName stays null */ }
+
+    if (!stepName) return null;
+    return { stepName, ticketId };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Check if the /check workflow is actively running for a ticket.
  * When /check is active, the session guard should not block stops
  * because /check has its own quality gates and state management.
@@ -476,6 +516,24 @@ function handleStop(hookData) {
   }
 
   const session = nonCheckSessions[0];
+
+  // For /work sessions, try to provide an actionable message with current step info
+  if (session.workflow === '/work') {
+    const workState = readWorkState(session.ticketId);
+    if (workState) {
+      process.stderr.write(
+        `BLOCKED: You are mid-workflow (/work ${workState.ticketId}). DO NOT STOP.\n\n` +
+          `Current step: ${workState.stepName}\n` +
+          `Your next action: Run the orchestrator to get your plan and continue executing ALL remaining steps:\n` +
+          '  node "${CLAUDE_PLUGIN_ROOT}/workflows/work/work.workflow.js" ' + workState.ticketId + '\n\n' +
+          "Then execute each RUN step in order. Do NOT stop until the workflow reaches 'complete'.\n" +
+          'The only step that allows user interaction is brief_gate.\n'
+      );
+      process.exit(2);
+      return;
+    }
+  }
+
   process.stderr.write(
     `BLOCKED: Active workflow session for ${session.ticketId} (${session.workflow}). ` +
       `Complete all ${session.workflow} steps to unlock, or type 'abort workflow' to force-stop.\n`
