@@ -20,11 +20,11 @@ Initialize TDD state:
 
 Note: --task <N> is required when working inside a task-scoped workflow (tasks.md exists).
 Omit --task when running standalone /work-implement without task context.
-All subcommands (init, record-*, transition, exception) support --task.
+All subcommands (init, record-*, transition, exception) support --task when task context exists.
 
 For each behavior change, cycle through RED → GREEN → REFACTOR:
 
-RED Phase (write failing tests):
+RED Phase (write failing tests — hook enforced):
 - Hook BLOCKS Write/Edit to any non .test/.spec file
 - Write focused tests (1-3) that express expected behavior
 - Record evidence and transition:

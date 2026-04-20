@@ -69,7 +69,8 @@ function transitionStep(ticket, targetStep, deps) {
     const { exists, parseError, evidence } = readTddEvidence(safeTicket, currentStep, taskNum);
     if (!exists || parseError) {
       const tddStatePath = path.resolve(__dirname, '..', 'work-implement', 'tdd-phase-state.js');
-      const msg = `Cannot leave ${currentStep} without TDD evidence. Use the TDD phase system:\n  node ${tddStatePath} init ${safeTicket}\n  node ${tddStatePath} record-red ${safeTicket} --cmd "<test command>"\n  node ${tddStatePath} record-green ${safeTicket} --cmd "<test command>"\n  node ${tddStatePath} record-refactor ${safeTicket} --cmd "<test command>"`;
+      const taskFlag = taskNum ? ` --task ${taskNum}` : '';
+      const msg = `Cannot leave ${currentStep} without TDD evidence. Use the TDD phase system:\n  node ${tddStatePath} init ${safeTicket}${taskFlag}\n  node ${tddStatePath} record-red ${safeTicket}${taskFlag} --cmd "<test command>"\n  node ${tddStatePath} record-green ${safeTicket}${taskFlag} --cmd "<test command>"\n  node ${tddStatePath} record-refactor ${safeTicket}${taskFlag} --cmd "<test command>"`;
       return { error: true, message: msg };
     }
     const validation = validateTddEvidence(evidence);
