@@ -194,6 +194,10 @@ function parseTask(args) {
   if (!Number.isInteger(val) || val < 1) throw new Error("Invalid --task value: " + args[taskIdx + 1]); return val;
 }
 
+function safeParseTask(args) {
+  try { return parseTask(args); } catch (e) { errorExit(e.message); }
+}
+
 function runTestCommand(cmd) {
   try {
     execSync(cmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 300000 });
@@ -261,7 +265,7 @@ function cmdInit(ticketId, args) {
   if (!ticketId) {
     errorExit('Missing ticket ID. Usage: node tdd-phase-state.js init <TICKET_ID>');
   }
-  const taskNum = parseTask(args || []);
+  const taskNum = safeParseTask(args || []);
   const opts = taskNum ? { taskNum } : undefined;
   const state = {
     currentPhase: 'red',
@@ -276,7 +280,7 @@ function cmdCurrent(ticketId, args) {
   if (!ticketId) {
     errorExit('Missing ticket ID.');
   }
-  const taskNum = parseTask(args || []);
+  const taskNum = safeParseTask(args || []);
   const opts = taskNum ? { taskNum } : undefined;
   const state = readState(ticketId, opts);
   if (!state) {
@@ -289,7 +293,7 @@ function cmdRecordRed(ticketId, args) {
   if (!ticketId) errorExit('Missing ticket ID.');
   const cmd = parseCmd(args);
   if (!cmd) errorExit('Missing --cmd argument.');
-  const taskNum = parseTask(args);
+  const taskNum = safeParseTask(args);
   const opts = taskNum ? { taskNum } : undefined;
 
   const state = readState(ticketId, opts); // reads per-task path when taskNum provided
@@ -352,7 +356,7 @@ function cmdRecordGreen(ticketId, args) {
   if (!ticketId) errorExit('Missing ticket ID.');
   const cmd = parseCmd(args);
   if (!cmd) errorExit('Missing --cmd argument.');
-  const taskNum = parseTask(args);
+  const taskNum = safeParseTask(args);
   const opts = taskNum ? { taskNum } : undefined;
 
   const state = readState(ticketId, opts);
@@ -388,7 +392,7 @@ function cmdRecordRefactor(ticketId, args) {
   if (!ticketId) errorExit('Missing ticket ID.');
   const cmd = parseCmd(args);
   if (!cmd) errorExit('Missing --cmd argument.');
-  const taskNum = parseTask(args);
+  const taskNum = safeParseTask(args);
   const opts = taskNum ? { taskNum } : undefined;
 
   const state = readState(ticketId, opts);
@@ -419,7 +423,7 @@ function cmdRecordRefactor(ticketId, args) {
 function cmdTransition(ticketId, targetPhase, args) {
   if (!ticketId) errorExit('Missing ticket ID.');
   if (!targetPhase) errorExit('Missing target phase.');
-  const taskNum = parseTask(args || []);
+  const taskNum = safeParseTask(args || []);
   const opts = taskNum ? { taskNum } : undefined;
 
   const state = readState(ticketId, opts);
@@ -466,7 +470,7 @@ function cmdException(ticketId, args) {
   if (!reason || !reason.trim()) {
     errorExit('Reason cannot be empty.');
   }
-  const taskNum = parseTask(args);
+  const taskNum = safeParseTask(args);
   const opts = taskNum ? { taskNum } : undefined;
   const state = {
     currentPhase: 'exception',
