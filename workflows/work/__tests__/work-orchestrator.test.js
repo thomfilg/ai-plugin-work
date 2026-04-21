@@ -605,13 +605,10 @@ describe('work-orchestrator.js', () => {
       }
     });
 
-    it('should not include agentType for SKIP steps', async () => {
+    it('should not emit any SKIP steps (GH-245)', async () => {
       const { result } = await runOrchestrator([TEST_TICKET]);
       const skipSteps = result.plan.filter((s) => s.action === 'SKIP');
-      for (const step of skipSteps) {
-        assert.equal(step.agentType, undefined);
-        assert.equal(step.agentPrompt, undefined);
-      }
+      assert.equal(skipSteps.length, 0, `Found ${skipSteps.length} SKIP step(s): ${skipSteps.map(s => s.step).join(', ')}`);
     });
 
     it('should include agentType for DEFER steps with commands as fallback (GH-130)', async () => {

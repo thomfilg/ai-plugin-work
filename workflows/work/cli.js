@@ -93,14 +93,20 @@ function main(deps) {
         providerConfig.repo = ghUrlMeta.repo;
       }
       const state = ticket ? inspect(ticket, providerConfig, suffix) : null;
-      const result = generatePlan(
-        ticket,
-        isTicket ? null : raw,
-        state,
-        rework,
-        providerConfig,
-        suffix
-      );
+      let result;
+      try {
+        result = generatePlan(
+          ticket,
+          isTicket ? null : raw,
+          state,
+          rework,
+          providerConfig,
+          suffix
+        );
+      } catch (err) {
+        console.log(JSON.stringify({ error: true, message: err.message }));
+        process.exit(1);
+      }
 
       result.timestamp = new Date().toISOString();
 
