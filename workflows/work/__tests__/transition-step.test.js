@@ -134,7 +134,7 @@ describe('transition-step.js (GH-245 Task 4)', () => {
       );
     });
 
-    it('should mark multiple intermediate steps as "deferred" when jumping several steps', () => {
+    it('should mark multiple intermediate steps as "completed" and log "step deferred" when jumping', () => {
       const { transitionStep } = require('../transition-step');
 
       const deps = createDeps();
