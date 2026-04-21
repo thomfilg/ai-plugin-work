@@ -296,15 +296,13 @@ describe('work-orchestrator.js', () => {
       const { result } = await runOrchestrator([TEST_TICKET]);
       assert.ok('total' in result.summary);
       assert.ok('run' in result.summary);
-      assert.ok('skip' in result.summary);
       assert.ok('pending' in result.summary);
       assert.ok('firstAction' in result.summary);
       assert.ok('stepsToRun' in result.summary);
-      assert.ok('stepsSkipped' in result.summary);
       assert.ok('defer' in result.summary);
       assert.equal(
         result.summary.total,
-        result.summary.run + result.summary.skip + result.summary.defer + result.summary.pending
+        result.summary.run + result.summary.defer + result.summary.pending
       );
     });
 
@@ -607,19 +605,19 @@ describe('work-orchestrator.js', () => {
       }
     });
 
-    it('should not include agentType for SKIP steps', async () => {
+    it('should not emit any SKIP steps (GH-245)', async () => {
       const { result } = await runOrchestrator([TEST_TICKET]);
       const skipSteps = result.plan.filter((s) => s.action === 'SKIP');
-      for (const step of skipSteps) {
-        assert.equal(step.agentType, undefined);
-        assert.equal(step.agentPrompt, undefined);
-      }
+      assert.equal(skipSteps.length, 0, `Found ${skipSteps.length} SKIP step(s): ${skipSteps.map(s => s.step).join(', ')}`);
     });
 
-    it('should include agentType for DEFER steps as fallback (GH-130)', async () => {
+    it('should include agentType for DEFER steps with commands as fallback (GH-130)', async () => {
       const { result } = await runOrchestrator([TEST_TICKET]);
-      const deferSteps = result.plan.filter((s) => s.action === 'DEFER');
-      for (const step of deferSteps) {
+      // GH-245: SKIP was eliminated; former-SKIP steps now emit DEFER without
+      // agentType (no fallback action needed). Only DEFER steps that carry a
+      // command have a meaningful fallback and must include agentType/agentPrompt.
+      const deferStepsWithCommand = result.plan.filter((s) => s.action === 'DEFER' && s.command);
+      for (const step of deferStepsWithCommand) {
         assert.ok(step.agentType, `DEFER step ${step.step} should have agentType as fallback`);
         assert.ok(step.agentPrompt, `DEFER step ${step.step} should have agentPrompt as fallback`);
       }
@@ -684,7 +682,7 @@ describe('work-orchestrator.js', () => {
     it('should handle 2b_transition based on provider', async () => {
       const { result } = await runOrchestrator([TEST_TICKET]);
       const transStep = result.plan.find((s) => s.step === '2b_transition');
-      // May be SKIP (no provider) or RUN (jira/linear)
+      // May be DEFER (no provider) or RUN (jira/linear)
       if (transStep.action === 'RUN') {
         assert.equal(transStep.agentType, 'general-purpose');
         assert.ok(
@@ -692,7 +690,7 @@ describe('work-orchestrator.js', () => {
             transStep.agentPrompt.includes('Transition')
         );
       } else {
-        assert.equal(transStep.action, 'SKIP');
+        assert.equal(transStep.action, 'DEFER');
       }
     });
   });
@@ -826,10 +824,10 @@ describe('work-orchestrator.js', () => {
       assert.equal(result.summary.stepsDeferred.length, result.summary.defer);
     });
 
-    it('should include stepsSkipped array', async () => {
+    it('should include stepsDeferred array', async () => {
       const { result } = await runOrchestrator([TEST_TICKET]);
-      assert.ok(Array.isArray(result.summary.stepsSkipped));
-      assert.equal(result.summary.stepsSkipped.length, result.summary.skip);
+      assert.ok(Array.isArray(result.summary.stepsDeferred));
+      assert.equal(result.summary.stepsDeferred.length, result.summary.defer);
     });
 
     it('should identify firstAction correctly', async () => {
@@ -1824,7 +1822,7 @@ describe('GH-211: task_review in plan generation', () => {
 
     const taskReviewEntry = result.plan.find((s) => s.step === 'task_review');
     assert.ok(taskReviewEntry, 'plan must include task_review step even when skipped');
-    assert.equal(taskReviewEntry.action, 'SKIP', 'task_review must be SKIP for single-task (final task)');
+    assert.equal(taskReviewEntry.action, 'DEFER', 'task_review must be DEFER for single-task (final task)');
   });
 
   // 9.1: TASK_REVIEW_ENABLED=0 skips task_review
@@ -1839,7 +1837,7 @@ describe('GH-211: task_review in plan generation', () => {
 
     const taskReviewEntry = result.plan.find((s) => s.step === 'task_review');
     assert.ok(taskReviewEntry, 'plan must include task_review step entry');
-    assert.equal(taskReviewEntry.action, 'SKIP', 'task_review must be SKIP when TASK_REVIEW_ENABLED=0');
+    assert.equal(taskReviewEntry.action, 'DEFER', 'task_review must be DEFER when TASK_REVIEW_ENABLED=0');
     assert.ok(
       taskReviewEntry.reason.includes('disabled') || taskReviewEntry.reason.includes('TASK_REVIEW_ENABLED'),
       'reason should mention disabled/env flag'

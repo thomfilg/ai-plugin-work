@@ -93,14 +93,20 @@ function main(deps) {
         providerConfig.repo = ghUrlMeta.repo;
       }
       const state = ticket ? inspect(ticket, providerConfig, suffix) : null;
-      const result = generatePlan(
-        ticket,
-        isTicket ? null : raw,
-        state,
-        rework,
-        providerConfig,
-        suffix
-      );
+      let result;
+      try {
+        result = generatePlan(
+          ticket,
+          isTicket ? null : raw,
+          state,
+          rework,
+          providerConfig,
+          suffix
+        );
+      } catch (err) {
+        console.log(JSON.stringify({ error: true, message: err?.message || String(err) }));
+        process.exit(1);
+      }
 
       result.timestamp = new Date().toISOString();
 
@@ -170,13 +176,11 @@ function main(deps) {
       result.summary = {
         total: result.plan.length,
         run: by('RUN').length,
-        skip: by('SKIP').length,
         defer: by('DEFER').length,
         pending: by('PENDING').length,
         firstAction: by('RUN')[0]?.step || by('DEFER')[0]?.step || 'none',
         stepsToRun: by('RUN').map((s) => s.step),
         stepsDeferred: by('DEFER').map((s) => s.step),
-        stepsSkipped: by('SKIP').map((s) => s.step),
       };
       console.log(JSON.stringify(result, null, 2));
       break;

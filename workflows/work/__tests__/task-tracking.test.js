@@ -274,7 +274,7 @@ Verify all prior tasks are correctly implemented.
     // Find the tasks step
     const tasksStep = result.plan.find((p) => p.step === 'tasks');
     assert.ok(tasksStep, 'tasks step should exist in plan');
-    assert.equal(tasksStep.action, 'SKIP', 'tasks.md already exists so should be SKIP');
+    assert.equal(tasksStep.action, 'DEFER', 'tasks.md already exists so should be DEFER');
 
     // Find implement step — should reference Task 1
     const implStep = result.plan.find((p) => p.step === 'implement');

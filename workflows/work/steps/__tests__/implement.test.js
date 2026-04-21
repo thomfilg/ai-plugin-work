@@ -85,7 +85,7 @@ describe('implement step', () => {
     assert.match(entries[0].agentPrompt, /task 1: First task/);
   });
 
-  it('SKIPs when all tasks are done', () => {
+  it('DEFERs when all tasks are done', () => {
     const { add, entries } = makeAdd();
     const fakeTasks = [{ num: 1, title: 'Only task', isCheckpoint: false }];
     const ctx = makeCtx({ parseTasks: () => fakeTasks });
@@ -94,11 +94,11 @@ describe('implement step', () => {
       workState: { tasksMeta: { currentTaskIndex: 1 } },
     });
     implementStep(add, s, ctx);
-    assert.equal(entries[0].action, 'SKIP');
+    assert.equal(entries[0].action, 'DEFER');
     assert.match(entries[0].reason, /All tasks completed/);
   });
 
-  it('SKIPs checkpoint tasks without running implementation', () => {
+  it('DEFERs checkpoint tasks without running implementation', () => {
     const { add, entries } = makeAdd();
     const fakeTasks = [{ num: 1, title: 'Review', isCheckpoint: true }];
     const ctx = makeCtx({ parseTasks: () => fakeTasks });
@@ -107,7 +107,7 @@ describe('implement step', () => {
       workState: { tasksMeta: { currentTaskIndex: 0 } },
     });
     implementStep(add, s, ctx);
-    assert.equal(entries[0].action, 'SKIP');
+    assert.equal(entries[0].action, 'DEFER');
     assert.match(entries[0].reason, /checkpoint/);
   });
 
@@ -155,7 +155,7 @@ describe('implement step', () => {
       workState: { tasksMeta: { currentTaskIndex: 5 } },
     });
     implementStep(add, s, ctx);
-    assert.equal(entries[0].action, 'SKIP');
+    assert.equal(entries[0].action, 'DEFER');
     assert.equal(ctx._allTasksDone, true);
   });
 });

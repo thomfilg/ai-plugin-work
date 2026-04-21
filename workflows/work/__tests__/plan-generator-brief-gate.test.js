@@ -56,9 +56,9 @@ function makeDeps(overrides = {}) {
 }
 
 /**
- * Minimal inspected state — enough for every step module to make a SKIP
+ * Minimal inspected state — enough for every step module to make a DEFER
  * decision without reading real files. The key flag under test is hasBrief,
- * which controls whether brief_gate emits SKIP ("No brief.md present") or
+ * which controls whether brief_gate emits DEFER ("No brief.md present") or
  * attempts to read brief.md.
  */
 function makeState(overrides = {}) {
@@ -104,7 +104,7 @@ function stepIndex(plan, stepName) {
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe('plan-generator brief_gate ordering (GH-215 Task 6.2)', () => {
-  it('emits brief_gate when brief is not yet present (SKIP path)', () => {
+  it('emits brief_gate when brief is not yet present (DEFER path)', () => {
     const state = makeState({ hasBrief: false });
     const { plan } = generatePlan(
       'TEST-100',
@@ -129,7 +129,7 @@ describe('plan-generator brief_gate ordering (GH-215 Task 6.2)', () => {
 
   it('emits brief_gate when hasBrief is true (gate evaluates brief.md)', () => {
     // With hasBrief=true, the gate will try to read brief.md via fs and
-    // fail-open to a SKIP ("brief.md unreadable") because we use a bogus path.
+    // fail-open to RUN ("brief.md unreadable — regenerate brief...") because we use a bogus path.
     // That is fine for the ordering assertion — we only care that a
     // brief_gate entry appears between brief and spec.
     const state = makeState({ hasBrief: true });
@@ -155,7 +155,7 @@ describe('plan-generator brief_gate ordering (GH-215 Task 6.2)', () => {
   });
 
   it('keeps brief_gate in the plan even when brief step is disabled', () => {
-    // WORK_BRIEF_ENABLED=0 makes brief step SKIP; the gate also SKIPs for
+    // WORK_BRIEF_ENABLED=0 makes brief step DEFER; the gate also DEFERs for
     // the same reason, but both entries must still appear in order so the
     // workflow state machine can advance through brief_gate.
     const prev = process.env.WORK_BRIEF_ENABLED;

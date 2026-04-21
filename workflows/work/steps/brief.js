@@ -10,9 +10,9 @@ module.exports = function briefStep(add, s, ctx) {
   const briefEnabled = process.env.WORK_BRIEF_ENABLED !== '0';
 
   if (!briefEnabled) {
-    add(STEPS.brief, 'SKIP', null, 'Brief generation disabled (WORK_BRIEF_ENABLED=0)');
+    add(STEPS.brief, 'DEFER', null, 'Brief generation disabled (WORK_BRIEF_ENABLED=0)');
   } else if (s?.hasBrief) {
-    add(STEPS.brief, 'SKIP', null, 'brief.md already exists');
+    add(STEPS.brief, 'DEFER', null, 'brief.md already exists');
   } else {
     add(
       STEPS.brief,

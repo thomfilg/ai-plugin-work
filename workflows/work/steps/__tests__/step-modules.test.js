@@ -188,14 +188,14 @@ describe('step modules', () => {
       bootstrapStep = require(path.join(__dirname, '..', 'bootstrap.js'));
     });
 
-    it('should SKIP when worktree + PR exist', () => {
+    it('should DEFER when worktree + PR exist', () => {
       const entries = [];
       const add = (step, action, command, reason, extra) =>
         entries.push({ step, action, command, reason, ...extra });
       const s = makeState({ worktreeExists: true, pr: { number: 1 } });
       const ctx = makeCtx();
       bootstrapStep(add, s, ctx);
-      assert.equal(entries[0].action, 'SKIP');
+      assert.equal(entries[0].action, 'DEFER');
     });
 
     it('should RUN with /bootstrap when no worktree', () => {
@@ -255,5 +255,38 @@ describe('step modules', () => {
       assert.ok(entries[0].preCommands);
       assert.ok(entries[0].preCommands.length > 0);
     });
+  });
+
+  // GH-245 Task 1: No step module may emit 'SKIP' — all former SKIP sites
+  // must use 'DEFER' instead.
+  describe('no step module emits SKIP action (GH-245)', () => {
+    const fs = require('fs');
+
+    const stepFiles = [
+      'bootstrap.js',
+      'brief.js',
+      'brief-gate.js',
+      'spec.js',
+      'tasks.js',
+      'implement.js',
+      'ready.js',
+      'task-review.js',
+      'transition.js',
+    ];
+
+    for (const file of stepFiles) {
+      it(`${file} must not contain 'SKIP' as an action argument`, () => {
+        const filePath = path.join(__dirname, '..', file);
+        const source = fs.readFileSync(filePath, 'utf8');
+        // Match 'SKIP' only when used as the action argument in add() calls.
+        // Pattern: add(anything, 'SKIP', ...) — ignores SKIP in comments or unrelated strings.
+        const skipMatches = source.match(/add\([^)]*,\s*'SKIP'\s*,/g);
+        assert.equal(
+          skipMatches,
+          null,
+          `${file} still emits 'SKIP' action (found ${skipMatches ? skipMatches.length : 0} occurrence(s)) — must use 'DEFER' instead`
+        );
+      });
+    }
   });
 });

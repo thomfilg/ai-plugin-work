@@ -11,9 +11,9 @@ module.exports = function tasksStep(add, s, ctx) {
   const specPath = path.join(tasksDir, 'spec.md');
 
   if (!tasksEnabled) {
-    add(STEPS.tasks, 'SKIP', null, 'Task splitting disabled (WORK_TASKS_ENABLED=0)');
+    add(STEPS.tasks, 'DEFER', null, 'Task splitting disabled (WORK_TASKS_ENABLED=0)');
   } else if (s?.hasTasks) {
-    add(STEPS.tasks, 'SKIP', null, 'tasks.md already exists');
+    add(STEPS.tasks, 'DEFER', null, 'tasks.md already exists');
   } else if (!fileExists(specPath)) {
     add(STEPS.tasks, 'DEFER', null, 'No spec.md — cannot generate tasks', {
       agentType: 'skill',

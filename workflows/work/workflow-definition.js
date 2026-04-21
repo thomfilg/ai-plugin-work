@@ -220,7 +220,7 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
       {
         step: STEPS.implement,
         verify: (ticketId) => {
-          // tasks step gating is orchestrator-controlled via SKIP/RUN plan actions
+          // tasks step gating is orchestrator-controlled via DEFER/RUN plan actions
           // Implement is proven if tdd-phase.json has at least one cycle with red + green evidence
           try {
             const state = JSON.parse(

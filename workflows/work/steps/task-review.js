@@ -7,9 +7,9 @@
  * (via `ctx._taskData`, `ctx._currentTaskIdx`).
  *
  * Decision matrix:
- *   1. `TASK_REVIEW_ENABLED=0`               -> SKIP "Task review disabled"
- *   2. No tasks (no taskData or no tasksMeta) -> SKIP "No tasks"
- *   3. Final task (current == last)           -> SKIP "Final task -- /check handles review"
+ *   1. `TASK_REVIEW_ENABLED=0`               -> DEFER "Task review disabled"
+ *   2. No tasks (no taskData or no tasksMeta) -> DEFER "No tasks"
+ *   3. Final task (current == last)           -> DEFER "Final task -- /check handles review"
  *   4. Fix rounds exhausted (>= max)          -> RUN  AskUserQuestion escalation
  *   5. Intermediate task needing review       -> RUN  parallel /tests-review + /code-review
  */
@@ -31,7 +31,7 @@ module.exports = function taskReviewStep(add, s, ctx) {
 
   // Decision 1: disabled via env
   if (process.env.TASK_REVIEW_ENABLED === '0') {
-    add(STEPS.task_review, 'SKIP', null, 'Task review disabled (TASK_REVIEW_ENABLED=0)');
+    add(STEPS.task_review, 'DEFER', null, 'Task review disabled (TASK_REVIEW_ENABLED=0)');
     return;
   }
 
@@ -41,7 +41,7 @@ module.exports = function taskReviewStep(add, s, ctx) {
 
   // Decision 2: no tasks
   if (!s?.hasTasks || !taskData || !tasksMeta) {
-    add(STEPS.task_review, 'SKIP', null, 'No tasks');
+    add(STEPS.task_review, 'DEFER', null, 'No tasks');
     return;
   }
 
@@ -50,7 +50,7 @@ module.exports = function taskReviewStep(add, s, ctx) {
 
   // Decision 3: final task -- /check handles the full review
   if (currentIdx >= totalTasks - 1) {
-    add(STEPS.task_review, 'SKIP', null, 'Final task -- /check handles review');
+    add(STEPS.task_review, 'DEFER', null, 'Final task -- /check handles review');
     return;
   }
 

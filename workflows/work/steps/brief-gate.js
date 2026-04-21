@@ -7,10 +7,10 @@
  * reuses the pure parser/rewriter in `../lib/open-questions.js`.
  *
  * Decision matrix:
- *   1. `WORK_BRIEF_ENABLED=0`                  → SKIP "Brief disabled"
- *   2. `!s.hasBrief`                           → SKIP "No brief.md present"
- *   3. `brief.md` unreadable (fail-closed)      → RUN  "brief.md unreadable — regenerate brief"
- *   4. Parser returns zero blocking questions  → SKIP "All blocking questions resolved"
+ *   1. `WORK_BRIEF_ENABLED=0`                  → DEFER "Brief disabled"
+ *   2. `!s.hasBrief`                           → DEFER "No brief.md present"
+ *   3. `brief.md` unreadable (fail-closed)      → RUN   "brief.md unreadable — regenerate brief"
+ *   4. Parser returns zero blocking questions  → DEFER "All blocking questions resolved"
  *   5. Otherwise                               → RUN with an AskUserQuestion
  *                                                payload + `onResolve: 'rewrite brief.md'`
  *
@@ -59,12 +59,12 @@ function briefGateStep(add, s, ctx) {
   const briefEnabled = process.env.WORK_BRIEF_ENABLED !== '0';
 
   if (!briefEnabled) {
-    add(STEPS.brief_gate, 'SKIP', null, 'Brief disabled (WORK_BRIEF_ENABLED=0)');
+    add(STEPS.brief_gate, 'DEFER', null, 'Brief disabled (WORK_BRIEF_ENABLED=0)');
     return;
   }
 
   if (!s || !s.hasBrief) {
-    add(STEPS.brief_gate, 'SKIP', null, 'No brief.md present');
+    add(STEPS.brief_gate, 'DEFER', null, 'No brief.md present');
     return;
   }
 
@@ -74,8 +74,8 @@ function briefGateStep(add, s, ctx) {
     markdown = fs.readFileSync(briefPath, 'utf8');
   } catch (_e) {
     // Emit RUN so the planner shows the gate needs attention — verify
-    // returns false on read errors (fail-closed), so emitting SKIP here
-    // would create a confusing mismatch ("gate skipped" yet transition
+    // returns false on read errors (fail-closed), so emitting DEFER here
+    // would create a confusing mismatch ("gate deferred" yet transition
     // blocked). RUN with a helpful message signals the issue clearly.
     add(STEPS.brief_gate, 'RUN', '/brief', 'brief.md unreadable — regenerate brief before proceeding', {
       agentType: 'skill',
@@ -88,7 +88,7 @@ function briefGateStep(add, s, ctx) {
   const blocking = openQuestions.findBlocking(questions);
 
   if (blocking.length === 0) {
-    add(STEPS.brief_gate, 'SKIP', null, 'All blocking questions resolved');
+    add(STEPS.brief_gate, 'DEFER', null, 'All blocking questions resolved');
     return;
   }
 

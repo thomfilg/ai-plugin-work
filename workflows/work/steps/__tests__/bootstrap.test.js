@@ -49,13 +49,13 @@ describe('bootstrap step', () => {
     assert.equal(typeof bootstrapStep, 'function');
   });
 
-  it('SKIPs when worktree + PR both exist', () => {
+  it('DEFERs when worktree + PR both exist', () => {
     const { add, entries } = makeAdd();
     const s = makeState({ worktreeExists: true, pr: { number: 42 } });
     bootstrapStep(add, s, makeCtx());
     assert.equal(entries.length, 1);
     assert.equal(entries[0].step, STEPS.bootstrap);
-    assert.equal(entries[0].action, 'SKIP');
+    assert.equal(entries[0].action, 'DEFER');
     assert.match(entries[0].reason, /PR #42/);
   });
 

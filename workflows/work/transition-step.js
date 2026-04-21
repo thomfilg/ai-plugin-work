@@ -193,8 +193,10 @@ function transitionStep(ticket, targetStep, deps) {
     // Going forward
     for (let i = currentIdx + 1; i < targetIdx; i++) {
       if (ws.stepStatus[ALL_STEPS[i]] === 'pending') {
+        // Status stays 'completed' for backward compat with getCurrentStep/enforcement hooks.
+        // Audit log records 'step deferred' to distinguish from explicitly executed steps.
         ws.stepStatus[ALL_STEPS[i]] = 'completed';
-        appendAction(safeTicket, { step: ALL_STEPS[i], what: 'step skipped' });
+        appendAction(safeTicket, { step: ALL_STEPS[i], what: 'step deferred' });
       }
     }
   }

@@ -155,7 +155,29 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg, suffix,
     planResult.suffix = suffix;
     planResult.fullTicket = planResult.ticket + '/' + suffix;
   }
+
+  // Safety net: reject any plan containing SKIP actions (GH-245).
+  // All step modules (including spec-gate.js) now emit DEFER instead of SKIP.
+  validatePlan(plan);
+
   return planResult;
 }
 
-module.exports = { generatePlan };
+/**
+ * Validate that no plan entry uses the deprecated SKIP action.
+ * Throws if any entry has action === 'SKIP'.
+ *
+ * @param {Array<{step: string, action: string}>} plan
+ */
+function validatePlan(plan) {
+  for (const entry of plan) {
+    if (entry.action === 'SKIP') {
+      throw new Error(
+        `Plan validation failed: step "${entry.step}" has forbidden action "SKIP". ` +
+        `All steps must use RUN or DEFER.`
+      );
+    }
+  }
+}
+
+module.exports = { generatePlan, validatePlan };

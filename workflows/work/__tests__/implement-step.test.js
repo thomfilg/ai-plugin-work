@@ -325,7 +325,7 @@ describe('implement step — dependency-aware messaging (GH-219 Task 16)', () =>
   });
 
   describe('existing behaviors preserved', () => {
-    it('SKIPs when all tasks are done', () => {
+    it('DEFERs when all tasks are done', () => {
       const taskData = makeTaskData([
         { num: 1, title: 'Only task' },
       ]);
@@ -343,11 +343,11 @@ describe('implement step — dependency-aware messaging (GH-219 Task 16)', () =>
       const ctx = makeCtx({ taskData });
       const entries = captureStep(s, ctx);
 
-      assert.equal(entries[0].action, 'SKIP');
+      assert.equal(entries[0].action, 'DEFER');
       assert.ok(entries[0].reason.includes('All tasks completed'));
     });
 
-    it('SKIPs checkpoint tasks', () => {
+    it('DEFERs checkpoint tasks', () => {
       const taskData = makeTaskData([
         { num: 1, title: 'Checkpoint task', isCheckpoint: true, type: 'checkpoint' },
       ]);
@@ -365,7 +365,7 @@ describe('implement step — dependency-aware messaging (GH-219 Task 16)', () =>
       const ctx = makeCtx({ taskData });
       const entries = captureStep(s, ctx);
 
-      assert.equal(entries[0].action, 'SKIP');
+      assert.equal(entries[0].action, 'DEFER');
       assert.ok(entries[0].reason.includes('checkpoint'));
     });
 

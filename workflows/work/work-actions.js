@@ -204,7 +204,7 @@ function analyzeActions(actions) {
       entry.blocks++;
     } else if (action.what === 'step reset') {
       entry.retries++;
-    } else if (!['workflow started', 'step skipped'].includes(action.what)) {
+    } else if (!['workflow started', 'step deferred', 'step skipped'].includes(action.what)) {
       entry.commands++;
     }
   }

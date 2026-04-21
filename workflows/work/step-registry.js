@@ -93,7 +93,7 @@ function canTransition(statusTransitions) {
 //
 //  Forward edges are generated from STEP_ORDER (each step → next step).
 //  Retry loops (backward edges) are merged in explicitly.
-//  No skip edges — the orchestrator marks steps as SKIP/RUN/DEFER,
+//  No skip edges — the orchestrator marks steps as RUN/DEFER,
 //  and the engine transitions through each step sequentially.
 
 // Retry loops: backward edges for failure recovery

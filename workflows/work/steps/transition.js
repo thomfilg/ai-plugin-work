@@ -15,6 +15,6 @@ module.exports = function transitionStep(add, s, ctx) {
       agentPrompt: transitionPrompt,
     });
   } else {
-    add('2b_transition', 'SKIP', null, 'No ticket transition for this provider');
+    add('2b_transition', 'DEFER', null, 'No ticket transition for this provider');
   }
 };

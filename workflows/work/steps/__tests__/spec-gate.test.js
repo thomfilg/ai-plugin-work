@@ -1,12 +1,12 @@
 /**
  * Unit tests for the spec-gate step module (GH-244, Task 4).
  *
- * Covers the six SKIP/RUN decision paths:
- *   1. WORK_SPEC_ENABLED=0 → SKIP
- *   2. !s.hasSpec → SKIP
+ * Covers the six DEFER/RUN decision paths:
+ *   1. WORK_SPEC_ENABLED=0 → DEFER
+ *   2. !s.hasSpec → DEFER
  *   3. spec.md unreadable → RUN /spec
- *   4. gherkin-skip override → SKIP with reason
- *   5. Validation passes → SKIP with scenario count
+ *   4. gherkin-skip override → DEFER with reason
+ *   5. Validation passes → DEFER with scenario count
  *   6. Validation fails → RUN with error messages
  *
  * Run: node --test workflows/work/steps/__tests__/spec-gate.test.js
@@ -155,23 +155,23 @@ describe('spec-gate step', () => {
   });
 
   // Case 1: WORK_SPEC_ENABLED=0
-  it('SKIPs when WORK_SPEC_ENABLED=0', () => {
+  it('DEFERs when WORK_SPEC_ENABLED=0', () => {
     process.env.WORK_SPEC_ENABLED = '0';
     const { add, entries } = makeAdd();
     specGateStep(add, makeState(), makeCtx());
     assert.equal(entries.length, 1);
     assert.equal(entries[0].step, STEPS.spec_gate);
-    assert.equal(entries[0].action, 'SKIP');
+    assert.equal(entries[0].action, 'DEFER');
     assert.match(entries[0].reason, /disabled/i);
   });
 
   // Case 2: No spec.md present
-  it('SKIPs when !s.hasSpec', () => {
+  it('DEFERs when !s.hasSpec', () => {
     const { add, entries } = makeAdd();
     specGateStep(add, makeState({ hasSpec: false }), makeCtx());
     assert.equal(entries.length, 1);
     assert.equal(entries[0].step, STEPS.spec_gate);
-    assert.equal(entries[0].action, 'SKIP');
+    assert.equal(entries[0].action, 'DEFER');
     assert.match(entries[0].reason, /no spec/i);
   });
 
@@ -191,27 +191,27 @@ describe('spec-gate step', () => {
   });
 
   // Case 4: gherkin-skip override
-  it('SKIPs with reason when skip override is present', () => {
+  it('DEFERs with reason when skip override is present', () => {
     const dir = makeTmpTasksDir(SPEC_WITH_SKIP_OVERRIDE);
     createdDirs.push(dir);
     const { add, entries } = makeAdd();
     specGateStep(add, makeState(), makeCtx({ tasksDir: dir }));
     assert.equal(entries.length, 1);
     assert.equal(entries[0].step, STEPS.spec_gate);
-    assert.equal(entries[0].action, 'SKIP');
+    assert.equal(entries[0].action, 'DEFER');
     assert.match(entries[0].reason, /skip override/i);
     assert.match(entries[0].reason, /legacy migration/i);
   });
 
   // Case 5: Validation passes
-  it('SKIPs with scenario count when validation passes', () => {
+  it('DEFERs with scenario count when validation passes', () => {
     const dir = makeTmpTasksDir(SPEC_VALID_GHERKIN);
     createdDirs.push(dir);
     const { add, entries } = makeAdd();
     specGateStep(add, makeState(), makeCtx({ tasksDir: dir }));
     assert.equal(entries.length, 1);
     assert.equal(entries[0].step, STEPS.spec_gate);
-    assert.equal(entries[0].action, 'SKIP');
+    assert.equal(entries[0].action, 'DEFER');
     assert.match(entries[0].reason, /passed/i);
     assert.match(entries[0].reason, /2 scenarios/);
     assert.match(entries[0].reason, /1 @integration/);

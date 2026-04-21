@@ -13,9 +13,9 @@ module.exports = function specStep(add, s, ctx) {
   const specPath = path.join(tasksDir, 'spec.md');
 
   if (!specEnabled) {
-    add(STEPS.spec, 'SKIP', null, 'Spec generation disabled (WORK_SPEC_ENABLED=0)');
+    add(STEPS.spec, 'DEFER', null, 'Spec generation disabled (WORK_SPEC_ENABLED=0)');
   } else if (s?.hasSpec) {
-    add(STEPS.spec, 'SKIP', null, 'spec.md already exists');
+    add(STEPS.spec, 'DEFER', null, 'spec.md already exists');
   } else {
     const briefRef =
       fileExists(briefPath) || (briefEnabled && !s?.hasBrief)

@@ -267,6 +267,15 @@ function completeWork(ticketId) {
     return state;
   }
 
+  // Terminal guard: block completion if tasks are still pending (GH-245)
+  // Array.isArray guards against corrupted state files where tasksMeta.tasks is not an array
+  if (state.tasksMeta && Array.isArray(state.tasksMeta.tasks)) {
+    const pendingTasks = state.tasksMeta.tasks.filter(t => t.status !== 'completed');
+    if (pendingTasks.length > 0) {
+      return { error: `Cannot complete workflow: ${pendingTasks.length} tasks still pending` };
+    }
+  }
+
   state.status = 'completed';
   state.completedTime = new Date().toISOString();
   STEPS.forEach((step) => {

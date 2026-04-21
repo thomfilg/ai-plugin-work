@@ -748,4 +748,56 @@ describe('work-state.js', () => {
       }
     });
   });
+
+  // ─── Terminal guard: completeWork rejects pending tasks (GH-245 Task 5) ────
+
+  describe('completeWork terminal guard (GH-245)', () => {
+    const TICKET_PENDING = 'TEST-GUARD-PENDING';
+    const TICKET_DONE = 'TEST-GUARD-DONE';
+    const TICKET_NO_META = 'TEST-GUARD-NOMETA';
+
+    after(() => {
+      cleanupTempWorkState(TICKET_PENDING);
+      cleanupTempWorkState(TICKET_DONE);
+      cleanupTempWorkState(TICKET_NO_META);
+    });
+
+    it('should reject completion when tasks are still pending', async () => {
+      // Init state and add tasksMeta with a pending task
+      await runWorkState(['init', TICKET_PENDING]);
+      await runWorkState(['task-init', TICKET_PENDING, '3']);
+
+      const { code, stderr } = await runWorkState(['complete', TICKET_PENDING]);
+      assert.equal(code, 1, 'Should exit with code 1 when tasks are pending');
+      const errResult = JSON.parse(stderr.trim());
+      assert.ok(errResult.error, 'Should return an error');
+      assert.match(
+        errResult.error,
+        /tasks still pending/i,
+        'Error should mention tasks still pending'
+      );
+    });
+
+    it('should succeed when all tasks are completed', async () => {
+      // Init state, add tasksMeta, and complete all tasks
+      await runWorkState(['init', TICKET_DONE]);
+      await runWorkState(['task-init', TICKET_DONE, '2']);
+      // Advance both tasks to completed
+      await runWorkState(['task-advance', TICKET_DONE]);
+      await runWorkState(['task-advance', TICKET_DONE]);
+
+      const { result, code } = await runWorkState(['complete', TICKET_DONE]);
+      assert.equal(code, 0, 'Should exit with code 0 when all tasks completed');
+      assert.equal(result.status, 'completed');
+    });
+
+    it('should succeed when no tasksMeta exists (backward compat)', async () => {
+      // Init state without task tracking
+      await runWorkState(['init', TICKET_NO_META]);
+
+      const { result, code } = await runWorkState(['complete', TICKET_NO_META]);
+      assert.equal(code, 0, 'Should exit with code 0 when no tasksMeta exists');
+      assert.equal(result.status, 'completed');
+    });
+  });
 });

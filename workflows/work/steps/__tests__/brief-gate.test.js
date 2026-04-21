@@ -1,7 +1,7 @@
 /**
  * Unit tests for the brief-gate step module (GH-215, Task 4).
  *
- * Covers the four SKIP/RUN decision paths plus the post-resolve handler
+ * Covers the four DEFER/RUN decision paths plus the post-resolve handler
  * behavior (rewrite-on-answer, no-op-on-cancel).
  *
  * Run: node --test workflows/work/steps/__tests__/brief-gate.test.js
@@ -122,33 +122,33 @@ describe('brief-gate step', () => {
     assert.equal(typeof briefGateStep, 'function');
   });
 
-  it('SKIPs when WORK_BRIEF_ENABLED=0', () => {
+  it('DEFERs when WORK_BRIEF_ENABLED=0', () => {
     process.env.WORK_BRIEF_ENABLED = '0';
     const { add, entries } = makeAdd();
     briefGateStep(add, makeState(), makeCtx());
     assert.equal(entries.length, 1);
     assert.equal(entries[0].step, STEPS.brief_gate);
-    assert.equal(entries[0].action, 'SKIP');
+    assert.equal(entries[0].action, 'DEFER');
     assert.match(entries[0].reason, /disabled/i);
   });
 
-  it('SKIPs when no brief.md is present', () => {
+  it('DEFERs when no brief.md is present', () => {
     const { add, entries } = makeAdd();
     briefGateStep(add, makeState({ hasBrief: false }), makeCtx());
     assert.equal(entries.length, 1);
     assert.equal(entries[0].step, STEPS.brief_gate);
-    assert.equal(entries[0].action, 'SKIP');
+    assert.equal(entries[0].action, 'DEFER');
     assert.match(entries[0].reason, /no brief/i);
   });
 
-  it('SKIPs when all questions are resolved (only-local brief)', () => {
+  it('DEFERs when all questions are resolved (only-local brief)', () => {
     const dir = makeTmpTasksDir(BRIEF_ALL_LOCAL);
     createdDirs.push(dir);
     const { add, entries } = makeAdd();
     briefGateStep(add, makeState(), makeCtx({ tasksDir: dir }));
     assert.equal(entries.length, 1);
     assert.equal(entries[0].step, STEPS.brief_gate);
-    assert.equal(entries[0].action, 'SKIP');
+    assert.equal(entries[0].action, 'DEFER');
     assert.match(entries[0].reason, /resolved|no open/i);
   });
 

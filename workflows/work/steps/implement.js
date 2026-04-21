@@ -196,11 +196,11 @@ module.exports = function implementStep(add, s, ctx) {
   };
 
   if (allTasksDone) {
-    add(STEPS.implement, 'SKIP', null, 'All tasks completed');
+    add(STEPS.implement, 'DEFER', null, 'All tasks completed');
   } else if (currentTask?.isCheckpoint) {
     add(
       STEPS.implement,
-      'SKIP',
+      'DEFER',
       null,
       `Task ${currentTask.num} is a checkpoint — no implementation needed`
     );

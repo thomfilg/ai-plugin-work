@@ -6,11 +6,11 @@
  * `./brief-gate.js`, and reuses the pure parser in `../lib/parse-gherkin.js`.
  *
  * Decision matrix:
- *   1. `WORK_SPEC_ENABLED=0`                  → SKIP "Spec disabled"
- *   2. `!s.hasSpec`                           → SKIP "No spec.md present"
+ *   1. `WORK_SPEC_ENABLED=0`                  → DEFER "Spec disabled"
+ *   2. `!s.hasSpec`                           → DEFER "No spec.md present"
  *   3. `spec.md` unreadable (fail-closed)      → RUN  "/spec" regenerate spec
- *   4. gherkin-skip override present           → SKIP with override reason
- *   5. parse() + validate() passes             → SKIP with scenario count
+ *   4. gherkin-skip override present           → DEFER with override reason
+ *   5. parse() + validate() passes             → DEFER with scenario count
  *   6. Validation fails                        → RUN  "/spec" with error messages
  */
 
@@ -30,13 +30,13 @@ function specGateStep(add, s, ctx) {
 
   // Case 1: Spec disabled
   if (!specEnabled) {
-    add(STEPS.spec_gate, 'SKIP', null, 'Spec disabled (WORK_SPEC_ENABLED=0)');
+    add(STEPS.spec_gate, 'DEFER', null, 'Spec disabled (WORK_SPEC_ENABLED=0)');
     return;
   }
 
   // Case 2: No spec.md
   if (!s || !s.hasSpec) {
-    add(STEPS.spec_gate, 'SKIP', null, 'No spec.md present');
+    add(STEPS.spec_gate, 'DEFER', null, 'No spec.md present');
     return;
   }
 
@@ -56,7 +56,7 @@ function specGateStep(add, s, ctx) {
   // Case 4: Skip override
   const skipResult = parseGherkin.hasSkipOverride(markdown);
   if (skipResult.skip) {
-    add(STEPS.spec_gate, 'SKIP', null, `Gherkin skip override: ${skipResult.reason}`);
+    add(STEPS.spec_gate, 'DEFER', null, `Gherkin skip override: ${skipResult.reason}`);
     return;
   }
 
@@ -71,7 +71,7 @@ function specGateStep(add, s, ctx) {
       sum + f.scenarios.filter((sc) => sc.tags.includes('@integration')).length, 0);
     const e2eCount = parsed.features.reduce((sum, f) =>
       sum + f.scenarios.filter((sc) => sc.tags.includes('@e2e')).length, 0);
-    add(STEPS.spec_gate, 'SKIP', null,
+    add(STEPS.spec_gate, 'DEFER', null,
       `Gherkin validation passed (${totalScenarios} scenarios, ${integrationCount} @integration, ${e2eCount} @e2e)`);
     return;
   }

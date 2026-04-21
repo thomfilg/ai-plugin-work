@@ -2,9 +2,9 @@
  * Unit tests for the task-review step module (GH-211, Task 5).
  *
  * Covers the five decision paths:
- *   1. SKIP when TASK_REVIEW_ENABLED=0
- *   2. SKIP when no tasks (no hasTasks or no taskData)
- *   3. SKIP when final task (current task is last)
+ *   1. DEFER when TASK_REVIEW_ENABLED=0
+ *   2. DEFER when no tasks (no hasTasks or no taskData)
+ *   3. DEFER when final task (current task is last)
  *   4. RUN for intermediate task needing review
  *   5. RUN with AskUserQuestion escalation when max fix rounds exhausted
  *
@@ -81,9 +81,9 @@ describe('task-review step', () => {
     assert.equal(typeof taskReviewStep, 'function');
   });
 
-  // ─── Decision 1: SKIP when disabled ────────────────────────────────────────
+  // ─── Decision 1: DEFER when disabled ───────────────────────────────────────
 
-  it('SKIPs when TASK_REVIEW_ENABLED=0', () => {
+  it('DEFERs when TASK_REVIEW_ENABLED=0', () => {
     process.env.TASK_REVIEW_ENABLED = '0';
     const { add, entries } = makeAdd();
     const taskData = [
@@ -98,24 +98,24 @@ describe('task-review step', () => {
     taskReviewStep(add, s, ctx);
     assert.equal(entries.length, 1);
     assert.equal(entries[0].step, STEPS.task_review);
-    assert.equal(entries[0].action, 'SKIP');
+    assert.equal(entries[0].action, 'DEFER');
     assert.match(entries[0].reason, /disabled/i);
   });
 
-  // ─── Decision 2: SKIP when no tasks ────────────────────────────────────────
+  // ─── Decision 2: DEFER when no tasks ──────────────────────────────────────
 
-  it('SKIPs when no tasks (hasTasks=false)', () => {
+  it('DEFERs when no tasks (hasTasks=false)', () => {
     const { add, entries } = makeAdd();
     const s = makeState({ hasTasks: false });
     const ctx = makeCtx();
     taskReviewStep(add, s, ctx);
     assert.equal(entries.length, 1);
     assert.equal(entries[0].step, STEPS.task_review);
-    assert.equal(entries[0].action, 'SKIP');
+    assert.equal(entries[0].action, 'DEFER');
     assert.match(entries[0].reason, /no tasks/i);
   });
 
-  it('SKIPs when no tasksMeta in workState', () => {
+  it('DEFERs when no tasksMeta in workState', () => {
     const { add, entries } = makeAdd();
     const taskData = [{ num: 1, title: 'Task A', isCheckpoint: false }];
     const s = makeState({ hasTasks: true, workState: {} });
@@ -123,11 +123,11 @@ describe('task-review step', () => {
     taskReviewStep(add, s, ctx);
     assert.equal(entries.length, 1);
     assert.equal(entries[0].step, STEPS.task_review);
-    assert.equal(entries[0].action, 'SKIP');
+    assert.equal(entries[0].action, 'DEFER');
     assert.match(entries[0].reason, /no tasks/i);
   });
 
-  it('SKIPs when _taskData is null', () => {
+  it('DEFERs when _taskData is null', () => {
     const { add, entries } = makeAdd();
     const s = makeState({
       hasTasks: true,
@@ -137,13 +137,13 @@ describe('task-review step', () => {
     taskReviewStep(add, s, ctx);
     assert.equal(entries.length, 1);
     assert.equal(entries[0].step, STEPS.task_review);
-    assert.equal(entries[0].action, 'SKIP');
+    assert.equal(entries[0].action, 'DEFER');
     assert.match(entries[0].reason, /no tasks/i);
   });
 
-  // ─── Decision 3: SKIP when final task ──────────────────────────────────────
+  // ─── Decision 3: DEFER when final task ─────────────────────────────────────
 
-  it('SKIPs when current task is the last task', () => {
+  it('DEFERs when current task is the last task', () => {
     const { add, entries } = makeAdd();
     const taskData = [
       { num: 1, title: 'Task A', isCheckpoint: false },
@@ -162,11 +162,11 @@ describe('task-review step', () => {
     taskReviewStep(add, s, ctx);
     assert.equal(entries.length, 1);
     assert.equal(entries[0].step, STEPS.task_review);
-    assert.equal(entries[0].action, 'SKIP');
+    assert.equal(entries[0].action, 'DEFER');
     assert.match(entries[0].reason, /final task/i);
   });
 
-  it('SKIPs when single task (always the final task)', () => {
+  it('DEFERs when single task (always the final task)', () => {
     const { add, entries } = makeAdd();
     const taskData = [{ num: 1, title: 'Only task', isCheckpoint: false }];
     const s = makeState({
@@ -182,7 +182,7 @@ describe('task-review step', () => {
     taskReviewStep(add, s, ctx);
     assert.equal(entries.length, 1);
     assert.equal(entries[0].step, STEPS.task_review);
-    assert.equal(entries[0].action, 'SKIP');
+    assert.equal(entries[0].action, 'DEFER');
     assert.match(entries[0].reason, /final task/i);
   });
 
