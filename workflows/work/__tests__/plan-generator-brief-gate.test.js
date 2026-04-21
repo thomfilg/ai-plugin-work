@@ -129,7 +129,7 @@ describe('plan-generator brief_gate ordering (GH-215 Task 6.2)', () => {
 
   it('emits brief_gate when hasBrief is true (gate evaluates brief.md)', () => {
     // With hasBrief=true, the gate will try to read brief.md via fs and
-    // fail-open to a DEFER ("brief.md unreadable") because we use a bogus path.
+    // fail-open to RUN ("brief.md unreadable — regenerate brief...") because we use a bogus path.
     // That is fine for the ordering assertion — we only care that a
     // brief_gate entry appears between brief and spec.
     const state = makeState({ hasBrief: true });

@@ -193,7 +193,7 @@ function transitionStep(ticket, targetStep, deps) {
     // Going forward
     for (let i = currentIdx + 1; i < targetIdx; i++) {
       if (ws.stepStatus[ALL_STEPS[i]] === 'pending') {
-        ws.stepStatus[ALL_STEPS[i]] = 'deferred';
+        ws.stepStatus[ALL_STEPS[i]] = 'completed';
         appendAction(safeTicket, { step: ALL_STEPS[i], what: 'step deferred' });
       }
     }

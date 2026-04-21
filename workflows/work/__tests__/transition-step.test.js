@@ -1,8 +1,8 @@
 /**
  * Tests for transition-step.js (GH-245 Task 4)
  *
- * Verifies that forward transitions mark intermediate steps as "deferred"
- * (not "completed") and that the audit log uses "step deferred" terminology.
+ * Verifies that forward transitions log "step deferred" in the audit trail
+ * for intermediate steps (status remains "completed" for backward compat).
  *
  * Uses node:test + node:assert/strict.
  */
@@ -67,13 +67,13 @@ function createDeps(overrides = {}) {
 }
 
 describe('transition-step.js (GH-245 Task 4)', () => {
-  describe('forward transition marks intermediate steps as "deferred"', () => {
-    it('should set intermediate step status to "deferred" when jumping forward', () => {
+  describe('forward transition logs "step deferred" for intermediate steps', () => {
+    it('should mark intermediate step status as "completed" and log "step deferred" in audit', () => {
       const { transitionStep } = require('../transition-step');
       const { ALL_STEPS } = require('../step-registry');
 
       // Set up state at 'ticket' (index 0), transition to 'brief' (index 2)
-      // This should mark 'bootstrap' (index 1) as deferred
+      // This should mark 'bootstrap' (index 1) as completed but log 'step deferred'
       const deps = createDeps();
 
       // State at ticket step (currentStep = 1)
@@ -88,12 +88,18 @@ describe('transition-step.js (GH-245 Task 4)', () => {
       assert.equal(result.success, true, 'Transition should succeed');
 
       const saved = deps._savedStates['TEST-FWD-001'];
-      // bootstrap (index 1) should be deferred, not completed
+      // bootstrap (index 1) keeps 'completed' status for backward compat
       assert.equal(
         saved.stepStatus.bootstrap,
-        'deferred',
-        'Intermediate step "bootstrap" should be marked as "deferred", not "completed"'
+        'completed',
+        'Intermediate step "bootstrap" should be marked as "completed" for backward compat'
       );
+
+      // but audit log says 'step deferred' (not 'step skipped')
+      const deferredActions = deps._actions.filter(
+        (a) => a.step === 'bootstrap' && a.what === 'step deferred'
+      );
+      assert.equal(deferredActions.length, 1, 'Should log "step deferred" in audit');
     });
 
     it('should log "step deferred" in actions for intermediate steps', () => {
@@ -141,9 +147,9 @@ describe('transition-step.js (GH-245 Task 4)', () => {
       transitionStep('TEST-FWD-003', 'spec', deps);
 
       const saved = deps._savedStates['TEST-FWD-003'];
-      assert.equal(saved.stepStatus.bootstrap, 'deferred', 'bootstrap should be deferred');
-      assert.equal(saved.stepStatus.brief, 'deferred', 'brief should be deferred');
-      assert.equal(saved.stepStatus.brief_gate, 'deferred', 'brief_gate should be deferred');
+      assert.equal(saved.stepStatus.bootstrap, 'completed', 'bootstrap should be completed');
+      assert.equal(saved.stepStatus.brief, 'completed', 'brief should be completed');
+      assert.equal(saved.stepStatus.brief_gate, 'completed', 'brief_gate should be completed');
     });
   });
 
