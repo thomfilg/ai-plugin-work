@@ -279,6 +279,7 @@ function checkCI(prNumber) {
 
 // ── Reviews ─────────────────────────────────────────────────────────────────
 
+// Aliases for each bot are in botLoginAliases (see getReviews)
 const DEFAULT_BOT_REVIEWERS = 'copilot-pull-request-reviewer,cursor-ai[bot],chatgpt-codex-connector[bot]';
 
 function getBotReviewers() {
