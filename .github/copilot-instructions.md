@@ -1,5 +1,7 @@
 # Copilot Code Review Instructions
 
+**Architecture Reference:** See [`docs/README.md`](../docs/README.md) for full codebase documentation — architecture, workflows, state machine, hooks, TDD enforcement, agents, skills, and configuration.
+
 ## Stale Comment Resolution
 
 - Before flagging an issue, check if it was already fixed in a later commit in the same PR.
