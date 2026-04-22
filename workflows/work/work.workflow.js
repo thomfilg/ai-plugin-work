@@ -161,6 +161,11 @@ function getWorkflowDefinition() {
 }
 function buildTransitionDeps() {
   const { workflow } = getWorkflowDefinition();
+  // GH-260: Allow disabling the step-verify gate in test environments.
+  // When STEP_VERIFY_ENABLED=0, treat all steps as soft (skip verify functions).
+  // This prevents verify functions that do real I/O (git, fs) from blocking
+  // transitions in CI test suites that don't test the verify gate itself.
+  const stepVerifyDisabled = process.env.STEP_VERIFY_ENABLED === '0';
   return {
     tp,
     STEPS,
@@ -178,8 +183,8 @@ function buildTransitionDeps() {
     getCurrentStep,
     TASKS_BASE,
     // GH-260: generic step-verify gate
-    softSteps: workflow.softSteps,
-    commandMap: workflow.commandMap,
+    softSteps: stepVerifyDisabled ? new Set(ALL_STEPS) : workflow.softSteps,
+    commandMap: stepVerifyDisabled ? [] : workflow.commandMap,
   };
 }
 function transitionStep(ticket, targetStep) {

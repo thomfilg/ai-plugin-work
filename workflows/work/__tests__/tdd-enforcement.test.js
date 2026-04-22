@@ -93,6 +93,7 @@ function baseEnv(extra = {}) {
     WORKTREES_BASE: tempWorktreesBase,
     TASKS_BASE: tempTasksBase,
     SESSION_GUARD_ENABLED: '0',
+    STEP_VERIFY_ENABLED: '0',
     ...extra,
   };
 }

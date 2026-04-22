@@ -57,7 +57,7 @@ function runOrchestrator(args = [], opts = {}) {
       stdio: ['pipe', 'pipe', 'pipe'],
       // Intentionally disable session guard to isolate orchestrator plan logic.
       // Session guard has dedicated tests in session-guard.test.js (26 tests covering all subcommands + hooks).
-      env: { ...process.env, SESSION_GUARD_ENABLED: '0', ...derivedEnv },
+      env: { ...process.env, SESSION_GUARD_ENABLED: '0', STEP_VERIFY_ENABLED: '0', ...derivedEnv },
       cwd: opts.cwd,
     });
 
