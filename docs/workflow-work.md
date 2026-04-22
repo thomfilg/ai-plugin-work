@@ -1,6 +1,6 @@
 # /work Workflow
 
-The main orchestrator workflow that drives ticket-to-PR delivery through 17 deterministic steps.
+The main orchestrator workflow that drives ticket-to-PR delivery through 18 deterministic steps.
 
 ## Invocation
 
@@ -80,7 +80,24 @@ The main orchestrator workflow that drives ticket-to-PR delivery through 17 dete
 
 **Output:** `tasks/<ticket>/spec.md`
 
-### 6. tasks
+### 6. spec_gate (GH-244)
+
+**Purpose:** Validate Gherkin test scenarios in the spec before task decomposition.
+
+**Actions:**
+- Parse `spec.md` for Gherkin test scenario blocks
+- Validate syntax and structure via `parse-gherkin.js`
+- Check for skip override (specs can declare Gherkin validation not applicable)
+
+**Verification:** One of:
+- Spec is disabled (`WORK_SPEC_ENABLED=0`)
+- `spec.md` doesn't exist (step SKIPs)
+- Skip override is present in spec
+- `parse()` + `validate()` passes with no errors
+
+**Retry:** On failure, loops back to `spec` to regenerate (`spec_gate → spec`)
+
+### 7. tasks
 
 **Purpose:** Split the spec into ordered, deliverable tasks with requirement traceability.
 
@@ -96,7 +113,7 @@ The main orchestrator workflow that drives ticket-to-PR delivery through 17 dete
 
 **Output:** `tasks/<ticket>/tasks.md`
 
-### 7. implement
+### 8. implement
 
 **Purpose:** Code implementation following TDD discipline.
 
@@ -119,7 +136,7 @@ task N: implement → commit → task_review → check
 
 **Exception mode:** For config-only/mechanical changes, `tdd-phase-state.js exception` records a reason and bypasses TDD. See [TDD Enforcement](./tdd-enforcement.md).
 
-### 8. commit
+### 9. commit
 
 **Purpose:** Commit implemented changes.
 
@@ -132,7 +149,7 @@ task N: implement → commit → task_review → check
 
 **Verification:** HEAD has new non-empty commits compared to base branch
 
-### 9. task_review (GH-211)
+### 10. task_review (GH-211)
 
 **Purpose:** Per-task code review after each commit.
 
@@ -147,7 +164,7 @@ task N: implement → commit → task_review → check
 
 **Verification:** Review artifacts exist (`task-review-tests.md` or `task-review-code.md`)
 
-### 10. check
+### 11. check
 
 **Purpose:** Full quality verification across all tasks.
 
@@ -162,7 +179,7 @@ task N: implement → commit → task_review → check
 
 **Verification:** All required report files exist
 
-### 11. pr
+### 12. pr
 
 **Purpose:** Create or update the pull request.
 
@@ -175,13 +192,13 @@ task N: implement → commit → task_review → check
 
 **Verification:** Open PR exists for current branch (`gh pr view`)
 
-### 12. ready
+### 13. ready
 
 **Purpose:** Mark PR as ready for review.
 
 **Soft step** — user/agent signals readiness.
 
-### 13. follow_up
+### 14. follow_up
 
 **Purpose:** Monitor PR for CI status and review comments.
 
@@ -193,7 +210,7 @@ task N: implement → commit → task_review → check
 
 **Verification:** `isPRGateReady()` returns true AND all comments accounted for
 
-### 14. ci
+### 15. ci
 
 **Purpose:** Verify CI checks pass.
 
@@ -201,7 +218,7 @@ task N: implement → commit → task_review → check
 
 **Retry:** If CI fails, loop back to implement to fix
 
-### 15. cleanup
+### 16. cleanup
 
 **Purpose:** Remove development server sessions.
 
@@ -211,13 +228,13 @@ task N: implement → commit → task_review → check
 
 **Verification:** No tmux session exists for this ticket
 
-### 16. reports
+### 17. reports
 
 **Purpose:** Validate final approval status.
 
 **Verification:** All check reports contain `Status: APPROVED` or `Status: COMPLETE`. At least one QA report exists and passes.
 
-### 17. complete
+### 18. complete
 
 **Purpose:** Terminal step.
 

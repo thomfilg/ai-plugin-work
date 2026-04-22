@@ -38,7 +38,7 @@ Comprehensive documentation for the `claude-plugin-work` plugin, a deterministic
 ### Workflow Step Order (/work)
 
 ```
-ticket → bootstrap → brief → brief_gate → spec → tasks →
+ticket → bootstrap → brief → brief_gate → spec → spec_gate → tasks →
 implement → commit → task_review → check → pr → ready →
 follow_up → ci → cleanup → reports → complete
 ```

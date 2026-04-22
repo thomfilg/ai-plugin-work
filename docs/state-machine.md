@@ -17,6 +17,7 @@ const STEPS = Object.freeze({
   brief:       'brief',
   brief_gate:  'brief_gate',
   spec:        'spec',
+  spec_gate:   'spec_gate',
   tasks:       'tasks',
   implement:   'implement',
   commit:      'commit',
@@ -40,18 +41,19 @@ const STEPS = Object.freeze({
 3. brief         — Generate product brief
 4. brief_gate    — Verify no blocking open questions (GH-215)
 5. spec          — Generate technical spec
-6. tasks         — Split spec into tasks (tasks.md)
-7. implement     — TDD-gated code implementation
-8. commit        — Commit changes
-9. task_review   — Per-task code review gate (GH-211)
-10. check        — Full quality verification
-11. pr           — Create/update pull request
-12. ready        — Mark PR ready for review
-13. follow_up    — Monitor CI & address review comments
-14. ci           — Verify CI passes
-15. cleanup      — Remove dev server sessions
-16. reports      — Generate approval summary
-17. complete     — Terminal step
+6. spec_gate     — Validate Gherkin test scenarios in spec (GH-244)
+7. tasks         — Split spec into tasks (tasks.md)
+8. implement     — TDD-gated code implementation
+9. commit        — Commit changes
+10. task_review  — Per-task code review gate (GH-211)
+11. check        — Full quality verification
+12. pr           — Create/update pull request
+13. ready        — Mark PR ready for review
+14. follow_up   — Monitor CI & address review comments
+15. ci           — Verify CI passes
+16. cleanup      — Remove dev server sessions
+17. reports      — Generate approval summary
+18. complete     — Terminal step
 ```
 
 ## Transition Graph
@@ -62,9 +64,10 @@ Each step transitions to the next step in order: `ticket → bootstrap → brief
 
 ### Backward Edges (Retry Loops)
 
-When quality gates fail, the workflow loops back to `implement` to fix issues:
+When quality gates fail, the workflow loops back to fix issues:
 
 ```
+spec_gate   → spec         (Gherkin validation failed, regenerate spec)
 task_review → implement    (review found issues)
 check       → implement    (check found issues)
 follow_up   → implement    (PR review requires code changes)
@@ -80,9 +83,11 @@ complete → complete        (retry terminal step on partial failure, GH-106)
 ### Visual Graph
 
 ```
-ticket → bootstrap → brief → brief_gate → spec → tasks
-                                                    │
-    ┌───────────────────────────────────────────────┘
+ticket → bootstrap → brief → brief_gate → spec → spec_gate → tasks
+                                            ▲        │
+                                            └────────┘ (Gherkin invalid)
+                                                               │
+    ┌──────────────────────────────────────────────────────────┘
     ▼
 implement ←──────────────────────────────────────┐
     │                                             │
