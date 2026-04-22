@@ -9,7 +9,7 @@
 1. **Deterministic orchestration** — A state machine guarantees exact step execution order. No step is skipped unless explicitly planned (SKIP/DEFER).
 2. **Evidence-based gates** — Steps must produce verifiable evidence (files, git state, test results) before the workflow can progress.
 3. **Fail-open hooks** — All enforcement hooks exit 0 on internal errors (allow tool use). Only intentional blocks return exit code 2.
-4. **Agent specialization** — 18 domain-specific agents handle different concerns. No agent self-reports evidence; external scripts record it.
+4. **Agent specialization** — 19 domain-specific agents handle different concerns. No agent self-reports evidence; external scripts record it.
 5. **Resume on context loss** — Persistent state files allow the workflow to resume from the last completed step after a crash or context window rotation.
 
 ## Directory Structure

@@ -43,9 +43,11 @@ Generates a well-structured PR description from git diffs and adds visual docume
 
 ## State File
 
-`TASKS_BASE/<ticket>/.work-pr-state.json`
+`TASKS_BASE/<ticket>/.work-pr.workflow-state.json`
 
 ## Workflow Steps
+
+The full workflow includes orchestration steps (preflight, setup, screenshot gating, summary). The two agent-executed steps are:
 
 1. **pr-generator** — Create/update PR description
 2. **pr-post-generator** — Add visual documentation (screenshots, recordings)

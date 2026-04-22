@@ -65,10 +65,9 @@ The plugin uses environment variables for configuration, loaded via `.envrc` fil
 **File:** `workflows/lib/config.js`
 
 Resolution order (first wins):
-1. `process.env` (command line / shell environment)
-2. `.envrc` file (parent directory — check `../` first)
-3. `.env` file (plugin root or cwd)
-4. Defaults in `config.js`
+1. `process.env` (command line / shell environment — includes variables loaded by `direnv` from `.envrc`)
+2. `.env` file (repo root or cwd — loaded by `config.js`)
+3. Defaults in `config.js`
 
 ### Key Functions
 
@@ -137,7 +136,7 @@ The `WEB_APPS` variable controls QA agent routing during `/check`:
 
 ## .envrc Location
 
-The `.envrc` file is typically in the **parent directory** relative to the worktree, not inside the worktree itself. The config loader checks `../` first when looking for environment configuration.
+In many setups, especially when using `direnv`, the `.envrc` file lives in the **parent directory** relative to the worktree rather than inside the worktree itself. This is a shell/environment convention (direnv loads `.envrc` into `process.env`), not a special `../` lookup implemented by `config.js`.
 
 ```
 parent-dir/

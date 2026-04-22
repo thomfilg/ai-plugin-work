@@ -258,7 +258,7 @@ Task N: implement → commit → task_review ──┘ (if fix needed)
 
 State tracking:
 - `tasksMeta.currentTaskIndex` — 0-indexed pointer
-- `tasksMeta.tasks[i].status` — `pending`, `in_progress`, `completed`
+- `tasksMeta.tasks[i].status` — `pending` or `completed` (active task is identified by `currentTaskIndex`, not a separate status)
 - `tasksMeta.tasks[i].taskReviewFixRounds` — Fix round counter (resets per task)
 
 ## Plan Actions

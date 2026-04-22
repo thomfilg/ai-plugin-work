@@ -120,7 +120,7 @@ The primary state file tracks step progress:
 {
   "ticketId": "PROJ-123",
   "description": "",
-  "currentStep": 10,
+  "currentStep": 11,
   "status": "in_progress",
   "stepStatus": {
     "ticket": "completed",
@@ -128,6 +128,7 @@ The primary state file tracks step progress:
     "brief": "completed",
     "brief_gate": "completed",
     "spec": "completed",
+    "spec_gate": "completed",
     "tasks": "completed",
     "implement": "completed",
     "commit": "completed",
@@ -147,7 +148,7 @@ The primary state file tracks step progress:
       { "id": "task_1", "status": "completed" },
       { "id": "task_2", "status": "completed" },
       { "id": "task_3", "status": "completed" },
-      { "id": "task_4", "status": "in_progress" },
+      { "id": "task_4", "status": "pending" },
       { "id": "task_5", "status": "pending" },
       { "id": "task_6", "status": "pending" }
     ]

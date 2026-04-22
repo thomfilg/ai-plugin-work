@@ -33,28 +33,33 @@ User message / Agent action
 
 Hooks are registered as shell commands that receive tool context via stdin (JSON):
 
+The actual `hooks.json` uses `matcher` regex patterns, `CLAUDE_HOOK_TYPE` env vars, and `${CLAUDE_PLUGIN_ROOT}` paths. Different tool types trigger different hook sets:
+
 ```json
 {
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Edit|Write|MultiEdit|Bash",
+        "matcher": "Task|Skill",
         "hooks": [
-          {
-            "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/enforce-step-workflow.js"
-          }
+          { "type": "command", "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/enforce-step-workflow.js" }
+        ]
+      },
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          { "type": "command", "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/enforce-step-workflow.js" },
+          { "type": "command", "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/work/hooks/enforce-work-command.js" },
+          { "type": "command", "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/work-implement/hooks/work-implement-enforce.js" },
+          { "type": "command", "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/work/hooks/work-require-implement.js" }
         ]
       }
     ],
     "PostToolUse": [
       {
-        "matcher": "Edit|Write|MultiEdit|Bash",
+        "matcher": "Task|Skill|Bash",
         "hooks": [
-          {
-            "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/enforce-step-workflow.js"
-          }
+          { "type": "command", "command": "CLAUDE_HOOK_TYPE=PostToolUse node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/enforce-step-workflow.js" }
         ]
       }
     ]
@@ -62,7 +67,7 @@ Hooks are registered as shell commands that receive tool context via stdin (JSON
 }
 ```
 
-Note: The actual `hooks.json` uses `matcher` patterns and `${CLAUDE_PLUGIN_ROOT}` paths. Only matching tool types trigger the hooks.
+Note: This is a simplified excerpt. The full `hooks.json` includes additional matchers for `Bash`, MCP tools, `AskUserQuestion`, `PreCompact`, and `Stop` events. `CLAUDE_HOOK_TYPE` is set as an env var prefix so the same script can distinguish Pre vs Post invocation.
 
 ## Hook Input/Output Protocol
 

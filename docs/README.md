@@ -24,7 +24,7 @@ Comprehensive documentation for the `claude-plugin-work` plugin, a deterministic
 
 ### Agents & Skills
 
-- **[Agents](./agents.md)** — All 18 specialized agents: roles, dispatch rules, and authorization
+- **[Agents](./agents.md)** — All 19 specialized agents: roles, dispatch rules, and authorization
 - **[Skills](./skills.md)** — All slash commands: purpose, allowed tools, and invocation patterns
 
 ### Configuration & Setup

@@ -27,7 +27,7 @@ RED ──────────► GREEN ──────────► RE
 
 **Hook enforcement:** Blocks Write/Edit to non-test files.
 
-**Allowed files:** `*.test.ts`, `*.test.tsx`, `*.spec.ts`, `*.spec.tsx` (only files matching `.test.*` or `.spec.*` patterns — helpers like `__mocks__/` are blocked in RED)
+**Allowed files:** Files matching `/\.test\.[jt]sx?$/` or `/\.spec\.[jt]sx?$/` — i.e., `*.test.ts`, `*.test.tsx`, `*.test.js`, `*.test.jsx`, `*.spec.ts`, `*.spec.tsx`, `*.spec.js`, `*.spec.jsx`. Helpers (`__mocks__/`, `__fixtures__/`, `test-utils/`) are blocked in RED.
 
 **Evidence required:** Test files changed + test command exits with non-zero code.
 
@@ -154,10 +154,10 @@ This PreToolUse hook blocks file edits based on the current TDD phase:
 - `.test.ts`, `.test.tsx`, `.test.js`, `.test.jsx`
 - `.spec.ts`, `.spec.tsx`, `.spec.js`, `.spec.jsx`
 
-**Test helper detection:**
+**Test helper detection** (from `TEST_HELPER_PATTERNS`):
 - `__mocks__/*`, `__fixtures__/*`
-- `test-utils.*`, `testing-library.*`
-- Files matching helper patterns are always writable
+- `test-utils/`, `test-utils.[jt]sx?`, `test-helper/`
+- Helpers are writable in GREEN and REFACTOR, but blocked in RED
 
 ## Evidence Validation
 
