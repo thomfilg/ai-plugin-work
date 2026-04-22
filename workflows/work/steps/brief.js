@@ -7,11 +7,8 @@
  */
 module.exports = function briefStep(add, s, ctx) {
   const { STEPS, t, tasksDir, getDocsPrompt, fileExists, path } = ctx;
-  const briefEnabled = process.env.WORK_BRIEF_ENABLED !== '0';
 
-  if (!briefEnabled) {
-    add(STEPS.brief, 'DEFER', null, 'Brief generation disabled (WORK_BRIEF_ENABLED=0)');
-  } else if (s?.hasBrief) {
+  if (s?.hasBrief) {
     add(STEPS.brief, 'DEFER', null, 'brief.md already exists');
   } else {
     add(
