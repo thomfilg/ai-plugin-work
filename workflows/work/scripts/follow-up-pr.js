@@ -521,10 +521,10 @@ function classifyCommentPriority(author, body) {
       if (level <= 2) return 'medium';
       return 'low';
     }
-    // No P-badge: default to medium (blocking). Header/announcement comments
-    // are filtered out by isBotReview() at the review level; inline comments
-    // without badges should be treated as actionable.
-    return 'medium';
+    // No P-badge: default to low (non-blocking). Codex header/announcement comments
+    // and unbadged inline suggestions are treated as non-blocking.
+    // Inline comments WITH P-badges are classified by badge level.
+    return 'low';
   }
 
   // Human reviewers: always blocking

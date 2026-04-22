@@ -163,7 +163,7 @@ describe('classifyCommentPriority', () => {
     });
 
     it('returns medium for comments without P-badge', () => {
-      assert.equal(classifyCommentPriority(author, 'no badge comment'), 'medium');
+      assert.equal(classifyCommentPriority(author, 'no badge comment'), 'low');
     });
   });
 
