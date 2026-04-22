@@ -305,7 +305,7 @@ function isBotAuthorLogin(author, botReviewers) {
   // Exact match against configured bot reviewers (case-insensitive)
   if (reviewers.includes(lower)) return true;
   // Match known aliases used by classifyCommentPriority
-  if (lower === 'copilot' || lower === 'cursor-ai[bot]' || lower === 'chatgpt-codex-connector[bot]' || lower === 'chatgpt-codex-connector') return true;
+  if (lower === 'copilot' || lower === 'cursor-ai[bot]') return true;
   // Fuzzy match: strip [bot] suffix from configured names
   return reviewers.some((bot) => bot.includes('[bot]') && lower === bot.replace('[bot]', ''));
 }
@@ -511,16 +511,19 @@ function classifyCommentPriority(author, body) {
     return 'medium';
   }
 
-  // Codex (chatgpt-codex-connector[bot]): parse P-level badges or treat non-inline as low
+  // Codex (chatgpt-codex-connector[bot]): parse P-level badges
   if (author === 'chatgpt-codex-connector[bot]' || author === 'chatgpt-codex-connector') {
-    const badgeMatch = (body || '').match(/!\[P(\d)/);
+    const badgeMatch = (body || '').match(/!\[P(\d+)/);
     if (badgeMatch) {
       const level = parseInt(badgeMatch[1], 10);
       if (level <= 1) return 'high';
       if (level <= 2) return 'medium';
       return 'low';
     }
-    return 'low';
+    // No P-badge: default to medium (blocking). Header/announcement comments
+    // are filtered out by isBotReview() at the review level; inline comments
+    // without badges should be treated as actionable.
+    return 'medium';
   }
 
   // Human reviewers: always blocking
@@ -714,6 +717,8 @@ function getReviews(prNumber) {
     const botLoginAliases = {
       'copilot-pull-request-reviewer': ['copilot', 'copilot-pull-request-reviewer'],
       'cursor-ai[bot]': ['cursor-ai[bot]', 'cursor-ai'],
+      'chatgpt-codex-connector[bot]': ['chatgpt-codex-connector'],
+      'chatgpt-codex-connector': ['chatgpt-codex-connector[bot]'],
     };
     for (const bot of botReviewers) {
       const aliases = botLoginAliases[bot] || [bot.toLowerCase()];
@@ -1589,6 +1594,7 @@ if (require.main === module) {
 
 module.exports = {
   classifyCommentPriority,
+  isBotAuthorLogin,
   isBlockingPriority,
   getResolvedCommentIds,
   resolveOutdatedThreads,
