@@ -17,6 +17,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const { STEPS } = require('../../step-registry');
+const briefStep = require('../brief.js');
 
 // ─── Test doubles ────────────────────────────────────────────────────────────
 
@@ -70,7 +71,7 @@ describe('brief step (GH-253)', () => {
 
   it('never DEFERs with a "disabled" reason even when WORK_BRIEF_ENABLED=0', () => {
     process.env.WORK_BRIEF_ENABLED = '0';
-    const briefStep = require(path.join(__dirname, '..', 'brief.js'));
+
     const { add, entries } = makeAdd();
     briefStep(add, makeState(), makeCtx());
     assert.equal(entries.length, 1);
@@ -92,7 +93,7 @@ describe('brief step (GH-253)', () => {
   });
 
   it('RUNs when brief.md is missing (hasBrief=false)', () => {
-    const briefStep = require(path.join(__dirname, '..', 'brief.js'));
+
     const { add, entries } = makeAdd();
     briefStep(add, makeState({ hasBrief: false }), makeCtx());
     assert.equal(entries.length, 1);
@@ -101,7 +102,7 @@ describe('brief step (GH-253)', () => {
   });
 
   it('DEFERs when brief.md already exists (hasBrief=true)', () => {
-    const briefStep = require(path.join(__dirname, '..', 'brief.js'));
+
     const { add, entries } = makeAdd();
     briefStep(add, makeState({ hasBrief: true }), makeCtx());
     assert.equal(entries.length, 1);
@@ -111,7 +112,7 @@ describe('brief step (GH-253)', () => {
   });
 
   it('RUNs with correct agent type and prompt when brief is missing', () => {
-    const briefStep = require(path.join(__dirname, '..', 'brief.js'));
+
     const { add, entries } = makeAdd();
     briefStep(add, makeState({ hasBrief: false }), makeCtx());
     const entry = entries[0];
@@ -122,7 +123,7 @@ describe('brief step (GH-253)', () => {
 
   it('still RUNs when WORK_BRIEF_ENABLED=0 and brief is missing', () => {
     process.env.WORK_BRIEF_ENABLED = '0';
-    const briefStep = require(path.join(__dirname, '..', 'brief.js'));
+
     const { add, entries } = makeAdd();
     briefStep(add, makeState({ hasBrief: false }), makeCtx());
     assert.equal(entries.length, 1);

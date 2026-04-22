@@ -1,6 +1,12 @@
 /**
  * Step: spec
  * Generates the technical specification from the brief and codebase analysis.
+ *
+ * Decision matrix:
+ *   1. hasSpec=true                          → DEFER (artifact already present)
+ *   2. hasSpec=false, brief exists or pending → RUN with briefRef in prompt
+ *   3. hasSpec=false, brief complete on disk  → RUN without briefRef
+ *
  * @param {Function} add
  * @param {object} s
  * @param {object} ctx

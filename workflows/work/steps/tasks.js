@@ -1,6 +1,12 @@
 /**
  * Step: tasks
  * Generates tasks from the technical specification.
+ *
+ * Decision matrix:
+ *   1. hasTasks=true     → DEFER (artifact already present)
+ *   2. spec.md missing   → DEFER (dependency not met)
+ *   3. spec.md exists    → RUN  (generate tasks from spec)
+ *
  * @param {Function} add
  * @param {object} s
  * @param {object} ctx

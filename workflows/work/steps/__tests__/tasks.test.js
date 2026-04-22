@@ -18,6 +18,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const { STEPS } = require('../../step-registry');
+const tasksStep = require('../tasks.js');
 
 // ─── Test doubles ────────────────────────────────────────────────────────────
 
@@ -71,7 +72,7 @@ describe('tasks step (GH-253)', () => {
 
   it('never DEFERs with a "disabled" reason even when WORK_TASKS_ENABLED=0', () => {
     process.env.WORK_TASKS_ENABLED = '0';
-    const tasksStep = require(path.join(__dirname, '..', 'tasks.js'));
+
     const { add, entries } = makeAdd();
     const ctx = makeCtx({ fileExists: () => true });
     tasksStep(add, makeState(), ctx);
@@ -94,7 +95,7 @@ describe('tasks step (GH-253)', () => {
   });
 
   it('DEFERs when tasks.md already exists (hasTasks=true)', () => {
-    const tasksStep = require(path.join(__dirname, '..', 'tasks.js'));
+
     const { add, entries } = makeAdd();
     tasksStep(add, makeState({ hasTasks: true }), makeCtx());
     assert.equal(entries.length, 1);
@@ -104,7 +105,7 @@ describe('tasks step (GH-253)', () => {
   });
 
   it('RUNs when spec.md exists and tasks.md is missing', () => {
-    const tasksStep = require(path.join(__dirname, '..', 'tasks.js'));
+
     const { add, entries } = makeAdd();
     const ctx = makeCtx({ fileExists: () => true });
     tasksStep(add, makeState({ hasTasks: false }), ctx);
@@ -114,7 +115,7 @@ describe('tasks step (GH-253)', () => {
   });
 
   it('DEFERs when spec.md is missing (cannot generate tasks)', () => {
-    const tasksStep = require(path.join(__dirname, '..', 'tasks.js'));
+
     const { add, entries } = makeAdd();
     const ctx = makeCtx({ fileExists: () => false });
     tasksStep(add, makeState({ hasTasks: false }), ctx);
@@ -126,7 +127,7 @@ describe('tasks step (GH-253)', () => {
 
   it('still RUNs when WORK_TASKS_ENABLED=0 and spec exists', () => {
     process.env.WORK_TASKS_ENABLED = '0';
-    const tasksStep = require(path.join(__dirname, '..', 'tasks.js'));
+
     const { add, entries } = makeAdd();
     const ctx = makeCtx({ fileExists: () => true });
     tasksStep(add, makeState({ hasTasks: false }), ctx);
@@ -135,7 +136,7 @@ describe('tasks step (GH-253)', () => {
   });
 
   it('RUNs with correct agent type and prompt', () => {
-    const tasksStep = require(path.join(__dirname, '..', 'tasks.js'));
+
     const { add, entries } = makeAdd();
     const ctx = makeCtx({ fileExists: () => true });
     tasksStep(add, makeState({ hasTasks: false }), ctx);

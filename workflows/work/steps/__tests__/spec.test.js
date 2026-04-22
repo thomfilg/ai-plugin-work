@@ -18,6 +18,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const { STEPS } = require('../../step-registry');
+const specStep = require('../spec.js');
 
 // ─── Test doubles ────────────────────────────────────────────────────────────
 
@@ -76,7 +77,7 @@ describe('spec step (GH-253)', () => {
 
   it('never DEFERs with a "disabled" reason even when WORK_SPEC_ENABLED=0', () => {
     process.env.WORK_SPEC_ENABLED = '0';
-    const specStep = require(path.join(__dirname, '..', 'spec.js'));
+
     const { add, entries } = makeAdd();
     specStep(add, makeState(), makeCtx());
     assert.equal(entries.length, 1);
@@ -106,7 +107,7 @@ describe('spec step (GH-253)', () => {
   });
 
   it('RUNs when spec.md is missing (hasSpec=false)', () => {
-    const specStep = require(path.join(__dirname, '..', 'spec.js'));
+
     const { add, entries } = makeAdd();
     specStep(add, makeState({ hasSpec: false }), makeCtx());
     assert.equal(entries.length, 1);
@@ -115,7 +116,7 @@ describe('spec step (GH-253)', () => {
   });
 
   it('DEFERs when spec.md already exists (hasSpec=true)', () => {
-    const specStep = require(path.join(__dirname, '..', 'spec.js'));
+
     const { add, entries } = makeAdd();
     specStep(add, makeState({ hasSpec: true }), makeCtx());
     assert.equal(entries.length, 1);
@@ -125,7 +126,7 @@ describe('spec step (GH-253)', () => {
   });
 
   it('includes briefRef when brief.md file exists on disk', () => {
-    const specStep = require(path.join(__dirname, '..', 'spec.js'));
+
     const { add, entries } = makeAdd();
     const ctx = makeCtx({ fileExists: () => true });
     specStep(add, makeState({ hasSpec: false }), ctx);
@@ -133,16 +134,23 @@ describe('spec step (GH-253)', () => {
   });
 
   it('includes briefRef when brief.md does not exist but hasBrief is false (will be generated)', () => {
-    const specStep = require(path.join(__dirname, '..', 'spec.js'));
+
     const { add, entries } = makeAdd();
     const ctx = makeCtx({ fileExists: () => false });
     specStep(add, makeState({ hasSpec: false, hasBrief: false }), ctx);
     assert.match(entries[0].agentPrompt, /brief\.md/);
   });
 
+  it('omits briefRef when hasBrief=true and brief.md does not exist on disk', () => {
+    const { add, entries } = makeAdd();
+    const ctx = makeCtx({ fileExists: () => false });
+    specStep(add, makeState({ hasSpec: false, hasBrief: true }), ctx);
+    assert.doesNotMatch(entries[0].agentPrompt, /Read the product brief/);
+  });
+
   it('still RUNs when WORK_SPEC_ENABLED=0 and spec is missing', () => {
     process.env.WORK_SPEC_ENABLED = '0';
-    const specStep = require(path.join(__dirname, '..', 'spec.js'));
+
     const { add, entries } = makeAdd();
     specStep(add, makeState({ hasSpec: false }), makeCtx());
     assert.equal(entries.length, 1);
@@ -150,7 +158,7 @@ describe('spec step (GH-253)', () => {
   });
 
   it('RUNs with correct agent type', () => {
-    const specStep = require(path.join(__dirname, '..', 'spec.js'));
+
     const { add, entries } = makeAdd();
     specStep(add, makeState({ hasSpec: false }), makeCtx());
     assert.equal(entries[0].agentType, 'spec-writer');

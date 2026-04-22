@@ -1,6 +1,11 @@
 /**
  * Step: brief
  * Generates the product brief from ticket requirements.
+ *
+ * Decision matrix:
+ *   1. hasBrief=true  → DEFER (artifact already present)
+ *   2. hasBrief=false → RUN  (generate the brief)
+ *
  * @param {Function} add
  * @param {object} s
  * @param {object} ctx
