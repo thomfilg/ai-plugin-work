@@ -11,7 +11,7 @@
 
 const { describe, it, after, afterEach, before } = require('node:test');
 const assert = require('node:assert/strict');
-const { spawn } = require('child_process');
+const { spawn, execFileSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -98,8 +98,68 @@ function baseEnv(extra = {}) {
 }
 
 /**
+ * Create a fake git repo in a temp dir with a branch containing the ticket ID.
+ * Also sets up origin/main so that commit verify (git log origin/main..HEAD) works.
+ * Returns the temp dir path.
+ */
+function setupFakeGitRepo(ticketId) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdd-git-'));
+  const gitOpts = { cwd: dir, encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] };
+  const gc = ['-c', 'user.email=test@test.com', '-c', 'user.name=Test'];
+  execFileSync('git', ['init', '--initial-branch=main'], gitOpts);
+  execFileSync('git', [...gc, 'commit', '--allow-empty', '-m', 'initial'], gitOpts);
+  execFileSync('git', ['remote', 'add', 'origin', '.'], gitOpts);
+  execFileSync('git', ['fetch', 'origin'], gitOpts);
+  execFileSync('git', ['checkout', '-b', `${ticketId}-branch`], gitOpts);
+  fs.writeFileSync(path.join(dir, 'change.txt'), 'test change');
+  execFileSync('git', ['add', '.'], gitOpts);
+  execFileSync('git', [...gc, 'commit', '-m', `${ticketId}: test change`], gitOpts);
+  return dir;
+}
+
+/**
+ * Create task artifacts (brief.md, spec.md, tasks.md) in the ticket's TASKS_BASE dir
+ * so that verify functions for brief, brief_gate, spec, spec_gate, and tasks pass.
+ */
+function writeTaskArtifacts(ticket) {
+  const safeTicket = ticket.startsWith('#') ? `GH-${ticket.slice(1)}` : ticket;
+  const dir = path.join(tempTasksBase, safeTicket);
+  fs.mkdirSync(dir, { recursive: true });
+  // brief.md with no open questions → brief verify + brief_gate verify pass
+  fs.writeFileSync(path.join(dir, 'brief.md'), '# Brief\n\n## Problem Statement\nTest brief.\n');
+  // spec.md with gherkin-skip → spec verify + spec_gate verify pass
+  fs.writeFileSync(
+    path.join(dir, 'spec.md'),
+    '# Spec\n\n<!-- gherkin-skip: test artifact -->\n\n## Summary\nTest spec.\n'
+  );
+  // tasks.md → tasks verify passes
+  fs.writeFileSync(path.join(dir, 'tasks.md'), '# Tasks\n\n- [ ] Task 1\n');
+}
+
+/**
+ * Prepare a ticket environment with fake git repo and task artifacts.
+ * Returns { gitDir, env, cwd } for use with runOrchestrator.
+ * Caller is responsible for cleaning up gitDir.
+ */
+function prepareTicketEnv(ticket, envExtra = {}) {
+  const safeTicket = ticket.startsWith('#') ? `GH-${ticket.slice(1)}` : ticket;
+  const gitDir = setupFakeGitRepo(safeTicket);
+  writeTaskArtifacts(safeTicket);
+  return {
+    gitDir,
+    opts: { env: baseEnv(envExtra), cwd: gitDir },
+    safeTicket,
+    cleanup: () => { try { fs.rmSync(gitDir, { recursive: true, force: true }); } catch {} },
+  };
+}
+
+/**
  * Walk a ticket through transitions 1_ticket -> ... -> targetStep.
  * Returns the result of the final transition.
+ *
+ * Sets up a fake git repo and task artifacts so verify functions pass
+ * for steps up through commit (bootstrap, brief, brief_gate, spec,
+ * spec_gate, tasks, commit).
  */
 async function transitionTo(ticket, targetStep, envExtra = {}) {
   const steps = [
@@ -126,6 +186,9 @@ async function transitionTo(ticket, targetStep, envExtra = {}) {
   // Determine the sanitized ticket for writing TDD evidence
   const safeTicket = ticket.startsWith('#') ? `GH-${ticket.slice(1)}` : ticket;
 
+  // Set up verify prerequisites: fake git repo + task artifacts
+  const { opts, cleanup } = prepareTicketEnv(ticket, envExtra);
+
   let lastResult;
   // Walk step by step through the linear graph.
   for (let i = 0; i <= idx; i++) {
@@ -134,12 +197,12 @@ async function transitionTo(ticket, targetStep, envExtra = {}) {
     if (steps[i] === 'commit') {
       writeValidPhaseState(safeTicket);
     }
-    const { result } = await runOrchestrator(['transition', ticket, steps[i]], {
-      env: baseEnv(envExtra),
-    });
+    const { result } = await runOrchestrator(['transition', ticket, steps[i]], opts);
     lastResult = result;
     if (result?.error) break;
   }
+  // Clean up fake git repo
+  cleanup();
   return lastResult;
 }
 
@@ -387,60 +450,68 @@ describe('TDD enforcement', () => {
     });
 
     it('transition INTO 3_implement (from 6_check) resets tdd-phase.json to RED phase', async () => {
-      // Walk to implement linearly
-      await runOrchestrator(['transition', TICKET, 'bootstrap'], { env: baseEnv() });
-      await runOrchestrator(['transition', TICKET, 'brief'], { env: baseEnv() });
-      await runOrchestrator(['transition', TICKET, 'brief_gate'], { env: baseEnv() });
-      await runOrchestrator(['transition', TICKET, 'spec'], { env: baseEnv() });
-      await runOrchestrator(['transition', TICKET, 'spec_gate'], { env: baseEnv() });
-      await runOrchestrator(['transition', TICKET, 'tasks'], { env: baseEnv() });
-      await runOrchestrator(['transition', TICKET, 'implement'], { env: baseEnv() });
+      const { opts, cleanup } = prepareTicketEnv(TICKET);
+      try {
+        // Walk to implement linearly
+        await runOrchestrator(['transition', TICKET, 'bootstrap'], opts);
+        await runOrchestrator(['transition', TICKET, 'brief'], opts);
+        await runOrchestrator(['transition', TICKET, 'brief_gate'], opts);
+        await runOrchestrator(['transition', TICKET, 'spec'], opts);
+        await runOrchestrator(['transition', TICKET, 'spec_gate'], opts);
+        await runOrchestrator(['transition', TICKET, 'tasks'], opts);
+        await runOrchestrator(['transition', TICKET, 'implement'], opts);
 
-      // Record valid evidence so we can leave 3_implement
-      writeValidPhaseState(TICKET);
-      await runOrchestrator(['transition', TICKET, 'commit'], { env: baseEnv() });
-      await runOrchestrator(['transition', TICKET, 'task_review'], { env: baseEnv() });
-      await runOrchestrator(['transition', TICKET, 'check'], { env: baseEnv() });
+        // Record valid evidence so we can leave 3_implement
+        writeValidPhaseState(TICKET);
+        await runOrchestrator(['transition', TICKET, 'commit'], opts);
+        await runOrchestrator(['transition', TICKET, 'task_review'], opts);
+        await runOrchestrator(['transition', TICKET, 'check'], opts);
 
-      // Now create a stale phase state file for 3_implement
-      const phasePath = path.join(tempTasksBase, TICKET, 'tdd-phase.json');
-      fs.writeFileSync(
-        phasePath,
-        JSON.stringify({ currentPhase: 'green', currentCycle: 2, cycles: [{ cycle: 1 }] })
-      );
-      assert.ok(fs.existsSync(phasePath));
+        // Now create a stale phase state file for 3_implement
+        const phasePath = path.join(tempTasksBase, TICKET, 'tdd-phase.json');
+        fs.writeFileSync(
+          phasePath,
+          JSON.stringify({ currentPhase: 'green', currentCycle: 2, cycles: [{ cycle: 1 }] })
+        );
+        assert.ok(fs.existsSync(phasePath));
 
-      // Transition back INTO 3_implement
-      await runOrchestrator(['transition', TICKET, 'implement'], { env: baseEnv() });
+        // Transition back INTO 3_implement (backward — no verify)
+        await runOrchestrator(['transition', TICKET, 'implement'], opts);
 
-      // tdd-phase.json should be re-created (not deleted) with fresh RED phase
-      assert.ok(
-        fs.existsSync(phasePath),
-        'Phase state file should be re-created after transition into implement'
-      );
-      const state = JSON.parse(fs.readFileSync(phasePath, 'utf8'));
-      assert.equal(state.currentPhase, 'red', 'Phase should be reset to red');
-      assert.equal(state.currentCycle, 1, 'Cycle should be reset to 1');
-      assert.deepEqual(state.cycles, [], 'Cycles should be empty after reset');
+        // tdd-phase.json should be re-created (not deleted) with fresh RED phase
+        assert.ok(
+          fs.existsSync(phasePath),
+          'Phase state file should be re-created after transition into implement'
+        );
+        const state = JSON.parse(fs.readFileSync(phasePath, 'utf8'));
+        assert.equal(state.currentPhase, 'red', 'Phase should be reset to red');
+        assert.equal(state.currentCycle, 1, 'Cycle should be reset to 1');
+        assert.deepEqual(state.cycles, [], 'Cycles should be empty after reset');
+      } finally {
+        cleanup();
+      }
     });
 
     it('transition INTO 3_implement with no prior tdd-phase.json does not error (ENOENT handled)', async () => {
-      await runOrchestrator(['transition', TICKET, 'bootstrap'], { env: baseEnv() });
-      await runOrchestrator(['transition', TICKET, 'brief'], { env: baseEnv() });
-      await runOrchestrator(['transition', TICKET, 'brief_gate'], { env: baseEnv() });
-      await runOrchestrator(['transition', TICKET, 'spec'], { env: baseEnv() });
-      await runOrchestrator(['transition', TICKET, 'spec_gate'], { env: baseEnv() });
-      await runOrchestrator(['transition', TICKET, 'tasks'], { env: baseEnv() });
-      // Make sure no phase state file exists
-      const phasePath = path.join(tempTasksBase, TICKET, 'tdd-phase.json');
+      const { opts, cleanup } = prepareTicketEnv(TICKET);
       try {
-        fs.unlinkSync(phasePath);
-      } catch {}
+        await runOrchestrator(['transition', TICKET, 'bootstrap'], opts);
+        await runOrchestrator(['transition', TICKET, 'brief'], opts);
+        await runOrchestrator(['transition', TICKET, 'brief_gate'], opts);
+        await runOrchestrator(['transition', TICKET, 'spec'], opts);
+        await runOrchestrator(['transition', TICKET, 'spec_gate'], opts);
+        await runOrchestrator(['transition', TICKET, 'tasks'], opts);
+        // Make sure no phase state file exists
+        const phasePath = path.join(tempTasksBase, TICKET, 'tdd-phase.json');
+        try {
+          fs.unlinkSync(phasePath);
+        } catch {}
 
-      const { result } = await runOrchestrator(['transition', TICKET, 'implement'], {
-        env: baseEnv(),
-      });
-      assert.equal(result.success, true);
+        const { result } = await runOrchestrator(['transition', TICKET, 'implement'], opts);
+        assert.equal(result.success, true);
+      } finally {
+        cleanup();
+      }
     });
 
     it('corrupt JSON tdd-phase.json -> BLOCKED', async () => {
@@ -505,15 +576,24 @@ describe('TDD enforcement', () => {
     });
 
     it('current commit -> task_review -> check does not consult TDD evidence (non-gated steps)', async () => {
-      await transitionTo(TICKET, 'implement');
-      writeValidPhaseState(TICKET);
-      await runOrchestrator(['transition', TICKET, 'commit'], { env: baseEnv() });
+      const { opts, cleanup } = prepareTicketEnv(TICKET);
+      try {
+        // Walk to implement
+        const steps = ['bootstrap', 'brief', 'brief_gate', 'spec', 'spec_gate', 'tasks', 'implement'];
+        for (const s of steps) {
+          await runOrchestrator(['transition', TICKET, s], opts);
+        }
+        writeValidPhaseState(TICKET);
+        await runOrchestrator(['transition', TICKET, 'commit'], opts);
 
-      // commit -> task_review -> check without any evidence for these (non-gated)
-      await runOrchestrator(['transition', TICKET, 'task_review'], { env: baseEnv() });
-      const { result } = await runOrchestrator(['transition', TICKET, 'check'], { env: baseEnv() });
-      assert.equal(result.success, true);
-      assert.equal(result.to, 'check');
+        // commit -> task_review -> check without any evidence for these (non-gated)
+        await runOrchestrator(['transition', TICKET, 'task_review'], opts);
+        const { result } = await runOrchestrator(['transition', TICKET, 'check'], opts);
+        assert.equal(result.success, true);
+        assert.equal(result.to, 'check');
+      } finally {
+        cleanup();
+      }
     });
   });
 

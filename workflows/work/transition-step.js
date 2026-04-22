@@ -3,7 +3,8 @@
  *
  * Handles the state machine transition command. Validates transitions
  * against the step registry, enforces TDD gates, DEFER re-evaluation
- * gates, and the check-to-PR quality gate. Persists state changes.
+ * gates, the check-to-PR quality gate, and a generic step-verify gate
+ * (GH-260). Persists state changes.
  *
  * Exposes two functions:
  *   - transitionStep(ticket, targetStep, deps)
@@ -36,6 +37,9 @@ function transitionStep(ticket, targetStep, deps) {
     saveWorkState,
     getCurrentStep,
     TASKS_BASE,
+    // GH-260: generic step-verify gate deps
+    softSteps,
+    commandMap,
   } = deps;
 
   if (!ALL_STEPS.includes(targetStep)) {
@@ -117,6 +121,39 @@ function transitionStep(ticket, targetStep, deps) {
         reasons: checkGate.reasons,
         hint: 'Wait for all check agents to finish and ensure reports pass before transitioning to pr.',
       };
+    }
+  }
+
+  // GH-260: Generic step-verify gate — run the step's verify() function before
+  // allowing forward transitions out of non-soft steps. This catches bypasses
+  // for follow_up, ci, and any other step with a verify() in workflow-definition.js.
+  // The TDD and check-to-PR gates above remain as explicit fast-path checks with
+  // better error messages; this gate acts as a universal catch-all.
+  if (isForward && !softSteps.has(currentStep) && !TDD_GATED_STEPS.includes(currentStep)) {
+    const entry = commandMap.find((c) => c.step === currentStep && typeof c.verify === 'function');
+    if (entry) {
+      let verified;
+      try {
+        verified = entry.verify(safeTicket);
+      } catch (err) {
+        const detail = err && typeof err.message === 'string' ? err.message : String(err);
+        return {
+          error: true,
+          message: `BLOCKED: ${currentStep} verify threw — cannot transition to ${targetStep}: ${detail}`,
+          gate: 'step-verify',
+          step: currentStep,
+          hint: `The ${currentStep} step verification encountered an error: ${detail}. Resolve the issue before transitioning.`,
+        };
+      }
+      if (!verified) {
+        return {
+          error: true,
+          message: `BLOCKED: ${currentStep} not verified — cannot transition to ${targetStep}`,
+          gate: 'step-verify',
+          step: currentStep,
+          hint: `The ${currentStep} step has not passed its verification check. Complete the step requirements before transitioning.`,
+        };
+      }
     }
   }
 

@@ -207,16 +207,48 @@ function transitionStep(workflow, stateInstance, instanceId, targetStep) {
     };
   }
 
-  // Initialize state if needed
+  // GH-260: Generic step-verify gate — run workflow's verifyStep callback
+  // before allowing forward transitions. Blocks BEFORE any state mutation
+  // (including init), so failed first transitions don't create orphan state files.
+  //
+  // verifyStep contract: return falsy to allow, or an object with either
+  // { blocked: true } or { error: true } to block the transition.
+  // Optional fields: message (string), gate (string).
+  const currentIdx = allSteps.indexOf(currentStep);
+  const targetIdx = allSteps.indexOf(targetStep);
+  if (targetIdx > currentIdx && typeof workflow.verifyStep === 'function') {
+    let verifyResult;
+    try {
+      verifyResult = workflow.verifyStep(currentStep, targetStep, instanceId);
+    } catch (err) {
+      return {
+        error: true,
+        message: `BLOCKED: ${currentStep} verify threw — cannot transition to ${targetStep}: ${err && err.message ? err.message : String(err)}`,
+        gate: 'step-verify',
+        step: currentStep,
+        from: currentStep,
+        to: targetStep,
+      };
+    }
+    if (verifyResult && (verifyResult.blocked || verifyResult.error)) {
+      return {
+        error: true,
+        message: verifyResult.message || `BLOCKED: ${currentStep} not verified — cannot transition to ${targetStep}`,
+        gate: verifyResult.gate || 'step-verify',
+        step: currentStep,
+        from: currentStep,
+        to: targetStep,
+      };
+    }
+  }
+
+  // Initialize state if needed (after verify gate — blocked transitions don't create state)
   if (!ws) {
     ws = stateInstance.init(instanceId, allSteps);
   }
 
   // Snapshot state before mutations — used for full rollback if onTransition fails
   const preTransitionState = structuredClone(ws);
-
-  const currentIdx = allSteps.indexOf(currentStep);
-  const targetIdx = allSteps.indexOf(targetStep);
 
   // Mark current as completed, target as in_progress
   ws.stepStatus[currentStep] = 'completed';

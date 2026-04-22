@@ -1,8 +1,12 @@
 /**
- * Tests for transition-step.js (GH-245 Task 4)
+ * Tests for transition-step.js (GH-245 Task 4, GH-260)
  *
  * Verifies that forward transitions log "step deferred" in the audit trail
  * for intermediate steps (status remains "completed" for backward compat).
+ *
+ * GH-260: Tests generic step-verify gate that enforces verify() functions
+ * from workflow-definition.js before allowing forward transitions out of
+ * non-soft steps.
  *
  * Uses node:test + node:assert/strict.
  */
@@ -59,6 +63,9 @@ function createDeps(overrides = {}) {
       return ALL_STEPS[(ws.currentStep || 1) - 1] || ALL_STEPS[0];
     },
     TASKS_BASE: '/tmp/fake-tasks-base',
+    // GH-260: generic step-verify gate deps (default: no soft steps, no commandMap)
+    softSteps: new Set(),
+    commandMap: [],
     // expose for assertions
     _actions: actions,
     _savedStates: savedStates,
@@ -175,4 +182,189 @@ describe('transition-step.js (GH-245 Task 4)', () => {
       );
     });
   });
+});
+
+describe('transition-step.js (GH-260): generic step-verify gate', () => {
+  it('should block forward transition when verify() returns false for non-soft step', () => {
+    const { transitionStep } = require('../transition-step');
+    const { STEPS, ALL_STEPS } = require('../step-registry');
+
+    // Put state at follow_up step
+    const followUpIdx = ALL_STEPS.indexOf(STEPS.follow_up);
+    const deps = createDeps({
+      workflowCanTransition: () => true,
+      softSteps: new Set([STEPS.ticket, STEPS.ready, STEPS.task_review, STEPS.reports, STEPS.complete]),
+      commandMap: [
+        { step: STEPS.follow_up, verify: () => false }, // verify fails
+      ],
+    });
+
+    const ws = deps.loadWorkState('TEST-VERIFY-001');
+    ws.currentStep = followUpIdx + 1; // 1-indexed
+    ws.stepStatus[STEPS.follow_up] = 'in_progress';
+    deps._savedStates['TEST-VERIFY-001'] = ws;
+
+    const result = transitionStep('TEST-VERIFY-001', STEPS.ci, deps);
+    assert.equal(result.error, true, 'Should block transition');
+    assert.equal(result.gate, 'step-verify', 'Gate should be step-verify');
+    assert.ok(result.message.includes('follow_up not verified'), 'Message should name the step');
+  });
+
+  it('should allow forward transition when verify() returns true for non-soft step', () => {
+    const { transitionStep } = require('../transition-step');
+    const { STEPS, ALL_STEPS } = require('../step-registry');
+
+    const followUpIdx = ALL_STEPS.indexOf(STEPS.follow_up);
+    const deps = createDeps({
+      workflowCanTransition: () => true,
+      softSteps: new Set([STEPS.ticket, STEPS.ready, STEPS.task_review, STEPS.reports, STEPS.complete]),
+      commandMap: [
+        { step: STEPS.follow_up, verify: () => true }, // verify passes
+      ],
+    });
+
+    const ws = deps.loadWorkState('TEST-VERIFY-002');
+    ws.currentStep = followUpIdx + 1;
+    ws.stepStatus[STEPS.follow_up] = 'in_progress';
+    deps._savedStates['TEST-VERIFY-002'] = ws;
+
+    const result = transitionStep('TEST-VERIFY-002', STEPS.ci, deps);
+    assert.equal(result.success, true, 'Should allow transition');
+  });
+
+  it('should skip verify gate for soft steps', () => {
+    const { transitionStep } = require('../transition-step');
+    const { STEPS, ALL_STEPS } = require('../step-registry');
+
+    const reportsIdx = ALL_STEPS.indexOf(STEPS.reports);
+    const deps = createDeps({
+      workflowCanTransition: () => true,
+      softSteps: new Set([STEPS.ticket, STEPS.ready, STEPS.task_review, STEPS.reports, STEPS.complete]),
+      commandMap: [
+        { step: STEPS.reports, verify: () => false }, // verify would fail, but reports is soft
+      ],
+    });
+
+    const ws = deps.loadWorkState('TEST-VERIFY-003');
+    ws.currentStep = reportsIdx + 1;
+    ws.stepStatus[STEPS.reports] = 'in_progress';
+    deps._savedStates['TEST-VERIFY-003'] = ws;
+
+    const result = transitionStep('TEST-VERIFY-003', STEPS.complete, deps);
+    assert.equal(result.success, true, 'Soft step should not be blocked by verify');
+  });
+
+  it('should skip verify gate for backward transitions', () => {
+    const { transitionStep } = require('../transition-step');
+    const { STEPS, ALL_STEPS } = require('../step-registry');
+
+    const ciIdx = ALL_STEPS.indexOf(STEPS.ci);
+    const deps = createDeps({
+      workflowCanTransition: () => true,
+      softSteps: new Set([STEPS.ticket, STEPS.ready, STEPS.task_review, STEPS.reports, STEPS.complete]),
+      commandMap: [
+        { step: STEPS.ci, verify: () => false }, // verify fails but backward should be allowed
+      ],
+    });
+
+    const ws = deps.loadWorkState('TEST-VERIFY-004');
+    ws.currentStep = ciIdx + 1;
+    ws.stepStatus[STEPS.ci] = 'in_progress';
+    deps._savedStates['TEST-VERIFY-004'] = ws;
+
+    const result = transitionStep('TEST-VERIFY-004', STEPS.implement, deps);
+    assert.equal(result.success, true, 'Backward transition should not be blocked by verify');
+  });
+
+  it('should allow forward transition when step has no verify function', () => {
+    const { transitionStep } = require('../transition-step');
+    const { STEPS, ALL_STEPS } = require('../step-registry');
+
+    const cleanupIdx = ALL_STEPS.indexOf(STEPS.cleanup);
+    const deps = createDeps({
+      workflowCanTransition: () => true,
+      softSteps: new Set([STEPS.ticket, STEPS.ready, STEPS.task_review, STEPS.reports, STEPS.complete]),
+      commandMap: [], // no verify for cleanup
+    });
+
+    const ws = deps.loadWorkState('TEST-VERIFY-005');
+    ws.currentStep = cleanupIdx + 1;
+    ws.stepStatus[STEPS.cleanup] = 'in_progress';
+    deps._savedStates['TEST-VERIFY-005'] = ws;
+
+    const result = transitionStep('TEST-VERIFY-005', STEPS.reports, deps);
+    assert.equal(result.success, true, 'Step with no verify should be allowed');
+  });
+
+  it('should throw when softSteps is missing from deps', () => {
+    const { transitionStep } = require('../transition-step');
+    const { STEPS, ALL_STEPS } = require('../step-registry');
+
+    const followUpIdx = ALL_STEPS.indexOf(STEPS.follow_up);
+    const deps = createDeps({
+      workflowCanTransition: () => true,
+      commandMap: [],
+    });
+    delete deps.softSteps;
+
+    const ws = deps.loadWorkState('TEST-VERIFY-REQ-001');
+    ws.currentStep = followUpIdx + 1;
+    ws.stepStatus[STEPS.follow_up] = 'in_progress';
+    deps._savedStates['TEST-VERIFY-REQ-001'] = ws;
+
+    assert.throws(
+      () => transitionStep('TEST-VERIFY-REQ-001', STEPS.ci, deps),
+      (err) => err instanceof TypeError,
+      'Should throw TypeError when softSteps is missing'
+    );
+  });
+
+  it('should block ci → cleanup when CI verify returns false', () => {
+    const { transitionStep } = require('../transition-step');
+    const { STEPS, ALL_STEPS } = require('../step-registry');
+
+    const ciIdx = ALL_STEPS.indexOf(STEPS.ci);
+    const deps = createDeps({
+      workflowCanTransition: () => true,
+      softSteps: new Set([STEPS.ticket, STEPS.ready, STEPS.task_review, STEPS.reports, STEPS.complete]),
+      commandMap: [
+        { step: STEPS.ci, verify: () => false }, // CI not passing
+      ],
+    });
+
+    const ws = deps.loadWorkState('TEST-VERIFY-006');
+    ws.currentStep = ciIdx + 1;
+    ws.stepStatus[STEPS.ci] = 'in_progress';
+    deps._savedStates['TEST-VERIFY-006'] = ws;
+
+    const result = transitionStep('TEST-VERIFY-006', STEPS.cleanup, deps);
+    assert.equal(result.error, true, 'Should block ci -> cleanup');
+    assert.equal(result.gate, 'step-verify');
+    assert.ok(result.message.includes('ci not verified'));
+  });
+
+  it('should block forward transition when verify() throws an error', () => {
+    const { transitionStep } = require('../transition-step');
+    const { STEPS, ALL_STEPS } = require('../step-registry');
+
+    const followUpIdx = ALL_STEPS.indexOf(STEPS.follow_up);
+    const deps = createDeps({
+      workflowCanTransition: () => true,
+      softSteps: new Set([STEPS.ticket, STEPS.ready, STEPS.task_review, STEPS.reports, STEPS.complete]),
+      commandMap: [
+        { step: STEPS.follow_up, verify: () => { throw new Error('isPRGateReady exploded'); } },
+      ],
+    });
+
+    const ws = deps.loadWorkState('TEST-VERIFY-THROW-001');
+    ws.currentStep = followUpIdx + 1;
+    ws.stepStatus[STEPS.follow_up] = 'in_progress';
+    deps._savedStates['TEST-VERIFY-THROW-001'] = ws;
+
+    const result = transitionStep('TEST-VERIFY-THROW-001', STEPS.ci, deps);
+    assert.equal(result.error, true, 'Should block transition when verify throws');
+    assert.equal(result.gate, 'step-verify', 'Gate should be step-verify');
+    assert.ok(result.message.includes('verify threw'), 'Message should indicate verify threw');
+  });
+
 });

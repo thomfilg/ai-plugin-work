@@ -163,6 +163,7 @@ describe('DEFER step re-evaluation guard (GH-154)', () => {
     fs.writeFileSync(path.join(dir, 'code-review.check.md'), '# Code Review\nStatus: APPROVED\n');
     fs.writeFileSync(path.join(dir, 'completion.check.md'), '# Completion\nStatus: APPROVED\n');
     fs.writeFileSync(path.join(dir, 'qa-feature.check.md'), '# QA\nStatus: APPROVED\n');
+    fs.writeFileSync(path.join(dir, 'README.md'), '# README\n');
     putWorkState(ticket, state);
 
     const { result } = await runOrchestrator(['transition', ticket, 'pr']);
@@ -270,30 +271,35 @@ describe('DEFER step re-evaluation guard (GH-154)', () => {
   });
 
   it('9. multiple consecutive DEFER steps — second transition blocked after first invalidates plan', async () => {
+    // Tests that transitioning past a DEFER step invalidates the plan so that
+    // the next DEFER step blocks. Uses task_review (soft — no verify) and
+    // spec_gate/tasks (file-verifiable) to avoid external-tool-dependent verify.
     const ticket = 'TEST-DEFER-009';
-    const state = buildState(ticket, 'ready', {
-      deferredSteps: ['follow_up', 'cleanup'],
+    const dir = path.join(TASKS_BASE, ticket);
+    fs.mkdirSync(dir, { recursive: true });
+    // Create artifacts for spec_gate and tasks verify
+    fs.writeFileSync(path.join(dir, 'spec.md'), '# Spec\n<!-- gherkin-skip: test -->\n');
+    fs.writeFileSync(path.join(dir, 'tasks.md'), '# Tasks\n- [ ] Task 1\n');
+
+    const state = buildState(ticket, 'task_review', {
+      deferredSteps: ['check', 'pr'],
       lastPlanTimestamp: '2026-01-01T00:00:05.000Z',
       lastTransitionTimestamp: '2026-01-01T00:00:01.000Z',
     });
     putWorkState(ticket, state);
 
-    // First transition: ready -> follow_up (follow_up is deferred, plan is fresh) — should succeed
-    const { result: r1 } = await runOrchestrator(['transition', ticket, 'follow_up']);
+    // First transition: task_review -> check (check is deferred, plan is fresh) — should succeed
+    // task_review is soft — no verify gate
+    const { result: r1 } = await runOrchestrator(['transition', ticket, 'check']);
     assert.ok(r1.success, `First transition should succeed: ${JSON.stringify(r1)}`);
 
-    // follow_up -> ci: ci is NOT in deferredSteps, should succeed
-    const { result: r2 } = await runOrchestrator(['transition', ticket, 'ci']);
-    assert.ok(
-      r2.success,
-      `follow_up -> ci should succeed (ci not deferred): ${JSON.stringify(r2)}`
-    );
-
-    // ci -> cleanup: cleanup IS in deferredSteps, plan is now stale — should block
-    const { result: r3 } = await runOrchestrator(['transition', ticket, 'cleanup']);
-    assert.ok(r3.error, 'ci -> cleanup should be blocked (stale plan)');
+    // After transition, lastTransitionTimestamp is updated, making plan stale.
+    // check -> pr: pr IS in deferredSteps, plan is now stale — should block
+    // (DEFER gate fires before verify gate)
+    const { result: r3 } = await runOrchestrator(['transition', ticket, 'pr']);
+    assert.ok(r3.error, 'check -> pr should be blocked (stale plan)');
     assert.equal(r3.gate, 'defer-reeval');
-    assert.equal(r3.deferStep, 'cleanup');
+    assert.equal(r3.deferStep, 'pr');
 
     cleanupTicket(ticket);
   });

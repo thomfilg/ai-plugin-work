@@ -579,3 +579,135 @@ describe('cross-workflow isolation', () => {
     assert.strictEqual(checkLoaded.stepStatus['step_c'], 'pending');
   });
 });
+
+// ─── verifyStep callback (GH-260) ───────────────────────────────────────────
+
+describe('verifyStep callback (GH-260)', () => {
+  const stateDir = path.join(TEST_BASE, 'verifystep-state');
+
+  after(() => {
+    fs.rmSync(stateDir, { recursive: true, force: true });
+  });
+
+  it('blocks forward transition when verifyStep returns { blocked: true }', () => {
+    const wf = mockWorkflow({
+      stateDir,
+      verifyStep: (currentStep, targetStep, instanceId) => ({
+        blocked: true,
+        message: `Step ${currentStep} not verified`,
+        gate: 'step-verify',
+      }),
+    });
+    const stateInstance = new WorkflowState(wf.name, wf.stateDir);
+    const steps = wf.steps.map((s) => s.id);
+    stateInstance.init('verify-block-1', steps);
+    stateInstance.setStepStatus('verify-block-1', 'step_a', 'in_progress');
+
+    const result = transitionStep(wf, stateInstance, 'verify-block-1', 'step_b');
+    assert.strictEqual(result.error, true);
+    assert.strictEqual(result.gate, 'step-verify');
+    assert.ok(result.message.includes('not verified'));
+
+    // State should be unchanged (gate runs before mutations)
+    const ws = stateInstance.load('verify-block-1');
+    assert.strictEqual(ws.stepStatus['step_a'], 'in_progress');
+    assert.strictEqual(ws.stepStatus['step_b'], 'pending');
+  });
+
+  it('blocks forward transition when verifyStep returns { error: true }', () => {
+    const wf = mockWorkflow({
+      stateDir,
+      verifyStep: (currentStep, targetStep, instanceId) => ({
+        error: true,
+        message: `Step ${currentStep} failed verification`,
+        gate: 'step-verify',
+      }),
+    });
+    const stateInstance = new WorkflowState(wf.name, wf.stateDir);
+    const steps = wf.steps.map((s) => s.id);
+    stateInstance.init('verify-error-1', steps);
+    stateInstance.setStepStatus('verify-error-1', 'step_a', 'in_progress');
+
+    const result = transitionStep(wf, stateInstance, 'verify-error-1', 'step_b');
+    assert.strictEqual(result.error, true);
+    assert.strictEqual(result.gate, 'step-verify');
+    assert.ok(result.message.includes('failed verification'));
+
+    // State should be unchanged
+    const ws = stateInstance.load('verify-error-1');
+    assert.strictEqual(ws.stepStatus['step_a'], 'in_progress');
+    assert.strictEqual(ws.stepStatus['step_b'], 'pending');
+  });
+
+  it('allows forward transition when verifyStep returns falsy', () => {
+    const wf = mockWorkflow({
+      stateDir,
+      verifyStep: () => null,
+    });
+    const stateInstance = new WorkflowState(wf.name, wf.stateDir);
+    const steps = wf.steps.map((s) => s.id);
+    stateInstance.init('verify-allow-1', steps);
+    stateInstance.setStepStatus('verify-allow-1', 'step_a', 'in_progress');
+
+    const result = transitionStep(wf, stateInstance, 'verify-allow-1', 'step_b');
+    assert.strictEqual(result.success, true);
+  });
+
+  it('skips verifyStep for backward transitions', () => {
+    let called = false;
+    const wfBack = mockWorkflow({
+      stateDir,
+      transitions: [
+        { source: 'step_a', targets: ['step_b'] },
+        { source: 'step_b', targets: ['step_c', 'step_a'] }, // backward edge to step_a
+        { source: 'step_c', targets: ['step_d'] },
+        { source: 'step_d', targets: [] },
+      ],
+      verifyStep: () => { called = true; return { blocked: true }; },
+    });
+    const stateInstance = new WorkflowState(wfBack.name, wfBack.stateDir);
+    const steps = wfBack.steps.map((s) => s.id);
+    stateInstance.init('verify-back-2', steps);
+    stateInstance.setStepStatus('verify-back-2', 'step_a', 'completed');
+    stateInstance.setStepStatus('verify-back-2', 'step_b', 'in_progress');
+
+    called = false;
+    const result = transitionStep(wfBack, stateInstance, 'verify-back-2', 'step_a');
+    assert.strictEqual(result.success, true);
+    assert.strictEqual(called, false, 'verifyStep should not be called for backward transitions');
+  });
+
+  it('works normally when workflow has no verifyStep', () => {
+    const wf = mockWorkflow({ stateDir });
+    // Ensure no verifyStep
+    delete wf.verifyStep;
+    const stateInstance = new WorkflowState(wf.name, wf.stateDir);
+    const steps = wf.steps.map((s) => s.id);
+    stateInstance.init('verify-none-1', steps);
+    stateInstance.setStepStatus('verify-none-1', 'step_a', 'in_progress');
+
+    const result = transitionStep(wf, stateInstance, 'verify-none-1', 'step_b');
+    assert.strictEqual(result.success, true);
+  });
+
+  it('blocks forward transition when verifyStep throws an error', () => {
+    const wf = mockWorkflow({
+      stateDir,
+      verifyStep: () => { throw new Error('verifyStep exploded'); },
+    });
+    const stateInstance = new WorkflowState(wf.name, wf.stateDir);
+    const steps = wf.steps.map((s) => s.id);
+    stateInstance.init('verify-throw-1', steps);
+    stateInstance.setStepStatus('verify-throw-1', 'step_a', 'in_progress');
+
+    const result = transitionStep(wf, stateInstance, 'verify-throw-1', 'step_b');
+    assert.strictEqual(result.error, true);
+    assert.strictEqual(result.gate, 'step-verify');
+    assert.ok(result.message.includes('verify threw'));
+
+    // State should be unchanged (gate runs before mutations)
+    const ws = stateInstance.load('verify-throw-1');
+    assert.strictEqual(ws.stepStatus['step_a'], 'in_progress');
+    assert.strictEqual(ws.stepStatus['step_b'], 'pending');
+  });
+});
