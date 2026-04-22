@@ -478,11 +478,16 @@ describe('workflow-definition: verify[STEPS.spec] (no toggle)', () => {
   });
 
   it('does not auto-verify when WORK_SPEC_ENABLED=0 (toggle removed)', () => {
-    process.env.WORK_SPEC_ENABLED = '0';
-    const verify = getSpecVerify();
-    // spec.md does not exist, so verify should return false regardless of env
-    assert.equal(verify(ticketId), false);
-    delete process.env.WORK_SPEC_ENABLED;
+    const saved = process.env.WORK_SPEC_ENABLED;
+    try {
+      process.env.WORK_SPEC_ENABLED = '0';
+      const verify = getSpecVerify();
+      // spec.md does not exist, so verify should return false regardless of env
+      assert.equal(verify(ticketId), false);
+    } finally {
+      if (saved === undefined) delete process.env.WORK_SPEC_ENABLED;
+      else process.env.WORK_SPEC_ENABLED = saved;
+    }
   });
 });
 
