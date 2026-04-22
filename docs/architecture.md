@@ -127,10 +127,10 @@ The orchestrator dispatches agents via `Task()` tool calls. Each step maps to on
 
 ### Hooks → Workflows
 
-Hooks intercept tool calls and delegate to workflow-specific logic:
+Hooks intercept prompt and tool events and delegate to workflow-specific logic:
 
-1. `workflow-router-hook.js` identifies which workflow is active
-2. `enforce-step-workflow.js` applies step gating rules
+1. `workflow-router-hook.js` routes `UserPromptSubmit` events to workflow-specific prompt logic
+2. `enforce-step-workflow.js` identifies which workflow is active for tool gating (by loading each workflow's state file and evaluating `isActive(state)`), then applies step gating rules
 3. Workflow-specific hooks add domain logic (TDD phase gating, screenshot requirements)
 
 ### State → Filesystem

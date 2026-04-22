@@ -169,9 +169,9 @@ All hooks follow a strict fail-open policy:
 |---|---|
 | `check-setup.js` | Initialize check context, discover impacted apps |
 | `check-start-env.js` | Start dev servers |
-| `check-validate-reports.js` | Validate report format and status |
+| `check-validate-reports.js` | Validate report format and status lines |
 
-### Shared hooks used by /check (`workflows/lib/hooks/`)
+### Shared hooks consumed by /check (`workflows/lib/hooks/`)
 
 | Hook | Purpose |
 |---|---|

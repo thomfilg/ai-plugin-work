@@ -93,9 +93,8 @@ Protected files:
 - `.work-actions.json`
 - `.workflow-state.json`
 - `.check.workflow-state.json`
-- `tdd-phase.json`
 
-Only designated management scripts (work-state.js, tdd-phase-state.js, workflow-engine.js) can write these files.
+Only designated management scripts (such as `work-state.js` and `workflow-engine.js`) can write these workflow state files. Note: `tdd-phase.json` is protected via the TDD phase hook gating system (`work-implement-enforce.js`), not by `protect-state-files.js`.
 
 ## Artifact Archival
 

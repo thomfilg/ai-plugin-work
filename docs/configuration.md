@@ -97,12 +97,12 @@ The provider abstraction handles differences between Jira, Linear, and GitHub:
 | `github` | `#123` | `#123` → `GH-123` | `https://github.com/org/repo/issues/123` |
 | `none` | any | (none) | (none) |
 
-### Auto-detection
+### Provider Resolution
 
-If `TICKET_PROVIDER` is not set, the provider is auto-detected:
-1. If `JIRA_BASE_URL` is set → `jira`
-2. If `LINEAR_TEAM_KEY` is set → `linear`
-3. If `GITHUB_ORG` is set → `github`
+Provider resolution uses this precedence:
+1. If `TICKET_PROVIDER` env var is set → use it directly
+2. Per-repo config in `~/.claude/ticket-providers.json` (if exists)
+3. Fallback based on available env vars (e.g., `JIRA_PROJECT_KEY`)
 4. Otherwise → `none`
 
 ## WEB_APPS Configuration

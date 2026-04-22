@@ -74,7 +74,7 @@ node tdd-phase-state.js record-green TICKET-123 --task 1 --cmd "npm test"
 node tdd-phase-state.js record-refactor TICKET-123 --task 1 --cmd "npm test"
 
 # Transition to next phase
-node tdd-phase-state.js transition TICKET-123 --task 1 green
+node tdd-phase-state.js transition TICKET-123 green --task 1
 
 # Exception mode (skip TDD for mechanical changes)
 node tdd-phase-state.js exception TICKET-123 --task 1 --reason "config-only change"
