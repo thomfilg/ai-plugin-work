@@ -2,6 +2,7 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const {
   classifyCommentPriority,
+  isBotAuthorLogin,
   isBlockingPriority,
   getResolvedCommentIds,
   resolveOutdatedThreads,
@@ -146,6 +147,34 @@ describe('classifyCommentPriority', () => {
     });
   });
 
+  describe('Codex (chatgpt-codex-connector[bot])', () => {
+    const author = 'chatgpt-codex-connector[bot]';
+
+    it('returns high for P1 badge', () => {
+      assert.equal(classifyCommentPriority(author, '![P1 Badge] Critical issue found'), 'high');
+    });
+
+    it('returns medium for P2 badge', () => {
+      assert.equal(classifyCommentPriority(author, '![P2 Badge] Consider fixing'), 'medium');
+    });
+
+    it('returns low for P3 badge', () => {
+      assert.equal(classifyCommentPriority(author, '![P3 Badge] Minor suggestion'), 'low');
+    });
+
+    it('returns medium for comments without P-badge', () => {
+      assert.equal(classifyCommentPriority(author, 'no badge comment'), 'low');
+    });
+  });
+
+  describe('Codex (chatgpt-codex-connector alias)', () => {
+    const author = 'chatgpt-codex-connector';
+
+    it('returns high for P1 badge (alias)', () => {
+      assert.equal(classifyCommentPriority(author, '![P1 Badge] Critical issue found'), 'high');
+    });
+  });
+
   describe('Human reviewers', () => {
     it('returns high for any human reviewer', () => {
       assert.equal(classifyCommentPriority('octocat', 'Please fix this'), 'high');
@@ -161,6 +190,18 @@ describe('classifyCommentPriority', () => {
         'high'
       );
     });
+  });
+});
+
+describe('isBotAuthorLogin', () => {
+  const defaultBots = ['copilot-pull-request-reviewer', 'cursor-ai[bot]', 'chatgpt-codex-connector[bot]'];
+
+  it('returns true for chatgpt-codex-connector[bot]', () => {
+    assert.equal(isBotAuthorLogin('chatgpt-codex-connector[bot]', defaultBots), true);
+  });
+
+  it('returns true for chatgpt-codex-connector (fuzzy match strips [bot])', () => {
+    assert.equal(isBotAuthorLogin('chatgpt-codex-connector', defaultBots), true);
   });
 });
 

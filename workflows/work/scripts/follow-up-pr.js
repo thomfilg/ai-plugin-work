@@ -279,7 +279,8 @@ function checkCI(prNumber) {
 
 // ── Reviews ─────────────────────────────────────────────────────────────────
 
-const DEFAULT_BOT_REVIEWERS = 'copilot-pull-request-reviewer,cursor-ai[bot]';
+// Aliases for each bot are in botLoginAliases (see getReviews)
+const DEFAULT_BOT_REVIEWERS = 'copilot-pull-request-reviewer,cursor-ai[bot],chatgpt-codex-connector[bot]';
 
 function getBotReviewers() {
   const env = process.env.FOLLOW_UP_PR_BOT_REVIEWERS;
@@ -511,6 +512,21 @@ function classifyCommentPriority(author, body) {
     return 'medium';
   }
 
+  // Codex (chatgpt-codex-connector[bot]): parse P-level badges
+  if (author === 'chatgpt-codex-connector[bot]' || author === 'chatgpt-codex-connector') {
+    const badgeMatch = (body || '').match(/!\[P(\d+)/);
+    if (badgeMatch) {
+      const level = parseInt(badgeMatch[1], 10);
+      if (level <= 1) return 'high';
+      if (level <= 2) return 'medium';
+      return 'low';
+    }
+    // No P-badge: default to low (non-blocking). Codex header/announcement comments
+    // and unbadged inline suggestions are treated as non-blocking.
+    // Inline comments WITH P-badges are classified by badge level.
+    return 'low';
+  }
+
   // Human reviewers: always blocking
   return 'high';
 }
@@ -702,6 +718,8 @@ function getReviews(prNumber) {
     const botLoginAliases = {
       'copilot-pull-request-reviewer': ['copilot', 'copilot-pull-request-reviewer'],
       'cursor-ai[bot]': ['cursor-ai[bot]', 'cursor-ai'],
+      'chatgpt-codex-connector[bot]': ['chatgpt-codex-connector'],
+      'chatgpt-codex-connector': ['chatgpt-codex-connector[bot]'],
     };
     for (const bot of botReviewers) {
       const aliases = botLoginAliases[bot] || [bot.toLowerCase()];
@@ -1577,6 +1595,7 @@ if (require.main === module) {
 
 module.exports = {
   classifyCommentPriority,
+  isBotAuthorLogin,
   isBlockingPriority,
   getResolvedCommentIds,
   resolveOutdatedThreads,
