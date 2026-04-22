@@ -16,6 +16,7 @@ jobs:
   ai-review-gate:
     runs-on: ubuntu-latest
     name: AI Review Gate
+    if: github.event.pull_request.base.ref == 'main' || github.event.review.pull_request.base.ref == 'main'
     steps:
       - name: Set AI review status
         uses: actions/github-script@v7
@@ -34,11 +35,11 @@ jobs:
             const pull_number = pr.number;
             const statusContext = 'AI Review Required';
 
-            const { data: reviews } = await github.rest.pulls.listReviews({
-              owner,
-              repo,
-              pull_number,
-            });
+            // Paginate to fetch all reviews (default page is 30)
+            const reviews = await github.paginate(
+              github.rest.pulls.listReviews,
+              { owner, repo, pull_number, per_page: 100 },
+            );
 
             const aiReviewerLogins = [
               'copilot-pull-request-reviewer',
@@ -51,7 +52,6 @@ jobs:
             );
 
             if (aiReviews.length === 0) {
-              // No AI review yet — set PENDING status
               await github.rest.repos.createCommitStatus({
                 owner,
                 repo,
@@ -64,13 +64,18 @@ jobs:
               return;
             }
 
-            // Get latest review from each bot
+            // Pick the latest review per bot by submitted_at
             const latestByBot = new Map();
             for (const review of aiReviews) {
-              latestByBot.set(review.user.login, review);
+              const existing = latestByBot.get(review.user.login);
+              if (!existing || new Date(review.submitted_at) > new Date(existing.submitted_at)) {
+                latestByBot.set(review.user.login, review);
+              }
             }
 
-            // Check for "changes requested"
+            // Only APPROVED or COMMENTED count as active reviews
+            const allowedStates = new Set(['APPROVED', 'COMMENTED']);
+
             for (const [login, review] of latestByBot) {
               if (review.state === 'CHANGES_REQUESTED') {
                 await github.rest.repos.createCommitStatus({
@@ -86,13 +91,30 @@ jobs:
               }
             }
 
-            // AI review present, no blocking feedback
+            // Verify at least one bot has an active review (not DISMISSED/PENDING)
+            const activeReviewers = [...latestByBot.entries()]
+              .filter(([, r]) => allowedStates.has(r.state))
+              .map(([login]) => login);
+
+            if (activeReviewers.length === 0) {
+              await github.rest.repos.createCommitStatus({
+                owner,
+                repo,
+                sha,
+                state: 'pending',
+                context: statusContext,
+                description: 'AI reviews were dismissed — waiting for new review',
+              });
+              console.log('All AI reviews dismissed — status set to pending');
+              return;
+            }
+
             await github.rest.repos.createCommitStatus({
               owner,
               repo,
               sha,
               state: 'success',
               context: statusContext,
-              description: `Reviewed by ${[...latestByBot.keys()].join(', ')}`,
+              description: `Reviewed by ${activeReviewers.join(', ')}`,
             });
             console.log('AI review present — status set to success');
