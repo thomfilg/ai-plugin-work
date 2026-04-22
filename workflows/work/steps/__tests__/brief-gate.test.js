@@ -100,21 +100,13 @@ describe('brief-gate step', () => {
   let briefGateStep;
   let applyBriefResolutions;
   const createdDirs = [];
-  const originalEnv = process.env.WORK_BRIEF_ENABLED;
-
   before(() => {
     const mod = require(path.join(__dirname, '..', 'brief-gate.js'));
     briefGateStep = typeof mod === 'function' ? mod : mod.briefGateStep;
     applyBriefResolutions = mod.applyBriefResolutions;
   });
 
-  beforeEach(() => {
-    delete process.env.WORK_BRIEF_ENABLED;
-  });
-
   afterEach(() => {
-    if (originalEnv === undefined) delete process.env.WORK_BRIEF_ENABLED;
-    else process.env.WORK_BRIEF_ENABLED = originalEnv;
     while (createdDirs.length) rmrf(createdDirs.pop());
   });
 
@@ -122,14 +114,31 @@ describe('brief-gate step', () => {
     assert.equal(typeof briefGateStep, 'function');
   });
 
-  it('DEFERs when WORK_BRIEF_ENABLED=0', () => {
+  // GH-253 Task 4: WORK_BRIEF_ENABLED toggle removed — brief-gate no longer
+  // checks process.env.WORK_BRIEF_ENABLED.
+  it('does not reference WORK_BRIEF_ENABLED in source code', () => {
+    const src = fs.readFileSync(path.join(__dirname, '..', 'brief-gate.js'), 'utf8');
+    assert.ok(
+      !src.includes('WORK_BRIEF_ENABLED'),
+      'brief-gate.js must not contain WORK_BRIEF_ENABLED'
+    );
+  });
+
+  it('ignores WORK_BRIEF_ENABLED=0 and still evaluates brief.md normally', () => {
+    const prev = process.env.WORK_BRIEF_ENABLED;
     process.env.WORK_BRIEF_ENABLED = '0';
-    const { add, entries } = makeAdd();
-    briefGateStep(add, makeState(), makeCtx());
-    assert.equal(entries.length, 1);
-    assert.equal(entries[0].step, STEPS.brief_gate);
-    assert.equal(entries[0].action, 'DEFER');
-    assert.match(entries[0].reason, /disabled/i);
+    try {
+      const { add, entries } = makeAdd();
+      // hasBrief=false should DEFER with "No brief.md present", NOT "disabled"
+      briefGateStep(add, makeState({ hasBrief: false }), makeCtx());
+      assert.equal(entries.length, 1);
+      assert.equal(entries[0].step, STEPS.brief_gate);
+      assert.equal(entries[0].action, 'DEFER');
+      assert.match(entries[0].reason, /no brief/i);
+    } finally {
+      if (prev === undefined) delete process.env.WORK_BRIEF_ENABLED;
+      else process.env.WORK_BRIEF_ENABLED = prev;
+    }
   });
 
   it('DEFERs when no brief.md is present', () => {
@@ -174,6 +183,27 @@ describe('brief-gate step', () => {
     assert.equal(typeof entry.agentPrompt, 'string', 'AskUserQuestion RUN must carry agentPrompt string');
     assert.match(entry.agentPrompt, /AskUserQuestion/, 'agentPrompt must mention AskUserQuestion');
     assert.match(entry.agentPrompt, /applyBriefResolutions/, 'agentPrompt must mention applyBriefResolutions');
+  });
+
+  it('RUN entry includes postResolveCommand referencing applyBriefResolutions', () => {
+    const dir = makeTmpTasksDir(BRIEF_ONE_BLOCKING_ARCH);
+    createdDirs.push(dir);
+    const { add, entries } = makeAdd();
+    briefGateStep(add, makeState(), makeCtx({ tasksDir: dir }));
+    assert.equal(entries.length, 1);
+    const entry = entries[0];
+    assert.equal(entry.action, 'RUN');
+    assert.equal(typeof entry.postResolveCommand, 'string', 'RUN entry must carry postResolveCommand string');
+    assert.match(entry.postResolveCommand, /applyBriefResolutions/, 'postResolveCommand must reference applyBriefResolutions');
+    assert.match(entry.postResolveCommand, /brief-gate\.js/, 'postResolveCommand must require brief-gate.js');
+    assert.match(entry.postResolveCommand, /\$RESOLUTIONS_JSON/, 'postResolveCommand must reference $RESOLUTIONS_JSON placeholder');
+    assert.match(entry.postResolveCommand, /node -e/, 'postResolveCommand must be a node -e one-liner');
+    // Verify the path includes the actual briefPath (tasks dir + brief.md)
+    const expectedBriefPath = path.join(dir, 'brief.md');
+    assert.ok(
+      entry.postResolveCommand.includes(expectedBriefPath),
+      `postResolveCommand must include briefPath: ${expectedBriefPath}`
+    );
   });
 
   it('emits RUN (not SKIP) when brief.md is unreadable so planner shows gate needs attention', () => {

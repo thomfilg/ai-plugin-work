@@ -1,24 +1,26 @@
 /**
  * Step: spec
  * Generates the technical specification from the brief and codebase analysis.
+ *
+ * Decision matrix:
+ *   1. hasSpec=true                                        → DEFER (artifact already present)
+ *   2. hasSpec=false, brief.md on disk OR hasBrief=false   → RUN with briefRef path in prompt
+ *   3. hasSpec=false, brief.md NOT on disk AND hasBrief=true → RUN without briefRef
+ *
  * @param {Function} add
  * @param {object} s
  * @param {object} ctx
  */
 module.exports = function specStep(add, s, ctx) {
   const { STEPS, t, worktreeDir, tasksDir, getDocsPrompt, fileExists, path } = ctx;
-  const specEnabled = process.env.WORK_SPEC_ENABLED !== '0';
-  const briefEnabled = process.env.WORK_BRIEF_ENABLED !== '0';
   const briefPath = path.join(tasksDir, 'brief.md');
   const specPath = path.join(tasksDir, 'spec.md');
 
-  if (!specEnabled) {
-    add(STEPS.spec, 'DEFER', null, 'Spec generation disabled (WORK_SPEC_ENABLED=0)');
-  } else if (s?.hasSpec) {
+  if (s?.hasSpec) {
     add(STEPS.spec, 'DEFER', null, 'spec.md already exists');
   } else {
     const briefRef =
-      fileExists(briefPath) || (briefEnabled && !s?.hasBrief)
+      fileExists(briefPath) || !s?.hasBrief
         ? `\n\nRead the product brief at: ${briefPath}`
         : '';
     add(STEPS.spec, 'RUN', 'Task(spec-writer)', 'Generate technical specification', {

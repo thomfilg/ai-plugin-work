@@ -436,6 +436,61 @@ describe('workflow-definition: brief.md contentGuard', () => {
   });
 });
 
+// ─── GH-253 Task 3: spec step verify (toggle removed) ────────────────────────
+describe('workflow-definition: verify[STEPS.spec] (no toggle)', () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-def-spec-notoggle-'));
+  const ticketId = 'GH-253';
+  const ticketDir = path.join(tmpRoot, ticketId);
+  fs.mkdirSync(ticketDir, { recursive: true });
+
+  const deps = {
+    TASKS_BASE: tmpRoot,
+    safeTicketPath: (id) => id,
+    resolveGitHead: () => 'ref: refs/heads/stub',
+  };
+  const { workflow: specWf } = createWorkflowDefinition(deps);
+
+  function getSpecVerify() {
+    const entries = specWf.commandMap.filter(
+      (e) => e.step === STEPS.spec && typeof e.verify === 'function'
+    );
+    return entries.length > 0 ? entries[0].verify : undefined;
+  }
+
+  after(() => {
+    try {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    } catch {
+      /* best-effort cleanup */
+    }
+  });
+
+  it('returns false when spec.md does not exist', () => {
+    const verify = getSpecVerify();
+    assert.equal(verify(ticketId), false);
+  });
+
+  it('returns true when spec.md exists', () => {
+    fs.writeFileSync(path.join(ticketDir, 'spec.md'), '# Spec\nContent');
+    const verify = getSpecVerify();
+    assert.equal(verify(ticketId), true);
+    fs.unlinkSync(path.join(ticketDir, 'spec.md'));
+  });
+
+  it('does not auto-verify when WORK_SPEC_ENABLED=0 (toggle removed)', () => {
+    const saved = process.env.WORK_SPEC_ENABLED;
+    try {
+      process.env.WORK_SPEC_ENABLED = '0';
+      const verify = getSpecVerify();
+      // spec.md does not exist, so verify should return false regardless of env
+      assert.equal(verify(ticketId), false);
+    } finally {
+      if (saved === undefined) delete process.env.WORK_SPEC_ENABLED;
+      else process.env.WORK_SPEC_ENABLED = saved;
+    }
+  });
+});
+
 // ─── GH-244: spec_gate verify entry ──────────────────────────────────────────
 describe('workflow-definition: verify[STEPS.spec_gate]', () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-def-specgate-'));
@@ -471,21 +526,15 @@ describe('workflow-definition: verify[STEPS.spec_gate]', () => {
     } catch {
       /* best-effort cleanup */
     }
-    // Restore env
-    delete process.env.WORK_SPEC_ENABLED;
   });
 
-  it('returns true when WORK_SPEC_ENABLED=0 (gate auto-verified)', () => {
-    process.env.WORK_SPEC_ENABLED = '0';
-    const verify = getSpecGateVerify();
-    assert.equal(verify(ticketId), true);
-    delete process.env.WORK_SPEC_ENABLED;
-  });
+  // GH-253 Task 3: WORK_SPEC_ENABLED toggle removed — spec is always mandatory.
+  // verifySpecGate no longer checks process.env.WORK_SPEC_ENABLED.
 
-  it('returns true when spec.md does not exist (nothing to validate)', () => {
+  it('returns false when spec.md does not exist (fail-closed)', () => {
     removeSpec();
     const verify = getSpecGateVerify();
-    assert.equal(verify(ticketId), true);
+    assert.equal(verify(ticketId), false);
   });
 
   it('returns true when skip override <!-- gherkin-skip: reason --> is present', () => {
@@ -542,6 +591,15 @@ describe('workflow-definition: verify[STEPS.spec_gate]', () => {
     );
     const verify = getSpecGateVerify();
     assert.equal(verify(ticketId), false);
+  });
+
+  // GH-253 Task 3: verify WORK_SPEC_ENABLED is not referenced anywhere in workflow-definition.js
+  it('does not reference WORK_SPEC_ENABLED in the module source', () => {
+    const src = fs.readFileSync(path.join(__dirname, '..', 'workflow-definition.js'), 'utf-8');
+    assert.ok(
+      !src.includes('WORK_SPEC_ENABLED'),
+      'workflow-definition.js should not reference WORK_SPEC_ENABLED'
+    );
   });
 
   it('returns false when parse has errors but validation would pass (malformed Gherkin)', () => {

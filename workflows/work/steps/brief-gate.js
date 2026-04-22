@@ -7,11 +7,10 @@
  * reuses the pure parser/rewriter in `../lib/open-questions.js`.
  *
  * Decision matrix:
- *   1. `WORK_BRIEF_ENABLED=0`                  → DEFER "Brief disabled"
- *   2. `!s.hasBrief`                           → DEFER "No brief.md present"
- *   3. `brief.md` unreadable (fail-closed)      → RUN   "brief.md unreadable — regenerate brief"
- *   4. Parser returns zero blocking questions  → DEFER "All blocking questions resolved"
- *   5. Otherwise                               → RUN with an AskUserQuestion
+ *   1. `!s.hasBrief`                           → DEFER "No brief.md present"
+ *   2. `brief.md` unreadable (fail-closed)      → RUN   "brief.md unreadable — regenerate brief"
+ *   3. Parser returns zero blocking questions  → DEFER "All blocking questions resolved"
+ *   4. Otherwise                               → RUN with an AskUserQuestion
  *                                                payload + `onResolve: 'rewrite brief.md'`
  *
  * The RUN payload instructs the orchestrator to invoke AskUserQuestion
@@ -56,12 +55,6 @@ function buildAskUserQuestionPayload(blocking) {
  */
 function briefGateStep(add, s, ctx) {
   const { STEPS, tasksDir, path } = ctx;
-  const briefEnabled = process.env.WORK_BRIEF_ENABLED !== '0';
-
-  if (!briefEnabled) {
-    add(STEPS.brief_gate, 'DEFER', null, 'Brief disabled (WORK_BRIEF_ENABLED=0)');
-    return;
-  }
 
   if (!s || !s.hasBrief) {
     add(STEPS.brief_gate, 'DEFER', null, 'No brief.md present');
@@ -102,6 +95,7 @@ function briefGateStep(add, s, ctx) {
       agentPrompt: `Use AskUserQuestion to resolve ${blocking.length} unresolved open question(s) in brief.md, then call applyBriefResolutions() to persist the answers.`,
       askUserQuestionPayload: buildAskUserQuestionPayload(blocking),
       onResolve: 'rewrite brief.md',
+      postResolveCommand: `node -e "var r=process.argv[3];if(!r)process.exit(0);require(process.argv[1]).applyBriefResolutions(process.argv[2],JSON.parse(r))" "${path.join(__dirname, 'brief-gate.js')}" "${briefPath}" "$RESOLUTIONS_JSON"`,
     }
   );
 }

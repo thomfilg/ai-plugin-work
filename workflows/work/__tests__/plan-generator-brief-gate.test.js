@@ -154,10 +154,10 @@ describe('plan-generator brief_gate ordering (GH-215 Task 6.2)', () => {
     assert.equal(specIdx, gateIdx + 1);
   });
 
-  it('keeps brief_gate in the plan even when brief step is disabled', () => {
-    // WORK_BRIEF_ENABLED=0 makes brief step DEFER; the gate also DEFERs for
-    // the same reason, but both entries must still appear in order so the
-    // workflow state machine can advance through brief_gate.
+  it('keeps brief_gate in the plan even when WORK_BRIEF_ENABLED=0 (toggle is ignored)', () => {
+    // GH-253 Task 4: WORK_BRIEF_ENABLED toggle removed — setting it to '0'
+    // has no effect. Both entries must still appear in order so the workflow
+    // state machine can advance through brief_gate.
     const prev = process.env.WORK_BRIEF_ENABLED;
     process.env.WORK_BRIEF_ENABLED = '0';
     try {

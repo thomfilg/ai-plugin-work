@@ -6,12 +6,11 @@
  * `./brief-gate.js`, and reuses the pure parser in `../lib/parse-gherkin.js`.
  *
  * Decision matrix:
- *   1. `WORK_SPEC_ENABLED=0`                  → DEFER "Spec disabled"
- *   2. `!s.hasSpec`                           → DEFER "No spec.md present"
- *   3. `spec.md` unreadable (fail-closed)      → RUN  "/spec" regenerate spec
- *   4. gherkin-skip override present           → DEFER with override reason
- *   5. parse() + validate() passes             → DEFER with scenario count
- *   6. Validation fails                        → RUN  "/spec" with error messages
+ *   1. `!s.hasSpec`                           → DEFER "No spec.md present"
+ *   2. `spec.md` unreadable (fail-closed)      → RUN  "/spec" regenerate spec
+ *   3. gherkin-skip override present           → DEFER with override reason
+ *   4. parse() + validate() passes             → DEFER with scenario count
+ *   5. Validation fails                        → RUN  "/spec" with error messages
  */
 
 'use strict';
@@ -26,21 +25,14 @@ const parseGherkin = require('../lib/parse-gherkin');
  */
 function specGateStep(add, s, ctx) {
   const { STEPS, tasksDir, path } = ctx;
-  const specEnabled = process.env.WORK_SPEC_ENABLED !== '0';
 
-  // Case 1: Spec disabled
-  if (!specEnabled) {
-    add(STEPS.spec_gate, 'DEFER', null, 'Spec disabled (WORK_SPEC_ENABLED=0)');
-    return;
-  }
-
-  // Case 2: No spec.md
+  // Case 1: No spec.md
   if (!s || !s.hasSpec) {
     add(STEPS.spec_gate, 'DEFER', null, 'No spec.md present');
     return;
   }
 
-  // Case 3: spec.md unreadable
+  // Case 2: spec.md unreadable
   const specPath = path.join(tasksDir, 'spec.md');
   let markdown;
   try {
@@ -53,14 +45,14 @@ function specGateStep(add, s, ctx) {
     return;
   }
 
-  // Case 4: Skip override
+  // Case 3: Skip override
   const skipResult = parseGherkin.hasSkipOverride(markdown);
   if (skipResult.skip) {
     add(STEPS.spec_gate, 'DEFER', null, `Gherkin skip override: ${skipResult.reason}`);
     return;
   }
 
-  // Case 5+6: Parse and validate
+  // Case 4+5: Parse and validate
   const parsed = parseGherkin.parse(markdown);
   // If parse found errors and no features, report parse errors in the RUN reason
   const validation = parseGherkin.validate(parsed);
@@ -76,7 +68,7 @@ function specGateStep(add, s, ctx) {
     return;
   }
 
-  // Case 6: Validation or parse fails → RUN with retry to spec
+  // Case 5: Validation or parse fails → RUN with retry to spec
   add(STEPS.spec_gate, 'RUN', '/spec', allErrors.join('; '), {
     agentType: 'skill',
     agentPrompt: '/spec',
