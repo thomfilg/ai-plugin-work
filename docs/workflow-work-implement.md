@@ -27,7 +27,7 @@ RED ──────────► GREEN ──────────► RE
 
 **Hook enforcement:** Blocks Write/Edit to non-test files.
 
-**Allowed files:** `*.test.ts`, `*.test.tsx`, `*.spec.ts`, `*.spec.tsx`, `__mocks__/*`, `__fixtures__/*`, `test-utils/*`
+**Allowed files:** `*.test.ts`, `*.test.tsx`, `*.spec.ts`, `*.spec.tsx` (only files matching `.test.*` or `.spec.*` patterns — helpers like `__mocks__/` are blocked in RED)
 
 **Evidence required:** Test files changed + test command exits with non-zero code.
 
@@ -37,7 +37,7 @@ RED ──────────► GREEN ──────────► RE
 
 **Hook enforcement:** Blocks Write/Edit to test files (except helpers).
 
-**Allowed files:** All non-test source files.
+**Allowed files:** All non-test source files, plus test helpers (`__mocks__/*`, `__fixtures__/*`, `test-utils/*`).
 
 **Evidence required:** Test command exits with code 0.
 

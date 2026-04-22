@@ -12,16 +12,20 @@ A PreToolUse hook that blocks file edits based on the current TDD phase:
 
 | Current Phase | Edit test file | Edit source file | Edit helper |
 |---|---|---|---|
-| RED | ALLOW | BLOCK | ALLOW |
+| RED | ALLOW | BLOCK | BLOCK |
 | GREEN | BLOCK | ALLOW | ALLOW |
 | REFACTOR | ALLOW | ALLOW | ALLOW |
 | exception | ALLOW | ALLOW | ALLOW |
 
+Note: In RED phase, only files matching `.test.*` or `.spec.*` patterns are allowed. Helpers (`__mocks__/`, `__fixtures__/`, `test-utils/`) are classified separately and blocked in RED. In GREEN phase, test files are blocked but helpers are explicitly allowed (`isTestFile && !isTestHelper`).
+
 **File classification** (`tdd-phase-registry.js`):
 
-- **Test files:** `*.test.ts`, `*.test.tsx`, `*.spec.ts`, `*.spec.tsx`, `*.test.js`, `*.spec.js`
-- **Test helpers:** `__mocks__/*`, `__fixtures__/*`, `test-utils.*`, `testing-library.*`
+- **Test files:** Matches `TEST_FILE_PATTERNS`: `/\.test\.[jt]sx?$/`, `/\.spec\.[jt]sx?$/`
+- **Test helpers:** Matches `TEST_HELPER_PATTERNS`: `__mocks__/`, `__fixtures__/`, `test-utils/`, `test-utils.[jt]sx?`, `test-helper/`
 - **Source files:** Everything else
+
+Note: `isTestHelper()` returns false if the file also matches `isTestFile()` — a file named `test-utils.test.ts` is a test file, not a helper.
 
 ### Layer 2: Evidence Recording (CLI)
 
@@ -71,9 +75,9 @@ Valid transitions:
 red → green → refactor → red (cyclic)
 ```
 
-Any phase can transition to `exception` (one-way, terminal).
+`exception` is not part of the transition graph — it is set directly by the `cmdException()` function, bypassing `tddCanTransition()`. It overwrites the entire state file with `{ currentPhase: 'exception', exception: reason, cycles: [] }`.
 
-The `tddCanTransition(from, to)` function enforces this graph.
+The `tddCanTransition(from, to)` function only enforces the `red → green → refactor → red` cycle.
 
 ## State File
 

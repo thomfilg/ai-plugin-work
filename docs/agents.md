@@ -1,6 +1,6 @@
 # Agents
 
-The plugin uses 18 specialized agents, each defined as a markdown file in `agents/`. Agents are dispatched via `Task()` tool calls — they never self-invoke or call other agents recursively.
+The plugin uses 19 specialized agents, each defined as a markdown file in `agents/`. Agents are dispatched via `Task()` tool calls — they never self-invoke or call other agents recursively.
 
 ## Agent Catalog
 

@@ -37,14 +37,32 @@ Hooks are registered as shell commands that receive tool context via stdin (JSON
 {
   "hooks": {
     "PreToolUse": [
-      { "command": "node workflows/lib/hooks/enforce-step-workflow.js" }
+      {
+        "matcher": "Edit|Write|MultiEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/enforce-step-workflow.js"
+          }
+        ]
+      }
     ],
     "PostToolUse": [
-      { "command": "node workflows/lib/hooks/enforce-step-workflow.js" }
+      {
+        "matcher": "Edit|Write|MultiEdit|Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/enforce-step-workflow.js"
+          }
+        ]
+      }
     ]
   }
 }
 ```
+
+Note: The actual `hooks.json` uses `matcher` patterns and `${CLAUDE_PLUGIN_ROOT}` paths. Only matching tool types trigger the hooks.
 
 ## Hook Input/Output Protocol
 
@@ -147,7 +165,8 @@ All hooks follow a strict fail-open policy:
 | `check-setup.js` | Initialize check context, discover impacted apps |
 | `check-start-env.js` | Start dev servers |
 | `check-validate-reports.js` | Validate report format and status |
-| `enforce-screenshot-requirement.js` | Block QA without screenshots (GH-207) |
+
+Note: `enforce-screenshot-requirement.js` lives in `workflows/lib/hooks/` (shared hooks), not in the check-specific hooks directory. It is consumed by the check workflow but is architecturally a shared enforcement hook.
 
 ## Session Guard
 

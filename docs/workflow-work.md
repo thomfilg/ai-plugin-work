@@ -115,7 +115,7 @@ The main orchestrator workflow that drives ticket-to-PR delivery through 18 dete
 
 ### 8. implement
 
-**Purpose:** Code implementation following TDD discipline.
+**Purpose:** TDD-gated code implementation.
 
 **Agents:** `developer-nodejs-tdd`, `developer-react-senior`, `developer-react-ui-architect`, `developer-devops` (auto-selected based on file types)
 

@@ -58,8 +58,8 @@ claude-plugin-work/
 │       ├── check.workflow.js   # Check dispatcher
 │       ├── hooks/              # Check-specific hooks
 │       └── scripts/            # Report writers
-├── agents/                     # 18 specialized agent definitions (markdown)
-├── skills/                     # 25 slash command definitions (SKILL.md)
+├── agents/                     # 19 specialized agent definitions (markdown)
+├── skills/                     # 23 slash command definitions (SKILL.md)
 ├── hooks/                      # Hook registration (hooks.json)
 ├── scripts/                    # Root-level scripts
 └── package.json                # Dependencies (biome only)

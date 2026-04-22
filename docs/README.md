@@ -11,7 +11,7 @@ Comprehensive documentation for the `claude-plugin-work` plugin, a deterministic
 
 ### Core Workflows
 
-- **[/work Workflow](./workflow-work.md)** — The main orchestrator: 17-step ticket-to-PR pipeline
+- **[/work Workflow](./workflow-work.md)** — The main orchestrator: 18-step ticket-to-PR pipeline
 - **[/check Workflow](./workflow-check.md)** — Parallel quality verification: code review, tests, QA, completion
 - **[/work-implement Workflow](./workflow-work-implement.md)** — Quick TDD-gated implementation (skip brief/spec/tasks)
 - **[/work-pr Workflow](./workflow-work-pr.md)** — PR description generation and visual documentation
@@ -52,8 +52,8 @@ follow_up → ci → cleanup → reports → complete
 | `workflows/work-implement/` | TDD phase management |
 | `workflows/work-pr/` | PR generation |
 | `workflows/lib/` | Shared utilities, hooks, policies |
-| `agents/` | 18 agent definitions (markdown) |
-| `skills/` | 25 slash command definitions |
+| `agents/` | 19 agent definitions (markdown) |
+| `skills/` | 23 slash command definitions |
 | `hooks/` | Top-level hook registration |
 
 ### State Files

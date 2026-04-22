@@ -20,8 +20,8 @@ const STEPS = Object.freeze({
   spec_gate:   'spec_gate',
   tasks:       'tasks',
   implement:   'implement',
-  commit:      'commit',
-  task_review: 'task_review',
+  commit:      'commit',      // step 9
+  task_review: 'task_review', // step 10 (GH-211)
   check:       'check',
   pr:          'pr',
   ready:       'ready',

@@ -28,8 +28,10 @@ Also invoked automatically as part of `/work` at the `check` step.
 
 The check workflow computes a hash of code changes to avoid redundant re-checks:
 
-```bash
-git diff ${baseBranch}...HEAD -w | sha256sum
+```javascript
+// check.workflow.js — computeChangesHash()
+const diff = execSync(`git diff ${baseBranch}...HEAD -w`);
+return crypto.createHash('sha256').update(diff).digest('hex').substring(0, 12);
 ```
 
 - Each report includes: `**Changes Hash:** abc123def456`
