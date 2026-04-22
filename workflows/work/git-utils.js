@@ -20,6 +20,15 @@ const path = require('path');
  */
 function resolveGitHead(cwd) {
   const dotgitPath = path.join(cwd || process.cwd(), '.git');
+
+  // Check if .git is a file (worktree) or directory (normal repo)
+  const stat = fs.statSync(dotgitPath);
+  if (stat.isDirectory()) {
+    // Normal repo — read HEAD directly
+    return fs.readFileSync(path.join(dotgitPath, 'HEAD'), 'utf-8').trim();
+  }
+
+  // Worktree — .git is a file containing "gitdir: <path>"
   const dotgit = fs.readFileSync(dotgitPath, 'utf-8').trim();
   if (dotgit.startsWith('gitdir: ')) {
     const gitdir = path.resolve(path.dirname(dotgitPath), dotgit.slice('gitdir: '.length));

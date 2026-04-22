@@ -58,6 +58,16 @@ describe('resolveGitHead (GH-260 Issue 1)', () => {
     assert.equal(result, 'ref: refs/heads/feature-branch', 'Should resolve relative gitdir');
   });
 
+  it('should read HEAD directly when .git is a directory (normal repo)', () => {
+    const repo = makeTmpDir();
+    const dotgitDir = path.join(repo, '.git');
+    fs.mkdirSync(dotgitDir);
+    fs.writeFileSync(path.join(dotgitDir, 'HEAD'), 'ref: refs/heads/main\n');
+
+    const result = resolveGitHead(repo);
+    assert.equal(result, 'ref: refs/heads/main', 'Should read HEAD from .git directory');
+  });
+
   it('should throw for unexpected .git content', () => {
     const worktree = makeTmpDir();
     fs.writeFileSync(path.join(worktree, '.git'), 'some random content\n');
