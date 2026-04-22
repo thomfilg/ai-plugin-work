@@ -88,9 +88,6 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg, suffix,
 
   // Planning docs discovery
   const providerConfig = tp.getProviderConfig({ skipPrompt: true });
-  const briefEnabled = process.env.WORK_BRIEF_ENABLED !== '0';
-  const specEnabled = process.env.WORK_SPEC_ENABLED !== '0';
-  const tasksEnabled = process.env.WORK_TASKS_ENABLED !== '0';
   const briefPath = path.join(tasksDir, 'brief.md');
   const specPath = path.join(tasksDir, 'spec.md');
   const tasksPath = path.join(tasksDir, 'tasks.md');
@@ -105,11 +102,11 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg, suffix,
   }
   const planningDocs = [];
   if (fileExists(briefPath)) planningDocs.push(`- Brief: ${briefPath}`);
-  else if (briefEnabled) planningDocs.push(`- Brief (if present after brief step): ${briefPath}`);
+  else planningDocs.push(`- Brief (if present after brief step): ${briefPath}`);
   if (fileExists(specPath)) planningDocs.push(`- Spec: ${specPath}`);
-  else if (specEnabled) planningDocs.push(`- Spec (if present after spec step): ${specPath}`);
+  else planningDocs.push(`- Spec (if present after spec step): ${specPath}`);
   if (fileExists(tasksPath)) planningDocs.push(`- Tasks: ${tasksPath}`);
-  else if (tasksEnabled) planningDocs.push(`- Tasks (if present after tasks step): ${tasksPath}`);
+  else planningDocs.push(`- Tasks (if present after tasks step): ${tasksPath}`);
   prePlanningFiles.forEach((f) => planningDocs.push(`- Pre-planning: ${f}`));
   const planningContext =
     planningDocs.length > 0

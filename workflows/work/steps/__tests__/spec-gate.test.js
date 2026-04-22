@@ -1,13 +1,12 @@
 /**
  * Unit tests for the spec-gate step module (GH-244, Task 4).
  *
- * Covers the six DEFER/RUN decision paths:
- *   1. WORK_SPEC_ENABLED=0 → DEFER
- *   2. !s.hasSpec → DEFER
- *   3. spec.md unreadable → RUN /spec
- *   4. gherkin-skip override → DEFER with reason
- *   5. Validation passes → DEFER with scenario count
- *   6. Validation fails → RUN with error messages
+ * Covers the five DEFER/RUN decision paths:
+ *   1. !s.hasSpec → DEFER
+ *   2. spec.md unreadable → RUN /spec
+ *   3. gherkin-skip override → DEFER with reason
+ *   4. Validation passes → DEFER with scenario count
+ *   5. Validation fails → RUN with error messages
  *
  * Run: node --test workflows/work/steps/__tests__/spec-gate.test.js
  */
@@ -133,20 +132,13 @@ function rmrf(dir) {
 describe('spec-gate step', () => {
   let specGateStep;
   const createdDirs = [];
-  const originalEnv = process.env.WORK_SPEC_ENABLED;
 
   before(() => {
     const mod = require(path.join(__dirname, '..', 'spec-gate.js'));
     specGateStep = typeof mod === 'function' ? mod : mod.specGateStep;
   });
 
-  beforeEach(() => {
-    delete process.env.WORK_SPEC_ENABLED;
-  });
-
   afterEach(() => {
-    if (originalEnv === undefined) delete process.env.WORK_SPEC_ENABLED;
-    else process.env.WORK_SPEC_ENABLED = originalEnv;
     while (createdDirs.length) rmrf(createdDirs.pop());
   });
 
@@ -154,18 +146,34 @@ describe('spec-gate step', () => {
     assert.equal(typeof specGateStep, 'function');
   });
 
-  // Case 1: WORK_SPEC_ENABLED=0
-  it('DEFERs when WORK_SPEC_ENABLED=0', () => {
-    process.env.WORK_SPEC_ENABLED = '0';
-    const { add, entries } = makeAdd();
-    specGateStep(add, makeState(), makeCtx());
-    assert.equal(entries.length, 1);
-    assert.equal(entries[0].step, STEPS.spec_gate);
-    assert.equal(entries[0].action, 'DEFER');
-    assert.match(entries[0].reason, /disabled/i);
+  // GH-253 Task 4: WORK_SPEC_ENABLED toggle removed — spec-gate no longer
+  // checks process.env.WORK_SPEC_ENABLED.
+  it('does not reference WORK_SPEC_ENABLED in source code', () => {
+    const src = fs.readFileSync(path.join(__dirname, '..', 'spec-gate.js'), 'utf8');
+    assert.ok(
+      !src.includes('WORK_SPEC_ENABLED'),
+      'spec-gate.js must not contain WORK_SPEC_ENABLED'
+    );
   });
 
-  // Case 2: No spec.md present
+  it('ignores WORK_SPEC_ENABLED=0 and still evaluates spec.md normally', () => {
+    const prev = process.env.WORK_SPEC_ENABLED;
+    process.env.WORK_SPEC_ENABLED = '0';
+    try {
+      const { add, entries } = makeAdd();
+      // hasSpec=false should DEFER with "No spec.md present", NOT "disabled"
+      specGateStep(add, makeState({ hasSpec: false }), makeCtx());
+      assert.equal(entries.length, 1);
+      assert.equal(entries[0].step, STEPS.spec_gate);
+      assert.equal(entries[0].action, 'DEFER');
+      assert.match(entries[0].reason, /no spec/i);
+    } finally {
+      if (prev === undefined) delete process.env.WORK_SPEC_ENABLED;
+      else process.env.WORK_SPEC_ENABLED = prev;
+    }
+  });
+
+  // Case 1: No spec.md present
   it('DEFERs when !s.hasSpec', () => {
     const { add, entries } = makeAdd();
     specGateStep(add, makeState({ hasSpec: false }), makeCtx());
