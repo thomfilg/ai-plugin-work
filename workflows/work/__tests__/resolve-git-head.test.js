@@ -43,8 +43,9 @@ describe('resolveGitHead (GH-260 Issue 1)', () => {
 
   it('should handle relative gitdir paths in worktree .git file', () => {
     const worktree = makeTmpDir();
-    const mainRepo = path.join(worktree, '..', 'main-repo', '.git');
-    fs.mkdirSync(path.dirname(mainRepo), { recursive: true });
+    const mainRepoParent = makeTmpDir();
+    const mainRepo = path.join(mainRepoParent, '.git');
+    fs.mkdirSync(mainRepo, { recursive: true });
     fs.mkdirSync(path.join(mainRepo, 'worktrees', 'wt1'), { recursive: true });
     fs.writeFileSync(
       path.join(mainRepo, 'worktrees', 'wt1', 'HEAD'),

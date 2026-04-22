@@ -135,13 +135,14 @@ function transitionStep(ticket, targetStep, deps) {
       let verified;
       try {
         verified = entry.verify(safeTicket);
-      } catch {
+      } catch (err) {
+        const detail = err && typeof err.message === 'string' ? err.message : String(err);
         return {
           error: true,
-          message: `BLOCKED: ${currentStep} verify threw — cannot transition to ${targetStep}`,
+          message: `BLOCKED: ${currentStep} verify threw — cannot transition to ${targetStep}: ${detail}`,
           gate: 'step-verify',
           step: currentStep,
-          hint: `The ${currentStep} step verification encountered an error. Resolve the issue before transitioning.`,
+          hint: `The ${currentStep} step verification encountered an error: ${detail}. Resolve the issue before transitioning.`,
         };
       }
       if (!verified) {
