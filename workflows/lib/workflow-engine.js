@@ -221,7 +221,19 @@ function transitionStep(workflow, stateInstance, instanceId, targetStep) {
   const currentIdx = allSteps.indexOf(currentStep);
   const targetIdx = allSteps.indexOf(targetStep);
   if (targetIdx > currentIdx && typeof workflow.verifyStep === 'function') {
-    const verifyResult = workflow.verifyStep(currentStep, targetStep, instanceId);
+    let verifyResult;
+    try {
+      verifyResult = workflow.verifyStep(currentStep, targetStep, instanceId);
+    } catch {
+      return {
+        error: true,
+        message: `BLOCKED: ${currentStep} verify threw — cannot transition to ${targetStep}`,
+        gate: 'step-verify',
+        step: currentStep,
+        from: currentStep,
+        to: targetStep,
+      };
+    }
     if (verifyResult && (verifyResult.blocked || verifyResult.error)) {
       return {
         error: true,

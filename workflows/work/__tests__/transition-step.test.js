@@ -343,4 +343,28 @@ describe('transition-step.js (GH-260): generic step-verify gate', () => {
     assert.ok(result.message.includes('ci not verified'));
   });
 
+  it('should block forward transition when verify() throws an error', () => {
+    const { transitionStep } = require('../transition-step');
+    const { STEPS, ALL_STEPS } = require('../step-registry');
+
+    const followUpIdx = ALL_STEPS.indexOf(STEPS.follow_up);
+    const deps = createDeps({
+      workflowCanTransition: () => true,
+      softSteps: new Set([STEPS.ticket, STEPS.ready, STEPS.task_review, STEPS.reports, STEPS.complete]),
+      commandMap: [
+        { step: STEPS.follow_up, verify: () => { throw new Error('isPRGateReady exploded'); } },
+      ],
+    });
+
+    const ws = deps.loadWorkState('TEST-VERIFY-THROW-001');
+    ws.currentStep = followUpIdx + 1;
+    ws.stepStatus[STEPS.follow_up] = 'in_progress';
+    deps._savedStates['TEST-VERIFY-THROW-001'] = ws;
+
+    const result = transitionStep('TEST-VERIFY-THROW-001', STEPS.ci, deps);
+    assert.equal(result.error, true, 'Should block transition when verify throws');
+    assert.equal(result.gate, 'step-verify', 'Gate should be step-verify');
+    assert.ok(result.message.includes('verify threw'), 'Message should indicate verify threw');
+  });
+
 });

@@ -148,9 +148,11 @@ let _workflowDef = null;
 function getWorkflowDefinition() {
   if (!_workflowDef) {
     const createWorkflowDefinition = require(path.join(__dirname, 'workflow-definition'));
+    // Compute providerConfig once (avoids repeated execSync/file reads)
+    const providerConfig = tp.getProviderConfig({ skipPrompt: true });
     _workflowDef = createWorkflowDefinition({
       TASKS_BASE,
-      safeTicketPath: (id) => tp.sanitizeTicketIdForPath(id, tp.getProviderConfig({ skipPrompt: true })),
+      safeTicketPath: (id) => tp.sanitizeTicketIdForPath(id, providerConfig),
       resolveGitHead: () => {
         const { resolveGitHead } = require(path.join(__dirname, 'git-utils'));
         return resolveGitHead();

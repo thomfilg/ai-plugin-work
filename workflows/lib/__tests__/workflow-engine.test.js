@@ -689,4 +689,25 @@ describe('verifyStep callback (GH-260)', () => {
     const result = transitionStep(wf, stateInstance, 'verify-none-1', 'step_b');
     assert.strictEqual(result.success, true);
   });
+
+  it('blocks forward transition when verifyStep throws an error', () => {
+    const wf = mockWorkflow({
+      stateDir,
+      verifyStep: () => { throw new Error('verifyStep exploded'); },
+    });
+    const stateInstance = new WorkflowState(wf.name, wf.stateDir);
+    const steps = wf.steps.map((s) => s.id);
+    stateInstance.init('verify-throw-1', steps);
+    stateInstance.setStepStatus('verify-throw-1', 'step_a', 'in_progress');
+
+    const result = transitionStep(wf, stateInstance, 'verify-throw-1', 'step_b');
+    assert.strictEqual(result.error, true);
+    assert.strictEqual(result.gate, 'step-verify');
+    assert.ok(result.message.includes('verify threw'));
+
+    // State should be unchanged (gate runs before mutations)
+    const ws = stateInstance.load('verify-throw-1');
+    assert.strictEqual(ws.stepStatus['step_a'], 'in_progress');
+    assert.strictEqual(ws.stepStatus['step_b'], 'pending');
+  });
 });

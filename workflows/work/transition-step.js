@@ -131,14 +131,28 @@ function transitionStep(ticket, targetStep, deps) {
   // better error messages; this gate acts as a universal catch-all.
   if (isForward && !softSteps.has(currentStep)) {
     const entry = commandMap.find((c) => c.step === currentStep && typeof c.verify === 'function');
-    if (entry && !entry.verify(safeTicket)) {
-      return {
-        error: true,
-        message: `BLOCKED: ${currentStep} not verified — cannot transition to ${targetStep}`,
-        gate: 'step-verify',
-        step: currentStep,
-        hint: `The ${currentStep} step has not passed its verification check. Complete the step requirements before transitioning.`,
-      };
+    if (entry) {
+      let verified;
+      try {
+        verified = entry.verify(safeTicket);
+      } catch {
+        return {
+          error: true,
+          message: `BLOCKED: ${currentStep} verify threw — cannot transition to ${targetStep}`,
+          gate: 'step-verify',
+          step: currentStep,
+          hint: `The ${currentStep} step verification encountered an error. Resolve the issue before transitioning.`,
+        };
+      }
+      if (!verified) {
+        return {
+          error: true,
+          message: `BLOCKED: ${currentStep} not verified — cannot transition to ${targetStep}`,
+          gate: 'step-verify',
+          step: currentStep,
+          hint: `The ${currentStep} step has not passed its verification check. Complete the step requirements before transitioning.`,
+        };
+      }
     }
   }
 
