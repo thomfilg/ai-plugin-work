@@ -24,7 +24,7 @@
  *   node tdd-phase-state.js record-green <TICKET_ID> --cmd "<test command>"
  *   node tdd-phase-state.js record-refactor <TICKET_ID> --cmd "<test command>"
  *   node tdd-phase-state.js transition <TICKET_ID> <target_phase>
- *   node tdd-phase-state.js exception <TICKET_ID> --reason "<reason>"
+ *   node tdd-phase-state.js exception <TICKET_ID> --category <category> --reason "<reason>"
  */
 
 const fs = require('fs');
@@ -50,7 +50,7 @@ const ALLOWED_AGENTS = [
 ];
 
 // Subcommands that require token verification
-const GATED_SUBCOMMANDS = ['record-red', 'record-green', 'record-refactor', 'transition'];
+const GATED_SUBCOMMANDS = ['record-red', 'record-green', 'record-refactor', 'transition', 'exception'];
 
 const TOKEN_MAX_AGE_MS = 10_000; // 10 seconds
 
@@ -196,6 +196,13 @@ function parseTask(args) {
 
 function safeParseTask(args) {
   try { return parseTask(args); } catch (e) { errorExit(e.message); }
+}
+
+
+function parseCategory(args) {
+  const idx = args.indexOf('--category');
+  if (idx === -1 || idx + 1 >= args.length) return null;
+  return args[idx + 1];
 }
 
 function runTestCommand(cmd) {
@@ -460,25 +467,73 @@ function cmdTransition(ticketId, targetPhase, args) {
 
 function cmdException(ticketId, args) {
   if (!ticketId) errorExit('Missing ticket ID.');
+
+  // Parse --category (required)
+  const category = parseCategory(args);
+  if (!category) {
+    errorExit('Missing --category argument. Usage: node tdd-phase-state.js exception <TICKET_ID> --category <category> --reason "<reason>"');
+  }
+
+  // Validate category
+  const { validateExceptionCategory, checkNewExportedCode } = require('./exception-validator');
+  const catResult = validateExceptionCategory(category);
+  if (!catResult.valid) {
+    errorExit('Invalid exception category: ' + catResult.reason);
+  }
+
+  // Parse --reason (required)
   const reasonIdx = args.indexOf('--reason');
   if (reasonIdx === -1 || reasonIdx + 1 >= args.length) {
-    errorExit(
-      'Missing --reason argument. Usage: node tdd-phase-state.js exception <TICKET_ID> --reason "<reason>"'
-    );
+    errorExit('Missing --reason argument.');
   }
   const reason = args[reasonIdx + 1];
   if (!reason || !reason.trim()) {
     errorExit('Reason cannot be empty.');
   }
+
   const taskNum = safeParseTask(args);
   const opts = taskNum ? { taskNum } : undefined;
+
+  // Heuristic check: detect new exported code (skip for checkpoint)
+  if (category !== 'checkpoint') {
+    let allChanged = [];
+    try {
+      const diff = execSync('git diff --name-only', { encoding: 'utf8' }).trim();
+      const staged = execSync('git diff --cached --name-only', { encoding: 'utf8' }).trim();
+      const untracked = execSync('git ls-files --others --exclude-standard', { encoding: 'utf8' }).trim();
+      allChanged = [...new Set([...diff.split('\n'), ...staged.split('\n'), ...untracked.split('\n')].filter(Boolean))];
+    } catch { /* git not available */ }
+
+    const exportCheck = checkNewExportedCode(allChanged);
+    if (exportCheck.hasNewExports) {
+      errorExit('New exported code detected in: ' + exportCheck.files.join(', ') + '. TDD is required for new code with exports. Use the RED-GREEN-REFACTOR cycle instead of exception mode.');
+    }
+  }
+
+  // Write structured exception
   const state = {
     currentPhase: 'exception',
-    exception: reason,
+    exception: { category, reason },
     cycles: [],
   };
   writeState(ticketId, state, opts);
-  successOut({ ok: true, phase: 'exception', exception: reason });
+
+  // Audit trail (fail-open)
+  try {
+    const { appendEnforcementAudit } = require('../../work/work-actions');
+    appendEnforcementAudit(ticketId, {
+      origin: 'ai-subtask',
+      task: taskNum || null,
+      phase: null,
+      action: 'tdd-exception',
+      allow: true,
+      reason: category + ': ' + reason,
+      outputPath: null,
+      meta: { category },
+    });
+  } catch { /* fail-open */ }
+
+  successOut({ ok: true, phase: 'exception', category, reason });
 }
 
 // ─── Main ───────────────────────────────────────────────────────────────────
