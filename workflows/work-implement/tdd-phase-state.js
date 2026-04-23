@@ -502,11 +502,15 @@ function cmdException(ticketId, args) {
 
   // Validate checkpoint category against actual task metadata
   if (category === 'checkpoint') {
+    if (!taskNum) {
+      auditException(ticketId, null, category, null, false);
+      errorExit('Category "checkpoint" requires --task <N> to identify which task is a checkpoint.');
+    }
     const { isCheckpointTask } = require('./exception-validator');
     const resolvedTasksBase = resolveTasksBase();
     const safeId = sanitizeId(ticketId);
-    if (taskNum && !isCheckpointTask(safeId, taskNum, resolvedTasksBase)) {
-      auditException(ticketId, taskNum, category, reason, false);
+    if (!isCheckpointTask(safeId, taskNum, resolvedTasksBase)) {
+      auditException(ticketId, taskNum, category, null, false);
       errorExit('Category "checkpoint" is only allowed for checkpoint tasks. Task ' + taskNum + ' is not a checkpoint task.');
     }
   }
