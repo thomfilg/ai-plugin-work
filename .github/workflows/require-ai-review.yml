@@ -31,8 +31,15 @@ jobs:
               return;
             }
 
+            // Skip fork PRs — GITHUB_TOKEN is read-only and createCommitStatus will 403
+            if (pr.head.repo?.fork) {
+              console.log('Fork PR detected — skipping status update (read-only token)');
+              return;
+            }
+
             const sha = pr.head.sha;
             const pull_number = pr.number;
+            // Enforcement: add "AI Review Required" as a required status check in branch protection
             const statusContext = 'AI Review Required';
 
             // Paginate to fetch all reviews (default page is 30)
