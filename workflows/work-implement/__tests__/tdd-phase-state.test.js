@@ -850,7 +850,7 @@ describe('tdd-phase-state CLI', () => {
       fs.mkdirSync(ticketDir, { recursive: true });
       fs.writeFileSync(
         path.join(ticketDir, 'tasks.md'),
-        '## Task 1\n**Type:** implementation\n\n## Task 2\n**Type:** checkpoint\n'
+        '## Task 1\n### Type\nimplementation\n\n## Task 2\n### Type\ncheckpoint\n'
       );
 
       const { stdout, exitCode } = runCli(
