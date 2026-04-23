@@ -240,6 +240,15 @@ describe('isCheckpointTask', () => {
     const result = isCheckpointTask('TICK-1', 'abc', tmpDir);
     assert.strictEqual(result, false);
   });
+
+  it('returns false for task with checkpoint in title but non-checkpoint type', () => {
+    const { isCheckpointTask } = load();
+    writeTasksMd(
+      '## Task 1 — Checkpoint restore logic\n### Type\nbackend\n### Dependencies\nNone\n### Acceptance Criteria\n- done\n'
+    );
+    const result = isCheckpointTask('TICK-1', 1, tmpDir);
+    assert.strictEqual(result, false);
+  });
 });
 
 // ─── ALLOWED_CATEGORIES export ──────────────────────────────────────────────

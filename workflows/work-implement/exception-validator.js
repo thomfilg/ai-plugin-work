@@ -115,7 +115,7 @@ function isCheckpointTask(ticketId, taskNum, tasksBase) {
     if (!tasks) return false;
 
     const task = tasks.find((t) => t.num === num);
-    return task ? !!task.isCheckpoint : false;
+    return task ? task.type === 'checkpoint' : false;
   } catch {
     return false;
   }
