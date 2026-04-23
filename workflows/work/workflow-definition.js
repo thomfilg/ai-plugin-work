@@ -268,9 +268,12 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
                 return typeof cat === 'string' && ALLOWED_CATEGORIES.includes(cat) &&
                   typeof reason === 'string' && reason.trim() !== '';
               } catch {
-                // Fallback: accept if category and reason are non-empty strings
-                return typeof state.exception.category === 'string' && state.exception.category.trim() !== '' &&
-                  typeof state.exception.reason === 'string' && state.exception.reason.trim() !== '';
+                // Fallback: hardcoded allowlist when exception-validator module unavailable
+                const FALLBACK_CATEGORIES = ['checkpoint', 'config-only', 'file-move', 'mechanical-refactor'];
+                const cat = state.exception.category;
+                const reason = state.exception.reason;
+                return typeof cat === 'string' && FALLBACK_CATEGORIES.includes(cat) &&
+                  typeof reason === 'string' && reason.trim() !== '';
               }
             }
             if (!Array.isArray(state.cycles) || state.cycles.length === 0) return false;

@@ -22,7 +22,7 @@ const SOURCE_EXTENSIONS = new Set(['.js', '.jsx', '.ts', '.tsx']);
 
 const EXPORT_PATTERNS = [
   /module\.exports\b/,
-  /exports\.\w/,
+  /\bexports\.\w/,
   /export\s+default\b/,
   /export\s+function\b/,
   /export\s+async\s+function\b/,

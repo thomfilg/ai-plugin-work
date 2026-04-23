@@ -18,13 +18,6 @@ const path = require('path');
 const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
 const { createArtifactProtector } = require(path.join(__dirname, '..', '..', 'lib', 'protect-artifact-files'));
 
-const ALLOWED_STEPS = new Set(['tasks', 'task_review']);
-
-// Use 'tasks' as the canonical step name for the factory rule.
-// The getStepInProgress wrapper maps task_review → tasks so the factory
-// single-step check passes for both allowed steps.
-const CANONICAL_STEP = 'tasks';
-
 /**
  * Get the ticket ID from TICKET_ID env var or derive from branch/cwd.
  * Reuses the canonical getCurrentTaskId from get-ticket-id.js.
@@ -48,8 +41,6 @@ function getTicketId(hookData) {
 
 /**
  * Get the current in_progress step from .work-state.json.
- * Returns the canonical step name ('tasks') when either tasks or task_review
- * is in_progress, so the factory's single-step rule works correctly.
  * @param {string} ticketId
  * @returns {string|null}
  */
@@ -66,8 +57,7 @@ function getStepInProgress(ticketId) {
 
     for (const [step, status] of Object.entries(stepStatus)) {
       if (status === 'in_progress') {
-        // Map allowed steps to canonical step so the factory rule matches
-        return ALLOWED_STEPS.has(step) ? CANONICAL_STEP : step;
+        return step;
       }
     }
     return null;
@@ -79,7 +69,7 @@ function getStepInProgress(ticketId) {
 }
 
 const protector = createArtifactProtector({
-  artifacts: [{ basename: 'tasks.md', step: CANONICAL_STEP }],
+  artifacts: [{ basename: 'tasks.md', step: 'tasks', allowedSteps: ['task_review'] }],
   getStepInProgress,
   getTicketId,
   // Bash write-vector detection is handled by createArtifactProtector (checks basename in command strings)
