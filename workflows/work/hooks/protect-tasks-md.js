@@ -26,31 +26,24 @@ const ALLOWED_STEPS = new Set(['tasks', 'task_review']);
 const CANONICAL_STEP = 'tasks';
 
 /**
- * Get the ticket ID from TICKET_ID env var or derive from branch name.
+ * Get the ticket ID from TICKET_ID env var or derive from branch/cwd.
+ * Reuses the canonical getCurrentTaskId from get-ticket-id.js.
  * @param {object} [hookData]
  * @returns {string|null}
  */
 function getTicketId(hookData) {
-  if (process.env.TICKET_ID) return process.env.TICKET_ID;
-  try {
-    const branch = require('child_process')
-      .execSync('git branch --show-current', {
-        encoding: 'utf8',
-        timeout: 3000,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      })
-      .trim();
-    const match = branch.match(/^(GH-\d+|[A-Z]+-\d+)/i);
-    if (!match) return null;
-    let ticketId = match[1];
+  // Use TICKET_ID env var if set, otherwise derive from branch/cwd
+  const raw = process.env.TICKET_ID || (() => {
     try {
-      const config = require(path.join(__dirname, '..', '..', 'lib', 'config'));
-      ticketId = config.safeTicketId(ticketId);
-    } catch { /* use raw if config unavailable */ }
-    return ticketId;
-  } catch {
-    return null;
-  }
+      const { getCurrentTaskId } = require(path.join(__dirname, '..', '..', 'lib', 'scripts', 'get-ticket-id'));
+      return getCurrentTaskId() || null;
+    } catch { return null; }
+  })();
+  if (!raw) return null;
+  // Normalize (e.g., #99 → GH-99)
+  try {
+    return require(path.join(__dirname, '..', '..', 'lib', 'config')).safeTicketId(raw);
+  } catch { return raw; }
 }
 
 /**

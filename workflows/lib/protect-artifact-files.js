@@ -148,7 +148,7 @@ function createArtifactProtector(opts) {
         file: bn,
         rule: 'step',
         message:
-          `BLOCKED: Cannot write ${bn} — step '${rule.step}' is not in_progress.\n` +
+          `BLOCKED: Cannot write ${bn} — none of the allowed step(s) '${stepsLabel}' are in_progress.\n` +
           `Current step: ${currentStep || '(none)'}\n` +
           `Only the ${stepsLabel} step(s) may create/modify this file.\n`,
       };

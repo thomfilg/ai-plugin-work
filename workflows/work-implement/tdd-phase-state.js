@@ -500,6 +500,17 @@ function cmdException(ticketId, args) {
     errorExit('Invalid exception category: ' + catResult.reason);
   }
 
+  // Validate checkpoint category against actual task metadata
+  if (category === 'checkpoint') {
+    const { isCheckpointTask } = require('./exception-validator');
+    const resolvedTasksBase = resolveTasksBase();
+    const safeId = sanitizeId(ticketId);
+    if (taskNum && !isCheckpointTask(safeId, taskNum, resolvedTasksBase)) {
+      auditException(ticketId, taskNum, category, reason, false);
+      errorExit('Category "checkpoint" is only allowed for checkpoint tasks. Task ' + taskNum + ' is not a checkpoint task.');
+    }
+  }
+
   // Parse --reason (required)
   const reasonIdx = args.indexOf('--reason');
   if (reasonIdx === -1 || reasonIdx + 1 >= args.length) {
@@ -526,6 +537,12 @@ function cmdException(ticketId, args) {
       // Fail-open: git not available or not a repo — allow exception.
       // This follows project convention (CLAUDE.md: hooks catch errors and exit 0).
     }
+
+    // Normalize paths to repo root so checkNewExportedCode can read them
+    try {
+      const repoRoot = execSync('git rev-parse --show-toplevel', { encoding: 'utf8' }).trim();
+      allChanged = allChanged.map(f => path.resolve(repoRoot, f));
+    } catch { /* use relative paths as fallback */ }
 
     const exportCheck = checkNewExportedCode(allChanged);
     if (exportCheck.hasNewExports) {

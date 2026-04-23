@@ -844,6 +844,15 @@ describe('tdd-phase-state CLI', () => {
       );
       execSync('git add src/new-module.js', { cwd: gitRepo, stdio: 'pipe' });
 
+      // Create tasks.md with task 2 as a checkpoint task so validation passes
+      const tasksBase = path.join(homeDir, 'worktrees', 'tasks');
+      const ticketDir = path.join(tasksBase, 'TEST-CAT5');
+      fs.mkdirSync(ticketDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(ticketDir, 'tasks.md'),
+        '## Task 1\n**Type:** implementation\n\n## Task 2\n**Type:** checkpoint\n'
+      );
+
       const { stdout, exitCode } = runCli(
         'exception TEST-CAT5 --category checkpoint --reason "checkpoint task" --task 2',
         homeDir,

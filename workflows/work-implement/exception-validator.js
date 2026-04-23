@@ -22,9 +22,16 @@ const SOURCE_EXTENSIONS = new Set(['.js', '.jsx', '.ts', '.tsx']);
 
 const EXPORT_PATTERNS = [
   /module\.exports\b/,
+  /exports\.\w/,
   /export\s+default\b/,
   /export\s+function\b/,
+  /export\s+async\s+function\b/,
   /export\s+const\b/,
+  /export\s+let\b/,
+  /export\s+var\b/,
+  /export\s+class\b/,
+  /export\s*\{/,
+  /export\s*\*\s*from\b/,
 ];
 
 // ─── validateExceptionCategory ──────────────────────────────────────────────

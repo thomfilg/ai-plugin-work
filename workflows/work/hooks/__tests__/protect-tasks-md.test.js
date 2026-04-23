@@ -224,4 +224,51 @@ describe('protect-tasks-md hook', () => {
     );
     assert.strictEqual(code, 0, 'Expected exit 0 (allow) for GH-258 during tasks step');
   });
+
+  it('should BLOCK Bash redirect to tasks.md when step is implement', async () => {
+    const fixture = createStateFixture('GH-99', {
+      implement: 'in_progress',
+      tasks: 'completed',
+      task_review: 'pending',
+    });
+    try {
+      const tasksFilePath = path.join(fixture.tasksBase, 'GH-99', 'tasks.md');
+      const { code, stderr } = await runHook(
+        {
+          tool_name: 'Bash',
+          tool_input: {
+            command: `echo "modified" >> ${tasksFilePath}`,
+          },
+        },
+        { TASKS_BASE: fixture.tasksBase, TICKET_ID: 'GH-99' }
+      );
+      assert.strictEqual(code, 2, `Expected exit 2 (block) for Bash redirect to tasks.md, got ${code}. stderr: ${stderr}`);
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it('should normalize #N ticket IDs to GH-N for path matching', async () => {
+    // Create fixture with GH-99 (filesystem format)
+    const fixture = createStateFixture('GH-99', {
+      implement: 'in_progress',
+      tasks: 'completed',
+      task_review: 'pending',
+    });
+    try {
+      const { code, stderr } = await runHook(
+        {
+          tool_name: 'Edit',
+          tool_input: { file_path: path.join(fixture.tasksBase, 'GH-99', 'tasks.md') },
+        },
+        {
+          TASKS_BASE: fixture.tasksBase,
+          TICKET_ID: '#99', // Raw format requiring normalization
+        }
+      );
+      assert.strictEqual(code, 2, `Should block even when TICKET_ID needs normalization (#99 → GH-99), got ${code}. stderr: ${stderr}`);
+    } finally {
+      fixture.cleanup();
+    }
+  });
 });
