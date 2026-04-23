@@ -259,10 +259,18 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
             if (typeof state.exception === 'string' && state.exception.trim() !== '') return true;
             if (
               typeof state.exception === 'object' &&
-              state.exception !== null &&
-              typeof state.exception.category === 'string'
-            )
-              return true;
+              state.exception !== null
+            ) {
+              try {
+                const { ALLOWED_CATEGORIES } = require(path.join(__dirname, '..', 'work-implement', 'exception-validator'));
+                const cat = state.exception.category;
+                const reason = state.exception.reason;
+                return typeof cat === 'string' && ALLOWED_CATEGORIES.includes(cat) &&
+                  typeof reason === 'string' && reason.trim() !== '';
+              } catch {
+                return typeof state.exception.category === 'string'; // fallback if module unavailable
+              }
+            }
             if (!Array.isArray(state.cycles) || state.cycles.length === 0) return false;
             // At least one cycle must have both red and green evidence
             return state.cycles.some((c) => c.red && c.green);
