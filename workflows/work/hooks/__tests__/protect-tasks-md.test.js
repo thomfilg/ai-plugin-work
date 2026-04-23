@@ -264,6 +264,7 @@ describe('protect-tasks-md hook', () => {
         {
           TASKS_BASE: fixture.tasksBase,
           TICKET_ID: '#99', // Raw format requiring normalization
+          TICKET_PROVIDER: 'github', // Required for #N → GH-N normalization
         }
       );
       assert.strictEqual(code, 2, `Should block even when TICKET_ID needs normalization (#99 → GH-99), got ${code}. stderr: ${stderr}`);
