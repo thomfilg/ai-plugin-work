@@ -14,6 +14,7 @@ module.exports = function checkStep(add, s, ctx) {
       agentPrompt: '/check',
       preCommands: [
         `rm -f "${tasksDir}"/*.check.md`,
+        `rm -f "${tasksDir}"/task*/*.check.md`,
         `rm -f "${tasksDir}"/.pr-update-sha`,
         `rm -f "${tasksDir}"/.post-pr-update-sha`,
       ],

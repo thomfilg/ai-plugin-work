@@ -56,10 +56,11 @@ describe('check step', () => {
     assert.equal(entries[0].action, 'RUN');
     assert.match(entries[0].reason, /REWORK/);
     assert.ok(Array.isArray(entries[0].preCommands));
-    assert.equal(entries[0].preCommands.length, 3);
+    assert.equal(entries[0].preCommands.length, 4);
     assert.match(entries[0].preCommands[0], /rm -f.*\.check\.md/);
-    assert.match(entries[0].preCommands[1], /\.pr-update-sha/);
-    assert.match(entries[0].preCommands[2], /\.post-pr-update-sha/);
+    assert.match(entries[0].preCommands[1], /rm -f.*task\*.*\.check\.md/);
+    assert.match(entries[0].preCommands[2], /\.pr-update-sha/);
+    assert.match(entries[0].preCommands[3], /\.post-pr-update-sha/);
   });
 
   it('DEFERs when all three or more reports pass', () => {

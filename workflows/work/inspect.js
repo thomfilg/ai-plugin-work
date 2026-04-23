@@ -131,6 +131,43 @@ function inspect(ticket, providerConfig, suffix, deps) {
     }
   }
 
+  // Per-task reports (GH-259 Task 7.1)
+  // When tasks.md exists, scan taskN/ subdirectories for check reports and TDD evidence.
+  // Uses deps.fileExists/readFile/listFiles for testability (consistent with the rest of inspect).
+  if (fileExists(path.join(s.tasksDir, 'tasks.md'))) {
+    s.perTaskReports = {};
+    const taskDirNames = listFiles(s.tasksDir, /^task\d+$/).map((fp) => path.basename(fp));
+    for (const taskDirName of taskDirNames) {
+      const taskDir = path.join(s.tasksDir, taskDirName);
+      const taskReport = { tddPhase: null, checkReports: [] };
+
+      // Read tdd-phase.json if present
+      const tddPath = path.join(taskDir, 'tdd-phase.json');
+      if (fileExists(tddPath)) {
+        try {
+          const tddData = JSON.parse(readFile(tddPath));
+          const hasException =
+            typeof tddData.exception === 'string' && tddData.exception.trim() !== '';
+          const hasCompleteCycle =
+            Array.isArray(tddData.cycles) && tddData.cycles.some((c) => c.red && c.green);
+          taskReport.tddPhase = {
+            exists: true,
+            valid: hasException || hasCompleteCycle,
+            exception: hasException,
+            cycleCount: Array.isArray(tddData.cycles) ? tddData.cycles.length : 0,
+          };
+        } catch {
+          taskReport.tddPhase = { exists: true, valid: false, parseError: true };
+        }
+      }
+
+      // Scan for *.check.md files in the task dir
+      taskReport.checkReports = listFiles(taskDir, /\.check\.md$/).map((fp) => path.basename(fp));
+
+      s.perTaskReports[taskDirName] = taskReport;
+    }
+  }
+
   // SHA tracking
   s.prUpdateSha = fileExists(path.join(s.tasksDir, '.pr-update-sha'))
     ? readFile(path.join(s.tasksDir, '.pr-update-sha')).trim()

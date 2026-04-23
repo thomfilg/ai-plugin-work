@@ -161,6 +161,45 @@ const CHECK_GATE_RULES = [
     },
   },
   {
+    name: 'per-task-tdd-evidence',
+    description: 'All tasks must have TDD evidence when tasks.md exists (GH-259)',
+    check(dir) {
+      const tasksPath = path.join(dir, 'tasks.md');
+      if (!fileExists(tasksPath)) return []; // single-task mode, skip
+      const taskDirs = listFiles(dir, /^task\d+$/).filter((d) => {
+        try {
+          return fs.statSync(d).isDirectory();
+        } catch {
+          return false;
+        }
+      });
+      if (taskDirs.length === 0) return []; // no task dirs yet
+      const reasons = [];
+      for (const taskDirPath of taskDirs) {
+        const taskName = path.basename(taskDirPath);
+        const tddPath = path.join(taskDirPath, 'tdd-phase.json');
+        if (!fileExists(tddPath)) {
+          reasons.push(`Missing TDD evidence: ${taskName}/tdd-phase.json`);
+          continue;
+        }
+        try {
+          const state = JSON.parse(fs.readFileSync(tddPath, 'utf8'));
+          if (typeof state.exception === 'string' && state.exception.trim() !== '') continue;
+          if (!Array.isArray(state.cycles) || state.cycles.length === 0) {
+            reasons.push(`${taskName}/tdd-phase.json has no TDD cycles or exception`);
+            continue;
+          }
+          if (!state.cycles.some((c) => c.red && c.green)) {
+            reasons.push(`${taskName}/tdd-phase.json has no complete RED→GREEN cycle`);
+          }
+        } catch {
+          reasons.push(`${taskName}/tdd-phase.json is not valid JSON`);
+        }
+      }
+      return reasons;
+    },
+  },
+  {
     name: 'spec-verification',
     description: 'Spec Verification Checklist markers must all pass (fail-open for legacy specs)',
     check(dir) {

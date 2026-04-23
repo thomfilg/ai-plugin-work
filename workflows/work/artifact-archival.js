@@ -106,6 +106,51 @@ function archiveStepArtifacts(tasksDir, stepsToArchive) {
     }
   }
 
+  // Scan taskN/ subdirectories for matching artifacts (GH-259)
+  try {
+    const taskDirs = fs
+      .readdirSync(tasksDir)
+      .filter((d) => /^task\d+$/.test(d))
+      .filter((d) => {
+        try {
+          return fs.statSync(path.join(tasksDir, d)).isDirectory();
+        } catch {
+          return false;
+        }
+      });
+
+    for (const taskDir of taskDirs) {
+      const taskPath = path.join(tasksDir, taskDir);
+      for (const step of stepsToArchive) {
+        const patterns = STEP_ARTIFACTS[step];
+        if (!patterns) continue;
+
+        const files = [...new Set(patterns.flatMap((p) => listFiles(taskPath, p)))];
+        if (files.length === 0) continue;
+
+        if (!archived) {
+          fs.mkdirSync(runDir, { recursive: true });
+          archived = true;
+        }
+        const taskRunDir = path.join(runDir, taskDir);
+        fs.mkdirSync(taskRunDir, { recursive: true });
+
+        for (const filePath of files) {
+          const dest = path.join(taskRunDir, path.basename(filePath));
+          try {
+            fs.renameSync(filePath, dest);
+          } catch (e) {
+            process.stderr.write(
+              `work-orchestrator: failed to archive ${taskDir}/${path.basename(filePath)}: ${e?.message || e}\n`
+            );
+          }
+        }
+      }
+    }
+  } catch {
+    /* ignore readdir failures */
+  }
+
   return archived ? `runs/run${runNum}` : null;
 }
 

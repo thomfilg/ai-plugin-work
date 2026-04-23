@@ -75,6 +75,30 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
   }
   // GH-244: verifySpecGate tests added in workflow-definition.test.js
 
+  // GH-259 Task 7.2: Helper to verify per-task TDD evidence when tasks.md exists.
+  // Returns true if no tasks.md, or if every taskN/ dir has valid tdd-phase.json.
+  function verifyPerTaskTDD(ticketId) {
+    try {
+      const dir = path.join(TASKS_BASE, safeTicketPath(ticketId));
+      const tasksPath = path.join(dir, 'tasks.md');
+      if (!fs.existsSync(tasksPath)) return true; // single-task mode — no per-task check
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      const taskDirs = entries.filter((e) => e.isDirectory() && /^task\d+$/.test(e.name));
+      if (taskDirs.length === 0) return true; // no task dirs yet — skip
+      for (const taskEntry of taskDirs) {
+        const tddPath = path.join(dir, taskEntry.name, 'tdd-phase.json');
+        if (!fs.existsSync(tddPath)) return false;
+        const state = JSON.parse(fs.readFileSync(tddPath, 'utf-8'));
+        if (typeof state.exception === 'string' && state.exception.trim() !== '') continue;
+        if (!Array.isArray(state.cycles) || state.cycles.length === 0) return false;
+        if (!state.cycles.some((c) => c.red && c.green)) return false;
+      }
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   // ─── Declarative policy config (GH-206 Task 12) ───────────────────────────
   //
   // Artifact patterns per step — consumed by artifact-archival.js on backward
@@ -354,7 +378,9 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
             // At least one QA report must exist (matches qaReportPattern)
             const files = fs.readdirSync(dir);
             const qaPattern = reqs?.qaReportPattern;
-            return qaPattern ? files.some((f) => qaPattern.test(f)) : true;
+            if (qaPattern && !files.some((f) => qaPattern.test(f))) return false;
+            // GH-259: When tasks.md exists, verify per-task TDD evidence
+            return verifyPerTaskTDD(ticketId);
           } catch {
             return false;
           }
@@ -398,7 +424,9 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
             try {
               const branch = execFileSync('git', ['branch', '--show-current'], opts).trim();
               if (branch) ghArgs = ['pr', 'view', branch, '--json', 'number,state'];
-            } catch { /* branch detection failed -- fall back to no branch arg */ }
+            } catch {
+              /* branch detection failed -- fall back to no branch arg */
+            }
 
             const pr = JSON.parse(execFileSync('gh', ghArgs, opts).trim()); // GH-203: positional arg, not --head
             return pr.number > 0 && pr.state === 'OPEN';
@@ -427,7 +455,8 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
               );
               if (!fs.existsSync(accountabilityFile)) return false;
               const entries = JSON.parse(fs.readFileSync(accountabilityFile, 'utf-8'));
-              if (!Array.isArray(entries) || entries.length < result.strictCommentCount) return false;
+              if (!Array.isArray(entries) || entries.length < result.strictCommentCount)
+                return false;
               if (!entries.every((e) => e.disposition && e.reason)) return false;
               const acknowledged = entries.filter((e) => e.disposition === 'acknowledged');
               if (acknowledged.length > 0) {
@@ -458,7 +487,9 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
         verify: () => {
           // Single source of truth: delegates to follow-up-pr.js functions
           try {
-            const { getPRInfo, checkCI } = require(path.join(__dirname, 'scripts', 'follow-up-pr.js'));
+            const { getPRInfo, checkCI } = require(
+              path.join(__dirname, 'scripts', 'follow-up-pr.js')
+            );
             const prInfo = getPRInfo();
             if (!prInfo || !prInfo.number) return false;
             const ci = checkCI(prInfo.number);
@@ -491,12 +522,15 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
             // At least one QA report must exist and pass
             const qaPattern = reqs?.qaReportPattern;
             const approvalPattern = reqs?.qaApprovalPattern;
-            if (!qaPattern || !approvalPattern) return true;
+            if (!qaPattern || !approvalPattern) return verifyPerTaskTDD(ticketId);
             const files = fs.readdirSync(dir).filter((f) => qaPattern.test(f));
             if (files.length === 0) return false;
-            return files.every((f) =>
-              approvalPattern.test(fs.readFileSync(path.join(dir, f), 'utf-8'))
-            );
+            if (
+              !files.every((f) => approvalPattern.test(fs.readFileSync(path.join(dir, f), 'utf-8')))
+            )
+              return false;
+            // GH-259: When tasks.md exists, verify per-task TDD evidence
+            return verifyPerTaskTDD(ticketId);
           } catch {
             return false;
           }
