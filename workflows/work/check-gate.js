@@ -169,7 +169,28 @@ const CHECK_GATE_RULES = [
       const { validateTddEvidence } = require(path.join(__dirname, 'tdd-enforcement'));
       const taskParser = require(path.join(__dirname, 'task-parser'));
       const tasks = taskParser.parseTasks(dir);
-      if (!tasks || tasks.length === 0) return ['Unable to parse tasks.md — cannot verify per-task TDD evidence'];
+      if (!tasks || tasks.length === 0) {
+        // Fallback: scan for existing taskN/ dirs when tasks.md is unparseable
+        const fallbackDirs = listFiles(dir, /^task\d+$/).filter((d) => {
+          try { return fs.statSync(d).isDirectory(); } catch { return false; }
+        });
+        if (fallbackDirs.length === 0) return []; // no tasks declared or created yet
+        // Validate discovered dirs
+        const fallbackReasons = [];
+        for (const taskDirPath of fallbackDirs) {
+          const taskName = path.basename(taskDirPath);
+          const tddPath = path.join(taskDirPath, 'tdd-phase.json');
+          if (!fileExists(tddPath)) { fallbackReasons.push(`Missing TDD evidence: ${taskName}/tdd-phase.json`); continue; }
+          try {
+            const state = JSON.parse(readFile(tddPath));
+            const validation = validateTddEvidence(state);
+            if (!validation.valid) fallbackReasons.push(`${taskName}/tdd-phase.json: ${validation.reason}`);
+          } catch (e) {
+            fallbackReasons.push(`${taskName}/tdd-phase.json: ${e instanceof SyntaxError ? 'invalid JSON' : e?.message || 'read error'}`);
+          }
+        }
+        return fallbackReasons;
+      }
       const expectedTasks = tasks.filter((t) => !t.isCheckpoint);
       if (expectedTasks.length === 0) return []; // all checkpoint tasks
       const reasons = [];

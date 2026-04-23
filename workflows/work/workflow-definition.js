@@ -86,7 +86,21 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
       const tasksPath = path.join(dir, 'tasks.md');
       if (!fs.existsSync(tasksPath)) return true; // single-task mode — no per-task check
       const tasks = taskParser.parseTasks(dir);
-      if (!tasks || tasks.length === 0) return false; // fail-closed: unparseable tasks.md blocks gate
+      if (!tasks || tasks.length === 0) {
+        // Fallback: scan for existing taskN/ dirs when tasks.md is unparseable
+        const entries = fs.readdirSync(dir, { withFileTypes: true });
+        const taskDirs = entries.filter((e) => e.isDirectory() && /^task\d+$/.test(e.name));
+        if (taskDirs.length === 0) return true; // no tasks declared or created yet
+        // Validate discovered dirs
+        for (const taskEntry of taskDirs) {
+          const tddPath = path.join(dir, taskEntry.name, 'tdd-phase.json');
+          if (!fs.existsSync(tddPath)) return false;
+          const state = JSON.parse(fs.readFileSync(tddPath, 'utf-8'));
+          const validation = validateTddEvidence(state);
+          if (!validation.valid) return false;
+        }
+        return true;
+      }
       const expectedTasks = tasks.filter((t) => !t.isCheckpoint);
       if (expectedTasks.length === 0) return true; // all checkpoint tasks
       for (const task of expectedTasks) {
