@@ -901,6 +901,25 @@ describe('tdd-phase-state CLI', () => {
       fs.rmSync(gitRepo, { recursive: true, force: true });
     });
 
+    it('--category config-only outside a git repo exits 1 (fail-closed)', () => {
+      // Run the command in a plain temp dir (not a git repo) so git commands fail
+      const nonGitDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdd-nongit-'));
+      try {
+        const { exitCode, stderr } = runCli(
+          'exception TEST-NOGIT --category config-only --reason "config update" --task 1',
+          homeDir,
+          nonGitDir
+        );
+        assert.strictEqual(exitCode, 1, `Expected exit 1 when git repo detection fails, got ${exitCode}`);
+        assert.ok(
+          stderr.includes('git') || stderr.includes('repository'),
+          `Expected git/repository error message, got: ${stderr}`
+        );
+      } finally {
+        fs.rmSync(nonGitDir, { recursive: true, force: true });
+      }
+    });
+
     it('rejected exception (invalid --category) writes audit record with allow: false', () => {
       const { exitCode } = runCli(
         'exception TEST-AUD1 --category bogus --reason "test" --task 3',

@@ -1,7 +1,7 @@
 /**
  * exception-validator.js
  *
- * Pure-function validation module for TDD exception mode.
+ * Validation utilities for TDD exception mode.
  * Validates exception categories, checks for new exported code,
  * and identifies checkpoint tasks.
  */

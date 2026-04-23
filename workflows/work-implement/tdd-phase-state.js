@@ -533,20 +533,17 @@ function cmdException(ticketId, args) {
   if (category !== 'checkpoint' && category !== 'file-move') {
     let allChanged = [];
     try {
-      const diff = execSync('git diff --diff-filter=A --name-only', { encoding: 'utf8' }).trim();
-      const staged = execSync('git diff --cached --diff-filter=A --name-only', { encoding: 'utf8' }).trim();
-      const untracked = execSync('git ls-files --others --exclude-standard', { encoding: 'utf8' }).trim();
-      allChanged = [...new Set([...diff.split('\n'), ...staged.split('\n'), ...untracked.split('\n')].filter(Boolean))];
-    } catch {
-      // Fail-open: git not available or not a repo — allow exception.
-      // This follows project convention (CLAUDE.md: hooks catch errors and exit 0).
-    }
-
-    // Normalize paths to repo root so checkNewExportedCode can read them
-    try {
       const repoRoot = execSync('git rev-parse --show-toplevel', { encoding: 'utf8' }).trim();
-      allChanged = allChanged.map(f => path.resolve(repoRoot, f));
-    } catch { /* use relative paths as fallback */ }
+      const gitOpts = { encoding: 'utf8', cwd: repoRoot };
+      const diff = execSync('git diff --diff-filter=A --name-only', gitOpts).trim();
+      const staged = execSync('git diff --cached --diff-filter=A --name-only', gitOpts).trim();
+      const untracked = execSync('git ls-files --others --exclude-standard', gitOpts).trim();
+      const relFiles = [...new Set([...diff.split('\n'), ...staged.split('\n'), ...untracked.split('\n')].filter(Boolean))];
+      allChanged = relFiles.map(f => path.resolve(repoRoot, f));
+    } catch {
+      auditException(ticketId, taskNum, category, reason, false);
+      errorExit('Unable to verify exception eligibility: git repository detection failed. Run this command from within the repository so new-export checks can be enforced.');
+    }
 
     const exportCheck = checkNewExportedCode(allChanged);
     if (exportCheck.hasNewExports) {
