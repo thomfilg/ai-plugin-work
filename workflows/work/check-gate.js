@@ -161,6 +161,42 @@ const CHECK_GATE_RULES = [
     },
   },
   {
+    name: 'per-task-tdd-evidence',
+    description: 'All tasks must have TDD evidence when tasks.md exists (GH-259)',
+    check(dir) {
+      const tasksPath = path.join(dir, 'tasks.md');
+      if (!fileExists(tasksPath)) return []; // single-task mode, skip
+      const { validateTddEvidence } = require(path.join(__dirname, 'tdd-enforcement'));
+      const taskParser = require(path.join(__dirname, 'task-parser'));
+      const tasks = taskParser.parseTasks(dir);
+      if (!tasks || tasks.length === 0) return ['Unable to parse tasks.md — cannot verify per-task TDD evidence'];
+      const expectedTasks = tasks.filter((t) => !t.isCheckpoint);
+      if (expectedTasks.length === 0) return []; // all checkpoint tasks
+      const reasons = [];
+      for (const task of expectedTasks) {
+        const taskName = `task${task.num}`;
+        const taskDirPath = path.join(dir, taskName);
+        const tddPath = path.join(taskDirPath, 'tdd-phase.json');
+        if (!fileExists(tddPath)) {
+          reasons.push(`Missing TDD evidence: ${taskName}/tdd-phase.json`);
+          continue;
+        }
+        try {
+          const state = JSON.parse(readFile(tddPath));
+          const validation = validateTddEvidence(state);
+          if (!validation.valid) {
+            reasons.push(`${taskName}/tdd-phase.json: ${validation.reason}`);
+          }
+        } catch (e) {
+          reasons.push(
+            `${taskName}/tdd-phase.json: ${e instanceof SyntaxError ? 'invalid JSON' : e?.message || 'read error'}`
+          );
+        }
+      }
+      return reasons;
+    },
+  },
+  {
     name: 'spec-verification',
     description: 'Spec Verification Checklist markers must all pass (fail-open for legacy specs)',
     check(dir) {

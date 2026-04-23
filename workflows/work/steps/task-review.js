@@ -107,8 +107,9 @@ module.exports = function taskReviewStep(add, s, ctx) {
     `Task ${currentIdx + 1}/${totalTasks}: review "${currentTask?.title || 'unknown'}" before advancing`,
     {
       agentType: 'skill',
-      agentPrompt: `Run /tests-review and /code-review in parallel for task ${currentIdx + 1}/${totalTasks} ("${currentTask?.title || 'unknown'}"). Scope both reviews to the task diff range${diffRange ? ` (base=${diffRange.base}, head=${diffRange.head})` : ' (computed from .last-commit-sha)'}. Aggregate results and fail the gate if either review fails.`,
+      agentPrompt: `Run /tests-review and /code-review in parallel for task ${currentIdx + 1}/${totalTasks} ("${currentTask?.title || 'unknown'}"). Scope both reviews to the task diff range${diffRange ? ` (base=${diffRange.base}, head=${diffRange.head})` : ' (computed from .last-commit-sha)'}. Set REPORT_FOLDER=${reviewTasksDir} for both skills. Aggregate results and fail the gate if either review fails.`,
       diffRange,
+      reportFolder: reviewTasksDir,
     }
   );
   appendAction(ctx.ticket, {

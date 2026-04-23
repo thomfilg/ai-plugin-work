@@ -131,6 +131,46 @@ function inspect(ticket, providerConfig, suffix, deps) {
     }
   }
 
+  // Per-task reports (GH-259 Task 7.1)
+  // When tasks.md exists, scan taskN/ subdirectories for check reports and TDD evidence.
+  // Uses deps.listFiles/fileExists/readFile for most I/O; fs.statSync for directory detection
+  // (no deps.isDirectory exists — acceptable since listFiles already filters by regex).
+  if (fileExists(path.join(s.tasksDir, 'tasks.md'))) {
+    const { validateTddEvidence } = require(path.join(__dirname, 'tdd-enforcement'));
+    s.perTaskReports = {};
+    const taskDirNames = listFiles(s.tasksDir, /^task\d+$/)
+      .filter((fp) => { try { return fs.statSync(fp).isDirectory(); } catch { return false; } })
+      .map((fp) => path.basename(fp));
+    for (const taskDirName of taskDirNames) {
+      const taskDir = path.join(s.tasksDir, taskDirName);
+      const taskReport = { tddPhase: null, checkReports: [] };
+
+      // Read tdd-phase.json if present — uses shared validateTddEvidence for consistency
+      const tddPath = path.join(taskDir, 'tdd-phase.json');
+      if (fileExists(tddPath)) {
+        try {
+          const tddData = JSON.parse(readFile(tddPath));
+          const validation = validateTddEvidence(tddData);
+          const hasException =
+            typeof tddData.exception === 'string' && tddData.exception.trim() !== '';
+          taskReport.tddPhase = {
+            exists: true,
+            valid: validation.valid,
+            exception: hasException,
+            cycleCount: Array.isArray(tddData.cycles) ? tddData.cycles.length : 0,
+          };
+        } catch {
+          taskReport.tddPhase = { exists: true, valid: false, parseError: true };
+        }
+      }
+
+      // Scan for *.check.md files in the task dir
+      taskReport.checkReports = listFiles(taskDir, /\.check\.md$/).map((fp) => path.basename(fp));
+
+      s.perTaskReports[taskDirName] = taskReport;
+    }
+  }
+
   // SHA tracking
   s.prUpdateSha = fileExists(path.join(s.tasksDir, '.pr-update-sha'))
     ? readFile(path.join(s.tasksDir, '.pr-update-sha')).trim()
