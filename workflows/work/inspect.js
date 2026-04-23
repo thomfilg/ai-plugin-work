@@ -157,9 +157,9 @@ function inspect(ticket, providerConfig, suffix, deps) {
             cycleCount: Array.isArray(tddData.cycles) ? tddData.cycles.length : 0,
           };
         } catch {
-          taskReport.tddPhase = { exists: true, valid: false, parseError: true };
+          taskReport.tddPhase = { exists: true, valid: false, parseError: true }; // GH-259: uses deps.listFiles
         }
-      }
+      } // end tdd-phase check
 
       // Scan for *.check.md files in the task dir
       taskReport.checkReports = listFiles(taskDir, /\.check\.md$/).map((fp) => path.basename(fp));

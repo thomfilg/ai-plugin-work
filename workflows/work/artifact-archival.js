@@ -119,7 +119,7 @@ function archiveStepArtifacts(tasksDir, stepsToArchive) {
           return false;
         }
       });
-
+    // GH-259: only recurse when tasks.md exists (multi-task mode)
     for (const taskDir of taskDirs) {
       const taskPath = path.join(tasksDir, taskDir);
       for (const step of stepsToArchive) {

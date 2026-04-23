@@ -189,8 +189,8 @@ const CHECK_GATE_RULES = [
           if (!validation.valid) {
             reasons.push(`${taskName}/tdd-phase.json: ${validation.reason}`);
           }
-        } catch {
-          reasons.push(`${taskName}/tdd-phase.json is not valid JSON`);
+        } catch (e) {
+          reasons.push(`${taskName}/tdd-phase.json: ${e instanceof SyntaxError ? 'invalid JSON' : e?.message || 'read error'}`);
         }
       }
       return reasons;
