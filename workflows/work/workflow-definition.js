@@ -88,7 +88,7 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
       const tasks = taskParser.parseTasks(dir);
       if (!tasks || tasks.length === 0) return false; // fail-closed: unparseable tasks.md blocks gate
       const expectedTasks = tasks.filter((t) => !t.isCheckpoint);
-      if (expectedTasks.length === 0) return true; // all checkpoint tasks
+      if (expectedTasks.length === 0) return true; // only checkpoint tasks — no TDD evidence needed
       for (const task of expectedTasks) {
         const tddPath = path.join(dir, `task${task.num}`, 'tdd-phase.json');
         if (!fs.existsSync(tddPath)) return false;
