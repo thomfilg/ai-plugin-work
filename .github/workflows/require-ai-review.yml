@@ -7,10 +7,18 @@ on:
   pull_request_review:
     types: [submitted, dismissed]
 
+concurrency:
+  group: ai-review-gate-${{ github.event.pull_request.number || github.event.review.pull_request.number }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   pull-requests: read
   statuses: write
+
+# Note: Fork PRs are skipped (read-only GITHUB_TOKEN cannot write commit statuses).
+# If this status context is a required check, fork PRs won't be mergeable.
+# This is acceptable for private repos; for public repos, use pull_request_target instead.
 
 jobs:
   ai-review-gate:
