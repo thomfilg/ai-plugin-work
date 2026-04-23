@@ -325,6 +325,93 @@ describe('task-review step', () => {
     assert.notEqual(entries[0].command, 'AskUserQuestion');
   });
 
+  // ─── GH-259: reportFolder in plan entry metadata ─────────────────────────
+
+  it('RUN entry includes reportFolder with per-task path when task context exists', () => {
+    const { add, entries } = makeAdd();
+    const taskData = [
+      { num: 1, title: 'Task A', isCheckpoint: false },
+      { num: 2, title: 'Task B', isCheckpoint: false },
+      { num: 3, title: 'Task C', isCheckpoint: false },
+    ];
+    const s = makeState({
+      hasTasks: true,
+      workState: {
+        tasksMeta: {
+          currentTaskIndex: 0,
+          tasks: [
+            { id: 'task-1', taskReviewFixRounds: 0 },
+            { id: 'task-2' },
+            { id: 'task-3' },
+          ],
+        },
+      },
+    });
+    const ctx = makeCtx({ _taskData: taskData, _currentTaskIdx: 0 });
+    taskReviewStep(add, s, ctx);
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].reportFolder, '/tmp/tasks/TEST-100/task1');
+  });
+
+  it('RUN entry includes reportFolder as tasksDir when _currentTaskIdx is undefined', () => {
+    const { add, entries } = makeAdd();
+    // _currentTaskIdx undefined means reviewTasksDir falls back to ctx.tasksDir
+    // But currentIdx defaults to 0 via ?? 0, so with 3 tasks it's intermediate
+    const taskData = [
+      { num: 1, title: 'Task A', isCheckpoint: false },
+      { num: 2, title: 'Task B', isCheckpoint: false },
+      { num: 3, title: 'Task C', isCheckpoint: false },
+    ];
+    const s = makeState({
+      hasTasks: true,
+      workState: {
+        tasksMeta: {
+          currentTaskIndex: 0,
+          tasks: [
+            { id: 'task-1', taskReviewFixRounds: 0 },
+            { id: 'task-2' },
+            { id: 'task-3' },
+          ],
+        },
+      },
+    });
+    const ctx = makeCtx({
+      _taskData: taskData,
+      _currentTaskIdx: undefined,
+    });
+    taskReviewStep(add, s, ctx);
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].reportFolder, '/tmp/tasks/TEST-100');
+  });
+
+  it('agentPrompt mentions reportFolder path for downstream skills', () => {
+    const { add, entries } = makeAdd();
+    const taskData = [
+      { num: 1, title: 'Task A', isCheckpoint: false },
+      { num: 2, title: 'Task B', isCheckpoint: false },
+      { num: 3, title: 'Task C', isCheckpoint: false },
+    ];
+    const s = makeState({
+      hasTasks: true,
+      workState: {
+        tasksMeta: {
+          currentTaskIndex: 0,
+          tasks: [
+            { id: 'task-1', taskReviewFixRounds: 0 },
+            { id: 'task-2' },
+            { id: 'task-3' },
+          ],
+        },
+      },
+    });
+    const ctx = makeCtx({ _taskData: taskData, _currentTaskIdx: 0 });
+    taskReviewStep(add, s, ctx);
+    assert.equal(entries.length, 1);
+    // agentPrompt should reference the per-task report folder path
+    assert.match(entries[0].agentPrompt, /\/tmp\/tasks\/TEST-100\/task1/);
+    assert.match(entries[0].agentPrompt, /REPORT_FOLDER/i);
+  });
+
   // ─── STEP_PIPELINE registration ────────────────────────────────────────────
 
   describe('STEP_PIPELINE registration', () => {

@@ -22,8 +22,8 @@ beforeEach(() => {
 });
 
 describe('check-gate (unit)', () => {
-  it('CHECK_GATE_RULES has 4 rules with required shape', () => {
-    assert.equal(CHECK_GATE_RULES.length, 4);
+  it('CHECK_GATE_RULES has 5 rules with required shape', () => {
+    assert.equal(CHECK_GATE_RULES.length, 5);
     for (const rule of CHECK_GATE_RULES) {
       assert.ok(rule.name, 'rule must have a name');
       assert.ok(rule.description, 'rule must have a description');
@@ -240,6 +240,212 @@ describe('check-gate (unit)', () => {
       delete require.cache[configPath];
       delete require.cache[gatePath];
     }
+  });
+
+  // ─── GH-259: per-task TDD evidence gate ──────────────────────────────────
+
+  function writeTaskFile(taskDir, name, content) {
+    const dir = path.join(TEMP, testTicket, taskDir);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, name), content);
+  }
+
+  it('per-task-tdd-evidence rule passes when tasks.md exists and all tasks have TDD evidence', () => {
+    const dir = path.join(TEMP, testTicket);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'tasks.md'), '# Tasks\n\n## Task 1\n## Task 2\n');
+    writeTaskFile(
+      'task1',
+      'tdd-phase.json',
+      JSON.stringify({
+        cycles: [{ red: { ts: 1 }, green: { ts: 2 } }],
+      })
+    );
+    writeTaskFile(
+      'task2',
+      'tdd-phase.json',
+      JSON.stringify({
+        cycles: [{ red: { ts: 1 }, green: { ts: 2 } }],
+      })
+    );
+    const rule = CHECK_GATE_RULES.find((r) => r.name === 'per-task-tdd-evidence');
+    assert.ok(rule, 'per-task-tdd-evidence rule must exist');
+    const reasons = rule.check(dir, testTicket);
+    assert.deepStrictEqual(reasons, []);
+  });
+
+  it('per-task-tdd-evidence rule fails when a task dir is missing tdd-phase.json', () => {
+    const dir = path.join(TEMP, testTicket);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'tasks.md'), '# Tasks\n\n## Task 1\n## Task 2\n');
+    writeTaskFile(
+      'task1',
+      'tdd-phase.json',
+      JSON.stringify({
+        cycles: [{ red: { ts: 1 }, green: { ts: 2 } }],
+      })
+    );
+    // task2 exists but no tdd-phase.json
+    fs.mkdirSync(path.join(dir, 'task2'), { recursive: true });
+    const rule = CHECK_GATE_RULES.find((r) => r.name === 'per-task-tdd-evidence');
+    const reasons = rule.check(dir, testTicket);
+    assert.equal(reasons.length, 1);
+    assert.ok(reasons[0].includes('task2'));
+    assert.ok(reasons[0].toLowerCase().includes('tdd'));
+  });
+
+  it('per-task-tdd-evidence rule fails when tdd-phase.json has no complete cycle', () => {
+    const dir = path.join(TEMP, testTicket);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'tasks.md'), '# Tasks\n\n## Task 1\n');
+    writeTaskFile(
+      'task1',
+      'tdd-phase.json',
+      JSON.stringify({
+        cycles: [{ red: { ts: 1 } }], // no green
+      })
+    );
+    const rule = CHECK_GATE_RULES.find((r) => r.name === 'per-task-tdd-evidence');
+    const reasons = rule.check(dir, testTicket);
+    assert.equal(reasons.length, 1);
+    assert.ok(reasons[0].includes('task1'));
+    assert.ok(reasons[0].includes('RED'));
+  });
+
+  it('per-task-tdd-evidence rule passes when tdd-phase.json has exception mode', () => {
+    const dir = path.join(TEMP, testTicket);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'tasks.md'), '# Tasks\n\n## Task 1\n');
+    writeTaskFile(
+      'task1',
+      'tdd-phase.json',
+      JSON.stringify({
+        exception: 'config-only change',
+        cycles: [],
+      })
+    );
+    const rule = CHECK_GATE_RULES.find((r) => r.name === 'per-task-tdd-evidence');
+    const reasons = rule.check(dir, testTicket);
+    assert.deepStrictEqual(reasons, []);
+  });
+
+  it('per-task-tdd-evidence rule skips when no tasks.md (single-task mode)', () => {
+    const dir = path.join(TEMP, testTicket);
+    fs.mkdirSync(dir, { recursive: true });
+    // No tasks.md
+    const rule = CHECK_GATE_RULES.find((r) => r.name === 'per-task-tdd-evidence');
+    const reasons = rule.check(dir, testTicket);
+    assert.deepStrictEqual(reasons, []);
+  });
+
+  it('per-task-tdd-evidence rule fails when tdd-phase.json is invalid JSON', () => {
+    const dir = path.join(TEMP, testTicket);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'tasks.md'), '# Tasks\n\n## Task 1\n');
+    writeTaskFile('task1', 'tdd-phase.json', 'not valid json{{{');
+    const rule = CHECK_GATE_RULES.find((r) => r.name === 'per-task-tdd-evidence');
+    const reasons = rule.check(dir, testTicket);
+    assert.equal(reasons.length, 1);
+    assert.ok(reasons[0].includes('task1'));
+    assert.ok(reasons[0].toLowerCase().includes('json'));
+  });
+
+  it('per-task-tdd-evidence rule fails when tasks.md declares tasks but no taskN dirs exist', () => {
+    const dir = path.join(TEMP, testTicket);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'tasks.md'), '# Tasks\n\n## Task 1\n');
+    // No task directories created yet — gate must catch this
+    const rule = CHECK_GATE_RULES.find((r) => r.name === 'per-task-tdd-evidence');
+    const reasons = rule.check(dir, testTicket);
+    assert.equal(reasons.length, 1);
+    assert.ok(reasons[0].includes('task1'));
+    assert.ok(reasons[0].toLowerCase().includes('tdd'));
+  });
+
+  it('per-task-tdd-evidence rule fails when tasks.md declares 3 tasks but only 2 dirs exist', () => {
+    const dir = path.join(TEMP, testTicket);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'tasks.md'), '# Tasks\n\n## Task 1\n## Task 2\n## Task 3\n');
+    writeTaskFile(
+      'task1',
+      'tdd-phase.json',
+      JSON.stringify({ cycles: [{ red: { ts: 1 }, green: { ts: 2 } }] })
+    );
+    writeTaskFile(
+      'task2',
+      'tdd-phase.json',
+      JSON.stringify({ cycles: [{ red: { ts: 1 }, green: { ts: 2 } }] })
+    );
+    // task3 directory does not exist at all
+    const rule = CHECK_GATE_RULES.find((r) => r.name === 'per-task-tdd-evidence');
+    const reasons = rule.check(dir, testTicket);
+    assert.equal(reasons.length, 1);
+    assert.ok(reasons[0].includes('task3'));
+    assert.ok(reasons[0].toLowerCase().includes('tdd'));
+  });
+
+  it('per-task-tdd-evidence rule skips checkpoint tasks from tasks.md', () => {
+    const dir = path.join(TEMP, testTicket);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'tasks.md'),
+      '# Tasks\n\n## Task 1\n— Implement feature\n### Type\nimplementation\n\n## Task 2\n— Checkpoint\n### Type\ncheckpoint\n'
+    );
+    writeTaskFile(
+      'task1',
+      'tdd-phase.json',
+      JSON.stringify({ cycles: [{ red: { ts: 1 }, green: { ts: 2 } }] })
+    );
+    // task2 is a checkpoint — no dir needed
+    const rule = CHECK_GATE_RULES.find((r) => r.name === 'per-task-tdd-evidence');
+    const reasons = rule.check(dir, testTicket);
+    assert.deepStrictEqual(reasons, []);
+  });
+
+  it('validateCheckGate multi-task: passes when all reports + TDD evidence present', () => {
+    const dir = path.join(TEMP, testTicket);
+    writeReport('tests.check.md', 'Status: APPROVED');
+    writeReport('code-review.check.md', 'Status: APPROVED');
+    writeReport('completion.check.md', 'Status: COMPLETE');
+    fs.writeFileSync(path.join(dir, 'tasks.md'), '# Tasks\n\n## Task 1\n## Task 2\n');
+    writeTaskFile(
+      'task1',
+      'tdd-phase.json',
+      JSON.stringify({
+        cycles: [{ red: { ts: 1 }, green: { ts: 2 } }],
+      })
+    );
+    writeTaskFile(
+      'task2',
+      'tdd-phase.json',
+      JSON.stringify({
+        cycles: [{ red: { ts: 1 }, green: { ts: 2 } }],
+      })
+    );
+    const result = validateCheckGate(TEMP, testTicket);
+    // Filter out running-agents and spec-verification (env-dependent)
+    const tddReasons = result.reasons.filter((r) => r.toLowerCase().includes('tdd'));
+    assert.deepStrictEqual(tddReasons, []);
+  });
+
+  it('validateCheckGate multi-task: fails when task2 missing TDD evidence', () => {
+    const dir = path.join(TEMP, testTicket);
+    writeReport('tests.check.md', 'Status: APPROVED');
+    writeReport('code-review.check.md', 'Status: APPROVED');
+    writeReport('completion.check.md', 'Status: COMPLETE');
+    fs.writeFileSync(path.join(dir, 'tasks.md'), '# Tasks\n\n## Task 1\n## Task 2\n');
+    writeTaskFile(
+      'task1',
+      'tdd-phase.json',
+      JSON.stringify({
+        cycles: [{ red: { ts: 1 }, green: { ts: 2 } }],
+      })
+    );
+    fs.mkdirSync(path.join(dir, 'task2'), { recursive: true });
+    // task2 has no tdd-phase.json
+    const result = validateCheckGate(TEMP, testTicket);
+    assert.equal(result.valid, false);
+    assert.ok(result.reasons.some((r) => r.includes('task2') && r.toLowerCase().includes('tdd')));
   });
 
   it('spec-verification rule passes when spec has no checklist (scenario 12)', () => {

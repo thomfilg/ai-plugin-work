@@ -146,6 +146,24 @@ function writeCheckReports(tasksBase, ticket) {
 function writeTddException(tasksBase, ticket) {
   const dir = path.join(tasksBase, ticket);
   fs.mkdirSync(dir, { recursive: true });
+  // Also write per-task TDD evidence when tasks.md declares tasks (GH-259)
+  const tasksPath = path.join(dir, 'tasks.md');
+  if (fs.existsSync(tasksPath)) {
+    try {
+      const tp = require(path.join(__dirname, '..', 'task-parser'));
+      const tasks = tp.parseTasks(dir);
+      if (tasks && tasks.length > 0) {
+        for (const t of tasks.filter((x) => !x.isCheckpoint)) {
+          const taskDir = path.join(dir, `task${t.num}`);
+          fs.mkdirSync(taskDir, { recursive: true });
+          fs.writeFileSync(
+            path.join(taskDir, 'tdd-phase.json'),
+            JSON.stringify({ exception: 'test artifact — orchestrator test', cycles: [] })
+          );
+        }
+      }
+    } catch { /* parseTasks may not be available in all test contexts */ }
+  }
   fs.writeFileSync(
     path.join(dir, 'tdd-phase.json'),
     JSON.stringify({
@@ -190,7 +208,7 @@ function writeTaskArtifacts(tasksBase, ticket) {
     path.join(dir, 'spec.md'),
     '# Spec\n\n<!-- gherkin-skip: test artifact -->\n\n## Summary\nTest spec.\n'
   );
-  fs.writeFileSync(path.join(dir, 'tasks.md'), '# Tasks\n\n- [ ] Task 1\n');
+  fs.writeFileSync(path.join(dir, 'tasks.md'), '# Tasks\n\n## Task 1 — Test task\n\n### Type\nbackend\n\n### Deliverables\n- [ ] 1.1 Test deliverable\n');
 }
 
 /**

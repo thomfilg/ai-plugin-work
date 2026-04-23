@@ -147,4 +147,69 @@ describe('archiveStepArtifacts', () => {
     // Artifact moved
     assert.ok(!fs.existsSync(path.join(tmpDir, 'dev-quality.check.md')));
   });
+
+  // ─── Per-task archival (GH-259 Task 6) ──────────────────────────────────
+
+  it('archives per-task files to runs/runN/taskM/', () => {
+    // tasks.md must exist for per-task archival (GH-259)
+    fs.writeFileSync(path.join(tmpDir, 'tasks.md'), '# Tasks\n', 'utf-8');
+    // Create task subdirectories with artifact files
+    fs.mkdirSync(path.join(tmpDir, 'task1'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, 'task2'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, 'task1', 'code-review.check.md'), 'review1', 'utf-8');
+    fs.writeFileSync(path.join(tmpDir, 'task2', 'tests.check.md'), 'review2', 'utf-8');
+
+    const result = archiveStepArtifacts(tmpDir, [STEPS.check]);
+    assert.equal(result, 'runs/run1');
+
+    // Per-task files archived to per-task run dirs
+    const runDir = path.join(tmpDir, 'runs', 'run1');
+    assert.ok(fs.existsSync(path.join(runDir, 'task1', 'code-review.check.md')));
+    assert.ok(fs.existsSync(path.join(runDir, 'task2', 'tests.check.md')));
+
+    // Original files removed
+    assert.ok(!fs.existsSync(path.join(tmpDir, 'task1', 'code-review.check.md')));
+    assert.ok(!fs.existsSync(path.join(tmpDir, 'task2', 'tests.check.md')));
+  });
+
+  it('archives root and per-task files together', () => {
+    // tasks.md must exist for per-task archival (GH-259)
+    fs.writeFileSync(path.join(tmpDir, 'tasks.md'), '# Tasks\n', 'utf-8');
+    // Root-level artifact
+    touch('dev-quality.check.md');
+
+    // Per-task artifacts
+    fs.mkdirSync(path.join(tmpDir, 'task1'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, 'task1', 'lint.check.md'), 'task1-lint', 'utf-8');
+
+    const result = archiveStepArtifacts(tmpDir, [STEPS.check]);
+    assert.equal(result, 'runs/run1');
+
+    const runDir = path.join(tmpDir, 'runs', 'run1');
+    // Root file at run root
+    assert.ok(fs.existsSync(path.join(runDir, 'dev-quality.check.md')));
+    // Per-task file in task subdir
+    assert.ok(fs.existsSync(path.join(runDir, 'task1', 'lint.check.md')));
+
+    // Originals removed
+    assert.ok(!fs.existsSync(path.join(tmpDir, 'dev-quality.check.md')));
+    assert.ok(!fs.existsSync(path.join(tmpDir, 'task1', 'lint.check.md')));
+  });
+
+  it('handles single-task mode (no task dirs) unchanged', () => {
+    // Only root-level files, no taskN/ directories
+    touch('dev-quality.check.md');
+
+    const result = archiveStepArtifacts(tmpDir, [STEPS.check]);
+    assert.equal(result, 'runs/run1');
+
+    const runDir = path.join(tmpDir, 'runs', 'run1');
+    assert.ok(fs.existsSync(path.join(runDir, 'dev-quality.check.md')));
+    assert.ok(!fs.existsSync(path.join(tmpDir, 'dev-quality.check.md')));
+
+    // No taskN/ dirs should exist in run dir
+    const runContents = fs.readdirSync(runDir);
+    const taskDirs = runContents.filter(d => /^task\d+$/.test(d));
+    assert.equal(taskDirs.length, 0);
+  });
 });
