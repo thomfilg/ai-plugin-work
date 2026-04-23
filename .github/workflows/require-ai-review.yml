@@ -6,6 +6,8 @@ on:
     types: [opened, synchronize, reopened]
   pull_request_review:
     types: [submitted, dismissed]
+  pull_request_review_comment:
+    types: [created, deleted]
 
 concurrency:
   group: ai-review-gate-${{ github.event.pull_request.number || github.event.review.pull_request.number }}
@@ -126,6 +128,35 @@ jobs:
               return;
             }
 
+            // Check for unresolved review comments (inline code comments)
+            const threads = await github.paginate(
+              github.rest.pulls.listReviewComments,
+              { owner, repo, pull_number, per_page: 100 },
+            );
+
+            // GitHub marks resolved threads by setting in_reply_to_id on resolution comments,
+            // but the simplest signal is checking which comments are part of unresolved threads.
+            // A comment with no `in_reply_to_id` is a top-level thread start.
+            // We count threads that are NOT resolved (position !== null means still active on the diff).
+            const unresolvedCount = threads.filter(c =>
+              !c.in_reply_to_id && c.position !== null
+            ).length;
+
+            if (unresolvedCount > 0) {
+              await github.rest.repos.createCommitStatus({
+                owner,
+                repo,
+                sha,
+                state: 'failure',
+                context: statusContext,
+                description: `${unresolvedCount} unresolved review comment(s) — resolve before merging`,
+              });
+              const msg = `${unresolvedCount} unresolved review comment(s)`;
+              console.log(`${msg} — status set to failure`);
+              core.setFailed(msg);
+              return;
+            }
+
             await github.rest.repos.createCommitStatus({
               owner,
               repo,
@@ -134,4 +165,4 @@ jobs:
               context: statusContext,
               description: `Reviewed by ${activeReviewers.join(', ')}`,
             });
-            console.log('AI review present — status set to success');
+            console.log('AI review present, no unresolved comments — status set to success');
