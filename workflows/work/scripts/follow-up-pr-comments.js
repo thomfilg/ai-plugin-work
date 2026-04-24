@@ -107,15 +107,21 @@ function saveState(state) {
  */
 function rebuildAccountability(state) {
   const entries = state.comments
-    .filter((c) => c.status === 'solved' || c.status === 'skipped')
+    .filter((c) => c.status === 'solved' || c.status === 'skipped' || c.status === 'resolved')
     .map((c) => ({
       id: c.id,
       author: c.author || 'unknown',
       path: c.path || null,
       comment: (c.body || '').slice(0, 120),
-      disposition: c.status === 'solved' ? 'addressed' : 'acknowledged',
+      disposition:
+        c.status === 'solved' ? 'addressed' : c.status === 'resolved' ? 'outdated' : 'acknowledged',
       reason:
-        c.resolution || (c.status === 'solved' ? 'Addressed during follow-up' : 'Acknowledged'),
+        c.resolution ||
+        (c.status === 'solved'
+          ? 'Addressed during follow-up'
+          : c.status === 'resolved'
+            ? 'Resolved/outdated thread'
+            : 'Acknowledged'),
     }));
 
   const filePath = getAccountabilityFilePath();
@@ -235,9 +241,7 @@ function handleSnapshot(prNumber) {
         rawInlineCount += pageData.length;
 
         for (const cm of pageData) {
-          // Skip resolved threads
-          if (resolvedIds.has(cm.id)) continue;
-
+          const isResolved = resolvedIds.has(cm.id);
           const author = cm.user?.login || 'unknown';
           const body = (cm.body || '').trim();
           const filePath = cm.path || null;
@@ -256,9 +260,11 @@ function handleSnapshot(prNumber) {
             line: cm.line || null,
             original_line: cm.original_line || null,
             priority: classifyCommentPriority(author, body),
-            status: 'unsolved',
+            // Resolved/outdated comments are pre-resolved so they count toward strictCommentCount
+            // but don't appear in --next-comment iteration
+            status: isResolved ? 'resolved' : 'unsolved',
             commitSha: null,
-            resolution: null,
+            resolution: isResolved ? 'Resolved/outdated thread' : null,
           });
         }
 
@@ -425,7 +431,8 @@ function handleStatus() {
   const total = state.comments.length;
   const solved = state.comments.filter((c) => c.status === 'solved').length;
   const skipped = state.comments.filter((c) => c.status === 'skipped').length;
-  const remaining = total - solved - skipped;
+  const resolved = state.comments.filter((c) => c.status === 'resolved').length;
+  const remaining = total - solved - skipped - resolved;
 
   console.log(
     JSON.stringify({
