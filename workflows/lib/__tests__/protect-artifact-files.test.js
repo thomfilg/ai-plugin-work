@@ -853,6 +853,27 @@ describe('per-task path enforcement for .check.md', () => {
     assert.ok(result.message.includes('wrong task folder'));
   });
 
+  it('does not treat ..foo.check.md as escaping the ticket dir', () => {
+    const ticketDir = path.join(tmpDir, TICKET);
+    fs.mkdirSync(ticketDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(ticketDir, '.work-state.json'),
+      JSON.stringify({ tasksMeta: { totalTasks: 3, currentTaskIndex: 1 } })
+    );
+
+    const p = makeProtector();
+    // A file named ..foo.check.md at ticket root — should be treated as
+    // within the ticket dir (isWithinTicketDir = true) and blocked at
+    // ticket root level (per-task-path), NOT treated as directory escape.
+    const filePath = path.join(ticketDir, '..foo.check.md');
+    const result = p.check('Write', { file_path: filePath });
+    assert.equal(result.blocked, true);
+    assert.equal(result.rule, 'per-task-path');
+    // Should suggest the correct task folder, not be treated as escaping
+    assert.ok(result.message.includes('task2'));
+    assert.ok(result.message.includes('Per-task mode'));
+  });
+
   it('handles non-integer float currentTaskIndex by defaulting to 0', () => {
     const ticketDir = path.join(tmpDir, TICKET);
     fs.mkdirSync(ticketDir, { recursive: true });

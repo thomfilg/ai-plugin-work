@@ -187,8 +187,10 @@ function createArtifactProtector(opts) {
             const resolvedTicketDir = path.resolve(path.join(tasksBase, safeId));
             const resolvedFilePath = path.resolve(filePath);
             const relPath = path.relative(resolvedTicketDir, resolvedFilePath);
+            const isEscapingTicketDir =
+              relPath === '..' || relPath.startsWith('..' + path.sep);
             const isWithinTicketDir =
-              relPath !== '' && !relPath.startsWith('..') && !path.isAbsolute(relPath);
+              relPath !== '' && !isEscapingTicketDir && !path.isAbsolute(relPath);
 
             // Compute task number before branching — needed by both branches
             const totalTasks = state.tasksMeta.totalTasks;
