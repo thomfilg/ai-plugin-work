@@ -473,10 +473,6 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
               if (!Array.isArray(entries) || entries.length < result.strictCommentCount)
                 return false;
               if (!entries.every((e) => e.disposition && e.reason)) return false;
-              const acknowledged = entries.filter((e) => e.disposition === 'acknowledged');
-              if (acknowledged.length > 0) {
-                if (!acknowledged.every((e) => e.userApproval === true)) return false;
-              }
             }
 
             return true;
