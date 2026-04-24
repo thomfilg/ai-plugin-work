@@ -171,8 +171,9 @@ function createArtifactProtector(opts) {
         const getConfigMod = require(path.join(__dirname, 'get-config'));
         const tasksBase = getConfigMod.require('TASKS_BASE');
         // Sanitize ticketId for filesystem path (e.g. GitHub #123 → GH-123)
-        const safeId = getConfigMod.safeTicketId
-          ? getConfigMod.safeTicketId(ticketId)
+        const configMod = require(path.join(__dirname, 'config'));
+        const safeId = typeof configMod.safeTicketId === 'function'
+          ? configMod.safeTicketId(ticketId)
           : ticketId;
         const statePath = path.join(tasksBase, safeId, '.work-state.json');
         if (fs.existsSync(statePath)) {
