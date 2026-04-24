@@ -221,31 +221,6 @@ Notes:
 - Inline comments after ` # ` are stripped
 - Specs without this section pass verification (fail-open)
 
-### GREP Markers: Prefer Regex Over Literal Strings
-
-Always use `/regex/flags` syntax for GREP markers instead of exact literal strings. Literal strings are brittle — they break when the implementation is semantically equivalent but uses different formatting, variable names, or syntax (e.g., single vs double quotes, different argument order, trailing commas). Regex patterns are resilient to these variations because they match the structural intent rather than one specific spelling.
-
-**Avoid literal strings:**
-```
-- GREP src/routes/api.ts "router.get('/foo', handler)"
-```
-This breaks if the developer uses double quotes, adds middleware, or reorders arguments.
-
-**Prefer regex patterns:**
-```
-- GREP src/routes/api.ts /router\.get\(.*\/foo/
-- GREP src/lib/config.js /getConfig\(.*TASKS_BASE/
-- GREP src/hooks/validate.js /process\.exit\([12]\)/
-```
-These match any semantically equivalent implementation regardless of exact formatting.
-
-**Guidelines for writing resilient GREP patterns:**
-- Match the structural landmark (function name, key identifier) rather than the full line
-- Escape regex metacharacters (`.`, `(`, `)`) with backslashes
-- Use `.*` to bridge variable portions of a line
-- Use character classes (e.g., `['\"]`) when quote style may vary
-- Add the `i` flag (`/pattern/i`) when casing is not semantically significant
-
 ## Guidelines
 
 - Reference **specific files and line ranges** from the codebase, not abstract patterns

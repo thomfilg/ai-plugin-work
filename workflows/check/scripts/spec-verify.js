@@ -383,13 +383,20 @@ function checkReuses(args, root) {
     return { type: 'REUSES', args, passed: false, reason: `File ${filePath} not found` };
   }
 
-  // Check for import or require containing the pattern (line-by-line to avoid cross-line false positives)
+  // Check for import or require containing the pattern.
+  // First try line-by-line (avoids cross-line false positives), then fall back
+  // to full-content matching for formatters that split require() across lines.
   const escaped = escapeRegex(importPattern);
   const importRegex = new RegExp(
     `(import\\s.*${escaped}|${escaped}.*require\\s*\\(|require\\s*\\(.*${escaped})`
   );
   const lines = content.split(/\r?\n/);
   if (lines.some((line) => importRegex.test(line))) {
+    return { type: 'REUSES', args, passed: true };
+  }
+  // Fallback: check full content for require('...pattern...') split across lines by formatters
+  const multilineRegex = new RegExp(`require\\s*\\([^)]*${escaped}[^)]*\\)`, 's');
+  if (multilineRegex.test(content)) {
     return { type: 'REUSES', args, passed: true };
   }
   return {
