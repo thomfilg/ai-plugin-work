@@ -686,7 +686,7 @@ describe('per-task path enforcement for .check.md', () => {
     assert.ok(result.message.includes('code.check.md'));
   });
 
-  it('only applies to Write/Edit/MultiEdit tools, not Bash', () => {
+  it('blocks Bash write of .check.md at ticket root when per-task mode active', () => {
     const ticketDir = path.join(tmpDir, TICKET);
     fs.mkdirSync(ticketDir, { recursive: true });
     fs.writeFileSync(
@@ -695,14 +695,88 @@ describe('per-task path enforcement for .check.md', () => {
     );
 
     const p = makeProtector();
-    // Bash command referencing .check.md — per-task check should NOT apply
-    // (Bash is handled by step/agent checks but not per-task path)
     const result = p.check('Bash', {
       command: `cat > ${path.join(ticketDir, 'tests.check.md')}`,
     });
-    // Bash writes are checked for step/agent but per-task path enforcement
-    // only applies to Write/Edit/MultiEdit (line 168 condition)
+    assert.equal(result.blocked, true);
+    assert.equal(result.rule, 'per-task-path');
+    assert.ok(result.message.includes('task1'));
+    assert.ok(result.message.includes('Per-task mode'));
+  });
+
+  it('allows Bash write of .check.md to correct task folder', () => {
+    const ticketDir = path.join(tmpDir, TICKET);
+    fs.mkdirSync(path.join(ticketDir, 'task2'), { recursive: true });
+    fs.writeFileSync(
+      path.join(ticketDir, '.work-state.json'),
+      JSON.stringify({ tasksMeta: { totalTasks: 3, currentTaskIndex: 1 } })
+    );
+
+    const p = makeProtector();
+    const result = p.check('Bash', {
+      command: `cat > ${path.join(ticketDir, 'task2', 'tests.check.md')}`,
+    });
     assert.equal(result.blocked, false);
+  });
+
+  it('fails open when Bash target path cannot be extracted', () => {
+    const ticketDir = path.join(tmpDir, TICKET);
+    fs.mkdirSync(ticketDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(ticketDir, '.work-state.json'),
+      JSON.stringify({ tasksMeta: { totalTasks: 3, currentTaskIndex: 0 } })
+    );
+
+    const p = makeProtector();
+    // Command mentions .check.md but no extractable path with /
+    const result = p.check('Bash', {
+      command: `echo tests.check.md | tee ${path.join(ticketDir, 'tests.check.md')}`,
+    });
+    // The tee path IS extractable, so this should still be blocked
+    assert.equal(result.blocked, true);
+    assert.equal(result.rule, 'per-task-path');
+  });
+
+  it('Bash write with unextractable .check.md path fails open on per-task check', () => {
+    const ticketDir = path.join(tmpDir, TICKET);
+    fs.mkdirSync(ticketDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(ticketDir, '.work-state.json'),
+      JSON.stringify({ tasksMeta: { totalTasks: 3, currentTaskIndex: 0 } })
+    );
+
+    const p = makeProtector();
+    // Command where the basename appears but no token has both basename and /
+    // The Bash vector still detects the artifact via pattern match on tokens,
+    // and filePath is set to the full command. But extractBashTargetPath
+    // can't find a clean path token — so per-task enforcement is skipped (fail-open).
+    // We need a command that triggers write detection AND artifact pattern match
+    // but where no single token has both the basename and a slash.
+    const result = p.check('Bash', {
+      command: `node -e "writeFileSync(p, d)" tests.check.md ${TICKET}`,
+    });
+    // Should not be blocked by per-task — fail-open
+    // (step/agent checks pass because currentStep=check and isRunningInAgent=true)
+    assert.equal(result.blocked, false);
+  });
+
+  it('blocks Bash write of .check.md to wrong task folder', () => {
+    const ticketDir = path.join(tmpDir, TICKET);
+    fs.mkdirSync(path.join(ticketDir, 'task3'), { recursive: true });
+    fs.writeFileSync(
+      path.join(ticketDir, '.work-state.json'),
+      JSON.stringify({ tasksMeta: { totalTasks: 3, currentTaskIndex: 0 } })
+    );
+
+    const p = makeProtector();
+    // currentTaskIndex=0 → task1, but writing to task3/
+    const result = p.check('Bash', {
+      command: `cat > ${path.join(ticketDir, 'task3', 'tests.check.md')}`,
+    });
+    assert.equal(result.blocked, true);
+    assert.equal(result.rule, 'per-task-path');
+    assert.ok(result.message.includes('task 1'));
+    assert.ok(result.message.includes('wrong task folder'));
   });
 
   it('blocks relative path input that resolves to ticket root', () => {

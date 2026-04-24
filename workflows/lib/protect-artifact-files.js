@@ -33,6 +33,27 @@ const path = require('path');
 /** Shell write operators — redirects, tee, cp, mv, dd */
 const BASH_WRITE_OPS = /(?:>{1,2}|\btee\b|\bcp\b|\bmv\b|\bdd\b.*\bof=)/;
 
+/**
+ * Extract the actual target file path from a Bash command string.
+ * Looks for tokens containing both the given basename and a path separator.
+ * Returns null if no reliable path can be determined (caller should fail-open).
+ *
+ * @param {string} cmd — the raw Bash command string
+ * @param {string} basename — the artifact basename to search for
+ * @returns {string|null}
+ */
+function extractBashTargetPath(cmd, basename) {
+  const tokens = cmd.split(/\s+/);
+  for (const token of tokens) {
+    // Strip shell redirects and quotes
+    const cleaned = token.replace(/^[>]+/, '').replace(/['"]/g, '');
+    if (cleaned.includes(basename) && cleaned.includes('/')) {
+      return cleaned;
+    }
+  }
+  return null;
+}
+
 /** Node.js fs write calls executed via Bash */
 const NODE_FS_WRITES = /\b(?:writeFileSync|appendFileSync|writeFile|createWriteStream)\b/;
 
@@ -165,7 +186,7 @@ function createArtifactProtector(opts) {
 
     // Check 3: Per-task path enforcement — when tasks.md exists, .check.md reports
     // must go to tasks/ticketId/task${N}/ not tasks/ticketId/ root
-    if (bn.endsWith('.check.md') && ['Write', 'Edit', 'MultiEdit'].includes(toolName)) {
+    if (bn.endsWith('.check.md')) {
       try {
         const fs = require('fs');
         const getConfigMod = require(path.join(__dirname, 'get-config'));
@@ -179,13 +200,25 @@ function createArtifactProtector(opts) {
         if (fs.existsSync(statePath)) {
           const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
           if (state.tasksMeta && state.tasksMeta.totalTasks > 0) {
+            // Determine the actual file path — for Bash, extract from command string
+            let actualFilePath;
+            if (['Write', 'Edit', 'MultiEdit'].includes(toolName)) {
+              actualFilePath = filePath;
+            } else if (toolName === 'Bash') {
+              actualFilePath = extractBashTargetPath(filePath, bn);
+              // If we can't extract a reliable path, fail-open (skip per-task check)
+            }
+
+            if (!actualFilePath) {
+              // Can't determine path — skip per-task enforcement (fall through)
+            } else {
             // Per-task mode active — check file path is under task${N}/
             // Use path.resolve to prevent bypass via relative path components
             // (e.g., ../../ticketId/file.check.md). path.relative then gives a
             // canonical relative path; we verify it doesn't escape with '..'
             // and doesn't contain path.sep (i.e., it's a direct child, not nested).
             const resolvedTicketDir = path.resolve(path.join(tasksBase, safeId));
-            const resolvedFilePath = path.resolve(filePath);
+            const resolvedFilePath = path.resolve(actualFilePath);
             const relPath = path.relative(resolvedTicketDir, resolvedFilePath);
             const isEscapingTicketDir =
               relPath === '..' || relPath.startsWith('..' + path.sep);
@@ -228,6 +261,7 @@ function createArtifactProtector(opts) {
                 };
               }
             }
+            } // end actualFilePath else
           }
         }
       } catch {
