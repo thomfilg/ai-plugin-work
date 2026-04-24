@@ -474,7 +474,8 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
                 return false;
               // GH-285: userApproval requirement removed per brief resolution —
               // disposition + reason fields are sufficient proof of comment triage.
-              if (!entries.every((e) => e.disposition && e.reason)) return false;
+              const validDispositions = ['addressed', 'acknowledged', 'outdated'];
+              if (!entries.every((e) => validDispositions.includes(e.disposition) && e.reason)) return false;
             }
 
             return true;
