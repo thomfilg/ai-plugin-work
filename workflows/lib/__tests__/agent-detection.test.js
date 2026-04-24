@@ -236,3 +236,125 @@ describe('isRunningInAgent — debug logging', () => {
     assert.equal(stderrOutput, '');
   });
 });
+
+// ─── isRunningInAgent — hookData.agent_type (Primary-B) ──────────────────────
+
+describe('isRunningInAgent — hookData.agent_type', () => {
+  const savedEnv = {};
+
+  beforeEach(() => {
+    savedEnv.CLAUDE_CURRENT_AGENT = process.env.CLAUDE_CURRENT_AGENT;
+    savedEnv.ENFORCE_HOOK_DEBUG = process.env.ENFORCE_HOOK_DEBUG;
+    delete process.env.CLAUDE_CURRENT_AGENT;
+    delete process.env.ENFORCE_HOOK_DEBUG;
+  });
+
+  afterEach(() => {
+    if (savedEnv.CLAUDE_CURRENT_AGENT !== undefined) {
+      process.env.CLAUDE_CURRENT_AGENT = savedEnv.CLAUDE_CURRENT_AGENT;
+    } else {
+      delete process.env.CLAUDE_CURRENT_AGENT;
+    }
+    if (savedEnv.ENFORCE_HOOK_DEBUG !== undefined) {
+      process.env.ENFORCE_HOOK_DEBUG = savedEnv.ENFORCE_HOOK_DEBUG;
+    } else {
+      delete process.env.ENFORCE_HOOK_DEBUG;
+    }
+  });
+
+  it('matches exact agent_type from hookData', () => {
+    const hookData = { agent_type: 'code-checker' };
+    assert.ok(isRunningInAgent('/nonexistent/transcript.json', ['code-checker'], hookData));
+  });
+
+  it('matches agent_type with namespace prefix via normalization', () => {
+    const hookData = { agent_type: 'work-workflow:code-checker' };
+    assert.ok(isRunningInAgent('/nonexistent/transcript.json', ['code-checker'], hookData));
+  });
+
+  it('returns false when agent_type does not match any alias', () => {
+    const hookData = { agent_type: 'other-agent' };
+    assert.ok(!isRunningInAgent('/nonexistent/transcript.json', ['code-checker'], hookData));
+  });
+
+  it('agent_type takes precedence over tool_input.subagent_type', () => {
+    // agent_type matches, subagent_type does not — should still match
+    const hookData = {
+      agent_type: 'code-checker',
+      tool_input: { subagent_type: 'wrong-agent' },
+    };
+    assert.ok(isRunningInAgent('/nonexistent/transcript.json', ['code-checker'], hookData));
+  });
+
+  it('CLAUDE_CURRENT_AGENT env var takes precedence over agent_type when it matches', () => {
+    // env var matches — returns true without ever checking agent_type
+    process.env.CLAUDE_CURRENT_AGENT = 'code-checker';
+    const hookData = { agent_type: 'wrong-agent' };
+    assert.ok(isRunningInAgent('/nonexistent/transcript.json', ['code-checker'], hookData));
+  });
+
+  it('falls through to agent_type when CLAUDE_CURRENT_AGENT does not match', () => {
+    // env var is 'other-agent' which doesn't match ['code-checker']
+    // so it falls through to agent_type which is 'code-checker' — matches
+    process.env.CLAUDE_CURRENT_AGENT = 'other-agent';
+    const hookData = { agent_type: 'code-checker' };
+    assert.ok(isRunningInAgent('/nonexistent/transcript.json', ['code-checker'], hookData));
+  });
+
+  it('agent_type with different casing matches via normalization', () => {
+    const hookData = { agent_type: 'Code-Checker' };
+    assert.ok(isRunningInAgent('/nonexistent/transcript.json', ['code-checker'], hookData));
+  });
+
+});
+
+// ─── isRunningInAgent — debug logging for agent_type ─────────────────────────
+
+describe('isRunningInAgent — debug logging for agent_type', () => {
+  const savedEnv = {};
+  let stderrOutput = '';
+  let originalWrite;
+
+  beforeEach(() => {
+    savedEnv.CLAUDE_CURRENT_AGENT = process.env.CLAUDE_CURRENT_AGENT;
+    savedEnv.ENFORCE_HOOK_DEBUG = process.env.ENFORCE_HOOK_DEBUG;
+    delete process.env.CLAUDE_CURRENT_AGENT;
+    delete process.env.ENFORCE_HOOK_DEBUG;
+    stderrOutput = '';
+    originalWrite = process.stderr.write;
+    process.stderr.write = (chunk) => {
+      stderrOutput += chunk;
+      return true;
+    };
+  });
+
+  afterEach(() => {
+    process.stderr.write = originalWrite;
+    if (savedEnv.CLAUDE_CURRENT_AGENT !== undefined) {
+      process.env.CLAUDE_CURRENT_AGENT = savedEnv.CLAUDE_CURRENT_AGENT;
+    } else {
+      delete process.env.CLAUDE_CURRENT_AGENT;
+    }
+    if (savedEnv.ENFORCE_HOOK_DEBUG !== undefined) {
+      process.env.ENFORCE_HOOK_DEBUG = savedEnv.ENFORCE_HOOK_DEBUG;
+    } else {
+      delete process.env.ENFORCE_HOOK_DEBUG;
+    }
+  });
+
+  it('emits debug log for agent_type match', () => {
+    process.env.ENFORCE_HOOK_DEBUG = '1';
+    const hookData = { agent_type: 'code-checker' };
+    isRunningInAgent('/nonexistent/transcript.json', ['code-checker'], hookData);
+    assert.ok(stderrOutput.includes('[agent-detection]'));
+    assert.ok(stderrOutput.includes('matched agent_type'));
+  });
+
+  it('emits debug log for agent_type miss', () => {
+    process.env.ENFORCE_HOOK_DEBUG = '1';
+    const hookData = { agent_type: 'other-agent' };
+    isRunningInAgent('/nonexistent/transcript.json', ['code-checker'], hookData);
+    assert.ok(stderrOutput.includes('[agent-detection]'));
+    assert.ok(stderrOutput.includes('no match for agent_type'));
+  });
+});
