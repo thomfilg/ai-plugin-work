@@ -33,6 +33,10 @@
           {
             "type": "command",
             "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/enforce-step-workflow.js"
+          },
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/work/hooks/protect-tasks-md.js"
           }
         ]
       },
@@ -63,6 +67,10 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/work/hooks/work-require-implement.js"
+          },
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/work/hooks/protect-tasks-md.js"
           }
         ]
       },

@@ -374,7 +374,7 @@ async function main() {
     const msg =
       'TDD not initialized. Production file writes are blocked until TDD state exists.\n' +
       `Run: node ${tddScript} init <TICKET_ID>\n` +
-      `Or use: node ${tddScript} exception <TICKET_ID> --reason "<reason>"\n`;
+      `Or use: node ${tddScript} exception <TICKET_ID> --category <category> --reason "<reason>"\n`;
     process.stderr.write(msg);
     // Audit the block (R13)
     const auditCb = createAuditCallback(ticketId, toolName, filePath, ctx);

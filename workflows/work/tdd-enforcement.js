@@ -50,7 +50,9 @@ Rules:
 - Evidence is recorded by the SCRIPT — it runs git diff and test commands itself.
 - Do NOT make local git commits during the cycle — the commit step handles that.
 - If the change is purely mechanical (config-only, no behavior change):
-  node <TDD_STATE_PATH> exception <TICKET_ID> --task <N> --reason "config-only change, no testable behavior"  # --task supported
+  node <TDD_STATE_PATH> exception <TICKET_ID> --task <N> --category <category> --reason "<reason>"
+  Allowed categories: checkpoint, config-only, file-move, mechanical-refactor
+  Exception is BLOCKED when git diff contains new files with exports (use TDD instead).
 `.trim();
 
 /**
@@ -90,8 +92,27 @@ function validateTddEvidence(evidence) {
     return { valid: false, reason: 'Evidence is null or not an object' };
   }
 
-  if (typeof evidence.exception === 'string' && evidence.exception.trim() !== '') {
-    return { valid: true, reason: '' };
+  // Exception handling: accept both legacy string and structured { category, reason }
+  if (evidence.exception != null) {
+    // Legacy format: bare string (backward compat)
+    if (typeof evidence.exception === 'string' && evidence.exception.trim() !== '') {
+      return { valid: true, reason: '' };
+    }
+    // Structured format: { category, reason }
+    if (typeof evidence.exception === 'object' && evidence.exception !== null) {
+      const { ALLOWED_CATEGORIES } = require('../work-implement/exception-validator');
+      const cat = evidence.exception.category;
+      if (typeof cat === 'string' && ALLOWED_CATEGORIES.includes(cat)) { // GH-258: validated against exception-validator.ALLOWED_CATEGORIES
+        const reason = evidence.exception.reason;
+        if (typeof reason !== 'string' || !reason.trim()) {
+          return { valid: false, reason: 'Exception reason is required and must be a non-empty string.' };
+        }
+        return { valid: true, reason: '' };
+      }
+      return { valid: false, reason: 'Invalid exception category: "' + cat + '". Allowed: ' + ALLOWED_CATEGORIES.join(', ') + '.' };
+    }
+    // exception exists but is neither string nor valid object
+    return { valid: false, reason: 'Exception field has invalid format' };
   }
 
   const cycles = evidence.cycles;

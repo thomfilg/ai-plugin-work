@@ -77,7 +77,7 @@ node tdd-phase-state.js record-refactor TICKET-123 --task 1 --cmd "npm test"
 node tdd-phase-state.js transition TICKET-123 green --task 1
 
 # Exception mode (skip TDD for mechanical changes)
-node tdd-phase-state.js exception TICKET-123 --task 1 --reason "config-only change"
+node tdd-phase-state.js exception TICKET-123 --task 1 --category config-only --reason "config-only change"
 ```
 
 ### Token Gating

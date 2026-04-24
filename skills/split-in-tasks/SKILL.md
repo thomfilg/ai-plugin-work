@@ -287,3 +287,10 @@ _TDD Protocol: Every non-exempt implementation task follows RED -> GREEN -> REFA
 - Implementation task deliverables use bold phase prefixes: `**RED:**`, `**GREEN:**`, `**REFACTOR:**` nested within each subtask — each subtask gets its own small TDD cycle. Checkpoint tasks and config-only infrastructure tasks are exempt (see Rule 10).
 - The file starts with `# Tasks`, metadata, and the extracted requirements list
 - The file ends with the Requirement Coverage table
+
+**Rule 11 — Documentation Task:**
+If the spec references user-facing behavior changes, API changes, configuration changes, or existing `.md` documentation files are related to the changes, add a final task of type `checkpoint` titled "Documentation Review" that verifies:
+- Affected `.md` files are updated (README, architecture docs, API docs)
+- New features are documented if user-facing
+- Configuration changes are documented
+This task is checkpoint type (auto-TDD-exception) and should be the last task.

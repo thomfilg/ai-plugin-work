@@ -199,7 +199,7 @@ node tdd-phase-state.js record-refactor TICKET-123 --cmd "npm test" [--task N]
 node tdd-phase-state.js transition TICKET-123 green [--task N]
 
 # Exception mode
-node tdd-phase-state.js exception TICKET-123 --reason "reason" [--task N]
+node tdd-phase-state.js exception TICKET-123 --category <category> --reason "reason" [--task N]
 ```
 
 ## Environment Variables

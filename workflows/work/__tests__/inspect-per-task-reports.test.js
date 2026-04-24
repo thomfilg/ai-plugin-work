@@ -163,6 +163,31 @@ describe('inspect: perTaskReports aggregation (GH-259 Task 7.1)', () => {
     );
   });
 
+  it('shows exception: true for structured exception object in tdd-phase.json', () => {
+    const tmp = makeTmpDir();
+    tmpDirs.push(tmp);
+    const ticketDir = path.join(tmp, 'GH-104');
+    fs.mkdirSync(ticketDir, { recursive: true });
+    fs.writeFileSync(path.join(ticketDir, 'tasks.md'), '# Tasks\n## Task 1\n');
+
+    const task1Dir = path.join(ticketDir, 'task1');
+    fs.mkdirSync(task1Dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(task1Dir, 'tdd-phase.json'),
+      JSON.stringify({ exception: { category: 'config-only', reason: 'test' }, cycles: [] })
+    );
+
+    const deps = makeDeps(tmp);
+    const s = inspect('GH-104', {}, null, deps);
+
+    assert.ok(s.perTaskReports.task1.tddPhase, 'tddPhase should exist');
+    assert.equal(
+      s.perTaskReports.task1.tddPhase.exception,
+      true,
+      'structured exception object should be flagged as exception: true'
+    );
+  });
+
   it('preserves s.reports for backward compatibility', () => {
     const tmp = makeTmpDir();
     tmpDirs.push(tmp);

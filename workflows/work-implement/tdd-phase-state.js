@@ -24,7 +24,7 @@
  *   node tdd-phase-state.js record-green <TICKET_ID> --cmd "<test command>"
  *   node tdd-phase-state.js record-refactor <TICKET_ID> --cmd "<test command>"
  *   node tdd-phase-state.js transition <TICKET_ID> <target_phase>
- *   node tdd-phase-state.js exception <TICKET_ID> --reason "<reason>"
+ *   node tdd-phase-state.js exception <TICKET_ID> --category <category> --reason "<reason>"
  */
 
 const fs = require('fs');
@@ -50,7 +50,7 @@ const ALLOWED_AGENTS = [
 ];
 
 // Subcommands that require token verification
-const GATED_SUBCOMMANDS = ['record-red', 'record-green', 'record-refactor', 'transition'];
+const GATED_SUBCOMMANDS = ['record-red', 'record-green', 'record-refactor', 'transition', 'exception'];
 
 const TOKEN_MAX_AGE_MS = 10_000; // 10 seconds
 
@@ -196,6 +196,13 @@ function parseTask(args) {
 
 function safeParseTask(args) {
   try { return parseTask(args); } catch (e) { errorExit(e.message); }
+}
+
+
+function parseCategory(args) {
+  const idx = args.indexOf('--category');
+  if (idx === -1 || idx + 1 >= args.length) return null;
+  return args[idx + 1];
 }
 
 function runTestCommand(cmd) {
@@ -458,27 +465,104 @@ function cmdTransition(ticketId, targetPhase, args) {
   successOut({ phase: state.currentPhase, cycle: state.currentCycle });
 }
 
+function auditException(ticketId, taskNum, category, reason, allow) {
+  try {
+    const { appendEnforcementAudit } = require('../work/work-actions');
+    appendEnforcementAudit(ticketId, {
+      origin: 'ai-subtask',
+      task: taskNum || null,
+      phase: null,
+      action: 'tdd-exception',
+      allow,
+      reason: (category || 'unknown') + ': ' + (reason || ''),
+      outputPath: null,
+      meta: { category },
+    });
+  } catch { /* fail-open */ }
+}
+
 function cmdException(ticketId, args) {
   if (!ticketId) errorExit('Missing ticket ID.');
+
+  // Parse --category (required)
+  const category = parseCategory(args);
+  const taskNum = safeParseTask(args);
+  if (!category) {
+    auditException(ticketId, taskNum, null, null, false);
+    errorExit('Missing --category argument. Usage: node tdd-phase-state.js exception <TICKET_ID> --category <category> --reason "<reason>"');
+  }
+
+  // Validate category
+  const { validateExceptionCategory, checkNewExportedCode } = require('./exception-validator');
+  const catResult = validateExceptionCategory(category);
+  if (!catResult.valid) {
+    auditException(ticketId, taskNum, category, null, false);
+    errorExit('Invalid exception category: ' + catResult.reason);
+  }
+
+  // Validate checkpoint category against actual task metadata
+  if (category === 'checkpoint') {
+    if (!taskNum) {
+      auditException(ticketId, null, category, null, false);
+      errorExit('Category "checkpoint" requires --task <N> to identify which task is a checkpoint.');
+    }
+    const { isCheckpointTask } = require('./exception-validator');
+    const resolvedTasksBase = resolveTasksBase();
+    const safeId = sanitizeId(ticketId);
+    if (!isCheckpointTask(safeId, taskNum, resolvedTasksBase)) {
+      auditException(ticketId, taskNum, category, null, false);
+      errorExit('Category "checkpoint" is only allowed for checkpoint tasks. Task ' + taskNum + ' is not a checkpoint task.');
+    }
+  }
+
+  // Parse --reason (required)
   const reasonIdx = args.indexOf('--reason');
   if (reasonIdx === -1 || reasonIdx + 1 >= args.length) {
-    errorExit(
-      'Missing --reason argument. Usage: node tdd-phase-state.js exception <TICKET_ID> --reason "<reason>"'
-    );
+    auditException(ticketId, taskNum, category, null, false);
+    errorExit('Missing --reason argument.');
   }
   const reason = args[reasonIdx + 1];
   if (!reason || !reason.trim()) {
+    auditException(ticketId, taskNum, category, '', false);
     errorExit('Reason cannot be empty.');
   }
-  const taskNum = safeParseTask(args);
+
   const opts = taskNum ? { taskNum } : undefined;
+
+  // Heuristic check: detect new exported code (skip for checkpoint and file-move)
+  if (category !== 'checkpoint' && category !== 'file-move') {
+    let allChanged = [];
+    try {
+      const repoRoot = execSync('git rev-parse --show-toplevel', { encoding: 'utf8' }).trim();
+      const gitOpts = { encoding: 'utf8', cwd: repoRoot };
+      const diff = execSync('git diff --diff-filter=A --name-only', gitOpts).trim();
+      const staged = execSync('git diff --cached --diff-filter=A --name-only', gitOpts).trim();
+      const untracked = execSync('git ls-files --others --exclude-standard', gitOpts).trim();
+      const relFiles = [...new Set([...diff.split('\n'), ...staged.split('\n'), ...untracked.split('\n')].filter(Boolean))];
+      allChanged = relFiles.map(f => path.resolve(repoRoot, f));
+    } catch {
+      auditException(ticketId, taskNum, category, reason, false);
+      errorExit('Unable to verify exception eligibility: git repository detection failed. Run this command from within the repository so new-export checks can be enforced.');
+    }
+
+    const exportCheck = checkNewExportedCode(allChanged);
+    if (exportCheck.hasNewExports) {
+      auditException(ticketId, taskNum, category, reason, false);
+      errorExit('New exported code detected in: ' + exportCheck.files.join(', ') + '. TDD is required for new code with exports. Use the RED-GREEN-REFACTOR cycle instead of exception mode.');
+    }
+  }
+
+  // Write structured exception
   const state = {
     currentPhase: 'exception',
-    exception: reason,
+    exception: { category, reason },
     cycles: [],
   };
   writeState(ticketId, state, opts);
-  successOut({ ok: true, phase: 'exception', exception: reason });
+
+  auditException(ticketId, taskNum, category, reason, true);
+
+  successOut({ ok: true, phase: 'exception', category, reason });
 }
 
 // ─── Main ───────────────────────────────────────────────────────────────────

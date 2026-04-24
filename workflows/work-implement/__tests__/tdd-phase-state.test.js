@@ -300,30 +300,33 @@ describe('tdd-phase-state CLI', () => {
 
   describe('exception', () => {
     it('creates valid state with exception reason', () => {
+      const gitRepo = createTempGitRepo();
       const { stdout, exitCode } = runCli(
-        'exception TEST-EXC --reason "config-only change, no testable behavior"',
-        homeDir
+        'exception TEST-EXC --category config-only --reason "config-only change, no testable behavior"',
+        homeDir,
+        gitRepo
       );
       assert.strictEqual(exitCode, 0);
       const result = JSON.parse(stdout);
       assert.strictEqual(result.ok, true);
       assert.strictEqual(result.phase, 'exception');
-      assert.strictEqual(result.exception, 'config-only change, no testable behavior');
+      assert.strictEqual(result.reason, 'config-only change, no testable behavior');
 
       const state = readState(homeDir, 'TEST-EXC');
       assert.strictEqual(state.currentPhase, 'exception');
-      assert.strictEqual(state.exception, 'config-only change, no testable behavior');
+      assert.deepStrictEqual(state.exception, { category: 'config-only', reason: 'config-only change, no testable behavior' });
       assert.deepStrictEqual(state.cycles, []);
+      fs.rmSync(gitRepo, { recursive: true, force: true });
     });
 
     it('fails without --reason argument', () => {
-      const { exitCode, stderr } = runCli('exception TEST-EXC2', homeDir);
+      const { exitCode, stderr } = runCli('exception TEST-EXC2 --category config-only', homeDir);
       assert.strictEqual(exitCode, 1);
       assert.ok(stderr.includes('reason'), `Expected error about reason, got: ${stderr}`);
     });
 
     it('fails with empty reason', () => {
-      const { exitCode, stderr } = runCli('exception TEST-EXC3 --reason ""', homeDir);
+      const { exitCode, stderr } = runCli('exception TEST-EXC3 --category config-only --reason ""', homeDir);
       assert.strictEqual(exitCode, 1);
       assert.ok(
         stderr.includes('empty') || stderr.includes('reason'),
@@ -332,9 +335,11 @@ describe('tdd-phase-state CLI', () => {
     });
 
     it('with --task writes to per-task path (GH-219 PR6)', () => {
+      const gitRepo = createTempGitRepo();
       const { stdout, exitCode } = runCli(
-        'exception TEST-EXC4 --task 2 --reason "config-only change"',
-        homeDir
+        'exception TEST-EXC4 --task 2 --category config-only --reason "config-only change"',
+        homeDir,
+        gitRepo
       );
       assert.strictEqual(exitCode, 0);
       const result = JSON.parse(stdout);
@@ -348,21 +353,25 @@ describe('tdd-phase-state CLI', () => {
       assert.ok(fs.existsSync(perTaskPath), `Expected per-task state at ${perTaskPath}`);
       const state = JSON.parse(fs.readFileSync(perTaskPath, 'utf8'));
       assert.strictEqual(state.currentPhase, 'exception');
-      assert.strictEqual(state.exception, 'config-only change');
+      assert.deepStrictEqual(state.exception, { category: 'config-only', reason: 'config-only change' });
 
       // Root path should NOT exist
       const rootPath = path.join(homeDir, 'worktrees', 'tasks', 'TEST-EXC4', 'tdd-phase.json');
       assert.ok(!fs.existsSync(rootPath), 'Root state should NOT be created when --task is used');
+      fs.rmSync(gitRepo, { recursive: true, force: true });
     });
 
     it('without --task writes to root path (backward compat)', () => {
+      const gitRepo = createTempGitRepo();
       const { exitCode } = runCli(
-        'exception TEST-EXC5 --reason "no task context"',
-        homeDir
+        'exception TEST-EXC5 --category config-only --reason "no task context"',
+        homeDir,
+        gitRepo
       );
       assert.strictEqual(exitCode, 0);
       const rootPath = path.join(homeDir, 'worktrees', 'tasks', 'TEST-EXC5', 'tdd-phase.json');
       assert.ok(fs.existsSync(rootPath), `Expected root state at ${rootPath}`);
+      fs.rmSync(gitRepo, { recursive: true, force: true });
     });
   });
 
@@ -752,7 +761,186 @@ describe('tdd-phase-state CLI', () => {
       assert.strictEqual(exitCode, 0);
     });
   });
-  describe('multi-task TDD accumulation (GH-219 Task 5)', () => {
+  describe('exception with --category (GH-258)', () => {
+    it('valid --category config-only with --reason succeeds and writes structured state', () => {
+      const gitRepo = createTempGitRepo();
+      const { stdout, exitCode } = runCli(
+        'exception TEST-CAT1 --category config-only --reason "update config" --task 2',
+        homeDir,
+        gitRepo
+      );
+      assert.strictEqual(exitCode, 0);
+      const result = JSON.parse(stdout);
+      assert.strictEqual(result.ok, true);
+      assert.strictEqual(result.phase, 'exception');
+      assert.strictEqual(result.category, 'config-only');
+      assert.strictEqual(result.reason, 'update config');
+
+      // Verify structured format in state file
+      const perTaskPath = path.join(
+        homeDir, 'worktrees', 'tasks', 'TEST-CAT1', 'task2', 'tdd-phase.json'
+      );
+      const state = JSON.parse(fs.readFileSync(perTaskPath, 'utf8'));
+      assert.strictEqual(state.currentPhase, 'exception');
+      assert.deepStrictEqual(state.exception, { category: 'config-only', reason: 'update config' });
+      assert.deepStrictEqual(state.cycles, []);
+
+      fs.rmSync(gitRepo, { recursive: true, force: true });
+    });
+
+    it('invalid --category whatever exits 1', () => {
+      const { exitCode, stderr } = runCli(
+        'exception TEST-CAT2 --category whatever --reason "test" --task 2',
+        homeDir
+      );
+      assert.strictEqual(exitCode, 1);
+      assert.ok(
+        stderr.includes('Invalid exception category'),
+        `Expected invalid category error, got: ${stderr}`
+      );
+    });
+
+    it('missing --category (only --reason) exits 1', () => {
+      const { exitCode, stderr } = runCli(
+        'exception TEST-CAT3 --reason "some reason" --task 2',
+        homeDir
+      );
+      assert.strictEqual(exitCode, 1);
+      assert.ok(
+        stderr.includes('--category'),
+        `Expected missing category error, got: ${stderr}`
+      );
+    });
+
+    it('new exported code with --category config-only exits 1 (heuristic blocks)', () => {
+      const gitRepo = createTempGitRepo();
+      fs.mkdirSync(path.join(gitRepo, 'src'), { recursive: true });
+      fs.writeFileSync(
+        path.join(gitRepo, 'src', 'utils.js'),
+        'function helper() {}\nmodule.exports = { helper };\n'
+      );
+      execSync('git add src/utils.js', { cwd: gitRepo, stdio: 'pipe' });
+
+      const { exitCode, stderr } = runCli(
+        'exception TEST-CAT4 --category config-only --reason "config update" --task 2',
+        homeDir,
+        gitRepo
+      );
+      assert.strictEqual(exitCode, 1);
+      assert.ok(
+        stderr.includes('New exported code detected') || stderr.includes('new exported code'),
+        `Expected heuristic block error, got: ${stderr}`
+      );
+
+      fs.rmSync(gitRepo, { recursive: true, force: true });
+    });
+
+    it('--category checkpoint skips heuristic even with new exported code', () => {
+      const gitRepo = createTempGitRepo();
+      fs.mkdirSync(path.join(gitRepo, 'src'), { recursive: true });
+      fs.writeFileSync(
+        path.join(gitRepo, 'src', 'new-module.js'),
+        'module.exports = { foo: 1 };\n'
+      );
+      execSync('git add src/new-module.js', { cwd: gitRepo, stdio: 'pipe' });
+
+      // Create tasks.md with task 2 as a checkpoint task so validation passes
+      const tasksBase = path.join(homeDir, 'worktrees', 'tasks');
+      const ticketDir = path.join(tasksBase, 'TEST-CAT5');
+      fs.mkdirSync(ticketDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(ticketDir, 'tasks.md'),
+        '## Task 1\n### Type\nimplementation\n\n## Task 2\n### Type\ncheckpoint\n'
+      );
+
+      const { stdout, exitCode } = runCli(
+        'exception TEST-CAT5 --category checkpoint --reason "checkpoint task" --task 2',
+        homeDir,
+        gitRepo
+      );
+      assert.strictEqual(exitCode, 0);
+      const result = JSON.parse(stdout);
+      assert.strictEqual(result.ok, true);
+      assert.strictEqual(result.category, 'checkpoint');
+
+      fs.rmSync(gitRepo, { recursive: true, force: true });
+    });
+
+    it('exception is in GATED_SUBCOMMANDS (token gating)', () => {
+      // Verify that exception without token skip fails with token error
+      const { exitCode, stderr } = runCliNoTokenSkip(
+        'exception TEST-CAT6 --category config-only --reason "test" --task 2',
+        homeDir
+      );
+      assert.strictEqual(exitCode, 1);
+      assert.ok(
+        stderr.includes('No valid write token'),
+        `Expected token error for gated exception, got: ${stderr}`
+      );
+    });
+
+    it('--category file-move bypasses heuristic even with staged file containing module.exports', () => {
+      const gitRepo = createTempGitRepo();
+      fs.mkdirSync(path.join(gitRepo, 'src'), { recursive: true });
+      fs.writeFileSync(
+        path.join(gitRepo, 'src', 'moved-module.js'),
+        'function helper() {}\nmodule.exports = { helper };\n'
+      );
+      execSync('git add src/moved-module.js', { cwd: gitRepo, stdio: 'pipe' });
+
+      const { stdout, exitCode } = runCli(
+        'exception TEST-FM1 --category file-move --reason "rename src/old.js to src/moved-module.js" --task 1',
+        homeDir,
+        gitRepo
+      );
+      assert.strictEqual(exitCode, 0);
+      const result = JSON.parse(stdout);
+      assert.strictEqual(result.ok, true);
+      assert.strictEqual(result.category, 'file-move');
+
+      fs.rmSync(gitRepo, { recursive: true, force: true });
+    });
+
+    it('--category config-only outside a git repo exits 1 (fail-closed)', () => {
+      // Run the command in a plain temp dir (not a git repo) so git commands fail
+      const nonGitDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdd-nongit-'));
+      try {
+        const { exitCode, stderr } = runCli(
+          'exception TEST-NOGIT --category config-only --reason "config update" --task 1',
+          homeDir,
+          nonGitDir
+        );
+        assert.strictEqual(exitCode, 1, `Expected exit 1 when git repo detection fails, got ${exitCode}`);
+        assert.ok(
+          stderr.includes('git') || stderr.includes('repository'),
+          `Expected git/repository error message, got: ${stderr}`
+        );
+      } finally {
+        fs.rmSync(nonGitDir, { recursive: true, force: true });
+      }
+    });
+
+    it('rejected exception (invalid --category) writes audit record with allow: false', () => {
+      const { exitCode } = runCli(
+        'exception TEST-AUD1 --category bogus --reason "test" --task 3',
+        homeDir
+      );
+      assert.strictEqual(exitCode, 1);
+
+      // Check audit file for audit record
+      const actionsPath = path.join(homeDir, 'worktrees', 'tasks', 'TEST-AUD1', '.work-actions.json');
+      assert.ok(fs.existsSync(actionsPath), `Expected audit file at ${actionsPath}`);
+      const actions = JSON.parse(fs.readFileSync(actionsPath, 'utf8'));
+      const auditRecord = actions.find(
+        (a) => a.action === 'tdd-exception' && a.allow === false
+      );
+      assert.ok(auditRecord, 'Expected audit record with allow: false');
+      assert.strictEqual(auditRecord.allow, false);
+      assert.ok(auditRecord.reason.includes('bogus'), 'Expected reason to contain category');
+    });
+  });
+
+    describe('multi-task TDD accumulation (GH-219 Task 5)', () => {
     it('5.1: accumulates independent per-task state across full TDD lifecycle', () => {
       const ticketId = 'TEST-MT1';
       const tasksBase = path.join(homeDir, 'worktrees', 'tasks');

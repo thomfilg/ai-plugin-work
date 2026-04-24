@@ -255,7 +255,19 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
               )
             );
             // Exception mode: config-only or mechanical changes that skip TDD
+            // Accept both legacy string format and structured { category, reason } format
             if (typeof state.exception === 'string' && state.exception.trim() !== '') return true;
+            if (
+              typeof state.exception === 'object' &&
+              state.exception !== null
+            ) {
+              // If exception-validator fails to load, the outer catch returns false (fail-closed)
+              const { ALLOWED_CATEGORIES } = require(path.join(__dirname, '..', 'work-implement', 'exception-validator'));
+              const cat = state.exception.category;
+              const reason = state.exception.reason;
+              return typeof cat === 'string' && ALLOWED_CATEGORIES.includes(cat) &&
+                typeof reason === 'string' && reason.trim() !== '';
+            }
             if (!Array.isArray(state.cycles) || state.cycles.length === 0) return false;
             // At least one cycle must have both red and green evidence
             return state.cycles.some((c) => c.red && c.green);
@@ -589,7 +601,7 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
       },
     },
     { basename: 'spec.md', step: STEPS.spec, agents: ['spec-writer'] },
-    { basename: 'tasks.md', step: STEPS.tasks, agents: [] },
+    { basename: 'tasks.md', step: STEPS.tasks, allowedSteps: [STEPS.task_review], agents: [] },
     { basename: '.last-commit-sha', step: STEPS.commit },
     { basename: 'code-review.check.md', step: STEPS.check, agents: ['code-checker'] },
     { basename: 'tests.check.md', step: STEPS.check, agents: ['quality-checker'] },

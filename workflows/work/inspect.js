@@ -152,7 +152,8 @@ function inspect(ticket, providerConfig, suffix, deps) {
           const tddData = JSON.parse(readFile(tddPath));
           const validation = validateTddEvidence(tddData);
           const hasException =
-            typeof tddData.exception === 'string' && tddData.exception.trim() !== '';
+            (typeof tddData.exception === 'string' && tddData.exception.trim() !== '') ||
+            (typeof tddData.exception === 'object' && tddData.exception !== null && typeof tddData.exception.category === 'string');
           taskReport.tddPhase = {
             exists: true,
             valid: validation.valid,

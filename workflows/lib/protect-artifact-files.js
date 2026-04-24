@@ -40,7 +40,8 @@ const NODE_FS_WRITES = /\b(?:writeFileSync|appendFileSync|writeFile|createWriteS
  * @typedef {object} ArtifactRule
  * @property {string} [basename] — exact file basename to match
  * @property {RegExp} [pattern] — regex to match against file basename
- * @property {string} step — the workflow step that owns this artifact
+ * @property {string} step — the primary workflow step that owns this artifact
+ * @property {string[]} [allowedSteps] — additional steps that may write this artifact (checked alongside `step`)
  * @property {string[]} [agents] — authorized agent names (if omitted, any agent in the step is allowed)
  */
 
@@ -133,17 +134,23 @@ function createArtifactProtector(opts) {
     if (!filePath.includes(`/${ticketId}/`) && !filePath.endsWith(`/${ticketId}`))
       return { blocked: false };
 
-    // Check 1: Step must be in_progress
+    // Check 1: Step must be in_progress (primary step or any allowedSteps)
     const currentStep = getStepInProgress(ticketId);
-    if (currentStep !== rule.step) {
+    const stepAllowed =
+      currentStep === rule.step ||
+      (Array.isArray(rule.allowedSteps) && rule.allowedSteps.includes(currentStep));
+    if (!stepAllowed) {
+      const stepsLabel = rule.allowedSteps
+        ? [rule.step, ...rule.allowedSteps].join(', ')
+        : rule.step;
       return {
         blocked: true,
         file: bn,
         rule: 'step',
         message:
-          `BLOCKED: Cannot write ${bn} — step '${rule.step}' is not in_progress.\n` +
+          `BLOCKED: Cannot write ${bn} — none of the allowed step(s) '${stepsLabel}' are in_progress.\n` +
           `Current step: ${currentStep || '(none)'}\n` +
-          `Only the ${rule.step} step may create/modify this file.\n`,
+          `Only the ${stepsLabel} step(s) may create/modify this file.\n`,
       };
     }
 

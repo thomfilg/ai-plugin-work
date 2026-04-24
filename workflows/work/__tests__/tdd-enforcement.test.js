@@ -872,6 +872,57 @@ describe('TDD enforcement', () => {
   // task-review uses per-task path when task context is available (GH-219 Task 3)
   // ═══════════════════════════════════════════════════════════════════════════
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // validateTddEvidence structured exception (GH-258)
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe('validateTddEvidence structured exception (GH-258)', () => {
+    const { validateTddEvidence } = require('../tdd-enforcement');
+
+    it('legacy string exception still valid', () => {
+      const result = validateTddEvidence({ exception: 'config-only change', cycles: [] });
+      assert.equal(result.valid, true);
+    });
+
+    it('structured exception with valid category config-only', () => {
+      const result = validateTddEvidence({ exception: { category: 'config-only', reason: 'tsconfig' }, cycles: [] });
+      assert.equal(result.valid, true);
+    });
+
+    it('structured exception with valid category file-move', () => {
+      const result = validateTddEvidence({ exception: { category: 'file-move', reason: 'renamed' }, cycles: [] });
+      assert.equal(result.valid, true);
+    });
+
+    it('structured exception with invalid category rejects', () => {
+      const result = validateTddEvidence({ exception: { category: 'whatever', reason: 'x' }, cycles: [] });
+      assert.equal(result.valid, false);
+      assert.ok(result.reason.includes('Invalid exception category'), `Expected reason to contain "Invalid exception category", got: ${result.reason}`);
+    });
+
+    it('structured exception with missing category rejects', () => {
+      const result = validateTddEvidence({ exception: { reason: 'x' }, cycles: [] });
+      assert.equal(result.valid, false);
+    });
+
+    it('exception as number (invalid type) rejects', () => {
+      const result = validateTddEvidence({ exception: 42, cycles: [] });
+      assert.equal(result.valid, false);
+    });
+
+    it('structured exception with missing reason rejects', () => {
+      const result = validateTddEvidence({ exception: { category: 'config-only' }, cycles: [] });
+      assert.equal(result.valid, false);
+      assert.ok(result.reason.includes('Exception reason is required'), `Expected reason message, got: ${result.reason}`);
+    });
+
+    it('structured exception with empty reason rejects', () => {
+      const result = validateTddEvidence({ exception: { category: 'config-only', reason: '  ' }, cycles: [] });
+      assert.equal(result.valid, false);
+      assert.ok(result.reason.includes('Exception reason is required'), `Expected reason message, got: ${result.reason}`);
+    });
+  });
+
   describe('task-review uses per-task tasksDir', () => {
     const taskReviewStep = require('../steps/task-review');
     const { STEPS } = require('../step-registry');

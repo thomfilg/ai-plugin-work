@@ -174,7 +174,20 @@ _Why this split?_ Reviews run as a different agent against a committed artifact,
 **Important:**
 - Evidence is recorded by the SCRIPT, not by agents — the script runs `git diff` and test commands itself
 - Do NOT make local git commits during the TDD loop — the commit step handles that
-- If the change is purely mechanical (config-only, no behavior change), skip the TDD loop entirely
+**Exception mode** (for non-testable changes only):
+If the change is purely mechanical, use the exception command with a required category:
+```bash
+node ${CLAUDE_PLUGIN_ROOT}/workflows/work-implement/tdd-phase-state.js exception <TICKET_ID> --category <category> --reason "<reason>"
+```
+
+Allowed categories: `checkpoint`, `config-only`, `file-move`, `mechanical-refactor`
+
+**What does NOT qualify for exception mode:**
+- New components, hooks, or providers
+- New types with behavior (throw guards, validators)
+- New utility functions with logic
+- Any code the spec lists test scenarios for
+- New files with exports (heuristic will block)
 
 ### Step 3: Select and invoke the appropriate agent
 

@@ -126,6 +126,51 @@ describe('createArtifactProtector', () => {
     assert.equal(result.blocked, true);
   });
 
+  // ── allowedSteps gating ──
+
+  it('allows artifact in primary step', () => {
+    const p = createArtifactProtector({
+      artifacts: [{ basename: 'tasks.md', step: 'tasks', allowedSteps: ['task_review'] }],
+      getStepInProgress: () => 'tasks',
+      getTicketId: () => TICKET,
+    });
+    const result = p.check('Write', { file_path: `/tasks/${TICKET}/tasks.md` });
+    assert.equal(result.blocked, false);
+  });
+
+  it('allows artifact in allowedSteps (task_review)', () => {
+    const p = createArtifactProtector({
+      artifacts: [{ basename: 'tasks.md', step: 'tasks', allowedSteps: ['task_review'] }],
+      getStepInProgress: () => 'task_review',
+      getTicketId: () => TICKET,
+    });
+    const result = p.check('Write', { file_path: `/tasks/${TICKET}/tasks.md` });
+    assert.equal(result.blocked, false);
+  });
+
+  it('blocks artifact when neither primary step nor allowedSteps is in_progress', () => {
+    const p = createArtifactProtector({
+      artifacts: [{ basename: 'tasks.md', step: 'tasks', allowedSteps: ['task_review'] }],
+      getStepInProgress: () => 'implement',
+      getTicketId: () => TICKET,
+    });
+    const result = p.check('Write', { file_path: `/tasks/${TICKET}/tasks.md` });
+    assert.equal(result.blocked, true);
+    assert.equal(result.rule, 'step');
+  });
+
+  it('block message references both primary step and allowedSteps', () => {
+    const p = createArtifactProtector({
+      artifacts: [{ basename: 'tasks.md', step: 'tasks', allowedSteps: ['task_review'] }],
+      getStepInProgress: () => 'implement',
+      getTicketId: () => TICKET,
+    });
+    const result = p.check('Write', { file_path: `/tasks/${TICKET}/tasks.md` });
+    assert.equal(result.blocked, true);
+    assert.ok(result.message.includes('tasks'), 'message should include primary step');
+    assert.ok(result.message.includes('task_review'), 'message should include allowedSteps');
+  });
+
   // ── Agent gating ──
 
   it('blocks spec.md when correct step but wrong agent', () => {
