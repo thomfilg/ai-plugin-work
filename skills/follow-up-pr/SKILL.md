@@ -541,6 +541,35 @@ If 10 attempts are reached without success:
 
 ---
 
+## Review Accountability
+
+When the monitor script exits 0 (PR READY TO REVIEW) and the PR has review comments, it automatically generates a `review-accountability.json` artifact under `${TASKS_BASE}/<TICKET_ID>/`. This file records how each PR review comment was handled.
+
+### Schema
+
+JSON array where each entry contains:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | `number\|null` | GitHub comment ID |
+| `author` | `string` | Comment author |
+| `path` | `string\|null` | File path associated with the comment, or `null` when not tied to a specific file |
+| `comment` | `string` | Comment body text (truncated to 120 chars) |
+| `disposition` | `string` | One of: `addressed`, `acknowledged`, `outdated` |
+| `reason` | `string` | Why this disposition was chosen |
+
+### Dispositions
+
+- **`addressed`** — Code was changed to fix the issue (blocking comments, deduplicated comments)
+- **`acknowledged`** — Intentionally not addressed (non-blocking, low-priority, or conflicts with user intent)
+- **`outdated`** — Comment refers to code that no longer exists
+
+### Transition Gate
+
+The `follow_up → ci` transition requires `review-accountability.json` to exist when the PR had review comments. If the file cannot be written (missing `TASKS_BASE` or ticket ID), a warning is logged to stderr but the script still exits 0.
+
+---
+
 ## Example Invocation
 
 User: `/follow-up-pr`

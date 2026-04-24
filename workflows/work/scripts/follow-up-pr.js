@@ -1454,22 +1454,10 @@ async function main() {
         );
         const ticketId = getTicketId.getCurrentTaskId();
         if (tasksBase && ticketId) {
-          const allComments = [...(reviews.blocking || []), ...(reviews.nonBlocking || [])];
-          const entries = allComments.map((item) => ({
-            id: item.id || null,
-            author: item.author || 'unknown',
-            comment: (item.body || '').slice(0, 120),
-            disposition: item.deduplicated
-              ? 'addressed'
-              : (reviews.blocking || []).includes(item)
-                ? 'addressed'
-                : 'deferred',
-            reason: item.deduplicated
-              ? 'Previously addressed, re-posted after force-push'
-              : (reviews.blocking || []).includes(item)
-                ? 'Blocking comment addressed during follow-up'
-                : 'Non-blocking low-priority comment',
-          }));
+          const entries = buildAccountabilityEntries(
+            reviews.blocking || [],
+            reviews.nonBlocking || []
+          );
           let safeTicketId = ticketId;
           try {
             safeTicketId = require(path.join(__dirname, '..', '..', 'lib', 'config')).safeTicketId(
@@ -1484,8 +1472,12 @@ async function main() {
           fs.mkdirSync(path.dirname(accountabilityPath), { recursive: true });
           fs.writeFileSync(accountabilityPath, JSON.stringify(entries, null, 2));
         }
-      } catch {
-        // Non-fatal — accountability file is best-effort
+      } catch (err) {
+        const errMsg = String(err && err.message ? err.message : err);
+        process.stderr.write(
+          `WARNING: Failed to write review-accountability.json: ${errMsg}\n` +
+          `The follow_up → ci transition gate will block until this file exists.\n`
+        );
       }
 
       process.exit(0);
@@ -1593,6 +1585,34 @@ if (require.main === module) {
   });
 }
 
+/**
+ * Build accountability entries from blocking and non-blocking review comments.
+ * Extracted for testability.
+ *
+ * @param {Array} blocking - Blocking review comments
+ * @param {Array} nonBlocking - Non-blocking review comments
+ * @returns {Array} Accountability entries with disposition and reason
+ */
+function buildAccountabilityEntries(blocking, nonBlocking) {
+  const allComments = [...blocking, ...nonBlocking];
+  return allComments.map((item) => ({
+    id: item.id || null,
+    author: item.author || 'unknown',
+    path: item.path || null,
+    comment: (item.body || '').slice(0, 120),
+    disposition: item.deduplicated
+      ? 'addressed'
+      : blocking.includes(item)
+        ? 'addressed'
+        : 'acknowledged',
+    reason: item.deduplicated
+      ? 'Previously addressed, re-posted after force-push'
+      : blocking.includes(item)
+        ? 'Blocking comment addressed during follow-up'
+        : 'Non-blocking low-priority comment',
+  }));
+}
+
 module.exports = {
   classifyCommentPriority,
   isBotAuthorLogin,
@@ -1606,6 +1626,7 @@ module.exports = {
   getChangedPaths,
   initState,
   getCodeContext,
+  buildAccountabilityEntries,
   // Gate-check exports: used by workflow-definition.js verify()
   isPRGateReady,
   ghExec,

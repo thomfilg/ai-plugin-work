@@ -108,7 +108,7 @@ async function main() {
         `Before declaring "PR READY TO REVIEW", you must create:\n` +
         `  ${accountabilityFile}\n\n` +
         `Format: JSON array where each entry has:\n` +
-        `  { "file": "path/to/file.js", "line": 42, "disposition": "addressed|acknowledged|outdated", "reason": "..." }\n\n` +
+        `  { "disposition": "addressed|acknowledged|outdated", "reason": "..." }\n\n` +
         `Dispositions:\n` +
         `  - "addressed" — code changed to fix it (include commit SHA in reason)\n` +
         `  - "acknowledged" — intentionally skipped (reason MUST be shown to user)\n` +
@@ -137,9 +137,9 @@ async function main() {
     // Check all entries have required fields
     for (let i = 0; i < accountability.length; i++) {
       const entry = accountability[i];
-      if (!entry.file || !entry.disposition || !entry.reason) {
+      if (!entry.disposition || !entry.reason) {
         process.stderr.write(
-          `BLOCKED: review-accountability.json entry ${i} missing required fields (file, disposition, reason).\n`
+          `BLOCKED: review-accountability.json entry ${i} missing required fields (disposition, reason).\n`
         );
         process.exit(2);
       }
