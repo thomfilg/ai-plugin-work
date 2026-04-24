@@ -1457,10 +1457,29 @@ async function main() {
         );
         const ticketId = getTicketId.getCurrentTaskId();
         if (tasksBase && ticketId) {
-          const entries = buildAccountabilityEntries(
-            reviews.blocking || [],
-            reviews.nonBlocking || []
-          );
+          // Include inline PR comments to match strictCommentCount (GH-276)
+          const inlineComments = [];
+          try {
+            const repo = ghExec('repo view --json nameWithOwner').nameWithOwner;
+            const ids = ghExec(
+              ['api', '--paginate', `repos/${repo}/pulls/${prInfo.number}/comments?per_page=100`, '--jq', '.[].id'],
+              { json: false }
+            );
+            const inlineIds = new Set((ids || '').split('\n').filter(Boolean));
+            const existing = new Set(
+              [...(reviews.blocking || []), ...(reviews.nonBlocking || [])].map((c) => String(c.id))
+            );
+            for (const id of inlineIds) {
+              if (!existing.has(id))
+                inlineComments.push({ id: Number(id) || id, author: 'inline', body: '' });
+            }
+          } catch (inlineErr) {
+            process.stderr.write(`WARNING: Failed to fetch inline comment IDs: ${inlineErr.message}\n`);
+          }
+          const entries = buildAccountabilityEntries(reviews.blocking || [], [
+            ...(reviews.nonBlocking || []),
+            ...inlineComments,
+          ]);
           let safeTicketId = ticketId;
           try {
             safeTicketId = require(path.join(__dirname, '..', '..', 'lib', 'config')).safeTicketId(
@@ -1531,11 +1550,13 @@ function isPRGateReady() {
   let strictCommentCount = 0;
   try {
     const repo = ghExec('repo view --json nameWithOwner').nameWithOwner;
+    // Use --paginate to count ALL inline comments, not just the first page (default 30)
     const comments = ghExec(
-      ['api', `repos/${repo}/pulls/${prInfo.number}/comments`, '--jq', 'length'],
+      ['api', '--paginate', `repos/${repo}/pulls/${prInfo.number}/comments?per_page=100`, '--jq', 'length'],
       { json: false }
     );
-    strictCommentCount = parseInt(comments, 10) || 0;
+    // --paginate with --jq length returns one number per page; sum them
+    strictCommentCount = (comments || '').split('\n').filter(Boolean).reduce((sum, n) => sum + (parseInt(n, 10) || 0), 0);
   } catch {
     // Cannot verify comment count — fail closed
     return { ready: false };

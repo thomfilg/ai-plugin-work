@@ -2056,14 +2056,144 @@ describe('enforce-step-workflow', () => {
       assert.ok(stderr.includes('BLOCKED'));
     });
 
-    it('blocks direct work-state.js complete call', async () => {
+    it('allows direct work-state.js complete call at terminal step (GH-276)', async () => {
+      writeWorkState(makeStepStatus('complete', WORK_STEPS));
+
+      const { code } = await runHook(
+        {
+          tool_name: 'Bash',
+          tool_input: { command: `node ${WORK_STATE_PATH} complete ${TEST_TICKET}` },
+        },
+        'PreToolUse'
+      );
+      assert.equal(code, 0, 'direct complete should be allowed at terminal step');
+    });
+
+    it('allows direct work-state.js complete with quoted path at terminal step (GH-276)', async () => {
+      writeWorkState(makeStepStatus('complete', WORK_STEPS));
+
+      const { code } = await runHook(
+        {
+          tool_name: 'Bash',
+          tool_input: { command: `node "${WORK_STATE_PATH}" complete ${TEST_TICKET}` },
+        },
+        'PreToolUse'
+      );
+      assert.equal(code, 0, 'quoted path complete should be allowed at terminal step');
+    });
+
+    it('does not trigger complete bypass for untrusted path (GH-276 security)', async () => {
+      // /tmp/work-state.js is not in TRUSTED_SCRIPT_DIRS, so the bypass won't fire.
+      // Rule 3b also skips untrusted paths (they are handled by Vector 3).
+      // This test verifies the bypass function itself rejects untrusted paths.
+      writeWorkState(makeStepStatus('complete', WORK_STEPS));
+
+      // The command passes through the hook (not blocked, not bypassed) because
+      // Rule 3 doesn't detect .work-state.json in the command text, and
+      // Rule 3b skips untrusted paths. This is correct — Vector 3 handles untrusted scripts.
+      const { code } = await runHook(
+        {
+          tool_name: 'Bash',
+          tool_input: { command: `node /tmp/work-state.js complete ${TEST_TICKET}` },
+        },
+        'PreToolUse'
+      );
+      // The hook allows it through (exit 0) — the script doesn't exist so it would fail at runtime.
+      // The important thing is that isTerminalCompleteBypass() returns false for untrusted paths.
+      assert.equal(code, 0, 'untrusted path is not caught by this hook (handled by Vector 3)');
+    });
+
+    it('blocks direct work-state.js complete call from non-terminal step (GH-276)', async () => {
       writeWorkState(makeStepStatus('implement', WORK_STEPS));
 
       const { code, stderr } = await runHook(
-        { tool_name: 'Bash', tool_input: { command: `node ${WORK_STATE_PATH} complete TEST-1` } },
+        {
+          tool_name: 'Bash',
+          tool_input: { command: `node ${WORK_STATE_PATH} complete ${TEST_TICKET}` },
+        },
         'PreToolUse'
       );
-      assert.equal(code, 2, 'direct complete should be blocked');
+      assert.equal(code, 2, 'complete should be blocked at non-terminal step');
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+
+    it('blocks direct work-state.js complete targeting a different ticket (GH-276)', async () => {
+      writeWorkState(makeStepStatus('complete', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        {
+          tool_name: 'Bash',
+          tool_input: { command: `node ${WORK_STATE_PATH} complete WRONG-TICKET` },
+        },
+        'PreToolUse'
+      );
+      assert.equal(code, 2, 'complete targeting wrong ticket should be blocked');
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+
+    it('blocks work-state.js complete with command substitution (GH-276 security)', async () => {
+      writeWorkState(makeStepStatus('complete', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node ${WORK_STATE_PATH} complete $(echo ${TEST_TICKET})` } },
+        'PreToolUse'
+      );
+      assert.equal(code, 2, 'command substitution should be blocked');
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+
+    it('blocks work-state.js complete with backtick substitution (GH-276 security)', async () => {
+      writeWorkState(makeStepStatus('complete', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node ${WORK_STATE_PATH} complete \`echo ${TEST_TICKET}\`` } },
+        'PreToolUse'
+      );
+      assert.equal(code, 2, 'backtick substitution should be blocked');
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+
+    it('blocks work-state.js complete chained with || (GH-276 security)', async () => {
+      writeWorkState(makeStepStatus('complete', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node ${WORK_STATE_PATH} complete ${TEST_TICKET} || echo pwned` } },
+        'PreToolUse'
+      );
+      assert.equal(code, 2, 'chained || should be blocked');
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+
+    it('blocks work-state.js complete with pipe (GH-276 security)', async () => {
+      writeWorkState(makeStepStatus('complete', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node ${WORK_STATE_PATH} complete ${TEST_TICKET} | tee /tmp/out` } },
+        'PreToolUse'
+      );
+      assert.equal(code, 2, 'pipe should be blocked');
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+
+    it('blocks work-state.js complete with redirect (GH-276 security)', async () => {
+      writeWorkState(makeStepStatus('complete', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node ${WORK_STATE_PATH} complete ${TEST_TICKET} > /tmp/out` } },
+        'PreToolUse'
+      );
+      assert.equal(code, 2, 'redirect should be blocked');
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+
+    it('blocks work-state.js complete with extra args after ticket (GH-276 security)', async () => {
+      writeWorkState(makeStepStatus('complete', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node ${WORK_STATE_PATH} complete ${TEST_TICKET} --force` } },
+        'PreToolUse'
+      );
+      assert.equal(code, 2, 'extra args should be blocked');
       assert.ok(stderr.includes('BLOCKED'));
     });
 

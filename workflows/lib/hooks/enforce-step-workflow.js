@@ -198,6 +198,7 @@ const EXEMPT_SCRIPTS = new Set([
 // work-state.js: exempt for get, resume-info, init, active-subtask, add-error.
 // workflow-state.js: exempt for get, resume-info, add-error (init blocked — not idempotent).
 // Mutating sub-commands (set-step, set-check, complete, etc.) must go through the orchestrator.
+// Exception: 'complete' is step-conditionally allowed at the terminal step via strict match (GH-276).
 const SAFE_SUBCOMMANDS = {
   'work-state.js': new Set([
     'get',
@@ -408,6 +409,43 @@ function getCurrentStep(state, steps) {
   return active[0] || null;
 }
 
+/**
+ * Step-conditional bypass for `work-state.js complete` at the terminal step (GH-276).
+ * Returns true ONLY when ALL conditions are met:
+ *   1. Command is a strict `node <path>/work-state.js complete <ticketId>` invocation
+ *   2. No shell operators, substitutions, or extra arguments
+ *   3. Target ticket matches the active ticket
+ *   4. The workflow is at the terminal `complete` step
+ *
+ * @param {string} cmd — the Bash command string
+ * @param {string} ticketId — the active ticket ID
+ * @returns {boolean}
+ */
+function isTerminalCompleteBypass(cmd, ticketId) {
+  // Strict format: only "node <path>/work-state.js complete <ticketId>"
+  // Accepts quoted paths: node "path/work-state.js" or node 'path/work-state.js'
+  // Reject anything with shell operators, substitutions, or extra arguments
+  const strictPattern = /^node\s+(?:"([^"]+[\\/]work-state\.js)"|'([^']+[\\/]work-state\.js)'|(\S+[\\/]work-state\.js))\s+complete\s+(\S+)\s*$/;
+  const match = strictPattern.exec(cmd);
+  if (!match) return false;
+
+  // Reject shell operators and substitutions
+  if (/[;&|$`<>(){}\n]/.test(cmd)) return false;
+
+  // Extract and verify script path is trusted
+  const scriptPath = match[1] || match[2] || match[3];
+  const resolvedPath = expandPluginRoot(scriptPath);
+  if (!isTrustedScriptPath(resolvedPath, TRUSTED_SCRIPT_DIRS)) return false;
+
+  // Verify ticket arg matches active ticket
+  const targetTicket = match[4];
+  if (targetTicket !== ticketId) return false;
+
+  // Verify terminal step — reuse shared helper for consistent multi-in_progress handling
+  const state = loadStateFile(ticketId, '.work-state.json');
+  return getCurrentStep(state, WORK_STEPS) === 'complete';
+}
+
 function loadEvidence(ticketId, evidenceFile) {
   return loadEvidencePolicy({ tasksBase: TASKS_BASE, ticketId, evidenceFile, safeTicketPath });
 }
@@ -464,10 +502,19 @@ function handlePreToolUse(hookData) {
   // Prevents agents from bypassing the state machine by directly editing state files
   const rule3 = stateFileProtector.check(toolName, toolInput);
   if (rule3.blocked) {
-    didBlock = true;
-    const hint = BASENAME_TO_HINT[rule3.match] || WORKFLOWS[0].transitionHint;
-    process.stderr.write(rule3.message + `Use: ${hint} ${ticketId} <step>\n`);
-    process.exit(2);
+    // Step-conditional bypass: work-state.js complete is allowed at the terminal step (GH-276)
+    if (toolName === 'Bash' && rule3.match === '.work-state.json') {
+      const cmd = String(toolInput?.command || '').trim();
+      if (isTerminalCompleteBypass(cmd, ticketId)) {
+        rule3.blocked = false;
+      }
+    }
+    if (rule3.blocked) {
+      didBlock = true;
+      const hint = BASENAME_TO_HINT[rule3.match] || WORKFLOWS[0].transitionHint;
+      process.stderr.write(rule3.message + `Use: ${hint} ${ticketId} <step>\n`);
+      process.exit(2);
+    }
   }
   // Rule 3b: Block unsafe sub-commands on state scripts invoked via node (GH-89)
   // Defense-in-depth: the stateFileProtector's isExempt/Vector 3 may miss the script when
@@ -487,6 +534,14 @@ function handlePreToolUse(hookData) {
 
         const subCmd = extractSubCommand(cmd, m, scriptBase);
         if (!isSafeSubCommand(scriptBase, subCmd, SAFE_SUBCOMMANDS)) {
+          // Step-conditional bypass: work-state.js complete at terminal step (GH-276)
+          if (
+            scriptBase === 'work-state.js' &&
+            subCmd === 'complete' &&
+            isTerminalCompleteBypass(cmd, ticketId)
+          ) {
+            continue;
+          }
           didBlock = true;
           process.stderr.write(
             `BLOCKED: Direct Bash call to ${scriptBase} with sub-command '${subCmd}' is not allowed.\n` +
