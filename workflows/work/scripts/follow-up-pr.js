@@ -1473,8 +1473,9 @@ async function main() {
           fs.writeFileSync(accountabilityPath, JSON.stringify(entries, null, 2));
         }
       } catch (err) {
+        const errMsg = String(err && err.message ? err.message : err);
         process.stderr.write(
-          `WARNING: Failed to write review-accountability.json: ${err.message}\n` +
+          `WARNING: Failed to write review-accountability.json: ${errMsg}\n` +
           `The follow_up → ci transition gate will block until this file exists.\n`
         );
       }
