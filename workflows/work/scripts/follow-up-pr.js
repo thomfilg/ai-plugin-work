@@ -1538,7 +1538,9 @@ async function main() {
 function isPRGateReady() {
   const prInfo = getPRInfo();
   if (!prInfo || !prInfo.number) return { ready: false };
-  if (prInfo.state === 'CLOSED' || prInfo.state === 'MERGED') return { ready: false };
+  if (prInfo.state === 'CLOSED') return { ready: false };
+  // Merged PRs have passed all gates — allow transition (GH-276)
+  if (prInfo.state === 'MERGED') return { ready: true, reviews: {}, decision: { action: 'exit-success', finalStatus: 'merged' }, strictCommentCount: 0, prInfo };
 
   const ci = checkCI(prInfo.number);
   const reviews = getReviews(prInfo.number);
