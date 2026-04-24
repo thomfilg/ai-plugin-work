@@ -193,8 +193,9 @@ function createArtifactProtector(opts) {
     }
 
     // Check 3: Per-task path enforcement — when tasks.md exists, .check.md reports
-    // must go to tasks/ticketId/task${N}/ not tasks/ticketId/ root
-    if (bn.endsWith('.check.md')) {
+    // must go to tasks/ticketId/task${N}/ not tasks/ticketId/ root.
+    // Exception: during the final /check step, reports belong at ticket root (not per-task).
+    if (bn.endsWith('.check.md') && currentStep !== 'check') {
       try {
         const fs = require('fs');
         const getConfigMod = require(path.join(__dirname, 'get-config'));
