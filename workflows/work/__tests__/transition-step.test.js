@@ -42,7 +42,9 @@ function createDeps(overrides = {}) {
       if (savedStates[ticket]) return savedStates[ticket];
       // Return a basic in_progress state at the given step
       const stepStatus = {};
-      ALL_STEPS.forEach((s) => { stepStatus[s] = 'pending'; });
+      ALL_STEPS.forEach((s) => {
+        stepStatus[s] = 'pending';
+      });
       stepStatus[ALL_STEPS[0]] = 'in_progress';
       return {
         ticketId: ticket,
@@ -131,14 +133,8 @@ describe('transition-step.js (GH-245 Task 4)', () => {
       );
 
       // Should NOT have "step skipped" actions
-      const skippedActions = deps._actions.filter(
-        (a) => a.what === 'step skipped'
-      );
-      assert.equal(
-        skippedActions.length,
-        0,
-        'Should NOT log any "step skipped" actions'
-      );
+      const skippedActions = deps._actions.filter((a) => a.what === 'step skipped');
+      assert.equal(skippedActions.length, 0, 'Should NOT log any "step skipped" actions');
     });
 
     it('should mark multiple intermediate steps as "completed" and log "step deferred" when jumping', () => {
@@ -193,7 +189,13 @@ describe('transition-step.js (GH-260): generic step-verify gate', () => {
     const followUpIdx = ALL_STEPS.indexOf(STEPS.follow_up);
     const deps = createDeps({
       workflowCanTransition: () => true,
-      softSteps: new Set([STEPS.ticket, STEPS.ready, STEPS.task_review, STEPS.reports, STEPS.complete]),
+      softSteps: new Set([
+        STEPS.ticket,
+        STEPS.ready,
+        STEPS.task_review,
+        STEPS.reports,
+        STEPS.complete,
+      ]),
       commandMap: [
         { step: STEPS.follow_up, verify: () => false }, // verify fails
       ],
@@ -217,7 +219,13 @@ describe('transition-step.js (GH-260): generic step-verify gate', () => {
     const followUpIdx = ALL_STEPS.indexOf(STEPS.follow_up);
     const deps = createDeps({
       workflowCanTransition: () => true,
-      softSteps: new Set([STEPS.ticket, STEPS.ready, STEPS.task_review, STEPS.reports, STEPS.complete]),
+      softSteps: new Set([
+        STEPS.ticket,
+        STEPS.ready,
+        STEPS.task_review,
+        STEPS.reports,
+        STEPS.complete,
+      ]),
       commandMap: [
         { step: STEPS.follow_up, verify: () => true }, // verify passes
       ],
@@ -239,7 +247,13 @@ describe('transition-step.js (GH-260): generic step-verify gate', () => {
     const reportsIdx = ALL_STEPS.indexOf(STEPS.reports);
     const deps = createDeps({
       workflowCanTransition: () => true,
-      softSteps: new Set([STEPS.ticket, STEPS.ready, STEPS.task_review, STEPS.reports, STEPS.complete]),
+      softSteps: new Set([
+        STEPS.ticket,
+        STEPS.ready,
+        STEPS.task_review,
+        STEPS.reports,
+        STEPS.complete,
+      ]),
       commandMap: [
         { step: STEPS.reports, verify: () => false }, // verify would fail, but reports is soft
       ],
@@ -261,7 +275,13 @@ describe('transition-step.js (GH-260): generic step-verify gate', () => {
     const ciIdx = ALL_STEPS.indexOf(STEPS.ci);
     const deps = createDeps({
       workflowCanTransition: () => true,
-      softSteps: new Set([STEPS.ticket, STEPS.ready, STEPS.task_review, STEPS.reports, STEPS.complete]),
+      softSteps: new Set([
+        STEPS.ticket,
+        STEPS.ready,
+        STEPS.task_review,
+        STEPS.reports,
+        STEPS.complete,
+      ]),
       commandMap: [
         { step: STEPS.ci, verify: () => false }, // verify fails but backward should be allowed
       ],
@@ -283,7 +303,13 @@ describe('transition-step.js (GH-260): generic step-verify gate', () => {
     const cleanupIdx = ALL_STEPS.indexOf(STEPS.cleanup);
     const deps = createDeps({
       workflowCanTransition: () => true,
-      softSteps: new Set([STEPS.ticket, STEPS.ready, STEPS.task_review, STEPS.reports, STEPS.complete]),
+      softSteps: new Set([
+        STEPS.ticket,
+        STEPS.ready,
+        STEPS.task_review,
+        STEPS.reports,
+        STEPS.complete,
+      ]),
       commandMap: [], // no verify for cleanup
     });
 
@@ -326,7 +352,13 @@ describe('transition-step.js (GH-260): generic step-verify gate', () => {
     const ciIdx = ALL_STEPS.indexOf(STEPS.ci);
     const deps = createDeps({
       workflowCanTransition: () => true,
-      softSteps: new Set([STEPS.ticket, STEPS.ready, STEPS.task_review, STEPS.reports, STEPS.complete]),
+      softSteps: new Set([
+        STEPS.ticket,
+        STEPS.ready,
+        STEPS.task_review,
+        STEPS.reports,
+        STEPS.complete,
+      ]),
       commandMap: [
         { step: STEPS.ci, verify: () => false }, // CI not passing
       ],
@@ -350,9 +382,20 @@ describe('transition-step.js (GH-260): generic step-verify gate', () => {
     const followUpIdx = ALL_STEPS.indexOf(STEPS.follow_up);
     const deps = createDeps({
       workflowCanTransition: () => true,
-      softSteps: new Set([STEPS.ticket, STEPS.ready, STEPS.task_review, STEPS.reports, STEPS.complete]),
+      softSteps: new Set([
+        STEPS.ticket,
+        STEPS.ready,
+        STEPS.task_review,
+        STEPS.reports,
+        STEPS.complete,
+      ]),
       commandMap: [
-        { step: STEPS.follow_up, verify: () => { throw new Error('isPRGateReady exploded'); } },
+        {
+          step: STEPS.follow_up,
+          verify: () => {
+            throw new Error('isPRGateReady exploded');
+          },
+        },
       ],
     });
 
@@ -366,5 +409,4 @@ describe('transition-step.js (GH-260): generic step-verify gate', () => {
     assert.equal(result.gate, 'step-verify', 'Gate should be step-verify');
     assert.ok(result.message.includes('verify threw'), 'Message should indicate verify threw');
   });
-
 });

@@ -32,7 +32,9 @@ function writeClaim(tasksDir, taskNum, ownerId) {
 }
 function cleanupClaims() {
   for (const dir of _claimCleanupDirs) {
-    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+    try {
+      fs.rmSync(dir, { recursive: true, force: true });
+    } catch {}
   }
   _claimCleanupDirs = [];
 }
@@ -151,8 +153,10 @@ describe('implement step — dependency-aware messaging (GH-219 Task 16)', () =>
       assert.equal(entry.action, 'RUN');
       // Reason should mention the task id
       // Strict: must include exact task_1 id, not just "Task 1"
-      assert.ok(entry.reason.includes('task_1'),
-        `reason should mention task id "task_1", got: "${entry.reason}"`);
+      assert.ok(
+        entry.reason.includes('task_1'),
+        `reason should mention task id "task_1", got: "${entry.reason}"`
+      );
     });
 
     it('includes task id for non-first task', () => {
@@ -194,15 +198,14 @@ describe('implement step — dependency-aware messaging (GH-219 Task 16)', () =>
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'impl-test-'));
       _claimCleanupDirs.push(tmpDir);
       writeClaim(tmpDir, 1, 'PR1'); // claim via lock file, not tasksMeta.claimedBy
-      const taskData = makeTaskData([
-        { num: 1, title: 'First task' },
-      ]);
+      const taskData = makeTaskData([{ num: 1, title: 'First task' }]);
       const s = makeState({
         workState: {
           tasksMeta: {
             totalTasks: 1,
             currentTaskIndex: 0,
-            tasks: [ // no claimedBy — claim lives in lock file
+            tasks: [
+              // no claimedBy — claim lives in lock file
               { id: 'task_1', status: 'pending', dependencies: [] },
             ], // claim ownership read from .claims/task-1.lock, not here
           },
@@ -225,15 +228,14 @@ describe('implement step — dependency-aware messaging (GH-219 Task 16)', () =>
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'impl-test-'));
       _claimCleanupDirs.push(tmpDir);
       writeClaim(tmpDir, 1, 'PR2'); // claim via lock file, not tasksMeta.claimedBy
-      const taskData = makeTaskData([
-        { num: 1, title: 'First task' },
-      ]);
+      const taskData = makeTaskData([{ num: 1, title: 'First task' }]);
       const s = makeState({
         workState: {
           tasksMeta: {
             totalTasks: 1,
             currentTaskIndex: 0,
-            tasks: [ // no claimedBy — claim lives in lock file
+            tasks: [
+              // no claimedBy — claim lives in lock file
               { id: 'task_1', status: 'pending', dependencies: [] },
             ], // claim ownership read from .claims/task-1.lock, not here
           },
@@ -293,17 +295,13 @@ describe('implement step — dependency-aware messaging (GH-219 Task 16)', () =>
     });
 
     it('does not mention dependencies when task has none', () => {
-      const taskData = makeTaskData([
-        { num: 1, title: 'First task', dependencies: [] },
-      ]);
+      const taskData = makeTaskData([{ num: 1, title: 'First task', dependencies: [] }]);
       const s = makeState({
         workState: {
           tasksMeta: {
             totalTasks: 1,
             currentTaskIndex: 0,
-            tasks: [
-              { id: 'task_1', status: 'pending', dependencies: [] },
-            ],
+            tasks: [{ id: 'task_1', status: 'pending', dependencies: [] }],
           },
         },
       });
@@ -326,17 +324,13 @@ describe('implement step — dependency-aware messaging (GH-219 Task 16)', () =>
 
   describe('existing behaviors preserved', () => {
     it('DEFERs when all tasks are done', () => {
-      const taskData = makeTaskData([
-        { num: 1, title: 'Only task' },
-      ]);
+      const taskData = makeTaskData([{ num: 1, title: 'Only task' }]);
       const s = makeState({
         workState: {
           tasksMeta: {
             totalTasks: 1,
-            currentTaskIndex: 1,  // past the end
-            tasks: [
-              { id: 'task_1', status: 'completed', dependencies: [] },
-            ],
+            currentTaskIndex: 1, // past the end
+            tasks: [{ id: 'task_1', status: 'completed', dependencies: [] }],
           },
         },
       });
@@ -356,9 +350,7 @@ describe('implement step — dependency-aware messaging (GH-219 Task 16)', () =>
           tasksMeta: {
             totalTasks: 1,
             currentTaskIndex: 0,
-            tasks: [
-              { id: 'task_1', status: 'pending', dependencies: [] },
-            ],
+            tasks: [{ id: 'task_1', status: 'pending', dependencies: [] }],
           },
         },
       });
@@ -370,9 +362,7 @@ describe('implement step — dependency-aware messaging (GH-219 Task 16)', () =>
     });
 
     it('DEFERs when implement previously completed with diff', () => {
-      const taskData = makeTaskData([
-        { num: 1, title: 'Task one' },
-      ]);
+      const taskData = makeTaskData([{ num: 1, title: 'Task one' }]);
       const s = makeState({
         hasDiffVsMain: true,
         diffSummary: '3 files changed',
@@ -381,9 +371,7 @@ describe('implement step — dependency-aware messaging (GH-219 Task 16)', () =>
           tasksMeta: {
             totalTasks: 1,
             currentTaskIndex: 0,
-            tasks: [
-              { id: 'task_1', status: 'pending', dependencies: [] },
-            ],
+            tasks: [{ id: 'task_1', status: 'pending', dependencies: [] }],
           },
         },
       });
@@ -403,17 +391,13 @@ describe('implement step — dependency-aware messaging (GH-219 Task 16)', () =>
     });
 
     it('exports task metadata on ctx for task-advance step', () => {
-      const taskData = makeTaskData([
-        { num: 1, title: 'First task' },
-      ]);
+      const taskData = makeTaskData([{ num: 1, title: 'First task' }]);
       const s = makeState({
         workState: {
           tasksMeta: {
             totalTasks: 1,
             currentTaskIndex: 0,
-            tasks: [
-              { id: 'task_1', status: 'pending', dependencies: [] },
-            ],
+            tasks: [{ id: 'task_1', status: 'pending', dependencies: [] }],
           },
         },
       });

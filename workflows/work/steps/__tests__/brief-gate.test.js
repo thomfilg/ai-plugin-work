@@ -180,9 +180,17 @@ describe('brief-gate step', () => {
     );
     assert.equal(entry.onResolve, 'rewrite brief.md');
     assert.equal(entry.agentType, 'general-purpose', 'AskUserQuestion RUN must specify agentType');
-    assert.equal(typeof entry.agentPrompt, 'string', 'AskUserQuestion RUN must carry agentPrompt string');
+    assert.equal(
+      typeof entry.agentPrompt,
+      'string',
+      'AskUserQuestion RUN must carry agentPrompt string'
+    );
     assert.match(entry.agentPrompt, /AskUserQuestion/, 'agentPrompt must mention AskUserQuestion');
-    assert.match(entry.agentPrompt, /applyBriefResolutions/, 'agentPrompt must mention applyBriefResolutions');
+    assert.match(
+      entry.agentPrompt,
+      /applyBriefResolutions/,
+      'agentPrompt must mention applyBriefResolutions'
+    );
   });
 
   it('RUN entry includes postResolveCommand referencing applyBriefResolutions', () => {
@@ -193,11 +201,31 @@ describe('brief-gate step', () => {
     assert.equal(entries.length, 1);
     const entry = entries[0];
     assert.equal(entry.action, 'RUN');
-    assert.equal(typeof entry.postResolveCommand, 'string', 'RUN entry must carry postResolveCommand string');
-    assert.match(entry.postResolveCommand, /applyBriefResolutions/, 'postResolveCommand must reference applyBriefResolutions');
-    assert.match(entry.postResolveCommand, /brief-gate\.js/, 'postResolveCommand must require brief-gate.js');
-    assert.match(entry.postResolveCommand, /\$RESOLUTIONS_JSON/, 'postResolveCommand must reference $RESOLUTIONS_JSON placeholder');
-    assert.match(entry.postResolveCommand, /node -e/, 'postResolveCommand must be a node -e one-liner');
+    assert.equal(
+      typeof entry.postResolveCommand,
+      'string',
+      'RUN entry must carry postResolveCommand string'
+    );
+    assert.match(
+      entry.postResolveCommand,
+      /applyBriefResolutions/,
+      'postResolveCommand must reference applyBriefResolutions'
+    );
+    assert.match(
+      entry.postResolveCommand,
+      /brief-gate\.js/,
+      'postResolveCommand must require brief-gate.js'
+    );
+    assert.match(
+      entry.postResolveCommand,
+      /\$RESOLUTIONS_JSON/,
+      'postResolveCommand must reference $RESOLUTIONS_JSON placeholder'
+    );
+    assert.match(
+      entry.postResolveCommand,
+      /node -e/,
+      'postResolveCommand must be a node -e one-liner'
+    );
     // Verify the path includes the actual briefPath (tasks dir + brief.md)
     const expectedBriefPath = path.join(dir, 'brief.md');
     assert.ok(
@@ -217,7 +245,11 @@ describe('brief-gate step', () => {
     assert.match(entries[0].reason, /unreadable|regenerate/i);
     assert.equal(entries[0].command, '/brief', 'unreadable RUN must carry /brief command');
     assert.equal(entries[0].agentType, 'skill', 'unreadable RUN must specify agentType: skill');
-    assert.equal(entries[0].agentPrompt, '/brief', 'unreadable RUN must specify agentPrompt: /brief');
+    assert.equal(
+      entries[0].agentPrompt,
+      '/brief',
+      'unreadable RUN must specify agentPrompt: /brief'
+    );
   });
 
   describe('applyBriefResolutions (post-resolve handler)', () => {

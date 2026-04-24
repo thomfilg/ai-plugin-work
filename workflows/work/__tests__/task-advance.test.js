@@ -18,18 +18,11 @@ const { STEPS } = require(path.join(__dirname, '..', 'step-registry'));
 
 describe('task-advance: mutates task_review plan entry', () => {
   it('sets nextAction on task_review entry when more tasks remain', () => {
-    const plan = [
-      { step: STEPS.check },
-      { step: STEPS.task_review },
-    ];
+    const plan = [{ step: STEPS.check }, { step: STEPS.task_review }];
     const ctx = {
       STEPS,
       plan,
-      _taskData: [
-        { title: 'Task 1' },
-        { title: 'Task 2' },
-        { title: 'Task 3' },
-      ],
+      _taskData: [{ title: 'Task 1' }, { title: 'Task 2' }, { title: 'Task 3' }],
       _allTasksDone: false,
       _currentTaskIdx: 0,
     };
@@ -38,8 +31,11 @@ describe('task-advance: mutates task_review plan entry', () => {
 
     const taskReviewEntry = plan.find((p) => p.step === STEPS.task_review);
     assert.ok(taskReviewEntry, 'task_review entry should exist');
-    assert.equal(taskReviewEntry.nextAction, 'advance_task',
-      'task_review entry should have nextAction = advance_task');
+    assert.equal(
+      taskReviewEntry.nextAction,
+      'advance_task',
+      'task_review entry should have nextAction = advance_task'
+    );
     assert.ok(taskReviewEntry.taskInfo, 'task_review entry should have taskInfo');
     assert.equal(taskReviewEntry.taskInfo.current, 1);
     assert.equal(taskReviewEntry.taskInfo.total, 3);
@@ -47,10 +43,7 @@ describe('task-advance: mutates task_review plan entry', () => {
   });
 
   it('does NOT set nextAction on task_review when all tasks are done', () => {
-    const plan = [
-      { step: STEPS.check },
-      { step: STEPS.task_review },
-    ];
+    const plan = [{ step: STEPS.check }, { step: STEPS.task_review }];
     const ctx = {
       STEPS,
       plan,
@@ -63,15 +56,15 @@ describe('task-advance: mutates task_review plan entry', () => {
 
     const taskReviewEntry = plan.find((p) => p.step === STEPS.task_review);
     assert.ok(taskReviewEntry);
-    assert.equal(taskReviewEntry.nextAction, undefined,
-      'task_review should NOT have nextAction when on last task');
+    assert.equal(
+      taskReviewEntry.nextAction,
+      undefined,
+      'task_review should NOT have nextAction when on last task'
+    );
   });
 
   it('does NOT set nextAction on task_review when _allTasksDone is true', () => {
-    const plan = [
-      { step: STEPS.check },
-      { step: STEPS.task_review },
-    ];
+    const plan = [{ step: STEPS.check }, { step: STEPS.task_review }];
     const ctx = {
       STEPS,
       plan,
@@ -88,10 +81,7 @@ describe('task-advance: mutates task_review plan entry', () => {
   });
 
   it('still mutates check entry alongside task_review (backward compat)', () => {
-    const plan = [
-      { step: STEPS.check },
-      { step: STEPS.task_review },
-    ];
+    const plan = [{ step: STEPS.check }, { step: STEPS.task_review }];
     const ctx = {
       STEPS,
       plan,
@@ -103,8 +93,7 @@ describe('task-advance: mutates task_review plan entry', () => {
     taskAdvanceStep(() => {}, {}, ctx);
 
     const checkEntry = plan.find((p) => p.step === STEPS.check);
-    assert.equal(checkEntry.nextAction, 'advance_task',
-      'check entry should still be mutated');
+    assert.equal(checkEntry.nextAction, 'advance_task', 'check entry should still be mutated');
   });
 
   it('handles missing task_review entry gracefully', () => {

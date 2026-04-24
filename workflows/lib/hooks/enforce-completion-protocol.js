@@ -54,7 +54,9 @@ function hasActiveWorkSession() {
           const match = ref.match(/[A-Z]+-\d+/);
           if (match) currentTicket = match[0];
         }
-      } catch { /* no git context — ticket matching will be skipped */ }
+      } catch {
+        /* no git context — ticket matching will be skipped */
+      }
     }
 
     for (const f of files) {
@@ -71,9 +73,13 @@ function hasActiveWorkSession() {
           if (currentTicket && data.ticketId !== currentTicket) continue;
           return true;
         }
-      } catch { /* skip corrupt or inaccessible files */ }
+      } catch {
+        /* skip corrupt or inaccessible files */
+      }
     }
-  } catch { /* fail open */ }
+  } catch {
+    /* fail open */
+  }
   return false;
 }
 

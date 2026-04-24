@@ -17,14 +17,13 @@ describe('discoverApps', () => {
     discoverApps = require('../app-access').discoverApps;
   });
 
-  afterEach(() => { // restore config to prevent test pollution
+  afterEach(() => {
+    // restore config to prevent test pollution
     config.WEB_APPS = originalWebApps;
   });
 
   it('returns parsed entries with defaults from WEB_APPS config', () => {
-    config.WEB_APPS = [
-      { name: 'my-app', defaultPort: 3000, type: 'vite' },
-    ];
+    config.WEB_APPS = [{ name: 'my-app', defaultPort: 3000, type: 'vite' }];
     const apps = discoverApps();
     assert.equal(apps.length, 1);
     assert.equal(apps[0].name, 'my-app');
@@ -48,9 +47,7 @@ describe('discoverApps', () => {
   });
 
   it('returns entries for single-app repo', () => {
-    config.WEB_APPS = [
-      { name: 'solo-app', defaultPort: 4000, type: 'remix', appType: 'api' },
-    ];
+    config.WEB_APPS = [{ name: 'solo-app', defaultPort: 4000, type: 'remix', appType: 'api' }];
     const apps = discoverApps();
     assert.equal(apps.length, 1);
     assert.equal(apps[0].name, 'solo-app');
@@ -142,7 +139,7 @@ describe('validateManifestEntry', () => {
       startCommand: 'pnpm dev; rm -rf /',
     });
     assert.equal(result.valid, false);
-    assert.ok(result.errors.some(e => e.includes('dangerous shell characters')));
+    assert.ok(result.errors.some((e) => e.includes('dangerous shell characters')));
   });
 
   it('rejects startCommand with pipe', () => {
@@ -152,7 +149,7 @@ describe('validateManifestEntry', () => {
       startCommand: 'pnpm dev | cat /etc/passwd',
     });
     assert.equal(result.valid, false);
-    assert.ok(result.errors.some(e => e.includes('dangerous shell characters')));
+    assert.ok(result.errors.some((e) => e.includes('dangerous shell characters')));
   });
 
   it('rejects startCommand with &&', () => {
@@ -162,7 +159,7 @@ describe('validateManifestEntry', () => {
       startCommand: 'pnpm dev && rm -rf /',
     });
     assert.equal(result.valid, false);
-    assert.ok(result.errors.some(e => e.includes('dangerous shell characters')));
+    assert.ok(result.errors.some((e) => e.includes('dangerous shell characters')));
   });
 
   it('rejects startCommand with backticks', () => {
@@ -172,7 +169,7 @@ describe('validateManifestEntry', () => {
       startCommand: 'pnpm dev `whoami`',
     });
     assert.equal(result.valid, false);
-    assert.ok(result.errors.some(e => e.includes('dangerous shell characters')));
+    assert.ok(result.errors.some((e) => e.includes('dangerous shell characters')));
   });
 
   it('rejects startCommand with $()', () => {
@@ -182,7 +179,7 @@ describe('validateManifestEntry', () => {
       startCommand: 'pnpm dev $(whoami)',
     });
     assert.equal(result.valid, false);
-    assert.ok(result.errors.some(e => e.includes('dangerous shell characters')));
+    assert.ok(result.errors.some((e) => e.includes('dangerous shell characters')));
   });
 
   it('rejects startCommand with single & (background exec)', () => {
@@ -192,7 +189,7 @@ describe('validateManifestEntry', () => {
       startCommand: 'pnpm dev & malicious-cmd',
     });
     assert.equal(result.valid, false);
-    assert.ok(result.errors.some(e => e.includes('dangerous shell characters')));
+    assert.ok(result.errors.some((e) => e.includes('dangerous shell characters')));
   });
 
   it('rejects startCommand with newline', () => {
@@ -202,7 +199,7 @@ describe('validateManifestEntry', () => {
       startCommand: 'pnpm dev\nrm -rf /',
     });
     assert.equal(result.valid, false);
-    assert.ok(result.errors.some(e => e.includes('dangerous shell characters')));
+    assert.ok(result.errors.some((e) => e.includes('dangerous shell characters')));
   });
 
   it('rejects startCommand with carriage return', () => {
@@ -212,7 +209,7 @@ describe('validateManifestEntry', () => {
       startCommand: 'pnpm dev\rmalicious',
     });
     assert.equal(result.valid, false);
-    assert.ok(result.errors.some(e => e.includes('dangerous shell characters')));
+    assert.ok(result.errors.some((e) => e.includes('dangerous shell characters')));
   });
 
   it('rejects startCommand with > (output redirection)', () => {
@@ -222,7 +219,7 @@ describe('validateManifestEntry', () => {
       startCommand: 'pnpm dev > /tmp/out',
     });
     assert.equal(result.valid, false);
-    assert.ok(result.errors.some(e => e.includes('dangerous shell characters')));
+    assert.ok(result.errors.some((e) => e.includes('dangerous shell characters')));
   });
 
   it('rejects startCommand with < (input redirection)', () => {
@@ -232,7 +229,7 @@ describe('validateManifestEntry', () => {
       startCommand: 'pnpm dev < /tmp/in',
     });
     assert.equal(result.valid, false);
-    assert.ok(result.errors.some(e => e.includes('dangerous shell characters')));
+    assert.ok(result.errors.some((e) => e.includes('dangerous shell characters')));
   });
 
   it('rejects startCommand with ${VAR} (variable expansion)', () => {
@@ -242,7 +239,7 @@ describe('validateManifestEntry', () => {
       startCommand: 'pnpm dev ${HOME}',
     });
     assert.equal(result.valid, false);
-    assert.ok(result.errors.some(e => e.includes('dangerous shell characters')));
+    assert.ok(result.errors.some((e) => e.includes('dangerous shell characters')));
   });
 
   // Port range tests
@@ -296,7 +293,7 @@ describe('validateManifestEntry', () => {
       healthEndpoint: '//evil.com',
     });
     assert.equal(result.valid, false);
-    assert.ok(result.errors.some(e => e.includes('must not start with "//"')));
+    assert.ok(result.errors.some((e) => e.includes('must not start with "//"')));
   });
 
   it('rejects healthEndpoint with query strings', () => {
@@ -306,7 +303,7 @@ describe('validateManifestEntry', () => {
       healthEndpoint: '/health?token=abc',
     });
     assert.equal(result.valid, false);
-    assert.ok(result.errors.some(e => e.includes('must not contain query strings')));
+    assert.ok(result.errors.some((e) => e.includes('must not contain query strings')));
   });
 
   it('rejects healthEndpoint not starting with "/"', () => {
@@ -316,7 +313,7 @@ describe('validateManifestEntry', () => {
       healthEndpoint: 'health',
     });
     assert.equal(result.valid, false);
-    assert.ok(result.errors.some(e => e.includes('must start with "/"')));
+    assert.ok(result.errors.some((e) => e.includes('must start with "/"')));
   });
 
   it('accepts valid healthEndpoint', () => {
@@ -331,13 +328,13 @@ describe('validateManifestEntry', () => {
   it('requires defaultPort for web apps', () => {
     const result = validateManifestEntry({ name: 'web-app', appType: 'web' });
     assert.equal(result.valid, false);
-    assert.ok(result.errors.some(e => e.includes('defaultPort is required')));
+    assert.ok(result.errors.some((e) => e.includes('defaultPort is required')));
   });
 
   it('requires defaultPort for api apps', () => {
     const result = validateManifestEntry({ name: 'api-app', appType: 'api' });
     assert.equal(result.valid, false);
-    assert.ok(result.errors.some(e => e.includes('defaultPort is required')));
+    assert.ok(result.errors.some((e) => e.includes('defaultPort is required')));
   });
 
   it('allows missing defaultPort for cli apps', () => {
@@ -348,7 +345,7 @@ describe('validateManifestEntry', () => {
   it('requires defaultPort when appType is undefined (defaults to web)', () => {
     const result = validateManifestEntry({ name: 'no-type-app' });
     assert.equal(result.valid, false);
-    assert.ok(result.errors.some(e => e.includes('defaultPort is required')));
+    assert.ok(result.errors.some((e) => e.includes('defaultPort is required')));
   });
 
   it('returns multiple errors for multiple violations', () => {
@@ -513,7 +510,12 @@ describe('checkHealth', () => {
     const unusedPort = srv.address().port;
     srv.close();
     const app = { name: 'test-app', defaultPort: unusedPort, healthEndpoint: '/' };
-    const result = await checkHealth(app, { host: '127.0.0.1', retries: 1, retryInterval: 50, timeout: 1000 });
+    const result = await checkHealth(app, {
+      host: '127.0.0.1',
+      retries: 1,
+      retryInterval: 50,
+      timeout: 1000,
+    });
     assert.equal(result.status, AppAccessStatus.ACCESS_FAILED);
     assert.equal(result.responseCode, null);
     assert.ok(result.error);
@@ -523,7 +525,12 @@ describe('checkHealth', () => {
   it('returns ACCESS_FAILED on 503 response after retries', async () => {
     const port = await startServer(503);
     const app = { name: 'test-app', defaultPort: port, healthEndpoint: '/' };
-    const result = await checkHealth(app, { host: '127.0.0.1', retries: 1, retryInterval: 50, timeout: 2000 });
+    const result = await checkHealth(app, {
+      host: '127.0.0.1',
+      retries: 1,
+      retryInterval: 50,
+      timeout: 2000,
+    });
     assert.equal(result.status, AppAccessStatus.ACCESS_FAILED);
     assert.equal(result.responseCode, 503);
     assert.equal(result.error, 'HTTP 503');
@@ -538,7 +545,12 @@ describe('checkHealth', () => {
     const unusedPort = srv.address().port;
     srv.close();
     const app = { name: 'test-app', defaultPort: unusedPort, healthEndpoint: '/' };
-    const result = await checkHealth(app, { host: '127.0.0.1', retries: 1, retryInterval: 50, timeout: 1000 });
+    const result = await checkHealth(app, {
+      host: '127.0.0.1',
+      retries: 1,
+      retryInterval: 50,
+      timeout: 1000,
+    });
     assert.equal(result.status, AppAccessStatus.ACCESS_FAILED);
     assert.ok('lsofOutput' in result.diagnostics);
     assert.equal(typeof result.diagnostics.lsofOutput, 'string');
@@ -570,7 +582,12 @@ describe('checkHealth', () => {
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
     const port = server.address().port;
     const app = { name: 'test-app', defaultPort: port, healthEndpoint: '/' };
-    const result = await checkHealth(app, { host: '127.0.0.1', retries: 3, retryInterval: 50, timeout: 2000 });
+    const result = await checkHealth(app, {
+      host: '127.0.0.1',
+      retries: 3,
+      retryInterval: 50,
+      timeout: 2000,
+    });
     assert.equal(result.status, AppAccessStatus.ACCESS_FAILED);
     assert.equal(requestCount, 3);
     await new Promise((resolve) => server.close(resolve));

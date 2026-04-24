@@ -201,9 +201,10 @@ function createArtifactProtector(opts) {
         const tasksBase = getConfigMod.require('TASKS_BASE');
         // Sanitize ticketId for filesystem path (e.g. GitHub #123 → GH-123)
         const configMod = require(path.join(__dirname, 'config'));
-        const safeId = typeof configMod.safeTicketId === 'function'
-          ? configMod.safeTicketId(ticketId)
-          : ticketId;
+        const safeId =
+          typeof configMod.safeTicketId === 'function'
+            ? configMod.safeTicketId(ticketId)
+            : ticketId;
         const statePath = path.join(tasksBase, safeId, '.work-state.json');
         if (fs.existsSync(statePath)) {
           const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
@@ -220,68 +221,67 @@ function createArtifactProtector(opts) {
             if (!actualFilePath) {
               // Can't determine path — skip per-task enforcement (fall through)
             } else {
-            // Per-task mode active — check file path is under task${N}/
-            // Use path.resolve to prevent bypass via relative path components
-            // (e.g., ../../ticketId/file.check.md). path.relative then gives a
-            // canonical relative path; we verify it doesn't escape with '..'
-            // and doesn't contain path.sep (i.e., it's a direct child, not nested).
-            const resolvedTicketDir = path.resolve(path.join(tasksBase, safeId));
-            const resolvedFilePath = path.resolve(actualFilePath);
-            const relPath = path.relative(resolvedTicketDir, resolvedFilePath);
-            const isEscapingTicketDir =
-              relPath === '..' || relPath.startsWith('..' + path.sep);
-            const isWithinTicketDir =
-              relPath !== '' && !isEscapingTicketDir && !path.isAbsolute(relPath);
+              // Per-task mode active — check file path is under task${N}/
+              // Use path.resolve to prevent bypass via relative path components
+              // (e.g., ../../ticketId/file.check.md). path.relative then gives a
+              // canonical relative path; we verify it doesn't escape with '..'
+              // and doesn't contain path.sep (i.e., it's a direct child, not nested).
+              const resolvedTicketDir = path.resolve(path.join(tasksBase, safeId));
+              const resolvedFilePath = path.resolve(actualFilePath);
+              const relPath = path.relative(resolvedTicketDir, resolvedFilePath);
+              const isEscapingTicketDir = relPath === '..' || relPath.startsWith('..' + path.sep);
+              const isWithinTicketDir =
+                relPath !== '' && !isEscapingTicketDir && !path.isAbsolute(relPath);
 
-            // Compute task number before branching — needed by both branches
-            const totalTasks = state.tasksMeta.totalTasks;
-            const rawCurrentIdx = state.tasksMeta.currentTaskIndex;
-            const currentIdx = Number.isInteger(rawCurrentIdx) ? rawCurrentIdx : 0;
-            const normalizedIdx = Math.min(Math.max(currentIdx, 0), totalTasks - 1);
-            const taskNum = normalizedIdx + 1;
+              // Compute task number before branching — needed by both branches
+              const totalTasks = state.tasksMeta.totalTasks;
+              const rawCurrentIdx = state.tasksMeta.currentTaskIndex;
+              const currentIdx = Number.isInteger(rawCurrentIdx) ? rawCurrentIdx : 0;
+              const normalizedIdx = Math.min(Math.max(currentIdx, 0), totalTasks - 1);
+              const taskNum = normalizedIdx + 1;
 
-            // Block writes that escape the ticket directory via traversal
-            if (isEscapingTicketDir) {
-              return {
-                blocked: true,
-                file: bn,
-                rule: 'per-task-path',
-                message:
-                  `BLOCKED: Cannot write ${bn} outside ticket directory.\n` +
-                  `The resolved path escapes the ticket folder. Write your report to:\n` +
-                  `  ${path.join(resolvedTicketDir, 'task' + taskNum, bn)}\n`,
-              };
-            }
-
-            // Two-branch enforcement:
-            // 1. Block writes at ticket root (no path separator in relPath)
-            // 2. Block writes to wrong task folder (relPath doesn't start with taskN/)
-            if (isWithinTicketDir && !relPath.includes(path.sep)) {
-              // File is at ticket root (no path separator) — block and suggest correct task folder
-              return {
-                blocked: true,
-                file: bn,
-                rule: 'per-task-path',
-                message:
-                  `BLOCKED: Cannot write ${bn} at ticket root.\n` +
-                  `Per-task mode is active for this ticket. Write your report to the task folder instead:\n` +
-                  `  ${path.join(resolvedTicketDir, 'task' + taskNum, bn)}\n`,
-              };
-            } else if (isWithinTicketDir) {
-              // File is in a subdirectory — validate it's the correct task folder
-              const expectedPath = 'task' + taskNum + path.sep + bn;
-              if (relPath !== expectedPath) {
+              // Block writes that escape the ticket directory via traversal
+              if (isEscapingTicketDir) {
                 return {
                   blocked: true,
                   file: bn,
                   rule: 'per-task-path',
                   message:
-                    `BLOCKED: Cannot write ${bn} to wrong task folder.\n` +
-                    `You are working on task ${taskNum}. Write your report to:\n` +
+                    `BLOCKED: Cannot write ${bn} outside ticket directory.\n` +
+                    `The resolved path escapes the ticket folder. Write your report to:\n` +
                     `  ${path.join(resolvedTicketDir, 'task' + taskNum, bn)}\n`,
                 };
               }
-            }
+
+              // Two-branch enforcement:
+              // 1. Block writes at ticket root (no path separator in relPath)
+              // 2. Block writes to wrong task folder (relPath doesn't start with taskN/)
+              if (isWithinTicketDir && !relPath.includes(path.sep)) {
+                // File is at ticket root (no path separator) — block and suggest correct task folder
+                return {
+                  blocked: true,
+                  file: bn,
+                  rule: 'per-task-path',
+                  message:
+                    `BLOCKED: Cannot write ${bn} at ticket root.\n` +
+                    `Per-task mode is active for this ticket. Write your report to the task folder instead:\n` +
+                    `  ${path.join(resolvedTicketDir, 'task' + taskNum, bn)}\n`,
+                };
+              } else if (isWithinTicketDir) {
+                // File is in a subdirectory — validate it's the correct task folder
+                const expectedPath = 'task' + taskNum + path.sep + bn;
+                if (relPath !== expectedPath) {
+                  return {
+                    blocked: true,
+                    file: bn,
+                    rule: 'per-task-path',
+                    message:
+                      `BLOCKED: Cannot write ${bn} to wrong task folder.\n` +
+                      `You are working on task ${taskNum}. Write your report to:\n` +
+                      `  ${path.join(resolvedTicketDir, 'task' + taskNum, bn)}\n`,
+                  };
+                }
+              }
             } // end actualFilePath else
           }
         }

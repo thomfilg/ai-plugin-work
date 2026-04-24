@@ -270,7 +270,8 @@ function completeQA(ticketId, appName, overallResult) {
   }
 
   progress.status = overallResult === 'pass' ? 'completed_pass' : 'completed_fail';
-  progress.accessStatus = overallResult === 'pass' ? AppAccessStatus.PASSED : AppAccessStatus.TEST_FAILED;
+  progress.accessStatus =
+    overallResult === 'pass' ? AppAccessStatus.PASSED : AppAccessStatus.TEST_FAILED;
   progress.completedTime = new Date().toISOString();
   progress.testsInProgress = null;
 

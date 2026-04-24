@@ -183,20 +183,15 @@ function parse(markdown) {
  * @returns {{ valid: boolean, errors: string[] }}
  */
 function validate(parseResult, options) {
-  const minScenarios = (options && options.minScenarios !== undefined)
-    ? options.minScenarios
-    : DEFAULT_MIN_SCENARIOS;
-  const requireTags = (options && options.requireTags !== undefined)
-    ? options.requireTags
-    : DEFAULT_REQUIRED_TAGS;
+  const minScenarios =
+    options && options.minScenarios !== undefined ? options.minScenarios : DEFAULT_MIN_SCENARIOS;
+  const requireTags =
+    options && options.requireTags !== undefined ? options.requireTags : DEFAULT_REQUIRED_TAGS;
 
   const validationErrors = [];
 
   // Count total scenarios across all features
-  const totalScenarios = parseResult.features.reduce(
-    (sum, f) => sum + f.scenarios.length,
-    0
-  );
+  const totalScenarios = parseResult.features.reduce((sum, f) => sum + f.scenarios.length, 0);
 
   if (totalScenarios < minScenarios) {
     validationErrors.push(

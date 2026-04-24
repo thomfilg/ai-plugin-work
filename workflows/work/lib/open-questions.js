@@ -351,7 +351,10 @@ function normalizeResolutions(resolutions) {
  * says `resolved: true`, return it unchanged.
  */
 function flipResolvedLine(line) {
-  return line.replace(/(`resolved:\s*)(false)(\s*`)/i, (_m, pre, _val, post) => `${pre}true${post}`);
+  return line.replace(
+    /(`resolved:\s*)(false)(\s*`)/i,
+    (_m, pre, _val, post) => `${pre}true${post}`
+  );
 }
 
 /**
@@ -459,7 +462,10 @@ function applyResolutions(markdown, resolutions) {
       let indent = '  ';
       for (const bl of blockLines) {
         const m = bl.match(/^(\s{2,})-\s+/);
-        if (m) { indent = m[1]; break; }
+        if (m) {
+          indent = m[1];
+          break;
+        }
       }
       lines.splice(insertionPoint, 0, `${indent}- \`resolved: true\``);
       insertionPoint++; // Resolution line goes AFTER resolved: true

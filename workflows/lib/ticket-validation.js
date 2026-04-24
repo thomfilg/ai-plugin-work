@@ -50,9 +50,7 @@ function validateTicketIdStructured(ticketId) {
     return {
       code: 'INVALID_TICKET_ID',
       message: 'ticketId must be a non-empty string (received empty/whitespace).',
-      remediation: [
-        'Pass a ticket id like "GH-219" or "PROJ-123".',
-      ],
+      remediation: ['Pass a ticket id like "GH-219" or "PROJ-123".'],
     };
   }
 
@@ -112,9 +110,12 @@ function validateTicketIdStructured(ticketId) {
       return {
         code: 'INVALID_TICKET_ID',
         message: `ticketId ${JSON.stringify(ticketId)} has invalid suffix after "/".`,
-        remediation: ['Either remove the trailing "/" or add a valid suffix like "PROJ-123/phase1".'],
+        remediation: [
+          'Either remove the trailing "/" or add a valid suffix like "PROJ-123/phase1".',
+        ],
       };
-    } } // end suffix validation — rejects empty, dot, and unsafe-char suffixes
+    }
+  } // end suffix validation — rejects empty, dot, and unsafe-char suffixes
 
   return null;
 }
@@ -156,7 +157,8 @@ function sanitizeTicketId(ticketId) {
   } catch (err) {
     if (!err || err.code !== 'MODULE_NOT_FOUND') throw err; // only swallow missing config
   }
-  return ticketId; }
+  return ticketId;
+}
 
 // ─── TASKS_BASE resolution ───────────────────────────────────────────────────
 
@@ -175,9 +177,7 @@ function resolveTasksBase() {
   } catch (err) {
     if (!err || err.code !== 'MODULE_NOT_FOUND') throw err; // only swallow missing config
   }
-  throw new Error(
-    'TASKS_BASE is not configured. Set TASKS_BASE (or WORKTREES_BASE in .envrc).'
-  );
+  throw new Error('TASKS_BASE is not configured. Set TASKS_BASE (or WORKTREES_BASE in .envrc).');
 }
 
 /**

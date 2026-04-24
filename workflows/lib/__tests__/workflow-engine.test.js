@@ -663,7 +663,10 @@ describe('verifyStep callback (GH-260)', () => {
         { source: 'step_c', targets: ['step_d'] },
         { source: 'step_d', targets: [] },
       ],
-      verifyStep: () => { called = true; return { blocked: true }; },
+      verifyStep: () => {
+        called = true;
+        return { blocked: true };
+      },
     });
     const stateInstance = new WorkflowState(wfBack.name, wfBack.stateDir);
     const steps = wfBack.steps.map((s) => s.id);
@@ -693,7 +696,9 @@ describe('verifyStep callback (GH-260)', () => {
   it('blocks forward transition when verifyStep throws an error', () => {
     const wf = mockWorkflow({
       stateDir,
-      verifyStep: () => { throw new Error('verifyStep exploded'); },
+      verifyStep: () => {
+        throw new Error('verifyStep exploded');
+      },
     });
     const stateInstance = new WorkflowState(wf.name, wf.stateDir);
     const steps = wf.steps.map((s) => s.id);

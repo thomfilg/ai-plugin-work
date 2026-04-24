@@ -16,7 +16,9 @@
 const fs = require('fs');
 const path = require('path');
 const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
-const { createArtifactProtector } = require(path.join(__dirname, '..', '..', 'lib', 'protect-artifact-files'));
+const { createArtifactProtector } = require(
+  path.join(__dirname, '..', '..', 'lib', 'protect-artifact-files')
+);
 
 const ALLOWED_STEPS = new Set(['tasks', 'task_review']);
 
@@ -28,25 +30,35 @@ const ALLOWED_STEPS = new Set(['tasks', 'task_review']);
  */
 function getTicketId(hookData) {
   // Use TICKET_ID env var if set, otherwise derive from branch/cwd
-  const raw = process.env.TICKET_ID || (() => {
-    try {
-      const { getCurrentTaskId } = require(path.join(__dirname, '..', '..', 'lib', 'scripts', 'get-ticket-id'));
-      return getCurrentTaskId() || null;
-    } catch { return null; }
-  })();
+  const raw =
+    process.env.TICKET_ID ||
+    (() => {
+      try {
+        const { getCurrentTaskId } = require(
+          path.join(__dirname, '..', '..', 'lib', 'scripts', 'get-ticket-id')
+        );
+        return getCurrentTaskId() || null;
+      } catch {
+        return null;
+      }
+    })();
   if (!raw) return null;
   // Normalize (e.g., #99 → GH-99)
   let ticketId;
   try {
     ticketId = require(path.join(__dirname, '..', '..', 'lib', 'config')).safeTicketId(raw);
-  } catch { ticketId = raw; }
+  } catch {
+    ticketId = raw;
+  }
   // Fail-open: if work state doesn't exist, return null (no ticket context → allow)
   try {
     const getConfig = require(path.join(__dirname, '..', '..', 'lib', 'get-config'));
     const tasksBase = getConfig.require('TASKS_BASE');
     const statePath = path.join(tasksBase, ticketId, '.work-state.json');
     if (!fs.existsSync(statePath)) return null;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
   return ticketId;
 }
 
@@ -97,11 +109,16 @@ async function main() {
   const hookData = JSON.parse(input);
   const toolName = hookData.tool_name;
   const toolInput = hookData.tool_input || {};
-  const cmd = (toolInput.command || '');
+  const cmd = toolInput.command || '';
 
   // Additional Bash vector: resolve relative paths against cwd
   const ticketId = getTicketId(hookData);
-  if (toolName === 'Bash' && cmd.includes('tasks.md') && ticketId && !cmd.includes('/' + ticketId + '/')) {
+  if (
+    toolName === 'Bash' &&
+    cmd.includes('tasks.md') &&
+    ticketId &&
+    !cmd.includes('/' + ticketId + '/')
+  ) {
     try {
       const cwd = process.cwd();
       const getConfig = require(path.join(__dirname, '..', '..', 'lib', 'get-config'));
@@ -110,11 +127,17 @@ async function main() {
         // We're inside the ticket directory — relative tasks.md is ticket-scoped
         const step = getStepInProgress(ticketId);
         if (!ALLOWED_STEPS.has(step)) {
-          process.stderr.write('BLOCKED: Bash write to tasks.md via relative path during ' + (step || 'unknown') + ' step.\n');
+          process.stderr.write(
+            'BLOCKED: Bash write to tasks.md via relative path during ' +
+              (step || 'unknown') +
+              ' step.\n'
+          );
           process.exit(2);
         }
       }
-    } catch { /* fail-open */ }
+    } catch {
+      /* fail-open */
+    }
   }
 
   const result = protector.check(toolName, toolInput, hookData);

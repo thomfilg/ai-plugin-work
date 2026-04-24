@@ -233,7 +233,11 @@ describe('validateTaskGraph (R4 — pure graph validator)', () => {
     ]);
     assert.equal(result.valid, false);
     const dupErrors = result.errors.filter((e) => e.code === 'DUPLICATE_TASK_NUM');
-    assert.equal(dupErrors.length, 2, 'should report one DUPLICATE_TASK_NUM per duplicate occurrence');
+    assert.equal(
+      dupErrors.length,
+      2,
+      'should report one DUPLICATE_TASK_NUM per duplicate occurrence'
+    );
   });
 });
 
@@ -350,7 +354,10 @@ describe('initTasksMeta — parseTasks output + graph validation (R3, R4, R16)',
       { num: 1, dependencies: [] },
     ]);
     assert.ok(result.error, 'must return error for duplicate task numbers');
-    assert.ok(result.error.includes('Duplicate'), `error message must mention duplicates: ${result.error}`);
+    assert.ok(
+      result.error.includes('Duplicate'),
+      `error message must mention duplicates: ${result.error}`
+    );
 
     const state = workState.loadState(TICKET);
     assert.equal(state.tasksMeta, undefined, 'duplicate nums must not reach disk');
@@ -402,10 +409,7 @@ describe('initTasksMeta — parseTasks output + graph validation (R3, R4, R16)',
         ],
       },
     };
-    fs.writeFileSync(
-      path.join(taskDir, '.work-state.json'),
-      JSON.stringify(legacyState, null, 2)
-    );
+    fs.writeFileSync(path.join(taskDir, '.work-state.json'), JSON.stringify(legacyState, null, 2));
 
     // loadState must not throw on the missing fields (R16)
     const loaded = workState.loadState(TICKET);
@@ -502,10 +506,7 @@ describe('canStart(ticketId, taskNum) — pure dependency readiness (R3, R16)', 
         tasks: [{ id: 'task_1', status: 'pending', dependencies: [42] }],
       },
     };
-    fs.writeFileSync(
-      path.join(taskDir, '.work-state.json'),
-      JSON.stringify(state, null, 2)
-    );
+    fs.writeFileSync(path.join(taskDir, '.work-state.json'), JSON.stringify(state, null, 2));
 
     assert.equal(
       workState.canStart(TICKET, 1),
@@ -536,10 +537,7 @@ describe('canStart(ticketId, taskNum) — pure dependency readiness (R3, R16)', 
         ],
       },
     };
-    fs.writeFileSync(
-      path.join(taskDir, '.work-state.json'),
-      JSON.stringify(state, null, 2)
-    );
+    fs.writeFileSync(path.join(taskDir, '.work-state.json'), JSON.stringify(state, null, 2));
 
     // Documented R16 default: missing dependencies field ⇒ treat as empty deps
     // ⇒ canStart returns true for any task (sequential orchestrator-driven
@@ -591,9 +589,7 @@ describe('canStartFromState(state, taskNum) — pure readiness from loaded state
   it('returns true when task has no dependencies', () => {
     const state = {
       tasksMeta: {
-        tasks: [
-          { id: 'task_1', status: 'pending', dependencies: [] },
-        ],
+        tasks: [{ id: 'task_1', status: 'pending', dependencies: [] }],
       },
     };
     assert.equal(workState.canStartFromState(state, 1), true);
@@ -630,9 +626,7 @@ describe('canStartFromState(state, taskNum) — pure readiness from loaded state
   it('returns false for completed task', () => {
     const state = {
       tasksMeta: {
-        tasks: [
-          { id: 'task_1', status: 'completed', dependencies: [] },
-        ],
+        tasks: [{ id: 'task_1', status: 'completed', dependencies: [] }],
       },
     };
     assert.equal(workState.canStartFromState(state, 1), false);
@@ -641,9 +635,7 @@ describe('canStartFromState(state, taskNum) — pure readiness from loaded state
   it('returns true for pre-IDEA2 tasks without dependencies field (R16)', () => {
     const state = {
       tasksMeta: {
-        tasks: [
-          { id: 'task_1', status: 'pending' },
-        ],
+        tasks: [{ id: 'task_1', status: 'pending' }],
       },
     };
     assert.equal(workState.canStartFromState(state, 1), true);

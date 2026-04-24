@@ -83,10 +83,7 @@ describe('safeExec — error handling', () => {
 describe('safeExec — stderr suppression', () => {
   it('does not leak stderr to parent process', () => {
     // Node script writes to both stdout and stderr; safeExec must return only stdout
-    const result = safeExec(nodePath, [
-      '-e',
-      'console.log("ok"); console.error("err")',
-    ]);
+    const result = safeExec(nodePath, ['-e', 'console.log("ok"); console.error("err")']);
     assert.equal(result, 'ok');
   });
 });
@@ -181,11 +178,10 @@ describe('safeExec — custom options', () => {
   }); // end cwd test — no hardcoded paths anywhere in this test body
 
   it('returns fallback when command times out', () => {
-    const result = safeExec(
-      nodePath,
-      ['-e', 'setTimeout(() => {}, 10000)'],
-      { timeout: 1, fallback: 'timed-out' },
-    );
+    const result = safeExec(nodePath, ['-e', 'setTimeout(() => {}, 10000)'], {
+      timeout: 1,
+      fallback: 'timed-out',
+    });
     assert.equal(result, 'timed-out');
   });
 });

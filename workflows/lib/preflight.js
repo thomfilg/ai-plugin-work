@@ -177,7 +177,9 @@ function runPreflight(context, options) {
         denied = true;
         if (Array.isArray(res.reasons) && res.reasons.length > 0) {
           for (const r of res.reasons) reasons.push(r);
-        } else { reasons.push('PREFLIGHT_DENIED'); } // synthetic reason when check provides none
+        } else {
+          reasons.push('PREFLIGHT_DENIED');
+        } // synthetic reason when check provides none
         if (Array.isArray(res.remediation)) {
           for (const r of res.remediation) remediation.push(r);
         }

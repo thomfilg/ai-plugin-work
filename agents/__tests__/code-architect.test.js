@@ -192,13 +192,9 @@ describe('Output Format item 2', () => {
     // Find numbered items only within the "### Output Format" section
     const ofIdx = lines.findIndex((l) => l.includes('### Output Format'));
     assert.ok(ofIdx > -1);
-    const nextHeadingOffset = lines
-      .slice(ofIdx + 1)
-      .findIndex((l) => l.match(/^###\s+/));
+    const nextHeadingOffset = lines.slice(ofIdx + 1).findIndex((l) => l.match(/^###\s+/));
     const sectionEnd = nextHeadingOffset === -1 ? lines.length : ofIdx + 1 + nextHeadingOffset;
-    const ofItems = lines
-      .slice(ofIdx, sectionEnd)
-      .filter((l) => l.match(/^\d+\.\s+\*\*/));
+    const ofItems = lines.slice(ofIdx, sectionEnd).filter((l) => l.match(/^\d+\.\s+\*\*/));
     assert.equal(ofItems.length, 9, 'Output Format should have 9 items');
   });
 });

@@ -3,9 +3,7 @@
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 
-const {
-  buildAccountabilityEntries,
-} = require('../follow-up-pr.js');
+const { buildAccountabilityEntries } = require('../follow-up-pr.js');
 
 describe('buildAccountabilityEntries', () => {
   it('marks blocking comments as addressed', () => {
@@ -20,9 +18,7 @@ describe('buildAccountabilityEntries', () => {
 
   it('marks deduplicated comments as addressed', () => {
     const blocking = [];
-    const nonBlocking = [
-      { id: 2, author: 'bob', body: 'Nit: rename var', deduplicated: true },
-    ];
+    const nonBlocking = [{ id: 2, author: 'bob', body: 'Nit: rename var', deduplicated: true }];
     const entries = buildAccountabilityEntries(blocking, nonBlocking);
 
     assert.equal(entries.length, 1);
@@ -32,9 +28,7 @@ describe('buildAccountabilityEntries', () => {
 
   it('marks non-blocking non-deduplicated comments as acknowledged (not deferred)', () => {
     const blocking = [];
-    const nonBlocking = [
-      { id: 3, author: 'carol', body: 'Consider renaming' },
-    ];
+    const nonBlocking = [{ id: 3, author: 'carol', body: 'Consider renaming' }];
     const entries = buildAccountabilityEntries(blocking, nonBlocking);
 
     assert.equal(entries.length, 1);
@@ -79,7 +73,10 @@ describe('review-accountability error handling', () => {
     // Capture stderr output
     const stderrChunks = [];
     const origWrite = process.stderr.write;
-    process.stderr.write = (chunk) => { stderrChunks.push(String(chunk)); return true; };
+    process.stderr.write = (chunk) => {
+      stderrChunks.push(String(chunk));
+      return true;
+    };
 
     try {
       // Simulate the catch block behavior from follow-up-pr.js
@@ -87,7 +84,7 @@ describe('review-accountability error handling', () => {
       // This mirrors the exact catch block at lines 1476-1480
       process.stderr.write(
         `WARNING: Failed to write review-accountability.json: ${err.message}\n` +
-        `The follow_up → ci transition gate will block until this file exists.\n`
+          `The follow_up → ci transition gate will block until this file exists.\n`
       );
 
       const output = stderrChunks.join('');

@@ -493,9 +493,6 @@ describe('allocateWorkerSlot — per-ticket isolation', () => {
     const result = workState.allocateWorkerSlot('A/B/C');
     assert.ok(result.error, 'must return an error for multiple slashes');
     assert.equal(result.error.code, 'INVALID_TICKET_ID');
-    assert.ok(
-      result.error.message.includes('/'),
-      'error message must mention the slash issue'
-    );
+    assert.ok(result.error.message.includes('/'), 'error message must mention the slash issue');
   });
 });

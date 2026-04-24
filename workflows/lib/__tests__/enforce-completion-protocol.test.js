@@ -216,15 +216,22 @@ describe('enforce-completion-protocol hook', () => {
           message: {
             role: 'assistant',
             content: [
-              { type: 'tool_use', name: 'Edit', input: { file_path: `${GIT_ROOT}/apps/as-dashboard-worker/src/index.ts` } },
+              {
+                type: 'tool_use',
+                name: 'Edit',
+                input: { file_path: `${GIT_ROOT}/apps/as-dashboard-worker/src/index.ts` },
+              },
             ],
           },
         },
       ]);
-      const { result } = await runHook({
-        transcript_path: tp,
-        assistant_message: { content: 'The implementation is complete.' },
-      }, { SESSION_GUARD_DIR: sessionDir, SESSION_GUARD_TICKET_ID: 'GH-250' });
+      const { result } = await runHook(
+        {
+          transcript_path: tp,
+          assistant_message: { content: 'The implementation is complete.' },
+        },
+        { SESSION_GUARD_DIR: sessionDir, SESSION_GUARD_TICKET_ID: 'GH-250' }
+      );
       assert.strictEqual(result.decision, 'approve');
     });
 
@@ -240,15 +247,22 @@ describe('enforce-completion-protocol hook', () => {
           message: {
             role: 'assistant',
             content: [
-              { type: 'tool_use', name: 'Edit', input: { file_path: `${GIT_ROOT}/apps/as-dashboard-worker/src/index.ts` } },
+              {
+                type: 'tool_use',
+                name: 'Edit',
+                input: { file_path: `${GIT_ROOT}/apps/as-dashboard-worker/src/index.ts` },
+              },
             ],
           },
         },
       ]);
-      const { result } = await runHook({
-        transcript_path: tp,
-        assistant_message: { content: 'The implementation is complete.' },
-      }, { SESSION_GUARD_DIR: sessionDir });
+      const { result } = await runHook(
+        {
+          transcript_path: tp,
+          assistant_message: { content: 'The implementation is complete.' },
+        },
+        { SESSION_GUARD_DIR: sessionDir }
+      );
       assert.strictEqual(result.decision, 'block');
     });
 
@@ -260,15 +274,22 @@ describe('enforce-completion-protocol hook', () => {
           message: {
             role: 'assistant',
             content: [
-              { type: 'tool_use', name: 'Edit', input: { file_path: `${GIT_ROOT}/apps/as-dashboard-worker/src/index.ts` } },
+              {
+                type: 'tool_use',
+                name: 'Edit',
+                input: { file_path: `${GIT_ROOT}/apps/as-dashboard-worker/src/index.ts` },
+              },
             ],
           },
         },
       ]);
-      const { result } = await runHook({
-        transcript_path: tp,
-        assistant_message: { content: 'The implementation is complete.' },
-      }, { SESSION_GUARD_DIR: sessionDir, SESSION_GUARD_TICKET_ID: 'GH-250' });
+      const { result } = await runHook(
+        {
+          transcript_path: tp,
+          assistant_message: { content: 'The implementation is complete.' },
+        },
+        { SESSION_GUARD_DIR: sessionDir, SESSION_GUARD_TICKET_ID: 'GH-250' }
+      );
       assert.strictEqual(result.decision, 'block');
     });
 
@@ -280,15 +301,22 @@ describe('enforce-completion-protocol hook', () => {
           message: {
             role: 'assistant',
             content: [
-              { type: 'tool_use', name: 'Edit', input: { file_path: `${GIT_ROOT}/apps/as-dashboard-worker/src/index.ts` } },
+              {
+                type: 'tool_use',
+                name: 'Edit',
+                input: { file_path: `${GIT_ROOT}/apps/as-dashboard-worker/src/index.ts` },
+              },
             ],
           },
         },
       ]);
-      const { result } = await runHook({
-        transcript_path: tp,
-        assistant_message: { content: 'The implementation is complete.' },
-      }, { SESSION_GUARD_DIR: sessionDir, SESSION_GUARD_TICKET_ID: 'GH-250' });
+      const { result } = await runHook(
+        {
+          transcript_path: tp,
+          assistant_message: { content: 'The implementation is complete.' },
+        },
+        { SESSION_GUARD_DIR: sessionDir, SESSION_GUARD_TICKET_ID: 'GH-250' }
+      );
       assert.strictEqual(result.decision, 'block');
     });
 
@@ -300,15 +328,22 @@ describe('enforce-completion-protocol hook', () => {
           message: {
             role: 'assistant',
             content: [
-              { type: 'tool_use', name: 'Edit', input: { file_path: `${GIT_ROOT}/apps/as-dashboard-worker/src/index.ts` } },
+              {
+                type: 'tool_use',
+                name: 'Edit',
+                input: { file_path: `${GIT_ROOT}/apps/as-dashboard-worker/src/index.ts` },
+              },
             ],
           },
         },
       ]);
-      const { result } = await runHook({
-        transcript_path: tp,
-        assistant_message: { content: 'The implementation is complete.' },
-      }, { SESSION_GUARD_DIR: sessionDir, SESSION_GUARD_TICKET_ID: 'GH-250' });
+      const { result } = await runHook(
+        {
+          transcript_path: tp,
+          assistant_message: { content: 'The implementation is complete.' },
+        },
+        { SESSION_GUARD_DIR: sessionDir, SESSION_GUARD_TICKET_ID: 'GH-250' }
+      );
       assert.strictEqual(result.decision, 'block');
     });
   });

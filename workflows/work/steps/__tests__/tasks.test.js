@@ -95,7 +95,6 @@ describe('tasks step (GH-253)', () => {
   });
 
   it('DEFERs when tasks.md already exists (hasTasks=true)', () => {
-
     const { add, entries } = makeAdd();
     tasksStep(add, makeState({ hasTasks: true }), makeCtx());
     assert.equal(entries.length, 1);
@@ -105,7 +104,6 @@ describe('tasks step (GH-253)', () => {
   });
 
   it('RUNs when spec.md exists and tasks.md is missing', () => {
-
     const { add, entries } = makeAdd();
     const ctx = makeCtx({ fileExists: () => true });
     tasksStep(add, makeState({ hasTasks: false }), ctx);
@@ -115,7 +113,6 @@ describe('tasks step (GH-253)', () => {
   });
 
   it('DEFERs when spec.md is missing (cannot generate tasks)', () => {
-
     const { add, entries } = makeAdd();
     const ctx = makeCtx({ fileExists: () => false });
     tasksStep(add, makeState({ hasTasks: false }), ctx);
@@ -136,7 +133,6 @@ describe('tasks step (GH-253)', () => {
   });
 
   it('RUNs with correct agent type and prompt', () => {
-
     const { add, entries } = makeAdd();
     const ctx = makeCtx({ fileExists: () => true });
     tasksStep(add, makeState({ hasTasks: false }), ctx);

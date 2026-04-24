@@ -257,16 +257,19 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
             // Exception mode: config-only or mechanical changes that skip TDD
             // Accept both legacy string format and structured { category, reason } format
             if (typeof state.exception === 'string' && state.exception.trim() !== '') return true;
-            if (
-              typeof state.exception === 'object' &&
-              state.exception !== null
-            ) {
+            if (typeof state.exception === 'object' && state.exception !== null) {
               // If exception-validator fails to load, the outer catch returns false (fail-closed)
-              const { ALLOWED_CATEGORIES } = require(path.join(__dirname, '..', 'work-implement', 'exception-validator'));
+              const { ALLOWED_CATEGORIES } = require(
+                path.join(__dirname, '..', 'work-implement', 'exception-validator')
+              );
               const cat = state.exception.category;
               const reason = state.exception.reason;
-              return typeof cat === 'string' && ALLOWED_CATEGORIES.includes(cat) &&
-                typeof reason === 'string' && reason.trim() !== '';
+              return (
+                typeof cat === 'string' &&
+                ALLOWED_CATEGORIES.includes(cat) &&
+                typeof reason === 'string' &&
+                reason.trim() !== ''
+              );
             }
             if (!Array.isArray(state.cycles) || state.cycles.length === 0) return false;
             // At least one cycle must have both red and green evidence
@@ -475,7 +478,8 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
               // GH-285: userApproval requirement removed per brief resolution —
               // disposition + reason fields are sufficient proof of comment triage.
               const validDispositions = ['addressed', 'acknowledged', 'outdated'];
-              if (!entries.every((e) => validDispositions.includes(e.disposition) && e.reason)) return false;
+              if (!entries.every((e) => validDispositions.includes(e.disposition) && e.reason))
+                return false;
             }
 
             return true;

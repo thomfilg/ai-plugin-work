@@ -45,10 +45,7 @@ function createStateFixture(ticketId, stepStatus = {}) {
     lastUpdate: new Date().toISOString(),
   };
 
-  fs.writeFileSync(
-    path.join(ticketDir, '.work-state.json'),
-    JSON.stringify(state, null, 2)
-  );
+  fs.writeFileSync(path.join(ticketDir, '.work-state.json'), JSON.stringify(state, null, 2));
 
   return {
     tasksBase,
@@ -209,7 +206,11 @@ describe('protect-tasks-md hook', () => {
       'GH-258',
       { implement: 'in_progress', tasks: 'completed', task_review: 'pending' }
     );
-    assert.strictEqual(code, 2, `Expected exit 2 (block) for GH-258, got ${code}. stderr: ${stderr}`);
+    assert.strictEqual(
+      code,
+      2,
+      `Expected exit 2 (block) for GH-258, got ${code}. stderr: ${stderr}`
+    );
     assert.ok(stderr.length > 0, 'Expected stderr message explaining block');
   });
 
@@ -242,7 +243,11 @@ describe('protect-tasks-md hook', () => {
         },
         { TASKS_BASE: fixture.tasksBase, TICKET_ID: 'GH-99' }
       );
-      assert.strictEqual(code, 2, `Expected exit 2 (block) for Bash redirect to tasks.md, got ${code}. stderr: ${stderr}`);
+      assert.strictEqual(
+        code,
+        2,
+        `Expected exit 2 (block) for Bash redirect to tasks.md, got ${code}. stderr: ${stderr}`
+      );
     } finally {
       fixture.cleanup();
     }
@@ -267,7 +272,11 @@ describe('protect-tasks-md hook', () => {
           TICKET_PROVIDER: 'github', // Required for #N → GH-N normalization
         }
       );
-      assert.strictEqual(code, 2, `Should block even when TICKET_ID needs normalization (#99 → GH-99), got ${code}. stderr: ${stderr}`);
+      assert.strictEqual(
+        code,
+        2,
+        `Should block even when TICKET_ID needs normalization (#99 → GH-99), got ${code}. stderr: ${stderr}`
+      );
     } finally {
       fixture.cleanup();
     }

@@ -85,7 +85,7 @@ function getImpactedApps() {
   // to determine which apps may be affected (replaces hardcoded WEB_APPS list)
   const manifestApps = discoverApps();
   if (apps.size === 0 && packages.size > 0 && manifestApps.length > 0) {
-    return manifestApps.map(a => a.name).sort();
+    return manifestApps.map((a) => a.name).sort();
   }
 
   return Array.from(apps).sort();
@@ -98,7 +98,7 @@ function getImpactedApps() {
  */
 function getQaAgentForApp(appName, manifestApps) {
   const apps = manifestApps || discoverApps();
-  const entry = apps.find(a => a.name === appName);
+  const entry = apps.find((a) => a.name === appName);
   const appType = entry?.appType || 'web';
 
   switch (appType) {

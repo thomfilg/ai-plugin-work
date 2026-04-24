@@ -79,7 +79,9 @@ function validateQAReport(filePath, appName) {
       valid: false,
       infrastructureFailure: false,
       accessFailed: true,
-      issues: [`App access failed for ${appName} — app unreachable (infrastructure issue, not a test failure)`],
+      issues: [
+        `App access failed for ${appName} — app unreachable (infrastructure issue, not a test failure)`,
+      ],
       failed: false, // Not a test failure
     };
   }

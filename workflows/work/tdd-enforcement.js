@@ -65,9 +65,10 @@ Rules:
  */
 function readTddEvidence(tasksBase, ticketId, stepId, taskNum) {
   // taskSegment() validates taskNum internally (throws on non-positive-integer)
-  const phasePath = taskNum != null
-    ? path.join(tasksBase, ticketId, taskSegment(taskNum), 'tdd-phase.json')
-    : path.join(tasksBase, ticketId, 'tdd-phase.json'); // root fallback for non-task flows
+  const phasePath =
+    taskNum != null
+      ? path.join(tasksBase, ticketId, taskSegment(taskNum), 'tdd-phase.json')
+      : path.join(tasksBase, ticketId, 'tdd-phase.json'); // root fallback for non-task flows
   try {
     if (!fs.existsSync(phasePath)) return { exists: false, parseError: false, evidence: null };
   } catch {
@@ -102,14 +103,26 @@ function validateTddEvidence(evidence) {
     if (typeof evidence.exception === 'object' && evidence.exception !== null) {
       const { ALLOWED_CATEGORIES } = require('../work-implement/exception-validator');
       const cat = evidence.exception.category;
-      if (typeof cat === 'string' && ALLOWED_CATEGORIES.includes(cat)) { // GH-258: validated against exception-validator.ALLOWED_CATEGORIES
+      if (typeof cat === 'string' && ALLOWED_CATEGORIES.includes(cat)) {
+        // GH-258: validated against exception-validator.ALLOWED_CATEGORIES
         const reason = evidence.exception.reason;
         if (typeof reason !== 'string' || !reason.trim()) {
-          return { valid: false, reason: 'Exception reason is required and must be a non-empty string.' };
+          return {
+            valid: false,
+            reason: 'Exception reason is required and must be a non-empty string.',
+          };
         }
         return { valid: true, reason: '' };
       }
-      return { valid: false, reason: 'Invalid exception category: "' + cat + '". Allowed: ' + ALLOWED_CATEGORIES.join(', ') + '.' };
+      return {
+        valid: false,
+        reason:
+          'Invalid exception category: "' +
+          cat +
+          '". Allowed: ' +
+          ALLOWED_CATEGORIES.join(', ') +
+          '.',
+      };
     }
     // exception exists but is neither string nor valid object
     return { valid: false, reason: 'Exception field has invalid format' };

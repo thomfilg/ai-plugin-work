@@ -41,11 +41,7 @@ const AI_REQUEST_PREFIX = 'ai-request-';
  * @throws {Error} if taskNum is not a positive integer
  */
 function taskSegment(taskNum) {
-  if (
-    typeof taskNum !== 'number' ||
-    !Number.isInteger(taskNum) ||
-    taskNum < 1
-  ) {
+  if (typeof taskNum !== 'number' || !Number.isInteger(taskNum) || taskNum < 1) {
     throw new Error(
       `Invalid taskNum: expected positive integer, received ${JSON.stringify(taskNum)}`
     );
@@ -104,18 +100,20 @@ function allocateOutputFolder(ticketId, context = {}) {
 
   // ── Out-of-flow allocation ───────────────────────────────────────────────
   if (context.flow === 'out-of-flow') {
-    const isAi =
-      context.origin === 'ai-subtask' || context.origin === 'ai';
+    const isAi = context.origin === 'ai-subtask' || context.origin === 'ai';
 
     if (isAi) {
       if (!context.counters || context.counters.aiRequestNext == null) {
         throw new Error(
           'Out-of-flow AI allocation requires counters.aiRequestNext. ' +
-          'Task 10 will wire the real .request-index.json counter.'
+            'Task 10 will wire the real .request-index.json counter.'
         );
       }
       const n = context.counters.aiRequestNext;
-      if (!Number.isInteger(n) || n < 1) throw new Error(`Invalid aiRequestNext counter: expected positive integer, got ${String(n)}`);
+      if (!Number.isInteger(n) || n < 1)
+        throw new Error(
+          `Invalid aiRequestNext counter: expected positive integer, got ${String(n)}`
+        );
       const seg = `${AI_REQUEST_PREFIX}${n}`;
       return {
         kind: 'out-of-flow-ai',
@@ -129,11 +127,14 @@ function allocateOutputFolder(ticketId, context = {}) {
     if (!context.counters || context.counters.userRequestNext == null) {
       throw new Error(
         'Out-of-flow user allocation requires counters.userRequestNext. ' +
-        'Task 10 will wire the real .request-index.json counter.'
+          'Task 10 will wire the real .request-index.json counter.'
       );
     }
     const n = context.counters.userRequestNext;
-    if (!Number.isInteger(n) || n < 1) throw new Error(`Invalid userRequestNext counter: expected positive integer, got ${String(n)}`);
+    if (!Number.isInteger(n) || n < 1)
+      throw new Error(
+        `Invalid userRequestNext counter: expected positive integer, got ${String(n)}`
+      );
     const seg = `${USER_REQUEST_PREFIX}${n}`;
     return {
       kind: 'out-of-flow-user',
@@ -145,7 +146,9 @@ function allocateOutputFolder(ticketId, context = {}) {
 
   // ── Reject unknown flow values ───────────────────────────────────────────
   if (context.flow != null && context.flow !== 'in-flow' && context.flow !== 'out-of-flow') {
-    throw new Error(`Unknown flow type: ${String(context.flow)}. Expected "in-flow", "out-of-flow", or undefined.`);
+    throw new Error(
+      `Unknown flow type: ${String(context.flow)}. Expected "in-flow", "out-of-flow", or undefined.`
+    );
   }
 
   // ── Legacy-root fallback ─────────────────────────────────────────────────
@@ -155,7 +158,8 @@ function allocateOutputFolder(ticketId, context = {}) {
     segment: null,
     root: ticketRoot,
     ticketRoot,
-  }; } // end allocateOutputFolder
+  };
+} // end allocateOutputFolder
 
 module.exports = {
   allocateOutputFolder,

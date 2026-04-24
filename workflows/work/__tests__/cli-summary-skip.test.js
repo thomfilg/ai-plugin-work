@@ -17,10 +17,7 @@ describe('CLI summary cleanup (GH-245 Task 7)', () => {
   describe('cli.js summary object', () => {
     it('should not include "skip" key in summary', () => {
       // Read cli.js source and check the summary object construction
-      const cliSource = fs.readFileSync(
-        path.join(__dirname, '..', 'cli.js'),
-        'utf-8'
-      );
+      const cliSource = fs.readFileSync(path.join(__dirname, '..', 'cli.js'), 'utf-8');
 
       // The summary object should not have a skip counter
       // Check for `skip:` in the summary construction block (lines ~169-179)
@@ -28,17 +25,11 @@ describe('CLI summary cleanup (GH-245 Task 7)', () => {
       assert.ok(summaryBlock, 'Should find summary assignment block');
 
       // Should not contain skip key
-      assert.ok(
-        !summaryBlock[0].includes("skip:"),
-        'Summary should not contain "skip:" counter'
-      );
+      assert.ok(!summaryBlock[0].includes('skip:'), 'Summary should not contain "skip:" counter');
     });
 
     it('should not include "stepsSkipped" key in summary', () => {
-      const cliSource = fs.readFileSync(
-        path.join(__dirname, '..', 'cli.js'),
-        'utf-8'
-      );
+      const cliSource = fs.readFileSync(path.join(__dirname, '..', 'cli.js'), 'utf-8');
 
       const summaryBlock = cliSource.match(/result\.summary\s*=\s*\{[\s\S]*?\};/);
       assert.ok(summaryBlock, 'Should find summary assignment block');
@@ -50,10 +41,7 @@ describe('CLI summary cleanup (GH-245 Task 7)', () => {
     });
 
     it('summary should still contain run, defer, and pending counters', () => {
-      const cliSource = fs.readFileSync(
-        path.join(__dirname, '..', 'cli.js'),
-        'utf-8'
-      );
+      const cliSource = fs.readFileSync(path.join(__dirname, '..', 'cli.js'), 'utf-8');
 
       const summaryBlock = cliSource.match(/result\.summary\s*=\s*\{[\s\S]*?\};/);
       assert.ok(summaryBlock, 'Should find summary assignment block');
@@ -66,10 +54,7 @@ describe('CLI summary cleanup (GH-245 Task 7)', () => {
 
   describe('comment references to SKIP', () => {
     it('workflow-definition.js should not reference "SKIP/RUN" in comments', () => {
-      const source = fs.readFileSync(
-        path.join(__dirname, '..', 'workflow-definition.js'),
-        'utf-8'
-      );
+      const source = fs.readFileSync(path.join(__dirname, '..', 'workflow-definition.js'), 'utf-8');
 
       // Line 193 originally has "SKIP/RUN" -- should be changed to "DEFER/RUN"
       assert.ok(
@@ -79,10 +64,7 @@ describe('CLI summary cleanup (GH-245 Task 7)', () => {
     });
 
     it('step-registry.js should not reference "SKIP/RUN/DEFER" in comments', () => {
-      const source = fs.readFileSync(
-        path.join(__dirname, '..', 'step-registry.js'),
-        'utf-8'
-      );
+      const source = fs.readFileSync(path.join(__dirname, '..', 'step-registry.js'), 'utf-8');
 
       // Line 94 originally has "SKIP/RUN/DEFER" -- should be changed to "RUN/DEFER"
       assert.ok(

@@ -183,7 +183,8 @@ function loadEnforcementContext(ticketId, options = {}) {
       origin = 'user';
       error = {
         code: 'AMBIGUOUS_SUBTASK',
-        message: `--subtask flag is set but no active subtask state found for ticket "${safeId}". ` +
+        message:
+          `--subtask flag is set but no active subtask state found for ticket "${safeId}". ` +
           'Cannot determine ai-subtask origin without a resolvable .work-state-*-subtask-*.json file.',
         remediation: [
           'Initialize a subtask first: node work-state.js init-subtask ' + safeId,

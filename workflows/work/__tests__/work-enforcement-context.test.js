@@ -312,7 +312,11 @@ describe('loadEnforcementContext — R15 ticket id validation', () => {
     const ctx = loadEnforcementContext('/etc/passwd');
 
     // After normalization to "etc-passwd", the ID is safe — no error
-    assert.equal(ctx.error, null, 'slash-containing input that normalizes safely should not be rejected');
+    assert.equal(
+      ctx.error,
+      null,
+      'slash-containing input that normalizes safely should not be rejected'
+    );
     assert.equal(ctx.ticketId, 'etc-passwd');
   });
 
@@ -403,10 +407,7 @@ describe('loadEnforcementContext — no transcript / no grep (R1)', () => {
       assert.equal(ctx.origin, 'workflow');
 
       for (const p of spy.calls.reads) {
-        assert.ok(
-          !/\.jsonl$/i.test(p),
-          `adapter must not read transcript jsonl files — saw: ${p}`
-        );
+        assert.ok(!/\.jsonl$/i.test(p), `adapter must not read transcript jsonl files — saw: ${p}`);
         assert.ok(!/transcript/i.test(p), `adapter must not read transcript files — saw: ${p}`);
       }
       for (const e of spy.calls.execs) {
@@ -428,7 +429,10 @@ describe('loadEnforcementContext — no transcript / no grep (R1)', () => {
 
     assert.ok(mocks.loadStateCalls.length > 0, 'adapter must call loadState via work-state.js');
     assert.ok(mocks.parseTasksCalls.length > 0, 'adapter must call parseTasks via task-parser.js');
-    assert.ok(Array.isArray(ctx.tasks) && ctx.tasks[0].id === 'task_1', 'tasks are exposed on context');
+    assert.ok(
+      Array.isArray(ctx.tasks) && ctx.tasks[0].id === 'task_1',
+      'tasks are exposed on context'
+    );
   });
 });
 
@@ -460,6 +464,10 @@ describe('loadEnforcementContext — context shape (Task 3 contract)', () => {
       assert.ok(key in ctx, `EnforcementContext must expose "${key}" for preflight consumer`);
     }
     assert.equal(ctx.ticketId, 'GH-219', 'ticketId is the sanitized id');
-    assert.equal(ctx.options.subtask, false, 'options.subtask is coerced to boolean (undefined → false)');
+    assert.equal(
+      ctx.options.subtask,
+      false,
+      'options.subtask is coerced to boolean (undefined → false)'
+    );
   });
 });

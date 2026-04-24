@@ -190,10 +190,7 @@ describe('GH-106: complete step deadlock fix', () => {
 
   describe('6. workflows/work/steps/complete.js: complete step prompt includes archival', () => {
     it('complete step agentPrompt mentions archiving artifacts', () => {
-      const src = fs.readFileSync(
-        path.join(__dirname, '..', 'steps', 'complete.js'),
-        'utf-8'
-      );
+      const src = fs.readFileSync(path.join(__dirname, '..', 'steps', 'complete.js'), 'utf-8');
       assert.match(
         src,
         /archive|archiv/i,

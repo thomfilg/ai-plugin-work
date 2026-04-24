@@ -59,8 +59,10 @@ describe('computeTaskDiff', () => {
     const result = computeTaskDiff(tasksDir, 'T-2');
     assert.strictEqual(result.head, 'HEAD');
     // base should be a branch reference (e.g., origin/main), not a 40-char SHA
-    assert.ok(result.base.includes('/') || result.base === 'origin/main',
-      `Expected base branch fallback, got: ${result.base}`);
+    assert.ok(
+      result.base.includes('/') || result.base === 'origin/main',
+      `Expected base branch fallback, got: ${result.base}`
+    );
     assert.ok(result.fallback === true, 'Should indicate fallback was used');
   });
 

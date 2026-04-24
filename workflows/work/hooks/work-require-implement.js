@@ -75,7 +75,11 @@ const ALLOWED_PATTERNS = [
   /\.prettierrc/, // Prettier config
   /package\.json$/, // Package files
   /tsconfig/, // TypeScript config
-  new RegExp(config.TASKS_BASE ? config.TASKS_BASE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') : '__NO_TASKS_BASE__'), // Global task tracking files
+  new RegExp(
+    config.TASKS_BASE
+      ? config.TASKS_BASE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      : '__NO_TASKS_BASE__'
+  ), // Global task tracking files
   /\.task-/, // Task files
   /\/__tests__\//, // Test directories
   /\.test\.[jt]sx?$/, // .test.js, .test.ts, .test.tsx
@@ -208,7 +212,8 @@ function createAuditCallback(ticketId, toolName, filePath, ctx) {
       phase: null,
       action: `${toolName}:${filePath || 'unknown'}`,
       allow: entry.decision === 'allow',
-      reason: (entry.reasons || []).join('; ') || (entry.decision === 'allow' ? 'allowed' : 'denied'),
+      reason:
+        (entry.reasons || []).join('; ') || (entry.decision === 'allow' ? 'allowed' : 'denied'),
       outputPath: filePath || null,
     });
   };
@@ -296,7 +301,14 @@ async function main() {
   // ── Block with audit (R13) ───────────────────────────────────────────
   const auditCb = createAuditCallback(ticketId, toolName, filePath, ctx);
   runPreflight(
-    { ...ctx, error: { code: 'IMPLEMENT_REQUIRED', message: '/work-implement not invoked', remediation: ['Invoke /work-implement first'] } },
+    {
+      ...ctx,
+      error: {
+        code: 'IMPLEMENT_REQUIRED',
+        message: '/work-implement not invoked',
+        remediation: ['Invoke /work-implement first'],
+      },
+    },
     { audit: auditCb }
   );
 

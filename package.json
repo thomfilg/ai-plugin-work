@@ -19,7 +19,8 @@
     "dev:check": "pnpm dev:lint && pnpm dev:typecheck && pnpm dev:test",
     "dev:test:main": "./workflows/lib/scripts/dev-check/dev-test.sh --main",
     "format": "biome format --write .",
-    "format:check": "biome format ."
+    "format:check": "biome format .",
+    "prepare": "command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1 && git config core.hooksPath scripts/hooks || true"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.11"

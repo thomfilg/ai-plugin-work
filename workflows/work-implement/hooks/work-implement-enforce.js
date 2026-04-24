@@ -129,7 +129,10 @@ function resolveTaskBase() {
     taskBase = process.env.TASKS_BASE || null;
   }
   if (!taskBase) {
-    taskBase = (process.env.HOME || process.env.USERPROFILE) ? path.join(process.env.HOME || process.env.USERPROFILE, 'worktrees', 'tasks') : null;
+    taskBase =
+      process.env.HOME || process.env.USERPROFILE
+        ? path.join(process.env.HOME || process.env.USERPROFILE, 'worktrees', 'tasks')
+        : null;
   }
   return taskBase;
 }
@@ -161,9 +164,7 @@ function resolveSafeTicketId(ticketId) {
  * @returns {string|null} Path to tdd-phase.json, or null if not found
  */
 function resolveTddStatePath(taskBase, safeTicketId) {
-  const taskNum = process.env.WORK_TASK_NUM
-    ? parseInt(process.env.WORK_TASK_NUM, 10)
-    : null;
+  const taskNum = process.env.WORK_TASK_NUM ? parseInt(process.env.WORK_TASK_NUM, 10) : null;
 
   if (taskNum && Number.isInteger(taskNum) && taskNum > 0) {
     // Try per-task path first
@@ -230,12 +231,12 @@ function checkTddPhase(filePath, ticketId) {
  * @returns {{ prDir: string|null, taskDir: string|null, ticketRoot: string }|null}
  */
 function buildAllowedPaths(taskBase, safeTicketId) {
-  const taskNum = process.env.WORK_TASK_NUM
-    ? parseInt(process.env.WORK_TASK_NUM, 10)
-    : null;
+  const taskNum = process.env.WORK_TASK_NUM ? parseInt(process.env.WORK_TASK_NUM, 10) : null;
 
   // No task num = legacy mode; invalid taskNum = fail-closed
-  if (taskNum == null) return null; if (!Number.isInteger(taskNum) || taskNum < 1) return { prDir: null, taskDir: null, ticketRoot: null };
+  if (taskNum == null) return null;
+  if (!Number.isInteger(taskNum) || taskNum < 1)
+    return { prDir: null, taskDir: null, ticketRoot: null };
 
   const ticketRoot = path.join(taskBase, safeTicketId);
   let taskDir = null;
@@ -246,12 +247,9 @@ function buildAllowedPaths(taskBase, safeTicketId) {
   }
 
   // PR slot for worktree dir
-  const prSlot = process.env.WORK_PR_SLOT
-    ? parseInt(process.env.WORK_PR_SLOT, 10)
-    : null;
-  const prDir = prSlot && Number.isInteger(prSlot) && prSlot > 0
-    ? path.join(ticketRoot, 'PR' + prSlot)
-    : null;
+  const prSlot = process.env.WORK_PR_SLOT ? parseInt(process.env.WORK_PR_SLOT, 10) : null;
+  const prDir =
+    prSlot && Number.isInteger(prSlot) && prSlot > 0 ? path.join(ticketRoot, 'PR' + prSlot) : null;
 
   return { prDir, taskDir, ticketRoot };
 }
@@ -263,14 +261,17 @@ function buildAllowedPaths(taskBase, safeTicketId) {
 function createAuditCallback(ticketId, toolName, filePath, ctx) {
   return (entry) => {
     try {
-      const { appendEnforcementAudit } = require(path.join(__dirname, '..', '..', 'work', 'work-actions'));
+      const { appendEnforcementAudit } = require(
+        path.join(__dirname, '..', '..', 'work', 'work-actions')
+      );
       appendEnforcementAudit(ticketId, {
         origin: entry.origin || (ctx && ctx.origin) || 'user',
         task: null,
         phase: null,
         action: `${toolName}:${filePath || 'unknown'}`,
         allow: entry.decision === 'allow',
-        reason: (entry.reasons || []).join('; ') || (entry.decision === 'allow' ? 'allowed' : 'denied'),
+        reason:
+          (entry.reasons || []).join('; ') || (entry.decision === 'allow' ? 'allowed' : 'denied'),
         outputPath: filePath || null,
       });
     } catch {
@@ -298,26 +299,27 @@ async function main() {
   // ── State-based activation (R1): load enforcement context ──────────────
   // If TICKET_ID is explicitly set (even to empty), honor it; otherwise derive
   const ticketId =
-    ('TICKET_ID' in process.env) ? (process.env.TICKET_ID || null) :
-    (() => {
-      try {
-        const { getCurrentTaskId } = require(
-          path.join(__dirname, '..', '..', 'lib', 'scripts', 'get-ticket-id.js')
-        );
-        const id = getCurrentTaskId();
-        return id || null;
-      } catch {
-        try {
-          const branch = require('child_process')
-            .execSync('git branch --show-current', { encoding: 'utf8' })
-            .trim();
-          const match = branch.match(/[A-Za-z]+-[0-9]+/i);
-          return match ? match[0] : null;
-        } catch {
-          return null;
-        }
-      }
-    })();
+    'TICKET_ID' in process.env
+      ? process.env.TICKET_ID || null
+      : (() => {
+          try {
+            const { getCurrentTaskId } = require(
+              path.join(__dirname, '..', '..', 'lib', 'scripts', 'get-ticket-id.js')
+            );
+            const id = getCurrentTaskId();
+            return id || null;
+          } catch {
+            try {
+              const branch = require('child_process')
+                .execSync('git branch --show-current', { encoding: 'utf8' })
+                .trim();
+              const match = branch.match(/[A-Za-z]+-[0-9]+/i);
+              return match ? match[0] : null;
+            } catch {
+              return null;
+            }
+          }
+        })();
 
   // No ticket ID => no workflow to enforce
   if (!ticketId) {
@@ -395,9 +397,11 @@ async function main() {
     const allowedPaths = buildAllowedPaths(resolveTaskBase(), resolveSafeTicketId(ticketId));
     if (allowedPaths && filePath && !isWriteAllowedPath(filePath, allowedPaths)) {
       process.stderr.write(
-        'Write to "' + filePath + '" is outside the allowed path set.\n' +
-        'Allowed: PR{N}/, task{N}/, shared whitelist at ticket root.\n' +
-        'Verify the file path falls under the claimed worker or task directory.\n'
+        'Write to "' +
+          filePath +
+          '" is outside the allowed path set.\n' +
+          'Allowed: PR{N}/, task{N}/, shared whitelist at ticket root.\n' +
+          'Verify the file path falls under the claimed worker or task directory.\n'
       );
       const auditCb = createAuditCallback(ticketId, toolName, filePath, ctx);
       auditCb({ decision: 'deny', reasons: ['PATH_NOT_ALLOWED'], origin: ctx.origin });

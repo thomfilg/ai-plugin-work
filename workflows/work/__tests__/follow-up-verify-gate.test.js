@@ -31,12 +31,7 @@ describe('follow_up verify gate: acknowledged entries without userApproval', () 
     fs.mkdirSync(ticketDir, { recursive: true });
 
     // Stub isPRGateReady via module cache override
-    const followUpPrPath = path.resolve(
-      __dirname,
-      '..',
-      'scripts',
-      'follow-up-pr.js'
-    );
+    const followUpPrPath = path.resolve(__dirname, '..', 'scripts', 'follow-up-pr.js');
 
     // Cache a stub module for follow-up-pr.js
     const stubModule = new Module(followUpPrPath);
@@ -48,11 +43,7 @@ describe('follow_up verify gate: acknowledged entries without userApproval', () 
     require.cache[followUpPrPath] = stubModule;
 
     // Create the workflow definition with our temp TASKS_BASE
-    const createWorkflowDefinition = require(path.join(
-      __dirname,
-      '..',
-      'workflow-definition'
-    ));
+    const createWorkflowDefinition = require(path.join(__dirname, '..', 'workflow-definition'));
     const { STEPS } = require(path.join(__dirname, '..', 'step-registry'));
 
     const result = createWorkflowDefinition({
@@ -76,12 +67,7 @@ describe('follow_up verify gate: acknowledged entries without userApproval', () 
     fs.rmSync(tmpDir, { recursive: true, force: true });
 
     // Remove the stubbed module from cache
-    const followUpPrPath = path.resolve(
-      __dirname,
-      '..',
-      'scripts',
-      'follow-up-pr.js'
-    );
+    const followUpPrPath = path.resolve(__dirname, '..', 'scripts', 'follow-up-pr.js');
     delete require.cache[followUpPrPath];
   });
 
@@ -114,7 +100,11 @@ describe('follow_up verify gate: acknowledged entries without userApproval', () 
     fs.writeFileSync(accountabilityFile, JSON.stringify(entries));
 
     const result = followUpGate.verify(ticketId);
-    assert.equal(result, true, 'Gate should pass for acknowledged entries even with userApproval: false');
+    assert.equal(
+      result,
+      true,
+      'Gate should pass for acknowledged entries even with userApproval: false'
+    );
   });
 
   it('still returns true for acknowledged entries with userApproval: true', () => {

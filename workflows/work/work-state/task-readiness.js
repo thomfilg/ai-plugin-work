@@ -144,29 +144,33 @@ function initTasksMeta(ticketId, taskCountOrTasks) {
 
   // ─── Non-contiguous / duplicate task number validation ─────────────────
   if (isTaskArray) {
-    const nums = tasksInput.map(t => t.num);
+    const nums = tasksInput.map((t) => t.num);
     const uniqueNums = new Set(nums);
     if (uniqueNums.size !== nums.length) {
       return {
         error: 'Duplicate task numbers detected in tasksInput.',
-        errors: [{
-          code: 'DUPLICATE_TASK_NUMS',
-          taskId: null,
-          message: 'Duplicate task numbers detected.',
-          remediation: ['Each task must have a unique num field.'],
-        }],
+        errors: [
+          {
+            code: 'DUPLICATE_TASK_NUMS',
+            taskId: null,
+            message: 'Duplicate task numbers detected.',
+            remediation: ['Each task must have a unique num field.'],
+          },
+        ],
       };
     }
     const maxNum = Math.max(...nums);
-    if (maxNum !== taskCount || !nums.every(n => n >= 1 && n <= taskCount)) {
+    if (maxNum !== taskCount || !nums.every((n) => n >= 1 && n <= taskCount)) {
       return {
         error: `Task numbers must be contiguous 1..${taskCount}. Found: ${nums.sort((a, b) => a - b).join(', ')}`,
-        errors: [{
-          code: 'NON_CONTIGUOUS_TASK_NUMS',
-          taskId: null,
-          message: `Task numbers must be contiguous 1..${taskCount}. Found: ${nums.sort((a, b) => a - b).join(', ')}`,
-          remediation: ['Ensure tasks are numbered 1 through N with no gaps.'],
-        }],
+        errors: [
+          {
+            code: 'NON_CONTIGUOUS_TASK_NUMS',
+            taskId: null,
+            message: `Task numbers must be contiguous 1..${taskCount}. Found: ${nums.sort((a, b) => a - b).join(', ')}`,
+            remediation: ['Ensure tasks are numbered 1 through N with no gaps.'],
+          },
+        ],
       };
     }
   }
@@ -198,7 +202,10 @@ function initTasksMeta(ticketId, taskCountOrTasks) {
     const entry = { id: `task_${i + 1}`, status: 'pending' };
     if (isTaskArray) {
       const src = taskMap.get(i + 1);
-      const deps = src && Array.isArray(src.dependencies) ? src.dependencies.filter(d => Number.isInteger(d)) : [];
+      const deps =
+        src && Array.isArray(src.dependencies)
+          ? src.dependencies.filter((d) => Number.isInteger(d))
+          : [];
       entry.dependencies = deps.slice(); // defensive copy
     }
     tasks.push(entry);

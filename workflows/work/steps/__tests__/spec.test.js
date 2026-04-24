@@ -92,10 +92,7 @@ describe('spec step (GH-253)', () => {
 
   it('does not reference WORK_SPEC_ENABLED in source code', () => {
     const source = fs.readFileSync(path.join(__dirname, '..', 'spec.js'), 'utf8');
-    assert.ok(
-      !source.includes('WORK_SPEC_ENABLED'),
-      'spec.js must not contain WORK_SPEC_ENABLED'
-    );
+    assert.ok(!source.includes('WORK_SPEC_ENABLED'), 'spec.js must not contain WORK_SPEC_ENABLED');
   });
 
   it('does not reference WORK_BRIEF_ENABLED in source code', () => {
@@ -107,7 +104,6 @@ describe('spec step (GH-253)', () => {
   });
 
   it('RUNs when spec.md is missing (hasSpec=false)', () => {
-
     const { add, entries } = makeAdd();
     specStep(add, makeState({ hasSpec: false }), makeCtx());
     assert.equal(entries.length, 1);
@@ -116,7 +112,6 @@ describe('spec step (GH-253)', () => {
   });
 
   it('DEFERs when spec.md already exists (hasSpec=true)', () => {
-
     const { add, entries } = makeAdd();
     specStep(add, makeState({ hasSpec: true }), makeCtx());
     assert.equal(entries.length, 1);
@@ -126,7 +121,6 @@ describe('spec step (GH-253)', () => {
   });
 
   it('includes briefRef when brief.md file exists on disk', () => {
-
     const { add, entries } = makeAdd();
     const ctx = makeCtx({ fileExists: () => true });
     specStep(add, makeState({ hasSpec: false }), ctx);
@@ -134,7 +128,6 @@ describe('spec step (GH-253)', () => {
   });
 
   it('includes briefRef when brief.md does not exist but hasBrief is false (will be generated)', () => {
-
     const { add, entries } = makeAdd();
     const ctx = makeCtx({ fileExists: () => false });
     specStep(add, makeState({ hasSpec: false, hasBrief: false }), ctx);
@@ -158,7 +151,6 @@ describe('spec step (GH-253)', () => {
   });
 
   it('RUNs with correct agent type', () => {
-
     const { add, entries } = makeAdd();
     specStep(add, makeState({ hasSpec: false }), makeCtx());
     assert.equal(entries[0].agentType, 'spec-writer');

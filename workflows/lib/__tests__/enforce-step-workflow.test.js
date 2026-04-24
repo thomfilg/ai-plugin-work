@@ -2651,9 +2651,8 @@ describe('enforce-step-workflow', () => {
       commits = '{"commits":[]}',
     } = {}) {
       // Auto-compute comment count from inline comments JSON
-      const autoCount = commentCount != null
-        ? commentCount
-        : (JSON.parse(inlineComments).length || 0);
+      const autoCount =
+        commentCount != null ? commentCount : JSON.parse(inlineComments).length || 0;
       const prView = JSON.stringify({
         number: 42,
         title: 'Test PR',
@@ -2745,8 +2744,20 @@ describe('enforce-step-workflow', () => {
     it('allows transition when non-blocking comments exist with valid accountability', async () => {
       // Copilot [nitpick] comments → low priority (non-blocking)
       const inlineComments = JSON.stringify([
-        { id: 1, user: { login: 'copilot-pull-request-reviewer' }, body: '[nitpick] Consider renaming', path: 'src/a.js', line: 10 },
-        { id: 2, user: { login: 'copilot-pull-request-reviewer' }, body: '[low] Minor style issue', path: 'src/b.js', line: 20 },
+        {
+          id: 1,
+          user: { login: 'copilot-pull-request-reviewer' },
+          body: '[nitpick] Consider renaming',
+          path: 'src/a.js',
+          line: 10,
+        },
+        {
+          id: 2,
+          user: { login: 'copilot-pull-request-reviewer' },
+          body: '[low] Minor style issue',
+          path: 'src/b.js',
+          line: 20,
+        },
       ]);
       writeFakeGh(buildGhResponses({ inlineComments }));
 
@@ -2766,8 +2777,20 @@ describe('enforce-step-workflow', () => {
 
     it('blocks transition when non-blocking comments exist but no accountability file', async () => {
       const inlineComments = JSON.stringify([
-        { id: 1, user: { login: 'copilot-pull-request-reviewer' }, body: '[nitpick] Consider renaming', path: 'src/a.js', line: 10 },
-        { id: 2, user: { login: 'copilot-pull-request-reviewer' }, body: '[low] Minor style issue', path: 'src/b.js', line: 20 },
+        {
+          id: 1,
+          user: { login: 'copilot-pull-request-reviewer' },
+          body: '[nitpick] Consider renaming',
+          path: 'src/a.js',
+          line: 10,
+        },
+        {
+          id: 2,
+          user: { login: 'copilot-pull-request-reviewer' },
+          body: '[low] Minor style issue',
+          path: 'src/b.js',
+          line: 20,
+        },
       ]);
       writeFakeGh(buildGhResponses({ inlineComments }));
 
@@ -2814,7 +2837,13 @@ describe('enforce-step-workflow', () => {
 
     it('blocks when accountability entries lack disposition/reason', async () => {
       const inlineComments = JSON.stringify([
-        { id: 1, user: { login: 'copilot-pull-request-reviewer' }, body: '[nitpick] Minor issue', path: 'src/a.js', line: 10 },
+        {
+          id: 1,
+          user: { login: 'copilot-pull-request-reviewer' },
+          body: '[nitpick] Minor issue',
+          path: 'src/a.js',
+          line: 10,
+        },
       ]);
       writeFakeGh(buildGhResponses({ inlineComments }));
 
@@ -2832,7 +2861,13 @@ describe('enforce-step-workflow', () => {
 
     it('allows acknowledged entries without userApproval (GH-285)', async () => {
       const inlineComments = JSON.stringify([
-        { id: 1, user: { login: 'copilot-pull-request-reviewer' }, body: '[nitpick] Minor issue', path: 'src/a.js', line: 10 },
+        {
+          id: 1,
+          user: { login: 'copilot-pull-request-reviewer' },
+          body: '[nitpick] Minor issue',
+          path: 'src/a.js',
+          line: 10,
+        },
       ]);
       writeFakeGh(buildGhResponses({ inlineComments }));
 
@@ -2849,7 +2884,13 @@ describe('enforce-step-workflow', () => {
 
     it('allows when acknowledged entries have userApproval=true', async () => {
       const inlineComments = JSON.stringify([
-        { id: 1, user: { login: 'copilot-pull-request-reviewer' }, body: '[nitpick] Minor issue', path: 'src/a.js', line: 10 },
+        {
+          id: 1,
+          user: { login: 'copilot-pull-request-reviewer' },
+          body: '[nitpick] Minor issue',
+          path: 'src/a.js',
+          line: 10,
+        },
       ]);
       writeFakeGh(buildGhResponses({ inlineComments }));
 

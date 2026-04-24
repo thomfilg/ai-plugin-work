@@ -87,9 +87,10 @@ module.exports = function taskReviewStep(add, s, ctx) {
   // Override tasksDir to per-task subfolder when task context is available.
   // ctx._currentTaskIdx is set by the implement step; when present (not undefined/null),
   // use taskSegment() to construct the per-task path for artifact resolution.
-  const reviewTasksDir = ctx._currentTaskIdx != null
-    ? path.join(ctx.tasksDir, taskSegment(currentIdx + 1))
-    : ctx.tasksDir;
+  const reviewTasksDir =
+    ctx._currentTaskIdx != null
+      ? path.join(ctx.tasksDir, taskSegment(currentIdx + 1))
+      : ctx.tasksDir;
   // Compute task-scoped diff range via computeTaskDiff (reads .last-commit-sha,
   // validates, falls back to base branch on missing/invalid SHA). The range is
   // passed to the orchestrator in plan-entry metadata so /tests-review and
@@ -116,6 +117,6 @@ module.exports = function taskReviewStep(add, s, ctx) {
     step: STEPS.task_review,
     what: `task ${currentIdx + 1}/${totalTasks} review scheduled for "${currentTask?.title || 'unknown'}"`,
   });
-}
+};
 
 module.exports.taskReviewStep = module.exports;

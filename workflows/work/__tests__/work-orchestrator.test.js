@@ -96,17 +96,23 @@ function cleanupTempWorkState(ticket) {
 after(() => {
   // Nuke the whole temp base — no selective cleanup needed since everything
   // the suite touches lives under TEMP_WORKTREES_BASE.
-  try { fs.rmSync(TEMP_WORKTREES_BASE, { recursive: true, force: true }); } catch {}
+  try {
+    fs.rmSync(TEMP_WORKTREES_BASE, { recursive: true, force: true });
+  } catch {}
   // Safety-net: clean up leaked session guard files created by THIS suite only (TEST-* tickets)
   try {
     const tmpDir = os.tmpdir();
-    const tmpFiles = fs.readdirSync(tmpDir).filter(f => f.startsWith('claude-session-guard-TEST-'));
+    const tmpFiles = fs
+      .readdirSync(tmpDir)
+      .filter((f) => f.startsWith('claude-session-guard-TEST-'));
     for (const f of tmpFiles) {
       try {
         fs.unlinkSync(path.join(tmpDir, f));
       } catch {}
     }
-  } catch { /* ignore if tmpdir unreadable */ }
+  } catch {
+    /* ignore if tmpdir unreadable */
+  }
   // Restore original env so sibling test files loaded in the same Node
   // process (node --test runs many files in one process) don't see our
   // temp overrides leak through inherited env.
@@ -117,8 +123,12 @@ after(() => {
   // Clear require.cache for get-config / config so sibling test files get a
   // fresh module re-read with the restored env instead of our cached temp
   // derivation.
-  try { delete require.cache[require.resolve(GET_CONFIG_PATH)]; } catch {}
-  try { delete require.cache[require.resolve(CONFIG_PATH)]; } catch {}
+  try {
+    delete require.cache[require.resolve(GET_CONFIG_PATH)];
+  } catch {}
+  try {
+    delete require.cache[require.resolve(CONFIG_PATH)];
+  } catch {}
 });
 
 /**
@@ -162,7 +172,9 @@ function writeTddException(tasksBase, ticket) {
           );
         }
       }
-    } catch { /* parseTasks may not be available in all test contexts */ }
+    } catch {
+      /* parseTasks may not be available in all test contexts */
+    }
   }
   fs.writeFileSync(
     path.join(dir, 'tdd-phase.json'),
@@ -208,7 +220,10 @@ function writeTaskArtifacts(tasksBase, ticket) {
     path.join(dir, 'spec.md'),
     '# Spec\n\n<!-- gherkin-skip: test artifact -->\n\n## Summary\nTest spec.\n'
   );
-  fs.writeFileSync(path.join(dir, 'tasks.md'), '# Tasks\n\n## Task 1 — Test task\n\n### Type\nbackend\n\n### Deliverables\n- [ ] 1.1 Test deliverable\n');
+  fs.writeFileSync(
+    path.join(dir, 'tasks.md'),
+    '# Tasks\n\n## Task 1 — Test task\n\n### Type\nbackend\n\n### Deliverables\n- [ ] 1.1 Test deliverable\n'
+  );
 }
 
 /**
@@ -222,7 +237,11 @@ function prepareVerifyEnv(ticket, tasksBase) {
   writeTaskArtifacts(tasksBase, ticket);
   return {
     gitDir,
-    cleanup: () => { try { fs.rmSync(gitDir, { recursive: true, force: true }); } catch {} },
+    cleanup: () => {
+      try {
+        fs.rmSync(gitDir, { recursive: true, force: true });
+      } catch {}
+    },
   };
 }
 
@@ -463,8 +482,12 @@ describe('work-orchestrator.js', () => {
     let transGitDir;
     const transOpts = {};
     after(() => {
-      try { fs.rmSync(TEMP_WB, { recursive: true, force: true }); } catch {}
-      try { if (transGitDir) fs.rmSync(transGitDir, { recursive: true, force: true }); } catch {}
+      try {
+        fs.rmSync(TEMP_WB, { recursive: true, force: true });
+      } catch {}
+      try {
+        if (transGitDir) fs.rmSync(transGitDir, { recursive: true, force: true });
+      } catch {}
     });
     afterEach(() => {
       try {
@@ -692,7 +715,11 @@ describe('work-orchestrator.js', () => {
     it('should not emit any SKIP steps (GH-245)', async () => {
       const { result } = await runOrchestrator([TEST_TICKET]);
       const skipSteps = result.plan.filter((s) => s.action === 'SKIP');
-      assert.equal(skipSteps.length, 0, `Found ${skipSteps.length} SKIP step(s): ${skipSteps.map(s => s.step).join(', ')}`);
+      assert.equal(
+        skipSteps.length,
+        0,
+        `Found ${skipSteps.length} SKIP step(s): ${skipSteps.map((s) => s.step).join(', ')}`
+      );
     });
 
     it('should include agentType for DEFER steps with commands as fallback (GH-130)', async () => {
@@ -822,7 +849,9 @@ describe('work-orchestrator.js', () => {
         assert.equal(result.success, true);
         assert.equal(result.direction, 'backward');
       } finally {
-        try { fs.rmSync(TMP, { recursive: true, force: true }); } catch {}
+        try {
+          fs.rmSync(TMP, { recursive: true, force: true });
+        } catch {}
         cleanupGit();
       }
     });
@@ -838,14 +867,25 @@ describe('work-orchestrator.js', () => {
       const stepStatus = {};
       let foundPr = false;
       for (const s of ALL_STEPS) {
-        if (s === 'pr') { stepStatus[s] = 'in_progress'; foundPr = true; }
-        else if (!foundPr) { stepStatus[s] = 'completed'; }
-        else { stepStatus[s] = 'pending'; }
+        if (s === 'pr') {
+          stepStatus[s] = 'in_progress';
+          foundPr = true;
+        } else if (!foundPr) {
+          stepStatus[s] = 'completed';
+        } else {
+          stepStatus[s] = 'pending';
+        }
       }
-      fs.writeFileSync(path.join(dir, STATE_BASENAME), JSON.stringify({
-        ticketId: TEST_TICKET, status: 'in_progress', stepStatus,
-        startTime: '2026-01-01T00:00:00.000Z', lastUpdate: '2026-01-01T00:00:00.000Z',
-      }));
+      fs.writeFileSync(
+        path.join(dir, STATE_BASENAME),
+        JSON.stringify({
+          ticketId: TEST_TICKET,
+          status: 'in_progress',
+          stepStatus,
+          startTime: '2026-01-01T00:00:00.000Z',
+          lastUpdate: '2026-01-01T00:00:00.000Z',
+        })
+      );
       try {
         // pr → ci is invalid (must go through ready + follow_up) — graph block fires before verify
         const { result } = await runOrchestrator(['transition', TEST_TICKET, 'ci']);
@@ -869,14 +909,25 @@ describe('work-orchestrator.js', () => {
       const stepStatus = {};
       let foundReady = false;
       for (const s of ALL_STEPS) {
-        if (s === 'ready') { stepStatus[s] = 'in_progress'; foundReady = true; }
-        else if (!foundReady) { stepStatus[s] = 'completed'; }
-        else { stepStatus[s] = 'pending'; }
+        if (s === 'ready') {
+          stepStatus[s] = 'in_progress';
+          foundReady = true;
+        } else if (!foundReady) {
+          stepStatus[s] = 'completed';
+        } else {
+          stepStatus[s] = 'pending';
+        }
       }
-      fs.writeFileSync(path.join(dir, STATE_BASENAME), JSON.stringify({
-        ticketId: TEST_TICKET, status: 'in_progress', stepStatus,
-        startTime: '2026-01-01T00:00:00.000Z', lastUpdate: '2026-01-01T00:00:00.000Z',
-      }));
+      fs.writeFileSync(
+        path.join(dir, STATE_BASENAME),
+        JSON.stringify({
+          ticketId: TEST_TICKET,
+          status: 'in_progress',
+          stepStatus,
+          startTime: '2026-01-01T00:00:00.000Z',
+          lastUpdate: '2026-01-01T00:00:00.000Z',
+        })
+      );
       try {
         // ready → follow_up (ready is soft — no verify)
         const { result: r1 } = await runOrchestrator(['transition', TEST_TICKET, 'follow_up']);
@@ -993,8 +1044,12 @@ describe('work-orchestrator.js', () => {
       o.cwd = fuGitDir;
     });
     after(() => {
-      try { fs.rmSync(TEMP_WB, { recursive: true, force: true }); } catch {}
-      try { if (fuGitDir) fs.rmSync(fuGitDir, { recursive: true, force: true }); } catch {}
+      try {
+        fs.rmSync(TEMP_WB, { recursive: true, force: true });
+      } catch {}
+      try {
+        if (fuGitDir) fs.rmSync(fuGitDir, { recursive: true, force: true });
+      } catch {}
     });
 
     it('should allow transition follow_up → ci (forward)', async () => {
@@ -1009,14 +1064,25 @@ describe('work-orchestrator.js', () => {
       const stepStatus = {};
       let found = false;
       for (const s of ALL_STEPS) {
-        if (s === 'follow_up') { stepStatus[s] = 'in_progress'; found = true; }
-        else if (!found) { stepStatus[s] = 'completed'; }
-        else { stepStatus[s] = 'pending'; }
+        if (s === 'follow_up') {
+          stepStatus[s] = 'in_progress';
+          found = true;
+        } else if (!found) {
+          stepStatus[s] = 'completed';
+        } else {
+          stepStatus[s] = 'pending';
+        }
       }
-      fs.writeFileSync(path.join(dir, STATE_BASENAME), JSON.stringify({
-        ticketId: T, status: 'in_progress', stepStatus,
-        startTime: '2026-01-01T00:00:00.000Z', lastUpdate: '2026-01-01T00:00:00.000Z',
-      }));
+      fs.writeFileSync(
+        path.join(dir, STATE_BASENAME),
+        JSON.stringify({
+          ticketId: T,
+          status: 'in_progress',
+          stepStatus,
+          startTime: '2026-01-01T00:00:00.000Z',
+          lastUpdate: '2026-01-01T00:00:00.000Z',
+        })
+      );
       // follow_up → ci is valid in graph; verify gate blocks without real PR.
       // Test the graph validity via transitions query.
       const { result } = await runOrchestrator(['transitions', T], o);
@@ -1035,14 +1101,25 @@ describe('work-orchestrator.js', () => {
       const stepStatus = {};
       let found = false;
       for (const s of ALL_STEPS) {
-        if (s === 'follow_up') { stepStatus[s] = 'in_progress'; found = true; }
-        else if (!found) { stepStatus[s] = 'completed'; }
-        else { stepStatus[s] = 'pending'; }
+        if (s === 'follow_up') {
+          stepStatus[s] = 'in_progress';
+          found = true;
+        } else if (!found) {
+          stepStatus[s] = 'completed';
+        } else {
+          stepStatus[s] = 'pending';
+        }
       }
-      fs.writeFileSync(path.join(dir, STATE_BASENAME), JSON.stringify({
-        ticketId: T2, status: 'in_progress', stepStatus,
-        startTime: '2026-01-01T00:00:00.000Z', lastUpdate: '2026-01-01T00:00:00.000Z',
-      }));
+      fs.writeFileSync(
+        path.join(dir, STATE_BASENAME),
+        JSON.stringify({
+          ticketId: T2,
+          status: 'in_progress',
+          stepStatus,
+          startTime: '2026-01-01T00:00:00.000Z',
+          lastUpdate: '2026-01-01T00:00:00.000Z',
+        })
+      );
       try {
         const { result } = await runOrchestrator(['transition', T2, 'implement'], o);
         assert.equal(result.success, true);
@@ -1050,7 +1127,9 @@ describe('work-orchestrator.js', () => {
         assert.equal(result.to, 'implement');
         assert.equal(result.direction, 'backward');
       } finally {
-        try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+        try {
+          fs.rmSync(dir, { recursive: true, force: true });
+        } catch {}
       }
     });
 
@@ -1064,14 +1143,25 @@ describe('work-orchestrator.js', () => {
       const stepStatus = {};
       let found = false;
       for (const s of ALL_STEPS) {
-        if (s === 'follow_up') { stepStatus[s] = 'in_progress'; found = true; }
-        else if (!found) { stepStatus[s] = 'completed'; }
-        else { stepStatus[s] = 'pending'; }
+        if (s === 'follow_up') {
+          stepStatus[s] = 'in_progress';
+          found = true;
+        } else if (!found) {
+          stepStatus[s] = 'completed';
+        } else {
+          stepStatus[s] = 'pending';
+        }
       }
-      fs.writeFileSync(path.join(dir, STATE_BASENAME), JSON.stringify({
-        ticketId: T3, status: 'in_progress', stepStatus,
-        startTime: '2026-01-01T00:00:00.000Z', lastUpdate: '2026-01-01T00:00:00.000Z',
-      }));
+      fs.writeFileSync(
+        path.join(dir, STATE_BASENAME),
+        JSON.stringify({
+          ticketId: T3,
+          status: 'in_progress',
+          stepStatus,
+          startTime: '2026-01-01T00:00:00.000Z',
+          lastUpdate: '2026-01-01T00:00:00.000Z',
+        })
+      );
       try {
         const { result } = await runOrchestrator(['transition', T3, 'implement'], o);
         assert.equal(result.success, true);
@@ -1079,7 +1169,9 @@ describe('work-orchestrator.js', () => {
         assert.equal(result.to, 'implement');
         assert.equal(result.direction, 'backward');
       } finally {
-        try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+        try {
+          fs.rmSync(dir, { recursive: true, force: true });
+        } catch {}
       }
     });
 
@@ -1094,14 +1186,25 @@ describe('work-orchestrator.js', () => {
         const stepStatus = {};
         let found = false;
         for (const s of ALL_STEPS) {
-          if (s === 'check') { stepStatus[s] = 'in_progress'; found = true; }
-          else if (!found) { stepStatus[s] = 'completed'; }
-          else { stepStatus[s] = 'pending'; }
+          if (s === 'check') {
+            stepStatus[s] = 'in_progress';
+            found = true;
+          } else if (!found) {
+            stepStatus[s] = 'completed';
+          } else {
+            stepStatus[s] = 'pending';
+          }
         }
-        fs.writeFileSync(path.join(ticketDir, STATE_BASENAME), JSON.stringify({
-          ticketId: T_ARCHIVE, status: 'in_progress', stepStatus,
-          startTime: '2026-01-01T00:00:00.000Z', lastUpdate: '2026-01-01T00:00:00.000Z',
-        }));
+        fs.writeFileSync(
+          path.join(ticketDir, STATE_BASENAME),
+          JSON.stringify({
+            ticketId: T_ARCHIVE,
+            status: 'in_progress',
+            stepStatus,
+            startTime: '2026-01-01T00:00:00.000Z',
+            lastUpdate: '2026-01-01T00:00:00.000Z',
+          })
+        );
         writeCheckReports(TEMP_TASKS, T_ARCHIVE);
 
         // Verify reports exist before backward transition
@@ -1126,7 +1229,9 @@ describe('work-orchestrator.js', () => {
         assert.ok(fs.existsSync(path.join(ticketDir, 'runs', 'run1', 'completion.check.md')));
         assert.ok(fs.existsSync(path.join(ticketDir, 'runs', 'run1', 'qa-feature.check.md')));
       } finally {
-        try { fs.rmSync(ticketDir, { recursive: true, force: true }); } catch {}
+        try {
+          fs.rmSync(ticketDir, { recursive: true, force: true });
+        } catch {}
       }
     });
 
@@ -1141,14 +1246,25 @@ describe('work-orchestrator.js', () => {
         const stepStatus = {};
         let found = false;
         for (const s of ALL_STEPS) {
-          if (s === 'check') { stepStatus[s] = 'in_progress'; found = true; }
-          else if (!found) { stepStatus[s] = 'completed'; }
-          else { stepStatus[s] = 'pending'; }
+          if (s === 'check') {
+            stepStatus[s] = 'in_progress';
+            found = true;
+          } else if (!found) {
+            stepStatus[s] = 'completed';
+          } else {
+            stepStatus[s] = 'pending';
+          }
         }
-        fs.writeFileSync(path.join(ticketDir, STATE_BASENAME), JSON.stringify({
-          ticketId: T_RUNS, status: 'in_progress', stepStatus,
-          startTime: '2026-01-01T00:00:00.000Z', lastUpdate: '2026-01-01T00:00:00.000Z',
-        }));
+        fs.writeFileSync(
+          path.join(ticketDir, STATE_BASENAME),
+          JSON.stringify({
+            ticketId: T_RUNS,
+            status: 'in_progress',
+            stepStatus,
+            startTime: '2026-01-01T00:00:00.000Z',
+            lastUpdate: '2026-01-01T00:00:00.000Z',
+          })
+        );
         writeCheckReports(TEMP_TASKS, T_RUNS);
         // First backward: check → implement
         await runOrchestrator(['transition', T_RUNS, 'implement'], o);
@@ -1164,7 +1280,9 @@ describe('work-orchestrator.js', () => {
 
         assert.ok(fs.existsSync(path.join(ticketDir, 'runs', 'run2')), 'run2 should exist');
       } finally {
-        try { fs.rmSync(ticketDir, { recursive: true, force: true }); } catch {}
+        try {
+          fs.rmSync(ticketDir, { recursive: true, force: true });
+        } catch {}
       }
     });
 
@@ -1234,8 +1352,12 @@ describe('work-orchestrator.js', () => {
       envOpts.cwd = integGitDir;
     });
     after(() => {
-      try { fs.rmSync(TEMP_WB, { recursive: true, force: true }); } catch {}
-      try { if (integGitDir) fs.rmSync(integGitDir, { recursive: true, force: true }); } catch {}
+      try {
+        fs.rmSync(TEMP_WB, { recursive: true, force: true });
+      } catch {}
+      try {
+        if (integGitDir) fs.rmSync(integGitDir, { recursive: true, force: true });
+      } catch {}
     });
 
     afterEach(() => {
@@ -1535,8 +1657,12 @@ describe('work-orchestrator.js', () => {
       gateOpts.cwd = gateGitDir;
     });
     after(() => {
-      try { fs.rmSync(TEMP_WB, { recursive: true, force: true }); } catch {}
-      try { if (gateGitDir) fs.rmSync(gateGitDir, { recursive: true, force: true }); } catch {}
+      try {
+        fs.rmSync(TEMP_WB, { recursive: true, force: true });
+      } catch {}
+      try {
+        if (gateGitDir) fs.rmSync(gateGitDir, { recursive: true, force: true });
+      } catch {}
     });
     afterEach(() => {
       try {
@@ -1883,9 +2009,24 @@ describe('GH-211: task_review in plan generation', () => {
 
     const stepStatus = {};
     const allSteps = [
-      'ticket', 'bootstrap', 'brief', 'brief_gate', 'spec', 'spec_gate', 'tasks',
-      'implement', 'commit', 'task_review', 'check', 'pr', 'ready',
-      'follow_up', 'ci', 'cleanup', 'reports', 'complete',
+      'ticket',
+      'bootstrap',
+      'brief',
+      'brief_gate',
+      'spec',
+      'spec_gate',
+      'tasks',
+      'implement',
+      'commit',
+      'task_review',
+      'check',
+      'pr',
+      'ready',
+      'follow_up',
+      'ci',
+      'cleanup',
+      'reports',
+      'complete',
     ];
     for (const step of allSteps) {
       stepStatus[step] = 'pending';
@@ -1936,7 +2077,11 @@ describe('GH-211: task_review in plan generation', () => {
     assert.ok(stepNames.includes('task_review'), 'plan must include task_review step');
 
     const taskReviewEntry = result.plan.find((s) => s.step === 'task_review');
-    assert.equal(taskReviewEntry.action, 'RUN', 'task_review must be RUN for non-final task in multi-task plan');
+    assert.equal(
+      taskReviewEntry.action,
+      'RUN',
+      'task_review must be RUN for non-final task in multi-task plan'
+    );
 
     // task_review should come after commit in pipeline order
     const commitIdx = stepNames.indexOf('commit');
@@ -1956,7 +2101,11 @@ describe('GH-211: task_review in plan generation', () => {
 
     const taskReviewEntry = result.plan.find((s) => s.step === 'task_review');
     assert.ok(taskReviewEntry, 'plan must include task_review step even when skipped');
-    assert.equal(taskReviewEntry.action, 'DEFER', 'task_review must be DEFER for single-task (final task)');
+    assert.equal(
+      taskReviewEntry.action,
+      'DEFER',
+      'task_review must be DEFER for single-task (final task)'
+    );
   });
 
   // 9.1: TASK_REVIEW_ENABLED=0 skips task_review
@@ -1966,14 +2115,22 @@ describe('GH-211: task_review in plan generation', () => {
     writeWorkStateWithTasks(TEMP_TASKS, TEST_TICKET, { totalTasks: 3, currentTaskIndex: 0 });
     writeTddException(TEMP_TASKS, TEST_TICKET);
 
-    const { result, code } = await runOrchestrator([TEST_TICKET], isolatedEnv({ TASK_REVIEW_ENABLED: '0' }));
+    const { result, code } = await runOrchestrator(
+      [TEST_TICKET],
+      isolatedEnv({ TASK_REVIEW_ENABLED: '0' })
+    );
     assert.equal(code, 0);
 
     const taskReviewEntry = result.plan.find((s) => s.step === 'task_review');
     assert.ok(taskReviewEntry, 'plan must include task_review step entry');
-    assert.equal(taskReviewEntry.action, 'DEFER', 'task_review must be DEFER when TASK_REVIEW_ENABLED=0');
+    assert.equal(
+      taskReviewEntry.action,
+      'DEFER',
+      'task_review must be DEFER when TASK_REVIEW_ENABLED=0'
+    );
     assert.ok(
-      taskReviewEntry.reason.includes('disabled') || taskReviewEntry.reason.includes('TASK_REVIEW_ENABLED'),
+      taskReviewEntry.reason.includes('disabled') ||
+        taskReviewEntry.reason.includes('TASK_REVIEW_ENABLED'),
       'reason should mention disabled/env flag'
     );
   });
@@ -1989,7 +2146,10 @@ describe('GH-211: task_review in plan generation', () => {
     });
     writeTddException(TEMP_TASKS, TEST_TICKET);
 
-    const { result, code } = await runOrchestrator([TEST_TICKET], isolatedEnv({ TASK_REVIEW_MAX_FIXES: '2' }));
+    const { result, code } = await runOrchestrator(
+      [TEST_TICKET],
+      isolatedEnv({ TASK_REVIEW_MAX_FIXES: '2' })
+    );
     assert.equal(code, 0);
 
     const taskReviewEntry = result.plan.find((s) => s.step === 'task_review');
@@ -1999,6 +2159,10 @@ describe('GH-211: task_review in plan generation', () => {
       taskReviewEntry.reason.includes('exhausted') || taskReviewEntry.reason.includes('escalat'),
       'reason should mention exhaustion or escalation'
     );
-    assert.equal(taskReviewEntry.command, 'AskUserQuestion', 'escalation should use AskUserQuestion command');
+    assert.equal(
+      taskReviewEntry.command,
+      'AskUserQuestion',
+      'escalation should use AskUserQuestion command'
+    );
   });
 });

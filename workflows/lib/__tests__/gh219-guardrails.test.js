@@ -30,9 +30,21 @@ process.env.TASKS_BASE = TEMP_TASKS_BASE;
 // Clear cached modules so config picks up our override
 delete require.cache[require.resolve('../../lib/config')];
 delete require.cache[require.resolve('../../work/work-state')];
-try { delete require.cache[require.resolve('../../work/work-state/graph-validation')]; } catch { /* may not exist */ }
-try { delete require.cache[require.resolve('../../work/work-state/task-readiness')]; } catch { /* may not exist */ }
-try { delete require.cache[require.resolve('../../work/work-state/parallel-workers')]; } catch { /* may not exist */ }
+try {
+  delete require.cache[require.resolve('../../work/work-state/graph-validation')];
+} catch {
+  /* may not exist */
+}
+try {
+  delete require.cache[require.resolve('../../work/work-state/task-readiness')];
+} catch {
+  /* may not exist */
+}
+try {
+  delete require.cache[require.resolve('../../work/work-state/parallel-workers')];
+} catch {
+  /* may not exist */
+}
 
 const { describe, it, after, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
@@ -64,7 +76,9 @@ function freshTicket(prefix) {
 function cleanupTicket(ticketId) {
   try {
     fs.rmSync(path.join(TEMP_TASKS_BASE, ticketId), { recursive: true, force: true });
-  } catch { /* best-effort */ }
+  } catch {
+    /* best-effort */
+  }
 }
 
 /**
@@ -72,24 +86,31 @@ function cleanupTicket(ticketId) {
  */
 function installCtxMocks({ state = null, tasks = null, subtaskState = null, safeId } = {}) {
   require.cache[WORK_STATE_PATH] = {
-    id: WORK_STATE_PATH, filename: WORK_STATE_PATH, loaded: true,
+    id: WORK_STATE_PATH,
+    filename: WORK_STATE_PATH,
+    loaded: true,
     exports: {
       loadState: (tid) => (typeof state === 'function' ? state(tid) : state),
-      loadActiveSubtaskState: (tid) => (typeof subtaskState === 'function' ? subtaskState(tid) : subtaskState),
+      loadActiveSubtaskState: (tid) =>
+        typeof subtaskState === 'function' ? subtaskState(tid) : subtaskState,
       allocateWorkerSlot: workState.allocateWorkerSlot,
       releaseWorkerSlot: workState.releaseWorkerSlot,
     },
   };
 
   require.cache[TASK_PARSER_PATH] = {
-    id: TASK_PARSER_PATH, filename: TASK_PARSER_PATH, loaded: true,
+    id: TASK_PARSER_PATH,
+    filename: TASK_PARSER_PATH,
+    loaded: true,
     exports: {
       parseTasks: (dir) => (typeof tasks === 'function' ? tasks(dir) : tasks),
     },
   };
 
   require.cache[CONFIG_PATH] = {
-    id: CONFIG_PATH, filename: CONFIG_PATH, loaded: true,
+    id: CONFIG_PATH,
+    filename: CONFIG_PATH,
+    loaded: true,
     exports: {
       TASKS_BASE: '/fake/tasks',
       safeTicketId: (id) => (typeof safeId === 'function' ? safeId(id) : id),
@@ -112,7 +133,11 @@ function uninstallCtxMocks() {
 after(() => {
   if (SAVED_TASKS_BASE) process.env.TASKS_BASE = SAVED_TASKS_BASE;
   else delete process.env.TASKS_BASE;
-  try { fs.rmSync(TEMP_TASKS_BASE, { recursive: true, force: true }); } catch { /* best-effort */ }
+  try {
+    fs.rmSync(TEMP_TASKS_BASE, { recursive: true, force: true });
+  } catch {
+    /* best-effort */
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -297,7 +322,10 @@ describe('guardrail 3 — concurrent request index (20 rapid sequential allocati
     assert.equal(uniqueSeqs.size, 20, 'all 20 sequences must be unique');
 
     // Values are exactly 1..20
-    assert.deepEqual(seqs, Array.from({ length: 20 }, (_, i) => i + 1));
+    assert.deepEqual(
+      seqs,
+      Array.from({ length: 20 }, (_, i) => i + 1)
+    );
 
     // Persistent index reflects final count
     const idx = requestIndex.readIndex(TICKET);
