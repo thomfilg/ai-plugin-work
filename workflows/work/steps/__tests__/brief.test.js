@@ -93,7 +93,6 @@ describe('brief step (GH-253)', () => {
   });
 
   it('RUNs when brief.md is missing (hasBrief=false)', () => {
-
     const { add, entries } = makeAdd();
     briefStep(add, makeState({ hasBrief: false }), makeCtx());
     assert.equal(entries.length, 1);
@@ -102,7 +101,6 @@ describe('brief step (GH-253)', () => {
   });
 
   it('DEFERs when brief.md already exists (hasBrief=true)', () => {
-
     const { add, entries } = makeAdd();
     briefStep(add, makeState({ hasBrief: true }), makeCtx());
     assert.equal(entries.length, 1);
@@ -112,7 +110,6 @@ describe('brief step (GH-253)', () => {
   });
 
   it('RUNs with correct agent type and prompt when brief is missing', () => {
-
     const { add, entries } = makeAdd();
     briefStep(add, makeState({ hasBrief: false }), makeCtx());
     const entry = entries[0];

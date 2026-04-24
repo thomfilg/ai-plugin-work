@@ -114,9 +114,7 @@ function validateTicketId(ticketId) {
     return {
       code: 'INVALID_TICKET_ID',
       message: `ticketId ${JSON.stringify(ticketId)} contains leading/trailing whitespace.`,
-      remediation: [
-        'Trim the ticket id before passing it to claimTask/releaseTask.',
-      ],
+      remediation: ['Trim the ticket id before passing it to claimTask/releaseTask.'],
     };
   }
   // Expects pre-normalized ticket ID (e.g. "GH-219", not a URL).
@@ -155,7 +153,8 @@ function validateTicketId(ticketId) {
   const slashCount = (ticketId.match(/\//g) || []).length;
   if (slashCount > 1) {
     // "A/B/C" — only one "/" allowed
-    return { code: 'INVALID_TICKET_ID',
+    return {
+      code: 'INVALID_TICKET_ID',
       message: 'Only one "/" suffix separator is allowed.',
       remediation: ['Use format like "PROJ-123/phase1" — at most one "/".'],
     };
@@ -343,7 +342,9 @@ function claimTask(ticketId, taskNum, ownerId) {
       try {
         fs.unlinkSync(tmpPath);
         tmpWritten = false;
-      } catch { /* best-effort cleanup; finally will retry while tmpWritten remains true */ }
+      } catch {
+        /* best-effort cleanup; finally will retry while tmpWritten remains true */
+      }
       return { success: true, ownerId, lockPath };
     } catch (linkErr) {
       if (linkErr && linkErr.code === 'EEXIST') {
@@ -359,10 +360,9 @@ function claimTask(ticketId, taskNum, ownerId) {
           lockPath,
           error: {
             code: 'ALREADY_CLAIMED',
-            message:
-              existingOwner
-                ? `Task ${taskNumInt} on ${ticketId} is already claimed by ${existingOwner}.`
-                : `Task ${taskNumInt} on ${ticketId} is already claimed (owner unreadable).`,
+            message: existingOwner
+              ? `Task ${taskNumInt} on ${ticketId} is already claimed by ${existingOwner}.`
+              : `Task ${taskNumInt} on ${ticketId} is already claimed (owner unreadable).`,
             remediation: [
               `Wait for ${existingOwner || 'the current owner'} to call releaseTask or complete.`,
               `Pick a different task (see canStart in workflows/work/work-state.js for readiness).`,
@@ -428,10 +428,9 @@ function releaseTask(ticketId, taskNum, ownerId) {
       lockPath,
       error: {
         code: 'WRONG_OWNER',
-        message:
-          existingOwner
-            ? `Cannot release task ${taskNumInt} on ${ticketId}: current owner is ${existingOwner}, not ${ownerId}.`
-            : `Cannot release task ${taskNumInt} on ${ticketId}: lock payload unreadable (refusing to delete).`,
+        message: existingOwner
+          ? `Cannot release task ${taskNumInt} on ${ticketId}: current owner is ${existingOwner}, not ${ownerId}.`
+          : `Cannot release task ${taskNumInt} on ${ticketId}: lock payload unreadable (refusing to delete).`,
         remediation: [
           `Only the current owner (${existingOwner || 'unknown'}) may call releaseTask.`,
           `Verify ownerId matches the value stored at ${lockPath}.`,

@@ -169,7 +169,8 @@ const CHECK_GATE_RULES = [
       const { validateTddEvidence } = require(path.join(__dirname, 'tdd-enforcement'));
       const taskParser = require(path.join(__dirname, 'task-parser'));
       const tasks = taskParser.parseTasks(dir);
-      if (!tasks || tasks.length === 0) return ['Unable to parse tasks.md — cannot verify per-task TDD evidence'];
+      if (!tasks || tasks.length === 0)
+        return ['Unable to parse tasks.md — cannot verify per-task TDD evidence'];
       const expectedTasks = tasks.filter((t) => !t.isCheckpoint);
       if (expectedTasks.length === 0) return []; // all checkpoint tasks
       const reasons = [];

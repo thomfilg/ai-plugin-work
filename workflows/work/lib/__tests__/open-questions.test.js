@@ -358,9 +358,7 @@ describe('open-questions: applyResolutions', () => {
   });
 
   it('rewrites a single unresolved architectural block with resolved: true and a Resolution line', () => {
-    const resolutions = new Map([
-      ['Should the gate be a hook or a step?', 'It should be a step.'],
-    ]);
+    const resolutions = new Map([['Should the gate be a hook or a step?', 'It should be a step.']]);
     const result = applyResolutions(FIXTURE_SINGLE_STRUCTURED, resolutions);
 
     // The result is still a string containing the original heading and summary.
@@ -451,27 +449,23 @@ describe('open-questions: applyResolutions', () => {
 
   it('preserves the Question[] count after a rewrite (no block corruption)', () => {
     const before = parse(FIXTURE_MULTIPLE_MIXED).length;
-    const resolutions = new Map([
-      ['How do siblings coordinate router ownership?', 'answer'],
-    ]);
+    const resolutions = new Map([['How do siblings coordinate router ownership?', 'answer']]);
     const after = parse(applyResolutions(FIXTURE_MULTIPLE_MIXED, resolutions)).length;
     assert.equal(after, before);
   });
 
   it('preserves surrounding markdown byte-for-byte outside the changed block', () => {
-    const resolutions = new Map([
-      ['Should the gate be a hook or a step?', 'A step.'],
-    ]);
+    const resolutions = new Map([['Should the gate be a hook or a step?', 'A step.']]);
     const result = applyResolutions(FIXTURE_SINGLE_STRUCTURED, resolutions);
     // Heading, summary, and section header are unchanged verbatim.
-    assert.ok(result.startsWith('# Product Brief\n\n## Summary\nExample brief.\n\n## Open Questions\n'));
+    assert.ok(
+      result.startsWith('# Product Brief\n\n## Summary\nExample brief.\n\n## Open Questions\n')
+    );
   });
 
   it('escapes injection: leading "##" heading in answer does not create a new section', () => {
     const malicious = '## Injected Heading\nmore stuff';
-    const resolutions = new Map([
-      ['Should the gate be a hook or a step?', malicious],
-    ]);
+    const resolutions = new Map([['Should the gate be a hook or a step?', malicious]]);
     const result = applyResolutions(FIXTURE_SINGLE_STRUCTURED, resolutions);
 
     // Re-parse: still exactly one question, resolved.
@@ -486,9 +480,7 @@ describe('open-questions: applyResolutions', () => {
 
   it('collapses multi-line answers to a single line', () => {
     const multi = 'line one\nline two\nline three';
-    const resolutions = new Map([
-      ['Should the gate be a hook or a step?', multi],
-    ]);
+    const resolutions = new Map([['Should the gate be a hook or a step?', multi]]);
     const result = applyResolutions(FIXTURE_SINGLE_STRUCTURED, resolutions);
     const parsed = parse(result);
     assert.equal(parsed.length, 1);
@@ -509,9 +501,7 @@ describe('open-questions: applyResolutions', () => {
     // returns `''`. An empty-after-escape answer must not produce a
     // dangling `- **Resolution:** ` line with empty content — the block
     // should remain unresolved so the gate re-prompts on the next pass.
-    const resolutions = new Map([
-      ['Should the gate be a hook or a step?', '###'],
-    ]);
+    const resolutions = new Map([['Should the gate be a hook or a step?', '###']]);
     const result = applyResolutions(FIXTURE_SINGLE_STRUCTURED, resolutions);
 
     // Byte-equal to the input: no rewrite occurred.
@@ -559,9 +549,7 @@ describe('open-questions: applyResolutions', () => {
 
   it('is a no-op when the answer is pure whitespace that collapses to empty', () => {
     // `escapeResolution('## ')` also returns `''`; same contract applies.
-    const resolutions = new Map([
-      ['Should the gate be a hook or a step?', '## '],
-    ]);
+    const resolutions = new Map([['Should the gate be a hook or a step?', '## ']]);
     const result = applyResolutions(FIXTURE_SINGLE_STRUCTURED, resolutions);
     assert.equal(result, FIXTURE_SINGLE_STRUCTURED);
   });

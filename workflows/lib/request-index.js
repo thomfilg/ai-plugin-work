@@ -136,10 +136,16 @@ function acquireLock(lockPath) {
             fs.unlinkSync(lockPath);
             continue; // retry after removing stale lock
           }
-        } catch { /* lock disappeared — retry */ }
+        } catch {
+          /* lock disappeared — retry */
+        }
         // Yield briefly before retry — fs.accessSync is a no-op syscall
         // that yields to the event loop without busy-spinning or sleeping.
-        try { fs.accessSync(lockPath); } catch { /* lock may have been released */ }
+        try {
+          fs.accessSync(lockPath);
+        } catch {
+          /* lock may have been released */
+        }
         continue; // retry after brief yield
       }
       throw err;
@@ -153,7 +159,11 @@ function acquireLock(lockPath) {
  * @param {string} lockPath
  */
 function releaseLock(lockPath) {
-  try { fs.unlinkSync(lockPath); } catch { /* best-effort */ }
+  try {
+    fs.unlinkSync(lockPath);
+  } catch {
+    /* best-effort */
+  }
 }
 
 // ─── Public API ──────────────────────────────────────────────────────────────

@@ -37,7 +37,8 @@ const { normalizeAgentName } = require('../lib/agent-detection');
 let config;
 try {
   config = require('../lib/config');
-} catch (e) { if (e && e.code !== "MODULE_NOT_FOUND") throw e;
+} catch (e) {
+  if (e && e.code !== 'MODULE_NOT_FOUND') throw e;
   config = null;
 }
 
@@ -50,7 +51,13 @@ const ALLOWED_AGENTS = [
 ];
 
 // Subcommands that require token verification
-const GATED_SUBCOMMANDS = ['record-red', 'record-green', 'record-refactor', 'transition', 'exception'];
+const GATED_SUBCOMMANDS = [
+  'record-red',
+  'record-green',
+  'record-refactor',
+  'transition',
+  'exception',
+];
 
 const TOKEN_MAX_AGE_MS = 10_000; // 10 seconds
 
@@ -59,7 +66,8 @@ const TOKEN_MAX_AGE_MS = 10_000; // 10 seconds
 function sanitizeId(ticketId) {
   try {
     return require('../lib/config').safeTicketId(ticketId);
-  } catch (e) { if (e && e.code !== "MODULE_NOT_FOUND") throw e;
+  } catch (e) {
+    if (e && e.code !== 'MODULE_NOT_FOUND') throw e;
     return ticketId;
   }
 }
@@ -87,7 +95,8 @@ function perTaskStatePath(base, safeId, taskNum) {
   let taskSegmentFn;
   try {
     taskSegmentFn = require('../lib/allocate-output-folder').taskSegment;
-  } catch (e) { if (e && e.code !== "MODULE_NOT_FOUND") throw e;
+  } catch (e) {
+    if (e && e.code !== 'MODULE_NOT_FOUND') throw e;
     // fallback if allocator not available — inline the task${N} pattern
     taskSegmentFn = (n) => `task${n}`;
   }
@@ -191,13 +200,18 @@ function parseTask(args) {
     return undefined;
   }
   const val = parseInt(args[taskIdx + 1], 10);
-  if (!Number.isInteger(val) || val < 1) throw new Error("Invalid --task value: " + args[taskIdx + 1]); return val;
+  if (!Number.isInteger(val) || val < 1)
+    throw new Error('Invalid --task value: ' + args[taskIdx + 1]);
+  return val;
 }
 
 function safeParseTask(args) {
-  try { return parseTask(args); } catch (e) { errorExit(e.message); }
+  try {
+    return parseTask(args);
+  } catch (e) {
+    errorExit(e.message);
+  }
 }
-
 
 function parseCategory(args) {
   const idx = args.indexOf('--category');
@@ -478,7 +492,9 @@ function auditException(ticketId, taskNum, category, reason, allow) {
       outputPath: null,
       meta: { category },
     });
-  } catch { /* fail-open */ }
+  } catch {
+    /* fail-open */
+  }
 }
 
 function cmdException(ticketId, args) {
@@ -489,7 +505,9 @@ function cmdException(ticketId, args) {
   const taskNum = safeParseTask(args);
   if (!category) {
     auditException(ticketId, taskNum, null, null, false);
-    errorExit('Missing --category argument. Usage: node tdd-phase-state.js exception <TICKET_ID> --category <category> --reason "<reason>"');
+    errorExit(
+      'Missing --category argument. Usage: node tdd-phase-state.js exception <TICKET_ID> --category <category> --reason "<reason>"'
+    );
   }
 
   // Validate category
@@ -504,14 +522,20 @@ function cmdException(ticketId, args) {
   if (category === 'checkpoint') {
     if (!taskNum) {
       auditException(ticketId, null, category, null, false);
-      errorExit('Category "checkpoint" requires --task <N> to identify which task is a checkpoint.');
+      errorExit(
+        'Category "checkpoint" requires --task <N> to identify which task is a checkpoint.'
+      );
     }
     const { isCheckpointTask } = require('./exception-validator');
     const resolvedTasksBase = resolveTasksBase();
     const safeId = sanitizeId(ticketId);
     if (!isCheckpointTask(safeId, taskNum, resolvedTasksBase)) {
       auditException(ticketId, taskNum, category, null, false);
-      errorExit('Category "checkpoint" is only allowed for checkpoint tasks. Task ' + taskNum + ' is not a checkpoint task.');
+      errorExit(
+        'Category "checkpoint" is only allowed for checkpoint tasks. Task ' +
+          taskNum +
+          ' is not a checkpoint task.'
+      );
     }
   }
 
@@ -538,17 +562,27 @@ function cmdException(ticketId, args) {
       const diff = execSync('git diff --diff-filter=A --name-only', gitOpts).trim();
       const staged = execSync('git diff --cached --diff-filter=A --name-only', gitOpts).trim();
       const untracked = execSync('git ls-files --others --exclude-standard', gitOpts).trim();
-      const relFiles = [...new Set([...diff.split('\n'), ...staged.split('\n'), ...untracked.split('\n')].filter(Boolean))];
-      allChanged = relFiles.map(f => path.resolve(repoRoot, f));
+      const relFiles = [
+        ...new Set(
+          [...diff.split('\n'), ...staged.split('\n'), ...untracked.split('\n')].filter(Boolean)
+        ),
+      ];
+      allChanged = relFiles.map((f) => path.resolve(repoRoot, f));
     } catch {
       auditException(ticketId, taskNum, category, reason, false);
-      errorExit('Unable to verify exception eligibility: git repository detection failed. Run this command from within the repository so new-export checks can be enforced.');
+      errorExit(
+        'Unable to verify exception eligibility: git repository detection failed. Run this command from within the repository so new-export checks can be enforced.'
+      );
     }
 
     const exportCheck = checkNewExportedCode(allChanged);
     if (exportCheck.hasNewExports) {
       auditException(ticketId, taskNum, category, reason, false);
-      errorExit('New exported code detected in: ' + exportCheck.files.join(', ') + '. TDD is required for new code with exports. Use the RED-GREEN-REFACTOR cycle instead of exception mode.');
+      errorExit(
+        'New exported code detected in: ' +
+          exportCheck.files.join(', ') +
+          '. TDD is required for new code with exports. Use the RED-GREEN-REFACTOR cycle instead of exception mode.'
+      );
     }
   }
 

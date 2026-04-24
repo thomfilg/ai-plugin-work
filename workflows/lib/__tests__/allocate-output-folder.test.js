@@ -176,34 +176,76 @@ describe('allocate-output-folder', () => {
 
   describe('R15 ticket ID validation (fail-closed, before I/O)', () => {
     it('rejects empty / null / undefined ticket id', () => {
-      assert.throws(() => allocator.allocateOutputFolder('', { flow: 'in-flow', taskNum: 1 }), /Invalid ticket ID/i);
-      assert.throws(() => allocator.allocateOutputFolder(null, { flow: 'in-flow', taskNum: 1 }), /Invalid ticket ID/i);
-      assert.throws(() => allocator.allocateOutputFolder(undefined, { flow: 'in-flow', taskNum: 1 }), /Invalid ticket ID/i);
+      assert.throws(
+        () => allocator.allocateOutputFolder('', { flow: 'in-flow', taskNum: 1 }),
+        /Invalid ticket ID/i
+      );
+      assert.throws(
+        () => allocator.allocateOutputFolder(null, { flow: 'in-flow', taskNum: 1 }),
+        /Invalid ticket ID/i
+      );
+      assert.throws(
+        () => allocator.allocateOutputFolder(undefined, { flow: 'in-flow', taskNum: 1 }),
+        /Invalid ticket ID/i
+      );
     });
 
     it('rejects path traversal attempts', () => {
-      assert.throws(() => allocator.allocateOutputFolder('../etc', { flow: 'in-flow', taskNum: 1 }), /Invalid ticket ID/i);
-      assert.throws(() => allocator.allocateOutputFolder('GH-1/../evil', { flow: 'in-flow', taskNum: 1 }), /Invalid ticket ID/i);
-      assert.throws(() => allocator.allocateOutputFolder('foo\\bar', { flow: 'in-flow', taskNum: 1 }), /Invalid ticket ID/i);
+      assert.throws(
+        () => allocator.allocateOutputFolder('../etc', { flow: 'in-flow', taskNum: 1 }),
+        /Invalid ticket ID/i
+      );
+      assert.throws(
+        () => allocator.allocateOutputFolder('GH-1/../evil', { flow: 'in-flow', taskNum: 1 }),
+        /Invalid ticket ID/i
+      );
+      assert.throws(
+        () => allocator.allocateOutputFolder('foo\\bar', { flow: 'in-flow', taskNum: 1 }),
+        /Invalid ticket ID/i
+      );
     });
 
     it('rejects bare dot as ticket ID', () => {
-      assert.throws(() => allocator.allocateOutputFolder('.', { flow: 'in-flow', taskNum: 1 }), /Invalid ticket ID/i);
-      assert.throws(() => allocator.allocateOutputFolder('./', { flow: 'in-flow', taskNum: 1 }), /Invalid ticket ID/i);
+      assert.throws(
+        () => allocator.allocateOutputFolder('.', { flow: 'in-flow', taskNum: 1 }),
+        /Invalid ticket ID/i
+      );
+      assert.throws(
+        () => allocator.allocateOutputFolder('./', { flow: 'in-flow', taskNum: 1 }),
+        /Invalid ticket ID/i
+      );
     });
 
     it('handles suffixed ticket IDs with slash separator', () => {
-      const result = allocator.allocateOutputFolder('GH-219/phase1', { flow: 'in-flow', taskNum: 1 });
-      assert.ok(result.root.includes(path.join('GH-219', 'phase1', 'task1')),
-        `root should contain GH-219/phase1/task1, got: ${result.root}`);
+      const result = allocator.allocateOutputFolder('GH-219/phase1', {
+        flow: 'in-flow',
+        taskNum: 1,
+      });
+      assert.ok(
+        result.root.includes(path.join('GH-219', 'phase1', 'task1')),
+        `root should contain GH-219/phase1/task1, got: ${result.root}`
+      );
     }); // suffix handling verified
     it('rejects ticket IDs with multiple slashes', () => {
-      assert.throws(() => allocator.allocateOutputFolder('a/b/c', { flow: 'in-flow', taskNum: 1 }), /at most one/i);
-      assert.throws(() => allocator.allocateOutputFolder('https://github.com/org/repo/issues/42', { flow: 'in-flow', taskNum: 1 }), /Invalid ticket ID/i);
+      assert.throws(
+        () => allocator.allocateOutputFolder('a/b/c', { flow: 'in-flow', taskNum: 1 }),
+        /at most one/i
+      );
+      assert.throws(
+        () =>
+          allocator.allocateOutputFolder('https://github.com/org/repo/issues/42', {
+            flow: 'in-flow',
+            taskNum: 1,
+          }),
+        /Invalid ticket ID/i
+      );
     });
 
     it('rejects leading slash ticket IDs', () => {
-      assert.throws(() => allocator.allocateOutputFolder('/etc/passwd', { flow: 'in-flow', taskNum: 1 }), /Invalid ticket ID/i);
+      assert.throws(
+        () => allocator.allocateOutputFolder('/etc/passwd', { flow: 'in-flow', taskNum: 1 }),
+        /Invalid ticket ID/i
+      );
     });
   }); // end ticket ID validation
 
@@ -211,8 +253,10 @@ describe('allocate-output-folder', () => {
     it('uses TASKS_BASE from environment when set', () => {
       // Verify that the resolved base matches what we set
       const result = allocator.allocateOutputFolder('GH-219', { flow: 'in-flow', taskNum: 1 });
-      assert.ok(result.root.includes(process.env.TASKS_BASE),
-        `root should include TASKS_BASE, got: ${result.root}`);
+      assert.ok(
+        result.root.includes(process.env.TASKS_BASE),
+        `root should include TASKS_BASE, got: ${result.root}`
+      );
     });
   });
 });

@@ -314,7 +314,10 @@ describe('tdd-phase-state CLI', () => {
 
       const state = readState(homeDir, 'TEST-EXC');
       assert.strictEqual(state.currentPhase, 'exception');
-      assert.deepStrictEqual(state.exception, { category: 'config-only', reason: 'config-only change, no testable behavior' });
+      assert.deepStrictEqual(state.exception, {
+        category: 'config-only',
+        reason: 'config-only change, no testable behavior',
+      });
       assert.deepStrictEqual(state.cycles, []);
       fs.rmSync(gitRepo, { recursive: true, force: true });
     });
@@ -326,7 +329,10 @@ describe('tdd-phase-state CLI', () => {
     });
 
     it('fails with empty reason', () => {
-      const { exitCode, stderr } = runCli('exception TEST-EXC3 --category config-only --reason ""', homeDir);
+      const { exitCode, stderr } = runCli(
+        'exception TEST-EXC3 --category config-only --reason ""',
+        homeDir
+      );
       assert.strictEqual(exitCode, 1);
       assert.ok(
         stderr.includes('empty') || stderr.includes('reason'),
@@ -348,12 +354,20 @@ describe('tdd-phase-state CLI', () => {
 
       // Verify state file is at per-task path
       const perTaskPath = path.join(
-        homeDir, 'worktrees', 'tasks', 'TEST-EXC4', 'task2', 'tdd-phase.json'
+        homeDir,
+        'worktrees',
+        'tasks',
+        'TEST-EXC4',
+        'task2',
+        'tdd-phase.json'
       );
       assert.ok(fs.existsSync(perTaskPath), `Expected per-task state at ${perTaskPath}`);
       const state = JSON.parse(fs.readFileSync(perTaskPath, 'utf8'));
       assert.strictEqual(state.currentPhase, 'exception');
-      assert.deepStrictEqual(state.exception, { category: 'config-only', reason: 'config-only change' });
+      assert.deepStrictEqual(state.exception, {
+        category: 'config-only',
+        reason: 'config-only change',
+      });
 
       // Root path should NOT exist
       const rootPath = path.join(homeDir, 'worktrees', 'tasks', 'TEST-EXC4', 'tdd-phase.json');
@@ -507,7 +521,14 @@ describe('tdd-phase-state CLI', () => {
       assert.strictEqual(result.ok, true);
 
       // Verify state file is at per-task path
-      const perTaskPath = path.join(homeDir, 'worktrees', 'tasks', 'TEST-T9A', 'task3', 'tdd-phase.json');
+      const perTaskPath = path.join(
+        homeDir,
+        'worktrees',
+        'tasks',
+        'TEST-T9A',
+        'task3',
+        'tdd-phase.json'
+      );
       assert.ok(fs.existsSync(perTaskPath), `Expected per-task state at ${perTaskPath}`);
       const state = JSON.parse(fs.readFileSync(perTaskPath, 'utf8'));
       assert.strictEqual(state.currentPhase, 'red');
@@ -526,7 +547,11 @@ describe('tdd-phase-state CLI', () => {
       runCli('init TEST-T9C', homeDir);
       // Now read with --task — per-task file does not exist, should NOT fallback to root
       const { exitCode } = runCli('current TEST-T9C --task 2', homeDir);
-      assert.strictEqual(exitCode, 1, 'Should fail when per-task state does not exist, no root fallback');
+      assert.strictEqual(
+        exitCode,
+        1,
+        'Should fail when per-task state does not exist, no root fallback'
+      );
     });
 
     it('current with --task fails when per-task path does not exist', () => {
@@ -541,7 +566,6 @@ describe('tdd-phase-state CLI', () => {
     });
   });
 
-
   describe('no-fallback guard (GH-219 Task 1)', () => {
     it('getStatePath with taskNum always returns per-task path, never root', () => {
       // Init at root, then verify --task read does NOT find root state
@@ -549,7 +573,14 @@ describe('tdd-phase-state CLI', () => {
       const rootPath = path.join(homeDir, 'worktrees', 'tasks', 'TEST-NOFALL', 'tdd-phase.json');
       assert.ok(fs.existsSync(rootPath), 'Root state should exist');
 
-      const perTaskPath = path.join(homeDir, 'worktrees', 'tasks', 'TEST-NOFALL', 'task1', 'tdd-phase.json');
+      const perTaskPath = path.join(
+        homeDir,
+        'worktrees',
+        'tasks',
+        'TEST-NOFALL',
+        'task1',
+        'tdd-phase.json'
+      );
       assert.ok(!fs.existsSync(perTaskPath), 'Per-task state should NOT exist yet');
 
       // Reading with --task 1 should fail (no per-task state), NOT fall back to root
@@ -563,7 +594,14 @@ describe('tdd-phase-state CLI', () => {
       // Init per-task state
       runCli('init TEST-RG1 --task 2', homeDir);
       // Set up state for green phase
-      const perTaskPath = path.join(homeDir, 'worktrees', 'tasks', 'TEST-RG1', 'task2', 'tdd-phase.json');
+      const perTaskPath = path.join(
+        homeDir,
+        'worktrees',
+        'tasks',
+        'TEST-RG1',
+        'task2',
+        'tdd-phase.json'
+      );
       const state = JSON.parse(fs.readFileSync(perTaskPath, 'utf8'));
       state.currentPhase = 'green';
       state.cycles = [
@@ -598,7 +636,14 @@ describe('tdd-phase-state CLI', () => {
 
     it('record-refactor with --task reads/writes per-task path', () => {
       runCli('init TEST-RR1 --task 4', homeDir);
-      const perTaskPath = path.join(homeDir, 'worktrees', 'tasks', 'TEST-RR1', 'task4', 'tdd-phase.json');
+      const perTaskPath = path.join(
+        homeDir,
+        'worktrees',
+        'tasks',
+        'TEST-RR1',
+        'task4',
+        'tdd-phase.json'
+      );
       const state = JSON.parse(fs.readFileSync(perTaskPath, 'utf8'));
       state.currentPhase = 'refactor';
       state.cycles = [
@@ -647,10 +692,7 @@ describe('tdd-phase-state CLI', () => {
       fs.writeFileSync(rootPath, JSON.stringify(state, null, 2));
 
       const passScript = createExitScript(scriptDir, 0);
-      const { stdout, exitCode } = runCli(
-        `record-green TEST-RG2 --cmd "${passScript}"`,
-        homeDir
-      );
+      const { stdout, exitCode } = runCli(`record-green TEST-RG2 --cmd "${passScript}"`, homeDir);
       assert.strictEqual(exitCode, 0);
       const updatedState = JSON.parse(fs.readFileSync(rootPath, 'utf8'));
       assert.strictEqual(updatedState.cycles[0].green.testExitCode, 0);
@@ -660,7 +702,14 @@ describe('tdd-phase-state CLI', () => {
   describe('transition with --task (GH-219 Task 1)', () => {
     it('transition with --task reads/writes per-task path', () => {
       runCli('init TEST-TR1 --task 3', homeDir);
-      const perTaskPath = path.join(homeDir, 'worktrees', 'tasks', 'TEST-TR1', 'task3', 'tdd-phase.json');
+      const perTaskPath = path.join(
+        homeDir,
+        'worktrees',
+        'tasks',
+        'TEST-TR1',
+        'task3',
+        'tdd-phase.json'
+      );
       const state = JSON.parse(fs.readFileSync(perTaskPath, 'utf8'));
       state.cycles = [
         {
@@ -778,7 +827,12 @@ describe('tdd-phase-state CLI', () => {
 
       // Verify structured format in state file
       const perTaskPath = path.join(
-        homeDir, 'worktrees', 'tasks', 'TEST-CAT1', 'task2', 'tdd-phase.json'
+        homeDir,
+        'worktrees',
+        'tasks',
+        'TEST-CAT1',
+        'task2',
+        'tdd-phase.json'
       );
       const state = JSON.parse(fs.readFileSync(perTaskPath, 'utf8'));
       assert.strictEqual(state.currentPhase, 'exception');
@@ -806,10 +860,7 @@ describe('tdd-phase-state CLI', () => {
         homeDir
       );
       assert.strictEqual(exitCode, 1);
-      assert.ok(
-        stderr.includes('--category'),
-        `Expected missing category error, got: ${stderr}`
-      );
+      assert.ok(stderr.includes('--category'), `Expected missing category error, got: ${stderr}`);
     });
 
     it('new exported code with --category config-only exits 1 (heuristic blocks)', () => {
@@ -910,7 +961,11 @@ describe('tdd-phase-state CLI', () => {
           homeDir,
           nonGitDir
         );
-        assert.strictEqual(exitCode, 1, `Expected exit 1 when git repo detection fails, got ${exitCode}`);
+        assert.strictEqual(
+          exitCode,
+          1,
+          `Expected exit 1 when git repo detection fails, got ${exitCode}`
+        );
         assert.ok(
           stderr.includes('git') || stderr.includes('repository'),
           `Expected git/repository error message, got: ${stderr}`
@@ -928,19 +983,23 @@ describe('tdd-phase-state CLI', () => {
       assert.strictEqual(exitCode, 1);
 
       // Check audit file for audit record
-      const actionsPath = path.join(homeDir, 'worktrees', 'tasks', 'TEST-AUD1', '.work-actions.json');
+      const actionsPath = path.join(
+        homeDir,
+        'worktrees',
+        'tasks',
+        'TEST-AUD1',
+        '.work-actions.json'
+      );
       assert.ok(fs.existsSync(actionsPath), `Expected audit file at ${actionsPath}`);
       const actions = JSON.parse(fs.readFileSync(actionsPath, 'utf8'));
-      const auditRecord = actions.find(
-        (a) => a.action === 'tdd-exception' && a.allow === false
-      );
+      const auditRecord = actions.find((a) => a.action === 'tdd-exception' && a.allow === false);
       assert.ok(auditRecord, 'Expected audit record with allow: false');
       assert.strictEqual(auditRecord.allow, false);
       assert.ok(auditRecord.reason.includes('bogus'), 'Expected reason to contain category');
     });
   });
 
-    describe('multi-task TDD accumulation (GH-219 Task 5)', () => {
+  describe('multi-task TDD accumulation (GH-219 Task 5)', () => {
     it('5.1: accumulates independent per-task state across full TDD lifecycle', () => {
       const ticketId = 'TEST-MT1';
       const tasksBase = path.join(homeDir, 'worktrees', 'tasks');
@@ -967,7 +1026,11 @@ describe('tdd-phase-state CLI', () => {
         homeDir,
         gitRepo
       );
-      assert.strictEqual(redResult.exitCode, 0, `record-red should succeed, got: ${redResult.stderr || ''}`);
+      assert.strictEqual(
+        redResult.exitCode,
+        0,
+        `record-red should succeed, got: ${redResult.stderr || ''}`
+      );
 
       // 4. Transition task 1 to green
       const transResult = runCli(`transition ${ticketId} green --task 1`, homeDir);
@@ -978,7 +1041,11 @@ describe('tdd-phase-state CLI', () => {
         `record-green ${ticketId} --task 1 --cmd "${passScript}"`,
         homeDir
       );
-      assert.strictEqual(greenResult.exitCode, 0, `record-green should succeed, got: ${greenResult.stderr || ''}`);
+      assert.strictEqual(
+        greenResult.exitCode,
+        0,
+        `record-green should succeed, got: ${greenResult.stderr || ''}`
+      );
 
       // 6. Verify task1/tdd-phase.json has non-empty cycles with red AND green evidence
       const task1Final = JSON.parse(fs.readFileSync(task1Path, 'utf8'));
@@ -1012,7 +1079,11 @@ describe('tdd-phase-state CLI', () => {
         homeDir,
         gitRepo2
       );
-      assert.strictEqual(redResult2.exitCode, 0, `record-red task 2 should succeed, got: ${redResult2.stderr || ''}`);
+      assert.strictEqual(
+        redResult2.exitCode,
+        0,
+        `record-red task 2 should succeed, got: ${redResult2.stderr || ''}`
+      );
 
       // 10. Verify both state files exist independently
       const task2Path = path.join(tasksBase, ticketId, 'task2', 'tdd-phase.json');
@@ -1086,5 +1157,4 @@ describe('tdd-phase-state CLI', () => {
       assert.ok(fs.existsSync(task2Path), 'task2/tdd-phase.json should exist');
     });
   });
-
 });

@@ -721,7 +721,9 @@ describe('session-guard', () => {
     function cleanupTasksDir() {
       try {
         fs.rmSync(TASKS_DIR, { recursive: true, force: true });
-      } catch { /* */ }
+      } catch {
+        /* */
+      }
     }
 
     beforeEach(() => {
@@ -747,10 +749,7 @@ describe('session-guard', () => {
       assert.ok(r.stderr.includes('Do NOT stop'), 'should contain Do NOT stop');
       assert.ok(r.stderr.includes(WORK_TICKET), 'should mention ticket ID');
       assert.ok(r.stderr.includes('brief_gate'), 'should include the step name');
-      assert.ok(
-        r.stderr.includes('work.workflow.js'),
-        'should include orchestrator command'
-      );
+      assert.ok(r.stderr.includes('work.workflow.js'), 'should include orchestrator command');
     });
 
     it('falls back to generic message when .work-state.json is missing', async () => {

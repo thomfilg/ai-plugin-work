@@ -280,7 +280,8 @@ function checkCI(prNumber) {
 // ── Reviews ─────────────────────────────────────────────────────────────────
 
 // Aliases for each bot are in botLoginAliases (see getReviews)
-const DEFAULT_BOT_REVIEWERS = 'copilot-pull-request-reviewer,cursor-ai[bot],chatgpt-codex-connector[bot]';
+const DEFAULT_BOT_REVIEWERS =
+  'copilot-pull-request-reviewer,cursor-ai[bot],chatgpt-codex-connector[bot]';
 
 function getBotReviewers() {
   const env = process.env.FOLLOW_UP_PR_BOT_REVIEWERS;
@@ -1382,7 +1383,9 @@ async function main() {
           const staleTag = item.stale ? c.dim(' (stale)') : '';
           const dedupTag = item.deduplicated ? c.dim(' (deduped)') : '';
           console.log('');
-          console.log(`  ${c.cyan(`Comment ${i + 1}:`)} @${item.author} [${priority}]${staleTag}${dedupTag} ${loc}`);
+          console.log(
+            `  ${c.cyan(`Comment ${i + 1}:`)} @${item.author} [${priority}]${staleTag}${dedupTag} ${loc}`
+          );
           console.log(`  ${c.dim('─'.repeat(60))}`);
           console.log(`  ${(item.body || '').trim()}`);
           console.log(`  ${c.dim('─'.repeat(60))}`);
@@ -1476,7 +1479,7 @@ async function main() {
         const errMsg = String(err && err.message ? err.message : err);
         process.stderr.write(
           `WARNING: Failed to write review-accountability.json: ${errMsg}\n` +
-          `The follow_up → ci transition gate will block until this file exists.\n`
+            `The follow_up → ci transition gate will block until this file exists.\n`
         );
       }
 
@@ -1528,12 +1531,10 @@ function isPRGateReady() {
   let strictCommentCount = 0;
   try {
     const repo = ghExec('repo view --json nameWithOwner').nameWithOwner;
-    const comments = ghExec([
-      'api',
-      `repos/${repo}/pulls/${prInfo.number}/comments`,
-      '--jq',
-      'length',
-    ], { json: false });
+    const comments = ghExec(
+      ['api', `repos/${repo}/pulls/${prInfo.number}/comments`, '--jq', 'length'],
+      { json: false }
+    );
     strictCommentCount = parseInt(comments, 10) || 0;
   } catch {
     // Cannot verify comment count — fail closed
@@ -1544,13 +1545,15 @@ function isPRGateReady() {
   let currentHead = null;
   try {
     currentHead = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim();
-  } catch { /* non-fatal */ }
+  } catch {
+    /* non-fatal */
+  }
 
   const state = loadState(prInfo.number);
   const previousRunBotHashes = state
-    ? (state.previousRunBotHashes && state.previousRunBotHashes.length > 0
-        ? state.previousRunBotHashes
-        : (state.addressedBotComments || []).map((a) => a.hash))
+    ? state.previousRunBotHashes && state.previousRunBotHashes.length > 0
+      ? state.previousRunBotHashes
+      : (state.addressedBotComments || []).map((a) => a.hash)
     : [];
 
   const deduped = deduplicateBlockingBotComments(

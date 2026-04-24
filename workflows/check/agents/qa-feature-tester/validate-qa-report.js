@@ -49,7 +49,11 @@ async function main() {
       /`?mcp__(playwright|claude-in-chrome)__\w+`?\s*(?:[-–—:]?\s*)Result:\s*(SUCCESS|FAIL)/i;
     const hasBrowserMCP = browserToolPattern.test(content);
 
-    if (!hasBrowserMCP && !content.includes('INFRASTRUCTURE_FAILURE') && !content.includes('ACCESS_FAILED')) {
+    if (
+      !hasBrowserMCP &&
+      !content.includes('INFRASTRUCTURE_FAILURE') &&
+      !content.includes('ACCESS_FAILED')
+    ) {
       issues.push(
         'No structured browser tool evidence — expected `mcp__playwright__...` or `mcp__claude-in-chrome__...` tool calls, each with "Result: SUCCESS" or "Result: FAIL"'
       );
@@ -66,7 +70,11 @@ async function main() {
     const hasScreenshots =
       content.match(/!\[.*?\]\(.*?\.(png|jpg|jpeg)/i) || content.includes('screenshots/');
 
-    if (!hasScreenshots && !content.includes('INFRASTRUCTURE_FAILURE') && !content.includes('ACCESS_FAILED')) {
+    if (
+      !hasScreenshots &&
+      !content.includes('INFRASTRUCTURE_FAILURE') &&
+      !content.includes('ACCESS_FAILED')
+    ) {
       issues.push('No screenshot references found');
     }
 

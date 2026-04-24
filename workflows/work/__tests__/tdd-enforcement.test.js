@@ -149,7 +149,11 @@ function prepareTicketEnv(ticket, envExtra = {}) {
     gitDir,
     opts: { env: baseEnv(envExtra), cwd: gitDir },
     safeTicket,
-    cleanup: () => { try { fs.rmSync(gitDir, { recursive: true, force: true }); } catch {} },
+    cleanup: () => {
+      try {
+        fs.rmSync(gitDir, { recursive: true, force: true });
+      } catch {}
+    },
   };
 }
 
@@ -579,7 +583,15 @@ describe('TDD enforcement', () => {
       const { opts, cleanup } = prepareTicketEnv(TICKET);
       try {
         // Walk to implement
-        const steps = ['bootstrap', 'brief', 'brief_gate', 'spec', 'spec_gate', 'tasks', 'implement'];
+        const steps = [
+          'bootstrap',
+          'brief',
+          'brief_gate',
+          'spec',
+          'spec_gate',
+          'tasks',
+          'implement',
+        ];
         for (const s of steps) {
           await runOrchestrator(['transition', TICKET, s], opts);
         }
@@ -611,7 +623,14 @@ describe('TDD enforcement', () => {
       const state = {
         currentPhase: 'red',
         currentCycle: 2,
-        cycles: [{ cycle: 1, red: { testFiles: ['a.test.ts'] }, green: { testCommand: 'test' }, refactor: { testCommand: 'test' } }],
+        cycles: [
+          {
+            cycle: 1,
+            red: { testFiles: ['a.test.ts'] },
+            green: { testCommand: 'test' },
+            refactor: { testCommand: 'test' },
+          },
+        ],
       };
       fs.writeFileSync(path.join(taskDir, 'tdd-phase.json'), JSON.stringify(state));
 
@@ -635,7 +654,11 @@ describe('TDD enforcement', () => {
       );
 
       const result = readTddEvidence(tempTasksBase, ticket, 'implement', 2);
-      assert.equal(result.exists, false, 'Must not fall back to ticket root when taskNum is provided');
+      assert.equal(
+        result.exists,
+        false,
+        'Must not fall back to ticket root when taskNum is provided'
+      );
 
       // Cleanup
       fs.rmSync(ticketDir, { recursive: true, force: true });
@@ -645,7 +668,10 @@ describe('TDD enforcement', () => {
       const ticket = 'TDDT2-102';
       const ticketDir = path.join(tempTasksBase, ticket);
       fs.mkdirSync(ticketDir, { recursive: true });
-      const state = { currentPhase: 'red', cycles: [{ cycle: 1, red: {}, green: {}, refactor: {} }] };
+      const state = {
+        currentPhase: 'red',
+        cycles: [{ cycle: 1, red: {}, green: {}, refactor: {} }],
+      };
       fs.writeFileSync(path.join(ticketDir, 'tdd-phase.json'), JSON.stringify(state));
 
       const result = readTddEvidence(tempTasksBase, ticket, 'implement');
@@ -712,19 +738,22 @@ describe('TDD enforcement', () => {
       delete require.cache[require.resolve('../../lib/config')];
       delete require.cache[require.resolve('../work-state')];
       // Also clear submodules that work-state requires (they cache parent fns)
-      try { delete require.cache[require.resolve('../work-state/task-readiness')]; } catch {}
-      try { delete require.cache[require.resolve('../work-state/parallel-workers')]; } catch {}
-      try { delete require.cache[require.resolve('../work-state/graph-validation')]; } catch {}
+      try {
+        delete require.cache[require.resolve('../work-state/task-readiness')];
+      } catch {}
+      try {
+        delete require.cache[require.resolve('../work-state/parallel-workers')];
+      } catch {}
+      try {
+        delete require.cache[require.resolve('../work-state/graph-validation')];
+      } catch {}
       const { autoInitTdd } = require('../work-state');
 
       // Call autoInitTdd with taskNum
       autoInitTdd(ticket, 2);
 
       // Assert file exists at per-task path
-      assert.ok(
-        fs.existsSync(expectedFile),
-        `Expected tdd-phase.json at ${expectedFile}`
-      );
+      assert.ok(fs.existsSync(expectedFile), `Expected tdd-phase.json at ${expectedFile}`);
 
       // Assert file contents
       const state = JSON.parse(fs.readFileSync(expectedFile, 'utf8'));
@@ -885,19 +914,31 @@ describe('TDD enforcement', () => {
     });
 
     it('structured exception with valid category config-only', () => {
-      const result = validateTddEvidence({ exception: { category: 'config-only', reason: 'tsconfig' }, cycles: [] });
+      const result = validateTddEvidence({
+        exception: { category: 'config-only', reason: 'tsconfig' },
+        cycles: [],
+      });
       assert.equal(result.valid, true);
     });
 
     it('structured exception with valid category file-move', () => {
-      const result = validateTddEvidence({ exception: { category: 'file-move', reason: 'renamed' }, cycles: [] });
+      const result = validateTddEvidence({
+        exception: { category: 'file-move', reason: 'renamed' },
+        cycles: [],
+      });
       assert.equal(result.valid, true);
     });
 
     it('structured exception with invalid category rejects', () => {
-      const result = validateTddEvidence({ exception: { category: 'whatever', reason: 'x' }, cycles: [] });
+      const result = validateTddEvidence({
+        exception: { category: 'whatever', reason: 'x' },
+        cycles: [],
+      });
       assert.equal(result.valid, false);
-      assert.ok(result.reason.includes('Invalid exception category'), `Expected reason to contain "Invalid exception category", got: ${result.reason}`);
+      assert.ok(
+        result.reason.includes('Invalid exception category'),
+        `Expected reason to contain "Invalid exception category", got: ${result.reason}`
+      );
     });
 
     it('structured exception with missing category rejects', () => {
@@ -913,13 +954,22 @@ describe('TDD enforcement', () => {
     it('structured exception with missing reason rejects', () => {
       const result = validateTddEvidence({ exception: { category: 'config-only' }, cycles: [] });
       assert.equal(result.valid, false);
-      assert.ok(result.reason.includes('Exception reason is required'), `Expected reason message, got: ${result.reason}`);
+      assert.ok(
+        result.reason.includes('Exception reason is required'),
+        `Expected reason message, got: ${result.reason}`
+      );
     });
 
     it('structured exception with empty reason rejects', () => {
-      const result = validateTddEvidence({ exception: { category: 'config-only', reason: '  ' }, cycles: [] });
+      const result = validateTddEvidence({
+        exception: { category: 'config-only', reason: '  ' },
+        cycles: [],
+      });
       assert.equal(result.valid, false);
-      assert.ok(result.reason.includes('Exception reason is required'), `Expected reason message, got: ${result.reason}`);
+      assert.ok(
+        result.reason.includes('Exception reason is required'),
+        `Expected reason message, got: ${result.reason}`
+      );
     });
   });
 
@@ -969,11 +1019,7 @@ describe('TDD enforcement', () => {
         workState: {
           tasksMeta: {
             currentTaskIndex: 0,
-            tasks: [
-              { id: 'task-1', taskReviewFixRounds: 0 },
-              { id: 'task-2' },
-              { id: 'task-3' },
-            ],
+            tasks: [{ id: 'task-1', taskReviewFixRounds: 0 }, { id: 'task-2' }, { id: 'task-3' }],
           },
         },
       });
@@ -1015,10 +1061,7 @@ describe('TDD enforcement', () => {
         workState: {
           tasksMeta: {
             currentTaskIndex: 0,
-            tasks: [
-              { id: 'task-1', taskReviewFixRounds: 0 },
-              { id: 'task-2' },
-            ],
+            tasks: [{ id: 'task-1', taskReviewFixRounds: 0 }, { id: 'task-2' }],
           },
         },
       });

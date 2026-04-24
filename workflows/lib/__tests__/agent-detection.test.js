@@ -305,7 +305,6 @@ describe('isRunningInAgent — hookData.agent_type', () => {
     const hookData = { agent_type: 'Code-Checker' };
     assert.ok(isRunningInAgent('/nonexistent/transcript.json', ['code-checker'], hookData));
   });
-
 });
 
 // ─── isRunningInAgent — debug logging for agent_type ─────────────────────────

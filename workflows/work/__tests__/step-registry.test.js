@@ -13,7 +13,9 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
 
-const { STEPS, ALL_STEPS, STEP_ORDER, STEP_TRANSITIONS } = require(path.join(__dirname, '..', 'step-registry'));
+const { STEPS, ALL_STEPS, STEP_ORDER, STEP_TRANSITIONS } = require(
+  path.join(__dirname, '..', 'step-registry')
+);
 
 describe('step-registry', () => {
   describe('STEPS constant map', () => {

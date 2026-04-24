@@ -171,7 +171,7 @@ function validatePlan(plan) {
     if (entry.action === 'SKIP') {
       throw new Error(
         `Plan validation failed: step "${entry.step}" has forbidden action "SKIP". ` +
-        `All steps must use RUN or DEFER.`
+          `All steps must use RUN or DEFER.`
       );
     }
   }

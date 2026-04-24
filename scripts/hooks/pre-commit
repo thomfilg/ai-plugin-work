@@ -1,0 +1,14 @@
+#!/bin/sh
+# Pre-commit hook: format staged JS files with biome
+# Install: git config core.hooksPath scripts/hooks
+
+STAGED=$(git diff --cached --name-only --diff-filter=ACM -- '*.js' '*.json')
+[ -z "$STAGED" ] && exit 0
+
+# Format staged files in place
+echo "$STAGED" | xargs npx biome format --write 2>/dev/null
+
+# Re-stage any reformatted files
+echo "$STAGED" | xargs git add
+
+exit 0

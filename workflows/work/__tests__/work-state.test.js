@@ -736,10 +736,7 @@ describe('work-state.js', () => {
       try {
         await runWorkState(['init', TICKET_NO_TASKS]);
 
-        const { code, stderr } = await runWorkState([
-          'task-review-fix-rounds',
-          TICKET_NO_TASKS,
-        ]);
+        const { code, stderr } = await runWorkState(['task-review-fix-rounds', TICKET_NO_TASKS]);
         assert.equal(code, 1);
         const errResult = JSON.parse(stderr.trim());
         assert.ok(errResult.error);

@@ -356,7 +356,8 @@ async function main() {
     // Non-web apps or packages changed — start all web apps for mandatory QA
     const allWebApps = Object.keys(appsMap);
     if (allWebApps.length > 0) {
-      console.error( // cli apps are already filtered out of appsMap
+      console.error(
+        // cli apps are already filtered out of appsMap
         `Package/non-web changes detected (${IMPACTED_APPS.join(', ')}) — starting all ${allWebApps.length} web apps for mandatory QA`
       );
       webAppsToStart = allWebApps;

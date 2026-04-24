@@ -66,10 +66,7 @@ function createWorkState(ticketDir, overrides = {}) {
 
 function createTddPhaseState(ticketDir, phase) {
   const statePath = path.join(ticketDir, 'tdd-phase.json');
-  fs.writeFileSync(
-    statePath,
-    JSON.stringify({ currentPhase: phase, currentCycle: 1, cycles: [] })
-  );
+  fs.writeFileSync(statePath, JSON.stringify({ currentPhase: phase, currentCycle: 1, cycles: [] }));
   return statePath;
 }
 
@@ -77,10 +74,7 @@ function createPerTaskTddPhaseState(ticketDir, taskNum, phase) {
   const taskDir = path.join(ticketDir, 'task' + taskNum);
   fs.mkdirSync(taskDir, { recursive: true });
   const statePath = path.join(taskDir, 'tdd-phase.json');
-  fs.writeFileSync(
-    statePath,
-    JSON.stringify({ currentPhase: phase, currentCycle: 1, cycles: [] })
-  );
+  fs.writeFileSync(statePath, JSON.stringify({ currentPhase: phase, currentCycle: 1, cycles: [] }));
   return statePath;
 }
 
@@ -104,10 +98,19 @@ function makeTranscript(content = '') {
     os.tmpdir(),
     'test-wie-' + Date.now() + '-' + Math.random().toString(36).slice(2) + '.jsonl'
   );
-  fs.writeFileSync(tp, content); _transcriptPaths.push(tp);
+  fs.writeFileSync(tp, content);
+  _transcriptPaths.push(tp);
   return tp;
 }
-afterEach(() => { while (_transcriptPaths.length) { try { fs.unlinkSync(_transcriptPaths.pop()); } catch { /* already cleaned */ } } });
+afterEach(() => {
+  while (_transcriptPaths.length) {
+    try {
+      fs.unlinkSync(_transcriptPaths.pop());
+    } catch {
+      /* already cleaned */
+    }
+  }
+});
 describe('work-implement-enforce hook (GH-219 Task 14 — state-based)', () => {
   it('should APPROVE non-blocked tools (Read, Bash)', async () => {
     const { result } = await runHook({ tool_name: 'Read', tool_input: {} });
@@ -155,7 +158,11 @@ describe('work-implement-enforce hook (GH-219 Task 14 — state-based)', () => {
     const env = createTestEnv('TEST-MD');
     const tp = makeTranscript();
     const { result } = await runHookWithEnv(
-      { tool_name: 'Write', tool_input: { file_path: '/home/node/project/README.md' }, transcript_path: tp },
+      {
+        tool_name: 'Write',
+        tool_input: { file_path: '/home/node/project/README.md' },
+        transcript_path: tp,
+      },
       env.env
     );
     env.cleanup();
@@ -166,7 +173,11 @@ describe('work-implement-enforce hook (GH-219 Task 14 — state-based)', () => {
     const env = createTestEnv('TEST-CLAUDE');
     const tp = makeTranscript();
     const { result } = await runHookWithEnv(
-      { tool_name: 'Write', tool_input: { file_path: '/tmp/project/.claude/hooks/test.js' }, transcript_path: tp },
+      {
+        tool_name: 'Write',
+        tool_input: { file_path: '/tmp/project/.claude/hooks/test.js' },
+        transcript_path: tp,
+      },
       env.env
     );
     env.cleanup();
@@ -177,7 +188,11 @@ describe('work-implement-enforce hook (GH-219 Task 14 — state-based)', () => {
     const env = createTestEnv('TEST-NOAGENT');
     const tp = makeTranscript('');
     const { result } = await runHookWithEnv(
-      { tool_name: 'Edit', tool_input: { file_path: '/home/node/project/src/app.ts' }, transcript_path: tp },
+      {
+        tool_name: 'Edit',
+        tool_input: { file_path: '/home/node/project/src/app.ts' },
+        transcript_path: tp,
+      },
       env.env
     );
     env.cleanup();
@@ -190,7 +205,11 @@ describe('work-implement-enforce hook (GH-219 Task 14 — state-based)', () => {
     createTddPhaseState(env.ticketDir, 'green');
     const tp = makeTranscript('"subagent_type": "developer-nodejs-tdd"\n');
     const { result } = await runHookWithEnv(
-      { tool_name: 'Edit', tool_input: { file_path: '/home/node/project/src/app.ts' }, transcript_path: tp },
+      {
+        tool_name: 'Edit',
+        tool_input: { file_path: '/home/node/project/src/app.ts' },
+        transcript_path: tp,
+      },
       env.env
     );
     env.cleanup();
@@ -202,7 +221,11 @@ describe('work-implement-enforce hook (GH-219 Task 14 — state-based)', () => {
     createTddPhaseState(env.ticketDir, 'green');
     const tp = makeTranscript('"subagent_type": "work-workflow:developer-nodejs-tdd"\n');
     const { result } = await runHookWithEnv(
-      { tool_name: 'Edit', tool_input: { file_path: '/home/node/project/src/app.ts' }, transcript_path: tp },
+      {
+        tool_name: 'Edit',
+        tool_input: { file_path: '/home/node/project/src/app.ts' },
+        transcript_path: tp,
+      },
       env.env
     );
     env.cleanup();
@@ -214,7 +237,11 @@ describe('work-implement-enforce hook (GH-219 Task 14 — state-based)', () => {
     createTddPhaseState(env.ticketDir, 'green');
     const tp = makeTranscript('"subagent_type": "code-architect"\n');
     const { result } = await runHookWithEnv(
-      { tool_name: 'Edit', tool_input: { file_path: '/home/node/project/src/app.ts' }, transcript_path: tp },
+      {
+        tool_name: 'Edit',
+        tool_input: { file_path: '/home/node/project/src/app.ts' },
+        transcript_path: tp,
+      },
       { ...env.env, WORK_ARCHITECT_ENABLED: '1' }
     );
     env.cleanup();
@@ -226,7 +253,11 @@ describe('work-implement-enforce hook (GH-219 Task 14 — state-based)', () => {
     createTddPhaseState(env.ticketDir, 'green');
     const tp = makeTranscript('"subagent_type": "work-workflow:code-architect"\n');
     const { result } = await runHookWithEnv(
-      { tool_name: 'Edit', tool_input: { file_path: '/home/node/project/src/app.ts' }, transcript_path: tp },
+      {
+        tool_name: 'Edit',
+        tool_input: { file_path: '/home/node/project/src/app.ts' },
+        transcript_path: tp,
+      },
       { ...env.env, WORK_ARCHITECT_ENABLED: '1' }
     );
     env.cleanup();
@@ -237,12 +268,19 @@ describe('work-implement-enforce hook (GH-219 Task 14 — state-based)', () => {
     const env = createTestEnv('TEST-CA-BLOCK');
     const tp = makeTranscript('');
     const { result } = await runHookWithEnv(
-      { tool_name: 'Edit', tool_input: { file_path: '/home/node/project/src/app.ts' }, transcript_path: tp },
+      {
+        tool_name: 'Edit',
+        tool_input: { file_path: '/home/node/project/src/app.ts' },
+        transcript_path: tp,
+      },
       { ...env.env, WORK_ARCHITECT_ENABLED: '1' }
     );
     env.cleanup();
     assert.strictEqual(result.decision, 'block');
-    assert.ok(result.reason.includes('code-architect'), 'error message should mention code-architect');
+    assert.ok(
+      result.reason.includes('code-architect'),
+      'error message should mention code-architect'
+    );
   });
 
   describe('WORK_ARCHITECT_ENABLED gate', () => {
@@ -250,7 +288,11 @@ describe('work-implement-enforce hook (GH-219 Task 14 — state-based)', () => {
       const env = createTestEnv('TEST-CA-GATE1');
       const tp = makeTranscript('"subagent_type": "code-architect"\n');
       const { result } = await runHookWithEnv(
-        { tool_name: 'Edit', tool_input: { file_path: '/home/node/project/src/app.ts' }, transcript_path: tp },
+        {
+          tool_name: 'Edit',
+          tool_input: { file_path: '/home/node/project/src/app.ts' },
+          transcript_path: tp,
+        },
         { ...env.env, WORK_ARCHITECT_ENABLED: '' }
       );
       env.cleanup();
@@ -262,7 +304,11 @@ describe('work-implement-enforce hook (GH-219 Task 14 — state-based)', () => {
       createTddPhaseState(env.ticketDir, 'green');
       const tp = makeTranscript('"subagent_type": "code-architect"\n');
       const { result } = await runHookWithEnv(
-        { tool_name: 'Edit', tool_input: { file_path: '/home/node/project/src/app.ts' }, transcript_path: tp },
+        {
+          tool_name: 'Edit',
+          tool_input: { file_path: '/home/node/project/src/app.ts' },
+          transcript_path: tp,
+        },
         { ...env.env, WORK_ARCHITECT_ENABLED: '1' }
       );
       env.cleanup();
@@ -273,24 +319,38 @@ describe('work-implement-enforce hook (GH-219 Task 14 — state-based)', () => {
       const env = createTestEnv('TEST-CA-GATE3');
       const tp = makeTranscript('');
       const { result } = await runHookWithEnv(
-        { tool_name: 'Edit', tool_input: { file_path: '/home/node/project/src/app.ts' }, transcript_path: tp },
+        {
+          tool_name: 'Edit',
+          tool_input: { file_path: '/home/node/project/src/app.ts' },
+          transcript_path: tp,
+        },
         { ...env.env, WORK_ARCHITECT_ENABLED: '' }
       );
       env.cleanup();
       assert.strictEqual(result.decision, 'block');
-      assert.ok(!result.reason.includes('code-architect'), 'should NOT mention code-architect when disabled');
+      assert.ok(
+        !result.reason.includes('code-architect'),
+        'should NOT mention code-architect when disabled'
+      );
     });
 
     it('should include code-architect in error message when WORK_ARCHITECT_ENABLED=1', async () => {
       const env = createTestEnv('TEST-CA-GATE4');
       const tp = makeTranscript('');
       const { result } = await runHookWithEnv(
-        { tool_name: 'Edit', tool_input: { file_path: '/home/node/project/src/app.ts' }, transcript_path: tp },
+        {
+          tool_name: 'Edit',
+          tool_input: { file_path: '/home/node/project/src/app.ts' },
+          transcript_path: tp,
+        },
         { ...env.env, WORK_ARCHITECT_ENABLED: '1' }
       );
       env.cleanup();
       assert.strictEqual(result.decision, 'block');
-      assert.ok(result.reason.includes('code-architect'), 'should mention code-architect when enabled');
+      assert.ok(
+        result.reason.includes('code-architect'),
+        'should mention code-architect when enabled'
+      );
     });
   });
 
@@ -298,7 +358,11 @@ describe('work-implement-enforce hook (GH-219 Task 14 — state-based)', () => {
     const env = createTestEnv('TEST-TDD-PROTECT');
     const tp = makeTranscript();
     const { result } = await runHookWithEnv(
-      { tool_name: 'Write', tool_input: { file_path: '/home/node/project/tasks/TEST-123/tdd-phase.json' }, transcript_path: tp },
+      {
+        tool_name: 'Write',
+        tool_input: { file_path: '/home/node/project/tasks/TEST-123/tdd-phase.json' },
+        transcript_path: tp,
+      },
       env.env
     );
     env.cleanup();
@@ -322,7 +386,11 @@ describe('work-implement-enforce hook (GH-219 Task 14 — state-based)', () => {
       createTddPhaseState(env.ticketDir, 'red');
       const tp = makeTranscript('"subagent_type": "developer-nodejs-tdd"\n');
       const { result } = await runHookWithEnv(
-        { tool_name: 'Write', tool_input: { file_path: '/home/node/project/src/app.ts' }, transcript_path: tp },
+        {
+          tool_name: 'Write',
+          tool_input: { file_path: '/home/node/project/src/app.ts' },
+          transcript_path: tp,
+        },
         env.env
       );
       env.cleanup();
@@ -335,7 +403,11 @@ describe('work-implement-enforce hook (GH-219 Task 14 — state-based)', () => {
       createTddPhaseState(env.ticketDir, 'red');
       const tp = makeTranscript('"subagent_type": "developer-nodejs-tdd"\n');
       const { result } = await runHookWithEnv(
-        { tool_name: 'Write', tool_input: { file_path: '/home/node/project/src/app.test.ts' }, transcript_path: tp },
+        {
+          tool_name: 'Write',
+          tool_input: { file_path: '/home/node/project/src/app.test.ts' },
+          transcript_path: tp,
+        },
         env.env
       );
       env.cleanup();
@@ -347,7 +419,11 @@ describe('work-implement-enforce hook (GH-219 Task 14 — state-based)', () => {
       createTddPhaseState(env.ticketDir, 'green');
       const tp = makeTranscript('"subagent_type": "developer-nodejs-tdd"\n');
       const { result } = await runHookWithEnv(
-        { tool_name: 'Write', tool_input: { file_path: '/home/node/project/src/app.test.ts' }, transcript_path: tp },
+        {
+          tool_name: 'Write',
+          tool_input: { file_path: '/home/node/project/src/app.test.ts' },
+          transcript_path: tp,
+        },
         env.env
       );
       env.cleanup();
@@ -360,7 +436,11 @@ describe('work-implement-enforce hook (GH-219 Task 14 — state-based)', () => {
       createTddPhaseState(env.ticketDir, 'green');
       const tp = makeTranscript('"subagent_type": "developer-nodejs-tdd"\n');
       const { result } = await runHookWithEnv(
-        { tool_name: 'Write', tool_input: { file_path: '/home/node/project/src/app.ts' }, transcript_path: tp },
+        {
+          tool_name: 'Write',
+          tool_input: { file_path: '/home/node/project/src/app.ts' },
+          transcript_path: tp,
+        },
         env.env
       );
       env.cleanup();
@@ -372,7 +452,11 @@ describe('work-implement-enforce hook (GH-219 Task 14 — state-based)', () => {
       createTddPhaseState(env.ticketDir, 'green');
       const tp = makeTranscript('"subagent_type": "developer-nodejs-tdd"\n');
       const { result } = await runHookWithEnv(
-        { tool_name: 'Write', tool_input: { file_path: '/home/node/project/__mocks__/foo.js' }, transcript_path: tp },
+        {
+          tool_name: 'Write',
+          tool_input: { file_path: '/home/node/project/__mocks__/foo.js' },
+          transcript_path: tp,
+        },
         env.env
       );
       env.cleanup();
@@ -383,7 +467,11 @@ describe('work-implement-enforce hook (GH-219 Task 14 — state-based)', () => {
       const env = createTestEnv('TDD-NOINIT');
       const tp = makeTranscript('"subagent_type": "developer-nodejs-tdd"\n');
       const { result } = await runHookWithEnv(
-        { tool_name: 'Write', tool_input: { file_path: '/home/node/project/src/app.ts' }, transcript_path: tp },
+        {
+          tool_name: 'Write',
+          tool_input: { file_path: '/home/node/project/src/app.ts' },
+          transcript_path: tp,
+        },
         env.env
       );
       env.cleanup();
@@ -395,7 +483,11 @@ describe('work-implement-enforce hook (GH-219 Task 14 — state-based)', () => {
       const env = createTestEnv('TDD-NOFILE-MD');
       const tp = makeTranscript('"subagent_type": "developer-nodejs-tdd"\n');
       const { result } = await runHookWithEnv(
-        { tool_name: 'Write', tool_input: { file_path: '/home/node/project/README.md' }, transcript_path: tp },
+        {
+          tool_name: 'Write',
+          tool_input: { file_path: '/home/node/project/README.md' },
+          transcript_path: tp,
+        },
         env.env
       );
       env.cleanup();
@@ -406,7 +498,11 @@ describe('work-implement-enforce hook (GH-219 Task 14 — state-based)', () => {
       const env = createTestEnv('TDD-NOFILE-NOAGENT');
       const tp = makeTranscript('');
       const { result } = await runHookWithEnv(
-        { tool_name: 'Write', tool_input: { file_path: '/home/node/project/src/app.ts' }, transcript_path: tp },
+        {
+          tool_name: 'Write',
+          tool_input: { file_path: '/home/node/project/src/app.ts' },
+          transcript_path: tp,
+        },
         env.env
       );
       env.cleanup();
@@ -419,7 +515,11 @@ describe('work-implement-enforce hook (GH-219 Task 14 — state-based)', () => {
       createPerTaskTddPhaseState(env.ticketDir, 14, 'red');
       const tp = makeTranscript('"subagent_type": "developer-nodejs-tdd"\n');
       const { result } = await runHookWithEnv(
-        { tool_name: 'Write', tool_input: { file_path: '/home/node/project/src/app.ts' }, transcript_path: tp },
+        {
+          tool_name: 'Write',
+          tool_input: { file_path: '/home/node/project/src/app.ts' },
+          transcript_path: tp,
+        },
         { ...env.env, WORK_TASK_NUM: '14' }
       );
       env.cleanup();
@@ -447,7 +547,11 @@ describe('work-implement-enforce hook (GH-219 Task 14 — state-based)', () => {
       const env = createTestEnv('TEST-AUDIT');
       const tp = makeTranscript('');
       await runHookWithEnv(
-        { tool_name: 'Edit', tool_input: { file_path: '/home/node/project/src/app.ts' }, transcript_path: tp },
+        {
+          tool_name: 'Edit',
+          tool_input: { file_path: '/home/node/project/src/app.ts' },
+          transcript_path: tp,
+        },
         env.env
       );
       const actionsFile = '.work-actions' + '.json';
@@ -466,7 +570,11 @@ describe('work-implement-enforce hook (GH-219 Task 14 — state-based)', () => {
     it('should NOT activate based on transcript content alone (no state)', async () => {
       const tp = makeTranscript('# Implement Command\n');
       const { result } = await runHookWithEnv(
-        { tool_name: 'Edit', tool_input: { file_path: '/home/node/project/src/app.ts' }, transcript_path: tp },
+        {
+          tool_name: 'Edit',
+          tool_input: { file_path: '/home/node/project/src/app.ts' },
+          transcript_path: tp,
+        },
         { TICKET_ID: '' }
       );
       assert.strictEqual(result.decision, 'approve', 'Should not activate from transcript alone');
@@ -486,7 +594,11 @@ describe('work-implement-enforce hook (GH-219 Task 14 — state-based)', () => {
         { ...env.env, WORK_TASK_NUM: '5', WORK_PR_SLOT: '1' }
       );
       env.cleanup();
-      assert.strictEqual(result.decision, 'approve', 'Writes to PR{N}/ should be allowed in task-aware mode');
+      assert.strictEqual(
+        result.decision,
+        'approve',
+        'Writes to PR{N}/ should be allowed in task-aware mode'
+      );
     });
 
     it('should APPROVE writes to task{N}/ dir when task-aware mode active', async () => {
@@ -513,7 +625,11 @@ describe('work-implement-enforce hook (GH-219 Task 14 — state-based)', () => {
         { ...env.env, WORK_TASK_NUM: '5' }
       );
       env.cleanup();
-      assert.strictEqual(result.decision, 'approve', 'Writes to shared whitelist files should be allowed');
+      assert.strictEqual(
+        result.decision,
+        'approve',
+        'Writes to shared whitelist files should be allowed'
+      );
     });
 
     it('should BLOCK writes outside allow list when task-aware and developer agent present', async () => {
@@ -526,9 +642,14 @@ describe('work-implement-enforce hook (GH-219 Task 14 — state-based)', () => {
         { ...env.env, WORK_TASK_NUM: '5', WORK_PR_SLOT: '1' }
       );
       env.cleanup();
-      assert.strictEqual(result.decision, 'block', 'Writes outside allow list should be blocked in task-aware mode');
+      assert.strictEqual(
+        result.decision,
+        'block',
+        'Writes outside allow list should be blocked in task-aware mode'
+      );
       assert.ok(
-        result.reason.includes('outside the allowed path set') || result.reason.includes('PATH_NOT_ALLOWED'),
+        result.reason.includes('outside the allowed path set') ||
+          result.reason.includes('PATH_NOT_ALLOWED'),
         'Should mention path not allowed'
       );
     });
@@ -543,17 +664,26 @@ describe('work-implement-enforce hook (GH-219 Task 14 — state-based)', () => {
         env.env
       );
       env.cleanup();
-      assert.strictEqual(result.decision, 'approve', 'Legacy mode (no WORK_TASK_NUM) should not apply path gate');
+      assert.strictEqual(
+        result.decision,
+        'approve',
+        'Legacy mode (no WORK_TASK_NUM) should not apply path gate'
+      );
     });
 
     it('should use isWriteAllowedPath from preflight (not duplicate)', async () => {
       const { isWriteAllowedPath } = require(path.join(__dirname, '..', '..', 'lib', 'preflight'));
-      assert.strictEqual(typeof isWriteAllowedPath, 'function', 'isWriteAllowedPath should be exported from preflight');
-      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wp-test-'));
-      const result = isWriteAllowedPath(
-        path.join(tempDir, 'PR1', 'src', 'file.ts'),
-        { prDir: path.join(tempDir, 'PR1'), taskDir: null, ticketRoot: tempDir }
+      assert.strictEqual(
+        typeof isWriteAllowedPath,
+        'function',
+        'isWriteAllowedPath should be exported from preflight'
       );
+      const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wp-test-'));
+      const result = isWriteAllowedPath(path.join(tempDir, 'PR1', 'src', 'file.ts'), {
+        prDir: path.join(tempDir, 'PR1'),
+        taskDir: null,
+        ticketRoot: tempDir,
+      });
       assert.strictEqual(result, true, 'isWriteAllowedPath should allow PR dir files');
       fs.rmSync(tempDir, { recursive: true, force: true });
     });

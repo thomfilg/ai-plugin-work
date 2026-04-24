@@ -77,7 +77,9 @@ function runHook(toolInput, hookType = 'PostToolUse') {
 
 describe('work-enforce-steps hook', () => {
   after(() => {
-    try { fs.rmSync(TEMP_TASKS_BASE, { recursive: true, force: true }); } catch {}
+    try {
+      fs.rmSync(TEMP_TASKS_BASE, { recursive: true, force: true });
+    } catch {}
     // Restore original env so sibling test files in the same Node process
     // don't inherit our temp base / test project key.
     if (ORIG_ENV.TASKS_BASE === undefined) delete process.env.TASKS_BASE;
@@ -86,7 +88,9 @@ describe('work-enforce-steps hook', () => {
     else process.env.TICKET_PROJECT_KEY = ORIG_ENV.TICKET_PROJECT_KEY;
     // Clear require.cache for config.js so sibling tests re-read it under
     // restored env instead of reusing our cached temp derivation.
-    try { delete require.cache[require.resolve(CONFIG_PATH)]; } catch {}
+    try {
+      delete require.cache[require.resolve(CONFIG_PATH)];
+    } catch {}
   });
 
   it('should exit 0 for non-work/work-pr skills', async () => {
@@ -101,10 +105,7 @@ describe('work-enforce-steps hook', () => {
 
   it('should create session file on PreToolUse for /work', async () => {
     const ticketId = nextTicketId();
-    const { code } = await runHook(
-      { skill: 'work', args: ticketId },
-      'PreToolUse'
-    );
+    const { code } = await runHook({ skill: 'work', args: ticketId }, 'PreToolUse');
     assert.strictEqual(code, 0);
 
     // Check session file was created

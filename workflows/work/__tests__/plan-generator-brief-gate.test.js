@@ -133,15 +133,7 @@ describe('plan-generator brief_gate ordering (GH-215 Task 6.2)', () => {
     // That is fine for the ordering assertion — we only care that a
     // brief_gate entry appears between brief and spec.
     const state = makeState({ hasBrief: true });
-    const { plan } = generatePlan(
-      'TEST-100',
-      null,
-      state,
-      false,
-      null,
-      null,
-      makeDeps()
-    );
+    const { plan } = generatePlan('TEST-100', null, state, false, null, null, makeDeps());
 
     const briefIdx = stepIndex(plan, STEPS.brief);
     const gateIdx = stepIndex(plan, STEPS.brief_gate);
@@ -161,15 +153,7 @@ describe('plan-generator brief_gate ordering (GH-215 Task 6.2)', () => {
     const prev = process.env.WORK_BRIEF_ENABLED;
     process.env.WORK_BRIEF_ENABLED = '0';
     try {
-      const { plan } = generatePlan(
-        'TEST-100',
-        null,
-        makeState(),
-        false,
-        null,
-        null,
-        makeDeps()
-      );
+      const { plan } = generatePlan('TEST-100', null, makeState(), false, null, null, makeDeps());
 
       const briefIdx = stepIndex(plan, STEPS.brief);
       const gateIdx = stepIndex(plan, STEPS.brief_gate);

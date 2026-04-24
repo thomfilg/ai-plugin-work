@@ -18,7 +18,11 @@ function validateManifestEntry(entry) {
     if (entry.appType !== 'cli') {
       errors.push('defaultPort is required for web and api apps');
     }
-  } else if (typeof entry.defaultPort !== 'number' || entry.defaultPort < 1024 || entry.defaultPort > 65535) {
+  } else if (
+    typeof entry.defaultPort !== 'number' ||
+    entry.defaultPort < 1024 ||
+    entry.defaultPort > 65535
+  ) {
     errors.push(`Port ${entry.defaultPort} is outside valid range (1024-65535)`);
   }
 
@@ -52,13 +56,16 @@ function validateManifestEntry(entry) {
  * @returns {Array<object>} Array of validated app configurations
  */
 function discoverApps() {
-  if (!config.WEB_APPS || !Array.isArray(config.WEB_APPS) || config.WEB_APPS.length === 0) return [];
+  if (!config.WEB_APPS || !Array.isArray(config.WEB_APPS) || config.WEB_APPS.length === 0)
+    return [];
   const map = config.webAppsMap();
   const entries = Object.entries(map).map(([name, fields]) => ({ name, ...fields }));
-  return entries.filter(app => {
+  return entries.filter((app) => {
     const validation = validateManifestEntry(app);
     if (!validation.valid) {
-      console.error(`[app-access] Skipping invalid app "${app.name}": ${validation.errors.join(', ')}`);
+      console.error(
+        `[app-access] Skipping invalid app "${app.name}": ${validation.errors.join(', ')}`
+      );
       return false;
     }
     return true;
@@ -78,7 +85,10 @@ function httpGet(url, timeout) {
       res.resume();
     });
     req.on('error', reject);
-    req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error('timeout'));
+    });
   });
 }
 
@@ -94,8 +104,13 @@ function httpGet(url, timeout) {
 function buildFailureResult(url, healthEndpoint, port, responseCode, error) {
   let lsofOutput = '';
   try {
-    lsofOutput = execSync(`lsof -i :${port} -P -n 2>/dev/null | head -5`, { encoding: 'utf8', timeout: 3000 });
-  } catch { /* ignore */ }
+    lsofOutput = execSync(`lsof -i :${port} -P -n 2>/dev/null | head -5`, {
+      encoding: 'utf8',
+      timeout: 3000,
+    });
+  } catch {
+    /* ignore */
+  }
 
   return {
     status: AppAccessStatus.ACCESS_FAILED,
@@ -114,7 +129,12 @@ function buildFailureResult(url, healthEndpoint, port, responseCode, error) {
  * @returns {Promise<object>} Health check result
  */
 async function checkHealth(app, options = {}) {
-  const { timeout = 5000, retries = 3, retryInterval = 2000, host = 'host.docker.internal' } = options;
+  const {
+    timeout = 5000,
+    retries = 3,
+    retryInterval = 2000,
+    host = 'host.docker.internal',
+  } = options;
   const port = app.defaultPort;
   const healthEndpoint = app.healthEndpoint || '/';
   const url = `http://${host}:${port}${healthEndpoint}`;
@@ -132,7 +152,13 @@ async function checkHealth(app, options = {}) {
       }
       // Non-success status code
       if (attempt === retries) {
-        return buildFailureResult(url, healthEndpoint, port, result.statusCode, `HTTP ${result.statusCode}`);
+        return buildFailureResult(
+          url,
+          healthEndpoint,
+          port,
+          result.statusCode,
+          `HTTP ${result.statusCode}`
+        );
       }
     } catch (err) {
       if (attempt === retries) {
@@ -141,7 +167,7 @@ async function checkHealth(app, options = {}) {
     }
     // Wait before retry (only if not last attempt)
     if (attempt < retries) {
-      await new Promise(resolve => setTimeout(resolve, retryInterval));
+      await new Promise((resolve) => setTimeout(resolve, retryInterval));
     }
   }
 
@@ -184,4 +210,11 @@ function buildAccessPayload(app, healthResult) {
   };
 }
 
-module.exports = { discoverApps, validateManifestEntry, checkHealth, classifyResult, buildAccessPayload, AppAccessStatus };
+module.exports = {
+  discoverApps,
+  validateManifestEntry,
+  checkHealth,
+  classifyResult,
+  buildAccessPayload,
+  AppAccessStatus,
+};

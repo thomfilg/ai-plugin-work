@@ -64,9 +64,8 @@ function transitionStep(ticket, targetStep, deps) {
   }
 
   // Extract 1-indexed task number from work state for per-task TDD paths (GH-219 Task 2)
-  const taskNum = ws?.tasksMeta?.currentTaskIndex != null
-    ? ws.tasksMeta.currentTaskIndex + 1
-    : undefined;
+  const taskNum =
+    ws?.tasksMeta?.currentTaskIndex != null ? ws.tasksMeta.currentTaskIndex + 1 : undefined;
 
   // TDD gate: require evidence before leaving gated steps (always enforced)
   if (TDD_GATED_STEPS.includes(currentStep) && currentStep !== targetStep) {

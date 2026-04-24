@@ -209,7 +209,7 @@ describe('archiveStepArtifacts', () => {
 
     // No taskN/ dirs should exist in run dir
     const runContents = fs.readdirSync(runDir);
-    const taskDirs = runContents.filter(d => /^task\d+$/.test(d));
+    const taskDirs = runContents.filter((d) => /^task\d+$/.test(d));
     assert.equal(taskDirs.length, 0);
   });
 });

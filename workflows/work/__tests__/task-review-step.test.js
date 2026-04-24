@@ -95,7 +95,9 @@ describe('task-review step', () => {
     ];
     const s = makeState({
       hasTasks: true,
-      workState: { tasksMeta: { currentTaskIndex: 0, tasks: [{ id: 'task-1' }, { id: 'task-2' }] } },
+      workState: {
+        tasksMeta: { currentTaskIndex: 0, tasks: [{ id: 'task-1' }, { id: 'task-2' }] },
+      },
     });
     const ctx = makeCtx({ _taskData: taskData, _currentTaskIdx: 0 });
     taskReviewStep(add, s, ctx);
@@ -203,11 +205,7 @@ describe('task-review step', () => {
       workState: {
         tasksMeta: {
           currentTaskIndex: 0,
-          tasks: [
-            { id: 'task-1', taskReviewFixRounds: 0 },
-            { id: 'task-2' },
-            { id: 'task-3' },
-          ],
+          tasks: [{ id: 'task-1', taskReviewFixRounds: 0 }, { id: 'task-2' }, { id: 'task-3' }],
         },
       },
     });
@@ -234,10 +232,7 @@ describe('task-review step', () => {
       workState: {
         tasksMeta: {
           currentTaskIndex: 0,
-          tasks: [
-            { id: 'task-1', taskReviewFixRounds: 0 },
-            { id: 'task-2' },
-          ],
+          tasks: [{ id: 'task-1', taskReviewFixRounds: 0 }, { id: 'task-2' }],
         },
       },
     });
@@ -261,10 +256,7 @@ describe('task-review step', () => {
       workState: {
         tasksMeta: {
           currentTaskIndex: 0,
-          tasks: [
-            { id: 'task-1', taskReviewFixRounds: 2 },
-            { id: 'task-2' },
-          ],
+          tasks: [{ id: 'task-1', taskReviewFixRounds: 2 }, { id: 'task-2' }],
         },
       },
     });
@@ -290,10 +282,7 @@ describe('task-review step', () => {
       workState: {
         tasksMeta: {
           currentTaskIndex: 0,
-          tasks: [
-            { id: 'task-1', taskReviewFixRounds: 1 },
-            { id: 'task-2' },
-          ],
+          tasks: [{ id: 'task-1', taskReviewFixRounds: 1 }, { id: 'task-2' }],
         },
       },
     });
@@ -314,10 +303,7 @@ describe('task-review step', () => {
       workState: {
         tasksMeta: {
           currentTaskIndex: 0,
-          tasks: [
-            { id: 'task-1', taskReviewFixRounds: 1 },
-            { id: 'task-2' },
-          ],
+          tasks: [{ id: 'task-1', taskReviewFixRounds: 1 }, { id: 'task-2' }],
         },
       },
     });
@@ -352,7 +338,11 @@ describe('task-review step', () => {
 
     it('exports taskReviewStep as a named export', () => {
       const barrel = require(path.join(__dirname, '..', 'steps', 'index.js'));
-      assert.equal(typeof barrel.taskReviewStep, 'function', 'steps/index.js should export taskReviewStep');
+      assert.equal(
+        typeof barrel.taskReviewStep,
+        'function',
+        'steps/index.js should export taskReviewStep'
+      );
     });
   });
 });

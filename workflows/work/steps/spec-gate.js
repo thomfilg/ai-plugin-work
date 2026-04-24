@@ -59,12 +59,20 @@ function specGateStep(add, s, ctx) {
   const allErrors = [...parsed.errors, ...validation.errors];
   if (validation.valid && parsed.errors.length === 0) {
     const totalScenarios = parsed.features.reduce((sum, f) => sum + f.scenarios.length, 0);
-    const integrationCount = parsed.features.reduce((sum, f) =>
-      sum + f.scenarios.filter((sc) => sc.tags.includes('@integration')).length, 0);
-    const e2eCount = parsed.features.reduce((sum, f) =>
-      sum + f.scenarios.filter((sc) => sc.tags.includes('@e2e')).length, 0);
-    add(STEPS.spec_gate, 'DEFER', null,
-      `Gherkin validation passed (${totalScenarios} scenarios, ${integrationCount} @integration, ${e2eCount} @e2e)`);
+    const integrationCount = parsed.features.reduce(
+      (sum, f) => sum + f.scenarios.filter((sc) => sc.tags.includes('@integration')).length,
+      0
+    );
+    const e2eCount = parsed.features.reduce(
+      (sum, f) => sum + f.scenarios.filter((sc) => sc.tags.includes('@e2e')).length,
+      0
+    );
+    add(
+      STEPS.spec_gate,
+      'DEFER',
+      null,
+      `Gherkin validation passed (${totalScenarios} scenarios, ${integrationCount} @integration, ${e2eCount} @e2e)`
+    );
     return;
   }
 

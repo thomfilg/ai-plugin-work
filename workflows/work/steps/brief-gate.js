@@ -70,10 +70,16 @@ function briefGateStep(add, s, ctx) {
     // returns false on read errors (fail-closed), so emitting DEFER here
     // would create a confusing mismatch ("gate deferred" yet transition
     // blocked). RUN with a helpful message signals the issue clearly.
-    add(STEPS.brief_gate, 'RUN', '/brief', 'brief.md unreadable — regenerate brief before proceeding', {
-      agentType: 'skill',
-      agentPrompt: '/brief',
-    });
+    add(
+      STEPS.brief_gate,
+      'RUN',
+      '/brief',
+      'brief.md unreadable — regenerate brief before proceeding',
+      {
+        agentType: 'skill',
+        agentPrompt: '/brief',
+      }
+    );
     return; // fail-closed: verify() also returns false on read errors — aligned
   }
 

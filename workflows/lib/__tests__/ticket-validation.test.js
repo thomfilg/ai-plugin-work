@@ -172,4 +172,5 @@ describe('assertPathContainment', () => {
 
   it('prevents prefix-sibling attacks', () => {
     assert.throws(() => assertPathContainment(sibling, base), /escapes base/);
-  }); }); // end assertPathContainment
+  });
+}); // end assertPathContainment

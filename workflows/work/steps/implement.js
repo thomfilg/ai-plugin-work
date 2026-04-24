@@ -25,7 +25,9 @@ function _readClaimOwner(tasksDir, taskNum) {
     const raw = fs.readFileSync(lockPath, 'utf8');
     const parsed = JSON.parse(raw);
     return parsed?.ownerId ?? null;
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 // ─── GH-219 Task 16: Dependency-aware message builders ─────────────────────
@@ -61,7 +63,11 @@ function _buildDependencyStatus(currentTask, taskState) {
   const tasks = taskState?.tasks ?? [];
   const currentTaskMeta = tasks.find((t) => t.id === `task_${currentTask.num}`);
   // Backward compat: missing dependencies field → no deps (matches R16 in task-readiness.js)
-  if (!currentTaskMeta || !Array.isArray(currentTaskMeta.dependencies) || currentTaskMeta.dependencies.length === 0) {
+  if (
+    !currentTaskMeta ||
+    !Array.isArray(currentTaskMeta.dependencies) ||
+    currentTaskMeta.dependencies.length === 0
+  ) {
     return null;
   }
   // Build dependency list from persisted tasksMeta (aligned with canStartFromState).
@@ -117,7 +123,15 @@ function _buildDependencyPrompt(depStatus, claimOwner, workerSlot) {
  * @param {object|null} s
  * @returns {string}
  */
-function _buildTaskReason(currentTask, currentTaskIdx, taskData, claimOwner, workerSlot, depStatus, s) {
+function _buildTaskReason(
+  currentTask,
+  currentTaskIdx,
+  taskData,
+  claimOwner,
+  workerSlot,
+  depStatus,
+  s
+) {
   if (!currentTask) {
     return s?.hasDiffVsMain
       ? 'Changes exist but implement not yet completed'
@@ -126,7 +140,9 @@ function _buildTaskReason(currentTask, currentTaskIdx, taskData, claimOwner, wor
 
   const parts = [];
   // Task id + progress
-  parts.push(`Task ${currentTaskIdx + 1}/${taskData.length} (task_${currentTask.num}): ${currentTask.title}`);
+  parts.push(
+    `Task ${currentTaskIdx + 1}/${taskData.length} (task_${currentTask.num}): ${currentTask.title}`
+  );
 
   // Claim + PR slot
   if (claimOwner) {
@@ -215,7 +231,15 @@ module.exports = function implementStep(add, s, ctx) {
         implementMeta
       );
     } else {
-      const reason = _buildTaskReason(currentTask, currentTaskIdx, taskData, claimOwner, workerSlot, depStatus, s);
+      const reason = _buildTaskReason(
+        currentTask,
+        currentTaskIdx,
+        taskData,
+        claimOwner,
+        workerSlot,
+        depStatus,
+        s
+      );
       add(STEPS.implement, 'RUN', '/work-implement <requirements>', reason, implementMeta);
     }
   }

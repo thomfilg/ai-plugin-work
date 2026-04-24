@@ -31,7 +31,11 @@ const MODULE_PATH = path.join(__dirname, '..', 'preflight');
 describe('preflight — module surface (R12)', () => {
   it('exports runPreflight as a function', () => {
     const mod = require(MODULE_PATH);
-    assert.equal(typeof mod.runPreflight, 'function', 'runPreflight must be exported as a function');
+    assert.equal(
+      typeof mod.runPreflight,
+      'function',
+      'runPreflight must be exported as a function'
+    );
   });
 
   it('runPreflight has arity 2 (context, options) per the documented contract', () => {
@@ -52,7 +56,13 @@ describe('preflight — module surface (R12)', () => {
     // Also adds built-in check factories: `createGraphCheck`, `createClaimCheck`, `createPathCheck`.
     assert.deepEqual(
       exported,
-      ['createClaimCheck', 'createGraphCheck', 'createPathCheck', 'isWriteAllowedPath', 'runPreflight'],
+      [
+        'createClaimCheck',
+        'createGraphCheck',
+        'createPathCheck',
+        'isWriteAllowedPath',
+        'runPreflight',
+      ],
       `preflight module must export { createClaimCheck, createGraphCheck, createPathCheck, isWriteAllowedPath, runPreflight }; got: ${exported.join(', ')}`
     );
   });
@@ -72,7 +82,9 @@ describe('preflight — module surface (R12)', () => {
         `preflight must not require work-actions (found: ${id}). ` +
           'Audit persistence is injected by callers via options.audit.'
       );
-    } }); }); // end coupling test
+    }
+  });
+}); // end coupling test
 
 // ─── R12 — Happy path (empty context, no checks) ────────────────────────────
 
@@ -426,7 +438,10 @@ describe('preflight — pluggable checks (R12, §Pattern — pluggable checks)',
     const result = runPreflight({}, { checks });
     assert.equal(result.allow, false, 'must deny even without reasons');
     assert.ok(result.reasons.length > 0, 'must have at least one synthetic reason');
-    assert.ok(result.reasons.includes('PREFLIGHT_DENIED'), 'synthetic reason should be PREFLIGHT_DENIED');
+    assert.ok(
+      result.reasons.includes('PREFLIGHT_DENIED'),
+      'synthetic reason should be PREFLIGHT_DENIED'
+    );
   });
 
   it('deny with empty reasons array still forces allow:false', () => {
@@ -596,7 +611,11 @@ describe('preflight — isWriteAllowedPath export (R6, R12)', () => {
 
   it('isWriteAllowedPath has arity 2 (filePath, allowedPaths)', () => {
     const { isWriteAllowedPath } = require(MODULE_PATH);
-    assert.equal(isWriteAllowedPath.length, 2, 'isWriteAllowedPath(filePath, allowedPaths) needs 2 params');
+    assert.equal(
+      isWriteAllowedPath.length,
+      2,
+      'isWriteAllowedPath(filePath, allowedPaths) needs 2 params'
+    );
   });
 });
 
@@ -1136,7 +1155,13 @@ describe('preflight — createPathCheck (R6 — path intent check)', () => {
       hasWorkflow: true,
     };
 
-    for (const file of ['brief.md', 'spec.md', 'tasks.md', '.work-state.json', '.work-actions.json']) {
+    for (const file of [
+      'brief.md',
+      'spec.md',
+      'tasks.md',
+      '.work-state.json',
+      '.work-actions.json',
+    ]) {
       const check = createPathCheck({
         filePath: `/tasks/GH-219/${file}`,
         allowedPaths: {
@@ -1178,7 +1203,9 @@ describe('preflight — createPathCheck (R6 — path intent check)', () => {
 
 describe('preflight — full composition: graph + claim + path (R3, R4, R6)', () => {
   it('happy path: valid graph, claimed task, matching paths → allow', () => {
-    const { runPreflight, createGraphCheck, createClaimCheck, createPathCheck } = require(MODULE_PATH);
+    const { runPreflight, createGraphCheck, createClaimCheck, createPathCheck } = require(
+      MODULE_PATH
+    );
 
     const ctx = {
       ticketId: 'GH-219',
@@ -1221,7 +1248,9 @@ describe('preflight — full composition: graph + claim + path (R3, R4, R6)', ()
   });
 
   it('audit callback is invoked with full decision on composed happy path', () => {
-    const { runPreflight, createGraphCheck, createClaimCheck, createPathCheck } = require(MODULE_PATH);
+    const { runPreflight, createGraphCheck, createClaimCheck, createPathCheck } = require(
+      MODULE_PATH
+    );
 
     const audited = [];
     const ctx = {
@@ -1246,10 +1275,7 @@ describe('preflight — full composition: graph + claim + path (R3, R4, R6)', ()
       hasWorkflow: true,
     };
 
-    const checks = [
-      createGraphCheck(),
-      createClaimCheck({ taskNum: 2, ownerId: 'PR1' }),
-    ];
+    const checks = [createGraphCheck(), createClaimCheck({ taskNum: 2, ownerId: 'PR1' })];
 
     runPreflight(ctx, { checks, audit: (e) => audited.push(e) });
 

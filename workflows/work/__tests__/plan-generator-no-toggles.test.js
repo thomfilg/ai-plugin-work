@@ -86,10 +86,7 @@ function makeState(overrides = {}) {
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe('GH-253 Task 4: plan-generator.js toggle removal', () => {
-  const planGenSource = fs.readFileSync(
-    path.join(__dirname, '..', 'plan-generator.js'),
-    'utf8'
-  );
+  const planGenSource = fs.readFileSync(path.join(__dirname, '..', 'plan-generator.js'), 'utf8');
 
   it('does not reference WORK_BRIEF_ENABLED in source code', () => {
     assert.ok(
@@ -178,20 +175,36 @@ describe('GH-253 Task 4: plan never contains "disabled" reason', () => {
     assert.equal(briefEntry.action, 'RUN', 'brief should be RUN when artifact missing');
     assert.equal(specEntry.action, 'RUN', 'spec should be RUN when artifact missing');
     // tasks DEFERs when spec.md is absent (dependency not met) — that is correct behavior
-    assert.equal(tasksEntry.action, 'DEFER', 'tasks should DEFER when spec.md dependency is absent');
+    assert.equal(
+      tasksEntry.action,
+      'DEFER',
+      'tasks should DEFER when spec.md dependency is absent'
+    );
   });
 
   it('includes RUN for tasks when spec exists but tasks.md is missing', () => {
     const state = makeState({ hasBrief: true, hasSpec: true, hasTasks: false });
     // fileExists returns true for spec.md path so tasks step can RUN
     const specPath = '/tmp/tasks/TEST-100/spec.md';
-    const { plan } = generatePlan('TEST-100', null, state, false, null, null, makeDeps({
-      fileExists: (p) => p === specPath || p === '/tmp/tasks/TEST-100',
-    }));
+    const { plan } = generatePlan(
+      'TEST-100',
+      null,
+      state,
+      false,
+      null,
+      null,
+      makeDeps({
+        fileExists: (p) => p === specPath || p === '/tmp/tasks/TEST-100',
+      })
+    );
 
     const tasksEntry = plan.find((e) => e.step === STEPS.tasks);
     assert.ok(tasksEntry, 'plan must contain a tasks entry');
-    assert.equal(tasksEntry.action, 'RUN', 'tasks should be RUN when spec exists but tasks.md missing');
+    assert.equal(
+      tasksEntry.action,
+      'RUN',
+      'tasks should be RUN when spec exists but tasks.md missing'
+    );
   });
 });
 

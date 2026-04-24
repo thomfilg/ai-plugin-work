@@ -154,7 +154,12 @@ function autoInitTdd(ticketId, taskNum) {
     // Validate ticketId — reject traversal chars and verify resolved path stays within TASKS_BASE
     if (!ticketId || /\.\./.test(ticketId) || /\\/.test(ticketId)) return;
     if (taskNum != null) {
-      tddStatePath = path.join(TASKS_BASE, safeId(ticketId), taskSegment(taskNum), 'tdd-phase.json');
+      tddStatePath = path.join(
+        TASKS_BASE,
+        safeId(ticketId),
+        taskSegment(taskNum),
+        'tdd-phase.json'
+      );
     } else {
       tddStatePath = path.join(TASKS_BASE, safeId(ticketId), 'tdd-phase.json');
     }
@@ -270,7 +275,7 @@ function completeWork(ticketId) {
   // Terminal guard: block completion if tasks are still pending (GH-245)
   // Array.isArray guards against corrupted state files where tasksMeta.tasks is not an array
   if (state.tasksMeta && Array.isArray(state.tasksMeta.tasks)) {
-    const pendingTasks = state.tasksMeta.tasks.filter(t => t.status !== 'completed');
+    const pendingTasks = state.tasksMeta.tasks.filter((t) => t.status !== 'completed');
     if (pendingTasks.length > 0) {
       return { error: `Cannot complete workflow: ${pendingTasks.length} tasks still pending` };
     }
@@ -886,10 +891,7 @@ try {
 // Extracted to work-state/parallel-workers.js. Re-imported here so all
 // existing consumers of work-state.js are unaffected.
 const _parallelWorkers = require('./work-state/parallel-workers');
-const {
-  allocateWorkerSlot,
-  releaseWorkerSlot,
-} = _parallelWorkers;
+const { allocateWorkerSlot, releaseWorkerSlot } = _parallelWorkers;
 
 // Inject parent functions into submodules to break the circular dependency.
 // MUST run before the CLI `main()` block below — `main()` is async but its

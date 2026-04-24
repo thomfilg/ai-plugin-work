@@ -95,14 +95,7 @@ function main(deps) {
       const state = ticket ? inspect(ticket, providerConfig, suffix) : null;
       let result;
       try {
-        result = generatePlan(
-          ticket,
-          isTicket ? null : raw,
-          state,
-          rework,
-          providerConfig,
-          suffix
-        );
+        result = generatePlan(ticket, isTicket ? null : raw, state, rework, providerConfig, suffix);
       } catch (err) {
         console.log(JSON.stringify({ error: true, message: err?.message || String(err) }));
         process.exit(1);

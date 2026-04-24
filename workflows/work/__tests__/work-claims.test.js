@@ -154,11 +154,7 @@ describe('claimTask — happy path + lock payload (R5)', () => {
     const entries = fs.readdirSync(claimsDirFor(TICKET));
     // Only the canonical lock file should remain. No `.tmp-*` leftovers.
     const leaked = entries.filter((name) => name.startsWith('.tmp-'));
-    assert.deepEqual(
-      leaked,
-      [],
-      `temp lock file(s) leaked into .claims/: ${leaked.join(', ')}`
-    );
+    assert.deepEqual(leaked, [], `temp lock file(s) leaked into .claims/: ${leaked.join(', ')}`);
   });
 });
 
@@ -308,7 +304,19 @@ describe('releaseTask', () => {
 
 describe('claimTask — R15 input validation (fail closed, no I/O)', () => {
   it('rejects bad ticket ids with INVALID_TICKET_ID; creates no directory', () => {
-    const bad = ['', '   ', null, undefined, '../x', '/etc/passwd', 'a\\b', 'a\0b', 'a//b', 'a:b', 'GH-219/'];
+    const bad = [
+      '',
+      '   ',
+      null,
+      undefined,
+      '../x',
+      '/etc/passwd',
+      'a\\b',
+      'a\0b',
+      'a//b',
+      'a:b',
+      'GH-219/',
+    ];
     for (const ticketId of bad) {
       const result = workClaims.claimTask(ticketId, 1, 'PR1');
       assert.equal(
@@ -371,7 +379,11 @@ describe('claimTask — R15 input validation (fail closed, no I/O)', () => {
     const bad = [' GH-219', 'GH-219 ', ' GH-219 ', '\tGH-219', 'GH-219\n'];
     for (const ticketId of bad) {
       const result = workClaims.claimTask(ticketId, 1, 'PR1');
-      assert.equal(result.success, false, `whitespace-padded ${JSON.stringify(ticketId)} must fail`);
+      assert.equal(
+        result.success,
+        false,
+        `whitespace-padded ${JSON.stringify(ticketId)} must fail`
+      );
       assert.equal(result.error.code, 'INVALID_TICKET_ID');
     }
   });
@@ -503,10 +515,7 @@ describe('R5 — does not perturb session-guard / work-state surfaces', () => {
     const result = workClaims.claimTask('A/B/C', 1, 'PR1');
     assert.equal(result.success, false, 'must reject A/B/C');
     assert.equal(result.error.code, 'INVALID_TICKET_ID');
-    assert.ok(
-      result.error.message.includes('/'),
-      'error message must mention the slash issue'
-    );
+    assert.ok(result.error.message.includes('/'), 'error message must mention the slash issue');
   });
 
   it('releaseTask returns idempotent success when lock disappears between existsSync and readLockOwner (TOCTOU)', () => {

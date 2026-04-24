@@ -194,7 +194,11 @@ describe('classifyCommentPriority', () => {
 });
 
 describe('isBotAuthorLogin', () => {
-  const defaultBots = ['copilot-pull-request-reviewer', 'cursor-ai[bot]', 'chatgpt-codex-connector[bot]'];
+  const defaultBots = [
+    'copilot-pull-request-reviewer',
+    'cursor-ai[bot]',
+    'chatgpt-codex-connector[bot]',
+  ];
 
   it('returns true for chatgpt-codex-connector[bot]', () => {
     assert.equal(isBotAuthorLogin('chatgpt-codex-connector[bot]', defaultBots), true);

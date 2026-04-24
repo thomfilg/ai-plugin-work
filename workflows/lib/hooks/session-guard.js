@@ -445,7 +445,9 @@ function readWorkState(ticketId) {
       if (zeroBasedIndex >= 0 && zeroBasedIndex < STEP_ORDER.length) {
         stepName = STEP_ORDER[zeroBasedIndex];
       }
-    } catch { /* step-registry not available — stepName stays null */ }
+    } catch {
+      /* step-registry not available — stepName stays null */
+    }
 
     if (!stepName) return null;
     return { stepName, ticketId };
@@ -525,7 +527,9 @@ function handleStop(hookData) {
         `BLOCKED: You are mid-workflow (/work ${workState.ticketId}). DO NOT STOP.\n\n` +
           `Current step: ${workState.stepName}\n` +
           `Your next action: Run the orchestrator to get your plan and continue executing ALL remaining steps:\n` +
-          '  node "${CLAUDE_PLUGIN_ROOT}/workflows/work/work.workflow.js" ' + workState.ticketId + '\n\n' +
+          '  node "${CLAUDE_PLUGIN_ROOT}/workflows/work/work.workflow.js" ' +
+          workState.ticketId +
+          '\n\n' +
           "Then execute each RUN step in order. Do NOT stop until the workflow reaches 'complete'.\n" +
           'The only step that allows user interaction is brief_gate.\n'
       );

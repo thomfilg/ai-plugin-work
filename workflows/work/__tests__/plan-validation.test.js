@@ -33,10 +33,7 @@ describe('validatePlan (GH-245 Task 8)', () => {
           err.message.includes('bootstrap'),
           'Error message should include the step name "bootstrap"'
         );
-        assert.ok(
-          err.message.includes('SKIP'),
-          'Error message should mention SKIP'
-        );
+        assert.ok(err.message.includes('SKIP'), 'Error message should mention SKIP');
         return true;
       },
       'validatePlan should throw for plan with SKIP action'
@@ -61,18 +58,13 @@ describe('validatePlan (GH-245 Task 8)', () => {
   it('should not throw for an empty plan', () => {
     const { validatePlan } = require('../plan-generator');
 
-    assert.doesNotThrow(
-      () => validatePlan([]),
-      'validatePlan should pass silently for empty plan'
-    );
+    assert.doesNotThrow(() => validatePlan([]), 'validatePlan should pass silently for empty plan');
   });
 
   it('should throw with descriptive error including step name for SKIP entries', () => {
     const { validatePlan } = require('../plan-generator');
 
-    const plan = [
-      { step: 'implement', action: 'SKIP', reason: 'skipped' },
-    ];
+    const plan = [{ step: 'implement', action: 'SKIP', reason: 'skipped' }];
 
     assert.throws(
       () => validatePlan(plan),

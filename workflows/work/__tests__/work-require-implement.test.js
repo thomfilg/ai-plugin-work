@@ -52,10 +52,7 @@ function createStateFixture(ticketId, stateOverrides = {}) {
     ...restOverrides,
   };
 
-  fs.writeFileSync(
-    path.join(ticketDir, '.work-state.json'),
-    JSON.stringify(defaultState, null, 2)
-  );
+  fs.writeFileSync(path.join(ticketDir, '.work-state.json'), JSON.stringify(defaultState, null, 2));
 
   return {
     tasksBase,
@@ -253,7 +250,11 @@ describe('work-require-implement hook', () => {
           tool_name: 'Write',
           tool_input: { file_path: taskFile },
         },
-        { TASKS_BASE: fixture.tasksBase, WORKTREES_BASE: path.dirname(fixture.tasksBase), TICKET_ID: 'GH-219' }
+        {
+          TASKS_BASE: fixture.tasksBase,
+          WORKTREES_BASE: path.dirname(fixture.tasksBase),
+          TICKET_ID: 'GH-219',
+        }
       );
       assert.strictEqual(result.decision, 'approve');
     } finally {
@@ -265,10 +266,7 @@ describe('work-require-implement hook', () => {
 
   it('should APPROVE when inside developer agent', async () => {
     const tp = path.join(os.tmpdir(), `test-wri4-${Date.now()}.jsonl`);
-    fs.writeFileSync(
-      tp,
-      ['"subagent_type": "developer-nodejs-tdd"'].join('\n')
-    );
+    fs.writeFileSync(tp, ['"subagent_type": "developer-nodejs-tdd"'].join('\n'));
     try {
       const { result } = await runHookWithState(
         {
@@ -291,10 +289,7 @@ describe('work-require-implement hook', () => {
 
   it('should APPROVE when inside developer agent with work-workflow: prefix', async () => {
     const tp = path.join(os.tmpdir(), `test-wri-prefix-${Date.now()}.jsonl`);
-    fs.writeFileSync(
-      tp,
-      ['"subagent_type": "work-workflow:developer-nodejs-tdd"'].join('\n')
-    );
+    fs.writeFileSync(tp, ['"subagent_type": "work-workflow:developer-nodejs-tdd"'].join('\n'));
     try {
       const { result } = await runHookWithState(
         {
@@ -317,10 +312,7 @@ describe('work-require-implement hook', () => {
 
   it('should APPROVE when inside code-architect agent with WORK_ARCHITECT_ENABLED=1', async () => {
     const tp = path.join(os.tmpdir(), `test-wri-ca-prefix-${Date.now()}.jsonl`);
-    fs.writeFileSync(
-      tp,
-      ['"subagent_type": "work-workflow:code-architect"'].join('\n')
-    );
+    fs.writeFileSync(tp, ['"subagent_type": "work-workflow:code-architect"'].join('\n'));
     try {
       const { result } = await runHookWithState(
         {
@@ -345,10 +337,7 @@ describe('work-require-implement hook', () => {
   describe('WORK_ARCHITECT_ENABLED gate', () => {
     it('should BLOCK code-architect when WORK_ARCHITECT_ENABLED is not set', async () => {
       const tp = path.join(os.tmpdir(), `test-wri-ca-gate-${Date.now()}.jsonl`);
-      fs.writeFileSync(
-        tp,
-        ['"subagent_type": "code-architect"'].join('\n')
-      );
+      fs.writeFileSync(tp, ['"subagent_type": "code-architect"'].join('\n'));
       try {
         const { result } = await runHookWithState(
           {
@@ -372,10 +361,7 @@ describe('work-require-implement hook', () => {
 
     it('should APPROVE code-architect when WORK_ARCHITECT_ENABLED=1', async () => {
       const tp = path.join(os.tmpdir(), `test-wri-ca-gate2-${Date.now()}.jsonl`);
-      fs.writeFileSync(
-        tp,
-        ['"subagent_type": "code-architect"'].join('\n')
-      );
+      fs.writeFileSync(tp, ['"subagent_type": "code-architect"'].join('\n'));
       try {
         const { result } = await runHookWithState(
           {
@@ -448,7 +434,11 @@ describe('work-require-implement hook', () => {
           tool_name: 'Edit',
           tool_input: { file_path: '/home/node/project/src/app.ts' },
         },
-        { TASKS_BASE: fixture.tasksBase, WORKTREES_BASE: path.dirname(fixture.tasksBase), TICKET_ID: 'GH-219' }
+        {
+          TASKS_BASE: fixture.tasksBase,
+          WORKTREES_BASE: path.dirname(fixture.tasksBase),
+          TICKET_ID: 'GH-219',
+        }
       );
 
       // Check that .work-actions.json was written with an enforcement audit record
@@ -477,7 +467,11 @@ describe('work-require-implement hook', () => {
           tool_name: 'Edit',
           tool_input: { file_path: '/home/node/project/src/app.ts' },
         },
-        { TASKS_BASE: fixture.tasksBase, WORKTREES_BASE: path.dirname(fixture.tasksBase), TICKET_ID: 'GH-219' }
+        {
+          TASKS_BASE: fixture.tasksBase,
+          WORKTREES_BASE: path.dirname(fixture.tasksBase),
+          TICKET_ID: 'GH-219',
+        }
       );
 
       // Check that audit was written on allow path too

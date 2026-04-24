@@ -60,7 +60,9 @@ after(() => {
   else delete process.env.TASKS_BASE;
   try {
     fs.rmSync(TEMP_TASKS_BASE, { recursive: true, force: true });
-  } catch { /* best-effort */ }
+  } catch {
+    /* best-effort */
+  }
 });
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -659,7 +661,8 @@ describe('integration — R18 remediation quality bar', () => {
       'remediation must reference the blocking dependency (Task 1)'
     );
     assert.ok(
-      allRemediation.toLowerCase().includes('complete') || allRemediation.toLowerCase().includes('canstart'),
+      allRemediation.toLowerCase().includes('complete') ||
+        allRemediation.toLowerCase().includes('canstart'),
       'remediation must suggest completing the dependency or checking canStart'
     );
   });
@@ -755,7 +758,8 @@ describe('integration — R18 remediation quality bar', () => {
     assert.ok(result.remediation.length > 0);
     const allRemediation = result.remediation.join(' ');
     assert.ok(
-      allRemediation.toLowerCase().includes('cycle') || allRemediation.toLowerCase().includes('break'),
+      allRemediation.toLowerCase().includes('cycle') ||
+        allRemediation.toLowerCase().includes('break'),
       'cycle remediation must suggest breaking the cycle'
     );
   });
@@ -871,9 +875,6 @@ describe('integration — composed multi-failure aggregation (R20)', () => {
     assert.ok(result.reasons.includes('UNCLAIMED_TASK_WRITE'));
 
     // All remediation steps aggregated
-    assert.ok(
-      result.remediation.length >= 3,
-      'aggregated remediation from all deny sources'
-    );
+    assert.ok(result.remediation.length >= 3, 'aggregated remediation from all deny sources');
   });
 });

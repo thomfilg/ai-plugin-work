@@ -233,7 +233,9 @@ function transitionStep(workflow, stateInstance, instanceId, targetStep) {
     if (verifyResult && (verifyResult.blocked || verifyResult.error)) {
       return {
         error: true,
-        message: verifyResult.message || `BLOCKED: ${currentStep} not verified — cannot transition to ${targetStep}`,
+        message:
+          verifyResult.message ||
+          `BLOCKED: ${currentStep} not verified — cannot transition to ${targetStep}`,
         gate: verifyResult.gate || 'step-verify',
         step: currentStep,
         from: currentStep,

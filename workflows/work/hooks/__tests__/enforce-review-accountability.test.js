@@ -31,10 +31,7 @@ function createFixture(ticketId, { commentCount = 1, accountability = null } = {
   // Fake .git/HEAD
   const gitDir = path.join(base, '.git');
   fs.mkdirSync(gitDir, { recursive: true });
-  fs.writeFileSync(
-    path.join(gitDir, 'HEAD'),
-    `ref: refs/heads/${ticketId}-fix-something\n`
-  );
+  fs.writeFileSync(path.join(gitDir, 'HEAD'), `ref: refs/heads/${ticketId}-fix-something\n`);
 
   // Fake gh script that returns PR number and comment count
   const binDir = path.join(base, 'bin');
@@ -92,8 +89,12 @@ function runHook(input, { cwd, envOverrides = {} } = {}) {
     });
     let stdout = '';
     let stderr = '';
-    proc.stdout.on('data', (d) => { stdout += d.toString(); });
-    proc.stderr.on('data', (d) => { stderr += d.toString(); });
+    proc.stdout.on('data', (d) => {
+      stdout += d.toString();
+    });
+    proc.stderr.on('data', (d) => {
+      stderr += d.toString();
+    });
     proc.on('close', (code) => resolve({ code, stderr, stdout }));
     proc.on('error', reject);
     proc.stdin.write(JSON.stringify(input));
@@ -113,9 +114,7 @@ describe('enforce-review-accountability: file field not required', () => {
   it('should ALLOW entries with disposition+reason but no file field (exit 0)', async () => {
     const fixture = createFixture('GH-285', {
       commentCount: 1,
-      accountability: [
-        { disposition: 'addressed', reason: 'Fixed in commit abc123' },
-      ],
+      accountability: [{ disposition: 'addressed', reason: 'Fixed in commit abc123' }],
     });
     cleanups.push(fixture.cleanup);
 
@@ -128,7 +127,8 @@ describe('enforce-review-accountability: file field not required', () => {
     });
 
     assert.strictEqual(
-      code, 0,
+      code,
+      0,
       `Expected exit 0 (allow) for entry without file field, got ${code}. stderr: ${stderr}`
     );
   });
@@ -136,9 +136,7 @@ describe('enforce-review-accountability: file field not required', () => {
   it('should still BLOCK entries missing disposition (exit 2)', async () => {
     const fixture = createFixture('GH-285', {
       commentCount: 1,
-      accountability: [
-        { reason: 'some reason but no disposition' },
-      ],
+      accountability: [{ reason: 'some reason but no disposition' }],
     });
     cleanups.push(fixture.cleanup);
 
@@ -157,9 +155,7 @@ describe('enforce-review-accountability: file field not required', () => {
   it('should still BLOCK entries missing reason (exit 2)', async () => {
     const fixture = createFixture('GH-285', {
       commentCount: 1,
-      accountability: [
-        { disposition: 'addressed' },
-      ],
+      accountability: [{ disposition: 'addressed' }],
     });
     cleanups.push(fixture.cleanup);
 
@@ -178,9 +174,7 @@ describe('enforce-review-accountability: file field not required', () => {
   it('should ALLOW entries that include file field alongside disposition+reason (exit 0)', async () => {
     const fixture = createFixture('GH-285', {
       commentCount: 1,
-      accountability: [
-        { file: 'src/index.js', disposition: 'outdated', reason: 'Code removed' },
-      ],
+      accountability: [{ file: 'src/index.js', disposition: 'outdated', reason: 'Code removed' }],
     });
     cleanups.push(fixture.cleanup);
 
@@ -193,7 +187,8 @@ describe('enforce-review-accountability: file field not required', () => {
     });
 
     assert.strictEqual(
-      code, 0,
+      code,
+      0,
       `Expected exit 0 (allow) for entry with file field present, got ${code}. stderr: ${stderr}`
     );
   });
@@ -202,7 +197,7 @@ describe('enforce-review-accountability: file field not required', () => {
     const fixture = createFixture('GH-285', {
       commentCount: 1,
       accountability: [
-        { file: 'src/index.js' },  // has file but missing disposition + reason
+        { file: 'src/index.js' }, // has file but missing disposition + reason
       ],
     });
     cleanups.push(fixture.cleanup);
@@ -229,7 +224,7 @@ describe('enforce-review-accountability: file field not required', () => {
   it('should not show file or line fields in schema documentation', async () => {
     const fixture = createFixture('GH-285', {
       commentCount: 1,
-      accountability: null,  // no file → triggers schema docs output
+      accountability: null, // no file → triggers schema docs output
     });
     cleanups.push(fixture.cleanup);
 

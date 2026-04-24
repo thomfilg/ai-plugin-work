@@ -139,7 +139,13 @@ function inspect(ticket, providerConfig, suffix, deps) {
     const { validateTddEvidence } = require(path.join(__dirname, 'tdd-enforcement'));
     s.perTaskReports = {};
     const taskDirNames = listFiles(s.tasksDir, /^task\d+$/)
-      .filter((fp) => { try { return fs.statSync(fp).isDirectory(); } catch { return false; } })
+      .filter((fp) => {
+        try {
+          return fs.statSync(fp).isDirectory();
+        } catch {
+          return false;
+        }
+      })
       .map((fp) => path.basename(fp));
     for (const taskDirName of taskDirNames) {
       const taskDir = path.join(s.tasksDir, taskDirName);
@@ -153,7 +159,9 @@ function inspect(ticket, providerConfig, suffix, deps) {
           const validation = validateTddEvidence(tddData);
           const hasException =
             (typeof tddData.exception === 'string' && tddData.exception.trim() !== '') ||
-            (typeof tddData.exception === 'object' && tddData.exception !== null && typeof tddData.exception.category === 'string');
+            (typeof tddData.exception === 'object' &&
+              tddData.exception !== null &&
+              typeof tddData.exception.category === 'string');
           taskReport.tddPhase = {
             exists: true,
             valid: validation.valid,
