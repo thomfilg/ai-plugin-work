@@ -553,6 +553,7 @@ JSON array where each entry contains:
 |-------|------|-------------|
 | `id` | `number\|null` | GitHub comment ID |
 | `author` | `string` | Comment author |
+| `path` | `string\|null` | File path associated with the comment, or `null` when not tied to a specific file |
 | `comment` | `string` | Comment text (truncated to 120 chars) |
 | `disposition` | `string` | One of: `addressed`, `acknowledged`, `outdated` |
 | `reason` | `string` | Why this disposition was chosen |
