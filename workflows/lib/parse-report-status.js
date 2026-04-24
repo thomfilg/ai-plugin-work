@@ -110,14 +110,18 @@ function checkFailMarkers(content, type) {
  * @returns {string|null}
  */
 function checkStatusLine(content) {
-  const re = /\*{0,2}Status:\*{0,2}\s*\*{0,2}\s*([A-Z_]+)\s*\*{0,2}/gi;
+  // Match Status: at start of line (^ with multiline) to avoid matching
+  // Status: mentions inside prose or bullet points. Scan all matches and
+  // return the LAST one (the final verdict, typically at end of report).
+  const re = /^\*{0,2}Status:\*{0,2}\s*\*{0,2}\s*([A-Z_]+)\s*\*{0,2}/gim;
   let match;
+  let lastResolved = null;
   while ((match = re.exec(content)) !== null) {
     const raw = match[1].toUpperCase();
     const resolved = STATUS_ALIASES[raw];
-    if (resolved) return resolved;
+    if (resolved) lastResolved = resolved;
   }
-  return null;
+  return lastResolved;
 }
 
 /**
