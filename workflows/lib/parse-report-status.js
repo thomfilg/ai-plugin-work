@@ -38,7 +38,7 @@ STATUS_ALIASES['NOT_APPLICABLE'] = 'NOT_APPLICABLE';
 const TYPE_CHECKS = Object.create(null);
 
 TYPE_CHECKS['tests'] = Object.create(null);
-TYPE_CHECKS['tests'].fail = ['❌ FAIL', 'NEEDS_WORK', 'fail [1-9]\\d*'];
+TYPE_CHECKS['tests'].fail = ['❌ FAIL', 'NEEDS_WORK', '(?:^|\\n|ℹ\\s*)fail [1-9]\\d*'];
 TYPE_CHECKS['tests'].pass = ['✅ PASS', 'APPROVED', 'All.*pass'];
 
 TYPE_CHECKS['codeReview'] = Object.create(null);
@@ -113,7 +113,7 @@ function checkStatusLine(content) {
   // Match Status: at start of line (^ with multiline) to avoid matching
   // Status: mentions inside prose or bullet points. Scan all matches and
   // return the LAST one (the final verdict, typically at end of report).
-  const re = /^\*{0,2}Status:\*{0,2}\s*\*{0,2}\s*([A-Z_]+)\s*\*{0,2}/gim;
+  const re = /^\s*\*{0,2}Status:\*{0,2}\s*\*{0,2}\s*([A-Z_]+)\s*\*{0,2}/gim;
   let match;
   let lastResolved = null;
   while ((match = re.exec(content)) !== null) {
@@ -163,9 +163,9 @@ function checkPassMarkers(content, type) {
  *
  * Format priority:
  *   1. Infrastructure failures (QA only)
- *   2. Fail markers (type-specific, fail-first precedence per R10)
- *   3. Status: line with optional bold markdown
- *   4. Summary table with status column
+ *   2. Status: line with optional bold markdown (authoritative when present)
+ *   3. Summary table with status column
+ *   4. Fail markers (type-specific, only when no explicit Status line)
  *   5. Pass markers (type-specific)
  *   6. Fallback: UNKNOWN
  *
@@ -297,9 +297,9 @@ const ISSUE_TITLE_PATTERNS = [
 // Guard filter: reject spurious bold words that are not real issue titles.
 // Mirrors the guard in work-suggestion-replies.js (lines 109-115).
 const SPURIOUS_TITLE_RE =
-  /^(none|n\/a|no\s+|issues?\s*found|CRITICAL|IMPORTANT|NICE-TO-HAVE|SUGGESTIONS)/i;
+  /^(none|n\/a|no\s+issues?\b|no\s+critical\b|no\s+important\b|none\s+found|issues?\s*found|CRITICAL|IMPORTANT|NICE-TO-HAVE|SUGGESTIONS)/i;
 const FIELD_LABEL_RE =
-  /^(File|Description|Impact|Recommendation|Decision|Reason|Status|Summary|Details|Category|Severity|Priority)$/i;
+  /^(File|Description|Impact|Recommendation|Decision|Reason|Status|Summary|Details|Category|Severity|Priority|Suggestion|Evidence|Location|Context|Resolution|Type|Source|Line|Path)$/i;
 
 /**
  * Extract issue titles from a section of the code-review report.
@@ -322,7 +322,7 @@ function extractIssueTitles(sectionContent) {
       const title = m[1].trim();
       if (
         title &&
-        title.length > 3 &&
+        title.length > 2 &&
         !SPURIOUS_TITLE_RE.test(title) &&
         !FIELD_LABEL_RE.test(title) &&
         !titles.includes(title)

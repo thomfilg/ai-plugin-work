@@ -633,16 +633,29 @@ describe('isCodeReviewResolved — spurious title filtering (GH-232)', () => {
     assert.deepStrictEqual(result.unaddressed, []);
   });
 
-  it('does not treat short bold words (<=3 chars) as issue titles', () => {
+  it('does not treat short bold words (<=2 chars) as issue titles', () => {
     const report = [
       '### 🔴 CRITICAL ISSUES',
-      '**No** issues found here. **Yes** confirmed.',
+      '**No** issues found here. **It** is confirmed.',
       '### 🟢 NICE-TO-HAVE',
     ].join('\n');
 
     const result = isCodeReviewResolved(report, '');
     assert.equal(result.resolved, true, 'Short bold words must not be treated as issue titles');
     assert.deepStrictEqual(result.unaddressed, []);
+  });
+
+  it('treats 3-char titles like XSS or SQL as real issue titles', () => {
+    const report = [
+      '### 🔴 CRITICAL ISSUES',
+      '**XSS** vulnerability found in input handler.',
+      '### 🟢 NICE-TO-HAVE',
+    ].join('\n');
+
+    const result = isCodeReviewResolved(report, '');
+    assert.equal(result.resolved, false, '3-char titles like XSS should be treated as real issues');
+    assert.equal(result.unaddressed.length, 1);
+    assert.ok(result.unaddressed[0].includes('XSS'));
   });
 
   it('does not treat field labels like Decision/Status/Reason as issue titles', () => {
