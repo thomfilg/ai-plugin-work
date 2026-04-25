@@ -393,10 +393,13 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
             const reqs = evidenceRequirements[STEPS.check];
             const required = reqs?.requiredFiles || [];
             if (!required.every((f) => fs.existsSync(path.join(dir, f)))) return false;
-            // At least one QA report must exist (matches qaReportPattern)
-            const files = fs.readdirSync(dir);
-            const qaPattern = reqs?.qaReportPattern;
-            if (qaPattern && !files.some((f) => qaPattern.test(f))) return false;
+            // At least one QA report must exist when web apps are configured
+            const config = require(path.join(__dirname, '..', 'lib', 'config'));
+            if (config.webAppNames().length > 0) {
+              const files = fs.readdirSync(dir);
+              const qaPattern = reqs?.qaReportPattern;
+              if (qaPattern && !files.some((f) => qaPattern.test(f))) return false;
+            }
             // GH-259: When tasks.md exists, verify per-task TDD evidence
             return verifyPerTaskTDD(ticketId);
           } catch {

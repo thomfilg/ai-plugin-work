@@ -635,8 +635,15 @@ describe('per-task path enforcement for .check.md', () => {
 
   function makeProtector(overrides = {}) {
     return createArtifactProtector({
-      artifacts: [{ pattern: /\.check\.md$/, step: 'check', agents: ['code-checker'] }],
-      getStepInProgress: () => overrides.currentStep || 'check',
+      artifacts: [
+        {
+          pattern: /\.check\.md$/,
+          step: 'check',
+          allowedSteps: ['task_review'],
+          agents: ['code-checker'],
+        },
+      ],
+      getStepInProgress: () => overrides.currentStep || 'task_review',
       isRunningInAgent: overrides.isRunningInAgent || (() => true),
       getTicketId: () => overrides.ticketId || TICKET,
       ...overrides,
@@ -1060,6 +1067,69 @@ describe('per-task path enforcement for .check.md', () => {
     assert.equal(result.blocked, true);
     assert.equal(result.rule, 'per-task-path');
     assert.ok(result.message.includes('outside ticket directory'));
+  });
+
+  it('allows .check.md at ticket root during check step (per-task routing skipped)', () => {
+    const ticketDir = path.join(tmpDir, TICKET);
+    fs.mkdirSync(ticketDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(ticketDir, '.work-state.json'),
+      JSON.stringify({ tasksMeta: { totalTasks: 3, currentTaskIndex: 1 } })
+    );
+
+    const p = makeProtector({ currentStep: 'check' });
+    const filePath = path.join(ticketDir, 'tests.check.md');
+    const result = p.check('Write', { file_path: filePath });
+    assert.equal(result.blocked, false);
+  });
+
+  it('blocks .check.md escaping ticket dir during check step (traversal guard still active)', () => {
+    const ticketDir = path.join(tmpDir, TICKET);
+    fs.mkdirSync(path.join(ticketDir, 'task1'), { recursive: true });
+    fs.writeFileSync(
+      path.join(ticketDir, '.work-state.json'),
+      JSON.stringify({ tasksMeta: { totalTasks: 3, currentTaskIndex: 0 } })
+    );
+
+    const p = makeProtector({ currentStep: 'check' });
+    const filePath = ticketDir + '/task1/../../other/tests.check.md';
+    const result = p.check('Write', { file_path: filePath });
+    assert.equal(result.blocked, true);
+    assert.equal(result.rule, 'per-task-path');
+    assert.ok(result.message.includes('outside ticket directory'));
+  });
+
+  it('traversal block message suggests ticket root path during check step', () => {
+    const ticketDir = path.join(tmpDir, TICKET);
+    fs.mkdirSync(path.join(ticketDir, 'task1'), { recursive: true });
+    fs.writeFileSync(
+      path.join(ticketDir, '.work-state.json'),
+      JSON.stringify({ tasksMeta: { totalTasks: 3, currentTaskIndex: 0 } })
+    );
+
+    const p = makeProtector({ currentStep: 'check' });
+    const filePath = ticketDir + '/task1/../../other/tests.check.md';
+    const result = p.check('Write', { file_path: filePath });
+    assert.equal(result.blocked, true);
+    // During check step, suggested path should be ticket root, not per-task
+    assert.ok(result.message.includes(path.join(ticketDir, 'tests.check.md')));
+    assert.ok(!result.message.includes('task1'));
+  });
+
+  it('traversal block message suggests per-task path during non-check step', () => {
+    const ticketDir = path.join(tmpDir, TICKET);
+    fs.mkdirSync(path.join(ticketDir, 'task1'), { recursive: true });
+    fs.writeFileSync(
+      path.join(ticketDir, '.work-state.json'),
+      JSON.stringify({ tasksMeta: { totalTasks: 3, currentTaskIndex: 0 } })
+    );
+
+    const p = makeProtector({ currentStep: 'task_review' });
+    const filePath = ticketDir + '/task1/../../other/tests.check.md';
+    const result = p.check('Write', { file_path: filePath });
+    assert.equal(result.blocked, true);
+    // During non-check step, suggested path should be per-task
+    assert.ok(result.message.includes(path.join(ticketDir, 'task1', 'tests.check.md')));
   });
 
   it('fails open when ticketId contains ../ (path traversal)', () => {

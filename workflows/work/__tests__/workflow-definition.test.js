@@ -18,6 +18,8 @@ const os = require('os');
 const createWorkflowDefinition = require(path.join(__dirname, '..', 'workflow-definition'));
 const { STEPS } = require(path.join(__dirname, '..', 'step-registry'));
 
+const configPath = path.resolve(__dirname, '..', '..', 'lib', 'config.js');
+
 // Minimal deps stub — we only read static config, not call verify fns.
 const stubDeps = {
   TASKS_BASE: '/tmp/tasks-base',
@@ -616,5 +618,95 @@ describe('workflow-definition: verify[STEPS.spec_gate]', () => {
     );
     const verify = getSpecGateVerify();
     assert.equal(verify(ticketId), false);
+  });
+});
+
+describe('workflow-definition: verify[STEPS.check] QA report gating', () => {
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'workflow-def-check-'));
+  const ticketId = 'GH-232';
+  const ticketDir = path.join(tmpRoot, ticketId);
+
+  const deps = {
+    TASKS_BASE: tmpRoot,
+    safeTicketPath: (id) => id,
+    resolveGitHead: () => 'ref: refs/heads/stub',
+  };
+  const { workflow: checkWf } = createWorkflowDefinition(deps);
+
+  function getCheckVerify() {
+    const entries = checkWf.commandMap.filter(
+      (e) => e.step === STEPS.check && typeof e.verify === 'function'
+    );
+    return entries.length > 0 ? entries[0].verify : undefined;
+  }
+
+  after(() => {
+    try {
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+    } catch {
+      /* best-effort */
+    }
+  });
+
+  function setupTicketDir(files) {
+    fs.rmSync(ticketDir, { recursive: true, force: true });
+    fs.mkdirSync(ticketDir, { recursive: true });
+    for (const f of files) {
+      fs.writeFileSync(path.join(ticketDir, f), 'placeholder');
+    }
+  }
+
+  function callVerifyWithWebApps(webApps) {
+    const savedWebApps = process.env.WEB_APPS;
+    delete require.cache[configPath];
+    process.env.WEB_APPS = JSON.stringify(webApps);
+    try {
+      const verify = getCheckVerify();
+      return verify(ticketId);
+    } finally {
+      if (savedWebApps !== undefined) {
+        process.env.WEB_APPS = savedWebApps;
+      } else {
+        delete process.env.WEB_APPS;
+      }
+      delete require.cache[configPath];
+    }
+  }
+
+  it('passes without QA report when no web apps configured', () => {
+    setupTicketDir([
+      'code-review.check.md',
+      'tests.check.md',
+      'completion.check.md',
+      'README.md',
+    ]);
+    assert.equal(callVerifyWithWebApps([]), true);
+  });
+
+  it('fails without QA report when web apps are configured', () => {
+    setupTicketDir([
+      'code-review.check.md',
+      'tests.check.md',
+      'completion.check.md',
+      'README.md',
+    ]);
+    assert.equal(
+      callVerifyWithWebApps([{ name: 'my-app', defaultPort: 3000, type: 'vite' }]),
+      false
+    );
+  });
+
+  it('passes with QA report when web apps are configured', () => {
+    setupTicketDir([
+      'code-review.check.md',
+      'tests.check.md',
+      'completion.check.md',
+      'README.md',
+      'qa-feature-tester.check.md',
+    ]);
+    assert.equal(
+      callVerifyWithWebApps([{ name: 'my-app', defaultPort: 3000, type: 'vite' }]),
+      true
+    );
   });
 });
