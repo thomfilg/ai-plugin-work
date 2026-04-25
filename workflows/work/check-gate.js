@@ -14,6 +14,7 @@ const path = require('path');
 const fs = require('fs');
 const { execFileSync } = require('child_process');
 const config = require(path.join(__dirname, '..', 'lib', 'config'));
+const { parseReportStatus, isCodeReviewResolved } = require('../lib/parse-report-status');
 
 // ─── Helpers (local, no external deps) ──────────────────────────────────────
 
@@ -89,9 +90,9 @@ const CHECK_GATE_RULES = [
       'All required .check.md reports must exist with accepted status (APPROVED or COMPLETE)',
     check(dir) {
       const required = [
-        { file: 'tests.check.md', pattern: /Status:\s*\*{0,2}\s*APPROVED/i },
-        { file: 'code-review.check.md', pattern: /Status:\s*\*{0,2}\s*APPROVED/i },
-        { file: 'completion.check.md', pattern: /Status:\s*\*{0,2}\s*(COMPLETE|APPROVED)/i },
+        { file: 'tests.check.md', type: 'tests' },
+        { file: 'code-review.check.md', type: 'codeReview' },
+        { file: 'completion.check.md', type: 'completion' },
       ];
       const reasons = [];
       for (const req of required) {
@@ -100,8 +101,47 @@ const CHECK_GATE_RULES = [
           reasons.push(`Missing report: ${req.file}`);
           continue;
         }
-        if (!req.pattern.test(readFile(fp))) {
-          reasons.push(`Report ${req.file} does not contain the required Status: line`);
+        const content = readFile(fp);
+
+        // Guard: empty/whitespace content cannot pass any gate
+        if (!content || !content.trim()) {
+          reasons.push(`Report ${req.file} is empty`);
+          continue;
+        }
+
+        const { status } = parseReportStatus(content, req.type);
+
+        // Code-review: short-circuit on APPROVED (no need to check replies),
+        // then check reply reconciliation for non-APPROVED statuses.
+        if (req.type === 'codeReview') {
+          // If already APPROVED, accept regardless of reply file state
+          if (status === 'APPROVED') {
+            continue;
+          }
+
+          const replyPath = path.join(dir, 'code-review-reply.check.md');
+          if (fileExists(replyPath)) {
+            const replyContent = readFile(replyPath);
+            const resolution = isCodeReviewResolved(content, replyContent);
+            if (resolution.blockingCount > 0) {
+              // Report has CRITICAL/IMPORTANT issues — reply reconciliation decides
+              if (resolution.resolved) {
+                continue; // blockingCount > 0 but all addressed — skip this report
+              }
+              reasons.push(
+                `Report ${req.file} has unresolved issues: ${resolution.unaddressed.join(', ')}`
+              );
+              continue;
+            } // blockingCount === 0: no CRITICAL/IMPORTANT issues found in report
+            // No blocking issues extracted — reply file cannot bypass a non-APPROVED
+            // status; fall through to the standard status check below.
+          }
+          // No reply file — fall through to status check
+        }
+
+        if (status !== 'APPROVED') {
+          // Status line is the authoritative gate when no blocking issues exist
+          reasons.push(`Report ${req.file} status is ${status} (expected APPROVED)`);
         }
       }
       return reasons;
@@ -110,7 +150,7 @@ const CHECK_GATE_RULES = [
   {
     name: 'qa-reports',
     description:
-      'At least one qa-*.check.md must exist when web apps are configured; all must have Status: APPROVED',
+      'At least one qa-*.check.md must exist when web apps are configured; all must have Status: APPROVED or NOT_APPLICABLE',
     check(dir) {
       // Skip QA requirement when no web apps are configured (GH-181)
       if (config.webAppNames().length === 0) {
@@ -118,9 +158,16 @@ const CHECK_GATE_RULES = [
       }
       const qaFiles = listFiles(dir, /^qa-.*\.check\.md$/);
       if (qaFiles.length === 0) return ['No QA reports found (need at least one qa-*.check.md)'];
-      return qaFiles
-        .filter((f) => !/Status:\s*\*{0,2}\s*APPROVED/i.test(readFile(f)))
-        .map((f) => `QA report ${path.basename(f)} does not have Status: APPROVED`); // regex on line above handles bold markdown
+      const reasons = [];
+      for (const f of qaFiles) {
+        const { status } = parseReportStatus(readFile(f), 'qa');
+        if (status !== 'APPROVED' && status !== 'NOT_APPLICABLE') {
+          reasons.push(
+            `QA report ${path.basename(f)} has status ${status} (expected APPROVED or NOT_APPLICABLE)`
+          );
+        }
+      }
+      return reasons;
     },
   },
   {
@@ -250,12 +297,16 @@ const CHECK_GATE_RULES = [
  * Validate all check-gate rules for a ticket.
  * @param {string} tasksBase - Root tasks directory
  * @param {string} ticket    - Ticket ID (e.g. "PROJ-123")
- * @returns {{ valid: boolean, reasons: string[] }}
+ * @returns {{ valid: boolean, reasons: string[], rules: Array<{ name: string, passed: boolean, reasons: string[] }> }}
  */
 function validateCheckGate(tasksBase, ticket) {
   const dir = path.join(tasksBase, ticket);
-  const reasons = CHECK_GATE_RULES.flatMap((rule) => rule.check(dir, ticket));
-  return { valid: reasons.length === 0, reasons };
+  const rules = CHECK_GATE_RULES.map((rule) => {
+    const ruleReasons = rule.check(dir, ticket);
+    return { name: rule.name, passed: ruleReasons.length === 0, reasons: ruleReasons };
+  });
+  const reasons = rules.flatMap((r) => r.reasons);
+  return { valid: reasons.length === 0, reasons, rules };
 }
 
 module.exports = { CHECK_GATE_RULES, validateCheckGate };

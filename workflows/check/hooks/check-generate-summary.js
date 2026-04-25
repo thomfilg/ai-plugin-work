@@ -12,6 +12,7 @@
 const fs = require('fs');
 const path = require('path');
 const AppAccessStatus = require(path.join(__dirname, '..', 'lib', 'app-access-status'));
+const { parseReportStatus } = require('../../lib/parse-report-status');
 
 // Get args (only when run as CLI)
 let REPORT_FOLDER, CHANGES_HASH, TICKET_ID, IMPACTED_APPS;
@@ -47,69 +48,11 @@ function readFile(filePath) {
 }
 
 /**
- * Check report status from content
+ * Check report status from content.
+ * Delegates to shared parseReportStatus (R5) while preserving export name (R8).
  */
 function getReportStatus(content, type) {
-  if (!content) return { status: 'MISSING', icon: '❓' };
-
-  // Check for infrastructure/access failure FIRST (for QA reports)
-  if (type === 'qa') {
-    if (
-      content.includes('INFRASTRUCTURE_FAILURE') ||
-      content.includes('PLAYWRIGHT_UNAVAILABLE') ||
-      content.includes('PLAYWRIGHT UNAVAILABLE')
-    ) {
-      return { status: 'INFRASTRUCTURE_FAILURE', icon: '🛑' };
-    }
-    if (content.includes(AppAccessStatus.ACCESS_FAILED)) {
-      return { status: AppAccessStatus.ACCESS_FAILED, icon: '🔒' };
-    }
-  }
-
-  const statusChecks = {
-    tests: {
-      pass: ['✅ PASS', 'APPROVED', 'All.*pass'],
-      fail: ['❌ FAIL', 'NEEDS_WORK', 'fail [1-9]\\d*'],
-    },
-    codeReview: {
-      pass: ['APPROVED', 'No critical', 'No issues'],
-      fail: ['CRITICAL', 'NEEDS_WORK'],
-    },
-    qa: {
-      pass: ['✅ PASS', 'All tests passed', 'SUCCESS', 'Status:\\s*APPROVED'],
-      fail: [
-        '❌ FAIL',
-        'FAILED:\\s*[1-9]',
-        'failures:\\s*[1-9]',
-        'Status:\\s*FAIL',
-        'Status:\\s*NEEDS_WORK',
-      ],
-    },
-    completion: {
-      pass: ['COMPLETE', 'DELIVERED'],
-      fail: ['INCOMPLETE', 'PENDING'],
-    },
-  };
-
-  const checks = statusChecks[type];
-  if (!checks) return { status: 'UNKNOWN', icon: '❓' };
-
-  // Check for failures first — fail markers take precedence to avoid false negatives
-  // (pass-first ordering would silence explicit NEEDS_WORK when a pass pattern also matches)
-  for (const pattern of checks.fail) {
-    if (new RegExp(pattern, 'i').test(content)) {
-      return { status: 'NEEDS_WORK', icon: '❌' };
-    }
-  }
-
-  // Check for pass
-  for (const pattern of checks.pass) {
-    if (new RegExp(pattern, 'i').test(content)) {
-      return { status: 'APPROVED', icon: '✅' };
-    }
-  }
-
-  return { status: 'UNKNOWN', icon: '❓' };
+  return parseReportStatus(content, type);
 }
 
 /**

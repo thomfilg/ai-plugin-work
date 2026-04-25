@@ -11,6 +11,8 @@
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const { getReportStatus } = require('../hooks/check-generate-summary.js');
 
@@ -152,6 +154,20 @@ describe('getReportStatus', () => {
       result.status,
       'NEEDS_WORK',
       'Fail markers should take precedence over pass markers to avoid false negatives'
+    );
+  });
+
+  // ── Shared utility delegation (R5, R8) ──────────────────────────────────
+
+  it('delegates to shared parseReportStatus from parse-report-status.js (R5)', () => {
+    const source = fs.readFileSync(
+      path.join(__dirname, '..', 'hooks', 'check-generate-summary.js'),
+      'utf8'
+    );
+    assert.ok(
+      source.includes("require('../../lib/parse-report-status") ||
+        source.includes('require("../../lib/parse-report-status'),
+      'check-generate-summary.js must import from shared parse-report-status module'
     );
   });
 });
