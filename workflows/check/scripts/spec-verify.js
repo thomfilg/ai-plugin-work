@@ -383,14 +383,30 @@ function checkReuses(args, root) {
     return { type: 'REUSES', args, passed: false, reason: `File ${filePath} not found` };
   }
 
-  // Check for import or require containing the pattern (line-by-line to avoid cross-line false positives)
+  // Check for import or require containing the pattern.
+  // First try line-by-line (avoids cross-line false positives), then fall back
+  // to full-content matching for formatters that split require() across lines.
   const escaped = escapeRegex(importPattern);
   const importRegex = new RegExp(
     `(import\\s.*${escaped}|${escaped}.*require\\s*\\(|require\\s*\\(.*${escaped})`
   );
-  const lines = content.split(/\r?\n/);
-  if (lines.some((line) => importRegex.test(line))) {
+  // Strip comments while preserving string literal content. A simple state
+  // machine avoids false stripping of // inside strings (e.g. URLs).
+  const stripped = stripComments(content);
+  const lines = stripped.split(/\r?\n/);
+  if (lines.some((line) => {
+    const m = importRegex.exec(line);
+    return m && !isInsideString(line, m.index);
+  })) {
     return { type: 'REUSES', args, passed: true };
+  }
+  // Fallback: check full content for require('...pattern...') split across lines by formatters.
+  const multilineRegex = new RegExp(`require\\s*\\(\\s*['"][^'"]*${escaped}[^'"]*['"]`, 'sg');
+  let match;
+  while ((match = multilineRegex.exec(stripped)) !== null) {
+    if (!isInsideString(stripped, match.index)) {
+      return { type: 'REUSES', args, passed: true };
+    }
   }
   return {
     type: 'REUSES',
@@ -398,6 +414,164 @@ function checkReuses(args, root) {
     passed: false,
     reason: `Expected import matching "${importPattern}" in ${filePath} — not found`,
   };
+}
+
+/**
+ * Strip JS comments while respecting string and regex literals.
+ * Tracks quote/regex state so // and /* inside strings/regex are preserved.
+ * Block comments are replaced with equivalent newlines to prevent line concatenation.
+ * @param {string} src
+ * @returns {string}
+ */
+function stripComments(src) {
+  let out = '';
+  let i = 0;
+  while (i < src.length) {
+    const ch = src[i];
+    // String literals — preserve content (needed for require() arguments)
+    if (ch === "'" || ch === '"' || ch === '`') {
+      const quote = ch;
+      out += ch;
+      i++;
+      while (i < src.length && src[i] !== quote) {
+        if (src[i] === '\\') {
+          out += src[i] + (src[i + 1] || '');
+          i += 2;
+        } else {
+          out += src[i];
+          i++;
+        }
+      }
+      if (i < src.length) {
+        out += src[i]; // closing quote
+        i++;
+      }
+    // Regex literal — a / after certain tokens starts a regex, not a comment.
+    // Heuristic: / preceded by =, (, [, !, &, |, ?, :, ,, ;, {, }, newline, or line start.
+    } else if (ch === '/' && src[i + 1] !== '/' && src[i + 1] !== '*' && isRegexContext(out)) {
+      out += ch;
+      i++;
+      while (i < src.length && src[i] !== '/' && src[i] !== '\n') {
+        if (src[i] === '\\') {
+          out += src[i] + (src[i + 1] || '');
+          i += 2;
+        } else if (src[i] === '[') {
+          // Character class — skip to ]
+          out += src[i];
+          i++;
+          while (i < src.length && src[i] !== ']' && src[i] !== '\n') {
+            if (src[i] === '\\') {
+              out += src[i] + (src[i + 1] || '');
+              i += 2;
+            } else {
+              out += src[i];
+              i++;
+            }
+          }
+        } else {
+          out += src[i];
+          i++;
+        }
+      }
+      if (i < src.length && src[i] === '/') {
+        out += src[i]; // closing /
+        i++;
+        // Skip regex flags
+        while (i < src.length && /[gimsuy]/.test(src[i])) {
+          out += src[i];
+          i++;
+        }
+      }
+    // Single-line comment — skip to end of line
+    } else if (ch === '/' && src[i + 1] === '/') {
+      while (i < src.length && src[i] !== '\n') i++;
+    // Block comment — replace with newlines to preserve line structure.
+    // If no newline was emitted, insert a space to prevent token concatenation.
+    } else if (ch === '/' && src[i + 1] === '*') {
+      let emittedNewline = false;
+      i += 2;
+      while (i < src.length && !(src[i] === '*' && src[i + 1] === '/')) {
+        if (src[i] === '\n') {
+          out += '\n';
+          emittedNewline = true;
+        }
+        i++;
+      }
+      if (!emittedNewline) out += ' ';
+      if (i < src.length) i += 2; // skip */
+    } else {
+      out += ch;
+      i++;
+    }
+  }
+  return out;
+}
+
+/**
+ * Check if a position in source text is inside a string literal.
+ * Walks from the start tracking quote state.
+ * @param {string} src - source text (already comment-stripped)
+ * @param {number} pos - character index to check
+ * @returns {boolean}
+ */
+function isInsideString(src, pos) {
+  let inString = false;
+  let quote = '';
+  let braceDepth = 0; // tracks ${...} nesting in template literals
+  for (let i = 0; i < pos && i < src.length; i++) {
+    const ch = src[i];
+    if (inString && quote === '`' && braceDepth > 0) {
+      // Inside ${...} interpolation — treat as code
+      if (ch === '{') {
+        braceDepth++;
+      } else if (ch === '}') {
+        braceDepth--;
+      } else if (ch === "'" || ch === '"') {
+        // Skip strings inside interpolation
+        const q = ch;
+        i++;
+        while (i < src.length && src[i] !== q) {
+          if (src[i] === '\\') i++;
+          i++;
+        }
+      }
+    } else if (inString) {
+      if (ch === '\\') {
+        i++; // skip escaped char
+      } else if (quote === '`' && ch === '$' && src[i + 1] === '{') {
+        braceDepth = 1;
+        i++; // skip {
+      } else if (ch === quote) {
+        inString = false;
+      }
+    } else if (ch === "'" || ch === '"' || ch === '`') {
+      inString = true;
+      quote = ch;
+    } else if (ch === '/' && isRegexContext(src.slice(0, i))) {
+      // Skip regex literal to avoid treating quotes inside regex as string starts
+      i++;
+      while (i < src.length && src[i] !== '/' && src[i] !== '\n') {
+        if (src[i] === '\\') i++;
+        i++;
+      }
+    }
+  }
+  return inString && !(quote === '`' && braceDepth > 0);
+}
+
+/**
+ * Check if the last non-whitespace character in output suggests a regex follows.
+ * A / is a regex start after: = ( [ ! & | ? : , ; { } ~ ^ + - * % < > newline or start of string.
+ * A / is division after: ) ] identifier digit.
+ * @param {string} output - text emitted so far
+ * @returns {boolean}
+ */
+function isRegexContext(output) {
+  const trimmed = output.replace(/\s+$/, '');
+  if (trimmed.length === 0) return true;
+  const last = trimmed[trimmed.length - 1];
+  // Include ) for keyword contexts like if(x)/regex/ and return(x)/regex/
+  return '=([)!&|?:,;{}~^+-*%<>\n'.includes(last);
 }
 
 /**
