@@ -983,22 +983,34 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
           const preview = normalized.length > 80 ? normalized.slice(0, 77) + '...' : normalized;
           lines.push(`    ${c.dim('"' + preview + '"')}`);
         }
-        if (item.path && item.line) {
-          lines.push(
-            `    ${c.yellow('→ Alter line ' + item.line + ' in ' + item.path + ' to address this comment (touch the exact line to invalidate stale review)')}`
-          );
-          // Show actual code at the referenced line so the agent can verify if already fixed
-          const codeCtx = getCodeContext(item.path, item.line);
-          if (codeCtx) {
-            lines.push(`    ${c.dim('Current code at ' + item.path + ':' + item.line + ':')}`);
-            for (const ctxLine of codeCtx.split('\n')) {
-              lines.push(`    ${c.dim(ctxLine)}`);
-            }
-          }
-        } else if (item.path) {
-          lines.push(`    ${c.yellow('→ Alter ' + item.path + ' to address this comment')}`);
-        }
+        // Code context omitted — use follow-up-pr-comments.js --next-comment for full details
       }
+      lines.push('');
+      lines.push(
+        c.yellow(
+          '  → Use node follow-up-pr-comments.js --snapshot --pr <N> then --next-comment to process each comment ONE AT A TIME'
+        )
+      );
+      lines.push(
+        c.yellow(
+          '  → SOLVE ALL COMMENTS BEFORE PUSHING. Do NOT push after each comment. Do NOT use gh api to read'
+        )
+      );
+      lines.push(
+        c.yellow(
+          '    comments directly. The --next-comment loop is the ONLY way to process comments — it tracks'
+        )
+      );
+      lines.push(
+        c.yellow(
+          '    state so nothing is missed or duplicated. Pushing mid-loop causes snapshot invalidation,'
+        )
+      );
+      lines.push(
+        c.yellow(
+          '    line-number drift, and dedup confusion.'
+        )
+      );
       if (reviews.nonBlocking.length > 0) {
         lines.push(
           `  + ${reviews.nonBlocking.length} non-blocking (nitpick/low — assess whether to address):`
@@ -1047,19 +1059,10 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
       lines.push('');
       lines.push(c.bold('--- Non-Blocking Comments Report ---'));
       reviews.nonBlocking.forEach((item, i) => {
-        const loc = item.path ? `${item.path}${item.line ? ':' + item.line : ''}` : '';
-        const fullText = item.body ? item.body.trim() : '';
-        lines.push('');
-        lines.push(`  Comment ${i + 1}: ${fullText}`);
-        lines.push(`  File: ${loc || 'N/A'}`);
-        lines.push(`  Author: @${item.author}`);
-        if (item.deduplicated) {
-          lines.push(
-            `  Status: ${c.cyan('DEDUPED')} — previously addressed, re-posted after force-push`
-          );
-        } else {
-          lines.push(`  Status: ${c.dim('NOT ADDRESSED')} — low priority`);
-        }
+        const loc = item.path ? `${item.path}${item.line ? ':' + item.line : ''}` : 'N/A';
+        const briefBody = (item.body || '').trim().replace(/\n/g, ' ').substring(0, 80);
+        const status = item.deduplicated ? c.cyan('DEDUPED') : c.dim('NOT ADDRESSED');
+        lines.push(`  Comment ${i + 1}: [${status}] @${item.author} ${loc} — ${briefBody}`);
       });
       lines.push('');
       lines.push(c.dim('---'));
@@ -1362,15 +1365,15 @@ async function main() {
       state.finalStatus = decision.finalStatus;
       saveState(state);
 
-      // GH-248: Show full comment bodies for ALL comments on exit so the agent
-      // has complete context. Non-blocking comments must be evaluated too.
+      // GH-248: Show brief comment previews (80 chars) for ALL comments on exit
+      // so the agent has context. Non-blocking comments must be evaluated too.
       const allExitComments = [
         ...(reviews.blocking || []).map((item) => ({ ...item, _section: 'BLOCKING' })),
         ...(reviews.nonBlocking || []).map((item) => ({ ...item, _section: 'NON-BLOCKING' })),
       ];
       if (allExitComments.length > 0) {
         console.log('');
-        console.log(c.bold('--- Full Comment Bodies (All Reviews) ---'));
+        console.log(c.bold('--- Brief Comment Bodies (All Reviews) ---'));
         let currentSection = '';
         allExitComments.forEach((item, i) => {
           if (item._section !== currentSection) {
@@ -1382,13 +1385,10 @@ async function main() {
           const priority = (item.priority || 'unknown').toUpperCase();
           const staleTag = item.stale ? c.dim(' (stale)') : '';
           const dedupTag = item.deduplicated ? c.dim(' (deduped)') : '';
-          console.log('');
+          const briefBody = (item.body || '').trim().replace(/\n/g, ' ').substring(0, 80);
           console.log(
-            `  ${c.cyan(`Comment ${i + 1}:`)} @${item.author} [${priority}]${staleTag}${dedupTag} ${loc}`
+            `  ${c.cyan(`Comment ${i + 1}:`)} [${priority}] @${item.author}${staleTag}${dedupTag} ${loc} — ${briefBody}`
           );
-          console.log(`  ${c.dim('─'.repeat(60))}`);
-          console.log(`  ${(item.body || '').trim()}`);
-          console.log(`  ${c.dim('─'.repeat(60))}`);
         });
         console.log('');
       }
@@ -1462,7 +1462,13 @@ async function main() {
           try {
             const repo = ghExec('repo view --json nameWithOwner').nameWithOwner;
             const ids = ghExec(
-              ['api', '--paginate', `repos/${repo}/pulls/${prInfo.number}/comments?per_page=100`, '--jq', '.[].id'],
+              [
+                'api',
+                '--paginate',
+                `repos/${repo}/pulls/${prInfo.number}/comments?per_page=100`,
+                '--jq',
+                '.[].id',
+              ],
               { json: false }
             );
             const inlineIds = new Set((ids || '').split('\n').filter(Boolean));
@@ -1474,7 +1480,9 @@ async function main() {
                 inlineComments.push({ id: Number(id) || id, author: 'inline', body: '' });
             }
           } catch (inlineErr) {
-            process.stderr.write(`WARNING: Failed to fetch inline comment IDs: ${inlineErr.message}\n`);
+            process.stderr.write(
+              `WARNING: Failed to fetch inline comment IDs: ${inlineErr.message}\n`
+            );
           }
           const entries = buildAccountabilityEntries(reviews.blocking || [], [
             ...(reviews.nonBlocking || []),
@@ -1540,7 +1548,14 @@ function isPRGateReady() {
   if (!prInfo || !prInfo.number) return { ready: false };
   if (prInfo.state === 'CLOSED') return { ready: false };
   // Merged PRs have passed all gates — allow transition (GH-276)
-  if (prInfo.state === 'MERGED') return { ready: true, reviews: {}, decision: { action: 'exit-success', finalStatus: 'merged' }, strictCommentCount: 0, prInfo };
+  if (prInfo.state === 'MERGED')
+    return {
+      ready: true,
+      reviews: {},
+      decision: { action: 'exit-success', finalStatus: 'merged' },
+      strictCommentCount: 0,
+      prInfo,
+    };
 
   const ci = checkCI(prInfo.number);
   const reviews = getReviews(prInfo.number);
@@ -1554,11 +1569,20 @@ function isPRGateReady() {
     const repo = ghExec('repo view --json nameWithOwner').nameWithOwner;
     // Use --paginate to count ALL inline comments, not just the first page (default 30)
     const comments = ghExec(
-      ['api', '--paginate', `repos/${repo}/pulls/${prInfo.number}/comments?per_page=100`, '--jq', 'length'],
+      [
+        'api',
+        '--paginate',
+        `repos/${repo}/pulls/${prInfo.number}/comments?per_page=100`,
+        '--jq',
+        'length',
+      ],
       { json: false }
     );
     // --paginate with --jq length returns one number per page; sum them
-    strictCommentCount = (comments || '').split('\n').filter(Boolean).reduce((sum, n) => sum + (parseInt(n, 10) || 0), 0);
+    strictCommentCount = (comments || '')
+      .split('\n')
+      .filter(Boolean)
+      .reduce((sum, n) => sum + (parseInt(n, 10) || 0), 0);
   } catch {
     // Cannot verify comment count — fail closed
     return { ready: false };
