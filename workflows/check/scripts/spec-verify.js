@@ -394,8 +394,10 @@ function checkReuses(args, root) {
   if (lines.some((line) => importRegex.test(line))) {
     return { type: 'REUSES', args, passed: true };
   }
-  // Fallback: check full content for require('...pattern...') split across lines by formatters
-  const multilineRegex = new RegExp(`require\\s*\\([^)]*${escaped}[^)]*\\)`, 's');
+  // Fallback: check full content for require('...pattern...') split across lines by formatters.
+  // Constrained to match within string arguments (quotes) to avoid false positives from
+  // comments or unrelated expressions that happen to contain the pattern.
+  const multilineRegex = new RegExp(`require\\s*\\(\\s*['"][^'"]*${escaped}[^'"]*['"]`, 's');
   if (multilineRegex.test(content)) {
     return { type: 'REUSES', args, passed: true };
   }
