@@ -258,4 +258,13 @@ describe('spec-verify.js', () => {
     const json = JSON.parse(result.stdout);
     assert.equal(json.checks[0].passed, false);
   });
+
+  it('REUSES preserves // inside string literals when stripping comments', () => {
+    writeFile('src/app.js', 'const url = "https://api"; const { useAuth } = require(\'./hooks\');');
+    const specPath = writeSpec(['- REUSES src/app.js hooks']);
+    const result = runScript(specPath, { json: true });
+    assert.equal(result.exitCode, 0);
+    const json = JSON.parse(result.stdout);
+    assert.equal(json.checks[0].passed, true);
+  });
 });

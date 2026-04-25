@@ -390,12 +390,9 @@ function checkReuses(args, root) {
   const importRegex = new RegExp(
     `(import\\s.*${escaped}|${escaped}.*require\\s*\\(|require\\s*\\(.*${escaped})`
   );
-  // Strip single-line (//) and block (/* */) comments before matching to avoid
-  // false positives from commented-out import/require statements.
-  // Block comments preserve newlines to prevent line concatenation.
-  const stripped = content
-    .replace(/\/\/[^\n]*/g, '')
-    .replace(/\/\*[\s\S]*?\*\//g, (match) => match.replace(/[^\n]/g, ''));
+  // Strip comments while preserving string literal content. A simple state
+  // machine avoids false stripping of // inside strings (e.g. URLs).
+  const stripped = stripComments(content);
   const lines = stripped.split(/\r?\n/);
   if (lines.some((line) => importRegex.test(line))) {
     return { type: 'REUSES', args, passed: true };
@@ -418,6 +415,55 @@ function checkReuses(args, root) {
  * @param {string} str
  * @returns {string}
  */
+/**
+ * Strip JS comments while respecting string literals.
+ * Tracks quote state so // and /* inside strings are preserved.
+ * Block comments are replaced with equivalent newlines to prevent line concatenation.
+ * @param {string} src
+ * @returns {string}
+ */
+function stripComments(src) {
+  let out = '';
+  let i = 0;
+  while (i < src.length) {
+    const ch = src[i];
+    // String literals — skip to closing quote, respecting escapes
+    if (ch === "'" || ch === '"' || ch === '`') {
+      const quote = ch;
+      out += ch;
+      i++;
+      while (i < src.length && src[i] !== quote) {
+        if (src[i] === '\\') {
+          out += src[i] + (src[i + 1] || '');
+          i += 2;
+        } else {
+          out += src[i];
+          i++;
+        }
+      }
+      if (i < src.length) {
+        out += src[i]; // closing quote
+        i++;
+      }
+    // Single-line comment — skip to end of line
+    } else if (ch === '/' && src[i + 1] === '/') {
+      while (i < src.length && src[i] !== '\n') i++;
+    // Block comment — replace with newlines to preserve line structure
+    } else if (ch === '/' && src[i + 1] === '*') {
+      i += 2;
+      while (i < src.length && !(src[i] === '*' && src[i + 1] === '/')) {
+        if (src[i] === '\n') out += '\n';
+        i++;
+      }
+      if (i < src.length) i += 2; // skip */
+    } else {
+      out += ch;
+      i++;
+    }
+  }
+  return out;
+}
+
 function escapeRegex(str) {
   return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
