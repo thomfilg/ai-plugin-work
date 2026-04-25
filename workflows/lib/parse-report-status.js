@@ -68,7 +68,11 @@ TYPE_CHECKS['tests'].pass = ['✅ PASS', '\\bAPPROVED\\b', '\\bAll\\b.*\\bpass']
 
 TYPE_CHECKS['codeReview'] = Object.create(null);
 TYPE_CHECKS['codeReview'].fail = ['(?<!No )CRITICAL(?!\\s*ISSUES?)\\b', 'NEEDS_WORK'];
-TYPE_CHECKS['codeReview'].pass = ['\\bAPPROVED\\b', '\\bNo critical\\b', '\\bNo issues\\b'];
+TYPE_CHECKS['codeReview'].pass = [
+  '\\bAPPROVED\\b',
+  '\\bNo critical issues\\b',
+  '\\bNo issues found\\b',
+];
 
 TYPE_CHECKS['qa'] = Object.create(null);
 TYPE_CHECKS['qa'].fail = [
@@ -81,7 +85,7 @@ TYPE_CHECKS['qa'].fail = [
 TYPE_CHECKS['qa'].pass = [
   '✅ PASS',
   '\\bAll tests passed\\b',
-  '\\bSUCCESS\\b',
+  'Status:\\s*SUCCESS',
   'Status:\\s*APPROVED',
 ];
 
@@ -194,9 +198,9 @@ function checkPassMarkers(content, type) {
  * Parse the status from report file content.
  *
  * Resolution priority (matches implementation order):
- *   1. Infrastructure failures (QA only)
- *   2. Explicit Status: line (first match, authoritative when present)
- *   3. Summary table with status column
+ *   1. Explicit Status: line (first match, authoritative when present)
+ *   2. Summary table with status column
+ *   3. Infrastructure failures (QA only — after Status line so declared status wins)
  *   4. Fail markers (type-specific heuristics, only when no explicit status)
  *   5. Pass markers (type-specific heuristics)
  *   6. Fallback: UNKNOWN
@@ -211,22 +215,24 @@ function parseReportStatus(content, type) {
     return { status: 'MISSING', icon: ICONS['MISSING'] };
   }
 
-  // 1. Infrastructure failures (QA only)
-  const infraStatus = checkInfrastructureFailure(content, type);
-  if (infraStatus) {
-    return { status: infraStatus, icon: ICONS[infraStatus] };
-  }
-
-  // 2. Explicit Status: line — authoritative when present (overrides raw content patterns)
+  // 1. Explicit Status: line — authoritative when present (overrides raw content patterns)
   const lineStatus = checkStatusLine(content, type);
   if (lineStatus) {
     return { status: lineStatus, icon: ICONS[lineStatus] || ICONS['UNKNOWN'] };
   }
 
-  // 3. Summary table
+  // 2. Summary table
   const tableStatus = checkSummaryTable(content, type);
   if (tableStatus) {
     return { status: tableStatus, icon: ICONS[tableStatus] || ICONS['UNKNOWN'] };
+  }
+
+  // 3. Infrastructure failures (QA only) — checked AFTER explicit Status/table so that
+  //    a declared Status: NOT_APPLICABLE or Status: APPROVED is honored even when the
+  //    report body mentions infrastructure tokens like PLAYWRIGHT_UNAVAILABLE in prose.
+  const infraStatus = checkInfrastructureFailure(content, type);
+  if (infraStatus) {
+    return { status: infraStatus, icon: ICONS[infraStatus] };
   }
 
   // 4. Fail markers (only when no explicit Status line — raw content heuristic)
@@ -327,11 +333,14 @@ const ISSUE_TITLE_PATTERNS = [
 ];
 
 // Guard filter: reject spurious bold words that are not real issue titles.
-// Mirrors the guard in work-suggestion-replies.js (lines 109-115).
-// Guard: reject template phrases and section keywords, but not real issue titles
-// starting with "No" (e.g., "No error handling in foo()" is a legitimate issue).
+// Intentionally diverges from work-suggestion-replies.js (lines 109-115):
+//   - work-suggestion-replies filters any title starting with "no " and requires length > 3
+//   - Here we only filter specific "no issues/no critical" template phrases and allow
+//     titles starting with "No" when they describe real issues (e.g., "No error handling
+//     in foo()"). We also allow 3-char titles like "XSS" / "NPE" that are legitimate
+//     blocking findings.
 const SPURIOUS_TITLE_RE =
-  /^(none|n\/a|no\s+issues?\s*$|no\s+issues?\s+found|no\s+critical\s+issues?|no\s+important\s+issues?|none\s+found|issues?\s*found|CRITICAL|IMPORTANT|NICE-TO-HAVE|SUGGESTIONS?)/i;
+  /^(none|n\/a|no\s+issues?\s*$|no\s+issues?\s+found|no\s+critical\s+issues?|no\s+important\s+issues?|none\s+found|issues?\s*found|CRITICAL\s*$|IMPORTANT\s*$|NICE-TO-HAVE|SUGGESTIONS?\s*$)/i;
 // Matches common field labels with optional trailing colon (e.g., "File", "File:")
 // Also includes "Note" to avoid treating "**Note:** something" as an issue title.
 const FIELD_LABEL_RE =

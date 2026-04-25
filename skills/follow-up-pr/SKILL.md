@@ -162,55 +162,84 @@ node "$SCRIPT_PATH" $REVIEW_FLAG 2>&1
 
 ---
 
-## Step 5: Address Review Feedback
+## Step 5: Address Review Feedback (Sequential Comment Resolution)
 
-### Review Priority System
+```
+╔══════════════════════════════════════════════════════════════════════╗
+║  CRITICAL: Process comments ONE AT A TIME using the sequential CLI  ║
+║                                                                      ║
+║  DO NOT try to read or fix all comments at once.                    ║
+║  Get ONE comment → fix it → mark solved → get NEXT comment.        ║
+╚══════════════════════════════════════════════════════════════════════╝
+```
 
-The script automatically classifies review comments by priority:
+### 5.0 Snapshot PR Comments
 
-| Reviewer | Blocking (must fix) | Non-blocking (ignore) |
-|----------|--------------------|-----------------------|
-| **Cursor** (`cursor-ai[bot]`) | severity: critical/high/major/medium/moderate | severity: minor/low/nitpick/trivial/suggestion |
-| **Copilot** (`copilot-pull-request-reviewer`) | `[critical]`, `[high]`, `[medium]`, or no tag | `[low]` or `[nitpick]` tags |
-| **Human reviewers** | Always blocking | — |
+First, detect the PR number and take a snapshot of all comments:
 
-- **Blocking reviews** (medium/high priority) → you MUST fix these
-- **Non-blocking reviews** (low/nitpick) → shown as informational, do NOT block "PR READY TO REVIEW"
+```bash
+COMMENTS_SCRIPT="$PLUGIN_ROOT/workflows/work/scripts/follow-up-pr-comments.js"
+PR_NUMBER=$(gh pr view --json number -q '.number')
+node "$COMMENTS_SCRIPT" --snapshot --pr "$PR_NUMBER"
+```
 
-### 5.1 Read and Understand Feedback
+Then check how many blocking comments exist:
 
-For each **blocking** review comment:
+```bash
+node "$COMMENTS_SCRIPT" --status
+```
 
-1. Read the comment body and understand what change is requested
-2. If it's an inline comment, read the referenced file and line(s)
-3. Group related comments (e.g., multiple comments about the same pattern)
+This shows a brief summary like: `Blocking: 8, Non-blocking: 5, Solved: 0, Skipped: 0`
 
-### 5.2 Apply Review Fixes
+### 5.1 Sequential Comment Loop
 
-For each group of related feedback:
+Process each blocking comment ONE AT A TIME:
 
-1. Determine `<TICKET_ID>` from the current branch: `git branch --show-current | grep -oE '[A-Z]+-[0-9]+|GH-[0-9]+' || echo "unknown"`
-2. Formulate a review-fix description: reviewer name, comment text, file path, line number, and what change is requested
-3. Invoke: `Skill(work-implement): --subtask <TICKET_ID> fix(review): <description with full comment context, file path, and line number>`
-4. After /work-implement completes, run: `Skill(check)`
-5. Record in `summary.reviewsAddressed`:
-   ```javascript
-   { author: "<reviewer>", comment: "<summary>", fix: "<what was changed>" }
-   ```
+```
+WHILE there are unsolved blocking comments:
+  1. Get the next unsolved comment:
+     node "$COMMENTS_SCRIPT" --next-comment
+     → Returns: comment ID, file, line, author, priority, body
 
-If /work-implement fails, use AskUserQuestion to ask the user for guidance before retrying.
+  2. Read the referenced file at the indicated line
+  3. Understand what the reviewer is asking for
+  4. Fix the code (directly — no need for /work-implement for small fixes)
+  5. Run tests to verify: node --test <affected-test-file>
+  6. Mark the comment as solved:
+     node "$COMMENTS_SCRIPT" --solve-comment <ID> $(git rev-parse HEAD) "<brief description of fix>"
 
-### 5.3 Push and Re-enter Loop
+  7. OR skip the comment if it conflicts with user intent:
+     node "$COMMENTS_SCRIPT" --skip-comment <ID> "<reason why skipped>"
 
-1. Push: `git push`
-2. Log the review fixes in `summary.fixes`
-3. Return to Step 1 (re-run monitor script to re-check CI and reviews)
+  REPEAT until --next-comment returns no more blocking comments
+```
 
-**Important notes for review handling:**
-- **If a review comment is ambiguous or you're unsure how to address it**, use AskUserQuestion to ask the user for guidance
-- **Never dismiss or resolve review threads** — let the reviewer verify your fix
-- **If the same reviewer keeps requesting changes**, consider asking the user if they want to continue or discuss directly with the reviewer
-- **After addressing reviews**, the reviewer may add new comments — that's why we re-enter the loop
+### 5.2 Commit and Push After All Comments
+
+After ALL blocking comments are solved/skipped:
+
+```bash
+git add -A
+# Use commit-writer agent
+git push
+```
+
+### 5.3 Re-enter Monitor Loop
+
+Return to Step 1 (re-run follow-up-pr.js) — the reviewer may post new comments after your push.
+
+### 5.4 Skip AI Comments That Conflict With User Intent
+
+When an AI reviewer suggests reverting or undoing changes the user explicitly requested:
+
+1. **Do NOT implement** — skip it
+2. Use: `node "$COMMENTS_SCRIPT" --skip-comment <ID> "Conflicts with user intent: <reason>"`
+3. Report skipped comments in the summary
+
+**Important notes:**
+- **If a comment is ambiguous**, use AskUserQuestion to ask the user
+- **Never dismiss or resolve review threads on GitHub** — let the reviewer verify
+- **Process ONE comment at a time** — fix, verify, mark solved, then get next
 
 ### 5.4 Skip AI Comments That Conflict With User Intent
 
