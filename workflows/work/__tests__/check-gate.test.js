@@ -93,7 +93,11 @@ describe('check-gate (unit)', () => {
       const rule = freshRules.find((r) => r.name === 'qa-reports');
       const reasons = rule.check(path.join(TEMP, testTicket));
       assert.equal(reasons.length, 1);
-      assert.ok(reasons[0].includes('qa-feature.check.md'));
+      assert.ok(reasons[0].includes('qa-feature.check.md'), 'reason should mention file');
+      assert.ok(
+        reasons[0].includes('APPROVED or NOT_APPLICABLE'),
+        'reason should mention accepted statuses'
+      );
     } finally {
       if (savedWebApps === undefined) delete process.env.WEB_APPS;
       else process.env.WEB_APPS = savedWebApps;
@@ -518,6 +522,39 @@ describe('check-gate (unit)', () => {
     const reasons = rule.check(path.join(TEMP, testTicket));
     assert.ok(reasons.length > 0, 'no reply with CRITICAL issues should block');
     assert.ok(reasons.some((r) => r.includes('code-review')));
+  });
+
+  it('required-reports rule passes APPROVED code-review even with incomplete reply file', () => {
+    writeReport('tests.check.md', 'Status: APPROVED');
+    writeReport('completion.check.md', 'Status: COMPLETE');
+    // code-review is APPROVED — reply should not block it
+    writeReport('code-review.check.md', 'Status: APPROVED\n\n## CRITICAL ISSUES\nNone found.');
+    // Incomplete reply file exists
+    writeReport(
+      'code-review-reply.check.md',
+      '## Issue: Some other issue\n\n**Decision:** FIXED\n**Reason:** Done\n'
+    );
+    const rule = CHECK_GATE_RULES.find((r) => r.name === 'required-reports');
+    const reasons = rule.check(path.join(TEMP, testTicket));
+    assert.deepStrictEqual(
+      reasons,
+      [],
+      'APPROVED code-review should pass regardless of reply state'
+    );
+  });
+
+  it('required-reports rule blocks empty code-review even with reply file', () => {
+    writeReport('tests.check.md', 'Status: APPROVED');
+    writeReport('completion.check.md', 'Status: COMPLETE');
+    writeReport('code-review.check.md', '   '); // empty/whitespace
+    writeReport(
+      'code-review-reply.check.md',
+      '## Issue: X\n**Decision:** FIXED\n**Reason:** Done\n'
+    );
+    const rule = CHECK_GATE_RULES.find((r) => r.name === 'required-reports');
+    const reasons = rule.check(path.join(TEMP, testTicket));
+    assert.ok(reasons.length > 0, 'empty code-review must not pass');
+    assert.ok(reasons[0].includes('empty'), 'reason should mention empty');
   });
 
   it('required-reports rule passes with bold Status format', () => {

@@ -242,8 +242,9 @@ function createArtifactProtector(opts) {
               const normalizedIdx = Math.min(Math.max(currentIdx, 0), totalTasks - 1);
               const taskNum = normalizedIdx + 1;
 
-              // Block writes that escape the ticket directory via traversal
-              // (always enforced, even during 'check' step)
+              // Block writes that escape the ticket directory via path traversal.
+              // This guard runs unconditionally — including during the 'check' step —
+              // so that writes like "/<ticket>/../outside/file.check.md" are always blocked.
               if (isEscapingTicketDir) {
                 return {
                   blocked: true,

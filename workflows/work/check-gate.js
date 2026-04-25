@@ -111,34 +111,20 @@ const CHECK_GATE_RULES = [
 
         const { status } = parseReportStatus(content, req.type);
 
-        // Code-review: check reply reconciliation when reply file exists
+        // Code-review: short-circuit on APPROVED (no need to check replies),
+        // then check reply reconciliation for non-APPROVED statuses.
         if (req.type === 'codeReview') {
+          // If already APPROVED, accept regardless of reply file state
+          if (status === 'APPROVED') {
+            continue;
+          }
+
           const replyPath = path.join(dir, 'code-review-reply.check.md');
           if (fileExists(replyPath)) {
             const replyContent = readFile(replyPath);
             const resolution = isCodeReviewResolved(content, replyContent);
             if (resolution.resolved) {
-              // Reply reconciliation passed — still verify report status is not NEEDS_WORK
-              // unless all issues were explicitly addressed (which they are if resolved is true).
-              // However, if the report status is explicitly NEEDS_WORK and there were no
-              // extractable blocking issues, the reply may not cover the underlying problem.
-              if (status === 'NEEDS_WORK') {
-                // Double-check: if there are zero blocking issues extracted, the NEEDS_WORK
-                // status itself is the signal — reply reconciliation alone is not enough.
-                const criticalMatch = content.match(
-                  /###?\s*(?:🔴\s*)?CRITICAL\s*ISSUES?[^\n]*\n([\s\S]*?)(?=###?\s*(?:🟡|IMPORTANT|🟢|NICE-TO-HAVE|SUGGESTIONS?|---)|$)/i
-                );
-                const importantMatch = content.match(
-                  /###?\s*(?:🟡\s*)?IMPORTANT\s*ISSUES?[^\n]*\n([\s\S]*?)(?=###?\s*(?:🟢|NICE-TO-HAVE|SUGGESTIONS?|---)|$)/i
-                );
-                const hasSections = criticalMatch || importantMatch;
-                if (!hasSections) {
-                  // NEEDS_WORK with no extractable CRITICAL/IMPORTANT sections — cannot reconcile
-                  reasons.push(`Report ${req.file} status is NEEDS_WORK (expected APPROVED)`);
-                  continue;
-                }
-              }
-              continue; // all CRITICAL/IMPORTANT issues addressed
+              continue; // all CRITICAL/IMPORTANT issues addressed via reply
             }
             reasons.push(
               `Report ${req.file} has unresolved issues: ${resolution.unaddressed.join(', ')}`
@@ -171,9 +157,10 @@ const CHECK_GATE_RULES = [
           const { status } = parseReportStatus(readFile(f), 'qa');
           return status !== 'APPROVED' && status !== 'NOT_APPLICABLE';
         })
-        .map(
-          (f) => `QA report ${path.basename(f)} does not have Status: APPROVED or NOT_APPLICABLE`
-        );
+        .map((f) => {
+          const { status } = parseReportStatus(readFile(f), 'qa');
+          return `QA report ${path.basename(f)} has status ${status} (expected APPROVED or NOT_APPLICABLE)`;
+        });
     },
   },
   {

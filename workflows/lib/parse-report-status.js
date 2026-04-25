@@ -38,12 +38,16 @@ STATUS_ALIASES['NOT_APPLICABLE'] = 'NOT_APPLICABLE';
 const TYPE_CHECKS = Object.create(null);
 
 TYPE_CHECKS['tests'] = Object.create(null);
-TYPE_CHECKS['tests'].fail = ['❌ FAIL', 'NEEDS_WORK', '(?:^|\\n|ℹ\\s*)fail [1-9]\\d*'];
-TYPE_CHECKS['tests'].pass = ['✅ PASS', 'APPROVED', 'All.*pass'];
+TYPE_CHECKS['tests'].fail = [
+  '❌ FAIL',
+  'NEEDS_WORK',
+  '(?:^|\\n)(?:ℹ\\s*)?fail(?:ed)?\\s+[1-9]\\d*',
+];
+TYPE_CHECKS['tests'].pass = ['✅ PASS', '\\bAPPROVED\\b', '\\bAll\\b.*\\bpass'];
 
 TYPE_CHECKS['codeReview'] = Object.create(null);
-TYPE_CHECKS['codeReview'].fail = ['(?<!No )CRITICAL(?! ISSUES?)\\b', 'NEEDS_WORK'];
-TYPE_CHECKS['codeReview'].pass = ['APPROVED', 'No critical', 'No issues'];
+TYPE_CHECKS['codeReview'].fail = ['(?<!No )CRITICAL(?!\\s*ISSUES?)\\b', 'NEEDS_WORK'];
+TYPE_CHECKS['codeReview'].pass = ['\\bAPPROVED\\b', '\\bNo critical\\b', '\\bNo issues\\b'];
 
 TYPE_CHECKS['qa'] = Object.create(null);
 TYPE_CHECKS['qa'].fail = [
@@ -53,11 +57,16 @@ TYPE_CHECKS['qa'].fail = [
   'Status:\\s*FAIL',
   'Status:\\s*NEEDS_WORK',
 ];
-TYPE_CHECKS['qa'].pass = ['✅ PASS', 'All tests passed', 'SUCCESS', 'Status:\\s*APPROVED'];
+TYPE_CHECKS['qa'].pass = [
+  '✅ PASS',
+  '\\bAll tests passed\\b',
+  '\\bSUCCESS\\b',
+  'Status:\\s*APPROVED',
+];
 
 TYPE_CHECKS['completion'] = Object.create(null);
-TYPE_CHECKS['completion'].fail = ['INCOMPLETE', 'PENDING'];
-TYPE_CHECKS['completion'].pass = ['COMPLETE', 'DELIVERED'];
+TYPE_CHECKS['completion'].fail = ['\\bINCOMPLETE\\b', '\\bPENDING\\b'];
+TYPE_CHECKS['completion'].pass = ['\\bCOMPLETE\\b', '\\bDELIVERED\\b'];
 
 // ---------------------------------------------------------------------------
 // Format checkers — each returns a normalized status string or null
@@ -111,17 +120,17 @@ function checkFailMarkers(content, type) {
  */
 function checkStatusLine(content) {
   // Match Status: at start of line (^ with multiline) to avoid matching
-  // Status: mentions inside prose or bullet points. Scan all matches and
-  // return the LAST one (the final verdict, typically at end of report).
+  // Status: mentions inside prose or bullet points. Return the FIRST
+  // recognized match — the top-level declaration is authoritative, and
+  // later Status: tokens in embedded output should not override it.
   const re = /^\s*\*{0,2}Status:\*{0,2}\s*\*{0,2}\s*([A-Z_]+)\s*\*{0,2}/gim;
   let match;
-  let lastResolved = null;
   while ((match = re.exec(content)) !== null) {
     const raw = match[1].toUpperCase();
     const resolved = STATUS_ALIASES[raw];
-    if (resolved) lastResolved = resolved;
+    if (resolved) return resolved;
   }
-  return lastResolved;
+  return null;
 }
 
 /**
@@ -161,12 +170,12 @@ function checkPassMarkers(content, type) {
 /**
  * Parse the status from report file content.
  *
- * Format priority:
+ * Resolution priority (matches implementation order):
  *   1. Infrastructure failures (QA only)
- *   2. Status: line with optional bold markdown (authoritative when present)
+ *   2. Explicit Status: line (first match, authoritative when present)
  *   3. Summary table with status column
- *   4. Fail markers (type-specific, only when no explicit Status line)
- *   5. Pass markers (type-specific)
+ *   4. Fail markers (type-specific heuristics, only when no explicit status)
+ *   5. Pass markers (type-specific heuristics)
  *   6. Fallback: UNKNOWN
  *
  * @param {string|null|undefined} content - report file content
@@ -296,10 +305,14 @@ const ISSUE_TITLE_PATTERNS = [
 
 // Guard filter: reject spurious bold words that are not real issue titles.
 // Mirrors the guard in work-suggestion-replies.js (lines 109-115).
+// Guard: reject template phrases and section keywords, but not real issue titles
+// starting with "No" (e.g., "No error handling in foo()" is a legitimate issue).
 const SPURIOUS_TITLE_RE =
-  /^(none|n\/a|no\s+issues?\b|no\s+critical\b|no\s+important\b|none\s+found|issues?\s*found|CRITICAL|IMPORTANT|NICE-TO-HAVE|SUGGESTIONS)/i;
+  /^(none|n\/a|no\s+issues?\s*$|no\s+issues?\s+found|no\s+critical\s+issues?|no\s+important\s+issues?|none\s+found|issues?\s*found|CRITICAL|IMPORTANT|NICE-TO-HAVE|SUGGESTIONS?)/i;
+// Matches common field labels with optional trailing colon (e.g., "File", "File:")
+// Also includes "Note" to avoid treating "**Note:** something" as an issue title.
 const FIELD_LABEL_RE =
-  /^(File|Description|Impact|Recommendation|Decision|Reason|Status|Summary|Details|Category|Severity|Priority|Suggestion|Evidence|Location|Context|Resolution|Type|Source|Line|Path)$/i;
+  /^(File|Description|Impact|Recommendation|Decision|Reason|Status|Summary|Details|Category|Severity|Priority|Suggestion|Evidence|Location|Context|Resolution|Type|Source|Line|Path|Note|Example|Output|Result|Action|Fix|Cause|Root Cause):?$/i;
 
 /**
  * Extract issue titles from a section of the code-review report.
@@ -320,11 +333,13 @@ function extractIssueTitles(sectionContent) {
     let m;
     while ((m = re.exec(sectionContent)) !== null) {
       const title = m[1].trim();
+      // Strip trailing colon before guard checks so "File:" matches FIELD_LABEL_RE
+      const normalizedTitle = title.replace(/:$/, '');
       if (
         title &&
         title.length > 2 &&
         !SPURIOUS_TITLE_RE.test(title) &&
-        !FIELD_LABEL_RE.test(title) &&
+        !FIELD_LABEL_RE.test(normalizedTitle) &&
         !titles.includes(title)
       ) {
         titles.push(title);
@@ -350,16 +365,34 @@ function extractIssueTitles(sectionContent) {
  * @returns {{ resolved: boolean, unaddressed: string[] }}
  */
 function isCodeReviewResolved(reportContent, replyContent) {
+  // Empty/missing report cannot be considered resolved — callers should not
+  // bypass the gate on an empty code-review.check.md just because a reply exists.
   if (!reportContent || !reportContent.trim()) {
-    return { resolved: true, unaddressed: [] };
+    return { resolved: false, unaddressed: ['(empty report content)'] };
   }
 
-  // Extract CRITICAL and IMPORTANT issue titles from the report
+  // Extract CRITICAL and IMPORTANT issue titles from the report.
+  // Supports two formats:
+  //   1. Section-based: "## CRITICAL ISSUES" with bold issue titles inside
+  //   2. Heading-based: "### CRITICAL: Title" / "### IMPORTANT: Title" (inline titles)
   const criticalMatch = reportContent.match(CRITICAL_SECTION_RE);
   const importantMatch = reportContent.match(IMPORTANT_SECTION_RE);
 
   const criticalTitles = extractIssueTitles(criticalMatch ? criticalMatch[1] : '');
   const importantTitles = extractIssueTitles(importantMatch ? importantMatch[1] : '');
+
+  // Also extract inline heading-based issues (### CRITICAL: Title / ### IMPORTANT: Title)
+  const INLINE_CRITICAL_RE = /###?\s*(?:🔴\s*)?CRITICAL:\s*(.+)/gi;
+  const INLINE_IMPORTANT_RE = /###?\s*(?:🟡\s*)?IMPORTANT:\s*(.+)/gi;
+  let inlineMatch;
+  while ((inlineMatch = INLINE_CRITICAL_RE.exec(reportContent)) !== null) {
+    const title = inlineMatch[1].trim();
+    if (title && !criticalTitles.includes(title)) criticalTitles.push(title);
+  }
+  while ((inlineMatch = INLINE_IMPORTANT_RE.exec(reportContent)) !== null) {
+    const title = inlineMatch[1].trim();
+    if (title && !importantTitles.includes(title)) importantTitles.push(title);
+  }
 
   const allBlockingTitles = [...criticalTitles, ...importantTitles];
 

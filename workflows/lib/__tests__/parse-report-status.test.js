@@ -239,6 +239,40 @@ describe('parseReportStatus — CRITICAL section header false-negative (GH-232)'
 });
 
 // ---------------------------------------------------------------------------
+// GH-232: Anchored markers prevent substring false positives
+// ---------------------------------------------------------------------------
+describe('parseReportStatus — anchored markers prevent false positives', () => {
+  it('does not treat "unsuccessful" as SUCCESS for QA type', () => {
+    const result = parseReportStatus('execution was unsuccessful', 'qa');
+    assert.notEqual(result.status, 'APPROVED', '"unsuccessful" must not match SUCCESS');
+  });
+
+  it('does not treat "unapproved" as APPROVED for tests type', () => {
+    const result = parseReportStatus('this run is unapproved pending rerun', 'tests');
+    assert.notEqual(result.status, 'APPROVED', '"unapproved" must not match APPROVED');
+  });
+
+  it('does not treat "should fail 3 times" prose as fail marker for tests type', () => {
+    const content = 'Status: APPROVED\n\nTest description: should fail 3 times before succeeding';
+    const result = parseReportStatus(content, 'tests');
+    assert.equal(result.status, 'APPROVED', 'inline prose "fail 3" must not override Status line');
+  });
+
+  it('Status: APPROVED at top overrides later Status: FAIL in embedded output', () => {
+    const content = [
+      'Status: APPROVED',
+      '',
+      '```',
+      'Status: FAIL',
+      'Some embedded output',
+      '```',
+    ].join('\n');
+    const result = parseReportStatus(content, 'tests');
+    assert.equal(result.status, 'APPROVED', 'first Status line should be authoritative');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Unknown type / unknown content -> UNKNOWN
 // ---------------------------------------------------------------------------
 describe('parseReportStatus — fallback to UNKNOWN', () => {
@@ -577,22 +611,55 @@ describe('isCodeReviewResolved — no blocking issues', () => {
 });
 
 describe('isCodeReviewResolved — null safety', () => {
-  it('returns resolved:true for null report', () => {
+  it('returns resolved:false for null report (cannot verify empty content)', () => {
     const result = isCodeReviewResolved(null, null);
-    assert.equal(result.resolved, true);
-    assert.deepStrictEqual(result.unaddressed, []);
+    assert.equal(result.resolved, false);
+    assert.ok(result.unaddressed.length > 0, 'empty report should have unaddressed marker');
   });
 
-  it('returns resolved:true for empty report', () => {
+  it('returns resolved:false for empty report (cannot verify empty content)', () => {
     const result = isCodeReviewResolved('', '');
-    assert.equal(result.resolved, true);
-    assert.deepStrictEqual(result.unaddressed, []);
+    assert.equal(result.resolved, false);
+    assert.ok(result.unaddressed.length > 0, 'empty report should have unaddressed marker');
   });
 });
 
 describe('isCodeReviewResolved — exports', () => {
   it('exports isCodeReviewResolved as a function', () => {
     assert.equal(typeof isCodeReviewResolved, 'function');
+  });
+});
+
+describe('isCodeReviewResolved — inline CRITICAL/IMPORTANT heading format', () => {
+  it('extracts issues from ### CRITICAL: Title format', () => {
+    const report = [
+      '# Code Review',
+      '',
+      '### CRITICAL: Memory leak in handler',
+      'Details about the leak.',
+      '',
+      '### CRITICAL: SQL injection risk',
+      'Details about the risk.',
+    ].join('\n');
+
+    const result = isCodeReviewResolved(report, '');
+    assert.equal(result.resolved, false);
+    assert.equal(result.unaddressed.length, 2);
+    assert.ok(result.unaddressed.some((t) => t.includes('Memory leak in handler')));
+    assert.ok(result.unaddressed.some((t) => t.includes('SQL injection risk')));
+  });
+
+  it('resolves inline CRITICAL heading issues via reply', () => {
+    const report = ['### CRITICAL: Memory leak in handler', 'Details.'].join('\n');
+
+    const reply = [
+      '## Issue: Memory leak in handler',
+      '**Decision:** FIXED',
+      '**Reason:** Fixed the leak.',
+    ].join('\n');
+
+    const result = isCodeReviewResolved(report, reply);
+    assert.equal(result.resolved, true);
   });
 });
 
@@ -631,6 +698,57 @@ describe('isCodeReviewResolved — spurious title filtering (GH-232)', () => {
       'IMPORTANT keyword alone must not be treated as issue title'
     );
     assert.deepStrictEqual(result.unaddressed, []);
+  });
+
+  it('does not treat bold field labels with colon like "**File:**" as issue titles', () => {
+    const report = [
+      '### 🔴 CRITICAL ISSUES',
+      '**Memory leak in handler**',
+      '**File:** src/handler.js',
+      '**Description:** Resource not freed',
+      '**Status:** open',
+      '### 🟢 NICE-TO-HAVE',
+    ].join('\n');
+
+    const reply = [
+      '## Issue: Memory leak in handler',
+      '**Decision:** FIXED',
+      '**Reason:** Fixed it.',
+    ].join('\n');
+
+    const result = isCodeReviewResolved(report, reply);
+    assert.equal(result.resolved, true, 'Field labels with colon must not be issue titles');
+  });
+
+  it('does not treat "**Note:**" as an issue title', () => {
+    const report = [
+      '### 🔴 CRITICAL ISSUES',
+      '**Unsafe input handling**',
+      '**Note:** This affects all endpoints',
+      '### 🟢 NICE-TO-HAVE',
+    ].join('\n');
+
+    const reply = [
+      '## Issue: Unsafe input handling',
+      '**Decision:** FIXED',
+      '**Reason:** Added validation.',
+    ].join('\n');
+
+    const result = isCodeReviewResolved(report, reply);
+    assert.equal(result.resolved, true, '"Note:" should be filtered as a field label');
+  });
+
+  it('treats "No error handling in foo()" as a real issue title (not filtered by SPURIOUS_TITLE_RE)', () => {
+    const report = [
+      '### 🔴 CRITICAL ISSUES',
+      '**No error handling in foo()**',
+      'Details.',
+      '### 🟢 NICE-TO-HAVE',
+    ].join('\n');
+
+    const result = isCodeReviewResolved(report, '');
+    assert.equal(result.resolved, false, '"No error handling in foo()" is a real issue');
+    assert.ok(result.unaddressed[0].includes('No error handling'));
   });
 
   it('does not treat short bold words (<=2 chars) as issue titles', () => {
