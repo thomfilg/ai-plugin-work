@@ -15,21 +15,42 @@ ICONS['INFRASTRUCTURE_FAILURE'] = '🛑';
 ICONS['ACCESS_FAILED'] = '🔒';
 
 // ---------------------------------------------------------------------------
-// Status normalization — maps raw values to canonical statuses
+// Status normalization — maps raw values to canonical statuses.
+// Base aliases apply to all types; type-specific overrides extend them.
 // ---------------------------------------------------------------------------
-const STATUS_ALIASES = Object.create(null);
-STATUS_ALIASES['APPROVED'] = 'APPROVED';
-STATUS_ALIASES['COMPLETE'] = 'APPROVED';
-STATUS_ALIASES['DELIVERED'] = 'APPROVED';
-STATUS_ALIASES['PASS'] = 'APPROVED';
-STATUS_ALIASES['PASSED'] = 'APPROVED';
-STATUS_ALIASES['SUCCESS'] = 'APPROVED';
-STATUS_ALIASES['NEEDS_WORK'] = 'NEEDS_WORK';
-STATUS_ALIASES['FAIL'] = 'NEEDS_WORK';
-STATUS_ALIASES['FAILED'] = 'NEEDS_WORK';
-STATUS_ALIASES['INCOMPLETE'] = 'NEEDS_WORK';
-STATUS_ALIASES['PENDING'] = 'NEEDS_WORK';
-STATUS_ALIASES['NOT_APPLICABLE'] = 'NOT_APPLICABLE';
+const BASE_ALIASES = Object.create(null);
+BASE_ALIASES['APPROVED'] = 'APPROVED';
+BASE_ALIASES['PASS'] = 'APPROVED';
+BASE_ALIASES['PASSED'] = 'APPROVED';
+BASE_ALIASES['SUCCESS'] = 'APPROVED';
+BASE_ALIASES['NEEDS_WORK'] = 'NEEDS_WORK';
+BASE_ALIASES['FAIL'] = 'NEEDS_WORK';
+BASE_ALIASES['FAILED'] = 'NEEDS_WORK';
+BASE_ALIASES['INCOMPLETE'] = 'NEEDS_WORK';
+BASE_ALIASES['PENDING'] = 'NEEDS_WORK';
+BASE_ALIASES['NOT_APPLICABLE'] = 'NOT_APPLICABLE';
+
+// Per-type alias maps — only 'completion' accepts COMPLETE/DELIVERED as APPROVED.
+// tests and codeReview must use explicit APPROVED.
+const TYPE_ALIASES = Object.create(null);
+TYPE_ALIASES['completion'] = Object.assign(Object.create(null), BASE_ALIASES, {
+  COMPLETE: 'APPROVED',
+  DELIVERED: 'APPROVED',
+});
+// Fallback for types without overrides
+const STATUS_ALIASES = BASE_ALIASES;
+
+/**
+ * Resolve a raw status string to a canonical status, scoped by report type.
+ * @param {string} raw - uppercase raw status value
+ * @param {string} [type] - report type for type-specific aliases
+ * @returns {string|undefined}
+ */
+function resolveAlias(raw, type) {
+  const typeMap = type && TYPE_ALIASES[type];
+  if (typeMap && typeMap[raw] !== undefined) return typeMap[raw];
+  return STATUS_ALIASES[raw];
+}
 
 // ---------------------------------------------------------------------------
 // Per-type marker patterns (migrated from check-generate-summary.js)
@@ -116,9 +137,10 @@ function checkFailMarkers(content, type) {
  * Check for explicit Status: line (with optional bold markdown).
  * Matches: Status: APPROVED, **Status:** **APPROVED**, **Status:** APPROVED
  * @param {string} content
+ * @param {string} [type] - report type for type-scoped alias resolution
  * @returns {string|null}
  */
-function checkStatusLine(content) {
+function checkStatusLine(content, type) {
   // Match Status: at start of line (^ with multiline) to avoid matching
   // Status: mentions inside prose or bullet points. Return the FIRST
   // recognized match — the top-level declaration is authoritative, and
@@ -127,7 +149,7 @@ function checkStatusLine(content) {
   let match;
   while ((match = re.exec(content)) !== null) {
     const raw = match[1].toUpperCase();
-    const resolved = STATUS_ALIASES[raw];
+    const resolved = resolveAlias(raw, type);
     if (resolved) return resolved;
   }
   return null;
@@ -137,13 +159,14 @@ function checkStatusLine(content) {
  * Check for status in a markdown summary table.
  * Matches: | Status | APPROVED |
  * @param {string} content
+ * @param {string} [type] - report type for type-scoped alias resolution
  * @returns {string|null}
  */
-function checkSummaryTable(content) {
+function checkSummaryTable(content, type) {
   const match = content.match(/\|\s*Status\s*\|\s*\*{0,2}([A-Z_]+)\*{0,2}\s*\|/i);
   if (!match) return null;
   const raw = match[1].toUpperCase();
-  return STATUS_ALIASES[raw] || null;
+  return resolveAlias(raw, type) || null;
 }
 
 /**
@@ -195,13 +218,13 @@ function parseReportStatus(content, type) {
   }
 
   // 2. Explicit Status: line — authoritative when present (overrides raw content patterns)
-  const lineStatus = checkStatusLine(content);
+  const lineStatus = checkStatusLine(content, type);
   if (lineStatus) {
     return { status: lineStatus, icon: ICONS[lineStatus] || ICONS['UNKNOWN'] };
   }
 
   // 3. Summary table
-  const tableStatus = checkSummaryTable(content);
+  const tableStatus = checkSummaryTable(content, type);
   if (tableStatus) {
     return { status: tableStatus, icon: ICONS[tableStatus] || ICONS['UNKNOWN'] };
   }

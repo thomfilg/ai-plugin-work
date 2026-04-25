@@ -57,6 +57,17 @@ describe('parseReportStatus — Status: line format', () => {
     assert.deepStrictEqual(result, { status: 'APPROVED', icon: '✅' });
   });
 
+  it('does NOT accept Status: COMPLETE for tests type (type-scoped aliases)', () => {
+    const result = parseReportStatus('Status: COMPLETE', 'tests');
+    // COMPLETE is not a valid alias for tests — should fall through to UNKNOWN
+    assert.notEqual(result.status, 'APPROVED');
+  });
+
+  it('does NOT accept Status: COMPLETE for codeReview type', () => {
+    const result = parseReportStatus('Status: COMPLETE', 'codeReview');
+    assert.notEqual(result.status, 'APPROVED');
+  });
+
   it('recognizes Status: NEEDS_WORK', () => {
     const result = parseReportStatus('Status: NEEDS_WORK', 'codeReview');
     assert.deepStrictEqual(result, { status: 'NEEDS_WORK', icon: '⚠️' });
