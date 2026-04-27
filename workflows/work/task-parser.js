@@ -113,12 +113,54 @@ function parseTasks(tasksDir) {
   return tasks.length > 0 ? tasks : null;
 }
 
-function buildTaskPrompt(task, tasksDir) {
+/**
+ * @param {object} task - Current task object from parseTasks()
+ * @param {string} tasksDir - Path to the task directory
+ * @param {Array|null} allTasks - All tasks from parseTasks(), used to build task context
+ * @param {object|null} taskState - tasksMeta from work state, used to show completion status
+ */
+function buildTaskPrompt(task, tasksDir, allTasks, taskState) {
   const lines = [];
   lines.push(`## Current Task: Task ${task.num} — ${task.title}`);
   lines.push('');
   lines.push('You are implementing ONE task from the task plan. Do NOT implement other tasks.');
   lines.push('');
+
+  // ── Task Context: show scope of all tasks to prevent agent drift ─────────
+  if (allTasks && allTasks.length > 1) {
+    const persistedTasks = taskState?.tasks ?? [];
+    lines.push('### Task Context');
+    lines.push(
+      `This is Task ${task.num} of ${allTasks.length}. Scope boundaries are listed below to prevent drift:`
+    );
+    lines.push('');
+    for (const t of allTasks) {
+      const taskMeta = persistedTasks.find((tm) => tm.id === `task_${t.num}`);
+      const isCompleted = taskMeta?.status === 'completed';
+      const isCurrent = t.num === task.num;
+      if (isCurrent) {
+        lines.push(`- **Task ${t.num} — ${t.title}** ← YOU ARE IMPLEMENTING THIS`);
+      } else if (isCompleted) {
+        lines.push(`- Task ${t.num} — ${t.title} [✓ completed — do NOT re-implement]`);
+      } else {
+        lines.push(`- Task ${t.num} — ${t.title} [pending — do NOT implement yet]`);
+        if (t.suggestedScope) {
+          // Cap at 5 lines to keep the prompt concise — a long list is still
+          // listed in full inside the task's own section in tasks.md
+          const scopeLines = t.suggestedScope
+            .split('\n')
+            .map((l) => l.trim())
+            .filter(Boolean)
+            .slice(0, 5);
+          if (scopeLines.length > 0) {
+            lines.push(`  Reserved files: ${scopeLines.join(', ')}`);
+          }
+        }
+      }
+    }
+    lines.push('');
+  }
+
   lines.push('### Task Details');
   lines.push(task.rawContent);
   lines.push('');

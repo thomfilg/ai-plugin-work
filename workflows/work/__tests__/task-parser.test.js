@@ -242,4 +242,98 @@ describe('buildTaskPrompt', () => {
     const prompt = buildTaskPrompt(task, tmpDir);
     assert.ok(prompt.includes('Build the widget'));
   });
+
+  it('omits task context section when allTasks is not provided', () => {
+    const task = { num: 1, title: 'Only task', rawContent: 'content' };
+    const prompt = buildTaskPrompt(task, tmpDir);
+    assert.ok(!prompt.includes('### Task Context'));
+  });
+
+  it('omits task context section when allTasks has only one task', () => {
+    const task = { num: 1, title: 'Only task', rawContent: 'content' };
+    const allTasks = [task];
+    const prompt = buildTaskPrompt(task, tmpDir, allTasks);
+    assert.ok(!prompt.includes('### Task Context'));
+  });
+
+  it('includes task context section when multiple tasks are provided', () => {
+    const task = { num: 2, title: 'Second task', rawContent: 'content', suggestedScope: '' };
+    const allTasks = [
+      { num: 1, title: 'First task', suggestedScope: '' },
+      task,
+      { num: 3, title: 'Third task', suggestedScope: '' },
+    ];
+    const prompt = buildTaskPrompt(task, tmpDir, allTasks);
+    assert.ok(prompt.includes('### Task Context'));
+    assert.ok(prompt.includes('Task 2 of 3'));
+  });
+
+  it('marks current task with YOU ARE IMPLEMENTING THIS', () => {
+    const task = { num: 2, title: 'Current', rawContent: 'content', suggestedScope: '' };
+    const allTasks = [
+      { num: 1, title: 'Previous', suggestedScope: '' },
+      task,
+    ];
+    const prompt = buildTaskPrompt(task, tmpDir, allTasks);
+    assert.ok(prompt.includes('YOU ARE IMPLEMENTING THIS'));
+    assert.ok(prompt.match(/Task 2.*YOU ARE IMPLEMENTING THIS/));
+  });
+
+  it('marks pending tasks as do NOT implement yet', () => {
+    const task = { num: 1, title: 'Current', rawContent: 'content', suggestedScope: '' };
+    const allTasks = [
+      task,
+      { num: 2, title: 'Upcoming', suggestedScope: '' },
+    ];
+    const prompt = buildTaskPrompt(task, tmpDir, allTasks);
+    assert.ok(prompt.includes('pending — do NOT implement yet'));
+  });
+
+  it('marks completed tasks as do NOT re-implement', () => {
+    const task = { num: 2, title: 'Current', rawContent: 'content', suggestedScope: '' };
+    const allTasks = [
+      { num: 1, title: 'Done task', suggestedScope: '' },
+      task,
+    ];
+    const taskState = {
+      tasks: [{ id: 'task_1', status: 'completed' }],
+    };
+    const prompt = buildTaskPrompt(task, tmpDir, allTasks, taskState);
+    assert.ok(prompt.includes('completed — do NOT re-implement'));
+  });
+
+  it('includes reserved files for pending tasks that have suggestedScope', () => {
+    const task = { num: 1, title: 'Current', rawContent: 'content', suggestedScope: '' };
+    const allTasks = [
+      task,
+      { num: 2, title: 'Upcoming', suggestedScope: '- src/foo.ts\n- src/bar.ts' },
+    ];
+    const prompt = buildTaskPrompt(task, tmpDir, allTasks);
+    assert.ok(prompt.includes('Reserved files:'));
+    assert.ok(prompt.includes('src/foo.ts'));
+    assert.ok(prompt.includes('src/bar.ts'));
+  });
+
+  it('does not include reserved files for pending tasks with no suggestedScope', () => {
+    const task = { num: 1, title: 'Current', rawContent: 'content', suggestedScope: '' };
+    const allTasks = [
+      task,
+      { num: 2, title: 'No scope', suggestedScope: '' },
+    ];
+    const prompt = buildTaskPrompt(task, tmpDir, allTasks);
+    assert.ok(!prompt.includes('Reserved files:'));
+  });
+
+  it('falls back gracefully when taskState has no tasks array', () => {
+    const task = { num: 2, title: 'Current', rawContent: 'content', suggestedScope: '' };
+    const allTasks = [
+      { num: 1, title: 'Previous', suggestedScope: '' },
+      task,
+    ];
+    // taskState with no tasks array — should not throw
+    const prompt = buildTaskPrompt(task, tmpDir, allTasks, {});
+    assert.ok(prompt.includes('### Task Context'));
+    // Task 1 has no persisted status → treated as pending
+    assert.ok(prompt.includes('pending — do NOT implement yet'));
+  });
 });
