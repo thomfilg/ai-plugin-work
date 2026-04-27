@@ -207,7 +207,7 @@ module.exports = function implementStep(add, s, ctx) {
   const implementMeta = {
     agentType: 'skill',
     agentPrompt: currentTask
-      ? `/work-implement ${buildTaskPrompt(currentTask, tasksDir)}${_buildDependencyPrompt(depStatus, claimOwner, workerSlot)}${getDocsPrompt('READ_DOCS_ON_DEV')}`
+      ? `/work-implement ${buildTaskPrompt(currentTask, tasksDir, taskData, taskState)}${_buildDependencyPrompt(depStatus, claimOwner, workerSlot)}${getDocsPrompt('READ_DOCS_ON_DEV')}`
       : `/work-implement <requirements>${planningContext}${getDocsPrompt('READ_DOCS_ON_DEV')}`,
   };
 

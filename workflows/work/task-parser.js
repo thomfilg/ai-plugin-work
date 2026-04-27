@@ -40,6 +40,38 @@ function readFile(p) {
   }
 }
 
+/**
+ * Return the claim owner ID from a task's lock file, or null if unclaimed.
+ * @param {string} tasksDir
+ * @param {number} taskNum
+ * @returns {string|null}
+ */
+function _readClaimOwner(tasksDir, taskNum) {
+  try {
+    const lockPath = path.join(tasksDir, '.claims', `task-${taskNum}.lock`);
+    const raw = fs.readFileSync(lockPath, 'utf8');
+    const parsed = JSON.parse(raw);
+    const ownerId = parsed?.ownerId;
+    if (typeof ownerId === 'string' && /^PR[1-9]\d*$/.test(ownerId)) {
+      return ownerId;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Normalise a single suggestedScope line by stripping leading list markers
+ * (`- `, `* `, `+ `) so the reserved-files list is clean regardless of how
+ * tasks.md was formatted.
+ * @param {string} line
+ * @returns {string}
+ */
+function _normalizeScope(line) {
+  return line.trim().replace(/^[-*+]\s+/, '').trim();
+}
+
 // ─── Task Parsing ────────────────────────────────────────────────────────────
 
 function parseTasks(tasksDir) {
@@ -113,12 +145,55 @@ function parseTasks(tasksDir) {
   return tasks.length > 0 ? tasks : null;
 }
 
-function buildTaskPrompt(task, tasksDir) {
+/**
+ * @param {object} task - Current task object from parseTasks()
+ * @param {string} tasksDir - Path to the task directory
+ * @param {Array|null} allTasks - All tasks from parseTasks(), used to build task context
+ * @param {object|null} taskState - tasksMeta from work state, used to show completion status
+ */
+function buildTaskPrompt(task, tasksDir, allTasks, taskState) {
   const lines = [];
   lines.push(`## Current Task: Task ${task.num} — ${task.title}`);
   lines.push('');
   lines.push('You are implementing ONE task from the task plan. Do NOT implement other tasks.');
   lines.push('');
+
+  // ── Task Context: show scope of all tasks to prevent agent drift ─────────
+  if (allTasks && allTasks.length > 1) {
+    const persistedTasks = Array.isArray(taskState?.tasks) ? taskState.tasks : [];
+    lines.push('### Task Context');
+    lines.push(
+      `This is Task ${task.num} of ${allTasks.length}. Scope boundaries are listed below to prevent drift:`
+    );
+    lines.push('');
+    for (const t of allTasks) {
+      const taskMeta = persistedTasks.find((tm) => tm.id === `task_${t.num}`);
+      const isCompleted = taskMeta?.status === 'completed';
+      const isCurrent = t.num === task.num;
+      if (isCurrent) {
+        lines.push(`- **Task ${t.num} — ${t.title}** ← YOU ARE IMPLEMENTING THIS`);
+      } else if (isCompleted) {
+        lines.push(`- Task ${t.num} — ${t.title} [✓ completed — do NOT re-implement]`);
+      } else {
+        const claimOwner = _readClaimOwner(tasksDir, t.num);
+        const label = claimOwner
+          ? `in progress by ${claimOwner} — do NOT duplicate work`
+          : 'pending — do NOT implement yet';
+        lines.push(`- Task ${t.num} — ${t.title} [${label}]`);
+        if (t.suggestedScope) {
+          const scopeLines = t.suggestedScope
+            .split('\n')
+            .map((l) => _normalizeScope(l))
+            .filter(Boolean);
+          if (scopeLines.length > 0) {
+            lines.push(`  Reserved files: ${scopeLines.join(', ')}`);
+          }
+        }
+      }
+    }
+    lines.push('');
+  }
+
   lines.push('### Task Details');
   lines.push(task.rawContent);
   lines.push('');
