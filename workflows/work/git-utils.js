@@ -5,6 +5,7 @@
  * and reuse across modules.
  */
 
+const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -38,4 +39,23 @@ function resolveGitHead(cwd) {
   throw new Error(`unexpected .git content in ${dotgitPath}`);
 }
 
-module.exports = { resolveGitHead };
+/**
+ * Get the current HEAD commit SHA.
+ *
+ * Uses `git rev-parse HEAD` to retrieve the 40-char hex SHA.
+ * Returns null on any failure (fail-open).
+ *
+ * @returns {string|null} 40-char hex SHA, or null on error
+ */
+function getHeadSha() {
+  try {
+    return execFileSync('git', ['rev-parse', 'HEAD'], {
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    return null;
+  }
+}
+
+module.exports = { resolveGitHead, getHeadSha };

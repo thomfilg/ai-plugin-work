@@ -12,7 +12,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { resolveGitHead } = require('../git-utils');
+const { resolveGitHead, getHeadSha } = require('../git-utils');
 
 describe('resolveGitHead (GH-260 Issue 1)', () => {
   const tmpDirs = [];
@@ -78,5 +78,29 @@ describe('resolveGitHead (GH-260 Issue 1)', () => {
       /unexpected \.git content/,
       'Should throw for non-gitdir content'
     );
+  });
+});
+
+describe('getHeadSha (GH-299 Task 1)', () => {
+  it('should return a 40-char hex string in a real git repo', () => {
+    const sha = getHeadSha();
+    assert.notEqual(sha, null, 'Should not be null in a git repo');
+    assert.match(sha, /^[0-9a-f]{40}$/, 'Should be a 40-char hex SHA');
+  });
+
+  it('should return null when git fails (non-git directory)', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gh299-'));
+    try {
+      const origCwd = process.cwd();
+      process.chdir(tmpDir);
+      try {
+        const sha = getHeadSha();
+        assert.equal(sha, null, 'Should return null in a non-git directory');
+      } finally {
+        process.chdir(origCwd);
+      }
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });
