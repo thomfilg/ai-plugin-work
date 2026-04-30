@@ -40,6 +40,8 @@ function transitionStep(ticket, targetStep, deps) {
     // GH-260: generic step-verify gate deps
     softSteps,
     commandMap,
+    // GH-299: check-drift gate dep
+    getHeadSha,
   } = deps;
 
   if (!ALL_STEPS.includes(targetStep)) {
@@ -123,6 +125,12 @@ function transitionStep(ticket, targetStep, deps) {
     }
   }
 
+  // GH-299: Record checkPassedSha on successful check → pr forward transition
+  if (isCheckToPr && isForward) {
+    ws.checkPassedSha = getHeadSha();
+    ws.checkInterruptedStep = null;
+  }
+
   // GH-260: Generic step-verify gate — run the step's verify() function before
   // allowing forward transitions out of non-soft steps. This catches bypasses
   // for follow_up, ci, and any other step with a verify() in workflow-definition.js.
@@ -153,6 +161,33 @@ function transitionStep(ticket, targetStep, deps) {
           hint: `The ${currentStep} step has not passed its verification check. Complete the step requirements before transitioning.`,
         };
       }
+    }
+  }
+
+  // GH-299: Check-drift gate — detect HEAD drift on forward transitions from post-check steps.
+  // If new commits landed since check passed, redirect back to check.
+  let checkDriftDetected = false;
+  const POST_CHECK_STEPS = [
+    STEPS.pr,
+    STEPS.ready,
+    STEPS.follow_up,
+    STEPS.ci,
+    STEPS.cleanup,
+    STEPS.reports,
+  ];
+  if (isForward && POST_CHECK_STEPS.includes(currentStep) && ws?.checkPassedSha) {
+    const headSha = getHeadSha();
+    if (headSha != null && headSha !== ws.checkPassedSha) {
+      ws.checkInterruptedStep = currentStep;
+      ws.checkPassedSha = null;
+      appendAction(safeTicket, {
+        step: currentStep,
+        what: 'check re-triggered: new commits detected',
+      });
+      saveWorkState(safeTicket, ws);
+      // Redirect transition to check (backward)
+      targetStep = STEPS.check;
+      checkDriftDetected = true;
     }
   }
 
@@ -240,13 +275,21 @@ function transitionStep(ticket, targetStep, deps) {
   ws.lastTransitionTimestamp = new Date().toISOString();
   saveWorkState(safeTicket, ws);
 
-  return {
+  const result = {
     success: true,
     from: currentStep,
     to: targetStep,
     direction: targetIdx > currentIdx ? 'forward' : 'backward',
     message: `${currentStep} → ${targetStep}`,
   };
+
+  // GH-299: Annotate result when check-drift redirected the transition
+  if (checkDriftDetected) {
+    result.gate = 'check-drift';
+    result.message = `New commits detected since check passed. Re-running check.`;
+  }
+
+  return result;
 }
 
 function getAvailableTransitions(ticket, deps) {

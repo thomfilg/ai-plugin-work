@@ -68,6 +68,8 @@ function createDeps(overrides = {}) {
     // GH-260: generic step-verify gate deps (default: no soft steps, no commandMap)
     softSteps: new Set(),
     commandMap: [],
+    // GH-299: getHeadSha dep (default: returns a fixed SHA)
+    getHeadSha: () => 'a'.repeat(40),
     // expose for assertions
     _actions: actions,
     _savedStates: savedStates,
@@ -408,5 +410,192 @@ describe('transition-step.js (GH-260): generic step-verify gate', () => {
     assert.equal(result.error, true, 'Should block transition when verify throws');
     assert.equal(result.gate, 'step-verify', 'Gate should be step-verify');
     assert.ok(result.message.includes('verify threw'), 'Message should indicate verify threw');
+  });
+});
+
+// ─── GH-299: check-drift gate tests ─────────────────────────────────────────
+describe('transition-step.js (GH-299): check-drift gate', () => {
+  /** Helper: create deps with state at a given step, with checkPassedSha set */
+  function depsAtStep(stepName, opts = {}) {
+    const { STEPS, ALL_STEPS } = require('../step-registry');
+    const stepIdx = ALL_STEPS.indexOf(stepName);
+    const sha = opts.checkPassedSha !== undefined ? opts.checkPassedSha : 'a'.repeat(40);
+    const headSha = opts.headSha !== undefined ? opts.headSha : 'a'.repeat(40);
+
+    const deps = createDeps({
+      workflowCanTransition: () => true,
+      getHeadSha: () => headSha,
+      ...opts.extraDeps,
+    });
+
+    const ws = deps.loadWorkState(opts.ticket || 'TEST-DRIFT');
+    ws.currentStep = stepIdx + 1;
+    ws.stepStatus[stepName] = 'in_progress';
+    if (sha !== undefined) {
+      ws.checkPassedSha = sha;
+    }
+    if (opts.checkInterruptedStep !== undefined) {
+      ws.checkInterruptedStep = opts.checkInterruptedStep;
+    }
+    deps._savedStates[opts.ticket || 'TEST-DRIFT'] = ws;
+
+    return { deps, STEPS, ALL_STEPS };
+  }
+
+  it('should proceed normally when SHA matches on forward transition from post-check step', () => {
+    const { transitionStep } = require('../transition-step');
+    const matchingSha = 'b'.repeat(40);
+    const { deps } = depsAtStep('pr', {
+      ticket: 'TEST-DRIFT-MATCH',
+      checkPassedSha: matchingSha,
+      headSha: matchingSha,
+    });
+
+    const result = transitionStep('TEST-DRIFT-MATCH', 'ready', deps);
+    assert.equal(result.success, true, 'Should proceed when SHA matches');
+    assert.equal(result.from, 'pr');
+    assert.equal(result.to, 'ready');
+  });
+
+  it('should redirect to check when SHA differs on forward transition from post-check step', () => {
+    const { transitionStep } = require('../transition-step');
+    const { deps, STEPS } = depsAtStep('pr', {
+      ticket: 'TEST-DRIFT-DIFF',
+      checkPassedSha: 'a'.repeat(40),
+      headSha: 'b'.repeat(40),
+    });
+
+    const result = transitionStep('TEST-DRIFT-DIFF', 'ready', deps);
+    assert.equal(result.success, true, 'Should succeed (redirected)');
+    assert.equal(result.to, STEPS.check, 'Should redirect to check');
+    assert.equal(result.gate, 'check-drift', 'Gate should be check-drift');
+    assert.ok(
+      result.message.includes('New commits detected'),
+      'Message should mention new commits'
+    );
+  });
+
+  it('should skip gate on backward transitions', () => {
+    const { transitionStep } = require('../transition-step');
+    const { deps, STEPS } = depsAtStep('pr', {
+      ticket: 'TEST-DRIFT-BACK',
+      checkPassedSha: 'a'.repeat(40),
+      headSha: 'b'.repeat(40), // SHA differs but backward should skip gate
+    });
+
+    const result = transitionStep('TEST-DRIFT-BACK', STEPS.check, deps);
+    assert.equal(result.success, true, 'Backward transition should succeed');
+    assert.equal(result.to, STEPS.check);
+    // Should NOT have gate='check-drift' — backward transitions skip the gate
+    assert.notEqual(result.gate, 'check-drift', 'Backward should not trigger drift gate');
+  });
+
+  it('should skip gate when checkPassedSha is missing from work state', () => {
+    const { transitionStep } = require('../transition-step');
+    const { deps } = depsAtStep('pr', {
+      ticket: 'TEST-DRIFT-NOSHA',
+      checkPassedSha: undefined,
+      headSha: 'b'.repeat(40),
+    });
+    // Remove checkPassedSha explicitly
+    delete deps._savedStates['TEST-DRIFT-NOSHA'].checkPassedSha;
+
+    const result = transitionStep('TEST-DRIFT-NOSHA', 'ready', deps);
+    assert.equal(result.success, true, 'Should proceed without checkPassedSha');
+  });
+
+  it('should skip gate (fail-open) when getHeadSha returns null', () => {
+    const { transitionStep } = require('../transition-step');
+    const { deps } = depsAtStep('pr', {
+      ticket: 'TEST-DRIFT-NULL',
+      checkPassedSha: 'a'.repeat(40),
+      headSha: null,
+    });
+
+    const result = transitionStep('TEST-DRIFT-NULL', 'ready', deps);
+    assert.equal(result.success, true, 'Should fail-open when getHeadSha returns null');
+  });
+
+  it('should record checkPassedSha on check → pr transition', () => {
+    const { transitionStep } = require('../transition-step');
+    const { STEPS, ALL_STEPS } = require('../step-registry');
+    const expectedSha = 'c'.repeat(40);
+
+    const checkIdx = ALL_STEPS.indexOf(STEPS.check);
+    const deps = createDeps({
+      workflowCanTransition: () => true,
+      getHeadSha: () => expectedSha,
+    });
+
+    const ws = deps.loadWorkState('TEST-DRIFT-RECORD');
+    ws.currentStep = checkIdx + 1;
+    ws.stepStatus[STEPS.check] = 'in_progress';
+    deps._savedStates['TEST-DRIFT-RECORD'] = ws;
+
+    const result = transitionStep('TEST-DRIFT-RECORD', STEPS.pr, deps);
+    assert.equal(result.success, true, 'check -> pr should succeed');
+
+    const saved = deps._savedStates['TEST-DRIFT-RECORD'];
+    assert.equal(saved.checkPassedSha, expectedSha, 'checkPassedSha should be recorded');
+  });
+
+  it('should clear checkInterruptedStep on check → pr transition', () => {
+    const { transitionStep } = require('../transition-step');
+    const { STEPS, ALL_STEPS } = require('../step-registry');
+
+    const checkIdx = ALL_STEPS.indexOf(STEPS.check);
+    const deps = createDeps({
+      workflowCanTransition: () => true,
+      getHeadSha: () => 'd'.repeat(40),
+    });
+
+    const ws = deps.loadWorkState('TEST-DRIFT-CLEAR');
+    ws.currentStep = checkIdx + 1;
+    ws.stepStatus[STEPS.check] = 'in_progress';
+    ws.checkInterruptedStep = 'pr'; // was previously interrupted
+    deps._savedStates['TEST-DRIFT-CLEAR'] = ws;
+
+    const result = transitionStep('TEST-DRIFT-CLEAR', STEPS.pr, deps);
+    assert.equal(result.success, true);
+
+    const saved = deps._savedStates['TEST-DRIFT-CLEAR'];
+    assert.equal(saved.checkInterruptedStep, null, 'checkInterruptedStep should be cleared');
+  });
+
+  it('should set checkInterruptedStep on drift detection', () => {
+    const { transitionStep } = require('../transition-step');
+    const { deps, STEPS } = depsAtStep('follow_up', {
+      ticket: 'TEST-DRIFT-INTERRUPT',
+      checkPassedSha: 'a'.repeat(40),
+      headSha: 'b'.repeat(40),
+    });
+
+    const result = transitionStep('TEST-DRIFT-INTERRUPT', STEPS.ci, deps);
+    assert.equal(result.gate, 'check-drift');
+
+    const saved = deps._savedStates['TEST-DRIFT-INTERRUPT'];
+    assert.equal(
+      saved.checkInterruptedStep,
+      'follow_up',
+      'checkInterruptedStep should be set to current step'
+    );
+    assert.equal(saved.checkPassedSha, null, 'checkPassedSha should be cleared on drift');
+  });
+
+  it('should call appendAction with re-check message on drift', () => {
+    const { transitionStep } = require('../transition-step');
+    const { deps, STEPS } = depsAtStep('ci', {
+      ticket: 'TEST-DRIFT-ACTION',
+      checkPassedSha: 'a'.repeat(40),
+      headSha: 'b'.repeat(40),
+    });
+
+    transitionStep('TEST-DRIFT-ACTION', STEPS.cleanup, deps);
+
+    const recheckActions = deps._actions.filter(
+      (a) => a.what === 'check re-triggered: new commits detected'
+    );
+    assert.equal(recheckActions.length, 1, 'Should log re-check action');
+    assert.equal(recheckActions[0].step, 'ci', 'Action step should be current step');
   });
 });
