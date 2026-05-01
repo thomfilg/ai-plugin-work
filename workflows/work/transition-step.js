@@ -145,9 +145,12 @@ function transitionStep(ticket, targetStep, deps) {
     }
   }
 
-  // GH-299: Record checkPassedSha on successful check → pr forward transition
+  // GH-299: Record checkPassedSha on successful check → pr forward transition.
+  // Only update if getHeadSha returns a valid SHA; otherwise preserve any existing value
+  // to avoid disabling drift detection when git is temporarily unavailable.
   if (isCheckToPr && isForward) {
-    ws.checkPassedSha = getHeadSha(process.cwd());
+    const sha = getHeadSha(process.cwd());
+    if (sha) ws.checkPassedSha = sha;
     ws.checkInterruptedStep = null;
   }
 
