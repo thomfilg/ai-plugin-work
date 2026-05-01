@@ -153,7 +153,7 @@ Review all generated tasks and check:
 - Parallelization is maximized safely (any task marked `No` that could be `Yes`?)
 - Checkpoint tasks are present after every 3 implementation tasks or subsystem boundary
 - TDD ordering is correct (RED before GREEN before REFACTOR in every non-exempt implementation task — see Rule 10 for exemptions)
-- Bookend enforcement: first task is a Gherkin-to-test task (type `test`) and last task is a verification checkpoint (type `checkpoint`) per Rule 12
+- Bookend enforcement: first task is type `test` (Gherkin-based or acceptance-criteria-based per Rule 12) and last task is a verification checkpoint (type `checkpoint`) per Rule 12
 - Anti-patterns are absent
 
 Refactor tasks if any issues are found. Re-validate coverage after any refactoring.
