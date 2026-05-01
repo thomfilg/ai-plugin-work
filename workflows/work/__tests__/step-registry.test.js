@@ -153,4 +153,18 @@ describe('step-registry', () => {
       );
     });
   });
+
+  // GH-299: post-check steps can retry back to check
+  describe('post-check retry edges to check (GH-299)', () => {
+    const postCheckSteps = ['pr', 'ready', 'follow_up', 'ci', 'cleanup', 'reports'];
+
+    for (const step of postCheckSteps) {
+      it(`RETRY_EDGES maps ${step} to check`, () => {
+        assert.ok(
+          STEP_TRANSITIONS[step].includes('check'),
+          `${step} should have a retry edge to check`
+        );
+      });
+    }
+  });
 });

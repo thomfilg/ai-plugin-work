@@ -69,7 +69,10 @@ function _readClaimOwner(tasksDir, taskNum) {
  * @returns {string}
  */
 function _normalizeScope(line) {
-  return line.trim().replace(/^[-*+]\s+/, '').trim();
+  return line
+    .trim()
+    .replace(/^[-*+]\s+/, '')
+    .trim();
 }
 
 // ─── Task Parsing ────────────────────────────────────────────────────────────

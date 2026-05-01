@@ -12,7 +12,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { resolveGitHead } = require('../git-utils');
+const { resolveGitHead, getHeadSha } = require('../git-utils');
 
 describe('resolveGitHead (GH-260 Issue 1)', () => {
   const tmpDirs = [];
@@ -78,5 +78,39 @@ describe('resolveGitHead (GH-260 Issue 1)', () => {
       /unexpected \.git content/,
       'Should throw for non-gitdir content'
     );
+  });
+});
+
+describe('getHeadSha (GH-299 Task 1)', () => {
+  const { execFileSync } = require('child_process');
+
+  it('should return a 40-char hex string in a self-contained temp git repo', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gh299-git-'));
+    try {
+      // Create a self-contained git repo so test doesn't depend on outer checkout
+      const gitOpts = { cwd: tmpDir, stdio: 'ignore', timeout: 5000 };
+      execFileSync('git', ['init'], gitOpts);
+      execFileSync('git', ['config', 'user.email', 'test@test.com'], gitOpts);
+      execFileSync('git', ['config', 'user.name', 'Test'], gitOpts);
+      fs.writeFileSync(path.join(tmpDir, 'file.txt'), 'test');
+      execFileSync('git', ['add', '.'], gitOpts);
+      execFileSync('git', ['commit', '-m', 'init'], gitOpts);
+
+      const sha = getHeadSha(tmpDir);
+      assert.notEqual(sha, null, 'Should not be null in a git repo');
+      assert.match(sha, /^[0-9a-f]{40}$/, 'Should be a 40-char hex SHA');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it('should return null when git fails (non-git directory)', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gh299-'));
+    try {
+      const sha = getHeadSha(tmpDir);
+      assert.equal(sha, null, 'Should return null in a non-git directory');
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });

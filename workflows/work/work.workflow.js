@@ -74,6 +74,7 @@ const { run, fileExists, readFile, listFiles, ...helpers } = require(
 const { parseTicketInput } = require(path.join(__dirname, '..', 'lib', 'ticket-provider'));
 const { parseTasks, buildTaskPrompt } = require(path.join(__dirname, 'task-parser'));
 const { archiveStepArtifacts } = require(path.join(__dirname, 'artifact-archival'));
+const { getHeadSha } = require(path.join(__dirname, 'git-utils'));
 const { TDD_PROTOCOL, readTddEvidence: _readTddEvidence, validateTddEvidence } = require(
   path.join(__dirname, 'tdd-enforcement')
 );
@@ -183,6 +184,8 @@ function buildTransitionDeps() {
     // Tests must provide the necessary filesystem/git state for verify to pass.
     softSteps: workflow.softSteps,
     commandMap: workflow.commandMap,
+    // GH-299: check-drift gate dep
+    getHeadSha,
   };
 }
 function transitionStep(ticket, targetStep) {

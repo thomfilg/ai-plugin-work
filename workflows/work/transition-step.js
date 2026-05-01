@@ -14,6 +14,25 @@
 const fs = require('fs');
 const path = require('path');
 const { taskSegment } = require(path.join(__dirname, '..', 'lib', 'allocate-output-folder'));
+const { SHA_REGEX } = require(path.join(__dirname, 'git-utils'));
+
+/**
+ * Derive the set of steps that come after `check` in the workflow.
+ * Computed from the step registry rather than hardcoded, so it stays
+ * in sync if steps are renamed or added (GH-299).
+ * @param {string[]} allSteps - ALL_STEPS from the step registry
+ * @param {object} STEPS - STEPS constants from the step registry
+ * @returns {Set<string>}
+ */
+let _postCheckSteps = null;
+function getPostCheckSteps(allSteps, STEPS) {
+  if (!_postCheckSteps) {
+    const checkIdx = allSteps.indexOf(STEPS.check);
+    // Steps after check, excluding 'complete' (terminal step)
+    _postCheckSteps = new Set(allSteps.slice(checkIdx + 1).filter((s) => s !== STEPS.complete));
+  }
+  return _postCheckSteps;
+}
 
 /**
  * @param {string} ticket
@@ -40,6 +59,8 @@ function transitionStep(ticket, targetStep, deps) {
     // GH-260: generic step-verify gate deps
     softSteps,
     commandMap,
+    // GH-299: check-drift gate dep
+    getHeadSha,
   } = deps;
 
   if (!ALL_STEPS.includes(targetStep)) {
@@ -123,12 +144,60 @@ function transitionStep(ticket, targetStep, deps) {
     }
   }
 
+  // GH-299: Record checkPassedSha on successful check → pr forward transition.
+  // Only update if getHeadSha returns a valid SHA; otherwise preserve any existing value
+  // to avoid disabling drift detection when git is temporarily unavailable.
+  if (isCheckToPr && isForward) {
+    const sha = getHeadSha(process.cwd());
+    if (sha) ws.checkPassedSha = sha;
+    ws.checkInterruptedStep = null;
+  }
+
+  // GH-299: Check-drift gate — detect HEAD drift on forward transitions from post-check steps.
+  // If new commits landed since check passed, redirect back to check.
+  // Runs BEFORE step-verify so that drift detection fires even when the current step's
+  // verify() would fail (e.g., follow_up verify returns false but HEAD drifted).
+  let checkDriftDetected = false;
+  if (
+    isForward &&
+    getPostCheckSteps(ALL_STEPS, STEPS).has(currentStep) &&
+    ws?.checkPassedSha &&
+    SHA_REGEX.test(ws.checkPassedSha)
+  ) {
+    const headSha = getHeadSha(process.cwd());
+    if (headSha != null && headSha !== ws.checkPassedSha) {
+      // Validate redirected edge before mutating state
+      if (!workflowCanTransition(currentStep, STEPS.check)) {
+        return {
+          error: true,
+          message: `BLOCKED: cannot transition from ${currentStep} to ${STEPS.check}`,
+          allowed: STEP_TRANSITIONS[currentStep] || [],
+        };
+      }
+      // Edge validated — now mutate state and redirect
+      ws.checkInterruptedStep = currentStep;
+      ws.checkPassedSha = null;
+      appendAction(safeTicket, {
+        step: currentStep,
+        what: 'check re-triggered: new commits detected',
+      });
+      targetStep = STEPS.check;
+      checkDriftDetected = true;
+    }
+  }
+
   // GH-260: Generic step-verify gate — run the step's verify() function before
   // allowing forward transitions out of non-soft steps. This catches bypasses
   // for follow_up, ci, and any other step with a verify() in workflow-definition.js.
   // The TDD and check-to-PR gates above remain as explicit fast-path checks with
   // better error messages; this gate acts as a universal catch-all.
-  if (isForward && !softSteps.has(currentStep) && !TDD_GATED_STEPS.includes(currentStep)) {
+  // Skipped when check-drift redirected targetStep (backward transition to check).
+  if (
+    isForward &&
+    !checkDriftDetected &&
+    !softSteps.has(currentStep) &&
+    !TDD_GATED_STEPS.includes(currentStep)
+  ) {
     const entry = commandMap.find((c) => c.step === currentStep && typeof c.verify === 'function');
     if (entry) {
       let verified;
@@ -240,13 +309,21 @@ function transitionStep(ticket, targetStep, deps) {
   ws.lastTransitionTimestamp = new Date().toISOString();
   saveWorkState(safeTicket, ws);
 
-  return {
+  const result = {
     success: true,
     from: currentStep,
     to: targetStep,
     direction: targetIdx > currentIdx ? 'forward' : 'backward',
     message: `${currentStep} → ${targetStep}`,
   };
+
+  // GH-299: Annotate result when check-drift redirected the transition
+  if (checkDriftDetected) {
+    result.gate = 'check-drift';
+    result.message = `New commits detected since check passed. Re-running check.`;
+  }
+
+  return result;
 }
 
 function getAvailableTransitions(ticket, deps) {

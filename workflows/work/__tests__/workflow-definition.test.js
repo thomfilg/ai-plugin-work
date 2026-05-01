@@ -674,22 +674,12 @@ describe('workflow-definition: verify[STEPS.check] QA report gating', () => {
   }
 
   it('passes without QA report when no web apps configured', () => {
-    setupTicketDir([
-      'code-review.check.md',
-      'tests.check.md',
-      'completion.check.md',
-      'README.md',
-    ]);
+    setupTicketDir(['code-review.check.md', 'tests.check.md', 'completion.check.md', 'README.md']);
     assert.equal(callVerifyWithWebApps([]), true);
   });
 
   it('fails without QA report when web apps are configured', () => {
-    setupTicketDir([
-      'code-review.check.md',
-      'tests.check.md',
-      'completion.check.md',
-      'README.md',
-    ]);
+    setupTicketDir(['code-review.check.md', 'tests.check.md', 'completion.check.md', 'README.md']);
     assert.equal(
       callVerifyWithWebApps([{ name: 'my-app', defaultPort: 3000, type: 'vite' }]),
       false

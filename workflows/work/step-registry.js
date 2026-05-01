@@ -101,8 +101,12 @@ const RETRY_EDGES = {
   [STEPS.spec_gate]: [STEPS.spec], // GH-244: gate failed, regenerate spec
   [STEPS.task_review]: [STEPS.implement], // GH-211: review failed, fix code
   [STEPS.check]: [STEPS.implement], // check failed, fix code
-  [STEPS.follow_up]: [STEPS.implement], // follow-up requires code changes
-  [STEPS.ci]: [STEPS.implement], // CI failed, fix code
+  [STEPS.pr]: [STEPS.check], // GH-299: recheck on new commits
+  [STEPS.ready]: [STEPS.check], // GH-299: recheck on new commits
+  [STEPS.follow_up]: [STEPS.implement, STEPS.check], // follow-up requires code changes; GH-299: recheck
+  [STEPS.ci]: [STEPS.implement, STEPS.check], // CI failed, fix code; GH-299: recheck
+  [STEPS.cleanup]: [STEPS.check], // GH-299: recheck on new commits
+  [STEPS.reports]: [STEPS.check], // GH-299: recheck on new commits
 };
 
 // Generate linear forward edges from STEP_ORDER, merge retry edges

@@ -1006,11 +1006,7 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
           '    state so nothing is missed or duplicated. Pushing mid-loop causes snapshot invalidation,'
         )
       );
-      lines.push(
-        c.yellow(
-          '    line-number drift, and dedup confusion.'
-        )
-      );
+      lines.push(c.yellow('    line-number drift, and dedup confusion.'));
       if (reviews.nonBlocking.length > 0) {
         lines.push(
           `  + ${reviews.nonBlocking.length} non-blocking (nitpick/low — assess whether to address):`
