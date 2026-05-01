@@ -299,7 +299,7 @@ This task is checkpoint type (auto-TDD-exception) and should be the second-to-la
 **Rule 12 — Bookend Tasks (First/Last Enforcement):**
 The first task in `tasks.md` must be of type `test` and must implement the Gherkin/Given-When-Then scenarios from `spec.md` as automated tests. This ensures tests exist before any implementation begins. If `spec.md` contains no Gherkin scenarios, the first task should still be type `test` but focused on scaffolding the test harness based on acceptance criteria from the brief or spec.
 
-The last task must be of type `checkpoint` titled "Checkpoint: Verify all tests pass" that runs all tests created during the ticket's tasks and confirms they pass. This task must depend on all preceding tasks.
+The last task must be a verification checkpoint of type `checkpoint` titled "Checkpoint: Verify all tests pass" that runs all tests created during the ticket's tasks and confirms they pass. This task must depend on all preceding tasks.
 
 All intermediate tasks (implementation, infrastructure, refactoring, other checkpoints) must be ordered between the first test task and the last verification checkpoint task.
 
