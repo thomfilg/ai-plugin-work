@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Deterministic workflow orchestrator for Jira task implementation with state machine validation.",
-    "version": "3.0.41"
+    "version": "3.0.42"
   },
   "plugins": [
     {
@@ -14,7 +14,13 @@
       "source": "./",
       "description": "Orchestrated /work command with pre-computed action plans",
       "category": "workflow",
-      "tags": ["workflow", "jira", "orchestrator", "state-machine", "automation"]
+      "tags": [
+        "workflow",
+        "jira",
+        "orchestrator",
+        "state-machine",
+        "automation"
+      ]
     }
   ]
 }
