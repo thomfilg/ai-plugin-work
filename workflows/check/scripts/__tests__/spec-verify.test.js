@@ -269,7 +269,7 @@ describe('spec-verify.js', () => {
   });
 
   it('REUSES preserves // inside regex literals when stripping comments', () => {
-    writeFile('src/app.js', 'const re = /https?:\\/\\//; const { useAuth } = require(\'./hooks\');');
+    writeFile('src/app.js', "const re = /https?:\\/\\//; const { useAuth } = require('./hooks');");
     const specPath = writeSpec(['- REUSES src/app.js hooks']);
     const result = runScript(specPath, { json: true });
     assert.equal(result.exitCode, 0);

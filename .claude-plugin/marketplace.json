@@ -14,13 +14,7 @@
       "source": "./",
       "description": "Orchestrated /work command with pre-computed action plans",
       "category": "workflow",
-      "tags": [
-        "workflow",
-        "jira",
-        "orchestrator",
-        "state-machine",
-        "automation"
-      ]
+      "tags": ["workflow", "jira", "orchestrator", "state-machine", "automation"]
     }
   ]
 }

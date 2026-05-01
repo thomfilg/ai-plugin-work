@@ -238,7 +238,9 @@ describe('follow-up-pr-comments CLI', () => {
     it('exits 1 for unknown comment ID', () => {
       const comments = [makeComment({ id: 100 })];
       ctx = createTempState(makeState(comments));
-      const result = run(['--solve-comment', '999', 'abc1234', 'Fix'], envFor(ctx.tmpDir), { cwd: cwdFor(ctx) });
+      const result = run(['--solve-comment', '999', 'abc1234', 'Fix'], envFor(ctx.tmpDir), {
+        cwd: cwdFor(ctx),
+      });
       assert.equal(result.status, 1);
       assert.match(result.stderr, /not found/i);
     });
@@ -246,7 +248,9 @@ describe('follow-up-pr-comments CLI', () => {
     it('validates commitSha format (hex 7-40 chars)', () => {
       const comments = [makeComment({ id: 100 })];
       ctx = createTempState(makeState(comments));
-      const result = run(['--solve-comment', '100', 'short', 'Fix'], envFor(ctx.tmpDir), { cwd: cwdFor(ctx) });
+      const result = run(['--solve-comment', '100', 'short', 'Fix'], envFor(ctx.tmpDir), {
+        cwd: cwdFor(ctx),
+      });
       assert.equal(result.status, 1);
       assert.match(result.stderr, /commit/i);
     });
@@ -255,7 +259,9 @@ describe('follow-up-pr-comments CLI', () => {
       const comments = [makeComment({ id: 100 })];
       ctx = createTempState(makeState(comments));
       const longDesc = 'x'.repeat(600);
-      const result = run(['--solve-comment', '100', 'abc1234def0', longDesc], envFor(ctx.tmpDir), { cwd: cwdFor(ctx) });
+      const result = run(['--solve-comment', '100', 'abc1234def0', longDesc], envFor(ctx.tmpDir), {
+        cwd: cwdFor(ctx),
+      });
       assert.equal(result.status, 0);
 
       const state = JSON.parse(fs.readFileSync(ctx.stateFile, 'utf8'));
@@ -274,7 +280,9 @@ describe('follow-up-pr-comments CLI', () => {
         makeComment({ id: 200, author: 'reviewer', body: 'Nitpick', path: 'src/b.js' }),
       ];
       ctx = createTempState(makeState(comments));
-      const result = run(['--skip-comment', '200', 'Non-blocking nitpick'], envFor(ctx.tmpDir), { cwd: cwdFor(ctx) });
+      const result = run(['--skip-comment', '200', 'Non-blocking nitpick'], envFor(ctx.tmpDir), {
+        cwd: cwdFor(ctx),
+      });
       assert.equal(result.status, 0);
 
       const state = JSON.parse(fs.readFileSync(ctx.stateFile, 'utf8'));
@@ -291,7 +299,9 @@ describe('follow-up-pr-comments CLI', () => {
     it('exits 1 for unknown comment ID', () => {
       const comments = [makeComment({ id: 200 })];
       ctx = createTempState(makeState(comments));
-      const result = run(['--skip-comment', '999', 'Reason'], envFor(ctx.tmpDir), { cwd: cwdFor(ctx) });
+      const result = run(['--skip-comment', '999', 'Reason'], envFor(ctx.tmpDir), {
+        cwd: cwdFor(ctx),
+      });
       assert.equal(result.status, 1);
       assert.match(result.stderr, /not found/i);
     });
@@ -300,7 +310,9 @@ describe('follow-up-pr-comments CLI', () => {
       const comments = [makeComment({ id: 200 })];
       ctx = createTempState(makeState(comments));
       const longReason = 'y'.repeat(600);
-      const result = run(['--skip-comment', '200', longReason], envFor(ctx.tmpDir), { cwd: cwdFor(ctx) });
+      const result = run(['--skip-comment', '200', longReason], envFor(ctx.tmpDir), {
+        cwd: cwdFor(ctx),
+      });
       assert.equal(result.status, 0);
 
       const state = JSON.parse(fs.readFileSync(ctx.stateFile, 'utf8'));
@@ -457,21 +469,29 @@ describe('follow-up-pr-comments CLI', () => {
     it('accepts string review IDs (e.g. PRR_kwDO...) for --solve-comment', () => {
       const comments = [makeComment({ id: 'PRR_kwDO123' })];
       ctx = createTempState(makeState(comments));
-      const result = run(['--solve-comment', 'PRR_kwDO123', 'abc1234def0', 'Fix'], envFor(ctx.tmpDir), { cwd: cwdFor(ctx) });
+      const result = run(
+        ['--solve-comment', 'PRR_kwDO123', 'abc1234def0', 'Fix'],
+        envFor(ctx.tmpDir),
+        { cwd: cwdFor(ctx) }
+      );
       assert.equal(result.status, 0);
     });
 
     it('accepts string review IDs for --skip-comment', () => {
       const comments = [makeComment({ id: 'PRR_kwDO456' })];
       ctx = createTempState(makeState(comments));
-      const result = run(['--skip-comment', 'PRR_kwDO456', 'Low priority'], envFor(ctx.tmpDir), { cwd: cwdFor(ctx) });
+      const result = run(['--skip-comment', 'PRR_kwDO456', 'Low priority'], envFor(ctx.tmpDir), {
+        cwd: cwdFor(ctx),
+      });
       assert.equal(result.status, 0);
     });
 
     it('rejects empty commentId for --solve-comment', () => {
       const comments = [makeComment({ id: 100 })];
       ctx = createTempState(makeState(comments));
-      const result = run(['--solve-comment', '', 'abc1234', 'Fix'], envFor(ctx.tmpDir), { cwd: cwdFor(ctx) });
+      const result = run(['--solve-comment', '', 'abc1234', 'Fix'], envFor(ctx.tmpDir), {
+        cwd: cwdFor(ctx),
+      });
       assert.equal(result.status, 1);
     });
 

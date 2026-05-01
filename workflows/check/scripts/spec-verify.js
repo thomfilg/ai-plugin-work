@@ -394,10 +394,12 @@ function checkReuses(args, root) {
   // machine avoids false stripping of // inside strings (e.g. URLs).
   const stripped = stripComments(content);
   const lines = stripped.split(/\r?\n/);
-  if (lines.some((line) => {
-    const m = importRegex.exec(line);
-    return m && !isInsideString(line, m.index);
-  })) {
+  if (
+    lines.some((line) => {
+      const m = importRegex.exec(line);
+      return m && !isInsideString(line, m.index);
+    })
+  ) {
     return { type: 'REUSES', args, passed: true };
   }
   // Fallback: check full content for require('...pattern...') split across lines by formatters.
@@ -446,8 +448,8 @@ function stripComments(src) {
         out += src[i]; // closing quote
         i++;
       }
-    // Regex literal — a / after certain tokens starts a regex, not a comment.
-    // Heuristic: / preceded by =, (, [, !, &, |, ?, :, ,, ;, {, }, newline, or line start.
+      // Regex literal — a / after certain tokens starts a regex, not a comment.
+      // Heuristic: / preceded by =, (, [, !, &, |, ?, :, ,, ;, {, }, newline, or line start.
     } else if (ch === '/' && src[i + 1] !== '/' && src[i + 1] !== '*' && isRegexContext(out)) {
       out += ch;
       i++;
@@ -482,11 +484,11 @@ function stripComments(src) {
           i++;
         }
       }
-    // Single-line comment — skip to end of line
+      // Single-line comment — skip to end of line
     } else if (ch === '/' && src[i + 1] === '/') {
       while (i < src.length && src[i] !== '\n') i++;
-    // Block comment — replace with newlines to preserve line structure.
-    // If no newline was emitted, insert a space to prevent token concatenation.
+      // Block comment — replace with newlines to preserve line structure.
+      // If no newline was emitted, insert a space to prevent token concatenation.
     } else if (ch === '/' && src[i + 1] === '*') {
       let emittedNewline = false;
       i += 2;

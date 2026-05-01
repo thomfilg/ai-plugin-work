@@ -425,7 +425,8 @@ function isTerminalCompleteBypass(cmd, ticketId) {
   // Strict format: only "node <path>/work-state.js complete <ticketId>"
   // Accepts quoted paths: node "path/work-state.js" or node 'path/work-state.js'
   // Reject anything with shell operators, substitutions, or extra arguments
-  const strictPattern = /^node\s+(?:"([^"]+[\\/]work-state\.js)"|'([^']+[\\/]work-state\.js)'|(\S+[\\/]work-state\.js))\s+complete\s+(\S+)\s*$/;
+  const strictPattern =
+    /^node\s+(?:"([^"]+[\\/]work-state\.js)"|'([^']+[\\/]work-state\.js)'|(\S+[\\/]work-state\.js))\s+complete\s+(\S+)\s*$/;
   const match = strictPattern.exec(cmd);
   if (!match) return false;
 

@@ -73,7 +73,11 @@ describe('parseReportStatus — Status: line format', () => {
     // exists in the body, the explicit Status: line should prevent heuristic fallback.
     const content = 'Status: COMPLETE\n\n✅ PASS\nAll tests passed';
     const result = parseReportStatus(content, 'tests');
-    assert.equal(result.status, 'UNKNOWN', 'unrecognized Status line must block heuristic fallback');
+    assert.equal(
+      result.status,
+      'UNKNOWN',
+      'unrecognized Status line must block heuristic fallback'
+    );
   });
 
   it('stops at first Status line even when later Status lines are valid', () => {
@@ -87,7 +91,11 @@ describe('parseReportStatus — Status: line format', () => {
   it('returns UNKNOWN for summary table with type-invalid status', () => {
     const content = '| Status | COMPLETE |\n\n✅ PASS';
     const result = parseReportStatus(content, 'tests');
-    assert.equal(result.status, 'UNKNOWN', 'type-invalid table status must block heuristic fallback');
+    assert.equal(
+      result.status,
+      'UNKNOWN',
+      'type-invalid table status must block heuristic fallback'
+    );
   });
 
   it('recognizes Status: NEEDS_WORK', () => {
@@ -794,7 +802,11 @@ describe('isCodeReviewResolved — spurious title filtering (GH-232)', () => {
     ].join('\n');
 
     const result = isCodeReviewResolved(report, '');
-    assert.equal(result.resolved, true, 'CRITICAL: with colon must be filtered by SPURIOUS_TITLE_RE');
+    assert.equal(
+      result.resolved,
+      true,
+      'CRITICAL: with colon must be filtered by SPURIOUS_TITLE_RE'
+    );
     assert.deepStrictEqual(result.unaddressed, []);
   });
 

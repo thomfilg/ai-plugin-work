@@ -270,10 +270,7 @@ describe('buildTaskPrompt', () => {
 
   it('marks current task with YOU ARE IMPLEMENTING THIS', () => {
     const task = { num: 2, title: 'Current', rawContent: 'content', suggestedScope: '' };
-    const allTasks = [
-      { num: 1, title: 'Previous', suggestedScope: '' },
-      task,
-    ];
+    const allTasks = [{ num: 1, title: 'Previous', suggestedScope: '' }, task];
     const prompt = buildTaskPrompt(task, tmpDir, allTasks);
     assert.ok(prompt.includes('YOU ARE IMPLEMENTING THIS'));
     assert.ok(prompt.match(/Task 2.*YOU ARE IMPLEMENTING THIS/));
@@ -281,20 +278,14 @@ describe('buildTaskPrompt', () => {
 
   it('marks pending tasks as do NOT implement yet', () => {
     const task = { num: 1, title: 'Current', rawContent: 'content', suggestedScope: '' };
-    const allTasks = [
-      task,
-      { num: 2, title: 'Upcoming', suggestedScope: '' },
-    ];
+    const allTasks = [task, { num: 2, title: 'Upcoming', suggestedScope: '' }];
     const prompt = buildTaskPrompt(task, tmpDir, allTasks);
     assert.ok(prompt.includes('pending — do NOT implement yet'));
   });
 
   it('marks completed tasks as do NOT re-implement', () => {
     const task = { num: 2, title: 'Current', rawContent: 'content', suggestedScope: '' };
-    const allTasks = [
-      { num: 1, title: 'Done task', suggestedScope: '' },
-      task,
-    ];
+    const allTasks = [{ num: 1, title: 'Done task', suggestedScope: '' }, task];
     const taskState = {
       tasks: [{ id: 'task_1', status: 'completed' }],
     };
@@ -316,20 +307,14 @@ describe('buildTaskPrompt', () => {
 
   it('does not include reserved files for pending tasks with no suggestedScope', () => {
     const task = { num: 1, title: 'Current', rawContent: 'content', suggestedScope: '' };
-    const allTasks = [
-      task,
-      { num: 2, title: 'No scope', suggestedScope: '' },
-    ];
+    const allTasks = [task, { num: 2, title: 'No scope', suggestedScope: '' }];
     const prompt = buildTaskPrompt(task, tmpDir, allTasks);
     assert.ok(!prompt.includes('Reserved files:'));
   });
 
   it('falls back gracefully when taskState has no tasks array', () => {
     const task = { num: 2, title: 'Current', rawContent: 'content', suggestedScope: '' };
-    const allTasks = [
-      { num: 1, title: 'Previous', suggestedScope: '' },
-      task,
-    ];
+    const allTasks = [{ num: 1, title: 'Previous', suggestedScope: '' }, task];
     // taskState with no tasks array — should not throw
     const prompt = buildTaskPrompt(task, tmpDir, allTasks, {});
     assert.ok(prompt.includes('### Task Context'));
@@ -340,10 +325,7 @@ describe('buildTaskPrompt', () => {
   it('shows all reserved files when scope exceeds the old 5-line cap', () => {
     const task = { num: 1, title: 'Current', rawContent: 'content', suggestedScope: '' };
     const manyFiles = Array.from({ length: 8 }, (_, i) => `- src/file${i + 1}.ts`).join('\n');
-    const allTasks = [
-      task,
-      { num: 2, title: 'Big scope', suggestedScope: manyFiles },
-    ];
+    const allTasks = [task, { num: 2, title: 'Big scope', suggestedScope: manyFiles }];
     const prompt = buildTaskPrompt(task, tmpDir, allTasks);
     // All 8 files must appear, not just 5
     for (let i = 1; i <= 8; i++) {
@@ -426,10 +408,7 @@ describe('buildTaskPrompt', () => {
 
   it('labels a claimed (in-flight) task as in progress, not pending', () => {
     const task = { num: 1, title: 'Current', rawContent: 'content', suggestedScope: '' };
-    const allTasks = [
-      task,
-      { num: 2, title: 'In-flight', suggestedScope: '' },
-    ];
+    const allTasks = [task, { num: 2, title: 'In-flight', suggestedScope: '' }];
     // Write a claim lock for task 2
     const claimsDir = path.join(tmpDir, '.claims');
     fs.mkdirSync(claimsDir, { recursive: true });

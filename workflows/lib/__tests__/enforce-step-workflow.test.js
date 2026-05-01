@@ -2135,7 +2135,10 @@ describe('enforce-step-workflow', () => {
       writeWorkState(makeStepStatus('complete', WORK_STEPS));
 
       const { code, stderr } = await runHook(
-        { tool_name: 'Bash', tool_input: { command: `node ${WORK_STATE_PATH} complete $(echo ${TEST_TICKET})` } },
+        {
+          tool_name: 'Bash',
+          tool_input: { command: `node ${WORK_STATE_PATH} complete $(echo ${TEST_TICKET})` },
+        },
         'PreToolUse'
       );
       assert.equal(code, 2, 'command substitution should be blocked');
@@ -2146,7 +2149,10 @@ describe('enforce-step-workflow', () => {
       writeWorkState(makeStepStatus('complete', WORK_STEPS));
 
       const { code, stderr } = await runHook(
-        { tool_name: 'Bash', tool_input: { command: `node ${WORK_STATE_PATH} complete \`echo ${TEST_TICKET}\`` } },
+        {
+          tool_name: 'Bash',
+          tool_input: { command: `node ${WORK_STATE_PATH} complete \`echo ${TEST_TICKET}\`` },
+        },
         'PreToolUse'
       );
       assert.equal(code, 2, 'backtick substitution should be blocked');
@@ -2157,7 +2163,10 @@ describe('enforce-step-workflow', () => {
       writeWorkState(makeStepStatus('complete', WORK_STEPS));
 
       const { code, stderr } = await runHook(
-        { tool_name: 'Bash', tool_input: { command: `node ${WORK_STATE_PATH} complete ${TEST_TICKET} || echo pwned` } },
+        {
+          tool_name: 'Bash',
+          tool_input: { command: `node ${WORK_STATE_PATH} complete ${TEST_TICKET} || echo pwned` },
+        },
         'PreToolUse'
       );
       assert.equal(code, 2, 'chained || should be blocked');
@@ -2168,7 +2177,10 @@ describe('enforce-step-workflow', () => {
       writeWorkState(makeStepStatus('complete', WORK_STEPS));
 
       const { code, stderr } = await runHook(
-        { tool_name: 'Bash', tool_input: { command: `node ${WORK_STATE_PATH} complete ${TEST_TICKET} | tee /tmp/out` } },
+        {
+          tool_name: 'Bash',
+          tool_input: { command: `node ${WORK_STATE_PATH} complete ${TEST_TICKET} | tee /tmp/out` },
+        },
         'PreToolUse'
       );
       assert.equal(code, 2, 'pipe should be blocked');
@@ -2179,7 +2191,10 @@ describe('enforce-step-workflow', () => {
       writeWorkState(makeStepStatus('complete', WORK_STEPS));
 
       const { code, stderr } = await runHook(
-        { tool_name: 'Bash', tool_input: { command: `node ${WORK_STATE_PATH} complete ${TEST_TICKET} > /tmp/out` } },
+        {
+          tool_name: 'Bash',
+          tool_input: { command: `node ${WORK_STATE_PATH} complete ${TEST_TICKET} > /tmp/out` },
+        },
         'PreToolUse'
       );
       assert.equal(code, 2, 'redirect should be blocked');
@@ -2190,7 +2205,10 @@ describe('enforce-step-workflow', () => {
       writeWorkState(makeStepStatus('complete', WORK_STEPS));
 
       const { code, stderr } = await runHook(
-        { tool_name: 'Bash', tool_input: { command: `node ${WORK_STATE_PATH} complete ${TEST_TICKET} --force` } },
+        {
+          tool_name: 'Bash',
+          tool_input: { command: `node ${WORK_STATE_PATH} complete ${TEST_TICKET} --force` },
+        },
         'PreToolUse'
       );
       assert.equal(code, 2, 'extra args should be blocked');
