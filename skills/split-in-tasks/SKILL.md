@@ -290,7 +290,7 @@ _TDD Protocol: Every non-exempt implementation task follows RED -> GREEN -> REFA
 - The file ends with the Requirement Coverage table
 
 **Rule 11 — Documentation Task:**
-If the spec references user-facing behavior changes, API changes, configuration changes, or existing `.md` documentation files are related to the changes, add a final task of type `checkpoint` titled "Documentation Review" that verifies:
+If the spec references user-facing behavior changes, API changes, configuration changes, or existing `.md` documentation files are related to the changes, add a task of type `checkpoint` titled "Documentation Review" that verifies:
 - Affected `.md` files are updated (README, architecture docs, API docs)
 - New features are documented if user-facing
 - Configuration changes are documented
