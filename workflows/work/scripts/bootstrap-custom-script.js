@@ -6,6 +6,7 @@
  * Executes a user-provided bootstrap script during the /bootstrap workflow.
  * Configured via BOOTSTRAP_SCRIPT env var (absolute or relative path).
  *
+ * Uses spawnSync (not execFileSync) to capture stderr on successful runs.
  * Fail-open: any error (missing script, non-zero exit, timeout) logs a
  * warning and exits 0 so the bootstrap workflow continues.
  *
