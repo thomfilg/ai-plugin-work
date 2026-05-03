@@ -1,12 +1,12 @@
 ---
 name: bootstrap
-description: Setup multiple ticket tasks - creates worktrees, symlinks configs, and opens draft PRs
+description: Setup multiple ticket tasks - creates worktrees and runs custom bootstrap scripts
 argument-hint: <task-ids...>
 user-invocable: true
 allowed-tools: Task, Bash, Read, Write, Edit, Grep, Glob, mcp__atlassian__jira_get_issue, mcp__linear__get_issue
 ---
 
-# Setup multiple ticket tasks - creates worktrees, symlinks configs, and opens draft PRs
+# Setup multiple ticket tasks - creates worktrees and runs custom bootstrap scripts
 
 ## Usage
 
@@ -32,7 +32,7 @@ Extract task IDs from input. If only numbers provided, prefix with your project 
 
 ### Step 2: For EACH task, execute the following steps
 
-Loop through each task ID and perform Steps 3-9.
+Loop through each task ID and perform Steps 3-6.
 
 ### Step 3: Fetch ticket details
 
@@ -49,7 +49,11 @@ Extract:
 $REPO_NAME="look your current directory, then look if there are worktrees (folders in a directory above with same prefix). Eg: worktrees/my-repository-ticket-A, worktrees/my-repository-ticket-B, worktrees/my-repository << this is the main directory"
 
 cd ~/${my_repository} # eg: cd ~/worktrees/my-repository
-git fetch origin main
+# Normalize BASE_BRANCH: strip "origin/" or "refs/remotes/origin/" prefix if present
+BASE_BRANCH="${BASE_BRANCH:-main}"
+BASE_BRANCH="${BASE_BRANCH#refs/remotes/origin/}"
+BASE_BRANCH="${BASE_BRANCH#origin/}"
+git fetch origin "$BASE_BRANCH"
 
 # Generate branch name from ticket
 TICKET_ID="PROJ-XXX"
@@ -58,63 +62,24 @@ BRANCH_NAME="${TICKET_ID}-${SHORT_DESC}"
 WORKTREE_PATH="../{$REPO_NAME}-${TICKET_ID}"
 
 # Create worktree
-git worktree add "$WORKTREE_PATH" -b "$BRANCH_NAME" origin/main
+git worktree add "$WORKTREE_PATH" -b "$BRANCH_NAME" "origin/$BASE_BRANCH"
 ```
 
-### Step 5: Setup worktree environment
+### Step 5: Run custom bootstrap script (if configured)
 
 ```bash
 cd "$WORKTREE_PATH"
-
-# Copy credentials (required)
-cp -r ../$REPO_NAME/credentials/* ./credentials/
-
-# Symlink Claude config (required - keeps all worktrees in sync)
-ln -s ../$REPO_NAME/.claude .claude
-
-# Create CLAUDE.md symlink (required)
-ln -s GEMINI.md CLAUDE.md
-
-# Fix .env symlinks using the symlink helper script (uses absolute paths)
-node "${CLAUDE_PLUGIN_ROOT}/external_scripts/symlink.js" --env
-
-# Create .env.local for as-dashboard with title prefix (helps identify browser tabs)
-cat > apps/as-dashboard/.env.local << EOF
-# Local development overrides (gitignored)
-# This file is for developer-specific settings
-
-# Title prefix for browser tab (helps identify which browser belongs to which agent)
-# Format: "{prefix} • AS Dashboard"
-VITE_TITLE_PREFIX=${TICKET_ID}
-EOF
+node "${CLAUDE_PLUGIN_ROOT}/workflows/work/scripts/bootstrap-custom-script.js" "$WORKTREE_PATH" "$TICKET_ID"
 ```
 
-### Step 6: Install dependencies
+Runs the script specified by `BOOTSTRAP_SCRIPT` env var. The script receives the worktree path and ticket ID as arguments. If `BOOTSTRAP_SCRIPT` is not set, this step is skipped (logs "skipping" and exits 0). Script failures are non-fatal (warning only).
 
+Configure in your `.envrc`:
 ```bash
-cd "$WORKTREE_PATH"
-pnpm install
+export BOOTSTRAP_SCRIPT="./scripts/bootstrap.sh"
 ```
 
-### Step 7: Create initial commit and push (if enabled)
-
-```bash
-cd "$WORKTREE_PATH"
-node "${CLAUDE_PLUGIN_ROOT}/workflows/work/scripts/bootstrap-publish.js" --commit "$WORKTREE_PATH" "$BRANCH_NAME" "$TICKET_ID"
-```
-
-Skips entirely if `ENABLE_EMPTY_COMMIT` is not set.
-
-### Step 8: Create draft PR
-
-```bash
-cd "$WORKTREE_PATH"
-node "${CLAUDE_PLUGIN_ROOT}/workflows/work/scripts/bootstrap-publish.js" --pr "$WORKTREE_PATH" "$BRANCH_NAME" "$TICKET_ID"
-```
-
-Skips if `ENABLE_EMPTY_COMMIT` or `ENABLE_DRAFT_PR` is not set (no commit means no PR).
-
-### Step 9: Report results
+### Step 6: Report results
 
 After processing all tasks, display summary:
 
@@ -167,12 +132,9 @@ Next steps:
 | 1 | Parse task IDs |
 | 2 | Loop through tasks |
 | 3 | Fetch ticket details |
-| 4 | Create worktree + branch |
-| 5 | Copy credentials, .claude, symlink CLAUDE.md, symlink .env files, create .env.local |
-| 6 | pnpm install |
-| 7 | Initial commit + push (empty commit if `ENABLE_EMPTY_COMMIT`) |
-| 8 | Create draft PR (if `ENABLE_EMPTY_COMMIT` + `ENABLE_DRAFT_PR`) |
-| 9 | Display summary |
+| 4 | Create worktree + branch (uses `BASE_BRANCH` env var, defaults to `main`) |
+| 5 | Run custom bootstrap script (if `BOOTSTRAP_SCRIPT` is set) |
+| 6 | Display summary |
 
 ## Notes
 
@@ -180,6 +142,5 @@ Next steps:
 - Default project key: configured via `TICKET_PROJECT_KEY` env var (falls back to `JIRA_PROJECT_KEY`)
 - Worktree path: `../$REPO_NAME-<TICKET-ID>`
 - Branch format: `<TICKET-ID>-<kebab-case-description>`
-- Draft PRs created when both `ENABLE_EMPTY_COMMIT` and `ENABLE_DRAFT_PR` are set
-- Empty bootstrap commits when `ENABLE_EMPTY_COMMIT` is set
-- `.env.local` is created for `as-dashboard` with `VITE_TITLE_PREFIX` to identify browser tabs per agent
+- Custom bootstrap script: set `BOOTSTRAP_SCRIPT` env var to a script path (relative to repo root or absolute)
+- The bootstrap script receives worktree path and ticket ID as arguments
