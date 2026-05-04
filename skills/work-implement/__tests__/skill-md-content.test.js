@@ -12,9 +12,7 @@ const content = fs.readFileSync(SKILL_PATH, 'utf-8');
  * bold-prefixed mode header ("**When in ").
  */
 function getOrchestratorSection() {
-  const start = content.search(
-    /\*\*When called from [`/]*(?:\/)?work[`]* orchestrator/
-  );
+  const start = content.search(/\*\*When called from [`/]*(?:\/)?work[`]* orchestrator/);
   if (start === -1) return null;
   const rest = content.slice(start);
   const nextHeader = rest.slice(1).search(/\n\*\*When in /);
@@ -59,10 +57,7 @@ describe('work-implement SKILL.md — orchestrator completion (GH-231)', () => {
   describe('Scenario 1: orchestrator section contains no structured signal block', () => {
     it('the orchestrator-mode section exists', () => {
       const section = getOrchestratorSection();
-      assert.ok(
-        section,
-        'SKILL.md must contain a "When called from /work orchestrator" section'
-      );
+      assert.ok(section, 'SKILL.md must contain a "When called from /work orchestrator" section');
     });
 
     it('the orchestrator section does NOT contain "IMPLEMENT_COMPLETE" text', () => {
@@ -118,11 +113,7 @@ describe('work-implement SKILL.md — orchestrator completion (GH-231)', () => {
     it('contains "Next steps"', () => {
       const section = getNormalModeSection();
       assert.ok(section, 'normal-mode section must exist');
-      assert.match(
-        section,
-        /Next steps/,
-        'Normal-mode section must contain "Next steps"'
-      );
+      assert.match(section, /Next steps/, 'Normal-mode section must contain "Next steps"');
     });
   });
 
@@ -135,11 +126,7 @@ describe('work-implement SKILL.md — orchestrator completion (GH-231)', () => {
     it('instructs the agent to commit changes', () => {
       const section = getSubtaskModeSection();
       assert.ok(section, 'subtask-mode section must exist');
-      assert.match(
-        section,
-        /[Cc]ommit/,
-        'Subtask-mode section must instruct committing changes'
-      );
+      assert.match(section, /[Cc]ommit/, 'Subtask-mode section must instruct committing changes');
     });
 
     it('instructs the agent to mark the subtask as completed', () => {
@@ -178,9 +165,7 @@ describe('work-implement SKILL.md — orchestrator completion (GH-231)', () => {
       const section = getOrchestratorSection();
       assert.ok(section, 'orchestrator section must exist');
       const implementIdx = section.search(/implement\.md/);
-      const returnIdx = section.search(
-        /return.*control|hand.*control.*back|return.*orchestrator/i
-      );
+      const returnIdx = section.search(/return.*control|hand.*control.*back|return.*orchestrator/i);
       assert.ok(implementIdx > -1, 'implement.md reference must exist');
       assert.ok(returnIdx > -1, 'return-control instruction must exist');
       assert.ok(
