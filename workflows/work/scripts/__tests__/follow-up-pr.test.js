@@ -868,6 +868,138 @@ describe('formatReport', () => {
   });
 });
 
+// ── formatReport review output with BLOCKED merge + non-blocking comments (GH-324 Task 6) ──
+describe('formatReport — review output clarity (GH-324)', () => {
+  const basePrInfo = {
+    number: 42,
+    title: 'Test PR',
+    branch: 'feature-branch',
+    mergeable: 'MERGEABLE',
+    mergeStateStatus: 'CLEAN',
+  };
+  const baseOpts = { noReviews: false, interval: 30 };
+
+  function makeCi(overrides) {
+    return {
+      status: 'passing',
+      total: 2,
+      passed: [{ name: 'build' }, { name: 'test' }],
+      running: [],
+      failed: [],
+      neutral: [],
+      cancelled: [],
+      optionalFailed: [],
+      requiredFailed: [],
+      hasRequiredInfo: false,
+      ...overrides,
+    };
+  }
+
+  it('shows UNRESOLVED (not CLEAR) when non-blocking comments exist', () => {
+    const ci = makeCi({ status: 'passing' });
+    const reviews = {
+      hasBlocking: false,
+      pendingBots: [],
+      blocking: [],
+      nonBlocking: [
+        { author: 'Copilot', priority: 'low', path: 'file.js', line: 10, body: 'nitpick' },
+      ],
+    };
+    const output = formatReport(basePrInfo, ci, reviews, 1, 10, baseOpts);
+    assert.match(output, /UNRESOLVED/, 'should show UNRESOLVED instead of CLEAR');
+    assert.ok(!output.match(/Reviews: CLEAR/), 'should NOT say CLEAR when comments exist');
+  });
+
+  it('says "address these to unblock merge" instead of "assess whether to address"', () => {
+    const ci = makeCi({ status: 'passing' });
+    const reviews = {
+      hasBlocking: false,
+      pendingBots: [],
+      blocking: [],
+      nonBlocking: [
+        { author: 'Copilot', priority: 'low', path: 'file.js', line: 10, body: 'nitpick' },
+      ],
+    };
+    const output = formatReport(basePrInfo, ci, reviews, 1, 10, baseOpts);
+    assert.match(
+      output,
+      /address these to unblock merge/,
+      'should say address these to unblock merge'
+    );
+    assert.ok(
+      !output.includes('assess whether to address'),
+      'should NOT say assess whether to address'
+    );
+  });
+
+  it('shows "Merge BLOCKED by N unresolved comment threads" when BLOCKED + unresolved comments', () => {
+    const ci = makeCi({ status: 'passing' });
+    const blockedPrInfo = {
+      ...basePrInfo,
+      mergeStateStatus: 'BLOCKED',
+    };
+    const reviews = {
+      hasBlocking: false,
+      pendingBots: [],
+      blocking: [],
+      nonBlocking: [
+        { author: 'Copilot', priority: 'low', path: 'file.js', line: 10, body: 'nitpick' },
+        { author: 'Copilot', priority: 'low', path: 'other.js', line: 5, body: 'style' },
+      ],
+    };
+    const output = formatReport(blockedPrInfo, ci, reviews, 1, 10, baseOpts);
+    assert.match(
+      output,
+      /Merge BLOCKED by 2 unresolved comment/,
+      'should link BLOCKED merge status to unresolved comments count'
+    );
+  });
+
+  it('still says "awaiting required approvals" when BLOCKED but no unresolved comments', () => {
+    const ci = makeCi({ status: 'passing' });
+    const blockedPrInfo = {
+      ...basePrInfo,
+      mergeStateStatus: 'BLOCKED',
+    };
+    const reviews = {
+      hasBlocking: false,
+      pendingBots: [],
+      blocking: [],
+      nonBlocking: [],
+    };
+    const output = formatReport(blockedPrInfo, ci, reviews, 1, 10, baseOpts);
+    assert.match(output, /awaiting required approvals/, 'should show awaiting required approvals');
+    assert.ok(
+      !output.includes('unresolved comment'),
+      'should NOT mention unresolved comments when there are none'
+    );
+  });
+
+  it('uses "unresolved" wording in blocking reviews non-blocking sub-section too', () => {
+    const ci = makeCi({ status: 'passing' });
+    const reviews = {
+      hasBlocking: true,
+      pendingBots: [],
+      blocking: [
+        { author: 'Copilot', priority: 'medium', path: 'main.js', line: 20, body: 'bug here' },
+      ],
+      nonBlocking: [
+        { author: 'Copilot', priority: 'low', path: 'file.js', line: 10, body: 'nitpick' },
+      ],
+    };
+    const output = formatReport(basePrInfo, ci, reviews, 1, 10, baseOpts);
+    assert.match(
+      output,
+      /unresolved/,
+      'should use "unresolved" wording for non-blocking sub-section'
+    );
+    assert.ok(
+      !output.includes('assess whether to address'),
+      'should NOT use "assess whether to address" in blocking section either'
+    );
+  });
+});
+
 describe('ghExec shared module', () => {
   it('is importable from shared gh-exec module', () => {
     const { ghExec } = require('../gh-exec.js');

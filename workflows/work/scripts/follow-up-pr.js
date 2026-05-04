@@ -1002,7 +1002,16 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts, decision)
     const isBlockedByApprovalStatus =
       prInfo.mergeable === 'MERGEABLE' && prInfo.mergeStateStatus === 'BLOCKED';
     lines.push('');
-    if (isBlockedByApprovalStatus) {
+    const unresolvedCount =
+      (reviews.nonBlocking ? reviews.nonBlocking.length : 0) +
+      (reviews.blocking ? reviews.blocking.length : 0);
+    if (isBlockedByApprovalStatus && unresolvedCount > 0) {
+      lines.push(
+        c.yellow(
+          `MERGE STATUS: Merge BLOCKED by ${unresolvedCount} unresolved comment thread${unresolvedCount !== 1 ? 's' : ''}`
+        )
+      );
+    } else if (isBlockedByApprovalStatus) {
       lines.push(c.yellow('MERGE STATUS: BLOCKED (awaiting required approvals)'));
     } else {
       lines.push(
@@ -1058,14 +1067,14 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts, decision)
       lines.push(c.yellow('    line-number drift, and dedup confusion.'));
       if (reviews.nonBlocking.length > 0) {
         lines.push(
-          `  + ${reviews.nonBlocking.length} non-blocking (nitpick/low — assess whether to address):`
+          `  + ${reviews.nonBlocking.length} unresolved (nitpick/low — address these to unblock merge):`
         );
         formatNonBlockingItems(reviews.nonBlocking, lines);
       }
     } else if (reviews.nonBlocking.length > 0) {
       lines.push(
-        c.green(`Reviews: CLEAR`) +
-          ` (${reviews.nonBlocking.length} non-blocking — assess whether to address):`
+        c.yellow(`Reviews: UNRESOLVED`) +
+          ` (${reviews.nonBlocking.length} unresolved — address these to unblock merge):`
       );
       formatNonBlockingItems(reviews.nonBlocking, lines);
     } else {
@@ -1120,9 +1129,9 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts, decision)
     lines.push(c.green('═══════════════════════════════════════'));
     lines.push('');
     const ciLabel = ci.status === 'no-checks' ? 'NO CHECKS' : 'PASSED';
-    lines.push(
-      c.green(`CI: ${ciLabel} | Reviews: ${opts.noReviews ? 'SKIPPED' : 'CLEAR'} | Conflicts: NONE`)
-    );
+    const hasUnresolved = reviews.nonBlocking && reviews.nonBlocking.length > 0;
+    const reviewLabel = opts.noReviews ? 'SKIPPED' : hasUnresolved ? 'UNRESOLVED' : 'CLEAR';
+    lines.push(c.green(`CI: ${ciLabel} | Reviews: ${reviewLabel} | Conflicts: NONE`));
     if (decision && decision.finalStatus === 'blocked-by-approval') {
       lines.push(c.yellow('PR ready \u2014 merge blocked by required approvals only'));
     }
