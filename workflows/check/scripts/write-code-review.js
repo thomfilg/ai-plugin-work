@@ -36,6 +36,8 @@ const VALID_PRIORITIES = ['critical', 'important', 'nice-to-have'];
 const writer = createReportWriter({
   name: 'Code Review Writer',
 
+  reportType: 'codeReview',
+
   allowedAgents: ['code-checker'],
 
   requiredFields: ['reportPath', 'changesHash', 'verdict', 'strengths', 'issues'],

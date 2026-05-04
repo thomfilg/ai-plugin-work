@@ -27,6 +27,8 @@ const { createReportWriter } = require('../../lib/scripts/write-report');
 const writer = createReportWriter({
   name: 'Completion Report Writer',
 
+  reportType: 'completion',
+
   allowedAgents: ['completion-checker'],
 
   requiredFields: ['reportPath', 'changesHash', 'originalRequest', 'deliverables', 'finalStatus'],

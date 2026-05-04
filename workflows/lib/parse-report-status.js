@@ -101,6 +101,11 @@ TYPE_CHECKS['completion'].fail = ['\\bINCOMPLETE\\b', '\\bPENDING\\b'];
 TYPE_CHECKS['completion'].pass = ['\\bCOMPLETE\\b', '\\bDELIVERED\\b'];
 
 // ---------------------------------------------------------------------------
+// Status line regex — shared with validate-check-report-status.js
+// ---------------------------------------------------------------------------
+const STATUS_LINE_RE = /^\s*\*{0,2}Status:\*{0,2}\s*\*{0,2}\s*([A-Z_]+)\s*\*{0,2}/im;
+
+// ---------------------------------------------------------------------------
 // Format checkers — each returns a normalized status string or null
 // ---------------------------------------------------------------------------
 
@@ -157,8 +162,7 @@ function checkStatusLine(content, type) {
   // not override it. If the first Status: line's value is not recognized for this
   // type, return UNKNOWN to prevent heuristic fallback from overriding an explicit
   // (but type-invalid) declaration.
-  const re = /^\s*\*{0,2}Status:\*{0,2}\s*\*{0,2}\s*([A-Z_]+)\s*\*{0,2}/im;
-  const match = content.match(re);
+  const match = content.match(STATUS_LINE_RE);
   if (!match) return null;
   const raw = match[1].toUpperCase();
   const resolved = resolveAlias(raw, type);
@@ -197,6 +201,65 @@ function checkPassMarkers(content, type) {
   return null;
 }
 
+/**
+ * Check for freeform status patterns in report content.
+ * This is a P1 fallback that catches status declarations agents emit outside
+ * of the canonical "Status: <VALUE>" line or summary table.
+ *
+ * Patterns (checked in order):
+ *   1. Standalone bold status on own line: **APPROVED**, **NEEDS_WORK**, etc.
+ *   2. "Overall Assessment: <status>" pattern
+ *   3. "Result: <status>" pattern
+ *   4. Standalone status at line start followed by dash: COMPLETE — ...
+ *
+ * Only returns a value when the raw match resolves via resolveAlias for the
+ * given type. Returns null otherwise (lets other checks handle it).
+ *
+ * @param {string} content
+ * @param {string} [type] - report type for type-scoped alias resolution
+ * @returns {string|null}
+ */
+function checkFreeformStatus(content, type) {
+  // 1. Standalone bold status on own line
+  const boldMatch = content.match(
+    /^\s*\*{2}(APPROVED|NEEDS_WORK|COMPLETE|INCOMPLETE|PASS|PASSED|FAIL|FAILED)\*{2}\s*$/im
+  );
+  if (boldMatch) {
+    const resolved = resolveAlias(boldMatch[1].toUpperCase(), type);
+    if (resolved) return resolved;
+  }
+
+  // 2. "Overall Assessment: <status>"
+  const assessmentMatch = content.match(
+    /Overall\s+Assessment:\s*(?:✅|❌)?\s*(Approved|Needs[_ ]Work|Pass|Fail)/im
+  );
+  if (assessmentMatch) {
+    const raw = assessmentMatch[1].replace(/[_ ]/g, '_').toUpperCase();
+    const resolved = resolveAlias(raw, type);
+    if (resolved) return resolved;
+  }
+
+  // 3. "Result: <status>"
+  const resultMatch = content.match(
+    /Result:\s*(APPROVED|NEEDS_WORK|COMPLETE|INCOMPLETE|PASS|FAIL)/im
+  );
+  if (resultMatch) {
+    const resolved = resolveAlias(resultMatch[1].toUpperCase(), type);
+    if (resolved) return resolved;
+  }
+
+  // 4. Standalone status at line start followed by dash
+  const dashMatch = content.match(
+    /^(COMPLETE|APPROVED|NEEDS_WORK|INCOMPLETE)\s*[—–-]/m
+  );
+  if (dashMatch) {
+    const resolved = resolveAlias(dashMatch[1].toUpperCase(), type);
+    if (resolved) return resolved;
+  }
+
+  return null;
+}
+
 // ---------------------------------------------------------------------------
 // Public API
 // ---------------------------------------------------------------------------
@@ -207,6 +270,7 @@ function checkPassMarkers(content, type) {
  * Resolution priority (matches implementation order):
  *   1. Explicit Status: line (first match, authoritative when present)
  *   2. Summary table with status column
+ *   2.5. Freeform fallback patterns (GH-326)
  *   3. Infrastructure failures (QA only — after Status line so declared status wins)
  *   4. Fail markers (type-specific heuristics, only when no explicit status)
  *   5. Pass markers (type-specific heuristics)
@@ -232,6 +296,12 @@ function parseReportStatus(content, type) {
   const tableStatus = checkSummaryTable(content, type);
   if (tableStatus) {
     return { status: tableStatus, icon: ICONS[tableStatus] || ICONS['UNKNOWN'] };
+  }
+
+  // 2.5 Freeform fallback (GH-326)
+  const freeformStatus = checkFreeformStatus(content, type);
+  if (freeformStatus) {
+    return { status: freeformStatus, icon: ICONS[freeformStatus] || ICONS['UNKNOWN'] };
   }
 
   // 3. Infrastructure failures (QA only) — checked AFTER explicit Status/table so that
@@ -503,4 +573,4 @@ function isCodeReviewResolved(reportContent, replyContent) {
   };
 }
 
-module.exports = { parseReportStatus, parseReplyDecisions, isCodeReviewResolved };
+module.exports = { parseReportStatus, parseReplyDecisions, isCodeReviewResolved, resolveAlias, STATUS_LINE_RE };

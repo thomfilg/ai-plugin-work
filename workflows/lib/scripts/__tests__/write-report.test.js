@@ -250,4 +250,113 @@ describe('write-report', () => {
       assert.ok(result.output.includes('not authorized'));
     });
   });
+
+  // ─── GH-326 Task 1.4: Post-write validation ──────────────────────────────
+  describe('post-write validation (GH-326)', () => {
+    it('rejects formatted output without Status line when reportType is set', () => {
+      // createReportWriter with reportType should validate formatReport output.
+      // A formatReport that returns content without a Status: line should cause
+      // the writer to exit with error.
+      const { createReportWriter } = require(WRITE_REPORT);
+
+      // We test by creating a writer with a reportType and a formatReport that
+      // omits the Status line, then running it via the script pattern.
+      // Since createReportWriter reads from stdin, we need a helper script.
+      const helperScript = path.join('/tmp', 'test-write-report-validation-no-status.js');
+      fs.writeFileSync(
+        helperScript,
+        `
+        const { createReportWriter } = require('${WRITE_REPORT.replace(/\\/g, '\\\\')}');
+        createReportWriter({
+          name: 'Test Writer',
+          allowedAgents: ['test-agent'],
+          requiredFields: ['reportPath'],
+          reportType: 'tests',
+          formatReport: () => '# Test Report\\nAll tests pass\\nNo Status line here',
+        }).run();
+        `,
+        'utf8'
+      );
+
+      writeToken(path.basename(helperScript), 'test-agent', Date.now());
+      const result = runScript(helperScript, { reportPath: REPORT_PATH });
+      // Should fail because formatted output has no valid Status line
+      assert.notEqual(result.exitCode, 0, 'should reject output without Status line');
+      assert.ok(
+        result.output.includes('Status') || result.output.includes('status'),
+        'error should mention Status'
+      );
+
+      try {
+        fs.unlinkSync(helperScript);
+      } catch {
+        /* ignore */
+      }
+    });
+
+    it('accepts formatted output with valid Status line when reportType is set', () => {
+      const helperScript = path.join('/tmp', 'test-write-report-validation-with-status.js');
+      fs.writeFileSync(
+        helperScript,
+        `
+        const { createReportWriter } = require('${WRITE_REPORT.replace(/\\/g, '\\\\')}');
+        createReportWriter({
+          name: 'Test Writer',
+          allowedAgents: ['test-agent'],
+          requiredFields: ['reportPath'],
+          reportType: 'tests',
+          formatReport: () => 'Status: APPROVED\\n# Test Report\\nAll tests pass',
+        }).run();
+        `,
+        'utf8'
+      );
+
+      writeToken(path.basename(helperScript), 'test-agent', Date.now());
+      const result = runScript(helperScript, { reportPath: REPORT_PATH });
+      assert.equal(result.exitCode, 0, 'should accept output with valid Status line');
+
+      try {
+        fs.unlinkSync(helperScript);
+      } catch {
+        /* ignore */
+      }
+      try {
+        fs.unlinkSync(REPORT_PATH);
+      } catch {
+        /* ignore */
+      }
+    });
+
+    it('skips validation when reportType is not set (backward compat)', () => {
+      const helperScript = path.join('/tmp', 'test-write-report-validation-no-type.js');
+      fs.writeFileSync(
+        helperScript,
+        `
+        const { createReportWriter } = require('${WRITE_REPORT.replace(/\\/g, '\\\\')}');
+        createReportWriter({
+          name: 'Test Writer',
+          allowedAgents: ['test-agent'],
+          requiredFields: ['reportPath'],
+          formatReport: () => '# Report\\nNo Status line but no reportType either',
+        }).run();
+        `,
+        'utf8'
+      );
+
+      writeToken(path.basename(helperScript), 'test-agent', Date.now());
+      const result = runScript(helperScript, { reportPath: REPORT_PATH });
+      assert.equal(result.exitCode, 0, 'should skip validation when no reportType');
+
+      try {
+        fs.unlinkSync(helperScript);
+      } catch {
+        /* ignore */
+      }
+      try {
+        fs.unlinkSync(REPORT_PATH);
+      } catch {
+        /* ignore */
+      }
+    });
+  });
 });

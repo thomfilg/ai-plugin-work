@@ -700,3 +700,96 @@ describe('workflow-definition: verify[STEPS.check] QA report gating', () => {
     );
   });
 });
+
+// ─── GH-326 Task 1.2: .check.md contentGuard ─────────────────────────────────
+describe('workflow-definition: .check.md contentGuard', () => {
+  const { artifactRules } = createWorkflowDefinition(stubDeps);
+
+  function getRule(basename) {
+    return artifactRules.find((r) => r.basename === basename);
+  }
+
+  // --- contentGuard presence ---
+  it('has a contentGuard on tests.check.md artifact rule', () => {
+    const rule = getRule('tests.check.md');
+    assert.equal(typeof rule.contentGuard, 'function');
+  });
+
+  it('has a contentGuard on code-review.check.md artifact rule', () => {
+    const rule = getRule('code-review.check.md');
+    assert.equal(typeof rule.contentGuard, 'function');
+  });
+
+  it('has a contentGuard on completion.check.md artifact rule', () => {
+    const rule = getRule('completion.check.md');
+    assert.equal(typeof rule.contentGuard, 'function');
+  });
+
+  // --- contentGuard blocks missing Status line ---
+  it('blocks tests.check.md without Status line', () => {
+    const rule = getRule('tests.check.md');
+    const result = rule.contentGuard('# Test Report\nAll tests pass', STEPS.check);
+    assert.equal(result.blocked, true);
+    assert.ok(result.message.includes('Status:'), 'message should mention Status:');
+  });
+
+  it('blocks code-review.check.md without Status line', () => {
+    const rule = getRule('code-review.check.md');
+    const result = rule.contentGuard('# Code Review\nLooks good', STEPS.check);
+    assert.equal(result.blocked, true);
+    assert.ok(result.message);
+  });
+
+  it('blocks completion.check.md without Status line', () => {
+    const rule = getRule('completion.check.md');
+    const result = rule.contentGuard('# Completion Report\nAll done', STEPS.check);
+    assert.equal(result.blocked, true);
+    assert.ok(result.message);
+  });
+
+  // --- contentGuard allows valid Status line ---
+  it('allows tests.check.md with "Status: APPROVED"', () => {
+    const rule = getRule('tests.check.md');
+    const result = rule.contentGuard('Status: APPROVED\n# Test Report', STEPS.check);
+    assert.equal(result.blocked, false);
+  });
+
+  it('allows code-review.check.md with "Status: NEEDS_WORK"', () => {
+    const rule = getRule('code-review.check.md');
+    const result = rule.contentGuard('Status: NEEDS_WORK\n# Code Review', STEPS.check);
+    assert.equal(result.blocked, false);
+  });
+
+  it('allows completion.check.md with "Status: COMPLETE"', () => {
+    const rule = getRule('completion.check.md');
+    const result = rule.contentGuard('Status: COMPLETE\n# Completion Report', STEPS.check);
+    assert.equal(result.blocked, false);
+  });
+
+  // --- contentGuard blocks invalid status for type ---
+  it('blocks tests.check.md with Status: COMPLETE (invalid for tests)', () => {
+    const rule = getRule('tests.check.md');
+    const result = rule.contentGuard('Status: COMPLETE\n# Test Report', STEPS.check);
+    assert.equal(result.blocked, true);
+  });
+
+  it('blocks code-review.check.md with Status: COMPLETE (invalid for codeReview)', () => {
+    const rule = getRule('code-review.check.md');
+    const result = rule.contentGuard('Status: COMPLETE\n# Code Review', STEPS.check);
+    assert.equal(result.blocked, true);
+  });
+
+  // --- contentGuard allows bold markdown variants ---
+  it('allows tests.check.md with "**Status:** **APPROVED**"', () => {
+    const rule = getRule('tests.check.md');
+    const result = rule.contentGuard('**Status:** **APPROVED**\n# Report', STEPS.check);
+    assert.equal(result.blocked, false);
+  });
+
+  // --- contentGuard blocks freeform status without Status: prefix ---
+  it('blocks code-review.check.md with standalone "**APPROVED**" (no Status: prefix)', () => {
+    const rule = getRule('code-review.check.md');
+    const result = rule.contentGuard('# Code Review\n\n**APPROVED**\nLooks good', STEPS.check);
+    assert.equal(result.blocked, true);
+  });
+});
