@@ -1040,3 +1040,60 @@ describe('isCodeReviewResolved — Issues Found list format (write-code-review.j
     assert.equal(result.blockingCount, 0);
   });
 });
+
+// ===========================================================================
+// GH-326 Task 1.3: Freeform fallback patterns
+// ===========================================================================
+describe('parseReportStatus — freeform fallback patterns (GH-326)', () => {
+  it('resolves standalone "**APPROVED**" on own line to APPROVED for codeReview', () => {
+    const content = '# Code Review\n\n**APPROVED**\n\nAll good';
+    const result = parseReportStatus(content, 'codeReview');
+    assert.equal(result.status, 'APPROVED');
+  });
+
+  it('resolves "Overall Assessment: Approved" to APPROVED for codeReview', () => {
+    const content = 'Overall Assessment: Approved\n\nDetails...';
+    const result = parseReportStatus(content, 'codeReview');
+    assert.equal(result.status, 'APPROVED');
+  });
+
+  it('resolves "Result: COMPLETE" to APPROVED for completion type', () => {
+    const content = 'Result: COMPLETE\n\nAll requirements delivered';
+    const result = parseReportStatus(content, 'completion');
+    assert.equal(result.status, 'APPROVED');
+  });
+
+  it('resolves "COMPLETE -- All requirements delivered" to APPROVED for completion', () => {
+    const content = 'COMPLETE \u2014 All requirements delivered';
+    const result = parseReportStatus(content, 'completion');
+    assert.equal(result.status, 'APPROVED');
+  });
+
+  it('resolves standalone "**NEEDS_WORK**" on own line to NEEDS_WORK for codeReview', () => {
+    const content = '# Code Review\n\n**NEEDS_WORK**\n\nSee issues below';
+    const result = parseReportStatus(content, 'codeReview');
+    assert.equal(result.status, 'NEEDS_WORK');
+  });
+
+  it('does NOT let freeform pattern override explicit Status: line', () => {
+    // Explicit Status: NEEDS_WORK should win even if freeform **APPROVED** appears
+    const content = 'Status: NEEDS_WORK\n\n**APPROVED**\nAll good';
+    const result = parseReportStatus(content, 'codeReview');
+    assert.equal(result.status, 'NEEDS_WORK', 'explicit Status: line must take priority');
+  });
+
+  it('does NOT let freeform pattern override summary table', () => {
+    // Summary table should win over freeform
+    const content = '| Status | NEEDS_WORK |\n\n**APPROVED**\nAll good';
+    const result = parseReportStatus(content, 'codeReview');
+    assert.equal(result.status, 'NEEDS_WORK', 'summary table must take priority over freeform');
+  });
+
+  it('freeform pattern takes priority over fail/pass markers', () => {
+    // Freeform "**APPROVED**" should win over a fail marker in the body
+    // (freeform is inserted between summary table and infrastructure failure)
+    const content = '# Code Review\n\n**APPROVED**\n\nSome CRITICAL mention in passing';
+    const result = parseReportStatus(content, 'codeReview');
+    assert.equal(result.status, 'APPROVED', 'freeform should take priority over fail markers');
+  });
+});

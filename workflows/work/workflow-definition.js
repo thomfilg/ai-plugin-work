@@ -609,9 +609,36 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
     { basename: 'spec.md', step: STEPS.spec, agents: ['spec-writer'] },
     { basename: 'tasks.md', step: STEPS.tasks, allowedSteps: [STEPS.task_review], agents: [] },
     { basename: '.last-commit-sha', step: STEPS.commit },
-    { basename: 'code-review.check.md', step: STEPS.check, agents: ['code-checker'] },
-    { basename: 'tests.check.md', step: STEPS.check, agents: ['quality-checker'] },
-    { basename: 'completion.check.md', step: STEPS.check, agents: ['completion-checker'] },
+    {
+      basename: 'code-review.check.md',
+      step: STEPS.check,
+      agents: ['code-checker'],
+      contentGuard: (content) => {
+        const { validateCheckReportStatus } = require(path.join(__dirname, '..', 'lib', 'validate-check-report-status'));
+        const result = validateCheckReportStatus(content, 'codeReview');
+        return result.valid ? { blocked: false } : { blocked: true, message: result.message };
+      },
+    },
+    {
+      basename: 'tests.check.md',
+      step: STEPS.check,
+      agents: ['quality-checker'],
+      contentGuard: (content) => {
+        const { validateCheckReportStatus } = require(path.join(__dirname, '..', 'lib', 'validate-check-report-status'));
+        const result = validateCheckReportStatus(content, 'tests');
+        return result.valid ? { blocked: false } : { blocked: true, message: result.message };
+      },
+    },
+    {
+      basename: 'completion.check.md',
+      step: STEPS.check,
+      agents: ['completion-checker'],
+      contentGuard: (content) => {
+        const { validateCheckReportStatus } = require(path.join(__dirname, '..', 'lib', 'validate-check-report-status'));
+        const result = validateCheckReportStatus(content, 'completion');
+        return result.valid ? { blocked: false } : { blocked: true, message: result.message };
+      },
+    },
     {
       pattern: /^qa-.*\.check\.md$/,
       step: STEPS.check,

@@ -111,6 +111,7 @@ function consumeToken(scriptBasename) {
  * @property {string[]} requiredFields — Field names that must be present in input
  * @property {(input: object) => string} formatReport — Function that formats input into markdown
  * @property {(input: object) => string[]} [validate] — Optional extra validation (returns error messages)
+ * @property {string} [reportType] — Report type for post-write status validation (e.g. 'tests', 'codeReview', 'completion')
  */
 
 /**
@@ -120,7 +121,7 @@ function consumeToken(scriptBasename) {
  * @returns {{ run: () => Promise<void> }}
  */
 function createReportWriter(config) {
-  const { name, allowedAgents, requiredFields, formatReport, validate } = config;
+  const { name, allowedAgents, requiredFields, formatReport, validate, reportType } = config;
 
   async function run() {
     // Parse input from stdin (JSON)
@@ -243,6 +244,22 @@ function createReportWriter(config) {
     }
 
     const newContent = formatReport(input);
+
+    // Post-write validation: verify formatted output has a parseable Status line (GH-326)
+    if (reportType) {
+      const { STATUS_LINE_RE, resolveAlias } = require('../parse-report-status');
+      const statusMatch = newContent.match(STATUS_LINE_RE);
+      const hasValidStatus = statusMatch && resolveAlias(statusMatch[1].toUpperCase(), reportType);
+      if (!hasValidStatus) {
+        process.stderr.write(
+          `[${name}] VALIDATION FAILED: Formatted report has no parseable Status line.\n` +
+          `  parseReportStatus returned: ${hasValidStatus ? 'valid' : 'UNKNOWN'}\n` +
+          `  The formatReport() function must include a "Status: <VALUE>" line.\n` +
+          `  This is a bug in the report writer, not in the agent input.\n`
+        );
+        process.exit(1);
+      }
+    }
 
     // Prepend strategy: if file exists, preserve old content with separator
     let finalContent = newContent;

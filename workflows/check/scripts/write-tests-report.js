@@ -26,6 +26,8 @@ const { createReportWriter } = require('../../lib/scripts/write-report');
 const writer = createReportWriter({
   name: 'Tests Report Writer',
 
+  reportType: 'tests',
+
   allowedAgents: ['quality-checker'],
 
   requiredFields: ['reportPath', 'changesHash', 'qualityGate', 'unitTests'],
