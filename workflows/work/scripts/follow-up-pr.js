@@ -100,31 +100,7 @@ Options:
 
 // ── gh CLI Wrapper ──────────────────────────────────────────────────────────
 
-function ghExec(ghArgs, { json = true, allowNonZero = false } = {}) {
-  const args = typeof ghArgs === 'string' ? ghArgs.split(/\s+/) : ghArgs;
-  try {
-    const result = execFileSync('gh', args, {
-      encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 30000,
-    });
-    return json ? JSON.parse(result) : result.trim();
-  } catch (err) {
-    if (allowNonZero && err.stdout) {
-      const stdout = err.stdout.toString().trim();
-      if (json && stdout) {
-        try {
-          return JSON.parse(stdout);
-        } catch {
-          /* fall through */
-        }
-      }
-      if (!json && stdout) return stdout;
-    }
-    const stderr = err.stderr ? err.stderr.toString().trim() : '';
-    throw new Error(`gh command failed: gh ${args.join(' ')}\n${stderr}`);
-  }
-}
+const { ghExec } = require('./gh-exec.js');
 
 // ── PR Info ─────────────────────────────────────────────────────────────────
 
@@ -160,6 +136,24 @@ function categorizeCheck(checkName) {
     if (cat.pattern.test(checkName)) return cat.name;
   }
   return 'unknown';
+}
+
+// ── Required/Optional CI Check Partitioning ─────────────────────────────────
+
+/**
+ * Partition failed checks into required and optional.
+ * @param {Array} allFailed - All failed check objects
+ * @param {Array|null} requiredChecks - Required check names (null = unavailable)
+ * @returns {{ requiredFailed: Array, optionalFailed: Array, hasRequiredInfo: boolean }}
+ */
+function partitionByRequired(allFailed, requiredChecks) {
+  if (!requiredChecks || requiredChecks.length === 0) {
+    return { requiredFailed: allFailed, optionalFailed: [], hasRequiredInfo: false };
+  }
+  const requiredNames = new Set(requiredChecks.map((n) => (typeof n === 'string' ? n : n.name)));
+  const requiredFailed = allFailed.filter((ck) => requiredNames.has(ck.name));
+  const optionalFailed = allFailed.filter((ck) => !requiredNames.has(ck.name));
+  return { requiredFailed, optionalFailed, hasRequiredInfo: true };
 }
 
 // ── CI Status ───────────────────────────────────────────────────────────────
@@ -267,14 +261,52 @@ function checkCI(prNumber) {
   const neutral = checks.filter((ck) => ck.bucket === 'neutral');
   const cancelled = checks.filter((ck) => ck.bucket === 'cancel');
 
-  let status;
-  if (failed.length > 0) status = 'failing';
-  else if (running.length > 0) status = 'pending';
-  else if (checks.length === 0) status = 'no-checks';
-  else if (cancelled.length > 0) status = 'cancelled';
-  else status = 'passing';
+  // Fetch required checks (gh pr checks --required)
+  let requiredCheckNames = null;
+  try {
+    const requiredRaw = ghExec(`pr checks ${prArg} --required --json name`, { allowNonZero: true });
+    if (Array.isArray(requiredRaw) && requiredRaw.length > 0) {
+      requiredCheckNames = requiredRaw.map((c) => c.name);
+    }
+  } catch {
+    // --required flag unavailable or failed — fall back to all-as-required
+  }
 
-  return { status, checks, failed, running, passed, neutral, cancelled, total: checks.length };
+  const { requiredFailed, optionalFailed, hasRequiredInfo } = partitionByRequired(
+    failed,
+    requiredCheckNames
+  );
+
+  let status;
+  if (hasRequiredInfo) {
+    // When we know which checks are required, only required failures matter
+    if (requiredFailed.length > 0) status = 'failing';
+    else if (running.length > 0) status = 'pending';
+    else if (checks.length === 0) status = 'no-checks';
+    else if (cancelled.length > 0) status = 'cancelled';
+    else status = 'passing';
+  } else {
+    // Fallback: all checks treated as required (current behavior)
+    if (failed.length > 0) status = 'failing';
+    else if (running.length > 0) status = 'pending';
+    else if (checks.length === 0) status = 'no-checks';
+    else if (cancelled.length > 0) status = 'cancelled';
+    else status = 'passing';
+  }
+
+  return {
+    status,
+    checks,
+    failed,
+    running,
+    passed,
+    neutral,
+    cancelled,
+    total: checks.length,
+    requiredFailed,
+    optionalFailed,
+    hasRequiredInfo,
+  };
 }
 
 // ── Reviews ─────────────────────────────────────────────────────────────────
@@ -867,7 +899,7 @@ function formatNonBlockingItems(items, lines) {
   }
 }
 
-function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
+function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts, decision) {
   const lines = [];
 
   lines.push(c.bold('=== Follow-up PR Monitor ==='));
@@ -944,6 +976,23 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
     lines.push(c.dim('CI: No checks found'));
   }
 
+  // Optional (non-required) CI failures — shown as warnings, not errors
+  // Only show when CI is not already failing (avoids duplicating checks shown in CI FAILING section)
+  if (
+    ci.optionalFailed &&
+    ci.optionalFailed.length > 0 &&
+    ci.hasRequiredInfo &&
+    ci.status !== 'failing'
+  ) {
+    lines.push('');
+    lines.push(c.yellow('\u26A0 Optional CI failures (non-blocking):'));
+    for (const ck of ci.optionalFailed) {
+      lines.push(
+        `  ${c.yellow('\u26A0')} ${ck.name} ${c.dim(`[${ck.category || 'unknown'}]`)} — failed (optional)`
+      );
+    }
+  }
+
   // Merge status
   const isConflicting = prInfo.mergeable === 'CONFLICTING' || prInfo.mergeStateStatus === 'DIRTY';
   const isMergeReady =
@@ -956,12 +1005,25 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
     lines.push('');
     lines.push(c.red('CONFLICTS: Merge conflicts detected — rebase required'));
   } else if (!isMergeReady) {
+    const isBlockedByApprovalStatus =
+      prInfo.mergeable === 'MERGEABLE' && prInfo.mergeStateStatus === 'BLOCKED';
     lines.push('');
-    lines.push(
-      c.yellow(
-        `MERGE STATUS: ${prInfo.mergeable || 'UNKNOWN'} (${prInfo.mergeStateStatus || 'UNKNOWN'}) — not yet mergeable`
-      )
-    );
+    const unresolvedCount = reviews.nonBlocking ? reviews.nonBlocking.length : 0;
+    if (isBlockedByApprovalStatus && unresolvedCount > 0) {
+      lines.push(
+        c.yellow(
+          `MERGE STATUS: Merge BLOCKED by ${unresolvedCount} unresolved review comment${unresolvedCount !== 1 ? 's' : ''}`
+        )
+      );
+    } else if (isBlockedByApprovalStatus) {
+      lines.push(c.yellow('MERGE STATUS: BLOCKED (awaiting required approvals)'));
+    } else {
+      lines.push(
+        c.yellow(
+          `MERGE STATUS: ${prInfo.mergeable || 'UNKNOWN'} (${prInfo.mergeStateStatus || 'UNKNOWN'}) — not yet mergeable`
+        )
+      );
+    }
   }
 
   // Reviews
@@ -1009,14 +1071,14 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
       lines.push(c.yellow('    line-number drift, and dedup confusion.'));
       if (reviews.nonBlocking.length > 0) {
         lines.push(
-          `  + ${reviews.nonBlocking.length} non-blocking (nitpick/low — assess whether to address):`
+          `  + ${reviews.nonBlocking.length} unresolved (nitpick/low — address these to unblock merge):`
         );
         formatNonBlockingItems(reviews.nonBlocking, lines);
       }
     } else if (reviews.nonBlocking.length > 0) {
       lines.push(
-        c.green(`Reviews: CLEAR`) +
-          ` (${reviews.nonBlocking.length} non-blocking — assess whether to address):`
+        c.yellow(`Reviews: UNRESOLVED`) +
+          ` (${reviews.nonBlocking.length} unresolved — address these to unblock merge):`
       );
       formatNonBlockingItems(reviews.nonBlocking, lines);
     } else {
@@ -1027,6 +1089,8 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
   // Action hint — order matches fail-fast exit priority
   lines.push('');
   const ciAcceptable = ci.status === 'passing' || ci.status === 'no-checks';
+  const isBlockedByApproval =
+    prInfo.mergeable === 'MERGEABLE' && prInfo.mergeStateStatus === 'BLOCKED' && !isConflicting;
   if (ci.status === 'failing') {
     lines.push(`→ Fix the failure, push, then re-run: ${c.dim('node scripts/follow-up-pr.js')}`);
   } else if (isConflicting) {
@@ -1048,7 +1112,8 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
     ciAcceptable &&
     (!reviews.hasBlocking || opts.noReviews) &&
     reviews.pendingBots.length === 0 &&
-    isMergeReady
+    (isMergeReady ||
+      (isBlockedByApproval && !(reviews.nonBlocking && reviews.nonBlocking.length > 0)))
   ) {
     // Non-blocking comments report (before the banner)
     if (reviews.nonBlocking && reviews.nonBlocking.length > 0) {
@@ -1069,9 +1134,12 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts) {
     lines.push(c.green('═══════════════════════════════════════'));
     lines.push('');
     const ciLabel = ci.status === 'no-checks' ? 'NO CHECKS' : 'PASSED';
-    lines.push(
-      c.green(`CI: ${ciLabel} | Reviews: ${opts.noReviews ? 'SKIPPED' : 'CLEAR'} | Conflicts: NONE`)
-    );
+    const hasUnresolved = reviews.nonBlocking && reviews.nonBlocking.length > 0;
+    const reviewLabel = opts.noReviews ? 'SKIPPED' : hasUnresolved ? 'UNRESOLVED' : 'CLEAR';
+    lines.push(c.green(`CI: ${ciLabel} | Reviews: ${reviewLabel} | Conflicts: NONE`));
+    if (decision && decision.finalStatus === 'blocked-by-approval') {
+      lines.push(c.yellow('PR ready \u2014 merge blocked by required approvals only'));
+    }
     lines.push(c.green(`PR #${prInfo.number} is ready for review/merge!`));
   } else if (ci.status === 'pending') {
     lines.push(`→ Waiting ${opts.interval}s for checks... (attempt ${attempt}/${maxAttempts})`);
@@ -1103,6 +1171,8 @@ function decideNextAction(ciStatus, prInfo, reviews, noReviews) {
       prInfo.mergeStateStatus === 'CLEAN' ||
       prInfo.mergeStateStatus === 'HAS_HOOKS' ||
       prInfo.mergeStateStatus === 'UNSTABLE');
+  const isBlockedByApproval =
+    prInfo.mergeable === 'MERGEABLE' && prInfo.mergeStateStatus === 'BLOCKED' && !isConflicting;
   const ciAcceptable = ciStatus === 'passing' || ciStatus === 'no-checks';
   const ciFinished = ciAcceptable || ciStatus === 'cancelled';
   const reviewsClear = noReviews || (!reviews.hasBlocking && reviews.pendingBots.length === 0);
@@ -1127,9 +1197,33 @@ function decideNextAction(ciStatus, prInfo, reviews, noReviews) {
     return { action: 'exit-fail', finalStatus: 'reviews-blocking' };
   }
 
+  // BLOCKED by unresolved conversations — non-blocking comments that still block merge via branch protection
+  // Wait for bot reviews to finish first (consistent with blocking-review guard above)
+  if (
+    isBlockedByApproval &&
+    ciAcceptable &&
+    !noReviews &&
+    reviews.pendingBots.length === 0 &&
+    reviews.nonBlocking &&
+    reviews.nonBlocking.length > 0
+  ) {
+    const count = reviews.nonBlocking.length;
+    return {
+      action: 'exit-fail',
+      finalStatus: 'unresolved-conversations',
+      message: `Merge blocked by ${count} unresolved review comment(s) — analyse each comment, address those that make sense. Do NOT blindly solve comments that conflict with user/ticket intent or request large out-of-scope refactors (minor improvements are ok). Skip with reason when appropriate, e.g. Skipped "<title>" — conflicts with user intent: <reason>, or Skipped "<title>" — out of scope: <reason>.`,
+    };
+  }
+
   // Success — CI acceptable (passing or no-checks), reviews clear, merge ready
-  if (ciAcceptable && reviewsClear && isMergeReady) {
-    return { action: 'exit-success', finalStatus: 'ready' };
+  if (ciAcceptable && reviewsClear && (isMergeReady || isBlockedByApproval)) {
+    return {
+      action: 'exit-success',
+      finalStatus: isBlockedByApproval ? 'blocked-by-approval' : 'ready',
+      message: isBlockedByApproval
+        ? 'PR ready — merge blocked by required approvals only'
+        : undefined,
+    };
   }
 
   // Still polling — build list of reasons (tested in follow-up-pr.test.js)
@@ -1673,6 +1767,8 @@ module.exports = {
   initState,
   getCodeContext,
   buildAccountabilityEntries,
+  formatReport,
+  partitionByRequired,
   // Gate-check exports: used by workflow-definition.js verify()
   isPRGateReady,
   ghExec,

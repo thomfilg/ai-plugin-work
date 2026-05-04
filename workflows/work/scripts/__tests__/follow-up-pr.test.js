@@ -9,6 +9,8 @@ const {
   decideNextAction,
   getAdaptiveInterval,
   getCodeContext,
+  partitionByRequired,
+  formatReport,
 } = require('../follow-up-pr.js');
 
 describe('classifyCommentPriority', () => {
@@ -438,6 +440,7 @@ describe('decideNextAction', () => {
   const notReady = { mergeable: 'UNKNOWN', mergeStateStatus: 'BEHIND' };
   const noReviews = { hasBlocking: false, pendingBots: [], nonBlocking: [] };
   const blockingReviews = { hasBlocking: true, pendingBots: [], blocking: [{ author: 'user' }] };
+  const blockedByApproval = { mergeable: 'MERGEABLE', mergeStateStatus: 'BLOCKED' };
   const pendingBots = { hasBlocking: false, pendingBots: ['copilot-pull-request-reviewer'] };
 
   it('returns exit-fail with ci-failing when CI fails', () => {
@@ -528,6 +531,106 @@ describe('decideNextAction', () => {
     assert.equal(result.action, 'poll');
     assert.match(result.waitReason, /merge status: BEHIND/);
   });
+
+  // ── BLOCKED merge status tests ──────────────────────────────────────────────
+  it('returns exit-success with blocked-by-approval when BLOCKED, CI passing, reviews clear', () => {
+    const result = decideNextAction('passing', blockedByApproval, noReviews, false);
+    assert.equal(result.action, 'exit-success');
+    assert.equal(result.finalStatus, 'blocked-by-approval');
+  });
+
+  it('returns exit-fail with ci-failing when BLOCKED and CI fails', () => {
+    const result = decideNextAction('failing', blockedByApproval, noReviews, false);
+    assert.equal(result.action, 'exit-fail');
+    assert.equal(result.finalStatus, 'ci-failing');
+  });
+
+  it('returns exit-fail with conflicting when BLOCKED but has conflicts', () => {
+    const blockedConflicting = { mergeable: 'CONFLICTING', mergeStateStatus: 'DIRTY' };
+    const result = decideNextAction('passing', blockedConflicting, noReviews, false);
+    assert.equal(result.action, 'exit-fail');
+    assert.equal(result.finalStatus, 'conflicting');
+  });
+
+  it('returns poll when BLOCKED and CI is pending', () => {
+    const result = decideNextAction('pending', blockedByApproval, noReviews, false);
+    assert.equal(result.action, 'poll');
+  });
+
+  it('returns exit-success with blocked-by-approval when BLOCKED, no-checks CI, reviews clear', () => {
+    const result = decideNextAction('no-checks', blockedByApproval, noReviews, false);
+    assert.equal(result.action, 'exit-success');
+    assert.equal(result.finalStatus, 'blocked-by-approval');
+  });
+
+  it('returns exit-fail with reviews-blocking when BLOCKED and reviews are blocking', () => {
+    const result = decideNextAction('passing', blockedByApproval, blockingReviews, false);
+    assert.equal(result.action, 'exit-fail');
+    assert.equal(result.finalStatus, 'reviews-blocking');
+  });
+
+  it('returns exit-success when BLOCKED, CI passing, noReviews is true', () => {
+    const result = decideNextAction('passing', blockedByApproval, blockingReviews, true);
+    assert.equal(result.action, 'exit-success');
+    assert.equal(result.finalStatus, 'blocked-by-approval');
+  });
+
+  it('returns exit-fail with ci-cancelled when BLOCKED and CI is cancelled', () => {
+    const result = decideNextAction('cancelled', blockedByApproval, noReviews, false);
+    assert.equal(result.action, 'exit-fail');
+    assert.equal(result.finalStatus, 'ci-cancelled');
+  });
+
+  it('includes human-readable message when exiting success due to blocked-by-approval', () => {
+    const result = decideNextAction('passing', blockedByApproval, noReviews, false);
+    assert.ok(result.message, 'should include a message');
+    assert.match(result.message, /blocked.*approval/i);
+  });
+
+  // checkCI returns 'passing' when only optional (non-required) checks fail.
+  // These tests verify that decideNextAction correctly exits success in that
+  // scenario, confirming the full checkCI → decideNextAction pipeline handles
+  // optional-only failures as non-blocking.
+  it('returns exit-success when ciStatus is passing (optional-only failures) and merge ready', () => {
+    const result = decideNextAction('passing', mergeReady, noReviews, false);
+    assert.equal(result.action, 'exit-success');
+    assert.equal(result.finalStatus, 'ready');
+  });
+
+  it('returns exit-success when ciStatus is passing (optional-only failures) and blocked-by-approval', () => {
+    const result = decideNextAction('passing', blockedByApproval, noReviews, false);
+    assert.equal(result.action, 'exit-success');
+    assert.equal(result.finalStatus, 'blocked-by-approval');
+  });
+
+  // ── BLOCKED + unresolved conversations (non-blocking comments) ──────────
+  it('returns exit-fail with unresolved-conversations when BLOCKED, CI passing, non-blocking comments exist', () => {
+    const nonBlockingComments = {
+      hasBlocking: false,
+      pendingBots: [],
+      nonBlocking: [{ author: 'copilot', body: '[low] suggestion' }],
+    };
+    const result = decideNextAction('passing', blockedByApproval, nonBlockingComments, false);
+    assert.equal(result.action, 'exit-fail');
+    assert.equal(result.finalStatus, 'unresolved-conversations');
+  });
+
+  it('returns exit-success when BLOCKED, CI passing, truly no comments at all', () => {
+    const result = decideNextAction('passing', blockedByApproval, noReviews, false);
+    assert.equal(result.action, 'exit-success');
+    assert.equal(result.finalStatus, 'blocked-by-approval');
+  });
+
+  it('includes unresolved thread count in message when BLOCKED by conversations', () => {
+    const twoComments = {
+      hasBlocking: false,
+      pendingBots: [],
+      nonBlocking: [{ author: 'a' }, { author: 'b' }],
+    };
+    const result = decideNextAction('passing', blockedByApproval, twoComments, false);
+    assert.ok(result.message);
+    assert.match(result.message, /2.*unresolved/i);
+  });
 });
 
 describe('getAdaptiveInterval', () => {
@@ -573,6 +676,58 @@ describe('getAdaptiveInterval', () => {
   it('returns 30s when no checks exist (total=0, attempt>1)', () => {
     const ci = makeCi([], []);
     assert.equal(getAdaptiveInterval(2, ci), 30);
+  });
+});
+
+// ── partitionByRequired ──────────────────────────────────────────────────────
+describe('partitionByRequired', () => {
+  const makeCheck = (name) => ({ name, bucket: 'fail', category: 'unknown' });
+
+  it('treats all failed as required when requiredChecks is null', () => {
+    const failed = [makeCheck('lint'), makeCheck('test')];
+    const result = partitionByRequired(failed, null);
+    assert.equal(result.hasRequiredInfo, false);
+    assert.deepStrictEqual(result.requiredFailed, failed);
+    assert.deepStrictEqual(result.optionalFailed, []);
+  });
+
+  it('treats all failed as required when requiredChecks is empty array', () => {
+    const failed = [makeCheck('lint')];
+    const result = partitionByRequired(failed, []);
+    assert.equal(result.hasRequiredInfo, false);
+    assert.deepStrictEqual(result.requiredFailed, failed);
+    assert.deepStrictEqual(result.optionalFailed, []);
+  });
+
+  it('returns only optional failures when all required checks pass', () => {
+    const failed = [makeCheck('optional-lint'), makeCheck('optional-docs')];
+    const requiredChecks = ['build', 'test'];
+    const result = partitionByRequired(failed, requiredChecks);
+    assert.equal(result.hasRequiredInfo, true);
+    assert.deepStrictEqual(result.requiredFailed, []);
+    assert.deepStrictEqual(result.optionalFailed, failed);
+  });
+
+  it('returns required failure when a required check fails', () => {
+    const failedBuild = makeCheck('build');
+    const failed = [failedBuild];
+    const requiredChecks = ['build', 'test'];
+    const result = partitionByRequired(failed, requiredChecks);
+    assert.equal(result.hasRequiredInfo, true);
+    assert.deepStrictEqual(result.requiredFailed, [failedBuild]);
+    assert.deepStrictEqual(result.optionalFailed, []);
+  });
+
+  it('partitions mixed required and optional failures correctly', () => {
+    const failedBuild = makeCheck('build');
+    const failedLint = makeCheck('lint');
+    const failedDocs = makeCheck('docs');
+    const failed = [failedBuild, failedLint, failedDocs];
+    const requiredChecks = ['build', 'docs'];
+    const result = partitionByRequired(failed, requiredChecks);
+    assert.equal(result.hasRequiredInfo, true);
+    assert.deepStrictEqual(result.requiredFailed, [failedBuild, failedDocs]);
+    assert.deepStrictEqual(result.optionalFailed, [failedLint]);
   });
 });
 
@@ -626,5 +781,257 @@ describe('getCodeContext', () => {
     assert.ok(result.includes('>>>'), 'should have marker');
     // Should not have negative line numbers
     assert.ok(!result.includes('-1:'), 'no negative line numbers');
+  });
+});
+
+// ── formatReport ──────────────────────────────────────────────────────────────
+describe('formatReport', () => {
+  // Minimal fixtures for formatReport parameters
+  const basePrInfo = {
+    number: 42,
+    title: 'Test PR',
+    branch: 'feature-branch',
+    mergeable: 'MERGEABLE',
+    mergeStateStatus: 'CLEAN',
+  };
+  const baseReviews = { hasBlocking: false, pendingBots: [], nonBlocking: [], blocking: [] };
+  const baseOpts = { noReviews: false, interval: 30 };
+
+  function makeCi(overrides) {
+    return {
+      status: 'passing',
+      total: 2,
+      passed: [{ name: 'build' }, { name: 'test' }],
+      running: [],
+      failed: [],
+      neutral: [],
+      cancelled: [],
+      optionalFailed: [],
+      requiredFailed: [],
+      hasRequiredInfo: false,
+      ...overrides,
+    };
+  }
+
+  it('displays optional CI failures as warnings (not errors) when optionalFailed has items', () => {
+    const ci = makeCi({
+      status: 'passing',
+      failed: [{ name: 'lint', category: 'lint' }],
+      optionalFailed: [{ name: 'lint', category: 'lint' }],
+      requiredFailed: [],
+      hasRequiredInfo: true,
+    });
+    const output = formatReport(basePrInfo, ci, baseReviews, 1, 10, baseOpts);
+    assert.match(
+      output,
+      /Optional CI failures \(non-blocking\)/,
+      'should show optional failures warning section'
+    );
+    assert.match(output, /lint/, 'should list the optional failure name');
+  });
+
+  it('includes blocked-by-approval message when decision has that status', () => {
+    const ci = makeCi({ status: 'passing' });
+    const blockedPrInfo = {
+      ...basePrInfo,
+      mergeStateStatus: 'BLOCKED',
+    };
+    const decision = { action: 'exit-success', finalStatus: 'blocked-by-approval' };
+    const output = formatReport(blockedPrInfo, ci, baseReviews, 1, 10, baseOpts, decision);
+    assert.match(
+      output,
+      /merge blocked by required approvals only/i,
+      'should show blocked-by-approval message'
+    );
+  });
+
+  it('shows "awaiting required approvals" (not "not yet mergeable") when blocked by approval', () => {
+    const ci = makeCi({ status: 'passing' });
+    const blockedPrInfo = {
+      ...basePrInfo,
+      mergeStateStatus: 'BLOCKED',
+    };
+    const output = formatReport(blockedPrInfo, ci, baseReviews, 1, 10, baseOpts);
+    assert.match(
+      output,
+      /BLOCKED \(awaiting required approvals\)/,
+      'should show blocked awaiting approvals message'
+    );
+    assert.ok(
+      !output.includes('not yet mergeable'),
+      'should not show generic "not yet mergeable" for blocked-by-approval'
+    );
+  });
+
+  it('does not show optional failures section when optionalFailed is empty', () => {
+    const ci = makeCi({ status: 'passing', optionalFailed: [] });
+    const output = formatReport(basePrInfo, ci, baseReviews, 1, 10, baseOpts);
+    assert.ok(
+      !output.includes('Optional CI failures'),
+      'should not show optional failures section'
+    );
+  });
+
+  it('does not show optional failures section when optionalFailed is undefined', () => {
+    const ci = makeCi({ status: 'passing' });
+    delete ci.optionalFailed;
+    const output = formatReport(basePrInfo, ci, baseReviews, 1, 10, baseOpts);
+    assert.ok(
+      !output.includes('Optional CI failures'),
+      'should not show optional failures section'
+    );
+  });
+
+  it('backward compat: still shows failed checks normally when no optionalFailed info', () => {
+    const ci = makeCi({
+      status: 'failing',
+      failed: [{ name: 'build', category: 'build' }],
+      hasRequiredInfo: false,
+    });
+    delete ci.optionalFailed;
+    delete ci.requiredFailed;
+    const output = formatReport(basePrInfo, ci, baseReviews, 1, 10, baseOpts);
+    // Should still show the failure with the standard format
+    assert.match(output, /build/, 'should display failed check name');
+    assert.match(output, /FAILING/, 'should show FAILING status');
+  });
+});
+
+// ── formatReport review output with BLOCKED merge + non-blocking comments (GH-324 Task 6) ──
+describe('formatReport — review output clarity (GH-324)', () => {
+  const basePrInfo = {
+    number: 42,
+    title: 'Test PR',
+    branch: 'feature-branch',
+    mergeable: 'MERGEABLE',
+    mergeStateStatus: 'CLEAN',
+  };
+  const baseOpts = { noReviews: false, interval: 30 };
+
+  function makeCi(overrides) {
+    return {
+      status: 'passing',
+      total: 2,
+      passed: [{ name: 'build' }, { name: 'test' }],
+      running: [],
+      failed: [],
+      neutral: [],
+      cancelled: [],
+      optionalFailed: [],
+      requiredFailed: [],
+      hasRequiredInfo: false,
+      ...overrides,
+    };
+  }
+
+  it('shows UNRESOLVED (not CLEAR) when non-blocking comments exist', () => {
+    const ci = makeCi({ status: 'passing' });
+    const reviews = {
+      hasBlocking: false,
+      pendingBots: [],
+      blocking: [],
+      nonBlocking: [
+        { author: 'Copilot', priority: 'low', path: 'file.js', line: 10, body: 'nitpick' },
+      ],
+    };
+    const output = formatReport(basePrInfo, ci, reviews, 1, 10, baseOpts);
+    assert.match(output, /UNRESOLVED/, 'should show UNRESOLVED instead of CLEAR');
+    assert.ok(!output.match(/Reviews: CLEAR/), 'should NOT say CLEAR when comments exist');
+  });
+
+  it('says "address these to unblock merge" instead of "assess whether to address"', () => {
+    const ci = makeCi({ status: 'passing' });
+    const reviews = {
+      hasBlocking: false,
+      pendingBots: [],
+      blocking: [],
+      nonBlocking: [
+        { author: 'Copilot', priority: 'low', path: 'file.js', line: 10, body: 'nitpick' },
+      ],
+    };
+    const output = formatReport(basePrInfo, ci, reviews, 1, 10, baseOpts);
+    assert.match(
+      output,
+      /address these to unblock merge/,
+      'should say address these to unblock merge'
+    );
+    assert.ok(
+      !output.includes('assess whether to address'),
+      'should NOT say assess whether to address'
+    );
+  });
+
+  it('shows "Merge BLOCKED by N unresolved review comments" when BLOCKED + unresolved comments', () => {
+    const ci = makeCi({ status: 'passing' });
+    const blockedPrInfo = {
+      ...basePrInfo,
+      mergeStateStatus: 'BLOCKED',
+    };
+    const reviews = {
+      hasBlocking: false,
+      pendingBots: [],
+      blocking: [],
+      nonBlocking: [
+        { author: 'Copilot', priority: 'low', path: 'file.js', line: 10, body: 'nitpick' },
+        { author: 'Copilot', priority: 'low', path: 'other.js', line: 5, body: 'style' },
+      ],
+    };
+    const output = formatReport(blockedPrInfo, ci, reviews, 1, 10, baseOpts);
+    assert.match(
+      output,
+      /Merge BLOCKED by 2 unresolved review comment/,
+      'should link BLOCKED merge status to unresolved comments count'
+    );
+  });
+
+  it('still says "awaiting required approvals" when BLOCKED but no unresolved comments', () => {
+    const ci = makeCi({ status: 'passing' });
+    const blockedPrInfo = {
+      ...basePrInfo,
+      mergeStateStatus: 'BLOCKED',
+    };
+    const reviews = {
+      hasBlocking: false,
+      pendingBots: [],
+      blocking: [],
+      nonBlocking: [],
+    };
+    const output = formatReport(blockedPrInfo, ci, reviews, 1, 10, baseOpts);
+    assert.match(output, /awaiting required approvals/, 'should show awaiting required approvals');
+    assert.ok(
+      !output.includes('unresolved comment'),
+      'should NOT mention unresolved comments when there are none'
+    );
+  });
+
+  it('uses "unresolved" wording in blocking reviews non-blocking sub-section too', () => {
+    const ci = makeCi({ status: 'passing' });
+    const reviews = {
+      hasBlocking: true,
+      pendingBots: [],
+      blocking: [
+        { author: 'Copilot', priority: 'medium', path: 'main.js', line: 20, body: 'bug here' },
+      ],
+      nonBlocking: [
+        { author: 'Copilot', priority: 'low', path: 'file.js', line: 10, body: 'nitpick' },
+      ],
+    };
+    const output = formatReport(basePrInfo, ci, reviews, 1, 10, baseOpts);
+    assert.match(
+      output,
+      /unresolved/,
+      'should use "unresolved" wording for non-blocking sub-section'
+    );
+    assert.ok(
+      !output.includes('assess whether to address'),
+      'should NOT use "assess whether to address" in blocking section either'
+    );
+  });
+});
+
+describe('ghExec shared module', () => {
+  it('is importable from shared gh-exec module', () => {
+    const { ghExec } = require('../gh-exec.js');
+    assert.equal(typeof ghExec, 'function');
   });
 });
