@@ -272,7 +272,7 @@ Fix any issues before completing.
 
 Still update `$HOME/worktrees/tasks/${TICKET_ID}/implement.md` with results (same as normal mode).
 
-After updating implement.md, finish and return control to the orchestrator immediately. Do NOT output any structured completion block, do NOT display "Next steps", and Do NOT prompt the user. The orchestrator handles all subsequent steps automatically.
+After updating implement.md, finish and return control to the orchestrator immediately. Do NOT output any structured completion block, Do NOT display "Next steps", and Do NOT prompt the user. The orchestrator handles all subsequent steps automatically.
 
 **When in normal mode (standalone invocation, no `--subtask`, not called from `/work`):**
 
