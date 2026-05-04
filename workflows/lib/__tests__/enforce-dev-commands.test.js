@@ -118,6 +118,13 @@ describe('enforce-dev-commands — BLOCK intercepted commands', () => {
     assert.ok(stderr.includes('dev-check.sh'));
   });
 
+  it('should BLOCK "pnpm dev:check && pnpm lint" (chained with blocked command)', async () => {
+    const { code } = await runHook({
+      tool_input: { command: 'pnpm dev:check && pnpm lint' },
+    });
+    assert.strictEqual(code, 2);
+  });
+
   it('should BLOCK when intercepted command has trailing arguments', async () => {
     const { code, stderr } = await runHook({
       tool_input: { command: 'pnpm test --watch' },

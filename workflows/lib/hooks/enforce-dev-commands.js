@@ -54,13 +54,15 @@ const ALLOWED_PATTERNS = [
 ];
 
 function isBlocked(command) {
-  // Check allow-list first
-  for (const pattern of ALLOWED_PATTERNS) {
-    if (pattern.test(command)) return false;
-  }
-  // Check block-list
-  for (const pattern of BLOCKED_PATTERNS) {
-    if (pattern.test(command)) return true;
+  // Split on chain operators and check each segment independently.
+  // A command is blocked if ANY segment matches a blocked pattern
+  // and that same segment is not covered by the allow-list.
+  const segments = command.split(/\s*(?:&&|;|\|)\s*/);
+  for (const segment of segments) {
+    const segBlocked = BLOCKED_PATTERNS.some((p) => p.test(segment));
+    if (!segBlocked) continue;
+    const segAllowed = ALLOWED_PATTERNS.some((p) => p.test(segment));
+    if (!segAllowed) return true;
   }
   return false;
 }
