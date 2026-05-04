@@ -266,16 +266,7 @@ Fix any issues before completing.
 
 Still update `$HOME/worktrees/tasks/${TICKET_ID}/implement.md` with results (same as normal mode).
 
-Then return a brief completion signal and hand control back to the orchestrator. Do NOT prompt the user for next steps or display a "Next steps" list.
-
-```
-IMPLEMENT_COMPLETE
-
-Agent used: <agent-name>
-Changes: <brief summary>
-Files modified: <count> files
-Quality: <quality checks run and results>
-```
+After updating implement.md, finish and return control to the orchestrator immediately. Do NOT output any structured completion block, Do NOT display "Next steps", and Do NOT prompt the user. The orchestrator handles all subsequent steps automatically.
 
 **When in normal mode (standalone invocation, no `--subtask`, not called from `/work`):**
 
@@ -339,4 +330,4 @@ Next steps:
 - For complex multi-step features, consider using `/work` instead
 - **Agent delegation is MANDATORY** - direct Write/Edit is blocked
 - **Subtask mode** (`--subtask <TICKET_ID>`): Skips branch/worktree creation, uses subtask state tracking, commits on completion, and returns control to parent workflow
-- **Orchestrator mode**: When invoked by `/work`, returns a brief completion signal instead of prompting the user — the orchestrator handles subsequent steps (commit, check, PR)
+- **Orchestrator mode**: When invoked by `/work`, returns control to the orchestrator without prompting — the orchestrator handles subsequent steps (commit, check, PR) automatically
