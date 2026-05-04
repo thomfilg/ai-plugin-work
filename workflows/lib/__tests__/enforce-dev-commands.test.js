@@ -140,6 +140,48 @@ describe('enforce-dev-commands — BLOCK intercepted commands', () => {
     assert.ok(stderr.includes('dev-check.sh'));
   });
 
+  it('should BLOCK "pnpm --filter pkg lint" (pnpm flags before script)', async () => {
+    const { code } = await runHook({
+      tool_input: { command: 'pnpm --filter pkg lint' },
+    });
+    assert.strictEqual(code, 2);
+  });
+
+  it('should BLOCK "pnpm -r lint" (short flag before script)', async () => {
+    const { code } = await runHook({
+      tool_input: { command: 'pnpm -r lint' },
+    });
+    assert.strictEqual(code, 2);
+  });
+
+  it('should BLOCK "CI=1 pnpm test" (env var prefix)', async () => {
+    const { code } = await runHook({
+      tool_input: { command: 'CI=1 pnpm test' },
+    });
+    assert.strictEqual(code, 2);
+  });
+
+  it('should BLOCK "env FOO=1 pnpm lint" (env command prefix)', async () => {
+    const { code } = await runHook({
+      tool_input: { command: 'env FOO=1 pnpm lint' },
+    });
+    assert.strictEqual(code, 2);
+  });
+
+  it('should BLOCK "CI=1 NODE_ENV=test pnpm --filter=app typecheck" (multiple env + flag)', async () => {
+    const { code } = await runHook({
+      tool_input: { command: 'CI=1 NODE_ENV=test pnpm --filter=app typecheck' },
+    });
+    assert.strictEqual(code, 2);
+  });
+
+  it('should BLOCK "pnpm --workspace-root dev:test" (long flag before dev: script)', async () => {
+    const { code } = await runHook({
+      tool_input: { command: 'pnpm --workspace-root dev:test' },
+    });
+    assert.strictEqual(code, 2);
+  });
+
   it('should include correct script path in stderr message', async () => {
     const { stderr } = await runHook({
       tool_input: { command: 'pnpm lint' },
@@ -185,6 +227,22 @@ describe('enforce-dev-commands — ALLOW non-intercepted commands', () => {
   it('should ALLOW "pnpm run dev:check"', async () => {
     const { code, stderr } = await runHook({
       tool_input: { command: 'pnpm run dev:check' },
+    });
+    assert.strictEqual(code, 0);
+    assert.strictEqual(stderr, '');
+  });
+
+  it('should ALLOW "CI=1 pnpm dev:check" (env prefix with allowed command)', async () => {
+    const { code, stderr } = await runHook({
+      tool_input: { command: 'CI=1 pnpm dev:check' },
+    });
+    assert.strictEqual(code, 0);
+    assert.strictEqual(stderr, '');
+  });
+
+  it('should ALLOW "pnpm --filter pkg dev:check" (flags with allowed command)', async () => {
+    const { code, stderr } = await runHook({
+      tool_input: { command: 'pnpm --filter pkg dev:check' },
     });
     assert.strictEqual(code, 0);
     assert.strictEqual(stderr, '');

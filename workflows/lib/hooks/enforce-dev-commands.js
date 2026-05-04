@@ -32,19 +32,29 @@ const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(__dirname, '.
  * Each regex is tested against individual segments after splitting on separators
  * (&&, ;, |, \n), so they only need to match from the start of a segment.
  */
+/**
+ * Prefix pattern that tolerates:
+ * - Environment variable assignments: CI=1 pnpm ..., env FOO=1 pnpm ...
+ * - pnpm flags before the script name: --filter pkg, -r, --workspace-root, etc.
+ *
+ * Structure: ^<optional env prefixes><pnpm><optional flags><script>
+ */
+const ENV_PREFIX = '(?:\\w+=\\S+\\s+)*(?:env\\s+(?:\\w+=\\S+\\s+)*)?';
+const PNPM_FLAGS = '(?:(?:-[-\\w]+(?:[=\\s]\\S+)?)\\s+)*';
+
 const BLOCKED_PATTERNS = [
-  // pnpm lint / pnpm run lint
-  /^\s*pnpm\s+(?:run\s+)?lint(?:\s|$)/,
+  // pnpm lint / pnpm run lint (with optional env prefixes and pnpm flags)
+  new RegExp(`^\\s*${ENV_PREFIX}pnpm\\s+${PNPM_FLAGS}(?:run\\s+)?lint(?:\\s|$)`),
   // pnpm test / pnpm run test
-  /^\s*pnpm\s+(?:run\s+)?test(?:\s|$)/,
+  new RegExp(`^\\s*${ENV_PREFIX}pnpm\\s+${PNPM_FLAGS}(?:run\\s+)?test(?:\\s|$)`),
   // pnpm typecheck / pnpm run typecheck
-  /^\s*pnpm\s+(?:run\s+)?typecheck(?:\s|$)/,
+  new RegExp(`^\\s*${ENV_PREFIX}pnpm\\s+${PNPM_FLAGS}(?:run\\s+)?typecheck(?:\\s|$)`),
   // pnpm dev:lint
-  /^\s*pnpm\s+(?:run\s+)?dev:lint(?:\s|$)/,
+  new RegExp(`^\\s*${ENV_PREFIX}pnpm\\s+${PNPM_FLAGS}(?:run\\s+)?dev:lint(?:\\s|$)`),
   // pnpm dev:typecheck
-  /^\s*pnpm\s+(?:run\s+)?dev:typecheck(?:\s|$)/,
+  new RegExp(`^\\s*${ENV_PREFIX}pnpm\\s+${PNPM_FLAGS}(?:run\\s+)?dev:typecheck(?:\\s|$)`),
   // pnpm dev:test
-  /^\s*pnpm\s+(?:run\s+)?dev:test(?:\s|$)/,
+  new RegExp(`^\\s*${ENV_PREFIX}pnpm\\s+${PNPM_FLAGS}(?:run\\s+)?dev:test(?:\\s|$)`),
 ];
 
 /**
@@ -53,8 +63,8 @@ const BLOCKED_PATTERNS = [
  * additions cannot accidentally block legitimate commands.
  */
 const ALLOWED_PATTERNS = [
-  // pnpm dev:check is the correct command
-  /^\s*pnpm\s+(?:run\s+)?dev:check(?:\s|$)/,
+  // pnpm dev:check is the correct command (with optional env prefixes and pnpm flags)
+  new RegExp(`^\\s*${ENV_PREFIX}pnpm\\s+${PNPM_FLAGS}(?:run\\s+)?dev:check(?:\\s|$)`),
 ];
 
 function isBlocked(command) {
