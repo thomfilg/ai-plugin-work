@@ -9,6 +9,7 @@ const {
   decideNextAction,
   getAdaptiveInterval,
   getCodeContext,
+  partitionByRequired,
 } = require('../follow-up-pr.js');
 
 describe('classifyCommentPriority', () => {
@@ -629,6 +630,58 @@ describe('getAdaptiveInterval', () => {
   it('returns 30s when no checks exist (total=0, attempt>1)', () => {
     const ci = makeCi([], []);
     assert.equal(getAdaptiveInterval(2, ci), 30);
+  });
+});
+
+// ── partitionByRequired ──────────────────────────────────────────────────────
+describe('partitionByRequired', () => {
+  const makeCheck = (name) => ({ name, bucket: 'fail', category: 'unknown' });
+
+  it('treats all failed as required when requiredChecks is null', () => {
+    const failed = [makeCheck('lint'), makeCheck('test')];
+    const result = partitionByRequired(failed, null);
+    assert.equal(result.hasRequiredInfo, false);
+    assert.deepStrictEqual(result.requiredFailed, failed);
+    assert.deepStrictEqual(result.optionalFailed, []);
+  });
+
+  it('treats all failed as required when requiredChecks is empty array', () => {
+    const failed = [makeCheck('lint')];
+    const result = partitionByRequired(failed, []);
+    assert.equal(result.hasRequiredInfo, false);
+    assert.deepStrictEqual(result.requiredFailed, failed);
+    assert.deepStrictEqual(result.optionalFailed, []);
+  });
+
+  it('returns only optional failures when all required checks pass', () => {
+    const failed = [makeCheck('optional-lint'), makeCheck('optional-docs')];
+    const requiredChecks = ['build', 'test'];
+    const result = partitionByRequired(failed, requiredChecks);
+    assert.equal(result.hasRequiredInfo, true);
+    assert.deepStrictEqual(result.requiredFailed, []);
+    assert.deepStrictEqual(result.optionalFailed, failed);
+  });
+
+  it('returns required failure when a required check fails', () => {
+    const failedBuild = makeCheck('build');
+    const failed = [failedBuild];
+    const requiredChecks = ['build', 'test'];
+    const result = partitionByRequired(failed, requiredChecks);
+    assert.equal(result.hasRequiredInfo, true);
+    assert.deepStrictEqual(result.requiredFailed, [failedBuild]);
+    assert.deepStrictEqual(result.optionalFailed, []);
+  });
+
+  it('partitions mixed required and optional failures correctly', () => {
+    const failedBuild = makeCheck('build');
+    const failedLint = makeCheck('lint');
+    const failedDocs = makeCheck('docs');
+    const failed = [failedBuild, failedLint, failedDocs];
+    const requiredChecks = ['build', 'docs'];
+    const result = partitionByRequired(failed, requiredChecks);
+    assert.equal(result.hasRequiredInfo, true);
+    assert.deepStrictEqual(result.requiredFailed, [failedBuild, failedDocs]);
+    assert.deepStrictEqual(result.optionalFailed, [failedLint]);
   });
 });
 

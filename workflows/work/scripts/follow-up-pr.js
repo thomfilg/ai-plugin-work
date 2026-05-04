@@ -162,6 +162,24 @@ function categorizeCheck(checkName) {
   return 'unknown';
 }
 
+// ── Required/Optional CI Check Partitioning ─────────────────────────────────
+
+/**
+ * Partition failed checks into required and optional.
+ * @param {Array} allFailed - All failed check objects
+ * @param {Array|null} requiredChecks - Required check names (null = unavailable)
+ * @returns {{ requiredFailed: Array, optionalFailed: Array, hasRequiredInfo: boolean }}
+ */
+function partitionByRequired(allFailed, requiredChecks) {
+  if (!requiredChecks || requiredChecks.length === 0) {
+    return { requiredFailed: allFailed, optionalFailed: [], hasRequiredInfo: false };
+  }
+  const requiredNames = new Set(requiredChecks.map((n) => (typeof n === 'string' ? n : n.name)));
+  const requiredFailed = allFailed.filter((ck) => requiredNames.has(ck.name));
+  const optionalFailed = allFailed.filter((ck) => !requiredNames.has(ck.name));
+  return { requiredFailed, optionalFailed, hasRequiredInfo: true };
+}
+
 // ── CI Status ───────────────────────────────────────────────────────────────
 
 function checkCI(prNumber) {
@@ -267,14 +285,52 @@ function checkCI(prNumber) {
   const neutral = checks.filter((ck) => ck.bucket === 'neutral');
   const cancelled = checks.filter((ck) => ck.bucket === 'cancel');
 
-  let status;
-  if (failed.length > 0) status = 'failing';
-  else if (running.length > 0) status = 'pending';
-  else if (checks.length === 0) status = 'no-checks';
-  else if (cancelled.length > 0) status = 'cancelled';
-  else status = 'passing';
+  // Fetch required checks (gh pr checks --required)
+  let requiredCheckNames = null;
+  try {
+    const requiredRaw = ghExec(`pr checks ${prArg} --required --json name`, { allowNonZero: true });
+    if (Array.isArray(requiredRaw) && requiredRaw.length > 0) {
+      requiredCheckNames = requiredRaw.map((c) => c.name);
+    }
+  } catch {
+    // --required flag unavailable or failed — fall back to all-as-required
+  }
 
-  return { status, checks, failed, running, passed, neutral, cancelled, total: checks.length };
+  const { requiredFailed, optionalFailed, hasRequiredInfo } = partitionByRequired(
+    failed,
+    requiredCheckNames
+  );
+
+  let status;
+  if (hasRequiredInfo) {
+    // When we know which checks are required, only required failures matter
+    if (requiredFailed.length > 0) status = 'failing';
+    else if (running.length > 0) status = 'pending';
+    else if (checks.length === 0) status = 'no-checks';
+    else if (cancelled.length > 0) status = 'cancelled';
+    else status = 'passing';
+  } else {
+    // Fallback: all checks treated as required (current behavior)
+    if (failed.length > 0) status = 'failing';
+    else if (running.length > 0) status = 'pending';
+    else if (checks.length === 0) status = 'no-checks';
+    else if (cancelled.length > 0) status = 'cancelled';
+    else status = 'passing';
+  }
+
+  return {
+    status,
+    checks,
+    failed,
+    running,
+    passed,
+    neutral,
+    cancelled,
+    total: checks.length,
+    requiredFailed,
+    optionalFailed,
+    hasRequiredInfo,
+  };
 }
 
 // ── Reviews ─────────────────────────────────────────────────────────────────
@@ -1681,6 +1737,7 @@ module.exports = {
   initState,
   getCodeContext,
   buildAccountabilityEntries,
+  partitionByRequired,
   // Gate-check exports: used by workflow-definition.js verify()
   isPRGateReady,
   ghExec,
