@@ -189,12 +189,23 @@ function checkSegment(segment) {
       return; // safe: hasUnsafeMetachars() pre-check above rejects >, <, `, $(), & outside quotes
     }
 
-    // git tag — only listing (no -d, -a, -m, no creation)
+    // git tag — only listing (no creation, deletion, annotation, signing)
     if (sub === 'tag') {
-      if (!/^git\s+tag\s*(-l|--list)?(\s|$)/.test(s)) {
-        block(`'git tag' only allowed for listing. Blocked: ${s.slice(0, 100)}`);
+      // Allow: bare "git tag", "git tag -l [pattern]", "git tag --list [pattern]"
+      // Block: any positional tag name (creation), or mutation flags (-a, -d, -s, --delete, -m, etc.)
+      const tagArgs = s.replace(/^git\s+tag\s*/, '').trim();
+      // Block mutation flags in unquoted portions of args (even after -l)
+      // Strip quoted strings before checking so patterns like "v1.0-d" don't false-positive
+      const unquotedTagArgs = tagArgs.replace(/"[^"]*"|'[^']*'/g, '""');
+      if (/(-a|-d|-s|-f|-m|--delete|--annotate|--sign|--force|--message)\b/.test(unquotedTagArgs)) {
+        block(`'git tag' mutation flags are not allowed. Blocked: ${s.slice(0, 100)}`);
+        return;
       }
-      return; // allowed
+      if (tagArgs === '' || /^(-l|--list)(\s|$)/.test(tagArgs)) {
+        return; // allowed: bare listing or explicit -l/--list
+      }
+      block(`'git tag' only allowed for listing. Blocked: ${s.slice(0, 100)}`);
+      return;
     }
 
     // git branch — listing only; block mutation flags (-d/-D/-m/-M/-c/-C/--set-upstream/--delete)
