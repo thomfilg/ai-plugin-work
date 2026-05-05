@@ -464,3 +464,100 @@ describe('commit-writer-block-write — branch mutation exit 2', () => {
     assert.strictEqual(code, 2);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Tag mutation blocking
+// ---------------------------------------------------------------------------
+
+describe('commit-writer-block-write — tag mutation exit 2', () => {
+  it('blocks git tag v1.0.0 (tag creation)', async () => {
+    const { code, stderr } = await runHook({
+      tool_name: 'Bash',
+      tool_input: { command: 'git tag v1.0.0' },
+    });
+    assert.strictEqual(code, 2);
+    assert.match(stderr, /COMMIT-WRITER GUARD/);
+  });
+
+  it('blocks git tag -d v1.0.0 (tag deletion)', async () => {
+    const { code, stderr } = await runHook({
+      tool_name: 'Bash',
+      tool_input: { command: 'git tag -d v1.0.0' },
+    });
+    assert.strictEqual(code, 2);
+    assert.match(stderr, /COMMIT-WRITER GUARD/);
+  });
+
+  it('blocks git tag -a v1.0.0 -m "release" (annotated tag)', async () => {
+    const { code, stderr } = await runHook({
+      tool_name: 'Bash',
+      tool_input: { command: 'git tag -a v1.0.0 -m "release"' },
+    });
+    assert.strictEqual(code, 2);
+    assert.match(stderr, /COMMIT-WRITER GUARD/);
+  });
+
+  it('blocks git tag --delete v1.0.0', async () => {
+    const { code, stderr } = await runHook({
+      tool_name: 'Bash',
+      tool_input: { command: 'git tag --delete v1.0.0' },
+    });
+    assert.strictEqual(code, 2);
+    assert.match(stderr, /COMMIT-WRITER GUARD/);
+  });
+
+  it('blocks git tag -s v1.0.0 (signed tag)', async () => {
+    const { code, stderr } = await runHook({
+      tool_name: 'Bash',
+      tool_input: { command: 'git tag -s v1.0.0' },
+    });
+    assert.strictEqual(code, 2);
+    assert.match(stderr, /COMMIT-WRITER GUARD/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tag listing allowed
+// ---------------------------------------------------------------------------
+
+describe('commit-writer-block-write — tag listing exit 0', () => {
+  it('allows git tag (bare, lists tags)', async () => {
+    const { code } = await runHook({
+      tool_name: 'Bash',
+      tool_input: { command: 'git tag' },
+    });
+    assert.strictEqual(code, 0);
+  });
+
+  it('allows git tag -l', async () => {
+    const { code } = await runHook({
+      tool_name: 'Bash',
+      tool_input: { command: 'git tag -l' },
+    });
+    assert.strictEqual(code, 0);
+  });
+
+  it('allows git tag --list', async () => {
+    const { code } = await runHook({
+      tool_name: 'Bash',
+      tool_input: { command: 'git tag --list' },
+    });
+    assert.strictEqual(code, 0);
+  });
+
+  it('allows git tag -l "v1.*" (list with pattern)', async () => {
+    const { code } = await runHook({
+      tool_name: 'Bash',
+      tool_input: { command: 'git tag -l "v1.*"' },
+    });
+    assert.strictEqual(code, 0);
+  });
+
+  it('allows git tag --list "v1.*" (list with pattern)', async () => {
+    const { code } = await runHook({
+      tool_name: 'Bash',
+      tool_input: { command: 'git tag --list "v1.*"' },
+    });
+    assert.strictEqual(code, 0);
+  });
+});

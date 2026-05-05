@@ -12,9 +12,11 @@
  * Run: node --test workflows/work/agents/commit-writer/__tests__/commit-writer-preflight.test.js
  */
 
-const { describe, it } = require('node:test');
+const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
-const { spawn } = require('child_process');
+const { spawn, execSync } = require('child_process');
+const { mkdtempSync, writeFileSync, rmSync } = require('fs');
+const os = require('os');
 const path = require('path');
 
 const HOOK_PATH = path.join(__dirname, '..', 'commit-writer-preflight.js');
@@ -128,5 +130,85 @@ describe('commit-writer-preflight — malformed input exit 2', () => {
     assert.strictEqual(code, 2);
     assert.match(stderr, /COMMIT-WRITER PREFLIGHT/);
     assert.match(stderr, /Failed to parse/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Staged changes check (requires temp git repo)
+// ---------------------------------------------------------------------------
+
+describe('commit-writer-preflight — staged changes check', () => {
+  let tmpDir;
+
+  before(() => {
+    tmpDir = mkdtempSync(path.join(os.tmpdir(), 'cw-preflight-'));
+    execSync('git init', { cwd: tmpDir, stdio: 'pipe' });
+    execSync('git config user.email "test@test.com"', { cwd: tmpDir, stdio: 'pipe' });
+    execSync('git config user.name "Test"', { cwd: tmpDir, stdio: 'pipe' });
+    // Create an initial commit so HEAD exists
+    writeFileSync(path.join(tmpDir, 'init.txt'), 'init');
+    execSync('git add init.txt', { cwd: tmpDir, stdio: 'pipe' });
+    execSync('git commit -m "initial"', { cwd: tmpDir, stdio: 'pipe' });
+  });
+
+  after(() => {
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function runHookWithCwd(input, cwd) {
+    return new Promise((resolve, reject) => {
+      const proc = spawn('node', [HOOK_PATH], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: { ...process.env },
+        cwd,
+      });
+      let stdout = '';
+      let stderr = '';
+      proc.stdout.on('data', (d) => {
+        stdout += d.toString();
+      });
+      proc.stderr.on('data', (d) => {
+        stderr += d.toString();
+      });
+      proc.on('close', (code) => {
+        resolve({ code, stdout, stderr });
+      });
+      proc.on('error', reject);
+      proc.stdin.write(JSON.stringify(input));
+      proc.stdin.end();
+    });
+  }
+
+  it('exits 2 with "No staged changes" when nothing is staged', async () => {
+    const { code, stderr } = await runHookWithCwd(
+      {
+        tool_name: 'Task',
+        tool_input: { subagent_type: 'commit-writer' },
+        cwd: tmpDir,
+      },
+      tmpDir
+    );
+    assert.strictEqual(code, 2);
+    assert.match(stderr, /No staged changes/);
+  });
+
+  it('does not exit 2 with "No staged changes" when files are staged', async () => {
+    // Create and stage a new file
+    writeFileSync(path.join(tmpDir, 'staged.txt'), 'content');
+    execSync('git add staged.txt', { cwd: tmpDir, stdio: 'pipe' });
+
+    const { code, stderr } = await runHookWithCwd(
+      {
+        tool_name: 'Task',
+        tool_input: { subagent_type: 'commit-writer' },
+        cwd: tmpDir,
+      },
+      tmpDir
+    );
+    // Should NOT be blocked for "No staged changes" — may still fail on quality checks
+    // but the "No staged changes" gate should have been passed
+    if (code === 2) {
+      assert.doesNotMatch(stderr, /No staged changes/);
+    }
   });
 });

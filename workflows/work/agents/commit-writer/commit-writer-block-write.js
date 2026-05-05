@@ -189,12 +189,15 @@ function checkSegment(segment) {
       return; // safe: hasUnsafeMetachars() pre-check above rejects >, <, `, $(), & outside quotes
     }
 
-    // git tag — only listing (no -d, -a, -m, no creation)
+    // git tag — only listing (no creation, deletion, annotation, signing)
     if (sub === 'tag') {
-      if (!/^git\s+tag\s*(-l|--list)?(\s|$)/.test(s)) {
-        block(`'git tag' only allowed for listing. Blocked: ${s.slice(0, 100)}`);
+      // Allow: bare "git tag", "git tag -l [pattern]", "git tag --list [pattern]"
+      // Block: any positional tag name (creation), or mutation flags (-a, -d, -s, --delete, -m, etc.)
+      const tagArgs = s.replace(/^git\s+tag\s*/, '').trim();
+      if (tagArgs === '' || /^(-l|--list)(\s|$)/.test(tagArgs)) {
+        return; // allowed: bare listing or explicit -l/--list
       }
-      return; // allowed
+      block(`'git tag' only allowed for listing. Blocked: ${s.slice(0, 100)}`);
     }
 
     // git branch — listing only; block mutation flags (-d/-D/-m/-M/-c/-C/--set-upstream/--delete)

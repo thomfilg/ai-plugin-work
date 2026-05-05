@@ -1,7 +1,5 @@
 'use strict';
 
-const path = require('node:path');
-
 /**
  * Well-known directory prefixes mapped to scope names.
  * Order matters: more specific prefixes must come first.
