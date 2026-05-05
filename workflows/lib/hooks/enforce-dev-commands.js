@@ -63,9 +63,9 @@ function isBlocked(command) {
   // from a different part of the command (not the dev:check itself).
   // dev:test/dev:lint/dev:typecheck are blocked; dev:check is allowed.
   if (ALLOWED_PATTERN.test(command)) {
-    // Remove the dev:check portion and re-test
+    // Remove only the dev:check segment (don't cross command separators)
     const withoutAllowed = command.replace(
-      /\bpnpm\s+(?:.*?\s+)?(?:run\s+(?:.*?\s+)?)?dev:check(?:\s|$)/,
+      /(?:^|[^\\w])pnpm\s+(?:[^&;|\n]*?\s)?(?:run\s+(?:[^&;|\n]*?\s)?)?dev:check(?=[\s"')\]},;|&]|$)/,
       ' '
     );
     return BLOCKED_PATTERNS.some((p) => p.test(withoutAllowed));
