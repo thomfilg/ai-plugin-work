@@ -32,6 +32,10 @@
           },
           {
             "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/enforce-dev-commands.js"
+          },
+          {
+            "type": "command",
             "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/enforce-step-workflow.js"
           },
           {
