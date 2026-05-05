@@ -84,8 +84,8 @@ function detectScope(filePaths) {
       continue;
     }
 
-    // Root-level file or unmapped directory — no clear scope
-    return '';
+    // Root-level file or unmapped directory — skip (neutral, doesn't affect scope)
+    continue;
   }
 
   // Unanimous scope wins; mixed scopes → ''
