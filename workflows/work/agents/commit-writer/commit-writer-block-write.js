@@ -198,6 +198,7 @@ function checkSegment(segment) {
         return; // allowed: bare listing or explicit -l/--list
       }
       block(`'git tag' only allowed for listing. Blocked: ${s.slice(0, 100)}`);
+      return;
     }
 
     // git branch — listing only; block mutation flags (-d/-D/-m/-M/-c/-C/--set-upstream/--delete)
