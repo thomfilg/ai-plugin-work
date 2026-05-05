@@ -28,67 +28,50 @@ process.on('unhandledRejection', (err) => {
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(__dirname, '..', '..', '..');
 
 /**
- * Patterns that match intercepted pnpm commands.
- * Each regex is tested against individual segments after splitting on separators
- * (&&, ;, |, \n), so they only need to match from the start of a segment.
- */
-/**
- * Prefix pattern that tolerates:
- * - Environment variable assignments: CI=1 pnpm ..., env FOO=1 pnpm ...
- * - pnpm flags before the script name: --filter pkg, -r, --workspace-root, etc.
+ * Detection strategy: search for pnpm + blocked script name anywhere in the
+ * command text. This catches all wrapper forms (env, command, time, bash -c,
+ * subshells, command substitution, etc.) without needing to enumerate them.
  *
- * Structure: ^<optional env prefixes><pnpm><optional flags><script>
+ * We use non-anchored patterns with \b word boundaries to find pnpm invocations
+ * regardless of what precedes them. The (?:run\s+)? handles `pnpm run <script>`.
+ * Flags between pnpm/run and the script are tolerated via a permissive middle.
  */
-const ENV_PREFIX = '(?:\\w+=\\S+\\s+)*(?:env\\s+(?:\\w+=\\S+\\s+)*)?';
-const PNPM_FLAGS = '(?:(?:-[-\\w]+(?:[=\\s]\\S+)?)\\s+)*';
+const BLOCKED_SCRIPTS = ['lint', 'test', 'typecheck', 'dev:lint', 'dev:typecheck', 'dev:test'];
 
-const BLOCKED_PATTERNS = [
-  // pnpm lint / pnpm run lint (with optional env prefixes and pnpm flags before and after run)
-  new RegExp(`^\\s*${ENV_PREFIX}pnpm\\s+${PNPM_FLAGS}(?:run\\s+${PNPM_FLAGS})?lint(?:\\s|$)`),
-  // pnpm test / pnpm run test
-  new RegExp(`^\\s*${ENV_PREFIX}pnpm\\s+${PNPM_FLAGS}(?:run\\s+${PNPM_FLAGS})?test(?:\\s|$)`),
-  // pnpm typecheck / pnpm run typecheck
-  new RegExp(`^\\s*${ENV_PREFIX}pnpm\\s+${PNPM_FLAGS}(?:run\\s+${PNPM_FLAGS})?typecheck(?:\\s|$)`),
-  // pnpm dev:lint
-  new RegExp(`^\\s*${ENV_PREFIX}pnpm\\s+${PNPM_FLAGS}(?:run\\s+${PNPM_FLAGS})?dev:lint(?:\\s|$)`),
-  // pnpm dev:typecheck
-  new RegExp(
-    `^\\s*${ENV_PREFIX}pnpm\\s+${PNPM_FLAGS}(?:run\\s+${PNPM_FLAGS})?dev:typecheck(?:\\s|$)`
-  ),
-  // pnpm dev:test
-  new RegExp(`^\\s*${ENV_PREFIX}pnpm\\s+${PNPM_FLAGS}(?:run\\s+${PNPM_FLAGS})?dev:test(?:\\s|$)`),
-];
+const BLOCKED_PATTERNS = BLOCKED_SCRIPTS.map(
+  (script) =>
+    new RegExp(
+      `(?:^|[^\\w])pnpm\\s+(?:[^&;|\\n]*?\\s)?(?:run\\s+(?:[^&;|\\n]*?\\s)?)?${script.replace(':', '\\:')}(?=[\\s"')\\]},;|&]|$)`
+    )
+);
 
 /**
- * Defense-in-depth: commands explicitly allowed even if they partially match
- * a blocked pattern. This safety override ensures future BLOCKED_PATTERNS
- * additions cannot accidentally block legitimate commands.
+ * Defense-in-depth: pnpm dev:check is the correct command and must never
+ * be blocked, even if a future BLOCKED_PATTERNS entry accidentally matches it.
  */
-const ALLOWED_PATTERNS = [
-  // pnpm dev:check is the correct command (with optional env prefixes and pnpm flags)
-  new RegExp(`^\\s*${ENV_PREFIX}pnpm\\s+${PNPM_FLAGS}(?:run\\s+${PNPM_FLAGS})?dev:check(?:\\s|$)`),
-];
+const ALLOWED_PATTERN =
+  /(?:^|[^\w])pnpm\s+(?:.*?\s)?(?:run\s+(?:.*?\s)?)?dev:check(?=[\s"')\]},;|&]|$)/;
 
 function isBlocked(command) {
-  // Split on chain/background operators and check each segment independently.
-  // A command is blocked if ANY segment matches a blocked pattern
-  // and that same segment is not covered by the allow-list.
-  const segments = command.split(/\s*(?:&&|&|;|\||\n)\s*/);
-  for (const seg of segments) {
-    // Strip leading shell syntax: subshell parens, quotes, shell wrappers
-    const segment = seg
-      .replace(/^\s*\(+\s*/, '') // leading ( or ((
-      .replace(/^\s*(?:bash|sh|command|time|exec|nice|nohup)\s+(?:-\w+\s+)*["']?/, '') // shell builtins/wrappers
-      .replace(/^\s*(?:\/usr\/bin\/)?env\s+(?:\w+=\S+\s+)*/, '') // env with vars
-      .replace(/^["']+\s*/, '') // leading quotes
-      .replace(/\$\(([^)]+)\)/, '$1') // command substitution $(...)
-      .replace(/["')\s]+$/, ''); // trailing quotes/parens/whitespace
-    const segBlocked = BLOCKED_PATTERNS.some((p) => p.test(segment));
-    if (!segBlocked) continue;
-    const segAllowed = ALLOWED_PATTERNS.some((p) => p.test(segment));
-    if (!segAllowed) return true;
+  // Check the full command text — no splitting needed since patterns are non-anchored.
+  // But we still need to ensure that if dev:check is present alongside a blocked command
+  // in a chain, only the blocked part triggers.
+  const hasBlocked = BLOCKED_PATTERNS.some((p) => p.test(command));
+  if (!hasBlocked) return false;
+
+  // If the command also contains dev:check, check if the blocked match is
+  // from a different part of the command (not the dev:check itself).
+  // dev:test/dev:lint/dev:typecheck are blocked; dev:check is allowed.
+  if (ALLOWED_PATTERN.test(command)) {
+    // Remove the dev:check portion and re-test
+    const withoutAllowed = command.replace(
+      /\bpnpm\s+(?:.*?\s+)?(?:run\s+(?:.*?\s+)?)?dev:check(?:\s|$)/,
+      ' '
+    );
+    return BLOCKED_PATTERNS.some((p) => p.test(withoutAllowed));
   }
-  return false;
+
+  return true;
 }
 
 async function main() {
