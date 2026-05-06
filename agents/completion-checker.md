@@ -2,7 +2,7 @@
 name: completion-checker
 tools: Bash, Read, Grep, Glob
 description: Checks that all user requirements have been met before finalizing the conversation.
-model: sonnet
+model: opus
 color: cyan
 ---
 
