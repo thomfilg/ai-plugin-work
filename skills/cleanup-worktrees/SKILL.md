@@ -4,6 +4,16 @@ description: Safely clean up git worktrees by verifying code has been merged to 
 user-invocable: true
 allowed-tools: Bash, Read, Grep, Glob, AskUserQuestion, mcp__atlassian__jira_search, mcp__atlassian__jira_get_issue, mcp__atlassian__jira_get_transitions, mcp__atlassian__jira_transition_issue, mcp__linear__get_issue
 ---
+
+**CRITICAL**: Every invocation of this command MUST discard all prior analysis results, cached data, and previous conclusions — and start from scratch. Re-analyze every worktree fresh, regardless of any earlier runs.
+
+Before any analysis, you MUST:
+1. Run `git fetch --prune origin` to get the latest remote state and remove stale tracking branches
+2. Re-check PR status for every worktree branch — never rely on cached PR data
+3. Re-check every worktree for uncommitted changes and unpushed commits — previous results are invalid
+
+Begin output with: "Fresh analysis started — all prior results discarded."
+
 # Cleanup Worktrees Command
 
 Safely clean up git worktrees by thoroughly verifying code has been merged to main.
@@ -18,7 +28,7 @@ Safely clean up git worktrees by thoroughly verifying code has been merged to ma
 
 ```bash
 cd ~/$REPO_NAME
-git fetch origin main
+git fetch --prune origin
 git worktree list
 ```
 
