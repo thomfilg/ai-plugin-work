@@ -1216,9 +1216,6 @@ function decideNextAction(ciStatus, prInfo, reviews, noReviews, ci) {
   const effectivePendingBots = ci
     ? getEffectivePendingBots(reviews.pendingBots, ci)
     : reviews.pendingBots;
-  // Log finalized bots (R6 logging requirement) — outside the pure helper
-  if (ci) {
-  }
   const reviewsClear = noReviews || (!reviews.hasBlocking && effectivePendingBots.length === 0);
 
   // Fail-fast exits (ordered by priority)
