@@ -45,11 +45,14 @@ const FIX_ATTEMPT_PATTERNS = [
   /\bpatch\b/,
 ];
 
+// Allowed git subcommands — read-only + commit + push (no merge, rebase, reset, etc.)
+const ALLOWED_GIT_SUBCOMMANDS = /^\s*git\s+(diff|log|show|status|branch|rev-parse|ls-files|fetch|remote|describe|config|shortlog|name-rev|for-each-ref|cat-file|tag|commit|push)\b/;
+
 // Explicitly allowed commands (quality gate + git/gh)
 const ALLOWED_COMMANDS = [
   /^\s*pnpm\s+dev:check\b/, // Quality gate — read-only verification
   /^\s*(\w+=\S+\s+)*([\w./-]*\/)?dev-check\.sh(\s+[-\w=./]+)*\s*$/, // Bundled dev-check scripts — plugin fallback (anchored, no shell chaining)
-  /^\s*git\b/,
+  ALLOWED_GIT_SUBCOMMANDS,
   /^\s*gh\b/,
   /^\s*DEFAULT_BRANCH=/,
   /^\s*echo\s+"/, // echo for display only (no redirect)
@@ -61,8 +64,8 @@ function isAllowedCommand(command) {
       return true;
     }
   }
-  // git and gh commands are always allowed, even with pipes
-  if (/^\s*(git|gh)\b/.test(command)) {
+  // gh commands are always allowed, even with pipes
+  if (/^\s*gh\b/.test(command)) {
     return true;
   }
   return false;
