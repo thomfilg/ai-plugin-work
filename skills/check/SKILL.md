@@ -989,7 +989,7 @@ fi
 ║                                                                      ║
 ╚══════════════════════════════════════════════════════════════════════╝
 ```
-Exit with ACCESS_FAILED status (not APPROVED).
+Exit with NEEDS_WORK status (infrastructure failure prevents APPROVED).
 
 **If no infrastructure failures:** Continue with validation:
 

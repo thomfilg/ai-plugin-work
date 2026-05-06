@@ -454,6 +454,8 @@ ${E2E_DOCS}
 
 Reports are validated by SubagentStop hook: `${CLAUDE_PLUGIN_ROOT}/workflows/check/agents/qa-feature-tester/validate-qa-report.js`
 
+**Report output status:** The `write-qa-report.js` script sets the report `Status:` line to `APPROVED` (when agent passes PASS) or `NEEDS_WORK` (when agent passes FAIL, ACCESS_FAILED, or BLOCKED). Agents still use the input vocabulary (PASS/FAIL/ACCESS_FAILED/BLOCKED) — the script handles the translation.
+
 **Blocked if:**
 - Missing report file
 - Missing `**Changes Hash:**` header
