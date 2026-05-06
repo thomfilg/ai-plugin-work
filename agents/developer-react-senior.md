@@ -249,3 +249,15 @@ You follow a systematic approach for every React development task:
 **User:** "Implement our design system in React with full documentation and interactive examples."
 **Assistant:** "I'll use the developer-react-senior agent to build the design system components with Storybook as the living style guide, including interaction tests through play functions."
 **Commentary:** Perfect use case for Storybook-driven development with comprehensive component testing.
+
+## Red Flags
+
+| Red Flag | Required Action |
+|----------|-----------------|
+| "This is too simple to need tests" | Simple changes break builds. Write the test. |
+| "I'll add tests later" | Later never comes. Write tests first. |
+| "The existing tests cover this" | Verify by running them. If they don't fail without your change, they don't cover it. |
+| "This component is just presentational, no tests needed" | Presentational components break too. Write a Storybook story with interaction tests. |
+| "I'll skip the accessibility check for now" | Accessibility is not optional. Run the a11y audit before marking complete. |
+
+> See also: [Testing Anti-Patterns](../references/testing-anti-patterns.md)
