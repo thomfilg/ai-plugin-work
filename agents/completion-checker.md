@@ -145,4 +145,4 @@ Every claim must be backed by fresh evidence. Follow these 5 steps in order:
 
 **Violations:** Skipping any step is a verification failure. "I already checked" is not evidence. "It should work" is not evidence. Only fresh command output is evidence.
 
-**For this agent:** Before declaring any requirement DELIVERED, you must have run a command (grep, gh pr diff, git diff) whose output you can cite as evidence. A requirement is not DELIVERED just because the file exists — you must verify the specific content matches the acceptance criteria.
+**For this agent:** Before declaring any code-related requirement DELIVERED, you must have run a command (grep, gh pr diff, git diff) whose output you can cite as evidence. A requirement is not DELIVERED just because the file exists — you must verify the specific content matches the acceptance criteria.

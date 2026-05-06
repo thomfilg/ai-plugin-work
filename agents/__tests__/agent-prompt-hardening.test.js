@@ -214,8 +214,9 @@ describe('Testing anti-patterns reference file', () => {
       return;
     }
     const text = fs.readFileSync(ANTI_PATTERNS_PATH, 'utf-8');
+    // Split on ## headings; first element is the preamble (before any ##), skip it
     const sections = text.split(/^## /m).filter((s) => s.trim());
-    const antiPatternSections = sections.filter((s) => !s.startsWith('Testing Anti-Patterns'));
+    const antiPatternSections = sections.slice(1);
     for (const section of antiPatternSections) {
       const title = section.split('\n')[0].trim();
       assert.ok(
