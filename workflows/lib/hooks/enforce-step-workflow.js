@@ -546,13 +546,14 @@ function handlePreToolUse(hookData) {
   // Prevents agents from bypassing the state machine by directly editing state files
   const rule3 = stateFileProtector.check(toolName, toolInput);
   if (rule3.blocked) {
-    // Step-conditional bypass: work-state.js complete is allowed at the terminal step (GH-276)
-    if (toolName === 'Bash' && rule3.match === '.work-state.json') {
+    if (toolName === 'Bash') {
       const cmd = String(toolInput?.command || '').trim();
-      if (isTerminalCompleteBypass(cmd, ticketId)) {
+      // Step-conditional bypass: work-state.js complete is allowed at the terminal step (GH-276)
+      if (rule3.match === '.work-state.json' && isTerminalCompleteBypass(cmd, ticketId)) {
         rule3.blocked = false;
       }
       // Step-conditional bypass: session-guard.js finish/reveal/complete at terminal step (GH-338)
+      // Not gated on rule3.match — session-guard.js may trigger Rule 3 via different state files
       if (rule3.blocked && isTerminalSessionGuardBypass(cmd, ticketId)) {
         rule3.blocked = false;
       }
