@@ -701,6 +701,38 @@ describe('workflow-definition: verify[STEPS.check] QA report gating', () => {
   });
 });
 
+// ─── GH-321 Task 4: tasks.md contentGuard ─────────────────────────────────────
+
+describe('workflow-definition: tasks.md contentGuard', () => {
+  const { artifactRules } = createWorkflowDefinition(stubDeps);
+
+  function getTasksRule() {
+    return artifactRules.find((r) => r.basename === 'tasks.md');
+  }
+
+  it('has a contentGuard on the tasks.md artifact rule', () => {
+    const rule = getTasksRule();
+    assert.ok(rule, 'tasks.md rule should exist in artifactRules');
+    assert.equal(typeof rule.contentGuard, 'function', 'tasks.md should have a contentGuard');
+  });
+
+  it('tasks.md contentGuard blocks vague descriptions', () => {
+    const rule = getTasksRule();
+    const result = rule.contentGuard('## Task 1 — Test\n\n### Description\nTBD\n');
+    assert.equal(result.blocked, true);
+    assert.ok(result.message, 'blocked result should include a message');
+  });
+
+  it('tasks.md contentGuard allows valid descriptions', () => {
+    const rule = getTasksRule();
+    const result = rule.contentGuard(
+      '## Task 1 — Test\n\n### Description\nImplement the user authentication flow with JWT tokens\n'
+    );
+    assert.equal(result.blocked, false);
+  });
+});
+
+
 // ─── GH-326 Task 1.2: .check.md contentGuard ─────────────────────────────────
 describe('workflow-definition: .check.md contentGuard', () => {
   const { artifactRules } = createWorkflowDefinition(stubDeps);

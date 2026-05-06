@@ -134,6 +134,17 @@ Checkpoint tasks and config-only infrastructure tasks are exempt from the RED/GR
 - Tasks without requirement mapping
 - "Refactor and clean up" as a standalone task (cleanup belongs inside the task that creates the code)
 
+**Anti-patterns are enforced by `workflows/lib/hooks/policies/task-description-quality.js` — the canonical blocked-pattern list. The following patterns will cause `tasks.md` writes to be blocked:**
+- **TBD** — Replace the TBD placeholder with a concrete description of what this task delivers.
+- **TODO** — Replace the TODO placeholder with specific implementation details.
+- **implement later** — Remove the deferral phrase and describe what should be implemented now, or move to a separate task. (Blocked unless followed by 20+ chars of qualifying detail.)
+- **to be determined** — Replace with a concrete decision or escalate to the spec phase. (Always blocked, no qualification possible.)
+- **Handle edge cases** — Specify which edge cases to handle (e.g. null input, empty array, overflow). (Blocked unless followed by 20+ chars of qualifying detail.)
+- **Add appropriate error handling** — Specify which error types to handle and the handling strategy (retry, fallback, abort). (Blocked unless followed by 20+ chars of qualifying detail.)
+- **Add tests** — List specific test scenarios (e.g. "test that invalid input returns 400"). (Blocked unless followed by 20+ chars of qualifying detail. Lines with TDD phase prefixes like `**RED:**` are exempt.)
+- **Similar/Same as Task N** — Repeat the actual steps instead of cross-referencing another task.
+
+
 #### Step 4.2 — Coverage Validation (MANDATORY — do this AFTER creating all tasks)
 
 After generating all tasks, verify coverage:

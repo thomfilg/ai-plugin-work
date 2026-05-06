@@ -607,14 +607,32 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
       },
     },
     { basename: 'spec.md', step: STEPS.spec, agents: ['spec-writer'] },
-    { basename: 'tasks.md', step: STEPS.tasks, allowedSteps: [STEPS.task_review], agents: [] },
+    {
+      basename: 'tasks.md',
+      step: STEPS.tasks,
+      allowedSteps: [STEPS.task_review],
+      agents: [],
+      contentGuard: (content) => {
+        try {
+          const { validateTaskDescriptions } = require(
+            path.join(__dirname, '..', 'lib', 'hooks', 'policies', 'task-description-quality')
+          );
+          const result = validateTaskDescriptions(content);
+          return result.blocked ? { blocked: true, message: result.message } : { blocked: false };
+        } catch {
+          return { blocked: false }; // fail-open
+        }
+      },
+    },
     { basename: '.last-commit-sha', step: STEPS.commit },
     {
       basename: 'code-review.check.md',
       step: STEPS.check,
       agents: ['code-checker'],
       contentGuard: (content) => {
-        const { validateCheckReportStatus } = require(path.join(__dirname, '..', 'lib', 'validate-check-report-status'));
+        const { validateCheckReportStatus } = require(
+          path.join(__dirname, '..', 'lib', 'validate-check-report-status')
+        );
         const result = validateCheckReportStatus(content, 'codeReview');
         return result.valid ? { blocked: false } : { blocked: true, message: result.message };
       },
@@ -624,7 +642,9 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
       step: STEPS.check,
       agents: ['quality-checker'],
       contentGuard: (content) => {
-        const { validateCheckReportStatus } = require(path.join(__dirname, '..', 'lib', 'validate-check-report-status'));
+        const { validateCheckReportStatus } = require(
+          path.join(__dirname, '..', 'lib', 'validate-check-report-status')
+        );
         const result = validateCheckReportStatus(content, 'tests');
         return result.valid ? { blocked: false } : { blocked: true, message: result.message };
       },
@@ -634,7 +654,9 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
       step: STEPS.check,
       agents: ['completion-checker'],
       contentGuard: (content) => {
-        const { validateCheckReportStatus } = require(path.join(__dirname, '..', 'lib', 'validate-check-report-status'));
+        const { validateCheckReportStatus } = require(
+          path.join(__dirname, '..', 'lib', 'validate-check-report-status')
+        );
         const result = validateCheckReportStatus(content, 'completion');
         return result.valid ? { blocked: false } : { blocked: true, message: result.message };
       },
