@@ -163,17 +163,20 @@ async function main() {
       // We must scan ALL tokens — a command may reference both subfolder and
       // root-level tasks.md (e.g. `cat subfolder/tasks.md >> root/tasks.md`).
       // Only exit 0 if subfolder references exist AND no root-level reference exists.
+      // Bare tokens (no '/') are resolved against cwd to handle relative paths.
       if (toolName === 'Bash' && cmd.includes('tasks.md')) {
         let hasSubfolderRef = false;
         let hasRootLevelRef = false;
+        const cwd = process.cwd();
         const tokens = cmd.split(/\s+/);
         for (const token of tokens) {
           const cleaned = token.replace(/^[>]+/, '').replace(/['"]/g, '');
-          if (cleaned.includes('tasks.md') && cleaned.includes('/')) {
-            const depth = isRootLevelTasksMd(cleaned, ticketId, tasksBase);
-            if (depth === false) hasSubfolderRef = true;
-            if (depth === true) hasRootLevelRef = true;
-          }
+          if (!cleaned.includes('tasks.md')) continue;
+          // Resolve: absolute paths stay absolute, relative paths resolve against cwd
+          const resolved = cleaned.includes('/') ? cleaned : path.resolve(cwd, cleaned);
+          const depth = isRootLevelTasksMd(resolved, ticketId, tasksBase);
+          if (depth === false) hasSubfolderRef = true;
+          if (depth === true) hasRootLevelRef = true;
         }
         if (hasSubfolderRef && !hasRootLevelRef) {
           process.exit(0); // Only subfolder tasks.md refs — allow unconditionally
@@ -196,14 +199,21 @@ async function main() {
       const getConfig = require(path.join(__dirname, '..', '..', 'lib', 'get-config'));
       const tasksBase = getConfig.require('TASKS_BASE');
       if (cwd.startsWith(path.join(tasksBase, ticketId))) {
-        // GH-309: Extract the actual relative path referencing tasks.md from the command,
-        // then resolve it against cwd. This handles ../tasks.md, ./sub/tasks.md, etc.
-        const relRef =
-          cmd.match(/(?:>>?|>)\s*([^\s;|&]*tasks\.md)/)?.[1] ||
-          cmd.match(/\b([^\s;|&]*tasks\.md)\b/)?.[1] ||
-          'tasks.md';
-        const resolvedTarget = path.resolve(cwd, relRef);
-        if (isRootLevelTasksMd(resolvedTarget, ticketId, tasksBase) === false) {
+        // GH-309: Extract ALL relative paths referencing tasks.md from the command,
+        // resolve each against cwd. Only allow if ALL resolve to subfolder (not root).
+        // This handles ../tasks.md, ./sub/tasks.md, cp tasks.md ../tasks.md, etc.
+        const refPattern = /[^\s;|&]*tasks\.md/g;
+        const refs = cmd.match(refPattern) || ['tasks.md'];
+        let anyRoot = false;
+        let anySub = false;
+        for (const ref of refs) {
+          const cleaned = ref.replace(/^[>]+/, '').replace(/['"]/g, '');
+          const resolved = path.resolve(cwd, cleaned);
+          const depth = isRootLevelTasksMd(resolved, ticketId, tasksBase);
+          if (depth === true) anyRoot = true;
+          if (depth === false) anySub = true;
+        }
+        if (anySub && !anyRoot) {
           process.exit(0);
         }
         // We're inside the ticket directory — relative tasks.md is ticket-scoped
