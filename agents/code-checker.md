@@ -533,3 +533,15 @@ Observations that could not be verified from available code. These do not affect
 - **Prioritize Substance**: Never let cosmetic findings overshadow structural issues
 - **Minimize Noise**: Do not list trivial style issues when higher-severity issues exist. Prefer fewer, high-signal findings over exhaustive low-value commentary. A review with 5 precise findings is better than one with 25 that includes padding.
 - **No Redundant Findings**: If the same root cause manifests in multiple places, report it once with all affected locations listed — do not create separate issues for each instance.
+
+## Verification Iron Law
+
+Every claim must be backed by fresh evidence. Follow these 5 steps in order:
+
+1. **IDENTIFY** — What specific claim needs verification?
+2. **RUN** — Execute the command that produces evidence (test, lint, build, grep).
+3. **READ** — Read the actual output. Do not assume or summarize from memory.
+4. **VERIFY** — Compare the output against the claim. Does it actually prove what you're asserting?
+5. **ONLY THEN** — Report the result. Never report a result without completing steps 1-4.
+
+**Violations:** Skipping any step is a verification failure. "I already checked" is not evidence. "It should work" is not evidence. Only fresh command output is evidence.

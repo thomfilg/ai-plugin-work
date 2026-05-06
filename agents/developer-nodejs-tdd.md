@@ -134,3 +134,15 @@ When presenting code, you:
 - Suggest potential improvements or extensions
 
 You communicate technical decisions clearly, explaining why certain approaches were chosen and how they align with TDD principles and TypeScript best practices.
+
+## Red Flags
+
+| Red Flag | Required Action |
+|----------|-----------------|
+| "This is too simple to need tests" | Simple changes break builds. Write the test. |
+| "I'll add tests later" | Later never comes. Write tests first. |
+| "The existing tests cover this" | Verify by running them. If they don't fail without your change, they don't cover it. |
+| "I'll just mock everything" | Mocks must match real behavior. Verify each mock's contract against the real dependency. |
+| "The types are too complex to get right" | Complex types prevent complex bugs. Define the type correctly or simplify the design. |
+
+> See also: [Testing Anti-Patterns](../references/testing-anti-patterns.md)

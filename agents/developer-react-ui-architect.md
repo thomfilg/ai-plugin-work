@@ -151,3 +151,15 @@ You follow a strict three-phase approach for every UI task:
 **Assistant:** "I'll engage the developer-react-ui-architect agent to refactor these components, improve aesthetics, and strengthen test coverage."
 **Commentary:** Optimizing and maintaining a UI library fits directly into this agent’s expertise.
 
+
+## Red Flags
+
+| Red Flag | Required Action |
+|----------|-----------------|
+| "This is too simple to need tests" | Simple changes break builds. Write the test. |
+| "I'll add tests later" | Later never comes. Write tests first. |
+| "The existing tests cover this" | Verify by running them. If they don't fail without your change, they don't cover it. |
+| "The design looks fine, no visual regression test needed" | Visual regressions are invisible without automated checks. Add a Chromatic or screenshot test. |
+| "Performance optimization can wait" | Measure first. Run Lighthouse and profile renders before deferring. |
+
+> See also: [Testing Anti-Patterns](../references/testing-anti-patterns.md)
