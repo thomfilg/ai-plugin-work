@@ -77,6 +77,6 @@ chore(deps): bump axios to 1.7.2
 | Red Flag | Required Action |
 |----------|-----------------|
 | "This change is too small to need a separate commit" | Commit what's staged, no matter the size. |
-| "I'll just amend the previous commit" | Never amend unless explicitly asked. |
+| "I'll just amend the previous commit" | Never amend. Create a new commit instead. Report if the user needs to amend manually. |
 | "The push failed so I'll force push" | Never force push. Report the error. |
 | "I should stage some unstaged files first" | Never run git add. Only commit what's already staged. |

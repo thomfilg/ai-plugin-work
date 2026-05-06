@@ -160,12 +160,17 @@ describe('Verification Iron Law in quality agents', () => {
       const headingLevel = headingMatch[1].length;
       const startIdx = content.indexOf(headingMatch[0]);
 
-      // Extract from the heading to the next heading of same or higher level (or EOF)
+      // Extract the core Iron Law text (heading through "Violations:" paragraph)
+      // Agent-specific addenda after the core section are allowed to differ
       const afterStart = content.slice(startIdx);
-      const sameOrHigherRe = new RegExp(`\\n#{1,${headingLevel}}\\s`);
-      const nextHeading = afterStart.slice(1).search(sameOrHigherRe);
-      const section = nextHeading === -1 ? afterStart : afterStart.slice(0, nextHeading + 1);
-      sections.push(section.trim());
+      const violationsEnd = afterStart.search(/\*\*Violations:\*\*[^\n]*\n/);
+      if (violationsEnd === -1) {
+        sections.push(afterStart.trim());
+      } else {
+        const endOfViolations = afterStart.indexOf('\n', violationsEnd + 1);
+        const core = endOfViolations === -1 ? afterStart : afterStart.slice(0, endOfViolations);
+        sections.push(core.trim());
+      }
     }
 
     assert.ok(sections.length > 0, 'At least one quality agent must have Iron Law section');
