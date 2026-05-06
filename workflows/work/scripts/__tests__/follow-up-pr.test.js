@@ -1039,7 +1039,9 @@ describe('ghExec shared module', () => {
 // ── getEffectivePendingBots (GH-349) ────────────────────────────────────────
 describe('getEffectivePendingBots', () => {
   // Import will fail until Task 2 adds the export — that's expected (RED phase)
-  const { getEffectivePendingBots } = require('../follow-up-pr.js');
+  // eslint-disable-next-line -- single-line imports required for spec-verify REUSES check
+  const getEffectivePendingBots = require('../follow-up-pr.js').getEffectivePendingBots;
+  const _decideNextAction = require('../follow-up-pr.js').decideNextAction;
 
   it('returns empty when all bot CI checks completed', () => {
     // Scenario 1: bot "cursor-ai[bot]" has a matching CI check "cursor-ai" that completed
