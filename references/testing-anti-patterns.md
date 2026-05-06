@@ -41,3 +41,4 @@ When integration tests are deferred, skipped, or written as shallow wrappers aro
 ### Gate function
 
 For any feature that crosses a system boundary (database, HTTP, file system, message queue), verify that at least one integration test exercises the real boundary. If all tests for a boundary-crossing feature use mocks exclusively, flag the gap. The integration test does not need to cover every case, but it must prove that the real wiring works for at least the primary happy path and one failure path.
+
