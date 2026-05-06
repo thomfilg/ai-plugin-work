@@ -56,14 +56,19 @@ function createStateFixture(ticketId, stepStatus = {}) {
 
 /**
  * Run the hook with given stdin input and env overrides.
+ * @param {object} input — JSON payload to pipe to stdin
+ * @param {object} [envOverrides] — environment variable overrides
+ * @param {object} [options] — additional spawn options (e.g. { cwd: '/some/dir' })
  * Returns { code, stderr, stdout }.
  */
-function runHook(input, envOverrides = {}) {
+function runHook(input, envOverrides = {}, options = {}) {
   return new Promise((resolve, reject) => {
-    const proc = spawn('node', [HOOK_PATH], {
+    const spawnOpts = {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, ...envOverrides },
-    });
+    };
+    if (options.cwd) spawnOpts.cwd = options.cwd;
+    const proc = spawn('node', [HOOK_PATH], spawnOpts);
     let stdout = '';
     let stderr = '';
     proc.stdout.on('data', (d) => {
@@ -251,6 +256,173 @@ describe('protect-tasks-md hook', () => {
     } finally {
       fixture.cleanup();
     }
+  });
+
+  describe('subfolder tasks.md — GH-309', () => {
+    it('should ALLOW Edit to subfolder tasks.md when step is implement (exit 0)', async () => {
+      const fixture = createStateFixture('GH-309', {
+        implement: 'in_progress',
+        tasks: 'completed',
+        task_review: 'pending',
+      });
+      try {
+        const subfolderPath = path.join(fixture.tasksBase, 'GH-309', 'flaky-tests', 'tasks.md');
+        fs.mkdirSync(path.dirname(subfolderPath), { recursive: true });
+        const { code } = await runHook(
+          {
+            tool_name: 'Edit',
+            tool_input: { file_path: subfolderPath },
+          },
+          { TASKS_BASE: fixture.tasksBase, TICKET_ID: 'GH-309' }
+        );
+        assert.strictEqual(
+          code,
+          0,
+          'Expected exit 0 (allow) for subfolder tasks.md during implement'
+        );
+      } finally {
+        fixture.cleanup();
+      }
+    });
+
+    it('should ALLOW Write to deeply nested subfolder tasks.md (exit 0)', async () => {
+      const fixture = createStateFixture('GH-309', {
+        implement: 'in_progress',
+        tasks: 'completed',
+        task_review: 'pending',
+      });
+      try {
+        const deepPath = path.join(fixture.tasksBase, 'GH-309', 'sub', 'deep', 'tasks.md');
+        fs.mkdirSync(path.dirname(deepPath), { recursive: true });
+        const { code } = await runHook(
+          {
+            tool_name: 'Write',
+            tool_input: { file_path: deepPath },
+          },
+          { TASKS_BASE: fixture.tasksBase, TICKET_ID: 'GH-309' }
+        );
+        assert.strictEqual(
+          code,
+          0,
+          'Expected exit 0 (allow) for deeply nested tasks.md during implement'
+        );
+      } finally {
+        fixture.cleanup();
+      }
+    });
+
+    it('should ALLOW Bash redirect to subfolder tasks.md (exit 0)', async () => {
+      const fixture = createStateFixture('GH-309', {
+        implement: 'in_progress',
+        tasks: 'completed',
+        task_review: 'pending',
+      });
+      try {
+        const subfolderPath = path.join(fixture.tasksBase, 'GH-309', 'flaky-tests', 'tasks.md');
+        fs.mkdirSync(path.dirname(subfolderPath), { recursive: true });
+        const { code } = await runHook(
+          {
+            tool_name: 'Bash',
+            tool_input: {
+              command: `echo "data" >> ${subfolderPath}`,
+            },
+          },
+          { TASKS_BASE: fixture.tasksBase, TICKET_ID: 'GH-309' }
+        );
+        assert.strictEqual(
+          code,
+          0,
+          'Expected exit 0 (allow) for Bash redirect to subfolder tasks.md'
+        );
+      } finally {
+        fixture.cleanup();
+      }
+    });
+
+    it('should ALLOW Bash relative-path write to tasks.md from subfolder cwd (exit 0)', async () => {
+      const fixture = createStateFixture('GH-309', {
+        implement: 'in_progress',
+        tasks: 'completed',
+        task_review: 'pending',
+      });
+      try {
+        // Create a subfolder inside the ticket dir
+        const subfolderDir = path.join(fixture.tasksBase, 'GH-309', 'flaky-tests');
+        fs.mkdirSync(subfolderDir, { recursive: true });
+        const { code } = await runHook(
+          {
+            tool_name: 'Bash',
+            tool_input: {
+              command: 'echo "data" >> tasks.md',
+            },
+          },
+          { TASKS_BASE: fixture.tasksBase, TICKET_ID: 'GH-309' },
+          { cwd: subfolderDir }
+        );
+        assert.strictEqual(
+          code,
+          0,
+          'Expected exit 0 (allow) for relative tasks.md from subfolder cwd'
+        );
+      } finally {
+        fixture.cleanup();
+      }
+    });
+
+    it('should BLOCK Bash command that references subfolder AND root-level tasks.md (exit 2)', async () => {
+      const fixture = createStateFixture('GH-309', {
+        implement: 'in_progress',
+        tasks: 'completed',
+        task_review: 'pending',
+      });
+      try {
+        const subfolderPath = path.join(fixture.tasksBase, 'GH-309', 'flaky-tests', 'tasks.md');
+        const rootPath = path.join(fixture.tasksBase, 'GH-309', 'tasks.md');
+        fs.mkdirSync(path.dirname(subfolderPath), { recursive: true });
+        const { code, stderr } = await runHook(
+          {
+            tool_name: 'Bash',
+            tool_input: {
+              command: `cat ${subfolderPath} >> ${rootPath}`,
+            },
+          },
+          { TASKS_BASE: fixture.tasksBase, TICKET_ID: 'GH-309' }
+        );
+        assert.strictEqual(
+          code,
+          2,
+          `Expected exit 2 (block) when Bash references both subfolder and root tasks.md, got ${code}. stderr: ${stderr}`
+        );
+      } finally {
+        fixture.cleanup();
+      }
+    });
+
+    it('should still BLOCK Edit to root-level tasks.md when step is implement (exit 2) — regression', async () => {
+      const fixture = createStateFixture('GH-309', {
+        implement: 'in_progress',
+        tasks: 'completed',
+        task_review: 'pending',
+      });
+      try {
+        const rootPath = path.join(fixture.tasksBase, 'GH-309', 'tasks.md');
+        const { code, stderr } = await runHook(
+          {
+            tool_name: 'Edit',
+            tool_input: { file_path: rootPath },
+          },
+          { TASKS_BASE: fixture.tasksBase, TICKET_ID: 'GH-309' }
+        );
+        assert.strictEqual(
+          code,
+          2,
+          `Expected exit 2 (block) for root-level tasks.md, got ${code}. stderr: ${stderr}`
+        );
+        assert.ok(stderr.length > 0, 'Expected stderr message explaining block');
+      } finally {
+        fixture.cleanup();
+      }
+    });
   });
 
   it('should normalize #N ticket IDs to GH-N for path matching', async () => {
