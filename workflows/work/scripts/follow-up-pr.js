@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * follow-up-pr.js — CI & Review Monitor
+ * follow-up-pr.js  — CI & Review Monitor
  *
  * Polls PR CI checks and reviews in a loop, reports failures fast,
  * and persists state across runs.
@@ -1099,19 +1099,30 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts, decision)
     lines.push(
       `→ CI was cancelled. Re-push or re-run the workflow: ${c.dim('gh run rerun <run-id>')}`
     );
-  } else if (!opts.noReviews && reviews.hasBlocking && reviews.pendingBots.length > 0) {
+  } else if (
+    !opts.noReviews &&
+    reviews.hasBlocking &&
+    reviews.pendingBots.length > 0 &&
+    (!decision || decision.action === 'poll')
+  ) {
     const blockCount = reviews.blocking ? reviews.blocking.length : 0;
     lines.push(
       `→ Waiting ${opts.interval}s for bot reviews (${blockCount} blocking comment${blockCount !== 1 ? 's' : ''} may become stale)... (attempt ${attempt}/${maxAttempts})`
     );
   } else if (!opts.noReviews && reviews.hasBlocking) {
-    lines.push(
-      `→ Address blocking reviews, push, then re-run: ${c.dim('node scripts/follow-up-pr.js')}`
-    );
+    if (decision && decision.action === 'exit-fail' && reviews.pendingBots.length > 0) {
+      lines.push(
+        `→ Bot review is finalized — address blocking comments, push, then re-run: ${c.dim('node scripts/follow-up-pr.js')}`
+      );
+    } else {
+      lines.push(
+        `→ Address blocking reviews, push, then re-run: ${c.dim('node scripts/follow-up-pr.js')}`
+      );
+    }
   } else if (
     ciAcceptable &&
     (!reviews.hasBlocking || opts.noReviews) &&
-    reviews.pendingBots.length === 0 &&
+    (reviews.pendingBots.length === 0 || (decision && decision.action !== 'poll')) &&
     (isMergeReady ||
       (isBlockedByApproval && !(reviews.nonBlocking && reviews.nonBlocking.length > 0)))
   ) {
@@ -1143,7 +1154,11 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts, decision)
     lines.push(c.green(`PR #${prInfo.number} is ready for review/merge!`));
   } else if (ci.status === 'pending') {
     lines.push(`→ Waiting ${opts.interval}s for checks... (attempt ${attempt}/${maxAttempts})`);
-  } else if (!opts.noReviews && reviews.pendingBots.length > 0) {
+  } else if (
+    !opts.noReviews &&
+    reviews.pendingBots.length > 0 &&
+    (!decision || decision.action === 'poll')
+  ) {
     lines.push(
       `→ Waiting ${opts.interval}s for bot reviews... (attempt ${attempt}/${maxAttempts})`
     );
@@ -1157,13 +1172,36 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts, decision)
 // ── Decision Logic ──────────────────────────────────────────────────────────
 
 /**
+ * Filter pending bots by cross-referencing with CI check completion status.
+ * If a bot's CI check has completed (bucket !== 'pending'), remove it from
+ * the pending list — its review is final, no need to wait longer.
+ *
+ * Fail-open: if ci is missing or a bot has no matching CI check, keep it.
+ *
+ * @param {string[]} pendingBots - bot login names from review analysis
+ * @param {object|undefined} ci - CI object with .checks array
+ * @returns {string[]} filtered list of bots still genuinely pending
+ */
+function getEffectivePendingBots(pendingBots, ci) {
+  if (!ci || !ci.checks || ci.checks.length === 0) return pendingBots;
+
+  return pendingBots.filter((bot) => {
+    const stripped = bot.replace(/\[bot\]$/, '').toLowerCase();
+    const matches = ci.checks.filter((check) => check.name.toLowerCase().includes(stripped));
+    if (matches.length === 0) return true; // no matching CI check — keep as pending (fail-open)
+    // Only remove bot if ALL matching checks completed (none still pending)
+    return matches.some((check) => check.bucket === 'pending');
+  });
+}
+
+/**
  * Pure function that decides the next action based on current PR state.
  * Returns { action, finalStatus, waitReason? }
  *   action: 'exit-fail' | 'exit-success' | 'poll'
  *   finalStatus: string for state persistence
  *   waitReason: human-readable reason when action is 'poll'
  */
-function decideNextAction(ciStatus, prInfo, reviews, noReviews) {
+function decideNextAction(ciStatus, prInfo, reviews, noReviews, ci) {
   const isConflicting = prInfo.mergeable === 'CONFLICTING' || prInfo.mergeStateStatus === 'DIRTY';
   const isMergeReady =
     prInfo.mergeable === 'MERGEABLE' &&
@@ -1175,7 +1213,10 @@ function decideNextAction(ciStatus, prInfo, reviews, noReviews) {
     prInfo.mergeable === 'MERGEABLE' && prInfo.mergeStateStatus === 'BLOCKED' && !isConflicting;
   const ciAcceptable = ciStatus === 'passing' || ciStatus === 'no-checks';
   const ciFinished = ciAcceptable || ciStatus === 'cancelled';
-  const reviewsClear = noReviews || (!reviews.hasBlocking && reviews.pendingBots.length === 0);
+  const effectivePendingBots = ci
+    ? getEffectivePendingBots(reviews.pendingBots, ci)
+    : reviews.pendingBots;
+  const reviewsClear = noReviews || (!reviews.hasBlocking && effectivePendingBots.length === 0);
 
   // Fail-fast exits (ordered by priority)
   // Only CI failures, conflicts, and cancelled CI cause immediate exit.
@@ -1193,7 +1234,7 @@ function decideNextAction(ciStatus, prInfo, reviews, noReviews) {
   // Only exit on blocking reviews AFTER CI has fully completed (not pending).
   // When CI is still running, stale review comments may become outdated.
   // When bots are still reviewing, old blocking comments may become stale after the new review.
-  if (!noReviews && reviews.hasBlocking && reviews.pendingBots.length === 0 && ciFinished) {
+  if (!noReviews && reviews.hasBlocking && effectivePendingBots.length === 0 && ciFinished) {
     return { action: 'exit-fail', finalStatus: 'reviews-blocking' };
   }
 
@@ -1203,7 +1244,7 @@ function decideNextAction(ciStatus, prInfo, reviews, noReviews) {
     isBlockedByApproval &&
     ciAcceptable &&
     !noReviews &&
-    reviews.pendingBots.length === 0 &&
+    effectivePendingBots.length === 0 &&
     reviews.nonBlocking &&
     reviews.nonBlocking.length > 0
   ) {
@@ -1229,10 +1270,10 @@ function decideNextAction(ciStatus, prInfo, reviews, noReviews) {
   // Still polling — build list of reasons (tested in follow-up-pr.test.js)
   const reasons = [];
   if (!ciFinished) reasons.push('CI checks pending');
-  if (!noReviews && reviews.pendingBots.length > 0) reasons.push('bot reviews pending');
+  if (!noReviews && effectivePendingBots.length > 0) reasons.push('bot reviews pending');
   if (!noReviews && reviews.hasBlocking && !ciFinished)
     reasons.push('waiting for CI to finish before evaluating reviews');
-  if (!noReviews && reviews.hasBlocking && reviews.pendingBots.length > 0)
+  if (!noReviews && reviews.hasBlocking && effectivePendingBots.length > 0)
     reasons.push('blocking reviews may become stale after bot review');
   if (!isMergeReady && !isConflicting)
     reasons.push(`merge status: ${prInfo.mergeStateStatus || 'UNKNOWN'}`);
@@ -1424,13 +1465,23 @@ async function main() {
     // Use explicit --interval if set, otherwise compute adaptive interval
     const interval = opts.interval !== null ? opts.interval : getAdaptiveInterval(attempt, ci);
 
+    // Decide next action using extracted pure function (before formatReport so decision is available)
+    const decision = decideNextAction(ci.status, prInfo, reviews, opts.noReviews, ci);
+
+    // Log finalized bot reviews (side effect kept outside pure decideNextAction)
+    if (ci && reviews.pendingBots.length > 0) {
+      const effective = getEffectivePendingBots(reviews.pendingBots, ci);
+      reviews.pendingBots
+        .filter((b) => !effective.includes(b))
+        .forEach((b) => console.log(c.dim(`  ℹ Bot "${b}" CI check completed — review is final`)));
+    }
+
     // Print report
     console.log('');
-    console.log(formatReport(prInfo, ci, reviews, attempt, maxAttempts, { ...opts, interval }));
+    console.log(
+      formatReport(prInfo, ci, reviews, attempt, maxAttempts, { ...opts, interval }, decision)
+    );
     console.log('');
-
-    // Decide next action using extracted pure function
-    const decision = decideNextAction(ci.status, prInfo, reviews, opts.noReviews);
 
     // Compute changed paths once for both exit-fail and exit-success branches
     // changedPaths: null = error/no-data (record all), empty Set = no changes (record all).
@@ -1610,7 +1661,7 @@ async function main() {
   }
 
   // Exhausted attempts — report what we were waiting on
-  const lastDecision = decideNextAction(ci.status, prInfo, reviews, opts.noReviews);
+  const lastDecision = decideNextAction(ci.status, prInfo, reviews, opts.noReviews, ci);
   console.log(
     c.yellow(
       `Max attempts (${maxAttempts}) reached. Still waiting: ${lastDecision.waitReason || 'unknown'}`
@@ -1706,7 +1757,7 @@ function isPRGateReady() {
     hasBlocking: deduped.blocking.length > 0,
   };
 
-  const decision = decideNextAction(ci.status, prInfo, dedupedReviews, false);
+  const decision = decideNextAction(ci.status, prInfo, dedupedReviews, false, ci);
 
   return {
     ready: decision.action === 'exit-success',
@@ -1760,6 +1811,7 @@ module.exports = {
   getResolvedCommentIds,
   resolveOutdatedThreads,
   decideNextAction,
+  getEffectivePendingBots,
   getAdaptiveInterval,
   computeCommentHash,
   deduplicateBlockingBotComments,

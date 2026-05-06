@@ -1035,3 +1035,362 @@ describe('ghExec shared module', () => {
     assert.equal(typeof ghExec, 'function');
   });
 });
+
+// ── getEffectivePendingBots (GH-349) ────────────────────────────────────────
+describe('getEffectivePendingBots', () => {
+  // Import will fail until Task 2 adds the export — that's expected (RED phase)
+  // eslint-disable-next-line -- single-line imports required for spec-verify REUSES check
+  const getEffectivePendingBots = require('../follow-up-pr.js').getEffectivePendingBots;
+  const _decideNextAction = require('../follow-up-pr.js').decideNextAction;
+
+  it('returns empty when all bot CI checks completed', () => {
+    // Scenario 1: bot "cursor-ai[bot]" has a matching CI check "cursor-ai" that completed
+    const pendingBots = ['cursor-ai[bot]'];
+    const ci = {
+      status: 'passing',
+      checks: [
+        { name: 'cursor-ai / review', bucket: 'pass' },
+        { name: 'Build', bucket: 'pass' },
+      ],
+      running: 0,
+      passed: 2,
+      failed: 0,
+      neutral: 0,
+      cancelled: 0,
+      total: 2,
+    };
+    const result = getEffectivePendingBots(pendingBots, ci);
+    assert.deepStrictEqual(result, []);
+  });
+
+  it('preserves bots with no matching CI check', () => {
+    // Scenario 2: bot "unknown-bot[bot]" has no matching CI check
+    const pendingBots = ['unknown-bot[bot]'];
+    const ci = {
+      status: 'passing',
+      checks: [
+        { name: 'Build', bucket: 'pass' },
+        { name: 'Test', bucket: 'pass' },
+      ],
+      running: 0,
+      passed: 2,
+      failed: 0,
+      neutral: 0,
+      cancelled: 0,
+      total: 2,
+    };
+    const result = getEffectivePendingBots(pendingBots, ci);
+    assert.deepStrictEqual(result, ['unknown-bot[bot]']);
+  });
+
+  it('returns all bots when ci is undefined', () => {
+    // Scenario 3: ci parameter is undefined (backward compatibility)
+    const pendingBots = ['cursor-ai[bot]'];
+    const result = getEffectivePendingBots(pendingBots, undefined);
+    assert.deepStrictEqual(result, ['cursor-ai[bot]']);
+  });
+
+  it('returns all bots when ci is null', () => {
+    const result = getEffectivePendingBots(['cursor-ai[bot]'], null);
+    assert.deepStrictEqual(result, ['cursor-ai[bot]']);
+  });
+
+  it('returns all bots when ci.checks is empty', () => {
+    const result = getEffectivePendingBots(['cursor-ai[bot]'], { checks: [] });
+    assert.deepStrictEqual(result, ['cursor-ai[bot]']);
+  });
+
+  it('returns empty when pendingBots is empty', () => {
+    const ci = {
+      checks: [
+        { name: 'cursor-ai / review', bucket: 'pass' },
+        { name: 'Build', bucket: 'pass' },
+      ],
+      running: 0,
+      passed: 2,
+      failed: 0,
+      neutral: 0,
+      cancelled: 0,
+      total: 2,
+    };
+    const result = getEffectivePendingBots([], ci);
+    assert.deepStrictEqual(result, []);
+  });
+
+  it('keeps bot when its CI check is still pending', () => {
+    const ci = {
+      checks: [{ name: 'cursor-ai', bucket: 'pending' }],
+      running: 1,
+      passed: 0,
+      failed: 0,
+      neutral: 0,
+      cancelled: 0,
+      total: 1,
+    };
+    const result = getEffectivePendingBots(['cursor-ai[bot]'], ci);
+    assert.deepStrictEqual(result, ['cursor-ai[bot]']);
+  });
+
+  it('keeps bot when one matching check completed but another is still pending', () => {
+    // Scenario: cursor-ai-lint completed, but cursor-ai / review still running
+    // Bot should stay pending because not ALL matching checks are done
+    const ci = {
+      checks: [
+        { name: 'cursor-ai-lint', bucket: 'pass' },
+        { name: 'cursor-ai / review', bucket: 'pending' },
+      ],
+      running: 1,
+      passed: 1,
+      failed: 0,
+      neutral: 0,
+      cancelled: 0,
+      total: 2,
+    };
+    const result = getEffectivePendingBots(['cursor-ai[bot]'], ci);
+    assert.deepStrictEqual(result, ['cursor-ai[bot]']);
+  });
+
+  it('removes bot only when ALL matching checks completed', () => {
+    const ci = {
+      checks: [
+        { name: 'cursor-ai-lint', bucket: 'pass' },
+        { name: 'cursor-ai / review', bucket: 'pass' },
+      ],
+      running: 0,
+      passed: 2,
+      failed: 0,
+      neutral: 0,
+      cancelled: 0,
+      total: 2,
+    };
+    const result = getEffectivePendingBots(['cursor-ai[bot]'], ci);
+    assert.deepStrictEqual(result, []);
+  });
+});
+
+// ── decideNextAction with ci parameter (GH-349) ────────────────────────────
+describe('decideNextAction — bot CI completion awareness (GH-349)', () => {
+  const mergeReady = { mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN' };
+
+  it('exits immediately when bot CI completed and blocking comments exist', () => {
+    // Scenario 4: CI passing, bot in pendingBots, bot CI check completed, blocking comments
+    const reviews = {
+      hasBlocking: true,
+      pendingBots: ['copilot-pull-request-reviewer'],
+      blocking: [{ author: 'copilot-pull-request-reviewer', body: 'bug here' }],
+      nonBlocking: [],
+    };
+    const ci = {
+      status: 'passing',
+      checks: [
+        { name: 'copilot-pull-request-reviewer / review', bucket: 'pass' },
+        { name: 'Build', bucket: 'pass' },
+      ],
+      running: 0,
+      passed: 2,
+      failed: 0,
+      neutral: 0,
+      cancelled: 0,
+      total: 2,
+    };
+    const result = decideNextAction('passing', mergeReady, reviews, false, ci);
+    assert.equal(result.action, 'exit-fail');
+    assert.equal(result.finalStatus, 'reviews-blocking');
+  });
+
+  it('continues polling when bot CI is genuinely still pending', () => {
+    // Scenario 5: CI pending, bot in pendingBots, bot CI check still pending
+    const reviews = {
+      hasBlocking: false,
+      pendingBots: ['copilot-pull-request-reviewer'],
+      nonBlocking: [],
+    };
+    const ci = {
+      status: 'pending',
+      checks: [
+        { name: 'copilot-pull-request-reviewer / review', bucket: 'pending' },
+        { name: 'Build', bucket: 'pass' },
+      ],
+      running: 1,
+      passed: 1,
+      failed: 0,
+      neutral: 0,
+      cancelled: 0,
+      total: 2,
+    };
+    const result = decideNextAction('pending', mergeReady, reviews, false, ci);
+    assert.equal(result.action, 'poll');
+  });
+
+  it('exits immediately when all bot CIs completed (multiple bots)', () => {
+    // Scenario 6: CI passing, 2 bots, both CI completed, blocking reviews
+    const reviews = {
+      hasBlocking: true,
+      pendingBots: ['copilot-pull-request-reviewer', 'cursor-ai[bot]'],
+      blocking: [{ author: 'copilot-pull-request-reviewer', body: 'issue found' }],
+      nonBlocking: [],
+    };
+    const ci = {
+      status: 'passing',
+      checks: [
+        { name: 'copilot-pull-request-reviewer / review', bucket: 'pass' },
+        { name: 'cursor-ai / review', bucket: 'pass' },
+        { name: 'Build', bucket: 'pass' },
+      ],
+      running: 0,
+      passed: 3,
+      failed: 0,
+      neutral: 0,
+      cancelled: 0,
+      total: 3,
+    };
+    const result = decideNextAction('passing', mergeReady, reviews, false, ci);
+    assert.equal(result.action, 'exit-fail');
+    assert.equal(result.finalStatus, 'reviews-blocking');
+  });
+
+  it('continues polling when one bot CI is still pending among multiple', () => {
+    // Scenario 7: CI pending, 2 bots, one completed one pending
+    const reviews = {
+      hasBlocking: false,
+      pendingBots: ['copilot-pull-request-reviewer', 'cursor-ai[bot]'],
+      nonBlocking: [],
+    };
+    const ci = {
+      status: 'pending',
+      checks: [
+        { name: 'copilot-pull-request-reviewer / review', bucket: 'pass' },
+        { name: 'cursor-ai / review', bucket: 'pending' },
+        { name: 'Build', bucket: 'pass' },
+      ],
+      running: 1,
+      passed: 2,
+      failed: 0,
+      neutral: 0,
+      cancelled: 0,
+      total: 3,
+    };
+    const result = decideNextAction('pending', mergeReady, reviews, false, ci);
+    assert.equal(result.action, 'poll');
+  });
+
+  it('backward compatibility when ci parameter is omitted', () => {
+    // Scenario 8: CI passing, bot in pendingBots, blocking, NO ci param → poll
+    const reviews = {
+      hasBlocking: true,
+      pendingBots: ['copilot-pull-request-reviewer'],
+      blocking: [{ author: 'copilot-pull-request-reviewer', body: 'bug' }],
+      nonBlocking: [],
+    };
+    const result = decideNextAction('passing', mergeReady, reviews, false);
+    assert.equal(result.action, 'poll');
+    assert.match(result.waitReason, /blocking reviews may become stale/);
+  });
+});
+
+// ── formatReport — bot CI final message (GH-349 Scenario 9) ────────────────
+describe('formatReport — bot CI completion message (GH-349)', () => {
+  const basePrInfo = {
+    number: 42,
+    title: 'Test PR',
+    branch: 'feature-branch',
+    mergeable: 'MERGEABLE',
+    mergeStateStatus: 'CLEAN',
+  };
+  const baseOpts = { noReviews: false, interval: 30 };
+
+  function makeCi(overrides) {
+    return {
+      status: 'passing',
+      total: 2,
+      passed: [{ name: 'build' }, { name: 'test' }],
+      running: [],
+      failed: [],
+      neutral: [],
+      cancelled: [],
+      optionalFailed: [],
+      requiredFailed: [],
+      hasRequiredInfo: false,
+      ...overrides,
+    };
+  }
+
+  it('shows "final" message instead of "may become stale" when bot CI is done', () => {
+    // Scenario 9: When bot CI completed, the report should indicate finality
+    // rather than suggesting comments "may become stale"
+    const ci = makeCi({ status: 'passing' });
+    const reviews = {
+      hasBlocking: true,
+      pendingBots: ['copilot-pull-request-reviewer'],
+      blocking: [{ author: 'copilot-pull-request-reviewer', body: 'bug here', priority: 'high' }],
+      nonBlocking: [],
+    };
+    const ciObj = {
+      status: 'passing',
+      checks: [
+        { name: 'copilot-pull-request-reviewer / review', bucket: 'pass' },
+        { name: 'Build', bucket: 'pass' },
+      ],
+      running: 0,
+      passed: 2,
+      failed: 0,
+      neutral: 0,
+      cancelled: 0,
+      total: 2,
+    };
+    // The decision with ci param should be exit-fail (not poll)
+    const decision = decideNextAction('passing', basePrInfo, reviews, false, ciObj);
+    const output = formatReport(basePrInfo, ci, reviews, 1, 10, baseOpts, decision);
+    // When decision is exit-fail (bot CI done), should NOT show "may become stale"
+    assert.ok(
+      !output.includes('may become stale'),
+      'should NOT show "may become stale" when bot CI completed'
+    );
+    assert.ok(
+      output.toLowerCase().includes('finalized') || output.toLowerCase().includes('final'),
+      'should indicate bot review is finalized when bot CI is done'
+    );
+  });
+});
+
+// ── e2e: full poll loop exits within one cycle (GH-349 Scenario 10) ─────────
+describe('decideNextAction — e2e single-cycle exit (GH-349)', () => {
+  it('exits within one cycle when bot CI is completed and reviews are blocking', () => {
+    // Scenario 10: Simulates a full poll cycle where bot CI has completed
+    // and blocking reviews exist — should exit immediately, not poll
+    const mergeReady = { mergeable: 'MERGEABLE', mergeStateStatus: 'CLEAN' };
+    const reviews = {
+      hasBlocking: true,
+      pendingBots: ['copilot-pull-request-reviewer'],
+      blocking: [
+        {
+          author: 'copilot-pull-request-reviewer',
+          body: 'This function has a bug',
+          priority: 'medium',
+          path: 'src/index.js',
+          line: 42,
+        },
+      ],
+      nonBlocking: [],
+    };
+    const ci = {
+      status: 'passing',
+      checks: [
+        { name: 'copilot-pull-request-reviewer / review', bucket: 'pass' },
+        { name: 'Build', bucket: 'pass' },
+        { name: 'Tests', bucket: 'pass' },
+      ],
+      running: 0,
+      passed: 3,
+      failed: 0,
+      neutral: 0,
+      cancelled: 0,
+      total: 3,
+    };
+
+    // First call should immediately exit (not poll)
+    const decision = decideNextAction('passing', mergeReady, reviews, false, ci);
+    assert.equal(decision.action, 'exit-fail', 'should exit immediately, not poll');
+    assert.equal(decision.finalStatus, 'reviews-blocking');
+  });
+});
