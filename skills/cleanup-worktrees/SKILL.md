@@ -9,7 +9,7 @@ allowed-tools: Bash, Read, Grep, Glob, AskUserQuestion, mcp__atlassian__jira_sea
 
 Before any analysis, you MUST:
 1. Run `git fetch --prune origin` to get the latest remote state and remove stale tracking branches
-2. Re-check PR status via `gh pr view` for every worktree branch — never rely on cached PR data
+2. Re-check PR status for every worktree branch — never rely on cached PR data
 3. Re-check every worktree for uncommitted changes and unpushed commits — previous results are invalid
 
 Begin output with: "Fresh analysis started — all prior results discarded."
