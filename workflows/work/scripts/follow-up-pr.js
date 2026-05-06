@@ -1122,7 +1122,7 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts, decision)
   } else if (
     ciAcceptable &&
     (!reviews.hasBlocking || opts.noReviews) &&
-    reviews.pendingBots.length === 0 &&
+    (reviews.pendingBots.length === 0 || (decision && decision.action !== 'poll')) &&
     (isMergeReady ||
       (isBlockedByApproval && !(reviews.nonBlocking && reviews.nonBlocking.length > 0)))
   ) {
@@ -1154,7 +1154,11 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts, decision)
     lines.push(c.green(`PR #${prInfo.number} is ready for review/merge!`));
   } else if (ci.status === 'pending') {
     lines.push(`→ Waiting ${opts.interval}s for checks... (attempt ${attempt}/${maxAttempts})`);
-  } else if (!opts.noReviews && reviews.pendingBots.length > 0) {
+  } else if (
+    !opts.noReviews &&
+    reviews.pendingBots.length > 0 &&
+    (!decision || decision.action === 'poll')
+  ) {
     lines.push(
       `→ Waiting ${opts.interval}s for bot reviews... (attempt ${attempt}/${maxAttempts})`
     );
@@ -1215,9 +1219,6 @@ function decideNextAction(ciStatus, prInfo, reviews, noReviews, ci) {
     : reviews.pendingBots;
   // Log finalized bots (R6 logging requirement) — outside the pure helper
   if (ci) {
-    reviews.pendingBots
-      .filter((b) => !effectivePendingBots.includes(b))
-      .forEach((b) => console.log(c.dim(`  ℹ Bot "${b}" CI check completed — review is final`)));
   }
   const reviewsClear = noReviews || (!reviews.hasBlocking && effectivePendingBots.length === 0);
 
@@ -1470,6 +1471,14 @@ async function main() {
 
     // Decide next action using extracted pure function (before formatReport so decision is available)
     const decision = decideNextAction(ci.status, prInfo, reviews, opts.noReviews, ci);
+
+    // Log finalized bot reviews (side effect kept outside pure decideNextAction)
+    if (ci && reviews.pendingBots.length > 0) {
+      const effective = getEffectivePendingBots(reviews.pendingBots, ci);
+      reviews.pendingBots
+        .filter((b) => !effective.includes(b))
+        .forEach((b) => console.log(c.dim(`  ℹ Bot "${b}" CI check completed — review is final`)));
+    }
 
     // Print report
     console.log('');
