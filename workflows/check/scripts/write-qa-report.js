@@ -33,6 +33,8 @@ const ALLOWED_STATUSES = ['PASS', 'FAIL', 'INFRASTRUCTURE_FAILURE', 'ACCESS_FAIL
 const writer = createReportWriter({
   name: 'QA Report Writer',
 
+  reportType: 'qa',
+
   allowedAgents: ['qa-feature-tester', 'qa-api-tester'],
 
   requiredFields: [
@@ -121,8 +123,7 @@ const writer = createReportWriter({
 
     // Header with changes hash (required for cache validation)
     // Status line for downstream gate compatibility (check-generate-summary.js)
-    const gateStatus =
-      input.status === 'PASS' ? 'APPROVED' : input.status === 'FAIL' ? 'NEEDS_WORK' : input.status;
+    const gateStatus = input.status === 'PASS' ? 'APPROVED' : 'NEEDS_WORK';
     lines.push(`**Changes Hash:** ${input.changesHash}`);
     lines.push(`Status: ${gateStatus}`);
     lines.push('');

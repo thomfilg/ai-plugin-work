@@ -40,8 +40,8 @@ TYPE_ALIASES['completion'] = Object.assign(Object.create(null), BASE_ALIASES, {
 // and recognizes infrastructure/access failure statuses from write-qa-report.js.
 TYPE_ALIASES['qa'] = Object.assign(Object.create(null), BASE_ALIASES, {
   SUCCESS: 'APPROVED',
-  INFRASTRUCTURE_FAILURE: 'INFRASTRUCTURE_FAILURE',
-  ACCESS_FAILED: 'ACCESS_FAILED',
+  INFRASTRUCTURE_FAILURE: 'NEEDS_WORK',
+  ACCESS_FAILED: 'NEEDS_WORK',
 });
 // Fallback for types without overrides
 const STATUS_ALIASES = BASE_ALIASES;
