@@ -50,6 +50,17 @@ describe('gherkin-coverage: validateTaskCoverage', () => {
     assert.equal(result.valid, true);
     assert.deepEqual(result.uncovered, []);
   });
+
+  it('matches scenario names case-insensitively', () => {
+    const scenarios = [
+      { name: 'User Can Login', tags: ['@integration'] },
+      { name: 'Admin Dashboard Loads', tags: ['@e2e'] },
+    ];
+    const tasksContent = '## Task 1\nImplement user can login\n## Task 2\nImplement admin dashboard loads';
+    const result = validateTaskCoverage(scenarios, tasksContent);
+    assert.equal(result.valid, true);
+    assert.deepEqual(result.uncovered, []);
+  });
 });
 
 // ─── validateTestCoverage ───────────────────────────────────────────────────
@@ -63,6 +74,17 @@ describe('gherkin-coverage: validateTestCoverage', () => {
       { path: 'src/__tests__/password-reset.e2e.test.js', content: 'test("Request password reset email", () => {})' },
     ];
 
+    const result = validateTestCoverage(scenarios, testFiles);
+    assert.equal(result.valid, true);
+    assert.ok(result.covered.length > 0);
+    assert.equal(result.covered[0].tagMatch, true);
+  });
+
+  it('matches scenario to correct test type with @integration tag', () => {
+    const scenarios = [{ name: 'Data persists after save', tags: ['@integration'] }];
+    const testFiles = [
+      { path: 'src/__tests__/save.integration.test.js', content: 'test("Data persists after save", () => {})' },
+    ];
     const result = validateTestCoverage(scenarios, testFiles);
     assert.equal(result.valid, true);
     assert.ok(result.covered.length > 0);

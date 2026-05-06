@@ -289,7 +289,7 @@ describe('spec-gate with standalone gherkin.feature', () => {
   ].join('\n');
 
   const GHERKIN_FEATURE_WITH_SKIP = [
-    '# gherkin-skip: config-only change, no testable behavior',
+    '<!-- gherkin-skip: config-only change, no testable behavior -->',
     '',
     'Feature: Something',
     '  Scenario: A test',
