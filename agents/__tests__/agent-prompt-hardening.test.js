@@ -154,12 +154,16 @@ describe('Verification Iron Law in quality agents', () => {
     const sections = [];
     for (const agent of QUALITY_AGENTS) {
       const content = agentContent[agent];
-      const startIdx = content.indexOf('Verification Iron Law');
-      if (startIdx === -1) continue;
+      // Find the full heading line (e.g., "## Verification Iron Law")
+      const headingMatch = content.match(/^(#{1,3})\s+Verification Iron Law/m);
+      if (!headingMatch) continue;
+      const headingLevel = headingMatch[1].length;
+      const startIdx = content.indexOf(headingMatch[0]);
 
-      // Extract from the Iron Law heading to the next heading of same or higher level
+      // Extract from the heading to the next heading of same or higher level (or EOF)
       const afterStart = content.slice(startIdx);
-      const nextHeading = afterStart.slice(1).search(/\n#{1,3}\s/);
+      const sameOrHigherRe = new RegExp(`\\n#{1,${headingLevel}}\\s`);
+      const nextHeading = afterStart.slice(1).search(sameOrHigherRe);
       const section = nextHeading === -1 ? afterStart : afterStart.slice(0, nextHeading + 1);
       sections.push(section.trim());
     }
@@ -198,17 +202,22 @@ describe('Testing anti-patterns reference file', () => {
     );
   });
 
-  it('contains gate functions', () => {
+  it('each anti-pattern section contains a gate function', () => {
     const exists = fs.existsSync(ANTI_PATTERNS_PATH);
     if (!exists) {
       assert.fail('Cannot check gate functions — file does not exist');
       return;
     }
     const text = fs.readFileSync(ANTI_PATTERNS_PATH, 'utf-8');
-    assert.ok(
-      text.includes('gate') || text.includes('Gate'),
-      'testing-anti-patterns.md must reference gate functions'
-    );
+    const sections = text.split(/^## /m).filter((s) => s.trim());
+    const antiPatternSections = sections.filter((s) => !s.startsWith('Testing Anti-Patterns'));
+    for (const section of antiPatternSections) {
+      const title = section.split('\n')[0].trim();
+      assert.ok(
+        /gate/i.test(section),
+        `Anti-pattern section "${title}" must contain a gate function`
+      );
+    }
   });
 });
 
