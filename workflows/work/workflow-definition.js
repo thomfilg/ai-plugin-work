@@ -55,18 +55,28 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
     }
   }
 
-  // GH-253: Helper for STEPS.spec_gate verify. Returns true iff spec.md
-  // exists AND (skip override is present OR parse() + validate() passes).
-  // Fail-closed: returns false when spec.md is missing or on any error.
+  // GH-253, GH-350: Helper for STEPS.spec_gate verify. Returns true iff
+  // spec.md exists AND gherkin.feature exists AND (skip override is present
+  // OR parseRaw() + validate() passes). Reads gherkin.feature (standalone)
+  // instead of the spec.md gherkin section.
+  // Fail-closed: returns false when spec.md or gherkin.feature is missing
+  // or on any error.
   function verifySpecGate(ticketId) {
     try {
-      const specPath = path.join(TASKS_BASE, safeTicketPath(ticketId), 'spec.md');
-      if (!fs.existsSync(specPath)) return false; // GH-253: fail-closed — missing spec blocks the gate
+      const ticketDir = path.join(TASKS_BASE, safeTicketPath(ticketId));
+      const specPath = path.join(ticketDir, 'spec.md');
+      if (!fs.existsSync(specPath)) return false; // fail-closed — missing spec blocks the gate
+      const gherkinPath = path.join(ticketDir, 'gherkin.feature');
+      let gherkinContent;
+      try {
+        gherkinContent = fs.readFileSync(gherkinPath, 'utf-8');
+      } catch {
+        return false; // fail-closed — missing gherkin.feature blocks the gate
+      }
       const parseGherkin = require(path.join(__dirname, 'lib', 'parse-gherkin'));
-      const markdown = fs.readFileSync(specPath, 'utf-8');
-      const skipResult = parseGherkin.hasSkipOverride(markdown);
+      const skipResult = parseGherkin.hasSkipOverride(gherkinContent);
       if (skipResult.skip) return true;
-      const parsed = parseGherkin.parse(markdown);
+      const parsed = parseGherkin.parseRaw(gherkinContent);
       const validation = parseGherkin.validate(parsed);
       return validation.valid && parsed.errors.length === 0;
     } catch {

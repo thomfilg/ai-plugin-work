@@ -517,8 +517,15 @@ describe('workflow-definition: verify[STEPS.spec_gate]', () => {
   function writeSpec(contents) {
     fs.writeFileSync(path.join(ticketDir, 'spec.md'), contents, 'utf-8');
   }
+  function writeGherkin(contents) {
+    fs.writeFileSync(path.join(ticketDir, 'gherkin.feature'), contents, 'utf-8');
+  }
   function removeSpec() {
     const p = path.join(ticketDir, 'spec.md');
+    if (fs.existsSync(p)) fs.unlinkSync(p);
+  }
+  function removeGherkin() {
+    const p = path.join(ticketDir, 'gherkin.feature');
     if (fs.existsSync(p)) fs.unlinkSync(p);
   }
 
@@ -535,16 +542,23 @@ describe('workflow-definition: verify[STEPS.spec_gate]', () => {
 
   it('returns false when spec.md does not exist (fail-closed)', () => {
     removeSpec();
+    removeGherkin();
     const verify = getSpecGateVerify();
     assert.equal(verify(ticketId), false);
   });
 
-  it('returns true when skip override <!-- gherkin-skip: reason --> is present', () => {
-    writeSpec(
+  it('returns false when gherkin.feature does not exist (fail-closed)', () => {
+    writeSpec('# Spec\n');
+    removeGherkin();
+    const verify = getSpecGateVerify();
+    assert.equal(verify(ticketId), false);
+  });
+
+  it('returns true when skip override <!-- gherkin-skip: reason --> is present in gherkin.feature', () => {
+    writeSpec('# Spec\n');
+    writeGherkin(
       [
-        '# Spec',
         '<!-- gherkin-skip: trivial change -->',
-        '## Test Scenarios (Gherkin)',
         'Feature: Test',
         '  Scenario: Only one',
         '    Given something',
@@ -557,10 +571,9 @@ describe('workflow-definition: verify[STEPS.spec_gate]', () => {
   });
 
   it('returns true when Gherkin validates (2+ scenarios with @integration)', () => {
-    writeSpec(
+    writeSpec('# Spec\n');
+    writeGherkin(
       [
-        '# Spec',
-        '## Test Scenarios (Gherkin)',
         'Feature: Test',
         '  @integration',
         '  Scenario: First',
@@ -579,10 +592,9 @@ describe('workflow-definition: verify[STEPS.spec_gate]', () => {
   });
 
   it('returns false when validation fails (1 scenario only)', () => {
-    writeSpec(
+    writeSpec('# Spec\n');
+    writeGherkin(
       [
-        '# Spec',
-        '## Test Scenarios (Gherkin)',
         'Feature: Test',
         '  @integration',
         '  Scenario: Only one',

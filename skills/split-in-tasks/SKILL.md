@@ -43,10 +43,11 @@ Set `TASKS_DIR="${TASKS_BASE}/${FOLDER_NAME}"`.
 
 ### Step 2: Read input documents
 
-Read both files from `${TASKS_DIR}/`:
+Read files from `${TASKS_DIR}/`:
 
 1. **`brief.md`** (required) — Contains the requirements, user stories, and acceptance criteria
 2. **`spec.md`** (required) — Contains the technical specification, architecture, and implementation details
+3. **`gherkin.feature`** (optional) — Contains the gherkin test scenarios. If present, each task must reference which scenario(s) it covers.
 
 **If `brief.md` is missing:** Stop with error: "No brief.md found at `${TASKS_DIR}/brief.md`. Run `/brief ${FOLDER_NAME}` first."
 
@@ -60,7 +61,7 @@ If `${TASKS_DIR}/tasks.md` already exists:
 
 ### Step 4: Generate tasks
 
-You are the decomposer. Read both `brief.md` and `spec.md` in full, then follow steps 4.0 through 4.2 in order.
+You are the decomposer. Read both `brief.md` and `spec.md` in full, then follow steps 4.0 through 4.3 in order.
 
 #### Step 4.0 — Extract Requirements (MANDATORY — do this BEFORE creating any tasks)
 
@@ -81,7 +82,7 @@ Before creating any tasks:
    - If a requirement is too trivial (less than a single subtask of work), merge it with a related requirement
    - Goal: each requirement should map cleanly to 1–2 tasks
 
-This list is the **source of truth** for requirement coverage. Every task you create MUST reference IDs from this list. Keep this list in working memory — you will need it for coverage validation in Step 4.2.
+This list is the **source of truth** for requirement coverage. Every task you create MUST reference IDs from this list. Keep this list in working memory — you will need it for coverage validation in Step 4.3.
 
 #### Step 4.1 — Decompose into tasks
 
@@ -91,7 +92,7 @@ Using the extracted requirement list as your guide, decompose the spec into task
 Each task must modify ONE logical component (e.g., one service, one UI module, one infrastructure unit) and produce ONE verifiable outcome (e.g., an API endpoint works, an agent classifies correctly, a DB table is created). If a task spans multiple components or produces multiple unrelated outcomes, split it.
 
 **Rule 2 — Requirement Coverage:**
-Every requirement from your Step 4.0 list must appear in at least one task's `Requirements Covered` section. Orphan requirements (in spec but not in any task) and orphan tasks (no requirement mapping) must be resolved in Step 4.2 before proceeding — add missing mappings or create/merge tasks until coverage is complete.
+Every requirement from your Step 4.0 list must appear in at least one task's `Requirements Covered` section. Orphan requirements (in spec but not in any task) and orphan tasks (no requirement mapping) must be resolved in Step 4.3 before proceeding — add missing mappings or create/merge tasks until coverage is complete.
 
 **Rule 3 — Independent Testability:**
 Every task must be testable in isolation. If you can't write a test for it, it's not a task — it's part of another task.
@@ -145,7 +146,15 @@ Checkpoint tasks and config-only infrastructure tasks are exempt from the RED/GR
 - **Similar/Same as Task N** — Repeat the actual steps instead of cross-referencing another task.
 
 
-#### Step 4.2 — Coverage Validation (MANDATORY — do this AFTER creating all tasks)
+#### Step 4.2 — Gherkin Coverage Validation (when gherkin.feature exists)
+
+If `${TASKS_DIR}/gherkin.feature` exists:
+1. Parse gherkin scenarios from the file
+2. For each scenario, verify it is referenced by name in at least one task
+3. If any scenario is not covered, add it to an existing task or create a new task
+4. Include a Gherkin Coverage table in the output (similar to Requirement Coverage)
+
+#### Step 4.3 — Requirement Coverage Validation (MANDATORY — do this AFTER creating all tasks)
 
 After generating all tasks, verify coverage:
 
@@ -164,7 +173,7 @@ Review all generated tasks and check:
 - Parallelization is maximized safely (any task marked `No` that could be `Yes`?)
 - Checkpoint tasks are present after every 3 implementation tasks or subsystem boundary
 - TDD ordering is correct (RED before GREEN before REFACTOR in every non-exempt implementation task — see Rule 10 for exemptions)
-- Bookend enforcement: first task is type `test` (Gherkin-based or acceptance-criteria-based per Rule 12) and last task is a verification checkpoint (type `checkpoint`) per Rule 12
+- Gherkin coverage: every scenario from `gherkin.feature` is referenced by at least one task (if `gherkin.feature` exists)
 - Anti-patterns are absent
 
 Refactor tasks if any issues are found. Re-validate coverage after any refactoring.
@@ -307,15 +316,3 @@ If the spec references user-facing behavior changes, API changes, configuration 
 - Configuration changes are documented
 This task is checkpoint type (auto-TDD-exception) and should be the second-to-last task (before the final verification checkpoint).
 
-**Rule 12 — Bookend Tasks (First/Last Enforcement):**
-The first task in `tasks.md` must be of type `test` and must implement the Gherkin/Given-When-Then scenarios from `spec.md` as automated tests. This ensures tests exist before any implementation begins. If `spec.md` contains no Gherkin scenarios, the first task should still be type `test` but focused on scaffolding the test harness based on acceptance criteria from the brief or spec.
-
-The last task must be of type `checkpoint` and serves as the final verification step, titled "Checkpoint: Verify all tests pass", that runs all tests created during the ticket's tasks and confirms they pass. This task must depend on all preceding tasks.
-
-All intermediate tasks (implementation, infrastructure, refactoring, other checkpoints) must be ordered between the first test task and the last verification checkpoint task.
-
-**Anti-patterns for bookend enforcement:**
-- Do not place implementation tasks before the first test task
-- Do not place any task after the final verification checkpoint
-- Do not omit the first test task even if the spec has no Gherkin scenarios
-- Do not omit the final verification checkpoint task

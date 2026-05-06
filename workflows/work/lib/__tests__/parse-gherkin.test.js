@@ -14,6 +14,7 @@ const {
   parse,
   validate,
   hasSkipOverride,
+  parseRaw,
   DEFAULT_MIN_SCENARIOS,
   DEFAULT_REQUIRED_TAGS,
 } = require('../parse-gherkin');
@@ -678,5 +679,74 @@ describe('parse-gherkin: hasSkipOverride', () => {
   it('rejects skip comment with whitespace-only reason', () => {
     const result = hasSkipOverride('<!-- gherkin-skip:   -->');
     assert.equal(result.skip, false);
+  });
+});
+
+// ─── parseRaw() ─────────────────────────────────────────────────────────────
+
+const FIXTURE_STANDALONE = `Feature: User login
+  @integration
+  Scenario: Successful login with valid credentials
+    Given a registered user with email "test@example.com"
+    When the user submits valid credentials
+    Then the user is redirected to the dashboard
+
+  @unit
+  Scenario: Failed login with invalid password
+    Given a registered user with email "test@example.com"
+    When the user submits an invalid password
+    Then an error message is displayed
+
+Feature: Password reset
+  @e2e
+  Scenario: Request password reset email
+    Given a registered user
+    When the user requests a password reset
+    Then a reset email is sent
+`;
+
+describe('parse-gherkin: parseRaw', () => {
+  it('parses well-formed standalone gherkin content (no markdown headings)', () => {
+    const result = parseRaw(FIXTURE_STANDALONE);
+    assert.deepEqual(result.errors, []);
+    assert.equal(result.features.length, 2);
+
+    const [login, reset] = result.features;
+    assert.equal(login.name, 'User login');
+    assert.equal(login.scenarios.length, 2);
+    assert.equal(login.scenarios[0].name, 'Successful login with valid credentials');
+    assert.deepEqual(login.scenarios[0].tags, ['@integration']);
+    assert.equal(login.scenarios[1].name, 'Failed login with invalid password');
+    assert.deepEqual(login.scenarios[1].tags, ['@unit']);
+
+    assert.equal(reset.name, 'Password reset');
+    assert.equal(reset.scenarios.length, 1);
+    assert.equal(reset.scenarios[0].name, 'Request password reset email');
+    assert.deepEqual(reset.scenarios[0].tags, ['@e2e']);
+  });
+
+  it('returns errors for empty or malformed input', () => {
+    const emptyResult = parseRaw('');
+    assert.equal(emptyResult.features.length, 0);
+    assert.ok(emptyResult.errors.length > 0);
+
+    const nullResult = parseRaw(null);
+    assert.equal(nullResult.features.length, 0);
+    assert.ok(nullResult.errors.length > 0);
+
+    const undefinedResult = parseRaw(undefined);
+    assert.equal(undefinedResult.features.length, 0);
+    assert.ok(undefinedResult.errors.length > 0);
+  });
+
+  it('hasSkipOverride works on standalone gherkin content', () => {
+    const withSkip = `<!-- gherkin-skip: config-only change -->\n\nFeature: Something\n  Scenario: A test\n    Given x\n    When y\n    Then z\n`;
+    const result = hasSkipOverride(withSkip);
+    assert.equal(result.skip, true);
+    assert.equal(result.reason, 'config-only change');
+
+    // Also works on raw gherkin without skip comment
+    const noSkip = hasSkipOverride(FIXTURE_STANDALONE);
+    assert.equal(noSkip.skip, false);
   });
 });

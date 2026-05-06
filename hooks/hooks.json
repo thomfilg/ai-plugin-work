@@ -41,6 +41,10 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/work/hooks/protect-tasks-md.js"
+          },
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/work/hooks/protect-gherkin.js"
           }
         ]
       },
@@ -75,6 +79,10 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/work/hooks/protect-tasks-md.js"
+          },
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/work/hooks/protect-gherkin.js"
           }
         ]
       },

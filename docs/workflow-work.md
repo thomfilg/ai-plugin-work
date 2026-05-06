@@ -78,14 +78,14 @@ The main orchestrator workflow that drives ticket-to-PR delivery through 18 dete
 
 **Verification:** `spec.md` exists
 
-**Output:** `tasks/<ticket>/spec.md`
+**Output:** `tasks/<ticket>/spec.md`, `tasks/<ticket>/gherkin.feature` (Gherkin scenarios saved as standalone file)
 
 ### 6. spec_gate (GH-244)
 
 **Purpose:** Validate Gherkin test scenarios in the spec before task decomposition.
 
 **Actions:**
-- Parse `spec.md` for Gherkin test scenario blocks
+- Parse Gherkin test scenarios from `gherkin.feature` (standalone file) or fall back to inline scenarios in `spec.md`
 - Validate syntax and structure via `parse-gherkin.js`
 - Check for skip override (specs can declare Gherkin validation not applicable)
 

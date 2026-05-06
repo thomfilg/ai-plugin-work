@@ -223,6 +223,7 @@ function inspect(ticket, providerConfig, suffix, deps) {
 
   s.hasBrief = fileExists(path.join(s.tasksDir, 'brief.md'));
   s.hasSpec = fileExists(path.join(s.tasksDir, 'spec.md'));
+  s.hasGherkin = fileExists(path.join(s.tasksDir, 'gherkin.feature'));
   s.hasTasks = fileExists(path.join(s.tasksDir, 'tasks.md'));
 
   // Dev session

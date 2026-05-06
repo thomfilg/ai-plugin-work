@@ -127,10 +127,15 @@ function writeTaskArtifacts(ticket) {
   fs.mkdirSync(dir, { recursive: true });
   // brief.md with no open questions → brief verify + brief_gate verify pass
   fs.writeFileSync(path.join(dir, 'brief.md'), '# Brief\n\n## Problem Statement\nTest brief.\n');
-  // spec.md with gherkin-skip → spec verify + spec_gate verify pass
+  // spec.md → spec verify passes
   fs.writeFileSync(
     path.join(dir, 'spec.md'),
-    '# Spec\n\n<!-- gherkin-skip: test artifact -->\n\n## Summary\nTest spec.\n'
+    '# Spec\n\n## Summary\nTest spec.\n'
+  );
+  // gherkin.feature with gherkin-skip → spec_gate verify passes (GH-350: standalone gherkin file)
+  fs.writeFileSync(
+    path.join(dir, 'gherkin.feature'),
+    '<!-- gherkin-skip: test artifact -->\n'
   );
   // tasks.md → tasks verify passes
   fs.writeFileSync(path.join(dir, 'tasks.md'), '# Tasks\n\n- [ ] Task 1\n');

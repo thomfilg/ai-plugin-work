@@ -6,6 +6,7 @@
  *
  * Public API:
  *   - parse(markdown): { features: Feature[], errors: string[] }
+ *   - parseRaw(text): { features: Feature[], errors: string[] }
  *   - validate(parseResult, options?): { valid: boolean, errors: string[] }
  *   - hasSkipOverride(markdown): { skip: boolean, reason?: string }
  *   - DEFAULT_MIN_SCENARIOS: number (2)
@@ -62,35 +63,25 @@ function parseTags(line) {
   return match[1].split(/\s+/).filter((t) => t.startsWith('@'));
 }
 
-// ─── Public API ─────────────────────────────────────────────────────────────
+// ─── Core Parsing ───────────────────────────────────────────────────────────
 
 /**
- * Parse the `## Test Scenarios (Gherkin)` or `## Test Scenarios` section of a
- * spec markdown document into structured Feature/Scenario/Step data.
+ * Parse Feature/Scenario/Step lines from a slice of lines.
+ * Shared by both parse() and parseRaw().
  *
- * Never throws. Returns { features: Feature[], errors: string[] }.
- *
- * @param {string|null|undefined} markdown
+ * @param {string[]} lines
+ * @param {number} startIdx - inclusive
+ * @param {number} endIdx - exclusive
  * @returns {{ features: Array<{name: string, scenarios: Array<{name: string, tags: string[], steps: Array<{keyword: string, text: string}>}>}>, errors: string[] }}
  */
-function parse(markdown) {
-  if (typeof markdown !== 'string' || markdown.length === 0) {
-    return { features: [], errors: ['No Gherkin section found'] };
-  }
-
-  const lines = markdown.split('\n');
-  const range = findSectionRange(lines);
-  if (!range) {
-    return { features: [], errors: ['No Gherkin section found'] };
-  }
-
+function parseLines(lines, startIdx, endIdx) {
   const features = [];
   const errors = [];
   let currentFeature = null;
   let currentScenario = null;
   let pendingTags = [];
 
-  for (let i = range.start; i < range.end; i++) {
+  for (let i = startIdx; i < endIdx; i++) {
     const line = lines[i];
 
     // Feature line
@@ -161,12 +152,55 @@ function parse(markdown) {
     features.push(currentFeature);
   }
 
-  // If we found the section but no features, it's likely legacy free-text
+  // If no features found, report structural issue
   if (features.length === 0) {
     errors.push('No Feature/Scenario structure found in Gherkin section');
   }
 
   return { features, errors };
+}
+
+// ─── Public API ─────────────────────────────────────────────────────────────
+
+/**
+ * Parse the `## Test Scenarios (Gherkin)` or `## Test Scenarios` section of a
+ * spec markdown document into structured Feature/Scenario/Step data.
+ *
+ * Never throws. Returns { features: Feature[], errors: string[] }.
+ *
+ * @param {string|null|undefined} markdown
+ * @returns {{ features: Array<{name: string, scenarios: Array<{name: string, tags: string[], steps: Array<{keyword: string, text: string}>}>}>, errors: string[] }}
+ */
+function parse(markdown) {
+  if (typeof markdown !== 'string' || markdown.length === 0) {
+    return { features: [], errors: ['No Gherkin section found'] };
+  }
+
+  const lines = markdown.split('\n');
+  const range = findSectionRange(lines);
+  if (!range) {
+    return { features: [], errors: ['No Gherkin section found'] };
+  }
+
+  return parseLines(lines, range.start, range.end);
+}
+
+/**
+ * Parse standalone gherkin content without looking for a `## Test Scenarios`
+ * heading. Treats the entire input as gherkin Feature/Scenario/Step content.
+ *
+ * Never throws. Returns { features: Feature[], errors: string[] }.
+ *
+ * @param {string|null|undefined} text
+ * @returns {{ features: Array<{name: string, scenarios: Array<{name: string, tags: string[], steps: Array<{keyword: string, text: string}>}>}>, errors: string[] }}
+ */
+function parseRaw(text) {
+  if (typeof text !== 'string' || text.length === 0) {
+    return { features: [], errors: ['Empty or invalid input'] };
+  }
+
+  const lines = text.split('\n');
+  return parseLines(lines, 0, lines.length);
 }
 
 /**
@@ -257,10 +291,4 @@ function hasSkipOverride(markdown) {
   return { skip: false };
 }
 
-module.exports = {
-  parse,
-  validate,
-  hasSkipOverride,
-  DEFAULT_MIN_SCENARIOS,
-  DEFAULT_REQUIRED_TAGS,
-};
+module.exports = { parse, parseRaw, validate, hasSkipOverride, DEFAULT_MIN_SCENARIOS, DEFAULT_REQUIRED_TAGS };

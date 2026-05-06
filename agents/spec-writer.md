@@ -120,6 +120,14 @@ Search the codebase for existing endpoints/routes/handlers that overlap with thi
 
 Generate structured Gherkin scenarios with @integration or @e2e tags. The spec_gate step validates this section before allowing task generation.
 
+**Important: Save gherkin scenarios as a standalone file.** After generating the spec, save the Gherkin scenarios to `${TASKS_DIR}/gherkin.feature` as a standalone file. In `spec.md`, replace the inline Gherkin content with a reference:
+
+```
+See [gherkin.feature](./gherkin.feature) for test scenarios.
+```
+
+The `gherkin.feature` file must contain the full Feature block with all scenarios. The spec_gate parser will read from this file when it exists.
+
 **Requirements:**
 - Minimum 2 scenarios total
 - At least 1 scenario tagged @integration or @e2e
@@ -130,7 +138,7 @@ Generate structured Gherkin scenarios with @integration or @e2e tags. The spec_g
 
 **Skip override:** If the spec is for a config-only or documentation change with no testable behavior, add `<!-- gherkin-skip: reason -->` instead of Gherkin scenarios.
 
-**Format:**
+**Format (for gherkin.feature):**
 
 Feature: {feature name}
 

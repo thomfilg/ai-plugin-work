@@ -1,5 +1,5 @@
 /**
- * Unit tests for the spec-gate step module (GH-244, Task 4).
+ * Unit tests for the spec-gate step module (GH-244, Task 4; GH-350, Task 5).
  *
  * Covers the five DEFER/RUN decision paths:
  *   1. !s.hasSpec → DEFER
@@ -7,6 +7,9 @@
  *   3. gherkin-skip override → DEFER with reason
  *   4. Validation passes → DEFER with scenario count
  *   5. Validation fails → RUN with error messages
+ *
+ * GH-350 additions:
+ *   - gherkin.feature standalone file support (3 tests)
  *
  * Run: node --test workflows/work/steps/__tests__/spec-gate.test.js
  */
@@ -58,11 +61,11 @@ function makeAdd() {
 
 // ─── Fixture helpers ────────────────────────────────────────────────────────
 
-const SPEC_VALID_GHERKIN = [
-  '# Spec',
-  '',
-  '## Test Scenarios (Gherkin)',
-  '',
+// GH-350: spec.md no longer contains inline gherkin — gherkin.feature is separate.
+// Spec fixtures now contain only spec prose; gherkin fixtures are standalone.
+const SPEC_PROSE = '# Spec\n\n## Requirements\n\n- Req 1\n';
+
+const GHERKIN_VALID = [
   'Feature: User login',
   '  @integration',
   '  Scenario: Successful login',
@@ -77,11 +80,7 @@ const SPEC_VALID_GHERKIN = [
   '',
 ].join('\n');
 
-const SPEC_INVALID_GHERKIN = [
-  '# Spec',
-  '',
-  '## Test Scenarios (Gherkin)',
-  '',
+const GHERKIN_INVALID = [
   'Feature: Incomplete',
   '  Scenario: Only one scenario',
   '    Given something',
@@ -90,31 +89,31 @@ const SPEC_INVALID_GHERKIN = [
   '',
 ].join('\n');
 
-const SPEC_MALFORMED_GHERKIN = [
-  '# Spec',
-  '',
-  '## Test Scenarios (Gherkin)',
-  '',
+const GHERKIN_MALFORMED = [
   'Some free text without any Feature or Scenario keywords.',
   'This should trigger parse errors (no features found).',
   '',
 ].join('\n');
 
-const SPEC_WITH_SKIP_OVERRIDE = [
-  '# Spec',
-  '',
+const GHERKIN_WITH_SKIP_OVERRIDE = [
   '<!-- gherkin-skip: legacy migration, no testable behavior -->',
-  '',
-  '## Test Scenarios (Gherkin)',
   '',
   'Some free text without proper gherkin.',
   '',
 ].join('\n');
 
-function makeTmpTasksDir(specContent) {
+/**
+ * Create a temp tasks dir with spec.md and optionally gherkin.feature.
+ * @param {string|null} specContent - spec.md content (null = no spec.md)
+ * @param {string|null|undefined} gherkinContent - gherkin.feature content (null/undefined = no file)
+ */
+function makeTmpTasksDir(specContent, gherkinContent) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'spec-gate-test-'));
   if (specContent !== null) {
     fs.writeFileSync(path.join(dir, 'spec.md'), specContent, 'utf8');
+  }
+  if (gherkinContent != null) {
+    fs.writeFileSync(path.join(dir, 'gherkin.feature'), gherkinContent, 'utf8');
   }
   return dir;
 }
@@ -183,9 +182,9 @@ describe('spec-gate step', () => {
     assert.match(entries[0].reason, /no spec/i);
   });
 
-  // Case 3: spec.md unreadable
-  it('RUNs when spec.md is unreadable', () => {
-    const dir = makeTmpTasksDir(null); // no spec.md file
+  // Case 2: gherkin.feature missing (spec.md exists but no gherkin.feature)
+  it('RUNs when gherkin.feature is missing', () => {
+    const dir = makeTmpTasksDir(SPEC_PROSE); // spec.md exists, no gherkin.feature
     createdDirs.push(dir);
     const { add, entries } = makeAdd();
     specGateStep(add, makeState({ hasSpec: true }), makeCtx({ tasksDir: dir }));
@@ -193,14 +192,14 @@ describe('spec-gate step', () => {
     assert.equal(entries[0].step, STEPS.spec_gate);
     assert.equal(entries[0].action, 'RUN');
     assert.equal(entries[0].command, '/spec');
-    assert.match(entries[0].reason, /unreadable|regenerate/i);
+    assert.match(entries[0].reason, /gherkin\.feature|missing|regenerate/i);
     assert.equal(entries[0].agentType, 'skill');
     assert.equal(entries[0].agentPrompt, '/spec');
   });
 
-  // Case 4: gherkin-skip override
+  // Case 3: gherkin-skip override in gherkin.feature
   it('DEFERs with reason when skip override is present', () => {
-    const dir = makeTmpTasksDir(SPEC_WITH_SKIP_OVERRIDE);
+    const dir = makeTmpTasksDir(SPEC_PROSE, GHERKIN_WITH_SKIP_OVERRIDE);
     createdDirs.push(dir);
     const { add, entries } = makeAdd();
     specGateStep(add, makeState(), makeCtx({ tasksDir: dir }));
@@ -211,9 +210,9 @@ describe('spec-gate step', () => {
     assert.match(entries[0].reason, /legacy migration/i);
   });
 
-  // Case 5: Validation passes
+  // Case 4: Validation passes
   it('DEFERs with scenario count when validation passes', () => {
-    const dir = makeTmpTasksDir(SPEC_VALID_GHERKIN);
+    const dir = makeTmpTasksDir(SPEC_PROSE, GHERKIN_VALID);
     createdDirs.push(dir);
     const { add, entries } = makeAdd();
     specGateStep(add, makeState(), makeCtx({ tasksDir: dir }));
@@ -226,9 +225,9 @@ describe('spec-gate step', () => {
     assert.match(entries[0].reason, /0 @e2e/);
   });
 
-  // Case 6a: Validation fails (valid parse but thresholds not met)
+  // Case 5a: Validation fails (valid parse but thresholds not met)
   it('RUNs with error messages when validation fails', () => {
-    const dir = makeTmpTasksDir(SPEC_INVALID_GHERKIN);
+    const dir = makeTmpTasksDir(SPEC_PROSE, GHERKIN_INVALID);
     createdDirs.push(dir);
     const { add, entries } = makeAdd();
     specGateStep(add, makeState(), makeCtx({ tasksDir: dir }));
@@ -241,9 +240,9 @@ describe('spec-gate step', () => {
     assert.equal(entries[0].agentPrompt, '/spec');
   });
 
-  // Case 6b: Parse errors (malformed gherkin with no features)
+  // Case 5b: Parse errors (malformed gherkin with no features)
   it('RUNs with parse errors when Gherkin is malformed', () => {
-    const dir = makeTmpTasksDir(SPEC_MALFORMED_GHERKIN);
+    const dir = makeTmpTasksDir(SPEC_PROSE, GHERKIN_MALFORMED);
     createdDirs.push(dir);
     const { add, entries } = makeAdd();
     specGateStep(add, makeState(), makeCtx({ tasksDir: dir }));
@@ -255,5 +254,97 @@ describe('spec-gate step', () => {
     assert.match(entries[0].reason, /No Feature\/Scenario structure found/i);
     assert.equal(entries[0].agentType, 'skill');
     assert.equal(entries[0].agentPrompt, '/spec');
+  });
+});
+
+// ─── spec-gate with standalone gherkin.feature (GH-350) ─────────────────────
+
+describe('spec-gate with standalone gherkin.feature', () => {
+  let specGateStep;
+  const createdDirs = [];
+
+  before(() => {
+    const mod = require(path.join(__dirname, '..', 'spec-gate.js'));
+    specGateStep = typeof mod === 'function' ? mod : mod.specGateStep;
+  });
+
+  afterEach(() => {
+    while (createdDirs.length) rmrf(createdDirs.pop());
+  });
+
+  const GHERKIN_FEATURE_VALID = [
+    'Feature: User login',
+    '  @integration',
+    '  Scenario: Successful login',
+    '    Given a registered user',
+    '    When they submit valid credentials',
+    '    Then they are logged in',
+    '',
+    '  Scenario: Failed login',
+    '    Given a registered user',
+    '    When they submit invalid credentials',
+    '    Then they see an error message',
+    '',
+  ].join('\n');
+
+  const GHERKIN_FEATURE_WITH_SKIP = [
+    '<!-- gherkin-skip: config-only change, no testable behavior -->',
+    '',
+    'Feature: Something',
+    '  Scenario: A test',
+    '    Given x',
+    '    When y',
+    '    Then z',
+    '',
+  ].join('\n');
+
+  /**
+   * Create a temp tasks dir with spec.md (no inline gherkin) and optionally
+   * a gherkin.feature file.
+   */
+  function makeTmpWithGherkinFeature(gherkinContent) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'spec-gate-gherkin-'));
+    // spec.md without inline gherkin
+    fs.writeFileSync(path.join(dir, 'spec.md'), '# Spec\n\n## Requirements\n\n- Req 1\n', 'utf8');
+    if (gherkinContent !== null) {
+      fs.writeFileSync(path.join(dir, 'gherkin.feature'), gherkinContent, 'utf8');
+    }
+    return dir;
+  }
+
+  it('reads gherkin.feature instead of spec.md section and DEFERs with scenario count', () => {
+    const dir = makeTmpWithGherkinFeature(GHERKIN_FEATURE_VALID);
+    createdDirs.push(dir);
+    const { add, entries } = makeAdd();
+    specGateStep(add, makeState(), makeCtx({ tasksDir: dir }));
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].step, STEPS.spec_gate);
+    assert.equal(entries[0].action, 'DEFER');
+    assert.match(entries[0].reason, /passed/i);
+    assert.match(entries[0].reason, /2 scenarios/);
+  });
+
+  it('RUNs when gherkin.feature is missing', () => {
+    const dir = makeTmpWithGherkinFeature(null);
+    createdDirs.push(dir);
+    const { add, entries } = makeAdd();
+    specGateStep(add, makeState(), makeCtx({ tasksDir: dir }));
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].step, STEPS.spec_gate);
+    assert.equal(entries[0].action, 'RUN');
+    assert.equal(entries[0].command, '/spec');
+    assert.match(entries[0].reason, /gherkin\.feature|missing gherkin/i);
+  });
+
+  it('handles gherkin-skip override in gherkin.feature', () => {
+    const dir = makeTmpWithGherkinFeature(GHERKIN_FEATURE_WITH_SKIP);
+    createdDirs.push(dir);
+    const { add, entries } = makeAdd();
+    specGateStep(add, makeState(), makeCtx({ tasksDir: dir }));
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].step, STEPS.spec_gate);
+    assert.equal(entries[0].action, 'DEFER');
+    assert.match(entries[0].reason, /skip override/i);
+    assert.match(entries[0].reason, /config-only/i);
   });
 });
