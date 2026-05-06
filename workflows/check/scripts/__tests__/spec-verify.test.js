@@ -312,4 +312,105 @@ describe('spec-verify.js', () => {
     const json = JSON.parse(result.stdout);
     assert.equal(json.checks[0].passed, false);
   });
+
+  // ── REUSES local definitions (GH-327) ──────────────────────────────────
+
+  describe('REUSES local definitions (GH-327)', () => {
+    // --- Local definitions (RED — production code does not support yet) ---
+
+    it('REUSES detects local function declaration', () => {
+      writeFile('src/utils.js', 'function ghExec(args) { return args; }');
+      const specPath = writeSpec(['- REUSES src/utils.js ghExec']);
+      const result = runScript(specPath, { json: true });
+      assert.equal(result.exitCode, 0);
+      const json = JSON.parse(result.stdout);
+      assert.equal(json.checks[0].passed, true);
+    });
+
+    it('REUSES detects local const assignment', () => {
+      writeFile('src/utils.js', 'const ghExec = (args) => args;');
+      const specPath = writeSpec(['- REUSES src/utils.js ghExec']);
+      const result = runScript(specPath, { json: true });
+      assert.equal(result.exitCode, 0);
+      const json = JSON.parse(result.stdout);
+      assert.equal(json.checks[0].passed, true);
+    });
+
+    it('REUSES detects local let assignment', () => {
+      writeFile('src/utils.js', 'let counter = 0;');
+      const specPath = writeSpec(['- REUSES src/utils.js counter']);
+      const result = runScript(specPath, { json: true });
+      assert.equal(result.exitCode, 0);
+      const json = JSON.parse(result.stdout);
+      assert.equal(json.checks[0].passed, true);
+    });
+
+    it('REUSES detects local var assignment', () => {
+      writeFile('src/utils.js', 'var oldStyle = true;');
+      const specPath = writeSpec(['- REUSES src/utils.js oldStyle']);
+      const result = runScript(specPath, { json: true });
+      assert.equal(result.exitCode, 0);
+      const json = JSON.parse(result.stdout);
+      assert.equal(json.checks[0].passed, true);
+    });
+
+    // --- Regression tests (should PASS with current code) ---
+
+    it('REUSES regression: ES import still passes', () => {
+      writeFile('src/app.js', 'import { useAuth } from "./hooks";');
+      const specPath = writeSpec(['- REUSES src/app.js useAuth']);
+      const result = runScript(specPath, { json: true });
+      assert.equal(result.exitCode, 0);
+      const json = JSON.parse(result.stdout);
+      assert.equal(json.checks[0].passed, true);
+    });
+
+    it('REUSES regression: require import still passes', () => {
+      writeFile('src/app.js', "const { useAuth } = require('./hooks');");
+      const specPath = writeSpec(['- REUSES src/app.js useAuth']);
+      const result = runScript(specPath, { json: true });
+      assert.equal(result.exitCode, 0);
+      const json = JSON.parse(result.stdout);
+      assert.equal(json.checks[0].passed, true);
+    });
+
+    // --- Negative tests (should correctly FAIL) ---
+
+    it('REUSES fails when symbol is not present in file', () => {
+      writeFile('src/app.js', 'const x = 1;');
+      const specPath = writeSpec(['- REUSES src/app.js nonExistent']);
+      const result = runScript(specPath, { json: true });
+      assert.equal(result.exitCode, 1);
+      const json = JSON.parse(result.stdout);
+      assert.equal(json.checks[0].passed, false);
+      assert.ok(json.checks[0].reason.includes('definition'), 'reason should mention definition');
+    });
+
+    it('REUSES fails for commented-out function definition', () => {
+      writeFile('src/app.js', '// function ghExec(args) {}');
+      const specPath = writeSpec(['- REUSES src/app.js ghExec']);
+      const result = runScript(specPath, { json: true });
+      assert.equal(result.exitCode, 1);
+      const json = JSON.parse(result.stdout);
+      assert.equal(json.checks[0].passed, false);
+    });
+
+    it('REUSES fails for block-commented definition', () => {
+      writeFile('src/app.js', '/* const ghExec = 1; */\nconst x = 2;');
+      const specPath = writeSpec(['- REUSES src/app.js ghExec']);
+      const result = runScript(specPath, { json: true });
+      assert.equal(result.exitCode, 1);
+      const json = JSON.parse(result.stdout);
+      assert.equal(json.checks[0].passed, false);
+    });
+
+    it('REUSES fails for partial name match (word boundary)', () => {
+      writeFile('src/app.js', 'function ghExecHelper(args) {}');
+      const specPath = writeSpec(['- REUSES src/app.js ghExec']);
+      const result = runScript(specPath, { json: true });
+      assert.equal(result.exitCode, 1);
+      const json = JSON.parse(result.stdout);
+      assert.equal(json.checks[0].passed, false);
+    });
+  });
 });
