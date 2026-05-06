@@ -383,6 +383,7 @@ describe('spec-verify.js', () => {
       assert.equal(result.exitCode, 1);
       const json = JSON.parse(result.stdout);
       assert.equal(json.checks[0].passed, false);
+      assert.ok(json.checks[0].reason.includes('definition'), 'reason should mention definition');
     });
 
     it('REUSES fails for commented-out function definition', () => {
