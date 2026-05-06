@@ -14,6 +14,7 @@ const {
   parse,
   validate,
   hasSkipOverride,
+  parseRaw,
   DEFAULT_MIN_SCENARIOS,
   DEFAULT_REQUIRED_TAGS,
 } = require('../parse-gherkin');
@@ -682,8 +683,6 @@ describe('parse-gherkin: hasSkipOverride', () => {
 });
 
 // ─── parseRaw() ─────────────────────────────────────────────────────────────
-
-const { parseRaw } = require('../parse-gherkin');
 
 const FIXTURE_STANDALONE = `Feature: User login
   @integration

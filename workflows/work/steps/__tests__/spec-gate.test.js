@@ -334,6 +334,7 @@ describe('spec-gate with standalone gherkin.feature', () => {
     assert.equal(entries[0].step, STEPS.spec_gate);
     assert.equal(entries[0].action, 'RUN');
     assert.equal(entries[0].command, '/spec');
+    assert.match(entries[0].reason, /gherkin\.feature|missing gherkin/i);
   });
 
   it('handles gherkin-skip override in gherkin.feature', () => {
