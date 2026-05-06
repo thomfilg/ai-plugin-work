@@ -116,35 +116,30 @@ function validateTestCoverage(scenarios, testFiles) {
   for (const scenario of scenarios) {
     const lowerName = scenario.name.toLowerCase();
     let found = false;
+    let correctMatch = null;
+    let wrongMatch = null;
 
     for (const file of testFiles) {
       if (file.content.toLowerCase().includes(lowerName)) {
         found = true;
         const expected = expectedTestType(scenario.tags || []);
         const actual = classifyTestFile(file.path);
-        const tagMatch = expected === actual;
 
-        if (tagMatch) {
-          covered.push({
-            scenario: scenario.name,
-            file: file.path,
-            tagMatch: true,
-          });
-        } else {
-          // Tag present → expected a specific type but found wrong one
+        if (expected === actual) {
+          correctMatch = { scenario: scenario.name, file: file.path, tagMatch: true };
+          break; // correct type found — stop searching
+        } else if (!wrongMatch) {
           const tag = scenario.tags.find((t) => t === '@e2e' || t === '@integration') || '@unit';
-          mismatched.push({
-            scenario: scenario.name,
-            tag,
-            file: file.path,
-            actualType: actual,
-          });
+          wrongMatch = { scenario: scenario.name, tag, file: file.path, actualType: actual };
         }
-        break; // first matching file wins
       }
     }
 
-    if (!found) {
+    if (correctMatch) {
+      covered.push(correctMatch);
+    } else if (wrongMatch) {
+      mismatched.push(wrongMatch);
+    } else if (!found) {
       uncovered.push(scenario.name);
     }
   }
