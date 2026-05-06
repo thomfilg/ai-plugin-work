@@ -212,6 +212,7 @@ const SAFE_SUBCOMMANDS = {
     'task-get',
   ]),
   'workflow-state.js': new Set(['get', 'resume-info', 'add-error']), // init excluded: not idempotent (resets all steps). exemptPatterns (line ~327) aligned.
+  'session-guard.js': new Set(['init', 'status']), // SAFE_SUBCOMMANDS session-guard (GH-338)
 };
 
 // Trusted directories where exempt scripts are allowed to live.
@@ -447,6 +448,48 @@ function isTerminalCompleteBypass(cmd, ticketId) {
   return getCurrentStep(state, WORK_STEPS) === 'complete';
 }
 
+/**
+ * Step-conditional bypass for session-guard.js finish/reveal/complete at terminal step (GH-338).
+ *
+ * Mirrors isTerminalCompleteBypass() but for session-guard.js subcommands.
+ * Only allows finish, reveal, or complete when the workflow is at the terminal `complete` step.
+ *
+ * Security checks:
+ *   1. Command is a strict `node <path>/session-guard.js <finish|reveal|complete> <ticketId>` invocation
+ *   2. No shell operators, substitutions, or extra arguments
+ *   3. Target ticket matches the active ticket
+ *   4. The workflow is at the terminal `complete` step
+ *
+ * @param {string} cmd — the Bash command string
+ * @param {string} ticketId — the active ticket ID
+ * @returns {boolean}
+ */
+function isTerminalSessionGuardBypass(cmd, ticketId) {
+  // Strict format: only "node <path>/session-guard.js <finish|reveal|complete> <ticketId>"
+  // Accepts quoted paths: node "path/session-guard.js" or node 'path/session-guard.js'
+  // Reject anything with shell operators, substitutions, or extra arguments
+  const strictPattern =
+    /^node\s+(?:"([^"]+[\\/]session-guard\.js)"|'([^']+[\\/]session-guard\.js)'|(\S+[\\/]session-guard\.js))\s+(finish|reveal|complete)\s+(\S+)\s*$/;
+  const match = strictPattern.exec(cmd);
+  if (!match) return false;
+
+  // Reject shell operators and substitutions
+  if (/[;&|$`<>(){}\n]/.test(cmd)) return false;
+
+  // Extract and verify script path is trusted
+  const scriptPath = match[1] || match[2] || match[3];
+  const resolvedPath = expandPluginRoot(scriptPath);
+  if (!isTrustedScriptPath(resolvedPath, TRUSTED_SCRIPT_DIRS)) return false;
+
+  // Verify ticket arg matches active ticket
+  const targetTicket = match[5];
+  if (targetTicket !== ticketId) return false;
+
+  // Verify terminal step — reuse shared helper for consistent multi-in_progress handling
+  const state = loadStateFile(ticketId, '.work-state.json');
+  return getCurrentStep(state, WORK_STEPS) === 'complete';
+}
+
 function loadEvidence(ticketId, evidenceFile) {
   return loadEvidencePolicy({ tasksBase: TASKS_BASE, ticketId, evidenceFile, safeTicketPath });
 }
@@ -503,10 +546,15 @@ function handlePreToolUse(hookData) {
   // Prevents agents from bypassing the state machine by directly editing state files
   const rule3 = stateFileProtector.check(toolName, toolInput);
   if (rule3.blocked) {
-    // Step-conditional bypass: work-state.js complete is allowed at the terminal step (GH-276)
-    if (toolName === 'Bash' && rule3.match === '.work-state.json') {
+    if (toolName === 'Bash') {
       const cmd = String(toolInput?.command || '').trim();
-      if (isTerminalCompleteBypass(cmd, ticketId)) {
+      // Step-conditional bypass: work-state.js complete is allowed at the terminal step (GH-276)
+      if (rule3.match === '.work-state.json' && isTerminalCompleteBypass(cmd, ticketId)) {
+        rule3.blocked = false;
+      }
+      // Step-conditional bypass: session-guard.js finish/reveal/complete at terminal step (GH-338)
+      // Not gated on rule3.match — session-guard.js may trigger Rule 3 via different state files
+      if (rule3.blocked && isTerminalSessionGuardBypass(cmd, ticketId)) {
         rule3.blocked = false;
       }
     }
@@ -540,6 +588,14 @@ function handlePreToolUse(hookData) {
             scriptBase === 'work-state.js' &&
             subCmd === 'complete' &&
             isTerminalCompleteBypass(cmd, ticketId)
+          ) {
+            continue;
+          }
+          // Step-conditional bypass: session-guard.js finish/reveal/complete at terminal step (GH-338)
+          if (
+            scriptBase === 'session-guard.js' &&
+            (subCmd === 'finish' || subCmd === 'reveal' || subCmd === 'complete') &&
+            isTerminalSessionGuardBypass(cmd, ticketId)
           ) {
             continue;
           }
