@@ -50,10 +50,7 @@ describe('validateCheckReportStatus — valid Status lines', () => {
   });
 
   it('accepts "Status: APPROVED" for completion type (base alias)', () => {
-    const result = validateCheckReportStatus(
-      'Status: APPROVED\n# Completion Report',
-      'completion'
-    );
+    const result = validateCheckReportStatus('Status: APPROVED\n# Completion Report', 'completion');
     assert.deepStrictEqual(result, { valid: true });
   });
 
@@ -176,10 +173,7 @@ describe('validateCheckReportStatus — bold markdown variants', () => {
   });
 
   it('accepts "**Status:** **COMPLETE**" for completion type', () => {
-    const result = validateCheckReportStatus(
-      '**Status:** **COMPLETE**\n# Report',
-      'completion'
-    );
+    const result = validateCheckReportStatus('**Status:** **COMPLETE**\n# Report', 'completion');
     assert.deepStrictEqual(result, { valid: true });
   });
 

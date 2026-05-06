@@ -110,6 +110,17 @@ Report one of these five statuses for each app:
 Valid failure statuses: `ACCESS_FAILED` (Playwright unavailable, connection refused), `BLOCKED` (environment issue).
 Deprecated statuses (never use): ~~PARTIAL PASS~~, ~~PASS (API only)~~, ~~INFRASTRUCTURE_FAILURE~~ (replaced by `ACCESS_FAILED`).
 
+### Report Output Status
+
+The `write-qa-report.js` script generates the final report `Status:` line using a canonical vocabulary:
+
+| Agent Input | Report Output |
+|-------------|---------------|
+| `PASS` | `APPROVED` |
+| `FAIL`, `ACCESS_FAILED`, `BLOCKED` | `NEEDS_WORK` |
+
+You still pass the input statuses above (PASS, FAIL, ACCESS_FAILED, BLOCKED) to the report script. The script translates them to APPROVED or NEEDS_WORK on the `Status:` line for downstream gate compatibility.
+
 **Forbidden test commands:** `pnpm test`, `vitest`, `jest`, `pnpm test:smoke`, `pnpm test:integration`, `pnpm test:e2e`. You are a manual tester using browser and curl.
 
 ## 3. Source Code Policy

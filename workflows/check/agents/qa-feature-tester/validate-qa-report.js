@@ -79,9 +79,10 @@ async function main() {
     }
 
     // Check: Has structured test results (in table rows or after "Status:" labels)
+    // Matches canonical statuses (APPROVED/NEEDS_WORK) alongside legacy ones (PASS/FAIL)
     const hasTestStatus =
-      /\|\s*(PASS|FAIL)\s*\|/i.test(content) ||
-      /Status:\s*(PASS|FAIL)/i.test(content) ||
+      /\|\s*(PASS|FAIL|APPROVED|NEEDS_WORK)\s*\|/i.test(content) ||
+      /Status:\s*(PASS|FAIL|APPROVED|NEEDS_WORK)/i.test(content) ||
       content.includes('INFRASTRUCTURE_FAILURE') ||
       content.includes('ACCESS_FAILED');
     if (!hasTestStatus) {

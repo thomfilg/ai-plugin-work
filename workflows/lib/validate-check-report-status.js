@@ -11,8 +11,24 @@ VALID_STATUSES['completion'] = ['APPROVED', 'NEEDS_WORK', 'NOT_APPLICABLE']; // 
 // Human-readable valid values per type (includes aliases for user guidance)
 const VALID_VALUES = Object.create(null);
 VALID_VALUES['completion'] = ['APPROVED', 'NEEDS_WORK', 'COMPLETE', 'INCOMPLETE', 'NOT_APPLICABLE'];
-VALID_VALUES['tests'] = ['APPROVED', 'NEEDS_WORK', 'PASS', 'PASSED', 'FAIL', 'FAILED', 'NOT_APPLICABLE'];
-VALID_VALUES['codeReview'] = ['APPROVED', 'NEEDS_WORK', 'PASS', 'PASSED', 'FAIL', 'FAILED', 'NOT_APPLICABLE'];
+VALID_VALUES['tests'] = [
+  'APPROVED',
+  'NEEDS_WORK',
+  'PASS',
+  'PASSED',
+  'FAIL',
+  'FAILED',
+  'NOT_APPLICABLE',
+];
+VALID_VALUES['codeReview'] = [
+  'APPROVED',
+  'NEEDS_WORK',
+  'PASS',
+  'PASSED',
+  'FAIL',
+  'FAILED',
+  'NOT_APPLICABLE',
+];
 
 /**
  * Get human-readable valid status values for a report type.
@@ -35,7 +51,8 @@ function getValidStatusValues(reportType) {
  */
 function validateCheckReportStatus(content, reportType) {
   try {
-    if (content === null || content === undefined || typeof content !== 'string') return { valid: true }; // fail-open for null/undefined/non-string
+    if (content === null || content === undefined || typeof content !== 'string')
+      return { valid: true }; // fail-open for null/undefined/non-string
     // Empty string is treated as missing Status (not fail-open) — check-gate blocks empty reports
 
     const match = content.match(STATUS_LINE_RE);
@@ -43,7 +60,8 @@ function validateCheckReportStatus(content, reportType) {
       const validValues = getValidStatusValues(reportType);
       return {
         valid: false,
-        message: `BLOCKED: Report content must contain a Status: line.\n` +
+        message:
+          `BLOCKED: Report content must contain a Status: line.\n` +
           `Expected format: Status: <VALUE> or **Status:** <VALUE>\n` +
           `Valid values for ${reportType} reports: ${validValues.join(', ')}\n` +
           `Example: Status: APPROVED`,
@@ -56,7 +74,8 @@ function validateCheckReportStatus(content, reportType) {
       const validValues = getValidStatusValues(reportType);
       return {
         valid: false,
-        message: `BLOCKED: Status value "${raw}" is not valid for ${reportType} reports.\n` +
+        message:
+          `BLOCKED: Status value "${raw}" is not valid for ${reportType} reports.\n` +
           `Valid values: ${validValues.join(', ')}`,
       };
     }

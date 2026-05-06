@@ -358,14 +358,14 @@ describe('parseReportStatus — anchored markers prevent false positives', () =>
     assert.equal(result.status, 'UNKNOWN', 'SUCCESS is only valid for QA type');
   });
 
-  it('recognizes "Status: INFRASTRUCTURE_FAILURE" for QA type', () => {
+  it('resolves "Status: INFRASTRUCTURE_FAILURE" to NEEDS_WORK for QA type (GH-331)', () => {
     const result = parseReportStatus('Status: INFRASTRUCTURE_FAILURE', 'qa');
-    assert.deepStrictEqual(result, { status: 'INFRASTRUCTURE_FAILURE', icon: '🛑' });
+    assert.deepStrictEqual(result, { status: 'NEEDS_WORK', icon: '❌' });
   });
 
-  it('recognizes "Status: ACCESS_FAILED" for QA type', () => {
+  it('resolves "Status: ACCESS_FAILED" to NEEDS_WORK for QA type (GH-331)', () => {
     const result = parseReportStatus('Status: ACCESS_FAILED', 'qa');
-    assert.deepStrictEqual(result, { status: 'ACCESS_FAILED', icon: '🔒' });
+    assert.deepStrictEqual(result, { status: 'NEEDS_WORK', icon: '❌' });
   });
 
   it('Status: APPROVED at top overrides later Status: FAIL in embedded output', () => {
@@ -1095,5 +1095,58 @@ describe('parseReportStatus — freeform fallback patterns (GH-326)', () => {
     const content = '# Code Review\n\n**APPROVED**\n\nSome CRITICAL mention in passing';
     const result = parseReportStatus(content, 'codeReview');
     assert.equal(result.status, 'APPROVED', 'freeform should take priority over fail markers');
+  });
+});
+
+// ===========================================================================
+// GH-331 Task 1.1: QA alias unification — INFRASTRUCTURE_FAILURE and
+// ACCESS_FAILED should resolve to NEEDS_WORK via Status: line
+// ===========================================================================
+describe('parseReportStatus — GH-331 QA alias unification', () => {
+  it('resolves "Status: INFRASTRUCTURE_FAILURE" to NEEDS_WORK for QA type', () => {
+    const result = parseReportStatus('Status: INFRASTRUCTURE_FAILURE', 'qa');
+    assert.equal(
+      result.status,
+      'NEEDS_WORK',
+      'INFRASTRUCTURE_FAILURE alias must resolve to NEEDS_WORK'
+    );
+    assert.equal(result.icon, '❌');
+  });
+
+  it('resolves "Status: ACCESS_FAILED" to NEEDS_WORK for QA type', () => {
+    const result = parseReportStatus('Status: ACCESS_FAILED', 'qa');
+    assert.equal(result.status, 'NEEDS_WORK', 'ACCESS_FAILED alias must resolve to NEEDS_WORK');
+    assert.equal(result.icon, '❌');
+  });
+
+  it('resolves INFRASTRUCTURE_FAILURE in summary table to NEEDS_WORK for QA type', () => {
+    const content = '| Status | INFRASTRUCTURE_FAILURE |';
+    const result = parseReportStatus(content, 'qa');
+    assert.equal(
+      result.status,
+      'NEEDS_WORK',
+      'INFRASTRUCTURE_FAILURE in table must resolve to NEEDS_WORK'
+    );
+  });
+
+  it('resolves ACCESS_FAILED in summary table to NEEDS_WORK for QA type', () => {
+    const content = '| Status | ACCESS_FAILED |';
+    const result = parseReportStatus(content, 'qa');
+    assert.equal(result.status, 'NEEDS_WORK', 'ACCESS_FAILED in table must resolve to NEEDS_WORK');
+  });
+
+  it('still resolves "Status: SUCCESS" to APPROVED for QA type (backward compat)', () => {
+    const result = parseReportStatus('Status: SUCCESS', 'qa');
+    assert.equal(result.status, 'APPROVED', 'SUCCESS alias must still resolve to APPROVED');
+  });
+
+  it('still resolves "Status: PASS" to APPROVED for QA type', () => {
+    const result = parseReportStatus('Status: PASS', 'qa');
+    assert.equal(result.status, 'APPROVED', 'PASS alias must resolve to APPROVED');
+  });
+
+  it('still resolves "Status: FAIL" to NEEDS_WORK for QA type', () => {
+    const result = parseReportStatus('Status: FAIL', 'qa');
+    assert.equal(result.status, 'NEEDS_WORK', 'FAIL alias must resolve to NEEDS_WORK');
   });
 });

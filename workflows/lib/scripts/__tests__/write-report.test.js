@@ -359,4 +359,134 @@ describe('write-report', () => {
       }
     });
   });
+
+  // ─── GH-331 Task 1.2: write-qa-report formatReport status mapping ─────────
+  describe('write-qa-report formatReport status mapping (GH-331)', () => {
+    afterEach(() => {
+      cleanupToken('write-qa-report.js');
+      try {
+        fs.unlinkSync('/tmp/qa-test-runner.check.md');
+      } catch {
+        /* ignore */
+      }
+    });
+
+    it('outputs "Status: APPROVED" when input status is PASS', () => {
+      writeToken('write-qa-report.js', 'qa-feature-tester', Date.now());
+      const input = { ...validQAInput, status: 'PASS' };
+      const result = runScript(QA_SCRIPT, input);
+      assert.equal(result.exitCode, 0, `script failed: ${result.output}`);
+
+      const content = fs.readFileSync('/tmp/qa-test-runner.check.md', 'utf8');
+      const statusLine = content.match(/^Status:\s*(\S+)/m);
+      assert.ok(statusLine, 'report must contain a Status: line');
+      assert.equal(statusLine[1], 'APPROVED', 'PASS input must produce Status: APPROVED');
+    });
+
+    it('outputs "Status: NEEDS_WORK" when input status is FAIL', () => {
+      writeToken('write-qa-report.js', 'qa-feature-tester', Date.now());
+      const input = {
+        ...validQAInput,
+        status: 'FAIL',
+        tests: [{ name: 'test1', status: 'fail' }],
+      };
+      const result = runScript(QA_SCRIPT, input);
+      assert.equal(result.exitCode, 0, `script failed: ${result.output}`);
+
+      const content = fs.readFileSync('/tmp/qa-test-runner.check.md', 'utf8');
+      const statusLine = content.match(/^Status:\s*(\S+)/m);
+      assert.ok(statusLine, 'report must contain a Status: line');
+      assert.equal(statusLine[1], 'NEEDS_WORK', 'FAIL input must produce Status: NEEDS_WORK');
+    });
+
+    it('outputs "Status: NEEDS_WORK" when input status is INFRASTRUCTURE_FAILURE', () => {
+      writeToken('write-qa-report.js', 'qa-feature-tester', Date.now());
+      const input = {
+        ...validQAInput,
+        status: 'INFRASTRUCTURE_FAILURE',
+        screenshots: [],
+        mcpDiagnostics: 'Playwright not available',
+      };
+      const result = runScript(QA_SCRIPT, input);
+      assert.equal(result.exitCode, 0, `script failed: ${result.output}`);
+
+      const content = fs.readFileSync('/tmp/qa-test-runner.check.md', 'utf8');
+      const statusLine = content.match(/^Status:\s*(\S+)/m);
+      assert.ok(statusLine, 'report must contain a Status: line');
+      assert.equal(
+        statusLine[1],
+        'NEEDS_WORK',
+        'INFRASTRUCTURE_FAILURE input must produce Status: NEEDS_WORK'
+      );
+    });
+
+    it('outputs "Status: NEEDS_WORK" when input status is ACCESS_FAILED', () => {
+      writeToken('write-qa-report.js', 'qa-feature-tester', Date.now());
+      const input = {
+        ...validQAInput,
+        status: 'ACCESS_FAILED',
+        screenshots: [],
+        mcpDiagnostics: 'Could not reach app',
+      };
+      const result = runScript(QA_SCRIPT, input);
+      assert.equal(result.exitCode, 0, `script failed: ${result.output}`);
+
+      const content = fs.readFileSync('/tmp/qa-test-runner.check.md', 'utf8');
+      const statusLine = content.match(/^Status:\s*(\S+)/m);
+      assert.ok(statusLine, 'report must contain a Status: line');
+      assert.equal(
+        statusLine[1],
+        'NEEDS_WORK',
+        'ACCESS_FAILED input must produce Status: NEEDS_WORK'
+      );
+    });
+
+    it('outputs "Status: NEEDS_WORK" when input status is BLOCKED', () => {
+      writeToken('write-qa-report.js', 'qa-feature-tester', Date.now());
+      const input = {
+        ...validQAInput,
+        status: 'BLOCKED',
+        screenshots: [],
+      };
+      const result = runScript(QA_SCRIPT, input);
+      assert.equal(result.exitCode, 0, `script failed: ${result.output}`);
+
+      const content = fs.readFileSync('/tmp/qa-test-runner.check.md', 'utf8');
+      const statusLine = content.match(/^Status:\s*(\S+)/m);
+      assert.ok(statusLine, 'report must contain a Status: line');
+      assert.equal(statusLine[1], 'NEEDS_WORK', 'BLOCKED input must produce Status: NEEDS_WORK');
+    });
+  });
+
+  // ─── GH-331 Task 1.3: write-qa-report reportType validation ───────────────
+  describe('write-qa-report reportType: qa validation (GH-331)', () => {
+    afterEach(() => {
+      cleanupToken('write-qa-report.js');
+      try {
+        fs.unlinkSync('/tmp/qa-test-runner.check.md');
+      } catch {
+        /* ignore */
+      }
+    });
+
+    it('has reportType set to qa in createReportWriter config', () => {
+      // Verify by reading the source file and checking for reportType: 'qa'
+      const qaSource = fs.readFileSync(QA_SCRIPT, 'utf8');
+      assert.ok(
+        /reportType:\s*['"]qa['"]/.test(qaSource),
+        'write-qa-report.js must configure reportType: "qa" in createReportWriter config'
+      );
+    });
+
+    it('post-write validation succeeds for PASS status (reportType fires)', () => {
+      // When reportType: 'qa' is set, the post-write validation in write-report.js
+      // will verify that the formatted output has a parseable Status line.
+      // This test verifies the full pipeline works with reportType active.
+      writeToken('write-qa-report.js', 'qa-feature-tester', Date.now());
+      const input = { ...validQAInput, status: 'PASS' };
+      const result = runScript(QA_SCRIPT, input);
+      assert.equal(result.exitCode, 0, `post-write validation should pass: ${result.output}`);
+      assert.ok(result.output.includes('"success": true'));
+    });
+  });
 });

@@ -103,14 +103,28 @@ function validateQAReport(filePath, appName) {
     issues.push('No screenshots found - QA reports must include visual evidence');
   }
 
-  // Check for pass/fail status
-  const hasStatus = content.includes('PASS') || content.includes('FAIL');
+  // Check for pass/fail status (canonical: APPROVED/NEEDS_WORK, legacy: PASS/FAIL)
+  const hasStatus =
+    content.includes('PASS') ||
+    content.includes('FAIL') ||
+    content.includes('APPROVED') ||
+    content.includes('NEEDS_WORK');
   if (!hasStatus) {
-    issues.push('Missing PASS/FAIL status');
+    issues.push('Missing PASS/FAIL/APPROVED/NEEDS_WORK status');
   }
 
-  // Check if marked as failed
-  const failed = content.includes('❌ FAIL') || content.includes('Status: FAIL');
+  // Check if marked as failed using the FIRST Status: line + body markers in current run.
+  // Reports may contain "Previous Run" sections with stale statuses — limit body scan
+  // to content before the first "# Previous Run" delimiter.
+  const statusLineMatch = content.match(/^Status:\s*(\S+)/m);
+  const firstStatus = statusLineMatch ? statusLineMatch[1] : '';
+  const prevRunIdx = content.indexOf('# Previous Run');
+  const currentRunContent = prevRunIdx > -1 ? content.slice(0, prevRunIdx) : content;
+  const bodyHasFailMarker =
+    currentRunContent.includes('❌ FAIL') || currentRunContent.includes('❌ NEEDS_WORK');
+  const failed = statusLineMatch
+    ? firstStatus === 'FAIL' || firstStatus === 'NEEDS_WORK' || bodyHasFailMarker
+    : bodyHasFailMarker;
 
   return {
     exists: true,

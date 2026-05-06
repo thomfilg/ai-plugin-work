@@ -40,8 +40,8 @@ TYPE_ALIASES['completion'] = Object.assign(Object.create(null), BASE_ALIASES, {
 // and recognizes infrastructure/access failure statuses from write-qa-report.js.
 TYPE_ALIASES['qa'] = Object.assign(Object.create(null), BASE_ALIASES, {
   SUCCESS: 'APPROVED',
-  INFRASTRUCTURE_FAILURE: 'INFRASTRUCTURE_FAILURE',
-  ACCESS_FAILED: 'ACCESS_FAILED',
+  INFRASTRUCTURE_FAILURE: 'NEEDS_WORK',
+  ACCESS_FAILED: 'NEEDS_WORK',
 });
 // Fallback for types without overrides
 const STATUS_ALIASES = BASE_ALIASES;
@@ -249,9 +249,7 @@ function checkFreeformStatus(content, type) {
   }
 
   // 4. Standalone status at line start followed by dash
-  const dashMatch = content.match(
-    /^(COMPLETE|APPROVED|NEEDS_WORK|INCOMPLETE)\s*[—–-]/m
-  );
+  const dashMatch = content.match(/^(COMPLETE|APPROVED|NEEDS_WORK|INCOMPLETE)\s*[—–-]/m);
   if (dashMatch) {
     const resolved = resolveAlias(dashMatch[1].toUpperCase(), type);
     if (resolved) return resolved;
@@ -573,4 +571,10 @@ function isCodeReviewResolved(reportContent, replyContent) {
   };
 }
 
-module.exports = { parseReportStatus, parseReplyDecisions, isCodeReviewResolved, resolveAlias, STATUS_LINE_RE };
+module.exports = {
+  parseReportStatus,
+  parseReplyDecisions,
+  isCodeReviewResolved,
+  resolveAlias,
+  STATUS_LINE_RE,
+};

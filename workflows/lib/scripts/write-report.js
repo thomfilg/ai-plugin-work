@@ -253,9 +253,9 @@ function createReportWriter(config) {
       if (!hasValidStatus) {
         process.stderr.write(
           `[${name}] VALIDATION FAILED: Formatted report has no parseable Status line.\n` +
-          `  parseReportStatus returned: ${hasValidStatus ? 'valid' : 'UNKNOWN'}\n` +
-          `  The formatReport() function must include a "Status: <VALUE>" line.\n` +
-          `  This is a bug in the report writer, not in the agent input.\n`
+            `  parseReportStatus returned: ${hasValidStatus ? 'valid' : 'UNKNOWN'}\n` +
+            `  The formatReport() function must include a "Status: <VALUE>" line.\n` +
+            `  This is a bug in the report writer, not in the agent input.\n`
         );
         process.exit(1);
       }
