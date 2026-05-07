@@ -29,11 +29,14 @@ function getTaskStatus(tasksDir, taskNum) {
 
   try {
     const state = JSON.parse(fs.readFileSync(tddPath, 'utf8'));
-    // Check if evidence has both red and green (minimum for completion)
+    // Check for completed TDD cycle (red+green minimum)
+    // Evidence format uses cycles array: [{red:{...}, green:{...}, refactor:{...}}]
+    const cycles = state.cycles || [];
+    const hasCompleteCycle = cycles.some((c) => c.red && c.green);
+    if (hasCompleteCycle) return 'completed';
+    // Also check legacy flat format (evidence.red/evidence.green)
     const evidence = state.evidence || {};
-    const hasRed = !!evidence.red;
-    const hasGreen = !!evidence.green;
-    if (hasRed && hasGreen) return 'completed';
+    if (evidence.red && evidence.green) return 'completed';
     return 'in_progress';
   } catch {
     // No TDD state file — check if task dir exists (may have been started)

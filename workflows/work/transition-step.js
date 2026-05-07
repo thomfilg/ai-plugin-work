@@ -89,9 +89,8 @@ function transitionStep(ticket, targetStep, deps) {
     ws?.tasksMeta?.currentTaskIndex != null ? ws.tasksMeta.currentTaskIndex + 1 : undefined;
 
   // TDD gate: require evidence before leaving gated steps (always enforced)
-  // NOTE: This gate validates TDD evidence for the CURRENT task only.
-  // Multi-task iteration (blocking implement→commit when tasks remain) is handled
-  // by work2's implement-gate.js — NOT here. This file is shared across /work and /work2.
+  // NOTE: This validates TDD evidence for the CURRENT task only (per tasksMeta.currentTaskIndex).
+  // The multi-task guard below separately blocks leaving implement when tasks remain.
   if (TDD_GATED_STEPS.includes(currentStep) && currentStep !== targetStep) {
     const { exists, parseError, evidence } = readTddEvidence(safeTicket, currentStep, taskNum);
     if (!exists || parseError) {
@@ -103,6 +102,26 @@ function transitionStep(ticket, targetStep, deps) {
     const validation = validateTddEvidence(evidence);
     if (!validation.valid) {
       return { error: true, message: `TDD evidence invalid: ${validation.reason}` };
+    }
+  }
+
+  // Multi-task gate: block leaving implement until ALL tasks are done.
+  // This MUST be in transition-step.js (not just implement-gate.js) because the
+  // dispatch-advance gate only runs when transition FAILS. Without this guard,
+  // transition succeeds after any single task's TDD evidence passes and remaining
+  // tasks are silently skipped. work2's implement-gate.js handles advancing the
+  // task pointer; this guard ensures the transition itself is blocked.
+  if (currentStep === STEPS.implement && currentStep !== targetStep) {
+    if (ws?.tasksMeta && Array.isArray(ws.tasksMeta.tasks)) {
+      const currentIdx = ws.tasksMeta.currentTaskIndex ?? 0;
+      const totalTasks = ws.tasksMeta.tasks.length;
+      if (currentIdx < totalTasks - 1) {
+        return {
+          error: true,
+          message: `Cannot leave implement: task ${currentIdx + 1}/${totalTasks} done, ${totalTasks - currentIdx - 1} tasks remaining. Advance to next task first.`,
+          gate: 'multi-task',
+        };
+      }
     }
   }
 

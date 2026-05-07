@@ -1,13 +1,17 @@
 /**
  * Implement multi-task gate.
  *
- * Prevents the implement step from advancing to commit when there are
- * remaining tasks. When TDD evidence exists for the current task but
- * more tasks remain, advances the task pointer and signals a re-dispatch.
+ * Handles task-advance when the current task's TDD evidence is valid
+ * and more tasks remain. Returns { recurse: true } to re-dispatch
+ * the next task, or null to let work-next.js handle re-dispatch.
  *
- * This is work2-specific orchestration — the shared transition-step.js
- * only validates TDD evidence per-task, it does NOT enforce multi-task
- * iteration. That responsibility lives here.
+ * This gate works WITH the multi-task guard in transition-step.js:
+ *   - transition-step.js BLOCKS implement→commit when tasks remain
+ *   - This gate ADVANCES the task pointer when evidence is valid
+ *
+ * When evidence is missing or invalid, returns null so work-next.js
+ * falls through and re-dispatches the full implementation prompt
+ * (which already includes TDD evidence instructions).
  */
 
 'use strict';
@@ -19,33 +23,19 @@ const { markProgress } = require(path.join(__dirname, '..', 'mark-task-progress'
 /**
  * Dispatch-advance gate for the implement step.
  *
- * Called by work-next.js when a dispatched step's transition is blocked.
- * Returns null (no action), { recurse: true } (re-run orchestrator),
- * or a full instruction object (return to caller).
- *
  * @param {string} safeName - Sanitized ticket ID
  * @param {object} ctx - Context from work-next.js
- * @param {string} ctx.ticket - Display ticket ID (e.g., '#279')
- * @param {object} ctx.stateCtx - State context for instruction building
  * @param {object} deps - Dependencies injected from work-next.js
- * @param {Function} deps.loadWorkState
- * @param {Function} deps.saveWorkState
- * @param {Function} deps.readTddEvidence
- * @param {string} deps.stepName - Current step name (e.g., 'implement')
- * @param {string} deps.workDir - Path to workflows/work/
- * @param {string} deps.work2Dir - Path to workflows/work2/
- * @param {Function} deps.log - Debug logger
- * @param {number} deps.recursionDepth
- * @returns {null | { recurse: true } | object} - null=no action, recurse=re-run, object=instruction
+ * @returns {null | { recurse: true }} - null=no action (re-dispatch), recurse=re-run orchestrator
  */
 function dispatchAdvanceGate(safeName, ctx, deps) {
   const {
     loadWorkState,
     saveWorkState,
     readTddEvidence,
+    validateTddEvidence,
     stepName,
     workDir,
-    work2Dir,
     log,
     recursionDepth,
   } = deps;
@@ -59,46 +49,14 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
   const totalTasks = ws.tasksMeta.tasks.length;
   const taskNum = currentIdx + 1; // 1-indexed
 
-  // Check if TDD evidence exists for the current task
-  const { exists: hasEvidence } = readTddEvidence(safeName, stepName, taskNum);
+  // Check evidence exists AND is valid (red+green cycle complete)
+  const { exists, evidence } = readTddEvidence(safeName, stepName, taskNum);
+  if (!exists) return null; // no evidence — let work-next re-dispatch implementation prompt
 
-  // No evidence — return instruction to record it
-  if (!hasEvidence) {
-    const tddNextPath = path.join(work2Dir, 'tdd-next.js');
-    const taskFlag = taskNum ? ` --task ${taskNum}` : '';
-    const instr = {
-      type: 'work_instruction',
-      action: 'execute',
-      state: { ...ctx.stateCtx, currentStep: stepName },
-      continue: true,
-      delegate: {
-        type: 'task',
-        agentType: 'developer-nodejs-tdd',
-        description: `record TDD evidence for task ${taskNum}`,
-        prompt: [
-          '## TDD Evidence Missing',
-          '',
-          'The implementation work is done but TDD evidence was NOT recorded.',
-          'The workflow CANNOT advance without it.',
-          '',
-          '**You MUST run these commands in order:**',
-          '',
-          '```bash',
-          `node "${tddNextPath}" ${ctx.ticket}${taskFlag}`,
-          '```',
-          '',
-          'Follow the instructions from tdd-next.js to record evidence for each phase (init → red → green → refactor).',
-          'Run the test command at each phase to generate real evidence.',
-          '',
-          'DO NOT skip any phase. DO NOT re-implement code. Just record evidence.',
-        ].join('\n'),
-      },
-    };
-    if (log) log.instruction(instr);
-    return instr;
-  }
+  const validation = validateTddEvidence(evidence);
+  if (!validation.valid) return null; // incomplete evidence — let work-next re-dispatch
 
-  // Evidence exists but more tasks remain — advance task pointer
+  // Evidence valid — check if more tasks remain
   if (currentIdx < totalTasks - 1) {
     try {
       execFileSync(
@@ -113,7 +71,7 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
         delete ws2._work2DispatchedAction;
         saveWorkState(safeName, ws2);
       }
-      // Update tasks.md checkboxes to reflect progress
+      // Update tasks.md checkboxes
       if (ctx.tasksDir) {
         try {
           markProgress(ctx.tasksDir);
@@ -130,7 +88,7 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
     }
   }
 
-  // All tasks done, evidence exists — update checkboxes and allow transition
+  // All tasks done with valid evidence — update checkboxes, allow transition
   if (ctx.tasksDir) {
     try {
       markProgress(ctx.tasksDir);
