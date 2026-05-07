@@ -223,6 +223,32 @@ function buildInstruction(entry, stateCtx) {
     instruction.preCommands = entry.preCommands;
   }
 
+  // Context enrichment: inject ticket details file reference into prompts that need it
+  const ticket = stateCtx.ticket;
+  const providerConfig = tp.getProviderConfig({ skipPrompt: true });
+  const safeBase = tp.sanitizeTicketIdForPath(ticket, providerConfig);
+  const tasksDir = path.join(TASKS_BASE, safeBase);
+  const ticketFile = path.join(tasksDir, 'ticket.json');
+
+  // For ticket step: add instruction to save output to file
+  if (entry.step === 'ticket') {
+    const saveCmd = `gh issue view ${ticket.replace('#', '')} --json title,body,state,labels > "${ticketFile}"`;
+    entry.agentPrompt = `${entry.agentPrompt}\n\nIMPORTANT: Also save the raw JSON output to: ${ticketFile}\nRun: ${saveCmd}`;
+  }
+
+  // For steps that benefit from ticket context: append file reference
+  if (['brief', 'spec', 'implement'].includes(entry.step)) {
+    if (fs.existsSync(ticketFile)) {
+      try {
+        const ticketData = JSON.parse(fs.readFileSync(ticketFile, 'utf8'));
+        const contextBlock = `\n\n## Ticket Context\nTitle: ${ticketData.title}\nState: ${ticketData.state}\n\n${ticketData.body || '(no body)'}`;
+        entry.agentPrompt = (entry.agentPrompt || '') + contextBlock;
+      } catch {
+        /* fail-open */
+      }
+    }
+  }
+
   // Delegation block
   if (entry.agentType === 'skill') {
     // Extract skill name from agentPrompt (e.g., "/check" → "check", "/work-implement ..." → "work-implement")
