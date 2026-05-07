@@ -449,7 +449,7 @@ function getNextInstruction(ticketRaw, rework) {
           const gateResult = runGate(
             entry.step,
             safeName,
-            { ticket, stateCtx },
+            { ticket, stateCtx, tasksDir },
             {
               loadWorkState,
               saveWorkState,

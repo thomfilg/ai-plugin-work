@@ -14,6 +14,7 @@
 
 const path = require('path');
 const { execFileSync } = require('child_process');
+const { markProgress } = require(path.join(__dirname, '..', 'mark-task-progress'));
 
 /**
  * Dispatch-advance gate for the implement step.
@@ -112,6 +113,14 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
         delete ws2._work2DispatchedAction;
         saveWorkState(safeName, ws2);
       }
+      // Update tasks.md checkboxes to reflect progress
+      if (ctx.tasksDir) {
+        try {
+          markProgress(ctx.tasksDir);
+        } catch {
+          /* fail-open */
+        }
+      }
       if (log) {
         log.recurse(recursionDepth, `task-advance ${currentIdx + 1} → ${currentIdx + 2}`);
       }
@@ -121,7 +130,14 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
     }
   }
 
-  // All tasks done, evidence exists — no gate action needed
+  // All tasks done, evidence exists — update checkboxes and allow transition
+  if (ctx.tasksDir) {
+    try {
+      markProgress(ctx.tasksDir);
+    } catch {
+      /* fail-open */
+    }
+  }
   return null;
 }
 
