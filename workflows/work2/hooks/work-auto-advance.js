@@ -3,11 +3,10 @@
 /**
  * work-auto-advance.js — PostToolUse hook for /work2.
  *
- * After each Task/Skill completion at the orchestrator level, this hook:
+ * After each Task/Skill completion, this hook:
  * 1. Checks if a /work2 session is active (marker file exists)
- * 2. Verifies we're at the orchestrator level (session_id matches marker)
- * 3. Calls work-next.js to get the next instruction
- * 4. Outputs the instruction via console.log() (visible to AI)
+ * 2. Calls work-next.js to get the next instruction
+ * 3. Outputs the instruction via console.log() (visible to AI)
  *
  * Fail-open: Any error → exit 0 silently.
  */
@@ -29,10 +28,6 @@ function main() {
     process.exit(0);
   }
 
-  // Guard: need session_id
-  const sessionId = hookData?.session_id;
-  if (!sessionId) process.exit(0);
-
   // Guard: find active /work2 session via marker file
   const getConfig = require(path.join(__dirname, '..', '..', 'lib', 'get-config'));
   const WORKTREES_BASE = getConfig('WORKTREES_BASE') || '';
@@ -41,11 +36,12 @@ function main() {
   if (!TASKS_BASE) process.exit(0);
 
   // Scan for .work2-orchestrator.pid marker in TASKS_BASE subdirectories
-  const marker = findActiveMarker(TASKS_BASE, sessionId);
+  const marker = findActiveMarker(TASKS_BASE);
   if (!marker) process.exit(0);
 
-  // Guard: session must match (ensures we're at orchestrator level, not inside sub-agent)
-  if (marker.sessionId !== sessionId) process.exit(0);
+  // Guard: marker must be recent (less than 12 hours old) to avoid stale sessions
+  const markerAge = Date.now() - new Date(marker.startedAt).getTime();
+  if (markerAge > 12 * 60 * 60 * 1000) process.exit(0);
 
   // Call work-next.js
   const workNextPath = path.join(__dirname, '..', 'work-next.js');
@@ -55,7 +51,6 @@ function main() {
       encoding: 'utf8',
       timeout: 25000,
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, SESSION_ID: sessionId },
     });
   } catch {
     process.exit(0);
@@ -69,7 +64,7 @@ function main() {
     process.exit(0);
   }
 
-  // Only output if there's work to do
+  // Output the instruction for the AI to see
   if (instruction.action === 'execute') {
     console.log('');
     console.log('═══ WORK2: NEXT STEP ═══');
@@ -94,10 +89,10 @@ function main() {
 }
 
 /**
- * Scan TASKS_BASE for an active .work2-orchestrator.pid marker matching sessionId.
+ * Scan TASKS_BASE for an active .work2-orchestrator.pid marker.
  * Returns the parsed marker or null.
  */
-function findActiveMarker(tasksBase, sessionId) {
+function findActiveMarker(tasksBase) {
   try {
     const entries = fs.readdirSync(tasksBase, { withFileTypes: true });
     for (const entry of entries) {
@@ -105,8 +100,7 @@ function findActiveMarker(tasksBase, sessionId) {
       const markerPath = path.join(tasksBase, entry.name, '.work2-orchestrator.pid');
       if (!fs.existsSync(markerPath)) continue;
       try {
-        const marker = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
-        if (marker.sessionId === sessionId) return marker;
+        return JSON.parse(fs.readFileSync(markerPath, 'utf8'));
       } catch {
         continue;
       }

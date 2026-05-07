@@ -31,16 +31,8 @@ function runHook(hookData, env = {}) {
 }
 
 describe('work-prevent-stop hook', () => {
-  it('allows stop when no session_id', () => {
+  it('allows stop when no matching marker file exists', () => {
     const result = runHook({ tool_name: 'Stop' });
-    assert.equal(result.exitCode, 0);
-  });
-
-  it('allows stop when no matching marker file', () => {
-    const result = runHook({
-      tool_name: 'Stop',
-      session_id: 'no-match-session-99999',
-    });
     assert.equal(result.exitCode, 0);
   });
 

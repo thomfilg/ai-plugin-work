@@ -4,7 +4,7 @@
  * work-prevent-stop.js — Stop hook for /work2.
  *
  * Prevents the AI from stopping mid-workflow. If a /work2 session is
- * active (marker file exists for current session), blocks the stop
+ * active (marker file exists and is recent), blocks the stop
  * and outputs a continuation instruction.
  *
  * Fail-open: Any error → exit 0 (allow stop).
@@ -17,17 +17,12 @@ process.on('uncaughtException', () => process.exit(0));
 process.on('unhandledRejection', () => process.exit(0));
 
 function main() {
-  // Read hook input from stdin
-  let hookData;
+  // Read hook input from stdin (required by hook protocol)
   try {
-    const input = fs.readFileSync(0, 'utf8');
-    hookData = JSON.parse(input);
+    fs.readFileSync(0, 'utf8');
   } catch {
     process.exit(0);
   }
-
-  const sessionId = hookData?.session_id;
-  if (!sessionId) process.exit(0);
 
   // Find active marker
   const getConfig = require(path.join(__dirname, '..', '..', 'lib', 'get-config'));
@@ -46,7 +41,9 @@ function main() {
       if (!fs.existsSync(markerPath)) continue;
       try {
         const m = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
-        if (m.sessionId === sessionId) {
+        // Check marker is recent (less than 12 hours old)
+        const age = Date.now() - new Date(m.startedAt).getTime();
+        if (age < 12 * 60 * 60 * 1000) {
           marker = m;
           break;
         }

@@ -189,17 +189,22 @@ function transitionStep(ticket, targetStep) {
 
 // ─── Core Logic ─────────────────────────────────────────────────────────────
 
-function buildStateContext(ticket, plan) {
-  const completed = plan.filter((e) => e.action === 'SKIP').map((e) => e.step);
-  const actionable = plan.filter((e) => e.action !== 'SKIP');
-  const current = actionable[0]?.step || 'complete';
-  const remaining = actionable.slice(1).map((e) => e.step);
-  const total = plan.length;
-  const done = completed.length;
+function buildStateContext(ticket, plan, safeName) {
+  // Derive state from work-state.json stepStatus (source of truth), not from plan actions
+  const ws = loadWorkState(safeName);
+  const stepStatus = ws?.stepStatus || {};
+  const currentStepName = ws ? getCurrentStep(ws) : null;
+
+  const completed = ALL_STEPS.filter((s) => stepStatus[s] === 'completed');
+  const currentIdx = currentStepName ? ALL_STEPS.indexOf(currentStepName) : 0;
+  const remaining = ALL_STEPS.filter(
+    (s) => ALL_STEPS.indexOf(s) > currentIdx && stepStatus[s] !== 'completed'
+  );
+
   return {
     ticket,
-    currentStep: current,
-    progress: `${done + 1}/${total}`,
+    currentStep: currentStepName || plan[0]?.step || 'ticket',
+    progress: `${completed.length + 1}/${ALL_STEPS.length}`,
     completedSteps: completed,
     remainingSteps: remaining,
   };
@@ -373,7 +378,7 @@ function getNextInstruction(ticketRaw, rework) {
   }
 
   const plan = result.plan;
-  const stateCtx = buildStateContext(ticket, plan);
+  const stateCtx = buildStateContext(ticket, plan, safeName);
 
   // Handle task-advance if needed
   if (result.nextAction === 'advance_task') {
