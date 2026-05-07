@@ -89,6 +89,9 @@ function transitionStep(ticket, targetStep, deps) {
     ws?.tasksMeta?.currentTaskIndex != null ? ws.tasksMeta.currentTaskIndex + 1 : undefined;
 
   // TDD gate: require evidence before leaving gated steps (always enforced)
+  // NOTE: This gate validates TDD evidence for the CURRENT task only.
+  // Multi-task iteration (blocking implement→commit when tasks remain) is handled
+  // by work2's implement-gate.js — NOT here. This file is shared across /work and /work2.
   if (TDD_GATED_STEPS.includes(currentStep) && currentStep !== targetStep) {
     const { exists, parseError, evidence } = readTddEvidence(safeTicket, currentStep, taskNum);
     if (!exists || parseError) {
