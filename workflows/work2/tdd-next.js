@@ -1,20 +1,20 @@
 #!/usr/bin/env node
 
 /**
- * tdd-next.js — Script-driven TDD phase orchestrator for /work2.
+ * tdd-next.js — Read-only TDD phase helper for /work2.
  *
- * Instead of the developer agent manually calling tdd-phase-state.js
- * subcommands, this script inspects the current TDD state and outputs
- * a single instruction for what the developer should do next.
+ * Shows the current TDD phase and provides instructions for what the
+ * developer agent should do next. Does NOT execute tdd-phase-state.js
+ * commands — those must be called by an authorized developer agent
+ * (agent-gated for evidence integrity).
  *
  * Usage: node tdd-next.js <TICKET_ID> [--task N]
  *
- * Output: JSON instruction to stdout with phase, allowed files, and next action.
+ * Output: JSON with current phase, allowed files, and commands to run.
  */
 
 const path = require('path');
 const fs = require('fs');
-const { execFileSync } = require('child_process');
 
 // Fail-safe
 if (require.main === module) {
@@ -28,7 +28,7 @@ const { workDir, libDir } = resolvePluginPaths(__dirname);
 const getConfig = require(path.join(libDir, 'get-config'));
 const TASKS_BASE = getConfig('TASKS_BASE') || '';
 
-// Path to the real tdd-phase-state.js (marketplace)
+// Path to the real tdd-phase-state.js (marketplace — authorized agents call this directly)
 const tddStatePath = path.join(
   path.dirname(workDir), // workflows/
   'work-implement',
@@ -36,66 +36,40 @@ const tddStatePath = path.join(
 );
 
 /**
- * Get current TDD phase state by calling tdd-phase-state.js current.
+ * Read TDD phase state from the JSON file directly (no subprocess needed).
  */
-function getCurrentPhase(ticketId, taskNum) {
-  const args = [tddStatePath, 'current', ticketId];
-  if (taskNum) args.push('--task', String(taskNum));
+function readPhase(ticketId, taskNum) {
+  const taskDir = taskNum ? `task${taskNum}` : '';
+  const tddPath = taskDir
+    ? path.join(TASKS_BASE, ticketId, taskDir, 'tdd-phase.json')
+    : path.join(TASKS_BASE, ticketId, 'tdd-phase.json');
   try {
-    const result = execFileSync(process.execPath, args, {
-      encoding: 'utf8',
-      timeout: 5000,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    return JSON.parse(result);
+    return JSON.parse(fs.readFileSync(tddPath, 'utf8'));
   } catch {
     return null;
   }
 }
 
 /**
- * Check if TDD state is initialized for this ticket/task.
- */
-function isInitialized(ticketId, taskNum) {
-  const safeName = ticketId;
-  const taskDir = taskNum ? `task${taskNum}` : '';
-  const tddPath = taskDir
-    ? path.join(TASKS_BASE, safeName, taskDir, 'tdd-phase.json')
-    : path.join(TASKS_BASE, safeName, 'tdd-phase.json');
-  return fs.existsSync(tddPath);
-}
-
-/**
- * Build the TDD instruction based on current phase.
+ * Build phase instruction based on current state.
  */
 function buildInstruction(ticketId, taskNum) {
-  const initialized = isInitialized(ticketId, taskNum);
   const taskFlag = taskNum ? ` --task ${taskNum}` : '';
+  const stateCmd = `node "${tddStatePath}"`;
 
-  if (!initialized) {
+  const state = readPhase(ticketId, taskNum);
+
+  if (!state) {
     return {
       type: 'tdd_instruction',
       phase: 'init',
       action: 'Initialize TDD state',
-      command: `node "${tddStatePath}" init ${ticketId}${taskFlag}`,
-      rules: {
-        allowedFiles: 'all',
-        description: 'Run this command to initialize TDD tracking, then run tdd-next.js again.',
-      },
+      command: `${stateCmd} init ${ticketId}${taskFlag}`,
+      note: 'This command must be run by the developer agent (agent-gated).',
     };
   }
 
-  const current = getCurrentPhase(ticketId, taskNum);
-  if (!current) {
-    return {
-      type: 'tdd_instruction',
-      phase: 'unknown',
-      action: 'Cannot read TDD state',
-      suggestion: `Check if ${TASKS_BASE}/${ticketId}/tdd-phase.json exists`,
-    };
-  }
-
-  const phase = current.currentPhase || current.phase || 'red';
+  const phase = state.currentPhase || 'red';
 
   switch (phase) {
     case 'red':
@@ -108,10 +82,11 @@ function buildInstruction(ticketId, taskNum) {
           blockedFiles: 'Source/production files are BLOCKED by hooks',
           description: 'Write focused failing tests (1-3) that express expected behavior.',
         },
-        whenDone: {
-          record: `node "${tddStatePath}" record-red ${ticketId}${taskFlag} --cmd "<your test command>"`,
-          transition: `node "${tddStatePath}" transition ${ticketId} green${taskFlag}`,
-        },
+        whenDone: [
+          'Run your test command to confirm tests FAIL',
+          `${stateCmd} record-red ${ticketId}${taskFlag} --cmd "<your test command>"`,
+          `${stateCmd} transition ${ticketId} green${taskFlag}`,
+        ],
       };
 
     case 'green':
@@ -124,10 +99,11 @@ function buildInstruction(ticketId, taskNum) {
           blockedFiles: '.test.* and .spec.* files are BLOCKED by hooks',
           description: 'Write the minimum production code to make failing tests pass.',
         },
-        whenDone: {
-          record: `node "${tddStatePath}" record-green ${ticketId}${taskFlag} --cmd "<your test command>"`,
-          transition: `node "${tddStatePath}" transition ${ticketId} refactor${taskFlag}`,
-        },
+        whenDone: [
+          'Run your test command to confirm tests PASS',
+          `${stateCmd} record-green ${ticketId}${taskFlag} --cmd "<your test command>"`,
+          `${stateCmd} transition ${ticketId} refactor${taskFlag}`,
+        ],
       };
 
     case 'refactor':
@@ -139,20 +115,16 @@ function buildInstruction(ticketId, taskNum) {
           allowedFiles: 'All files',
           description: 'Refactor for clarity and quality. Tests must still pass after.',
         },
-        whenDone: {
-          record: `node "${tddStatePath}" record-refactor ${ticketId}${taskFlag} --cmd "<your test command>"`,
-          nextCycle: `node "${tddStatePath}" transition ${ticketId} red${taskFlag}`,
-          done: 'If no more behaviors to add, the task is complete.',
-        },
+        whenDone: [
+          'Run your test command to confirm tests still PASS',
+          `${stateCmd} record-refactor ${ticketId}${taskFlag} --cmd "<your test command>"`,
+          `If more behaviors: ${stateCmd} transition ${ticketId} red${taskFlag}`,
+          'If done: task implementation is complete.',
+        ],
       };
 
     default:
-      return {
-        type: 'tdd_instruction',
-        phase,
-        action: `Unknown phase: ${phase}`,
-        suggestion: 'Check tdd-phase.json manually',
-      };
+      return { type: 'tdd_instruction', phase, action: `Unknown phase: ${phase}` };
   }
 }
 
@@ -182,4 +154,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { buildInstruction, getCurrentPhase };
+module.exports = { buildInstruction, readPhase };

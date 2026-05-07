@@ -1,9 +1,8 @@
 /**
  * Implement step enrichment.
  *
- * Replaces the raw TDD protocol block with tdd-next.js instructions.
- * The developer agent calls tdd-next.js to get phase-specific guidance
- * instead of manually managing tdd-phase-state.js subcommands.
+ * Replaces the raw TDD protocol with tdd-next.js read-only instructions
+ * and forces delegation to a developer agent (tdd-phase-state.js is agent-gated).
  */
 
 'use strict';
@@ -17,45 +16,49 @@ module.exports = function registerImplement(register) {
     const tddNextPath = path.join(__dirname, '..', '..', 'tdd-next.js');
     const ticket = ctx.ticket || 'TICKET';
 
-    // Extract task number from prompt if present (e.g., "Task 1 of 3")
+    // Extract task number from prompt if present
     const taskMatch = entry.agentPrompt.match(/Task (\d+) of \d+/);
     const taskFlag = taskMatch ? ` --task ${taskMatch[1]}` : '';
 
-    const tddBlock = [
-      '## TDD Phase Management (script-driven)',
+    const delegationBlock = [
+      '## CRITICAL: Delegate to developer agent',
       '',
-      'Instead of manually calling tdd-phase-state.js, use tdd-next.js to get your current phase and instructions:',
+      'You MUST delegate implementation to Task(developer-nodejs-tdd).',
+      'Do NOT run tdd-phase-state.js yourself — it is agent-gated and WILL be blocked.',
+      'Do NOT try different paths — ALL paths are blocked outside developer agents.',
+      '',
+      'Delegate like this:',
+      '```',
+      'Task(developer-nodejs-tdd):',
+      '  description: "implement <task description>"',
+      '  prompt: <pass the full implementation prompt below>',
+      '```',
+      '',
+      '## TDD Phase Helper (read-only)',
+      '',
+      'The developer agent can check current TDD phase with:',
       '```bash',
       `node "${tddNextPath}" ${ticket}${taskFlag}`,
       '```',
-      '',
-      'Run this command to see:',
-      '- Your current TDD phase (red/green/refactor)',
-      '- Which files you can edit (hooks enforce this)',
-      '- The exact commands to record evidence and transition',
-      '',
-      'Call tdd-next.js after each phase transition to get updated instructions.',
-      '',
-      'The TDD commands in tdd-next.js output are pre-formatted — copy and run them directly.',
+      'This shows: current phase, allowed files, and exact commands to run.',
+      'The tdd-phase-state.js commands in the output WILL work from inside the developer agent.',
     ].join('\n');
 
-    // Replace the raw TDD protocol block with tdd-next.js instructions
-    // The TDD protocol starts with "TDD protocol (hook-enforced" or similar
+    // Replace the raw TDD protocol block with delegation instructions
     const tddProtocolStart = entry.agentPrompt.indexOf('TDD protocol (hook-enforced');
     if (tddProtocolStart >= 0) {
-      // Find where the TDD protocol ends (next ## heading or end of string)
       const afterProtocol = entry.agentPrompt.indexOf('\n## ', tddProtocolStart + 1);
       if (afterProtocol >= 0) {
         entry.agentPrompt =
           entry.agentPrompt.slice(0, tddProtocolStart) +
-          tddBlock +
+          delegationBlock +
           entry.agentPrompt.slice(afterProtocol);
       } else {
-        entry.agentPrompt = entry.agentPrompt.slice(0, tddProtocolStart) + tddBlock;
+        entry.agentPrompt = entry.agentPrompt.slice(0, tddProtocolStart) + delegationBlock;
       }
     } else {
-      // No TDD protocol found — append tdd-next.js block
-      entry.agentPrompt += '\n\n' + tddBlock;
+      // No TDD protocol found — prepend delegation block
+      entry.agentPrompt = delegationBlock + '\n\n' + entry.agentPrompt;
     }
   });
 };
