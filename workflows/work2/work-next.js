@@ -405,6 +405,17 @@ function getNextInstruction(ticketRaw, rework) {
 
       // Pseudo-steps (e.g., 2b_transition) are not in ALL_STEPS — execute directly without transitions
       if (entryIdx < 0) {
+        // Check if already dispatched (pseudo-steps have no state machine tracking)
+        const dispatched = workState?._work2PseudoDispatched || [];
+        if (dispatched.includes(entry.step)) {
+          continue; // Already executed, skip
+        }
+        // Mark as dispatched
+        const ws = loadWorkState(safeName);
+        if (ws) {
+          ws._work2PseudoDispatched = [...(ws._work2PseudoDispatched || []), entry.step];
+          saveWorkState(safeName, ws);
+        }
         if (entry.agentType && entry.agentPrompt) {
           return buildInstruction(entry, stateCtx);
         }
