@@ -28,6 +28,10 @@ function main() {
     process.exit(0);
   }
 
+  // Guard: do NOT fire inside sub-agents (would advance state while agent is working)
+  const transcriptPath = hookData?.transcript_path || '';
+  if (transcriptPath.includes('/subagents/')) process.exit(0);
+
   // Guard: find active /work2 session via marker file
   const getConfig = require(path.join(__dirname, '..', '..', 'lib', 'get-config'));
   const WORKTREES_BASE = getConfig('WORKTREES_BASE') || '';
