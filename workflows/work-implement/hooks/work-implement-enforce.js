@@ -164,7 +164,21 @@ function resolveSafeTicketId(ticketId) {
  * @returns {string|null} Path to tdd-phase.json, or null if not found
  */
 function resolveTddStatePath(taskBase, safeTicketId) {
-  const taskNum = process.env.WORK_TASK_NUM ? parseInt(process.env.WORK_TASK_NUM, 10) : null;
+  // Resolve task number: env var → work state tasksMeta → null (legacy)
+  let taskNum = process.env.WORK_TASK_NUM ? parseInt(process.env.WORK_TASK_NUM, 10) : null;
+
+  // If no env var, try reading from work state (supports /work2 which doesn't set env vars)
+  if (!taskNum) {
+    try {
+      const statePath = path.join(taskBase, safeTicketId, '.work-state.json');
+      const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+      if (state?.tasksMeta?.currentTaskIndex != null) {
+        taskNum = state.tasksMeta.currentTaskIndex + 1; // 0-indexed → 1-indexed
+      }
+    } catch {
+      /* no state file — legacy mode */
+    }
+  }
 
   if (taskNum && Number.isInteger(taskNum) && taskNum > 0) {
     // Try per-task path first
@@ -231,7 +245,18 @@ function checkTddPhase(filePath, ticketId) {
  * @returns {{ prDir: string|null, taskDir: string|null, ticketRoot: string }|null}
  */
 function buildAllowedPaths(taskBase, safeTicketId) {
-  const taskNum = process.env.WORK_TASK_NUM ? parseInt(process.env.WORK_TASK_NUM, 10) : null;
+  let taskNum = process.env.WORK_TASK_NUM ? parseInt(process.env.WORK_TASK_NUM, 10) : null;
+  if (!taskNum) {
+    try {
+      const stPath = path.join(taskBase, safeTicketId, '.work-state.json');
+      const st = JSON.parse(fs.readFileSync(stPath, 'utf8'));
+      if (st?.tasksMeta?.currentTaskIndex != null) {
+        taskNum = st.tasksMeta.currentTaskIndex + 1;
+      }
+    } catch {
+      /* no state file */
+    }
+  }
 
   // No task num = legacy mode; invalid taskNum = fail-closed
   if (taskNum == null) return null;

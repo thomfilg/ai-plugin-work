@@ -21,6 +21,25 @@ const { execFileSync } = require('child_process');
 const { markProgress } = require(path.join(__dirname, '..', 'mark-task-progress'));
 
 /**
+ * Read task type from tasks.md for a given task number.
+ * @param {string} tasksDir
+ * @param {number} taskNum - 1-indexed
+ * @returns {string|null} - 'test', 'backend', 'checkpoint', etc.
+ */
+function resolveTaskType(tasksDir, taskNum) {
+  try {
+    const fs = require('fs');
+    const tasksFile = path.join(tasksDir, 'tasks.md');
+    const content = fs.readFileSync(tasksFile, 'utf8');
+    const pattern = new RegExp(`## Task ${taskNum}\\b[\\s\\S]*?### Type\\s*\\n(\\w+)`, 'm');
+    const match = content.match(pattern);
+    return match ? match[1].trim().toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Dispatch-advance gate for the implement step.
  *
  * @param {string} safeName - Sanitized ticket ID
@@ -53,8 +72,19 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
   const { exists, evidence } = readTddEvidence(safeName, stepName, taskNum);
   if (!exists) return null; // no evidence — let work-next re-dispatch implementation prompt
 
-  const validation = validateTddEvidence(evidence);
-  if (!validation.valid) return null; // incomplete evidence — let work-next re-dispatch
+  // For test-only and checkpoint tasks, RED-only evidence is sufficient
+  // (tests written and failing — GREEN requires the implementation from the next task)
+  const taskType = resolveTaskType(ctx.tasksDir, taskNum);
+  const isTestOnly = taskType === 'test' || taskType === 'checkpoint';
+
+  if (isTestOnly) {
+    // Accept any evidence (even RED-only) for test/checkpoint tasks
+    const hasAnyCycle = Array.isArray(evidence?.cycles) && evidence.cycles.length > 0;
+    if (!hasAnyCycle) return null; // no cycles at all — re-dispatch
+  } else {
+    const validation = validateTddEvidence(evidence);
+    if (!validation.valid) return null; // incomplete evidence — let work-next re-dispatch
+  }
 
   // Evidence valid — check if more tasks remain
   if (currentIdx < totalTasks - 1) {
