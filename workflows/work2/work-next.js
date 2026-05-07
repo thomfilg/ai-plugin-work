@@ -403,9 +403,17 @@ function getNextInstruction(ticketRaw, rework) {
     if (entry.action === 'RUN' || entry.action === 'DEFER') {
       const entryIdx = ALL_STEPS.indexOf(entry.step);
 
+      // Pseudo-steps (e.g., 2b_transition) are not in ALL_STEPS — execute directly without transitions
+      if (entryIdx < 0) {
+        if (entry.agentType && entry.agentPrompt) {
+          return buildInstruction(entry, stateCtx);
+        }
+        continue;
+      }
+
       // Skip steps that are behind the current step in the state machine
       // The plan may mark them as RUN but the state already advanced past them
-      if (currentStepIdx >= 0 && entryIdx >= 0 && entryIdx < currentStepIdx) {
+      if (currentStepIdx >= 0 && entryIdx < currentStepIdx) {
         continue;
       }
 
