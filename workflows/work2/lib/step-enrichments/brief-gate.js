@@ -26,8 +26,20 @@ module.exports = function registerBriefGate(register) {
     lines.push(`Brief file: ${briefPath}`);
     lines.push(`Total blocking questions: ${questions.length}\n`);
 
-    if (localQs.length > 0) {
-      lines.push('### Step 1: Solve LOCAL questions (investigate codebase yourself)\n');
+    if (localQs.length > 0 && userQs.length === 0) {
+      // Only local questions — these don't block the gate. They'll be resolved
+      // during spec phase when the AI investigates the codebase in depth.
+      lines.push('### LOCAL questions (non-blocking — resolved during spec phase)\n');
+      lines.push(
+        'These questions will be answered by the spec-writer agent when it analyzes the codebase.'
+      );
+      lines.push('No action needed here — the gate will pass automatically.\n');
+      localQs.forEach((q, i) => {
+        lines.push(`${i + 1}. "${q.questionText}" → deferred to spec`);
+      });
+      lines.push('');
+    } else if (localQs.length > 0) {
+      lines.push('### LOCAL questions (investigate codebase yourself before asking user)\n');
       localQs.forEach((q, i) => {
         lines.push(`${i + 1}. "${q.questionText}"`);
         if (q.rationale) lines.push(`   Rationale: ${q.rationale}`);
