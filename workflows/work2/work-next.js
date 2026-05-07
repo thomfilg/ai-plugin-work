@@ -410,6 +410,11 @@ function getNextInstruction(ticketRaw, rework) {
           );
           for (const target of allowed) {
             const transResult = transitionStep(safeName, target);
+            if (process.env.WORK2_DEBUG) {
+              process.stderr.write(
+                `[work-next] dispatch-advance ${entry.step}→${target}: ${transResult?.error ? transResult.message : 'SUCCESS'}\n`
+              );
+            }
             if (transResult && !transResult.error) {
               const ws = loadWorkState(safeName);
               if (ws) {
@@ -420,7 +425,13 @@ function getNextInstruction(ticketRaw, rework) {
               return getNextInstruction(ticketRaw, rework);
             }
           }
-          // Transition blocked — step genuinely needs more work, return instruction again
+          // Transition blocked — log the last failure (debug only, no re-attempt)
+          if (process.env.WORK2_DEBUG) {
+            process.stderr.write(
+              `[work-next] dispatch-advance BLOCKED for ${entry.step}, tried ${allowed.length} forward targets\n`
+            );
+          }
+          // Step genuinely needs more work, return instruction again
         }
 
         // Mark as dispatched (with action) and set stepStatus to in_progress
