@@ -3,16 +3,18 @@
 /**
  * work-next.js — Script-driven orchestrator for /work2.
  *
- * Instead of outputting a full plan JSON for the AI to parse and manage,
- * this script outputs a SINGLE instruction — the next thing the AI should do.
- *
+ * Outputs a SINGLE instruction — the next thing the AI should do.
  * A PostToolUse hook (work-auto-advance.js) calls this after each step
  * delegation completes, creating an automatic advance loop.
  *
- * Usage:
- *   node work-next.js <TICKET_ID> [--rework] [--init]
+ * Architecture:
+ *   work-next.js          — DI wiring + core orchestration loop
+ *   lib/instruction-builder.js  — delegation type mapping
+ *   lib/state-context.js        — progress derivation from work state
+ *   lib/marker.js               — session marker file management
+ *   lib/step-enrichments/       — registry of per-step prompt overrides
  *
- * Output: JSON instruction to stdout (see instruction format in plan).
+ * Usage: node work-next.js <TICKET_ID> [--rework] [--init]
  */
 
 const path = require('path');
@@ -86,6 +88,13 @@ const { generatePlan: _generatePlan } = require(path.join(workDir, 'plan-generat
 const { transitionStep: _transitionStep } = require(path.join(workDir, 'transition-step'));
 const { validateCheckGate: _validateCheckGate } = require(path.join(workDir, 'check-gate'));
 
+// ─── Local modules ──────────────────────────────────────────────────────────
+const { buildInstruction } = require(path.join(__dirname, 'lib', 'instruction-builder'));
+const { buildStateContext } = require(path.join(__dirname, 'lib', 'state-context'));
+const { writeMarkerFile } = require(path.join(__dirname, 'lib', 'marker'));
+const { enrich } = require(path.join(__dirname, 'lib', 'step-enrichments'));
+
+// ─── Constants ──────────────────────────────────────────────────────────────
 const TDD_GATED_STEPS = [STEPS.implement];
 const REQUIRED_REPORTS = [
   { file: 'tests.check.md', passPattern: /Status:\s*APPROVED/i },
@@ -187,173 +196,10 @@ function transitionStep(ticket, targetStep) {
   return _transitionStep(ticket, targetStep, buildTransitionDeps());
 }
 
-// ─── Core Logic ─────────────────────────────────────────────────────────────
-
-function buildStateContext(ticket, plan, safeName) {
-  // Derive state from work-state.json stepStatus (source of truth), not from plan actions
-  const ws = loadWorkState(safeName);
-  const stepStatus = ws?.stepStatus || {};
-  const currentStepName = ws ? getCurrentStep(ws) : null;
-
-  const completed = ALL_STEPS.filter((s) => stepStatus[s] === 'completed');
-  const currentIdx = currentStepName ? ALL_STEPS.indexOf(currentStepName) : 0;
-  const remaining = ALL_STEPS.filter(
-    (s) => ALL_STEPS.indexOf(s) > currentIdx && stepStatus[s] !== 'completed'
-  );
-
-  return {
-    ticket,
-    currentStep: currentStepName || plan[0]?.step || 'ticket',
-    progress: `${completed.length + 1}/${ALL_STEPS.length}`,
-    completedSteps: completed,
-    remainingSteps: remaining,
-  };
-}
-
-function buildInstruction(entry, stateCtx) {
-  const instruction = {
-    type: 'work_instruction',
-    action: 'execute',
-    state: stateCtx,
-    continue: true,
-  };
-
-  // preCommands
-  if (entry.preCommands && entry.preCommands.length > 0) {
-    instruction.preCommands = entry.preCommands;
-  }
-
-  // Context enrichment: inject ticket details file reference into prompts that need it
-  const ticket = stateCtx.ticket;
-  const providerConfig = tp.getProviderConfig({ skipPrompt: true });
-  const safeBase = tp.sanitizeTicketIdForPath(ticket, providerConfig);
-  const tasksDir = path.join(TASKS_BASE, safeBase);
-  const ticketFile = path.join(tasksDir, 'ticket.json');
-
-  // For ticket step: add instruction to save output to file
-  if (entry.step === 'ticket') {
-    const saveCmd = `gh issue view ${ticket.replace('#', '')} --json title,body,state,labels > "${ticketFile}"`;
-    entry.agentPrompt = `${entry.agentPrompt}\n\nIMPORTANT: Also save the raw JSON output to: ${ticketFile}\nRun: ${saveCmd}`;
-  }
-
-  // For steps that benefit from ticket context: append file reference
-  if (['brief', 'spec', 'implement'].includes(entry.step)) {
-    if (fs.existsSync(ticketFile)) {
-      try {
-        const ticketData = JSON.parse(fs.readFileSync(ticketFile, 'utf8'));
-        const contextBlock = `\n\n## Ticket Context\nTitle: ${ticketData.title}\nState: ${ticketData.state}\n\n${ticketData.body || '(no body)'}`;
-        entry.agentPrompt = (entry.agentPrompt || '') + contextBlock;
-      } catch {
-        /* fail-open */
-      }
-    }
-  }
-
-  // Override brief_gate prompt with detailed instructions
-  if (entry.step === 'brief_gate' && entry.askUserQuestionPayload) {
-    const questions = entry.askUserQuestionPayload.questions || [];
-    const localQs = questions.filter((q) => q.scope === 'local');
-    const userQs = questions.filter((q) => q.scope !== 'local');
-    const briefGatePath = path.join(workDir, 'steps', 'brief-gate.js');
-    const briefPath = path.join(tasksDir, 'brief.md');
-
-    const lines = ['## brief_gate: Resolve Open Questions\n'];
-    lines.push(`Brief file: ${briefPath}`);
-    lines.push(`Total blocking questions: ${questions.length}\n`);
-
-    if (localQs.length > 0) {
-      lines.push('### Step 1: Solve LOCAL questions (investigate codebase yourself)\n');
-      localQs.forEach((q, i) => {
-        lines.push(`${i + 1}. "${q.questionText}"`);
-        if (q.rationale) lines.push(`   Rationale: ${q.rationale}`);
-      });
-      lines.push('');
-    }
-
-    if (userQs.length > 0) {
-      lines.push(
-        `### Step ${localQs.length > 0 ? '2' : '1'}: Ask USER these questions (use AskUserQuestion)\n`
-      );
-      userQs.forEach((q, i) => {
-        lines.push(`${i + 1}. "${q.questionText}"`);
-        if (q.rationale) lines.push(`   Rationale: ${q.rationale}`);
-      });
-      lines.push('');
-    }
-
-    lines.push(
-      `### Step ${localQs.length > 0 && userQs.length > 0 ? '3' : '2'}: Apply resolutions\n`
-    );
-    lines.push('Run this command with your answers (JSON map of questionText → answer):');
-    lines.push('```bash');
-    lines.push(
-      `node -e "require('${briefGatePath}').applyBriefResolutions('${briefPath}', JSON.parse(process.argv[1]))" '<JSON_RESOLUTIONS>'`
-    );
-    lines.push('```');
-    lines.push('');
-    lines.push('Example:');
-    lines.push('```bash');
-    if (questions.length > 0) {
-      const example = {};
-      example[questions[0].questionText] = 'Your answer here';
-      lines.push(
-        `node -e "require('${briefGatePath}').applyBriefResolutions('${briefPath}', JSON.parse(process.argv[1]))" '${JSON.stringify(example)}'`
-      );
-    }
-    lines.push('```');
-    lines.push(
-      '\nIMPORTANT: Do NOT edit brief.md directly. Only applyBriefResolutions can modify it during brief_gate.'
-    );
-
-    entry.agentPrompt = lines.join('\n');
-  }
-
-  // Delegation block
-  if (entry.agentType === 'skill') {
-    // Extract skill name from agentPrompt (e.g., "/check" → "check", "/work-implement ..." → "work-implement")
-    const skillMatch = (entry.agentPrompt || '').match(/^\/([\w-]+)/);
-    instruction.delegate = {
-      type: 'skill',
-      name: skillMatch ? skillMatch[1] : entry.command,
-      prompt: entry.agentPrompt,
-    };
-  } else if (entry.agentType === 'Bash' || entry.agentType === 'bash') {
-    instruction.delegate = {
-      type: 'bash',
-      description: `${entry.step} ${entry.reason || ''}`.trim(),
-      command: entry.agentPrompt || entry.command,
-    };
-  } else {
-    // Task-based (general-purpose, brief-writer, spec-writer, commit-writer, etc.)
-    // Detect simple single-command prompts and emit as "bash" instead of spawning an agent
-    const prompt = entry.agentPrompt || '';
-    const isSingleCommand =
-      entry.agentType === 'general-purpose' &&
-      /^(Fetch|Run|Execute|Check)\b/.test(prompt) &&
-      /\bgh\s|\bgit\s|\bnode\s|\bcurl\s/.test(prompt) &&
-      prompt.split('\n').filter((l) => l.trim()).length <= 3;
-
-    if (isSingleCommand) {
-      instruction.delegate = {
-        type: 'bash',
-        description: `${entry.step} ${entry.reason || ''}`.trim().slice(0, 80),
-        command: prompt,
-      };
-    } else {
-      instruction.delegate = {
-        type: 'task',
-        agentType: entry.agentType,
-        description: `${entry.step} ${entry.reason || ''}`.trim().slice(0, 80),
-        prompt,
-      };
-    }
-  }
-
-  return instruction;
-}
+// ─── Core Orchestration Loop ────────────────────────────────────────────────
 
 let _recursionDepth = 0;
-const MAX_RECURSION = 10; // prevent infinite loops through soft steps
+const MAX_RECURSION = 10;
 
 function getNextInstruction(ticketRaw, rework) {
   if (_recursionDepth >= MAX_RECURSION) {
@@ -431,9 +277,7 @@ function getNextInstruction(ticketRaw, rework) {
     };
   }
 
-  // Override session guard: generatePlan() inits with '/work', we patch the session
-  // file to '/work2' so session-guard Stop hook shows the correct work-next.js command.
-  // cmdInit is idempotent and won't overwrite the workflow field, so we patch directly.
+  // Override session guard workflow field
   const safeBase = tp.sanitizeTicketIdForPath(ticket, providerConfig);
   const safeName = suffix ? safeBase + '/' + suffix : safeBase;
   if (process.env.SESSION_GUARD_ENABLED !== '0') {
@@ -451,9 +295,8 @@ function getNextInstruction(ticketRaw, rework) {
     }
   }
 
-  // Persist DEFER metadata (same as cli.js plan command)
+  // Persist DEFER metadata
   result.timestamp = new Date().toISOString();
-
   const planState = loadWorkState(safeName);
   if (planState) {
     planState.lastPlanTimestamp = result.timestamp;
@@ -483,8 +326,9 @@ function getNextInstruction(ticketRaw, rework) {
   }
 
   const plan = result.plan;
+  const tasksDir = path.join(TASKS_BASE, safeName);
 
-  // Debug: log state for troubleshooting (stderr only, not visible to AI)
+  // Debug logging (env-gated)
   const _dbgState = loadWorkState(safeName);
   if (process.env.WORK2_DEBUG) {
     process.stderr.write(
@@ -495,7 +339,11 @@ function getNextInstruction(ticketRaw, rework) {
     );
   }
 
-  const stateCtx = buildStateContext(ticket, plan, safeName);
+  const stateCtx = buildStateContext(ticket, plan, safeName, {
+    loadWorkState,
+    getCurrentStep,
+    ALL_STEPS,
+  });
 
   // Handle task-advance if needed
   if (result.nextAction === 'advance_task') {
@@ -506,18 +354,19 @@ function getNextInstruction(ticketRaw, rework) {
         timeout: 5000,
         stdio: 'pipe',
       });
-      // Re-run after advancing (depth-limited by _recursionDepth)
       return getNextInstruction(ticketRaw, rework);
     } catch {
       /* fail-open */
     }
   }
 
-  // Find first actionable step
-  // Determine current step from work state to skip steps we've already passed
+  // ─── Step iteration loop ────────────────────────────────────────────────
   const workState = loadWorkState(safeName);
   const currentStepName = workState ? getCurrentStep(workState) : null;
   const currentStepIdx = currentStepName ? ALL_STEPS.indexOf(currentStepName) : -1;
+
+  // Enrichment context for step overrides
+  const enrichCtx = { tasksDir, ticket, workDir, path, fs, tp, TASKS_BASE };
 
   for (const entry of plan) {
     if (entry.action === 'SKIP') continue;
@@ -525,42 +374,33 @@ function getNextInstruction(ticketRaw, rework) {
     if (entry.action === 'RUN' || entry.action === 'DEFER') {
       const entryIdx = ALL_STEPS.indexOf(entry.step);
 
-      // Pseudo-steps (e.g., 2b_transition) are not in ALL_STEPS — execute directly without transitions
+      // Pseudo-steps (e.g., 2b_transition) not in ALL_STEPS — execute directly
       if (entryIdx < 0) {
-        // Check if already dispatched (pseudo-steps have no state machine tracking)
         const dispatched = workState?._work2PseudoDispatched || [];
-        if (dispatched.includes(entry.step)) {
-          continue; // Already executed, skip
-        }
-        // Mark as dispatched
+        if (dispatched.includes(entry.step)) continue;
         const ws = loadWorkState(safeName);
         if (ws) {
           ws._work2PseudoDispatched = [...(ws._work2PseudoDispatched || []), entry.step];
           saveWorkState(safeName, ws);
         }
         if (entry.agentType && entry.agentPrompt) {
+          enrich(entry, enrichCtx);
           return buildInstruction(entry, stateCtx);
         }
         continue;
       }
 
-      // Skip steps that are behind the current step in the state machine
-      // The plan may mark them as RUN but the state already advanced past them
-      if (currentStepIdx >= 0 && entryIdx < currentStepIdx) {
-        continue;
-      }
+      // Skip steps behind current position
+      if (currentStepIdx >= 0 && entryIdx < currentStepIdx) continue;
 
-      // If this is the current step...
+      // Current step — handle dispatched marker logic
       if (entry.step === currentStepName) {
-        // Check if we already dispatched this step in a previous call
         if (workState && workState._work2Dispatched === entry.step) {
-          // Step was already executed — try to transition forward
+          // Already dispatched — try to transition forward
           const allowed = STEP_TRANSITIONS[entry.step] || [];
-          let advanced = false;
           for (const target of allowed) {
             const transResult = transitionStep(safeName, target);
             if (transResult && !transResult.error) {
-              // Successfully advanced! Clear dispatched flag and recurse
               const ws = loadWorkState(safeName);
               if (ws) {
                 delete ws._work2Dispatched;
@@ -569,10 +409,10 @@ function getNextInstruction(ticketRaw, rework) {
               return getNextInstruction(ticketRaw, rework);
             }
           }
-          // All transitions blocked — step needs more work, return instruction again
+          // All transitions blocked — step needs more work
         }
 
-        // Mark step as dispatched for next call
+        // Mark as dispatched and return instruction
         const ws = loadWorkState(safeName);
         if (ws) {
           ws._work2Dispatched = entry.step;
@@ -580,16 +420,15 @@ function getNextInstruction(ticketRaw, rework) {
         }
 
         if (entry.agentType && entry.agentPrompt) {
+          enrich(entry, enrichCtx);
           return buildInstruction(entry, { ...stateCtx, currentStep: entry.step });
         }
         continue;
       }
 
-      // Need to transition forward to this step
+      // Forward transition to this step
       const transResult = transitionStep(safeName, entry.step);
-
       if (transResult && transResult.error) {
-        // Gate blocked
         return {
           type: 'work_instruction',
           action: 'blocked',
@@ -599,12 +438,11 @@ function getNextInstruction(ticketRaw, rework) {
         };
       }
 
-      // Transition succeeded — check if it needs AI execution
+      // Transition succeeded
       if (entry.agentType && entry.agentPrompt) {
+        enrich(entry, enrichCtx);
         return buildInstruction(entry, { ...stateCtx, currentStep: entry.step });
       }
-
-      // No agentType means this is a pass-through (rare) — continue to next
       continue;
     }
   }
@@ -616,24 +454,6 @@ function getNextInstruction(ticketRaw, rework) {
     state: stateCtx,
     summary: `All ${plan.length} steps done for ${ticket}`,
   };
-}
-
-// ─── Marker file management ─────────────────────────────────────────────────
-
-function writeMarkerFile(ticket, sessionId) {
-  const providerConfig = tp.getProviderConfig({ skipPrompt: true });
-  const safeBase = tp.sanitizeTicketIdForPath(ticket.toUpperCase(), providerConfig);
-  const tasksDir = path.join(TASKS_BASE, safeBase);
-  try {
-    fs.mkdirSync(tasksDir, { recursive: true });
-    const markerPath = path.join(tasksDir, '.work2-orchestrator.pid');
-    fs.writeFileSync(
-      markerPath,
-      JSON.stringify({ sessionId, ticket, startedAt: new Date().toISOString() })
-    );
-  } catch {
-    /* fail-open */
-  }
 }
 
 // ─── CLI ────────────────────────────────────────────────────────────────────
@@ -671,7 +491,7 @@ function main() {
   if (init) {
     const sessionId =
       process.env.SESSION_ID || process.env.CLAUDE_SESSION_ID || `work2-${Date.now()}`;
-    writeMarkerFile(ticketRaw, sessionId);
+    writeMarkerFile(ticketRaw, sessionId, { TASKS_BASE, tp });
   }
 
   const instruction = getNextInstruction(ticketRaw, rework);

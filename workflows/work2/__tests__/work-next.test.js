@@ -9,18 +9,34 @@
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const { buildStateContext, buildInstruction } = require('../work-next');
+const { buildInstruction } = require('../lib/instruction-builder');
+const { buildStateContext } = require('../lib/state-context');
 
 describe('buildStateContext', () => {
+  const ALL_STEPS = [
+    'ticket',
+    'bootstrap',
+    'brief',
+    'spec',
+    'implement',
+    'commit',
+    'check',
+    'pr',
+    'complete',
+  ];
+  const mockDeps = {
+    loadWorkState: () => null,
+    getCurrentStep: () => null,
+    ALL_STEPS,
+  };
+
   it('returns ticket as current when no work state exists', () => {
     const plan = [
       { step: 'ticket', action: 'RUN' },
       { step: 'bootstrap', action: 'PENDING' },
     ];
-    // safeName that won't match any real state file
-    const ctx = buildStateContext('PROJ-123', plan, 'NONEXISTENT-TICKET-999');
+    const ctx = buildStateContext('PROJ-123', plan, 'NONEXISTENT-TICKET-999', mockDeps);
     assert.equal(ctx.ticket, 'PROJ-123');
-    // Without work state, falls back to plan's first step
     assert.equal(ctx.currentStep, 'ticket');
     assert.ok(ctx.progress.includes('/'));
     assert.ok(Array.isArray(ctx.completedSteps));
@@ -29,7 +45,7 @@ describe('buildStateContext', () => {
 
   it('includes ticket in output', () => {
     const plan = [{ step: 'ticket', action: 'RUN' }];
-    const ctx = buildStateContext('PROJ-456', plan, 'NONEXISTENT-TICKET-999');
+    const ctx = buildStateContext('PROJ-456', plan, 'NONEXISTENT-TICKET-999', mockDeps);
     assert.equal(ctx.ticket, 'PROJ-456');
   });
 });
