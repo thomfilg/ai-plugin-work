@@ -60,6 +60,7 @@ node ${CLAUDE_PLUGIN_ROOT}/workflows/work2/work-next.js <TICKET_ID>
 
 - If `preCommands` present → run via `Task(Bash)` **first**, then delegate the main step
 - Task description **MUST** start with the step name (e.g., `"brief generate product brief"`)
+- **Augment prompts with context**: When delegating, append relevant context from previous steps (e.g., ticket details, spec decisions) to the agent's prompt. The instruction prompt is a minimum — enrich it with what you know.
 
 ## Rules
 
