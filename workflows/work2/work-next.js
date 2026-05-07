@@ -382,6 +382,18 @@ function getNextInstruction(ticketRaw, rework) {
   }
 
   const plan = result.plan;
+
+  // Debug: log state for troubleshooting (stderr only, not visible to AI)
+  const _dbgState = loadWorkState(safeName);
+  if (process.env.WORK2_DEBUG) {
+    process.stderr.write(
+      `[work-next] safeName=${safeName} currentStep=${_dbgState ? getCurrentStep(_dbgState) : 'null'} dispatched=${_dbgState?._work2Dispatched || 'none'} depth=${_recursionDepth}\n`
+    );
+    process.stderr.write(
+      `[work-next] stepStatus: ${JSON.stringify(Object.fromEntries(Object.entries(_dbgState?.stepStatus || {}).filter(([, v]) => v !== 'pending')))}\n`
+    );
+  }
+
   const stateCtx = buildStateContext(ticket, plan, safeName);
 
   // Handle task-advance if needed
