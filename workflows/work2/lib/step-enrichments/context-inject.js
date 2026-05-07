@@ -1,42 +1,19 @@
 /**
  * Context injection enrichment.
  *
- * For brief/spec/implement steps, reads ticket.json and appends
- * ticket context (title + body) to the agent prompt.
- * For spec/implement steps, also injects brief.md content.
+ * Injects ticket context (title + body) and file paths for artifacts.
+ * For small files (ticket.json), inlines the content.
+ * For larger files (brief, spec, tasks), provides paths + "READ THIS FIRST" instructions
+ * so the agent reads the full content instead of getting truncated text.
  */
 
 'use strict';
 
 const TICKET_CONTEXT_STEPS = ['brief', 'spec', 'implement'];
-const BRIEF_CONTEXT_STEPS = ['spec', 'implement'];
-const SPEC_CONTEXT_STEPS = ['tasks', 'implement'];
+const ARTIFACT_STEPS = ['spec', 'tasks', 'implement'];
 
 module.exports = function registerContextInject(register) {
-  // Inject spec content into tasks/implement
-  for (const stepName of SPEC_CONTEXT_STEPS) {
-    register(stepName, (entry, ctx) => {
-      const { tasksDir, path, fs } = ctx;
-      const specFile = path.join(tasksDir, 'spec.md');
-      if (!fs.existsSync(specFile)) return;
-      try {
-        const specContent = fs.readFileSync(specFile, 'utf8');
-        const truncated =
-          specContent.length > 5000
-            ? specContent.slice(0, 5000) +
-              '\n\n[... truncated, read full file at: ' +
-              specFile +
-              ']'
-            : specContent;
-        const contextBlock = `\n\n## Spec Content\n\n${truncated}`;
-        entry.agentPrompt = (entry.agentPrompt || '') + contextBlock;
-      } catch {
-        /* fail-open */
-      }
-    });
-  }
-
-  // Inject ticket context
+  // Inject ticket context (small — always inline)
   for (const stepName of TICKET_CONTEXT_STEPS) {
     register(stepName, (entry, ctx) => {
       const { tasksDir, path, fs } = ctx;
@@ -52,27 +29,30 @@ module.exports = function registerContextInject(register) {
     });
   }
 
-  // Inject brief content
-  for (const stepName of BRIEF_CONTEXT_STEPS) {
+  // Inject artifact file paths with read instructions (no truncation)
+  for (const stepName of ARTIFACT_STEPS) {
     register(stepName, (entry, ctx) => {
       const { tasksDir, path, fs } = ctx;
+
+      const artifacts = [];
       const briefFile = path.join(tasksDir, 'brief.md');
-      if (!fs.existsSync(briefFile)) return;
-      try {
-        const briefContent = fs.readFileSync(briefFile, 'utf8');
-        // Truncate if too long (keep first 3000 chars to avoid prompt bloat)
-        const truncated =
-          briefContent.length > 3000
-            ? briefContent.slice(0, 3000) +
-              '\n\n[... truncated, read full file at: ' +
-              briefFile +
-              ']'
-            : briefContent;
-        const contextBlock = `\n\n## Brief Content\n\n${truncated}`;
-        entry.agentPrompt = (entry.agentPrompt || '') + contextBlock;
-      } catch {
-        /* fail-open */
-      }
+      const specFile = path.join(tasksDir, 'spec.md');
+      const tasksFile = path.join(tasksDir, 'tasks.md');
+
+      if (fs.existsSync(briefFile)) artifacts.push({ name: 'Brief', path: briefFile });
+      if (fs.existsSync(specFile)) artifacts.push({ name: 'Spec', path: specFile });
+      if (fs.existsSync(tasksFile)) artifacts.push({ name: 'Tasks', path: tasksFile });
+
+      if (artifacts.length === 0) return;
+
+      const lines = ['\n\n## Required Reading (MUST read before starting)'];
+      artifacts.forEach((a) => {
+        lines.push(`- **${a.name}:** ${a.path}`);
+      });
+      lines.push('');
+      lines.push('Read these files IN FULL before implementing. Do NOT skip or skim.');
+
+      entry.agentPrompt = (entry.agentPrompt || '') + lines.join('\n');
     });
   }
 };
