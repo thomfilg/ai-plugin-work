@@ -10,8 +10,32 @@
 
 const TICKET_CONTEXT_STEPS = ['brief', 'spec', 'implement'];
 const BRIEF_CONTEXT_STEPS = ['spec', 'implement'];
+const SPEC_CONTEXT_STEPS = ['tasks', 'implement'];
 
 module.exports = function registerContextInject(register) {
+  // Inject spec content into tasks/implement
+  for (const stepName of SPEC_CONTEXT_STEPS) {
+    register(stepName, (entry, ctx) => {
+      const { tasksDir, path, fs } = ctx;
+      const specFile = path.join(tasksDir, 'spec.md');
+      if (!fs.existsSync(specFile)) return;
+      try {
+        const specContent = fs.readFileSync(specFile, 'utf8');
+        const truncated =
+          specContent.length > 5000
+            ? specContent.slice(0, 5000) +
+              '\n\n[... truncated, read full file at: ' +
+              specFile +
+              ']'
+            : specContent;
+        const contextBlock = `\n\n## Spec Content\n\n${truncated}`;
+        entry.agentPrompt = (entry.agentPrompt || '') + contextBlock;
+      } catch {
+        /* fail-open */
+      }
+    });
+  }
+
   // Inject ticket context
   for (const stepName of TICKET_CONTEXT_STEPS) {
     register(stepName, (entry, ctx) => {
