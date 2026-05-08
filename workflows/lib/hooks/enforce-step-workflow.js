@@ -166,6 +166,7 @@ const PROTECTED_STATE_BASENAMES = buildProtectedBasenames(WORKFLOWS, [
   '.pr-update-sha',
   '.workflow-state.json',
   '.check.workflow-state.json',
+  'follow-up-comments.json',
 ]);
 
 // Map each protected basename to its workflow's transition hint
