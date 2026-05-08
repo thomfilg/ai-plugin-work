@@ -44,12 +44,14 @@ const STEPS = [
   '1_setup',
   '2_start_env',
   '3_verify_playwright',
-  '4_run_tests',
-  '5_phase1_agents',
-  '6_phase2_consensus',
-  '7_quality_recheck',
-  '8_validate_summary',
-  '9_output',
+  '4_run_tests',           // unit tests (affected-only if SCRIPT_RUN_AFFECTED_UNIT set)
+  '5_phase1_agents',       // code-checker + completion-checker
+  '6_phase2_consensus',    // re-review loop if NEEDS_WORK
+  '7_quality_recheck',     // verify reports APPROVED
+  '8_run_integration',     // integration tests (skipped if env var not set)
+  '9_run_e2e',             // e2e tests (skipped if env var not set)
+  '10_validate_summary',
+  '11_output',
 ];
 
 // ─── Register steps ─────────────────────────────────────────────────────────
@@ -60,6 +62,8 @@ require('./steps/run-tests')(registerStep);
 require('./steps/phase1-agents')(registerStep);
 require('./steps/phase2-consensus')(registerStep);
 require('./steps/quality-recheck')(registerStep);
+require('./steps/run-integration')(registerStep);
+require('./steps/run-e2e')(registerStep);
 require('./steps/validate-summary')(registerStep);
 require('./steps/output')(registerStep);
 

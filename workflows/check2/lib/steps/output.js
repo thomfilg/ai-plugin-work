@@ -8,7 +8,7 @@ const fs = require('fs');
 const path = require('path');
 
 module.exports = function registerOutput(register) {
-  register('9_output', (state, ctx) => {
+  register('11_output', (state, ctx) => {
     const readmePath = path.join(ctx.tasksDir, 'README.md');
     let readme = 'No summary generated.';
     try {

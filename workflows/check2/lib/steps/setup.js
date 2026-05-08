@@ -22,11 +22,11 @@ module.exports = function registerSetup(register) {
 
       // Cache hit → skip to output
       if (state.setupResult.cache && state.setupResult.cache.cached) {
-        state.currentStep = '9_output';
+        state.currentStep = '11_output';
         return {
           type: 'check_instruction',
           action: 'cached',
-          state: { ticket: state.ticketId, currentStep: '9_output' },
+          state: { ticket: state.ticketId, currentStep: '11_output' },
           summary: `Reports up-to-date (hash: ${state.changesHash}). No re-check needed.`,
           readme: state.setupResult.cache.readme,
         };

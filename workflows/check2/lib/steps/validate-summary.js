@@ -8,7 +8,7 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 
 module.exports = function registerValidateSummary(register) {
-  register('7_validate_summary', (state, ctx) => {
+  register('10_validate_summary', (state, ctx) => {
     const reportFolder = state.setupResult?.reportFolder || ctx.tasksDir;
     const apps = JSON.stringify(state.setupResult?.impactedApps || []);
 

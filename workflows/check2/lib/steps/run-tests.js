@@ -1,6 +1,12 @@
 /**
  * Step: 4_run_tests — Run automated tests inline (deterministic).
  * If tests fail, returns blocked so work-next.js can transition back to implement.
+ *
+ * Test runner priority:
+ *   0. SCRIPT_RUN_AFFECTED_UNIT env var (affected-only tests, fastest)
+ *   1. pnpm dev:check (project-defined)
+ *   2. Bundled dev-check.sh
+ *   3. pnpm test / node --test (fallback)
  */
 
 'use strict';
@@ -9,68 +15,50 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
+function runCommand(cmd, timeout) {
+  try {
+    const output = execSync(`${cmd} 2>&1`, { encoding: 'utf8', timeout });
+    return { output, exitCode: 0 };
+  } catch (err) {
+    return {
+      output: (err.stdout || '') + (err.stderr || ''),
+      exitCode: err.status || 1,
+    };
+  }
+}
+
 /**
  * Run quality gate and return { output, exitCode, tier }.
  */
 function runQualityGate(checkHooksDir) {
+  // Tier 0: SCRIPT_RUN_AFFECTED_UNIT — affected-only tests (fastest, set via .envrc)
+  const affectedUnit = process.env.SCRIPT_RUN_AFFECTED_UNIT;
+  if (affectedUnit) {
+    const result = runCommand(affectedUnit, 300000);
+    return { ...result, tier: 'affected-unit' };
+  }
+
   // Tier 1: pnpm dev:check
   try {
     const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
     if (pkg.scripts && pkg.scripts['dev:check']) {
-      try {
-        const output = execSync('pnpm dev:check 2>&1', { encoding: 'utf8', timeout: 120000 });
-        return { output, exitCode: 0, tier: 'pnpm dev:check' };
-      } catch (err) {
-        return {
-          output: (err.stdout || '') + (err.stderr || ''),
-          exitCode: err.status || 1,
-          tier: 'pnpm dev:check',
-        };
-      }
+      const result = runCommand('pnpm dev:check', 120000);
+      return { ...result, tier: 'pnpm dev:check' };
     }
   } catch {
     /* no package.json */
   }
 
   // Tier 2: bundled dev-check script
-  const devCheckScript = path.join(
-    checkHooksDir,
-    '..',
-    '..',
-    'scripts',
-    'dev-check',
-    'dev-check.sh'
-  );
+  const devCheckScript = path.join(checkHooksDir, '..', '..', 'scripts', 'dev-check', 'dev-check.sh');
   if (fs.existsSync(devCheckScript)) {
-    try {
-      const output = execSync(`bash "${devCheckScript}" 2>&1`, {
-        encoding: 'utf8',
-        timeout: 120000,
-      });
-      return { output, exitCode: 0, tier: 'dev-check.sh' };
-    } catch (err) {
-      return {
-        output: (err.stdout || '') + (err.stderr || ''),
-        exitCode: err.status || 1,
-        tier: 'dev-check.sh',
-      };
-    }
+    const result = runCommand(`bash "${devCheckScript}"`, 120000);
+    return { ...result, tier: 'dev-check.sh' };
   }
 
   // Tier 3: pnpm test or node --test
-  try {
-    const output = execSync('pnpm test 2>&1 || node --test 2>&1', {
-      encoding: 'utf8',
-      timeout: 120000,
-    });
-    return { output, exitCode: 0, tier: 'pnpm test' };
-  } catch (err) {
-    return {
-      output: (err.stdout || '') + (err.stderr || ''),
-      exitCode: err.status || 1,
-      tier: 'pnpm test',
-    };
-  }
+  const result = runCommand('pnpm test || node --test', 120000);
+  return { ...result, tier: 'pnpm test' };
 }
 
 module.exports = function registerRunTests(register) {
@@ -112,7 +100,6 @@ module.exports = function registerRunTests(register) {
     fs.writeFileSync(reportPath, report);
 
     if (result.exitCode !== 0) {
-      // Tests failed — signal back to work-next.js to transition to implement
       state.testsFailed = true;
       return {
         type: 'check_instruction',
