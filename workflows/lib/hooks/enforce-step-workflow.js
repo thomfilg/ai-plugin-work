@@ -195,6 +195,10 @@ const EXEMPT_SCRIPTS = new Set([
   'work-state.js',
   'workflow-state.js',
   'session-guard.js',
+  'check-next.js',
+  'follow-up-next.js',
+  'follow-up-pr-comments.js',
+  'work-next.js',
 ]);
 
 // Sub-command filtering for state scripts (GH-89).
@@ -225,8 +229,12 @@ const TRUSTED_SCRIPT_DIRS = [
   path.resolve(__dirname, '..'), // workflows/lib/
   path.resolve(__dirname, '..', 'scripts'), // workflows/lib/scripts/
   path.resolve(__dirname, '..', '..', 'work'), // workflows/work/
+  path.resolve(__dirname, '..', '..', 'work', 'scripts'), // workflows/work/scripts/
   path.resolve(__dirname, '..', '..', 'check', 'scripts'), // workflows/check/scripts/
   path.resolve(__dirname, '..', '..', 'work-implement'), // workflows/work-implement/
+  path.resolve(__dirname, '..', '..', 'work2'), // workflows/work2/
+  path.resolve(__dirname, '..', '..', 'check2'), // workflows/check2/
+  path.resolve(__dirname, '..', '..', 'follow-up2'), // workflows/follow-up2/
 ];
 
 // Agent-gated writer scripts — map script basename to { agents, step }.
