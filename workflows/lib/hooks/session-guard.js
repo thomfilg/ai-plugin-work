@@ -538,10 +538,26 @@ function handleStop(hookData) {
     }
   }
 
-  process.stderr.write(
-    `BLOCKED: Active workflow session for ${session.ticketId} (${session.workflow}). ` +
-      `Complete all ${session.workflow} steps to unlock, or type 'abort workflow' to force-stop.\n`
-  );
+  const workflow = session.workflow || '/work2';
+  const ticketId = session.ticketId || '';
+
+  if (workflow === '/work2') {
+    process.stderr.write(
+      `ACTIVE WORKFLOW SESSION — DO NOT ABANDON\n` +
+        `Workflow: ${workflow} | Ticket: ${ticketId}\n` +
+        `You MUST continue this workflow. Run:\n` +
+        `  node "\${CLAUDE_PLUGIN_ROOT}/workflows/work2/work-next.js" ${ticketId}\n` +
+        `Execute the returned instruction, then re-run work-next.js until action: "complete".\n` +
+        `The session is locked with a passphrase. Complete all steps to unlock.\n`
+    );
+  } else {
+    process.stderr.write(
+      `ACTIVE WORKFLOW SESSION — DO NOT ABANDON\n` +
+        `Workflow: ${workflow} | Ticket: ${ticketId}\n` +
+        `You MUST continue this workflow. Run: ${workflow} ${ticketId}\n` +
+        `The session is locked with a passphrase. Complete all steps to unlock.\n`
+    );
+  }
   process.exit(2);
 }
 
