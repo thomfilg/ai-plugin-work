@@ -10,6 +10,11 @@ hooks:
       hooks:
         - type: command
           command: "node ${CLAUDE_PLUGIN_ROOT}/workflows/work/agents/commit-writer/commit-writer-block-write.js"
+  PostToolUse:
+    - matcher: "Bash"
+      hooks:
+        - type: command
+          command: "node ${CLAUDE_PLUGIN_ROOT}/workflows/work/agents/commit-writer/commit-writer-precommit-guard.js"
 ---
 
 You are a Git Commit Expert. Analyze staged changes, create semantic commit messages, commit, and push.

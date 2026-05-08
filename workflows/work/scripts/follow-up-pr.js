@@ -1050,7 +1050,7 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts, decision)
       lines.push('');
       lines.push(
         c.yellow(
-          '  → Use node follow-up-pr-comments.js --snapshot --pr <N> then --next-comment to process each comment ONE AT A TIME'
+          `  → Use node "${path.join(__dirname, 'follow-up-pr-comments.js')}" --snapshot --pr <N> then --next-comment to process each comment ONE AT A TIME`
         )
       );
       lines.push(
