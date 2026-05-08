@@ -89,7 +89,7 @@ function initState(ticketId, prNumber) {
     status: 'in_progress',
     dispatched: null,
     attempt: 0,
-    maxAttempts: 10,
+    maxAttempts: 40,
     lastMonitorResult: null,
     failureCategory: null,
     startTime: new Date().toISOString(),

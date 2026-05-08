@@ -1,11 +1,16 @@
 /**
- * Step: push-retry — Commit fixes, push, increment attempt, loop back to monitor.
+ * Step: push-retry — Push committed fixes, increment attempt, loop back to monitor.
+ *
+ * Each fix-reviews comment gets its own commit. This step just pushes
+ * all pending commits to origin. If nothing to push, loops back silently.
  */
 
 'use strict';
 
+const { execFileSync } = require('child_process');
+
 module.exports = function registerPushRetry(register) {
-  register('push-retry', (state) => {
+  register('push-retry', (state, ctx) => {
     state.attempt = (state.attempt || 0) + 1;
 
     if (state.attempt >= state.maxAttempts) {
@@ -16,9 +21,41 @@ module.exports = function registerPushRetry(register) {
       };
     }
 
-    // Delegate commit-writer to commit + push
+    // Already pushed — loop back to monitor
     if (state.dispatched === 'push-retry') {
-      // Already committed — loop back to monitor
+      state.currentStep = 'monitor';
+      state.dispatched = null;
+      state.failureCategory = null;
+      return null;
+    }
+
+    // Check if there are commits to push
+    let hasUnpushed = false;
+    try {
+      const count = execFileSync('git', ['rev-list', '--count', '@{upstream}..HEAD'], {
+        encoding: 'utf8',
+        timeout: 5000,
+        cwd: ctx.worktreeDir,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      }).trim();
+      hasUnpushed = parseInt(count, 10) > 0;
+    } catch {
+      // No upstream or git error — check for uncommitted changes as fallback
+      try {
+        const porcelain = execFileSync('git', ['status', '--porcelain'], {
+          encoding: 'utf8',
+          timeout: 5000,
+          cwd: ctx.worktreeDir,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        }).trim();
+        hasUnpushed = porcelain.length > 0;
+      } catch {
+        hasUnpushed = false;
+      }
+    }
+
+    if (!hasUnpushed) {
+      // Nothing to push — all comments were skipped, loop back
       state.currentStep = 'monitor';
       state.dispatched = null;
       state.failureCategory = null;
@@ -33,11 +70,9 @@ module.exports = function registerPushRetry(register) {
       state: { ticket: state.ticketId, currentStep: 'push-retry', attempt: state.attempt },
       continue: true,
       delegate: {
-        type: 'task',
-        agentType: 'work-workflow:commit-writer',
-        description: `Commit follow-up fixes (attempt ${state.attempt})`,
-        prompt: `autonomous - commit and push follow-up fixes for ${state.ticketId}`,
-        note: 'Pass the prompt directly to the agent.',
+        type: 'bash',
+        description: `Push follow-up fixes for ${state.ticketId}`,
+        command: `cd "${ctx.worktreeDir}" && git push`,
       },
     };
   });

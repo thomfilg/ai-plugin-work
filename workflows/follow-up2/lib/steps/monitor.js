@@ -1,6 +1,12 @@
 /**
  * Step: monitor — Run follow-up-pr.js to check CI + reviews.
- * Parses exit code and stores result for triage.
+ *
+ * Lets follow-up-pr.js handle its own adaptive polling loop:
+ *   - CI done → returns in ~15s (just API calls)
+ *   - CI pending → polls adaptively (10s, 30s, 60s intervals)
+ *   - CI failing → returns immediately
+ *
+ * Exit codes: 0 = all clear, 1 = issues remain, 2 = error
  */
 
 'use strict';
@@ -15,29 +21,41 @@ module.exports = function registerMonitor(register) {
     if (state.prNumber) args.push('--pr', String(state.prNumber));
 
     let exitCode = 0;
-    let output = '';
+    let stdout = '';
     try {
-      output = execFileSync(process.execPath, args, {
+      stdout = execFileSync(process.execPath, args, {
         encoding: 'utf8',
-        timeout: 120000, // 2 min — script has internal polling
-        stdio: ['pipe', 'pipe', 'pipe'],
+        timeout: 600000, // 10 min — script has its own 40-attempt limit
         cwd: ctx.worktreeDir,
+        stdio: ['pipe', 'pipe', 'pipe'],
       });
       exitCode = 0;
     } catch (err) {
-      exitCode = err.status || 1;
-      output = (err.stdout || '') + (err.stderr || '');
+      exitCode = typeof err.status === 'number' ? err.status : 1;
+      stdout =
+        typeof err.stdout === 'string'
+          ? err.stdout
+          : Buffer.isBuffer(err.stdout)
+            ? err.stdout.toString()
+            : '';
+      const stderr =
+        typeof err.stderr === 'string'
+          ? err.stderr
+          : Buffer.isBuffer(err.stderr)
+            ? err.stderr.toString()
+            : '';
+      if (stderr) stdout += '\n' + stderr;
     }
 
-    state.lastMonitorResult = { exitCode, output: output.substring(0, 2000) };
+    state.lastMonitorResult = { exitCode, output: stdout.substring(0, 3000) };
 
     if (exitCode === 0) {
-      // Success — skip to report
+      // All clear — skip to report
       state.currentStep = 'report';
-      return null;
     }
+    // exitCode 1 = issues remain → advance to triage
+    // exitCode 2 = error → triage handles it
 
-    // Failure — advance to triage
     return null;
   });
 };
