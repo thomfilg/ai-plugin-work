@@ -1,9 +1,9 @@
 /**
- * Step: monitor — Run follow-up-pr.js --once for a fast status check.
+ * Step: monitor — Run follow-up-pr.js to check CI + reviews.
  *
- * Uses --once so the script does a single check (~15s) and returns immediately.
- * The follow-up2 orchestrator loop (monitor → triage → fix → push → monitor)
- * handles retries — we don't need follow-up-pr.js internal polling here.
+ * Runs the full follow-up-pr.js with its adaptive polling loop
+ * (40 attempts, 10s→30s→60s intervals). Handles long CI runs (20+ min).
+ * No timeout — follow-up-pr.js has its own attempt limit.
  *
  * Exit codes: 0 = all clear, 1 = issues remain, 2 = error
  */
@@ -16,7 +16,7 @@ const { execFileSync } = require('child_process');
 module.exports = function registerMonitor(register) {
   register('monitor', (state, ctx) => {
     const scriptPath = path.join(ctx.workScriptsDir, 'follow-up-pr.js');
-    const args = [scriptPath, '--once'];
+    const args = [scriptPath];
     if (state.prNumber) args.push('--pr', String(state.prNumber));
 
     let exitCode = 0;
@@ -24,7 +24,6 @@ module.exports = function registerMonitor(register) {
     try {
       stdout = execFileSync(process.execPath, args, {
         encoding: 'utf8',
-        timeout: 60000, // 1 min — --once is a single check
         cwd: ctx.worktreeDir,
         stdio: ['pipe', 'pipe', 'pipe'],
       });
@@ -49,11 +48,8 @@ module.exports = function registerMonitor(register) {
     state.lastMonitorResult = { exitCode, output: stdout.substring(0, 3000) };
 
     if (exitCode === 0) {
-      // All clear — skip to report
       state.currentStep = 'report';
     }
-    // exitCode 1 = issues remain → advance to triage
-    // exitCode 2 = error → triage handles it
 
     return null;
   });

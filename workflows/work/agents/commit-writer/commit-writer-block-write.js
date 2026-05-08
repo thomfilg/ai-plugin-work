@@ -179,6 +179,11 @@ function checkSegment(segment) {
           `'git commit --only' is not allowed — commit only staged files. Blocked: ${s.slice(0, 100)}`
         );
       }
+      if (/--no-verify\b|-n\b/.test(s)) {
+        block(
+          `'git commit --no-verify/-n' is not allowed — pre-commit hooks must run. Blocked: ${s.slice(0, 100)}`
+        );
+      }
       return; // allowed: commit staged files with -m
     }
 

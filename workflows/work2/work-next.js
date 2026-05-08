@@ -21,10 +21,26 @@ const path = require('path');
 const fs = require('fs');
 const { execFileSync } = require('child_process');
 
-// Fail-safe handlers
+// Error handlers — log errors as blocked instructions instead of swallowing silently
 if (require.main === module) {
-  process.on('uncaughtException', () => process.exit(0));
-  process.on('unhandledRejection', () => process.exit(0));
+  process.on('uncaughtException', (err) => {
+    console.error(JSON.stringify({
+      type: 'work_instruction',
+      action: 'blocked',
+      reason: `Uncaught exception: ${err.message}`,
+      stack: err.stack,
+    }));
+    process.exit(1);
+  });
+  process.on('unhandledRejection', (err) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(JSON.stringify({
+      type: 'work_instruction',
+      action: 'blocked',
+      reason: `Unhandled rejection: ${msg}`,
+    }));
+    process.exit(1);
+  });
 }
 
 // ─── Load shared modules from /work ─────────────────────────────────────────

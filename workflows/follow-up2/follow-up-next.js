@@ -16,8 +16,24 @@ const fs = require('fs');
 const path = require('path');
 
 if (require.main === module) {
-  process.on('uncaughtException', () => process.exit(0));
-  process.on('unhandledRejection', () => process.exit(0));
+  process.on('uncaughtException', (err) => {
+    console.error(JSON.stringify({
+      type: 'follow_up_instruction',
+      action: 'blocked',
+      reason: `Uncaught exception: ${err.message}`,
+      stack: err.stack,
+    }));
+    process.exit(1);
+  });
+  process.on('unhandledRejection', (err) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(JSON.stringify({
+      type: 'follow_up_instruction',
+      action: 'blocked',
+      reason: `Unhandled rejection: ${msg}`,
+    }));
+    process.exit(1);
+  });
 }
 
 // ─── Resolve paths ──────────────────────────────────────────────────────────
