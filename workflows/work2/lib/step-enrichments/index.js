@@ -71,6 +71,7 @@ require('./spec-gate')(register);
 require('./context-inject')(register);
 require('./implement')(register);
 require('./check')(register);
+require('./follow-up')(register);
 
 // --- Register dispatch-advance gates ---
 const { dispatchAdvanceGate: implementGate } = require('./implement-gate');
