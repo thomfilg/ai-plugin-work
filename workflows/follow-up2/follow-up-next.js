@@ -43,6 +43,21 @@ if (!TASKS_BASE) {
   process.exit(0);
 }
 
+// Ticket provider for ID sanitization
+let tp;
+try {
+  tp = require(path.join(libDir, 'ticket-provider'));
+} catch {
+  console.log(
+    JSON.stringify({
+      type: 'follow_up_instruction',
+      action: 'blocked',
+      reason: 'ticket-provider not found',
+    })
+  );
+  process.exit(0);
+}
+
 // ─── Step registry ──────────────────────────────────────────────────────────
 const { runStep, STEPS } = require(path.join(__dirname, 'lib', 'step-registry'));
 
@@ -161,25 +176,29 @@ function main() {
     process.exit(0);
   }
 
-  const ticketId = args.filter((a) => !a.startsWith('--'))[0];
+  const ticketRaw = args.filter((a) => !a.startsWith('--'))[0];
   const prIdx = args.indexOf('--pr');
   const prNumber = prIdx >= 0 ? parseInt(args[prIdx + 1], 10) : null;
   const isInit = args.includes('--init');
 
+  // Sanitize ticket ID: #279 → GH-279
+  const providerConfig = tp.getProviderConfig({ skipPrompt: true });
+  const safeName = tp.sanitizeTicketIdForPath(ticketRaw, providerConfig);
+
   if (isInit) {
-    const markerDir = path.join(TASKS_BASE, ticketId);
+    const markerDir = path.join(TASKS_BASE, safeName);
     fs.mkdirSync(markerDir, { recursive: true });
     fs.writeFileSync(
       path.join(markerDir, '.follow-up2-orchestrator.pid'),
       JSON.stringify({
-        ticket: ticketId,
+        ticket: safeName,
         startedAt: new Date().toISOString(),
         workflow: '/follow-up2',
       })
     );
   }
 
-  const instruction = getNextInstruction(ticketId, prNumber);
+  const instruction = getNextInstruction(safeName, prNumber);
   console.log(JSON.stringify(instruction, null, 2));
 }
 
