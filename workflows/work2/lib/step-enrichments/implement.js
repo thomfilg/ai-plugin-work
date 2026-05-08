@@ -64,6 +64,8 @@ function resolveAgentType(tasksDir, taskNum) {
   return 'developer-nodejs-tdd';
 }
 
+const { findReadyTasks, parseTasks } = require(path.join(__dirname, '..', 'task-graph'));
+
 module.exports = function registerImplement(register) {
   register('implement', (entry, ctx) => {
     if (!entry.agentPrompt) return;
@@ -74,6 +76,60 @@ module.exports = function registerImplement(register) {
     const pluginRoot = resolvePluginRoot(__dirname, 4);
     const tddNextPath = path.join(pluginRoot, 'workflows', 'work2', 'tdd-next.js');
     const ticket = ctx.ticket || 'TICKET';
+
+    // Check for parallel tasks
+    const tasksDir = ctx.tasksDir || '';
+    const taskMatch = entry.agentPrompt.match(/Task (\d+) of (\d+)/);
+    const currentTaskNum = taskMatch ? parseInt(taskMatch[1], 10) : 1;
+    const totalTasks = taskMatch ? parseInt(taskMatch[2], 10) : 1;
+
+    if (tasksDir && totalTasks > 1) {
+      const { parallelTasks } = findReadyTasks(tasksDir, currentTaskNum - 1);
+      if (parallelTasks.length > 1) {
+        const allTasks = parseTasks(tasksDir);
+        const delegates = parallelTasks.map((num) => {
+          const task = allTasks.find((t) => t.num === num);
+          const agentType = resolveAgentType(tasksDir, num);
+          return {
+            type: 'task',
+            agentType,
+            description: `Task ${num}/${totalTasks} — ${task?.title || 'Implementation'}`,
+            prompt: [
+              `## Implement Task ${num}/${totalTasks} — ${task?.title || 'Implementation'}`,
+              '',
+              `### TDD Phase: RED — write failing tests`,
+              'Get phase commands:',
+              '```bash',
+              `node "${tddNextPath}" ${ticket} --task ${num}`,
+              '```',
+              'Record evidence at each phase (init → red → green → refactor).',
+              '',
+              '### Required Reading',
+              `- **Task details:** ${path.join(tasksDir, 'tasks.md')} (find "## Task ${num}" section)`,
+              `- **Spec:** ${path.join(tasksDir, 'spec.md')}`,
+              `- **Brief:** ${path.join(tasksDir, 'brief.md')}`,
+              '',
+              '### Rules',
+              `- Implement ONLY Task ${num} deliverables`,
+              '- Do NOT touch files reserved for other tasks',
+              '- Follow TDD: run tdd-next.js → do the work → record evidence → transition phase',
+            ].join('\n'),
+            note: 'Pass the prompt directly to the agent.',
+          };
+        });
+
+        entry._overrideInstruction = {
+          type: 'work_instruction',
+          action: 'execute',
+          state: { ticket, currentStep: 'implement', progress: `${currentTaskNum}/${totalTasks}` },
+          continue: true,
+          parallel: true,
+          delegates,
+          note: `Launch ALL ${delegates.length} agents IN PARALLEL (single message, multiple Task tool calls). Each task is independent.`,
+        };
+        return;
+      }
+    }
 
     // Extract task number and title from the plan generator prompt
     const taskMatch = entry.agentPrompt.match(/Task (\d+) of (\d+)/);
