@@ -15,15 +15,7 @@
 const fs = require('fs');
 const path = require('path');
 const AppAccessStatus = require(path.join(__dirname, '..', 'lib', 'app-access-status'));
-
-// Get args
-const REPORT_FOLDER = process.argv[2];
-const IMPACTED_APPS = JSON.parse(process.argv[3] || '[]');
-
-if (!REPORT_FOLDER) {
-  console.error('Usage: node check-validate-reports.js <REPORT_FOLDER> <IMPACTED_APPS_JSON>');
-  process.exit(1);
-}
+const { detectSeverityMarkers } = require(path.join(__dirname, '..', 'lib', 'severity-detection'));
 
 /**
  * Check if a file exists
@@ -159,15 +151,10 @@ function validateCodeReview(reportFolder) {
     issues.push('Missing "**Changes Hash:**" at top of report');
   }
 
-  // Check for CRITICAL issues
-  const criticalMatches = content.match(/🔴\s*CRITICAL|CRITICAL.*must fix|severity.*critical/gi);
-  const hasCritical = criticalMatches && criticalMatches.length > 0;
-
-  // Check for IMPORTANT issues
-  const importantMatches = content.match(
-    /🟡\s*IMPORTANT|IMPORTANT.*should fix|severity.*important/gi
-  );
-  const hasImportant = importantMatches && importantMatches.length > 0;
+  // Detect severity markers using line-based analysis with negation filtering
+  const markers = detectSeverityMarkers(content);
+  const hasCritical = markers.critical.length > 0;
+  const hasImportant = markers.important.length > 0;
 
   // Check if there's a reply file addressing the issues
   const replyPath = path.join(reportFolder, 'code-review-reply.check.md');
@@ -261,6 +248,15 @@ function validateCompletionReport(reportFolder) {
  * Main validation
  */
 function main() {
+  // Get args
+  const REPORT_FOLDER = process.argv[2];
+  const IMPACTED_APPS = JSON.parse(process.argv[3] || '[]');
+
+  if (!REPORT_FOLDER) {
+    console.error('Usage: node check-validate-reports.js <REPORT_FOLDER> <IMPACTED_APPS_JSON>');
+    process.exit(1);
+  }
+
   const results = {
     reportFolder: REPORT_FOLDER,
     impactedApps: IMPACTED_APPS,
@@ -390,4 +386,8 @@ function main() {
   process.exit(results.overall.valid ? 0 : 1);
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = { validateCodeReview };
