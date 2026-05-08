@@ -1,19 +1,22 @@
 /**
  * Step: fix-reviews — Process PR review comments one at a time.
  *
- * Runs follow-up-pr-comments.js inline:
- *   1. --snapshot (first call only)
- *   2. --next-comment → get exact comment
- *   3. Dispatch developer to fix or skip
- *   4. Developer commits fix OR script records skip via --skip-comment
- *   5. Repeat until all comments processed
+ * IMPORTANT: Only runs when Cursor Bugbot has FINISHED reviewing.
+ * Triage skips this step when bot reviews are still pending
+ * (Bugbot auto-dismisses old comments on re-review, so waiting avoids
+ * processing stale comments).
  *
- * When only skipped comments remain → prompts user to review follow-up-comments.json.
+ * Flow:
+ *   1. Snapshot comments (first call)
+ *   2. Get next unsolved comment
+ *   3. Return instruction showing exactly ONE comment
+ *   4. Agent addresses it using --solve-comment or --skip-comment
+ *   5. Re-enter → get next → repeat until done
+ *   6. If any skipped → block for user review
  */
 
 'use strict';
 
-const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
@@ -37,106 +40,19 @@ module.exports = function registerFixReviews(register) {
       state._reviewSnapshotDone = true;
     }
 
-    // After developer returned — record result then get next
-    if (state.dispatched === 'fix-reviews' && state._pendingCommentId) {
-      // Check if developer made changes (committed)
-      let lastCommitSha = '';
-      try {
-        lastCommitSha = execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
-          encoding: 'utf8',
-          timeout: 5000,
-          cwd: ctx.worktreeDir,
-          stdio: ['pipe', 'pipe', 'pipe'],
-        }).trim();
-      } catch {
-        /* ignore */
-      }
-
-      // Check if there are uncommitted changes (developer fixed but didn't commit)
-      let hasUncommitted = false;
-      try {
-        const porcelain = execFileSync('git', ['status', '--porcelain'], {
-          encoding: 'utf8',
-          timeout: 5000,
-          cwd: ctx.worktreeDir,
-          stdio: ['pipe', 'pipe', 'pipe'],
-        }).trim();
-        hasUncommitted = porcelain.length > 0;
-      } catch {
-        /* ignore */
-      }
-
-      const priorSha = state._priorHeadSha || '';
-      const wasCommitted = lastCommitSha && lastCommitSha !== priorSha;
-
-      if (wasCommitted) {
-        // Developer committed a fix → mark solved
-        try {
-          execFileSync(
-            process.execPath,
-            [
-              commentsScript,
-              '--solve-comment',
-              state._pendingCommentId,
-              lastCommitSha,
-              'Fixed by developer',
-            ],
-            {
-              encoding: 'utf8',
-              timeout: 10000,
-              cwd: ctx.worktreeDir,
-              stdio: ['pipe', 'pipe', 'pipe'],
-            }
-          );
-        } catch {
-          /* fail-open */
-        }
-      } else if (!hasUncommitted) {
-        // No changes at all → developer decided to skip
-        // Read skip reason from follow-up-skips.md if it exists
-        let skipReason = 'Developer determined no code change needed';
-        const skipsFile = path.join(ctx.tasksDir, 'follow-up-skips.md');
-        try {
-          const content = fs.readFileSync(skipsFile, 'utf8');
-          const lines = content.trim().split('\n');
-          const lastLine = lines[lines.length - 1];
-          const reasonMatch = lastLine.match(/SKIPPED\s*—\s*(.+)$/);
-          if (reasonMatch) skipReason = reasonMatch[1].trim();
-        } catch {
-          /* no skips file */
-        }
-
-        try {
-          execFileSync(
-            process.execPath,
-            [commentsScript, '--skip-comment', state._pendingCommentId, skipReason],
-            {
-              encoding: 'utf8',
-              timeout: 10000,
-              cwd: ctx.worktreeDir,
-              stdio: ['pipe', 'pipe', 'pipe'],
-            }
-          );
-        } catch {
-          /* fail-open */
-        }
-      }
-      // If hasUncommitted but not committed — developer partially fixed. Leave as unsolved for next round.
-
-      delete state._pendingCommentId;
-      delete state._priorHeadSha;
+    // After agent returned from previous comment — clear dispatch, get next
+    if (state.dispatched === 'fix-reviews') {
       state.dispatched = null;
     }
 
-    // Get next unresolved comment
+    // Get next unsolved comment
     let comment = null;
     try {
-      const result = execFileSync(process.execPath, [commentsScript, '--next-comment'], {
-        encoding: 'utf8',
-        timeout: 15000,
-        cwd: ctx.worktreeDir,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
+      const result = execFileSync(
+        process.execPath,
+        [commentsScript, '--next-comment'],
+        { encoding: 'utf8', timeout: 15000, cwd: ctx.worktreeDir, stdio: ['pipe', 'pipe', 'pipe'] }
+      );
       comment = JSON.parse(result);
     } catch {
       delete state._reviewSnapshotDone;
@@ -146,19 +62,16 @@ module.exports = function registerFixReviews(register) {
     if (!comment || comment.done) {
       delete state._reviewSnapshotDone;
 
-      // Check if there are skipped comments → prompt user
+      // Check for skipped comments → prompt user
       let statusResult = null;
       try {
-        const raw = execFileSync(process.execPath, [commentsScript, '--status'], {
-          encoding: 'utf8',
-          timeout: 10000,
-          cwd: ctx.worktreeDir,
-          stdio: ['pipe', 'pipe', 'pipe'],
-        });
+        const raw = execFileSync(
+          process.execPath,
+          [commentsScript, '--status'],
+          { encoding: 'utf8', timeout: 10000, cwd: ctx.worktreeDir, stdio: ['pipe', 'pipe', 'pipe'] }
+        );
         statusResult = JSON.parse(raw);
-      } catch {
-        /* ignore */
-      }
+      } catch { /* ignore */ }
 
       if (statusResult && statusResult.skipped > 0) {
         const reviewFile = path.join(ctx.tasksDir, 'follow-up-comments.json');
@@ -176,30 +89,35 @@ module.exports = function registerFixReviews(register) {
       return null; // all solved → advance to push-retry
     }
 
-    // Save HEAD sha before developer works
-    let headSha = '';
-    try {
-      headSha = execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
-        encoding: 'utf8',
-        timeout: 5000,
-        cwd: ctx.worktreeDir,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      }).trim();
-    } catch {
-      /* ignore */
-    }
-
     state.dispatched = 'fix-reviews';
-    state._pendingCommentId = comment.id;
-    state._priorHeadSha = headSha;
+
+    // Get total count for "N of M" display
+    let totalComments = '?';
+    let currentIndex = '?';
+    try {
+      const raw = execFileSync(
+        process.execPath,
+        [commentsScript, '--status'],
+        { encoding: 'utf8', timeout: 10000, cwd: ctx.worktreeDir, stdio: ['pipe', 'pipe', 'pipe'] }
+      );
+      const st = JSON.parse(raw);
+      totalComments = st.total || '?';
+      currentIndex = (st.solved || 0) + (st.skipped || 0) + 1;
+    } catch { /* ignore */ }
 
     const author = comment.author || 'unknown';
-    const filePath = comment.path || 'unknown file';
-    const line = comment.line || 'N/A';
+    const filePath = comment.path || 'general';
+    const line = comment.line || '';
     const body = comment.body || '';
     const priority = comment.priority || 'unknown';
     const codeContext = comment.codeContext || '';
-    const skipsFile = path.join(ctx.tasksDir, 'follow-up-skips.md');
+    const commentId = comment.id;
+    const fileRef = line ? `${filePath}:${line}` : filePath;
+
+    // Build the solve/skip commands the agent must use
+    const solveCmd = `node "${commentsScript}" --solve-comment "${commentId}" "<COMMIT_SHA>" "<description of what you fixed>"`;
+    const skipCmd = `node "${commentsScript}" --skip-comment "${commentId}" "<reason>"`;
+    const nextCmd = `node "${path.join(__dirname, '..', '..', 'follow-up-next.js')}" "${state.ticketId}"${state.prNumber ? ` --pr ${state.prNumber}` : ''}`;
 
     return {
       type: 'follow_up_instruction',
@@ -209,43 +127,36 @@ module.exports = function registerFixReviews(register) {
       delegate: {
         type: 'task',
         agentType: 'work-workflow:developer-nodejs-tdd',
-        description: `Fix review: ${filePath}:${line} by ${author}`,
+        description: `Review comment ${currentIndex} of ${totalComments}: ${fileRef}`,
         prompt: [
-          `## PR #${prNum} Review Comment`,
+          `## Review Comment ${currentIndex} of ${totalComments}`,
           '',
-          `| Field | Value |`,
-          `|-------|-------|`,
-          `| Author | ${author} |`,
-          `| Priority | ${priority} |`,
-          `| File | ${filePath} |`,
-          `| Line | ${line} |`,
+          `**Author:** ${author} | **Priority:** ${priority} | **File:** ${fileRef}`,
           '',
-          '### Comment:',
           body,
           '',
-          codeContext
-            ? `### Current code at ${filePath}:${line}:\n\`\`\`\n${codeContext}\n\`\`\`\n`
-            : '',
-          '### You MUST do exactly ONE of these:',
+          codeContext ? `### Current code:\n\`\`\`\n${codeContext}\n\`\`\`\n` : '',
+          '---',
           '',
-          '**Option A — Fix and commit:**',
-          '1. Fix the code in the specified file',
-          '2. Stage the changed files',
-          '3. Commit with message: `fix(review): <what you fixed>`',
-          '4. Do NOT push',
+          '## You MUST do exactly ONE of these:',
           '',
-          '**Option B — Skip with reason:**',
-          `Append to \`${skipsFile}\`:`,
+          '### Option A — Fix the code:',
+          '1. Fix the issue in the specified file',
+          '2. Stage and commit: `git add <files> && git commit -m "fix(review): <what you fixed>"`',
+          '3. Then mark as addressed:',
           '```',
-          `- **${filePath}:${line}** (${author}): SKIPPED — <reason>`,
+          solveCmd,
           '```',
           '',
-          'Valid skip reasons ONLY:',
-          '- "Outside scope of brief/spec" — the suggestion goes beyond what the ticket requires',
-          '- "Conflicts with ticket requirements" — contradicts ticket.json/brief.md',
-          '- "Conflicts with user instruction" — goes against an explicit user decision',
+          '### Option B — Skip with reason:',
+          '```',
+          skipCmd,
+          '```',
+          'Valid reasons: "Outside scope of brief/spec", "Conflicts with ticket requirements", "Conflicts with user instruction"',
           '',
-          'Do NOT skip for any other reason. If the comment points to a real bug, fix it.',
+          '---',
+          '',
+          `When done, call: \`${nextCmd}\``,
         ].join('\n'),
         note: 'Pass the prompt directly to the agent.',
       },
