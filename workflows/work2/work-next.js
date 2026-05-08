@@ -303,7 +303,7 @@ function getNextInstruction(ticketRaw, rework) {
   const safeName = suffix ? safeBase + '/' + suffix : safeBase;
   if (process.env.SESSION_GUARD_ENABLED !== '0') {
     try {
-      const sessionDir = process.env.SESSION_GUARD_DIR || '/tmp';
+      const sessionDir = process.env.SESSION_GUARD_DIR || require('os').tmpdir();
       const sanitizedId = String(safeBase).replace(/[/\\:\0]/g, '_');
       const sessionPath = path.join(sessionDir, `claude-session-guard-${sanitizedId}.json`);
       if (fs.existsSync(sessionPath)) {
