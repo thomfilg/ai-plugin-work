@@ -1,9 +1,9 @@
 /**
  * Check dispatch-advance gate.
  *
- * When check2's run-tests step fails, reads .check2-state.json
- * and triggers a backward transition check → implement so the
- * developer can fix the failing tests.
+ * Handles two cases:
+ * 1. check2 completed → advance work state to PR step
+ * 2. check2 tests failed → transition back to implement
  */
 
 'use strict';
@@ -20,31 +20,41 @@ const path = require('path');
 function dispatchAdvanceGate(safeName, ctx, deps) {
   const { loadWorkState, saveWorkState, log, recursionDepth } = deps;
 
-  // Read check2 state
   const checkStatePath = path.join(ctx.tasksDir, '.check2-state.json');
   let checkState;
   try {
     checkState = JSON.parse(fs.readFileSync(checkStatePath, 'utf8'));
   } catch {
-    return null; // no check2 state — let normal flow handle
+    return null;
   }
 
-  // If tests failed, transition back to implement
+  const ws = loadWorkState(safeName);
+  if (!ws) return null;
+
+  // Case 1: check2 completed successfully → advance to pr
+  if (checkState.status === 'complete') {
+    ws.stepStatus.check = 'completed';
+    ws.currentStep = 12; // pr step index
+    ws.stepStatus.pr = 'in_progress';
+    delete ws._work2Dispatched;
+    delete ws._work2DispatchedAction;
+    saveWorkState(safeName, ws);
+
+    if (log) {
+      log.recurse(recursionDepth, 'check→pr (check2 complete)');
+    }
+
+    return { recurse: true };
+  }
+
+  // Case 2: tests failed → transition back to implement
   if (checkState.testsFailed) {
-    const ws = loadWorkState(safeName);
-    if (!ws) return null;
-
-    // Read the test report path for context
-    const reportPath = path.join(ctx.tasksDir, 'tests.check.md');
-
-    // Reset check2 state so next check run starts fresh
     try {
       fs.unlinkSync(checkStatePath);
     } catch {
       /* fail-open */
     }
 
-    // Transition back to implement
     ws.stepStatus.check = 'pending';
     ws.stepStatus.commit = 'pending';
     ws.stepStatus.task_review = 'pending';

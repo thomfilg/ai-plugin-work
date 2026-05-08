@@ -35,7 +35,6 @@ node ${CLAUDE_PLUGIN_ROOT}/workflows/work2/work-next.js "$ARGUMENTS" --init
 
 ## Rules
 
-- **Do NOT** read brief/spec/tasks files before delegating — the agent reads them.
-- **Do NOT** reinterpret or improvise on instructions. Execute exactly what the script says.
-- **Do NOT** stop until `action: "complete"`.
-- If `action: "blocked"` → follow the `suggestion` field, then re-run work-next.js.
+- The **only** command you run directly is `work-next.js`. Everything else comes from its instructions.
+- If `action: "blocked"` → re-run `work-next.js`. It handles recovery.
+- Never stop until `action: "complete"`.
