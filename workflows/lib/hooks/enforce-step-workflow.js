@@ -166,6 +166,8 @@ const PROTECTED_STATE_BASENAMES = buildProtectedBasenames(WORKFLOWS, [
   '.pr-update-sha',
   '.workflow-state.json',
   '.check.workflow-state.json',
+  '.check2-state.json',
+  '.follow-up2-state.json',
   'follow-up-comments.json',
 ]);
 
