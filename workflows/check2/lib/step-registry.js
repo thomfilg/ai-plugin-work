@@ -49,7 +49,6 @@ const STEPS = [
   '6_quality_recheck',
   '7_validate_summary',
   '8_output',
-  '9_cleanup',
 ];
 
 // ─── Register steps ─────────────────────────────────────────────────────────
@@ -61,6 +60,5 @@ require('./steps/phase2-consensus')(registerStep);
 require('./steps/quality-recheck')(registerStep);
 require('./steps/validate-summary')(registerStep);
 require('./steps/output')(registerStep);
-require('./steps/cleanup')(registerStep);
 
 module.exports = { registerStep, runStep, STEPS };
