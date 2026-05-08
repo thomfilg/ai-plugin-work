@@ -112,6 +112,38 @@ describe('severity-detection', () => {
     });
   });
 
+  describe('Markdown list-prefixed negation — false positive prevention', () => {
+    it('suppresses "- No remaining" bullet-list negation', () => {
+      const report = '- No remaining 🔴 CRITICAL issues';
+      const result = detectSeverityMarkers(report);
+      assert.equal(result.critical.length, 0, 'bullet-list negation must be suppressed');
+    });
+
+    it('suppresses "* No CRITICAL issues" bullet-list negation', () => {
+      const report = '* No 🔴 CRITICAL issues found';
+      const result = detectSeverityMarkers(report);
+      assert.equal(result.critical.length, 0, 'asterisk-list negation must be suppressed');
+    });
+
+    it('suppresses "> All resolved" blockquote negation', () => {
+      const report = '> All 🔴 CRITICAL issues resolved';
+      const result = detectSeverityMarkers(report);
+      assert.equal(result.critical.length, 0, 'blockquote negation must be suppressed');
+    });
+
+    it('suppresses indented bullet-list negation', () => {
+      const report = '  - 0 🔴 CRITICAL issues found';
+      const result = detectSeverityMarkers(report);
+      assert.equal(result.critical.length, 0, 'indented bullet negation must be suppressed');
+    });
+
+    it('suppresses nested list negation ("> - No...")', () => {
+      const report = '> - No 🔴 CRITICAL issues found';
+      const result = detectSeverityMarkers(report);
+      assert.equal(result.critical.length, 0, 'nested list negation must be suppressed');
+    });
+  });
+
   describe('inline code — false positive prevention', () => {
     it('does not detect severity marker inside backtick-quoted code', () => {
       const report =

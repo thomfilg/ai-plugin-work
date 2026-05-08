@@ -29,15 +29,20 @@ const IMPORTANT_RE = /🟡\s*IMPORTANT/i;
  *
  * Uses `.*` to bridge emoji/severity tokens that may appear between the
  * negation keyword and the anchor word (e.g., "No 🔴 CRITICAL issues").
+ *
+ * The `LINE_START` prefix handles optional Markdown list markers (`- `, `* `, `> `)
+ * and blockquote prefixes that commonly appear in code review report summaries.
  */
+const LINE_START = /^\s*(?:[-*>]+\s+)*/.source;
+
 const NEGATION_PATTERNS = [
-  /^\s*no\s+remaining\b/i,
-  /^\s*\bno\b.*\bissues\b/i,
-  /^\s*0\s+.*(?:critical|important)\b/i,
-  /^\s*none\s+found\b/i,
-  /^\s*\ball\b.*\bresolved\b/i,
-  /^\s*\ball\b.*\baddressed\b/i,
-  /^\s*\bno\b.*\bfound\b/i,
+  new RegExp(`${LINE_START}no\\s+remaining\\b`, 'i'),
+  new RegExp(`${LINE_START}\\bno\\b.*\\bissues\\b`, 'i'),
+  new RegExp(`${LINE_START}0\\s+.*(?:critical|important)\\b`, 'i'),
+  new RegExp(`${LINE_START}none\\s+found\\b`, 'i'),
+  new RegExp(`${LINE_START}\\ball\\b.*\\bresolved\\b`, 'i'),
+  new RegExp(`${LINE_START}\\ball\\b.*\\baddressed\\b`, 'i'),
+  new RegExp(`${LINE_START}\\bno\\b.*\\bfound\\b`, 'i'),
 ];
 
 /**
