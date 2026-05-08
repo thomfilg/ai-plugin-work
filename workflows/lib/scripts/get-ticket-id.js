@@ -12,6 +12,9 @@ const TICKET_PATTERN = /([A-Z]+-\d+)/i;
 const GH_PATTERN = /GH-(\d+)/i;
 
 function getCurrentTaskId(cwd = process.cwd()) {
+  // Explicit override via env var (used by follow-up2 when running outside worktree)
+  if (process.env.WORK_TICKET_ID) return process.env.WORK_TICKET_ID;
+
   // Try GH-XX pattern first (for GitHub Issues worktree paths like my-project-GH-56)
   // Return GH-N (path-safe) instead of #N to avoid filesystem issues with # in directory names
   const ghMatch = cwd.match(GH_PATTERN);

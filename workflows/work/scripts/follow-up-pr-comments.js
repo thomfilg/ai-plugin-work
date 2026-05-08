@@ -207,8 +207,12 @@ function handleSnapshot(prNumber) {
       for (const review of reviews) {
         if (!review.body || !review.body.trim()) continue;
         const author = review.author?.login || 'unknown';
-        // Skip non-bot review-level comments? No, include all per spec.
         const body = (review.body || '').trim();
+
+        // Skip bot summary comments (Bugbot, Copilot summaries) — not actionable code issues
+        if (/<!-- BUGBOT_REVIEW -->|<!-- BUGBOT_FIX_ALL -->|BUGBOT_AUTOFIX/i.test(body)) continue;
+        if (/<!-- copilot_review_start -->|copilot-pull-request-reviewer/i.test(body)) continue;
+
         const hash = computeCommentHash(null, body);
         if (seenHashes.has(hash)) continue;
         seenHashes.add(hash);
@@ -249,10 +253,35 @@ function handleSnapshot(prNumber) {
           const author = cm.user?.login || 'unknown';
           const body = (cm.body || '').trim();
           const filePath = cm.path || null;
-          // Include line in hash key so same-text comments on different lines are preserved
-          // Key on comment ID to preserve all distinct comments (two bots can post same text on same line)
-          const hashKey = String(cm.id);
 
+          // Skip replies (only process top-level comments)
+          if (cm.in_reply_to_id) continue;
+
+          // Skip outdated comments (code changed since comment was posted)
+          // position === null means the diff context is gone
+          if (cm.position === null && cm.original_position !== null) {
+            // Mark as resolved so it counts but doesn't iterate
+            const hashKey = String(cm.id);
+            if (seenHashes.has(hashKey)) continue;
+            seenHashes.add(hashKey);
+            comments.push({
+              id: cm.id,
+              hash: computeCommentHash(filePath, body),
+              author,
+              body,
+              path: filePath,
+              line: cm.line || cm.original_line || null,
+              original_line: cm.original_line || null,
+              priority: classifyCommentPriority(author, body),
+              status: 'resolved',
+              commitSha: null,
+              resolution: 'Outdated (code changed since comment)',
+            });
+            continue;
+          }
+
+          // Key on comment ID to preserve all distinct comments
+          const hashKey = String(cm.id);
           if (seenHashes.has(hashKey)) continue;
           seenHashes.add(hashKey);
 
@@ -265,8 +294,6 @@ function handleSnapshot(prNumber) {
             line: cm.line || null,
             original_line: cm.original_line || null,
             priority: classifyCommentPriority(author, body),
-            // Resolved/outdated comments are pre-resolved so they count toward strictCommentCount
-            // but don't appear in --next-comment iteration
             status: isResolved ? 'resolved' : 'unsolved',
             commitSha: null,
             resolution: isResolved ? 'Resolved/outdated thread' : null,
