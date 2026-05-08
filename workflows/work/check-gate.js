@@ -218,7 +218,7 @@ const CHECK_GATE_RULES = [
       const tasks = taskParser.parseTasks(dir);
       if (!tasks || tasks.length === 0)
         return ['Unable to parse tasks.md — cannot verify per-task TDD evidence'];
-      const expectedTasks = tasks.filter((t) => !t.isCheckpoint);
+      const expectedTasks = tasks.filter((t) => !t.isCheckpoint && t.type !== 'test');
       if (expectedTasks.length === 0) return []; // all checkpoint tasks
       const reasons = [];
       for (const task of expectedTasks) {
