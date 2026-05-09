@@ -35,11 +35,25 @@ try {
     process.exit(0);
   }
 
-  // Find any active follow-up2 state files
+  // Determine current ticket from branch name or cwd
+  let currentTicket = '';
+  try {
+    const { getCurrentTaskId } = require(
+      path.join(__dirname, '..', 'workflows', 'lib', 'scripts', 'get-ticket-id')
+    );
+    currentTicket = getCurrentTaskId() || '';
+  } catch {
+    // Can't determine ticket — check all sessions (fallback)
+  }
+
+  // Check if the CURRENT ticket has an active follow-up2 session
   let found = false;
   try {
     const entries = fs.readdirSync(tasksBase);
     for (const entry of entries) {
+      // Only check the current ticket's session (or all if ticket unknown)
+      if (currentTicket && entry !== currentTicket) continue;
+
       const statePath = path.join(tasksBase, entry, '.follow-up2-state.json');
       try {
         const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
