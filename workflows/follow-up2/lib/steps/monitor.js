@@ -144,7 +144,7 @@ module.exports = function registerMonitor(register) {
     const maxAttempts = state.maxAttempts || 40;
     const parts = [];
     if (ci.running && ci.running.length > 0) parts.push(`🔄 ${ci.running.length}`);
-    if (ci.passed && ci.passed.length > 0) parts.push(`🟢 ${ci.passed.length}`);
+    if (ci.passed && ci.passed.length > 0) parts.push(`✅ ${ci.passed.length}`);
     if (ci.failed && ci.failed.length > 0) parts.push(`🔴 ${ci.failed.length}`);
     if (ci.cancelled && ci.cancelled.length > 0) parts.push(`⊘ ${ci.cancelled.length}`);
     const pendingBots = reviews.pendingBots || [];
