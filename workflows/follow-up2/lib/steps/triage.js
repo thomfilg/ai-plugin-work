@@ -73,7 +73,9 @@ module.exports = function registerTriage(register) {
     if (hasCiPending) {
       state.attempt = (state.attempt || 0) + 1;
       const running = state._ciRunningCount || 0;
-      const interval = running <= 2 ? 15 : state.attempt <= 5 ? 30 : 60;
+      let interval = 60;
+      if (running <= 2) interval = 15;
+      else if (state.attempt <= 5) interval = 30;
       waitSeconds(interval);
       state.currentStep = 'monitor';
       return null;
