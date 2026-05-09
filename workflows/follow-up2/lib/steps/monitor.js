@@ -170,6 +170,13 @@ module.exports = function registerMonitor(register) {
     const lines = [header];
     if (parts.length > 0) lines.push(parts.join(' · '));
     if (detailLine) lines.push(detailLine);
+
+    // Redraw: move cursor up to overwrite previous status block
+    const prevLines = state._statusLineCount || 0;
+    if (prevLines > 0) {
+      process.stderr.write(`\x1b[${prevLines}A\x1b[J`);
+    }
+    state._statusLineCount = lines.length;
     process.stderr.write(lines.join('\n') + '\n');
 
     if (exitCode === 0) {
