@@ -17,21 +17,25 @@ const path = require('path');
 
 if (require.main === module) {
   process.on('uncaughtException', (err) => {
-    console.error(JSON.stringify({
-      type: 'follow_up_instruction',
-      action: 'blocked',
-      reason: `Uncaught exception: ${err.message}`,
-      stack: err.stack,
-    }));
+    console.error(
+      JSON.stringify({
+        type: 'follow_up_instruction',
+        action: 'blocked',
+        reason: `Uncaught exception: ${err.message}`,
+        stack: err.stack,
+      })
+    );
     process.exit(1);
   });
   process.on('unhandledRejection', (err) => {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(JSON.stringify({
-      type: 'follow_up_instruction',
-      action: 'blocked',
-      reason: `Unhandled rejection: ${msg}`,
-    }));
+    console.error(
+      JSON.stringify({
+        type: 'follow_up_instruction',
+        action: 'blocked',
+        reason: `Unhandled rejection: ${msg}`,
+      })
+    );
     process.exit(1);
   });
 }
@@ -114,8 +118,6 @@ function initState(ticketId, prNumber) {
 
 // ─── Core orchestrator loop ─────────────────────────────────────────────────
 
-const MAX_ITERATIONS = 30; // safety
-
 function getNextInstruction(ticketId, prNumber) {
   let state = loadState(ticketId) || initState(ticketId, prNumber);
   if (prNumber && !state.prNumber) state.prNumber = prNumber;
@@ -130,11 +132,8 @@ function getNextInstruction(ticketId, prNumber) {
     workScriptsDir: path.join(__dirname, '..', 'work', 'scripts'),
   };
 
-  let iterations = 0;
-
-  while (iterations < MAX_ITERATIONS) {
-    iterations++;
-
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
     if (state.status === 'complete' || !STEPS.includes(state.currentStep)) {
       saveState(ticketId, state);
       return { type: 'follow_up_instruction', action: 'complete', summary: 'Already complete.' };
@@ -173,9 +172,6 @@ function getNextInstruction(ticketId, prNumber) {
     state.dispatched = null;
     saveState(ticketId, state);
   }
-
-  saveState(ticketId, state);
-  return { type: 'follow_up_instruction', action: 'blocked', reason: 'Max iterations reached' };
 }
 
 // ─── CLI ────────────────────────────────────────────────────────────────────
