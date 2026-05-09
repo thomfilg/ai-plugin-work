@@ -4,24 +4,18 @@ description: Script-driven PR follow-up (CI monitor, review handler, auto-fixer)
 user_invocable: true
 ---
 
-# /follow-up2 — Script-Driven PR Follow-Up
+# /follow-up2
 
-Run the follow-up-next.js orchestrator. It returns ONE instruction at a time.
-
-## Usage
+Run follow-up-next.js. It handles everything. Just run it and wait.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/workflows/follow-up2/follow-up-next.js" <TICKET_ID> --init [--pr N]
 ```
 
-Execute the returned instruction. The PostToolUse auto-advance hook handles the loop.
+## Rules
 
-## What it does
-
-1. **Monitor** — run follow-up-pr.js to check CI status + reviews
-2. **Triage** — classify failure (CI, conflict, reviews)
-3. **Fix** — delegate developer agent to fix the issue
-4. **Push + retry** — commit, push, loop back to monitor
-5. **Report** — generate accountability report on success
-
-Loops up to 10 attempts. Monitor step handles CI polling internally.
+- The script waits for CI internally (up to 40 attempts with adaptive intervals). **CI can take 20+ minutes. This is normal. Do NOT cancel, interrupt, or give up.**
+- Execute the returned `delegate` block exactly as described.
+- After executing, re-run follow-up-next.js (without --init) for the next instruction.
+- Repeat until `action: "complete"` or `action: "blocked"`.
+- **Never stop early.** If the script is running, it is working. Wait for it.

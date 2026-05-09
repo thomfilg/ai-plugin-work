@@ -10,9 +10,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { ALL_STEPS } = require(
-  path.join(__dirname, '..', '..', '..', 'work', 'step-registry')
-);
+const { ALL_STEPS } = require(path.join(__dirname, '..', '..', '..', 'work', 'step-registry'));
 
 /**
  * @param {string} safeName
@@ -37,7 +35,7 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
   // Case 1: check2 completed successfully → advance to pr
   if (checkState.status === 'complete') {
     ws.stepStatus.check = 'completed';
-    ws.currentStep = ALL_STEPS.indexOf('pr');
+    ws.currentStep = ALL_STEPS.indexOf('pr') + 1;
     ws.stepStatus.pr = 'in_progress';
     delete ws._work2Dispatched;
     delete ws._work2DispatchedAction;
@@ -62,7 +60,7 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
     ws.stepStatus.commit = 'pending';
     ws.stepStatus.task_review = 'pending';
     ws.stepStatus.implement = 'in_progress';
-    ws.currentStep = ALL_STEPS.indexOf('implement');
+    ws.currentStep = ALL_STEPS.indexOf('implement') + 1;
     delete ws._work2Dispatched;
     delete ws._work2DispatchedAction;
     saveWorkState(safeName, ws);

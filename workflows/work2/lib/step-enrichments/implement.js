@@ -64,6 +64,8 @@ function resolveAgentType(tasksDir, taskNum) {
   return 'developer-nodejs-tdd';
 }
 
+const { findReadyTasks, parseTasks } = require(path.join(__dirname, '..', 'task-graph'));
+
 module.exports = function registerImplement(register) {
   register('implement', (entry, ctx) => {
     if (!entry.agentPrompt) return;
@@ -75,10 +77,72 @@ module.exports = function registerImplement(register) {
     const tddNextPath = path.join(pluginRoot, 'workflows', 'work2', 'tdd-next.js');
     const ticket = ctx.ticket || 'TICKET';
 
-    // Extract task number and title from the plan generator prompt
+    // Check for parallel tasks
+    const tasksDir = ctx.tasksDir || '';
     const taskMatch = entry.agentPrompt.match(/Task (\d+) of (\d+)/);
+    const currentTaskNum = taskMatch ? parseInt(taskMatch[1], 10) : null;
+    const totalTasks = taskMatch ? parseInt(taskMatch[2], 10) : null;
+
+    if (tasksDir && totalTasks && totalTasks > 1) {
+      const { parallelTasks } = findReadyTasks(tasksDir, currentTaskNum - 1);
+      if (parallelTasks.length > 1) {
+        const allTasks = parseTasks(tasksDir);
+        const { readPhase } = require(path.join(__dirname, '..', '..', 'tdd-next.js'));
+        const phaseLabels = {
+          red: 'RED — write failing tests',
+          green: 'GREEN — make tests pass with minimum code',
+          refactor: 'REFACTOR — clean up code',
+        };
+
+        const delegates = parallelTasks.map((num) => {
+          const task = allTasks.find((t) => t.num === num);
+          const agentType = resolveAgentType(tasksDir, num);
+          const tddState = readPhase(ticket.replace('#', 'GH-'), num);
+          const phase = tddState?.currentPhase || 'red';
+          const phaseLabel = phaseLabels[phase] || `${phase} phase`;
+          return {
+            type: 'task',
+            agentType,
+            description: `Task ${num}/${totalTasks} — ${task?.title || 'Implementation'}`,
+            prompt: [
+              `## Implement Task ${num}/${totalTasks} — ${task?.title || 'Implementation'}`,
+              '',
+              `### TDD Phase: ${phaseLabel}`,
+              'Get phase commands:',
+              '```bash',
+              `node "${tddNextPath}" ${ticket} --task ${num}`,
+              '```',
+              'Record evidence at each phase (init → red → green → refactor).',
+              '',
+              '### Required Reading',
+              `- **Task details:** ${path.join(tasksDir, 'tasks.md')} (find "## Task ${num}" section)`,
+              `- **Spec:** ${path.join(tasksDir, 'spec.md')}`,
+              `- **Brief:** ${path.join(tasksDir, 'brief.md')}`,
+              '',
+              '### Rules',
+              `- Implement ONLY Task ${num} deliverables`,
+              '- Do NOT touch files reserved for other tasks',
+              '- Follow TDD: run tdd-next.js → do the work → record evidence → transition phase',
+            ].join('\n'),
+            note: 'Pass the prompt directly to the agent.',
+          };
+        });
+
+        entry._overrideInstruction = {
+          type: 'work_instruction',
+          action: 'execute',
+          state: { ticket, currentStep: 'implement', progress: `${currentTaskNum}/${totalTasks}` },
+          continue: true,
+          parallel: true,
+          delegates,
+          note: `Launch ALL ${delegates.length} agents IN PARALLEL (single message, multiple Task tool calls). Each task is independent.`,
+        };
+        return;
+      }
+    }
+
+    // Reuse taskMatch/totalTasks from parallel check above
     const taskNum = taskMatch ? taskMatch[1] : null;
-    const totalTasks = taskMatch ? taskMatch[2] : null;
     const taskFlag = taskNum ? ` --task ${taskNum}` : '';
 
     // Extract task title from prompt
@@ -97,7 +161,6 @@ module.exports = function registerImplement(register) {
       }[currentPhase] || `${currentPhase} phase`;
 
     // Mark current progress in tasks.md (shows [-] for in-progress task)
-    const tasksDir = ctx.tasksDir || '';
     if (tasksDir) {
       try {
         const { markProgress } = require(path.join(__dirname, '..', 'mark-task-progress'));
@@ -133,11 +196,12 @@ module.exports = function registerImplement(register) {
       `## Implement Task ${taskNum || '?'}/${totalTasks || '?'} — ${taskTitle}`,
       '',
       `### TDD Phase: ${phaseLabel}`,
-      'Get phase commands:',
+      '',
+      '### Next step',
+      'Run this command and follow its output:',
       '```bash',
       `node "${tddNextPath}" ${ticket}${taskFlag}`,
       '```',
-      'Record evidence at each phase (init → red → green → refactor) or the task will be re-dispatched.',
       '',
       '### Required Reading (read IN FULL before implementing)',
       `- **Task details:** ${path.join(tasksDir, 'tasks.md')} (find "## Task ${taskNum}" section)`,
@@ -148,7 +212,6 @@ module.exports = function registerImplement(register) {
       `- Implement ONLY Task ${taskNum} deliverables`,
       '- Do NOT touch files reserved for other tasks',
       '- Do NOT invoke /work-implement or any other skill',
-      '- Follow TDD: run tdd-next.js → do the work → record evidence → transition phase',
     ].join('\n');
 
     entry.agentPrompt = devPrompt;

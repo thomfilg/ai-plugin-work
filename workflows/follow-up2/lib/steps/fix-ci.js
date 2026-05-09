@@ -46,12 +46,58 @@ module.exports = function registerFixCi(register) {
         // Extract run ID from URL (e.g., .../runs/12345/...)
         const runMatch = runsJson.match(/runs\/(\d+)/);
         if (runMatch) {
-          ciLogs = execFileSync('gh', ['run', 'view', runMatch[1], '--log-failed'], {
+          const rawLogs = execFileSync('gh', ['run', 'view', runMatch[1], '--log-failed'], {
             encoding: 'utf8',
             timeout: 30000,
             cwd: ctx.worktreeDir,
             stdio: ['pipe', 'pipe', 'pipe'],
-          }).substring(0, 3000);
+          });
+
+          // Filter out runner setup noise — keep only lines with actual errors/test failures
+          ciLogs = rawLogs
+            .split('\n')
+            .filter((line) => {
+              // Skip runner setup lines (versions, image info, env, etc.)
+              if (
+                /UNKNOWN STEP|##\[group\]|##\[endgroup\]|Runner Image|Operating System/i.test(line)
+              )
+                return false;
+              if (
+                /runner version|Secret source|Prepare workflow|Download action|Getting action/i.test(
+                  line
+                )
+              )
+                return false;
+              if (/Image:|Version:|Commit:|Build Date:|Worker ID:|Azure Region:/i.test(line))
+                return false;
+              if (
+                /Permissions|Actions: read|Contents: read|Metadata: read|PullRequests:/i.test(line)
+              )
+                return false;
+              // Keep error markers, assertions, test names, and meaningful output
+              if (/error|fail|assert|expect|timeout|ERR_|✗|✕|FAIL|Error:|×/i.test(line))
+                return true;
+              // Keep lines with test file paths
+              if (/\.(spec|test)\.(ts|js|tsx|jsx)/.test(line)) return true;
+              // Keep stack traces
+              if (/^\s+at\s/.test(line)) return true;
+              // Keep exit codes and process signals
+              if (/exit code|exit\s+\d|SIGTERM|SIGKILL|Process completed/i.test(line)) return true;
+              // Keep lines with step names that have actual content
+              if (/Run tests|Run e2e|playwright/i.test(line)) return true;
+              return false;
+            })
+            .join('\n')
+            .substring(0, 4000);
+
+          // Fallback: if filtering removed everything, take raw tail
+          if (!ciLogs.trim()) {
+            const lines = rawLogs.split('\n');
+            ciLogs = lines
+              .slice(Math.max(0, lines.length - 100))
+              .join('\n')
+              .substring(0, 4000);
+          }
         }
       } catch {
         ciLogs = '(Could not fetch CI logs automatically)';

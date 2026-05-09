@@ -15,6 +15,16 @@
     ],
     "PreToolUse": [
       {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/hooks/enforce-follow-up-script.js",
+            "timeout": 5
+          }
+        ]
+      },
+      {
         "matcher": "Task|Skill",
         "hooks": [
           {
@@ -188,10 +198,6 @@
             "type": "command",
             "command": "CLAUDE_HOOK_TYPE=Stop node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/session-guard.js",
             "timeout": 10
-          },
-          {
-            "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/enforce-completion-protocol.js"
           }
         ]
       },

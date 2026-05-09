@@ -24,21 +24,25 @@ const { execFileSync } = require('child_process');
 // Error handlers — log errors as blocked instructions instead of swallowing silently
 if (require.main === module) {
   process.on('uncaughtException', (err) => {
-    console.error(JSON.stringify({
-      type: 'work_instruction',
-      action: 'blocked',
-      reason: `Uncaught exception: ${err.message}`,
-      stack: err.stack,
-    }));
+    console.error(
+      JSON.stringify({
+        type: 'work_instruction',
+        action: 'blocked',
+        reason: `Uncaught exception: ${err.message}`,
+        stack: err.stack,
+      })
+    );
     process.exit(1);
   });
   process.on('unhandledRejection', (err) => {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(JSON.stringify({
-      type: 'work_instruction',
-      action: 'blocked',
-      reason: `Unhandled rejection: ${msg}`,
-    }));
+    console.error(
+      JSON.stringify({
+        type: 'work_instruction',
+        action: 'blocked',
+        reason: `Unhandled rejection: ${msg}`,
+      })
+    );
     process.exit(1);
   });
 }
@@ -357,15 +361,22 @@ function getNextInstruction(ticketRaw, rework) {
 
   // If workflow is already at the complete step, release session guard and return
   const _preCheckState = loadWorkState(safeName);
-  if (_preCheckState && getCurrentStep(_preCheckState) === 'complete' &&
-      _preCheckState.stepStatus?.complete === 'completed') {
+  if (
+    _preCheckState &&
+    getCurrentStep(_preCheckState) === 'complete' &&
+    _preCheckState.stepStatus?.complete === 'completed'
+  ) {
     // Release session guard inline
     try {
       const sgPath = path.join(workDir, '..', 'lib', 'hooks', 'session-guard.js');
       execFileSync(process.execPath, [sgPath, 'finish', safeName], {
-        encoding: 'utf8', timeout: 10000, stdio: 'pipe',
+        encoding: 'utf8',
+        timeout: 10000,
+        stdio: 'pipe',
       });
-    } catch { /* already released or not active */ }
+    } catch {
+      /* already released or not active */
+    }
     return {
       type: 'work_instruction',
       action: 'complete',
@@ -462,12 +473,32 @@ function getNextInstruction(ticketRaw, rework) {
       // Current step — handle dispatched marker logic
       if (entry.step === currentStepName) {
         if (workState && workState._work2Dispatched === entry.step) {
-          // Already dispatched — try to transition forward.
-          // The transition gate (verify function) determines if the step is truly done.
-          // Soft steps pass immediately; gated steps (brief_gate, spec_gate) only pass
-          // when their verify() returns true (e.g., questions resolved, gherkin valid).
-          // Only try FORWARD transitions (higher index in ALL_STEPS)
-          // Backward transitions would revert state and cause loops
+          // Pre-transition gate: run BEFORE transitionStep to avoid hanging
+          // on verify functions (e.g., isPRGateReady calls checkCI which blocks).
+          // Gates like follow-up-gate and check-gate read sub-orchestrator state
+          // and advance directly when their sub-workflow completed.
+          const preGateResult = runGate(
+            entry.step,
+            safeName,
+            { ticket, stateCtx, tasksDir },
+            {
+              loadWorkState,
+              saveWorkState,
+              readTddEvidence,
+              validateTddEvidence,
+              stepName: entry.step,
+              workDir,
+              work2Dir: __dirname,
+              log,
+              recursionDepth: _recursionDepth,
+            }
+          );
+          if (preGateResult) {
+            if (preGateResult.recurse) return getNextInstruction(ticketRaw, rework);
+            return preGateResult;
+          }
+
+          // Gate didn't handle it — try standard transitions
           const allowed = (STEP_TRANSITIONS[entry.step] || []).filter(
             (t) => ALL_STEPS.indexOf(t) > ALL_STEPS.indexOf(entry.step)
           );
@@ -490,28 +521,6 @@ function getNextInstruction(ticketRaw, rework) {
             }
           }
           log.error(`dispatch-advance BLOCKED for ${entry.step}`, { tried: allowed.length });
-
-          // Run step-specific dispatch-advance gate (registered in step-enrichments/)
-          const gateResult = runGate(
-            entry.step,
-            safeName,
-            { ticket, stateCtx, tasksDir },
-            {
-              loadWorkState,
-              saveWorkState,
-              readTddEvidence,
-              validateTddEvidence,
-              stepName: entry.step,
-              workDir,
-              work2Dir: __dirname,
-              log,
-              recursionDepth: _recursionDepth,
-            }
-          );
-          if (gateResult) {
-            if (gateResult.recurse) return getNextInstruction(ticketRaw, rework);
-            return gateResult; // full instruction object
-          }
 
           // Step genuinely needs more work, return instruction again
         }

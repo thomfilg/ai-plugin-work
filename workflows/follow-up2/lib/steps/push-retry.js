@@ -11,13 +11,19 @@ const { execFileSync } = require('child_process');
 
 module.exports = function registerPushRetry(register) {
   register('push-retry', (state, ctx) => {
-    state.attempt = (state.attempt || 0) + 1;
+    // Reset CI monitoring state for the next cycle
+    state.attempt = 0;
+    delete state._monitorStartTime;
 
-    if (state.attempt >= state.maxAttempts) {
+    // Only increment on fresh entry, not on re-entry after dispatch
+    if (state.dispatched !== 'push-retry') {
+      state._pushRetryCount = (state._pushRetryCount || 0) + 1;
+    }
+    if (state._pushRetryCount >= (state.maxAttempts || 40)) {
       return {
         type: 'follow_up_instruction',
         action: 'blocked',
-        reason: `Max attempts (${state.maxAttempts}) reached. PR still has issues.`,
+        reason: `Max push-retry cycles (${state.maxAttempts || 40}) reached. PR still has issues.`,
       };
     }
 

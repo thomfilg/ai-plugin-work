@@ -55,11 +55,13 @@ module.exports = function registerFixReviews(register) {
     // Get next unsolved comment
     let comment = null;
     try {
-      const result = execFileSync(
-        process.execPath,
-        [commentsScript, '--next-comment'],
-        { encoding: 'utf8', timeout: 15000, cwd: ctx.worktreeDir, env: scriptEnv, stdio: ['pipe', 'pipe', 'pipe'] }
-      );
+      const result = execFileSync(process.execPath, [commentsScript, '--next-comment'], {
+        encoding: 'utf8',
+        timeout: 15000,
+        cwd: ctx.worktreeDir,
+        env: scriptEnv,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
       comment = JSON.parse(result);
     } catch (err) {
       // Exit 0 + {"done":true} is handled above via JSON.parse
@@ -86,13 +88,17 @@ module.exports = function registerFixReviews(register) {
       // Check for skipped comments → prompt user
       let statusResult = null;
       try {
-        const raw = execFileSync(
-          process.execPath,
-          [commentsScript, '--status'],
-          { encoding: 'utf8', timeout: 10000, cwd: ctx.worktreeDir, env: scriptEnv, stdio: ['pipe', 'pipe', 'pipe'] }
-        );
+        const raw = execFileSync(process.execPath, [commentsScript, '--status'], {
+          encoding: 'utf8',
+          timeout: 10000,
+          cwd: ctx.worktreeDir,
+          env: scriptEnv,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
         statusResult = JSON.parse(raw);
-      } catch { /* ignore */ }
+      } catch {
+        /* ignore */
+      }
 
       if (statusResult && statusResult.skipped > 0) {
         const reviewFile = path.join(ctx.tasksDir, 'follow-up-comments.json');
@@ -116,21 +122,36 @@ module.exports = function registerFixReviews(register) {
     let totalComments = '?';
     let currentIndex = '?';
     try {
-      const raw = execFileSync(
-        process.execPath,
-        [commentsScript, '--status'],
-        { encoding: 'utf8', timeout: 10000, cwd: ctx.worktreeDir, env: scriptEnv, stdio: ['pipe', 'pipe', 'pipe'] }
-      );
+      const raw = execFileSync(process.execPath, [commentsScript, '--status'], {
+        encoding: 'utf8',
+        timeout: 10000,
+        cwd: ctx.worktreeDir,
+        env: scriptEnv,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
       const st = JSON.parse(raw);
       totalComments = st.remaining || st.total || '?';
       currentIndex = (st.solved || 0) + (st.skipped || 0) + 1;
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
 
     const author = comment.author || 'unknown';
     const filePath = comment.path || 'general';
     const line = comment.line || '';
-    const body = comment.body || '';
+    const rawBody = comment.body || '';
     const priority = comment.priority || 'unknown';
+
+    // Strip noise from Cursor Bugbot comments: HTML links, base64 URLs, metadata
+    const body = rawBody
+      .replace(/<div>[\s\S]*?<\/div>/g, '') // cursor fix-in-cursor/fix-in-web buttons
+      .replace(/<details>[\s\S]*?<\/details>/g, '') // collapsed additional locations
+      .replace(/<sup>[\s\S]*?<\/sup>/g, '') // "Reviewed by Cursor Bugbot" footer
+      .replace(/<!--[\s\S]*?-->/g, '') // HTML comments (BUGBOT_BUG_ID, LOCATIONS, DESCRIPTION markers)
+      .replace(/<\/?picture>|<source[^>]*>|<img[^>]*>/g, '') // image tags
+      .replace(/<a[^>]*>[\s\S]*?<\/a>/g, '') // remaining anchor tags
+      .replace(/\n{3,}/g, '\n\n') // collapse excessive blank lines
+      .trim();
     const codeContext = comment.codeContext || '';
     const commentId = comment.id;
     const fileRef = line ? `${filePath}:${line}` : filePath;

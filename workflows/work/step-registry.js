@@ -103,7 +103,7 @@ const RETRY_EDGES = {
   [STEPS.check]: [STEPS.implement], // check failed, fix code
   [STEPS.pr]: [STEPS.check], // GH-299: recheck on new commits
   [STEPS.ready]: [STEPS.check], // GH-299: recheck on new commits
-  [STEPS.follow_up]: [STEPS.implement, STEPS.check], // follow-up requires code changes; GH-299: recheck
+  [STEPS.follow_up]: [STEPS.implement, STEPS.check], // backward edges: needs fixes (ci is already the linear forward edge)
   [STEPS.ci]: [STEPS.implement, STEPS.check], // CI failed, fix code; GH-299: recheck
   [STEPS.cleanup]: [STEPS.check], // GH-299: recheck on new commits
   [STEPS.reports]: [STEPS.check], // GH-299: recheck on new commits

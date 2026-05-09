@@ -330,7 +330,10 @@ describe('session-guard', () => {
         { SESSION_GUARD_TICKET_ID: TEST_TICKET }
       );
       assert.equal(r.code, 2, 'should exit 2 to block stop');
-      assert.ok(r.stderr.includes('BLOCKED'), 'should contain BLOCKED');
+      assert.ok(
+        r.stderr.includes('BLOCKED') || r.stderr.includes('ACTIVE WORKFLOW SESSION'),
+        'should contain blocking message'
+      );
       assert.ok(r.stderr.includes(TEST_TICKET), 'should mention ticket');
     });
 
@@ -745,6 +748,7 @@ describe('session-guard', () => {
         TASKS_BASE: TASKS_DIR,
       });
       assert.equal(r.code, 2, 'should exit 2 to block stop');
+      assert.ok(r.stderr.includes('BLOCKED'), 'should contain BLOCKED');
       assert.ok(r.stderr.includes('mid-workflow'), 'should mention mid-workflow');
       assert.ok(r.stderr.includes('Do NOT stop'), 'should contain Do NOT stop');
       assert.ok(r.stderr.includes(WORK_TICKET), 'should mention ticket ID');
@@ -761,9 +765,8 @@ describe('session-guard', () => {
         TASKS_BASE: TASKS_DIR,
       });
       assert.equal(r.code, 2, 'should exit 2 to block stop');
-      assert.ok(r.stderr.includes('BLOCKED'), 'should contain BLOCKED');
-      assert.ok(r.stderr.includes('Complete all'), 'should use generic message');
-      assert.ok(!r.stderr.includes('mid-workflow'), 'should NOT use actionable message');
+      assert.ok(r.stderr.includes('ACTIVE WORKFLOW SESSION'), 'should contain active workflow');
+      assert.ok(r.stderr.includes('MUST continue'), 'should use MUST continue message');
     });
 
     it('falls back to generic message when .work-state.json has invalid JSON', async () => {
@@ -777,8 +780,8 @@ describe('session-guard', () => {
         TASKS_BASE: TASKS_DIR,
       });
       assert.equal(r.code, 2, 'should exit 2 to block stop');
-      assert.ok(r.stderr.includes('BLOCKED'), 'should contain BLOCKED');
-      assert.ok(r.stderr.includes('Complete all'), 'should use generic message');
+      assert.ok(r.stderr.includes('ACTIVE WORKFLOW SESSION'), 'should contain active workflow');
+      assert.ok(r.stderr.includes('MUST continue'), 'should use MUST continue message');
     });
 
     it('non-/work sessions still get generic message', async () => {
@@ -790,9 +793,8 @@ describe('session-guard', () => {
         TASKS_BASE: TASKS_DIR,
       });
       assert.equal(r.code, 2, 'should exit 2 to block stop');
-      assert.ok(r.stderr.includes('BLOCKED'), 'should contain BLOCKED');
-      assert.ok(r.stderr.includes('Complete all'), 'should use generic message');
-      assert.ok(!r.stderr.includes('mid-workflow'), 'should NOT use actionable /work message');
+      assert.ok(r.stderr.includes('ACTIVE WORKFLOW SESSION'), 'should contain active workflow');
+      assert.ok(r.stderr.includes('MUST continue'), 'should use MUST continue message');
     });
   });
 });

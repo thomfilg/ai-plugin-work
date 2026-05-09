@@ -76,51 +76,31 @@ function buildInstruction(ticketId, taskNum) {
       return {
         type: 'tdd_instruction',
         phase: 'red',
-        action: 'Write failing tests',
-        rules: {
-          allowedFiles: 'Only .test.* and .spec.* files',
-          blockedFiles: 'Source/production files are BLOCKED by hooks',
-          description: 'Write focused failing tests (1-3) that express expected behavior.',
-        },
-        whenDone: [
-          'Run your test command to confirm tests FAIL',
-          `${stateCmd} record-red ${ticketId}${taskFlag} --cmd "<your test command>"`,
-          `${stateCmd} transition ${ticketId} green${taskFlag}`,
-        ],
+        action: 'Write failing tests (only .test.* and .spec.* files allowed)',
+        description:
+          'Write focused failing tests (1-3) that express expected behavior. Source files are BLOCKED by hooks.',
+        whenDone: `Run: ${stateCmd} record-red ${ticketId}${taskFlag} --cmd "<your test command>" && ${stateCmd} transition ${ticketId} green${taskFlag}`,
+        thenRun: `node "${path.join(__dirname, 'tdd-next.js')}" ${ticketId}${taskFlag}`,
       };
 
     case 'green':
       return {
         type: 'tdd_instruction',
         phase: 'green',
-        action: 'Make tests pass with minimum code',
-        rules: {
-          allowedFiles: 'Source files and test helpers only',
-          blockedFiles: '.test.* and .spec.* files are BLOCKED by hooks',
-          description: 'Write the minimum production code to make failing tests pass.',
-        },
-        whenDone: [
-          'Run your test command to confirm tests PASS',
-          `${stateCmd} record-green ${ticketId}${taskFlag} --cmd "<your test command>"`,
-          `${stateCmd} transition ${ticketId} refactor${taskFlag}`,
-        ],
+        action: 'Make tests pass with minimum code (source files only, test files BLOCKED)',
+        description: 'Write the minimum production code to make failing tests pass.',
+        whenDone: `Run: ${stateCmd} record-green ${ticketId}${taskFlag} --cmd "<your test command>" && ${stateCmd} transition ${ticketId} refactor${taskFlag}`,
+        thenRun: `node "${path.join(__dirname, 'tdd-next.js')}" ${ticketId}${taskFlag}`,
       };
 
     case 'refactor':
       return {
         type: 'tdd_instruction',
         phase: 'refactor',
-        action: 'Clean up code (both test and production)',
-        rules: {
-          allowedFiles: 'All files',
-          description: 'Refactor for clarity and quality. Tests must still pass after.',
-        },
-        whenDone: [
-          'Run your test command to confirm tests still PASS',
-          `${stateCmd} record-refactor ${ticketId}${taskFlag} --cmd "<your test command>"`,
-          `If more behaviors: ${stateCmd} transition ${ticketId} red${taskFlag}`,
-          'If done: task implementation is complete.',
-        ],
+        action: 'Clean up code (all files allowed). Tests must still pass.',
+        description: 'Refactor for clarity and quality.',
+        whenDone: `Run: ${stateCmd} record-refactor ${ticketId}${taskFlag} --cmd "<your test command>" && ${stateCmd} transition ${ticketId} red${taskFlag}`,
+        thenRun: `node "${path.join(__dirname, 'tdd-next.js')}" ${ticketId}${taskFlag}`,
       };
 
     default:

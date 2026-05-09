@@ -20,21 +20,22 @@ node ${CLAUDE_PLUGIN_ROOT}/workflows/work2/work-next.js "$ARGUMENTS" --init
 
 1. Parse JSON output
 2. Execute the `delegate` block exactly as described below
-3. After delegation, the auto-advance hook outputs the next instruction
-4. If no hook output appears, re-run: `node ${CLAUDE_PLUGIN_ROOT}/workflows/work2/work-next.js <TICKET_ID>`
-5. Repeat until `action: "complete"`
+3. Re-run work-next.js for the next instruction
+4. Repeat until `action: "complete"`
 
 ## How to execute `delegate`
 
 | delegate.type | Do this |
 |---------------|---------|
-| `bash` | Run the `command` field with Bash. Nothing else. |
+| `bash` | Run the `command` field with Bash |
 | `task` | `Task(agentType)` with the `prompt` field. Do NOT read files yourself. |
-| `parallel_tasks` | Launch ALL agents in `agents[]` array as parallel Task() calls. |
-| `skill` | `Skill(name)` with the `prompt` field. |
+| `skill` | `Skill(name)` with the `prompt` field |
+
+If the instruction has `parallel: true` with `delegates` array: launch ALL agents as parallel Task() calls in a single message.
 
 ## Rules
 
 - The **only** command you run directly is `work-next.js`. Everything else comes from its instructions.
-- If `action: "blocked"` → re-run `work-next.js`. It handles recovery.
+- If `action: "blocked"` → show the reason to the user and wait. Do NOT re-run automatically.
+- **Some steps take a long time (CI monitoring can take 20+ minutes). This is normal. Do NOT cancel, interrupt, or give up.**
 - Never stop until `action: "complete"`.
