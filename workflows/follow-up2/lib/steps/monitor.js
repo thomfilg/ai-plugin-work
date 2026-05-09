@@ -191,13 +191,7 @@ module.exports = function registerMonitor(register) {
     if (parts.length > 0) lines.push(parts.join(' · '));
     if (detailLine) lines.push(detailLine);
 
-    // Redraw: move cursor up to overwrite previous status block
-    const prevLines = state._statusLineCount || 0;
-    if (prevLines > 0) {
-      process.stderr.write(`\x1b[${prevLines}A\x1b[J`);
-    }
-    state._statusLineCount = lines.length;
-    process.stderr.write(lines.join('\n') + '\n');
+    process.stderr.write(lines.join(' | ') + '\n');
 
     if (exitCode === 0) {
       state.currentStep = 'report';
