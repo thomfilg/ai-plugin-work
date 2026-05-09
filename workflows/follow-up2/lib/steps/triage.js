@@ -68,6 +68,14 @@ module.exports = function registerTriage(register) {
       return null;
     }
 
+    // Blocking reviews take priority over waiting for CI —
+    // fix reviews now, CI will re-trigger after push anyway.
+    if (hasBlockingReviews && !hasOngoingReview) {
+      state.failureCategory = 'reviews';
+      state.currentStep = 'fix-reviews';
+      return null;
+    }
+
     // CI still running — wait before re-checking.
     // Adaptive interval: shorter when few checks remain.
     if (hasCiPending) {
@@ -85,12 +93,6 @@ module.exports = function registerTriage(register) {
     if (hasCiCancelled && isMergeBlocked && !hasBlockingReviews) {
       state.failureCategory = 'ci_cancelled_blocking';
       state.currentStep = 'fix-ci';
-      return null;
-    }
-
-    if (hasBlockingReviews && !hasOngoingReview) {
-      state.failureCategory = 'reviews';
-      state.currentStep = 'fix-reviews';
       return null;
     }
 

@@ -111,9 +111,10 @@ describe('triage step', () => {
     assert.equal(state.failureCategory, 'ci_failure');
   });
 
-  it('CI pending takes priority over blocking reviews', () => {
+  it('blocking reviews take priority over CI pending', () => {
     const state = makeState(1, 'CI: PENDING\nReviews: 1 BLOCKING');
-    const result = triage(state, {});
-    assert.equal(state.currentStep, 'monitor');
+    triage(state, {});
+    assert.equal(state.failureCategory, 'reviews');
+    assert.equal(state.currentStep, 'fix-reviews');
   });
 });
