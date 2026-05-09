@@ -23,9 +23,29 @@ function hasFailedRuns(prInfo, worktreeDir) {
   try {
     const branch = prInfo.headRefName || prInfo.branch || '';
     if (!branch) return false;
+
+    // Get current HEAD SHA to filter only runs for the latest commit
+    const headSha = execFileSync('git', ['rev-parse', 'HEAD'], {
+      encoding: 'utf8',
+      timeout: 5000,
+      cwd: worktreeDir,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+
     const raw = execFileSync(
       'gh',
-      ['run', 'list', '--branch', branch, '--limit', '10', '--json', 'conclusion,status,name'],
+      [
+        'run',
+        'list',
+        '--branch',
+        branch,
+        '--commit',
+        headSha,
+        '--limit',
+        '10',
+        '--json',
+        'conclusion,status,name',
+      ],
       { encoding: 'utf8', timeout: 10000, cwd: worktreeDir, stdio: ['pipe', 'pipe', 'pipe'] }
     );
     const runs = JSON.parse(raw);
