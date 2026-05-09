@@ -69,8 +69,10 @@ module.exports = function registerTriage(register) {
     }
 
     // Blocking reviews take priority over waiting for CI —
-    // fix reviews now, CI will re-trigger after push anyway.
-    if (hasBlockingReviews && !hasOngoingReview) {
+    // but only when the bot has finished reviewing (check completed).
+    // While the bot check is still running, it may dismiss old comments.
+    const botStillRunning = /Cursor Bugbot.*running/i.test(output);
+    if (hasBlockingReviews && !hasOngoingReview && !botStillRunning) {
       state.failureCategory = 'reviews';
       state.currentStep = 'fix-reviews';
       return null;
