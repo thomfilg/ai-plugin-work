@@ -522,28 +522,6 @@ function getNextInstruction(ticketRaw, rework) {
           }
           log.error(`dispatch-advance BLOCKED for ${entry.step}`, { tried: allowed.length });
 
-          // Run step-specific dispatch-advance gate (registered in step-enrichments/)
-          const gateResult = runGate(
-            entry.step,
-            safeName,
-            { ticket, stateCtx, tasksDir },
-            {
-              loadWorkState,
-              saveWorkState,
-              readTddEvidence,
-              validateTddEvidence,
-              stepName: entry.step,
-              workDir,
-              work2Dir: __dirname,
-              log,
-              recursionDepth: _recursionDepth,
-            }
-          );
-          if (gateResult) {
-            if (gateResult.recurse) return getNextInstruction(ticketRaw, rework);
-            return gateResult; // full instruction object
-          }
-
           // Step genuinely needs more work, return instruction again
         }
 
