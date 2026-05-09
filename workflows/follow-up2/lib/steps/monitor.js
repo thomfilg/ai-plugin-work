@@ -146,7 +146,7 @@ module.exports = function registerMonitor(register) {
     if (ci.running && ci.running.length > 0) parts.push(`🔄 ${ci.running.length}`);
     if (ci.passed && ci.passed.length > 0) parts.push(`🟢 ${ci.passed.length}`);
     if (ci.failed && ci.failed.length > 0) parts.push(`🔴 ${ci.failed.length}`);
-    if (ci.cancelled && ci.cancelled.length > 0) parts.push(`⚪ ${ci.cancelled.length}`);
+    if (ci.cancelled && ci.cancelled.length > 0) parts.push(`⊘ ${ci.cancelled.length}`);
     const pendingBots = reviews.pendingBots || [];
     if (pendingBots.length > 0) parts.push(`🤖 ${pendingBots.length}`);
     if (reviews.hasBlocking) parts.push(`🚫 ${reviews.blocking.length}`);
