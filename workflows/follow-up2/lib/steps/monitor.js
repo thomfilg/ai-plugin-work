@@ -19,12 +19,8 @@ const { execFileSync } = require('child_process');
  * but `gh pr checks` still shows the parent as "in_progress".
  * `gh run list` sees the run-level conclusion sooner.
  */
-function hasFailedRuns(prInfo, worktreeDir) {
+function hasFailedJobs(prInfo, worktreeDir) {
   try {
-    const branch = prInfo.headRefName || prInfo.branch || '';
-    if (!branch) return false;
-
-    // Get current HEAD SHA to filter only runs for the latest commit
     const headSha = execFileSync('git', ['rev-parse', 'HEAD'], {
       encoding: 'utf8',
       timeout: 5000,
@@ -32,24 +28,21 @@ function hasFailedRuns(prInfo, worktreeDir) {
       stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
 
+    // Check individual job conclusions via the check-runs API.
+    // Matrix parent stays "in_progress" but individual shard jobs
+    // get conclusion:"failure" as soon as they finish.
     const raw = execFileSync(
       'gh',
       [
-        'run',
-        'list',
-        '--branch',
-        branch,
-        '--commit',
-        headSha,
-        '--limit',
-        '10',
-        '--json',
-        'conclusion,status,name',
+        'api',
+        `repos/{owner}/{repo}/commits/${headSha}/check-runs`,
+        '--jq',
+        '.check_runs[] | select(.conclusion == "failure") | .name',
       ],
-      { encoding: 'utf8', timeout: 10000, cwd: worktreeDir, stdio: ['pipe', 'pipe', 'pipe'] }
-    );
-    const runs = JSON.parse(raw);
-    return runs.some((r) => r.conclusion === 'failure');
+      { encoding: 'utf8', timeout: 15000, cwd: worktreeDir, stdio: ['pipe', 'pipe', 'pipe'] }
+    ).trim();
+
+    return raw.length > 0;
   } catch {
     return false; // fail-open
   }
@@ -90,7 +83,7 @@ module.exports = function registerMonitor(register) {
 
     // Early fail-fast: gh pr checks shows matrix parent as "pending" while
     // individual shards have already failed. Check run-level conclusions.
-    if (ci.status === 'pending' && hasFailedRuns(prInfo, ctx.worktreeDir)) {
+    if (ci.status === 'pending' && hasFailedJobs(prInfo, ctx.worktreeDir)) {
       ci.status = 'failing';
     }
 
