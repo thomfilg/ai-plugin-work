@@ -42,22 +42,35 @@ You will receive:
 
 ## Workflow
 
-1. **Read the brief** - Extract goals, requirements, constraints, success metrics
-2. **Explore the codebase** - Use Grep and Glob to understand:
+1. **Read the brief and project docs** - Extract goals, requirements, constraints, success metrics. If READ_DOCS_ON_SPEC docs are provided (pattern-first.md, architecture.md, ARCH.md, etc.), read them FIRST — they define the app's component structure, shared libraries, and conventions.
+2. **Reuse audit** (MUST complete BEFORE designing architecture):
+   a. From the brief, extract a list of every UI component, data pattern, and behavior needed (modals, dropdowns, forms, tables, filters, CRUD operations, validation, etc.)
+   b. **Similar pages/features analysis** — Find other pages or features in the app that solve similar problems:
+      - Search for pages with similar UX patterns (e.g., if brief needs a "settings modal", find ALL existing settings/config modals across the app)
+      - READ each similar page's implementation — identify which components, hooks, and patterns it uses
+      - List: which page, what it does, which shared components it imports
+      - This reveals the app's established component library and conventions
+   c. For EACH item from the brief, run targeted searches:
+      - Glob for component directories: `**/components/**/*Modal*`, `**/components/**/*Dialog*`, `**/components/**/*Dropdown*`
+      - Glob for shared/common UI: `**/shared/**`, `**/common/**`, `**/ui/**`
+      - Grep for import statements of similar components across existing pages
+   d. **Reuse vs Refactor decision** — For each finding, decide:
+      - **Direct reuse**: Component already exists and fits → use it as-is
+      - **Extend**: Component exists but needs minor additions → extend/wrap it
+      - **Extract & refactor**: Multiple pages have similar inline implementations but no shared component → propose extracting into a shared component as part of this task
+      - **Create new**: Nothing similar exists → create new, but explain why existing code can't be reused
+   e. Document findings in the Reuse Audit tables BEFORE writing Architecture Decisions
+3. **Explore the codebase** - Use Grep and Glob to understand:
    - Project structure and file organization
    - Existing patterns (data models, API patterns, error handling)
    - Related code that will be affected
    - Test patterns and frameworks in use
-3. **Reuse audit** - Actively search for existing code that can be reused:
-   - Grep/Glob for components, utilities, helpers, hooks, and patterns related to the feature
-   - Check for similar implementations that can be extended rather than rebuilt
-   - Document each finding with file path and how it maps to the new feature
 4. **Data & API audit** - Search for existing data models and endpoints:
    - Grep for schema definitions, model files, migration patterns
    - Grep for existing routes, handlers, endpoints that overlap with the feature
    - Distinguish between what exists (reuse/extend) vs what's new (create)
 5. **Identify scope boundaries** - Determine what is out of scope and document it explicitly
-6. **Generate the spec** - Fill the template with concrete, codebase-aware details
+6. **Generate the spec** - Fill the template with concrete, codebase-aware details. Architecture decisions MUST reference reuse audit findings.
 7. **Save** to the specified path
 8. **Return** a summary highlighting key architecture decisions, reuse findings, and test scenarios
 
@@ -73,10 +86,26 @@ You will receive:
 ## Summary
 {One paragraph overview of what this spec covers}
 
+## Reuse Audit
+
+### Similar Pages/Features Found
+| Page/Feature | What it does | Components Used | Relevance |
+|---|---|---|---|
+| {page name} | {description} | `{ComponentA}`, `{HookB}` from `{path}` | {how it relates to this feature} |
+
+### Component & Pattern Reuse
+| What | File | Decision | Rationale |
+|---|---|---|---|
+| {Existing component/utility/pattern} | `{file path}` | Reuse / Extend / Extract / Create New | {why this decision} |
+
+{If nothing reusable was found, state: "No existing patterns found that match this feature's requirements." with evidence of what was searched.}
+
 ## Architecture Decisions
+- **Reuse:** {What existing components/patterns from the Reuse Audit will be used}
+- **Refactor:** {Any extractions proposed — inline implementations → shared component}
 - **Pattern:** {What existing patterns to follow, with file references}
-- **Location:** {Where new code should live}
-- **Rationale:** {Why this approach}
+- **New Code:** {Only what CANNOT be achieved by reusing/extending existing code}
+- **Rationale:** {Why new code is needed where reuse was rejected}
 
 ## Data Model Changes
 
@@ -162,16 +191,6 @@ Feature: {feature name}
 
 {Generate 5-10 scenarios covering happy path, edge cases, and error cases. Each scenario must have at least one Given, one When, and one Then step. Use And/But for additional steps within a scenario.}
 
-## Reuse Audit
-
-Existing code that MUST be reused (found via grep/glob):
-
-| What | File | How to Reuse |
-|------|------|--------------|
-| {Existing component/utility/pattern} | `{file path}` | {How it maps to this feature} |
-
-{If nothing reusable was found, state: "No existing patterns found that match this feature's requirements."}
-
 ## Implementation Order
 
 Numbered steps with explicit dependency notation. Each step should be the smallest independently testable unit.
@@ -235,6 +254,6 @@ Notes:
 - Test scenarios should be concrete enough to write tests from directly
 - Keep implementation steps small — each should be completable in one TDD cycle
 - Aim for 5-10 test scenarios covering happy path, edge cases, and error cases
-- **Reuse Audit is mandatory** — always grep/glob for existing patterns before proposing new code. Document findings even if nothing reusable is found.
+- **Reuse Audit is mandatory and comes FIRST** — read the brief, list every UI component and data pattern needed, find similar pages in the app, then grep/glob for each one. Architecture decisions MUST reference reuse findings. Propose extending existing code before creating new.
 - **Out of Scope is mandatory** — explicitly list what is excluded to prevent scope creep during implementation
 - If the brief has gaps, note them in Open Questions & Decisions with a default assumption so developers are never blocked
