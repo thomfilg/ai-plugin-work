@@ -17,6 +17,7 @@
 
 'use strict';
 
+const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
@@ -26,23 +27,38 @@ module.exports = function registerFixReviews(register) {
     const prNum = String(state.prNumber || '');
     const scriptEnv = { ...process.env, WORK_TICKET_ID: state.ticketId };
 
-    // First call: take snapshot
+    // First call: take snapshot (or reuse existing if same PR)
     if (!state._reviewSnapshotDone) {
+      // Check if existing snapshot is for the same PR — reuse it to preserve
+      // solved/skipped state from previous fix-reviews cycles (GH-358).
+      let canReuse = false;
       try {
-        execFileSync(process.execPath, [commentsScript, '--snapshot', '--pr', prNum], {
-          encoding: 'utf8',
-          timeout: 30000,
-          cwd: ctx.worktreeDir,
-          env: scriptEnv,
-          stdio: ['pipe', 'pipe', 'pipe'],
-        });
-      } catch (err) {
-        const msg = err.stderr || err.stdout || err.message || 'unknown error';
-        return {
-          type: 'follow_up_instruction',
-          action: 'blocked',
-          reason: `Snapshot failed: ${String(msg).substring(0, 500)}`,
-        };
+        const stateFile = path.join(ctx.tasksDir, 'follow-up-comments.json');
+        const existing = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+        if (existing?.prNumber === Number(prNum) && Array.isArray(existing.comments)) {
+          canReuse = true;
+        }
+      } catch {
+        // No existing state or parse error — take fresh snapshot
+      }
+
+      if (!canReuse) {
+        try {
+          execFileSync(process.execPath, [commentsScript, '--snapshot', '--pr', prNum], {
+            encoding: 'utf8',
+            timeout: 30000,
+            cwd: ctx.worktreeDir,
+            env: scriptEnv,
+            stdio: ['pipe', 'pipe', 'pipe'],
+          });
+        } catch (err) {
+          const msg = err.stderr || err.stdout || err.message || 'unknown error';
+          return {
+            type: 'follow_up_instruction',
+            action: 'blocked',
+            reason: `Snapshot failed: ${String(msg).substring(0, 500)}`,
+          };
+        }
       }
       state._reviewSnapshotDone = true;
     }
