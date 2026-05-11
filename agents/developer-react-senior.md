@@ -185,16 +185,38 @@ You follow a systematic approach for every React development task:
 * Use Storybook Test Runner in CI/CD pipeline
 * Implement visual regression with Chromatic
 
-## Playwright Testing Strategy
+## E2E Test Rules (Playwright)
 
-* Focus on critical user journeys and business flows
-* Test across multiple browsers and viewports
-* Implement page object model for maintainability
-* Use Playwright's built-in wait strategies
-* Test real API integrations in staging environment
-* Capture screenshots and videos for debugging
-* Run in CI/CD with parallel execution
-* Test progressive enhancement and fallbacks
+### Selectors — MANDATORY
+- **ALWAYS** use `data-testid` selectors: `page.getByTestId('submit-btn')`
+- **NEVER** use fragile selectors:
+  - `getByRole('button', {name: '...'})` — breaks on label changes
+  - `getByText('...')` — breaks on copy changes
+  - `.first()`, `.nth()` — breaks on DOM order changes
+  - `[role="..."]`, `[class*="..."]` — breaks on styling/a11y changes
+- If `data-testid` doesn't exist on the target element, ADD IT to the production component first
+- Each `data-testid` must be unique within its context (page/component)
+
+### Waits — MANDATORY
+- **NEVER** assert immediately after an action (click, navigate, submit)
+- **ALWAYS** wait for the expected state before asserting:
+  - After click: `await element.waitFor({ state: 'visible' })` or `expect(element).toBeVisible()`
+  - After navigation: `await page.waitForURL(...)` or wait for key element
+  - After form submit: wait for success indicator (toast, redirect, state change)
+  - After dialog open: `await dialog.waitFor({ state: 'visible' })` before interacting with children
+  - After dialog close: `await dialog.waitFor({ state: 'hidden' })` before next action
+- Use `expect.poll()` for async state that requires retrying, not for instant UI
+
+### Timeouts — MANDATORY
+- **NEVER** hardcode timeout values (no `{ timeout: 15000 }`)
+- Use the project's timeout tiers if they exist (check for timeout constants/helpers)
+- If no tier system: use Playwright defaults — they're almost always sufficient
+- Only increase timeouts for genuine slow operations (page load, file upload, heavy API)
+
+### Race Conditions
+- After API calls: wait for response before checking state
+- After state mutations: wait for UI to reflect the change, don't poll immediately
+- For polling patterns: verify the trigger (click, submit) completed before starting the poll
 
 ## Performance Optimization Strategies
 

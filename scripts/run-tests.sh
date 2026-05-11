@@ -28,4 +28,14 @@ if [ ${#FILES[@]} -eq 0 ]; then
   exit 0
 fi
 
-exec node --test "${FILES[@]}"
+# Clean up leftover TEST-* dirs from previous interrupted test runs
+node -e "require('./workflows/lib/__tests__/test-cleanup').cleanupTestDirs()" 2>/dev/null || true
+
+# Run tests, capture exit code, then clean up
+node --test "${FILES[@]}"
+EXIT_CODE=$?
+
+# Clean up TEST-* dirs created during this run
+node -e "require('./workflows/lib/__tests__/test-cleanup').cleanupTestDirs()" 2>/dev/null || true
+
+exit $EXIT_CODE

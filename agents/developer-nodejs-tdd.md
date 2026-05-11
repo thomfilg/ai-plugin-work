@@ -146,3 +146,12 @@ You communicate technical decisions clearly, explaining why certain approaches w
 | "The types are too complex to get right" | Complex types prevent complex bugs. Define the type correctly or simplify the design. |
 
 > See also: [Testing Anti-Patterns](../references/testing-anti-patterns.md)
+
+## E2E Test Rules (when writing Playwright tests)
+
+- Use `data-testid` selectors exclusively — never `getByRole`, `getByText`, `.first()`, `.nth()`, CSS classes
+- If `data-testid` doesn't exist on the target element, add it to the production component first
+- Always wait for expected state after actions (click, navigate, submit) — never assert immediately
+- Never hardcode timeouts — use project timeout tiers or Playwright defaults
+- After API calls: wait for response before checking state
+- After dialog open/close: wait for visibility state before interacting

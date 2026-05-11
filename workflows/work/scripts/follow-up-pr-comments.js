@@ -197,6 +197,22 @@ function handleSnapshot(prNumber) {
     const resolvedResult = getResolvedCommentIds(repo, prNumber);
     const resolvedIds = resolvedResult?.resolved || new Set();
 
+    // Preserve solved/skipped state from previous snapshot to avoid
+    // re-presenting comments that were already addressed (GH-358).
+    const previousState = loadState();
+    const previousStatusMap = new Map();
+    if (previousState?.comments) {
+      for (const c of previousState.comments) {
+        if (c.status === 'solved' || c.status === 'skipped') {
+          previousStatusMap.set(String(c.id), {
+            status: c.status,
+            commitSha: c.commitSha || null,
+            resolution: c.resolution || null,
+          });
+        }
+      }
+    }
+
     const seenHashes = new Set();
     const comments = [];
 
@@ -226,9 +242,11 @@ function handleSnapshot(prNumber) {
           line: null,
           original_line: null,
           priority: classifyCommentPriority(author, body),
-          status: 'unsolved',
-          commitSha: null,
-          resolution: null,
+          status: previousStatusMap.has(String(review.id))
+            ? previousStatusMap.get(String(review.id)).status
+            : 'unsolved',
+          commitSha: previousStatusMap.get(String(review.id))?.commitSha || null,
+          resolution: previousStatusMap.get(String(review.id))?.resolution || null,
         });
       }
     } catch (err) {
@@ -273,9 +291,13 @@ function handleSnapshot(prNumber) {
               line: cm.line || cm.original_line || null,
               original_line: cm.original_line || null,
               priority: classifyCommentPriority(author, body),
-              status: 'resolved',
-              commitSha: null,
-              resolution: 'Outdated (code changed since comment)',
+              status: previousStatusMap.has(String(cm.id))
+                ? previousStatusMap.get(String(cm.id)).status
+                : 'resolved',
+              commitSha: previousStatusMap.get(String(cm.id))?.commitSha || null,
+              resolution:
+                previousStatusMap.get(String(cm.id))?.resolution ||
+                'Outdated (code changed since comment)',
             });
             continue;
           }
@@ -294,9 +316,15 @@ function handleSnapshot(prNumber) {
             line: cm.line || null,
             original_line: cm.original_line || null,
             priority: classifyCommentPriority(author, body),
-            status: isResolved ? 'resolved' : 'unsolved',
-            commitSha: null,
-            resolution: isResolved ? 'Resolved/outdated thread' : null,
+            status: previousStatusMap.has(String(cm.id))
+              ? previousStatusMap.get(String(cm.id)).status
+              : isResolved
+                ? 'resolved'
+                : 'unsolved',
+            commitSha: previousStatusMap.get(String(cm.id))?.commitSha || null,
+            resolution:
+              previousStatusMap.get(String(cm.id))?.resolution ||
+              (isResolved ? 'Resolved/outdated thread' : null),
           });
         }
 

@@ -85,8 +85,13 @@ function transitionStep(ticket, targetStep, deps) {
   }
 
   // Extract 1-indexed task number from work state for per-task TDD paths (GH-219 Task 2)
+  // Clamp to totalTasks so that when currentTaskIndex points past the end (all tasks done),
+  // the TDD gate re-checks the LAST task's evidence instead of a non-existent task N+1.
   const taskNum =
-    ws?.tasksMeta?.currentTaskIndex != null ? ws.tasksMeta.currentTaskIndex + 1 : undefined;
+    ws?.tasksMeta?.currentTaskIndex != null
+      ? Math.min(ws.tasksMeta.currentTaskIndex + 1, ws.tasksMeta.tasks?.length ?? Infinity) ||
+        undefined
+      : undefined;
 
   // TDD gate: require evidence before leaving gated steps (always enforced)
   // NOTE: This validates TDD evidence for the CURRENT task only (per tasksMeta.currentTaskIndex).

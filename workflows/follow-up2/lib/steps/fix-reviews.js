@@ -26,7 +26,9 @@ module.exports = function registerFixReviews(register) {
     const prNum = String(state.prNumber || '');
     const scriptEnv = { ...process.env, WORK_TICKET_ID: state.ticketId };
 
-    // First call: take snapshot
+    // First call: always take fresh snapshot to catch new comments.
+    // The --snapshot command preserves solved/skipped state from previous
+    // runs via previousStatusMap (GH-358), so no data is lost.
     if (!state._reviewSnapshotDone) {
       try {
         execFileSync(process.execPath, [commentsScript, '--snapshot', '--pr', prNum], {

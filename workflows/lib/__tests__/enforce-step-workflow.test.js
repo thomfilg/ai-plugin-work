@@ -5,7 +5,7 @@
  * Run: node --test hooks/__tests__/enforce-step-workflow.test.js
  */
 
-const { describe, it, beforeEach, afterEach } = require('node:test');
+const { describe, it, before, beforeEach, afterEach, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { spawn } = require('child_process');
 const os = require('os');
@@ -15,9 +15,11 @@ const path = require('path');
 const HOOK_PATH = path.join(__dirname, '..', 'hooks', 'enforce-step-workflow.js');
 const getConfig = require(path.join(__dirname, '..', 'get-config'));
 const TASKS_BASE = getConfig.require('TASKS_BASE');
+// TEST-* dirs are cleaned globally by scripts/run-tests.sh via test-cleanup.js
 
 // Use a unique ticket ID per test run to avoid interference
-const TEST_TICKET = `TEST-${process.pid}`;
+// Convention: all test tickets MUST start with TEST- for cleanup (see test-cleanup.js)
+const TEST_TICKET = `TEST-ESW-${process.pid}`;
 const TASKS_DIR = path.join(TASKS_BASE, TEST_TICKET);
 
 // ─── Helpers ────────────────────────────────────────────────────────────────

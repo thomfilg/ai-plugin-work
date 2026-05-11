@@ -127,6 +127,17 @@ Standard implementation tasks MUST order deliverables following the TDD cycle: R
 
 Checkpoint tasks and config-only infrastructure tasks are exempt from the RED/GREEN/REFACTOR deliverables requirement. For those exempt tasks, use a non-phase deliverables list that describes the concrete verifiable work in execution order, for example: `- Update config`, `- Validate config`, `- Document rollout/usage` as applicable.
 
+**Rule 12 — Shared-Resource Detection (MANDATORY for parallel tasks):**
+After marking tasks as `Parallel: Yes`, scan ALL parallel tasks' Suggested Scope for **overlapping production files**. If two or more parallel tasks modify the **same production file** (not test files — those don't conflict):
+1. Extract the shared changes into a new **prerequisite task** that makes the shared modifications first
+2. **Reorder all tasks** — the prerequisite becomes the first task (Task 1), and all subsequent tasks renumber accordingly. Never use "Task 0" — all tasks are numbered sequentially starting from 1.
+3. Mark the prerequisite as `Parallel: No` with dependency `None`
+4. Update all tasks that originally touched the shared file to depend on the prerequisite
+5. The prerequisite task should ONLY make the shared changes (e.g., "add data-testid to BulkActionsDropdown"), not implement the full feature
+6. Add a `## Parallelization Plan` section at the top of the file showing Wave 1 (prerequisite) → Wave 2 (parallel) → Wave 3 (checkpoints) structure
+
+Example: If Task 3 and Task 5 both need to modify `BulkActionsDropdown.tsx`, create a new task for the shared changes, make it Task 1, renumber everything else, and mark the parallel tasks as depending on it.
+
 **Anti-patterns — DO NOT generate tasks like these:**
 - "Implement backend logic" (too vague, spans multiple components)
 - "Setup everything" (not atomic, no single verifiable outcome)
@@ -171,6 +182,7 @@ Review all generated tasks and check:
 - No task is trivial (less than ~5 minutes of work — merge it into an adjacent task)
 - Dependencies are minimal (prefer independent tasks where possible)
 - Parallelization is maximized safely (any task marked `No` that could be `Yes`?)
+- Shared-resource detection: parallel tasks don't modify the same production files (if they do, extract a prerequisite — Rule 12)
 - Checkpoint tasks are present after every 3 implementation tasks or subsystem boundary
 - TDD ordering is correct (RED before GREEN before REFACTOR in every non-exempt implementation task — see Rule 10 for exemptions)
 - Gherkin coverage: every scenario from `gherkin.feature` is referenced by at least one task (if `gherkin.feature` exists)
@@ -276,6 +288,19 @@ Verify all prior tasks are correctly implemented and integrated.
 _Generated from: brief.md, spec.md_
 _Ticket: <TICKET_ID>_
 _TDD Protocol: Every non-exempt implementation task follows RED -> GREEN -> REFACTOR ordering in deliverables._
+
+## Parallelization Plan
+
+(Include this section when any tasks are parallel. Shows wave execution order.)
+
+**Wave 1 (prerequisite — shared resource changes):**
+- Task 1: <shared changes extracted from parallel tasks>
+
+**Wave 2 (parallel — after Wave 1):**
+- Task 2, Task 3, Task 4 (all parallel, no file conflicts)
+
+**Wave 3 (sequential — after Wave 2):**
+- Task 5: Checkpoint
 
 ## Extracted Requirements
 
