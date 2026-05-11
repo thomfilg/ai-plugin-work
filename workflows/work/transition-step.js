@@ -89,7 +89,8 @@ function transitionStep(ticket, targetStep, deps) {
   // the TDD gate re-checks the LAST task's evidence instead of a non-existent task N+1.
   const taskNum =
     ws?.tasksMeta?.currentTaskIndex != null
-      ? Math.min(ws.tasksMeta.currentTaskIndex + 1, ws.tasksMeta.tasks?.length ?? Infinity)
+      ? Math.min(ws.tasksMeta.currentTaskIndex + 1, ws.tasksMeta.tasks?.length ?? Infinity) ||
+        undefined
       : undefined;
 
   // TDD gate: require evidence before leaving gated steps (always enforced)
