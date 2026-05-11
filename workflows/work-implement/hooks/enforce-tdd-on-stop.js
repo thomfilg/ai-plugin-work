@@ -162,6 +162,22 @@ if (testCommand) {
     }
   }
 
+  // Apply phase-aware test flags:
+  //   RED:   run ALL tests (need full failure picture)
+  //   GREEN/REFACTOR: fail-fast on first failure (no point running rest)
+  let phaseTestCommand = testCommand;
+  if (currentPhase === 'green' || currentPhase === 'refactor') {
+    // Append fail-fast flags for common test runners
+    // vitest/jest: --bail    playwright: already fails fast by default
+    // Only append if not already present
+    if (!/--bail\b/.test(phaseTestCommand)) {
+      phaseTestCommand = phaseTestCommand.replace(
+        /(pnpm\s+test(?::unit|:integration)?)/g,
+        '$1 --bail'
+      );
+    }
+  }
+
   // Run test command and record evidence
   try {
     execFileSync(
@@ -173,7 +189,7 @@ if (testCommand) {
         '--task',
         String(taskNum),
         '--cmd',
-        testCommand,
+        phaseTestCommand,
       ],
       execOpts
     );
