@@ -236,13 +236,64 @@ function checkTddPhase(filePath, ticketId) {
 }
 
 /**
+ * Detect the worktree directory for a ticket.
+ *
+ * Worktrees follow the convention `<WORKTREES_BASE>/<repo>-<TICKET_ID>` (per
+ * inspect.js:44). Detection priority:
+ *   1. process.env.WORK_WORKTREE_DIR — explicit override
+ *   2. WORKTREES_BASE/<MAIN_WORKTREE_FOLDER>-<safeTicketId> — convention
+ *   3. Walk up from process.cwd() looking for a dir whose name ends with
+ *      `-<safeTicketId>` and whose parent is WORKTREES_BASE
+ *
+ * Returns null if no worktree can be confidently identified.
+ *
+ * @param {string} safeTicketId
+ * @returns {string|null}
+ */
+function detectWorktreeDir(safeTicketId) {
+  if (process.env.WORK_WORKTREE_DIR) return path.resolve(process.env.WORK_WORKTREE_DIR);
+
+  const wbase = process.env.WORKTREES_BASE;
+  const repo = process.env.REPO_NAME;
+  if (wbase && repo) {
+    const candidate = path.join(wbase, `${repo}-${safeTicketId}`);
+    try {
+      if (fs.statSync(candidate).isDirectory()) return path.resolve(candidate);
+    } catch {
+      /* not present */
+    }
+  }
+
+  // Walk up from cwd looking for `<something>-<safeTicketId>` whose parent
+  // is WORKTREES_BASE (or any parent if WORKTREES_BASE unset).
+  try {
+    const wbaseResolved = wbase ? path.resolve(wbase) : null;
+    let dir = process.cwd();
+    const root = path.parse(dir).root;
+    while (dir !== root) {
+      const base = path.basename(dir);
+      if (base.endsWith(`-${safeTicketId}`)) {
+        const parent = path.dirname(dir);
+        if (!wbaseResolved || path.resolve(parent) === wbaseResolved) {
+          return path.resolve(dir);
+        }
+      }
+      dir = path.dirname(dir);
+    }
+  } catch {
+    /* fail-closed */
+  }
+  return null;
+}
+
+/**
  * Build the allowed-paths object for isWriteAllowedPath (R6).
  * Only active when WORK_TASK_NUM is set (task-aware mode).
  * Legacy mode (no WORK_TASK_NUM) skips the path gate entirely.
  *
  * @param {string} taskBase - Resolved TASKS_BASE
  * @param {string} safeTicketId - Sanitized ticket ID
- * @returns {{ prDir: string|null, taskDir: string|null, ticketRoot: string }|null}
+ * @returns {{ prDir: string|null, taskDir: string|null, ticketRoot: string, worktreeDir: string|null }|null}
  */
 function buildAllowedPaths(taskBase, safeTicketId) {
   let taskNum = process.env.WORK_TASK_NUM ? parseInt(process.env.WORK_TASK_NUM, 10) : null;
@@ -261,7 +312,7 @@ function buildAllowedPaths(taskBase, safeTicketId) {
   // No task num = legacy mode; invalid taskNum = fail-closed
   if (taskNum == null) return null;
   if (!Number.isInteger(taskNum) || taskNum < 1)
-    return { prDir: null, taskDir: null, ticketRoot: null };
+    return { prDir: null, taskDir: null, ticketRoot: null, worktreeDir: null };
 
   const ticketRoot = path.join(taskBase, safeTicketId);
   let taskDir = null;
@@ -276,7 +327,13 @@ function buildAllowedPaths(taskBase, safeTicketId) {
   const prDir =
     prSlot && Number.isInteger(prSlot) && prSlot > 0 ? path.join(ticketRoot, 'PR' + prSlot) : null;
 
-  return { prDir, taskDir, ticketRoot };
+  // Worktree path — when running inside a `<repo>-<TICKET>` worktree, the
+  // entire worktree is the legitimate write zone for this ticket. Most real
+  // tasks edit repo source files, not files under tasks/<TICKET>/task{N}/.
+  // (Workaround for path-gate-blocks-repo-writes issue from echo-4520-issue-2.)
+  const worktreeDir = detectWorktreeDir(safeTicketId);
+
+  return { prDir, taskDir, ticketRoot, worktreeDir };
 }
 
 /**
