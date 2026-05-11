@@ -95,13 +95,20 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
   delete ws._tddRetryCount;
   saveWorkState(safeName, ws);
 
+  // Derive TASKS_BASE from ctx.tasksDir for subprocess calls.
+  // The gate runs in the plugin's process context, but the ticket's tasks
+  // may be in a different project (e.g., worktree). ctx.tasksDir is the
+  // correct path — extract TASKS_BASE by removing the ticket subfolder.
+  const gateTASKS_BASE = ctx.tasksDir ? path.dirname(ctx.tasksDir) : process.env.TASKS_BASE;
+  const gateExecEnv = gateTASKS_BASE ? { ...process.env, TASKS_BASE: gateTASKS_BASE } : process.env;
+
   // Evidence valid — check if more tasks remain
   if (currentIdx < totalTasks - 1) {
     try {
       execFileSync(
         process.execPath,
         [path.join(workDir, 'work-state.js'), 'task-advance', safeName],
-        { encoding: 'utf-8', timeout: 5000, stdio: 'pipe' }
+        { encoding: 'utf-8', timeout: 5000, stdio: 'pipe', env: gateExecEnv }
       );
       // Clear dispatched marker so the new task gets dispatched fresh
       const ws2 = loadWorkState(safeName);
@@ -136,7 +143,7 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
     execFileSync(
       process.execPath,
       [path.join(workDir, 'work-state.js'), 'task-advance', safeName],
-      { encoding: 'utf-8', timeout: 5000, stdio: 'pipe' }
+      { encoding: 'utf-8', timeout: 5000, stdio: 'pipe', env: gateExecEnv }
     );
   } catch {
     /* fail-open — task-advance returns { done: true } for last task, which is fine */
