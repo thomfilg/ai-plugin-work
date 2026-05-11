@@ -249,9 +249,7 @@ module.exports = function registerImplement(register) {
       );
       const scope = scopeMatch ? scopeMatch[1] : '';
       const isE2E =
-        /\.spec\.ts|e2e|playwright|\.spec\.js/i.test(scope) ||
-        taskType === 'e2e' ||
-        /e2e/i.test(taskTitle);
+        /e2e|playwright/i.test(scope) || taskType === 'e2e' || /e2e|playwright/i.test(taskTitle);
       if (isE2E) {
         e2eRules = [
           '',
