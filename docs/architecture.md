@@ -16,7 +16,7 @@
 
 ```
 claude-plugin-work/
-├── workflows/                  # Core workflow engine & definitions
+├── scripts/workflows/                  # Core workflow engine & definitions
 │   ├── lib/                    # Shared utilities
 │   │   ├── workflow-engine.js  # Reusable state machine engine
 │   │   ├── workflow-state.js   # Generic state persistence

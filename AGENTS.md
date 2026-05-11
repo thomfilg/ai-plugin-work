@@ -13,7 +13,7 @@ For detailed documentation see **[docs/README.md](./docs/README.md)**.
 - Hooks use `process.exit(0/1/2)` intentionally — 0=allow, 2=block. Do not suggest throwing errors instead.
 - **Fail-open is intentional** — hooks catch errors and exit 0. Do not suggest fail-closed alternatives.
 - `logHookError(__filename, err)` is the logging convention. Do not suggest `console.error`.
-- Config lives in `workflows/lib/config.js` — do not duplicate its logic elsewhere.
+- Config lives in `scripts/workflows/lib/config.js` — do not duplicate its logic elsewhere.
 - `Object.create(null)` prevents prototype pollution — intentional, do not flag.
 - Content inside `skills/**/SKILL.md` and `agents/*.md` are AI instruction documents, not executable code. Do not flag code fences inside them.
 - `protect-state-files.js` four-vector design is intentional. Do not simplify regex patterns.

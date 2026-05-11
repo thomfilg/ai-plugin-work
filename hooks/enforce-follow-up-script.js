@@ -65,7 +65,7 @@ try {
             `BLOCKED: Active /follow-up2 session for ${ticketId}.\n\n` +
               `Do NOT check CI manually. Use /follow-up2 instead — it handles CI monitoring, review comments, and fixes.\n\n` +
               `Run: /follow-up2\n` +
-              `Or: node "\${CLAUDE_PLUGIN_ROOT}/workflows/follow-up2/follow-up-next.js" "${ticketId}"${prNumber ? ` --pr ${prNumber}` : ''}`
+              `Or: node "\${CLAUDE_PLUGIN_ROOT}/scripts/workflows/follow-up2/follow-up-next.js" "${ticketId}"${prNumber ? ` --pr ${prNumber}` : ''}`
           );
           break;
         }

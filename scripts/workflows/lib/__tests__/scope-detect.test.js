@@ -14,8 +14,8 @@ const { detectScope } = require('../scope-detect');
 describe('scope-detect — detectScope()', () => {
   it('returns scope for single-directory changes', () => {
     const scope = detectScope([
-      'workflows/lib/hooks/enforce-dev-commands.js',
-      'workflows/lib/hooks/enforce-dev-commands.test.js',
+      'scripts/workflows/lib/hooks/enforce-dev-commands.js',
+      'scripts/workflows/lib/hooks/enforce-dev-commands.test.js',
     ]);
     assert.strictEqual(scope, 'hooks');
   });
@@ -23,7 +23,7 @@ describe('scope-detect — detectScope()', () => {
   it('returns empty string for cross-cutting changes', () => {
     const scope = detectScope([
       'agents/commit-writer.md',
-      'workflows/lib/scope-detect.js',
+      'scripts/workflows/lib/scope-detect.js',
       'hooks/hooks.json',
     ]);
     assert.strictEqual(scope, '');

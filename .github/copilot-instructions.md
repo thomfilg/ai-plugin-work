@@ -64,7 +64,7 @@ When reviewing pull requests in this repository:
 - Silent `catch { ... }` blocks that call `logHookError` or follow a documented fail-open pattern. Only flag empty catches that swallow errors **without** logging or fail-open handling.
 
 ### Security hardening
-- Defensive patterns in `workflows/lib/protect-state-files.js` — the four-vector design (Edit/Write, Bash, script, inline-interpreter) is intentional. Do not suggest collapsing vectors or simplifying regex patterns without understanding the bypass they close.
+- Defensive patterns in `scripts/workflows/lib/protect-state-files.js` — the four-vector design (Edit/Write, Bash, script, inline-interpreter) is intentional. Do not suggest collapsing vectors or simplifying regex patterns without understanding the bypass they close.
 - `fs.realpathSync` + `git ls-files` checks for trusted test scripts — this is the GH-191 hardening. Do not suggest replacing with simpler suffix-based checks.
 - Base64 over-blocking in inline-interpreter detection — this is an intentional tradeoff documented in the GH-107 spec.
 
@@ -79,4 +79,4 @@ When reviewing pull requests in this repository:
 - Git worktree detection via `git rev-parse --show-toplevel` — do not suggest `__dirname`-based root detection.
 
 ### Instruction / prompt files
-- Content inside `skills/**/SKILL.md`, `agents/**.md`, or `workflows/**/agents/**.md` — these are instruction documents for AI agents. Code fences inside them are illustrative examples, not executable code. Do not flag "unused imports," "missing types," or "dead code" inside these fences.
+- Content inside `skills/**/SKILL.md`, `agents/**.md`, or `scripts/workflows/**/agents/**.md` — these are instruction documents for AI agents. Code fences inside them are illustrative examples, not executable code. Do not flag "unused imports," "missing types," or "dead code" inside these fences.

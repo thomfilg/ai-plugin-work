@@ -11,7 +11,7 @@ Run the check-next.js orchestrator for the given ticket. It returns ONE instruct
 ## Usage
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/workflows/check2/check-next.js" <TICKET_ID> --init
+node "${CLAUDE_PLUGIN_ROOT}/scripts/workflows/check2/check-next.js" <TICKET_ID> --init
 ```
 
 Execute the returned instruction. The PostToolUse auto-advance hook will call check-next.js again after each step completes.

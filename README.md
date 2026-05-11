@@ -83,7 +83,7 @@ claude-plugin-work/
 ├── hooks/                        # Top-level event hooks
 │   ├── hooks.json                # Hook registration config
 │   └── work-orchestrator-hook.js
-├── workflows/                    # Workflow definitions and core engine
+├── scripts/workflows/                    # Workflow definitions and core engine
 │   ├── lib/                      # Core engine and shared hook utilities
 │   │   ├── workflow-engine.js    # Reusable state machine engine
 │   │   ├── workflow-state.js     # Workflow state persistence
@@ -108,7 +108,7 @@ claude-plugin-work/
 
 ### Workflow Engine
 
-The workflow engine (`workflows/lib/workflow-engine.js`) provides:
+The workflow engine (`scripts/workflows/lib/workflow-engine.js`) provides:
 
 - **Plan generation** - Detects current state and computes remaining steps
 - **State transitions** - Records forward/backward step transitions with validation
@@ -139,7 +139,7 @@ export ENFORCE_HOOK_DEBUG=1
 **Race conditions:** Each log line includes PID. Writes use `O_APPEND` with short lines (~3.8KB max). On Linux ext4/xfs, these are effectively atomic across concurrent instances.
 
 **Source files:**
-- `workflows/lib/hook-error-log.js` (plugin hooks)
+- `scripts/workflows/lib/hook-error-log.js` (plugin hooks)
 - `~/.claude/hooks/lib/hook-error-log.js` (personal hooks — identical copy)
 
 ## Prerequisites

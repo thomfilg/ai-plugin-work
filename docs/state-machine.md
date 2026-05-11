@@ -4,7 +4,7 @@ The workflow engine is built on a deterministic state machine that tracks step p
 
 ## Step Registry
 
-**File:** `workflows/work/step-registry.js`
+**File:** `scripts/workflows/work/step-registry.js`
 
 The step registry is the single source of truth for step identifiers and ordering. Step IDs are decoupled from their position — reordering only requires changing `STEP_ORDER`.
 
@@ -178,7 +178,7 @@ The implement/commit/task_review cycle repeats for each task before proceeding t
 
 ## Plan Generator
 
-**File:** `workflows/work/plan-generator.js`
+**File:** `scripts/workflows/work/plan-generator.js`
 
 Before each orchestrator iteration, the plan generator inspects current state and computes actions:
 
@@ -207,11 +207,11 @@ When Claude's context window rotates or the conversation crashes:
 
 ## Workflow Engine (Generic)
 
-**File:** `workflows/lib/workflow-engine.js`
+**File:** `scripts/workflows/lib/workflow-engine.js`
 
 The generic workflow engine supports any workflow (not just /work). It provides:
 
-- `discoverWorkflows()` — Scan `workflows/` for `*.workflow.js` files
+- `discoverWorkflows()` — Scan `scripts/workflows/` for `*.workflow.js` files
 - `loadWorkflow(name)` — Load workflow definition
 - `transitionStep(ticketId, step)` — Advance state machine
 - `detectStepState(workflow, ticketId)` — Inspect which steps are verified

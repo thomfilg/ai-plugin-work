@@ -28,7 +28,7 @@ Updates PR description and adds visual documentation for a ticket task. Uses the
 Run the workflow engine to get the execution plan:
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/workflow-engine.js work-pr plan "$ARGS"
+node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/lib/workflow-engine.js work-pr plan "$ARGS"
 ```
 
 Parse the JSON output. Extract `instanceId`, `params`, `plan`, and `summary`.
@@ -39,7 +39,7 @@ Set these variables from params:
 
 If `summary.run === 0`, print "Everything up-to-date", then transition to `6_summary` and complete the workflow:
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/workflow-engine.js work-pr transition ${TICKET_ID} 6_summary
+node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/lib/workflow-engine.js work-pr transition ${TICKET_ID} 6_summary
 echo "✅ Everything up-to-date — nothing to do."
 ```
 
@@ -49,7 +49,7 @@ Initialize state, then execute each step marked `RUN` in order. Call `transition
 
 **Transition command:**
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/workflow-engine.js work-pr transition ${TICKET_ID} <step_id>
+node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/lib/workflow-engine.js work-pr transition ${TICKET_ID} <step_id>
 ```
 
 ---
@@ -246,7 +246,7 @@ echo "Current HEAD: ${CURRENT_SHA}"
 
 Mark workflow complete:
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/workflow-engine.js work-pr transition ${TICKET_ID} 6_summary
+node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/lib/workflow-engine.js work-pr transition ${TICKET_ID} 6_summary
 ```
 
 ## State Machine

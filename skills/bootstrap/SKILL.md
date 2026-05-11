@@ -69,7 +69,7 @@ git worktree add "$WORKTREE_PATH" -b "$BRANCH_NAME" "origin/$BASE_BRANCH"
 
 ```bash
 cd "$WORKTREE_PATH"
-node "${CLAUDE_PLUGIN_ROOT}/workflows/work/scripts/bootstrap-custom-script.js" "$WORKTREE_PATH" "$TICKET_ID"
+node "${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/scripts/bootstrap-custom-script.js" "$WORKTREE_PATH" "$TICKET_ID"
 ```
 
 Runs the script specified by `BOOTSTRAP_SCRIPT` env var. The script receives the worktree path and ticket ID as arguments. If `BOOTSTRAP_SCRIPT` is not set, this step is skipped (logs "skipping" and exits 0). Script failures are non-fatal (warning only).

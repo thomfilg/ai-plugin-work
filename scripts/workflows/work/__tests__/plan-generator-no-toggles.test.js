@@ -210,7 +210,7 @@ describe('GH-253 Task 4: plan never contains "disabled" reason', () => {
 
 describe('GH-253 Task 4: .env.example toggle removal', () => {
   const envExampleSource = fs.readFileSync(
-    path.join(__dirname, '..', '..', '..', '.env.example'),
+    path.join(__dirname, '..', '..', '..', '..', '.env.example'),
     'utf8'
   );
 

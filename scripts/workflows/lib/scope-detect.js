@@ -6,9 +6,9 @@
  * @type {Array<[string, string]>}
  */
 const SCOPE_MAP = [
-  ['workflows/lib/hooks/', 'hooks'],
-  ['workflows/lib/', 'lib'],
-  ['workflows/work/', 'work'],
+  ['scripts/workflows/lib/hooks/', 'hooks'],
+  ['scripts/workflows/lib/', 'lib'],
+  ['scripts/workflows/work/', 'work'],
   ['agents/', 'agents'],
   ['skills/', 'skills'],
   ['hooks/', 'hooks'],

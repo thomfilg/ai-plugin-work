@@ -42,16 +42,16 @@ The actual `hooks.json` uses `matcher` regex patterns, `CLAUDE_HOOK_TYPE` env va
       {
         "matcher": "Task|Skill",
         "hooks": [
-          { "type": "command", "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/enforce-step-workflow.js" }
+          { "type": "command", "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/lib/hooks/enforce-step-workflow.js" }
         ]
       },
       {
         "matcher": "Edit|Write|MultiEdit",
         "hooks": [
-          { "type": "command", "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/enforce-step-workflow.js" },
-          { "type": "command", "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/work/hooks/enforce-work-command.js" },
-          { "type": "command", "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/work-implement/hooks/work-implement-enforce.js" },
-          { "type": "command", "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/work/hooks/work-require-implement.js" }
+          { "type": "command", "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/lib/hooks/enforce-step-workflow.js" },
+          { "type": "command", "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/hooks/enforce-work-command.js" },
+          { "type": "command", "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-implement/hooks/work-implement-enforce.js" },
+          { "type": "command", "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/hooks/work-require-implement.js" }
         ]
       }
     ],
@@ -59,7 +59,7 @@ The actual `hooks.json` uses `matcher` regex patterns, `CLAUDE_HOOK_TYPE` env va
       {
         "matcher": "Task|Skill|Bash",
         "hooks": [
-          { "type": "command", "command": "CLAUDE_HOOK_TYPE=PostToolUse node ${CLAUDE_PLUGIN_ROOT}/workflows/lib/hooks/enforce-step-workflow.js" }
+          { "type": "command", "command": "CLAUDE_HOOK_TYPE=PostToolUse node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/lib/hooks/enforce-step-workflow.js" }
         ]
       }
     ]
@@ -96,7 +96,7 @@ Note: This is a simplified excerpt. The full `hooks.json` includes additional ma
 
 ## Master Enforcement Hook
 
-**File:** `workflows/lib/hooks/enforce-step-workflow.js`
+**File:** `scripts/workflows/lib/hooks/enforce-step-workflow.js`
 
 This is the primary enforcement hook, handling both PreToolUse and PostToolUse for all workflows.
 
@@ -148,7 +148,7 @@ All hooks follow a strict fail-open policy:
 
 ## Workflow-Specific Hooks
 
-### /work hooks (`workflows/work/hooks/`)
+### /work hooks (`scripts/workflows/work/hooks/`)
 
 | Hook | Purpose |
 |---|---|
@@ -157,13 +157,13 @@ All hooks follow a strict fail-open policy:
 | `work-require-implement.js` | Block code changes outside implement step |
 | `work-code-review-status.js` | Track code review consensus |
 
-### /work-implement hooks (`workflows/work-implement/hooks/`)
+### /work-implement hooks (`scripts/workflows/work-implement/hooks/`)
 
 | Hook | Purpose |
 |---|---|
 | `work-implement-enforce.js` | TDD phase file gating (RED/GREEN/REFACTOR) |
 
-### /check hooks (`workflows/check/hooks/`)
+### /check hooks (`scripts/workflows/check/hooks/`)
 
 | Hook | Purpose |
 |---|---|
@@ -171,7 +171,7 @@ All hooks follow a strict fail-open policy:
 | `check-start-env.js` | Start dev servers |
 | `check-validate-reports.js` | Validate report format and status lines |
 
-### Shared hooks consumed by /check (`workflows/lib/hooks/`)
+### Shared hooks consumed by /check (`scripts/workflows/lib/hooks/`)
 
 | Hook | Purpose |
 |---|---|
@@ -179,7 +179,7 @@ All hooks follow a strict fail-open policy:
 
 ## Session Guard
 
-**File:** `workflows/lib/hooks/session-guard.js`
+**File:** `scripts/workflows/lib/hooks/session-guard.js`
 
 Prevents concurrent `/work` sessions:
 - Creates a lock file on workflow start
@@ -189,7 +189,7 @@ Prevents concurrent `/work` sessions:
 
 ## Error Logging
 
-**File:** `workflows/lib/hook-error-log.js`
+**File:** `scripts/workflows/lib/hook-error-log.js`
 
 Hook errors go to a log file instead of stderr:
 - Path: `/tmp/claude-hook-errors.log` (or `HOOK_ERROR_LOG` env)

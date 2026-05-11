@@ -16,7 +16,7 @@ See **[AGENTS.md](./AGENTS.md)** for the agent catalog. See **[docs/README.md](.
 
 ### Testing
 - Run tests: `pnpm test`
-- Run specific test: `node --test workflows/work/__tests__/transition-step.test.js`
+- Run specific test: `node --test scripts/workflows/work/__tests__/transition-step.test.js`
 - Tests spawn hook scripts with `child_process.spawn` to test exit codes — this is the established pattern.
 - Temp directories use `fs.mkdtempSync` + `rmSync({ recursive: true, force: true })` in `after`/`afterEach`.
 
@@ -25,20 +25,20 @@ See **[AGENTS.md](./AGENTS.md)** for the agent catalog. See **[docs/README.md](.
 - Fail-open: hooks `catch` errors and exit 0 (allow). Only intentional blocks use exit 2.
 - `logHookError(__filename, err)` is the logging convention. Not `console.error`.
 - `Object.create(null)` prevents prototype pollution — intentional.
-- Config via `workflows/lib/config.js` — never duplicate its logic elsewhere.
+- Config via `scripts/workflows/lib/config.js` — never duplicate its logic elsewhere.
 - `getConfig('TASKS_BASE')` / `getConfig.orExit(...)` are the canonical config accessors.
 
 ### File Organization
-- `workflows/` — Core engine, per-workflow definitions, hooks, scripts
-- `workflows/lib/` — Shared utilities (config, enforcement, validation, policies)
-- `workflows/lib/hooks/policies/` — Pure decision functions (testable, no side effects)
+- `scripts/workflows/` — Core engine, per-workflow definitions, hooks, scripts
+- `scripts/workflows/lib/` — Shared utilities (config, enforcement, validation, policies)
+- `scripts/workflows/lib/hooks/policies/` — Pure decision functions (testable, no side effects)
 - `agents/` — Agent definitions (markdown instruction files)
 - `skills/` — Slash command definitions (SKILL.md per command)
 - `hooks/hooks.json` — Hook registration (matchers, commands, timeouts)
 
 ### State Machine
 - 18 steps: `ticket → bootstrap → brief → brief_gate → spec → spec_gate → tasks → implement → commit → task_review → check → pr → ready → follow_up → ci → cleanup → reports → complete`
-- Step IDs are in `workflows/work/step-registry.js` — decoupled from ordering.
+- Step IDs are in `scripts/workflows/work/step-registry.js` — decoupled from ordering.
 - Transitions validated by `workflowCanTransition()` — only declared edges are allowed.
 - `transition-step.js` handles state persistence, artifact archival, and TDD gates.
 

@@ -546,7 +546,7 @@ function handleStop(hookData) {
         `BLOCKED: You are mid-workflow (/work ${workState.ticketId}). DO NOT STOP.\n\n` +
           `Current step: ${workState.stepName}\n` +
           `Your next action: Run the orchestrator to get your plan and continue executing ALL remaining steps:\n` +
-          '  node "${CLAUDE_PLUGIN_ROOT}/workflows/work/work.workflow.js" ' +
+          '  node "${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/work.workflow.js" ' +
           workState.ticketId +
           '\n\n' +
           "Then execute each RUN step in order. Do NOT stop until the workflow reaches 'complete'.\n" +
@@ -582,7 +582,7 @@ function handleStop(hookData) {
           if (!activeSkillSteps.has(ws._work2Dispatched)) {
             process.stderr.write(
               `ACTIVE WORKFLOW SESSION — step "${ws._work2Dispatched}" dispatched, waiting for agent.\n` +
-                `When ready, continue: node "\${CLAUDE_PLUGIN_ROOT}/workflows/work2/work-next.js" ${ticketId}\n`
+                `When ready, continue: node "\${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work2/work-next.js" ${ticketId}\n`
             );
             process.exit(0); // allow stop — agent is waiting, not abandoning
             return;
@@ -597,7 +597,7 @@ function handleStop(hookData) {
       `ACTIVE WORKFLOW SESSION — DO NOT ABANDON\n` +
         `Workflow: ${workflow} | Ticket: ${ticketId}\n` +
         `You MUST continue this workflow. Run:\n` +
-        `  node "\${CLAUDE_PLUGIN_ROOT}/workflows/work2/work-next.js" ${ticketId}\n` +
+        `  node "\${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work2/work-next.js" ${ticketId}\n` +
         `Execute the returned instruction, then re-run work-next.js until action: "complete".\n` +
         `The session is locked with a passphrase. Complete all steps to unlock.\n`
     );

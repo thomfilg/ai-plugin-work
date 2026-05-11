@@ -1,6 +1,6 @@
 # Configuration
 
-The plugin uses environment variables for configuration, resolved through `workflows/lib/config.js` from the repo `.env` file or the current process environment (e.g., populated by `direnv` from `.envrc`).
+The plugin uses environment variables for configuration, resolved through `scripts/workflows/lib/config.js` from the repo `.env` file or the current process environment (e.g., populated by `direnv` from `.envrc`).
 
 ## Environment Variables
 
@@ -62,7 +62,7 @@ The plugin uses environment variables for configuration, resolved through `workf
 
 ## Config Resolution
 
-**File:** `workflows/lib/config.js`
+**File:** `scripts/workflows/lib/config.js`
 
 Resolution order (first wins):
 1. `process.env` (command line / shell environment — includes variables loaded by `direnv` from `.envrc`)
@@ -86,7 +86,7 @@ config.prefixTicketId(id)   // Add project key prefix if missing
 
 ## Ticket Provider
 
-**File:** `workflows/lib/ticket-provider.js`
+**File:** `scripts/workflows/lib/ticket-provider.js`
 
 The provider abstraction handles differences between Jira, Linear, and GitHub:
 
@@ -148,7 +148,7 @@ parent-dir/
 
 ## Path Security
 
-**File:** `workflows/lib/ticket-validation.js`
+**File:** `scripts/workflows/lib/ticket-validation.js`
 
 All ticket-ID-to-path conversions are validated:
 
