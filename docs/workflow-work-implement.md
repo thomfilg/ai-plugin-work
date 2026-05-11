@@ -51,7 +51,7 @@ RED ──────────► GREEN ──────────► RE
 
 ## TDD Phase State CLI
 
-**File:** `workflows/work-implement/tdd-phase-state.js`
+**File:** `scripts/workflows/work-implement/tdd-phase-state.js`
 
 All subcommands support `--task N` for per-task scoping.
 
@@ -139,7 +139,7 @@ For purely mechanical changes (config-only, file moves, no testable behavior), t
 
 ## File Gating Hook
 
-**File:** `workflows/work-implement/hooks/work-implement-enforce.js`
+**File:** `scripts/workflows/work-implement/hooks/work-implement-enforce.js`
 
 This PreToolUse hook blocks file edits based on the current TDD phase:
 
@@ -161,7 +161,7 @@ This PreToolUse hook blocks file edits based on the current TDD phase:
 
 ## Evidence Validation
 
-**File:** `workflows/work/tdd-enforcement.js`
+**File:** `scripts/workflows/work/tdd-enforcement.js`
 
 The `/work` orchestrator validates TDD evidence before allowing transition out of `implement`:
 

@@ -396,6 +396,7 @@ describe('SKILL.md consolidation', () => {
       '..',
       '..',
       '..',
+      '..',
       'skills',
       'split-in-tasks',
       'SKILL.md'

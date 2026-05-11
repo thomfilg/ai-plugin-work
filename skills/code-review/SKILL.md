@@ -16,8 +16,8 @@ Review all changes on the current branch compared to the target branch using the
 ```bash
 # Reuse the centralized getBaseBranch() from the plugin (returns "origin/<branch>")
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT:-}"
-if [ -n "$PLUGIN_ROOT" ] && [ -f "$PLUGIN_ROOT/workflows/lib/config.js" ]; then
-  TARGET_REF=$(node -e "const c = require('$PLUGIN_ROOT/workflows/lib/config.js'); console.log(c.getBaseBranch())")
+if [ -n "$PLUGIN_ROOT" ] && [ -f "$PLUGIN_ROOT/scripts/workflows/lib/config.js" ]; then
+  TARGET_REF=$(node -e "const c = require('$PLUGIN_ROOT/scripts/workflows/lib/config.js'); console.log(c.getBaseBranch())")
 else
   # Fallback: manual detection
   TARGET_REF=""

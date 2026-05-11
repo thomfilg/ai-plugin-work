@@ -30,7 +30,7 @@ Generate a structured product brief from a ticket or feature description. The br
 ```bash
 # Get config
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
-node -e "const c = require('$PLUGIN_ROOT/workflows/lib/config'); console.log(JSON.stringify({ TASKS_BASE: c.TASKS_BASE }))"
+node -e "const c = require('$PLUGIN_ROOT/scripts/workflows/lib/config'); console.log(JSON.stringify({ TASKS_BASE: c.TASKS_BASE }))"
 ```
 
 If the argument looks like a ticket ID (e.g., `PROJ-123`, `#42`):

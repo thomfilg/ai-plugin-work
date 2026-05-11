@@ -40,17 +40,17 @@ describe('work-orchestrator-hook source hardening', () => {
     assert.strictEqual(
       hasDirectExecFileSync || destructuredExecFileSync,
       false,
-      'execFileSync should not be imported directly — use safeExec from workflows/lib/safe-exec'
+      'execFileSync should not be imported directly — use safeExec from scripts/workflows/lib/safe-exec'
     );
   });
 
-  it('should import safeExec from workflows/lib/safe-exec', () => {
+  it('should import safeExec from scripts/workflows/lib/safe-exec', () => {
     const hasSafeExecImport = /\{\s*safeExec\s*\}\s*=\s*require/.test(src);
     const referencesSafeExecModule = /safe-exec/.test(src);
     assert.strictEqual(
       hasSafeExecImport && referencesSafeExecModule,
       true,
-      'safeExec import from workflows/lib/safe-exec is missing'
+      'safeExec import from scripts/workflows/lib/safe-exec is missing'
     );
   });
 

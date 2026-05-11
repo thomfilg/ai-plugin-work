@@ -97,7 +97,7 @@ If an unauthorized agent attempts to call a gated script, the hook blocks it wit
 
 ## Agent Identity Detection
 
-**File:** `workflows/lib/agent-detection.js`
+**File:** `scripts/workflows/lib/agent-detection.js`
 
 Agent identity is determined from the Claude Code transcript:
 

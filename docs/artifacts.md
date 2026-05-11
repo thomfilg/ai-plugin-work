@@ -4,7 +4,7 @@ The artifact system controls where files are created, who can write them, and ho
 
 ## Output Folder Allocation
 
-**File:** `workflows/lib/allocate-output-folder.js`
+**File:** `scripts/workflows/lib/allocate-output-folder.js`
 
 ### Allocation Rules (GH-219)
 
@@ -39,7 +39,7 @@ const result = allocateOutputFolder('PROJ-123', {
 
 ## Artifact Rules
 
-**File:** `workflows/work/workflow-definition.js`
+**File:** `scripts/workflows/work/workflow-definition.js`
 
 Each artifact is bound to a step and authorized agents:
 
@@ -70,7 +70,7 @@ Certain scripts require both the correct agent AND the correct step:
 
 ## Artifact Protection
 
-**File:** `workflows/lib/protect-artifact-files.js`
+**File:** `scripts/workflows/lib/protect-artifact-files.js`
 
 The artifact protector blocks unauthorized writes:
 
@@ -86,7 +86,7 @@ Current step: implement. Current agent: developer-nodejs-tdd.
 
 ## State File Protection
 
-**File:** `workflows/lib/protect-state-files.js`
+**File:** `scripts/workflows/lib/protect-state-files.js`
 
 Protected files:
 - `.work-state.json`
@@ -98,7 +98,7 @@ Only designated management scripts (such as `work-state.js` and `workflow-engine
 
 ## Artifact Archival
 
-**File:** `workflows/work/artifact-archival.js`
+**File:** `scripts/workflows/work/artifact-archival.js`
 
 When the workflow transitions backward (e.g., `check → implement`), stale artifacts must be cleaned to prevent false verification.
 
@@ -159,7 +159,7 @@ See [GH-259](https://github.com/tigredonorte/claude-plugin-work/issues/259) for 
 
 ## Path Security
 
-**File:** `workflows/lib/ticket-validation.js`
+**File:** `scripts/workflows/lib/ticket-validation.js`
 
 All path construction validates:
 1. Ticket ID doesn't contain `..`, `\`, or null bytes

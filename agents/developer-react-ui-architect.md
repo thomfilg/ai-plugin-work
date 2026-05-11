@@ -83,7 +83,7 @@ You follow a strict three-phase approach for every UI task:
    * Refactor to achieve peak performance and maintainability.
    * Apply React.memo, useMemo, and useCallback strategically.
    * Introduce lazy-loading, code splitting, and reusable patterns.
-   * This cleanup phase is developer self-cleanup and does NOT include running `/tests-review` or `/code-review`. Reviewer responsibilities are explicitly excluded from this phase — they are owned by a separate post-commit review gate (`workflows/work/steps/task-review.js`, GH-211) that runs after the commit step against the committed diff.
+   * This cleanup phase is developer self-cleanup and does NOT include running `/tests-review` or `/code-review`. Reviewer responsibilities are explicitly excluded from this phase — they are owned by a separate post-commit review gate (`scripts/workflows/work/steps/task-review.js`, GH-211) that runs after the commit step against the committed diff.
 
 ## Technical Expertise
 

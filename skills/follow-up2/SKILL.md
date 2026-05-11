@@ -9,7 +9,7 @@ user_invocable: true
 Run follow-up-next.js. It handles everything. Just run it and wait.
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/workflows/follow-up2/follow-up-next.js" <TICKET_ID> --init [--pr N]
+node "${CLAUDE_PLUGIN_ROOT}/scripts/workflows/follow-up2/follow-up-next.js" <TICKET_ID> --init [--pr N]
 ```
 
 ## Rules

@@ -6,7 +6,7 @@ The TDD enforcement system ensures that all code changes follow the RED → GREE
 
 ### Layer 1: Phase Gating (Hook)
 
-**File:** `workflows/work-implement/hooks/work-implement-enforce.js`
+**File:** `scripts/workflows/work-implement/hooks/work-implement-enforce.js`
 
 A PreToolUse hook that blocks file edits based on the current TDD phase:
 
@@ -29,7 +29,7 @@ Note: `isTestHelper()` returns false if the file also matches `isTestFile()` —
 
 ### Layer 2: Evidence Recording (CLI)
 
-**File:** `workflows/work-implement/tdd-phase-state.js`
+**File:** `scripts/workflows/work-implement/tdd-phase-state.js`
 
 Only this CLI can record TDD evidence — agents cannot self-report. Evidence includes:
 
@@ -45,7 +45,7 @@ Only this CLI can record TDD evidence — agents cannot self-report. Evidence in
 
 ### Layer 3: Evidence Validation (Orchestrator)
 
-**File:** `workflows/work/tdd-enforcement.js`
+**File:** `scripts/workflows/work/tdd-enforcement.js`
 
 The `/work` orchestrator validates TDD evidence before allowing transition out of `implement`:
 
@@ -67,7 +67,7 @@ function validateTddEvidence(evidence) {
 
 ## Phase Transitions
 
-**File:** `workflows/work-implement/tdd-phase-registry.js`
+**File:** `scripts/workflows/work-implement/tdd-phase-registry.js`
 
 Valid transitions:
 

@@ -47,11 +47,11 @@ follow_up → ci → cleanup → reports → complete
 
 | Directory | Purpose |
 |---|---|
-| `workflows/work/` | Main /work orchestrator |
-| `workflows/check/` | Quality verification |
-| `workflows/work-implement/` | TDD phase management |
-| `workflows/work-pr/` | PR generation |
-| `workflows/lib/` | Shared utilities, hooks, policies |
+| `scripts/workflows/work/` | Main /work orchestrator |
+| `scripts/workflows/check/` | Quality verification |
+| `scripts/workflows/work-implement/` | TDD phase management |
+| `scripts/workflows/work-pr/` | PR generation |
+| `scripts/workflows/lib/` | Shared utilities, hooks, policies |
 | `agents/` | 19 agent definitions (markdown) |
 | `skills/` | 23 slash command definitions |
 | `hooks/` | Top-level hook registration |

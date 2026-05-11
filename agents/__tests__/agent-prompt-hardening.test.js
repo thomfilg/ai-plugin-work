@@ -2,7 +2,7 @@
 // agents, Verification Iron Law in quality agents, and testing anti-patterns
 // reference file.
 //
-// Discovered by scripts/run-tests.sh which searches: workflows/, agents/, skills/
+// Discovered by scripts/run-tests.sh which searches: scripts/workflows/, agents/, skills/
 // Manual: node --test agents/__tests__/agent-prompt-hardening.test.js
 
 const { describe, it } = require('node:test');

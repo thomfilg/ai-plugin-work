@@ -54,7 +54,7 @@ esac
 
 When `--subtask` is present:
 - Use `SUBTASK_PARENT` as the ticket ID (skip branch/worktree detection)
-- Initialize subtask state: `node ${CLAUDE_PLUGIN_ROOT}/workflows/work/work-state.js init-subtask <TICKET_ID> "<description>"`
+- Initialize subtask state: `node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/work-state.js init-subtask <TICKET_ID> "<description>"`
 - Skip `implement.md` creation (subtask state file replaces it)
 - The subtask state tracks only two steps: `implement`, `commit`
 
@@ -126,7 +126,7 @@ The TDD loop is enforced by hooks — not by agent discipline. File restrictions
 
 **Initialize TDD state:**
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/workflows/work-implement/tdd-phase-state.js init <TICKET_ID>
+node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-implement/tdd-phase-state.js init <TICKET_ID>
 ```
 
 **For each behavior change, cycle through RED → GREEN → REFACTOR:**
@@ -136,10 +136,10 @@ node ${CLAUDE_PLUGIN_ROOT}/workflows/work-implement/tdd-phase-state.js init <TIC
 - Write focused tests that express the expected behavior (1-3 tests)
 - When done, record evidence and transition:
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/workflows/work-implement/tdd-phase-state.js record-red <TICKET_ID> --cmd "<targeted test command>"
+node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-implement/tdd-phase-state.js record-red <TICKET_ID> --cmd "<targeted test command>"
 # Script runs git diff to find changed test files
 # Script runs the test command — tests MUST FAIL (exit non-zero)
-node ${CLAUDE_PLUGIN_ROOT}/workflows/work-implement/tdd-phase-state.js transition <TICKET_ID> green
+node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-implement/tdd-phase-state.js transition <TICKET_ID> green
 ```
 
 #### GREEN Phase (make tests pass)
@@ -148,9 +148,9 @@ node ${CLAUDE_PLUGIN_ROOT}/workflows/work-implement/tdd-phase-state.js transitio
 - Write minimum production code to make the failing tests pass
 - When done, record evidence and transition:
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/workflows/work-implement/tdd-phase-state.js record-green <TICKET_ID> --cmd "<same test command>"
+node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-implement/tdd-phase-state.js record-green <TICKET_ID> --cmd "<same test command>"
 # Script runs the test command — tests MUST PASS (exit zero)
-node ${CLAUDE_PLUGIN_ROOT}/workflows/work-implement/tdd-phase-state.js transition <TICKET_ID> refactor
+node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-implement/tdd-phase-state.js transition <TICKET_ID> refactor
 ```
 
 #### REFACTOR Phase (clean up)
@@ -158,21 +158,21 @@ node ${CLAUDE_PLUGIN_ROOT}/workflows/work-implement/tdd-phase-state.js transitio
 - Refactor both test and production code for clarity
 - When done, record evidence and transition back to RED (or proceed to Step 3):
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/workflows/work-implement/tdd-phase-state.js record-refactor <TICKET_ID> --cmd "<broader test command>"
+node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-implement/tdd-phase-state.js record-refactor <TICKET_ID> --cmd "<broader test command>"
 # Script runs the test command — tests MUST still PASS
 # If more behaviors to implement:
-node ${CLAUDE_PLUGIN_ROOT}/workflows/work-implement/tdd-phase-state.js transition <TICKET_ID> red
+node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-implement/tdd-phase-state.js transition <TICKET_ID> red
 # If done with all behaviors: proceed to Step 3
 ```
 
-**REFACTOR is developer-owned self-cleanup only.** `/tests-review` and `/code-review` are NOT run during REFACTOR — they run as a separate post-commit gate via `workflows/work/steps/task-review.js` (GH-211). The developer agent's responsibility in REFACTOR ends at producing clean, still-green code; reviewer agents take over afterwards against the committed diff.
+**REFACTOR is developer-owned self-cleanup only.** `/tests-review` and `/code-review` are NOT run during REFACTOR — they run as a separate post-commit gate via `scripts/workflows/work/steps/task-review.js` (GH-211). The developer agent's responsibility in REFACTOR ends at producing clean, still-green code; reviewer agents take over afterwards against the committed diff.
 
 **REFACTOR exit checklist (advisory):**
 - tests still green
 - no dead code
 - naming consistent
 
-_Why this split?_ Reviews run as a different agent against a committed artifact, which keeps the core workflow aligned to the three-phase TDD loop (RED/GREEN/REFACTOR) and ensures reviewers never see half-refactored work. See `workflows/work/steps/task-review.js` (GH-211) for the post-commit review gate.
+_Why this split?_ Reviews run as a different agent against a committed artifact, which keeps the core workflow aligned to the three-phase TDD loop (RED/GREEN/REFACTOR) and ensures reviewers never see half-refactored work. See `scripts/workflows/work/steps/task-review.js` (GH-211) for the post-commit review gate.
 
 **Important:**
 - Evidence is recorded by the SCRIPT, not by agents — the script runs `git diff` and test commands itself
@@ -180,7 +180,7 @@ _Why this split?_ Reviews run as a different agent against a committed artifact,
 **Exception mode** (for non-testable changes only):
 If the change is purely mechanical, use the exception command with a required category:
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/workflows/work-implement/tdd-phase-state.js exception <TICKET_ID> --category <category> --reason "<reason>"
+node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-implement/tdd-phase-state.js exception <TICKET_ID> --category <category> --reason "<reason>"
 ```
 
 Allowed categories: `checkpoint`, `config-only`, `file-move`, `mechanical-refactor`
@@ -242,7 +242,7 @@ After agent completes:
 
 1. Verify TDD phase evidence exists:
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/workflows/work-implement/tdd-phase-state.js current <TICKET_ID>
+node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-implement/tdd-phase-state.js current <TICKET_ID>
 # Should show the current phase and cycle count
 ```
 
@@ -258,7 +258,7 @@ Fix any issues before completing.
 **When in subtask mode (`--subtask` was set):**
 
 1. Commit changes using commit-writer agent (subtasks commit before returning, unlike normal mode)
-2. Mark subtask as completed: `node ${CLAUDE_PLUGIN_ROOT}/workflows/work/work-state.js complete-subtask <TICKET_ID> <N>`
+2. Mark subtask as completed: `node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/work-state.js complete-subtask <TICKET_ID> <N>`
    (where `<N>` is the subtask index from the init-subtask output)
 3. Report completion briefly and return control to the parent workflow
 
@@ -306,17 +306,17 @@ Next steps:
 ```
 ## Enforcement Infrastructure (GH-219)
 
-- **Task Claims**: `claimTask(ticketId, taskNum, ownerId)` / `releaseTask(...)` acquire atomic lock files at `TASKS_BASE/<ticketId>/.claims/task-${n}.lock`. Owner IDs use `PR{N}` format (e.g., PR1, PR42). Module: `workflows/work/work-claims.js`.
+- **Task Claims**: `claimTask(ticketId, taskNum, ownerId)` / `releaseTask(...)` acquire atomic lock files at `TASKS_BASE/<ticketId>/.claims/task-${n}.lock`. Owner IDs use `PR{N}` format (e.g., PR1, PR42). Module: `scripts/workflows/work/work-claims.js`.
 
-- **PR{N} Worker Layout**: Parallel workers get assigned slots via `allocateWorkerSlot()`. Output goes to `TASKS_BASE/<ticketId>/PR{N}/`. Slot allocation is sequential and monotonic (no reuse). Module: `workflows/work/work-state/parallel-workers.js`.
+- **PR{N} Worker Layout**: Parallel workers get assigned slots via `allocateWorkerSlot()`. Output goes to `TASKS_BASE/<ticketId>/PR{N}/`. Slot allocation is sequential and monotonic (no reuse). Module: `scripts/workflows/work/work-state/parallel-workers.js`.
 
-- **Per-Task Artifacts**: TDD phase state, `implement.md`, and check reports resolve to `task${N}/` subdirectories under the ticket folder. Legacy flat layout is still supported as fallback. Module: `workflows/work/work-state.js`.
+- **Per-Task Artifacts**: TDD phase state, `implement.md`, and check reports resolve to `task${N}/` subdirectories under the ticket folder. Legacy flat layout is still supported as fallback. Module: `scripts/workflows/work/work-state.js`.
 
-- **Preflight Gate**: `runPreflight(context, options)` evaluates enforcement rules before file writes. Returns `{ allow, reasons, remediation }`. Hooks call this instead of transcript-based detection. Module: `workflows/lib/preflight.js`.
+- **Preflight Gate**: `runPreflight(context, options)` evaluates enforcement rules before file writes. Returns `{ allow, reasons, remediation }`. Hooks call this instead of transcript-based detection. Module: `scripts/workflows/lib/preflight.js`.
 
-- **Enforcement Audit**: Decisions are logged to `.work-actions.json` via `appendEnforcementAudit()`. Records use `kind: 'enforcement'` discriminator (coexists with legacy step rows). Module: `workflows/work/work-actions.js`.
+- **Enforcement Audit**: Decisions are logged to `.work-actions.json` via `appendEnforcementAudit()`. Records use `kind: 'enforcement'` discriminator (coexists with legacy step rows). Module: `scripts/workflows/work/work-actions.js`.
 
-- **Out-of-Flow Routing**: User requests go to `user-request-${n}/`, AI subtask requests to `ai-request-${n}/`. Atomic counter in `.request-index.json`. Modules: `workflows/lib/allocate-output-folder.js`, `workflows/lib/request-index.js`.
+- **Out-of-Flow Routing**: User requests go to `user-request-${n}/`, AI subtask requests to `ai-request-${n}/`. Atomic counter in `.request-index.json`. Modules: `scripts/workflows/lib/allocate-output-folder.js`, `scripts/workflows/lib/request-index.js`.
 
 - **P2 Deferred Features**: Task/phase/readiness status summary (R21) and dry-run preflight (R22) are deferred to v2. No configurable rule registry in v1 -- rules live in `preflight.js` as explicit code.
 

@@ -37,7 +37,7 @@ Orchestrates multiple specialized agents to collaboratively design and create we
 **MANDATORY: Your first action must be running the workflow engine.**
 
 ```bash
-node workflows/lib/workflow-engine.js create-jira plan "$ARGUMENTS"
+node scripts/workflows/lib/workflow-engine.js create-jira plan "$ARGUMENTS"
 ```
 
 Parse the JSON output. This is your roadmap.
@@ -83,7 +83,7 @@ For each step where `action = "RUN"`:
 ### 2a. Validate the Transition First
 
 ```bash
-node workflows/lib/workflow-engine.js create-jira transition <slug> <target_step>
+node scripts/workflows/lib/workflow-engine.js create-jira transition <slug> <target_step>
 ```
 
 **If success:** Proceed with the step's command.
@@ -113,21 +113,21 @@ If a step fails:
 1. Fix the issue
 2. Re-run the workflow engine for a fresh plan:
    ```bash
-   node workflows/lib/workflow-engine.js create-jira plan "<description>"
+   node scripts/workflows/lib/workflow-engine.js create-jira plan "<description>"
    ```
 3. Continue from the new plan
 
 ### 2d. Consensus Loop
 
 If consensus is NOT reached at step 6_consensus:
-1. Transition back to 5_consult: `node workflows/lib/workflow-engine.js create-jira transition <slug> 5_consult`
+1. Transition back to 5_consult: `node scripts/workflows/lib/workflow-engine.js create-jira transition <slug> 5_consult`
 2. Re-run agents SEQUENTIALLY (agents review each other's changes)
 3. Maximum 3 iterations, then escalate to user
 
 ### 2e. User Rejection Loop
 
 If user selects "Modify" at step 8_confirm:
-1. Transition back to 5_consult: `node workflows/lib/workflow-engine.js create-jira transition <slug> 5_consult`
+1. Transition back to 5_consult: `node scripts/workflows/lib/workflow-engine.js create-jira transition <slug> 5_consult`
 2. Incorporate user feedback into next agent consultation round
 
 ### 2f. Bootstrap Prompt (Step 12)
@@ -156,7 +156,7 @@ AskUserQuestion with:
 After fixing any issue, always get a fresh plan:
 
 ```bash
-node workflows/lib/workflow-engine.js create-jira plan "<description>"
+node scripts/workflows/lib/workflow-engine.js create-jira plan "<description>"
 ```
 
 ---
@@ -177,13 +177,13 @@ Skip edges (forward):
 ### Check Available Transitions
 
 ```bash
-node workflows/lib/workflow-engine.js create-jira transitions <slug>
+node scripts/workflows/lib/workflow-engine.js create-jira transitions <slug>
 ```
 
 ### View Full Graph
 
 ```bash
-node workflows/lib/workflow-engine.js create-jira graph
+node scripts/workflows/lib/workflow-engine.js create-jira graph
 ```
 
 ---

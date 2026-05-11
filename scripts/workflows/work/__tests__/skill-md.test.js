@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const SKILL_PATH = path.resolve(__dirname, '../../..', 'skills/work/SKILL.md');
+const SKILL_PATH = path.resolve(__dirname, '../../../..', 'skills/work/SKILL.md');
 const content = fs.readFileSync(SKILL_PATH, 'utf8');
 
 describe('SKILL.md task_review documentation', () => {

@@ -19,7 +19,7 @@ const path = require('path');
 // ─── .env Loader ────────────────────────────────────────────────────────────
 
 function loadEnvFile() {
-  const locations = [path.join(__dirname, '..', '..', '.env'), path.join(process.cwd(), '.env')];
+  const locations = [path.join(__dirname, '..', '..', '..', '.env'), path.join(process.cwd(), '.env')];
 
   for (const envPath of locations) {
     if (fs.existsSync(envPath)) {

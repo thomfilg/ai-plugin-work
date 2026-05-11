@@ -36,7 +36,7 @@ Resolve the tasks base directory using the workflow config module (same as `/bri
 
 ```bash
 PLUGIN_ROOT="${CLAUDE_PLUGIN_ROOT}"
-node -e "const c = require('$PLUGIN_ROOT/workflows/lib/config'); console.log(JSON.stringify({ TASKS_BASE: c.TASKS_BASE }))"
+node -e "const c = require('$PLUGIN_ROOT/scripts/workflows/lib/config'); console.log(JSON.stringify({ TASKS_BASE: c.TASKS_BASE }))"
 ```
 
 Set `TASKS_DIR="${TASKS_BASE}/${FOLDER_NAME}"`.
@@ -146,7 +146,7 @@ Example: If Task 3 and Task 5 both need to modify `BulkActionsDropdown.tsx`, cre
 - Tasks without requirement mapping
 - "Refactor and clean up" as a standalone task (cleanup belongs inside the task that creates the code)
 
-**Anti-patterns are enforced by `workflows/lib/hooks/policies/task-description-quality.js` — the canonical blocked-pattern list. The following patterns will cause `tasks.md` writes to be blocked:**
+**Anti-patterns are enforced by `scripts/workflows/lib/hooks/policies/task-description-quality.js` — the canonical blocked-pattern list. The following patterns will cause `tasks.md` writes to be blocked:**
 - **TBD** — Replace the TBD placeholder with a concrete description of what this task delivers.
 - **TODO** — Replace the TODO placeholder with specific implementation details.
 - **implement later** — Remove the deferral phrase and describe what should be implemented now, or move to a separate task. (Blocked unless followed by 20+ chars of qualifying detail.)

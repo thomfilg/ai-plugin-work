@@ -17,10 +17,92 @@
 'use strict';
 
 const path = require('path');
-const { execFileSync } = require('child_process');
+const fs = require('fs');
+const { execFileSync, execSync } = require('child_process');
 const { markProgress } = require(path.join(__dirname, '..', 'mark-task-progress'));
 
 const { resolveTaskType } = require(path.join(__dirname, '..', 'resolve-task-type'));
+
+/**
+ * Read the `### Test Command` for a specific task from tasks.md.
+ *
+ * @param {string} tasksDir
+ * @param {number} taskNum - 1-indexed task number
+ * @returns {string|null}
+ */
+function readTaskTestCommand(tasksDir, taskNum) {
+  if (!tasksDir) return null;
+  const tasksMdPath = path.join(tasksDir, 'tasks.md');
+  if (!fs.existsSync(tasksMdPath)) return null;
+  try {
+    const content = fs.readFileSync(tasksMdPath, 'utf8');
+    const sectionRe = new RegExp(
+      `## Task ${taskNum}\\b[\\s\\S]*?(?=\\n## Task \\d|\\n## (?!Task )|$)`,
+      'm'
+    );
+    const sectionMatch = content.match(sectionRe);
+    if (!sectionMatch) return null;
+    const cmdMatch = sectionMatch[0].match(/### Test Command[^\n]*\n([^\n]+)/);
+    return cmdMatch ? cmdMatch[1].trim() : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Run a test command and record TDD evidence based on exit code.
+ * On pass: synthesizes a full RED→GREEN→REFACTOR cycle.
+ * On fail: returns false without recording (gate falls through to re-dispatch).
+ *
+ * @returns {boolean} true if test passed and evidence was recorded
+ */
+function runTestAndRecord(cmd, safeName, taskNum, workingDir, env, pluginRoot) {
+  let exitCode = 0;
+  try {
+    execSync(cmd, {
+      encoding: 'utf-8',
+      cwd: workingDir,
+      env,
+      timeout: 300000,
+      stdio: 'pipe',
+    });
+  } catch (err) {
+    exitCode = err.status ?? 1;
+  }
+
+  if (exitCode !== 0) return false;
+
+  const tddScript = path.join(pluginRoot, 'workflows', 'work-implement', 'tdd-phase-state.js');
+  const recordEnv = { ...env, WORK_TDD_TOKEN_SKIP: '1' };
+  const opts = { encoding: 'utf-8', timeout: 5000, stdio: 'pipe', env: recordEnv };
+
+  try {
+    execFileSync(process.execPath, [tddScript, 'init', safeName, '--task', String(taskNum)], opts);
+    execFileSync(
+      process.execPath,
+      [tddScript, 'record-red', safeName, '--task', String(taskNum), '--cmd', cmd],
+      opts
+    );
+    execFileSync(
+      process.execPath,
+      [tddScript, 'transition', safeName, 'green', '--task', String(taskNum)],
+      opts
+    );
+    execFileSync(
+      process.execPath,
+      [tddScript, 'record-green', safeName, '--task', String(taskNum), '--cmd', cmd],
+      opts
+    );
+    execFileSync(
+      process.execPath,
+      [tddScript, 'transition', safeName, 'refactor', '--task', String(taskNum)],
+      opts
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /**
  * Dispatch-advance gate for the implement step.
@@ -60,14 +142,35 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
     // Non-checkpoint: check evidence exists AND is valid
     // Use ctx.tasksDir-derived TASKS_BASE (not the global one which points to plugin dir)
     const gateTasksBase = ctx.tasksDir ? path.dirname(ctx.tasksDir) : null;
-    const { exists, evidence } = gateTasksBase
-      ? require(path.join(__dirname, '..', '..', '..', 'work', 'tdd-enforcement')).readTddEvidence(
-          gateTasksBase,
-          safeName,
-          stepName,
-          taskNum
-        )
+    const tddEnforcement = require(
+      path.join(__dirname, '..', '..', '..', 'work', 'tdd-enforcement')
+    );
+    let { exists, evidence } = gateTasksBase
+      ? tddEnforcement.readTddEvidence(gateTasksBase, safeName, stepName, taskNum)
       : readTddEvidence(safeName, stepName, taskNum);
+
+    // Gate-driven TDD: if evidence missing AND tasks.md has a ### Test Command,
+    // run it ourselves and synthesize evidence on pass. Stop hooks don't fire
+    // for plugin subagents (Anthropic bug #29767), so the gate is the only
+    // reliable place to enforce this.
+    if (!exists && ctx.tasksDir) {
+      const testCmd = readTaskTestCommand(ctx.tasksDir, taskNum);
+      if (testCmd) {
+        const pluginRoot = path.join(__dirname, '..', '..', '..', '..');
+        const workingDir = ctx.worktreeDir || (ws.worktreeDir ? ws.worktreeDir : process.cwd());
+        const runEnv = gateTasksBase ? { ...process.env, TASKS_BASE: gateTasksBase } : process.env;
+        const passed = runTestAndRecord(testCmd, safeName, taskNum, workingDir, runEnv, pluginRoot);
+        if (passed) {
+          // Re-read evidence after recording
+          const reread = gateTasksBase
+            ? tddEnforcement.readTddEvidence(gateTasksBase, safeName, stepName, taskNum)
+            : readTddEvidence(safeName, stepName, taskNum);
+          exists = reread.exists;
+          evidence = reread.evidence;
+        }
+      }
+    }
+
     if (!exists) {
       ws._tddRetryReason = `No TDD evidence found at task${taskNum}/tdd-phase.json. You MUST run the TDD phase commands before this task can advance.`;
       ws._tddRetryCount = (ws._tddRetryCount || 0) + 1;

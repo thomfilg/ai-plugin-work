@@ -13,7 +13,7 @@ Run the driver script. Execute what it says. Do not improvise.
 ## Start
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/workflows/work2/work-next.js "$ARGUMENTS" --init
+node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work2/work-next.js "$ARGUMENTS" --init
 ```
 
 ## Loop
