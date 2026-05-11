@@ -165,6 +165,12 @@ The `gherkin.feature` file must contain the full Feature block with all scenario
 - @unit tags are also accepted but not enforced by the gate
 - Existing specs using the old `## Test Scenarios` heading (without "(Gherkin)") are also accepted by the parser
 
+**E2E scenario rules:**
+- Reference `data-testid` selectors in Given/When/Then steps, not text labels or roles
+- Each "When" step that triggers an action must have a corresponding "Then" that waits for the result
+- Never reference specific timeout values in scenarios — use "within expected time"
+- For bug-fix/refactor tickets involving E2E tests: include a root cause analysis per affected file (Line | Current Code | Issue | Fix table) in the Architecture Decisions section
+
 **Skip override:** If the spec is for a config-only or documentation change with no testable behavior, add `<!-- gherkin-skip: reason -->` instead of Gherkin scenarios.
 
 **Format (for gherkin.feature):**

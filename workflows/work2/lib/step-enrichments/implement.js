@@ -237,6 +237,35 @@ module.exports = function registerImplement(register) {
       /* fail-open — no retry info available */
     }
 
+    // Detect E2E tasks by checking suggested scope and task type for e2e/playwright patterns
+    let e2eRules = '';
+    try {
+      const content = fs.readFileSync(path.join(tasksDir, 'tasks.md'), 'utf8');
+      const scopeMatch = content.match(
+        new RegExp(
+          `## Task ${taskNum}\\b[\\s\\S]*?### Suggested Scope[^\\n]*\\n([\\s\\S]*?)(?=\\n###|\\n## |$)`,
+          'm'
+        )
+      );
+      const scope = scopeMatch ? scopeMatch[1] : '';
+      const isE2E =
+        /\.spec\.ts|e2e|playwright|\.spec\.js/i.test(scope) ||
+        taskType === 'e2e' ||
+        /e2e/i.test(taskTitle);
+      if (isE2E) {
+        e2eRules = [
+          '',
+          '### E2E Test Rules (MANDATORY)',
+          '- **Selectors:** Use `data-testid` ONLY. Never `getByRole`, `getByText`, `.first()`, `.nth()`, `[role=...]`, CSS classes. Add `data-testid` to production components if missing.',
+          '- **Waits:** NEVER assert immediately after click/navigate/submit. Always wait for expected state (`waitFor`, `toBeVisible`, `waitForURL`).',
+          '- **Timeouts:** NEVER hardcode timeouts. Use project timeout tiers if they exist. Never increase timeouts — fix the root cause instead.',
+          '- **Race conditions:** Wait for API response before checking state. Wait for UI to reflect mutations before polling.',
+        ].join('\n');
+      }
+    } catch {
+      /* fail-open */
+    }
+
     // Build compact prompt for implementation tasks
     const devPrompt = [
       retryHeader,
@@ -259,6 +288,7 @@ module.exports = function registerImplement(register) {
       `- Implement ONLY Task ${taskNum} deliverables`,
       '- Do NOT touch files reserved for other tasks',
       '- Do NOT invoke /work-implement or any other skill',
+      e2eRules,
     ].join('\n');
 
     entry.agentPrompt = devPrompt;
