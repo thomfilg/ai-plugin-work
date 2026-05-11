@@ -86,7 +86,11 @@ module.exports = function registerImplement(register) {
     if (tasksDir && totalTasks && totalTasks > 1) {
       const { parallelTasks } = findReadyTasks(tasksDir, currentTaskNum - 1);
       if (parallelTasks.length > 1) {
-        const allTasks = parseTasks(tasksDir);
+        // Use task-parser (not task-graph) to get testCommand and suggestedScope
+        const { parseTasks: parseFullTasks } = require(
+          path.join(__dirname, '..', '..', '..', 'work', 'task-parser')
+        );
+        const allTasks = parseFullTasks(tasksDir) || parseTasks(tasksDir);
         const { readPhase } = require(path.join(__dirname, '..', '..', 'tdd-next.js'));
         const phaseLabels = {
           red: 'RED — write failing tests',
