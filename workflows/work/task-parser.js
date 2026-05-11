@@ -129,6 +129,10 @@ function parseTasks(tasksDir) {
     const scopeMatch = body.match(/### Suggested Scope[^\n]*\n([\s\S]*?)(?=\n###|\n## |$)/);
     const suggestedScope = scopeMatch ? scopeMatch[1].trim() : '';
 
+    // Extract ### Test Command (machine-parseable command for gate-driven TDD)
+    const testCmdMatch = body.match(/### Test Command[^\n]*\n([^\n]+)/);
+    const testCommand = testCmdMatch ? testCmdMatch[1].trim() : null;
+
     const isCheckpoint = type === 'checkpoint' || /checkpoint/i.test(title);
 
     tasks.push({
@@ -141,6 +145,7 @@ function parseTasks(tasksDir) {
       requirementsCovered,
       acceptanceCriteria,
       suggestedScope,
+      testCommand,
       rawContent: `## Task ${num} ${body}`,
     });
   }

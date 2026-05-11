@@ -119,7 +119,119 @@ if (exists && valid) {
   process.exit(0); // evidence valid — allow stop
 }
 
-// ─── Block: get next command from tdd-next.js ────────────────────────────────
+// ─── Auto-run test command from tasks.md ─────────────────────────────────────
+
+const { execFileSync, execSync } = require('child_process');
+const tasksDir = path.join(TASKS_BASE, safeTicket);
+
+let testCommand = null;
+try {
+  const { parseTasks } = require(path.join(__dirname, '..', '..', 'work', 'task-parser'));
+  const tasks = parseTasks(tasksDir);
+  const currentTask = tasks?.find((t) => t.num === taskNum);
+  testCommand = currentTask?.testCommand || null;
+} catch {
+  // Can't parse tasks — fall through to manual block
+}
+
+if (testCommand) {
+  const tddStatePath = path.join(__dirname, '..', 'tdd-phase-state.js');
+  const tddEnv = { ...process.env, WORK_TDD_TOKEN_SKIP: '1' };
+  const execOpts = { encoding: 'utf-8', timeout: 300000, stdio: 'pipe', env: tddEnv };
+
+  // Read current phase
+  let currentPhase = 'red';
+  try {
+    const { readPhase } = require(path.join(__dirname, '..', '..', 'work2', 'tdd-next'));
+    const phase = readPhase(safeTicket, taskNum);
+    currentPhase = phase?.currentPhase || 'red';
+  } catch {
+    // Default to red
+  }
+
+  // Init if no state exists
+  if (currentPhase === 'red' && !exists) {
+    try {
+      execFileSync(
+        process.execPath,
+        [tddStatePath, 'init', safeTicket, '--task', String(taskNum)],
+        execOpts
+      );
+    } catch {
+      // Init may already exist — continue
+    }
+  }
+
+  // Run test command and record evidence
+  try {
+    execFileSync(
+      process.execPath,
+      [
+        tddStatePath,
+        `record-${currentPhase}`,
+        safeTicket,
+        '--task',
+        String(taskNum),
+        '--cmd',
+        testCommand,
+      ],
+      execOpts
+    );
+
+    // Transition to next phase
+    const nextPhase = { red: 'green', green: 'refactor', refactor: 'red' }[currentPhase];
+    if (nextPhase && nextPhase !== 'red') {
+      try {
+        execFileSync(
+          process.execPath,
+          [tddStatePath, 'transition', safeTicket, nextPhase, '--task', String(taskNum)],
+          execOpts
+        );
+      } catch {
+        // Transition may fail if already at target phase
+      }
+    }
+
+    // Log success
+    try {
+      const debugPath = path.join(TASKS_BASE, safeTicket, 'debug.md');
+      const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+      fs.appendFileSync(
+        debugPath,
+        `\n## ${timestamp} — enforce-tdd-on-stop\n\n- **[AUTO-RECORDED]** task ${taskNum}: ${currentPhase} phase recorded via test command\n`
+      );
+    } catch {
+      /* best-effort */
+    }
+
+    // If we recorded GREEN or REFACTOR, allow stop
+    if (currentPhase === 'green' || currentPhase === 'refactor') {
+      process.exit(0);
+    }
+
+    // RED recorded — tests fail, block agent to fix them
+    process.stderr.write(`TDD: RED phase recorded for task ${taskNum} — tests are failing.\n`);
+    process.stderr.write(`Fix the failing tests, then try to stop again.\n`);
+    process.exit(2);
+  } catch (err) {
+    // record-* failed — likely test command error or phase mismatch
+    const msg = err.stderr || err.stdout || err.message || 'unknown';
+    try {
+      const debugPath = path.join(TASKS_BASE, safeTicket, 'debug.md');
+      const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
+      fs.appendFileSync(
+        debugPath,
+        `\n## ${timestamp} — enforce-tdd-on-stop\n\n- **[AUTO-RUN FAILED]** task ${taskNum}: ${currentPhase} phase — ${String(msg).substring(0, 200)}\n`
+      );
+    } catch {
+      /* best-effort */
+    }
+
+    // Fall through to manual block below
+  }
+}
+
+// ─── Manual block: no test command or auto-run failed ────────────────────────
 
 let nextCmd;
 try {
@@ -133,18 +245,17 @@ try {
   nextCmd = `node "${tddNextPath}" ${safeTicket} --task ${taskNum}`;
 }
 
-// ─── Log to debug.md ─────────────────────────────────────────────────────────
-
+// Log to debug.md
 try {
   const debugPath = path.join(TASKS_BASE, safeTicket, 'debug.md');
   const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
-  const line = `\n## ${timestamp} — enforce-tdd-on-stop\n\n- **[STOP BLOCKED]** task ${taskNum}: TDD evidence ${!exists ? 'missing' : 'invalid'}\n- **Next:** \`${nextCmd}\`\n`;
-  fs.appendFileSync(debugPath, line);
+  fs.appendFileSync(
+    debugPath,
+    `\n## ${timestamp} — enforce-tdd-on-stop\n\n- **[STOP BLOCKED]** task ${taskNum}: TDD evidence ${!exists ? 'missing' : 'invalid'}${testCommand ? ' (auto-run failed)' : ' (no ### Test Command in tasks.md)'}\n- **Next:** \`${nextCmd}\`\n`
+  );
 } catch {
-  // fail-open — debug logging is best-effort
+  // fail-open
 }
-
-// ─── Block the stop ──────────────────────────────────────────────────────────
 
 process.stderr.write(`BLOCKED: TDD evidence incomplete for task ${taskNum}.\n`);
 process.stderr.write(`Run this command: ${nextCmd}\n`);
