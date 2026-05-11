@@ -49,10 +49,15 @@ const BLOCKED_SCRIPTS = ['lint', 'test', 'typecheck', 'dev:lint', 'dev:typecheck
  *   pnpm test -t 'pattern'     → ALLOWED (has arg)
  *   pnpm test --filter=x       → ALLOWED (has arg)
  */
+// After the script name we BLOCK only when followed by a hard terminator
+// (end-of-string, ;, |, &, newline, or `)`) — meaning no trailing argument.
+// We deliberately do NOT treat `"` or `'` as terminators because they often
+// appear inside content (grep patterns, comments, error messages) and would
+// cause false positives. Trade-off: `bash -lc "pnpm lint"` is no longer blocked.
 const BLOCKED_PATTERNS = BLOCKED_SCRIPTS.map(
   (script) =>
     new RegExp(
-      `(?:^|[^\\w])pnpm\\s+(?:[^&;|\\n]*?\\s)?(?:run\\s+(?:[^&;|\\n]*?\\s)?)?${script.replace(':', '\\:')}\\s*(?=$|[;|&\\n)"'])`
+      `(?:^|[^\\w])pnpm\\s+(?:[^&;|\\n]*?\\s)?(?:run\\s+(?:[^&;|\\n]*?\\s)?)?${script.replace(':', '\\:')}\\s*(?=$|[;|&\\n)])`
     )
 );
 

@@ -216,11 +216,11 @@ describe('enforce-dev-commands — BLOCK intercepted commands', () => {
     assert.strictEqual(code, 2);
   });
 
-  it('should BLOCK "bash -lc \"pnpm lint\"" (nested shell)', async () => {
+  it('should ALLOW "bash -lc \"pnpm lint\"" (quotes are not treated as terminators to avoid false positives in grep patterns / strings)', async () => {
     const { code } = await runHook({
       tool_input: { command: 'bash -lc "pnpm lint"' },
     });
-    assert.strictEqual(code, 2);
+    assert.strictEqual(code, 0);
   });
 
   it('should BLOCK "command pnpm test" (command builtin)', async () => {
