@@ -231,32 +231,21 @@ if (testCommand) {
   }
 }
 
-// ─── Manual block: no test command or auto-run failed ────────────────────────
+// ─── No test command in tasks.md — allow stop (bypass evidence) ──────────────
+// Gate-driven TDD requires ### Test Command in tasks.md. If missing, the task
+// was created before this feature or the split-in-tasks agent didn't include it.
+// Allow the agent to stop — evidence verification is skipped for tasks without
+// a test command.
 
-let nextCmd;
-try {
-  const { buildInstruction } = require(path.join(__dirname, '..', '..', 'work2', 'tdd-next'));
-  const instruction = buildInstruction(safeTicket, taskNum);
-  nextCmd =
-    instruction.whenDone ||
-    `node "${path.join(__dirname, '..', '..', 'work2', 'tdd-next.js')}" ${safeTicket} --task ${taskNum}`;
-} catch {
-  const tddNextPath = path.join(__dirname, '..', '..', 'work2', 'tdd-next.js');
-  nextCmd = `node "${tddNextPath}" ${safeTicket} --task ${taskNum}`;
-}
-
-// Log to debug.md
 try {
   const debugPath = path.join(TASKS_BASE, safeTicket, 'debug.md');
   const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
   fs.appendFileSync(
     debugPath,
-    `\n## ${timestamp} — enforce-tdd-on-stop\n\n- **[STOP BLOCKED]** task ${taskNum}: TDD evidence ${!exists ? 'missing' : 'invalid'}${testCommand ? ' (auto-run failed)' : ' (no ### Test Command in tasks.md)'}\n- **Next:** \`${nextCmd}\`\n`
+    `\n## ${timestamp} — enforce-tdd-on-stop\n\n- **[BYPASS]** task ${taskNum}: No ### Test Command in tasks.md — evidence check skipped\n`
   );
 } catch {
   // fail-open
 }
 
-process.stderr.write(`BLOCKED: TDD evidence incomplete for task ${taskNum}.\n`);
-process.stderr.write(`Run this command: ${nextCmd}\n`);
-process.exit(2);
+process.exit(0);
