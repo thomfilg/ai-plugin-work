@@ -542,6 +542,33 @@ function handleStop(hookData) {
   const ticketId = session.ticketId || '';
 
   if (workflow === '/work2') {
+    // Check if the workflow step is dispatched (agent is waiting for sub-agent results)
+    // In this case, warn but allow stop — the agent isn't abandoning, it's waiting.
+    try {
+      const getConfig = require(path.join(__dirname, '..', 'get-config'));
+      const tasksBase = getConfig('TASKS_BASE');
+      if (tasksBase && ticketId) {
+        let safeId = ticketId;
+        try {
+          safeId = require(path.join(__dirname, '..', 'config')).safeTicketId(ticketId);
+        } catch {
+          /* use raw */
+        }
+        const wsPath = path.join(tasksBase, safeId, '.work-state.json');
+        const ws = JSON.parse(fs.readFileSync(wsPath, 'utf8'));
+        if (ws && ws._work2Dispatched) {
+          process.stderr.write(
+            `ACTIVE WORKFLOW SESSION — step "${ws._work2Dispatched}" dispatched, waiting for agent.\n` +
+              `When ready, continue: node "\${CLAUDE_PLUGIN_ROOT}/workflows/work2/work-next.js" ${ticketId}\n`
+          );
+          process.exit(0); // allow stop — agent is waiting, not abandoning
+          return;
+        }
+      }
+    } catch {
+      // Can't read state — fall through to block
+    }
+
     process.stderr.write(
       `ACTIVE WORKFLOW SESSION — DO NOT ABANDON\n` +
         `Workflow: ${workflow} | Ticket: ${ticketId}\n` +

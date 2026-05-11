@@ -14,6 +14,8 @@ hooks:
     - matcher: ".*"
       hooks:
         - type: command
+          command: "node ${CLAUDE_PLUGIN_ROOT}/workflows/work-implement/hooks/enforce-tdd-on-stop.js"
+        - type: command
           command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/developer-quality-gate.js"
 ---
 

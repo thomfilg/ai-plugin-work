@@ -6,6 +6,8 @@ hooks:
     - matcher: ".*"
       hooks:
         - type: command
+          command: "node ${CLAUDE_PLUGIN_ROOT}/workflows/work-implement/hooks/enforce-tdd-on-stop.js"
+        - type: command
           command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/developer-quality-gate.js"
 description: |
   Use this agent when you need to develop Node.js TypeScript applications using frameworks like Express, Nest, or Next.js, following strict TDD practices. This agent should be invoked for creating new features, API endpoints, services, or any backend functionality that requires test-first development and code optimization. Examples:
