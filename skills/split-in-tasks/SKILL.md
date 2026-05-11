@@ -185,6 +185,7 @@ Review all generated tasks and check:
 - Shared-resource detection: parallel tasks don't modify the same production files (if they do, extract a prerequisite — Rule 12)
 - Checkpoint tasks are present after every 3 implementation tasks or subsystem boundary
 - TDD ordering is correct (RED before GREEN before REFACTOR in every non-exempt implementation task — see Rule 10 for exemptions)
+- Every non-checkpoint implementation task has a `### Test Command` with a real, runnable test command
 - Gherkin coverage: every scenario from `gherkin.feature` is referenced by at least one task (if `gherkin.feature` exists)
 - Anti-patterns are absent
 
@@ -206,6 +207,13 @@ After saving, output:
 ---
 
 ## Output Format
+
+### Checkbox Legend
+All deliverables start with `[ ]`. The workflow engine updates them automatically:
+- `[ ]` — not started
+- `[-]` — in progress (TDD initialized)
+- `[x]` — implementation done (TDD evidence recorded)
+- `[v]` — verified by completion-checker
 
 ### Task format (implementation tasks)
 
@@ -251,6 +259,11 @@ After saving, output:
 
 ### Parallel
 - Yes | No | Partial (reason)
+
+### Test Command
+<shell command to run tests for this task — supports && chaining for multiple test suites>
+Example: `pnpm test:e2e -- tests/e2e/specs/admin/general-settings.spec.ts --retries 0 && pnpm test:unit components/admin/settings.test.ts`
+Note: The implement Stop hook runs this command automatically to record TDD evidence. Agents don't need to run tdd-phase-state.js manually.
 
 ### Suggested Scope (optional — include when file paths are inferable from the spec)
 - `<path/to/likely/file.ts>`

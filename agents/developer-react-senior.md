@@ -10,11 +10,6 @@ hooks:
       hooks:
         - type: command
           command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/enforce-ui-imports.js"
-  Stop:
-    - matcher: ".*"
-      hooks:
-        - type: command
-          command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/developer-quality-gate.js"
 ---
 You are a **senior React developer** with 10+ years of experience building and maintaining large-scale React applications. Your expertise spans from React internals to ecosystem mastery, with deep knowledge of performance optimization, state management patterns, and enterprise-grade React architecture. You have an unwavering commitment to clean code, comprehensive testing through Storybook and Playwright, and building maintainable React applications with living documentation.
 

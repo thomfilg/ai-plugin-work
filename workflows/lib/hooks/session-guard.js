@@ -471,12 +471,31 @@ function isCheckWorkflowActive(ticketId) {
     try {
       safeId = require(path.join(__dirname, '..', 'config')).safeTicketId(ticketId);
     } catch {}
-    const resolved = path.resolve(tasksBase, safeId, '.check.workflow-state.json');
+    const resolvedBase = path.resolve(tasksBase, safeId);
     // Guard against path traversal — resolved path must stay under tasksBase
-    if (!resolved.startsWith(path.resolve(tasksBase) + path.sep)) return false;
+    if (!resolvedBase.startsWith(path.resolve(tasksBase) + path.sep)) return false;
 
-    const state = JSON.parse(fs.readFileSync(resolved, 'utf-8'));
-    return state?.workflow === 'check' && state?.status === 'in_progress';
+    // Check /check (old) state file
+    try {
+      const state = JSON.parse(
+        fs.readFileSync(path.join(resolvedBase, '.check.workflow-state.json'), 'utf-8')
+      );
+      if (state?.workflow === 'check' && state?.status === 'in_progress') return true;
+    } catch {
+      /* not found or corrupt */
+    }
+
+    // Check /check2 (new) state file
+    try {
+      const state2 = JSON.parse(
+        fs.readFileSync(path.join(resolvedBase, '.check2-state.json'), 'utf-8')
+      );
+      if (state2?.status === 'in_progress' || state2?.currentStep) return true;
+    } catch {
+      /* not found or corrupt */
+    }
+
+    return false;
   } catch {
     return false;
   }
@@ -542,6 +561,38 @@ function handleStop(hookData) {
   const ticketId = session.ticketId || '';
 
   if (workflow === '/work2') {
+    // Check if the workflow step is dispatched (agent is waiting for sub-agent results)
+    // In this case, warn but allow stop — the agent isn't abandoning, it's waiting.
+    try {
+      const getConfig = require(path.join(__dirname, '..', 'get-config'));
+      const tasksBase = getConfig('TASKS_BASE');
+      if (tasksBase && ticketId) {
+        let safeId = ticketId;
+        try {
+          safeId = require(path.join(__dirname, '..', 'config')).safeTicketId(ticketId);
+        } catch {
+          /* use raw */
+        }
+        const wsPath = path.join(tasksBase, safeId, '.work-state.json');
+        const ws = JSON.parse(fs.readFileSync(wsPath, 'utf8'));
+        if (ws && ws._work2Dispatched) {
+          // Steps that require agent to actively invoke a skill (not background sub-agents)
+          // should NOT be bypassed — the agent must stay and run the skill.
+          const activeSkillSteps = new Set(['check']);
+          if (!activeSkillSteps.has(ws._work2Dispatched)) {
+            process.stderr.write(
+              `ACTIVE WORKFLOW SESSION — step "${ws._work2Dispatched}" dispatched, waiting for agent.\n` +
+                `When ready, continue: node "\${CLAUDE_PLUGIN_ROOT}/workflows/work2/work-next.js" ${ticketId}\n`
+            );
+            process.exit(0); // allow stop — agent is waiting, not abandoning
+            return;
+          }
+        }
+      }
+    } catch {
+      // Can't read state — fall through to block
+    }
+
     process.stderr.write(
       `ACTIVE WORKFLOW SESSION — DO NOT ABANDON\n` +
         `Workflow: ${workflow} | Ticket: ${ticketId}\n` +

@@ -51,37 +51,51 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
   const totalTasks = ws.tasksMeta.tasks.length;
   const taskNum = currentIdx + 1; // 1-indexed
 
-  // Check evidence exists AND is valid (red+green cycle complete)
-  const { exists, evidence } = readTddEvidence(safeName, stepName, taskNum);
-  if (!exists) {
-    // Store retry reason so the implement enrichment can tell the agent what went wrong
-    ws._tddRetryReason = `No TDD evidence found at task${taskNum}/tdd-phase.json. You MUST run the TDD phase commands before this task can advance.`;
-    ws._tddRetryCount = (ws._tddRetryCount || 0) + 1;
-    saveWorkState(safeName, ws);
-    return null;
-  }
-
-  // For test-only and checkpoint tasks, RED-only evidence is sufficient
-  // (tests written and failing — GREEN requires the implementation from the next task)
+  // Check task type BEFORE evidence — checkpoint tasks are exempt from TDD entirely
   const taskType = resolveTaskType(ctx.tasksDir, taskNum);
-  const isTestOnly = taskType === 'test' || taskType === 'checkpoint';
-
-  if (isTestOnly) {
-    // Accept any evidence (even RED-only) for test/checkpoint tasks
-    const hasAnyCycle = Array.isArray(evidence?.cycles) && evidence.cycles.length > 0;
-    if (!hasAnyCycle) {
-      ws._tddRetryReason = `TDD evidence exists but has no cycles. Record at least one RED phase.`;
+  if (taskType === 'checkpoint') {
+    // Checkpoints don't need TDD evidence — skip directly to advance
+    // (checkpoint tasks verify, they don't implement)
+  } else {
+    // Non-checkpoint: check evidence exists AND is valid
+    // Use ctx.tasksDir-derived TASKS_BASE (not the global one which points to plugin dir)
+    const gateTasksBase = ctx.tasksDir ? path.dirname(ctx.tasksDir) : null;
+    const { exists, evidence } = gateTasksBase
+      ? require(path.join(__dirname, '..', '..', '..', 'work', 'tdd-enforcement')).readTddEvidence(
+          gateTasksBase,
+          safeName,
+          stepName,
+          taskNum
+        )
+      : readTddEvidence(safeName, stepName, taskNum);
+    if (!exists) {
+      ws._tddRetryReason = `No TDD evidence found at task${taskNum}/tdd-phase.json. You MUST run the TDD phase commands before this task can advance.`;
       ws._tddRetryCount = (ws._tddRetryCount || 0) + 1;
       saveWorkState(safeName, ws);
       return null;
     }
-  } else {
-    const validation = validateTddEvidence(evidence);
-    if (!validation.valid) {
-      ws._tddRetryReason = `TDD evidence invalid: ${validation.reason}`;
-      ws._tddRetryCount = (ws._tddRetryCount || 0) + 1;
-      saveWorkState(safeName, ws);
-      return null;
+
+    const isTestOnly = taskType === 'test';
+
+    if (isTestOnly) {
+      // Accept any evidence (even RED-only) for test tasks.
+      // Also accept exception evidence (e.g., config-only, mechanical-refactor).
+      const hasAnyCycle = Array.isArray(evidence?.cycles) && evidence.cycles.length > 0;
+      const hasException = evidence?.currentPhase === 'exception' && evidence?.exception;
+      if (!hasAnyCycle && !hasException) {
+        ws._tddRetryReason = `TDD evidence exists but has no cycles or exception. Record at least one RED phase or use exception mode.`;
+        ws._tddRetryCount = (ws._tddRetryCount || 0) + 1;
+        saveWorkState(safeName, ws);
+        return null;
+      }
+    } else {
+      const validation = validateTddEvidence(evidence);
+      if (!validation.valid) {
+        ws._tddRetryReason = `TDD evidence invalid: ${validation.reason}`;
+        ws._tddRetryCount = (ws._tddRetryCount || 0) + 1;
+        saveWorkState(safeName, ws);
+        return null;
+      }
     }
   }
 
@@ -90,13 +104,20 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
   delete ws._tddRetryCount;
   saveWorkState(safeName, ws);
 
+  // Derive TASKS_BASE from ctx.tasksDir for subprocess calls.
+  // The gate runs in the plugin's process context, but the ticket's tasks
+  // may be in a different project (e.g., worktree). ctx.tasksDir is the
+  // correct path — extract TASKS_BASE by removing the ticket subfolder.
+  const gateTASKS_BASE = ctx.tasksDir ? path.dirname(ctx.tasksDir) : process.env.TASKS_BASE;
+  const gateExecEnv = gateTASKS_BASE ? { ...process.env, TASKS_BASE: gateTASKS_BASE } : process.env;
+
   // Evidence valid — check if more tasks remain
   if (currentIdx < totalTasks - 1) {
     try {
       execFileSync(
         process.execPath,
         [path.join(workDir, 'work-state.js'), 'task-advance', safeName],
-        { encoding: 'utf-8', timeout: 5000, stdio: 'pipe' }
+        { encoding: 'utf-8', timeout: 5000, stdio: 'pipe', env: gateExecEnv }
       );
       // Clear dispatched marker so the new task gets dispatched fresh
       const ws2 = loadWorkState(safeName);
@@ -122,7 +143,20 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
     }
   }
 
-  // All tasks done with valid evidence — update checkboxes, allow transition
+  // All tasks done with valid evidence — mark last task completed and update checkboxes.
+  // Without this, the last task stays with status !== 'completed' in tasksMeta because
+  // task-advance only runs for non-last tasks (currentIdx < totalTasks - 1 branch above).
+  // The complete step's guard at work-state.js:278 correctly blocks if any task isn't
+  // marked completed — so we must record the bookkeeping here.
+  try {
+    execFileSync(
+      process.execPath,
+      [path.join(workDir, 'work-state.js'), 'task-advance', safeName],
+      { encoding: 'utf-8', timeout: 5000, stdio: 'pipe', env: gateExecEnv }
+    );
+  } catch {
+    /* fail-open — task-advance returns { done: true } for last task, which is fine */
+  }
   if (ctx.tasksDir) {
     try {
       markProgress(ctx.tasksDir);

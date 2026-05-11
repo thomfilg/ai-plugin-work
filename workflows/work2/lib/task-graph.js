@@ -47,9 +47,9 @@ function parseTasks(tasksDir) {
     }
 
     // Check completion from checkbox markers
-    // [x] = completed, [-] = in progress, [ ] = not started
-    const allCheckboxes = block.match(/- \[[ x-]\]/g) || [];
-    const completedBoxes = block.match(/- \[x\]/g) || [];
+    // [v] = verified, [x] = completed, [-] = in progress, [ ] = not started
+    const allCheckboxes = block.match(/- \[[ xv-]\]/g) || [];
+    const completedBoxes = block.match(/- \[[xv]\]/g) || [];
     const completed = allCheckboxes.length > 0 && allCheckboxes.length === completedBoxes.length;
 
     return { num, title, type, parallel, dependencies, completed };

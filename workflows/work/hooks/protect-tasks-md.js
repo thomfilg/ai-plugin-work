@@ -8,7 +8,7 @@
  *
  * Refactored to use createArtifactProtector factory (GH-258 code review).
  *
- * Allowed steps: tasks, task_review
+ * Allowed steps: tasks, task_review, complete
  * All other steps: blocked (exit 2)
  * No workflow active: allowed (exit 0, fail-open)
  */
@@ -18,7 +18,7 @@ const path = require('path');
 const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
 const { createArtifactProtector } = require('../../lib/protect-artifact-files');
 
-const ALLOWED_STEPS = new Set(['tasks', 'task_review']);
+const ALLOWED_STEPS = new Set(['tasks', 'task_review', 'complete']);
 
 /**
  * Check whether a file named tasks.md is the root-level workflow artifact

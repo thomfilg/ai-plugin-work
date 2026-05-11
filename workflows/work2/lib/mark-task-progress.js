@@ -7,6 +7,7 @@
  *   [ ]  not started (no TDD state)
  *   [-]  in progress (TDD initialized or partial evidence)
  *   [x]  completed   (full TDD evidence: red + green recorded)
+ *   [v]  verified    (completion-checker confirmed deliverables)
  *
  * Usage: node mark-task-progress.js <TASKS_DIR>
  * Called automatically by implement-gate.js on task-advance.
@@ -58,6 +59,8 @@ const { resolveTaskType } = require(path.join(__dirname, 'resolve-task-type'));
  */
 function statusToCheckbox(status) {
   switch (status) {
+    case 'verified':
+      return '[v]';
     case 'completed':
       return '[x]';
     case 'in_progress':
@@ -73,7 +76,7 @@ function statusToCheckbox(status) {
  *
  * @param {string} content - tasks.md content
  * @param {number} taskNum - 1-indexed task number
- * @param {string} checkbox - '[x]', '[-]', or '[ ]'
+ * @param {string} checkbox - '[v]', '[x]', '[-]', or '[ ]'
  * @returns {string} - Updated content
  */
 function updateTaskCheckboxes(content, taskNum, checkbox) {
@@ -91,8 +94,8 @@ function updateTaskCheckboxes(content, taskNum, checkbox) {
       break;
     }
     if (inSection) {
-      // Replace checkbox markers: [ ], [-], [x]
-      lines[i] = lines[i].replace(/\[([ x\-])\]/g, checkbox);
+      // Replace checkbox markers: [ ], [-], [x], [v]
+      lines[i] = lines[i].replace(/\[([ xv\-])\]/g, checkbox);
     }
   }
 
@@ -126,6 +129,38 @@ function markProgress(tasksDir) {
   fs.writeFileSync(tasksFile, content);
 }
 
+/**
+ * Mark specific tasks as verified ([v]) in tasks.md.
+ * Called after completion-checker confirms deliverables.
+ *
+ * @param {string} tasksDir - Path to ticket tasks directory
+ * @param {number[]} [taskNums] - Task numbers to mark verified. If omitted, marks ALL completed tasks.
+ */
+function markVerified(tasksDir, taskNums) {
+  const tasksFile = path.join(tasksDir, 'tasks.md');
+  if (!fs.existsSync(tasksFile)) return;
+
+  let content = fs.readFileSync(tasksFile, 'utf8');
+
+  // If no specific tasks given, find all completed tasks
+  if (!taskNums) {
+    taskNums = [];
+    const taskPattern = /^## Task (\d+)/gm;
+    let match;
+    while ((match = taskPattern.exec(content)) !== null) {
+      const num = parseInt(match[1], 10);
+      const status = getTaskStatus(tasksDir, num);
+      if (status === 'completed') taskNums.push(num);
+    }
+  }
+
+  for (const num of taskNums) {
+    content = updateTaskCheckboxes(content, num, '[v]');
+  }
+
+  fs.writeFileSync(tasksFile, content);
+}
+
 // CLI
 if (require.main === module) {
   const tasksDir = process.argv[2];
@@ -137,4 +172,4 @@ if (require.main === module) {
   console.log(`Updated checkboxes in ${path.join(tasksDir, 'tasks.md')}`);
 }
 
-module.exports = { markProgress, getTaskStatus, updateTaskCheckboxes };
+module.exports = { markProgress, markVerified, getTaskStatus, updateTaskCheckboxes };

@@ -86,7 +86,11 @@ module.exports = function registerImplement(register) {
     if (tasksDir && totalTasks && totalTasks > 1) {
       const { parallelTasks } = findReadyTasks(tasksDir, currentTaskNum - 1);
       if (parallelTasks.length > 1) {
-        const allTasks = parseTasks(tasksDir);
+        // Use task-parser (not task-graph) to get testCommand and suggestedScope
+        const { parseTasks: parseFullTasks } = require(
+          path.join(__dirname, '..', '..', '..', 'work', 'task-parser')
+        );
+        const allTasks = parseFullTasks(tasksDir) || parseTasks(tasksDir);
         const { readPhase } = require(path.join(__dirname, '..', '..', 'tdd-next.js'));
         const phaseLabels = {
           red: 'RED — write failing tests',
@@ -100,6 +104,36 @@ module.exports = function registerImplement(register) {
           const tddState = readPhase(ticket.replace('#', 'GH-'), num);
           const phase = tddState?.currentPhase || 'red';
           const phaseLabel = phaseLabels[phase] || `${phase} phase`;
+          const parallelTestCmd = task?.testCommand || null;
+
+          const parallelScope = task?.suggestedScope || '';
+          const parallelTddSection = parallelTestCmd
+            ? [
+                ...(parallelScope
+                  ? [
+                      '### Files to implement',
+                      ...parallelScope
+                        .split('\n')
+                        .map((l) => l.trim())
+                        .filter(Boolean)
+                        .map((l) => `- \`${l.replace(/^[-*+]\s+/, '').replace(/`/g, '')}\``),
+                      '',
+                    ]
+                  : []),
+                '### Verification (automated — runs when you stop)',
+                `\`${parallelTestCmd}\``,
+                'If tests fail, you will be blocked from stopping and must fix the code.',
+                'Do NOT run tdd-phase-state.js or tdd-next.js manually.',
+              ]
+            : [
+                `### TDD Phase: ${phaseLabel}`,
+                'Get phase commands:',
+                '```bash',
+                `node "${tddNextPath}" ${ticket} --task ${num}`,
+                '```',
+                'Record evidence at each phase (init → red → green → refactor).',
+              ];
+
           return {
             type: 'task',
             agentType,
@@ -107,12 +141,7 @@ module.exports = function registerImplement(register) {
             prompt: [
               `## Implement Task ${num}/${totalTasks} — ${task?.title || 'Implementation'}`,
               '',
-              `### TDD Phase: ${phaseLabel}`,
-              'Get phase commands:',
-              '```bash',
-              `node "${tddNextPath}" ${ticket} --task ${num}`,
-              '```',
-              'Record evidence at each phase (init → red → green → refactor).',
+              ...parallelTddSection,
               '',
               '### Required Reading',
               `- **Task details:** ${path.join(tasksDir, 'tasks.md')} (find "## Task ${num}" section)`,
@@ -122,7 +151,6 @@ module.exports = function registerImplement(register) {
               '### Rules',
               `- Implement ONLY Task ${num} deliverables`,
               '- Do NOT touch files reserved for other tasks',
-              '- Follow TDD: run tdd-next.js → do the work → record evidence → transition phase',
             ].join('\n'),
             note: 'Pass the prompt directly to the agent.',
           };
@@ -264,18 +292,58 @@ module.exports = function registerImplement(register) {
       /* fail-open */
     }
 
-    // Build compact prompt for implementation tasks
+    // Read task metadata (testCommand, suggestedScope) from task-parser
+    let hasGateTDD = false;
+    let taskTestCommand = null;
+    let taskScope = '';
+    try {
+      const { parseTasks: parseFullTasks } = require(
+        path.join(__dirname, '..', '..', '..', 'work', 'task-parser')
+      );
+      const allParsedTasks = parseFullTasks(tasksDir);
+      const currentTask = allParsedTasks?.find((t) => t.num === Number(taskNum));
+      taskTestCommand = currentTask?.testCommand || null;
+      taskScope = currentTask?.suggestedScope || '';
+      hasGateTDD = !!taskTestCommand;
+    } catch {
+      /* fail-open */
+    }
+
+    const tddSection = hasGateTDD
+      ? [
+          ...(taskScope
+            ? [
+                '### Files to implement',
+                ...taskScope
+                  .split('\n')
+                  .map((l) => l.trim())
+                  .filter(Boolean)
+                  .map((l) => `- \`${l.replace(/^[-*+]\s+/, '').replace(/`/g, '')}\``),
+                '',
+              ]
+            : []),
+          '### Verification (automated — runs when you stop)',
+          '```',
+          taskTestCommand,
+          '```',
+          'If tests fail, you will be blocked from stopping and must fix the code.',
+          'Do NOT run tdd-phase-state.js or tdd-next.js — the hook handles evidence recording.',
+        ]
+      : [
+          `### TDD Phase: ${phaseLabel}`,
+          '',
+          '### Next step',
+          'Run this command and follow its output:',
+          '```bash',
+          `node "${tddNextPath}" ${ticket}${taskFlag}`,
+          '```',
+        ];
+
     const devPrompt = [
       retryHeader,
       `## Implement Task ${taskNum || '?'}/${totalTasks || '?'} — ${taskTitle}`,
       '',
-      `### TDD Phase: ${phaseLabel}`,
-      '',
-      '### Next step',
-      'Run this command and follow its output:',
-      '```bash',
-      `node "${tddNextPath}" ${ticket}${taskFlag}`,
-      '```',
+      ...tddSection,
       '',
       '### Required Reading (read IN FULL before implementing)',
       `- **Task details:** ${path.join(tasksDir, 'tasks.md')} (find "## Task ${taskNum}" section)`,

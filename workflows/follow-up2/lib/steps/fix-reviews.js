@@ -102,7 +102,8 @@ module.exports = function registerFixReviews(register) {
         /* ignore */
       }
 
-      if (statusResult && statusResult.skipped > 0) {
+      if (statusResult && statusResult.skipped > 0 && !state._skippedReviewWarningShown) {
+        state._skippedReviewWarningShown = true;
         const reviewFile = path.join(ctx.tasksDir, 'follow-up-comments.json');
         return {
           type: 'follow_up_instruction',

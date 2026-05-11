@@ -50,7 +50,14 @@ function runQualityGate(checkHooksDir) {
   }
 
   // Tier 2: bundled dev-check script
-  const devCheckScript = path.join(checkHooksDir, '..', '..', 'scripts', 'dev-check', 'dev-check.sh');
+  const devCheckScript = path.join(
+    checkHooksDir,
+    '..',
+    '..',
+    'scripts',
+    'dev-check',
+    'dev-check.sh'
+  );
   if (fs.existsSync(devCheckScript)) {
     const result = runCommand(`bash "${devCheckScript}"`, 120000);
     return { ...result, tier: 'dev-check.sh' };
@@ -61,7 +68,7 @@ function runQualityGate(checkHooksDir) {
   return { ...result, tier: 'pnpm test' };
 }
 
-module.exports = function registerRunTests(register) {
+function registerRunTests(register) {
   register('4_run_tests', (state, ctx) => {
     const reportFolder = state.setupResult?.reportFolder || ctx.tasksDir;
     const changesHash = state.changesHash || 'unknown';
@@ -112,4 +119,7 @@ module.exports = function registerRunTests(register) {
 
     return null; // auto-advance
   });
-};
+}
+
+module.exports = registerRunTests;
+module.exports.runQualityGate = runQualityGate;

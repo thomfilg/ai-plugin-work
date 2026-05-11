@@ -190,6 +190,18 @@
         ]
       }
     ],
+    "SubagentStop": [
+      {
+        "matcher": "developer-nodejs-tdd|developer-react-senior|developer-react-ui-architect|developer-devops",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/workflows/work-implement/hooks/enforce-tdd-on-stop.js",
+            "timeout": 310
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "matcher": ".*",

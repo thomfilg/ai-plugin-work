@@ -186,12 +186,33 @@ function successOut(data) {
   process.stdout.write(JSON.stringify(data) + '\n');
 }
 
+// Commands that are NOT real test runners — used to fake TDD evidence
+const FAKE_CMD_PATTERNS = [
+  /^\s*exit\s+\d/i, // exit 1
+  /^\s*echo\b/i, // echo anything
+  /^\s*true\s*$/i, // true
+  /^\s*false\s*$/i, // false
+  /^\s*:\s*$/i, // : (no-op)
+  /^\s*test\s+-[a-z]\s/i, // test -f (file tests, not test runners)
+  /^\s*\/bin\/(true|false)\s*$/i, // /bin/true, /bin/false
+];
+
 function parseCmd(args) {
   const cmdIdx = args.indexOf('--cmd');
   if (cmdIdx === -1 || cmdIdx + 1 >= args.length) {
     return null;
   }
-  return args[cmdIdx + 1];
+  const cmd = args[cmdIdx + 1];
+
+  // Block fake/dummy test commands
+  if (FAKE_CMD_PATTERNS.some((re) => re.test(cmd))) {
+    errorExit(
+      `Fake test command detected: "${cmd}". ` +
+        'The --cmd argument must be a real test runner (e.g., "pnpm test", "npx vitest", "node --test").'
+    );
+  }
+
+  return cmd;
 }
 
 function parseTask(args) {

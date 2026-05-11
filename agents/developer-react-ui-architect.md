@@ -10,11 +10,6 @@ hooks:
       hooks:
         - type: command
           command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/enforce-ui-imports.js"
-  Stop:
-    - matcher: ".*"
-      hooks:
-        - type: command
-          command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/developer-quality-gate.js"
 ---
 
 You are an **elite React UI/UX architect** and the maintainer of several prominent UI component libraries. Your expertise spans from pixel-perfect design implementation to performance-critical React optimizations. You have an unwavering commitment to Test-Driven Development and creating visually stunning, highly efficient user interfaces.
