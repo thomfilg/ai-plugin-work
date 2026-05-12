@@ -19,12 +19,95 @@ module.exports = function registerFixCi(register) {
     const monitorOutput = (state.lastMonitorResult?.output || '').substring(0, 1500);
     const isConflict = category === 'conflict';
 
-    // For CI failures: fetch the actual failed run logs
+    // For CI failures: fetch the actual failed run logs.
+    // Strategy:
+    //   1. Try `gh pr checks --json` to get FAILURE links.
+    //   2. Fall back to `gh run list --branch <branch>` for the latest failed run.
+    //   3. For each candidate run, fetch `--log-failed` (with optional --job filter
+    //      using the failing job name extracted from monitor output).
+    //   4. Filter to test/assert lines only; truncate to fit prompt budget.
+    //   5. Surface real fetch errors instead of swallowing them.
     let ciLogs = '';
-    if (!isConflict) {
+    const ciFetchErrors = [];
+
+    function filterLogs(rawLogs) {
+      const filtered = rawLogs
+        .split('\n')
+        .filter((line) => {
+          // Skip runner setup noise
+          if (/UNKNOWN STEP|##\[group\]|##\[endgroup\]|Runner Image|Operating System/i.test(line))
+            return false;
+          if (
+            /runner version|Secret source|Prepare workflow|Download action|Getting action/i.test(
+              line
+            )
+          )
+            return false;
+          if (/Image:|Version:|Commit:|Build Date:|Worker ID:|Azure Region:/i.test(line))
+            return false;
+          if (/Permissions|Actions: read|Contents: read|Metadata: read|PullRequests:/i.test(line))
+            return false;
+          // Keep error markers, assertions, test names, meaningful output
+          if (/error|fail|assert|expect|timeout|ERR_|✗|✕|FAIL|Error:|×/i.test(line)) return true;
+          if (/\.(spec|test)\.(ts|js|tsx|jsx)/.test(line)) return true;
+          if (/^\s+at\s/.test(line)) return true;
+          if (/exit code|exit\s+\d|SIGTERM|SIGKILL|Process completed/i.test(line)) return true;
+          if (/Run tests|Run e2e|playwright/i.test(line)) return true;
+          return false;
+        })
+        .join('\n')
+        .substring(0, 6000);
+      if (filtered.trim()) return filtered;
+      // Fallback: tail of raw logs when filter removed everything
+      const lines = rawLogs.split('\n');
+      return lines
+        .slice(Math.max(0, lines.length - 120))
+        .join('\n')
+        .substring(0, 6000);
+    }
+
+    function shellSafe(s) {
+      return String(s || '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
+    function ghErr(stage, err) {
+      const msg = shellSafe(err?.stderr || err?.stdout || err?.message || 'unknown');
+      ciFetchErrors.push(`[${stage}] ${msg.substring(0, 300)}`);
+    }
+
+    function fetchRunLogs(runId, jobName) {
+      const args = ['run', 'view', String(runId), '--log-failed'];
+      if (jobName) args.push('--job', jobName);
       try {
-        // Get failed run ID from PR checks
-        const runsJson = execFileSync(
+        return execFileSync('gh', args, {
+          encoding: 'utf8',
+          timeout: 30000,
+          cwd: ctx.worktreeDir,
+          stdio: ['pipe', 'pipe', 'pipe'],
+          maxBuffer: 10 * 1024 * 1024,
+        });
+      } catch (err) {
+        ghErr(`run-view ${runId}${jobName ? ' --job=' + jobName : ''}`, err);
+        return '';
+      }
+    }
+
+    // Extract the failed job name from monitor output if present
+    // e.g. "✗ 🧪 Integration Tests · shard 4/5 — failed"
+    function extractFailedJobName(monitorText) {
+      const m = String(monitorText || '').match(/[✗✕×]\s+(.+?)\s+—\s+failed/);
+      return m ? m[1].trim() : null;
+    }
+
+    if (!isConflict) {
+      const failedJobName = extractFailedJobName(monitorOutput);
+      const candidateRunIds = new Set();
+
+      // Strategy 1: gh pr checks
+      try {
+        const linksOutput = execFileSync(
           'gh',
           [
             'pr',
@@ -41,66 +124,74 @@ module.exports = function registerFixCi(register) {
             cwd: ctx.worktreeDir,
             stdio: ['pipe', 'pipe', 'pipe'],
           }
-        ).trim();
+        );
+        for (const m of linksOutput.matchAll(/runs\/(\d+)/g)) candidateRunIds.add(m[1]);
+      } catch (err) {
+        ghErr('pr-checks', err);
+      }
 
-        // Extract run ID from URL (e.g., .../runs/12345/...)
-        const runMatch = runsJson.match(/runs\/(\d+)/);
-        if (runMatch) {
-          const rawLogs = execFileSync('gh', ['run', 'view', runMatch[1], '--log-failed'], {
-            encoding: 'utf8',
-            timeout: 30000,
-            cwd: ctx.worktreeDir,
-            stdio: ['pipe', 'pipe', 'pipe'],
-          });
-
-          // Filter out runner setup noise — keep only lines with actual errors/test failures
-          ciLogs = rawLogs
-            .split('\n')
-            .filter((line) => {
-              // Skip runner setup lines (versions, image info, env, etc.)
-              if (
-                /UNKNOWN STEP|##\[group\]|##\[endgroup\]|Runner Image|Operating System/i.test(line)
-              )
-                return false;
-              if (
-                /runner version|Secret source|Prepare workflow|Download action|Getting action/i.test(
-                  line
-                )
-              )
-                return false;
-              if (/Image:|Version:|Commit:|Build Date:|Worker ID:|Azure Region:/i.test(line))
-                return false;
-              if (
-                /Permissions|Actions: read|Contents: read|Metadata: read|PullRequests:/i.test(line)
-              )
-                return false;
-              // Keep error markers, assertions, test names, and meaningful output
-              if (/error|fail|assert|expect|timeout|ERR_|✗|✕|FAIL|Error:|×/i.test(line))
-                return true;
-              // Keep lines with test file paths
-              if (/\.(spec|test)\.(ts|js|tsx|jsx)/.test(line)) return true;
-              // Keep stack traces
-              if (/^\s+at\s/.test(line)) return true;
-              // Keep exit codes and process signals
-              if (/exit code|exit\s+\d|SIGTERM|SIGKILL|Process completed/i.test(line)) return true;
-              // Keep lines with step names that have actual content
-              if (/Run tests|Run e2e|playwright/i.test(line)) return true;
-              return false;
-            })
-            .join('\n')
-            .substring(0, 4000);
-
-          // Fallback: if filtering removed everything, take raw tail
-          if (!ciLogs.trim()) {
-            const lines = rawLogs.split('\n');
-            ciLogs = lines
-              .slice(Math.max(0, lines.length - 100))
-              .join('\n')
-              .substring(0, 4000);
+      // Strategy 2: most recent failed run on the PR branch
+      if (candidateRunIds.size === 0) {
+        try {
+          const branchOut = execFileSync(
+            'gh',
+            ['pr', 'view', String(prNum), '--json', 'headRefName', '--jq', '.headRefName'],
+            {
+              encoding: 'utf8',
+              timeout: 10000,
+              cwd: ctx.worktreeDir,
+              stdio: ['pipe', 'pipe', 'pipe'],
+            }
+          ).trim();
+          if (branchOut) {
+            const runListOut = execFileSync(
+              'gh',
+              [
+                'run',
+                'list',
+                '--branch',
+                branchOut,
+                '--status',
+                'failure',
+                '--limit',
+                '3',
+                '--json',
+                'databaseId',
+                '--jq',
+                '.[].databaseId',
+              ],
+              {
+                encoding: 'utf8',
+                timeout: 15000,
+                cwd: ctx.worktreeDir,
+                stdio: ['pipe', 'pipe', 'pipe'],
+              }
+            );
+            for (const id of runListOut.split('\n').filter(Boolean)) candidateRunIds.add(id);
           }
+        } catch (err) {
+          ghErr('run-list-fallback', err);
         }
-      } catch {
-        ciLogs = '(Could not fetch CI logs automatically)';
+      }
+
+      // Fetch + concat raw logs from up to 3 candidate runs
+      const rawChunks = [];
+      for (const runId of Array.from(candidateRunIds).slice(0, 3)) {
+        const raw = fetchRunLogs(runId, failedJobName);
+        if (raw) rawChunks.push(raw);
+        if (rawChunks.join('\n').length > 12000) break;
+      }
+
+      if (rawChunks.length > 0) {
+        ciLogs = filterLogs(rawChunks.join('\n'));
+      } else {
+        const errLines = ciFetchErrors.length
+          ? ciFetchErrors.map((e) => `  - ${e}`).join('\n')
+          : '  - no candidate failed runs found';
+        ciLogs =
+          '(Could not fetch CI logs automatically)\nCommands attempted:\n' +
+          errLines +
+          (failedJobName ? `\nFailing job (from monitor): ${failedJobName}` : '');
       }
     }
 
