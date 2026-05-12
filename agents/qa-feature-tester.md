@@ -458,3 +458,7 @@ CHANGED_FILES="path/to/your/file.ts" eval "$TYPECHECK_COMMAND"
 ```
 
 If empty/unset, the bundled `dev-check.sh` runs scoped lint/typecheck on changed files. Never run lint/typecheck on the whole repo.
+
+### Long-running commands
+
+For any command that may run more than ~10 seconds (test suites, builds, dev servers, CI watchers), launch with `Bash(run_in_background: true)` and read progress via `BashOutput` between subsequent tool calls. Use the `Monitor` tool when you need to react to streaming stdout line-by-line. The runtime will notify you when a background bash or Agent completes; continue with other work in the meantime.
