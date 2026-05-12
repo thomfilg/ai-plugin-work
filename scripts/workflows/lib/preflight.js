@@ -292,6 +292,18 @@ function isWriteAllowedPath(filePath, allowedPaths) {
     }
   }
 
+  // Check worktreeDir — when set, the entire worktree is the legitimate
+  // write zone for this ticket. Real tasks edit repo source files (not
+  // tasks/<TICKET>/task{N}/). Worktrees follow `<repo>-<TICKET>` convention
+  // so they're scoped to a single ticket.
+  if (typeof allowedPaths.worktreeDir === 'string' && allowedPaths.worktreeDir.length > 0) {
+    if (!path.isAbsolute(allowedPaths.worktreeDir)) return false;
+    const wtResolved = path.resolve(allowedPaths.worktreeDir);
+    if (normalized.startsWith(wtResolved + path.sep) || normalized === wtResolved) {
+      return true;
+    }
+  }
+
   return false;
 }
 

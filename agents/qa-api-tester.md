@@ -640,3 +640,43 @@ DELETE {{baseUrl}}/api/users/6
 - Testing error handling with invalid inputs
 - Checking logs for errors
 - Reporting what ACTUALLY HAPPENED, not what the code says should happen
+
+---
+
+### Authoritative test commands
+
+When you run tests to verify code, use these env vars (do NOT invent your own):
+
+| Env var | When |
+|---|---|
+| `$TEST_UNIT_COMMAND` | unit tests |
+| `$TEST_INTEGRATION_COMMAND` | integration tests |
+| `$TEST_E2E_COMMAND` | e2e tests |
+
+The literal `$CHANGED_FILES` placeholder must be substituted with the space-separated list of files you're verifying (`git diff --name-only <base>...HEAD` for the PR diff, or specific files):
+
+```bash
+CHANGED_FILES="path/to/file.ts" eval "$TEST_INTEGRATION_COMMAND"
+```
+
+If the env var is empty/unset, fall back to the project's standard command. Never run the full test suite — always scope to the files under review.
+
+### Authoritative lint/typecheck commands
+
+Same `$CHANGED_FILES` pattern applies to lint and typecheck:
+
+| Env var | When |
+|---|---|
+| `$LINT_COMMAND` | linter (auto-detected if unset) |
+| `$TYPECHECK_COMMAND` | type checker (auto-detected if unset) |
+
+```bash
+CHANGED_FILES="path/to/your/file.ts" eval "$LINT_COMMAND"
+CHANGED_FILES="path/to/your/file.ts" eval "$TYPECHECK_COMMAND"
+```
+
+If empty/unset, the bundled `dev-check.sh` runs scoped lint/typecheck on changed files. Never run lint/typecheck on the whole repo.
+
+### Long-running commands
+
+For any command that may run more than ~10 seconds (test suites, builds, dev servers, CI watchers), launch with `Bash(run_in_background: true)` and read progress via `BashOutput` between subsequent tool calls. Use the `Monitor` tool when you need to react to streaming stdout line-by-line. The runtime will notify you when a background bash or Agent completes; continue with other work in the meantime.

@@ -212,9 +212,38 @@ function main() {
         workflow: '/follow-up2',
       })
     );
+    // Register session guard so Stop hook blocks abandonment.
+    // Idempotent: a parent /work2 session for the same ticket is reused.
+    try {
+      const { spawnSync } = require('child_process');
+      const sessionGuardPath = path.join(__dirname, '..', 'lib', 'hooks', 'session-guard.js');
+      spawnSync('node', [sessionGuardPath, 'init', safeName, '/follow-up2'], {
+        stdio: 'inherit',
+        timeout: 5000,
+      });
+    } catch {
+      /* fail-open — session guard is advisory */
+    }
   }
 
   const instruction = getNextInstruction(safeName, prNumber);
+
+  // When the workflow completes, release the session guard ONLY if /follow-up2
+  // owns it (the `complete <id> <workflow>` filter is a no-op when a parent
+  // workflow such as /work2 owns the session).
+  if (instruction && instruction.action === 'complete') {
+    try {
+      const { spawnSync } = require('child_process');
+      const sessionGuardPath = path.join(__dirname, '..', 'lib', 'hooks', 'session-guard.js');
+      spawnSync('node', [sessionGuardPath, 'complete', safeName, '/follow-up2'], {
+        stdio: 'inherit',
+        timeout: 5000,
+      });
+    } catch {
+      /* fail-open */
+    }
+  }
+
   console.log(JSON.stringify(instruction, null, 2));
 }
 

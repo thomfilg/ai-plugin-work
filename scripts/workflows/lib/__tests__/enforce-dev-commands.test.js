@@ -132,12 +132,25 @@ describe('enforce-dev-commands — BLOCK intercepted commands', () => {
     assert.strictEqual(code, 2);
   });
 
-  it('should BLOCK when intercepted command has trailing arguments', async () => {
-    const { code, stderr } = await runHook({
+  it('should ALLOW pnpm test with a file/pattern arg (scoped invocation)', async () => {
+    const { code } = await runHook({
+      tool_input: { command: 'pnpm test path/foo.spec.ts' },
+    });
+    assert.strictEqual(code, 0);
+  });
+
+  it('should ALLOW pnpm test with a flag arg (-t pattern)', async () => {
+    const { code } = await runHook({
+      tool_input: { command: "pnpm test -t 'pattern'" },
+    });
+    assert.strictEqual(code, 0);
+  });
+
+  it('should ALLOW pnpm test --watch (any trailing arg means scoped/intentional)', async () => {
+    const { code } = await runHook({
       tool_input: { command: 'pnpm test --watch' },
     });
-    assert.strictEqual(code, 2);
-    assert.ok(stderr.includes('dev-check.sh'));
+    assert.strictEqual(code, 0);
   });
 
   it('should BLOCK "pnpm --filter pkg lint" (pnpm flags before script)', async () => {
@@ -203,11 +216,11 @@ describe('enforce-dev-commands — BLOCK intercepted commands', () => {
     assert.strictEqual(code, 2);
   });
 
-  it('should BLOCK "bash -lc \"pnpm lint\"" (nested shell)', async () => {
+  it('should ALLOW "bash -lc \"pnpm lint\"" (quotes are not treated as terminators to avoid false positives in grep patterns / strings)', async () => {
     const { code } = await runHook({
       tool_input: { command: 'bash -lc "pnpm lint"' },
     });
-    assert.strictEqual(code, 2);
+    assert.strictEqual(code, 0);
   });
 
   it('should BLOCK "command pnpm test" (command builtin)', async () => {

@@ -29,19 +29,35 @@ const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(__dirname, '.
 
 /**
  * Detection strategy: search for pnpm + blocked script name anywhere in the
- * command text. This catches all wrapper forms (env, command, time, bash -c,
- * subshells, command substitution, etc.) without needing to enumerate them.
- *
- * We use non-anchored patterns with \b word boundaries to find pnpm invocations
- * regardless of what precedes them. The (?:run\s+)? handles `pnpm run <script>`.
- * Flags between pnpm/run and the script are tolerated via a permissive middle.
+ * command text. Block ONLY when the script is invoked with NO arguments (i.e.
+ * the bare command runs the entire suite). Scoped invocations like
+ * `pnpm test path/to/file.test.ts` or `pnpm test -t 'pattern'` are allowed —
+ * agents need to run targeted tests during development.
  */
 const BLOCKED_SCRIPTS = ['lint', 'test', 'typecheck', 'dev:lint', 'dev:typecheck', 'dev:test'];
 
+/**
+ * Match the bare script name with NO trailing argument before a command
+ * terminator. The lookahead `[\s"')\]},;|&]*` consumes only whitespace and
+ * terminators — anything else means there's a following arg, so allow.
+ *
+ * Captures:
+ *   pnpm test                  → blocked (no args)
+ *   pnpm test &&               → blocked (no args before chain)
+ *   pnpm run test              → blocked
+ *   pnpm test path/foo.spec    → ALLOWED (has arg)
+ *   pnpm test -t 'pattern'     → ALLOWED (has arg)
+ *   pnpm test --filter=x       → ALLOWED (has arg)
+ */
+// After the script name we BLOCK only when followed by a hard terminator
+// (end-of-string, ;, |, &, newline, or `)`) — meaning no trailing argument.
+// We deliberately do NOT treat `"` or `'` as terminators because they often
+// appear inside content (grep patterns, comments, error messages) and would
+// cause false positives. Trade-off: `bash -lc "pnpm lint"` is no longer blocked.
 const BLOCKED_PATTERNS = BLOCKED_SCRIPTS.map(
   (script) =>
     new RegExp(
-      `(?:^|[^\\w])pnpm\\s+(?:[^&;|\\n]*?\\s)?(?:run\\s+(?:[^&;|\\n]*?\\s)?)?${script.replace(':', '\\:')}(?=[\\s"')\\]},;|&]|$)`
+      `(?:^|[^\\w])pnpm\\s+(?:[^&;|\\n]*?\\s)?(?:run\\s+(?:[^&;|\\n]*?\\s)?)?${script.replace(':', '\\:')}\\s*(?=$|[;|&\\n)])`
     )
 );
 
@@ -49,29 +65,19 @@ const BLOCKED_PATTERNS = BLOCKED_SCRIPTS.map(
  * Defense-in-depth: pnpm dev:check is the correct command and must never
  * be blocked, even if a future BLOCKED_PATTERNS entry accidentally matches it.
  */
-const ALLOWED_PATTERN =
-  /(?:^|[^\w])pnpm\s+(?:.*?\s)?(?:run\s+(?:.*?\s)?)?dev:check(?=[\s"')\]},;|&]|$)/;
+const ALLOWED_PATTERN = /(?:^|[^\w])pnpm\s+(?:run\s+)?dev:check(?=[\s"')\]},;|&]|$)/;
 
 function isBlocked(command) {
-  // Check the full command text — no splitting needed since patterns are non-anchored.
-  // But we still need to ensure that if dev:check is present alongside a blocked command
-  // in a chain, only the blocked part triggers.
-  const hasBlocked = BLOCKED_PATTERNS.some((p) => p.test(command));
-  if (!hasBlocked) return false;
-
-  // If the command also contains dev:check, check if the blocked match is
-  // from a different part of the command (not the dev:check itself).
-  // dev:test/dev:lint/dev:typecheck are blocked; dev:check is allowed.
   if (ALLOWED_PATTERN.test(command)) {
-    // Remove only the dev:check segment (don't cross command separators)
+    // dev:check present — strip it then re-check (so it doesn't shadow a
+    // sibling blocked command in a chain).
     const withoutAllowed = command.replace(
-      /(?:^|[^\\w])pnpm\s+(?:[^&;|\n]*?\s)?(?:run\s+(?:[^&;|\n]*?\s)?)?dev:check(?=[\s"')\]},;|&]|$)/,
+      /(?:^|[^\w])pnpm\s+(?:run\s+)?dev:check(?=[\s"')\]},;|&]|$)/,
       ' '
     );
     return BLOCKED_PATTERNS.some((p) => p.test(withoutAllowed));
   }
-
-  return true;
+  return BLOCKED_PATTERNS.some((p) => p.test(command));
 }
 
 async function main() {
@@ -94,12 +100,13 @@ async function main() {
     'dev-check.sh'
   );
   const message = [
-    'BLOCKED: Raw pnpm lint/test/typecheck commands are not allowed.',
+    'BLOCKED: Bare pnpm lint/test/typecheck (no args) runs the whole suite.',
     '',
-    'Use the unified dev-check script instead:',
-    `  ${scriptPath}`,
+    'Either:',
+    `  - Run scoped: pnpm test <file-or-pattern>  (e.g. pnpm test path/foo.spec.ts)`,
+    `  - Or use the unified dev-check script: ${scriptPath}`,
     '',
-    'This script runs lint → typecheck → test on changed files only (faster, consistent).',
+    'dev-check.sh runs lint → typecheck → test on changed files only.',
     '',
   ].join('\n');
 

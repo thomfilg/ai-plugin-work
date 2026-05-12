@@ -61,6 +61,21 @@ function main() {
     process.exit(0);
   }
 
+  // Persist the latest instruction so the Stop hook (session-guard) can
+  // surface it inline when the agent tries to stop. Without this the agent
+  // gets only "go run follow-up-next.js again" with no context.
+  try {
+    const instructionPath = path.join(TASKS_BASE, marker.ticket, '.follow-up2-next.json');
+    if (instruction.action === 'complete') {
+      // Clean up so a future run doesn't surface a stale completion blob
+      if (fs.existsSync(instructionPath)) fs.unlinkSync(instructionPath);
+    } else {
+      fs.writeFileSync(instructionPath, JSON.stringify(instruction, null, 2));
+    }
+  } catch {
+    /* fail-open */
+  }
+
   if (instruction.action === 'execute') {
     console.log('\n═══ FOLLOW-UP2: NEXT STEP ═══');
     console.log(JSON.stringify(instruction, null, 2));

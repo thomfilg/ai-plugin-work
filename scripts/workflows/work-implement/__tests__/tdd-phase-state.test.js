@@ -47,7 +47,13 @@ function runCli(args, homeDir, cwd) {
     const tasksBase = path.join(homeDir, 'worktrees', 'tasks');
     const stdout = execSync(`node ${CLI_PATH} ${args}`, {
       encoding: 'utf8',
-      env: { ...process.env, HOME: homeDir, TASKS_BASE: tasksBase, WORK_TDD_TOKEN_SKIP: '1' },
+      env: {
+        ...process.env,
+        HOME: homeDir,
+        TASKS_BASE: tasksBase,
+        WORK_TDD_TOKEN_SKIP: '1',
+        WORK_TDD_SKIP_WORKSPACE_CHECK: '1',
+      },
       stdio: ['pipe', 'pipe', 'pipe'],
       ...(cwd ? { cwd } : {}),
     });
@@ -62,7 +68,12 @@ function runCliNoTokenSkip(args, homeDir) {
     const tasksBase = path.join(homeDir, 'worktrees', 'tasks');
     const stdout = execSync(`node ${CLI_PATH} ${args}`, {
       encoding: 'utf8',
-      env: { ...process.env, HOME: homeDir, TASKS_BASE: tasksBase },
+      env: {
+        ...process.env,
+        HOME: homeDir,
+        TASKS_BASE: tasksBase,
+        WORK_TDD_SKIP_WORKSPACE_CHECK: '1',
+      },
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     return { stdout, exitCode: 0 };

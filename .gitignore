@@ -9,3 +9,7 @@ node_modules
 
 # Runtime-generated hook artifacts
 .claude-code-check-request.json
+
+# Local-only backward-compat symlink for stale sessions (workflows -> scripts/workflows)
+/workflows
+.in_use/

@@ -29,13 +29,41 @@ function runCommand(cmd, timeout) {
 
 /**
  * Run quality gate and return { output, exitCode, tier }.
+ *
+ * Tier 0 (preferred): per-suite SCRIPT_RUN_AFFECTED_* env vars. Each set
+ *   suite is run in sequence; the first non-zero exit short-circuits.
+ *   This lets repos plug in their own affected-detection (nx, turbo, custom).
+ * Tier 1: pnpm dev:check
+ * Tier 2: bundled dev-check.sh
+ * Tier 3: pnpm test fallback
  */
 function runQualityGate(checkHooksDir) {
-  // Tier 0: SCRIPT_RUN_AFFECTED_UNIT — affected-only tests (fastest, set via .envrc)
-  const affectedUnit = process.env.SCRIPT_RUN_AFFECTED_UNIT;
-  if (affectedUnit) {
-    const result = runCommand(affectedUnit, 300000);
-    return { ...result, tier: 'affected-unit' };
+  // Tier 0: per-suite SCRIPT_RUN_AFFECTED_* — run each defined suite, stop on first failure
+  const suites = [
+    { name: 'unit', cmd: process.env.SCRIPT_RUN_AFFECTED_UNIT },
+    { name: 'integration', cmd: process.env.SCRIPT_RUN_AFFECTED_INTEGRATION },
+    { name: 'e2e', cmd: process.env.SCRIPT_RUN_AFFECTED_E2E },
+  ].filter((s) => s.cmd);
+
+  if (suites.length > 0) {
+    const outputs = [];
+    for (const { name, cmd } of suites) {
+      outputs.push(`### ${name} (${cmd})`);
+      const result = runCommand(cmd, 600000);
+      outputs.push(result.output);
+      if (result.exitCode !== 0) {
+        return {
+          output: outputs.join('\n'),
+          exitCode: result.exitCode,
+          tier: `affected-${name} (failed)`,
+        };
+      }
+    }
+    return {
+      output: outputs.join('\n'),
+      exitCode: 0,
+      tier: `affected (${suites.map((s) => s.name).join('+')})`,
+    };
   }
 
   // Tier 1: pnpm dev:check

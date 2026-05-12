@@ -262,8 +262,40 @@ All deliverables start with `[ ]`. The workflow engine updates them automaticall
 
 ### Test Command
 <shell command to run tests for this task — supports && chaining for multiple test suites>
-Example: `pnpm test:e2e -- tests/e2e/specs/admin/general-settings.spec.ts --retries 0 && pnpm test:unit components/admin/settings.test.ts`
-Note: The implement Stop hook runs this command automatically to record TDD evidence. Agents don't need to run tdd-phase-state.js manually.
+
+**MANDATORY format**: the command MUST use the per-suite env vars and the literal `$CHANGED_FILES` placeholder. Do NOT hardcode `pnpm test`/`pnpm e2e` paths — the project overrides the runner via `.envrc`, and the implement-gate executes whatever you write here verbatim.
+
+Pick the env var by suite type:
+
+| Suite | Env var |
+|---|---|
+| Unit / component | `$TEST_UNIT_COMMAND` |
+| Integration | `$TEST_INTEGRATION_COMMAND` |
+| E2E (Playwright) | `$TEST_E2E_COMMAND` |
+
+Single-suite template (the value MUST look exactly like this — only fill in the file list and pick the matching env var):
+```bash
+CHANGED_FILES="<task's deliverable file paths, space-separated>" eval "$TEST_E2E_COMMAND"
+```
+
+Multi-suite template (chain with `&&`, set `$CHANGED_FILES` once for the whole chain):
+```bash
+CHANGED_FILES="components/admin/settings.tsx tests/e2e/specs/admin/general-settings.spec.ts" eval "$TEST_UNIT_COMMAND" && eval "$TEST_E2E_COMMAND"
+```
+
+Concrete example for an E2E task:
+```bash
+CHANGED_FILES="tests/e2e/specs/workbook-detail/workbook-detail-subscriptions-tab.spec.ts" eval "$TEST_E2E_COMMAND"
+```
+
+Concrete example for a unit/component task:
+```bash
+CHANGED_FILES="components/workbooks/workbook-views-content/workbook-subscriptions-tab-content.test.tsx" eval "$TEST_UNIT_COMMAND"
+```
+
+Hardcoded `pnpm test:foo path/to/file` is **only** allowed if a project explicitly opts out of env-var-based runners (rare — flag this with the user before falling back).
+
+Note: The implement-gate executes this command automatically before/after dispatching the developer agent. Agents do NOT call `tdd-phase-state.js` or record any TDD evidence themselves.
 
 ### Suggested Scope (optional — include when file paths are inferable from the spec)
 - `<path/to/likely/file.ts>`

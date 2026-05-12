@@ -129,9 +129,10 @@ function parseTasks(tasksDir) {
     const scopeMatch = body.match(/### Suggested Scope[^\n]*\n([\s\S]*?)(?=\n###|\n## |$)/);
     const suggestedScope = scopeMatch ? scopeMatch[1].trim() : '';
 
-    // Extract ### Test Command (machine-parseable command for gate-driven TDD)
-    const testCmdMatch = body.match(/### Test Command[^\n]*\n([^\n]+)/);
-    const testCommand = testCmdMatch ? testCmdMatch[1].trim() : null;
+    // Extract ### Test Command (machine-parseable command for gate-driven TDD).
+    // Skip ```bash``` fence markers, leading shell comments, and inline-code
+    // backticks. Concatenates lines joined by trailing `\` continuations.
+    const testCommand = extractTestCommand(body);
 
     const isCheckpoint = type === 'checkpoint' || /checkpoint/i.test(title);
 
@@ -151,6 +152,38 @@ function parseTasks(tasksDir) {
   }
 
   return tasks.length > 0 ? tasks : null;
+}
+
+/**
+ * Pull the actual command out of a `### Test Command` section, ignoring
+ * markdown noise (fenced code blocks, inline-code backticks, comments).
+ *
+ * @param {string} taskBody - the body text from `## Task N` to next `## Task`
+ * @returns {string|null}
+ */
+function extractTestCommand(taskBody) {
+  const headingMatch = taskBody.match(
+    /### Test Command[^\n]*\n([\s\S]*?)(?=\n### |\n## |\n---\s*\n|$)/
+  );
+  if (!headingMatch) return null;
+  const cmdLines = [];
+  let inFence = false;
+  for (const raw of headingMatch[1].split('\n')) {
+    const line = raw.trimEnd();
+    if (/^\s*```/.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (trimmed.startsWith('#')) continue;
+    const stripped = trimmed.replace(/^`+|`+$/g, '').trim();
+    if (!stripped) continue;
+    cmdLines.push(stripped);
+    if (!stripped.endsWith('\\')) break;
+  }
+  if (cmdLines.length === 0) return null;
+  return cmdLines.map((l) => l.replace(/\\$/, '').trim()).join(' ');
 }
 
 /**
