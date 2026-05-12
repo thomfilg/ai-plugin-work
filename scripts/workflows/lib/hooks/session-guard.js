@@ -294,10 +294,23 @@ function cmdReveal(ticketId) {
   process.exit(0);
 }
 
-function cmdComplete(ticketId) {
+function cmdComplete(ticketId, workflowFilter) {
   if (!ticketId) {
-    process.stderr.write('Usage: session-guard.js complete <ticketId>\n');
+    process.stderr.write('Usage: session-guard.js complete <ticketId> [workflow]\n');
     process.exit(1);
+  }
+
+  // If a workflow filter is provided, only clear when the active session
+  // belongs to that workflow. Prevents a sub-workflow (e.g. /follow-up2)
+  // from tearing down a parent workflow's session (e.g. /work2).
+  if (workflowFilter) {
+    const existing = readSessionFile(ticketId);
+    if (existing && existing.workflow && existing.workflow !== workflowFilter) {
+      process.stderr.write(
+        `Session for ${ticketId} owned by ${existing.workflow} — ${workflowFilter} complete is a no-op.\n`
+      );
+      process.exit(0);
+    }
   }
 
   try {
@@ -560,6 +573,43 @@ function handleStop(hookData) {
   const workflow = session.workflow || '/work2';
   const ticketId = session.ticketId || '';
 
+  if (workflow === '/follow-up2') {
+    // Check follow-up2 state — if completed, allow stop.
+    try {
+      const getConfig = require(path.join(__dirname, '..', 'get-config'));
+      const tasksBase = getConfig('TASKS_BASE');
+      if (tasksBase && ticketId) {
+        let safeId = ticketId;
+        try {
+          safeId = require(path.join(__dirname, '..', 'config')).safeTicketId(ticketId);
+        } catch {
+          /* use raw */
+        }
+        const fuPath = path.join(tasksBase, safeId, '.follow-up2-state.json');
+        if (fs.existsSync(fuPath)) {
+          const fu = JSON.parse(fs.readFileSync(fuPath, 'utf8'));
+          if (fu && fu.status === 'complete') {
+            process.exit(0);
+            return;
+          }
+        }
+      }
+    } catch {
+      /* unreadable — fall through to block */
+    }
+
+    process.stderr.write(
+      `ACTIVE WORKFLOW SESSION — DO NOT ABANDON\n` +
+        `Workflow: ${workflow} | Ticket: ${ticketId}\n` +
+        `You MUST continue this workflow. Run:\n` +
+        `  node "\${CLAUDE_PLUGIN_ROOT}/scripts/workflows/follow-up2/follow-up-next.js" ${ticketId}\n` +
+        `Execute the returned instruction, then re-run follow-up-next.js until action: "complete".\n` +
+        `The session is locked with a passphrase. Complete all steps to unlock.\n`
+    );
+    process.exit(2);
+    return;
+  }
+
   if (workflow === '/work2') {
     // Check if the workflow step is dispatched (agent is waiting for sub-agent results)
     // In this case, warn but allow stop — the agent isn't abandoning, it's waiting.
@@ -662,7 +712,7 @@ async function main() {
       cmdReveal(args[1]);
       break;
     case 'complete':
-      cmdComplete(args[1]);
+      cmdComplete(args[1], args[2]);
       break;
     case 'finish':
       cmdFinish(args[1]);
@@ -675,7 +725,7 @@ async function main() {
         'Usage: session-guard.js <init|reveal|complete|finish|status> [args]\n' +
           '  init <ticketId> <workflow>  — Start session guard\n' +
           '  reveal <ticketId>           — Reveal passphrase\n' +
-          '  complete <ticketId>         — Clear session\n' +
+          '  complete <ticketId> [wf]    — Clear session (optional workflow filter)\n' +
           '  finish <ticketId>           — Reveal + complete (atomic teardown)\n' +
           '  status [ticketId]           — Show session info\n'
       );
