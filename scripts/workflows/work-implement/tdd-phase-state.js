@@ -148,8 +148,11 @@ function rejectMalformedTicketId(ticketId) {
     );
   }
 
-  // "task" or "-task" or "/task" substrings indicate ticket+task concatenation
-  if (/(?:^|[-_/])task[-_]?\d+\b/i.test(ticketId)) {
+  // "-task<N>" / "_task<N>" / "/task<N>" substrings indicate ticket+task
+  // concatenation. The leading separator is required so legitimate project
+  // keys like "TASK-123" are not rejected (those have no separator before
+  // "task" — they ARE the task prefix).
+  if (/[-_/]task[-_]?\d+\b/i.test(ticketId)) {
     const cleaned = ticketId.replace(/[-_/]task[-_]?\d+\b.*$/i, '');
     const taskMatch = ticketId.match(/task[-_]?(\d+)/i);
     const suggestedTask = taskMatch ? taskMatch[1] : 'N';

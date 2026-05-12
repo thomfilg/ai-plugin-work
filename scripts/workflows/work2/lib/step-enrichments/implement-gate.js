@@ -218,14 +218,15 @@ function runPreImplementTest(cmd, safeName, taskNum, workingDir, env, gateTasksB
     return { decision: 'dispatch', preTestSkipped: true };
   }
 
-  // Pre-test FAILED — authentic RED
+  // Pre-test FAILED — authentic RED. Phase is 'red' until the post-implement
+  // test passes and runTestAndRecord transitions it to 'green'.
   try {
     fs.mkdirSync(taskDir, { recursive: true });
     fs.writeFileSync(
       evidencePath,
       JSON.stringify(
         {
-          currentPhase: 'green',
+          currentPhase: 'red',
           currentCycle: 1,
           cycles: [
             {
@@ -445,12 +446,14 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
           saveWorkState(safeName, ws);
           return null;
         }
-        // dispatch — re-read evidence (RED may have just been written)
-        const reread = gateTasksBase
-          ? tddEnforcement.readTddEvidence(gateTasksBase, safeName, stepName, taskNum)
-          : readTddEvidence(safeName, stepName, taskNum);
-        exists = reread.exists;
-        evidence = reread.evidence;
+        // The pre-test just ran on this gate pass. Return now — DO NOT fall
+        // through to the post-implement test on the same call. Otherwise the
+        // gate would record GREEN immediately (especially for tasks whose
+        // pre-test passes, e.g. non-TDD types) and auto-advance the task
+        // without ever dispatching the implementation agent. The next gate
+        // pass (after the agent has run) will skip this branch (preTestDone
+        // is now true) and run the post-implement test.
+        return null;
       }
     }
 
