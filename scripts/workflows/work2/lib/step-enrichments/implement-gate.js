@@ -42,11 +42,53 @@ function readTaskTestCommand(tasksDir, taskNum) {
     );
     const sectionMatch = content.match(sectionRe);
     if (!sectionMatch) return null;
-    const cmdMatch = sectionMatch[0].match(/### Test Command[^\n]*\n([^\n]+)/);
-    return cmdMatch ? cmdMatch[1].trim() : null;
+    return extractTestCommandFromSection(sectionMatch[0]);
   } catch {
     return null;
   }
+}
+
+/**
+ * Extract the actual test command from a `### Test Command` section.
+ *
+ * Handles three common authoring styles:
+ *   - bare line:        `pnpm test foo.spec.ts`
+ *   - inline code:      `` `pnpm test foo.spec.ts` ``
+ *   - fenced block:     ``` ```bash\npnpm test foo.spec.ts\n``` ```
+ *
+ * Strips backticks/code-fence markers, skips empty lines and shell comments,
+ * and concatenates multi-line commands joined by trailing `\` continuations.
+ *
+ * @param {string} section - The full task section text containing `### Test Command`.
+ * @returns {string|null}
+ */
+function extractTestCommandFromSection(section) {
+  const headingIdx = section.search(/### Test Command[^\n]*\n/);
+  if (headingIdx < 0) return null;
+  const afterHeading = section.slice(headingIdx).split('\n').slice(1); // drop the heading line itself
+  const cmdLines = [];
+  let inFence = false;
+  for (const raw of afterHeading) {
+    // Stop at the next subsection / horizontal rule / new task heading
+    if (/^### /.test(raw) || /^## /.test(raw) || /^---\s*$/.test(raw)) break;
+    const line = raw.trimEnd();
+    // Toggle fenced code blocks
+    if (/^\s*```/.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (trimmed.startsWith('#')) continue; // shell comment / markdown comment
+    // Strip surrounding inline-code backticks: `cmd` → cmd
+    const stripped = trimmed.replace(/^`+|`+$/g, '').trim();
+    if (!stripped) continue;
+    cmdLines.push(stripped);
+    // Stop on the first non-continuation line (no trailing backslash)
+    if (!stripped.endsWith('\\')) break;
+  }
+  if (cmdLines.length === 0) return null;
+  return cmdLines.map((l) => l.replace(/\\$/, '').trim()).join(' ');
 }
 
 /**
