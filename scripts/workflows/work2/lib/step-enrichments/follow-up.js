@@ -13,7 +13,13 @@ module.exports = function registerFollowUp(register) {
   register('follow_up', (entry, ctx) => {
     const { resolvePluginRoot } = require(path.join(__dirname, '..', 'resolve-plugin-root'));
     const pluginRoot = resolvePluginRoot(__dirname, 4);
-    const followUpNextPath = path.join(pluginRoot, 'workflows', 'follow-up2', 'follow-up-next.js');
+    const followUpNextPath = path.join(
+      pluginRoot,
+      'scripts',
+      'workflows',
+      'follow-up2',
+      'follow-up-next.js'
+    );
 
     entry.agentType = 'Bash';
     entry.agentPrompt = `node "${followUpNextPath}" ${ctx.ticket || 'TICKET'} --init`;
