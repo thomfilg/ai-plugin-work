@@ -95,11 +95,13 @@ module.exports = function registerFixCi(register) {
       ciFetchErrors.push(`[${stage}] ${msg.substring(0, 300)}`);
     }
 
-    function fetchRunLogs(runId, jobName) {
-      const args = ['run', 'view', String(runId), '--log-failed'];
-      if (jobName) args.push('--job', jobName);
+    // NOTE: gh's `--job` flag requires a numeric job ID (not a name). We don't
+    // have job IDs here — only check-run names — so we run `--log-failed` for
+    // the entire run. That already filters to failing steps; our filterLogs()
+    // strips the rest of the noise.
+    function fetchRunLogs(runId) {
       try {
-        return execFileSync('gh', args, {
+        return execFileSync('gh', ['run', 'view', String(runId), '--log-failed'], {
           encoding: 'utf8',
           timeout: 30000,
           cwd: ctx.worktreeDir,
@@ -107,7 +109,7 @@ module.exports = function registerFixCi(register) {
           maxBuffer: 10 * 1024 * 1024,
         });
       } catch (err) {
-        ghErr(`run-view ${runId}${jobName ? ' --job=' + jobName : ''}`, err);
+        ghErr(`run-view ${runId}`, err);
         return '';
       }
     }
@@ -157,7 +159,7 @@ module.exports = function registerFixCi(register) {
       for (const t of targets) {
         if (seenRuns.has(t.runId)) continue;
         seenRuns.add(t.runId);
-        const raw = fetchRunLogs(t.runId, t.name);
+        const raw = fetchRunLogs(t.runId);
         if (raw) chunks.push(`### Failed job: ${t.name}\n` + filterLogs(raw));
         if (chunks.join('\n').length > 8000) break;
         if (seenRuns.size >= 3) break;

@@ -65,12 +65,12 @@ function main() {
   // surface it inline when the agent tries to stop. Without this the agent
   // gets only "go run follow-up-next.js again" with no context.
   try {
-    const nextPath = path.join(TASKS_BASE, marker.ticket, '.follow-up2-next.json');
+    const instructionPath = path.join(TASKS_BASE, marker.ticket, '.follow-up2-next.json');
     if (instruction.action === 'complete') {
       // Clean up so a future run doesn't surface a stale completion blob
-      if (fs.existsSync(nextPath)) fs.unlinkSync(nextPath);
+      if (fs.existsSync(instructionPath)) fs.unlinkSync(instructionPath);
     } else {
-      fs.writeFileSync(nextPath, JSON.stringify(instruction, null, 2));
+      fs.writeFileSync(instructionPath, JSON.stringify(instruction, null, 2));
     }
   } catch {
     /* fail-open */
