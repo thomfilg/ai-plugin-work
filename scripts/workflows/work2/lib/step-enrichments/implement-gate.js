@@ -314,7 +314,15 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
     // _preTestForTask prevents re-running the pre-test on every gate pass.
     const preTestMarker = `${taskNum}`;
     const preTestDone = ws._preTestForTask === preTestMarker;
-    if (!exists && !preTestDone && ctx.tasksDir) {
+    // "Has usable RED" = evidence file exists AND has a cycle with red entry.
+    // An empty/init-only tdd-phase.json (cycles: []) does NOT count — the gate
+    // must run the pre-test to capture authentic RED instead of getting stuck.
+    const hasUsableRed =
+      exists &&
+      Array.isArray(evidence?.cycles) &&
+      evidence.cycles.length > 0 &&
+      evidence.cycles[0]?.red;
+    if (!hasUsableRed && !preTestDone && ctx.tasksDir) {
       const testCmd = readTaskTestCommand(ctx.tasksDir, taskNum);
       if (testCmd) {
         const workingDir = ctx.worktreeDir || (ws.worktreeDir ? ws.worktreeDir : process.cwd());

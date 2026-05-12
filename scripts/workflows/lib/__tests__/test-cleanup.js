@@ -19,6 +19,19 @@ const fs = require('fs');
 const path = require('path');
 
 const TEST_DIR_PREFIX = 'TEST-';
+// Additional test-only patterns that leak into TASKS_BASE because some
+// tested functions (e.g., executeTaskReview → appendAction) write to the
+// configured TASKS_BASE rather than the injected tasksDir. Extend this list
+// rather than letting garbage accumulate.
+const EXTRA_TEST_PATTERNS = [
+  /^T-\d+$/, // task-review-gate.test.js: T-1..T-14
+  /^ARCHIVE-TEST-\d+$/, // complete-deadlock.test.js
+];
+
+function isTestDir(name) {
+  if (name.startsWith(TEST_DIR_PREFIX)) return true;
+  return EXTRA_TEST_PATTERNS.some((re) => re.test(name));
+}
 
 function cleanupTestDirs() {
   let tasksBase;
@@ -33,7 +46,7 @@ function cleanupTestDirs() {
   try {
     const entries = fs.readdirSync(tasksBase);
     for (const entry of entries) {
-      if (entry.startsWith(TEST_DIR_PREFIX)) {
+      if (isTestDir(entry)) {
         fs.rmSync(path.join(tasksBase, entry), { recursive: true, force: true });
       }
     }
@@ -42,4 +55,4 @@ function cleanupTestDirs() {
   }
 }
 
-module.exports = { cleanupTestDirs, TEST_DIR_PREFIX };
+module.exports = { cleanupTestDirs, isTestDir, TEST_DIR_PREFIX, EXTRA_TEST_PATTERNS };
