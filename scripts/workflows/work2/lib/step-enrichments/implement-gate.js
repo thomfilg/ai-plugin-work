@@ -378,6 +378,21 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
   const totalTasks = ws.tasksMeta.tasks.length;
   const taskNum = currentIdx + 1; // 1-indexed
 
+  // Guard: when all tasks are done, currentIdx may be incremented past the
+  // last task by the final task-advance below. On subsequent gate passes
+  // (e.g. when the workflow has moved to the commit step), don't validate
+  // an out-of-bounds task — that would generate bogus "--task <total+1>"
+  // retry instructions. Clear any stale retry state and exit.
+  if (currentIdx >= totalTasks) {
+    if (ws._tddRetryReason || ws._tddRetryCount || ws._preTestForTask) {
+      delete ws._tddRetryReason;
+      delete ws._tddRetryCount;
+      delete ws._preTestForTask;
+      saveWorkState(safeName, ws);
+    }
+    return null;
+  }
+
   // Check task type BEFORE evidence — checkpoint tasks are exempt from TDD entirely
   const taskType = resolveTaskType(ctx.tasksDir, taskNum);
   if (taskType === 'checkpoint') {
