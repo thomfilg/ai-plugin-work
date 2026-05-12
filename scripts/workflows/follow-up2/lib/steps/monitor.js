@@ -186,13 +186,66 @@ module.exports = function registerMonitor(register) {
     process.stderr.write('\n');
 
     // Persist for fix-ci.js — header line + structured failed-job list
-    // (avoids the brittle "✗ Name — failed" regex extraction)
+    // (avoids the brittle "✗ Name — failed" regex extraction).
     state._ciStatusLine = line1;
     state._ciStatusDetail = detail || '';
-    state._ciFailedJobs = (ci.failed || []).map((j) => {
+    const initialFailedJobs = (ci.failed || []).map((j) => {
       const m = String(j.link || '').match(/runs\/(\d+)/);
       return { name: j.name || '', runId: m ? m[1] : null };
     });
+
+    // Resolve missing runIds via the check-runs API at HEAD SHA. Matrix
+    // parent checks ("🧪 Run Integration Tests [tests]") often have no
+    // `link` in `gh pr checks`, so fix-ci would have nothing to fetch.
+    const needsResolve = initialFailedJobs.some((j) => !j.runId && j.name);
+    if (needsResolve) {
+      try {
+        const headSha = execFileSync('git', ['rev-parse', 'HEAD'], {
+          encoding: 'utf8',
+          timeout: 5000,
+          cwd: ctx.worktreeDir,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        }).trim();
+        const apiOut = execFileSync(
+          'gh',
+          [
+            'api',
+            `repos/{owner}/{repo}/commits/${headSha}/check-runs`,
+            '--paginate',
+            '--jq',
+            '.check_runs[] | select(.conclusion == "failure") | "\(.name)\t\(.details_url // .html_url)"',
+          ],
+          {
+            encoding: 'utf8',
+            timeout: 20000,
+            cwd: ctx.worktreeDir,
+            stdio: ['pipe', 'pipe', 'pipe'],
+            maxBuffer: 5 * 1024 * 1024,
+          }
+        );
+        // Map normalized job name → runId (strip trailing `[tag]` suffix
+        // so "🧪 Run Integration Tests" matches "🧪 Run Integration Tests")
+        const byName = new Map();
+        const norm = (s) =>
+          String(s || '')
+            .replace(/\s*\[[^\]]+\]\s*$/, '')
+            .trim();
+        for (const line of apiOut.split('\n').filter(Boolean)) {
+          const [name, link] = line.split('\t');
+          const m = String(link || '').match(/runs\/(\d+)/);
+          if (name && m) byName.set(norm(name), m[1]);
+        }
+        for (const j of initialFailedJobs) {
+          if (!j.runId) {
+            const rid = byName.get(norm(j.name));
+            if (rid) j.runId = rid;
+          }
+        }
+      } catch {
+        /* fail-open — fix-ci will surface the empty-runIds case */
+      }
+    }
+    state._ciFailedJobs = initialFailedJobs;
 
     if (exitCode === 0) {
       state.currentStep = 'report';
