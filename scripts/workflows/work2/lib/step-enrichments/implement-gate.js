@@ -42,21 +42,274 @@ function readTaskTestCommand(tasksDir, taskNum) {
     );
     const sectionMatch = content.match(sectionRe);
     if (!sectionMatch) return null;
-    const cmdMatch = sectionMatch[0].match(/### Test Command[^\n]*\n([^\n]+)/);
-    return cmdMatch ? cmdMatch[1].trim() : null;
+    return extractTestCommandFromSection(sectionMatch[0]);
   } catch {
     return null;
   }
 }
 
 /**
- * Run a test command and record TDD evidence based on exit code.
- * On pass: synthesizes a full RED→GREEN→REFACTOR cycle.
- * On fail: returns false without recording (gate falls through to re-dispatch).
+ * Extract the actual test command from a `### Test Command` section.
  *
- * @returns {boolean} true if test passed and evidence was recorded
+ * Handles three common authoring styles:
+ *   - bare line:        `pnpm test foo.spec.ts`
+ *   - inline code:      `` `pnpm test foo.spec.ts` ``
+ *   - fenced block:     ``` ```bash\npnpm test foo.spec.ts\n``` ```
+ *
+ * Strips backticks/code-fence markers, skips empty lines and shell comments,
+ * and concatenates multi-line commands joined by trailing `\` continuations.
+ *
+ * @param {string} section - The full task section text containing `### Test Command`.
+ * @returns {string|null}
  */
-function runTestAndRecord(cmd, safeName, taskNum, workingDir, env, pluginRoot) {
+function extractTestCommandFromSection(section) {
+  const headingIdx = section.search(/### Test Command[^\n]*\n/);
+  if (headingIdx < 0) return null;
+  const afterHeading = section.slice(headingIdx).split('\n').slice(1); // drop the heading line itself
+  const cmdLines = [];
+  let inFence = false;
+  for (const raw of afterHeading) {
+    // Stop at the next subsection / horizontal rule / new task heading
+    if (/^### /.test(raw) || /^## /.test(raw) || /^---\s*$/.test(raw)) break;
+    const line = raw.trimEnd();
+    // Toggle fenced code blocks
+    if (/^\s*```/.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+    if (trimmed.startsWith('#')) continue; // shell comment / markdown comment
+    // Strip surrounding inline-code backticks: `cmd` → cmd
+    const stripped = trimmed.replace(/^`+|`+$/g, '').trim();
+    if (!stripped) continue;
+    cmdLines.push(stripped);
+    // Stop on the first non-continuation line (no trailing backslash)
+    if (!stripped.endsWith('\\')) break;
+  }
+  if (cmdLines.length === 0) return null;
+  return cmdLines.map((l) => l.replace(/\\$/, '').trim()).join(' ');
+}
+
+/**
+ * Task types that REQUIRE authentic RED before dispatch (pre-test must fail).
+ * Other types skip RED enforcement and allow dispatch on a passing pre-test.
+ */
+const TDD_REQUIRED_TYPES = new Set(['implementation', 'feature', 'fix', 'test']);
+
+function isTddRequired(taskType) {
+  if (!taskType) return true; // default = TDD required
+  return TDD_REQUIRED_TYPES.has(String(taskType).toLowerCase());
+}
+
+function evidencePathFor(gateTasksBase, safeName, taskNum) {
+  return path.join(gateTasksBase, safeName, `task${taskNum}`, 'tdd-phase.json');
+}
+
+/**
+ * Detect whether a test command targets E2E (Playwright) tests.
+ * Used by the WORK_SKIP_E2E env var to bypass slow E2E runs in pre/post-test.
+ */
+function isE2eCommand(cmd) {
+  if (!cmd) return false;
+  return /\bTEST_E2E_COMMAND\b|\bpnpm\s+(?:run\s+)?(?:test:)?e2e\b|\bplaywright\b|\bpw\s+test\b/i.test(
+    cmd
+  );
+}
+
+/**
+ * Should the gate skip executing this test command?
+ * Currently: WORK_SKIP_E2E=1 (or WORK_SKIP_E2E_TESTS=1) skips E2E commands.
+ */
+function shouldSkipTestExecution(cmd, env) {
+  const e = env || process.env;
+  const skipE2e = e.WORK_SKIP_E2E === '1' || e.WORK_SKIP_E2E_TESTS === '1';
+  if (skipE2e && isE2eCommand(cmd)) return 'e2e-disabled';
+  return null;
+}
+
+/**
+ * Write a skip-stub TDD evidence file when test execution is bypassed.
+ * Records a complete cycle so the gate can advance — note explains why.
+ */
+function writeSkipStubEvidence(cmd, safeName, taskNum, gateTasksBase, reason) {
+  const evidencePath = evidencePathFor(gateTasksBase, safeName, taskNum);
+  const taskDir = path.dirname(evidencePath);
+  const now = new Date().toISOString();
+  const note = `Test execution skipped by gate (reason: ${reason}).`;
+  try {
+    fs.mkdirSync(taskDir, { recursive: true });
+    fs.writeFileSync(
+      evidencePath,
+      JSON.stringify(
+        {
+          currentPhase: 'refactor',
+          currentCycle: 1,
+          cycles: [
+            {
+              cycle: 1,
+              red: {
+                testCommand: cmd,
+                testExitCode: 0,
+                timestamp: now,
+                capturedByGate: true,
+                skippedByGate: true,
+                note,
+              },
+              green: {
+                testCommand: cmd,
+                testExitCode: 0,
+                timestamp: now,
+                capturedByGate: true,
+                skippedByGate: true,
+                note,
+              },
+            },
+          ],
+        },
+        null,
+        2
+      )
+    );
+  } catch {
+    /* fail-open */
+  }
+}
+
+/**
+ * Run the test command BEFORE the dev agent is dispatched and write authentic
+ * RED evidence (or block, or skip) based on outcome and task type.
+ *
+ *   - exit non-zero        → write real RED, return { decision: 'dispatch' }
+ *   - exit zero, TDD type  → return { decision: 'block', reason }
+ *   - exit zero, non-TDD   → write skip-stub RED, return { decision: 'dispatch' }
+ *   - timeout/error        → return { decision: 'dispatch', preTestSkipped: true }
+ */
+function runPreImplementTest(cmd, safeName, taskNum, workingDir, env, gateTasksBase, taskType) {
+  if (!gateTasksBase) {
+    return { decision: 'dispatch', preTestSkipped: true };
+  }
+
+  // Honor WORK_SKIP_E2E=1 / WORK_SKIP_E2E_TESTS=1 — record a skip stub and
+  // dispatch (or just advance, since the post-test will also skip).
+  const skipReason = shouldSkipTestExecution(cmd, env);
+  if (skipReason) {
+    writeSkipStubEvidence(cmd, safeName, taskNum, gateTasksBase, skipReason);
+    return { decision: 'dispatch', preTestSkipped: true, skipReason };
+  }
+
+  let exitCode = 0;
+  let output = '';
+  try {
+    output = execSync(cmd, {
+      encoding: 'utf-8',
+      cwd: workingDir,
+      env,
+      timeout: 300000,
+      stdio: 'pipe',
+    });
+  } catch (err) {
+    if (err && err.signal) {
+      // timeout / killed — can't tell if test would have failed
+      return { decision: 'dispatch', preTestSkipped: true };
+    }
+    exitCode = err.status ?? 1;
+    output = (err.stdout || '') + (err.stderr || '');
+  }
+
+  const taskDir = path.dirname(evidencePathFor(gateTasksBase, safeName, taskNum));
+  const evidencePath = evidencePathFor(gateTasksBase, safeName, taskNum);
+  const now = new Date().toISOString();
+
+  if (exitCode === 0) {
+    if (isTddRequired(taskType)) {
+      return {
+        decision: 'block',
+        reason: `Pre-implement test passed for task type "${taskType || 'default'}". TDD requires a failing test before implementation. Update tasks.md or the test command for task ${taskNum}.`,
+      };
+    }
+    // Non-TDD type — record skip stub and allow dispatch
+    try {
+      fs.mkdirSync(taskDir, { recursive: true });
+      fs.writeFileSync(
+        evidencePath,
+        JSON.stringify(
+          {
+            currentPhase: 'green',
+            currentCycle: 1,
+            cycles: [
+              {
+                cycle: 1,
+                red: {
+                  testCommand: cmd,
+                  testExitCode: 0,
+                  timestamp: now,
+                  capturedByGate: true,
+                  note: `RED skipped: task type "${taskType}" does not require TDD.`,
+                },
+              },
+            ],
+          },
+          null,
+          2
+        )
+      );
+    } catch {
+      /* fail-open */
+    }
+    return { decision: 'dispatch', preTestSkipped: true };
+  }
+
+  // Pre-test FAILED — authentic RED. Phase is 'red' until the post-implement
+  // test passes and runTestAndRecord transitions it to 'green'.
+  try {
+    fs.mkdirSync(taskDir, { recursive: true });
+    fs.writeFileSync(
+      evidencePath,
+      JSON.stringify(
+        {
+          currentPhase: 'red',
+          currentCycle: 1,
+          cycles: [
+            {
+              cycle: 1,
+              red: {
+                testFiles: [],
+                testCommand: cmd,
+                testExitCode: exitCode,
+                timestamp: now,
+                capturedByGate: true,
+                outputTail: String(output).slice(-2000),
+              },
+            },
+          ],
+        },
+        null,
+        2
+      )
+    );
+  } catch {
+    /* fail-open */
+  }
+  return { decision: 'dispatch' };
+}
+
+/**
+ * Post-implement test: run command, on pass record GREEN evidence.
+ *
+ * If a RED entry already exists (from runPreImplementTest), append GREEN
+ * to the existing cycle. Otherwise synthesize a full RED+GREEN cycle.
+ *
+ * @returns {boolean} true if test passed and evidence is now complete
+ */
+function runTestAndRecord(cmd, safeName, taskNum, workingDir, env, gateTasksBase) {
+  // Honor WORK_SKIP_E2E=1 / WORK_SKIP_E2E_TESTS=1 — write skip stub and pass.
+  const skipReason = shouldSkipTestExecution(cmd, env);
+  if (skipReason && gateTasksBase) {
+    writeSkipStubEvidence(cmd, safeName, taskNum, gateTasksBase, skipReason);
+    return true;
+  }
+
   let exitCode = 0;
   try {
     execSync(cmd, {
@@ -71,33 +324,68 @@ function runTestAndRecord(cmd, safeName, taskNum, workingDir, env, pluginRoot) {
   }
 
   if (exitCode !== 0) return false;
+  if (!gateTasksBase) return false;
 
-  const tddScript = path.join(pluginRoot, 'workflows', 'work-implement', 'tdd-phase-state.js');
-  const recordEnv = { ...env, WORK_TDD_TOKEN_SKIP: '1' };
-  const opts = { encoding: 'utf-8', timeout: 5000, stdio: 'pipe', env: recordEnv };
+  const taskDir = path.join(gateTasksBase, safeName, `task${taskNum}`);
+  const evidencePath = path.join(taskDir, 'tdd-phase.json');
+  const now = new Date().toISOString();
+
+  // If pre-test wrote a RED entry, preserve it and add GREEN
+  let existing = null;
+  try {
+    existing = JSON.parse(fs.readFileSync(evidencePath, 'utf8'));
+  } catch {
+    /* no pre-existing evidence */
+  }
+
+  let evidence;
+  if (existing && Array.isArray(existing.cycles) && existing.cycles[0]?.red) {
+    evidence = {
+      ...existing,
+      currentPhase: 'refactor',
+      cycles: existing.cycles.map((c, i) =>
+        i === 0
+          ? {
+              ...c,
+              green: {
+                testCommand: cmd,
+                testExitCode: 0,
+                timestamp: now,
+                capturedByGate: true,
+              },
+            }
+          : c
+      ),
+    };
+  } else {
+    // No prior RED — synthesize the full cycle
+    evidence = {
+      currentPhase: 'refactor',
+      currentCycle: 1,
+      cycles: [
+        {
+          cycle: 1,
+          red: {
+            testFiles: [],
+            testCommand: cmd,
+            testExitCode: 1,
+            timestamp: now,
+            synthesizedByGate: true,
+          },
+          green: {
+            testCommand: cmd,
+            testExitCode: 0,
+            timestamp: now,
+            synthesizedByGate: true,
+          },
+        },
+      ],
+    };
+  }
 
   try {
-    execFileSync(process.execPath, [tddScript, 'init', safeName, '--task', String(taskNum)], opts);
-    execFileSync(
-      process.execPath,
-      [tddScript, 'record-red', safeName, '--task', String(taskNum), '--cmd', cmd],
-      opts
-    );
-    execFileSync(
-      process.execPath,
-      [tddScript, 'transition', safeName, 'green', '--task', String(taskNum)],
-      opts
-    );
-    execFileSync(
-      process.execPath,
-      [tddScript, 'record-green', safeName, '--task', String(taskNum), '--cmd', cmd],
-      opts
-    );
-    execFileSync(
-      process.execPath,
-      [tddScript, 'transition', safeName, 'refactor', '--task', String(taskNum)],
-      opts
-    );
+    fs.mkdirSync(taskDir, { recursive: true });
+    fs.writeFileSync(evidencePath, JSON.stringify(evidence, null, 2));
     return true;
   } catch {
     return false;
@@ -133,6 +421,21 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
   const totalTasks = ws.tasksMeta.tasks.length;
   const taskNum = currentIdx + 1; // 1-indexed
 
+  // Guard: when all tasks are done, currentIdx may be incremented past the
+  // last task by the final task-advance below. On subsequent gate passes
+  // (e.g. when the workflow has moved to the commit step), don't validate
+  // an out-of-bounds task — that would generate bogus "--task <total+1>"
+  // retry instructions. Clear any stale retry state and exit.
+  if (currentIdx >= totalTasks) {
+    if (ws._tddRetryReason || ws._tddRetryCount || ws._preTestForTask) {
+      delete ws._tddRetryReason;
+      delete ws._tddRetryCount;
+      delete ws._preTestForTask;
+      saveWorkState(safeName, ws);
+    }
+    return null;
+  }
+
   // Check task type BEFORE evidence — checkpoint tasks are exempt from TDD entirely
   const taskType = resolveTaskType(ctx.tasksDir, taskNum);
   if (taskType === 'checkpoint') {
@@ -149,19 +452,72 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
       ? tddEnforcement.readTddEvidence(gateTasksBase, safeName, stepName, taskNum)
       : readTddEvidence(safeName, stepName, taskNum);
 
-    // Gate-driven TDD: if evidence missing AND tasks.md has a ### Test Command,
-    // run it ourselves and synthesize evidence on pass. Stop hooks don't fire
-    // for plugin subagents (Anthropic bug #29767), so the gate is the only
-    // reliable place to enforce this.
-    if (!exists && ctx.tasksDir) {
+    // PRE-IMPLEMENT (gate-driven authentic RED capture).
+    // Run once per task, before the first dispatch attempt. The marker
+    // _preTestForTask prevents re-running the pre-test on every gate pass.
+    const preTestMarker = `${taskNum}`;
+    const preTestDone = ws._preTestForTask === preTestMarker;
+    // "Has usable RED" = evidence file exists AND has a cycle with red entry.
+    // An empty/init-only tdd-phase.json (cycles: []) does NOT count — the gate
+    // must run the pre-test to capture authentic RED instead of getting stuck.
+    const hasUsableRed =
+      exists &&
+      Array.isArray(evidence?.cycles) &&
+      evidence.cycles.length > 0 &&
+      evidence.cycles[0]?.red;
+    if (!hasUsableRed && !preTestDone && ctx.tasksDir) {
       const testCmd = readTaskTestCommand(ctx.tasksDir, taskNum);
       if (testCmd) {
-        const pluginRoot = path.join(__dirname, '..', '..', '..', '..');
         const workingDir = ctx.worktreeDir || (ws.worktreeDir ? ws.worktreeDir : process.cwd());
         const runEnv = gateTasksBase ? { ...process.env, TASKS_BASE: gateTasksBase } : process.env;
-        const passed = runTestAndRecord(testCmd, safeName, taskNum, workingDir, runEnv, pluginRoot);
+        const pre = runPreImplementTest(
+          testCmd,
+          safeName,
+          taskNum,
+          workingDir,
+          runEnv,
+          gateTasksBase,
+          taskType
+        );
+        ws._preTestForTask = preTestMarker;
+        saveWorkState(safeName, ws);
+
+        if (pre.decision === 'block') {
+          ws._tddRetryReason = pre.reason;
+          ws._tddRetryCount = (ws._tddRetryCount || 0) + 1;
+          saveWorkState(safeName, ws);
+          return null;
+        }
+        // The pre-test just ran on this gate pass. Return now — DO NOT fall
+        // through to the post-implement test on the same call. Otherwise the
+        // gate would record GREEN immediately (especially for tasks whose
+        // pre-test passes, e.g. non-TDD types) and auto-advance the task
+        // without ever dispatching the implementation agent. The next gate
+        // pass (after the agent has run) will skip this branch (preTestDone
+        // is now true) and run the post-implement test.
+        return null;
+      }
+    }
+
+    // POST-IMPLEMENT: after agent has run, re-run the test command. On pass,
+    // append GREEN to the existing cycle (or synthesize one if pre-test was
+    // skipped). Stop hooks don't fire for plugin subagents (Anthropic bug
+    // #29767), so the gate is the only reliable place to record GREEN.
+    if (ctx.tasksDir) {
+      const testCmd = readTaskTestCommand(ctx.tasksDir, taskNum);
+      const needsGreen = !exists || !Array.isArray(evidence?.cycles) || !evidence.cycles[0]?.green;
+      if (testCmd && needsGreen) {
+        const workingDir = ctx.worktreeDir || (ws.worktreeDir ? ws.worktreeDir : process.cwd());
+        const runEnv = gateTasksBase ? { ...process.env, TASKS_BASE: gateTasksBase } : process.env;
+        const passed = runTestAndRecord(
+          testCmd,
+          safeName,
+          taskNum,
+          workingDir,
+          runEnv,
+          gateTasksBase
+        );
         if (passed) {
-          // Re-read evidence after recording
           const reread = gateTasksBase
             ? tddEnforcement.readTddEvidence(gateTasksBase, safeName, stepName, taskNum)
             : readTddEvidence(safeName, stepName, taskNum);
@@ -227,6 +583,7 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
       if (ws2) {
         delete ws2._work2Dispatched;
         delete ws2._work2DispatchedAction;
+        delete ws2._preTestForTask;
         saveWorkState(safeName, ws2);
       }
       // Update tasks.md checkboxes
@@ -270,4 +627,11 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
   return null;
 }
 
-module.exports = { dispatchAdvanceGate };
+module.exports = {
+  dispatchAdvanceGate,
+  runPreImplementTest,
+  runTestAndRecord,
+  isE2eCommand,
+  shouldSkipTestExecution,
+  writeSkipStubEvidence,
+};

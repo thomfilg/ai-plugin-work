@@ -138,3 +138,43 @@ jobs:
 ```
 
 *Notes: Credentials stored in GitHub Secrets. Consider using OIDC for improved security. Add rollback steps for resilience.*
+
+---
+
+### Authoritative test commands
+
+When this agent does run tests (e.g. for IaC validation scripts, deployment helpers), use these env vars (do NOT invent your own):
+
+| Env var | When |
+|---|---|
+| `$TEST_UNIT_COMMAND` | unit tests |
+| `$TEST_INTEGRATION_COMMAND` | integration tests |
+| `$TEST_E2E_COMMAND` | e2e tests |
+
+Substitute the literal `$CHANGED_FILES` placeholder with the files you changed (`git diff --name-only HEAD`), then `eval` the command:
+
+```bash
+CHANGED_FILES="scripts/deploy.ts" eval "$TEST_UNIT_COMMAND"
+```
+
+If empty/unset, fall back to the project's standard command. Never run the full suite during implementation.
+
+### Authoritative lint/typecheck commands
+
+Same `$CHANGED_FILES` pattern applies to lint and typecheck:
+
+| Env var | When |
+|---|---|
+| `$LINT_COMMAND` | linter (auto-detected if unset) |
+| `$TYPECHECK_COMMAND` | type checker (auto-detected if unset) |
+
+```bash
+CHANGED_FILES="path/to/your/file.ts" eval "$LINT_COMMAND"
+CHANGED_FILES="path/to/your/file.ts" eval "$TYPECHECK_COMMAND"
+```
+
+If empty/unset, the bundled `dev-check.sh` runs scoped lint/typecheck on changed files. Never run lint/typecheck on the whole repo.
+
+### Long-running commands
+
+For any command that may run more than ~10 seconds (test suites, builds, dev servers, CI watchers), launch with `Bash(run_in_background: true)` and read progress via `BashOutput` between subsequent tool calls. Use the `Monitor` tool when you need to react to streaming stdout line-by-line. The runtime will notify you when a background bash or Agent completes; continue with other work in the meantime.

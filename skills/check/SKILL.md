@@ -595,7 +595,7 @@ const NEEDS_CONSENSUS = DEVELOPER_RESULT.needsConsensus;
 |-------------|----------|-----------------|
 | Backend/API | routes/, services/, api/, workers/, .sql, migrations/ | `developer-nodejs-tdd` |
 | Frontend/UI | .tsx, components/, pages/, hooks/, packages/ui/ | `developer-react-senior` |
-| DevOps/Infra | .github/scripts/workflows/, Dockerfile, terraform/, k8s/ | `developer-devops` |
+| DevOps/Infra | .github/workflows/, Dockerfile, terraform/, k8s/ | `developer-devops` |
 
 ### Phase 2 Step 2: Code Review Reply with Consensus
 

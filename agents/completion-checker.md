@@ -141,3 +141,39 @@ Every claim must be backed by fresh evidence. Follow these 5 steps in order:
 **Violations:** Skipping any step is a verification failure. "I already checked" is not evidence. "It should work" is not evidence. Only fresh command output is evidence.
 
 **For this agent:** Before declaring any code-related requirement DELIVERED, you must have run a command (grep, gh pr diff, git diff) whose output you can cite as evidence. A requirement is not DELIVERED just because the file exists — you must verify the specific content matches the acceptance criteria.
+
+---
+
+### Authoritative test commands
+
+When you run tests to verify code, use these env vars (do NOT invent your own):
+
+| Env var | When |
+|---|---|
+| `$TEST_UNIT_COMMAND` | unit tests |
+| `$TEST_INTEGRATION_COMMAND` | integration tests |
+| `$TEST_E2E_COMMAND` | e2e tests |
+
+The literal `$CHANGED_FILES` placeholder must be substituted with the space-separated list of files you're verifying (`git diff --name-only <base>...HEAD` for the PR diff, or specific files):
+
+```bash
+CHANGED_FILES="path/to/file.ts" eval "$TEST_INTEGRATION_COMMAND"
+```
+
+If the env var is empty/unset, fall back to the project's standard command. Never run the full test suite — always scope to the files under review.
+
+### Authoritative lint/typecheck commands
+
+Same `$CHANGED_FILES` pattern applies to lint and typecheck:
+
+| Env var | When |
+|---|---|
+| `$LINT_COMMAND` | linter (auto-detected if unset) |
+| `$TYPECHECK_COMMAND` | type checker (auto-detected if unset) |
+
+```bash
+CHANGED_FILES="path/to/your/file.ts" eval "$LINT_COMMAND"
+CHANGED_FILES="path/to/your/file.ts" eval "$TYPECHECK_COMMAND"
+```
+
+If empty/unset, the bundled `dev-check.sh` runs scoped lint/typecheck on changed files. Never run lint/typecheck on the whole repo.

@@ -19,7 +19,10 @@ const path = require('path');
 // ─── .env Loader ────────────────────────────────────────────────────────────
 
 function loadEnvFile() {
-  const locations = [path.join(__dirname, '..', '..', '..', '.env'), path.join(process.cwd(), '.env')];
+  const locations = [
+    path.join(__dirname, '..', '..', '..', '.env'),
+    path.join(process.cwd(), '.env'),
+  ];
 
   for (const envPath of locations) {
     if (fs.existsSync(envPath)) {
@@ -100,13 +103,37 @@ const config = {
   // Custom commands per repo — override defaults for non-standard project setups
   // Example .env:
   //   DEV_COMMAND=~/g2i/scripts/dev-squire.sh    (start dev environment)
-  //   TEST_COMMAND=pnpm vitest run                (run tests)
+  //   TEST_COMMAND=pnpm vitest run                (run tests — legacy, prefer TEST_*_COMMAND below)
   //   LINT_COMMAND=pnpm biome check               (run linter)
   //   TYPECHECK_COMMAND=pnpm tsc --noEmit         (run type checker)
   DEV_COMMAND: process.env.DEV_COMMAND || '',
   TEST_COMMAND: process.env.TEST_COMMAND || '',
   LINT_COMMAND: process.env.LINT_COMMAND || '',
   TYPECHECK_COMMAND: process.env.TYPECHECK_COMMAND || '',
+
+  // Per-suite test commands used by developer agents during implementation.
+  // The literal "$CHANGED_FILES" placeholder is substituted by the agent at run
+  // time with the list of files it has changed (space-separated paths). Use
+  // these for fast, scoped iteration on the agent's own diff.
+  // Example .env:
+  //   TEST_UNIT_COMMAND="pnpm test $CHANGED_FILES"
+  //   TEST_INTEGRATION_COMMAND="pnpm test:integration $CHANGED_FILES"
+  //   TEST_E2E_COMMAND="pnpm test:e2e $CHANGED_FILES"
+  TEST_UNIT_COMMAND: process.env.TEST_UNIT_COMMAND || '',
+  TEST_INTEGRATION_COMMAND: process.env.TEST_INTEGRATION_COMMAND || '',
+  TEST_E2E_COMMAND: process.env.TEST_E2E_COMMAND || '',
+
+  // Per-suite "run affected" scripts used by /check during quality verification.
+  // These run the project's own affected-detection logic (typically scanning
+  // the full diff vs base branch) and are NOT scoped to a single agent's
+  // changes. Set them to a script that knows how to compute affected internally.
+  // Example .env:
+  //   SCRIPT_RUN_AFFECTED_UNIT="pnpm exec tsx ./scripts/run-affected-tests.ts --unit"
+  //   SCRIPT_RUN_AFFECTED_INTEGRATION="pnpm exec tsx ./scripts/run-affected-tests.ts --integration"
+  //   SCRIPT_RUN_AFFECTED_E2E="pnpm exec tsx ./scripts/run-affected-e2e.ts"
+  SCRIPT_RUN_AFFECTED_UNIT: process.env.SCRIPT_RUN_AFFECTED_UNIT || '',
+  SCRIPT_RUN_AFFECTED_INTEGRATION: process.env.SCRIPT_RUN_AFFECTED_INTEGRATION || '',
+  SCRIPT_RUN_AFFECTED_E2E: process.env.SCRIPT_RUN_AFFECTED_E2E || '',
 
   // Web apps list — each repo defines its own via WEB_APPS env var (JSON)
   // Example .env: WEB_APPS='[{"name":"my-app","defaultPort":3000,"type":"vite"}]'

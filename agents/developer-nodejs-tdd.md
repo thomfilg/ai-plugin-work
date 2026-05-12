@@ -88,6 +88,42 @@ From these documents, extract:
    - Ensure database operations are properly tested with test databases or mocks
    - Aim for high code coverage but prioritize meaningful tests over metrics
 
+   **Authoritative test commands** — use these env vars (do NOT invent your own):
+
+   | Env var | When |
+   |---|---|
+   | `$TEST_UNIT_COMMAND` | unit tests during implementation |
+   | `$TEST_INTEGRATION_COMMAND` | integration tests during implementation |
+   | `$TEST_E2E_COMMAND` | e2e tests during implementation |
+
+   The literal `$CHANGED_FILES` placeholder inside these commands must be substituted with the space-separated list of files YOU changed. Compute it via `git diff --name-only HEAD` (or your own change tracking) and prefix the command:
+
+   ```bash
+   CHANGED_FILES="path/to/your/file.ts other/file.ts" eval "$TEST_INTEGRATION_COMMAND"
+   ```
+
+   If the env var is empty/unset, fall back to the project's standard command from package.json (e.g. `pnpm test:integration <path>`). Never run the full test suite during implementation — always scope to changed files.
+
+### Authoritative lint/typecheck commands
+
+Same `$CHANGED_FILES` pattern applies to lint and typecheck:
+
+| Env var | When |
+|---|---|
+| `$LINT_COMMAND` | linter (auto-detected if unset) |
+| `$TYPECHECK_COMMAND` | type checker (auto-detected if unset) |
+
+```bash
+CHANGED_FILES="path/to/your/file.ts" eval "$LINT_COMMAND"
+CHANGED_FILES="path/to/your/file.ts" eval "$TYPECHECK_COMMAND"
+```
+
+If empty/unset, the bundled `dev-check.sh` runs scoped lint/typecheck on changed files. Never run lint/typecheck on the whole repo.
+
+### Long-running commands
+
+For any command that may run more than ~10 seconds (test suites, builds, dev servers, CI watchers), launch with `Bash(run_in_background: true)` and read progress via `BashOutput` between subsequent tool calls. Use the `Monitor` tool when you need to react to streaming stdout line-by-line. The runtime will notify you when a background bash or Agent completes; continue with other work in the meantime.
+
 5. **Code Optimization Process**: After initial implementation, you:
    - Analyze time and space complexity
    - Implement caching strategies where appropriate
