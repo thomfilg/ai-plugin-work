@@ -253,6 +253,24 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
         pattern: /^(work-workflow:)?split-in-tasks$/,
       },
       {
+        // Gate C — tasks_gate. Verify passes when tasks.md parses and every
+        // task declares `### Files in scope`. Legacy `### Suggested Scope`
+        // is accepted as fallback (see lib/task-scope.js#validateTask).
+        step: STEPS.tasks_gate,
+        verify: (ticketId) => {
+          try {
+            const { parseTasks } = require(path.join(__dirname, 'task-parser'));
+            const { validateAll } = require(path.join(__dirname, '..', 'lib', 'task-scope'));
+            const dir = path.join(TASKS_BASE, safeTicketPath(ticketId));
+            const tasks = parseTasks(dir);
+            if (!tasks) return false;
+            return validateAll(tasks).valid;
+          } catch {
+            return false;
+          }
+        },
+      },
+      {
         step: STEPS.implement,
         verify: (ticketId) => {
           // tasks step gating is orchestrator-controlled via DEFER/RUN plan actions

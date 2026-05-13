@@ -216,18 +216,29 @@ function writeTaskArtifacts(tasksBase, ticket) {
   const dir = path.join(tasksBase, ticket);
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, 'brief.md'), '# Brief\n\n## Problem Statement\nTest brief.\n');
-  fs.writeFileSync(
-    path.join(dir, 'spec.md'),
-    '# Spec\n\n## Summary\nTest spec.\n'
-  );
+  fs.writeFileSync(path.join(dir, 'spec.md'), '# Spec\n\n## Summary\nTest spec.\n');
   // gherkin.feature with gherkin-skip → spec_gate verify passes (GH-350: standalone gherkin file)
-  fs.writeFileSync(
-    path.join(dir, 'gherkin.feature'),
-    '<!-- gherkin-skip: test artifact -->\n'
-  );
+  fs.writeFileSync(path.join(dir, 'gherkin.feature'), '<!-- gherkin-skip: test artifact -->\n');
+  // Gate C requires `### Files in scope` on every task — include it.
   fs.writeFileSync(
     path.join(dir, 'tasks.md'),
-    '# Tasks\n\n## Task 1 — Test task\n\n### Type\nbackend\n\n### Deliverables\n- [ ] 1.1 Test deliverable\n'
+    [
+      '# Tasks',
+      '',
+      '## Task 1 — Test task',
+      '',
+      '### Type',
+      'backend',
+      '',
+      '### Files in scope',
+      '- src/**',
+      '',
+      '### Files explicitly out of scope',
+      '',
+      '### Deliverables',
+      '- [ ] 1.1 Test deliverable',
+      '',
+    ].join('\n')
   );
 }
 
@@ -278,7 +289,7 @@ describe('work-orchestrator.js', () => {
       assert.ok(result.steps.includes('ticket'));
       assert.ok(result.steps.includes('complete'));
       // GH-244: added spec_gate between spec and tasks.
-      assert.equal(result.steps.length, 18);
+      assert.equal(result.steps.length, 19);
     });
 
     it('should include follow_up in steps', async () => {
@@ -541,6 +552,7 @@ describe('work-orchestrator.js', () => {
       await runOrchestrator(['transition', TEST_TICKET, 'spec'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'spec_gate'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'tasks'], transOpts);
+      await runOrchestrator(['transition', TEST_TICKET, 'tasks_gate'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'implement'], transOpts);
       const { result } = await runOrchestrator(['transition', TEST_TICKET, 'pr'], transOpts);
       assert.equal(result.error, true);
@@ -556,6 +568,7 @@ describe('work-orchestrator.js', () => {
       await runOrchestrator(['transition', TEST_TICKET, 'spec'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'spec_gate'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'tasks'], transOpts);
+      await runOrchestrator(['transition', TEST_TICKET, 'tasks_gate'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'implement'], transOpts);
       writeTddException(TEMP_TASKS_DIR, TEST_TICKET);
       await runOrchestrator(['transition', TEST_TICKET, 'commit'], transOpts);
@@ -582,6 +595,7 @@ describe('work-orchestrator.js', () => {
       await runOrchestrator(['transition', TEST_TICKET, 'spec'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'spec_gate'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'tasks'], transOpts);
+      await runOrchestrator(['transition', TEST_TICKET, 'tasks_gate'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'implement'], transOpts);
       const { result } = await runOrchestrator(['transitions', TEST_TICKET], transOpts);
       assert.equal(result.currentStep, 'implement');
@@ -597,6 +611,7 @@ describe('work-orchestrator.js', () => {
       await runOrchestrator(['transition', TEST_TICKET, 'spec'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'spec_gate'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'tasks'], transOpts);
+      await runOrchestrator(['transition', TEST_TICKET, 'tasks_gate'], transOpts);
       await runOrchestrator(['transition', TEST_TICKET, 'implement'], transOpts);
       writeTddException(TEMP_TASKS_DIR, TEST_TICKET);
       await runOrchestrator(['transition', TEST_TICKET, 'commit'], transOpts);
@@ -611,10 +626,10 @@ describe('work-orchestrator.js', () => {
   });
 
   describe('state machine logic', () => {
-    it('should have 18 steps total', async () => {
+    it('should have 19 steps total', async () => {
       const { result } = await runOrchestrator(['graph']);
       // GH-244: added spec_gate between spec and tasks.
-      assert.equal(result.steps.length, 18);
+      assert.equal(result.steps.length, 19);
     });
 
     it('should not allow self-transitions (except complete)', async () => {
@@ -848,6 +863,7 @@ describe('work-orchestrator.js', () => {
         await runOrchestrator(['transition', T, 'spec'], o);
         await runOrchestrator(['transition', T, 'spec_gate'], o);
         await runOrchestrator(['transition', T, 'tasks'], o);
+        await runOrchestrator(['transition', T, 'tasks_gate'], o);
         await runOrchestrator(['transition', T, 'implement'], o);
         writeTddException(TASKS_DIR, T);
         await runOrchestrator(['transition', T, 'commit'], o);
@@ -1303,6 +1319,7 @@ describe('work-orchestrator.js', () => {
         await runOrchestrator(['transition', T4, 'spec'], o);
         await runOrchestrator(['transition', T4, 'spec_gate'], o);
         await runOrchestrator(['transition', T4, 'tasks'], o);
+        await runOrchestrator(['transition', T4, 'tasks_gate'], o);
         await runOrchestrator(['transition', T4, 'implement'], o);
         writeTddException(TEMP_TASKS, T4);
         await runOrchestrator(['transition', T4, 'commit'], o);
@@ -1383,6 +1400,7 @@ describe('work-orchestrator.js', () => {
       await runOrchestrator(['transition', TICKET, 'spec'], envOpts);
       await runOrchestrator(['transition', TICKET, 'spec_gate'], envOpts);
       await runOrchestrator(['transition', TICKET, 'tasks'], envOpts);
+      await runOrchestrator(['transition', TICKET, 'tasks_gate'], envOpts);
       await runOrchestrator(['transition', TICKET, 'implement'], envOpts);
       writeTddException(TEMP_TASKS, TICKET);
       await runOrchestrator(['transition', TICKET, 'commit'], envOpts);
@@ -1412,6 +1430,7 @@ describe('work-orchestrator.js', () => {
       await runOrchestrator(['transition', TICKET, 'spec'], envOpts);
       await runOrchestrator(['transition', TICKET, 'spec_gate'], envOpts);
       await runOrchestrator(['transition', TICKET, 'tasks'], envOpts);
+      await runOrchestrator(['transition', TICKET, 'tasks_gate'], envOpts);
       await runOrchestrator(['transition', TICKET, 'implement'], envOpts);
       writeTddException(TEMP_TASKS, TICKET);
       await runOrchestrator(['transition', TICKET, 'commit'], envOpts);
@@ -1650,6 +1669,7 @@ describe('work-orchestrator.js', () => {
       await runOrchestrator(['transition', TICKET, 'spec'], gateOpts);
       await runOrchestrator(['transition', TICKET, 'spec_gate'], gateOpts);
       await runOrchestrator(['transition', TICKET, 'tasks'], gateOpts);
+      await runOrchestrator(['transition', TICKET, 'tasks_gate'], gateOpts);
       await runOrchestrator(['transition', TICKET, 'implement'], gateOpts);
       writeTddException(TEMP_TASKS, TICKET);
       await runOrchestrator(['transition', TICKET, 'commit'], gateOpts);
@@ -1724,6 +1744,7 @@ describe('work-orchestrator.js', () => {
       await runOrchestrator(['transition', TICKET, 'spec'], gateOpts);
       await runOrchestrator(['transition', TICKET, 'spec_gate'], gateOpts);
       await runOrchestrator(['transition', TICKET, 'tasks'], gateOpts);
+      await runOrchestrator(['transition', TICKET, 'tasks_gate'], gateOpts);
       await runOrchestrator(['transition', TICKET, 'implement'], gateOpts);
       writeTddException(TEMP_TASKS, TICKET);
       const { result } = await runOrchestrator(['transition', TICKET, 'commit'], gateOpts);
