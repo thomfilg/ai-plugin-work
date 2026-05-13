@@ -121,10 +121,12 @@ function detectMalformedTestCommand(cmd) {
   if (/^(?:bash|sh|zsh|fish|node|python|python3)\s*$/i.test(raw)) return 'bare-interpreter';
   // Pure backtick / fence remnants
   if (/^[`]+$/.test(raw)) return 'backticks-only';
+  // Markdown fence opener that survived (must come before the broader
+  // stray-backtick check, which would otherwise match first and label
+  // ```bash as a "stray-backtick").
+  if (/^```/.test(raw)) return 'fence-opener';
   // Starts/ends with a stray backtick (parser failed to strip a partial fence)
   if (/^`/.test(raw) || /`$/.test(raw)) return 'stray-backtick';
-  // Markdown fence opener that survived
-  if (/^```/.test(raw)) return 'fence-opener';
   return null;
 }
 
