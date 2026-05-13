@@ -83,6 +83,9 @@ function extractTestCommandFromSection(section) {
     // Strip surrounding inline-code backticks: `cmd` → cmd
     const stripped = trimmed.replace(/^`+|`+$/g, '').trim();
     if (!stripped) continue;
+    // Skip parser artefacts that would silently `execSync` to garbage.
+    if (/^(?:bash|sh|zsh|fish|node|python|python3)\s*$/i.test(stripped)) continue;
+    if (/^[`]+$/.test(stripped)) continue;
     cmdLines.push(stripped);
     // Stop on the first non-continuation line (no trailing backslash)
     if (!stripped.endsWith('\\')) break;
@@ -100,6 +103,31 @@ const TDD_REQUIRED_TYPES = new Set(['implementation', 'feature', 'fix', 'test'])
 function isTddRequired(taskType) {
   if (!taskType) return true; // default = TDD required
   return TDD_REQUIRED_TYPES.has(String(taskType).toLowerCase());
+}
+
+/**
+ * Detect a `### Test Command` value that the parser leaked from markdown
+ * formatting (fenced-block fragment, bare shell name, unmatched backtick).
+ * These would `execSync` silently and starve the gate of a real exit code,
+ * causing infinite re-dispatch — return a clear block reason instead.
+ *
+ * @param {string} cmd
+ * @returns {string|null} reason if malformed, null if usable
+ */
+function detectMalformedTestCommand(cmd) {
+  const raw = String(cmd || '').trim();
+  if (!raw) return 'empty';
+  // Bare shell launchers with no arguments — the parser dropped the body
+  if (/^(?:bash|sh|zsh|fish|node|python|python3)\s*$/i.test(raw)) return 'bare-interpreter';
+  // Pure backtick / fence remnants
+  if (/^[`]+$/.test(raw)) return 'backticks-only';
+  // Markdown fence opener that survived (must come before the broader
+  // stray-backtick check, which would otherwise match first and label
+  // ```bash as a "stray-backtick").
+  if (/^```/.test(raw)) return 'fence-opener';
+  // Starts/ends with a stray backtick (parser failed to strip a partial fence)
+  if (/^`/.test(raw) || /`$/.test(raw)) return 'stray-backtick';
+  return null;
 }
 
 function evidencePathFor(gateTasksBase, safeName, taskNum) {
@@ -190,6 +218,24 @@ function runPreImplementTest(cmd, safeName, taskNum, workingDir, env, gateTasksB
     return { decision: 'dispatch', preTestSkipped: true };
   }
 
+  // Detect malformed parser output (fenced-block fragment, bare shell name)
+  // and surface it BEFORE execSync — otherwise we burn retries on garbage.
+  const malformed = detectMalformedTestCommand(cmd);
+  if (malformed) {
+    return {
+      decision: 'block',
+      reason:
+        `Test command for task ${taskNum} is malformed in tasks.md ` +
+        `(parser returned: ${JSON.stringify(String(cmd || '').slice(0, 120))}, ` +
+        `category: ${malformed}). ` +
+        `Open tasks.md and fix the \`### Test Command\` section under "## Task ${taskNum}". ` +
+        `Use a single shell command on its own line, optionally inside a fenced \`\`\`bash\`\`\` block.`,
+      command: String(cmd || ''),
+      exitCode: null,
+      outputTail: '',
+    };
+  }
+
   // Honor WORK_SKIP_E2E=1 / WORK_SKIP_E2E_TESTS=1 — record a skip stub and
   // dispatch (or just advance, since the post-test will also skip).
   const skipReason = shouldSkipTestExecution(cmd, env);
@@ -226,6 +272,9 @@ function runPreImplementTest(cmd, safeName, taskNum, workingDir, env, gateTasksB
       return {
         decision: 'block',
         reason: `Pre-implement test passed for task type "${taskType || 'default'}". TDD requires a failing test before implementation. Update tasks.md or the test command for task ${taskNum}.`,
+        command: cmd,
+        exitCode: 0,
+        outputTail: String(output).slice(-4000),
       };
     }
     // Non-TDD type — record skip stub and allow dispatch
@@ -303,16 +352,30 @@ function runPreImplementTest(cmd, safeName, taskNum, workingDir, env, gateTasksB
  * @returns {boolean} true if test passed and evidence is now complete
  */
 function runTestAndRecord(cmd, safeName, taskNum, workingDir, env, gateTasksBase) {
+  // Detect malformed parser output up front — return a structured failure so
+  // the gate can surface a clear "fix tasks.md" reason instead of "no GREEN".
+  const malformed = detectMalformedTestCommand(cmd);
+  if (malformed) {
+    return {
+      passed: false,
+      malformed,
+      command: String(cmd || ''),
+      exitCode: null,
+      outputTail: '',
+    };
+  }
+
   // Honor WORK_SKIP_E2E=1 / WORK_SKIP_E2E_TESTS=1 — write skip stub and pass.
   const skipReason = shouldSkipTestExecution(cmd, env);
   if (skipReason && gateTasksBase) {
     writeSkipStubEvidence(cmd, safeName, taskNum, gateTasksBase, skipReason);
-    return true;
+    return { passed: true, skipped: skipReason };
   }
 
   let exitCode = 0;
+  let output = '';
   try {
-    execSync(cmd, {
+    output = execSync(cmd, {
       encoding: 'utf-8',
       cwd: workingDir,
       env,
@@ -321,10 +384,12 @@ function runTestAndRecord(cmd, safeName, taskNum, workingDir, env, gateTasksBase
     });
   } catch (err) {
     exitCode = err.status ?? 1;
+    output = (err.stdout || '') + (err.stderr || '');
   }
 
-  if (exitCode !== 0) return false;
-  if (!gateTasksBase) return false;
+  if (exitCode !== 0)
+    return { passed: false, command: cmd, exitCode, outputTail: String(output).slice(-4000) };
+  if (!gateTasksBase) return { passed: false, command: cmd, exitCode: 0, outputTail: '' };
 
   const taskDir = path.join(gateTasksBase, safeName, `task${taskNum}`);
   const evidencePath = path.join(taskDir, 'tdd-phase.json');
@@ -386,9 +451,14 @@ function runTestAndRecord(cmd, safeName, taskNum, workingDir, env, gateTasksBase
   try {
     fs.mkdirSync(taskDir, { recursive: true });
     fs.writeFileSync(evidencePath, JSON.stringify(evidence, null, 2));
-    return true;
-  } catch {
-    return false;
+    return { passed: true };
+  } catch (err) {
+    return {
+      passed: false,
+      command: cmd,
+      exitCode: 0,
+      outputTail: `Failed to write tdd-phase.json: ${err && err.message}`,
+    };
   }
 }
 
@@ -430,11 +500,30 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
     if (ws._tddRetryReason || ws._tddRetryCount || ws._preTestForTask) {
       delete ws._tddRetryReason;
       delete ws._tddRetryCount;
+      delete ws._tddRetryCommand;
+      delete ws._tddRetryExitCode;
+      delete ws._tddRetryOutputTail;
+      delete ws._tddRetryTask;
       delete ws._preTestForTask;
       saveWorkState(safeName, ws);
     }
     return null;
   }
+
+  // Helper: persist retry-failure context so the next dispatch prompt can
+  // surface the exact command, exit code, and output to the agent. The
+  // _tddRetryTask field scopes the retry block to a specific task number;
+  // parallel-dispatch delegates check this to avoid showing one task's
+  // failure to other tasks' agents.
+  const recordRetry = (reason, extras) => {
+    ws._tddRetryReason = reason;
+    ws._tddRetryCount = (ws._tddRetryCount || 0) + 1;
+    ws._tddRetryCommand = extras?.command || null;
+    ws._tddRetryExitCode = extras?.exitCode ?? null;
+    ws._tddRetryOutputTail = extras?.outputTail || '';
+    ws._tddRetryTask = taskNum;
+    saveWorkState(safeName, ws);
+  };
 
   // Check task type BEFORE evidence — checkpoint tasks are exempt from TDD entirely
   const taskType = resolveTaskType(ctx.tasksDir, taskNum);
@@ -483,9 +572,11 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
         saveWorkState(safeName, ws);
 
         if (pre.decision === 'block') {
-          ws._tddRetryReason = pre.reason;
-          ws._tddRetryCount = (ws._tddRetryCount || 0) + 1;
-          saveWorkState(safeName, ws);
+          recordRetry(pre.reason, {
+            command: pre.command || testCmd,
+            exitCode: pre.exitCode,
+            outputTail: pre.outputTail,
+          });
           return null;
         }
         // The pre-test just ran on this gate pass. Return now — DO NOT fall
@@ -509,7 +600,7 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
       if (testCmd && needsGreen) {
         const workingDir = ctx.worktreeDir || (ws.worktreeDir ? ws.worktreeDir : process.cwd());
         const runEnv = gateTasksBase ? { ...process.env, TASKS_BASE: gateTasksBase } : process.env;
-        const passed = runTestAndRecord(
+        const result = runTestAndRecord(
           testCmd,
           safeName,
           taskNum,
@@ -517,20 +608,42 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
           runEnv,
           gateTasksBase
         );
-        if (passed) {
+        if (result && result.passed) {
           const reread = gateTasksBase
             ? tddEnforcement.readTddEvidence(gateTasksBase, safeName, stepName, taskNum)
             : readTddEvidence(safeName, stepName, taskNum);
           exists = reread.exists;
           evidence = reread.evidence;
+        } else if (result && result.malformed) {
+          recordRetry(
+            `Test command for task ${taskNum} is malformed in tasks.md ` +
+              `(parser returned: ${JSON.stringify(String(result.command || '').slice(0, 120))}, ` +
+              `category: ${result.malformed}). ` +
+              `Open tasks.md and fix the \`### Test Command\` section under "## Task ${taskNum}".`,
+            { command: result.command, exitCode: null, outputTail: '' }
+          );
+          return null;
+        } else if (result && result.passed === false) {
+          // Post-test ran and failed — capture the command + exit + tail so
+          // the next dispatch prompt can show the agent EXACTLY what broke.
+          recordRetry(
+            `Post-implement test for task ${taskNum} failed (exit ${result.exitCode}). Fix the source so the command below passes.`,
+            {
+              command: result.command,
+              exitCode: result.exitCode,
+              outputTail: result.outputTail,
+            }
+          );
+          return null;
         }
       }
     }
 
     if (!exists) {
-      ws._tddRetryReason = `No TDD evidence found at task${taskNum}/tdd-phase.json. You MUST run the TDD phase commands before this task can advance.`;
-      ws._tddRetryCount = (ws._tddRetryCount || 0) + 1;
-      saveWorkState(safeName, ws);
+      recordRetry(
+        `No TDD evidence found at task${taskNum}/tdd-phase.json. The gate will record evidence by running the task's \`### Test Command\` — if you keep seeing this, the test command is missing or unrunnable in tasks.md under "## Task ${taskNum}".`,
+        {}
+      );
       return null;
     }
 
@@ -542,17 +655,16 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
       const hasAnyCycle = Array.isArray(evidence?.cycles) && evidence.cycles.length > 0;
       const hasException = evidence?.currentPhase === 'exception' && evidence?.exception;
       if (!hasAnyCycle && !hasException) {
-        ws._tddRetryReason = `TDD evidence exists but has no cycles or exception. Record at least one RED phase or use exception mode.`;
-        ws._tddRetryCount = (ws._tddRetryCount || 0) + 1;
-        saveWorkState(safeName, ws);
+        recordRetry(
+          `TDD evidence exists but has no cycles or exception. Gate will retry by running the task's \`### Test Command\`.`,
+          {}
+        );
         return null;
       }
     } else {
       const validation = validateTddEvidence(evidence);
       if (!validation.valid) {
-        ws._tddRetryReason = `TDD evidence invalid: ${validation.reason}`;
-        ws._tddRetryCount = (ws._tddRetryCount || 0) + 1;
-        saveWorkState(safeName, ws);
+        recordRetry(`TDD evidence invalid: ${validation.reason}`, {});
         return null;
       }
     }
@@ -561,6 +673,10 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
   // Evidence valid — clear retry state
   delete ws._tddRetryReason;
   delete ws._tddRetryCount;
+  delete ws._tddRetryCommand;
+  delete ws._tddRetryExitCode;
+  delete ws._tddRetryOutputTail;
+  delete ws._tddRetryTask;
   saveWorkState(safeName, ws);
 
   // Derive TASKS_BASE from ctx.tasksDir for subprocess calls.
