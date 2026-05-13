@@ -282,11 +282,11 @@ function getRelatedTicketsPrompt(ticketId, providerConfig, manifestPath) {
     '  "self":      { "id": "' +
     ticketId +
     '", "title": "...", "status": "..." },\n' +
-    '  "parent":    { "id": "...", "title": "...", "status": "..." } | null,\n' +
-    '  "siblings":  [ { "id": "...", "title": "...", "status": "...", "prNumber": 1234, "surfaces": ["lib/x.ts", "app/api/.../y.ts"] } ],\n' +
-    '  "blockedBy": [ { "id": "...", "status": "...", "prNumber": null } ],\n' +
-    '  "dependsOn": [ { "id": "...", "status": "...", "prNumber": null } ],\n' +
-    '  "relatedTo": [ { "id": "...", "status": "...", "prNumber": null } ],\n' +
+    '  "parent":    { "id": "...", "title": "...", "status": "...", "scope": "..." } | null,\n' +
+    '  "siblings":  [ { "id": "...", "title": "...", "status": "...", "scope": "...", "prNumber": 1234, "surfaces": ["lib/x.ts", "app/api/.../y.ts"] } ],\n' +
+    '  "blockedBy": [ { "id": "...", "title": "...", "status": "...", "scope": "...", "prNumber": null } ],\n' +
+    '  "dependsOn": [ { "id": "...", "title": "...", "status": "...", "scope": "...", "prNumber": null } ],\n' +
+    '  "relatedTo": [ { "id": "...", "title": "...", "status": "...", "scope": "...", "prNumber": null } ],\n' +
     '  "fetchedAt": "<ISO-8601 timestamp NOW>"\n' +
     '}\n' +
     '\n' +
@@ -294,7 +294,13 @@ function getRelatedTicketsPrompt(ticketId, providerConfig, manifestPath) {
     '- `parent` is null when this ticket has no parent. Otherwise populate from the parent link.\n' +
     '- `siblings` = children of the same parent, EXCLUDING this ticket. If there is no parent, leave it [].\n' +
     '- `blockedBy` / `dependsOn` / `relatedTo` come from the ticket-system link types.\n' +
-    '- For every sibling AND parent with a merged PR, populate `surfaces` with the list of files changed in that PR (run `gh pr diff <N> --name-only` and copy the file paths). For unshipped tickets, leave `surfaces: []`.\n' +
+    "- **`scope` (REQUIRED on every linked entry):** read each linked ticket's full description, then distill it into a focused one-to-three-sentence summary of WHAT THAT TICKET OWNS — files, endpoints, schemas, layers. This is the field downstream agents use to decide sibling ownership when no PR is merged yet.\n" +
+    '  - Good: `"scope": "Owns the new `externalAssets.listDownstreamDashboards` tRPC procedure on viewsRouter and its Zod schema. Adds `select`+`where` for Dashboard rows. No UI changes."`\n' +
+    '  - Bad (too vague): `"scope": "Backend work for downstream dashboards"`\n' +
+    '  - Bad (full body): pasting the entire ticket description verbatim.\n' +
+    '  - Bad (too narrow): `"scope": "Wire to explore.list"` without naming any concrete surface.\n' +
+    '  - Keep `scope` ≤ ~400 characters. Strip implementation noise (deadlines, status updates, side-comments) — keep only ownership signals.\n' +
+    '- For every sibling AND parent with a merged PR, populate `surfaces` with the list of files changed in that PR (run `gh pr diff <N> --name-only` and copy the file paths). For unshipped tickets, leave `surfaces: []` — `scope` is what carries ownership info in that case.\n' +
     '- Write the JSON to: ' +
     manifestPath +
     '\n' +

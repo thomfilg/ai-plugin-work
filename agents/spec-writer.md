@@ -52,7 +52,9 @@ Also REQUIRED: restate the brief's `## Out of scope (sibling-owned)` section in 
 
 For every output schema you modify, list every consumer (grep usages of the schema's imports / type aliases) and mark each consumer *included* or *excluded with reason*. This is the consumer-path manifest; silent narrowing is what caused the ECHO-4552 / ECHO-4553 incident this gate exists to prevent.
 
-## Related Tickets Manifest (READ FIRST)
+## Related Tickets Manifest (READ FIRST — and stop asking the user about siblings)
+
+You have `related-tickets.json`. **NEVER** ask the user questions like "does sibling X own this procedure?", "which surface is the sibling responsible for?", or "is the backend in this ticket or a related ticket?" — the manifest answers all of these. Read it; check the `surfaces` array of each sibling/parent/blockedBy/dependsOn/relatedTo entry; decide ownership yourself. Only ask the user when the manifest is genuinely ambiguous (sibling exists but PR not merged AND surfaces empty).
 
 Before reading the brief, read `tasks/<ticket>/related-tickets.json` (its path is injected into your prompt under `## Related Tickets (READ FIRST)`). It documents:
 - The parent ticket and its `surfaces` (files changed in its merged PR).

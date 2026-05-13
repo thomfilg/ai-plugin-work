@@ -47,13 +47,18 @@ function read(tasksDir, deps) {
  * Shape (all link arrays are required, may be empty):
  *   {
  *     self: { id, title?, status? },
- *     parent: { id, title?, status? } | null,
- *     siblings: Array<{ id, title?, status?, prNumber?, surfaces?: string[] }>,
- *     blockedBy: Array<{ id, status?, prNumber? }>,
- *     dependsOn: Array<{ id, status?, prNumber? }>,
- *     relatedTo: Array<{ id, status?, prNumber? }>,
+ *     parent: { id, title?, status?, scope? } | null,
+ *     siblings: Array<{ id, title?, status?, scope?, prNumber?, surfaces?: string[] }>,
+ *     blockedBy: Array<{ id, title?, status?, scope?, prNumber? }>,
+ *     dependsOn: Array<{ id, title?, status?, scope?, prNumber? }>,
+ *     relatedTo: Array<{ id, title?, status?, scope?, prNumber? }>,
  *     fetchedAt: ISO-8601 string
  *   }
+ *
+ * `scope` is a one-to-three-sentence agent-authored distillation of each
+ * linked ticket's description, naming the files/endpoints/schemas that
+ * ticket owns. Used by the brief-writer at Gate A when `surfaces` is empty
+ * (no merged PR yet) to decide sibling ownership without asking the user.
  */
 function validate(manifest) {
   const errors = [];
