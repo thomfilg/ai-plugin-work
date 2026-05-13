@@ -39,6 +39,65 @@ You will receive:
 1. Ticket requirements (title, description, acceptance criteria) from a previous step
 2. A path where to save the brief
 
+## Out of scope (sibling-owned) — Gate A
+
+### DO NOT ask the user "does a sibling own this?"
+
+You have `related-tickets.json`. That file IS the authoritative answer. Before drafting ANY sibling-ownership AskUserQuestion, you MUST:
+
+1. Read `tasks/<ticket>/related-tickets.json` in full.
+2. For each surface the brief references (file path, tRPC procedure name, schema, symbol), determine ownership by walking this decision tree:
+
+   **Step A — `surfaces` exact match.** Check every sibling's `surfaces` array (and parent / blockedBy / dependsOn / relatedTo). If the surface appears, → **sibling-owned**. Done.
+
+   **Step B — sibling `scope` field** (USE THIS when surfaces are empty because no sibling PR has merged yet). Every linked entry in `related-tickets.json` carries a `scope` field — a one-to-three-sentence summary of what that ticket owns, written by the agent that created the manifest. Match the surface in question against each sibling's `scope`:
+   - If the `scope` names the same procedure / file / schema / endpoint you're considering → **sibling-owned**. Add it to `## Out of scope (sibling-owned)` directly, citing the `scope` text as the reason. Do NOT ask the user.
+   - If `scope` is empty or generic (manifest-creation drift), fall through to the title heuristic below.
+
+   **Step B' — sibling title heuristic** (fallback when both `surfaces` and `scope` are empty/unhelpful). Read each sibling's `title` and infer ownership from plain language:
+   - Title prefixes like `Backend:`, `API:`, `tRPC:`, `Wire:` strongly suggest that sibling owns backend/API surfaces (tRPC procedures, schemas, routers).
+   - `Frontend:`, `UI:`, `Component:` suggest UI surfaces (`components/**`, `app/**/page.tsx`).
+   - `E2E:`, `Tests:`, `QA:` suggest test-only surfaces (`tests/e2e/**`).
+   - `Wire:` / `Integration:` suggest the wiring layer between layers; usually owns adapter code and the API surface it consumes.
+   - When the surface in question matches that pattern (e.g. you need `externalAssets.listDownstreamDashboards` and a sibling is titled `Wire: X to explore.list` or `Backend: X procedure`) → **sibling-owned**. Add it to `## Out of scope (sibling-owned)` directly, citing the title as the reason. Do NOT ask the user.
+
+   **Step C — only now ask.** If after Steps A and B the ownership is *genuinely* ambiguous (sibling exists but its title is generic like "Misc fixes" or "Refactor X"), THEN it's appropriate to ask. Quote both the manifest entry AND the title heuristic you tried in your question.
+
+3. **Forbidden questions to the user:** "Does sibling X own this procedure?", "Is the backend in a sibling ticket?", "Which surface is owned where?" when the sibling title clearly answers it. Asking them means you stopped at Step A instead of completing Step B.
+
+The user has already complained about this. Read the manifest, apply the title heuristic, only ask what the manifest + titles genuinely cannot answer.
+
+### Format
+
+When a P0 requirement names a surface (file path / endpoint / schema / symbol) that the `related-tickets.json` manifest declares as owned by a sibling ticket, do NOT add the P0 to this brief's `### Must Have`. Move it to a dedicated section:
+
+```markdown
+## Out of scope (sibling-owned)
+- `<SURFACE>` — owned by <SIBLING-TICKET-ID> (status: <STATUS>, PR: <#N or "not yet shipped">). Reason: <why this is needed for the current ticket but not owned here>.
+```
+
+One entry per surface. The format is mechanical — Gate A parses these bullets to surface AskUserQuestion at brief_gate. After the user decides, the gate persists their answer under a sibling section:
+
+```markdown
+## Sibling-gap decisions
+- `<SURFACE>` — decision: <implement-here | wait-for-sibling>; ticket: <SIBLING-TICKET-ID>; timestamp: <ISO-8601>
+```
+
+Rules:
+- Every `## Out of scope (sibling-owned)` entry MUST have a matching `## Sibling-gap decisions` entry before brief_gate passes.
+- Do NOT pre-fill the decisions section yourself — the orchestrator writes it after the user answers.
+- The surface token in both sections must match exactly (case-insensitive) so Gate A can pair them.
+
+## Related Tickets Manifest (Gate 0 — REQUIRED FIRST)
+
+Before drafting the brief, fetch the related tickets and write `tasks/<ticket>/related-tickets.json`. The orchestrator injects exact fetch instructions per ticket provider (Jira / Linear / GitHub) into your prompt under `## Related Tickets Manifest (REQUIRED — fetch FIRST)`.
+
+Why this is mandatory:
+- Sibling tickets often own surfaces (files / endpoints / schemas) that are referenced by the current ticket's requirements. If you absorb those into the brief as P0 items, the next agent will edit sibling-owned code — exactly the failure mode this gate exists to prevent.
+- `brief_gate` will block until a valid manifest exists at the documented path. There is no way to skip this.
+
+After writing the manifest, treat its contents as authoritative when populating the brief — especially the `## Out of Scope` section (see below).
+
 ## Brief Template
 
 Generate a markdown document with this structure:

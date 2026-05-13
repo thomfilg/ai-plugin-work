@@ -216,6 +216,26 @@ This is CRITICAL - the PR will be rejected if ticket-system-style escaping is de
 ## Intended New Behavior
 [Your analysis here]
 
+## Brief P0 coverage
+[Gate F — REQUIRED when a `tasks/<ticket>/brief.md` exists for this ticket.
+List each P0 from the brief by ID with the diff location proving it shipped.
+Format:
+- **P0 #1:** <one-line restatement> — implemented in `path/to/file.ts:42`
+- **P0 #2:** <restatement> — implemented in `another/file.ts:118` + test `tests/foo.test.ts:9`
+If any P0 has no diff evidence, mark it `UNVERIFIED` and explain — the
+completion-checker should have blocked, surface here as a fallback.]
+
+## Out-of-scope changes
+[Gate F — REQUIRED when the check step's Gate E scope-diff verifier reported
+any `outOfScope` or `unaccounted` files. List each file with a one-line
+justification (legitimate side effect / sibling-owned that was intentionally
+included / etc.). Omit this section ONLY if every changed file matched a
+task's `### Files in scope`.
+Format:
+- `path/to/file.ts` — <one-line reason>
+The completion-checker's Gate E output is your source of truth here. Copy
+the file list verbatim.]
+
 ## Dev Checks
 - [ ] Functionality can be toggled on/off
 - [ ] New code is covered by unit/integration tests

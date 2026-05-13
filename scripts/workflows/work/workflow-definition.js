@@ -30,7 +30,7 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
         head = fs.readFileSync(path.join('.git', 'HEAD'), 'utf-8').trim();
       }
       const ref = head.startsWith('ref: ') ? head.slice(5) : head;
-      return ref.includes(ticketId);
+      return ref.toLowerCase().includes(ticketId.toLowerCase());
     } catch {
       return false;
     }
@@ -251,6 +251,24 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
         tool: 'Skill',
         field: 'skill',
         pattern: /^(work-workflow:)?split-in-tasks$/,
+      },
+      {
+        // Gate C — tasks_gate. Verify passes when tasks.md parses and every
+        // task declares `### Files in scope`. Legacy `### Suggested Scope`
+        // is accepted as fallback (see lib/task-scope.js#validateTask).
+        step: STEPS.tasks_gate,
+        verify: (ticketId) => {
+          try {
+            const { parseTasks } = require(path.join(__dirname, 'task-parser'));
+            const { validateAll } = require(path.join(__dirname, '..', 'lib', 'task-scope'));
+            const dir = path.join(TASKS_BASE, safeTicketPath(ticketId));
+            const tasks = parseTasks(dir);
+            if (!tasks) return false;
+            return validateAll(tasks).valid;
+          } catch {
+            return false;
+          }
+        },
       },
       {
         step: STEPS.implement,
@@ -590,6 +608,11 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
     {
       basename: 'brief.md',
       step: STEPS.brief,
+      // brief_gate may amend brief.md to record `## Sibling-gap decisions`
+      // and to resolve open-questions. Without this allowedSteps entry,
+      // brief_gate edits get blocked by the artifact-protector before the
+      // contentGuard below ever runs.
+      allowedSteps: [STEPS.brief_gate],
       agents: ['brief-writer'],
       contentGuard: (content, currentStep) => {
         // Only enforce during the 'brief' step — brief_gate is allowed to resolve questions
@@ -616,11 +639,22 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
         return { blocked: false };
       },
     },
-    { basename: 'spec.md', step: STEPS.spec, agents: ['spec-writer'] },
+    {
+      basename: 'spec.md',
+      step: STEPS.spec,
+      // spec_gate may need in-place edits when its validators (brief↔spec
+      // coverage, embedded gherkin) fail. Without this, the agent can't
+      // repair the spec without manual state-machine rewinding.
+      allowedSteps: [STEPS.spec_gate],
+      agents: ['spec-writer'],
+    },
     {
       basename: 'tasks.md',
       step: STEPS.tasks,
-      allowedSteps: [STEPS.task_review],
+      // Gate C runs at tasks_gate; in-place repair must be possible there
+      // without widening implement-step authority (which would let agents
+      // grant themselves broader Gate D file scope mid-implementation).
+      allowedSteps: [STEPS.tasks_gate, STEPS.task_review],
       agents: [],
       contentGuard: (content) => {
         try {

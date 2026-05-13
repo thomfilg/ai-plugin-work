@@ -72,7 +72,7 @@ describe('work-state.js', () => {
       cleanupTempWorkState(TICKET);
     });
 
-    it('should create state with all 18 steps as pending', async () => {
+    it('should create state with all 19 steps as pending', async () => {
       const { result, code } = await runWorkState(['init', TICKET]);
       assert.equal(code, 0);
       assert.equal(result.ticketId, TICKET);
@@ -83,8 +83,8 @@ describe('work-state.js', () => {
       assert.equal(result.errors.length, 0);
 
       const steps = Object.keys(result.stepStatus);
-      // GH-244: 18 steps — added spec_gate between spec and tasks.
-      assert.equal(steps.length, 18);
+      // GH-244: 19 steps — added spec_gate between spec and tasks.
+      assert.equal(steps.length, 19);
       for (const step of steps) {
         assert.equal(result.stepStatus[step], 'pending', `Step ${step} should be pending`);
       }
@@ -98,6 +98,7 @@ describe('work-state.js', () => {
         'spec',
         'spec_gate', // GH-244
         'tasks',
+        'tasks_gate', // Gate C
         'implement',
         'commit',
         'task_review', // GH-211
@@ -148,8 +149,8 @@ describe('work-state.js', () => {
       assert.equal(code, 0);
       assert.equal(result.ticketId, TICKET_EXISTS);
       assert.equal(result.status, 'in_progress');
-      // GH-244: 18 steps — added spec_gate between spec and tasks.
-      assert.equal(Object.keys(result.stepStatus).length, 18);
+      // GH-244: 19 steps — added spec_gate between spec and tasks.
+      assert.equal(Object.keys(result.stepStatus).length, 19);
       for (const step of Object.keys(result.stepStatus)) {
         assert.equal(result.stepStatus[step], 'pending');
       }
@@ -179,9 +180,10 @@ describe('work-state.js', () => {
       // Verify persistence
       const { result: getResult } = await runWorkState(['get', TICKET]);
       assert.equal(getResult.stepStatus['implement'], 'in_progress');
-      // currentStep should be updated to 8 (index 7 + 1, after ticket/bootstrap/brief/brief_gate/spec/spec_gate/tasks)
-      // GH-244: spec_gate shifts implement to index 7.
-      assert.equal(getResult.currentStep, 8);
+      // currentStep should reflect implement's position in STEP_ORDER:
+      // ticket, bootstrap, brief, brief_gate, spec, spec_gate, tasks, tasks_gate, implement → index 8 → currentStep 9.
+      // Gate C inserts tasks_gate between tasks and implement.
+      assert.equal(getResult.currentStep, 9);
     });
 
     it('should reject invalid step name with exit code 1', async () => {

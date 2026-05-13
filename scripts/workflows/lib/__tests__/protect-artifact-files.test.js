@@ -148,6 +148,26 @@ describe('createArtifactProtector', () => {
     assert.equal(result.blocked, false);
   });
 
+  it('recovery: brief.md is writable during brief_gate (Gate A / open questions)', () => {
+    const p = createArtifactProtector({
+      artifacts: [{ basename: 'brief.md', step: 'brief', allowedSteps: ['brief_gate'] }],
+      getStepInProgress: () => 'brief_gate',
+      getTicketId: () => TICKET,
+    });
+    const result = p.check('Write', { file_path: `/tasks/${TICKET}/brief.md` });
+    assert.equal(result.blocked, false);
+  });
+
+  it('recovery: spec.md is writable during spec_gate (Gate B / gherkin fix)', () => {
+    const p = createArtifactProtector({
+      artifacts: [{ basename: 'spec.md', step: 'spec', allowedSteps: ['spec_gate'] }],
+      getStepInProgress: () => 'spec_gate',
+      getTicketId: () => TICKET,
+    });
+    const result = p.check('Write', { file_path: `/tasks/${TICKET}/spec.md` });
+    assert.equal(result.blocked, false);
+  });
+
   it('blocks artifact when neither primary step nor allowedSteps is in_progress', () => {
     const p = createArtifactProtector({
       artifacts: [{ basename: 'tasks.md', step: 'tasks', allowedSteps: ['task_review'] }],

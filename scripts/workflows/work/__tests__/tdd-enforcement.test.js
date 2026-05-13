@@ -45,6 +45,32 @@ after(() => {
   } catch {
     /* ignore if tmpdir unreadable */
   }
+  // Safety-net: clean up test-fixture directories that leaked into the real
+  // TASKS_BASE (e.g., TEST-TR-101 / TDDP-200 / GH-154). In-process tests
+  // pass `tasksDir` directly via ctx; spawned child processes get TASKS_BASE
+  // via env. But some code paths (config.orExit fallback, transitionStep
+  // resolving paths through process.env at module-load time) can still
+  // resolve to the developer's real TASKS_BASE. Empty dirs are harmless but
+  // accumulate. Match conservatively — only prefixes used by this suite.
+  try {
+    const realTasksBase =
+      process.env.TASKS_BASE ||
+      require(path.join(__dirname, '..', '..', 'lib', 'config')).TASKS_BASE;
+    if (realTasksBase && fs.existsSync(realTasksBase)) {
+      const SUITE_PREFIXES = ['TEST-TR-', 'TDDP-', 'TDDG-', 'TDD-'];
+      const entries = fs.readdirSync(realTasksBase);
+      for (const name of entries) {
+        if (!SUITE_PREFIXES.some((p) => name.startsWith(p))) continue;
+        try {
+          fs.rmSync(path.join(realTasksBase, name), { recursive: true, force: true });
+        } catch {
+          /* best-effort */
+        }
+      }
+    }
+  } catch {
+    /* ignore if config unreadable */
+  }
 });
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -128,17 +154,34 @@ function writeTaskArtifacts(ticket) {
   // brief.md with no open questions → brief verify + brief_gate verify pass
   fs.writeFileSync(path.join(dir, 'brief.md'), '# Brief\n\n## Problem Statement\nTest brief.\n');
   // spec.md → spec verify passes
-  fs.writeFileSync(
-    path.join(dir, 'spec.md'),
-    '# Spec\n\n## Summary\nTest spec.\n'
-  );
+  fs.writeFileSync(path.join(dir, 'spec.md'), '# Spec\n\n## Summary\nTest spec.\n');
   // gherkin.feature with gherkin-skip → spec_gate verify passes (GH-350: standalone gherkin file)
+  fs.writeFileSync(path.join(dir, 'gherkin.feature'), '<!-- gherkin-skip: test artifact -->\n');
+  // tasks.md → tasks verify + tasks_gate (Gate C) verify pass.
+  // Gate C requires every `## Task N` block to declare `### Files in scope`
+  // (or the legacy `### Suggested Scope` as fallback).
   fs.writeFileSync(
-    path.join(dir, 'gherkin.feature'),
-    '<!-- gherkin-skip: test artifact -->\n'
+    path.join(dir, 'tasks.md'),
+    [
+      '# Tasks',
+      '',
+      '## Task 1 — TDD enforcement fixture',
+      '',
+      '### Type',
+      'backend',
+      '',
+      '### Files in scope',
+      '- src/**',
+      '',
+      '### Files explicitly out of scope',
+      '',
+      '### Test Command',
+      '```bash',
+      'pnpm test',
+      '```',
+      '',
+    ].join('\n')
   );
-  // tasks.md → tasks verify passes
-  fs.writeFileSync(path.join(dir, 'tasks.md'), '# Tasks\n\n- [ ] Task 1\n');
 }
 
 /**
@@ -178,6 +221,7 @@ async function transitionTo(ticket, targetStep, envExtra = {}) {
     'spec',
     'spec_gate', // GH-244
     'tasks',
+    'tasks_gate', // Gate C — between tasks and implement
     'implement',
     'commit',
     'check',
@@ -468,6 +512,7 @@ describe('TDD enforcement', () => {
         await runOrchestrator(['transition', TICKET, 'spec'], opts);
         await runOrchestrator(['transition', TICKET, 'spec_gate'], opts);
         await runOrchestrator(['transition', TICKET, 'tasks'], opts);
+        await runOrchestrator(['transition', TICKET, 'tasks_gate'], opts);
         await runOrchestrator(['transition', TICKET, 'implement'], opts);
 
         // Record valid evidence so we can leave 3_implement
@@ -510,6 +555,7 @@ describe('TDD enforcement', () => {
         await runOrchestrator(['transition', TICKET, 'spec'], opts);
         await runOrchestrator(['transition', TICKET, 'spec_gate'], opts);
         await runOrchestrator(['transition', TICKET, 'tasks'], opts);
+        await runOrchestrator(['transition', TICKET, 'tasks_gate'], opts);
         // Make sure no phase state file exists
         const phasePath = path.join(tempTasksBase, TICKET, 'tdd-phase.json');
         try {
@@ -595,6 +641,7 @@ describe('TDD enforcement', () => {
           'spec',
           'spec_gate',
           'tasks',
+          'tasks_gate',
           'implement',
         ];
         for (const s of steps) {

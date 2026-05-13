@@ -21,6 +21,11 @@ const STEPS = Object.freeze({
   spec: 'spec',
   spec_gate: 'spec_gate', // GH-244: Gherkin validation gate
   tasks: 'tasks',
+  // Gate C — validates `### Files in scope` / `### Files explicitly out of
+  // scope` per-task in tasks.md before implementation begins. Lets the user
+  // amend tasks.md in-place (via allowedSteps on the artifact rule) without
+  // an unsafe `implement → tasks.md` edit path.
+  tasks_gate: 'tasks_gate',
   implement: 'implement',
   commit: 'commit',
   // GH-211: per-task review gate that blocks check until review passes.
@@ -46,6 +51,7 @@ const STEP_ORDER = Object.freeze([
   STEPS.spec,
   STEPS.spec_gate,
   STEPS.tasks,
+  STEPS.tasks_gate, // Gate C — sits between tasks and implement
   STEPS.implement,
   STEPS.commit,
   STEPS.task_review, // GH-211: must sit between commit and check
@@ -99,6 +105,7 @@ function canTransition(statusTransitions) {
 // Retry loops: backward edges for failure recovery
 const RETRY_EDGES = {
   [STEPS.spec_gate]: [STEPS.spec], // GH-244: gate failed, regenerate spec
+  [STEPS.tasks_gate]: [STEPS.tasks], // Gate C: tasks.md missing scope sections → regenerate tasks
   [STEPS.task_review]: [STEPS.implement], // GH-211: review failed, fix code
   [STEPS.check]: [STEPS.implement], // check failed, fix code
   [STEPS.pr]: [STEPS.check], // GH-299: recheck on new commits

@@ -75,6 +75,46 @@ function _normalizeScope(line) {
     .trim();
 }
 
+/**
+ * Parse a bulleted scope section (Files in scope / Files explicitly out of scope)
+ * into a deduplicated array of glob patterns / paths. Skips empty lines,
+ * comments, and lines that are just markdown noise.
+ *
+ * @param {RegExpMatchArray|null} sectionMatch
+ * @returns {string[]}
+ */
+function _parseScopeList(sectionMatch) {
+  if (!sectionMatch) return [];
+  const lines = sectionMatch[1].split('\n');
+  const out = [];
+  const seen = new Set();
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (line.startsWith('<!--')) continue;
+    let stripped = _normalizeScope(line).replace(/^`+/, '').replace(/`+$/, '').trim();
+    if (!stripped) continue;
+    // Strip trailing annotations: the brief-writer / jira-task-creator
+    // templates produce entries like:
+    //   `lib/sibling.ts — owned by [GH-100]`
+    //   `app/x.ts -- owned by SIBLING-1, see #42`
+    //   `path/to/y.ts (sibling-owned: GH-99)`
+    // Gate D / Gate E match this entry against actual filesystem paths,
+    // so the annotation must not survive into the parsed value. Cut at
+    // the first ` — `, ` -- `, ` # `, or ` (`.
+    const cutMatch = stripped.match(/\s+(?:—|--|#|\()/);
+    if (cutMatch) stripped = stripped.slice(0, cutMatch.index).trim();
+    // Strip any wrapping backticks that survived (e.g. `lib/x.ts` — owned…
+    // becomes `lib/x.ts` after the cut; strip the closing backtick).
+    stripped = stripped.replace(/^`+/, '').replace(/`+$/, '').trim();
+    if (!stripped) continue;
+    if (seen.has(stripped)) continue;
+    seen.add(stripped);
+    out.push(stripped);
+  }
+  return out;
+}
+
 // ─── Task Parsing ────────────────────────────────────────────────────────────
 
 function parseTasks(tasksDir) {
@@ -125,9 +165,19 @@ function parseTasks(tasksDir) {
     const acMatch = body.match(/### Acceptance Criteria\s*\n([\s\S]*?)(?=\n###|\n## |$)/);
     const acceptanceCriteria = acMatch ? acMatch[1].trim() : '';
 
-    // Extract ### Suggested Scope
+    // Extract ### Suggested Scope (legacy, kept for backwards compat)
     const scopeMatch = body.match(/### Suggested Scope[^\n]*\n([\s\S]*?)(?=\n###|\n## |$)/);
     const suggestedScope = scopeMatch ? scopeMatch[1].trim() : '';
+
+    // Gate C: ### Files in scope (glob patterns or paths the task may edit)
+    const filesInScope = _parseScopeList(
+      body.match(/### Files in scope[^\n]*\n([\s\S]*?)(?=\n###|\n## |$)/)
+    );
+
+    // Gate C: ### Files explicitly out of scope (sibling-owned paths the task must NOT edit)
+    const filesOutOfScope = _parseScopeList(
+      body.match(/### Files explicitly out of scope[^\n]*\n([\s\S]*?)(?=\n###|\n## |$)/)
+    );
 
     // Extract ### Test Command (machine-parseable command for gate-driven TDD).
     // Skip ```bash``` fence markers, leading shell comments, and inline-code
@@ -146,6 +196,8 @@ function parseTasks(tasksDir) {
       requirementsCovered,
       acceptanceCriteria,
       suggestedScope,
+      filesInScope,
+      filesOutOfScope,
       testCommand,
       rawContent: `## Task ${num} ${body}`,
     });
@@ -184,6 +236,18 @@ function extractTestCommand(taskBody) {
     //   - leftover backticks / fence markers
     if (/^(?:bash|sh|zsh|fish|node|python|python3)\s*$/i.test(stripped)) continue;
     if (/^[`]+$/.test(stripped)) continue;
+    // Skip markdown prose lines that are obviously not shell commands —
+    // bullet-prefix italics (`- _Documentation only_`) or plain italic
+    // (`_Documentation only_`). These appear in checkpoint/doc-only tasks
+    // where the author meant "no test runs here" but the implement-gate
+    // would otherwise try to execSync the prose.
+    const bulletStripped = stripped.replace(/^[-*+]\s+/, '').trim();
+    if (/^_[^_]*_\s*$/.test(bulletStripped)) continue;
+    if (/^_/.test(bulletStripped) && /_$/.test(bulletStripped)) continue;
+    // Skip markdown horizontal-rule separators (`---`, `***`, `___`).
+    // These can leak into the captured body when the heading lookahead
+    // doesn't terminate cleanly (trailing newline missing, etc).
+    if (/^-{3,}$|^\*{3,}$|^_{3,}$/.test(stripped)) continue;
     cmdLines.push(stripped);
     if (!stripped.endsWith('\\')) break;
   }

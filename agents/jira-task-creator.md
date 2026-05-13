@@ -44,6 +44,38 @@ This agent is called by the `/create-jira` command after it has:
 - You ARE the jira-task-creator agent - do the work directly
 - Calling yourself creates infinite recursion loops
 
+## Related Tickets Manifest (READ FIRST when invoked via /work2)
+
+When invoked through the `/work2` workflow, your prompt will include a pointer to `tasks/<ticket>/related-tickets.json` under `## Related Tickets (READ FIRST)`. Read it before splitting into tasks.
+
+For every file listed under a sibling's `surfaces`, that file is owned by the sibling ticket. When you split the current ticket into tasks:
+- DO NOT list any sibling-owned file under any task's `### Files in scope`.
+- DO list every sibling-owned file referenced by the brief under each affected task's `### Files explicitly out of scope` along with the owning sibling's ID.
+- If the brief implies a task that would require editing a sibling-owned file, do not create that task — surface it as an open question against the sibling ticket instead.
+
+This is non-negotiable: Gate D (file-edit hook) will block any task whose implementation tries to write to a sibling-owned file at runtime.
+
+## Required per-task sections (Gate C)
+
+Every `## Task N` block in tasks.md MUST include both of these sections, in addition to the existing Type / Description / Requirements Covered / Deliverables / Acceptance Criteria / Dependencies / Test Command sections:
+
+```markdown
+### Files in scope
+- path/or/glob/the/task/may/edit/**
+- another/specific-file.ts
+- (one entry per line; globs ok)
+
+### Files explicitly out of scope
+- sibling-owned/file.ts — owned by [SIBLING-TICKET-ID]
+- (may be empty when no siblings own related surfaces)
+```
+
+Rules:
+- `### Files in scope` is REQUIRED and MUST be non-empty. The orchestrator refuses to dispatch the implement step when any task lacks it.
+- `### Files explicitly out of scope` is REQUIRED but MAY be empty. Populate from the sibling-surfaces list in `related-tickets.json`. Include the owning ticket ID for each entry.
+- Use real paths or glob patterns (e.g. `app/api/trpc/routers/views.ts`, `components/**/*.tsx`). Do not paraphrase ("the views router").
+- A file listed under `### Files explicitly out of scope` MUST NOT also appear under `### Files in scope` of any task in the same tasks.md.
+
 ## Critical Rules
 
 ### GOLDEN RULE: NEVER DROP DETAILS

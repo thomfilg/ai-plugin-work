@@ -301,8 +301,21 @@ Note: The implement-gate executes this command automatically before/after dispat
 - `<path/to/likely/file.ts>`
 - `<path/to/another/file.ts>`
 
+### Files in scope (REQUIRED — Gate C)
+- <path/or/glob/the/task/may/edit/**>
+- <another/specific-file.ts>
+
+### Files explicitly out of scope (REQUIRED — Gate C; may be empty when no siblings own related surfaces)
+- <sibling-owned/file.ts — owned by [SIBLING-TICKET-ID]>
+
 ---
 ```
+
+**Required sections (Gate C):**
+- `### Files in scope` — Glob patterns or paths the task may edit. Must be non-empty. The implement-step hook blocks any file edit outside this set.
+- `### Files explicitly out of scope` — Paths owned by sibling tickets that this task must not touch. May be empty when no siblings exist. Populate from `tasks/<ticket>/related-tickets.json` (`surfaces` array under each sibling).
+
+The `### Suggested Scope` field is the legacy precursor — leave it in place for backwards compatibility, but ALSO emit the two new sections above.
 
 ### Task format (checkpoint tasks)
 

@@ -66,9 +66,12 @@ function runGate(stepName, safeName, ctx, deps) {
 
 // --- Register built-in enrichments ---
 require('./ticket')(register);
+require('./related-tickets-inject')(register);
 require('./brief-gate')(register);
 require('./spec-gate')(register);
 require('./context-inject')(register);
+require('./tasks-scope-gate')(register);
+require('./discrepancy-gate')(register);
 require('./implement')(register);
 require('./check')(register);
 require('./follow-up')(register);

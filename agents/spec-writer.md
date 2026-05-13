@@ -40,6 +40,34 @@ You will receive:
 2. The worktree directory to explore
 3. A path where to save the spec
 
+## Brief→Spec coverage (Gate B — REQUIRED)
+
+Every brief P0 ID must be referenced in the spec. The orchestrator runs a checker at spec_gate that scans the spec for `P0 #N` mentions (in headings or inline) for each P0 in the brief's `### Must Have (P0)` section. Missing references block transition.
+
+Conventions:
+- Add a heading per P0: `### P0 #1 — <short title>` followed by the design for that P0.
+- Or, if multiple P0s share a section, prefix the section with `P0 #1, #2, #3:` and discuss them together.
+
+Also REQUIRED: restate the brief's `## Out of scope (sibling-owned)` section in the spec verbatim under the same heading. Surfaces listed there must NOT be targeted by any spec design decision. The orchestrator checks for the heading AND for at least one matching entry; the section blocks transition when missing.
+
+For every output schema you modify, list every consumer (grep usages of the schema's imports / type aliases) and mark each consumer *included* or *excluded with reason*. This is the consumer-path manifest; silent narrowing is what caused the ECHO-4552 / ECHO-4553 incident this gate exists to prevent.
+
+## Related Tickets Manifest (READ FIRST — and stop asking the user about siblings)
+
+You have `related-tickets.json`. **NEVER** ask the user questions like "does sibling X own this procedure?", "which surface is the sibling responsible for?", or "is the backend in this ticket or a related ticket?" — the manifest answers all of these. Read it; check the `surfaces` array of each sibling/parent/blockedBy/dependsOn/relatedTo entry; decide ownership yourself. Only ask the user when the manifest is genuinely ambiguous (sibling exists but PR not merged AND surfaces empty).
+
+Before reading the brief, read `tasks/<ticket>/related-tickets.json` (its path is injected into your prompt under `## Related Tickets (READ FIRST)`). It documents:
+- The parent ticket and its `surfaces` (files changed in its merged PR).
+- Sibling tickets (children of the same parent) and the files they own.
+- `blockedBy` / `dependsOn` / `relatedTo` links.
+
+For every file listed under a sibling's `surfaces`, treat it as **out of scope for this spec**. If the brief contains a requirement that would force you to design changes against a sibling-owned file:
+1. Do NOT design the change.
+2. Restate the brief's `## Out of Scope` section in your spec verbatim under the same heading.
+3. Add an open question naming the sibling ticket and asking whether to wait for it or extend scope.
+
+When designing API / schema changes, also enumerate every consumer of a modified output schema (grep for usages). Consumer paths must be explicitly *included* or *excluded with reason* in the spec — never silently narrowed.
+
 ## Workflow
 
 1. **Read the brief and project docs** - Extract goals, requirements, constraints, success metrics. If READ_DOCS_ON_SPEC docs are provided (pattern-first.md, architecture.md, ARCH.md, etc.), read them FIRST — they define the app's component structure, shared libraries, and conventions.
@@ -161,8 +189,8 @@ The `gherkin.feature` file must contain the full Feature block with all scenario
 - Minimum 2 scenarios total
 - At least 1 scenario tagged @integration or @e2e
 - Use Feature/Scenario/Given/When/Then structure
-- Tag each scenario with @integration (tests internal logic/APIs) or @e2e (tests full user flows)
-- @unit tags are also accepted but not enforced by the gate
+- Tag each scenario with **exactly** `@integration` (tests internal logic/APIs) or `@e2e` (tests full user flows)
+- **No other tags are valid.** `@unit`, `@storybook`, `@smoke`, `@regression`, custom tags, etc. will cause spec_gate to fail validation. If you think the work needs a different tag, pick `@integration` for component / hook / service level tests and `@e2e` for browser-driven flows — and STOP. Do not invent new tags.
 - Existing specs using the old `## Test Scenarios` heading (without "(Gherkin)") are also accepted by the parser
 
 **E2E scenario rules:**

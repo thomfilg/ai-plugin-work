@@ -38,7 +38,7 @@ function readTaskTestCommand(tasksDir, taskNum) {
     const content = fs.readFileSync(tasksMdPath, 'utf8');
     const sectionRe = new RegExp(
       `## Task ${taskNum}\\b[\\s\\S]*?(?=\\n## Task \\d|\\n## (?!Task )|$)`,
-      'm'
+      ''
     );
     const sectionMatch = content.match(sectionRe);
     if (!sectionMatch) return null;
