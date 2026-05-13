@@ -187,8 +187,8 @@ The `gherkin.feature` file must contain the full Feature block with all scenario
 - Minimum 2 scenarios total
 - At least 1 scenario tagged @integration or @e2e
 - Use Feature/Scenario/Given/When/Then structure
-- Tag each scenario with @integration (tests internal logic/APIs) or @e2e (tests full user flows)
-- @unit tags are also accepted but not enforced by the gate
+- Tag each scenario with **exactly** `@integration` (tests internal logic/APIs) or `@e2e` (tests full user flows)
+- **No other tags are valid.** `@unit`, `@storybook`, `@smoke`, `@regression`, custom tags, etc. will cause spec_gate to fail validation. If you think the work needs a different tag, pick `@integration` for component / hook / service level tests and `@e2e` for browser-driven flows — and STOP. Do not invent new tags.
 - Existing specs using the old `## Test Scenarios` heading (without "(Gherkin)") are also accepted by the parser
 
 **E2E scenario rules:**

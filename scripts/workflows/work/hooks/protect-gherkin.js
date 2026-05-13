@@ -83,8 +83,12 @@ function getStepInProgress(ticketId) {
   }
 }
 
+// Allow edits during `spec` (initial authoring) AND `spec_gate` (recovery
+// path: spec_gate's validator failed against gherkin.feature and the agent
+// needs to fix the tags / structure in-place without rewinding the state
+// machine).
 const protector = createArtifactProtector({
-  artifacts: [{ basename: 'gherkin.feature', step: 'spec' }],
+  artifacts: [{ basename: 'gherkin.feature', step: 'spec', allowedSteps: ['spec_gate'] }],
   getStepInProgress,
   getTicketId,
 });

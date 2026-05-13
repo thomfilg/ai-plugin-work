@@ -124,18 +124,21 @@ module.exports = function registerSpecGate(register) {
     });
     lines.push('');
     lines.push('### What to do\n');
-    lines.push('Edit spec.md to fix the gherkin section. Common issues:');
+    const gherkinPath = path.join(tasksDir, 'gherkin.feature');
+    lines.push(`Edit \`${gherkinPath}\` (the standalone file the validator reads) to fix:`);
     lines.push('- Missing Feature/Scenario/Given/When/Then structure');
-    lines.push('- Missing @integration or @e2e tags');
-    lines.push('- Less than 2 scenarios');
-    lines.push('- Gherkin not inside a ```gherkin code fence');
+    lines.push('- Missing or invalid tags — ONLY `@integration` and `@e2e` are valid');
+    lines.push('  - `@unit`, `@storybook`, `@smoke`, etc. WILL fail validation');
+    lines.push('- Fewer than 2 scenarios');
+    lines.push('');
+    lines.push('Also keep `spec.md` consistent if it embeds gherkin inline.');
     lines.push('');
     lines.push(
       `If this change is non-testable, add \`<!-- gherkin-skip: reason -->\` to spec.md instead.`
     );
     lines.push('');
     lines.push(
-      'IMPORTANT: Edit spec.md directly to fix the gherkin. Do NOT regenerate the entire spec.'
+      'IMPORTANT: Edit gherkin.feature in-place — do NOT regenerate the entire spec. `protect-gherkin.js` allows writes during spec_gate when validation is failing.'
     );
 
     entry.agentPrompt = lines.join('\n');
