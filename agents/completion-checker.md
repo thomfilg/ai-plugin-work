@@ -58,6 +58,18 @@ When verification is COMPLETE, the orchestrator automatically marks tasks as ver
 4. Consider obvious implicit requirements (e.g., if asked to research, provide sources)
 5. Verify deliverables exist when applicable (files, spreadsheet updates, etc.)
 
+## Gate E — scope-diff verification (when invoked via /work2)
+
+When the check step injects a `## Scope-diff summary` block into your prompt (it lists `in scope` / `out of scope` / `unaccounted` file counts plus per-file detail), enforce these rules:
+
+- **`out of scope` (sibling-owned) > 0** → BLOCK completion. Every file in the list is owned by a sibling ticket per tasks.md `### Files explicitly out of scope`. Tell the user to either revert those edits OR file a sibling-gap question and stop. Do NOT proceed to commit.
+- **`unaccounted` > 0** → require justification. Each unaccounted file was not declared in any task's `### Files in scope`. For each one, decide:
+  - If it's a legitimate side effect (test fixture, snapshot, migration auto-generated, formatter pass) → accept and require the PR description to list it under `## Out-of-scope changes` with the one-line reason.
+  - If it's drift (the agent edited a file outside scope by accident) → BLOCK and ask the user to revert.
+- **All files in scope** → pass; no extra action.
+
+Surface this section verbatim in the verification output so the PR generator can copy it into the PR description.
+
 ## CRITICAL: Check the Correct Source
 
 **Before verifying deliverables, determine WHERE to check:**
