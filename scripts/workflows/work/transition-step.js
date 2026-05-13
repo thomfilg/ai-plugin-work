@@ -113,9 +113,32 @@ function transitionStep(ticket, targetStep, deps) {
   if (TDD_GATED_STEPS.includes(currentStep) && currentStep !== targetStep && !_isCheckpointTask) {
     const { exists, parseError, evidence } = readTddEvidence(safeTicket, currentStep, taskNum);
     if (!exists || parseError) {
-      const tddStatePath = path.resolve(__dirname, '..', 'work-implement', 'tdd-phase-state.js');
-      const taskFlag = taskNum ? ` --task ${taskNum}` : '';
-      const msg = `Cannot leave ${currentStep} without TDD evidence. Use the TDD phase system:\n  node ${tddStatePath} init ${safeTicket}${taskFlag}\n  node ${tddStatePath} record-red ${safeTicket}${taskFlag} --cmd "<test command>"\n  node ${tddStatePath} record-green ${safeTicket}${taskFlag} --cmd "<test command>"\n  node ${tddStatePath} record-refactor ${safeTicket}${taskFlag} --cmd "<test command>"`;
+      const taskLabel = taskNum ? ` for task ${taskNum}` : '';
+      // /work2 flow: implement-gate.js runs the task's `### Test Command` and
+      // writes tdd-phase.json itself. Agents must NOT invoke tdd-phase-state.js
+      // (the legacy CLI) — its writes to tdd-phase.json are blocked by the
+      // protect-orchestrator-state hook. Surface the gate-driven failure modes
+      // and the diagnostic that's actually available (state file).
+      const wsPath = path.join(TASKS_BASE, safeTicket, '.work-state.json');
+      const msg = [
+        `Cannot leave ${currentStep} without TDD evidence${taskLabel}.`,
+        '',
+        "In /work2 the implement-gate runs your task's `### Test Command`",
+        'automatically and writes tdd-phase.json. Agents do NOT invoke',
+        'tdd-phase-state.js, and direct writes to tdd-phase.json are blocked.',
+        '',
+        'If the gate keeps failing, diagnose:',
+        `  1. Open ${wsPath} and read \`_tddRetryReason\` /`,
+        '     `_tddRetryCommand` / `_tddRetryExitCode` / `_tddRetryOutputTail`',
+        '     — they name the exact gate failure.',
+        `  2. Confirm tasks.md "## Task ${taskNum || '<N>'}" has a \`### Test Command\``,
+        '     block with a runnable shell command.',
+        '  3. Common causes: required env var (e.g. $TEST_UNIT_COMMAND) unset,',
+        "     test command references files that don't exist yet, malformed",
+        '     parser output (fence remnant, bare interpreter name).',
+        '',
+        'If the state file is corrupted and needs manual repair, stop and ask the user.',
+      ].join('\n');
       return { error: true, message: msg };
     }
     const validation = validateTddEvidence(evidence);

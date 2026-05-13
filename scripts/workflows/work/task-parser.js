@@ -179,6 +179,11 @@ function extractTestCommand(taskBody) {
     if (trimmed.startsWith('#')) continue;
     const stripped = trimmed.replace(/^`+|`+$/g, '').trim();
     if (!stripped) continue;
+    // Skip parser artefacts that would silently `execSync` to garbage:
+    //   - bare interpreter names ("bash", "sh", "node") with no args
+    //   - leftover backticks / fence markers
+    if (/^(?:bash|sh|zsh|fish|node|python|python3)\s*$/i.test(stripped)) continue;
+    if (/^[`]+$/.test(stripped)) continue;
     cmdLines.push(stripped);
     if (!stripped.endsWith('\\')) break;
   }
