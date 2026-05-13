@@ -25,16 +25,23 @@ function validateTask(task) {
   }
   const label = `Task ${task.num ?? '?'}`;
 
-  if (!Array.isArray(task.filesInScope) || task.filesInScope.length === 0) {
-    errors.push(`${label} is missing a non-empty \`### Files in scope\` section`);
+  // Legacy fallback: tasks written before Gate C may carry `### Suggested Scope`
+  // instead of `### Files in scope`. Accept that as evidence of scope intent
+  // and ONLY error when BOTH are missing/empty. New tasks SHOULD use
+  // `### Files in scope`; the warning surfaces via downstream check-step
+  // tooling (Gate E), not as a hard implement-step block.
+  const hasInScope = Array.isArray(task.filesInScope) && task.filesInScope.length > 0;
+  const hasLegacyScope =
+    typeof task.suggestedScope === 'string' && task.suggestedScope.trim().length > 0;
+  if (!hasInScope && !hasLegacyScope) {
+    errors.push(
+      `${label} is missing both \`### Files in scope\` AND \`### Suggested Scope\` (need at least one)`
+    );
   }
-  // `Files explicitly out of scope` may legitimately be empty (no siblings).
-  // We require the SECTION to exist, but the parser today returns [] both for
-  // "section missing" and "section empty" — we can't distinguish without
-  // re-reading the raw markdown. For now treat it as advisory: warn if no
-  // siblings declared in the manifest *and* this is empty. Strict enforcement
-  // happens at Gate A when the sibling-gap list is finalized.
-  if (!Array.isArray(task.filesOutOfScope)) {
+  // `### Files explicitly out of scope` is forward-looking and not required
+  // for legacy tasks. New tasks (those with `### Files in scope`) SHOULD
+  // include it; tolerate absence here and surface in Gate E review.
+  if (task.filesOutOfScope !== undefined && !Array.isArray(task.filesOutOfScope)) {
     errors.push(`${label} has malformed \`### Files explicitly out of scope\` section`);
   }
   return errors;

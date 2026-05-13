@@ -30,22 +30,41 @@ describe('validateTask', () => {
     assert.deepEqual(errors, []);
   });
 
-  it('fails when filesInScope is missing', () => {
+  it('fails when both filesInScope and suggestedScope are missing', () => {
     const errors = ts.validateTask({ num: 2, filesOutOfScope: [] });
     assert.equal(errors.length, 1);
     assert.match(errors[0], /Task 2/);
     assert.match(errors[0], /Files in scope/);
   });
 
-  it('fails when filesInScope is empty', () => {
-    const errors = ts.validateTask({ num: 3, filesInScope: [], filesOutOfScope: [] });
+  it('fails when both filesInScope and suggestedScope are empty', () => {
+    const errors = ts.validateTask({
+      num: 3,
+      filesInScope: [],
+      suggestedScope: '',
+      filesOutOfScope: [],
+    });
     assert.equal(errors.length, 1);
-    assert.match(errors[0], /Files in scope/);
   });
 
-  it('fails when filesOutOfScope is not an array', () => {
+  it('accepts legacy suggestedScope as fallback when filesInScope is missing', () => {
+    const errors = ts.validateTask({
+      num: 5,
+      filesInScope: [],
+      suggestedScope: '- lib/x.ts',
+      filesOutOfScope: [],
+    });
+    assert.deepEqual(errors, []);
+  });
+
+  it('fails when filesOutOfScope is non-array (malformed)', () => {
     const errors = ts.validateTask({ num: 4, filesInScope: ['x.ts'], filesOutOfScope: 'oops' });
     assert.match(errors.join('|'), /out of scope/);
+  });
+
+  it('tolerates missing filesOutOfScope (legacy task)', () => {
+    const errors = ts.validateTask({ num: 6, filesInScope: ['x.ts'] });
+    assert.deepEqual(errors, []);
   });
 
   it('handles non-object input gracefully', () => {
