@@ -73,8 +73,8 @@ describe('tasks-scope-gate', () => {
     writeTasks([validTaskBody(1), validTaskBody(2)].join('\n'));
     const reg = makeRegistry();
     registerEnrichment(reg.register);
-    const entry = { step: 'implement' };
-    reg.run('implement', entry, ctx());
+    const entry = { step: 'tasks_gate' };
+    reg.run('tasks_gate', entry, ctx());
     assert.equal(entry._overrideInstruction, undefined);
   });
 
@@ -82,8 +82,8 @@ describe('tasks-scope-gate', () => {
     writeTasks([validTaskBody(1, false, true), validTaskBody(2)].join('\n'));
     const reg = makeRegistry();
     registerEnrichment(reg.register);
-    const entry = { step: 'implement' };
-    reg.run('implement', entry, ctx());
+    const entry = { step: 'tasks_gate' };
+    reg.run('tasks_gate', entry, ctx());
     assert.ok(entry._overrideInstruction);
     assert.equal(entry._overrideInstruction.action, 'blocked');
     assert.match(entry._overrideInstruction.details, /Task 1/);
@@ -104,16 +104,16 @@ describe('tasks-scope-gate', () => {
     writeTasks(body);
     const reg = makeRegistry();
     registerEnrichment(reg.register);
-    const entry = { step: 'implement' };
-    reg.run('implement', entry, ctx());
+    const entry = { step: 'tasks_gate' };
+    reg.run('tasks_gate', entry, ctx());
     assert.equal(entry._overrideInstruction, undefined);
   });
 
   it('skips silently when tasks.md does not exist', () => {
     const reg = makeRegistry();
     registerEnrichment(reg.register);
-    const entry = { step: 'implement' };
-    reg.run('implement', entry, ctx());
+    const entry = { step: 'tasks_gate' };
+    reg.run('tasks_gate', entry, ctx());
     assert.equal(entry._overrideInstruction, undefined);
   });
 
@@ -122,8 +122,8 @@ describe('tasks-scope-gate', () => {
     const reg = makeRegistry();
     registerEnrichment(reg.register);
     const existing = { type: 'work_instruction', action: 'blocked', reason: 'other' };
-    const entry = { step: 'implement', _overrideInstruction: existing };
-    reg.run('implement', entry, ctx());
+    const entry = { step: 'tasks_gate', _overrideInstruction: existing };
+    reg.run('tasks_gate', entry, ctx());
     assert.equal(entry._overrideInstruction, existing);
   });
 
@@ -131,8 +131,8 @@ describe('tasks-scope-gate', () => {
     writeTasks([validTaskBody(1, false, false), validTaskBody(2, false, true)].join('\n'));
     const reg = makeRegistry();
     registerEnrichment(reg.register);
-    const entry = { step: 'implement' };
-    reg.run('implement', entry, ctx());
+    const entry = { step: 'tasks_gate' };
+    reg.run('tasks_gate', entry, ctx());
     assert.ok(entry._overrideInstruction);
     assert.match(entry._overrideInstruction.details, /Task 1/);
     assert.match(entry._overrideInstruction.details, /Task 2/);

@@ -633,7 +633,10 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
     {
       basename: 'tasks.md',
       step: STEPS.tasks,
-      allowedSteps: [STEPS.task_review],
+      // Gate C runs at tasks_gate; in-place repair must be possible there
+      // without widening implement-step authority (which would let agents
+      // grant themselves broader Gate D file scope mid-implementation).
+      allowedSteps: [STEPS.tasks_gate, STEPS.task_review],
       agents: [],
       contentGuard: (content) => {
         try {

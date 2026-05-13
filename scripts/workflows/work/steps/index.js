@@ -14,6 +14,7 @@ const briefGateStep = require('./brief-gate');
 const specStep = require('./spec');
 const specGateStep = require('./spec-gate');
 const tasksStep = require('./tasks'); // GH-244: specGateStep registered above (tested in step-registry.test.js)
+const tasksGateStep = require('./tasks-gate');
 const implementStep = require('./implement');
 const commitStep = require('./commit');
 const taskReviewStep = require('./task-review');
@@ -43,6 +44,7 @@ const STEP_PIPELINE = [
   specStep,
   specGateStep,
   tasksStep,
+  tasksGateStep,
   implementStep,
   commitStep,
   taskReviewStep,
@@ -67,6 +69,8 @@ module.exports = {
   briefGateStep,
   // GH-244: export specGateStep as a named handle
   specGateStep,
+  // tasks_gate: export so tests can reference the Gate C handler directly.
+  tasksGateStep,
   // GH-211 Task 5.2: export taskReviewStep as a named handle so external
   // consumers (and tests) can reference the per-task review gate without
   // knowing its position in STEP_PIPELINE. The gate runs between commitStep
