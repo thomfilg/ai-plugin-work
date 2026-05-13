@@ -92,7 +92,21 @@ function _parseScopeList(sectionMatch) {
     const line = raw.trim();
     if (!line) continue;
     if (line.startsWith('<!--')) continue;
-    const stripped = _normalizeScope(line).replace(/^`+/, '').replace(/`+$/, '').trim();
+    let stripped = _normalizeScope(line).replace(/^`+/, '').replace(/`+$/, '').trim();
+    if (!stripped) continue;
+    // Strip trailing annotations: the brief-writer / jira-task-creator
+    // templates produce entries like:
+    //   `lib/sibling.ts — owned by [GH-100]`
+    //   `app/x.ts -- owned by SIBLING-1, see #42`
+    //   `path/to/y.ts (sibling-owned: GH-99)`
+    // Gate D / Gate E match this entry against actual filesystem paths,
+    // so the annotation must not survive into the parsed value. Cut at
+    // the first ` — `, ` -- `, ` # `, or ` (`.
+    const cutMatch = stripped.match(/\s+(?:—|--|#|\()/);
+    if (cutMatch) stripped = stripped.slice(0, cutMatch.index).trim();
+    // Strip any wrapping backticks that survived (e.g. `lib/x.ts` — owned…
+    // becomes `lib/x.ts` after the cut; strip the closing backtick).
+    stripped = stripped.replace(/^`+/, '').replace(/`+$/, '').trim();
     if (!stripped) continue;
     if (seen.has(stripped)) continue;
     seen.add(stripped);
