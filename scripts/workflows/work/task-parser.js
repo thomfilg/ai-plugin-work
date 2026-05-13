@@ -75,6 +75,32 @@ function _normalizeScope(line) {
     .trim();
 }
 
+/**
+ * Parse a bulleted scope section (Files in scope / Files explicitly out of scope)
+ * into a deduplicated array of glob patterns / paths. Skips empty lines,
+ * comments, and lines that are just markdown noise.
+ *
+ * @param {RegExpMatchArray|null} sectionMatch
+ * @returns {string[]}
+ */
+function _parseScopeList(sectionMatch) {
+  if (!sectionMatch) return [];
+  const lines = sectionMatch[1].split('\n');
+  const out = [];
+  const seen = new Set();
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (line.startsWith('<!--')) continue;
+    const stripped = _normalizeScope(line).replace(/^`+/, '').replace(/`+$/, '').trim();
+    if (!stripped) continue;
+    if (seen.has(stripped)) continue;
+    seen.add(stripped);
+    out.push(stripped);
+  }
+  return out;
+}
+
 // ─── Task Parsing ────────────────────────────────────────────────────────────
 
 function parseTasks(tasksDir) {
@@ -125,9 +151,19 @@ function parseTasks(tasksDir) {
     const acMatch = body.match(/### Acceptance Criteria\s*\n([\s\S]*?)(?=\n###|\n## |$)/);
     const acceptanceCriteria = acMatch ? acMatch[1].trim() : '';
 
-    // Extract ### Suggested Scope
+    // Extract ### Suggested Scope (legacy, kept for backwards compat)
     const scopeMatch = body.match(/### Suggested Scope[^\n]*\n([\s\S]*?)(?=\n###|\n## |$)/);
     const suggestedScope = scopeMatch ? scopeMatch[1].trim() : '';
+
+    // Gate C: ### Files in scope (glob patterns or paths the task may edit)
+    const filesInScope = _parseScopeList(
+      body.match(/### Files in scope[^\n]*\n([\s\S]*?)(?=\n###|\n## |$)/)
+    );
+
+    // Gate C: ### Files explicitly out of scope (sibling-owned paths the task must NOT edit)
+    const filesOutOfScope = _parseScopeList(
+      body.match(/### Files explicitly out of scope[^\n]*\n([\s\S]*?)(?=\n###|\n## |$)/)
+    );
 
     // Extract ### Test Command (machine-parseable command for gate-driven TDD).
     // Skip ```bash``` fence markers, leading shell comments, and inline-code
@@ -146,6 +182,8 @@ function parseTasks(tasksDir) {
       requirementsCovered,
       acceptanceCriteria,
       suggestedScope,
+      filesInScope,
+      filesOutOfScope,
       testCommand,
       rawContent: `## Task ${num} ${body}`,
     });
