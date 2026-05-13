@@ -308,11 +308,12 @@ function getNextInstruction(ticketRaw, rework) {
   // This rejects malformed input like "ECHO-4446 TASKS" (whitespace), traversal,
   // or non-canonical bases — preventing creation of bogus tasks/ subfolders.
   const providerConfigEarly = tp.getProviderConfig({ skipPrompt: true });
-  let ticketBase, suffix;
+  let ticketBase, suffix, separator;
   try {
     const validated = validateRawTicketInput(ticketRaw, providerConfigEarly);
     ticketBase = validated.ticketBase;
     suffix = validated.suffix;
+    separator = validated.separator || null;
   } catch (err) {
     return {
       type: 'work_instruction',
@@ -400,7 +401,10 @@ function getNextInstruction(ticketRaw, rework) {
     if (planState.ticketBase === undefined) planState.ticketBase = safeBase;
     if (planState.ticketSuffix === undefined) planState.ticketSuffix = suffix || null;
     if (planState.ticketSeparator === undefined) {
-      planState.ticketSeparator = suffix ? '/' : null;
+      // Use the separator the user actually typed (validateRawTicketInput
+      // returns '-', '/', or null). Falling back to '/' only when a suffix
+      // exists but the parser didn't report a separator — defensive only.
+      planState.ticketSeparator = suffix ? separator || '/' : null;
     }
     saveWorkState(safeName, planState);
   } else {
@@ -410,7 +414,7 @@ function getNextInstruction(ticketRaw, rework) {
         ticketId: safeName,
         ticketBase: safeBase,
         ticketSuffix: suffix || null,
-        ticketSeparator: suffix ? '/' : null,
+        ticketSeparator: suffix ? separator || '/' : null,
         description: '',
         currentStep: 1,
         status: 'in_progress',
