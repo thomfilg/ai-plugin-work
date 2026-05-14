@@ -129,14 +129,52 @@ function getActiveTask(tasksDir) {
 const BASH_WRITE_TOKEN =
   /(?:>>?\s*|tee(?:\s+-a)?\s+|\bof=|\bcp\s+\S+\s+|\bmv\s+\S+\s+)([^\s;|&>]+)/g;
 
+/**
+ * Characters that NEVER appear in a real file path but DO appear in shell
+ * expressions, JS arrow functions, comparison operators, etc. If a captured
+ * "token" contains any of these, it is not a filename — it's syntax bleed-
+ * through from quoted code like `node -e "x=>y"` or `bash -c "test a > b"`.
+ *
+ * This prevents the gate from blocking commands whose inline interpreter
+ * code happens to contain `>` (arrow functions, comparators, redirects
+ * inside quoted strings).
+ */
+const NON_PATH_CHAR = /[()=+{}[\]<>$`!*?]/;
+
+function looksLikePath(token) {
+  if (!token) return false;
+  if (NON_PATH_CHAR.test(token)) return false;
+  // Reject pure-numeric tokens (file descriptors after redirects like `2>&1`
+  // get caught here even though `>` is excluded above) and dot/dotdot.
+  if (/^\d+$/.test(token)) return false;
+  if (token === '.' || token === '..') return false;
+  return true;
+}
+
+/**
+ * Strip the body of single- and double-quoted strings before scanning so
+ * shell operators inside `"..."` or `'...'` don't trigger false positives.
+ * This is intentionally approximate (no shell escape handling, no `$(...)`
+ * nesting) — the hook fails open and the protect-state-files protector
+ * still catches real bypass attempts via Vector 2/3/4.
+ */
+function stripQuotedStrings(cmd) {
+  return String(cmd || '')
+    .replace(/'[^']*'/g, "''")
+    .replace(/"(?:[^"\\]|\\.)*"/g, '""');
+}
+
 function extractBashWriteTargets(cmd) {
   if (!cmd || typeof cmd !== 'string') return [];
   const out = new Set();
+  const scanCmd = stripQuotedStrings(cmd);
   BASH_WRITE_TOKEN.lastIndex = 0;
   let m;
-  while ((m = BASH_WRITE_TOKEN.exec(cmd)) !== null) {
+  while ((m = BASH_WRITE_TOKEN.exec(scanCmd)) !== null) {
     const tok = (m[1] || '').replace(/^["']|["']$/g, '');
-    if (tok && !tok.startsWith('-')) out.add(tok);
+    if (!tok || tok.startsWith('-')) continue;
+    if (!looksLikePath(tok)) continue;
+    out.add(tok);
   }
   return Array.from(out);
 }
