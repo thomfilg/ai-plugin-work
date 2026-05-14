@@ -74,22 +74,27 @@ module.exports = function registerMonitor(register) {
     // to be reported. Retry a few times before trusting UNKNOWN.
     // Bounded retry (3 * 3s = 9s max latency) — better than letting a
     // conflict slip past the gate for an entire cycle.
-    let mergeableRetries = 0;
-    while (prInfo && prInfo.mergeable === 'UNKNOWN' && mergeableRetries < 3) {
+    // Synchronous sleep via Atomics.wait — no subprocess, no event-loop
+    // dependency. Uses a private SharedArrayBuffer so the wait can never be
+    // notified externally; it always times out after `ms` milliseconds.
+    const sleepSync = (ms) => {
       try {
-        execFileSync('node', ['-e', 'setTimeout(()=>{}, 3000)'], {
-          stdio: 'ignore',
-          timeout: 5000,
-        });
+        const sab = new SharedArrayBuffer(4);
+        Atomics.wait(new Int32Array(sab), 0, 0, ms);
       } catch {
         /* sleep best-effort */
       }
+    };
+
+    let mergeableRetries = 0;
+    while (prInfo && prInfo.mergeable === 'UNKNOWN' && mergeableRetries < 3) {
+      mergeableRetries++;
+      sleepSync(3000);
       try {
         prInfo = getPRInfo(prArg);
       } catch {
         break;
       }
-      mergeableRetries++;
     }
 
     // First-class conflict signal. Any later step (triage, fix-reviews,
