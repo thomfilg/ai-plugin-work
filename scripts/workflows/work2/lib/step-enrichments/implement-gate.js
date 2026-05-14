@@ -22,6 +22,78 @@ const { execFileSync, execSync } = require('child_process');
 const { markProgress } = require(path.join(__dirname, '..', 'mark-task-progress'));
 
 const { resolveTaskType } = require(path.join(__dirname, '..', 'resolve-task-type'));
+const { parseTasks } = require(path.join(__dirname, '..', 'task-graph'));
+
+/**
+ * Reconcile `ws.tasksMeta` against the current tasks.md.
+ *
+ * When tasks.md is edited mid-workflow (e.g. tasks_gate repair drops a task),
+ * `tasksMeta.tasks` keeps the stale entries and the gate then demands TDD
+ * evidence for a task that no longer exists. Truncate the tail to match the
+ * file when — AND ONLY WHEN — all dropped entries are still pending (never
+ * silently drop completed work).
+ *
+ * Returns true when state was mutated and saved.
+ */
+function reconcileTasksMetaWithFile(ws, tasksDir, saveWorkState, safeName, log) {
+  if (!tasksDir) return false;
+  if (!ws?.tasksMeta || !Array.isArray(ws.tasksMeta.tasks)) return false;
+
+  let parsed;
+  try {
+    parsed = parseTasks(tasksDir);
+  } catch {
+    return false;
+  }
+  if (!Array.isArray(parsed) || parsed.length === 0) return false;
+
+  const fileCount = parsed.length;
+  const stateCount = ws.tasksMeta.tasks.length;
+  if (fileCount >= stateCount) return false;
+
+  // Only truncate when EVERY tail entry past fileCount is non-completed.
+  // Dropping completed entries would lose evidence of done work.
+  const tail = ws.tasksMeta.tasks.slice(fileCount);
+  const allTailPending = tail.every((t) => t && t.status !== 'completed');
+  if (!allTailPending) return false;
+
+  ws.tasksMeta.tasks = ws.tasksMeta.tasks.slice(0, fileCount);
+  if (typeof ws.tasksMeta.totalTasks === 'number') {
+    ws.tasksMeta.totalTasks = fileCount;
+  }
+  if ((ws.tasksMeta.currentTaskIndex ?? 0) > fileCount) {
+    ws.tasksMeta.currentTaskIndex = fileCount;
+  }
+
+  // Clear stale retry state that pointed at a now-missing task.
+  if (typeof ws._tddRetryTask === 'number' && ws._tddRetryTask > fileCount) {
+    delete ws._tddRetryReason;
+    delete ws._tddRetryCount;
+    delete ws._tddRetryCommand;
+    delete ws._tddRetryExitCode;
+    delete ws._tddRetryOutputTail;
+    delete ws._tddRetryTask;
+  }
+  if (typeof ws._preTestForTask === 'number' && ws._preTestForTask > fileCount) {
+    delete ws._preTestForTask;
+  }
+
+  try {
+    saveWorkState(safeName, ws);
+  } catch {
+    return false;
+  }
+  if (typeof log === 'function') {
+    try {
+      log(
+        `tasksMeta reconciled with tasks.md: ${stateCount} → ${fileCount} (dropped ${stateCount - fileCount} pending tail entr${stateCount - fileCount === 1 ? 'y' : 'ies'})`
+      );
+    } catch {
+      /* fail-open */
+    }
+  }
+  return true;
+}
 
 /**
  * Read the `### Test Command` for a specific task from tasks.md.
@@ -486,6 +558,12 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
   if (!ws?.tasksMeta || !Array.isArray(ws.tasksMeta.tasks)) {
     return null;
   }
+
+  // Reconcile tasksMeta with tasks.md before reading currentIdx/totalTasks.
+  // Mid-workflow tasks.md edits (e.g. tasks_gate repair shrinks the task list)
+  // would otherwise leave stale pending entries and the gate would loop asking
+  // for TDD evidence of a task that no longer exists in tasks.md.
+  reconcileTasksMetaWithFile(ws, ctx && ctx.tasksDir, saveWorkState, safeName, log);
 
   const currentIdx = ws.tasksMeta.currentTaskIndex ?? 0;
   const totalTasks = ws.tasksMeta.tasks.length;
