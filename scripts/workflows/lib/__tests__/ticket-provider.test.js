@@ -502,4 +502,98 @@ describe('ticket-provider', () => {
       assert.equal(tp.normalizeTicketId('PROJ-123-bugfix'), 'PROJ-123-bugfix');
     });
   });
+
+  // ─── validateRawTicketInput ─────────────────────────────────────────
+
+  describe('validateRawTicketInput', () => {
+    it('accepts a plain ticket ID', () => {
+      const tp = freshRequire('../ticket-provider');
+      const r = tp.validateRawTicketInput('ECHO-4446', { provider: 'linear' });
+      assert.deepStrictEqual(r, {
+        ticketBase: 'ECHO-4446',
+        suffix: null,
+        separator: null,
+        canonical: 'ECHO-4446',
+      });
+    });
+
+    it('accepts hyphenated suffix and returns canonical', () => {
+      const tp = freshRequire('../ticket-provider');
+      const r = tp.validateRawTicketInput('APP-1234-foo', { provider: 'jira' });
+      assert.deepStrictEqual(r, {
+        ticketBase: 'APP-1234',
+        suffix: 'foo',
+        separator: '-',
+        canonical: 'APP-1234-foo',
+      });
+    });
+
+    it('accepts slash suffix', () => {
+      const tp = freshRequire('../ticket-provider');
+      const r = tp.validateRawTicketInput('APP-1234/phase1', { provider: 'jira' });
+      assert.deepStrictEqual(r, {
+        ticketBase: 'APP-1234',
+        suffix: 'phase1',
+        separator: '/',
+        canonical: 'APP-1234/phase1',
+      });
+    });
+
+    it('uppercases the base on a lowercase input', () => {
+      const tp = freshRequire('../ticket-provider');
+      const r = tp.validateRawTicketInput('app-1234-foo', { provider: 'jira' });
+      assert.equal(r.ticketBase, 'APP-1234');
+      assert.equal(r.canonical, 'APP-1234-foo');
+    });
+
+    it('rejects internal whitespace (the ECHO-4446 TASKS bug)', () => {
+      const tp = freshRequire('../ticket-provider');
+      assert.throws(
+        () => tp.validateRawTicketInput('ECHO-4446 TASKS', { provider: 'linear' }),
+        /whitespace/
+      );
+    });
+
+    it('rejects path traversal', () => {
+      const tp = freshRequire('../ticket-provider');
+      assert.throws(
+        () => tp.validateRawTicketInput('../../etc/passwd', { provider: 'jira' }),
+        /unsafe|traversal|backslash/i
+      );
+    });
+
+    it('rejects empty input', () => {
+      const tp = freshRequire('../ticket-provider');
+      assert.throws(() => tp.validateRawTicketInput('', { provider: 'jira' }), /required/);
+      assert.throws(() => tp.validateRawTicketInput(null, { provider: 'jira' }), /required/);
+    });
+
+    it('rejects bases that do not match canonical format', () => {
+      const tp = freshRequire('../ticket-provider');
+      assert.throws(
+        () => tp.validateRawTicketInput('notaticket', { provider: 'jira' }),
+        /Invalid ticket ID base/
+      );
+    });
+
+    it('accepts GitHub URL form', () => {
+      const tp = freshRequire('../ticket-provider');
+      const r = tp.validateRawTicketInput('https://github.com/org/repo/issues/56', {
+        provider: 'github',
+      });
+      assert.equal(r.canonical, 'GH-56');
+      assert.equal(r.ticketBase, 'GH-56');
+    });
+
+    it('accepts #N for github provider', () => {
+      const tp = freshRequire('../ticket-provider');
+      const r = tp.validateRawTicketInput('#56', { provider: 'github' });
+      assert.equal(r.ticketBase, '#56');
+    });
+
+    it('rejects #N for non-github provider', () => {
+      const tp = freshRequire('../ticket-provider');
+      assert.throws(() => tp.validateRawTicketInput('#56', { provider: 'jira' }), /Invalid/);
+    });
+  });
 });

@@ -68,6 +68,119 @@ module.exports = function registerMonitor(register) {
       return null;
     }
 
+    // GitHub returns `mergeable: UNKNOWN` for up to ~30s after a push or a
+    // sibling-PR merge, while it recomputes mergeability. If we accept that
+    // value we declare the PR conflict-free when in fact a conflict is about
+    // to be reported. Retry a few times before trusting UNKNOWN.
+    // Bounded retry (3 * 3s = 9s max latency) — better than letting a
+    // conflict slip past the gate for an entire cycle.
+    // Synchronous sleep via Atomics.wait — no subprocess, no event-loop
+    // dependency. Uses a private SharedArrayBuffer so the wait can never be
+    // notified externally; it always times out after `ms` milliseconds.
+    const sleepSync = (ms) => {
+      try {
+        const sab = new SharedArrayBuffer(4);
+        Atomics.wait(new Int32Array(sab), 0, 0, ms);
+      } catch {
+        /* sleep best-effort */
+      }
+    };
+
+    let mergeableRetries = 0;
+    while (prInfo && prInfo.mergeable === 'UNKNOWN' && mergeableRetries < 3) {
+      mergeableRetries++;
+      sleepSync(3000);
+      try {
+        prInfo = getPRInfo(prArg);
+      } catch {
+        break;
+      }
+    }
+
+    // First-class conflict signal. Any later step (triage, fix-reviews,
+    // report) can check `state._isConflicting` without re-parsing the
+    // formatted output. This makes merge-conflict detection authoritative:
+    // it preempts CI status, review state, and pending bot reviews.
+    const apiConflicting =
+      prInfo.mergeable === 'CONFLICTING' || prInfo.mergeStateStatus === 'DIRTY';
+
+    // Cross-check via local `git merge-tree` against the PR's base branch.
+    // GitHub's `mergeable` API has known false-clean cases:
+    //   - stacked PRs (base is a sibling branch — clean to base, conflicts vs main)
+    //   - stale cached mergeability after a sibling PR merged into the base
+    // Local check is authoritative because it operates on actual tree content.
+    // Best-effort: if `git fetch` / `git merge-tree` fail, trust the API answer.
+    let localConflicting = false;
+    let localConflictFiles = [];
+    const baseBranch = prInfo.baseBranch;
+    if (baseBranch && ctx && ctx.worktreeDir) {
+      try {
+        execFileSync('git', ['fetch', 'origin', baseBranch], {
+          stdio: 'ignore',
+          cwd: ctx.worktreeDir,
+          timeout: 30000,
+        });
+        const mb = execFileSync('git', ['merge-base', 'HEAD', `origin/${baseBranch}`], {
+          encoding: 'utf8',
+          cwd: ctx.worktreeDir,
+          timeout: 10000,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        }).trim();
+        if (mb) {
+          // `git merge-tree` exits with code 1 when conflicts are present —
+          // execFileSync THROWS on non-zero, so we use spawnSync to capture
+          // both stdout and exit code without throwing. Conflict markers in
+          // the default output format are `CONFLICT (content): ...` lines
+          // (NOT `<<<<<<<` separator markers — those only appear with
+          // --write-tree mode against an actual workdir, not against bare
+          // refs like origin/<base>). Each conflicting file gets one
+          // `Auto-merging <path>` and one `CONFLICT (...) <path>` line.
+          const { spawnSync } = require('child_process');
+          const res = spawnSync(
+            'git',
+            ['merge-tree', `--merge-base=${mb}`, 'HEAD', `origin/${baseBranch}`],
+            {
+              encoding: 'utf8',
+              cwd: ctx.worktreeDir,
+              timeout: 30000,
+            }
+          );
+          const tree = (res && (res.stdout || '')) + (res && res.stderr ? res.stderr : '');
+          // Conflict is signaled by EITHER non-zero exit code OR a CONFLICT line.
+          const hasConflictExitCode = res && res.status !== 0 && res.status !== null;
+          const hasConflictMarker = /^CONFLICT \(/m.test(tree);
+          if (hasConflictExitCode || hasConflictMarker) {
+            localConflicting = true;
+            // Extract conflicting file paths from `CONFLICT (...): Merge conflict in <path>`
+            // and `Auto-merging <path>` lines.
+            for (const line of tree.split('\n')) {
+              const m =
+                line.match(/^CONFLICT \([^)]+\):.*?(?:in|on) (.+?)$/) ||
+                line.match(/^Auto-merging (.+?)$/);
+              if (m && !localConflictFiles.includes(m[1])) {
+                localConflictFiles.push(m[1]);
+              }
+              if (localConflictFiles.length >= 3) break;
+            }
+          }
+        }
+      } catch {
+        /* network/auth failure → trust API */
+      }
+    }
+
+    state._mergeStatus = {
+      mergeable: prInfo.mergeable || 'UNKNOWN',
+      mergeStateStatus: prInfo.mergeStateStatus || 'UNKNOWN',
+      baseBranch: baseBranch || null,
+      apiConflicting,
+      localConflicting,
+      localConflictFiles,
+      isConflicting: apiConflicting || localConflicting,
+      retries: mergeableRetries,
+    };
+    state._isConflicting = state._mergeStatus.isConflicting;
+
     if (prInfo.state === 'MERGED') {
       state.lastMonitorResult = { exitCode: 0, output: `PR #${prInfo.number} is merged.` };
       state.currentStep = 'report';
@@ -124,11 +237,16 @@ module.exports = function registerMonitor(register) {
       output = lines.join('\n');
     }
 
-    // Determine exit code: 0 = all clear, 1 = issues remain
+    // Determine exit code: 0 = all clear, 1 = issues remain.
+    // Merge state matters: a PR with green CI + clear reviews but
+    // `mergeable: CONFLICTING` is NOT all-clear — it needs a rebase before
+    // it can merge. Previously this returned 0 and `report.js` declared the
+    // workflow complete while conflicts existed on the PR.
     const ciOk = ci.status === 'passing' || ci.status === 'no-checks';
     const reviewsOk =
       !reviews.hasBlocking && (!reviews.pendingBots || reviews.pendingBots.length === 0);
-    const exitCode = ciOk && reviewsOk ? 0 : 1;
+    const mergeOk = prInfo.mergeable !== 'CONFLICTING' && prInfo.mergeStateStatus !== 'DIRTY';
+    const exitCode = ciOk && reviewsOk && mergeOk ? 0 : 1;
 
     state.lastMonitorResult = { exitCode, output: output.substring(0, 3000) };
     state._ciRunningCount = ci.running ? ci.running.length : 0;
