@@ -42,8 +42,11 @@ const SESSION_GUARD_TEST_PATTERNS = [
   /^TEST-/, // test-only ticket prefix
   /^T-\d+(?:\.json)?$/, // task-review-gate.test.js series
   /^ARCHIVE-TEST-/, // archive deadlock tests
-  /[ =]/, // garbage IDs (real ticket IDs have no spaces/'=')
-  /TASKS|SPEC|REWORK/, // belt-and-braces for known leaked names
+  // Garbage IDs from pre-validation bug runs always contained a space or '='
+  // (real ticket IDs are alphanumeric+hyphen only). This pattern catches them
+  // without risking real tickets — INSPECT-123, PAPERWORK-42, etc. are safe
+  // because they don't contain either character.
+  /[ =]/,
 ];
 
 function isTestDir(name) {

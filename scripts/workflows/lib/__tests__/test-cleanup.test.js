@@ -46,6 +46,11 @@ describe('test-cleanup: session-guard lock classification', () => {
     ['claude-session-guard-ECHO-4446.json', false],
     ['claude-session-guard-APPSUPEN-1234.json', false],
     ['claude-session-guard-PR-1547.json', false],
+    // Regression: real tickets whose names contain SPEC/REWORK/TASKS as a
+    // substring (INSPECT, PAPERWORK, TASKS-RELATED) must NEVER be matched.
+    ['claude-session-guard-INSPECT-123.json', false],
+    ['claude-session-guard-PAPERWORK-42.json', false],
+    ['claude-session-guard-MULTITASKS-7.json', false],
     // Unrelated files → not touched
     ['some-other-file.json', false],
     ['claude-session-guard-', false], // empty tail
