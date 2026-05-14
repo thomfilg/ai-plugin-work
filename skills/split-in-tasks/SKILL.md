@@ -297,6 +297,16 @@ Hardcoded `pnpm test:foo path/to/file` is **only** allowed if a project explicit
 
 Note: The implement-gate executes this command automatically before/after dispatching the developer agent. Agents do NOT call `tdd-phase-state.js` or record any TDD evidence themselves.
 
+**Test-file naming MUST match the chosen runner** (CRITICAL — the tasks_gate validator enforces this):
+
+| Runner env var | File name pattern (ANY ONE must match) |
+|---|---|
+| `$TEST_INTEGRATION_COMMAND` | `**/*.integration.(test\|spec).(ts\|tsx\|js\|jsx\|mjs\|cjs)` OR `**/integration/**/*.(test\|spec).<ext>` |
+| `$TEST_E2E_COMMAND` | `**/*.e2e.(test\|spec).(ts\|tsx\|js\|jsx\|mjs\|cjs)` OR `**/e2e/**/*.(test\|spec).<ext>` |
+| `$TEST_UNIT_COMMAND` | Must NOT match either of the above patterns (no `.integration.` / `.e2e.` infix, not under `/integration/` or `/e2e/`) |
+
+If a test file is misnamed for its runner, the vitest config silently routes it to a different runner (or skips it). The gate then can't pass because the test never executes — or it executes against the wrong fixtures. When creating a NEW test file, also name it correctly upfront and include the proposed filename in the task's `### Files in scope`.
+
 **Test scope must equal task scope** (CRITICAL — prevents cross-task gate deadlocks):
 
 A task's Test Command may ONLY exercise code declared in this task's `### Files in scope`. If the test passes through a network boundary (tRPC procedure, REST handler, GraphQL resolver), it ALSO traverses the input/output validators, middleware, and routing for that boundary — and those are owned by OTHER tasks. The gate then can't pass until every co-traversed task is also done, but each of those tasks is gated by its own test that needs THIS task done. Deadlock.

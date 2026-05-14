@@ -99,11 +99,81 @@ function fileMatchesScope(candidate, scopeGlobs) {
 }
 
 /**
+ * Recognise a test file by extension.
+ */
+const TEST_FILE_EXT_RE = /\.(?:test|spec)\.(?:ts|tsx|js|jsx|mjs|cjs)$/;
+
+/**
+ * Decide whether a test file path follows the project's integration-test
+ * naming convention. Integration tests must be EITHER:
+ *   - filename ends with `.integration.test.<ext>` / `.integration.spec.<ext>`, or
+ *   - path contains an `integration/` directory segment.
+ *
+ * Unit tests must do NEITHER (they live under any directory but never
+ * inside `integration/` and never carry the `.integration.` infix).
+ *
+ * This naming rule is what lets the vitest configs route a test file to
+ * the correct runner; it is also how split-in-tasks declares per-task gate
+ * granularity. Misnamed files silently fall into the wrong runner and the
+ * gate either skips them or runs them against the wrong fixtures.
+ *
+ * @param {string} candidate
+ * @returns {boolean}
+ */
+function isIntegrationTestPath(candidate) {
+  if (typeof candidate !== 'string' || !candidate) return false;
+  if (!TEST_FILE_EXT_RE.test(candidate)) return false;
+  if (/\.integration\.(?:test|spec)\.(?:ts|tsx|js|jsx|mjs|cjs)$/.test(candidate)) return true;
+  if (/(?:^|\/)integration\//.test(candidate)) return true;
+  return false;
+}
+
+/**
+ * Decide whether a test file path follows the project's e2e naming convention.
+ *   - filename ends with `.e2e.test.<ext>` / `.e2e.spec.<ext>`, OR
+ *   - path contains an `e2e/` directory segment.
+ */
+function isE2eTestPath(candidate) {
+  if (typeof candidate !== 'string' || !candidate) return false;
+  if (!TEST_FILE_EXT_RE.test(candidate)) return false;
+  if (/\.e2e\.(?:test|spec)\.(?:ts|tsx|js|jsx|mjs|cjs)$/.test(candidate)) return true;
+  if (/(?:^|\/)e2e\//.test(candidate)) return true;
+  return false;
+}
+
+/**
+ * Decide whether the Test Command targets the integration runner.
+ */
+function usesIntegrationRunner(testCommand) {
+  return typeof testCommand === 'string' && /\$TEST_INTEGRATION_COMMAND\b/.test(testCommand);
+}
+
+/**
+ * Decide whether the Test Command targets the unit runner.
+ */
+function usesUnitRunner(testCommand) {
+  return typeof testCommand === 'string' && /\$TEST_UNIT_COMMAND\b/.test(testCommand);
+}
+
+/**
+ * Decide whether the Test Command targets the e2e runner.
+ */
+function usesE2eRunner(testCommand) {
+  return typeof testCommand === 'string' && /\$TEST_E2E_COMMAND\b/.test(testCommand);
+}
+
+/**
  * Verify the task's Test Command CHANGED_FILES list is fully covered by
  * this task's `### Files in scope`. When a CHANGED_FILES path is owned
  * by another task, the test will execute through that other task's code
  * — and the gate cannot pass until that sibling is also complete. That
  * is the ECHO-4637-class deadlock.
+ *
+ * Also enforces test-file naming conventions:
+ *   - $TEST_INTEGRATION_COMMAND → every test file MUST be an integration
+ *     test (filename `*.integration.test|spec.<ext>` OR under `integration/`).
+ *   - $TEST_UNIT_COMMAND → every test file MUST NOT be an integration test.
+ * Mismatches mean the test file silently lands in the wrong runner.
  *
  * @param {object} task
  * @returns {string[]} validation errors
@@ -113,20 +183,64 @@ function validateTaskTestScope(task) {
   if (!task || typeof task !== 'object') return errors;
   const changed = extractChangedFilesFromTestCommand(task.testCommand);
   if (changed.length === 0) return errors;
+
   const scope =
     Array.isArray(task.filesInScope) && task.filesInScope.length > 0 ? task.filesInScope : null;
-  if (!scope) return errors; // already reported by validateTask
-  const offenders = changed.filter((p) => !fileMatchesScope(p, scope));
-  if (offenders.length > 0) {
-    errors.push(
-      `Task ${task.num ?? '?'} \`### Test Command\` references files not in its \`### Files in scope\`: ` +
-        offenders.map((p) => `"${p}"`).join(', ') +
-        '. The gate will execute the test against code owned by sibling tasks, which cannot pass until ' +
-        'those siblings are also complete (deadlock). Fix by either: (a) narrowing the Test Command to a ' +
-        "unit test of files this task actually ships, or (b) widening this task's Files in scope to include " +
-        'the referenced files (only if this task should own them).'
-    );
+  if (scope) {
+    const offenders = changed.filter((p) => !fileMatchesScope(p, scope));
+    if (offenders.length > 0) {
+      errors.push(
+        `Task ${task.num ?? '?'} \`### Test Command\` references files not in its \`### Files in scope\`: ` +
+          offenders.map((p) => `"${p}"`).join(', ') +
+          '. The gate will execute the test against code owned by sibling tasks, which cannot pass until ' +
+          'those siblings are also complete (deadlock). Fix by either: (a) narrowing the Test Command to a ' +
+          "unit test of files this task actually ships, or (b) widening this task's Files in scope to include " +
+          'the referenced files (only if this task should own them).'
+      );
+    }
   }
+
+  // Test-runner / file-naming consistency
+  const testFiles = changed.filter((p) => TEST_FILE_EXT_RE.test(p));
+  if (testFiles.length > 0) {
+    if (usesIntegrationRunner(task.testCommand)) {
+      const wrong = testFiles.filter((p) => !isIntegrationTestPath(p));
+      if (wrong.length > 0) {
+        errors.push(
+          `Task ${task.num ?? '?'} \`### Test Command\` uses \`$TEST_INTEGRATION_COMMAND\` but ` +
+            `CHANGED_FILES includes test files that are NOT named as integration tests: ` +
+            wrong.map((p) => `"${p}"`).join(', ') +
+            '. Integration tests MUST match `**/*.integration.(test|spec).(ts|tsx|js|jsx|mjs|cjs)` ' +
+            'OR live under a `**/integration/**/` directory. Either rename the test file (recommended) ' +
+            'or switch the Test Command to `$TEST_UNIT_COMMAND` if it is actually a unit test.'
+        );
+      }
+    } else if (usesE2eRunner(task.testCommand)) {
+      const wrong = testFiles.filter((p) => !isE2eTestPath(p));
+      if (wrong.length > 0) {
+        errors.push(
+          `Task ${task.num ?? '?'} \`### Test Command\` uses \`$TEST_E2E_COMMAND\` but ` +
+            `CHANGED_FILES includes test files that are NOT named as e2e tests: ` +
+            wrong.map((p) => `"${p}"`).join(', ') +
+            '. E2E tests MUST match `**/*.e2e.(test|spec).(ts|tsx|js|jsx|mjs|cjs)` ' +
+            'OR live under a `**/e2e/**/` directory. Either rename the test file (recommended) ' +
+            'or switch the Test Command to `$TEST_UNIT_COMMAND` / `$TEST_INTEGRATION_COMMAND`.'
+        );
+      }
+    } else if (usesUnitRunner(task.testCommand)) {
+      const wrong = testFiles.filter((p) => isIntegrationTestPath(p) || isE2eTestPath(p));
+      if (wrong.length > 0) {
+        errors.push(
+          `Task ${task.num ?? '?'} \`### Test Command\` uses \`$TEST_UNIT_COMMAND\` but ` +
+            `CHANGED_FILES includes integration- or e2e-named test files: ` +
+            wrong.map((p) => `"${p}"`).join(', ') +
+            '. Either rename the file to drop the `.integration.` / `.e2e.` infix and move it out of ' +
+            'any `integration/` or `e2e/` directory, or switch the Test Command to the matching runner.'
+        );
+      }
+    }
+  }
+
   return errors;
 }
 
@@ -187,4 +301,10 @@ module.exports = {
   findTask,
   extractChangedFilesFromTestCommand,
   fileMatchesScope,
+  isIntegrationTestPath,
+  isE2eTestPath,
+  usesIntegrationRunner,
+  usesUnitRunner,
+  usesE2eRunner,
+  TEST_FILE_EXT_RE,
 };

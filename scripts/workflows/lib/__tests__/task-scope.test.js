@@ -148,11 +148,12 @@ describe('validateTaskTestScope (regression: ECHO-4637-class deadlock)', () => {
         'eval "$TEST_INTEGRATION_COMMAND"',
     };
     const errors = ts.validateTaskTestScope(task);
-    assert.equal(errors.length, 1);
-    assert.match(errors[0], /Task 2/);
-    assert.match(errors[0], /external-assets-tags\.integration\.test\.ts/);
-    assert.match(errors[0], /lib\/validation\/__tests__\/external-asset-update-tags\.test\.ts/);
-    assert.match(errors[0], /deadlock/i);
+    assert.ok(errors.length >= 1, `expected at least one error, got ${errors.length}`);
+    const deadlock = errors.find((e) => /deadlock/i.test(e));
+    assert.ok(deadlock, 'expected a deadlock error');
+    assert.match(deadlock, /Task 2/);
+    assert.match(deadlock, /external-assets-tags\.integration\.test\.ts/);
+    assert.match(deadlock, /lib\/validation\/__tests__\/external-asset-update-tags\.test\.ts/);
   });
 
   it('honours glob patterns in Files in scope', () => {
@@ -206,6 +207,111 @@ describe('extractChangedFilesFromTestCommand', () => {
       assert.deepEqual(ts.extractChangedFilesFromTestCommand(input), expected);
     });
   }
+});
+
+describe('test-file naming convention (integration / e2e)', () => {
+  describe('isIntegrationTestPath', () => {
+    const cases = [
+      ['lib/foo/__tests__/bar.integration.test.ts', true],
+      ['lib/foo/bar.integration.spec.tsx', true],
+      ['tests/integration/handler.test.ts', true],
+      ['app/integration/foo.spec.js', true],
+      ['lib/foo/bar.test.ts', false], // plain unit
+      ['lib/foo/bar.spec.ts', false], // plain unit
+      ['tests/e2e/bar.test.ts', false], // e2e, not integration
+      ['lib/foo/bar.integration.ts', false], // not a test file
+      ['lib/integrationhelpers/foo.test.ts', false], // word boundary
+    ];
+    for (const [p, expected] of cases) {
+      it(`${JSON.stringify(p)} → ${expected}`, () => {
+        assert.equal(ts.isIntegrationTestPath(p), expected);
+      });
+    }
+  });
+
+  describe('isE2eTestPath', () => {
+    const cases = [
+      ['tests/e2e/specs/login.e2e.spec.ts', true],
+      ['app/e2e/foo.spec.ts', true],
+      ['lib/foo/bar.e2e.test.ts', true],
+      ['lib/foo/bar.test.ts', false],
+      ['lib/foo/bar.integration.test.ts', false],
+      ['lib/e2ehelper/foo.test.ts', false], // word boundary
+    ];
+    for (const [p, expected] of cases) {
+      it(`${JSON.stringify(p)} → ${expected}`, () => {
+        assert.equal(ts.isE2eTestPath(p), expected);
+      });
+    }
+  });
+
+  describe('validateTaskTestScope: runner-vs-naming consistency', () => {
+    it('blocks $TEST_INTEGRATION_COMMAND with a non-integration test file', () => {
+      const task = {
+        num: 1,
+        filesInScope: ['lib/foo/**', 'tests/**'],
+        testCommand:
+          'CHANGED_FILES="lib/foo/bar.ts tests/foo/bar.test.ts" eval "$TEST_INTEGRATION_COMMAND"',
+      };
+      const errors = ts.validateTaskTestScope(task);
+      assert.equal(errors.length, 1);
+      assert.match(errors[0], /not named as integration tests/i);
+      assert.match(errors[0], /bar\.test\.ts/);
+    });
+
+    it('blocks $TEST_E2E_COMMAND with a non-e2e test file', () => {
+      const task = {
+        num: 2,
+        filesInScope: ['tests/**'],
+        testCommand: 'CHANGED_FILES="tests/foo.test.ts" eval "$TEST_E2E_COMMAND"',
+      };
+      const errors = ts.validateTaskTestScope(task);
+      assert.equal(errors.length, 1);
+      assert.match(errors[0], /not named as e2e tests/i);
+    });
+
+    it('blocks $TEST_UNIT_COMMAND when test file IS an integration test', () => {
+      const task = {
+        num: 3,
+        filesInScope: ['lib/foo/**'],
+        testCommand:
+          'CHANGED_FILES="lib/foo/__tests__/bar.integration.test.ts" eval "$TEST_UNIT_COMMAND"',
+      };
+      const errors = ts.validateTaskTestScope(task);
+      assert.equal(errors.length, 1);
+      assert.match(errors[0], /integration- or e2e-named/);
+    });
+
+    it('blocks $TEST_UNIT_COMMAND when test file IS an e2e test', () => {
+      const task = {
+        num: 4,
+        filesInScope: ['tests/**'],
+        testCommand: 'CHANGED_FILES="tests/e2e/foo.spec.ts" eval "$TEST_UNIT_COMMAND"',
+      };
+      const errors = ts.validateTaskTestScope(task);
+      assert.equal(errors.length, 1);
+      assert.match(errors[0], /integration- or e2e-named/);
+    });
+
+    it('passes correctly named integration test with the integration runner', () => {
+      const task = {
+        num: 5,
+        filesInScope: ['lib/foo/**'],
+        testCommand:
+          'CHANGED_FILES="lib/foo/bar.integration.test.ts" eval "$TEST_INTEGRATION_COMMAND"',
+      };
+      assert.deepEqual(ts.validateTaskTestScope(task), []);
+    });
+
+    it('passes correctly named e2e test with the e2e runner', () => {
+      const task = {
+        num: 6,
+        filesInScope: ['tests/**'],
+        testCommand: 'CHANGED_FILES="tests/e2e/foo.spec.ts" eval "$TEST_E2E_COMMAND"',
+      };
+      assert.deepEqual(ts.validateTaskTestScope(task), []);
+    });
+  });
 });
 
 describe('fileMatchesScope', () => {
