@@ -50,6 +50,40 @@ describe('extractBashWriteTargets', () => {
     assert.deepEqual(extractBashWriteTargets('cat a.ts'), []);
     assert.deepEqual(extractBashWriteTargets('grep foo a.ts'), []);
   });
+
+  // Regression: arrow functions / shell expressions inside `node -e "..."`
+  // (and similar quoted code) used to leak through and yield bogus tokens
+  // like `d+=c).on('end',()=` that hit decideEdit and blocked legitimate
+  // diagnostic commands. The scope hook now (a) strips quoted strings before
+  // scanning and (b) validates captured tokens look like real paths.
+  describe('regression: no false positives from quoted code / arrows', () => {
+    const cases = [
+      // The exact pattern that blocked the ECHO-4454 diagnostic
+      [`node -e "let d=''; process.stdin.on('data',c=>d+=c).on('end',()=>{console.log(d)})"`],
+      // Generic arrow function in `node -e`
+      [`node -e "const f = x => x + 1; console.log(f(2))"`],
+      // bash -c with > inside a quoted comparator
+      [`bash -c "if [ 5 > 3 ]; then echo yes; fi"`],
+      // grep with > inside a regex argument
+      [`grep -E "foo>bar" file.txt`],
+      // single-quoted python -c with comparators
+      [`python3 -c 'print(1 > 0)'`],
+    ];
+    for (const [cmd] of cases) {
+      it(`emits no targets for: ${cmd.slice(0, 50)}…`, () => {
+        assert.deepEqual(
+          extractBashWriteTargets(cmd),
+          [],
+          `expected no targets for diagnostic command: ${cmd}`
+        );
+      });
+    }
+  });
+
+  it('still extracts real redirect targets adjacent to quoted code', () => {
+    // The redirect is OUTSIDE the quoted block — must still be caught.
+    assert.deepEqual(extractBashWriteTargets(`node -e "console.log('x')" > out.txt`), ['out.txt']);
+  });
 });
 
 describe('evaluateTool', () => {

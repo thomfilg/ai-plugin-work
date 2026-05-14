@@ -48,19 +48,27 @@ module.exports = function registerTriage(register) {
       };
     }
 
-    const hasConflict = /merge conflict|cannot be merged/i.test(output);
+    // ── PRIORITY 0: merge conflict ──────────────────────────────────────
+    // Conflict ALWAYS preempts everything else (CI status, reviews, etc).
+    // Structured signal `state._isConflicting` is set by monitor.js after
+    // a bounded retry on `mergeable: UNKNOWN`, so it survives the case
+    // where formatReport didn't emit a "CONFLICTS:" line yet (e.g. when
+    // GitHub was mid-recompute). Regex fallback covers older state files
+    // written before this field existed.
+    const structuredConflict = !!state._isConflicting;
+    const hasConflict = structuredConflict || /merge conflict|cannot be merged/i.test(output);
+    if (hasConflict) {
+      state.failureCategory = 'conflict';
+      state.currentStep = 'fix-ci';
+      return null;
+    }
+
     const hasCiFailure = /CI:\s*FAILING/i.test(output);
     const hasCiPending = /CI:\s*PENDING/i.test(output);
     const hasCiCancelled = /CI:\s*CANCELLED/i.test(output);
     const isMergeBlocked = /MERGE STATUS:\s*BLOCKED/i.test(output);
     const hasBlockingReviews = /Reviews:.*BLOCKING/i.test(output);
     const hasOngoingReview = /awaiting bot reviews/i.test(output);
-
-    if (hasConflict) {
-      state.failureCategory = 'conflict';
-      state.currentStep = 'fix-ci';
-      return null;
-    }
 
     if (hasCiFailure) {
       state.failureCategory = 'ci_failure';

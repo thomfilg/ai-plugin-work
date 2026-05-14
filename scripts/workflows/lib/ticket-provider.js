@@ -186,6 +186,73 @@ function normalizeTicketId(raw) {
   return base + parsed.separator + parsed.suffix;
 }
 
+/**
+ * Strict validator for raw ticket arguments at the entry points of /work2 and
+ * /work-implement. Rejects malformed input BEFORE any filesystem side effects.
+ *
+ * Returns { ticketBase, suffix, separator, canonical }. Throws Error on invalid.
+ * `canonical` is the post-normalization handle used as the session identity.
+ */
+function validateRawTicketInput(raw, providerConfig) {
+  if (raw === null || raw === undefined || raw === '') {
+    throw new Error('Ticket ID is required.');
+  }
+  if (typeof raw !== 'string') {
+    throw new Error(`Ticket ID must be a string (received ${typeof raw}).`);
+  }
+  // URL form: handle BEFORE the structured validator (URLs contain ':' which would
+  // otherwise trip the unsafe-char check).
+  if (raw.startsWith('http://') || raw.startsWith('https://')) {
+    const parsed = parseGitHubUrl(raw);
+    if (!parsed) {
+      throw new Error(`Unrecognized ticket URL: ${raw}`);
+    }
+    const canonical = 'GH-' + parsed.number;
+    return { ticketBase: canonical, suffix: null, separator: null, canonical };
+  }
+  // Delegate the path-safety subset to the shared structured validator
+  // (covers ../, backslash, colon, NUL, leading slash, multi-slash, leading/trailing
+  // whitespace, bare dot). It does NOT reject internal whitespace, so we check that
+  // explicitly below.
+  let structErr = null;
+  try {
+    const { validateTicketIdStructured } = require('./ticket-validation');
+    structErr = validateTicketIdStructured(raw);
+  } catch (e) {
+    if (!e || e.code !== 'MODULE_NOT_FOUND') throw e;
+  }
+  if (structErr) {
+    const err = new Error(structErr.message);
+    err.code = structErr.code;
+    err.remediation = structErr.remediation;
+    throw err;
+  }
+  if (/\s/.test(raw)) {
+    throw new Error(
+      `Ticket ID ${JSON.stringify(raw)} contains whitespace. Expected format: PROJ-123 or PROJ-123-suffix (no spaces).`
+    );
+  }
+  const parsed = parseTicketInput(raw);
+  const ticketBase = parsed.ticketBase;
+  const isGitHub = providerConfig && providerConfig.provider === 'github';
+  const baseOk = isGitHub
+    ? /^#?\d+$/.test(ticketBase) || /^GH-\d+$/i.test(ticketBase)
+    : /^[A-Z]+-\d+$/i.test(ticketBase);
+  if (!baseOk) {
+    const expected = isGitHub ? '#N, N, or GH-N' : 'PROJ-123';
+    throw new Error(
+      `Invalid ticket ID base ${JSON.stringify(ticketBase)} — expected ${expected} format.`
+    );
+  }
+  const canonical = normalizeTicketId(raw);
+  return {
+    ticketBase: String(ticketBase).toUpperCase(),
+    suffix: parsed.suffix || null,
+    separator: parsed.separator || null,
+    canonical,
+  };
+}
+
 function ticketUrl(ticketId, providerConfig) {
   if (!providerConfig || !ticketId) return null;
   const num = String(ticketId).replace(/^#|^GH-/i, '');
@@ -486,6 +553,7 @@ module.exports = {
   sanitizeTicketIdForPath,
   parseTicketInput,
   normalizeTicketId,
+  validateRawTicketInput,
   VALID_PROVIDERS,
   PROVIDERS_FILE,
 };

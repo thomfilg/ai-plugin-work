@@ -25,6 +25,15 @@ function validateTask(task) {
   }
   const label = `Task ${task.num ?? '?'}`;
 
+  // Checkpoint tasks don't ship code, so the `Files in scope` envelope is
+  // not meaningful for them. The implement-gate already exempts them from
+  // TDD evidence; this matches that behavior at Gate C.
+  const taskType = typeof task.type === 'string' ? task.type.toLowerCase().trim() : null;
+  const isCheckpoint = taskType === 'checkpoint' || task.isCheckpoint === true;
+  if (isCheckpoint) {
+    return errors;
+  }
+
   // Legacy fallback: tasks written before Gate C may carry `### Suggested Scope`
   // instead of `### Files in scope`. Accept that as evidence of scope intent
   // and ONLY error when BOTH are missing/empty. New tasks SHOULD use
@@ -48,6 +57,292 @@ function validateTask(task) {
 }
 
 /**
+ * Extract the CHANGED_FILES list from a task's `### Test Command`. Returns
+ * an empty array if the command doesn't follow the canonical
+ * `CHANGED_FILES="<list>" eval "$TEST_*_COMMAND"` form.
+ *
+ * @param {string|null|undefined} testCommand
+ * @returns {string[]}
+ */
+function extractChangedFilesFromTestCommand(testCommand) {
+  if (typeof testCommand !== 'string' || !testCommand) return [];
+  // Match CHANGED_FILES="..." or CHANGED_FILES='...'. Tolerant of leading
+  // whitespace and `&&`/`;` chains — we only need the FIRST assignment to
+  // judge what the gate will execute against.
+  const m = testCommand.match(/CHANGED_FILES\s*=\s*(['"])([\s\S]*?)\1/);
+  if (!m) return [];
+  return m[2].split(/\s+/).filter(Boolean);
+}
+
+/**
+ * Check whether a candidate file path is covered by any of the task's
+ * `Files in scope` glob patterns. Performs a simple prefix/segment match
+ * sufficient for tasks.md authoring (full glob matching happens at
+ * Gate D runtime via micromatch).
+ *
+ * Returns true when the candidate equals a scope entry, sits under one
+ * (treating `**` as a wildcard), or matches the directory prefix of a
+ * scope entry that ends with a glob.
+ *
+ * @param {string} candidate
+ * @param {string[]} scopeGlobs
+ * @returns {boolean}
+ */
+function fileMatchesScope(candidate, scopeGlobs) {
+  if (!candidate || !Array.isArray(scopeGlobs) || scopeGlobs.length === 0) return false;
+  const norm = String(candidate).replace(/^\.\//, '');
+  for (const raw of scopeGlobs) {
+    if (typeof raw !== 'string' || !raw) continue;
+    const glob = raw.replace(/^\.\//, '');
+    if (glob === norm) return true;
+    // `lib/foo/**` or `lib/foo/**/*.ts` → match anything under lib/foo/
+    const starIdx = glob.indexOf('*');
+    if (starIdx > 0) {
+      const prefix = glob.slice(0, starIdx);
+      if (norm.startsWith(prefix)) return true;
+    } else if (glob.endsWith('/')) {
+      if (norm.startsWith(glob)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Recognise a test file by extension.
+ */
+const TEST_FILE_EXT_RE = /\.(?:test|spec)\.(?:ts|tsx|js|jsx|mjs|cjs)$/;
+
+/**
+ * Decide whether a test file path follows the project's integration-test
+ * naming convention. Integration tests must be EITHER:
+ *   - filename ends with `.integration.test.<ext>` / `.integration.spec.<ext>`, or
+ *   - path contains an `integration/` directory segment.
+ *
+ * Unit tests must do NEITHER (they live under any directory but never
+ * inside `integration/` and never carry the `.integration.` infix).
+ *
+ * This naming rule is what lets the vitest configs route a test file to
+ * the correct runner; it is also how split-in-tasks declares per-task gate
+ * granularity. Misnamed files silently fall into the wrong runner and the
+ * gate either skips them or runs them against the wrong fixtures.
+ *
+ * @param {string} candidate
+ * @returns {boolean}
+ */
+function isIntegrationTestPath(candidate) {
+  if (typeof candidate !== 'string' || !candidate) return false;
+  if (!TEST_FILE_EXT_RE.test(candidate)) return false;
+  if (/\.integration\.(?:test|spec)\.(?:ts|tsx|js|jsx|mjs|cjs)$/.test(candidate)) return true;
+  if (/(?:^|\/)integration\//.test(candidate)) return true;
+  return false;
+}
+
+/**
+ * Decide whether a test file path follows the project's e2e naming convention.
+ *   - filename ends with `.e2e.test.<ext>` / `.e2e.spec.<ext>`, OR
+ *   - path contains an `e2e/` directory segment.
+ */
+function isE2eTestPath(candidate) {
+  if (typeof candidate !== 'string' || !candidate) return false;
+  if (!TEST_FILE_EXT_RE.test(candidate)) return false;
+  if (/\.e2e\.(?:test|spec)\.(?:ts|tsx|js|jsx|mjs|cjs)$/.test(candidate)) return true;
+  if (/(?:^|\/)e2e\//.test(candidate)) return true;
+  return false;
+}
+
+/**
+ * Decide whether the Test Command targets the integration runner.
+ */
+function usesIntegrationRunner(testCommand) {
+  return typeof testCommand === 'string' && /\$TEST_INTEGRATION_COMMAND\b/.test(testCommand);
+}
+
+/**
+ * Decide whether the Test Command targets the unit runner.
+ */
+function usesUnitRunner(testCommand) {
+  return typeof testCommand === 'string' && /\$TEST_UNIT_COMMAND\b/.test(testCommand);
+}
+
+/**
+ * Decide whether the Test Command targets the e2e runner.
+ */
+function usesE2eRunner(testCommand) {
+  return typeof testCommand === 'string' && /\$TEST_E2E_COMMAND\b/.test(testCommand);
+}
+
+/**
+ * Decide whether the Test Command is a recognised test-runner invocation
+ * (unit / integration / e2e) — i.e. it would actually execute tests.
+ * Plain typecheck/lint/build commands are NOT test invocations, so they
+ * cannot serve as a task's behavior gate.
+ */
+function usesRecognisedRunner(testCommand) {
+  return (
+    usesUnitRunner(testCommand) || usesIntegrationRunner(testCommand) || usesE2eRunner(testCommand)
+  );
+}
+
+/**
+ * Detect Test Commands that pretend to be a test gate but actually run
+ * something that never asserts behavior — typecheck, lint, build, format,
+ * a bare `true`, etc. Returns a short category name when matched, null
+ * otherwise.
+ *
+ * The check is conservative: it only flags commands that are CLEARLY
+ * non-test (no test runner referenced; primary verb is a compile/lint
+ * tool). Hardcoded runner invocations like `pnpm test foo.ts` aren't
+ * touched here (handled by the opt-out clause in SKILL.md).
+ */
+function detectNonTestCommand(testCommand) {
+  if (typeof testCommand !== 'string' || !testCommand.trim()) return null;
+  if (usesRecognisedRunner(testCommand)) return null;
+  const lower = testCommand.toLowerCase();
+  // Hardcoded test-runner invocations still count as tests, even without env vars
+  if (
+    /\b(?:pnpm|npm|yarn|bun)\s+(?:run\s+)?(?:test|vitest|jest|playwright|cypress|pw\s+test)\b/.test(
+      lower
+    )
+  ) {
+    return null;
+  }
+  if (
+    /\b(?:pnpm|npm|yarn|bun)\s+(?:run\s+)?typecheck\b|\btsc\b(?!.*-p\s+tsconfig\.test)/.test(lower)
+  ) {
+    return 'typecheck-only';
+  }
+  if (/\b(?:pnpm|npm|yarn|bun)\s+(?:run\s+)?(?:lint|format|prettier|biome|eslint)\b/.test(lower)) {
+    return 'lint-only';
+  }
+  if (/\b(?:pnpm|npm|yarn|bun)\s+(?:run\s+)?build\b/.test(lower)) {
+    return 'build-only';
+  }
+  if (/^\s*(?:true|:|exit\s+0)\s*;?\s*$/.test(testCommand)) {
+    return 'noop';
+  }
+  return null;
+}
+
+/**
+ * Verify the task's Test Command CHANGED_FILES list is fully covered by
+ * this task's `### Files in scope`. When a CHANGED_FILES path is owned
+ * by another task, the test will execute through that other task's code
+ * — and the gate cannot pass until that sibling is also complete. That
+ * is the ECHO-4637-class deadlock.
+ *
+ * Also enforces test-file naming conventions:
+ *   - $TEST_INTEGRATION_COMMAND → every test file MUST be an integration
+ *     test (filename `*.integration.test|spec.<ext>` OR under `integration/`).
+ *   - $TEST_UNIT_COMMAND → every test file MUST NOT be an integration test.
+ * Mismatches mean the test file silently lands in the wrong runner.
+ *
+ * @param {object} task
+ * @returns {string[]} validation errors
+ */
+function validateTaskTestScope(task) {
+  const errors = [];
+  if (!task || typeof task !== 'object') return errors;
+
+  // Skip checks for checkpoint tasks — they're explicit "verify integration"
+  // markers and the implement-gate exempts them from TDD evidence entirely.
+  const taskType = typeof task.type === 'string' ? task.type.toLowerCase().trim() : null;
+  if (taskType === 'checkpoint' || task.isCheckpoint === true) {
+    return errors;
+  }
+
+  // Rule 4b: Test Command must actually run tests. Typecheck / lint / build /
+  // `true` are not behavior gates. If a task has no behavior to verify, it
+  // should be merged with its consumer (SKILL.md Rule 4b).
+  const nonTest = detectNonTestCommand(task.testCommand);
+  if (nonTest) {
+    errors.push(
+      `Task ${task.num ?? '?'} \`### Test Command\` is a ${nonTest} command, not a test runner: ` +
+        `${JSON.stringify(String(task.testCommand || '').slice(0, 120))}. ` +
+        "A task's gate must execute tests that assert behavior. Use $TEST_UNIT_COMMAND / " +
+        '$TEST_INTEGRATION_COMMAND / $TEST_E2E_COMMAND with a real test file in CHANGED_FILES. ' +
+        'If this task has no testable behavior in isolation (e.g. a helper consumed only by ' +
+        'another task), MERGE IT INTO THE CONSUMING TASK — see split-in-tasks SKILL.md Rule 4b.'
+    );
+    return errors;
+  }
+
+  const changed = extractChangedFilesFromTestCommand(task.testCommand);
+  // Rule 4b (helper-only): A task that uses a recognised runner but lists ZERO
+  // test files in CHANGED_FILES will never have a test to execute — the gate
+  // gets "No test files found" forever. This is the helper-only pattern.
+  if (
+    usesRecognisedRunner(task.testCommand) &&
+    changed.length > 0 &&
+    !changed.some((p) => TEST_FILE_EXT_RE.test(p))
+  ) {
+    errors.push(
+      `Task ${task.num ?? '?'} \`### Test Command\` lists CHANGED_FILES with NO test files ` +
+        `(no .test.* / .spec.* path). The runner will report "No test files found" and the ` +
+        'gate will loop forever. This is the helper-only task pattern — the task ships code ' +
+        "used by another task's tests but has no test of its own. MERGE IT INTO THE CONSUMING " +
+        "TASK (split-in-tasks SKILL.md Rule 4b), or add this task's own test file to CHANGED_FILES."
+    );
+    return errors;
+  }
+
+  if (changed.length === 0) return errors;
+
+  const scope =
+    Array.isArray(task.filesInScope) && task.filesInScope.length > 0 ? task.filesInScope : null;
+  if (scope) {
+    const offenders = changed.filter((p) => !fileMatchesScope(p, scope));
+    if (offenders.length > 0) {
+      errors.push(
+        `Task ${task.num ?? '?'} \`### Test Command\` references files not in its \`### Files in scope\`: ` +
+          offenders.map((p) => `"${p}"`).join(', ') +
+          '. The gate will execute the test against code owned by sibling tasks, which cannot pass until ' +
+          'those siblings are also complete (deadlock). Fix by either: (a) narrowing the Test Command to a ' +
+          "unit test of files this task actually ships, or (b) widening this task's Files in scope to include " +
+          'the referenced files (only if this task should own them).'
+      );
+    }
+  }
+
+  // Test-runner / file-naming consistency.
+  //
+  // Multi-suite chained commands (`$TEST_UNIT_COMMAND && $TEST_INTEGRATION_COMMAND`)
+  // are valid — each runner self-filters CHANGED_FILES by its include pattern.
+  // We only flag a file when NO chained runner's naming convention matches it.
+  const testFiles = changed.filter((p) => TEST_FILE_EXT_RE.test(p));
+  if (testFiles.length > 0) {
+    const runners = {
+      unit: usesUnitRunner(task.testCommand),
+      integration: usesIntegrationRunner(task.testCommand),
+      e2e: usesE2eRunner(task.testCommand),
+    };
+    const fileMatchesAnyRunner = (p) => {
+      if (runners.e2e && isE2eTestPath(p)) return true;
+      if (runners.integration && isIntegrationTestPath(p)) return true;
+      if (runners.unit && !isIntegrationTestPath(p) && !isE2eTestPath(p)) return true;
+      return false;
+    };
+    const orphans = testFiles.filter((p) => !fileMatchesAnyRunner(p));
+    if (orphans.length > 0) {
+      const declared = Object.entries(runners)
+        .filter(([, on]) => on)
+        .map(([k]) => `$TEST_${k.toUpperCase()}_COMMAND`)
+        .join(' + ');
+      errors.push(
+        `Task ${task.num ?? '?'} \`### Test Command\` declares ${declared || '(no known runner)'} ` +
+          `but CHANGED_FILES includes test files no declared runner will pick up: ` +
+          orphans.map((p) => `"${p}"`).join(', ') +
+          '. Integration tests MUST match `**/*.integration.(test|spec).<ext>` OR live under ' +
+          '`**/integration/**/`. E2E tests MUST match `**/*.e2e.(test|spec).<ext>` OR live under ' +
+          '`**/e2e/**/`. Unit tests must do NEITHER. Either rename the test file or add the matching ' +
+          'runner to the chain (e.g. append ` && eval "$TEST_INTEGRATION_COMMAND"`).'
+      );
+    }
+  }
+
+  return errors;
+}
+
+/**
  * Validate every task and return a flat error list.
  *
  * @param {Array<object>|null|undefined} tasks
@@ -60,6 +355,7 @@ function validateAll(tasks) {
   const errors = [];
   for (const t of tasks) {
     errors.push(...validateTask(t));
+    errors.push(...validateTaskTestScope(t));
   }
   return { valid: errors.length === 0, errors };
 }
@@ -95,4 +391,20 @@ function findTask(tasks, taskNum) {
   return tasks.find((t) => t && t.num === taskNum) || null;
 }
 
-module.exports = { validateTask, validateAll, unionFilesInScope, findTask };
+module.exports = {
+  validateTask,
+  validateTaskTestScope,
+  validateAll,
+  unionFilesInScope,
+  findTask,
+  extractChangedFilesFromTestCommand,
+  fileMatchesScope,
+  isIntegrationTestPath,
+  isE2eTestPath,
+  usesIntegrationRunner,
+  usesUnitRunner,
+  usesE2eRunner,
+  usesRecognisedRunner,
+  detectNonTestCommand,
+  TEST_FILE_EXT_RE,
+};

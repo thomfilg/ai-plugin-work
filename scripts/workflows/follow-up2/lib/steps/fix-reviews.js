@@ -22,6 +22,19 @@ const { execFileSync } = require('child_process');
 
 module.exports = function registerFixReviews(register) {
   register('fix-reviews', (state, ctx) => {
+    // ── PRIORITY 0 guard: never process reviews against a conflicted branch.
+    // Conflict was either detected on the current monitor cycle (state
+    // ._isConflicting set by monitor.js) or persisted from a prior cycle.
+    // Sending the agent to fix reviews against a branch that won't merge
+    // wastes a round-trip and risks the "blocked: review skipped, ask
+    // user" instruction when the real issue is "rebase first". Re-route
+    // to fix-ci so the agent resolves the conflict before any review work.
+    if (state._isConflicting) {
+      state.failureCategory = 'conflict';
+      state.currentStep = 'fix-ci';
+      return null;
+    }
+
     const commentsScript = path.join(ctx.workScriptsDir, 'follow-up-pr-comments.js');
     const prNum = String(state.prNumber || '');
     const scriptEnv = { ...process.env, WORK_TICKET_ID: state.ticketId };
@@ -102,18 +115,23 @@ module.exports = function registerFixReviews(register) {
         /* ignore */
       }
 
-      if (statusResult && statusResult.skipped > 0 && !state._skippedReviewWarningShown) {
-        state._skippedReviewWarningShown = true;
-        const reviewFile = path.join(ctx.tasksDir, 'follow-up-comments.json');
-        return {
-          type: 'follow_up_instruction',
-          action: 'blocked',
-          reason: [
-            `Review comments: ${statusResult.solved} fixed, ${statusResult.skipped} skipped.`,
-            `Skipped comments need your review: ${reviewFile}`,
-            `After reviewing, re-run follow-up-next.js to continue.`,
-          ].join('\n'),
-        };
+      // When all remaining comments are terminal (solved or skipped),
+      // advance directly to `report` and let the workflow finish. The
+      // rationale for each skipped comment is preserved in
+      // follow-up-comments.json for later review. Previously this returned
+      // `action: 'blocked'` which forced a manual "I have reviewed, re-run"
+      // ack-loop every time — even when the user had already approved the
+      // skips. The reason for each skip is the agent's responsibility to
+      // make defensible (per `feedback_review_comments_judgment`).
+      //
+      // Loop-break invariant: routing to `report` marks the workflow
+      // `status: complete`, so re-running /follow-up2 without --init
+      // returns "Already complete" instead of cycling back here.
+      if (statusResult && statusResult.skipped > 0) {
+        state._skippedReviewsCount = statusResult.skipped;
+        state._solvedReviewsCount = statusResult.solved || 0;
+        state.currentStep = 'report';
+        return null;
       }
 
       return null; // all solved → advance to push-retry

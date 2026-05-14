@@ -90,6 +90,18 @@ describe('protect-orchestrator-state hook', () => {
       ['grep tdd-phase.json', 'grep -r foo /tmp/t/ECHO-1/task1/tdd-phase.json'],
       ['ls .claims', 'ls -la /tmp/t/ECHO-1/.claims/'],
       ['echo without redirect', 'echo "this mentions .work-state.json but does not write"'],
+      // Regression: `2>/dev/null` (stderr to /dev/null) is a fd-number
+      // redirect, NOT a file write. The hook used to treat the `>` as a
+      // shell write op, tokenize the whole command, and block on the
+      // protected-filename mention.
+      [
+        'cat .work-state.json with stderr suppress',
+        'cat /tmp/t/ECHO-1/.work-state.json 2>/dev/null | grep _tdd',
+      ],
+      [
+        'grep tdd-phase.json with stderr suppress',
+        'grep -r foo /tmp/t/ECHO-1/task1/tdd-phase.json 2>/dev/null',
+      ],
     ];
     for (const [label, command] of cases) {
       it(label, () => {
@@ -108,5 +120,28 @@ describe('protect-orchestrator-state hook', () => {
       const r = runHook({ tool_name: 'Write' });
       assert.equal(r.code, 0);
     });
+  });
+
+  describe('does NOT deadlock the orchestrator (regression: GH plugin self-bypass)', () => {
+    // Vector 3 used to block the orchestrator from running itself because
+    // work-next.js (a) contains fs.writeFileSync and (b) mentions the literal
+    // ".work-state.json" in its source. We now exempt scripts living inside
+    // the plugin root.
+    const WORK_NEXT = path.resolve(__dirname, '..', '..', 'work-next.js');
+    const TRANSITION = path.resolve(__dirname, '..', '..', 'transition-step.js');
+    const cases = [
+      ['node work-next.js ECHO-4446', `node ${WORK_NEXT} ECHO-4446`],
+      ['node transition-step.js …', `node ${TRANSITION} ECHO-4446 brief`],
+    ];
+    for (const [label, command] of cases) {
+      it(label, () => {
+        const r = runHook({ tool_name: 'Bash', tool_input: { command } });
+        assert.equal(
+          r.code,
+          0,
+          `orchestrator script must not be blocked by its own protector; stderr=${r.stderr.slice(0, 300)}`
+        );
+      });
+    }
   });
 });

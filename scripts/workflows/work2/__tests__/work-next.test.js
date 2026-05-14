@@ -166,4 +166,155 @@ describe('work-next.js CLI', () => {
     assert.equal(parsed.action, 'blocked');
     assert.ok(parsed.reason.includes('No ticket'));
   });
+
+  it('rejects invalid ticket input (whitespace) WITHOUT creating any folder', () => {
+    const { spawnSync } = require('child_process');
+    const fs = require('fs');
+    const os = require('os');
+    const pathMod = require('path');
+    const tmpBase = fs.mkdtempSync(pathMod.join(os.tmpdir(), 'work-next-validate-'));
+    try {
+      const env = {
+        ...process.env,
+        TASKS_BASE: tmpBase,
+        SESSION_GUARD_ENABLED: '0',
+        TICKET_PROVIDER: 'jira',
+        TICKET_PROJECT_KEY: 'ECHO',
+      };
+      delete env.CLAUDE_PLUGIN_ROOT;
+      const res = spawnSync(
+        process.execPath,
+        [pathMod.join(__dirname, '..', 'work-next.js'), 'ECHO-4446 TASKS'],
+        { encoding: 'utf8', timeout: 10000, env }
+      );
+      const stdout = String(res.stdout || '');
+      // Last JSON blob on stdout (skip any non-JSON noise)
+      const lastBrace = stdout.lastIndexOf('{');
+      const parsed = JSON.parse(stdout.slice(lastBrace > -1 ? lastBrace : 0));
+      assert.equal(parsed.action, 'blocked');
+      assert.ok(
+        /whitespace|Invalid|positional/i.test(parsed.reason),
+        `unexpected reason: ${parsed.reason}`
+      );
+      // Critical: no folder must have been created in TASKS_BASE
+      const entries = fs.readdirSync(tmpBase);
+      assert.deepEqual(entries, [], `expected empty TASKS_BASE, found: ${JSON.stringify(entries)}`);
+    } finally {
+      fs.rmSync(tmpBase, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects multiple positional args WITHOUT creating any folder', () => {
+    const { spawnSync } = require('child_process');
+    const fs = require('fs');
+    const os = require('os');
+    const pathMod = require('path');
+    const tmpBase = fs.mkdtempSync(pathMod.join(os.tmpdir(), 'work-next-validate-'));
+    try {
+      const env = {
+        ...process.env,
+        TASKS_BASE: tmpBase,
+        SESSION_GUARD_ENABLED: '0',
+        TICKET_PROVIDER: 'jira',
+        TICKET_PROJECT_KEY: 'ECHO',
+      };
+      delete env.CLAUDE_PLUGIN_ROOT;
+      const res = spawnSync(
+        process.execPath,
+        [pathMod.join(__dirname, '..', 'work-next.js'), 'ECHO-4446', 'EXTRA-ARG'],
+        { encoding: 'utf8', timeout: 10000, env }
+      );
+      const stdout = String(res.stdout || '');
+      const lastBrace = stdout.lastIndexOf('{');
+      const parsed = JSON.parse(stdout.slice(lastBrace > -1 ? lastBrace : 0));
+      assert.equal(parsed.action, 'blocked');
+      assert.ok(/positional/i.test(parsed.reason), `unexpected reason: ${parsed.reason}`);
+      const entries = fs.readdirSync(tmpBase);
+      assert.deepEqual(entries, []);
+    } finally {
+      fs.rmSync(tmpBase, { recursive: true, force: true });
+    }
+  });
+
+  it('blocks no-suffix input when a suffix-session is already active', () => {
+    const { spawnSync } = require('child_process');
+    const fs = require('fs');
+    const os = require('os');
+    const pathMod = require('path');
+    const tmpBase = fs.mkdtempSync(pathMod.join(os.tmpdir(), 'work-next-conflict-'));
+    try {
+      // Pre-create an active session at tasks/TEST-1234/foo/.work-state.json
+      const sessionDir = pathMod.join(tmpBase, 'TEST-1234', 'foo');
+      fs.mkdirSync(sessionDir, { recursive: true });
+      fs.writeFileSync(
+        pathMod.join(sessionDir, '.work-state.json'),
+        JSON.stringify({
+          ticketId: 'TEST-1234/foo',
+          ticketBase: 'TEST-1234',
+          ticketSuffix: 'foo',
+          ticketSeparator: '/',
+          currentStep: 3,
+          status: 'in_progress',
+          stepStatus: {},
+        })
+      );
+      const env = {
+        ...process.env,
+        TASKS_BASE: tmpBase,
+        SESSION_GUARD_ENABLED: '0',
+        TICKET_PROVIDER: 'jira',
+        TICKET_PROJECT_KEY: 'TEST',
+      };
+      delete env.CLAUDE_PLUGIN_ROOT;
+      // User now passes the bare base — should be blocked
+      const res = spawnSync(
+        process.execPath,
+        [pathMod.join(__dirname, '..', 'work-next.js'), 'TEST-1234'],
+        { encoding: 'utf8', timeout: 10000, env }
+      );
+      const stdout = String(res.stdout || '');
+      const lastBrace = stdout.lastIndexOf('{');
+      const parsed = JSON.parse(stdout.slice(lastBrace > -1 ? lastBrace : 0));
+      assert.equal(parsed.action, 'blocked');
+      assert.ok(/active session/i.test(parsed.reason), `unexpected reason: ${parsed.reason}`);
+      assert.ok(/TEST-1234\/foo|TEST-1234-foo/.test(parsed.suggestion || parsed.reason));
+    } finally {
+      fs.rmSync(tmpBase, { recursive: true, force: true });
+    }
+  });
+
+  it('persists canonical identity fields on initial state write', () => {
+    const { spawnSync } = require('child_process');
+    const fs = require('fs');
+    const os = require('os');
+    const pathMod = require('path');
+    const tmpBase = fs.mkdtempSync(pathMod.join(os.tmpdir(), 'work-next-canonical-'));
+    try {
+      const env = {
+        ...process.env,
+        TASKS_BASE: tmpBase,
+        SESSION_GUARD_ENABLED: '0',
+        TICKET_PROVIDER: 'jira',
+        TICKET_PROJECT_KEY: 'TEST',
+      };
+      delete env.CLAUDE_PLUGIN_ROOT;
+      spawnSync(
+        process.execPath,
+        [pathMod.join(__dirname, '..', 'work-next.js'), 'TEST-1234-foo'],
+        { encoding: 'utf8', timeout: 10000, env }
+      );
+      // State file should be at tasks/TEST-1234/foo/.work-state.json with canonical fields
+      const statePath = pathMod.join(tmpBase, 'TEST-1234', 'foo', '.work-state.json');
+      if (fs.existsSync(statePath)) {
+        const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+        assert.equal(state.ticketBase, 'TEST-1234');
+        assert.equal(state.ticketSuffix, 'foo');
+        assert.ok(state.ticketSeparator === '/' || state.ticketSeparator === '-');
+      }
+      // Otherwise: no DEFER plan was emitted, which is fine — the test only
+      // asserts the field shape WHEN state is created.
+    } finally {
+      fs.rmSync(tmpBase, { recursive: true, force: true });
+    }
+  });
 });

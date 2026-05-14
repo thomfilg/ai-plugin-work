@@ -703,6 +703,14 @@ describe('exported constants', () => {
     assert.ok(BASH_WRITE_OPS.test('dd if=/dev/zero of=file'));
     assert.ok(!BASH_WRITE_OPS.test('cat file'));
     assert.ok(!BASH_WRITE_OPS.test('echo hello'));
+    // fd-number redirects must NOT match (they don't write to a user-named target)
+    assert.ok(!BASH_WRITE_OPS.test('cat foo 2>/dev/null'));
+    assert.ok(!BASH_WRITE_OPS.test('cat foo 2>>/dev/null'));
+    assert.ok(!BASH_WRITE_OPS.test('cat foo 1>>log'));
+    assert.ok(!BASH_WRITE_OPS.test('cat foo 1>/dev/null'));
+    // but &>> and &> still match (these DO write to a user-named target)
+    assert.ok(BASH_WRITE_OPS.test('cmd &> out'));
+    assert.ok(BASH_WRITE_OPS.test('cmd &>> out'));
   });
 
   it('NODE_FS_WRITES matches fs write calls', () => {

@@ -2749,7 +2749,7 @@ describe('enforce-step-workflow', () => {
     const ORCHESTRATOR_PATH = path.join(__dirname, '..', '..', 'work', 'work.workflow.js');
 
     // The verify() function now delegates to follow-up-pr.js which calls:
-    //   getPRInfo():  gh pr view --json number,title,url,headRefName,mergeable,mergeStateStatus,state
+    //   getPRInfo():  gh pr view --json number,title,url,headRefName,baseRefName,mergeable,mergeStateStatus,state
     //   checkCI():    gh pr checks <N> --json name,bucket,state,link,workflow
     //                 gh pr view <N> --json statusCheckRollup  (NEUTRAL enrichment)
     //   getReviews(): gh pr view <N> --json reviews,statusCheckRollup
@@ -2814,6 +2814,7 @@ describe('enforce-step-workflow', () => {
         title: 'Test PR',
         url: 'https://github.com/test/repo/pull/42',
         headRefName: 'test-branch',
+        baseRefName: 'main',
         mergeable,
         mergeStateStatus,
         state: prState,
@@ -2831,7 +2832,8 @@ describe('enforce-step-workflow', () => {
 
       return {
         // getPRInfo: gh pr view --json number,title,...
-        'pr view --json number,title,url,headRefName,mergeable,mergeStateStatus,state': prView,
+        'pr view --json number,title,url,headRefName,baseRefName,mergeable,mergeStateStatus,state':
+          prView,
         // checkCI: gh pr checks 42 --json ...
         'pr checks 42 --json name,bucket,state,link,workflow': ciChecks,
         // checkCI: NEUTRAL enrichment fallback

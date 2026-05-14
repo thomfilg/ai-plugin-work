@@ -97,7 +97,7 @@ const { STEPS, STEP_TRANSITIONS, ALL_STEPS, workflowCanTransition } = require(
 const { run, fileExists, readFile, listFiles, ...helpers } = require(
   path.join(workDir, 'work-helpers')
 );
-const { parseTicketInput } = require(path.join(libDir, 'ticket-provider'));
+const { parseTicketInput, validateRawTicketInput } = require(path.join(libDir, 'ticket-provider'));
 const { parseTasks, buildTaskPrompt } = require(path.join(workDir, 'task-parser'));
 const { archiveStepArtifacts } = require(path.join(workDir, 'artifact-archival'));
 const { getHeadSha } = require(path.join(workDir, 'git-utils'));
@@ -218,6 +218,92 @@ function transitionStep(ticket, targetStep) {
   return _transitionStep(ticket, targetStep, buildTransitionDeps());
 }
 
+// ─── Active-session conflict detection ──────────────────────────────────────
+
+/**
+ * Detect whether the user-supplied ticket canonical conflicts with an existing
+ * active session. Returns null on no conflict, or { canonical, reason } when
+ * the caller should be blocked.
+ *
+ * Rules:
+ *   - Input has suffix, no-suffix sibling state exists at tasks/<base>/.work-state.json → conflict
+ *   - Input has no suffix, but a suffix-session exists at tasks/<base>/<suffix>/.work-state.json → conflict
+ *   - Exact-match state (or no state at all) → no conflict
+ */
+function detectSessionConflict(validated, tasksBase, tp) {
+  const fsLocal = require('fs');
+  const pathLocal = require('path');
+  const providerConfig = tp.getProviderConfig({ skipPrompt: true });
+  const isGitHub = providerConfig?.provider === 'github';
+  // Normalize ticketBase the same way getNextInstruction does, so the
+  // filesystem path we probe matches the one used by state writers.
+  // For GitHub, `GH-56` / `56` / `#56` all canonicalize to `#56` before
+  // sanitization → `sanitizeTicketIdForPath('#56', ...)` (e.g. `GH-56`).
+  let normalizedBase = validated.ticketBase.toUpperCase();
+  if (
+    isGitHub &&
+    (/^#?\d+$/.test(validated.ticketBase) || /^GH-\d+$/i.test(validated.ticketBase))
+  ) {
+    const num = validated.ticketBase.replace(/^#|^GH-/i, '');
+    normalizedBase = '#' + num;
+  }
+  const safeBase = tp.sanitizeTicketIdForPath(normalizedBase, providerConfig);
+  const suffix = validated.suffix;
+  const exactPath = pathLocal.join(
+    tasksBase,
+    suffix ? `${safeBase}/${suffix}` : safeBase,
+    '.work-state.json'
+  );
+  if (fsLocal.existsSync(exactPath)) return null; // exact match — proceed
+  if (suffix) {
+    // Input has suffix; check for a bare-base session
+    const baseStatePath = pathLocal.join(tasksBase, safeBase, '.work-state.json');
+    if (fsLocal.existsSync(baseStatePath)) {
+      return {
+        canonical: safeBase,
+        reason: `An active session exists for ${safeBase} (no suffix). Re-invoke with that exact canonical, or finish/abort it first.`,
+      };
+    }
+  } else {
+    // Input has no suffix; check for any suffix-session under tasks/<base>/
+    const baseDir = pathLocal.join(tasksBase, safeBase);
+    if (fsLocal.existsSync(baseDir)) {
+      let entries;
+      try {
+        entries = fsLocal.readdirSync(baseDir, { withFileTypes: true });
+      } catch {
+        entries = [];
+      }
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue;
+        const stateFile = pathLocal.join(baseDir, entry.name, '.work-state.json');
+        if (fsLocal.existsSync(stateFile)) {
+          // Read the existing session's recorded separator (if any) so the
+          // `canonical` and `reason` fields are mutually consistent —
+          // matching the form the session was originally created with.
+          // Falls back to `-` (default re-invocation form).
+          let existingSeparator = '-';
+          try {
+            const raw = fsLocal.readFileSync(stateFile, 'utf8');
+            const parsed = JSON.parse(raw);
+            if (parsed && (parsed.ticketSeparator === '-' || parsed.ticketSeparator === '/')) {
+              existingSeparator = parsed.ticketSeparator;
+            }
+          } catch {
+            // ignore — fall back to '-'
+          }
+          const canonical = `${safeBase}${existingSeparator}${entry.name}`;
+          return {
+            canonical,
+            reason: `An active session exists for ${canonical}. Re-invoke with: ${canonical}`,
+          };
+        }
+      }
+    }
+  }
+  return null;
+}
+
 // ─── Core Orchestration Loop ────────────────────────────────────────────────
 // IMPORTANT: This file is the generic orchestrator. NO step-specific logic here.
 // Step-specific behavior (prompts, gates, delegation overrides) belongs in
@@ -244,12 +330,16 @@ function getNextInstruction(ticketRaw, rework) {
   }
   _recursionDepth++;
 
-  // Parse ticket input
-  let ticketBase, suffix;
+  // Parse + STRICT validate ticket input BEFORE any filesystem side effect.
+  // This rejects malformed input like "ECHO-4446 TASKS" (whitespace), traversal,
+  // or non-canonical bases — preventing creation of bogus tasks/ subfolders.
+  const providerConfigEarly = tp.getProviderConfig({ skipPrompt: true });
+  let ticketBase, suffix, separator;
   try {
-    const parsed = parseTicketInput(ticketRaw);
-    ticketBase = parsed.ticketBase;
-    suffix = parsed.suffix;
+    const validated = validateRawTicketInput(ticketRaw, providerConfigEarly);
+    ticketBase = validated.ticketBase;
+    suffix = validated.suffix;
+    separator = validated.separator || null;
   } catch (err) {
     return {
       type: 'work_instruction',
@@ -262,11 +352,12 @@ function getNextInstruction(ticketRaw, rework) {
         remainingSteps: [],
       },
       reason: err.message,
-      suggestion: 'Check ticket ID format',
+      suggestion:
+        'Pass a canonical ticket ID like PROJ-123 (or PROJ-123-suffix). No spaces or path separators.',
     };
   }
 
-  const providerConfig = tp.getProviderConfig({ skipPrompt: true });
+  const providerConfig = providerConfigEarly;
   const isGitHub = providerConfig?.provider === 'github';
 
   // Normalize ticket
@@ -323,18 +414,33 @@ function getNextInstruction(ticketRaw, rework) {
     }
   }
 
-  // Persist DEFER metadata
+  // Persist DEFER metadata. Also persist the canonical ticket identity
+  // (ticketBase / ticketSuffix / ticketSeparator) so future invocations can
+  // verify they're addressing the same session even if the user passes a
+  // shortened or different variant.
   result.timestamp = new Date().toISOString();
   const planState = loadWorkState(safeName);
   if (planState) {
     planState.lastPlanTimestamp = result.timestamp;
     planState.deferredSteps = result.plan.filter((s) => s.action === 'DEFER').map((s) => s.step);
+    // Backfill canonical identity on existing state from pre-this-fix sessions
+    if (planState.ticketBase === undefined) planState.ticketBase = safeBase;
+    if (planState.ticketSuffix === undefined) planState.ticketSuffix = suffix || null;
+    if (planState.ticketSeparator === undefined) {
+      // Use the separator the user actually typed (validateRawTicketInput
+      // returns '-', '/', or null). Falling back to '/' only when a suffix
+      // exists but the parser didn't report a separator — defensive only.
+      planState.ticketSeparator = suffix ? separator || '/' : null;
+    }
     saveWorkState(safeName, planState);
   } else {
     const deferSteps = result.plan.filter((s) => s.action === 'DEFER').map((s) => s.step);
     if (deferSteps.length > 0) {
       const minimalState = {
         ticketId: safeName,
+        ticketBase: safeBase,
+        ticketSuffix: suffix || null,
+        ticketSeparator: suffix ? separator || '/' : null,
         description: '',
         currentStep: 1,
         status: 'in_progress',
@@ -477,10 +583,16 @@ function getNextInstruction(ticketRaw, rework) {
           // on verify functions (e.g., isPRGateReady calls checkCI which blocks).
           // Gates like follow-up-gate and check-gate read sub-orchestrator state
           // and advance directly when their sub-workflow completed.
+          // Compute the canonical worktree dir for this ticket so the gate's
+          // test commands run inside the ticket's worktree — NOT whichever
+          // shell cwd the PostToolUse hook happened to fire from. Cross-shell
+          // invocations (one shell per worktree) used to leak: the gate would
+          // run tests from worktree A but write evidence into ticket B.
+          const worktreeDir = path.join(WORKTREES_BASE, `${MAIN_WORKTREE_FOLDER}-${safeBase}`);
           const preGateResult = runGate(
             entry.step,
             safeName,
-            { ticket, stateCtx, tasksDir },
+            { ticket, stateCtx, tasksDir, worktreeDir },
             {
               loadWorkState,
               saveWorkState,
@@ -603,10 +715,72 @@ function main() {
 
   const rework = args.includes('--rework');
   const init = args.includes('--init');
-  const ticketRaw = args
-    .filter((a) => !a.startsWith('--'))
-    .join(' ')
-    .trim();
+  // Take only the FIRST positional arg as the ticket. Multiple positionals
+  // (e.g. "ECHO-4446 TASKS ECHO-4446") are an error — they would otherwise be
+  // silently joined into "ECHO-4446 TASKS ECHO-4446" and create a bogus folder.
+  const positionals = args.filter((a) => !a.startsWith('--'));
+  const ticketRaw = (positionals[0] || '').trim();
+  if (positionals.length > 1) {
+    console.log(
+      JSON.stringify(
+        {
+          type: 'work_instruction',
+          action: 'blocked',
+          reason: `Multiple positional arguments received: ${JSON.stringify(positionals)}. Pass exactly ONE ticket ID.`,
+          suggestion: 'Quote suffixes: use APP-1234-foo (one arg), not APP-1234 foo (two args).',
+        },
+        null,
+        2
+      )
+    );
+    process.exit(1);
+  }
+
+  // Validate BEFORE writeMarkerFile (which creates a tasks/<id>/ folder).
+  // We re-validate inside getNextInstruction too, but the marker write happens
+  // first under --init, so we must gate it here as well.
+  let validated;
+  try {
+    const earlyProviderConfig = tp.getProviderConfig({ skipPrompt: true });
+    validated = validateRawTicketInput(ticketRaw, earlyProviderConfig);
+  } catch (err) {
+    console.log(
+      JSON.stringify(
+        {
+          type: 'work_instruction',
+          action: 'blocked',
+          reason: err.message,
+          suggestion:
+            'Pass a canonical ticket ID like PROJ-123 (or PROJ-123-suffix). No spaces or path separators.',
+        },
+        null,
+        2
+      )
+    );
+    process.exit(1);
+  }
+
+  // Active-session conflict check: once a session is bootstrapped, future
+  // invocations MUST use the same canonical ID. Pass `APP-1234` when an active
+  // session uses `APP-1234-foo` (or vice versa) → block.
+  {
+    const conflict = detectSessionConflict(validated, TASKS_BASE, tp);
+    if (conflict) {
+      console.log(
+        JSON.stringify(
+          {
+            type: 'work_instruction',
+            action: 'blocked',
+            reason: conflict.reason,
+            suggestion: `Re-invoke with: ${conflict.canonical}`,
+          },
+          null,
+          2
+        )
+      );
+      process.exit(1);
+    }
+  }
 
   // On --init, write marker file for auto-advance hook detection
   if (init) {

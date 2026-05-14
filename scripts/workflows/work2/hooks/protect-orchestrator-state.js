@@ -105,9 +105,24 @@ function formatMessage(match, vector) {
 
 // ─── Hook entrypoint ────────────────────────────────────────────────────────
 
+// Plugin root contains every legitimate writer of the protected basenames
+// (work-next.js, transition-step.js, tdd-phase-state.js, the gate scripts).
+// Declaring it as a trusted script root prevents Vector 3 from blocking the
+// orchestrator from running itself — it would otherwise scan work-next.js,
+// see "fs.writeFileSync" and ".work-state.json" both present, and block.
+//
+// Use the project's authoritative resolvePluginRoot so we land on
+// `<repo>/scripts/` (the plugin root that contains `workflows/work`), NOT
+// the entire repo root. Three `..` from `scripts/workflows/work2/hooks/`
+// → `scripts/`. Resolver falls back to that exact traversal when no env
+// var is set, but prefers an env-pinned root when one is present.
+const { resolvePluginRoot } = require(path.join(__dirname, '..', 'lib', 'resolve-plugin-root'));
+const PLUGIN_ROOT = resolvePluginRoot(__dirname, 3) || path.resolve(__dirname, '..', '..', '..');
+
 const protector = createFileProtector({
   isProtected: isOrchestratorManaged,
   formatMessage,
+  trustedScriptRoots: [PLUGIN_ROOT],
 });
 
 async function main() {
