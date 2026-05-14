@@ -124,11 +124,16 @@ module.exports = function registerMonitor(register) {
       output = lines.join('\n');
     }
 
-    // Determine exit code: 0 = all clear, 1 = issues remain
+    // Determine exit code: 0 = all clear, 1 = issues remain.
+    // Merge state matters: a PR with green CI + clear reviews but
+    // `mergeable: CONFLICTING` is NOT all-clear — it needs a rebase before
+    // it can merge. Previously this returned 0 and `report.js` declared the
+    // workflow complete while conflicts existed on the PR.
     const ciOk = ci.status === 'passing' || ci.status === 'no-checks';
     const reviewsOk =
       !reviews.hasBlocking && (!reviews.pendingBots || reviews.pendingBots.length === 0);
-    const exitCode = ciOk && reviewsOk ? 0 : 1;
+    const mergeOk = prInfo.mergeable !== 'CONFLICTING' && prInfo.mergeStateStatus !== 'DIRTY';
+    const exitCode = ciOk && reviewsOk && mergeOk ? 0 : 1;
 
     state.lastMonitorResult = { exitCode, output: output.substring(0, 3000) };
     state._ciRunningCount = ci.running ? ci.running.length : 0;

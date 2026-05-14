@@ -9,6 +9,18 @@ const path = require('path');
 
 module.exports = function registerReport(register) {
   register('report', (state, ctx) => {
+    // Final safety net: never mark complete while the latest monitor cycle
+    // still shows merge conflicts. Catches the case where an earlier step
+    // (triage/fix-ci) routed past a conflict without resolving it — e.g.
+    // fix-ci falling through when there were no failing CI jobs to dispatch
+    // a fix for. Send the workflow back to fix-ci instead.
+    const lastOutput = (state.lastMonitorResult && state.lastMonitorResult.output) || '';
+    if (/merge conflict|cannot be merged/i.test(lastOutput)) {
+      state.failureCategory = 'conflict';
+      state.currentStep = 'fix-ci';
+      return null;
+    }
+
     // Write accountability report if it doesn't exist
     const reportPath = path.join(ctx.tasksDir, 'review-accountability.json');
     if (!fs.existsSync(reportPath)) {
