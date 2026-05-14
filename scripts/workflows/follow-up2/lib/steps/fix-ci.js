@@ -11,6 +11,22 @@ const { execFileSync } = require('child_process');
 
 module.exports = function registerFixCi(register) {
   register('fix-ci', (state, ctx) => {
+    // ── HARD STOP on merge conflict ─────────────────────────────────────
+    // Conflicts are NOT auto-resolved. Halt the workflow and tell the
+    // agent (and the user) to sync the branch before continuing. This
+    // prevents auto-rebase delegates from silently dropping upstream
+    // changes that need human judgement (big sibling-PR merges, conflicting
+    // schema migrations, etc).
+    if (state._isConflicting || state.failureCategory === 'conflict') {
+      const prNum = state.prNumber || 'unknown';
+      return {
+        type: 'follow_up_instruction',
+        action: 'blocked',
+        reason: `Merge conflicts found on PR #${prNum} — sync your branch with the target branch before proceeding. Then re-run /follow-up2 ${state.ticketId || ''}.`,
+        state: { ticket: state.ticketId, currentStep: 'fix-ci', attempt: state.attempt || 0 },
+      };
+    }
+
     if (state.dispatched === 'fix-ci') return null; // already ran → advance to push-retry
 
     state.dispatched = 'fix-ci';

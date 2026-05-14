@@ -31,9 +31,11 @@ function registerStep(name, fn) {
 require('../lib/steps/triage')(registerStep);
 require('../lib/steps/fix-reviews')(registerStep);
 require('../lib/steps/report')(registerStep);
+require('../lib/steps/fix-ci')(registerStep);
 const triage = handlers['triage'];
 const fixReviews = handlers['fix-reviews'];
 const report = handlers['report'];
+const fixCi = handlers['fix-ci'];
 
 function makeCtx() {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fu-conflict-'));
@@ -126,6 +128,30 @@ describe('follow-up2: merge conflict has absolute precedence', () => {
       if (result && result.reason) {
         assert.ok(typeof result.reason === 'string');
       }
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('fix-ci HARD STOPS with a blocked instruction when conflicted (no auto-rebase dispatch)', () => {
+    const { tmp, ctx } = makeCtx();
+    try {
+      const state = {
+        ticketId: 'ECHO-CONF',
+        prNumber: 1611,
+        currentStep: 'fix-ci',
+        attempt: 0,
+        _isConflicting: true,
+        failureCategory: 'conflict',
+      };
+      const result = fixCi(state, ctx);
+      assert.ok(result, 'fix-ci must return an instruction when conflicted');
+      assert.equal(result.action, 'blocked');
+      assert.match(result.reason, /Merge conflicts found/i);
+      assert.match(result.reason, /sync your branch/i);
+      assert.match(result.reason, /#1611/);
+      // Crucially: no delegate. The agent does NOT get an auto-rebase dispatch.
+      assert.equal(result.delegate, undefined);
     } finally {
       fs.rmSync(tmp, { recursive: true, force: true });
     }
