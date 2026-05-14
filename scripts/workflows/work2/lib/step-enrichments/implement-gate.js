@@ -96,6 +96,72 @@ function reconcileTasksMetaWithFile(ws, tasksDir, saveWorkState, safeName, log) 
 }
 
 /**
+ * Persist the full stdout+stderr of a test run alongside its tdd-phase.json.
+ *
+ * Writes `task<N>/logs/<phase>-<timestamp>.log` with a small header (command,
+ * exit code, timestamp) so the file is self-describing if opened directly.
+ * The JSON evidence only carries `outputTail` (small slice) plus a pointer
+ * to this file via `logPath` / `logBytes`, keeping tdd-phase.json compact.
+ *
+ * Retention: keep at most LOG_RETENTION_COUNT files per `logs/` dir. Older
+ * files are deleted on each write — bounded growth even on long retry loops.
+ *
+ * Fail-open: any IO error returns null and the caller proceeds with only
+ * the in-JSON outputTail, matching the rest of this module's policy.
+ *
+ * @param {string} taskDir - Absolute path to `tasks/<TICKET>/task<N>/`
+ * @param {string} phase - 'red' | 'green'
+ * @param {string} cmd - The test command that ran
+ * @param {number|null} exitCode
+ * @param {string} output - Combined stdout+stderr
+ * @param {string} nowIso - ISO timestamp matching evidence timestamp
+ * @returns {{ logPath: string, logBytes: number } | null}
+ *   logPath is relative to taskDir, e.g. `logs/red-2026-05-14T11-22-33-000Z.log`
+ */
+const LOG_RETENTION_COUNT = 6;
+function writeTestLog(taskDir, phase, cmd, exitCode, output, nowIso) {
+  try {
+    if (!taskDir || !phase || output == null) return null;
+    const logsDir = path.join(taskDir, 'logs');
+    fs.mkdirSync(logsDir, { recursive: true });
+    // Filename-safe timestamp (colons break on Windows).
+    const stamp = String(nowIso).replace(/[:.]/g, '-');
+    const filename = `${phase}-${stamp}.log`;
+    const fullPath = path.join(logsDir, filename);
+    const header =
+      `# command: ${cmd}\n` +
+      `# exitCode: ${exitCode == null ? 'null' : exitCode}\n` +
+      `# timestamp: ${nowIso}\n` +
+      `# phase: ${phase}\n` +
+      `${'-'.repeat(72)}\n`;
+    const body = String(output);
+    fs.writeFileSync(fullPath, header + body);
+
+    // Prune oldest entries (by lexicographic name; ISO stamps sort correctly).
+    try {
+      const entries = fs
+        .readdirSync(logsDir)
+        .filter((f) => f.endsWith('.log'))
+        .sort();
+      const excess = entries.length - LOG_RETENTION_COUNT;
+      for (let i = 0; i < excess; i++) {
+        try {
+          fs.unlinkSync(path.join(logsDir, entries[i]));
+        } catch {
+          /* fail-open */
+        }
+      }
+    } catch {
+      /* fail-open */
+    }
+
+    return { logPath: path.join('logs', filename), logBytes: Buffer.byteLength(body) };
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Read the `### Test Command` for a specific task from tasks.md.
  *
  * @param {string} tasksDir
@@ -383,6 +449,7 @@ function runPreImplementTest(cmd, safeName, taskNum, workingDir, env, gateTasksB
 
   // Pre-test FAILED — authentic RED. Phase is 'red' until the post-implement
   // test passes and runTestAndRecord transitions it to 'green'.
+  const redLog = writeTestLog(taskDir, 'red', cmd, exitCode, output, now);
   try {
     fs.mkdirSync(taskDir, { recursive: true });
     fs.writeFileSync(
@@ -401,6 +468,7 @@ function runPreImplementTest(cmd, safeName, taskNum, workingDir, env, gateTasksB
                 timestamp: now,
                 capturedByGate: true,
                 outputTail: String(output).slice(-2000),
+                ...(redLog ? { logPath: redLog.logPath, logBytes: redLog.logBytes } : {}),
               },
             },
           ],
@@ -475,6 +543,7 @@ function runTestAndRecord(cmd, safeName, taskNum, workingDir, env, gateTasksBase
     /* no pre-existing evidence */
   }
 
+  const greenLog = writeTestLog(taskDir, 'green', cmd, 0, output, now);
   let evidence;
   if (existing && Array.isArray(existing.cycles) && existing.cycles[0]?.red) {
     evidence = {
@@ -489,6 +558,8 @@ function runTestAndRecord(cmd, safeName, taskNum, workingDir, env, gateTasksBase
                 testExitCode: 0,
                 timestamp: now,
                 capturedByGate: true,
+                outputTail: String(output).slice(-2000),
+                ...(greenLog ? { logPath: greenLog.logPath, logBytes: greenLog.logBytes } : {}),
               },
             }
           : c
