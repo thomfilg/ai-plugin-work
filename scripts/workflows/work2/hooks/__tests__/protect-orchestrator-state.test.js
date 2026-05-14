@@ -90,6 +90,18 @@ describe('protect-orchestrator-state hook', () => {
       ['grep tdd-phase.json', 'grep -r foo /tmp/t/ECHO-1/task1/tdd-phase.json'],
       ['ls .claims', 'ls -la /tmp/t/ECHO-1/.claims/'],
       ['echo without redirect', 'echo "this mentions .work-state.json but does not write"'],
+      // Regression: `2>/dev/null` (stderr to /dev/null) is a fd-number
+      // redirect, NOT a file write. The hook used to treat the `>` as a
+      // shell write op, tokenize the whole command, and block on the
+      // protected-filename mention.
+      [
+        'cat .work-state.json with stderr suppress',
+        'cat /tmp/t/ECHO-1/.work-state.json 2>/dev/null | grep _tdd',
+      ],
+      [
+        'grep tdd-phase.json with stderr suppress',
+        'grep -r foo /tmp/t/ECHO-1/task1/tdd-phase.json 2>/dev/null',
+      ],
     ];
     for (const [label, command] of cases) {
       it(label, () => {

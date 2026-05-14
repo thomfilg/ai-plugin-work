@@ -297,6 +297,21 @@ Hardcoded `pnpm test:foo path/to/file` is **only** allowed if a project explicit
 
 Note: The implement-gate executes this command automatically before/after dispatching the developer agent. Agents do NOT call `tdd-phase-state.js` or record any TDD evidence themselves.
 
+**Test scope must equal task scope** (CRITICAL — prevents cross-task gate deadlocks):
+
+A task's Test Command may ONLY exercise code declared in this task's `### Files in scope`. If the test passes through a network boundary (tRPC procedure, REST handler, GraphQL resolver), it ALSO traverses the input/output validators, middleware, and routing for that boundary — and those are owned by OTHER tasks. The gate then can't pass until every co-traversed task is also done, but each of those tasks is gated by its own test that needs THIS task done. Deadlock.
+
+Symptoms when this is violated (don't ship a tasks.md with these):
+- Task A's test executes a tRPC procedure but Task A only ships the inner helper — the procedure's output schema lives in Task B.
+- Task A's Files in scope is one file, but its Test Command's CHANGED_FILES list spans 3 directories.
+- A Zod / type error fires in the test that names a symbol declared by Task B.
+
+Rules:
+1. **Default to unit tests** for per-task gates. A task that ships `lib/foo/helper.ts` should test the helper directly: `CHANGED_FILES="lib/foo/__tests__/helper.test.ts" eval "$TEST_UNIT_COMMAND"`. Do NOT test it through a procedure / handler / resolver unless that procedure is also in this task's Files in scope.
+2. **Use integration tests only when the task owns the entire boundary** — handler + validator + helper all listed under this task's Files in scope. Otherwise the integration test couples this task to its siblings.
+3. **Reserve cross-cutting integration tests for the final `checkpoint` task** — that task's scope is "verify the whole feature works end-to-end" and explicitly depends on every prior task.
+4. **Audit every Test Command before emitting tasks.md**: for each task, walk the file list in CHANGED_FILES and confirm every file appears under this task's Files in scope. If any file is owned by a different task, switch to a narrower unit test or expand the scope.
+
 ### Suggested Scope (optional — include when file paths are inferable from the spec)
 - `<path/to/likely/file.ts>`
 - `<path/to/another/file.ts>`

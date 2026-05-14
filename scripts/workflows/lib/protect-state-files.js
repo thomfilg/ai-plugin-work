@@ -33,8 +33,12 @@ const path = require('path');
 /** Tools that write via file_path */
 const FILE_WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit']);
 
-/** Shell write operators — redirects, tee, cp, mv, dd */
-const BASH_WRITE_OPS = /(?:>{1,2}|\btee\b|\bcp\b|\bmv\b|\bdd\b.*\bof=)/;
+/** Shell write operators — redirects, tee, cp, mv, dd.
+ *  The negative-lookbehind `(?<!\d)` on `>` excludes fd-number redirects
+ *  like `2>/dev/null`, `1>>log`, which never write to a user-named target.
+ *  Real file writes (`> out`, `>> out`, `cmd &> out`) still match because
+ *  they're preceded by whitespace or `&`, not a digit. */
+const BASH_WRITE_OPS = /(?:(?<!\d)>{1,2}|\btee\b|\bcp\b|\bmv\b|\bdd\b.*\bof=)/;
 
 /** Node.js fs write calls executed via Bash (node -e, inline scripts) */
 const NODE_FS_WRITES = /\b(?:writeFileSync|appendFileSync|writeFile|createWriteStream)\b/;

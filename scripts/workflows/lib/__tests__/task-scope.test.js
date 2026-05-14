@@ -120,6 +120,109 @@ describe('unionFilesInScope', () => {
   });
 });
 
+describe('validateTaskTestScope (regression: ECHO-4637-class deadlock)', () => {
+  it('passes when CHANGED_FILES is a strict subset of Files in scope', () => {
+    const task = {
+      num: 2,
+      filesInScope: [
+        'lib/external-assets/update-tags.ts',
+        'lib/external-assets/__tests__/update-tags.test.ts',
+      ],
+      testCommand:
+        'CHANGED_FILES="lib/external-assets/__tests__/update-tags.test.ts" eval "$TEST_UNIT_COMMAND"',
+    };
+    assert.deepEqual(ts.validateTaskTestScope(task), []);
+  });
+
+  it('blocks when CHANGED_FILES references a sibling-owned integration test', () => {
+    // The exact ECHO-4637 shape: Task 2 ships only the helper but its test
+    // command runs through tRPC integration tests, traversing code owned by
+    // Task 4 (schema narrowing).
+    const task = {
+      num: 2,
+      filesInScope: ['lib/external-assets/update-tags.ts'],
+      testCommand:
+        'CHANGED_FILES="lib/external-assets/update-tags.ts ' +
+        'app/api/trpc/routers/__tests__/external-assets-tags.integration.test.ts ' +
+        'lib/validation/__tests__/external-asset-update-tags.test.ts" ' +
+        'eval "$TEST_INTEGRATION_COMMAND"',
+    };
+    const errors = ts.validateTaskTestScope(task);
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /Task 2/);
+    assert.match(errors[0], /external-assets-tags\.integration\.test\.ts/);
+    assert.match(errors[0], /lib\/validation\/__tests__\/external-asset-update-tags\.test\.ts/);
+    assert.match(errors[0], /deadlock/i);
+  });
+
+  it('honours glob patterns in Files in scope', () => {
+    const task = {
+      num: 1,
+      filesInScope: ['lib/foo/**', 'tests/foo/**'],
+      testCommand: 'CHANGED_FILES="lib/foo/bar.ts tests/foo/bar.test.ts" eval "$TEST_UNIT_COMMAND"',
+    };
+    assert.deepEqual(ts.validateTaskTestScope(task), []);
+  });
+
+  it('skips check when testCommand is absent (legacy tasks)', () => {
+    const task = { num: 3, filesInScope: ['lib/foo.ts'], testCommand: null };
+    assert.deepEqual(ts.validateTaskTestScope(task), []);
+  });
+
+  it('skips check when Test Command does not use the canonical CHANGED_FILES envelope', () => {
+    const task = {
+      num: 4,
+      filesInScope: ['lib/foo.ts'],
+      testCommand: 'pnpm test lib/other/something.test.ts',
+    };
+    assert.deepEqual(ts.validateTaskTestScope(task), []);
+  });
+
+  it('validateAll surfaces test-scope errors alongside scope-envelope errors', () => {
+    const tasks = [
+      {
+        num: 1,
+        filesInScope: ['lib/foo.ts'],
+        testCommand: 'CHANGED_FILES="lib/bar.ts" eval "$TEST_UNIT_COMMAND"',
+      },
+    ];
+    const r = ts.validateAll(tasks);
+    assert.equal(r.valid, false);
+    assert.ok(r.errors.some((e) => /references files not in its/.test(e)));
+  });
+});
+
+describe('extractChangedFilesFromTestCommand', () => {
+  const cases = [
+    ['CHANGED_FILES="a.ts b.ts" eval "$X"', ['a.ts', 'b.ts']],
+    [`CHANGED_FILES='a.ts b.ts' eval "$X"`, ['a.ts', 'b.ts']],
+    ['CHANGED_FILES="a.ts" eval "$X" && CHANGED_FILES="b.ts" eval "$Y"', ['a.ts']],
+    ['pnpm test foo.ts', []],
+    [null, []],
+    ['', []],
+  ];
+  for (const [input, expected] of cases) {
+    it(`parses: ${JSON.stringify(input)}`, () => {
+      assert.deepEqual(ts.extractChangedFilesFromTestCommand(input), expected);
+    });
+  }
+});
+
+describe('fileMatchesScope', () => {
+  it('exact match', () => {
+    assert.equal(ts.fileMatchesScope('lib/foo.ts', ['lib/foo.ts']), true);
+  });
+  it('glob with **', () => {
+    assert.equal(ts.fileMatchesScope('lib/foo/bar/baz.ts', ['lib/foo/**']), true);
+  });
+  it('no match across siblings', () => {
+    assert.equal(ts.fileMatchesScope('lib/bar.ts', ['lib/foo.ts']), false);
+  });
+  it('handles ./ prefix on both sides', () => {
+    assert.equal(ts.fileMatchesScope('./lib/foo.ts', ['./lib/foo.ts']), true);
+  });
+});
+
 describe('findTask', () => {
   it('finds by task num', () => {
     const tasks = [
