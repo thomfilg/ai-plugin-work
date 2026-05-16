@@ -161,6 +161,22 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
       ],
       step: STEPS.implement,
     },
+    // task-next.js is the self-paced TDD runner that internally invokes
+    // tdd-phase-state.js via spawnSync. That inner call bypasses the
+    // PreToolUse hook, so we declare tdd-phase-state.js as a companion:
+    // the hook will mint a write token for both scripts when an agent
+    // invokes task-next.js, allowing the inner recorder to consume its
+    // own token without a second hook trip.
+    'task-next.js': {
+      agents: [
+        'developer-nodejs-tdd',
+        'developer-react-senior',
+        'developer-react-ui-architect',
+        'developer-devops',
+      ],
+      step: STEPS.implement,
+      companionScripts: ['tdd-phase-state.js'],
+    },
   };
 
   const workflow = {

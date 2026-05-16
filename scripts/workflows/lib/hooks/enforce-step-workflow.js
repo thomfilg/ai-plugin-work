@@ -707,22 +707,35 @@ function handlePreToolUse(hookData) {
         })();
         try {
           ensureTokenDir();
-          const tp = tokenPath(scriptBase);
-          try {
-            fs.unlinkSync(tp);
-          } catch {
-            /* may not exist */
-          }
-          const fd = fs.openSync(tp, 'wx', 0o600);
-          try {
-            const tokenData = {
-              agent: normalizeAgentName(detectedAgent),
-              timestamp: Date.now(),
-              tasksBase: ticketId ? path.join(TASKS_BASE, safeTicketPath(ticketId)) : null,
-            };
-            fs.writeSync(fd, JSON.stringify(tokenData));
-          } finally {
-            fs.closeSync(fd);
+          const tokenData = {
+            agent: normalizeAgentName(detectedAgent),
+            timestamp: Date.now(),
+            tasksBase: ticketId ? path.join(TASKS_BASE, safeTicketPath(ticketId)) : null,
+          };
+          const writeOneToken = (basename) => {
+            const tp = tokenPath(basename);
+            try {
+              fs.unlinkSync(tp);
+            } catch {
+              /* may not exist */
+            }
+            const fd = fs.openSync(tp, 'wx', 0o600);
+            try {
+              fs.writeSync(fd, JSON.stringify(tokenData));
+            } finally {
+              fs.closeSync(fd);
+            }
+          };
+          writeOneToken(scriptBase);
+          // Companion tokens: scripts the gated script calls internally via
+          // spawnSync (which bypasses the PreToolUse hook). Mint a matching
+          // token for each so the chained writer can authenticate without a
+          // second hook trip.
+          const companions = Array.isArray(gatedEntry.companionScripts)
+            ? gatedEntry.companionScripts
+            : [];
+          for (const companion of companions) {
+            writeOneToken(companion);
           }
         } catch (e) {
           if (DEBUG) process.stderr.write(`WARNING: Failed to write token: ${e.message}\n`);
