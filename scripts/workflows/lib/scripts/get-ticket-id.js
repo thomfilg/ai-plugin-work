@@ -15,27 +15,17 @@ function getCurrentTaskId(cwd = process.cwd()) {
   // Explicit override via env var (used by follow-up2 when running outside worktree)
   if (process.env.WORK_TICKET_ID) return process.env.WORK_TICKET_ID;
 
-  // Try GH-XX pattern first (for GitHub Issues worktree paths like my-project-GH-56)
-  // Return GH-N (path-safe) instead of #N to avoid filesystem issues with # in directory names
-  const ghMatch = cwd.match(GH_PATTERN);
-  if (ghMatch) {
-    return 'GH-' + ghMatch[1];
-  }
-
-  // Try to get from worktree folder name (Jira/Linear: PROJ-123)
-  const worktreeMatch = cwd.match(TICKET_PATTERN);
-  if (worktreeMatch) {
-    return worktreeMatch[1].toUpperCase();
-  }
-
-  // Try to get from git branch name
+  // Prefer git branch over cwd path. In symlinked worktrees (e.g.
+  // w-tabwoah/tabwoah-ECHO-4628/ checked out to a feature/echo-4630-...
+  // branch), the cwd-name lies and the branch is authoritative. We still
+  // fall back to cwd-pattern matching if the git lookup fails (e.g. tests
+  // pass a synthetic cwd that doesn't exist on disk).
   try {
     const branch = execSync('git branch --show-current', {
       cwd,
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
-    // Check GH-XX pattern in branch name
     const branchGhMatch = branch.match(GH_PATTERN);
     if (branchGhMatch) {
       return 'GH-' + branchGhMatch[1];
@@ -45,7 +35,20 @@ function getCurrentTaskId(cwd = process.cwd()) {
       return branchMatch[1].toUpperCase();
     }
   } catch {
-    // Ignore git errors
+    // Ignore git errors — fall through to cwd matching.
+  }
+
+  // Fallback: cwd path. Try GH-XX first (for GitHub Issues worktree paths
+  // like my-project-GH-56). Return GH-N (path-safe) instead of #N to avoid
+  // filesystem issues with # in directory names.
+  const ghMatch = cwd.match(GH_PATTERN);
+  if (ghMatch) {
+    return 'GH-' + ghMatch[1];
+  }
+
+  const worktreeMatch = cwd.match(TICKET_PATTERN);
+  if (worktreeMatch) {
+    return worktreeMatch[1].toUpperCase();
   }
 
   // Fallback: try numeric suffix for GitHub Issues provider

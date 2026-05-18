@@ -24,7 +24,26 @@ const { getNodeInvocations } = require('./command-matching');
 function isTrustedScriptPath(scriptPath, trustedDirs) {
   try {
     const resolved = fs.realpathSync(path.resolve(scriptPath));
-    return trustedDirs.some((dir) => resolved.startsWith(dir + path.sep));
+    // realpath BOTH sides: if the hook was loaded via a symlinked plugin
+    // cache (~/.claude/plugins/cache/.../3.0.64 → /home/.../dev-tree), the
+    // trustedDirs computed from __dirname will be cache paths, while a
+    // caller using the dev-tree path directly will resolve to the symlink
+    // TARGET. Without resolving both, the prefix check returns false even
+    // though both paths point to the same physical directory.
+    return trustedDirs.some((dir) => {
+      let realDir = dir;
+      try {
+        realDir = fs.realpathSync(dir);
+      } catch {
+        /* dir might not exist; fall back to raw */
+      }
+      return (
+        resolved === realDir ||
+        resolved.startsWith(realDir + path.sep) ||
+        resolved === dir ||
+        resolved.startsWith(dir + path.sep)
+      );
+    });
   } catch {
     return false;
   }

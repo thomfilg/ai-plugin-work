@@ -26,7 +26,10 @@ module.exports = function registerPhase1(register) {
         // Mark tasks as verified [v] if completion-checker says COMPLETE
         try {
           const completionReport = fs.readFileSync(completionPath, 'utf8');
-          if (/Status:\s*COMPLETE\b/i.test(completionReport)) {
+          const { hasVerdict } = require(
+            path.join(__dirname, '..', '..', '..', 'lib', 'parse-completion-status')
+          );
+          if (hasVerdict(completionReport, ['COMPLETE'])) {
             const { markVerified } = require(
               path.join(__dirname, '..', '..', '..', 'work2', 'lib', 'mark-task-progress')
             );

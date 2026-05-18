@@ -83,12 +83,20 @@ function getStepInProgress(ticketId) {
   }
 }
 
-// Allow edits during `spec` (initial authoring) AND `spec_gate` (recovery
-// path: spec_gate's validator failed against gherkin.feature and the agent
-// needs to fix the tags / structure in-place without rewinding the state
-// machine).
+// Allow edits during `spec` (initial authoring), `spec_gate` (recovery
+// path: spec_gate's validator failed against gherkin.feature and the
+// agent needs to fix the tags / structure in-place without rewinding the
+// state machine), AND `tasks` / `tasks_gate` (so the agent can add
+// `@task:N` / `@test:<path>` tags that the tasks_gate cross-validator
+// requires — without these the gate would block forever).
 const protector = createArtifactProtector({
-  artifacts: [{ basename: 'gherkin.feature', step: 'spec', allowedSteps: ['spec_gate'] }],
+  artifacts: [
+    {
+      basename: 'gherkin.feature',
+      step: 'spec',
+      allowedSteps: ['spec_gate', 'tasks', 'tasks_gate'],
+    },
+  ],
   getStepInProgress,
   getTicketId,
 });
