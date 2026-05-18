@@ -783,7 +783,13 @@ function handlePreToolUse(hookData) {
             tasksBase: ticketId ? path.join(TASKS_BASE, safeTicketPath(ticketId)) : null,
           };
           const writeOneToken = (basename) => {
-            const tp = tokenPath(basename);
+            // Key by ticket so parallel sessions on different tickets do
+            // not clobber each other's tokens (real incident: ECHO-4465
+            // and ECHO-4630 task-next.js runs colliding on the same
+            // /tmp/.claude-write-tokens/task-next.js file). When ticketId
+            // is null (no ticket context), falls back to the legacy
+            // unkeyed path.
+            const tp = tokenPath(basename, ticketId);
             try {
               fs.unlinkSync(tp);
             } catch {

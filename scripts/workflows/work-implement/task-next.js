@@ -263,11 +263,15 @@ function currentPhase(state) {
 // agent identity unless we cached it. Subsequent spawns will re-mint the
 // token from this snapshot with a fresh timestamp.
 let _companionTokenSnapshot = null;
-function snapshotCompanionToken(scriptBasename) {
+function snapshotCompanionToken(scriptBasename, ticketId) {
   try {
     const { tokenPath } = require('../lib/scripts/write-report');
-    const tp = tokenPath(scriptBasename);
-    if (!fs.existsSync(tp)) return false;
+    // Prefer the ticket-keyed path (parallel-session-safe); fall back to
+    // the legacy unkeyed path if the keyed one isn't there.
+    const keyed = tokenPath(scriptBasename, ticketId);
+    const unkeyed = tokenPath(scriptBasename);
+    const tp = fs.existsSync(keyed) ? keyed : fs.existsSync(unkeyed) ? unkeyed : null;
+    if (!tp) return false;
     _companionTokenSnapshot = {
       basename: scriptBasename,
       path: tp,
@@ -583,7 +587,7 @@ function main() {
   // The hook minted this token when the agent invoked `node task-next.js ...`;
   // we'll re-mint it from this snapshot before every inner tdd-phase-state.js
   // spawn so consumed/expired tokens don't strand a transition mid-cycle.
-  snapshotCompanionToken('tdd-phase-state.js');
+  snapshotCompanionToken('tdd-phase-state.js', ticket);
 
   const tasksBase = resolveTasksBase();
   const tasksDir = path.join(tasksBase, ticket);
