@@ -112,9 +112,14 @@ function writeState(ticketId, state) {
   fs.renameSync(tmp, p);
 }
 
-function verifyToken() {
+function verifyToken(expectedTicketId) {
   const scriptBasename = path.basename(__filename);
-  const token = consumeToken(scriptBasename);
+  // Pass ticket id so consumeToken hits the per-ticket keyed path
+  // (/tmp/.claude-write-tokens/brief-phase-state.js.<TICKET>). The PreToolUse
+  // hook mints ONLY the keyed path post-suffix-strip — checking the
+  // legacy unkeyed path here would fail every time for any agent in a
+  // worktree session.
+  const token = consumeToken(scriptBasename, expectedTicketId);
   if (!token) {
     errorExit(
       "No valid write token found. This script can only be called through Claude Code's agent system."
@@ -218,10 +223,10 @@ function main(argv) {
   if (!sub) {
     errorExit('Usage: brief-phase-state.js <init|current|record|transition> <TICKET> [args]');
   }
-  if (GATED_SUBCOMMANDS.includes(sub)) verifyToken();
-
   const ticket = args[1];
   if (!ticket) errorExit('Missing ticket ID.');
+
+  if (GATED_SUBCOMMANDS.includes(sub)) verifyToken(ticket);
 
   if (sub === 'init') return cmdInit(ticket);
   if (sub === 'current') return cmdCurrent(ticket);
