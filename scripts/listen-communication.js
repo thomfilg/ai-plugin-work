@@ -33,6 +33,8 @@ process.stdout.write(`listening on ${inbox} (Ctrl-C to stop)\n`);
 
 const tail = spawn('tail', ['-n', '0', '-F', inbox], { stdio: ['ignore', 'pipe', 'inherit'] });
 
+const DONE_SENTINEL = '__MONITOR_DONE__';
+
 let buf = '';
 tail.stdout.on('data', (chunk) => {
   buf += chunk.toString('utf8');
@@ -42,6 +44,13 @@ tail.stdout.on('data', (chunk) => {
     buf = buf.slice(idx + 1);
     if (line.length === 0) continue;
     process.stdout.write(`\x07>>> ${line}\n`);
+    if (line.includes(DONE_SENTINEL)) {
+      process.stdout.write(`[${ticket}] channel marked complete — listener exiting.\n`);
+      try {
+        tail.kill('SIGTERM');
+      } catch {}
+      process.exit(0);
+    }
   }
 });
 
