@@ -70,38 +70,61 @@ function ensureTokenDir() {
 }
 
 /**
- * Build the token file path for a given script.
+ * Build the token file path for a given script and (optionally) ticket.
+ * When a ticketId is provided, the path is namespaced as
+ * `<TOKEN_DIR>/<scriptBasename>.<safeTicketId>` so parallel sessions for
+ * DIFFERENT tickets do not collide on the same token file (real incident:
+ * two agents running task-next.js concurrently for ECHO-4465 and
+ * ECHO-4630 — last hook-fire's token clobbered the other's).
+ *
  * @param {string} scriptBasename — e.g. "write-qa-report.js"
+ * @param {string} [ticketId] — optional, when present creates per-ticket token
  * @returns {string} — e.g. "/tmp/.claude-write-tokens/write-qa-report.js"
+ *                    OR "/tmp/.claude-write-tokens/write-qa-report.js.ECHO-4630"
  */
-function tokenPath(scriptBasename) {
+function tokenPath(scriptBasename, ticketId) {
+  if (ticketId && typeof ticketId === 'string') {
+    const safe = ticketId.replace(/[^A-Za-z0-9_-]/g, '_');
+    if (safe.length > 0) return path.join(TOKEN_DIR, `${scriptBasename}.${safe}`);
+  }
   return path.join(TOKEN_DIR, scriptBasename);
 }
 
 /**
  * Read and consume a write token (atomic read + delete).
  * Validates that the token file is a regular file (not a symlink).
+ *
+ * Tries the ticket-keyed path first when a ticketId is provided, falling
+ * back to the unkeyed legacy path for backwards compatibility with
+ * pre-keyed hook mints in flight during a deploy.
+ *
  * @param {string} scriptBasename
+ * @param {string} [ticketId]
  * @returns {{ agent: string, timestamp: number } | null}
  */
-function consumeToken(scriptBasename) {
-  const tp = tokenPath(scriptBasename);
-  try {
-    // Verify the token is a regular file (not a symlink to an unsafe target)
-    const stat = fs.lstatSync(tp);
-    if (!stat.isFile()) return null;
-
-    const raw = fs.readFileSync(tp, 'utf8');
-    // Delete immediately to prevent reuse
+function consumeToken(scriptBasename, ticketId) {
+  const candidates = [];
+  if (ticketId) candidates.push(tokenPath(scriptBasename, ticketId));
+  candidates.push(tokenPath(scriptBasename)); // legacy / unkeyed fallback
+  for (const tp of candidates) {
     try {
-      fs.unlinkSync(tp);
+      // Verify the token is a regular file (not a symlink to an unsafe target)
+      const stat = fs.lstatSync(tp);
+      if (!stat.isFile()) continue;
+
+      const raw = fs.readFileSync(tp, 'utf8');
+      // Delete immediately to prevent reuse
+      try {
+        fs.unlinkSync(tp);
+      } catch {
+        /* already deleted — race is fine */
+      }
+      return JSON.parse(raw);
     } catch {
-      /* already deleted — race is fine */
+      /* missing or unparseable — try next candidate */
     }
-    return JSON.parse(raw);
-  } catch {
-    return null;
   }
+  return null;
 }
 
 /**

@@ -161,6 +161,35 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
       ],
       step: STEPS.implement,
     },
+    // task-next.js is the self-paced TDD runner that internally invokes
+    // tdd-phase-state.js via spawnSync. That inner call bypasses the
+    // PreToolUse hook, so we declare tdd-phase-state.js as a companion:
+    // the hook will mint a write token for both scripts when an agent
+    // invokes task-next.js, allowing the inner recorder to consume its
+    // own token without a second hook trip.
+    'task-next.js': {
+      agents: [
+        'developer-nodejs-tdd',
+        'developer-react-senior',
+        'developer-react-ui-architect',
+        'developer-devops',
+      ],
+      step: STEPS.implement,
+      companionScripts: ['tdd-phase-state.js'],
+    },
+    // Self-paced brief runner: same companion pattern as task-next.js —
+    // brief-next.js spawns brief-phase-state.js internally to record/transition
+    // phase evidence. The hook mints tokens for both when the brief-writer
+    // agent invokes brief-next.js during the `brief` step.
+    'brief-next.js': {
+      agents: ['brief-writer'],
+      step: STEPS.brief,
+      companionScripts: ['brief-phase-state.js'],
+    },
+    'brief-phase-state.js': {
+      agents: ['brief-writer'],
+      step: STEPS.brief,
+    },
   };
 
   const workflow = {
@@ -478,7 +507,11 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
             }
 
             const pr = JSON.parse(execFileSync('gh', ghArgs, opts).trim()); // GH-203: positional arg, not --head
-            return pr.number > 0 && pr.state === 'OPEN';
+            // Accept OPEN or MERGED — a merged PR is even stronger evidence
+            // that the pr step succeeded than an open one. Rejecting MERGED
+            // permanently strands tickets whose PR shipped before the
+            // workflow finished its remaining steps.
+            return pr.number > 0 && (pr.state === 'OPEN' || pr.state === 'MERGED');
           } catch {
             return false;
           }

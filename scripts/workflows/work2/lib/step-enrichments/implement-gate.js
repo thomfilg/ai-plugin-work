@@ -239,14 +239,20 @@ function extractTestCommandFromSection(section) {
 }
 
 /**
- * Task types that REQUIRE authentic RED before dispatch (pre-test must fail).
- * Other types skip RED enforcement and allow dispatch on a passing pre-test.
+ * TDD is required for every task type EXCEPT the exemption list below. The
+ * previous design (`TDD_REQUIRED_TYPES` allowlist) let agents self-exempt
+ * via the `### Type` field in tasks.md — labelling a task "frontend" or
+ * "infrastructure" caused the gate to record a skip stub and let the task
+ * pass without an authentic RED. Inverting the list closes that bypass.
+ *
+ * `checkpoint` is the only legitimate exemption: checkpoint tasks verify
+ * the work of other tasks and have no implementation of their own.
  */
-const TDD_REQUIRED_TYPES = new Set(['implementation', 'feature', 'fix', 'test']);
+const TDD_EXEMPT_TYPES = new Set(['checkpoint']);
 
 function isTddRequired(taskType) {
-  if (!taskType) return true; // default = TDD required
-  return TDD_REQUIRED_TYPES.has(String(taskType).toLowerCase());
+  if (!taskType) return true;
+  return !TDD_EXEMPT_TYPES.has(String(taskType).toLowerCase());
 }
 
 /**
@@ -572,28 +578,18 @@ function runTestAndRecord(cmd, safeName, taskNum, workingDir, env, gateTasksBase
       ),
     };
   } else {
-    // No prior RED — synthesize the full cycle
-    evidence = {
-      currentPhase: 'refactor',
-      currentCycle: 1,
-      cycles: [
-        {
-          cycle: 1,
-          red: {
-            testFiles: [],
-            testCommand: cmd,
-            testExitCode: 1,
-            timestamp: now,
-            synthesizedByGate: true,
-          },
-          green: {
-            testCommand: cmd,
-            testExitCode: 0,
-            timestamp: now,
-            synthesizedByGate: true,
-          },
-        },
-      ],
+    // No prior RED evidence. The pre-implement test path is the ONLY way to
+    // produce authentic RED — synthesizing a fake RED+GREEN at the same
+    // timestamp would let any passing post-test approve a task that was
+    // never test-driven (the bug that produced ECHO-4612/task2,
+    // ECHO-4614/task3, ECHO-4614/task4 evidence). Refuse the GREEN and
+    // surface the gap so the orchestrator routes back through pre-test.
+    return {
+      passed: false,
+      command: cmd,
+      exitCode: 0,
+      outputTail: '',
+      noRedEvidence: true,
     };
   }
 
@@ -713,6 +709,39 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
       const testCmd = readTaskTestCommand(ctx.tasksDir, taskNum);
       if (testCmd) {
         const workingDir = ctx.worktreeDir || (ws.worktreeDir ? ws.worktreeDir : process.cwd());
+        // Gate D' — gherkin @test:<path> existence check.
+        // Before running the test command, verify that every test file
+        // declared in gherkin.feature for this task actually exists on
+        // disk. This catches the "agent renames source out then in" /
+        // "tests/<path>.tsx never existed" patterns that previously
+        // produced testFiles:[] + synthesizedByGate evidence. The check
+        // is opt-in: tickets whose gherkin.feature has no @test tags
+        // (legacy or trivial) skip silently.
+        try {
+          const gherkinPath = path.join(ctx.tasksDir, 'gherkin.feature');
+          if (fs.existsSync(gherkinPath)) {
+            const { findMissingTestFiles, collectTaskTestPaths } = require(
+              path.join(__dirname, '..', 'gherkin-task-refs.js')
+            );
+            const gherkinText = fs.readFileSync(gherkinPath, 'utf8');
+            const allRefs = collectTaskTestPaths({ gherkinText }, taskNum);
+            if (allRefs.length > 0) {
+              const { missing } = findMissingTestFiles(
+                { gherkinText, worktreeDir: workingDir },
+                taskNum
+              );
+              if (missing.length > 0) {
+                recordRetry(
+                  `Task ${taskNum} cannot enter RED — gherkin.feature declares @test files that do not exist on disk: ${missing.join(', ')}. Create the failing test file(s) first, then re-run the gate.`,
+                  { command: testCmd, exitCode: null, outputTail: missing.join('\n') }
+                );
+                return null;
+              }
+            }
+          }
+        } catch {
+          /* fail-open — gherkin parse failure shouldn't deadlock the gate */
+        }
         const runEnv = gateTasksBase ? { ...process.env, TASKS_BASE: gateTasksBase } : process.env;
         const pre = runPreImplementTest(
           testCmd,
@@ -769,6 +798,19 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
             : readTddEvidence(safeName, stepName, taskNum);
           exists = reread.exists;
           evidence = reread.evidence;
+        } else if (result && result.noRedEvidence) {
+          // GREEN ran cleanly but no authentic RED was captured. Clear the
+          // pre-test marker so the next gate pass runs the pre-implement
+          // test again — if the agent already modified source, that pre-test
+          // will pass and the gate will block with "test passed; write a
+          // failing test first," forcing a real RED cycle.
+          delete ws._preTestForTask;
+          saveWorkState(safeName, ws);
+          recordRetry(
+            `No authentic RED evidence for task ${taskNum}. The gate refuses to synthesize a TDD cycle — write a failing test FIRST, commit the failure (gate will capture it), then implement.`,
+            { command: result.command, exitCode: result.exitCode ?? 0, outputTail: '' }
+          );
+          return null;
         } else if (result && result.malformed) {
           recordRetry(
             `Test command for task ${taskNum} is malformed in tasks.md ` +

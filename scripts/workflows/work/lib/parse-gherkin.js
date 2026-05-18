@@ -27,7 +27,7 @@ const DEFAULT_REQUIRED_TAGS = ['@integration', '@e2e'];
 const GHERKIN_SECTION_HEADING = /^##\s+Test Scenarios(?:\s*\(Gherkin\))?\s*$/;
 const ANY_HEADING = /^#{1,6}\s+/;
 const FEATURE_LINE = /^Feature:\s*(.+)$/;
-const SCENARIO_LINE = /^\s*Scenario:\s*(.+)$/;
+const SCENARIO_LINE = /^\s*Scenario(?:\s+Outline)?:\s*(.+)$/;
 const TAG_LINE = /^\s*(@\S+(?:\s+@\S+)*)$/;
 const STEP_LINE = /^\s*(Given|When|Then|And|But)\s+(.+)$/;
 const SKIP_COMMENT = /<!--\s*gherkin-skip:\s*(.+?)\s*-->/;
@@ -291,4 +291,11 @@ function hasSkipOverride(markdown) {
   return { skip: false };
 }
 
-module.exports = { parse, parseRaw, validate, hasSkipOverride, DEFAULT_MIN_SCENARIOS, DEFAULT_REQUIRED_TAGS };
+module.exports = {
+  parse,
+  parseRaw,
+  validate,
+  hasSkipOverride,
+  DEFAULT_MIN_SCENARIOS,
+  DEFAULT_REQUIRED_TAGS,
+};

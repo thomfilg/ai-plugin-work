@@ -18,8 +18,22 @@
 // Handles: cd && node ..., env prefixes, Node flags (including multi-arg like --require <path>),
 // quoted paths. --eval/--print/-e/-p excluded (inline code, not file paths).
 // Use getNodeInvocations() helper to catch ALL invocations in chained commands.
+// Wrapper-aware: matches `timeout <N>[s|m|h] node ...`, `nice [-n N] node ...`,
+// and bare `env [VAR=val ...] node ...` in addition to inline env-assignment.
+// Without this, agents using `timeout 90 node task-next.js ...` silently bypass
+// Rule 5 because the regex didn't recognize the wrapped invocation as a node call.
 const NODE_INVOKE_PATTERN_SRC =
-  '(?:^|&&|;|\\|)\\s*(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|\'[^\']*\'|\\S+)\\s+)*(?:node|nodejs)\\s+(?:(?:--(?:require|loader|experimental-loader|import|input-type|conditions|inspect-brk|inspect|inspect-port)|-[rCi])\\s+\\S+\\s+|(?:-[^\\s]+\\s+))*(?:"([^"]+)"|\'([^\']+)\'|(\\S+))';
+  '(?:^|&&|;|\\|)\\s*' +
+  // Optional wrapper commands (timeout, nice, env). All consume their args.
+  '(?:timeout\\s+\\d+(?:\\.\\d+)?[smhdSMHD]?\\s+|' +
+  'nice(?:\\s+-n\\s+-?\\d+)?\\s+|' +
+  'env(?:\\s+[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|\'[^\']*\'|\\S+))*\\s+' +
+  ')*' +
+  // Inline env-assignments (FOO=bar BAZ=qux node ...).
+  '(?:[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|\'[^\']*\'|\\S+)\\s+)*' +
+  '(?:node|nodejs)\\s+' +
+  '(?:(?:--(?:require|loader|experimental-loader|import|input-type|conditions|inspect-brk|inspect|inspect-port)|-[rCi])\\s+\\S+\\s+|(?:-[^\\s]+\\s+))*' +
+  '(?:"([^"]+)"|\'([^\']+)\'|(\\S+))';
 
 /** Return all node-script invocations from a command string. */
 function getNodeInvocations(cmd) {

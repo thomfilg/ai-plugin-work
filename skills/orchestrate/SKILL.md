@@ -164,6 +164,49 @@ Failed tasks (need manual attention):
   - PROJ-853: [reason]
 ```
 
+## Monitor ↔ Agent Unblocking Protocol (MANDATORY)
+
+When you (as orchestrator/monitor) receive a message from a worker agent on
+its channel and decide to take action to unblock it, you MUST follow this
+three-step communication protocol so the agent knows what's happening:
+
+1. **ACK — "I'm starting work to unblock you."**
+   Send IMMEDIATELY upon receiving the blocker, BEFORE any code change.
+   ```bash
+   node "${CLAUDE_PLUGIN_ROOT}/scripts/communicate.js" <TICKET> \
+     "monitor: ACK — starting work to unblock <one-line summary>. Stand by."
+   ```
+
+2. **Do the changes.**
+   Diagnose, edit code, run tests, commit, push. The agent waits.
+
+3. **DONE — "You are unblocked."**
+   Send when the fix is shipped (committed AND pushed if on a PR branch).
+   Message MUST include:
+   - The exact commit hash + branch / PR number
+   - One-line description of the fix
+   - The exact command the agent should re-invoke to resume
+   ```bash
+   node "${CLAUDE_PLUGIN_ROOT}/scripts/communicate.js" <TICKET> \
+     "monitor: UNBLOCKED at commit <hash> on <branch> (PR #<n>). <one-line fix>. Retry: <exact command>"
+   ```
+
+**Why this is mandatory:**
+- Agents have no visibility into your work. Without ACK they assume the
+  message was lost and either retry endlessly or give up.
+- Without DONE they don't know whether to keep waiting or resume.
+- Silent fixes look identical to no fix — agents cannot tell.
+
+**Rules:**
+- Never silently fix and walk away. Both messages are required.
+- ACK goes out FIRST, before you read deeply, edit, or spawn agents.
+- DONE goes out LAST, after the fix is verifiably live (push completed).
+- If the fix takes long, send progress pings every ~10 minutes
+  (`monitor: still working — <what you're doing now>`).
+- If you decide NOT to act (false alarm, out of scope, etc.), send a
+  CLOSED message with the reason instead of going silent:
+  `monitor: CLOSED — not acting because <reason>. <next step for you>`.
+
 ## Key Behaviors
 
 ### Sequential Execution (CRITICAL)

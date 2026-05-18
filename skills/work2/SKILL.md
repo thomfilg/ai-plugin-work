@@ -12,6 +12,20 @@ Run the driver script. Execute what it says. Do not improvise.
 
 ## Start
 
+**Step 0 — open the monitor channel for this ticket FIRST.** This must be
+the first tool call in the session. Each new line in the inbox file becomes
+a task-notification that resumes you mid-idle — no polling, no manual nudges.
+
+```
+Monitor(node ${CLAUDE_PLUGIN_ROOT}/scripts/listen-communication.js <TICKET>)
+```
+
+Replace `<TICKET>` with `$ARGUMENTS` (the ticket id). The Monitor runs for
+the lifetime of your session — do not stop it. Only the main /work2
+orchestrator opens this channel; dispatched subagents do NOT.
+
+**Step 1 — then start the driver:**
+
 ```bash
 node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work2/work-next.js "$ARGUMENTS" --init
 ```

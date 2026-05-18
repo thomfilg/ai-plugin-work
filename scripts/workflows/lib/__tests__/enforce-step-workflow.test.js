@@ -4548,4 +4548,64 @@ describe('enforce-step-workflow', () => {
       assert.equal(code, 0, 'untrusted path not caught by Rule 3b (handled by Vector 3)');
     });
   });
+
+  // ─── ticketId fallback chain (regression: ECHO-4560 token-mint failure) ───
+  describe('ticketId fallback chain when CWD has no ticket branch', () => {
+    it('derives ticket from hookData.tool_input.command when ENFORCE_HOOK_TICKET_ID is empty', async () => {
+      // Empty ENFORCE_HOOK_TICKET_ID forces the fallback chain. The hook
+      // should still process the Bash call (not silently early-return)
+      // and exit 0 because no state file matches our fabricated ticket.
+      const { code } = await runHook(
+        {
+          tool_name: 'Bash',
+          tool_input: {
+            command: 'node /tmp/some-script.js TEST-FALLBACK-CMD-9999 task1',
+          },
+        },
+        'PreToolUse',
+        { ENFORCE_HOOK_TICKET_ID: '' }
+      );
+      assert.equal(code, 0, 'hook should allow Bash with no ticket context');
+    });
+
+    it('derives ticket from hookData.transcript_path when command has none', async () => {
+      const { code } = await runHook(
+        {
+          tool_name: 'Bash',
+          tool_input: { command: 'ls -la' },
+          transcript_path:
+            '/home/u/.claude/projects/-home-u-g2i-w-tabwoah-tabwoah-TEST-FALLBACK-TR-9998/abc.jsonl',
+        },
+        'PreToolUse',
+        { ENFORCE_HOOK_TICKET_ID: '' }
+      );
+      assert.equal(code, 0, 'hook should allow Bash when ticket only present in transcript_path');
+    });
+
+    it('does not early-return when ticketId is null — Bash on a gated script still reaches Rule 5', async () => {
+      // The bug being prevented: prior to the fix, handlePreToolUse exited
+      // before Rule 5 when getTicketId() returned null, so no write token
+      // was ever minted. This test exercises the path with an explicitly
+      // empty ticketId and a Bash call invoking a gated script via a path
+      // that resolves to /tmp (untrusted), which means Rule 5 will hit the
+      // trusted-dir check and exit 2. That non-zero exit IS the signal
+      // that Rule 5 ran — under the bug, the hook would have exited 0.
+      const { code } = await runHook(
+        {
+          tool_name: 'Bash',
+          tool_input: {
+            command: 'node /tmp/task-next.js TEST-FALLBACK-RULE5-9997 task1',
+          },
+          transcript_path: '/tmp/no-ticket-here.jsonl',
+        },
+        'PreToolUse',
+        { ENFORCE_HOOK_TICKET_ID: '' }
+      );
+      assert.equal(
+        code,
+        2,
+        'Rule 5 should run for gated script and block on untrusted path (proves no early-return)'
+      );
+    });
+  });
 });

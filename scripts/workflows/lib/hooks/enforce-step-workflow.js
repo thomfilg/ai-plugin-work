@@ -232,6 +232,7 @@ const TRUSTED_SCRIPT_DIRS = [
   path.resolve(__dirname, '..', '..', 'work', 'scripts'), // workflows/work/scripts/
   path.resolve(__dirname, '..', '..', 'check', 'scripts'), // workflows/check/scripts/
   path.resolve(__dirname, '..', '..', 'work-implement'), // workflows/work-implement/
+  path.resolve(__dirname, '..', '..', 'work-brief'), // workflows/work-brief/
   path.resolve(__dirname, '..', '..', 'work2'), // workflows/work2/
   path.resolve(__dirname, '..', '..', 'check2'), // workflows/check2/
   path.resolve(__dirname, '..', '..', 'follow-up2'), // workflows/follow-up2/
@@ -338,7 +339,7 @@ function resolveGitHead() {
   throw new Error('unexpected .git content');
 }
 
-function getTicketId() {
+function getTicketId(hookData) {
   if (_ticketIdResolved) return _cachedTicketId;
   _ticketIdResolved = true;
   // Allow override for testing — empty string explicitly opts out (no git fallback)
@@ -356,21 +357,41 @@ function getTicketId() {
     }
     return _cachedTicketId;
   }
-  // (Patch 6+9) Worktree-aware .git/HEAD read — no subprocess spawn
-  try {
-    let head;
-    try {
-      // Try worktree-aware read first (.git as file)
-      head = resolveGitHead();
-    } catch {
-      // Fallback: normal repo (.git is a directory)
-      head = fs.readFileSync(path.join('.git', 'HEAD'), 'utf-8').trim();
+  // Priority order: command > .git/HEAD > transcript_path.
+  // The Bash command itself (when present) is the most explicit signal —
+  // a developer running `node task-next.js ECHO-XXXX taskN` literally
+  // states which ticket they're working on. .git/HEAD is *usually* right
+  // but breaks in symlinked-worktree setups where the worktree directory
+  // name doesn't match the checked-out branch (e.g. tabwoah-ECHO-4628/
+  // with branch ECHO-4465 checked out — observed in real incidents).
+  // transcript_path is the weakest signal but a useful last resort when
+  // neither command nor cwd identify a ticket.
+  if (hookData) {
+    const cmd = hookData?.tool_input?.command;
+    if (typeof cmd === 'string') {
+      const m = cmd.match(/\b[A-Z]+-\d+\b/);
+      if (m) _cachedTicketId = m[0];
     }
-    const ref = head.startsWith('ref: ') ? head.slice(5) : head;
-    const match = ref.match(/[A-Z]+-\d+/);
-    _cachedTicketId = match ? match[0] : null;
-  } catch {
-    _cachedTicketId = null;
+  }
+  if (!_cachedTicketId) {
+    // (Patch 6+9) Worktree-aware .git/HEAD read — no subprocess spawn
+    try {
+      let head;
+      try {
+        head = resolveGitHead();
+      } catch {
+        head = fs.readFileSync(path.join('.git', 'HEAD'), 'utf-8').trim();
+      }
+      const ref = head.startsWith('ref: ') ? head.slice(5) : head;
+      const match = ref.match(/[A-Z]+-\d+/);
+      _cachedTicketId = match ? match[0] : null;
+    } catch {
+      _cachedTicketId = null;
+    }
+  }
+  if (!_cachedTicketId && hookData && typeof hookData?.transcript_path === 'string') {
+    const m = hookData.transcript_path.match(/\b[A-Z]+-\d+\b/);
+    if (m) _cachedTicketId = m[0];
   }
   // Compose with suffix when present (GH-146: phase-aware state paths)
   // Only append if ticketId doesn't already contain a '/' (prevent double-suffixing)
@@ -549,13 +570,20 @@ function handlePreToolUse(hookData) {
   const toolName = hookData.tool_name || '';
   const toolInput = hookData.tool_input || {};
 
-  // 1. Find active ticket
-  const ticketId = getTicketId();
-  if (!ticketId) return; // No ticket context → allow
+  // 1. Find active ticket. May be null when the hook's own CWD is not a
+  //    worktree (e.g. parent session lives in the plugin source tree).
+  //    Do NOT early-return on null — Rule 5 (agent-gated writer-script
+  //    token mint) does not need a ticket. Rules that genuinely require
+  //    one already guard with `if (ticketId) { ... }` below.
+  const ticketId = getTicketId(hookData);
 
   // Rule 3: Block direct writes to workflow state files
-  // Prevents agents from bypassing the state machine by directly editing state files
-  const rule3 = stateFileProtector.check(toolName, toolInput);
+  // Prevents agents from bypassing the state machine by directly editing state files.
+  // Fail-open when no ticket context: without a workflow there is nothing to protect,
+  // and the hook should not block tool use it cannot reason about. Rule 5 below still
+  // runs unconditionally so agent-gated writer-script token minting works when the
+  // hook is invoked outside a worktree (e.g. plugin source tree parent sessions).
+  const rule3 = ticketId ? stateFileProtector.check(toolName, toolInput) : { blocked: false };
   if (rule3.blocked) {
     if (toolName === 'Bash') {
       const cmd = String(toolInput?.command || '').trim();
@@ -580,7 +608,8 @@ function handlePreToolUse(hookData) {
   // Defense-in-depth: the stateFileProtector's isExempt/Vector 3 may miss the script when
   // multi-arg flags (--require, -r, etc.) cause INTERPRETER_PATTERN to capture the flag
   // argument instead of the actual script. This rule uses the improved nodePattern directly.
-  if (toolName === 'Bash') {
+  // Fail-open when no ticket context — see Rule 3 comment above.
+  if (toolName === 'Bash' && ticketId) {
     const cmd = String(toolInput?.command || '').trim();
     const stateMatches = getNodeInvocations(cmd);
     for (const m of stateMatches) {
@@ -642,6 +671,12 @@ function handlePreToolUse(hookData) {
   // When a Bash command invokes a writer script (e.g. write-qa-report.js),
   // verify the caller is an authorized agent. This provides defense-in-depth
   // alongside the script's own identity check.
+  let _tokenLog;
+  try {
+    ({ logTokenEvent: _tokenLog } = require(path.join(__dirname, '..', 'next-script-log')));
+  } catch {
+    _tokenLog = () => {};
+  }
   if (toolName === 'Bash') {
     const cmd = String(toolInput?.command || '');
     const nodeMatches = getNodeInvocations(cmd);
@@ -649,13 +684,36 @@ function handlePreToolUse(hookData) {
       const scriptPath = expandPluginRoot(nodeExec[1] || nodeExec[2] || nodeExec[3]);
       const scriptBase = path.basename(scriptPath);
       const gatedEntry = AGENT_GATED_SCRIPTS[scriptBase];
+      // Telemetry: log EVERY node-invocation seen by Rule 5, gated or not.
+      // Helps diagnose why a gated script's mint path isn't being reached.
+      _tokenLog('rule5-checked', {
+        scriptBase,
+        scriptPath,
+        gated: Boolean(gatedEntry),
+        gatedKeys: Object.keys(AGENT_GATED_SCRIPTS).slice(0, 20),
+        ticketId: ticketId || null,
+      });
       if (gatedEntry) {
+        _tokenLog('rule5-match', {
+          scriptBase,
+          scriptPath,
+          ticketId: ticketId || null,
+          cmd: cmd.slice(0, 300),
+          envAgent: process.env.CLAUDE_CURRENT_AGENT || null,
+          subagentType: hookData?.tool_input?.subagent_type || null,
+          hookAgentType: hookData?.agent_type || null,
+        });
         const allowedAgents = gatedEntry.agents;
         if (!isTrustedScriptPath(scriptPath, TRUSTED_SCRIPT_DIRS)) {
           didBlock = true;
+          const trustedSample = TRUSTED_SCRIPT_DIRS[0] || '<plugin>/scripts/workflows';
           process.stderr.write(
             `BLOCKED: Script ${scriptBase} is not in a trusted directory.\n` +
-              `Resolved path must be under a trusted workflows directory.\n`
+              `  Resolved path: ${scriptPath}\n` +
+              `  Trusted root example: ${trustedSample}\n` +
+              `\nWHAT TO DO INSTEAD:\n` +
+              `  Use an ABSOLUTE path under \${CLAUDE_PLUGIN_ROOT}/scripts/workflows/...\n` +
+              `  Avoid relative paths like ../../scripts/... — they may not normalize to a trusted dir.\n`
           );
           process.exit(2);
         }
@@ -664,10 +722,21 @@ function handlePreToolUse(hookData) {
         const transcriptPath = hookData?.transcript_path;
         if (!isRunningInAgent(transcriptPath, allowedAgents, hookData)) {
           didBlock = true;
+          const primaryAgent = allowedAgents[0];
           process.stderr.write(
             `BLOCKED: Cannot call ${scriptBase} — not running in an authorized agent.\n` +
-              `Allowed agents: ${allowedAgents.join(', ')}\n` +
-              `Only these agents may invoke this writer script.\n`
+              `  Allowed agents: ${allowedAgents.join(', ')}\n` +
+              `\nWHAT TO DO INSTEAD:\n` +
+              `  Re-dispatch this invocation through the Task tool so it runs inside the\n` +
+              `  authorized agent's subprocess (where the hook can mint the write token).\n` +
+              `\n  Example:\n` +
+              `    Task(\n` +
+              `      subagent_type: "${primaryAgent}",\n` +
+              `      prompt: "node ${scriptBase} ${ticketId || '<TICKET>'} ...your args..."\n` +
+              `    )\n` +
+              `\n  Do NOT invoke ${scriptBase} directly from the orchestrator/main session.\n` +
+              `  Do NOT stash source files to /tmp to fake test failures — that is fabricated\n` +
+              `  TDD evidence and forbidden by user rules.\n`
           );
           process.exit(2);
         }
@@ -683,7 +752,13 @@ function handlePreToolUse(hookData) {
             didBlock = true;
             process.stderr.write(
               `BLOCKED: Cannot issue write token — step '${currentStep}' is active, not '${requiredStep}'.\n` +
-                `Script ${scriptBase} can only be called during the ${requiredStep} step.\n`
+                `  Script ${scriptBase} can only be called during the ${requiredStep} step.\n` +
+                `\nWHAT TO DO INSTEAD:\n` +
+                `  The workflow has moved past '${requiredStep}'. Do NOT try to record evidence\n` +
+                `  for a previous step now — that artifact window has closed.\n` +
+                `  If the workflow is genuinely stuck, run:\n` +
+                `    node \${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work2/work-next.js ${ticketId || '<TICKET>'}\n` +
+                `  and follow the action it prints for the CURRENT step ('${currentStep}').\n`
             );
             process.exit(2);
           }
@@ -707,22 +782,48 @@ function handlePreToolUse(hookData) {
         })();
         try {
           ensureTokenDir();
-          const tp = tokenPath(scriptBase);
-          try {
-            fs.unlinkSync(tp);
-          } catch {
-            /* may not exist */
-          }
-          const fd = fs.openSync(tp, 'wx', 0o600);
-          try {
-            const tokenData = {
-              agent: normalizeAgentName(detectedAgent),
-              timestamp: Date.now(),
-              tasksBase: ticketId ? path.join(TASKS_BASE, safeTicketPath(ticketId)) : null,
-            };
-            fs.writeSync(fd, JSON.stringify(tokenData));
-          } finally {
-            fs.closeSync(fd);
+          const tokenData = {
+            agent: normalizeAgentName(detectedAgent),
+            timestamp: Date.now(),
+            tasksBase: ticketId ? path.join(TASKS_BASE, safeTicketPath(ticketId)) : null,
+          };
+          const writeOneToken = (basename) => {
+            // Key by ticket so parallel sessions on different tickets do
+            // not clobber each other's tokens (real incident: ECHO-4465
+            // and ECHO-4630 task-next.js runs colliding on the same
+            // /tmp/.claude-write-tokens/task-next.js file). When ticketId
+            // is null (no ticket context), falls back to the legacy
+            // unkeyed path.
+            //
+            // Strip ENFORCE_HOOK_SUFFIX from the ticket-key: getTicketId()
+            // appends the suffix (`<ticket>/<suffix>`) for phase-aware
+            // STATE-file paths, but consumers like tdd-phase-state.js look
+            // up tokens by the BARE ticket arg from the CLI (no suffix).
+            // Keying tokens with the suffix would make consumers miss them.
+            const bareTicket = ticketId ? ticketId.split('/')[0] : ticketId;
+            const tp = tokenPath(basename, bareTicket);
+            try {
+              fs.unlinkSync(tp);
+            } catch {
+              /* may not exist */
+            }
+            const fd = fs.openSync(tp, 'wx', 0o600);
+            try {
+              fs.writeSync(fd, JSON.stringify(tokenData));
+            } finally {
+              fs.closeSync(fd);
+            }
+          };
+          writeOneToken(scriptBase);
+          // Companion tokens: scripts the gated script calls internally via
+          // spawnSync (which bypasses the PreToolUse hook). Mint a matching
+          // token for each so the chained writer can authenticate without a
+          // second hook trip.
+          const companions = Array.isArray(gatedEntry.companionScripts)
+            ? gatedEntry.companionScripts
+            : [];
+          for (const companion of companions) {
+            writeOneToken(companion);
           }
         } catch (e) {
           if (DEBUG) process.stderr.write(`WARNING: Failed to write token: ${e.message}\n`);
@@ -733,6 +834,11 @@ function handlePreToolUse(hookData) {
   }
 
   if (rule3.skipRemainingChecks) return; // Edit/Write/MultiEdit — skip per-workflow loop
+
+  // The per-workflow state/transition loop below needs a ticketId to load
+  // any state. Skip it entirely when ticketId could not be resolved (Rule 5
+  // and earlier rules already ran above with their own null-guards).
+  if (!ticketId) return;
 
   // 2. Check each workflow independently
   for (const wf of WORKFLOWS) {
@@ -957,6 +1063,24 @@ async function main() {
 
     const hookData = JSON.parse(input);
     const hookType = process.env.CLAUDE_HOOK_TYPE || 'PostToolUse';
+
+    // Telemetry: log every fire so we can prove the hook ran. JSONL.
+    try {
+      const { logTokenEvent } = require(path.join(__dirname, '..', 'next-script-log'));
+      logTokenEvent('hook-fired', {
+        hookType,
+        toolName: hookData?.tool_name || null,
+        cmdSnippet: hookData?.tool_input?.command
+          ? String(hookData.tool_input.command).slice(0, 200)
+          : null,
+        envAgent: process.env.CLAUDE_CURRENT_AGENT || null,
+        subagentType: hookData?.tool_input?.subagent_type || null,
+        hookAgentType: hookData?.agent_type || null,
+        transcriptPath: hookData?.transcript_path || null,
+      });
+    } catch {
+      /* fail-open */
+    }
 
     if (hookType === 'PreToolUse') {
       handlePreToolUse(hookData);

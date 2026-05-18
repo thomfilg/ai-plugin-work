@@ -339,9 +339,13 @@ function getCurrentCycleRecord(state) {
 
 // ─── Token Verification ─────────────────────────────────────────────────────
 
-function verifyToken() {
+function verifyToken(expectedTicketId) {
   const scriptBasename = path.basename(__filename);
-  const token = consumeToken(scriptBasename);
+  // Try the ticket-keyed token first (per write-report.js's per-ticket
+  // namespacing) and fall back to the unkeyed legacy path. The token
+  // file is also tasksBase-validated below to catch any cross-ticket
+  // collisions that slip past the path-level keying.
+  const token = consumeToken(scriptBasename, expectedTicketId);
 
   if (!token) {
     errorExit(
@@ -374,6 +378,26 @@ function verifyToken() {
     errorExit(
       `Token agent "${token.agent}" is not authorized. Allowed: ${ALLOWED_AGENTS.join(', ')}`
     );
+  }
+
+  // Cross-ticket safety: token files are keyed by script basename, so a
+  // parallel session for a DIFFERENT ticket can overwrite our token between
+  // the hook's mint and our consume. The token carries `tasksBase` which
+  // resolves to `<TASKS_BASE>/<safeTicketPath(ticket)>`. Reject if the
+  // ticket arg we received doesn't match the token's tasksBase — that means
+  // a parallel session clobbered us and we should bail rather than write
+  // evidence under the wrong ticket. The caller (task-next.js) will retry.
+  if (expectedTicketId && typeof token.tasksBase === 'string' && token.tasksBase.length > 0) {
+    const safe = sanitizeId(expectedTicketId);
+    const expectedSegment = `${path.sep}${safe}${path.sep}`;
+    const expectedSuffix = `${path.sep}${safe}`;
+    if (!token.tasksBase.includes(expectedSegment) && !token.tasksBase.endsWith(expectedSuffix)) {
+      errorExit(
+        `Write token belongs to a different ticket (token.tasksBase=${token.tasksBase}, expected ticket=${expectedTicketId}). ` +
+          'Likely cause: parallel session for another ticket overwrote /tmp/.claude-write-tokens/' +
+          `${scriptBasename} between the hook's mint and this consume. Re-invoke task-next.js to mint a fresh token.`
+      );
+    }
   }
 }
 
@@ -706,7 +730,7 @@ const ticketId = args[1];
 // where tdd-phase-state.js is registered with developer-* agents authorized.
 // WORK_TDD_TOKEN_SKIP=1 bypasses verification for standalone/debugging use.
 if (GATED_SUBCOMMANDS.includes(subcommand) && process.env.WORK_TDD_TOKEN_SKIP !== '1') {
-  verifyToken();
+  verifyToken(ticketId);
 }
 
 switch (subcommand) {

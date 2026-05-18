@@ -118,10 +118,11 @@ const { createDebugLog } = require(path.join(__dirname, 'lib', 'debug-log'));
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 const TDD_GATED_STEPS = [STEPS.implement];
+const { buildVerdictRegex } = require(path.join(__dirname, '..', 'lib', 'parse-completion-status'));
 const REQUIRED_REPORTS = [
-  { file: 'tests.check.md', passPattern: /Status:\s*APPROVED/i },
-  { file: 'code-review.check.md', passPattern: /Status:\s*APPROVED/i },
-  { file: 'completion.check.md', passPattern: /Status:\s*(COMPLETE|APPROVED)/i },
+  { file: 'tests.check.md', passPattern: buildVerdictRegex(['APPROVED']) },
+  { file: 'code-review.check.md', passPattern: buildVerdictRegex(['APPROVED']) },
+  { file: 'completion.check.md', passPattern: buildVerdictRegex(['COMPLETE', 'APPROVED']) },
 ];
 
 // ─── DI wrappers (same pattern as work.workflow.js) ─────────────────────────
