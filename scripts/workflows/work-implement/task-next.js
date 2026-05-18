@@ -201,17 +201,28 @@ function resolveTestCommand(taskTestCmd, suiteEnvVar) {
 }
 
 function runTest(cmd, cwd) {
+  // Bound the test command so a hung subprocess (watch mode, dev server,
+  // interactive prompt waiting on stdin, etc.) doesn't strand the whole
+  // workflow. Override via TASK_NEXT_TEST_TIMEOUT_MS env var.
+  const timeoutMs = Number(process.env.TASK_NEXT_TEST_TIMEOUT_MS) || 5 * 60 * 1000;
   const result = spawnSync('bash', ['-lc', cmd], {
     cwd,
     encoding: 'utf8',
     maxBuffer: 16 * 1024 * 1024,
+    timeout: timeoutMs,
+    killSignal: 'SIGKILL',
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
   const stdout = result.stdout || '';
   const stderr = result.stderr || '';
+  const timedOut = result.signal === 'SIGKILL' || result.error?.code === 'ETIMEDOUT';
   return {
-    exitCode: result.status ?? -1,
+    exitCode: timedOut ? 124 : (result.status ?? -1),
     stdout,
-    stderr,
+    stderr: timedOut
+      ? `${stderr}\n[task-next] test command exceeded ${timeoutMs}ms — killed.\n`
+      : stderr,
+    timedOut,
     combined: (stdout + stderr).slice(-4000),
   };
 }
