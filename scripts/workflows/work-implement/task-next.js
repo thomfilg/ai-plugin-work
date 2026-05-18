@@ -295,7 +295,7 @@ function mintCompanionToken() {
   }
 }
 
-function recordEvidence(phase, ticket, taskNum, cmd, cwd) {
+function recordEvidence(phase, ticket, taskNum, cmd, cwd, scope) {
   // Delegate to tdd-phase-state.js — the only authorized writer. Forward
   // `--task N` so the recorder resolves the per-task state path. Records
   // evidence for the just-completed phase, then (for red/green only)
@@ -317,10 +317,25 @@ function recordEvidence(phase, ticket, taskNum, cmd, cwd) {
   // we cannot just always init). Strategy: try record first; if it fails
   // with "No TDD phase state found", run init ONCE and retry. Existing
   // cycle history is preserved (init only runs when there is no state).
+  //
+  // tdd-phase-state.js re-runs the test command itself (intentional
+  // anti-fake-evidence design) so we must propagate the SAME env we
+  // used in our own runTest, otherwise the recorder's internal run
+  // can disagree with ours (e.g. CHANGED_FILES injection failing in
+  // its subshell would make pnpm test:unit run the whole suite).
+  const changedFiles = Array.isArray(scope)
+    ? scope.filter((p) => /\.(test|spec)\.[jt]sx?$/i.test(p)).join(' ')
+    : '';
+  const childEnv = { ...process.env, CHANGED_FILES: changedFiles };
   function runRecord() {
     mintCompanionToken();
     const recordArgs = [TDD_CLI, sub, ticket, '--task', String(taskNum), '--cmd', cmd];
-    return spawnSync(process.execPath, recordArgs, { cwd, stdio: 'pipe', encoding: 'utf8' });
+    return spawnSync(process.execPath, recordArgs, {
+      cwd,
+      stdio: 'pipe',
+      encoding: 'utf8',
+      env: childEnv,
+    });
   }
   let r = runRecord();
   if (r.status !== 0) {
@@ -330,7 +345,7 @@ function recordEvidence(phase, ticket, taskNum, cmd, cwd) {
       const initRes = spawnSync(
         process.execPath,
         [TDD_CLI, 'init', ticket, '--task', String(taskNum)],
-        { cwd, stdio: 'pipe', encoding: 'utf8' }
+        { cwd, stdio: 'pipe', encoding: 'utf8', env: childEnv }
       );
       if (initRes.status !== 0) {
         return {
@@ -361,6 +376,7 @@ function recordEvidence(phase, ticket, taskNum, cmd, cwd) {
     cwd,
     stdio: 'pipe',
     encoding: 'utf8',
+    env: childEnv,
   });
   if (t.status !== 0) {
     return {
@@ -718,7 +734,7 @@ function main() {
           if (totalBlocks === 0) {
             blockReason = `No gherkin scenarios tagged @task:${taskNum}. Found ${testFiles.length} test file(s) in Suggested Scope but none contain it()/test() blocks. Add at least one failing test, then re-invoke me.`;
           } else {
-            const rec = recordEvidence('red', ticket, taskNum, testCmd, repoRoot);
+            const rec = recordEvidence('red', ticket, taskNum, testCmd, repoRoot, scope);
             if (!rec.ok) {
               blockReason = `Could not record RED evidence:\n${rec.out}`;
             } else {
@@ -733,7 +749,7 @@ function main() {
       } else if (missing.length > 0) {
         blockReason = `Tests do not yet cover these scenarios (verbatim title match against test files in Suggested Scope):\n  - ${missing.join('\n  - ')}\nAdd a test for each (failing) before re-invoking me.`;
       } else {
-        const rec = recordEvidence('red', ticket, taskNum, testCmd, repoRoot);
+        const rec = recordEvidence('red', ticket, taskNum, testCmd, repoRoot, scope);
         if (!rec.ok) {
           blockReason = `Could not record RED evidence:\n${rec.out}`;
         } else {
@@ -746,7 +762,7 @@ function main() {
     if (!passed) {
       blockReason = `Test command still failing (exit ${run.exitCode}). Last output:\n\n${run.combined}`;
     } else {
-      const rec = recordEvidence('green', ticket, taskNum, testCmd, repoRoot);
+      const rec = recordEvidence('green', ticket, taskNum, testCmd, repoRoot, scope);
       if (!rec.ok) {
         blockReason = `Could not record GREEN evidence:\n${rec.out}`;
       } else {
@@ -758,7 +774,7 @@ function main() {
     if (!passed) {
       blockReason = `Regression detected — tests failed during refactor (exit ${run.exitCode}). Revert the breaking change before re-invoking me.\n\n${run.combined}`;
     } else {
-      const rec = recordEvidence('refactor', ticket, taskNum, testCmd, repoRoot);
+      const rec = recordEvidence('refactor', ticket, taskNum, testCmd, repoRoot, scope);
       if (!rec.ok) {
         blockReason = `Could not record REFACTOR evidence:\n${rec.out}`;
       } else {
