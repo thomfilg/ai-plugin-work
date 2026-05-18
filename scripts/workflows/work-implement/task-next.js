@@ -287,15 +287,42 @@ function recordEvidence(phase, ticket, taskNum, cmd, cwd) {
     phase === 'red' ? 'record-red' : phase === 'green' ? 'record-green' : 'record-refactor';
   const target = phase === 'red' ? 'green' : phase === 'green' ? 'refactor' : null;
 
-  mintCompanionToken();
-  const recordArgs = [TDD_CLI, sub, ticket, '--task', String(taskNum), '--cmd', cmd];
-  const r = spawnSync(process.execPath, recordArgs, {
-    cwd,
-    stdio: 'pipe',
-    encoding: 'utf8',
-  });
+  // tdd-phase-state.js record-* requires the per-task state file to exist;
+  // it does NOT auto-init, and `init` itself overwrites existing state (so
+  // we cannot just always init). Strategy: try record first; if it fails
+  // with "No TDD phase state found", run init ONCE and retry. Existing
+  // cycle history is preserved (init only runs when there is no state).
+  function runRecord() {
+    mintCompanionToken();
+    const recordArgs = [TDD_CLI, sub, ticket, '--task', String(taskNum), '--cmd', cmd];
+    return spawnSync(process.execPath, recordArgs, { cwd, stdio: 'pipe', encoding: 'utf8' });
+  }
+  let r = runRecord();
   if (r.status !== 0) {
-    return { ok: false, out: (r.stdout || '') + (r.stderr || ''), exitCode: r.status };
+    const combined = (r.stdout || '') + (r.stderr || '');
+    if (/No TDD phase state found/i.test(combined)) {
+      mintCompanionToken();
+      const initRes = spawnSync(
+        process.execPath,
+        [TDD_CLI, 'init', ticket, '--task', String(taskNum)],
+        { cwd, stdio: 'pipe', encoding: 'utf8' }
+      );
+      if (initRes.status !== 0) {
+        return {
+          ok: false,
+          out:
+            combined +
+            `\n--- auto-init ${ticket} task${taskNum} failed ---\n` +
+            (initRes.stdout || '') +
+            (initRes.stderr || ''),
+          exitCode: initRes.status,
+        };
+      }
+      r = runRecord();
+    }
+    if (r.status !== 0) {
+      return { ok: false, out: (r.stdout || '') + (r.stderr || ''), exitCode: r.status };
+    }
   }
 
   if (!target) {
