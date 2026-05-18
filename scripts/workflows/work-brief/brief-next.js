@@ -3,29 +3,22 @@
 /**
  * brief-next.js
  *
- * Self-paced runner for the `brief` step, modeled on task-next.js for
- * `implement`. The agent invokes this script and follows the Markdown
- * response. Each phase validates artifacts, records evidence, and
- * advances. Phases (in order):
+ * Self-paced runner for the `brief` step. Thin orchestrator only — every
+ * phase (inputs / overlap / draft / validate / memorize / done) lives in
+ * its own module under `lib/phases/`, registered via `lib/phase-registry.js`.
+ * The dispatcher pattern mirrors `check2/lib/step-registry.js`.
  *
- *   1. inputs    — recall memory, fetch ticket + every linked ticket's
- *                  FULL content (not just titles), save to _related/.
- *   2. overlap   — analyze overlaps with each linked ticket, write
- *                  sibling-overlap.md with one section per linked ticket
- *                  and a verdict (sibling-owned | shared | no-overlap).
- *   3. draft     — investigate docs for ambiguities, then write brief.md
- *                  with required sections. Each Open Question entry MUST
- *                  carry a `Searched:` annotation listing the paths/queries
- *                  consulted, OR the section is empty.
- *   4. validate  — re-check section presence, AC→P0 mapping, and that
- *                  brief.md's `Out of scope (sibling-owned)` reflects the
- *                  sibling-owned verdicts from sibling-overlap.md.
- *   5. memorize  — persist decisions via the installed memory plugin
- *                  (e.g. cortex). Skipped with a warning if none detected.
+ * Per invocation:
+ *   1. Resolve ticket context (tasks dir, manifest, linked siblings, memory plugin).
+ *   2. Look up the current phase from `brief-phase.json` via `brief-phase-state.js`.
+ *   3. Ask the registered phase handler whether the phase is ready to advance.
+ *        validate(ctx) → { ok, errors?, summary? }
+ *   4. If ok and the phase has a successor: record evidence + transition.
+ *      If errors are present: emit a block prefix on the response.
+ *      Otherwise: just print the current phase's instructions.
+ *   5. Print the header + (possibly blocked) phase instructions.
  *
- * The script is the source of truth for what to do at every phase. The
- * agent only sees the printed Markdown; it does not need to know the
- * gate logic.
+ * Exit codes: 0 = phase progressed or waiting, 2 = phase blocked.
  */
 
 'use strict';
@@ -36,7 +29,8 @@ const { spawnSync } = require('node:child_process');
 
 const BRIEF_PHASE_CLI = path.resolve(__dirname, 'brief-phase-state.js');
 
-const { BRIEF_PHASES, BRIEF_INITIAL_PHASE, briefNextPhases } = require('./brief-phase-registry');
+const { BRIEF_INITIAL_PHASE } = require('./brief-phase-registry');
+const { getPhase } = require('./lib/phase-registry');
 
 let logNextScriptEvent;
 try {
@@ -45,14 +39,14 @@ try {
   logNextScriptEvent = () => {};
 }
 
-// ─── Helpers ────────────────────────────────────────────────────────────────
-
 let config;
 try {
   config = require('../lib/config');
 } catch {
   config = null;
 }
+
+// ─── Path + env helpers ────────────────────────────────────────────────────
 
 function resolveTasksBase() {
   return (
@@ -62,25 +56,17 @@ function resolveTasksBase() {
   );
 }
 
-function readFile(p) {
-  try {
-    return fs.readFileSync(p, 'utf8');
-  } catch {
-    return null;
-  }
-}
-
-function die(msg) {
-  process.stderr.write(`brief-next: ${msg}\n`);
-  process.exit(2);
-}
-
 function resolveWorktreeRoot() {
   const r = spawnSync('git', ['rev-parse', '--show-toplevel'], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'ignore'],
   });
   return r.status === 0 ? r.stdout.trim() : null;
+}
+
+function die(msg) {
+  process.stderr.write(`brief-next: ${msg}\n`);
+  process.exit(2);
 }
 
 // ─── Token snapshot/remint (mirrors task-next.js) ──────────────────────────
@@ -92,9 +78,7 @@ function snapshotCompanionToken(scriptBasename) {
     const dir = process.env.CLAUDE_WRITE_TOKEN_DIR || '/tmp/.claude-write-tokens';
     const file = path.join(dir, scriptBasename);
     if (!fs.existsSync(file)) return;
-    const raw = fs.readFileSync(file, 'utf8');
-    const data = JSON.parse(raw);
-    _companionTokenSnapshot = { path: file, data };
+    _companionTokenSnapshot = { path: file, data: JSON.parse(fs.readFileSync(file, 'utf8')) };
   } catch {
     /* fail-open — phase recording will surface the missing token */
   }
@@ -116,8 +100,8 @@ function mintCompanionToken() {
 
 /**
  * Detect installed memory plugins (cortex, mem0, anything that exposes
- * recall/remember tools). Returns { name, recallTool, rememberTool } or
- * null. The check looks for known plugin manifest paths under ~/.claude/.
+ * recall/remember tools). Returns { name, recallTool, rememberTool } or null.
+ * Exported for test coverage.
  */
 function detectMemoryPlugin() {
   const home = require('node:os').homedir();
@@ -149,9 +133,7 @@ function detectMemoryPlugin() {
       } catch {
         continue;
       }
-      if (entries.some((e) => c.probe.test(e.name))) {
-        return c;
-      }
+      if (entries.some((e) => c.probe.test(e.name))) return c;
     }
   }
   return null;
@@ -194,8 +176,7 @@ function getCurrentPhase(ticket) {
   const r = callPhaseCli(['current', ticket]);
   if (r.code !== 0) return null;
   try {
-    const j = JSON.parse(r.out.trim().split('\n').pop());
-    return j.currentPhase;
+    return JSON.parse(r.out.trim().split('\n').pop()).currentPhase;
   } catch {
     return null;
   }
@@ -214,352 +195,7 @@ function transitionPhase(ticket, target) {
   return callPhaseCli(['transition', ticket, target]);
 }
 
-// ─── Phase validation logic ────────────────────────────────────────────────
-
-function validateInputs(tasksDir, manifest, linkedIds) {
-  const errors = [];
-  // No linked tickets => nothing to put in _related/ => nothing to check.
-  if (linkedIds.length === 0) return errors;
-
-  const relDir = path.join(tasksDir, '_related');
-  if (!fs.existsSync(relDir)) {
-    errors.push(
-      `Missing directory ${relDir}. Save each linked ticket's full content as ${relDir}/<TICKET-ID>.md.`
-    );
-    return errors;
-  }
-  for (const id of linkedIds) {
-    const f = path.join(relDir, `${id}.md`);
-    const c = readFile(f);
-    if (!c || c.trim().length < 50) {
-      errors.push(
-        `Missing or too-short ${f} (< 50 chars). Fetch the linked ticket's FULL description (not just title) and save it here.`
-      );
-    }
-  }
-  return errors;
-}
-
-function validateOverlap(tasksDir, linkedIds) {
-  const errors = [];
-  const f = path.join(tasksDir, 'sibling-overlap.md');
-  const c = readFile(f);
-  if (!c) {
-    errors.push(`Missing ${f}.`);
-    return errors;
-  }
-  for (const id of linkedIds) {
-    const headerRe = new RegExp(`^##\\s+${id}\\b`, 'm');
-    if (!headerRe.test(c)) {
-      errors.push(`sibling-overlap.md is missing section for ${id} (expected '## ${id}').`);
-      continue;
-    }
-    const startIdx = c.match(headerRe).index;
-    const after = c.slice(startIdx);
-    const nextHdr = after.slice(2).match(/^##\s/m);
-    const section = nextHdr ? after.slice(0, nextHdr.index + 2) : after;
-    if (!/\*\*Verdict:\*\*\s*(sibling-owned|shared|no-overlap)\b/i.test(section)) {
-      errors.push(
-        `sibling-overlap.md section for ${id} missing '**Verdict:** sibling-owned|shared|no-overlap'.`
-      );
-    }
-  }
-  return errors;
-}
-
-// NOTE: trailing terminator must match a non-word char OR end-of-line.
-// Headings ending in `)` (like `### Must Have (P0)`) followed by `\n` are
-// two non-word chars in a row, where `\b` does NOT match. Using
-// `(?=\s|$)` is correct for both word-ending and paren-ending headings.
-const REQUIRED_BRIEF_SECTIONS = [
-  /^##\s+Problem Statement(?=\s|$)/im,
-  /^##\s+Goal(?=\s|$)/im,
-  /^##\s+Target Users(?=\s|$)/im,
-  /^###\s+Must Have\s*\(P0\)(?=\s|$)/im,
-  /^##\s+Constraints(?=\s|$)/im,
-  /^##\s+Out of scope\s*\(sibling-owned\)(?=\s|$)/im,
-  /^##\s+Success Metrics(?=\s|$)/im,
-  /^##\s+Open Questions(?=\s|$)/im,
-];
-
-function sliceSection(text, headerRe) {
-  const m = text.match(headerRe);
-  if (!m) return null;
-  const after = text.slice(m.index + m[0].length);
-  const next = after.match(/^##\s/m);
-  return next ? after.slice(0, next.index) : after;
-}
-
-function validateDraft(tasksDir) {
-  const errors = [];
-  const f = path.join(tasksDir, 'brief.md');
-  const c = readFile(f);
-  if (!c) {
-    errors.push(`Missing ${f}.`);
-    return errors;
-  }
-  for (const re of REQUIRED_BRIEF_SECTIONS) {
-    if (!re.test(c)) errors.push(`brief.md missing required section: ${re}.`);
-  }
-  // Open Questions: each non-empty entry must carry a `Searched:` line.
-  // The "no open questions" placeholder is `- _None._` (or `- None.`,
-  // `- N/A`) — recognised and exempt from the annotation requirement.
-  const oq = sliceSection(c, /^##\s+Open Questions\b/im) || '';
-  const EMPTY_PLACEHOLDER_RE = /^[-*+]\s+(?:_?(?:none|n\/a|nothing)\b\.?_?|—|-)\s*$/i;
-  const bullets = oq
-    .split('\n')
-    .map((l) => l.trim())
-    .filter((l) => /^[-*+]\s+/.test(l));
-  for (const b of bullets) {
-    // Skip the empty-placeholder marker — the section is intentionally empty.
-    if (EMPTY_PLACEHOLDER_RE.test(b)) continue;
-    // Each bullet must either close with "Searched:" inline or be followed
-    // by an indented sub-bullet starting with "Searched:". Accept either.
-    if (!/Searched:/i.test(b)) {
-      // look for sub-bullet by scanning lines after this one
-      const idx = oq.indexOf(b);
-      const tail = oq.slice(idx + b.length, idx + b.length + 400);
-      if (!/Searched:/i.test(tail)) {
-        errors.push(
-          `Open Question without 'Searched:' annotation: "${b.slice(0, 100)}". Each open question must list what docs/code you searched (paths + patterns) before leaving it open. If you have no open questions, write '- _None._' under the heading.`
-        );
-      }
-    }
-  }
-  return errors;
-}
-
-function validateValidate(tasksDir, linkedIds) {
-  const errors = [];
-  const briefPath = path.join(tasksDir, 'brief.md');
-  const overlapPath = path.join(tasksDir, 'sibling-overlap.md');
-  const brief = readFile(briefPath);
-  const overlap = readFile(overlapPath);
-  if (!brief) errors.push(`Missing ${briefPath}.`);
-  if (!overlap) errors.push(`Missing ${overlapPath}.`);
-  if (!brief || !overlap) return errors;
-
-  // Every sibling-owned verdict in overlap.md must appear in brief.md's
-  // `Out of scope (sibling-owned)` section.
-  const oos = sliceSection(brief, /^##\s+Out of scope\s*\(sibling-owned\)\b/im) || '';
-  for (const id of linkedIds) {
-    const headerRe = new RegExp(`^##\\s+${id}\\b`, 'm');
-    const m = overlap.match(headerRe);
-    if (!m) continue;
-    const startIdx = m.index;
-    const after = overlap.slice(startIdx);
-    const nextHdr = after.slice(2).match(/^##\s/m);
-    const section = nextHdr ? after.slice(0, nextHdr.index + 2) : after;
-    const verdict = (section.match(/\*\*Verdict:\*\*\s*(sibling-owned|shared|no-overlap)/i) ||
-      [])[1];
-    if (verdict && verdict.toLowerCase() === 'sibling-owned') {
-      if (!oos.includes(id)) {
-        errors.push(
-          `brief.md 'Out of scope (sibling-owned)' is missing ${id}, which sibling-overlap.md marks sibling-owned.`
-        );
-      }
-    }
-  }
-  return errors;
-}
-
-// ─── Phase instructions (Markdown to the agent) ────────────────────────────
-
-function instructInputs(ctx) {
-  const { ticket, tasksDir, linkedIds, manifest, memory } = ctx;
-  const memBlock = memory
-    ? [
-        '',
-        `### 0. Recall prior memory (${memory.name})`,
-        `Before reading anything, call \`${memory.recallTool}\` with each of these queries (one call per query) and read the results:`,
-        `- \`${ticket}\``,
-        `- the ticket title (extract from related-tickets.json self field if present)`,
-        `- "${ticket} brief"`,
-        `- "sibling overlap" + the area of work (e.g. tRPC, schema, component name)`,
-        `- "past decisions" + the area of work`,
-        '',
-        'Treat any hits as authoritative prior context — read them in full before you draft anything. If multiple agents have already decided how to scope this ticket, do not re-litigate; carry the decision forward.',
-      ]
-    : [
-        '',
-        '### 0. Recall prior memory',
-        'No memory plugin detected. Skipping recall step. If you have a memory plugin installed, surface it to the orchestrator so this step can be enabled.',
-      ];
-  return [
-    `# brief-next — Phase 1 of 5: INPUTS`,
-    `Ticket: ${ticket}`,
-    `Tasks dir: ${tasksDir}`,
-    '',
-    ...memBlock,
-    '',
-    '### 1. Read your own ticket',
-    `Open the ticket payload your previous workflow step fetched (typically under \`${path.join(tasksDir, 'ticket')}.{md,json}\` or surfaced in the previous step output). Read every field: title, description, acceptance criteria, comments. Take notes.`,
-    '',
-    '### 2. Read every linked ticket — FULL CONTENT, not just title',
-    manifest
-      ? `\`related-tickets.json\` lists ${linkedIds.length} linked ticket(s): ${linkedIds.join(', ') || '(none)'}. For EACH id, fetch the full description (jira/linear/gh) and save it to \`${path.join(tasksDir, '_related')}/<id>.md\`. Title is not enough — you must read the full body to detect overlaps in phase 2.`
-      : 'No `related-tickets.json` found. Generate it first via the related-tickets-inject step or have the orchestrator regenerate it. This script will block until the manifest is present.',
-    '',
-    '### What I will check before advancing',
-    `- \`${path.join(tasksDir, 'related-tickets.json')}\` exists`,
-    `- For every linked ticket id, \`${path.join(tasksDir, '_related')}/<id>.md\` exists with at least 50 chars of body (title-only files are rejected)`,
-    '',
-    'When done, re-invoke me.',
-    '',
-  ].join('\n');
-}
-
-function instructOverlap(ctx) {
-  const { ticket, tasksDir, linkedIds } = ctx;
-  const overlapPath = path.join(tasksDir, 'sibling-overlap.md');
-  return [
-    `# brief-next — Phase 2 of 5: OVERLAP`,
-    `Ticket: ${ticket}`,
-    '',
-    '### Task',
-    `Read every file in \`${path.join(tasksDir, '_related')}/\`. For each linked ticket (${linkedIds.length}), decide whether your ticket overlaps with theirs in any surface: file paths, tRPC procedures, schemas, components, endpoints, DB tables, environment variables, or product flows.`,
-    '',
-    `Write \`${overlapPath}\` in this exact format:`,
-    '',
-    '```markdown',
-    '# Sibling Overlap Analysis',
-    '',
-    '## <TICKET-ID> — <title>',
-    '**Verdict:** sibling-owned | shared | no-overlap',
-    '**Surfaces:** comma-separated list of overlapping surfaces (file paths, procedures, schemas...)',
-    '**Notes:** one-to-three sentence rationale, citing specific lines/paragraphs from the sibling description that informed the verdict.',
-    '',
-    '## <NEXT-TICKET-ID> — ...',
-    '...',
-    '```',
-    '',
-    '### Verdict semantics',
-    "- **sibling-owned** — the surface is theirs; you must put it in your brief's `## Out of scope (sibling-owned)` and not implement it.",
-    '- **shared** — both tickets touch it; coordination required. Note who owns the change.',
-    '- **no-overlap** — different concerns; no risk of stepping on each other.',
-    '',
-    '### What I will check before advancing',
-    `- \`${overlapPath}\` exists`,
-    `- One \`## <TICKET-ID>\` section per linked ticket (${linkedIds.length} sections)`,
-    `- Each section has a \`**Verdict:**\` line with one of the three values`,
-    '',
-    'When done, re-invoke me.',
-    '',
-  ].join('\n');
-}
-
-function instructDraft(ctx) {
-  const { ticket, tasksDir } = ctx;
-  const briefPath = path.join(tasksDir, 'brief.md');
-  return [
-    `# brief-next — Phase 3 of 5: DRAFT`,
-    `Ticket: ${ticket}`,
-    '',
-    '### Before drafting: investigate docs for ambiguities',
-    "List every ambiguity you would otherwise drop into Open Questions. For EACH ambiguity, search the project docs (README, docs/, ADRs, design notes, this plugin's own AGENTS.md) AND the codebase for prior resolutions BEFORE leaving it open. If a search resolves the ambiguity, fold the answer into the brief proper. If not, leave it open AND record what you searched.",
-    '',
-    '### Required brief structure',
-    `Write \`${briefPath}\` with all of the following sections (exact headings):`,
-    '',
-    '- `## Problem Statement` — one paragraph, user-facing pain.',
-    '- `## Goal` — one paragraph, measurable outcome.',
-    '- `## Target Users` — bulleted list of personas.',
-    '- `## Requirements`',
-    '  - `### Must Have (P0)` — numbered list. Each P0 maps to one or more ticket AC items.',
-    '  - `### Should Have (P1)` — optional, numbered.',
-    '  - `### Could Have (P2)` — optional, numbered.',
-    '- `## Constraints` — bulleted: timelines, tech limits, compliance.',
-    '- `## Out of scope (sibling-owned)` — populated from sibling-overlap.md (every sibling marked `sibling-owned`). One bullet per surface, citing the sibling ID.',
-    '- `## Success Metrics` — bulleted measurable outcomes.',
-    '- `## Open Questions` — bulleted. Each MUST carry a `Searched:` annotation listing what you looked at, e.g.:',
-    '',
-    '  ```',
-    '  - Should the retry use exponential backoff or fixed delay?',
-    '    Searched: docs/architecture/retry.md, ADR-014, grep "backoff" in services/ → no prior decision.',
-    '  ```',
-    '',
-    '  If you have no open questions, write `- _None._` under the heading. Do NOT use the section as a parking lot for unsearched ambiguities.',
-    '',
-    '### What I will check before advancing',
-    `- All required sections present in \`${briefPath}\``,
-    '- Every Open Questions bullet has a `Searched:` annotation OR the section contains `_None._`',
-    '',
-    'When done, re-invoke me.',
-    '',
-  ].join('\n');
-}
-
-function instructValidate(ctx) {
-  const { ticket, tasksDir } = ctx;
-  return [
-    `# brief-next — Phase 4 of 5: VALIDATE`,
-    `Ticket: ${ticket}`,
-    '',
-    '### What I check',
-    `- \`brief.md\` has every required section.`,
-    `- Every linked ticket marked \`sibling-owned\` in sibling-overlap.md is referenced in brief.md's \`Out of scope (sibling-owned)\`.`,
-    '',
-    'If validation passes, I record the phase and advance you to MEMORIZE. If it fails, I print the gaps and you fix them.',
-    '',
-    'Re-invoke me to run the check.',
-    '',
-  ].join('\n');
-}
-
-function instructMemorize(ctx) {
-  const { ticket, memory, linkedIds } = ctx;
-  if (!memory) {
-    return [
-      `# brief-next — Phase 5 of 5: MEMORIZE (skipped)`,
-      '',
-      'No memory plugin detected on this machine. Recording phase as complete with `summary=no-memory-plugin` and advancing to done.',
-      '',
-      'To enable memory persistence, install a plugin like cortex and re-run this workflow.',
-      '',
-    ].join('\n');
-  }
-  return [
-    `# brief-next — Phase 5 of 5: MEMORIZE (${memory.name})`,
-    `Ticket: ${ticket}`,
-    '',
-    '### Task',
-    `Persist your key decisions via \`${memory.rememberTool}\` so future agents can recall them. Save AT LEAST these entries (one tool call each — DO NOT batch into one entry):`,
-    '',
-    `1. **Ticket overview**: tag with the ticket ID and area-of-work keywords. Body = problem statement + goal from brief.md.`,
-    `2. **Sibling ownership map**: for each linked ticket (${linkedIds.length}), save the verdict from sibling-overlap.md with tags ${ticket}, sibling-overlap, and the linked ticket id.`,
-    `3. **P0 requirements**: save the Must Have (P0) list with tags ${ticket}, requirements, P0.`,
-    `4. **Open questions + their searches**: save each unresolved Open Question with the search trail. Tag ${ticket}, open-question, plus the area keyword.`,
-    `5. **Out-of-scope reasoning**: save the sibling-owned out-of-scope list so the next agent working on a related ticket can recall who owns what.`,
-    '',
-    memory.saveTool
-      ? `Finally, archive the session via \`${memory.saveTool}\` so the full conversation context is queryable.`
-      : '',
-    '',
-    '### Why this matters',
-    'When a sibling/follow-up ticket runs `brief-next` later, its INPUTS phase will recall these entries and avoid re-litigating decisions you already made. Skip this and you waste future agent time on questions you already answered.',
-    '',
-    'When done, re-invoke me and I will transition you to done.',
-    '',
-  ].join('\n');
-}
-
-function instructDone(ctx) {
-  return [
-    `# brief-next — DONE`,
-    `Ticket: ${ctx.ticket}`,
-    '',
-    'All five phases recorded. Artifacts:',
-    `- \`brief.md\``,
-    `- \`sibling-overlap.md\``,
-    `- \`_related/<id>.md\` (per linked ticket)`,
-    `- \`brief-phase.json\``,
-    '',
-    'Re-invoke /work2 (or /work) to advance to the brief_gate step.',
-    '',
-  ].join('\n');
-}
-
-// ─── Main ──────────────────────────────────────────────────────────────────
+// ─── Orchestrator ──────────────────────────────────────────────────────────
 
 function main(argv) {
   const startedAt = Date.now();
@@ -592,82 +228,35 @@ function main(argv) {
 
   const ctx = { ticket, tasksDir, tasksBase, manifest, linkedIds, memory, worktreeRoot };
 
-  // Validation gates: each phase validates inputs FROM the previous instruction.
-  // If validation fails, print the failures and the current-phase instructions.
-  let blockReason = '';
+  // Look up the registered handler for the current phase and ask it whether
+  // the phase is ready to advance. The phase handler does NOT perform the
+  // record/transition itself — that stays here so all state mutations live
+  // in one place.
+  const handler = getPhase(phase);
+  const verdict = handler.validate(ctx);
+
   let advanced = false;
+  let blockReason = '';
 
-  // advanceAfter(target, summary) — record current phase + transition to target.
-  // Returns true on success; on failure sets blockReason and returns false.
-  const advanceAfter = (target, summary) => {
-    const r = recordPhase(ticket, phase, summary);
-    if (r.code !== 0) {
-      blockReason = `Could not record phase ${phase}:\n${r.out}`;
-      return false;
-    }
-    const t = transitionPhase(ticket, target);
-    if (t.code !== 0) {
-      blockReason = `Could not transition to ${target}:\n${t.out}`;
-      return false;
-    }
-    advanced = true;
-    phase = target;
-    return true;
-  };
-
-  if (phase === BRIEF_PHASES.inputs) {
-    if (!manifest) {
-      blockReason = `related-tickets.json missing at ${path.join(tasksDir, 'related-tickets.json')}. Cannot proceed without sibling context.`;
+  if (verdict.ok && handler.next) {
+    const rec = recordPhase(ticket, phase, verdict.summary || '');
+    if (rec.code !== 0) {
+      blockReason = `Could not record phase ${phase}:\n${rec.out}`;
     } else {
-      const errs = validateInputs(tasksDir, manifest, linkedIds);
-      if (errs.length === 0) {
-        advanceAfter(
-          briefNextPhases(BRIEF_PHASES.inputs)[0],
-          `linked=${linkedIds.length} memory=${memory ? memory.name : 'none'}`
-        );
+      const t = transitionPhase(ticket, handler.next);
+      if (t.code !== 0) {
+        blockReason = `Could not transition to ${handler.next}:\n${t.out}`;
       } else {
-        blockReason = errs.join('\n');
+        advanced = true;
+        phase = handler.next;
       }
     }
-  } else if (phase === BRIEF_PHASES.overlap) {
-    const errs = validateOverlap(tasksDir, linkedIds);
-    if (errs.length === 0) {
-      advanceAfter(briefNextPhases(BRIEF_PHASES.overlap)[0], `siblings=${linkedIds.length}`);
-    } else {
-      blockReason = errs.join('\n');
-    }
-  } else if (phase === BRIEF_PHASES.draft) {
-    const errs = validateDraft(tasksDir);
-    if (errs.length === 0) {
-      advanceAfter(briefNextPhases(BRIEF_PHASES.draft)[0], 'brief.md drafted');
-    } else {
-      blockReason = errs.join('\n');
-    }
-  } else if (phase === BRIEF_PHASES.validate) {
-    const errs = validateValidate(tasksDir, linkedIds);
-    if (errs.length === 0) {
-      advanceAfter(briefNextPhases(BRIEF_PHASES.validate)[0], 'cross-checks ok');
-    } else {
-      blockReason = errs.join('\n');
-    }
-  } else if (phase === BRIEF_PHASES.memorize) {
-    // We can't verify memory writes (no introspection across plugins).
-    // Record on re-invoke; if no memory plugin, auto-advance.
-    const target = briefNextPhases(BRIEF_PHASES.memorize)[0];
-    if (!memory) {
-      advanceAfter(target, 'no-memory-plugin');
-    } else {
-      // First call in memorize prints instructions. Second call (when agent
-      // has finished saving) advances. We detect "second call" by the
-      // presence of a sentinel file the agent must touch after persisting.
-      const sentinel = path.join(tasksDir, '.brief-memorized');
-      if (fs.existsSync(sentinel)) {
-        advanceAfter(target, `via=${memory.name}`);
-      }
-    }
+  } else if (Array.isArray(verdict.errors) && verdict.errors.length > 0) {
+    blockReason = verdict.errors.join('\n');
   }
+  // Else: not ok but no errors — waiting (e.g. memorize before sentinel).
 
-  // Compose response
+  // Header + body
   const header = [
     `brief-next: ${ticket}`,
     `  tasks dir: ${tasksDir}`,
@@ -678,34 +267,25 @@ function main(argv) {
     '',
   ].join('\n');
 
-  const INSTRUCTORS = {
-    [BRIEF_PHASES.inputs]: instructInputs,
-    [BRIEF_PHASES.overlap]: instructOverlap,
-    [BRIEF_PHASES.draft]: instructDraft,
-    [BRIEF_PHASES.validate]: instructValidate,
-    [BRIEF_PHASES.memorize]: instructMemorize,
-    [BRIEF_PHASES.done]: instructDone,
-  };
-  const instructFor = (p) => (INSTRUCTORS[p] || instructMemorize)(ctx);
-
-  let body;
-  if (blockReason && !advanced) {
-    body = [
-      `## ❌ Phase ${phase.toUpperCase()} blocked`,
-      '',
-      '```',
-      blockReason,
-      '```',
-      '',
-      '---',
-      '',
-      instructFor(phase),
-    ].join('\n');
-  } else {
-    body = instructFor(phase);
-  }
+  const instructorPhase = getPhase(phase);
+  const instructions = instructorPhase.instructions(ctx);
+  const body =
+    blockReason && !advanced
+      ? [
+          `## ❌ Phase ${phase.toUpperCase()} blocked`,
+          '',
+          '```',
+          blockReason,
+          '```',
+          '',
+          '---',
+          '',
+          instructions,
+        ].join('\n')
+      : instructions;
 
   process.stdout.write(header + '\n' + body);
+
   const exitCode = blockReason && !advanced ? 2 : 0;
   logNextScriptEvent('brief-next', {
     event: 'completed',
@@ -730,4 +310,4 @@ if (require.main === module) {
   }
 }
 
-module.exports = { detectMemoryPlugin, BRIEF_PHASES };
+module.exports = { detectMemoryPlugin };
