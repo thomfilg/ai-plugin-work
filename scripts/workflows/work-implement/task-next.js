@@ -122,7 +122,12 @@ function extractTaskSection(tasksMd, taskNum) {
 }
 
 function extractField(section, header) {
-  const re = new RegExp(`### *${header}[^\\n]*\\n([\\s\\S]*?)(?=\\n### |\\n## |$)`, 'm');
+  // NOTE: no `m` flag. With `m`, `$` in the lookahead matches end-of-LINE,
+  // so the lazy `[\s\S]*?` terminates at the first newline and we only
+  // capture the first line of the field body (e.g. Suggested Scope returns
+  // only the first path). Without `m`, `$` is end-of-string, and the
+  // lookahead terminates correctly at the next `### ` / `## ` header or EOF.
+  const re = new RegExp(`### *${header}[^\\n]*\\n([\\s\\S]*?)(?=\\n### |\\n## |$)`);
   const m = section.match(re);
   return m ? m[1].trim() : '';
 }
