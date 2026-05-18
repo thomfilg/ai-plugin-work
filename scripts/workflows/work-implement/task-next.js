@@ -370,6 +370,25 @@ function findTestFilesInScope(repoRoot, scope) {
 // to substring match if no gherkin() calls are present in the file. The
 // substring fallback handles older test files that haven't adopted the
 // annotation helper.
+// For unit-only tasks (no @task:N gherkin scenarios — e.g. pure Zod schemas
+// with no E2E behavior to tag), the RED gate falls back to verifying that
+// at least one test file in Suggested Scope contains at least one test
+// block. Returns { totalBlocks, filesWithBlocks }.
+function countTestBlocksInFiles(testFiles) {
+  let totalBlocks = 0;
+  let filesWithBlocks = 0;
+  const re = /\b(?:it|test)(?:\.\w+)?\s*\(/g;
+  for (const f of testFiles) {
+    const c = readFile(f) || '';
+    const matches = c.match(re);
+    if (matches && matches.length > 0) {
+      filesWithBlocks += 1;
+      totalBlocks += matches.length;
+    }
+  }
+  return { totalBlocks, filesWithBlocks };
+}
+
 function scenariosCoveredByTests(scenarios, testFiles) {
   const fileContents = testFiles.map((f) => ({ f, c: readFile(f) || '' }));
   const allGherkinCalls = new Set();
@@ -579,7 +598,30 @@ function main() {
       const testFiles = findTestFilesInScope(repoRoot, scope);
       const missing = scenariosCoveredByTests(scenarios, testFiles);
       if (scenarios.length === 0) {
-        blockReason = `No gherkin scenarios are tagged @task:${taskNum}. RED cannot validate scope. Fix gherkin.feature or have an orchestrator regenerate it.`;
+        // Unit-only fallback: tasks with no E2E gherkin coverage (pure Zod
+        // schemas, isolated utilities, etc.) may still validate RED by
+        // proving there is at least one failing test block under Suggested
+        // Scope. The test command already failed (exitCode !== 0) above —
+        // we just need to confirm authorship intent.
+        if (testFiles.length === 0) {
+          blockReason = `No gherkin scenarios tagged @task:${taskNum} AND no *.test.* / *.spec.* files found under Suggested Scope. Add at least one failing test in a file under Suggested Scope, then re-invoke me.`;
+        } else {
+          const { totalBlocks, filesWithBlocks } = countTestBlocksInFiles(testFiles);
+          if (totalBlocks === 0) {
+            blockReason = `No gherkin scenarios tagged @task:${taskNum}. Found ${testFiles.length} test file(s) in Suggested Scope but none contain it()/test() blocks. Add at least one failing test, then re-invoke me.`;
+          } else {
+            const rec = recordEvidence('red', ticket, taskNum, testCmd, repoRoot);
+            if (!rec.ok) {
+              blockReason = `Could not record RED evidence:\n${rec.out}`;
+            } else {
+              advanced = true;
+              phase = 'green';
+              process.stdout.write(
+                `task-next: RED accepted via unit-only fallback (no @task:${taskNum} gherkin tags; ${filesWithBlocks} test file(s) under Suggested Scope, ${totalBlocks} test block(s)).\n`
+              );
+            }
+          }
+        }
       } else if (missing.length > 0) {
         blockReason = `Tests do not yet cover these scenarios (verbatim title match against test files in Suggested Scope):\n  - ${missing.join('\n  - ')}\nAdd a test for each (failing) before re-invoking me.`;
       } else {
