@@ -1009,6 +1009,24 @@ async function main() {
     const hookData = JSON.parse(input);
     const hookType = process.env.CLAUDE_HOOK_TYPE || 'PostToolUse';
 
+    // Telemetry: log every fire so we can prove the hook ran. JSONL.
+    try {
+      const { logTokenEvent } = require(path.join(__dirname, '..', 'next-script-log'));
+      logTokenEvent('hook-fired', {
+        hookType,
+        toolName: hookData?.tool_name || null,
+        cmdSnippet: hookData?.tool_input?.command
+          ? String(hookData.tool_input.command).slice(0, 200)
+          : null,
+        envAgent: process.env.CLAUDE_CURRENT_AGENT || null,
+        subagentType: hookData?.tool_input?.subagent_type || null,
+        hookAgentType: hookData?.agent_type || null,
+        transcriptPath: hookData?.transcript_path || null,
+      });
+    } catch {
+      /* fail-open */
+    }
+
     if (hookType === 'PreToolUse') {
       handlePreToolUse(hookData);
     } else if (hookType === 'PostToolUse') {

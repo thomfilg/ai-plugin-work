@@ -577,6 +577,18 @@ function main() {
         '',
       ].join('\n')
     );
+    if (globalThis.__taskNextLog) {
+      globalThis.__taskNextLog({
+        event: 'completed',
+        ticket: globalThis.__taskNextCtx?.ticket,
+        taskNum: globalThis.__taskNextCtx?.taskNum,
+        phase: 'checkpoint',
+        advanced: advanceCode === 0,
+        blocked: advanceCode !== 0,
+        exitCode: advanceCode === 0 ? 0 : 2,
+        durationMs: Date.now() - (globalThis.__taskNextStart || Date.now()),
+      });
+    }
     process.exit(advanceCode === 0 ? 0 : 2);
   }
 
@@ -605,6 +617,18 @@ function main() {
         testCmdSource,
       })
     );
+    if (globalThis.__taskNextLog) {
+      globalThis.__taskNextLog({
+        event: 'completed',
+        ticket: globalThis.__taskNextCtx?.ticket,
+        taskNum: globalThis.__taskNextCtx?.taskNum,
+        phase: 'done',
+        advanced: false,
+        blocked: false,
+        exitCode: 0,
+        durationMs: Date.now() - (globalThis.__taskNextStart || Date.now()),
+      });
+    }
     process.exit(0);
   }
 
