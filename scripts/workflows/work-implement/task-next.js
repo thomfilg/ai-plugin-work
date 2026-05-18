@@ -480,6 +480,38 @@ function main() {
   const type = parseTaskType(section);
   const taskTestCmd = parseTaskTestCommand(section);
 
+  // Checkpoint tasks are verification-only — no source change, no test
+  // authorship, no gherkin scenarios. Asking the agent to satisfy a TDD
+  // RED gate ("write a failing test for each scenario") is contradictory
+  // when there are 0 scenarios by design. Short-circuit: print the
+  // checkpoint instructions and exit cleanly. No phase, no evidence,
+  // no transition. The orchestrator's implement-gate already routes
+  // checkpoint tasks to the code-checker agent with a verify-only prompt
+  // (see implement.js); this branch is the safety net when the script
+  // is invoked directly.
+  if (type === 'checkpoint') {
+    process.stdout.write(
+      [
+        `task-next: ${ticket} task${taskNum} — ${taskTitle}`,
+        '  type: checkpoint (verification only, no TDD cycle)',
+        '',
+        `# Checkpoint — Task ${taskNum}`,
+        '',
+        'This task is verification-only. Do NOT write tests, do NOT change source.',
+        '',
+        '## What to do',
+        `1. Read the "## Task ${taskNum}" section in ${path.join(tasksDir, 'tasks.md')}.`,
+        '2. Run each verification command listed under "### Acceptance" / "### Test Command" exactly as written.',
+        '3. Report which commands passed and which (if any) did not.',
+        '',
+        'When all verifications pass, the orchestrator will advance the workflow on its next tick.',
+        'No TDD evidence is recorded for checkpoint tasks — that is by design.',
+        '',
+      ].join('\n')
+    );
+    process.exit(0);
+  }
+
   const gherkin = readFile(path.join(tasksDir, 'gherkin.feature')) || '';
   const scenarios = parseGherkinScenarios(gherkin, taskNum);
 
