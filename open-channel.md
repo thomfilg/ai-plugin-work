@@ -12,7 +12,7 @@ A monitor session may need to nudge you mid-workflow (e.g. "your test path is wr
 TICKET=<TICKET-ID>
 SESS="${TICKET}-listen"
 tmux has-session -t "$SESS" 2>/dev/null || \
-  tmux new-session -d -s "$SESS" "exec node /home/thomfilg/p/w-claude-plugin/claude-plugin-work/scripts/listen-all.js"
+  tmux new-session -d -s "$SESS" "exec node ${CLAUDE_PLUGIN_ROOT}/scripts/listen-all.js"
 tmux list-sessions | grep "$SESS"
 ```
 
@@ -23,7 +23,7 @@ tmux list-sessions | grep "$SESS"
 To send a status update back to the monitor:
 
 ```bash
-node /home/thomfilg/p/w-claude-plugin/claude-plugin-work/scripts/communicate.js MONITOR "<TICKET-ID>: <your message>"
+node ${CLAUDE_PLUGIN_ROOT}/scripts/communicate.js MONITOR "<TICKET-ID>: <your message>"
 ```
 
 Always prefix MONITOR messages with your ticket ID. The script will report how many listeners are tailing MONITOR before sending; if it warns "no active listeners", the message is still persisted to the log.
@@ -31,7 +31,7 @@ Always prefix MONITOR messages with your ticket ID. The script will report how m
 Optional one-shot check whether the monitor is listening right now:
 
 ```bash
-node /home/thomfilg/p/w-claude-plugin/claude-plugin-work/scripts/communicate.js --check MONITOR
+node ${CLAUDE_PLUGIN_ROOT}/scripts/communicate.js --check MONITOR
 ```
 
 Periodically (every few minutes during long tool calls) glance at the pane in case you missed a tmux highlight, or run `tail -20 /tmp/claude-agent-inbox/<TICKET-ID>.log`.
