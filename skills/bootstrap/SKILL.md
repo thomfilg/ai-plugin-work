@@ -94,7 +94,7 @@ session for the ticket already exists.
 LISTEN_SESSION="${TICKET_ID}-listen"
 if ! tmux has-session -t "$LISTEN_SESSION" 2>/dev/null; then
   tmux new-session -d -s "$LISTEN_SESSION" \
-    "node $HOME/p/w-claude-plugin/claude-plugin-work/scripts/listen-communication.js $TICKET_ID"
+    "node \"${CLAUDE_PLUGIN_ROOT}/scripts/listen-communication.js\" $TICKET_ID"
   echo "  ✓ orchestrator listener started: tmux session $LISTEN_SESSION"
 else
   echo "  ✓ orchestrator listener already running: tmux session $LISTEN_SESSION"
@@ -104,7 +104,7 @@ fi
 After starting, verify a listener is attached by running:
 
 ```bash
-node $HOME/p/w-claude-plugin/claude-plugin-work/scripts/communicate.js --check "$TICKET_ID"
+node "${CLAUDE_PLUGIN_ROOT}/scripts/communicate.js" --check "$TICKET_ID"
 # Exits 0 if at least one listener is attached, exits 3 otherwise.
 ```
 
@@ -118,7 +118,7 @@ node $HOME/p/w-claude-plugin/claude-plugin-work/scripts/communicate.js --check "
   attach a side pane in its own session before starting work.
 - Talking back to the monitor uses:
   ```bash
-  node $HOME/p/w-claude-plugin/claude-plugin-work/scripts/communicate.js \
+  node "${CLAUDE_PLUGIN_ROOT}/scripts/communicate.js" \
     MONITOR "$TICKET_ID: <message to orchestrator>"
   ```
 

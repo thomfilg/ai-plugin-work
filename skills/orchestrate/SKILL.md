@@ -173,7 +173,7 @@ three-step communication protocol so the agent knows what's happening:
 1. **ACK — "I'm starting work to unblock you."**
    Send IMMEDIATELY upon receiving the blocker, BEFORE any code change.
    ```bash
-   node ~/p/w-claude-plugin/claude-plugin-work/scripts/communicate.js <TICKET> \
+   node "${CLAUDE_PLUGIN_ROOT}/scripts/communicate.js" <TICKET> \
      "monitor: ACK — starting work to unblock <one-line summary>. Stand by."
    ```
 
@@ -187,7 +187,7 @@ three-step communication protocol so the agent knows what's happening:
    - One-line description of the fix
    - The exact command the agent should re-invoke to resume
    ```bash
-   node ~/p/w-claude-plugin/claude-plugin-work/scripts/communicate.js <TICKET> \
+   node "${CLAUDE_PLUGIN_ROOT}/scripts/communicate.js" <TICKET> \
      "monitor: UNBLOCKED at commit <hash> on <branch> (PR #<n>). <one-line fix>. Retry: <exact command>"
    ```
 
