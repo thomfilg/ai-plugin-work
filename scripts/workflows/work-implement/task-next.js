@@ -471,7 +471,24 @@ function printPhaseInstructions(phase, ctx) {
   return lines.join('\n') + '\n';
 }
 
+let _log;
+function _logEvent(payload) {
+  if (!_log) {
+    try {
+      _log = require('../lib/next-script-log').logNextScriptEvent;
+    } catch {
+      _log = () => {};
+    }
+  }
+  try {
+    _log('task-next', payload);
+  } catch {
+    /* fail-open */
+  }
+}
+
 function main() {
+  const _startedAt = Date.now();
   const [, , ticketRaw, taskRaw] = process.argv;
   if (!ticketRaw || !taskRaw) {
     process.stderr.write(
@@ -483,6 +500,16 @@ function main() {
   }
   const ticket = sanitizeTicketId(ticketRaw);
   const taskNum = parseTaskId(taskRaw);
+  _logEvent({
+    event: 'invoked',
+    ticket,
+    taskNum,
+    cwd: process.cwd(),
+    agent: process.env.CLAUDE_CURRENT_AGENT || null,
+  });
+  globalThis.__taskNextStart = _startedAt;
+  globalThis.__taskNextLog = _logEvent;
+  globalThis.__taskNextCtx = { ticket, taskNum };
 
   // Snapshot the companion token NOW, before any child spawn could consume it.
   // The hook minted this token when the agent invoked `node task-next.js ...`;
@@ -695,7 +722,21 @@ function main() {
     })
   );
 
-  process.exit(blockReason ? 2 : 0);
+  const _exitCode = blockReason ? 2 : 0;
+  if (globalThis.__taskNextLog) {
+    globalThis.__taskNextLog({
+      event: 'completed',
+      ticket: globalThis.__taskNextCtx?.ticket,
+      taskNum: globalThis.__taskNextCtx?.taskNum,
+      phase,
+      advanced: Boolean(advanced),
+      blocked: Boolean(blockReason),
+      blockReason: blockReason ? String(blockReason).slice(0, 500) : null,
+      exitCode: _exitCode,
+      durationMs: Date.now() - (globalThis.__taskNextStart || Date.now()),
+    });
+  }
+  process.exit(_exitCode);
 }
 
 main();

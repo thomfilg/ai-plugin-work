@@ -232,6 +232,7 @@ const TRUSTED_SCRIPT_DIRS = [
   path.resolve(__dirname, '..', '..', 'work', 'scripts'), // workflows/work/scripts/
   path.resolve(__dirname, '..', '..', 'check', 'scripts'), // workflows/check/scripts/
   path.resolve(__dirname, '..', '..', 'work-implement'), // workflows/work-implement/
+  path.resolve(__dirname, '..', '..', 'work-brief'), // workflows/work-brief/
   path.resolve(__dirname, '..', '..', 'work2'), // workflows/work2/
   path.resolve(__dirname, '..', '..', 'check2'), // workflows/check2/
   path.resolve(__dirname, '..', '..', 'follow-up2'), // workflows/follow-up2/
@@ -642,6 +643,12 @@ function handlePreToolUse(hookData) {
   // When a Bash command invokes a writer script (e.g. write-qa-report.js),
   // verify the caller is an authorized agent. This provides defense-in-depth
   // alongside the script's own identity check.
+  let _tokenLog;
+  try {
+    ({ logTokenEvent: _tokenLog } = require(path.join(__dirname, '..', 'next-script-log')));
+  } catch {
+    _tokenLog = () => {};
+  }
   if (toolName === 'Bash') {
     const cmd = String(toolInput?.command || '');
     const nodeMatches = getNodeInvocations(cmd);
@@ -650,6 +657,15 @@ function handlePreToolUse(hookData) {
       const scriptBase = path.basename(scriptPath);
       const gatedEntry = AGENT_GATED_SCRIPTS[scriptBase];
       if (gatedEntry) {
+        _tokenLog('rule5-match', {
+          scriptBase,
+          scriptPath,
+          ticketId: ticketId || null,
+          cmd: cmd.slice(0, 300),
+          envAgent: process.env.CLAUDE_CURRENT_AGENT || null,
+          subagentType: hookData?.tool_input?.subagent_type || null,
+          hookAgentType: hookData?.agent_type || null,
+        });
         const allowedAgents = gatedEntry.agents;
         if (!isTrustedScriptPath(scriptPath, TRUSTED_SCRIPT_DIRS)) {
           didBlock = true;

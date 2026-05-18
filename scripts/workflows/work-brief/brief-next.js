@@ -36,6 +36,13 @@ const { spawnSync } = require('node:child_process');
 
 const BRIEF_PHASE_CLI = path.resolve(__dirname, 'brief-phase-state.js');
 
+let logNextScriptEvent;
+try {
+  ({ logNextScriptEvent } = require('../lib/next-script-log'));
+} catch {
+  logNextScriptEvent = () => {};
+}
+
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 let config;
@@ -541,12 +548,19 @@ function instructDone(ctx) {
 // ─── Main ──────────────────────────────────────────────────────────────────
 
 function main(argv) {
+  const startedAt = Date.now();
   const args = argv.slice(2);
   const ticket = args[0];
   if (!ticket || /^-/.test(ticket)) {
     process.stderr.write('usage: brief-next.js <TICKET>\n  e.g. node brief-next.js ECHO-4560\n');
     process.exit(2);
   }
+  logNextScriptEvent('brief-next', {
+    event: 'invoked',
+    ticket,
+    cwd: process.cwd(),
+    agent: process.env.CLAUDE_CURRENT_AGENT || null,
+  });
 
   snapshotCompanionToken('brief-phase-state.js');
 
@@ -723,7 +737,20 @@ function main(argv) {
   }
 
   process.stdout.write(header + '\n' + body);
-  process.exit(blockReason && !advanced ? 2 : 0);
+  const exitCode = blockReason && !advanced ? 2 : 0;
+  logNextScriptEvent('brief-next', {
+    event: 'completed',
+    ticket,
+    phase,
+    advanced,
+    blocked: Boolean(blockReason),
+    blockReason: blockReason ? blockReason.slice(0, 500) : null,
+    linkedTickets: linkedIds.length,
+    memoryPlugin: memory ? memory.name : null,
+    exitCode,
+    durationMs: Date.now() - startedAt,
+  });
+  process.exit(exitCode);
 }
 
 if (require.main === module) {
