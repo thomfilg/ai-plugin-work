@@ -789,7 +789,14 @@ function handlePreToolUse(hookData) {
             // /tmp/.claude-write-tokens/task-next.js file). When ticketId
             // is null (no ticket context), falls back to the legacy
             // unkeyed path.
-            const tp = tokenPath(basename, ticketId);
+            //
+            // Strip ENFORCE_HOOK_SUFFIX from the ticket-key: getTicketId()
+            // appends the suffix (`<ticket>/<suffix>`) for phase-aware
+            // STATE-file paths, but consumers like tdd-phase-state.js look
+            // up tokens by the BARE ticket arg from the CLI (no suffix).
+            // Keying tokens with the suffix would make consumers miss them.
+            const bareTicket = ticketId ? ticketId.split('/')[0] : ticketId;
+            const tp = tokenPath(basename, bareTicket);
             try {
               fs.unlinkSync(tp);
             } catch {
