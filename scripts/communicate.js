@@ -6,15 +6,20 @@ const path = require('node:path');
 
 const INBOX_DIR = process.env.CLAUDE_AGENT_INBOX_DIR || '/tmp/claude-agent-inbox';
 
+const DONE_SENTINEL = '__MONITOR_DONE__';
+
 function usage(code) {
   process.stderr.write(
     'usage: communicate.js <ticket-id> <message...>\n' +
       '       communicate.js --check <ticket-id>\n' +
       '       communicate.js --watch <ticket-id>\n' +
+      '       communicate.js --done <ticket-id> [reason...]\n' +
       '  ticket-id is case-insensitive (echo-1234 → ECHO-1234)\n' +
       '  message can be a single quoted string or remaining argv joined with spaces\n' +
       '  --check prints listener PIDs for the channel (no send)\n' +
       '  --watch polls every 1s and prints listener join/leave events\n' +
+      '  --done writes a completion sentinel to the ticket channel AND notifies MONITOR;\n' +
+      '         listeners on the ticket channel exit cleanly on the sentinel.\n' +
       '  Send always reports listener count; exits 3 if zero listeners.\n'
   );
   process.exit(code);
@@ -59,11 +64,12 @@ function findListeners(inboxPath) {
 const args = process.argv.slice(2);
 const checkOnly = args[0] === '--check' || args[0] === '-c';
 const watchMode = args[0] === '--watch' || args[0] === '-w';
-if (checkOnly || watchMode) args.shift();
+const doneMode = args[0] === '--done' || args[0] === '-d';
+if (checkOnly || watchMode || doneMode) args.shift();
 
 const [rawTicket, ...rest] = args;
 if (!rawTicket) usage(1);
-if (!checkOnly && !watchMode && rest.length === 0) usage(1);
+if (!checkOnly && !watchMode && !doneMode && rest.length === 0) usage(1);
 
 const ticket = rawTicket.toUpperCase().replace(/[^A-Z0-9_-]/g, '');
 if (!ticket) {
@@ -84,6 +90,25 @@ if (checkOnly) {
     `${inbox}: ${listeners.length} listener(s)${listeners.length ? ` — pids: ${listeners.join(', ')}` : ''}\n`
   );
   process.exit(listeners.length === 0 ? 3 : 0);
+}
+
+if (doneMode) {
+  // Cleanup signal: write sentinel to the ticket's own channel AND notify
+  // the MONITOR channel (with the ticket prefix so the manager knows which
+  // session just completed). Listeners on the ticket channel exit cleanly
+  // when they see DONE_SENTINEL.
+  if (!fs.existsSync(inbox)) fs.closeSync(fs.openSync(inbox, 'a'));
+  const reason = rest.join(' ').trim();
+  const ts = new Date().toISOString();
+  const tail = reason ? ` ${reason}` : '';
+  fs.appendFileSync(inbox, `[${ts}] ${DONE_SENTINEL}${tail}\n`, { mode: 0o644 });
+
+  const monitor = path.join(INBOX_DIR, 'MONITOR.log');
+  if (!fs.existsSync(monitor)) fs.closeSync(fs.openSync(monitor, 'a'));
+  fs.appendFileSync(monitor, `[${ts}] ${ticket}: ${DONE_SENTINEL}${tail}\n`, { mode: 0o644 });
+
+  process.stdout.write(`done → ${ticket} channel + MONITOR notified${tail}\n`);
+  process.exit(0);
 }
 
 if (watchMode) {
