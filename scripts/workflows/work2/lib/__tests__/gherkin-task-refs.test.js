@@ -92,6 +92,28 @@ describe('parseFeatureFile', () => {
     assert.equal(errors.length, 0);
   });
 
+  it('extracts tags from Scenario Outline entries (parity with task-next.js)', () => {
+    const withOutline = `Feature: x
+  @integration
+  @task:1
+  @test:components/foo/foo.test.tsx
+  Scenario Outline: foo handles <input>
+    Given <input>
+    When processed
+    Then <output>
+
+    Examples:
+      | input | output |
+      | a     | A      |
+`;
+    const { scenarios, errors } = parseFeatureFile(withOutline);
+    assert.equal(errors.length, 0, `unexpected errors: ${errors.join('; ')}`);
+    assert.equal(scenarios.length, 1);
+    assert.equal(scenarios[0].name, 'foo handles <input>');
+    assert.equal(scenarios[0].taskNum, 1);
+    assert.deepEqual(scenarios[0].testPaths, ['components/foo/foo.test.tsx']);
+  });
+
   it('flags scenarios with multiple @task tags', () => {
     const broken = `Feature: x
   @task:1
