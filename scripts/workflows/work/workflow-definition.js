@@ -626,7 +626,7 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
           // PR is proven if an open PR exists for the current branch
           try {
             const { execFileSync } = require('child_process');
-            const { buildChildEnv } = require('../lib/scripts/gh-exec');
+            const { buildChildEnv } = require('./scripts/gh-exec');
             const opts = {
               encoding: 'utf-8',
               timeout: 10000,
