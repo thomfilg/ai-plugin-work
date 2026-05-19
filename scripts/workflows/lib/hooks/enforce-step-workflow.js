@@ -233,6 +233,17 @@ const TRUSTED_SCRIPT_DIRS = [
   path.resolve(__dirname, '..', '..', 'check', 'scripts'), // workflows/check/scripts/
   path.resolve(__dirname, '..', '..', 'work-implement'), // workflows/work-implement/
   path.resolve(__dirname, '..', '..', 'work-brief'), // workflows/work-brief/
+  path.resolve(__dirname, '..', '..', 'work-spec'), // workflows/work-spec/
+  path.resolve(__dirname, '..', '..', 'work-tasks'), // workflows/work-tasks/
+  path.resolve(__dirname, '..', '..', 'work-pr-step'), // workflows/work-pr-step/
+  path.resolve(__dirname, '..', '..', 'work-ci'), // workflows/work-ci/
+  path.resolve(__dirname, '..', '..', 'work-completion-checker'), // workflows/work-completion-checker/
+  path.resolve(__dirname, '..', '..', 'work-code-checker'), // workflows/work-code-checker/
+  path.resolve(__dirname, '..', '..', 'work-qa-feature-tester'), // workflows/work-qa-feature-tester/
+  path.resolve(__dirname, '..', '..', 'work-pr-reviewer'), // workflows/work-pr-reviewer/
+  path.resolve(__dirname, '..', '..', 'work-task-review'), // workflows/work-task-review/
+  path.resolve(__dirname, '..', '..', 'work-reports'), // workflows/work-reports/
+  path.resolve(__dirname, '..', '..', 'work-cleanup'), // workflows/work-cleanup/
   path.resolve(__dirname, '..', '..', 'work2'), // workflows/work2/
   path.resolve(__dirname, '..', '..', 'check2'), // workflows/check2/
   path.resolve(__dirname, '..', '..', 'follow-up2'), // workflows/follow-up2/
