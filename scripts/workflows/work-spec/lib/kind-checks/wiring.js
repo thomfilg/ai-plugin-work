@@ -1,0 +1,64 @@
+/**
+ * Kind: wiring — the ECHO-4579 defense.
+ *
+ * "Wiring" tickets connect existing pieces. They should NOT introduce
+ * backend schema changes nor new sibling-owned component shells. If brief
+ * says "no backend changes", any backend file in Files to Create/Modify
+ * BLOCKS.
+ */
+
+'use strict';
+
+const {
+  readSpec,
+  readBrief,
+  filesInFilesToModify,
+  briefForbidsBackend,
+  isBackendFile,
+  detectKinds,
+} = require('./shared');
+
+function appliesTo(ctx) {
+  const kinds = detectKinds(ctx.tasksDir);
+  if (kinds.includes('wiring')) return true;
+  // Also apply when brief explicitly forbids backend AND no kind tag is
+  // present — wiring is the implicit default for "connect existing" tickets.
+  const brief = readBrief(ctx.tasksDir);
+  if (briefForbidsBackend(brief) && kinds.length === 0) return true;
+  return false;
+}
+
+function validate(ctx) {
+  const spec = readSpec(ctx.tasksDir);
+  const brief = readBrief(ctx.tasksDir);
+  const files = filesInFilesToModify(spec);
+  const errors = [];
+  const warnings = [];
+
+  const backendDrift = files.filter(isBackendFile);
+  if (briefForbidsBackend(brief)) {
+    if (backendDrift.length) {
+      errors.push(
+        `Wiring kind + brief forbids backend changes, but spec lists backend files: ${backendDrift.map((f) => `\`${f}\``).join(', ')}. This is exactly the ECHO-4579 failure mode — STOP, escalate to the sibling owner, do NOT silently extend the sibling surface.`
+      );
+    }
+  } else if (backendDrift.length) {
+    warnings.push(
+      `Wiring kind but spec lists backend files: ${backendDrift.map((f) => `\`${f}\``).join(', ')}. Confirm these were intentional and not a sibling-scope escape.`
+    );
+  }
+
+  return {
+    ok: errors.length === 0,
+    errors,
+    warnings,
+    summary: `${files.length} files, ${backendDrift.length} backend-suspect`,
+  };
+}
+
+module.exports = function register(registerKind) {
+  registerKind('wiring', { appliesTo, validate });
+};
+
+module.exports.appliesTo = appliesTo;
+module.exports.validate = validate;

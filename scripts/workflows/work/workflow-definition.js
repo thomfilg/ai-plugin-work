@@ -190,6 +190,53 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
       agents: ['brief-writer'],
       step: STEPS.brief,
     },
+    // Self-paced spec runner: same companion pattern as brief-next.js.
+    // spec-next.js spawns spec-phase-state.js internally to record/transition
+    // phase evidence. The hook mints tokens for both when the spec-writer
+    // agent invokes spec-next.js during the `spec` step.
+    'spec-next.js': {
+      agents: ['spec-writer'],
+      step: STEPS.spec,
+      companionScripts: ['spec-phase-state.js'],
+    },
+    'spec-phase-state.js': {
+      agents: ['spec-writer'],
+      step: STEPS.spec,
+    },
+    // Self-paced tasks runner: same companion pattern. tasks-next.js spawns
+    // tasks-phase-state.js internally. Allow-list includes both the skill
+    // name and the optional task-decomposer agent so future routing changes
+    // don't break the gate.
+    'tasks-next.js': {
+      agents: ['split-in-tasks', 'task-decomposer'],
+      step: STEPS.tasks,
+      companionScripts: ['tasks-phase-state.js'],
+    },
+    'tasks-phase-state.js': {
+      agents: ['split-in-tasks', 'task-decomposer'],
+      step: STEPS.tasks,
+    },
+    // Self-paced pr-step runner: gates the WORK orchestrator's `pr` step
+    // before delegating to the /work-pr skill.
+    'pr-next.js': {
+      agents: ['pr-generator', 'pr-post-generator'],
+      step: STEPS.pr,
+      companionScripts: ['pr-phase-state.js'],
+    },
+    'pr-phase-state.js': {
+      agents: ['pr-generator', 'pr-post-generator'],
+      step: STEPS.pr,
+    },
+    // Self-paced ci-step runner: phases the wait/triage/fix/rerun loop.
+    'ci-next.js': {
+      agents: ['ci-runner', 'ci-triager'],
+      step: STEPS.ci,
+      companionScripts: ['ci-phase-state.js'],
+    },
+    'ci-phase-state.js': {
+      agents: ['ci-runner', 'ci-triager'],
+      step: STEPS.ci,
+    },
   };
 
   const workflow = {
