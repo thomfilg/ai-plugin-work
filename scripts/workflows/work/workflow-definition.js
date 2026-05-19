@@ -284,6 +284,31 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
       agents: ['pr-reviewer'],
       step: STEPS.check,
     },
+    // Self-paced task-review runner: phases the per-task review loop
+    // during the `task_review` step (between commit and check). Allow-list
+    // includes code-checker as a fallback for repos without a dedicated
+    // task-reviewer agent.
+    'task-review-next.js': {
+      agents: ['task-reviewer', 'code-checker'],
+      step: STEPS.task_review,
+      companionScripts: ['task-review-phase-state.js'],
+    },
+    'task-review-phase-state.js': {
+      agents: ['task-reviewer', 'code-checker'],
+      step: STEPS.task_review,
+    },
+    // Self-paced reports runner: phases the cross-step summary loop
+    // during the second-to-last `reports` step (aggregates artifacts from
+    // brief/spec/tasks/qa/code-review/completion + CI history).
+    'reports-next.js': {
+      agents: ['reports-writer'],
+      step: STEPS.reports,
+      companionScripts: ['reports-phase-state.js'],
+    },
+    'reports-phase-state.js': {
+      agents: ['reports-writer'],
+      step: STEPS.reports,
+    },
   };
 
   const workflow = {
