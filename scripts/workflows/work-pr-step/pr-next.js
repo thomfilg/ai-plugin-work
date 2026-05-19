@@ -143,7 +143,7 @@ function getCurrentPhase(ticket) {
 
 function ensureInit(ticket) {
   const r = callPhaseCli(['init', ticket]);
-  if (r.code !== 0) die(`Could not init tasks-phase state:\n${r.out}`);
+  if (r.code !== 0) die(`Could not init pr-phase state:\n${r.out}`);
 }
 
 function recordPhase(ticket, phase, summary) {
