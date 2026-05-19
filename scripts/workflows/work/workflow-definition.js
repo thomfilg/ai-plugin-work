@@ -309,6 +309,19 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
       agents: ['reports-writer'],
       step: STEPS.reports,
     },
+    // Self-paced cleanup runner: phases the per-ticket cleanup loop
+    // (branch delete, scoped tmux kill, state archive). Defensive
+    // pr_merged_check duplicates ci-step's wait_merge — cleanup never
+    // runs against a non-merged PR.
+    'cleanup-next.js': {
+      agents: ['cleanup-runner'],
+      step: STEPS.cleanup,
+      companionScripts: ['cleanup-phase-state.js'],
+    },
+    'cleanup-phase-state.js': {
+      agents: ['cleanup-runner'],
+      step: STEPS.cleanup,
+    },
   };
 
   const workflow = {

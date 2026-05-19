@@ -37,14 +37,14 @@ function validate(ctx) {
 function instructions(ctx) {
   if (!ctx.memory)
     return [
-      `# ci-next — Phase 6 of 7: MEMORIZE`,
+      `# ci-next — Phase 7 of 8: MEMORIZE`,
       `Ticket: ${ctx.ticket}`,
       '',
       'No memory plugin. Auto-advancing.',
       '',
     ].join('\n');
   return [
-    `# ci-next — Phase 6 of 7: MEMORIZE (${ctx.memory.name})`,
+    `# ci-next — Phase 7 of 8: MEMORIZE (${ctx.memory.name})`,
     `Ticket: ${ctx.ticket}`,
     '',
     `Call \`${ctx.memory.rememberTool}\` with the failure classifications from ci-triage.json (especially \`flake\` and \`pre-existing\` entries — these are the most valuable for future tickets).`,

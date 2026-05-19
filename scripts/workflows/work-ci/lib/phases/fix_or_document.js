@@ -54,7 +54,7 @@ function validate(ctx) {
 
 function instructions(ctx) {
   return [
-    `# ci-next — Phase 4 of 7: FIX OR DOCUMENT`,
+    `# ci-next — Phase 4 of 8: FIX OR DOCUMENT`,
     `Ticket: ${ctx.ticket}`,
     '',
     '### What you do',

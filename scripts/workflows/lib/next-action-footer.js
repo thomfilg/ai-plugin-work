@@ -82,6 +82,8 @@ function dirFor(scriptName) {
       return 'work-task-review';
     case 'reports-next.js':
       return 'work-reports';
+    case 'cleanup-next.js':
+      return 'work-cleanup';
     default:
       return '';
   }

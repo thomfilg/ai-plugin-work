@@ -13,16 +13,25 @@ const {
 } = require('../ci-phase-registry');
 const { getPhase, hasPhase } = require('../lib/phase-registry');
 
-test('CI_PHASE_ORDER is 7 phases in declared order', () => {
+test('CI_PHASE_ORDER is 8 phases in declared order', () => {
   assert.deepEqual(CI_PHASE_ORDER, [
     'inputs',
     'wait',
     'triage',
     'fix_or_document',
     'rerun_check',
+    'wait_merge',
     'memorize',
     'done',
   ]);
+});
+
+test('rerun_check transitions to wait_merge (not memorize)', () => {
+  assert.deepEqual(ciNextPhases('rerun_check'), ['wait_merge']);
+});
+
+test('wait_merge transitions to memorize', () => {
+  assert.deepEqual(ciNextPhases('wait_merge'), ['memorize']);
 });
 
 test('every non-terminal phase transitions to next', () => {
