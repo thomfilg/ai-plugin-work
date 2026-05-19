@@ -78,6 +78,10 @@ function dirFor(scriptName) {
       return 'work-qa-feature-tester';
     case 'pr-review-next.js':
       return 'work-pr-reviewer';
+    case 'task-review-next.js':
+      return 'work-task-review';
+    case 'reports-next.js':
+      return 'work-reports';
     default:
       return '';
   }
