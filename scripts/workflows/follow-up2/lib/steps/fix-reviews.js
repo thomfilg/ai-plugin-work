@@ -220,6 +220,8 @@ module.exports = function registerFixReviews(register) {
           '---',
           '',
           `When done, call: \`${nextCmd}\``,
+          '',
+          '**Do NOT pipe the output** (no `| head`, `| tail`, `| grep`, `> file`, `2>&1 |`). Piping truncates the JSON delegate block and hides next-step instructions. Run the command raw.',
         ].join('\n'),
         note: 'Pass the prompt directly to the agent.',
       },
