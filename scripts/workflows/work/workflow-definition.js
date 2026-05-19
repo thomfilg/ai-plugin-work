@@ -216,6 +216,27 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
       agents: ['split-in-tasks', 'task-decomposer'],
       step: STEPS.tasks,
     },
+    // Self-paced pr-step runner: gates the WORK orchestrator's `pr` step
+    // before delegating to the /work-pr skill.
+    'pr-next.js': {
+      agents: ['pr-generator', 'pr-post-generator'],
+      step: STEPS.pr,
+      companionScripts: ['pr-phase-state.js'],
+    },
+    'pr-phase-state.js': {
+      agents: ['pr-generator', 'pr-post-generator'],
+      step: STEPS.pr,
+    },
+    // Self-paced ci-step runner: phases the wait/triage/fix/rerun loop.
+    'ci-next.js': {
+      agents: ['ci-runner', 'ci-triager'],
+      step: STEPS.ci,
+      companionScripts: ['ci-phase-state.js'],
+    },
+    'ci-phase-state.js': {
+      agents: ['ci-runner', 'ci-triager'],
+      step: STEPS.ci,
+    },
   };
 
   const workflow = {
