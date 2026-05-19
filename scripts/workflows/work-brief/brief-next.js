@@ -278,6 +278,18 @@ function main(argv) {
 
   process.stdout.write(header + '\n' + body);
 
+  const { renderNextActionFooter } = require('../lib/next-action-footer');
+  process.stdout.write(
+    renderNextActionFooter({
+      scriptName: 'brief-next.js',
+      ticket,
+      phase,
+      terminalPhase: 'done',
+      advanced,
+      blockReason,
+    })
+  );
+
   const exitCode = blockReason && !advanced ? 2 : 0;
   logNextScriptEvent('brief-next', {
     event: 'completed',

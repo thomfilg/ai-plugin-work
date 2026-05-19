@@ -237,6 +237,29 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
       agents: ['ci-runner', 'ci-triager'],
       step: STEPS.ci,
     },
+    // Self-paced completion-checker runner: phases the requirement
+    // verification loop during the `check` step. Both runner and
+    // its inner phase-state writer are agent-gated to completion-checker.
+    'completion-next.js': {
+      agents: ['completion-checker'],
+      step: STEPS.check,
+      companionScripts: ['completion-phase-state.js'],
+    },
+    'completion-phase-state.js': {
+      agents: ['completion-checker'],
+      step: STEPS.check,
+    },
+    // Self-paced code-checker runner: phases the code-quality audit
+    // during the `check` step.
+    'code-next.js': {
+      agents: ['code-checker'],
+      step: STEPS.check,
+      companionScripts: ['code-phase-state.js'],
+    },
+    'code-phase-state.js': {
+      agents: ['code-checker'],
+      step: STEPS.check,
+    },
   };
 
   const workflow = {

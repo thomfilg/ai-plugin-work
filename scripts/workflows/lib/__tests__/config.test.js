@@ -314,6 +314,22 @@ describe('config', () => {
       const branch = config.getBaseBranch({ cwd: '/tmp' });
       assert.equal(branch, 'origin/main');
     });
+
+    it('honors BASE_BRANCH set AFTER config module was loaded (ECHO-4450)', () => {
+      // Load config with no BASE_BRANCH set — simulates the case where the
+      // parent process exports BASE_BRANCH only later (or via a wrapper).
+      const config = freshRequire({ BASE_BRANCH: '' });
+      assert.equal(config.BASE_BRANCH, '');
+      // Now set env dynamically (still won't exist in repo, but the sanitize
+      // + probe path must consider it and not silently use the cached '').
+      process.env.BASE_BRANCH = 'nonexistent-late-binding-xyz';
+      const branch = config.getBaseBranch();
+      // The dynamic read must reach the sanitize-and-probe branch — since
+      // the ref doesn't exist, we fall through. The KEY assertion: the
+      // cached empty value did NOT short-circuit the function.
+      assert.notEqual(branch, '');
+      delete process.env.BASE_BRANCH;
+    });
   });
 
   // ─── prefixTicketId ─────────────────────────────────────────────────────

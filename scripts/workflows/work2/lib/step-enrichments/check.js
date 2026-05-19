@@ -17,6 +17,17 @@ const { parseTasks } = require(path.join('..', '..', '..', 'work', 'task-parser'
 const { compareDiffToScope, summarizeScopeDiff } = require('../../../lib/scope-diff');
 const config = require('../../../lib/config');
 
+/**
+ * Build ordered diff-base candidates from a base branch value. Handles the
+ * case where the input already starts with `origin/` (ECHO-4450 reproducer
+ * was `origin/origin/main...HEAD` from double-prefixing). Deduped + ordered:
+ * remote ref first, bare second.
+ */
+function buildBaseCandidates(base) {
+  const bare = String(base || 'main').replace(/^origin\//, '');
+  return [...new Set([`origin/${bare}`, bare])];
+}
+
 function gitDiffFiles(workDir) {
   // Resolve the repo's configured base branch (honors BASE_BRANCH env / git
   // symbolic-ref / probes for main/master/dev). Falls back to 'main' only if
@@ -28,7 +39,7 @@ function gitDiffFiles(workDir) {
   } catch {
     /* fall through with default */
   }
-  const candidates = [`origin/${base}`, base];
+  const candidates = buildBaseCandidates(base);
   for (const ref of candidates) {
     try {
       const out = execSync(`git diff --name-only ${ref}...HEAD`, {
@@ -64,7 +75,7 @@ function buildScopeDiffBlock(tasksDir, workDir) {
   return summarizeScopeDiff(result);
 }
 
-module.exports = function registerCheck(register) {
+function registerCheck(register) {
   register('check', (entry, ctx) => {
     entry.agentType = 'skill';
     entry.agentPrompt = `/work-workflow:check2 ${ctx.ticket || 'TICKET'}`;
@@ -76,4 +87,7 @@ module.exports = function registerCheck(register) {
       entry.agentPrompt = `${entry.agentPrompt}\n\n${block}\n\nGate E: surface any sibling-owned or unaccounted files in the PR body. Sibling-owned changes must be reverted or escalated to the owning ticket — do NOT ship them in this PR.`;
     }
   });
-};
+}
+
+module.exports = registerCheck;
+module.exports.buildBaseCandidates = buildBaseCandidates;

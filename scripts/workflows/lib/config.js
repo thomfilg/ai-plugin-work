@@ -229,9 +229,14 @@ config.getBaseBranch = (options = {}) => {
     }
   };
 
-  // 1. Explicit repo config (highest priority) — sanitize to prevent shell injection
-  if (config.BASE_BRANCH) {
-    const sanitized = config.BASE_BRANCH.replace(/^refs\/remotes\//, '')
+  // 1. Explicit repo config (highest priority) — sanitize to prevent shell injection.
+  // Read env dynamically here, not via the cached config.BASE_BRANCH snapshot:
+  // a parent process may export BASE_BRANCH after this module is first loaded,
+  // and ECHO-4450 hit that case (BASE_BRANCH=dev was set but ignored).
+  const explicitBase = process.env.BASE_BRANCH || config.BASE_BRANCH;
+  if (explicitBase) {
+    const sanitized = explicitBase
+      .replace(/^refs\/remotes\//, '')
       .replace(/^origin\//, '')
       .replace(/[^a-zA-Z0-9._\-/]/g, '')
       .replace(/\.{2,}/g, ''); // reject git revspec operators (.., ...)

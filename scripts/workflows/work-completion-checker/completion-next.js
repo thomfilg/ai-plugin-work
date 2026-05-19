@@ -1,23 +1,12 @@
 #!/usr/bin/env node
 
 /**
- * spec-next.js
+ * completion-next.js
  *
- * Self-paced runner for the `spec` step. Thin orchestrator — every phase
- * (inputs / reuse_audit / surface_audit / draft / validate / memorize /
- * kind_checks / done) lives in its own module under `lib/phases/`,
- * registered via `lib/phase-registry.js`. Mirrors `work-brief/brief-next.js`.
- *
- * Per invocation:
- *   1. Resolve ticket context (tasks dir, manifest, linked siblings, memory,
- *      worktree root).
- *   2. Look up current phase from `spec-phase.json` via `spec-phase-state.js`.
- *   3. Call the phase handler's `validate(ctx)`.
- *   4. If ok and the phase has a successor: record evidence + transition.
- *      If errors: emit block prefix. Otherwise: print waiting instructions.
- *   5. Print the header + instructions.
- *
- * Exit codes: 0 = progressed or waiting, 2 = blocked.
+ * Self-paced runner for the `check` step's completion-checker agent.
+ * Mirrors spec-next.js / pr-next.js. Phases:
+ *   inputs → requirements_extract → diff_scope → coverage_check →
+ *   kind_checks → report → memorize → done
  */
 
 'use strict';
@@ -26,9 +15,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
-const SPEC_PHASE_CLI = path.resolve(__dirname, 'spec-phase-state.js');
+const COMPLETION_PHASE_CLI = path.resolve(__dirname, 'completion-phase-state.js');
 
-const { SPEC_INITIAL_PHASE } = require('./spec-phase-registry');
+const { COMPLETION_INITIAL_PHASE } = require('./completion-phase-registry');
 const { getPhase } = require('./lib/phase-registry');
 const { loadMemoryPluginCandidates } = require('./lib/memory-plugin-config');
 
@@ -45,8 +34,6 @@ try {
 } catch {
   config = null;
 }
-
-// ─── Path + env helpers ────────────────────────────────────────────────────
 
 function resolveTasksBase() {
   return (
@@ -65,11 +52,9 @@ function resolveWorktreeRoot() {
 }
 
 function die(msg) {
-  process.stderr.write(`spec-next: ${msg}\n`);
+  process.stderr.write(`completion-next: ${msg}\n`);
   process.exit(2);
 }
-
-// ─── Token snapshot/remint (mirrors brief-next.js) ─────────────────────────
 
 let _companionTokenSnapshot = null;
 
@@ -83,7 +68,7 @@ function snapshotCompanionToken(scriptBasename, ticketId) {
     if (!file) return;
     _companionTokenSnapshot = { path: file, data: JSON.parse(fs.readFileSync(file, 'utf8')) };
   } catch {
-    /* fail-open — phase recording surfaces the missing token */
+    /* fail-open */
   }
 }
 
@@ -98,8 +83,6 @@ function mintCompanionToken() {
     return false;
   }
 }
-
-// ─── Memory plugin detection ───────────────────────────────────────────────
 
 function detectMemoryPlugin(env = process.env) {
   const home = require('node:os').homedir();
@@ -119,8 +102,6 @@ function detectMemoryPlugin(env = process.env) {
   }
   return null;
 }
-
-// ─── related-tickets.json reading ──────────────────────────────────────────
 
 function readRelatedManifest(tasksDir) {
   const p = path.join(tasksDir, 'related-tickets.json');
@@ -142,11 +123,9 @@ function listLinkedIds(manifest) {
   return [...ids];
 }
 
-// ─── Phase state CLI wrappers ──────────────────────────────────────────────
-
 function callPhaseCli(args) {
   mintCompanionToken();
-  const r = spawnSync(process.execPath, [SPEC_PHASE_CLI, ...args], {
+  const r = spawnSync(process.execPath, [COMPLETION_PHASE_CLI, ...args], {
     encoding: 'utf8',
     stdio: 'pipe',
   });
@@ -165,7 +144,7 @@ function getCurrentPhase(ticket) {
 
 function ensureInit(ticket) {
   const r = callPhaseCli(['init', ticket]);
-  if (r.code !== 0) die(`Could not init spec-phase state:\n${r.out}`);
+  if (r.code !== 0) die(`Could not init completion-phase state:\n${r.out}`);
 }
 
 function recordPhase(ticket, phase, summary) {
@@ -176,24 +155,24 @@ function transitionPhase(ticket, target) {
   return callPhaseCli(['transition', ticket, target]);
 }
 
-// ─── Orchestrator ──────────────────────────────────────────────────────────
-
 function main(argv) {
   const startedAt = Date.now();
   const args = argv.slice(2);
   const ticket = args[0];
   if (!ticket || /^-/.test(ticket)) {
-    process.stderr.write('usage: spec-next.js <TICKET>\n  e.g. node spec-next.js ECHO-4579\n');
+    process.stderr.write(
+      'usage: completion-next.js <TICKET>\n  e.g. node completion-next.js ECHO-4579\n'
+    );
     process.exit(2);
   }
-  logNextScriptEvent('spec-next', {
+  logNextScriptEvent('completion-next', {
     event: 'invoked',
     ticket,
     cwd: process.cwd(),
     agent: process.env.CLAUDE_CURRENT_AGENT || null,
   });
 
-  snapshotCompanionToken('spec-phase-state.js', ticket);
+  snapshotCompanionToken('completion-phase-state.js', ticket);
 
   const tasksBase = resolveTasksBase();
   const tasksDir = path.join(tasksBase, ticket);
@@ -205,7 +184,7 @@ function main(argv) {
   const worktreeRoot = resolveWorktreeRoot() || path.dirname(tasksBase);
 
   ensureInit(ticket);
-  let phase = getCurrentPhase(ticket) || SPEC_INITIAL_PHASE;
+  let phase = getCurrentPhase(ticket) || COMPLETION_INITIAL_PHASE;
 
   const ctx = { ticket, tasksDir, tasksBase, manifest, linkedIds, memory, worktreeRoot };
 
@@ -233,7 +212,7 @@ function main(argv) {
   }
 
   const header = [
-    `spec-next: ${ticket}`,
+    `completion-next: ${ticket}`,
     `  tasks dir: ${tasksDir}`,
     `  current phase (after this run): ${phase}`,
     `  memory plugin: ${memory ? memory.name : '(none detected)'}`,
@@ -264,7 +243,7 @@ function main(argv) {
   const { renderNextActionFooter } = require('../lib/next-action-footer');
   process.stdout.write(
     renderNextActionFooter({
-      scriptName: 'spec-next.js',
+      scriptName: 'completion-next.js',
       ticket,
       phase,
       terminalPhase: 'done',
@@ -274,7 +253,7 @@ function main(argv) {
   );
 
   const exitCode = blockReason && !advanced ? 2 : 0;
-  logNextScriptEvent('spec-next', {
+  logNextScriptEvent('completion-next', {
     event: 'completed',
     ticket,
     phase,
