@@ -260,6 +260,30 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
       agents: ['code-checker'],
       step: STEPS.check,
     },
+    // Self-paced qa-feature-tester runner: phases the manual QA loop
+    // (env setup → smoke → feature → per-kind checks → screenshot → report).
+    // Allow-list includes both qa-feature-tester and qa-api-tester so the
+    // same state-state writer can serve either testing variant.
+    'qa-next.js': {
+      agents: ['qa-feature-tester', 'qa-api-tester'],
+      step: STEPS.check,
+      companionScripts: ['qa-phase-state.js'],
+    },
+    'qa-phase-state.js': {
+      agents: ['qa-feature-tester', 'qa-api-tester'],
+      step: STEPS.check,
+    },
+    // Self-paced pr-reviewer runner: phases the PR-review loop
+    // (pr context → diff audit → standards → kind-specific → post → memorize).
+    'pr-review-next.js': {
+      agents: ['pr-reviewer'],
+      step: STEPS.check,
+      companionScripts: ['pr-review-phase-state.js'],
+    },
+    'pr-review-phase-state.js': {
+      agents: ['pr-reviewer'],
+      step: STEPS.check,
+    },
   };
 
   const workflow = {

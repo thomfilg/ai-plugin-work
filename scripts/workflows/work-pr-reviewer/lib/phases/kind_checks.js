@@ -1,0 +1,127 @@
+/**
+ * Phase: kind_checks — fan-out per-task-kind PR-review validators.
+ * Mirrors work-spec/lib/phases/kind_checks.js, records into
+ * pr-review.check.md.
+ */
+
+'use strict';
+
+const fs = require('node:fs');
+const path = require('node:path');
+
+const { PR_REVIEW_PHASES } = require('../../pr-review-phase-registry');
+const { getKindCheckRegistry } = require('../kind-checks/kind-registry');
+
+const KIND_HEADER = '## PR-review kind verification';
+
+function readFile(p) {
+  try {
+    return fs.readFileSync(p, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+function renderKindBlock(results) {
+  const lines = [KIND_HEADER, ''];
+  for (const r of results) {
+    const status = r.ok ? '✓ ok' : '✗ blocking';
+    lines.push(`- **${r.kind}** — ${status}: ${r.summary || ''}`);
+    for (const w of r.warnings || []) lines.push(`  - warning: ${w}`);
+    for (const e of r.errors || []) lines.push(`  - error: ${e}`);
+  }
+  lines.push('');
+  return lines.join('\n');
+}
+
+function upsertKindSection(text, block) {
+  if (!text) return block;
+  const idx = text.indexOf(KIND_HEADER);
+  if (idx === -1) return `${text.replace(/\s+$/, '')}\n\n${block}`;
+  const after = text.slice(idx + KIND_HEADER.length);
+  const nextHdr = after.match(/^##\s/m);
+  const end = nextHdr ? idx + KIND_HEADER.length + nextHdr.index : text.length;
+  return text.slice(0, idx) + block + text.slice(end);
+}
+
+function writeKindSection(tasksDir, results) {
+  const p = path.join(tasksDir, 'pr-review.check.md');
+  const text = readFile(p);
+  const next = upsertKindSection(text, renderKindBlock(results));
+  if (next !== text) {
+    try {
+      fs.writeFileSync(p, next);
+    } catch {
+      /* hook-gated */
+    }
+  }
+}
+
+function validate(ctx) {
+  const registry = getKindCheckRegistry();
+  const matched = [];
+  for (const [kind, h] of Object.entries(registry)) {
+    let applies = false;
+    try {
+      applies = Boolean(h.appliesTo(ctx));
+    } catch {
+      applies = false;
+    }
+    if (applies) matched.push({ kind, h });
+  }
+  const results = [];
+  for (const { kind, h } of matched) {
+    let r;
+    try {
+      r = h.validate(ctx);
+    } catch (e) {
+      r = { ok: false, errors: [`kind-check "${kind}" threw: ${e.message}`] };
+    }
+    results.push({ kind, ...r });
+  }
+  if (results.length) writeKindSection(ctx.tasksDir, results);
+  const allErrors = results.flatMap((r) => (r.ok ? [] : r.errors || []));
+  if (allErrors.length) {
+    return {
+      ok: false,
+      errors: allErrors,
+      summary: `${results.filter((r) => r.ok).length}/${results.length} kinds passing`,
+    };
+  }
+  return {
+    ok: true,
+    summary: `${results.length} kind check(s) passed (${results.map((r) => r.kind).join(', ') || 'none applied'})`,
+  };
+}
+
+function instructions(ctx) {
+  return [
+    '# pr-review-next — Phase 5 of 8: KIND CHECKS',
+    `Ticket: ${ctx.ticket}`,
+    '',
+    '### Per task kind',
+    '- **frontend**: breaking-change risk, missing companion test, style drift.',
+    '- **backend**: TS safety, missing integration test, migration without rollback, missing auth.',
+    '- **wiring**: ECHO-4579 backend drift; PR-size sanity.',
+    '- **e2e**: `.only`, missing `expect(`, hardcoded `waitForTimeout`.',
+    '- **devops**: secret-leak suspects, unpinned action refs, app-source drift.',
+    '- **fullstack**: frontend + backend.',
+    '',
+    'Recorded under `## PR-review kind verification` in pr-review.check.md.',
+    '',
+  ].join('\n');
+}
+
+module.exports = function register(registerPhase) {
+  registerPhase(PR_REVIEW_PHASES.kind_checks, {
+    next: PR_REVIEW_PHASES.review_post,
+    validate,
+    instructions,
+  });
+};
+
+module.exports.validate = validate;
+module.exports.instructions = instructions;
+module.exports.renderKindBlock = renderKindBlock;
+module.exports.upsertKindSection = upsertKindSection;
+module.exports.KIND_HEADER = KIND_HEADER;
