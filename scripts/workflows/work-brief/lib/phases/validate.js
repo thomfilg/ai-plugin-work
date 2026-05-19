@@ -40,7 +40,11 @@ function validateArtifacts(tasksDir, linkedIds) {
   if (!overlap) errors.push(`Missing ${overlapPath}.`);
   if (!brief || !overlap) return errors;
 
-  const oos = sliceSection(brief, /^##\s+Out of scope\s*\(sibling-owned\)\b/im) || '';
+  // Use lookahead instead of \b — `)` is non-word and the following char
+  // (space/EOL) is also non-word, so \b never matches in JS regex. ECHO-4578
+  // hit this: the section sliced to empty even when every sibling ID was
+  // present, blocking validate indefinitely.
+  const oos = sliceSection(brief, /^##\s+Out of scope\s*\(sibling-owned\)(?=\s|$)/im) || '';
   for (const id of linkedIds) {
     const headerRe = new RegExp(`^##\\s+${id}\\b`, 'm');
     const m = overlap.match(headerRe);
