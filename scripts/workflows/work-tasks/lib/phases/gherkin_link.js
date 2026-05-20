@@ -49,7 +49,7 @@ function validateArtifacts(tasksDir) {
   // Use the canonical validator if available.
   if (typeof validateConsistency === 'function') {
     try {
-      const result = validateConsistency(gherkin, tasks);
+      const result = validateConsistency({ gherkinText: gherkin, tasksMdText: tasks });
       if (result && Array.isArray(result.errors) && result.errors.length) {
         for (const e of result.errors) errors.push(`gherkin-task-refs: ${e}`);
         return errors;

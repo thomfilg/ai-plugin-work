@@ -54,10 +54,20 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
     // / ci-triager) is dispatched to wait + verify. Falling through is the
     // safe failure mode: it gives the agent a chance to surface the issue
     // rather than silently completing the step.
+    //
+    // Merge requirement: CI passing alone is NOT enough — the PR must also
+    // be MERGED before we declare the `ci` step complete. The agent's job
+    // ends at "code shipped to base branch," not "code ready to ship."
+    // Advancing on an unmerged PR caused the workflow to report `complete`
+    // while PR #1869 was still open (see triage echo-4448-issue-1). Without
+    // the merge requirement, the workflow declares success on work that may
+    // never land (PR closed without merge, conflicts blocking merge, review
+    // not yet granted). Both conditions are independent and BOTH are required:
+    //   - `ci.status === 'passing'` — checks went green (independent verify)
+    //   - `prInfo.state === 'MERGED'` — code actually shipped
     const ci = checkCI(prInfo.number);
-    if (ci && ci.status === 'passing') {
-      const reason = prInfo.state === 'MERGED' ? 'CI passing (PR merged)' : 'CI passing';
-      return advanceToCleanup(safeName, deps, reason);
+    if (ci && ci.status === 'passing' && prInfo.state === 'MERGED') {
+      return advanceToCleanup(safeName, deps, 'CI passing and PR merged');
     }
   } catch {
     // Can't check PR/CI state — fall through to normal transition
