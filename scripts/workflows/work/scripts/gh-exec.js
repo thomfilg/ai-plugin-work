@@ -37,7 +37,7 @@ function ghExec(ghArgs, { json = true, allowNonZero = false } = {}) {
     const result = execFileSync('gh', args, {
       encoding: 'utf8',
       stdio: ['pipe', 'pipe', 'pipe'],
-      timeout: 30000,
+      timeout: 60000,
       env: buildChildEnv(),
     });
     return json ? JSON.parse(result) : result.trim();
