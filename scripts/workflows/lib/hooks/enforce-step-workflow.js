@@ -199,6 +199,10 @@ const EXEMPT_SCRIPTS = new Set([
   'follow-up-next.js',
   'follow-up-pr-comments.js',
   'work-next.js',
+  // Orchestrator-side health monitor: read-only on state files, writes
+  // throttle markers to /tmp only. Mentions .work-state.json in source
+  // (for the path argument) which trips Vector 3 — exempt here.
+  'workflow-monitor.js',
 ]);
 
 // Sub-command filtering for state scripts (GH-89).

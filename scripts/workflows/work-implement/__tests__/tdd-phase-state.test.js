@@ -26,6 +26,16 @@ function createExitScript(dir, exitCode) {
   return scriptPath;
 }
 
+// Create a script that prints `output` to stdout and exits 0. Used to
+// simulate test runners that emit "N passed / N skipped" summaries.
+function createOutputScript(dir, name, output) {
+  const scriptPath = path.join(dir, `${name}.sh`);
+  // Escape single quotes by closing/concatenating
+  const safe = output.replace(/'/g, "'\\''");
+  fs.writeFileSync(scriptPath, `#!/bin/sh\nprintf '%s\\n' '${safe}'\nexit 0\n`, { mode: 0o755 });
+  return scriptPath;
+}
+
 function createTempGitRepo() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdd-git-'));
   execSync('git init', { cwd: dir, stdio: 'pipe' });
@@ -181,6 +191,105 @@ describe('tdd-phase-state CLI', () => {
       const updatedState = readState(homeDir, 'TEST-GRN');
       assert.strictEqual(updatedState.cycles[0].green.testExitCode, 0);
     });
+
+    // RC-B regression coverage: GREEN must reject all-skipped runs even when
+    // the runner exits 0. Without this guard, an agent could ship a spec
+    // where every test is .skip and the workflow would advance to `check`
+    // with zero coverage delivered (ECHO-4451 hit this).
+    it('rejects all-skipped run as false-positive GREEN', () => {
+      runCli('init TEST-GRN-SKIP', homeDir);
+      const statePath = path.join(homeDir, 'worktrees', 'tasks', 'TEST-GRN-SKIP', 'tdd-phase.json');
+      const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+      state.currentPhase = 'green';
+      state.cycles = [
+        {
+          cycle: 1,
+          red: {
+            testFiles: ['foo.test.ts'],
+            testCommand: 'echo test',
+            testExitCode: 1,
+            timestamp: new Date().toISOString(),
+          },
+        },
+      ];
+      fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
+
+      const allSkippedScript = createOutputScript(
+        scriptDir,
+        'all-skipped',
+        'Tests: 0 passed, 4 skipped, 4 total'
+      );
+      const { exitCode, stderr } = runCli(
+        `record-green TEST-GRN-SKIP --cmd "${allSkippedScript}"`,
+        homeDir
+      );
+      assert.notStrictEqual(exitCode, 0, 'should have rejected');
+      assert.match(stderr, /All tests are skipped/);
+      assert.match(stderr, /4 skipped/);
+
+      // State must NOT have been mutated — green not recorded.
+      const after = readState(homeDir, 'TEST-GRN-SKIP');
+      assert.ok(!after.cycles[0].green, 'green evidence should not be recorded');
+    });
+
+    it('accepts mixed passed+skipped run (some real coverage)', () => {
+      runCli('init TEST-GRN-MIX', homeDir);
+      const statePath = path.join(homeDir, 'worktrees', 'tasks', 'TEST-GRN-MIX', 'tdd-phase.json');
+      const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+      state.currentPhase = 'green';
+      state.cycles = [
+        {
+          cycle: 1,
+          red: {
+            testFiles: ['foo.test.ts'],
+            testCommand: 'echo test',
+            testExitCode: 1,
+            timestamp: new Date().toISOString(),
+          },
+        },
+      ];
+      fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
+
+      const mixedScript = createOutputScript(
+        scriptDir,
+        'mixed',
+        'Tests: 3 passed, 2 skipped, 5 total'
+      );
+      const { exitCode } = runCli(`record-green TEST-GRN-MIX --cmd "${mixedScript}"`, homeDir);
+      assert.strictEqual(exitCode, 0);
+      const after = readState(homeDir, 'TEST-GRN-MIX');
+      assert.strictEqual(after.cycles[0].green.testExitCode, 0);
+    });
+
+    it('accepts silent runner with no parseable summary', () => {
+      runCli('init TEST-GRN-SILENT', homeDir);
+      const statePath = path.join(
+        homeDir,
+        'worktrees',
+        'tasks',
+        'TEST-GRN-SILENT',
+        'tdd-phase.json'
+      );
+      const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+      state.currentPhase = 'green';
+      state.cycles = [
+        {
+          cycle: 1,
+          red: {
+            testFiles: ['foo.test.ts'],
+            testCommand: 'echo test',
+            testExitCode: 1,
+            timestamp: new Date().toISOString(),
+          },
+        },
+      ];
+      fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
+
+      // Silent runner: exit 0, no summary output → allow (lenient on format).
+      const silentScript = createExitScript(scriptDir, 0);
+      const { exitCode } = runCli(`record-green TEST-GRN-SILENT --cmd "${silentScript}"`, homeDir);
+      assert.strictEqual(exitCode, 0);
+    });
   });
 
   describe('record-refactor', () => {
@@ -214,6 +323,47 @@ describe('tdd-phase-state CLI', () => {
 
       const updatedState = readState(homeDir, 'TEST-REF');
       assert.strictEqual(updatedState.cycles[0].refactor.testExitCode, 0);
+    });
+
+    // RC-B regression coverage: REFACTOR has the same all-skipped loophole
+    // as GREEN. A refactor that disabled every test would silently advance.
+    it('rejects all-skipped run as false-positive REFACTOR', () => {
+      runCli('init TEST-REF-SKIP', homeDir);
+      const statePath = path.join(homeDir, 'worktrees', 'tasks', 'TEST-REF-SKIP', 'tdd-phase.json');
+      const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+      state.currentPhase = 'refactor';
+      state.cycles = [
+        {
+          cycle: 1,
+          red: {
+            testFiles: ['foo.test.ts'],
+            testCommand: 'echo test',
+            testExitCode: 1,
+            timestamp: new Date().toISOString(),
+          },
+          green: {
+            testCommand: 'echo test',
+            testExitCode: 0,
+            timestamp: new Date().toISOString(),
+          },
+        },
+      ];
+      fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
+
+      const allSkippedScript = createOutputScript(
+        scriptDir,
+        'all-skipped-ref',
+        'Tests: 0 passed, 6 skipped, 6 total'
+      );
+      const { exitCode, stderr } = runCli(
+        `record-refactor TEST-REF-SKIP --cmd "${allSkippedScript}"`,
+        homeDir
+      );
+      assert.notStrictEqual(exitCode, 0);
+      assert.match(stderr, /All tests are skipped/);
+
+      const after = readState(homeDir, 'TEST-REF-SKIP');
+      assert.ok(!after.cycles[0].refactor, 'refactor evidence should not be recorded');
     });
   });
 

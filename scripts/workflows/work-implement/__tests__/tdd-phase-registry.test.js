@@ -49,8 +49,20 @@ describe('tdd-phase-registry', () => {
       assert.strictEqual(tddCanTransition('red', 'refactor'), false);
     });
 
-    it('green -> red is invalid', () => {
-      assert.strictEqual(tddCanTransition('green', 'red'), false);
+    // RC-A defense: GREEN→RED is the legitimate path for test-correction.
+    // Agents who discover their test assertions don't match shipped reality
+    // (e.g., ECHO-4457: spec asserted testids missing from shipped sibling
+    // components) need a way back to RED without orchestrator rewind.
+    it('green -> red is valid (test-correction back-edge)', () => {
+      assert.strictEqual(tddCanTransition('green', 'red'), true);
+    });
+
+    it('red -> red is invalid (no self-loop)', () => {
+      assert.strictEqual(tddCanTransition('red', 'red'), false);
+    });
+
+    it('refactor -> green is invalid', () => {
+      assert.strictEqual(tddCanTransition('refactor', 'green'), false);
     });
   });
 

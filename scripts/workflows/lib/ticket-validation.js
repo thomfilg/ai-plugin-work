@@ -194,6 +194,53 @@ function resolveTasksBaseOrNull() {
   }
 }
 
+/**
+ * Resolve TASKS_BASE with a default fallback when unset.
+ *
+ * Preserves the legacy behavior used across per-step phase-state modules
+ * (tdd-phase-state, ci-phase-state, spec-phase-state, etc.) that always
+ * returned a usable path even outside a configured workspace — historically
+ * `~/worktrees/tasks`. Centralized here so all callers share one source of
+ * truth instead of redefining the same function in ~30 files.
+ *
+ * @param {string} [fallback] - Path to use when TASKS_BASE is unset.
+ *   Defaults to `<HOME>/worktrees/tasks`.
+ * @returns {string} Absolute path
+ */
+function resolveTasksBaseWithFallback(fallback) {
+  if (process.env.TASKS_BASE) return path.resolve(process.env.TASKS_BASE);
+  try {
+    const config = require('./config');
+    if (config && config.TASKS_BASE) return path.resolve(config.TASKS_BASE);
+  } catch (err) {
+    if (err && err.code !== 'MODULE_NOT_FOUND') throw err;
+  }
+  if (fallback) return path.resolve(fallback);
+  return path.join(require('os').homedir(), 'worktrees', 'tasks');
+}
+
+/**
+ * Resolve the current git worktree root (output of `git rev-parse --show-toplevel`).
+ * Returns null when not inside a git worktree or git is unavailable.
+ *
+ * Centralized here so all callers share one source of truth instead of
+ * redefining the same spawnSync block in ~15 files.
+ *
+ * @returns {string|null}
+ */
+function resolveWorktreeRoot() {
+  try {
+    const { spawnSync } = require('child_process');
+    const r = spawnSync('git', ['rev-parse', '--show-toplevel'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    return r.status === 0 ? r.stdout.trim() : null;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Path containment ─────────────────────────────────────────────────────────
 
 /**
@@ -219,6 +266,8 @@ module.exports = {
   sanitizeTicketId,
   resolveTasksBase,
   resolveTasksBaseOrNull,
+  resolveTasksBaseWithFallback,
+  resolveWorktreeRoot,
   assertPathContainment,
   UNSAFE_TICKET_RE,
 };

@@ -234,11 +234,15 @@ if (testCommand) {
     }
   }
 
-  // Run test command and record evidence
-  // Special case: if tests PASS during RED phase, the agent already implemented
-  // everything. Write GREEN evidence directly (bypassing tdd-phase-state.js CLI
-  // which requires RED evidence before allowing green transition).
-  let effectivePhase = currentPhase;
+  // Run test command and record evidence through the authorized writer.
+  // The hook MUST NOT write phase state directly — tdd-phase-state.js is the
+  // sole writer. Previous fabrication path (RED+GREEN written directly when
+  // tests passed in RED) caused agent/state divergence: agent thought "I haven't
+  // done the cycle yet" while disk said "cycle complete" (ECHO-4581 burned 1h+
+  // looping on this divergence). If tests pass in RED, that means either the
+  // agent skipped writing the failing test or the test was already passing —
+  // both require agent intervention, not silent fabrication.
+  const effectivePhase = currentPhase;
   if (currentPhase === 'red') {
     try {
       require('child_process').execSync(phaseTestCommand, {
@@ -247,36 +251,31 @@ if (testCommand) {
         stdio: 'pipe',
         cwd: process.cwd(),
       });
-      // Tests passed in RED phase — write GREEN evidence directly
-      effectivePhase = 'green';
-      const taskDir = path.join(TASKS_BASE, safeTicket, `task${taskNum}`);
-      fs.mkdirSync(taskDir, { recursive: true });
-      const evidence = {
-        currentPhase: 'green',
-        currentCycle: 1,
-        cycles: [
-          {
-            cycle: 1,
-            red: {
-              testFiles: [],
-              testCommand: phaseTestCommand,
-              testExitCode: 0,
-              timestamp: new Date().toISOString(),
-              note: 'Tests passed in RED — agent implemented before stopping',
-            },
-            green: {
-              testCommand: phaseTestCommand,
-              testExitCode: 0,
-              timestamp: new Date().toISOString(),
-            },
-          },
-        ],
-      };
-      fs.writeFileSync(path.join(taskDir, 'tdd-phase.json'), JSON.stringify(evidence, null, 2));
-      debugLog('AUTO-WRITE: tests passed in RED, wrote GREEN evidence directly');
-      process.exit(0); // allow stop — evidence written
+      // Tests passed in RED — block the stop with a clear instruction. Do NOT
+      // fabricate GREEN. The agent must reconcile: either record a real failing
+      // test (RED), or call task-next.js to get the next instruction.
+      process.stderr.write(
+        [
+          '',
+          'STOP BLOCKED: RED phase has no failing-test evidence yet, but the',
+          'current test command exits 0. This means one of:',
+          '  (a) You skipped writing the failing test first.',
+          '  (b) The test was already passing before this cycle started.',
+          '  (c) You implemented the production code before recording RED.',
+          '',
+          'The hook will NOT fabricate evidence for you — that would corrupt the',
+          'TDD audit trail (see RC-C in implement-gate stuckness investigation).',
+          '',
+          'What to do:',
+          `  Run: node $CLAUDE_PLUGIN_ROOT/scripts/workflows/work-implement/task-next.js ${safeTicket} task${taskNum}`,
+          '  It will tell you precisely which phase you are in and what to do next.',
+          '',
+        ].join('\n')
+      );
+      debugLog('STOP BLOCKED: tests passed in RED, refused to fabricate evidence');
+      process.exit(2); // block the stop — agent must call task-next.js
     } catch {
-      // Tests failed — good, RED phase is correct
+      // Tests failed — good, RED phase is correct. Fall through to record-red.
       debugLog('AUTO-RUN: tests failed in RED phase (expected)');
     }
   }

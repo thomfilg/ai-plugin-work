@@ -108,8 +108,8 @@ function validate(ctx) {
     errors.push(
       'e2e kind requires a `## Selectors` section in spec.md enumerating every selector ' +
         'the test will use. Format per line: `` `selector-name` — existing — `path/to/file.tsx` `` ' +
-        '(or `new` if this ticket creates the component). Prevents the ECHO-4457 bug class where ' +
-        'the spec asserted testids that did not exist on shipped sibling components.'
+        '(or `new` if this ticket creates the component). Look on siblings tickets for existing selectors and use them if they exist. ' +
+        'If no existing selectors are found, create a new selector.'
     );
   } else {
     const entries = parseSelectorLines(selectorBlock);

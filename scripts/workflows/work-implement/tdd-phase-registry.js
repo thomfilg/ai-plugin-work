@@ -19,9 +19,17 @@ const TDD_PHASES = Object.freeze({
 const TDD_PHASE_ORDER = Object.freeze([TDD_PHASES.red, TDD_PHASES.green, TDD_PHASES.refactor]);
 
 // ─── Phase Transition Graph (cyclic) ────────────────────────────────────────
+// RC-A defense: GREEN can return to RED for legitimate test-correction. Without
+// this back-edge, an agent who discovers their test assertions don't match
+// shipped reality (ECHO-4457: spec asserted testids that didn't exist on
+// shipped sibling components) gets locked in GREEN and needs orchestrator
+// rewind. The transition still goes through cmdTransition which validates
+// evidence exists for the current phase, so it can't be used to skip work.
+// green→red also increments the cycle counter (same as refactor→red) so the
+// evidence array shape stays consistent.
 const TDD_PHASE_TRANSITIONS = Object.freeze({
   [TDD_PHASES.red]: [TDD_PHASES.green],
-  [TDD_PHASES.green]: [TDD_PHASES.refactor],
+  [TDD_PHASES.green]: [TDD_PHASES.refactor, TDD_PHASES.red],
   [TDD_PHASES.refactor]: [TDD_PHASES.red],
 });
 
