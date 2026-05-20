@@ -204,16 +204,15 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
       step: STEPS.spec,
     },
     // Self-paced tasks runner: same companion pattern. tasks-next.js spawns
-    // tasks-phase-state.js internally. Allow-list includes both the skill
-    // name and the optional task-decomposer agent so future routing changes
-    // don't break the gate.
+    // tasks-phase-state.js internally. Gated to the dedicated split-in-tasks
+    // agent (agents/split-in-tasks.md).
     'tasks-next.js': {
-      agents: ['split-in-tasks', 'task-decomposer'],
+      agents: ['split-in-tasks'],
       step: STEPS.tasks,
       companionScripts: ['tasks-phase-state.js'],
     },
     'tasks-phase-state.js': {
-      agents: ['split-in-tasks', 'task-decomposer'],
+      agents: ['split-in-tasks'],
       step: STEPS.tasks,
     },
     // Self-paced pr-step runner: gates the WORK orchestrator's `pr` step
