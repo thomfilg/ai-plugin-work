@@ -41,7 +41,7 @@ try {
   config = null;
 }
 
-const ALLOWED_AGENTS = ['split-in-tasks', 'task-decomposer'];
+const ALLOWED_AGENTS = ['split-in-tasks'];
 const GATED_SUBCOMMANDS = ['init', 'record', 'transition'];
 const TOKEN_MAX_AGE_MS = 10_000;
 
