@@ -39,6 +39,8 @@ try {
   logNextScriptEvent = () => {};
 }
 
+const { resolveTasksBaseWithFallback, resolveWorktreeRoot } = require('../lib/ticket-validation');
+
 let config;
 try {
   config = require('../lib/config');
@@ -47,22 +49,6 @@ try {
 }
 
 // ─── Path + env helpers ────────────────────────────────────────────────────
-
-function resolveTasksBase() {
-  return (
-    process.env.TASKS_BASE ||
-    (config && config.TASKS_BASE) ||
-    path.join(require('node:os').homedir(), 'worktrees', 'tasks')
-  );
-}
-
-function resolveWorktreeRoot() {
-  const r = spawnSync('git', ['rev-parse', '--show-toplevel'], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'ignore'],
-  });
-  return r.status === 0 ? r.stdout.trim() : null;
-}
 
 function die(msg) {
   process.stderr.write(`spec-next: ${msg}\n`);
@@ -195,7 +181,7 @@ function main(argv) {
 
   snapshotCompanionToken('spec-phase-state.js', ticket);
 
-  const tasksBase = resolveTasksBase();
+  const tasksBase = resolveTasksBaseWithFallback();
   const tasksDir = path.join(tasksBase, ticket);
   if (!fs.existsSync(tasksDir)) die(`tasks dir not found: ${tasksDir}`);
 

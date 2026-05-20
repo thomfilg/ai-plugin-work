@@ -679,8 +679,53 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
   // Check task type BEFORE evidence — checkpoint tasks are exempt from TDD entirely
   const taskType = resolveTaskType(ctx.tasksDir, taskNum);
   if (taskType === 'checkpoint') {
-    // Checkpoints don't need TDD evidence — skip directly to advance
-    // (checkpoint tasks verify, they don't implement)
+    // Checkpoint tasks verify, they don't implement — advance immediately.
+    // Falling through to the shared "evidence valid → maybe-recurse" path is
+    // unreliable for checkpoints because the gate's recursion can be cut
+    // short between the upstream task's advance (which clears the dispatched
+    // marker) and the checkpoint task's own gate pass. Result: implement
+    // step transitions to commit while the checkpoint task is still
+    // status:'pending', then `completeWork` blocks the terminal step (see
+    // ECHO-4581). Advancing here, in this gate pass, short-circuits the
+    // race and keeps tasksMeta consistent with the workflow's forward
+    // progress.
+    const gateTASKS_BASE = ctx.tasksDir ? path.dirname(ctx.tasksDir) : process.env.TASKS_BASE;
+    const gateExecEnv = gateTASKS_BASE
+      ? { ...process.env, TASKS_BASE: gateTASKS_BASE }
+      : process.env;
+    try {
+      execFileSync(
+        process.execPath,
+        [path.join(workDir, 'work-state.js'), 'task-advance', safeName],
+        { encoding: 'utf-8', timeout: 5000, stdio: 'pipe', env: gateExecEnv }
+      );
+    } catch {
+      /* fail-open — surfaced via completeWork's terminal guard if it really failed */
+    }
+    // Clear dispatch markers so the next pass dispatches fresh (mirrors the
+    // non-last-task branch below).
+    const ws2 = loadWorkState(safeName);
+    if (ws2) {
+      delete ws2._work2Dispatched;
+      delete ws2._work2DispatchedAction;
+      delete ws2._preTestForTask;
+      saveWorkState(safeName, ws2);
+    }
+    if (ctx.tasksDir) {
+      try {
+        markProgress(ctx.tasksDir);
+      } catch {
+        /* fail-open */
+      }
+    }
+    if (log) {
+      log.recurse(recursionDepth, `checkpoint advance ${currentIdx + 1} (skipped TDD evidence)`);
+    }
+    // If checkpoint was the last task, return null so work-next.js can
+    // transition implement → commit. Otherwise return recurse so the next
+    // task gets dispatched.
+    if (currentIdx >= totalTasks - 1) return null;
+    return { recurse: true };
   } else {
     // Non-checkpoint: check evidence exists AND is valid
     // Use ctx.tasksDir-derived TASKS_BASE (not the global one which points to plugin dir)

@@ -29,10 +29,11 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execSync, spawnSync } = require('child_process');
 const { tddCanTransition, isTestFile } = require('./tdd-phase-registry');
 const { consumeToken, tokenPath } = require('../lib/scripts/write-report');
 const { normalizeAgentName } = require('../lib/agent-detection');
+const { resolveTasksBaseWithFallback } = require('../lib/ticket-validation');
 
 let config;
 try {
@@ -70,18 +71,6 @@ function sanitizeId(ticketId) {
     if (e && e.code !== 'MODULE_NOT_FOUND') throw e;
     return ticketId;
   }
-}
-
-/**
- * Resolve TASKS_BASE from env, config, or HOME fallback.
- * @returns {string}
- */
-function resolveTasksBase() {
-  return (
-    process.env.TASKS_BASE ||
-    (config && config.TASKS_BASE) ||
-    path.join(require('os').homedir(), 'worktrees', 'tasks')
-  );
 }
 
 /**
@@ -200,7 +189,7 @@ function getStatePath(ticketId, opts) {
     throw new Error(`Invalid ticket ID: ${ticketId}`);
   }
   rejectMalformedTicketId(ticketId);
-  const base = resolveTasksBase();
+  const base = resolveTasksBaseWithFallback();
   const safeId = sanitizeId(ticketId);
   const taskNum = opts && opts.taskNum;
 
@@ -317,15 +306,95 @@ function parseCategory(args) {
 }
 
 function runTestCommand(cmd) {
-  try {
-    execSync(cmd, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 300000 });
-    return 0;
-  } catch (err) {
-    if (err.killed) {
+  return runTestCommandWithOutput(cmd).exitCode;
+}
+
+/**
+ * Like runTestCommand but also captures stdout+stderr so callers can
+ * inspect the test runner's summary line (passed/skipped/failed counts).
+ * Used by GREEN/REFACTOR recording to reject "all-skipped" false positives
+ * (RC-B in implement-gate stuckness investigation: a fully-skipped spec
+ * exits 0 and used to silently record as legitimate GREEN evidence).
+ */
+function runTestCommandWithOutput(cmd) {
+  // Use spawnSync (not execSync) so we capture BOTH stdout AND stderr on
+  // success. execSync only returns stdout when exit code is 0, which means
+  // the RC-B "all-skipped" guard silently fails for Jest/Vitest — both
+  // print their summary lines to stderr. spawnSync via shell preserves the
+  // same command-parsing behavior as execSync.
+  const result = spawnSync(cmd, {
+    encoding: 'utf8',
+    shell: true,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    timeout: 300000,
+  });
+  if (result.error) {
+    if (result.error.code === 'ETIMEDOUT' || result.signal === 'SIGTERM') {
       process.stderr.write(`Test command timed out after 5 minutes: ${cmd}\n`);
     }
-    return err.status || 1;
+    return {
+      exitCode: result.status === null ? 1 : result.status,
+      stdout: result.stdout || '',
+      stderr: result.stderr || '',
+    };
   }
+  return {
+    exitCode: result.status === null ? 1 : result.status,
+    stdout: result.stdout || '',
+    stderr: result.stderr || '',
+  };
+}
+
+/**
+ * Inspect a test runner's stdout/stderr for a summary line indicating
+ * pass/skip counts. Returns { passed, skipped, parsed } where `parsed` is
+ * true only if we found a recognizable summary. Be lenient on format —
+ * vitest, jest, mocha, playwright all phrase summaries differently — but
+ * strict on meaning: only return parsed=true when we're confident.
+ */
+function parseTestSummary(output) {
+  if (!output || typeof output !== 'string') return { passed: 0, skipped: 0, parsed: false };
+  let passed = 0;
+  let skipped = 0;
+  let parsed = false;
+  // vitest: "Tests  4 passed | 2 skipped (6)"
+  // jest: "Tests:  4 passed, 2 skipped, 6 total"
+  // mocha: "4 passing", "2 pending"
+  // playwright: "4 passed (10s)", "2 skipped"
+  // Generic: capture any `N passed` and `N skipped|pending` anywhere.
+  const passedMatches = output.match(/(\d+)\s+passed/gi);
+  if (passedMatches && passedMatches.length > 0) {
+    // Use the LAST occurrence — runners often print intermediate updates
+    // and a final summary line; the summary wins.
+    const last = passedMatches[passedMatches.length - 1];
+    const m = last.match(/(\d+)/);
+    if (m) {
+      passed = parseInt(m[1], 10);
+      parsed = true;
+    }
+  }
+  // Mocha uses "passing" instead of "passed"
+  if (!parsed) {
+    const passingMatches = output.match(/(\d+)\s+passing/gi);
+    if (passingMatches && passingMatches.length > 0) {
+      const last = passingMatches[passingMatches.length - 1];
+      const m = last.match(/(\d+)/);
+      if (m) {
+        passed = parseInt(m[1], 10);
+        parsed = true;
+      }
+    }
+  }
+  const skippedMatches = output.match(/(\d+)\s+(?:skipped|pending)/gi);
+  if (skippedMatches && skippedMatches.length > 0) {
+    const last = skippedMatches[skippedMatches.length - 1];
+    const m = last.match(/(\d+)/);
+    if (m) {
+      skipped = parseInt(m[1], 10);
+      parsed = true;
+    }
+  }
+  return { passed, skipped, parsed };
 }
 
 function getCurrentCycleRecord(state) {
@@ -511,9 +580,23 @@ function cmdRecordGreen(ticketId, args) {
         '". Transition to green first.'
     );
 
-  const exitCode = runTestCommand(cmd);
+  const { exitCode, stdout, stderr } = runTestCommandWithOutput(cmd);
   if (exitCode !== 0) {
     errorExit('Tests must PASS in GREEN phase. Tests failed (exit ' + exitCode + ').');
+  }
+
+  // RC-B defense: reject all-skipped false positives. A spec where every test
+  // is .skip exits 0 but delivers zero coverage. Recording that as GREEN lets
+  // the workflow advance with no work shipped (ECHO-4451 hit this).
+  const summary = parseTestSummary(stdout + '\n' + stderr);
+  if (summary.parsed && summary.passed === 0 && summary.skipped > 0) {
+    errorExit(
+      'All tests are skipped (' +
+        summary.skipped +
+        ' skipped, 0 passed). GREEN requires actual passing tests, not skipped. ' +
+        "Unskip the affected tests in this PR's scope, or document the skips with " +
+        'their follow-up tickets in tasks.md before re-invoking me.'
+    );
   }
 
   const record = getCurrentCycleRecord(state);
@@ -547,9 +630,22 @@ function cmdRecordRefactor(ticketId, args) {
         '". Transition to refactor first.'
     );
 
-  const exitCode = runTestCommand(cmd);
+  const { exitCode, stdout, stderr } = runTestCommandWithOutput(cmd);
   if (exitCode !== 0) {
     errorExit('Tests must still PASS after refactoring. Tests failed (exit ' + exitCode + ').');
+  }
+
+  // RC-B defense: same all-skipped guard as GREEN — REFACTOR also delivers
+  // zero coverage when every test is .skip.
+  const summary = parseTestSummary(stdout + '\n' + stderr);
+  if (summary.parsed && summary.passed === 0 && summary.skipped > 0) {
+    errorExit(
+      'All tests are skipped (' +
+        summary.skipped +
+        ' skipped, 0 passed). REFACTOR requires actual passing tests, not skipped. ' +
+        "Unskip the affected tests in this PR's scope, or document the skips with " +
+        'their follow-up tickets in tasks.md before re-invoking me.'
+    );
   }
 
   const record = getCurrentCycleRecord(state);
@@ -575,7 +671,7 @@ function cmdTransition(ticketId, targetPhase, args) {
   if (!tddCanTransition(state.currentPhase, targetPhase)) {
     errorExit(
       `Invalid transition: ${state.currentPhase} -> ${targetPhase}. ` +
-        `Valid transitions: red->green, green->refactor, refactor->red.`
+        `Valid transitions: red->green, green->refactor, green->red, refactor->red.`
     );
   }
 
@@ -648,7 +744,7 @@ function cmdException(ticketId, args) {
       );
     }
     const { isCheckpointTask } = require('./exception-validator');
-    const resolvedTasksBase = resolveTasksBase();
+    const resolvedTasksBase = resolveTasksBaseWithFallback();
     const safeId = sanitizeId(ticketId);
     if (!isCheckpointTask(safeId, taskNum, resolvedTasksBase)) {
       auditException(ticketId, taskNum, category, null, false);

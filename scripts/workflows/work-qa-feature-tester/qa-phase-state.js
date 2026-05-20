@@ -16,6 +16,7 @@ const path = require('node:path');
 
 const { consumeToken } = require('../lib/scripts/write-report');
 const { normalizeAgentName } = require('../lib/agent-detection');
+const { resolveTasksBaseWithFallback } = require('../lib/ticket-validation');
 const {
   QA_PHASE_ORDER,
   QA_INITIAL_PHASE,
@@ -56,19 +57,11 @@ function sanitizeId(ticketId) {
   }
 }
 
-function resolveTasksBase() {
-  return (
-    process.env.TASKS_BASE ||
-    (config && config.TASKS_BASE) ||
-    path.join(require('node:os').homedir(), 'worktrees', 'tasks')
-  );
-}
-
 function getStatePath(ticketId) {
   if (!ticketId || /\.\.|[\\:\x00]/.test(ticketId)) {
     throw new Error(`Invalid ticket ID: ${ticketId}`);
   }
-  const base = path.resolve(resolveTasksBase());
+  const base = path.resolve(resolveTasksBaseWithFallback());
   const safeId = sanitizeId(ticketId);
   const resolved = path.resolve(base, safeId, 'qa-phase.json');
   if (!resolved.startsWith(base + path.sep)) {

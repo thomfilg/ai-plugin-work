@@ -38,15 +38,26 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
     const prInfo = getPRInfo();
     if (!prInfo || !prInfo.number) return null;
 
-    // Case 1: PR already merged — skip CI
-    if (prInfo.state === 'MERGED') {
-      return advanceToCleanup(safeName, deps, 'PR merged, skip CI');
-    }
-
-    // Case 2: All CI checks passing — advance
+    // CI must have actually gone green at some point. We require a real
+    // `checkCI` => 'passing' read REGARDLESS of merge state.
+    //
+    // Why this is non-negotiable: a merged PR is NOT proof that CI passed —
+    // admins can override, branch-protection can be relaxed, auto-merge can
+    // race with required-checks updates, and historically (see ECHO-4451)
+    // ci-gate was silently advancing on `state === 'MERGED'` while the
+    // follow-up PR's checks were still pending and merge status was
+    // BLOCKED. Trusting upstream "merged" as a CI proxy meant the workflow
+    // marked ci:completed without ever observing a green build.
+    //
+    // The gate now always asks GitHub for the actual check rollup. If the
+    // checks aren't passing, fall through so the ci step's agent (ci-runner
+    // / ci-triager) is dispatched to wait + verify. Falling through is the
+    // safe failure mode: it gives the agent a chance to surface the issue
+    // rather than silently completing the step.
     const ci = checkCI(prInfo.number);
-    if (ci.status === 'passing') {
-      return advanceToCleanup(safeName, deps, 'CI passing');
+    if (ci && ci.status === 'passing') {
+      const reason = prInfo.state === 'MERGED' ? 'CI passing (PR merged)' : 'CI passing';
+      return advanceToCleanup(safeName, deps, reason);
     }
   } catch {
     // Can't check PR/CI state — fall through to normal transition
