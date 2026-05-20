@@ -31,9 +31,11 @@ function resolvePrNumber(worktreeRoot) {
     /* fall through */
   }
   // Fallback: gh pr view.
+  const { buildChildEnv } = require('../../../work/scripts/gh-exec');
   const r = spawnSync('gh', ['pr', 'view', '--json', 'number'], {
     cwd: worktreeRoot,
     encoding: 'utf8',
+    env: buildChildEnv(),
   });
   if (r.status === 0) {
     try {
@@ -71,7 +73,7 @@ function validate(ctx) {
 
 function instructions(ctx) {
   return [
-    `# ci-next — Phase 1 of 7: INPUTS`,
+    `# ci-next — Phase 1 of 8: INPUTS`,
     `Ticket: ${ctx.ticket}`,
     '',
     `Resolves the PR number from \`pr-context.json\` (preferred) or \`gh pr view\`. Writes it to \`${CTX_FILE}\`.`,

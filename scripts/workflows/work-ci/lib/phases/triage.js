@@ -65,7 +65,7 @@ function validate(ctx) {
 
 function instructions(ctx) {
   return [
-    `# ci-next — Phase 3 of 7: TRIAGE`,
+    `# ci-next — Phase 3 of 8: TRIAGE`,
     `Ticket: ${ctx.ticket}`,
     '',
     '### What you do',

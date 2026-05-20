@@ -12,6 +12,7 @@ const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
 const specShared = require('../../../work-spec/lib/kind-checks/shared');
+const config = require('../../../lib/config');
 
 function readFile(p) {
   try {
@@ -32,7 +33,9 @@ function readChangedFiles(ctx) {
     }
   }
   const root = ctx.worktreeRoot || process.cwd();
-  for (const base of ['origin/main', 'main', 'origin/dev', 'dev']) {
+  // Honor BASE_BRANCH / symbolic-ref so dev-based repos don't fall back to
+  // origin/main (which is behind merges and surfaces phantom files).
+  for (const base of config.getDiffBaseCandidates({ cwd: root })) {
     const r = spawnSync('git', ['diff', '--name-only', `${base}...HEAD`], {
       cwd: root,
       encoding: 'utf8',

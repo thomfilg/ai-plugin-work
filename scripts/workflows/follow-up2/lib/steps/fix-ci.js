@@ -8,6 +8,7 @@
 'use strict';
 
 const { execFileSync } = require('child_process');
+const { buildChildEnv } = require('../../../work/scripts/gh-exec');
 
 module.exports = function registerFixCi(register) {
   register('fix-ci', (state, ctx) => {
@@ -131,6 +132,7 @@ module.exports = function registerFixCi(register) {
           cwd: ctx.worktreeDir,
           stdio: ['pipe', 'pipe', 'pipe'],
           maxBuffer: 10 * 1024 * 1024,
+          env: buildChildEnv(),
         });
       } catch (err) {
         ghErr(`run-view ${runId}`, err);
@@ -165,6 +167,7 @@ module.exports = function registerFixCi(register) {
               timeout: 15000,
               cwd: ctx.worktreeDir,
               stdio: ['pipe', 'pipe', 'pipe'],
+              env: buildChildEnv(),
             }
           );
           for (const line of linksOutput.split('\n').filter(Boolean)) {

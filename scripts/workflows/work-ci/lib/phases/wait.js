@@ -25,9 +25,11 @@ function readContext(tasksDir, file) {
 }
 
 function fetchChecks(worktreeRoot, prNumber) {
+  const { buildChildEnv } = require('../../../work/scripts/gh-exec');
   const r = spawnSync('gh', ['pr', 'view', String(prNumber), '--json', 'statusCheckRollup'], {
     cwd: worktreeRoot,
     encoding: 'utf8',
+    env: buildChildEnv(),
   });
   if (r.status !== 0) return null;
   try {
@@ -110,7 +112,7 @@ function validate(ctx) {
 
 function instructions(ctx) {
   const status = readContext(ctx.tasksDir, STATUS_FILE);
-  const lines = [`# ci-next — Phase 2 of 7: WAIT`, `Ticket: ${ctx.ticket}`, ''];
+  const lines = [`# ci-next — Phase 2 of 8: WAIT`, `Ticket: ${ctx.ticket}`, ''];
   if (status) {
     lines.push(`Last snapshot: ${status.snapshotAt}`);
     lines.push(

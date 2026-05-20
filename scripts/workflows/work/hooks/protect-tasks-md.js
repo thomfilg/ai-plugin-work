@@ -4,11 +4,11 @@
  * PreToolUse hook: Protect tasks.md from edits outside allowed steps.
  *
  * GH-258 Task 5: Blocks Edit/Write/MultiEdit/Bash to tasks.md when the current
- * workflow step is NOT `tasks` or `task_review`. Fail-open on errors.
+ * workflow step is NOT `tasks` or `tasks_gate`. Fail-open on errors.
  *
  * Refactored to use createArtifactProtector factory (GH-258 code review).
  *
- * Allowed steps: tasks, task_review, complete
+ * Allowed steps: tasks, tasks_gate, complete
  * All other steps: blocked (exit 2)
  * No workflow active: allowed (exit 0, fail-open)
  */
@@ -18,7 +18,7 @@ const path = require('path');
 const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
 const { createArtifactProtector } = require('../../lib/protect-artifact-files');
 
-const ALLOWED_STEPS = new Set(['tasks', 'task_review', 'complete']);
+const ALLOWED_STEPS = new Set(['tasks', 'tasks_gate', 'complete']);
 
 /**
  * Check whether a file named tasks.md is the root-level workflow artifact
@@ -122,7 +122,7 @@ function getStepInProgress(ticketId) {
 }
 
 const protector = createArtifactProtector({
-  artifacts: [{ basename: 'tasks.md', step: 'tasks', allowedSteps: ['task_review'] }],
+  artifacts: [{ basename: 'tasks.md', step: 'tasks', allowedSteps: ['tasks_gate'] }],
   getStepInProgress,
   getTicketId,
   // Bash write-vector detection is handled by createArtifactProtector (checks basename in command strings)

@@ -12,6 +12,7 @@
 
 const path = require('path');
 const { execFileSync } = require('child_process');
+const { buildChildEnv } = require('../../../work/scripts/gh-exec');
 
 /**
  * Check if any workflow run for the PR's branch has already failed.
@@ -39,7 +40,13 @@ function hasFailedJobs(prInfo, worktreeDir) {
         '--jq',
         '.check_runs[] | select(.conclusion == "failure") | .name',
       ],
-      { encoding: 'utf8', timeout: 15000, cwd: worktreeDir, stdio: ['pipe', 'pipe', 'pipe'] }
+      {
+        encoding: 'utf8',
+        timeout: 15000,
+        cwd: worktreeDir,
+        stdio: ['pipe', 'pipe', 'pipe'],
+        env: buildChildEnv(),
+      }
     ).trim();
 
     return raw.length > 0;
@@ -339,6 +346,7 @@ module.exports = function registerMonitor(register) {
             cwd: ctx.worktreeDir,
             stdio: ['pipe', 'pipe', 'pipe'],
             maxBuffer: 5 * 1024 * 1024,
+            env: buildChildEnv(),
           }
         );
         // Map normalized job name → runId (strip trailing `[tag]` suffix

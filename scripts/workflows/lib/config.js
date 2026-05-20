@@ -259,6 +259,29 @@ config.getBaseBranch = (options = {}) => {
   return 'origin/main';
 };
 
+/**
+ * Resolve the ordered list of git refs to try when diffing a branch against
+ * its base — `[origin/<base>, <base>]`. Honors BASE_BRANCH env / repo
+ * symbolic-ref via getBaseBranch(). Used by scope-diff callers (check,
+ * code-checker, completion-checker) so all three pick the same base and
+ * one is not behind merges of the others. Replaces the hardcoded
+ * ['origin/main','main','origin/dev','dev'] list that picked origin/main
+ * even on dev-based repos and surfaced phantom files (ECHO-4451/ECHO-4578).
+ *
+ * @param {{cwd?: string}} [options]
+ * @returns {string[]}
+ */
+config.getDiffBaseCandidates = (options = {}) => {
+  let base = 'main';
+  try {
+    base = config.getBaseBranch({ cwd: options.cwd }) || 'main';
+  } catch {
+    /* fall through with default */
+  }
+  const bare = String(base).replace(/^origin\//, '');
+  return [...new Set([`origin/${bare}`, bare])];
+};
+
 config.prefixTicketId = (input) => {
   if (/^\d+$/.test(input)) {
     return `${config.TICKET_PROJECT_KEY}-${input}`;

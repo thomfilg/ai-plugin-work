@@ -239,6 +239,25 @@ Numbered steps with explicit dependency notation. Each step should be the smalle
 ## Files to Create/Modify
 - `{path}` — {what changes}
 
+## Selectors
+
+**REQUIRED for e2e kind.** Enumerate every UI selector the spec will reference
+(data-testids, getByRole names, etc). For each, grep the cited sibling-owned
+file BEFORE listing — the e2e kind-check runs the same grep and BLOCKS spec_gate
+on any mismatch. This is the ECHO-4457 lesson: spec asserted testids that did
+not exist on shipped sibling components and the bug only surfaced at test run.
+
+Format (em-dash or hyphen separators, both accepted):
+```
+- `<selector-name>` — existing — `<path/to/sibling-owned-file.tsx>`
+- `<selector-name>` — new — `<path/to/file-in-this-PRs-scope.tsx>`
+```
+
+- `existing` selectors must be present in the cited file (literal grep). Any
+  miss is a blocking error.
+- `new` selectors are only valid if the cited file appears in this spec's
+  `## Files to Create/Modify`.
+
 ## Out of Scope
 
 Explicitly list what is NOT being implemented to prevent scope creep:

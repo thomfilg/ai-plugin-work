@@ -29,17 +29,10 @@ function buildBaseCandidates(base) {
 }
 
 function gitDiffFiles(workDir) {
-  // Resolve the repo's configured base branch (honors BASE_BRANCH env / git
-  // symbolic-ref / probes for main/master/dev). Falls back to 'main' only if
-  // config.getBaseBranch() can't be resolved — and we still try `origin/<b>`
-  // first since most plugin consumers diff against the remote tip.
-  let base = 'main';
-  try {
-    base = config.getBaseBranch({ cwd: workDir }) || 'main';
-  } catch {
-    /* fall through with default */
-  }
-  const candidates = buildBaseCandidates(base);
+  // Use the shared base-candidate resolver so check, code-checker, and
+  // completion-checker all pick the same base ref. Honors BASE_BRANCH env
+  // and git symbolic-ref; falls back to origin/main.
+  const candidates = config.getDiffBaseCandidates({ cwd: workDir });
   for (const ref of candidates) {
     try {
       const out = execSync(`git diff --name-only ${ref}...HEAD`, {

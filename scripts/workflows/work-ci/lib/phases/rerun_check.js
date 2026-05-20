@@ -23,9 +23,11 @@ function readJson(p) {
 function validate(ctx) {
   const c = readJson(path.join(ctx.tasksDir, 'ci-context.json'));
   if (!c || !c.prNumber) return { ok: false, errors: ['Missing ci-context.json prNumber.'] };
+  const { buildChildEnv } = require('../../../work/scripts/gh-exec');
   const r = spawnSync('gh', ['pr', 'view', String(c.prNumber), '--json', 'statusCheckRollup'], {
     cwd: ctx.worktreeRoot,
     encoding: 'utf8',
+    env: buildChildEnv(),
   });
   if (r.status !== 0) {
     return {
@@ -73,7 +75,7 @@ function validate(ctx) {
 
 function instructions(ctx) {
   return [
-    `# ci-next — Phase 5 of 7: RE-RUN CHECK`,
+    `# ci-next — Phase 5 of 8: RE-RUN CHECK`,
     `Ticket: ${ctx.ticket}`,
     '',
     'I re-query CI. If failures remain, every one must be category=pre-existing with `documentation` set.',
@@ -86,7 +88,7 @@ function instructions(ctx) {
 
 module.exports = function register(r) {
   r(CI_PHASES.rerun_check, {
-    next: CI_PHASES.memorize,
+    next: CI_PHASES.wait_merge,
     validate,
     instructions,
   });

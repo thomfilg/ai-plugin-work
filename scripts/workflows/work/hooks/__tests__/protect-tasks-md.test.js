@@ -125,7 +125,7 @@ describe('protect-tasks-md hook', () => {
     assert.strictEqual(code, 0, 'Expected exit 0 (allow) during tasks step');
   });
 
-  it('should ALLOW Edit to tasks.md when step is task_review (exit 0)', async () => {
+  it('should ALLOW Edit to tasks.md when step is tasks_gate (exit 0)', async () => {
     const { code } = await runHookWithState(
       {
         tool_name: 'Edit',
@@ -134,11 +134,11 @@ describe('protect-tasks-md hook', () => {
       'GH-99',
       {
         tasks: 'completed',
-        implement: 'completed',
-        task_review: 'in_progress',
+        tasks_gate: 'in_progress',
+        implement: 'pending',
       }
     );
-    assert.strictEqual(code, 0, 'Expected exit 0 (allow) during task_review step');
+    assert.strictEqual(code, 0, 'Expected exit 0 (allow) during tasks_gate step');
   });
 
   it('should ALLOW Edit to non-tasks.md files (exit 0)', async () => {

@@ -79,49 +79,6 @@ Configure in your `.envrc`:
 export BOOTSTRAP_SCRIPT="./scripts/bootstrap.sh"
 ```
 
-### Step 5.5: Open orchestrator listener channel (MANDATORY)
-
-Before reporting success, ensure the worker agent for this ticket can
-receive messages from the orchestrator/monitor. The listener uses the
-file-based mailbox at `/tmp/claude-agent-inbox/<TICKET>.log` (channel
-names are case-insensitive and uppercased by the script).
-
-Start a detached `tmux` session that tails the channel so any monitor
-message lands in a pane the agent can read. Idempotent — skips if a
-session for the ticket already exists.
-
-```bash
-LISTEN_SESSION="${TICKET_ID}-listen"
-if ! tmux has-session -t "$LISTEN_SESSION" 2>/dev/null; then
-  tmux new-session -d -s "$LISTEN_SESSION" \
-    "node \"${CLAUDE_PLUGIN_ROOT}/scripts/listen-communication.js\" $TICKET_ID"
-  echo "  ✓ orchestrator listener started: tmux session $LISTEN_SESSION"
-else
-  echo "  ✓ orchestrator listener already running: tmux session $LISTEN_SESSION"
-fi
-```
-
-After starting, verify a listener is attached by running:
-
-```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/communicate.js" --check "$TICKET_ID"
-# Exits 0 if at least one listener is attached, exits 3 otherwise.
-```
-
-**Why this is mandatory:**
-- The /orchestrate Monitor ↔ Agent Unblocking Protocol (ACK → fix → DONE)
-  depends on the worker having an active listener. Without it, monitor
-  messages are written but never seen, and the agent can stall waiting
-  for a response that already arrived.
-- The worker agent MUST also accept messages on this channel: it should
-  poll the tmux pane (`tmux capture-pane -p -t "$LISTEN_SESSION"`) or
-  attach a side pane in its own session before starting work.
-- Talking back to the monitor uses:
-  ```bash
-  node "${CLAUDE_PLUGIN_ROOT}/scripts/communicate.js" \
-    MONITOR "$TICKET_ID: <message to orchestrator>"
-  ```
-
 ### Step 6: Report results
 
 After processing all tasks, display summary:
@@ -177,8 +134,12 @@ Next steps:
 | 3 | Fetch ticket details |
 | 4 | Create worktree + branch (uses `BASE_BRANCH` env var, defaults to `main`) |
 | 5 | Run custom bootstrap script (if `BOOTSTRAP_SCRIPT` is set) |
-| 5.5 | Start orchestrator listener (tmux `<TICKET>-listen` running `listen-communication.js`) |
 | 6 | Display summary |
+
+**Note:** Bootstrap does NOT start the orchestrator listener. The
+`<TICKET>-listen` tmux session is started by `/work2` on every
+invocation (idempotent) so the worker — not the worktree creator —
+owns the channel.
 
 ## Notes
 

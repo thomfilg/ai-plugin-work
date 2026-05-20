@@ -4,11 +4,17 @@
  * Phases for the WORK orchestrator's `ci` step.
  *
  * Phases (linear):
- *   inputs → wait → triage → fix_or_document → rerun_check → memorize → done
+ *   inputs → wait → triage → fix_or_document → rerun_check →
+ *   wait_merge → memorize → done
  *
  * `wait` is a re-entrant phase: when CI is still running, validate returns
  * `{ ok: false, errors: [] }` (no errors → waiting, not blocked), so the
  * orchestrator prints the current instructions and exits without advancing.
+ *
+ * `wait_merge` is also re-entrant (same pattern): blocks ci-step exit
+ * until `gh pr view` reports `state === MERGED`. Ensures the workflow
+ * cannot reach cleanup/reports/complete until the PR is actually merged
+ * into the base branch.
  */
 
 'use strict';
@@ -19,6 +25,7 @@ const CI_PHASES = Object.freeze({
   triage: 'triage',
   fix_or_document: 'fix_or_document',
   rerun_check: 'rerun_check',
+  wait_merge: 'wait_merge',
   memorize: 'memorize',
   done: 'done',
 });
@@ -29,6 +36,7 @@ const CI_PHASE_ORDER = Object.freeze([
   CI_PHASES.triage,
   CI_PHASES.fix_or_document,
   CI_PHASES.rerun_check,
+  CI_PHASES.wait_merge,
   CI_PHASES.memorize,
   CI_PHASES.done,
 ]);
@@ -38,7 +46,8 @@ const CI_PHASE_TRANSITIONS = Object.freeze({
   [CI_PHASES.wait]: Object.freeze([CI_PHASES.triage]),
   [CI_PHASES.triage]: Object.freeze([CI_PHASES.fix_or_document]),
   [CI_PHASES.fix_or_document]: Object.freeze([CI_PHASES.rerun_check]),
-  [CI_PHASES.rerun_check]: Object.freeze([CI_PHASES.memorize]),
+  [CI_PHASES.rerun_check]: Object.freeze([CI_PHASES.wait_merge]),
+  [CI_PHASES.wait_merge]: Object.freeze([CI_PHASES.memorize]),
   [CI_PHASES.memorize]: Object.freeze([CI_PHASES.done]),
   [CI_PHASES.done]: Object.freeze([]),
 });

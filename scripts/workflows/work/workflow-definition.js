@@ -228,13 +228,30 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
       step: STEPS.pr,
     },
     // Self-paced ci-step runner: phases the wait/triage/fix/rerun loop.
+    // Allow-list = the real developer agents that get dispatched to fix CI
+    // failures. `ci-runner` / `ci-triager` are reserved for future dedicated
+    // agents but kept here so explicit ci-* agents still work if registered.
     'ci-next.js': {
-      agents: ['ci-runner', 'ci-triager'],
+      agents: [
+        'ci-runner',
+        'ci-triager',
+        'developer-nodejs-tdd',
+        'developer-react-senior',
+        'developer-react-ui-architect',
+        'developer-devops',
+      ],
       step: STEPS.ci,
       companionScripts: ['ci-phase-state.js'],
     },
     'ci-phase-state.js': {
-      agents: ['ci-runner', 'ci-triager'],
+      agents: [
+        'ci-runner',
+        'ci-triager',
+        'developer-nodejs-tdd',
+        'developer-react-senior',
+        'developer-react-ui-architect',
+        'developer-devops',
+      ],
       step: STEPS.ci,
     },
     // Self-paced completion-checker runner: phases the requirement
@@ -308,6 +325,19 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
     'reports-phase-state.js': {
       agents: ['reports-writer'],
       step: STEPS.reports,
+    },
+    // Self-paced cleanup runner: phases the per-ticket cleanup loop
+    // (branch delete, scoped tmux kill, state archive). Defensive
+    // pr_merged_check duplicates ci-step's wait_merge — cleanup never
+    // runs against a non-merged PR.
+    'cleanup-next.js': {
+      agents: ['cleanup-runner'],
+      step: STEPS.cleanup,
+      companionScripts: ['cleanup-phase-state.js'],
+    },
+    'cleanup-phase-state.js': {
+      agents: ['cleanup-runner'],
+      step: STEPS.cleanup,
     },
   };
 
@@ -613,7 +643,13 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
           // PR is proven if an open PR exists for the current branch
           try {
             const { execFileSync } = require('child_process');
-            const opts = { encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] };
+            const { buildChildEnv } = require('./scripts/gh-exec');
+            const opts = {
+              encoding: 'utf-8',
+              timeout: 10000,
+              stdio: ['pipe', 'pipe', 'pipe'],
+              env: buildChildEnv(),
+            };
 
             // Resolve branch to support worktree contexts (GH-191, GH-203)
             // Note: gh pr view uses positional branch arg, not --head flag

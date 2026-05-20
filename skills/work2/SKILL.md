@@ -24,6 +24,31 @@ Replace `<TICKET>` with `$ARGUMENTS` (the ticket id). The Monitor runs for
 the lifetime of your session — do not stop it. Only the main /work2
 orchestrator opens this channel; dispatched subagents do NOT.
 
+**Step 0.5 — ensure the tmux listener pane is running (idempotent).** This
+must run on EVERY /work2 invocation, regardless of step — bootstrap is not
+guaranteed to have run in this session (resumes, reworks, mid-workflow
+restarts). The Monitor tool consumes events into your conversation; the
+tmux pane gives a human/orchestrator a place to send nudges that the
+worker can see via `tmux capture-pane`. Both are required.
+
+```bash
+LISTEN_SESSION="${ARGUMENTS%% *}-listen"
+if ! tmux has-session -t "$LISTEN_SESSION" 2>/dev/null; then
+  tmux new-session -d -s "$LISTEN_SESSION" \
+    "node \"${CLAUDE_PLUGIN_ROOT}/scripts/listen-communication.js\" ${ARGUMENTS%% *}"
+  echo "  ✓ listener started: tmux session $LISTEN_SESSION"
+else
+  echo "  ✓ listener already running: tmux session $LISTEN_SESSION"
+fi
+```
+
+Verify a listener is attached:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/communicate.js" --check "${ARGUMENTS%% *}"
+# Exits 0 if at least one listener is attached, exits 3 otherwise.
+```
+
 **Step 1 — then start the driver:**
 
 ```bash

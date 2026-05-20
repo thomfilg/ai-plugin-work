@@ -834,6 +834,7 @@ function getReviews(prNumber) {
 
 function getRepoSlug() {
   try {
+    const { buildChildEnv } = require('./gh-exec.js');
     const result = execFileSync(
       'gh',
       ['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner'],
@@ -841,6 +842,7 @@ function getRepoSlug() {
         encoding: 'utf8',
         stdio: ['pipe', 'pipe', 'pipe'],
         timeout: 5000,
+        env: buildChildEnv(),
       }
     ).trim();
     return result.replace(/[^\w.-]/g, '_');
