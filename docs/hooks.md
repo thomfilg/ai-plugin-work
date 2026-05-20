@@ -49,7 +49,6 @@ The actual `hooks.json` uses `matcher` regex patterns, `CLAUDE_HOOK_TYPE` env va
         "matcher": "Edit|Write|MultiEdit",
         "hooks": [
           { "type": "command", "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/lib/hooks/enforce-step-workflow.js" },
-          { "type": "command", "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/hooks/enforce-work-command.js" },
           { "type": "command", "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-implement/hooks/work-implement-enforce.js" },
           { "type": "command", "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/hooks/work-require-implement.js" }
         ]
@@ -148,11 +147,10 @@ All hooks follow a strict fail-open policy:
 
 ## Workflow-Specific Hooks
 
-### /work hooks (`scripts/workflows/work/hooks/`)
+### /work2 hooks (`scripts/workflows/work/hooks/`)
 
 | Hook | Purpose |
 |---|---|
-| `enforce-work-command.js` | Ensure /work is the active command |
 | `enforce-coverage-fix.js` | Post-check coverage improvement |
 | `work-require-implement.js` | Block code changes outside implement step |
 | `work-code-review-status.js` | Track code review consensus |
@@ -163,7 +161,7 @@ All hooks follow a strict fail-open policy:
 |---|---|
 | `work-implement-enforce.js` | TDD phase file gating (RED/GREEN/REFACTOR) |
 
-### /check hooks (`scripts/workflows/check/hooks/`)
+### /check2 hooks (`scripts/workflows/check/hooks/`)
 
 | Hook | Purpose |
 |---|---|
@@ -171,7 +169,7 @@ All hooks follow a strict fail-open policy:
 | `check-start-env.js` | Start dev servers |
 | `check-validate-reports.js` | Validate report format and status lines |
 
-### Shared hooks consumed by /check (`scripts/workflows/lib/hooks/`)
+### Shared hooks consumed by /check2 (`scripts/workflows/lib/hooks/`)
 
 | Hook | Purpose |
 |---|---|
@@ -181,7 +179,7 @@ All hooks follow a strict fail-open policy:
 
 **File:** `scripts/workflows/lib/hooks/session-guard.js`
 
-Prevents concurrent `/work` sessions:
+Prevents concurrent `/work2` sessions:
 - Creates a lock file on workflow start
 - Blocks if lock exists from another session
 - Cleans up on PreCompact/Stop events

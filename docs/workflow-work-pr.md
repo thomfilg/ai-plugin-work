@@ -8,7 +8,7 @@ PR description generation and visual documentation workflow.
 /work-pr TICKET-123
 ```
 
-Also invoked automatically as part of `/work` at the `pr` step.
+Also invoked automatically as part of `/work2` at the `pr` step.
 
 ## Purpose
 
