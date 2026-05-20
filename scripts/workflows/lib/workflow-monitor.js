@@ -184,18 +184,6 @@ function recordFingerprint(ticket, fp) {
   }
 }
 
-// Returns true if the agent posted anything on its inbox channel since `sinceMs`.
-function agentRepliedSince(ticket, sinceMs) {
-  const inboxDir = process.env.CLAUDE_AGENT_INBOX_DIR || '/tmp/claude-agent-inbox';
-  const inbox = path.join(inboxDir, `${ticket}.log`);
-  try {
-    const s = fs.statSync(inbox);
-    return s.mtimeMs > sinceMs;
-  } catch {
-    return false;
-  }
-}
-
 // Capture diagnostic snapshot the agent can't easily see: tmux sessions, port/
 // file locks for the worktree's likely DB files. Best-effort, fail-open.
 function captureDiagnosticSnapshot(ticket, tasksBase) {
