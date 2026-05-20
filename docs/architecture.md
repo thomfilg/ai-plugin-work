@@ -36,14 +36,14 @@ claude-plugin-work/
 │   │   │       ├── step-gate.js
 │   │   │       └── transition-gate.js
 │   │   └── scripts/            # Utility scripts
-│   ├── work/                   # /work orchestrator
+│   ├── work/                   # /work2 orchestrator
 │   │   ├── work.workflow.js    # Main dispatcher
 │   │   ├── workflow-definition.js  # Declarative config
 │   │   ├── step-registry.js    # Step ID + ordering registry
 │   │   ├── steps/              # Per-step handlers
 │   │   ├── hooks/              # /work-specific hooks
-│   │   ├── scripts/            # /work scripts
-│   │   ├── work-state.js       # /work state extensions
+│   │   ├── scripts/            # /work2 scripts
+│   │   ├── work-state.js       # /work2 state extensions
 │   │   ├── plan-generator.js   # RUN/SKIP/DEFER planner
 │   │   ├── inspect.js          # Filesystem state inspector
 │   │   ├── check-gate.js       # Quality verification gate
@@ -68,7 +68,7 @@ claude-plugin-work/
 ## Data Flow
 
 ```
-User invokes /work TICKET-123
+User invokes /work2 TICKET-123
          │
          ▼
 ┌─────────────────────────────────────┐

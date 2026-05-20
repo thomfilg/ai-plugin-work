@@ -84,10 +84,6 @@
           },
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/hooks/enforce-work-command.js"
-          },
-          {
-            "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/hooks/protect-tasks-md.js"
           },
           {

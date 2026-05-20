@@ -47,7 +47,7 @@ Only this CLI can record TDD evidence — agents cannot self-report. Evidence in
 
 **File:** `scripts/workflows/work/tdd-enforcement.js`
 
-The `/work` orchestrator validates TDD evidence before allowing transition out of `implement`:
+The `/work2` orchestrator validates TDD evidence before allowing transition out of `implement`:
 
 ```javascript
 function validateTddEvidence(evidence) {
@@ -167,7 +167,7 @@ Without --task: TASKS_BASE/<ticket>/tdd-phase.json
 
 ## Auto-Initialization
 
-When the `/work` orchestrator transitions to the `implement` step, it automatically initializes `tdd-phase.json` with RED phase:
+When the `/work2` orchestrator transitions to the `implement` step, it automatically initializes `tdd-phase.json` with RED phase:
 
 ```javascript
 // work-state.js:autoInitTdd()
