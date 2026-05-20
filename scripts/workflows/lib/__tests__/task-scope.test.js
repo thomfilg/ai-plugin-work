@@ -442,6 +442,121 @@ describe('fileMatchesScope', () => {
   });
 });
 
+describe('validateTddCycle (ECHO-4453 wedge detection)', () => {
+  it('returns no errors on a clean single-cycle task', () => {
+    const tasks = [
+      {
+        num: 1,
+        title: 'Backend: derive dashboardCount (full TDD cycle)',
+        type: 'backend',
+        requirementsCovered: 'R9, spec §IO #1',
+      },
+    ];
+    assert.deepEqual(ts.validateTddCycle(tasks), []);
+  });
+
+  it('flags RED-only Task N followed by GREEN-only Task N+1 sharing R-ids', () => {
+    const tasks = [
+      {
+        num: 1,
+        title: 'RED: extend get.integration.test.ts with failing assertion',
+        type: 'backend',
+        requirementsCovered: 'R9, spec §IO #2',
+      },
+      {
+        num: 2,
+        title: 'GREEN: derive real dashboardCount in get.ts',
+        type: 'backend',
+        requirementsCovered: 'R9, spec §IO #1',
+      },
+    ];
+    const errs = ts.validateTddCycle(tasks);
+    assert.equal(errs.length, 1);
+    assert.match(errs[0], /Task 1 \(RED\) and Task 2 \(GREEN\)/);
+    assert.match(errs[0], /R9/);
+    assert.match(errs[0], /ECHO-4453 wedge/);
+  });
+
+  it('flags GREEN → REFACTOR split too', () => {
+    const tasks = [
+      {
+        num: 1,
+        title: 'GREEN: implement derivation',
+        type: 'backend',
+        requirementsCovered: 'R9',
+      },
+      {
+        num: 2,
+        title: 'REFACTOR: tidy reducer',
+        type: 'backend',
+        requirementsCovered: 'R9',
+      },
+    ];
+    const errs = ts.validateTddCycle(tasks);
+    assert.equal(errs.length, 1);
+    assert.match(errs[0], /Task 1 \(GREEN\) and Task 2 \(REFACTOR\)/);
+  });
+
+  it('does not flag when phase-prefixed tasks cover DIFFERENT requirements', () => {
+    const tasks = [
+      { num: 1, title: 'RED: scenario A', type: 'backend', requirementsCovered: 'R1' },
+      { num: 2, title: 'GREEN: scenario B', type: 'backend', requirementsCovered: 'R2' },
+    ];
+    assert.deepEqual(ts.validateTddCycle(tasks), []);
+  });
+
+  it('does not flag checkpoint tasks', () => {
+    const tasks = [
+      { num: 1, title: 'RED: write failing test', type: 'backend', requirementsCovered: 'R1' },
+      { num: 2, title: 'GREEN: implement', type: 'checkpoint', requirementsCovered: 'R1' },
+    ];
+    assert.deepEqual(ts.validateTddCycle(tasks), []);
+  });
+
+  it('does not flag non-consecutive phase transitions (RED then REFACTOR)', () => {
+    const tasks = [
+      { num: 1, title: 'RED: foo', type: 'backend', requirementsCovered: 'R1' },
+      { num: 2, title: 'REFACTOR: bar', type: 'backend', requirementsCovered: 'R1' },
+    ];
+    assert.deepEqual(ts.validateTddCycle(tasks), []);
+  });
+
+  it('does not flag tasks without phase prefix', () => {
+    const tasks = [
+      { num: 1, title: 'Add failing test', type: 'backend', requirementsCovered: 'R1' },
+      { num: 2, title: 'Implement feature', type: 'backend', requirementsCovered: 'R1' },
+    ];
+    assert.deepEqual(ts.validateTddCycle(tasks), []);
+  });
+
+  it('handles empty input gracefully', () => {
+    assert.deepEqual(ts.validateTddCycle([]), []);
+    assert.deepEqual(ts.validateTddCycle(null), []);
+  });
+
+  it('validateAll includes TDD-cycle errors in aggregated output', () => {
+    const tasks = [
+      {
+        num: 1,
+        title: 'RED: failing test',
+        type: 'backend',
+        filesInScope: ['a.test.ts'],
+        requirementsCovered: 'R9',
+      },
+      {
+        num: 2,
+        title: 'GREEN: implementation',
+        type: 'backend',
+        filesInScope: ['a.ts'],
+        requirementsCovered: 'R9',
+      },
+    ];
+    const result = ts.validateAll(tasks);
+    assert.equal(result.valid, false);
+    assert.ok(result.errors.some((e) => /ECHO-4453 wedge/.test(e)));
+  });
+});
+
 describe('findTask', () => {
   it('finds by task num', () => {
     const tasks = [
