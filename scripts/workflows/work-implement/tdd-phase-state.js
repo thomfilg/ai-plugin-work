@@ -671,7 +671,7 @@ function cmdTransition(ticketId, targetPhase, args) {
   if (!tddCanTransition(state.currentPhase, targetPhase)) {
     errorExit(
       `Invalid transition: ${state.currentPhase} -> ${targetPhase}. ` +
-        `Valid transitions: red->green, green->refactor, refactor->red.`
+        `Valid transitions: red->green, green->refactor, green->red, refactor->red.`
     );
   }
 
