@@ -132,8 +132,41 @@ A task can be marked `Parallel: Yes` ONLY if ALL of these are true:
 - It does not require outputs (code, config, data) from any incomplete task
 Otherwise mark `Parallel: No` or `Parallel: Partial` with explanation.
 
-**Rule 10 — TDD Ordering:**
+**Rule 10 — TDD Ordering (CRITICAL — read this twice):**
 Standard implementation tasks MUST order deliverables following the TDD cycle: RED (write failing tests) -> GREEN (implement to pass) -> REFACTOR (clean up). Each deliverable gets a bold phase prefix: `**RED:**`, `**GREEN:**`, `**REFACTOR:**`. When a task covers multiple behaviors, each behavior gets its own RED/GREEN/REFACTOR triplet.
+
+**One full TDD cycle per task — never split phases across tasks.** R/G/R live inside a SINGLE task as nested deliverables (e.g. 1.1.1 RED, 1.1.2 GREEN, 1.1.3 REFACTOR). The implement-gate enforces RED→GREEN→REFACTOR within one task; if you put RED in Task N and GREEN in Task N+1, the gate wedges:
+
+- Task N's RED test fails (expected) → gate records RED, demands GREEN within Task N
+- GREEN means "make the test pass" → requires editing the impl file
+- But the impl file is in Task N+1's scope, listed as out-of-scope for Task N → the implementing agent loops forever, blocked by its own decomposition
+
+This is the **ECHO-4453-class wedge**. To avoid it:
+- The same task must own BOTH the test file and the impl file in `### Files in scope`.
+- The same task's Test Command must exercise the test added in its RED deliverable.
+- Both test and impl edits must be reachable from inside ONE task's allowed surface.
+
+✅ Correct (R/G/R inside one task):
+```
+## Task 1 — Backend: derive dashboardCount (full TDD cycle)
+### Files in scope
+- get.ts
+- get.integration.test.ts
+### Deliverables
+- [ ] 1.1.1 **RED:** add failing test in get.integration.test.ts
+- [ ] 1.1.2 **GREEN:** edit get.ts to make the test pass
+- [ ] 1.1.3 **REFACTOR:** tidy reducer + JSDoc
+```
+
+❌ Wrong (R/G/R split across tasks — wedges):
+```
+## Task 1 — RED: add failing test
+### Files in scope
+- get.integration.test.ts
+### Files explicitly out of scope
+- get.ts   # ← GREEN can't reach this without scope violation
+## Task 2 — GREEN: edit get.ts
+```
 
 Checkpoint tasks and config-only infrastructure tasks are exempt from the RED/GREEN/REFACTOR deliverables requirement. For those exempt tasks, use a non-phase deliverables list that describes the concrete verifiable work in execution order, for example: `- Update config`, `- Validate config`, `- Document rollout/usage` as applicable.
 

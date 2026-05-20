@@ -49,6 +49,18 @@ When the orchestrator advances `/work2` into the `tasks` step, it must dispatch 
 - **Test plan per task** — every task declares the test command(s) and the assertions it must satisfy. The implement step's TDD gate reads these.
 - **No invention** — only decompose what's already in `brief.md` and `spec.md`. If something is missing, stop and surface the gap; don't fabricate scope.
 
+### CRITICAL: One full TDD cycle per task — never split RED/GREEN/REFACTOR across tasks
+
+The implement-gate enforces RED → GREEN → REFACTOR within a SINGLE task. If you put the failing test in Task N and the implementation that makes it pass in Task N+1, the workflow wedges:
+
+- Task N's RED test fails → gate records RED, demands GREEN within Task N
+- GREEN requires editing the impl file → that file is in Task N+1's scope, out-of-scope for Task N
+- Implementing agent loops forever — blocked by its own decomposition (ECHO-4453-class wedge)
+
+**Always:** the task that contains the RED deliverable must also include the impl file in its `### Files in scope`, and the same task must own the GREEN and REFACTOR deliverables. Use nested numbering for sub-deliverables: `1.1.1 RED`, `1.1.2 GREEN`, `1.1.3 REFACTOR` — all under Task 1.
+
+Checkpoint tasks (verification-only) and config-only tasks are exempt — they have no R/G/R.
+
 ## Your Inputs
 
 You will receive a ticket ID (e.g., `PROJ-123`) and, by convention, are expected to operate over:

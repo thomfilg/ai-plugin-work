@@ -357,7 +357,86 @@ function validateAll(tasks) {
     errors.push(...validateTask(t));
     errors.push(...validateTaskTestScope(t));
   }
+  errors.push(...validateTddCycle(tasks));
   return { valid: errors.length === 0, errors };
+}
+
+/**
+ * Detect the TDD phase prefix in a task title.
+ * Matches patterns like "RED: foo", "GREEN — foo", "REFACTOR - foo" at the start.
+ * Returns the uppercase phase name or null.
+ *
+ * @param {string} title
+ * @returns {string|null}
+ */
+function _detectPhaseInTitle(title) {
+  if (typeof title !== 'string') return null;
+  const m = title.match(/^\s*(RED|GREEN|REFACTOR)\s*[:\-—–]/i);
+  return m ? m[1].toUpperCase() : null;
+}
+
+/**
+ * Extract requirement IDs from a task's `Requirements Covered` text.
+ * Recognized patterns: `R1`, `R1a`, `spec §...`, `brief AC-N`, `brief P0 #N`.
+ *
+ * @param {string} text
+ * @returns {string[]}
+ */
+function _extractReqIds(text) {
+  if (typeof text !== 'string') return [];
+  const ids = new Set();
+  // R-style: R1, R1a, R12
+  for (const m of text.matchAll(/\bR\d+[a-z]?\b/g)) ids.add(m[0]);
+  // spec § citations: capture up to a comma, newline, or sentence end
+  for (const m of text.matchAll(/spec §[^,\n]+/g)) ids.add(m[0].trim());
+  // brief AC-N or brief P0/P1 #N
+  for (const m of text.matchAll(/\bbrief (?:AC-\d+|P[012]\s*#\d+)\b/gi)) ids.add(m[0].trim());
+  return Array.from(ids);
+}
+
+/**
+ * Detect the "TDD phases split across separate tasks" anti-pattern
+ * (ECHO-4453 wedge). When found, the implement-gate will be unsatisfiable
+ * because Task N's RED test demands GREEN on a file owned exclusively by
+ * Task N+1.
+ *
+ * Returns an array of human-readable error messages (empty when clean).
+ *
+ * @param {Array<object>} tasks - Parsed task objects from task-parser
+ * @returns {string[]}
+ */
+function validateTddCycle(tasks) {
+  if (!Array.isArray(tasks) || tasks.length === 0) return [];
+  const errors = [];
+  const enriched = tasks.map((t) => ({
+    num: t?.num,
+    title: t?.title || '',
+    type: typeof t?.type === 'string' ? t.type.toLowerCase() : '',
+    phase: _detectPhaseInTitle(t?.title || ''),
+    reqs: _extractReqIds(t?.requirementsCovered || ''),
+  }));
+
+  for (let i = 0; i < enriched.length; i++) {
+    const cur = enriched[i];
+    if (!cur.phase) continue; // Only flag phase-prefixed titles
+    if (cur.type === 'checkpoint') continue;
+    const next = enriched[i + 1];
+    if (!next || !next.phase || next.type === 'checkpoint') continue;
+    // Only flag the legitimate-looking R→G or G→R sequence
+    const expected = { RED: 'GREEN', GREEN: 'REFACTOR' };
+    if (expected[cur.phase] !== next.phase) continue;
+    // Shared requirement coverage = strong signal both tasks describe the
+    // same vertical slice across phases.
+    const shared = cur.reqs.filter((r) => next.reqs.includes(r));
+    if (shared.length === 0) continue;
+    errors.push(
+      `Task ${cur.num} (${cur.phase}) and Task ${next.num} (${next.phase}) split TDD phases across separate tasks for shared requirement(s) ${shared.join(', ')}. ` +
+        `The implement-gate enforces RED→GREEN→REFACTOR within a single task; this decomposition will wedge (RED test fails, GREEN requires editing files owned by Task ${next.num}). ` +
+        `Merge into one task with nested deliverables (e.g. ${cur.num}.1.1 RED, ${cur.num}.1.2 GREEN, ${cur.num}.1.3 REFACTOR). ` +
+        `See skills/split-in-tasks/SKILL.md Rule 10 (ECHO-4453 wedge).`
+    );
+  }
+  return errors;
 }
 
 /**
@@ -394,6 +473,7 @@ function findTask(tasks, taskNum) {
 module.exports = {
   validateTask,
   validateTaskTestScope,
+  validateTddCycle,
   validateAll,
   unionFilesInScope,
   findTask,
