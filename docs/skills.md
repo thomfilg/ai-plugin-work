@@ -12,8 +12,7 @@ Skills are user-invocable slash commands defined in `skills/*/SKILL.md`. Each sk
 | `/work-implement <TICKET>` | `skills/work-implement/` | Quick TDD-gated implementation |
 | `/work-pr <TICKET>` | `skills/work-pr/` | Update PR description and visual docs |
 | `/check2 <TICKET>` | `skills/check2/` | Full quality verification (parallel agents) |
-| `/qa <TICKET>` | `skills/qa/` | Orchestrate QA per impacted app |
-| `/check-qa <app>` | `skills/check-qa/` | Test specific app via Playwright |
+| `/qa <app>` | `skills/qa/` | Manual QA for a single app via Playwright |
 
 ### Planning Skills
 

@@ -3,7 +3,7 @@
 /**
  * browser-verify.js — API-first browser/UI verification helper.
  *
- * Replaces the deleted /check-browser skill. Invokable from /check-qa
+ * Replaces the deleted /check-browser skill. Invokable from /qa
  * (and other QA flows) to verify a specific fact about a running app
  * without spinning up Playwright when an API endpoint can answer.
  *

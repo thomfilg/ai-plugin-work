@@ -1,145 +1,493 @@
 ---
 name: qa
-description: Orchestrated QA testing — discovers impacted apps and dispatches per-appType QA agents in parallel (web → /check-qa, api → qa-api-tester, cli → skip)
-argument-hint: <TICKET_ID> [--apps app1,app2]
+argument-hint: <app-name> [options-json]
+description: Manual QA for a single app — starts $DEV_COMMAND, dispatches qa-feature-tester via Playwright MCP
 user-invocable: true
-allowed-tools: Bash, Read, Glob, Grep, Task, Skill
+allowed-tools: Task, Bash, Read, AskUserQuestion
 ---
 
-# /qa — Orchestrated QA Testing
+# /qa - Manual QA for a Single App
 
-Top-level QA orchestrator. Discovers which apps are impacted by the current change, then dispatches the appropriate QA agent per app in parallel.
+Run QA testing for a specific application by launching the `qa-feature-tester` agent.
 
-This is what the deleted `/check` Agent 3.x logic used to do. It's now a standalone skill so it can be invoked from `/check2`'s phase1-agents step (or directly by a human for ad-hoc QA).
+This skill tests ONE app at a time (memory-conscious — running multiple browser-based QA sessions in parallel exhausts memory on most machines). For multi-app coverage, invoke `/qa` once per impacted app sequentially.
 
-## Usage
+## What This Command Does
 
-```bash
-/qa <TICKET_ID>                          # Discover apps automatically
-/qa <TICKET_ID> --apps status-site,api   # Test specific apps only
-```
+1. **Ensure dev environment is running** via `$DEV_COMMAND` (idempotent — no-op if already up)
+2. Parse arguments (app name + optional JSON options)
+3. If no arguments → auto-discover affected apps
+4. **Initialize QA progress tracking** (enables resume on context loss)
+5. **Cleanup old screenshots** for the specific app being tested
+6. Launch `qa-feature-tester` agent with context
+7. Agent handles ALL testing (Playwright, screenshots, report)
 
-## What it does
+## Step 0: Ensure dev environment is running
 
-1. **Resolve tasks dir + report folder** from TICKET_ID using `resolveTasksBaseWithFallback`.
-2. **Discover impacted apps** by combining:
-   - The `WEB_APPS` env var (JSON manifest: `[{"name":"...","defaultPort":N,"type":"next","appType":"web"|"api"|"cli"}]`)
-   - Changed files in the current PR vs base branch
-   - Falls back to "all apps in `WEB_APPS`" if change detection is empty
-3. **Route per appType:**
-   - `web` apps → invoke `Skill("check-qa", args: <APP_NAME> <JSON_PARAMS>)` — browser-based QA
-   - `api` apps → dispatch `Task(subagent_type: 'qa-api-tester', ...)` — HTTP/curl testing
-   - `cli` apps → skip (covered by `quality-checker` automated tests)
-4. **Dispatch in parallel** — all per-app QA runs as a single multi-tool-use block.
-5. **Aggregate reports** — each per-app QA writes to `${REPORT_FOLDER}/qa-<app>.check.md`. After all return, summarize the verdicts.
-
-## Resolve config
+Before doing any QA work, ensure the dev environment is up. The worktree's `.envrc` defines `$DEV_COMMAND` (e.g. `~/g2i/scripts/dev-tabwoah.sh`) which knows how to start all apps idempotently — it's safe to invoke even when servers are already running. Skip this step if `$DEV_COMMAND` is unset.
 
 ```bash
-# Tasks dir
-node -e "const { resolveTasksBaseWithFallback } = require('${CLAUDE_PLUGIN_ROOT}/scripts/workflows/lib/ticket-validation'); console.log(resolveTasksBaseWithFallback());"
-
-# Web apps manifest (from .envrc)
-echo "$WEB_APPS" | jq .
+# Idempotent: starts dev if not already running, no-op otherwise
+if [ -n "${DEV_COMMAND}" ] && [ -x "$(echo $DEV_COMMAND | awk '{print $1}')" ]; then
+  $DEV_COMMAND
+fi
 ```
 
-If `WEB_APPS` is unset OR empty after parse, exit with a config error: `"WEB_APPS env var not set. Define apps in the worktree's .envrc (JSON array of {name, defaultPort, type, appType})."`
+When `/qa` is invoked **inside `/check2`'s phase1-agents flow**, the dev environment has already been started by `/check2`'s `start-env` step — this becomes a no-op. When `/qa` is invoked **standalone** (ad-hoc QA), Step 0 brings up the env.
 
-## App discovery
+## Browser/UI fact verification
 
-Read `WEB_APPS` JSON:
+For quick verifications during QA (e.g. "is the queue health card showing operational?"), use `scripts/workflows/qa/browser-verify.js` — API-first with a guidance fallback to Playwright:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/workflows/qa/browser-verify.js" --url "${APP_URL}" --query "queue health"
+# → ANSWER: {"totalQueues":20,"operational":20,"critical":0}
+```
+
+The script exits 0 with a concise answer when an API endpoint matches the query, exits 1 with guidance to use the browser when no API match exists (the agent then uses `mcp__playwright__browser_*` directly). This consolidates what the deleted `/check-browser` skill used to do.
+
+## Context Loss Protection
+
+This command uses `${CLAUDE_PLUGIN_ROOT}/scripts/workflows/check/hooks/qa-progress.js` to track progress incrementally.
+If interrupted, QA can resume from where it left off.
+
+**Progress file:** `$HOME/worktrees/tasks/{TICKET_ID}/.qa-progress-{APP_NAME}.json`
+
+---
+
+## Step 1: Parse Arguments
 
 ```javascript
-const apps = JSON.parse(process.env.WEB_APPS || '[]');
-// Each entry: {name, defaultPort, type, appType}
+const rawArgs = "$ARGUMENTS".trim();
+
+// If no arguments, go to Step 2 (auto-discover)
+if (!rawArgs) {
+  // Continue to auto-discovery
+}
+
+// Parse: "app-name" or "app-name {json}"
+const args = rawArgs.split(/\s+(.+)/);
+const APP_NAME = args[0];
+const options = args[1] ? JSON.parse(args[1]) : {};
+
+// Defaults
+const TICKET_ID = options.ticketId || options.jiraTicketId || ''; // Extract from branch if empty (jiraTicketId accepted for backward compat)
+const GLOBAL_TASKS = `${process.env.HOME}/worktrees/tasks`;
+const TASK_FOLDER = `${GLOBAL_TASKS}/${TICKET_ID || 'unknown'}`;
+const REPORT_PATH = options.reportPath || `${TASK_FOLDER}/qa-${APP_NAME}.md`;
+const CHANGES_HASH = options.changesHash || 'NO_HASH';
+const SCREENSHOTS_FOLDER = options.screenshotsFolder || `${TASK_FOLDER}/screenshots/${APP_NAME}`;
+const AFFECTED_FILES = options.affectedFiles || [];
+const AFFECTED_PACKAGES = options.affectedPackages || [];
+const QA_DOCS = options.qaDocs || '';   // from READ_DOCS_ON_QA via check-setup.js
+const E2E_DOCS = options.e2eDocs || ''; // from READ_DOCS_ON_E2E via check-setup.js
+
+// App URL from structured access payload (provided by check-start-env.js via RUNNING_APPS)
+// RUNNING_APPS is set by the /check workflow; parse it to get the URL for each app.
+const runningApps = JSON.parse(process.env.RUNNING_APPS || '{}');
+const APP_URL = options.appUrl || (runningApps[APP_NAME] && runningApps[APP_NAME].url) || 'http://host.docker.internal:3000';
 ```
 
-Filter to impacted apps:
-1. If `--apps app1,app2` provided → use the explicit list (intersected with WEB_APPS).
-2. Else if `affected-tests` artifact present at `${TASKS_DIR}/affected.json` → use the apps it lists.
-3. Else → run on ALL apps in WEB_APPS (safe default; matches the deleted `/check`'s behavior when change detection couldn't narrow).
+---
 
-For each impacted app, compute:
-- `appUrl` = `http://host.docker.internal:${defaultPort}` (or `http://localhost:${defaultPort}` outside docker)
-- `reportPath` = `${TASKS_DIR}/qa-<app>.check.md`
-- `screenshotsFolder` = `${TASKS_DIR}/screenshots/<app>/`
+## Step 2: Auto-Discover Affected Apps (if no arguments)
 
-## Dispatch logic
+**Only run this if `$ARGUMENTS` is empty.**
 
-For each impacted app, build the dispatch by appType:
+```bash
+# Discover affected apps
+AFFECTED_APPS=$(node scripts/get-affected.js main json)
+echo "Affected apps: $AFFECTED_APPS"
+```
 
-### Web apps → `/check-qa`
+Parse and filter to QA-testable apps using the app manifest (via `discoverApps`):
+```javascript
+const path = require('path');
+const { discoverApps } = require(path.join(process.env.CLAUDE_PLUGIN_ROOT, 'workflows', 'check', 'lib', 'app-access'));
+
+const allAffected = JSON.parse(AFFECTED_APPS);
+const manifest = discoverApps();
+
+// Filter affected apps to those in the manifest, then route by appType
+const qaApps = allAffected.filter(app => {
+  const entry = manifest.find(m => m.name === app);
+  if (!entry) return false;
+  // cli apps are tested by automated tests only — skip QA
+  if (entry.appType === 'cli') return false;
+  return true;
+});
+```
+
+### appType Routing
+
+The app manifest declares an `appType` for each app. Use it to select the correct QA agent:
+
+| appType | QA Agent | Testing Method |
+|---------|----------|----------------|
+| `web` | `qa-feature-tester` | Browser-based testing via Playwright MCP / Chrome MCP |
+| `api` | `qa-api-tester` | API testing via curl/HTTP requests |
+| `cli` | _(skip QA)_ | Tested only by quality-checker automated tests |
 
 ```javascript
-const qaParams = {
-  ticketId: TICKET_ID,
-  reportPath: `${TASKS_DIR}/qa-${app.name}.check.md`,
-  changesHash: CHANGES_HASH,
-  appUrl: `http://localhost:${app.defaultPort}`,
-  screenshotsFolder: `${TASKS_DIR}/screenshots/${app.name}/`,
-  affectedFiles: AFFECTED_FILES[app.name] || [],
-  affectedPackages: AFFECTED_PACKAGES || [],
-  qaDocs: QA_DOCS || '',
-  e2eDocs: E2E_DOCS || ''
-};
-Skill("check-qa", args: `${app.name} ${JSON.stringify(qaParams)}`);
+for (const appName of qaApps) {
+  const entry = manifest.find(m => m.name === appName);
+  const appType = entry?.appType || 'web';
+
+  if (appType === 'web') {
+    // Launch qa-feature-tester (browser-based QA)
+    // See Step 3 below
+  } else if (appType === 'api') {
+    // Launch qa-api-tester (HTTP/curl-based QA)
+  }
+  // cli apps were already filtered out above
+}
 ```
 
-### API apps → `qa-api-tester` agent
+| Result | Action |
+|--------|--------|
+| 0 QA apps | Ask user to select from manifest entries |
+| 1 QA app | Launch agent for that app |
+| 2+ QA apps | **Go to Step 2.1 to verify actual usage** |
 
+**If no QA apps found:**
 ```javascript
-Task(
-  subagent_type: 'qa-api-tester',
-  description: `QA API tests for ${app.name}`,
-  prompt: `Test the ${app.name} API at http://localhost:${app.defaultPort}. ` +
-          `Verify HTTP responses, schemas, and side-effects for the changes in this PR. ` +
-          `Write report to ${TASKS_DIR}/qa-${app.name}.check.md. ` +
-          `Affected files: ${JSON.stringify(AFFECTED_FILES[app.name] || [])}`
-);
+// Build options dynamically from the manifest
+const manifestApps = discoverApps().filter(m => m.appType !== 'cli');
+// Present each app with its name and default port
+```
+```
+AskUserQuestion:
+  question: "No QA-testable apps affected. Which app to test?"
+  header: "App"
+  options: [dynamically built from discoverApps() manifest entries]
 ```
 
-### CLI apps → skip
+---
 
-Log "Skipping QA for CLI app <name> (covered by quality-checker)" and continue.
+## Step 2.1: Verify Component Usage in Apps (CRITICAL)
 
-## Parallelization (CRITICAL)
+**When shared packages (shared-ui, ui) are changed, verify each app ACTUALLY uses the changed components.**
 
-ALL per-app dispatches MUST run in parallel — a single message with one `Skill` or `Task` call per app. Sequential runs are forbidden because dev environments are shared across apps and serial runs waste minutes.
+This prevents running QA on apps that are only "transitively affected" but don't actually use the changed code.
 
-## Aggregation
+### 2.1.1: Identify Changed Components from Shared Packages
 
-After all dispatches return:
-1. Read each `${TASKS_DIR}/qa-<app>.check.md` report.
-2. Parse the verdict (`Status: APPROVED` / `Status: NEEDS_WORK` / `Status: FAIL`).
-3. Aggregate: if any app reports NEEDS_WORK or FAIL, the overall `/qa` verdict is NEEDS_WORK.
-4. Emit a summary table:
-   ```
-   | App | Verdict | Report |
-   |---|---|---|
-   | status-site | APPROVED | qa-status-site.check.md |
-   | api-server | NEEDS_WORK | qa-api-server.check.md |
-   ```
+```bash
+# Get files changed in shared packages
+# Detect base branch dynamically (origin/main, origin/dev, origin/master)
+# Priority: $BASE_BRANCH env var → git symbolic-ref → probe common names → fallback
+BASE_BRANCH="${BASE_BRANCH:-$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/||')}"
+if [ -z "$BASE_BRANCH" ]; then
+  for b in origin/main origin/dev origin/master; do
+    if git rev-parse --verify "$b" >/dev/null 2>&1; then BASE_BRANCH="$b"; break; fi
+  done
+fi
+BASE_BRANCH="${BASE_BRANCH:-origin/main}"
+CHANGED_FILES=$(git diff --name-only ${BASE_BRANCH}...HEAD)
 
-## Invocation contexts
+# Extract component names from shared-ui/ui changes
+# Pattern: packages/shared-ui/src/components/ComponentName/
+# Pattern: packages/ui/src/components/ComponentName/
+```
 
-- **From `/check2`** (the primary path) — `phase1-agents.js` dispatches `/qa` alongside code-checker + completion-checker. The dev environment is already up (start-env step ran earlier).
-- **Standalone (ad-hoc)** — user runs `/qa <TICKET>` directly. In this mode, `/check-qa` (the dispatched skill) starts the dev environment itself via `$DEV_COMMAND`. Idempotent — does nothing if already running.
+**Extract component names:**
+```javascript
+const changedFiles = CHANGED_FILES.split('\n');
+const componentPattern = /packages\/(shared-ui|ui)\/src\/components\/([^\/]+)\//;
+const changedComponents = [...new Set(
+  changedFiles
+    .map(f => f.match(componentPattern)?.[2])
+    .filter(Boolean)
+)];
 
-## Exit behavior
+// Example: ["TimeRangeSelector", "DataGrid"]
+console.log("Changed shared components:", changedComponents);
+```
 
-- All apps APPROVED → exit 0
-- Any app NEEDS_WORK or FAIL → exit 0 with summary table (the caller's gate decides what to do with the verdicts)
-- Config error (no WEB_APPS, no apps after filter, etc.) → exit 1 with descriptive message
+### 2.1.2: Check Each App for Component Usage
 
-## Reuse (do NOT re-implement)
+**For each QA-testable app, verify it actually imports/uses the changed components:**
 
-- `scripts/workflows/lib/ticket-validation.js::resolveTasksBaseWithFallback` — TASKS_BASE resolution
-- `/check-qa` skill — per-app web QA (don't inline the logic)
-- `qa-api-tester` agent — API testing (don't inline)
-- The deleted `/check`'s Agent 3.x discovery+routing logic was the reference — port the routing without re-creating the orchestrator monolith.
+```bash
+# For each changed component, check if app uses it
+for APP in $QA_APPS; do
+  for COMPONENT in $CHANGED_COMPONENTS; do
+    # Search for imports in the app
+    USAGE=$(grep -r "$COMPONENT" apps/$APP/app --include="*.tsx" --include="*.ts" 2>/dev/null | head -5)
+    if [ -n "$USAGE" ]; then
+      echo "✅ $APP uses $COMPONENT"
+      # Add to VERIFIED_APPS
+    else
+      echo "⏭️ $APP does NOT use $COMPONENT - skipping"
+    fi
+  done
+done
+```
 
-## Failure modes
+**Grep patterns to check:**
+```bash
+# Import from package
+grep -r "from '@$REPO_NAME/shared-ui'" apps/$APP/app --include="*.tsx" | grep "$COMPONENT"
+grep -r "from '@$REPO_NAME/ui'" apps/$APP/app --include="*.tsx" | grep "$COMPONENT"
 
-- Dev environment not running and not started by `/check-qa` — surfaces as the per-app QA report's failure. `/qa` aggregates and reports.
-- A single app fails — other apps continue (parallel, no fail-fast). Aggregated verdict reflects all results.
-- `WEB_APPS` malformed JSON — exit with the parse error and the raw value for debugging.
+# Direct component usage in JSX
+grep -r "<$COMPONENT" apps/$APP/app --include="*.tsx"
+```
+
+### 2.1.3: Decision Matrix
+
+| Scenario | Action |
+|----------|--------|
+| App directly changed (files in `apps/$APP/`) | Always include in QA |
+| App uses changed shared component | Include in QA |
+| App marked affected but doesn't use changed component | **SKIP QA** (log reason) |
+| Only shared package tests changed | Skip QA for all apps |
+
+### 2.1.4: Example Analysis Output
+
+```
+📊 Component Usage Analysis:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Changed components: [TimeRangeSelector]
+
+status-site:
+  ✅ Direct changes in apps/status-site/
+  ✅ Uses TimeRangeSelector (apps/status-site/app/routes/queue-dashboard.tsx:15)
+  → INCLUDE in QA
+
+as-dashboard:
+  ⚠️ No direct changes
+  ❌ Does NOT import TimeRangeSelector
+  → SKIP QA (transitive dependency only)
+
+status-site-admin:
+  ⚠️ No direct changes
+  ❌ Does NOT import TimeRangeSelector
+  → SKIP QA
+
+as-dashboard-admin:
+  ⚠️ No direct changes
+  ❌ Does NOT import TimeRangeSelector
+  → SKIP QA
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Final QA targets: [status-site]
+```
+
+### 2.1.5: Implementation Steps
+
+1. **Run this Bash command to extract changed components:**
+```bash
+# Detect base branch dynamically
+# Priority: $BASE_BRANCH env var → git symbolic-ref → probe common names → fallback
+BASE_BRANCH="${BASE_BRANCH:-$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/||')}"
+if [ -z "$BASE_BRANCH" ]; then
+  for b in origin/main origin/dev origin/master; do
+    if git rev-parse --verify "$b" >/dev/null 2>&1; then BASE_BRANCH="$b"; break; fi
+  done
+fi
+BASE_BRANCH="${BASE_BRANCH:-origin/main}"
+git diff --name-only ${BASE_BRANCH}...HEAD | grep -E "packages/(shared-ui|ui)/src/components/[^/]+/" | sed 's|.*/components/||' | cut -d'/' -f1 | sort -u
+```
+
+2. **For each QA-testable app, check usage:**
+```bash
+# Example: Check if status-site uses TimeRangeSelector
+grep -rn "TimeRangeSelector" apps/status-site/app --include="*.tsx" --include="*.ts"
+```
+
+3. **Build final verified apps list:**
+```javascript
+const verifiedApps = qaApps.filter(app => {
+  // Always include if app has direct changes
+  const hasDirectChanges = changedFiles.some(f => f.startsWith(`apps/${app}/`));
+  if (hasDirectChanges) return true;
+
+  // Check if app uses any changed shared component
+  return changedComponents.some(component => appUsesComponent(app, component));
+});
+```
+
+**IMPORTANT:** Only launch QA agents for `verifiedApps`, not all `qaApps`.
+
+---
+
+## Step 2.5: Cleanup App-Specific Screenshots (BEFORE QA)
+
+**Clean up existing screenshots for THIS APP ONLY before running QA.**
+
+This ensures fresh screenshots are generated and old ones don't pollute the results.
+
+```bash
+# Clean up screenshots for the specific app being tested
+if [ -d "${SCREENSHOTS_FOLDER}" ]; then
+  echo "🧹 Cleaning up old screenshots for ${APP_NAME}..."
+  rm -rf "${SCREENSHOTS_FOLDER}"/*
+  echo "✅ Removed old screenshots from: ${SCREENSHOTS_FOLDER}"
+else
+  echo "📁 Creating screenshots folder for ${APP_NAME}..."
+  mkdir -p "${SCREENSHOTS_FOLDER}"
+fi
+```
+
+**Example cleanup paths:**
+- `status-site` → `tasks/PROJ-XXX/screenshots/status-site/`
+- `as-dashboard` → `tasks/PROJ-XXX/screenshots/as-dashboard/`
+
+**Note:** Only cleans the specific app folder, NOT the entire screenshots directory.
+
+---
+
+## Step 2.6: Initialize QA Progress Tracking (CONTEXT LOSS PROTECTION)
+
+**CRITICAL: Initialize progress tracking BEFORE launching QA agent.**
+
+This creates a checkpoint file that enables resume on context loss.
+
+```bash
+# Initialize QA progress tracking
+node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/check/hooks/qa-progress.js init "${TICKET_ID}" "${APP_NAME}" "${APP_URL}"
+
+echo "✅ QA progress tracking initialized"
+echo "   Progress file: $HOME/worktrees/tasks/${TICKET_ID}/.qa-progress-${APP_NAME}.json"
+```
+
+**Check for existing progress (resume detection):**
+```bash
+# Check if we can resume from previous run
+RESUME_INFO=$(node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/check/hooks/qa-progress.js resume-info "${TICKET_ID}" "${APP_NAME}")
+CAN_RESUME=$(echo "$RESUME_INFO" | jq -r '.canResume')
+COMPLETED_TESTS=$(echo "$RESUME_INFO" | jq -r '.completedTests | length')
+
+if [ "$CAN_RESUME" = "true" ] && [ "$COMPLETED_TESTS" -gt 0 ]; then
+  echo "🔄 RESUME DETECTED: Found ${COMPLETED_TESTS} completed tests from previous run"
+  echo "   Skipping completed tests, continuing from where we left off..."
+fi
+```
+
+**Pass resume info to agent:**
+```javascript
+const resumeInfo = JSON.parse(RESUME_INFO);
+// Agent will skip tests in resumeInfo.completedTests
+```
+
+---
+
+## Step 3: Launch QA Agent (REQUIRED)
+
+**YOU MUST launch the qa-feature-tester agent using Task tool.**
+
+```
+Task(subagent_type: "work-workflow:qa-feature-tester", prompt: "
+Test ${APP_NAME} application.
+
+## SERVER IS ALREADY RUNNING — DO NOT START ANY DEV SERVERS
+
+╔══════════════════════════════════════════════════════════════════════╗
+║  THE APP SERVER IS ALREADY RUNNING AND READY FOR TESTING             ║
+║                                                                      ║
+║  URL: ${APP_URL}                                                     ║
+║                                                                      ║
+║  FORBIDDEN COMMANDS (will break other agents):                       ║
+║  - pnpm dev, pnpm start, make dev-local                             ║
+║  - tmux new-session ... pnpm dev                                     ║
+║  - npm run dev, npx vite, npx remix dev                              ║
+║  - sleep && curl (health checks to wait for server startup)          ║
+║  - Starting ANY server process whatsoever                            ║
+║                                                                      ║
+║  JUST NAVIGATE TO THE URL ABOVE WITH PLAYWRIGHT AND START TESTING.  ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+Your FIRST action must be:
+  mcp__playwright__browser_navigate(url: '${APP_URL}')
+
+If the page does not load, report ACCESS_FAILED (infrastructure issue, not a test failure).
+Do NOT attempt to start a server yourself.
+
+## Context Variables
+- TICKET_ID: ${TICKET_ID}
+- REPORT_PATH: ${REPORT_PATH}
+- CHANGES_HASH: ${CHANGES_HASH}
+- APP_URL: ${APP_URL}
+- SCREENSHOTS_FOLDER: ${SCREENSHOTS_FOLDER}
+
+## Progress Tracking (CRITICAL - enables resume on context loss)
+- PROGRESS_SCRIPT: ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/check/hooks/qa-progress.js
+- Use these commands to track progress:
+  - Start test: node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/check/hooks/qa-progress.js start-test ${TICKET_ID} ${APP_NAME} 'test_name'
+  - Complete test: node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/check/hooks/qa-progress.js complete-test ${TICKET_ID} ${APP_NAME} 'test_name' pass 'screenshot.png'
+  - Fail test: node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/check/hooks/qa-progress.js fail-test ${TICKET_ID} ${APP_NAME} 'test_name' 'error message'
+  - Playwright status: node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/check/hooks/qa-progress.js set-playwright ${TICKET_ID} ${APP_NAME} true/false
+  - Infrastructure failure: node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/check/hooks/qa-progress.js infrastructure-failure ${TICKET_ID} ${APP_NAME} 'error'
+
+## Resume Info (skip already-completed tests)
+${JSON.stringify(resumeInfo || { completedTests: [] })}
+
+## Files Changed
+${AFFECTED_FILES.join('\n') || 'None specified'}
+
+## Packages Changed
+${AFFECTED_PACKAGES.join('\n') || 'None specified'}
+
+${QA_DOCS ? `
+## Project-Specific QA Rules
+
+IMPORTANT: Apply these project-specific QA rules as PRIMARY testing criteria.
+
+${QA_DOCS}
+` : ''}
+${E2E_DOCS ? `
+## Project-Specific E2E Testing Rules
+
+IMPORTANT: Apply these E2E testing rules when writing and running E2E tests.
+
+${E2E_DOCS}
+` : ''  /* E2E_DOCS loaded from options.e2eDocs (line 56) */}
+")
+```
+
+**The agent will:**
+1. **Navigate directly to APP_URL** (server is already running — started by check-start-env.js)
+2. **Track progress incrementally** (call qa-progress.js at each step)
+3. Run tests based on affected files (skip completed tests from resume info)
+4. Take screenshots
+5. Write report to REPORT_PATH
+6. Handle infrastructure failures with MCP diagnostics (NEVER start a server)
+
+---
+
+## Examples
+
+### Simple (one app)
+```
+/qa status-site
+```
+→ Launches qa-feature-tester for status-site with defaults
+
+### With options (from /check)
+```
+/qa as-dashboard {"ticketId":"PROJ-856","reportPath":"$HOME/worktrees/tasks/PROJ-856/qa-as-dashboard.md","changesHash":"abc123","appUrl":"http://host.docker.internal:5178"}
+```
+
+### No arguments (auto-discover)
+```
+/qa
+```
+→ Runs `node scripts/get-affected.js main json`
+→ Launches agent for each affected app
+
+---
+
+## Enforcement
+
+Reports are validated by SubagentStop hook: `${CLAUDE_PLUGIN_ROOT}/scripts/workflows/check/agents/qa-feature-tester/validate-qa-report.js`
+
+**Report output status:** The `write-qa-report.js` script sets the report `Status:` line to `APPROVED` (when agent passes PASS) or `NEEDS_WORK` (when agent passes FAIL, ACCESS_FAILED, or BLOCKED). Agents still use the input vocabulary (PASS/FAIL/ACCESS_FAILED/BLOCKED) — the script handles the translation.
+
+**Blocked if:**
+- Missing report file
+- Missing `**Changes Hash:**` header
+- Missing `## Playwright Verification` section
+- No `mcp__playwright__` tool evidence
+- Puppeteer scripts used instead of MCP
+- No screenshots
+- ACCESS_FAILED without MCP diagnostics

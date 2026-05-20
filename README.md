@@ -43,8 +43,7 @@ For local development, point to a local directory instead:
 | Command | Description |
 |---------|-------------|
 | `/check2 <TICKET_ID>` | Run full quality check: lint, typecheck, tests, code review, QA, and requirements verification in parallel |
-| `/qa <TICKET_ID>` | Orchestrate QA per impacted app (web → `/check-qa`, api → `qa-api-tester`) |
-| `/check-qa <app>` | Run QA testing for a specific app using Playwright |
+| `/qa <app>` | Manual QA for a single app — starts $DEV_COMMAND, dispatches qa-feature-tester via Playwright |
 
 ### Test Management
 
