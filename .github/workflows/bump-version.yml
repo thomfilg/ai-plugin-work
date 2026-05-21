@@ -25,8 +25,32 @@ jobs:
         with:
           node-version: 20
 
-      - name: Bump patch version
-        run: node scripts/workflows/lib/scripts/bump-version.js patch
+      - name: Determine bump type from commit message
+        id: bump-type
+        # Conventional Commits → semver:
+        #   - "<type>!:" or body contains "BREAKING CHANGE" → major
+        #   - "feat:" / "feat(scope):"                      → minor
+        #   - anything else (fix/chore/refactor/docs/test/perf/ci/build/style/revert)
+        #                                                   → patch
+        # The signal lives in `github.event.head_commit.message`, which for
+        # squash-merged PRs is the PR title + body, and for merge commits is
+        # the PR's merge-commit subject.
+        env:
+          MSG: ${{ github.event.head_commit.message }}
+        run: |
+          if printf '%s\n' "$MSG" | grep -qE '^[a-zA-Z]+(\([^)]+\))?!:' \
+             || printf '%s\n' "$MSG" | grep -qE '(^|[[:space:]])BREAKING[ -]CHANGE([[:space:]]|:)'; then
+            TYPE=major
+          elif printf '%s\n' "$MSG" | grep -qE '^feat(\([^)]+\))?:'; then
+            TYPE=minor
+          else
+            TYPE=patch
+          fi
+          echo "Detected bump type: $TYPE (from first line: $(printf '%s' "$MSG" | head -1))"
+          echo "type=$TYPE" >> "$GITHUB_OUTPUT"
+
+      - name: Bump version (${{ steps.bump-type.outputs.type }})
+        run: node scripts/workflows/lib/scripts/bump-version.js ${{ steps.bump-type.outputs.type }}
 
       - name: Commit and push
         run: |
