@@ -33,20 +33,23 @@ module.exports = function registerRunE2e(register) {
     const failCount = failMatch ? failMatch[1] : '?';
     const status = exitCode === 0 ? 'APPROVED' : 'NEEDS_WORK';
 
-    fs.writeFileSync(reportPath, [
-      `Status: ${status}`,
-      '',
-      '# E2E Test Results',
-      '',
-      `**Runner:** SCRIPT_RUN_AFFECTED_E2E`,
-      `**Exit code:** ${exitCode}`,
-      `**Pass:** ${passCount} | **Fail:** ${failCount}`,
-      '',
-      '## Output',
-      '```',
-      output.substring(0, 5000),
-      '```',
-    ].join('\n'));
+    fs.writeFileSync(
+      reportPath,
+      [
+        `Status: ${status}`,
+        '',
+        '# E2E Test Results',
+        '',
+        `**Runner:** SCRIPT_RUN_AFFECTED_E2E`,
+        `**Exit code:** ${exitCode}`,
+        `**Pass:** ${passCount} | **Fail:** ${failCount}`,
+        '',
+        '## Output',
+        '```',
+        output.substring(0, 5000),
+        '```',
+      ].join('\n')
+    );
 
     if (exitCode !== 0) {
       state.testsFailed = true;

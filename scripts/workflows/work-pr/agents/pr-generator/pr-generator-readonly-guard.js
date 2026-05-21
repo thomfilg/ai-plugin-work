@@ -53,7 +53,8 @@ const FIX_ATTEMPT_PATTERNS = [
 ];
 
 // Allowed git subcommands — read-only + commit + push (no merge, rebase, reset, etc.)
-const ALLOWED_GIT_SUBCOMMANDS = /^\s*git\s+(diff|log|show|status|branch|rev-parse|ls-files|fetch|commit|push)\b/;
+const ALLOWED_GIT_SUBCOMMANDS =
+  /^\s*git\s+(diff|log|show|status|branch|rev-parse|ls-files|fetch|commit|push)\b/;
 
 // Explicitly allowed commands (quality gate + git/gh)
 const ALLOWED_COMMANDS = [

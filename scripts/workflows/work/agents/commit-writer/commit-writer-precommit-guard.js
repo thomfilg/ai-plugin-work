@@ -31,12 +31,16 @@ function resolveTasksDir(cwd) {
   try {
     const { execSync } = require('child_process');
     const branch = execSync('git rev-parse --abbrev-ref HEAD', {
-      encoding: 'utf8', cwd, stdio: ['pipe', 'pipe', 'pipe'],
+      encoding: 'utf8',
+      cwd,
+      stdio: ['pipe', 'pipe', 'pipe'],
     }).trim();
     // Extract ticket ID from branch (e.g., GH-279-foo → GH-279, ECHO-4399-bar → ECHO-4399)
     const match = branch.match(/^(?:feature\/)?([A-Z]+-\d+|GH-\d+)/i);
     if (match) return path.join(tasksBase, match[1]);
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 
   return null;
 }
@@ -84,17 +88,22 @@ async function main() {
     try {
       fs.mkdirSync(tasksDir, { recursive: true });
       errorFile = path.join(tasksDir, 'precommit-error.log');
-      fs.writeFileSync(errorFile, [
-        `# Pre-commit Hook Failure`,
-        `**Date:** ${new Date().toISOString()}`,
-        `**Command:** ${command}`,
-        '',
-        '## Full Output',
-        '```',
-        result,
-        '```',
-      ].join('\n'));
-    } catch { /* fail-open on write */ }
+      fs.writeFileSync(
+        errorFile,
+        [
+          `# Pre-commit Hook Failure`,
+          `**Date:** ${new Date().toISOString()}`,
+          `**Command:** ${command}`,
+          '',
+          '## Full Output',
+          '```',
+          result,
+          '```',
+        ].join('\n')
+      );
+    } catch {
+      /* fail-open on write */
+    }
   }
 
   const msg = errorFile

@@ -129,7 +129,8 @@ function validateTestCoverage(scenarios, testFiles) {
           correctMatch = { scenario: scenario.name, file: file.path, tagMatch: true };
           break; // correct type found — stop searching
         } else if (!wrongMatch) {
-          const tag = (scenario.tags || []).find((t) => t === '@e2e' || t === '@integration') || '@unit';
+          const tag =
+            (scenario.tags || []).find((t) => t === '@e2e' || t === '@integration') || '@unit';
           wrongMatch = { scenario: scenario.name, tag, file: file.path, actualType: actual };
         }
       }

@@ -44,17 +44,22 @@ If `tasks.md` exists, each task's `Test:` lines and acceptance criteria define t
 
 ## What You DO (Run These Commands)
 
-### 1. Quality Gate (ALWAYS — 3-tier fallback)
+### 1. Quality Gate (ALWAYS — 4-tier fallback)
 Try these in order, use the first one that works:
 ```bash
-# Tier 1: Project has dev:check in package.json
+# Tier 1: Repo's .envrc defines step overrides — bundled dev-check.sh honors them
+# (set any of $LINT_COMMAND / $TYPECHECK_COMMAND / $TEST_COMMAND in .envrc)
+[ -n "$LINT_COMMAND$TYPECHECK_COMMAND$TEST_COMMAND" ] && \
+  bash ${CLAUDE_PLUGIN_ROOT}/scripts/dev-check/dev-check.sh
+
+# Tier 2: Project has dev:check in package.json
 pnpm dev:check
 
-# Tier 2: Bundled dev-check scripts (if pnpm dev:check doesn't exist)
+# Tier 3: Bundled dev-check scripts (if neither above applies)
 ${CLAUDE_PLUGIN_ROOT}/scripts/dev-check/dev-check.sh
 
-# Tier 3: Standard scripts (if neither above works)
-pnpm lint && pnpm typecheck && pnpm test
+# Tier 4: Standard scripts (last-resort fallback)
+${LINT_COMMAND:-pnpm lint} && ${TYPECHECK_COMMAND:-pnpm typecheck} && ${TEST_COMMAND:-pnpm test}
 ```
 This runs lint + typecheck + tests on all branch changes vs origin/main.
 Capture and report the full output.
@@ -99,17 +104,21 @@ ls -la **/tests/smoke/ 2>/dev/null
 ls -la **/tests/e2e/ 2>/dev/null
 ```
 
-### Step 2: Run Quality Gate (3-tier fallback)
+### Step 2: Run Quality Gate (4-tier fallback)
 Try in order — use the first that succeeds:
 ```bash
-# Check if project has dev:check
+# Prefer env-var-driven steps if .envrc set them
+[ -n "$LINT_COMMAND$TYPECHECK_COMMAND$TEST_COMMAND" ] && \
+  bash ${CLAUDE_PLUGIN_ROOT}/scripts/dev-check/dev-check.sh
+
+# Otherwise check if project has dev:check
 cat package.json | grep -q '"dev:check"' && pnpm dev:check
 
-# If not, use bundled scripts
+# If not, use bundled scripts directly
 # ${CLAUDE_PLUGIN_ROOT}/scripts/dev-check/dev-check.sh
 
-# If neither, fall back to standard scripts
-# pnpm lint && pnpm typecheck && pnpm test
+# Last resort: standard scripts
+# ${LINT_COMMAND:-pnpm lint} && ${TYPECHECK_COMMAND:-pnpm typecheck} && ${TEST_COMMAND:-pnpm test}
 ```
 - Capture full output
 - Note pass/fail count
