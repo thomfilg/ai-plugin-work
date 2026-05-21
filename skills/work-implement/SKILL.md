@@ -246,9 +246,14 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-implement/tdd-phase-state.js c
 # Should show the current phase and cycle count
 ```
 
-2. Then run broader checks:
+2. Then run broader checks (env-var-first, then fall back to package.json):
 ```bash
-pnpm dev:check   # Runs: dev:lint → dev:typecheck → dev:test
+# If .envrc defines step overrides, route through bundled dev-check.sh which honors them
+if [ -n "$LINT_COMMAND$TYPECHECK_COMMAND$TEST_COMMAND" ]; then
+  bash ${CLAUDE_PLUGIN_ROOT}/scripts/dev-check/dev-check.sh
+else
+  pnpm dev:check   # Runs: dev:lint → dev:typecheck → dev:test
+fi
 ```
 
 Fix any issues before completing.
