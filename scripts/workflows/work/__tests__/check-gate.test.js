@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const { CHECK_GATE_RULES, validateCheckGate } = require('../check-gate');
+const { CHECK_GATE_RULES, validateCheckGate } = require('../gates/check-gate');
 
 const TEMP = path.join(os.tmpdir(), 'check-gate-test-' + process.pid);
 let testTicket;
@@ -63,10 +63,10 @@ describe('check-gate (unit)', () => {
     try {
       process.env.WEB_APPS = '[{"name":"test-app","defaultPort":3000,"type":"vite"}]';
       const configPath = require.resolve('../../lib/config');
-      const gatePath = require.resolve('../check-gate');
+      const gatePath = require.resolve('../gates/check-gate');
       delete require.cache[configPath];
       delete require.cache[gatePath];
-      const { CHECK_GATE_RULES: freshRules } = require('../check-gate');
+      const { CHECK_GATE_RULES: freshRules } = require('../gates/check-gate');
       const rule = freshRules.find((r) => r.name === 'qa-reports');
       fs.mkdirSync(path.join(TEMP, testTicket), { recursive: true });
       const reasons = rule.check(path.join(TEMP, testTicket));
@@ -76,7 +76,7 @@ describe('check-gate (unit)', () => {
       if (savedWebApps === undefined) delete process.env.WEB_APPS;
       else process.env.WEB_APPS = savedWebApps;
       delete require.cache[require.resolve('../../lib/config')];
-      delete require.cache[require.resolve('../check-gate')];
+      delete require.cache[require.resolve('../gates/check-gate')];
     }
   });
 
@@ -85,10 +85,10 @@ describe('check-gate (unit)', () => {
     try {
       process.env.WEB_APPS = '[{"name":"test-app","defaultPort":3000,"type":"vite"}]';
       const configPath = require.resolve('../../lib/config');
-      const gatePath = require.resolve('../check-gate');
+      const gatePath = require.resolve('../gates/check-gate');
       delete require.cache[configPath];
       delete require.cache[gatePath];
-      const { CHECK_GATE_RULES: freshRules } = require('../check-gate');
+      const { CHECK_GATE_RULES: freshRules } = require('../gates/check-gate');
       writeReport('qa-feature.check.md', 'Status: FAILED');
       const rule = freshRules.find((r) => r.name === 'qa-reports');
       const reasons = rule.check(path.join(TEMP, testTicket));
@@ -102,7 +102,7 @@ describe('check-gate (unit)', () => {
       if (savedWebApps === undefined) delete process.env.WEB_APPS;
       else process.env.WEB_APPS = savedWebApps;
       delete require.cache[require.resolve('../../lib/config')];
-      delete require.cache[require.resolve('../check-gate')];
+      delete require.cache[require.resolve('../gates/check-gate')];
     }
   });
 
@@ -145,10 +145,10 @@ describe('check-gate (unit)', () => {
       // Re-require to pick up env change — config caches WEB_APPS at load time
       // so we need to invalidate the config cache
       const configPath = require.resolve('../../lib/config');
-      const gatePath = require.resolve('../check-gate');
+      const gatePath = require.resolve('../gates/check-gate');
       delete require.cache[configPath];
       delete require.cache[gatePath];
-      const { CHECK_GATE_RULES: freshRules } = require('../check-gate');
+      const { CHECK_GATE_RULES: freshRules } = require('../gates/check-gate');
       const rule = freshRules.find((r) => r.name === 'qa-reports');
       fs.mkdirSync(path.join(TEMP, testTicket), { recursive: true });
       const reasons = rule.check(path.join(TEMP, testTicket));
@@ -158,7 +158,7 @@ describe('check-gate (unit)', () => {
       else process.env.WEB_APPS = savedWebApps;
       // Restore original modules
       const configPath = require.resolve('../../lib/config');
-      const gatePath = require.resolve('../check-gate');
+      const gatePath = require.resolve('../gates/check-gate');
       delete require.cache[configPath];
       delete require.cache[gatePath];
     }
@@ -169,10 +169,10 @@ describe('check-gate (unit)', () => {
     try {
       delete process.env.WEB_APPS;
       const configPath = require.resolve('../../lib/config');
-      const gatePath = require.resolve('../check-gate');
+      const gatePath = require.resolve('../gates/check-gate');
       delete require.cache[configPath];
       delete require.cache[gatePath];
-      const { CHECK_GATE_RULES: freshRules } = require('../check-gate');
+      const { CHECK_GATE_RULES: freshRules } = require('../gates/check-gate');
       const rule = freshRules.find((r) => r.name === 'qa-reports');
       fs.mkdirSync(path.join(TEMP, testTicket), { recursive: true });
       const reasons = rule.check(path.join(TEMP, testTicket));
@@ -181,7 +181,7 @@ describe('check-gate (unit)', () => {
       if (savedWebApps === undefined) delete process.env.WEB_APPS;
       else process.env.WEB_APPS = savedWebApps;
       const configPath = require.resolve('../../lib/config');
-      const gatePath = require.resolve('../check-gate');
+      const gatePath = require.resolve('../gates/check-gate');
       delete require.cache[configPath];
       delete require.cache[gatePath];
     }
@@ -192,10 +192,10 @@ describe('check-gate (unit)', () => {
     try {
       process.env.WEB_APPS = '[{"name":"my-app","defaultPort":3000,"type":"vite"}]';
       const configPath = require.resolve('../../lib/config');
-      const gatePath = require.resolve('../check-gate');
+      const gatePath = require.resolve('../gates/check-gate');
       delete require.cache[configPath];
       delete require.cache[gatePath];
-      const { CHECK_GATE_RULES: freshRules } = require('../check-gate');
+      const { CHECK_GATE_RULES: freshRules } = require('../gates/check-gate');
       const rule = freshRules.find((r) => r.name === 'qa-reports');
       fs.mkdirSync(path.join(TEMP, testTicket), { recursive: true });
       const reasons = rule.check(path.join(TEMP, testTicket));
@@ -209,7 +209,7 @@ describe('check-gate (unit)', () => {
       if (savedWebApps === undefined) delete process.env.WEB_APPS;
       else process.env.WEB_APPS = savedWebApps;
       const configPath = require.resolve('../../lib/config');
-      const gatePath = require.resolve('../check-gate');
+      const gatePath = require.resolve('../gates/check-gate');
       delete require.cache[configPath];
       delete require.cache[gatePath];
     }
@@ -220,10 +220,10 @@ describe('check-gate (unit)', () => {
     try {
       process.env.WEB_APPS = '[]';
       const configPath = require.resolve('../../lib/config');
-      const gatePath = require.resolve('../check-gate');
+      const gatePath = require.resolve('../gates/check-gate');
       delete require.cache[configPath];
       delete require.cache[gatePath];
-      const { validateCheckGate: freshValidate } = require('../check-gate');
+      const { validateCheckGate: freshValidate } = require('../gates/check-gate');
       writeReport('tests.check.md', 'Status: APPROVED');
       writeReport('code-review.check.md', 'Status: APPROVED');
       writeReport('completion.check.md', 'Status: COMPLETE');
@@ -240,7 +240,7 @@ describe('check-gate (unit)', () => {
       if (savedWebApps === undefined) delete process.env.WEB_APPS;
       else process.env.WEB_APPS = savedWebApps;
       const configPath = require.resolve('../../lib/config');
-      const gatePath = require.resolve('../check-gate');
+      const gatePath = require.resolve('../gates/check-gate');
       delete require.cache[configPath];
       delete require.cache[gatePath];
     }
@@ -582,10 +582,10 @@ describe('check-gate (unit)', () => {
     try {
       process.env.WEB_APPS = '[{"name":"test-app","defaultPort":3000,"type":"vite"}]';
       const configPath = require.resolve('../../lib/config');
-      const gatePath = require.resolve('../check-gate');
+      const gatePath = require.resolve('../gates/check-gate');
       delete require.cache[configPath];
       delete require.cache[gatePath];
-      const { CHECK_GATE_RULES: freshRules } = require('../check-gate');
+      const { CHECK_GATE_RULES: freshRules } = require('../gates/check-gate');
       writeReport(
         'qa-feature.check.md',
         'QA skipped because no WEB_APPS configured\n\nStatus: NOT_APPLICABLE'
@@ -597,7 +597,7 @@ describe('check-gate (unit)', () => {
       if (savedWebApps === undefined) delete process.env.WEB_APPS;
       else process.env.WEB_APPS = savedWebApps;
       delete require.cache[require.resolve('../../lib/config')];
-      delete require.cache[require.resolve('../check-gate')];
+      delete require.cache[require.resolve('../gates/check-gate')];
     }
   });
 
@@ -666,10 +666,10 @@ describe('check-gate (unit)', () => {
     try {
       process.env.WEB_APPS = '[{"name":"my-app","defaultPort":3000,"type":"vite"}]';
       const configPath = require.resolve('../../lib/config');
-      const gatePath = require.resolve('../check-gate');
+      const gatePath = require.resolve('../gates/check-gate');
       delete require.cache[configPath];
       delete require.cache[gatePath];
-      const { validateCheckGate: freshValidate } = require('../check-gate');
+      const { validateCheckGate: freshValidate } = require('../gates/check-gate');
       writeReport('tests.check.md', 'Status: APPROVED');
       writeReport('code-review.check.md', 'Status: APPROVED');
       writeReport('completion.check.md', 'Status: COMPLETE');
@@ -693,7 +693,7 @@ describe('check-gate (unit)', () => {
       if (savedWebApps === undefined) delete process.env.WEB_APPS;
       else process.env.WEB_APPS = savedWebApps;
       delete require.cache[require.resolve('../../lib/config')];
-      delete require.cache[require.resolve('../check-gate')];
+      delete require.cache[require.resolve('../gates/check-gate')];
     }
   });
 

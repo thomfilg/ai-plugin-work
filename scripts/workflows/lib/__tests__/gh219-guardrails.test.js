@@ -62,9 +62,18 @@ const requestIndex = require(path.join(__dirname, '..', 'request-index'));
 
 // ─── Resolve enforcement context module paths for mock injection ─────────────
 
-const ENFORCEMENT_CTX_PATH = path.join(__dirname, '..', '..', 'work', 'work-enforcement-context');
+const ENFORCEMENT_CTX_PATH = path.join(
+  __dirname,
+  '..',
+  '..',
+  'work',
+  'lib',
+  'work-enforcement-context'
+);
 const WORK_STATE_PATH = require.resolve(path.join(__dirname, '..', '..', 'work', 'work-state'));
-const TASK_PARSER_PATH = require.resolve(path.join(__dirname, '..', '..', 'work', 'task-parser'));
+const TASK_PARSER_PATH = require.resolve(
+  path.join(__dirname, '..', '..', 'work', 'lib', 'task-parser')
+);
 const CONFIG_PATH = require.resolve(path.join(__dirname, '..', '..', 'lib', 'config'));
 
 // ─── Helpers ────────────────────────────────────────────────────────────────

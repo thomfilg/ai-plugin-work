@@ -13,7 +13,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
-const HOOK_PATH = path.join(__dirname, '..', 'work.workflow.js');
+const HOOK_PATH = path.join(__dirname, '..', 'engine', 'work.workflow.js');
 const getConfig = require(path.join(__dirname, '..', '..', 'lib', 'get-config'));
 const TASKS_BASE = getConfig.require('TASKS_BASE');
 // TEST-* dirs are cleaned globally by scripts/run-tests.sh via test-cleanup.js

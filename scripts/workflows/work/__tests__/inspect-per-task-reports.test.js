@@ -13,7 +13,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
-const { inspect } = require('../inspect');
+const { inspect } = require('../engine/inspect');
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 

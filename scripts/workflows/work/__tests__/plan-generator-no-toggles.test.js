@@ -18,7 +18,7 @@ const assert = require('node:assert/strict');
 const path = require('path');
 const fs = require('fs');
 
-const { generatePlan } = require(path.join(__dirname, '..', 'plan-generator'));
+const { generatePlan } = require(path.join(__dirname, '..', 'engine', 'plan-generator'));
 const { STEPS } = require(path.join(__dirname, '..', 'step-registry'));
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -86,7 +86,10 @@ function makeState(overrides = {}) {
 // ─── Tests ──────────────────────────────────────────────────────────────────
 
 describe('GH-253 Task 4: plan-generator.js toggle removal', () => {
-  const planGenSource = fs.readFileSync(path.join(__dirname, '..', 'plan-generator.js'), 'utf8');
+  const planGenSource = fs.readFileSync(
+    path.join(__dirname, '..', 'engine', 'plan-generator.js'),
+    'utf8'
+  );
 
   it('does not reference WORK_BRIEF_ENABLED in source code', () => {
     assert.ok(

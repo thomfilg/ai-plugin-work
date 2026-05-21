@@ -698,7 +698,7 @@ function cmdTransition(ticketId, targetPhase, args) {
 
 function auditException(ticketId, taskNum, category, reason, allow) {
   try {
-    const { appendEnforcementAudit } = require('../work/work-actions');
+    const { appendEnforcementAudit } = require('../work/lib/work-actions');
     appendEnforcementAudit(ticketId, {
       origin: 'ai-subtask',
       task: taskNum || null,

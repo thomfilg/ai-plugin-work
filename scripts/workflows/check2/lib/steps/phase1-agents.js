@@ -31,15 +31,7 @@ module.exports = function registerPhase1(register) {
           );
           if (hasVerdict(completionReport, ['COMPLETE'])) {
             const { markVerified } = require(
-              path.join(
-                __dirname,
-                '..',
-                '..',
-                '..',
-                'work-orchestrator',
-                'lib',
-                'mark-task-progress'
-              )
+              path.join(__dirname, '..', '..', '..', 'work', 'lib', 'mark-task-progress')
             );
             markVerified(ctx.tasksDir);
           }

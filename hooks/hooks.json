@@ -58,11 +58,11 @@
           },
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-orchestrator/hooks/protect-orchestrator-state.js"
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/hooks/protect-orchestrator-state.js"
           },
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-orchestrator/hooks/protect-task-scope.js"
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/hooks/protect-task-scope.js"
           }
         ]
       },
@@ -92,11 +92,11 @@
           },
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-orchestrator/hooks/protect-orchestrator-state.js"
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/hooks/protect-orchestrator-state.js"
           },
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-orchestrator/hooks/protect-task-scope.js"
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/hooks/protect-task-scope.js"
           }
         ]
       },
@@ -142,7 +142,7 @@
           },
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-orchestrator/hooks/work-auto-advance.js"
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/hooks/work-auto-advance.js"
           },
           {
             "type": "command",

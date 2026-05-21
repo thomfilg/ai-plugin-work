@@ -13,7 +13,7 @@ const path = require('path');
 const os = require('os');
 
 const { STEP_ARTIFACTS, archiveStepArtifacts } = require(
-  path.join(__dirname, '..', 'artifact-archival')
+  path.join(__dirname, '..', 'lib', 'artifact-archival')
 );
 const { STEPS } = require(path.join(__dirname, '..', 'step-registry'));
 

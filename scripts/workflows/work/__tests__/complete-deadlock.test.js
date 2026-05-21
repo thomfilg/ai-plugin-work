@@ -177,7 +177,10 @@ describe('GH-106: complete step deadlock fix', () => {
 
   describe('5. work.workflow.js: STEP_ARTIFACTS excludes complete', () => {
     it('STEP_ARTIFACTS does not have a complete entry (recovery archival is in unstick-complete.js)', () => {
-      const src = fs.readFileSync(path.join(__dirname, '..', 'work.workflow.js'), 'utf-8');
+      const src = fs.readFileSync(
+        path.join(__dirname, '..', 'engine', 'work.workflow.js'),
+        'utf-8'
+      );
       assert.doesNotMatch(
         src,
         /STEP_ARTIFACTS[\s\S]*?\[STEPS\.complete\]/,
@@ -238,9 +241,9 @@ describe('GH-106: complete step deadlock fix', () => {
       process.env.TASKS_BASE = TEMP_TASKS_BASE;
       process.env.WORKTREES_BASE = TEMP_TASKS_BASE;
       process.env.REPO_NAME = 'test';
-      delete require.cache[require.resolve('../unstick-complete')];
+      delete require.cache[require.resolve('../engine/unstick-complete')];
       // Must not throw — if it does, all subsequent tests in this block fail visibly
-      const mod = require('../unstick-complete');
+      const mod = require('../engine/unstick-complete');
       sanitizeTicketId = mod.sanitizeTicketId;
       isStuckInComplete = mod.isStuckInComplete;
       archiveArtifacts = mod.archiveArtifacts;

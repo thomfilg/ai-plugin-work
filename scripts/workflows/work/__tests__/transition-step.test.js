@@ -80,7 +80,7 @@ function createDeps(overrides = {}) {
 describe('transition-step.js (GH-245 Task 4)', () => {
   describe('forward transition logs "step deferred" for intermediate steps', () => {
     it('should mark intermediate step status as "completed" and log "step deferred" in audit', () => {
-      const { transitionStep } = require('../transition-step');
+      const { transitionStep } = require('../engine/transition-step');
       const { ALL_STEPS } = require('../step-registry');
 
       // Set up state at 'ticket' (index 0), transition to 'brief' (index 2)
@@ -114,7 +114,7 @@ describe('transition-step.js (GH-245 Task 4)', () => {
     });
 
     it('should log "step deferred" in actions for intermediate steps', () => {
-      const { transitionStep } = require('../transition-step');
+      const { transitionStep } = require('../engine/transition-step');
 
       const deps = createDeps();
       const ws = deps.loadWorkState('TEST-FWD-002');
@@ -140,7 +140,7 @@ describe('transition-step.js (GH-245 Task 4)', () => {
     });
 
     it('should mark multiple intermediate steps as "completed" and log "step deferred" when jumping', () => {
-      const { transitionStep } = require('../transition-step');
+      const { transitionStep } = require('../engine/transition-step');
 
       const deps = createDeps();
       const ws = deps.loadWorkState('TEST-FWD-003');
@@ -160,7 +160,7 @@ describe('transition-step.js (GH-245 Task 4)', () => {
 
   describe('analyzeActions ignores "step deferred" entries', () => {
     it('should not count "step deferred" as commands in analyzeActions', () => {
-      const { analyzeActions } = require('../work-actions');
+      const { analyzeActions } = require('../lib/work-actions');
 
       const actions = [
         { step: 'ticket', timestamp: '2026-01-01T00:00:00.000Z', what: 'step started' },
@@ -184,7 +184,7 @@ describe('transition-step.js (GH-245 Task 4)', () => {
 
 describe('transition-step.js (GH-260): generic step-verify gate', () => {
   it('should block forward transition when verify() returns false for non-soft step', () => {
-    const { transitionStep } = require('../transition-step');
+    const { transitionStep } = require('../engine/transition-step');
     const { STEPS, ALL_STEPS } = require('../step-registry');
 
     // Put state at follow_up step
@@ -215,7 +215,7 @@ describe('transition-step.js (GH-260): generic step-verify gate', () => {
   });
 
   it('should allow forward transition when verify() returns true for non-soft step', () => {
-    const { transitionStep } = require('../transition-step');
+    const { transitionStep } = require('../engine/transition-step');
     const { STEPS, ALL_STEPS } = require('../step-registry');
 
     const followUpIdx = ALL_STEPS.indexOf(STEPS.follow_up);
@@ -243,7 +243,7 @@ describe('transition-step.js (GH-260): generic step-verify gate', () => {
   });
 
   it('should skip verify gate for soft steps', () => {
-    const { transitionStep } = require('../transition-step');
+    const { transitionStep } = require('../engine/transition-step');
     const { STEPS, ALL_STEPS } = require('../step-registry');
 
     const reportsIdx = ALL_STEPS.indexOf(STEPS.reports);
@@ -271,7 +271,7 @@ describe('transition-step.js (GH-260): generic step-verify gate', () => {
   });
 
   it('should skip verify gate for backward transitions', () => {
-    const { transitionStep } = require('../transition-step');
+    const { transitionStep } = require('../engine/transition-step');
     const { STEPS, ALL_STEPS } = require('../step-registry');
 
     const ciIdx = ALL_STEPS.indexOf(STEPS.ci);
@@ -299,7 +299,7 @@ describe('transition-step.js (GH-260): generic step-verify gate', () => {
   });
 
   it('should allow forward transition when step has no verify function', () => {
-    const { transitionStep } = require('../transition-step');
+    const { transitionStep } = require('../engine/transition-step');
     const { STEPS, ALL_STEPS } = require('../step-registry');
 
     const cleanupIdx = ALL_STEPS.indexOf(STEPS.cleanup);
@@ -325,7 +325,7 @@ describe('transition-step.js (GH-260): generic step-verify gate', () => {
   });
 
   it('should throw when softSteps is missing from deps', () => {
-    const { transitionStep } = require('../transition-step');
+    const { transitionStep } = require('../engine/transition-step');
     const { STEPS, ALL_STEPS } = require('../step-registry');
 
     const followUpIdx = ALL_STEPS.indexOf(STEPS.follow_up);
@@ -348,7 +348,7 @@ describe('transition-step.js (GH-260): generic step-verify gate', () => {
   });
 
   it('should block ci → cleanup when CI verify returns false', () => {
-    const { transitionStep } = require('../transition-step');
+    const { transitionStep } = require('../engine/transition-step');
     const { STEPS, ALL_STEPS } = require('../step-registry');
 
     const ciIdx = ALL_STEPS.indexOf(STEPS.ci);
@@ -378,7 +378,7 @@ describe('transition-step.js (GH-260): generic step-verify gate', () => {
   });
 
   it('should block forward transition when verify() throws an error', () => {
-    const { transitionStep } = require('../transition-step');
+    const { transitionStep } = require('../engine/transition-step');
     const { STEPS, ALL_STEPS } = require('../step-registry');
 
     const followUpIdx = ALL_STEPS.indexOf(STEPS.follow_up);
@@ -443,7 +443,7 @@ describe('transition-step.js (GH-299): check-drift gate', () => {
   }
 
   it('should proceed normally when SHA matches on forward transition from post-check step', () => {
-    const { transitionStep } = require('../transition-step');
+    const { transitionStep } = require('../engine/transition-step');
     const matchingSha = 'b'.repeat(40);
     const { deps } = depsAtStep('pr', {
       ticket: 'TEST-DRIFT-MATCH',
@@ -458,7 +458,7 @@ describe('transition-step.js (GH-299): check-drift gate', () => {
   });
 
   it('should redirect to check when SHA differs on forward transition from post-check step', () => {
-    const { transitionStep } = require('../transition-step');
+    const { transitionStep } = require('../engine/transition-step');
     const { deps, STEPS } = depsAtStep('pr', {
       ticket: 'TEST-DRIFT-DIFF',
       checkPassedSha: 'a'.repeat(40),
@@ -476,7 +476,7 @@ describe('transition-step.js (GH-299): check-drift gate', () => {
   });
 
   it('should skip gate on backward transitions', () => {
-    const { transitionStep } = require('../transition-step');
+    const { transitionStep } = require('../engine/transition-step');
     const { deps, STEPS } = depsAtStep('pr', {
       ticket: 'TEST-DRIFT-BACK',
       checkPassedSha: 'a'.repeat(40),
@@ -491,7 +491,7 @@ describe('transition-step.js (GH-299): check-drift gate', () => {
   });
 
   it('should skip gate when checkPassedSha is missing from work state', () => {
-    const { transitionStep } = require('../transition-step');
+    const { transitionStep } = require('../engine/transition-step');
     const { deps } = depsAtStep('pr', {
       ticket: 'TEST-DRIFT-NOSHA',
       checkPassedSha: undefined,
@@ -505,7 +505,7 @@ describe('transition-step.js (GH-299): check-drift gate', () => {
   });
 
   it('should skip gate (fail-open) when getHeadSha returns null', () => {
-    const { transitionStep } = require('../transition-step');
+    const { transitionStep } = require('../engine/transition-step');
     const { deps } = depsAtStep('pr', {
       ticket: 'TEST-DRIFT-NULL',
       checkPassedSha: 'a'.repeat(40),
@@ -517,7 +517,7 @@ describe('transition-step.js (GH-299): check-drift gate', () => {
   });
 
   it('should record checkPassedSha on check → pr transition', () => {
-    const { transitionStep } = require('../transition-step');
+    const { transitionStep } = require('../engine/transition-step');
     const { STEPS, ALL_STEPS } = require('../step-registry');
     const expectedSha = 'c'.repeat(40);
 
@@ -540,7 +540,7 @@ describe('transition-step.js (GH-299): check-drift gate', () => {
   });
 
   it('should clear checkInterruptedStep on check → pr transition', () => {
-    const { transitionStep } = require('../transition-step');
+    const { transitionStep } = require('../engine/transition-step');
     const { STEPS, ALL_STEPS } = require('../step-registry');
 
     const checkIdx = ALL_STEPS.indexOf(STEPS.check);
@@ -563,7 +563,7 @@ describe('transition-step.js (GH-299): check-drift gate', () => {
   });
 
   it('should set checkInterruptedStep on drift detection', () => {
-    const { transitionStep } = require('../transition-step');
+    const { transitionStep } = require('../engine/transition-step');
     const { deps, STEPS } = depsAtStep('follow_up', {
       ticket: 'TEST-DRIFT-INTERRUPT',
       checkPassedSha: 'a'.repeat(40),
@@ -583,7 +583,7 @@ describe('transition-step.js (GH-299): check-drift gate', () => {
   });
 
   it('should call appendAction with re-check message on drift', () => {
-    const { transitionStep } = require('../transition-step');
+    const { transitionStep } = require('../engine/transition-step');
     const { deps, STEPS } = depsAtStep('ci', {
       ticket: 'TEST-DRIFT-ACTION',
       checkPassedSha: 'a'.repeat(40),

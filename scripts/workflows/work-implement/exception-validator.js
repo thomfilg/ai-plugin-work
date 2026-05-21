@@ -114,7 +114,7 @@ function isCheckpointTask(ticketId, taskNum, tasksBase) {
     const num = Number(taskNum);
     if (!Number.isInteger(num) || num < 1) return false;
 
-    const { parseTasks } = require('../work/task-parser');
+    const { parseTasks } = require('../work/lib/task-parser');
     const tasksDir = path.join(tasksBase, ticketId);
     const tasks = parseTasks(tasksDir);
     if (!tasks) return false;

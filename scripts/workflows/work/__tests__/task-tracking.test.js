@@ -239,7 +239,7 @@ Verify all prior tasks are correctly implemented.
     );
 
     // Run orchestrator
-    const ORCH_PATH = path.join(__dirname, '..', 'work.workflow.js');
+    const ORCH_PATH = path.join(__dirname, '..', 'engine', 'work.workflow.js');
     const { result } = await new Promise((resolve, reject) => {
       const proc = spawn('node', [ORCH_PATH, ticket], {
         stdio: ['pipe', 'pipe', 'pipe'],
@@ -307,7 +307,7 @@ Verify all prior tasks are correctly implemented.
       })
     );
 
-    const ORCH_PATH = path.join(__dirname, '..', 'work.workflow.js');
+    const ORCH_PATH = path.join(__dirname, '..', 'engine', 'work.workflow.js');
     const { result } = await new Promise((resolve, reject) => {
       const proc = spawn('node', [ORCH_PATH, 'GH-501'], {
         stdio: ['pipe', 'pipe', 'pipe'],

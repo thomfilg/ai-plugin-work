@@ -12,7 +12,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 
-const WORKFLOW_PATH = path.join(__dirname, '..', 'work.workflow.js');
+const WORKFLOW_PATH = path.join(__dirname, '..', 'engine', 'work.workflow.js');
 const source = fs.readFileSync(WORKFLOW_PATH, 'utf-8');
 
 describe('work.workflow.js dependency wiring', () => {

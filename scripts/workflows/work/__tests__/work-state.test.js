@@ -298,10 +298,14 @@ describe('work-state.js', () => {
 
         // Load ALL_STEPS from work-orchestrator.js via graph subcommand
         const orchestratorSteps = await new Promise((resolve, reject) => {
-          const proc = spawn('node', [path.join(__dirname, '..', 'work.workflow.js'), 'graph'], {
-            stdio: ['pipe', 'pipe', 'pipe'],
-            env: { ...process.env, TASKS_BASE: TEMP_TASKS_BASE },
-          });
+          const proc = spawn(
+            'node',
+            [path.join(__dirname, '..', 'engine', 'work.workflow.js'), 'graph'],
+            {
+              stdio: ['pipe', 'pipe', 'pipe'],
+              env: { ...process.env, TASKS_BASE: TEMP_TASKS_BASE },
+            }
+          );
           let stdout = '';
           proc.stdout.on('data', (d) => {
             stdout += d.toString();

@@ -20,7 +20,7 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('path');
 
-const { generatePlan } = require(path.join(__dirname, '..', 'plan-generator'));
+const { generatePlan } = require(path.join(__dirname, '..', 'engine', 'plan-generator'));
 const { STEPS } = require(path.join(__dirname, '..', 'step-registry'));
 
 // ─── Helpers ────────────────────────────────────────────────────────────────

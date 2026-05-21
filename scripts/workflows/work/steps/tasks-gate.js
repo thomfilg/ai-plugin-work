@@ -19,11 +19,11 @@
 function tasksGateStep(add, s, ctx) {
   const { STEPS, tasksDir, path } = ctx;
   const fs = require('fs');
-  const { parseTasks } = require('../task-parser');
+  const { parseTasks } = require('../lib/task-parser');
   const { validateAll } = require('../../lib/task-scope');
   const {
     validateConsistency: validateGherkinTaskRefs,
-  } = require('../../work-orchestrator/lib/gherkin-task-refs');
+  } = require('../../work/lib/gherkin-task-refs');
 
   if (!s || !s.hasTasks) {
     add(STEPS.tasks_gate, 'DEFER', null, 'No tasks.md present');

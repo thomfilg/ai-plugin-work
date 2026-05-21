@@ -25,7 +25,7 @@
 const path = require('path');
 
 /**
- * @typedef {import('../work/work-enforcement-context').EnforcementContext} EnforcementContext
+ * @typedef {import('../work/lib/work-enforcement-context').EnforcementContext} EnforcementContext
  *
  * Unified enforcement context composed by `loadEnforcementContext` in
  * `workflows/work/work-enforcement-context.js` (Task 2). Contains:
@@ -40,7 +40,7 @@ const path = require('path');
  */
 
 /**
- * @typedef {import('../work/work-enforcement-context').EnforcementContextError} EnforcementContextError
+ * @typedef {import('../work/lib/work-enforcement-context').EnforcementContextError} EnforcementContextError
  *
  * Structured error descriptor attached to `EnforcementContext.error`:
  *   - `code`        {string}   stable identifier (e.g. 'AMBIGUOUS_SUBTASK')

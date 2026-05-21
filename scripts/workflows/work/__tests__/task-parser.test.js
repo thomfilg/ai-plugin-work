@@ -12,7 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const { parseTasks, buildTaskPrompt } = require(path.join(__dirname, '..', 'task-parser'));
+const { parseTasks, buildTaskPrompt } = require(path.join(__dirname, '..', 'lib', 'task-parser'));
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 

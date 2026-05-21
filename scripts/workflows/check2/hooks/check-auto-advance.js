@@ -34,9 +34,9 @@ function main() {
 
   // Guard: find active /check2 session via marker file
   const { resolvePluginPaths } = require(
-    path.join(__dirname, '..', '..', 'work-orchestrator', 'lib', 'resolve-plugin-root')
+    path.join(__dirname, '..', '..', 'work', 'lib', 'resolve-plugin-root')
   );
-  const { libDir } = resolvePluginPaths(path.join(__dirname, '..', '..', 'work-orchestrator'), 2);
+  const { libDir } = resolvePluginPaths(path.join(__dirname, '..', '..', 'work'), 2);
   const getConfig = require(path.join(libDir, 'get-config'));
   const WORKTREES_BASE = getConfig('WORKTREES_BASE') || '';
   const TASKS_BASE =

@@ -355,7 +355,7 @@ function createAuditCallback(ticketId, toolName, filePath, ctx) {
   return (entry) => {
     try {
       const { appendEnforcementAudit } = require(
-        path.join(__dirname, '..', '..', 'work', 'work-actions')
+        path.join(__dirname, '..', '..', 'work', 'lib', 'work-actions')
       );
       appendEnforcementAudit(ticketId, {
         origin: entry.origin || (ctx && ctx.origin) || 'user',
@@ -422,7 +422,7 @@ async function main() {
   let ctx;
   try {
     const { loadEnforcementContext } = require(
-      path.join(__dirname, '..', '..', 'work', 'work-enforcement-context')
+      path.join(__dirname, '..', '..', 'work', 'lib', 'work-enforcement-context')
     );
     ctx = loadEnforcementContext(ticketId);
   } catch {

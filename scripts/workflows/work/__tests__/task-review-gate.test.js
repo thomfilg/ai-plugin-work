@@ -30,7 +30,7 @@ after(() => fs.rmSync(TEMP, { recursive: true, force: true }));
 
 describe('computeTaskDiff', () => {
   it('returns { base, head } when .last-commit-sha contains a valid ancestor SHA', () => {
-    const { computeTaskDiff } = require('../task-review-gate');
+    const { computeTaskDiff } = require('../gates/task-review-gate');
     // Write a valid 40-char hex SHA
     const fakeSha = 'a'.repeat(40);
     fs.writeFileSync(path.join(tasksDir, '.last-commit-sha'), fakeSha);
@@ -54,7 +54,7 @@ describe('computeTaskDiff', () => {
   });
 
   it('falls back to base branch when .last-commit-sha file is missing', () => {
-    const { computeTaskDiff } = require('../task-review-gate');
+    const { computeTaskDiff } = require('../gates/task-review-gate');
     // No .last-commit-sha file written
     const result = computeTaskDiff(tasksDir, 'T-2');
     assert.strictEqual(result.head, 'HEAD');
@@ -67,7 +67,7 @@ describe('computeTaskDiff', () => {
   });
 
   it('falls back to base branch when SHA is not 40-char hex', () => {
-    const { computeTaskDiff } = require('../task-review-gate');
+    const { computeTaskDiff } = require('../gates/task-review-gate');
     fs.writeFileSync(path.join(tasksDir, '.last-commit-sha'), 'not-a-valid-sha');
     const result = computeTaskDiff(tasksDir, 'T-3');
     assert.strictEqual(result.head, 'HEAD');
@@ -75,7 +75,7 @@ describe('computeTaskDiff', () => {
   });
 
   it('falls back to base branch when SHA is not an ancestor of HEAD', () => {
-    const { computeTaskDiff } = require('../task-review-gate');
+    const { computeTaskDiff } = require('../gates/task-review-gate');
     const fakeSha = 'b'.repeat(40);
     fs.writeFileSync(path.join(tasksDir, '.last-commit-sha'), fakeSha);
 
@@ -101,7 +101,7 @@ describe('computeTaskDiff', () => {
   });
 
   it('trims whitespace from SHA file contents', () => {
-    const { computeTaskDiff } = require('../task-review-gate');
+    const { computeTaskDiff } = require('../gates/task-review-gate');
     const fakeSha = 'c'.repeat(40);
     fs.writeFileSync(path.join(tasksDir, '.last-commit-sha'), `  ${fakeSha}\n`);
 
@@ -127,7 +127,7 @@ describe('computeTaskDiff', () => {
 
 describe('executeTaskReview', () => {
   it('returns passed:true when both reviews pass', () => {
-    const { executeTaskReview } = require('../task-review-gate');
+    const { executeTaskReview } = require('../gates/task-review-gate');
     const deps = {
       runTestsReview: () => ({ passed: true, summary: 'All tests pass' }),
       runCodeReview: () => ({ passed: true, summary: 'Code looks good' }),
@@ -141,7 +141,7 @@ describe('executeTaskReview', () => {
   });
 
   it('returns passed:false with reasons when tests review fails', () => {
-    const { executeTaskReview } = require('../task-review-gate');
+    const { executeTaskReview } = require('../gates/task-review-gate');
     const deps = {
       runTestsReview: () => ({ passed: false, summary: 'Missing coverage for module X' }),
       runCodeReview: () => ({ passed: true, summary: 'Code looks good' }),
@@ -154,7 +154,7 @@ describe('executeTaskReview', () => {
   });
 
   it('returns passed:false with reasons when code review fails', () => {
-    const { executeTaskReview } = require('../task-review-gate');
+    const { executeTaskReview } = require('../gates/task-review-gate');
     const deps = {
       runTestsReview: () => ({ passed: true, summary: 'All tests pass' }),
       runCodeReview: () => ({ passed: false, summary: 'Security issue found' }),
@@ -167,7 +167,7 @@ describe('executeTaskReview', () => {
   });
 
   it('returns passed:false with multiple reasons when both reviews fail', () => {
-    const { executeTaskReview } = require('../task-review-gate');
+    const { executeTaskReview } = require('../gates/task-review-gate');
     const deps = {
       runTestsReview: () => ({ passed: false, summary: 'Missing tests' }),
       runCodeReview: () => ({ passed: false, summary: 'Bad patterns' }),
@@ -179,7 +179,7 @@ describe('executeTaskReview', () => {
   });
 
   it('writes review artifacts to tasksDir', () => {
-    const { executeTaskReview } = require('../task-review-gate');
+    const { executeTaskReview } = require('../gates/task-review-gate');
     const deps = {
       runTestsReview: () => ({ passed: true, summary: 'All tests pass' }),
       runCodeReview: () => ({ passed: true, summary: 'Code looks good' }),

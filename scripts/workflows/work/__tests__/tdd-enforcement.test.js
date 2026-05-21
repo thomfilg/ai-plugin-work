@@ -16,7 +16,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
-const HOOK_PATH = path.join(__dirname, '..', 'work.workflow.js');
+const HOOK_PATH = path.join(__dirname, '..', 'engine', 'work.workflow.js');
 
 // ─── Temp dir for isolated TASKS_BASE ─────────────────────────────────────────
 
@@ -666,7 +666,7 @@ describe('TDD enforcement', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('readTddEvidence with taskNum (per-task paths)', () => {
-    const { readTddEvidence } = require('../tdd-enforcement');
+    const { readTddEvidence } = require('../lib/tdd-enforcement');
 
     it('reads from per-task path when taskNum is provided', () => {
       const ticket = 'TDDT2-100';
@@ -914,7 +914,7 @@ describe('TDD enforcement', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('TDD_PROTOCOL includes --task <N> in CLI examples', () => {
-    const { TDD_PROTOCOL } = require('../tdd-enforcement');
+    const { TDD_PROTOCOL } = require('../lib/tdd-enforcement');
 
     it('init command includes --task <N>', () => {
       assert.match(TDD_PROTOCOL, /init <TICKET_ID> --task <N>/);
@@ -958,7 +958,7 @@ describe('TDD enforcement', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('validateTddEvidence structured exception (GH-258)', () => {
-    const { validateTddEvidence } = require('../tdd-enforcement');
+    const { validateTddEvidence } = require('../lib/tdd-enforcement');
 
     it('legacy string exception still valid', () => {
       const result = validateTddEvidence({ exception: 'config-only change', cycles: [] });

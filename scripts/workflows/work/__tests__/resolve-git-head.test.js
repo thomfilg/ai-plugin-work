@@ -12,7 +12,7 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { resolveGitHead, getHeadSha } = require('../git-utils');
+const { resolveGitHead, getHeadSha } = require('../lib/git-utils');
 
 describe('resolveGitHead (GH-260 Issue 1)', () => {
   const tmpDirs = [];

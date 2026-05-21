@@ -139,7 +139,7 @@ if (!taskNum) {
 
 try {
   const { resolveTaskType } = require(
-    path.join(__dirname, '..', '..', 'work-orchestrator', 'lib', 'resolve-task-type')
+    path.join(__dirname, '..', '..', 'work', 'lib', 'resolve-task-type')
   );
   const tasksDir = path.join(TASKS_BASE, safeTicket);
   const taskType = resolveTaskType(tasksDir, taskNum);
@@ -157,7 +157,7 @@ let exists = false;
 let valid = false;
 try {
   const { readTddEvidence, validateTddEvidence } = require(
-    path.join(__dirname, '..', '..', 'work', 'tdd-enforcement')
+    path.join(__dirname, '..', '..', 'work', 'lib', 'tdd-enforcement')
   );
   const result = readTddEvidence(safeTicket, 'implement', taskNum);
   exists = result.exists;
@@ -181,7 +181,7 @@ const tasksDir = path.join(TASKS_BASE, safeTicket);
 
 let testCommand = null;
 try {
-  const { parseTasks } = require(path.join(__dirname, '..', '..', 'work', 'task-parser'));
+  const { parseTasks } = require(path.join(__dirname, '..', '..', 'work', 'lib', 'task-parser'));
   const tasks = parseTasks(tasksDir);
   const currentTask = tasks?.find((t) => t.num === taskNum);
   testCommand = currentTask?.testCommand || null;
@@ -198,9 +198,7 @@ if (testCommand) {
   // Read current phase
   let currentPhase = 'red';
   try {
-    const { readPhase } = require(
-      path.join(__dirname, '..', '..', 'work-orchestrator', 'tdd-next')
-    );
+    const { readPhase } = require(path.join(__dirname, '..', '..', 'work', 'tdd-next'));
     const phase = readPhase(safeTicket, taskNum);
     currentPhase = phase?.currentPhase || 'red';
   } catch {

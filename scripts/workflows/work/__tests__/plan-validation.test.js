@@ -12,12 +12,12 @@ const assert = require('node:assert/strict');
 
 describe('validatePlan (GH-245 Task 8)', () => {
   it('should export validatePlan as a function', () => {
-    const { validatePlan } = require('../plan-generator');
+    const { validatePlan } = require('../engine/plan-generator');
     assert.equal(typeof validatePlan, 'function', 'plan-generator must export validatePlan');
   });
 
   it('should throw for a plan containing a SKIP action', () => {
-    const { validatePlan } = require('../plan-generator');
+    const { validatePlan } = require('../engine/plan-generator');
 
     const plan = [
       { step: 'ticket', action: 'RUN', reason: 'needed' },
@@ -41,7 +41,7 @@ describe('validatePlan (GH-245 Task 8)', () => {
   });
 
   it('should not throw for a plan with only RUN and DEFER actions', () => {
-    const { validatePlan } = require('../plan-generator');
+    const { validatePlan } = require('../engine/plan-generator');
 
     const plan = [
       { step: 'ticket', action: 'RUN', reason: 'needed' },
@@ -56,13 +56,13 @@ describe('validatePlan (GH-245 Task 8)', () => {
   });
 
   it('should not throw for an empty plan', () => {
-    const { validatePlan } = require('../plan-generator');
+    const { validatePlan } = require('../engine/plan-generator');
 
     assert.doesNotThrow(() => validatePlan([]), 'validatePlan should pass silently for empty plan');
   });
 
   it('should throw with descriptive error including step name for SKIP entries', () => {
-    const { validatePlan } = require('../plan-generator');
+    const { validatePlan } = require('../engine/plan-generator');
 
     const plan = [{ step: 'implement', action: 'SKIP', reason: 'skipped' }];
 

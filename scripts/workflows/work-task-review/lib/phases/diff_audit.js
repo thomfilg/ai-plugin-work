@@ -14,7 +14,7 @@ const { TASK_REVIEW_PHASES } = require('../../task-review-phase-registry');
 
 let taskReviewGate;
 try {
-  taskReviewGate = require('../../../work/task-review-gate');
+  taskReviewGate = require('../../../work/gates/task-review-gate');
 } catch {
   taskReviewGate = null;
 }

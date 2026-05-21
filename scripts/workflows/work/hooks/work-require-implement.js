@@ -46,9 +46,9 @@ try {
 if (!config) process.exit(0);
 
 // ─── Imports: adapter, preflight, audit (GH-219 Task 13) ─────────────────
-const { loadEnforcementContext } = require('../work-enforcement-context');
+const { loadEnforcementContext } = require('../lib/work-enforcement-context');
 const { runPreflight } = require('../../lib/preflight');
-const { appendEnforcementAudit } = require('../work-actions');
+const { appendEnforcementAudit } = require('../lib/work-actions');
 const { getCurrentTaskId } = require('../../lib/scripts/get-ticket-id');
 
 // Tools that require /work-implement first

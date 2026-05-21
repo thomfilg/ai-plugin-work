@@ -35,12 +35,12 @@ process.env.TASKS_BASE = TEMP_TASKS_BASE;
 // TEMP_TASKS_BASE override takes effect even if another test loaded them first.
 delete require.cache[require.resolve('../../lib/config')];
 delete require.cache[require.resolve('../work-state')];
-delete require.cache[require.resolve('../work-claims')];
+delete require.cache[require.resolve('../lib/work-claims')];
 
 const { describe, it, after, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 
-const workClaims = require(path.join(__dirname, '..', 'work-claims'));
+const workClaims = require(path.join(__dirname, '..', 'lib', 'work-claims'));
 const workState = require(path.join(__dirname, '..', 'work-state'));
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -78,7 +78,7 @@ after(() => {
   // Clear require.cache so other test files get fresh config
   delete require.cache[require.resolve('../../lib/config')];
   delete require.cache[require.resolve('../work-state')];
-  delete require.cache[require.resolve('../work-claims')];
+  delete require.cache[require.resolve('../lib/work-claims')];
   try {
     fs.rmSync(TEMP_TASKS_BASE, { recursive: true, force: true });
   } catch {

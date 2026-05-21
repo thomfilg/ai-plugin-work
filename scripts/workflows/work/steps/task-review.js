@@ -17,8 +17,8 @@
 'use strict';
 
 const path = require('path');
-const { appendAction } = require(path.join(__dirname, '..', 'work-actions'));
-const { computeTaskDiff } = require('../task-review-gate');
+const { appendAction } = require(path.join(__dirname, '..', 'lib', 'work-actions'));
+const { computeTaskDiff } = require('../gates/task-review-gate');
 const { taskSegment } = require('../../lib/allocate-output-folder');
 
 /**

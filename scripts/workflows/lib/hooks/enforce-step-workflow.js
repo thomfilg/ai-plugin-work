@@ -83,7 +83,9 @@ const {
 
 let appendAction;
 try {
-  appendAction = require(path.join(__dirname, '..', '..', 'work', 'work-actions')).appendAction;
+  appendAction = require(
+    path.join(__dirname, '..', '..', 'work', 'lib', 'work-actions')
+  ).appendAction;
 } catch {
   appendAction = () => {};
 }
@@ -248,7 +250,7 @@ const TRUSTED_SCRIPT_DIRS = [
   path.resolve(__dirname, '..', '..', 'work-task-review'), // workflows/work-task-review/
   path.resolve(__dirname, '..', '..', 'work-reports'), // workflows/work-reports/
   path.resolve(__dirname, '..', '..', 'work-cleanup'), // workflows/work-cleanup/
-  path.resolve(__dirname, '..', '..', 'work-orchestrator'), // workflows/work-orchestrator/
+  path.resolve(__dirname, '..', '..', 'work'), // workflows/work/
   path.resolve(__dirname, '..', '..', 'check2'), // workflows/check2/
   path.resolve(__dirname, '..', '..', 'follow-up'), // workflows/follow-up/
 ];
@@ -772,7 +774,7 @@ function handlePreToolUse(hookData) {
                 `  The workflow has moved past '${requiredStep}'. Do NOT try to record evidence\n` +
                 `  for a previous step now — that artifact window has closed.\n` +
                 `  If the workflow is genuinely stuck, run:\n` +
-                `    node \${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-orchestrator/work-next.js ${ticketId || '<TICKET>'}\n` +
+                `    node \${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/work-next.js ${ticketId || '<TICKET>'}\n` +
                 `  and follow the action it prints for the CURRENT step ('${currentStep}').\n`
             );
             process.exit(2);

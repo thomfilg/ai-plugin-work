@@ -17,7 +17,7 @@ describe('CLI summary cleanup (GH-245 Task 7)', () => {
   describe('cli.js summary object', () => {
     it('should not include "skip" key in summary', () => {
       // Read cli.js source and check the summary object construction
-      const cliSource = fs.readFileSync(path.join(__dirname, '..', 'cli.js'), 'utf-8');
+      const cliSource = fs.readFileSync(path.join(__dirname, '..', 'engine', 'cli.js'), 'utf-8');
 
       // The summary object should not have a skip counter
       // Check for `skip:` in the summary construction block (lines ~169-179)
@@ -29,7 +29,7 @@ describe('CLI summary cleanup (GH-245 Task 7)', () => {
     });
 
     it('should not include "stepsSkipped" key in summary', () => {
-      const cliSource = fs.readFileSync(path.join(__dirname, '..', 'cli.js'), 'utf-8');
+      const cliSource = fs.readFileSync(path.join(__dirname, '..', 'engine', 'cli.js'), 'utf-8');
 
       const summaryBlock = cliSource.match(/result\.summary\s*=\s*\{[\s\S]*?\};/);
       assert.ok(summaryBlock, 'Should find summary assignment block');
@@ -41,7 +41,7 @@ describe('CLI summary cleanup (GH-245 Task 7)', () => {
     });
 
     it('summary should still contain run, defer, and pending counters', () => {
-      const cliSource = fs.readFileSync(path.join(__dirname, '..', 'cli.js'), 'utf-8');
+      const cliSource = fs.readFileSync(path.join(__dirname, '..', 'engine', 'cli.js'), 'utf-8');
 
       const summaryBlock = cliSource.match(/result\.summary\s*=\s*\{[\s\S]*?\};/);
       assert.ok(summaryBlock, 'Should find summary assignment block');

@@ -28,9 +28,9 @@ describe('work-actions', () => {
     process.env.TASKS_BASE = path.join(FAKE_HOME, 'worktrees', 'tasks');
 
     // Clear require cache and re-require with new HOME
-    delete require.cache[require.resolve('../work-actions')];
+    delete require.cache[require.resolve('../lib/work-actions')];
     delete require.cache[require.resolve('../../lib/config')];
-    const mod = require('../work-actions');
+    const mod = require('../lib/work-actions');
     appendAction = mod.appendAction;
     loadActions = mod.loadActions;
     analyzeActions = mod.analyzeActions;

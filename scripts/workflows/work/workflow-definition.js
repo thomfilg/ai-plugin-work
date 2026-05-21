@@ -90,8 +90,8 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
   // Uses validateTddEvidence from tdd-enforcement.js (single source of truth).
   function verifyPerTaskTDD(ticketId) {
     try {
-      const { validateTddEvidence } = require(path.join(__dirname, 'tdd-enforcement'));
-      const taskParser = require(path.join(__dirname, 'task-parser'));
+      const { validateTddEvidence } = require(path.join(__dirname, 'lib', 'tdd-enforcement'));
+      const taskParser = require(path.join(__dirname, 'lib', 'task-parser'));
       const dir = path.join(TASKS_BASE, safeTicketPath(ticketId));
       const tasksPath = path.join(dir, 'tasks.md');
       if (!fs.existsSync(tasksPath)) return true; // single-task mode — no per-task check
@@ -436,7 +436,7 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
         step: STEPS.tasks_gate,
         verify: (ticketId) => {
           try {
-            const { parseTasks } = require(path.join(__dirname, 'task-parser'));
+            const { parseTasks } = require(path.join(__dirname, 'lib', 'task-parser'));
             const { validateAll } = require(path.join(__dirname, '..', 'lib', 'task-scope'));
             const dir = path.join(TASKS_BASE, safeTicketPath(ticketId));
             const tasks = parseTasks(dir);

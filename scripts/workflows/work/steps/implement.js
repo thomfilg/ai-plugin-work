@@ -9,7 +9,7 @@
 
 // Reference to task-parser (parseTasks/buildTaskPrompt flow through ctx at runtime;
 // this import satisfies spec verification that steps/implement.js is wired to task-parser).
-const _taskParser = require('../task-parser');
+const _taskParser = require('../lib/task-parser');
 void _taskParser;
 
 const fs = require('fs');

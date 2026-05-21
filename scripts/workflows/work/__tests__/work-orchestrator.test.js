@@ -12,7 +12,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
-const HOOK_PATH = path.join(__dirname, '..', 'work.workflow.js');
+const HOOK_PATH = path.join(__dirname, '..', 'engine', 'work.workflow.js');
 
 // Isolate all filesystem side effects to a temp dir so the real tasks/
 // directory never accumulates orphan ticket dirs when an assertion fails
@@ -160,7 +160,7 @@ function writeTddException(tasksBase, ticket) {
   const tasksPath = path.join(dir, 'tasks.md');
   if (fs.existsSync(tasksPath)) {
     try {
-      const tp = require(path.join(__dirname, '..', 'task-parser'));
+      const tp = require(path.join(__dirname, '..', 'lib', 'task-parser'));
       const tasks = tp.parseTasks(dir);
       if (tasks && tasks.length > 0) {
         for (const t of tasks.filter((x) => !x.isCheckpoint)) {
@@ -1872,7 +1872,7 @@ describe('work-orchestrator.js', () => {
 
 // ─── parseTicketInput tests ──────────────────────────────────────────────────
 // parseTicketInput is exported from work.workflow.js for testing.
-const { parseTicketInput } = require(path.join(__dirname, '..', 'work.workflow.js'));
+const { parseTicketInput } = require(path.join(__dirname, '..', 'engine', 'work.workflow.js'));
 
 describe('parseTicketInput', () => {
   it('should parse GH-prefixed ticket with suffix', () => {

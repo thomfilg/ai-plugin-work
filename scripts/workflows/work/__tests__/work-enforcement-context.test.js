@@ -23,11 +23,11 @@ const assert = require('node:assert/strict');
 const path = require('path');
 
 // Resolve target + dependency paths ONCE to match what the adapter will
-// receive from its own `require('./work-state')` / `require('./task-parser')`
+// receive from its own `require('./work-state')` / `require('../lib/task-parser')`
 // / `require('../lib/config')` calls — same absolute paths are cached.
-const MODULE_PATH = path.join(__dirname, '..', 'work-enforcement-context');
+const MODULE_PATH = path.join(__dirname, '..', 'lib', 'work-enforcement-context');
 const WORK_STATE_PATH = require.resolve(path.join(__dirname, '..', 'work-state'));
-const TASK_PARSER_PATH = require.resolve(path.join(__dirname, '..', 'task-parser'));
+const TASK_PARSER_PATH = require.resolve(path.join(__dirname, '..', 'lib', 'task-parser'));
 const CONFIG_PATH = require.resolve(path.join(__dirname, '..', '..', 'lib', 'config'));
 
 // ─── Mock infrastructure ────────────────────────────────────────────────────
