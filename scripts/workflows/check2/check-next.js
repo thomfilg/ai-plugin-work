@@ -17,30 +17,34 @@ const path = require('path');
 
 if (require.main === module) {
   process.on('uncaughtException', (err) => {
-    console.error(JSON.stringify({
-      type: 'check_instruction',
-      action: 'blocked',
-      reason: `Uncaught exception: ${err.message}`,
-      stack: err.stack,
-    }));
+    console.error(
+      JSON.stringify({
+        type: 'check_instruction',
+        action: 'blocked',
+        reason: `Uncaught exception: ${err.message}`,
+        stack: err.stack,
+      })
+    );
     process.exit(1);
   });
   process.on('unhandledRejection', (err) => {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(JSON.stringify({
-      type: 'check_instruction',
-      action: 'blocked',
-      reason: `Unhandled rejection: ${msg}`,
-    }));
+    console.error(
+      JSON.stringify({
+        type: 'check_instruction',
+        action: 'blocked',
+        reason: `Unhandled rejection: ${msg}`,
+      })
+    );
     process.exit(1);
   });
 }
 
 // ─── Resolve paths ──────────────────────────────────────────────────────────
 const { resolvePluginPaths } = require(
-  path.join(__dirname, '..', 'work2', 'lib', 'resolve-plugin-root')
+  path.join(__dirname, '..', 'work-orchestrator', 'lib', 'resolve-plugin-root')
 );
-const { workDir, libDir } = resolvePluginPaths(path.join(__dirname, '..', 'work2'), 2);
+const { workDir, libDir } = resolvePluginPaths(path.join(__dirname, '..', 'work-orchestrator'), 2);
 const getConfig = require(path.join(libDir, 'get-config'));
 
 const WORKTREES_BASE = getConfig('WORKTREES_BASE') || '';

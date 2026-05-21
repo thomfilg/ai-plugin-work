@@ -137,7 +137,7 @@ Next steps:
 | 6 | Display summary |
 
 **Note:** Bootstrap does NOT start the orchestrator listener. The
-`<TICKET>-listen` tmux session is started by `/work2` on every
+`<TICKET>-listen` tmux session is started by `/work` on every
 invocation (idempotent) so the worker — not the worktree creator —
 owns the channel.
 

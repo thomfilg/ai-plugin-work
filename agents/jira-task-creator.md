@@ -44,9 +44,9 @@ This agent is called by the `/create-jira` command after it has:
 - You ARE the jira-task-creator agent - do the work directly
 - Calling yourself creates infinite recursion loops
 
-## Related Tickets Manifest (READ FIRST when invoked via /work2)
+## Related Tickets Manifest (READ FIRST when invoked via /work)
 
-When invoked through the `/work2` workflow, your prompt will include a pointer to `tasks/<ticket>/related-tickets.json` under `## Related Tickets (READ FIRST)`. Read it before splitting into tasks.
+When invoked through the `/work` workflow, your prompt will include a pointer to `tasks/<ticket>/related-tickets.json` under `## Related Tickets (READ FIRST)`. Read it before splitting into tasks.
 
 For every file listed under a sibling's `surfaces`, that file is owned by the sibling ticket. When you split the current ticket into tasks:
 - DO NOT list any sibling-owned file under any task's `### Files in scope`.

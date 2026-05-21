@@ -10,7 +10,7 @@
  * Historically each consumer had its own regex (`/Status:\s*COMPLETE/`) which
  * only matched the simplest form, so a correctly-written report with
  * `## Final Status\n**[COMPLETE]**` was rejected. This module centralises a
- * tolerant matcher used by both work-next.js (work2) and phase1-agents.js
+ * tolerant matcher used by both work-next.js (work) and phase1-agents.js
  * (check2).
  */
 

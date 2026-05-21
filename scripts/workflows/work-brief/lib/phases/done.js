@@ -22,7 +22,7 @@ function instructions(ctx) {
     `- \`_related/<id>.md\` (per linked ticket)`,
     `- \`brief-phase.json\``,
     '',
-    'Re-invoke /work2 (or /work) to advance to the brief_gate step.',
+    'Re-invoke /work (or /work) to advance to the brief_gate step.',
     '',
   ].join('\n');
 }

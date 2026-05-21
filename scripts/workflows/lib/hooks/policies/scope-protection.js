@@ -168,7 +168,7 @@ function decideEdit(input) {
     reason:
       `BLOCKED: ${relPath} is outside the active task's \`### Files in scope\`` +
       (activeTask ? ` (${activeTask})` : '') +
-      `. If this file genuinely belongs to this task, update tasks.md and re-run /work2.`,
+      `. If this file genuinely belongs to this task, update tasks.md and re-run /work.`,
   };
 }
 

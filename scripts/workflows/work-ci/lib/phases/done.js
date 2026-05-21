@@ -11,7 +11,7 @@ function instructions(ctx) {
     `Ticket: ${ctx.ticket}`,
     '',
     'CI phases complete. All checks pass (or pre-existing failures are documented).',
-    'Re-invoke /work2 (or /work) to advance to the cleanup step.',
+    'Re-invoke /work (or /work) to advance to the cleanup step.',
     '',
   ].join('\n');
 }

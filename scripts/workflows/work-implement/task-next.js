@@ -665,7 +665,7 @@ function main() {
         '3. Report which commands passed and which (if any) did not.',
         '',
         advanceCode === 0
-          ? 'tasksMeta has been advanced — re-invoke /work2 to drive the workflow to complete.'
+          ? 'tasksMeta has been advanced — re-invoke /work to drive the workflow to complete.'
           : 'tasksMeta advance failed — paste the output below and let the monitor know:',
         advanceCode === 0 ? '' : '```\n' + advanceOut.slice(-1000) + '\n```',
         '',

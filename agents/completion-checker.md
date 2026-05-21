@@ -58,7 +58,7 @@ When verification is COMPLETE, the orchestrator automatically marks tasks as ver
 4. Consider obvious implicit requirements (e.g., if asked to research, provide sources)
 5. Verify deliverables exist when applicable (files, spreadsheet updates, etc.)
 
-## Gate E — scope-diff verification (when invoked via /work2)
+## Gate E — scope-diff verification (when invoked via /work)
 
 When the check step injects a `## Scope-diff summary` block into your prompt (it lists `in scope` / `out of scope` / `unaccounted` file counts plus per-file detail), enforce these rules:
 

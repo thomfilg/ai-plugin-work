@@ -19,7 +19,7 @@ function instructions(ctx) {
     `- \`tasks.md\` (numbered tasks with kinds, requirements, and traceability)`,
     `- \`tasks-phase.json\``,
     '',
-    'Re-invoke /work2 (or /work) to advance to the tasks_gate step.',
+    'Re-invoke /work (or /work) to advance to the tasks_gate step.',
     '',
   ].join('\n');
 }

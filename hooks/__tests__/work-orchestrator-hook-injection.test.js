@@ -5,7 +5,7 @@
  * 1. execSync with string interpolation is NOT used (injection vector removed)
  * 2. safeExec (which wraps execFileSync) is used with array args (safe from shell injection)
  * 3. logHookError is imported and invoked on failure paths
- * 4. Existing /work2 routing behaviour is preserved
+ * 4. Existing /work routing behaviour is preserved
  *
  * Run with: node --test hooks/__tests__/work-orchestrator-hook-injection.test.js
  */
@@ -108,7 +108,7 @@ function runHook(userPrompt) {
 }
 
 describe('work-orchestrator-hook functional behaviour', () => {
-  it('should exit 0 for non /work2 commands', async () => {
+  it('should exit 0 for non /work commands', async () => {
     const { code } = await runHook('hello world');
     assert.strictEqual(code, 0);
   });
@@ -119,8 +119,8 @@ describe('work-orchestrator-hook functional behaviour', () => {
   });
 
   it('should exit 0 even when orchestrator fails (graceful error handling)', async () => {
-    // /work2 with args will attempt to run orchestrator — may fail, but hook must not crash
-    const { code } = await runHook('/work2 TEST-999');
+    // /work with args will attempt to run orchestrator — may fail, but hook must not crash
+    const { code } = await runHook('/work TEST-999');
     assert.strictEqual(code, 0);
   });
 });

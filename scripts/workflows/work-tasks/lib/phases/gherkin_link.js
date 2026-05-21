@@ -1,6 +1,6 @@
 /**
  * Phase: gherkin_link — if gherkin.feature exists, every scenario must be
- * referenced by ≥1 task. Reuses work2/lib/gherkin-task-refs when available.
+ * referenced by ≥1 task. Reuses work-orchestrator/lib/gherkin-task-refs when available.
  */
 
 'use strict';
@@ -12,7 +12,7 @@ const { TASKS_PHASES } = require('../../tasks-phase-registry');
 
 let validateConsistency;
 try {
-  ({ validateConsistency } = require('../../../work2/lib/gherkin-task-refs'));
+  ({ validateConsistency } = require('../../../work-orchestrator/lib/gherkin-task-refs'));
 } catch {
   validateConsistency = null;
 }

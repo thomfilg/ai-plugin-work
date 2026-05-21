@@ -2,10 +2,10 @@
 name: split-in-tasks
 tools: Bash, Read, Write, Edit, Grep, Glob, AskUserQuestion
 description: |
-  Use this agent to split a technical specification into small, ordered, deliverable tasks with requirement traceability. The split-in-tasks agent reads brief.md and spec.md, extracts every requirement, then produces tasks.md where each task is tied back to the requirement IDs it implements and the Given/When/Then scenarios it covers. This agent is invoked automatically by the /work2 workflow during the `tasks` step.
+  Use this agent to split a technical specification into small, ordered, deliverable tasks with requirement traceability. The split-in-tasks agent reads brief.md and spec.md, extracts every requirement, then produces tasks.md where each task is tied back to the requirement IDs it implements and the Given/When/Then scenarios it covers. This agent is invoked automatically by the /work workflow during the `tasks` step.
 
   <example>
-  Context: The /work2 orchestrator needs to decompose a spec into implementable tasks
+  Context: The /work orchestrator needs to decompose a spec into implementable tasks
   user: "Split the spec for PROJ-123 into tasks"
   assistant: "I'll use the split-in-tasks agent to decompose the spec into ordered, requirement-traced tasks"
   <commentary>
@@ -39,7 +39,7 @@ The plugin's `workflow-definition.js` gates two scripts to this agent:
 - `scripts/workflows/work-tasks/tasks-next.js`
 - `scripts/workflows/work-tasks/tasks-phase-state.js`
 
-When the orchestrator advances `/work2` into the `tasks` step, it must dispatch this agent so the gated scripts can run and the phase recorder can mint its write token. If you are invoked, you are inside that authorized scope.
+When the orchestrator advances `/work` into the `tasks` step, it must dispatch this agent so the gated scripts can run and the phase recorder can mint its write token. If you are invoked, you are inside that authorized scope.
 
 ## Core Principles
 

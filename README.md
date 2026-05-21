@@ -33,8 +33,8 @@ For local development, point to a local directory instead:
 
 | Command | Description |
 |---------|-------------|
-| `/work2 <TICKET_ID>` | Full orchestrated workflow: fetch Jira task, branch, implement, test, review, PR |
-| `/work2 <TICKET_ID> --rework` | Re-run quality checks and PR update on an existing implementation |
+| `/work <TICKET_ID>` | Full orchestrated workflow: fetch Jira task, branch, implement, test, review, PR |
+| `/work <TICKET_ID> --rework` | Re-run quality checks and PR update on an existing implementation |
 | `/work-implement <TICKET_ID>` | Quick implementation without the full workflow ceremony |
 | `/work-pr <TICKET_ID>` | Update PR description and add visual documentation |
 
@@ -59,21 +59,21 @@ For local development, point to a local directory instead:
 | Command | Description |
 |---------|-------------|
 | `/bootstrap <TICKET_IDs...>` | Setup multiple Jira tasks: creates worktrees, symlinks configs, opens draft PRs |
-| `/orchestrate <TICKET_IDs...>` | Runs `/work2` for multiple Jira tasks sequentially in isolated worktrees |
+| `/orchestrate <TICKET_IDs...>` | Runs `/work` for multiple Jira tasks sequentially in isolated worktrees |
 
 ### CI/CD
 
 | Command | Description |
 |---------|-------------|
-| `/follow-up2` | Monitor PR CI status, auto-fix failures, and retry until passing (max 10 attempts) |
+| `/follow-up` | Monitor PR CI status, auto-fix failures, and retry until passing (max 10 attempts) |
 
 ## Hooks
 
 The plugin registers hooks that enforce workflow discipline:
 
-- **`enforce-step-workflow`** - Validates that steps execute in the correct order during `/work2` sessions
+- **`enforce-step-workflow`** - Validates that steps execute in the correct order during `/work` sessions
 - **`enforce-screenshot-requirement`** - Ensures QA screenshots are captured before completing checks
-- **`work-orchestrator-hook`** - Pre-processes `/work2` commands to initialize the workflow engine
+- **`work-orchestrator-hook`** - Pre-processes `/work` commands to initialize the workflow engine
 
 ## Architecture
 
@@ -89,7 +89,7 @@ claude-plugin-work/
 │   │   ├── workflow-state.js     # Workflow state persistence
 │   │   ├── hook-error-log.js     # Hook error file logger (see Debugging Hooks)
 │   │   └── hooks/                # Shared hooks (enforce-step-workflow, etc.)
-│   ├── work/                     # /work2 orchestrator workflow
+│   ├── work/                     # /work orchestrator workflow
 │   ├── check/                    # /check2 workflow
 │   └── work-pr/                  # /work-pr workflow
 ├── agents/                       # Agent definitions (18 specialized agents)

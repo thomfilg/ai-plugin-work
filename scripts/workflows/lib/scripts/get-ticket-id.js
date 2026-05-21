@@ -12,7 +12,7 @@ const TICKET_PATTERN = /([A-Z]+-\d+)/i;
 const GH_PATTERN = /GH-(\d+)/i;
 
 function getCurrentTaskId(cwd = process.cwd()) {
-  // Explicit override via env var (used by follow-up2 when running outside worktree)
+  // Explicit override via env var (used by follow-up when running outside worktree)
   if (process.env.WORK_TICKET_ID) return process.env.WORK_TICKET_ID;
 
   // Prefer git branch over cwd path. In symlinked worktrees (e.g.

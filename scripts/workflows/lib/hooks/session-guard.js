@@ -301,8 +301,8 @@ function cmdComplete(ticketId, workflowFilter) {
   }
 
   // If a workflow filter is provided, only clear when the active session
-  // belongs to that workflow. Prevents a sub-workflow (e.g. /follow-up2)
-  // from tearing down a parent workflow's session (e.g. /work2).
+  // belongs to that workflow. Prevents a sub-workflow (e.g. /follow-up)
+  // from tearing down a parent workflow's session (e.g. /work).
   if (workflowFilter) {
     const existing = readSessionFile(ticketId);
     if (existing && existing.workflow && existing.workflow !== workflowFilter) {
@@ -570,11 +570,11 @@ function handleStop(hookData) {
     }
   }
 
-  const workflow = session.workflow || '/work2';
+  const workflow = session.workflow || '/work';
   const ticketId = session.ticketId || '';
 
-  if (workflow === '/follow-up2') {
-    // Check follow-up2 state — if completed, allow stop.
+  if (workflow === '/follow-up') {
+    // Check follow-up state — if completed, allow stop.
     try {
       const getConfig = require(path.join(__dirname, '..', 'get-config'));
       const tasksBase = getConfig('TASKS_BASE');
@@ -585,7 +585,7 @@ function handleStop(hookData) {
         } catch {
           /* use raw */
         }
-        const fuPath = path.join(tasksBase, safeId, '.follow-up2-state.json');
+        const fuPath = path.join(tasksBase, safeId, '.follow-up-state.json');
         if (fs.existsSync(fuPath)) {
           const fu = JSON.parse(fs.readFileSync(fuPath, 'utf8'));
           if (fu && fu.status === 'complete') {
@@ -612,7 +612,7 @@ function handleStop(hookData) {
         } catch {
           /* use raw */
         }
-        const nextPath = path.join(tasksBase, safeId, '.follow-up2-next.json');
+        const nextPath = path.join(tasksBase, safeId, '.follow-up-next.json');
         if (fs.existsSync(nextPath)) {
           pendingInstruction = fs.readFileSync(nextPath, 'utf8');
         }
@@ -625,10 +625,10 @@ function handleStop(hookData) {
       `ACTIVE WORKFLOW SESSION — DO NOT ABANDON\n` +
         `Workflow: ${workflow} | Ticket: ${ticketId}\n` +
         `You MUST continue this workflow. Run:\n` +
-        `  node "\${CLAUDE_PLUGIN_ROOT}/scripts/workflows/follow-up2/follow-up-next.js" ${ticketId}\n` +
+        `  node "\${CLAUDE_PLUGIN_ROOT}/scripts/workflows/follow-up/follow-up-next.js" ${ticketId}\n` +
         `Execute the returned instruction, then re-run follow-up-next.js until action: "complete".\n` +
         (pendingInstruction
-          ? `\n=== PENDING /follow-up2 INSTRUCTION ===\n${pendingInstruction}\n=== END INSTRUCTION ===\n\n`
+          ? `\n=== PENDING /follow-up INSTRUCTION ===\n${pendingInstruction}\n=== END INSTRUCTION ===\n\n`
           : '') +
         `The session is locked with a passphrase. Complete all steps to unlock.\n`
     );
@@ -636,7 +636,7 @@ function handleStop(hookData) {
     return;
   }
 
-  if (workflow === '/work2') {
+  if (workflow === '/work') {
     // Check if the workflow step is dispatched (agent is waiting for sub-agent results)
     // In this case, warn but allow stop — the agent isn't abandoning, it's waiting.
     try {
@@ -663,7 +663,7 @@ function handleStop(hookData) {
           if (allowStopSteps.has(ws._work2Dispatched)) {
             process.stderr.write(
               `Pausing at user-review checkpoint "${ws._work2Dispatched}".\n` +
-                `When ready, continue: node "\${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work2/work-next.js" ${ticketId}\n`
+                `When ready, continue: node "\${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-orchestrator/work-next.js" ${ticketId}\n`
             );
             process.exit(0); // allow stop — this is a human-approval gate
             return;
@@ -678,7 +678,7 @@ function handleStop(hookData) {
       `ACTIVE WORKFLOW SESSION — DO NOT ABANDON\n` +
         `Workflow: ${workflow} | Ticket: ${ticketId}\n` +
         `You MUST continue this workflow. Run:\n` +
-        `  node "\${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work2/work-next.js" ${ticketId}\n` +
+        `  node "\${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-orchestrator/work-next.js" ${ticketId}\n` +
         `Execute the returned instruction, then re-run work-next.js until action: "complete".\n` +
         `The session is locked with a passphrase. Complete all steps to unlock.\n`
     );

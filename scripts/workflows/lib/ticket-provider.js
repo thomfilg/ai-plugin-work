@@ -187,7 +187,7 @@ function normalizeTicketId(raw) {
 }
 
 /**
- * Strict validator for raw ticket arguments at the entry points of /work2 and
+ * Strict validator for raw ticket arguments at the entry points of /work and
  * /work-implement. Rejects malformed input BEFORE any filesystem side effects.
  *
  * Returns { ticketBase, suffix, separator, canonical }. Throws Error on invalid.

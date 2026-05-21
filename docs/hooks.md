@@ -147,7 +147,7 @@ All hooks follow a strict fail-open policy:
 
 ## Workflow-Specific Hooks
 
-### /work2 hooks (`scripts/workflows/work/hooks/`)
+### /work hooks (`scripts/workflows/work/hooks/`)
 
 | Hook | Purpose |
 |---|---|
@@ -179,7 +179,7 @@ All hooks follow a strict fail-open policy:
 
 **File:** `scripts/workflows/lib/hooks/session-guard.js`
 
-Prevents concurrent `/work2` sessions:
+Prevents concurrent `/work` sessions:
 - Creates a lock file on workflow start
 - Blocks if lock exists from another session
 - Cleans up on PreCompact/Stop events

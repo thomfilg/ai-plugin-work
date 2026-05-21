@@ -114,7 +114,7 @@ function transitionStep(ticket, targetStep, deps) {
     const { exists, parseError, evidence } = readTddEvidence(safeTicket, currentStep, taskNum);
     if (!exists || parseError) {
       const taskLabel = taskNum ? ` for task ${taskNum}` : '';
-      // /work2 flow: implement-gate.js runs the task's `### Test Command` and
+      // /work flow: implement-gate.js runs the task's `### Test Command` and
       // writes tdd-phase.json itself. Agents must NOT invoke tdd-phase-state.js
       // (the legacy CLI) — its writes to tdd-phase.json are blocked by the
       // protect-orchestrator-state hook. Surface the gate-driven failure modes
@@ -123,7 +123,7 @@ function transitionStep(ticket, targetStep, deps) {
       const msg = [
         `Cannot leave ${currentStep} without TDD evidence${taskLabel}.`,
         '',
-        "In /work2 the implement-gate runs your task's `### Test Command`",
+        "In /work the implement-gate runs your task's `### Test Command`",
         'automatically and writes tdd-phase.json. Agents do NOT invoke',
         'tdd-phase-state.js, and direct writes to tdd-phase.json are blocked.',
         '',
@@ -151,7 +151,7 @@ function transitionStep(ticket, targetStep, deps) {
   // This MUST be in transition-step.js (not just implement-gate.js) because the
   // dispatch-advance gate only runs when transition FAILS. Without this guard,
   // transition succeeds after any single task's TDD evidence passes and remaining
-  // tasks are silently skipped. work2's implement-gate.js handles advancing the
+  // tasks are silently skipped. work's implement-gate.js handles advancing the
   // task pointer; this guard ensures the transition itself is blocked.
   if (currentStep === STEPS.implement && currentStep !== targetStep) {
     if (ws?.tasksMeta && Array.isArray(ws.tasksMeta.tasks)) {

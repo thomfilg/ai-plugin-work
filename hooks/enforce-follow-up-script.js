@@ -2,9 +2,9 @@
 /**
  * enforce-follow-up-script.js — PreToolUse hook (Bash matcher)
  *
- * When a follow-up2 session is active for the current ticket,
+ * When a follow-up session is active for the current ticket,
  * blocks manual CI checks (gh run, gh pr checks, gh pr view)
- * and forces the agent to use /follow-up2 instead.
+ * and forces the agent to use /follow-up instead.
  */
 
 'use strict';
@@ -22,7 +22,7 @@ try {
     process.exit(0);
   }
 
-  // Check if a follow-up2 session is active
+  // Check if a follow-up session is active
   let tasksBase;
   try {
     const getConfig = require(path.join(__dirname, '..', 'workflows', 'lib', 'get-config'));
@@ -46,7 +46,7 @@ try {
     // Can't determine ticket — check all sessions (fallback)
   }
 
-  // Check if the CURRENT ticket has an active follow-up2 session
+  // Check if the CURRENT ticket has an active follow-up session
   let found = false;
   try {
     const entries = fs.readdirSync(tasksBase);
@@ -54,7 +54,7 @@ try {
       // Only check the current ticket's session (or all if ticket unknown)
       if (currentTicket && entry !== currentTicket) continue;
 
-      const statePath = path.join(tasksBase, entry, '.follow-up2-state.json');
+      const statePath = path.join(tasksBase, entry, '.follow-up-state.json');
       try {
         const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
         if (state.status === 'in_progress') {
@@ -62,10 +62,10 @@ try {
           const ticketId = state.ticketId || entry;
           const prNumber = state.prNumber || '';
           console.error(
-            `BLOCKED: Active /follow-up2 session for ${ticketId}.\n\n` +
-              `Do NOT check CI manually. Use /follow-up2 instead — it handles CI monitoring, review comments, and fixes.\n\n` +
-              `Run: /follow-up2\n` +
-              `Or: node "\${CLAUDE_PLUGIN_ROOT}/scripts/workflows/follow-up2/follow-up-next.js" "${ticketId}"${prNumber ? ` --pr ${prNumber}` : ''}`
+            `BLOCKED: Active /follow-up session for ${ticketId}.\n\n` +
+              `Do NOT check CI manually. Use /follow-up instead — it handles CI monitoring, review comments, and fixes.\n\n` +
+              `Run: /follow-up\n` +
+              `Or: node "\${CLAUDE_PLUGIN_ROOT}/scripts/workflows/follow-up/follow-up-next.js" "${ticketId}"${prNumber ? ` --pr ${prNumber}` : ''}`
           );
           break;
         }

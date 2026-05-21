@@ -167,7 +167,7 @@ function resolveTddStatePath(taskBase, safeTicketId) {
   // Resolve task number: env var → work state tasksMeta → null (legacy)
   let taskNum = process.env.WORK_TASK_NUM ? parseInt(process.env.WORK_TASK_NUM, 10) : null;
 
-  // If no env var, try reading from work state (supports /work2 which doesn't set env vars)
+  // If no env var, try reading from work state (supports /work which doesn't set env vars)
   if (!taskNum) {
     try {
       const statePath = path.join(taskBase, safeTicketId, '.work-state.json');

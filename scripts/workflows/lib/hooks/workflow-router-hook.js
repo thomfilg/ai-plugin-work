@@ -9,7 +9,7 @@
  * When a match is found, runs the workflow engine's `plan` subcommand
  * and injects the formatted plan into the chat context.
  *
- * Pattern follows work2-orchestrator-hook.js.
+ * Pattern follows work-orchestrator-hook.js.
  */
 
 const fs = require('fs');
@@ -31,7 +31,7 @@ const ENGINE_PATH = path.join(__dirname, '..', 'workflow-engine.js');
 
 // Tokenize args string into positional single-token values.
 // Quoted multi-word args are NOT supported by design — matches pre-execFileSync
-// shell tokenization behavior. Used by both /work and /work2 slash commands.
+// shell tokenization behavior. Used by both /work and /work slash commands.
 function tokenizeArgs(rawArgs) {
   return rawArgs.split(/\s+/).filter((token) => token.length > 0);
 }

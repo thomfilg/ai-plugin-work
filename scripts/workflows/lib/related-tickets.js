@@ -120,7 +120,7 @@ function readAndValidate(tasksDir, deps) {
 
 /**
  * @param {object} manifest
- * @param {string|Date} runStartedAt - The /work2 run start time (ISO string or Date)
+ * @param {string|Date} runStartedAt - The /work run start time (ISO string or Date)
  * @returns {boolean} true when fetchedAt is older than runStartedAt
  */
 function isStale(manifest, runStartedAt) {

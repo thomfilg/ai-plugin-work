@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
 /**
- * work2-orchestrator-hook.js
+ * work-orchestrator-hook.js
  *
  * UserPromptSubmit hook that automatically runs the orchestrator
- * when /work2 is invoked, injecting the plan into the context.
+ * when /work is invoked, injecting the plan into the context.
  */
 
 const path = require('path');
@@ -18,7 +18,7 @@ const ORCHESTRATOR_PATH = path.join(PLUGIN_ROOT, 'workflows', 'work', 'work.work
 
 // Tokenize args string into positional single-token values.
 // Quoted multi-word args are NOT supported by design — matches pre-execFileSync
-// shell tokenization behavior. Used by both /work and /work2 slash commands.
+// shell tokenization behavior.
 function tokenizeArgs(rawArgs) {
   return rawArgs.split(/\s+/).filter((token) => token.length > 0);
 }
@@ -26,14 +26,14 @@ function tokenizeArgs(rawArgs) {
 function main() {
   const userPrompt = process.env.CLAUDE_USER_PROMPT || '';
 
-  // Check if this is a /work2 invocation
-  const work2Match = userPrompt.match(/^\s*\/work2\s+(.+)/i);
-  if (!work2Match) {
-    // Not a /work2 command, let it pass through
+  // Check if this is a /work invocation. Match /work followed by whitespace
+  // (so /work-implement, /work-pr, /work2 don't trigger this hook).
+  const workMatch = userPrompt.match(/^\s*\/work\s+(.+)/i);
+  if (!workMatch) {
     process.exit(0);
   }
 
-  const args = work2Match[1].trim();
+  const args = workMatch[1].trim();
   // Tokenize via the named helper to make the intent obvious at the call site.
   // See tokenizeArgs() above for the scope-constraint rationale.
   const parsedArgs = tokenizeArgs(args);

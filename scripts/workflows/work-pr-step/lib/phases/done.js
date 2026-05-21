@@ -11,7 +11,7 @@ function instructions(ctx) {
     `Ticket: ${ctx.ticket}`,
     '',
     'PR phases complete. The pull request was created/updated, validated, and any attachments wired.',
-    'Re-invoke /work2 (or /work) to advance to the ready step.',
+    'Re-invoke /work (or /work) to advance to the ready step.',
     '',
   ].join('\n');
 }

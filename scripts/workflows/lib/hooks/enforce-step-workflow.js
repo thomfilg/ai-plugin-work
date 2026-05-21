@@ -167,7 +167,7 @@ const PROTECTED_STATE_BASENAMES = buildProtectedBasenames(WORKFLOWS, [
   '.workflow-state.json',
   '.check.workflow-state.json',
   '.check2-state.json',
-  '.follow-up2-state.json',
+  '.follow-up-state.json',
   'follow-up-comments.json',
 ]);
 
@@ -248,9 +248,9 @@ const TRUSTED_SCRIPT_DIRS = [
   path.resolve(__dirname, '..', '..', 'work-task-review'), // workflows/work-task-review/
   path.resolve(__dirname, '..', '..', 'work-reports'), // workflows/work-reports/
   path.resolve(__dirname, '..', '..', 'work-cleanup'), // workflows/work-cleanup/
-  path.resolve(__dirname, '..', '..', 'work2'), // workflows/work2/
+  path.resolve(__dirname, '..', '..', 'work-orchestrator'), // workflows/work-orchestrator/
   path.resolve(__dirname, '..', '..', 'check2'), // workflows/check2/
-  path.resolve(__dirname, '..', '..', 'follow-up2'), // workflows/follow-up2/
+  path.resolve(__dirname, '..', '..', 'follow-up'), // workflows/follow-up/
 ];
 
 // Agent-gated writer scripts — map script basename to { agents, step }.
@@ -772,7 +772,7 @@ function handlePreToolUse(hookData) {
                 `  The workflow has moved past '${requiredStep}'. Do NOT try to record evidence\n` +
                 `  for a previous step now — that artifact window has closed.\n` +
                 `  If the workflow is genuinely stuck, run:\n` +
-                `    node \${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work2/work-next.js ${ticketId || '<TICKET>'}\n` +
+                `    node \${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-orchestrator/work-next.js ${ticketId || '<TICKET>'}\n` +
                 `  and follow the action it prints for the CURRENT step ('${currentStep}').\n`
             );
             process.exit(2);

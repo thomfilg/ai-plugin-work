@@ -11,7 +11,7 @@ Comprehensive documentation for the `claude-plugin-work` plugin, a deterministic
 
 ### Core Workflows
 
-- **[/work2 Workflow](./workflow-work.md)** — The main orchestrator: 18-step ticket-to-PR pipeline
+- **[/work Workflow](./workflow-work.md)** — The main orchestrator: 18-step ticket-to-PR pipeline
 - **[/check2 Workflow](./workflow-check.md)** — Parallel quality verification: code review, tests, QA, completion
 - **[/work-implement Workflow](./workflow-work-implement.md)** — Quick TDD-gated implementation (skip brief/spec/tasks)
 - **[/work-pr Workflow](./workflow-work-pr.md)** — PR description generation and visual documentation
@@ -35,7 +35,7 @@ Comprehensive documentation for the `claude-plugin-work` plugin, a deterministic
 
 ## Quick Reference
 
-### Workflow Step Order (/work2)
+### Workflow Step Order (/work)
 
 ```
 ticket → bootstrap → brief → brief_gate → spec → spec_gate → tasks →
@@ -47,7 +47,7 @@ follow_up → ci → cleanup → reports → complete
 
 | Directory | Purpose |
 |---|---|
-| `scripts/workflows/work/` | Main /work2 orchestrator |
+| `scripts/workflows/work/` | Main /work orchestrator |
 | `scripts/workflows/check/` | Quality verification |
 | `scripts/workflows/work-implement/` | TDD phase management |
 | `scripts/workflows/work-pr/` | PR generation |
@@ -60,7 +60,7 @@ follow_up → ci → cleanup → reports → complete
 
 | File | Location | Purpose |
 |---|---|---|
-| `.work-state.json` | `TASKS_BASE/<ticket>/` | /work2 step progress |
+| `.work-state.json` | `TASKS_BASE/<ticket>/` | /work step progress |
 | `.work-actions.json` | `TASKS_BASE/<ticket>/` | Audit trail of all actions |
 | `tdd-phase.json` | `TASKS_BASE/<ticket>/taskN/` | TDD cycle evidence |
 | `.check.workflow-state.json` | `TASKS_BASE/<ticket>/` | /check2 step progress |

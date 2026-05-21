@@ -16,9 +16,9 @@ model: inherit
 color: purple
 ---
 
-## ⚠️ MANDATORY: brief generation via brief-next.js (when invoked during /work2 brief)
+## ⚠️ MANDATORY: brief generation via brief-next.js (when invoked during /work brief)
 
-When you are dispatched during the `brief` step of a /work or /work2 workflow,
+When you are dispatched during the `brief` step of a /work or /work workflow,
 the entry instruction is ALWAYS:
 
 ```

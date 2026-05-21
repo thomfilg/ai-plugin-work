@@ -34,9 +34,9 @@ model: inherit
 color: green
 ---
 
-## ⚠️ MANDATORY: TDD via task-next.js (when invoked during /work2 implement)
+## ⚠️ MANDATORY: TDD via task-next.js (when invoked during /work implement)
 
-When you are dispatched during the `implement` step of a /work or /work2 workflow,
+When you are dispatched during the `implement` step of a /work or /work workflow,
 the entry instruction is ALWAYS:
 
 ```
@@ -58,7 +58,7 @@ You MUST NOT:
   are written only by the authorized recorder, and direct edits are blocked.
 - Stash files to /tmp or `git checkout --` to "fake" a RED failure — that is
   fabricated TDD evidence and is forbidden by user policy.
-- Invoke /work-implement, /work2, or any slash command. You are inside a /work2
+- Invoke /work-implement, /work, or any slash command. You are inside a /work
   dispatch — your only job is the per-task TDD cycle.
 
 If you are tempted to deviate ("I already know the answer", "the test is trivial",

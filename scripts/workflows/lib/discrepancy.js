@@ -135,7 +135,7 @@ function buildDiscrepancyQuestions(comparison, higherLabel, lowerLabel) {
 /**
  * Read the "Discrepancy decisions" section from an artifact and return the
  * set of claim tokens that already have a recorded answer. The gate uses
- * this to avoid re-prompting on every /work2 invocation.
+ * this to avoid re-prompting on every /work invocation.
  *
  * Decisions are bullets formatted like:
  *   - `<claim>` — decision: <text>; timestamp: <ISO>

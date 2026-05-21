@@ -23,7 +23,7 @@ function tasksGateStep(add, s, ctx) {
   const { validateAll } = require('../../lib/task-scope');
   const {
     validateConsistency: validateGherkinTaskRefs,
-  } = require('../../work2/lib/gherkin-task-refs');
+  } = require('../../work-orchestrator/lib/gherkin-task-refs');
 
   if (!s || !s.hasTasks) {
     add(STEPS.tasks_gate, 'DEFER', null, 'No tasks.md present');

@@ -8,7 +8,7 @@ Skills are user-invocable slash commands defined in `skills/*/SKILL.md`. Each sk
 
 | Command | Skill Directory | Purpose |
 |---|---|---|
-| `/work2 <TICKET>` | `skills/work2/` | Full orchestrated ticket-to-PR workflow |
+| `/work <TICKET>` | `skills/work/` | Full orchestrated ticket-to-PR workflow |
 | `/work-implement <TICKET>` | `skills/work-implement/` | Quick TDD-gated implementation |
 | `/work-pr <TICKET>` | `skills/work-pr/` | Update PR description and visual docs |
 | `/check2 <TICKET>` | `skills/check2/` | Full quality verification (parallel agents) |
@@ -36,9 +36,9 @@ Skills are user-invocable slash commands defined in `skills/*/SKILL.md`. Each sk
 
 | Command | Skill Directory | Purpose |
 |---|---|---|
-| `/follow-up2` | `skills/follow-up2/` | Monitor CI, address review comments |
+| `/follow-up` | `skills/follow-up/` | Monitor CI, address review comments |
 | `/bootstrap <TICKET...>` | `skills/bootstrap/` | Setup worktrees for multiple tickets |
-| `/orchestrate <TICKET...>` | `skills/orchestrate/` | Run /work2 sequentially for multiple tickets |
+| `/orchestrate <TICKET...>` | `skills/orchestrate/` | Run /work sequentially for multiple tickets |
 | `/cleanup-worktrees` | `skills/cleanup-worktrees/` | Verify merge & remove worktrees |
 
 ### Jira Skills
@@ -71,7 +71,7 @@ argument-hint: <TICKET_ID> [description]
 
 | Field | Purpose |
 |---|---|
-| `name` | Slash command name (e.g., `work` → `/work2`) |
+| `name` | Slash command name (e.g., `work` → `/work`) |
 | `description` | One-line description shown in help |
 | `allowed-tools` | Tools the skill can use (whitelist) |
 | `argument-hint` | Usage hint shown to user |
@@ -91,7 +91,7 @@ argument-hint: <TICKET_ID> [description]
 Skills can invoke other skills and agents:
 
 ```
-/work2 TICKET-123
+/work TICKET-123
   ├─ /brief (skill)
   │   └─ Task(brief-writer)
   ├─ /spec (skill)
@@ -105,5 +105,5 @@ Skills can invoke other skills and agents:
   │   ├─ Task(qa-feature-tester)
   │   └─ Task(completion-checker)
   ├─ Task(pr-generator)            ← pr step
-  └─ /follow-up2 (skill)        ← follow_up step
+  └─ /follow-up (skill)        ← follow_up step
 ```

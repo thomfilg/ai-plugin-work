@@ -7,7 +7,7 @@
  * pre-mints the agent-gated token so the hook isn't required.
  *
  * The test exists to:
- *   1. Surface bugs in brief-next.js before real /work2 sessions hit them.
+ *   1. Surface bugs in brief-next.js before real /work sessions hit them.
  *   2. Prove that brief-phase-state.js's record/transition chain works
  *      after the same auto-init pattern used in task-next.js.
  *   3. Provide a regression anchor so future edits to either script can't

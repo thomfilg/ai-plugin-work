@@ -5,11 +5,11 @@
  * already-loaded state object) and decides whether the PR for the active
  * ticket has been closed without merge.
  *
- * Used by the follow-up enrichment: a closed-not-merged PR forces /work2
+ * Used by the follow-up enrichment: a closed-not-merged PR forces /work
  * back through brief (full re-plan) rather than looping through implement.
  * This prevents the failure mode where an agent absorbed sibling scope,
  * the user closed the PR, and the orchestrator silently retried the same
- * scope in `implement` on the next /work2 invocation.
+ * scope in `implement` on the next /work invocation.
  */
 
 'use strict';
