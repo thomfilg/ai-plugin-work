@@ -13,7 +13,7 @@
 const path = require('path');
 const { execSync } = require('child_process');
 
-const { parseTasks } = require(path.join('..', '..', '..', 'work', 'task-parser'));
+const { parseTasks } = require(path.join('..', '..', '..', 'work-orchestrator', 'task-parser'));
 const { compareDiffToScope, summarizeScopeDiff } = require('../../../lib/scope-diff');
 const config = require('../../../lib/config');
 

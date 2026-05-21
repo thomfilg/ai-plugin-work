@@ -711,7 +711,9 @@ describe('session-guard', () => {
   describe('Hook: Stop — actionable /work message', () => {
     const TASKS_DIR = path.join(SESSION_DIR, 'tasks-base');
     const WORK_TICKET = 'WORK-100';
-    const { STEP_ORDER } = require(path.join(__dirname, '..', '..', 'work', 'step-registry'));
+    const { STEP_ORDER } = require(
+      path.join(__dirname, '..', '..', 'work-orchestrator', 'step-registry')
+    );
     // currentStep in .work-state.json is 1-based (stepIndex + 1)
     const BRIEF_GATE_STEP = STEP_ORDER.indexOf('brief_gate') + 1;
 

@@ -8,13 +8,20 @@
  */
 
 const path = require('path');
-const { appendAction } = require(path.join(__dirname, '..', 'workflows', 'work', 'work-actions'));
+const { appendAction } = require(
+  path.join(__dirname, '..', 'workflows', 'work-orchestrator', 'work-actions')
+);
 const { logHookError } = require(path.join(__dirname, '..', 'workflows', 'lib', 'hook-error-log'));
 const { safeExec } = require(path.join(__dirname, '..', 'workflows', 'lib', 'safe-exec'));
 
 // Use CLAUDE_PLUGIN_ROOT if available, otherwise fallback to __dirname
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.dirname(__dirname);
-const ORCHESTRATOR_PATH = path.join(PLUGIN_ROOT, 'workflows', 'work', 'work.workflow.js');
+const ORCHESTRATOR_PATH = path.join(
+  PLUGIN_ROOT,
+  'workflows',
+  'work-orchestrator',
+  'work.workflow.js'
+);
 
 // Tokenize args string into positional single-token values.
 // Quoted multi-word args are NOT supported by design — matches pre-execFileSync
@@ -149,7 +156,7 @@ function formatPlan(plan) {
     '  INSTRUCTIONS: Execute RUN steps in order. DEFER steps: re-run plan first to resolve to RUN/SKIP.'
   );
   lines.push(
-    `  TRANSITION: node ${PLUGIN_ROOT}/scripts/workflows/work/work.workflow.js transition ${plan.ticket} <step>`
+    `  TRANSITION: node ${PLUGIN_ROOT}/scripts/workflows/work-orchestrator/work.workflow.js transition ${plan.ticket} <step>`
   );
   lines.push('═══════════════════════════════════════════════════════════════════');
   lines.push('');

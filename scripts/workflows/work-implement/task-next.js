@@ -633,7 +633,7 @@ function main() {
   // task-advance writer — without that bookkeeping, work-next.js refuses
   // to complete the workflow ("Cannot complete: 1 tasks still pending").
   if (type === 'checkpoint') {
-    const workStateCli = path.resolve(__dirname, '..', 'work', 'work-state.js');
+    const workStateCli = path.resolve(__dirname, '..', 'work-orchestrator', 'work-state.js');
     let advanceOut = '';
     let advanceCode = -1;
     try {

@@ -731,7 +731,7 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
     // Use ctx.tasksDir-derived TASKS_BASE (not the global one which points to plugin dir)
     const gateTasksBase = ctx.tasksDir ? path.dirname(ctx.tasksDir) : null;
     const tddEnforcement = require(
-      path.join(__dirname, '..', '..', '..', 'work', 'tdd-enforcement')
+      path.join(__dirname, '..', '..', '..', 'work-orchestrator', 'tdd-enforcement')
     );
     let { exists, evidence } = gateTasksBase
       ? tddEnforcement.readTddEvidence(gateTasksBase, safeName, stepName, taskNum)

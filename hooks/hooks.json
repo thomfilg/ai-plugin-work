@@ -50,11 +50,11 @@
           },
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/hooks/protect-tasks-md.js"
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-orchestrator/hooks/protect-tasks-md.js"
           },
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/hooks/protect-gherkin.js"
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-orchestrator/hooks/protect-gherkin.js"
           },
           {
             "type": "command",
@@ -84,11 +84,11 @@
           },
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/hooks/protect-tasks-md.js"
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-orchestrator/hooks/protect-tasks-md.js"
           },
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/hooks/protect-gherkin.js"
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-orchestrator/hooks/protect-gherkin.js"
           },
           {
             "type": "command",
@@ -118,7 +118,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/hooks/work-enforce-steps.js"
+            "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-orchestrator/hooks/work-enforce-steps.js"
           }
         ]
       },
@@ -127,7 +127,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/agents/commit-writer/commit-writer-preflight.js"
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-orchestrator/agents/commit-writer/commit-writer-preflight.js"
           }
         ]
       }
@@ -172,7 +172,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "CLAUDE_HOOK_TYPE=PostToolUse node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/hooks/work-enforce-steps.js"
+            "command": "CLAUDE_HOOK_TYPE=PostToolUse node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-orchestrator/hooks/work-enforce-steps.js"
           }
         ]
       },
@@ -185,7 +185,7 @@
           },
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/hooks/enforce-coverage-fix.js"
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-orchestrator/hooks/enforce-coverage-fix.js"
           }
         ]
       },
@@ -226,11 +226,11 @@
         "hooks": [
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/hooks/work-code-review-status.js"
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-orchestrator/hooks/work-code-review-status.js"
           },
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/hooks/work-suggestion-replies.js"
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-orchestrator/hooks/work-suggestion-replies.js"
           }
         ]
       }

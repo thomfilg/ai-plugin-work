@@ -120,7 +120,7 @@ const WORK_STEPS = [
   // GH-215: brief_gate sits between `brief` and `spec` so the hook can block
   // the transition into `spec` until every cross-ticket/architectural open
   // question in brief.md has been resolved. The ordering here must mirror
-  // workflows/work/step-registry.js:ALL_STEPS so tests that rely on
+  // workflows/work-orchestrator/step-registry.js:ALL_STEPS so tests that rely on
   // makeStepStatus() see an authentic in-progress/pending split.
   'brief_gate',
   'spec',
@@ -1328,7 +1328,13 @@ describe('enforce-step-workflow', () => {
 
     it('source confirms ready is in softSteps set', () => {
       // After OCP refactor, work workflow definition lives in its own file
-      const defPath = path.join(__dirname, '..', '..', 'work', 'workflow-definition.js');
+      const defPath = path.join(
+        __dirname,
+        '..',
+        '..',
+        'work-orchestrator',
+        'workflow-definition.js'
+      );
       const defSource = fs.readFileSync(defPath, 'utf-8');
       const softStepsMatch = defSource.match(/softSteps:\s*new Set\(\[([^\]]+)\]\)/);
       assert.ok(softStepsMatch, 'Should have softSteps declaration');
@@ -1906,7 +1912,7 @@ describe('enforce-step-workflow', () => {
     // Use the actual hooks directory (trusted path) for exempt script tests
     const HOOKS_DIR = path.join(__dirname, '..', 'hooks');
     const LIB_DIR = path.join(__dirname, '..');
-    const WORK_DIR = path.join(__dirname, '..', '..', 'work');
+    const WORK_DIR = path.join(__dirname, '..', '..', 'work-orchestrator');
     const ORCHESTRATOR_PATH = path.join(WORK_DIR, 'work.workflow.js');
     const ENGINE_PATH = path.join(LIB_DIR, 'workflow-engine.js');
 
@@ -2746,7 +2752,13 @@ describe('enforce-step-workflow', () => {
 
     const FAKE_GH_DIR = path.join(os.tmpdir(), `fake-gh-${process.pid}`);
     const FAKE_GH_PATH = path.join(FAKE_GH_DIR, 'gh');
-    const ORCHESTRATOR_PATH = path.join(__dirname, '..', '..', 'work', 'work.workflow.js');
+    const ORCHESTRATOR_PATH = path.join(
+      __dirname,
+      '..',
+      '..',
+      'work-orchestrator',
+      'work.workflow.js'
+    );
 
     // The verify() function now delegates to follow-up-pr.js which calls:
     //   getPRInfo():  gh pr view --json number,title,url,headRefName,baseRefName,mergeable,mergeStateStatus,state
@@ -3075,7 +3087,13 @@ describe('enforce-step-workflow', () => {
     const FAKE_GIT_PATH = path.join(FAKE_GIT_DIR, 'git');
     const FAKE_GH_DIR = path.join(os.tmpdir(), `fake-gh-commit-${process.pid}`);
     const FAKE_GH_PATH = path.join(FAKE_GH_DIR, 'gh');
-    const ORCHESTRATOR_PATH = path.join(__dirname, '..', '..', 'work', 'work.workflow.js');
+    const ORCHESTRATOR_PATH = path.join(
+      __dirname,
+      '..',
+      '..',
+      'work-orchestrator',
+      'work.workflow.js'
+    );
 
     function writeFakeGit(responseMap) {
       if (!fs.existsSync(FAKE_GIT_DIR)) fs.mkdirSync(FAKE_GIT_DIR, { recursive: true });
@@ -3211,7 +3229,13 @@ describe('enforce-step-workflow', () => {
     const FAKE_GIT_PATH = path.join(FAKE_GIT_DIR, 'git');
     const FAKE_GH_DIR = path.join(os.tmpdir(), `fake-gh-pr-191-${process.pid}`);
     const FAKE_GH_PATH = path.join(FAKE_GH_DIR, 'gh');
-    const ORCHESTRATOR_PATH = path.join(__dirname, '..', '..', 'work', 'work.workflow.js');
+    const ORCHESTRATOR_PATH = path.join(
+      __dirname,
+      '..',
+      '..',
+      'work-orchestrator',
+      'work.workflow.js'
+    );
     const PR_TEST_BRANCH = `${TEST_TICKET}-pr-test`;
 
     function writeFakeGit() {
@@ -3440,7 +3464,13 @@ describe('enforce-step-workflow', () => {
     // Requires a real git repo to exercise the git log/diff commands.
 
     const { execSync } = require('child_process');
-    const WORK_ORCH_PATH = path.join(__dirname, '..', '..', 'work', 'work.workflow.js');
+    const WORK_ORCH_PATH = path.join(
+      __dirname,
+      '..',
+      '..',
+      'work-orchestrator',
+      'work.workflow.js'
+    );
     let gitRepoDir;
     let bareDir;
     let tmpTasksBase;
@@ -3572,7 +3602,13 @@ describe('enforce-step-workflow', () => {
   // ═══════════════════════════════════════════════════════════════════════════
 
   describe('spec -> implement transition (#96)', () => {
-    const ORCHESTRATOR_PATH = path.join(__dirname, '..', '..', 'work', 'work.workflow.js');
+    const ORCHESTRATOR_PATH = path.join(
+      __dirname,
+      '..',
+      '..',
+      'work-orchestrator',
+      'work.workflow.js'
+    );
 
     it('allows transition from spec when spec.md exists (verify function)', async () => {
       writeWorkState(makeStepStatus('spec', WORK_STEPS));
@@ -3682,7 +3718,13 @@ describe('enforce-step-workflow', () => {
   // subfield indentation, same trailing newline) — that isolates the gate's
   // behavior from any whitespace noise in the fixtures.
   describe('brief_gate -> spec transition (GH-215)', () => {
-    const ORCHESTRATOR_PATH = path.join(__dirname, '..', '..', 'work', 'work.workflow.js');
+    const ORCHESTRATOR_PATH = path.join(
+      __dirname,
+      '..',
+      '..',
+      'work-orchestrator',
+      'work.workflow.js'
+    );
     const BRIEF_PATH = () => path.join(TASKS_DIR, 'brief.md');
 
     // Minimal brief.md containing a single structured Open Question of the
@@ -3835,7 +3877,13 @@ describe('enforce-step-workflow', () => {
   });
 
   describe('commit -> check transition (#95)', () => {
-    const ORCHESTRATOR_PATH = path.join(__dirname, '..', '..', 'work', 'work.workflow.js');
+    const ORCHESTRATOR_PATH = path.join(
+      __dirname,
+      '..',
+      '..',
+      'work-orchestrator',
+      'work.workflow.js'
+    );
 
     it('allows forward transition from commit to check with evidence (new commits exist)', async () => {
       writeWorkState(makeStepStatus('commit', WORK_STEPS));
@@ -3857,7 +3905,13 @@ describe('enforce-step-workflow', () => {
   });
 
   describe('check -> pr and check -> implement (#95)', () => {
-    const ORCHESTRATOR_PATH = path.join(__dirname, '..', '..', 'work', 'work.workflow.js');
+    const ORCHESTRATOR_PATH = path.join(
+      __dirname,
+      '..',
+      '..',
+      'work-orchestrator',
+      'work.workflow.js'
+    );
 
     it('allows transition from check to pr with Skill(check) evidence', async () => {
       writeWorkState(makeStepStatus('check', WORK_STEPS));
@@ -3921,7 +3975,13 @@ describe('enforce-step-workflow', () => {
   });
 
   describe('pr -> ready transition (#101)', () => {
-    const ORCHESTRATOR_PATH = path.join(__dirname, '..', '..', 'work', 'work.workflow.js');
+    const ORCHESTRATOR_PATH = path.join(
+      __dirname,
+      '..',
+      '..',
+      'work-orchestrator',
+      'work.workflow.js'
+    );
 
     it('allows transition from pr to ready when pr evidence exists', async () => {
       writeWorkState(makeStepStatus('pr', WORK_STEPS));
@@ -3977,7 +4037,13 @@ describe('enforce-step-workflow', () => {
   });
 
   describe('ready -> follow_up and ready -> ci (#102)', () => {
-    const ORCHESTRATOR_PATH = path.join(__dirname, '..', '..', 'work', 'work.workflow.js');
+    const ORCHESTRATOR_PATH = path.join(
+      __dirname,
+      '..',
+      '..',
+      'work-orchestrator',
+      'work.workflow.js'
+    );
 
     it('allows transition from ready to follow_up (soft step, no evidence needed)', async () => {
       writeWorkState(makeStepStatus('ready', WORK_STEPS));
@@ -4008,7 +4074,13 @@ describe('enforce-step-workflow', () => {
   });
 
   describe('follow_up -> ci and follow_up -> implement (#103)', () => {
-    const ORCHESTRATOR_PATH = path.join(__dirname, '..', '..', 'work', 'work.workflow.js');
+    const ORCHESTRATOR_PATH = path.join(
+      __dirname,
+      '..',
+      '..',
+      'work-orchestrator',
+      'work.workflow.js'
+    );
 
     it('allows backward transition from follow_up to implement (retry loop)', async () => {
       writeWorkState(makeStepStatus('follow_up', WORK_STEPS));
@@ -4050,7 +4122,13 @@ describe('enforce-step-workflow', () => {
   });
 
   describe('ci -> cleanup and ci -> implement (#104)', () => {
-    const ORCHESTRATOR_PATH = path.join(__dirname, '..', '..', 'work', 'work.workflow.js');
+    const ORCHESTRATOR_PATH = path.join(
+      __dirname,
+      '..',
+      '..',
+      'work-orchestrator',
+      'work.workflow.js'
+    );
 
     it('allows transition from ci to cleanup with ci evidence', async () => {
       writeWorkState(makeStepStatus('ci', WORK_STEPS));
@@ -4105,7 +4183,13 @@ describe('enforce-step-workflow', () => {
   });
 
   describe('cleanup -> reports transition (#105)', () => {
-    const ORCHESTRATOR_PATH = path.join(__dirname, '..', '..', 'work', 'work.workflow.js');
+    const ORCHESTRATOR_PATH = path.join(
+      __dirname,
+      '..',
+      '..',
+      'work-orchestrator',
+      'work.workflow.js'
+    );
 
     it('allows transition from cleanup with cleanup evidence', async () => {
       writeWorkState(makeStepStatus('cleanup', WORK_STEPS));
@@ -4137,7 +4221,13 @@ describe('enforce-step-workflow', () => {
   });
 
   describe('backward transition evidence clearing (GH-141)', () => {
-    const ORCHESTRATOR_PATH = path.join(__dirname, '..', '..', 'work', 'work.workflow.js');
+    const ORCHESTRATOR_PATH = path.join(
+      __dirname,
+      '..',
+      '..',
+      'work-orchestrator',
+      'work.workflow.js'
+    );
 
     it('clears evidence for commit through ci on ci -> implement backward transition', async () => {
       writeWorkState(makeStepStatus('ci', WORK_STEPS));
@@ -4226,7 +4316,13 @@ describe('enforce-step-workflow', () => {
   });
 
   describe('anti-skip transitions allowed by hook (GH-141)', () => {
-    const ORCHESTRATOR_PATH = path.join(__dirname, '..', '..', 'work', 'work.workflow.js');
+    const ORCHESTRATOR_PATH = path.join(
+      __dirname,
+      '..',
+      '..',
+      'work-orchestrator',
+      'work.workflow.js'
+    );
 
     it('allows transition from commit to pr (anti-skip is orchestrator concern)', async () => {
       writeWorkState(makeStepStatus('commit', WORK_STEPS));

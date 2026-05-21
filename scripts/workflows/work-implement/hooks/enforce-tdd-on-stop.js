@@ -157,7 +157,7 @@ let exists = false;
 let valid = false;
 try {
   const { readTddEvidence, validateTddEvidence } = require(
-    path.join(__dirname, '..', '..', 'work', 'tdd-enforcement')
+    path.join(__dirname, '..', '..', 'work-orchestrator', 'tdd-enforcement')
   );
   const result = readTddEvidence(safeTicket, 'implement', taskNum);
   exists = result.exists;
@@ -181,7 +181,9 @@ const tasksDir = path.join(TASKS_BASE, safeTicket);
 
 let testCommand = null;
 try {
-  const { parseTasks } = require(path.join(__dirname, '..', '..', 'work', 'task-parser'));
+  const { parseTasks } = require(
+    path.join(__dirname, '..', '..', 'work-orchestrator', 'task-parser')
+  );
   const tasks = parseTasks(tasksDir);
   const currentTask = tasks?.find((t) => t.num === taskNum);
   testCommand = currentTask?.testCommand || null;

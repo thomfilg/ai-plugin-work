@@ -129,7 +129,7 @@ function getNextInstruction(ticketId, prNumber) {
     tasksDir,
     worktreeDir,
     TASKS_BASE,
-    workScriptsDir: path.join(__dirname, '..', 'work', 'scripts'),
+    workScriptsDir: path.join(__dirname, '..', 'work-orchestrator', 'scripts'),
   };
 
   // eslint-disable-next-line no-constant-condition

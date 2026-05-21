@@ -116,7 +116,7 @@ module.exports = function registerImplement(register) {
       const { parallelTasks } = findReadyTasks(tasksDir, currentTaskNum - 1);
       if (parallelTasks.length > 1) {
         const { parseTasks: parseFullTasks } = require(
-          path.join(__dirname, '..', '..', '..', 'work', 'task-parser')
+          path.join(__dirname, '..', '..', '..', 'work-orchestrator', 'task-parser')
         );
         const allTasks = parseFullTasks(tasksDir) || [];
 

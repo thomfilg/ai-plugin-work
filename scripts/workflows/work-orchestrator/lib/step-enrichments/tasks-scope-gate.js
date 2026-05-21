@@ -18,7 +18,7 @@
 'use strict';
 
 const path = require('path');
-const { parseTasks } = require(path.join('..', '..', '..', 'work', 'task-parser'));
+const { parseTasks } = require(path.join('..', '..', '..', 'work-orchestrator', 'task-parser'));
 const { validateAll } = require('../../../lib/task-scope');
 
 function buildBlocker(tasksDir, validation) {

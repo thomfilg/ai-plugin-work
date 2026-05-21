@@ -10,7 +10,9 @@
 
 const fs = require('fs');
 const path = require('path');
-const { ALL_STEPS } = require(path.join(__dirname, '..', '..', '..', 'work', 'step-registry'));
+const { ALL_STEPS } = require(
+  path.join(__dirname, '..', '..', '..', 'work-orchestrator', 'step-registry')
+);
 
 /**
  * @param {string} safeName

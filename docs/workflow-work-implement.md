@@ -161,7 +161,7 @@ This PreToolUse hook blocks file edits based on the current TDD phase:
 
 ## Evidence Validation
 
-**File:** `scripts/workflows/work/tdd-enforcement.js`
+**File:** `scripts/workflows/work-orchestrator/tdd-enforcement.js`
 
 The `/work` orchestrator validates TDD evidence before allowing transition out of `implement`:
 

@@ -29,7 +29,9 @@ const config = require(path.join(__dirname, '..', '..', 'lib', 'config'));
 const { decideEdit } = require(
   path.join(__dirname, '..', '..', 'lib', 'hooks', 'policies', 'scope-protection')
 );
-const { parseTasks } = require(path.join(__dirname, '..', '..', 'work', 'task-parser'));
+const { parseTasks } = require(
+  path.join(__dirname, '..', '..', 'work-orchestrator', 'task-parser')
+);
 
 const FILE_WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 

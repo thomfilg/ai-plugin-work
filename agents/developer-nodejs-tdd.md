@@ -189,7 +189,7 @@ For any command that may run more than ~10 seconds (test suites, builds, dev ser
 2. Design the test suite that captures all requirements
 3. Write integration tests first (red phase)
 4. Implement the feature with proper TypeScript types (green phase)
-5. Refactor for optimization and cleanliness (refactor phase) — REFACTOR is developer self-cleanup; do NOT run `/tests-review` or `/code-review` here. Those reviewer commands are explicitly excluded from the refactor phase and run as a separate post-commit review gate (`scripts/workflows/work/steps/task-review.js`, GH-211) against the committed diff.
+5. Refactor for optimization and cleanliness (refactor phase) — REFACTOR is developer self-cleanup; do NOT run `/tests-review` or `/code-review` here. Those reviewer commands are explicitly excluded from the refactor phase and run as a separate post-commit review gate (`scripts/workflows/work-orchestrator/steps/task-review.js`, GH-211) against the committed diff.
 6. Verify all tests still pass
 7. Document any complex logic or architectural decisions
 

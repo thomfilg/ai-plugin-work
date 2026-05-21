@@ -4,7 +4,7 @@
  * IDEA2 / GH-219 — Task 3: Shared preflight gate with audit hook.
  *
  * `runPreflight(context, options)` is the single evaluation surface consumed
- * by `workflows/work/hooks/work-require-implement.js` and
+ * by `workflows/work-orchestrator/hooks/work-require-implement.js` and
  * `workflows/work-implement/hooks/work-implement-enforce.js`. It returns a
  * {@link PreflightResult} and invokes an optional {@link PreflightAudit}
  * callback so enforcement decisions can be persisted to `.work-actions.json`
@@ -12,7 +12,7 @@
  * `work-actions.js` (low coupling; audit is injected by callers).
  *
  * The `context` parameter matches the `EnforcementContext` shape returned by
- * `workflows/work/work-enforcement-context.js` (Task 2). The JSDoc `@param`
+ * `workflows/work-orchestrator/work-enforcement-context.js` (Task 2). The JSDoc `@param`
  * below imports that type by name via a TypeScript-compatible `import(...)`
  * specifier so downstream tooling (tsc in checkJs mode, Cursor/VSCode
  * IntelliSense) resolves the fields without a runtime require — preflight
@@ -28,7 +28,7 @@ const path = require('path');
  * @typedef {import('../work/work-enforcement-context').EnforcementContext} EnforcementContext
  *
  * Unified enforcement context composed by `loadEnforcementContext` in
- * `workflows/work/work-enforcement-context.js` (Task 2). Contains:
+ * `workflows/work-orchestrator/work-enforcement-context.js` (Task 2). Contains:
  *   - `ticketId`    {string|null}           sanitized ticket id, null on validation error
  *   - `origin`      {'workflow'|'ai-subtask'|'user'|null} derived origin
  *   - `state`       {object|null}           result from `loadState(ticketId)`
@@ -128,7 +128,7 @@ const path = require('path');
  *
  * @param {EnforcementContext} context
  *   Enforcement context produced by `loadEnforcementContext`
- *   (`workflows/work/work-enforcement-context.js`, Task 2).
+ *   (`workflows/work-orchestrator/work-enforcement-context.js`, Task 2).
  * @param {PreflightOptions} [options]
  * @returns {PreflightResult}
  */
@@ -323,7 +323,7 @@ function createGraphCheck() {
     // Lazy require to avoid module-level coupling with work-state.js.
     // In production config is always available; if require fails, the
     // enclosing runPreflight try/catch records PREFLIGHT_CHECK_ERROR.
-    const { validateTaskGraph } = require('../work/work-state');
+    const { validateTaskGraph } = require('../work-orchestrator/work-state');
 
     const validation = validateTaskGraph(ctx.tasks);
     if (validation.valid) return null;

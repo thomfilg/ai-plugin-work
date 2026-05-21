@@ -50,7 +50,7 @@ The actual `hooks.json` uses `matcher` regex patterns, `CLAUDE_HOOK_TYPE` env va
         "hooks": [
           { "type": "command", "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/lib/hooks/enforce-step-workflow.js" },
           { "type": "command", "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-implement/hooks/work-implement-enforce.js" },
-          { "type": "command", "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/hooks/work-require-implement.js" }
+          { "type": "command", "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-orchestrator/hooks/work-require-implement.js" }
         ]
       }
     ],
@@ -147,7 +147,7 @@ All hooks follow a strict fail-open policy:
 
 ## Workflow-Specific Hooks
 
-### /work hooks (`scripts/workflows/work/hooks/`)
+### /work hooks (`scripts/workflows/work-orchestrator/hooks/`)
 
 | Hook | Purpose |
 |---|---|

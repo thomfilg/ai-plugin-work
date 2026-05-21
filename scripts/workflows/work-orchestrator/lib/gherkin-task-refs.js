@@ -54,7 +54,9 @@
 const path = require('node:path');
 const fs = require('node:fs');
 
-const { parseRaw } = require(path.join(__dirname, '..', '..', 'work', 'lib', 'parse-gherkin.js'));
+const { parseRaw } = require(
+  path.join(__dirname, '..', '..', 'work-orchestrator', 'lib', 'parse-gherkin.js')
+);
 
 const TASK_TAG_RE = /^@task:(\d+)$/;
 const TEST_TAG_RE = /^@test:(.+)$/;

@@ -12,7 +12,7 @@
 
 const path = require('path');
 const { execFileSync } = require('child_process');
-const { buildChildEnv } = require('../../../work/scripts/gh-exec');
+const { buildChildEnv } = require('../../../work-orchestrator/scripts/gh-exec');
 
 /**
  * Check if any workflow run for the PR's branch has already failed.

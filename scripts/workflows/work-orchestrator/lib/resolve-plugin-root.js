@@ -23,16 +23,16 @@ function resolvePluginRoot(callerDir, levelsUp = 2) {
   const envRoot = process.env.CLAUDE_PLUGIN_ROOT;
   if (envRoot) {
     // Direct: already points to the plugin
-    if (fs.existsSync(path.join(envRoot, 'workflows', 'work'))) return envRoot;
+    if (fs.existsSync(path.join(envRoot, 'workflows', 'work-orchestrator'))) return envRoot;
     // Parent: points to plugins dir — resolve to marketplace subdir
     const mp = path.join(envRoot, 'marketplaces', 'work-workflow');
-    if (fs.existsSync(path.join(mp, 'workflows', 'work'))) return mp;
+    if (fs.existsSync(path.join(mp, 'workflows', 'work-orchestrator'))) return mp;
   }
   // Fallback: resolve from caller's __dirname
   if (callerDir) {
     let dir = callerDir;
     for (let i = 0; i < levelsUp; i++) dir = path.join(dir, '..');
-    if (fs.existsSync(path.join(dir, 'workflows', 'work'))) return dir;
+    if (fs.existsSync(path.join(dir, 'workflows', 'work-orchestrator'))) return dir;
   }
   return null;
 }
@@ -45,7 +45,9 @@ function resolvePluginRoot(callerDir, levelsUp = 2) {
 function resolvePluginPaths(callerDir, levelsUp) {
   const root = resolvePluginRoot(callerDir, levelsUp);
   return {
-    workDir: root ? path.join(root, 'workflows', 'work') : path.join(callerDir, '..', 'work'),
+    workDir: root
+      ? path.join(root, 'workflows', 'work-orchestrator')
+      : path.join(callerDir, '..', 'work-orchestrator'),
     libDir: root ? path.join(root, 'workflows', 'lib') : path.join(callerDir, '..', 'lib'),
   };
 }

@@ -452,7 +452,9 @@ function readWorkState(ticketId) {
 
     let stepName;
     try {
-      const { STEP_ORDER } = require(path.join(__dirname, '..', '..', 'work', 'step-registry'));
+      const { STEP_ORDER } = require(
+        path.join(__dirname, '..', '..', 'work-orchestrator', 'step-registry')
+      );
       // currentStep in .work-state.json is 1-based (see work-state.js: stepIndex + 1)
       const zeroBasedIndex = stepIndex - 1;
       if (zeroBasedIndex >= 0 && zeroBasedIndex < STEP_ORDER.length) {
@@ -559,7 +561,7 @@ function handleStop(hookData) {
         `BLOCKED: You are mid-workflow (/work ${workState.ticketId}). DO NOT STOP.\n\n` +
           `Current step: ${workState.stepName}\n` +
           `Your next action: Run the orchestrator to get your plan and continue executing ALL remaining steps:\n` +
-          '  node "${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/work.workflow.js" ' +
+          '  node "${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-orchestrator/work.workflow.js" ' +
           workState.ticketId +
           '\n\n' +
           "Then execute each RUN step in order. Do NOT stop until the workflow reaches 'complete'.\n" +

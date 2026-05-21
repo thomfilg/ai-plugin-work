@@ -14,7 +14,7 @@ const { TASKS_PHASES } = require('../../tasks-phase-registry');
 
 let parseTasks;
 try {
-  ({ parseTasks } = require('../../../work/task-parser'));
+  ({ parseTasks } = require('../../../work-orchestrator/task-parser'));
 } catch {
   parseTasks = null;
 }

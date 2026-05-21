@@ -47,7 +47,7 @@ follow_up → ci → cleanup → reports → complete
 
 | Directory | Purpose |
 |---|---|
-| `scripts/workflows/work/` | Main /work orchestrator |
+| `scripts/workflows/work-orchestrator/` | Main /work orchestrator |
 | `scripts/workflows/check/` | Quality verification |
 | `scripts/workflows/work-implement/` | TDD phase management |
 | `scripts/workflows/work-pr/` | PR generation |

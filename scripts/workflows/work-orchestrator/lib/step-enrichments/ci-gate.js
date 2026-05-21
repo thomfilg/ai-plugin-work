@@ -12,7 +12,9 @@
 'use strict';
 
 const path = require('path');
-const { ALL_STEPS } = require(path.join(__dirname, '..', '..', '..', 'work', 'step-registry'));
+const { ALL_STEPS } = require(
+  path.join(__dirname, '..', '..', '..', 'work-orchestrator', 'step-registry')
+);
 
 function advanceToCleanup(safeName, deps, reason) {
   const { loadWorkState, saveWorkState, log, recursionDepth } = deps;

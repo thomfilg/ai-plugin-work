@@ -13,7 +13,7 @@ const os = require('os');
 
 let ghMockResponses = {};
 
-const ghExecPath = require.resolve('../../work/scripts/gh-exec.js');
+const ghExecPath = require.resolve('../../work-orchestrator/scripts/gh-exec.js');
 require.cache[ghExecPath] = {
   id: ghExecPath,
   filename: ghExecPath,
@@ -45,7 +45,7 @@ childProcess.execSync = function (cmd, opts) {
 };
 
 // Clear follow-up-pr.js cache so it picks up mock
-const followUpPrPath = require.resolve('../../work/scripts/follow-up-pr.js');
+const followUpPrPath = require.resolve('../../work-orchestrator/scripts/follow-up-pr.js');
 delete require.cache[followUpPrPath];
 
 // ─── Import step handlers ──────────────────────────────────────────────────
@@ -131,7 +131,7 @@ describe('CI progression with mocked gh calls', () => {
       tasksDir: path.join(tmpDir, 'GH-123'),
       worktreeDir: tmpDir,
       TASKS_BASE: tmpDir,
-      workScriptsDir: path.resolve(__dirname, '..', '..', 'work', 'scripts'),
+      workScriptsDir: path.resolve(__dirname, '..', '..', 'work-orchestrator', 'scripts'),
     };
   });
 

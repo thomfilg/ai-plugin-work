@@ -10,7 +10,7 @@
   "scripts": {
     "test": "bash scripts/run-tests.sh",
     "test:enforce": "node --test scripts/workflows/lib/__tests__/enforce-step-workflow.test.js",
-    "test:orchestrator": "node --test scripts/workflows/work/__tests__/work-orchestrator.test.js",
+    "test:orchestrator": "node --test scripts/workflows/work-orchestrator/__tests__/work-orchestrator.test.js",
     "test:work-pr": "node --test scripts/workflows/work-pr/__tests__/work-pr.workflow.test.js",
     "bump": "node scripts/workflows/lib/scripts/bump-version.js",
     "dev:lint": "./scripts/workflows/lib/scripts/dev-check/dev-lint.sh",

@@ -238,7 +238,13 @@ describe('createFileProtector — script bypass', () => {
     const repoRoot = require('child_process')
       .execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' })
       .trim();
-    const testScript = path.join(repoRoot, 'workflows', 'work', '__tests__', 'work-state.test.js');
+    const testScript = path.join(
+      repoRoot,
+      'workflows',
+      'work-orchestrator',
+      '__tests__',
+      'work-state.test.js'
+    );
     // This file is git-tracked and in __tests__/ — should be exempt from Vector 3
     const result = protector.check('Bash', { command: `node ${testScript}` });
     assert.equal(result.blocked, false, 'Git-tracked files in __tests__/ should skip Vector 3');

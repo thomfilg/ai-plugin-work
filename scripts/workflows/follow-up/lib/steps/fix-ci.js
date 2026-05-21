@@ -8,7 +8,7 @@
 'use strict';
 
 const { execFileSync } = require('child_process');
-const { buildChildEnv } = require('../../../work/scripts/gh-exec');
+const { buildChildEnv } = require('../../../work-orchestrator/scripts/gh-exec');
 
 module.exports = function registerFixCi(register) {
   register('fix-ci', (state, ctx) => {

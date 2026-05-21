@@ -83,7 +83,9 @@ const {
 
 let appendAction;
 try {
-  appendAction = require(path.join(__dirname, '..', '..', 'work', 'work-actions')).appendAction;
+  appendAction = require(
+    path.join(__dirname, '..', '..', 'work-orchestrator', 'work-actions')
+  ).appendAction;
 } catch {
   appendAction = () => {};
 }
@@ -112,7 +114,7 @@ function safeTicketPath(ticketId) {
 // Each workflow directory exports a factory function that receives shared deps.
 
 const { STEPS, ALL_STEPS: WORK_STEPS } = require(
-  path.join(__dirname, '..', '..', 'work', 'step-registry')
+  path.join(__dirname, '..', '..', 'work-orchestrator', 'step-registry')
 );
 
 const workflowDeps = { TASKS_BASE, safeTicketPath, resolveGitHead };
@@ -232,8 +234,8 @@ const TRUSTED_SCRIPT_DIRS = [
   path.resolve(__dirname), // workflows/lib/hooks/
   path.resolve(__dirname, '..'), // workflows/lib/
   path.resolve(__dirname, '..', 'scripts'), // workflows/lib/scripts/
-  path.resolve(__dirname, '..', '..', 'work'), // workflows/work/
-  path.resolve(__dirname, '..', '..', 'work', 'scripts'), // workflows/work/scripts/
+  path.resolve(__dirname, '..', '..', 'work-orchestrator'), // workflows/work-orchestrator/
+  path.resolve(__dirname, '..', '..', 'work-orchestrator', 'scripts'), // workflows/work-orchestrator/scripts/
   path.resolve(__dirname, '..', '..', 'check', 'scripts'), // workflows/check/scripts/
   path.resolve(__dirname, '..', '..', 'work-implement'), // workflows/work-implement/
   path.resolve(__dirname, '..', '..', 'work-brief'), // workflows/work-brief/

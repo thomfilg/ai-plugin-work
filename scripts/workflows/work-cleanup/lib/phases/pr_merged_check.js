@@ -23,7 +23,7 @@ function readContext(tasksDir) {
 }
 
 function fetchPrState(worktreeRoot, prNumber) {
-  const { buildChildEnv } = require('../../../work/scripts/gh-exec');
+  const { buildChildEnv } = require('../../../work-orchestrator/scripts/gh-exec');
   const r = spawnSync('gh', ['pr', 'view', String(prNumber), '--json', 'state,mergedAt'], {
     cwd: worktreeRoot,
     encoding: 'utf8',

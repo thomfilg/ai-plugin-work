@@ -4,7 +4,7 @@ The workflow engine is built on a deterministic state machine that tracks step p
 
 ## Step Registry
 
-**File:** `scripts/workflows/work/step-registry.js`
+**File:** `scripts/workflows/work-orchestrator/step-registry.js`
 
 The step registry is the single source of truth for step identifiers and ordering. Step IDs are decoupled from their position — reordering only requires changing `STEP_ORDER`.
 
@@ -178,7 +178,7 @@ The implement/commit/task_review cycle repeats for each task before proceeding t
 
 ## Plan Generator
 
-**File:** `scripts/workflows/work/plan-generator.js`
+**File:** `scripts/workflows/work-orchestrator/plan-generator.js`
 
 Before each orchestrator iteration, the plan generator inspects current state and computes actions:
 
