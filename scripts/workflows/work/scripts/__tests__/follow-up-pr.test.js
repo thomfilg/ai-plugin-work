@@ -735,14 +735,22 @@ describe('partitionByRequired', () => {
 describe('getCodeContext', () => {
   it('returns context lines around the target line', () => {
     // Use this test file itself as a known file
-    const result = getCodeContext('scripts/workflows/work/scripts/__tests__/follow-up-pr.test.js', 1, 1);
+    const result = getCodeContext(
+      'scripts/workflows/work/scripts/__tests__/follow-up-pr.test.js',
+      1,
+      1
+    );
     assert.ok(result, 'should return context');
     assert.ok(result.includes('>>>'), 'should have a marker on the target line');
     assert.ok(result.includes('1:'), 'should have line number 1');
   });
 
   it('marks the correct line with >>>', () => {
-    const result = getCodeContext('scripts/workflows/work/scripts/__tests__/follow-up-pr.test.js', 3, 1);
+    const result = getCodeContext(
+      'scripts/workflows/work/scripts/__tests__/follow-up-pr.test.js',
+      3,
+      1
+    );
     assert.ok(result);
     const lines = result.split('\n');
     const markedLine = lines.find((l) => l.startsWith('>>>'));
@@ -776,7 +784,11 @@ describe('getCodeContext', () => {
   });
 
   it('handles line 1 without negative index', () => {
-    const result = getCodeContext('scripts/workflows/work/scripts/__tests__/follow-up-pr.test.js', 1, 3);
+    const result = getCodeContext(
+      'scripts/workflows/work/scripts/__tests__/follow-up-pr.test.js',
+      1,
+      3
+    );
     assert.ok(result, 'should return context');
     assert.ok(result.includes('>>>'), 'should have marker');
     // Should not have negative line numbers
