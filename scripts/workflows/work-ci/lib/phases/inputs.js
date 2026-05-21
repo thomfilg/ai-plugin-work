@@ -31,7 +31,7 @@ function resolvePrNumber(worktreeRoot) {
     /* fall through */
   }
   // Fallback: gh pr view.
-  const { buildChildEnv } = require('../../../work-orchestrator/scripts/gh-exec');
+  const { buildChildEnv } = require('../../../work/scripts/gh-exec');
   const r = spawnSync('gh', ['pr', 'view', '--json', 'number'], {
     cwd: worktreeRoot,
     encoding: 'utf8',

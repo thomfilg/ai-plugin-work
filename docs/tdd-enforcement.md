@@ -45,7 +45,7 @@ Only this CLI can record TDD evidence — agents cannot self-report. Evidence in
 
 ### Layer 3: Evidence Validation (Orchestrator)
 
-**File:** `scripts/workflows/work-orchestrator/tdd-enforcement.js`
+**File:** `scripts/workflows/work/tdd-enforcement.js`
 
 The `/work` orchestrator validates TDD evidence before allowing transition out of `implement`:
 

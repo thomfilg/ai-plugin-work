@@ -8,7 +8,7 @@
 const SCOPE_MAP = [
   ['scripts/workflows/lib/hooks/', 'hooks'],
   ['scripts/workflows/lib/', 'lib'],
-  ['scripts/workflows/work-orchestrator/', 'work'],
+  ['scripts/workflows/work/', 'work'],
   ['agents/', 'agents'],
   ['skills/', 'skills'],
   ['hooks/', 'hooks'],

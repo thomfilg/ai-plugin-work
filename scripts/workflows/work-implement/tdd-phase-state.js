@@ -10,7 +10,7 @@
  *   REFACTOR evidence recorded here is developer self-cleanup only. The
  *   external review gate (/tests-review + /code-review) is NOT part of
  *   REFACTOR and is NOT invoked by this CLI. The post-commit review gate
- *   lives in workflows/work-orchestrator/steps/task-review.js (GH-211) and runs after
+ *   lives in workflows/work/steps/task-review.js (GH-211) and runs after
  *   the commit step, against the committed diff. Keeping reviews out of
  *   the TDD phase state machine means the normal TDD loop preserves the
  *   clean RED / GREEN / REFACTOR flow, while exception handling remains
@@ -611,7 +611,7 @@ function cmdRecordGreen(ticketId, args) {
 
 // cmdRecordRefactor: records re-run evidence only; does NOT invoke
 // /tests-review or /code-review. Those reviewer commands run as a separate
-// post-commit gate owned by workflows/work-orchestrator/steps/task-review.js (GH-211),
+// post-commit gate owned by workflows/work/steps/task-review.js (GH-211),
 // not by this CLI and not by the developer agent driving the TDD loop.
 function cmdRecordRefactor(ticketId, args) {
   if (!ticketId) errorExit('Missing ticket ID.');
@@ -698,7 +698,7 @@ function cmdTransition(ticketId, targetPhase, args) {
 
 function auditException(ticketId, taskNum, category, reason, allow) {
   try {
-    const { appendEnforcementAudit } = require('../work-orchestrator/work-actions');
+    const { appendEnforcementAudit } = require('../work/work-actions');
     appendEnforcementAudit(ticketId, {
       origin: 'ai-subtask',
       task: taskNum || null,

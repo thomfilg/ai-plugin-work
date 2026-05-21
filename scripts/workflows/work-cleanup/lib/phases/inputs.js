@@ -18,7 +18,7 @@ function currentBranch(cwd) {
 
 function detectPrNumber(cwd, branch) {
   if (!branch) return null;
-  const { buildChildEnv } = require('../../../work-orchestrator/scripts/gh-exec');
+  const { buildChildEnv } = require('../../../work/scripts/gh-exec');
   const r = spawnSync('gh', ['pr', 'view', branch, '--json', 'number'], {
     cwd,
     encoding: 'utf8',

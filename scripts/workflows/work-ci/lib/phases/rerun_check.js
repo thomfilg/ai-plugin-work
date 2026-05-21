@@ -23,7 +23,7 @@ function readJson(p) {
 function validate(ctx) {
   const c = readJson(path.join(ctx.tasksDir, 'ci-context.json'));
   if (!c || !c.prNumber) return { ok: false, errors: ['Missing ci-context.json prNumber.'] };
-  const { buildChildEnv } = require('../../../work-orchestrator/scripts/gh-exec');
+  const { buildChildEnv } = require('../../../work/scripts/gh-exec');
   const r = spawnSync('gh', ['pr', 'view', String(c.prNumber), '--json', 'statusCheckRollup'], {
     cwd: ctx.worktreeRoot,
     encoding: 'utf8',

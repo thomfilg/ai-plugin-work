@@ -83,9 +83,7 @@ const {
 
 let appendAction;
 try {
-  appendAction = require(
-    path.join(__dirname, '..', '..', 'work-orchestrator', 'work-actions')
-  ).appendAction;
+  appendAction = require(path.join(__dirname, '..', '..', 'work', 'work-actions')).appendAction;
 } catch {
   appendAction = () => {};
 }
@@ -114,7 +112,7 @@ function safeTicketPath(ticketId) {
 // Each workflow directory exports a factory function that receives shared deps.
 
 const { STEPS, ALL_STEPS: WORK_STEPS } = require(
-  path.join(__dirname, '..', '..', 'work-orchestrator', 'step-registry')
+  path.join(__dirname, '..', '..', 'work', 'step-registry')
 );
 
 const workflowDeps = { TASKS_BASE, safeTicketPath, resolveGitHead };
@@ -234,8 +232,8 @@ const TRUSTED_SCRIPT_DIRS = [
   path.resolve(__dirname), // workflows/lib/hooks/
   path.resolve(__dirname, '..'), // workflows/lib/
   path.resolve(__dirname, '..', 'scripts'), // workflows/lib/scripts/
-  path.resolve(__dirname, '..', '..', 'work-orchestrator'), // workflows/work-orchestrator/
-  path.resolve(__dirname, '..', '..', 'work-orchestrator', 'scripts'), // workflows/work-orchestrator/scripts/
+  path.resolve(__dirname, '..', '..', 'work'), // workflows/work/
+  path.resolve(__dirname, '..', '..', 'work', 'scripts'), // workflows/work/scripts/
   path.resolve(__dirname, '..', '..', 'check', 'scripts'), // workflows/check/scripts/
   path.resolve(__dirname, '..', '..', 'work-implement'), // workflows/work-implement/
   path.resolve(__dirname, '..', '..', 'work-brief'), // workflows/work-brief/
@@ -250,7 +248,7 @@ const TRUSTED_SCRIPT_DIRS = [
   path.resolve(__dirname, '..', '..', 'work-task-review'), // workflows/work-task-review/
   path.resolve(__dirname, '..', '..', 'work-reports'), // workflows/work-reports/
   path.resolve(__dirname, '..', '..', 'work-cleanup'), // workflows/work-cleanup/
-  path.resolve(__dirname, '..', '..', 'work-orchestrator'), // workflows/work-orchestrator/
+  path.resolve(__dirname, '..', '..', 'work'), // workflows/work/
   path.resolve(__dirname, '..', '..', 'check2'), // workflows/check2/
   path.resolve(__dirname, '..', '..', 'follow-up'), // workflows/follow-up/
 ];
@@ -774,7 +772,7 @@ function handlePreToolUse(hookData) {
                 `  The workflow has moved past '${requiredStep}'. Do NOT try to record evidence\n` +
                 `  for a previous step now — that artifact window has closed.\n` +
                 `  If the workflow is genuinely stuck, run:\n` +
-                `    node \${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-orchestrator/work-next.js ${ticketId || '<TICKET>'}\n` +
+                `    node \${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/work-next.js ${ticketId || '<TICKET>'}\n` +
                 `  and follow the action it prints for the CURRENT step ('${currentStep}').\n`
             );
             process.exit(2);

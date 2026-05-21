@@ -6,7 +6,7 @@
  * gate to refuse dispatch when scope sections are missing or empty, and
  * by Gate D's hook to compute the active envelope.
  *
- * The parser lives in `scripts/workflows/work-orchestrator/task-parser.js`. This file
+ * The parser lives in `scripts/workflows/work/task-parser.js`. This file
  * only validates the already-parsed objects.
  */
 

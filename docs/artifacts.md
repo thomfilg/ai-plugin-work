@@ -39,7 +39,7 @@ const result = allocateOutputFolder('PROJ-123', {
 
 ## Artifact Rules
 
-**File:** `scripts/workflows/work-orchestrator/workflow-definition.js`
+**File:** `scripts/workflows/work/workflow-definition.js`
 
 Each artifact is bound to a step and authorized agents:
 
@@ -98,7 +98,7 @@ Only designated management scripts (such as `work-state.js` and `workflow-engine
 
 ## Artifact Archival
 
-**File:** `scripts/workflows/work-orchestrator/artifact-archival.js`
+**File:** `scripts/workflows/work/artifact-archival.js`
 
 When the workflow transitions backward (e.g., `check → implement`), stale artifacts must be cleaned to prevent false verification.
 

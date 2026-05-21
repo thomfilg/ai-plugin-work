@@ -12,7 +12,7 @@ const { TASKS_PHASES } = require('../../tasks-phase-registry');
 
 let validateConsistency;
 try {
-  ({ validateConsistency } = require('../../../work-orchestrator/lib/gherkin-task-refs'));
+  ({ validateConsistency } = require('../../../work/lib/gherkin-task-refs'));
 } catch {
   validateConsistency = null;
 }

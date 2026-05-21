@@ -37,7 +37,7 @@ const {
   createPathCheck,
 } = require(path.join(__dirname, '..', 'preflight'));
 
-const workState = require(path.join(__dirname, '..', '..', 'work-orchestrator', 'work-state'));
+const workState = require(path.join(__dirname, '..', '..', 'work', 'work-state'));
 const requestIndex = require(path.join(__dirname, '..', 'request-index'));
 
 // ─── Helpers ────────────────────────────────────────────────────────────────

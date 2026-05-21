@@ -452,9 +452,7 @@ function readWorkState(ticketId) {
 
     let stepName;
     try {
-      const { STEP_ORDER } = require(
-        path.join(__dirname, '..', '..', 'work-orchestrator', 'step-registry')
-      );
+      const { STEP_ORDER } = require(path.join(__dirname, '..', '..', 'work', 'step-registry'));
       // currentStep in .work-state.json is 1-based (see work-state.js: stepIndex + 1)
       const zeroBasedIndex = stepIndex - 1;
       if (zeroBasedIndex >= 0 && zeroBasedIndex < STEP_ORDER.length) {
@@ -561,7 +559,7 @@ function handleStop(hookData) {
         `BLOCKED: You are mid-workflow (/work ${workState.ticketId}). DO NOT STOP.\n\n` +
           `Current step: ${workState.stepName}\n` +
           `Your next action: Run the orchestrator to get your plan and continue executing ALL remaining steps:\n` +
-          '  node "${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-orchestrator/work.workflow.js" ' +
+          '  node "${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/work.workflow.js" ' +
           workState.ticketId +
           '\n\n' +
           "Then execute each RUN step in order. Do NOT stop until the workflow reaches 'complete'.\n" +
@@ -665,7 +663,7 @@ function handleStop(hookData) {
           if (allowStopSteps.has(ws._work2Dispatched)) {
             process.stderr.write(
               `Pausing at user-review checkpoint "${ws._work2Dispatched}".\n` +
-                `When ready, continue: node "\${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-orchestrator/work-next.js" ${ticketId}\n`
+                `When ready, continue: node "\${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/work-next.js" ${ticketId}\n`
             );
             process.exit(0); // allow stop — this is a human-approval gate
             return;
@@ -680,7 +678,7 @@ function handleStop(hookData) {
       `ACTIVE WORKFLOW SESSION — DO NOT ABANDON\n` +
         `Workflow: ${workflow} | Ticket: ${ticketId}\n` +
         `You MUST continue this workflow. Run:\n` +
-        `  node "\${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-orchestrator/work-next.js" ${ticketId}\n` +
+        `  node "\${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/work-next.js" ${ticketId}\n` +
         `Execute the returned instruction, then re-run work-next.js until action: "complete".\n` +
         `The session is locked with a passphrase. Complete all steps to unlock.\n`
     );

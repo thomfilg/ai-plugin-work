@@ -11,7 +11,7 @@
  *         `appendEnforcementAudit`. Preflight MUST NOT import `work-actions.js`
  *         to keep coupling low; callers inject the audit callback.
  *
- * Context shape contract (from Task 2, `workflows/work-orchestrator/work-enforcement-context.js`):
+ * Context shape contract (from Task 2, `workflows/work/work-enforcement-context.js`):
  *   EnforcementContext = {
  *     ticketId, origin, state, tasks, subtaskState, hasWorkflow, error, options
  *   }

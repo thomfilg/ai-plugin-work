@@ -16,7 +16,7 @@ See **[AGENTS.md](./AGENTS.md)** for the agent catalog. See **[docs/README.md](.
 
 ### Testing
 - Run tests: `pnpm test`
-- Run specific test: `node --test scripts/workflows/work-orchestrator/__tests__/transition-step.test.js`
+- Run specific test: `node --test scripts/workflows/work/__tests__/transition-step.test.js`
 - Tests spawn hook scripts with `child_process.spawn` to test exit codes — this is the established pattern.
 - Temp directories use `fs.mkdtempSync` + `rmSync({ recursive: true, force: true })` in `after`/`afterEach`.
 
@@ -38,7 +38,7 @@ See **[AGENTS.md](./AGENTS.md)** for the agent catalog. See **[docs/README.md](.
 
 ### State Machine
 - 18 steps: `ticket → bootstrap → brief → brief_gate → spec → spec_gate → tasks → implement → commit → task_review → check → pr → ready → follow_up → ci → cleanup → reports → complete`
-- Step IDs are in `scripts/workflows/work-orchestrator/step-registry.js` — decoupled from ordering.
+- Step IDs are in `scripts/workflows/work/step-registry.js` — decoupled from ordering.
 - Transitions validated by `workflowCanTransition()` — only declared edges are allowed.
 - `transition-step.js` handles state persistence, artifact archival, and TDD gates.
 

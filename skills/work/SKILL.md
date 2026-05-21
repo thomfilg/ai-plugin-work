@@ -52,7 +52,7 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/communicate.js" --check "${ARGUMENTS%% *}"
 **Step 1 — then start the driver:**
 
 ```bash
-node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-orchestrator/work-next.js "$ARGUMENTS" --init
+node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/work-next.js "$ARGUMENTS" --init
 ```
 
 ## Loop

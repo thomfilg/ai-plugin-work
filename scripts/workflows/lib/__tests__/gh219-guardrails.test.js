@@ -29,19 +29,19 @@ process.env.TASKS_BASE = TEMP_TASKS_BASE;
 
 // Clear cached modules so config picks up our override
 delete require.cache[require.resolve('../../lib/config')];
-delete require.cache[require.resolve('../../work-orchestrator/work-state')];
+delete require.cache[require.resolve('../../work/work-state')];
 try {
-  delete require.cache[require.resolve('../../work-orchestrator/work-state/graph-validation')];
+  delete require.cache[require.resolve('../../work/work-state/graph-validation')];
 } catch {
   /* may not exist */
 }
 try {
-  delete require.cache[require.resolve('../../work-orchestrator/work-state/task-readiness')];
+  delete require.cache[require.resolve('../../work/work-state/task-readiness')];
 } catch {
   /* may not exist */
 }
 try {
-  delete require.cache[require.resolve('../../work-orchestrator/work-state/parallel-workers')];
+  delete require.cache[require.resolve('../../work/work-state/parallel-workers')];
 } catch {
   /* may not exist */
 }
@@ -57,24 +57,14 @@ const {
   createPathCheck,
 } = require(path.join(__dirname, '..', 'preflight'));
 
-const workState = require(path.join(__dirname, '..', '..', 'work-orchestrator', 'work-state'));
+const workState = require(path.join(__dirname, '..', '..', 'work', 'work-state'));
 const requestIndex = require(path.join(__dirname, '..', 'request-index'));
 
 // ─── Resolve enforcement context module paths for mock injection ─────────────
 
-const ENFORCEMENT_CTX_PATH = path.join(
-  __dirname,
-  '..',
-  '..',
-  'work-orchestrator',
-  'work-enforcement-context'
-);
-const WORK_STATE_PATH = require.resolve(
-  path.join(__dirname, '..', '..', 'work-orchestrator', 'work-state')
-);
-const TASK_PARSER_PATH = require.resolve(
-  path.join(__dirname, '..', '..', 'work-orchestrator', 'task-parser')
-);
+const ENFORCEMENT_CTX_PATH = path.join(__dirname, '..', '..', 'work', 'work-enforcement-context');
+const WORK_STATE_PATH = require.resolve(path.join(__dirname, '..', '..', 'work', 'work-state'));
+const TASK_PARSER_PATH = require.resolve(path.join(__dirname, '..', '..', 'work', 'task-parser'));
 const CONFIG_PATH = require.resolve(path.join(__dirname, '..', '..', 'lib', 'config'));
 
 // ─── Helpers ────────────────────────────────────────────────────────────────

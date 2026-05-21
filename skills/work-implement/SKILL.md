@@ -54,7 +54,7 @@ esac
 
 When `--subtask` is present:
 - Use `SUBTASK_PARENT` as the ticket ID (skip branch/worktree detection)
-- Initialize subtask state: `node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-orchestrator/work-state.js init-subtask <TICKET_ID> "<description>"`
+- Initialize subtask state: `node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/work-state.js init-subtask <TICKET_ID> "<description>"`
 - Skip `implement.md` creation (subtask state file replaces it)
 - The subtask state tracks only two steps: `implement`, `commit`
 
@@ -165,14 +165,14 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-implement/tdd-phase-state.js t
 # If done with all behaviors: proceed to Step 3
 ```
 
-**REFACTOR is developer-owned self-cleanup only.** `/tests-review` and `/code-review` are NOT run during REFACTOR — they run as a separate post-commit gate via `scripts/workflows/work-orchestrator/steps/task-review.js` (GH-211). The developer agent's responsibility in REFACTOR ends at producing clean, still-green code; reviewer agents take over afterwards against the committed diff.
+**REFACTOR is developer-owned self-cleanup only.** `/tests-review` and `/code-review` are NOT run during REFACTOR — they run as a separate post-commit gate via `scripts/workflows/work/steps/task-review.js` (GH-211). The developer agent's responsibility in REFACTOR ends at producing clean, still-green code; reviewer agents take over afterwards against the committed diff.
 
 **REFACTOR exit checklist (advisory):**
 - tests still green
 - no dead code
 - naming consistent
 
-_Why this split?_ Reviews run as a different agent against a committed artifact, which keeps the core workflow aligned to the three-phase TDD loop (RED/GREEN/REFACTOR) and ensures reviewers never see half-refactored work. See `scripts/workflows/work-orchestrator/steps/task-review.js` (GH-211) for the post-commit review gate.
+_Why this split?_ Reviews run as a different agent against a committed artifact, which keeps the core workflow aligned to the three-phase TDD loop (RED/GREEN/REFACTOR) and ensures reviewers never see half-refactored work. See `scripts/workflows/work/steps/task-review.js` (GH-211) for the post-commit review gate.
 
 **Important:**
 - Evidence is recorded by the SCRIPT, not by agents — the script runs `git diff` and test commands itself
@@ -258,7 +258,7 @@ Fix any issues before completing.
 **When in subtask mode (`--subtask` was set):**
 
 1. Commit changes using commit-writer agent (subtasks commit before returning, unlike normal mode)
-2. Mark subtask as completed: `node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-orchestrator/work-state.js complete-subtask <TICKET_ID> <N>`
+2. Mark subtask as completed: `node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/work-state.js complete-subtask <TICKET_ID> <N>`
    (where `<N>` is the subtask index from the init-subtask output)
 3. Report completion briefly and return control to the parent workflow
 
@@ -306,15 +306,15 @@ Next steps:
 ```
 ## Enforcement Infrastructure (GH-219)
 
-- **Task Claims**: `claimTask(ticketId, taskNum, ownerId)` / `releaseTask(...)` acquire atomic lock files at `TASKS_BASE/<ticketId>/.claims/task-${n}.lock`. Owner IDs use `PR{N}` format (e.g., PR1, PR42). Module: `scripts/workflows/work-orchestrator/work-claims.js`.
+- **Task Claims**: `claimTask(ticketId, taskNum, ownerId)` / `releaseTask(...)` acquire atomic lock files at `TASKS_BASE/<ticketId>/.claims/task-${n}.lock`. Owner IDs use `PR{N}` format (e.g., PR1, PR42). Module: `scripts/workflows/work/work-claims.js`.
 
-- **PR{N} Worker Layout**: Parallel workers get assigned slots via `allocateWorkerSlot()`. Output goes to `TASKS_BASE/<ticketId>/PR{N}/`. Slot allocation is sequential and monotonic (no reuse). Module: `scripts/workflows/work-orchestrator/work-state/parallel-workers.js`.
+- **PR{N} Worker Layout**: Parallel workers get assigned slots via `allocateWorkerSlot()`. Output goes to `TASKS_BASE/<ticketId>/PR{N}/`. Slot allocation is sequential and monotonic (no reuse). Module: `scripts/workflows/work/work-state/parallel-workers.js`.
 
-- **Per-Task Artifacts**: TDD phase state, `implement.md`, and check reports resolve to `task${N}/` subdirectories under the ticket folder. Legacy flat layout is still supported as fallback. Module: `scripts/workflows/work-orchestrator/work-state.js`.
+- **Per-Task Artifacts**: TDD phase state, `implement.md`, and check reports resolve to `task${N}/` subdirectories under the ticket folder. Legacy flat layout is still supported as fallback. Module: `scripts/workflows/work/work-state.js`.
 
 - **Preflight Gate**: `runPreflight(context, options)` evaluates enforcement rules before file writes. Returns `{ allow, reasons, remediation }`. Hooks call this instead of transcript-based detection. Module: `scripts/workflows/lib/preflight.js`.
 
-- **Enforcement Audit**: Decisions are logged to `.work-actions.json` via `appendEnforcementAudit()`. Records use `kind: 'enforcement'` discriminator (coexists with legacy step rows). Module: `scripts/workflows/work-orchestrator/work-actions.js`.
+- **Enforcement Audit**: Decisions are logged to `.work-actions.json` via `appendEnforcementAudit()`. Records use `kind: 'enforcement'` discriminator (coexists with legacy step rows). Module: `scripts/workflows/work/work-actions.js`.
 
 - **Out-of-Flow Routing**: User requests go to `user-request-${n}/`, AI subtask requests to `ai-request-${n}/`. Atomic counter in `.request-index.json`. Modules: `scripts/workflows/lib/allocate-output-folder.js`, `scripts/workflows/lib/request-index.js`.
 
