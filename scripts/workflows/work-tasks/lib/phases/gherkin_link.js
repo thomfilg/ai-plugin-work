@@ -49,13 +49,15 @@ function validateArtifacts(tasksDir) {
   // Use the canonical validator if available.
   if (typeof validateConsistency === 'function') {
     try {
-      const result = validateConsistency(gherkin, tasks);
+      const result = validateConsistency({ gherkinText: gherkin, tasksMdText: tasks });
       if (result && Array.isArray(result.errors) && result.errors.length) {
         for (const e of result.errors) errors.push(`gherkin-task-refs: ${e}`);
         return errors;
       }
-      if (result && result.ok === false && result.message) {
-        errors.push(`gherkin-task-refs: ${result.message}`);
+      // Canonical validator passed — trust it and skip the naive fallback,
+      // which can produce false positives by tasks.includes(title) on titles
+      // referenced via Acceptance Criteria or Requirements Covered.
+      if (result && result.valid === true) {
         return errors;
       }
     } catch (e) {
