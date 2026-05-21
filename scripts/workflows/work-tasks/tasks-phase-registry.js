@@ -6,7 +6,7 @@
  *
  * Phases (linear):
  *   inputs → requirements_extract → draft → traceability → kind_assign →
- *   gherkin_link → memorize → done
+ *   scope_exists → gherkin_link → memorize → done
  *
  * `done` is terminal — no outgoing edges.
  */
@@ -19,6 +19,7 @@ const TASKS_PHASES = Object.freeze({
   draft: 'draft',
   traceability: 'traceability',
   kind_assign: 'kind_assign',
+  scope_exists: 'scope_exists',
   gherkin_link: 'gherkin_link',
   memorize: 'memorize',
   done: 'done',
@@ -30,6 +31,7 @@ const TASKS_PHASE_ORDER = Object.freeze([
   TASKS_PHASES.draft,
   TASKS_PHASES.traceability,
   TASKS_PHASES.kind_assign,
+  TASKS_PHASES.scope_exists,
   TASKS_PHASES.gherkin_link,
   TASKS_PHASES.memorize,
   TASKS_PHASES.done,
@@ -40,7 +42,8 @@ const TASKS_PHASE_TRANSITIONS = Object.freeze({
   [TASKS_PHASES.requirements_extract]: Object.freeze([TASKS_PHASES.draft]),
   [TASKS_PHASES.draft]: Object.freeze([TASKS_PHASES.traceability]),
   [TASKS_PHASES.traceability]: Object.freeze([TASKS_PHASES.kind_assign]),
-  [TASKS_PHASES.kind_assign]: Object.freeze([TASKS_PHASES.gherkin_link]),
+  [TASKS_PHASES.kind_assign]: Object.freeze([TASKS_PHASES.scope_exists]),
+  [TASKS_PHASES.scope_exists]: Object.freeze([TASKS_PHASES.gherkin_link]),
   [TASKS_PHASES.gherkin_link]: Object.freeze([TASKS_PHASES.memorize]),
   [TASKS_PHASES.memorize]: Object.freeze([TASKS_PHASES.done]),
   [TASKS_PHASES.done]: Object.freeze([]),

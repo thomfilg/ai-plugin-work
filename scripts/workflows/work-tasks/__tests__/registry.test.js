@@ -15,13 +15,14 @@ const {
 } = require('../tasks-phase-registry');
 const { getPhase, hasPhase } = require('../lib/phase-registry');
 
-test('TASKS_PHASE_ORDER is 8 phases in declared order', () => {
+test('TASKS_PHASE_ORDER is 9 phases in declared order', () => {
   assert.deepEqual(TASKS_PHASE_ORDER, [
     'inputs',
     'requirements_extract',
     'draft',
     'traceability',
     'kind_assign',
+    'scope_exists',
     'gherkin_link',
     'memorize',
     'done',
