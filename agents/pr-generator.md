@@ -82,14 +82,18 @@ You are a **read-only** agent. You can read and analyze code, but you must NEVER
 Before doing ANY work (git sync, diff analysis, PR creation), you MUST run quality checks.
 Try these in order — use the first one that works:
 ```bash
-# Tier 1: Project has dev:check in package.json
+# Tier 1: Repo's .envrc defines step overrides — bundled dev-check.sh honors them
+[ -n "$LINT_COMMAND$TYPECHECK_COMMAND$TEST_COMMAND" ] && \
+  bash ${CLAUDE_PLUGIN_ROOT}/scripts/dev-check/dev-check.sh
+
+# Tier 2: Project has dev:check in package.json
 pnpm dev:check
 
-# Tier 2: Bundled dev-check scripts (if pnpm dev:check doesn't exist)
+# Tier 3: Bundled dev-check scripts (if neither above applies)
 ${CLAUDE_PLUGIN_ROOT}/scripts/dev-check/dev-check.sh
 
-# Tier 3: Standard scripts (if neither above works)
-pnpm lint && pnpm typecheck && pnpm test
+# Tier 4: Standard scripts (last-resort fallback)
+${LINT_COMMAND:-pnpm lint} && ${TYPECHECK_COMMAND:-pnpm typecheck} && ${TEST_COMMAND:-pnpm test}
 ```
 This runs lint, typecheck, and tests on changed files.
 

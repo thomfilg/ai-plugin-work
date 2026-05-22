@@ -201,7 +201,7 @@ function instructions(ctx) {
 
 module.exports = function register(registerPhase) {
   registerPhase(TASKS_PHASES.kind_assign, {
-    next: TASKS_PHASES.gherkin_link,
+    next: TASKS_PHASES.scope_exists,
     validate,
     instructions,
   });

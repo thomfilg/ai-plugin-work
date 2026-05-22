@@ -1,5 +1,5 @@
 /**
- * Tests for work-orchestrator-hook.js — GH-206 hardening
+ * Tests for work-hook.js — GH-206 hardening
  *
  * Verifies:
  * 1. execSync with string interpolation is NOT used (injection vector removed)
@@ -7,7 +7,7 @@
  * 3. logHookError is imported and invoked on failure paths
  * 4. Existing /work routing behaviour is preserved
  *
- * Run with: node --test hooks/__tests__/work-orchestrator-hook-injection.test.js
+ * Run with: node --test hooks/__tests__/work-hook-injection.test.js
  */
 
 const { describe, it } = require('node:test');
@@ -16,11 +16,11 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 
-const HOOK_PATH = path.join(__dirname, '..', 'work-orchestrator-hook.js');
+const HOOK_PATH = path.join(__dirname, '..', 'work-hook.js');
 
 // ---------- Static source-code analysis tests ----------
 
-describe('work-orchestrator-hook source hardening', () => {
+describe('work-hook source hardening', () => {
   const src = fs.readFileSync(HOOK_PATH, 'utf-8');
 
   it('should NOT use execSync with template-literal string interpolation', () => {
@@ -107,7 +107,7 @@ function runHook(userPrompt) {
   });
 }
 
-describe('work-orchestrator-hook functional behaviour', () => {
+describe('work-hook functional behaviour', () => {
   it('should exit 0 for non /work commands', async () => {
     const { code } = await runHook('hello world');
     assert.strictEqual(code, 0);

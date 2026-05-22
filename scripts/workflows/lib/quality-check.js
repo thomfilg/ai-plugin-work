@@ -3,10 +3,13 @@
 /**
  * quality-check.js
  *
- * Shared utility for running quality checks with a 3-tier fallback:
+ * Shared utility for running quality checks with a 4-tier fallback:
+ *   0. Env-var overrides — `$LINT_COMMAND`/`$TYPECHECK_COMMAND`/`$TEST_COMMAND`
+ *      from .envrc. Routed through the bundled dev-check.sh which honors them.
  *   1. `pnpm dev:check` — project defines it in package.json
  *   2. Bundled dev-check scripts — this plugin's scripts/dev-check/
- *   3. Standard scripts — `pnpm lint`, `pnpm typecheck`, `pnpm test`
+ *   3. Standard scripts — `$LINT_COMMAND`/`$TYPECHECK_COMMAND`/`$TEST_COMMAND`,
+ *      else `pnpm run <script>` for whichever of lint/typecheck/test exist
  *
  * Usage:
  *   const { runQualityCheck, resolveQualityCommand, getAvailableScripts } = require('./quality-check');
@@ -83,6 +86,16 @@ function hasBundledDevCheck() {
  */
 function resolveQualityCommand(repoRoot) {
   const scripts = getAvailableScripts(repoRoot);
+  const envOverridesPresent =
+    process.env.LINT_COMMAND || process.env.TYPECHECK_COMMAND || process.env.TEST_COMMAND;
+
+  // Tier 0: Env-var overrides take precedence — route through the bundled
+  // dev-check.sh which honors $LINT_COMMAND / $TYPECHECK_COMMAND / $TEST_COMMAND.
+  // This makes the repo's .envrc the source of truth, bypassing whatever
+  // `dev:check` happens to do in package.json.
+  if (envOverridesPresent && hasBundledDevCheck()) {
+    return { command: BUNDLED_DEV_CHECK, strategy: 'env-overrides' };
+  }
 
   // Tier 1: Project has dev:check in package.json
   if (scripts['dev:check']) {
@@ -187,6 +200,8 @@ function runQualityCheck(options = {}) {
  */
 function describeStrategy(strategy) {
   switch (strategy) {
+    case 'env-overrides':
+      return 'bundled dev-check.sh honoring $LINT_COMMAND/$TYPECHECK_COMMAND/$TEST_COMMAND';
     case 'project-dev-check':
       return 'pnpm dev:check (project script)';
     case 'bundled-dev-check':

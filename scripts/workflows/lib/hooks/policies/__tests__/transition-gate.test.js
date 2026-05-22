@@ -14,8 +14,8 @@ const baseWorkflow = {
   steps: ['plan', 'implement', 'check', 'pr'],
   softSteps: new Set(['plan']),
   commandMap: [{ tool: 'Bash', field: 'command', pattern: /^pnpm test$/, step: 'check' }],
-  transitionPattern: /work-orchestrator\.js\s+transition\s+(\S+)\s+(\S+)/,
-  transitionHint: 'node work-orchestrator.js transition',
+  transitionPattern: /work\.workflow\.js\s+transition\s+(\S+)\s+(\S+)/,
+  transitionHint: 'node work.workflow.js transition',
 };
 
 describe('transition-gate: evaluateTransitionGate', () => {
@@ -102,7 +102,7 @@ describe('transition-gate: evaluateTransitionGate', () => {
         isTransition: true,
         ticket: 'GH-1',
         targetStep: 'pr',
-        raw: 'node work-orchestrator.js transition GH-1 pr',
+        raw: 'node work.workflow.js transition GH-1 pr',
       },
       evidence: {},
     });

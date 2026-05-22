@@ -1,7 +1,8 @@
 /**
  * Tests for lib/quality-check.js
  *
- * Tests the 3-tier fallback logic for quality checks:
+ * Tests the 4-tier fallback logic for quality checks:
+ *   0. Env-var overrides ($LINT_COMMAND / $TYPECHECK_COMMAND / $TEST_COMMAND)
  *   1. pnpm dev:check (project script)
  *   2. Bundled dev-check scripts (plugin fallback)
  *   3. Standard scripts (lint/typecheck/test)
@@ -36,7 +37,27 @@ function cleanupDir(dir) {
   fs.rmSync(dir, { recursive: true, force: true });
 }
 
+// Clear env-var overrides between tests so Tier 0 doesn't bleed into
+// other tier tests (and vice versa). Restored in afterEach.
+const ENV_KEYS = ['LINT_COMMAND', 'TYPECHECK_COMMAND', 'TEST_COMMAND'];
+function snapshotEnv() {
+  return Object.fromEntries(ENV_KEYS.map((k) => [k, process.env[k]]));
+}
+function restoreEnv(snap) {
+  for (const k of ENV_KEYS) {
+    if (snap[k] === undefined) delete process.env[k];
+    else process.env[k] = snap[k];
+  }
+}
+
 describe('quality-check', () => {
+  let envSnap;
+  beforeEach(() => {
+    envSnap = snapshotEnv();
+    for (const k of ENV_KEYS) delete process.env[k];
+  });
+  afterEach(() => restoreEnv(envSnap));
+
   describe('getAvailableScripts', () => {
     it('returns scripts from package.json', () => {
       const dir = makeTempRepo({ lint: 'eslint .', test: 'vitest' });
@@ -72,6 +93,41 @@ describe('quality-check', () => {
   });
 
   describe('resolveQualityCommand', () => {
+    it('Tier 0: env-var overrides route through bundled dev-check.sh', () => {
+      if (!hasBundledDevCheck()) return; // skip in environments without bundled scripts
+      const dir = makeTempRepo({ 'dev:check': 'echo hi', lint: 'eslint .' });
+      try {
+        process.env.TYPECHECK_COMMAND = 'pnpm typecheck $CHANGED_FILES';
+        const { command, strategy } = resolveQualityCommand(dir);
+        assert.strictEqual(strategy, 'env-overrides');
+        assert.strictEqual(command, BUNDLED_DEV_CHECK);
+      } finally {
+        cleanupDir(dir);
+      }
+    });
+
+    it('Tier 0 wins over Tier 1 (dev:check) when env var set', () => {
+      if (!hasBundledDevCheck()) return;
+      const dir = makeTempRepo({ 'dev:check': 'pnpm dev:lint && pnpm dev:test' });
+      try {
+        process.env.LINT_COMMAND = 'pnpm lint $CHANGED_FILES';
+        const { strategy } = resolveQualityCommand(dir);
+        assert.strictEqual(strategy, 'env-overrides');
+      } finally {
+        cleanupDir(dir);
+      }
+    });
+
+    it('Tier 0 does NOT trigger when env vars unset (falls to Tier 1)', () => {
+      const dir = makeTempRepo({ 'dev:check': 'pnpm dev:lint' });
+      try {
+        const { strategy } = resolveQualityCommand(dir);
+        assert.strictEqual(strategy, 'project-dev-check');
+      } finally {
+        cleanupDir(dir);
+      }
+    });
+
     it('Tier 1: uses pnpm dev:check when project defines it', () => {
       const dir = makeTempRepo({ 'dev:check': 'pnpm dev:lint && pnpm dev:test', lint: 'eslint .' });
       try {

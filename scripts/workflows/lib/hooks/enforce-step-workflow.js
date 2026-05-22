@@ -191,7 +191,6 @@ const artifactProtector = createArtifactProtector({
 // Exempt orchestrator and workflow-engine scripts from Vector 3 (script bypass detection)
 // These are the legitimate writers of state files.
 const EXEMPT_SCRIPTS = new Set([
-  'work-orchestrator.js',
   'work.workflow.js',
   'workflow-engine.js',
   'work-state.js',

@@ -34,6 +34,7 @@ require('./phases/requirements_extract')(registerPhase);
 require('./phases/draft')(registerPhase);
 require('./phases/traceability')(registerPhase);
 require('./phases/kind_assign')(registerPhase);
+require('./phases/scope_exists')(registerPhase);
 require('./phases/gherkin_link')(registerPhase);
 require('./phases/memorize')(registerPhase);
 require('./phases/done')(registerPhase);

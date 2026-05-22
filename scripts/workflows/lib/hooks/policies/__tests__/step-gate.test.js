@@ -100,7 +100,7 @@ describe('step-gate: formatStepBlockMessage', () => {
       matchedStep: 'pr',
       currentStep: 'check',
       cmdDesc: 'pnpm pr-cmd',
-      transitionHint: 'node work-orchestrator.js transition',
+      transitionHint: 'node work.workflow.js transition',
       ticketId: 'GH-1',
     });
     assert.match(msg, /BLOCKED \[work\]/);

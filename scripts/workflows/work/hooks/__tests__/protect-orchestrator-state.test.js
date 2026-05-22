@@ -23,7 +23,7 @@ describe('protect-orchestrator-state hook', () => {
     const cases = [
       ['.work-state.json', '/tmp/t/ECHO-1/.work-state.json'],
       ['.work-state.json.bak', '/tmp/t/ECHO-1/.work-state.json.bak.20260512'],
-      ['.work-orchestrator.pid', '/tmp/t/ECHO-1/.work-orchestrator.pid'],
+      ['.work.pid', '/tmp/t/ECHO-1/.work.pid'],
       ['.last-commit-sha', '/tmp/t/ECHO-1/.last-commit-sha'],
       ['.work-actions.json', '/tmp/t/ECHO-1/.work-actions.json'],
       ['task<N>/tdd-phase.json', '/tmp/t/ECHO-1/task3/tdd-phase.json'],

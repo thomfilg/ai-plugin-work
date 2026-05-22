@@ -216,7 +216,7 @@ describe('enforce-step-workflow', () => {
         const { code } = await runHook({
           tool_name: 'Bash',
           tool_input: {
-            command: 'node ${CLAUDE_PLUGIN_ROOT}/hooks/work-orchestrator.js plan PROJ-123',
+            command: 'node ${CLAUDE_PLUGIN_ROOT}/hooks/work.workflow.js plan PROJ-123',
           },
         });
         assert.equal(code, 0);
@@ -226,7 +226,7 @@ describe('enforce-step-workflow', () => {
         const { code } = await runHook({
           tool_name: 'Bash',
           tool_input: {
-            command: 'node ${CLAUDE_PLUGIN_ROOT}/hooks/work-orchestrator.js transitions PROJ-123',
+            command: 'node ${CLAUDE_PLUGIN_ROOT}/hooks/work.workflow.js transitions PROJ-123',
           },
         });
         assert.equal(code, 0);
@@ -759,7 +759,7 @@ describe('enforce-step-workflow', () => {
       const { code } = await runHook(
         {
           tool_name: 'Bash',
-          tool_input: { command: 'node /path/to/work-orchestrator.js transition PROJ-123 commit' },
+          tool_input: { command: 'node /path/to/work.workflow.js transition PROJ-123 commit' },
         },
         'PostToolUse'
       );
@@ -777,7 +777,7 @@ describe('enforce-step-workflow', () => {
 
       const { code } = await runHook({
         tool_name: 'Bash',
-        tool_input: { command: 'node /path/to/work-orchestrator.js transition OTHER-999 commit' },
+        tool_input: { command: 'node /path/to/work.workflow.js transition OTHER-999 commit' },
       });
       assert.equal(code, 0);
     });
@@ -788,7 +788,7 @@ describe('enforce-step-workflow', () => {
       const { code, stderr } = await runHook({
         tool_name: 'Bash',
         tool_input: {
-          command: `node /path/to/work-orchestrator.js transition ${TEST_TICKET} commit`,
+          command: `node /path/to/work.workflow.js transition ${TEST_TICKET} commit`,
         },
       });
       assert.equal(code, 2);
@@ -808,7 +808,7 @@ describe('enforce-step-workflow', () => {
       const { code } = await runHook(
         {
           tool_name: 'Bash',
-          tool_input: { command: 'node /path/to/work-orchestrator.js transition OTHER-999 commit' },
+          tool_input: { command: 'node /path/to/work.workflow.js transition OTHER-999 commit' },
         },
         'PostToolUse'
       );
@@ -839,7 +839,7 @@ describe('enforce-step-workflow', () => {
         {
           tool_name: 'Bash',
           tool_input: {
-            command: `node /path/to/work-orchestrator.js transition ${TEST_TICKET} commit`,
+            command: `node /path/to/work.workflow.js transition ${TEST_TICKET} commit`,
           },
         },
         'PostToolUse'
@@ -861,7 +861,7 @@ describe('enforce-step-workflow', () => {
 
       const { code, stderr } = await runHook({
         tool_name: 'Bash',
-        tool_input: { command: `node /path/to/work-orchestrator.js transition ${TEST_TICKET} pr` },
+        tool_input: { command: `node /path/to/work.workflow.js transition ${TEST_TICKET} pr` },
       });
       assert.equal(code, 2);
 
@@ -892,7 +892,7 @@ describe('enforce-step-workflow', () => {
     it('includes the attempted transition command via transition.raw (Patch 4)', async () => {
       writeWorkState(makeStepStatus('implement', WORK_STEPS));
 
-      const transitionCmd = `node /path/to/work-orchestrator.js transition ${TEST_TICKET} commit`;
+      const transitionCmd = `node /path/to/work.workflow.js transition ${TEST_TICKET} commit`;
       const { code, stderr } = await runHook({
         tool_name: 'Bash',
         tool_input: { command: transitionCmd },
@@ -1183,7 +1183,7 @@ describe('enforce-step-workflow', () => {
       const { code } = await runHook({
         tool_name: 'Bash',
         tool_input: {
-          command: `node /path/to/work-orchestrator.js transition ${TEST_TICKET} nonexistent_step`,
+          command: `node /path/to/work.workflow.js transition ${TEST_TICKET} nonexistent_step`,
         },
       });
       // Should NOT block — the command doesn't target a known step, so it's not a real transition
@@ -1197,7 +1197,7 @@ describe('enforce-step-workflow', () => {
       const { code, stderr } = await runHook({
         tool_name: 'Bash',
         tool_input: {
-          command: `node /path/to/work-orchestrator.js transition ${TEST_TICKET} commit`,
+          command: `node /path/to/work.workflow.js transition ${TEST_TICKET} commit`,
         },
       });
       assert.equal(code, 2);
@@ -1216,7 +1216,7 @@ describe('enforce-step-workflow', () => {
         {
           tool_name: 'Bash',
           tool_input: {
-            command: `node /path/to/work-orchestrator.js transition ${TEST_TICKET} fake_step`,
+            command: `node /path/to/work.workflow.js transition ${TEST_TICKET} fake_step`,
           },
         },
         'PostToolUse'
@@ -1285,7 +1285,7 @@ describe('enforce-step-workflow', () => {
       const { code, stderr } = await runHook({
         tool_name: 'Bash',
         tool_input: {
-          command: `node /path/to/work-orchestrator.js transition ${TEST_TICKET} commit`,
+          command: `node /path/to/work.workflow.js transition ${TEST_TICKET} commit`,
         },
       });
       assert.equal(code, 2);
@@ -1320,7 +1320,7 @@ describe('enforce-step-workflow', () => {
 
       const { code } = await runHook({
         tool_name: 'Bash',
-        tool_input: { command: `node /path/to/work-orchestrator.js transition ${TEST_TICKET} ci` },
+        tool_input: { command: `node /path/to/work.workflow.js transition ${TEST_TICKET} ci` },
       });
       // Soft step → should allow transition without evidence
       assert.equal(code, 0);
@@ -1910,7 +1910,7 @@ describe('enforce-step-workflow', () => {
     const ORCHESTRATOR_PATH = path.join(WORK_DIR, 'engine', 'work.workflow.js');
     const ENGINE_PATH = path.join(LIB_DIR, 'workflow-engine.js');
 
-    it('allows node work-orchestrator.js transition command (trusted path)', async () => {
+    it('allows node work.workflow.js transition command (trusted path)', async () => {
       writeWorkState(makeStepStatus('implement', WORK_STEPS));
 
       const { code } = await runHook(
