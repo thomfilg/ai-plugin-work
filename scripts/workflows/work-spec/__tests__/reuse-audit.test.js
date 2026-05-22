@@ -144,6 +144,27 @@ test('original minimal Reuse Audit (no broad-search evidence) is rejected', () =
   cleanup(root);
 });
 
+test('BLOCKS when a Component Shape row has an unrecognised Decision (typo / malformed cell)', () => {
+  // Regression: the unknown-decision check used to sit inside the
+  // `if (!row.isSpecificOnly) continue` guard, so rows with malformed
+  // decisions (e.g. "Maybe", "TBD") silently passed the gate.
+  const malformed = [
+    '## Component Shape Decision',
+    '',
+    '| Proposed | Data | Other pages? | Decision | Rationale |',
+    '|---|---|---|---|---|',
+    '| `Thing` | `data` | unsure | Maybe | not sure yet |',
+    '',
+  ].join('\n');
+  const { root, tasksDir } = fixture(`${GOOD_REUSE_AUDIT}\n${malformed}`);
+  const errors = reuseAudit.validateArtifacts(tasksDir);
+  assert.ok(
+    errors.some((e) => /unrecognised Decision cell/i.test(e) && /Maybe/.test(e)),
+    `expected unrecognised-decision error, got: ${JSON.stringify(errors)}`
+  );
+  cleanup(root);
+});
+
 test('hasComponentShapeRow ignores separator rows', () => {
   const headerOnly = ['| a | b | c | d | e |', '|---|---|---|---|---|'].join('\n');
   assert.equal(reuseAudit.hasComponentShapeRow(headerOnly), false);

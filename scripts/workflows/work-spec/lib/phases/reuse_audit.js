@@ -180,6 +180,16 @@ function validateArtifacts(tasksDir) {
     // Rationale-quality + cross-spec checks on the parsed rows.
     const { rows } = parseShapeSection(spec);
     for (const row of rows) {
+      // Unknown decisions must surface regardless of category — typos and
+      // malformed cells (e.g. "Maybe", "TBD") need to fail the gate even
+      // when they don't match Specific-only. This check sits BEFORE the
+      // specific-only filter so it can fire on any row.
+      if (row.kind === 'unknown') {
+        errors.push(
+          `\`## Component Shape Decision\` row "${row.proposed || '(unnamed)'}" has an unrecognised Decision cell ("${row.decision}"). Use "Split: Generic <Name> + Specific <Name>", "Specific-only", or "N/A".`
+        );
+        continue;
+      }
       if (!row.isSpecificOnly) continue;
       for (const ap of RATIONALE_ANTIPATTERNS) {
         if (ap.re.test(row.rationale)) {
@@ -187,11 +197,6 @@ function validateArtifacts(tasksDir) {
             `\`## Component Shape Decision\` row "${row.proposed || '(unnamed)'}" is **Specific-only** with a non-technical rationale ("${row.rationale}"). ${ap.hint}.`
           );
         }
-      }
-      if (row.kind === 'unknown') {
-        errors.push(
-          `\`## Component Shape Decision\` row "${row.proposed || '(unnamed)'}" has an unrecognised Decision cell ("${row.decision}"). Use "Split: Generic <Name> + Specific <Name>", "Specific-only", or "N/A".`
-        );
       }
     }
     const conflicts = findCrossSpecConflicts(tasksDir, rows);
