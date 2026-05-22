@@ -12,9 +12,7 @@
 'use strict';
 
 const path = require('path');
-const { ALL_STEPS } = require(
-  path.join(__dirname, '..', '..', '..', 'work', 'step-registry')
-);
+const { ALL_STEPS } = require(path.join(__dirname, '..', '..', '..', 'work', 'step-registry'));
 
 function advanceToCleanup(safeName, deps, reason) {
   const { loadWorkState, saveWorkState, log, recursionDepth } = deps;
@@ -32,44 +30,76 @@ function advanceToCleanup(safeName, deps, reason) {
   return { recurse: true };
 }
 
+function rollbackToFollowUp(safeName, deps, reason) {
+  const { loadWorkState, saveWorkState, log, recursionDepth } = deps;
+  const ws = loadWorkState(safeName);
+  if (!ws) return null;
+
+  // Go back from `ci` to `follow_up`. This is the inverse of the normal
+  // forward edge and exists for the case where the PR was sitting at `ci`
+  // waiting for merge but something changed (new conflict pushed to base,
+  // a reviewer requested changes, a previously-passing check went red on
+  // a base-branch rebase). The orchestrator should re-run follow-up to fix
+  // the new problem rather than waiting forever at `ci`.
+  ws.stepStatus.ci = 'in_progress';
+  ws.currentStep = ALL_STEPS.indexOf('follow_up') + 1;
+  ws.stepStatus.follow_up = 'in_progress';
+  delete ws._work2Dispatched;
+  delete ws._work2DispatchedAction;
+  saveWorkState(safeName, ws);
+
+  if (log) log.recurse(recursionDepth, `ci→follow_up (${reason})`);
+  return { recurse: true };
+}
+
 function dispatchAdvanceGate(safeName, ctx, deps) {
   const { workDir } = deps;
 
   try {
-    const { getPRInfo, checkCI } = require(path.join(workDir, 'scripts', 'follow-up-pr.js'));
+    const { getPRInfo } = require(path.join(workDir, 'scripts', 'follow-up-pr.js'));
     const prInfo = getPRInfo();
     if (!prInfo || !prInfo.number) return null;
 
-    // CI must have actually gone green at some point. We require a real
-    // `checkCI` => 'passing' read REGARDLESS of merge state.
+    // Mergeability is the single signal: a PR is ready for the ci→cleanup
+    // advance iff GitHub itself would allow a Squash-and-merge AND the PR
+    // is actually MERGED. We use `pr-mergeable.assessMergeable` to mirror
+    // GitHub's own merge button — `mergeStateStatus ∈ {CLEAN, UNSTABLE}`
+    // AND no rollup entry is still running.
     //
-    // Why this is non-negotiable: a merged PR is NOT proof that CI passed —
-    // admins can override, branch-protection can be relaxed, auto-merge can
-    // race with required-checks updates, and historically (see ECHO-4451)
-    // ci-gate was silently advancing on `state === 'MERGED'` while the
-    // follow-up PR's checks were still pending and merge status was
-    // BLOCKED. Trusting upstream "merged" as a CI proxy meant the workflow
-    // marked ci:completed without ever observing a green build.
+    // Two regressions led here:
+    //   - PR #1960: failed REQUIRED check + "Merging is blocked" but
+    //     `checkCI()` returned status:'passing' (silent --required empty array).
+    //   - PR #1929: 9 IN_PROGRESS checks + 2 unpushed commits but
+    //     follow-up declared "Already complete" from saved state.
+    // The new predicate fixes both by asking GitHub, not the workflow's
+    // own intermediate state.
     //
-    // The gate now always asks GitHub for the actual check rollup. If the
-    // checks aren't passing, fall through so the ci step's agent (ci-runner
-    // / ci-triager) is dispatched to wait + verify. Falling through is the
-    // safe failure mode: it gives the agent a chance to surface the issue
-    // rather than silently completing the step.
+    // Merge requirement remains independent: the agent's job ends at "code
+    // shipped to base branch." Both conditions must hold:
+    //   - assessMergeable.mergeable === true
+    //   - prInfo.state === 'MERGED'
+    const { assessMergeable, hasActionableBlockers } = require(
+      path.join(__dirname, '..', 'pr-mergeable.js')
+    );
+    const m = assessMergeable(prInfo.number);
+
+    // Forward edge: mergeable AND already merged → advance to cleanup.
+    if (m.mergeable && prInfo.state === 'MERGED') {
+      return advanceToCleanup(safeName, deps, 'Mergeable and PR merged');
+    }
+
+    // Backward edge: PR is OPEN and has REAL (non-transient) blockers —
+    // conflicts, new failing checks introduced by a base-branch change,
+    // reviewer requested changes. Roll back to `follow_up` so the loop
+    // gets a chance to fix whatever made the PR un-mergeable.
     //
-    // Merge requirement: CI passing alone is NOT enough — the PR must also
-    // be MERGED before we declare the `ci` step complete. The agent's job
-    // ends at "code shipped to base branch," not "code ready to ship."
-    // Advancing on an unmerged PR caused the workflow to report `complete`
-    // while PR #1869 was still open (see triage echo-4448-issue-1). Without
-    // the merge requirement, the workflow declares success on work that may
-    // never land (PR closed without merge, conflicts blocking merge, review
-    // not yet granted). Both conditions are independent and BOTH are required:
-    //   - `ci.status === 'passing'` — checks went green (independent verify)
-    //   - `prInfo.state === 'MERGED'` — code actually shipped
-    const ci = checkCI(prInfo.number);
-    if (ci && ci.status === 'passing' && prInfo.state === 'MERGED') {
-      return advanceToCleanup(safeName, deps, 'CI passing and PR merged');
+    // `hasActionableBlockers` centralises the two guards (filter gh_error
+    // transients, require prState=OPEN) that this gate and follow-up-next's
+    // rewind path both apply.
+    const action = hasActionableBlockers(m, { prStateOverride: prInfo.state });
+    if (action.actionable) {
+      const reason = action.realBlockers.map((b) => b.kind).join(', ');
+      return rollbackToFollowUp(safeName, deps, reason);
     }
   } catch {
     // Can't check PR/CI state — fall through to normal transition

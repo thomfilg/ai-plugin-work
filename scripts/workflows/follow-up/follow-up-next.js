@@ -135,6 +135,52 @@ function getNextInstruction(ticketId, prNumber) {
   // eslint-disable-next-line no-constant-condition
   while (true) {
     if (state.status === 'complete' || !STEPS.includes(state.currentStep)) {
+      // Re-verify against GitHub before honoring a saved "complete". The
+      // saved state is a cache of a prior run's decision; if anything has
+      // changed (new pushes, checks now running, merge state now blocked)
+      // we must NOT silently return "Already complete" — that's how PR
+      // #1929 cleared its session guard with 9 in-progress checks and 2
+      // unpushed commits.
+      //
+      // Rule: honor the cache only when the PR mirrors a clickable
+      // Squash-and-merge button (mergeable === true). Otherwise rewind
+      // status to in_progress and let the loop re-evaluate the current
+      // step from live GitHub state.
+      if (state.prNumber) {
+        let liveMergeable = null;
+        let actionable = false;
+        let realBlockers = [];
+        try {
+          const { assessMergeable, hasActionableBlockers } = require(
+            path.join(__dirname, '..', 'work', 'lib', 'pr-mergeable.js')
+          );
+          liveMergeable = assessMergeable(state.prNumber);
+          // hasActionableBlockers centralises the two guards (filter out
+          // gh_error transients, require prState=OPEN) shared with
+          // ci-gate.js. See pr-mergeable.js for the full rationale.
+          const action = hasActionableBlockers(liveMergeable);
+          actionable = action.actionable;
+          realBlockers = action.realBlockers;
+        } catch {
+          liveMergeable = null;
+        }
+        if (actionable) {
+          const blockerSummary = realBlockers.map((b) => b.kind).join(', ');
+          process.stderr.write(
+            `[follow-up-next] saved state said complete but PR #${state.prNumber} is not mergeable (${blockerSummary}); rewinding and resuming.\n`
+          );
+          state.status = 'in_progress';
+          // Always reset to the first step on rewind. The saved currentStep
+          // is untrustworthy (the workflow already claimed to have finished
+          // it); resuming from a later step would just loop forward and
+          // re-set status='complete' in the next normal-advance branch.
+          // Restarting from monitor forces a fresh CI rollup read.
+          state.currentStep = STEPS[0];
+          state.dispatched = null;
+          saveState(ticketId, state);
+          continue;
+        }
+      }
       saveState(ticketId, state);
       return { type: 'follow_up_instruction', action: 'complete', summary: 'Already complete.' };
     }
