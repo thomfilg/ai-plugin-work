@@ -25,7 +25,9 @@ try {
   // Check if a follow-up session is active
   let tasksBase;
   try {
-    const getConfig = require(path.join(__dirname, '..', 'workflows', 'lib', 'get-config'));
+    const getConfig = require(
+      path.join(__dirname, '..', 'scripts', 'workflows', 'lib', 'get-config')
+    );
     tasksBase = getConfig('TASKS_BASE');
   } catch {
     process.exit(0); // Can't determine tasks base — fail-open
@@ -39,7 +41,7 @@ try {
   let currentTicket = '';
   try {
     const { getCurrentTaskId } = require(
-      path.join(__dirname, '..', 'workflows', 'lib', 'scripts', 'get-ticket-id')
+      path.join(__dirname, '..', 'scripts', 'workflows', 'lib', 'scripts', 'get-ticket-id')
     );
     currentTicket = getCurrentTaskId() || '';
   } catch {

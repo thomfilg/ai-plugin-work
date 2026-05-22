@@ -8,15 +8,32 @@
  */
 
 const path = require('path');
+// Resolve paths via the canonical scripts/workflows/... layout. The plugin root
+// historically also exposed `workflows -> scripts/workflows` as a committed
+// symlink, but relying on it makes these top-level requires throw with
+// MODULE_NOT_FOUND (loader:1459) if the symlink is ever missing (clean clone
+// without symlinks, copy to a filesystem that strips them, refactor that
+// removes it). Use the real path so the hook never depends on the symlink.
 const { appendAction } = require(
-  path.join(__dirname, '..', 'workflows', 'work', 'lib', 'work-actions')
+  path.join(__dirname, '..', 'scripts', 'workflows', 'work', 'lib', 'work-actions')
 );
-const { logHookError } = require(path.join(__dirname, '..', 'workflows', 'lib', 'hook-error-log'));
-const { safeExec } = require(path.join(__dirname, '..', 'workflows', 'lib', 'safe-exec'));
+const { logHookError } = require(
+  path.join(__dirname, '..', 'scripts', 'workflows', 'lib', 'hook-error-log')
+);
+const { safeExec } = require(
+  path.join(__dirname, '..', 'scripts', 'workflows', 'lib', 'safe-exec')
+);
 
 // Use CLAUDE_PLUGIN_ROOT if available, otherwise fallback to __dirname
 const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.dirname(__dirname);
-const ORCHESTRATOR_PATH = path.join(PLUGIN_ROOT, 'workflows', 'work', 'engine', 'work.workflow.js');
+const ORCHESTRATOR_PATH = path.join(
+  PLUGIN_ROOT,
+  'scripts',
+  'workflows',
+  'work',
+  'engine',
+  'work.workflow.js'
+);
 
 // Tokenize args string into positional single-token values.
 // Quoted multi-word args are NOT supported by design — matches pre-execFileSync
