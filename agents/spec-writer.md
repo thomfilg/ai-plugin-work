@@ -159,6 +159,13 @@ For each new component, fill one row:
 
 If this spec proposes no new UI components, write a single row: `| — | — | — | **N/A** | No new UI components in this spec |`. The table itself is still required so the question is asked.
 
+**Two additional gates run on this table:**
+
+1. **Rationale-quality** — Specific-only rows are REJECTED if the Rationale contains avoidance phrases like "would force a cross-cutting change", "out of scope", "too risky", "premature abstraction", "deferred to future". The rationale must name a *technical* constraint (page-local hook, route-bound state, server-component boundary). If you find yourself writing one of those phrases, the correct decision is Generic-split and a follow-up extraction, not Specific-only.
+2. **Cross-spec scan** — if any other in-flight spec under TASKS_BASE also declares Specific-only for the same component stem (e.g. both specs say Specific-only for `*Lineage*`), the gate blocks. Two specs page-binding the same role is exactly the ECHO-4452 pattern. Revisit the Generic split.
+
+**Downstream tasks-phase rule** — if any row on this table is Generic-split, Task #1 in `tasks.md` must scaffold the shared shell (path under `shared/`, `ui/`, `packages/ui/`, etc.) and mention the generic component name in its title/body. Page-specific wrapper tasks depend on Task #1. This translates the spec-level "build the shell once" decision into an implementation-order constraint.
+
 ## Architecture Decisions
 - **Reuse:** {What existing components/patterns from the Reuse Audit will be used}
 - **Refactor:** {Any extractions proposed — inline implementations → shared component}

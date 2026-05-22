@@ -19,6 +19,84 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { SPEC_PHASES } = require('../../spec-phase-registry');
+const { parseShapeSection, parseShapeFromSpec } = require('../component-shape');
+
+/**
+ * Rationale anti-patterns: phrases that signal the author is avoiding the
+ * Generic split for *organisational* reasons rather than naming a hard
+ * technical constraint. Lifted directly from ECHO-4466's spec, which justified
+ * a duplicate `LineageRow` by saying it "would force a cross-cutting change
+ * to the asset-level file" — i.e. the work was deferred, not impossible.
+ *
+ * A Specific-only rationale must describe what makes the component
+ * page-bound (page-local hook, route-scoped state, server-component
+ * boundary, etc.). If it instead describes effort/risk/scope, reject it.
+ */
+const RATIONALE_ANTIPATTERNS = [
+  {
+    re: /cross[-\s]?cutting\s+change/i,
+    hint: 'rewrite as: "the component depends on <page-local hook / route-scoped state> that cannot be lifted"',
+  },
+  {
+    re: /out\s+of\s+scope/i,
+    hint: 'scope is not a technical constraint — name what makes the component page-bound, or do the split',
+  },
+  {
+    // Optional article between verb and object: "would force a refactor",
+    // "would require the refactoring", etc. matches as well as the no-article
+    // form. Mirrors the same allowance in the `defer` pattern below.
+    re: /would\s+(force|require)\s+(a\s+|the\s+|some\s+)?(refactor|refactoring|modifying|modification|changing|change|touching)/i,
+    hint: 'refactor effort is not a hard constraint — name a technical limit or do the split',
+  },
+  {
+    re: /too\s+(risky|much\s+work|big|large|complex)/i,
+    hint: 'risk/effort is not a hard constraint — name a technical limit or do the split',
+  },
+  {
+    re: /premature\s+abstraction/i,
+    hint: '"premature abstraction" is a smell on the FIRST occurrence; by the time the spec asks, the use-case is concrete — split it',
+  },
+  {
+    re: /defer(red|ral)?\s+(to\s+|until\s+|for\s+)?(a\s+|the\s+|some\s+)?(another|future|later|next|follow[-\s]?up|backlog)/i,
+    hint: 'deferring is not a hard constraint — file a follow-up ticket and do the split now',
+  },
+  {
+    re: /YAGNI/i,
+    hint: 'YAGNI does not apply when the broad-reuse search proves another page already needs the role',
+  },
+];
+
+function findCrossSpecConflicts(tasksDir, currentRows) {
+  // Walk siblings of tasksDir under TASKS_BASE for other spec.md files,
+  // collect their Specific-only rows, and report stems shared with this
+  // spec's Specific-only rows. The current ticket is excluded.
+  const conflicts = [];
+  const tasksBase = path.dirname(tasksDir);
+  let entries = [];
+  try {
+    entries = fs.readdirSync(tasksBase, { withFileTypes: true });
+  } catch {
+    return conflicts;
+  }
+  const currentTicket = path.basename(tasksDir);
+  const myStems = new Set(
+    currentRows.filter((r) => r.isSpecificOnly && r.stem).map((r) => r.stem.toLowerCase())
+  );
+  if (myStems.size === 0) return conflicts;
+  for (const ent of entries) {
+    if (!ent.isDirectory()) continue;
+    if (ent.name === currentTicket) continue;
+    const otherSpec = path.join(tasksBase, ent.name, 'spec.md');
+    const { rows } = parseShapeFromSpec(otherSpec);
+    for (const r of rows) {
+      if (!r.isSpecificOnly || !r.stem) continue;
+      if (myStems.has(r.stem.toLowerCase())) {
+        conflicts.push({ otherTicket: ent.name, stem: r.stem, otherComponent: r.proposed });
+      }
+    }
+  }
+  return conflicts;
+}
 
 function readFile(p) {
   try {
@@ -101,6 +179,42 @@ function validateArtifacts(tasksDir) {
     errors.push(
       `\`## Component Shape Decision\` section exists but contains no decision rows. Add at least one table row deciding Generic vs Specific for each new UI component (or an "N/A" row if none).`
     );
+  } else {
+    // Rationale-quality + cross-spec checks on the parsed rows.
+    const { rows } = parseShapeSection(spec);
+    for (const row of rows) {
+      // Unknown decisions must surface regardless of category — typos and
+      // malformed cells (e.g. "Maybe", "TBD") need to fail the gate even
+      // when they don't match Specific-only. This check sits BEFORE the
+      // specific-only filter so it can fire on any row.
+      if (row.kind === 'unknown') {
+        errors.push(
+          `\`## Component Shape Decision\` row "${row.proposed || '(unnamed)'}" has an unrecognised Decision cell ("${row.decision}"). Use "Split: Generic <Name> + Specific <Name>", "Specific-only", or "N/A".`
+        );
+        continue;
+      }
+      if (!row.isSpecificOnly) continue;
+      for (const ap of RATIONALE_ANTIPATTERNS) {
+        if (ap.re.test(row.rationale)) {
+          errors.push(
+            `\`## Component Shape Decision\` row "${row.proposed || '(unnamed)'}" is **Specific-only** with a non-technical rationale ("${row.rationale}"). ${ap.hint}.`
+          );
+        }
+      }
+    }
+    const conflicts = findCrossSpecConflicts(tasksDir, rows);
+    if (conflicts.length > 0) {
+      const byStem = new Map();
+      for (const c of conflicts) {
+        if (!byStem.has(c.stem)) byStem.set(c.stem, new Set());
+        byStem.get(c.stem).add(`${c.otherTicket}::${c.otherComponent}`);
+      }
+      for (const [stem, others] of byStem.entries()) {
+        errors.push(
+          `\`## Component Shape Decision\` declares **Specific-only** for stem "${stem}" but other in-flight spec(s) also chose Specific-only for the same stem: ${[...others].join(', ')}. Revisit the Generic split decision — multiple specs declaring the same role page-bound is the ECHO-4452 duplication pattern.`
+        );
+      }
+    }
   }
   return errors;
 }
