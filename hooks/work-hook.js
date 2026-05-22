@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * work-orchestrator-hook.js
+ * work-hook.js
  *
  * UserPromptSubmit hook that automatically runs the orchestrator
  * when /work is invoked, injecting the plan into the context.

@@ -41,7 +41,7 @@ function main() {
     getConfig('TASKS_BASE') || (WORKTREES_BASE ? path.join(WORKTREES_BASE, 'tasks') : '');
   if (!TASKS_BASE) process.exit(0);
 
-  // Scan for .work-orchestrator.pid marker in TASKS_BASE subdirectories
+  // Scan for .work.pid marker in TASKS_BASE subdirectories
   const marker = findActiveMarker(TASKS_BASE);
   if (!marker) process.exit(0);
 
@@ -95,7 +95,7 @@ function main() {
 }
 
 /**
- * Scan TASKS_BASE for an active .work-orchestrator.pid marker.
+ * Scan TASKS_BASE for an active .work.pid marker.
  * Returns the parsed marker or null.
  */
 function findActiveMarker(tasksBase) {
@@ -103,7 +103,7 @@ function findActiveMarker(tasksBase) {
     const entries = fs.readdirSync(tasksBase, { withFileTypes: true });
     for (const entry of entries) {
       if (!entry.isDirectory()) continue;
-      const markerPath = path.join(tasksBase, entry.name, '.work-orchestrator.pid');
+      const markerPath = path.join(tasksBase, entry.name, '.work.pid');
       if (!fs.existsSync(markerPath)) continue;
       try {
         return JSON.parse(fs.readFileSync(markerPath, 'utf8'));

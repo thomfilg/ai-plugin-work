@@ -1,7 +1,7 @@
 /**
  * Marker file management for /work session detection.
  *
- * The marker file (.work-orchestrator.pid) enables hooks to detect
+ * The marker file (.work.pid) enables hooks to detect
  * active /work sessions without relying on session_id matching.
  */
 
@@ -23,7 +23,7 @@ function writeMarkerFile(ticket, sessionId, deps) {
   const tasksDir = path.join(TASKS_BASE, safeBase);
   try {
     fs.mkdirSync(tasksDir, { recursive: true });
-    const markerPath = path.join(tasksDir, '.work-orchestrator.pid');
+    const markerPath = path.join(tasksDir, '.work.pid');
     fs.writeFileSync(
       markerPath,
       JSON.stringify({ sessionId, ticket, startedAt: new Date().toISOString() })

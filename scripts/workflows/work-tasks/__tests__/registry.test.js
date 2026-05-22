@@ -15,13 +15,14 @@ const {
 } = require('../tasks-phase-registry');
 const { getPhase, hasPhase } = require('../lib/phase-registry');
 
-test('TASKS_PHASE_ORDER is 8 phases in declared order', () => {
+test('TASKS_PHASE_ORDER is 9 phases in declared order', () => {
   assert.deepEqual(TASKS_PHASE_ORDER, [
     'inputs',
     'requirements_extract',
     'draft',
     'traceability',
     'kind_assign',
+    'scope_exists',
     'gherkin_link',
     'memorize',
     'done',
@@ -70,6 +71,19 @@ test('done has next=null, others have a next string', () => {
     const h = getPhase(p);
     if (p === 'done') assert.equal(h.next, null);
     else assert.equal(typeof h.next, 'string');
+  }
+});
+
+test('every phase handler.next matches the transitions map (no wedges)', () => {
+  for (const p of TASKS_PHASE_ORDER) {
+    const h = getPhase(p);
+    if (p === 'done') continue;
+    const allowed = TASKS_PHASE_TRANSITIONS[p] || [];
+    assert.ok(
+      allowed.includes(h.next),
+      `Phase "${p}" handler.next is "${h.next}" but transitions map only allows [${allowed.join(', ')}]. ` +
+        'A mismatch wedges the workflow at this phase.'
+    );
   }
 });
 

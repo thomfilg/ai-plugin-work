@@ -3,10 +3,11 @@
  * If tests fail, returns blocked so work-next.js can transition back to implement.
  *
  * Test runner priority:
- *   0. SCRIPT_RUN_AFFECTED_UNIT env var (affected-only tests, fastest)
- *   1. pnpm dev:check (project-defined)
- *   2. Bundled dev-check.sh
- *   3. pnpm test / node --test (fallback)
+ *   0. SCRIPT_RUN_AFFECTED_UNIT/INTEGRATION/E2E env vars (affected-only, fastest)
+ *   1. $LINT_COMMAND / $TYPECHECK_COMMAND / $TEST_COMMAND env vars via dev-check.sh
+ *   2. pnpm dev:check (project-defined)
+ *   3. Bundled dev-check.sh
+ *   4. pnpm test / node --test (fallback)
  */
 
 'use strict';
@@ -33,9 +34,11 @@ function runCommand(cmd, timeout) {
  * Tier 0 (preferred): per-suite SCRIPT_RUN_AFFECTED_* env vars. Each set
  *   suite is run in sequence; the first non-zero exit short-circuits.
  *   This lets repos plug in their own affected-detection (nx, turbo, custom).
- * Tier 1: pnpm dev:check
- * Tier 2: bundled dev-check.sh
- * Tier 3: pnpm test fallback
+ * Tier 1: $LINT_COMMAND / $TYPECHECK_COMMAND / $TEST_COMMAND env vars routed
+ *   through the bundled dev-check.sh which evaluates them with $CHANGED_FILES.
+ * Tier 2: pnpm dev:check
+ * Tier 3: bundled dev-check.sh
+ * Tier 4: pnpm test fallback
  */
 function runQualityGate(checkHooksDir) {
   // Tier 0: per-suite SCRIPT_RUN_AFFECTED_* — run each defined suite, stop on first failure
@@ -66,7 +69,26 @@ function runQualityGate(checkHooksDir) {
     };
   }
 
-  // Tier 1: pnpm dev:check
+  const devCheckScript = path.join(
+    checkHooksDir,
+    '..',
+    '..',
+    'scripts',
+    'dev-check',
+    'dev-check.sh'
+  );
+
+  // Tier 1: env-var overrides — dev-check.sh already honors LINT_COMMAND /
+  // TYPECHECK_COMMAND / TEST_COMMAND, so routing through it lets repos override
+  // every step via .envrc without touching package.json.
+  const envOverridesPresent =
+    process.env.LINT_COMMAND || process.env.TYPECHECK_COMMAND || process.env.TEST_COMMAND;
+  if (envOverridesPresent && fs.existsSync(devCheckScript)) {
+    const result = runCommand(`bash "${devCheckScript}"`, 120000);
+    return { ...result, tier: 'dev-check.sh ($LINT/$TYPECHECK/$TEST_COMMAND)' };
+  }
+
+  // Tier 2: pnpm dev:check
   try {
     const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
     if (pkg.scripts && pkg.scripts['dev:check']) {
@@ -77,21 +99,13 @@ function runQualityGate(checkHooksDir) {
     /* no package.json */
   }
 
-  // Tier 2: bundled dev-check script
-  const devCheckScript = path.join(
-    checkHooksDir,
-    '..',
-    '..',
-    'scripts',
-    'dev-check',
-    'dev-check.sh'
-  );
+  // Tier 3: bundled dev-check script
   if (fs.existsSync(devCheckScript)) {
     const result = runCommand(`bash "${devCheckScript}"`, 120000);
     return { ...result, tier: 'dev-check.sh' };
   }
 
-  // Tier 3: pnpm test or node --test
+  // Tier 4: pnpm test or node --test
   const result = runCommand('pnpm test || node --test', 120000);
   return { ...result, tier: 'pnpm test' };
 }

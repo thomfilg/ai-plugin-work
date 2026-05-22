@@ -127,7 +127,7 @@ describe('command-matching: isExempt', () => {
 
 describe('command-matching: parseTransition', () => {
   // Use a regex with two capture groups: ticket and step
-  const pattern = /work-orchestrator\.js\s+transition\s+(\S+)\s+(\S+)/;
+  const pattern = /work\.workflow\.js\s+transition\s+(\S+)\s+(\S+)/;
 
   // Stub provider that just echoes the ticket back
   const sanitize = (id) => id;
@@ -138,7 +138,7 @@ describe('command-matching: parseTransition', () => {
   });
 
   it('parses a transition command', () => {
-    const cmd = 'node work-orchestrator.js transition GH-1 plan';
+    const cmd = 'node work.workflow.js transition GH-1 plan';
     const r = parseTransition('Bash', { command: cmd }, pattern, sanitize);
     assert.equal(r.isTransition, true);
     assert.equal(r.ticket, 'GH-1');
@@ -152,7 +152,7 @@ describe('command-matching: parseTransition', () => {
   });
 
   it('applies sanitizer to ticket id', () => {
-    const cmd = 'node work-orchestrator.js transition #123 plan';
+    const cmd = 'node work.workflow.js transition #123 plan';
     const r = parseTransition(
       'Bash',
       { command: cmd },

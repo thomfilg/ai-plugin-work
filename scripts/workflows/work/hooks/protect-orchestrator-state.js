@@ -18,7 +18,7 @@
  *
  * Coverage:
  *   - .work-state.json (and .bak* rotations)
- *   - .work-orchestrator.pid
+ *   - .work.pid
  *   - .last-commit-sha
  *   - .work-actions.json
  *   - .claims/ — every file under
@@ -41,7 +41,7 @@ const { createFileProtector } = require(
 /** Bare basenames the orchestrator manages; agents must never write these. */
 const PROTECTED_BASENAMES = new Set([
   '.work-state.json',
-  '.work-orchestrator.pid',
+  '.work.pid',
   '.last-commit-sha',
   '.work-actions.json',
   'tdd-phase.json',

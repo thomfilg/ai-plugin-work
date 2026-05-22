@@ -9,7 +9,7 @@
  * When a match is found, runs the workflow engine's `plan` subcommand
  * and injects the formatted plan into the chat context.
  *
- * Pattern follows work-orchestrator-hook.js.
+ * Pattern follows work-hook.js.
  */
 
 const fs = require('fs');

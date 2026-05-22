@@ -783,9 +783,9 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
       // step, so no verify function is needed. This prevents deadlocks when CI
       // re-runs or PR state changes transiently after reaching the terminal step.
     ],
-    transitionPattern: /work(?:-orchestrator|.workflow)\.js\s+transition\s+(\S+)\s+(\S+)/,
+    transitionPattern: /work\.workflow\.js\s+transition\s+(\S+)\s+(\S+)/,
     exemptPatterns: [
-      /work(?:-orchestrator|.workflow)\.js\s+(plan|transitions|graph)/,
+      /work\.workflow\.js\s+(plan|transitions|graph)/,
       /work-state\.js\s+(get|resume-info|init|task-current|task-advance|task-get|task-init)/,
     ],
     transitionHint: `node ${path.join(__dirname, 'work.workflow.js')} transition`,

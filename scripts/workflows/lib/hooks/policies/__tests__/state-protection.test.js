@@ -21,7 +21,7 @@ const FAKE_WORKFLOWS = [
     name: 'work',
     stateFile: '.work-state.json',
     evidenceFile: '.work-evidence.json',
-    transitionHint: 'node work-orchestrator.js transition',
+    transitionHint: 'node work.workflow.js transition',
   },
   {
     name: 'work-pr',
@@ -34,8 +34,8 @@ const FAKE_WORKFLOWS = [
 describe('state-protection: buildBasenameToHintMap', () => {
   it('maps both stateFile and evidenceFile basenames to the workflow hint', () => {
     const map = buildBasenameToHintMap(FAKE_WORKFLOWS);
-    assert.equal(map['.work-state.json'], 'node work-orchestrator.js transition');
-    assert.equal(map['.work-evidence.json'], 'node work-orchestrator.js transition');
+    assert.equal(map['.work-state.json'], 'node work.workflow.js transition');
+    assert.equal(map['.work-evidence.json'], 'node work.workflow.js transition');
     assert.equal(map['.work-pr.workflow-state.json'], 'node work-pr-orchestrator.js transition');
   });
 
