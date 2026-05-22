@@ -87,19 +87,61 @@ describe('hook scripts resolve without the workflows symlink', () => {
 
   it('enforce-follow-up-script.js loads and exits 0 with no MODULE_NOT_FOUND on stderr', () => {
     const hook = path.join(tmpRoot, 'hooks', 'enforce-follow-up-script.js');
-    // Feed a benign tool_input that won't match the gh-CI regex → early exit 0.
-    const payload = JSON.stringify({ tool_input: { command: 'ls -la' } });
+    // Use a command that DOES match the gh-CI regex so the hook actually
+    // reaches the changed require() calls for get-config and get-ticket-id.
+    // A benign command like `ls -la` would exit early and bypass the requires
+    // entirely, making this test useless as a regression guard (the swallowing
+    // try/catch in the hook would also hide MODULE_NOT_FOUND in normal flow).
+    const payload = JSON.stringify({ tool_input: { command: 'gh run list' } });
     const res = spawnSync(process.execPath, [hook], {
       input: payload,
       env: { ...process.env, CLAUDE_PLUGIN_ROOT: tmpRoot },
       encoding: 'utf8',
       timeout: 15000,
     });
-    assert.equal(res.status, 0, `expected exit 0, got ${res.status}; stderr=${res.stderr}`);
+    // Exit 0 is expected (no active follow-up session); exit 2 would mean a
+    // block, which we don't expect in this fixture. Either way the require()
+    // calls must have resolved cleanly.
+    assert.ok(
+      res.status === 0 || res.status === 2,
+      `expected exit 0 or 2, got ${res.status}; stderr=${res.stderr}`
+    );
     assert.ok(
       !/MODULE_NOT_FOUND/.test(res.stderr || ''),
       `unexpected MODULE_NOT_FOUND in stderr: ${res.stderr}`
     );
+  });
+
+  it('changed require paths resolve from the synthetic plugin root (no symlink)', () => {
+    // Directly verify that the two module paths the hooks now use can be
+    // resolved via Node's require system in a process whose plugin root has
+    // NO `workflows` symlink. This bypasses the hook's inner try/catch that
+    // would otherwise swallow MODULE_NOT_FOUND, providing a hard guarantee
+    // that the canonical scripts/workflows path works on its own.
+    const probe = `
+      'use strict';
+      const path = require('node:path');
+      const hooksDir = path.join(${JSON.stringify(tmpRoot)}, 'hooks');
+      try {
+        require.resolve(path.join(hooksDir, '..', 'scripts', 'workflows', 'lib', 'get-config'));
+        require.resolve(path.join(hooksDir, '..', 'scripts', 'workflows', 'lib', 'scripts', 'get-ticket-id'));
+        process.stdout.write('OK');
+        process.exit(0);
+      } catch (err) {
+        process.stderr.write(String(err && err.code) + ':' + String(err && err.message));
+        process.exit(1);
+      }
+    `;
+    const res = spawnSync(process.execPath, ['-e', probe], {
+      encoding: 'utf8',
+      timeout: 15000,
+    });
+    assert.equal(
+      res.status,
+      0,
+      `module resolution failed without symlink; stdout=${res.stdout} stderr=${res.stderr}`
+    );
+    assert.equal(res.stdout, 'OK');
   });
 
   it('work-hook.js still loads when CLAUDE_PLUGIN_ROOT is unset (uses __dirname)', () => {
