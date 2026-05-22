@@ -133,11 +133,29 @@ Show the queries you ran and where (one line each). Required substrings for the 
 
 ## Component Shape Decision
 
-For each NEW UI component this spec introduces, decide whether it should be **Generic** (data-shape-agnostic, reusable across pages) or **Specific** (bound to this page). Default is **Generic** for any layout/list/sidebar/table/panel that consumes a typed data array. **Specific** requires a hard-constraint rationale.
+For each NEW UI component this spec introduces, decide whether it should be **Generic** or **Specific**.
 
-| Proposed component | Data inputs | Could be agnostic? | Decision | Rationale |
+**The rule (read this twice):**
+- **Generic** = if *any other page* could plausibly use this component — even if this is the first time we're building it — it belongs in `shared/` or `ui/` as a generic component. "Generic" is about the *role* (Table, Breadcrumb, Modal, Sidebar, Panel, List), not the *data*. It accepts data via props; it does not know about this page's domain.
+- **Specific** = this component only makes sense for this page (it wires the generic component to this page's data, hooks, routes, or copy). Specific components are fine — they just must not duplicate the generic shell.
+
+**Two examples — internalise these:**
+
+1. **Table.** A Users page needs a table. Create TWO components:
+   - `Table` in `shared/ui/` — generic, takes `columns` + `rows`.
+   - `UsersTable` on the Users page — specific, picks the columns and feeds users into `Table`. It does NOT re-implement table layout/sort/empty-state.
+
+2. **Breadcrumb.** Users page has `Users > User A > Details`. Create TWO components:
+   - `Breadcrumb` in `shared/ui/` — generic, takes a list of `{label, href}`.
+   - `UsersBreadcrumb` on the Users page — specific, builds the segment list from the user object.
+
+**Anti-pattern this gate exists to stop:** one page builds `UsersTable` with table layout inlined; the next page builds `OrdersTable` with the same layout inlined again; six pages later you have six near-duplicate table shells. That is exactly what shipped on the ECHO-4452 Lineage tickets.
+
+For each new component, fill one row:
+
+| Proposed component | Data inputs | Other pages could use the generic part? | Decision | Rationale |
 |---|---|---|---|---|
-| `<NameYouWouldHaveWritten>` | `{props shape}` | Yes / No | **Generic `<SharedName>`** / **Specific** | {one sentence — for Specific, name the constraint that prevents extraction} |
+| `<NameYouWouldHaveWritten>` | `{props shape}` | Yes / No | **Split: Generic `<SharedName>` + Specific `<ThisPageName>`** / **Specific-only** | {one sentence — for Specific-only, name what makes this so page-bound that no generic shell could exist} |
 
 If this spec proposes no new UI components, write a single row: `| — | — | — | **N/A** | No new UI components in this spec |`. The table itself is still required so the question is asked.
 
