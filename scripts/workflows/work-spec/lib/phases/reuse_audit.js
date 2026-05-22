@@ -42,7 +42,10 @@ const RATIONALE_ANTIPATTERNS = [
     hint: 'scope is not a technical constraint — name what makes the component page-bound, or do the split',
   },
   {
-    re: /would\s+(force|require)\s+(refactor|modifying|changing|touching)/i,
+    // Optional article between verb and object: "would force a refactor",
+    // "would require the refactoring", etc. matches as well as the no-article
+    // form. Mirrors the same allowance in the `defer` pattern below.
+    re: /would\s+(force|require)\s+(a\s+|the\s+|some\s+)?(refactor|refactoring|modifying|modification|changing|change|touching)/i,
     hint: 'refactor effort is not a hard constraint — name a technical limit or do the split',
   },
   {

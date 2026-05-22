@@ -210,6 +210,27 @@ test('REJECTS Specific-only rationale citing "out of scope"', () => {
   cleanup(root);
 });
 
+test('REJECTS "would force a refactor" / "would require the refactoring" (article between verb and object)', () => {
+  // Cursor regression: the previous regex required the object word to come
+  // immediately after the verb, so natural phrasings with articles ("a",
+  // "the", "some") slipped through. Mirrors the article-allowance in defer.
+  for (const phrase of [
+    'would force a refactor of multiple call sites',
+    'would require the refactoring of shared/',
+    'would force some modification of the asset-level file',
+    'would require a change to the existing component',
+  ]) {
+    const shape = buildShapeRow({ rationale: phrase });
+    const { root, tasksDir } = fixture(`${GOOD_REUSE_AUDIT}\n${shape}`);
+    const errors = reuseAudit.validateArtifacts(tasksDir);
+    assert.ok(
+      errors.some((e) => /non-technical rationale/i.test(e)),
+      `expected rejection for "${phrase}", got: ${JSON.stringify(errors)}`
+    );
+    cleanup(root);
+  }
+});
+
 test('REJECTS Specific-only rationale citing "too risky" / "premature abstraction" / "deferred"', () => {
   for (const phrase of [
     'this is too risky right now',
