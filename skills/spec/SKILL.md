@@ -75,13 +75,14 @@ Task(spec-writer):
   4. API/interface changes
   5. Security considerations
   6. Test scenarios in Given/When/Then format (5-10 scenarios)
-  7. Reuse Audit — grep/glob for existing patterns, components, utilities that can be reused
-  8. Implementation Order — numbered steps with explicit dependency notation (e.g., "→ depends on: #1, #3")
-  9. Files to create/modify
-  10. Out of Scope — explicitly list what is NOT being implemented
-  11. Open Questions & Decisions — surface ambiguity with default assumptions
-  12. Dependencies — external libs, services, or internal modules needed
-  13. Verification Checklist — machine-checkable markers (FILE_EXISTS, GREP, TEST_COUNT, REUSES)
+  7. Reuse Audit — grep/glob for existing patterns, components, utilities that can be reused. MUST include broad-search evidence under two subheadings: a "Codebase search:" / "Filesystem search:" block (or a `codegraph_search` call result) AND a "Linear search:" / "Jira search:" / "Issue search:" / "GitHub search:" block scanning the whole project — not just the current epic — for similarly named components. Search by **stem** (e.g. `Lineage`, `Sidebar`), not by the exact name you intend to write.
+  8. Component Shape Decision — required table forcing a Generic-vs-Specific decision for every new UI component. Default for layout/list/sidebar/table/panel components consuming typed data is **Generic** (data-shape-agnostic, lives in shared/ui). **Specific** requires a one-sentence hard-constraint rationale. If no new UI components are proposed, include one N/A row — the table is mandatory so the "could this be agnostic?" question always gets asked. (Spec gate blocks transition when missing or empty. This is the ECHO-4452 lesson — 6 near-duplicate `Lineage*` components shipped because this question was never asked.)
+  9. Implementation Order — numbered steps with explicit dependency notation (e.g., "→ depends on: #1, #3")
+  10. Files to create/modify
+  11. Out of Scope — explicitly list what is NOT being implemented
+  12. Open Questions & Decisions — surface ambiguity with default assumptions
+  13. Dependencies — external libs, services, or internal modules needed
+  14. Verification Checklist — machine-checkable markers (FILE_EXISTS, GREP, TEST_COUNT, REUSES)
 
   ${IF READ_DOCS_ON_SPEC: Read these docs before starting: ${comma-separated paths}}
 ```

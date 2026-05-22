@@ -72,22 +72,19 @@ When designing API / schema changes, also enumerate every consumer of a modified
 
 1. **Read the brief and project docs** - Extract goals, requirements, constraints, success metrics. If READ_DOCS_ON_SPEC docs are provided (pattern-first.md, architecture.md, ARCH.md, etc.), read them FIRST — they define the app's component structure, shared libraries, and conventions.
 2. **Reuse audit** (MUST complete BEFORE designing architecture):
-   a. From the brief, extract a list of every UI component, data pattern, and behavior needed (modals, dropdowns, forms, tables, filters, CRUD operations, validation, etc.)
-   b. **Similar pages/features analysis** — Find other pages or features in the app that solve similar problems:
-      - Search for pages with similar UX patterns (e.g., if brief needs a "settings modal", find ALL existing settings/config modals across the app)
-      - READ each similar page's implementation — identify which components, hooks, and patterns it uses
-      - List: which page, what it does, which shared components it imports
-      - This reveals the app's established component library and conventions
-   c. For EACH item from the brief, run targeted searches:
-      - Glob for component directories: `**/components/**/*Modal*`, `**/components/**/*Dialog*`, `**/components/**/*Dropdown*`
-      - Glob for shared/common UI: `**/shared/**`, `**/common/**`, `**/ui/**`
-      - Grep for import statements of similar components across existing pages
-   d. **Reuse vs Refactor decision** — For each finding, decide:
+   a. From the brief, extract a list of every UI component, data pattern, and behavior needed (modals, dropdowns, forms, tables, filters, CRUD operations, validation, etc.). For each item, also extract its **stem** — the family-level noun, not the page-specific name. Example: `ExternalAssetLineageSidebar` → stems `Lineage`, `Sidebar`. Stems are what you search; concrete names hide siblings.
+   b. **Broad reuse search** — search by stem, not by exact name. The ECHO-4452 incident shipped six near-duplicate `Lineage*` components because the audit searched only the current branch for exact names. Required searches per stem:
+      - **Codegraph (preferred when available)**: `codegraph_search('<stem>', limit: 20)` returns symbols across the whole workspace. Also try `codegraph_search('<stem> <role>')` where role is "sidebar"/"panel"/"table"/"row"/"modal" etc.
+      - **Filesystem fuzzy globs**: `**/components/**/*<Stem>*`, `**/shared/**/*<Stem>*`, `**/common/**/*<Stem>*`, `**/ui/**/*<Stem>*`.
+      - **Ticket-provider keyword search** (Linear / Jira / GitHub Issues — whatever `TICKET_PROVIDER` is set to): search the whole project for tickets whose title or description contains the stem, even when they live in different epics. The 6 Lineage tickets were spread across **different task trees** with no link between them; only a project-wide keyword scan would have surfaced them. Use `mcp__linear__*` / `mcp__atlassian__jira_search` / `gh issue list --search` accordingly.
+      - **Similar pages/features analysis** — for any matches, READ those pages and list which shared components/hooks they import. This reveals the established component library.
+   c. **Reuse vs Refactor decision** — For each finding, decide:
       - **Direct reuse**: Component already exists and fits → use it as-is
       - **Extend**: Component exists but needs minor additions → extend/wrap it
       - **Extract & refactor**: Multiple pages have similar inline implementations but no shared component → propose extracting into a shared component as part of this task
       - **Create new**: Nothing similar exists → create new, but explain why existing code can't be reused
-   e. Document findings in the Reuse Audit tables BEFORE writing Architecture Decisions
+   d. Document findings in the Reuse Audit tables BEFORE writing Architecture Decisions. The Reuse Audit text MUST include evidence of the broad searches you ran — the spec gate looks for the substrings `codegraph_search`, an explicit `Codebase search:` / `Filesystem search:` subheading, and a `Linear search:` / `Jira search:` / `Issue search:` subheading (whichever matches your provider).
+   e. **Agnostic component decision** — for every NEW UI component you propose, fill the `## Component Shape Decision` table (see template below). The default for layout/list/sidebar/table/panel components that consume a typed data array is **Generic** (data-shape-agnostic, lives in `shared/` or `ui/`). Choosing **Specific** requires a one-sentence rationale naming a hard constraint (e.g., "uses page-local hooks that cannot be lifted"). The table is mandatory even when there is only one new component — its purpose is to force the "could this be agnostic?" question that was skipped on the Lineage tickets.
 3. **Explore the codebase** - Use Grep and Glob to understand:
    - Project structure and file organization
    - Existing patterns (data models, API patterns, error handling)
@@ -127,6 +124,22 @@ When designing API / schema changes, also enumerate every consumer of a modified
 | {Existing component/utility/pattern} | `{file path}` | Reuse / Extend / Extract / Create New | {why this decision} |
 
 {If nothing reusable was found, state: "No existing patterns found that match this feature's requirements." with evidence of what was searched.}
+
+### Broad Search Evidence
+Show the queries you ran and where (one line each). Required substrings for the spec gate are noted in parentheses.
+
+- **Codebase search:** `codegraph_search('<stem>')` → {N hits, summary} (gate looks for `codegraph_search` or a `Codebase search:` / `Filesystem search:` subheading)
+- **Linear search:** `mcp__linear__*` query for `<stem>` → {tickets found across the whole project, including different epics} (gate looks for `Linear search:` / `Jira search:` / `Issue search:` subheading matching `TICKET_PROVIDER`)
+
+## Component Shape Decision
+
+For each NEW UI component this spec introduces, decide whether it should be **Generic** (data-shape-agnostic, reusable across pages) or **Specific** (bound to this page). Default is **Generic** for any layout/list/sidebar/table/panel that consumes a typed data array. **Specific** requires a hard-constraint rationale.
+
+| Proposed component | Data inputs | Could be agnostic? | Decision | Rationale |
+|---|---|---|---|---|
+| `<NameYouWouldHaveWritten>` | `{props shape}` | Yes / No | **Generic `<SharedName>`** / **Specific** | {one sentence — for Specific, name the constraint that prevents extraction} |
+
+If this spec proposes no new UI components, write a single row: `| — | — | — | **N/A** | No new UI components in this spec |`. The table itself is still required so the question is asked.
 
 ## Architecture Decisions
 - **Reuse:** {What existing components/patterns from the Reuse Audit will be used}
