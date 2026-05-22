@@ -10,9 +10,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { ALL_STEPS } = require(
-  path.join(__dirname, '..', '..', '..', 'work', 'step-registry')
-);
+const { ALL_STEPS } = require(path.join(__dirname, '..', '..', '..', 'work', 'step-registry'));
 
 /**
  * @param {string} safeName
@@ -35,25 +33,23 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
 
   // Defense-in-depth: follow-up's self-reported `status: 'complete'` is the
   // sub-orchestrator's own assertion. Before trusting it to advance the
-  // outer workflow, independently verify with GitHub that the follow-up
-  // PR's CI is actually passing. Without this check, a follow-up runner
-  // bug that prematurely marks status:'complete' silently advances both
-  // follow_up AND ci (because ci-gate sees the merged-or-green state and
-  // skips). See ECHO-4451: follow-up self-reported complete while its
-  // PR (#1826) still had 2 checks running and merge was BLOCKED awaiting
-  // approvals; the outer workflow advanced anyway.
+  // outer workflow, independently verify with GitHub that the PR mirrors
+  // a clickable Squash-and-merge button (mergeStateStatus ∈ {CLEAN,
+  // UNSTABLE} AND no checks still running). See PR #1960 and PR #1929 —
+  // both regressions advanced past this gate while GitHub was showing
+  // "Merging is blocked" / "checks running".
   //
   // Fail-safe: if we can't read the rollup (network/gh error, missing
   // workDir, or missing prNumber), DO NOT advance — fall through so the
   // ci step's agent runs the real verifier. Treat any inability to
-  // independently verify as "can't verify, don't advance" (ECHO-4451).
+  // independently verify as "can't verify, don't advance".
   if (!workDir || !followUpState.prNumber) {
     return null;
   }
   try {
-    const { checkCI } = require(path.join(workDir, 'scripts', 'follow-up-pr.js'));
-    const ci = checkCI(followUpState.prNumber);
-    if (!ci || ci.status !== 'passing') {
+    const { assessMergeable } = require(path.join(__dirname, '..', 'pr-mergeable.js'));
+    const m = assessMergeable(followUpState.prNumber);
+    if (!m.mergeable) {
       return null;
     }
   } catch {

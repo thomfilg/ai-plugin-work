@@ -111,7 +111,7 @@ const RETRY_EDGES = {
   [STEPS.pr]: [STEPS.check], // GH-299: recheck on new commits
   [STEPS.ready]: [STEPS.check], // GH-299: recheck on new commits
   [STEPS.follow_up]: [STEPS.implement, STEPS.check], // backward edges: needs fixes (ci is already the linear forward edge)
-  [STEPS.ci]: [STEPS.implement, STEPS.check], // CI failed, fix code; GH-299: recheck
+  [STEPS.ci]: [STEPS.implement, STEPS.check, STEPS.follow_up], // CI failed → fix code; GH-299: recheck; ci-gate rollback when PR un-mergeable (conflicts, base-branch churn, new review changes)
   [STEPS.cleanup]: [STEPS.check], // GH-299: recheck on new commits
   [STEPS.reports]: [STEPS.check], // GH-299: recheck on new commits
 };

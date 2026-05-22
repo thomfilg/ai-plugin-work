@@ -312,9 +312,16 @@ describe('work-orchestrator.js', () => {
       );
     });
 
-    it('should NOT have ci transitions including follow_up (no backward from ci)', async () => {
+    it('should have ci → follow_up backward edge (rollback when PR un-mergeable)', async () => {
+      // Added with the ci-gate rollback feature: when a PR sitting at ci
+      // becomes un-mergeable (new conflict, base-branch churn introduces a
+      // failing check, reviewer requested changes), ci can't wait for a
+      // merge that's no longer possible — it bounces back to follow_up.
       const { result } = await runOrchestrator(['graph']);
-      assert.ok(!result.transitions['ci'].includes('follow_up'));
+      assert.ok(
+        result.transitions['ci'].includes('follow_up'),
+        'ci should have a backward edge to follow_up for rollback when PR un-mergeable'
+      );
     });
 
     it('should have valid transitions for each step', async () => {
