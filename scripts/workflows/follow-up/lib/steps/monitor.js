@@ -315,7 +315,12 @@ module.exports = function registerMonitor(register) {
     state._ciStatusLine = line1;
     state._ciStatusDetail = detail || '';
     const initialFailedJobs = (ci.failed || []).map((j) => {
-      const m = String(j.link || '').match(/runs\/(\d+)/);
+      // checkCI() in follow-up-pr.js exposes the URL under `url` (gh's
+      // `link` field is renamed during normalisation). Reading `j.link`
+      // always returned undefined, so runId was always null, forcing
+      // the API resolver below to do the work — and that resolver only
+      // matches `conclusion: "failure"`, missing timed_out/cancelled/etc.
+      const m = String(j.url || j.link || '').match(/runs\/(\d+)/);
       return { name: j.name || '', runId: m ? m[1] : null };
     });
 
@@ -338,7 +343,11 @@ module.exports = function registerMonitor(register) {
             `repos/{owner}/{repo}/commits/${headSha}/check-runs`,
             '--paginate',
             '--jq',
-            '.check_runs[] | select(.conclusion == "failure") | "\(.name)\t\(.details_url // .html_url)"',
+            // Match every terminal "this check failed" conclusion, not just "failure".
+            // GitHub returns lowercase conclusions: failure, timed_out, cancelled,
+            // action_required, stale. The previous filter caught only "failure",
+            // so a TIMED_OUT or CANCELLED required check left fix-ci with no logs.
+            '.check_runs[] | select(.conclusion == "failure" or .conclusion == "timed_out" or .conclusion == "cancelled" or .conclusion == "action_required" or .conclusion == "stale" or .conclusion == "startup_failure") | "\(.name)\t\(.details_url // .html_url)"',
           ],
           {
             encoding: 'utf8',
