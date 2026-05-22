@@ -147,6 +147,29 @@ test('saved state complete + only gh_error blocker → honored (transient, do NO
   assert.equal(r.action, 'complete', 'expected fast-path honored on transient gh_error');
 });
 
+test('saved state complete + MERGED PR with transient UNKNOWN merge-state → honored (no rewind churn)', () => {
+  // Regression: GitHub reports mergeStateStatus=UNKNOWN for ~5-30s after
+  // merge. That makes assessMergeable return mergeable:false even though
+  // the work is done. Without a prState guard, follow-up-next would
+  // rewind to monitor (which immediately sees MERGED and completes),
+  // then on the next call rewind again — an infinite churn loop.
+  stubMergeableResult = {
+    mergeable: false,
+    blockers: [{ kind: 'merge_state_unknown', detail: 'GitHub still computing' }],
+    signals: { prState: 'MERGED' },
+  };
+  const mod = loadFresh();
+  const { STEPS } = require('../lib/step-registry');
+  writeState('TEST-6', {
+    ticketId: 'TEST-6',
+    prNumber: 999,
+    currentStep: STEPS[STEPS.length - 1],
+    status: 'complete',
+  });
+  const r = mod.getNextInstruction('TEST-6', 999);
+  assert.equal(r.action, 'complete', 'expected fast-path honored when PR is MERGED');
+});
+
 test('saved state complete + gh_error AND real blocker → rewinds (real blocker wins)', () => {
   stubMergeableResult = {
     mergeable: false,

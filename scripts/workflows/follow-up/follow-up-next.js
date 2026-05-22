@@ -163,7 +163,16 @@ function getNextInstruction(ticketId, prNumber) {
         const realBlockers = (
           liveMergeable && liveMergeable.blockers ? liveMergeable.blockers : []
         ).filter((b) => b.kind !== 'gh_error');
-        if (liveMergeable && !liveMergeable.mergeable && realBlockers.length > 0) {
+        // Skip rewind when the PR is already MERGED. GitHub transiently
+        // reports `mergeStateStatus: UNKNOWN` for ~5-30s after merge, which
+        // produces a non-mergeable result even though the work is done.
+        // Rewinding here would just loop: monitor → MERGED → report →
+        // complete → rewind → monitor... Mirror ci-gate's `prState ===
+        // 'OPEN'` guard so only an actually-open-and-broken PR rewinds.
+        const liveState =
+          (liveMergeable && liveMergeable.signals && liveMergeable.signals.prState) || '';
+        const prIsOpen = liveState === '' || liveState === 'OPEN';
+        if (liveMergeable && !liveMergeable.mergeable && realBlockers.length > 0 && prIsOpen) {
           const blockerSummary = realBlockers.map((b) => b.kind).join(', ');
           process.stderr.write(
             `[follow-up-next] saved state said complete but PR #${state.prNumber} is not mergeable (${blockerSummary}); rewinding and resuming.\n`
