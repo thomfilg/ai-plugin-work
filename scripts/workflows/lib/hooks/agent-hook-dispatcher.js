@@ -125,11 +125,30 @@ async function main() {
 
   const pluginRoot = resolvePluginRoot();
 
+  // Guard: when the current tool is Task/Agent, the call is the PARENT
+  // *about to invoke* a subagent — the subagent isn't running yet.
+  // hookData.tool_input.subagent_type names the target, not the active
+  // agent. isRunningInAgent() would falsely match (via its secondary
+  // tool_input.subagent_type check) and run that target's guard scripts
+  // against the parent's Task call, blocking the agent from ever
+  // starting. Skip dispatch on these meta-invocations.
+  if (hookData.tool_name === 'Task' || hookData.tool_name === 'Agent') {
+    process.exit(0);
+  }
+
   // Find which registered agent (if any) is currently active.
+  // Pass a hookData copy with tool_input.subagent_type stripped as a
+  // belt-and-suspenders defense against any non-Task tool that happens
+  // to carry that field — only the Task tool's tool_input legitimately
+  // names a target agent, and we've already short-circuited that above.
+  const detectionHookData =
+    hookData.tool_input && hookData.tool_input.subagent_type
+      ? { ...hookData, tool_input: { ...hookData.tool_input, subagent_type: undefined } }
+      : hookData;
   const transcriptPath = hookData.transcript_path || '';
   let activeAgent = null;
   for (const agentName of Object.keys(REGISTRY)) {
-    if (isRunningInAgent(transcriptPath, [agentName], hookData)) {
+    if (isRunningInAgent(transcriptPath, [agentName], detectionHookData)) {
       activeAgent = agentName;
       break;
     }

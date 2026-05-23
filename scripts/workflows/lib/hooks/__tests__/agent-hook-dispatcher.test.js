@@ -219,6 +219,39 @@ process.stdin.on('end', () => {
     assert.equal(r.status, 0);
   });
 
+  it('skips dispatch on Task tool (parent invoking a subagent)', () => {
+    // Regression: previously the dispatcher would treat
+    // tool_input.subagent_type as proof the target agent was active,
+    // run that agent's guards against the parent's Task call, and
+    // block the agent from ever starting (self-brick).
+    const rec = path.join(tmp, 'probe-record.log');
+    const r = run(
+      {
+        tool_name: 'Task',
+        tool_input: { subagent_type: 'commit-writer', prompt: 'do something' },
+      },
+      { ...envBase, CLAUDE_HOOK_TYPE: 'PreToolUse', PROBE_RECORD: rec, PROBE_EXIT: '2' }
+    );
+    assert.equal(r.code, 0, 'Task invocations must not trigger agent dispatch');
+    assert.equal(fs.existsSync(rec), false, 'no probe should have run');
+  });
+
+  it('ignores tool_input.subagent_type for non-Task tools', () => {
+    // Defense-in-depth: even if a non-Task tool somehow carries a
+    // subagent_type field, the dispatcher must not use it for detection.
+    const rec = path.join(tmp, 'probe-record.log');
+    const r = run(
+      {
+        tool_name: 'Bash',
+        tool_input: { command: 'ls', subagent_type: 'commit-writer' },
+        agent_type: 'no-such-agent',
+      },
+      { ...envBase, CLAUDE_HOOK_TYPE: 'PreToolUse', PROBE_RECORD: rec, PROBE_EXIT: '2' }
+    );
+    assert.equal(r.code, 0, 'must not match commit-writer via stray subagent_type');
+    assert.equal(fs.existsSync(rec), false);
+  });
+
   it('Stop event only fires matcher-less entries', () => {
     // pr-post-generator has only Stop entries, no matcher — should fire.
     // The script doesn't exist in our test layout, so dispatcher logs
