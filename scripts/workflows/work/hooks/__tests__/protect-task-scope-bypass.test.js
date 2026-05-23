@@ -72,6 +72,7 @@ function runHook({ tasksBase, cwd, toolName, toolInput, env = {} }) {
       PROTECT_TASK_SCOPE_TICKET_ID: TICKET,
       // Clear by default so tests opt in explicitly.
       PROTECT_TASK_SCOPE_BYPASS_REASON: '',
+      PROTECT_TASK_SCOPE_BYPASS_TARGET: '',
       ...env,
     },
   });
@@ -111,7 +112,7 @@ describe('protect-task-scope.js escape hatch + cross-task allow-list (GH-392 Tas
     fs.rmSync(tmpHome, { recursive: true, force: true });
   });
 
-  it('P0 #6 — protect-task-scope.js escape hatch with reason', () => {
+  it('P0 #6 — escape hatch fires when REASON + TARGET both set and match', () => {
     writeTasksMd(tasksDir, { withCrossTaskDeps: false });
     const target = path.join(tmpHome, 'src/shared/schema.ts');
 
@@ -121,13 +122,16 @@ describe('protect-task-scope.js escape hatch + cross-task allow-list (GH-392 Tas
       cwd: tmpHome,
       toolName: 'Edit',
       toolInput: { file_path: target },
-      env: { PROTECT_TASK_SCOPE_BYPASS_REASON: reason },
+      env: {
+        PROTECT_TASK_SCOPE_BYPASS_REASON: reason,
+        PROTECT_TASK_SCOPE_BYPASS_TARGET: 'src/shared/schema.ts',
+      },
     });
 
     assert.equal(
       r.status,
       0,
-      `expected exit 0 with bypass reason set; stderr=${r.stderr} stdout=${r.stdout}`
+      `expected exit 0 with bypass reason+target set; stderr=${r.stderr} stdout=${r.stdout}`
     );
 
     const rows = readActions(tasksBase);
@@ -135,17 +139,82 @@ describe('protect-task-scope.js escape hatch + cross-task allow-list (GH-392 Tas
     assert.equal(bypassRows.length, 1, 'exactly one scope-bypass audit row expected');
     const row = bypassRows[0];
     assert.equal(row.reason, reason, 'audit row carries the supplied reason');
-    // Target path appears in the row (either directly or under meta/outputPath).
     const serialized = JSON.stringify(row);
     assert.ok(
       serialized.includes('src/shared/schema.ts'),
       `audit row should reference the target path; got: ${serialized}`
     );
-    // Task num is recorded so multi-task tickets can be audited.
+    // Audit row records the CONFIGURED target alongside the actual one.
+    assert.equal(
+      row.meta && row.meta.configuredTarget,
+      'src/shared/schema.ts',
+      `audit row meta should record configuredTarget; got: ${serialized}`
+    );
     assert.ok(
       row.task === 1 || row.task === '1' || (row.meta && (row.meta.taskNum === 1 || row.meta.task === 1)),
       `audit row should reference task 1; got: ${serialized}`
     );
+  });
+
+  it('P0 #6 — REASON set but TARGET missing → block stands, NO audit row', () => {
+    writeTasksMd(tasksDir, { withCrossTaskDeps: false });
+    const target = path.join(tmpHome, 'src/shared/schema.ts');
+
+    const r = runHook({
+      tasksBase,
+      cwd: tmpHome,
+      toolName: 'Edit',
+      toolInput: { file_path: target },
+      env: { PROTECT_TASK_SCOPE_BYPASS_REASON: 'lone reason' },
+    });
+
+    assert.equal(r.status, 2, `expected exit 2 when TARGET is missing; stderr=${r.stderr}`);
+    const rows = readActions(tasksBase);
+    const bypassRows = rows.filter((row) => row && row.action === 'scope-bypass');
+    assert.equal(bypassRows.length, 0, 'no scope-bypass row when TARGET unset');
+  });
+
+  it("P0 #6 — REASON+TARGET set but TARGET doesn't match actual target → block stands, NO audit row", () => {
+    writeTasksMd(tasksDir, { withCrossTaskDeps: false });
+    const target = path.join(tmpHome, 'src/shared/schema.ts');
+
+    const r = runHook({
+      tasksBase,
+      cwd: tmpHome,
+      toolName: 'Edit',
+      toolInput: { file_path: target },
+      env: {
+        PROTECT_TASK_SCOPE_BYPASS_REASON: 'reason',
+        PROTECT_TASK_SCOPE_BYPASS_TARGET: 'src/somewhere/else.ts',
+      },
+    });
+
+    assert.equal(r.status, 2, `expected exit 2 when TARGET mismatches; stderr=${r.stderr}`);
+    const rows = readActions(tasksBase);
+    const bypassRows = rows.filter((row) => row && row.action === 'scope-bypass');
+    assert.equal(bypassRows.length, 0, 'no scope-bypass row when TARGET mismatches');
+  });
+
+  it('P0 #6 — TARGET as glob matches and fires bypass', () => {
+    writeTasksMd(tasksDir, { withCrossTaskDeps: false });
+    const target = path.join(tmpHome, 'src/shared/schema.ts');
+
+    const r = runHook({
+      tasksBase,
+      cwd: tmpHome,
+      toolName: 'Edit',
+      toolInput: { file_path: target },
+      env: {
+        PROTECT_TASK_SCOPE_BYPASS_REASON: 'pattern bypass',
+        PROTECT_TASK_SCOPE_BYPASS_TARGET: 'src/shared/**',
+      },
+    });
+
+    assert.equal(r.status, 0, `expected exit 0 with TARGET glob match; stderr=${r.stderr}`);
+    const rows = readActions(tasksBase);
+    const bypassRows = rows.filter((row) => row && row.action === 'scope-bypass');
+    assert.equal(bypassRows.length, 1, 'scope-bypass row expected when TARGET glob matches');
+    assert.equal(bypassRows[0].meta.configuredTarget, 'src/shared/**');
   });
 
   it('P0 #6 — protect-task-scope.js block message advertises the bypass', () => {
@@ -171,7 +240,12 @@ describe('protect-task-scope.js escape hatch + cross-task allow-list (GH-392 Tas
     assert.match(
       lastLine,
       /PROTECT_TASK_SCOPE_BYPASS_REASON/,
-      `BYPASS line must name the env var; got: ${lastLine}`
+      `BYPASS line must name the REASON env var; got: ${lastLine}`
+    );
+    assert.match(
+      lastLine,
+      /PROTECT_TASK_SCOPE_BYPASS_TARGET/,
+      `BYPASS line must name the TARGET env var; got: ${lastLine}`
     );
     assert.ok(
       lastLine.includes(WORK_ACTIONS_FILENAME),

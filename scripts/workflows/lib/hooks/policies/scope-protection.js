@@ -27,7 +27,56 @@
 
 'use strict';
 
+const fs = require('fs');
 const path = require('path');
+
+/**
+ * Walk up from `p` to the first existing ancestor, realpath it, then re-join
+ * the non-existent tail. Lets us defend against symlink-escape attempts on
+ * write targets that do not yet exist (e.g. Write into a new file under a
+ * directory that itself is a symlink).
+ *
+ * @param {string} p absolute path
+ * @returns {string} best-effort canonicalised absolute path
+ */
+function _realpathBestEffort(p) {
+  let current = p;
+  const tail = [];
+  // Bound to a sane depth so a pathological symlink can't loop us forever.
+  for (let i = 0; i < 4096; i++) {
+    try {
+      const real = fs.realpathSync.native
+        ? fs.realpathSync.native(current)
+        : fs.realpathSync(current);
+      if (tail.length === 0) return real;
+      return path.join(real, ...tail.slice().reverse());
+    } catch {
+      const parent = path.dirname(current);
+      if (parent === current) return p; // hit filesystem root, give up
+      tail.push(path.basename(current));
+      current = parent;
+    }
+  }
+  return p;
+}
+
+/**
+ * True when a posix-style relative path contains a `..` segment anywhere
+ * (not just at the start). Defends against `lib/../../../etc/passwd` style
+ * post-normalisation traversal — `path.normalize` collapses these on POSIX
+ * but a hand-crafted relative input with `\` separators (Windows) can sneak
+ * `..` past a naive `startsWith('..')` check.
+ *
+ * @param {string} rel
+ * @returns {boolean}
+ */
+function _containsParentSegment(rel) {
+  if (typeof rel !== 'string' || !rel) return false;
+  return rel
+    .replace(/\\/g, '/')
+    .split('/')
+    .some((seg) => seg === '..');
+}
 
 /**
  * Compile a glob pattern to a RegExp.
@@ -86,9 +135,32 @@ function globToRegex(glob) {
  */
 function relativizePath(filePath, workDir) {
   if (!filePath || !workDir) return null;
-  const abs = path.isAbsolute(filePath) ? filePath : path.resolve(workDir, filePath);
-  const rel = path.relative(workDir, abs);
-  if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return null;
+  // 1. path.normalize the candidate FIRST so a `..` segment can't sneak past
+  //    the relative() check via a denormalised input like `lib/./../../etc`.
+  const absRaw = path.isAbsolute(filePath) ? filePath : path.resolve(workDir, filePath);
+  const abs = path.normalize(absRaw);
+  let rel = path.relative(workDir, abs);
+  if (!rel || _containsParentSegment(rel) || path.isAbsolute(rel)) return null;
+
+  // 2. Symlink-escape check. Even after normalisation, a path like
+  //    `src/legit.ts` can be a symlink to `../../outside.ts`. Resolve the
+  //    target (best-effort, since the file may not exist yet) and confirm it
+  //    still lands inside the worktree. When the worktree root itself
+  //    doesn't exist on disk (synthetic test inputs), skip the realpath
+  //    check and rely on the lexical normalisation above.
+  let realWork = null;
+  try {
+    realWork = fs.realpathSync.native
+      ? fs.realpathSync.native(workDir)
+      : fs.realpathSync(workDir);
+  } catch {
+    realWork = null;
+  }
+  if (realWork) {
+    const realTarget = _realpathBestEffort(abs);
+    const realRel = path.relative(realWork, realTarget);
+    if (realRel && (_containsParentSegment(realRel) || path.isAbsolute(realRel))) return null;
+  }
   return rel.replace(/\\/g, '/');
 }
 
@@ -102,8 +174,19 @@ function relativizePath(filePath, workDir) {
  */
 function findMatch(relPath, patterns) {
   if (!Array.isArray(patterns) || patterns.length === 0) return null;
+  // Defence-in-depth: refuse to match if the candidate slipped through with
+  // a `..` segment, or if it's absolute. relativizePath should already have
+  // rejected these, but findMatch is also called directly (e.g. crossTaskDeps
+  // check in protect-task-scope.js) and must not be tricked into matching a
+  // pattern against an escape path.
+  if (typeof relPath !== 'string' || !relPath) return null;
+  if (path.isAbsolute(relPath) || _containsParentSegment(relPath)) return null;
   for (const p of patterns) {
     if (!p || typeof p !== 'string') continue;
+    // Reject absolute patterns and patterns with `..` segments at match time
+    // as a backstop — the authoritative rejection happens at tasks-gate parse,
+    // but a misconfigured runtime caller shouldn't be able to widen scope.
+    if (path.isAbsolute(p) || /^[A-Za-z]:[\\/]/.test(p) || _containsParentSegment(p)) continue;
     let re;
     try {
       re = globToRegex(p);
@@ -147,7 +230,9 @@ function decideEdit(input) {
   // GH-392 Task 8 / spec §P0#6 / R7: every block message ends with a `BYPASS:`
   // line advertising the env-var escape hatch + audit log location.
   const bypassLine =
-    'BYPASS: set PROTECT_TASK_SCOPE_BYPASS_REASON="<reason>" and retry. Audit: .work-actions.json';
+    'BYPASS: set BOTH PROTECT_TASK_SCOPE_BYPASS_REASON="<reason>" AND ' +
+    'PROTECT_TASK_SCOPE_BYPASS_TARGET="<exact-rel-path-or-glob>" and retry. ' +
+    'Audit: .work-actions.json';
 
   const outMatch = findMatch(relPath, filesOutOfScope);
   if (outMatch) {

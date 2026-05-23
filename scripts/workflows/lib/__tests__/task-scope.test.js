@@ -77,6 +77,110 @@ describe('validateTask', () => {
     assert.deepEqual(ts.validateTask({ num: 9, type: 'checkpoint' }), []);
     assert.deepEqual(ts.validateTask({ num: 10, isCheckpoint: true }), []);
   });
+
+  // GH-392 follow-up: cross-task deps must be repo-relative.
+  it('rejects absolute POSIX path in crossTaskDeps', () => {
+    const errors = ts.validateTask({
+      num: 11,
+      filesInScope: ['src/a.ts'],
+      crossTaskDeps: ['/etc/passwd'],
+    });
+    assert.match(errors.join('|'), /Cross-Task Dependencies.*absolute path/);
+    assert.match(errors.join('|'), /\/etc\/passwd/);
+  });
+
+  it('rejects absolute Windows path in crossTaskDeps', () => {
+    const errors = ts.validateTask({
+      num: 12,
+      filesInScope: ['src/a.ts'],
+      crossTaskDeps: ['C:\\Windows\\System32\\evil.dll'],
+    });
+    assert.match(errors.join('|'), /Cross-Task Dependencies.*absolute path/);
+  });
+
+  it('accepts repo-relative crossTaskDeps', () => {
+    const errors = ts.validateTask({
+      num: 13,
+      filesInScope: ['src/a.ts'],
+      crossTaskDeps: ['src/shared/schema.ts', 'lib/**/*.ts'],
+    });
+    assert.deepEqual(errors, []);
+  });
+
+  it('rejects absolute path in filesInScope and filesOutOfScope', () => {
+    const errors = ts.validateTask({
+      num: 14,
+      filesInScope: ['/abs/in.ts'],
+      filesOutOfScope: ['/abs/out.ts'],
+    });
+    assert.match(errors.join('|'), /Files in scope.*absolute path/);
+    assert.match(errors.join('|'), /Files explicitly out of scope.*absolute path/);
+  });
+});
+
+// GH-392 follow-up: cross-task deps must reference paths owned by another task.
+describe('validateCrossTaskDepsOwnership', () => {
+  it('errors when a crossTaskDep is owned by no other task', () => {
+    const tasks = [
+      { num: 1, filesInScope: ['src/a.ts'], crossTaskDeps: ['src/orphan.ts'] },
+      { num: 2, filesInScope: ['src/b.ts'] },
+    ];
+    const errors = ts.validateCrossTaskDepsOwnership(tasks);
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /Task 1 declares Cross-Task Dependency `src\/orphan\.ts`/);
+    assert.match(errors[0], /no other task lists it in/);
+  });
+
+  it('accepts a crossTaskDep that literally appears in another task\'s scope', () => {
+    const tasks = [
+      { num: 1, filesInScope: ['src/a.ts'], crossTaskDeps: ['src/shared/schema.ts'] },
+      { num: 2, filesInScope: ['src/shared/schema.ts', 'src/b.ts'] },
+    ];
+    assert.deepEqual(ts.validateCrossTaskDepsOwnership(tasks), []);
+  });
+
+  it('accepts a crossTaskDep covered by another task\'s glob scope', () => {
+    const tasks = [
+      { num: 1, filesInScope: ['src/a.ts'], crossTaskDeps: ['src/shared/schema.ts'] },
+      { num: 2, filesInScope: ['src/shared/**'] },
+    ];
+    assert.deepEqual(ts.validateCrossTaskDepsOwnership(tasks), []);
+  });
+
+  it('rejects a crossTaskDep that only the SAME task lists in scope', () => {
+    const tasks = [
+      {
+        num: 1,
+        filesInScope: ['src/a.ts', 'src/self.ts'],
+        crossTaskDeps: ['src/self.ts'],
+      },
+      { num: 2, filesInScope: ['src/b.ts'] },
+    ];
+    const errors = ts.validateCrossTaskDepsOwnership(tasks);
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /no other task lists it in/);
+  });
+
+  it('validateAll surfaces the cross-task ownership error at tasks-gate', () => {
+    const result = ts.validateAll([
+      { num: 1, filesInScope: ['src/a.ts'], crossTaskDeps: ['src/orphan.ts'] },
+      { num: 2, filesInScope: ['src/b.ts'] },
+    ]);
+    assert.equal(result.valid, false);
+    assert.ok(
+      result.errors.some((e) => /Cross-Task Dependency.*orphan/.test(e)),
+      `validateAll should surface ownership error; got: ${result.errors.join(' | ')}`
+    );
+  });
+
+  it('skips absolute entries (already errored by validateTask)', () => {
+    const tasks = [
+      { num: 1, filesInScope: ['src/a.ts'], crossTaskDeps: ['/etc/passwd'] },
+      { num: 2, filesInScope: ['src/b.ts'] },
+    ];
+    // validateCrossTaskDepsOwnership skips absolute entries; validateTask covers them.
+    assert.deepEqual(ts.validateCrossTaskDepsOwnership(tasks), []);
+  });
 });
 
 describe('validateAll', () => {
