@@ -226,7 +226,6 @@ scripts/workflows/work-qa-feature-tester/lib/phases/report.js
 scripts/workflows/work/lib/step-enrichments/complete.js
 scripts/workflows/work-spec/lib/kind-checks/frontend.js
 scripts/workflows/work/lib/instruction-builder.js
-scripts/workflows/lib/scripts/quality/shared/engine.js
 scripts/workflows/work-pr-step/lib/phases/description_draft.js
 scripts/workflows/work-completion-checker/lib/phases/memorize.js
 scripts/workflows/work-qa-feature-tester/lib/kind-checks/shared.js
