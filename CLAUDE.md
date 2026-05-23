@@ -65,3 +65,39 @@ See **[AGENTS.md](./AGENTS.md)** for the agent catalog. See **[docs/README.md](.
 ### Formatting
 - `pnpm format` — biome formatter
 - `pnpm format:check` — check only
+
+### Static Code Quality Gate
+
+A deterministic gate enforces six static-code rules across the repo. It is wired
+into CI (`.github/workflows/ci.yml` → `quality` job) and is required for merge.
+
+**Runner:** `scripts/workflows/lib/scripts/quality/quality.js`
+
+**Local usage:**
+- `pnpm quality` — full-repo scan; exits non-zero on any non-allowlisted violation
+- `pnpm quality:changed` — scan only files changed against `main` (fast inner loop)
+
+**Rules and default thresholds:**
+| Rule ID | Threshold | What it catches |
+|---|---|---|
+| `max-lines` | 500 lines / file | Oversized modules |
+| `max-lines-per-function` | 75 lines / function | Bloated functions |
+| `cyclomatic-complexity` | 10 | Tangled branching |
+| `max-depth` | 4 | Deeply-nested blocks |
+| `duplicate-blocks` | 50-token blocks across files | Copy-paste drift |
+| `biome-bridge` | biome lint findings | Existing biome rules |
+
+**Allowlist (`.quality-exceptions` at repo root):**
+- Captures the current set of pre-existing violations so the gate can flip on
+  without a mass-refactor PR.
+- **Burn-down policy: new PRs may only shrink, never grow, the allowlist.** Any
+  PR that introduces a new entry is rejected by the gate; entries should be
+  removed as code is cleaned up.
+- File format: one entry per line, `path:rule[:identifier]` (see runner source
+  for exact grammar).
+
+**When the gate fails:**
+1. Read the runner output — each violation prints `file:line  rule (value) in function`.
+2. Fix the violation (preferred) or, if the change is genuinely pre-existing
+   and out of scope, leave it allowlisted and address in a follow-up.
+3. Re-run `pnpm quality` locally before pushing.

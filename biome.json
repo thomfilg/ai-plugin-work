@@ -14,7 +14,13 @@
       "**/*.json",
       "!**/node_modules",
       "!**/pnpm-lock.yaml",
-      "!**/.git"
+      "!**/.git",
+      "!tasks/**",
+      "!external_scripts/**",
+      "!references/**",
+      "!docs/**",
+      "!**/*.md",
+      "!**/__tests__/**"
     ]
   },
   "formatter": {
@@ -39,7 +45,18 @@
     }
   },
   "linter": {
-    "enabled": false
+    "enabled": true,
+    "rules": {
+      "recommended": false,
+      "complexity": {
+        "noExcessiveCognitiveComplexity": {
+          "level": "error",
+          "options": {
+            "maxAllowedComplexity": 15
+          }
+        }
+      }
+    }
   },
   "assist": {
     "enabled": false
