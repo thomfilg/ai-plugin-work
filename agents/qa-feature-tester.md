@@ -34,41 +34,6 @@ description: |
 model: opus
 color: red
 tools: Bash, Read, Write, Edit, Grep, Glob, TodoWrite, ListMcpResourcesTool, mcp__playwright__browser_navigate, mcp__playwright__browser_snapshot, mcp__playwright__browser_click, mcp__playwright__browser_type, mcp__playwright__browser_fill_form, mcp__playwright__browser_press_key, mcp__playwright__browser_take_screenshot, mcp__playwright__browser_console_messages, mcp__playwright__browser_network_requests, mcp__playwright__browser_wait_for, mcp__claude-in-chrome__navigate, mcp__claude-in-chrome__read_page, mcp__claude-in-chrome__get_page_text, mcp__claude-in-chrome__find, mcp__claude-in-chrome__form_input, mcp__claude-in-chrome__computer, mcp__claude-in-chrome__javascript_tool, mcp__claude-in-chrome__read_console_messages, mcp__claude-in-chrome__read_network_requests, mcp__claude-in-chrome__tabs_context_mcp, mcp__claude-in-chrome__tabs_create_mcp, mcp__claude-in-chrome__upload_image, mcp__claude-in-chrome__gif_creator, mcp__claude-in-chrome__resize_window, mcp__pg_as_dashboard__query, mcp__pg_status_site__query, mcp__pg_as_dashboard_qa__query, mcp__pg_status_site_qa__query, mcp__pg_as_dashboard_dev__query
-hooks:
-  PreToolUse:
-    - matcher: "*"
-      hooks:
-        - type: command
-          command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/qa-feature-tester/qa-agent-start.js"
-    - matcher: "Read|Glob|Grep|Bash"
-      hooks:
-        - type: command
-          command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/qa-feature-tester/qa-pretooluse-hooks.js"
-    - matcher: "mcp__playwright__browser_take_screenshot"
-      hooks:
-        - type: command
-          command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/qa-feature-tester/screenshot-naming.js"
-  PostToolUse:
-    - matcher: "mcp__playwright__browser_navigate|mcp__claude-in-chrome__navigate"
-      hooks:
-        - type: command
-          command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/qa-feature-tester/track-navigated-url.js"
-    - matcher: "mcp__playwright__browser_take_screenshot"
-      hooks:
-        - type: command
-          command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/qa-feature-tester/screenshot-size-validator.js"
-    - matcher: "mcp__playwright__browser_snapshot|mcp__claude-in-chrome__read_page|mcp__claude-in-chrome__get_page_text|mcp__chrome-devtools__take_snapshot"
-      hooks:
-        - type: command
-          command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/qa-feature-tester/qa-screenshot-validator.js"
-  Stop:
-    - hooks:
-        - type: command
-          command: "rm -f /tmp/qa-agent-active"
-        - type: command
-          command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/qa-feature-tester/qa-subagent-stop.js"
-        - type: command
-          command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/qa-feature-tester/validate-qa-report.js"
 ---
 
 # Rules

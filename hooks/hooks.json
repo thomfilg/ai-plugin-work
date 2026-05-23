@@ -130,6 +130,15 @@
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/agents/commit-writer/commit-writer-preflight.js"
           }
         ]
+      },
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/lib/hooks/agent-hook-dispatcher.js"
+          }
+        ]
       }
     ],
     "PostToolUse": [
@@ -197,6 +206,15 @@
             "command": "CLAUDE_HOOK_TYPE=PostToolUse node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/check/hooks/enforce-env-start-failure.js"
           }
         ]
+      },
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CLAUDE_HOOK_TYPE=PostToolUse node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/lib/hooks/agent-hook-dispatcher.js"
+          }
+        ]
       }
     ],
     "PreCompact": [
@@ -231,6 +249,15 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/hooks/work-suggestion-replies.js"
+          }
+        ]
+      },
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "CLAUDE_HOOK_TYPE=Stop node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/lib/hooks/agent-hook-dispatcher.js"
           }
         ]
       }
