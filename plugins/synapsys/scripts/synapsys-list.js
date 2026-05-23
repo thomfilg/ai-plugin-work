@@ -158,8 +158,9 @@ for (const [kind, bucket] of byStore.entries()) {
 // ─── summary ──────────────────────────────────────────────────────────
 const summary = `${C.bold(`Total: ${total}`)} ${C.dim('·')} UPS: ${C.yellow(upsCount)} ${C.dim('·')} PTU: ${C.yellow(ptuCount)} ${C.dim('·')} SS: ${C.yellow(sessionCount)}`;
 console.log(summary);
+// Build the legend in parts so the inner red/bold "F" doesn't reset the outer
+// dim attribute (an inner \x1b[0m clears ALL attributes on the rest of the line).
+const legendTail = verbose ? 'verbose mode (regexes shown)' : 'pass --verbose for triggers';
 console.log(
-  C.dim(
-    `Legend: ${C.red(C.bold('F'))} = full inject · s = summary inject · ${verbose ? 'verbose mode (regexes shown)' : 'pass --verbose for triggers'}`
-  )
+  `${C.dim('Legend: ')}${C.red(C.bold('F'))}${C.dim(` = full inject · s = summary inject · ${legendTail}`)}`
 );
