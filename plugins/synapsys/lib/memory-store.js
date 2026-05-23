@@ -68,7 +68,7 @@ function coerceFrontmatterValue(raw) {
 }
 
 function parseFrontmatter(content) {
-  const m = content.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
+  const m = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n([\s\S]*))?$/);
   if (!m) return { meta: {}, body: content };
   const meta = Object.create(null);
   for (const raw of m[1].split(/\r?\n/)) {
@@ -78,7 +78,7 @@ function parseFrontmatter(content) {
     if (!km) continue;
     meta[km[1]] = coerceFrontmatterValue(km[2]);
   }
-  return { meta, body: m[2] };
+  return { meta, body: m[2] || '' };
 }
 
 const SKIP_FILES = new Set(['INDEX.md', 'README.md']);
