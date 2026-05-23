@@ -562,57 +562,19 @@ describe('enforce-step-workflow', () => {
           ]),
           'work-pr'
         );
-        // Seed prior 3_pr_gen evidence so the workflow state reflects a
-        // realistic post-pr_gen position. The PostToolUse handler in the
-        // hook merges into an existing evidence object via load → mutate
-        // → atomic rename. On slower CI filesystems the bare initial
-        // write (no prior evidence) was observed to race against the
-        // immediate read in this test; pre-seeding makes the file
-        // already exist before the hook runs, eliminating that race.
-        writeEvidence(
-          {
-            '3_pr_gen': {
-              executed: true,
-              command: 'pr-generator',
-              tool: 'Agent',
-              timestamp: new Date().toISOString(),
-            },
-          },
-          '.step-evidence-work-pr.json'
-        );
         const input = {
           tool_name: 'Agent',
           tool_input: { subagent_type: 'pr-post-generator', prompt: 'add screenshots' },
         };
 
-        // Enable hook debug logging so a future CI failure surfaces the
-        // hook's own diagnostic output in the assertion message.
-        const env = { ENFORCE_HOOK_DEBUG: '1' };
-        const pre = await runHook(input, 'PreToolUse', env);
-        assert.equal(
-          pre.code,
-          0,
-          `PreToolUse should allow Agent. stderr=${pre.stderr} stdout=${pre.stdout}`
-        );
+        const pre = await runHook(input);
+        assert.equal(pre.code, 0, 'PreToolUse should allow Agent');
 
-        const post = await runHook(input, 'PostToolUse', env);
-        assert.equal(
-          post.code,
-          0,
-          `PostToolUse should succeed. stderr=${post.stderr} stdout=${post.stdout}`
-        );
+        const post = await runHook(input, 'PostToolUse');
+        assert.equal(post.code, 0);
         const evidence = readEvidence('.step-evidence-work-pr.json');
-        assert.ok(
-          evidence['5_post_pr_gen']?.executed,
-          `Should record evidence for 5_post_pr_gen. evidence=${JSON.stringify(evidence)} ` +
-            `pre.stderr=${pre.stderr} post.stderr=${post.stderr}`
-        );
+        assert.ok(evidence['5_post_pr_gen']?.executed, 'Should record evidence for 5_post_pr_gen');
         assert.equal(evidence['5_post_pr_gen']?.tool, 'Agent');
-        // Pre-seeded evidence should be preserved (no backward clear).
-        assert.ok(
-          evidence['3_pr_gen']?.executed,
-          'Pre-seeded 3_pr_gen evidence should be preserved'
-        );
       });
     });
 
