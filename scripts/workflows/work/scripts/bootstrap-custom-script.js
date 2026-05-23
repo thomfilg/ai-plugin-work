@@ -24,6 +24,50 @@ const { logHookError } = require('../../lib/hook-error-log');
 const DEFAULT_TIMEOUT_SECONDS = 120;
 
 /**
+ * Source `.envrc` from candidate directories and merge missing vars into
+ * process.env. Direnv may not be active in the orchestrator's spawning
+ * shell, so the workflow can't rely on env vars from `.envrc` being present.
+ *
+ * Existing process.env values are preserved (env wins over .envrc) so that
+ * explicit overrides from the caller still take precedence.
+ *
+ * @param {string[]} candidateDirs - Directories to check for a .envrc
+ * @returns {string[]} Paths of .envrc files that were sourced
+ */
+function loadEnvrcFromDirs(candidateDirs) {
+  const sourced = [];
+  const seen = new Set();
+  for (const dir of candidateDirs) {
+    if (!dir) continue;
+    const envrcPath = path.join(dir, '.envrc');
+    if (seen.has(envrcPath)) continue;
+    seen.add(envrcPath);
+    if (!fs.existsSync(envrcPath)) continue;
+
+    const result = spawnSync(
+      'bash',
+      ['-c', `set -a; source "${envrcPath}" >/dev/null 2>&1; env -0`],
+      { encoding: 'utf-8', timeout: 10000, maxBuffer: 5 * 1024 * 1024 }
+    );
+
+    if (result.status !== 0 || !result.stdout) continue;
+
+    for (const entry of result.stdout.split('\0')) {
+      if (!entry) continue;
+      const eq = entry.indexOf('=');
+      if (eq <= 0) continue;
+      const key = entry.slice(0, eq);
+      const value = entry.slice(eq + 1);
+      if (!process.env[key]) {
+        process.env[key] = value;
+      }
+    }
+    sourced.push(envrcPath);
+  }
+  return sourced;
+}
+
+/**
  * Resolve the script path. Supports absolute and cwd-relative paths.
  * @param {string} scriptPath - Raw path from config
  * @returns {string} Resolved absolute path
@@ -53,7 +97,16 @@ function getTimeoutMs() {
  * @returns {{ ok: boolean, stdout?: string, stderr?: string, error?: string }}
  */
 function executeCustomScript(worktreePath, ticketId) {
-  const scriptConfig = getConfig('BOOTSTRAP_SCRIPT');
+  let scriptConfig = getConfig('BOOTSTRAP_SCRIPT');
+
+  if (!scriptConfig) {
+    const sourced = loadEnvrcFromDirs([worktreePath, path.dirname(worktreePath)]);
+    if (sourced.length > 0) {
+      console.log(`Sourced .envrc from: ${sourced.join(', ')}`);
+    }
+    scriptConfig = getConfig('BOOTSTRAP_SCRIPT');
+  }
+
   if (!scriptConfig) {
     console.log('BOOTSTRAP_SCRIPT not set, skipping custom bootstrap script');
     return { ok: true };
@@ -107,7 +160,7 @@ function executeCustomScript(worktreePath, ticketId) {
   }
 }
 
-module.exports = { executeCustomScript, resolveScriptPath, getTimeoutMs };
+module.exports = { executeCustomScript, resolveScriptPath, getTimeoutMs, loadEnvrcFromDirs };
 
 // CLI entry point
 if (require.main === module) {
