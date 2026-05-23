@@ -115,6 +115,42 @@ function _parseScopeList(sectionMatch) {
   return out;
 }
 
+/**
+ * Extract a markdown ### section body by heading, anchored at start-of-line
+ * so inline-backtick mentions like `- See \`### Files in scope\` convention`
+ * do not collide with the real section.
+ *
+ * SECURITY NOTE: `heading` is treated as a hardcoded literal — no regex-escape
+ * is applied. All call sites in this file pass constant strings (e.g.
+ * `### Files in scope`). Dynamic / user-supplied input is out of scope for
+ * this ticket per spec §Security Considerations; do not pass untrusted values.
+ *
+ * Returns a 2-element array shaped like String.prototype.match() output
+ * (`[whole, body]`) so callers — including `_parseScopeList` which reads
+ * `sectionMatch[1]` — work unchanged. Returns `null` when the heading is
+ * not present.
+ *
+ * @param {string} body  Task body markdown to search.
+ * @param {string} heading  Literal heading line, including leading `### `.
+ * @returns {[string, string] | null}
+ */
+function extractSectionByHeading(body, heading) {
+  // Anchor heading at start-of-line via (?:^|\n) so inline-backtick mentions
+  // like `- See \`### Files in scope\` convention` (mid-line) are skipped.
+  // We avoid the `m` flag because it would also redefine `$` in the
+  // lookahead terminator (`$` matches every line-end under `m`), which
+  // would prematurely truncate sections whose final line has no trailing
+  // newline. Section body terminates at the next ### / ## heading or EOF.
+  // The `[^\\n]*` after the heading preserves the legacy tolerance for
+  // trailing heading text (e.g. `### Suggested Scope (legacy)`).
+  const pattern = new RegExp(
+    `(?:^|\\n)${heading}[^\\n]*\\n([\\s\\S]*?)(?=\\n###|\\n## |$)`
+  );
+  const m = body.match(pattern);
+  if (!m) return null;
+  return [m[0], m[1]];
+}
+
 // ─── Task Parsing ────────────────────────────────────────────────────────────
 
 function parseTasks(tasksDir) {
@@ -157,26 +193,27 @@ function parseTasks(tasksDir) {
       });
     }
 
-    // Extract ### Requirements Covered
-    const reqMatch = body.match(/### Requirements Covered\s*\n([\s\S]*?)(?=\n###|\n## |$)/);
+    // Extract ### Requirements Covered (line-anchored via extractSectionByHeading
+    // so inline-backtick mentions earlier in the body don't shadow the real section)
+    const reqMatch = extractSectionByHeading(body, '### Requirements Covered');
     const requirementsCovered = reqMatch ? reqMatch[1].trim() : '';
 
     // Extract ### Acceptance Criteria
-    const acMatch = body.match(/### Acceptance Criteria\s*\n([\s\S]*?)(?=\n###|\n## |$)/);
+    const acMatch = extractSectionByHeading(body, '### Acceptance Criteria');
     const acceptanceCriteria = acMatch ? acMatch[1].trim() : '';
 
     // Extract ### Suggested Scope (legacy, kept for backwards compat)
-    const scopeMatch = body.match(/### Suggested Scope[^\n]*\n([\s\S]*?)(?=\n###|\n## |$)/);
+    const scopeMatch = extractSectionByHeading(body, '### Suggested Scope');
     const suggestedScope = scopeMatch ? scopeMatch[1].trim() : '';
 
     // Gate C: ### Files in scope (glob patterns or paths the task may edit)
     const filesInScope = _parseScopeList(
-      body.match(/### Files in scope[^\n]*\n([\s\S]*?)(?=\n###|\n## |$)/)
+      extractSectionByHeading(body, '### Files in scope')
     );
 
     // Gate C: ### Files explicitly out of scope (sibling-owned paths the task must NOT edit)
     const filesOutOfScope = _parseScopeList(
-      body.match(/### Files explicitly out of scope[^\n]*\n([\s\S]*?)(?=\n###|\n## |$)/)
+      extractSectionByHeading(body, '### Files explicitly out of scope')
     );
 
     // Extract ### Test Command (machine-parseable command for gate-driven TDD).

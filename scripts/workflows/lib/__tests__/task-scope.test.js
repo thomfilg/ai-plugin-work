@@ -398,15 +398,15 @@ describe('test-file naming convention (integration / e2e)', () => {
       assert.deepEqual(ts.validateTaskTestScope(task), []);
     });
 
-    it('passes multi-suite chained command (unit + integration)', () => {
-      // The legitimate pattern: each runner self-filters CHANGED_FILES.
-      // Unit runner picks up `foo.test.ts`; integration runner picks up
-      // `bar.integration.test.ts`. No file is orphaned.
+    it('passes multi-suite chained command when each eval has its own CHANGED_FILES (post-bug-#3 fix)', () => {
+      // After GH-397 bug #3 fix, each eval MUST be preceded by its own
+      // CHANGED_FILES assignment in the same segment — otherwise the second
+      // runner executes against the whole repo and the per-task gate is defeated.
       const task = {
         num: 7,
         filesInScope: ['lib/foo/**', 'app/api/**'],
         testCommand:
-          'CHANGED_FILES="app/api/bar.integration.test.ts lib/foo/foo.test.ts" eval "$TEST_UNIT_COMMAND" && eval "$TEST_INTEGRATION_COMMAND"',
+          'CHANGED_FILES="lib/foo/foo.test.ts" eval "$TEST_UNIT_COMMAND" && CHANGED_FILES="app/api/bar.integration.test.ts" eval "$TEST_INTEGRATION_COMMAND"',
       };
       assert.deepEqual(ts.validateTaskTestScope(task), []);
     });
@@ -424,6 +424,67 @@ describe('test-file naming convention (integration / e2e)', () => {
       assert.ok(errors.length >= 1);
       assert.match(errors[0], /bar\.integration\.test\.ts/);
     });
+  });
+});
+
+describe('per-eval CHANGED_FILES validation (Task 3 — bug #3)', () => {
+  it('Scenario 6: Test Command with two evals and only one CHANGED_FILES prefix fails validation', () => {
+    // Two evals chained with `&&`, only the FIRST has a CHANGED_FILES prefix.
+    // The second eval ($TEST_INTEGRATION_COMMAND) is unscoped — it would run
+    // the integration runner against ALL files, defeating the per-task gate.
+    const task = {
+      num: 3,
+      filesInScope: ['a.test.ts', 'b.integration.test.ts'],
+      testCommand:
+        'CHANGED_FILES="a.test.ts" eval "$TEST_UNIT_COMMAND" && eval "$TEST_INTEGRATION_COMMAND"',
+    };
+    const errors = ts.validateTaskTestScope(task);
+    assert.ok(errors.length >= 1, `expected at least one error, got ${errors.length}`);
+    const unscoped = errors.find((e) => /\$TEST_INTEGRATION_COMMAND/.test(e));
+    assert.ok(unscoped, 'expected error naming the unscoped $TEST_INTEGRATION_COMMAND eval');
+  });
+
+  it('Scenario 7: Test Command with one CHANGED_FILES per eval passes validation', () => {
+    // Each eval has its own CHANGED_FILES prefix in the same segment — both
+    // runners are scoped. Both test files live in `### Files in scope`.
+    const task = {
+      num: 4,
+      filesInScope: ['a.test.ts', 'b.integration.test.ts'],
+      testCommand:
+        'CHANGED_FILES="a.test.ts" eval "$TEST_UNIT_COMMAND" && CHANGED_FILES="b.integration.test.ts" eval "$TEST_INTEGRATION_COMMAND"',
+    };
+    assert.deepEqual(ts.validateTaskTestScope(task), []);
+  });
+
+  it('Scenario 8: Single-eval Test Command (backward compatible) still passes', () => {
+    const task = {
+      num: 5,
+      filesInScope: ['a.test.ts'],
+      testCommand: 'CHANGED_FILES="a.test.ts" eval "$TEST_UNIT_COMMAND"',
+    };
+    assert.deepEqual(ts.validateTaskTestScope(task), []);
+  });
+
+  it('Scenario 9: Two-eval form — second eval CHANGED_FILES references an unscoped file', () => {
+    // Both evals have their own CHANGED_FILES prefix (so the per-eval check
+    // passes), but the SECOND eval references `app/api/bar.integration.test.ts`
+    // which is NOT listed in `### Files in scope`. Downstream scope-membership
+    // validation must union both evals' files and flag the offender —
+    // otherwise the second runner executes against code owned by a sibling
+    // task and the gate deadlocks (ECHO-4637-class).
+    const task = {
+      num: 6,
+      filesInScope: ['a.test.ts'],
+      testCommand:
+        'CHANGED_FILES="a.test.ts" eval "$TEST_UNIT_COMMAND" && CHANGED_FILES="app/api/bar.integration.test.ts" eval "$TEST_INTEGRATION_COMMAND"',
+    };
+    const errors = ts.validateTaskTestScope(task);
+    assert.ok(
+      errors.some(
+        (e) => /Files in scope/.test(e) && /app\/api\/bar\.integration\.test\.ts/.test(e)
+      ),
+      `expected scope-membership error naming the offending file from the second eval; got: ${JSON.stringify(errors)}`
+    );
   });
 });
 

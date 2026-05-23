@@ -203,6 +203,74 @@ Some description here
     assert.ok(tasks);
     assert.equal(tasks[0].type, 'unknown');
   });
+
+  // GH-397 Task 2 — inline-backtick collision regression (gherkin Scenario 4)
+  it('Inline backtick mention of the scope heading does not collide with the real section', () => {
+    writeTasksFile(`## Task 1 — Backtick collision
+
+### Type
+fullstack
+
+### Description
+- See \`### Files in scope\` convention earlier in this body.
+
+### Files in scope
+- \`src/foo.ts\`
+`);
+    const tasks = parseTasks(tmpDir);
+    assert.ok(tasks);
+    assert.deepEqual(
+      tasks[0].filesInScope,
+      ['src/foo.ts'],
+      'filesInScope should reflect the real section, not the inline backtick mention'
+    );
+    assert.ok(tasks[0].filesInScope.length > 0, 'filesInScope must not be empty');
+  });
+
+  // GH-397 Task 2 — inline-backtick collision regression for all 5 subheadings (gherkin Scenario 5)
+  it('Inline backtick collision fix applies to all five subheadings', () => {
+    writeTasksFile(`## Task 1 — All five subheadings collision
+
+### Type
+fullstack
+
+### Description
+Inline mentions appear earlier than the real sections:
+- See \`### Requirements Covered\` convention.
+- See \`### Acceptance Criteria\` convention.
+- See \`### Suggested Scope\` convention.
+- See \`### Files in scope\` convention.
+- See \`### Files explicitly out of scope\` convention.
+
+### Requirements Covered
+- R1
+- R2
+
+### Acceptance Criteria
+- AC item one
+- AC item two
+
+### Suggested Scope
+- src/bar.ts
+
+### Files in scope
+- \`src/foo.ts\`
+
+### Files explicitly out of scope
+- \`src/excluded.ts\`
+`);
+    const tasks = parseTasks(tmpDir);
+    assert.ok(tasks);
+    const t = tasks[0];
+    assert.ok(t.requirementsCovered && t.requirementsCovered.length > 0, 'requirementsCovered non-empty');
+    assert.ok(/R1/.test(t.requirementsCovered), 'requirementsCovered references R1 from real section');
+    assert.ok(t.acceptanceCriteria && t.acceptanceCriteria.length > 0, 'acceptanceCriteria non-empty');
+    assert.ok(/AC item one/.test(t.acceptanceCriteria), 'acceptanceCriteria reflects real section');
+    assert.ok(t.suggestedScope && t.suggestedScope.length > 0, 'suggestedScope non-empty');
+    assert.ok(/src\/bar\.ts/.test(t.suggestedScope), 'suggestedScope reflects real section');
+    assert.deepEqual(t.filesInScope, ['src/foo.ts'], 'filesInScope from real section');
+    assert.deepEqual(t.filesOutOfScope, ['src/excluded.ts'], 'filesOutOfScope from real section');
+  });
 });
 
 // ─── buildTaskPrompt ────────────────────────────────────────────────────────

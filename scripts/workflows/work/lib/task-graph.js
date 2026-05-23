@@ -38,12 +38,32 @@ function parseTasks(tasksDir) {
     const parallelMatch = block.match(/### Parallel\s*\n-?\s*(Yes|No|true|false)/im);
     const parallel = parallelMatch ? /yes|true/i.test(parallelMatch[1]) : false;
 
-    const depsMatch = block.match(/### Dependencies\s*\n-?\s*(.+)/m);
+    // Extract the entire ### Dependencies section body (from the heading
+    // through the next ^### / ^## / EOF) so multi-line bullet lists are
+    // captured, not just the first line. Accepted forms:
+    //   "### Dependencies\nNone"                            → []
+    //   "### Dependencies\n- Task 1, Task 3"                → [1, 3]
+    //   "### Dependencies\n- Task 1\n- Task 2"              → [1, 2]
+    const depsSectionMatch = block.match(
+      /^###\s+Dependencies\s*\n([\s\S]*?)(?=^###\s|^##\s|$(?![\s\S]))/m
+    );
     let dependencies = [];
-    if (depsMatch && !/none/i.test(depsMatch[1])) {
-      // Parse "Task 1, Task 2" or "Task 1" or "1, 2"
-      const nums = depsMatch[1].match(/\d+/g);
-      if (nums) dependencies = nums.map(Number);
+    if (depsSectionMatch) {
+      const body = depsSectionMatch[1];
+      if (!/^\s*-?\s*none\s*$/im.test(body)) {
+        const nums = body.match(/\d+/g);
+        if (nums) {
+          // Uniquify while preserving first-seen order
+          const seen = new Set();
+          dependencies = [];
+          for (const n of nums.map(Number)) {
+            if (!seen.has(n)) {
+              seen.add(n);
+              dependencies.push(n);
+            }
+          }
+        }
+      }
     }
 
     // Check completion from checkbox markers

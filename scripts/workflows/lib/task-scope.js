@@ -61,6 +61,10 @@ function validateTask(task) {
  * an empty array if the command doesn't follow the canonical
  * `CHANGED_FILES="<list>" eval "$TEST_*_COMMAND"` form.
  *
+ * Preserved for backward compatibility with read-only consumers
+ * (`task-next.js`, `implement-gate.js`, `transition-step.js`). New per-eval
+ * validation lives in `extractEvalScopePairs` + `validateTaskTestScope`.
+ *
  * @param {string|null|undefined} testCommand
  * @returns {string[]}
  */
@@ -72,6 +76,62 @@ function extractChangedFilesFromTestCommand(testCommand) {
   const m = testCommand.match(/CHANGED_FILES\s*=\s*(['"])([\s\S]*?)\1/);
   if (!m) return [];
   return m[2].split(/\s+/).filter(Boolean);
+}
+
+/**
+ * Walk every `eval "$TEST_*_COMMAND"` occurrence in a Test Command and pair
+ * it with the nearest preceding `CHANGED_FILES=...` assignment in the SAME
+ * segment. Segments are separated by `&&`, `;`, or `\`-continued newlines.
+ *
+ * Returns an array of `{ eval, changedFiles, offset }` entries — one per
+ * eval occurrence. `changedFiles` is the matched value string or `null`
+ * when no CHANGED_FILES precedes the eval in its segment.
+ *
+ * @param {string|null|undefined} testCommand
+ * @returns {Array<{ eval:string, changedFiles:string|null, offset:number }>}
+ */
+function extractEvalScopePairs(testCommand) {
+  if (typeof testCommand !== 'string' || !testCommand) return [];
+  // Normalise `\<newline>` continuations to whitespace, then split on
+  // `&&` and `;` (top-level only — bash subshells/quotes are out of scope
+  // for the canonical Test Command form).
+  const flat = testCommand.replace(/\\\n/g, ' ');
+  const segments = [];
+  let cursor = 0;
+  const sepRe = /&&|;/g;
+  let m;
+  while ((m = sepRe.exec(flat)) !== null) {
+    segments.push({ text: flat.slice(cursor, m.index), offset: cursor });
+    cursor = m.index + m[0].length;
+  }
+  segments.push({ text: flat.slice(cursor), offset: cursor });
+
+  const evalRe = /eval\s+(['"])\$TEST_[A-Z0-9_]+_COMMAND\1/g;
+  const cfRe = /CHANGED_FILES\s*=\s*(['"])([\s\S]*?)\1/g;
+  const pairs = [];
+  for (const seg of segments) {
+    let em;
+    const cfMatches = [];
+    let cf;
+    cfRe.lastIndex = 0;
+    while ((cf = cfRe.exec(seg.text)) !== null) {
+      cfMatches.push({ value: cf[2], index: cf.index });
+    }
+    evalRe.lastIndex = 0;
+    while ((em = evalRe.exec(seg.text)) !== null) {
+      // Find the nearest CHANGED_FILES preceding this eval within the segment.
+      let nearest = null;
+      for (const c of cfMatches) {
+        if (c.index < em.index) nearest = c;
+      }
+      pairs.push({
+        eval: em[0].match(/\$TEST_[A-Z0-9_]+_COMMAND/)[0],
+        changedFiles: nearest ? nearest.value : null,
+        offset: seg.offset + em.index,
+      });
+    }
+  }
+  return pairs;
 }
 
 /**
@@ -266,7 +326,47 @@ function validateTaskTestScope(task) {
     return errors;
   }
 
-  const changed = extractChangedFilesFromTestCommand(task.testCommand);
+  // Per-eval CHANGED_FILES scoping (bug #3 fix): every `eval "$TEST_*_COMMAND"`
+  // occurrence MUST be preceded by its own `CHANGED_FILES=...` assignment in
+  // the same segment. A two-eval chain with only one prefix silently runs the
+  // second runner against the whole repo, defeating the per-task gate.
+  const evalPairs = extractEvalScopePairs(task.testCommand);
+  if (evalPairs.length > 1) {
+    const unscoped = evalPairs.filter((p) => p.changedFiles === null);
+    if (unscoped.length > 0) {
+      const carryValue = evalPairs.find((p) => p.changedFiles !== null)?.changedFiles || '<files>';
+      const suggested = evalPairs
+        .map((p) => `CHANGED_FILES="${p.changedFiles ?? carryValue}" eval "${p.eval}"`)
+        .join(' && ');
+      for (const u of unscoped) {
+        errors.push(
+          `Task ${task.num ?? '?'} \`### Test Command\` has an unscoped \`eval "${u.eval}"\` — ` +
+            'every eval in a chained Test Command must be preceded by its own `CHANGED_FILES=...` ' +
+            'assignment in the same segment, or the runner will execute the entire repo and the ' +
+            'per-task gate is defeated. Corrected form: ' +
+            `\`${suggested}\`.`
+        );
+      }
+      return errors;
+    }
+  }
+
+  // For downstream scope/runner-naming validation we need the UNION of every
+  // eval's CHANGED_FILES, not just the first assignment. The single-pair
+  // helper `extractChangedFilesFromTestCommand` is preserved for read-only
+  // consumers (R8), but here we must see ALL files the chained Test Command
+  // will execute against — otherwise a second eval's CHANGED_FILES escapes
+  // both the scope-membership and runner-naming checks.
+  const changed =
+    evalPairs.length > 1
+      ? Array.from(
+          new Set(
+            evalPairs
+              .filter((p) => typeof p.changedFiles === 'string' && p.changedFiles)
+              .flatMap((p) => p.changedFiles.split(/\s+/).filter(Boolean))
+          )
+        )
+      : extractChangedFilesFromTestCommand(task.testCommand);
   // Rule 4b (helper-only): A task that uses a recognised runner but lists ZERO
   // test files in CHANGED_FILES will never have a test to execute — the gate
   // gets "No test files found" forever. This is the helper-only pattern.
@@ -478,6 +578,7 @@ module.exports = {
   unionFilesInScope,
   findTask,
   extractChangedFilesFromTestCommand,
+  extractEvalScopePairs,
   fileMatchesScope,
   isIntegrationTestPath,
   isE2eTestPath,
