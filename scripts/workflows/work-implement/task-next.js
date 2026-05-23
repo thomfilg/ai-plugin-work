@@ -47,6 +47,49 @@ const { TDD_PHASES, TDD_PHASE_TRANSITIONS } = require('./tdd-phase-registry');
 // is treated as complete). It is NOT a state-machine target in the registry.
 const TDD_DERIVED_DONE = 'done';
 
+/**
+ * Filter a Suggested Scope list down to just test/spec files.
+ *
+ * Used to defensively sanitize CHANGED_FILES injected into the test
+ * subprocess and recorder env (spec §P0#2 — RED-phase CHANGED_FILES must
+ * never include source paths, which would otherwise make framework test
+ * runners try to execute source files as tests).
+ *
+ * Matches `<name>.test.<ext>` / `<name>.spec.<ext>` where ext is one of
+ * js/jsx/ts/tsx (case-insensitive on the suffix).
+ *
+ * @param {string[]} scope
+ * @returns {string[]}
+ */
+function filterToTestFiles(scope) {
+  if (!Array.isArray(scope)) return [];
+  return scope.filter((p) => typeof p === 'string' && /\.(test|spec)\.[jt]sx?$/i.test(p));
+}
+
+/**
+ * Wrap chained / multiline shell commands in strict mode so that
+ * middle-of-chain failures surface as a non-zero exit (instead of
+ * being masked by a successful final command).
+ *
+ * Spec: GH-392 §P0#3 — without `set -euo pipefail`, a command like
+ * `false && echo ok` exits non-zero, but `false; echo ok` exits 0,
+ * letting silent test failures pass through `runTest` / `recordEvidence`.
+ *
+ * Behavior:
+ *  - Strings with no chain operator (`&&`, `||`, `;`) and no newline
+ *    are returned unchanged (single-command invocations untouched).
+ *  - Anything else gets prefixed with `set -euo pipefail; `.
+ *
+ * @param {string} cmd
+ * @returns {string}
+ */
+function wrapStrictMode(cmd) {
+  if (typeof cmd !== 'string' || cmd.length === 0) return cmd;
+  const hasChain = /(\n|&&|\|\||;)/.test(cmd);
+  if (!hasChain) return cmd;
+  return `set -euo pipefail; ${cmd}`;
+}
+
 /** record-* subcommand name for a phase. */
 function recordSubcommandFor(phase) {
   return `record-${phase}`;
@@ -87,9 +130,22 @@ function readFile(p) {
 
 function resolveTasksBase() {
   const cwd = process.cwd();
+  // Honor TASKS_BASE from env first — matches tdd-phase-state.js / the
+  // shared ticket-validation.resolveTasksBaseWithFallback() contract. Task 10
+  // (GH-392 R12 integration scenario): without this, task-next.js invoked
+  // outside the user's main worktree (e.g. an integration-test sandbox with
+  // a tmp tasks dir) cannot find the per-task tasks.md and dies with
+  // "tasks dir not found", stranding the orchestrator path after a
+  // synthesized-cycle bypass.
+  if (process.env.TASKS_BASE) {
+    return path.resolve(cwd, process.env.TASKS_BASE);
+  }
   if (config?.getConfig) {
     const fromConfig = config.getConfig('TASKS_BASE');
     if (fromConfig) return path.resolve(cwd, fromConfig);
+  }
+  if (config && config.TASKS_BASE) {
+    return path.resolve(cwd, config.TASKS_BASE);
   }
   // Fallback: walk up looking for a `tasks/` dir
   let dir = cwd;
@@ -238,10 +294,10 @@ function runTest(cmd, cwd, scope) {
   // spawned process env makes both patterns work — inline assignment
   // overrides if present, otherwise this fallback wins. Only test-/spec-
   // files from scope are included (source files are not test targets).
-  const changedFiles = Array.isArray(scope)
-    ? scope.filter((p) => /\.(test|spec)\.[jt]sx?$/i.test(p)).join(' ')
-    : '';
-  const result = spawnSync('bash', ['-lc', cmd], {
+  const changedFiles = filterToTestFiles(scope).join(' ');
+  // Strict-mode wrap chained/multiline commands so middle-of-chain failures
+  // surface as non-zero exit (spec §P0#3).
+  const result = spawnSync('bash', ['-lc', wrapStrictMode(cmd)], {
     cwd,
     encoding: 'utf8',
     maxBuffer: 16 * 1024 * 1024,
@@ -349,13 +405,21 @@ function recordEvidence(phase, ticket, taskNum, cmd, cwd, scope) {
   // used in our own runTest, otherwise the recorder's internal run
   // can disagree with ours (e.g. CHANGED_FILES injection failing in
   // its subshell would make pnpm test:unit run the whole suite).
-  const changedFiles = Array.isArray(scope)
-    ? scope.filter((p) => /\.(test|spec)\.[jt]sx?$/i.test(p)).join(' ')
-    : '';
+  const changedFiles = filterToTestFiles(scope).join(' ');
   const childEnv = { ...process.env, CHANGED_FILES: changedFiles };
   function runRecord() {
     mintCompanionToken();
-    const recordArgs = [TDD_CLI, sub, ticket, '--task', String(taskNum), '--cmd', cmd];
+    // Strict-mode wrap the cmd forwarded to the recorder so its internal
+    // bash invocation surfaces middle-of-chain failures (spec §P0#3).
+    const recordArgs = [
+      TDD_CLI,
+      sub,
+      ticket,
+      '--task',
+      String(taskNum),
+      '--cmd',
+      wrapStrictMode(cmd),
+    ];
     return spawnSync(process.execPath, recordArgs, {
       cwd,
       stdio: 'pipe',
@@ -427,9 +491,28 @@ function recordEvidence(phase, ticket, taskNum, cmd, cwd, scope) {
 // Collect every test/spec file referenced by Suggested Scope. Scope entries
 // may name a file directly OR a directory; for directories we walk for
 // *.test.* / *.spec.* up to a small depth.
+//
+// Spec §P0#1 (tasks.md §Task 2): in addition to the directory walks below,
+// every regular *source* scope entry triggers a depth-0 scan of its parent
+// directory for colocated `<basename>.test.<ext>` / `<basename>.spec.<ext>`
+// neighbours (e.g. `src/foo.test.js` next to `src/foo.js`).
 function findTestFilesInScope(repoRoot, scope) {
   const out = new Set();
   const isTestPath = (p) => /\.(test|spec)\.[jt]sx?$/.test(p);
+  // Cache fs.readdirSync results per parent directory so multiple scope
+  // entries in the same folder don't restat the directory repeatedly.
+  const readdirCache = new Map();
+  const readdirCached = (dir) => {
+    if (readdirCache.has(dir)) return readdirCache.get(dir);
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      entries = null;
+    }
+    readdirCache.set(dir, entries);
+    return entries;
+  };
   for (const rel of scope) {
     const p = path.join(repoRoot, rel);
     if (!fs.existsSync(p)) continue;
@@ -441,6 +524,27 @@ function findTestFilesInScope(repoRoot, scope) {
     }
     if (stat.isFile() && isTestPath(p)) {
       out.add(p);
+      continue;
+    }
+    if (stat.isFile() && !isTestPath(p)) {
+      // Spec §P0#1: colocated test discovery. Scan the source file's parent
+      // directory (depth 0) for `<basename>.test.<ext>` / `<basename>.spec.<ext>`
+      // siblings and add them to the result set.
+      const parent = path.dirname(p);
+      const ext = path.extname(p);
+      const base = path.basename(p, ext);
+      const escapedBase = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const colocatedRe = new RegExp(
+        '^' + escapedBase + '\\.(test|spec)\\.(?:m?[cj]sx?|tsx?)$',
+      );
+      const entries = readdirCached(parent);
+      if (entries) {
+        for (const e of entries) {
+          if (e.isFile() && colocatedRe.test(e.name)) {
+            out.add(path.join(parent, e.name));
+          }
+        }
+      }
       continue;
     }
     if (stat.isDirectory()) {
@@ -462,7 +566,7 @@ function findTestFilesInScope(repoRoot, scope) {
       walk(p, 0);
     }
   }
-  return [...out];
+  return out;
 }
 
 // Look for explicit `gherkin('<scenario name>')` annotation calls; fall back
@@ -741,11 +845,22 @@ function main() {
   let blockReason = '';
 
   if (phase === TDD_PHASES.red) {
+    // spec §P0#2 — Sanitize CHANGED_FILES defensively. If Suggested Scope
+    // mixed source + test entries, we already stripped sources in runTest /
+    // recordEvidence via filterToTestFiles(); surface a single diagnostic
+    // so the operator notices, but DO NOT abort the cycle.
+    const sanitizedScope = filterToTestFiles(scope);
+    if (Array.isArray(scope) && scope.length !== sanitizedScope.length) {
+      const dropped = scope.filter((p) => !sanitizedScope.includes(p));
+      console.error(
+        `[task-next] RED: filtered ${dropped.length} non-test scope ${dropped.length === 1 ? 'entry' : 'entries'} from CHANGED_FILES (${dropped.join(', ')})`
+      );
+    }
     if (passed) {
       blockReason =
         'Your test command exits 0. RED requires a real failing test. Rewrite the assertion so it actually fails before re-invoking me.';
     } else {
-      const testFiles = findTestFilesInScope(repoRoot, scope);
+      const testFiles = [...findTestFilesInScope(repoRoot, scope)];
       const missing = scenariosCoveredByTests(scenarios, testFiles);
       if (scenarios.length === 0) {
         // Unit-only fallback: tasks with no E2E gherkin coverage (pure Zod
@@ -857,4 +972,8 @@ function main() {
   process.exit(_exitCode);
 }
 
-main();
+module.exports = { filterToTestFiles, findTestFilesInScope, wrapStrictMode };
+
+if (require.main === module) {
+  main();
+}

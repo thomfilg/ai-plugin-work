@@ -117,12 +117,22 @@ function formatMessage(match, vector) {
 // → `scripts/`. Resolver falls back to that exact traversal when no env
 // var is set, but prefers an env-pinned root when one is present.
 const { resolvePluginRoot } = require(path.join(__dirname, '..', 'lib', 'resolve-plugin-root'));
-const PLUGIN_ROOT = resolvePluginRoot(__dirname, 3) || path.resolve(__dirname, '..', '..', '..');
+// Trust BOTH the env-resolved plugin root (where the orchestrator is installed
+// via the marketplace) AND the __dirname-based local root (where the hook is
+// physically running from — e.g. a checked-out worktree). When the plugin is
+// symlinked into Claude's plugin cache, these two paths can diverge: env
+// resolution lands on the marketplace dir, but the spawned `node <script>`
+// arguments in tests resolve to the worktree dir. Without the local root in
+// the trust list, the protector blocks the orchestrator from running itself
+// in any non-installed checkout.
+const ENV_PLUGIN_ROOT = resolvePluginRoot(__dirname, 3);
+const LOCAL_PLUGIN_ROOT = path.resolve(__dirname, '..', '..', '..');
+const TRUSTED_ROOTS = [ENV_PLUGIN_ROOT, LOCAL_PLUGIN_ROOT].filter(Boolean);
 
 const protector = createFileProtector({
   isProtected: isOrchestratorManaged,
   formatMessage,
-  trustedScriptRoots: [PLUGIN_ROOT],
+  trustedScriptRoots: TRUSTED_ROOTS,
 });
 
 async function main() {

@@ -216,6 +216,12 @@ function parseTasks(tasksDir) {
       extractSectionByHeading(body, '### Files explicitly out of scope')
     );
 
+    // GH-392: ### Cross-Task Dependencies (paths owned by sibling tasks but
+    // legitimately needed by this task — bypass the scope hook with audit)
+    const crossTaskDeps = _parseScopeList(
+      extractSectionByHeading(body, '### Cross-Task Dependencies')
+    );
+
     // Extract ### Test Command (machine-parseable command for gate-driven TDD).
     // Skip ```bash``` fence markers, leading shell comments, and inline-code
     // backticks. Concatenates lines joined by trailing `\` continuations.
@@ -235,6 +241,7 @@ function parseTasks(tasksDir) {
       suggestedScope,
       filesInScope,
       filesOutOfScope,
+      crossTaskDeps,
       testCommand,
       rawContent: `## Task ${num} ${body}`,
     });

@@ -56,6 +56,7 @@ See **[AGENTS.md](./AGENTS.md)** for the agent catalog. See **[docs/README.md](.
 - `protect-state-files.js` guards `.work-state.json` etc. from direct edits.
 - `protect-artifact-files.js` enforces step+agent authorization for report files.
 - Agent-gated scripts require both correct agent identity AND correct workflow step.
+- `protect-task-scope.js` blocks edits outside the active task's `### Files in scope`. The env-var escape hatch is ONE-SHOT and requires BOTH `PROTECT_TASK_SCOPE_BYPASS_REASON="<reason>"` AND `PROTECT_TASK_SCOPE_BYPASS_TARGET="<exact-rel-path-or-glob>"` to be set; the bypass only fires when the actual write target matches `BYPASS_TARGET` (exact or glob). REASON alone never opens the gate. Each fired bypass appends a `scope-bypass` row to `.work-actions.json` recording both the configured target and the actual write path.
 
 ### Ticket Providers
 - Configured via `TICKET_PROVIDER` env var: `jira`, `linear`, `github`, `none`.

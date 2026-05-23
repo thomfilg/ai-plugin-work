@@ -22,10 +22,25 @@ const { spawnSync } = require('node:child_process');
 
 const TASK_NEXT = path.resolve(__dirname, '..', 'task-next.js');
 const TOKEN_DIR = '/tmp/.claude-write-tokens';
+const { tokenPath } = require('../../lib/scripts/write-report');
 
-function mintToken(scriptBasename) {
+// Mint write tokens the same way the production PreToolUse hook does:
+// always KEYED by ticket (`<basename>.<safeTicketId>`). The hook's
+// writeOneToken (enforce-step-workflow.js) calls tokenPath(basename, bareTicket)
+// whenever a ticket context exists; consumers read keyed-first and only
+// fall back to the unkeyed legacy path when no keyed token exists. Minting
+// unkeyed here breaks isolation: any other parallel test file that spawns
+// tdd-phase-state.js (e.g. tdd-phase-state.test.js's token-gating tests)
+// calls consumeToken('tdd-phase-state.js', '<their-ticket>') which falls
+// back to the unkeyed path and atomically DELETES our token mid-flight.
+// task-next.js's first companion spawn (record-*) consumes the token we
+// minted before any race; the second spawn (transition X→Y) then finds
+// nothing and exits "No valid write token found". Symptom surfaced on
+// Node 20 CI because parallel test scheduling on 2-core runners widens
+// the interference window — the bug exists on any Node version.
+function mintToken(scriptBasename, ticketId) {
   fs.mkdirSync(TOKEN_DIR, { recursive: true, mode: 0o700 });
-  const tp = path.join(TOKEN_DIR, scriptBasename);
+  const tp = tokenPath(scriptBasename, ticketId);
   fs.writeFileSync(
     tp,
     JSON.stringify({
@@ -42,9 +57,10 @@ function runTaskNext(ticket, taskArg, env) {
   // Mint tokens before invoking — task-next.js will consume them via
   // its companion script chain. The hook normally mints these for us
   // when an authorized agent invokes the script, but tests spawn it
-  // directly so we pre-mint.
-  mintToken('task-next.js');
-  mintToken('tdd-phase-state.js');
+  // directly so we pre-mint. KEYED by ticket to match the hook contract
+  // and avoid cross-test pollution of the shared TOKEN_DIR.
+  mintToken('task-next.js', ticket);
+  mintToken('tdd-phase-state.js', ticket);
   return spawnSync(process.execPath, [TASK_NEXT, ticket, taskArg], {
     cwd: env.cwd,
     encoding: 'utf8',

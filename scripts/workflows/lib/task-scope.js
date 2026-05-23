@@ -12,6 +12,23 @@
 
 'use strict';
 
+const path = require('path');
+
+/**
+ * Returns true when a tasks.md scope/dep entry is an absolute path
+ * (POSIX `/...` or Windows `C:\...`). Cross-task / scope entries must
+ * always be repo-relative; absolute paths bypass the worktree envelope.
+ *
+ * @param {string} entry
+ * @returns {boolean}
+ */
+function _isAbsolutePathEntry(entry) {
+  if (typeof entry !== 'string' || !entry) return false;
+  if (path.isAbsolute(entry)) return true;
+  if (/^[A-Za-z]:[\\/]/.test(entry)) return true; // Windows drive
+  return false;
+}
+
 /**
  * Validate one task object's scope sections.
  *
@@ -52,6 +69,35 @@ function validateTask(task) {
   // include it; tolerate absence here and surface in Gate E review.
   if (task.filesOutOfScope !== undefined && !Array.isArray(task.filesOutOfScope)) {
     errors.push(`${label} has malformed \`### Files explicitly out of scope\` section`);
+  }
+
+  // GH-392 follow-up: Cross-Task Dependencies must be repo-relative. An
+  // absolute path (POSIX `/foo` or Windows `C:\foo`) would let a task widen
+  // the protect-task-scope envelope to anywhere on disk via the cross-task
+  // allow-list. Reject at tasks-gate parse time — runtime is too late.
+  if (Array.isArray(task.crossTaskDeps)) {
+    for (const entry of task.crossTaskDeps) {
+      if (_isAbsolutePathEntry(entry)) {
+        errors.push(
+          `${label} \`### Cross-Task Dependencies\` entry "${entry}" is an absolute path. ` +
+            'Cross-task dep entries must be repo-relative (e.g. `src/shared/schema.ts`).'
+        );
+      }
+    }
+  }
+  // Same rule for filesInScope / filesOutOfScope as defence-in-depth — an
+  // absolute glob there has no legitimate meaning and would either match
+  // nothing or, worse, slip past the worktree envelope.
+  for (const field of ['filesInScope', 'filesOutOfScope']) {
+    const arr = task[field];
+    if (!Array.isArray(arr)) continue;
+    for (const entry of arr) {
+      if (_isAbsolutePathEntry(entry)) {
+        errors.push(
+          `${label} \`### ${field === 'filesInScope' ? 'Files in scope' : 'Files explicitly out of scope'}\` entry "${entry}" is an absolute path. Entries must be repo-relative.`
+        );
+      }
+    }
   }
   return errors;
 }
@@ -443,6 +489,53 @@ function validateTaskTestScope(task) {
 }
 
 /**
+ * GH-392 follow-up: cross-task deps must reference a path owned by another
+ * task. "Cross-task" must mean cross-task — without ownership enforcement,
+ * crossTaskDeps degrades into a free-form in-scope extension that bypasses
+ * the Gate D scope envelope on any path the author cares to list.
+ *
+ * For each task T and each non-absolute entry E in T.crossTaskDeps, assert
+ * that E is owned by some OTHER task — either E literally appears in that
+ * task's `filesInScope`, OR E matches one of that task's scope globs
+ * (delegated to `fileMatchesScope`, which handles `**` etc.).
+ *
+ * Absolute entries are skipped here because `validateTask` already errors
+ * on them with a sharper message.
+ *
+ * @param {Array<object>} tasks
+ * @returns {string[]} validation errors
+ */
+function validateCrossTaskDepsOwnership(tasks) {
+  if (!Array.isArray(tasks) || tasks.length === 0) return [];
+  const errors = [];
+  for (const task of tasks) {
+    if (!task || !Array.isArray(task.crossTaskDeps) || task.crossTaskDeps.length === 0) continue;
+    const label = `Task ${task.num ?? '?'}`;
+    for (const entry of task.crossTaskDeps) {
+      if (typeof entry !== 'string' || !entry) continue;
+      if (_isAbsolutePathEntry(entry)) continue; // handled by validateTask
+      const ownedByOther = tasks.some((other) => {
+        if (!other || other.num === task.num) return false;
+        const scope = Array.isArray(other.filesInScope) ? other.filesInScope : [];
+        if (scope.includes(entry)) return true;
+        return fileMatchesScope(entry, scope);
+      });
+      if (!ownedByOther) {
+        errors.push(
+          `${label} declares Cross-Task Dependency \`${entry}\` but no other task lists it in ` +
+            "`### Files in scope`. Either add `" +
+            entry +
+            "` to the producing task's `### Files in scope`, or remove it from this task's " +
+            '`### Cross-Task Dependencies`. (Cross-task deps must reference paths another task owns; ' +
+            'they are not a free-form scope extension.)'
+        );
+      }
+    }
+  }
+  return errors;
+}
+
+/**
  * Validate every task and return a flat error list.
  *
  * @param {Array<object>|null|undefined} tasks
@@ -458,6 +551,7 @@ function validateAll(tasks) {
     errors.push(...validateTaskTestScope(t));
   }
   errors.push(...validateTddCycle(tasks));
+  errors.push(...validateCrossTaskDepsOwnership(tasks));
   return { valid: errors.length === 0, errors };
 }
 
@@ -574,6 +668,7 @@ module.exports = {
   validateTask,
   validateTaskTestScope,
   validateTddCycle,
+  validateCrossTaskDepsOwnership,
   validateAll,
   unionFilesInScope,
   findTask,

@@ -202,6 +202,15 @@ function instructions(ctx) {
     '### Files explicitly out of scope',
     '- `path/sibling-owned/file.ts` — owned by ECHO-XXXX',
     '',
+    // Spec §P0#7 (Cross-Task Dependencies): authors list paths owned by other
+    // tasks that this task legitimately needs to edit. The block is parsed by
+    // `scripts/workflows/work/lib/task-parser.js` (see `crossTaskDeps`); the
+    // scope-bypass hook (`protect-task-scope.js`) treats these paths as
+    // pre-authorized edits without requiring `PROTECT_TASK_SCOPE_BYPASS_REASON`.
+    '### Cross-Task Dependencies',
+    '<!-- files owned by other tasks that this task legitimately needs to edit; one bullet per path, optional `(owned by Task N)` suffix -->',
+    '- `src/shared/schema.ts` (owned by Task 4)',
+    '',
     '### Test Command',
     '```bash',
     '# Use the canonical envelope so repos can override the runner via .envrc.',

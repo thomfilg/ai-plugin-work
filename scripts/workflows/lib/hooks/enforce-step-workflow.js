@@ -273,9 +273,20 @@ const AGENT_GATED_SCRIPTS = (() => {
   return merged;
 })();
 
+// Vector 3 (script-content bypass) of the state-file protector must skip
+// agent-gated writer scripts. Those scripts legitimately reference protected
+// basenames (e.g. tdd-phase-state.js calls appendEnforcementAudit on
+// .work-actions.json) and Rule 5 below is the authoritative gate for them
+// (agent identity + step + token mint). Without this, Rule 3 would block the
+// invocation before Rule 5 ever runs.
+const AGENT_GATED_EXEMPT_SCRIPTS = new Set([
+  ...EXEMPT_SCRIPTS,
+  ...Object.keys(AGENT_GATED_SCRIPTS),
+]);
+
 const stateFileProtector = createStateFileProtector({
   protectedBasenames: PROTECTED_STATE_BASENAMES,
-  exemptScripts: EXEMPT_SCRIPTS,
+  exemptScripts: AGENT_GATED_EXEMPT_SCRIPTS,
   safeSubcommands: SAFE_SUBCOMMANDS,
   trustedDirs: TRUSTED_SCRIPT_DIRS,
 });

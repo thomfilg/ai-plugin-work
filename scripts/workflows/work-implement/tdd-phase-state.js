@@ -320,11 +320,19 @@ function runTestCommandWithOutput(cmd) {
   // Use spawnSync (not execSync) so we capture BOTH stdout AND stderr on
   // success. execSync only returns stdout when exit code is 0, which means
   // the RC-B "all-skipped" guard silently fails for Jest/Vitest — both
-  // print their summary lines to stderr. spawnSync via shell preserves the
-  // same command-parsing behavior as execSync.
-  const result = spawnSync(cmd, {
+  // print their summary lines to stderr.
+  //
+  // Use `bash -lc` explicitly rather than `{ shell: true }`. Node's
+  // `shell: true` selects `/bin/sh`, which on Debian/Ubuntu is `dash` —
+  // a POSIX shell that does NOT support `set -o pipefail`. Callers
+  // (e.g. task-next.js recordEvidence) forward strict-mode-wrapped
+  // commands (`set -euo pipefail; ...`) per GH-392 §P0#3 so that
+  // middle-of-chain failures surface as non-zero. Running those under
+  // dash would fail with "set: Illegal option -o pipefail". bash also
+  // matches what task-next.js's own runTest() uses for the initial
+  // execution, keeping recorder and caller in lockstep.
+  const result = spawnSync('bash', ['-lc', cmd], {
     encoding: 'utf8',
-    shell: true,
     stdio: ['pipe', 'pipe', 'pipe'],
     timeout: 300000,
   });
@@ -507,6 +515,18 @@ function cmdRecordRed(ticketId, args) {
   const taskNum = safeParseTask(args);
   const opts = taskNum ? { taskNum } : undefined;
 
+  // Spec §P0#4 — synthesized-cycle bypass. When `--synthesized` is set and a
+  // non-empty `--reason` is supplied, a passing `--cmd` is accepted as
+  // RED-equivalent evidence (e.g. regression backfill where the failing test
+  // pre-exists). Empty/missing reason is fail-closed with a `BYPASS:` line and
+  // no audit row appended. See `feedback_no_fake_tdd_evidence.md` — the bypass
+  // requires explicit justification persisted to .work-actions.json so any use
+  // is auditable.
+  const synthesized = args.includes('--synthesized');
+  if (synthesized) {
+    return cmdRecordRedSynthesized(ticketId, args, cmd, taskNum, opts);
+  }
+
   const state = readState(ticketId, opts); // reads per-task path when taskNum provided
   if (!state) errorExit('No TDD phase state found. Run "init" first.');
   // Enforce phase consistency: record-red only allowed during red phase
@@ -559,6 +579,120 @@ function cmdRecordRed(ticketId, args) {
     phase: 'red',
     cycle: state.currentCycle,
     testFiles,
+    testExitCode: exitCode,
+  });
+}
+
+/**
+ * Handle `record-red --synthesized --reason "<...>"` (spec §P0#4).
+ *
+ * Contract:
+ *   - `--reason` must be present and non-empty (else exit non-zero with `BYPASS:`
+ *     line; no audit row appended — fail-closed on missing justification).
+ *   - Supplied `--cmd` is executed; if it exits 0, the cycle's red evidence is
+ *     persisted with `synthesized: true` + `reason`, and the phase transitions
+ *     RED → GREEN.
+ *   - Exactly one `tdd-synthesized-cycle` audit row is appended via
+ *     `appendEnforcementAudit` (the sole audit writer — see R11).
+ *
+ * Mirrors the structure of `cmdException` / `auditException` so the two bypass
+ * paths share auditing semantics.
+ */
+function cmdRecordRedSynthesized(ticketId, args, cmd, taskNum, opts) {
+  // Validate reason (mirrors cmdException). Empty/missing → BYPASS, no audit.
+  const reasonIdx = args.indexOf('--reason');
+  const reason =
+    reasonIdx !== -1 && reasonIdx + 1 < args.length ? args[reasonIdx + 1] : undefined;
+  if (!reason || !reason.trim()) {
+    // Write a BYPASS: line to stderr so callers see the recovery hint. Do NOT
+    // append an audit row — fail-closed: no justification ⇒ no record.
+    process.stderr.write(
+      'BYPASS: tdd-phase-state.js record-red --synthesized --reason "<why this cycle is synthesized>"\n'
+    );
+    process.exit(1);
+  }
+
+  const state = readState(ticketId, opts);
+  if (!state) errorExit('No TDD phase state found. Run "init" first.');
+  if (state.currentPhase !== 'red') {
+    errorExit(
+      'Cannot record RED evidence: current phase is "' +
+        state.currentPhase +
+        '". Transition to red first.'
+    );
+  }
+
+  // Run the supplied --cmd. The bypass requires a *passing* command (exit 0):
+  // this is the whole point — the agent claims the failing test already
+  // exists/is covered, so re-running it must pass.
+  const exitCode = runTestCommand(cmd);
+  if (exitCode !== 0) {
+    errorExit(
+      '--synthesized requires the supplied --cmd to exit 0 (the pre-existing test should pass). ' +
+        'Command exited ' +
+        exitCode +
+        '.'
+    );
+  }
+
+  // Detect any test-file changes (informational; not required for bypass).
+  let allChanged = [];
+  try {
+    const diff = execSync('git diff --name-only', { encoding: 'utf8' }).trim();
+    const staged = execSync('git diff --cached --name-only', { encoding: 'utf8' }).trim();
+    const untracked = execSync('git ls-files --others --exclude-standard', {
+      encoding: 'utf8',
+    }).trim();
+    allChanged = [
+      ...new Set(
+        [...diff.split('\n'), ...staged.split('\n'), ...untracked.split('\n')].filter(Boolean)
+      ),
+    ];
+  } catch {
+    /* git not available */
+  }
+  const testFiles = allChanged.filter((f) => isTestFile(f));
+
+  const record = getCurrentCycleRecord(state);
+  record.red = {
+    testFiles,
+    testCommand: cmd,
+    testExitCode: exitCode,
+    synthesized: true,
+    reason: reason,
+    timestamp: new Date().toISOString(),
+  };
+
+  // Transition RED → GREEN as part of the bypass — the synthesized cycle is
+  // accepted immediately so the next task-next.js invocation runs the GREEN
+  // command (R12 integration scenario).
+  state.currentPhase = 'green';
+  writeState(ticketId, state, opts);
+
+  // Append the audit row via the canonical writer (R11: appendEnforcementAudit
+  // is the sole audit path; .work-actions.json is append-only).
+  try {
+    const { appendEnforcementAudit } = require('../work/lib/work-actions');
+    appendEnforcementAudit(ticketId, {
+      origin: 'ai-subtask',
+      task: taskNum || null,
+      phase: 'red',
+      action: 'tdd-synthesized-cycle',
+      allow: true,
+      reason: reason,
+      outputPath: null,
+      meta: { cycle: state.currentCycle, testCommand: cmd },
+    });
+  } catch {
+    /* fail-open on audit write — the state transition is the source of truth */
+  }
+
+  successOut({
+    ok: true,
+    phase: 'green',
+    cycle: state.currentCycle,
+    synthesized: true,
+    reason,
     testExitCode: exitCode,
   });
 }

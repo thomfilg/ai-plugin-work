@@ -23,11 +23,15 @@ const { spawnSync } = require('node:child_process');
 
 const BRIEF_NEXT = path.resolve(__dirname, '..', 'brief-next.js');
 const TOKEN_DIR = '/tmp/.claude-write-tokens';
+const { tokenPath } = require('../../lib/scripts/write-report');
 
-function mintToken(scriptBasename) {
+// Mint KEYED tokens to match the production hook contract — see the long
+// comment in work-implement/__tests__/auto-init-record.test.js for the
+// cross-test pollution scenario this prevents.
+function mintToken(scriptBasename, ticketId) {
   fs.mkdirSync(TOKEN_DIR, { recursive: true, mode: 0o700 });
   fs.writeFileSync(
-    path.join(TOKEN_DIR, scriptBasename),
+    tokenPath(scriptBasename, ticketId),
     JSON.stringify({
       agent: 'brief-writer',
       timestamp: Date.now(),
@@ -38,8 +42,8 @@ function mintToken(scriptBasename) {
 }
 
 function runBriefNext(ticket, env) {
-  mintToken('brief-next.js');
-  mintToken('brief-phase-state.js');
+  mintToken('brief-next.js', ticket);
+  mintToken('brief-phase-state.js', ticket);
   return spawnSync(process.execPath, [BRIEF_NEXT, ticket], {
     cwd: env.cwd,
     encoding: 'utf8',

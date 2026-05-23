@@ -8,6 +8,7 @@
 
 const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
+const path = require('node:path');
 
 const { decideEdit, globToRegex, relativizePath, findMatch } = require('../scope-protection');
 
@@ -153,5 +154,84 @@ describe('decideEdit', () => {
     });
     assert.equal(d.blocked, true);
     assert.equal(d.category, 'out-of-scope');
+  });
+});
+
+// ─── GH-392 follow-up: traversal & symlink-escape hardening ──────────────────
+
+describe('relativizePath — path traversal hardening', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+
+  it('rejects ../ traversal in relative input', () => {
+    assert.equal(relativizePath('../../etc/passwd', '/repo'), null);
+    assert.equal(relativizePath('lib/../../etc/passwd', '/repo'), null);
+  });
+
+  it('rejects absolute paths outside workDir', () => {
+    assert.equal(relativizePath('/etc/passwd', '/repo'), null);
+  });
+
+  it('rejects symlink that escapes workDir', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'scope-symlink-'));
+    try {
+      const work = path.join(tmp, 'work');
+      const outside = path.join(tmp, 'outside.ts');
+      fs.mkdirSync(work);
+      fs.mkdirSync(path.join(work, 'src'));
+      fs.writeFileSync(outside, 'leak');
+      const linkPath = path.join(work, 'src', 'legit.ts');
+      try {
+        fs.symlinkSync(outside, linkPath);
+      } catch (e) {
+        // Some FS / privilege configs forbid symlinks; skip silently.
+        if (e.code === 'EPERM' || e.code === 'ENOSYS') return;
+        throw e;
+      }
+      // Without symlink-escape check this would return 'src/legit.ts' (allowed).
+      assert.equal(relativizePath(linkPath, work), null);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('allows ordinary symlink that stays inside workDir', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'scope-symlink-ok-'));
+    try {
+      const work = path.join(tmp, 'work');
+      fs.mkdirSync(work);
+      fs.mkdirSync(path.join(work, 'src'));
+      const realFile = path.join(work, 'src', 'real.ts');
+      fs.writeFileSync(realFile, '');
+      const linkPath = path.join(work, 'src', 'alias.ts');
+      try {
+        fs.symlinkSync(realFile, linkPath);
+      } catch (e) {
+        if (e.code === 'EPERM' || e.code === 'ENOSYS') return;
+        throw e;
+      }
+      assert.equal(relativizePath(linkPath, work), 'src/alias.ts');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('findMatch — traversal hardening', () => {
+  it('refuses to match a candidate containing ..', () => {
+    assert.equal(findMatch('../etc/passwd', ['**/*']), null);
+    assert.equal(findMatch('lib/../etc/passwd', ['**/*']), null);
+  });
+
+  it('refuses to match against an absolute pattern', () => {
+    assert.equal(findMatch('etc/passwd', ['/etc/passwd']), null);
+  });
+
+  it('refuses to match against a pattern with ..', () => {
+    assert.equal(findMatch('etc/passwd', ['../../etc/passwd']), null);
+  });
+
+  it('refuses to match an absolute candidate', () => {
+    assert.equal(findMatch('/repo/lib/x.ts', ['lib/x.ts']), null);
   });
 });
