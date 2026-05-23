@@ -37,7 +37,7 @@ pane_tokens() { echo "$1" | grep -oE '[0-9]+ tokens' | tail -1 | awk '{print $1}
 #   "* Hashing… (37s · ↓ 7.4k tokens)"
 # Always paired with a leading bullet/spinner glyph AND the ellipsis variant.
 pane_has_live_spinner() {
-  echo "$1" | grep -qE '^[●●○◯•*✻✶✢·✽✣✤✱⏵⏶] [A-Z][a-z]+ing…\s*\('
+  echo "$1" | grep -qE '^[●●○◯•*✻✶✢·✽✣✤✱⏵⏶] [A-Z][a-z]+ing…[[:space:]]*\('
 }
 
 while true; do
