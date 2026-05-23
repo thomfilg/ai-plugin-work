@@ -107,9 +107,14 @@ module.exports = function registerImplement(register) {
 
     const ticket = ctx.ticket || 'TICKET';
     const tasksDir = ctx.tasksDir || '';
-    const taskMatch = entry.agentPrompt.match(/Task (\d+) of (\d+)/);
-    const currentTaskNum = taskMatch ? parseInt(taskMatch[1], 10) : null;
-    const totalTasks = taskMatch ? parseInt(taskMatch[2], 10) : null;
+    // The "## Current Task: Task N — title" header is always emitted by
+    // buildTaskPrompt; the "Task N of M" context block is only present when
+    // allTasks.length > 1. Parse the header for the task number so single-task
+    // plans don't produce "Task null" / "tasknull" in the dispatched prompt.
+    const headerMatch = entry.agentPrompt.match(/## Current Task: Task (\d+)/);
+    const totalMatch = entry.agentPrompt.match(/Task \d+ of (\d+)/);
+    const currentTaskNum = headerMatch ? parseInt(headerMatch[1], 10) : null;
+    const totalTasks = totalMatch ? parseInt(totalMatch[1], 10) : null;
 
     // Parallel dispatch path: one delegate per ready-to-run task.
     if (tasksDir && totalTasks && totalTasks > 1) {
@@ -147,7 +152,7 @@ module.exports = function registerImplement(register) {
     }
 
     // Single-task path.
-    const taskNum = taskMatch ? taskMatch[1] : null;
+    const taskNum = currentTaskNum != null ? String(currentTaskNum) : null;
     const titleMatch = entry.agentPrompt.match(/## Current Task: Task \d+ — (.+?)(?:\n|$)/);
     const taskTitle = titleMatch ? titleMatch[1].trim() : 'Implementation';
 
