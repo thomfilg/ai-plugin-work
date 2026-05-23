@@ -255,42 +255,44 @@ async function main() {
   const toolName = hookData.tool_name || '';
   const toolInput = hookData.tool_input || {};
 
-  // GH-392 Task 8 / spec §P0#6: env-var escape hatch. Non-empty reason →
-  // append a `scope-bypass` audit row and exit 0. We fail closed when no
-  // ticket was detected (handled above by the early exit when ticketId is
-  // null), so identity is established here.
-  const bypassReason = (process.env.PROTECT_TASK_SCOPE_BYPASS_REASON || '').trim();
-  if (bypassReason) {
-    const target = extractTargetPath(toolName, toolInput) || '';
-    const relTarget = relativizePath(target, cwd) || target;
-    try {
-      appendEnforcementAudit(ticketId, {
-        origin: 'ai-subtask',
-        task: active.taskNum,
-        phase: null,
-        action: 'scope-bypass',
-        allow: true,
-        reason: bypassReason,
-        outputPath: relTarget,
-        meta: { taskNum: active.taskNum, target: relTarget },
-      });
-    } catch (err) {
-      try {
-        logHookError(__filename, err);
-      } catch {
-        /* swallow */
-      }
-    }
-    process.exit(0);
-  }
-
   const decision = evaluateTool(toolName, toolInput, active, cwd);
   if (decision && decision.blocked) {
+    const target = extractTargetPath(toolName, toolInput) || '';
+    const relTarget = relativizePath(target, cwd);
+
+    // GH-392 Task 8 / spec §P0#6: env-var escape hatch. Non-empty reason →
+    // append a `scope-bypass` audit row and exit 0. Checked after the
+    // `decision.blocked` gate so we only audit genuinely bypassed blocks
+    // (avoids false `scope-bypass` audit rows for Read/ListFiles/etc.).
+    // We fail closed when no ticket was detected (handled above by the
+    // early exit when ticketId is null), so identity is established here.
+    const bypassReason = (process.env.PROTECT_TASK_SCOPE_BYPASS_REASON || '').trim();
+    if (bypassReason) {
+      const auditTarget = relTarget || target;
+      try {
+        appendEnforcementAudit(ticketId, {
+          origin: 'ai-subtask',
+          task: active.taskNum,
+          phase: null,
+          action: 'scope-bypass',
+          allow: true,
+          reason: bypassReason,
+          outputPath: auditTarget,
+          meta: { taskNum: active.taskNum, target: auditTarget },
+        });
+      } catch (err) {
+        try {
+          logHookError(__filename, err);
+        } catch {
+          /* swallow */
+        }
+      }
+      process.exit(0);
+    }
+
     // GH-392 Task 8 / spec §P0#7b: cross-task allow-list. If the would-be-
     // blocked target matches an entry in `active.crossTaskDeps`, audit it
     // and exit 0.
-    const target = extractTargetPath(toolName, toolInput) || '';
-    const relTarget = relativizePath(target, cwd);
     if (
       relTarget &&
       Array.isArray(active.crossTaskDeps) &&
