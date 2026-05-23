@@ -23,6 +23,14 @@ function run(args, env = {}) {
   if (!('BOOTSTRAP_SCRIPT_TIMEOUT' in env)) {
     delete merged.BOOTSTRAP_SCRIPT_TIMEOUT;
   }
+  // Treat empty-string overrides as "unset" so tests can model the
+  // "var truly absent" scenario without colliding with the outer
+  // process.env. The production code distinguishes empty-string
+  // (caller's explicit value, preserved) from undefined (eligible
+  // for .envrc backfill).
+  for (const [k, v] of Object.entries(env)) {
+    if (v === '') delete merged[k];
+  }
   return execFileSync(process.execPath, [SCRIPT, ...args], {
     encoding: 'utf-8',
     env: merged,

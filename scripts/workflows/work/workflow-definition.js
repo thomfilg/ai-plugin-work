@@ -226,33 +226,12 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
       agents: ['pr-generator', 'pr-post-generator'],
       step: STEPS.pr,
     },
-    // Self-paced ci-step runner: phases the wait/triage/fix/rerun loop.
-    // Allow-list = the real developer agents that get dispatched to fix CI
-    // failures. `ci-runner` / `ci-triager` are reserved for future dedicated
-    // agents but kept here so explicit ci-* agents still work if registered.
-    'ci-next.js': {
-      agents: [
-        'ci-runner',
-        'ci-triager',
-        'developer-nodejs-tdd',
-        'developer-react-senior',
-        'developer-react-ui-architect',
-        'developer-devops',
-      ],
-      step: STEPS.ci,
-      companionScripts: ['ci-phase-state.js'],
-    },
-    'ci-phase-state.js': {
-      agents: [
-        'ci-runner',
-        'ci-triager',
-        'developer-nodejs-tdd',
-        'developer-react-senior',
-        'developer-react-ui-architect',
-        'developer-devops',
-      ],
-      step: STEPS.ci,
-    },
+    // ci-next.js / ci-phase-state.js intentionally NOT agent-gated.
+    // The ci step is bookkeeping/polling (wait → triage → fix → rerun); the
+    // gated agents only existed so the main session could dispatch work, and
+    // forcing a developer-agent round-trip just to advance phase state was
+    // pure overhead with no safety benefit. Callable directly from the
+    // orchestrator/main session.
     // Self-paced completion-checker runner: phases the requirement
     // verification loop during the `check` step. Both runner and
     // its inner phase-state writer are agent-gated to completion-checker.

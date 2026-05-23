@@ -41,34 +41,6 @@ function die(msg) {
   process.exit(2);
 }
 
-let _companionTokenSnapshot = null;
-
-function snapshotCompanionToken(scriptBasename, ticketId) {
-  try {
-    const dir = process.env.CLAUDE_WRITE_TOKEN_DIR || '/tmp/.claude-write-tokens';
-    const bareTicket = ticketId ? String(ticketId).split('/')[0] : null;
-    const keyed = bareTicket ? path.join(dir, `${scriptBasename}.${bareTicket}`) : null;
-    const legacy = path.join(dir, scriptBasename);
-    const file = keyed && fs.existsSync(keyed) ? keyed : fs.existsSync(legacy) ? legacy : null;
-    if (!file) return;
-    _companionTokenSnapshot = { path: file, data: JSON.parse(fs.readFileSync(file, 'utf8')) };
-  } catch {
-    /* fail-open */
-  }
-}
-
-function mintCompanionToken() {
-  if (!_companionTokenSnapshot) return false;
-  try {
-    fs.mkdirSync(path.dirname(_companionTokenSnapshot.path), { recursive: true, mode: 0o700 });
-    const data = { ..._companionTokenSnapshot.data, timestamp: Date.now() };
-    fs.writeFileSync(_companionTokenSnapshot.path, JSON.stringify(data), { mode: 0o600 });
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 function detectMemoryPlugin(env = process.env) {
   const home = require('node:os').homedir();
   const candidates = loadMemoryPluginCandidates(env);
@@ -109,7 +81,6 @@ function listLinkedIds(manifest) {
 }
 
 function callPhaseCli(args) {
-  mintCompanionToken();
   const r = spawnSync(process.execPath, [CI_PHASE_CLI, ...args], {
     encoding: 'utf8',
     stdio: 'pipe',
@@ -154,8 +125,6 @@ function main(argv) {
     cwd: process.cwd(),
     agent: process.env.CLAUDE_CURRENT_AGENT || null,
   });
-
-  snapshotCompanionToken('ci-phase-state.js', ticket);
 
   const tasksBase = resolveTasksBaseWithFallback();
   const tasksDir = path.join(tasksBase, ticket);

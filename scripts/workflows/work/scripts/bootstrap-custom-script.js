@@ -58,7 +58,7 @@ function loadEnvrcFromDirs(candidateDirs) {
       if (eq <= 0) continue;
       const key = entry.slice(0, eq);
       const value = entry.slice(eq + 1);
-      if (!process.env[key]) {
+      if (process.env[key] === undefined) {
         process.env[key] = value;
       }
     }

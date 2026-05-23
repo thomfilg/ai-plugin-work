@@ -3,12 +3,9 @@
 /**
  * ci-phase-state.js
  *
- * Authorized writer for `tasks/<ticket>/ci-phase.json`. Mirrors the
- * agent-gated pattern used by brief-phase-state.js / spec-phase-state.js.
- *
- * Allow-list: `ci-runner` (the user-facing skill that drives the
- * `tasks` step). Any sub-agent the skill spawns will be normalized to
- * the skill name via CLAUDE_CURRENT_AGENT.
+ * Writer for `tasks/<ticket>/ci-phase.json`. Unguarded — the ci step is
+ * bookkeeping, not code-writing, and ci-next.js (the sole caller) is no
+ * longer in agentGatedScripts.
  *
  * Subcommands:
  *   node ci-phase-state.js init       <TICKET>
@@ -22,8 +19,6 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { consumeToken } = require('../lib/scripts/write-report');
-const { normalizeAgentName } = require('../lib/agent-detection');
 const { resolveTasksBaseWithFallback } = require('../lib/ticket-validation');
 const {
   CI_PHASE_ORDER,
@@ -40,10 +35,6 @@ try {
   if (e && e.code !== 'MODULE_NOT_FOUND') throw e;
   config = null;
 }
-
-const ALLOWED_AGENTS = ['ci-runner', 'ci-triager'];
-const GATED_SUBCOMMANDS = ['init', 'record', 'transition'];
-const TOKEN_MAX_AGE_MS = 10_000;
 
 const PHASES = CI_PHASE_ORDER;
 
@@ -95,33 +86,6 @@ function writeState(ticketId, state) {
     if (e && e.code !== 'ENOENT') throw e;
   }
   fs.renameSync(tmp, p);
-}
-
-function verifyToken(expectedTicketId) {
-  const scriptBasename = path.basename(__filename);
-  const token = consumeToken(scriptBasename, expectedTicketId);
-  if (!token) {
-    errorExit(
-      "No valid write token found. This script can only be called through Claude Code's agent system."
-    );
-  }
-  if (typeof token.timestamp !== 'number' || !Number.isFinite(token.timestamp)) {
-    errorExit('Token has invalid or missing timestamp.');
-  }
-  if (typeof token.agent !== 'string' || !token.agent) {
-    errorExit('Token has invalid or missing agent field.');
-  }
-  const age = Date.now() - token.timestamp;
-  if (age < 0) errorExit(`Write token timestamp is in the future (${Math.abs(age)}ms ahead).`);
-  if (age > TOKEN_MAX_AGE_MS)
-    errorExit(`Write token expired (${age}ms old, max ${TOKEN_MAX_AGE_MS}ms).`);
-  const agentNormalized = normalizeAgentName(token.agent);
-  if (!ALLOWED_AGENTS.includes(agentNormalized)) {
-    errorExit(
-      `Agent "${token.agent}" is not authorized. Allowed agents: ${ALLOWED_AGENTS.join(', ')}.`
-    );
-  }
-  return token;
 }
 
 function parseFlag(args, name) {
@@ -205,8 +169,6 @@ function main(argv) {
   }
   const ticket = args[1];
   if (!ticket) errorExit('Missing ticket ID.');
-
-  if (GATED_SUBCOMMANDS.includes(sub)) verifyToken(ticket);
 
   if (sub === 'init') return cmdInit(ticket);
   if (sub === 'current') return cmdCurrent(ticket);
