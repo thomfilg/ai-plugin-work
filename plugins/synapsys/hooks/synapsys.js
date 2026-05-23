@@ -16,7 +16,9 @@
  */
 
 const path = require('node:path');
-const { listMemories, discoverStores } = require(path.join(__dirname, '..', 'lib', 'memory-store'));
+const { discoverStores, listMemoriesFromStore } = require(
+  path.join(__dirname, '..', 'lib', 'memory-store')
+);
 const { selectForEvent } = require(path.join(__dirname, '..', 'lib', 'matcher'));
 
 const VALID_EVENTS = new Set(['SessionStart', 'UserPromptSubmit', 'PreToolUse']);
@@ -73,10 +75,9 @@ function emptyStoreHint(stores) {
 
 // Returns a hint string when SessionStart fires with no store or no memories.
 // Returns null when no hint should be emitted (hint disabled or store + memories present).
-function getSessionStartHint(event, cwd, memories) {
+function getSessionStartHint(event, stores, memories) {
   if (event !== 'SessionStart') return null;
   if (process.env.SYNAPSYS_NO_SETUP_HINT === '1') return null;
-  const stores = discoverStores(cwd);
   if (!stores.length) return SETUP_REQUIRED_HINT;
   if (!memories.length) return emptyStoreHint(stores);
   return null;
@@ -95,9 +96,10 @@ function formatMatchedOutput(matched) {
 
     const payload = parsePayload(await readStdin());
     const cwd = payload.cwd || process.cwd();
-    const memories = listMemories(cwd);
+    const stores = discoverStores(cwd);
+    const memories = stores.flatMap(listMemoriesFromStore);
 
-    const sessionHint = getSessionStartHint(event, cwd, memories);
+    const sessionHint = getSessionStartHint(event, stores, memories);
     if (sessionHint) {
       process.stdout.write(sessionHint);
       process.exit(0);

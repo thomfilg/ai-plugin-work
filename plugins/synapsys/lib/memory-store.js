@@ -149,5 +149,6 @@ module.exports = {
   discoverStores,
   parseFrontmatter,
   listMemories,
+  listMemoriesFromStore,
   safeExec,
 };
