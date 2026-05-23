@@ -320,11 +320,19 @@ function runTestCommandWithOutput(cmd) {
   // Use spawnSync (not execSync) so we capture BOTH stdout AND stderr on
   // success. execSync only returns stdout when exit code is 0, which means
   // the RC-B "all-skipped" guard silently fails for Jest/Vitest — both
-  // print their summary lines to stderr. spawnSync via shell preserves the
-  // same command-parsing behavior as execSync.
-  const result = spawnSync(cmd, {
+  // print their summary lines to stderr.
+  //
+  // Use `bash -lc` explicitly rather than `{ shell: true }`. Node's
+  // `shell: true` selects `/bin/sh`, which on Debian/Ubuntu is `dash` —
+  // a POSIX shell that does NOT support `set -o pipefail`. Callers
+  // (e.g. task-next.js recordEvidence) forward strict-mode-wrapped
+  // commands (`set -euo pipefail; ...`) per GH-392 §P0#3 so that
+  // middle-of-chain failures surface as non-zero. Running those under
+  // dash would fail with "set: Illegal option -o pipefail". bash also
+  // matches what task-next.js's own runTest() uses for the initial
+  // execution, keeping recorder and caller in lockstep.
+  const result = spawnSync('bash', ['-lc', cmd], {
     encoding: 'utf8',
-    shell: true,
     stdio: ['pipe', 'pipe', 'pipe'],
     timeout: 300000,
   });
