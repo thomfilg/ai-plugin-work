@@ -12,7 +12,7 @@ See **[AGENTS.md](./AGENTS.md)** for the agent catalog. See **[docs/README.md](.
 - **CommonJS only** — `require`/`module.exports`. No ES modules, no `.mjs`, no bundlers.
 - **Plain JavaScript** — No TypeScript. No transpilation. Runs directly under Node.js.
 - **Node built-in test runner** — `node:test` + `node:assert/strict`. No Jest, Vitest, or Mocha.
-- **Zero runtime dependencies** — Only `@biomejs/biome` as devDependency for formatting.
+- **Zero runtime dependencies** — Runtime dependencies must stay zero (the plugin is installed by users; their install size matters). devDependencies for lint/build/format tooling are permitted: `@biomejs/biome` (format + cognitive-complexity), `eslint` (4 quality rules), `jscpd` (duplicate-block detection). These do not ship to consumers.
 
 ### Testing
 - Run tests: `pnpm test`
@@ -65,3 +65,46 @@ See **[AGENTS.md](./AGENTS.md)** for the agent catalog. See **[docs/README.md](.
 ### Formatting
 - `pnpm format` — biome formatter
 - `pnpm format:check` — check only
+
+### Static Code Quality Gate
+
+A deterministic gate enforces six static-code rules across the repo. It is wired
+into CI (`.github/workflows/ci.yml` → `quality` job) and is required for merge.
+
+**Runner:** `scripts/workflows/lib/scripts/quality/quality.js`
+
+**Local usage:**
+- `pnpm quality` — full-repo scan; exits non-zero on any non-allowlisted violation
+- `pnpm quality:changed` — scan only files changed against `main` (fast inner loop)
+
+**Rules and default thresholds:**
+| Rule ID | Threshold | What it catches |
+|---|---|---|
+| `max-lines` | 400 lines / file | Oversized modules |
+| `max-lines-per-function` | 80 lines / function | Bloated functions |
+| `cyclomatic-complexity` | 10 | Tangled branching (ESLint `complexity`) |
+| `max-depth` | 4 | Deeply-nested blocks (ESLint `max-depth`) |
+| `duplicate-blocks` | 50-token blocks across files | Copy-paste drift (jscpd) |
+| `cognitive-complexity` | 15 / function | Cognitively complex functions (Biome `noExcessiveCognitiveComplexity`) |
+
+The runner shells out to three tools and folds their diagnostics into a single
+violation shape: ESLint owns the first four rules (`complexity`, `max-depth`,
+`max-lines`, `max-lines-per-function` — config in
+`scripts/workflows/lib/scripts/quality/configs/quality-lint-rules.js`), jscpd
+owns `duplicate-blocks`, and `rules/biome-bridge.js` shells out to Biome for
+`cognitive-complexity`.
+
+**Allowlist (`.quality-exceptions` at repo root):**
+- Captures the current set of pre-existing violations so the gate can flip on
+  without a mass-refactor PR.
+- **Burn-down policy: new PRs may only shrink, never grow, the allowlist.** Any
+  PR that introduces a new entry is rejected by the gate; entries should be
+  removed as code is cleaned up.
+- File format: one relative path per line; blank lines and `#`-prefixed comments
+  are ignored. Absolute paths and `..` traversal are rejected.
+
+**When the gate fails:**
+1. Read the runner output — each violation prints `file:line  rule (value) in function`.
+2. Fix the violation (preferred) or, if the change is genuinely pre-existing
+   and out of scope, leave it allowlisted and address in a follow-up.
+3. Re-run `pnpm quality` locally before pushing.
