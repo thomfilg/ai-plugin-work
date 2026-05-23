@@ -169,6 +169,61 @@ describe('bootstrap-custom-script.js', () => {
     });
   });
 
+  describe('.envrc sourcing when BOOTSTRAP_SCRIPT not in env', () => {
+    it('sources .envrc from worktree parent directory and runs the script', () => {
+      const targetScript = makeScript('from-envrc.sh', '#!/bin/sh\necho "FROM_ENVRC_OK"\n');
+      const parentDir = fs.mkdtempSync(path.join(os.tmpdir(), 'envrc-parent-'));
+      const worktreeDir = path.join(parentDir, 'worktree-1');
+      fs.mkdirSync(worktreeDir);
+      fs.writeFileSync(
+        path.join(parentDir, '.envrc'),
+        `export BOOTSTRAP_SCRIPT="${targetScript}"\n`
+      );
+
+      try {
+        const result = runResult([worktreeDir, 'TICKET-ENVRC'], { BOOTSTRAP_SCRIPT: '' });
+        assert.equal(result.status, 0);
+        assert.match(result.stdout, /Sourced \.envrc from/);
+        assert.match(result.stdout, /FROM_ENVRC_OK/);
+      } finally {
+        fs.rmSync(parentDir, { recursive: true, force: true });
+      }
+    });
+
+    it('process.env wins over .envrc value', () => {
+      const envScript = makeScript('from-env.sh', '#!/bin/sh\necho "FROM_ENV_WINS"\n');
+      const envrcScript = makeScript('from-envrc-loser.sh', '#!/bin/sh\necho "ENVRC_LOSER"\n');
+      const parentDir = fs.mkdtempSync(path.join(os.tmpdir(), 'envrc-precedence-'));
+      const worktreeDir = path.join(parentDir, 'worktree-1');
+      fs.mkdirSync(worktreeDir);
+      fs.writeFileSync(
+        path.join(parentDir, '.envrc'),
+        `export BOOTSTRAP_SCRIPT="${envrcScript}"\n`
+      );
+
+      try {
+        const output = run([worktreeDir, 'TICKET-1'], { BOOTSTRAP_SCRIPT: envScript });
+        assert.match(output, /FROM_ENV_WINS/);
+        assert.doesNotMatch(output, /ENVRC_LOSER/);
+      } finally {
+        fs.rmSync(parentDir, { recursive: true, force: true });
+      }
+    });
+
+    it('still logs skipping when no .envrc and no env var is set', () => {
+      const parentDir = fs.mkdtempSync(path.join(os.tmpdir(), 'no-envrc-'));
+      const worktreeDir = path.join(parentDir, 'worktree-1');
+      fs.mkdirSync(worktreeDir);
+
+      try {
+        const output = run([worktreeDir, 'TICKET-1'], { BOOTSTRAP_SCRIPT: '' });
+        assert.match(output, /skipping/i);
+      } finally {
+        fs.rmSync(parentDir, { recursive: true, force: true });
+      }
+    });
+  });
+
   describe('non-executable file (EACCES)', () => {
     it('exits 0 and warns when file exists but is not executable', () => {
       const scriptPath = path.join(tmpDir, 'no-exec.sh');
