@@ -83,11 +83,11 @@ ${inner}
 `;
   const violations = rule.check('src/nest.js', source);
   const names = violations.map((v) => v.message);
-  assert.ok(names.some((m) => /in inner/.test(m)), 'expected inner violation');
   assert.ok(
-    !names.some((m) => /in outer/.test(m)),
-    'expected no outer violation'
+    names.some((m) => /in inner/.test(m)),
+    'expected inner violation'
   );
+  assert.ok(!names.some((m) => /in outer/.test(m)), 'expected no outer violation');
 });
 
 test('cyclomatic: && / || / ? inside strings and comments are ignored', () => {
@@ -124,6 +124,27 @@ test('cyclomatic: arrow function detected', () => {
   const violations = rule.check('src/baz.js', source);
   assert.equal(violations.length, 1);
   assert.match(violations[0].message, /in baz/);
+});
+
+test('cyclomatic: nullish coalescing `??` does not count as decision point', () => {
+  // 1 (base) + 1 (single ternary) = 2. If `??` were counted (as 1 or 2),
+  // this would exceed the threshold of 10 when repeated 10 times.
+  const source = `function nc(a, b, c, d, e, f, g, h, i, j) {
+  const x1 = a ?? 1;
+  const x2 = b ?? 2;
+  const x3 = c ?? 3;
+  const x4 = d ?? 4;
+  const x5 = e ?? 5;
+  const x6 = f ?? 6;
+  const x7 = g ?? 7;
+  const x8 = h ?? 8;
+  const x9 = i ?? 9;
+  const x10 = j ?? 10;
+  return x1 ? x2 : x3;
+}
+`;
+  const violations = rule.check('src/nc.js', source);
+  assert.deepEqual(violations, [], 'nullish coalescing must not inflate complexity');
 });
 
 test('cyclomatic: pure function — no filesystem I/O', () => {

@@ -209,7 +209,7 @@ function countComplexity(stripped) {
     /\bcatch\b/g,
     /&&/g,
     /\|\|/g,
-    /\?(?!\.)/g, // ternary; exclude optional-chaining `?.`
+    /(?<!\?)\?(?![.?])/g, // ternary; exclude optional-chaining `?.` and nullish-coalescing `??`
   ];
   for (const re of patterns) {
     const matches = stripped.match(re);
