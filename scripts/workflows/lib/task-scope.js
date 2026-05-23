@@ -351,7 +351,22 @@ function validateTaskTestScope(task) {
     }
   }
 
-  const changed = extractChangedFilesFromTestCommand(task.testCommand);
+  // For downstream scope/runner-naming validation we need the UNION of every
+  // eval's CHANGED_FILES, not just the first assignment. The single-pair
+  // helper `extractChangedFilesFromTestCommand` is preserved for read-only
+  // consumers (R8), but here we must see ALL files the chained Test Command
+  // will execute against — otherwise a second eval's CHANGED_FILES escapes
+  // both the scope-membership and runner-naming checks.
+  const changed =
+    evalPairs.length > 1
+      ? Array.from(
+          new Set(
+            evalPairs
+              .filter((p) => typeof p.changedFiles === 'string' && p.changedFiles)
+              .flatMap((p) => p.changedFiles.split(/\s+/).filter(Boolean))
+          )
+        )
+      : extractChangedFilesFromTestCommand(task.testCommand);
   // Rule 4b (helper-only): A task that uses a recognised runner but lists ZERO
   // test files in CHANGED_FILES will never have a test to execute — the gate
   // gets "No test files found" forever. This is the helper-only pattern.

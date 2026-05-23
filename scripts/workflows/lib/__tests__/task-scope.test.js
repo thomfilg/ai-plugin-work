@@ -464,6 +464,28 @@ describe('per-eval CHANGED_FILES validation (Task 3 — bug #3)', () => {
     };
     assert.deepEqual(ts.validateTaskTestScope(task), []);
   });
+
+  it('Scenario 9: Two-eval form — second eval CHANGED_FILES references an unscoped file', () => {
+    // Both evals have their own CHANGED_FILES prefix (so the per-eval check
+    // passes), but the SECOND eval references `app/api/bar.integration.test.ts`
+    // which is NOT listed in `### Files in scope`. Downstream scope-membership
+    // validation must union both evals' files and flag the offender —
+    // otherwise the second runner executes against code owned by a sibling
+    // task and the gate deadlocks (ECHO-4637-class).
+    const task = {
+      num: 6,
+      filesInScope: ['a.test.ts'],
+      testCommand:
+        'CHANGED_FILES="a.test.ts" eval "$TEST_UNIT_COMMAND" && CHANGED_FILES="app/api/bar.integration.test.ts" eval "$TEST_INTEGRATION_COMMAND"',
+    };
+    const errors = ts.validateTaskTestScope(task);
+    assert.ok(
+      errors.some(
+        (e) => /Files in scope/.test(e) && /app\/api\/bar\.integration\.test\.ts/.test(e)
+      ),
+      `expected scope-membership error naming the offending file from the second eval; got: ${JSON.stringify(errors)}`
+    );
+  });
 });
 
 describe('fileMatchesScope', () => {
