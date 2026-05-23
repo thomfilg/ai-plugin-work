@@ -106,7 +106,9 @@ function expandPaths(paths, repoRoot) {
 
 function changedFiles(repoRoot) {
   const base = config.getBaseBranch({ cwd: repoRoot }) || 'origin/main';
-  for (const ref of [`${base}...HEAD`, 'HEAD~1']) {
+  const refs = [`${base}...HEAD`, 'HEAD~1'];
+  const errors = [];
+  for (const ref of refs) {
     const res = spawnSync('git', ['diff', '--name-only', '--diff-filter=ACMR', ref], {
       cwd: repoRoot,
       encoding: 'utf8',
@@ -118,8 +120,14 @@ function changedFiles(repoRoot) {
         .filter((s) => s.length > 0 && s.endsWith('.js'))
         .map((s) => path.join(repoRoot, s));
     }
+    errors.push(`${ref}: ${(res.stderr || '').trim() || `status=${res.status}`}`);
   }
-  return [];
+  // All refs failed — shallow clone, detached HEAD with no HEAD~1, etc.
+  // Returning [] would silently pass the gate; throw so main() exits 2 and
+  // the caller knows --changed actually couldn't compute a diff.
+  throw new Error(
+    `quality --changed: unable to compute diff against any ref (tried ${refs.join(', ')}): ${errors.join(' | ')}`
+  );
 }
 
 function discoverFiles(opts, repoRoot) {
@@ -202,7 +210,13 @@ function main(argv) {
     return 2;
   }
 
-  const absFiles = discoverFiles(opts, repoRoot);
+  let absFiles;
+  try {
+    absFiles = discoverFiles(opts, repoRoot);
+  } catch (err) {
+    process.stderr.write(`quality: config error: ${err.message}\n`);
+    return 2;
+  }
 
   let violations;
   try {
