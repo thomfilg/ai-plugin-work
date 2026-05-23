@@ -371,6 +371,26 @@ function transitionStep(ticket, targetStep, deps) {
   }
 
   ws.lastTransitionTimestamp = new Date().toISOString();
+
+  // GH-398 Task 7: Record gateFingerprint when transitioning a gate step to
+  // completed. The current step (which gets marked completed above) is the
+  // gate; we fingerprint it with the plugin version + ISO timestamp.
+  // Back-compat: existing state files without gateFingerprints continue to
+  // load — the field is created lazily here.
+  if (currentStep && currentStep.endsWith('_gate') && ws.stepStatus[currentStep] === 'completed') {
+    ws.gateFingerprints = ws.gateFingerprints || {};
+    let pluginVersion = 'unknown';
+    try {
+      pluginVersion = require(path.join(__dirname, '..', '..', '..', '..', 'package.json')).version;
+    } catch {
+      /* fail-open: leave pluginVersion as 'unknown' */
+    }
+    ws.gateFingerprints[currentStep] = {
+      pluginVersion,
+      satisfiedAt: new Date().toISOString(),
+    };
+  }
+
   saveWorkState(safeTicket, ws);
 
   const result = {
