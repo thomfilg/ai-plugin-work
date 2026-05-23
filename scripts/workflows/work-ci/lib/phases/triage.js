@@ -35,7 +35,7 @@ function validate(ctx) {
     return {
       ok: false,
       errors: [
-        `${status.failures.length} CI failure(s) need triage. Create ${TRIAGE_FILE} with \`{ "classifications": [{ "name": "...", "category": "regression|pre-existing|flake", "evidence": "..." }] }\`.`,
+        `${status.failures.length} CI failure(s) need triage. Create ${TRIAGE_FILE} with \`{ "classifications": [{ "name": "...", "category": "${VALID_CATEGORIES.join('|')}", "evidence": "..." }] }\`.`,
       ],
     };
   }
