@@ -56,11 +56,17 @@ function runJscpdCli(bin, files, outDir, cwd) {
 
 function readReport(outDir) {
   const reportPath = path.join(outDir, 'jscpd-report.json');
+  // jscpd always writes a report after a normal run (even with zero clones).
+  // A missing file therefore means the process exited abnormally without
+  // emitting a report — we MUST surface that as a config error rather than
+  // silently treat it as "zero duplicates" (which would mask a tool crash).
   let raw;
   try {
     raw = fs.readFileSync(reportPath, 'utf8');
-  } catch {
-    return { duplicates: [] };
+  } catch (err) {
+    throw new Error(
+      `jscpd-bridge: report file missing at ${reportPath} (${err.code || err.message}) — jscpd likely crashed without writing it`
+    );
   }
   try {
     return JSON.parse(raw);
