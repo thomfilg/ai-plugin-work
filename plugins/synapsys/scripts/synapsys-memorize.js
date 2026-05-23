@@ -31,9 +31,9 @@
 const { fs, path, discoverStores, setupCli } = require('../lib/script-bootstrap');
 
 const { flag, cwd } = setupCli();
-const name = flag('name');
-const desc = flag('desc');
-const eventsRaw = flag('events');
+const name = typeof flag('name') === 'string' ? flag('name') : '';
+const desc = typeof flag('desc') === 'string' ? flag('desc') : '';
+const eventsRaw = typeof flag('events') === 'string' ? flag('events') : '';
 const prompt = typeof flag('prompt') === 'string' ? flag('prompt') : '';
 const pretool = typeof flag('pretool') === 'string' ? flag('pretool') : '';
 const session = flag('session') === 'true' || flag('session') === true;
