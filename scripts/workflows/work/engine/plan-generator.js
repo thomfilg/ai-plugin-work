@@ -137,6 +137,9 @@ function generatePlan(ticket, description, s, rework, callerProviderCfg, suffix,
     buildTaskPrompt,
     sessionGuardPath: path.join(__dirname, '..', '..', 'lib', 'hooks', 'session-guard.js'),
     workStatePath: path.join(__dirname, '..', 'work-state.js'),
+    // GH-398 Task 2: expose loaded .work-state.json to step handlers.
+    // Downstream consumers: spec-gate, tasks-gate (read stepStatus on resume).
+    workState: s?.workState ?? null,
   };
 
   // Execute step pipeline — each handler may call add() and/or mutate ctx/plan.

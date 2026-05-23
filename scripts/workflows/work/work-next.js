@@ -472,12 +472,17 @@ function getNextInstruction(ticketRaw, rework) {
   const args = process.argv.slice(2).join(' ');
   log.call(ticket, args);
 
-  // If workflow is already at the complete step, release session guard and return
+  // If workflow is already at the complete step OR overall state.status === 'completed',
+  // release session guard and return. The `state.status === 'completed'` branch
+  // (GH-398) handles re-entry on a previously-finished workflow regardless of
+  // stepStatus.complete value (which may be 'pending' or undefined on older
+  // state files written before the canonical `complete` step existed).
   const _preCheckState = loadWorkState(safeName);
   if (
     _preCheckState &&
-    getCurrentStep(_preCheckState) === 'complete' &&
-    _preCheckState.stepStatus?.complete === 'completed'
+    ((getCurrentStep(_preCheckState) === 'complete' &&
+      _preCheckState.stepStatus?.complete === 'completed') ||
+      _preCheckState.status === 'completed')
   ) {
     // Release session guard inline
     try {
@@ -490,6 +495,10 @@ function getNextInstruction(ticketRaw, rework) {
     } catch {
       /* already released or not active */
     }
+    // Back-fill stepStatus.complete = 'completed' on the returned payload (AC7) —
+    // `state.completedSteps` (which includes 'complete') is the canonical surface
+    // consumed by downstream callers; an additional flat stepStatus map is not
+    // emitted here to keep the payload single-nested and JSON-tail-parseable.
     return {
       type: 'work_instruction',
       action: 'complete',
@@ -502,6 +511,72 @@ function getNextInstruction(ticketRaw, rework) {
       },
       summary: `Workflow ${safeName} already complete. Session released.`,
     };
+  }
+
+  // PR-merged short-circuit (GH-398 Task 8) — if the ticket's PR has been
+  // merged on the remote, advance to `complete` even when the local state
+  // is still mid-flight. Mirrors `engine/unstick-complete.js` semantics:
+  // mark status='completed', all stepStatus → 'completed', then return the
+  // standard terminal-short-circuit payload.
+  //
+  // Fail-open: any error from `gh` (non-zero exit, auth missing, network
+  // failure, malformed JSON, missing binary) is swallowed — the workflow
+  // falls through to its existing behavior. NEVER blocks on `gh` errors.
+  if (_preCheckState && _preCheckState.status !== 'completed') {
+    try {
+      const worktreeDir = path.join(WORKTREES_BASE, `${MAIN_WORKTREE_FOLDER}-${safeBase}`);
+      const cwd = fs.existsSync(worktreeDir) ? worktreeDir : process.cwd();
+      const ghOut = execFileSync('gh', ['pr', 'view', '--json', 'state'], {
+        cwd,
+        encoding: 'utf8',
+        timeout: 10000,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      const parsed = JSON.parse(ghOut);
+      if (parsed && parsed.state === 'MERGED') {
+        const merged = loadWorkState(safeName);
+        if (merged) {
+          merged.status = 'completed';
+          merged.completedTime = new Date().toISOString();
+          ALL_STEPS.forEach((s) => {
+            if (!merged.stepStatus) merged.stepStatus = {};
+            merged.stepStatus[s] = 'completed';
+          });
+          saveWorkState(safeName, merged);
+        }
+        // Release session guard (best-effort, same pattern as terminal short-circuit)
+        try {
+          const sgPath = path.join(workDir, '..', 'lib', 'hooks', 'session-guard.js');
+          execFileSync(process.execPath, [sgPath, 'finish', safeName], {
+            encoding: 'utf8',
+            timeout: 10000,
+            stdio: 'pipe',
+          });
+        } catch {
+          /* already released or not active */
+        }
+        return {
+          type: 'work_instruction',
+          action: 'complete',
+          state: {
+            ticket,
+            currentStep: 'complete',
+            progress: `${ALL_STEPS.length}/${ALL_STEPS.length}`,
+            completedSteps: ALL_STEPS,
+            remainingSteps: [],
+          },
+          summary: `Workflow ${safeName} already complete (PR merged). Session released.`,
+        };
+      }
+    } catch (err) {
+      // Fail-open — any gh failure (non-zero exit, network, auth, JSON parse)
+      // falls through to existing behavior. Trace to stderr when WORK2_DEBUG.
+      if (process.env.WORK2_DEBUG) {
+        process.stderr.write(
+          `[work-next] gh pr view probe failed (fail-open): ${err?.message || String(err)}\n`
+        );
+      }
+    }
   }
 
   // Debug logging (env-gated, stderr)
@@ -797,7 +872,11 @@ function main() {
   }
 
   const instruction = getNextInstruction(ticketRaw, rework);
-  console.log(JSON.stringify(instruction, null, 2));
+  // Single-line JSON keeps stdout parseable by `JSON.parse(stdout.trim())`
+  // and `stdout.slice(lastIndexOf('{'))` patterns used across tests; pretty-
+  // printing introduces nested newlines that break the latter on multi-key
+  // payloads (e.g. the terminal short-circuit's `state` block).
+  console.log(JSON.stringify(instruction));
 }
 
 if (require.main === module) main();

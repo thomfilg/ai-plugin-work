@@ -348,3 +348,74 @@ describe('spec-gate with standalone gherkin.feature', () => {
     assert.match(entries[0].reason, /config-only/i);
   });
 });
+
+// ─── spec-gate idempotent resume short-circuit (GH-398, Task 3) ──────────────
+
+describe('spec-gate idempotent resume short-circuit (GH-398)', () => {
+  let specGateStep;
+  const createdDirs = [];
+
+  before(() => {
+    const mod = require(path.join(__dirname, '..', 'spec-gate.js'));
+    specGateStep = typeof mod === 'function' ? mod : mod.specGateStep;
+  });
+
+  afterEach(() => {
+    while (createdDirs.length) rmrf(createdDirs.pop());
+  });
+
+  // AC1: skips re-validation when previously satisfied
+  it('spec_gate skips re-validation when previously satisfied', () => {
+    // Use a tasksDir that has NO gherkin.feature. If the handler tried to read it,
+    // it would emit a RUN action with /missing|gherkin\.feature/. The short-circuit
+    // must fire FIRST so we get DEFER + "previously satisfied" without I/O.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'spec-gate-resume-'));
+    fs.writeFileSync(path.join(dir, 'spec.md'), SPEC_PROSE, 'utf8');
+    // intentionally NO gherkin.feature
+    createdDirs.push(dir);
+
+    // Spy fs.readFileSync to assert gherkin.feature is never read.
+    const origReadFileSync = fs.readFileSync;
+    const readPaths = [];
+    fs.readFileSync = function (p, ...rest) {
+      readPaths.push(String(p));
+      return origReadFileSync.call(fs, p, ...rest);
+    };
+
+    try {
+      const { add, entries } = makeAdd();
+      const ctx = makeCtx({
+        tasksDir: dir,
+        workState: { stepStatus: { spec_gate: 'completed' } },
+      });
+      specGateStep(add, makeState(), ctx);
+
+      assert.equal(entries.length, 1);
+      assert.equal(entries[0].step, STEPS.spec_gate);
+      assert.equal(entries[0].action, 'DEFER');
+      assert.match(entries[0].reason, /previously satisfied/i);
+      const readGherkin = readPaths.some((p) => p.endsWith('gherkin.feature'));
+      assert.equal(readGherkin, false, 'gherkin.feature must not be read on satisfied resume');
+    } finally {
+      fs.readFileSync = origReadFileSync;
+    }
+  });
+
+  // AC3: first-pass behavior preserved when in_progress + invalid gherkin
+  it('spec_gate re-validates on first-pass when stepStatus is in_progress', () => {
+    const dir = makeTmpTasksDir(SPEC_PROSE, GHERKIN_INVALID);
+    createdDirs.push(dir);
+    const { add, entries } = makeAdd();
+    const ctx = makeCtx({
+      tasksDir: dir,
+      workState: { stepStatus: { spec_gate: 'in_progress' } },
+    });
+    specGateStep(add, makeState(), ctx);
+
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].step, STEPS.spec_gate);
+    assert.equal(entries[0].action, 'RUN');
+    assert.equal(entries[0].command, '/spec');
+    assert.match(entries[0].reason, /need at least 2|No @integration or @e2e/i);
+  });
+});

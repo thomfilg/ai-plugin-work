@@ -24,6 +24,21 @@ function tasksGateStep(add, s, ctx) {
   const {
     validateConsistency: validateGherkinTaskRefs,
   } = require('../../work/lib/gherkin-task-refs');
+  const { isGateAlreadySatisfied } = require('../lib/gate-resume');
+
+  // GH-398: idempotent resume short-circuit. If this gate was previously
+  // satisfied, replaying /work against the same state must be a no-op DEFER
+  // — never a fresh validateAll/parseTasks invocation. Consumers (`spec_gate`,
+  // `tasks_gate`) share the predicate in ../lib/gate-resume.js.
+  if (isGateAlreadySatisfied(ctx.workState, STEPS.tasks_gate)) {
+    add(
+      STEPS.tasks_gate,
+      'DEFER',
+      null,
+      'tasks_gate previously satisfied — skipping re-validation on resume'
+    );
+    return;
+  }
 
   if (!s || !s.hasTasks) {
     add(STEPS.tasks_gate, 'DEFER', null, 'No tasks.md present');

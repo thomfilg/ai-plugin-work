@@ -17,6 +17,7 @@
 
 const fs = require('fs');
 const parseGherkin = require('../lib/parse-gherkin');
+const { isGateAlreadySatisfied } = require('../lib/gate-resume');
 
 /**
  * @param {Function} add
@@ -25,6 +26,19 @@ const parseGherkin = require('../lib/parse-gherkin');
  */
 function specGateStep(add, s, ctx) {
   const { STEPS, tasksDir, path } = ctx;
+
+  // GH-398 Task 3: idempotent resume short-circuit. When the gate was
+  // previously satisfied on a prior run, do NOT re-parse gherkin.feature —
+  // emit DEFER and let the workflow advance.
+  if (isGateAlreadySatisfied(ctx.workState, STEPS.spec_gate)) {
+    add(
+      STEPS.spec_gate,
+      'DEFER',
+      null,
+      'spec_gate previously satisfied — skipping re-validation on resume'
+    );
+    return;
+  }
 
   // Case 1: No spec.md
   if (!s || !s.hasSpec) {
