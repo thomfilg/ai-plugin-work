@@ -10,8 +10,8 @@
  * Modes:
  *   - default: walks the repo for `*.js` files (excludes node_modules, tasks/,
  *     external_scripts/, references/, docs/).
- *   - --changed: scans only the files changed vs `origin/main...HEAD`
- *     (fallback `HEAD~1`).
+ *   - --changed: scans only the files changed vs the dynamic base branch
+ *     (resolved via `config.getBaseBranch()`; fallback `HEAD~1`).
  *   - positional paths: explicit list (file or directory paths) override
  *     auto-discovery.
  *
@@ -29,6 +29,7 @@ const { spawnSync } = require('node:child_process');
 
 const { RuleEngine } = require('./shared/engine');
 const { AllowlistLoader } = require('./shared/allowlist');
+const config = require('../../config');
 
 const maxLines = require('./rules/max-lines');
 const maxLinesPerFunction = require('./rules/max-lines-per-function');
@@ -106,7 +107,8 @@ function expandPaths(paths, repoRoot) {
 }
 
 function changedFiles(repoRoot) {
-  const tryRefs = ['origin/main...HEAD', 'HEAD~1'];
+  const base = config.getBaseBranch({ cwd: repoRoot }) || 'origin/main';
+  const tryRefs = [`${base}...HEAD`, 'HEAD~1'];
   for (const ref of tryRefs) {
     const res = spawnSync('git', ['diff', '--name-only', '--diff-filter=ACMR', ref], {
       cwd: repoRoot,
