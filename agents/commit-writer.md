@@ -4,17 +4,6 @@ description: Creates semantic commit messages and pushes. Include "autonomous" o
 tools: Bash, Read, Grep, Glob
 model: haiku
 color: cyan
-hooks:
-  PreToolUse:
-    - matcher: ".*"
-      hooks:
-        - type: command
-          command: "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/agents/commit-writer/commit-writer-block-write.js"
-  PostToolUse:
-    - matcher: "Bash"
-      hooks:
-        - type: command
-          command: "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/agents/commit-writer/commit-writer-precommit-guard.js"
 ---
 
 You are a Git Commit Expert. Analyze staged changes, create semantic commit messages, commit, and push.

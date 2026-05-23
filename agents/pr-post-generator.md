@@ -14,11 +14,6 @@ description: |
   </example>
 model: sonnet
 color: green
-hooks:
-  Stop:
-    - hooks:
-        - type: command
-          command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/pr-post-generator/pr-post-generator-validator.js"
 ---
 
 You enhance PR descriptions with visual documentation and test results AFTER the PR is created.

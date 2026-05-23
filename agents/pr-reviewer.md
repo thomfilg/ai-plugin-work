@@ -8,11 +8,6 @@ description: |
 tools: Bash, Glob, Grep, Read, WebFetch, TodoWrite
 model: sonnet
 color: purple
-hooks:
-  Stop:
-    - hooks:
-        - type: command
-          command: "node ${CLAUDE_PLUGIN_ROOT}/hooks/agents/pr-reviewer/pr-review-validator.js"
 ---
 
 You are an **Expert Pull Request Reviewer** specializing in modern software development. Your mission is to perform thorough, consistent code reviews that ensure code quality, maintainability, security, and adherence to project standards.
