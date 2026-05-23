@@ -135,12 +135,96 @@ echo '{"state":"MERGED"}'
 exit 0
 `;
       const shimDir = makeShimDir(tmpBase, shScript);
-      const { parsed, stderr } = runWorkNext('ECHO-8001', tmpBase, shimDir);
+      // The probe requires the worktree dir to exist — create it so the
+      // PR-merged short-circuit runs against the shimmed `gh` rather than
+      // being skipped.
+      const worktreesBase = pathMod.join(tmpBase, 'worktrees');
+      const repoName = 'fake-repo';
+      fs.mkdirSync(pathMod.join(worktreesBase, `${repoName}-ECHO-8001`), { recursive: true });
+      const prevWB = process.env.WORKTREES_BASE;
+      const prevRN = process.env.REPO_NAME;
+      process.env.WORKTREES_BASE = worktreesBase;
+      process.env.REPO_NAME = repoName;
+      let parsed, stderr;
+      try {
+        ({ parsed, stderr } = runWorkNext('ECHO-8001', tmpBase, shimDir));
+      } finally {
+        if (prevWB === undefined) delete process.env.WORKTREES_BASE;
+        else process.env.WORKTREES_BASE = prevWB;
+        if (prevRN === undefined) delete process.env.REPO_NAME;
+        else process.env.REPO_NAME = prevRN;
+      }
       assert.ok(parsed, `expected JSON output, got stderr: ${stderr}`);
       assert.equal(
         parsed.action,
         'complete',
         `expected action=complete, got: ${JSON.stringify(parsed)}`
+      );
+    } finally {
+      fs.rmSync(tmpBase, { recursive: true, force: true });
+    }
+  });
+
+  it('skips gh pr view probe entirely when worktree dir does not exist', () => {
+    const tmpBase = fs.mkdtempSync(pathMod.join(os.tmpdir(), 'work-next-pr-merged-no-wt-'));
+    try {
+      writeInProgressState(tmpBase, 'ECHO-8003');
+      // Point WORKTREES_BASE at a directory where the expected
+      // `${REPO_NAME}-${safeBase}` folder definitively does NOT exist.
+      const fakeWorktreesBase = pathMod.join(tmpBase, 'no-worktrees-here');
+      fs.mkdirSync(fakeWorktreesBase, { recursive: true });
+
+      // Shim gh to ALWAYS return MERGED. If the probe runs (i.e. the
+      // process.cwd() fallback path is taken), the state would be mutated
+      // to completed. With the fix, the probe is skipped and state stays
+      // as in_progress with PR step still in_progress.
+      const callLog = pathMod.join(tmpBase, 'gh-calls.log');
+      const shScript = `#!/usr/bin/env bash
+echo "$@" >> ${JSON.stringify(callLog)}
+echo '{"state":"MERGED"}'
+exit 0
+`;
+      const shimDir = makeShimDir(tmpBase, shScript);
+
+      const env = {
+        ...process.env,
+        TASKS_BASE: tmpBase,
+        WORKTREES_BASE: fakeWorktreesBase,
+        REPO_NAME: 'fake-repo-no-such-worktree',
+        SESSION_GUARD_ENABLED: '0',
+        TICKET_PROVIDER: 'jira',
+        TICKET_PROJECT_KEY: 'ECHO',
+        PATH: `${shimDir}:${process.env.PATH || ''}`,
+      };
+      delete env.CLAUDE_PLUGIN_ROOT;
+      spawnSync(process.execPath, [WORK_NEXT, 'ECHO-8003'], {
+        encoding: 'utf8',
+        timeout: 15000,
+        env,
+      });
+
+      // Probe must not have called `gh pr view`. The log file may have
+      // entries from OTHER gh calls in work-next (e.g. unrelated provider
+      // probes), so assert specifically that no `pr view` invocation exists.
+      const log = fs.existsSync(callLog) ? fs.readFileSync(callLog, 'utf8') : '';
+      assert.ok(
+        !/\bpr\s+view\b/.test(log),
+        `expected no \`gh pr view\` invocation when worktree missing; gh call log was:\n${log}`
+      );
+
+      // State must NOT have been mutated to completed.
+      const stateAfter = JSON.parse(
+        fs.readFileSync(pathMod.join(tmpBase, 'ECHO-8003', '.work-state.json'), 'utf8')
+      );
+      assert.notEqual(
+        stateAfter.status,
+        'completed',
+        'PR-merged probe should not have mutated state when worktree dir is missing'
+      );
+      assert.notEqual(
+        stateAfter.stepStatus.pr,
+        'completed',
+        'pr step should remain in_progress when probe is skipped'
       );
     } finally {
       fs.rmSync(tmpBase, { recursive: true, force: true });

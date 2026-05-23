@@ -525,9 +525,15 @@ function getNextInstruction(ticketRaw, rework) {
   if (_preCheckState && _preCheckState.status !== 'completed') {
     try {
       const worktreeDir = path.join(WORKTREES_BASE, `${MAIN_WORKTREE_FOLDER}-${safeBase}`);
-      const cwd = fs.existsSync(worktreeDir) ? worktreeDir : process.cwd();
+      // Skip the probe entirely when the worktree dir is missing. Falling back
+      // to process.cwd() would run `gh pr view` against whatever branch happens
+      // to be checked out there, potentially querying an unrelated ticket's PR
+      // and destructively marking THIS ticket's state as completed.
+      if (!fs.existsSync(worktreeDir)) {
+        throw new Error('worktree directory missing — skipping PR-merged probe');
+      }
       const ghOut = execFileSync('gh', ['pr', 'view', '--json', 'state'], {
-        cwd,
+        cwd: worktreeDir,
         encoding: 'utf8',
         timeout: 10000,
         stdio: ['ignore', 'pipe', 'pipe'],
