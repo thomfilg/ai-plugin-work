@@ -43,6 +43,18 @@ function validate(ctx) {
       }
     } else if (c.category === 'flake') {
       // No artifact required — handled by rerun_check.
+    } else if (c.category === 'cache-miss') {
+      if (!c.rerunRunId || !/^\d{6,}$/.test(String(c.rerunRunId))) {
+        errors.push(
+          `Cache-miss failure \`${c.name}\` needs \`rerunRunId\` (numeric, ≥ 6 digits). Run \`gh run rerun <run-id>\` (full rerun, no \`--failed\`) and patch the entry with the new run id.`
+        );
+      }
+      const evidenceText = String(c.evidence || '');
+      if (/--failed/.test(evidenceText)) {
+        errors.push(
+          `Cache-miss failure \`${c.name}\` evidence contains \`--failed\`; do a full rerun instead (\`gh run rerun <run-id>\` without \`--failed\`) so the cache-producer job runs again, then capture the new run id in \`rerunRunId\`.`
+        );
+      }
     }
   }
   if (errors.length) return { ok: false, errors };
@@ -62,6 +74,7 @@ function instructions(ctx) {
     '- `regression`: fix the source, commit, then patch the entry with `"fixCommitSha": "abc1234"`.',
     '- `pre-existing`: patch the entry with `"documentation": "<link or issue ID>"` explaining where it\'s also broken.',
     '- `flake`: nothing here — `rerun_check` handles it.',
+    '- `cache-miss`: do a full rerun (`gh run rerun <run-id>` — NOT `--failed`) and patch the entry with `"rerunRunId": "<id>"` (≥ 6 digits).',
     '',
     'Re-invoke me to verify.',
     '',

@@ -13,7 +13,7 @@ module.exports = function readyStep(add, s, ctx) {
   } else {
     add(STEPS.ready, 'RUN', 'Task(Bash)', 'Mark PR ready', {
       agentType: 'Bash',
-      agentPrompt: `Run in ${worktreeDir}: gh pr ready`,
+      agentPrompt: `cd "${worktreeDir}" && gh pr ready`,
     });
   }
 };
