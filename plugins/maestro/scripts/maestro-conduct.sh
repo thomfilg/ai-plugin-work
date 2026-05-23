@@ -13,9 +13,14 @@ mkdir -p "$STATE_DIR"
 # bootstrap created. Override via env to customize layout.
 WORKTREES_BASE="${WORKTREES_BASE:-/home/thomfilg/p/w-claude-plugin}"
 REPO_NAME="${REPO_NAME:-claude-plugin-work}"
+SESSION_PATTERN="${SESSION_PATTERN:-^GH-[0-9]+-work$}"
+# Match maestro-bootstrap.sh so auto-restart uses the same binary and skill the
+# bootstrap launched with. Override via env to customize.
+CLAUDE_BIN="${CLAUDE_BIN:-claude}"
+SKILL_NAME="${SKILL_NAME:-work}"
 
 discover_sessions() {
-  tmux list-sessions -F '#S' 2>/dev/null | grep -E '^GH-[0-9]+-work$' || true
+  tmux list-sessions -F '#S' 2>/dev/null | grep -E "$SESSION_PATTERN" || true
 }
 
 ticket_id_for() { echo "$1" | sed 's/-work$//'; }
@@ -79,9 +84,9 @@ while true; do
       if [ ! -d "$wt" ]; then
         echo "[$s] AUTO-RESTART skipped: worktree $wt not found"
       else
-        echo "[$s] AUTO-RESTART after ${silence}s silence — relaunching /work $tid"
+        echo "[$s] AUTO-RESTART after ${silence}s silence — relaunching /$SKILL_NAME $tid"
         tmux kill-session -t "$s" 2>/dev/null
-        tmux new-session -d -s "$s" -c "$wt" "claude --dangerously-skip-permissions '/work $tid'"
+        tmux new-session -d -s "$s" -c "$wt" "$CLAUDE_BIN --dangerously-skip-permissions '/$SKILL_NAME $tid'"
         rm -f "$last_file.meta" "$last_file.txt"
       fi
     else
