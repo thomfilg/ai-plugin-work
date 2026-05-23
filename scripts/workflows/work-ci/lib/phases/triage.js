@@ -14,6 +14,7 @@ const path = require('node:path');
 const { CI_PHASES } = require('../../ci-phase-registry');
 
 const TRIAGE_FILE = 'ci-triage.json';
+const VALID_CATEGORIES = ['regression', 'pre-existing', 'flake', 'cache-miss'];
 
 function readJson(p) {
   try {
@@ -34,7 +35,7 @@ function validate(ctx) {
     return {
       ok: false,
       errors: [
-        `${status.failures.length} CI failure(s) need triage. Create ${TRIAGE_FILE} with \`{ "classifications": [{ "name": "...", "category": "regression|pre-existing|flake", "evidence": "..." }] }\`.`,
+        `${status.failures.length} CI failure(s) need triage. Create ${TRIAGE_FILE} with \`{ "classifications": [{ "name": "...", "category": "${VALID_CATEGORIES.join('|')}", "evidence": "..." }] }\`.`,
       ],
     };
   }
@@ -48,9 +49,14 @@ function validate(ctx) {
       );
       continue;
     }
-    if (!['regression', 'pre-existing', 'flake'].includes(t.category)) {
+    if (!VALID_CATEGORIES.includes(t.category)) {
       errors.push(
-        `Failure \`${f.name}\` has invalid category "${t.category}". Use one of: regression, pre-existing, flake.`
+        `Failure \`${f.name}\` has invalid category "${t.category}". Use one of: ${VALID_CATEGORIES.join(', ')}.`
+      );
+    }
+    if (t.category === 'cache-miss' && typeof t.upstreamProducerPassed !== 'boolean') {
+      errors.push(
+        `Failure \`${f.name}\` is category "cache-miss" but is missing required boolean field \`upstreamProducerPassed\`. Set it to true when the upstream cache-producer job passed (downstream missed the cache) or false when the producer also failed.`
       );
     }
     if (!t.evidence || String(t.evidence).trim().length < 10) {
@@ -92,6 +98,11 @@ function instructions(ctx) {
     '- `regression`: introduced by this branch. Must be fixed in `fix_or_document`.',
     '- `pre-existing`: also fails on `main`. Document with link.',
     '- `flake`: known flake. Re-run.',
+    '- `cache-miss`: a downstream job failed because a CI cache layer was missing.',
+    '  REQUIRES additional boolean field `upstreamProducerPassed`:',
+    '    - `true`  → the upstream cache-producer job passed; downstream just missed the cache.',
+    '              Routes to a full `gh run rerun <run-id>` (NOT `--failed`) in fix_or_document.',
+    '    - `false` → the upstream producer also failed; treat as a normal regression/pre-existing.',
     '',
     '`evidence` is required and must be ≥ 10 chars of concrete reasoning.',
     '',

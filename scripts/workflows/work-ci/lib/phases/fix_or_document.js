@@ -11,6 +11,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { CI_PHASES } = require('../../ci-phase-registry');
+const { classifyCacheMiss } = require('../cache-miss');
 
 function readJson(p) {
   try {
@@ -43,6 +44,29 @@ function validate(ctx) {
       }
     } else if (c.category === 'flake') {
       // No artifact required — handled by rerun_check.
+    } else if (c.category === 'cache-miss') {
+      const routing = classifyCacheMiss(c);
+      if (routing.needsFullRerun) {
+        if (typeof c.rerunRunId !== 'string' || !/^\d{6,}$/.test(c.rerunRunId)) {
+          errors.push(
+            `Cache-miss failure \`${c.name}\` needs \`rerunRunId\` (numeric, ≥ 6 digits): ${routing.reason}. Patch the entry with the new run id.`
+          );
+        }
+        const evidenceText = String(c.evidence || '');
+        if (/--failed/.test(evidenceText)) {
+          errors.push(
+            `Cache-miss failure \`${c.name}\` evidence contains \`--failed\`; do a full rerun instead (no \`--failed\` flag). ${routing.reason}. Capture the new run id in \`rerunRunId\`.`
+          );
+        }
+      } else {
+        // Upstream producer also failed — require a fix commit on the upstream
+        // producer, not a rerun. Reuse the regression-style fixCommitSha field.
+        if (!c.fixCommitSha || !/^[0-9a-f]{7,40}$/i.test(c.fixCommitSha)) {
+          errors.push(
+            `Cache-miss failure \`${c.name}\` needs \`fixCommitSha\` (7-40 hex): ${routing.reason}.`
+          );
+        }
+      }
     }
   }
   if (errors.length) return { ok: false, errors };
@@ -62,6 +86,8 @@ function instructions(ctx) {
     '- `regression`: fix the source, commit, then patch the entry with `"fixCommitSha": "abc1234"`.',
     '- `pre-existing`: patch the entry with `"documentation": "<link or issue ID>"` explaining where it\'s also broken.',
     '- `flake`: nothing here — `rerun_check` handles it.',
+    '- `cache-miss` with `upstreamProducerPassed: true`: do a full rerun (`gh run rerun <run-id>` — NOT `--failed`) and patch the entry with `"rerunRunId": "<id>"` (≥ 6 digits).',
+    '- `cache-miss` with `upstreamProducerPassed: false`: fix the upstream producer first, commit, and patch the entry with `"fixCommitSha": "abc1234"` (rerunning would re-hit the same broken producer).',
     '',
     'Re-invoke me to verify.',
     '',
