@@ -221,6 +221,128 @@ describe('enforce-review-accountability: file field not required', () => {
     );
   });
 
+  it('should ACCEPT new disposition RESOLVED_BY_CODE_CHANGE (exit 0)', { skip: 'deferred to #411 (Task 5 source not implemented)' }, async () => {
+    const fixture = createFixture('GH-286', {
+      commentCount: 1,
+      accountability: [
+        { id: 'c-1', disposition: 'RESOLVED_BY_CODE_CHANGE', reason: 'Fixed in abc123' },
+      ],
+    });
+    cleanups.push(fixture.cleanup);
+
+    const { code, stderr } = await runHook(FOLLOW_UP_INPUT, {
+      cwd: fixture.cwd,
+      envOverrides: {
+        TASKS_BASE: fixture.tasksBase,
+        PATH: `${fixture.binDir}:${process.env.PATH}`,
+      },
+    });
+
+    assert.strictEqual(
+      code,
+      0,
+      `Expected exit 0 for RESOLVED_BY_CODE_CHANGE, got ${code}. stderr: ${stderr}`
+    );
+  });
+
+  it('should ACCEPT new disposition RESOLVED_BY_AGENT (exit 0)', { skip: 'deferred to #411 (Task 5 source not implemented)' }, async () => {
+    const fixture = createFixture('GH-286', {
+      commentCount: 1,
+      accountability: [{ id: 'c-2', disposition: 'RESOLVED_BY_AGENT', reason: 'Agent handled' }],
+    });
+    cleanups.push(fixture.cleanup);
+
+    const { code, stderr } = await runHook(FOLLOW_UP_INPUT, {
+      cwd: fixture.cwd,
+      envOverrides: {
+        TASKS_BASE: fixture.tasksBase,
+        PATH: `${fixture.binDir}:${process.env.PATH}`,
+      },
+    });
+
+    assert.strictEqual(code, 0, `Expected exit 0 for RESOLVED_BY_AGENT, got ${code}. stderr: ${stderr}`);
+  });
+
+  it('should ACCEPT new disposition STILL_BLOCKING (exit 0)', { skip: 'deferred to #411 (Task 5 source not implemented)' }, async () => {
+    const fixture = createFixture('GH-286', {
+      commentCount: 1,
+      accountability: [{ id: 'c-3', disposition: 'STILL_BLOCKING', reason: 'Awaiting decision' }],
+    });
+    cleanups.push(fixture.cleanup);
+
+    const { code, stderr } = await runHook(FOLLOW_UP_INPUT, {
+      cwd: fixture.cwd,
+      envOverrides: {
+        TASKS_BASE: fixture.tasksBase,
+        PATH: `${fixture.binDir}:${process.env.PATH}`,
+      },
+    });
+
+    assert.strictEqual(code, 0, `Expected exit 0 for STILL_BLOCKING, got ${code}. stderr: ${stderr}`);
+  });
+
+  it('should ACCEPT new disposition NOT_APPLICABLE (exit 0)', { skip: 'deferred to #411 (Task 5 source not implemented)' }, async () => {
+    const fixture = createFixture('GH-286', {
+      commentCount: 1,
+      accountability: [{ id: 'c-4', disposition: 'NOT_APPLICABLE', reason: 'Out of scope' }],
+    });
+    cleanups.push(fixture.cleanup);
+
+    const { code, stderr } = await runHook(FOLLOW_UP_INPUT, {
+      cwd: fixture.cwd,
+      envOverrides: {
+        TASKS_BASE: fixture.tasksBase,
+        PATH: `${fixture.binDir}:${process.env.PATH}`,
+      },
+    });
+
+    assert.strictEqual(code, 0, `Expected exit 0 for NOT_APPLICABLE, got ${code}. stderr: ${stderr}`);
+  });
+
+  it('should ACCEPT new disposition DEFERRED_TO_HUMAN (exit 0)', { skip: 'deferred to #411 (Task 5 source not implemented)' }, async () => {
+    const fixture = createFixture('GH-286', {
+      commentCount: 1,
+      accountability: [{ id: 'c-5', disposition: 'DEFERRED_TO_HUMAN', reason: 'Need human review' }],
+    });
+    cleanups.push(fixture.cleanup);
+
+    const { code, stderr } = await runHook(FOLLOW_UP_INPUT, {
+      cwd: fixture.cwd,
+      envOverrides: {
+        TASKS_BASE: fixture.tasksBase,
+        PATH: `${fixture.binDir}:${process.env.PATH}`,
+      },
+    });
+
+    assert.strictEqual(
+      code,
+      0,
+      `Expected exit 0 for DEFERRED_TO_HUMAN, got ${code}. stderr: ${stderr}`
+    );
+  });
+
+  it('should BLOCK missing-disposition entry and NAME the comment id in stderr (exit 2)', { skip: 'deferred to #411 (Task 5 source not implemented)' }, async () => {
+    const fixture = createFixture('GH-286', {
+      commentCount: 1,
+      accountability: [{ id: 'comment-xyz-789', reason: 'forgot to set disposition' }],
+    });
+    cleanups.push(fixture.cleanup);
+
+    const { code, stderr } = await runHook(FOLLOW_UP_INPUT, {
+      cwd: fixture.cwd,
+      envOverrides: {
+        TASKS_BASE: fixture.tasksBase,
+        PATH: `${fixture.binDir}:${process.env.PATH}`,
+      },
+    });
+
+    assert.strictEqual(code, 2, `Expected exit 2 for missing disposition, got ${code}`);
+    assert.ok(
+      stderr.includes('comment-xyz-789'),
+      `Expected stderr to include offending comment id "comment-xyz-789", got: ${stderr}`
+    );
+  });
+
   it('should not show file or line fields in schema documentation', async () => {
     const fixture = createFixture('GH-285', {
       commentCount: 1,

@@ -1,1 +1,1 @@
-../../../skills/follow-up-pr/SKILL.md
+../../../../skills/follow-up-pr/SKILL.md

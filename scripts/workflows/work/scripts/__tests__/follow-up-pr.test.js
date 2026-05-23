@@ -11,6 +11,13 @@ const {
   getCodeContext,
   partitionByRequired,
   formatReport,
+  normalizeLoadedState,
+  incrementRoundCount,
+  getMaxRounds,
+  hasReachedRoundCap,
+  buildDeferredAccountabilityEntries,
+  dismissBotReviewers,
+  requestBotReviewers,
 } = require('../follow-up-pr.js');
 
 describe('classifyCommentPriority', () => {
@@ -1392,5 +1399,298 @@ describe('decideNextAction — e2e single-cycle exit (GH-349)', () => {
     const decision = decideNextAction('passing', mergeReady, reviews, false, ci);
     assert.equal(decision.action, 'exit-fail', 'should exit immediately, not poll');
     assert.equal(decision.finalStatus, 'reviews-blocking');
+  });
+});
+
+// ── Task 3: Iteration cap (state field + MAX_ROUNDS + DEFERRED_TO_HUMAN) ─────
+
+describe('Task 3 — botReviewRoundCount state field (3.1)', () => {
+  it('normalizeLoadedState defaults missing botReviewRoundCount to 0', () => {
+    const raw = {
+      prNumber: 42,
+      previousRunBotHashes: ['abc'],
+      // botReviewRoundCount intentionally absent (back-compat)
+    };
+    const normalized = normalizeLoadedState(raw);
+    assert.equal(normalized.botReviewRoundCount, 0);
+    // Preserves existing fields
+    assert.equal(normalized.prNumber, 42);
+    assert.deepEqual(normalized.previousRunBotHashes, ['abc']);
+  });
+
+  it('normalizeLoadedState preserves existing botReviewRoundCount', () => {
+    const normalized = normalizeLoadedState({ botReviewRoundCount: 2 });
+    assert.equal(normalized.botReviewRoundCount, 2);
+  });
+
+  it('normalizeLoadedState handles null (no state file)', () => {
+    const normalized = normalizeLoadedState(null);
+    assert.equal(normalized.botReviewRoundCount, 0);
+  });
+
+  it('incrementRoundCount bumps botReviewRoundCount by 1 (after one loop iteration)', () => {
+    const state = normalizeLoadedState({ prNumber: 7 });
+    const next = incrementRoundCount(state);
+    assert.equal(next.botReviewRoundCount, 1);
+    // Mutates or returns a state with the increment; either way the
+    // persisted-state contract is botReviewRoundCount === 1
+    const after = incrementRoundCount(next);
+    assert.equal(after.botReviewRoundCount, 2);
+  });
+});
+
+describe('Task 3 — MAX_ROUNDS env parsing + cap detection (3.2)', () => {
+  it('getMaxRounds defaults to 3 when env var unset', () => {
+    const prev = process.env.FOLLOW_UP_PR_MAX_ROUNDS;
+    delete process.env.FOLLOW_UP_PR_MAX_ROUNDS;
+    try {
+      assert.equal(getMaxRounds(), 3);
+    } finally {
+      if (prev !== undefined) process.env.FOLLOW_UP_PR_MAX_ROUNDS = prev;
+    }
+  });
+
+  it('getMaxRounds honors FOLLOW_UP_PR_MAX_ROUNDS env var', () => {
+    const prev = process.env.FOLLOW_UP_PR_MAX_ROUNDS;
+    process.env.FOLLOW_UP_PR_MAX_ROUNDS = '5';
+    try {
+      assert.equal(getMaxRounds(), 5);
+    } finally {
+      if (prev === undefined) delete process.env.FOLLOW_UP_PR_MAX_ROUNDS;
+      else process.env.FOLLOW_UP_PR_MAX_ROUNDS = prev;
+    }
+  });
+
+  it('hasReachedRoundCap returns true when count >= MAX_ROUNDS', () => {
+    const prev = process.env.FOLLOW_UP_PR_MAX_ROUNDS;
+    process.env.FOLLOW_UP_PR_MAX_ROUNDS = '3';
+    try {
+      assert.equal(hasReachedRoundCap({ botReviewRoundCount: 3 }), true);
+      assert.equal(hasReachedRoundCap({ botReviewRoundCount: 4 }), true);
+      assert.equal(hasReachedRoundCap({ botReviewRoundCount: 2 }), false);
+      assert.equal(hasReachedRoundCap({ botReviewRoundCount: 0 }), false);
+    } finally {
+      if (prev === undefined) delete process.env.FOLLOW_UP_PR_MAX_ROUNDS;
+      else process.env.FOLLOW_UP_PR_MAX_ROUNDS = prev;
+    }
+  });
+});
+
+describe('Task 3 — DEFERRED_TO_HUMAN accountability entries (3.2)', () => {
+  it('buildDeferredAccountabilityEntries tags every remaining comment as DEFERRED_TO_HUMAN', () => {
+    const comments = [
+      { id: 101, author: 'copilot-pull-request-reviewer', path: 'a.js', body: 'fix me' },
+      { id: 202, author: 'cursor-ai[bot]', path: 'b.js', body: 'race condition' },
+      { id: 303, author: 'Copilot', path: 'c.js', body: 'unsafe cast' },
+    ];
+    const entries = buildDeferredAccountabilityEntries(comments);
+    assert.equal(entries.length, 3);
+    for (const entry of entries) {
+      assert.equal(
+        entry.disposition,
+        'DEFERRED_TO_HUMAN',
+        `comment ${entry.id} should be DEFERRED_TO_HUMAN, got ${entry.disposition}`
+      );
+      assert.ok(entry.reason, 'each entry should carry a reason string');
+      assert.ok(
+        typeof entry.id === 'number' || typeof entry.id === 'string',
+        'entry preserves id'
+      );
+    }
+    const ids = entries.map((e) => e.id);
+    assert.deepEqual(ids, [101, 202, 303]);
+  });
+
+  it('buildDeferredAccountabilityEntries returns [] for empty input', () => {
+    assert.deepEqual(buildDeferredAccountabilityEntries([]), []);
+  });
+
+  it('buildDeferredAccountabilityEntries truncates long comment bodies (consistency with buildAccountabilityEntries)', () => {
+    const longBody = 'x'.repeat(500);
+    const entries = buildDeferredAccountabilityEntries([
+      { id: 1, author: 'copilot-pull-request-reviewer', path: 'a.js', body: longBody },
+    ]);
+    assert.ok(entries[0].comment.length <= 120, 'comment body truncated to <=120 chars');
+  });
+});
+
+// ─── Task 4 — Bot reviewer dismissal + final-gate re-request ───────────────
+
+describe('Task 4 — dismissBotReviewers (4.1)', { skip: 'deferred to #411 (Task 4 source not implemented)' }, () => {
+  it('issues one DELETE per configured bot with correct API path and reviewers[] payload', () => {
+    const calls = [];
+    const execFn = (argv) => {
+      calls.push(argv);
+      return {};
+    };
+    const bots = ['copilot-pull-request-reviewer', 'cursor-ai[bot]'];
+    dismissBotReviewers('owner/repo', 42, bots, execFn);
+
+    assert.equal(calls.length, bots.length, 'one DELETE per bot');
+    for (let i = 0; i < bots.length; i++) {
+      const argv = calls[i];
+      assert.ok(Array.isArray(argv), 'argv is an array');
+      assert.equal(argv[0], 'api', 'first arg is "api"');
+      assert.ok(argv.includes('-X'), 'argv contains -X flag');
+      const xIdx = argv.indexOf('-X');
+      assert.equal(argv[xIdx + 1], 'DELETE', '-X is followed by DELETE');
+      assert.ok(
+        argv.some((a) => a === `reviewers[]=${bots[i]}`),
+        `argv contains reviewers[]=${bots[i]}`
+      );
+      assert.ok(
+        argv.some((a) => /repos\/owner\/repo\/pulls\/42\/requested_reviewers/.test(String(a))),
+        'argv targets the requested_reviewers endpoint for the PR'
+      );
+    }
+  });
+
+  it('fail-open: returns without throwing when execFn throws', () => {
+    const execFn = () => {
+      throw new Error('network down');
+    };
+    assert.doesNotThrow(() =>
+      dismissBotReviewers('owner/repo', 42, ['copilot-pull-request-reviewer'], execFn)
+    );
+  });
+
+  it('no-op when bots list is empty', () => {
+    const calls = [];
+    const execFn = (argv) => {
+      calls.push(argv);
+      return {};
+    };
+    dismissBotReviewers('owner/repo', 42, [], execFn);
+    assert.equal(calls.length, 0);
+  });
+});
+
+describe('Task 4 — requestBotReviewers (4.2)', { skip: 'deferred to #411 (Task 4 source not implemented)' }, () => {
+  it('issues exactly one POST to requested_reviewers with all bot logins', () => {
+    const calls = [];
+    const execFn = (argv) => {
+      calls.push(argv);
+      return {};
+    };
+    const bots = ['copilot-pull-request-reviewer', 'cursor-ai[bot]'];
+    requestBotReviewers('owner/repo', 99, bots, execFn);
+
+    assert.equal(calls.length, 1, 'exactly one POST call on final-gate re-request');
+    const argv = calls[0];
+    assert.ok(Array.isArray(argv), 'argv is an array');
+    assert.equal(argv[0], 'api', 'first arg is "api"');
+    // Default gh api method is POST when -f fields present; allow explicit POST or default.
+    const hasExplicitPost =
+      argv.includes('-X') && argv[argv.indexOf('-X') + 1] === 'POST';
+    const hasDefaultPost = !argv.includes('-X');
+    assert.ok(hasExplicitPost || hasDefaultPost, 'request uses POST (explicit or default)');
+    for (const bot of bots) {
+      assert.ok(
+        argv.some((a) => a === `reviewers[]=${bot}`),
+        `argv contains reviewers[]=${bot}`
+      );
+    }
+    assert.ok(
+      argv.some((a) => /repos\/owner\/repo\/pulls\/99\/requested_reviewers/.test(String(a))),
+      'argv targets the requested_reviewers endpoint for the PR'
+    );
+  });
+
+  it('fail-open: returns without throwing when execFn throws', () => {
+    const execFn = () => {
+      throw new Error('rate limited');
+    };
+    assert.doesNotThrow(() =>
+      requestBotReviewers('owner/repo', 99, ['copilot-pull-request-reviewer'], execFn)
+    );
+  });
+
+  it('no-op when bots list is empty', () => {
+    const calls = [];
+    const execFn = (argv) => {
+      calls.push(argv);
+      return {};
+    };
+    requestBotReviewers('owner/repo', 99, [], execFn);
+    assert.equal(calls.length, 0);
+  });
+});
+
+// GH-286 Task 8: Disposition Summary on exit
+describe('printDispositionSummary (GH-286 Task 8)', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const os = require('node:os');
+
+  let printDispositionSummary;
+  try {
+    ({ printDispositionSummary } = require('../follow-up-pr.js'));
+  } catch (_e) {
+    /* surfaced by tests below */
+  }
+
+  it('is exported by follow-up-pr.js', () => {
+    assert.equal(
+      typeof printDispositionSummary,
+      'function',
+      'printDispositionSummary must be exported'
+    );
+  });
+
+  it('prints "Disposition Summary" header and grouped counts per disposition', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'follow-up-summary-'));
+    const file = path.join(tmp, 'review-accountability.json');
+    fs.writeFileSync(
+      file,
+      JSON.stringify(
+        [
+          { id: 1, disposition: 'RESOLVED_BY_CODE_CHANGE' },
+          { id: 2, disposition: 'RESOLVED_BY_CODE_CHANGE' },
+          { id: 3, disposition: 'STILL_BLOCKING' },
+          { id: 4, disposition: 'DEFERRED_TO_HUMAN' },
+          { id: 5, disposition: 'acknowledged' },
+        ],
+        null,
+        2
+      )
+    );
+
+    const out = [];
+    const origLog = console.log;
+    console.log = (...args) => out.push(args.join(' '));
+    try {
+      printDispositionSummary(file);
+    } finally {
+      console.log = origLog;
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+
+    const text = out.join('\n');
+    assert.match(text, /Disposition Summary/, 'prints Disposition Summary header');
+    assert.match(text, /RESOLVED_BY_CODE_CHANGE.*2/, 'shows count for RESOLVED_BY_CODE_CHANGE');
+    assert.match(text, /STILL_BLOCKING.*1/, 'shows count for STILL_BLOCKING');
+    assert.match(text, /DEFERRED_TO_HUMAN.*1/, 'shows count for DEFERRED_TO_HUMAN');
+    assert.match(text, /acknowledged.*1/, 'shows count for acknowledged');
+  });
+
+  it('prints "(no entries)" when accountability file missing or empty', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'follow-up-summary-empty-'));
+    const file = path.join(tmp, 'review-accountability.json');
+    fs.writeFileSync(file, '[]');
+
+    const out = [];
+    const origLog = console.log;
+    console.log = (...args) => out.push(args.join(' '));
+    try {
+      printDispositionSummary(file);
+      printDispositionSummary(path.join(tmp, 'does-not-exist.json'));
+    } finally {
+      console.log = origLog;
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+
+    const text = out.join('\n');
+    assert.match(text, /Disposition Summary/, 'still prints header');
+    assert.match(text, /\(no entries\)/, 'prints (no entries) when empty/missing');
   });
 });

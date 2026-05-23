@@ -881,8 +881,95 @@ function initState(prInfo) {
     attempts: [],
     finalStatus: null,
     previousRunBotHashes: [],
+    // GH-286 Task 3 (spec §Data Model — iteration cap):
+    // Counts bot-review rounds consumed. Defaulted to 0 for backward
+    // compatibility with older state files via normalizeLoadedState().
+    // Co-located with previousRunBotHashes because both are managed
+    // by the same bot-review round lifecycle.
+    botReviewRoundCount: 0,
     headAtLastExit: null,
   };
+}
+
+// ── GH-286 Task 3: Iteration cap on bot-review rounds ───────────────────────
+// Hard cap prevents infinite fix→review→fix loops. After MAX_ROUNDS we
+// surface remaining unresolved bot comments to a human via the
+// review-accountability.json file with disposition DEFERRED_TO_HUMAN.
+// Tunable via FOLLOW_UP_PR_MAX_ROUNDS env var (spec R1).
+
+const MAX_ROUNDS_DEFAULT = 3;
+
+function getMaxRounds() {
+  const raw = process.env.FOLLOW_UP_PR_MAX_ROUNDS;
+  if (raw === undefined || raw === '') return MAX_ROUNDS_DEFAULT;
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isFinite(n) || n <= 0) return MAX_ROUNDS_DEFAULT;
+  return n;
+}
+
+/**
+ * Normalize a loaded state object so the iteration-cap fields are
+ * always present. Treats `null`/`undefined` (no state file) as a fresh
+ * round counter of 0. Back-compat with state files written before
+ * GH-286 (R12 / R14).
+ *
+ * @param {object|null|undefined} raw - state from loadState()
+ * @returns {object} normalized state (always carries botReviewRoundCount)
+ */
+function normalizeLoadedState(raw) {
+  const base = raw && typeof raw === 'object' ? { ...raw } : {};
+  if (typeof base.botReviewRoundCount !== 'number' || !Number.isFinite(base.botReviewRoundCount)) {
+    base.botReviewRoundCount = 0;
+  }
+  return base;
+}
+
+/**
+ * Increment the bot-review round counter on a state object and return
+ * the (mutated) state for chaining. Called once at the top of each
+ * round before saveState().
+ *
+ * @param {object} state
+ * @returns {object} the same state, with botReviewRoundCount + 1
+ */
+function incrementRoundCount(state) {
+  state.botReviewRoundCount = (state.botReviewRoundCount || 0) + 1;
+  return state;
+}
+
+/**
+ * Returns true when botReviewRoundCount has met or exceeded the cap.
+ *
+ * @param {object} state
+ * @returns {boolean}
+ */
+function hasReachedRoundCap(state) {
+  const count = (state && state.botReviewRoundCount) || 0;
+  return count >= getMaxRounds();
+}
+
+/**
+ * Build review-accountability entries tagging every still-unresolved
+ * bot comment with disposition DEFERRED_TO_HUMAN. Used on cap-reached
+ * exit so the enforce-review-accountability gate (Task 5) sees an
+ * explicit disposition for every comment.
+ *
+ * Mirrors the shape of buildAccountabilityEntries() — same id/author/
+ * path/comment(120-char truncated)/disposition/reason fields.
+ *
+ * @param {Array} comments - remaining unresolved bot comments
+ * @returns {Array} accountability entries with disposition DEFERRED_TO_HUMAN
+ */
+function buildDeferredAccountabilityEntries(comments) {
+  if (!Array.isArray(comments) || comments.length === 0) return [];
+  return comments.map((item) => ({
+    id: item.id != null ? item.id : null,
+    author: item.author || 'unknown',
+    path: item.path || null,
+    comment: (item.body || '').slice(0, 120),
+    disposition: 'DEFERRED_TO_HUMAN',
+    reason: 'Iteration cap reached — remaining comments deferred to human',
+  }));
 }
 
 // ── Report Formatting ───────────────────────────────────────────────────────
@@ -1356,6 +1443,8 @@ async function main() {
 
   // Load or init state
   let state = loadState(prInfo.number) || initState(prInfo);
+  // GH-286 Task 3: ensure botReviewRoundCount is always present (back-compat)
+  state = normalizeLoadedState(state);
   state.prUrl = prInfo.url;
   state.branch = prInfo.branch;
 
@@ -1402,6 +1491,53 @@ async function main() {
   }
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    // GH-286 Task 3: increment bot-review round counter at top of each loop
+    // and short-circuit on cap. On cap-reached exit we write
+    // DEFERRED_TO_HUMAN dispositions for every still-unresolved bot
+    // comment so the enforce-review-accountability gate has full coverage.
+    incrementRoundCount(state);
+    if (hasReachedRoundCap(state)) {
+      console.log(
+        c.yellow(
+          `Iteration cap reached (botReviewRoundCount=${state.botReviewRoundCount}, MAX_ROUNDS=${getMaxRounds()}). Deferring remaining bot comments to human.`
+        )
+      );
+      try {
+        const unresolved = [
+          ...(reviews.blocking || []),
+          ...(reviews.nonBlocking || []),
+        ];
+        const entries = buildDeferredAccountabilityEntries(unresolved);
+        // Locate review-accountability.json next to other gate artifacts —
+        // same lookup pattern used elsewhere in this file (see ~L1720).
+        const localGetConfig = require(path.join(__dirname, '..', '..', 'lib', 'get-config'));
+        const outPath = path.join(
+          localGetConfig('TASKS_BASE') || os.tmpdir(),
+          'review-accountability.json'
+        );
+        fs.writeFileSync(outPath, JSON.stringify(entries, null, 2) + '\n');
+      } catch (errWrite) {
+        console.error(
+          c.yellow(
+            `WARNING: Failed to write DEFERRED_TO_HUMAN review-accountability.json: ${errWrite.message}`
+          )
+        );
+      }
+      state.finalStatus = 'cap-reached';
+      saveState(state);
+      // GH-286 Task 8 (R11): print disposition summary on cap-reached exit too.
+      try {
+        const localGetConfig2 = require(path.join(__dirname, '..', '..', 'lib', 'get-config'));
+        const tasksBase2 = localGetConfig2('TASKS_BASE');
+        printDispositionSummary(
+          tasksBase2 ? path.join(tasksBase2, 'review-accountability.json') : ''
+        );
+      } catch {
+        /* fail-open */
+      }
+      process.exit(0);
+    }
+
     // Refresh PR info each attempt (mergeable status may change)
     try {
       prInfo = getPRInfo(prInfo.number);
@@ -1654,6 +1790,29 @@ async function main() {
         );
       }
 
+      // GH-286 Task 8 (R11): print grouped disposition summary on clean exit.
+      try {
+        const localGetConfig = require(path.join(__dirname, '..', '..', 'lib', 'get-config'));
+        const tasksBase = localGetConfig('TASKS_BASE');
+        const getTicketId = require(
+          path.join(__dirname, '..', '..', 'lib', 'scripts', 'get-ticket-id.js')
+        );
+        const ticketId = getTicketId.getCurrentTaskId();
+        if (tasksBase && ticketId) {
+          let safeTicketId = ticketId;
+          try {
+            safeTicketId = require(path.join(__dirname, '..', '..', 'lib', 'config')).safeTicketId(
+              ticketId
+            );
+          } catch {}
+          printDispositionSummary(path.join(tasksBase, safeTicketId, 'review-accountability.json'));
+        } else {
+          printDispositionSummary('');
+        }
+      } catch {
+        // Fail-open: summary is observational, never blocks exit.
+      }
+
       process.exit(0);
     }
 
@@ -1807,6 +1966,42 @@ function buildAccountabilityEntries(blocking, nonBlocking) {
   }));
 }
 
+/**
+ * GH-286 Task 8: print a grouped disposition summary from
+ * review-accountability.json. Pure read + tabulate + console.log — no
+ * verification logic (GH-249 boundary). Tolerates a missing or empty
+ * file by printing `(no entries)`.
+ *
+ * @param {string} accountabilityPath - absolute path to review-accountability.json
+ */
+function printDispositionSummary(accountabilityPath) {
+  console.log('');
+  console.log('Disposition Summary');
+  console.log('===================');
+  let entries = [];
+  try {
+    const raw = fs.readFileSync(accountabilityPath, 'utf8');
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed)) entries = parsed;
+  } catch {
+    // Missing file or unparseable contents → treat as empty.
+  }
+  if (entries.length === 0) {
+    console.log('(no entries)');
+    return;
+  }
+  const counts = Object.create(null);
+  for (const e of entries) {
+    const d = e && e.disposition ? String(e.disposition) : '(missing)';
+    counts[d] = (counts[d] || 0) + 1;
+  }
+  const rows = Object.keys(counts).sort();
+  for (const d of rows) {
+    console.log(`  ${d.padEnd(28, ' ')} ${counts[d]}`);
+  }
+  console.log(`  ${'TOTAL'.padEnd(28, ' ')} ${entries.length}`);
+}
+
 module.exports = {
   classifyCommentPriority,
   isBotAuthorLogin,
@@ -1830,4 +2025,12 @@ module.exports = {
   getPRInfo,
   checkCI,
   getReviews,
+  // GH-286 Task 3: iteration cap
+  normalizeLoadedState,
+  incrementRoundCount,
+  getMaxRounds,
+  hasReachedRoundCap,
+  buildDeferredAccountabilityEntries,
+  // GH-286 Task 8: disposition summary on exit
+  printDispositionSummary,
 };
