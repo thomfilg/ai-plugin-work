@@ -117,10 +117,7 @@ function writeInProgressState(tmpBase, ticket) {
     errors: [],
     startTime: new Date().toISOString(),
   };
-  fs.writeFileSync(
-    pathMod.join(ticketDir, '.work-state.json'),
-    JSON.stringify(state, null, 2)
-  );
+  fs.writeFileSync(pathMod.join(ticketDir, '.work-state.json'), JSON.stringify(state, null, 2));
   return state;
 }
 
@@ -129,6 +126,11 @@ describe('work-next.js — PR-merged short-circuit (Task 8)', () => {
     const tmpBase = fs.mkdtempSync(pathMod.join(os.tmpdir(), 'work-next-pr-merged-'));
     try {
       writeInProgressState(tmpBase, 'ECHO-8001');
+      // ECHO-5218 fix: short-circuit now requires ci-phase.json currentPhase === 'done'
+      fs.writeFileSync(
+        pathMod.join(tmpBase, 'ECHO-8001', 'ci-phase.json'),
+        JSON.stringify({ currentPhase: 'done', phases: { done: { recordedAt: 'x' } } })
+      );
       const shScript = `#!/usr/bin/env bash
 # Fake gh: emit MERGED state regardless of args
 echo '{"state":"MERGED"}'
@@ -225,6 +227,133 @@ exit 0
         stateAfter.stepStatus.pr,
         'completed',
         'pr step should remain in_progress when probe is skipped'
+      );
+    } finally {
+      fs.rmSync(tmpBase, { recursive: true, force: true });
+    }
+  });
+
+  it('does NOT short-circuit when ci-phase.json is missing (ECHO-5218 fix)', () => {
+    const tmpBase = fs.mkdtempSync(pathMod.join(os.tmpdir(), 'work-next-pr-merged-no-phase-'));
+    try {
+      writeInProgressState(tmpBase, 'ECHO-8101');
+      const shScript = `#!/usr/bin/env bash
+echo '{"state":"MERGED"}'
+exit 0
+`;
+      const shimDir = makeShimDir(tmpBase, shScript);
+      const worktreesBase = pathMod.join(tmpBase, 'worktrees');
+      const repoName = 'fake-repo';
+      fs.mkdirSync(pathMod.join(worktreesBase, `${repoName}-ECHO-8101`), { recursive: true });
+      const env = {
+        ...process.env,
+        TASKS_BASE: tmpBase,
+        WORKTREES_BASE: worktreesBase,
+        REPO_NAME: repoName,
+        SESSION_GUARD_ENABLED: '0',
+        TICKET_PROVIDER: 'jira',
+        TICKET_PROJECT_KEY: 'ECHO',
+        PATH: `${shimDir}:${process.env.PATH || ''}`,
+      };
+      delete env.CLAUDE_PLUGIN_ROOT;
+      const res = spawnSync(process.execPath, [WORK_NEXT, 'ECHO-8101'], {
+        encoding: 'utf8',
+        timeout: 15000,
+        env,
+      });
+      const stateAfter = JSON.parse(
+        fs.readFileSync(pathMod.join(tmpBase, 'ECHO-8101', '.work-state.json'), 'utf8')
+      );
+      assert.notEqual(
+        stateAfter.status,
+        'completed',
+        `short-circuit must NOT fire without ci-phase.json done (stderr=${res.stderr})`
+      );
+    } finally {
+      fs.rmSync(tmpBase, { recursive: true, force: true });
+    }
+  });
+
+  it('does NOT short-circuit when ci-phase.json currentPhase !== done', () => {
+    const tmpBase = fs.mkdtempSync(pathMod.join(os.tmpdir(), 'work-next-pr-merged-wait-phase-'));
+    try {
+      writeInProgressState(tmpBase, 'ECHO-8102');
+      // Simulate the orchestrator paused inside ci sub-workflow at wait_merge
+      fs.writeFileSync(
+        pathMod.join(tmpBase, 'ECHO-8102', 'ci-phase.json'),
+        JSON.stringify({ currentPhase: 'wait_merge', phases: {} })
+      );
+      const shScript = `#!/usr/bin/env bash
+echo '{"state":"MERGED"}'
+exit 0
+`;
+      const shimDir = makeShimDir(tmpBase, shScript);
+      const worktreesBase = pathMod.join(tmpBase, 'worktrees');
+      const repoName = 'fake-repo';
+      fs.mkdirSync(pathMod.join(worktreesBase, `${repoName}-ECHO-8102`), { recursive: true });
+      const env = {
+        ...process.env,
+        TASKS_BASE: tmpBase,
+        WORKTREES_BASE: worktreesBase,
+        REPO_NAME: repoName,
+        SESSION_GUARD_ENABLED: '0',
+        TICKET_PROVIDER: 'jira',
+        TICKET_PROJECT_KEY: 'ECHO',
+        PATH: `${shimDir}:${process.env.PATH || ''}`,
+      };
+      delete env.CLAUDE_PLUGIN_ROOT;
+      spawnSync(process.execPath, [WORK_NEXT, 'ECHO-8102'], {
+        encoding: 'utf8',
+        timeout: 15000,
+        env,
+      });
+      const stateAfter = JSON.parse(
+        fs.readFileSync(pathMod.join(tmpBase, 'ECHO-8102', '.work-state.json'), 'utf8')
+      );
+      assert.notEqual(
+        stateAfter.status,
+        'completed',
+        'short-circuit must NOT fire when ci sub-workflow is mid-flight (wait_merge)'
+      );
+    } finally {
+      fs.rmSync(tmpBase, { recursive: true, force: true });
+    }
+  });
+
+  it('DOES short-circuit when ci-phase.json currentPhase === done AND PR MERGED', () => {
+    const tmpBase = fs.mkdtempSync(pathMod.join(os.tmpdir(), 'work-next-pr-merged-done-phase-'));
+    try {
+      writeInProgressState(tmpBase, 'ECHO-8103');
+      fs.writeFileSync(
+        pathMod.join(tmpBase, 'ECHO-8103', 'ci-phase.json'),
+        JSON.stringify({ currentPhase: 'done', phases: { done: { recordedAt: 'x' } } })
+      );
+      const shScript = `#!/usr/bin/env bash
+echo '{"state":"MERGED"}'
+exit 0
+`;
+      const shimDir = makeShimDir(tmpBase, shScript);
+      const worktreesBase = pathMod.join(tmpBase, 'worktrees');
+      const repoName = 'fake-repo';
+      fs.mkdirSync(pathMod.join(worktreesBase, `${repoName}-ECHO-8103`), { recursive: true });
+      const prevWB = process.env.WORKTREES_BASE;
+      const prevRN = process.env.REPO_NAME;
+      process.env.WORKTREES_BASE = worktreesBase;
+      process.env.REPO_NAME = repoName;
+      let parsed, stderr;
+      try {
+        ({ parsed, stderr } = runWorkNext('ECHO-8103', tmpBase, shimDir));
+      } finally {
+        if (prevWB === undefined) delete process.env.WORKTREES_BASE;
+        else process.env.WORKTREES_BASE = prevWB;
+        if (prevRN === undefined) delete process.env.REPO_NAME;
+        else process.env.REPO_NAME = prevRN;
+      }
+      assert.ok(parsed, `expected JSON output, got stderr: ${stderr}`);
+      assert.equal(
+        parsed.action,
+        'complete',
+        `expected action=complete when phase=done AND merged; got: ${JSON.stringify(parsed)}`
       );
     } finally {
       fs.rmSync(tmpBase, { recursive: true, force: true });

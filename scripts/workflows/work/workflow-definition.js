@@ -700,15 +700,22 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
       {
         step: STEPS.ci,
         verify: () => {
-          // Single source of truth: delegates to follow-up-pr.js functions
+          // Defense-in-depth for the third-attempt bug class (ECHO-5217/5218):
+          // ci is NOT complete just because CI checks went green — the PR must
+          // actually be MERGED on the remote. Without this, transition-step.js
+          // would walk ci → cleanup → reports → complete before the user merged.
           try {
             const { getPRInfo, checkCI } = require(
               path.join(__dirname, 'scripts', 'follow-up-pr.js')
             );
             const prInfo = getPRInfo();
             if (!prInfo || !prInfo.number) return false;
-            const ci = checkCI(prInfo.number);
-            return ci.status === 'passing';
+            if (checkCI(prInfo.number).status !== 'passing') return false;
+            const { fetchPrState } = require(
+              path.join(__dirname, '..', 'work-ci', 'lib', 'phases', 'wait_merge.js')
+            );
+            const s = fetchPrState(process.cwd(), prInfo.number);
+            return Boolean(s && s.state === 'MERGED');
           } catch {
             return false;
           }
