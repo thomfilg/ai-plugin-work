@@ -106,13 +106,18 @@ function instructions(ctx) {
     if (snapshot.mergedAt) lines.push(`  mergedAt: ${snapshot.mergedAt}`);
   }
   lines.push('');
+  lines.push('⛔ WAITING FOR HUMAN MERGE — do not spawn ANY agent, do not edit files.');
   lines.push(
-    'The ci step waits for the PR to be MERGED into the base branch before allowing the workflow to advance to cleanup/reports/complete.'
+    'The /work workflow CANNOT advance to cleanup/reports/complete until the user clicks "Merge" on the PR.'
+  );
+  lines.push(
+    'There is no orchestrator action that can resolve this — only the human merging the PR can.'
   );
   lines.push('');
   lines.push(
-    'Sleep / hand off to the user, then re-invoke me. I advance to MEMORIZE as soon as `gh pr view --json state` reports `MERGED`.'
+    'Hand off to the user with the PR URL. Re-invoke ci-next.js ONLY after they confirm merge.'
   );
+  lines.push('I advance to MEMORIZE as soon as `gh pr view --json state` reports `MERGED`.');
   lines.push('');
   return lines.join('\n');
 }

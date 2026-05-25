@@ -124,8 +124,11 @@ function instructions(ctx) {
     }
   }
   lines.push('');
+  lines.push('⏳ POLL-ONLY PHASE — do not edit files, do not spawn developer agents.');
+  lines.push('There is nothing to implement while CI is running. The ONLY action is to');
+  lines.push('re-invoke ci-next.js periodically (or wait for a Monitor task to nudge you).');
   lines.push(
-    'CI can take 20+ minutes. Re-invoke me periodically (or wait for a Monitor task to nudge you). I advance to TRIAGE as soon as no checks are still running.'
+    'CI can take 20+ minutes. I advance to TRIAGE as soon as no checks are still running.'
   );
   lines.push('');
   return lines.join('\n');

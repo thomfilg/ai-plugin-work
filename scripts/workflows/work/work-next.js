@@ -507,17 +507,21 @@ function getNextInstruction(ticketRaw, rework) {
     };
   }
 
-  // PR-merged short-circuit (GH-398 Task 8) — if the ticket's PR has been
-  // merged on the remote, advance to `complete` even when the local state
-  // is still mid-flight. Mirrors `engine/unstick-complete.js` semantics:
-  // mark status='completed', all stepStatus → 'completed', then return the
-  // standard terminal-short-circuit payload.
-  //
-  // Fail-open: any error from `gh` (non-zero exit, auth missing, network
-  // failure, malformed JSON, missing binary) is swallowed — the workflow
-  // falls through to its existing behavior. NEVER blocks on `gh` errors.
+  // Short-circuit to `complete` when BOTH ci-phase.json is at `done` AND
+  // `gh pr view` reports MERGED. Fail-open on gh errors; fail-closed on the
+  // phase guard (missing or non-done ci-phase.json skips the short-circuit).
   if (_preCheckState && _preCheckState.status !== 'completed') {
     try {
+      const ciPhasePath = path.join(TASKS_BASE, safeName, 'ci-phase.json');
+      let ciPhase = null;
+      try {
+        ciPhase = JSON.parse(fs.readFileSync(ciPhasePath, 'utf8'));
+      } catch {
+        // missing/unreadable → short-circuit MUST NOT fire
+      }
+      if (!ciPhase || ciPhase.currentPhase !== 'done') {
+        throw new Error('ci-phase.json not at terminal phase — skipping PR-merged probe');
+      }
       const worktreeDir = path.join(WORKTREES_BASE, `${MAIN_WORKTREE_FOLDER}-${safeBase}`);
       // Skip the probe entirely when the worktree dir is missing. Falling back
       // to process.cwd() would run `gh pr view` against whatever branch happens
