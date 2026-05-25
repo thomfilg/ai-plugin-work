@@ -16,7 +16,8 @@
 const fs = require('fs');
 const path = require('path');
 
-const ROOT = path.join(__dirname, '..', '..', '..');
+// __dirname = scripts/workflows/lib/scripts → repo root is 4 levels up
+const ROOT = path.join(__dirname, '..', '..', '..', '..');
 
 const FILES = [
   {
