@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Deterministic workflow orchestrator for Jira task implementation with state machine validation.",
-    "version": "3.2.1"
+    "version": "3.2.2"
   },
   "plugins": [
     {
@@ -14,21 +14,40 @@
       "source": "./",
       "description": "Orchestrated /work command with pre-computed action plans",
       "category": "workflow",
-      "tags": ["workflow", "jira", "orchestrator", "state-machine", "automation"]
+      "tags": [
+        "workflow",
+        "jira",
+        "orchestrator",
+        "state-machine",
+        "automation"
+      ]
     },
     {
       "name": "synapsys",
       "source": "./plugins/synapsys",
       "description": "Context-triggered memory injection — memories declare event hooks + trigger patterns and are injected when matched",
       "category": "memory",
-      "tags": ["memory", "hooks", "injection", "context", "recall"]
+      "tags": [
+        "memory",
+        "hooks",
+        "injection",
+        "context",
+        "recall"
+      ]
     },
     {
       "name": "maestro",
       "source": "./plugins/maestro",
       "description": "Multi-agent orchestrator — bootstraps per-ticket tmux sessions, conducts them (silence detection + auto-restart), and surfaces real prompts to the operator",
       "category": "orchestration",
-      "tags": ["orchestrate", "conduct", "agents", "tmux", "workflow", "multi-agent"]
+      "tags": [
+        "orchestrate",
+        "conduct",
+        "agents",
+        "tmux",
+        "workflow",
+        "multi-agent"
+      ]
     }
   ]
 }
