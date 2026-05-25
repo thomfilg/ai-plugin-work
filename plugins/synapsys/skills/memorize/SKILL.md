@@ -1,0 +1,85 @@
+---
+name: memorize
+description: Create a new Synapsys memory. Use this skill when the user says "remember this", "remember that…", "save this", "next time…", "don't forget", "from now on", or describes a recurring concern they want me to recall later. Derives triggers from the user's intent and writes the memory file via the memorize script.
+argument-hint: <what to remember>
+user-invocable: true
+allowed-tools: Bash, AskUserQuestion
+---
+
+# Memorize
+
+This skill has TWO responsibilities — the rest is the script's job:
+
+1. **Semantic derivation** (genuine LLM work): infer name, description, events, regex triggers, and inject mode from the user's free-text intent.
+2. **Store selection** (only if multiple stores are active): ask which one.
+
+Everything else (writing the file, validation, smoke-test) is handled by `synapsys-memorize.js`.
+
+## Steps
+
+### 1. Pre-flight — confirm a store exists
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/synapsys-list.js" --json | head
+```
+If the JSON shows zero stores, tell the user to run `/synapsys:install` and exit.
+
+### 2. Derive the structured form from the user's intent
+
+Apply judgment per field:
+
+| Field | How to derive |
+|---|---|
+| `name` | Short kebab-slug from the gist (e.g. `jira-search-first`, `rm-rf-confirm`). Must be unique. |
+| `desc` | One line under ~100 chars: when it should fire + what to do |
+| `events` | **ALWAYS `UserPromptSubmit,PreToolUse`** (user rule — no exceptions, even for "conversation-state" memories). Add `SessionStart` only if the memory must inject unconditionally at session start. |
+| `prompt` | REQUIRED. Form: `\b(kw1\|kw2\|...)\b`, lowercase. Match is case-insensitive. Be specific — avoid catch-all alternation. Pull 3–8 keywords from the description and body. |
+| `pretool` | REQUIRED. Comma list of `<Tool>:<arg-regex>`. Pick the tool actions that should remind the agent (e.g. `Bash:gh\s+pr` for PR-related memories, `Edit:\.claude/` for plugin-folder memories). Use `*:<regex>` to match any tool if the memory applies broadly. Never leave empty. |
+| `inject` | `full` for short critical rules (≤ ~20 body lines). `summary` for long playbooks where the agent should Read on demand. |
+
+### 3. Confirm the derived form with the user
+
+Show the proposed memory via `AskUserQuestion` with options: **save as-is**, **edit a field**, **cancel**. Preview the frontmatter as a code block plus the first 4 lines of body so they can sanity-check the trigger.
+
+### 4. Pick the store (only if multiple are active)
+
+If only one store, skip this. Otherwise ask via `AskUserQuestion`.
+
+### 5. Write the memory
+
+Pipe the body via stdin; pass everything else as flags. The body must be a self-sufficient playbook — when the memory fires, it's the only context the agent gets.
+
+```bash
+cat <<'BODY' | node "${CLAUDE_PLUGIN_ROOT}/scripts/synapsys-memorize.js" \
+  --name=<slug> \
+  --desc="<one-line>" \
+  --events=<events> \
+  --prompt='<regex>' \
+  --pretool='<patterns>' \
+  --inject=<full|summary> \
+  --store=<kind>
+<the body markdown the agent composed>
+BODY
+```
+
+The script validates name/events/triggers and writes the file. It prints JSON with the path written.
+
+### 6. Smoke-test the trigger
+
+For `UserPromptSubmit` memories, verify it actually fires:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/synapsys-test.js" --event=UserPromptSubmit --prompt="<example phrase that should match>"
+```
+
+The new memory's body (or header in `summary` mode) should appear. If it doesn't, the regex is too narrow — re-run with `--force` and a wider pattern.
+
+## Rules
+
+- **One memory per concept.** Don't pack unrelated rules into one file. Smaller, focused memories trigger more reliably.
+- **Body is the playbook.** Self-sufficient instruction. No "see also" pointers to dead links.
+- **Triggers must be specific.** `.*` will fire on every prompt and poison context. If the user can't articulate a trigger, ask for 2–3 example phrases and build the regex from those.
+- **Never overwrite without `--force`.** The script refuses by default; respect that.
+
+## Output format
+
+End with the single line the script prints: the path written, plus the smoke-test result.
