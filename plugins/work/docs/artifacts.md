@@ -155,7 +155,7 @@ tasks/PROJ-123/
 - `screenshots/` — QA screenshots
 - `runs/` — Archived check reports
 
-See [GH-259](https://github.com/tigredonorte/claude-plugin-work/issues/259) for discussion on scoping check reports per-task.
+See [GH-259](https://github.com/thomfilg/claude-plugin-work/issues/259) for discussion on scoping check reports per-task.
 
 ## Path Security
 

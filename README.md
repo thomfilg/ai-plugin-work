@@ -13,7 +13,7 @@ Repo-level files (`package.json`, `pnpm-lock.yaml`, `node_modules/`, `biome.json
 ## Install (Claude Code)
 
 ```
-/plugin marketplace add tigredonorte/claude-plugin-work
+/plugin marketplace add thomfilg/claude-plugin-work
 /plugin install work-workflow@latest
 /plugin install synapsys@latest
 /plugin install maestro@latest

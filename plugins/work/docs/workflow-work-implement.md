@@ -135,7 +135,7 @@ For purely mechanical changes (config-only, file moves, no testable behavior), t
 - File moves/renames with no behavior change
 - Non-testable infrastructure changes
 
-**Validation:** Currently accepts any non-empty string. See [GH-258](https://github.com/tigredonorte/claude-plugin-work/issues/258) for planned hardening.
+**Validation:** Currently accepts any non-empty string. See [GH-258](https://github.com/thomfilg/claude-plugin-work/issues/258) for planned hardening.
 
 ## File Gating Hook
 

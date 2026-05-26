@@ -146,7 +146,7 @@ When refactoring reveals need for more behavior:
 - File moves/renames with no behavior change
 - Non-testable infrastructure changes (CI/CD, Dockerfiles)
 
-**Known gap:** Any non-empty string is accepted. See [GH-258](https://github.com/tigredonorte/claude-plugin-work/issues/258).
+**Known gap:** Any non-empty string is accepted. See [GH-258](https://github.com/thomfilg/claude-plugin-work/issues/258).
 
 ## Per-Task vs Root State
 
