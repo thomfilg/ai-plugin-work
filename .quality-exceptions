@@ -271,4 +271,3 @@ plugins/work/scripts/workflows/work-pr-reviewer/lib/kind-checks/kind-registry.js
 plugins/work/scripts/workflows/work-qa-feature-tester/lib/kind-checks/kind-registry.js
 plugins/work/scripts/workflows/work-task-review/lib/kind-checks/kind-registry.js
 plugins/work/scripts/workflows/check/agents/qa-feature-tester/qa-subagent-stop.js
-plugins/work/external_scripts/symlink.js

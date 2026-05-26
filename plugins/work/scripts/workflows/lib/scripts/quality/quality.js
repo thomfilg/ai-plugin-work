@@ -56,17 +56,24 @@ function readDirSafe(dir) {
   }
 }
 
-function shouldSkipDir(name, isRoot) {
+function shouldSkipDir(name, isRoot, parentRelative) {
   if (SKIP_DIRS_ANY_DEPTH.has(name)) return true;
   if (isRoot && SKIP_DIRS_ROOT_ONLY.has(name)) return true;
+  // Also skip the same auxiliary dirs at the root of any plugin
+  // (`plugins/<name>/external_scripts`, `plugins/<name>/docs`, etc.).
+  // The plugin root is functionally equivalent to the repo root for these
+  // dev-only directories.
+  if (SKIP_DIRS_ROOT_ONLY.has(name) && /^plugins[\\/][^\\/]+$/.test(parentRelative))
+    return true;
   return false;
 }
 
-function processEntry(ent, dir, isRoot, stack, out) {
+function processEntry(ent, dir, isRoot, stack, out, root) {
   if (ent.name.startsWith('.')) return;
   const full = path.join(dir, ent.name);
   if (ent.isDirectory()) {
-    if (!shouldSkipDir(ent.name, isRoot)) stack.push(full);
+    const parentRelative = path.relative(root, dir);
+    if (!shouldSkipDir(ent.name, isRoot, parentRelative)) stack.push(full);
   } else if (ent.isFile() && ent.name.endsWith('.js')) {
     out.push(full);
   }
@@ -80,7 +87,7 @@ function walkJsFiles(root) {
   while (stack.length > 0) {
     const dir = stack.pop();
     const isRoot = dir === root;
-    for (const ent of readDirSafe(dir)) processEntry(ent, dir, isRoot, stack, out);
+    for (const ent of readDirSafe(dir)) processEntry(ent, dir, isRoot, stack, out, root);
   }
   return out;
 }
