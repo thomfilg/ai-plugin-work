@@ -50,13 +50,13 @@ jobs:
           echo "type=$TYPE" >> "$GITHUB_OUTPUT"
 
       - name: Bump version (${{ steps.bump-type.outputs.type }})
-        run: node scripts/workflows/lib/scripts/bump-version.js ${{ steps.bump-type.outputs.type }}
+        run: node plugins/work/scripts/workflows/lib/scripts/bump-version.js ${{ steps.bump-type.outputs.type }}
 
       - name: Commit and push
         run: |
           git config user.name "claude-plugin-work-botApp[bot]"
           git config user.email "claude-plugin-work-botApp[bot]@users.noreply.github.com"
           VERSION=$(node -p "require('./package.json').version")
-          git add package.json .claude-plugin/plugin.json .claude-plugin/marketplace.json
+          git add package.json plugins/work/.claude-plugin/plugin.json .claude-plugin/marketplace.json
           git commit -m "chore(release): bump version to ${VERSION}"
           git push

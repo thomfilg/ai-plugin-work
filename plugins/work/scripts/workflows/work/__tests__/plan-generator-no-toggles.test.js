@@ -213,7 +213,8 @@ describe('GH-253 Task 4: plan never contains "disabled" reason', () => {
 
 describe('GH-253 Task 4: .env.example toggle removal', () => {
   const envExampleSource = fs.readFileSync(
-    path.join(__dirname, '..', '..', '..', '..', '.env.example'),
+    // __dirname = plugins/work/scripts/workflows/work/__tests__ → repo root is 6 levels up
+    path.join(__dirname, '..', '..', '..', '..', '..', '..', '.env.example'),
     'utf8'
   );
 

@@ -11,7 +11,7 @@
   "plugins": [
     {
       "name": "work-workflow",
-      "source": "./",
+      "source": "./plugins/work",
       "description": "Orchestrated /work command with pre-computed action plans",
       "category": "workflow",
       "tags": [

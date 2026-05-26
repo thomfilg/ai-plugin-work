@@ -13,7 +13,7 @@ set -o pipefail
 SKIP_FILE=".test-skip"
 
 cleanup_test_artifacts() {
-  node -e "require('./scripts/workflows/lib/__tests__/test-cleanup').cleanupTestArtifacts()" 2>/dev/null || true
+  node -e "require('./plugins/work/scripts/workflows/lib/__tests__/test-cleanup').cleanupTestArtifacts()" 2>/dev/null || true
 }
 
 # On signal: clean up, then re-raise the signal so the script exits with the
@@ -33,7 +33,7 @@ trap 'on_signal INT' INT
 trap 'on_signal TERM' TERM
 
 # Build space-separated file list (node --test expects positional args, not newlines)
-mapfile -t FILES < <(find scripts/workflows agents skills -type f \( -name '*.test.js' -o -name '*.spec.js' \) | sort)
+mapfile -t FILES < <(find plugins/work/scripts/workflows plugins/work/agents plugins/work/skills -type f \( -name '*.test.js' -o -name '*.spec.js' \) | sort)
 
 if [ -f "$SKIP_FILE" ]; then
   FILTERED=()

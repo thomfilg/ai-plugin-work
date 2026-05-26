@@ -20,7 +20,8 @@ const path = require('path');
 
 function loadEnvFile() {
   const locations = [
-    path.join(__dirname, '..', '..', '..', '.env'),
+    // __dirname = plugins/work/scripts/workflows/lib → repo root is 5 levels up
+    path.join(__dirname, '..', '..', '..', '..', '..', '.env'),
     path.join(process.cwd(), '.env'),
   ];
 
