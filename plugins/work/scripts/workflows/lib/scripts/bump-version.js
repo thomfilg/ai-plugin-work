@@ -16,11 +16,12 @@
 const fs = require('fs');
 const path = require('path');
 
-// __dirname = scripts/workflows/lib/scripts → repo root is 4 levels up
-const ROOT = path.join(__dirname, '..', '..', '..', '..');
+// __dirname = plugins/work/scripts/workflows/lib/scripts → repo root is 6 levels up
+const ROOT = path.join(__dirname, '..', '..', '..', '..', '..', '..');
 
 const FILES = [
   {
+    // workspace manifest (stays at repo root)
     path: 'package.json',
     get: (j) => j.version,
     set: (j, v) => {
@@ -28,13 +29,15 @@ const FILES = [
     },
   },
   {
-    path: '.claude-plugin/plugin.json',
+    // work plugin manifest (lives inside the plugin)
+    path: 'plugins/work/.claude-plugin/plugin.json',
     get: (j) => j.version,
     set: (j, v) => {
       j.version = v;
     },
   },
   {
+    // marketplace manifest (stays at repo root)
     path: '.claude-plugin/marketplace.json',
     get: (j) => j.metadata?.version,
     set: (j, v) => {
