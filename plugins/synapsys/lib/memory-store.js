@@ -40,14 +40,52 @@ function candidateStores(cwd, projectName) {
   ];
 }
 
-function discoverStores(cwd) {
-  const projectName = getProjectName(cwd);
-  const out = [];
-  for (const c of candidateStores(cwd || process.cwd(), projectName)) {
-    if (fs.existsSync(path.join(c.dir, MARKER))) {
-      out.push({ kind: c.kind, dir: c.dir, projectName });
+// Walk up from startDir looking for the nearest ancestor that carries a
+// store marker at `<ancestor>/.claude/synapsys/.synapsys.json`. Returns the
+// store dir, or '' when none is found before the filesystem root.
+//
+// This is why worktrees nested more than one level below the shared `.claude`
+// base still resolve: the convention puts the store at the worktree base, but
+// a session may run from a sub-directory of the worktree (e.g. packages/app).
+function findAncestorStore(startDir) {
+  let dir = startDir;
+  for (;;) {
+    if (fs.existsSync(path.join(dir, '.claude', FOLDER, MARKER))) {
+      return path.join(dir, '.claude', FOLDER);
     }
+    const parent = path.dirname(dir);
+    if (parent === dir) return '';
+    dir = parent;
   }
+}
+
+function discoverStores(cwd) {
+  const resolved = cwd || process.cwd();
+  const projectName = getProjectName(resolved);
+  const out = [];
+  const seen = new Set();
+
+  const push = (kind, dir) => {
+    const key = path.resolve(dir);
+    if (seen.has(key)) return;
+    if (!fs.existsSync(path.join(dir, MARKER))) return;
+    seen.add(key);
+    out.push({ kind, dir, projectName });
+  };
+
+  // local: store inside the cwd itself.
+  push('local', path.join(resolved, '.claude', FOLDER));
+
+  // worktree: nearest ancestor above cwd carrying a store marker. Walking the
+  // tree (not just one level up) keeps discovery working from sub-directories
+  // of a worktree. The local store above already claimed cwd, so an ancestor
+  // hit here is genuinely "up the tree", never the local store.
+  const wt = findAncestorStore(path.dirname(resolved));
+  if (wt) push('worktree', wt);
+
+  // global: per-project store under home.
+  push('global', path.join(os.homedir(), '.claude', FOLDER, projectName));
+
   return out;
 }
 

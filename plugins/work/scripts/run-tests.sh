@@ -33,7 +33,7 @@ trap 'on_signal INT' INT
 trap 'on_signal TERM' TERM
 
 # Build space-separated file list (node --test expects positional args, not newlines)
-mapfile -t FILES < <(find plugins/work/scripts/workflows plugins/work/agents plugins/work/skills -type f \( -name '*.test.js' -o -name '*.spec.js' \) | sort)
+mapfile -t FILES < <(find plugins/work/scripts/workflows plugins/work/agents plugins/work/skills plugins/synapsys -type f \( -name '*.test.js' -o -name '*.spec.js' \) | sort)
 
 if [ -f "$SKIP_FILE" ]; then
   FILTERED=()
