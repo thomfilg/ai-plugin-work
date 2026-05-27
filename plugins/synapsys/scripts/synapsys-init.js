@@ -39,9 +39,11 @@ if (!target) {
 
 fs.mkdirSync(target.dir, { recursive: true });
 const markerPath = path.join(target.dir, MARKER);
+// The shared store is cross-project, so its marker must NOT be stamped with
+// whichever project happened to run init first. Omit projectName for shared.
 const marker = {
   kind: args.kind,
-  projectName,
+  ...(args.kind === 'shared' ? {} : { projectName }),
   createdAt: new Date().toISOString(),
   schemaVersion: 1,
 };
