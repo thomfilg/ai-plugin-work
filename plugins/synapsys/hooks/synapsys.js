@@ -59,7 +59,7 @@ const SETUP_REQUIRED_HINT =
   'AGENT: As your FIRST action this session, surface this to the user and offer to run `/synapsys:install`. Recommend the kind based on context:\n' +
   '  - If `git worktree list` shows >1 entry → recommend `worktree` (shared across all worktrees of this repo)\n' +
   '  - Otherwise → recommend `local`\n' +
-  '  - Mention `global` as an option that survives worktree deletion\n\n' +
+  '  - Mention `global` (per-project, survives worktree deletion) and `shared` (one store reused across ALL projects) as options\n\n' +
   'Do NOT install without asking — present the recommendation via `AskUserQuestion` so the user can confirm or choose differently. If the user declines, set SYNAPSYS_NO_SETUP_HINT=1 to silence this prompt for future sessions.';
 
 function emptyStoreHint(stores) {

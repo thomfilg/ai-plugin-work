@@ -7,6 +7,12 @@ const { execSync } = require('node:child_process');
 
 const MARKER = '.synapsys.json';
 const FOLDER = 'synapsys';
+// Dedicated directory for the cross-project "shared" tier. It sits OUTSIDE
+// the per-project `~/.claude/synapsys/<project>/` namespace so it can never
+// collide with a project whose name happens to match — git imposes no
+// restriction on directory names, so a sibling under `synapsys/` would not
+// be collision-proof.
+const SHARED_FOLDER = `${FOLDER}-shared`;
 
 // Pass cwd through to execSync so git resolves relative to the caller's path,
 // not the host process's cwd. Mirrors the pattern in
@@ -37,6 +43,7 @@ function candidateStores(cwd, projectName) {
     { kind: 'local', dir: path.join(cwd, '.claude', FOLDER) },
     { kind: 'worktree', dir: path.resolve(cwd, '..', '.claude', FOLDER) },
     { kind: 'global', dir: path.join(os.homedir(), '.claude', FOLDER, projectName) },
+    { kind: 'shared', dir: path.join(os.homedir(), '.claude', SHARED_FOLDER) },
   ];
 }
 
@@ -70,7 +77,9 @@ function discoverStores(cwd) {
     if (seen.has(key)) return;
     if (!fs.existsSync(path.join(dir, MARKER))) return;
     seen.add(key);
-    out.push({ kind, dir, projectName });
+    // The shared store is cross-project, so it must not be stamped with the
+    // caller's projectName (mirrors the marker written by synapsys-init.js).
+    out.push({ kind, dir, projectName: kind === 'shared' ? null : projectName });
   };
 
   // local: store inside the cwd itself.
@@ -85,6 +94,11 @@ function discoverStores(cwd) {
 
   // global: per-project store under home.
   push('global', path.join(os.homedir(), '.claude', FOLDER, projectName));
+
+  // shared: cross-project store under home — discovered for every project,
+  // regardless of cwd or project name. Lives outside the per-project
+  // namespace so it can never collide with a same-named project's global store.
+  push('shared', path.join(os.homedir(), '.claude', SHARED_FOLDER));
 
   return out;
 }
@@ -184,6 +198,7 @@ function toList(v) {
 module.exports = {
   MARKER,
   FOLDER,
+  SHARED_FOLDER,
   getProjectName,
   candidateStores,
   discoverStores,

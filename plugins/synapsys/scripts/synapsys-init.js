@@ -4,7 +4,7 @@
 /**
  * Initialize a Synapsys memory store.
  *
- *   node synapsys-init.js --kind=<local|worktree|global> [--cwd=<path>]
+ *   node synapsys-init.js --kind=<local|worktree|global|shared> [--cwd=<path>]
  *
  * Creates the directory (if missing) and writes a `.synapsys.json` marker.
  * The marker is what makes the directory discoverable by the hooks —
@@ -33,15 +33,17 @@ const projectName = getProjectName(args.cwd);
 const target = candidateStores(args.cwd, projectName).find((c) => c.kind === args.kind);
 
 if (!target) {
-  console.error(`unknown kind: ${args.kind} (use local|worktree|global)`);
+  console.error(`unknown kind: ${args.kind} (use local|worktree|global|shared)`);
   process.exit(1);
 }
 
 fs.mkdirSync(target.dir, { recursive: true });
 const markerPath = path.join(target.dir, MARKER);
+// The shared store is cross-project, so its marker must NOT be stamped with
+// whichever project happened to run init first. Omit projectName for shared.
 const marker = {
   kind: args.kind,
-  projectName,
+  ...(args.kind === 'shared' ? {} : { projectName }),
   createdAt: new Date().toISOString(),
   schemaVersion: 1,
 };
@@ -49,10 +51,13 @@ fs.writeFileSync(markerPath, `${JSON.stringify(marker, null, 2)}\n`);
 
 const indexPath = path.join(target.dir, 'INDEX.md');
 if (!fs.existsSync(indexPath)) {
+  // The shared store is cross-project; its INDEX should not be labelled with
+  // the project the init happened to run from.
+  const scopeLabel = args.kind === 'shared' ? 'all projects' : projectName;
   fs.writeFileSync(
     indexPath,
     [
-      `# Synapsys memories — ${projectName} (${args.kind})`,
+      `# Synapsys memories — ${scopeLabel} (${args.kind})`,
       '',
       'One memory per file. Frontmatter declares triggers + lifecycle events.',
       'Example schema (single-line values only — no nested YAML):',
@@ -75,6 +80,5 @@ if (!fs.existsSync(indexPath)) {
   );
 }
 
-console.log(
-  `initialized synapsys store at ${target.dir} (kind=${args.kind}, project=${projectName})`
-);
+const scopeNote = args.kind === 'shared' ? 'scope=all projects' : `project=${projectName}`;
+console.log(`initialized synapsys store at ${target.dir} (kind=${args.kind}, ${scopeNote})`);

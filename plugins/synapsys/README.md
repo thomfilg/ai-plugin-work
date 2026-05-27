@@ -4,13 +4,14 @@ Context-triggered memory injection plugin.
 
 Memories are markdown files with frontmatter that declares **which events** they listen to (`SessionStart`, `UserPromptSubmit`, `PreToolUse`) and **which trigger patterns** activate them. When an event fires and a memory's trigger matches the payload, the memory is injected into Claude's context.
 
-## Three storage tiers
+## Four storage tiers
 
 | Kind | Path | When to use |
 |---|---|---|
 | local | `./.claude/synapsys/` | This repo only — commit or gitignore as you like |
 | worktree | `../.claude/synapsys/` | Shared across all worktrees of this repo |
 | global | `~/.claude/synapsys/<project-name>/` | User-scoped, follows the project name (`git rev-parse --show-toplevel` basename) |
+| shared | `~/.claude/synapsys-shared/` | User-scoped, reused across **every** project — discovered regardless of cwd or project name |
 
 A store is "active" once it contains a `.synapsys.json` marker (written by `synapsys-init.js`). The dispatcher reads from every active store on every event, so multiple tiers coexist.
 
@@ -48,7 +49,7 @@ Next time you ask Claude to run `git push ...`, the PreToolUse hook fires, match
 - `hooks/hooks.json` — Claude Code hook registrations
 - `lib/memory-store.js` — store discovery + frontmatter parser
 - `lib/matcher.js` — event/payload matchers
-- `scripts/synapsys-init.js` — `--kind=<local|worktree|global>`
+- `scripts/synapsys-init.js` — `--kind=<local|worktree|global|shared>`
 - `scripts/synapsys-list.js` — list every discovered memory with its triggers
 - `skills/synapsys/SKILL.md` — `/synapsys` slash command (init, list, new)
 
