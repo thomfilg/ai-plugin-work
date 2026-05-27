@@ -225,6 +225,16 @@ function parseTaskType(section) {
   return (t || '').toLowerCase();
 }
 
+// Documentation tasks have no testable code surface — only prose files
+// (*.md, etc), so demanding a *.test.* authorship gate is contradictory.
+// They still run a real verification command (e.g. a grep asserting the docs
+// now contain the documented strings), so RED/GREEN are validated by that
+// command rather than by test-block authorship. Detected via an explicit
+// `docs` type or a "documentation exempt" / "docs-only" marker in the body.
+function isDocsExempt(type, section) {
+  return (type || '') === 'docs' || /documentation[\s-]*exempt|docs[-\s]?only/i.test(section || '');
+}
+
 function parseTaskTestCommand(section) {
   const m = section.match(/### *Test Command[^\n]*\n+```(?:[a-zA-Z]+)?\n([\s\S]*?)\n```/);
   return m ? m[1].trim() : '';
@@ -728,6 +738,7 @@ function main() {
   const scope = parseSuggestedScope(section);
   const type = parseTaskType(section);
   const taskTestCmd = parseTaskTestCommand(section);
+  const docsExempt = isDocsExempt(type, section);
 
   // Checkpoint tasks are verification-only — no source change, no test
   // authorship, no gherkin scenarios. Asking the agent to satisfy a TDD
@@ -868,7 +879,20 @@ function main() {
         // proving there is at least one failing test block under Suggested
         // Scope. The test command already failed (exitCode !== 0) above —
         // we just need to confirm authorship intent.
-        if (testFiles.length === 0) {
+        if (testFiles.length === 0 && docsExempt) {
+          // Docs-exempt: no test surface, but the verification command failed
+          // as RED requires (exitCode !== 0 confirmed above). Accept it.
+          const rec = recordEvidence(TDD_PHASES.red, ticket, taskNum, testCmd, repoRoot, scope);
+          if (!rec.ok) {
+            blockReason = `Could not record RED evidence:\n${rec.out}`;
+          } else {
+            advanced = true;
+            phase = TDD_PHASES.green;
+            process.stdout.write(
+              `task-next: RED accepted via docs-exempt fallback (documentation task — no testable code surface; verification command failed as required).\n`
+            );
+          }
+        } else if (testFiles.length === 0) {
           blockReason = `No gherkin scenarios tagged @task:${taskNum} AND no *.test.* / *.spec.* files found under Suggested Scope. Add at least one failing test in a file under Suggested Scope, then re-invoke me.`;
         } else {
           const { totalBlocks, filesWithBlocks } = countTestBlocksInFiles(testFiles);
@@ -972,7 +996,7 @@ function main() {
   process.exit(_exitCode);
 }
 
-module.exports = { filterToTestFiles, findTestFilesInScope, wrapStrictMode };
+module.exports = { filterToTestFiles, findTestFilesInScope, wrapStrictMode, isDocsExempt };
 
 if (require.main === module) {
   main();
