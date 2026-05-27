@@ -1,6 +1,6 @@
 ---
 name: install
-description: Configure Synapsys memory storage. Use when the user says "install synapsys", "set up memory", "set up synapsys", "configure memory", "create memory store", "initialize memory", or asks to start using the memory system. Picks local (./.claude/synapsys), worktree (../.claude/synapsys), global (~/.claude/synapsys/<project>), or shared (~/.claude/synapsys/_shared, reused across all projects).
+description: Configure Synapsys memory storage. Use when the user says "install synapsys", "set up memory", "set up synapsys", "configure memory", "create memory store", "initialize memory", or asks to start using the memory system. Picks local (./.claude/synapsys), worktree (../.claude/synapsys), global (~/.claude/synapsys/<project>), or shared (~/.claude/synapsys-shared, reused across all projects).
 argument-hint: [local|worktree|global|shared]
 user-invocable: true
 allowed-tools: Bash, AskUserQuestion

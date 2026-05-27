@@ -1,6 +1,6 @@
 // Behavioral tests for the cross-project "shared" memory tier.
 //
-// The shared store lives at `~/.claude/synapsys/_shared/` and must be
+// The shared store lives at `~/.claude/synapsys-shared/` and must be
 // discovered for EVERY project — regardless of cwd or project name. These
 // tests pin HOME to a temp dir (Node's os.homedir() honours $HOME on POSIX)
 // so discovery resolves into a fixture instead of the real home directory.
@@ -14,7 +14,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { discoverStores, listMemoriesFromStore, SHARED_DIRNAME } = require(
+const { discoverStores, listMemoriesFromStore, SHARED_FOLDER } = require(
   path.resolve(__dirname, '..', 'memory-store')
 );
 const { selectForEvent } = require(path.resolve(__dirname, '..', 'matcher'));
@@ -35,7 +35,7 @@ before(() => {
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-shared-'));
   process.env.HOME = home;
 
-  sharedDir = path.join(home, '.claude', 'synapsys', SHARED_DIRNAME);
+  sharedDir = path.join(home, '.claude', SHARED_FOLDER);
   fs.mkdirSync(sharedDir, { recursive: true });
   fs.writeFileSync(
     path.join(sharedDir, '.synapsys.json'),
@@ -82,6 +82,34 @@ describe('shared store discovery', { skip: !HOME_DRIVEN }, () => {
       stores.some((s) => s.kind === 'shared'),
       'shared store should surface for every project'
     );
+  });
+});
+
+describe('shared store does not collide with the per-project namespace', { skip: !HOME_DRIVEN }, () => {
+  it('keeps global and shared distinct even for a project named like the shared folder', () => {
+    // A project whose basename matches SHARED_FOLDER must NOT shadow the shared
+    // store: global lives under `synapsys/<name>/`, shared is a sibling of
+    // `synapsys/`, so the two paths can never resolve to the same directory.
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-collide-'));
+    const projectCwd = path.join(parent, SHARED_FOLDER);
+    fs.mkdirSync(projectCwd, { recursive: true });
+
+    const globalDir = path.join(home, '.claude', 'synapsys', SHARED_FOLDER);
+    fs.mkdirSync(globalDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(globalDir, '.synapsys.json'),
+      JSON.stringify({ kind: 'global', projectName: SHARED_FOLDER, schemaVersion: 1 })
+    );
+
+    const stores = discoverStores(projectCwd);
+    const shared = stores.find((s) => s.kind === 'shared');
+    const global = stores.find((s) => s.kind === 'global');
+    assert.ok(shared, 'shared store should still be discovered');
+    assert.ok(global, 'global store should still be discovered');
+    assert.notEqual(path.resolve(shared.dir), path.resolve(global.dir));
+
+    fs.rmSync(parent, { recursive: true, force: true });
+    fs.rmSync(globalDir, { recursive: true, force: true });
   });
 });
 
