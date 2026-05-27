@@ -48,6 +48,20 @@
         "workflow",
         "multi-agent"
       ]
+    },
+    {
+      "name": "heimdall",
+      "source": "./plugins/heimdall",
+      "description": "Config-driven file/directory guard — lock blocks pair protected paths with an unlock phrase; a PreToolUse hook blocks Edit/Write/Bash/Task mutations unless the phrase is spoken",
+      "category": "safety",
+      "tags": [
+        "guard",
+        "protection",
+        "hooks",
+        "pretooluse",
+        "lock",
+        "safety"
+      ]
     }
   ]
 }

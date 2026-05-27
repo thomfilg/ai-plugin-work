@@ -33,7 +33,11 @@ trap 'on_signal INT' INT
 trap 'on_signal TERM' TERM
 
 # Build space-separated file list (node --test expects positional args, not newlines)
-mapfile -t FILES < <(find plugins/work/scripts/workflows plugins/work/agents plugins/work/skills plugins/synapsys -type f \( -name '*.test.js' -o -name '*.spec.js' \) | sort)
+# Discover tests under any plugin (recursive), pruning node_modules. We also
+# prune plugins/work/hooks/__tests__: those orchestrator/session-state tests are
+# intentionally excluded from the suite (they share /tmp session-lock + workflow
+# state and flake when run concurrently with the other stateful work tests).
+mapfile -t FILES < <(find plugins -type d \( -name node_modules -o -path 'plugins/work/hooks' \) -prune -o -type f \( -name '*.test.js' -o -name '*.spec.js' \) -print | sort)
 
 if [ -f "$SKIP_FILE" ]; then
   FILTERED=()
