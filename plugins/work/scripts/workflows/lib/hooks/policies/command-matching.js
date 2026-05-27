@@ -22,8 +22,12 @@
 // and bare `env [VAR=val ...] node ...` in addition to inline env-assignment.
 // Without this, agents using `timeout 90 node task-next.js ...` silently bypass
 // Rule 5 because the regex didn't recognize the wrapped invocation as a node call.
+// Command separators include newline/CR: multi-line Bash (e.g. `cd dir\nnode ...`)
+// must be parsed too — otherwise the node call after a newline is invisible, which
+// both breaks legitimate exemptions and lets newline-separated invocations evade
+// Rules 3b/5.
 const NODE_INVOKE_PATTERN_SRC =
-  '(?:^|&&|;|\\|)\\s*' +
+  '(?:^|&&|;|\\||\\n|\\r)\\s*' +
   // Optional wrapper commands (timeout, nice, env). All consume their args.
   '(?:timeout\\s+\\d+(?:\\.\\d+)?[smhdSMHD]?\\s+|' +
   'nice(?:\\s+-n\\s+-?\\d+)?\\s+|' +

@@ -48,6 +48,23 @@ describe('command-matching: getNodeInvocations', () => {
     assert.equal(captured, 'script.js');
   });
 
+  it('treats a newline as a command separator (cd on its own line)', () => {
+    const matches = getNodeInvocations('cd /some/dir\nnode script.js');
+    assert.equal(matches.length, 1);
+    const captured = matches[0][1] || matches[0][2] || matches[0][3];
+    assert.equal(captured, 'script.js');
+  });
+
+  it('treats CRLF as a command separator', () => {
+    const matches = getNodeInvocations('cd /some/dir\r\nnode script.js');
+    assert.equal(matches.length, 1);
+  });
+
+  it('matches node calls on separate lines', () => {
+    const matches = getNodeInvocations('node a.js\nnode b.js');
+    assert.equal(matches.length, 2);
+  });
+
   it('exposes a stable pattern source string', () => {
     assert.equal(typeof NODE_INVOKE_PATTERN_SRC, 'string');
     assert.ok(NODE_INVOKE_PATTERN_SRC.length > 10);
