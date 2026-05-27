@@ -162,12 +162,12 @@ function anyMatches(patterns, v) {
   return false;
 }
 
-function markerWriteMatch(entry, marker, v) {
+function markerWriteMatch(marker, v) {
   for (const pattern of getPatternsForMarker(marker)) {
-    if (anyMatches([pattern], v) && !isDirectionSensitiveRead(entry._cmd, v.expanded, marker))
+    if (anyMatches([pattern], v) && !isDirectionSensitiveRead(v.command, v.expanded, marker))
       return true;
   }
-  if (anyMatches(BASH_WRITE_GLOBAL, v) && !isDirectionSensitiveRead(entry._cmd, v.expanded, marker))
+  if (anyMatches(BASH_WRITE_GLOBAL, v) && !isDirectionSensitiveRead(v.command, v.expanded, marker))
     return true;
   return false;
 }
@@ -193,7 +193,7 @@ function absolutePathWrite(entry, v, dirPresent) {
   return (
     dirPresent &&
     hasGenericWriteIntent(v.collapsed) &&
-    !isDirectionSensitiveRead(entry._cmd, v.expanded, entry.dir) &&
+    !isDirectionSensitiveRead(v.command, v.expanded, entry.dir) &&
     !allRefsUnderAllowedPaths(v.expandedCollapsed, entry)
   );
 }
@@ -203,7 +203,7 @@ function entryWriteMatch(entry, v) {
   if (absolutePathWrite(entry, v, dirPresent)) return 'absolute-path';
   for (const marker of entry.markers) {
     if (!markerEligible(entry, marker, v, dirPresent)) continue;
-    if (markerWriteMatch(entry, marker, v)) return 'marker';
+    if (markerWriteMatch(marker, v)) return 'marker';
   }
   return null;
 }
@@ -213,7 +213,6 @@ function bashTargetsProtectedTarget(command, entries) {
   if (!command) return null;
   const v = commandVariants(command);
   for (const entry of entries) {
-    entry._cmd = command;
     const matchType = entryWriteMatch(entry, v);
     if (matchType) return { entry, matchType };
   }
