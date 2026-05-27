@@ -1,6 +1,6 @@
 ---
 name: spec-writer
-tools: Bash, Read, Grep, Glob, Write
+tools: Bash, Read, Grep, Glob, Write, mcp__codegraph__codegraph_search, mcp__codegraph__codegraph_context, mcp__codegraph__codegraph_impact, mcp__codegraph__codegraph_files, mcp__codegraph__codegraph_callers, mcp__codegraph__codegraph_callees
 description: |
   Use this agent to generate a Technical Specification from a product brief and codebase analysis. The spec-writer explores the codebase to understand architecture, patterns, and data models, then produces a spec with architecture decisions, API changes, security considerations, and Given/When/Then test scenarios that feed into TDD. This agent is invoked automatically by the /work workflow during the 4_spec step.
 
@@ -75,6 +75,7 @@ When designing API / schema changes, also enumerate every consumer of a modified
    a. From the brief, extract a list of every UI component, data pattern, and behavior needed (modals, dropdowns, forms, tables, filters, CRUD operations, validation, etc.). For each item, also extract its **stem** — the family-level noun, not the page-specific name. Example: `ExternalAssetLineageSidebar` → stems `Lineage`, `Sidebar`. Stems are what you search; concrete names hide siblings.
    b. **Broad reuse search** — search by stem, not by exact name. The ECHO-4452 incident shipped six near-duplicate `Lineage*` components because the audit searched only the current branch for exact names. Required searches per stem:
       - **Codegraph (preferred when available)**: `codegraph_search('<stem>', limit: 20)` returns symbols across the whole workspace. Also try `codegraph_search('<stem> <role>')` where role is "sidebar"/"panel"/"table"/"row"/"modal" etc.
+      - **Codegraph impact (when `.codegraph/` exists)**: run `codegraph_impact` on every symbol you mark for hard-cutover modification to enumerate all consumers, and `codegraph_search` for reuse candidates before proposing new code. The graph reflects the local working tree, so no remote-ref handling is needed.
       - **Filesystem fuzzy globs**: `**/components/**/*<Stem>*`, `**/shared/**/*<Stem>*`, `**/common/**/*<Stem>*`, `**/ui/**/*<Stem>*`.
       - **Ticket-provider keyword search** (Linear / Jira / GitHub Issues — whatever `TICKET_PROVIDER` is set to): search the whole project for tickets whose title or description contains the stem, even when they live in different epics. The 6 Lineage tickets were spread across **different task trees** with no link between them; only a project-wide keyword scan would have surfaced them. Use `mcp__linear__*` / `mcp__atlassian__jira_search` / `gh issue list --search` accordingly.
       - **Similar pages/features analysis** — for any matches, READ those pages and list which shared components/hooks they import. This reveals the established component library.

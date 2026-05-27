@@ -19,8 +19,16 @@ const TASKS_BASE = getConfig.require('TASKS_BASE');
 
 // Use a unique ticket ID per test run to avoid interference
 // Convention: all test tickets MUST start with TEST- for cleanup (see test-cleanup.js)
-const TEST_TICKET = `TEST-ESW-${process.pid}`;
-const TASKS_DIR = path.join(TASKS_BASE, TEST_TICKET);
+// Per-test unique ticket/dir. Every leaf test gets its own TASKS_DIR (assigned
+// in beforeEach via a monotonic counter) so no two tests ever share workflow
+// state on disk. Under CI's heavily-parallel `node --test` load, a shared
+// pid-scoped dir let one test's afterEach cleanup race a sibling's state write,
+// intermittently dropping the just-written workflow-state before the hook read
+// it (observed: "records evidence for 5_post_pr_gen" flaking ~1/run). Both vars
+// are `let` and reassigned together so they always stay in sync.
+let _testCounter = 0;
+let TEST_TICKET = `TEST-ESW-${process.pid}-0`;
+let TASKS_DIR = path.join(TASKS_BASE, TEST_TICKET);
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -149,6 +157,10 @@ const WORK_PR_STEPS = [
 
 describe('enforce-step-workflow', () => {
   beforeEach(() => {
+    // Assign a fresh, unique ticket/dir for this test so it can never collide
+    // with a sibling test's state files under parallel CI load.
+    TEST_TICKET = `TEST-ESW-${process.pid}-${++_testCounter}`;
+    TASKS_DIR = path.join(TASKS_BASE, TEST_TICKET);
     if (fs.existsSync(TASKS_DIR)) {
       fs.rmSync(TASKS_DIR, { recursive: true, force: true });
     }
@@ -3233,7 +3245,9 @@ describe('enforce-step-workflow', () => {
       'engine',
       'work.workflow.js'
     );
-    const PR_TEST_BRANCH = `${TEST_TICKET}-pr-test`;
+    // Derived at call time (inside writeFakeGit) so it tracks the per-test
+    // TEST_TICKET assigned in beforeEach rather than a stale registration-time value.
+    const prTestBranch = () => `${TEST_TICKET}-pr-test`;
 
     function writeFakeGit() {
       if (!fs.existsSync(FAKE_GIT_DIR)) fs.mkdirSync(FAKE_GIT_DIR, { recursive: true });
@@ -3242,7 +3256,7 @@ describe('enforce-step-workflow', () => {
       const script = [
         '#!/bin/bash',
         'ARGS="$*"',
-        `if echo "$ARGS" | grep -qF -- "branch --show-current"; then echo '${PR_TEST_BRANCH}'; exit 0; fi`,
+        `if echo "$ARGS" | grep -qF -- "branch --show-current"; then echo '${prTestBranch()}'; exit 0; fi`,
         `if echo "$ARGS" | grep -qF -- "rev-parse --show-toplevel"; then echo '${process.cwd()}'; exit 0; fi`,
         // Let symbolic-ref / rev-parse --verify fail so getBaseBranch falls through
         'if echo "$ARGS" | grep -qF -- "symbolic-ref"; then exit 1; fi',
@@ -3298,7 +3312,7 @@ describe('enforce-step-workflow', () => {
     it('passes branch as positional arg to gh pr view', async () => {
       // The fake gh should receive the branch name as positional arg (not --head)
       writeFakeGh({
-        [`pr view ${PR_TEST_BRANCH}`]: '{"number":42,"state":"OPEN"}',
+        [`pr view ${prTestBranch()}`]: '{"number":42,"state":"OPEN"}',
       });
       // Fake git provides deterministic branch name for positional arg (CI-safe)
       const { code } = await transitionFromPr();
