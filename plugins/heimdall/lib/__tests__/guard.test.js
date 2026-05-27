@@ -190,6 +190,20 @@ describe('evaluate: bash', () => {
     assert.equal(r.exitCode, 0);
   });
 
+  it('blocks running an EXTERNAL script whose content writes into a protected dir', () => {
+    const evil = path.join(os.tmpdir(), `heimdall-evil-${process.pid}.js`);
+    fs.writeFileSync(
+      evil,
+      `require('fs').writeFileSync('${path.join(baseDir, '.claude', 'x')}', 'y')\n`
+    );
+    try {
+      const r = run(`node ${evil}`);
+      assert.equal(r.exitCode, 2, 'external script writing to a protected dir must be blocked');
+    } finally {
+      fs.rmSync(evil, { force: true });
+    }
+  });
+
   it('blocks a cp into a protected dir chained with && (no direction-sensitive bypass)', () => {
     const r = run(`cp /tmp/evil ${path.join(baseDir, '.claude', 'config')} && echo done`);
     assert.equal(r.exitCode, 2);

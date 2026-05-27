@@ -8,20 +8,9 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { commandAccessesProtectedPaths } = require('../command-analysis');
-const { isTempPath } = require('./paths');
 
 const WRITE_OPS_IN_SCRIPT =
   /\b(?:writeFileSync|appendFileSync|writeFile|createWriteStream|unlink|unlinkSync|rmSync|renameSync|rename|rmdir|rmdirSync|copyFileSync|exec|execSync|fs\.promises\.writeFile|fs\.promises\.rm|fs\.promises\.rename|fs\.writeFile|fs\.appendFile)\b/;
-
-function isUnderProtectedDir(scriptPath, entry) {
-  try {
-    const resolved = path.resolve(scriptPath);
-    const real = fs.existsSync(resolved) ? fs.realpathSync(resolved) : resolved;
-    return real === entry.dir || real.startsWith(entry.dir + path.sep);
-  } catch {
-    return true;
-  }
-}
 
 function isTrustedScript(scriptPath, entries) {
   for (const entry of entries) {
@@ -54,16 +43,18 @@ function scriptHasWriteOps(content) {
 
 /**
  * Inspect a command for script-driven writes to a protected dir entry.
+ *
+ * Fires for ANY non-trusted script the command runs whose content references
+ * the protected path AND performs a write — regardless of where the script
+ * lives. The whole point is to catch an EXTERNAL script (e.g. `node
+ * /tmp/eviL.js` or `node scripts/deploy.js`) that writes into a protected dir,
+ * so location-based gates (under-the-dir / temp-path) are intentionally NOT
+ * applied here; only `trustedSubdirs` scripts are exempt.
  * @returns {{ blocked: true, error?: string } | { blocked: false }}
  */
 function checkScriptBypass(collapsedCmd, entry, entries) {
   const found = commandAccessesProtectedPaths(collapsedCmd, scriptPatternsFor(entry));
-  if (
-    !found.found ||
-    isTrustedScript(found.scriptPath, entries) ||
-    isTempPath(found.scriptPath) ||
-    !isUnderProtectedDir(found.scriptPath, entry)
-  ) {
+  if (!found.found || isTrustedScript(found.scriptPath, entries)) {
     return { blocked: false };
   }
   let content;
