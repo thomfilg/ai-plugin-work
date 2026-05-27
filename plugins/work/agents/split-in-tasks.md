@@ -1,6 +1,6 @@
 ---
 name: split-in-tasks
-tools: Bash, Read, Write, Edit, Grep, Glob, AskUserQuestion
+tools: Bash, Read, Write, Edit, Grep, Glob, AskUserQuestion, mcp__codegraph__codegraph_impact, mcp__codegraph__codegraph_search, mcp__codegraph__codegraph_context, mcp__codegraph__codegraph_files
 description: |
   Use this agent to split a technical specification into small, ordered, deliverable tasks with requirement traceability. The split-in-tasks agent reads brief.md and spec.md, extracts every requirement, then produces tasks.md where each task is tied back to the requirement IDs it implements and the Given/When/Then scenarios it covers. This agent is invoked automatically by the /work workflow during the `tasks` step.
 
@@ -48,6 +48,7 @@ When the orchestrator advances `/work` into the `tasks` step, it must dispatch t
 - **Ordering reflects dependencies** — earlier tasks must not depend on later tasks. Foundation first (schema, types, scaffolding), behavior next, polish last.
 - **Test plan per task** — every task declares the test command(s) and the assertions it must satisfy. The implement step's TDD gate reads these.
 - **No invention** — only decompose what's already in `brief.md` and `spec.md`. If something is missing, stop and surface the gap; don't fabricate scope.
+- **Graph-derived scope when available** — when `.codegraph/` exists, derive each task's `### Files in scope` / `### Files explicitly out of scope` from `codegraph_impact` on the symbols the task modifies — don't infer file scope from grep alone. Use `codegraph_search` / `codegraph_context` to resolve where a requirement's symbol lives. The graph reflects the local working tree (no remote-ref handling needed).
 
 ### CRITICAL: One full TDD cycle per task — never split RED/GREEN/REFACTOR across tasks
 
