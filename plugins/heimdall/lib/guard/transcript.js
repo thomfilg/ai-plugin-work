@@ -1,22 +1,27 @@
 'use strict';
 
 /**
- * Transcript inspection: find which unlock phrases the user has spoken in
- * their recent messages. Speaking a phrase lifts the lock for entries that
- * share it, for a short window of subsequent tool calls.
+ * Transcript inspection: find which unlock phrases the user has TYPED in their
+ * recent messages. Speaking a phrase lifts the lock for entries that share it,
+ * for a short window of subsequent tool calls.
+ *
+ * SECURITY: only genuine user-authored text is trusted — string message
+ * content and `text` content blocks. `tool_result` content is deliberately
+ * ignored: a guarded agent could otherwise self-unlock by emitting the phrase
+ * as tool output (e.g. `echo "edit .claude"`, or even a forged
+ * `"...="edit .claude""` AskUserQuestion-looking string), which lands in the
+ * transcript as a tool_result on a user-type turn. Tool output is
+ * agent-controlled and must never authorize an unlock. As a consequence,
+ * AskUserQuestion answers (also recorded as tool_results) do NOT unlock — the
+ * user must type the phrase, which the agent cannot fabricate.
  */
 
 const fs = require('node:fs');
 
-function extractContentText(item) {
-  if (item.type === 'text') return item.text || '';
-  if (item.type !== 'tool_result') return '';
-  if (typeof item.content === 'string') return item.content;
-  if (!Array.isArray(item.content)) return '';
-  return item.content
-    .filter((c) => c.type === 'text')
-    .map((c) => c.text)
-    .join(' ');
+/** Genuine user-typed text from a content item; '' for tool_result/other. */
+function userAuthoredText(item) {
+  if (item && item.type === 'text') return item.text || '';
+  return '';
 }
 
 function messagesFromLine(line) {
@@ -31,7 +36,7 @@ function messagesFromLine(line) {
     }
     if (!Array.isArray(mc)) return out;
     for (const item of mc) {
-      const text = extractContentText(item);
+      const text = userAuthoredText(item);
       if (text) out.push(text);
     }
   } catch {
@@ -62,23 +67,28 @@ function stripSystemTags(text) {
     .trim();
 }
 
-// Heimdall's own block message is emitted on stderr and echoed back into the
-// transcript as a tool_result. Skip any message bearing this signature so the
-// hook can never unlock itself by quoting the phrase in its own output.
-const OWN_BLOCK_SIGNATURE = 'ACTION REQUIRED: Call the AskUserQuestion';
-
-/** Set of unlock phrases (lowercased) spoken in recent user messages. */
+/** Set of unlock phrases (lowercased) the user typed in recent messages. */
 function findUnlockedPhrases(transcriptPath, entries) {
   const phrases = new Set(entries.map((e) => (e.unlockPhrase || '').toLowerCase()).filter(Boolean));
   const unlocked = new Set();
   for (const msg of getRecentUserMessages(transcriptPath, 20)) {
-    if (msg.includes(OWN_BLOCK_SIGNATURE)) continue;
     const normalized = stripSystemTags(msg).replace(/\s+/g, ' ').toLowerCase();
+    if (!normalized) continue;
     for (const phrase of phrases) {
-      if (normalized === phrase || normalized.includes(`="${phrase}"`)) unlocked.add(phrase);
+      // The user's own message must contain the phrase as a standalone token.
+      if (
+        normalized === phrase ||
+        new RegExp(`(?:^|\\s)${escapeRe(phrase)}(?:$|\\s|[.!?])`).test(normalized)
+      ) {
+        unlocked.add(phrase);
+      }
     }
   }
   return unlocked;
+}
+
+function escapeRe(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function isEntryUnlocked(entry, unlockedPhrases) {

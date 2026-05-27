@@ -16,17 +16,16 @@ const { checkScriptBypass } = require('./scripts-bypass');
 const ALLOW = { exitCode: 0, message: '' };
 
 function blockMessage(reason, entry, matchContext) {
-  // NOTE: deliberately avoid the `label="<phrase>"` token here. This message is
-  // emitted on stderr and echoed back into the transcript as a tool_result; if it
-  // contained `="<phrase>"` it would match the AskUserQuestion-answer heuristic in
-  // findUnlockedPhrases and self-unlock the lock on the next tool call.
+  // Only the USER typing the phrase unlocks (see transcript.js): tool output —
+  // including this very message echoed back as a tool_result — is never trusted,
+  // so an agent cannot self-unlock by emitting the phrase.
   let msg = `BLOCKED (heimdall): ${reason}\n`;
   if (entry) {
-    const label = entry.unlockPhrase || `edit ${path.basename(entry.dir)}`;
-    msg += `\nACTION REQUIRED: Call the AskUserQuestion tool with EXACTLY these two options:\n`;
-    msg += `  Option 1 label -> ${label}  (Allow writing to ${path.basename(entry.dir)})\n`;
-    msg += `  Option 2 label -> Skip  (Skip this operation)\n`;
-    msg += `\nDo NOT ask in plain text. Do NOT try alternative approaches. Call AskUserQuestion NOW.\n`;
+    const phrase = entry.unlockPhrase || `edit ${path.basename(entry.dir)}`;
+    msg += `\nACTION REQUIRED: Stop and ask the user to UNLOCK this path. Tell them to reply with the\n`;
+    msg += `exact phrase (they must type it themselves — only a user message unlocks it):\n`;
+    msg += `  ${phrase}\n`;
+    msg += `Then retry. Do NOT try alternative approaches or attempt to emit the phrase yourself.\n`;
   }
   if (matchContext) msg += `MATCH: ${matchContext}\n`;
   return msg;
