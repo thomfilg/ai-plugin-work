@@ -219,19 +219,26 @@ function entryWriteMatch(entry, v) {
   return null;
 }
 
-/** Does the command write to a protected target? Returns { entry, matchType } or null. */
-function bashTargetsProtectedTarget(command, entries) {
-  if (!command) return null;
+/** Every protected target the command writes to: [{ entry, matchType }, ...]. */
+function bashTargets(command, entries) {
+  if (!command) return [];
   const v = commandVariants(command);
+  const out = [];
   for (const entry of entries) {
     const matchType = entryWriteMatch(entry, v);
-    if (matchType) return { entry, matchType };
+    if (matchType) out.push({ entry, matchType });
   }
-  return null;
+  return out;
+}
+
+/** First protected target the command writes to, or null. */
+function bashTargetsProtectedTarget(command, entries) {
+  return bashTargets(command, entries)[0] || null;
 }
 
 module.exports = {
   hasGenericWriteIntent,
   isReadOnlyBashCommand,
+  bashTargets,
   bashTargetsProtectedTarget,
 };

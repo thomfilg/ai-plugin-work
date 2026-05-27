@@ -199,6 +199,17 @@ describe('evaluate: bash', () => {
     const r = run("sed -i 's/a/b/' .claude/settings.json");
     assert.equal(r.exitCode, 2);
   });
+
+  it('blocks when a compound command also targets a still-locked entry (.claude unlocked, package.json not)', () => {
+    // .claude is unlocked via transcript; the command also writes package.json
+    // (locked under a different phrase) — must still block on package.json.
+    const r = run(
+      `cp /tmp/x ${path.join(baseDir, '.claude', 'config')} && sed -i s/a/b/ package.json`,
+      transcriptUnlocked
+    );
+    assert.equal(r.exitCode, 2);
+    assert.match(r.message, /edit repository config/);
+  });
 });
 
 // ─── Task ─────────────────────────────────────────────────────────────────────

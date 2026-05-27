@@ -7,8 +7,8 @@
 
 const os = require('node:os');
 const path = require('node:path');
-const { findProtectedPathRef, findProtectedTarget, resolvePathSafe } = require('./paths');
-const { isReadOnlyBashCommand, bashTargetsProtectedTarget } = require('./bash');
+const { findProtectedPathRefs, findProtectedTarget, resolvePathSafe } = require('./paths');
+const { isReadOnlyBashCommand, bashTargets } = require('./bash');
 const { isReadOnlyTaskPrompt } = require('./task');
 const { findUnlockedPhrases, isEntryUnlocked } = require('./transcript');
 const { checkScriptBypass } = require('./scripts-bypass');
@@ -57,15 +57,20 @@ function evaluateFileTool(toolInput, entries, unlocked) {
 
 function evaluateTask(toolInput, entries, unlocked) {
   const combined = JSON.stringify(toolInput).slice(0, 20000);
-  const entry = findProtectedPathRef(combined, entries);
-  if (!entry) return ALLOW;
-  if (isEntryUnlocked(entry, unlocked)) return ALLOW;
-  if (isReadOnlyTaskPrompt(combined)) return ALLOW;
-  return block(
-    `Task prompt references protected path (${path.basename(entry.dir)})`,
-    entry,
-    'task-prompt ' + path.basename(entry.dir)
-  );
+  const refs = findProtectedPathRefs(combined, entries);
+  if (refs.length === 0 || isReadOnlyTaskPrompt(combined)) return ALLOW;
+  // Block on the first referenced entry that is still locked — an unlocked
+  // entry must not green-light a prompt that also touches other locked ones.
+  for (const entry of refs) {
+    if (!isEntryUnlocked(entry, unlocked)) {
+      return block(
+        `Task prompt references protected path (${path.basename(entry.dir)})`,
+        entry,
+        'task-prompt ' + path.basename(entry.dir)
+      );
+    }
+  }
+  return ALLOW;
 }
 
 function evaluateBashScripts(command, entries, unlocked) {
@@ -89,13 +94,14 @@ function evaluateBash(toolInput, entries, unlocked) {
   const command = toolInput.command || '';
   if (isReadOnlyBashCommand(command)) return ALLOW;
 
-  const bashResult = bashTargetsProtectedTarget(command, entries);
-  if (bashResult) {
-    if (isEntryUnlocked(bashResult.entry, unlocked)) return ALLOW;
+  // Block on the first targeted entry still locked — a compound command may
+  // write to several protected paths; one unlocked entry must not allow the rest.
+  for (const { entry, matchType } of bashTargets(command, entries)) {
+    if (isEntryUnlocked(entry, unlocked)) continue;
     const ctx =
-      (bashResult.matchType === 'absolute-path' ? 'bash-absolute-path-write ' : 'bash-write ') +
-      path.basename(bashResult.entry.dir);
-    return block('Bash command targets protected path', bashResult.entry, ctx);
+      (matchType === 'absolute-path' ? 'bash-absolute-path-write ' : 'bash-write ') +
+      path.basename(entry.dir);
+    return block('Bash command targets protected path', entry, ctx);
   }
 
   return evaluateBashScripts(command, entries, unlocked);

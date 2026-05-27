@@ -67,16 +67,24 @@ function markerOnlyInTempPaths(text, marker) {
   return found;
 }
 
+function textReferencesEntry(expanded, entry) {
+  if (expanded.includes(entry.dir)) return true;
+  for (const marker of entry.markers) {
+    if (expanded.includes(marker) && !markerOnlyInTempPaths(expanded, marker)) return true;
+  }
+  return false;
+}
+
 /** First entry referenced by free text (used for Task prompts), or null. */
 function findProtectedPathRef(text, entries) {
   const expanded = expandHomePaths(text);
-  for (const entry of entries) {
-    if (expanded.includes(entry.dir)) return entry;
-    for (const marker of entry.markers) {
-      if (expanded.includes(marker) && !markerOnlyInTempPaths(expanded, marker)) return entry;
-    }
-  }
-  return null;
+  return entries.find((entry) => textReferencesEntry(expanded, entry)) || null;
+}
+
+/** All entries referenced by free text. */
+function findProtectedPathRefs(text, entries) {
+  const expanded = expandHomePaths(text);
+  return entries.filter((entry) => textReferencesEntry(expanded, entry));
 }
 
 /** Match a resolved absolute path against entries: file=exact, dir=prefix. */
@@ -137,6 +145,7 @@ module.exports = {
   isPathBoundary,
   markerOnlyInTempPaths,
   findProtectedPathRef,
+  findProtectedPathRefs,
   findProtectedTarget,
   resolvePathSafe,
   allRefsUnderAllowedPaths,
