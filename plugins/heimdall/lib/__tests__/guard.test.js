@@ -25,8 +25,10 @@ const LOCKS = [
 
 before(() => {
   // NOT under os.tmpdir(): the engine exempts temp paths (scratch space), so a
-  // realistic protected baseDir must live outside any temp prefix.
-  baseDir = fs.mkdtempSync(path.join(process.cwd(), 'heimdall-it-'));
+  // realistic protected baseDir must live outside any temp prefix. Use a home
+  // dir scratch path rather than the repo root, so concurrent test files in the
+  // full suite never observe stray fixture dirs under the working tree.
+  baseDir = fs.mkdtempSync(path.join(os.homedir(), '.heimdall-it-'));
   // A transcript whose last user message speaks the .claude unlock phrase.
   const txDir = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-tx-'));
   transcriptUnlocked = path.join(txDir, 'unlocked.jsonl');
