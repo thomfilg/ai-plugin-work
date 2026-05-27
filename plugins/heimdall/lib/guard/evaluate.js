@@ -82,7 +82,9 @@ function evaluateBashScripts(command, entries, unlocked) {
     const res = checkScriptBypass(collapsedCmd, entry, entries);
     if (!res.blocked) continue;
     if (res.error) return { exitCode: 2, message: `BLOCKED: ${res.error}. Blocking for safety.\n` };
-    if (isEntryUnlocked(entry, unlocked)) return ALLOW;
+    // Unlocked → skip this entry but keep checking; a later locked entry the
+    // same script writes to must still be caught (one unlock must not allow all).
+    if (isEntryUnlocked(entry, unlocked)) continue;
     return block(
       `Script "${res.scriptPath}" writes to protected path (${path.basename(entry.dir)})`,
       entry,
