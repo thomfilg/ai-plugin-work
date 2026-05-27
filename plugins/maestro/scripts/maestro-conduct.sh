@@ -14,18 +14,45 @@ mkdir -p "$STATE_DIR"
 # bootstrap created. Override via env to customize layout.
 WORKTREES_BASE="${WORKTREES_BASE:-$HOME/worktrees}"
 REPO_NAME="${REPO_NAME:-claude-plugin-work}"
-SESSION_PATTERN="${SESSION_PATTERN:-^GH-[0-9]+-work$}"
+
+# Provider-derived session-name prefix. resolve_prefix() (sets global PREFIX,
+# fail-open to "GH") is shared with maestro-bootstrap.sh via lib/resolve-prefix.sh
+# so the conductor and bootstrap can never drift to different prefixes.
+_MAESTRO_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/resolve-prefix.sh
+. "$_MAESTRO_SCRIPT_DIR/lib/resolve-prefix.sh"
+
+resolve_prefix
 # Match maestro-bootstrap.sh so auto-restart uses the same binary and skill the
 # bootstrap launched with. Override via env to customize.
 CLAUDE_BIN="${CLAUDE_BIN:-claude}"
 SKILL_NAME="${SKILL_NAME:-work}"
 
+# Single source of truth for the session-name suffixes the conductor tracks.
+# Reused by both the SESSION_PATTERN default and ticket_id_for's suffix strip
+# so the two never drift. (Auto-restart eligibility is gated separately to
+# -work — see restart_eligible.)
+SESSION_SUFFIX_ALT="work|dev|listen"
+
+# SESSION_PATTERN is the user-facing override for which sessions the conductor
+# discovers and watches (documented in README/SKILL.md). When unset it defaults
+# to -work plus the -dev/-listen helper sessions /work spawns, built from the
+# resolved PREFIX so it tracks provider resolution. discover_sessions consumes
+# it directly; auto-restart is gated separately to -work only, so helper
+# sessions are surfaced informationally but never relaunched.
+SESSION_PATTERN="${SESSION_PATTERN:-^${PREFIX}-[0-9]+-(${SESSION_SUFFIX_ALT})$}"
+
 discover_sessions() {
   tmux list-sessions -F '#S' 2>/dev/null | grep -E "$SESSION_PATTERN" || true
 }
 
-ticket_id_for() { echo "$1" | sed 's/-work$//'; }
+ticket_id_for() { echo "$1" | sed -E "s/-(${SESSION_SUFFIX_ALT})\$//"; }
 worktree_for()  { echo "$WORKTREES_BASE/$REPO_NAME-$1"; }
+
+# Auto-restart eligibility: only -work sessions are relaunched. Discovery
+# surfaces -dev/-listen helpers informationally, but resurrecting them as
+# `/work <tid>` would be wrong, so they are never restart-eligible.
+restart_eligible() { [[ "$1" =~ -work$ ]]; }
 
 # Extract the token count integer from the pane (status bar shows e.g. "353792 tokens")
 pane_tokens() { echo "$1" | grep -oE '[0-9]+ tokens' | tail -1 | awk '{print $1}'; }
@@ -40,9 +67,29 @@ pane_has_live_spinner() {
   echo "$1" | grep -qE '^[●●○◯•*✻✶✢·✽✣✤✱⏵⏶] [A-Z][a-z]+ing…[[:space:]]*\('
 }
 
+# Source-only guard: when set (e.g. by unit tests), define the functions and
+# resolve config but do not enter the poll loop.
+if [ "${MAESTRO_SOURCE_ONLY:-}" = "1" ]; then
+  return 0 2>/dev/null || exit 0
+fi
+
+# Loop-bounding test hook: when MAESTRO_MAX_ITERATIONS is set to a positive
+# integer (e.g. by the e2e suite), the poll loop runs exactly that many
+# iterations then exits cleanly. Unset/empty preserves the production default
+# of an unbounded poll loop. The trailing inter-poll sleep is skipped on the
+# final bounded iteration so the run completes promptly.
+_maestro_iter=0
 while true; do
+  _maestro_iter=$(( _maestro_iter + 1 ))
   while IFS= read -r s; do
     [ -z "$s" ] && continue
+    # Surface every discovered session as it is polled, noting whether it is
+    # auto-restart-eligible (-work) or a monitored-only helper (-dev/-listen).
+    if restart_eligible "$s"; then
+      echo "[$s] POLL: discovered (auto-restart-eligible)"
+    else
+      echo "[$s] POLL: discovered (monitored helper, not auto-restart-eligible)"
+    fi
     pane=$(tmux capture-pane -t "$s" -p 2>/dev/null) || { echo "[$s] SESSION-GONE"; continue; }
     last_file="$STATE_DIR/$s.last"
     hash_now=$(echo "$pane" | md5sum | cut -d' ' -f1)
@@ -80,6 +127,10 @@ while true; do
     silence=$(( now_ts - ts_prev ))
 
     if [ "$silence" -ge "$SILENCE_LIMIT_SEC" ]; then
+      if ! restart_eligible "$s"; then
+        echo "[$s] AUTO-RESTART skipped: non-work helper session (not restart-eligible)"
+        continue
+      fi
       tid=$(ticket_id_for "$s")
       wt=$(worktree_for "$tid")
       if [ ! -d "$wt" ]; then
@@ -94,5 +145,8 @@ while true; do
       echo "[$s] IDLE: ${silence}s silent (restart at ${SILENCE_LIMIT_SEC}s) — tokens=${toks_now:-?}"
     fi
   done < <(discover_sessions)
+  if [ -n "${MAESTRO_MAX_ITERATIONS:-}" ] && [ "$_maestro_iter" -ge "$MAESTRO_MAX_ITERATIONS" ]; then
+    break
+  fi
   sleep "$POLL_INTERVAL_SEC"
 done

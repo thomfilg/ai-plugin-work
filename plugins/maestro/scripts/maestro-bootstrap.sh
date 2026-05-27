@@ -52,6 +52,16 @@ BASE_BRANCH="${BASE_BRANCH#origin/}"
 CLAUDE_BIN="${CLAUDE_BIN:-claude}"
 SKILL_NAME="${SKILL_NAME:-work}"
 
+# Provider-derived session-name / ticket prefix. resolve_prefix() (sets global
+# PREFIX, fail-open to "GH") is shared with maestro-conduct.sh via
+# lib/resolve-prefix.sh so bootstrap and the conductor can never drift to
+# different prefixes for the same repository.
+_MAESTRO_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/resolve-prefix.sh
+. "$_MAESTRO_SCRIPT_DIR/lib/resolve-prefix.sh"
+
+resolve_prefix
+
 REPO_DIR="$WORKTREES_BASE/$REPO_NAME"
 if [ ! -d "$REPO_DIR/.git" ]; then
   echo "ERROR: $REPO_DIR is not a git repo" >&2
@@ -90,9 +100,9 @@ fi
 git -C "$REPO_DIR" fetch origin "$BASE_BRANCH" 2>&1 | tail -1
 
 for TICKET in "$@"; do
-  # Normalize: if user passed bare number, assume GH-<N>
+  # Normalize: if user passed bare number, prepend the provider-derived prefix.
   if [[ "$TICKET" =~ ^[0-9]+$ ]]; then
-    TICKET="GH-$TICKET"
+    TICKET="$PREFIX-$TICKET"
   fi
 
   WT="$WORKTREES_BASE/$REPO_NAME-$TICKET"
@@ -129,6 +139,8 @@ done
 
 echo
 echo "Active sessions:"
-# Use the same pattern maestro-conduct.sh's SESSION_PATTERN defaults to so the
-# listing only shows sessions the conductor will actually discover and monitor.
-tmux list-sessions 2>/dev/null | grep -E '^GH-[0-9]+-work:' || echo "  (none)"
+# List the -work sessions bootstrap just launched (its own deliverable). The
+# conductor discovers a wider set (SESSION_PATTERN defaults to
+# -(work|dev|listen)); this summary intentionally shows only the -work agents
+# bootstrap is responsible for.
+tmux list-sessions 2>/dev/null | grep -E "^${PREFIX}-[0-9]+-work:" || echo "  (none)"
