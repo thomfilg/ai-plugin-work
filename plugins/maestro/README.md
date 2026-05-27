@@ -8,7 +8,7 @@ When you run several `/work <TICKET>` agents in parallel — one per ticket, eac
 
 Session names are prefixed with the **provider-derived ticket prefix** rather than a hardcoded `GH`. Both `maestro-conduct.sh` and `maestro-bootstrap.sh` resolve the prefix via `plugins/work/scripts/workflows/lib/ticket-provider.js` (`getProviderConfig` → `projectKey` / `sanitizeTicketIdForPath`). The resolution is **fail-open**: when the provider is GitHub (`projectKey: ''`), unconfigured (returns `null`), the node shell-out fails, or the resolved value does not match `^[A-Z][A-Z0-9]*$`, the prefix falls back to `GH`. So with a Linear/Jira provider whose `projectKey` is `ECHO`, sessions are named `ECHO-<N>-work`; with GitHub (or no config) they stay `GH-<N>-work` byte-for-byte.
 
-The `SESSION_PATTERN` default is therefore `^${PREFIX}-[0-9]+-work$` for the resolved `${PREFIX}` — never an empty-prefix pattern. Session **discovery** widens to `-(work|dev|listen)` so helper sessions surface informationally, but **only `-work` sessions are auto-restart-eligible**: `-dev` and `-listen` helpers are reported but never relaunched with `/work <TICKET>`.
+The `SESSION_PATTERN` default is therefore `^${PREFIX}-[0-9]+-(work|dev|listen)$` for the resolved `${PREFIX}` — never an empty-prefix pattern. `SESSION_PATTERN` is the single env override that drives discovery: its default already widens to `-(work|dev|listen)` so the `-dev`/`-listen` helper sessions `/work` spawns surface informationally. Auto-restart is gated **separately** to `-work` only, so `-dev` and `-listen` helpers are reported but never relaunched with `/work <TICKET>`.
 
 ## Components
 
@@ -50,7 +50,7 @@ File-mailbox at `/tmp/claude-agent-inbox/<TICKET>.log`. `signal` appends a line,
 | `BASE_BRANCH` | `main` | Branch to base worktrees on |
 | `SILENCE_LIMIT_SEC` | `300` | Auto-restart threshold |
 | `POLL_INTERVAL_SEC` | `60` | Conductor poll cadence |
-| `SESSION_PATTERN` | `^${PREFIX}-[0-9]+-work$` | Regex of sessions to watch. `${PREFIX}` is the provider-derived prefix (via `ticket-provider.js`, fail-open to `GH`); GitHub/unconfigured resolves to `^GH-[0-9]+-work$`. Discovery widens to `-(work\|dev\|listen)`, but only `-work` is auto-restart-eligible. |
+| `SESSION_PATTERN` | `^${PREFIX}-[0-9]+-(work\|dev\|listen)$` | Regex of sessions to discover and watch. `${PREFIX}` is the provider-derived prefix (via `ticket-provider.js`, fail-open to `GH`); GitHub/unconfigured resolves to `^GH-[0-9]+-(work\|dev\|listen)$`. The default already includes `-dev`/`-listen` helpers; only `-work` is auto-restart-eligible. |
 
 ## Status
 

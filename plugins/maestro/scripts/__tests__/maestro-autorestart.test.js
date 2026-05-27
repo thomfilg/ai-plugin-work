@@ -99,9 +99,9 @@ function runOnePoll({ session, ticketId }) {
       POLL_INTERVAL_SEC: '3600', // sleep long after the single iteration
       // The conductor calls resolve_prefix() at source time, which would reset
       // PREFIX to the provider-derived value (GH, since the provider fails in
-      // the harness). Override DISCOVERY_PATTERN directly so discovery surfaces
+      // the harness). Override SESSION_PATTERN directly so discovery surfaces
       // the ECHO-* session deterministically regardless of resolve_prefix.
-      DISCOVERY_PATTERN: '^ECHO-[0-9]+-(work|dev|listen)$',
+      SESSION_PATTERN: '^ECHO-[0-9]+-(work|dev|listen)$',
       SKILL_NAME: 'work',
       CLAUDE_BIN: 'true',
       FAKE_TMUX_LIST_SESSIONS: session,

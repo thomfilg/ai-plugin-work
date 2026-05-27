@@ -48,23 +48,27 @@ resolve_prefix() {
 }
 
 resolve_prefix
-SESSION_PATTERN="${SESSION_PATTERN:-^${PREFIX}-[0-9]+-work$}"
 # Match maestro-bootstrap.sh so auto-restart uses the same binary and skill the
 # bootstrap launched with. Override via env to customize.
 CLAUDE_BIN="${CLAUDE_BIN:-claude}"
 SKILL_NAME="${SKILL_NAME:-work}"
 
 # Single source of truth for the session-name suffixes the conductor tracks.
-# Reused by both the discovery regex and ticket_id_for's suffix strip so the
-# two never drift. (Auto-restart eligibility is gated separately to -work.)
+# Reused by both the SESSION_PATTERN default and ticket_id_for's suffix strip
+# so the two never drift. (Auto-restart eligibility is gated separately to
+# -work — see restart_eligible.)
 SESSION_SUFFIX_ALT="work|dev|listen"
 
-# Discovery widens past SESSION_PATTERN (which gates auto-restart to -work) so
-# the conductor also surfaces -dev/-listen helper sessions informationally.
-# Built per-call from the current PREFIX so it tracks provider resolution.
+# SESSION_PATTERN is the user-facing override for which sessions the conductor
+# discovers and watches (documented in README/SKILL.md). When unset it defaults
+# to -work plus the -dev/-listen helper sessions /work spawns, built from the
+# resolved PREFIX so it tracks provider resolution. discover_sessions consumes
+# it directly; auto-restart is gated separately to -work only, so helper
+# sessions are surfaced informationally but never relaunched.
+SESSION_PATTERN="${SESSION_PATTERN:-^${PREFIX}-[0-9]+-(${SESSION_SUFFIX_ALT})$}"
+
 discover_sessions() {
-  local pattern="${DISCOVERY_PATTERN:-^${PREFIX}-[0-9]+-(${SESSION_SUFFIX_ALT})$}"
-  tmux list-sessions -F '#S' 2>/dev/null | grep -E "$pattern" || true
+  tmux list-sessions -F '#S' 2>/dev/null | grep -E "$SESSION_PATTERN" || true
 }
 
 ticket_id_for() { echo "$1" | sed -E "s/-(${SESSION_SUFFIX_ALT})\$//"; }

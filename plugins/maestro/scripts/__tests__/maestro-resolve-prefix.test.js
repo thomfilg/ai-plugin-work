@@ -2,8 +2,8 @@
 //
 // resolve_prefix() must derive the session-name prefix from the ticket
 // provider (via `node -e` against ticket-provider.js) and fail open to `GH`:
-//   - provider projectKey "ECHO"  -> PREFIX=ECHO, SESSION_PATTERN=^ECHO-[0-9]+-work$
-//   - github (projectKey: '')     -> PREFIX=GH,   SESSION_PATTERN=^GH-[0-9]+-work$
+//   - provider projectKey "ECHO"  -> PREFIX=ECHO, SESSION_PATTERN=^ECHO-[0-9]+-(work|dev|listen)$
+//   - github (projectKey: '')     -> PREFIX=GH,   SESSION_PATTERN=^GH-[0-9]+-(work|dev|listen)$
 //   - unconfigured (empty / null) -> PREFIX=GH
 //   - node/module unavailable     -> exit 0, PREFIX=GH (fail-open, no hard error)
 //   - malformed prefix            -> rejected by ^[A-Z][A-Z0-9]*$, PREFIX=GH
@@ -62,7 +62,7 @@ test('Prefix derives from provider projectKey when configured', () => {
 
   assert.equal(status, 0, `entrypoint should exit 0\nstdout:\n${stdout}`);
   assert.match(stdout, /^PREFIX=ECHO$/m);
-  assert.match(stdout, /^SESSION_PATTERN=\^ECHO-\[0-9\]\+-work\$$/m);
+  assert.match(stdout, /^SESSION_PATTERN=\^ECHO-\[0-9\]\+-\(work\|dev\|listen\)\$$/m);
 });
 
 test('Prefix falls back to GH when provider is github', () => {
@@ -78,9 +78,9 @@ test('Prefix falls back to GH when provider is github', () => {
 
   assert.equal(status, 0, `entrypoint should exit 0\nstdout:\n${stdout}`);
   assert.match(stdout, /^PREFIX=GH$/m);
-  assert.match(stdout, /^SESSION_PATTERN=\^GH-\[0-9\]\+-work\$$/m);
+  assert.match(stdout, /^SESSION_PATTERN=\^GH-\[0-9\]\+-\(work\|dev\|listen\)\$$/m);
   // Never emit an empty-prefix pattern.
-  assert.doesNotMatch(stdout, /SESSION_PATTERN=\^-\[0-9\]\+-work\$/);
+  assert.doesNotMatch(stdout, /SESSION_PATTERN=\^-\[0-9\]\+-\(work\|dev\|listen\)\$/);
 });
 
 test('Prefix falls back to GH when provider is unconfigured', () => {
@@ -96,8 +96,8 @@ test('Prefix falls back to GH when provider is unconfigured', () => {
 
   assert.equal(status, 0, `entrypoint should exit 0\nstdout:\n${stdout}`);
   assert.match(stdout, /^PREFIX=GH$/m);
-  assert.match(stdout, /^SESSION_PATTERN=\^GH-\[0-9\]\+-work\$$/m);
-  assert.doesNotMatch(stdout, /SESSION_PATTERN=\^-\[0-9\]\+-work\$/);
+  assert.match(stdout, /^SESSION_PATTERN=\^GH-\[0-9\]\+-\(work\|dev\|listen\)\$$/m);
+  assert.doesNotMatch(stdout, /SESSION_PATTERN=\^-\[0-9\]\+-\(work\|dev\|listen\)\$/);
 });
 
 test('Prefix fails open to GH when node or provider module is unavailable', () => {
@@ -113,7 +113,7 @@ test('Prefix fails open to GH when node or provider module is unavailable', () =
 
   assert.equal(status, 0, `fail-open: entrypoint must still exit 0\nstdout:\n${stdout}`);
   assert.match(stdout, /^PREFIX=GH$/m);
-  assert.match(stdout, /^SESSION_PATTERN=\^GH-\[0-9\]\+-work\$$/m);
+  assert.match(stdout, /^SESSION_PATTERN=\^GH-\[0-9\]\+-\(work\|dev\|listen\)\$$/m);
 });
 
 test('a malformed provider prefix is rejected and falls back to GH', () => {
@@ -129,7 +129,7 @@ test('a malformed provider prefix is rejected and falls back to GH', () => {
 
   assert.equal(status, 0, `entrypoint should exit 0\nstdout:\n${stdout}`);
   assert.match(stdout, /^PREFIX=GH$/m);
-  assert.match(stdout, /^SESSION_PATTERN=\^GH-\[0-9\]\+-work\$$/m);
+  assert.match(stdout, /^SESSION_PATTERN=\^GH-\[0-9\]\+-\(work\|dev\|listen\)\$$/m);
   // The raw malformed value must never leak into the prefix/pattern.
   assert.doesNotMatch(stdout, /rm -rf/);
 });

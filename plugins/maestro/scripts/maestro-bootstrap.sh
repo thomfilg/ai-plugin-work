@@ -164,6 +164,8 @@ done
 
 echo
 echo "Active sessions:"
-# Use the same pattern maestro-conduct.sh's SESSION_PATTERN defaults to so the
-# listing only shows sessions the conductor will actually discover and monitor.
+# List the -work sessions bootstrap just launched (its own deliverable). The
+# conductor discovers a wider set (SESSION_PATTERN defaults to
+# -(work|dev|listen)); this summary intentionally shows only the -work agents
+# bootstrap is responsible for.
 tmux list-sessions 2>/dev/null | grep -E "^${PREFIX}-[0-9]+-work:" || echo "  (none)"

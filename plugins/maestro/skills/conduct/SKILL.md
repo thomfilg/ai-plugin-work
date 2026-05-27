@@ -36,7 +36,7 @@ Discovery widens to `${PREFIX}-[0-9]+-(work|dev|listen)`, so `-dev`/`-listen` he
 |-----|---------|--------|
 | `SILENCE_LIMIT_SEC` | `300` | Real-silence threshold before auto-restart |
 | `POLL_INTERVAL_SEC` | `60` | Poll cadence |
-| `SESSION_PATTERN` | `^${PREFIX}-[0-9]+-work$` | Sessions to watch. `${PREFIX}` is the provider-derived prefix (via `ticket-provider.js`, fail-open to `GH`); GitHub/unconfigured resolves to `^GH-[0-9]+-work$`. Discovery widens to `-(work\|dev\|listen)`, but only `-work` is auto-restart-eligible. |
+| `SESSION_PATTERN` | `^${PREFIX}-[0-9]+-(work\|dev\|listen)$` | Sessions to discover and watch. `${PREFIX}` is the provider-derived prefix (via `ticket-provider.js`, fail-open to `GH`); GitHub/unconfigured resolves to `^GH-[0-9]+-(work\|dev\|listen)$`. The default already includes `-dev`/`-listen` helpers; only `-work` is auto-restart-eligible. |
 
 ## Stop
 
