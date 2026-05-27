@@ -13,7 +13,7 @@
  *     [--pretool=<Tool:argRegex,Tool:argRegex>] \
  *     [--session=true|false] \
  *     [--inject=full|summary] \
- *     [--store=<local|worktree|global>] \
+ *     [--store=<local|worktree|global|shared>] \
  *     [--force]                              # overwrite if exists
  *     [--cwd=<path>]
  *

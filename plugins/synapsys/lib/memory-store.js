@@ -7,6 +7,11 @@ const { execSync } = require('node:child_process');
 
 const MARKER = '.synapsys.json';
 const FOLDER = 'synapsys';
+// Reserved sub-directory under ~/.claude/synapsys for the cross-project
+// "shared" tier. Leading underscore keeps it from colliding with a real
+// project name (basename of a git toplevel), which the per-project "global"
+// tier uses as its directory name.
+const SHARED_DIRNAME = '_shared';
 
 // Pass cwd through to execSync so git resolves relative to the caller's path,
 // not the host process's cwd. Mirrors the pattern in
@@ -37,6 +42,7 @@ function candidateStores(cwd, projectName) {
     { kind: 'local', dir: path.join(cwd, '.claude', FOLDER) },
     { kind: 'worktree', dir: path.resolve(cwd, '..', '.claude', FOLDER) },
     { kind: 'global', dir: path.join(os.homedir(), '.claude', FOLDER, projectName) },
+    { kind: 'shared', dir: path.join(os.homedir(), '.claude', FOLDER, SHARED_DIRNAME) },
   ];
 }
 
@@ -85,6 +91,10 @@ function discoverStores(cwd) {
 
   // global: per-project store under home.
   push('global', path.join(os.homedir(), '.claude', FOLDER, projectName));
+
+  // shared: cross-project store under home — discovered for every project,
+  // regardless of cwd or project name.
+  push('shared', path.join(os.homedir(), '.claude', FOLDER, SHARED_DIRNAME));
 
   return out;
 }
@@ -184,6 +194,7 @@ function toList(v) {
 module.exports = {
   MARKER,
   FOLDER,
+  SHARED_DIRNAME,
   getProjectName,
   candidateStores,
   discoverStores,
