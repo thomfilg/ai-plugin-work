@@ -16,7 +16,7 @@
 
 const path = require('node:path');
 const { editContext } = require(path.join(__dirname, '..', 'lib', 'cli'));
-const { readConfig, writeConfig, SCHEMA_VERSION } = require(
+const { readConfig, writeConfig, removeLock, SCHEMA_VERSION } = require(
   path.join(__dirname, '..', 'lib', 'lock-store')
 );
 
@@ -25,23 +25,17 @@ const { phrase, paths, dirs } = editContext();
 function removeFromStore(storeDir) {
   const cfg = readConfig(storeDir);
   if (!cfg) return false;
-  const idx = cfg.locks.findIndex((l) => (l.unlockPhrase || '').trim() === phrase);
-  if (idx === -1) return false;
+  const status = removeLock(cfg, phrase, paths);
+  if (status === 'missing') return false;
 
-  if (paths.length === 0) {
-    cfg.locks.splice(idx, 1);
-    console.log(`removed lock block "${phrase}" from ${storeDir}`);
-  } else {
-    const block = cfg.locks[idx];
-    block.protect = (block.protect || []).filter((p) => !paths.includes(p));
-    if (block.protect.length === 0) {
-      cfg.locks.splice(idx, 1);
-      console.log(`removed paths and emptied block "${phrase}" from ${storeDir}`);
-    } else {
-      console.log(
-        `removed [${paths.join(', ')}] from "${phrase}"; remaining [${block.protect.join(', ')}] (${storeDir})`
-      );
-    }
+  if (status === 'removed') console.log(`removed lock block "${phrase}" from ${storeDir}`);
+  else if (status === 'emptied')
+    console.log(`removed paths and emptied block "${phrase}" from ${storeDir}`);
+  else {
+    const block = cfg.locks.find((l) => (l.unlockPhrase || '').trim() === phrase);
+    console.log(
+      `removed [${paths.join(', ')}] from "${phrase}"; remaining [${block.protect.join(', ')}] (${storeDir})`
+    );
   }
   cfg.schemaVersion = SCHEMA_VERSION;
   cfg.updatedAt = new Date().toISOString();

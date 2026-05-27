@@ -2,37 +2,31 @@
 //
 // Discovered by plugins/work/scripts/run-tests.sh (searches plugins/heimdall/).
 // Manual: node --test plugins/heimdall/lib/__tests__/scan.test.js
+//
+// In-process (require the lib, no subprocess/git spawns) so the test adds no
+// parallel-process load to the full suite.
 
 const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { execFileSync } = require('node:child_process');
 
-const SCAN = path.resolve(__dirname, '..', '..', 'scripts', 'heimdall-scan.js');
-const INIT = path.resolve(__dirname, '..', '..', 'scripts', 'heimdall-init.js');
-const PROTECT = path.resolve(__dirname, '..', '..', 'scripts', 'heimdall-protect.js');
+const { scan } = require(path.resolve(__dirname, '..', 'scan'));
+const { writeConfig, FOLDER } = require(path.resolve(__dirname, '..', 'lock-store'));
 
 let repo;
 
-function scanJson(kind) {
-  const out = execFileSync('node', [SCAN, `--kind=${kind}`, `--cwd=${repo}`, '--json'], {
-    encoding: 'utf8',
-  });
-  return JSON.parse(out);
-}
+// No git init needed: getRepoRoot() falls back to cwd when cwd is not a git
+// repo, which is exactly what we want here. Under os.tmpdir() so the worktree
+// ancestor-walk can't discover an ambient real store.
+const scanIds = (kind) =>
+  scan({ cwd: repo, kind })
+    .map((s) => s.id)
+    .sort();
 
 before(() => {
-  // Real (non-temp) repo so the guard's temp-path exemption is irrelevant and
-  // existence checks are meaningful.
-  // Under os.tmpdir() (not the dev tree) so the worktree ancestor-walk can't
-  // discover an ambient real store and dedupe suggestions away. Scan doesn't
-  // use the guard's temp-path exemption, so tmpdir is safe here.
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-scan-it-'));
-  // Real git repo so getRepoRoot() resolves to THIS dir, not the outer repo
-  // (an empty .git dir would let `git rev-parse` walk up to the real repo).
-  execFileSync('git', ['init', '-q'], { cwd: repo });
   fs.mkdirSync(path.join(repo, '.claude'));
   fs.mkdirSync(path.join(repo, '.github'));
   fs.writeFileSync(path.join(repo, 'package.json'), '{}\n');
@@ -43,39 +37,31 @@ after(() => {
   fs.rmSync(repo, { recursive: true, force: true });
 });
 
-describe('heimdall-scan', () => {
+describe('scan', () => {
   it('suggests only existing repo paths for a local install', () => {
-    const ids = scanJson('local')
-      .map((s) => s.id)
-      .sort();
-    assert.deepEqual(ids, ['claude-config', 'github-dir', 'root-package-json']);
+    assert.deepEqual(scanIds('local'), ['claude-config', 'github-dir', 'root-package-json']);
   });
 
   it('does not suggest packages/ui because it does not exist', () => {
-    assert.ok(!scanJson('local').some((s) => s.id === 'packages-ui'));
+    assert.ok(!scan({ cwd: repo, kind: 'local' }).some((s) => s.id === 'packages-ui'));
   });
 
   it('never suggests the home-anchored ~/.claude for a local install', () => {
-    const cc = scanJson('local').find((s) => s.id === 'claude-config');
+    const cc = scan({ cwd: repo, kind: 'local' }).find((s) => s.id === 'claude-config');
     assert.deepEqual(cc.protect, ['.claude'], 'only the repo .claude, not ~/.claude');
   });
 
   it('carries allowedPaths/trustedSubdirs on the claude-config suggestion', () => {
-    const cc = scanJson('local').find((s) => s.id === 'claude-config');
+    const cc = scan({ cwd: repo, kind: 'local' }).find((s) => s.id === 'claude-config');
     assert.ok(cc.allowedPaths.includes('plans'));
     assert.ok(cc.trustedSubdirs.includes('hooks'));
   });
 
   it('drops suggestions already covered by an existing lock', () => {
-    execFileSync('node', [INIT, '--kind=local', `--cwd=${repo}`], { encoding: 'utf8' });
-    execFileSync(
-      'node',
-      [PROTECT, '--kind=local', `--cwd=${repo}`, '--phrase=edit .github', '--paths=.github'],
-      { encoding: 'utf8' }
-    );
-    assert.ok(
-      !scanJson('local').some((s) => s.id === 'github-dir'),
-      '.github now protected → not re-suggested'
-    );
+    writeConfig(path.join(repo, '.claude', FOLDER), {
+      kind: 'local',
+      locks: [{ protect: ['.github'], unlockPhrase: 'edit .github' }],
+    });
+    assert.ok(!scanIds('local').includes('github-dir'), '.github now protected → not re-suggested');
   });
 });

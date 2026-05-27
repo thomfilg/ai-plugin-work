@@ -19,7 +19,7 @@
 
 const path = require('node:path');
 const { splitList, editContext } = require(path.join(__dirname, '..', 'lib', 'cli'));
-const { readConfig, writeConfig, SCHEMA_VERSION } = require(
+const { readConfig, writeConfig, upsertLock, SCHEMA_VERSION } = require(
   path.join(__dirname, '..', 'lib', 'lock-store')
 );
 
@@ -36,23 +36,17 @@ if (!cfg) {
   process.exit(1);
 }
 
-const existing = cfg.locks.find((l) => (l.unlockPhrase || '').trim() === phrase);
-if (existing) {
-  existing.protect = [...new Set([...(existing.protect || []), ...paths])];
-  if (args.allowed) existing.allowedPaths = splitList(args.allowed);
-  if (args.trusted) existing.trustedSubdirs = splitList(args.trusted);
-} else {
-  const block = { protect: paths, unlockPhrase: phrase };
-  if (args.allowed) block.allowedPaths = splitList(args.allowed);
-  if (args.trusted) block.trustedSubdirs = splitList(args.trusted);
-  cfg.locks.push(block);
-}
+const saved = upsertLock(cfg, {
+  phrase,
+  paths,
+  allowedPaths: args.allowed ? splitList(args.allowed) : undefined,
+  trustedSubdirs: args.trusted ? splitList(args.trusted) : undefined,
+});
 
 cfg.schemaVersion = SCHEMA_VERSION;
 cfg.updatedAt = new Date().toISOString();
 writeConfig(storeDir, cfg);
 
-const saved = cfg.locks.find((l) => (l.unlockPhrase || '').trim() === phrase);
 console.log(
   `protected [${saved.protect.join(', ')}] under phrase "${phrase}" ` +
     `(store: ${storeDir}, ${cfg.locks.length} block(s) total)`

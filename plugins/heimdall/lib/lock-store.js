@@ -123,6 +123,40 @@ function writeConfig(storeDir, cfg) {
   fs.writeFileSync(path.join(storeDir, MARKER), `${JSON.stringify(out, null, 2)}\n`);
 }
 
+/**
+ * Add a lock block (or merge paths into the existing block with the same
+ * phrase). Mutates cfg.locks and returns the resulting block.
+ */
+function upsertLock(cfg, { phrase, paths, allowedPaths, trustedSubdirs }) {
+  const existing = cfg.locks.find((l) => (l.unlockPhrase || '').trim() === phrase);
+  const block = existing || { protect: [], unlockPhrase: phrase };
+  block.protect = [...new Set([...(block.protect || []), ...paths])];
+  if (allowedPaths) block.allowedPaths = allowedPaths;
+  if (trustedSubdirs) block.trustedSubdirs = trustedSubdirs;
+  if (!existing) cfg.locks.push(block);
+  return block;
+}
+
+/**
+ * Remove a lock block by phrase, or just `paths` from it (deleting the block if
+ * it becomes empty). Returns a status: 'missing' | 'removed' | 'emptied' | 'trimmed'.
+ */
+function removeLock(cfg, phrase, paths = []) {
+  const idx = cfg.locks.findIndex((l) => (l.unlockPhrase || '').trim() === phrase);
+  if (idx === -1) return 'missing';
+  if (paths.length === 0) {
+    cfg.locks.splice(idx, 1);
+    return 'removed';
+  }
+  const block = cfg.locks[idx];
+  block.protect = (block.protect || []).filter((p) => !paths.includes(p));
+  if (block.protect.length === 0) {
+    cfg.locks.splice(idx, 1);
+    return 'emptied';
+  }
+  return 'trimmed';
+}
+
 module.exports = {
   MARKER,
   FOLDER,
@@ -135,4 +169,6 @@ module.exports = {
   discoverStores,
   readConfig,
   writeConfig,
+  upsertLock,
+  removeLock,
 };
