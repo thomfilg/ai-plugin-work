@@ -164,8 +164,9 @@ const RULES = [
     scope: 'memory',
     check(memory) {
       const events = Array.isArray(memory.events) ? memory.events : [];
+      const eventSet = new Set(events);
       const isDefault =
-        events.length === 2 && events[0] === 'UserPromptSubmit' && events[1] === 'PreToolUse';
+        events.length === 2 && eventSet.has('UserPromptSubmit') && eventSet.has('PreToolUse');
       if (!isDefault) return [];
       const pretool = Array.isArray(memory.trigger_pretool) ? memory.trigger_pretool : [];
       const permissive = pretool.length === 0 || pretool.every((p) => PERMISSIVE_PRETOOL.has(p));
