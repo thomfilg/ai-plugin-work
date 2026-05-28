@@ -250,12 +250,14 @@ function main() {
     // Force-reset any existing state (e.g., stale "complete" from previous run)
     const existingState = path.join(markerDir, '.follow-up-state.json');
     if (fs.existsSync(existingState)) fs.unlinkSync(existingState);
+    const { ownerStamp } = require(path.join(__dirname, '..', 'work', 'lib', 'marker'));
     fs.writeFileSync(
       path.join(markerDir, '.follow-up-orchestrator.pid'),
       JSON.stringify({
         ticket: safeName,
         startedAt: new Date().toISOString(),
         workflow: '/follow-up',
+        ...ownerStamp(),
       })
     );
     // Register session guard so Stop hook blocks abandonment.

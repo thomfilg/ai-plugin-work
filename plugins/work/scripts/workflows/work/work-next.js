@@ -868,11 +868,10 @@ function main() {
     }
   }
 
-  // On --init, write marker file for auto-advance hook detection
+  // On --init, write marker file for auto-advance hook detection (stamped with
+  // the owning session id + worktree root so hooks scope to this terminal).
   if (init) {
-    const sessionId =
-      process.env.SESSION_ID || process.env.CLAUDE_SESSION_ID || `work-${Date.now()}`;
-    writeMarkerFile(ticketRaw, sessionId, { TASKS_BASE, tp });
+    writeMarkerFile(ticketRaw, { TASKS_BASE, tp });
   }
 
   const instruction = getNextInstruction(ticketRaw, rework);

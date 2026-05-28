@@ -61,9 +61,13 @@ function readSession(ticketId) {
  */
 function runCli(args = [], extraEnv = {}) {
   return new Promise((resolve, reject) => {
+    const env = { ...process.env, SESSION_GUARD_DIR: SESSION_DIR, ...extraEnv };
+    // Neutralize ambient session id unless a test opts in, so legacy-path tests
+    // (no ownerSessionId scoping) stay deterministic when run inside a Claude session.
+    if (!('CLAUDE_CODE_SESSION_ID' in extraEnv)) delete env.CLAUDE_CODE_SESSION_ID;
     const proc = spawn('node', [HOOK_PATH, ...args], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, SESSION_GUARD_DIR: SESSION_DIR, ...extraEnv },
+      env,
     });
 
     let stdout = '';
@@ -86,14 +90,16 @@ function runCli(args = [], extraEnv = {}) {
  */
 function runHook(hookData, hookType, extraEnv = {}) {
   return new Promise((resolve, reject) => {
+    const env = {
+      ...process.env,
+      SESSION_GUARD_DIR: SESSION_DIR,
+      ...extraEnv,
+      CLAUDE_HOOK_TYPE: hookType,
+    };
+    if (!('CLAUDE_CODE_SESSION_ID' in extraEnv)) delete env.CLAUDE_CODE_SESSION_ID;
     const proc = spawn('node', [HOOK_PATH], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
-        SESSION_GUARD_DIR: SESSION_DIR,
-        ...extraEnv,
-        CLAUDE_HOOK_TYPE: hookType,
-      },
+      env,
     });
 
     let stdout = '';
@@ -795,6 +801,150 @@ describe('session-guard', () => {
       assert.equal(r.code, 2, 'should exit 2 to block stop');
       assert.ok(r.stderr.includes('ACTIVE WORKFLOW SESSION'), 'should contain active workflow');
       assert.ok(r.stderr.includes('MUST continue'), 'should use MUST continue message');
+    });
+  });
+
+  // ─── Session-id scoping (cross-terminal lock bleed) ───
+  //
+  // Regression for: a finished session whose worktree was removed leaves its
+  // shell in another active workflow's cwd. Without session-id scoping, the
+  // Stop hook force-holds THIS terminal with the OTHER ticket's lock (and feeds
+  // its delegate instructions) because cwd alone cannot tell two co-located
+  // Claude sessions apart.
+  describe('session-id scoping', () => {
+    afterEach(() => cleanupAllSessions());
+
+    function writeOwnedSession(ticketId, ownerSessionId, extra = {}) {
+      fs.writeFileSync(
+        sessionFilePath(ticketId),
+        JSON.stringify({
+          ticketId,
+          workflow: '/follow-up',
+          passphrase: 'TEST-ONLY-OWNED',
+          cwd: process.cwd(),
+          ownerSessionId,
+          startTime: new Date().toISOString(),
+          revealed: false,
+          ...extra,
+        })
+      );
+    }
+
+    it('init stamps ownerSessionId from CLAUDE_CODE_SESSION_ID', async () => {
+      await runCli(['init', TEST_TICKET, TEST_WORKFLOW], {
+        CLAUDE_CODE_SESSION_ID: 'sess-owner-1',
+      });
+      const session = readSession(TEST_TICKET);
+      assert.equal(session.ownerSessionId, 'sess-owner-1');
+    });
+
+    it('does NOT block a terminal whose session_id differs from the owner', async () => {
+      // Owned by another terminal; cwd matches AND ticket context is empty —
+      // would have blocked via cwd fallback under the old logic.
+      writeOwnedSession('OTHER-1', 'sess-owner-A');
+
+      const r = await runHook({ stop_message: '', session_id: 'sess-terminal-B' }, 'Stop', {
+        SESSION_GUARD_TICKET_ID: '',
+      });
+      assert.equal(r.code, 0, 'foreign-owned session must not hold this terminal');
+    });
+
+    it('still blocks the terminal that actually owns the session', async () => {
+      writeOwnedSession('OWNED-1', 'sess-owner-A');
+
+      const r = await runHook({ stop_message: '', session_id: 'sess-owner-A' }, 'Stop', {
+        SESSION_GUARD_TICKET_ID: '',
+      });
+      assert.equal(r.code, 2, 'owning terminal should still be blocked');
+    });
+
+    it('falls back to cwd/ticket scoping for legacy sessions without ownerSessionId', async () => {
+      // No ownerSessionId field → backward compatible: cwd match still blocks.
+      const sessionData = {
+        ticketId: 'LEGACY-2',
+        workflow: '/work',
+        passphrase: 'TEST-ONLY-LEGACY',
+        cwd: process.cwd(),
+        startTime: new Date().toISOString(),
+        revealed: false,
+      };
+      fs.writeFileSync(sessionFilePath('LEGACY-2'), JSON.stringify(sessionData));
+
+      const r = await runHook({ stop_message: '', session_id: 'sess-anything' }, 'Stop', {
+        SESSION_GUARD_TICKET_ID: '',
+      });
+      assert.equal(r.code, 2, 'legacy session without owner still blocks via cwd');
+    });
+
+    it('PreCompact omits reminders for a foreign-owned session', async () => {
+      writeOwnedSession('FOREIGN-1', 'sess-owner-A', { workflow: '/work' });
+
+      const r = await runHook({ session_id: 'sess-terminal-B' }, 'PreCompact', {
+        SESSION_GUARD_TICKET_ID: '',
+      });
+      assert.equal(r.code, 0);
+      assert.ok(!r.stdout.includes('FOREIGN-1'), 'should not surface foreign session');
+    });
+  });
+
+  // ─── Worktree scoping (cross-worktree lock bleed) ───
+  //
+  // Regression for: a /follow-up running in worktree A must never hold a Stop
+  // firing in sibling worktree B. cwd-equality + branch-ticket heuristics fail
+  // when the branch name has no parseable ticket (e.g. GitHub numeric tickets or
+  // a `chore/…` branch), so the lock must also be scoped by git worktree root.
+  describe('worktree scoping', () => {
+    const REPO_ROOT = require('child_process')
+      .execSync('git rev-parse --show-toplevel', { cwd: __dirname })
+      .toString()
+      .trim();
+
+    afterEach(() => cleanupAllSessions());
+
+    function writeWtSession(ticketId, worktreeRoot, extra = {}) {
+      fs.writeFileSync(
+        sessionFilePath(ticketId),
+        JSON.stringify({
+          ticketId,
+          workflow: '/follow-up',
+          passphrase: 'TEST-ONLY-WT',
+          cwd: process.cwd(),
+          worktreeRoot,
+          startTime: new Date().toISOString(),
+          revealed: false,
+          ...extra,
+        })
+      );
+    }
+
+    it('init stamps worktreeRoot from the current git worktree', async () => {
+      await runCli(['init', TEST_TICKET, TEST_WORKFLOW]);
+      const session = readSession(TEST_TICKET);
+      assert.equal(session.worktreeRoot, REPO_ROOT);
+    });
+
+    it('does NOT block a Stop firing in a different worktree', async () => {
+      // Lock owned by a sibling worktree; cwd matches AND ticket context is empty
+      // — would have blocked via cwd fallback under the old logic.
+      writeWtSession('OTHERWT-1', '/some/other/worktree-root');
+
+      const r = await runHook({ stop_message: '' }, 'Stop', { SESSION_GUARD_TICKET_ID: '' });
+      assert.equal(r.code, 0, 'a lock from another worktree must not hold this one');
+    });
+
+    it('still blocks a Stop firing in the owning worktree', async () => {
+      writeWtSession('OWNWT-1', REPO_ROOT);
+
+      const r = await runHook({ stop_message: '' }, 'Stop', { SESSION_GUARD_TICKET_ID: '' });
+      assert.equal(r.code, 2, 'owning worktree should still be blocked');
+    });
+
+    it('PreCompact omits reminders for a foreign-worktree session', async () => {
+      writeWtSession('OTHERWT-2', '/some/other/worktree-root', { workflow: '/work' });
+
+      const r = await runHook({}, 'PreCompact', { SESSION_GUARD_TICKET_ID: '' });
+      assert.equal(r.code, 0);
+      assert.ok(!r.stdout.includes('OTHERWT-2'), 'should not surface foreign-worktree session');
     });
   });
 });

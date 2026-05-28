@@ -186,11 +186,17 @@ function main() {
   const safeName = tp.sanitizeTicketIdForPath(ticketRaw, providerConfig);
 
   if (isInit) {
+    const { ownerStamp } = require(path.join(__dirname, '..', 'work', 'lib', 'marker'));
     const markerDir = path.join(TASKS_BASE, safeName);
     fs.mkdirSync(markerDir, { recursive: true });
     fs.writeFileSync(
       path.join(markerDir, '.check2-orchestrator.pid'),
-      JSON.stringify({ ticket: safeName, startedAt: new Date().toISOString(), workflow: '/check2' })
+      JSON.stringify({
+        ticket: safeName,
+        startedAt: new Date().toISOString(),
+        workflow: '/check2',
+        ...ownerStamp(),
+      })
     );
   }
 

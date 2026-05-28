@@ -36,7 +36,11 @@ function main() {
     getConfig('TASKS_BASE') || (WORKTREES_BASE ? path.join(WORKTREES_BASE, 'tasks') : '');
   if (!TASKS_BASE) process.exit(0);
 
-  const marker = findActiveMarker(TASKS_BASE);
+  // Find THIS terminal's .follow-up-orchestrator.pid marker. findActiveMarker
+  // scopes by owning session id + worktree root so a hook firing in one agent
+  // never advances another agent's workflow.
+  const { findActiveMarker } = require(path.join(__dirname, '..', '..', 'work', 'lib', 'marker'));
+  const marker = findActiveMarker(TASKS_BASE, '.follow-up-orchestrator.pid');
   if (!marker) process.exit(0);
 
   const markerAge = Date.now() - new Date(marker.startedAt).getTime();
@@ -91,25 +95,6 @@ function main() {
   }
 
   process.exit(0);
-}
-
-function findActiveMarker(tasksBase) {
-  try {
-    const entries = fs.readdirSync(tasksBase, { withFileTypes: true });
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const markerPath = path.join(tasksBase, entry.name, '.follow-up-orchestrator.pid');
-      if (!fs.existsSync(markerPath)) continue;
-      try {
-        return JSON.parse(fs.readFileSync(markerPath, 'utf8'));
-      } catch {
-        continue;
-      }
-    }
-  } catch {
-    /* fail-open */
-  }
-  return null;
 }
 
 main();

@@ -41,8 +41,11 @@ function main() {
     getConfig('TASKS_BASE') || (WORKTREES_BASE ? path.join(WORKTREES_BASE, 'tasks') : '');
   if (!TASKS_BASE) process.exit(0);
 
-  // Scan for .work.pid marker in TASKS_BASE subdirectories
-  const marker = findActiveMarker(TASKS_BASE);
+  // Find THIS terminal's .work.pid marker. findActiveMarker scopes by owning
+  // session id + worktree root, so a hook firing in one agent never advances
+  // another agent's workflow (cross-wiring).
+  const { findActiveMarker } = require(path.join(__dirname, '..', 'lib', 'marker'));
+  const marker = findActiveMarker(TASKS_BASE, '.work.pid');
   if (!marker) process.exit(0);
 
   // Guard: marker must be recent (less than 12 hours old) to avoid stale sessions
@@ -92,29 +95,6 @@ function main() {
   }
 
   process.exit(0);
-}
-
-/**
- * Scan TASKS_BASE for an active .work.pid marker.
- * Returns the parsed marker or null.
- */
-function findActiveMarker(tasksBase) {
-  try {
-    const entries = fs.readdirSync(tasksBase, { withFileTypes: true });
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const markerPath = path.join(tasksBase, entry.name, '.work.pid');
-      if (!fs.existsSync(markerPath)) continue;
-      try {
-        return JSON.parse(fs.readFileSync(markerPath, 'utf8'));
-      } catch {
-        continue;
-      }
-    }
-  } catch {
-    /* fail-open */
-  }
-  return null;
 }
 
 main();

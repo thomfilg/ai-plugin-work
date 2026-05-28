@@ -27,6 +27,8 @@ const crypto = require('crypto');
 // Cached TASKS_BASE resolution — loaded once per invocation
 const getConfig = require(path.join(__dirname, '..', 'get-config'));
 const { logHookError } = require(path.join(__dirname, '..', 'hook-error-log'));
+// Canonical git-worktree-root resolver — shared, do not reimplement.
+const { resolveWorktreeRoot } = require(path.join(__dirname, '..', 'ticket-validation'));
 
 let _tasksBase;
 function getTasksBase() {
@@ -154,6 +156,55 @@ function getTicketId() {
   return _cachedTicketId;
 }
 
+/**
+ * Resolve the Claude session id that owns the current terminal.
+ * Claude Code exports this as CLAUDE_CODE_SESSION_ID and passes the same value
+ * as `session_id` in hook payloads, so the two are directly comparable.
+ * Returns null when unavailable (e.g. plain CLI runs / older harness).
+ */
+function getOwnerSessionId() {
+  return process.env.CLAUDE_CODE_SESSION_ID || null;
+}
+
+/**
+ * The session id of the terminal firing the current hook. Prefer the hook
+ * payload's session_id (authoritative), falling back to the env var.
+ */
+function currentSessionId(hookData) {
+  return hookData?.session_id || process.env.CLAUDE_CODE_SESSION_ID || null;
+}
+
+/**
+ * A session belongs to a DIFFERENT terminal when it carries an ownerSessionId
+ * that we can compare against and that differs from the current session id.
+ * Legacy sessions (no ownerSessionId) or an unknown current id are treated as
+ * "not foreign" so existing ticket/cwd scoping still applies (backward compat).
+ */
+function isForeignSession(session, csid) {
+  return Boolean(session?.ownerSessionId && csid && session.ownerSessionId !== csid);
+}
+
+/**
+ * A session belongs to a DIFFERENT git worktree when it carries a worktreeRoot
+ * we can compare against and that differs from the current worktree root.
+ * Legacy sessions (no worktreeRoot) or an unresolvable current root are treated
+ * as "not foreign" so existing ticket/cwd scoping still applies (backward compat).
+ */
+function isForeignWorktree(session, currentRoot) {
+  return Boolean(session?.worktreeRoot && currentRoot && session.worktreeRoot !== currentRoot);
+}
+
+/**
+ * True when a session is owned by a different terminal OR a different worktree —
+ * i.e. it must not hold the current Stop/PreCompact hook. Each signal closes a
+ * distinct failure mode: session id handles two sessions sharing one cwd;
+ * worktree root handles sibling ticket worktrees whose branch names don't encode
+ * a parseable ticket.
+ */
+function isOtherOwner(session, csid, currentRoot) {
+  return isForeignSession(session, csid) || isForeignWorktree(session, currentRoot);
+}
+
 function readSessionFile(ticketId) {
   try {
     const filePath = sessionFilePath(ticketId);
@@ -239,15 +290,35 @@ function cmdInit(ticketId, workflow) {
     process.exit(1);
   }
 
+  const ownerSessionId = getOwnerSessionId();
+  const worktreeRoot = resolveWorktreeRoot();
+
   // Idempotent: reuse existing session if one exists for this ticket
   const existing = readSessionFile(ticketId);
   if (existing && existing.ticketId === ticketId) {
     // Update cwd if it changed (same ticket, different directory)
     const currentCwd = process.cwd();
+    let dirty = false;
     if (existing.cwd !== currentCwd) {
       existing.cwd = currentCwd;
+      dirty = true;
+    }
+    // Backfill owning Claude session id on a legacy/unstamped session so the
+    // Stop hook can scope the lock to this terminal (prevents cross-terminal
+    // lock bleed when two sessions share one cwd).
+    if (!existing.ownerSessionId && ownerSessionId) {
+      existing.ownerSessionId = ownerSessionId;
+      dirty = true;
+    }
+    // Backfill the owning worktree root so the Stop hook can scope the lock to
+    // this checkout (prevents bleed across sibling ticket worktrees).
+    if (!existing.worktreeRoot && worktreeRoot) {
+      existing.worktreeRoot = worktreeRoot;
+      dirty = true;
+    }
+    if (dirty) {
       writeSessionAtomic(ticketId, existing);
-      process.stderr.write(`Session guard for ${ticketId} updated cwd to ${currentCwd}.\n`);
+      process.stderr.write(`Session guard for ${ticketId} updated (cwd/owner).\n`);
     } else {
       process.stderr.write(
         `Session guard already active for ${ticketId} (${existing.workflow}). Reusing existing session.\n`
@@ -262,6 +333,12 @@ function cmdInit(ticketId, workflow) {
     workflow,
     passphrase,
     cwd: process.cwd(),
+    // Claude session that owns this workflow. Used by the Stop hook to avoid
+    // force-holding an unrelated terminal that merely shares this cwd.
+    ownerSessionId,
+    // Git worktree root that owns this workflow. Used by the Stop hook to avoid
+    // force-holding a Stop firing in a different (sibling) worktree.
+    worktreeRoot,
     startTime: new Date().toISOString(),
     revealed: false,
   };
@@ -397,8 +474,11 @@ function cmdStatus(ticketId) {
 
 // ─── Hook Handlers ───────────────────────────────────────────────────────────
 
-function handlePreCompact() {
-  const sessions = findActiveSessions();
+function handlePreCompact(hookData) {
+  // Drop sessions owned by a different terminal or worktree (lock bleed).
+  const csid = currentSessionId(hookData);
+  const currentRoot = resolveWorktreeRoot();
+  const sessions = findActiveSessions().filter((s) => !isOtherOwner(s, csid, currentRoot));
   if (sessions.length === 0) {
     process.exit(0);
     return;
@@ -515,7 +595,14 @@ function isCheckWorkflowActive(ticketId) {
 }
 
 function handleStop(hookData) {
-  const sessions = findActiveSessions();
+  // Drop sessions owned by a different terminal or worktree first. Without this,
+  // a lock created by a workflow in worktree A (or a finished session whose
+  // worktree was removed, leaving its shell in another workflow's cwd) gets
+  // force-held by THAT workflow's lock and fed its delegate instructions.
+  // Scoping by Claude session id + git worktree root prevents the bleed.
+  const csid = currentSessionId(hookData);
+  const currentRoot = resolveWorktreeRoot();
+  const sessions = findActiveSessions().filter((s) => !isOtherOwner(s, csid, currentRoot));
   if (sessions.length === 0) {
     process.exit(0);
     return;
@@ -720,7 +807,7 @@ async function main() {
 
     switch (hookType) {
       case 'PreCompact':
-        handlePreCompact();
+        handlePreCompact(hookData);
         break;
       case 'Stop':
         handleStop(hookData);

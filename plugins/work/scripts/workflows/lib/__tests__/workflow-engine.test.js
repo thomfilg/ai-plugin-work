@@ -24,6 +24,13 @@ const { WorkflowState } = require('../workflow-state');
 // Isolated temp directory for state persistence tests
 const TEST_BASE = path.join(os.tmpdir(), 'workflow-engine-test-' + process.pid);
 
+// Final sweep — remove the shared base after ALL suites finish. Per-suite
+// teardown only removes its own subdir, so suites never delete each other's
+// state dir mid-run (the cross-suite race that flaked CI under concurrency).
+after(() => {
+  fs.rmSync(TEST_BASE, { recursive: true, force: true });
+});
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 /** Minimal mock workflow matching the shape expected by the engine */
@@ -193,8 +200,11 @@ describe('loadWorkflow', () => {
 describe('defaultPlanGenerator', () => {
   const stateDir = path.join(TEST_BASE, 'plan-state');
 
+  // Clean only THIS suite's subdir — never the shared TEST_BASE, or we would
+  // delete a sibling suite's state dir when the runner interleaves suites
+  // (flaky under CI concurrency). Final base cleanup is a top-level after.
   after(() => {
-    fs.rmSync(TEST_BASE, { recursive: true, force: true });
+    fs.rmSync(stateDir, { recursive: true, force: true });
   });
 
   it('calls detectStepState() for each step', () => {
@@ -259,8 +269,9 @@ describe('defaultPlanGenerator', () => {
 describe('transitionStep', () => {
   const stateDir = path.join(TEST_BASE, 'transition-state');
 
+  // Clean only THIS suite's subdir (see note above) — never the shared base.
   after(() => {
-    fs.rmSync(TEST_BASE, { recursive: true, force: true });
+    fs.rmSync(stateDir, { recursive: true, force: true });
   });
 
   it('blocks invalid transition', () => {
