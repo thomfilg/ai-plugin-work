@@ -168,7 +168,9 @@ This is the **ECHO-4453-class wedge**. To avoid it:
 ## Task 2 — GREEN: edit get.ts
 ```
 
-Checkpoint tasks and config-only infrastructure tasks are exempt from the RED/GREEN/REFACTOR deliverables requirement. For those exempt tasks, use a non-phase deliverables list that describes the concrete verifiable work in execution order, for example: `- Update config`, `- Validate config`, `- Document rollout/usage` as applicable.
+Checkpoint tasks, config-only infrastructure tasks, and **Storybook stories-only tasks** are exempt from the RED/GREEN/REFACTOR deliverables requirement. For those exempt tasks, use a non-phase deliverables list that describes the concrete verifiable work in execution order, for example: `- Update config`, `- Validate config`, `- Document rollout/usage` as applicable.
+
+For stories-only tasks, scope shape alone signals the exemption to the implement-gate: when every entry in `### Files in scope` matches `*.stories.[jt]sx?`, `task-next.js`'s `isVisualOnlyTask()` accepts the verification command (typically `pnpm dev:check`) as RED evidence — no `*.test.*` authorship file is required. Use a `### Test Command` of `pnpm dev:check` (lint + typecheck) and document the visual artifact in deliverables. Do NOT mix story files with `.test.*`/`.spec.*` or production source in the same task's scope, or the exemption will not fire.
 
 **Rule 12 — Shared-Resource Detection (MANDATORY for parallel tasks):**
 After marking tasks as `Parallel: Yes`, scan ALL parallel tasks' Suggested Scope for **overlapping production files**. If two or more parallel tasks modify the **same production file** (not test files — those don't conflict):

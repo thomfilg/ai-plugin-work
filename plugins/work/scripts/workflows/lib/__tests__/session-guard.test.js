@@ -4,11 +4,11 @@
  * Run with: node --test hooks/__tests__/session-guard.test.js
  */
 
-const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const { describe, it, before, after, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
+const { spawnHook } = require('./_helpers/run-hook');
 
 const HOOK_PATH = path.join(__dirname, '..', 'hooks', 'session-guard.js');
 const SESSION_DIR = path.join(require('os').tmpdir(), 'session-guard-test-' + process.pid);
@@ -57,65 +57,36 @@ function readSession(ticketId) {
 }
 
 /**
- * Run session-guard.js as a CLI subcommand
+ * Run session-guard.js as a CLI subcommand.
+ *
+ * Uses the shared `spawnHook` helper which builds a deterministic env from a
+ * small passthrough allow-list (PATH, HOME, NODE_*, ...) plus the test's
+ * explicit `extraEnv`. This prevents developer-shell `.envrc` exports
+ * (TASKS_BASE, WORKTREES_BASE, ...) from leaking into the subprocess and
+ * silently overriding `extraEnv`-derived defaults.
  */
 function runCli(args = [], extraEnv = {}) {
-  return new Promise((resolve, reject) => {
-    const env = { ...process.env, SESSION_GUARD_DIR: SESSION_DIR, ...extraEnv };
-    // Neutralize ambient session id unless a test opts in, so legacy-path tests
-    // (no ownerSessionId scoping) stay deterministic when run inside a Claude session.
-    if (!('CLAUDE_CODE_SESSION_ID' in extraEnv)) delete env.CLAUDE_CODE_SESSION_ID;
-    const proc = spawn('node', [HOOK_PATH, ...args], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env,
-    });
-
-    let stdout = '';
-    let stderr = '';
-    proc.stdout.on('data', (d) => {
-      stdout += d.toString();
-    });
-    proc.stderr.on('data', (d) => {
-      stderr += d.toString();
-    });
-    proc.on('close', (code) => resolve({ stdout, stderr, code }));
-    proc.on('error', reject);
-
-    proc.stdin.end();
-  });
+  // Always provide isolated SESSION_DIR; tests may override via extraEnv.
+  const env = { SESSION_GUARD_DIR: SESSION_DIR, ...extraEnv };
+  // Neutralize ambient session id unless a test opts in, so legacy-path tests
+  // (no ownerSessionId scoping) stay deterministic when run inside a Claude session.
+  if (!('CLAUDE_CODE_SESSION_ID' in extraEnv)) env.CLAUDE_CODE_SESSION_ID = undefined;
+  return spawnHook(HOOK_PATH, null, env, { args });
 }
 
 /**
- * Run session-guard.js as a hook (stdin JSON input, hook type via env)
+ * Run session-guard.js as a hook (stdin JSON input, hook type via env).
+ *
+ * See `runCli` doc for env-scrubbing rationale.
  */
 function runHook(hookData, hookType, extraEnv = {}) {
-  return new Promise((resolve, reject) => {
-    const env = {
-      ...process.env,
-      SESSION_GUARD_DIR: SESSION_DIR,
-      ...extraEnv,
-      CLAUDE_HOOK_TYPE: hookType,
-    };
-    if (!('CLAUDE_CODE_SESSION_ID' in extraEnv)) delete env.CLAUDE_CODE_SESSION_ID;
-    const proc = spawn('node', [HOOK_PATH], {
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env,
-    });
-
-    let stdout = '';
-    let stderr = '';
-    proc.stdout.on('data', (d) => {
-      stdout += d.toString();
-    });
-    proc.stderr.on('data', (d) => {
-      stderr += d.toString();
-    });
-    proc.on('close', (code) => resolve({ stdout, stderr, code }));
-    proc.on('error', reject);
-
-    proc.stdin.write(JSON.stringify(hookData));
-    proc.stdin.end();
-  });
+  const env = {
+    SESSION_GUARD_DIR: SESSION_DIR,
+    ...extraEnv,
+    CLAUDE_HOOK_TYPE: hookType,
+  };
+  if (!('CLAUDE_CODE_SESSION_ID' in extraEnv)) env.CLAUDE_CODE_SESSION_ID = undefined;
+  return spawnHook(HOOK_PATH, hookData, env);
 }
 
 describe('session-guard', () => {
