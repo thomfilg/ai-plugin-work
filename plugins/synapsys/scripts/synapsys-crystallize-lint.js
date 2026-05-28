@@ -283,24 +283,24 @@ const RULES = [
  * Some rules (e.g. R7) may mutate the manifest in-place; downstream consumers
  * see the post-fix shape.
  */
+function runRule(rule, manifest) {
+  const scope = rule.scope || 'memory';
+  if (scope === 'manifest') return rule.check(manifest) || [];
+  const issues = [];
+  for (const memory of manifest.memories || []) {
+    const out = rule.check(memory, { manifest }) || [];
+    for (const entry of out) issues.push(entry);
+  }
+  return issues;
+}
+
 function lint(manifest) {
   const warnings = [];
   const errors = [];
-
   for (const rule of RULES) {
-    const scope = rule.scope || 'memory';
     const bucket = rule.severity === 'error' ? errors : warnings;
-    if (scope === 'manifest') {
-      const out = rule.check(manifest) || [];
-      for (const entry of out) bucket.push(entry);
-    } else {
-      for (const memory of manifest.memories || []) {
-        const out = rule.check(memory, { manifest }) || [];
-        for (const entry of out) bucket.push(entry);
-      }
-    }
+    for (const entry of runRule(rule, manifest)) bucket.push(entry);
   }
-
   return { manifest, warnings, errors };
 }
 
