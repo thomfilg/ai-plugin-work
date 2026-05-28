@@ -2063,27 +2063,35 @@ describe('enforce-step-workflow', () => {
     it('allows direct work-state.js complete call at terminal step (GH-276)', async () => {
       writeWorkState(makeStepStatus('complete', WORK_STEPS));
 
-      const { code } = await runHook(
+      const { code, stderr } = await runHook(
         {
           tool_name: 'Bash',
           tool_input: { command: `node ${WORK_STATE_PATH} complete ${TEST_TICKET}` },
         },
         'PreToolUse'
       );
-      assert.equal(code, 0, 'direct complete should be allowed at terminal step');
+      assert.equal(
+        code,
+        0,
+        `direct complete should be allowed at terminal step. stderr: ${stderr}`
+      );
     });
 
     it('allows direct work-state.js complete with quoted path at terminal step (GH-276)', async () => {
       writeWorkState(makeStepStatus('complete', WORK_STEPS));
 
-      const { code } = await runHook(
+      const { code, stderr } = await runHook(
         {
           tool_name: 'Bash',
           tool_input: { command: `node "${WORK_STATE_PATH}" complete ${TEST_TICKET}` },
         },
         'PreToolUse'
       );
-      assert.equal(code, 0, 'quoted path complete should be allowed at terminal step');
+      assert.equal(
+        code,
+        0,
+        `quoted path complete should be allowed at terminal step. stderr: ${stderr}`
+      );
     });
 
     it('does not trigger complete bypass for untrusted path (GH-276 security)', async () => {
@@ -4505,40 +4513,40 @@ describe('enforce-step-workflow', () => {
     it('allows session-guard.js finish when workflow is at complete step (R3, R5)', async () => {
       writeWorkState(makeStepStatus('complete', WORK_STEPS));
 
-      const { code } = await runHook(
+      const { code, stderr } = await runHook(
         {
           tool_name: 'Bash',
           tool_input: { command: `node ${SESSION_GUARD_PATH} finish ${TEST_TICKET}` },
         },
         'PreToolUse'
       );
-      assert.equal(code, 0, 'finish should be allowed at complete step');
+      assert.equal(code, 0, `finish should be allowed at complete step. stderr: ${stderr}`);
     });
 
     it('allows session-guard.js reveal when workflow is at complete step (R3)', async () => {
       writeWorkState(makeStepStatus('complete', WORK_STEPS));
 
-      const { code } = await runHook(
+      const { code, stderr } = await runHook(
         {
           tool_name: 'Bash',
           tool_input: { command: `node ${SESSION_GUARD_PATH} reveal ${TEST_TICKET}` },
         },
         'PreToolUse'
       );
-      assert.equal(code, 0, 'reveal should be allowed at complete step');
+      assert.equal(code, 0, `reveal should be allowed at complete step. stderr: ${stderr}`);
     });
 
     it('allows session-guard.js complete when workflow is at complete step (R3)', async () => {
       writeWorkState(makeStepStatus('complete', WORK_STEPS));
 
-      const { code } = await runHook(
+      const { code, stderr } = await runHook(
         {
           tool_name: 'Bash',
           tool_input: { command: `node ${SESSION_GUARD_PATH} complete ${TEST_TICKET}` },
         },
         'PreToolUse'
       );
-      assert.equal(code, 0, 'complete should be allowed at complete step');
+      assert.equal(code, 0, `complete should be allowed at complete step. stderr: ${stderr}`);
     });
 
     // ─── R1/R7: Allow safe subcommands (init, status) at any step ───────────
@@ -4546,27 +4554,27 @@ describe('enforce-step-workflow', () => {
     it('allows session-guard.js init at any step (R1, R7)', async () => {
       writeWorkState(makeStepStatus('implement', WORK_STEPS));
 
-      const { code } = await runHook(
+      const { code, stderr } = await runHook(
         {
           tool_name: 'Bash',
           tool_input: { command: `node ${SESSION_GUARD_PATH} init ${TEST_TICKET}` },
         },
         'PreToolUse'
       );
-      assert.equal(code, 0, 'init should be allowed at any step');
+      assert.equal(code, 0, `init should be allowed at any step. stderr: ${stderr}`);
     });
 
     it('allows session-guard.js status at any step (R1, R7)', async () => {
       writeWorkState(makeStepStatus('implement', WORK_STEPS));
 
-      const { code } = await runHook(
+      const { code, stderr } = await runHook(
         {
           tool_name: 'Bash',
           tool_input: { command: `node ${SESSION_GUARD_PATH} status ${TEST_TICKET}` },
         },
         'PreToolUse'
       );
-      assert.equal(code, 0, 'status should be allowed at any step');
+      assert.equal(code, 0, `status should be allowed at any step. stderr: ${stderr}`);
     });
 
     // ─── R8: Block shell operators even at complete step ────────────────────
