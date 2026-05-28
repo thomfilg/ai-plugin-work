@@ -23,24 +23,7 @@
  * suite. The CLI entry point only runs when this file is invoked directly.
  */
 
-// Stop-word list embedded verbatim from the ticket. Single-word alternation
-// tokens in `trigger_prompt` that match any of these (case-insensitive via
-// lowercase comparison) are flagged by R2-stopword. Multi-word phrases like
-// `git\s+push` bypass — only bare `^\w+$` tokens are checked. `new Set([...])`
-// dedupes the literal at module load (the ticket intentionally left dupes in).
-const STOP_WORDS = new Set([
-  'permission', 'permissions', 'hook', 'hooks', 'blocked', 'denied', 'protected',
-  'push', 'pushed', 'fetch', 'axios', 'slack', 'email', 'zoom', 'paste',
-  'chrome', 'extension', 'mcp', 'connect', 'broke', 'broken', 'story', 'stories',
-  'epic', 'epics', 'requirements', 'completion', 'rollout', 'report', 'fail',
-  'failed', 'passing', 'test', 'tests', 'vitest', 'vite', 'integration', 'smoke',
-  'implement', 'build', 'run', 'start', 'stop', 'server', 'port', 'url', 'host',
-  'credential', 'config', 'env', 'ticket', 'subtask', 'jira', 'story', 'comment',
-  'branch', 'merge', 'commit', 'staged', 'ours', 'theirs', 'queue', 'dashboard',
-  'worker', 'cron', 'prod', 'qa', 'uat', 'dev', 'local', 'kubectl', 'aws', 'cli',
-  'lux', 'indigo', 'palette', 'theme', 'component', 'library', 'chrome', 'mcp',
-  'vpn', 'wsl', 'container',
-]);
+const { STOP_WORDS } = require('../lib/lint-stopwords');
 
 /**
  * Extract alternation tokens from a `trigger_prompt` regex source. Picks out
@@ -73,6 +56,31 @@ const PERMISSIVE_PRETOOL = new Set(['Edit:.*', 'Write:.*', 'Bash:.*']);
  */
 function applyAutoFix(target, key, value) {
   target[key] = value;
+}
+
+function countSharedTokens(a, b) {
+  let shared = 0;
+  for (const t of a) if (b.has(t)) shared++;
+  return shared;
+}
+
+function r5Overlap(manifest) {
+  const memories = Array.isArray(manifest.memories) ? manifest.memories : [];
+  const sets = memories.map((m) => new Set(extractAlternationTokens(m.trigger_prompt)));
+  const issues = [];
+  for (let i = 0; i < memories.length; i++) {
+    for (let j = i + 1; j < memories.length; j++) {
+      const shared = countSharedTokens(sets[i], sets[j]);
+      if (shared < 3) continue;
+      const a = memories[i].name || `#${i}`;
+      const b = memories[j].name || `#${j}`;
+      issues.push({
+        rule: 'R5-overlap',
+        message: `memories "${a}" and "${b}" share ${shared} alternation tokens in trigger_prompt`,
+      });
+    }
+  }
+  return issues;
 }
 
 const RULES = [
@@ -157,13 +165,10 @@ const RULES = [
     check(memory) {
       const events = Array.isArray(memory.events) ? memory.events : [];
       const isDefault =
-        events.length === 2 &&
-        events[0] === 'UserPromptSubmit' &&
-        events[1] === 'PreToolUse';
+        events.length === 2 && events[0] === 'UserPromptSubmit' && events[1] === 'PreToolUse';
       if (!isDefault) return [];
       const pretool = Array.isArray(memory.trigger_pretool) ? memory.trigger_pretool : [];
-      const permissive =
-        pretool.length === 0 || pretool.every((p) => PERMISSIVE_PRETOOL.has(p));
+      const permissive = pretool.length === 0 || pretool.every((p) => PERMISSIVE_PRETOOL.has(p));
       if (!permissive) return [];
       return [
         {
@@ -218,28 +223,7 @@ const RULES = [
     id: 'R5-overlap',
     severity: 'warn',
     scope: 'manifest',
-    check(manifest) {
-      const memories = Array.isArray(manifest.memories) ? manifest.memories : [];
-      const tokenSets = memories.map((m) => new Set(extractAlternationTokens(m.trigger_prompt)));
-      const issues = [];
-      for (let i = 0; i < memories.length; i++) {
-        for (let j = i + 1; j < memories.length; j++) {
-          let shared = 0;
-          for (const t of tokenSets[i]) {
-            if (tokenSets[j].has(t)) shared++;
-          }
-          if (shared >= 3) {
-            const a = memories[i].name || `#${i}`;
-            const b = memories[j].name || `#${j}`;
-            issues.push({
-              rule: 'R5-overlap',
-              message: `memories "${a}" and "${b}" share ${shared} alternation tokens in trigger_prompt`,
-            });
-          }
-        }
-      }
-      return issues;
-    },
+    check: r5Overlap,
   },
   {
     id: 'R7-inject-full-too-long',
@@ -304,16 +288,11 @@ function lint(manifest) {
   return { manifest, warnings, errors };
 }
 
-function readStdin() {
-  return new Promise((resolve, reject) => {
-    let data = '';
-    process.stdin.setEncoding('utf8');
-    process.stdin.on('data', (chunk) => {
-      data += chunk;
-    });
-    process.stdin.on('end', () => resolve(data));
-    process.stdin.on('error', reject);
-  });
+async function readStdin() {
+  process.stdin.setEncoding('utf8');
+  const chunks = [];
+  for await (const chunk of process.stdin) chunks.push(chunk);
+  return chunks.join('');
 }
 
 async function main() {
