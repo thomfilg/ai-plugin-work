@@ -235,6 +235,19 @@ function isDocsExempt(type, section) {
   return (type || '') === 'docs' || /documentation[\s-]*exempt|docs[-\s]?only/i.test(section || '');
 }
 
+// Storybook stories are visual artifacts — `*.stories.tsx` files have no
+// executable assertions, so demanding a `*.test.*` authorship gate is
+// contradictory. When a task's `### Files in scope` consists exclusively of
+// `.stories.[jt]sx?` entries, treat the task as test-exempt; the verification
+// command (typically `pnpm dev:check`) still proves RED by failing while the
+// story file is absent, and GREEN by passing once it lands. Detected by scope
+// shape rather than a body marker so authors don't need to remember magic
+// phrases. See split-in-tasks SKILL.md Rule 10.
+function isVisualOnlyTask(scope) {
+  if (!Array.isArray(scope) || scope.length === 0) return false;
+  return scope.every((p) => typeof p === 'string' && /\.stories\.[jt]sx?$/i.test(p));
+}
+
 function parseTaskTestCommand(section) {
   const m = section.match(/### *Test Command[^\n]*\n+```(?:[a-zA-Z]+)?\n([\s\S]*?)\n```/);
   return m ? m[1].trim() : '';
@@ -544,9 +557,7 @@ function findTestFilesInScope(repoRoot, scope) {
       const ext = path.extname(p);
       const base = path.basename(p, ext);
       const escapedBase = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const colocatedRe = new RegExp(
-        '^' + escapedBase + '\\.(test|spec)\\.(?:m?[cj]sx?|tsx?)$',
-      );
+      const colocatedRe = new RegExp('^' + escapedBase + '\\.(test|spec)\\.(?:m?[cj]sx?|tsx?)$');
       const entries = readdirCached(parent);
       if (entries) {
         for (const e of entries) {
@@ -739,6 +750,7 @@ function main() {
   const type = parseTaskType(section);
   const taskTestCmd = parseTaskTestCommand(section);
   const docsExempt = isDocsExempt(type, section);
+  const visualOnly = isVisualOnlyTask(scope);
 
   // Checkpoint tasks are verification-only — no source change, no test
   // authorship, no gherkin scenarios. Asking the agent to satisfy a TDD
@@ -879,17 +891,22 @@ function main() {
         // proving there is at least one failing test block under Suggested
         // Scope. The test command already failed (exitCode !== 0) above —
         // we just need to confirm authorship intent.
-        if (testFiles.length === 0 && docsExempt) {
-          // Docs-exempt: no test surface, but the verification command failed
-          // as RED requires (exitCode !== 0 confirmed above). Accept it.
+        if (testFiles.length === 0 && (docsExempt || visualOnly)) {
+          // Test-exempt: no `*.test.*` authorship surface, but the verification
+          // command failed as RED requires (exitCode !== 0 confirmed above).
+          // Accept it. Fires for documentation tasks (isDocsExempt) and for
+          // Storybook stories-only tasks (isVisualOnlyTask).
           const rec = recordEvidence(TDD_PHASES.red, ticket, taskNum, testCmd, repoRoot, scope);
           if (!rec.ok) {
             blockReason = `Could not record RED evidence:\n${rec.out}`;
           } else {
             advanced = true;
             phase = TDD_PHASES.green;
+            const fallbackLabel = visualOnly
+              ? 'visual-only fallback (Storybook stories-only scope — no testable code surface'
+              : 'docs-exempt fallback (documentation task — no testable code surface';
             process.stdout.write(
-              `task-next: RED accepted via docs-exempt fallback (documentation task — no testable code surface; verification command failed as required).\n`
+              `task-next: RED accepted via ${fallbackLabel}; verification command failed as required).\n`
             );
           }
         } else if (testFiles.length === 0) {
@@ -996,7 +1013,13 @@ function main() {
   process.exit(_exitCode);
 }
 
-module.exports = { filterToTestFiles, findTestFilesInScope, wrapStrictMode, isDocsExempt };
+module.exports = {
+  filterToTestFiles,
+  findTestFilesInScope,
+  wrapStrictMode,
+  isDocsExempt,
+  isVisualOnlyTask,
+};
 
 if (require.main === module) {
   main();
