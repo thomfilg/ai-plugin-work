@@ -74,6 +74,8 @@ function frontmatter(m) {
   const pretool = Array.isArray(m.trigger_pretool)
     ? m.trigger_pretool.join(',')
     : m.trigger_pretool || '';
+  const hasContent =
+    Array.isArray(m.trigger_pretool_content) && m.trigger_pretool_content.length > 0;
   return [
     '---',
     `name: ${m.name}`,
@@ -83,6 +85,7 @@ function frontmatter(m) {
     `events: ${events.join(',')}`,
     `trigger_prompt: ${m.trigger_prompt || ''}`,
     `trigger_pretool: ${pretool}`,
+    ...(hasContent ? [`trigger_pretool_content: ${m.trigger_pretool_content.join(',')}`] : []),
     `trigger_session: ${m.trigger_session === true ? 'true' : 'false'}`,
     `inject: ${m.inject === 'full' ? 'full' : 'summary'}`,
     '---',
