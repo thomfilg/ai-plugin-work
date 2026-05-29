@@ -214,9 +214,70 @@ function parseSiblingTicketIds(text) {
 }
 
 /**
- * Detect whether a consumer signature treats `data` as an array (`data.map`)
- * while the producer signature wraps it (`{ deleters: ... }`). This is the
- * specific divergence shape Pass B is required to catch (AC3).
+ * Identifiers that look like array-consuming method calls. A consumer that
+ * calls `X.map(`, `X.forEach(`, `X.filter(`, or `X.reduce(` is treating `X`
+ * as an iterable / array.
+ */
+const ARRAY_CONSUMING_METHODS = ['map', 'forEach', 'filter', 'reduce'];
+
+/**
+ * Collect identifiers the consumer treats as arrays. A consumer treats `X`
+ * as an array when any of the following appears in its signature text:
+ *
+ *   - `X.<method>(` where method ∈ {map, forEach, filter, reduce}
+ *   - `X: Array<...>` or `X: SomeType[]` (type annotation)
+ *   - `const [a, b] = X` (array destructuring)
+ *
+ * @param {string} text concatenated consumer signature text
+ * @returns {Set<string>} identifier names
+ */
+function collectConsumerArrayIdentifiers(text) {
+  const ids = new Set();
+  if (!text) return ids;
+  const methodAlt = ARRAY_CONSUMING_METHODS.join('|');
+  const methodRe = new RegExp(`\\b([A-Za-z_$][A-Za-z0-9_$]*)\\.(?:${methodAlt})\\(`, 'g');
+  let m;
+  while ((m = methodRe.exec(text)) !== null) ids.add(m[1]);
+  // `X: Array<...>` or `X: T[]` — capture annotated identifier.
+  const annotRe =
+    /\b([A-Za-z_$][A-Za-z0-9_$]*)\s*\??\s*:\s*(?:Array\s*<|(?:[A-Za-z_$][A-Za-z0-9_$<>.,\s]*?)\[\])/g;
+  while ((m = annotRe.exec(text)) !== null) ids.add(m[1]);
+  // Array destructure: `const [a, b] = X` or `let [a] = X`.
+  const destructRe = /(?:const|let|var)\s*\[[^\]]*\]\s*=\s*([A-Za-z_$][A-Za-z0-9_$]*)/g;
+  while ((m = destructRe.exec(text)) !== null) ids.add(m[1]);
+  return ids;
+}
+
+/**
+ * Collect identifiers that appear as array-typed fields on the producer's
+ * object/return types. A producer "wraps" an array when its type text
+ * contains a field like `X: Foo[]` or `X: Array<Foo>` inside an object
+ * literal or interface body.
+ *
+ * @param {string} text concatenated producer signature text
+ * @returns {Set<string>} identifier names typed as arrays on a wrapper
+ */
+function collectProducerWrapperFields(text) {
+  const ids = new Set();
+  if (!text) return ids;
+  // Field with array-type value: `X: T[]` or `X: Array<T>`. The field must
+  // be syntactically a field — preceded by `{`, `;`, `,`, or a newline.
+  const fieldRe =
+    /(?:[{;,\n]\s*)([A-Za-z_$][A-Za-z0-9_$]*)\s*\??\s*:\s*(?:Array\s*<[^>]*>|[A-Za-z_$][A-Za-z0-9_$<>.,\s]*?\[\])/g;
+  let m;
+  while ((m = fieldRe.exec(text)) !== null) ids.add(m[1]);
+  return ids;
+}
+
+/**
+ * Detect array-vs-wrapper contract divergence by shape, not identifier.
+ *
+ * Returns true when the consumer treats at least one identifier as an
+ * array (via `.map`/`.forEach`/`.filter`/`.reduce`, array type annotation,
+ * or array destructuring) AND the producer types its response/return as
+ * an object that wraps an array under some field — regardless of whether
+ * the identifier names match. The shapes are structurally divergent:
+ * consumer expects a bare array, producer hands back `{ X: T[] }`.
  *
  * @param {ExportEntry[]} consumerExports
  * @param {ExportEntry[]} producerExports
@@ -225,9 +286,9 @@ function parseSiblingTicketIds(text) {
 function detectArrayVsWrapperDivergence(consumerExports, producerExports) {
   const consumerText = consumerExports.map((e) => e.signature).join('\n');
   const producerText = producerExports.map((e) => e.signature).join('\n');
-  const consumerIsArray = /data\.map\b/.test(consumerText) || /data:\s*Array</.test(consumerText);
-  const producerIsWrapper = /\bdeleters\s*:/.test(producerText);
-  return consumerIsArray && producerIsWrapper;
+  const consumerArrayIds = collectConsumerArrayIdentifiers(consumerText);
+  const producerWrapperFields = collectProducerWrapperFields(producerText);
+  return consumerArrayIds.size > 0 && producerWrapperFields.size > 0;
 }
 
 /**

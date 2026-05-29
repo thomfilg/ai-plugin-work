@@ -7,6 +7,7 @@ const path = require('node:path');
 const MODULE_PATH = path.resolve(__dirname, '..', 'lib', 'contract-extractor.js');
 const FIXTURE_DIRTY = path.resolve(__dirname, 'fixtures', 'echo-5362');
 const FIXTURE_CLEAN = path.resolve(__dirname, 'fixtures', 'echo-5362-clean');
+const FIXTURE_GENERIC = path.resolve(__dirname, 'fixtures', 'generic-array-wrapper');
 
 describe('contract-extractor — extractExports', () => {
   it('extracts the consumer signature from echo-5362 deleter-select-field.tsx and references data.map', () => {
@@ -74,7 +75,11 @@ describe('contract-extractor — runPassB on echo-5362 fixture (dirty)', () => {
     const out = runPassB(FIXTURE_DIRTY);
     assert.ok(out, 'runPassB must return a result');
     assert.ok(Array.isArray(out.warnings), 'expected warnings array');
-    assert.equal(out.warnings.length, 1, `expected exactly one warning, got ${out.warnings.length}`);
+    assert.equal(
+      out.warnings.length,
+      1,
+      `expected exactly one warning, got ${out.warnings.length}`
+    );
     const w = out.warnings[0];
     assert.equal(w.kind, 'B', 'expected Pass B warning');
     assert.match(
@@ -86,6 +91,33 @@ describe('contract-extractor — runPassB on echo-5362 fixture (dirty)', () => {
       `${w.message} ${w.hint || ''}`,
       /[A-Z]+-\d+/,
       'expected sibling ticket ID in message or hint'
+    );
+  });
+});
+
+describe('contract-extractor — runPassB on generic array-vs-wrapper fixture', () => {
+  it('detects divergence for non-fixture identifiers (items consumer, rows producer)', () => {
+    const { runPassB } = require(MODULE_PATH);
+    const out = runPassB(FIXTURE_GENERIC);
+    assert.ok(out, 'runPassB must return a result');
+    assert.ok(Array.isArray(out.warnings), 'expected warnings array');
+    assert.equal(
+      out.warnings.length,
+      1,
+      `expected exactly one warning for the generic fixture, got ${out.warnings.length}`
+    );
+    const w = out.warnings[0];
+    assert.equal(w.kind, 'B', 'expected Pass B warning');
+    assert.match(
+      `${w.message} ${w.hint || ''}`,
+      /mismatch|diverge|contract|differ/i,
+      'expected mismatch/divergence wording'
+    );
+    // Should NOT depend on `data`/`deleters` identifiers.
+    assert.doesNotMatch(
+      w.message,
+      /\bdeleters\b/,
+      'generic detector must not reference fixture-specific identifier'
     );
   });
 });
