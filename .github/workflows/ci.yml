@@ -54,10 +54,18 @@ jobs:
 
       - name: Run tests (scoped to touched plugins)
         if: steps.scope.outputs.non_plugin == '' && steps.scope.outputs.plugins != ''
+        env:
+          # Pass via env so a malicious plugin dir name can't inject shell commands at template-substitution time.
+          PLUGINS: ${{ steps.scope.outputs.plugins }}
         run: |
           set -euo pipefail
           FILES=()
-          for p in ${{ steps.scope.outputs.plugins }}; do
+          for p in $PLUGINS; do
+            # Defence-in-depth: refuse anything that isn't a simple alnum/_/- name.
+            if [[ ! "$p" =~ ^[A-Za-z0-9_-]+$ ]]; then
+              echo "Refusing suspicious plugin name: $p" >&2
+              exit 1
+            fi
             while IFS= read -r f; do FILES+=("$f"); done < <(find "plugins/$p" -type d -name node_modules -prune -o -type f \( -name '*.test.js' -o -name '*.spec.js' \) -print | sort)
           done
           if [ ${#FILES[@]} -eq 0 ]; then
