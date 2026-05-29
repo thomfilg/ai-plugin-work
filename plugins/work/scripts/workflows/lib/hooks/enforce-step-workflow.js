@@ -482,27 +482,63 @@ function getCurrentStep(state, steps) {
  * @returns {boolean}
  */
 function isTerminalCompleteBypass(cmd, ticketId) {
-  // Strict format: only "node <path>/work-state.js complete <ticketId>"
-  // Accepts quoted paths: node "path/work-state.js" or node 'path/work-state.js'
-  // Reject anything with shell operators, substitutions, or extra arguments
-  const strictPattern =
-    /^node\s+(?:"([^"]+[\\/]work-state\.js)"|'([^']+[\\/]work-state\.js)'|(\S+[\\/]work-state\.js))\s+complete\s+(\S+)\s*$/;
-  const match = strictPattern.exec(cmd);
-  if (!match) return false;
-
-  // Reject shell operators and substitutions
+  // Reject shell operators and substitutions FIRST — cheapest fail-fast.
   if (/[;&|$`<>(){}\n]/.test(cmd)) return false;
 
-  // Extract and verify script path is trusted
-  const scriptPath = match[1] || match[2] || match[3];
+  // Token-based parsing (more robust than a single big regex). This mirrors
+  // the same parser Rule 3b uses (getNodeInvocations / extractSubCommand), so
+  // the bypass and the block decision can never disagree on what the user typed.
+  // Previous all-in-one regex with `\S+[\\/]work-state\.js` was observed to
+  // not match on the GitHub Actions runner for unquoted paths even though the
+  // quoted equivalent matched — switching to token parsing eliminates that
+  // regex-engine difference.
+  const tokens = String(cmd).trim().split(/\s+/);
+
+  // Expect: node <path/work-state.js> complete <ticket>
+  // Allow optional inline env-assignments and -flags before the script path,
+  // mirroring how getNodeInvocations() tolerates them.
+  if (tokens.length < 4) return false;
+
+  // Find the `node` (or `nodejs`) token, skipping any leading env-assignments
+  // like FOO=bar. Reject wrappers (timeout, nice, env) — the bypass is meant
+  // for the orchestrator's direct call only, not chained/wrapped invocations.
+  let i = 0;
+  while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i])) i++;
+  if (i >= tokens.length || !/^(?:node|nodejs)$/.test(tokens[i])) return false;
+  i++;
+
+  // Strict bypass: no node flags allowed before the script path. Multi-arg
+  // flags like `--require evil.js` could otherwise smuggle in additional
+  // script execution before work-state.js runs.
+  if (i < tokens.length && tokens[i].startsWith('-')) return false;
+
+  // Script path token. Strip surrounding quotes (the shell already stripped
+  // them when the user actually typed quotes; we strip again defensively).
+  if (i >= tokens.length) return false;
+  let scriptPath = tokens[i].replace(/^['"]|['"]$/g, '');
+  i++;
+  if (!/[\\/]work-state\.js$/.test(scriptPath)) return false;
+
+  // Sub-command must be exactly `complete`.
+  if (tokens[i] !== 'complete') return false;
+  i++;
+
+  // Ticket arg.
+  if (i >= tokens.length) return false;
+  const targetTicket = tokens[i];
+  i++;
+
+  // No trailing tokens allowed — strict format only.
+  if (i !== tokens.length) return false;
+
+  // Verify script path is trusted.
   const resolvedPath = expandPluginRoot(scriptPath);
   if (!isTrustedScriptPath(resolvedPath, TRUSTED_SCRIPT_DIRS)) return false;
 
-  // Verify ticket arg matches active ticket
-  const targetTicket = match[4];
+  // Verify ticket arg matches active ticket.
   if (targetTicket !== ticketId) return false;
 
-  // Verify terminal step — reuse shared helper for consistent multi-in_progress handling
+  // Verify terminal step — reuse shared helper for consistent multi-in_progress handling.
   const state = loadStateFile(ticketId, '.work-state.json');
   return getCurrentStep(state, WORK_STEPS) === 'complete';
 }
@@ -524,27 +560,41 @@ function isTerminalCompleteBypass(cmd, ticketId) {
  * @returns {boolean}
  */
 function isTerminalSessionGuardBypass(cmd, ticketId) {
-  // Strict format: only "node <path>/session-guard.js <finish|reveal|complete> <ticketId>"
-  // Accepts quoted paths: node "path/session-guard.js" or node 'path/session-guard.js'
-  // Reject anything with shell operators, substitutions, or extra arguments
-  const strictPattern =
-    /^node\s+(?:"([^"]+[\\/]session-guard\.js)"|'([^']+[\\/]session-guard\.js)'|(\S+[\\/]session-guard\.js))\s+(finish|reveal|complete)\s+(\S+)\s*$/;
-  const match = strictPattern.exec(cmd);
-  if (!match) return false;
-
-  // Reject shell operators and substitutions
+  // Reject shell operators and substitutions FIRST — cheapest fail-fast.
   if (/[;&|$`<>(){}\n]/.test(cmd)) return false;
 
-  // Extract and verify script path is trusted
-  const scriptPath = match[1] || match[2] || match[3];
+  // Token-based parsing (see isTerminalCompleteBypass for rationale).
+  const tokens = String(cmd).trim().split(/\s+/);
+  if (tokens.length < 4) return false;
+
+  let i = 0;
+  while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i])) i++;
+  if (i >= tokens.length || !/^(?:node|nodejs)$/.test(tokens[i])) return false;
+  i++;
+
+  if (i < tokens.length && tokens[i].startsWith('-')) return false;
+
+  if (i >= tokens.length) return false;
+  const scriptPath = tokens[i].replace(/^['"]|['"]$/g, '');
+  i++;
+  if (!/[\\/]session-guard\.js$/.test(scriptPath)) return false;
+
+  if (i >= tokens.length) return false;
+  const subCmd = tokens[i];
+  if (subCmd !== 'finish' && subCmd !== 'reveal' && subCmd !== 'complete') return false;
+  i++;
+
+  if (i >= tokens.length) return false;
+  const targetTicket = tokens[i];
+  i++;
+
+  if (i !== tokens.length) return false;
+
   const resolvedPath = expandPluginRoot(scriptPath);
   if (!isTrustedScriptPath(resolvedPath, TRUSTED_SCRIPT_DIRS)) return false;
 
-  // Verify ticket arg matches active ticket
-  const targetTicket = match[5];
   if (targetTicket !== ticketId) return false;
 
-  // Verify terminal step — reuse shared helper for consistent multi-in_progress handling
   const state = loadStateFile(ticketId, '.work-state.json');
   return getCurrentStep(state, WORK_STEPS) === 'complete';
 }
