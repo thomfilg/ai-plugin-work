@@ -69,13 +69,17 @@ const written = [];
 const skipped = [];
 const errors = [];
 
+function contentLine(m) {
+  const list = m.trigger_pretool_content;
+  if (!Array.isArray(list) || list.length === 0) return [];
+  return [`trigger_pretool_content: ${list.join(',')}`];
+}
+
 function frontmatter(m) {
   const events = (m.events || []).filter((e) => VALID_EVENTS.has(e));
   const pretool = Array.isArray(m.trigger_pretool)
     ? m.trigger_pretool.join(',')
     : m.trigger_pretool || '';
-  const hasContent =
-    Array.isArray(m.trigger_pretool_content) && m.trigger_pretool_content.length > 0;
   return [
     '---',
     `name: ${m.name}`,
@@ -85,7 +89,7 @@ function frontmatter(m) {
     `events: ${events.join(',')}`,
     `trigger_prompt: ${m.trigger_prompt || ''}`,
     `trigger_pretool: ${pretool}`,
-    ...(hasContent ? [`trigger_pretool_content: ${m.trigger_pretool_content.join(',')}`] : []),
+    ...contentLine(m),
     `trigger_session: ${m.trigger_session === true ? 'true' : 'false'}`,
     `inject: ${m.inject === 'full' ? 'full' : 'summary'}`,
     '---',
