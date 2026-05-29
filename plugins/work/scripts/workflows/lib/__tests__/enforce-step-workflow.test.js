@@ -2077,34 +2077,22 @@ describe('enforce-step-workflow', () => {
       );
     });
 
-    // Skipped on Node 20 CI: pre-existing environment-specific failure tracked
-    // by GH-452. The test passes locally on Node 20.20.2, Node 22, and Node 24
-    // with a clean env, and on the GitHub Actions Node 22 matrix entry. The
-    // unquoted-path sibling test (above) covers the same bypass code path. The
-    // adjacent untrusted-path security test below verifies the bypass still
-    // rejects untrusted scripts. Re-enable once GH-452 isolates the runner-side
-    // trigger.
-    const skipOnCiNode20 = process.env.CI && process.versions.node.startsWith('20.');
-    const itQuotedPath = skipOnCiNode20 ? it.skip : it;
-    itQuotedPath(
-      'allows direct work-state.js complete with quoted path at terminal step (GH-276)',
-      async () => {
-        writeWorkState(makeStepStatus('complete', WORK_STEPS));
+    it('allows direct work-state.js complete with quoted path at terminal step (GH-276)', async () => {
+      writeWorkState(makeStepStatus('complete', WORK_STEPS));
 
-        const { code, stderr } = await runHook(
-          {
-            tool_name: 'Bash',
-            tool_input: { command: `node "${WORK_STATE_PATH}" complete ${TEST_TICKET}` },
-          },
-          'PreToolUse'
-        );
-        assert.equal(
-          code,
-          0,
-          `quoted path complete should be allowed at terminal step. stderr: ${stderr}`
-        );
-      }
-    );
+      const { code, stderr } = await runHook(
+        {
+          tool_name: 'Bash',
+          tool_input: { command: `node "${WORK_STATE_PATH}" complete ${TEST_TICKET}` },
+        },
+        'PreToolUse'
+      );
+      assert.equal(
+        code,
+        0,
+        `quoted path complete should be allowed at terminal step. stderr: ${stderr}`
+      );
+    });
 
     it('does not trigger complete bypass for untrusted path (GH-276 security)', async () => {
       // /tmp/work-state.js is not in TRUSTED_SCRIPT_DIRS, so the bypass won't fire.
