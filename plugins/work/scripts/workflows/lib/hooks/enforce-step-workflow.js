@@ -482,6 +482,64 @@ function getCurrentStep(state, steps) {
 }
 
 /**
+ * Quote-aware shell tokenizer for the strict bypass parser.
+ *
+ * Splits on whitespace EXCEPT within balanced ASCII single or double quotes,
+ * so paths containing spaces (e.g. `/Users/John Smith/...`) remain a single
+ * token. Surrounding quotes are stripped from each token before return.
+ *
+ * Rejects (returns null) on:
+ *   - Unbalanced quotes (open `"` or `'` with no matching close).
+ *   - Nested/mixed quotes within a token are simply treated literally — we do
+ *     not support shell-style escaping (`\"`, `$'..'`, etc.); the bypass is
+ *     for the orchestrator's strict, direct invocation only.
+ *
+ * @param {string} input
+ * @returns {string[] | null}
+ */
+function shellTokenize(input) {
+  const tokens = [];
+  let current = '';
+  let inToken = false;
+  let quote = null; // either '"' or "'" when inside a quoted run
+
+  for (let idx = 0; idx < input.length; idx++) {
+    const ch = input[idx];
+
+    if (quote) {
+      if (ch === quote) {
+        quote = null; // close quote — token continues (allows `a"b"c` style)
+      } else {
+        current += ch;
+      }
+      continue;
+    }
+
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      inToken = true;
+      continue;
+    }
+
+    if (/\s/.test(ch)) {
+      if (inToken) {
+        tokens.push(current);
+        current = '';
+        inToken = false;
+      }
+      continue;
+    }
+
+    current += ch;
+    inToken = true;
+  }
+
+  if (quote) return null; // unbalanced
+  if (inToken) tokens.push(current);
+  return tokens;
+}
+
+/**
  * Step-conditional bypass for `work-state.js complete` at the terminal step (GH-276).
  * Returns true ONLY when ALL conditions are met:
  *   1. Command is a strict `node <path>/work-state.js complete <ticketId>` invocation
@@ -494,29 +552,135 @@ function getCurrentStep(state, steps) {
  * @returns {boolean}
  */
 function isTerminalCompleteBypass(cmd, ticketId) {
-  // Strict format: only "node <path>/work-state.js complete <ticketId>"
-  // Accepts quoted paths: node "path/work-state.js" or node 'path/work-state.js'
-  // Reject anything with shell operators, substitutions, or extra arguments
-  const strictPattern =
-    /^node\s+(?:"([^"]+[\\/]work-state\.js)"|'([^']+[\\/]work-state\.js)'|(\S+[\\/]work-state\.js))\s+complete\s+(\S+)\s*$/;
-  const match = strictPattern.exec(cmd);
-  if (!match) return false;
+  const DEBUG_BYPASS = process.env.ENFORCE_HOOK_DEBUG === '1';
+  const trace = (reason, extra) => {
+    if (DEBUG_BYPASS) {
+      try {
+        process.stderr.write(
+          `[isTerminalCompleteBypass] ${reason}` +
+            (extra ? ` | ${JSON.stringify(extra)}` : '') +
+            '\n'
+        );
+      } catch {
+        /* never throw from debug */
+      }
+    }
+  };
 
-  // Reject shell operators and substitutions
-  if (/[;&|$`<>(){}\n]/.test(cmd)) return false;
+  // Reject shell operators and substitutions FIRST — cheapest fail-fast.
+  if (/[;&|$`<>(){}\n]/.test(cmd)) {
+    trace('reject: shell metachars');
+    return false;
+  }
 
-  // Extract and verify script path is trusted
-  const scriptPath = match[1] || match[2] || match[3];
+  // Quote-aware tokenizer: split on whitespace BUT treat quoted runs as one
+  // token. This is critical for paths containing spaces (e.g. macOS
+  // `/Users/John Smith/...`) — splitting after quote-stripping would break
+  // such paths into multiple tokens and fail the strict 4-token check.
+  // We honor only balanced ASCII " and ' pairs (no backslash escapes), which
+  // matches the strict shape of the bypass: orchestrator-issued commands.
+  // Unbalanced quotes return null → reject (caller treats as not-a-bypass).
+  const tokens = shellTokenize(String(cmd).trim());
+  if (tokens === null) {
+    trace('reject: unbalanced quotes');
+    return false;
+  }
+  trace('tokens', { count: tokens.length, tokens });
+
+  // Expect: node <path/work-state.js> complete <ticket>
+  // Env-assignment prefixes (FOO=bar node ...) are DISALLOWED entirely — they
+  // would let an attacker inject `NODE_OPTIONS=--require=/evil/module` (or
+  // NODE_PATH, LD_PRELOAD, DYLD_*, NODE_TLS_REJECT_UNAUTHORIZED, etc.) which
+  // Node.js honors before executing the legitimate script. The bypass is for
+  // the orchestrator's strict, direct call only — no wrappers, no env prefix.
+  if (tokens.length !== 4) {
+    trace('reject: token count not 4');
+    return false;
+  }
+
+  let i = 0;
+  if (!/^(?:node|nodejs)$/.test(tokens[i])) {
+    trace('reject: no node token', { i, token: tokens[i] });
+    return false;
+  }
+  i++;
+
+  // Strict bypass: no node flags allowed before the script path.
+  if (i < tokens.length && tokens[i].startsWith('-')) {
+    trace('reject: node flag before script', { token: tokens[i] });
+    return false;
+  }
+
+  // Script path token. Quote-stripping is unnecessary after normalization but
+  // kept defensively for nested-quote pathological inputs.
+  if (i >= tokens.length) {
+    trace('reject: no script token');
+    return false;
+  }
+  const scriptPath = tokens[i].replace(/^['"]|['"]$/g, '');
+  i++;
+  if (!/[\\/]work-state\.js$/.test(scriptPath)) {
+    trace('reject: not work-state.js', { scriptPath });
+    return false;
+  }
+
+  // Sub-command must be exactly `complete`.
+  if (i >= tokens.length || tokens[i] !== 'complete') {
+    trace('reject: sub-command not complete', { token: tokens[i] });
+    return false;
+  }
+  i++;
+
+  // Ticket arg.
+  if (i >= tokens.length) {
+    trace('reject: no ticket token');
+    return false;
+  }
+  const targetTicket = tokens[i];
+  i++;
+
+  // No trailing tokens allowed — strict format only.
+  if (i !== tokens.length) {
+    trace('reject: trailing tokens', { remaining: tokens.slice(i) });
+    return false;
+  }
+
+  // Verify script path is trusted.
   const resolvedPath = expandPluginRoot(scriptPath);
-  if (!isTrustedScriptPath(resolvedPath, TRUSTED_SCRIPT_DIRS)) return false;
+  if (!isTrustedScriptPath(resolvedPath, TRUSTED_SCRIPT_DIRS)) {
+    trace('reject: untrusted script path', { resolvedPath });
+    return false;
+  }
 
-  // Verify ticket arg matches active ticket
-  const targetTicket = match[4];
-  if (targetTicket !== ticketId) return false;
+  // Verify ticket arg matches active ticket.
+  if (targetTicket !== ticketId) {
+    trace('reject: ticket mismatch', { targetTicket, ticketId });
+    return false;
+  }
 
-  // Verify terminal step — reuse shared helper for consistent multi-in_progress handling
+  // Verify terminal step — reuse shared helper for consistent multi-in_progress handling.
   const state = loadStateFile(ticketId, '.work-state.json');
-  return getCurrentStep(state, WORK_STEPS) === 'complete';
+  const currentStep = getCurrentStep(state, WORK_STEPS);
+  if (currentStep !== 'complete') {
+    if (DEBUG_BYPASS) {
+      trace('reject: not at terminal step', {
+        currentStep,
+        ticketId,
+        TASKS_BASE,
+        safeTicketed: safeTicketPath(ticketId),
+        stateLoaded: !!state,
+        stateHasStepStatus: !!state?.stepStatus,
+        stepStatusKeys: state?.stepStatus ? Object.keys(state.stepStatus) : null,
+        completeVal: state?.stepStatus?.complete,
+        WORK_STEPS_len: WORK_STEPS.length,
+      });
+    } else {
+      trace('reject: not at terminal step', { currentStep });
+    }
+    return false;
+  }
+  trace('allow');
+  return true;
 }
 
 /**
@@ -536,27 +700,49 @@ function isTerminalCompleteBypass(cmd, ticketId) {
  * @returns {boolean}
  */
 function isTerminalSessionGuardBypass(cmd, ticketId) {
-  // Strict format: only "node <path>/session-guard.js <finish|reveal|complete> <ticketId>"
-  // Accepts quoted paths: node "path/session-guard.js" or node 'path/session-guard.js'
-  // Reject anything with shell operators, substitutions, or extra arguments
-  const strictPattern =
-    /^node\s+(?:"([^"]+[\\/]session-guard\.js)"|'([^']+[\\/]session-guard\.js)'|(\S+[\\/]session-guard\.js))\s+(finish|reveal|complete)\s+(\S+)\s*$/;
-  const match = strictPattern.exec(cmd);
-  if (!match) return false;
-
-  // Reject shell operators and substitutions
+  // Reject shell operators and substitutions FIRST — cheapest fail-fast.
   if (/[;&|$`<>(){}\n]/.test(cmd)) return false;
 
-  // Extract and verify script path is trusted
-  const scriptPath = match[1] || match[2] || match[3];
+  // Normalize by stripping balanced surrounding quote pairs (see
+  // isTerminalCompleteBypass for rationale). Keeps quoted and unquoted forms
+  // tokenizing identically on every Node version / OS.
+  const normalized = String(cmd)
+    .trim()
+    .replace(/"([^"]*)"/g, '$1')
+    .replace(/'([^']*)'/g, '$1');
+
+  // Token-based parsing (see isTerminalCompleteBypass for rationale).
+  const tokens = normalized.split(/\s+/);
+  if (tokens.length < 4) return false;
+
+  let i = 0;
+  while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i])) i++;
+  if (i >= tokens.length || !/^(?:node|nodejs)$/.test(tokens[i])) return false;
+  i++;
+
+  if (i < tokens.length && tokens[i].startsWith('-')) return false;
+
+  if (i >= tokens.length) return false;
+  const scriptPath = tokens[i].replace(/^['"]|['"]$/g, '');
+  i++;
+  if (!/[\\/]session-guard\.js$/.test(scriptPath)) return false;
+
+  if (i >= tokens.length) return false;
+  const subCmd = tokens[i];
+  if (subCmd !== 'finish' && subCmd !== 'reveal' && subCmd !== 'complete') return false;
+  i++;
+
+  if (i >= tokens.length) return false;
+  const targetTicket = tokens[i];
+  i++;
+
+  if (i !== tokens.length) return false;
+
   const resolvedPath = expandPluginRoot(scriptPath);
   if (!isTrustedScriptPath(resolvedPath, TRUSTED_SCRIPT_DIRS)) return false;
 
-  // Verify ticket arg matches active ticket
-  const targetTicket = match[5];
   if (targetTicket !== ticketId) return false;
 
-  // Verify terminal step — reuse shared helper for consistent multi-in_progress handling
   const state = loadStateFile(ticketId, '.work-state.json');
   return getCurrentStep(state, WORK_STEPS) === 'complete';
 }

@@ -97,6 +97,33 @@ describe('test-cleanup: cleanupSessionGuardLocks removes only test locks', () =>
 describe('test-cleanup: cleanupTestArtifacts is the union', () => {
   it('does not throw and exposes both leak vectors', () => {
     // Smoke test — both paths are best-effort and tolerant of missing config.
-    assert.doesNotThrow(() => cleanupTestArtifacts());
+    //
+    // IMPORTANT: `cleanupTestArtifacts()` deletes ALL TEST-* dirs from the
+    // configured TASKS_BASE. Under `node --test`, test files run concurrently,
+    // so invoking it against the real TASKS_BASE here races sibling test files
+    // (e.g. enforce-step-workflow.test.js writes TEST-ESW-<pid>-N/.work-state.json
+    // and then spawns a hook that reads it; if our cleanup fires between those
+    // two steps, the hook sees `stateLoaded:false` and the sibling test fails
+    // intermittently — observed as flaky GH-276 terminal-bypass failures in CI).
+    //
+    // Isolate both leak vectors to disposable tmp dirs so this smoke test cannot
+    // touch any other test's state:
+    //   - TASKS_BASE → tmp dir (overridden via env, restored in finally)
+    //   - os.tmpdir() → tmp dir (overridden, restored in finally)
+    const tmpTasks = fs.mkdtempSync(path.join(os.tmpdir(), 'cleanup-smoke-tasks-'));
+    const tmpLocks = fs.mkdtempSync(path.join(os.tmpdir(), 'cleanup-smoke-locks-'));
+    const origTasksBase = process.env.TASKS_BASE;
+    const origTmpdir = os.tmpdir;
+    process.env.TASKS_BASE = tmpTasks;
+    os.tmpdir = () => tmpLocks;
+    try {
+      assert.doesNotThrow(() => cleanupTestArtifacts());
+    } finally {
+      if (origTasksBase === undefined) delete process.env.TASKS_BASE;
+      else process.env.TASKS_BASE = origTasksBase;
+      os.tmpdir = origTmpdir;
+      fs.rmSync(tmpTasks, { recursive: true, force: true });
+      fs.rmSync(tmpLocks, { recursive: true, force: true });
+    }
   });
 });

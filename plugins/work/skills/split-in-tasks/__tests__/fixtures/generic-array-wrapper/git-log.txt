@@ -1,0 +1,9 @@
+commit abc111 (HEAD -> feature/rows)
+Author: Sibling Dev <sib@example.com>
+
+    GH-901 add RowList consumer expecting bare array prop
+
+commit abc222
+Author: Sibling Dev <sib@example.com>
+
+    GH-902 add getRows producer returning { rows: Row[] }

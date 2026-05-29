@@ -1,0 +1,10 @@
+{
+  "name": "echo-5353-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "_description": "Fixture package.json for ECHO-5353 Pass C regression. Intentionally has NO `lint` script so the resolver falls back to static-parsing eslint-output.json and includes a `Searched:` note in the warning.",
+  "scripts": {
+    "build": "echo no build",
+    "test": "node --test"
+  }
+}
