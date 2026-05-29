@@ -520,6 +520,7 @@ function isTerminalCompleteBypass(cmd, ticketId) {
   if (!/[\\/]work-state\.js$/.test(scriptPath)) return false;
 
   // Sub-command must be exactly `complete`.
+  if (i >= tokens.length) return false;
   if (tokens[i] !== 'complete') return false;
   i++;
 
