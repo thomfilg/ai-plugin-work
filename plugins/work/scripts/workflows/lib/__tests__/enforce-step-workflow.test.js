@@ -2090,7 +2090,8 @@ describe('enforce-step-workflow', () => {
           tool_name: 'Bash',
           tool_input: { command: `node ${WORK_STATE_PATH} complete ${TEST_TICKET}` },
         },
-        'PreToolUse'
+        'PreToolUse',
+        { ENFORCE_HOOK_DEBUG: '1' }
       );
       assert.equal(
         code,
@@ -2107,13 +2108,53 @@ describe('enforce-step-workflow', () => {
           tool_name: 'Bash',
           tool_input: { command: `node "${WORK_STATE_PATH}" complete ${TEST_TICKET}` },
         },
-        'PreToolUse'
+        'PreToolUse',
+        { ENFORCE_HOOK_DEBUG: '1' }
       );
       assert.equal(
         code,
         0,
         `quoted path complete should be allowed at terminal step. stderr: ${stderr}`
       );
+    });
+
+    it('allows direct work-state.js complete with quoted path containing spaces (GH-450)', async () => {
+      // Regression: cursor[bot] flagged that quote-stripping BEFORE whitespace
+      // split breaks paths like `/Users/John Smith/.../work-state.js` — the
+      // internal space caused split() to produce >4 tokens and the strict
+      // 4-token bypass check failed. The quote-aware tokenizer now keeps
+      // quoted runs as a single token even when they contain whitespace.
+      writeWorkState(makeStepStatus('complete', WORK_STEPS));
+
+      // Create a trusted-dir subdirectory whose NAME contains a space, then
+      // drop a placeholder work-state.js inside it. The trusted-path check
+      // walks parents, so any descendant of WORK_DIR is trusted.
+      const SPACED_DIR = path.join(WORK_DIR, 'has space');
+      const SPACED_PATH = path.join(SPACED_DIR, 'work-state.js');
+      fs.mkdirSync(SPACED_DIR, { recursive: true });
+      fs.writeFileSync(SPACED_PATH, '// placeholder for GH-450 regression test\n');
+      try {
+        const { code, stderr } = await runHook(
+          {
+            tool_name: 'Bash',
+            tool_input: { command: `node "${SPACED_PATH}" complete ${TEST_TICKET}` },
+          },
+          'PreToolUse',
+          { ENFORCE_HOOK_DEBUG: '1' }
+        );
+        assert.equal(
+          code,
+          0,
+          `quoted path with spaces should be tokenized as a single arg and allowed at terminal step. stderr: ${stderr}`
+        );
+        // Sanity: the bypass parser must NOT have rejected on token count.
+        assert.ok(
+          !/reject: token count not 4/.test(stderr),
+          `tokenizer should preserve quoted-with-spaces path as one token. stderr: ${stderr}`
+        );
+      } finally {
+        fs.rmSync(SPACED_DIR, { recursive: true, force: true });
+      }
     });
 
     it('does not trigger complete bypass for untrusted path (GH-276 security)', async () => {
@@ -2246,6 +2287,38 @@ describe('enforce-step-workflow', () => {
         'PreToolUse'
       );
       assert.equal(code, 2, 'extra args should be blocked');
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+
+    it('blocks work-state.js complete with NODE_OPTIONS env prefix (GH-450 security)', async () => {
+      writeWorkState(makeStepStatus('complete', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        {
+          tool_name: 'Bash',
+          tool_input: {
+            command: `NODE_OPTIONS=--require=/evil/module node ${WORK_STATE_PATH} complete ${TEST_TICKET}`,
+          },
+        },
+        'PreToolUse'
+      );
+      assert.equal(code, 2, 'NODE_OPTIONS env prefix should be blocked at terminal step');
+      assert.ok(stderr.includes('BLOCKED'));
+    });
+
+    it('blocks work-state.js complete with arbitrary env prefix (GH-450 security)', async () => {
+      writeWorkState(makeStepStatus('complete', WORK_STEPS));
+
+      const { code, stderr } = await runHook(
+        {
+          tool_name: 'Bash',
+          tool_input: {
+            command: `FOO=bar node ${WORK_STATE_PATH} complete ${TEST_TICKET}`,
+          },
+        },
+        'PreToolUse'
+      );
+      assert.equal(code, 2, 'any env prefix should be blocked at terminal step');
       assert.ok(stderr.includes('BLOCKED'));
     });
 

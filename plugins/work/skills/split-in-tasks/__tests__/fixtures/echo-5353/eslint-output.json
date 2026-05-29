@@ -1,0 +1,20 @@
+[
+  {
+    "filePath": "radial-pixel-table.test.ts",
+    "messages": [
+      {
+        "ruleId": "no-test-focus",
+        "severity": 2,
+        "message": "Unexpected `it.skip` — skipped tests must be tracked or removed.",
+        "line": 17,
+        "column": 6,
+        "nodeType": "CallExpression"
+      }
+    ],
+    "errorCount": 1,
+    "warningCount": 0,
+    "fixableErrorCount": 0,
+    "fixableWarningCount": 0,
+    "source": ""
+  }
+]
