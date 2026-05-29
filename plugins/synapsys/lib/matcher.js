@@ -1,8 +1,8 @@
 'use strict';
 
-function safeRegex(pattern) {
+function safeRegex(pattern, flags = 'i') {
   try {
-    return new RegExp(pattern, 'i');
+    return new RegExp(pattern, flags);
   } catch {
     return null;
   }
@@ -33,12 +33,65 @@ function pretoolSpecMatches(spec, toolName, argBlob) {
   return re ? re.test(argBlob) : false;
 }
 
+function hasContentPatterns(memory) {
+  return Array.isArray(memory.triggerPretoolContent) && memory.triggerPretoolContent.length > 0;
+}
+
 function matchPreTool(memory, payload) {
   if (!memory.events.includes('PreToolUse')) return false;
   if (!memory.triggerPretool.length) return false;
   const toolName = payload?.tool_name || '';
-  const argBlob = JSON.stringify(payload?.tool_input || {});
-  return memory.triggerPretool.some((spec) => pretoolSpecMatches(spec, toolName, argBlob));
+  const toolInput = payload?.tool_input || {};
+  const argBlob = JSON.stringify(toolInput);
+  const prefixMatch = memory.triggerPretool.some((spec) =>
+    pretoolSpecMatches(spec, toolName, argBlob)
+  );
+  if (!prefixMatch) return false;
+  if (!hasContentPatterns(memory)) return true;
+  const content = extractPretoolContent(toolName, toolInput);
+  if (content == null) return false;
+  return evaluatePretoolContent(memory, content);
+}
+
+function extractMultiEditContent(edits) {
+  if (!Array.isArray(edits)) return null;
+  const strings = edits
+    .map((e) => (e && typeof e.new_string === 'string' ? e.new_string : null))
+    .filter((s) => s !== null);
+  if (strings.length === 0) return null;
+  return strings.join('\n');
+}
+
+const PRETOOL_CONTENT_EXTRACTORS = {
+  Edit: (i) => (typeof i.new_string === 'string' ? i.new_string : null),
+  Write: (i) => (typeof i.content === 'string' ? i.content : null),
+  MultiEdit: (i) => extractMultiEditContent(i.edits),
+  NotebookEdit: (i) => (typeof i.new_source === 'string' ? i.new_source : null),
+};
+
+function extractPretoolContent(toolName, toolInput) {
+  if (!toolInput || typeof toolInput !== 'object') return null;
+  const extractor = PRETOOL_CONTENT_EXTRACTORS[toolName];
+  return extractor ? extractor(toolInput) : null;
+}
+
+function evaluatePretoolContent(memory, contentString) {
+  const patterns = memory.triggerPretoolContent;
+  if (!Array.isArray(patterns) || patterns.length === 0) return false;
+  let matched = false;
+  for (const pat of patterns) {
+    let re;
+    try {
+      re = new RegExp(pat, 'im');
+    } catch (err) {
+      process.stderr.write(
+        `[synapsys] memory ${memory.name}: invalid trigger_pretool_content regex "${pat}": ${err.message}\n`
+      );
+      continue;
+    }
+    if (re.test(contentString)) matched = true;
+  }
+  return matched;
 }
 
 function matchSession(memory) {
@@ -67,4 +120,13 @@ function selectForEvent(memories, event, payload) {
   return matched;
 }
 
-module.exports = { selectForEvent, matchPrompt, matchPreTool, matchSession, matchStop };
+module.exports = {
+  selectForEvent,
+  matchPrompt,
+  matchPreTool,
+  matchSession,
+  matchStop,
+  safeRegex,
+  extractPretoolContent,
+  evaluatePretoolContent,
+};

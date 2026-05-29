@@ -53,6 +53,15 @@ For each aggregated memory, infer:
   | "always read .envrc first" | `Bash:envrc,Read:.envrc` |
   | "never edit ~/.claude/" | `Edit:\.claude/,Write:\.claude/` |
   If a memory has no obvious tool action, still derive one from the closest relevant tool family (e.g. memories about `/work` get `Bash:work-orchestrator\.js|work-state\.js`; memories about PR comments get `Bash:gh\s+pr|gh\s+api.*comments`; memories about file edits get `Edit:|Write:`). Never leave `trigger_pretool` empty.
+- `trigger_pretool_content` *(optional)*: list of regex patterns matched against the **content being written** by the tool. Combined with `trigger_pretool` via **AND** semantics — both must match for the memory to fire. Use this when the trigger depends on what's inside the edit, not just the file path. Type: `string[]`. Flags: `i` (case-insensitive) and `m` (multiline). Per-tool content extraction:
+  | Tool | Content field |
+  |---|---|
+  | `Edit` | `tool_input.new_string` |
+  | `Write` | `tool_input.content` |
+  | `MultiEdit` | `tool_input.edits[].new_string` joined with `\n` |
+  | `NotebookEdit` | `tool_input.new_source` |
+  | other tools | ignored — memory cannot fire when content match is required |
+  Invalid regex behaviour: each invalid pattern logs `[synapsys] memory <name>: invalid trigger_pretool_content regex "<pat>": <error>` to stderr and is skipped. If **all** patterns are invalid, or if the tool has no extractable content field, the memory **fails closed** (does not fire). Memories without `trigger_pretool_content` behave exactly as before — pure prefix-match on `trigger_pretool`.
 - `events`: classify explicitly per the **Classifier matrix** below — do not default to all events.
 - `inject`: `full` if body ≤ ~20 lines and content is critical (rules/warnings); `summary` for long playbooks.
 
@@ -204,6 +213,32 @@ Crystallize is additive. The auto-memory system stays as a backstop.
 ## Output format
 
 End with: `Crystallized N memories into <kind> store. Sample fired correctly: <name>. M skipped (already exist). Auto-memory originals preserved.`
+
+## Worked example: content-gated memory
+
+The `ui-use-Button-not-raw-button` memory only fires when an edit to a `.tsx` file actually introduces a raw `<button>` element — not on every `.tsx` edit. `trigger_pretool` matches the file path; `trigger_pretool_content` matches the new content being written; both must hit (AND):
+
+```yaml
+---
+name: ui-use-Button-not-raw-button
+description: Block raw <button> in .tsx files; require the Button component from packages/ui.
+events: PreToolUse
+trigger_prompt: \b(<button|raw button|html button)\b
+trigger_pretool: Edit:.*\.tsx,Write:.*\.tsx
+trigger_pretool_content: <button\b
+trigger_session: false
+inject: full
+---
+
+### Button — use this, not `<button>`
+
+**Purpose:** Clickable button component
+**Use Cases:** Actions, form submissions, navigation, active state indicators
+**Features:** variants (solid, outline, ghost, text, glass, gradient), sizes (xs-xl), colors, icons, loading states, disabled, glow/pulse
+**Import:** `import { Button } from '@app-services-monitoring/ui';`
+**Location:** `src/components/form/Button`
+**Docs:** `packages/ui/src/components/form/Button/Button.md`
+```
 
 ## TODO (out of scope, deferred)
 

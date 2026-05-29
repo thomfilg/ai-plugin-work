@@ -4,6 +4,19 @@ Context-triggered memory injection plugin.
 
 Memories are markdown files with frontmatter that declares **which events** they listen to (`SessionStart`, `UserPromptSubmit`, `PreToolUse`) and **which trigger patterns** activate them. When an event fires and a memory's trigger matches the payload, the memory is injected into Claude's context.
 
+## Frontmatter schema
+
+| Field | Type | Purpose |
+|---|---|---|
+| `name` | string | Unique memory id |
+| `description` | string | Human-readable summary |
+| `events` | csv | Subset of `SessionStart,UserPromptSubmit,PreToolUse,Stop` |
+| `trigger_prompt` | regex | Matched against the user prompt on `UserPromptSubmit` |
+| `trigger_pretool` | csv of `<Tool>:<arg-regex>` | Matched against the tool name + serialized tool input on `PreToolUse` |
+| `trigger_pretool_content` | csv of regex | *(optional)* Matched against the **content** the tool is writing. Combined with `trigger_pretool` via AND. Per-tool content: `Edit`→`new_string`, `Write`→`content`, `MultiEdit`→`edits[].new_string` joined, `NotebookEdit`→`new_source`; other tools → no content (fail-closed). Flags: `i,m`. Invalid regex → stderr warning + skip; all-invalid or missing content → memory does not fire. |
+| `trigger_session` | bool | Fire on every `SessionStart` |
+| `inject` | `full` \| `summary` | How much of the body to inject |
+
 ## Four storage tiers
 
 | Kind | Path | When to use |
@@ -42,6 +55,32 @@ node plugins/synapsys/scripts/synapsys-list.js
 ```
 
 Next time you ask Claude to run `git push ...`, the PreToolUse hook fires, matches the regex against the tool input, and injects the memory before the tool runs.
+
+### Content-gated example
+
+To fire only when an `Edit`/`Write` to a `.tsx` file actually introduces a raw `<button>` element, combine `trigger_pretool` (path match) with `trigger_pretool_content` (content match — AND):
+
+```yaml
+---
+name: ui-use-Button-not-raw-button
+description: Block raw <button> in .tsx files; require the Button component from packages/ui.
+events: PreToolUse
+trigger_prompt: \b(<button|raw button|html button)\b
+trigger_pretool: Edit:.*\.tsx,Write:.*\.tsx
+trigger_pretool_content: <button\b
+trigger_session: false
+inject: full
+---
+
+### Button — use this, not `<button>`
+
+**Purpose:** Clickable button component
+**Use Cases:** Actions, form submissions, navigation, active state indicators
+**Features:** variants (solid, outline, ghost, text, glass, gradient), sizes (xs-xl), colors, icons, loading states, disabled, glow/pulse
+**Import:** `import { Button } from '@app-services-monitoring/ui';`
+**Location:** `src/components/form/Button`
+**Docs:** `packages/ui/src/components/form/Button/Button.md`
+```
 
 ## Files
 
