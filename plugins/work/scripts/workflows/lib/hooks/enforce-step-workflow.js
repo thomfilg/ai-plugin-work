@@ -482,29 +482,56 @@ function getCurrentStep(state, steps) {
  * @returns {boolean}
  */
 function isTerminalCompleteBypass(cmd, ticketId) {
+  // [DEBUG-GH-452] Temporary instrumentation — remove after CI root-cause is found.
+  const dbg = (msg) => process.stderr.write(`[DEBUG-GH-452] ${msg}\n`);
+
   // Strict format: only "node <path>/work-state.js complete <ticketId>"
   // Accepts quoted paths: node "path/work-state.js" or node 'path/work-state.js'
   // Reject anything with shell operators, substitutions, or extra arguments
   const strictPattern =
     /^node\s+(?:"([^"]+[\\/]work-state\.js)"|'([^']+[\\/]work-state\.js)'|(\S+[\\/]work-state\.js))\s+complete\s+(\S+)\s*$/;
   const match = strictPattern.exec(cmd);
-  if (!match) return false;
+  if (!match) {
+    dbg(`regex_miss cmd=${JSON.stringify(cmd)}`);
+    return false;
+  }
 
   // Reject shell operators and substitutions
-  if (/[;&|$`<>(){}\n]/.test(cmd)) return false;
+  if (/[;&|$`<>(){}\n]/.test(cmd)) {
+    dbg('shell_op_reject');
+    return false;
+  }
 
   // Extract and verify script path is trusted
   const scriptPath = match[1] || match[2] || match[3];
   const resolvedPath = expandPluginRoot(scriptPath);
-  if (!isTrustedScriptPath(resolvedPath, TRUSTED_SCRIPT_DIRS)) return false;
+  const trusted = isTrustedScriptPath(resolvedPath, TRUSTED_SCRIPT_DIRS);
+  dbg(`script_path raw=${scriptPath}`);
+  dbg(`script_path expanded=${resolvedPath}`);
+  try {
+    dbg(
+      `script_path realpath=${require('fs').realpathSync(require('path').resolve(resolvedPath))}`
+    );
+  } catch (e) {
+    dbg(`script_path realpath_err=${e.message}`);
+  }
+  dbg(`trusted_dirs=${JSON.stringify(TRUSTED_SCRIPT_DIRS)}`);
+  dbg(`trusted_result=${trusted}`);
+  if (!trusted) return false;
 
   // Verify ticket arg matches active ticket
   const targetTicket = match[4];
-  if (targetTicket !== ticketId) return false;
+  if (targetTicket !== ticketId) {
+    dbg(`ticket_mismatch target=${targetTicket} active=${ticketId}`);
+    return false;
+  }
 
   // Verify terminal step — reuse shared helper for consistent multi-in_progress handling
   const state = loadStateFile(ticketId, '.work-state.json');
-  return getCurrentStep(state, WORK_STEPS) === 'complete';
+  const currentStep = getCurrentStep(state, WORK_STEPS);
+  dbg(`state_loaded=${state ? 'yes' : 'no'} currentStep=${currentStep} TASKS_BASE=${TASKS_BASE}`);
+  if (state) dbg(`state_keys=${JSON.stringify(Object.keys(state.stepStatus || {}))}`);
+  return currentStep === 'complete';
 }
 
 /**
