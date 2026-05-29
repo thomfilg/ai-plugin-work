@@ -21,7 +21,7 @@ const { discoverStores, listMemoriesFromStore } = require(
 );
 const { selectForEvent } = require(path.join(__dirname, '..', 'lib', 'matcher'));
 
-const VALID_EVENTS = new Set(['SessionStart', 'UserPromptSubmit', 'PreToolUse']);
+const VALID_EVENTS = new Set(['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'Stop']);
 const MAX_INJECT_CHARS = 8000;
 
 async function readStdin() {

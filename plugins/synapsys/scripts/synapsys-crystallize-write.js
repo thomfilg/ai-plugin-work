@@ -64,7 +64,7 @@ if (!manifest || !Array.isArray(manifest.memories)) {
   process.exit(2);
 }
 
-const VALID_EVENTS = new Set(['UserPromptSubmit', 'PreToolUse', 'SessionStart']);
+const VALID_EVENTS = new Set(['UserPromptSubmit', 'PreToolUse', 'SessionStart', 'Stop']);
 const written = [];
 const skipped = [];
 const errors = [];

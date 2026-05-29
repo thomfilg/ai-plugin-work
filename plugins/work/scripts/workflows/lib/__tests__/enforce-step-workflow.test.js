@@ -50,6 +50,30 @@ function runHook(hookData, hookType = 'PreToolUse', env = {}) {
   );
 }
 
+// GH-452: writes the state file atomically (tmp + rename) so a hook spawned
+// immediately after never sees a half-written or missing file. The plain
+// fs.writeFileSync path occasionally raced on the Node 20 GitHub Actions
+// runner — the spawned hook's readFileSync hit ENOENT before the parent's
+// write became visible. Atomic rename + dir fsync closes that window.
+function atomicWriteJson(targetPath, value) {
+  const dir = path.dirname(targetPath);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  const tmpPath = `${targetPath}.tmp.${process.pid}.${Date.now()}`;
+  fs.writeFileSync(tmpPath, JSON.stringify(value, null, 2));
+  fs.renameSync(tmpPath, targetPath);
+  // Force directory metadata to disk so the rename is visible to other procs.
+  try {
+    const fd = fs.openSync(dir, 'r');
+    try {
+      fs.fsyncSync(fd);
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    // best-effort — fsync on a dir is unsupported on some filesystems.
+  }
+}
+
 function writeWorkState(stepStatus, status = 'in_progress') {
   if (!fs.existsSync(TASKS_DIR)) fs.mkdirSync(TASKS_DIR, { recursive: true });
   const state = {
@@ -63,11 +87,10 @@ function writeWorkState(stepStatus, status = 'in_progress') {
     startTime: new Date().toISOString(),
     lastUpdate: new Date().toISOString(),
   };
-  fs.writeFileSync(path.join(TASKS_DIR, '.work-state.json'), JSON.stringify(state, null, 2));
+  atomicWriteJson(path.join(TASKS_DIR, '.work-state.json'), state);
 }
 
 function writeWorkflowState(stepStatus, workflow = 'work-pr', status = 'in_progress') {
-  if (!fs.existsSync(TASKS_DIR)) fs.mkdirSync(TASKS_DIR, { recursive: true });
   const state = {
     workflow,
     instanceId: TEST_TICKET,
@@ -79,12 +102,11 @@ function writeWorkflowState(stepStatus, workflow = 'work-pr', status = 'in_progr
     lastUpdate: new Date().toISOString(),
   };
   const stateFile = `.${workflow}.workflow-state.json`;
-  fs.writeFileSync(path.join(TASKS_DIR, stateFile), JSON.stringify(state, null, 2));
+  atomicWriteJson(path.join(TASKS_DIR, stateFile), state);
 }
 
 function writeEvidence(evidence, evidenceFile = '.step-evidence.json') {
-  if (!fs.existsSync(TASKS_DIR)) fs.mkdirSync(TASKS_DIR, { recursive: true });
-  fs.writeFileSync(path.join(TASKS_DIR, evidenceFile), JSON.stringify(evidence, null, 2));
+  atomicWriteJson(path.join(TASKS_DIR, evidenceFile), evidence);
 }
 
 function readEvidence(evidenceFile = '.step-evidence.json') {

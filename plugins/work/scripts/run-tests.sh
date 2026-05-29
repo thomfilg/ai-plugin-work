@@ -61,4 +61,14 @@ fi
 cleanup_test_artifacts
 
 # Run tests; trap will fire cleanup on exit (clean or interrupted)
-node --test "${FILES[@]}"
+# (GH-452) Force --test-concurrency=1 on CI to serialize test files. The
+# enforce-step-workflow suite spawns many hook subprocesses that share
+# TASKS_BASE for state I/O; parallel runs on the 2-CPU GitHub Actions
+# ubuntu-latest runner contend for fs cache and intermittently lose
+# state-file write/read coherence (the file-not-found races chased on
+# GH-452). Locally we keep the default (CPU count) so devs aren't penalized.
+if [ "${CI:-}" = "true" ]; then
+  node --test --test-concurrency=1 "${FILES[@]}"
+else
+  node --test "${FILES[@]}"
+fi

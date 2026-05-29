@@ -435,25 +435,37 @@ function getTicketId(hookData) {
 
 function loadStateFile(ticketId, stateFile) {
   const p = path.join(TASKS_BASE, safeTicketPath(ticketId), stateFile);
-  try {
-    return JSON.parse(fs.readFileSync(p, 'utf-8'));
-  } catch {
-    // Legacy fallback: per-workflow files (e.g. .work-pr.workflow-state.json)
-    // may not exist if the state was written before per-workflow split.
-    // Try the legacy .workflow-state.json and check the workflow field matches.
-    if (stateFile !== '.workflow-state.json' && stateFile.endsWith('.workflow-state.json')) {
-      const legacyPath = path.join(TASKS_BASE, safeTicketPath(ticketId), '.workflow-state.json');
-      try {
-        const legacy = JSON.parse(fs.readFileSync(legacyPath, 'utf-8'));
-        // Derive expected workflow name from stateFile: .work-pr.workflow-state.json -> work-pr
-        const expectedWorkflow = stateFile
-          .replace(/^\./, '')
-          .replace(/\.workflow-state\.json$/, '');
-        if (legacy?.workflow === expectedWorkflow) return legacy;
-      } catch {} /* no legacy file either */
+  // GH-452: on slow GitHub Actions runners, a parent's fs.writeFileSync can
+  // return before the just-spawned child's readFileSync sees the file. Retry
+  // once with a short busy-wait to cover that visibility window.
+  const readOnce = () => {
+    try {
+      return JSON.parse(fs.readFileSync(p, 'utf-8'));
+    } catch (err) {
+      if (err && err.code === 'ENOENT') return undefined;
+      return null;
     }
-    return null;
+  };
+  let parsed = readOnce();
+  if (parsed === undefined) {
+    const sab = new SharedArrayBuffer(4);
+    Atomics.wait(new Int32Array(sab), 0, 0, 50);
+    parsed = readOnce();
   }
+  if (parsed !== undefined && parsed !== null) return parsed;
+  // Legacy fallback: per-workflow files (e.g. .work-pr.workflow-state.json)
+  // may not exist if the state was written before per-workflow split.
+  // Try the legacy .workflow-state.json and check the workflow field matches.
+  if (stateFile !== '.workflow-state.json' && stateFile.endsWith('.workflow-state.json')) {
+    const legacyPath = path.join(TASKS_BASE, safeTicketPath(ticketId), '.workflow-state.json');
+    try {
+      const legacy = JSON.parse(fs.readFileSync(legacyPath, 'utf-8'));
+      // Derive expected workflow name from stateFile: .work-pr.workflow-state.json -> work-pr
+      const expectedWorkflow = stateFile.replace(/^\./, '').replace(/\.workflow-state\.json$/, '');
+      if (legacy?.workflow === expectedWorkflow) return legacy;
+    } catch {} /* no legacy file either */
+  }
+  return null;
 }
 
 // Dual in_progress detection — warn but still fail-open
