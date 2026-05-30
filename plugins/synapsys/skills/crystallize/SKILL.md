@@ -252,9 +252,7 @@ description: Block raw <button> in .tsx files unless the file already imports th
 events: PreToolUse
 trigger_pretool: Edit:.*\.tsx,Write:.*\.tsx
 trigger_pretool_content: <button\b
-trigger_pretool_content_not:
-  - from\s+['"]@app-services-monitoring/ui['"]
-  - import\s+\{[^}]*\bButton\b
+trigger_pretool_content_not: from\s+['"]@app-services-monitoring/ui['"],import\s+\{[^}]*\bButton\b
 inject: full
 ---
 
