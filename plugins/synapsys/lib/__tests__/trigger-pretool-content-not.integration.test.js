@@ -4,12 +4,8 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const matcherModule = require('../matcher');
-const {
-  evaluatePretoolContentNot,
-  hasNegativeContentPatterns,
-  matchPreTool,
-  matchPreToolResult,
-} = matcherModule;
+const { evaluatePretoolContentNot, hasNegativeContentPatterns, matchPreTool, matchPreToolResult } =
+  matcherModule;
 
 function captureStderr(fn) {
   const orig = process.stderr.write.bind(process.stderr);
@@ -157,7 +153,7 @@ test('P0 #1, #2 — memory fires when positive matches and no negative pattern i
     ...BUTTON_MEMORY_BASE,
     triggerPretoolContentNot: [],
   };
-  assert.equal(matchPreTool(memory, editPayload('<button>Go</button>')), true);
+  assert.equal(matchPreTool(memory, editPayload('<button>Go</button>')).fired, true);
 });
 
 // S2 — UI-package import excludes
@@ -166,9 +162,8 @@ test('P0 #2, #3 — UI-package import excludes the memory', () => {
     ...BUTTON_MEMORY_BASE,
     triggerPretoolContentNot: ['@app-services-monitoring/ui'],
   };
-  const newString =
-    "import { Button } from '@app-services-monitoring/ui';\n<button>Go</button>";
-  assert.equal(matchPreTool(memory, editPayload(newString)), false);
+  const newString = "import { Button } from '@app-services-monitoring/ui';\n<button>Go</button>";
+  assert.equal(matchPreTool(memory, editPayload(newString)).fired, false);
 });
 
 // S3 — named import excludes
@@ -179,7 +174,7 @@ test('P0 #2 — named import excludes the memory', () => {
     triggerPretoolContentNot: ['import\\s*\\{[^}]*\\bButton\\b[^}]*\\}'],
   };
   const newString = "import { Button } from 'somewhere';\n<button>Go</button>";
-  assert.equal(matchPreTool(memory, editPayload(newString)), false);
+  assert.equal(matchPreTool(memory, editPayload(newString)).fired, false);
 });
 
 // S4 — short-circuit on positive miss (evaluatePretoolContentNot NOT invoked)
@@ -197,7 +192,7 @@ test('P0 #2 (short-circuit) — no positive match means negative is never evalua
   try {
     // new_string has no <button — positive pattern misses
     const result = matchPreTool(memory, editPayload('<Buttonish>Go</Buttonish>'));
-    assert.equal(result, false);
+    assert.equal(result.fired, false);
     assert.equal(callCount, 0, 'evaluatePretoolContentNot must not be called when positive misses');
   } finally {
     matcherModule.evaluatePretoolContentNot = orig;
@@ -207,14 +202,14 @@ test('P0 #2 (short-circuit) — no positive match means negative is never evalua
 // S5 — backwards-compat: memory without trigger_pretool_content_not behaves identically
 test('P0 §Compatibility — memory without trigger_pretool_content_not behaves identically to pre-change runtime', () => {
   const memory = { ...BUTTON_MEMORY_BASE }; // no triggerPretoolContentNot at all
-  assert.equal(matchPreTool(memory, editPayload('<button>Go</button>')), true);
-  assert.equal(matchPreTool(memory, editPayload('<Buttonish>Go</Buttonish>')), false);
+  assert.equal(matchPreTool(memory, editPayload('<button>Go</button>')).fired, true);
+  assert.equal(matchPreTool(memory, editPayload('<Buttonish>Go</Buttonish>')).fired, false);
 });
 
 // S6 — backwards-compat: empty trigger_pretool_content_not array behaves like absent field
 test('P0 §Compatibility — empty trigger_pretool_content_not array behaves like absent field', () => {
   const memory = { ...BUTTON_MEMORY_BASE, triggerPretoolContentNot: [] };
-  assert.equal(matchPreTool(memory, editPayload('<button>Go</button>')), true);
+  assert.equal(matchPreTool(memory, editPayload('<button>Go</button>')).fired, true);
 });
 
 // S7 — partial-invalid negative regex: invalid skipped, remaining still gates
@@ -223,13 +218,12 @@ test('P0 #4 — one invalid negative regex is skipped and the rest still gate', 
     ...BUTTON_MEMORY_BASE,
     triggerPretoolContentNot: ['(unclosed', '@app-services-monitoring/ui'],
   };
-  const newString =
-    "import { Button } from '@app-services-monitoring/ui';\n<button>Go</button>";
+  const newString = "import { Button } from '@app-services-monitoring/ui';\n<button>Go</button>";
   // Silence stderr to keep test output clean
   const origWrite = process.stderr.write.bind(process.stderr);
   process.stderr.write = () => true;
   try {
-    assert.equal(matchPreTool(memory, editPayload(newString)), false);
+    assert.equal(matchPreTool(memory, editPayload(newString)).fired, false);
   } finally {
     process.stderr.write = origWrite;
   }
@@ -244,7 +238,7 @@ test('P0 #4 — all-invalid negative regex falls back to positive-only behavior'
   const origWrite = process.stderr.write.bind(process.stderr);
   process.stderr.write = () => true;
   try {
-    assert.equal(matchPreTool(memory, editPayload('<button>Go</button>')), true);
+    assert.equal(matchPreTool(memory, editPayload('<button>Go</button>')).fired, true);
   } finally {
     process.stderr.write = origWrite;
   }
@@ -267,11 +261,13 @@ test('P0 #8 — MatchResult exposes negative-excludes reason and matched.negativ
     ...BUTTON_MEMORY_BASE,
     triggerPretoolContentNot: ['@app-services-monitoring/ui'],
   };
-  const newString =
-    "import { Button } from '@app-services-monitoring/ui';\n<button>Go</button>";
+  const newString = "import { Button } from '@app-services-monitoring/ui';\n<button>Go</button>";
   const result = matchPreToolResult(memory, editPayload(newString));
   assert.equal(result.reason, 'negative-excludes', 'reason must be "negative-excludes"');
-  assert.ok(result.matched && typeof result.matched === 'object', 'matched must be the details object');
+  assert.ok(
+    result.matched && typeof result.matched === 'object',
+    'matched must be the details object'
+  );
   assert.equal(
     result.matched.negative_pattern,
     '@app-services-monitoring/ui',
@@ -303,16 +299,16 @@ test('P0 #8 / S9 — matchPreToolResult on positive miss returns {matched:false}
   );
 });
 
-test('P0 #8 — boolean matchPreTool export remains unchanged (returns boolean)', () => {
+test('P0 #8 — matchPreTool returns MatchResult with negative-excludes reason on exclusion', () => {
   const memory = {
     ...BUTTON_MEMORY_BASE,
     triggerPretoolContentNot: ['@app-services-monitoring/ui'],
   };
-  const newString =
-    "import { Button } from '@app-services-monitoring/ui';\n<button>Go</button>";
+  const newString = "import { Button } from '@app-services-monitoring/ui';\n<button>Go</button>";
   const result = matchPreTool(memory, editPayload(newString));
-  assert.equal(typeof result, 'boolean');
-  assert.equal(result, false);
+  assert.equal(typeof result, 'object');
+  assert.equal(result.fired, false);
+  assert.equal(result.reason, 'negative-excludes');
 });
 
 // R7 — backwards-compat regression: real-shape positive-only memory unchanged
@@ -326,9 +322,9 @@ test('R7: positive-only memory (no negative field) matches identically to pre-ch
     // triggerPretoolContentNot intentionally absent
   };
   const payload = { tool_name: 'Bash', tool_input: { command: 'git push origin main' } };
-  assert.equal(matchPreTool(memory, payload), true);
+  assert.equal(matchPreTool(memory, payload).fired, true);
   const noMatch = { tool_name: 'Bash', tool_input: { command: 'ls -la' } };
-  assert.equal(matchPreTool(memory, noMatch), false);
+  assert.equal(matchPreTool(memory, noMatch).fired, false);
 });
 
 // --- Task 5: synapsys-crystallize-write.js emits trigger_pretool_content_not ---
