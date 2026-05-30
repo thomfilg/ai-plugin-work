@@ -107,7 +107,7 @@ function groupByMatcher(memories) {
 function warnAndKeepFirst(group) {
   const sorted = [...group].sort((a, b) => a.name.localeCompare(b.name));
   const names = sorted.map((m) => m.name);
-  const pattern = group[0].trigger_pretool_content.join(',');
+  const pattern = (group[0].trigger_pretool_content || []).join(',');
   process.stderr.write(
     `[synapsys-consolidate] unexpected matcher collision: ${names.join(' and ')} both derive ${pattern} — consider adding an explicit merge group\n`
   );
