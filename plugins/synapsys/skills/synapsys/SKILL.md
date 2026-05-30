@@ -62,3 +62,31 @@ Failure is fail-open: any error in the dispatcher exits 0 with no output. Memory
 ## Storage discovery
 
 Synapsys only reads from directories that contain a `.synapsys.json` marker (written by `synapsys init`). The marker also records the store kind so future tooling can distinguish local / worktree / global memories.
+
+## `synapsys-explain` — per-memory trigger debugger
+
+`synapsys-test.js` shows *which* memories fired; `synapsys-explain.js` shows *why* every other memory did not. It evaluates every memory in the discovered store(s) against an event (real or synthetic) and reports, per memory, whether it fired and — if not — at which gate it failed (`events-exclude`, `no-prompt-match`, `no-pretool-match`, `no-content-match`, `expired`, or `disabled`).
+
+```bash
+# Synthetic UserPromptSubmit
+node plugins/synapsys/scripts/synapsys-explain.js \
+  --event=UserPromptSubmit --prompt="going to deploy to prod"
+
+# Synthetic PreToolUse with tool input
+node plugins/synapsys/scripts/synapsys-explain.js \
+  --event=PreToolUse --tool=Edit \
+  --tool-input='{"file_path":"/repo/x.tsx","new_string":"<button>Save</button>"}'
+
+# Pipe a raw hook payload via stdin (same JSON the dispatcher receives)
+cat fake-hook-event.json | node plugins/synapsys/scripts/synapsys-explain.js --stdin
+
+# Limit to specific memories
+node plugins/synapsys/scripts/synapsys-explain.js \
+  --event=UserPromptSubmit --prompt="..." \
+  --only=ui-component-Button,auto-followup-pr-after-push
+
+# Verbose per-memory detail (matched alternative + matched substring + body preview)
+node plugins/synapsys/scripts/synapsys-explain.js --event=... --verbose
+```
+
+Exit code is `0` regardless of how many memories fired (this is a diagnostic, not a test). Exit `2` is reserved for misconfiguration: invalid `--stdin` JSON, unknown `--store=<name>`, or an unsupported `--event` value.

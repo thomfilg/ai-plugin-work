@@ -1,4 +1,4 @@
-const { describe, it } = require('node:test');
+const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const {
   computeCommentHash,
@@ -6,6 +6,19 @@ const {
   initState,
   getChangedPaths,
 } = require('../follow-up-pr.js');
+
+// Isolate from a polluted parent env: tests assume the default bot-reviewer
+// list (which includes copilot-pull-request-reviewer). A leaked
+// FOLLOW_UP_PR_BOT_REVIEWERS would shrink that list and break dedup tests.
+let __savedBotReviewers;
+before(() => {
+  __savedBotReviewers = process.env.FOLLOW_UP_PR_BOT_REVIEWERS;
+  delete process.env.FOLLOW_UP_PR_BOT_REVIEWERS;
+});
+after(() => {
+  if (__savedBotReviewers === undefined) delete process.env.FOLLOW_UP_PR_BOT_REVIEWERS;
+  else process.env.FOLLOW_UP_PR_BOT_REVIEWERS = __savedBotReviewers;
+});
 
 // ── computeCommentHash ──────────────────────────────────────────────────────
 

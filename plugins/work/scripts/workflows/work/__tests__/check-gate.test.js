@@ -632,31 +632,48 @@ describe('check-gate (unit)', () => {
     // Scenario: code-review.check.md has CRITICAL issues but
     // code-review-reply.check.md resolves all of them.
     // The full validateCheckGate() must return valid: true.
-    writeReport('tests.check.md', 'Status: APPROVED');
-    writeReport('completion.check.md', 'Status: COMPLETE');
-    writeReport(
-      'code-review.check.md',
-      '# Code Review\n\n## CRITICAL ISSUES\n\n**Unsafe input handling**\n\n**Memory leak in event listener**\n\nStatus: NEEDS_WORK'
-    );
-    writeReport(
-      'code-review-reply.check.md',
-      '## Issue: Unsafe input handling\n\n**Decision:** FIXED\n**Reason:** Added input validation\n\n## Issue: Memory leak in event listener\n\n**Decision:** FIXED\n**Reason:** Added cleanup in dispose()\n'
-    );
-    const result = validateCheckGate(TEMP, testTicket);
-    // Filter to only required-reports and qa-reports reasons (ignore running-agents, spec-verification, tdd which are env-dependent)
-    const reportReasons = result.reasons.filter(
-      (r) => r.includes('report') || r.includes('Report') || r.includes('code-review')
-    );
-    assert.deepStrictEqual(
-      reportReasons,
-      [],
-      'gate should pass for code-review when reply resolves all CRITICAL issues'
-    );
-    // Verify the required-reports rule specifically passed
-    const requiredRule = result.rules.find((r) => r.name === 'required-reports');
-    assert.ok(requiredRule, 'required-reports rule must be in results');
-    assert.equal(requiredRule.passed, true, 'required-reports rule must pass');
-    assert.deepStrictEqual(requiredRule.reasons, []);
+    // WEB_APPS is unset (and the config + gate caches busted so the unset
+    // takes effect) so qa-reports rule does not require any QA file —
+    // isolated from a polluted parent env that may export WEB_APPS.
+    const savedWebApps = process.env.WEB_APPS;
+    delete process.env.WEB_APPS;
+    const configPath = require.resolve('../../lib/config');
+    const gatePath = require.resolve('../gates/check-gate');
+    delete require.cache[configPath];
+    delete require.cache[gatePath];
+    const { validateCheckGate: freshValidate } = require('../gates/check-gate');
+    try {
+      writeReport('tests.check.md', 'Status: APPROVED');
+      writeReport('completion.check.md', 'Status: COMPLETE');
+      writeReport(
+        'code-review.check.md',
+        '# Code Review\n\n## CRITICAL ISSUES\n\n**Unsafe input handling**\n\n**Memory leak in event listener**\n\nStatus: NEEDS_WORK'
+      );
+      writeReport(
+        'code-review-reply.check.md',
+        '## Issue: Unsafe input handling\n\n**Decision:** FIXED\n**Reason:** Added input validation\n\n## Issue: Memory leak in event listener\n\n**Decision:** FIXED\n**Reason:** Added cleanup in dispose()\n'
+      );
+      const result = freshValidate(TEMP, testTicket);
+      // Filter to only required-reports and qa-reports reasons (ignore running-agents, spec-verification, tdd which are env-dependent)
+      const reportReasons = result.reasons.filter(
+        (r) => r.includes('report') || r.includes('Report') || r.includes('code-review')
+      );
+      assert.deepStrictEqual(
+        reportReasons,
+        [],
+        'gate should pass for code-review when reply resolves all CRITICAL issues'
+      );
+      // Verify the required-reports rule specifically passed
+      const requiredRule = result.rules.find((r) => r.name === 'required-reports');
+      assert.ok(requiredRule, 'required-reports rule must be in results');
+      assert.equal(requiredRule.passed, true, 'required-reports rule must pass');
+      assert.deepStrictEqual(requiredRule.reasons, []);
+    } finally {
+      if (savedWebApps === undefined) delete process.env.WEB_APPS;
+      else process.env.WEB_APPS = savedWebApps;
+      delete require.cache[configPath];
+      delete require.cache[gatePath];
+    }
   });
 
   it('integration: QA skipped with NOT_APPLICABLE passes full gate', () => {

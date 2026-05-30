@@ -25,16 +25,18 @@ function makeMemory(overrides) {
   );
 }
 
-test('matchStop returns true when memory has Stop in events', () => {
-  assert.equal(matchStop(makeMemory({ events: ['Stop'] })), true);
+test('matchStop returns { fired: true } when memory has Stop in events', () => {
+  assert.equal(matchStop(makeMemory({ events: ['Stop'] })).fired, true);
 });
 
-test('matchStop returns true even when other events are also listed', () => {
-  assert.equal(matchStop(makeMemory({ events: ['PreToolUse', 'Stop'] })), true);
+test('matchStop returns { fired: true } even when other events are also listed', () => {
+  assert.equal(matchStop(makeMemory({ events: ['PreToolUse', 'Stop'] })).fired, true);
 });
 
-test('matchStop returns false when memory has no Stop event', () => {
-  assert.equal(matchStop(makeMemory({ events: ['UserPromptSubmit'] })), false);
+test('matchStop returns { fired: false, reason: "events-exclude" } when memory has no Stop event', () => {
+  const result = matchStop(makeMemory({ events: ['UserPromptSubmit'] }));
+  assert.equal(result.fired, false);
+  assert.equal(result.reason, 'events-exclude');
 });
 
 test('selectForEvent("Stop", ...) picks only Stop-event memories', () => {
