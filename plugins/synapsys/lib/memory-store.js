@@ -159,9 +159,18 @@ function readMemoryFile(store, name) {
     triggerPretoolContentNot: toList(meta.trigger_pretool_content_not),
     triggerSession: meta.trigger_session === true || meta.trigger_session === 'true',
     inject: meta.inject === 'full' ? 'full' : 'summary',
+    disabled: meta.disabled === true || meta.disabled === 'true',
+    expired: parseExpired(meta.expires),
     meta,
     body,
   };
+}
+
+function parseExpired(value) {
+  if (!value) return false;
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) return false;
+  return date.getTime() < Date.now();
 }
 
 function listMemoriesFromStore(store) {

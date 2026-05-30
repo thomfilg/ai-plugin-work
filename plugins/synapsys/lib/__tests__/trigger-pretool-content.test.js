@@ -251,7 +251,15 @@ test('Edit on a .tsx file with raw <button> in new_string fires the memory', () 
       new_string: '<button onClick={x}>Go</button>',
     },
   };
-  assert.equal(matchPreTool(memory, payload), true);
+  const result = matchPreTool(memory, payload);
+  assert.equal(result.fired, true);
+  assert.equal(result.matched.content_pattern, '<button\\b');
+  assert.ok(
+    typeof result.matched.content_substring === 'string' &&
+      result.matched.content_substring.length > 0,
+    'matched.content_substring should be non-empty string'
+  );
+  assert.ok(result.matched.pretool_pattern, 'matched.pretool_pattern should be set');
 });
 
 test('Edit on a .tsx file with <Button> in new_string does NOT fire the memory', () => {
@@ -271,7 +279,9 @@ test('Edit on a .tsx file with <Button> in new_string does NOT fire the memory',
   };
   // The PascalCase `<Buttonish>` token has no `<button\b` occurrence: after the trailing `n`
   // of the case-insensitive `<button` match comes `i` (a word char), so `\b` cannot anchor.
-  assert.equal(matchPreTool(memory, payload), false);
+  const result = matchPreTool(memory, payload);
+  assert.equal(result.fired, false);
+  assert.equal(result.reason, 'no-content-match');
 });
 
 test('Edit on a .ts (not .tsx) file with <button> does NOT fire because trigger_pretool excludes', () => {
@@ -289,7 +299,9 @@ test('Edit on a .ts (not .tsx) file with <button> does NOT fire because trigger_
       new_string: '<button onClick={x}>Go</button>',
     },
   };
-  assert.equal(matchPreTool(memory, payload), false);
+  const result = matchPreTool(memory, payload);
+  assert.equal(result.fired, false);
+  assert.equal(result.reason, 'no-pretool-match');
 });
 
 test('Bash tool with trigger_pretool_content fails closed (no content field for Bash)', () => {
@@ -303,7 +315,9 @@ test('Bash tool with trigger_pretool_content fails closed (no content field for 
     tool_name: 'Bash',
     tool_input: { command: 'git push origin main' },
   };
-  assert.equal(matchPreTool(memory, payload), false);
+  const result = matchPreTool(memory, payload);
+  assert.equal(result.fired, false);
+  assert.equal(result.reason, 'no-content-match');
 });
 
 test('MultiEdit joins edits[].new_string with newline before evaluating content patterns', () => {
@@ -323,7 +337,7 @@ test('MultiEdit joins edits[].new_string with newline before evaluating content 
       ],
     },
   };
-  assert.equal(matchPreTool(memory, payload), true);
+  assert.equal(matchPreTool(memory, payload).fired, true);
 });
 
 test('NotebookEdit uses new_source as content', () => {
@@ -337,7 +351,7 @@ test('NotebookEdit uses new_source as content', () => {
     tool_name: 'NotebookEdit',
     tool_input: { notebook_path: 'n.ipynb', new_source: "console.log('x')" },
   };
-  assert.equal(matchPreTool(memory, payload), true);
+  assert.equal(matchPreTool(memory, payload).fired, true);
 });
 
 // --- Task 6: synapsys-crystallize-write.js emits trigger_pretool_content ---
@@ -394,7 +408,7 @@ test('Memory without trigger_pretool_content keeps existing behaviour (backwards
     tool_input: { command: 'git push origin main' },
   };
   assert.equal(
-    matchPreTool(memory, payload),
+    matchPreTool(memory, payload).fired,
     true,
     'memory without trigger_pretool_content must still fire on its prior trigger'
   );
@@ -402,11 +416,13 @@ test('Memory without trigger_pretool_content keeps existing behaviour (backwards
   // Regression guard: also assert that adding an unrelated triggerPretool entry
   // does not break prefix-match path.
   const memory2 = { ...memory, triggerPretool: ['Bash:git\\s+push', 'Edit:.*\\.tsx'] };
-  assert.equal(matchPreTool(memory2, payload), true);
+  assert.equal(matchPreTool(memory2, payload).fired, true);
 
   // And the negative: a different Bash command must NOT fire.
   const payloadNoMatch = { tool_name: 'Bash', tool_input: { command: 'ls -la' } };
-  assert.equal(matchPreTool(memory, payloadNoMatch), false);
+  const noMatchResult = matchPreTool(memory, payloadNoMatch);
+  assert.equal(noMatchResult.fired, false);
+  assert.equal(noMatchResult.reason, 'no-pretool-match');
 });
 
 test('Crystallize writer omits trigger_pretool_content line when field is absent', () => {

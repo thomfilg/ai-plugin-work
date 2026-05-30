@@ -92,7 +92,27 @@ inject: full
 - `lib/matcher.js` — event/payload matchers
 - `scripts/synapsys-init.js` — `--kind=<local|worktree|global|shared>`
 - `scripts/synapsys-list.js` — list every discovered memory with its triggers
+- `scripts/synapsys-explain.js` — per-memory trigger debugger; reports why each memory did or did not fire for a given event
 - `skills/synapsys/SKILL.md` — `/synapsys` slash command (init, list, new)
+
+## Debugging triggers with `synapsys-explain`
+
+When a memory does not fire for a prompt you expected it to, run `synapsys-explain` against the same event. It evaluates every memory in the store and prints a one-line verdict per memory plus the gate it failed at.
+
+```bash
+node plugins/synapsys/scripts/synapsys-explain.js \
+  --event=UserPromptSubmit --prompt="going to deploy to prod"
+
+node plugins/synapsys/scripts/synapsys-explain.js \
+  --event=PreToolUse --tool=Edit \
+  --tool-input='{"file_path":"/repo/x.tsx","new_string":"<button>Save</button>"}'
+
+cat fake-hook-event.json | node plugins/synapsys/scripts/synapsys-explain.js --stdin
+
+node plugins/synapsys/scripts/synapsys-explain.js --event=... --verbose
+```
+
+`--only=<csv>` narrows evaluation to specific memories. `--store=<name|path>` picks a non-auto-detected store. Exit code is `0` regardless of how many memories fired; `2` only on misconfiguration.
 
 ## Design choices
 
