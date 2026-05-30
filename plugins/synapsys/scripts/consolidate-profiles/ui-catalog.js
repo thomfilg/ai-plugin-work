@@ -91,7 +91,7 @@ const RAW_HTML_TAG = Object.freeze({
  * driver (Task 6) recognises it and merges.
  */
 const TYPOGRAPHY_NAMES = new Set(['Text', 'Heading', 'Paragraph']);
-const TYPOGRAPHY_SENTINEL = '__TYPOGRAPHY__';
+const { TYPOGRAPHY_SENTINEL } = require('./_constants');
 
 /**
  * Components with no single raw-HTML equivalent — these trigger on the
@@ -111,10 +111,7 @@ const SAFE_NAME_RE = /^[a-zA-Z0-9_]+$/;
 function muiEscapeHatch(name) {
   // C3: validate Name before interpolation.
   if (!SAFE_NAME_RE.test(name)) return null;
-  return [
-    `from\\s+['"]@mui/material['"]`,
-    `import\\s+\\{[^}]*\\b${name}\\b`,
-  ];
+  return [`from\\s+['"]@mui/material['"]`, `import\\s+\\{[^}]*\\b${name}\\b`];
 }
 
 function deriveTriggerContent(name) {

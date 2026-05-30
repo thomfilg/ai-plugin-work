@@ -77,9 +77,11 @@ function readSourcesForProfile(profile, repo) {
   return items;
 }
 
-const TYPOGRAPHY_SENTINEL = '__TYPOGRAPHY__';
-const TYPOGRAPHY_MATCHER = '<(p|h[1-6]|span)\\b';
-const TYPOGRAPHY_MERGED_NAME = 'ui-component-typography';
+const {
+  TYPOGRAPHY_SENTINEL,
+  TYPOGRAPHY_MATCHER,
+  TYPOGRAPHY_MERGED_NAME,
+} = require('./consolidate-profiles/_constants');
 
 /**
  * Post-toMemory merge step.
