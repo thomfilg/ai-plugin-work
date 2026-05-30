@@ -196,10 +196,16 @@ function main() {
       );
       continue;
     }
+    if (typeof profile.parse !== 'function' || typeof profile.toMemory !== 'function') {
+      process.stderr.write(
+        `[synapsys-consolidate] profile "${name}" is missing required exports — skipping\n`
+      );
+      continue;
+    }
     const items = readSourcesForProfile(profile, repo);
     let emitted = 0;
     for (const { item, source } of items) {
-      const memory = profile.toMemory(item, { source });
+      const memory = profile.toMemory(item, { source, repo });
       if (memory) {
         memories.push(memory);
         emitted++;
@@ -213,7 +219,9 @@ function main() {
   const mergedMemories = mergeCollisions(memories);
   const manifest = { memories: mergedMemories };
 
-  if (!dryRun) {
+  if (dryRun && !flag('out')) {
+    process.stdout.write(JSON.stringify(manifest, null, 2) + '\n');
+  } else if (!dryRun) {
     writeManifest(manifest, outPath);
   }
 
