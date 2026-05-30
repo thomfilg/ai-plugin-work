@@ -13,7 +13,7 @@
 /**
  * @typedef {Object} MatchResult
  * @property {boolean} fired
- * @property {('events-exclude'|'no-prompt-match'|'no-pretool-match'|'no-content-match'|'negative-excludes'|'expired'|'disabled')} [reason]
+ * @property {('events-exclude'|'no-prompt-match'|'no-pretool-match'|'no-content-match'|'negative-excludes'|'no-session-trigger'|'expired'|'disabled')} [reason]
  * @property {Matched} [matched]
  */
 
@@ -306,7 +306,7 @@ function matchPreToolResult(memory, payload) {
 function matchSession(memory) {
   const gate = gateMemory(memory, 'SessionStart');
   if (gate) return { fired: false, reason: gate };
-  if (memory.triggerSession !== true) return { fired: false, reason: 'disabled' };
+  if (memory.triggerSession !== true) return { fired: false, reason: 'no-session-trigger' };
   return { fired: true };
 }
 
