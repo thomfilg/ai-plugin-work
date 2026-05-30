@@ -245,6 +245,28 @@ const RULES = [
     },
   },
   {
+    id: 'R10-neg-without-pos',
+    severity: 'warn',
+    scope: 'memory',
+    check(memory) {
+      const neg = Array.isArray(memory.trigger_pretool_content_not)
+        ? memory.trigger_pretool_content_not
+        : [];
+      if (neg.length === 0) return [];
+      const pos = Array.isArray(memory.trigger_pretool_content)
+        ? memory.trigger_pretool_content
+        : [];
+      if (pos.length > 0) return [];
+      return [
+        {
+          rule: 'R10-neg-without-pos',
+          memory: memory.name,
+          message: `memory "${memory.name}" has trigger_pretool_content_not without a positive trigger_pretool_content — negative gate has nothing to gate`,
+        },
+      ];
+    },
+  },
+  {
     id: 'R8-stop-without-retro',
     severity: 'warn',
     scope: 'memory',

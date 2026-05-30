@@ -94,7 +94,7 @@ test('R2 ignores multi-word phrases', () => {
 test('R7 auto-fixes inject=full when body exceeds 30 lines', () => {
   // G4: inject=full + 50-line body → manifest.inject mutated to 'summary', R7 warning, exit 0.
   const { RULES } = require(LINT_PATH);
-  assert.equal(RULES.length, 9, 'RULES registry has 9 rules');
+  assert.equal(RULES.length, 10, 'RULES registry has 10 rules');
   const longBody = Array.from({ length: 50 }, (_, i) => `line ${i + 1}`).join('\n');
   const manifest = {
     memories: [makeMemory({ name: 'long-full-mem', inject: 'full', body: longBody })],

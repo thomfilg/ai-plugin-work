@@ -62,6 +62,7 @@ For each aggregated memory, infer:
   | `NotebookEdit` | `tool_input.new_source` |
   | other tools | ignored — memory cannot fire when content match is required |
   Invalid regex behaviour: each invalid pattern logs `[synapsys] memory <name>: invalid trigger_pretool_content regex "<pat>": <error>` to stderr and is skipped. If **all** patterns are invalid, or if the tool has no extractable content field, the memory **fails closed** (does not fire). Memories without `trigger_pretool_content` behave exactly as before — pure prefix-match on `trigger_pretool`.
+- `trigger_pretool_content_not` *(optional)*: list of regex patterns matched against the **same extracted content** as `trigger_pretool_content`. Combined as **AND-NOT**: the memory fires when `trigger_pretool` matches AND at least one positive content pattern matches AND **none** of these negative patterns match. Use this to turn reminders into corrections — only fire when the file actually needs the change, not when it's already conformant (e.g. the file already imports the right component). Same `i,m` flags, same per-tool extraction table, same per-pattern invalid-regex handling as the positive matcher (stderr warning `[synapsys] memory <name>: invalid trigger_pretool_content_not regex "<pat>": <error>` + skip). If **all** negative patterns are invalid, the negative gate is dropped and behavior falls back to positive-only. Absent or empty array → no negative gate (identical to today). Lint rule `R10-neg-without-pos` warns if you set `trigger_pretool_content_not` without a positive `trigger_pretool_content` (would block all fires). When a memory is excluded by a negative pattern, the matcher result reason is `negative-excludes` and the matched pattern is exposed via `matched.negative_pattern`.
 - `events`: classify explicitly per the **Classifier matrix** below — do not default to all events.
 - `inject`: `full` if body ≤ ~20 lines and content is critical (rules/warnings); `summary` for long playbooks.
 
@@ -239,6 +240,27 @@ inject: full
 **Location:** `src/components/form/Button`
 **Docs:** `packages/ui/src/components/form/Button/Button.md`
 ```
+
+## Worked example: AND-NOT negative-content gate
+
+The positive-only version above fires on **every** `.tsx` edit that contains `<button>` — including edits to files that are already importing the `Button` component (legitimate, the file is conformant). To suppress those false-positive fires, add `trigger_pretool_content_not`:
+
+```yaml
+---
+name: ui-use-Button-not-raw
+description: Block raw <button> in .tsx files unless the file already imports the Button component.
+events: PreToolUse
+trigger_pretool: Edit:.*\.tsx,Write:.*\.tsx
+trigger_pretool_content: <button\b
+trigger_pretool_content_not: from\s+['"]@app-services-monitoring/ui['"],import\s+\{[^}]*\bButton\b
+inject: full
+---
+
+Use the Button component, not raw <button>.
+Import: `import { Button } from '@app-services-monitoring/ui';`
+```
+
+**Semantics (AND-NOT):** fires only when raw `<button>` is present AND none of the negative patterns match — i.e. the file does NOT already import from `@app-services-monitoring/ui` AND does NOT already pull in `Button` by name. Order of evaluation: positive content match first (early-exit), negative second. If all `trigger_pretool_content_not` patterns are invalid regex, the matcher falls back to positive-only behavior (the negative gate is dropped). If a single pattern is invalid, it's skipped with a stderr warning; the rest still gate. When a memory is excluded by a negative pattern, the matcher result reason is `negative-excludes` and the matched pattern is exposed via `matched.negative_pattern` (consumed by `synapsys-explain`).
 
 ## TODO (out of scope, deferred)
 

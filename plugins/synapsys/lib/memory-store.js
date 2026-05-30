@@ -156,6 +156,7 @@ function readMemoryFile(store, name) {
     triggerPrompt: meta.trigger_prompt || '',
     triggerPretool: toList(meta.trigger_pretool),
     triggerPretoolContent: toList(meta.trigger_pretool_content),
+    triggerPretoolContentNot: toList(meta.trigger_pretool_content_not),
     triggerSession: meta.trigger_session === true || meta.trigger_session === 'true',
     inject: meta.inject === 'full' ? 'full' : 'summary',
     meta,

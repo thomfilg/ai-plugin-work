@@ -75,6 +75,12 @@ function contentLine(m) {
   return [`trigger_pretool_content: ${list.join(',')}`];
 }
 
+function contentNotLine(m) {
+  const list = m.trigger_pretool_content_not;
+  if (!Array.isArray(list) || list.length === 0) return [];
+  return [`trigger_pretool_content_not: ${list.join(',')}`];
+}
+
 function frontmatter(m) {
   const events = (m.events || []).filter((e) => VALID_EVENTS.has(e));
   const pretool = Array.isArray(m.trigger_pretool)
@@ -90,6 +96,7 @@ function frontmatter(m) {
     `trigger_prompt: ${m.trigger_prompt || ''}`,
     `trigger_pretool: ${pretool}`,
     ...contentLine(m),
+    ...contentNotLine(m),
     `trigger_session: ${m.trigger_session === true ? 'true' : 'false'}`,
     `inject: ${m.inject === 'full' ? 'full' : 'summary'}`,
     '---',

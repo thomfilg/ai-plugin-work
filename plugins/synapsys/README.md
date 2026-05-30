@@ -14,6 +14,7 @@ Memories are markdown files with frontmatter that declares **which events** they
 | `trigger_prompt` | regex | Matched against the user prompt on `UserPromptSubmit` |
 | `trigger_pretool` | csv of `<Tool>:<arg-regex>` | Matched against the tool name + serialized tool input on `PreToolUse` |
 | `trigger_pretool_content` | csv of regex | *(optional)* Matched against the **content** the tool is writing. Combined with `trigger_pretool` via AND. Per-tool content: `Edit`→`new_string`, `Write`→`content`, `MultiEdit`→`edits[].new_string` joined, `NotebookEdit`→`new_source`; other tools → no content (fail-closed). Flags: `i,m`. Invalid regex → stderr warning + skip; all-invalid or missing content → memory does not fire. |
+| `trigger_pretool_content_not` | csv of regex | *(optional)* Negative content gate. Combined with `trigger_pretool_content` via **AND-NOT**: memory fires when the positive content matches AND none of these patterns match. Use to suppress fires when the file is already conformant (e.g. it already imports the correct component). Same extraction table, same `i,m` flags, same fail-closed regex handling as `trigger_pretool_content`. If **all** negative patterns are invalid, the negative gate is dropped (positive-only fallback). Absent or empty array → no negative gate. |
 | `trigger_session` | bool | Fire on every `SessionStart` |
 | `inject` | `full` \| `summary` | How much of the body to inject |
 
@@ -58,7 +59,7 @@ Next time you ask Claude to run `git push ...`, the PreToolUse hook fires, match
 
 ### Content-gated example
 
-To fire only when an `Edit`/`Write` to a `.tsx` file actually introduces a raw `<button>` element, combine `trigger_pretool` (path match) with `trigger_pretool_content` (content match — AND):
+To fire only when an `Edit`/`Write` to a `.tsx` file actually introduces a raw `<button>` element AND the file isn't already importing the `Button` component, combine `trigger_pretool` (path match), `trigger_pretool_content` (positive content match), and `trigger_pretool_content_not` (negative content gate). Semantics: positive AND-NOT negative — the memory fires when raw `<button>` is present AND the UI package import / named `Button` import is NOT already there.
 
 ```yaml
 ---
@@ -68,6 +69,7 @@ events: PreToolUse
 trigger_prompt: \b(<button|raw button|html button)\b
 trigger_pretool: Edit:.*\.tsx,Write:.*\.tsx
 trigger_pretool_content: <button\b
+trigger_pretool_content_not: from\s+['"]@app-services-monitoring/ui['"],import\s+\{[^}]*\bButton\b
 trigger_session: false
 inject: full
 ---
