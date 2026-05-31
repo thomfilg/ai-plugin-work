@@ -119,6 +119,13 @@ function classifyMemory(memory, ctx) {
  * @returns {Array<{source: string, status: string, stored_hash?: string,
  *   current_hash?: string|null, memories: string[]}>}
  */
+// Status precedence: when multiple memories share a source but were
+// consolidated at different times, the most severe status wins. Orphan
+// (source file missing) outranks drifted (hash mismatch) outranks fresh.
+// This preserves the exit-code contract: any out-of-date memory in the
+// store surfaces as drifted/orphan in its group's status.
+const STATUS_RANK = { fresh: 0, drifted: 1, orphan: 2 };
+
 function groupResultsBySource(classifications) {
   if (!Array.isArray(classifications)) return [];
   const bySource = new Map();
@@ -133,6 +140,15 @@ function groupResultsBySource(classifications) {
         current_hash: c.current_hash,
         memories: [],
       });
+    } else {
+      const g = bySource.get(key);
+      const incoming = STATUS_RANK[c.status] ?? 0;
+      const existing = STATUS_RANK[g.status] ?? 0;
+      if (incoming > existing) {
+        g.status = c.status;
+        g.stored_hash = c.stored_hash;
+        g.current_hash = c.current_hash;
+      }
     }
     if (c.name) bySource.get(key).memories.push(c.name);
   }
