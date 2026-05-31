@@ -863,6 +863,22 @@ describe('work-state.js', () => {
       assert.match(result.autoCompleted[0].reason, /APPROVED/);
     });
 
+    it('audit reason reflects actual matched verdict (COMPLETE, not hardcoded APPROVED)', async () => {
+      const TICKET_COMPLETE = 'TEST-CHK-COMPLETE-001';
+      cleanupTempWorkState(TICKET_COMPLETE);
+      const dir = seedTicket(TICKET_COMPLETE, [
+        { id: 'task_1', status: 'completed', kind: 'backend' },
+        { id: 'task_2', status: 'pending', kind: 'checkpoint', title: 'Wrap-up' },
+      ]);
+      writeReport(dir, 'COMPLETE');
+      const { result, code } = await runWorkState(['complete', TICKET_COMPLETE]);
+      assert.equal(code, 0);
+      assert.equal(result.autoCompleted.length, 1);
+      assert.match(result.autoCompleted[0].reason, /^COMPLETE /,
+        'reason must use the actual verdict from the report, not a hardcoded string');
+      cleanupTempWorkState(TICKET_COMPLETE);
+    });
+
     it('blocks completion when checkpoint task has no completion.check.md', async () => {
       seedTicket(TICKET_NO_REPORT, [
         { id: 'task_1', status: 'completed', kind: 'backend' },

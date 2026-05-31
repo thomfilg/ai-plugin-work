@@ -61,7 +61,7 @@ const TASKS_BASE = config.TASKS_BASE;
 const { ALL_STEPS: STEPS } = require(path.join(__dirname, 'step-registry'));
 const { taskSegment } = require('../lib/allocate-output-folder');
 // GH-410: verdict parsing for checkpoint auto-completion in completeWork().
-const { hasVerdict } = require('../lib/parse-completion-status');
+const { buildVerdictRegex } = require('../lib/parse-completion-status');
 
 const SUBTASK_STEPS = ['implement', 'commit'];
 
@@ -278,17 +278,18 @@ function autoCompleteCheckpointTasks(state, ticketId) {
 
   const reportPath = path.join(TASKS_BASE, safeId(ticketId), 'completion.check.md');
   let reportContent = null;
-  let reportApproved = false;
+  let matchedVerdict = null;
   if (fs.existsSync(reportPath)) {
     try {
       reportContent = fs.readFileSync(reportPath, 'utf8');
-      reportApproved = hasVerdict(reportContent, ['COMPLETE', 'APPROVED']);
+      const m = buildVerdictRegex(['COMPLETE', 'APPROVED']).exec(reportContent);
+      if (m) matchedVerdict = m[1].toUpperCase();
     } catch {
-      reportApproved = false;
+      matchedVerdict = null;
     }
   }
 
-  if (!reportApproved) return closed;
+  if (!matchedVerdict) return closed;
 
   for (const entry of state.tasksMeta.tasks) {
     if (entry && entry.kind === 'checkpoint' && entry.status !== 'completed') {
@@ -296,7 +297,7 @@ function autoCompleteCheckpointTasks(state, ticketId) {
       closed.push({
         taskId: entry.id,
         title: entry.title || entry.id,
-        reason: 'APPROVED completion.check.md present',
+        reason: `${matchedVerdict} completion.check.md present`,
         timestamp: new Date().toISOString(),
       });
     }
