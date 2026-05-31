@@ -705,6 +705,8 @@ async function judgeBatch(items, { fetchImpl, apiKey, model } = {}) {
   const body = JSON.stringify({
     model,
     max_tokens: 256,
+    system:
+      'You are a relevance judge for synapsys memories. For each numbered item, decide whether the memory was ACTUALLY RELEVANT to the user prompt shown. Reply with one line per item in the exact form "N: yes" or "N: no" (lowercase, no extra text). Answer "yes" only when the memory would have been useful context for that prompt; otherwise "no". Do not add explanations or any other output.',
     messages: [{ role: 'user', content: numbered }],
   });
   let resp;
