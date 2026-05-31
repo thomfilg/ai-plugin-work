@@ -137,8 +137,8 @@ function renderSourceBlock(label, entries, useColor) {
     if (e.status === 'drifted' || e.status === 'orphan') {
       lines.push(`    stored:  ${e.stored_hash || '(missing)'}`);
       lines.push(`    current: ${e.current_hash || '(source deleted)'}`);
+      lines.push(`    suggested: synapsys consolidate --profile=<owner>`);
     }
-    lines.push(`    suggested: synapsys consolidate --profile=<owner>`);
   }
   return lines.join('\n');
 }
