@@ -238,3 +238,34 @@ test('CASE S10c — --re-consolidate continues to next source after a spawn fail
     `expected at least one --profile=good invocation, got ${JSON.stringify(calls)}`
   );
 });
+
+// ---------------------------------------------------------------------------
+// CASE 8 / CASE 9 — pending GH-442 (stamping contract lives in sibling
+// `synapsys-consolidate.js`, which is not yet on disk in this ticket).
+// These are documentation-only `test.skip` entries so `node --test` output
+// records the eventual contract surface. When GH-442 lands, lift the `.skip`
+// and implement the bodies against the real consolidate script.
+// ---------------------------------------------------------------------------
+
+test.skip(
+  'CASE 8 — pending GH-442 — stamping hook lives in sibling consolidate script',
+  () => {
+    // Eventual contract: after `synapsys-consolidate` writes a memory file,
+    // its frontmatter MUST contain:
+    //   - `source: <repo-relative path>` (no leading slash, POSIX separators)
+    //   - `source_hash: sha256:<64 lowercase hex>` matching
+    //     /^sha256:[0-9a-f]{64}$/ over the raw bytes of the source file.
+    assert.ok(true);
+  }
+);
+
+test.skip(
+  'CASE 9 — pending GH-442 — stamp stability across runs',
+  () => {
+    // Eventual contract: running `synapsys-consolidate` twice against an
+    // unchanged source file MUST yield byte-identical `source_hash` values
+    // in the resulting memory frontmatter (deterministic hashing, no
+    // timestamp leakage into the hashed payload).
+    assert.ok(true);
+  }
+);
