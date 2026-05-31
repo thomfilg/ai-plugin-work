@@ -21,8 +21,34 @@ const TOKENS_PER_JUDGED_ITEM = 500 + 5;
  * Spec §Security — `ANTHROPIC_API_KEY` is never included in output; this
  * function only serialises the inputs it is handed (no env access).
  */
+/**
+ * Order memory names by descending fp_rate (nulls last), with `fires`
+ * descending as a tiebreaker and name ascending as a final stable key.
+ * README + SKILL.md promise the report is "ranked by false-positive rate."
+ */
+function compareByName(a, b) {
+  if (a < b) return -1;
+  if (a > b) return 1;
+  return 0;
+}
+
+function compareMemories(agg, a, b) {
+  const fa = agg[a].fp_rate;
+  const fb = agg[b].fp_rate;
+  const aNull = fa == null;
+  const bNull = fb == null;
+  if (aNull !== bNull) return aNull ? 1 : -1;
+  if (!aNull && fa !== fb) return fb - fa;
+  if (agg[b].fires !== agg[a].fires) return agg[b].fires - agg[a].fires;
+  return compareByName(a, b);
+}
+
+function sortMemoryNames(agg) {
+  return Object.keys(agg).sort((a, b) => compareMemories(agg, a, b));
+}
+
 function renderJson(agg, suggestions, meta) {
-  const memories = Object.keys(agg).map((name) => {
+  const memories = sortMemoryNames(agg).map((name) => {
     const m = agg[name];
     return {
       name,
@@ -104,7 +130,7 @@ function renderCostFooter(itemsJudged, judgeCalls) {
 function renderReport(agg, suggestions, meta) {
   const m = meta || {};
   const lines = [renderHeaderLine(m), '', renderTableHeader()];
-  for (const name of Object.keys(agg)) {
+  for (const name of sortMemoryNames(agg)) {
     lines.push(renderMemoryRow(name, agg[name]));
   }
   lines.push('', 'Suggestions:');

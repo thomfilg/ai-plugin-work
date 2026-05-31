@@ -787,6 +787,37 @@ test('@task:6 renderJson does not leak ANTHROPIC_API_KEY value', () => {
   }
 });
 
+test('@task:6 renderJson orders memories by descending fp_rate (nulls last)', () => {
+  const { renderJson } = require(REPLAY);
+  const agg = {
+    a: {
+      fires: 1,
+      relevant: null,
+      irrelevant: null,
+      judge_failed: 0,
+      fp_rate: null,
+      sample_matches: [],
+    },
+    b: { fires: 4, relevant: 1, irrelevant: 3, judge_failed: 0, fp_rate: 0.75, sample_matches: [] },
+    c: { fires: 2, relevant: 1, irrelevant: 1, judge_failed: 0, fp_rate: 0.5, sample_matches: [] },
+    d: {
+      fires: 5,
+      relevant: null,
+      irrelevant: null,
+      judge_failed: 0,
+      fp_rate: null,
+      sample_matches: [],
+    },
+  };
+  const parsed = JSON.parse(renderJson(agg, [], { events_total: 0, events_ups: 0, events_ptu: 0 }));
+  const order = parsed.memories.map((m) => m.name);
+  assert.deepEqual(
+    order,
+    ['b', 'c', 'd', 'a'],
+    'fp_rate desc, then fires desc, name asc; nulls last'
+  );
+});
+
 test('@task:6 renderJson uses deterministic top-level key order', () => {
   const { renderJson } = require(REPLAY);
   const out = renderJson({}, [], {
