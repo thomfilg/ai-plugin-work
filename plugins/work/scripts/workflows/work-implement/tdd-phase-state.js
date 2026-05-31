@@ -719,6 +719,23 @@ function cmdRecordGreen(ticketId, args) {
     errorExit('Tests must PASS in GREEN phase. Tests failed (exit ' + exitCode + ').');
   }
 
+  // RC-D defense: refuse the "empty command exits 0" trap. A wrapped command
+  // like `eval "$TEST_UNIT_COMMAND"` with `$TEST_UNIT_COMMAND` unbound expands
+  // to `eval ""` and exits 0 silently. The wedge that follows (false GREEN →
+  // task advanced → next task scope blocks edits to the still-unwritten source)
+  // was observed on GH-417 / GH-432 / GH-452 — agents could not recover via
+  // /work. Real test runners always emit something to stdout or stderr; if
+  // both are empty AND exit was 0, the command did no work. Refuse to record.
+  if (stdout.trim() === '' && stderr.trim() === '') {
+    errorExit(
+      'GREEN test command exited 0 with NO stdout/stderr output. This is the ' +
+        'empty-command trap (typically an unbound test-command env var expanded ' +
+        'to `eval ""`). Real test runs always emit output. Source the worktree' +
+        "'s .envrc so $TEST_UNIT_COMMAND / $TEST_INTEGRATION_COMMAND are bound, " +
+        'verify the command runs real tests, then retry.'
+    );
+  }
+
   // RC-B defense: reject all-skipped false positives. A spec where every test
   // is .skip exits 0 but delivers zero coverage. Recording that as GREEN lets
   // the workflow advance with no work shipped (ECHO-4451 hit this).
@@ -767,6 +784,17 @@ function cmdRecordRefactor(ticketId, args) {
   const { exitCode, stdout, stderr } = runTestCommandWithOutput(cmd);
   if (exitCode !== 0) {
     errorExit('Tests must still PASS after refactoring. Tests failed (exit ' + exitCode + ').');
+  }
+
+  // RC-D defense: same empty-command guard as GREEN. Refuse exit-0-with-no-output.
+  if (stdout.trim() === '' && stderr.trim() === '') {
+    errorExit(
+      'REFACTOR test command exited 0 with NO stdout/stderr output. This is the ' +
+        'empty-command trap (typically an unbound test-command env var expanded ' +
+        'to `eval ""`). Real test runs always emit output. Source the worktree' +
+        "'s .envrc so test-command env vars are bound, verify the command runs " +
+        'real tests, then retry.'
+    );
   }
 
   // RC-B defense: same all-skipped guard as GREEN — REFACTOR also delivers
