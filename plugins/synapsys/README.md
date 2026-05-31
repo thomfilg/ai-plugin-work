@@ -169,7 +169,7 @@ node plugins/synapsys/scripts/synapsys-staleness-check.js || {
 
 ### `--re-consolidate`
 
-Once GH-442 lands the `consolidate` skill, passing `--re-consolidate` will rebuild any drifted memory in-place instead of just reporting drift. Until then the flag is a no-op placeholder.
+Passing `--re-consolidate` dispatches the owning profile for each drifted source by spawning the sibling consolidate script with `--profile=<name>`. Profile ownership is resolved by intersecting each profile module's declared source paths against the drifted source. Orphan sources (whose source file no longer exists) are skipped — they require human judgement. Ambiguous sources (claimed by multiple profiles) emit a warning and are skipped. Profile lookup requires the `consolidate-profiles/` directory, which is delivered by GH-442; until it lands, `--re-consolidate` will warn that no profile owns the source and exit non-zero.
 
 ## Design choices
 

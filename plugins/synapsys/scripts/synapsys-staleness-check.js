@@ -134,6 +134,10 @@ function renderSourceBlock(label, entries, useColor) {
         ? ` … ${e.memories.length - SAMPLE_CAP} more — use --verbose`
         : '';
     lines.push(`  - ${e.source} → ${sample}${more}`);
+    if (e.status === 'drifted' || e.status === 'orphan') {
+      lines.push(`    stored:  ${e.stored_hash || '(missing)'}`);
+      lines.push(`    current: ${e.current_hash || '(source deleted)'}`);
+    }
     lines.push(`    suggested: synapsys consolidate --profile=<owner>`);
   }
   return lines.join('\n');
@@ -164,7 +168,7 @@ function renderText(grouped, summary, opts) {
 // Rendering — JSON
 // ---------------------------------------------------------------------------
 
-function renderJson(grouped, summary) {
+function renderJson(grouped, summary, opts) {
   const results = grouped.map((g) => ({
     source: g.source,
     status: g.status,
@@ -173,6 +177,7 @@ function renderJson(grouped, summary) {
     memories: g.memories.slice(),
   }));
   const payload = {
+    store: (opts && opts.store) || 'all',
     results,
     summary: {
       drifted: summary.drifted,
@@ -264,8 +269,9 @@ function main() {
   const grouped = classifyStores(stores, repoRoot);
   const summary = summarise(grouped);
 
+  const storeLabel = typeof storeFlag === 'string' ? storeFlag : 'all';
   const out = json
-    ? renderJson(grouped, summary)
+    ? renderJson(grouped, summary, { store: storeLabel })
     : renderText(grouped, summary, { verbose, useColor: !noColor });
   process.stdout.write(out);
 
