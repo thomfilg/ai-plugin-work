@@ -808,4 +808,88 @@ describe('work-state.js', () => {
       assert.equal(result.status, 'completed');
     });
   });
+
+  describe('task-init descriptor array (GH-410)', () => {
+    const TICKET_STDIN = 'TEST-TASKINIT-STDIN-001';
+    const TICKET_ENV = 'TEST-TASKINIT-ENV-001';
+    const TICKET_LEGACY = 'TEST-TASKINIT-LEGACY-001';
+    const TICKET_BAD = 'TEST-TASKINIT-BAD-001';
+    const TICKET_CHECKPOINT = 'TEST-TASKINIT-CHK-001';
+
+    after(() => {
+      cleanupTempWorkState(TICKET_STDIN);
+      cleanupTempWorkState(TICKET_ENV);
+      cleanupTempWorkState(TICKET_LEGACY);
+      cleanupTempWorkState(TICKET_BAD);
+      cleanupTempWorkState(TICKET_CHECKPOINT);
+    });
+
+    it('accepts descriptor array via stdin and persists kind per entry', async () => {
+      await runWorkState(['init', TICKET_STDIN]);
+      const descriptors = [
+        { num: 1, type: 'frontend' },
+        { num: 2, type: 'backend' },
+        { num: 3, type: 'docs' },
+      ];
+      const { result, code, stderr } = await runWorkState(['task-init', TICKET_STDIN], {
+        stdin: JSON.stringify(descriptors),
+      });
+      assert.equal(code, 0, `should exit 0 (stderr: ${stderr})`);
+      assert.equal(result.success, true);
+      assert.ok(Array.isArray(result.tasksMeta.tasks));
+      assert.equal(result.tasksMeta.tasks.length, 3);
+      assert.equal(result.tasksMeta.tasks[0].kind, 'frontend');
+      assert.equal(result.tasksMeta.tasks[1].kind, 'backend');
+      assert.equal(result.tasksMeta.tasks[2].kind, 'docs');
+    });
+
+    it('accepts descriptor array via TASK_INIT_DESCRIPTORS env var', async () => {
+      await runWorkState(['init', TICKET_ENV]);
+      const descriptors = [
+        { num: 1, type: 'backend' },
+        { num: 2, type: 'docs' },
+      ];
+      const { result, code, stderr } = await runWorkState(['task-init', TICKET_ENV], {
+        env: { TASK_INIT_DESCRIPTORS: JSON.stringify(descriptors) },
+      });
+      assert.equal(code, 0, `should exit 0 (stderr: ${stderr})`);
+      assert.equal(result.success, true);
+      assert.equal(result.tasksMeta.tasks.length, 2);
+      assert.equal(result.tasksMeta.tasks[0].kind, 'backend');
+      assert.equal(result.tasksMeta.tasks[1].kind, 'docs');
+    });
+
+    it('persists kind for checkpoint type', async () => {
+      await runWorkState(['init', TICKET_CHECKPOINT]);
+      const descriptors = [
+        { num: 1, type: 'backend' },
+        { num: 2, type: 'checkpoint' },
+      ];
+      const { result, code } = await runWorkState(['task-init', TICKET_CHECKPOINT], {
+        stdin: JSON.stringify(descriptors),
+      });
+      assert.equal(code, 0);
+      assert.equal(result.tasksMeta.tasks[1].kind, 'checkpoint');
+    });
+
+    it('preserves legacy count argument with no kind on entries', async () => {
+      await runWorkState(['init', TICKET_LEGACY]);
+      const { result, code } = await runWorkState(['task-init', TICKET_LEGACY, '3']);
+      assert.equal(code, 0, 'legacy count mode should exit 0');
+      assert.equal(result.success, true);
+      assert.equal(result.tasksMeta.tasks.length, 3);
+      for (const entry of result.tasksMeta.tasks) {
+        assert.equal(entry.kind, undefined, 'legacy entries should not have kind');
+      }
+    });
+
+    it('errors on malformed JSON stdin with clear stderr message', async () => {
+      await runWorkState(['init', TICKET_BAD]);
+      const { code, stderr } = await runWorkState(['task-init', TICKET_BAD], {
+        stdin: '{not valid json[',
+      });
+      assert.notEqual(code, 0, 'malformed JSON should exit non-zero');
+      assert.match(stderr, /json|descriptor|parse/i, 'stderr should mention parse issue');
+    });
+  });
 });

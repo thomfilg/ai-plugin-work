@@ -716,6 +716,50 @@ function getTaskByIndex(ticketId, taskIndex) {
   };
 }
 
+// GH-410: read task-init descriptor JSON from stdin or TASK_INIT_DESCRIPTORS env.
+// Returns the parsed array (with auto-assigned `num` when missing) on success,
+// `{ error }` on malformed JSON, or `null` when no descriptors were supplied
+// (legacy count-mode).
+async function readTaskInitDescriptors(secondArg) {
+  // If the second positional arg looks like a count, prefer legacy path.
+  if (secondArg !== undefined && /^\d+$/.test(String(secondArg))) {
+    return null;
+  }
+
+  const envRaw = process.env.TASK_INIT_DESCRIPTORS;
+  let raw = null;
+  if (envRaw && envRaw.trim()) {
+    raw = envRaw;
+  } else if (!process.stdin.isTTY) {
+    raw = await new Promise((resolve) => {
+      let buf = '';
+      process.stdin.setEncoding('utf8');
+      process.stdin.on('data', (c) => { buf += c; });
+      process.stdin.on('end', () => resolve(buf));
+      // Don't hang if stdin produces no data:
+      setTimeout(() => resolve(buf), 50).unref();
+    });
+  }
+  if (!raw || !raw.trim()) return null;
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    return { error: `task-init: malformed JSON descriptor input: ${e.message}` };
+  }
+  if (!Array.isArray(parsed)) {
+    return { error: 'task-init: descriptor input must be a JSON array' };
+  }
+  // Auto-assign num by 1-based position when missing.
+  return parsed.map((d, i) => {
+    if (d && typeof d === 'object' && typeof d.num !== 'number') {
+      return { ...d, num: i + 1 };
+    }
+    return d;
+  });
+}
+
 // CLI handler
 async function main() {
   const args = process.argv.slice(2);
@@ -795,14 +839,24 @@ async function main() {
       console.log(JSON.stringify(result, null, 2));
       break;
 
-    case 'task-init':
-      result = initTasksMeta(ticketId, parseInt(args[2], 10));
+    case 'task-init': {
+      // GH-410: optionally accept a JSON descriptor array via stdin or
+      // TASK_INIT_DESCRIPTORS env var to thread per-task `kind` into tasksMeta.
+      // Legacy count-only invocation (`task-init <ticket> <N>`) is preserved.
+      const descriptors = await readTaskInitDescriptors(args[2]);
+      if (descriptors && descriptors.error) {
+        console.error(JSON.stringify(descriptors));
+        process.exit(1);
+      }
+      const arg = descriptors ?? parseInt(args[2], 10);
+      result = initTasksMeta(ticketId, arg);
       if (result && result.error) {
         console.error(JSON.stringify(result));
         process.exit(1);
       }
       console.log(JSON.stringify({ success: true, tasksMeta: result.tasksMeta }));
       break;
+    }
 
     case 'task-current':
       result = getTaskCurrent(ticketId);
