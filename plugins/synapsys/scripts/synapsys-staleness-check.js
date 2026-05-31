@@ -131,7 +131,7 @@ function renderSourceBlock(label, entries, useColor) {
     const sample = e.memories.slice(0, SAMPLE_CAP).join(', ');
     const more =
       e.memories.length > SAMPLE_CAP
-        ? ` … ${e.memories.length - SAMPLE_CAP} more — use --verbose`
+        ? ` … ${e.memories.length - SAMPLE_CAP} more — use --json for full list`
         : '';
     lines.push(`  - ${e.source} → ${sample}${more}`);
     if (e.status === 'drifted' || e.status === 'orphan') {
