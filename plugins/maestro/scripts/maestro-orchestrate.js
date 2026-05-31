@@ -62,16 +62,37 @@ function handleQuestion(ctx, qHit) {
   }
 }
 
+// Healthy "waiting on user" patterns the agent emits to the pane while halted.
+// When detected, phase-stall is suppressed — the agent is not stuck.
+const HALTED_WAITING_PATTERNS = [
+  /awaiting.*merge|wait.*merge|Once you( click| have)? merge/i,
+  /Per.*never-auto-merge|won['']t merge|won['']t auto-merge/i,
+  /CI is green.*[Mm]erge when ready/i,
+];
+
+function isHaltedWaitingForUser(pane) {
+  if (!pane) return false;
+  return HALTED_WAITING_PATTERNS.some(re => re.test(pane));
+}
+
 function handlePhaseStall(ctx, stallHit) {
   const profile = phaseFor(ctx.phase);
   if (profile.exempts(ctx)) {
     alerts.log(`${ctx.session} phase-stall exempted by registry for phase=${ctx.phase}`);
     return;
   }
+  // Suppress when the agent is correctly waiting for a human action (merge, etc.)
+  if (isHaltedWaitingForUser(ctx.pane)) {
+    alerts.log(`${ctx.session} phase-stall suppressed — agent halted waiting for user (phase=${ctx.phase})`);
+    return;
+  }
   const marker = stallHit.marker;
   const sinceLastNudge = marker.lastNudgeAt ? state.minutesSince(marker.lastNudgeAt) : Infinity;
   // Don't re-nudge before the per-phase cooldown.
   if (marker.lastNudgeAt && sinceLastNudge < stallHit.reNudgeMin) return;
+  // Once nudges are exhausted, stop re-alerting until the phase actually advances.
+  // (The marker is reset on phase change inside the phase-stall detector.)
+  if (marker.nudges >= stallHit.maxNudges) return;
 
   const escalation = escalationFor(ctx.phase, marker.nudges);
   const reason = `phase=${ctx.phase} stuck ${stallHit.elapsedMin}m budget=${stallHit.budgetMin}m nudge ${marker.nudges + 1}/${stallHit.maxNudges}`;
