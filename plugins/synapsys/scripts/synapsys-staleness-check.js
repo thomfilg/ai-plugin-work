@@ -120,7 +120,7 @@ const SAMPLE_CAP = 3;
 
 function colourise(useColor, code, text) {
   if (!useColor) return text;
-  return `[${code}m${text}[0m`;
+  return `\x1b[${code}m${text}\x1b[0m`;
 }
 
 function renderSourceBlock(label, entries, useColor) {
