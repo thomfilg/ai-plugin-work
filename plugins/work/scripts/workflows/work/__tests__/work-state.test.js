@@ -45,6 +45,11 @@ function runWorkState(args = [], opts = {}) {
     });
 
     proc.on('error', reject);
+
+    if (typeof opts.stdin === 'string') {
+      proc.stdin.write(opts.stdin);
+    }
+    proc.stdin.end();
   });
 }
 

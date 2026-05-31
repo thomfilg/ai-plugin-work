@@ -207,6 +207,9 @@ function initTasksMeta(ticketId, taskCountOrTasks) {
           ? src.dependencies.filter((d) => Number.isInteger(d))
           : [];
       entry.dependencies = deps.slice(); // defensive copy
+      if (src && typeof src.type === 'string') {
+        entry.kind = src.type;
+      }
     }
     tasks.push(entry);
   }
@@ -217,7 +220,9 @@ function initTasksMeta(ticketId, taskCountOrTasks) {
     tasks,
   };
 
-  return saveState(ticketId, state);
+  const saved = saveState(ticketId, state);
+  if (saved && saved.error) return saved;
+  return { success: true, tasksMeta: state.tasksMeta };
 }
 
 module.exports = {
