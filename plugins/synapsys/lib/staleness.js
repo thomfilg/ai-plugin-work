@@ -126,31 +126,35 @@ function classifyMemory(memory, ctx) {
 // store surfaces as drifted/orphan in its group's status.
 const STATUS_RANK = { fresh: 0, drifted: 1, orphan: 2 };
 
+function newGroup(c) {
+  return {
+    source: c.source,
+    status: c.status,
+    stored_hash: c.stored_hash,
+    current_hash: c.current_hash,
+    memories: [],
+  };
+}
+
+function mergeGroup(g, c) {
+  const incoming = STATUS_RANK[c.status] ?? 0;
+  const existing = STATUS_RANK[g.status] ?? 0;
+  if (incoming > existing) {
+    g.status = c.status;
+    g.stored_hash = c.stored_hash;
+    g.current_hash = c.current_hash;
+  }
+}
+
 function groupResultsBySource(classifications) {
   if (!Array.isArray(classifications)) return [];
   const bySource = new Map();
   for (const c of classifications) {
     if (!c || c.status === 'skip') continue;
-    const key = c.source;
-    if (!bySource.has(key)) {
-      bySource.set(key, {
-        source: c.source,
-        status: c.status,
-        stored_hash: c.stored_hash,
-        current_hash: c.current_hash,
-        memories: [],
-      });
-    } else {
-      const g = bySource.get(key);
-      const incoming = STATUS_RANK[c.status] ?? 0;
-      const existing = STATUS_RANK[g.status] ?? 0;
-      if (incoming > existing) {
-        g.status = c.status;
-        g.stored_hash = c.stored_hash;
-        g.current_hash = c.current_hash;
-      }
-    }
-    if (c.name) bySource.get(key).memories.push(c.name);
+    const existing = bySource.get(c.source);
+    if (existing) mergeGroup(existing, c);
+    else bySource.set(c.source, newGroup(c));
+    if (c.name) bySource.get(c.source).memories.push(c.name);
   }
   const groups = Array.from(bySource.values());
   for (const g of groups) g.memories.sort();
