@@ -63,18 +63,23 @@ test('CLI exits 2 on invalid --since (not matching /^\\d+d$/)', () => {
   assert.match(result.stderr, /since/i);
 });
 
-test('CLI exits 0 and echoes parsed flags as JSON in no-op main', () => {
+test('CLI exits 0 and emits report JSON in --no-judge mode (Task 8 wired main)', () => {
+  // Task 1 scaffold expected an echo of parsed flags. Task 8 wires main() to
+  // the real pipeline, so we now assert the wired JSON shape against an empty
+  // hermetic transcripts dir (no-transcripts message path is covered separately
+  // in the @task:8 cases). We point --transcripts-base at a missing dir so the
+  // pipeline exits 0 via the friendly no-transcripts branch.
+  const os2 = require('node:os');
+  const fs2 = require('node:fs');
+  const tmp = fs2.mkdtempSync(require('node:path').join(os2.tmpdir(), 'syn-cli-'));
   const result = spawnSync(
     process.execPath,
-    [REPLAY, '--since=7d', '--no-judge', '--json', '--max-judges=10'],
+    [REPLAY, '--since=7d', '--no-judge', '--max-judges=10', `--transcripts-base=${tmp}`],
     { encoding: 'utf8' }
   );
+  fs2.rmSync(tmp, { recursive: true, force: true });
   assert.equal(result.status, 0, `expected exit 0, got ${result.status}: ${result.stderr}`);
-  const parsed = JSON.parse(result.stdout);
-  assert.equal(parsed.since, '7d');
-  assert.equal(parsed.noJudge, true);
-  assert.equal(parsed.json, true);
-  assert.equal(parsed.maxJudges, 10);
+  assert.match(result.stdout, /no transcripts in window/i);
 });
 
 /**
@@ -100,9 +105,7 @@ test('extractEvents synthesizes UserPromptSubmit from a user transcript entry (P
     type: 'user',
     message: { content: [{ type: 'text', text: 'refactor the parser' }] },
   });
-  assert.deepEqual(arrayForm, [
-    { event: 'UserPromptSubmit', prompt: 'refactor the parser' },
-  ]);
+  assert.deepEqual(arrayForm, [{ event: 'UserPromptSubmit', prompt: 'refactor the parser' }]);
 
   // Unrelated entry types yield no events.
   assert.deepEqual(extractEvents({ type: 'system', message: { content: 'hi' } }), []);
@@ -258,7 +261,11 @@ test('@task:4 replayEvent returns per-memory tuple for a UserPromptSubmit event 
   assert.ok(ups, 'tuple exists for ups-bug');
   assert.equal(ups.event, 'UserPromptSubmit');
   assert.equal(ups.fired, true);
-  assert.equal(ups.matched_substring, 'auth bug', 'matched_substring from matched.prompt_substring');
+  assert.equal(
+    ups.matched_substring,
+    'auth bug',
+    'matched_substring from matched.prompt_substring'
+  );
 
   const ptu = tuples.find((t) => t.memory_name === 'ptu-write');
   assert.ok(ptu, 'tuple exists for ptu-write');
@@ -444,12 +451,32 @@ test('@task:5 judge call is mocked and per-memory relevance is computed correctl
   // a series of events; only `fired=true` rows feed the judge.
   const tuples = [
     // ups-bug: 5 fires (3 relevant, 1 irrelevant, 1 judge-failed) → fp = 1 - 3/4 = 0.25
-    { memory_name: 'ups-bug', event: 'UserPromptSubmit', fired: true, matched_substring: 'auth bug' },
-    { memory_name: 'ups-bug', event: 'UserPromptSubmit', fired: true, matched_substring: 'auth bug' },
+    {
+      memory_name: 'ups-bug',
+      event: 'UserPromptSubmit',
+      fired: true,
+      matched_substring: 'auth bug',
+    },
+    {
+      memory_name: 'ups-bug',
+      event: 'UserPromptSubmit',
+      fired: true,
+      matched_substring: 'auth bug',
+    },
     { memory_name: 'ups-bug', event: 'UserPromptSubmit', fired: true, matched_substring: 'login' },
     { memory_name: 'ups-bug', event: 'UserPromptSubmit', fired: true, matched_substring: 'login' },
-    { memory_name: 'ups-bug', event: 'UserPromptSubmit', fired: true, matched_substring: 'auth bug' },
-    { memory_name: 'ups-bug', event: 'UserPromptSubmit', fired: false, matched_substring: undefined },
+    {
+      memory_name: 'ups-bug',
+      event: 'UserPromptSubmit',
+      fired: true,
+      matched_substring: 'auth bug',
+    },
+    {
+      memory_name: 'ups-bug',
+      event: 'UserPromptSubmit',
+      fired: false,
+      matched_substring: undefined,
+    },
     // ptu-write: PTU-only memory → not judged in v1 → relevant=null, fp_rate=null
     { memory_name: 'ptu-write', event: 'PreToolUse', fired: true, matched_substring: 'TODO' },
     { memory_name: 'ptu-write', event: 'PreToolUse', fired: true, matched_substring: 'FIXME' },
@@ -464,8 +491,10 @@ test('@task:5 judge call is mocked and per-memory relevance is computed correctl
 
   const report = aggregateReport(tuples, judgments);
   assert.ok(report && typeof report === 'object', 'returns object');
-  const ups = report['ups-bug'] || (Array.isArray(report) && report.find((m) => m.name === 'ups-bug'));
-  const ptu = report['ptu-write'] || (Array.isArray(report) && report.find((m) => m.name === 'ptu-write'));
+  const ups =
+    report['ups-bug'] || (Array.isArray(report) && report.find((m) => m.name === 'ups-bug'));
+  const ptu =
+    report['ptu-write'] || (Array.isArray(report) && report.find((m) => m.name === 'ptu-write'));
   assert.ok(ups, 'ups-bug entry present');
   assert.ok(ptu, 'ptu-write entry present');
 
@@ -492,22 +521,27 @@ test('@task:5 heuristic tightening suggestion fires for fp_rate > 0.70 with shor
   const { suggestTightening, splitTopLevelAlternation } = require(REPLAY);
 
   // splitTopLevelAlternation splits on top-level `|` only.
-  assert.deepEqual(
-    splitTopLevelAlternation('push|fetch|deploy-production'),
-    ['push', 'fetch', 'deploy-production']
-  );
+  assert.deepEqual(splitTopLevelAlternation('push|fetch|deploy-production'), [
+    'push',
+    'fetch',
+    'deploy-production',
+  ]);
   // Top-level only — `|` inside `(...)` / `[...]` is not split.
-  assert.deepEqual(
-    splitTopLevelAlternation('(a|b)|cd|[e|f]'),
-    ['(a|b)', 'cd', '[e|f]']
-  );
+  assert.deepEqual(splitTopLevelAlternation('(a|b)|cd|[e|f]'), ['(a|b)', 'cd', '[e|f]']);
 
   // Memory with short alternation arms and high fp_rate → suggestion.
   const noisyMem = {
     name: 'noisy',
     triggerPrompt: 'push|fetch|deploy-production',
   };
-  const agg = { fires: 10, relevant: 2, irrelevant: 8, judge_failed: 0, fp_rate: 0.8, sample_matches: ['push', 'fetch'] };
+  const agg = {
+    fires: 10,
+    relevant: 2,
+    irrelevant: 8,
+    judge_failed: 0,
+    fp_rate: 0.8,
+    sample_matches: ['push', 'fetch'],
+  };
   const suggestion = suggestTightening(noisyMem, agg);
   assert.ok(suggestion, 'returns suggestion when fp_rate > 0.70 + short arms');
   assert.equal(suggestion.memory, 'noisy');
@@ -517,7 +551,14 @@ test('@task:5 heuristic tightening suggestion fires for fp_rate > 0.70 with shor
   assert.ok(!suggestion.candidates.includes('deploy-production'), 'does not flag long arm');
 
   // fp_rate <= 0.70 → no suggestion.
-  const okAgg = { fires: 10, relevant: 5, irrelevant: 5, judge_failed: 0, fp_rate: 0.5, sample_matches: [] };
+  const okAgg = {
+    fires: 10,
+    relevant: 5,
+    irrelevant: 5,
+    judge_failed: 0,
+    fp_rate: 0.5,
+    sample_matches: [],
+  };
   assert.equal(suggestTightening(noisyMem, okAgg), null, 'no suggestion when fp_rate <= 0.70');
 
   // High fp_rate but no short arms → no suggestion.
@@ -525,7 +566,14 @@ test('@task:5 heuristic tightening suggestion fires for fp_rate > 0.70 with shor
   assert.equal(suggestTightening(longMem, agg), null, 'no suggestion when all arms long');
 
   // PTU-only memory with fp_rate=null → no suggestion.
-  const nullAgg = { fires: 5, relevant: null, irrelevant: null, judge_failed: 0, fp_rate: null, sample_matches: [] };
+  const nullAgg = {
+    fires: 5,
+    relevant: null,
+    irrelevant: null,
+    judge_failed: 0,
+    fp_rate: null,
+    sample_matches: [],
+  };
   assert.equal(suggestTightening(noisyMem, nullAgg), null, 'no suggestion when fp_rate is null');
 });
 
@@ -566,9 +614,7 @@ test('@task:6 --json output shape includes memories, suggestions, and event tota
       sample_matches: ['TODO', 'FIXME'],
     },
   };
-  const suggestions = [
-    { memory: 'noisy', candidates: ['push', 'fetch'] },
-  ];
+  const suggestions = [{ memory: 'noisy', candidates: ['push', 'fetch'] }];
   const meta = {
     store: 'local',
     window: '7d',
@@ -594,7 +640,15 @@ test('@task:6 --json output shape includes memories, suggestions, and event tota
   assert.ok(Array.isArray(parsed.memories), 'memories is an array');
   assert.equal(parsed.memories.length, 2);
   for (const m of parsed.memories) {
-    for (const k of ['name', 'fires', 'relevant', 'irrelevant', 'judge_failed', 'fp_rate', 'sample_matches']) {
+    for (const k of [
+      'name',
+      'fires',
+      'relevant',
+      'irrelevant',
+      'judge_failed',
+      'fp_rate',
+      'sample_matches',
+    ]) {
       assert.ok(Object.prototype.hasOwnProperty.call(m, k), `memories[].${k} present`);
     }
   }
@@ -661,13 +715,21 @@ test('@task:6 renderReport cost footer absent under --no-judge (judgeCalls=0)', 
   const { renderReport } = require(REPLAY);
   const agg = {
     'ups-bug': {
-      fires: 5, relevant: null, irrelevant: null, judge_failed: 0,
-      fp_rate: null, sample_matches: ['auth bug'],
+      fires: 5,
+      relevant: null,
+      irrelevant: null,
+      judge_failed: 0,
+      fp_rate: null,
+      sample_matches: ['auth bug'],
     },
   };
   const meta = {
-    store: 'local', window: '7d',
-    events_total: 5, events_ups: 5, events_ptu: 0, judgeCalls: 0,
+    store: 'local',
+    window: '7d',
+    events_total: 5,
+    events_ups: 5,
+    events_ptu: 0,
+    judgeCalls: 0,
   };
   const out = renderReport(agg, [], meta);
   assert.ok(!/cost/i.test(out), 'no cost footer under --no-judge');
@@ -681,13 +743,21 @@ test('@task:6 renderJson does not leak ANTHROPIC_API_KEY value', () => {
   try {
     const agg = {
       'ups-bug': {
-        fires: 1, relevant: 1, irrelevant: 0, judge_failed: 0,
-        fp_rate: 0, sample_matches: ['x'],
+        fires: 1,
+        relevant: 1,
+        irrelevant: 0,
+        judge_failed: 0,
+        fp_rate: 0,
+        sample_matches: ['x'],
       },
     };
     const out = renderJson(agg, [], {
-      store: 'local', window: '7d',
-      events_total: 1, events_ups: 1, events_ptu: 0, judgeCalls: 1,
+      store: 'local',
+      window: '7d',
+      events_total: 1,
+      events_ups: 1,
+      events_ptu: 0,
+      judgeCalls: 1,
     });
     assert.ok(!out.includes(apiKey), 'api key value not in output');
   } finally {
@@ -699,11 +769,16 @@ test('@task:6 renderJson does not leak ANTHROPIC_API_KEY value', () => {
 test('@task:6 renderJson uses deterministic top-level key order', () => {
   const { renderJson } = require(REPLAY);
   const out = renderJson({}, [], {
-    store: 'local', window: '7d',
-    events_total: 0, events_ups: 0, events_ptu: 0, judgeCalls: 0,
+    store: 'local',
+    window: '7d',
+    events_total: 0,
+    events_ups: 0,
+    events_ptu: 0,
+    judgeCalls: 0,
   });
   // Match key order: memories, suggestions, events_total, events_ups, events_ptu.
-  const keyOrderRegex = /"memories"[\s\S]*"suggestions"[\s\S]*"events_total"[\s\S]*"events_ups"[\s\S]*"events_ptu"/;
+  const keyOrderRegex =
+    /"memories"[\s\S]*"suggestions"[\s\S]*"events_total"[\s\S]*"events_ups"[\s\S]*"events_ptu"/;
   assert.match(out, keyOrderRegex, 'keys appear in deterministic order');
 });
 
@@ -826,7 +901,10 @@ test('@task:7 sampleForCap evenly samples and flags extrapolated:true when items
   assert.equal(out.sampled.length, 10);
   // Evenly per Math.floor(i * fires / cap): indices 0,10,20,...,90.
   const expected = [0, 10, 20, 30, 40, 50, 60, 70, 80, 90];
-  assert.deepEqual(out.sampled.map((x) => x.i), expected);
+  assert.deepEqual(
+    out.sampled.map((x) => x.i),
+    expected
+  );
 });
 
 test('@task:7 --max-judges cap is honored as a hard upper bound (P0 #6)', async () => {
@@ -845,7 +923,9 @@ test('@task:7 --max-judges cap is honored as a hard upper bound (P0 #6)', async 
     };
   };
   const items = Array.from({ length: 500 }, (_, i) => ({
-    memory: 'm', prompt: `p${i}`, matched: 'x',
+    memory: 'm',
+    prompt: `p${i}`,
+    matched: 'x',
   }));
   const out = await judgePipeline(items, {
     fetchImpl,
@@ -859,3 +939,173 @@ test('@task:7 --max-judges cap is honored as a hard upper bound (P0 #6)', async 
   assert.ok(out.results.length <= 50, 'judged at most cap items');
 });
 
+/**
+ * Task 8 RED — Wire `main()` end-to-end + no-transcripts + missing-key
+ * behavior (R4, R12, AC5, G3, G4, G10, spec §Security).
+ *
+ * @task:8
+ *
+ * These spawn-script tests bind to the Task 8 gate. They MUST fail before
+ * Task 8 GREEN — `main()` does not yet wire walker → replay → render, and
+ * `--transcripts-base` is not yet parsed.
+ */
+
+function mkTask8Fixture() {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-replay-t8-'));
+  // Store dir with two memories: one UPS, one PTU.
+  const storeDir = path.join(tmp, 'store', '.claude', 'synapsys');
+  fs.mkdirSync(storeDir, { recursive: true });
+  fs.writeFileSync(path.join(storeDir, '.synapsys.json'), '{}');
+  fs.writeFileSync(
+    path.join(storeDir, 'ups-bug.md'),
+    [
+      '---',
+      'name: ups-bug',
+      'description: ups memory',
+      'events: UserPromptSubmit',
+      'trigger_prompt: auth bug|login',
+      '---',
+      'body',
+      '',
+    ].join('\n')
+  );
+  fs.writeFileSync(
+    path.join(storeDir, 'ptu-write.md'),
+    [
+      '---',
+      'name: ptu-write',
+      'description: ptu memory',
+      'events: PreToolUse',
+      'trigger_pretool: Write',
+      'trigger_pretool_content: TODO|FIXME',
+      '---',
+      'body',
+      '',
+    ].join('\n')
+  );
+
+  // Transcripts base: one project hash dir with one jsonl containing a
+  // matching UPS entry and a matching assistant tool_use (Write w/ TODO).
+  const baseDir = path.join(tmp, 'projects');
+  const projDir = path.join(baseDir, '-tmp-proj');
+  fs.mkdirSync(projDir, { recursive: true });
+  const jsonl = path.join(projDir, 'session.jsonl');
+  fs.writeFileSync(
+    jsonl,
+    [
+      JSON.stringify({ type: 'user', message: { content: 'please fix the auth bug today' } }),
+      JSON.stringify({
+        type: 'assistant',
+        message: {
+          content: [
+            {
+              type: 'tool_use',
+              name: 'Write',
+              input: { content: 'add TODO before shipping' },
+            },
+          ],
+        },
+      }),
+      '',
+    ].join('\n')
+  );
+
+  return { tmp, storeDir: path.join(tmp, 'store'), baseDir };
+}
+
+test('@task:8 replay against a fixture transcript counts fires per memory using the existing matcher (P0 #1, #3)', () => {
+  const { tmp, storeDir, baseDir } = mkTask8Fixture();
+  const result = spawnSync(
+    process.execPath,
+    [
+      REPLAY,
+      '--since=7d',
+      '--no-judge',
+      '--json',
+      `--store=${path.join(storeDir, '.claude', 'synapsys')}`,
+      `--transcripts-base=${baseDir}`,
+    ],
+    { encoding: 'utf8', env: { ...process.env, ANTHROPIC_API_KEY: '' } }
+  );
+  assert.equal(result.status, 0, `expected exit 0, got ${result.status}: ${result.stderr}`);
+  const parsed = JSON.parse(result.stdout);
+  assert.equal(parsed.events_total, 2, 'two synthesized events');
+  assert.equal(parsed.events_ups, 1);
+  assert.equal(parsed.events_ptu, 1);
+  const ups = parsed.memories.find((m) => m.name === 'ups-bug');
+  const ptu = parsed.memories.find((m) => m.name === 'ptu-write');
+  assert.ok(ups && ptu, 'both memories present in report');
+  assert.equal(ups.fires, 1, 'ups-bug fired once');
+  assert.equal(ptu.fires, 1, 'ptu-write fired once');
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('@task:8 --no-judge mode emits a parseable report without any Anthropic API call (P0 #4, #9)', () => {
+  const { tmp, storeDir, baseDir } = mkTask8Fixture();
+  // Sentinel: if any fetch fires, the script would see ANTHROPIC_API_KEY and
+  // try to judge. --no-judge must short-circuit before any network call. We
+  // verify by setting an obviously-invalid key + asserting (a) exit 0 and
+  // (b) every memory's relevant is null (no judge ran).
+  const result = spawnSync(
+    process.execPath,
+    [
+      REPLAY,
+      '--since=7d',
+      '--no-judge',
+      '--json',
+      `--store=${path.join(storeDir, '.claude', 'synapsys')}`,
+      `--transcripts-base=${baseDir}`,
+    ],
+    {
+      encoding: 'utf8',
+      env: { ...process.env, ANTHROPIC_API_KEY: 'sk-should-never-be-used' },
+    }
+  );
+  assert.equal(result.status, 0, `expected exit 0, got ${result.status}: ${result.stderr}`);
+  const parsed = JSON.parse(result.stdout);
+  assert.ok(Array.isArray(parsed.memories), 'memories array present');
+  assert.ok(parsed.memories.length >= 1, 'at least one memory in report');
+  for (const m of parsed.memories) {
+    assert.equal(m.relevant, null, `${m.name}.relevant=null under --no-judge`);
+    assert.equal(m.fp_rate, null, `${m.name}.fp_rate=null under --no-judge`);
+  }
+  // stderr must not contain any network/fetch error — proves no API call.
+  assert.ok(
+    !/api\.anthropic\.com|fetch failed|ECONNREFUSED/i.test(result.stderr),
+    `stderr clean of network noise; got: ${result.stderr}`
+  );
+  fs.rmSync(tmp, { recursive: true, force: true });
+});
+
+test('@task:8 no-transcripts window exits 0 with a friendly message (P0 #12)', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-replay-t8-empty-'));
+  // Store with one memory so the load step succeeds; empty transcripts base.
+  const storeDir = path.join(tmp, 'store', '.claude', 'synapsys');
+  fs.mkdirSync(storeDir, { recursive: true });
+  fs.writeFileSync(path.join(storeDir, '.synapsys.json'), '{}');
+  fs.writeFileSync(
+    path.join(storeDir, 'm.md'),
+    [
+      '---',
+      'name: m',
+      'description: x',
+      'events: UserPromptSubmit',
+      'trigger_prompt: anything',
+      '---',
+      'body',
+      '',
+    ].join('\n')
+  );
+  const emptyBase = path.join(tmp, 'projects');
+  fs.mkdirSync(emptyBase, { recursive: true });
+
+  const result = spawnSync(
+    process.execPath,
+    [REPLAY, '--since=7d', '--no-judge', `--store=${storeDir}`, `--transcripts-base=${emptyBase}`],
+    { encoding: 'utf8', env: { ...process.env, ANTHROPIC_API_KEY: '' } }
+  );
+  assert.equal(result.status, 0, `expected exit 0, got ${result.status}: ${result.stderr}`);
+  assert.match(result.stdout, /no transcripts in window/i, 'friendly stdout message');
+  assert.equal(result.stderr, '', `stderr must be empty; got: ${result.stderr}`);
+  fs.rmSync(tmp, { recursive: true, force: true });
+});

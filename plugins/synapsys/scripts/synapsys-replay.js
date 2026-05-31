@@ -50,8 +50,10 @@ function parseFlags(argv) {
     // Store selector — name or filesystem path; auto-detect like explain.
     store: typeof flag('store') === 'string' ? flag('store') : undefined,
     // Hard upper bound on judge API calls; over-cap triggers even sampling.
-    maxJudges:
-      maxJudgesRaw === undefined || maxJudgesRaw === true ? 200 : Number(maxJudgesRaw),
+    maxJudges: maxJudgesRaw === undefined || maxJudgesRaw === true ? 200 : Number(maxJudgesRaw),
+    // Test-only override (Task 8): direct ~/.claude/projects/ to a tmp dir.
+    transcriptsBase:
+      typeof flag('transcripts-base') === 'string' ? flag('transcripts-base') : undefined,
   };
 }
 
@@ -65,16 +67,157 @@ function die(msg, code = 2) {
 }
 
 /**
- * No-op main for Task 1 — validates --since, then echoes parsed flags as
- * JSON to stdout so spawn-script tests can assert flag round-tripping.
- * Subsequent tasks replace the echo with the real pipeline.
+ * Centralised judge gate (Task 8 REFACTOR target — exported for tests if
+ * needed later). Returns true only when judging is allowed AND warranted:
+ *   - `--no-judge` not set
+ *   - `ANTHROPIC_API_KEY` present
+ *   - at least one UPS fire to judge (PTU is not judged in v1, spec §Decision)
  */
-function main(argv) {
+function shouldJudge({ noJudge, apiKey, upsFires }) {
+  if (noJudge) return false;
+  if (!apiKey) return false;
+  if (!upsFires || upsFires <= 0) return false;
+  return true;
+}
+
+/**
+ * Wired main() (Task 8). Pipeline:
+ *   parseFlags → validate → loadStore → loadMemories (apply --only)
+ *   → walkTranscripts → iterLines → extractEvents → replayEvent
+ *   → (optional) judgePipeline → aggregateReport → suggestTightening
+ *   → renderReport / renderJson → exit
+ *
+ * Validation precedes I/O so `--since`/`--store` misconfigs exit 2 before
+ * any filesystem or network touches (spec §CLI). No-transcripts window is
+ * handled before the judge step and prints a friendly message (R12 / G10).
+ * Missing `ANTHROPIC_API_KEY` without `--no-judge` emits a single stderr
+ * notice and proceeds as `--no-judge` (spec §Security / AC5).
+ */
+async function main(argv) {
   const flags = parseFlags(argv);
+
+  // Validation (BEFORE any I/O — spec §CLI exit 2).
   if (!/^\d+d$/.test(flags.since)) {
     die(`invalid --since=${flags.since} (expected format like 7d, 14d)`);
   }
-  process.stdout.write(JSON.stringify(flags) + '\n');
+  if (flags.project !== undefined && !/^[\w.-]+$/.test(flags.project)) {
+    die(`invalid --project=${flags.project}`);
+  }
+
+  // Resolve store(s) and load memories. loadStore may die() on unknown store.
+  const stores = loadStore({ storeFlag: flags.store, cwd: process.cwd() });
+  let memories = loadMemories(stores);
+  if (flags.only) {
+    const allow = new Set(
+      flags.only
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+    );
+    memories = memories.filter((m) => allow.has(m.name));
+  }
+
+  // Walk transcripts. Honor --transcripts-base override for hermetic tests.
+  const files = walkTranscripts({
+    since: flags.since,
+    project: flags.project,
+    baseDir: flags.transcriptsBase,
+  });
+
+  // R12 / G10 — no-transcripts case: friendly stdout, clean stderr, exit 0.
+  if (files.length === 0) {
+    process.stdout.write('no transcripts in window\n');
+    process.exit(0);
+  }
+
+  // Stream events through the matcher.
+  const tuples = [];
+  let eventsTotal = 0;
+  let eventsUps = 0;
+  let eventsPtu = 0;
+  for (const file of files) {
+    for (const parsed of iterLines(file)) {
+      const events = extractEvents(parsed);
+      for (const ev of events) {
+        eventsTotal += 1;
+        if (ev.event === 'UserPromptSubmit') eventsUps += 1;
+        else if (ev.event === 'PreToolUse') eventsPtu += 1;
+        const evTuples = replayEvent(memories, ev);
+        for (const t of evTuples) {
+          // Preserve prompt text on fires for judge prompt construction.
+          if (t.fired && ev.event === 'UserPromptSubmit') t.prompt = ev.prompt;
+          tuples.push(t);
+        }
+      }
+    }
+  }
+
+  // Judge decision. Missing key + !noJudge → stderr notice + treat as no-judge.
+  const apiKey = process.env.ANTHROPIC_API_KEY || '';
+  const upsFires = tuples.filter((t) => t.fired && t.event === 'UserPromptSubmit').length;
+  if (!flags.noJudge && !apiKey) {
+    process.stderr.write('synapsys-replay: ANTHROPIC_API_KEY not set; proceeding as --no-judge\n');
+  }
+  const judging = shouldJudge({ noJudge: flags.noJudge, apiKey, upsFires });
+
+  let judgments;
+  let judgeCalls = 0;
+  let extrapolated = false;
+  if (judging) {
+    const items = tuples
+      .filter((t) => t.fired && t.event === 'UserPromptSubmit')
+      .map((t) => ({ memory: t.memory_name, prompt: t.prompt, matched: t.matched_substring }));
+    const pipeline = await judgePipeline(items, {
+      apiKey,
+      model: 'claude-haiku-4-5',
+      maxJudges: flags.maxJudges,
+    });
+    extrapolated = pipeline.extrapolated;
+    judgeCalls = Math.ceil(pipeline.results.length / JUDGE_BATCH_SIZE);
+    judgments = {};
+    for (const r of pipeline.results) {
+      if (!judgments[r.memory]) {
+        judgments[r.memory] = { relevant: 0, irrelevant: 0, judge_failed: 0 };
+      }
+      if (r.judge_failed) judgments[r.memory].judge_failed += 1;
+      else if (r.relevant === true) judgments[r.memory].relevant += 1;
+      else if (r.relevant === false) judgments[r.memory].irrelevant += 1;
+    }
+  }
+
+  // Aggregate + suggest.
+  const agg = aggregateReport(tuples, judgments);
+  // When the judge did not run, every memory's relevance is unknown — null
+  // out the bookkeeping fields so the JSON / report communicate that clearly
+  // (AC5 / R4). aggregateReport itself stays test-stable for Task 5.
+  if (!judging) {
+    for (const name of Object.keys(agg)) {
+      agg[name].relevant = null;
+      agg[name].irrelevant = null;
+      agg[name].fp_rate = null;
+    }
+  }
+  const suggestions = [];
+  for (const memory of memories) {
+    const sug = suggestTightening(memory, agg[memory.name]);
+    if (sug) suggestions.push(sug);
+  }
+
+  // Render.
+  const meta = {
+    store: stores.map((s) => s.dir).join(','),
+    window: flags.since,
+    events_total: eventsTotal,
+    events_ups: eventsUps,
+    events_ptu: eventsPtu,
+    judgeCalls,
+    extrapolated,
+  };
+  if (flags.json) {
+    process.stdout.write(renderJson(agg, suggestions, meta) + '\n');
+  } else {
+    process.stdout.write(renderReport(agg, suggestions, meta));
+  }
   process.exit(0);
 }
 
@@ -290,6 +433,12 @@ function loadStore({ storeFlag, cwd } = {}) {
   const abs = path.resolve(storeFlag);
   const byPath = stores.filter((s) => path.resolve(s.dir) === abs);
   if (byPath.length) return byPath;
+  // Path-form fallback: if the absolute path carries the store marker, accept
+  // it even when it lives outside discoverStores() reach. Lets callers point
+  // at a hermetic test store under /tmp (Task 8 fixtures).
+  if (fs.existsSync(path.join(abs, '.synapsys.json'))) {
+    return [{ kind: 'path', dir: abs, projectName: path.basename(abs) }];
+  }
   die(`unknown --store "${storeFlag}" (no matching discovered store)`, 2);
 }
 
@@ -404,7 +553,7 @@ function aggregateReport(tuples, judgments) {
     // then lexical asc).
     const subs = fireBuckets[name].subs;
     entry.sample_matches = Array.from(subs.entries())
-      .sort((a, b) => (b[1] - a[1]) || a[0].localeCompare(b[0]))
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
       .slice(0, 3)
       .map(([s]) => s);
     delete entry._hasUps;
@@ -421,7 +570,7 @@ function aggregateReport(tuples, judgments) {
 function suggestTightening(memory, agg) {
   if (!memory || !agg) return null;
   if (agg.fp_rate === null || agg.fp_rate === undefined) return null;
-  if (!(agg.fp_rate > 0.70)) return null;
+  if (!(agg.fp_rate > 0.7)) return null;
   const arms = splitTopLevelAlternation(memory.triggerPrompt || '');
   const candidates = arms.filter((a) => {
     const trimmed = a.trim();
@@ -489,13 +638,18 @@ function renderReport(agg, suggestions, meta) {
       `UPS=${m.events_ups || 0} PTU=${m.events_ptu || 0}`
   );
   lines.push('');
-  lines.push('Memory'.padEnd(30) + 'Fires'.padStart(7) + 'Relevant'.padStart(10) + 'FP%'.padStart(8) + '  Sample matches');
+  lines.push(
+    'Memory'.padEnd(30) +
+      'Fires'.padStart(7) +
+      'Relevant'.padStart(10) +
+      'FP%'.padStart(8) +
+      '  Sample matches'
+  );
   for (const name of Object.keys(agg)) {
     const e = agg[name];
     const relevant = e.relevant === null || e.relevant === undefined ? '—' : String(e.relevant);
-    const fpPct = e.fp_rate === null || e.fp_rate === undefined
-      ? '—'
-      : `${Math.round(e.fp_rate * 100)}%`;
+    const fpPct =
+      e.fp_rate === null || e.fp_rate === undefined ? '—' : `${Math.round(e.fp_rate * 100)}%`;
     const samples = (e.sample_matches || []).slice(0, 3).join(', ');
     lines.push(
       name.padEnd(30) +
@@ -543,7 +697,10 @@ async function judgeBatch(items, { fetchImpl, apiKey, model } = {}) {
     return items.map(() => ({ judge_failed: true, error: 'no fetch impl' }));
   }
   const numbered = items
-    .map((it, i) => `${i + 1}) memory=${it.memory} prompt=${JSON.stringify(it.prompt)} matched=${JSON.stringify(it.matched)}`)
+    .map(
+      (it, i) =>
+        `${i + 1}) memory=${it.memory} prompt=${JSON.stringify(it.prompt)} matched=${JSON.stringify(it.matched)}`
+    )
     .join('\n');
   const body = JSON.stringify({
     model,
@@ -649,8 +806,13 @@ module.exports = {
   judgeBatch,
   sampleForCap,
   judgePipeline,
+  shouldJudge,
+  main,
 };
 
 if (require.main === module) {
-  main(process.argv.slice(2));
+  main(process.argv.slice(2)).catch((err) => {
+    process.stderr.write(`synapsys-replay: ${err && err.message ? err.message : err}\n`);
+    process.exit(1);
+  });
 }
