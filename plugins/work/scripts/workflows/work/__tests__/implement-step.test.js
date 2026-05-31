@@ -409,4 +409,69 @@ describe('implement step — dependency-aware messaging (GH-219 Task 16)', () =>
       assert.equal(ctx._currentTaskIdx, 0);
     });
   });
+
+  describe('auto-init descriptors (GH-410)', () => {
+    function makeCapturingState(overrides = {}) {
+      return makeState({
+        workState: {
+          status: 'in_progress',
+          stepStatus: { implement: 'pending' },
+          ...overrides.workState,
+        },
+        ...overrides,
+      });
+    }
+
+    it('passes JSON descriptor array via stdin to task-init', () => {
+      const taskData = makeTaskData([
+        { num: 1, title: 'Backend', type: 'backend' },
+        { num: 2, title: 'Wrap-up', type: 'checkpoint' },
+      ]);
+      const calls = [];
+      const ctx = makeCtx({
+        taskData,
+        execFileSync: (cmd, args, opts) => {
+          calls.push({ cmd, args, input: opts && opts.input });
+          return '';
+        },
+      });
+      const s = makeCapturingState();
+      captureStep(s, ctx);
+
+      const taskInit = calls.find((c) => Array.isArray(c.args) && c.args.includes('task-init'));
+      assert.ok(taskInit, 'task-init invocation should occur');
+      assert.ok(typeof taskInit.input === 'string' && taskInit.input.length > 0, 'task-init must receive descriptor JSON via stdin');
+      const parsed = JSON.parse(taskInit.input);
+      assert.ok(Array.isArray(parsed));
+      assert.equal(parsed.length, 2);
+      assert.equal(parsed[0].type, 'backend');
+      assert.equal(parsed[1].type, 'checkpoint');
+      assert.equal(parsed[0].num, 1);
+      assert.equal(parsed[1].num, 2);
+    });
+
+    it('falls back to legacy count when stdin invocation throws', () => {
+      const taskData = makeTaskData([{ num: 1, title: 'Solo', type: 'backend' }]);
+      const calls = [];
+      let throwOnce = true;
+      const ctx = makeCtx({
+        taskData,
+        execFileSync: (cmd, args, opts) => {
+          calls.push({ cmd, args, hasInput: !!(opts && opts.input) });
+          if (throwOnce && opts && opts.input) {
+            throwOnce = false;
+            throw new Error('stdin path simulated failure');
+          }
+          return '';
+        },
+      });
+      const s = makeCapturingState();
+      captureStep(s, ctx);
+
+      assert.equal(calls.length, 2, 'should retry without stdin on failure');
+      assert.equal(calls[0].hasInput, true);
+      assert.equal(calls[1].hasInput, false);
+      assert.equal(calls[1].args[calls[1].args.length - 1], '1');
+    });
+  });
 });

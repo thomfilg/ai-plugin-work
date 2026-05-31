@@ -184,17 +184,36 @@ module.exports = function implementStep(add, s, ctx) {
   const currentTaskIdx = taskData ? Math.min(rawTaskIdx, taskData.length - 1) : rawTaskIdx;
   const currentTask = allTasksDone ? null : taskData?.[currentTaskIdx];
 
-  // Auto-initialize task tracking if tasks.md exists but tasksMeta doesn't
+  // Auto-initialize task tracking if tasks.md exists but tasksMeta doesn't.
+  // GH-410: thread parsed descriptors (with `type` for kind classification)
+  // via stdin so checkpoint tasks land in tasksMeta with `kind: 'checkpoint'`.
+  // Falls back to legacy count-only invocation if descriptor payload fails.
   if (taskData && !taskState && s?.workState) {
     try {
       const wsPath = ctx.workStatePath;
-      execFileSync(process.execPath, [wsPath, 'task-init', safeName, String(taskData.length)], {
+      const descriptors = taskData.map((t) => ({
+        num: t.num,
+        type: t.type,
+        dependencies: t.dependencies,
+      }));
+      execFileSync(process.execPath, [wsPath, 'task-init', safeName], {
         encoding: 'utf-8',
         timeout: 5000,
         stdio: 'pipe',
+        input: JSON.stringify(descriptors),
       });
     } catch {
-      /* fail-open: task tracking init failure should not block plan */
+      // Legacy fallback: pass count only.
+      try {
+        const wsPath = ctx.workStatePath;
+        execFileSync(process.execPath, [wsPath, 'task-init', safeName, String(taskData.length)], {
+          encoding: 'utf-8',
+          timeout: 5000,
+          stdio: 'pipe',
+        });
+      } catch {
+        /* fail-open: task tracking init failure should not block plan */
+      }
     }
   }
 
