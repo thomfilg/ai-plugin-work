@@ -202,7 +202,7 @@ function collectProfileMemories(profile, name, repo) {
     if (memory) memories.push(memory);
   }
   process.stderr.write(
-    `profile=${name} sources=${(profile.sources || []).length} items=${items.length} memories=${memories.length} merged=[] skipped=[]\n`
+    `profile=${name} sources=${(profile.sources || []).length} items=${items.length} memories=${memories.length}\n`
   );
   return memories;
 }
