@@ -11,20 +11,18 @@
  *   - suggestTightening(memory, agg)
  */
 
-function updateDepth(depth, ch) {
-  if (ch === '(') depth.paren++;
-  else if (ch === ')') depth.paren = Math.max(0, depth.paren - 1);
-  else if (ch === '[') depth.bracket++;
-  else if (ch === ']') depth.bracket = Math.max(0, depth.bracket - 1);
-}
-
 /**
- * Split `trigger_prompt` on top-level `|` only (outside `(...)` / `[...]`).
+ * Split `trigger_prompt` on top-level `|` (outside `(...)` and outside
+ * backslash escapes). Semantics match matcher.js:splitTopLevelAlternation
+ * exactly — the tightening heuristic must analyze the same arms the runtime
+ * matcher actually evaluates. Bracket characters `[` `]` are NOT depth-
+ * tracked, mirroring the matcher (which treats them as plain literals in
+ * the alternation grammar).
  */
 function splitTopLevelAlternation(triggerPrompt) {
   if (typeof triggerPrompt !== 'string' || triggerPrompt.length === 0) return [];
   const arms = [];
-  const depth = { paren: 0, bracket: 0 };
+  let depth = 0;
   let buf = '';
   let escaped = false;
   for (let i = 0; i < triggerPrompt.length; i++) {
@@ -39,8 +37,9 @@ function splitTopLevelAlternation(triggerPrompt) {
       escaped = true;
       continue;
     }
-    updateDepth(depth, ch);
-    if (ch === '|' && depth.paren === 0 && depth.bracket === 0) {
+    if (ch === '(') depth++;
+    else if (ch === ')') depth--;
+    if (ch === '|' && depth === 0) {
       arms.push(buf);
       buf = '';
       continue;

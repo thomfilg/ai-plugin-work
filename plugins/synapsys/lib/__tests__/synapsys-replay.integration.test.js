@@ -526,8 +526,9 @@ test('@task:5 heuristic tightening suggestion fires for fp_rate > 0.70 with shor
     'fetch',
     'deploy-production',
   ]);
-  // Top-level only — `|` inside `(...)` / `[...]` is not split.
-  assert.deepEqual(splitTopLevelAlternation('(a|b)|cd|[e|f]'), ['(a|b)', 'cd', '[e|f]']);
+  // Top-level only — `|` inside `(...)` is not split. Brackets are NOT
+  // depth-tracked (matches matcher.js semantics exactly).
+  assert.deepEqual(splitTopLevelAlternation('(a|b)|cd|ef'), ['(a|b)', 'cd', 'ef']);
   // Backslash-escaped `|` is not a separator.
   assert.deepEqual(splitTopLevelAlternation('auth\\|login|admin'), ['auth\\|login', 'admin']);
 
