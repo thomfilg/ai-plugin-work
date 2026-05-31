@@ -2794,8 +2794,9 @@ describe('enforce-step-workflow', () => {
         startTime: new Date().toISOString(),
         lastUpdate: new Date().toISOString(),
       };
-      fs.writeFileSync(path.join(flatDir, '.work-state.json'), JSON.stringify(flatState, null, 2));
-      fs.writeFileSync(path.join(flatDir, '.step-evidence.json'), JSON.stringify({}, null, 2));
+      // GH-452: atomic writes prevent ENOENT races on Node 20 GH Actions runner.
+      atomicWriteJson(path.join(flatDir, '.work-state.json'), flatState);
+      atomicWriteJson(path.join(flatDir, '.step-evidence.json'), {});
 
       // Invalid suffix should be ignored — hook falls back to flat path
       const { code } = await runHook(
@@ -2824,8 +2825,9 @@ describe('enforce-step-workflow', () => {
         startTime: new Date().toISOString(),
         lastUpdate: new Date().toISOString(),
       };
-      fs.writeFileSync(path.join(flatDir, '.work-state.json'), JSON.stringify(flatState, null, 2));
-      fs.writeFileSync(path.join(flatDir, '.step-evidence.json'), JSON.stringify({}, null, 2));
+      // GH-452: atomic writes prevent ENOENT races on Node 20 GH Actions runner.
+      atomicWriteJson(path.join(flatDir, '.work-state.json'), flatState);
+      atomicWriteJson(path.join(flatDir, '.step-evidence.json'), {});
 
       // Without suffix env, hook should look in flat path
       const { code } = await runHook(
@@ -3605,7 +3607,8 @@ describe('enforce-step-workflow', () => {
         startTime: new Date().toISOString(),
         lastUpdate: new Date().toISOString(),
       };
-      fs.writeFileSync(path.join(taskDir, '.work-state.json'), JSON.stringify(state, null, 2));
+      // GH-452: atomic write to close ENOENT race window for spawned hook reads.
+      atomicWriteJson(path.join(taskDir, '.work-state.json'), state);
     }
 
     beforeEach(() => {
@@ -4797,6 +4800,108 @@ describe('enforce-step-workflow', () => {
         code,
         2,
         'Rule 5 should run for gated script and block on untrusted path (proves no early-return)'
+      );
+    });
+  });
+
+  // GH-452: ENFORCE_HOOK_DEBUG=1 instrumentation — module-load and per-call
+  // diagnostic stderr lines used to classify the Node 20 CI failure mode.
+  describe('ENFORCE_HOOK_DEBUG instrumentation (GH-452)', () => {
+    it('emits module-load GH-452 trusted-dir realpath lines when ENFORCE_HOOK_DEBUG=1', async () => {
+      // Spawn the hook with the debug flag set. Use a minimal benign payload —
+      // we only care about the module-load stderr output, not the decision.
+      const { stderr } = await runHook(
+        { tool_name: 'Read', tool_input: { file_path: '/tmp/anything.txt' } },
+        'PreToolUse',
+        { ENFORCE_HOOK_DEBUG: '1' }
+      );
+      assert.match(
+        stderr,
+        /GH-452.*__dirname/i,
+        'expected a GH-452 __dirname diagnostic line in stderr'
+      );
+      assert.match(
+        stderr,
+        /GH-452.*trusted-dir.*realpath/i,
+        'expected a GH-452 trusted-dir realpath diagnostic line in stderr'
+      );
+    });
+
+    it('is silent (no GH-452 lines) when ENFORCE_HOOK_DEBUG is unset', async () => {
+      const { stderr } = await runHook(
+        { tool_name: 'Read', tool_input: { file_path: '/tmp/anything.txt' } },
+        'PreToolUse',
+        { ENFORCE_HOOK_DEBUG: undefined }
+      );
+      assert.doesNotMatch(
+        stderr,
+        /GH-452/,
+        'no GH-452 diagnostic lines should appear when flag is unset'
+      );
+    });
+
+    it('emits a per-call GH-452 candidate=<path> realpath=<resolved> line for a trusted script invocation', async () => {
+      // Pick a known trusted script that lives under one of the TRUSTED_SCRIPT_DIRS
+      // (workflows/work/work-state.js is referenced by the agent-gated list and
+      // resolves under workflows/work/).
+      const trustedScript = path.resolve(
+        __dirname,
+        '..',
+        '..',
+        'work',
+        'work-state.js'
+      );
+      assert.ok(
+        fs.existsSync(trustedScript),
+        'trusted candidate script must exist for this test fixture'
+      );
+      const { stderr } = await runHook(
+        {
+          tool_name: 'Bash',
+          tool_input: { command: `node ${trustedScript} get` },
+        },
+        'PreToolUse',
+        { ENFORCE_HOOK_DEBUG: '1', ENFORCE_HOOK_TICKET_ID: TEST_TICKET }
+      );
+      assert.match(
+        stderr,
+        /GH-452.*candidate=.*realpath=/i,
+        'expected a GH-452 candidate=<path> realpath=<resolved> line for the trusted invocation'
+      );
+    });
+  });
+
+  // GH-452: Node 20 CI regression — atomic state writes must close the ENOENT
+  // window where a spawned hook subprocess can read state files before the
+  // parent test process finishes writing them. Loops writeWorkState + runHook
+  // N=20 times and asserts the hook never sees ENOENT or spuriously BLOCKS due
+  // to missing state. Used to be flaky on GH Actions Node 20 runners.
+  describe('Node 20 CI regression (GH-452)', () => {
+    function simulateConcurrencyRace() {
+      return (async () => {
+        const results = [];
+        for (let i = 0; i < 20; i++) {
+          writeWorkState(makeStepStatus('implement', WORK_STEPS));
+          const r = await runHook(
+            { tool_name: 'Bash', tool_input: { command: 'echo race' } },
+            'PreToolUse'
+          );
+          results.push(r);
+        }
+        return results;
+      })();
+    }
+
+    it('never reads ENOENT or BLOCKS due to missing state across N=20 spawns', async () => {
+      const results = await simulateConcurrencyRace();
+      const enoent = results.find((r) => /ENOENT/.test(r.stderr));
+      assert.ok(!enoent, `expected no ENOENT in any spawn, got: ${enoent && enoent.stderr}`);
+      const stateBlocked = results.find(
+        (r) => r.code === 2 && /missing state|state file/i.test(r.stderr)
+      );
+      assert.ok(
+        !stateBlocked,
+        `expected no spurious BLOCKED due to missing state, got: ${stateBlocked && stateBlocked.stderr}`
       );
     });
   });
