@@ -11,44 +11,10 @@
  *   - suggestTightening(memory, agg)
  */
 
-/**
- * Split `trigger_prompt` on top-level `|` (outside `(...)` and outside
- * backslash escapes). Semantics match matcher.js:splitTopLevelAlternation
- * exactly — the tightening heuristic must analyze the same arms the runtime
- * matcher actually evaluates. Bracket characters `[` `]` are NOT depth-
- * tracked, mirroring the matcher (which treats them as plain literals in
- * the alternation grammar).
- */
-function splitTopLevelAlternation(triggerPrompt) {
-  if (typeof triggerPrompt !== 'string' || triggerPrompt.length === 0) return [];
-  const arms = [];
-  let depth = 0;
-  let buf = '';
-  let escaped = false;
-  for (let i = 0; i < triggerPrompt.length; i++) {
-    const ch = triggerPrompt[i];
-    if (escaped) {
-      buf += ch;
-      escaped = false;
-      continue;
-    }
-    if (ch === '\\') {
-      buf += ch;
-      escaped = true;
-      continue;
-    }
-    if (ch === '(') depth++;
-    else if (ch === ')') depth--;
-    if (ch === '|' && depth === 0) {
-      arms.push(buf);
-      buf = '';
-      continue;
-    }
-    buf += ch;
-  }
-  arms.push(buf);
-  return arms;
-}
+// Re-export the runtime matcher's splitTopLevelAlternation so the tightening
+// heuristic analyzes the same arms the matcher actually splits at runtime.
+// Single source of truth — see plugins/synapsys/lib/matcher.js.
+const { splitTopLevelAlternation } = require('./matcher');
 
 /**
  * fp_rate = 1 - relevant / (relevant + irrelevant). judge_failed excluded.
