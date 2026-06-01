@@ -137,10 +137,11 @@ function detect({ ticket, worktree }) {
     return { hit: false };
   }
 
-  // Count changed (bot still posting comments) → reset the stable-read clock
-  // without clearing alerted, so a noisy review doesn't trigger premature nudges.
+  // Count changed (bot still posting, or new wave of comments) → reset the
+  // full watch: nudges + alerted clear too. Otherwise an exhausted prior
+  // escalation cycle would silence escalation for the new comments forever.
   if (prev.count !== count) {
-    state.write(ticket, 'pr-comments', { ...prev, count, firstSeenAt: now });
+    state.write(ticket, 'pr-comments', { count, sha, firstSeenAt: now, alerted: false });
     return { hit: false };
   }
 
