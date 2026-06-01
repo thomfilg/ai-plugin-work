@@ -16,7 +16,7 @@
  * The PR number is resolved from the branch name `<ticket>-maestro` via
  * `gh pr list --head`. Result is cached per tick.
  */
-const { execSync } = require('child_process');
+const { execSync, spawnSync } = require('child_process');
 const state = require('../state');
 
 const BOT_RE = /(cursor|copilot|bugbot|codex|sourcery)/i;
@@ -29,12 +29,20 @@ function sh(cmd) {
   }
 }
 
+function gitOut(worktree, args) {
+  const res = spawnSync('git', ['-C', worktree, ...args], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  return res.status === 0 ? (res.stdout || '').trim() : '';
+}
+
 function headSha(worktree) {
-  return sh(`git -C ${worktree} rev-parse HEAD 2>/dev/null`).trim();
+  return gitOut(worktree, ['rev-parse', 'HEAD']);
 }
 
 function deriveRepo(worktree) {
-  const url = sh(`git -C ${worktree || '.'} remote get-url origin 2>/dev/null`).trim();
+  const url = gitOut(worktree || '.', ['remote', 'get-url', 'origin']);
   if (!url) return '';
   // Match owner/repo from https://github.com/owner/repo(.git) or git@github.com:owner/repo(.git)
   const m = url.match(/[:/]([^/:]+)\/([^/]+?)(?:\.git)?$/);

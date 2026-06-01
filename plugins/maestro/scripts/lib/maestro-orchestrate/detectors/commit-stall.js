@@ -8,17 +8,19 @@
  * phase-stall to enrich alerts.
  */
 const path = require('path');
-const { execSync } = require('child_process');
+const { spawnSync } = require('child_process');
 
 const COMMIT_STALL_MIN = parseInt(process.env.COMMIT_STALL_MIN || '30', 10);
 
 function minutesSinceLastCommit(worktree) {
-  try {
-    const out = execSync(`git -C ${worktree} log -1 --format=%ct 2>/dev/null`, { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
-    const secs = parseInt(out, 10);
-    if (!secs) return 99999;
-    return Math.floor((Date.now() / 1000 - secs) / 60);
-  } catch { return 99999; }
+  const res = spawnSync('git', ['-C', worktree, 'log', '-1', '--format=%ct'], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'ignore'],
+  });
+  if (res.status !== 0) return 99999;
+  const secs = parseInt((res.stdout || '').trim(), 10);
+  if (!secs) return 99999;
+  return Math.floor((Date.now() / 1000 - secs) / 60);
 }
 
 function detect({ worktree }) {
