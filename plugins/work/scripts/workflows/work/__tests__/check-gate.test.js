@@ -1,4 +1,4 @@
-const { describe, it, beforeEach, after } = require('node:test');
+const { describe, it, beforeEach, afterEach, after } = require('node:test');
 const assert = require('node:assert');
 const fs = require('fs');
 const path = require('path');
@@ -21,7 +21,42 @@ beforeEach(() => {
   testTicket = `T-${++testCount}`;
 });
 
+// R3: describe-level WEB_APPS isolation. Saves any ambient WEB_APPS into a
+// closure, deletes it from the env before each test, busts the require.cache
+// entries for ../../lib/config and ../gates/check-gate so they re-read the
+// (now-clean) env on next require(), and on teardown restores the original
+// value with an `=== undefined` check so an explicit empty-string is preserved.
+function installWebAppsIsolation() {
+  let savedWebApps;
+  const configPath = require.resolve('../../lib/config');
+  const gatePath = require.resolve('../gates/check-gate');
+  beforeEach(() => {
+    savedWebApps = process.env.WEB_APPS;
+    delete process.env.WEB_APPS;
+    delete require.cache[configPath];
+    delete require.cache[gatePath];
+  });
+  afterEach(() => {
+    if (savedWebApps === undefined) delete process.env.WEB_APPS;
+    else process.env.WEB_APPS = savedWebApps;
+    delete require.cache[configPath];
+    delete require.cache[gatePath];
+  });
+}
+
 describe('check-gate (unit)', () => {
+  installWebAppsIsolation();
+
+  // Meta-test (R3): every test in this describe must observe an isolated
+  // baseline regardless of the parent shell's WEB_APPS.
+  it('observes WEB_APPS=undefined at test start regardless of ambient env', () => {
+    assert.equal(
+      process.env.WEB_APPS,
+      undefined,
+      'WEB_APPS must be deleted by describe-level beforeEach before each test runs'
+    );
+  });
+
   it('CHECK_GATE_RULES has 5 rules with required shape', () => {
     assert.equal(CHECK_GATE_RULES.length, 5);
     for (const rule of CHECK_GATE_RULES) {
@@ -59,51 +94,31 @@ describe('check-gate (unit)', () => {
   });
 
   it('qa-reports rule requires at least one when WEB_APPS is configured', () => {
-    const savedWebApps = process.env.WEB_APPS;
-    try {
-      process.env.WEB_APPS = '[{"name":"test-app","defaultPort":3000,"type":"vite"}]';
-      const configPath = require.resolve('../../lib/config');
-      const gatePath = require.resolve('../gates/check-gate');
-      delete require.cache[configPath];
-      delete require.cache[gatePath];
-      const { CHECK_GATE_RULES: freshRules } = require('../gates/check-gate');
-      const rule = freshRules.find((r) => r.name === 'qa-reports');
-      fs.mkdirSync(path.join(TEMP, testTicket), { recursive: true });
-      const reasons = rule.check(path.join(TEMP, testTicket));
-      assert.equal(reasons.length, 1);
-      assert.ok(reasons[0].toLowerCase().includes('qa'));
-    } finally {
-      if (savedWebApps === undefined) delete process.env.WEB_APPS;
-      else process.env.WEB_APPS = savedWebApps;
-      delete require.cache[require.resolve('../../lib/config')];
-      delete require.cache[require.resolve('../gates/check-gate')];
-    }
+    process.env.WEB_APPS = '[{"name":"test-app","defaultPort":3000,"type":"vite"}]';
+    delete require.cache[require.resolve('../../lib/config')];
+    delete require.cache[require.resolve('../gates/check-gate')];
+    const { CHECK_GATE_RULES: freshRules } = require('../gates/check-gate');
+    const rule = freshRules.find((r) => r.name === 'qa-reports');
+    fs.mkdirSync(path.join(TEMP, testTicket), { recursive: true });
+    const reasons = rule.check(path.join(TEMP, testTicket));
+    assert.equal(reasons.length, 1);
+    assert.ok(reasons[0].toLowerCase().includes('qa'));
   });
 
   it('qa-reports rule detects unapproved QA file when WEB_APPS is configured', () => {
-    const savedWebApps = process.env.WEB_APPS;
-    try {
-      process.env.WEB_APPS = '[{"name":"test-app","defaultPort":3000,"type":"vite"}]';
-      const configPath = require.resolve('../../lib/config');
-      const gatePath = require.resolve('../gates/check-gate');
-      delete require.cache[configPath];
-      delete require.cache[gatePath];
-      const { CHECK_GATE_RULES: freshRules } = require('../gates/check-gate');
-      writeReport('qa-feature.check.md', 'Status: FAILED');
-      const rule = freshRules.find((r) => r.name === 'qa-reports');
-      const reasons = rule.check(path.join(TEMP, testTicket));
-      assert.equal(reasons.length, 1);
-      assert.ok(reasons[0].includes('qa-feature.check.md'), 'reason should mention file');
-      assert.ok(
-        reasons[0].includes('APPROVED or NOT_APPLICABLE'),
-        'reason should mention accepted statuses'
-      );
-    } finally {
-      if (savedWebApps === undefined) delete process.env.WEB_APPS;
-      else process.env.WEB_APPS = savedWebApps;
-      delete require.cache[require.resolve('../../lib/config')];
-      delete require.cache[require.resolve('../gates/check-gate')];
-    }
+    process.env.WEB_APPS = '[{"name":"test-app","defaultPort":3000,"type":"vite"}]';
+    delete require.cache[require.resolve('../../lib/config')];
+    delete require.cache[require.resolve('../gates/check-gate')];
+    const { CHECK_GATE_RULES: freshRules } = require('../gates/check-gate');
+    writeReport('qa-feature.check.md', 'Status: FAILED');
+    const rule = freshRules.find((r) => r.name === 'qa-reports');
+    const reasons = rule.check(path.join(TEMP, testTicket));
+    assert.equal(reasons.length, 1);
+    assert.ok(reasons[0].includes('qa-feature.check.md'), 'reason should mention file');
+    assert.ok(
+      reasons[0].includes('APPROVED or NOT_APPLICABLE'),
+      'reason should mention accepted statuses'
+    );
   });
 
   it('running-agents rule returns empty when no tmux sessions', () => {
@@ -139,111 +154,60 @@ describe('check-gate (unit)', () => {
   // ─── GH-181: qa-reports rule skips when WEB_APPS is empty ───────────────
 
   it('qa-reports rule passes (returns []) when WEB_APPS is empty', () => {
-    const savedWebApps = process.env.WEB_APPS;
-    try {
-      process.env.WEB_APPS = '[]';
-      // Re-require to pick up env change — config caches WEB_APPS at load time
-      // so we need to invalidate the config cache
-      const configPath = require.resolve('../../lib/config');
-      const gatePath = require.resolve('../gates/check-gate');
-      delete require.cache[configPath];
-      delete require.cache[gatePath];
-      const { CHECK_GATE_RULES: freshRules } = require('../gates/check-gate');
-      const rule = freshRules.find((r) => r.name === 'qa-reports');
-      fs.mkdirSync(path.join(TEMP, testTicket), { recursive: true });
-      const reasons = rule.check(path.join(TEMP, testTicket));
-      assert.deepStrictEqual(reasons, [], 'qa-reports should pass when WEB_APPS is empty');
-    } finally {
-      if (savedWebApps === undefined) delete process.env.WEB_APPS;
-      else process.env.WEB_APPS = savedWebApps;
-      // Restore original modules
-      const configPath = require.resolve('../../lib/config');
-      const gatePath = require.resolve('../gates/check-gate');
-      delete require.cache[configPath];
-      delete require.cache[gatePath];
-    }
+    process.env.WEB_APPS = '[]';
+    // Re-require to pick up env change — config caches WEB_APPS at load time
+    // so we need to invalidate the config cache
+    delete require.cache[require.resolve('../../lib/config')];
+    delete require.cache[require.resolve('../gates/check-gate')];
+    const { CHECK_GATE_RULES: freshRules } = require('../gates/check-gate');
+    const rule = freshRules.find((r) => r.name === 'qa-reports');
+    fs.mkdirSync(path.join(TEMP, testTicket), { recursive: true });
+    const reasons = rule.check(path.join(TEMP, testTicket));
+    assert.deepStrictEqual(reasons, [], 'qa-reports should pass when WEB_APPS is empty');
   });
 
   it('qa-reports rule passes when WEB_APPS env is unset', () => {
-    const savedWebApps = process.env.WEB_APPS;
-    try {
-      delete process.env.WEB_APPS;
-      const configPath = require.resolve('../../lib/config');
-      const gatePath = require.resolve('../gates/check-gate');
-      delete require.cache[configPath];
-      delete require.cache[gatePath];
-      const { CHECK_GATE_RULES: freshRules } = require('../gates/check-gate');
-      const rule = freshRules.find((r) => r.name === 'qa-reports');
-      fs.mkdirSync(path.join(TEMP, testTicket), { recursive: true });
-      const reasons = rule.check(path.join(TEMP, testTicket));
-      assert.deepStrictEqual(reasons, [], 'qa-reports should pass when WEB_APPS is unset');
-    } finally {
-      if (savedWebApps === undefined) delete process.env.WEB_APPS;
-      else process.env.WEB_APPS = savedWebApps;
-      const configPath = require.resolve('../../lib/config');
-      const gatePath = require.resolve('../gates/check-gate');
-      delete require.cache[configPath];
-      delete require.cache[gatePath];
-    }
+    // WEB_APPS already deleted by describe-level beforeEach
+    const { CHECK_GATE_RULES: freshRules } = require('../gates/check-gate');
+    const rule = freshRules.find((r) => r.name === 'qa-reports');
+    fs.mkdirSync(path.join(TEMP, testTicket), { recursive: true });
+    const reasons = rule.check(path.join(TEMP, testTicket));
+    assert.deepStrictEqual(reasons, [], 'qa-reports should pass when WEB_APPS is unset');
   });
 
   it('qa-reports rule still requires QA reports when WEB_APPS has entries', () => {
-    const savedWebApps = process.env.WEB_APPS;
-    try {
-      process.env.WEB_APPS = '[{"name":"my-app","defaultPort":3000,"type":"vite"}]';
-      const configPath = require.resolve('../../lib/config');
-      const gatePath = require.resolve('../gates/check-gate');
-      delete require.cache[configPath];
-      delete require.cache[gatePath];
-      const { CHECK_GATE_RULES: freshRules } = require('../gates/check-gate');
-      const rule = freshRules.find((r) => r.name === 'qa-reports');
-      fs.mkdirSync(path.join(TEMP, testTicket), { recursive: true });
-      const reasons = rule.check(path.join(TEMP, testTicket));
-      assert.equal(
-        reasons.length,
-        1,
-        'qa-reports should still require QA when WEB_APPS has entries'
-      );
-      assert.ok(reasons[0].toLowerCase().includes('qa'));
-    } finally {
-      if (savedWebApps === undefined) delete process.env.WEB_APPS;
-      else process.env.WEB_APPS = savedWebApps;
-      const configPath = require.resolve('../../lib/config');
-      const gatePath = require.resolve('../gates/check-gate');
-      delete require.cache[configPath];
-      delete require.cache[gatePath];
-    }
+    process.env.WEB_APPS = '[{"name":"my-app","defaultPort":3000,"type":"vite"}]';
+    delete require.cache[require.resolve('../../lib/config')];
+    delete require.cache[require.resolve('../gates/check-gate')];
+    const { CHECK_GATE_RULES: freshRules } = require('../gates/check-gate');
+    const rule = freshRules.find((r) => r.name === 'qa-reports');
+    fs.mkdirSync(path.join(TEMP, testTicket), { recursive: true });
+    const reasons = rule.check(path.join(TEMP, testTicket));
+    assert.equal(
+      reasons.length,
+      1,
+      'qa-reports should still require QA when WEB_APPS has entries'
+    );
+    assert.ok(reasons[0].toLowerCase().includes('qa'));
   });
 
   it('validateCheckGate passes with required reports and no QA when WEB_APPS empty', () => {
-    const savedWebApps = process.env.WEB_APPS;
-    try {
-      process.env.WEB_APPS = '[]';
-      const configPath = require.resolve('../../lib/config');
-      const gatePath = require.resolve('../gates/check-gate');
-      delete require.cache[configPath];
-      delete require.cache[gatePath];
-      const { validateCheckGate: freshValidate } = require('../gates/check-gate');
-      writeReport('tests.check.md', 'Status: APPROVED');
-      writeReport('code-review.check.md', 'Status: APPROVED');
-      writeReport('completion.check.md', 'Status: COMPLETE');
-      // No qa-*.check.md files — should still pass
-      const result = freshValidate(TEMP, testTicket);
-      // Filter out running-agents and spec-verification failures (tmux/git dependent)
-      const qaReasons = result.reasons.filter((r) => r.toLowerCase().includes('qa'));
-      assert.deepStrictEqual(
-        qaReasons,
-        [],
-        'should have no QA-related failures when WEB_APPS is empty'
-      );
-    } finally {
-      if (savedWebApps === undefined) delete process.env.WEB_APPS;
-      else process.env.WEB_APPS = savedWebApps;
-      const configPath = require.resolve('../../lib/config');
-      const gatePath = require.resolve('../gates/check-gate');
-      delete require.cache[configPath];
-      delete require.cache[gatePath];
-    }
+    process.env.WEB_APPS = '[]';
+    delete require.cache[require.resolve('../../lib/config')];
+    delete require.cache[require.resolve('../gates/check-gate')];
+    const { validateCheckGate: freshValidate } = require('../gates/check-gate');
+    writeReport('tests.check.md', 'Status: APPROVED');
+    writeReport('code-review.check.md', 'Status: APPROVED');
+    writeReport('completion.check.md', 'Status: COMPLETE');
+    // No qa-*.check.md files — should still pass
+    const result = freshValidate(TEMP, testTicket);
+    // Filter out running-agents and spec-verification failures (tmux/git dependent)
+    const qaReasons = result.reasons.filter((r) => r.toLowerCase().includes('qa'));
+    assert.deepStrictEqual(
+      qaReasons,
+      [],
+      'should have no QA-related failures when WEB_APPS is empty'
+    );
   });
 
   // ─── GH-259: per-task TDD evidence gate ──────────────────────────────────
@@ -578,27 +542,17 @@ describe('check-gate (unit)', () => {
   // ─── GH-232: QA NOT_APPLICABLE ─────────────────────────────────────────
 
   it('qa-reports rule passes when report has Status: NOT_APPLICABLE', () => {
-    const savedWebApps = process.env.WEB_APPS;
-    try {
-      process.env.WEB_APPS = '[{"name":"test-app","defaultPort":3000,"type":"vite"}]';
-      const configPath = require.resolve('../../lib/config');
-      const gatePath = require.resolve('../gates/check-gate');
-      delete require.cache[configPath];
-      delete require.cache[gatePath];
-      const { CHECK_GATE_RULES: freshRules } = require('../gates/check-gate');
-      writeReport(
-        'qa-feature.check.md',
-        'QA skipped because no WEB_APPS configured\n\nStatus: NOT_APPLICABLE'
-      );
-      const rule = freshRules.find((r) => r.name === 'qa-reports');
-      const reasons = rule.check(path.join(TEMP, testTicket));
-      assert.deepStrictEqual(reasons, [], 'NOT_APPLICABLE QA report should pass');
-    } finally {
-      if (savedWebApps === undefined) delete process.env.WEB_APPS;
-      else process.env.WEB_APPS = savedWebApps;
-      delete require.cache[require.resolve('../../lib/config')];
-      delete require.cache[require.resolve('../gates/check-gate')];
-    }
+    process.env.WEB_APPS = '[{"name":"test-app","defaultPort":3000,"type":"vite"}]';
+    delete require.cache[require.resolve('../../lib/config')];
+    delete require.cache[require.resolve('../gates/check-gate')];
+    const { CHECK_GATE_RULES: freshRules } = require('../gates/check-gate');
+    writeReport(
+      'qa-feature.check.md',
+      'QA skipped because no WEB_APPS configured\n\nStatus: NOT_APPLICABLE'
+    );
+    const rule = freshRules.find((r) => r.name === 'qa-reports');
+    const reasons = rule.check(path.join(TEMP, testTicket));
+    assert.deepStrictEqual(reasons, [], 'NOT_APPLICABLE QA report should pass');
   });
 
   // ─── GH-232: structured per-rule results ────────────────────────────────
@@ -632,86 +586,62 @@ describe('check-gate (unit)', () => {
     // Scenario: code-review.check.md has CRITICAL issues but
     // code-review-reply.check.md resolves all of them.
     // The full validateCheckGate() must return valid: true.
-    // WEB_APPS is unset (and the config + gate caches busted so the unset
-    // takes effect) so qa-reports rule does not require any QA file —
-    // isolated from a polluted parent env that may export WEB_APPS.
-    const savedWebApps = process.env.WEB_APPS;
-    delete process.env.WEB_APPS;
-    const configPath = require.resolve('../../lib/config');
-    const gatePath = require.resolve('../gates/check-gate');
-    delete require.cache[configPath];
-    delete require.cache[gatePath];
+    // WEB_APPS is unset by the describe-level beforeEach so qa-reports rule
+    // does not require any QA file — isolated from a polluted parent env.
     const { validateCheckGate: freshValidate } = require('../gates/check-gate');
-    try {
-      writeReport('tests.check.md', 'Status: APPROVED');
-      writeReport('completion.check.md', 'Status: COMPLETE');
-      writeReport(
-        'code-review.check.md',
-        '# Code Review\n\n## CRITICAL ISSUES\n\n**Unsafe input handling**\n\n**Memory leak in event listener**\n\nStatus: NEEDS_WORK'
-      );
-      writeReport(
-        'code-review-reply.check.md',
-        '## Issue: Unsafe input handling\n\n**Decision:** FIXED\n**Reason:** Added input validation\n\n## Issue: Memory leak in event listener\n\n**Decision:** FIXED\n**Reason:** Added cleanup in dispose()\n'
-      );
-      const result = freshValidate(TEMP, testTicket);
-      // Filter to only required-reports and qa-reports reasons (ignore running-agents, spec-verification, tdd which are env-dependent)
-      const reportReasons = result.reasons.filter(
-        (r) => r.includes('report') || r.includes('Report') || r.includes('code-review')
-      );
-      assert.deepStrictEqual(
-        reportReasons,
-        [],
-        'gate should pass for code-review when reply resolves all CRITICAL issues'
-      );
-      // Verify the required-reports rule specifically passed
-      const requiredRule = result.rules.find((r) => r.name === 'required-reports');
-      assert.ok(requiredRule, 'required-reports rule must be in results');
-      assert.equal(requiredRule.passed, true, 'required-reports rule must pass');
-      assert.deepStrictEqual(requiredRule.reasons, []);
-    } finally {
-      if (savedWebApps === undefined) delete process.env.WEB_APPS;
-      else process.env.WEB_APPS = savedWebApps;
-      delete require.cache[configPath];
-      delete require.cache[gatePath];
-    }
+    writeReport('tests.check.md', 'Status: APPROVED');
+    writeReport('completion.check.md', 'Status: COMPLETE');
+    writeReport(
+      'code-review.check.md',
+      '# Code Review\n\n## CRITICAL ISSUES\n\n**Unsafe input handling**\n\n**Memory leak in event listener**\n\nStatus: NEEDS_WORK'
+    );
+    writeReport(
+      'code-review-reply.check.md',
+      '## Issue: Unsafe input handling\n\n**Decision:** FIXED\n**Reason:** Added input validation\n\n## Issue: Memory leak in event listener\n\n**Decision:** FIXED\n**Reason:** Added cleanup in dispose()\n'
+    );
+    const result = freshValidate(TEMP, testTicket);
+    // Filter to only required-reports and qa-reports reasons (ignore running-agents, spec-verification, tdd which are env-dependent)
+    const reportReasons = result.reasons.filter(
+      (r) => r.includes('report') || r.includes('Report') || r.includes('code-review')
+    );
+    assert.deepStrictEqual(
+      reportReasons,
+      [],
+      'gate should pass for code-review when reply resolves all CRITICAL issues'
+    );
+    // Verify the required-reports rule specifically passed
+    const requiredRule = result.rules.find((r) => r.name === 'required-reports');
+    assert.ok(requiredRule, 'required-reports rule must be in results');
+    assert.equal(requiredRule.passed, true, 'required-reports rule must pass');
+    assert.deepStrictEqual(requiredRule.reasons, []);
   });
 
   it('integration: QA skipped with NOT_APPLICABLE passes full gate', () => {
     // Scenario: WEB_APPS is configured with entries, but the QA report
     // has Status: NOT_APPLICABLE. The full gate must pass.
-    const savedWebApps = process.env.WEB_APPS;
-    try {
-      process.env.WEB_APPS = '[{"name":"my-app","defaultPort":3000,"type":"vite"}]';
-      const configPath = require.resolve('../../lib/config');
-      const gatePath = require.resolve('../gates/check-gate');
-      delete require.cache[configPath];
-      delete require.cache[gatePath];
-      const { validateCheckGate: freshValidate } = require('../gates/check-gate');
-      writeReport('tests.check.md', 'Status: APPROVED');
-      writeReport('code-review.check.md', 'Status: APPROVED');
-      writeReport('completion.check.md', 'Status: COMPLETE');
-      writeReport(
-        'qa-feature.check.md',
-        'QA skipped because no WEB_APPS configured\n\nStatus: NOT_APPLICABLE'
-      );
-      const result = freshValidate(TEMP, testTicket);
-      // No QA-related failures
-      const qaReasons = result.reasons.filter((r) => r.toLowerCase().includes('qa'));
-      assert.deepStrictEqual(
-        qaReasons,
-        [],
-        'gate should pass when QA report has NOT_APPLICABLE status'
-      );
-      // Verify the qa-reports rule specifically passed
-      const qaRule = result.rules.find((r) => r.name === 'qa-reports');
-      assert.ok(qaRule, 'qa-reports rule must be in results');
-      assert.equal(qaRule.passed, true, 'qa-reports rule must pass with NOT_APPLICABLE');
-    } finally {
-      if (savedWebApps === undefined) delete process.env.WEB_APPS;
-      else process.env.WEB_APPS = savedWebApps;
-      delete require.cache[require.resolve('../../lib/config')];
-      delete require.cache[require.resolve('../gates/check-gate')];
-    }
+    process.env.WEB_APPS = '[{"name":"my-app","defaultPort":3000,"type":"vite"}]';
+    delete require.cache[require.resolve('../../lib/config')];
+    delete require.cache[require.resolve('../gates/check-gate')];
+    const { validateCheckGate: freshValidate } = require('../gates/check-gate');
+    writeReport('tests.check.md', 'Status: APPROVED');
+    writeReport('code-review.check.md', 'Status: APPROVED');
+    writeReport('completion.check.md', 'Status: COMPLETE');
+    writeReport(
+      'qa-feature.check.md',
+      'QA skipped because no WEB_APPS configured\n\nStatus: NOT_APPLICABLE'
+    );
+    const result = freshValidate(TEMP, testTicket);
+    // No QA-related failures
+    const qaReasons = result.reasons.filter((r) => r.toLowerCase().includes('qa'));
+    assert.deepStrictEqual(
+      qaReasons,
+      [],
+      'gate should pass when QA report has NOT_APPLICABLE status'
+    );
+    // Verify the qa-reports rule specifically passed
+    const qaRule = result.rules.find((r) => r.name === 'qa-reports');
+    assert.ok(qaRule, 'qa-reports rule must be in results');
+    assert.equal(qaRule.passed, true, 'qa-reports rule must pass with NOT_APPLICABLE');
   });
 
   it('integration: report with summary table (no Status line) passes full gate', () => {

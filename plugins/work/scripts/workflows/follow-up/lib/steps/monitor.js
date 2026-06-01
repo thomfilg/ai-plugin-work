@@ -295,6 +295,10 @@ function computeExitCode(prInfo, ci, reviews) {
   return ciOk && reviewsOk && mergeOk ? 0 : 1;
 }
 
+// Order matters: read `j.url || j.link`. `checkCI()` renames `link → url` for
+// failed jobs that have been normalized, but legacy/un-normalized entries
+// still carry only `link`. Probing `url` first preserves the canonical name
+// when present and falls back to `link` so we never drop a runId.
 function buildInitialFailedJobs(ci) {
   return (ci.failed || []).map((j) => {
     const m = String(j.url || j.link || '').match(/runs\/(\d+)/);
@@ -360,4 +364,15 @@ module.exports = function registerMonitor(register) {
     if (exitCode === 0) state.currentStep = 'report';
     return null;
   });
+};
+
+// test-only escape hatch — not public API. Exposes pure + shell-out helpers
+// so monitor.test.js can exercise each one in isolation.
+module.exports.__test__ = {
+  detectLocalConflict,
+  extractConflictFiles,
+  refreshPrUntilKnown,
+  computeExitCode,
+  resolveMissingRunIds,
+  buildInitialFailedJobs,
 };
