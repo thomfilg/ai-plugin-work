@@ -259,11 +259,6 @@ function addError(ticketId, step, error) {
 }
 
 /**
- * Mark work as complete.
- * GH-106: Made idempotent — if already completed, returns existing state.
- * Returns { error: ... } when no state found (caller must check).
- */
-/**
  * GH-410: Auto-complete checkpoint tasks that have an APPROVED/COMPLETE
  * completion.check.md report. Mutates `state` in place. Returns the array
  * of audit entries appended (empty if nothing changed).
@@ -310,6 +305,11 @@ function autoCompleteCheckpointTasks(state, ticketId) {
   return closed;
 }
 
+/**
+ * Mark work as complete.
+ * GH-106: Made idempotent — if already completed, returns existing state.
+ * Returns { error: ... } when no state found (caller must check).
+ */
 function completeWork(ticketId) {
   let state = loadState(ticketId);
   if (!state) {
