@@ -287,15 +287,21 @@ function autoCompleteCheckpointTasks(state, ticketId) {
   if (!matchedVerdict) return closed;
 
   for (const entry of state.tasksMeta.tasks) {
-    if (entry && entry.kind === 'checkpoint' && entry.status !== 'completed') {
-      entry.status = 'completed';
-      closed.push({
-        taskId: entry.id,
-        title: entry.title || entry.id,
-        reason: `${matchedVerdict} completion.check.md present`,
-        timestamp: new Date().toISOString(),
-      });
-    }
+    if (!entry || entry.kind !== 'checkpoint' || entry.status === 'completed') continue;
+    // Per-task linkage: require the checkpoint's id (or title) to appear in
+    // the report text. A single APPROVED verdict must NOT blanket-close every
+    // pending checkpoint in the ticket — each closure has to be backed by a
+    // verdict that names the task it verified.
+    const idHit = entry.id && reportContent.includes(entry.id);
+    const titleHit = entry.title && reportContent.includes(entry.title);
+    if (!idHit && !titleHit) continue;
+    entry.status = 'completed';
+    closed.push({
+      taskId: entry.id,
+      title: entry.title || entry.id,
+      reason: `${matchedVerdict} completion.check.md names ${idHit ? entry.id : entry.title}`,
+      timestamp: new Date().toISOString(),
+    });
   }
 
   if (closed.length > 0) {
@@ -778,10 +784,18 @@ function getTaskByIndex(ticketId, taskIndex) {
   };
 }
 
-// GH-410: read task-init descriptor JSON from stdin or TASK_INIT_DESCRIPTORS env.
+// GH-410: read task-init descriptor JSON from stdin only.
 // Returns the parsed array (with auto-assigned `num` when missing) on success,
 // `{ error }` on malformed JSON, or `null` when no descriptors were supplied
 // (legacy count-mode).
+//
+// Stdin is the only accepted channel. Earlier drafts also honored a
+// TASK_INIT_DESCRIPTORS env var — that was dropped as a security hardening
+// (security review on PR #470): env vars leak across subprocess hops too
+// freely, and any hook or subagent that could set it could re-classify real
+// implementation tasks as kind:"checkpoint" and bypass the TDD gate via the
+// auto-complete path. Stdin requires being the direct parent process, which
+// is a much narrower trust boundary.
 async function readTaskInitDescriptors(secondArg) {
   // Any positional arg → legacy path (let parseInt + initTasksMeta validate).
   // Without this guard, a malformed count like "-1" or "abc" would fall through
@@ -791,11 +805,8 @@ async function readTaskInitDescriptors(secondArg) {
     return null;
   }
 
-  const envRaw = process.env.TASK_INIT_DESCRIPTORS;
   let raw = null;
-  if (envRaw && envRaw.trim()) {
-    raw = envRaw;
-  } else if (!process.stdin.isTTY) {
+  if (!process.stdin.isTTY) {
     raw = await new Promise((resolve) => {
       let buf = '';
       process.stdin.setEncoding('utf8');
@@ -903,9 +914,9 @@ async function main() {
       break;
 
     case 'task-init': {
-      // GH-410: optionally accept a JSON descriptor array via stdin or
-      // TASK_INIT_DESCRIPTORS env var to thread per-task `kind` into tasksMeta.
-      // Legacy count-only invocation (`task-init <ticket> <N>`) is preserved.
+      // GH-410: optionally accept a JSON descriptor array via stdin to thread
+      // per-task `kind` into tasksMeta. Legacy count-only invocation
+      // (`task-init <ticket> <N>`) is preserved.
       const descriptors = await readTaskInitDescriptors(args[2]);
       if (descriptors && descriptors.error) {
         console.error(JSON.stringify(descriptors));

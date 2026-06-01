@@ -842,8 +842,17 @@ describe('work-state.js', () => {
       return dir;
     }
 
-    function writeReport(dir, status) {
-      fs.writeFileSync(path.join(dir, 'completion.check.md'), `# Completion Report\nStatus: ${status}\n`);
+    function writeReport(dir, status, namedTasks) {
+      // Per-task linkage (security review on PR #470): auto-completion now
+      // requires the checkpoint task's id or title to appear in the report.
+      // Tests that expect auto-completion must pass the relevant task ids.
+      const names = Array.isArray(namedTasks) && namedTasks.length
+        ? `\nVerified: ${namedTasks.join(', ')}\n`
+        : '';
+      fs.writeFileSync(
+        path.join(dir, 'completion.check.md'),
+        `# Completion Report\nStatus: ${status}\n${names}`
+      );
     }
 
     it('auto-completes a pending checkpoint task when completion.check.md is APPROVED', async () => {
@@ -851,7 +860,7 @@ describe('work-state.js', () => {
         { id: 'task_1', status: 'completed', kind: 'backend' },
         { id: 'task_2', status: 'pending', kind: 'checkpoint', title: 'Wrap-up verification' },
       ]);
-      writeReport(dir, 'APPROVED');
+      writeReport(dir, 'APPROVED', ['task_2']);
       const { result, code } = await runWorkState(['complete', TICKET_APPROVED]);
       assert.equal(code, 0);
       assert.equal(result.status, 'completed');
@@ -870,7 +879,7 @@ describe('work-state.js', () => {
         { id: 'task_1', status: 'completed', kind: 'backend' },
         { id: 'task_2', status: 'pending', kind: 'checkpoint', title: 'Wrap-up' },
       ]);
-      writeReport(dir, 'COMPLETE');
+      writeReport(dir, 'COMPLETE', ['task_2']);
       const { result, code } = await runWorkState(['complete', TICKET_COMPLETE]);
       assert.equal(code, 0);
       assert.equal(result.autoCompleted.length, 1);
@@ -917,6 +926,24 @@ describe('work-state.js', () => {
       const { code, stderr } = await runWorkState(['complete', TICKET_LEGACY]);
       assert.notEqual(code, 0);
       assert.match(stderr, /tasks still pending/i);
+    });
+
+    it('does NOT blanket-close every pending checkpoint when only one is named in the report', async () => {
+      // Security review on PR #470: a single APPROVED verdict must NOT close
+      // every pending checkpoint task. Each closure must be backed by the
+      // report naming that specific task (by id or title).
+      const TICKET_BLANKET = 'TEST-CHK-BLANKET-001';
+      cleanupTempWorkState(TICKET_BLANKET);
+      const dir = seedTicket(TICKET_BLANKET, [
+        { id: 'task_1', status: 'pending', kind: 'checkpoint', title: 'first checkpoint' },
+        { id: 'task_2', status: 'pending', kind: 'checkpoint', title: 'second checkpoint' },
+      ]);
+      // Report names only task_1, so task_2 must remain pending → complete fails.
+      writeReport(dir, 'APPROVED', ['task_1']);
+      const { code, stderr } = await runWorkState(['complete', TICKET_BLANKET]);
+      assert.notEqual(code, 0, 'complete must fail because task_2 was not named');
+      assert.match(stderr, /tasks still pending|checkpoint/i);
+      cleanupTempWorkState(TICKET_BLANKET);
     });
 
     it('emits a checkpoint-directive error when all pending are checkpoint without report', async () => {
@@ -974,20 +1001,25 @@ describe('work-state.js', () => {
       assert.equal(result.tasksMeta.tasks[2].kind, 'docs');
     });
 
-    it('accepts descriptor array via TASK_INIT_DESCRIPTORS env var', async () => {
+    it('ignores TASK_INIT_DESCRIPTORS env var (dropped as security hardening)', async () => {
+      // Security review on PR #470: env vars leak across subprocess hops too
+      // freely, so any hook or subagent that could set TASK_INIT_DESCRIPTORS
+      // could re-classify a real implementation task as kind:"checkpoint" and
+      // bypass the TDD gate via auto-completion. Stdin is now the only path.
       await runWorkState(['init', TICKET_ENV]);
       const descriptors = [
         { num: 1, type: 'backend' },
         { num: 2, type: 'docs' },
       ];
-      const { result, code, stderr } = await runWorkState(['task-init', TICKET_ENV], {
+      const { result, code, stderr } = await runWorkState(['task-init', TICKET_ENV, '2'], {
         env: { TASK_INIT_DESCRIPTORS: JSON.stringify(descriptors) },
       });
       assert.equal(code, 0, `should exit 0 (stderr: ${stderr})`);
       assert.equal(result.success, true);
       assert.equal(result.tasksMeta.tasks.length, 2);
-      assert.equal(result.tasksMeta.tasks[0].kind, 'backend');
-      assert.equal(result.tasksMeta.tasks[1].kind, 'docs');
+      // Legacy count path: no `kind` set on entries even though env was present.
+      assert.equal(result.tasksMeta.tasks[0].kind, undefined);
+      assert.equal(result.tasksMeta.tasks[1].kind, undefined);
     });
 
     it('persists kind for checkpoint type', async () => {

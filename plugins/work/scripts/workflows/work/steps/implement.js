@@ -203,8 +203,13 @@ module.exports = function implementStep(add, s, ctx) {
         stdio: 'pipe',
         input: JSON.stringify(descriptors),
       });
-    } catch {
+    } catch (descriptorErr) {
       // Legacy fallback: pass count only.
+      // Surface the fact that we silently downgraded — a kind-aware task
+      // (e.g. checkpoint) loses its classification under the legacy path,
+      // and that has security implications for auto-completion. Logging to
+      // .work-actions.json gives an audit trail for triage if a task's
+      // kind silently changes.
       try {
         const wsPath = ctx.workStatePath;
         execFileSync(process.execPath, [wsPath, 'task-init', safeName, String(taskData.length)], {
@@ -212,6 +217,22 @@ module.exports = function implementStep(add, s, ctx) {
           timeout: 5000,
           stdio: 'pipe',
         });
+        try {
+          const actionsPath = pathMod.join(tasksDir, '.work-actions.json');
+          const prev = fs.existsSync(actionsPath)
+            ? JSON.parse(fs.readFileSync(actionsPath, 'utf8'))
+            : [];
+          prev.push({
+            type: 'task-init-descriptor-fallback',
+            ticket: safeName,
+            taskCount: taskData.length,
+            reason: descriptorErr && descriptorErr.message ? descriptorErr.message : String(descriptorErr),
+            timestamp: new Date().toISOString(),
+          });
+          fs.writeFileSync(actionsPath, JSON.stringify(prev, null, 2));
+        } catch {
+          /* audit logging is best-effort; do not block plan */
+        }
       } catch {
         /* fail-open: task tracking init failure should not block plan */
       }
