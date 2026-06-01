@@ -235,7 +235,11 @@ module.exports = function implementStep(add, s, ctx) {
             reason: descriptorErr && descriptorErr.message ? descriptorErr.message : String(descriptorErr),
             timestamp: new Date().toISOString(),
           });
-          fs.writeFileSync(actionsPath, JSON.stringify(prev, null, 2));
+          // mode: 0o600 — restrict the audit log to the owner. CodeQL's
+          // "insecure temporary file" rule flags writeFileSync into a path it
+          // can't prove is non-temp (tasksDir is configurable). Owner-only
+          // mode is correct regardless and satisfies the rule.
+          fs.writeFileSync(actionsPath, JSON.stringify(prev, null, 2), { mode: 0o600 });
         } catch {
           /* audit logging is best-effort; do not block plan */
         }
