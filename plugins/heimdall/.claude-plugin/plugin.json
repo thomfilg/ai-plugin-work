@@ -1,6 +1,6 @@
 {
   "name": "heimdall",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Config-driven file/directory guard. Lock blocks declare protected paths + an unlock phrase; a PreToolUse hook blocks Edit/Write/Bash/Task mutations to those paths unless the user speaks the phrase. Stores are local, worktree, or global like synapsys.",
   "author": {
     "name": "Custom",
