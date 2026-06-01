@@ -96,9 +96,11 @@ function handlePhaseStall(ctx, stallHit) {
   const sinceLastNudge = marker.lastNudgeAt ? state.minutesSince(marker.lastNudgeAt) : Infinity;
   // Don't re-nudge before the per-phase cooldown.
   if (marker.lastNudgeAt && sinceLastNudge < stallHit.reNudgeMin) return;
-  // Once nudges are exhausted, stop re-alerting until the phase actually advances.
-  // (The marker is reset on phase change inside the phase-stall detector.)
-  if (marker.nudges >= stallHit.maxNudges) return;
+  // Once nudges are exhausted AND the one-shot alert has fired, stop re-alerting
+  // until the phase actually advances. The marker is reset on phase change inside
+  // the phase-stall detector. We must NOT early-return before the alert branch
+  // fires, since escalationFor() only returns 'alert' once nudges >= maxNudges.
+  if (marker.nudges >= stallHit.maxNudges && marker.alerted) return;
 
   const escalation = escalationFor(ctx.phase, marker.nudges);
   const reason = `phase=${ctx.phase} stuck ${stallHit.elapsedMin}m budget=${stallHit.budgetMin}m nudge ${marker.nudges + 1}/${stallHit.maxNudges}`;
@@ -113,6 +115,13 @@ function handlePhaseStall(ctx, stallHit) {
       budgetMin: stallHit.budgetMin,
       nudges: marker.nudges,
     });
+    state.write(ctx.ticket, 'phase', {
+      ...marker,
+      nudges: marker.nudges + 1,
+      lastNudgeAt: state.now(),
+      alerted: true,
+    });
+    return;
   } else if (escalation === 'interrupt') {
     actions.interrupt(ctx.session, reason);
   } else {
@@ -186,9 +195,12 @@ function handlePrComments(ctx, cHit) {
   if (marker.lastNudgeAt && sinceLastNudge < profile.reNudgeMin) return;
 
   const nudges = marker.nudges || 0;
-  // Once nudges are exhausted, stop re-alerting until HEAD moves or the
-  // comments are gone. The detector resets the marker on either change.
-  if (nudges >= (profile.maxNudges || 3)) return;
+  const maxNudges = profile.maxNudges || 3;
+  // Once nudges are exhausted AND the one-shot alert has fired, stop re-alerting
+  // until HEAD moves or the comments are gone. The detector resets the marker on
+  // either change. We must NOT early-return before the alert branch fires, since
+  // escalationFor() only returns 'alert' once nudges >= maxNudges.
+  if (nudges >= maxNudges && marker.alerted) return;
   const top = cHit.summary
     .map((s) => `${s.file}:${s.line} [${s.severity || '?'}] ${s.title}`)
     .join(' | ');
@@ -206,6 +218,13 @@ function handlePrComments(ctx, cHit) {
       elapsedMin: cHit.minsStuck,
       summary: cHit.summary,
     });
+    state.write(ctx.ticket, 'pr-comments', {
+      ...marker,
+      nudges: nudges + 1,
+      lastNudgeAt: state.now(),
+      alerted: true,
+    });
+    return;
   } else if (escalation === 'interrupt') {
     actions.interrupt(ctx.session, reason);
   } else {
