@@ -755,12 +755,60 @@ function getReviews(prNumber) {
       'chatgpt-codex-connector[bot]': ['chatgpt-codex-connector'],
       'chatgpt-codex-connector': ['chatgpt-codex-connector[bot]'],
     };
+    // Cross-reference with CI check status: if the bot's status check has
+    // already COMPLETED, the bot is effectively done even if GitHub's
+    // requested_reviewers API hasn't caught up yet. Without this guard, a
+    // green CI run with a lagging requested_reviewers entry would trap the
+    // monitor in an "awaiting bot reviews" wait loop forever.
+    // Keyword map: bot login → substring(s) found in its status-check name.
+    const botCheckKeywords = {
+      'copilot-pull-request-reviewer': ['copilot'],
+      'cursor-ai[bot]': ['cursor', 'bugbot'],
+      'cursor-ai': ['cursor', 'bugbot'],
+      'chatgpt-codex-connector[bot]': ['codex', 'chatgpt'],
+      'chatgpt-codex-connector': ['codex', 'chatgpt'],
+    };
+    const checks = data.statusCheckRollup || [];
+    const isTerminalNonCancelled = (ck) => {
+      if (ck.status === 'COMPLETED') {
+        // CheckRun shape — `conclusion` carries the outcome. CANCELLED /
+        // SKIPPED / STALE / TIMED_OUT mean the run was aborted before
+        // finishing; the bot did NOT actually produce a verdict.
+        const conclusion = (ck.conclusion || '').toUpperCase();
+        return conclusion === 'SUCCESS' || conclusion === 'FAILURE' || conclusion === 'NEUTRAL';
+      }
+      // StatusContext shape — terminal states are SUCCESS / FAILURE / ERROR.
+      return ck.state === 'SUCCESS' || ck.state === 'FAILURE' || ck.state === 'ERROR';
+    };
+    const isStillRunning = (ck) => {
+      if (ck.status && ck.status !== 'COMPLETED') return true;
+      if (ck.state === 'PENDING' || ck.state === 'EXPECTED') return true;
+      return false;
+    };
+    const botCheckCompleted = (bot) => {
+      const keywords = botCheckKeywords[bot.toLowerCase()] || botCheckKeywords[bot] || [
+        bot.toLowerCase().replace(/\[bot\]$/, ''),
+      ];
+      const matching = checks.filter((ck) => {
+        const name = (ck.name || ck.context || '').toLowerCase();
+        return keywords.some((kw) => name.includes(kw));
+      });
+      if (matching.length === 0) return false;
+      // statusCheckRollup can contain multiple entries for the same check
+      // when workflows use `concurrency: cancel-in-progress` — an old
+      // CANCELLED run plus a newer IN_PROGRESS run. If ANY matching entry
+      // is still running, the bot is NOT done — even if an older run has
+      // a terminal conclusion.
+      if (matching.some(isStillRunning)) return false;
+      // At least one non-cancelled terminal verdict means the bot finished.
+      return matching.some(isTerminalNonCancelled);
+    };
     for (const bot of botReviewers) {
       const aliases = botLoginAliases[bot] || [bot.toLowerCase()];
       const isPending = requestedLogins.some((login) =>
         aliases.some((alias) => login === alias || login.includes(alias))
       );
-      if (isPending) {
+      if (isPending && !botCheckCompleted(bot)) {
         pendingBots.push(bot);
       }
     }
