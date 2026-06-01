@@ -23,6 +23,25 @@ Returns JSON: `{ repo, current: {hash, dir, count}, siblings: [...], existingSto
 - If `current.count === 0` AND no sibling has memories → no auto-memories to crystallize. Stop.
 - If `existingStores` is empty → tell the user to run `/synapsys:install` first. Stop.
 
+### 1.5. Pre-flight drift check (idempotency gate)
+
+Crystallize is **idempotent**: re-running it on top of an existing store skips memories whose name + source are unchanged (the writer drops duplicates by name). To make idempotency drift-aware, run the staleness check against each existing store before continuing:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/synapsys-staleness-check.js" --json --store=<kind>
+```
+
+Interpretation:
+
+- Exit 0 → all consolidated memories in that store are in sync with their source files. Continue.
+- Exit 1 → at least one memory is `drifted` (source file changed) or `orphan` (source file deleted). Parse the JSON `results[]` and surface a short table (source → status → memory names) to the user via `AskUserQuestion`:
+  - **Re-derive drifted memories now** — pass the drifted memory names to the writer with `--force` after step 8 so they get rewritten with current source hashes. Orphan memories are listed but not auto-deleted (user decides).
+  - **Continue without re-deriving** — proceed with the new crystallization only; existing drift stays unresolved.
+  - **Abort** — stop the skill; user can run `synapsys consolidate` or fix sources first.
+- Exit 2 → invocation error (e.g., store path missing). Skip the gate with a stderr warning and continue — drift detection is supplementary, not blocking.
+
+Skip this gate entirely when the target store has zero existing memories (nothing to drift against).
+
 ### 2. Pick sources (if more than one has memories)
 
 If only the current worktree has memories (or only one sibling does), skip the question.
@@ -205,6 +224,7 @@ Crystallize is additive. The auto-memory system stays as a backstop.
 
 ## Rules
 
+- **Idempotent by design.** Re-running crystallize on top of an existing store must not duplicate work. The writer skips existing memory names; the Step 1.5 staleness gate catches the harder case where a memory exists but its source has drifted. If the user picks "Re-derive drifted memories now", invoke the writer with `--force` only for the drifted set — never blanket-force the whole batch.
 - **No catch-all triggers.** A pattern like `.*` will inject the memory on every prompt and poison context. If you can't derive a specific pattern for a memory, ask the user for 2–3 example phrases.
 - **Preserve `[[name]]` links** between memories in bodies.
 - **Prefer `PreToolUse` for action reminders.** "Don't push --force" should fire when the agent is about to run `git push`, not when the user types "push".

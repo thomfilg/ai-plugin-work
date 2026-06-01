@@ -114,6 +114,63 @@ node plugins/synapsys/scripts/synapsys-explain.js --event=... --verbose
 
 `--only=<csv>` narrows evaluation to specific memories. `--store=<name|path>` picks a non-auto-detected store. Exit code is `0` regardless of how many memories fired; `2` only on misconfiguration.
 
+## Staleness check
+
+`synapsys-staleness-check.js` verifies that consolidated memories are still in sync with the source notes they were built from. Run it manually before a release, in CI on every PR, or as a pre-commit hook to catch drift early.
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | Fresh — every consolidated memory matches its source notes; no orphan notes. |
+| `1` | Drift or orphan — at least one consolidated memory is out of date, or at least one source note is not consolidated. |
+| `2` | Misconfiguration — invalid flags, missing store, or unreadable frontmatter. |
+
+### Manual
+
+```bash
+node plugins/synapsys/scripts/synapsys-staleness-check.js
+node plugins/synapsys/scripts/synapsys-staleness-check.js --verbose
+node plugins/synapsys/scripts/synapsys-staleness-check.js --json
+node plugins/synapsys/scripts/synapsys-staleness-check.js --store=local
+```
+
+`--verbose` prints per-memory hash comparisons. `--json` emits a machine-readable report. `--store=<name|path>` narrows the check to a single store.
+
+### CI
+
+```yaml
+# .github/workflows/synapsys-staleness.yml
+name: synapsys-staleness
+on: [pull_request]
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check consolidated memories are fresh
+        run: |
+          PLUGIN="plugins/synapsys"
+          node "$PLUGIN/scripts/synapsys-staleness-check.js"
+```
+
+The job fails on exit `1` (drift) or `2` (misconfig); exit `0` keeps the PR green.
+
+### Pre-commit
+
+```bash
+# .git/hooks/pre-commit (or via husky/lefthook)
+#!/usr/bin/env bash
+node plugins/synapsys/scripts/synapsys-staleness-check.js || {
+  echo "synapsys: consolidated memories are stale — re-consolidate before committing." >&2
+  exit 1
+}
+```
+
+### `--re-consolidate`
+
+Passing `--re-consolidate` dispatches the owning profile for each drifted source by spawning the sibling consolidate script with `--profile=<name>`. Profile ownership is resolved by intersecting each profile module's declared source paths against the drifted source. Orphan sources (whose source file no longer exists) are skipped — they require human judgement. Ambiguous sources (claimed by multiple profiles) emit a warning and are skipped. Profile lookup requires the `consolidate-profiles/` directory, which is delivered by GH-442; until it lands, `--re-consolidate` will warn that no profile owns the source and exit non-zero.
+
 ## Design choices
 
 - **Fail-open** — any error in the dispatcher exits 0 with no output. Memory injection must never block a user prompt or tool call.
