@@ -106,7 +106,6 @@ function discoverPlugins() {
       name,
       label: `plugins/${name}/.claude-plugin/plugin.json`,
       path: path.join('plugins', name, '.claude-plugin', 'plugin.json'),
-      relPrefix: `plugins/${name}/`,
       get: (j) => j.version,
       set: (j, v) => {
         j.version = v;
