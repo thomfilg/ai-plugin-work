@@ -6,26 +6,33 @@
 const { execSync } = require('child_process');
 
 function sh(cmd) {
-  try { return execSync(cmd, { stdio: ['ignore', 'pipe', 'pipe'] }).toString(); }
-  catch { return ''; }
+  try {
+    return execSync(cmd, { stdio: ['ignore', 'pipe', 'pipe'] }).toString();
+  } catch {
+    return '';
+  }
 }
 
 function shVoid(cmd) {
-  try { execSync(cmd, { stdio: 'ignore' }); return true; }
-  catch { return false; }
+  try {
+    execSync(cmd, { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** List sessions matching a regex (default GH-*-work). */
 function listSessions(pattern = /^GH-[A-Z0-9-]+-work$/) {
   return sh('tmux ls 2>/dev/null')
     .split('\n')
-    .map(l => l.split(':')[0])
-    .filter(name => pattern.test(name));
+    .map((l) => l.split(':')[0])
+    .filter((name) => pattern.test(name));
 }
 
-/** Capture the visible pane of a session. */
+/** Capture pane (visible + extra scrollback so tall menus aren't truncated). */
 function capture(session) {
-  return sh(`tmux capture-pane -t ${session} -p 2>/dev/null`);
+  return sh(`tmux capture-pane -t ${session} -p -S -100 2>/dev/null`);
 }
 
 /** Send a literal string into a session prompt + Enter to submit. */
@@ -43,9 +50,10 @@ function sendKey(session, key) {
 
 /** Ensure a session exists; create it as a no-op holding session if missing. */
 function ensureSession(session) {
-  if (sh(`tmux has-session -t ${session} 2>&1`).startsWith('') &&
-      shVoid(`tmux has-session -t ${session}`)) return;
-  shVoid(`tmux new-session -d -s ${session} 'while :; do read line; echo "[$(date +%T)] $line"; done'`);
+  if (shVoid(`tmux has-session -t ${session} 2>/dev/null`)) return;
+  shVoid(
+    `tmux new-session -d -s ${session} 'while :; do read line; echo "[$(date +%T)] $line"; done'`
+  );
 }
 
 module.exports = { listSessions, capture, sendLine, sendKey, ensureSession };
