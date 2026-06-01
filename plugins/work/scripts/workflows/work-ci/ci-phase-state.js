@@ -4,14 +4,25 @@
  * ci-phase-state.js
  *
  * Writer for `tasks/<ticket>/ci-phase.json`. Unguarded — the ci step is
- * bookkeeping, not code-writing, and ci-next.js (the sole caller) is no
- * longer in agentGatedScripts.
+ * bookkeeping/polling and ci-next.js (the sole caller) is intentionally
+ * NOT in agentGatedScripts (see workflow-definition.js).
  *
- * Subcommands:
- *   node ci-phase-state.js init       <TICKET>
- *   node ci-phase-state.js current    <TICKET>
- *   node ci-phase-state.js record     <TICKET> <phase> [--summary "..."]
- *   node ci-phase-state.js transition <TICKET> <target>
+ * Factory contract (GH-478, Task 8):
+ *   This file is a thin wrapper around the `createPhaseStateCli` factory
+ *   at `plugins/work/scripts/workflows/lib/phase-state/create-phase-state-cli.js`.
+ *   The factory itself always token-gates `init` / `record` / `transition`
+ *   (verbatim port of the canonical `tasks-phase-state.js` shape).
+ *
+ *   To preserve the historical "unguarded" external CLI contract for ci
+ *   without bloating the factory's surface, this wrapper self-mints a
+ *   short-lived write-token for the `ci-runner` synthetic agent before
+ *   delegating to the factory's `main(argv)`. External callers
+ *   (orchestrator / main session) keep their token-free invocation;
+ *   the gating round-trip is contained inside this wrapper. Public
+ *   re-exports (`PHASES`, `ciCanTransition`, `ciNextPhases`) and the
+ *   on-disk state-file format are preserved verbatim.
+ *
+ * Subcommands: `init`, `current`, `record`, `transition`.
  */
 
 'use strict';
@@ -19,178 +30,63 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const { resolveTasksBaseWithFallback } = require('../lib/ticket-validation');
+const { createPhaseStateCli } = require('../lib/phase-state/create-phase-state-cli');
+const { tokenPath } = require('../lib/scripts/write-report');
 const {
   CI_PHASE_ORDER,
   CI_INITIAL_PHASE,
+  CI_TERMINAL_PHASE,
   ciNextPhases,
   ciCanTransition,
   isCiPhase,
 } = require('./ci-phase-registry');
 
-let config;
-try {
-  config = require('../lib/config');
-} catch (e) {
-  if (e && e.code !== 'MODULE_NOT_FOUND') throw e;
-  config = null;
-}
+const SCRIPT_NAME = 'ci-phase-state.js';
+const SYNTHETIC_AGENT = 'ci-runner';
+const GATED_SUBCOMMANDS = new Set(['init', 'record', 'transition']);
 
-const PHASES = CI_PHASE_ORDER;
+const cli = createPhaseStateCli({
+  phaseRegistry: {
+    PHASE_ORDER: CI_PHASE_ORDER,
+    INITIAL_PHASE: CI_INITIAL_PHASE,
+    TERMINAL_PHASE: CI_TERMINAL_PHASE,
+    nextPhases: ciNextPhases,
+    canTransition: ciCanTransition,
+    isPhase: isCiPhase,
+  },
+  allowedAgents: [SYNTHETIC_AGENT],
+  stateFileName: 'ci-phase.json',
+  scriptName: SCRIPT_NAME,
+});
 
-function errorExit(message) {
-  process.stderr.write(`${JSON.stringify({ error: true, message })}\n`);
-  process.exit(1);
-}
-
-function successOut(data) {
-  process.stdout.write(`${JSON.stringify(data)}\n`);
-}
-
-function sanitizeId(ticketId) {
+function mintSyntheticToken(ticketId) {
+  if (!ticketId) return;
   try {
-    return require('../lib/config').safeTicketId(ticketId);
-  } catch (e) {
-    if (e && e.code !== 'MODULE_NOT_FOUND') throw e;
-    return ticketId;
+    const tp = tokenPath(SCRIPT_NAME, ticketId);
+    fs.mkdirSync(path.dirname(tp), { recursive: true, mode: 0o700 });
+    const payload = {
+      agent: SYNTHETIC_AGENT,
+      timestamp: Date.now(),
+      tasksBase: null,
+    };
+    fs.writeFileSync(tp, JSON.stringify(payload), { mode: 0o600 });
+  } catch {
+    /* fail-open — the factory will surface a "missing token" error if mint failed */
   }
 }
 
-function getStatePath(ticketId) {
-  if (!ticketId || /\.\.|[\\:\x00]/.test(ticketId)) {
-    throw new Error(`Invalid ticket ID: ${ticketId}`);
-  }
-  const base = path.resolve(resolveTasksBaseWithFallback());
-  const safeId = sanitizeId(ticketId);
-  const resolved = path.resolve(base, safeId, 'ci-phase.json');
-  if (!resolved.startsWith(base + path.sep)) {
-    throw new Error(`Invalid ticket ID: ${ticketId}`);
-  }
-  return resolved;
-}
-
-function readState(ticketId) {
-  const p = getStatePath(ticketId);
-  if (!fs.existsSync(p)) return null;
-  return JSON.parse(fs.readFileSync(p, 'utf8'));
-}
-
-function writeState(ticketId, state) {
-  const p = getStatePath(ticketId);
-  fs.mkdirSync(path.dirname(p), { recursive: true });
-  const tmp = `${p}.${process.pid}.${Date.now()}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(state, null, 2));
-  try {
-    fs.unlinkSync(p);
-  } catch (e) {
-    if (e && e.code !== 'ENOENT') throw e;
-  }
-  fs.renameSync(tmp, p);
-}
-
-function parseFlag(args, name) {
-  const i = args.indexOf(name);
-  if (i === -1 || i + 1 >= args.length) return null;
-  return args[i + 1];
-}
-
-function cmdInit(ticket) {
-  const existing = readState(ticket);
-  if (existing) {
-    successOut({ ok: true, status: 'exists', state: existing });
-    return;
-  }
-  const now = new Date().toISOString();
-  const state = {
-    ticket,
-    createdAt: now,
-    updatedAt: now,
-    currentPhase: CI_INITIAL_PHASE,
-    phases: {},
-  };
-  writeState(ticket, state);
-  successOut({ ok: true, status: 'created', state });
-}
-
-function cmdCurrent(ticket) {
-  const state = readState(ticket);
-  if (!state) {
-    successOut({ ok: true, currentPhase: null, state: null });
-    return;
-  }
-  successOut({ ok: true, currentPhase: state.currentPhase, state });
-}
-
-function cmdRecord(ticket, phase, args) {
-  if (!isCiPhase(phase)) {
-    errorExit(`Unknown phase "${phase}". Valid: ${CI_PHASE_ORDER.join(', ')}.`);
-  }
-  const state = readState(ticket);
-  if (!state) errorExit(`No ci-phase state for ${ticket}. Run \`init\` first.`);
-  const summary = parseFlag(args, '--summary') || '';
-  const now = new Date().toISOString();
-  state.phases[phase] = { completedAt: now, summary };
-  state.updatedAt = now;
-  writeState(ticket, state);
-  successOut({ ok: true, recordedPhase: phase, state });
-}
-
-function cmdTransition(ticket, target) {
-  if (!isCiPhase(target)) {
-    errorExit(`Unknown target phase "${target}". Valid: ${CI_PHASE_ORDER.join(', ')}.`);
-  }
-  const state = readState(ticket);
-  if (!state) errorExit(`No ci-phase state for ${ticket}. Run \`init\` first.`);
-  if (!ciCanTransition(state.currentPhase, target)) {
-    const allowed = ciNextPhases(state.currentPhase);
-    errorExit(
-      `Invalid transition ${state.currentPhase} → ${target}. Allowed from ${state.currentPhase}: ${
-        allowed.length ? allowed.join(', ') : '(terminal)'
-      }.`
-    );
-  }
-  if (!state.phases[state.currentPhase]) {
-    errorExit(
-      `Cannot transition: phase "${state.currentPhase}" has no recorded evidence. Run \`record ${ticket} ${state.currentPhase}\` first.`
-    );
-  }
-  const now = new Date().toISOString();
-  state.currentPhase = target;
-  state.updatedAt = now;
-  writeState(ticket, state);
-  successOut({ ok: true, currentPhase: target, state });
-}
-
-function main(argv) {
+function maybeSelfMint(argv) {
   const args = argv.slice(2);
   const sub = args[0];
-  if (!sub) {
-    errorExit('Usage: ci-phase-state.js <init|current|record|transition> <TICKET> [args]');
-  }
   const ticket = args[1];
-  if (!ticket) errorExit('Missing ticket ID.');
-
-  if (sub === 'init') return cmdInit(ticket);
-  if (sub === 'current') return cmdCurrent(ticket);
-  if (sub === 'record') {
-    const phase = args[2];
-    if (!phase) errorExit('Usage: ci-phase-state.js record <TICKET> <phase> [--summary "..."]');
-    return cmdRecord(ticket, phase, args.slice(3));
+  if (sub && GATED_SUBCOMMANDS.has(sub) && ticket) {
+    mintSyntheticToken(ticket);
   }
-  if (sub === 'transition') {
-    const target = args[2];
-    if (!target) errorExit('Usage: ci-phase-state.js transition <TICKET> <target>');
-    return cmdTransition(ticket, target);
-  }
-  errorExit(`Unknown subcommand: ${sub}`);
 }
 
 if (require.main === module) {
-  try {
-    main(process.argv);
-  } catch (e) {
-    errorExit(e.message);
-  }
+  maybeSelfMint(process.argv);
+  cli.main(process.argv);
 }
 
-module.exports = { PHASES, ciCanTransition, ciNextPhases };
+module.exports = { PHASES: cli.PHASES, ciCanTransition, ciNextPhases };
