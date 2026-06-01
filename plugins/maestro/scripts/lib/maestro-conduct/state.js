@@ -7,7 +7,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const STATE_DIR = process.env.STATE_DIR || '/tmp/maestro-orchestrate-state';
+const STATE_DIR = process.env.STATE_DIR || '/tmp/maestro-conduct-state';
 fs.mkdirSync(STATE_DIR, { recursive: true });
 
 function file(ticket, kind) {

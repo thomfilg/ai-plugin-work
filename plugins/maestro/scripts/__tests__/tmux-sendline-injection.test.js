@@ -17,7 +17,7 @@ const os = require('node:os');
 const path = require('node:path');
 const fs = require('node:fs');
 
-const { sendLine, sendKey } = require('../lib/maestro-orchestrate/tmux.js');
+const { sendLine, sendKey } = require('../lib/maestro-conduct/tmux.js');
 
 /**
  * Build a temporary directory holding a fake `tmux` shim that appends each

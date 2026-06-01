@@ -6,15 +6,15 @@ When you run several `/work <TICKET>` agents in parallel — one per ticket, eac
 
 ### Provider-derived session prefix
 
-Session names are prefixed with the **provider-derived ticket prefix** rather than a hardcoded `GH`. Both `maestro-orchestrate.js` (via `tmux.resolveTicketPrefix()`) and `maestro-bootstrap.sh` (via `lib/resolve-prefix.sh`) resolve the prefix from the `TICKET_PREFIX` env var (in `tmux.js`) or `plugins/work/scripts/workflows/lib/ticket-provider.js` (in the bootstrap). Both paths are **fail-open**: when the provider is GitHub, unconfigured, the node shell-out fails, or the resolved value does not match `^[A-Z][A-Z0-9]*$`, the prefix falls back to `GH`. So with a Linear/Jira provider whose `projectKey` is `ECHO`, sessions are named `ECHO-<N>-work`; with GitHub (or no config) they stay `GH-<N>-work` byte-for-byte.
+Session names are prefixed with the **provider-derived ticket prefix** rather than a hardcoded `GH`. Both `maestro-conduct.js` (via `tmux.resolveTicketPrefix()`) and `maestro-bootstrap.sh` (via `lib/resolve-prefix.sh`) resolve the prefix from the `TICKET_PREFIX` env var (in `tmux.js`) or `plugins/work/scripts/workflows/lib/ticket-provider.js` (in the bootstrap). Both paths are **fail-open**: when the provider is GitHub, unconfigured, the node shell-out fails, or the resolved value does not match `^[A-Z][A-Z0-9]*$`, the prefix falls back to `GH`. So with a Linear/Jira provider whose `projectKey` is `ECHO`, sessions are named `ECHO-<N>-work`; with GitHub (or no config) they stay `GH-<N>-work` byte-for-byte.
 
 The `SESSION_PATTERN` default is therefore `^${PREFIX}-[0-9]+-(work|dev|listen)$` for the resolved `${PREFIX}` — never an empty-prefix pattern. `SESSION_PATTERN` is the single env override that drives discovery: its default already widens to `-(work|dev|listen)` so the `-dev`/`-listen` helper sessions `/work` spawns surface informationally. Auto-restart is gated **separately** to `-work` only, so `-dev` and `-listen` helpers are reported but never relaunched with `/work <TICKET>`.
 
 ## Components
 
-### `scripts/maestro-orchestrate.js`
+### `scripts/maestro-conduct.js`
 
-The orchestrator (single binary; replaces the previous `maestro-conduct.sh`). Per tick (every `TICK_SEC`, default 60s), each `${PREFIX}-*-work` tmux session runs through detectors registered in `lib/maestro-orchestrate/phase-registry.js`:
+The orchestrator (single binary; replaces the previous `maestro-conduct.sh`). Per tick (every `TICK_SEC`, default 60s), each `${PREFIX}-*-work` tmux session runs through detectors registered in `lib/maestro-conduct/phase-registry.js`:
 
 1. **Question** — pane shows `Do you want to proceed?` / menu prompt → emit `QUESTION-DETECTED`. Always wins; no nudges while the operator is being asked.
 2. **Silence / auto-restart** — pane is "active" only when a live spinner glyph is present (`✻ Jitterbugging…`) OR the token count went up OR the pane hash changed. After `SILENCE_LIMIT_SEC` (default 300s) of genuine silence, kill the session and relaunch `claude --dangerously-skip-permissions '/work <TICKET>'` in the same worktree. `/work` is resumable via `.work-state.json`. Only `-work` sessions are restart-eligible.
@@ -55,8 +55,8 @@ File-mailbox at `/tmp/claude-agent-inbox/<TICKET>.log`. `signal` appends a line,
 | `TICK_SEC` | `60` | Orchestrator tick cadence |
 | `CLAUDE_BIN` | `claude` | Binary used for auto-restart |
 | `SKILL_NAME` | `work` | Skill name passed to the auto-restart command |
-| `STATE_DIR` | `/tmp/maestro-orchestrate-state` | Per-ticket marker location |
-| `LOG_FILE` | `/tmp/maestro-orchestrate.log` | Where event lines are appended |
+| `STATE_DIR` | `/tmp/maestro-conduct-state` | Per-ticket marker location |
+| `LOG_FILE` | `/tmp/maestro-conduct.log` | Where event lines are appended |
 | `TICKET_PREFIX` | `GH` | Override the provider-derived session prefix |
 | `SESSION_PATTERN` | `^${PREFIX}-[0-9]+-(work\|dev\|listen)$` | Regex of sessions to discover and watch. `${PREFIX}` is the provider-derived prefix (via `ticket-provider.js`, fail-open to `GH`); GitHub/unconfigured resolves to `^GH-[0-9]+-(work\|dev\|listen)$`. The default already includes `-dev`/`-listen` helpers; only `-work` is auto-restart-eligible. |
 

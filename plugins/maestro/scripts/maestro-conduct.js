@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * maestro-orchestrate.js — the maestro's active conducting loop.
+ * maestro-conduct.js — the maestro's active conducting loop.
  *
  * The conductor keeps each player on tempo. For every GH-*-work tmux session:
  *   1. Determine current phase from the /work state file (workstate.js)
@@ -15,20 +15,20 @@
  * One-shot by default; pass --daemon to loop with TICK_SEC between cycles.
  */
 const path = require('path');
-const tmux = require('./lib/maestro-orchestrate/tmux');
-const state = require('./lib/maestro-orchestrate/state');
-const workstate = require('./lib/maestro-orchestrate/workstate');
-const { phaseFor, escalationFor } = require('./lib/maestro-orchestrate/phase-registry');
-const actions = require('./lib/maestro-orchestrate/actions');
-const alerts = require('./lib/maestro-orchestrate/alerts');
+const tmux = require('./lib/maestro-conduct/tmux');
+const state = require('./lib/maestro-conduct/state');
+const workstate = require('./lib/maestro-conduct/workstate');
+const { phaseFor, escalationFor } = require('./lib/maestro-conduct/phase-registry');
+const actions = require('./lib/maestro-conduct/actions');
+const alerts = require('./lib/maestro-conduct/alerts');
 
 const DETECTORS = {
-  question: require('./lib/maestro-orchestrate/detectors/question'),
-  silence: require('./lib/maestro-orchestrate/detectors/silence'),
-  spinner: require('./lib/maestro-orchestrate/detectors/spinner'),
-  phaseStall: require('./lib/maestro-orchestrate/detectors/phase-stall'),
-  commitStall: require('./lib/maestro-orchestrate/detectors/commit-stall'),
-  prComments: require('./lib/maestro-orchestrate/detectors/pr-comments'),
+  question: require('./lib/maestro-conduct/detectors/question'),
+  silence: require('./lib/maestro-conduct/detectors/silence'),
+  spinner: require('./lib/maestro-conduct/detectors/spinner'),
+  phaseStall: require('./lib/maestro-conduct/detectors/phase-stall'),
+  commitStall: require('./lib/maestro-conduct/detectors/commit-stall'),
+  prComments: require('./lib/maestro-conduct/detectors/pr-comments'),
 };
 
 // Only -work sessions are restart-eligible (matches maestro-conduct.sh
@@ -44,7 +44,10 @@ const TICK_SEC = parseInt(process.env.TICK_SEC || '60', 10);
 
 /** Build the context object passed to every detector. */
 function ctxFor(session) {
-  const ticket = session.replace(/-work$/, '');
+  // Strip the maestro session-suffix (-work / -dev / -listen). Helper sessions
+  // still derive a meaningful ticket id — they are surfaced informationally
+  // but never auto-restarted (see restartEligible above).
+  const ticket = tmux.ticketIdFor(session);
   // Single read so phase and step come from the same on-disk snapshot
   // (the file can be rewritten by /work between reads otherwise).
   const { phase, step } = workstate.snapshot(ticket);
@@ -294,4 +297,4 @@ function main() {
 }
 
 if (require.main === module) main();
-module.exports = { tick, ctxFor };
+module.exports = { tick, ctxFor, restartEligible };

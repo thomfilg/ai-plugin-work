@@ -16,7 +16,7 @@ function log(line) {
   const ts = new Date().toISOString();
   const out = `[${ts}] ${line}\n`;
   process.stderr.write(out);
-  try { fs.appendFileSync(process.env.LOG_FILE || '/tmp/maestro-orchestrate.log', out); }
+  try { fs.appendFileSync(process.env.LOG_FILE || '/tmp/maestro-conduct.log', out); }
   catch {}
 }
 

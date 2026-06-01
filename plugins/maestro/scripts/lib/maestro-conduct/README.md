@@ -1,4 +1,4 @@
-# maestro-orchestrate
+# maestro-conduct
 
 Active conducting loop for the maestro plugin. Keeps each `/work` agent on tempo.
 
@@ -30,7 +30,7 @@ and "hung but emitting frames" failure modes:
 |---|---|
 | `phase-registry.js` | Per-phase budgets + detectors + nudge policy. Single source of truth. |
 | `tmux.js` | Pane capture / send-keys / session helpers. |
-| `state.js` | JSON markers under `STATE_DIR` (default `/tmp/maestro-orchestrate-state`). |
+| `state.js` | JSON markers under `STATE_DIR` (default `/tmp/maestro-conduct-state`). |
 | `workstate.js` | Reads the `/work` state file for a ticket; resolves current phase. |
 | `alerts.js` | Writes maestro alerts to `/tmp/maestro-alerts.jsonl` + `maestro-alerts` tmux pane. |
 | `actions.js` | `soft`, `interrupt`, `alert` — implementations of the escalation actions. |
@@ -41,7 +41,7 @@ and "hung but emitting frames" failure modes:
 | `detectors/commit-stall.js` | Informational: no commits in implement phase. |
 | `detectors/pr-comments.js` | Bot review comments still open at CURRENT diff positions. |
 
-The entrypoint sits one level up at `../../maestro-orchestrate.js`.
+The entrypoint sits one level up at `../../maestro-conduct.js`.
 
 ## Registry pattern
 
@@ -59,17 +59,17 @@ Per-phase exempts (e.g., long-running e2e suites) can be added via the
 
 ```bash
 # one shot
-node plugins/maestro/scripts/maestro-orchestrate.js
+node plugins/maestro/scripts/maestro-conduct.js
 
 # daemon
-node plugins/maestro/scripts/maestro-orchestrate.js --daemon
+node plugins/maestro/scripts/maestro-conduct.js --daemon
 ```
 
 Drop it into a tmux session if you want it backgrounded:
 
 ```bash
 tmux new-session -d -s main-orchestrate \
-  'node plugins/maestro/scripts/maestro-orchestrate.js --daemon'
+  'node plugins/maestro/scripts/maestro-conduct.js --daemon'
 ```
 
 ## Tunables (env)
@@ -85,6 +85,6 @@ tmux new-session -d -s main-orchestrate \
 | `CLAUDE_BIN` | `claude` | Binary used by the silence auto-restart |
 | `SKILL_NAME` | `work` | Skill name passed to the auto-restart command |
 | `TICKET_PREFIX` | `GH` | Override the provider-derived session prefix |
-| `STATE_DIR` | `/tmp/maestro-orchestrate-state` | Marker location |
+| `STATE_DIR` | `/tmp/maestro-conduct-state` | Marker location |
 | `ALERT_FILE` | `/tmp/maestro-alerts.jsonl` | Alert sink |
 | `ALERT_SESSION` | `maestro-alerts` | tmux alert pane |

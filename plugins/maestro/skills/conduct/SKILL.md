@@ -19,7 +19,7 @@ Start the orchestrator on whatever `${PREFIX}-*-work` tmux sessions are already 
 
 ## What it does
 
-Runs `node plugins/maestro/scripts/maestro-orchestrate.js --daemon` in the background (typically piped through Claude Code's Monitor tool so each emitted line is a notification).
+Runs `node plugins/maestro/scripts/maestro-conduct.js --daemon` in the background (typically piped through Claude Code's Monitor tool so each emitted line is a notification).
 
 Per tick (every `TICK_SEC`, default 60s) each `${PREFIX}-*-work` session runs through this detector pipeline (per-phase via `phase-registry.js`):
 
@@ -38,8 +38,8 @@ Per tick (every `TICK_SEC`, default 60s) each `${PREFIX}-*-work` session runs th
 | `TICK_SEC` | `60` | Tick cadence |
 | `CLAUDE_BIN` | `claude` | Binary used for auto-restart |
 | `SKILL_NAME` | `work` | Skill name passed to the auto-restart command |
-| `STATE_DIR` | `/tmp/maestro-orchestrate-state` | Per-ticket marker location |
-| `LOG_FILE` | `/tmp/maestro-orchestrate.log` | Where event lines are appended |
+| `STATE_DIR` | `/tmp/maestro-conduct-state` | Per-ticket marker location |
+| `LOG_FILE` | `/tmp/maestro-conduct.log` | Where event lines are appended |
 | `WORKTREES_BASE` | `$HOME/worktrees` | Where worktrees live (must match bootstrap) |
 | `REPO_NAME` | `claude-plugin-work` | Worktree dirname suffix (must match bootstrap) |
 

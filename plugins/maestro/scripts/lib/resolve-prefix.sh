@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Shared provider-prefix resolver, sourced by maestro-bootstrap.sh.
-# (maestro-orchestrate.js derives the prefix independently in tmux.js via
+# (maestro-conduct.js derives the prefix independently in tmux.js via
 # TICKET_PREFIX env / `git remote` parsing; both paths fall open to "GH" so
 # they can never disagree on a clean checkout.)
 #

@@ -27,7 +27,7 @@ Examples:
    - Create worktree at `${WORKTREES_BASE}/${REPO_NAME}-<TICKET>` on a new branch
    - Launch tmux session `<TICKET>-work` running `claude --dangerously-skip-permissions '/work <TICKET>'` in that worktree
    - Idempotent — skips tickets whose worktree already exists
-2. Start the orchestrator via `node scripts/maestro-orchestrate.js --daemon` (pipe through the Monitor tool so each emitted line becomes a chat notification). The orchestrator handles all detection (questions, silence/auto-restart, hung spinner, phase budget, unaddressed PR comments).
+2. Start the orchestrator via `node scripts/maestro-conduct.js --daemon` (pipe through the Monitor tool so each emitted line becomes a chat notification). The orchestrator handles all detection (questions, silence/auto-restart, hung spinner, phase budget, unaddressed PR comments).
 3. Print the initial pulse snapshot.
 
 ## After launch

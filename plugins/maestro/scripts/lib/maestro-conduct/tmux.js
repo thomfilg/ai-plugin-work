@@ -44,19 +44,43 @@ function resolveTicketPrefix() {
   return /^[A-Z][A-Z0-9]*$/.test(raw) ? raw : 'GH';
 }
 
+// Suffixes the conductor tracks. Default discovery widens to -work plus the
+// -dev / -listen helper sessions /work spawns, mirroring maestro-conduct.sh's
+// SESSION_SUFFIX_ALT. Auto-restart is gated separately to -work only (see
+// restartEligible in maestro-conduct.js), so helper sessions surface
+// informationally but never get relaunched.
+const SESSION_SUFFIX_ALT = 'work|dev|listen';
+
 /**
  * List sessions matching a regex.
  *
  * Default pattern is built dynamically from TICKET_PREFIX (default "GH") so
  * non-GitHub providers (Linear ECHO-*, Jira PROJ-*, etc.) are discovered too.
- * Callers can pass an explicit RegExp to override entirely.
+ * The default suffix set is `work|dev|listen` so helper sessions surface
+ * informationally. Callers can pass an explicit RegExp to override entirely;
+ * `SESSION_PATTERN` env wins over the dynamic default.
  */
 function listSessions(pattern) {
-  const regex = pattern || new RegExp(`^${resolveTicketPrefix()}-[A-Z0-9-]+-work$`);
+  let regex = pattern;
+  if (!regex) {
+    if (process.env.SESSION_PATTERN) {
+      regex = new RegExp(process.env.SESSION_PATTERN);
+    } else {
+      regex = new RegExp(`^${resolveTicketPrefix()}-[A-Z0-9-]+-(${SESSION_SUFFIX_ALT})$`);
+    }
+  }
   return sh('tmux ls 2>/dev/null')
     .split('\n')
     .map((l) => l.split(':')[0])
     .filter((name) => regex.test(name));
+}
+
+/**
+ * Strip the maestro session-suffix (`-work`, `-dev`, `-listen`) to derive the
+ * underlying ticket id. Mirrors ticket_id_for from maestro-conduct.sh.
+ */
+function ticketIdFor(session) {
+  return session.replace(new RegExp(`-(${SESSION_SUFFIX_ALT})$`), '');
 }
 
 /** Capture pane (visible + extra scrollback so tall menus aren't truncated). */
@@ -101,4 +125,13 @@ function ensureSession(session) {
   ]);
 }
 
-module.exports = { listSessions, capture, sendLine, sendKey, ensureSession };
+module.exports = {
+  listSessions,
+  capture,
+  sendLine,
+  sendKey,
+  ensureSession,
+  ticketIdFor,
+  resolveTicketPrefix,
+  SESSION_SUFFIX_ALT,
+};
