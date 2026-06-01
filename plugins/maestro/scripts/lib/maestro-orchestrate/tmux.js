@@ -73,8 +73,10 @@ function capture(session) {
  * command substitution or arbitrary shell execution.
  */
 function sendLine(session, text) {
+  // -l forces literal delivery so short strings like "Enter" or "Space" can't
+  // collide with tmux's key-name table.
   // End ensures we're at end-of-line so Enter submits instead of inserting newline.
-  spawnVoid('tmux', ['send-keys', '-t', session, String(text)]);
+  spawnVoid('tmux', ['send-keys', '-l', '-t', session, String(text)]);
   spawnVoid('tmux', ['send-keys', '-t', session, 'End']);
   spawnVoid('tmux', ['send-keys', '-t', session, 'Enter']);
 }
