@@ -189,3 +189,14 @@ CHANGED_FILES="path/to/your/file.ts" eval "$TYPECHECK_COMMAND"
 ```
 
 If empty/unset, the bundled `dev-check.sh` runs scoped lint/typecheck on changed files. Never run lint/typecheck on the whole repo.
+
+## Requirement Coverage parsing — top-level table OR per-task subsections
+
+The completion-checker parser accepts two formats for requirement coverage in `tasks.md` (see GH-462):
+
+1. **Top-level `## Requirement Coverage` table** (primary, source of truth) — rows shaped `| ID | Description | Status | Evidence |`. Read verbatim.
+2. **Per-task `### Requirements Covered` subsections** (fallback safety-net) — bullet lists of requirement IDs under each `## Task N — <title>` block. Rows are synthesized with `status=DELIVERED` and `evidence=tasks.md:Task N`.
+
+The parser (`lib/kind-checks/shared.js::readRequirementCoverage`) tries the top-level table first. When the table is absent OR header-only (header + separator rows with zero data rows), it falls through to the subsection aggregator. When neither path resolves any rows, `coverage_check.validate` returns `ok:false` with an error pointing the operator at `/work-workflow:split-in-tasks`.
+
+The split-in-tasks skill mandates emitting BOTH formats so the rollup table stays authoritative and the fallback is rarely exercised.

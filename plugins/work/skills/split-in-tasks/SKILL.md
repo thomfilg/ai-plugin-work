@@ -217,7 +217,9 @@ After generating all tasks, verify coverage:
 1. Take your requirement list from Step 4.0
 2. For each requirement, confirm it appears in at least one task's `Requirements Covered` section
 3. If any requirement is missing: add it to an existing task or create a new task
-4. Generate the `Requirement Coverage` table (see output format below)
+4. Generate the `Requirement Coverage` table (see output format below).
+
+**The trailing `## Requirement Coverage` table MUST be emitted in every `tasks.md`** even when per-task `### Requirements Covered` subsections are also present. The completion-checker parser primarily reads the top-level table; the subsection fallback exists as a safety net (see GH-462) but the table is still the source of truth. Omitting it forces the parser into the fallback path and obscures rollup status.
 
 ### Step 5: Quality review pass (MANDATORY — do this BEFORE saving)
 
@@ -530,6 +532,8 @@ _TDD Protocol: Every non-exempt implementation task follows RED -> GREEN -> REFA
 | R2          | Task 3     |
 | ...         | ...        |
 ```
+
+> **Note (GH-462):** The top-level `## Requirement Coverage` table above is MANDATORY in every emitted `tasks.md`. Each `## Task N` block must ALSO include a `### Requirements Covered` subsection listing the requirement IDs that task implements. The completion-checker parser reads the top-level table first; when absent or header-only, it aggregates the per-task `### Requirements Covered` subsections as a safety-net fallback (synthesizing rows with `status=DELIVERED`, `evidence=tasks.md:Task N`). Emit both — the dual-emission keeps the rollup table authoritative while ensuring the workflow never deadlocks if the table is accidentally omitted.
 
 ### Format rules
 

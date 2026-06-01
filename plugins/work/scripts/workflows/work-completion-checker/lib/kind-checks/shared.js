@@ -57,31 +57,71 @@ function readChangedFiles(ctx) {
 }
 
 /**
+ * Walk `## Task N — <title>` blocks and synthesize coverage rows from each
+ * block's `### Requirements Covered` bullet list. Used as a fallback when
+ * the top-level `## Requirement Coverage` table is absent. Synthesized rows
+ * default to status='DELIVERED' and evidence='tasks.md:Task N' (R10).
+ */
+function readRequirementCoverageFromSubsections(tasksText) {
+  if (!tasksText) return [];
+  const rows = [];
+  const taskHeader = /^##\s+Task\s+(\d+)\b/gim;
+  let match;
+  while ((match = taskHeader.exec(tasksText)) !== null) {
+    const taskNum = match[1];
+    const after = tasksText.slice(match.index + match[0].length);
+    const nextTop = after.match(/^##\s/m);
+    const block = nextTop ? after.slice(0, nextTop.index) : after;
+    const reqMatch = block.match(/^###\s+Requirements Covered\b/im);
+    if (!reqMatch) continue;
+    const reqAfter = block.slice(reqMatch.index + reqMatch[0].length);
+    const nextHeading = reqAfter.match(/^#{2,3}\s/m);
+    const reqBlock = nextHeading ? reqAfter.slice(0, nextHeading.index) : reqAfter;
+    for (const line of reqBlock.split('\n')) {
+      const m = line.match(/^\s*[-*]\s+([A-Za-z0-9_-]+)\s*$/);
+      if (m) {
+        rows.push({
+          id: m[1],
+          description: '',
+          status: 'DELIVERED',
+          evidence: `tasks.md:Task ${taskNum}`,
+        });
+      }
+    }
+  }
+  return rows;
+}
+
+/**
  * Parse `## Requirement Coverage` table out of tasks.md.
  * Returns array of { id, description, status, evidence } records.
+ * Falls back to per-task `### Requirements Covered` subsections when the
+ * top-level table is absent (R4).
  */
 function readRequirementCoverage(tasksDir) {
   const text = specShared.readTasks(tasksDir);
   if (!text) return [];
   const block = specShared.sliceSection(text, /^##\s+Requirement Coverage\b/im);
-  if (!block) return [];
   const rows = [];
-  for (const line of block.split('\n')) {
-    if (!/^\|/.test(line)) continue;
-    const cells = line
-      .split('|')
-      .slice(1, -1)
-      .map((c) => c.trim());
-    if (cells.length < 2) continue;
-    if (/^-+$/.test(cells[0])) continue;
-    if (/^(id|requirement|req)$/i.test(cells[0])) continue;
-    rows.push({
-      id: cells[0],
-      description: cells[1] || '',
-      status: cells[2] || '',
-      evidence: cells[3] || '',
-    });
+  if (block) {
+    for (const line of block.split('\n')) {
+      if (!/^\|/.test(line)) continue;
+      const cells = line
+        .split('|')
+        .slice(1, -1)
+        .map((c) => c.trim());
+      if (cells.length < 2) continue;
+      if (/^-+$/.test(cells[0])) continue;
+      if (/^(id|requirement|req)$/i.test(cells[0])) continue;
+      rows.push({
+        id: cells[0],
+        description: cells[1] || '',
+        status: cells[2] || '',
+        evidence: cells[3] || '',
+      });
+    }
   }
+  if (rows.length === 0) return readRequirementCoverageFromSubsections(text);
   return rows;
 }
 

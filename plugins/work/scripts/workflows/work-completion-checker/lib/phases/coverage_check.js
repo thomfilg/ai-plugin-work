@@ -21,7 +21,7 @@ function validate(ctx) {
   const p0 = reqs.filter((r) => r.priority === 'P0');
   if (p0.length && !coverage.length) {
     errors.push(
-      `Brief lists ${p0.length} P0 requirement(s) but tasks.md has no \`## Requirement Coverage\` table. Add it before completing.`
+      "requirement_coverage_missing: no '## Requirement Coverage' table and no per-task '### Requirements Covered' subsections found in tasks.md. Re-run the split-in-tasks step to regenerate tasks.md."
     );
   }
 
