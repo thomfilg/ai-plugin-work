@@ -4982,7 +4982,7 @@ describe('enforce-step-workflow', () => {
     );
 
     // Spawn a fresh node process that requires the hook through `requirePath`
-    // with ENFORCE_HOOK_DEBUG=1 so Task 1's logGh452Diagnostics() dumps each
+    // with ENFORCE_HOOK_DEBUG=1 so Task 1's debugLogTrustedDirs() dumps each
     // trusted-dir entry on stderr at module load. Parse those lines back into
     // an array. We need a child process so module load happens fresh on every
     // test (parent's require cache already holds the unsymlinked instance).

@@ -313,7 +313,7 @@ for (let i = 0; i < TRUSTED_SCRIPT_DIRS.length; i++) {
 // the authorization decision path. Used to classify CI failure modes (resolve
 // drift, symlink skew, race) without altering trust semantics. Absolute paths
 // only — no secrets. See GH-452.
-function logGh452Diagnostics() {
+function debugLogTrustedDirs() {
   if (process.env.ENFORCE_HOOK_DEBUG !== '1') return;
   process.stderr.write(`GH-452 __dirname=${__dirname}\n`);
   for (const dir of TRUSTED_SCRIPT_DIRS) {
@@ -326,7 +326,7 @@ function logGh452Diagnostics() {
     process.stderr.write(`GH-452 trusted-dir entry=${dir} realpath=${realpath}\n`);
   }
 }
-function logGh452Candidate(candidate) {
+function debugLogCandidatePath(candidate) {
   if (process.env.ENFORCE_HOOK_DEBUG !== '1') return;
   let realpath;
   try {
@@ -336,7 +336,7 @@ function logGh452Candidate(candidate) {
   }
   process.stderr.write(`GH-452 candidate=${candidate} realpath=${realpath}\n`);
 }
-logGh452Diagnostics();
+debugLogTrustedDirs();
 
 // Agent-gated writer scripts — map script basename to { agents, step }.
 // When a Bash command invokes one of these scripts, the hook verifies:
@@ -731,7 +731,7 @@ function isTerminalCompleteBypass(cmd, ticketId) {
 
   // Verify script path is trusted.
   const resolvedPath = expandPluginRoot(scriptPath);
-  logGh452Candidate(resolvedPath);
+  debugLogCandidatePath(resolvedPath);
   if (!isTrustedScriptPath(resolvedPath, TRUSTED_SCRIPT_DIRS)) {
     trace('reject: untrusted script path', { resolvedPath });
     return false;
@@ -824,7 +824,7 @@ function isTerminalSessionGuardBypass(cmd, ticketId) {
   if (i !== tokens.length) return false;
 
   const resolvedPath = expandPluginRoot(scriptPath);
-  logGh452Candidate(resolvedPath);
+  debugLogCandidatePath(resolvedPath);
   if (!isTrustedScriptPath(resolvedPath, TRUSTED_SCRIPT_DIRS)) return false;
 
   if (targetTicket !== ticketId) return false;
@@ -930,7 +930,7 @@ function handlePreToolUse(hookData) {
       if (safeSet) {
         const resolvedPath = expandPluginRoot(scriptPath);
         // Verify trusted directory - skip untrusted (Vector 3 handles those)
-        logGh452Candidate(resolvedPath);
+        debugLogCandidatePath(resolvedPath);
         if (!isTrustedScriptPath(resolvedPath, TRUSTED_SCRIPT_DIRS)) continue;
 
         const subCmd = extractSubCommand(cmd, m, scriptBase);
@@ -1016,7 +1016,7 @@ function handlePreToolUse(hookData) {
           hookAgentType: hookData?.agent_type || null,
         });
         const allowedAgents = gatedEntry.agents;
-        logGh452Candidate(scriptPath);
+        debugLogCandidatePath(scriptPath);
         if (!isTrustedScriptPath(scriptPath, TRUSTED_SCRIPT_DIRS)) {
           didBlock = true;
           const trustedSample = TRUSTED_SCRIPT_DIRS[0] || '<plugin>/scripts/workflows';
