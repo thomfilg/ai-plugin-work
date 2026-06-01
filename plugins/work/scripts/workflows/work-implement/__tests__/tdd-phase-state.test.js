@@ -22,7 +22,14 @@ function createTempHome() {
 
 function createExitScript(dir, exitCode) {
   const scriptPath = path.join(dir, `exit-${exitCode}.sh`);
-  fs.writeFileSync(scriptPath, `#!/bin/sh\nexit ${exitCode}\n`, { mode: 0o755 });
+  // Always emit a token to stdout. RC-D refuses to record exit-0 with
+  // completely empty output (that's the empty-command trap). Real test
+  // runners always print something, so test fixtures that stand in for
+  // them must too.
+  const body = exitCode === 0
+    ? `#!/bin/sh\necho 'simulated test runner: 1 passed'\nexit 0\n`
+    : `#!/bin/sh\necho 'simulated test runner: 1 failed' >&2\nexit ${exitCode}\n`;
+  fs.writeFileSync(scriptPath, body, { mode: 0o755 });
   return scriptPath;
 }
 
@@ -261,7 +268,12 @@ describe('tdd-phase-state CLI', () => {
       assert.strictEqual(after.cycles[0].green.testExitCode, 0);
     });
 
-    it('accepts silent runner with no parseable summary', () => {
+    it('rejects silent runner with no output (RC-D empty-command trap)', () => {
+      // History: this case used to be accepted "for leniency", but it IS the
+      // empty-command trap (e.g. `eval "$UNBOUND_VAR"` → exits 0, prints nothing).
+      // The wedge that followed (false GREEN advanced the task; next-task scope
+      // hook then blocked edits to the still-unwritten source) made tickets
+      // unrecoverable via /work. Real test runners always emit something.
       runCli('init TEST-GRN-SILENT', homeDir);
       const statePath = path.join(
         homeDir,
@@ -285,10 +297,20 @@ describe('tdd-phase-state CLI', () => {
       ];
       fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
 
-      // Silent runner: exit 0, no summary output → allow (lenient on format).
-      const silentScript = createExitScript(scriptDir, 0);
-      const { exitCode } = runCli(`record-green TEST-GRN-SILENT --cmd "${silentScript}"`, homeDir);
-      assert.strictEqual(exitCode, 0);
+      // Inline truly-silent script (createExitScript always emits a token now;
+      // this test specifically wants empty stdout AND empty stderr).
+      const silentScript = path.join(scriptDir, 'truly-silent.sh');
+      fs.writeFileSync(silentScript, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+      const { exitCode, stderr } = runCli(
+        `record-green TEST-GRN-SILENT --cmd "${silentScript}"`,
+        homeDir
+      );
+      assert.notStrictEqual(exitCode, 0, 'silent runner should now be rejected');
+      assert.match(
+        stderr,
+        /empty-command trap|NO stdout\/stderr/i,
+        `expected RC-D rejection message, got: ${stderr}`
+      );
     });
   });
 
