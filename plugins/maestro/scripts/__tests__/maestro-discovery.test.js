@@ -1,17 +1,10 @@
-// RED-phase tests for Task 3 (GH-429): widen discover_sessions() and fix
-// ticket_id_for() suffix stripping in maestro-conduct.sh.
+// Discovery parity tests — ported from the old maestro-conduct.sh
+// discover_sessions / ticket_id_for tests onto the JS conduct module.
 //
-// Today discover_sessions() only matches `-work` and ticket_id_for() only
-// strips `-work$`, so helper sessions (`-dev`, `-listen`) are invisible to the
-// conductor and, when surfaced, keep their suffix in the derived ticket id.
-// Task 3 widens both to the `work|dev|listen` suffix set:
-//   - discover_sessions() returns ECHO-1-work, ECHO-2-listen, ECHO-3-dev
-//   - ticket_id_for ECHO-5327-{work,dev,listen} -> ECHO-5327
-//
-// Like the resolve_prefix suite, these tests drive a thin throwaway entrypoint
-// that sources maestro-conduct.sh under MAESTRO_SOURCE_ONLY=1 (suppressing the
-// main poll loop), then exercises the function under test. The fake `tmux`
-// stub (fixtures/tmux) scripts `list-sessions` via FAKE_TMUX_LIST_SESSIONS.
+// Acceptance:
+//   - tmux.listSessions() discovers ECHO-*-work, ECHO-*-dev, ECHO-*-listen
+//   - ticket_id_for strips work|dev|listen suffix → bare ticket id
+//   - Unrelated sessions (`-clip`, prefix mismatch, lowercase) are skipped
 'use strict';
 
 const test = require('node:test');
@@ -20,60 +13,86 @@ const os = require('node:os');
 const path = require('node:path');
 const fs = require('node:fs');
 
-const { runScript } = require('./helpers.js');
-
-const CONDUCT_SH = path.resolve(__dirname, '..', 'maestro-conduct.sh');
+const TMUX_LIB = path.resolve(__dirname, '..', 'lib', 'maestro-conduct', 'tmux.js');
 
 /**
- * Build a thin entrypoint that sources the conductor in source-only mode and
- * then runs the supplied body (a few bash lines) against the in-scope helpers.
- * PREFIX/SESSION_PATTERN are forced so discovery is deterministic and does not
- * depend on the (provider-derived) default.
- * @param {string[]} body
+ * Build a fake `tmux` shim that responds to `ls` with a fixed session list.
+ * Returns the temp dir so the caller can prepend it to PATH.
  */
-function makeEntrypoint(body) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'maestro-discovery-'));
-  const script = path.join(dir, 'run-discovery.sh');
+function makeFakeTmuxDir(sessions) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fake-tmux-ls-'));
+  const script = path.join(dir, 'tmux');
+  const lines = sessions.map((s) => `${s}: 1 windows`).join('\n');
   fs.writeFileSync(
     script,
-    [
-      '#!/usr/bin/env bash',
-      'set -u',
-      'export MAESTRO_SOURCE_ONLY=1',
-      `source "${CONDUCT_SH}"`,
-      // Pin the prefix/pattern so discovery is independent of provider state.
-      'PREFIX=ECHO',
-      'SESSION_PATTERN="^${PREFIX}-[0-9]+-(work|dev|listen)$"',
-      ...body,
-    ].join('\n') + '\n'
+    `#!/usr/bin/env bash\nif [ "$1" = "ls" ]; then\n  cat <<'EOF'\n${lines}\nEOF\nfi\nexit 0\n`,
+    { mode: 0o755 }
   );
-  return script;
+  return dir;
 }
 
-test('discover_sessions widens to work, dev and listen helper sessions', () => {
-  const script = makeEntrypoint(['discover_sessions']);
-  const { stdout, status } = runScript(script, {
-    env: {
-      FAKE_TMUX_LIST_SESSIONS: ['ECHO-1-work', 'ECHO-2-listen', 'ECHO-3-dev'].join('\n'),
-    },
-  });
+function loadFreshTmux(prefix, fakeDir) {
+  // Reset env + module cache so resolveTicketPrefix re-reads TICKET_PREFIX and
+  // the new PATH binding takes effect.
+  delete require.cache[require.resolve(TMUX_LIB)];
+  if (prefix === null) delete process.env.TICKET_PREFIX;
+  else process.env.TICKET_PREFIX = prefix;
+  delete process.env.SESSION_PATTERN;
+  process.env.PATH = `${fakeDir}:${process.env.PATH}`;
+  return require(TMUX_LIB);
+}
 
-  assert.equal(status, 0, `entrypoint should exit 0\nstdout:\n${stdout}`);
-  assert.match(stdout, /^ECHO-1-work$/m);
-  assert.match(stdout, /^ECHO-2-listen$/m);
-  assert.match(stdout, /^ECHO-3-dev$/m);
+test('listSessions discovers ECHO -work, -dev, -listen helpers', () => {
+  const sessions = [
+    'ECHO-1-work',
+    'ECHO-2-dev',
+    'ECHO-3-listen',
+    'ECHO-4-clip', // not a recognized maestro suffix
+    'unrelated', // no prefix
+    'gh-5-work', // wrong case
+  ];
+  const fakeDir = makeFakeTmuxDir(sessions);
+  const tmux = loadFreshTmux('ECHO', fakeDir);
+
+  const discovered = tmux.listSessions();
+  assert.deepStrictEqual(discovered.sort(), ['ECHO-1-work', 'ECHO-2-dev', 'ECHO-3-listen'].sort());
 });
 
-test('ticket_id_for strips the actual session suffix', () => {
-  const script = makeEntrypoint([
-    'echo "work=$(ticket_id_for ECHO-5327-work)"',
-    'echo "dev=$(ticket_id_for ECHO-5327-dev)"',
-    'echo "listen=$(ticket_id_for ECHO-5327-listen)"',
-  ]);
-  const { stdout, status } = runScript(script);
+test('listSessions defaults to GH when TICKET_PREFIX is unset', () => {
+  const sessions = ['GH-7-work', 'GH-7-dev', 'GH-7-listen', 'ECHO-1-work'];
+  const fakeDir = makeFakeTmuxDir(sessions);
+  const tmux = loadFreshTmux(null, fakeDir);
 
-  assert.equal(status, 0, `entrypoint should exit 0\nstdout:\n${stdout}`);
-  assert.match(stdout, /^work=ECHO-5327$/m);
-  assert.match(stdout, /^dev=ECHO-5327$/m);
-  assert.match(stdout, /^listen=ECHO-5327$/m);
+  const discovered = tmux.listSessions();
+  assert.deepStrictEqual(discovered.sort(), ['GH-7-work', 'GH-7-dev', 'GH-7-listen'].sort());
+});
+
+test('ticketIdFor strips work | dev | listen suffix', () => {
+  const tmux = require(TMUX_LIB);
+  assert.strictEqual(tmux.ticketIdFor('ECHO-5327-work'), 'ECHO-5327');
+  assert.strictEqual(tmux.ticketIdFor('ECHO-5327-dev'), 'ECHO-5327');
+  assert.strictEqual(tmux.ticketIdFor('ECHO-5327-listen'), 'ECHO-5327');
+  // Non-maestro suffix: leave unchanged.
+  assert.strictEqual(tmux.ticketIdFor('ECHO-5327-other'), 'ECHO-5327-other');
+});
+
+test('discovery rejects ambiguous compound suffixes like GH-42-dev-work', () => {
+  // Regression: an earlier [A-Z0-9-]+ ticket-id class would greedily consume
+  // "42-dev" and let the suffix group match "-work", classifying a stray
+  // session name as a valid -work ticket. Numeric-only ticket id avoids it.
+  const fakeDir = makeFakeTmuxDir(['GH-42-dev-work', 'GH-42-work']);
+  const tmux = loadFreshTmux(null, fakeDir);
+  const discovered = tmux.listSessions();
+  assert.deepStrictEqual(discovered, ['GH-42-work']);
+});
+
+test('SESSION_PATTERN env overrides the dynamic default', () => {
+  const sessions = ['ECHO-1-work', 'CUSTOM-9'];
+  const fakeDir = makeFakeTmuxDir(sessions);
+  const tmux = loadFreshTmux('ECHO', fakeDir);
+  process.env.SESSION_PATTERN = '^CUSTOM-[0-9]+$';
+
+  const discovered = tmux.listSessions();
+  assert.deepStrictEqual(discovered, ['CUSTOM-9']);
+  delete process.env.SESSION_PATTERN;
 });

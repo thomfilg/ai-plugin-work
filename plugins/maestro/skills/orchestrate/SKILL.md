@@ -27,7 +27,7 @@ Examples:
    - Create worktree at `${WORKTREES_BASE}/${REPO_NAME}-<TICKET>` on a new branch
    - Launch tmux session `<TICKET>-work` running `claude --dangerously-skip-permissions '/work <TICKET>'` in that worktree
    - Idempotent — skips tickets whose worktree already exists
-2. Start the conductor via `scripts/maestro-conduct.sh` (pipe through the Monitor tool so each emitted line becomes a chat notification).
+2. Start the orchestrator via `node scripts/maestro-conduct.js --daemon` (pipe through the Monitor tool so each emitted line becomes a chat notification). The orchestrator handles all detection (questions, silence/auto-restart, hung spinner, phase budget, unaddressed PR comments).
 3. Print the initial pulse snapshot.
 
 ## After launch
@@ -43,5 +43,5 @@ Examples:
 ## Anti-patterns
 
 - Do **not** kill sessions belonging to other tickets — scoped per `<TICKET>-work` only.
-- Do **not** auto-merge PRs without operator approval; the conductor does not call `gh pr merge`.
+- Do **not** auto-merge PRs without operator approval; the orchestrator does not call `gh pr merge`.
 - The inbox at `/tmp/claude-agent-inbox/<TICKET>.log` is human-facing; agents do not read it. Talk to agents via `tmux send-keys`.

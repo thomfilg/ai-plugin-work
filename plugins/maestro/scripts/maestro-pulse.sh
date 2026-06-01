@@ -13,9 +13,12 @@ else
   printf "  %-15s %-30s %-12s\n" "SESSION" "SPINNER" "TOKENS"
   while IFS= read -r s; do
     pane=$(tmux capture-pane -t "$s" -p 2>/dev/null) || continue
-    # Keep the spinner glyph set in sync with maestro-conduct.sh's
-    # pane_has_live_spinner() so both scripts agree on what "spinning" looks like.
-    spinner=$(echo "$pane" | grep -oE '^[●●○◯•*✻✶✢·✽✣✤✱⏵⏶] [A-Z][a-z]+ing…[^|]*' | tail -1 | head -c 28)
+    # Keep the spinner pattern in sync with detectors/silence.js LIVE_SPINNER_RE
+    # so pulse and the conduct.js silence detector agree on what "spinning"
+    # looks like: glyph + gerund "-ing" + ellipsis + open paren (the timer
+    # block). Without all four anchors a stale "Cooked for 40m" line or a
+    # non-spinner status line could be misreported here as an active session.
+    spinner=$(echo "$pane" | grep -oE '^[●●○◯•*✻✶✢·✽✣✤✱⏵⏶] [A-Z][a-z]+ing…[[:space:]]*\([^|]*' | tail -1 | head -c 28)
     tokens=$(echo "$pane" | grep -oE '[0-9]+ tokens' | tail -1)
     printf "  %-15s %-30s %-12s\n" "$s" "${spinner:-IDLE}" "${tokens:-?}"
   done <<<"$sessions"

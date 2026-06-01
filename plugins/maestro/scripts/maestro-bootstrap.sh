@@ -53,9 +53,9 @@ CLAUDE_BIN="${CLAUDE_BIN:-claude}"
 SKILL_NAME="${SKILL_NAME:-work}"
 
 # Provider-derived session-name / ticket prefix. resolve_prefix() (sets global
-# PREFIX, fail-open to "GH") is shared with maestro-conduct.sh via
-# lib/resolve-prefix.sh so bootstrap and the conductor can never drift to
-# different prefixes for the same repository.
+# PREFIX, fail-open to "GH"). maestro-conduct.js derives the same prefix
+# independently in tmux.js (TICKET_PREFIX env / git-remote parsing) and also
+# falls open to "GH", so the two paths can never drift on a clean checkout.
 _MAESTRO_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib/resolve-prefix.sh
 . "$_MAESTRO_SCRIPT_DIR/lib/resolve-prefix.sh"

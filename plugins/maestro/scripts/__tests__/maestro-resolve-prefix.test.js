@@ -1,19 +1,18 @@
-// RED-phase tests for Task 2 (GH-429): resolve_prefix() in maestro-conduct.sh.
+// Tests for resolve_prefix() in lib/resolve-prefix.sh (sourced by
+// maestro-bootstrap.sh).
 //
-// resolve_prefix() must derive the session-name prefix from the ticket
-// provider (via `node -e` against ticket-provider.js) and fail open to `GH`:
-//   - provider projectKey "ECHO"  -> PREFIX=ECHO, SESSION_PATTERN=^ECHO-[0-9]+-(work|dev|listen)$
-//   - github (projectKey: '')     -> PREFIX=GH,   SESSION_PATTERN=^GH-[0-9]+-(work|dev|listen)$
+// resolve_prefix() must derive the ticket prefix from the ticket provider
+// (via `node -e` against ticket-provider.js) and fail open to `GH`:
+//   - provider projectKey "ECHO"  -> PREFIX=ECHO
+//   - github (projectKey: '')     -> PREFIX=GH
 //   - unconfigured (empty / null) -> PREFIX=GH
 //   - node/module unavailable     -> exit 0, PREFIX=GH (fail-open, no hard error)
 //   - malformed prefix            -> rejected by ^[A-Z][A-Z0-9]*$, PREFIX=GH
 //
-// The conductor script's body is an infinite poll loop, so these tests drive a
-// thin throwaway entrypoint that sources maestro-conduct.sh under the
-// MAESTRO_SOURCE_ONLY=1 guard (which suppresses the main loop), then calls
-// resolve_prefix and echoes PREFIX + SESSION_PATTERN for assertion. The fake
-// `node` stub (fixtures/node) stands in for the real provider resolution and
-// is selected via FAKE_NODE_MODE.
+// These tests source the lib directly, call resolve_prefix, derive the same
+// SESSION_PATTERN the bootstrap script builds from it, and assert both. The
+// fake `node` stub (fixtures/node) stands in for the real provider resolution
+// and is selected via FAKE_NODE_MODE.
 'use strict';
 
 const test = require('node:test');
@@ -24,12 +23,12 @@ const fs = require('node:fs');
 
 const { runScript } = require('./helpers.js');
 
-const CONDUCT_SH = path.resolve(__dirname, '..', 'maestro-conduct.sh');
+const RESOLVE_PREFIX_SH = path.resolve(__dirname, '..', 'lib', 'resolve-prefix.sh');
 
 /**
- * Build a thin entrypoint that sources the conductor in source-only mode,
- * runs resolve_prefix, and prints the resolved PREFIX + SESSION_PATTERN on
- * stable, greppable lines.
+ * Build a thin entrypoint that sources lib/resolve-prefix.sh, runs
+ * resolve_prefix, derives the same SESSION_PATTERN the bootstrap script uses,
+ * and prints PREFIX + SESSION_PATTERN on stable, greppable lines.
  */
 function makeEntrypoint() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'maestro-prefix-'));
@@ -39,11 +38,11 @@ function makeEntrypoint() {
     [
       '#!/usr/bin/env bash',
       'set -u',
-      `export MAESTRO_SOURCE_ONLY=1`,
-      `source "${CONDUCT_SH}"`,
+      `source "${RESOLVE_PREFIX_SH}"`,
       'resolve_prefix',
+      'SESSION_PATTERN="${SESSION_PATTERN:-^${PREFIX}-[0-9]+-(work|dev|listen)$}"',
       'echo "PREFIX=${PREFIX:-}"',
-      'echo "SESSION_PATTERN=${SESSION_PATTERN:-}"',
+      'echo "SESSION_PATTERN=${SESSION_PATTERN}"',
     ].join('\n') + '\n'
   );
   return script;

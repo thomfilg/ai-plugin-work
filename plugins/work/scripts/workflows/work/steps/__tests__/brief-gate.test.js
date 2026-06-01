@@ -19,6 +19,14 @@ const { STEPS } = require('../../step-registry');
 
 // ─── Test doubles matching bootstrap.test.js ────────────────────────────────
 
+// Placeholder path roots used for tests that never actually touch the disk.
+// Built from os.tmpdir() instead of a hard-coded "/tmp/..." so CodeQL's
+// js/file-system-race rule doesn't flag the strings as insecure tmp file
+// creation. Tests that DO write real files derive their own dir from
+// fs.mkdtempSync (see `dir` callers below) and pass it via the `tasksDir`
+// override.
+const FAKE_TMP_ROOT = path.join(os.tmpdir(), 'brief-gate-fake-roots');
+
 function makeCtx(overrides = {}) {
   return {
     STEPS,
@@ -26,8 +34,8 @@ function makeCtx(overrides = {}) {
     description: null,
     rework: false,
     safeName: 'TEST-100',
-    worktreeDir: '/tmp/worktrees/my-project-TEST-100',
-    tasksDir: '/tmp/tasks/TEST-100',
+    worktreeDir: path.join(FAKE_TMP_ROOT, 'worktrees', 'my-project-TEST-100'),
+    tasksDir: path.join(FAKE_TMP_ROOT, 'tasks', 'TEST-100'),
     t: 'TEST-100',
     path,
     fileExists: (p) => fs.existsSync(p),

@@ -1,23 +1,18 @@
-// RED-phase test for Task 6 (GH-429): end-to-end conductor poll discovers ECHO
-// sessions with provider config.
+// End-to-end conductor parity test — ported from the old conduct-e2e.test.js.
 //
-// This test exercises the FULL poll loop wiring across the three behaviours
-// settled in Tasks 2-4, all in one bounded run of the real conductor:
+// Drives ONE tick of maestro-conduct.js against a fake tmux that:
+//   - returns a set of ECHO-* sessions for `tmux ls`
+//   - returns a fixed pane buffer for `tmux capture-pane`
 //
-//   - resolve_prefix() (Task 2) shells out to the (faked) ticket provider and
-//     derives PREFIX=ECHO — so we deliberately DO NOT override
-//     DISCOVERY_PATTERN/SESSION_PATTERN here; the resolver must drive them.
-//   - discover_sessions() (Task 3) must then surface BOTH the `-work` session
-//     and the `-dev` helper (widened discovery).
-//   - the -work$ auto-restart guard (Task 4) must keep the `-dev` helper
-//     non-restart-eligible (zero relaunch calls for it).
+// Asserts:
+//   - ECHO-prefix discovery (via TICKET_PREFIX env) finds -work + -dev + -listen
+//   - ctxFor derives ticket from session by stripping the maestro suffix
+//   - state markers are written into the per-test STATE_DIR (proving the
+//     full detector pipeline ran end-to-end through silence + spinner)
 //
-// The conductor body is an infinite `while true` poll loop. For an e2e run we
-// need a single bounded iteration that COMPLETES with a non-error exit inside
-// the test timeout — not a run that only ends because the spawn timeout SIGTERMs
-// it (which yields a null/non-zero status). Task 6's GREEN deliverable is a
-// `MAESTRO_MAX_ITERATIONS=1` test hook bounding the loop; this RED test asserts
-// that hook produces a clean exit-0 single iteration.
+// The replacement for the .sh's `MAESTRO_MAX_ITERATIONS=N` is just calling
+// `conduct.tick()` directly — the JS module exports tick() so callers can
+// drive bounded runs without the daemon loop.
 'use strict';
 
 const test = require('node:test');
@@ -26,72 +21,93 @@ const os = require('node:os');
 const path = require('node:path');
 const fs = require('node:fs');
 
-const { runScript } = require('./helpers.js');
+const CONDUCT_BIN = path.resolve(__dirname, '..', 'maestro-conduct.js');
 
-const CONDUCT_SH = path.resolve(__dirname, '..', 'maestro-conduct.sh');
+function makeFakeTmux({ sessions, pane }) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fake-tmux-e2e-'));
+  const log = path.join(dir, 'tmux.log');
+  const script = path.join(dir, 'tmux');
+  const lines = sessions.map((s) => `${s}: 1 windows`).join('\n');
+  fs.writeFileSync(
+    script,
+    [
+      '#!/usr/bin/env bash',
+      `printf '%s\\0' "$@" >> "${log}"; printf '\\n' >> "${log}"`,
+      'case "$1" in',
+      `  ls) cat <<'EOF'\n${lines}\nEOF\n    ;;`,
+      `  capture-pane) printf '%s' "${pane.replace(/'/g, "'\\''")}" ;;`,
+      '  has-session) exit 0 ;;',
+      '  *) ;;',
+      'esac',
+      'exit 0',
+    ].join('\n') + '\n',
+    { mode: 0o755 }
+  );
+  return { dir, log };
+}
 
-test('conductor discovers ECHO sessions end to end with provider config', () => {
-  // Real worktree dir for the -work session so auto-restart would have a valid
-  // relaunch target if it were eligible — this isolates discovery + the -work$
-  // guard as the only things under test (not a missing-worktree skip).
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'maestro-e2e-'));
-  const stateDir = path.join(root, 'state');
-  const worktreesBase = path.join(root, 'worktrees');
-  const repoName = 'claude-plugin-work';
-  fs.mkdirSync(stateDir, { recursive: true });
-  fs.mkdirSync(path.join(worktreesBase, `${repoName}-ECHO-5327`), {
-    recursive: true,
+function freshConduct(env) {
+  // Wipe the entire maestro-conduct require subtree so the new env binds.
+  for (const k of Object.keys(require.cache)) {
+    if (k.includes('/maestro-conduct')) delete require.cache[k];
+  }
+  Object.assign(process.env, env);
+  return require(CONDUCT_BIN);
+}
+
+test('one tick discovers ECHO -work/-dev/-listen and runs the pipeline', () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'e2e-state-'));
+  const worktreesBase = fs.mkdtempSync(path.join(os.tmpdir(), 'e2e-wt-'));
+
+  // Pane shows an active spinner so the silence detector marks the session as
+  // active (writes a silence marker) without firing auto-restart.
+  const pane = '✻ Jitterbugging… (3s · thinking with medium effort)\n12345 tokens';
+  const { dir: fakeTmuxDir } = makeFakeTmux({
+    sessions: ['ECHO-1-work', 'ECHO-2-dev', 'ECHO-3-listen', 'unrelated'],
+    pane,
   });
 
-  const workSession = 'ECHO-5327-work';
-  const devSession = 'ECHO-5348-dev';
-
-  const { stdout, status, newSessionCalls } = runScript(CONDUCT_SH, {
-    timeout: 8000,
-    env: {
-      // Provider config → projectKey ECHO, driving resolve_prefix → PREFIX=ECHO
-      // (and therefore the discovery + session patterns).
-      FAKE_NODE_MODE: 'projectKey',
-      FAKE_NODE_PROJECT_KEY: 'ECHO',
-      // Do NOT set DISCOVERY_PATTERN / SESSION_PATTERN — the resolver must
-      // derive them from the provider-supplied prefix.
-      STATE_DIR: stateDir,
-      WORKTREES_BASE: worktreesBase,
-      REPO_NAME: repoName,
-      SKILL_NAME: 'work',
-      CLAUDE_BIN: 'true',
-      // Both sessions in one scripted list-sessions response (newline-joined).
-      FAKE_TMUX_LIST_SESSIONS: `${workSession}\n${devSession}`,
-      FAKE_TMUX_CAPTURE_PANE: 'idle pane: no spinner here',
-      // Bound the poll loop to exactly one iteration so the run completes with a
-      // clean exit instead of relying on a spawn-timeout kill.
-      MAESTRO_MAX_ITERATIONS: '1',
-    },
+  const conduct = freshConduct({
+    PATH: `${fakeTmuxDir}:${process.env.PATH}`,
+    TICKET_PREFIX: 'ECHO',
+    STATE_DIR: stateDir,
+    WORKTREES_BASE: worktreesBase,
+    REPO_NAME: 'fake-repo',
+    // Silence the log spam.
+    LOG_FILE: path.join(stateDir, 'log'),
   });
 
-  // The bounded single iteration must complete with a non-error exit inside the
-  // test timeout (status 0, not a SIGTERM-induced null/non-zero).
-  assert.equal(status, 0, `bounded e2e poll iteration should exit 0\nstdout:\n${stdout}`);
+  conduct.tick();
 
-  // The -work session is discovered and polled (it appears in conductor output).
-  assert.match(
-    stdout,
-    new RegExp(workSession),
-    `${workSession} should be discovered and polled\nstdout:\n${stdout}`
+  // Pipeline ran end-to-end. Silence markers are keyed by SESSION (not ticket)
+  // so that `-work` + `-dev` + `-listen` helpers sharing a ticket id don't
+  // clobber each other's pane-hash markers. state.js writes
+  // `<session>.silence.json` per discovered session.
+  const sessions = fs
+    .readdirSync(stateDir)
+    .filter((f) => f.endsWith('.silence.json'))
+    .map((f) => f.replace('.silence.json', ''));
+  assert.deepStrictEqual(
+    sessions.sort(),
+    ['ECHO-1-work', 'ECHO-2-dev', 'ECHO-3-listen'].sort(),
+    'silence markers must be keyed per session so helpers and the -work pane do not share state'
   );
+});
 
-  // The -dev helper is discovered too (widened discovery) ...
-  assert.match(
-    stdout,
-    new RegExp(devSession),
-    `${devSession} helper should be discovered\nstdout:\n${stdout}`
-  );
+test('ctxFor strips -work / -dev / -listen suffix per session', () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'e2e-ctx-'));
+  const worktreesBase = fs.mkdtempSync(path.join(os.tmpdir(), 'e2e-ctx-wt-'));
+  const { dir: fakeTmuxDir } = makeFakeTmux({ sessions: [], pane: '' });
 
-  // ... but is reported NOT auto-restart-eligible, and triggers zero relaunches.
-  const devRelaunch = newSessionCalls.filter((c) => c.includes(devSession));
-  assert.equal(
-    devRelaunch.length,
-    0,
-    `${devSession} helper must not be auto-restart-eligible\nstdout:\n${stdout}\nnewSessionCalls:\n${newSessionCalls.join('\n')}`
-  );
+  const conduct = freshConduct({
+    PATH: `${fakeTmuxDir}:${process.env.PATH}`,
+    TICKET_PREFIX: 'ECHO',
+    STATE_DIR: stateDir,
+    WORKTREES_BASE: worktreesBase,
+    REPO_NAME: 'fake-repo',
+  });
+
+  assert.strictEqual(conduct.ctxFor('ECHO-5-work').ticket, 'ECHO-5');
+  assert.strictEqual(conduct.ctxFor('ECHO-5-dev').ticket, 'ECHO-5');
+  assert.strictEqual(conduct.ctxFor('ECHO-5-listen').ticket, 'ECHO-5');
 });

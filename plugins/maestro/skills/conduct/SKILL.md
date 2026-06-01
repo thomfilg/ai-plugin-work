@@ -7,9 +7,9 @@ allowed-tools: Bash
 
 # /conduct
 
-Start the conductor on whatever `${PREFIX}-*-work` tmux sessions are already running. Use this when you bootstrapped agents manually (or via `/orchestrate`) but don't have the monitor going.
+Start the orchestrator on whatever `${PREFIX}-*-work` tmux sessions are already running. Use this when you bootstrapped agents manually (or via `/orchestrate`) but don't have the monitor going.
 
-`${PREFIX}` is the **provider-derived ticket prefix**: the conductor resolves it via `plugins/work/scripts/workflows/lib/ticket-provider.js` (`getProviderConfig` → `projectKey`). Resolution is fail-open — GitHub (`projectKey: ''`), an unconfigured provider (`null`), a node failure, or a value that fails the `^[A-Z][A-Z0-9]*$` check all fall back to `GH`. So an `ECHO` provider watches `ECHO-<N>-work`, while GitHub/unconfigured stays `GH-<N>-work`.
+`${PREFIX}` is the **provider-derived ticket prefix**: resolved via `plugins/work/scripts/workflows/lib/ticket-provider.js` (`getProviderConfig` → `projectKey`). Resolution is fail-open — GitHub (`projectKey: ''`), an unconfigured provider (`null`), a node failure, or a value that fails the `^[A-Z][A-Z0-9]*$` check all fall back to `GH`. So an `ECHO` provider watches `ECHO-<N>-work`, while GitHub/unconfigured stays `GH-<N>-work`.
 
 ## Usage
 
@@ -19,25 +19,30 @@ Start the conductor on whatever `${PREFIX}-*-work` tmux sessions are already run
 
 ## What it does
 
-Runs `plugins/maestro/scripts/maestro-conduct.sh` in the background (typically piped through Claude Code's Monitor tool so each emitted line is a notification).
+Runs `node plugins/maestro/scripts/maestro-conduct.js --daemon` in the background (typically piped through Claude Code's Monitor tool so each emitted line is a notification).
 
-Per poll cycle (every `POLL_INTERVAL_SEC`, default 60s):
+Per tick (every `TICK_SEC`, default 60s) each `${PREFIX}-*-work` session runs through this detector pipeline (per-phase via `phase-registry.js`):
 
-- **Active** = live spinner glyph + ellipsis in the pane, OR token count moved, OR pane hash moved. (Static text containing the word "tokens" alone does NOT count as active — that's been a long-standing false-positive.)
-- **Question** = pane shows `Do you want to proceed?` / `Yes/No` / `Choose:` style prompt → emit `[<session>] QUESTION-DETECTED: …`
-- **Idle** = neither active nor a question → emit `[<session>] IDLE: <Ns> silent (restart at <LIMIT>s)`
-- **Auto-restart** = after `SILENCE_LIMIT_SEC` of real silence (default 300s), kill the session and relaunch `claude --dangerously-skip-permissions '/work <TICKET>'`. `/work` resumes from `.work-state.json`. Only `-work` sessions are restart-eligible.
-
-Discovery widens to `${PREFIX}-[0-9]+-(work|dev|listen)`, so `-dev`/`-listen` helper sessions surface informationally — they are reported but never auto-restarted (only `-work` sessions are relaunched with `/work <TICKET>`).
+- **Question** — pane shows `Do you want to proceed?` / menu prompt → emit `QUESTION-DETECTED`. Always wins; no nudges while the agent is waiting on the operator.
+- **Silence / auto-restart** — pane content is static (no live spinner, no token change, no hash change) for `SILENCE_LIMIT_SEC` (default 300s) → kill the session and relaunch `claude --dangerously-skip-permissions '/work <TICKET>'`. `/work` resumes from `.work-state.json`. Only `-work` sessions are restart-eligible; `-dev`/`-listen` helpers are surfaced informationally.
+- **Spinner hang** — Claude TUI spinner stuck >threshold → Esc + nudge (cooldown so we don't flood the pane).
+- **Phase budget stall** — current `/work` step has been current longer than `phaseFor(phase).budgetMin` → soft → interrupt → alert escalation.
+- **Commit stall** (implement phase only) — no commits in N min, surfaces as info log.
+- **PR comments** (follow_up phase only) — unaddressed bot review comments at CURRENT diff positions, HEAD unchanged → soft → interrupt → alert.
 
 ## Env
 
 | Var | Default | Effect |
 |-----|---------|--------|
 | `SILENCE_LIMIT_SEC` | `300` | Real-silence threshold before auto-restart |
-| `POLL_INTERVAL_SEC` | `60` | Poll cadence |
-| `SESSION_PATTERN` | `^${PREFIX}-[0-9]+-(work\|dev\|listen)$` | Sessions to discover and watch. `${PREFIX}` is the provider-derived prefix (via `ticket-provider.js`, fail-open to `GH`); GitHub/unconfigured resolves to `^GH-[0-9]+-(work\|dev\|listen)$`. The default already includes `-dev`/`-listen` helpers; only `-work` is auto-restart-eligible. |
+| `TICK_SEC` | `60` | Tick cadence |
+| `CLAUDE_BIN` | `claude` | Binary used for auto-restart |
+| `SKILL_NAME` | `work` | Skill name passed to the auto-restart command |
+| `STATE_DIR` | `/tmp/maestro-conduct-state` | Per-ticket marker location |
+| `LOG_FILE` | `/tmp/maestro-conduct.log` | Where event lines are appended |
+| `WORKTREES_BASE` | `$HOME/worktrees` | Where worktrees live (must match bootstrap) |
+| `REPO_NAME` | `claude-plugin-work` | Worktree dirname suffix (must match bootstrap) |
 
 ## Stop
 
-The conductor exits on TaskStop or session end. Killing it never touches the agent sessions.
+The orchestrator exits on TaskStop or session end. Killing it never touches the agent sessions.

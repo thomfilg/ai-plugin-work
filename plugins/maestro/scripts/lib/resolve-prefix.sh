@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-# Shared provider-prefix resolver, sourced by maestro-conduct.sh and
-# maestro-bootstrap.sh so the two can never derive a different prefix for the
-# same repository.
+# Shared provider-prefix resolver, sourced by maestro-bootstrap.sh.
+# (maestro-conduct.js derives the prefix independently in tmux.js via
+# TICKET_PREFIX env / `git remote` parsing; both paths fall open to "GH" so
+# they can never disagree on a clean checkout.)
 #
 # Derive the session-name / ticket prefix from the ticket provider
 # (ticket-provider.js) instead of hardcoding "GH". Fail-open: any node/module
