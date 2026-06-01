@@ -286,29 +286,28 @@ function autoCompleteCheckpointTasks(state, ticketId) {
 
   if (!matchedVerdict) return closed;
 
-  // Per-task linkage with token-boundary matching. A plain `includes()` check
-  // would accept `task_1` as a hit when the report only names `task_10`, since
-  // one is a prefix of the other — defeating the security intent.
-  // We require the id/title to appear with a non-word-character (or string
-  // boundary) on each side. JS `\b` treats `_` as a word char and so does not
-  // separate `task_1` from `task_10`; we use an explicit `[^A-Za-z0-9_]`
-  // boundary instead.
+  // Per-task linkage with id-only token-boundary matching.
+  //
+  // We deliberately do NOT match on titles. Titles are free-form prose
+  // ("Refactor", "Tests", "Wrap-up") that can collide with unrelated mentions
+  // in the report — a checkpoint titled "Refactor" would auto-close on any
+  // APPROVED report that happened to mention refactoring. Task ids
+  // (`task_1`, `task_2`, ...) are unambiguous synthetic tokens.
+  //
+  // JS `\b` treats `_` as a word char and so does NOT separate `task_1`
+  // from `task_10`; we use an explicit `[^A-Za-z0-9_]` boundary instead so
+  // a report naming only `task_10` does not auto-close `task_1`.
   const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const namesEntry = (token) => {
-    if (!token) return false;
-    const re = new RegExp(`(^|[^A-Za-z0-9_])${escapeRe(token)}([^A-Za-z0-9_]|$)`);
-    return re.test(reportContent);
-  };
   for (const entry of state.tasksMeta.tasks) {
     if (!entry || entry.kind !== 'checkpoint' || entry.status === 'completed') continue;
-    const idHit = namesEntry(entry.id);
-    const titleHit = namesEntry(entry.title);
-    if (!idHit && !titleHit) continue;
+    if (!entry.id) continue;
+    const re = new RegExp(`(^|[^A-Za-z0-9_])${escapeRe(entry.id)}([^A-Za-z0-9_]|$)`);
+    if (!re.test(reportContent)) continue;
     entry.status = 'completed';
     closed.push({
       taskId: entry.id,
       title: entry.title || entry.id,
-      reason: `${matchedVerdict} completion.check.md names ${idHit ? entry.id : entry.title}`,
+      reason: `${matchedVerdict} completion.check.md names ${entry.id}`,
       timestamp: new Date().toISOString(),
     });
   }

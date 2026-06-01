@@ -1006,7 +1006,7 @@ describe('work-state.js', () => {
       const descriptors = [
         { num: 1, type: 'frontend' },
         { num: 2, type: 'backend' },
-        { num: 3, type: 'docs' },
+        { num: 3, type: 'e2e' },
       ];
       const { result, code, stderr } = await runWorkState(['task-init', TICKET_STDIN], {
         stdin: JSON.stringify(descriptors),
@@ -1017,7 +1017,7 @@ describe('work-state.js', () => {
       assert.equal(result.tasksMeta.tasks.length, 3);
       assert.equal(result.tasksMeta.tasks[0].kind, 'frontend');
       assert.equal(result.tasksMeta.tasks[1].kind, 'backend');
-      assert.equal(result.tasksMeta.tasks[2].kind, 'docs');
+      assert.equal(result.tasksMeta.tasks[2].kind, 'e2e');
     });
 
     it('ignores TASK_INIT_DESCRIPTORS env var (dropped as security hardening)', async () => {
@@ -1039,6 +1039,29 @@ describe('work-state.js', () => {
       // Legacy count path: no `kind` set on entries even though env was present.
       assert.equal(result.tasksMeta.tasks[0].kind, undefined);
       assert.equal(result.tasksMeta.tasks[1].kind, undefined);
+    });
+
+    it('drops unknown kinds (allowlist enforcement)', async () => {
+      // Security review on PR #470: kinds carry security semantics
+      // (`checkpoint` auto-closes via completion.check.md). initTasksMeta
+      // must only persist values from the canonical VALID_KINDS set, so a
+      // future feature that auto-acts on a new kind cannot be triggered by
+      // an unknown string sneaking through tasks.md.
+      const TICKET_UNKNOWN_KIND = 'TEST-UNKNOWN-KIND-001';
+      cleanupTempWorkState(TICKET_UNKNOWN_KIND);
+      await runWorkState(['init', TICKET_UNKNOWN_KIND]);
+      const descriptors = [
+        { num: 1, type: 'backend' },
+        { num: 2, type: 'totally-made-up-kind' },
+      ];
+      const { result, code } = await runWorkState(['task-init', TICKET_UNKNOWN_KIND], {
+        stdin: JSON.stringify(descriptors),
+      });
+      assert.equal(code, 0);
+      assert.equal(result.tasksMeta.tasks[0].kind, 'backend');
+      assert.equal(result.tasksMeta.tasks[1].kind, undefined,
+        'unknown kind must not be persisted');
+      cleanupTempWorkState(TICKET_UNKNOWN_KIND);
     });
 
     it('persists kind for checkpoint type', async () => {
