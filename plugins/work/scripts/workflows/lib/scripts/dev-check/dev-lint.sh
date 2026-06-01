@@ -36,7 +36,16 @@ case "$LINTER" in
     fi
     ;;
   eslint)
-    echo "$CHANGED_FILES" | (cd "$ROOT_DIR" && xargs npx eslint)
+    ESLINT_CONFIG_ARGS=()
+    if [ -f "$ROOT_DIR/eslint.config.js" ] || [ -f "$ROOT_DIR/eslint.config.mjs" ] || [ -f "$ROOT_DIR/eslint.config.cjs" ] || [ -f "$ROOT_DIR/eslint.config.ts" ] || [ -f "$ROOT_DIR/eslint.config.mts" ] || [ -f "$ROOT_DIR/eslint.config.cts" ]; then
+      :
+    elif [ -f "$SCRIPT_DIR/../quality/configs/quality-lint-rules.js" ]; then
+      ESLINT_CONFIG_ARGS=(--config "$SCRIPT_DIR/../quality/configs/quality-lint-rules.js")
+    else
+      printf '\033[33m%s\033[0m\n' "dev-lint: no eslint flat config found — skipping lint" >&2
+      exit 0
+    fi
+    echo "$CHANGED_FILES" | (cd "$ROOT_DIR" && xargs npx eslint "${ESLINT_CONFIG_ARGS[@]}")
     ;;
   biome)
     echo "$ABS_FILES" | xargs npx biome lint
