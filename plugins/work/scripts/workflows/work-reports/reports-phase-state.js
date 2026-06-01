@@ -41,7 +41,7 @@ const cli = createPhaseStateCli({
   },
   allowedAgents: ['reports-writer'],
   stateFileName: 'reports-phase.json',
-  scriptName: 'reports-phase-state.js',
+  scriptFilename: __filename,
 });
 
 if (require.main === module) {

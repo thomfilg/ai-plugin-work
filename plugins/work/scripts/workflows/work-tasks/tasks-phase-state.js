@@ -41,7 +41,7 @@ const cli = createPhaseStateCli({
   },
   allowedAgents: ['split-in-tasks'],
   stateFileName: 'tasks-phase.json',
-  scriptName: 'tasks-phase-state.js',
+  scriptFilename: __filename,
 });
 
 if (require.main === module) {

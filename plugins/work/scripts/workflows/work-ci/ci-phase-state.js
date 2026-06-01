@@ -41,7 +41,7 @@ const {
   isCiPhase,
 } = require('./ci-phase-registry');
 
-const SCRIPT_NAME = 'ci-phase-state.js';
+const SCRIPT_NAME = path.basename(__filename);
 const SYNTHETIC_AGENT = 'ci-runner';
 const GATED_SUBCOMMANDS = new Set(['init', 'record', 'transition']);
 
@@ -56,7 +56,7 @@ const cli = createPhaseStateCli({
   },
   allowedAgents: [SYNTHETIC_AGENT],
   stateFileName: 'ci-phase.json',
-  scriptName: SCRIPT_NAME,
+  scriptFilename: __filename,
 });
 
 function mintSyntheticToken(ticketId) {

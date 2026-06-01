@@ -41,7 +41,7 @@ const cli = createPhaseStateCli({
   },
   allowedAgents: ['brief-writer'],
   stateFileName: 'brief-phase.json',
-  scriptName: 'brief-phase-state.js',
+  scriptFilename: __filename,
 });
 
 if (require.main === module) {

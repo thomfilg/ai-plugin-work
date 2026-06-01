@@ -22,7 +22,7 @@
  *     },
  *     allowedAgents: string[],
  *     stateFileName: string,
- *     scriptName:    string,
+ *     scriptFilename: string, // pass `__filename` from the wrapper
  *   }) => { main(argv), PHASES, run }
  *
  * State-file shape (frozen — must match the un-refactored baseline):
@@ -101,6 +101,11 @@ function writeState(stateFileName, ticketId, state) {
 }
 
 function verifyToken(scriptName, allowedAgents, expectedTicketId) {
+  // Pass ticket id so consumeToken hits the per-ticket keyed path
+  // (/tmp/.claude-write-tokens/<script-basename>.<TICKET>). The PreToolUse
+  // hook mints ONLY the keyed path post-suffix-strip — checking the legacy
+  // unkeyed path here would fail every time for any agent in a worktree
+  // session. (Ported from brief-phase-state.js pre-factory comment.)
   const token = consumeToken(scriptName, expectedTicketId);
   if (!token) {
     errorExit("No valid write token found. This script can only be called through Claude Code's agent system.");
@@ -223,7 +228,7 @@ function createPhaseStateCli(opts) {
   if (!opts || typeof opts !== 'object') {
     throw new Error('createPhaseStateCli: options object required');
   }
-  const { phaseRegistry, allowedAgents, stateFileName, scriptName } = opts;
+  const { phaseRegistry, allowedAgents, stateFileName, scriptFilename } = opts;
   if (!phaseRegistry) throw new Error('createPhaseStateCli: phaseRegistry required');
   if (!Array.isArray(allowedAgents) || allowedAgents.length === 0) {
     throw new Error('createPhaseStateCli: allowedAgents must be a non-empty array');
@@ -231,10 +236,15 @@ function createPhaseStateCli(opts) {
   if (!stateFileName || typeof stateFileName !== 'string') {
     throw new Error('createPhaseStateCli: stateFileName required');
   }
-  if (!scriptName || typeof scriptName !== 'string') {
-    throw new Error('createPhaseStateCli: scriptName required');
+  // Derive the script identity from the wrapper's __filename rather than a
+  // hand-typed string. This eliminates the typo foot-gun where a wrapper
+  // could mis-type its own filename (e.g. underscore vs dash) and silently
+  // look up tokens under the wrong key.
+  if (!scriptFilename || typeof scriptFilename !== 'string') {
+    throw new Error('createPhaseStateCli: scriptFilename (pass __filename) required');
   }
-  const main = (argv) => runCli(opts, argv);
+  const resolvedOpts = { ...opts, scriptName: path.basename(scriptFilename) };
+  const main = (argv) => runCli(resolvedOpts, argv);
   return { main, run: main, PHASES: phaseRegistry.PHASE_ORDER };
 }
 

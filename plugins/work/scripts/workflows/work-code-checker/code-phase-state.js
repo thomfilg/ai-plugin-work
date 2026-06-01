@@ -41,7 +41,7 @@ const cli = createPhaseStateCli({
   },
   allowedAgents: ['code-checker'],
   stateFileName: 'code-phase.json',
-  scriptName: 'code-phase-state.js',
+  scriptFilename: __filename,
 });
 
 if (require.main === module) {

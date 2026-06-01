@@ -41,7 +41,7 @@ const cli = createPhaseStateCli({
   },
   allowedAgents: ['qa-feature-tester', 'qa-api-tester'],
   stateFileName: 'qa-phase.json',
-  scriptName: 'qa-phase-state.js',
+  scriptFilename: __filename,
 });
 
 if (require.main === module) {

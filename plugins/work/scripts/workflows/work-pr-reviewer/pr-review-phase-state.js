@@ -41,7 +41,7 @@ const cli = createPhaseStateCli({
   },
   allowedAgents: ['pr-reviewer'],
   stateFileName: 'pr-review-phase.json',
-  scriptName: 'pr-review-phase-state.js',
+  scriptFilename: __filename,
 });
 
 if (require.main === module) {
