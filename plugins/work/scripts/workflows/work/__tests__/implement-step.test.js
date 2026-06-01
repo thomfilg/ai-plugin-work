@@ -412,7 +412,12 @@ describe('implement step — dependency-aware messaging (GH-219 Task 16)', () =>
 
   describe('auto-init descriptors (GH-410)', () => {
     function makeCapturingState(overrides = {}) {
-      return makeState({
+      // Auto-init in implement.js fires only when tasksMeta is absent
+      // (`taskData && !taskState && s?.workState`). makeState seeds a
+      // default 3-task tasksMeta, so we have to delete it on the result —
+      // a spread won't help because the spread happens BEFORE makeState's
+      // own defaults are applied to overrides.workState.
+      const state = makeState({
         workState: {
           status: 'in_progress',
           stepStatus: { implement: 'pending' },
@@ -420,6 +425,8 @@ describe('implement step — dependency-aware messaging (GH-219 Task 16)', () =>
         },
         ...overrides,
       });
+      delete state.workState.tasksMeta;
+      return state;
     }
 
     it('passes JSON descriptor array via stdin to task-init', () => {
