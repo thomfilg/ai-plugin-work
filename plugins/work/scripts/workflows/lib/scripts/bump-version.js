@@ -152,10 +152,17 @@ function pluginsTouchedIn(range, pluginNames) {
   return touched;
 }
 
-function logBumpPlan({ range, allPlugins, pluginsToBump, skippedPlugins }) {
-  if (!range) {
+function logBumpPlan({ range, touched, allPlugins, pluginsToBump, skippedPlugins }) {
+  // `touched === null` is the fallback signal from pluginsTouchedIn: either
+  // BUMP_RANGE was unset, the range failed the safety regex, or `git diff`
+  // errored. In all three cases we bump every plugin — keep the log honest
+  // about that so CI output does not claim a "scoped" bump when it's full.
+  if (touched === null) {
     const names = allPlugins.map((p) => p.name).join(', ');
-    console.log(`[bump-version] BUMP_RANGE not set — bumping ALL plugins (${names})`);
+    const reason = range
+      ? `BUMP_RANGE="${range}" rejected or git diff failed`
+      : 'BUMP_RANGE not set';
+    console.log(`[bump-version] ${reason} — bumping ALL plugins (${names})`);
     return;
   }
   console.log(`[bump-version] range: ${range}`);
@@ -210,7 +217,7 @@ function main() {
     ? allPlugins.filter((p) => !touched.has(p.name)).map((p) => p.name)
     : [];
 
-  logBumpPlan({ range, allPlugins, pluginsToBump, skippedPlugins });
+  logBumpPlan({ range, touched, allPlugins, pluginsToBump, skippedPlugins });
 
   const allTargets = [...ALWAYS_BUMP, ...pluginsToBump];
   for (const file of allTargets) {
