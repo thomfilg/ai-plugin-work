@@ -41,7 +41,7 @@ const cli = createPhaseStateCli({
   },
   allowedAgents: ['completion-checker'],
   stateFileName: 'completion-phase.json',
-  scriptName: 'completion-phase-state.js',
+  scriptFilename: __filename,
 });
 
 if (require.main === module) {

@@ -8,7 +8,7 @@
  * reusable factory at `plugins/work/scripts/workflows/lib/phase-state/
  * create-phase-state-cli.js`. The factory is constructed with:
  *
- *   createPhaseStateCli({ phaseRegistry, allowedAgents, stateFileName, scriptName })
+ *   createPhaseStateCli({ phaseRegistry, allowedAgents, stateFileName, scriptFilename })
  *
  * Each test spawns a synthetic CLI bin that wires the factory up with a
  * deterministic stub phase registry, then exercises the public subcommands
@@ -70,7 +70,7 @@ const cli = createPhaseStateCli({
   },
   allowedAgents: ['stub-agent'],
   stateFileName: 'stub-phase.json',
-  scriptName: ${JSON.stringify(BIN_BASENAME)},
+  scriptFilename: __filename,
 });
 cli.main(process.argv);
 `;

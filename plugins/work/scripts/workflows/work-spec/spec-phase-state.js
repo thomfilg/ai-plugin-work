@@ -41,7 +41,7 @@ const cli = createPhaseStateCli({
   },
   allowedAgents: ['spec-writer'],
   stateFileName: 'spec-phase.json',
-  scriptName: 'spec-phase-state.js',
+  scriptFilename: __filename,
 });
 
 if (require.main === module) {

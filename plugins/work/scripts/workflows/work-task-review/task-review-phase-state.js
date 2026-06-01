@@ -41,7 +41,7 @@ const cli = createPhaseStateCli({
   },
   allowedAgents: ['task-reviewer', 'code-checker'],
   stateFileName: 'task-review-phase.json',
-  scriptName: 'task-review-phase-state.js',
+  scriptFilename: __filename,
 });
 
 if (require.main === module) {

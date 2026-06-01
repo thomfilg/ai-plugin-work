@@ -41,7 +41,7 @@ const cli = createPhaseStateCli({
   },
   allowedAgents: ['pr-generator', 'pr-post-generator'],
   stateFileName: 'pr-phase.json',
-  scriptName: 'pr-phase-state.js',
+  scriptFilename: __filename,
 });
 
 if (require.main === module) {

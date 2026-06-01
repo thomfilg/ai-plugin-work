@@ -41,7 +41,7 @@ const cli = createPhaseStateCli({
   },
   allowedAgents: ['cleanup-runner'],
   stateFileName: 'cleanup-phase.json',
-  scriptName: 'cleanup-phase-state.js',
+  scriptFilename: __filename,
 });
 
 if (require.main === module) {
