@@ -23,11 +23,11 @@ const actions = require('./lib/maestro-orchestrate/actions');
 const alerts = require('./lib/maestro-orchestrate/alerts');
 
 const DETECTORS = {
-  question:    require('./lib/maestro-orchestrate/detectors/question'),
-  spinner:     require('./lib/maestro-orchestrate/detectors/spinner'),
-  phaseStall:  require('./lib/maestro-orchestrate/detectors/phase-stall'),
+  question: require('./lib/maestro-orchestrate/detectors/question'),
+  spinner: require('./lib/maestro-orchestrate/detectors/spinner'),
+  phaseStall: require('./lib/maestro-orchestrate/detectors/phase-stall'),
   commitStall: require('./lib/maestro-orchestrate/detectors/commit-stall'),
-  prComments:  require('./lib/maestro-orchestrate/detectors/pr-comments'),
+  prComments: require('./lib/maestro-orchestrate/detectors/pr-comments'),
 };
 
 const REPO_NAME = process.env.REPO_NAME || 'claude-plugin-work';
@@ -54,9 +54,13 @@ function handleQuestion(ctx, qHit) {
   const mins = state.minutesSince(prev.startedAt);
   if (mins >= Q_WAIT_MIN && !prev.alerted) {
     actions.alert({
-      session: ctx.session, ticket: ctx.ticket,
-      kind: 'question-pending', phase: ctx.phase,
-      elapsedMin: mins, options: qHit.options, promptKind: qHit.promptKind,
+      session: ctx.session,
+      ticket: ctx.ticket,
+      kind: 'question-pending',
+      phase: ctx.phase,
+      elapsedMin: mins,
+      options: qHit.options,
+      promptKind: qHit.promptKind,
     });
     state.write(ctx.ticket, 'question', { startedAt: prev.startedAt, alerted: true });
   }
@@ -72,7 +76,7 @@ const HALTED_WAITING_PATTERNS = [
 
 function isHaltedWaitingForUser(pane) {
   if (!pane) return false;
-  return HALTED_WAITING_PATTERNS.some(re => re.test(pane));
+  return HALTED_WAITING_PATTERNS.some((re) => re.test(pane));
 }
 
 function handlePhaseStall(ctx, stallHit) {
@@ -83,7 +87,9 @@ function handlePhaseStall(ctx, stallHit) {
   }
   // Suppress when the agent is correctly waiting for a human action (merge, etc.)
   if (isHaltedWaitingForUser(ctx.pane)) {
-    alerts.log(`${ctx.session} phase-stall suppressed — agent halted waiting for user (phase=${ctx.phase})`);
+    alerts.log(
+      `${ctx.session} phase-stall suppressed — agent halted waiting for user (phase=${ctx.phase})`
+    );
     return;
   }
   const marker = stallHit.marker;
@@ -99,9 +105,12 @@ function handlePhaseStall(ctx, stallHit) {
 
   if (escalation === 'alert') {
     actions.alert({
-      session: ctx.session, ticket: ctx.ticket,
-      kind: 'nudges-exhausted', phase: ctx.phase,
-      elapsedMin: stallHit.elapsedMin, budgetMin: stallHit.budgetMin,
+      session: ctx.session,
+      ticket: ctx.ticket,
+      kind: 'nudges-exhausted',
+      phase: ctx.phase,
+      elapsedMin: stallHit.elapsedMin,
+      budgetMin: stallHit.budgetMin,
       nudges: marker.nudges,
     });
   } else if (escalation === 'interrupt') {
@@ -109,50 +118,64 @@ function handlePhaseStall(ctx, stallHit) {
   } else {
     actions.soft(ctx.session, reason);
   }
-  state.write(ctx.ticket, 'phase', { ...marker, nudges: marker.nudges + 1, lastNudgeAt: state.now() });
+  state.write(ctx.ticket, 'phase', {
+    ...marker,
+    nudges: marker.nudges + 1,
+    lastNudgeAt: state.now(),
+  });
+}
+
+// Spinner hang is an immediate interrupt; doesn't go through nudge counter.
+// Returns true when handled (caller should skip remaining detectors).
+function runSpinnerDetector(ctx) {
+  const sHit = DETECTORS.spinner.detect(ctx);
+  if (!sHit.hit) return false;
+  actions.interrupt(ctx.session, `spinner stuck ${sHit.elapsedMin}m: ${sHit.line}`);
+  return true;
+}
+
+function runPhaseStallDetector(ctx) {
+  const pHit = DETECTORS.phaseStall.detect(ctx);
+  if (pHit.hit) handlePhaseStall(ctx, pHit);
+}
+
+function runCommitStallDetector(ctx) {
+  const cHit = DETECTORS.commitStall.detect(ctx);
+  if (cHit.hit) alerts.log(`${ctx.session} commit-stall ${cHit.mins}m in phase=${ctx.phase}`);
+}
+
+function runPrCommentsDetector(ctx) {
+  const cHit = DETECTORS.prComments.detect(ctx);
+  if (cHit.hit) handlePrComments(ctx, cHit);
+}
+
+/** Run the per-session pipeline. Returns when the session has been fully processed. */
+function tickSession(session) {
+  const ctx = ctxFor(session);
+
+  // Question always wins — never nudge while the agent is waiting on us.
+  const qHit = DETECTORS.question.detect(ctx);
+  if (qHit.hit) {
+    handleQuestion(ctx, qHit);
+    return;
+  }
+  state.clear(ctx.ticket, 'question');
+
+  const detectorsToRun = phaseFor(ctx.phase).detectors.filter((k) => k !== 'question');
+
+  if (detectorsToRun.includes('spinner') && runSpinnerDetector(ctx)) return;
+  if (detectorsToRun.includes('phaseStall')) runPhaseStallDetector(ctx);
+  if (detectorsToRun.includes('commitStall')) runCommitStallDetector(ctx);
+  if (detectorsToRun.includes('prComments')) runPrCommentsDetector(ctx);
 }
 
 function tick() {
   const sessions = tmux.listSessions();
-  if (!sessions.length) { alerts.log('no GH-*-work sessions'); return; }
-
-  for (const session of sessions) {
-    const ctx = ctxFor(session);
-
-    // Question always wins — never nudge while the agent is waiting on us.
-    const qHit = DETECTORS.question.detect(ctx);
-    if (qHit.hit) { handleQuestion(ctx, qHit); continue; }
-    state.clear(ctx.ticket, 'question');
-
-    const detectorsToRun = phaseFor(ctx.phase).detectors.filter(k => k !== 'question');
-
-    // Spinner hang is an immediate interrupt; doesn't go through nudge counter.
-    if (detectorsToRun.includes('spinner')) {
-      const sHit = DETECTORS.spinner.detect(ctx);
-      if (sHit.hit) {
-        actions.interrupt(ctx.session, `spinner stuck ${sHit.elapsedMin}m: ${sHit.line}`);
-        continue;
-      }
-    }
-
-    // Phase stall drives the soft → interrupt → alert chain.
-    if (detectorsToRun.includes('phaseStall')) {
-      const pHit = DETECTORS.phaseStall.detect(ctx);
-      if (pHit.hit) handlePhaseStall(ctx, pHit);
-    }
-
-    // Commit stall is informational — surfaces in the log only.
-    if (detectorsToRun.includes('commitStall')) {
-      const cHit = DETECTORS.commitStall.detect(ctx);
-      if (cHit.hit) alerts.log(`${ctx.session} commit-stall ${cHit.mins}m in phase=${ctx.phase}`);
-    }
-
-    // Unaddressed PR comments — only on follow_up. Same escalation chain as phase stall.
-    if (detectorsToRun.includes('prComments')) {
-      const cHit = DETECTORS.prComments.detect(ctx);
-      if (cHit.hit) handlePrComments(ctx, cHit);
-    }
+  if (!sessions.length) {
+    alerts.log('no GH-*-work sessions');
+    return;
   }
+  for (const session of sessions) tickSession(session);
 }
 
 function handlePrComments(ctx, cHit) {
@@ -166,28 +189,41 @@ function handlePrComments(ctx, cHit) {
   // Once nudges are exhausted, stop re-alerting until HEAD moves or the
   // comments are gone. The detector resets the marker on either change.
   if (nudges >= (profile.maxNudges || 3)) return;
-  const top = cHit.summary.map(s => `${s.file}:${s.line} [${s.severity||'?'}] ${s.title}`).join(' | ');
+  const top = cHit.summary
+    .map((s) => `${s.file}:${s.line} [${s.severity || '?'}] ${s.title}`)
+    .join(' | ');
   const reason = `PR #${cHit.prNumber} has ${cHit.count} unaddressed bot comment(s), HEAD unchanged ${cHit.minsStuck}m. Top: ${top}`;
   const escalation = escalationFor(ctx.phase, nudges);
 
   if (escalation === 'alert') {
     actions.alert({
-      session: ctx.session, ticket: ctx.ticket,
-      kind: 'pr-comments-stuck', phase: ctx.phase,
-      prNumber: cHit.prNumber, count: cHit.count,
-      elapsedMin: cHit.minsStuck, summary: cHit.summary,
+      session: ctx.session,
+      ticket: ctx.ticket,
+      kind: 'pr-comments-stuck',
+      phase: ctx.phase,
+      prNumber: cHit.prNumber,
+      count: cHit.count,
+      elapsedMin: cHit.minsStuck,
+      summary: cHit.summary,
     });
   } else if (escalation === 'interrupt') {
     actions.interrupt(ctx.session, reason);
   } else {
     actions.soft(ctx.session, reason);
   }
-  state.write(ctx.ticket, 'pr-comments', { ...marker, nudges: nudges + 1, lastNudgeAt: state.now() });
+  state.write(ctx.ticket, 'pr-comments', {
+    ...marker,
+    nudges: nudges + 1,
+    lastNudgeAt: state.now(),
+  });
 }
 
 function main() {
   const daemon = process.argv.includes('--daemon');
-  if (!daemon) { tick(); return; }
+  if (!daemon) {
+    tick();
+    return;
+  }
   alerts.log(`orchestrate daemon starting, tick=${TICK_SEC}s`);
   setInterval(tick, TICK_SEC * 1000);
   tick();
