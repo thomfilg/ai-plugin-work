@@ -9,10 +9,14 @@ const os = require('os');
 const path = require('path');
 
 const WORKTREES_BASE = process.env.WORKTREES_BASE || path.join(os.homedir(), 'worktrees');
+// Mirror plugins/work config: TASKS_BASE defaults to <WORKTREES_BASE>/tasks but
+// callers may override it; if we don't honor the override the orchestrator
+// reads from an empty directory and silently degrades.
+const TASKS_BASE = process.env.TASKS_BASE || path.join(WORKTREES_BASE, 'tasks');
 const STATE_BASENAME = '.work-state' + '.json';
 
 function stateFile(ticket) {
-  return path.join(WORKTREES_BASE, 'tasks', ticket, STATE_BASENAME);
+  return path.join(TASKS_BASE, ticket, STATE_BASENAME);
 }
 
 function read(ticket) {
