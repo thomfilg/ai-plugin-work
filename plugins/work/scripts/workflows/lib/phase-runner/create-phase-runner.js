@@ -196,28 +196,32 @@ function runPhase(opts, argv) {
     process.stderr.write(`${usageHint || `usage: ${scriptName} <TICKET>`}\n`);
     process.exit(2);
   }
-  logNextScriptEvent(scriptName.replace(/\.js$/, ''), {
-    event: 'invoked',
-    ticket,
-    cwd: process.cwd(),
-    agent: process.env.CLAUDE_CURRENT_AGENT || null,
-  });
-  const tokenSnap = snapshotCompanionToken(path.basename(phaseStateCliPath), ticket);
-  const tasksBase = resolveTasksBaseWithFallback();
-  const tasksDir = path.join(tasksBase, ticket);
-  if (!fs.existsSync(tasksDir)) die(scriptName, `tasks dir not found: ${tasksDir}`);
-  const manifest = readRelatedManifest(tasksDir);
-  const linkedIds = listLinkedIds(manifest);
-  const memory = detectMemoryPlugin();
-  const worktreeRoot = resolveWorktreeRoot() || path.dirname(tasksBase);
-  const initRes = callPhaseCli(phaseStateCliPath, tokenSnap, ['init', ticket]);
-  if (initRes.code !== 0) die(scriptName, `Could not init phase state:\n${initRes.out}`);
-  const startPhase = getCurrentPhase(phaseStateCliPath, tokenSnap, ticket) || initialPhase;
-  const ctx = { ticket, tasksDir, tasksBase, manifest, linkedIds, memory, worktreeRoot };
-  const handler = getPhase(startPhase);
-  const verdict = handler.validate(ctx);
-  const { advanced, phase, blockReason } = advancePhase(phaseStateCliPath, tokenSnap, ticket, startPhase, verdict, handler);
-  renderAndExit(opts, { ticket, phase, ctx, advanced, blockReason, memory, linkedIds, startedAt });
+  try {
+    logNextScriptEvent(scriptName.replace(/\.js$/, ''), {
+      event: 'invoked',
+      ticket,
+      cwd: process.cwd(),
+      agent: process.env.CLAUDE_CURRENT_AGENT || null,
+    });
+    const tokenSnap = snapshotCompanionToken(path.basename(phaseStateCliPath), ticket);
+    const tasksBase = resolveTasksBaseWithFallback();
+    const tasksDir = path.join(tasksBase, ticket);
+    if (!fs.existsSync(tasksDir)) die(scriptName, `tasks dir not found: ${tasksDir}`);
+    const manifest = readRelatedManifest(tasksDir);
+    const linkedIds = listLinkedIds(manifest);
+    const memory = detectMemoryPlugin();
+    const worktreeRoot = resolveWorktreeRoot() || path.dirname(tasksBase);
+    const initRes = callPhaseCli(phaseStateCliPath, tokenSnap, ['init', ticket]);
+    if (initRes.code !== 0) die(scriptName, `Could not init phase state:\n${initRes.out}`);
+    const startPhase = getCurrentPhase(phaseStateCliPath, tokenSnap, ticket) || initialPhase;
+    const ctx = { ticket, tasksDir, tasksBase, manifest, linkedIds, memory, worktreeRoot };
+    const handler = getPhase(startPhase);
+    const verdict = handler.validate(ctx);
+    const { advanced, phase, blockReason } = advancePhase(phaseStateCliPath, tokenSnap, ticket, startPhase, verdict, handler);
+    renderAndExit(opts, { ticket, phase, ctx, advanced, blockReason, memory, linkedIds, startedAt });
+  } catch (err) {
+    die(scriptName, err && err.message ? err.message : String(err));
+  }
 }
 
 /**
