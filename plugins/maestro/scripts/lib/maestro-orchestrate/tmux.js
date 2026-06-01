@@ -33,8 +33,8 @@ function spawnOut(cmd, args) {
 /**
  * Resolve the ticket prefix used to build the default session-name regex.
  *
- * Mirrors resolve-prefix.sh (sourced by maestro-conduct.sh / maestro-bootstrap.sh)
- * so the JS orchestrator and the shell conductor cannot drift to different
+ * Mirrors resolve-prefix.sh (sourced by maestro-bootstrap.sh) so the JS
+ * orchestrator and the bootstrap shell helper cannot drift to different
  * prefixes. Honors the TICKET_PREFIX env var (set by callers that have already
  * resolved the provider) and falls back to "GH" on empty/invalid values, using
  * the same strict ^[A-Z][A-Z0-9]*$ validation as the shell helper.

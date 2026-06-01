@@ -13,8 +13,9 @@ else
   printf "  %-15s %-30s %-12s\n" "SESSION" "SPINNER" "TOKENS"
   while IFS= read -r s; do
     pane=$(tmux capture-pane -t "$s" -p 2>/dev/null) || continue
-    # Keep the spinner glyph set in sync with maestro-conduct.sh's
-    # pane_has_live_spinner() so both scripts agree on what "spinning" looks like.
+    # Keep the spinner glyph set in sync with the orchestrator's
+    # detectors/silence.js LIVE_SPINNER_RE so both scripts agree on
+    # what "spinning" looks like.
     spinner=$(echo "$pane" | grep -oE '^[●●○◯•*✻✶✢·✽✣✤✱⏵⏶] [A-Z][a-z]+ing…[^|]*' | tail -1 | head -c 28)
     tokens=$(echo "$pane" | grep -oE '[0-9]+ tokens' | tail -1)
     printf "  %-15s %-30s %-12s\n" "$s" "${spinner:-IDLE}" "${tokens:-?}"

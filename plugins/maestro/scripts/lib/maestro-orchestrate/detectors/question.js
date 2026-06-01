@@ -14,15 +14,19 @@
  */
 function detect({ pane }) {
   if (!pane) return { hit: false };
-  const menuFooter = /(Enter to select|to navigate · Esc to cancel)/.test(pane);
-  const menuArrow = /^❯ [0-9]+\./m.test(pane);
-  const permPrompt = /Permission rule .+ requires confirmation/.test(pane);
-  if (!(menuFooter && menuArrow) && !permPrompt) return { hit: false };
+  // Menu footer is the strongest signal — when present, an option menu IS open
+  // even if the ❯ cursor + option list scrolled off the visible viewport.
+  // (Empirically observed: tall menus render >24 rows and capture-pane only
+  // sees the bottom slice.)
+  const menuFooter = /Enter to select.*(navigate|cancel)|to navigate · Esc to cancel/.test(pane);
+  const permPrompt = /Permission rule .+ requires confirmation|Do you want to proceed\?/.test(pane);
+  if (!menuFooter && !permPrompt) return { hit: false };
 
-  const optionLines = pane.split('\n')
-    .filter(l => /^(❯|\s+)[ ]*[0-9]+\.\s/.test(l))
+  const optionLines = pane
+    .split('\n')
+    .filter((l) => /^(❯|\s+)[ ]*[0-9]+\.\s/.test(l))
     .slice(0, 4)
-    .map(l => l.trim());
+    .map((l) => l.trim());
 
   return {
     hit: true,

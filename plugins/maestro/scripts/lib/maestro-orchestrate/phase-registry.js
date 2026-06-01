@@ -19,15 +19,17 @@
  */
 
 // Base profile every phase inherits unless overridden.
+// 'silence' runs in every phase — it watches for fully-dead panes and
+// auto-restarts -work sessions (ported from maestro-conduct.sh).
 const BASE = Object.freeze({
   maxNudges: 3,
-  detectors: ['question', 'spinner', 'phaseStall'],
+  detectors: ['question', 'silence', 'spinner', 'phaseStall'],
   exempts: () => false,
 });
 
 // Per-phase overrides — keep one row per phase, terse.
 const PHASES = Object.freeze({
-  bootstrap: { budgetMin: 5, detectors: ['spinner', 'phaseStall'] },
+  bootstrap: { budgetMin: 5, detectors: ['silence', 'spinner', 'phaseStall'] },
   ticket: { budgetMin: 2 },
   brief: { budgetMin: 10 },
   brief_gate: { budgetMin: 5 },
@@ -35,13 +37,19 @@ const PHASES = Object.freeze({
   spec_gate: { budgetMin: 5 },
   tasks: { budgetMin: 10 },
   tasks_gate: { budgetMin: 5 },
-  implement: { budgetMin: 60, detectors: ['question', 'spinner', 'phaseStall', 'commitStall'] },
+  implement: {
+    budgetMin: 60,
+    detectors: ['question', 'silence', 'spinner', 'phaseStall', 'commitStall'],
+  },
   commit: { budgetMin: 5 },
   task_review: { budgetMin: 30 },
   check: { budgetMin: 15 },
   pr: { budgetMin: 10 },
   ready: { budgetMin: 5 },
-  follow_up: { budgetMin: 60, detectors: ['question', 'spinner', 'phaseStall', 'prComments'] },
+  follow_up: {
+    budgetMin: 60,
+    detectors: ['question', 'silence', 'spinner', 'phaseStall', 'prComments'],
+  },
   ci: { budgetMin: 30 },
   cleanup: { budgetMin: 5 },
   reports: { budgetMin: 5 },

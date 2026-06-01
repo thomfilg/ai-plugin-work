@@ -24,11 +24,19 @@ const alerts = require('./lib/maestro-orchestrate/alerts');
 
 const DETECTORS = {
   question: require('./lib/maestro-orchestrate/detectors/question'),
+  silence: require('./lib/maestro-orchestrate/detectors/silence'),
   spinner: require('./lib/maestro-orchestrate/detectors/spinner'),
   phaseStall: require('./lib/maestro-orchestrate/detectors/phase-stall'),
   commitStall: require('./lib/maestro-orchestrate/detectors/commit-stall'),
   prComments: require('./lib/maestro-orchestrate/detectors/pr-comments'),
 };
+
+// Only -work sessions are restart-eligible (matches maestro-conduct.sh
+// gating). Helpers like -dev / -listen are surfaced informationally but
+// would re-launch wrong if relaunched as /work <tid>.
+function restartEligible(session) {
+  return /-work$/.test(session);
+}
 
 const REPO_NAME = process.env.REPO_NAME || 'claude-plugin-work';
 const Q_WAIT_MIN = parseInt(process.env.Q_WAIT_MIN || '3', 10);
@@ -160,6 +168,34 @@ function runSpinnerDetector(ctx) {
   return true;
 }
 
+// Silence is a "session is dead" signal; on hit, auto-restart -work sessions
+// and clear all per-ticket markers so detectors don't fire against the
+// pre-restart state. Returns true when handled so the tick can skip the
+// remaining detectors (no point running them against a session we just killed).
+function runSilenceDetector(ctx) {
+  const sHit = DETECTORS.silence.detect(ctx);
+  if (!sHit.hit) return false;
+  if (!restartEligible(ctx.session)) {
+    alerts.log(
+      `${ctx.session} AUTO-RESTART skipped: non-work helper session (not restart-eligible)`
+    );
+    return true;
+  }
+  const ok = actions.autoRestart({
+    session: ctx.session,
+    ticket: ctx.ticket,
+    worktree: ctx.worktree,
+    silenceSec: sHit.silenceSec,
+  });
+  if (ok) {
+    // Wipe per-ticket markers so the next tick starts clean.
+    ['silence', 'spinner', 'question', 'phase', 'pr-comments'].forEach((k) =>
+      state.clear(ctx.ticket, k)
+    );
+  }
+  return true;
+}
+
 function runPhaseStallDetector(ctx) {
   const pHit = DETECTORS.phaseStall.detect(ctx);
   if (pHit.hit) handlePhaseStall(ctx, pHit);
@@ -189,6 +225,9 @@ function tickSession(session) {
 
   const detectorsToRun = phaseFor(ctx.phase).detectors.filter((k) => k !== 'question');
 
+  // Silence runs before spinner: a totally-dead pane is more urgent than a
+  // hung spinner, and the restart wipes spinner state anyway.
+  if (detectorsToRun.includes('silence') && runSilenceDetector(ctx)) return;
   if (detectorsToRun.includes('spinner') && runSpinnerDetector(ctx)) return;
   if (detectorsToRun.includes('phaseStall')) runPhaseStallDetector(ctx);
   if (detectorsToRun.includes('commitStall')) runCommitStallDetector(ctx);

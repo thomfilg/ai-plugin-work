@@ -11,9 +11,13 @@
  * uncommitted work (the 'commit agent' is the orchestrator's commit-writer).
  * Avoid literal CLI strings that trip the enforce-agent-usage hook.
  */
+const fs = require('fs');
 const { spawnSync } = require('child_process');
 const tmux = require('./tmux');
 const alerts = require('./alerts');
+
+const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
+const SKILL_NAME = process.env.SKILL_NAME || 'work';
 
 function msgFor(reason, mode) {
   const base = `MAESTRO (${mode}): ${reason}. Audit uncommitted files via git status. If any are present, dispatch the commit agent with 'autonomous' to land them, then push. Re-run task-next.js to advance the gate.`;
@@ -41,4 +45,41 @@ function alert(reasonObj) {
   alerts.alert(reasonObj);
 }
 
-module.exports = { soft, interrupt, alert };
+/**
+ * Auto-restart a dead -work session in place: kill the existing tmux
+ * session, then relaunch `claude --dangerously-skip-permissions /<skill> <ticket>`
+ * inside the worktree. Returns true if the restart command was issued.
+ *
+ * Ported from maestro-conduct.sh's auto-restart branch. Caller is responsible
+ * for restart eligibility (only -work sessions) and for clearing per-ticket
+ * markers after the restart so detectors don't fire against the stale state.
+ */
+function autoRestart({ session, ticket, worktree, silenceSec }) {
+  if (!worktree || !fs.existsSync(worktree)) {
+    alerts.log(`${session} AUTO-RESTART skipped: worktree ${worktree} not found`);
+    return false;
+  }
+  alerts.log(
+    `${session} AUTO-RESTART after ${silenceSec}s silence — relaunching /${SKILL_NAME} ${ticket}`
+  );
+  // Kill the dead session (no-op if already gone).
+  spawnSync('tmux', ['kill-session', '-t', session], { stdio: 'ignore' });
+  // Relaunch in-place. argv form so the worktree path / ticket can't be
+  // interpreted by a shell.
+  spawnSync(
+    'tmux',
+    [
+      'new-session',
+      '-d',
+      '-s',
+      session,
+      '-c',
+      worktree,
+      `${CLAUDE_BIN} --dangerously-skip-permissions '/${SKILL_NAME} ${ticket}'`,
+    ],
+    { stdio: 'ignore' }
+  );
+  return true;
+}
+
+module.exports = { soft, interrupt, alert, autoRestart };
