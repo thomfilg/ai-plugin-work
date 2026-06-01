@@ -79,16 +79,18 @@ test('one tick discovers ECHO -work/-dev/-listen and runs the pipeline', () => {
 
   conduct.tick();
 
-  // Pipeline ran end-to-end: silence detector saw the active pane and wrote a
-  // marker for each discovered session. state.js writes `<ticket>.silence.json`.
-  const tickets = fs
+  // Pipeline ran end-to-end. Silence markers are keyed by SESSION (not ticket)
+  // so that `-work` + `-dev` + `-listen` helpers sharing a ticket id don't
+  // clobber each other's pane-hash markers. state.js writes
+  // `<session>.silence.json` per discovered session.
+  const sessions = fs
     .readdirSync(stateDir)
     .filter((f) => f.endsWith('.silence.json'))
     .map((f) => f.replace('.silence.json', ''));
   assert.deepStrictEqual(
-    tickets.sort(),
-    ['ECHO-1', 'ECHO-2', 'ECHO-3'].sort(),
-    'silence markers should exist for every discovered session, with ticket suffix stripped'
+    sessions.sort(),
+    ['ECHO-1-work', 'ECHO-2-dev', 'ECHO-3-listen'].sort(),
+    'silence markers must be keyed per session so helpers and the -work pane do not share state'
   );
 });
 

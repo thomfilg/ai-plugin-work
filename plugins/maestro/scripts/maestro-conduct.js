@@ -57,10 +57,13 @@ function ctxFor(session) {
 }
 
 function handleQuestion(ctx, qHit) {
-  const prev = state.read(ctx.ticket, 'question');
+  // Question marker is per-SESSION: a `-work` session showing a prompt while
+  // an `-dev` helper is idle (or vice versa) must not clobber each other's
+  // markers. Multiple sessions can map to the same ticket.
+  const prev = state.read(ctx.session, 'question');
   const now = state.now();
   if (!prev) {
-    state.write(ctx.ticket, 'question', { startedAt: now, alerted: false });
+    state.write(ctx.session, 'question', { startedAt: now, alerted: false });
     return;
   }
   const mins = state.minutesSince(prev.startedAt);
@@ -74,7 +77,7 @@ function handleQuestion(ctx, qHit) {
       options: qHit.options,
       promptKind: qHit.promptKind,
     });
-    state.write(ctx.ticket, 'question', { startedAt: prev.startedAt, alerted: true });
+    state.write(ctx.session, 'question', { startedAt: prev.startedAt, alerted: true });
   }
 }
 
@@ -156,18 +159,21 @@ const SPINNER_RE_INTERRUPT_MIN = parseInt(process.env.SPINNER_RE_INTERRUPT_MIN |
 // suppresses the re-interrupt but lets the other detectors keep observing.
 function runSpinnerDetector(ctx) {
   const sHit = DETECTORS.spinner.detect(ctx);
+  // Spinner marker is per-SESSION: a hung `-work` pane and an idle `-dev`
+  // helper share a ticket but have different pane buffers; sharing the
+  // marker would let one clear the other's cooldown.
   if (!sHit.hit) {
-    if (state.read(ctx.ticket, 'spinner')) state.clear(ctx.ticket, 'spinner');
+    if (state.read(ctx.session, 'spinner')) state.clear(ctx.session, 'spinner');
     return false;
   }
-  const prev = state.read(ctx.ticket, 'spinner');
+  const prev = state.read(ctx.session, 'spinner');
   if (prev && state.minutesSince(prev.lastInterruptAt) < SPINNER_RE_INTERRUPT_MIN) {
     // Within cooldown — already nudged this hang. Stay quiet on the spinner,
     // but let other detectors run; they observe independent signals.
     return false;
   }
   actions.interrupt(ctx.session, `spinner stuck ${sHit.elapsedMin}m: ${sHit.line}`);
-  state.write(ctx.ticket, 'spinner', { lastInterruptAt: state.now() });
+  state.write(ctx.session, 'spinner', { lastInterruptAt: state.now() });
   return true;
 }
 
@@ -191,10 +197,11 @@ function runSilenceDetector(ctx) {
     silenceSec: sHit.silenceSec,
   });
   if (ok) {
-    // Wipe per-ticket markers so the next tick starts clean.
-    ['silence', 'spinner', 'question', 'phase', 'pr-comments'].forEach((k) =>
-      state.clear(ctx.ticket, k)
-    );
+    // After a restart, wipe both per-SESSION markers (silence/spinner/question
+    // — keyed by session) AND per-TICKET markers (phase/pr-comments — keyed by
+    // ticket because the workflow state belongs to the ticket, not the pane).
+    ['silence', 'spinner', 'question'].forEach((k) => state.clear(ctx.session, k));
+    ['phase', 'pr-comments'].forEach((k) => state.clear(ctx.ticket, k));
   }
   return true;
 }
@@ -224,7 +231,7 @@ function tickSession(session) {
     handleQuestion(ctx, qHit);
     return;
   }
-  state.clear(ctx.ticket, 'question');
+  state.clear(ctx.session, 'question');
 
   const detectorsToRun = phaseFor(ctx.phase).detectors.filter((k) => k !== 'question');
 

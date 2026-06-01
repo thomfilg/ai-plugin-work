@@ -160,7 +160,11 @@ function reloadConductFresh(env) {
   return require(CONDUCT_BIN);
 }
 
-function seedStaleSilenceMarker(stateDir, ticket, secAgo, paneText) {
+// `key` is the SESSION name now (silence/spinner/question markers are keyed
+// per-session so helpers like `-dev`/`-listen` don't share state with the
+// `-work` pane). Older callers can still pass a bare ticket id and the
+// detector will fall back to it via `session || ticket`.
+function seedStaleSilenceMarker(stateDir, key, secAgo, paneText) {
   // Marker must match the current pane snapshot, otherwise silence.detect
   // sees the pane "moved" and resets the marker without firing. We seed the
   // md5 of the pane content the fake tmux will return, with no token change.
@@ -171,7 +175,7 @@ function seedStaleSilenceMarker(stateDir, ticket, secAgo, paneText) {
     .digest('hex');
   const now = Math.floor(Date.now() / 1000);
   fs.writeFileSync(
-    path.join(stateDir, `${ticket}.silence.json`),
+    path.join(stateDir, `${key}.silence.json`),
     JSON.stringify({ hash, tokens: null, lastActiveAt: now - secAgo })
   );
 }
@@ -202,7 +206,7 @@ test('silent -work session with present worktree still relaunches exactly once',
     SILENCE_LIMIT_SEC: '60',
     LOG_FILE: path.join(tmpDir, 'log'),
   });
-  seedStaleSilenceMarker(stateDir, 'ECHO-1', 300, idlePane);
+  seedStaleSilenceMarker(stateDir, 'ECHO-1-work', 300, idlePane);
 
   conduct.tick();
 
@@ -241,8 +245,8 @@ test('auto-restart never relaunches a non-work helper session', () => {
   });
   // Helpers are discovered with their bare ticket id (ticketIdFor strips
   // -listen/-dev), so the silence marker is keyed by that.
-  seedStaleSilenceMarker(stateDir, 'ECHO-2', 300, idlePane);
-  seedStaleSilenceMarker(stateDir, 'ECHO-3', 300, idlePane);
+  seedStaleSilenceMarker(stateDir, 'ECHO-2-listen', 300, idlePane);
+  seedStaleSilenceMarker(stateDir, 'ECHO-3-dev', 300, idlePane);
 
   conduct.tick();
 
@@ -293,8 +297,8 @@ test('discovery surfaces helper sessions but only -work is restart-eligible', ()
     SILENCE_LIMIT_SEC: '60',
     LOG_FILE: path.join(tmpDir, 'log'),
   });
-  seedStaleSilenceMarker(stateDir, 'ECHO-1', 300, 'idle pane');
-  seedStaleSilenceMarker(stateDir, 'ECHO-2', 300, 'idle pane');
+  seedStaleSilenceMarker(stateDir, 'ECHO-1-work', 300, 'idle pane');
+  seedStaleSilenceMarker(stateDir, 'ECHO-2-listen', 300, 'idle pane');
 
   conduct.tick();
 
@@ -308,4 +312,48 @@ test('discovery surfaces helper sessions but only -work is restart-eligible', ()
   assert.strictEqual(workLaunches.length, 1, '-work must be new-session-ed exactly once');
   assert.strictEqual(helperKills.length, 0, '-listen must NOT be kill-session-ed');
   assert.strictEqual(helperLaunches.length, 0, '-listen must NOT be new-session-ed');
+});
+
+test('per-session keying: -work + helper sharing a ticket do NOT clobber each others silence marker', () => {
+  // Regression for the high-severity comment: silence/spinner/question
+  // markers must be keyed by SESSION, not by ticket. Two sessions that map
+  // to the same ticket (ECHO-1-work + ECHO-1-dev) write distinct marker
+  // files; clearing one must not affect the other.
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'per-session-'));
+  const stateDir = path.join(tmpDir, 'state');
+  fs.mkdirSync(stateDir);
+  const wtBase = path.join(tmpDir, 'wt');
+  fs.mkdirSync(path.join(wtBase, 'fake-repo-ECHO-1'), { recursive: true });
+  const logPath = path.join(tmpDir, 'tmux.log');
+
+  // Pane content differs between -work and -dev. If markers were keyed by
+  // ticket, the hashes would ping-pong and both would always look "active".
+  // Per-session keying gives each session its own stable marker.
+  const fakeDir = makeFakeTmuxWithLsAndCapture({
+    logPath,
+    sessions: ['ECHO-1-work', 'ECHO-1-dev'],
+    pane: 'pane-A static',
+  });
+  const conduct = reloadConductFresh({
+    PATH: `${fakeDir}:${process.env.PATH}`,
+    TICKET_PREFIX: 'ECHO',
+    STATE_DIR: stateDir,
+    WORKTREES_BASE: wtBase,
+    REPO_NAME: 'fake-repo',
+    CLAUDE_BIN: 'fake-claude',
+    SKILL_NAME: 'work',
+    SILENCE_LIMIT_SEC: '300',
+    LOG_FILE: path.join(tmpDir, 'log'),
+  });
+  conduct.tick();
+
+  // Both sessions must have their own silence marker file under the SESSION
+  // name (not the bare ticket id). If keying were ticket-based, only one file
+  // would exist.
+  const markers = fs.readdirSync(stateDir).filter((f) => f.endsWith('.silence.json'));
+  assert.deepStrictEqual(
+    markers.sort(),
+    ['ECHO-1-dev.silence.json', 'ECHO-1-work.silence.json'].sort(),
+    'each session must have its own silence marker keyed by full session name'
+  );
 });

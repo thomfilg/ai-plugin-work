@@ -51,8 +51,14 @@ function isActive(pane, hashNow, toksNow, prev) {
   return false;
 }
 
-function detect({ ticket, pane }) {
-  if (!ticket) return { hit: false };
+function detect({ session, ticket, pane }) {
+  // Marker is keyed by SESSION, not ticket. Multiple sessions share a ticket
+  // (-work + -dev + -listen all map to the same ticket id) but each has its
+  // own pane content; sharing a marker would cause hash ping-pong and leave
+  // every helper falsely "active." Fall back to ticket only if a caller still
+  // passes one without a session (older tests do this).
+  const key = session || ticket;
+  if (!key) return { hit: false };
   if (!pane) {
     return { hit: true, kind: 'session-gone', silenceSec: Infinity, sessionGone: true };
   }
@@ -61,7 +67,7 @@ function detect({ ticket, pane }) {
   const toksNow = paneTokens(pane);
   const now = Math.floor(Date.now() / 1000);
 
-  const raw = state.read(ticket, 'silence') || {};
+  const raw = state.read(key, 'silence') || {};
   const prev = {
     hash: raw.hash,
     tokens: typeof raw.tokens === 'number' ? raw.tokens : null,
@@ -69,7 +75,7 @@ function detect({ ticket, pane }) {
   };
 
   if (isActive(pane, hashNow, toksNow, prev)) {
-    state.write(ticket, 'silence', { hash: hashNow, tokens: toksNow, lastActiveAt: now });
+    state.write(key, 'silence', { hash: hashNow, tokens: toksNow, lastActiveAt: now });
     return { hit: false };
   }
 
