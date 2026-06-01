@@ -783,8 +783,11 @@ function getTaskByIndex(ticketId, taskIndex) {
 // `{ error }` on malformed JSON, or `null` when no descriptors were supplied
 // (legacy count-mode).
 async function readTaskInitDescriptors(secondArg) {
-  // If the second positional arg looks like a count, prefer legacy path.
-  if (secondArg !== undefined && /^\d+$/.test(String(secondArg))) {
+  // Any positional arg → legacy path (let parseInt + initTasksMeta validate).
+  // Without this guard, a malformed count like "-1" or "abc" would fall through
+  // to the stdin read below and block forever when stdin is an open pipe
+  // (e.g. child_process.spawn with stdio: ['pipe', ...]).
+  if (secondArg !== undefined && secondArg !== '') {
     return null;
   }
 
