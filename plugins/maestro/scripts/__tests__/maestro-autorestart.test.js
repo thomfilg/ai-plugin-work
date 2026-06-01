@@ -121,3 +121,191 @@ test('restartEligible: only -work sessions are eligible (helpers skipped)', () =
   assert.strictEqual(conduct.restartEligible('ECHO-5-listen'), false);
   assert.strictEqual(conduct.restartEligible('ECHO-5'), false);
 });
+
+// ────────────────────────────────────────────────────────────────────────────
+// Integration: drive one conduct.tick() against a fake tmux holding a mix of
+// -work + helper sessions, all idle past SILENCE_LIMIT_SEC. Asserts that
+// auto-restart fires for -work but NOT for -dev / -listen. This is the parity
+// for the old conduct.sh test "discovery surfaces helper sessions but only
+// -work is restart-eligible".
+// ────────────────────────────────────────────────────────────────────────────
+
+function makeFakeTmuxWithLsAndCapture({ logPath, sessions, pane }) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'fake-tmux-tick-'));
+  const script = path.join(dir, 'tmux');
+  const lsLines = sessions.map((s) => `${s}: 1 windows`).join('\n');
+  fs.writeFileSync(
+    script,
+    [
+      '#!/usr/bin/env bash',
+      `printf '%s\\0' "$@" >> "${logPath}"; printf '\\n' >> "${logPath}"`,
+      'case "$1" in',
+      `  ls) cat <<'EOF'\n${lsLines}\nEOF\n    ;;`,
+      `  capture-pane) printf '%s' "${pane.replace(/'/g, "'\\''")}" ;;`,
+      '  has-session) exit 0 ;;',
+      '  *) ;;',
+      'esac',
+      'exit 0',
+    ].join('\n') + '\n',
+    { mode: 0o755 }
+  );
+  return dir;
+}
+
+function reloadConductFresh(env) {
+  for (const k of Object.keys(require.cache)) {
+    if (k.includes('/maestro-conduct')) delete require.cache[k];
+  }
+  Object.assign(process.env, env);
+  return require(CONDUCT_BIN);
+}
+
+function seedStaleSilenceMarker(stateDir, ticket, secAgo, paneText) {
+  // Marker must match the current pane snapshot, otherwise silence.detect
+  // sees the pane "moved" and resets the marker without firing. We seed the
+  // md5 of the pane content the fake tmux will return, with no token change.
+  const crypto = require('crypto');
+  const hash = crypto
+    .createHash('md5')
+    .update(paneText || '')
+    .digest('hex');
+  const now = Math.floor(Date.now() / 1000);
+  fs.writeFileSync(
+    path.join(stateDir, `${ticket}.silence.json`),
+    JSON.stringify({ hash, tokens: null, lastActiveAt: now - secAgo })
+  );
+}
+
+test('one tick: -work session past SILENCE_LIMIT_SEC IS relaunched', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tick-work-'));
+  const stateDir = path.join(tmpDir, 'state');
+  fs.mkdirSync(stateDir);
+  const wtBase = path.join(tmpDir, 'wt');
+  fs.mkdirSync(path.join(wtBase, 'fake-repo-ECHO-1'), { recursive: true });
+  const logPath = path.join(tmpDir, 'tmux.log');
+
+  // Idle pane: no live spinner, no tokens delta from the stale marker.
+  const idlePane = 'idle status bar — no spinner here';
+  const fakeDir = makeFakeTmuxWithLsAndCapture({
+    logPath,
+    sessions: ['ECHO-1-work'],
+    pane: idlePane,
+  });
+  const conduct = reloadConductFresh({
+    PATH: `${fakeDir}:${process.env.PATH}`,
+    TICKET_PREFIX: 'ECHO',
+    STATE_DIR: stateDir,
+    WORKTREES_BASE: wtBase,
+    REPO_NAME: 'fake-repo',
+    CLAUDE_BIN: 'fake-claude',
+    SKILL_NAME: 'work',
+    SILENCE_LIMIT_SEC: '60',
+    LOG_FILE: path.join(tmpDir, 'log'),
+  });
+  seedStaleSilenceMarker(stateDir, 'ECHO-1', 300, idlePane);
+
+  conduct.tick();
+
+  const inv = readInvocations(logPath);
+  const killed = inv.filter((a) => a[0] === 'kill-session' && a.includes('ECHO-1-work'));
+  const launched = inv.filter((a) => a[0] === 'new-session' && a.includes('ECHO-1-work'));
+  assert.strictEqual(killed.length, 1, 'kill-session must fire for -work');
+  assert.strictEqual(launched.length, 1, 'new-session must fire for -work');
+});
+
+test('one tick: -listen / -dev helpers past SILENCE_LIMIT_SEC are NOT relaunched', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tick-helper-'));
+  const stateDir = path.join(tmpDir, 'state');
+  fs.mkdirSync(stateDir);
+  const wtBase = path.join(tmpDir, 'wt');
+  fs.mkdirSync(path.join(wtBase, 'fake-repo-ECHO-2'), { recursive: true });
+  fs.mkdirSync(path.join(wtBase, 'fake-repo-ECHO-3'), { recursive: true });
+  const logPath = path.join(tmpDir, 'tmux.log');
+
+  const idlePane = 'idle helper pane — no spinner';
+  const fakeDir = makeFakeTmuxWithLsAndCapture({
+    logPath,
+    sessions: ['ECHO-2-listen', 'ECHO-3-dev'],
+    pane: idlePane,
+  });
+  const conduct = reloadConductFresh({
+    PATH: `${fakeDir}:${process.env.PATH}`,
+    TICKET_PREFIX: 'ECHO',
+    STATE_DIR: stateDir,
+    WORKTREES_BASE: wtBase,
+    REPO_NAME: 'fake-repo',
+    CLAUDE_BIN: 'fake-claude',
+    SKILL_NAME: 'work',
+    SILENCE_LIMIT_SEC: '60',
+    LOG_FILE: path.join(tmpDir, 'log'),
+  });
+  // Helpers are discovered with their bare ticket id (ticketIdFor strips
+  // -listen/-dev), so the silence marker is keyed by that.
+  seedStaleSilenceMarker(stateDir, 'ECHO-2', 300, idlePane);
+  seedStaleSilenceMarker(stateDir, 'ECHO-3', 300, idlePane);
+
+  conduct.tick();
+
+  const inv = readInvocations(logPath);
+  const helperKills = inv.filter(
+    (a) => a[0] === 'kill-session' && (a.includes('ECHO-2-listen') || a.includes('ECHO-3-dev'))
+  );
+  const helperLaunches = inv.filter(
+    (a) => a[0] === 'new-session' && (a.includes('ECHO-2-listen') || a.includes('ECHO-3-dev'))
+  );
+  assert.strictEqual(
+    helperKills.length,
+    0,
+    'helper sessions must NEVER be kill-session-ed for relaunch'
+  );
+  assert.strictEqual(
+    helperLaunches.length,
+    0,
+    'helper sessions must NEVER be new-session-ed (would re-launch as /work, wrong)'
+  );
+});
+
+test('one tick: mix of -work + -listen — only -work relaunches, helper still discovered', () => {
+  // Regression test for the old "discovery surfaces helper sessions but only
+  // -work is restart-eligible" contract: a tick with BOTH session types must
+  // relaunch -work but neither kill nor relaunch the helper.
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tick-mix-'));
+  const stateDir = path.join(tmpDir, 'state');
+  fs.mkdirSync(stateDir);
+  const wtBase = path.join(tmpDir, 'wt');
+  fs.mkdirSync(path.join(wtBase, 'fake-repo-ECHO-1'), { recursive: true });
+  fs.mkdirSync(path.join(wtBase, 'fake-repo-ECHO-2'), { recursive: true });
+  const logPath = path.join(tmpDir, 'tmux.log');
+
+  const fakeDir = makeFakeTmuxWithLsAndCapture({
+    logPath,
+    sessions: ['ECHO-1-work', 'ECHO-2-listen'],
+    pane: 'idle pane',
+  });
+  const conduct = reloadConductFresh({
+    PATH: `${fakeDir}:${process.env.PATH}`,
+    TICKET_PREFIX: 'ECHO',
+    STATE_DIR: stateDir,
+    WORKTREES_BASE: wtBase,
+    REPO_NAME: 'fake-repo',
+    CLAUDE_BIN: 'fake-claude',
+    SKILL_NAME: 'work',
+    SILENCE_LIMIT_SEC: '60',
+    LOG_FILE: path.join(tmpDir, 'log'),
+  });
+  seedStaleSilenceMarker(stateDir, 'ECHO-1', 300, 'idle pane');
+  seedStaleSilenceMarker(stateDir, 'ECHO-2', 300, 'idle pane');
+
+  conduct.tick();
+
+  const inv = readInvocations(logPath);
+  const workKills = inv.filter((a) => a[0] === 'kill-session' && a.includes('ECHO-1-work'));
+  const workLaunches = inv.filter((a) => a[0] === 'new-session' && a.includes('ECHO-1-work'));
+  const helperKills = inv.filter((a) => a[0] === 'kill-session' && a.includes('ECHO-2-listen'));
+  const helperLaunches = inv.filter((a) => a[0] === 'new-session' && a.includes('ECHO-2-listen'));
+
+  assert.strictEqual(workKills.length, 1, '-work must be kill-session-ed exactly once');
+  assert.strictEqual(workLaunches.length, 1, '-work must be new-session-ed exactly once');
+  assert.strictEqual(helperKills.length, 0, '-listen must NOT be kill-session-ed');
+  assert.strictEqual(helperLaunches.length, 0, '-listen must NOT be new-session-ed');
+});
