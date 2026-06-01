@@ -23,16 +23,11 @@
  */
 const THRESHOLD_MIN = parseInt(process.env.SPINNER_THRESHOLD_MIN || '15', 10);
 
-const SPINNER_GLYPHS = '●○◯•*✻✶✢·✽✣✤✱⏵⏶';
-// Live spinner = glyph + gerund verb + (ellipsis-with-parens OR "still running" tail).
-// The glyph anchor distinguishes a running spinner from a post-completion summary
-// (no glyph after the tool returns). The gerund "-ing" anchor distinguishes a live
-// thinking-spinner from past-tense completion lines like "Cooked for 40m" with no
-// glyph; the bash original required both anchors and dropping either lets stale
-// summary lines look like a hang.
-const LIVE_SPINNER_RE = new RegExp(
-  `^[${SPINNER_GLYPHS}]\\s+[A-Z][a-z]+ing(?:…\\s*\\([0-9]+[mh]|.*still running)`
-);
+// Shared with detectors/silence.js — see ../live-spinner.js for the contract.
+// Single source of truth so the two detectors can't drift on what counts as
+// "spinning" (drift makes silence auto-restart fire on a session the spinner
+// detector still considers active, and vice versa).
+const { LIVE_SPINNER_RE } = require('../live-spinner');
 
 // Match a trailing elapsed-time token like "40m 35s" or "1h 5m".
 const TIMER_RE = /(?:(\d+)h\s+)?(\d+)m(?:\s+(\d+)s)?/;

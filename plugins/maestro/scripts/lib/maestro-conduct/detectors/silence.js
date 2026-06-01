@@ -21,17 +21,11 @@ const state = require('../state');
 
 const SILENCE_LIMIT_SEC = parseInt(process.env.SILENCE_LIMIT_SEC || '300', 10);
 
-// Matches Claude TUI live spinner lines, e.g.:
-//   "✻ Jitterbugging… (3s · thinking with medium effort)"
-//   "* Hashing… (37s · ↓ 7.4k tokens)"
-// Requirements (mirrors maestro-conduct.sh pane_has_live_spinner):
-//   - leading bullet/spinner glyph
-//   - gerund verb form ending in -ing (NOT past tense like "Cooked" or
-//     generic completion words — those signal a finished action, not a live
-//     spinner). Dropping this requirement would let any "Word… (" line keep
-//     the session marked active and suppress silence auto-restart.
-//   - ellipsis followed by the (timer …) paren block
-const LIVE_SPINNER_RE = /^[●○◯•*✻✶✢·✽✣✤✱⏵⏶]\s+[A-Z][a-z]+ing…\s*\(/m;
+// Shared with detectors/spinner.js — see ../live-spinner.js for the contract.
+// Both detectors MUST consume the same regex; otherwise one classifies a pane
+// as active while the other classifies it as silent, and the escalation chain
+// becomes unpredictable for "still running" form spinners.
+const { LIVE_SPINNER_RE } = require('../live-spinner');
 
 function paneTokens(pane) {
   if (!pane) return null;
