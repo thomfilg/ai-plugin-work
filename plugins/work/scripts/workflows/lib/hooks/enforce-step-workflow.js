@@ -24,6 +24,37 @@
  * Pure rule logic lives in workflows/lib/hooks/policies/* and is unit-tested
  * in isolation. This file remains the source of truth for the wiring, the
  * documented patches (1–14), and the orchestration of the per-workflow loop.
+ *
+ * ─── GH-452: Node 20 CI hardening ──────────────────────────
+ * The Node 20 GitHub Actions runner exposed two latent issues invisible on
+ * developer machines and on Node 22/24 CI:
+ *
+ *   1. Trust-prefix drift. On the runner, the plugin cache path that
+ *      path.resolve(__dirname, '..') computes can diverge from the realpath
+ *      of the same directory (symlinks in the cache layer, cwd differences
+ *      between the spawned hook and the test parent). isTrustedScriptPath
+ *      realpaths BOTH sides per-call as defence-in-depth, but the prefix
+ *      containment compared the raw TRUSTED_SCRIPT_DIRS entries against the
+ *      resolved candidate, occasionally returning false on CI for
+ *      genuinely-trusted scripts and tripping Vector 3 assertions. Fix:
+ *      normalise TRUSTED_SCRIPT_DIRS via fs.realpathSync at module load
+ *      (per-entry, fail-open on failure with a stderr warning). Membership
+ *      is NOT widened — same set of directories, realpath form.
+ *
+ *   2. State-file ENOENT race. Tests that fs.writeFileSync a JSON state file
+ *      (e.g. .work-state.json) and immediately spawn the hook can race
+ *      the spawned subprocess on the runner: the child reads the file before
+ *      the parent's write becomes visible. Tests now route every JSON-state
+ *      write through an atomicWriteJson helper (tmp + rename + directory
+ *      fsync) which closes the window.
+ *
+ *   3. Diagnostic switch. ENFORCE_HOOK_DEBUG=1 dumps __dirname, each
+ *      TRUSTED_SCRIPT_DIRS entry alongside its realpath, and a per-call
+ *      GH-452 candidate=<path> realpath=<resolved> line. Used to classify
+ *      future drift fast on CI. Output is stderr-only, absolute paths only.
+ *
+ * The fix preserves the trust boundary: an untrusted script under
+ * os.tmpdir() still exits 2 with BLOCKED. Tracking: GH-452.
  */
 
 const fs = require('fs');
@@ -253,6 +284,59 @@ const TRUSTED_SCRIPT_DIRS = [
   path.resolve(__dirname, '..', '..', 'check2'), // workflows/check2/
   path.resolve(__dirname, '..', '..', 'follow-up'), // workflows/follow-up/
 ];
+
+// GH-452: Normalise TRUSTED_SCRIPT_DIRS via fs.realpathSync at module load so the
+// prefix containment check does not depend on per-call realpath resolution
+// against a possibly-symlinked plugin-cache directory. Membership is NOT
+// widened — the same set of directories is normalised in place. Per-entry
+// realpath failure is fail-open (keep the unresolved path so
+// isTrustedScriptPath defence-in-depth per-call realpath retains today's
+// behaviour) and emits a `GH-452 trusted-dir realpath failed` warning on
+// stderr.
+function safeRealpath(entry) {
+  try {
+    return fs.realpathSync(entry);
+  } catch (err) {
+    process.stderr.write(
+      `GH-452 trusted-dir realpath failed: ${entry} (${err && err.code ? err.code : 'EUNKNOWN'})\n`
+    );
+    return entry;
+  }
+}
+for (let i = 0; i < TRUSTED_SCRIPT_DIRS.length; i++) {
+  TRUSTED_SCRIPT_DIRS[i] = safeRealpath(TRUSTED_SCRIPT_DIRS[i]);
+}
+
+// GH-452: Diagnostic instrumentation gated behind ENFORCE_HOOK_DEBUG=1.
+// Dumps __dirname and each TRUSTED_SCRIPT_DIRS entry alongside its realpath at
+// module load, plus a per-call candidate=<path> realpath=<resolved> line inside
+// the authorization decision path. Used to classify CI failure modes (resolve
+// drift, symlink skew, race) without altering trust semantics. Absolute paths
+// only — no secrets. See GH-452.
+function debugLogTrustedDirs() {
+  if (process.env.ENFORCE_HOOK_DEBUG !== '1') return;
+  process.stderr.write(`GH-452 __dirname=${__dirname}\n`);
+  for (const dir of TRUSTED_SCRIPT_DIRS) {
+    let realpath;
+    try {
+      realpath = fs.realpathSync(dir);
+    } catch (err) {
+      realpath = `<realpath-error: ${err && err.code ? err.code : 'EUNKNOWN'}>`;
+    }
+    process.stderr.write(`GH-452 trusted-dir entry=${dir} realpath=${realpath}\n`);
+  }
+}
+function debugLogCandidatePath(candidate) {
+  if (process.env.ENFORCE_HOOK_DEBUG !== '1') return;
+  let realpath;
+  try {
+    realpath = fs.realpathSync(path.resolve(candidate));
+  } catch (err) {
+    realpath = `<realpath-error: ${err && err.code ? err.code : 'EUNKNOWN'}>`;
+  }
+  process.stderr.write(`GH-452 candidate=${candidate} realpath=${realpath}\n`);
+}
+debugLogTrustedDirs();
 
 // Agent-gated writer scripts — map script basename to { agents, step }.
 // When a Bash command invokes one of these scripts, the hook verifies:
@@ -647,6 +731,7 @@ function isTerminalCompleteBypass(cmd, ticketId) {
 
   // Verify script path is trusted.
   const resolvedPath = expandPluginRoot(scriptPath);
+  debugLogCandidatePath(resolvedPath);
   if (!isTrustedScriptPath(resolvedPath, TRUSTED_SCRIPT_DIRS)) {
     trace('reject: untrusted script path', { resolvedPath });
     return false;
@@ -739,6 +824,7 @@ function isTerminalSessionGuardBypass(cmd, ticketId) {
   if (i !== tokens.length) return false;
 
   const resolvedPath = expandPluginRoot(scriptPath);
+  debugLogCandidatePath(resolvedPath);
   if (!isTrustedScriptPath(resolvedPath, TRUSTED_SCRIPT_DIRS)) return false;
 
   if (targetTicket !== ticketId) return false;
@@ -844,6 +930,7 @@ function handlePreToolUse(hookData) {
       if (safeSet) {
         const resolvedPath = expandPluginRoot(scriptPath);
         // Verify trusted directory - skip untrusted (Vector 3 handles those)
+        debugLogCandidatePath(resolvedPath);
         if (!isTrustedScriptPath(resolvedPath, TRUSTED_SCRIPT_DIRS)) continue;
 
         const subCmd = extractSubCommand(cmd, m, scriptBase);
@@ -929,6 +1016,7 @@ function handlePreToolUse(hookData) {
           hookAgentType: hookData?.agent_type || null,
         });
         const allowedAgents = gatedEntry.agents;
+        debugLogCandidatePath(scriptPath);
         if (!isTrustedScriptPath(scriptPath, TRUSTED_SCRIPT_DIRS)) {
           didBlock = true;
           const trustedSample = TRUSTED_SCRIPT_DIRS[0] || '<plugin>/scripts/workflows';
