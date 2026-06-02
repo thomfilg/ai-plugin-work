@@ -188,7 +188,6 @@ test('extractEvents synthesizes PreToolUse from an assistant tool_use block (P0 
 
 const fs = require('node:fs');
 const os = require('node:os');
-const { spawnSync: spawnSync2 } = require('node:child_process'); // eslint-disable-line no-unused-vars
 
 function mkProjectsFixture() {
   const baseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-replay-walk-'));
