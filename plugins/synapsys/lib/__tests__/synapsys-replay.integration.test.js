@@ -1244,3 +1244,43 @@ test('@task:8 no-transcripts window exits 0 with a friendly message (P0 #12)', (
   assert.match(parsed.message || '', /no transcripts in window/i);
   fs.rmSync(tmp, { recursive: true, force: true });
 });
+
+test('@task:7 judgeBatch includes memory body (first 200 chars) in the user content per spec', async () => {
+  const { judgeBatch } = require(REPLAY);
+  const calls = [];
+  const fetchImpl = async (url, opts) => {
+    calls.push({ url, opts });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ content: [{ type: 'text', text: '1: yes' }] }),
+    };
+  };
+  const longBody = 'A'.repeat(500);
+  const items = [{ memory: 'mem-x', body: longBody, prompt: 'p', matched: 'm' }];
+  await judgeBatch(items, { fetchImpl, apiKey: 'k', model: 'claude-haiku-4-5' });
+  const body = JSON.parse(calls[0].opts.body);
+  const userContent = body.messages[0].content;
+  assert.match(userContent, /memory titled mem-x/, 'judge sees memory name with title phrasing');
+  assert.match(userContent, /with content "A{200}"/, 'judge sees first 200 chars of body');
+  assert.ok(!userContent.includes('A'.repeat(201)), 'body is truncated at 200 chars');
+});
+
+test('@task:7 judgeBatch falls back to claude-haiku-4-5 when opts.model is omitted', async () => {
+  const { judgeBatch } = require(REPLAY);
+  const calls = [];
+  const fetchImpl = async (url, opts) => {
+    calls.push({ url, opts });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ content: [{ type: 'text', text: '1: yes' }] }),
+    };
+  };
+  await judgeBatch([{ memory: 'm', body: 'b', prompt: 'p', matched: 'm' }], {
+    fetchImpl,
+    apiKey: 'k',
+  });
+  const body = JSON.parse(calls[0].opts.body);
+  assert.equal(body.model, 'claude-haiku-4-5', 'default model used when omitted');
+});

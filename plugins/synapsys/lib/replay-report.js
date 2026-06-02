@@ -11,9 +11,13 @@
 
 // Cost model constants (R17): per SKILL.md the judge spends ~500 input + ~5
 // output tokens PER FIRED UPS MATCH (i.e. per judged item, not per batched
-// API call). Haiku pricing approx $1.00 / 1M input + $5.00 / 1M output tokens.
-const PRICE_PER_TOKEN = 1e-6; // ~$1/1M as a conservative per-token blend.
-const TOKENS_PER_JUDGED_ITEM = 500 + 5;
+// API call). Haiku 4.5 pricing: $1.00 / 1M input, $5.00 / 1M output.
+const INPUT_PRICE_PER_TOKEN = 1e-6;
+const OUTPUT_PRICE_PER_TOKEN = 5e-6;
+const INPUT_TOKENS_PER_ITEM = 500;
+const OUTPUT_TOKENS_PER_ITEM = 5;
+const COST_PER_JUDGED_ITEM =
+  INPUT_TOKENS_PER_ITEM * INPUT_PRICE_PER_TOKEN + OUTPUT_TOKENS_PER_ITEM * OUTPUT_PRICE_PER_TOKEN;
 
 /**
  * Render the aggregated report as machine-readable JSON (R9, G6).
@@ -117,7 +121,7 @@ function renderSuggestionsBlock(suggestions) {
 }
 
 function renderCostFooter(itemsJudged, judgeCalls) {
-  const cost = TOKENS_PER_JUDGED_ITEM * itemsJudged * PRICE_PER_TOKEN;
+  const cost = COST_PER_JUDGED_ITEM * itemsJudged;
   return [
     '',
     `est. cost ≈ $${cost.toFixed(4)} (${itemsJudged} items judged across ${judgeCalls} batched API calls)`,

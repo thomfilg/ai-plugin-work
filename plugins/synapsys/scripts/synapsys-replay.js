@@ -137,6 +137,13 @@ function applyOnlyFilter(memories, onlyFlag) {
       .map((s) => s.trim())
       .filter(Boolean)
   );
+  const known = new Set(memories.map((m) => m.name));
+  const unknown = [...allow].filter((n) => !known.has(n));
+  if (unknown.length > 0) {
+    process.stderr.write(
+      `synapsys-replay: --only references unknown memory name(s): ${unknown.join(', ')}\n`
+    );
+  }
   return memories.filter((m) => allow.has(m.name));
 }
 
@@ -176,10 +183,16 @@ function tallyJudgmentResult(judgments, r) {
   else if (r.relevant === false) judgments[r.memory].irrelevant += 1;
 }
 
-async function runJudgePhase(tuples, flags, apiKey) {
+async function runJudgePhase(tuples, flags, apiKey, memories) {
+  const bodyByName = new Map((memories || []).map((m) => [m.name, (m.body || '').slice(0, 200)]));
   const items = tuples
     .filter((t) => t.fired && t.event === 'UserPromptSubmit')
-    .map((t) => ({ memory: t.memory_name, prompt: t.prompt, matched: t.matched_substring }));
+    .map((t) => ({
+      memory: t.memory_name,
+      body: bodyByName.get(t.memory_name) || '',
+      prompt: t.prompt,
+      matched: t.matched_substring,
+    }));
   const pipeline = await judgePipeline(items, {
     apiKey,
     model: 'claude-haiku-4-5',
@@ -279,7 +292,8 @@ async function main(argv) {
     ({ judgments, judgeCalls, itemsJudged, extrapolated } = await runJudgePhase(
       tuples,
       flags,
-      apiKey
+      apiKey,
+      memories
     ));
   }
 
