@@ -14,6 +14,7 @@ void _taskParser;
 
 const fs = require('fs');
 const pathMod = require('path');
+const { appendAction } = require('../lib/work-actions');
 
 /**
  * Read claim owner from lock file (single source of truth for task claims).
@@ -204,47 +205,55 @@ module.exports = function implementStep(add, s, ctx) {
         input: JSON.stringify(descriptors),
       });
     } catch (descriptorErr) {
-      // Legacy fallback: pass count only.
-      // Surface the fact that we silently downgraded — a kind-aware task
-      // (e.g. checkpoint) loses its classification under the legacy path,
-      // and that has security implications for auto-completion. Logging to
-      // .work-actions.json gives an audit trail for triage if a task's
-      // kind silently changes.
+      // Re-check whether the descriptor-path task-init succeeded part-way
+      // (i.e. saveState already wrote tasksMeta) before falling back. If it
+      // did, the legacy count-only fallback would OVERWRITE the freshly
+      // written checkpoint-aware entries with kind-less ones — silent kind
+      // loss. Bail out instead and rely on the audit trail.
+      let alreadyInitialized = false;
       try {
-        const wsPath = ctx.workStatePath;
-        execFileSync(process.execPath, [wsPath, 'task-init', safeName, String(taskData.length)], {
-          encoding: 'utf-8',
-          timeout: 5000,
-          stdio: 'pipe',
-        });
-        try {
-          const actionsPath = pathMod.join(tasksDir, '.work-actions.json');
-          // Single read inside try/catch — no TOCTOU between existsSync and
-          // readFileSync. ENOENT (or anything else) starts a fresh array.
-          let prev = [];
-          try {
-            prev = JSON.parse(fs.readFileSync(actionsPath, 'utf8'));
-            if (!Array.isArray(prev)) prev = [];
-          } catch {
-            prev = [];
-          }
-          prev.push({
-            type: 'task-init-descriptor-fallback',
-            ticket: safeName,
-            taskCount: taskData.length,
-            reason: descriptorErr && descriptorErr.message ? descriptorErr.message : String(descriptorErr),
-            timestamp: new Date().toISOString(),
-          });
-          // mode: 0o600 — restrict the audit log to the owner. CodeQL's
-          // "insecure temporary file" rule flags writeFileSync into a path it
-          // can't prove is non-temp (tasksDir is configurable). Owner-only
-          // mode is correct regardless and satisfies the rule.
-          fs.writeFileSync(actionsPath, JSON.stringify(prev, null, 2), { mode: 0o600 });
-        } catch {
-          /* audit logging is best-effort; do not block plan */
+        const statePath = pathMod.join(tasksDir, '.work-state.json');
+        const raw = fs.readFileSync(statePath, 'utf8');
+        const st = JSON.parse(raw);
+        if (st && st.tasksMeta && Array.isArray(st.tasksMeta.tasks) && st.tasksMeta.tasks.length > 0) {
+          alreadyInitialized = true;
         }
       } catch {
-        /* fail-open: task tracking init failure should not block plan */
+        alreadyInitialized = false;
+      }
+
+      // Surface the fact that we silently downgraded — a kind-aware task
+      // (e.g. checkpoint) loses its classification under the legacy path,
+      // and that has security implications for auto-completion. The audit
+      // row goes through appendAction so it shares schema + concurrency
+      // handling with the rest of the workflow's audit trail.
+      const reason = descriptorErr && descriptorErr.message ? descriptorErr.message : String(descriptorErr);
+      try {
+        appendAction(safeName, {
+          step: 'implement',
+          what: 'task-init descriptor fallback',
+          meta: {
+            type: 'task-init-descriptor-fallback',
+            taskCount: taskData.length,
+            reason,
+            alreadyInitialized,
+          },
+        });
+      } catch {
+        /* audit logging is best-effort; do not block plan */
+      }
+
+      if (!alreadyInitialized) {
+        try {
+          const wsPathFallback = ctx.workStatePath;
+          execFileSync(process.execPath, [wsPathFallback, 'task-init', safeName, String(taskData.length)], {
+            encoding: 'utf-8',
+            timeout: 5000,
+            stdio: 'pipe',
+          });
+        } catch {
+          /* fail-open: task tracking init failure should not block plan */
+        }
       }
     }
   }

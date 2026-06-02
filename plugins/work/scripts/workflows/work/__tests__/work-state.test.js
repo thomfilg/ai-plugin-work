@@ -943,6 +943,65 @@ describe('work-state.js', () => {
       assert.match(stderr, /tasks still pending/i);
     });
 
+    it('refuses to auto-close when tasks.md is missing (fail-closed)', async () => {
+      // Security review on PR #470 (round 2): tasks.md is the only authority
+      // we trust for the kind re-verification. If it's missing or
+      // unparseable, the same actor who could tamper with .work-state.json
+      // could have deleted it — so we refuse to auto-close anything.
+      const TICKET_NO_MD = 'TEST-CHK-NO-TASKS-MD-001';
+      cleanupTempWorkState(TICKET_NO_MD);
+      const dir = seedTicket(
+        TICKET_NO_MD,
+        [{ id: 'task_1', status: 'pending', kind: 'checkpoint', title: 'X' }],
+        { skipTasksMd: true }
+      );
+      writeReport(dir, 'APPROVED', ['task_1']);
+      const { code } = await runWorkState(['complete', TICKET_NO_MD]);
+      assert.notEqual(code, 0, 'complete must fail when tasks.md is absent');
+      cleanupTempWorkState(TICKET_NO_MD);
+    });
+
+    it('refuses to auto-close on quoted/example verdict text (verdict line anchor)', async () => {
+      // Security review on PR #470 (round 2): a report whose actual verdict
+      // is INCOMPLETE but which contains example/quoted text like
+      // "> Status: APPROVED" must NOT auto-close. The verdict line is now
+      // anchored — quote/list-prefixed lines don't satisfy the gate.
+      const TICKET_QUOTED = 'TEST-CHK-QUOTED-001';
+      cleanupTempWorkState(TICKET_QUOTED);
+      const dir = seedTicket(
+        TICKET_QUOTED,
+        [{ id: 'task_1', status: 'pending', kind: 'checkpoint', title: 'X' }],
+        { tasksMdKinds: ['checkpoint'] }
+      );
+      // Authentic verdict is INCOMPLETE; quoted example mentions APPROVED.
+      fs.writeFileSync(
+        path.join(dir, 'completion.check.md'),
+        `# Report\nStatus: INCOMPLETE\n\nExample of a passing report:\n> Status: APPROVED\n\nVerified: task_1\n`
+      );
+      const { code } = await runWorkState(['complete', TICKET_QUOTED]);
+      assert.notEqual(code, 0, 'complete must fail — only authentic verdict counts');
+      cleanupTempWorkState(TICKET_QUOTED);
+    });
+
+    it('does NOT auto-close when title contains "checkpoint" but Type is not checkpoint', async () => {
+      // Security review on PR #470 (round 2): parseTasks marks isCheckpoint
+      // via a title regex (/checkpoint/i.test(title)), but we deliberately
+      // trust ONLY explicit type:'checkpoint' from tasks.md. This pin asserts
+      // the contract against future drift.
+      const TICKET_TITLE = 'TEST-CHK-TITLE-001';
+      cleanupTempWorkState(TICKET_TITLE);
+      const dir = seedTicket(
+        TICKET_TITLE,
+        [{ id: 'task_1', status: 'pending', kind: 'checkpoint', title: 'checkpoint review' }],
+        { tasksMdKinds: ['backend'] } // tasks.md says backend, not checkpoint
+      );
+      writeReport(dir, 'APPROVED', ['task_1']);
+      const { code } = await runWorkState(['complete', TICKET_TITLE]);
+      assert.notEqual(code, 0,
+        'title-based heuristic must NOT pass the kind re-verify gate');
+      cleanupTempWorkState(TICKET_TITLE);
+    });
+
     it('refuses to auto-close when state says checkpoint but tasks.md disagrees', async () => {
       // Security review on PR #470: re-verify the source of truth (tasks.md)
       // before auto-closing. An attacker who can write .work-state.json

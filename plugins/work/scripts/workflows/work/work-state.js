@@ -294,7 +294,15 @@ function autoCompleteCheckpointTasks(state, ticketId) {
   // task classification — `kind_assign` already validates `type` against
   // VALID_KINDS at tasks-step time, so re-parsing here gives us a fresh
   // read of an authority that wasn't reachable via state-file tampering.
-  let tasksMdCheckpointNums = null;
+  //
+  // FAIL-CLOSED: if tasks.md is missing or unparseable, refuse to auto-close
+  // anything. The same actor that could tamper with `.work-state.json` could
+  // also delete or corrupt tasks.md to skip this re-check, and the remaining
+  // gates (verdict + id-in-report) are both writable by them too. tasks.md
+  // is the only authority we trust here, so its absence is treated as
+  // refusal-to-vouch, not as a green light.
+  let tasksMdCheckpointNums = new Set();
+  let tasksMdReadable = false;
   try {
     const tasksMdPath = path.join(ticketDir, 'tasks.md');
     if (fs.existsSync(tasksMdPath)) {
@@ -303,6 +311,7 @@ function autoCompleteCheckpointTasks(state, ticketId) {
       const { parseTasks } = require('./lib/task-parser');
       const parsed = parseTasks(ticketDir);
       if (Array.isArray(parsed)) {
+        tasksMdReadable = true;
         // Trust ONLY the explicit `type: checkpoint` from tasks.md.
         // parseTasks also sets `isCheckpoint` via a title regex
         // (/checkpoint/i.test(title)), but that title-prose path is the
@@ -318,8 +327,21 @@ function autoCompleteCheckpointTasks(state, ticketId) {
       }
     }
   } catch {
-    tasksMdCheckpointNums = null;
+    tasksMdReadable = false;
   }
+  if (!tasksMdReadable) return closed;
+
+  // Stricter verdict-line check: the verdict-regex helper matches anywhere
+  // in the document. Example/quoted prose like `> Status: APPROVED` or
+  // ``` Status: APPROVED ``` inside a fenced block would otherwise pass.
+  // Require the matched line to start with `Status:` / `Verdict:` (optional
+  // leading whitespace or markdown emphasis) — never as a quote `>` or
+  // list marker.
+  const verdictLineRe = new RegExp(
+    `^[\\s\\*_]*(?:Status|Verdict)[:\\s*]*\\[?(COMPLETE|APPROVED)\\]?`,
+    'im'
+  );
+  if (!verdictLineRe.test(reportContent)) return closed;
 
   // Per-task linkage with id-only token-boundary matching.
   //
@@ -340,14 +362,11 @@ function autoCompleteCheckpointTasks(state, ticketId) {
   for (const entry of state.tasksMeta.tasks) {
     if (!entry || entry.kind !== 'checkpoint' || entry.status === 'completed') continue;
     if (!entry.id) continue;
-    // Source-of-truth re-check: if we successfully parsed tasks.md, the
-    // task's num MUST appear there with type=checkpoint. If we couldn't
-    // parse tasks.md (missing, malformed), fall through to the report-name
-    // check below — the verdict gate + per-task linkage are still in force.
-    if (tasksMdCheckpointNums) {
-      const num = idToNum(entry.id);
-      if (num === null || !tasksMdCheckpointNums.has(num)) continue;
-    }
+    // Source-of-truth re-check: the task's num MUST appear in the parsed
+    // tasks.md set with type=checkpoint (we already bailed if tasks.md was
+    // unreadable). This is the gate state-file tampering can't bypass.
+    const num = idToNum(entry.id);
+    if (num === null || !tasksMdCheckpointNums.has(num)) continue;
     const re = new RegExp(`(^|[^A-Za-z0-9_])${escapeRe(entry.id)}([^A-Za-z0-9_]|$)`);
     if (!re.test(reportContent)) continue;
     entry.status = 'completed';
@@ -860,14 +879,50 @@ async function readTaskInitDescriptors(secondArg) {
     return null;
   }
 
+  // Stdin hardening: cap the read size (defends against an unbounded pipe
+  // OOMing this subprocess) and add an idle timeout (defends against a
+  // caller that opens stdio:'pipe' but forgets to .end() — the read would
+  // otherwise wait forever). Both are well above the realistic descriptor
+  // payload size (a few hundred tasks * a couple-hundred bytes each).
+  const MAX_BYTES = 1024 * 1024; // 1 MiB
+  const IDLE_TIMEOUT_MS = 5000;
   let raw = null;
   if (!process.stdin.isTTY) {
-    raw = await new Promise((resolve) => {
+    raw = await new Promise((resolve, reject) => {
       let buf = '';
+      let overflowed = false;
+      let timer = null;
+      const resetIdle = () => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => {
+          process.stdin.removeAllListeners('data');
+          process.stdin.removeAllListeners('end');
+          reject(new Error(`stdin idle for ${IDLE_TIMEOUT_MS}ms`));
+        }, IDLE_TIMEOUT_MS);
+      };
       process.stdin.setEncoding('utf8');
-      process.stdin.on('data', (c) => { buf += c; });
-      process.stdin.on('end', () => resolve(buf));
-    });
+      process.stdin.on('data', (c) => {
+        if (overflowed) return;
+        buf += c;
+        if (buf.length > MAX_BYTES) {
+          overflowed = true;
+          process.stdin.removeAllListeners('data');
+          process.stdin.removeAllListeners('end');
+          if (timer) clearTimeout(timer);
+          reject(new Error(`stdin exceeded ${MAX_BYTES} bytes`));
+          return;
+        }
+        resetIdle();
+      });
+      process.stdin.on('end', () => {
+        if (timer) clearTimeout(timer);
+        resolve(buf);
+      });
+      resetIdle();
+    }).catch((err) => ({ __readError: err.message }));
+  }
+  if (raw && typeof raw === 'object' && raw.__readError) {
+    return { error: `task-init: stdin read failed: ${raw.__readError}` };
   }
   if (!raw || !raw.trim()) return null;
 
@@ -880,12 +935,20 @@ async function readTaskInitDescriptors(secondArg) {
   if (!Array.isArray(parsed)) {
     return { error: 'task-init: descriptor input must be a JSON array' };
   }
-  // Auto-assign num by 1-based position when missing.
+  // Schema-validate each descriptor and auto-assign num by 1-based position
+  // when missing. Coerce num to an integer (rejects strings like "1") and
+  // bound title length so a malicious title can't bloat tasksMeta.
+  const MAX_TITLE_LEN = 256;
   return parsed.map((d, i) => {
-    if (d && typeof d === 'object' && typeof d.num !== 'number') {
-      return { ...d, num: i + 1 };
+    if (!d || typeof d !== 'object') return d;
+    const out = { ...d };
+    if (typeof out.num !== 'number' || !Number.isInteger(out.num)) {
+      out.num = i + 1;
     }
-    return d;
+    if (typeof out.title === 'string' && out.title.length > MAX_TITLE_LEN) {
+      out.title = out.title.slice(0, MAX_TITLE_LEN);
+    }
+    return out;
   });
 }
 
