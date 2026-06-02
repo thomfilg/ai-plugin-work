@@ -60,6 +60,12 @@ const TASKS_BASE = config.TASKS_BASE;
 
 const { ALL_STEPS: STEPS } = require(path.join(__dirname, 'step-registry'));
 const { taskSegment } = require('../lib/allocate-output-folder');
+// GH-410: verdict parsing for checkpoint auto-completion in completeWork().
+// buildVerdictRegex was previously imported here, but its document-wide
+// match was replaced with a line-anchored regex inline in
+// autoCompleteCheckpointTasks (PR #470 review): both the gate AND the audit
+// reason now key off the same authenticated read, so a quoted/example
+// "Status: APPROVED" can no longer drift into the audit trail.
 
 const SUBTASK_STEPS = ['implement', 'commit'];
 
@@ -257,6 +263,140 @@ function addError(ticketId, step, error) {
 }
 
 /**
+ * GH-410: Auto-complete checkpoint tasks that have an APPROVED/COMPLETE
+ * completion.check.md report. Mutates `state` in place. Returns the array
+ * of audit entries appended (empty if nothing changed).
+ *
+ * A checkpoint task is a verification-only roll-up with no source deliverables.
+ * The check step already verifies its outcome via completion.check.md, so the
+ * tasksMeta bookkeeping just needs to follow.
+ */
+function autoCompleteCheckpointTasks(state, ticketId) {
+  const closed = [];
+  if (!state || !state.tasksMeta || !Array.isArray(state.tasksMeta.tasks)) return closed;
+
+  const ticketDir = path.join(TASKS_BASE, safeId(ticketId));
+  const reportPath = path.join(ticketDir, 'completion.check.md');
+  let reportContent = null;
+  if (fs.existsSync(reportPath)) {
+    try {
+      reportContent = fs.readFileSync(reportPath, 'utf8');
+    } catch {
+      reportContent = null;
+    }
+  }
+  if (!reportContent) return closed;
+
+  // Re-verify checkpoint classification against tasks.md (not just persisted
+  // state). Without this, an attacker who can write `.work-state.json`
+  // directly could flip `kind:"checkpoint"` on a real implementation task
+  // and trigger the auto-close path. tasks.md is the source of truth for
+  // task classification — `kind_assign` already validates `type` against
+  // VALID_KINDS at tasks-step time, so re-parsing here gives us a fresh
+  // read of an authority that wasn't reachable via state-file tampering.
+  //
+  // FAIL-CLOSED: if tasks.md is missing or unparseable, refuse to auto-close
+  // anything. The same actor that could tamper with `.work-state.json` could
+  // also delete or corrupt tasks.md to skip this re-check, and the remaining
+  // gates (verdict + id-in-report) are both writable by them too. tasks.md
+  // is the only authority we trust here, so its absence is treated as
+  // refusal-to-vouch, not as a green light.
+  let tasksMdCheckpointNums = new Set();
+  let tasksMdReadable = false;
+  try {
+    const tasksMdPath = path.join(ticketDir, 'tasks.md');
+    if (fs.existsSync(tasksMdPath)) {
+      // Lazy require to avoid circular deps at module-load time.
+      // eslint-disable-next-line global-require
+      const { parseTasks } = require('./lib/task-parser');
+      const parsed = parseTasks(ticketDir);
+      if (Array.isArray(parsed)) {
+        tasksMdReadable = true;
+        // Trust ONLY the explicit `type: checkpoint` from tasks.md.
+        // parseTasks also sets `isCheckpoint` via a title regex
+        // (/checkpoint/i.test(title)), but that title-prose path is the
+        // same kind of unreliable signal we already rejected for the
+        // per-task linkage check — a real implementation task with
+        // "checkpoint" in its title would otherwise pass the gate here.
+        tasksMdCheckpointNums = new Set(
+          parsed
+            .filter((t) => t && t.type === 'checkpoint')
+            .map((t) => t.num)
+            .filter((n) => Number.isInteger(n))
+        );
+      }
+    }
+  } catch {
+    tasksMdReadable = false;
+  }
+  if (!tasksMdReadable) return closed;
+
+  // Authenticate the verdict on a line-anchored read. The buildVerdictRegex
+  // helper matches anywhere in the document — quoted/example prose like
+  // `> Status: APPROVED` or fenced-block text would otherwise pass.
+  // Require the matched line to start with `Status:` / `Verdict:` (optional
+  // leading whitespace or markdown emphasis) — never as a quote `>` or
+  // list marker. The matched verdict here is what flows into the audit
+  // `reason` field, so both the gate AND the traceability record key off
+  // the same authenticated read (see PR #470 review).
+  //
+  // Trailing boundary lookahead — `(?![A-Za-z0-9_-])` — prevents the
+  // verdict token from matching as a prefix of a longer word or a hyphen-
+  // qualified phrase: `Status: COMPLETED`, `Status: COMPLETELY ...`,
+  // `Status: APPROVED-WITH-CHANGES`, `Status: APPROVEDISH` must all fail.
+  // Whitespace, `]`, `.`, `,`, EOL, em-dash etc. are legitimate
+  // terminators; ASCII hyphen and word chars are not.
+  const verdictLineRe = new RegExp(
+    `^[\\s\\*_]*(?:Status|Verdict)[:\\s*]*\\[?(COMPLETE|APPROVED)(?![A-Za-z0-9_-])\\]?`,
+    'im'
+  );
+  const verdictMatch = verdictLineRe.exec(reportContent);
+  if (!verdictMatch) return closed;
+  const matchedVerdict = verdictMatch[1].toUpperCase();
+
+  // Per-task linkage with id-only token-boundary matching.
+  //
+  // We deliberately do NOT match on titles. Titles are free-form prose
+  // ("Refactor", "Tests", "Wrap-up") that can collide with unrelated mentions
+  // in the report — a checkpoint titled "Refactor" would auto-close on any
+  // APPROVED report that happened to mention refactoring. Task ids
+  // (`task_1`, `task_2`, ...) are unambiguous synthetic tokens.
+  //
+  // JS `\b` treats `_` as a word char and so does NOT separate `task_1`
+  // from `task_10`; we use an explicit `[^A-Za-z0-9_]` boundary instead so
+  // a report naming only `task_10` does not auto-close `task_1`.
+  const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const idToNum = (id) => {
+    const m = /^task_(\d+)$/.exec(String(id || ''));
+    return m ? Number(m[1]) : null;
+  };
+  for (const entry of state.tasksMeta.tasks) {
+    if (!entry || entry.kind !== 'checkpoint' || entry.status === 'completed') continue;
+    if (!entry.id) continue;
+    // Source-of-truth re-check: the task's num MUST appear in the parsed
+    // tasks.md set with type=checkpoint (we already bailed if tasks.md was
+    // unreadable). This is the gate state-file tampering can't bypass.
+    const num = idToNum(entry.id);
+    if (num === null || !tasksMdCheckpointNums.has(num)) continue;
+    const re = new RegExp(`(^|[^A-Za-z0-9_])${escapeRe(entry.id)}([^A-Za-z0-9_]|$)`);
+    if (!re.test(reportContent)) continue;
+    entry.status = 'completed';
+    closed.push({
+      taskId: entry.id,
+      title: entry.title || entry.id,
+      reason: `${matchedVerdict} completion.check.md names ${entry.id}`,
+      timestamp: new Date().toISOString(),
+    });
+  }
+
+  if (closed.length > 0) {
+    if (!Array.isArray(state.autoCompleted)) state.autoCompleted = [];
+    state.autoCompleted.push(...closed);
+  }
+  return closed;
+}
+
+/**
  * Mark work as complete.
  * GH-106: Made idempotent — if already completed, returns existing state.
  * Returns { error: ... } when no state found (caller must check).
@@ -272,12 +412,25 @@ function completeWork(ticketId) {
     return state;
   }
 
-  // Terminal guard: block completion if tasks are still pending (GH-245)
-  // Array.isArray guards against corrupted state files where tasksMeta.tasks is not an array
+  // GH-410: Auto-complete checkpoint tasks before the terminal guard so a
+  // verification-only roll-up doesn't wedge the `complete` step. Persists if
+  // anything changed so the audit trail survives.
+  const autoClosed = autoCompleteCheckpointTasks(state, ticketId);
+  if (autoClosed.length > 0) {
+    saveState(ticketId, state);
+  }
+
+  // Terminal guard: block completion if tasks are still pending (GH-245).
+  // GH-410: emit a directive message when the only pending tasks are
+  // checkpoint-kind without an APPROVED completion.check.md report.
   if (state.tasksMeta && Array.isArray(state.tasksMeta.tasks)) {
     const pendingTasks = state.tasksMeta.tasks.filter((t) => t.status !== 'completed');
     if (pendingTasks.length > 0) {
-      return { error: `Cannot complete workflow: ${pendingTasks.length} tasks still pending` };
+      const allCheckpoint = pendingTasks.every((t) => t && t.kind === 'checkpoint');
+      const msg = allCheckpoint
+        ? `Cannot complete workflow: ${pendingTasks.length} checkpoint task(s) still pending — expected APPROVED completion.check.md to auto-close them (see GH-410)`
+        : `Cannot complete workflow: ${pendingTasks.length} tasks still pending`;
+      return { error: msg };
     }
   }
 
@@ -716,6 +869,100 @@ function getTaskByIndex(ticketId, taskIndex) {
   };
 }
 
+// GH-410: read task-init descriptor JSON from stdin only.
+// Returns the parsed array (with auto-assigned `num` when missing) on success,
+// `{ error }` on malformed JSON, or `null` when no descriptors were supplied
+// (legacy count-mode).
+//
+// Stdin is the only accepted channel. Earlier drafts also honored a
+// TASK_INIT_DESCRIPTORS env var — that was dropped as a security hardening
+// (security review on PR #470): env vars leak across subprocess hops too
+// freely, and any hook or subagent that could set it could re-classify real
+// implementation tasks as kind:"checkpoint" and bypass the TDD gate via the
+// auto-complete path. Stdin requires being the direct parent process, which
+// is a much narrower trust boundary.
+async function readTaskInitDescriptors(secondArg) {
+  // Any positional arg → legacy path (let parseInt + initTasksMeta validate).
+  // Without this guard, a malformed count like "-1" or "abc" would fall through
+  // to the stdin read below and block forever when stdin is an open pipe
+  // (e.g. child_process.spawn with stdio: ['pipe', ...]).
+  if (secondArg !== undefined && secondArg !== '') {
+    return null;
+  }
+
+  // Stdin hardening: cap the read size (defends against an unbounded pipe
+  // OOMing this subprocess) and add an idle timeout (defends against a
+  // caller that opens stdio:'pipe' but forgets to .end() — the read would
+  // otherwise wait forever). Both are well above the realistic descriptor
+  // payload size (a few hundred tasks * a couple-hundred bytes each).
+  const MAX_BYTES = 1024 * 1024; // 1 MiB
+  const IDLE_TIMEOUT_MS = 5000;
+  let raw = null;
+  if (!process.stdin.isTTY) {
+    raw = await new Promise((resolve, reject) => {
+      let buf = '';
+      let overflowed = false;
+      let timer = null;
+      const resetIdle = () => {
+        if (timer) clearTimeout(timer);
+        timer = setTimeout(() => {
+          process.stdin.removeAllListeners('data');
+          process.stdin.removeAllListeners('end');
+          reject(new Error(`stdin idle for ${IDLE_TIMEOUT_MS}ms`));
+        }, IDLE_TIMEOUT_MS);
+      };
+      process.stdin.setEncoding('utf8');
+      process.stdin.on('data', (c) => {
+        if (overflowed) return;
+        buf += c;
+        if (buf.length > MAX_BYTES) {
+          overflowed = true;
+          process.stdin.removeAllListeners('data');
+          process.stdin.removeAllListeners('end');
+          if (timer) clearTimeout(timer);
+          reject(new Error(`stdin exceeded ${MAX_BYTES} bytes`));
+          return;
+        }
+        resetIdle();
+      });
+      process.stdin.on('end', () => {
+        if (timer) clearTimeout(timer);
+        resolve(buf);
+      });
+      resetIdle();
+    }).catch((err) => ({ __readError: err.message }));
+  }
+  if (raw && typeof raw === 'object' && raw.__readError) {
+    return { error: `task-init: stdin read failed: ${raw.__readError}` };
+  }
+  if (!raw || !raw.trim()) return null;
+
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    return { error: `task-init: malformed JSON descriptor input: ${e.message}` };
+  }
+  if (!Array.isArray(parsed)) {
+    return { error: 'task-init: descriptor input must be a JSON array' };
+  }
+  // Schema-validate each descriptor and auto-assign num by 1-based position
+  // when missing. Coerce num to an integer (rejects strings like "1") and
+  // bound title length so a malicious title can't bloat tasksMeta.
+  const MAX_TITLE_LEN = 256;
+  return parsed.map((d, i) => {
+    if (!d || typeof d !== 'object') return d;
+    const out = { ...d };
+    if (typeof out.num !== 'number' || !Number.isInteger(out.num)) {
+      out.num = i + 1;
+    }
+    if (typeof out.title === 'string' && out.title.length > MAX_TITLE_LEN) {
+      out.title = out.title.slice(0, MAX_TITLE_LEN);
+    }
+    return out;
+  });
+}
+
 // CLI handler
 async function main() {
   const args = process.argv.slice(2);
@@ -795,14 +1042,24 @@ async function main() {
       console.log(JSON.stringify(result, null, 2));
       break;
 
-    case 'task-init':
-      result = initTasksMeta(ticketId, parseInt(args[2], 10));
+    case 'task-init': {
+      // GH-410: optionally accept a JSON descriptor array via stdin to thread
+      // per-task `kind` into tasksMeta. Legacy count-only invocation
+      // (`task-init <ticket> <N>`) is preserved.
+      const descriptors = await readTaskInitDescriptors(args[2]);
+      if (descriptors && descriptors.error) {
+        console.error(JSON.stringify(descriptors));
+        process.exit(1);
+      }
+      const arg = descriptors ?? parseInt(args[2], 10);
+      result = initTasksMeta(ticketId, arg);
       if (result && result.error) {
         console.error(JSON.stringify(result));
         process.exit(1);
       }
       console.log(JSON.stringify({ success: true, tasksMeta: result.tasksMeta }));
       break;
+    }
 
     case 'task-current':
       result = getTaskCurrent(ticketId);

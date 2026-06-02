@@ -14,6 +14,7 @@ void _taskParser;
 
 const fs = require('fs');
 const pathMod = require('path');
+const { appendAction } = require('../lib/work-actions');
 
 /**
  * Read claim owner from lock file (single source of truth for task claims).
@@ -184,17 +185,76 @@ module.exports = function implementStep(add, s, ctx) {
   const currentTaskIdx = taskData ? Math.min(rawTaskIdx, taskData.length - 1) : rawTaskIdx;
   const currentTask = allTasksDone ? null : taskData?.[currentTaskIdx];
 
-  // Auto-initialize task tracking if tasks.md exists but tasksMeta doesn't
+  // Auto-initialize task tracking if tasks.md exists but tasksMeta doesn't.
+  // GH-410: thread parsed descriptors (with `type` for kind classification)
+  // via stdin so checkpoint tasks land in tasksMeta with `kind: 'checkpoint'`.
+  // Falls back to legacy count-only invocation if descriptor payload fails.
   if (taskData && !taskState && s?.workState) {
     try {
       const wsPath = ctx.workStatePath;
-      execFileSync(process.execPath, [wsPath, 'task-init', safeName, String(taskData.length)], {
+      const descriptors = taskData.map((t) => ({
+        num: t.num,
+        type: t.type,
+        title: t.title,
+        dependencies: t.dependencies,
+      }));
+      execFileSync(process.execPath, [wsPath, 'task-init', safeName], {
         encoding: 'utf-8',
         timeout: 5000,
         stdio: 'pipe',
+        input: JSON.stringify(descriptors),
       });
-    } catch {
-      /* fail-open: task tracking init failure should not block plan */
+    } catch (descriptorErr) {
+      // Re-check whether the descriptor-path task-init succeeded part-way
+      // (i.e. saveState already wrote tasksMeta) before falling back. If it
+      // did, the legacy count-only fallback would OVERWRITE the freshly
+      // written checkpoint-aware entries with kind-less ones — silent kind
+      // loss. Bail out instead and rely on the audit trail.
+      let alreadyInitialized = false;
+      try {
+        const statePath = pathMod.join(tasksDir, '.work-state.json');
+        const raw = fs.readFileSync(statePath, 'utf8');
+        const st = JSON.parse(raw);
+        if (st && st.tasksMeta && Array.isArray(st.tasksMeta.tasks) && st.tasksMeta.tasks.length > 0) {
+          alreadyInitialized = true;
+        }
+      } catch {
+        alreadyInitialized = false;
+      }
+
+      // Surface the fact that we silently downgraded — a kind-aware task
+      // (e.g. checkpoint) loses its classification under the legacy path,
+      // and that has security implications for auto-completion. The audit
+      // row goes through appendAction so it shares schema + concurrency
+      // handling with the rest of the workflow's audit trail.
+      const reason = descriptorErr && descriptorErr.message ? descriptorErr.message : String(descriptorErr);
+      try {
+        appendAction(safeName, {
+          step: 'implement',
+          what: 'task-init descriptor fallback',
+          meta: {
+            type: 'task-init-descriptor-fallback',
+            taskCount: taskData.length,
+            reason,
+            alreadyInitialized,
+          },
+        });
+      } catch {
+        /* audit logging is best-effort; do not block plan */
+      }
+
+      if (!alreadyInitialized) {
+        try {
+          const wsPathFallback = ctx.workStatePath;
+          execFileSync(process.execPath, [wsPathFallback, 'task-init', safeName, String(taskData.length)], {
+            encoding: 'utf-8',
+            timeout: 5000,
+            stdio: 'pipe',
+          });
+        } catch {
+          /* fail-open: task tracking init failure should not block plan */
+        }
+      }
     }
   }
 
