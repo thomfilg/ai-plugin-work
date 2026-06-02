@@ -24,7 +24,16 @@ const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-e
 const { createArtifactProtector } = require('../../lib/protect-artifact-files');
 
 /** Tag line: zero or more whitespace, then one or more `@token` tokens. */
-const TAG_LINE_RE = /^\s*(@[\w:-]+\s*)+$/;
+const TAG_LINE_RE = /^\s*(@[\w:./-]+\s*)+$/;
+
+/**
+ * Workflow steps during which a tag-only edit on gherkin.feature is allowed
+ * to bypass the artifact protector. `implement` enables agents to re-classify
+ * scenarios mid-cycle (P0 #5); `check` extends the same allowance during the
+ * lint/typecheck/test gate so retags surfaced by review don't force a spec
+ * rewind (GH-487 Task 2).
+ */
+const TAG_ONLY_ALLOWED_STEPS = ['implement', 'check'];
 
 /**
  * Detect if an Edit/MultiEdit diff of gherkin.feature touches ONLY tag lines.
@@ -174,7 +183,7 @@ async function main() {
     const filePath = toolInput?.file_path || '';
     if (filePath && path.basename(filePath) === 'gherkin.feature') {
       const ticketId = getTicketId(hookData);
-      if (ticketId && getStepInProgress(ticketId) === 'implement') {
+      if (ticketId && TAG_ONLY_ALLOWED_STEPS.includes(getStepInProgress(ticketId))) {
         const edits =
           toolName === 'MultiEdit' && Array.isArray(toolInput.edits)
             ? toolInput.edits

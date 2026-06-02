@@ -144,6 +144,171 @@ describe('protect-gherkin tag-only allow-path (P0 #5)', () => {
     );
   });
 
+  it('GH-487 S1 — TAG_LINE_RE recognises path-bearing tag tokens', async () => {
+    // Retag a scenario whose tag line includes a path-bearing @test:<path>
+    // tag plus @e2e being flipped to @integration. The only differing line is
+    // the tag line, so the hook must allow the edit (exit 0). Today this
+    // fails (exit 2) because TAG_LINE_RE's character class excludes `/` and
+    // `.`, so the path-bearing token is misclassified as a non-tag line.
+    const { code, stderr } = await runHookWithState(
+      {
+        tool_name: 'Edit',
+        tool_input: {
+          file_path: '/home/user/project/tasks/GH-99/gherkin.feature',
+          old_string:
+            '  @test:plugins/work/scripts/workflows/work/hooks/__tests__/protect-gherkin-tag-only.test.js @e2e\n' +
+            '  Scenario: ticket fetched\n' +
+            '    Given an open ticket',
+          new_string:
+            '  @test:plugins/work/scripts/workflows/work/hooks/__tests__/protect-gherkin-tag-only.test.js @integration\n' +
+            '  Scenario: ticket fetched\n' +
+            '    Given an open ticket',
+        },
+      },
+      'GH-99',
+      { implement: 'in_progress', spec: 'completed' }
+    );
+    assert.strictEqual(
+      code,
+      0,
+      `Expected exit 0 (path-bearing tag-only edit recognised as tag-only), got ${code}. stderr: ${stderr}`
+    );
+  });
+
+  it('tag-only Edit during check step is allowed', async () => {
+    // During `check` step, tag-only retag (@e2e -> @integration) must be allowed.
+    const { code, stderr } = await runHookWithState(
+      {
+        tool_name: 'Edit',
+        tool_input: {
+          file_path: '/home/user/project/tasks/GH-99/gherkin.feature',
+          old_string: '  @e2e\n  Scenario: ticket fetched\n    Given an open ticket',
+          new_string: '  @integration\n  Scenario: ticket fetched\n    Given an open ticket',
+        },
+      },
+      'GH-99',
+      { implement: 'completed', commit: 'completed', task_review: 'completed', check: 'in_progress', spec: 'completed' }
+    );
+    assert.strictEqual(
+      code,
+      0,
+      `Expected exit 0 (allow tag-only edit) during check, got ${code}. stderr: ${stderr}`
+    );
+  });
+
+  it('semantic Edit during check step is still blocked', async () => {
+    // During check, a Scenario: line change must still be blocked with BYPASS line.
+    const { code, stderr } = await runHookWithState(
+      {
+        tool_name: 'Edit',
+        tool_input: {
+          file_path: '/home/user/project/tasks/GH-99/gherkin.feature',
+          old_string: '  @regression\n  Scenario: ticket fetched\n    Given an open ticket',
+          new_string: '  @regression\n  Scenario: ticket retrieved\n    Given an open ticket',
+        },
+      },
+      'GH-99',
+      { implement: 'completed', commit: 'completed', task_review: 'completed', check: 'in_progress', spec: 'completed' }
+    );
+    assert.strictEqual(
+      code,
+      2,
+      `Expected exit 2 (block semantic edit) during check, got ${code}. stderr: ${stderr}`
+    );
+    const lines = stderr.trimEnd().split('\n');
+    const lastLine = lines[lines.length - 1] || '';
+    assert.ok(
+      lastLine.startsWith('BYPASS:'),
+      `Expected stderr to END with a BYPASS: line. Last line was: ${JSON.stringify(lastLine)}\nFull stderr: ${stderr}`
+    );
+    assert.ok(
+      /spec_gate/.test(lastLine),
+      `Expected BYPASS line to reference spec_gate recovery path. Got: ${JSON.stringify(lastLine)}`
+    );
+  });
+
+  it('tag-only Edit during pr step is still blocked', async () => {
+    // During `pr` step (not in allow-list), even tag-only edits must be blocked.
+    const { code, stderr } = await runHookWithState(
+      {
+        tool_name: 'Edit',
+        tool_input: {
+          file_path: '/home/user/project/tasks/GH-99/gherkin.feature',
+          old_string: '  @e2e\n  Scenario: ticket fetched\n    Given an open ticket',
+          new_string: '  @integration\n  Scenario: ticket fetched\n    Given an open ticket',
+        },
+      },
+      'GH-99',
+      {
+        implement: 'completed',
+        commit: 'completed',
+        task_review: 'completed',
+        check: 'completed',
+        pr: 'in_progress',
+        spec: 'completed',
+      }
+    );
+    assert.strictEqual(
+      code,
+      2,
+      `Expected exit 2 (block tag-only edit during pr step), got ${code}. stderr: ${stderr}`
+    );
+    const lines = stderr.trimEnd().split('\n');
+    const lastLine = lines[lines.length - 1] || '';
+    assert.ok(
+      lastLine.startsWith('BYPASS:'),
+      `Expected stderr to END with a BYPASS: line. Last line was: ${JSON.stringify(lastLine)}\nFull stderr: ${stderr}`
+    );
+  });
+
+  it('mixed tag + semantic Edit during check step default-blocks', async () => {
+    // Mixed diff during check must still default-block.
+    const { code, stderr } = await runHookWithState(
+      {
+        tool_name: 'Edit',
+        tool_input: {
+          file_path: '/home/user/project/tasks/GH-99/gherkin.feature',
+          old_string: '  @wip\n  Scenario: ticket fetched\n    Given an open ticket',
+          new_string: '  @regression\n  Scenario: ticket fetched\n    Given a closed ticket',
+        },
+      },
+      'GH-99',
+      { implement: 'completed', commit: 'completed', task_review: 'completed', check: 'in_progress', spec: 'completed' }
+    );
+    assert.strictEqual(
+      code,
+      2,
+      `Expected exit 2 (default-block ambiguous diff) during check, got ${code}. stderr: ${stderr}`
+    );
+  });
+
+  it('path-bearing tag retag during check is allowed end-to-end', async () => {
+    // End-to-end: path-bearing @test:<path> retag during check must exit 0.
+    const { code, stderr } = await runHookWithState(
+      {
+        tool_name: 'Edit',
+        tool_input: {
+          file_path: '/home/user/project/tasks/GH-99/gherkin.feature',
+          old_string:
+            '  @test:plugins/work/scripts/workflows/work/hooks/__tests__/protect-gherkin-tag-only.test.js @e2e\n' +
+            '  Scenario: ticket fetched\n' +
+            '    Given an open ticket',
+          new_string:
+            '  @test:plugins/work/scripts/workflows/work/hooks/__tests__/protect-gherkin-tag-only.test.js @integration\n' +
+            '  Scenario: ticket fetched\n' +
+            '    Given an open ticket',
+        },
+      },
+      'GH-99',
+      { implement: 'completed', commit: 'completed', task_review: 'completed', check: 'in_progress', spec: 'completed' }
+    );
+    assert.strictEqual(
+      code,
+      0,
+      `Expected exit 0 (allow path-bearing tag-only edit during check), got ${code}. stderr: ${stderr}`
+    );
+  });
+
   it('P0 #5 — ambiguous diff (tag + semantic line) default-blocks', async () => {
     // Diff touches both a tag AND a Given line — must default-block (security invariant).
     const { code, stderr } = await runHookWithState(
