@@ -81,6 +81,54 @@ test('CLI exits 2 on non-numeric --max-judges', () => {
   assert.match(result.stderr, /max-judges/i);
 });
 
+test('CLI exits 2 when --only references only unknown memory names (misconfig contract)', () => {
+  const os3 = require('node:os');
+  const fs3 = require('node:fs');
+  const path3 = require('node:path');
+  const tmpStore = fs3.mkdtempSync(path3.join(os3.tmpdir(), 'syn-store-'));
+  fs3.writeFileSync(path3.join(tmpStore, '.synapsys.json'), '{}');
+  fs3.writeFileSync(
+    path3.join(tmpStore, 'real-memory.md'),
+    '---\nname: real-memory\ndescription: x\nevents: UserPromptSubmit\ntrigger_prompt: foo\n---\nbody\n'
+  );
+  const tmpTx = fs3.mkdtempSync(path3.join(os3.tmpdir(), 'syn-tx-'));
+  const result = spawnSync(
+    process.execPath,
+    [
+      REPLAY,
+      '--no-judge',
+      `--store=${tmpStore}`,
+      '--only=does-not-exist,also-typo',
+      `--transcripts-base=${tmpTx}`,
+    ],
+    { encoding: 'utf8' }
+  );
+  fs3.rmSync(tmpStore, { recursive: true, force: true });
+  fs3.rmSync(tmpTx, { recursive: true, force: true });
+  assert.equal(result.status, 2, `expected exit 2, got ${result.status}: ${result.stderr}`);
+  assert.match(result.stderr, /only.*matched no memories|unknown/i);
+});
+
+test('CLI emits stderr warning and falls back to no-judge when ANTHROPIC_API_KEY is missing (AC5)', () => {
+  const os4 = require('node:os');
+  const fs4 = require('node:fs');
+  const path4 = require('node:path');
+  const tmp = fs4.mkdtempSync(path4.join(os4.tmpdir(), 'syn-cli-nokey-'));
+  const env = { ...process.env };
+  delete env.ANTHROPIC_API_KEY;
+  // Intentionally NO --no-judge: this exercises the missing-key fallback path.
+  const result = spawnSync(
+    process.execPath,
+    [REPLAY, '--since=7d', `--transcripts-base=${tmp}`, '--json'],
+    { encoding: 'utf8', env }
+  );
+  fs4.rmSync(tmp, { recursive: true, force: true });
+  assert.equal(result.status, 0, `expected exit 0, got ${result.status}: ${result.stderr}`);
+  const warnings = result.stderr.match(/ANTHROPIC_API_KEY not set/g) || [];
+  assert.equal(warnings.length, 1, `expected exactly one stderr warning, got: ${result.stderr}`);
+  assert.match(result.stderr, /proceeding as --no-judge/i);
+});
+
 test('CLI exits 0 and emits report JSON in --no-judge mode (Task 8 wired main)', () => {
   // Task 1 scaffold expected an echo of parsed flags. Task 8 wires main() to
   // the real pipeline, so we now assert the wired JSON shape against an empty

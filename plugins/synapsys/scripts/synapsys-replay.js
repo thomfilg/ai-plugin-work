@@ -144,6 +144,9 @@ function applyOnlyFilter(memories, onlyFlag) {
       `synapsys-replay: --only references unknown memory name(s): ${unknown.join(', ')}\n`
     );
   }
+  if (unknown.length === allow.size && allow.size > 0) {
+    die(`--only matched no memories in the store (unknown: ${[...allow].join(', ')})`, 2);
+  }
   return memories.filter((m) => allow.has(m.name));
 }
 
@@ -252,6 +255,11 @@ async function main(argv) {
   const stores = loadStore({ storeFlag: flags.store, cwd: process.cwd() });
   const memories = applyOnlyFilter(loadMemories(stores), flags.only);
 
+  const apiKey = process.env.ANTHROPIC_API_KEY || '';
+  if (!flags.noJudge && !apiKey) {
+    process.stderr.write('synapsys-replay: ANTHROPIC_API_KEY not set; proceeding as --no-judge\n');
+  }
+
   const files = walkTranscripts({
     since: flags.since,
     project: flags.project,
@@ -277,11 +285,7 @@ async function main(argv) {
 
   const { tuples, counts } = collectTuplesFromFiles(files, memories);
 
-  const apiKey = process.env.ANTHROPIC_API_KEY || '';
   const upsFires = tuples.filter((t) => t.fired && t.event === 'UserPromptSubmit').length;
-  if (!flags.noJudge && !apiKey) {
-    process.stderr.write('synapsys-replay: ANTHROPIC_API_KEY not set; proceeding as --no-judge\n');
-  }
   const judging = shouldJudge({ noJudge: flags.noJudge, apiKey, upsFires });
 
   let judgments;
