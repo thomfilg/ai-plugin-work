@@ -101,7 +101,7 @@ function validate(ctx) {
 
 function instructions(ctx) {
   return [
-    '# completion-next — Phase 3 of 8: DIFF SCOPE (Gate E)',
+    '# completion-next — Phase 3 of 11: DIFF SCOPE (Gate E)',
     `Ticket: ${ctx.ticket}`,
     '',
     'I classify every changed file against:',

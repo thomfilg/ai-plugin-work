@@ -129,7 +129,7 @@ function validate(ctx) {
 
 function instructions(ctx) {
   return [
-    '# completion-next — Phase 6 of 8: REPORT',
+    '# completion-next — Phase 9 of 11: REPORT',
     `Ticket: ${ctx.ticket}`,
     '',
     `Write \`${path.join(ctx.tasksDir, 'completion.check.md')}\` with the canonical structure from agents/completion-checker.md:`,

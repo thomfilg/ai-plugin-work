@@ -18,8 +18,8 @@
 
 const { COMPLETION_PHASES } = require('../../completion-phase-registry');
 const { readRequirementCoverage, readTestReport } = require('../kind-checks/shared');
-const { makeFailure, escapeRegExp } = require('../failure-record');
-const { hasVerdict } = require('../../../lib/parse-completion-status');
+const { makeFailure } = require('../failure-record');
+const { hasVerdict, escapeRegex } = require('../../../lib/parse-completion-status');
 
 const CITATION_RE = /(\S+\.test\.[jt]sx?):(\w+)/;
 const PASS_VERDICTS = ['PASS', 'COMPLETE', 'APPROVED'];
@@ -47,7 +47,7 @@ function parseEvidenceCitation(cell) {
  */
 function findTestLine(reportContent, testName) {
   if (!reportContent) return null;
-  const re = new RegExp(`\\b${escapeRegExp(testName)}\\b`);
+  const re = new RegExp(`\\b${escapeRegex(testName)}\\b`);
   for (const line of reportContent.split('\n')) {
     if (re.test(line)) return line;
   }

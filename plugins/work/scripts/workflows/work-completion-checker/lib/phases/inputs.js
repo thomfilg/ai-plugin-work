@@ -34,7 +34,7 @@ function validate(ctx) {
 
 function instructions(ctx) {
   return [
-    '# completion-next — Phase 1 of 8: INPUTS',
+    '# completion-next — Phase 1 of 11: INPUTS',
     `Ticket: ${ctx.ticket}`,
     '',
     '### What I check',

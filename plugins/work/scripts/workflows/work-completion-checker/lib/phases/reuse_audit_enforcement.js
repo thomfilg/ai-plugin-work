@@ -17,7 +17,8 @@ const path = require('node:path');
 
 const { COMPLETION_PHASES } = require('../../completion-phase-registry');
 const { readReuseAudit, readChangedFiles } = require('../kind-checks/shared');
-const { makeFailure, escapeRegExp } = require('../failure-record');
+const { makeFailure } = require('../failure-record');
+const { escapeRegex } = require('../../../lib/parse-completion-status');
 
 const SUFFIX_RE = /([A-Z][a-z0-9]+)$/;
 
@@ -37,7 +38,7 @@ function extractSuffixCandidates(symbol, diffContent) {
   const m = SUFFIX_RE.exec(symbol);
   if (!m) return [];
   const suffix = m[1];
-  const re = new RegExp(`\\b\\w+${escapeRegExp(suffix)}\\b`, 'g');
+  const re = new RegExp(`\\b\\w+${escapeRegex(suffix)}\\b`, 'g');
   const out = new Set();
   let hit;
   while ((hit = re.exec(diffContent)) !== null) {
@@ -65,7 +66,7 @@ function loadChangedContents(ctx, changed) {
 }
 
 function symbolPresentIn(symbol, fileBlobs) {
-  const re = new RegExp(`\\b${escapeRegExp(symbol)}\\b`);
+  const re = new RegExp(`\\b${escapeRegex(symbol)}\\b`);
   return fileBlobs.some((f) => re.test(f.content));
 }
 

@@ -59,7 +59,7 @@ function validate(ctx) {
 
 function instructions(ctx) {
   return [
-    '# completion-next — Phase 4 of 8: COVERAGE CHECK',
+    '# completion-next — Phase 4 of 11: COVERAGE CHECK',
     `Ticket: ${ctx.ticket}`,
     '',
     'I verify every requirement in `## Requirement Coverage` is DELIVERED with non-empty Evidence (file:line or commit ref).',
