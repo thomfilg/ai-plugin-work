@@ -40,6 +40,17 @@ function validateArtifacts(tasksDir, manifest, linkedIds) {
     );
     return errors;
   }
+  // Reject `_related/<self>.md` — the current ticket must never live under
+  // _related/, that folder is reserved for LINKED siblings/parent.
+  const selfId = manifest.self && manifest.self.id;
+  if (selfId) {
+    const selfFile = path.join(relDir, `${selfId}.md`);
+    if (fs.existsSync(selfFile)) {
+      errors.push(
+        `Unexpected self-ticket file in _related/: ${selfFile}. The _related/ folder is reserved for LINKED tickets (siblings/parent). Delete ${selfFile} — your own ticket body belongs in ticket.{md,json}, not under _related/.`
+      );
+    }
+  }
   for (const id of linkedIds) {
     const f = path.join(relDir, `${id}.md`);
     const c = readFile(f);
