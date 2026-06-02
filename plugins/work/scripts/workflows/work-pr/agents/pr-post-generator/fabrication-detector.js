@@ -26,9 +26,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const STABILITY_REGEXES = [
-  /\b\d+\/\d+\s+(stability|stable|runs?)\b/i,
-  /\bstability\s+run\b/i,
-  /\b10\/10\b/i,
+  /\b\d+\/\d+\s+(stability|stable|runs?)\b/gi,
+  /\bstability\s+run\b/gi,
+  /\b10\/10\b/gi,
 ];
 
 const STABILITY_ARTIFACT_PATTERNS = [/^stability.*\.log$/i, /^stability.*\.md$/i];
@@ -69,16 +69,21 @@ function hasStabilityArtifact(taskDir, claimText) {
 
 function checkStabilityClaims(prBody, taskDir) {
   const violations = [];
+  const seen = new Set();
   for (const re of STABILITY_REGEXES) {
-    const m = prBody.match(re);
-    if (!m) continue;
-    if (hasStabilityArtifact(taskDir, m[0])) continue;
-    violations.push({
-      phrase: m[0],
-      reason: 'stability-claim',
-      suggestion:
-        'Remove the stability claim or attach a stability*.log/stability*.md artifact in the task folder.',
-    });
+    for (const match of prBody.matchAll(re)) {
+      const phrase = match[0];
+      const key = `${match.index}:${phrase}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      if (hasStabilityArtifact(taskDir, phrase)) continue;
+      violations.push({
+        phrase,
+        reason: 'stability-claim',
+        suggestion:
+          'Remove the stability claim or attach a stability*.log/stability*.md artifact in the task folder.',
+      });
+    }
   }
   return violations;
 }
