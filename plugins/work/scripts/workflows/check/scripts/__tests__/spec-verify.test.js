@@ -221,6 +221,32 @@ describe('spec-verify.js', () => {
     assert.equal(json.checks[0].passed, true);
   });
 
+  // ── GREP /s flag cross-line (GH-304 Task 3) ────────────────────────────
+
+  it('GREP with /s flag matches a pattern across multiple lines (G-S5)', () => {
+    writeFile(
+      'src/component.jsx',
+      'export const C = () => (\n  <List\n    selectedIds={ids}\n    onSelectedIdsChange={setIds}\n  />\n);'
+    );
+    const specPath = writeSpec(['- GREP src/component.jsx /selectedIds.*onSelectedIdsChange/s']);
+    const result = runScript(specPath, { json: true });
+    assert.equal(result.exitCode, 0);
+    const json = JSON.parse(result.stdout);
+    assert.equal(json.checks[0].passed, true);
+  });
+
+  it('GREP without /s flag still fails on cross-line patterns (regression) [G-S6]', () => {
+    writeFile(
+      'src/component.jsx',
+      'export const C = () => (\n  <List\n    selectedIds={ids}\n    onSelectedIdsChange={setIds}\n  />\n);'
+    );
+    const specPath = writeSpec(['- GREP src/component.jsx /selectedIds.*onSelectedIdsChange/']);
+    const result = runScript(specPath, { json: true });
+    assert.equal(result.exitCode, 1);
+    const json = JSON.parse(result.stdout);
+    assert.equal(json.checks[0].passed, false);
+  });
+
   // ── REUSES with require ────────────────────────────────────────────────
 
   it('REUSES detects require() style imports', () => {
@@ -311,6 +337,98 @@ describe('spec-verify.js', () => {
     assert.equal(result.exitCode, 1);
     const json = JSON.parse(result.stdout);
     assert.equal(json.checks[0].passed, false);
+  });
+
+  // ── REUSES multi-line + alias-path imports (GH-304) ────────────────────
+
+  it('REUSES matches symbol in multi-line import block', () => {
+    writeFile(
+      'src/app.js',
+      "import {\n  useAuth,\n  useUser,\n} from './hooks';"
+    );
+    const specPath = writeSpec(['- REUSES src/app.js useAuth']);
+    const result = runScript(specPath, { json: true });
+    assert.equal(result.exitCode, 0);
+    const json = JSON.parse(result.stdout);
+    assert.equal(json.checks[0].passed, true);
+  });
+
+  it('REUSES matches symbol via alias path import', () => {
+    writeFile('src/app.js', "import { fetchUsers } from '@/app/api/users';");
+    const specPath = writeSpec(['- REUSES src/app.js fetchUsers']);
+    const result = runScript(specPath, { json: true });
+    assert.equal(result.exitCode, 0);
+    const json = JSON.parse(result.stdout);
+    assert.equal(json.checks[0].passed, true);
+  });
+
+  it('REUSES matches symbol in multi-line import that uses an alias path', () => {
+    writeFile(
+      'src/app.js',
+      "import {\n  fetchUsers,\n  createUser,\n} from '@/app/api/users';"
+    );
+    const specPath = writeSpec(['- REUSES src/app.js createUser']);
+    const result = runScript(specPath, { json: true });
+    assert.equal(result.exitCode, 0);
+    const json = JSON.parse(result.stdout);
+    assert.equal(json.checks[0].passed, true);
+  });
+
+  // ── REUSES default + namespace imports & failure hint (GH-304 Task 2) ─
+
+  it('REUSES matches default and namespace imports when symbol matches the local binding', () => {
+    writeFile('src/auth.js', "import Auth from '@/app/auth';");
+    const specPath = writeSpec(['- REUSES src/auth.js Auth']);
+    const result = runScript(specPath, { json: true });
+    assert.equal(result.exitCode, 0);
+    const json = JSON.parse(result.stdout);
+    assert.equal(json.checks[0].passed, true);
+
+    setupWorktree();
+    writeFile('src/users.js', "import * as Users from '@/app/users';");
+    const specPath2 = writeSpec(['- REUSES src/users.js Users']);
+    const result2 = runScript(specPath2, { json: true });
+    assert.equal(result2.exitCode, 0);
+    const json2 = JSON.parse(result2.stdout);
+    assert.equal(json2.checks[0].passed, true);
+  });
+
+  it('REUSES failure message hints at the multi-line and alias scenarios that were checked', () => {
+    writeFile('src/app.js', 'const x = 1;');
+    const specPath = writeSpec(['- REUSES src/app.js nonExistentSymbol']);
+    const result = runScript(specPath, { json: true });
+    assert.equal(result.exitCode, 1);
+    const json = JSON.parse(result.stdout);
+    assert.equal(json.checks[0].passed, false);
+    const reason = json.checks[0].reason || '';
+    assert.ok(reason.includes('multi-line'), `reason should hint at multi-line: ${reason}`);
+    assert.ok(reason.includes('import'), `reason should hint at import: ${reason}`);
+  });
+
+  // ── GREP glob path support (GH-304 Task 4) ─────────────────────────────
+
+  it('GREP supports glob patterns in the file-path argument', () => {
+    writeFile('src/a.tsx', 'const x = 1;');
+    writeFile('src/b.tsx', 'import { useFeatureFlag } from "./flags";');
+    const specPath = writeSpec(['- GREP src/**/*.tsx /useFeatureFlag/']);
+    const result = runScript(specPath, { json: true });
+    assert.equal(result.exitCode, 0);
+    const json = JSON.parse(result.stdout);
+    assert.equal(json.checks[0].passed, true);
+  });
+
+  it('GREP with glob fails when no matched file contains the pattern', () => {
+    writeFile('src/a.tsx', 'const x = 1;');
+    writeFile('src/b.tsx', 'const y = 2;');
+    const specPath = writeSpec(['- GREP src/**/*.tsx /useFeatureFlag/']);
+    const result = runScript(specPath, { json: true });
+    assert.equal(result.exitCode, 1);
+    const json = JSON.parse(result.stdout);
+    assert.equal(json.checks[0].passed, false);
+    assert.ok(
+      json.checks[0].reason.includes('src/**/*.tsx'),
+      `reason should mention the glob pattern: ${json.checks[0].reason}`
+    );
   });
 
   // ── REUSES local definitions (GH-327) ──────────────────────────────────

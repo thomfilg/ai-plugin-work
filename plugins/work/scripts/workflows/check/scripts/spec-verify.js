@@ -257,10 +257,6 @@ function checkGrep(args, root) {
       reason: 'GREP requires two arguments: <path> <pattern>',
     };
   }
-  const validation = validatePath(filePath);
-  if (!validation.valid) {
-    return { type: 'GREP', args, passed: false, reason: validation.reason };
-  }
 
   // Parse /regex/flags
   const match = /^\/(.+)\/([gimsuy]*)$/.exec(patternStr);
@@ -281,6 +277,36 @@ function checkGrep(args, root) {
     return { type: 'GREP', args, passed: false, reason: `Invalid regex: ${err.message}` };
   }
 
+  // Glob path branch — accept patterns like `src/**/*.tsx` and scan matched files.
+  if (filePath.includes('*')) {
+    const globPrefix = filePath.split('*')[0] || '.';
+    const prefixValidation = validatePath(globPrefix);
+    if (!prefixValidation.valid) {
+      return { type: 'GREP', args, passed: false, reason: prefixValidation.reason };
+    }
+    const files = miniGlob(root, filePath);
+    for (const file of files) {
+      try {
+        const fileContent = fs.readFileSync(file, 'utf-8');
+        if (regex.test(fileContent)) {
+          return { type: 'GREP', args, passed: true };
+        }
+      } catch {
+        // Skip unreadable files
+      }
+    }
+    return {
+      type: 'GREP',
+      args,
+      passed: false,
+      reason: `no file matching '${filePath}' (${files.length} files scanned) contains ${patternStr}`,
+    };
+  }
+
+  const validation = validatePath(filePath);
+  if (!validation.valid) {
+    return { type: 'GREP', args, passed: false, reason: validation.reason };
+  }
   const full = path.resolve(root, validation.resolved);
   /** @type {string} */
   let content;
@@ -410,6 +436,10 @@ function checkReuses(args, root) {
       return { type: 'REUSES', args, passed: true };
     }
   }
+  // multi-line import { ... } from '<any-specifier>' OR default / namespace imports
+  if (matchImportLayers(stripped, lines, escaped)) {
+    return { type: 'REUSES', args, passed: true };
+  }
   // Check for local definitions: function SYMBOL(, const/let/var SYMBOL =
   const defRegex = new RegExp(
     `(?:function\\s+${escaped}(?![a-zA-Z0-9_$])\\s*\\(|(?:const|let|var)\\s+${escaped}(?![a-zA-Z0-9_$])\\s*[=,;)])`
@@ -426,8 +456,46 @@ function checkReuses(args, root) {
     type: 'REUSES',
     args,
     passed: false,
-    reason: `Expected import or definition matching "${importPattern}" in ${filePath} — not found`,
+    reason: `Expected import or definition matching "${importPattern}" in ${filePath} — not found (checked: line-by-line import, multi-line import block, multi-line require(), local definition)`,
   };
+}
+
+/**
+ * Match a multi-line `import { ... } from '<any-specifier>'` block containing
+ * the given symbol. Guarded by isInsideString to skip matches inside strings.
+ * @param {string} stripped - comment-stripped source
+ * @param {string} escapedSymbol - already escapeRegex'd symbol
+ * @returns {boolean}
+ */
+function matchMultilineImport(stripped, escapedSymbol) {
+  const re = new RegExp(
+    String.raw`import\s*\{[^}]*\b${escapedSymbol}\b[^}]*\}\s*from\s*['"][^'"]*['"]`,
+    'sg'
+  );
+  let m;
+  while ((m = re.exec(stripped)) !== null) {
+    if (!isInsideString(stripped, m.index)) return true;
+  }
+  return false;
+}
+
+/**
+ * Match multi-line `import { ... }` blocks, default imports (`import X from`),
+ * and namespace imports (`import * as X from`) for the given symbol.
+ * @param {string} stripped - comment-stripped source
+ * @param {string[]} lines - comment-stripped source split into lines
+ * @param {string} escapedSymbol - already escapeRegex'd symbol
+ * @returns {boolean}
+ */
+function matchImportLayers(stripped, lines, escapedSymbol) {
+  if (matchMultilineImport(stripped, escapedSymbol)) return true;
+  const defaultOrNamespaceRegex = new RegExp(
+    `import\\s+(?:\\*\\s+as\\s+)?${escapedSymbol}\\s+from\\s*['"]`
+  );
+  return lines.some((line) => {
+    const m = defaultOrNamespaceRegex.exec(line);
+    return m && !isInsideString(line, m.index);
+  });
 }
 
 /**
