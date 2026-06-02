@@ -63,6 +63,28 @@ function validatePath(p) {
   return { valid: true, resolved: normalized };
 } // validatePath — segment-based '..' check + POSIX absolute rejection
 
+/**
+ * Validate a glob pattern: reject absolute paths and any '..' segment anywhere
+ * in the pattern, not just the prefix before the first wildcard. This prevents
+ * traversal like `src/**\/../../../outside/*` from sneaking past prefix-only
+ * checks before being expanded by miniGlob.
+ * @param {string} p - the glob pattern
+ * @returns {{ valid: boolean, reason?: string }}
+ */
+function validateGlobPattern(p) {
+  if (typeof p !== 'string' || p.length === 0) {
+    return { valid: false, reason: `Missing or invalid path argument: ${p}` };
+  }
+  if (path.isAbsolute(p)) {
+    return { valid: false, reason: `Absolute path rejected: ${p}` };
+  }
+  const segments = p.split(/[/\\]/);
+  if (segments.some((seg) => seg === '..')) {
+    return { valid: false, reason: `Path traversal rejected: ${p}` };
+  }
+  return { valid: true };
+}
+
 /** Directories to skip during glob traversal to avoid slow/flaky gate checks */
 const GLOB_SKIP_DIRS = new Set(['.git', 'node_modules', '.next', 'dist', 'build', 'coverage']);
 
@@ -279,10 +301,9 @@ function checkGrep(args, root) {
 
   // Glob path branch — accept patterns like `src/**/*.tsx` and scan matched files.
   if (filePath.includes('*')) {
-    const globPrefix = filePath.split('*')[0] || '.';
-    const prefixValidation = validatePath(globPrefix);
-    if (!prefixValidation.valid) {
-      return { type: 'GREP', args, passed: false, reason: prefixValidation.reason };
+    const patternValidation = validateGlobPattern(filePath);
+    if (!patternValidation.valid) {
+      return { type: 'GREP', args, passed: false, reason: patternValidation.reason };
     }
     const files = miniGlob(root, filePath);
     for (const file of files) {
@@ -343,10 +364,9 @@ function checkTestCount(args, root) {
       reason: 'TEST_COUNT requires two arguments: <glob-pattern> <minimum>',
     };
   }
-  // Validate the glob pattern prefix (before any wildcards) doesn't contain path traversal.
+  // Validate the full glob pattern (not just the prefix) doesn't contain path traversal.
   // globPattern is guaranteed to be a non-empty string by the guard above.
-  const globPrefix = globPattern.split('*')[0] || '.';
-  const pathValidation = validatePath(globPrefix);
+  const pathValidation = validateGlobPattern(globPattern);
   if (!pathValidation.valid) {
     return { type: 'TEST_COUNT', args, passed: false, reason: pathValidation.reason };
   }

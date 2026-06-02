@@ -431,6 +431,16 @@ describe('spec-verify.js', () => {
     );
   });
 
+  it('GREP rejects glob pattern with .. segments after a wildcard (traversal)', () => {
+    writeFile('src/a.tsx', 'const x = 1;');
+    const specPath = writeSpec(['- GREP src/**/../../../outside/*.tsx /anything/']);
+    const result = runScript(specPath, { json: true });
+    assert.equal(result.exitCode, 1);
+    const json = JSON.parse(result.stdout);
+    assert.equal(json.checks[0].passed, false);
+    assert.match(json.checks[0].reason, /Path traversal rejected/);
+  });
+
   // ── REUSES local definitions (GH-327) ──────────────────────────────────
 
   describe('REUSES local definitions (GH-327)', () => {
