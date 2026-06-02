@@ -45,10 +45,15 @@ function parseEvidenceCitation(cell) {
  * @param {string} testName
  * @returns {string | null}
  */
+function escapeRegExp(str) {
+  return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function findTestLine(reportContent, testName) {
   if (!reportContent) return null;
+  const re = new RegExp(`\\b${escapeRegExp(testName)}\\b`);
   for (const line of reportContent.split('\n')) {
-    if (line.includes(testName)) return line;
+    if (re.test(line)) return line;
   }
   return null;
 }

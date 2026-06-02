@@ -162,3 +162,27 @@ test.describe('test_pass_crossref phase', () => {
     }
   });
 });
+
+test('word-boundary match: test_R1 must NOT match test_R10 substring (no false-positive PASS)', async () => {
+  const tasks = coverageTasks([
+    { id: 'R1', status: 'DELIVERED', evidence: '`tests/foo.test.js:test_R1`' },
+  ]);
+  // test_R10 PASSes; test_R1 itself has FAIL line. Substring match would pick up test_R10 line first.
+  const report = [
+    '# Test Results Report',
+    '',
+    '- test_R10 — Status: PASS',
+    '- test_R1 — Status: FAIL',
+    '',
+  ].join('\n');
+  const { ctx, cleanup } = buildCtx({ tasks, testReport: report });
+  try {
+    const result = await phase.validate(ctx);
+    assert.equal(result.ok, false, 'must NOT silently pass when test_R1 fails (only test_R10 passes)');
+    const failed = ctx.failures.find((f) => f.checkType === 'test_pass');
+    assert.ok(failed, 'expected a test_pass failure record');
+    assert.match(failed.observed, /FAIL in tests\.check\.md/, 'observed must cite FAIL, not pass via substring');
+  } finally {
+    cleanup();
+  }
+});
