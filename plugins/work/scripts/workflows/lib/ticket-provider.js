@@ -358,9 +358,20 @@ function getRelatedTicketsPrompt(ticketId, providerConfig, manifestPath) {
     '}\n' +
     '\n' +
     'Rules:\n' +
-    '- `parent` is null when this ticket has no parent. Otherwise populate from the parent link.\n' +
-    '- `siblings` = children of the same parent, EXCLUDING this ticket. If there is no parent, leave it [].\n' +
-    '- `blockedBy` / `dependsOn` / `relatedTo` come from the ticket-system link types.\n' +
+    '- **Exclude the current ticket (' +
+    ticketId +
+    ') from every bucket — siblings, blockedBy, dependsOn, relatedTo, and parent.** A ticket is never its own sibling, blocker, dependency, related-to, or parent. Likewise, never write `_related/' +
+    ticketId +
+    '.md` — a ticket has no related-file representation of itself.\n' +
+    '- `parent` is null when this ticket has no parent. Otherwise populate from the parent link (and it must not be ' +
+    ticketId +
+    ').\n' +
+    '- `siblings` = children of the same parent, EXCLUDING ' +
+    ticketId +
+    '. If there is no parent, leave it [].\n' +
+    '- `blockedBy` / `dependsOn` / `relatedTo` come from the ticket-system link types, each EXCLUDING ' +
+    ticketId +
+    '.\n' +
     "- **`scope` (REQUIRED on every linked entry):** read each linked ticket's full description, then distill it into a focused one-to-three-sentence summary of WHAT THAT TICKET OWNS — files, endpoints, schemas, layers. This is the field downstream agents use to decide sibling ownership when no PR is merged yet.\n" +
     '  - Good: `"scope": "Owns the new `externalAssets.listDownstreamDashboards` tRPC procedure on viewsRouter and its Zod schema. Adds `select`+`where` for Dashboard rows. No UI changes."`\n' +
     '  - Bad (too vague): `"scope": "Backend work for downstream dashboards"`\n' +

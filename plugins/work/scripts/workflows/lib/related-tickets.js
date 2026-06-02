@@ -68,9 +68,15 @@ function validate(manifest) {
   if (!manifest.self || typeof manifest.self.id !== 'string' || !manifest.self.id) {
     errors.push('self.id is required (string)');
   }
+  const selfId = manifest.self && typeof manifest.self.id === 'string' ? manifest.self.id : null;
+  const copyHint = 'Did you copy this manifest from another ticket?';
   if (manifest.parent !== null && manifest.parent !== undefined) {
     if (typeof manifest.parent !== 'object' || typeof manifest.parent.id !== 'string') {
       errors.push('parent must be null or { id: string, ... }');
+    } else if (selfId && manifest.parent.id === selfId) {
+      errors.push(
+        `parent.id "${selfId}" cannot be its own self.id — a ticket cannot be its own parent. ${copyHint}`
+      );
     }
   }
   for (const key of ['siblings', 'blockedBy', 'dependsOn', 'relatedTo']) {
@@ -81,6 +87,12 @@ function validate(manifest) {
     manifest[key].forEach((entry, i) => {
       if (!entry || typeof entry !== 'object' || typeof entry.id !== 'string' || !entry.id) {
         errors.push(`${key}[${i}].id is required (string)`);
+        return;
+      }
+      if (selfId && entry.id === selfId) {
+        errors.push(
+          `${key}[${i}].id "${selfId}" cannot be its own self.id — a ticket cannot list itself in ${key}. ${copyHint}`
+        );
       }
     });
   }
@@ -137,6 +149,10 @@ function isStale(manifest, runStartedAt) {
  */
 function siblingIds(manifest) {
   if (!manifest) return [];
+  const selfId =
+    manifest.self && typeof manifest.self.id === 'string' && manifest.self.id
+      ? manifest.self.id
+      : null;
   const ids = new Set();
   if (manifest.parent && typeof manifest.parent.id === 'string') ids.add(manifest.parent.id);
   for (const key of ['siblings', 'blockedBy', 'dependsOn', 'relatedTo']) {
@@ -146,6 +162,7 @@ function siblingIds(manifest) {
       }
     }
   }
+  if (selfId) ids.delete(selfId);
   return Array.from(ids);
 }
 
