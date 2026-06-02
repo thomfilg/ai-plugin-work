@@ -34,7 +34,7 @@ function computePluginRoot() {
     // If env var is set, prefer probed result only when it derives from the env var.
     // When env var is set but doesn't probe (e.g., points to a non-existent dir),
     // honour it verbatim for backwards compatibility.
-    if (envRoot && !probed.startsWith(envRoot)) {
+    if (envRoot && probed !== envRoot && !probed.startsWith(envRoot + path.sep)) {
       return envRoot;
     }
     return probed;
