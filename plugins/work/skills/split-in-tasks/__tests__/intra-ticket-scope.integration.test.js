@@ -113,7 +113,10 @@ describe('validateIntraTicketScope', () => {
   it('validator accepts tasks.md after intra-ticket conflict is removed', () => {
     const { validateIntraTicketScope } = require(TASK_SCOPE_PATH);
     const tasks = parseFixture('tasks.fixed.md');
-    assert.ok(Array.isArray(tasks) && tasks.length === 4, 'corrected fixture must parse to 4 tasks');
+    assert.ok(
+      Array.isArray(tasks) && tasks.length === 4,
+      'corrected fixture must parse to 4 tasks'
+    );
 
     const errors = validateIntraTicketScope(tasks);
     assert.deepEqual(
@@ -150,6 +153,52 @@ describe('validateIntraTicketScope', () => {
       errors,
       [],
       `cross-ticket sibling-owned out-of-scope entries must NOT trigger intra-ticket errors; got: ${JSON.stringify(errors, null, 2)}`
+    );
+  });
+
+  it('glob out-of-scope entry conflicts with literal in-scope entry in a peer task', () => {
+    const { validateIntraTicketScope } = require(TASK_SCOPE_PATH);
+    // Task A lists `app/api/routers/**` under out-of-scope; Task B owns the
+    // literal `app/api/routers/users.ts` under in-scope. The out-of-scope
+    // glob COVERS the literal — that is an intra-ticket conflict and the
+    // validator must flag it (symmetric glob direction).
+    const tasks = [
+      {
+        num: 1,
+        title: 'Touch nothing in routers',
+        type: 'chore',
+        filesInScope: ['app/other.ts'],
+        filesOutOfScope: ['app/api/routers/**'],
+      },
+      {
+        num: 2,
+        title: 'Own users router',
+        type: 'wiring',
+        filesInScope: ['app/api/routers/users.ts'],
+        filesOutOfScope: [],
+      },
+    ];
+    const errors = validateIntraTicketScope(tasks);
+    assert.equal(
+      errors.length,
+      1,
+      `glob-out-of-scope-vs-literal-in-scope conflict must produce exactly 1 error; got ${errors.length}: ${JSON.stringify(errors, null, 2)}`
+    );
+    const [err] = errors;
+    assert.match(
+      err,
+      /app\/api\/routers\/\*\*/,
+      `error must name the conflicting out-of-scope glob entry; got: ${err}`
+    );
+    assert.match(
+      err,
+      /\bTask\s*1\b/i,
+      `error must name Task 1 (out-of-scope declarant); got: ${err}`
+    );
+    assert.match(
+      err,
+      /\bTask\s*2\b/i,
+      `error must name Task 2 (in-scope literal owner); got: ${err}`
     );
   });
 

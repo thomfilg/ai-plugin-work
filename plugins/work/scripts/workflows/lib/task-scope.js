@@ -523,7 +523,7 @@ function validateCrossTaskDepsOwnership(tasks) {
       if (!ownedByOther) {
         errors.push(
           `${label} declares Cross-Task Dependency \`${entry}\` but no other task lists it in ` +
-            "`### Files in scope`. Either add `" +
+            '`### Files in scope`. Either add `' +
             entry +
             "` to the producing task's `### Files in scope`, or remove it from this task's " +
             '`### Cross-Task Dependencies`. (Cross-task deps must reference paths another task owns; ' +
@@ -569,7 +569,16 @@ function validateIntraTicketScope(tasks) {
         if (scope.length === 0) continue;
         const literalMatch = scope.includes(entry);
         const globMatch = fileMatchesScope(entry, scope);
-        if (!literalMatch && !globMatch) continue;
+        // Symmetric direction: the out-of-scope `entry` may itself be a glob
+        // that covers one of the peer's literal in-scope entries (e.g. entry
+        // `app/api/routers/**` covers scope literal `app/api/routers/users.ts`).
+        const reverseGlobMatch =
+          !literalMatch &&
+          !globMatch &&
+          scope.some(
+            (scopeItem) => typeof scopeItem === 'string' && fileMatchesScope(scopeItem, [entry])
+          );
+        if (!literalMatch && !globMatch && !reverseGlobMatch) continue;
         errors.push(
           `Task ${declarant.num ?? '?'} lists \`${entry}\` under \`### Files explicitly out of scope\`, ` +
             `but Task ${owner.num ?? '?'} owns that path via \`### Files in scope\`. ` +
