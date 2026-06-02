@@ -961,6 +961,34 @@ describe('work-state.js', () => {
       cleanupTempWorkState(TICKET_NO_MD);
     });
 
+    it('captures the authenticated verdict in audit reason (not a quoted one)', async () => {
+      // Security review on PR #470: the gate and the audit-reason source
+      // must read the same authenticated value. Previously the gate used a
+      // line-anchored regex while matchedVerdict came from the unanchored
+      // buildVerdictRegex — so a quoted "Status: COMPLETE" earlier in the
+      // file could leak into the audit reason even when the authentic
+      // verdict was "Status: APPROVED". Both reads now share the anchored
+      // regex.
+      const TICKET_DRIFT = 'TEST-CHK-VERDICT-DRIFT-001';
+      cleanupTempWorkState(TICKET_DRIFT);
+      const dir = seedTicket(
+        TICKET_DRIFT,
+        [{ id: 'task_1', status: 'pending', kind: 'checkpoint', title: 'X' }],
+        { tasksMdKinds: ['checkpoint'] }
+      );
+      // Quoted example mentions COMPLETE; authentic line says APPROVED.
+      fs.writeFileSync(
+        path.join(dir, 'completion.check.md'),
+        `# Report\n\nQuote of a sample report:\n> Status: COMPLETE\n\nStatus: APPROVED\n\nVerified: task_1\n`
+      );
+      const { result, code } = await runWorkState(['complete', TICKET_DRIFT]);
+      assert.equal(code, 0);
+      assert.equal(result.autoCompleted.length, 1);
+      assert.match(result.autoCompleted[0].reason, /^APPROVED /,
+        'audit reason must reflect the authentic line-anchored verdict, not the quoted one');
+      cleanupTempWorkState(TICKET_DRIFT);
+    });
+
     it('refuses to auto-close on quoted/example verdict text (verdict line anchor)', async () => {
       // Security review on PR #470 (round 2): a report whose actual verdict
       // is INCOMPLETE but which contains example/quoted text like

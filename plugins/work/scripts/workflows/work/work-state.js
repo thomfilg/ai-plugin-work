@@ -61,7 +61,11 @@ const TASKS_BASE = config.TASKS_BASE;
 const { ALL_STEPS: STEPS } = require(path.join(__dirname, 'step-registry'));
 const { taskSegment } = require('../lib/allocate-output-folder');
 // GH-410: verdict parsing for checkpoint auto-completion in completeWork().
-const { buildVerdictRegex } = require('../lib/parse-completion-status');
+// buildVerdictRegex was previously imported here, but its document-wide
+// match was replaced with a line-anchored regex inline in
+// autoCompleteCheckpointTasks (PR #470 review): both the gate AND the audit
+// reason now key off the same authenticated read, so a quoted/example
+// "Status: APPROVED" can no longer drift into the audit trail.
 
 const SUBTASK_STEPS = ['implement', 'commit'];
 
@@ -274,18 +278,14 @@ function autoCompleteCheckpointTasks(state, ticketId) {
   const ticketDir = path.join(TASKS_BASE, safeId(ticketId));
   const reportPath = path.join(ticketDir, 'completion.check.md');
   let reportContent = null;
-  let matchedVerdict = null;
   if (fs.existsSync(reportPath)) {
     try {
       reportContent = fs.readFileSync(reportPath, 'utf8');
-      const m = buildVerdictRegex(['COMPLETE', 'APPROVED']).exec(reportContent);
-      if (m) matchedVerdict = m[1].toUpperCase();
     } catch {
-      matchedVerdict = null;
+      reportContent = null;
     }
   }
-
-  if (!matchedVerdict) return closed;
+  if (!reportContent) return closed;
 
   // Re-verify checkpoint classification against tasks.md (not just persisted
   // state). Without this, an attacker who can write `.work-state.json`
@@ -331,17 +331,21 @@ function autoCompleteCheckpointTasks(state, ticketId) {
   }
   if (!tasksMdReadable) return closed;
 
-  // Stricter verdict-line check: the verdict-regex helper matches anywhere
-  // in the document. Example/quoted prose like `> Status: APPROVED` or
-  // ``` Status: APPROVED ``` inside a fenced block would otherwise pass.
+  // Authenticate the verdict on a line-anchored read. The buildVerdictRegex
+  // helper matches anywhere in the document — quoted/example prose like
+  // `> Status: APPROVED` or fenced-block text would otherwise pass.
   // Require the matched line to start with `Status:` / `Verdict:` (optional
   // leading whitespace or markdown emphasis) — never as a quote `>` or
-  // list marker.
+  // list marker. The matched verdict here is what flows into the audit
+  // `reason` field, so both the gate AND the traceability record key off
+  // the same authenticated read (see PR #470 review).
   const verdictLineRe = new RegExp(
     `^[\\s\\*_]*(?:Status|Verdict)[:\\s*]*\\[?(COMPLETE|APPROVED)\\]?`,
     'im'
   );
-  if (!verdictLineRe.test(reportContent)) return closed;
+  const verdictMatch = verdictLineRe.exec(reportContent);
+  if (!verdictMatch) return closed;
+  const matchedVerdict = verdictMatch[1].toUpperCase();
 
   // Per-task linkage with id-only token-boundary matching.
   //
