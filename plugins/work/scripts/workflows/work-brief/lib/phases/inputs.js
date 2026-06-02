@@ -30,26 +30,27 @@ function validateArtifacts(tasksDir, manifest, linkedIds) {
     );
     return errors;
   }
-  // No linked tickets => nothing to put in _related/ => nothing to check.
-  if (linkedIds.length === 0) return errors;
-
   const relDir = path.join(tasksDir, '_related');
-  if (!fs.existsSync(relDir)) {
-    errors.push(
-      `Missing directory ${relDir}. Save each linked ticket's full content as ${relDir}/<TICKET-ID>.md.`
-    );
-    return errors;
-  }
   // Reject `_related/<self>.md` — the current ticket must never live under
-  // _related/, that folder is reserved for LINKED siblings/parent.
+  // _related/ regardless of linkedIds: the folder is reserved for LINKED
+  // siblings/parent and must never contain the ticket itself.
   const selfId = manifest.self && manifest.self.id;
-  if (selfId) {
+  if (selfId && fs.existsSync(relDir)) {
     const selfFile = path.join(relDir, `${selfId}.md`);
     if (fs.existsSync(selfFile)) {
       errors.push(
         `Unexpected self-ticket file in _related/: ${selfFile}. The _related/ folder is reserved for LINKED tickets (siblings/parent). Delete ${selfFile} — your own ticket body belongs in ticket.{md,json}, not under _related/.`
       );
     }
+  }
+  // No linked tickets => nothing more to check beyond the self-file rejection above.
+  if (linkedIds.length === 0) return errors;
+
+  if (!fs.existsSync(relDir)) {
+    errors.push(
+      `Missing directory ${relDir}. Save each linked ticket's full content as ${relDir}/<TICKET-ID>.md.`
+    );
+    return errors;
   }
   for (const id of linkedIds) {
     const f = path.join(relDir, `${id}.md`);

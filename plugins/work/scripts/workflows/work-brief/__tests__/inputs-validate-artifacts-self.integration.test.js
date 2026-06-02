@@ -78,6 +78,29 @@ describe('inputs.validateArtifacts() — _related/<self>.md rejection', () => {
     );
   });
 
+  it('catches _related/<self>.md even when linkedIds is empty (zero siblings)', () => {
+    const isoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'inputs-validate-self-zero-'));
+    const isoTasksDir = path.join(isoRoot, SELF_ID);
+    fs.mkdirSync(path.join(isoTasksDir, '_related'), { recursive: true });
+    // Only the offending self-file exists — no linked tickets at all.
+    fs.writeFileSync(
+      path.join(isoTasksDir, '_related', `${SELF_ID}.md`),
+      VALID_BODY
+    );
+    const manifest = {
+      self: { id: SELF_ID, title: 'Self ticket' },
+      parent: null,
+      siblings: [],
+    };
+    const errors = validateArtifacts(isoTasksDir, manifest, []);
+    const offending = path.join(isoTasksDir, '_related', `${SELF_ID}.md`);
+    assert.ok(
+      errors.some((e) => e.includes(offending)),
+      `expected error to flag ${offending} even with empty linkedIds, got: ${JSON.stringify(errors)}`
+    );
+    fs.rmSync(isoRoot, { recursive: true, force: true });
+  });
+
   it('does NOT flag _related/<self>.md when the self file is absent (happy path stays green)', () => {
     const cleanRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'inputs-validate-self-clean-'));
     const cleanTasksDir = path.join(cleanRoot, SELF_ID);
