@@ -86,6 +86,15 @@ function recordMissingReport(deliveredCitations, failures) {
   }
 }
 
+const VERDICT_WORDS = ['PASS', 'FAIL', 'COMPLETE', 'APPROVED', 'BLOCKED', 'NOT_DELIVERED'];
+const VERDICT_EXTRACT_RE = new RegExp(`\\b(${VERDICT_WORDS.join('|')})\\b`, 'i');
+
+function extractVerdictWord(line) {
+  if (!line) return null;
+  const m = VERDICT_EXTRACT_RE.exec(line);
+  return m ? m[1].toUpperCase() : null;
+}
+
 function checkCitations(deliveredCitations, reportContent, failures) {
   let testsChecked = 0;
   let testsFailing = 0;
@@ -94,10 +103,15 @@ function checkCitations(deliveredCitations, reportContent, failures) {
     const line = findTestLine(reportContent, cite.testName);
     if (line !== null && hasVerdict(line, PASS_VERDICTS)) continue;
     testsFailing += 1;
-    const observed =
-      line === null
-        ? `${cite.testName} not found in tests.check.md — not executed or not recorded`
-        : `${cite.testName} FAIL in tests.check.md`;
+    let observed;
+    if (line === null) {
+      observed = `${cite.testName} not found in tests.check.md — not executed or not recorded`;
+    } else {
+      const verdict = extractVerdictWord(line);
+      observed = verdict
+        ? `${cite.testName} ${verdict} in tests.check.md`
+        : `${cite.testName} mentioned in tests.check.md but no verdict marker found on that line`;
+    }
     failures.push(
       makeFailure({
         requirementId: row.id,

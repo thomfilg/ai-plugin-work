@@ -208,3 +208,36 @@ test('findTestLine prefers verdict line over heading mention of same testName', 
     cleanup();
   }
 });
+
+test('observed reports actual verdict word (BLOCKED) not hardcoded FAIL', async () => {
+  const tasks = coverageTasks([
+    { id: 'R4', status: 'DELIVERED', evidence: '`tests/foo.test.js:test_R4`' },
+  ]);
+  const report = '- test_R4 — Status: BLOCKED\n';
+  const { ctx, cleanup } = buildCtx({ tasks, testReport: report });
+  try {
+    const result = await phase.validate(ctx);
+    assert.equal(result.ok, false);
+    const f = ctx.failures.find((x) => x.checkType === 'test_pass');
+    assert.match(f.observed, /BLOCKED in tests\.check\.md/);
+    assert.doesNotMatch(f.observed, /FAIL in tests\.check\.md/);
+  } finally {
+    cleanup();
+  }
+});
+
+test('observed reports "no verdict marker" when mention exists but no verdict word', async () => {
+  const tasks = coverageTasks([
+    { id: 'R4', status: 'DELIVERED', evidence: '`tests/foo.test.js:test_R4`' },
+  ]);
+  const report = '- test_R4 mentioned in summary line with no verdict\n';
+  const { ctx, cleanup } = buildCtx({ tasks, testReport: report });
+  try {
+    const result = await phase.validate(ctx);
+    assert.equal(result.ok, false);
+    const f = ctx.failures.find((x) => x.checkType === 'test_pass');
+    assert.match(f.observed, /no verdict marker found/);
+  } finally {
+    cleanup();
+  }
+});
