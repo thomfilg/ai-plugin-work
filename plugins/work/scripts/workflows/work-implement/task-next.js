@@ -252,15 +252,52 @@ function isVisualOnlyTask(scope) {
 // tests around a feature already implemented in a prior task or upstream
 // change) cannot organically produce a failing test command in RED — the
 // source already passes. Authors opt into this by declaring the intent in
-// the task body with one of the marker phrases below. When marked, RED is
-// accepted if the gherkin scenarios are covered by test files under
-// Suggested Scope (or, with no gherkin tags, at least one test block exists
-// under scope). Detected by body marker so it requires explicit author
-// intent rather than firing silently whenever a test happens to pass.
+// the task body with BOTH markers co-occurring: the word `pre-existed` (the
+// behaviour is already there) AND the phrase `regression test added` (a
+// real regression test was authored). Requiring both keeps the matcher
+// narrow — a casual mention of `regression test added` in prose, or a
+// stray `pre-existed` elsewhere, won't trip the fallback alone.
 function isPreExistedRegressionTask(section) {
-  return /behaviour\s+pre-?existed|pre-?existed[,\s]+regression\s+test\s+added|regression\s+test\s+added/i.test(
-    section || ''
-  );
+  if (!section || typeof section !== 'string') return false;
+  return /pre-?existed/i.test(section) && /regression\s+test\s+added/i.test(section);
+}
+
+// Pure decision function for the pre-existed-regression RED gate, extracted
+// so each branch is unit-testable without spawning the full task-next.js
+// orchestrator. Returns either `{ verdict: 'block', reason }` to surface a
+// blockReason, or `{ verdict: 'advance', label }` to drive recordEvidence +
+// the success message.
+function evaluatePreExistedRegressionRed({ scenarios, testFiles, totalBlocks, taskNum }) {
+  if (!Array.isArray(testFiles) || testFiles.length === 0) {
+    return {
+      verdict: 'block',
+      reason:
+        'Pre-existed-regression marker present but no test files found under Suggested Scope. Add the regression test(s) to a *.test.* / *.spec.* file under scope.',
+    };
+  }
+  if (Array.isArray(scenarios) && scenarios.length > 0) {
+    const missing = scenariosCoveredByTests(scenarios, testFiles);
+    if (missing.length > 0) {
+      return {
+        verdict: 'block',
+        reason: `Pre-existed-regression marker present but tests do not yet cover these scenarios (verbatim title match against test files in Suggested Scope):\n  - ${missing.join('\n  - ')}\nAdd a test for each before re-invoking me.`,
+      };
+    }
+    return {
+      verdict: 'advance',
+      label: `tasks.md declared behaviour pre-existed; ${scenarios.length} scenario(s) covered by test files in Suggested Scope`,
+    };
+  }
+  if (!totalBlocks || totalBlocks === 0) {
+    return {
+      verdict: 'block',
+      reason: `Pre-existed-regression marker present but no it()/test() blocks found in ${testFiles.length} test file(s) under Suggested Scope. Add the regression test(s).`,
+    };
+  }
+  return {
+    verdict: 'advance',
+    label: `no @task:${taskNum} gherkin tags; ${testFiles.length} test file(s) under Suggested Scope, ${totalBlocks} test block(s)`,
+  };
 }
 
 function parseTaskTestCommand(section) {
@@ -906,43 +943,40 @@ function main() {
       // Pre-existed regression fallback: tasks.md explicitly authorizes
       // accepting RED when the test command already passes because the
       // behaviour being regression-tested predates this task. Author opts in
-      // via a body marker (see isPreExistedRegressionTask). We still verify
-      // scenario coverage so the task isn't trivially advanced.
+      // via a body marker (see isPreExistedRegressionTask). Decision logic
+      // is extracted into evaluatePreExistedRegressionRed for testability.
       if (isPreExistedRegressionTask(section)) {
         const testFiles = [...findTestFilesInScope(repoRoot, scope)];
-        if (testFiles.length === 0) {
-          blockReason = `Pre-existed-regression marker present but no test files found under Suggested Scope. Add the regression test(s) to a *.test.* / *.spec.* file under scope.`;
-        } else if (scenarios.length > 0) {
-          const missing = scenariosCoveredByTests(scenarios, testFiles);
-          if (missing.length > 0) {
-            blockReason = `Pre-existed-regression marker present but tests do not yet cover these scenarios (verbatim title match against test files in Suggested Scope):\n  - ${missing.join('\n  - ')}\nAdd a test for each before re-invoking me.`;
-          } else {
-            const rec = recordEvidence(TDD_PHASES.red, ticket, taskNum, testCmd, repoRoot, scope, ['--synthesized', '--reason', 'tasks.md declares behaviour pre-existed; regression test added']);
-            if (!rec.ok) {
-              blockReason = `Could not record RED evidence:\n${rec.out}`;
-            } else {
-              advanced = true;
-              phase = TDD_PHASES.green;
-              process.stdout.write(
-                `task-next: RED accepted via pre-existed-regression fallback (tasks.md declared behaviour pre-existed; ${scenarios.length} scenario(s) covered by test files in Suggested Scope).\n`
-              );
-            }
-          }
+        const totalBlocks =
+          testFiles.length > 0 && (scenarios?.length || 0) === 0
+            ? countTestBlocksInFiles(testFiles).totalBlocks
+            : 0;
+        const decision = evaluatePreExistedRegressionRed({
+          scenarios,
+          testFiles,
+          totalBlocks,
+          taskNum,
+        });
+        if (decision.verdict === 'block') {
+          blockReason = decision.reason;
         } else {
-          const { totalBlocks, filesWithBlocks } = countTestBlocksInFiles(testFiles);
-          if (totalBlocks === 0) {
-            blockReason = `Pre-existed-regression marker present but no it()/test() blocks found in ${testFiles.length} test file(s) under Suggested Scope. Add the regression test(s).`;
+          const rec = recordEvidence(
+            TDD_PHASES.red,
+            ticket,
+            taskNum,
+            testCmd,
+            repoRoot,
+            scope,
+            ['--synthesized', '--reason', 'tasks.md declares behaviour pre-existed; regression test added']
+          );
+          if (!rec.ok) {
+            blockReason = `Could not record RED evidence:\n${rec.out}`;
           } else {
-            const rec = recordEvidence(TDD_PHASES.red, ticket, taskNum, testCmd, repoRoot, scope, ['--synthesized', '--reason', 'tasks.md declares behaviour pre-existed; regression test added']);
-            if (!rec.ok) {
-              blockReason = `Could not record RED evidence:\n${rec.out}`;
-            } else {
-              advanced = true;
-              phase = TDD_PHASES.green;
-              process.stdout.write(
-                `task-next: RED accepted via pre-existed-regression fallback (no @task:${taskNum} gherkin tags; ${filesWithBlocks} test file(s) under Suggested Scope, ${totalBlocks} test block(s)).\n`
-              );
-            }
+            advanced = true;
+            phase = TDD_PHASES.green;
+            process.stdout.write(
+              `task-next: RED accepted via pre-existed-regression fallback (${decision.label}).\n`
+            );
           }
         }
       } else {
@@ -1087,6 +1121,7 @@ module.exports = {
   isDocsExempt,
   isVisualOnlyTask,
   isPreExistedRegressionTask,
+  evaluatePreExistedRegressionRed,
 };
 
 if (require.main === module) {
