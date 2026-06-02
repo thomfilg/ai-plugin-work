@@ -86,7 +86,7 @@ describe('tasks-gate intra-ticket scope routing', () => {
     fs.writeFileSync(path.join(tmpDir, 'tasks.md'), INVALID_TASKS_MD, 'utf8');
 
     const { parseTasks } = require(TASK_PARSER_PATH);
-    const { validateAll } = require(TASK_SCOPE_PATH);
+    const { validateAll } = require('../../lib/task-scope');
 
     const tasks = parseTasks(tmpDir);
     assert.ok(Array.isArray(tasks) && tasks.length === 2, 'invalid tasks.md must parse to 2 tasks');
