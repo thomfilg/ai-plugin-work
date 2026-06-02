@@ -1086,6 +1086,7 @@ module.exports = {
   wrapStrictMode,
   isDocsExempt,
   isVisualOnlyTask,
+  isPreExistedRegressionTask,
 };
 
 if (require.main === module) {
