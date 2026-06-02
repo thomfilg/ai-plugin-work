@@ -16,6 +16,7 @@
  */
 
 const { validateTaskGraph } = require('./graph-validation');
+const { VALID_KINDS } = require('../../work-tasks/lib/phases/kind_assign');
 
 // Parent module dependency injection. Set by work-state.js after it finishes
 // defining loadState/saveState/initState. This avoids the Node.js circular
@@ -207,6 +208,19 @@ function initTasksMeta(ticketId, taskCountOrTasks) {
           ? src.dependencies.filter((d) => Number.isInteger(d))
           : [];
       entry.dependencies = deps.slice(); // defensive copy
+      // Allowlist src.type against the canonical VALID_KINDS set used by the
+      // tasks-step kind_assign phase. An unknown value is dropped rather than
+      // persisted — kinds carry security semantics (the `checkpoint` kind
+      // auto-closes via completion.check.md), so silently accepting any
+      // string here would expand the blast radius of any future feature that
+      // auto-acts on a new kind. Adding a new kind must be a deliberate edit
+      // to kind_assign's VALID_KINDS.
+      if (src && typeof src.type === 'string' && VALID_KINDS.has(src.type)) {
+        entry.kind = src.type;
+      }
+      if (src && typeof src.title === 'string' && src.title) {
+        entry.title = src.title;
+      }
     }
     tasks.push(entry);
   }
@@ -217,7 +231,9 @@ function initTasksMeta(ticketId, taskCountOrTasks) {
     tasks,
   };
 
-  return saveState(ticketId, state);
+  const saved = saveState(ticketId, state);
+  if (saved && saved.error) return saved;
+  return { success: true, tasksMeta: state.tasksMeta };
 }
 
 module.exports = {

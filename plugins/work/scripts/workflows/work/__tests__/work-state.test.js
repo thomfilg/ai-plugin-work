@@ -45,6 +45,11 @@ function runWorkState(args = [], opts = {}) {
     });
 
     proc.on('error', reject);
+
+    if (typeof opts.stdin === 'string') {
+      proc.stdin.write(opts.stdin);
+    }
+    proc.stdin.end();
   });
 }
 
@@ -801,6 +806,448 @@ describe('work-state.js', () => {
       const { result, code } = await runWorkState(['complete', TICKET_NO_META]);
       assert.equal(code, 0, 'Should exit with code 0 when no tasksMeta exists');
       assert.equal(result.status, 'completed');
+    });
+  });
+
+
+  describe('completeWork checkpoint auto-completion (GH-410)', () => {
+    const TICKET_APPROVED = 'TEST-CHK-APPROVED-001';
+    const TICKET_NO_REPORT = 'TEST-CHK-NOREPORT-001';
+    const TICKET_INCOMPLETE = 'TEST-CHK-INCOMPLETE-001';
+    const TICKET_NON_CKPT = 'TEST-CHK-NONCKPT-001';
+    const TICKET_LEGACY = 'TEST-CHK-LEGACY-001';
+    const TICKET_MSG = 'TEST-CHK-MSG-001';
+    const TICKET_MSG_MIXED = 'TEST-CHK-MIXED-001';
+
+    after(() => {
+      cleanupTempWorkState(TICKET_APPROVED);
+      cleanupTempWorkState(TICKET_NO_REPORT);
+      cleanupTempWorkState(TICKET_INCOMPLETE);
+      cleanupTempWorkState(TICKET_NON_CKPT);
+      cleanupTempWorkState(TICKET_LEGACY);
+      cleanupTempWorkState(TICKET_MSG);
+      cleanupTempWorkState(TICKET_MSG_MIXED);
+    });
+
+    function seedTicket(ticket, tasks, opts = {}) {
+      const dir = path.join(TEMP_TASKS_BASE, ticket);
+      fs.mkdirSync(dir, { recursive: true });
+      const state = {
+        ticketId: ticket,
+        status: 'in_progress',
+        stepStatus: {},
+        tasksMeta: { totalTasks: tasks.length, currentTaskIndex: tasks.length, tasks },
+      };
+      fs.writeFileSync(path.join(dir, '.work-state.json'), JSON.stringify(state));
+      // By default write a tasks.md that matches the seeded tasksMeta. The
+      // auto-completion path re-verifies kind:'checkpoint' against tasks.md,
+      // so absent this file the gate refuses to close anything. Pass
+      // `opts.skipTasksMd: true` to test the tasks.md-missing fallback path,
+      // or `opts.tasksMdKinds` to deliberately desync tasks.md from state
+      // (e.g. for the tampering-defense test).
+      if (!opts.skipTasksMd) {
+        const kinds = opts.tasksMdKinds || tasks.map((t) => (t && t.kind) || 'backend');
+        const sections = tasks.map((t, i) => {
+          const num = i + 1;
+          const title = (t && t.title) || `Task ${num}`;
+          return `## Task ${num} — ${title}\n\n### Type\n${kinds[i] || 'backend'}\n`;
+        });
+        fs.writeFileSync(path.join(dir, 'tasks.md'), sections.join('\n'));
+      }
+      return dir;
+    }
+
+    function writeReport(dir, status, namedTasks) {
+      // Per-task linkage (security review on PR #470): auto-completion now
+      // requires the checkpoint task's id or title to appear in the report.
+      // Tests that expect auto-completion must pass the relevant task ids.
+      const names = Array.isArray(namedTasks) && namedTasks.length
+        ? `\nVerified: ${namedTasks.join(', ')}\n`
+        : '';
+      fs.writeFileSync(
+        path.join(dir, 'completion.check.md'),
+        `# Completion Report\nStatus: ${status}\n${names}`
+      );
+    }
+
+    it('auto-completes a pending checkpoint task when completion.check.md is APPROVED', async () => {
+      const dir = seedTicket(TICKET_APPROVED, [
+        { id: 'task_1', status: 'completed', kind: 'backend' },
+        { id: 'task_2', status: 'pending', kind: 'checkpoint', title: 'Wrap-up verification' },
+      ]);
+      writeReport(dir, 'APPROVED', ['task_2']);
+      const { result, code } = await runWorkState(['complete', TICKET_APPROVED]);
+      assert.equal(code, 0);
+      assert.equal(result.status, 'completed');
+      assert.ok(Array.isArray(result.autoCompleted));
+      assert.equal(result.autoCompleted.length, 1);
+      assert.equal(result.autoCompleted[0].taskId, 'task_2');
+      assert.equal(result.autoCompleted[0].title, 'Wrap-up verification',
+        'audit must capture human-readable title, not just task id');
+      assert.match(result.autoCompleted[0].reason, /APPROVED/);
+    });
+
+    it('audit reason reflects actual matched verdict (COMPLETE, not hardcoded APPROVED)', async () => {
+      const TICKET_COMPLETE = 'TEST-CHK-COMPLETE-001';
+      cleanupTempWorkState(TICKET_COMPLETE);
+      const dir = seedTicket(TICKET_COMPLETE, [
+        { id: 'task_1', status: 'completed', kind: 'backend' },
+        { id: 'task_2', status: 'pending', kind: 'checkpoint', title: 'Wrap-up' },
+      ]);
+      writeReport(dir, 'COMPLETE', ['task_2']);
+      const { result, code } = await runWorkState(['complete', TICKET_COMPLETE]);
+      assert.equal(code, 0);
+      assert.equal(result.autoCompleted.length, 1);
+      assert.match(result.autoCompleted[0].reason, /^COMPLETE /,
+        'reason must use the actual verdict from the report, not a hardcoded string');
+      cleanupTempWorkState(TICKET_COMPLETE);
+    });
+
+    it('blocks completion when checkpoint task has no completion.check.md', async () => {
+      seedTicket(TICKET_NO_REPORT, [
+        { id: 'task_1', status: 'completed', kind: 'backend' },
+        { id: 'task_2', status: 'pending', kind: 'checkpoint' },
+      ]);
+      const { code, stderr } = await runWorkState(['complete', TICKET_NO_REPORT]);
+      assert.notEqual(code, 0);
+      assert.match(stderr, /tasks still pending|checkpoint/i);
+    });
+
+    it('blocks completion when verdict is INCOMPLETE', async () => {
+      const dir = seedTicket(TICKET_INCOMPLETE, [
+        { id: 'task_1', status: 'pending', kind: 'checkpoint' },
+      ]);
+      writeReport(dir, 'INCOMPLETE');
+      const { code, stderr } = await runWorkState(['complete', TICKET_INCOMPLETE]);
+      assert.notEqual(code, 0);
+      assert.match(stderr, /tasks still pending|checkpoint/i);
+    });
+
+    it('does NOT auto-complete non-checkpoint pending tasks even with APPROVED report', async () => {
+      const dir = seedTicket(TICKET_NON_CKPT, [
+        { id: 'task_1', status: 'pending', kind: 'backend' },
+      ]);
+      writeReport(dir, 'APPROVED');
+      const { code, stderr } = await runWorkState(['complete', TICKET_NON_CKPT]);
+      assert.notEqual(code, 0);
+      assert.match(stderr, /tasks still pending/i);
+    });
+
+    it('does NOT auto-complete tasks lacking a kind field (legacy state)', async () => {
+      const dir = seedTicket(TICKET_LEGACY, [
+        { id: 'task_1', status: 'pending' },
+      ]);
+      writeReport(dir, 'APPROVED');
+      const { code, stderr } = await runWorkState(['complete', TICKET_LEGACY]);
+      assert.notEqual(code, 0);
+      assert.match(stderr, /tasks still pending/i);
+    });
+
+    it('refuses to auto-close when tasks.md is missing (fail-closed)', async () => {
+      // Security review on PR #470 (round 2): tasks.md is the only authority
+      // we trust for the kind re-verification. If it's missing or
+      // unparseable, the same actor who could tamper with .work-state.json
+      // could have deleted it — so we refuse to auto-close anything.
+      const TICKET_NO_MD = 'TEST-CHK-NO-TASKS-MD-001';
+      cleanupTempWorkState(TICKET_NO_MD);
+      const dir = seedTicket(
+        TICKET_NO_MD,
+        [{ id: 'task_1', status: 'pending', kind: 'checkpoint', title: 'X' }],
+        { skipTasksMd: true }
+      );
+      writeReport(dir, 'APPROVED', ['task_1']);
+      const { code } = await runWorkState(['complete', TICKET_NO_MD]);
+      assert.notEqual(code, 0, 'complete must fail when tasks.md is absent');
+      cleanupTempWorkState(TICKET_NO_MD);
+    });
+
+    it('does NOT match COMPLETE as a prefix of COMPLETED/COMPLETELY', async () => {
+      // Security review on PR #470: the verdict capture group must have a
+      // trailing non-letter boundary. Without it, "Status: COMPLETED with
+      // reservations" or "Status: COMPLETELY INSUFFICIENT" would pass the
+      // gate because COMPLETE is a prefix.
+      const cases = [
+        'Status: COMPLETED with reservations',
+        'Status: COMPLETELY INSUFFICIENT',
+        'Status: APPROVED-WITH-CHANGES',
+        'Status: APPROVEDISH',
+      ];
+      for (let i = 0; i < cases.length; i++) {
+        const ticket = `TEST-CHK-PREFIX-VERDICT-${i}`;
+        cleanupTempWorkState(ticket);
+        const dir = seedTicket(
+          ticket,
+          [{ id: 'task_1', status: 'pending', kind: 'checkpoint', title: 'X' }],
+          { tasksMdKinds: ['checkpoint'] }
+        );
+        fs.writeFileSync(
+          path.join(dir, 'completion.check.md'),
+          `# Report\n${cases[i]}\n\nVerified: task_1\n`
+        );
+        const { code } = await runWorkState(['complete', ticket]);
+        assert.notEqual(code, 0,
+          `verdict prefix "${cases[i]}" must NOT pass the gate`);
+        cleanupTempWorkState(ticket);
+      }
+    });
+
+    it('captures the authenticated verdict in audit reason (not a quoted one)', async () => {
+      // Security review on PR #470: the gate and the audit-reason source
+      // must read the same authenticated value. Previously the gate used a
+      // line-anchored regex while matchedVerdict came from the unanchored
+      // buildVerdictRegex — so a quoted "Status: COMPLETE" earlier in the
+      // file could leak into the audit reason even when the authentic
+      // verdict was "Status: APPROVED". Both reads now share the anchored
+      // regex.
+      const TICKET_DRIFT = 'TEST-CHK-VERDICT-DRIFT-001';
+      cleanupTempWorkState(TICKET_DRIFT);
+      const dir = seedTicket(
+        TICKET_DRIFT,
+        [{ id: 'task_1', status: 'pending', kind: 'checkpoint', title: 'X' }],
+        { tasksMdKinds: ['checkpoint'] }
+      );
+      // Quoted example mentions COMPLETE; authentic line says APPROVED.
+      fs.writeFileSync(
+        path.join(dir, 'completion.check.md'),
+        `# Report\n\nQuote of a sample report:\n> Status: COMPLETE\n\nStatus: APPROVED\n\nVerified: task_1\n`
+      );
+      const { result, code } = await runWorkState(['complete', TICKET_DRIFT]);
+      assert.equal(code, 0);
+      assert.equal(result.autoCompleted.length, 1);
+      assert.match(result.autoCompleted[0].reason, /^APPROVED /,
+        'audit reason must reflect the authentic line-anchored verdict, not the quoted one');
+      cleanupTempWorkState(TICKET_DRIFT);
+    });
+
+    it('refuses to auto-close on quoted/example verdict text (verdict line anchor)', async () => {
+      // Security review on PR #470 (round 2): a report whose actual verdict
+      // is INCOMPLETE but which contains example/quoted text like
+      // "> Status: APPROVED" must NOT auto-close. The verdict line is now
+      // anchored — quote/list-prefixed lines don't satisfy the gate.
+      const TICKET_QUOTED = 'TEST-CHK-QUOTED-001';
+      cleanupTempWorkState(TICKET_QUOTED);
+      const dir = seedTicket(
+        TICKET_QUOTED,
+        [{ id: 'task_1', status: 'pending', kind: 'checkpoint', title: 'X' }],
+        { tasksMdKinds: ['checkpoint'] }
+      );
+      // Authentic verdict is INCOMPLETE; quoted example mentions APPROVED.
+      fs.writeFileSync(
+        path.join(dir, 'completion.check.md'),
+        `# Report\nStatus: INCOMPLETE\n\nExample of a passing report:\n> Status: APPROVED\n\nVerified: task_1\n`
+      );
+      const { code } = await runWorkState(['complete', TICKET_QUOTED]);
+      assert.notEqual(code, 0, 'complete must fail — only authentic verdict counts');
+      cleanupTempWorkState(TICKET_QUOTED);
+    });
+
+    it('does NOT auto-close when title contains "checkpoint" but Type is not checkpoint', async () => {
+      // Security review on PR #470 (round 2): parseTasks marks isCheckpoint
+      // via a title regex (/checkpoint/i.test(title)), but we deliberately
+      // trust ONLY explicit type:'checkpoint' from tasks.md. This pin asserts
+      // the contract against future drift.
+      const TICKET_TITLE = 'TEST-CHK-TITLE-001';
+      cleanupTempWorkState(TICKET_TITLE);
+      const dir = seedTicket(
+        TICKET_TITLE,
+        [{ id: 'task_1', status: 'pending', kind: 'checkpoint', title: 'checkpoint review' }],
+        { tasksMdKinds: ['backend'] } // tasks.md says backend, not checkpoint
+      );
+      writeReport(dir, 'APPROVED', ['task_1']);
+      const { code } = await runWorkState(['complete', TICKET_TITLE]);
+      assert.notEqual(code, 0,
+        'title-based heuristic must NOT pass the kind re-verify gate');
+      cleanupTempWorkState(TICKET_TITLE);
+    });
+
+    it('refuses to auto-close when state says checkpoint but tasks.md disagrees', async () => {
+      // Security review on PR #470: re-verify the source of truth (tasks.md)
+      // before auto-closing. An attacker who can write .work-state.json
+      // directly could flip kind:"checkpoint" on a real implementation task —
+      // the tasks.md re-check defeats that path.
+      const TICKET_TAMPER = 'TEST-CHK-TAMPER-001';
+      cleanupTempWorkState(TICKET_TAMPER);
+      // tasksMeta claims task_1 is checkpoint, but tasks.md says backend.
+      const dir = seedTicket(
+        TICKET_TAMPER,
+        [{ id: 'task_1', status: 'pending', kind: 'checkpoint', title: 'fake checkpoint' }],
+        { tasksMdKinds: ['backend'] }
+      );
+      writeReport(dir, 'APPROVED', ['task_1']);
+      const { code, stderr } = await runWorkState(['complete', TICKET_TAMPER]);
+      assert.notEqual(code, 0,
+        'complete must fail — tasks.md disagrees with state on kind');
+      assert.match(stderr, /tasks still pending|checkpoint/i);
+      cleanupTempWorkState(TICKET_TAMPER);
+    });
+
+    it('does NOT match task_1 as a substring of task_10 in the report', async () => {
+      // Security review on PR #470 (cursor bot): a substring `includes()` check
+      // would accept `task_1` as a hit when the report only names `task_10`,
+      // since one is a prefix of the other. The linkage check must use a
+      // word/token boundary so each checkpoint closure is individually backed.
+      const TICKET_PREFIX = 'TEST-CHK-PREFIX-001';
+      cleanupTempWorkState(TICKET_PREFIX);
+      const dir = seedTicket(TICKET_PREFIX, [
+        { id: 'task_1', status: 'pending', kind: 'checkpoint', title: 'first' },
+        { id: 'task_10', status: 'pending', kind: 'checkpoint', title: 'tenth' },
+      ]);
+      // Report names only task_10 — task_1 must NOT be auto-closed.
+      writeReport(dir, 'APPROVED', ['task_10']);
+      const { code, stderr } = await runWorkState(['complete', TICKET_PREFIX]);
+      assert.notEqual(code, 0, 'complete must fail because task_1 was not named');
+      assert.match(stderr, /tasks still pending|checkpoint/i);
+      cleanupTempWorkState(TICKET_PREFIX);
+    });
+
+    it('does NOT blanket-close every pending checkpoint when only one is named in the report', async () => {
+      // Security review on PR #470: a single APPROVED verdict must NOT close
+      // every pending checkpoint task. Each closure must be backed by the
+      // report naming that specific task (by id or title).
+      const TICKET_BLANKET = 'TEST-CHK-BLANKET-001';
+      cleanupTempWorkState(TICKET_BLANKET);
+      const dir = seedTicket(TICKET_BLANKET, [
+        { id: 'task_1', status: 'pending', kind: 'checkpoint', title: 'first checkpoint' },
+        { id: 'task_2', status: 'pending', kind: 'checkpoint', title: 'second checkpoint' },
+      ]);
+      // Report names only task_1, so task_2 must remain pending → complete fails.
+      writeReport(dir, 'APPROVED', ['task_1']);
+      const { code, stderr } = await runWorkState(['complete', TICKET_BLANKET]);
+      assert.notEqual(code, 0, 'complete must fail because task_2 was not named');
+      assert.match(stderr, /tasks still pending|checkpoint/i);
+      cleanupTempWorkState(TICKET_BLANKET);
+    });
+
+    it('emits a checkpoint-directive error when all pending are checkpoint without report', async () => {
+      seedTicket(TICKET_MSG, [
+        { id: 'task_1', status: 'pending', kind: 'checkpoint' },
+      ]);
+      const { code, stderr } = await runWorkState(['complete', TICKET_MSG]);
+      assert.notEqual(code, 0);
+      assert.match(stderr, /checkpoint/i);
+      assert.match(stderr, /completion\.check\.md|APPROVED/);
+    });
+
+    it('emits the generic message when at least one pending task is not checkpoint', async () => {
+      seedTicket(TICKET_MSG_MIXED, [
+        { id: 'task_1', status: 'pending', kind: 'backend' },
+        { id: 'task_2', status: 'pending', kind: 'checkpoint' },
+      ]);
+      const { code, stderr } = await runWorkState(['complete', TICKET_MSG_MIXED]);
+      assert.notEqual(code, 0);
+      assert.match(stderr, /2 tasks still pending/);
+    });
+  });
+
+  describe('task-init descriptor array (GH-410)', () => {
+    const TICKET_STDIN = 'TEST-TASKINIT-STDIN-001';
+    const TICKET_ENV = 'TEST-TASKINIT-ENV-001';
+    const TICKET_LEGACY = 'TEST-TASKINIT-LEGACY-001';
+    const TICKET_BAD = 'TEST-TASKINIT-BAD-001';
+    const TICKET_CHECKPOINT = 'TEST-TASKINIT-CHK-001';
+
+    after(() => {
+      cleanupTempWorkState(TICKET_STDIN);
+      cleanupTempWorkState(TICKET_ENV);
+      cleanupTempWorkState(TICKET_LEGACY);
+      cleanupTempWorkState(TICKET_BAD);
+      cleanupTempWorkState(TICKET_CHECKPOINT);
+    });
+
+    it('accepts descriptor array via stdin and persists kind per entry', async () => {
+      await runWorkState(['init', TICKET_STDIN]);
+      const descriptors = [
+        { num: 1, type: 'frontend' },
+        { num: 2, type: 'backend' },
+        { num: 3, type: 'e2e' },
+      ];
+      const { result, code, stderr } = await runWorkState(['task-init', TICKET_STDIN], {
+        stdin: JSON.stringify(descriptors),
+      });
+      assert.equal(code, 0, `should exit 0 (stderr: ${stderr})`);
+      assert.equal(result.success, true);
+      assert.ok(Array.isArray(result.tasksMeta.tasks));
+      assert.equal(result.tasksMeta.tasks.length, 3);
+      assert.equal(result.tasksMeta.tasks[0].kind, 'frontend');
+      assert.equal(result.tasksMeta.tasks[1].kind, 'backend');
+      assert.equal(result.tasksMeta.tasks[2].kind, 'e2e');
+    });
+
+    it('ignores TASK_INIT_DESCRIPTORS env var (dropped as security hardening)', async () => {
+      // Security review on PR #470: env vars leak across subprocess hops too
+      // freely, so any hook or subagent that could set TASK_INIT_DESCRIPTORS
+      // could re-classify a real implementation task as kind:"checkpoint" and
+      // bypass the TDD gate via auto-completion. Stdin is now the only path.
+      await runWorkState(['init', TICKET_ENV]);
+      const descriptors = [
+        { num: 1, type: 'backend' },
+        { num: 2, type: 'docs' },
+      ];
+      const { result, code, stderr } = await runWorkState(['task-init', TICKET_ENV, '2'], {
+        env: { TASK_INIT_DESCRIPTORS: JSON.stringify(descriptors) },
+      });
+      assert.equal(code, 0, `should exit 0 (stderr: ${stderr})`);
+      assert.equal(result.success, true);
+      assert.equal(result.tasksMeta.tasks.length, 2);
+      // Legacy count path: no `kind` set on entries even though env was present.
+      assert.equal(result.tasksMeta.tasks[0].kind, undefined);
+      assert.equal(result.tasksMeta.tasks[1].kind, undefined);
+    });
+
+    it('drops unknown kinds (allowlist enforcement)', async () => {
+      // Security review on PR #470: kinds carry security semantics
+      // (`checkpoint` auto-closes via completion.check.md). initTasksMeta
+      // must only persist values from the canonical VALID_KINDS set, so a
+      // future feature that auto-acts on a new kind cannot be triggered by
+      // an unknown string sneaking through tasks.md.
+      const TICKET_UNKNOWN_KIND = 'TEST-UNKNOWN-KIND-001';
+      cleanupTempWorkState(TICKET_UNKNOWN_KIND);
+      await runWorkState(['init', TICKET_UNKNOWN_KIND]);
+      const descriptors = [
+        { num: 1, type: 'backend' },
+        { num: 2, type: 'totally-made-up-kind' },
+      ];
+      const { result, code } = await runWorkState(['task-init', TICKET_UNKNOWN_KIND], {
+        stdin: JSON.stringify(descriptors),
+      });
+      assert.equal(code, 0);
+      assert.equal(result.tasksMeta.tasks[0].kind, 'backend');
+      assert.equal(result.tasksMeta.tasks[1].kind, undefined,
+        'unknown kind must not be persisted');
+      cleanupTempWorkState(TICKET_UNKNOWN_KIND);
+    });
+
+    it('persists kind for checkpoint type', async () => {
+      await runWorkState(['init', TICKET_CHECKPOINT]);
+      const descriptors = [
+        { num: 1, type: 'backend' },
+        { num: 2, type: 'checkpoint' },
+      ];
+      const { result, code } = await runWorkState(['task-init', TICKET_CHECKPOINT], {
+        stdin: JSON.stringify(descriptors),
+      });
+      assert.equal(code, 0);
+      assert.equal(result.tasksMeta.tasks[1].kind, 'checkpoint');
+    });
+
+    it('preserves legacy count argument with no kind on entries', async () => {
+      await runWorkState(['init', TICKET_LEGACY]);
+      const { result, code } = await runWorkState(['task-init', TICKET_LEGACY, '3']);
+      assert.equal(code, 0, 'legacy count mode should exit 0');
+      assert.equal(result.success, true);
+      assert.equal(result.tasksMeta.tasks.length, 3);
+      for (const entry of result.tasksMeta.tasks) {
+        assert.equal(entry.kind, undefined, 'legacy entries should not have kind');
+      }
+    });
+
+    it('errors on malformed JSON stdin with clear stderr message', async () => {
+      await runWorkState(['init', TICKET_BAD]);
+      const { code, stderr } = await runWorkState(['task-init', TICKET_BAD], {
+        stdin: '{not valid json[',
+      });
+      assert.notEqual(code, 0, 'malformed JSON should exit non-zero');
+      assert.match(stderr, /json|descriptor|parse/i, 'stderr should mention parse issue');
     });
   });
 });
