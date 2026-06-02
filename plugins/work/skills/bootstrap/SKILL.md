@@ -42,6 +42,7 @@ Extract:
 - Summary (for branch name)
 - Description (for PR body)
 - Status (verify it's not already Done)
+- `gitBranchName` (Linear only — passed verbatim to `bootstrap-branch.js` in Step 4 via `--git-branch-name`; empty string when the field is absent or the provider is not Linear)
 
 ### Step 4: Resolve + validate branch name, then create worktree
 

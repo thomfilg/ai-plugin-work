@@ -24,6 +24,7 @@
 'use strict';
 
 const getConfig = require('../../lib/get-config');
+const { loadEnvrcFromDirs } = require('./bootstrap-custom-script');
 
 function parseArgs(argv) {
   const out = { ticketId: null, summary: null, gitBranchName: null };
@@ -150,6 +151,9 @@ function main() {
   if (!args.ticketId) {
     fail('missing required flag --ticket-id');
   }
+  // Mirror bootstrap-custom-script: source .envrc when direnv is not active so
+  // TICKET_PROVIDER / BRANCH_PREFIX / BRANCH_NAME_REGEX are honored under bare shells.
+  loadEnvrcFromDirs([process.cwd(), require('path').dirname(process.cwd())]);
   // --summary is only required when there is no Linear verbatim path.
   const providerIsLinear = (getConfig('TICKET_PROVIDER') || '').toLowerCase() === 'linear';
   if (!args.summary && !(args.gitBranchName && providerIsLinear)) {
