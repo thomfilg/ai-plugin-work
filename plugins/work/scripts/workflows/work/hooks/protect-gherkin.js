@@ -13,13 +13,13 @@
  * path. Ambiguous diffs (mixed tag + semantic line) default-block to
  * preserve the security invariant.
  *
- * GH-487: Tag-only allow-path extended to the `check` step so review-driven
- * retags don't force a spec rewind. TAG_LINE_RE also accepts `/` and `.` so
- * path-bearing tags (e.g. `@test:plugins/work/.../foo.test.js`) are
- * recognised as tag lines.
+ * GH-487: TAG_LINE_RE accepts `/` and `.` so path-bearing tags
+ * (e.g. `@test:plugins/work/.../foo.test.js`) — auto-stamped onto every
+ * scenario by tasks_gate — are recognised as tag lines. Without this the
+ * existing `implement` allow-path is broken for any tasks_gate-stamped
+ * scenario.
  *
- * Allowed steps for artifact protector: spec (+ spec_gate, tasks, tasks_gate via protector config)
- * Allowed steps for tag-only edits: implement, check (see TAG_ONLY_ALLOWED_STEPS)
+ * Allowed steps: spec
  * All other steps: blocked (exit 2)
  * No workflow active: allowed (exit 0, fail-open)
  */
@@ -31,15 +31,6 @@ const { createArtifactProtector } = require('../../lib/protect-artifact-files');
 
 /** Tag line: zero or more whitespace, then one or more `@token` tokens. */
 const TAG_LINE_RE = /^\s*(@[\w:./-]+\s*)+$/;
-
-/**
- * Workflow steps during which a tag-only edit on gherkin.feature is allowed
- * to bypass the artifact protector. `implement` enables agents to re-classify
- * scenarios mid-cycle (P0 #5); `check` extends the same allowance during the
- * lint/typecheck/test gate so retags surfaced by review don't force a spec
- * rewind (GH-487 Task 2).
- */
-const TAG_ONLY_ALLOWED_STEPS = ['implement', 'check'];
 
 /**
  * Detect if an Edit/MultiEdit diff of gherkin.feature touches ONLY tag lines.
@@ -189,7 +180,7 @@ async function main() {
     const filePath = toolInput?.file_path || '';
     if (filePath && path.basename(filePath) === 'gherkin.feature') {
       const ticketId = getTicketId(hookData);
-      if (ticketId && TAG_ONLY_ALLOWED_STEPS.includes(getStepInProgress(ticketId))) {
+      if (ticketId && getStepInProgress(ticketId) === 'implement') {
         const edits =
           toolName === 'MultiEdit' && Array.isArray(toolInput.edits)
             ? toolInput.edits
