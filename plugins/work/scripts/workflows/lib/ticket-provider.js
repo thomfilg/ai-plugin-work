@@ -459,9 +459,9 @@ function getTransitionPrompt(ticketId, status, providerConfig) {
       );
     case 'linear':
       return (
-        'Update Linear issue ' +
+        'Transition Linear issue ' +
         ticketId +
-        ' status to "' +
+        ' to "' +
         status +
         '" using mcp__linear__save_issue with id "' +
         ticketId +
