@@ -213,7 +213,10 @@ function extractField(section, header) {
 }
 
 function parseSuggestedScope(section) {
-  const raw = extractField(section, 'Suggested Scope') || extractField(section, 'Files in scope');
+  // Per spec Open Q #3: `Files in scope` is the canonical heading and wins
+  // when both are present. `Suggested Scope` remains as a backward-compatible
+  // fallback for older tasks.md files.
+  const raw = extractField(section, 'Files in scope') || extractField(section, 'Suggested Scope');
   return raw
     .split('\n')
     .map((l) => l.replace(/^[-*+]\s+/, '').trim())

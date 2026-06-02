@@ -164,6 +164,97 @@ test.describe('reuse_audit_enforcement phase', () => {
     assert.deepEqual(candidates, [], 'camelCase symbol must produce no suffix candidates');
   });
 
+  test('symbol with regex metacharacter (`Object.create`) is matched literally — passes when present', async () => {
+    const spec = [
+      '# Spec',
+      '',
+      '## Reuse Audit',
+      '',
+      '- `Object.create` MUST be reused from `lib/x.js`',
+      '',
+    ].join('\n');
+    const { ctx, cleanup } = buildCtx({
+      spec,
+      changedFiles: ['lib/x.js'],
+      fileContents: {
+        'lib/x.js': 'const o = Object.create(null);\n',
+      },
+    });
+    try {
+      const result = await phase.validate(ctx);
+      assert.equal(result.ok, true, 'literal Object.create in diff must satisfy the audit');
+      assert.equal(
+        ctx.failures.filter((f) => f.checkType === 'reuse_audit').length,
+        0,
+      );
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('symbol with regex metacharacter (`Object.create`) does NOT match wildcard token `ObjectXcreate`', async () => {
+    const spec = [
+      '# Spec',
+      '',
+      '## Reuse Audit',
+      '',
+      '- `Object.create` MUST be reused from `lib/x.js`',
+      '',
+    ].join('\n');
+    const { ctx, cleanup } = buildCtx({
+      spec,
+      changedFiles: ['lib/x.js'],
+      fileContents: {
+        'lib/x.js': 'const o = ObjectXcreate(null);\n',
+      },
+    });
+    try {
+      const result = await phase.validate(ctx);
+      assert.equal(
+        result.ok,
+        false,
+        'wildcard match must NOT count — `.` must be escaped to a literal dot',
+      );
+      const rec = ctx.failures.find((f) => f.checkType === 'reuse_audit');
+      assert.ok(rec, 'failure record should be pushed for missing literal symbol');
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('symbol containing `[`/`]` does not throw SyntaxError (regex metachar escaped)', async () => {
+    const spec = [
+      '# Spec',
+      '',
+      '## Reuse Audit',
+      '',
+      '- `foo[bar]` MUST be reused from `lib/y.js`',
+      '',
+    ].join('\n');
+    const { ctx, cleanup } = buildCtx({
+      spec,
+      changedFiles: ['lib/y.js'],
+      fileContents: {
+        'lib/y.js': 'const v = foo[bar];\n',
+      },
+    });
+    try {
+      const result = await phase.validate(ctx);
+      // The key assertion: validate did not crash with a SyntaxError caught
+      // by the fail-closed handler (which would surface "parser threw:"
+      // and silently bypass enforcement). Either ok:true (literal match
+      // succeeded) is acceptable; what must NOT happen is a parser-threw
+      // SyntaxError from an unescaped `[`.
+      const errs = Array.isArray(result.errors) ? result.errors : [];
+      assert.ok(
+        !errs.some((e) => /SyntaxError|Invalid regular expression/i.test(String(e))),
+        `must not surface a regex SyntaxError; got errors=${JSON.stringify(errs)}`,
+      );
+    } finally {
+      cleanup();
+    }
+  });
+
   test('(e) parser throws on malformed Reuse Audit block ⇒ ok:false with parser threw error (fail-closed)', async () => {
     // Reuse Audit heading present but body is empty/unparseable → readReuseAudit throws.
     const spec = '# Spec\n\n## Reuse Audit\n\n\n## Next\nx\n';

@@ -64,8 +64,22 @@ function loadChangedContents(ctx, changed) {
   return out;
 }
 
+/**
+ * Escape RegExp metacharacters so `symbol` is matched literally. Without
+ * this, audit entries containing `.`, `[`, `(`, etc. would either match
+ * wildcards (false positives, e.g. `Object.create` matching `ObjectXcreate`)
+ * or throw `SyntaxError` mid-regex (e.g. `foo[bar]`), which the phase's
+ * fail-closed `catch` would swallow and silently bypass enforcement.
+ *
+ * @param {string} str
+ * @returns {string}
+ */
+function escapeRegExp(str) {
+  return String(str).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function symbolPresentIn(symbol, fileBlobs) {
-  const re = new RegExp(`\\b${symbol}\\b`);
+  const re = new RegExp(`\\b${escapeRegExp(symbol)}\\b`);
   return fileBlobs.some((f) => re.test(f.content));
 }
 
@@ -162,3 +176,4 @@ module.exports = function register(registerPhase) {
 module.exports.validate = validate;
 module.exports.instructions = instructions;
 module.exports.extractSuffixCandidates = extractSuffixCandidates;
+module.exports.escapeRegExp = escapeRegExp;

@@ -35,3 +35,26 @@ test('extractField does NOT match heading-like substring without leading newline
   const section = 'prefix BACKTICK### Files in scopeBACKTICK inline\n### Other\n'.replace(/BACKTICK/g, String.fromCharCode(96));
   assert.equal(extractField(section, 'Files in scope'), '');
 });
+
+test('parseSuggestedScope: when BOTH headings are present, `Files in scope` wins (canonical per spec Open Q #3)', () => {
+  const section = [
+    '## Task 7',
+    '',
+    '### Suggested Scope',
+    '- BACKTICKlegacy/old-path.jsBACKTICK',
+    '- BACKTICKlegacy/other.jsBACKTICK',
+    '',
+    '### Files in scope',
+    '- BACKTICKcanonical/new-path.jsBACKTICK',
+    '- BACKTICKcanonical/new-test.test.jsBACKTICK',
+    '',
+    '### Test Command',
+    '',
+  ].join('\n').replace(/BACKTICK/g, String.fromCharCode(96));
+  const scope = parseSuggestedScope(section);
+  assert.deepEqual(
+    scope,
+    ['canonical/new-path.js', 'canonical/new-test.test.js'],
+    '`Files in scope` is the canonical heading and must override `Suggested Scope` when both are present',
+  );
+});
