@@ -23,7 +23,6 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const TASK_SCOPE_PATH = path.resolve(__dirname, '..', '..', 'lib', 'task-scope');
 const TASK_PARSER_PATH = path.resolve(__dirname, '..', 'lib', 'task-parser');
 
 let tmpDir;
@@ -100,10 +99,7 @@ describe('tasks-gate intra-ticket scope routing', () => {
 
     // At least one error must name `components/X.tsx` AND reference both task numbers.
     const matching = result.errors.filter(
-      (e) =>
-        /components\/X\.tsx/.test(e) &&
-        /\bTask\s*1\b/i.test(e) &&
-        /\bTask\s*2\b/i.test(e)
+      (e) => /components\/X\.tsx/.test(e) && /\bTask\s*1\b/i.test(e) && /\bTask\s*2\b/i.test(e)
     );
     assert.ok(
       matching.length >= 1,
