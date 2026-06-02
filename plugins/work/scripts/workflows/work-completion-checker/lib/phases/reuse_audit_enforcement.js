@@ -37,7 +37,7 @@ function extractSuffixCandidates(symbol, diffContent) {
   const m = SUFFIX_RE.exec(symbol);
   if (!m) return [];
   const suffix = m[1];
-  const re = new RegExp(`\\b\\w+${suffix}\\b`, 'g');
+  const re = new RegExp(`\\b\\w+${escapeRegExp(suffix)}\\b`, 'g');
   const out = new Set();
   let hit;
   while ((hit = re.exec(diffContent)) !== null) {
