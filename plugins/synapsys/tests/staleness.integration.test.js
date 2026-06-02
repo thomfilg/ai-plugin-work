@@ -385,7 +385,6 @@ module.exports = {
   const mA = JSON.parse(fs.readFileSync(outA, 'utf8'));
   const mB = JSON.parse(fs.readFileSync(outB, 'utf8'));
   // Canonical (sorted-key) JSON for robust byte-identical comparison.
-  const canon = (v) => JSON.stringify(v, Object.keys(v).sort ? undefined : null, 0);
   function stableStringify(obj) {
     return JSON.stringify(obj, (k, v) => {
       if (v && typeof v === 'object' && !Array.isArray(v)) {

@@ -129,7 +129,13 @@ function isTypographySentinel(memory) {
 
 function mergeTypographyGroup(typo) {
   const sorted = [...typo].sort((a, b) => a.name.localeCompare(b.name));
-  return {
+  // GH-446: typography members share a single profile source after the
+  // collectProfileMemories stamping hook, so the merged memory inherits the
+  // first member's meta.source / meta.source_hash. Without this, the merged
+  // memory would have no source_hash and the staleness checker would
+  // silently classify it as `skip`, making drift undetectable.
+  const meta = sorted.find((m) => m.meta)?.meta;
+  const merged = {
     name: 'ui-component-typography',
     events: ['PreToolUse'],
     trigger_pretool: ['Edit:.*\\.tsx', 'Write:.*\\.tsx'],
@@ -137,6 +143,8 @@ function mergeTypographyGroup(typo) {
     inject: 'full',
     body: sorted.map((m) => m.body).join('\n\n---\n\n'),
   };
+  if (meta) merged.meta = meta;
+  return merged;
 }
 
 function mergeCollisions(memories) {
