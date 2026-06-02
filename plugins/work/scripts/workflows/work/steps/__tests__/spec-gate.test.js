@@ -347,4 +347,32 @@ describe('spec-gate with standalone gherkin.feature', () => {
     assert.match(entries[0].reason, /skip override/i);
     assert.match(entries[0].reason, /config-only/i);
   });
+
+  // GH-400 Task 2: spec_gate accepts a standalone gherkin.feature with only Given/Then
+  const GHERKIN_FEATURE_RENDER_ONLY = [
+    'Feature: Render-only behavior',
+    '  @integration',
+    '  Scenario: Renders the dashboard widget',
+    '    Given the dashboard is mounted with default props',
+    '    Then the widget container is visible',
+    '',
+    '  @integration',
+    '  Scenario: Renders the empty state',
+    '    Given the dashboard is mounted with no data',
+    '    Then the empty-state message is visible',
+    '',
+  ].join('\n');
+
+  it('spec_gate accepts a standalone gherkin.feature with only Given/Then', () => {
+    const dir = makeTmpWithGherkinFeature(GHERKIN_FEATURE_RENDER_ONLY);
+    createdDirs.push(dir);
+    const { add, entries } = makeAdd();
+    specGateStep(add, makeState(), makeCtx({ tasksDir: dir }));
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].step, STEPS.spec_gate);
+    assert.equal(entries[0].action, 'DEFER');
+    assert.match(entries[0].reason, /passed/i);
+    assert.match(entries[0].reason, /2 scenarios/);
+    assert.match(entries[0].reason, /2 @integration/);
+  });
 });

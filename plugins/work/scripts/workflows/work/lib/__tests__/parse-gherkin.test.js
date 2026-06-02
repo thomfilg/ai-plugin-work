@@ -535,77 +535,6 @@ describe('parse-gherkin: validate', () => {
     assert.deepEqual(DEFAULT_REQUIRED_TAGS, ['@integration', '@e2e']);
   });
 
-  it('fails when scenario is missing When step', () => {
-    const parseResult = {
-      features: [
-        {
-          name: 'F',
-          scenarios: [
-            {
-              name: 'Missing When',
-              tags: ['@integration'],
-              steps: [
-                { keyword: 'Given', text: 'x' },
-                { keyword: 'Then', text: 'z' },
-              ],
-            },
-            {
-              name: 'Complete',
-              tags: [],
-              steps: [
-                { keyword: 'Given', text: 'a' },
-                { keyword: 'When', text: 'b' },
-                { keyword: 'Then', text: 'c' },
-              ],
-            },
-          ],
-        },
-      ],
-      errors: [],
-    };
-    const result = validate(parseResult, { minScenarios: 1, requireTags: ['@integration'] });
-    assert.equal(result.valid, false);
-    assert.ok(result.errors.some((e) => e.includes('Missing When') && e.includes('When')));
-  });
-
-  it('fails when scenario has only Given and Then (missing When mentioned)', () => {
-    const parseResult = {
-      features: [
-        {
-          name: 'F',
-          scenarios: [
-            {
-              name: 'Incomplete scenario',
-              tags: ['@e2e'],
-              steps: [
-                { keyword: 'Given', text: 'setup' },
-                { keyword: 'Then', text: 'result' },
-              ],
-            },
-            {
-              name: 'Full',
-              tags: [],
-              steps: [
-                { keyword: 'Given', text: 'a' },
-                { keyword: 'When', text: 'b' },
-                { keyword: 'Then', text: 'c' },
-              ],
-            },
-          ],
-        },
-      ],
-      errors: [],
-    };
-    const result = validate(parseResult, { minScenarios: 1, requireTags: ['@e2e'] });
-    assert.equal(result.valid, false);
-    const stepError = result.errors.find((e) => e.includes('Incomplete scenario'));
-    assert.ok(stepError);
-    assert.ok(stepError.includes('When'));
-    // Should only mention the missing keyword, not the ones already present
-    assert.ok(!stepError.includes('missing Given'));
-    assert.ok(!stepError.includes('missing Then'));
-  });
-
   it('passes when scenario has Given/When/Then plus And (And extends previous)', () => {
     const parseResult = {
       features: [
@@ -640,6 +569,142 @@ describe('parse-gherkin: validate', () => {
     const result = validate(parseResult, { minScenarios: 1, requireTags: ['@integration'] });
     assert.equal(result.valid, true);
     assert.deepEqual(result.errors, []);
+  });
+
+  it('Render-only scenario with only Given and Then passes validation', () => {
+    const parseResult = {
+      features: [
+        {
+          name: 'Render-only feature',
+          scenarios: [
+            {
+              name: 'render-only scenario',
+              tags: ['@integration'],
+              steps: [
+                { keyword: 'Given', text: 'a precondition' },
+                { keyword: 'Then', text: 'an outcome is observed' },
+              ],
+            },
+            {
+              name: 'second render-only scenario',
+              tags: ['@e2e'],
+              steps: [
+                { keyword: 'Given', text: 'another precondition' },
+                { keyword: 'Then', text: 'another outcome is observed' },
+              ],
+            },
+          ],
+        },
+      ],
+      errors: [],
+    };
+    const result = validate(parseResult);
+    assert.equal(result.valid, true);
+    assert.deepEqual(result.errors, []);
+  });
+
+  it('Given/When/Then scenarios continue to validate', () => {
+    const parseResult = {
+      features: [
+        {
+          name: 'Classic feature',
+          scenarios: [
+            {
+              name: 'classic Given-When-Then',
+              tags: ['@integration'],
+              steps: [
+                { keyword: 'Given', text: 'a precondition' },
+                { keyword: 'When', text: 'an action occurs' },
+                { keyword: 'Then', text: 'an outcome is observed' },
+              ],
+            },
+            {
+              name: 'second classic scenario',
+              tags: ['@e2e'],
+              steps: [
+                { keyword: 'Given', text: 'another precondition' },
+                { keyword: 'When', text: 'another action occurs' },
+                { keyword: 'Then', text: 'another outcome is observed' },
+              ],
+            },
+          ],
+        },
+      ],
+      errors: [],
+    };
+    const result = validate(parseResult);
+    assert.equal(result.valid, true);
+    assert.deepEqual(result.errors, []);
+  });
+
+  it('Missing Given fails with clear error', () => {
+    const parseResult = {
+      features: [
+        {
+          name: 'Missing Given feature',
+          scenarios: [
+            {
+              name: 'no Given scenario',
+              tags: ['@integration'],
+              steps: [
+                { keyword: 'When', text: 'an action occurs' },
+                { keyword: 'Then', text: 'an outcome is observed' },
+              ],
+            },
+            {
+              name: 'filler scenario',
+              tags: ['@e2e'],
+              steps: [
+                { keyword: 'Given', text: 'a precondition' },
+                { keyword: 'Then', text: 'an outcome is observed' },
+              ],
+            },
+          ],
+        },
+      ],
+      errors: [],
+    };
+    const result = validate(parseResult);
+    assert.equal(result.valid, false);
+    assert.ok(
+      result.errors.some((e) => /Given/.test(e)),
+      `expected an error mentioning Given, got: ${JSON.stringify(result.errors)}`
+    );
+  });
+
+  it('Missing Then fails with clear error', () => {
+    const parseResult = {
+      features: [
+        {
+          name: 'Missing Then feature',
+          scenarios: [
+            {
+              name: 'no Then scenario',
+              tags: ['@integration'],
+              steps: [
+                { keyword: 'Given', text: 'a precondition' },
+                { keyword: 'When', text: 'an action occurs' },
+              ],
+            },
+            {
+              name: 'filler scenario',
+              tags: ['@e2e'],
+              steps: [
+                { keyword: 'Given', text: 'a precondition' },
+                { keyword: 'Then', text: 'an outcome is observed' },
+              ],
+            },
+          ],
+        },
+      ],
+      errors: [],
+    };
+    const result = validate(parseResult);
+    assert.equal(result.valid, false);
+    assert.ok(
+      result.errors.some((e) => /Then/.test(e)),
+      `expected an error mentioning Then, got: ${JSON.stringify(result.errors)}`
+    );
   });
 });
 

@@ -250,12 +250,10 @@ function validate(parseResult, options) {
       const keywords = new Set(scenario.steps.map((s) => s.keyword));
       // And/But extend the previous keyword, so we only require the primary three
       const hasGiven = keywords.has('Given');
-      const hasWhen = keywords.has('When');
       const hasThen = keywords.has('Then');
-      if (!hasGiven || !hasWhen || !hasThen) {
+      if (!hasGiven || !hasThen) {
         const missing = [];
         if (!hasGiven) missing.push('Given');
-        if (!hasWhen) missing.push('When');
         if (!hasThen) missing.push('Then');
         validationErrors.push(
           `Scenario "${scenario.name}" is missing ${missing.join(', ')} step(s)`
