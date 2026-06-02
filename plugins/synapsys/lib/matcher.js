@@ -351,6 +351,7 @@ module.exports = {
   matchSession,
   matchStop,
   safeRegex,
+  splitTopLevelAlternation,
   extractPretoolContent,
   evaluatePretoolContent,
   evaluatePretoolContentNot,

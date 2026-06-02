@@ -114,6 +114,25 @@ node plugins/synapsys/scripts/synapsys-explain.js --event=... --verbose
 
 `--only=<csv>` narrows evaluation to specific memories. `--store=<name|path>` picks a non-auto-detected store. Exit code is `0` regardless of how many memories fired; `2` only on misconfiguration.
 
+## Measuring false positives with `synapsys replay`
+
+Once a store has more than a handful of memories, gut-feel trigger tuning stops scaling. `synapsys-replay.js` walks recent transcripts under `~/.claude/projects/<hash>/*.jsonl`, replays every `UserPromptSubmit` and `PreToolUse` event against the current store, optionally asks a lightweight LLM judge whether each fired match was actually relevant, and emits a per-memory report ranked by false-positive rate.
+
+```bash
+# Zero-cost path: no LLM calls, ranks memories by raw fire counts.
+node plugins/synapsys/scripts/synapsys-replay.js --since=7d --no-judge
+
+# Full pipeline with judge (requires ANTHROPIC_API_KEY).
+node plugins/synapsys/scripts/synapsys-replay.js --since=14d
+
+# Machine-readable output.
+node plugins/synapsys/scripts/synapsys-replay.js --since=7d --no-judge --json
+```
+
+Defaults: `--since=7d`, `--max-judges=200` (hard cap with even sampling + extrapolation note), `claude-haiku-4-5` as the judge model. Scope is the **current project only** — the cwd path with `/` replaced by `-` (matching Claude Code's `~/.claude/projects/<hash>` layout). Use `--project=<hash>` to target a different project, `--all-projects` to scan every project under `~/.claude/projects/`, `--only=<csv>` to restrict to specific memories, `--store=<name|path>` to override store auto-detection.
+
+`--no-judge` makes zero outbound HTTP calls and requires no `ANTHROPIC_API_KEY` — `relevant` and `fp_rate` are `null`, but `fires` and `sample_matches` are still populated. With the judge enabled, expected cost is well under **$0.05** per default run (~500 input + ~5 output tokens × ≤200 calls). See `skills/replay/SKILL.md` for the full cost model, security note, and the PTU-not-judged decision.
+
 ## Staleness check
 
 `synapsys-staleness-check.js` verifies that consolidated memories are still in sync with the source notes they were built from. Run it manually before a release, in CI on every PR, or as a pre-commit hook to catch drift early.
