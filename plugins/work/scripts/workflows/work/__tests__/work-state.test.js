@@ -961,6 +961,36 @@ describe('work-state.js', () => {
       cleanupTempWorkState(TICKET_NO_MD);
     });
 
+    it('does NOT match COMPLETE as a prefix of COMPLETED/COMPLETELY', async () => {
+      // Security review on PR #470: the verdict capture group must have a
+      // trailing non-letter boundary. Without it, "Status: COMPLETED with
+      // reservations" or "Status: COMPLETELY INSUFFICIENT" would pass the
+      // gate because COMPLETE is a prefix.
+      const cases = [
+        'Status: COMPLETED with reservations',
+        'Status: COMPLETELY INSUFFICIENT',
+        'Status: APPROVED-WITH-CHANGES',
+        'Status: APPROVEDISH',
+      ];
+      for (let i = 0; i < cases.length; i++) {
+        const ticket = `TEST-CHK-PREFIX-VERDICT-${i}`;
+        cleanupTempWorkState(ticket);
+        const dir = seedTicket(
+          ticket,
+          [{ id: 'task_1', status: 'pending', kind: 'checkpoint', title: 'X' }],
+          { tasksMdKinds: ['checkpoint'] }
+        );
+        fs.writeFileSync(
+          path.join(dir, 'completion.check.md'),
+          `# Report\n${cases[i]}\n\nVerified: task_1\n`
+        );
+        const { code } = await runWorkState(['complete', ticket]);
+        assert.notEqual(code, 0,
+          `verdict prefix "${cases[i]}" must NOT pass the gate`);
+        cleanupTempWorkState(ticket);
+      }
+    });
+
     it('captures the authenticated verdict in audit reason (not a quoted one)', async () => {
       // Security review on PR #470: the gate and the audit-reason source
       // must read the same authenticated value. Previously the gate used a

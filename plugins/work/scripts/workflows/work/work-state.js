@@ -339,8 +339,15 @@ function autoCompleteCheckpointTasks(state, ticketId) {
   // list marker. The matched verdict here is what flows into the audit
   // `reason` field, so both the gate AND the traceability record key off
   // the same authenticated read (see PR #470 review).
+  //
+  // Trailing boundary lookahead — `(?![A-Za-z0-9_-])` — prevents the
+  // verdict token from matching as a prefix of a longer word or a hyphen-
+  // qualified phrase: `Status: COMPLETED`, `Status: COMPLETELY ...`,
+  // `Status: APPROVED-WITH-CHANGES`, `Status: APPROVEDISH` must all fail.
+  // Whitespace, `]`, `.`, `,`, EOL, em-dash etc. are legitimate
+  // terminators; ASCII hyphen and word chars are not.
   const verdictLineRe = new RegExp(
-    `^[\\s\\*_]*(?:Status|Verdict)[:\\s*]*\\[?(COMPLETE|APPROVED)\\]?`,
+    `^[\\s\\*_]*(?:Status|Verdict)[:\\s*]*\\[?(COMPLETE|APPROVED)(?![A-Za-z0-9_-])\\]?`,
     'im'
   );
   const verdictMatch = verdictLineRe.exec(reportContent);
