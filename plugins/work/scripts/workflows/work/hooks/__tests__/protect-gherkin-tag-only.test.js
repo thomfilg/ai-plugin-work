@@ -144,6 +144,37 @@ describe('protect-gherkin tag-only allow-path (P0 #5)', () => {
     );
   });
 
+  it('GH-487 S1 — TAG_LINE_RE recognises path-bearing tag tokens', async () => {
+    // Retag a scenario whose tag line includes a path-bearing @test:<path>
+    // tag plus @e2e being flipped to @integration. The only differing line is
+    // the tag line, so the hook must allow the edit (exit 0). Today this
+    // fails (exit 2) because TAG_LINE_RE's character class excludes `/` and
+    // `.`, so the path-bearing token is misclassified as a non-tag line.
+    const { code, stderr } = await runHookWithState(
+      {
+        tool_name: 'Edit',
+        tool_input: {
+          file_path: '/home/user/project/tasks/GH-99/gherkin.feature',
+          old_string:
+            '  @test:plugins/work/scripts/workflows/work/hooks/__tests__/protect-gherkin-tag-only.test.js @e2e\n' +
+            '  Scenario: ticket fetched\n' +
+            '    Given an open ticket',
+          new_string:
+            '  @test:plugins/work/scripts/workflows/work/hooks/__tests__/protect-gherkin-tag-only.test.js @integration\n' +
+            '  Scenario: ticket fetched\n' +
+            '    Given an open ticket',
+        },
+      },
+      'GH-99',
+      { implement: 'in_progress', spec: 'completed' }
+    );
+    assert.strictEqual(
+      code,
+      0,
+      `Expected exit 0 (path-bearing tag-only edit recognised as tag-only), got ${code}. stderr: ${stderr}`
+    );
+  });
+
   it('P0 #5 — ambiguous diff (tag + semantic line) default-blocks', async () => {
     // Diff touches both a tag AND a Given line — must default-block (security invariant).
     const { code, stderr } = await runHookWithState(
