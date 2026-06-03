@@ -190,6 +190,70 @@ node plugins/synapsys/scripts/synapsys-staleness-check.js || {
 
 Passing `--re-consolidate` dispatches the owning profile for each drifted source by spawning the sibling consolidate script with `--profile=<name>`. Profile ownership is resolved by intersecting each profile module's declared source paths against the drifted source. Orphan sources (whose source file no longer exists) are skipped — they require human judgement. Ambiguous sources (claimed by multiple profiles) emit a warning and are skipped. Profile lookup requires the `consolidate-profiles/` directory, which is delivered by GH-442; until it lands, `--re-consolidate` will warn that no profile owns the source and exit non-zero.
 
+## Telemetry
+
+Synapsys records two kinds of events per session so you can measure which memories actually matter:
+
+- `fired` — a memory matched and was injected into the context.
+- `cited` — on the `Stop` event, the assistant's response mentions a previously-fired memory's signals (declared `cite_signals` or auto-extracted from the body).
+
+### On-disk lifecycle
+
+Per-session JSONL files live under:
+
+```
+~/.claude/synapsys/.telemetry/<session_id>.jsonl
+```
+
+On first write the directory is created and a sibling `.gitignore` is seeded with `*` so the telemetry stays local. Missing `session_id` payloads route to `_unknown-session.jsonl` and the `reason` field carries a `${pid}-${startMs}` token so multi-process noise can be untangled.
+
+All telemetry writes are wrapped in an inner `try/catch` and never crash the dispatcher — synapsys is fail-open by design.
+
+### `cite_signals` frontmatter
+
+Add `cite_signals` to a memory's frontmatter to declare the exact strings the cite scanner should look for in the assistant's response. When present, it overrides the auto-extraction (single-backticked identifiers, first H2/H3 heading body text, memory name).
+
+```yaml
+---
+name: ui-use-Button-not-raw-button
+description: Block raw <button> in .tsx; require the Button component.
+events: PreToolUse,Stop
+trigger_pretool: Edit:.*\.tsx,Write:.*\.tsx
+inject: full
+cite_signals: Button, packages/ui, @app-services-monitoring/ui
+---
+```
+
+Without `cite_signals`, synapsys auto-extracts signal candidates from the body: backticked identifiers (≥ 2 chars), the first H2/H3 heading text (≥ 4 chars, skipping code fences), and the memory `name`. Matching is `String.prototype.includes()` (not regex) and each memory can cite at most once per response; the captured `match` field is capped at 200 characters for privacy.
+
+### Opt-outs
+
+Two independent ways to suppress telemetry:
+
+| Mechanism | Scope | Example |
+|---|---|---|
+| Per-memory frontmatter `telemetry: false` | One memory only — `fired`/`cited` writes skipped for that file | `telemetry: false` in the YAML block |
+| Env var `SYNAPSYS_TELEMETRY=0` | Process-wide — all writes suppressed | `SYNAPSYS_TELEMETRY=0 claude ...` |
+
+Absent `telemetry` defaults to enabled. Either flag suppresses both `fired` and `cited` for the affected scope; matched memories still inject normally.
+
+### `synapsys:stats` — aggregating the JSONL
+
+Run the `/synapsys:stats` skill (or invoke the script directly) to summarize what your memories actually did over a time window:
+
+```bash
+node plugins/synapsys/scripts/synapsys-stats.js --last 7d
+node plugins/synapsys/scripts/synapsys-stats.js --last 30d --no-color
+```
+
+The output has three sections:
+
+- **Top influencers** — memories sorted by `cited` desc (tiebreak `fired × cited` desc). These earn their slot.
+- **Noise candidates** — memories with `fired >= 10 AND cited == 0`. Strong signal the trigger is too loose; tune `trigger_prompt`/`trigger_pretool` or add `cite_signals` so citations register.
+- **Never-fired** — memories present in active stores with zero `fired` events in the window. Either obsolete or simply not triggered yet.
+
+The `--last <Nd>` flag filters telemetry `.jsonl` files by `mtime`; default is `7d`. `--cwd` overrides discovery. Exit code is always `0` — read errors emit a stderr note but never fail the command.
+
 ## Design choices
 
 - **Fail-open** — any error in the dispatcher exits 0 with no output. Memory injection must never block a user prompt or tool call.
