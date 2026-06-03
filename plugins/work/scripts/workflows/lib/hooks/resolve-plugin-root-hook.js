@@ -14,6 +14,7 @@
 
 const path = require('path');
 const { logHookError } = require(path.join(__dirname, '..', 'hook-error-log'));
+const { resolvePluginRoot } = require('../../work/lib/resolve-plugin-root');
 
 // Fail-open: unexpected errors should never block unrelated commands
 process.on('uncaughtException', (err) => {
@@ -25,7 +26,17 @@ process.on('unhandledRejection', (err) => {
   process.exit(0);
 });
 
-const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(__dirname, '..', '..', '..');
+// Honour CLAUDE_PLUGIN_ROOT verbatim when set: if the env path doesn't match
+// the on-disk leaf/parent layout, resolvePluginRoot silently falls back to a
+// callerDir probe that has nothing to do with what the user set. For the
+// command-substitution use case, prefer the env value over an unrelated probe.
+const envRoot =
+  process.env.CLAUDE_PLUGIN_ROOT && path.resolve(process.env.CLAUDE_PLUGIN_ROOT);
+const probed = resolvePluginRoot(__dirname, 3);
+const PLUGIN_ROOT =
+  envRoot && probed && !probed.startsWith(envRoot)
+    ? envRoot
+    : probed || envRoot || path.resolve(__dirname, '..', '..', '..');
 
 async function main() {
   let input = ''; // read hook JSON from stdin
