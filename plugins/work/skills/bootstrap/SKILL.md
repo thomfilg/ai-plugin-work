@@ -42,8 +42,19 @@ Extract:
 - Summary (for branch name)
 - Description (for PR body)
 - Status (verify it's not already Done)
+- `gitBranchName` (Linear only — passed verbatim to `bootstrap-branch.js` in Step 4 via `--git-branch-name`; empty string when the field is absent or the provider is not Linear)
 
-### Step 4: Create branch and worktree
+### Step 4: Resolve + validate branch name, then create worktree
+
+Branch naming is delegated to `bootstrap-branch.js`, which:
+
+1. Uses Linear's `gitBranchName` field **verbatim** when present (provider is Linear).
+2. Otherwise constructs `<BRANCH_PREFIX><TICKET-ID>-<kebab-summary>` (ticket ID lowercased).
+3. Validates the resolved name against `BRANCH_NAME_REGEX` (if set) plus a hard-coded
+   safety class `^[A-Za-z0-9._\-/]+$` — exits non-zero on mismatch.
+
+The skill MUST capture stdout into `BRANCH_NAME` and **abort on non-zero exit** so no
+`git worktree add` runs with an invalid name.
 
 ```bash
 $REPO_NAME="look your current directory, then look if there are worktrees (folders in a directory above with same prefix). Eg: worktrees/my-repository-ticket-A, worktrees/my-repository-ticket-B, worktrees/my-repository << this is the main directory"
@@ -55,15 +66,50 @@ BASE_BRANCH="${BASE_BRANCH#refs/remotes/origin/}"
 BASE_BRANCH="${BASE_BRANCH#origin/}"
 git fetch origin "$BASE_BRANCH"
 
-# Generate branch name from ticket
+# Inputs derived from Step 3 ticket fetch
 TICKET_ID="PROJ-XXX"
-SHORT_DESC="short-description-kebab-case"  # Derived from summary
-BRANCH_NAME="${TICKET_ID}-${SHORT_DESC}"
+SUMMARY="Fix the foo bar"                # Ticket summary (used only in fallback path)
+GIT_BRANCH_NAME=""                       # Linear gitBranchName field, "" if absent
+
+# Resolve + validate the branch name via the helper.
+# Stdout = the resolved name; non-zero exit = validation failed → abort the skill.
+if [ -n "$GIT_BRANCH_NAME" ]; then
+  BRANCH_NAME=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/scripts/bootstrap-branch.js" \
+    --ticket-id "$TICKET_ID" \
+    --summary "$SUMMARY" \
+    --git-branch-name "$GIT_BRANCH_NAME") || {
+      echo "❌ $TICKET_ID: bootstrap-branch.js exited non-zero (validation failed); aborting — no worktree created." >&2
+      exit 1
+    }
+else
+  BRANCH_NAME=$(node "${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/scripts/bootstrap-branch.js" \
+    --ticket-id "$TICKET_ID" \
+    --summary "$SUMMARY") || {
+      echo "❌ $TICKET_ID: bootstrap-branch.js exited non-zero (validation failed); aborting — no worktree created." >&2
+      exit 1
+    }
+fi
+
 WORKTREE_PATH="../{$REPO_NAME}-${TICKET_ID}"
 
-# Create worktree
+# Only reached when the helper exited 0 → name is safe to feed to git.
 git worktree add "$WORKTREE_PATH" -b "$BRANCH_NAME" "origin/$BASE_BRANCH"
 ```
+
+#### Branch-naming environment variables
+
+| Var | Default | Effect |
+|---|---|---|
+| `BRANCH_PREFIX` | _empty_ | Prepended to the fallback name, e.g. `feature/`. Empty = backward-compatible (`<TICKET-ID>-<kebab>`). |
+| `BRANCH_NAME_REGEX` | _unset_ | If set, the resolved branch name must match this regex or the helper exits 1. Unset = validation skipped. Example: `^(?:(fix|feature|hotfix|release|refactor|chore|revert|vendorkit|main|dev).+|revert-pr-\d+)$`. |
+
+#### Linear `gitBranchName` precedence
+
+When `TICKET_PROVIDER=linear` and the fetched issue carries a non-empty `gitBranchName`,
+the helper uses that value **verbatim** (no kebab transformation, no prefix prepending).
+`BRANCH_NAME_REGEX` still applies — **regex wins on conflict**: if Linear's
+`gitBranchName` fails the configured regex, the helper aborts with both the offending
+name and the regex in stderr, and no worktree is created.
 
 ### Step 5: Run custom bootstrap script (if configured)
 
