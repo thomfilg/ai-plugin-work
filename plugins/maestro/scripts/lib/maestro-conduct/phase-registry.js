@@ -42,7 +42,7 @@ const PHASES = Object.freeze({
   tasks_gate: { budgetMin: 5 },
   implement: {
     budgetMin: 60,
-    detectors: ['question', 'silence', 'spinner', 'phaseStall', 'commitStall'],
+    detectors: ['question', 'silence', 'spinner', 'phaseStall', 'commitStall', 'prStatus'],
   },
   commit: { budgetMin: 5 },
   task_review: { budgetMin: 30 },
