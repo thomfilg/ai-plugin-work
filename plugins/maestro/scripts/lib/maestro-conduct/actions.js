@@ -18,6 +18,7 @@ const tmux = require('./tmux');
 const alerts = require('./alerts');
 const state = require('./state');
 const { headSha } = require('./detectors/gh-shared');
+const { eligibleTasks } = require('./session-shared');
 
 const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
 const SKILL_NAME = process.env.SKILL_NAME || 'work';
@@ -42,14 +43,11 @@ function readManifestSafe(file) {
 }
 
 function topPendingForManifest(manifest, entry) {
-  const tasks = Array.isArray(manifest.tasks) ? manifest.tasks : [];
-  const doneIds = new Set(tasks.filter((t) => t.status === 'done').map((t) => t.id));
-  const pending = tasks.filter(
-    (t) => t.status === 'pending' && (t.deps || []).every((d) => doneIds.has(d))
-  );
-  if (pending.length === 0) return null;
-  pending.sort((a, b) => (a.priority || 9999) - (b.priority || 9999));
-  const top = pending[0];
+  // Reuse session-shared.eligibleTasks so the slot-freed bootstrap path and
+  // the maestro-session CLI agree on the next task (incl. default priority).
+  const ranked = eligibleTasks(Array.isArray(manifest.tasks) ? manifest.tasks : []);
+  if (ranked.length === 0) return null;
+  const top = ranked[0];
   return {
     topic: manifest.topic || entry.replace(/\.json$/, ''),
     taskId: top.id,
@@ -66,7 +64,7 @@ function findNextEligibleTask() {
     if (!manifest) continue;
     const candidate = topPendingForManifest(manifest, entry);
     if (!candidate) continue;
-    if (!best || (candidate.priority || 9999) < (best.priority || 9999)) {
+    if (!best || (candidate.priority || 999) < (best.priority || 999)) {
       best = candidate;
     }
   }
