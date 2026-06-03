@@ -86,20 +86,31 @@ function handleQuestion(ctx, qHit) {
     return;
   }
   const mins = state.minutesSince(prev.startedAt);
-  if (mins >= Q_WAIT_MIN && !prev.alerted) {
-    const r = actions.alert({
-      session: ctx.session,
-      ticket: ctx.ticket,
-      kind: 'question-pending',
-      phase: ctx.phase,
-      elapsedMin: mins,
-      options: qHit.options,
-      promptKind: qHit.promptKind,
-      instruction: `tmux capture-pane -t ${ctx.session} -p | tail -40 — read full menu, pick the option that does NOT bypass any workflow gate (avoid: state-file edits, set-step CLI, completion-checker skip, --no-verify). If all options bypass, send a directive via "Type something".`,
-    });
-    state.write(ctx.session, 'question', { startedAt: prev.startedAt, alerted: true });
-    maybeEscalateToDeadEnd(ctx, 'question-pending', r.count, null);
+  if (mins < Q_WAIT_MIN) return;
+  // Re-emit on Q_WAIT_MIN cadence so the alert count can grow to
+  // DEAD_END_REEMITS and trigger freeDeadEndSlot. Previously this branch
+  // gated on !prev.alerted, which capped the count at 1 and made dead-end
+  // auto-rotation unreachable from the daemon loop.
+  if (prev.alerted) {
+    const sinceLastAlert = prev.lastAlertAt ? state.minutesSince(prev.lastAlertAt) : Infinity;
+    if (sinceLastAlert < Q_WAIT_MIN) return;
   }
+  const r = actions.alert({
+    session: ctx.session,
+    ticket: ctx.ticket,
+    kind: 'question-pending',
+    phase: ctx.phase,
+    elapsedMin: mins,
+    options: qHit.options,
+    promptKind: qHit.promptKind,
+    instruction: `tmux capture-pane -t ${ctx.session} -p | tail -40 — read full menu, pick the option that does NOT bypass any workflow gate (avoid: state-file edits, set-step CLI, completion-checker skip, --no-verify). If all options bypass, send a directive via "Type something".`,
+  });
+  state.write(ctx.session, 'question', {
+    startedAt: prev.startedAt,
+    alerted: true,
+    lastAlertAt: state.now(),
+  });
+  maybeEscalateToDeadEnd(ctx, 'question-pending', r.count, null);
 }
 
 // Healthy "waiting on user" patterns the agent emits to the pane while halted.
@@ -142,11 +153,11 @@ function handlePhaseStall(ctx, stallHit) {
   const sinceLastNudge = marker.lastNudgeAt ? state.minutesSince(marker.lastNudgeAt) : Infinity;
   // Don't re-nudge before the per-phase cooldown.
   if (marker.lastNudgeAt && sinceLastNudge < stallHit.reNudgeMin) return;
-  // Once nudges are exhausted AND the one-shot alert has fired, stop re-alerting
-  // until the phase actually advances. The marker is reset on phase change inside
-  // the phase-stall detector. We must NOT early-return before the alert branch
-  // fires, since escalationFor() only returns 'alert' once nudges >= maxNudges.
-  if (marker.nudges >= stallHit.maxNudges && marker.alerted) return;
+  // After the one-shot alert fires, keep re-emitting on reNudgeMin cadence so
+  // the alert count grows to DEAD_END_REEMITS and triggers freeDeadEndSlot.
+  // Previously this branch fully suppressed re-alerting, which capped the count
+  // at 1 and made dead-end auto-rotation unreachable. The phase-stall detector
+  // resets the marker on phase change, so re-emits stop naturally on advance.
 
   const escalation = escalationFor(ctx.phase, marker.nudges);
   const reason = `phase=${ctx.phase} stuck ${stallHit.elapsedMin}m budget=${stallHit.budgetMin}m nudge ${marker.nudges + 1}/${stallHit.maxNudges}`;
@@ -351,12 +362,12 @@ function handlePrComments(ctx, cHit) {
   if (marker.lastNudgeAt && sinceLastNudge < profile.reNudgeMin) return;
 
   const nudges = marker.nudges || 0;
-  const maxNudges = profile.maxNudges || 3;
-  // Once nudges are exhausted AND the one-shot alert has fired, stop re-alerting
-  // until HEAD moves or the comments are gone. The detector resets the marker on
-  // either change. We must NOT early-return before the alert branch fires, since
-  // escalationFor() only returns 'alert' once nudges >= maxNudges.
-  if (nudges >= maxNudges && marker.alerted) return;
+  // After the one-shot alert fires, keep re-emitting on reNudgeMin cadence so
+  // the alert count grows to DEAD_END_REEMITS and triggers freeDeadEndSlot.
+  // Previously this branch fully suppressed re-alerting, which capped the count
+  // at 1 and made dead-end auto-rotation unreachable. The pr-comments detector
+  // resets the marker when HEAD moves or comments are gone, so re-emits stop
+  // naturally once the agent acts.
   const top = cHit.summary
     .map((s) => `${s.file}:${s.line} [${s.severity || '?'}] ${s.title}`)
     .join(' | ');
