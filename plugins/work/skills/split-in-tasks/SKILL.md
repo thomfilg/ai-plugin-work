@@ -10,6 +10,16 @@ allowed-tools: Task, Bash, Read, Grep, Glob
 
 Split a technical specification into small, ordered, dependency-aware tasks. Each task is tied back to specific requirements so the implementing agent never loses track of what needs to be built.
 
+## Companion docs (read on demand)
+
+| Doc | When to consult |
+|---|---|
+| [docs/decomposition-rules.md](./docs/decomposition-rules.md) | Rules 1–12 + anti-patterns for Step 4.1 |
+| [docs/split-warning-passes.md](./docs/split-warning-passes.md) | Pass A / B / C static-analysis warnings emitted after Step 4 |
+| [docs/output-format.md](./docs/output-format.md) | Exact `tasks.md` structure — task formats, file layout, format rules |
+| [docs/test-command.md](./docs/test-command.md) | `### Test Command` block: runner env vars, file-name patterns, scope rules |
+| [docs/scope-sections.md](./docs/scope-sections.md) | `### Files in scope` / `### Files explicitly out of scope` — Gate C + intra-ticket exclusion rule |
+
 ## Usage
 
 ```
@@ -86,121 +96,7 @@ This list is the **source of truth** for requirement coverage. Every task you cr
 
 #### Step 4.1 — Decompose into tasks
 
-Using the extracted requirement list as your guide, decompose the spec into tasks following ALL of these rules:
-
-**Rule 1 — Atomicity:**
-Each task must modify ONE logical component (e.g., one service, one UI module, one infrastructure unit) and produce ONE verifiable outcome (e.g., an API endpoint works, an agent classifies correctly, a DB table is created). If a task spans multiple components or produces multiple unrelated outcomes, split it.
-
-**Rule 2 — Requirement Coverage:**
-Every requirement from your Step 4.0 list must appear in at least one task's `Requirements Covered` section. Orphan requirements (in spec but not in any task) and orphan tasks (no requirement mapping) must be resolved in Step 4.3 before proceeding — add missing mappings or create/merge tasks until coverage is complete.
-
-**Rule 3 — Independent Testability:**
-Every task must be testable in isolation. If you can't write a test for it, it's not a task — it's part of another task.
-
-**Rule 4 — No Overlap:**
-No two tasks should deliver the same code or satisfy the same requirement. If a requirement needs work across multiple tasks, split the requirement's concerns explicitly so each task owns a distinct piece.
-
-**Rule 4b — Every task MUST have a testable surface of its own:**
-A task ships code OR tests that can be verified by THIS task's `### Test Command`, against ONLY files in THIS task's `### Files in scope`. Forbidden patterns (every one of these is a `split-in-tasks` authoring bug — merge with the consumer):
-
-- **Helper-only task:** ships a pure helper or seed used solely by another task's test. There is no test for this helper in isolation. Merge it INTO the consuming task and list both the helper and its consumer's tests in that task's Files in scope.
-- **Schema-narrowing-without-consumer task:** narrows a type/schema that another task's integration test depends on. The narrowing has no behavior change observable in isolation — merge it INTO the task whose test would otherwise fail without the narrowing.
-- **"Run the dependent task's test" task:** a task whose Test Command points at a test file owned by another task. This is the ECHO-4637-class deadlock — caught by the tasks_gate validator.
-- **"Run typecheck only" task:** Test Command is `pnpm typecheck` or any other compile-check that doesn't exercise behavior. Typecheck is not a behavior gate; if your task has no behavior to verify, merge it.
-
-If you cannot write a unit or properly-scoped integration test for the task in isolation, the task should NOT exist as a separate task — merge it with its consumer.
-
-**Rule 5 — Logical Ordering:**
-Tasks are ordered by dependency. Foundational/infrastructure tasks first, then core logic, then integration/UI, then validation/checkpoints.
-
-**Rule 6 — Separation Preference:**
-Prefer separating: backend vs frontend, infrastructure vs application logic, data layer vs business logic, core vs integration. Clear ownership boundaries per task.
-
-**Rule 7 — Task Count:**
-Target 5–15 tasks for a typical spec. Fewer than 5 means tasks are too coarse (agent will forget mid-task). More than 15 means tasks are too granular (overhead exceeds value).
-
-**Rule 8 — Checkpoints:**
-Insert a checkpoint task (no implementation — just "run all tests, verify integration"):
-- After every 3 implementation tasks, OR
-- After completing a logical subsystem (e.g., all backend tasks done, all infra tasks done)
-Whichever comes first.
-
-**Rule 9 — Parallelization:**
-A task can be marked `Parallel: Yes` ONLY if ALL of these are true:
-- It has zero dependencies on incomplete tasks
-- It does not modify the same files or components as any concurrent task
-- It does not require outputs (code, config, data) from any incomplete task
-Otherwise mark `Parallel: No` or `Parallel: Partial` with explanation.
-
-**Rule 10 — TDD Ordering (CRITICAL — read this twice):**
-Standard implementation tasks MUST order deliverables following the TDD cycle: RED (write failing tests) -> GREEN (implement to pass) -> REFACTOR (clean up). Each deliverable gets a bold phase prefix: `**RED:**`, `**GREEN:**`, `**REFACTOR:**`. When a task covers multiple behaviors, each behavior gets its own RED/GREEN/REFACTOR triplet.
-
-**One full TDD cycle per task — never split phases across tasks.** R/G/R live inside a SINGLE task as nested deliverables (e.g. 1.1.1 RED, 1.1.2 GREEN, 1.1.3 REFACTOR). The implement-gate enforces RED→GREEN→REFACTOR within one task; if you put RED in Task N and GREEN in Task N+1, the gate wedges:
-
-- Task N's RED test fails (expected) → gate records RED, demands GREEN within Task N
-- GREEN means "make the test pass" → requires editing the impl file
-- But the impl file is in Task N+1's scope, listed as out-of-scope for Task N → the implementing agent loops forever, blocked by its own decomposition
-
-This is the **ECHO-4453-class wedge**. To avoid it:
-- The same task must own BOTH the test file and the impl file in `### Files in scope`.
-- The same task's Test Command must exercise the test added in its RED deliverable.
-- Both test and impl edits must be reachable from inside ONE task's allowed surface.
-
-✅ Correct (R/G/R inside one task):
-```
-## Task 1 — Backend: derive dashboardCount (full TDD cycle)
-### Files in scope
-- get.ts
-- get.integration.test.ts
-### Deliverables
-- [ ] 1.1.1 **RED:** add failing test in get.integration.test.ts
-- [ ] 1.1.2 **GREEN:** edit get.ts to make the test pass
-- [ ] 1.1.3 **REFACTOR:** tidy reducer + JSDoc
-```
-
-❌ Wrong (R/G/R split across tasks — wedges):
-```
-## Task 1 — RED: add failing test
-### Files in scope
-- get.integration.test.ts
-### Files explicitly out of scope
-- get.ts   # ← GREEN can't reach this without scope violation
-## Task 2 — GREEN: edit get.ts
-```
-
-Checkpoint tasks, config-only infrastructure tasks, and **Storybook stories-only tasks** are exempt from the RED/GREEN/REFACTOR deliverables requirement. For those exempt tasks, use a non-phase deliverables list that describes the concrete verifiable work in execution order, for example: `- Update config`, `- Validate config`, `- Document rollout/usage` as applicable.
-
-For stories-only tasks, scope shape alone signals the exemption to the implement-gate: when every entry in `### Files in scope` matches `*.stories.[jt]sx?`, `task-next.js`'s `isVisualOnlyTask()` accepts the verification command (typically `pnpm dev:check`) as RED evidence — no `*.test.*` authorship file is required. Use a `### Test Command` of `pnpm dev:check` (lint + typecheck) and document the visual artifact in deliverables. Do NOT mix story files with `.test.*`/`.spec.*` or production source in the same task's scope, or the exemption will not fire.
-
-**Rule 12 — Shared-Resource Detection (MANDATORY for parallel tasks):**
-After marking tasks as `Parallel: Yes`, scan ALL parallel tasks' Suggested Scope for **overlapping production files**. If two or more parallel tasks modify the **same production file** (not test files — those don't conflict):
-1. Extract the shared changes into a new **prerequisite task** that makes the shared modifications first
-2. **Reorder all tasks** — the prerequisite becomes the first task (Task 1), and all subsequent tasks renumber accordingly. Never use "Task 0" — all tasks are numbered sequentially starting from 1.
-3. Mark the prerequisite as `Parallel: No` with dependency `None`
-4. Update all tasks that originally touched the shared file to depend on the prerequisite
-5. The prerequisite task should ONLY make the shared changes (e.g., "add data-testid to BulkActionsDropdown"), not implement the full feature
-6. Add a `## Parallelization Plan` section at the top of the file showing Wave 1 (prerequisite) → Wave 2 (parallel) → Wave 3 (checkpoints) structure
-
-Example: If Task 3 and Task 5 both need to modify `BulkActionsDropdown.tsx`, create a new task for the shared changes, make it Task 1, renumber everything else, and mark the parallel tasks as depending on it.
-
-**Anti-patterns — DO NOT generate tasks like these:**
-- "Implement backend logic" (too vague, spans multiple components)
-- "Setup everything" (not atomic, no single verifiable outcome)
-- Tasks spanning multiple layers (backend + frontend + infra in one task)
-- Tasks without acceptance criteria
-- Tasks without requirement mapping
-- "Refactor and clean up" as a standalone task (cleanup belongs inside the task that creates the code)
-
-**Anti-patterns are enforced by `scripts/workflows/lib/hooks/policies/task-description-quality.js` — the canonical blocked-pattern list. The following patterns will cause `tasks.md` writes to be blocked:**
-- **TBD** — Replace the TBD placeholder with a concrete description of what this task delivers.
-- **TODO** — Replace the TODO placeholder with specific implementation details.
-- **implement later** — Remove the deferral phrase and describe what should be implemented now, or move to a separate task. (Blocked unless followed by 20+ chars of qualifying detail.)
-- **to be determined** — Replace with a concrete decision or escalate to the spec phase. (Always blocked, no qualification possible.)
-- **Handle edge cases** — Specify which edge cases to handle (e.g. null input, empty array, overflow). (Blocked unless followed by 20+ chars of qualifying detail.)
-- **Add appropriate error handling** — Specify which error types to handle and the handling strategy (retry, fallback, abort). (Blocked unless followed by 20+ chars of qualifying detail.)
-- **Add tests** — List specific test scenarios (e.g. "test that invalid input returns 400"). (Blocked unless followed by 20+ chars of qualifying detail. Lines with TDD phase prefixes like `**RED:**` are exempt.)
-- **Similar/Same as Task N** — Repeat the actual steps instead of cross-referencing another task.
-
+Apply ALL rules from **[docs/decomposition-rules.md](./docs/decomposition-rules.md)** (Rules 1–12 + the anti-pattern blocklist). The rules cover atomicity, requirement coverage, testability, ordering, TDD-cycle ownership inside a single task (Rule 10 is the most-violated — read it twice), parallelization, shared-resource detection, and the `task-description-quality.js` patterns that hard-fail at write time.
 
 #### Step 4.2 — Gherkin Coverage Validation (when gherkin.feature exists)
 
@@ -217,7 +113,7 @@ After generating all tasks, verify coverage:
 1. Take your requirement list from Step 4.0
 2. For each requirement, confirm it appears in at least one task's `Requirements Covered` section
 3. If any requirement is missing: add it to an existing task or create a new task
-4. Generate the `Requirement Coverage` table (see output format below).
+4. Generate the `Requirement Coverage` table (see [docs/output-format.md](./docs/output-format.md)).
 
 **The trailing `## Requirement Coverage` table MUST be emitted in every `tasks.md`** even when per-task `### Requirements Covered` subsections are also present. The completion-checker parser primarily reads the top-level table; the subsection fallback exists as a safety net (see GH-462) but the table is still the source of truth. Omitting it forces the parser into the fallback path and obscures rollup status.
 
@@ -229,19 +125,19 @@ Review all generated tasks and check:
 - No task is trivial (less than ~5 minutes of work — merge it into an adjacent task)
 - Dependencies are minimal (prefer independent tasks where possible)
 - Parallelization is maximized safely (any task marked `No` that could be `Yes`?)
-- Shared-resource detection: parallel tasks don't modify the same production files (if they do, extract a prerequisite — Rule 12)
+- Shared-resource detection: parallel tasks don't modify the same production files (if they do, extract a prerequisite — Rule 12 in [docs/decomposition-rules.md](./docs/decomposition-rules.md))
 - Checkpoint tasks are present after every 3 implementation tasks or subsystem boundary
-- TDD ordering is correct (RED before GREEN before REFACTOR in every non-exempt implementation task — see Rule 10 for exemptions)
-- Every non-checkpoint implementation task has a `### Test Command` with a real, runnable test command
+- TDD ordering is correct (RED before GREEN before REFACTOR in every non-exempt implementation task — see Rule 10 in [docs/decomposition-rules.md](./docs/decomposition-rules.md) for exemptions)
+- Every non-checkpoint implementation task has a `### Test Command` with a real, runnable test command (see [docs/test-command.md](./docs/test-command.md))
 - Gherkin coverage: every scenario from `gherkin.feature` is referenced by at least one task (if `gherkin.feature` exists)
-- Anti-patterns are absent
-- Split-Warning Passes (Pass A / Pass B / Pass C — see "Split-Warning Passes" section below) emit no unresolved `SPLIT-WARNING` lines, or each emitted warning has an operator-resolution decision recorded
+- Anti-patterns are absent (see anti-pattern blocklist in [docs/decomposition-rules.md](./docs/decomposition-rules.md))
+- Split-Warning Passes (Pass A / Pass B / Pass C — see [docs/split-warning-passes.md](./docs/split-warning-passes.md)) emit no unresolved `SPLIT-WARNING` lines, or each emitted warning has an operator-resolution decision recorded
 
 Refactor tasks if any issues are found. Re-validate coverage after any refactoring.
 
 ### Step 6: Save output
 
-Write the generated content to `${TASKS_DIR}/tasks.md`.
+Write the generated content to `${TASKS_DIR}/tasks.md`. The required structure, task formats (implementation + checkpoint), and format rules live in **[docs/output-format.md](./docs/output-format.md)**.
 
 ### Step 7: Summary
 
@@ -251,305 +147,3 @@ After saving, output:
 - Show requirement count and coverage status (all covered / N gaps)
 - If any coverage gaps remain, list them explicitly
 - Suggest next step: "Run `/work ${FOLDER_NAME}` to start implementation."
-
----
-
-## Split-Warning Passes
-
-After tasks are decomposed (Step 4) and before the quality review pass (Step 5), the splitter runs three static-analysis passes against the proposed tasks. Each pass that detects a problem emits a single-line `SPLIT-WARNING` token into `tasks.md` (or the splitter's stderr stream) so the operator can decide how to resolve it before committing the split.
-
-Warning line shape (all three passes share this Markdown blockquote template, rendered by `lib/emit-warnings.js`):
-
-```
-> ⚠️ SPLIT-WARNING: [Pass <X>] <file>: <one-line problem summary> — hint: <suggested-resolution>
-```
-
-The `<suggested-resolution>` text is pass-specific (see each pass below) and names the most likely operator action. Common hint phrases:
-
-- `merge-with-prior-task or convert-to-verification-checkpoint` — Pass A typically suggests merging the empty-RED task into its predecessor or downgrading it to a checkpoint
-- coordinate-with-sibling ticket IDs (e.g. `coordinate with ECHO-5355`) — Pass B includes sibling ticket IDs harvested from `git log`
-- `(a) add a Task 0 / (b) accept blast-radius takeover / (c) confirm with brief author` — Pass C lists the three remediation options in the hint
-
-### Pass A — Chronological Simulator
-
-**When it fires:** After Step 4.1, when two or more tasks declare overlapping `### Files in scope` AND one of them has an empty RED deliverable (no failing test authored). This catches the ECHO-5361-class wedge where a task ships GREEN code without the RED test to gate it.
-
-**Warning template:**
-
-```
-> ⚠️ SPLIT-WARNING: [Pass A] <shared-file>: Task <N> RED already holds after Task <M> GREEN — hint: merge-with-prior-task or convert-to-verification-checkpoint
-```
-
-**Limitations:**
-
-- Pass A does not cross task boundaries beyond direct file overlap (transitive dependencies are out of scope)
-- Pass A only inspects declared scope; it cannot detect implicit edits made via globs that overlap at runtime
-- The RED-emptiness check is a regex grep for `**RED:**` markers — tasks that use a non-standard phase prefix are not analyzed
-
-### Pass B — Contract Extractor
-
-**When it fires:** After Step 4.1, when a task's `### Test Command` references a file (via `$CHANGED_FILES`) that is NOT listed under that task's `### Files in scope` and IS listed under a sibling task's `### Files in scope`. This catches the ECHO-5362-class contract divergence where Task A's test depends on a contract owned by Task B.
-
-**Warning template:**
-
-```
-> ⚠️ SPLIT-WARNING: [Pass B] <path>: contract divergence with out-of-scope file (consumer/producer shapes differ) — hint: coordinate with <SIBLING-TICKET-ID>
-```
-
-**Limitations:**
-
-- Cross-task contracts that flow through node_modules, generated code, or framework boundaries are invisible to the static parse
-- Pass B assumes every sibling task's scope is correctly declared; if a sibling's scope is itself wrong, Pass B will silently agree
-- Pass B parses the literal `CHANGED_FILES="..."` value; it does not expand shell globs or evaluate command substitution
-
-### Pass C — Lint Blast Radius
-
-**When it fires:** After Step 4.1, when a task's `### Files in scope` includes a file that currently has lint violations OR is within a directory where `pnpm lint` would surface pre-existing violations outside the ticket's stated scope. This catches the ECHO-5353-class regression where a task's GREEN edit is blocked by pre-existing lint debt the task never intended to touch.
-
-**Warning template:**
-
-```
-> ⚠️ SPLIT-WARNING: [Pass C] <path>:<line>: pre-existing lint violation (<rule>) outside ticket scope — hint: (a) add a Task 0 / (b) accept blast-radius takeover / (c) confirm with brief author
-```
-
-**Limitations:**
-
-- Pass C does not run formatters (biome / prettier) — formatting drift is intentionally out of scope
-- Pass C falls back to a static AST parse when no `pnpm lint` script is detected; the static parse covers only syntactic rules, not project-specific ESLint plugins
-- The blast-radius heuristic uses directory-level grouping; very large directories may produce noisy warnings that the operator must resolve with `suppress`
-
-### De-duplication and operator workflow
-
-When the same file triggers warnings from multiple passes, the splitter collapses them into one consolidated `SPLIT-WARNING` line with the most-specific pass ID. The operator resolves each unique warning once; resolved warnings are removed from `tasks.md` before commit. The operator hint at the end of each warning is intentionally machine-readable so downstream tooling (e.g. `/work-implement`'s implement-gate) can detect unresolved warnings and refuse to advance until they are addressed.
-
----
-
-## Output Format
-
-### Checkbox Legend
-All deliverables start with `[ ]`. The workflow engine updates them automatically:
-- `[ ]` — not started
-- `[-]` — in progress (TDD initialized)
-- `[x]` — implementation done (TDD evidence recorded)
-- `[v]` — verified by completion-checker
-
-### Task format (implementation tasks)
-
-```markdown
-## Task N — <title>
-
-### Type
-<infrastructure | backend | frontend | integration | test | checkpoint>
-
-### Description
-<1-3 sentence summary of what this task delivers>
-
-### Requirements Covered
-- <requirement ID from Step 4.0>
-- <requirement ID from Step 4.0>
-
-### Deliverables
-- [ ] N.1 <subtask description>
-  - Test: <acceptance criterion>
-  - [ ] N.1.1 **RED:** Write failing tests for <behavior>
-    - Test: Tests fail — <expected behavior> is not yet implemented
-  - [ ] N.1.2 **GREEN:** Implement <behavior> to pass tests
-    - Test: All tests from N.1.1 pass
-  - [ ] N.1.3 **REFACTOR:** Refactor <component> for clarity
-    - Test: All tests still pass after refactoring
-  - _Requirements: <requirement ID> (<context>), <requirement ID> (<context>)_
-- [ ] N.2 <subtask description>
-  - Test: <acceptance criterion>
-  - [ ] N.2.1 **RED:** Write failing tests for <behavior>
-    - Test: Tests fail — <expected behavior> is not yet implemented
-  - [ ] N.2.2 **GREEN:** Implement <behavior> to pass tests
-    - Test: All tests from N.2.1 pass
-  - [ ] N.2.3 **REFACTOR:** Refactor <component> for clarity
-    - Test: All tests still pass after refactoring
-  - _Requirements: <requirement ID> (<context>), <requirement ID> (<context>)_
-
-### Acceptance Criteria
-- <criterion 1>
-- <criterion 2>
-
-### Dependencies
-- None | Task N (reason)
-
-### Parallel
-- Yes | No | Partial (reason)
-
-### Test Command
-<shell command to run tests for this task — supports && chaining for multiple test suites>
-
-**MANDATORY format**: the command MUST use the per-suite env vars and the literal `$CHANGED_FILES` placeholder. Do NOT hardcode `pnpm test`/`pnpm e2e` paths — the project overrides the runner via `.envrc`, and the implement-gate executes whatever you write here verbatim.
-
-Pick the env var by suite type:
-
-| Suite | Env var |
-|---|---|
-| Unit / component | `$TEST_UNIT_COMMAND` |
-| Integration | `$TEST_INTEGRATION_COMMAND` |
-| E2E (Playwright) | `$TEST_E2E_COMMAND` |
-
-Single-suite template (the value MUST look exactly like this — only fill in the file list and pick the matching env var):
-```bash
-CHANGED_FILES="<task's deliverable file paths, space-separated>" eval "$TEST_E2E_COMMAND"
-```
-
-Multi-suite template (chain with `&&`, set `$CHANGED_FILES` once for the whole chain):
-```bash
-CHANGED_FILES="components/admin/settings.tsx tests/e2e/specs/admin/general-settings.spec.ts" eval "$TEST_UNIT_COMMAND" && eval "$TEST_E2E_COMMAND"
-```
-
-Concrete example for an E2E task:
-```bash
-CHANGED_FILES="tests/e2e/specs/workbook-detail/workbook-detail-subscriptions-tab.spec.ts" eval "$TEST_E2E_COMMAND"
-```
-
-Concrete example for a unit/component task:
-```bash
-CHANGED_FILES="components/workbooks/workbook-views-content/workbook-subscriptions-tab-content.test.tsx" eval "$TEST_UNIT_COMMAND"
-```
-
-Hardcoded `pnpm test:foo path/to/file` is **only** allowed if a project explicitly opts out of env-var-based runners (rare — flag this with the user before falling back).
-
-Note: The implement-gate executes this command automatically before/after dispatching the developer agent. Agents do NOT call `tdd-phase-state.js` or record any TDD evidence themselves.
-
-**Test-file naming MUST match the chosen runner** (CRITICAL — the tasks_gate validator enforces this):
-
-| Runner env var | File name pattern (ANY ONE must match) |
-|---|---|
-| `$TEST_INTEGRATION_COMMAND` | `**/*.integration.(test\|spec).(ts\|tsx\|js\|jsx\|mjs\|cjs)` OR `**/integration/**/*.(test\|spec).<ext>` |
-| `$TEST_E2E_COMMAND` | `**/*.e2e.(test\|spec).(ts\|tsx\|js\|jsx\|mjs\|cjs)` OR `**/e2e/**/*.(test\|spec).<ext>` |
-| `$TEST_UNIT_COMMAND` | Must NOT match either of the above patterns (no `.integration.` / `.e2e.` infix, not under `/integration/` or `/e2e/`) |
-
-If a test file is misnamed for its runner, the vitest config silently routes it to a different runner (or skips it). The gate then can't pass because the test never executes — or it executes against the wrong fixtures. When creating a NEW test file, also name it correctly upfront and include the proposed filename in the task's `### Files in scope`.
-
-**Test scope must equal task scope** (CRITICAL — prevents cross-task gate deadlocks):
-
-A task's Test Command may ONLY exercise code declared in this task's `### Files in scope`. If the test passes through a network boundary (tRPC procedure, REST handler, GraphQL resolver), it ALSO traverses the input/output validators, middleware, and routing for that boundary — and those are owned by OTHER tasks. The gate then can't pass until every co-traversed task is also done, but each of those tasks is gated by its own test that needs THIS task done. Deadlock.
-
-Symptoms when this is violated (don't ship a tasks.md with these):
-- Task A's test executes a tRPC procedure but Task A only ships the inner helper — the procedure's output schema lives in Task B.
-- Task A's Files in scope is one file, but its Test Command's CHANGED_FILES list spans 3 directories.
-- A Zod / type error fires in the test that names a symbol declared by Task B.
-
-Rules:
-1. **Default to unit tests** for per-task gates. A task that ships `lib/foo/helper.ts` should test the helper directly: `CHANGED_FILES="lib/foo/__tests__/helper.test.ts" eval "$TEST_UNIT_COMMAND"`. Do NOT test it through a procedure / handler / resolver unless that procedure is also in this task's Files in scope.
-2. **Use integration tests only when the task owns the entire boundary** — handler + validator + helper all listed under this task's Files in scope. Otherwise the integration test couples this task to its siblings.
-3. **Reserve cross-cutting integration tests for the final `checkpoint` task** — that task's scope is "verify the whole feature works end-to-end" and explicitly depends on every prior task.
-4. **Audit every Test Command before emitting tasks.md**: for each task, walk the file list in CHANGED_FILES and confirm every file appears under this task's Files in scope. If any file is owned by a different task, switch to a narrower unit test or expand the scope.
-
-### Suggested Scope (optional — include when file paths are inferable from the spec)
-- `<path/to/likely/file.ts>`
-- `<path/to/another/file.ts>`
-
-### Files in scope (REQUIRED — Gate C)
-- `<path/or/glob/the/task/may/edit/**>`
-- `<another/specific-file.ts>`
-
-### Files explicitly out of scope (REQUIRED — Gate C; may be empty when no siblings own related surfaces)
-- `<sibling-owned/file.ts>` — owned by [SIBLING-TICKET-ID]
-
----
-```
-
-> The `<...>` brackets above are **template placeholders**. You MUST replace them with real paths before emitting `tasks.md`. The `scope_exists` phase rejects any path containing `<...>`, `{...}`, `TBD`, `XXX`, or `???`. If you cannot yet name the exact file, do not write the task — gather the information first (e.g. `ls .github/workflows/`).
-
-**Required sections (Gate C):**
-- `### Files in scope` — Glob patterns or paths the task may edit. Must be non-empty. The implement-step hook blocks any file edit outside this set. Each entry must reference a real path; annotate creates with `(NEW)` and deletions with `(DELETE)` (see marker convention below).
-- `### Files explicitly out of scope` — Paths owned by sibling tickets that this task must not touch. May be empty when no siblings exist. Populate from `tasks/<ticket>/related-tickets.json` (`surfaces` array under each sibling).
-
-**Marker convention for `### Files in scope` (enforced by the `scope_exists` phase):**
-- `` `path/to/file.ts` `` — file MUST exist at repo root (MODIFY, default)
-- `` `path/to/file.ts` (NEW) `` — file does NOT yet exist; this task creates it
-- `` `path/to/file.ts` (DELETE) `` — file MUST exist; this task removes it
-
-The `scope_exists` phase blocks when any entry without `(NEW)` does not exist on disk, when any `(DELETE)` target is missing, or when any path contains placeholder syntax. Glob patterns (`lib/foo/**/*.ts`) are accepted when their non-glob directory prefix exists.
-
-The `### Suggested Scope` field is the legacy precursor — leave it in place for backwards compatibility, but ALSO emit the two new sections above.
-
-### Task format (checkpoint tasks)
-
-```markdown
-## Task N — Checkpoint: <what to verify>
-
-### Type
-checkpoint
-
-### Description
-Verify all prior tasks are correctly implemented and integrated.
-
-### Acceptance Criteria
-- All tests pass
-- <specific integration verification>
-
-### Dependencies
-- Task N-1, Task N-2, ...
-
----
-```
-
-### Full file structure
-
-```markdown
-# Tasks
-
-_Generated from: brief.md, spec.md_
-_Ticket: <TICKET_ID>_
-_TDD Protocol: Every non-exempt implementation task follows RED -> GREEN -> REFACTOR ordering in deliverables._
-
-## Parallelization Plan
-
-(Include this section when any tasks are parallel. Shows wave execution order.)
-
-**Wave 1 (prerequisite — shared resource changes):**
-- Task 1: <shared changes extracted from parallel tasks>
-
-**Wave 2 (parallel — after Wave 1):**
-- Task 2, Task 3, Task 4 (all parallel, no file conflicts)
-
-**Wave 3 (sequential — after Wave 2):**
-- Task 5: Checkpoint
-
-## Extracted Requirements
-
-<The numbered requirement list from Step 4.0>
-
----
-
-## Task 1 — ...
-...
-
-## Task N — Checkpoint: ...
-...
-
-## Requirement Coverage
-
-| Requirement | Covered By |
-|-------------|------------|
-| R1          | Task 1     |
-| R2          | Task 3     |
-| ...         | ...        |
-```
-
-> **Note (GH-462):** The top-level `## Requirement Coverage` table above is MANDATORY in every emitted `tasks.md`. Each `## Task N` block must ALSO include a `### Requirements Covered` subsection listing the requirement IDs that task implements. The completion-checker parser reads the top-level table first; when absent or header-only, it aggregates the per-task `### Requirements Covered` subsections as a safety-net fallback (synthesizing rows with `status=DELIVERED`, `evidence=tasks.md:Task N`). Emit both — the dual-emission keeps the rollup table authoritative while ensuring the workflow never deadlocks if the table is accidentally omitted.
-
-### Format rules
-
-- Top-level tasks are numbered sequentially: Task 1, Task 2, ...
-- Subtasks use dot notation: N.1, N.2, ... Each subtask nests its own TDD cycle as sub-items: N.1.1 **RED:**, N.1.2 **GREEN:**, N.1.3 **REFACTOR:**
-- Every TDD sub-item has a `Test:` line (acceptance criterion). Each subtask ends with a `_Requirements:_` line with context annotations (e.g., `_Requirements: R1 (validation logic), R3 (error handling)_`)
-- Each deliverable must correspond to a concrete artifact: a file, function/class, API endpoint, CLI command, infrastructure resource, or configuration entry. Do not list abstract outcomes like "improved performance" as deliverables.
-- Dependencies reference task numbers, not subtask numbers
-- Implementation task deliverables use bold phase prefixes: `**RED:**`, `**GREEN:**`, `**REFACTOR:**` nested within each subtask — each subtask gets its own small TDD cycle. Checkpoint tasks and config-only infrastructure tasks are exempt (see Rule 10).
-- The file starts with `# Tasks`, metadata, and the extracted requirements list
-- The file ends with the Requirement Coverage table
-
-**Rule 11 — Documentation Task:**
-If the spec references user-facing behavior changes, API changes, configuration changes, or existing `.md` documentation files are related to the changes, add a task of type `checkpoint` titled "Documentation Review" that verifies:
-- Affected `.md` files are updated (README, architecture docs, API docs)
-- New features are documented if user-facing
-- Configuration changes are documented
-This task is checkpoint type (auto-TDD-exception) and should be the second-to-last task (before the final verification checkpoint).
-

@@ -605,6 +605,22 @@ describe('fileMatchesScope', () => {
   it('handles ./ prefix on both sides', () => {
     assert.equal(ts.fileMatchesScope('./lib/foo.ts', ['./lib/foo.ts']), true);
   });
+  it('mid-glob ** requires tail to match (no prefix-only false-positive)', () => {
+    // The previous prefix-match heuristic returned true for ANY file under
+    // `lib/` when the scope was `lib/**/foo.ts`. The fixed matcher only
+    // accepts paths whose tail also matches.
+    assert.equal(ts.fileMatchesScope('lib/unrelated.ts', ['lib/**/foo.ts']), false);
+    assert.equal(ts.fileMatchesScope('lib/bar/foo.ts', ['lib/**/foo.ts']), true);
+    assert.equal(ts.fileMatchesScope('lib/foo.ts', ['lib/**/foo.ts']), false);
+  });
+  it('single * does not cross path segments', () => {
+    assert.equal(ts.fileMatchesScope('lib/a/b.ts', ['lib/*.ts']), false);
+    assert.equal(ts.fileMatchesScope('lib/a.ts', ['lib/*.ts']), true);
+  });
+  it('trailing slash desugars to directory wildcard', () => {
+    assert.equal(ts.fileMatchesScope('lib/foo/bar.ts', ['lib/foo/']), true);
+    assert.equal(ts.fileMatchesScope('lib/other.ts', ['lib/foo/']), false);
+  });
 });
 
 describe('validateTddCycle (ECHO-4453 wedge detection)', () => {
