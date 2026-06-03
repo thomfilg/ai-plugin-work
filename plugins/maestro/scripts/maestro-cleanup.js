@@ -21,7 +21,11 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
+// Honor STATE_DIR (matches state.js / alerts.js) so custom deployments clean
+// the same directory the daemon writes to. MAESTRO_STATE_DIR kept as a legacy
+// fallback for any existing callers.
 const STATE_DIR =
+  process.env.STATE_DIR ||
   process.env.MAESTRO_STATE_DIR ||
   path.join(process.env.HOME || '/tmp', '.cache', 'maestro-conduct');
 const ALERT_COUNTS = path.join(STATE_DIR, '_alert-counts.json');
