@@ -34,14 +34,18 @@ require.cache[ghExecPath] = {
   },
 };
 
-// Mock git commands used by follow-up-pr.js
+// Mock git commands used by follow-up-pr.js. Any other execSync call must
+// fail the test loudly — falling through to the real binary would let
+// unexpected shell-outs slip past, and CodeQL flagged the fallthrough as a
+// command-injection surface (`js/shell-command-injection-from-environment`,
+// `js/indirect-command-line-injection`). A throw both silences the analyser
+// and turns unaccounted-for spawns into a deterministic test failure.
 const childProcess = require('child_process');
-const _origExecSync = childProcess.execSync;
-childProcess.execSync = function (cmd, opts) {
+childProcess.execSync = function (cmd) {
   if (typeof cmd === 'string' && cmd.includes('git rev-parse HEAD')) return 'abc1234567890\n';
   if (typeof cmd === 'string' && cmd.includes('git diff --name-only')) return '';
   if (typeof cmd === 'string' && cmd.includes('git branch --show-current')) return 'feat/test\n';
-  return _origExecSync.call(this, cmd, opts);
+  throw new Error(`Unmocked execSync in ci-progression.test.js: ${String(cmd).slice(0, 80)}`);
 };
 
 // Clear follow-up-pr.js cache so it picks up mock

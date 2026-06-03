@@ -14,6 +14,7 @@
 
 const path = require('path');
 const { logHookError } = require(path.join(__dirname, '..', 'hook-error-log'));
+const { resolvePluginRootHonouringEnv } = require('../../work/lib/resolve-plugin-root');
 
 // Fail-open: unexpected errors should never block unrelated commands
 process.on('uncaughtException', (err) => {
@@ -25,7 +26,14 @@ process.on('unhandledRejection', (err) => {
   process.exit(0);
 });
 
-const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(__dirname, '..', '..', '..');
+// Resolve via the shared helper. Fall back to the legacy chain only when the
+// helper cannot find a plugin root (unrecognized install layout).
+// Hook lives at <root>/scripts/workflows/lib/hooks — 3 levels up reaches the
+// plugin-scripts root. Use the env-honouring variant: the dev-check.sh path is
+// computed relative to PLUGIN_ROOT, so the user's CLAUDE_PLUGIN_ROOT must win
+// over an unrelated probe when the env value doesn't match a known layout.
+const PLUGIN_ROOT =
+  resolvePluginRootHonouringEnv(__dirname, 3) || path.resolve(__dirname, '..', '..', '..');
 
 /**
  * Detection strategy: search for pnpm + blocked script name anywhere in the
