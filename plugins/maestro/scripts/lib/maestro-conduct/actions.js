@@ -185,6 +185,19 @@ function checkRestartGuards({ session, ticket, worktree }) {
     );
     return { skip: true };
   }
+  // Dead-end guard. If freeDeadEndSlot already killed this ticket's tmux
+  // because the agent was stuck in a non-recoverable state, do NOT resurrect
+  // it. Unlike ci-gate-freed, dead-end has no SHA-gated clear: the slot has
+  // been rotated and the operator must bootstrap the next ticket manually
+  // (or it was auto-bootstrapped). Resurrecting here would undo slot rotation
+  // if tmux wasn't fully torn down or a session reappeared between ticks.
+  const deadEnd = state.read(ticket, 'dead-end');
+  if (deadEnd && deadEnd.killed) {
+    alerts.log(
+      `${session} AUTO-RESTART skipped: ticket ${ticket} dead-end-freed (trigger=${deadEnd.trigger || 'unknown'}); slot rotated, do not resurrect`
+    );
+    return { skip: true };
+  }
   return { skip: false };
 }
 

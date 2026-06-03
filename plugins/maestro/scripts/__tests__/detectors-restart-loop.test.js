@@ -141,3 +141,43 @@ test('autoRestart bails early when worktree does not exist (no marker mutation)'
     'no marker should be written for missing worktree'
   );
 });
+
+test('autoRestart skips when dead-end marker is set (slot rotated, do not resurrect)', () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rl-deadend-'));
+  const alertFile = path.join(stateDir, 'alerts.jsonl');
+  const tmuxStub = [];
+  const actions = freshActions({ stateDir, alertFile, tmuxStub });
+  const worktree = fakeWorktree();
+
+  // Seed a dead-end marker as freeDeadEndSlot would (per-ticket, killed:true).
+  fs.writeFileSync(
+    path.join(stateDir, 'GH-DE.dead-end.json'),
+    JSON.stringify({
+      killed: true,
+      freedAt: Math.floor(Date.now() / 1000),
+      trigger: 'phase-stall',
+    })
+  );
+
+  const args = {
+    session: 'GH-DE-work',
+    ticket: 'GH-DE',
+    worktree,
+    silenceSec: 600,
+  };
+  assert.equal(actions.autoRestart(args), false, 'must not resurrect after dead-end rotation');
+
+  // No tmux kill / new-session must have been issued.
+  const tmuxCalls = tmuxStub.filter(
+    (c) => c.args[0] === 'kill-session' || c.args[0] === 'new-session'
+  );
+  assert.equal(tmuxCalls.length, 0, 'dead-end guard must short-circuit before any tmux call');
+
+  // No restart-loop marker should be written (guard returns before recording).
+  const markerFile = path.join(stateDir, 'GH-DE-work.restart-loop.json');
+  assert.equal(
+    fs.existsSync(markerFile),
+    false,
+    'dead-end short-circuit must not touch restart-loop state'
+  );
+});
