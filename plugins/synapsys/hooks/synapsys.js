@@ -63,10 +63,23 @@ function reminderLine(memory) {
 function renderMatchedMemories(matched, sessionId) {
   try {
     const ledger = injectLedger.loadLedger(sessionId);
+    if (!ledger.memories || typeof ledger.memories !== 'object') {
+      ledger.memories = {};
+    }
     const out = matched.map((m) => {
-      const entry = ledger && ledger.memories ? ledger.memories[m.name] : undefined;
+      const entry = ledger.memories[m.name];
       const decision = decideInjection(m, entry);
       const text = decision.kind === 'full' ? formatMemory(m) : reminderLine(m);
+      // Update in-memory snapshot BEFORE the next iteration so duplicates of the
+      // same memory name (e.g. same name discovered in multiple stores) see the
+      // incremented count and correctly emit a reminder instead of another full.
+      const prevCount = Number(entry && entry.injectedCount) || 0;
+      const prevLast = Number(entry && entry.lastFullInjectAt) || 0;
+      const nextCount = prevCount + 1;
+      ledger.memories[m.name] = {
+        injectedCount: nextCount,
+        lastFullInjectAt: decision.kind === 'full' ? nextCount : prevLast,
+      };
       try {
         injectLedger.recordInjection(sessionId, m.name, { full: decision.kind === 'full' });
       } catch {
