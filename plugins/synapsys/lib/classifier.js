@@ -78,10 +78,7 @@ function matchesAny(patterns, text) {
 function matchesAnyTool(patterns, tools) {
   if (!Array.isArray(patterns) || patterns.length === 0 || tools.length === 0) return false;
   for (const tool of tools) {
-    if (typeof tool !== 'string' || tool.length === 0) continue;
-    for (const re of patterns) {
-      if (re && typeof re.test === 'function' && re.test(tool)) return true;
-    }
+    if (typeof tool === 'string' && tool.length > 0 && matchesAny(patterns, tool)) return true;
   }
   return false;
 }

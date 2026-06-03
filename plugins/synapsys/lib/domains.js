@@ -121,35 +121,46 @@ function parseRegistryBody(body) {
  * @param {string} [opts.bundledPath]   Path to bundled fallback (default: ./DOMAINS.md)
  * @returns {{ roots: Map<string, { leaves: Map<string, { signal_prompt: RegExp[], signal_pretool: RegExp[] }> }> }}
  */
+function statMtime(filePath) {
+  try {
+    return fs.statSync(filePath).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+function readFileText(filePath) {
+  try {
+    return fs.readFileSync(filePath, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
+function loadRegistryUncached(home, bundledPath) {
+  const filePath = resolveRegistryPath(home, bundledPath);
+  if (!filePath) return emptyRegistry();
+
+  const mtimeMs = statMtime(filePath);
+  if (mtimeMs === null) return emptyRegistry();
+
+  if (cache && cache.path === filePath && cache.mtimeMs === mtimeMs) {
+    return cache.registry;
+  }
+
+  const body = readFileText(filePath);
+  if (body === null) return emptyRegistry();
+
+  const registry = parseRegistryBody(body);
+  cache = { path: filePath, mtimeMs, registry };
+  return registry;
+}
+
 function loadDomainRegistry(opts = {}) {
   const home = opts.home || os.homedir();
   const bundledPath = opts.bundledPath || DEFAULT_BUNDLED_PATH;
-
   try {
-    const filePath = resolveRegistryPath(home, bundledPath);
-    if (!filePath) return emptyRegistry();
-
-    let mtimeMs;
-    try {
-      mtimeMs = fs.statSync(filePath).mtimeMs;
-    } catch {
-      return emptyRegistry();
-    }
-
-    if (cache && cache.path === filePath && cache.mtimeMs === mtimeMs) {
-      return cache.registry;
-    }
-
-    let body;
-    try {
-      body = fs.readFileSync(filePath, 'utf8');
-    } catch {
-      return emptyRegistry();
-    }
-
-    const registry = parseRegistryBody(body);
-    cache = { path: filePath, mtimeMs, registry };
-    return registry;
+    return loadRegistryUncached(home, bundledPath);
   } catch {
     return emptyRegistry();
   }

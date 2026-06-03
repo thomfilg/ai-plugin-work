@@ -355,17 +355,20 @@ function isDomainMismatch(memory, activeDomains) {
  * @param {{ activeDomains?: Set<string> }} [opts]
  * @returns {Array<object>} subset of `memories` whose matcher fired.
  */
+const EVENT_MATCHERS = {
+  UserPromptSubmit: (m, payload) => matchPrompt(m, payload?.prompt || ''),
+  PreToolUse: (m, payload) => matchPreTool(m, payload),
+  SessionStart: (m) => matchSession(m),
+  Stop: (m) => matchStop(m),
+};
+
 function selectForEvent(memories, event, payload, opts) {
   const activeDomains = opts && opts.activeDomains;
+  const matcher = EVENT_MATCHERS[event];
   const matched = [];
   for (const m of memories) {
-    // Domain gate ANDed BEFORE trigger evaluation (cheaper check first).
     if (isDomainMismatch(m, activeDomains)) continue;
-    let result = { fired: false };
-    if (event === 'UserPromptSubmit') result = matchPrompt(m, payload?.prompt || '');
-    else if (event === 'PreToolUse') result = matchPreTool(m, payload);
-    else if (event === 'SessionStart') result = matchSession(m);
-    else if (event === 'Stop') result = matchStop(m);
+    const result = matcher ? matcher(m, payload) : { fired: false };
     if (result.fired) matched.push(m);
   }
   return matched;

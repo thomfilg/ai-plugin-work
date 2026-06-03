@@ -54,48 +54,120 @@ function parseArgs(argv) {
  *
  * @returns {Map<string, { kind: 'prompt'|'pretool'|'sticky', detail: string }>}
  */
+function findPromptAttribution(leaf, prompt) {
+  if (!prompt) return null;
+  const patterns = Array.isArray(leaf.signal_prompt) ? leaf.signal_prompt : [];
+  for (const re of patterns) {
+    if (re && typeof re.test === 'function' && re.test(prompt)) {
+      return { kind: 'prompt', detail: `signal_prompt ${re}` };
+    }
+  }
+  return null;
+}
+
+function findPretoolAttribution(leaf, tools) {
+  const patterns = Array.isArray(leaf.signal_pretool) ? leaf.signal_pretool : [];
+  for (const re of patterns) {
+    if (!re || typeof re.test !== 'function') continue;
+    const hit = tools.find((t) => typeof t === 'string' && re.test(t));
+    if (hit) return { kind: 'pretool', detail: `signal_pretool ${re} on ${hit}` };
+  }
+  return null;
+}
+
+function setIfAbsent(map, keys, value) {
+  for (const k of keys) if (!map.has(k)) map.set(k, value);
+}
+
+function stickyAttribution(domain, stickySession) {
+  const entry = stickySession && stickySession[domain];
+  const isSticky = entry && entry.sticky === true;
+  return { kind: 'sticky', detail: isSticky ? 'sticky-carry' : 'carried' };
+}
+
+function attributeSignals(attribution, active, registry, prompt, tools) {
+  for (const { rootName, leafName, leaf } of iterateLeafSignals(registry)) {
+    const leafKey = `${rootName}:${leafName}`;
+    if (!active.has(rootName) && !active.has(leafKey)) continue;
+    const a = findPromptAttribution(leaf, prompt) || findPretoolAttribution(leaf, tools);
+    if (a) setIfAbsent(attribution, [leafKey, rootName], a);
+  }
+}
+
 function attribute({ active, registry, prompt, tools, stickySession }) {
   const attribution = new Map();
-  // First pass: walk leaves once and record prompt/pretool matches.
-  for (const { rootName, leafName, leaf } of iterateLeafSignals(registry)) {
-    const rootKey = rootName;
-    const leafKey = `${rootName}:${leafName}`;
-    if (!active.has(rootKey) && !active.has(leafKey)) continue;
-
-    // prompt
-    for (const re of Array.isArray(leaf.signal_prompt) ? leaf.signal_prompt : []) {
-      if (re && typeof re.test === 'function' && prompt && re.test(prompt)) {
-        const a = { kind: 'prompt', detail: `signal_prompt ${re}` };
-        if (!attribution.has(leafKey)) attribution.set(leafKey, a);
-        if (!attribution.has(rootKey)) attribution.set(rootKey, a);
-        break;
-      }
-    }
-    // pretool
-    if (!attribution.has(leafKey)) {
-      for (const re of Array.isArray(leaf.signal_pretool) ? leaf.signal_pretool : []) {
-        if (!re || typeof re.test !== 'function') continue;
-        const hit = tools.find((t) => typeof t === 'string' && re.test(t));
-        if (hit) {
-          const a = { kind: 'pretool', detail: `signal_pretool ${re} on ${hit}` };
-          if (!attribution.has(leafKey)) attribution.set(leafKey, a);
-          if (!attribution.has(rootKey)) attribution.set(rootKey, a);
-          break;
-        }
-      }
-    }
-  }
-  // Sticky fallback for anything still unattributed.
+  attributeSignals(attribution, active, registry, prompt, tools);
   for (const domain of active) {
-    if (attribution.has(domain)) continue;
-    const stickyEntry = stickySession && stickySession[domain];
-    if (stickyEntry && stickyEntry.sticky === true) {
-      attribution.set(domain, { kind: 'sticky', detail: 'sticky-carry' });
-    } else {
-      attribution.set(domain, { kind: 'sticky', detail: 'carried' });
-    }
+    if (!attribution.has(domain)) attribution.set(domain, stickyAttribution(domain, stickySession));
   }
   return attribution;
+}
+
+function safeLoadRegistry(home) {
+  try {
+    return loadDomainRegistry({ home });
+  } catch (_) {
+    return { roots: new Map() };
+  }
+}
+
+function safeLoadSticky(stickyPath) {
+  try {
+    return loadStickyState({ filePath: stickyPath });
+  } catch (_) {
+    return {};
+  }
+}
+
+function safeClassify({ prompt, recentToolCalls, registry, stickyState, sessionId }) {
+  try {
+    return classifyWithSticky({ prompt, recentToolCalls, registry, stickyState, sessionId })
+      .activeDomains;
+  } catch (_) {
+    return new Set();
+  }
+}
+
+function makeColors(noColor) {
+  if (noColor) return new Proxy({}, { get: () => (s) => String(s) });
+  return {
+    dim: (s) => `\x1b[2m${s}\x1b[0m`,
+    bold: (s) => `\x1b[1m${s}\x1b[0m`,
+    cyan: (s) => `\x1b[36m${s}\x1b[0m`,
+    green: (s) => `\x1b[32m${s}\x1b[0m`,
+    yellow: (s) => `\x1b[33m${s}\x1b[0m`,
+    magenta: (s) => `\x1b[35m${s}\x1b[0m`,
+  };
+}
+
+function emitJson(sessionId, active, attribution) {
+  const sortedActive = [...active].sort();
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        sessionId,
+        active: sortedActive,
+        attribution: sortedActive.map((d) => ({
+          domain: d,
+          ...(attribution.get(d) || { kind: 'unknown', detail: '' }),
+        })),
+      },
+      null,
+      2
+    )}\n`
+  );
+}
+
+function emitHuman(opts, active, attribution, C) {
+  if (active.size === 0) {
+    process.stdout.write(`${C.dim('no active domains')}\n`);
+    return;
+  }
+  process.stdout.write(`${C.bold('Active domains')} ${C.dim('·')} session=${opts.sessionId}\n`);
+  for (const domain of [...active].sort()) {
+    const a = attribution.get(domain) || { kind: 'unknown', detail: '' };
+    process.stdout.write(`  ${C.green(domain)}  ${C.dim('—')} ${C.magenta(a.kind)}: ${a.detail}\n`);
+  }
 }
 
 function main(argv) {
@@ -103,33 +175,15 @@ function main(argv) {
   const home = process.env.SYNAPSYS_HOME || process.env.HOME || os.homedir();
   const stickyPath = path.join(home, '.claude', 'synapsys', '.state', 'sticky-domains.json');
 
-  let registry = { roots: new Map() };
-  try {
-    registry = loadDomainRegistry({ home });
-  } catch (_) {
-    // fail-open
-  }
-
-  let stickyState = {};
-  try {
-    stickyState = loadStickyState({ filePath: stickyPath });
-  } catch (_) {
-    // fail-open
-  }
-
-  let active = new Set();
-  try {
-    const result = classifyWithSticky({
-      prompt: opts.prompt,
-      recentToolCalls: opts.tools,
-      registry,
-      stickyState,
-      sessionId: opts.sessionId,
-    });
-    active = result.activeDomains;
-  } catch (_) {
-    // fail-open
-  }
+  const registry = safeLoadRegistry(home);
+  const stickyState = safeLoadSticky(stickyPath);
+  const active = safeClassify({
+    prompt: opts.prompt,
+    recentToolCalls: opts.tools,
+    registry,
+    stickyState,
+    sessionId: opts.sessionId,
+  });
 
   const stickySession = (stickyState && stickyState[opts.sessionId]) || {};
   const attribution = attribute({
@@ -141,47 +195,11 @@ function main(argv) {
   });
 
   if (opts.json) {
-    const sortedActive = [...active].sort();
-    process.stdout.write(
-      `${JSON.stringify(
-        {
-          sessionId: opts.sessionId,
-          active: sortedActive,
-          attribution: sortedActive.map((d) => ({
-            domain: d,
-            ...(attribution.get(d) || { kind: 'unknown', detail: '' }),
-          })),
-        },
-        null,
-        2
-      )}\n`
-    );
+    emitJson(opts.sessionId, active, attribution);
     return 0;
   }
 
-  const C = opts.noColor
-    ? new Proxy({}, { get: () => (s) => String(s) })
-    : {
-        dim: (s) => `\x1b[2m${s}\x1b[0m`,
-        bold: (s) => `\x1b[1m${s}\x1b[0m`,
-        cyan: (s) => `\x1b[36m${s}\x1b[0m`,
-        green: (s) => `\x1b[32m${s}\x1b[0m`,
-        yellow: (s) => `\x1b[33m${s}\x1b[0m`,
-        magenta: (s) => `\x1b[35m${s}\x1b[0m`,
-      };
-
-  if (active.size === 0) {
-    process.stdout.write(`${C.dim('no active domains')}\n`);
-    return 0;
-  }
-
-  process.stdout.write(`${C.bold('Active domains')} ${C.dim('·')} session=${opts.sessionId}\n`);
-  for (const domain of [...active].sort()) {
-    const a = attribution.get(domain) || { kind: 'unknown', detail: '' };
-    process.stdout.write(
-      `  ${C.green(domain)}  ${C.dim('—')} ${C.magenta(a.kind)}: ${a.detail}\n`
-    );
-  }
+  emitHuman(opts, active, attribution, makeColors(opts.noColor));
   return 0;
 }
 

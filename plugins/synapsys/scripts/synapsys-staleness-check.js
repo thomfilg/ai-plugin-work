@@ -26,25 +26,13 @@
 
 const nodePath = require('node:path');
 const { spawnSync } = require('node:child_process');
-const {
-  fs,
-  path,
-  setupCli,
-  discoverStores,
-  listMemoriesFromStore,
-} = require(nodePath.join(__dirname, '..', 'lib', 'script-bootstrap'));
-const {
-  classifyMemory,
-  groupResultsBySource,
-  summarise,
-  getProfileForSource,
-} = require(nodePath.join(__dirname, '..', 'lib', 'staleness'));
-const { loadDomainRegistry } = require(nodePath.join(
-  __dirname,
-  '..',
-  'lib',
-  'domains'
-));
+const { fs, path, setupCli, discoverStores, listMemoriesFromStore } = require(
+  nodePath.join(__dirname, '..', 'lib', 'script-bootstrap')
+);
+const { classifyMemory, groupResultsBySource, summarise, getProfileForSource } = require(
+  nodePath.join(__dirname, '..', 'lib', 'staleness')
+);
+const { loadDomainRegistry } = require(nodePath.join(__dirname, '..', 'lib', 'domains'));
 
 // ---------------------------------------------------------------------------
 // Repo-root resolution
@@ -233,21 +221,15 @@ function dispatchReconsolidate(grouped, opts) {
       continue;
     }
     if (!profile || !profile.name) {
-      stderr.write(
-        `warning: no profile owns source ${g.source}; skipping\n`
-      );
+      stderr.write(`warning: no profile owns source ${g.source}; skipping\n`);
       continue;
     }
     // Route child stdout to stderr when --json is active so the parent's
     // JSON payload remains the only thing on stdout.
-    const childStdio = opts.json
-      ? ['inherit', process.stderr, 'inherit']
-      : 'inherit';
-    const result = spawnSync(
-      process.execPath,
-      [consolidateBin, '--profile=' + profile.name],
-      { stdio: childStdio }
-    );
+    const childStdio = opts.json ? ['inherit', process.stderr, 'inherit'] : 'inherit';
+    const result = spawnSync(process.execPath, [consolidateBin, '--profile=' + profile.name], {
+      stdio: childStdio,
+    });
     if (result.status !== 0) {
       sawSpawnFailure = true;
       stderr.write(
@@ -287,6 +269,15 @@ function parseCliOptions() {
  * @param {{ roots: Map<string, { leaves: Map<string, unknown> }> }} registry
  * @returns {Array<{ memory: string, value: string }>}
  */
+function isUnknownDomainValue(value, roots) {
+  if (typeof value !== 'string' || value.length === 0) return false;
+  const colonIdx = value.indexOf(':');
+  if (colonIdx === -1) return !roots.has(value);
+  const root = roots.get(value.slice(0, colonIdx));
+  const leafName = value.slice(colonIdx + 1);
+  return !root || !(root.leaves instanceof Map) || !root.leaves.has(leafName);
+}
+
 function lintDomainsForMemory(memory, registry) {
   if (!memory || !Array.isArray(memory.domain) || memory.domain.length === 0) {
     return [];
@@ -294,19 +285,7 @@ function lintDomainsForMemory(memory, registry) {
   const roots = registry && registry.roots instanceof Map ? registry.roots : new Map();
   const warnings = [];
   for (const value of memory.domain) {
-    if (typeof value !== 'string' || value.length === 0) continue;
-    const colonIdx = value.indexOf(':');
-    if (colonIdx === -1) {
-      // Bare root: must exist in registry.
-      if (!roots.has(value)) {
-        warnings.push({ memory: memory.name || '(unnamed)', value });
-      }
-      continue;
-    }
-    const rootName = value.slice(0, colonIdx);
-    const leafName = value.slice(colonIdx + 1);
-    const root = roots.get(rootName);
-    if (!root || !(root.leaves instanceof Map) || !root.leaves.has(leafName)) {
+    if (isUnknownDomainValue(value, roots)) {
       warnings.push({ memory: memory.name || '(unnamed)', value });
     }
   }
@@ -350,8 +329,7 @@ function maybeReconsolidate(grouped, opts) {
     process.env.SYNAPSYS_CONSOLIDATE_BIN_FOR_TEST ||
     path.join(__dirname, 'synapsys-consolidate.js');
   const profilesDir =
-    process.env.SYNAPSYS_PROFILES_DIR_FOR_TEST ||
-    path.join(__dirname, 'consolidate-profiles');
+    process.env.SYNAPSYS_PROFILES_DIR_FOR_TEST || path.join(__dirname, 'consolidate-profiles');
   const dispatched = dispatchReconsolidate(grouped, {
     consolidateBin,
     profilesDir,

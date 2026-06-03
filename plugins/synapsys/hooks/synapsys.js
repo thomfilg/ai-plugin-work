@@ -129,41 +129,48 @@ function mergeStickyActive(rawActive, stickyState, sessionId) {
 // quiet *prompts*, not Stop/PreToolUse turns). Other events read the
 // existing sticky set without mutation. Fail-open: any error → returns
 // `undefined` so the caller falls back to pre-classifier behavior (R3/R4/R7).
+function getRecentToolCalls(event, payload) {
+  const baseToolCalls = Array.isArray(payload.recentToolCalls)
+    ? payload.recentToolCalls
+    : Array.isArray(payload.recent_tool_calls)
+      ? payload.recent_tool_calls
+      : [];
+  const currentTool = currentToolCallString(event, payload);
+  return currentTool ? [currentTool, ...baseToolCalls] : baseToolCalls;
+}
+
+function classifyForUserPrompt(ctx) {
+  const { activeDomains, nextStickyState } = classifyWithSticky(ctx);
+  try {
+    saveStickyState({ state: nextStickyState });
+  } catch {
+    // fail-open: persistence failures must not block injection
+  }
+  return { activeDomains };
+}
+
 function buildActiveDomainsForPayload(event, payload) {
   try {
     const registry = loadDomainRegistry();
     if (!registry || !registry.roots || registry.roots.size === 0) return undefined;
 
     const prompt = typeof payload.prompt === 'string' ? payload.prompt : '';
-    const baseToolCalls = Array.isArray(payload.recentToolCalls)
-      ? payload.recentToolCalls
-      : Array.isArray(payload.recent_tool_calls)
-        ? payload.recent_tool_calls
-        : [];
-    const currentTool = currentToolCallString(event, payload);
-    const recentToolCalls = currentTool ? [currentTool, ...baseToolCalls] : baseToolCalls;
+    const recentToolCalls = getRecentToolCalls(event, payload);
     const sessionId = payload.session_id || payload.sessionId || 'default';
     const stickyState = loadStickyState();
 
     if (event === 'UserPromptSubmit') {
-      const { activeDomains, nextStickyState } = classifyWithSticky({
+      return classifyForUserPrompt({
         prompt,
         recentToolCalls,
         registry,
         stickyState,
         sessionId,
       });
-      try {
-        saveStickyState({ state: nextStickyState });
-      } catch {
-        // fail-open: persistence failures must not block injection
-      }
-      return { activeDomains };
     }
 
     const rawActive = classifyActiveDomains({ prompt, recentToolCalls, registry });
-    const activeDomains = mergeStickyActive(rawActive, stickyState, sessionId);
-    return { activeDomains };
+    return { activeDomains: mergeStickyActive(rawActive, stickyState, sessionId) };
   } catch {
     return undefined;
   }

@@ -20,39 +20,50 @@ function defaultStatePath() {
   return path.join(os.homedir(), '.claude', 'synapsys', '.state', 'sticky-domains.json');
 }
 
-function loadStickyState({ filePath = defaultStatePath(), now = Date.now() } = {}) {
+function readJsonFile(filePath) {
   let raw;
   try {
     raw = fs.readFileSync(filePath, 'utf8');
   } catch (_) {
-    return {};
+    return null;
   }
-  let parsed;
   try {
-    parsed = JSON.parse(raw);
+    return JSON.parse(raw);
   } catch (_) {
-    return {};
+    return null;
   }
+}
+
+function normalizeStickyEntry(entry, now) {
+  if (!entry || typeof entry !== 'object') return null;
+  const lastSeenTs = Number(entry.lastSeenTs) || 0;
+  if (now - lastSeenTs > TTL_MS) return null; // evict
+  return {
+    activeStreak: Number(entry.activeStreak) || 0,
+    quietStreak: Number(entry.quietStreak) || 0,
+    sticky: entry.sticky === true,
+    lastSeenTs,
+  };
+}
+
+function normalizeSession(session, now) {
+  if (!session || typeof session !== 'object') return null;
+  const kept = {};
+  for (const domain of Object.keys(session)) {
+    const entry = normalizeStickyEntry(session[domain], now);
+    if (entry) kept[domain] = entry;
+  }
+  return Object.keys(kept).length > 0 ? kept : null;
+}
+
+function loadStickyState({ filePath = defaultStatePath(), now = Date.now() } = {}) {
+  const parsed = readJsonFile(filePath);
   if (!parsed || typeof parsed !== 'object') return {};
 
   const out = {};
   for (const sessionId of Object.keys(parsed)) {
-    const session = parsed[sessionId];
-    if (!session || typeof session !== 'object') continue;
-    const kept = {};
-    for (const domain of Object.keys(session)) {
-      const entry = session[domain];
-      if (!entry || typeof entry !== 'object') continue;
-      const lastSeenTs = Number(entry.lastSeenTs) || 0;
-      if (now - lastSeenTs > TTL_MS) continue; // evict
-      kept[domain] = {
-        activeStreak: Number(entry.activeStreak) || 0,
-        quietStreak: Number(entry.quietStreak) || 0,
-        sticky: entry.sticky === true,
-        lastSeenTs,
-      };
-    }
-    if (Object.keys(kept).length > 0) out[sessionId] = kept;
+    const kept = normalizeSession(parsed[sessionId], now);
+    if (kept) out[sessionId] = kept;
   }
   return out;
 }
@@ -67,7 +78,11 @@ function saveStickyState({ state, filePath = defaultStatePath() }) {
       fs.renameSync(tmp, filePath);
     } catch (e) {
       // Cleanup tmp on rename failure.
-      try { fs.unlinkSync(tmp); } catch (_) { /* ignore */ }
+      try {
+        fs.unlinkSync(tmp);
+      } catch (_) {
+        /* ignore */
+      }
       throw e;
     }
   } catch (_) {
@@ -91,39 +106,31 @@ function nextStreak(prev, isActive) {
   };
 }
 
+function stepDomain(session, domain, isActive, now) {
+  const stepped = nextStreak(session[domain], isActive);
+  if (stepped.activeStreak >= STREAK_THRESHOLD) stepped.sticky = true;
+  if (stepped.quietStreak >= STREAK_THRESHOLD) {
+    delete session[domain];
+    return;
+  }
+  session[domain] = {
+    activeStreak: stepped.activeStreak,
+    quietStreak: stepped.quietStreak,
+    sticky: stepped.sticky,
+    lastSeenTs: now,
+  };
+}
+
 function updateStickyState({ state, sessionId, rawActiveSet, now = Date.now() }) {
   const next = { ...(state || {}) };
   const prevSession = (state && state[sessionId]) || {};
   const session = { ...prevSession };
 
   const active = rawActiveSet instanceof Set ? rawActiveSet : new Set(rawActiveSet || []);
-
-  // Domains we need to consider = active ∪ previously-tracked.
   const domains = new Set([...Object.keys(session), ...active]);
 
   for (const domain of domains) {
-    const prev = session[domain];
-    const isActive = active.has(domain);
-    const stepped = nextStreak(prev, isActive);
-
-    // Hysteresis flip.
-    if (stepped.activeStreak >= STREAK_THRESHOLD) {
-      stepped.sticky = true;
-    }
-
-    // Hysteresis drop.
-    if (stepped.quietStreak >= STREAK_THRESHOLD) {
-      // Remove entry entirely.
-      delete session[domain];
-      continue;
-    }
-
-    session[domain] = {
-      activeStreak: stepped.activeStreak,
-      quietStreak: stepped.quietStreak,
-      sticky: stepped.sticky,
-      lastSeenTs: now,
-    };
+    stepDomain(session, domain, active.has(domain), now);
   }
 
   if (Object.keys(session).length === 0) {
