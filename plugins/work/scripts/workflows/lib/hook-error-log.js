@@ -90,71 +90,79 @@ function getBranch() {
  * @param {string} [context.tool] - Tool name (e.g. "Edit", "Bash", "Task")
  * @param {object} [context.input] - Tool input (file_path, command, etc.)
  */
+function truncateCommand(cmd) {
+  return cmd.length > 200 ? cmd.slice(0, 200) + '...' : cmd;
+}
+
+const INPUT_FIELD_MAP = [
+  ['file_path', 'file', (v) => v],
+  ['command', 'cmd', truncateCommand],
+  ['skill', 'skill', (v) => v],
+  ['subagent_type', 'agent', (v) => v],
+];
+
+function buildInputParts(input) {
+  const parts = [];
+  if (!input) return parts;
+  for (const [key, label, transform] of INPUT_FIELD_MAP) {
+    if (input[key]) parts.push(`${label}=${transform(input[key])}`);
+  }
+  return parts;
+}
+
+function buildContextParts(context) {
+  const parts = [`pid=${process.pid}`];
+  const branch = getBranch();
+  if (branch) parts.push(`branch=${branch}`);
+  parts.push(`cwd=${process.cwd()}`);
+  if (context?.tool) parts.push(`tool=${context.tool}`);
+  parts.push(...buildInputParts(context?.input));
+  return parts;
+}
+
+function sanitizeLine(line) {
+  const MAX_BYTES = 3800;
+  const safeLine = line.replace(/\n/g, ' ').replace(/\r/g, '');
+  let finalLine = safeLine + '\n';
+  if (Buffer.byteLength(finalLine, 'utf8') > MAX_BYTES) {
+    let truncated = safeLine;
+    while (Buffer.byteLength(truncated + '...\n', 'utf8') > MAX_BYTES && truncated.length > 0) {
+      truncated = truncated.slice(0, -100);
+    }
+    finalLine = truncated + '...\n';
+  }
+  return finalLine;
+}
+
+function writeLogLine(fd, line, timestamp) {
+  try {
+    const stat = fs.fstatSync(fd);
+    if (stat.size > MAX_LOG_SIZE) {
+      fs.ftruncateSync(fd, 0);
+      fs.writeSync(fd, `[${timestamp}] --- log rotated ---\n`);
+    }
+    fs.writeSync(fd, sanitizeLine(line));
+  } catch {
+    // Can't log -- silently discard. Never write to stderr from hooks.
+  }
+}
+
 function logHookError(sourceFile, err, context) {
   const name = path.basename(sourceFile);
   const message = err?.message || String(err);
   const timestamp = new Date().toISOString();
-  const pid = process.pid;
-  const cwd = process.cwd();
-  const branch = getBranch();
-
-  // Build structured context: pid identifies this specific hook invocation
-  const parts = [`pid=${pid}`];
-  if (branch) parts.push(`branch=${branch}`);
-  parts.push(`cwd=${cwd}`);
-  if (context?.tool) parts.push(`tool=${context.tool}`);
-  if (context?.input?.file_path) parts.push(`file=${context.input.file_path}`);
-  if (context?.input?.command) {
-    // Truncate long commands to keep the line under PIPE_BUF for atomic writes
-    const cmd =
-      context.input.command.length > 200
-        ? context.input.command.slice(0, 200) + '...'
-        : context.input.command;
-    parts.push(`cmd=${cmd}`);
-  }
-  if (context?.input?.skill) parts.push(`skill=${context.input.skill}`);
-  if (context?.input?.subagent_type) parts.push(`agent=${context.input.subagent_type}`);
-
-  const ctx = parts.join(' ');
-  // Raw line before sanitization -- may contain newlines or exceed PIPE_BUF limit
+  const ctx = buildContextParts(context).join(' ');
   const line = `[${timestamp}] ${name} | ${ctx} | ${message}`;
 
   if (process.env.ENFORCE_HOOK_DEBUG) {
-    // In debug mode, write to stderr with optional stack trace for visibility
     const stack = err?.stack?.split('\n')[1]?.trim() || '';
     process.stderr.write(`[${name}] ${ctx} | ${message}${stack ? '\n  ' + stack : ''}\n`);
     return;
   }
 
   const fd = getLogFd();
-  if (fd <= 0) return; // can't log -- fd open failed, silently discard
-
-  try {
-    // Auto-rotate: check size via fstatSync on the fd (no path-based reopen needed)
-    const stat = fs.fstatSync(fd);
-    if (stat.size > MAX_LOG_SIZE) {
-      fs.ftruncateSync(fd, 0);
-      fs.writeSync(fd, `[${timestamp}] --- log rotated ---\n`);
-    }
-
-    // Sanitize: flatten to single line and truncate to stay under ~4KB (PIPE_BUF)
-    const MAX_BYTES = 3800;
-    const safeLine = line.replace(/\n/g, ' ').replace(/\r/g, '');
-    let finalLine = safeLine + '\n';
-    if (Buffer.byteLength(finalLine, 'utf8') > MAX_BYTES) {
-      // Truncate by slicing characters in chunks until under byte limit
-      let truncated = safeLine;
-      while (Buffer.byteLength(truncated + '...\n', 'utf8') > MAX_BYTES && truncated.length > 0) {
-        truncated = truncated.slice(0, -100);
-      }
-      finalLine = truncated + '...\n';
-    }
-
-    // Write via fd -- O_APPEND + short line = effectively atomic on Linux ext4/xfs
-    fs.writeSync(fd, finalLine);
-  } catch {
-    // Can't log -- silently discard. Never write to stderr from hooks.
-  }
+  if (fd <= 0) return;
+  writeLogLine(fd, line, timestamp);
 }
 
 /** @see lib/__tests__/hook-error-log.test.js for tests covering fd-based writes, rotation, symlink guard, and truncation */
