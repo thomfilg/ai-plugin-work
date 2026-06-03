@@ -565,3 +565,50 @@ test('Stop with missing session_id does not emit cited events', (t) => {
   const cited = rows.filter((r) => r.event === 'cited');
   assert.equal(cited.length, 0, `unknown-session must not emit cited rows, got ${cited.length}: ${JSON.stringify(cited)}`);
 });
+
+// PR #524 cursor[bot] Medium — blank line must not break cite_signals YAML block parse
+test('cite_signals YAML list survives a blank line after the key', (t) => {
+  const home = mktemp('synapsys-disp-tel-home-');
+  const fx = makeFixture({ home });
+  t.after(fx.cleanup);
+
+  // Author-written memory with a blank line between `cite_signals:` and items.
+  const memPath = path.join(fx.storeDir, 'blank-line-sig.md');
+  fs.writeFileSync(
+    memPath,
+    [
+      '---',
+      'name: blank-line-sig',
+      'description: x',
+      'events: [UserPromptSubmit, Stop]',
+      'trigger_prompt: bls-trigger',
+      'cite_signals:',
+      '',
+      '  - declared-token-alpha',
+      '  - declared-token-beta',
+      '---',
+      '',
+      'Body — should NOT be auto-extracted because cite_signals is declared.',
+    ].join('\n')
+  );
+
+  const sessionId = 'bls-session-1';
+  const firedRes = runDispatcher(
+    'UserPromptSubmit',
+    { cwd: fx.cwd, session_id: sessionId, prompt: 'use bls-trigger now' },
+    { home }
+  );
+  assert.equal(firedRes.status, 0);
+
+  const stopRes = runDispatcher(
+    'Stop',
+    { cwd: fx.cwd, session_id: sessionId, response: 'I emit declared-token-beta here.' },
+    { home }
+  );
+  assert.equal(stopRes.status, 0);
+
+  const jsonl = path.join(telemetryDirFor(home), `${sessionId}.jsonl`);
+  const cited = readJsonl(jsonl).filter((r) => r.event === 'cited' && r.memory === 'blank-line-sig');
+  assert.equal(cited.length, 1, `expected 1 cited row using declared signal across YAML blank line, got ${cited.length}`);
+  assert.equal(cited[0].match, 'declared-token-beta');
+});

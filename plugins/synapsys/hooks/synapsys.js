@@ -182,8 +182,10 @@ function parseCiteSignalsList(frontmatterText) {
       found.push(item[1].replace(/^["']|["']$/g, ''));
       continue;
     }
-    // End of list on next top-level key or blank line.
-    if (line.trim() === '' || /^[a-zA-Z_][\w]*\s*:/.test(line)) inList = false;
+    // Skip blank lines — common YAML formatting puts one between the key
+    // and its `- items`. End the list only when a new top-level key appears.
+    if (line.trim() === '') continue;
+    if (/^[a-zA-Z_][\w]*\s*:/.test(line)) inList = false;
   }
   return found;
 }
