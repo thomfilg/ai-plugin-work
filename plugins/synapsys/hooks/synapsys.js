@@ -222,6 +222,13 @@ function runCiteScan(payload, memories) {
     const responseText = extractResponseText(payload);
     if (!responseText) return;
     const sessionId = resolveSessionId(payload);
+    // _unknown-session.jsonl pools writes from every anonymous process across
+    // its lifetime, so a Stop here cannot prove a fired memory was actually
+    // injected in *this* logical session. The dispatcher runs as a fresh
+    // process per event, so pid-based filtering can't link Stop to the
+    // earlier fired-process either. Skip the cite scan rather than risk
+    // emitting cross-session false-positive `cited` events.
+    if (sessionId === '_unknown-session') return;
     const firedNames = readFiredMemoryNames(sessionId);
     if (firedNames.size === 0) return;
     const candidates = memories

@@ -526,3 +526,42 @@ test('Empty payload.response falls through to transcript_path scan', (t) => {
   const cited = readJsonl(jsonl).filter((r) => r.event === 'cited' && r.memory === 'fallback-memory');
   assert.equal(cited.length, 1, `expected 1 cited row when response='' and transcript_path is set`);
 });
+
+// PR #524 cursor[bot] Medium — unknown-session cite cross-talk
+// When session_id is missing, _unknown-session.jsonl pools fired events
+// across processes; a Stop scan in one anonymous session must not emit
+// cited events for memories fired in a different anonymous session.
+test('Stop with missing session_id does not emit cited events', (t) => {
+  const home = mktemp('synapsys-disp-tel-home-');
+  const fx = makeFixture({ home });
+  t.after(fx.cleanup);
+
+  writeMemory(fx.storeDir, 'cross-talk-memory', {
+    description: 'x',
+    events: '[UserPromptSubmit, Stop]',
+    triggerPrompt: 'cross-talk-trigger',
+    body: 'cross-talk-memory body',
+  });
+
+  // Fire under unknown session (no session_id).
+  const firedRes = runDispatcher(
+    'UserPromptSubmit',
+    { cwd: fx.cwd, prompt: 'mentions cross-talk-trigger here' },
+    { home }
+  );
+  assert.equal(firedRes.status, 0);
+
+  // Stop also under unknown session — should NOT emit cited even though
+  // the response would otherwise match.
+  const stopRes = runDispatcher(
+    'Stop',
+    { cwd: fx.cwd, response: 'I use cross-talk-memory now.' },
+    { home }
+  );
+  assert.equal(stopRes.status, 0);
+
+  const unknown = path.join(telemetryDirFor(home), '_unknown-session.jsonl');
+  const rows = fs.existsSync(unknown) ? readJsonl(unknown) : [];
+  const cited = rows.filter((r) => r.event === 'cited');
+  assert.equal(cited.length, 0, `unknown-session must not emit cited rows, got ${cited.length}: ${JSON.stringify(cited)}`);
+});
