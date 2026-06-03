@@ -252,7 +252,18 @@ function runCommitStallDetector(ctx) {
 
 function runPrCommentsDetector(ctx) {
   const cHit = DETECTORS.prComments.detect(ctx);
-  if (cHit.hit) handlePrComments(ctx, cHit);
+  if (cHit.hit) {
+    handlePrComments(ctx, cHit);
+    return;
+  }
+  // Detector reset its marker (comments gone, HEAD moved, or count changed) →
+  // also purge the persisted pr-comments-stuck alert count so a fresh stuck
+  // cycle starts at 1 instead of inheriting a near-dead-end repeat count.
+  if (cHit.reset) {
+    alerts.resetCount(
+      alerts.alertKey({ session: ctx.session, kind: 'pr-comments-stuck', phase: ctx.phase })
+    );
+  }
 }
 
 function runPrStatusDetector(ctx) {

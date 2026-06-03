@@ -64,10 +64,12 @@ function detect({ ticket, worktree }) {
   const prev = state.read(ticket, 'pr-comments');
   const now = state.now();
 
-  // No comments → clear any stale marker and bail.
+  // No comments → clear any stale marker and bail. Signal reset so the caller
+  // can also purge the persisted alert repeat count; otherwise a later stuck
+  // cycle would inherit the prior count and fire freeDeadEndSlot too soon.
   if (count === 0) {
     if (prev) state.clear(ticket, 'pr-comments');
-    return { hit: false };
+    return { hit: false, reset: !!prev };
   }
 
   // First time we see comments — record and bail. Wait for a stable read.
@@ -76,18 +78,20 @@ function detect({ ticket, worktree }) {
     return { hit: false };
   }
 
-  // HEAD moved since last check → agent has pushed; reset the watch.
+  // HEAD moved since last check → agent has pushed; reset the watch. Also
+  // reset the persisted alert repeat count so a new stuck cycle starts at 1.
   if (prev.sha !== sha) {
     state.write(ticket, 'pr-comments', { count, sha, firstSeenAt: now, alerted: false });
-    return { hit: false };
+    return { hit: false, reset: true };
   }
 
   // Count changed (bot still posting, or new wave of comments) → reset the
   // full watch: nudges + alerted clear too. Otherwise an exhausted prior
   // escalation cycle would silence escalation for the new comments forever.
+  // Reset the persisted alert count for the same reason.
   if (prev.count !== count) {
     state.write(ticket, 'pr-comments', { count, sha, firstSeenAt: now, alerted: false });
-    return { hit: false };
+    return { hit: false, reset: true };
   }
 
   // Same sha and same count two reads in a row → agent sat on them.
