@@ -301,7 +301,7 @@ function freeCIGateSlot({ session, ticket, prNumber, sha }) {
   state.write(ticket, 'ci-gate-freed', { killed: true, sha, prNumber, freedAt: state.now() });
   // Skip alert + bootstrap if this exact SHA was already announced — prevents
   // spam on every tick. The kill above still runs (defensive).
-  if (marker.sha === sha && ciFreed.sha === sha) return false;
+  if (marker.sha === sha || ciFreed.sha === sha) return false;
   state.write(session, 'slot-freed', { sha, prNumber, freedAt: state.now() });
   const next = findNextEligibleTask();
   const autoBootstrapped = next && maybeAutoBootstrap(next.taskId);
