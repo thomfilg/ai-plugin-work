@@ -31,7 +31,7 @@ test('hashFile returns null for a missing file', () => {
   assert.equal(result, null);
 });
 
-test('CASE 1 — classifyMemory returns fresh when stored_hash matches current', () => {
+test('CASE 1 — fresh memory when stored hash matches current source hash', () => {
   const memory = {
     name: 'mem-a.md',
     meta: { source: docARel, source_hash: knownHashA },
@@ -43,7 +43,7 @@ test('CASE 1 — classifyMemory returns fresh when stored_hash matches current',
   assert.equal(result.current_hash, result.stored_hash);
 });
 
-test('CASE 2 — classifyMemory returns drifted when stored_hash differs from current', () => {
+test('CASE 2 — drifted memory reports both stored and current hashes', () => {
   const mutated = 'sha256:' + 'a'.repeat(64);
   const memory = {
     name: 'mem-a.md',
@@ -58,7 +58,7 @@ test('CASE 2 — classifyMemory returns drifted when stored_hash differs from cu
   assert.ok(result.current_hash);
 });
 
-test('CASE 3 — classifyMemory returns orphan when source file is missing', () => {
+test('CASE 3 — orphan memory when source file is missing', () => {
   const memory = {
     name: 'mem-c.md',
     meta: { source: docCRel, source_hash: 'sha256:' + 'b'.repeat(64) },
@@ -68,7 +68,7 @@ test('CASE 3 — classifyMemory returns orphan when source file is missing', () 
   assert.equal(result.current_hash, null);
 });
 
-test('CASE 4 — classifyMemory returns skip when source_hash is missing (manual memory)', () => {
+test('CASE 4 — manual memory without source_hash is silently skipped', () => {
   const memory = {
     name: 'manual.md',
     meta: { /* no source_hash, possibly no source */ },
