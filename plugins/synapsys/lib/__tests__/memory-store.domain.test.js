@@ -18,10 +18,7 @@ function makeTempStore() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-domain-unit-'));
   const storeDir = path.join(dir, '.claude', 'synapsys');
   fs.mkdirSync(storeDir, { recursive: true });
-  fs.writeFileSync(
-    path.join(storeDir, '.synapsys.json'),
-    JSON.stringify({ projectName: 'test' })
-  );
+  fs.writeFileSync(path.join(storeDir, '.synapsys.json'), JSON.stringify({ projectName: 'test' }));
   return { cwd: dir, storeDir };
 }
 
@@ -73,6 +70,18 @@ test('readMemoryFile: bracket list `domain: [e2e, git]` normalizes to ["e2e","gi
   const m = readOne(storeDir, 'list.md');
   assert.ok(m);
   assert.deepEqual(m.domain, ['e2e', 'git']);
+});
+
+test('readMemoryFile: single-item bracket list `domain: [git]` normalizes to ["git"]', () => {
+  const { storeDir } = makeTempStore();
+  writeMemory(storeDir, 'single.md', {
+    name: 'single',
+    description: 'd',
+    domain: '[git]',
+  });
+  const m = readOne(storeDir, 'single.md');
+  assert.ok(m);
+  assert.deepEqual(m.domain, ['git']);
 });
 
 test('readMemoryFile: quoted value preserves casing/whitespace inside quotes', () => {

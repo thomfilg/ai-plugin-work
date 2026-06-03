@@ -108,9 +108,11 @@ function coerceFrontmatterValue(raw) {
   if (val === '') return '';
   if (val === 'true') return true;
   if (val === 'false') return false;
-  // Bracket-array form: only treat as array when a comma is present.
-  // Single-bracket values like `[a-z]` are regex character classes — keep as string.
-  if (/^\[.*,.*\]$/.test(val)) {
+  // Bracket-array form: treat `[…]` as a list when the contents look like an
+  // identifier list (letters/digits/colons/dots/dashes/underscores, optional
+  // quotes, comma-separated). Regex character classes like `[a-z]` contain a
+  // range character `-` between alphas with no separator and are kept as string.
+  if (/^\[[\s\w:.,\-_"']*\]$/.test(val) && !/^\[[a-zA-Z]-[a-zA-Z]\]$/.test(val)) {
     return val
       .slice(1, -1)
       .split(',')
