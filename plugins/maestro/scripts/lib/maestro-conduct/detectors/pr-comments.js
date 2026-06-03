@@ -16,65 +16,10 @@
  * The PR number is resolved from the branch name `<ticket>-maestro` via
  * `gh pr list --head`. Result is cached per tick.
  */
-const { spawnSync } = require('child_process');
 const state = require('../state');
+const { spawnOut, headSha, repoSlug, prNumberFor } = require('./gh-shared');
 
 const BOT_RE = /(cursor|copilot|bugbot|codex|sourcery)/i;
-
-function spawnOut(cmd, args) {
-  const res = spawnSync(cmd, args, {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'ignore'],
-  });
-  return res.status === 0 ? res.stdout || '' : '';
-}
-
-function gitOut(worktree, args) {
-  return spawnOut('git', ['-C', worktree, ...args]).trim();
-}
-
-function headSha(worktree) {
-  return gitOut(worktree, ['rev-parse', 'HEAD']);
-}
-
-function deriveRepo(worktree) {
-  const url = gitOut(worktree || '.', ['remote', 'get-url', 'origin']);
-  if (!url) return '';
-  // Match owner/repo from https://github.com/owner/repo(.git) or git@github.com:owner/repo(.git)
-  const m = url.match(/[:/]([^/:]+)\/([^/]+?)(?:\.git)?$/);
-  return m ? `${m[1]}/${m[2]}` : '';
-}
-
-function repoSlug(worktree) {
-  return process.env.GITHUB_REPO || deriveRepo(worktree);
-}
-
-function prNumberFor(ticket, worktree) {
-  const repo = repoSlug(worktree);
-  if (!repo) return null;
-  // Branch convention from maestro-bootstrap: <ticket>-maestro
-  const json = spawnOut('gh', [
-    'pr',
-    'list',
-    '--repo',
-    repo,
-    '--head',
-    `${ticket}-maestro`,
-    '--state',
-    'open',
-    '--json',
-    'number',
-    '--limit',
-    '1',
-  ]);
-  if (!json) return null;
-  try {
-    const arr = JSON.parse(json);
-    return arr[0] && arr[0].number;
-  } catch {
-    return null;
-  }
-}
 
 function fetchBotComments(prNumber, worktree) {
   const repo = repoSlug(worktree);
@@ -119,10 +64,12 @@ function detect({ ticket, worktree }) {
   const prev = state.read(ticket, 'pr-comments');
   const now = state.now();
 
-  // No comments → clear any stale marker and bail.
+  // No comments → clear any stale marker and bail. Signal reset so the caller
+  // can also purge the persisted alert repeat count; otherwise a later stuck
+  // cycle would inherit the prior count and fire freeDeadEndSlot too soon.
   if (count === 0) {
     if (prev) state.clear(ticket, 'pr-comments');
-    return { hit: false };
+    return { hit: false, reset: !!prev };
   }
 
   // First time we see comments — record and bail. Wait for a stable read.
@@ -131,18 +78,20 @@ function detect({ ticket, worktree }) {
     return { hit: false };
   }
 
-  // HEAD moved since last check → agent has pushed; reset the watch.
+  // HEAD moved since last check → agent has pushed; reset the watch. Also
+  // reset the persisted alert repeat count so a new stuck cycle starts at 1.
   if (prev.sha !== sha) {
     state.write(ticket, 'pr-comments', { count, sha, firstSeenAt: now, alerted: false });
-    return { hit: false };
+    return { hit: false, reset: true };
   }
 
   // Count changed (bot still posting, or new wave of comments) → reset the
   // full watch: nudges + alerted clear too. Otherwise an exhausted prior
   // escalation cycle would silence escalation for the new comments forever.
+  // Reset the persisted alert count for the same reason.
   if (prev.count !== count) {
     state.write(ticket, 'pr-comments', { count, sha, firstSeenAt: now, alerted: false });
-    return { hit: false };
+    return { hit: false, reset: true };
   }
 
   // Same sha and same count two reads in a row → agent sat on them.

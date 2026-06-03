@@ -21,9 +21,12 @@
 // Base profile every phase inherits unless overridden.
 // 'silence' runs in every phase — it watches for fully-dead panes and
 // auto-restarts -work sessions (ported from maestro-conduct.sh).
+// 'prStatus' runs in every phase too — it's a no-op when the ticket
+// has no open PR, but ensures pr-ready/pr-broken still surfaces after
+// /work has advanced to 'complete' (the agent's final-step state).
 const BASE = Object.freeze({
   maxNudges: 3,
-  detectors: ['question', 'silence', 'spinner', 'phaseStall'],
+  detectors: ['question', 'silence', 'spinner', 'phaseStall', 'prStatus'],
   exempts: () => false,
 });
 
@@ -39,18 +42,27 @@ const PHASES = Object.freeze({
   tasks_gate: { budgetMin: 5 },
   implement: {
     budgetMin: 60,
-    detectors: ['question', 'silence', 'spinner', 'phaseStall', 'commitStall'],
+    detectors: ['question', 'silence', 'spinner', 'phaseStall', 'commitStall', 'prStatus'],
   },
   commit: { budgetMin: 5 },
   task_review: { budgetMin: 30 },
   check: { budgetMin: 15 },
-  pr: { budgetMin: 10 },
-  ready: { budgetMin: 5 },
+  pr: {
+    budgetMin: 10,
+    detectors: ['question', 'silence', 'spinner', 'phaseStall', 'prStatus'],
+  },
+  ready: {
+    budgetMin: 5,
+    detectors: ['question', 'silence', 'spinner', 'phaseStall', 'prStatus'],
+  },
   follow_up: {
     budgetMin: 60,
-    detectors: ['question', 'silence', 'spinner', 'phaseStall', 'prComments'],
+    detectors: ['question', 'silence', 'spinner', 'phaseStall', 'prComments', 'prStatus'],
   },
-  ci: { budgetMin: 30 },
+  ci: {
+    budgetMin: 30,
+    detectors: ['question', 'silence', 'spinner', 'phaseStall', 'prStatus'],
+  },
   cleanup: { budgetMin: 5 },
   reports: { budgetMin: 5 },
   complete: { budgetMin: 1 },

@@ -21,6 +21,7 @@ const workstate = require('./lib/maestro-conduct/workstate');
 const { phaseFor, escalationFor } = require('./lib/maestro-conduct/phase-registry');
 const actions = require('./lib/maestro-conduct/actions');
 const alerts = require('./lib/maestro-conduct/alerts');
+const heartbeat = require('./lib/maestro-conduct/heartbeat');
 
 const DETECTORS = {
   question: require('./lib/maestro-conduct/detectors/question'),
@@ -29,14 +30,32 @@ const DETECTORS = {
   phaseStall: require('./lib/maestro-conduct/detectors/phase-stall'),
   commitStall: require('./lib/maestro-conduct/detectors/commit-stall'),
   prComments: require('./lib/maestro-conduct/detectors/pr-comments'),
+  prStatus: require('./lib/maestro-conduct/detectors/pr-status'),
 };
 
-// Only -work sessions are restart-eligible (matches maestro-conduct.sh
-// gating). Helpers like -dev / -listen are surfaced informationally but
-// would re-launch wrong if relaunched as /work <tid>.
-function restartEligible(session) {
-  return /-work$/.test(session);
+// Heartbeat: every HEARTBEAT_MIN emit a positive summary so silence on the
+// daemon side can't be mistaken for "nothing happening."
+const HEARTBEAT_MIN = parseInt(process.env.HEARTBEAT_MIN || '30', 10);
+let lastHeartbeatAt = 0;
+
+// Re-emit escalation: when the same (session, kind, sha/phase) alert fires
+// this many times, auto-rotate the slot via freeDeadEndSlot.
+const DEAD_END_REEMITS = parseInt(process.env.DEAD_END_REEMITS || '3', 10);
+
+function maybeEscalateToDeadEnd(ctx, kind, repeatCount, sha) {
+  if (repeatCount < DEAD_END_REEMITS || ['wait_merge', 'ci', 'complete'].includes(ctx.phase)) return;
+  actions.freeDeadEndSlot({
+    session: ctx.session,
+    ticket: ctx.ticket,
+    kind,
+    repeatCount,
+    sha,
+  });
 }
+
+// Only -work sessions restart-eligible (matches maestro-conduct.sh gating).
+// Re-exported from heartbeat.js so module.exports keeps the historical surface.
+const restartEligible = heartbeat.restartEligible;
 
 const REPO_NAME = process.env.REPO_NAME || 'claude-plugin-work';
 const Q_WAIT_MIN = parseInt(process.env.Q_WAIT_MIN || '3', 10);
@@ -44,12 +63,9 @@ const TICK_SEC = parseInt(process.env.TICK_SEC || '60', 10);
 
 /** Build the context object passed to every detector. */
 function ctxFor(session) {
-  // Strip the maestro session-suffix (-work / -dev / -listen). Helper sessions
-  // still derive a meaningful ticket id — they are surfaced informationally
-  // but never auto-restarted (see restartEligible above).
+  // Strip session-suffix to derive ticket id. -dev/-listen are informational only;
+  // restartEligible() gates auto-restart to -work. Snapshot is a single on-disk read.
   const ticket = tmux.ticketIdFor(session);
-  // Single read so phase and step come from the same on-disk snapshot
-  // (the file can be rewritten by /work between reads otherwise).
   const { phase, step } = workstate.snapshot(ticket);
   const worktree = path.join(workstate.WORKTREES_BASE, `${REPO_NAME}-${ticket}`);
   const pane = tmux.capture(session);
@@ -57,9 +73,7 @@ function ctxFor(session) {
 }
 
 function handleQuestion(ctx, qHit) {
-  // Question marker is per-SESSION: a `-work` session showing a prompt while
-  // an `-dev` helper is idle (or vice versa) must not clobber each other's
-  // markers. Multiple sessions can map to the same ticket.
+  // Question marker is per-SESSION so -work/-dev/-listen don't clobber each other.
   const prev = state.read(ctx.session, 'question');
   const now = state.now();
   if (!prev) {
@@ -67,18 +81,29 @@ function handleQuestion(ctx, qHit) {
     return;
   }
   const mins = state.minutesSince(prev.startedAt);
-  if (mins >= Q_WAIT_MIN && !prev.alerted) {
-    actions.alert({
-      session: ctx.session,
-      ticket: ctx.ticket,
-      kind: 'question-pending',
-      phase: ctx.phase,
-      elapsedMin: mins,
-      options: qHit.options,
-      promptKind: qHit.promptKind,
-    });
-    state.write(ctx.session, 'question', { startedAt: prev.startedAt, alerted: true });
+  if (mins < Q_WAIT_MIN) return;
+  // Re-emit on Q_WAIT_MIN cadence so alert count can grow to DEAD_END_REEMITS
+  // and trigger freeDeadEndSlot (one-shot gate previously capped count at 1).
+  if (prev.alerted) {
+    const sinceLastAlert = prev.lastAlertAt ? state.minutesSince(prev.lastAlertAt) : Infinity;
+    if (sinceLastAlert < Q_WAIT_MIN) return;
   }
+  const r = actions.alert({
+    session: ctx.session,
+    ticket: ctx.ticket,
+    kind: 'question-pending',
+    phase: ctx.phase,
+    elapsedMin: mins,
+    options: qHit.options,
+    promptKind: qHit.promptKind,
+    instruction: `tmux capture-pane -t ${ctx.session} -p | tail -40 — read full menu, pick the option that does NOT bypass any workflow gate (avoid: state-file edits, set-step CLI, completion-checker skip, --no-verify). If all options bypass, send a directive via "Type something".`,
+  });
+  state.write(ctx.session, 'question', {
+    startedAt: prev.startedAt,
+    alerted: true,
+    lastAlertAt: state.now(),
+  });
+  maybeEscalateToDeadEnd(ctx, 'question-pending', r.count, null);
 }
 
 // Healthy "waiting on user" patterns the agent emits to the pane while halted.
@@ -94,9 +119,7 @@ function isHaltedWaitingForUser(pane) {
   return HALTED_WAITING_PATTERNS.some((re) => re.test(pane));
 }
 
-// Advance a marker after sending a nudge/alert. `alerted=true` flips the
-// one-shot flag so subsequent ticks suppress re-alerting until the marker is
-// reset (phase advance, HEAD change, etc.).
+// Advance marker after a nudge/alert; `alerted=true` flips the one-shot flag.
 function bumpMarker(ticket, key, marker, alerted) {
   state.write(ticket, key, {
     ...marker,
@@ -123,17 +146,13 @@ function handlePhaseStall(ctx, stallHit) {
   const sinceLastNudge = marker.lastNudgeAt ? state.minutesSince(marker.lastNudgeAt) : Infinity;
   // Don't re-nudge before the per-phase cooldown.
   if (marker.lastNudgeAt && sinceLastNudge < stallHit.reNudgeMin) return;
-  // Once nudges are exhausted AND the one-shot alert has fired, stop re-alerting
-  // until the phase actually advances. The marker is reset on phase change inside
-  // the phase-stall detector. We must NOT early-return before the alert branch
-  // fires, since escalationFor() only returns 'alert' once nudges >= maxNudges.
-  if (marker.nudges >= stallHit.maxNudges && marker.alerted) return;
-
+  // Re-emit on reNudgeMin cadence so alert count grows to DEAD_END_REEMITS
+  // (marker resets on phase change, so re-emits stop naturally on advance).
   const escalation = escalationFor(ctx.phase, marker.nudges);
   const reason = `phase=${ctx.phase} stuck ${stallHit.elapsedMin}m budget=${stallHit.budgetMin}m nudge ${marker.nudges + 1}/${stallHit.maxNudges}`;
 
   if (escalation === 'alert') {
-    actions.alert({
+    const r = actions.alert({
       session: ctx.session,
       ticket: ctx.ticket,
       kind: 'nudges-exhausted',
@@ -141,7 +160,9 @@ function handlePhaseStall(ctx, stallHit) {
       elapsedMin: stallHit.elapsedMin,
       budgetMin: stallHit.budgetMin,
       nudges: marker.nudges,
+      instruction: `tmux capture-pane -t ${ctx.session} -p | tail -40 — agent exceeded phase=${ctx.phase} budget (${stallHit.elapsedMin}m vs ${stallHit.budgetMin}m). Diagnose or send directive via "Type something".`,
     });
+    maybeEscalateToDeadEnd(ctx, 'nudges-exhausted', r.count, ctx.phase);
   } else if (escalation === 'interrupt') {
     actions.interrupt(ctx.session, reason);
   } else {
@@ -185,12 +206,8 @@ function runSilenceDetector(ctx) {
   const sHit = DETECTORS.silence.detect(ctx);
   if (!sHit.hit) return false;
   if (!restartEligible(ctx.session)) {
-    // Helper (-dev / -listen) is idle past SILENCE_LIMIT_SEC but we won't kill
-    // it. Without resetting the marker, silence would fire every subsequent
-    // tick → log spam + short-circuit of other detectors forever. Instead:
-    // log once, refresh the marker so the silence timer restarts, and let the
-    // remaining detectors run by returning false. Worst case we log again in
-    // another SILENCE_LIMIT_SEC, not every tick.
+    // Helper (-dev / -listen) idle past SILENCE_LIMIT_SEC — don't kill. Refresh
+    // marker so silence timer restarts (else fires every tick → log spam).
     alerts.log(
       `${ctx.session} AUTO-RESTART skipped: non-work helper session (not restart-eligible)`
     );
@@ -213,8 +230,12 @@ function runSilenceDetector(ctx) {
     // ticket because the workflow state belongs to the ticket, not the pane).
     ['silence', 'spinner', 'question'].forEach((k) => state.clear(ctx.session, k));
     ['phase', 'pr-comments'].forEach((k) => state.clear(ctx.ticket, k));
+    return true;
   }
-  return true;
+  // autoRestart skipped (wedged quiet window, ci-gate-freed, dead-end, or
+  // missing worktree) — pane is still alive and listed, so let downstream
+  // detectors (notably prStatus) keep emitting pr-ready/pr-broken transitions.
+  return false;
 }
 
 function runPhaseStallDetector(ctx) {
@@ -223,13 +244,64 @@ function runPhaseStallDetector(ctx) {
 }
 
 function runCommitStallDetector(ctx) {
+  // detector handles its own dedup + marker — only "hits" on threshold crossings.
   const cHit = DETECTORS.commitStall.detect(ctx);
-  if (cHit.hit) alerts.log(`${ctx.session} commit-stall ${cHit.mins}m in phase=${ctx.phase}`);
+  if (!cHit.hit) return;
+  alerts.log(
+    `${ctx.session} commit-stall ${cHit.mins}m in phase=${ctx.phase} (threshold=${cHit.threshold}m)`
+  );
 }
 
 function runPrCommentsDetector(ctx) {
   const cHit = DETECTORS.prComments.detect(ctx);
-  if (cHit.hit) handlePrComments(ctx, cHit);
+  if (cHit.hit) {
+    handlePrComments(ctx, cHit);
+    return;
+  }
+  // Detector reset its marker (comments gone, HEAD moved, or count changed) →
+  // also purge the persisted pr-comments-stuck alert count so a fresh stuck
+  // cycle starts at 1 instead of inheriting a near-dead-end repeat count.
+  if (cHit.reset) {
+    alerts.resetCount(
+      alerts.alertKey({ session: ctx.session, kind: 'pr-comments-stuck', phase: ctx.phase })
+    );
+  }
+}
+
+function runPrStatusDetector(ctx) {
+  const sHit = DETECTORS.prStatus.detect(ctx);
+  if (!sHit.hit) return;
+  // pr-pending is informational only — log but never escalate to alert sink.
+  if (sHit.kind === 'pr-pending') {
+    alerts.log(
+      `${ctx.session} pr-pending PR #${sHit.prNumber} sha=${(sHit.sha || '').slice(0, 7)} checks running`
+    );
+    return;
+  }
+  // pr-ready / pr-broken → structured alert sink. Target -work explicitly
+  // (pr-status dedups per-ticket so -listen could otherwise own the alert).
+  const workSession = `${ctx.ticket}-work`;
+  const failingList = (sHit.failingChecks || [])
+    .map((c) => `${c.name}(${c.conclusion})`)
+    .join(', ');
+  const instruction =
+    sHit.kind === 'pr-ready'
+      ? `Spawn work-workflow:code-checker (Agent tool, keep alive in tmux until verdict) on PR #${sHit.prNumber} sha=${(sHit.sha || '').slice(0, 7)} for ${ctx.ticket}. Reviewer must answer FOUR questions: (1) Did the agent complete every requirement/AC in the ticket? (2) Did it introduce any bug (logic errors, regressions, broken edge cases)? (3) Did it add any security vulnerability (injection, secrets, unsafe shell, path traversal)? (4) Did it bypass any /work workflow gate (state edits, set-step CLI, completion-checker skip, fake TDD evidence, --no-verify, deferral annotations)? Verdict must be APPROVED only if ALL four are clean. On NEEDS-WORK → forward verbatim findings to ${workSession} via tmux send-keys; re-run after agent pushes. On APPROVED → surface PR URL to operator; operator merges PR and kills tmux sessions ${ctx.ticket}-work + ${ctx.ticket}-listen to free the pool slot.`
+      : `tmux capture-pane -t ${workSession} -p | tail -40 — drive agent to fix failing checks IN-PR (no skip, no follow-up issue). Failing: ${failingList || 'see PR'}.`;
+  actions.alert({
+    session: workSession,
+    ticket: ctx.ticket,
+    kind: sHit.kind,
+    phase: ctx.phase,
+    prNumber: sHit.prNumber,
+    sha: sHit.sha,
+    checksState: sHit.checksState,
+    mergeable: sHit.mergeable,
+    failingChecks: sHit.failingChecks,
+    instruction,
+  });
+  // CI-gate slot rotation removed: auto-freeing on pr-ready killed -work before
+  // code-checker could forward NEEDS-WORK. Slot freeing is operator-driven now.
 }
 
 /** Run the per-session pipeline. Returns when the session has been fully processed. */
@@ -243,6 +315,9 @@ function tickSession(session) {
     return;
   }
   state.clear(ctx.session, 'question');
+  // Reset persisted question-pending count so a later prompt in the same
+  // phase doesn't inherit [REPEAT N] and fire freeDeadEndSlot prematurely.
+  alerts.resetCount(alerts.alertKey({ session: ctx.session, kind: 'question-pending', phase: ctx.phase }));
 
   const detectorsToRun = phaseFor(ctx.phase).detectors.filter((k) => k !== 'question');
 
@@ -253,6 +328,14 @@ function tickSession(session) {
   if (detectorsToRun.includes('phaseStall')) runPhaseStallDetector(ctx);
   if (detectorsToRun.includes('commitStall')) runCommitStallDetector(ctx);
   if (detectorsToRun.includes('prComments')) runPrCommentsDetector(ctx);
+  if (detectorsToRun.includes('prStatus')) runPrStatusDetector(ctx);
+}
+
+function maybeEmitHeartbeat(sessions) {
+  const now = state.now();
+  if (lastHeartbeatAt && now - lastHeartbeatAt < HEARTBEAT_MIN * 60) return;
+  lastHeartbeatAt = now;
+  alerts.log(heartbeat.buildHeartbeat(sessions));
 }
 
 function tick() {
@@ -262,6 +345,7 @@ function tick() {
     return;
   }
   for (const session of sessions) tickSession(session);
+  maybeEmitHeartbeat(sessions);
 }
 
 function handlePrComments(ctx, cHit) {
@@ -272,12 +356,8 @@ function handlePrComments(ctx, cHit) {
   if (marker.lastNudgeAt && sinceLastNudge < profile.reNudgeMin) return;
 
   const nudges = marker.nudges || 0;
-  const maxNudges = profile.maxNudges || 3;
-  // Once nudges are exhausted AND the one-shot alert has fired, stop re-alerting
-  // until HEAD moves or the comments are gone. The detector resets the marker on
-  // either change. We must NOT early-return before the alert branch fires, since
-  // escalationFor() only returns 'alert' once nudges >= maxNudges.
-  if (nudges >= maxNudges && marker.alerted) return;
+  // Keep re-emitting on reNudgeMin cadence so count grows to DEAD_END_REEMITS;
+  // detector resets the marker when HEAD moves or comments clear.
   const top = cHit.summary
     .map((s) => `${s.file}:${s.line} [${s.severity || '?'}] ${s.title}`)
     .join(' | ');
@@ -285,7 +365,7 @@ function handlePrComments(ctx, cHit) {
   const escalation = escalationFor(ctx.phase, nudges);
 
   if (escalation === 'alert') {
-    actions.alert({
+    const r = actions.alert({
       session: ctx.session,
       ticket: ctx.ticket,
       kind: 'pr-comments-stuck',
@@ -294,7 +374,9 @@ function handlePrComments(ctx, cHit) {
       count: cHit.count,
       elapsedMin: cHit.minsStuck,
       summary: cHit.summary,
+      instruction: `tmux capture-pane -t ${ctx.session} -p | tail -40 — agent left ${cHit.count} bot comment(s) on PR #${cHit.prNumber} unaddressed for ${cHit.minsStuck}m, HEAD unchanged. Send directive: "Address each bot comment in the PR; never dismiss as stale."`,
     });
+    maybeEscalateToDeadEnd(ctx, 'pr-comments-stuck', r.count, null);
   } else if (escalation === 'interrupt') {
     actions.interrupt(ctx.session, reason);
   } else {
