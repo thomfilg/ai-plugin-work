@@ -53,10 +53,8 @@ function maybeEscalateToDeadEnd(ctx, kind, repeatCount, sha) {
   });
 }
 
-// Only -work sessions are restart-eligible (matches maestro-conduct.sh
-// gating). Helpers like -dev / -listen are surfaced informationally but
-// would re-launch wrong if relaunched as /work <tid>. Re-exported from
-// heartbeat.js so module.exports keeps the historical surface.
+// Only -work sessions restart-eligible (matches maestro-conduct.sh gating).
+// Re-exported from heartbeat.js so module.exports keeps the historical surface.
 const restartEligible = heartbeat.restartEligible;
 
 const REPO_NAME = process.env.REPO_NAME || 'claude-plugin-work';
@@ -297,14 +295,9 @@ function runPrStatusDetector(ctx) {
     failingChecks: sHit.failingChecks,
     instruction,
   });
-  // CI-gate slot rotation removed: previously this called freeCIGateSlot
-  // unconditionally on pr-ready in ci/wait_merge, which killed the -work
-  // tmux session the alert instruction had just told the operator to forward
-  // code-checker NEEDS-WORK findings to. The race destroyed the remediation
-  // path inside the same alert. Slot freeing is now operator-driven (see
-  // maestro-free-slot.sh) and must happen only AFTER the code-checker
-  // verdict is APPROVED. AUTO_FREE_CI_SLOT env var is preserved by
-  // freeCIGateSlot itself for callers that re-enable this path explicitly.
+  // CI-gate slot rotation removed: auto-freeing on pr-ready killed the -work
+  // session before code-checker could forward NEEDS-WORK findings. Slot freeing
+  // is now operator-driven via maestro-free-slot.sh after APPROVED verdict.
 }
 
 /** Run the per-session pipeline. Returns when the session has been fully processed. */
@@ -359,12 +352,8 @@ function handlePrComments(ctx, cHit) {
   if (marker.lastNudgeAt && sinceLastNudge < profile.reNudgeMin) return;
 
   const nudges = marker.nudges || 0;
-  // After the one-shot alert fires, keep re-emitting on reNudgeMin cadence so
-  // the alert count grows to DEAD_END_REEMITS and triggers freeDeadEndSlot.
-  // Previously this branch fully suppressed re-alerting, which capped the count
-  // at 1 and made dead-end auto-rotation unreachable. The pr-comments detector
-  // resets the marker when HEAD moves or comments are gone, so re-emits stop
-  // naturally once the agent acts.
+  // Keep re-emitting on reNudgeMin cadence so count grows to DEAD_END_REEMITS;
+  // detector resets the marker when HEAD moves or comments clear.
   const top = cHit.summary
     .map((s) => `${s.file}:${s.line} [${s.severity || '?'}] ${s.title}`)
     .join(' | ');
