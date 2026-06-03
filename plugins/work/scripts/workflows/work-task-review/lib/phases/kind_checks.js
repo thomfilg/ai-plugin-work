@@ -11,6 +11,7 @@ const path = require('node:path');
 
 const { TASK_REVIEW_PHASES } = require('../../task-review-phase-registry');
 const { getKindCheckRegistry } = require('../kind-checks/kind-registry');
+const { preflightTasksManifest } = require('../kind-checks/shared');
 
 const KIND_HEADER = '## Per-kind verification';
 
@@ -58,6 +59,14 @@ function writeKindSection(tasksDir, results) {
 }
 
 function validate(ctx) {
+  const pre = preflightTasksManifest(ctx.tasksDir);
+  if (!pre.ok) {
+    return {
+      ok: false,
+      errors: [pre.error],
+      summary: 'tasks.md malformed — no recognized ### Type headers (bypass guard)',
+    };
+  }
   const registry = getKindCheckRegistry();
   const matched = [];
   for (const [kind, h] of Object.entries(registry)) {

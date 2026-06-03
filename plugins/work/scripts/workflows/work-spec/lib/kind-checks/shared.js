@@ -69,24 +69,153 @@ function filesInFilesToModify(specText) {
 }
 
 /**
- * Best-effort detection of which task kinds are present. Scans spec.md
- * AND tasks.md for explicit kind markers like:
- *   - "### Task 1 (frontend)"
- *   - "kind: backend"
- *   - "@frontend" / "@backend" / "@e2e" tags
- *   - any of "frontend", "backend", "wiring", "e2e", "devops", "fullstack"
- *     mentioned as a stand-alone label.
+ * Detect which task kinds are present by parsing structured `### Type`
+ * headers in tasks.md. Each `## Task` block declares its kind via either:
+ *   - `### Type` on one line, value on the next non-empty line, OR
+ *   - `### Type: <kind>` inline.
+ *
+ * Spec.md is intentionally NOT scanned — it's prose/design. Only the
+ * explicit per-task declarations count. This eliminates the entire class
+ * of false-positives from prose, gherkin tables, scope notes, and
+ * deferral annotations (no keyword scan, no suppression surface).
+ *
+ * Three outcomes are distinguished:
+ *   1. tasks.md absent OR no `## Task` blocks → returns []
+ *      (legitimately empty — caller decides what that means).
+ *   2. `## Task` blocks present, each has a `### Type` header, but no
+ *      header value matches the kind axis → returns []. The header
+ *      exists; it just carries a work-type value (e.g. `feature`,
+ *      `implementation`, `checkpoint`) instead of a kind. Legitimate.
+ *   3. `## Task` blocks present, ZERO have a `### Type` header at all
+ *      → THROWS `MalformedTasksError`. The header is the contract;
+ *      its complete absence is malformed. Returning [] silently here
+ *      would let any task ship without a kind check by simply omitting
+ *      the Type header.
+ *
+ * Why the distinction matters: `### Type` is overloaded across this
+ * codebase. Some flows use it for the kind axis (frontend/backend/…),
+ * others use it for the work-type axis (feature/implementation/
+ * checkpoint). `detectKinds` only cares about the kind axis. A
+ * non-kind value is not malformed — it just means the task doesn't
+ * participate in kind-specific validators.
  */
 const KIND_NAMES = ['frontend', 'backend', 'wiring', 'e2e', 'devops', 'fullstack'];
 
-function detectKinds(tasksDir) {
-  const text = `${readSpec(tasksDir)}\n${readTasks(tasksDir)}`.toLowerCase();
-  const present = new Set();
-  for (const k of KIND_NAMES) {
-    const re = new RegExp(`(?:^|[^a-z])${k}(?![a-z])`, 'i');
-    if (re.test(text)) present.add(k);
+// Align with task-parser.js (`/^## Task (\d+)/m`): only numbered `## Task N`
+// headings count as real task blocks. The capture group is consumed inline
+// in `tallyTaskManifest` to record the task number.
+const TASK_BLOCK_RE = /^##\s+Task\s+(\d+)\b/i;
+const SECTION_BREAK_RE = /^##\s/; // any ## heading (including next ## Task) closes the current scope
+const TYPE_HEADER_RE = /^###\s+Type\s*:?\s*(.*)$/i;
+const BARE_TYPE_HEADER_RE = /^###\s+Type\b/i;
+
+/**
+ * Look ahead from `startIndex` for the first non-empty, non-heading line
+ * and return its lowercased trimmed value. Returns '' if none found.
+ */
+function findNextValueLine(lines, startIndex) {
+  for (let j = startIndex; j < lines.length; j++) {
+    const next = lines[j].trim();
+    if (!next) continue;
+    if (next.startsWith('#')) return '';
+    return next.toLowerCase();
   }
-  return [...present];
+  return '';
+}
+
+function extractKindFromHeader(lines, i) {
+  const m = lines[i].match(TYPE_HEADER_RE);
+  if (!m) return '';
+  const inline = m[1].trim().toLowerCase();
+  return inline || findNextValueLine(lines, i + 1);
+}
+
+class MalformedTasksError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'MalformedTasksError';
+  }
+}
+
+/**
+ * Walk tasks.md lines and tally `## Task N` blocks, the kind values they
+ * declare, and the per-task numbers that lack a `### Type` header. Only
+ * headers INSIDE a `## Task` block contribute — a floating `### Type`
+ * (file scope, under some other `##` section, or above the first
+ * `## Task`) is not a task declaration and would contradict the
+ * "no `## Task` blocks → []" rule.
+ *
+ * Per-task tracking matters: a global "at least one Type header" guard
+ * lets tasks without `### Type` slip through if any sibling task has one.
+ * We instead record which task numbers are missing the header.
+ */
+function tallyTaskManifest(lines) {
+  const found = new Set();
+  const tasksMissingType = [];
+  let taskBlocks = 0;
+  let currentTask = null; // { num, sawType }
+
+  const closeTask = () => {
+    if (currentTask && !currentTask.sawType) tasksMissingType.push(currentTask.num);
+    currentTask = null;
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const taskMatch = lines[i].match(TASK_BLOCK_RE);
+    if (taskMatch) {
+      closeTask();
+      taskBlocks++;
+      currentTask = { num: Number(taskMatch[1]), sawType: false };
+      continue;
+    }
+    if (SECTION_BREAK_RE.test(lines[i])) {
+      closeTask();
+      continue;
+    }
+    if (!currentTask) continue;
+    if (BARE_TYPE_HEADER_RE.test(lines[i])) currentTask.sawType = true;
+    const value = extractKindFromHeader(lines, i);
+    if (value && KIND_NAMES.includes(value)) found.add(value);
+  }
+  closeTask();
+  return { found, taskBlocks, tasksMissingType };
+}
+
+function detectKinds(tasksDir) {
+  const text = readTasks(tasksDir);
+  if (!text) return [];
+
+  const { found, taskBlocks, tasksMissingType } = tallyTaskManifest(text.split('\n'));
+
+  if (taskBlocks > 0 && tasksMissingType.length > 0) {
+    throw new MalformedTasksError(
+      `tasks.md in ${tasksDir} has ${tasksMissingType.length} of ${taskBlocks} task block(s) ` +
+        `missing a "### Type" header: ${tasksMissingType.map((n) => `Task ${n}`).join(', ')}. ` +
+        `Every task must declare its type via "### Type: <value>" or a "### Type" header followed ` +
+        `by a value line. A non-kind value (e.g. "feature", "implementation", "checkpoint") is ` +
+        `legitimate and produces no kinds — but omitting the header would let those tasks bypass ` +
+        `kind checks.`
+    );
+  }
+
+  return [...found];
+}
+
+/**
+ * Pre-flight check for kind-check phase orchestrators. Calls `detectKinds`
+ * once, surfaces `MalformedTasksError` as a structured result rather than
+ * a throw so the phase's `validate()` can fail loudly via its return value
+ * (the per-handler try/catch in orchestrators otherwise swallows throws
+ * from `appliesTo`, defeating the bypass guard).
+ */
+function preflightTasksManifest(tasksDir) {
+  try {
+    detectKinds(tasksDir);
+    return { ok: true };
+  } catch (e) {
+    if (e instanceof MalformedTasksError) return { ok: false, error: e.message };
+    throw e;
+  }
 }
 
 /** True if brief.md explicitly forbids backend changes. */
@@ -143,6 +272,8 @@ module.exports = {
   sliceSection,
   filesInFilesToModify,
   detectKinds,
+  MalformedTasksError,
+  preflightTasksManifest,
   briefForbidsBackend,
   isBackendFile,
   isFrontendFile,

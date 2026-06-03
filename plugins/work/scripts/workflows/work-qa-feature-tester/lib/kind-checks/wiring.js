@@ -18,10 +18,12 @@ const {
 } = require('./shared');
 
 function appliesTo(ctx) {
-  const k = detectKinds(ctx.tasksDir);
-  if (k.includes('wiring')) return true;
-  const brief = readBrief(ctx.tasksDir);
-  return briefForbidsBackend(brief) && k.length === 0;
+  // Structural precondition: brief forbids backend changes — that's the
+  // marker for integration/wiring work. Don't gate on `detectKinds`,
+  // because a brief-forbids-backend ticket whose tasks declare frontend
+  // would otherwise skip the wiring QA section check.
+  if (detectKinds(ctx.tasksDir).includes('wiring')) return true;
+  return briefForbidsBackend(readBrief(ctx.tasksDir));
 }
 
 function validate(ctx) {

@@ -16,7 +16,20 @@ const backend = require('./backend');
 const { readSpec, sliceSection, detectKinds } = require('./shared');
 
 function appliesTo(ctx) {
-  return detectKinds(ctx.tasksDir).includes('fullstack');
+  // Fullstack is a spec-time CROSS-CUT, not a per-task work-type. Gating it
+  // on `### Type: fullstack` conflicts with the per-task model where authors
+  // declare `frontend` + `backend` separately. Instead, fire when the
+  // structural precondition for the cross-cut is present:
+  //   1. explicit `### Type: fullstack` opt-in, OR
+  //   2. tasks declare BOTH frontend AND backend kinds (full-stack ticket
+  //      by composition), OR
+  //   3. the spec references backend fields from a frontend bullet (the
+  //      exact thing the cross-cut closes) — which is also the input
+  //      `validate()` already reads.
+  const kinds = detectKinds(ctx.tasksDir);
+  if (kinds.includes('fullstack')) return true;
+  if (kinds.includes('frontend') && kinds.includes('backend')) return true;
+  return listFrontendBacktickIdentifiers(readSpec(ctx.tasksDir)).size > 0;
 }
 
 function listVerifiedIdentifiers(specText) {

@@ -156,6 +156,8 @@ module.exports = {
   sliceSection: specShared.sliceSection,
   filesInFilesToModify: specShared.filesInFilesToModify,
   detectKinds: specShared.detectKinds,
+  MalformedTasksError: specShared.MalformedTasksError,
+  preflightTasksManifest: specShared.preflightTasksManifest,
   briefForbidsBackend: specShared.briefForbidsBackend,
   isBackendFile: specShared.isBackendFile,
   isFrontendFile: specShared.isFrontendFile,

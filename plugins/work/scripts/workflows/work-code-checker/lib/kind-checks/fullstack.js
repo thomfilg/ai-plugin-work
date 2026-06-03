@@ -6,10 +6,18 @@
 
 const frontend = require('./frontend');
 const backend = require('./backend');
-const { detectKinds } = require('./shared');
+const { detectKinds, readChangedFiles, isFrontendFile, isBackendFile } = require('./shared');
 
 function appliesTo(ctx) {
-  return detectKinds(ctx.tasksDir).includes('fullstack');
+  // Structural precondition: the diff contains BOTH frontend and backend
+  // files. Not gated purely on `### Type: fullstack`, which conflicts
+  // with the per-task model where authors declare frontend + backend
+  // separately. Also fires when both kinds are explicitly declared.
+  const kinds = detectKinds(ctx.tasksDir);
+  if (kinds.includes('fullstack')) return true;
+  if (kinds.includes('frontend') && kinds.includes('backend')) return true;
+  const changed = readChangedFiles(ctx);
+  return changed.some(isFrontendFile) && changed.some(isBackendFile);
 }
 
 function validate(ctx) {

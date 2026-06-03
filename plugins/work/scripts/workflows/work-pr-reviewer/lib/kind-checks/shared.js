@@ -118,6 +118,8 @@ module.exports = {
   readTasks: specShared.readTasks,
   sliceSection: specShared.sliceSection,
   detectKinds: specShared.detectKinds,
+  MalformedTasksError: specShared.MalformedTasksError,
+  preflightTasksManifest: specShared.preflightTasksManifest,
   briefForbidsBackend: specShared.briefForbidsBackend,
   isBackendFile: specShared.isBackendFile,
   isFrontendFile: specShared.isFrontendFile,

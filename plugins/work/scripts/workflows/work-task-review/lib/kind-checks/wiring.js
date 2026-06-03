@@ -17,11 +17,16 @@ const {
 } = require('./shared');
 
 function appliesTo(ctx) {
-  const k = detectKinds(ctx.tasksDir);
-  if (k.includes('wiring')) return true;
+  // Structural precondition: brief forbids backend AND this task's diff
+  // contains backend files. Don't gate on `detectKinds`, because the exact
+  // ECHO-4579 case (brief forbids backend + tasks declare frontend) would
+  // otherwise silence this check.
+  if (detectKinds(ctx.tasksDir).includes('wiring')) return true;
   const brief = readBrief(ctx.tasksDir);
-  return briefForbidsBackend(brief) && k.length === 0;
+  if (!briefForbidsBackend(brief)) return false;
+  return readChangedFiles(ctx).some(isBackendFile);
 }
+
 
 function validate(ctx) {
   const brief = readBrief(ctx.tasksDir);
