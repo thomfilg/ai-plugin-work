@@ -59,7 +59,12 @@ function topPendingForManifest(manifest, entry) {
 function findNextEligibleTask() {
   if (!fs.existsSync(SESSION_MANIFEST_DIR)) return null;
   let best = null;
-  for (const entry of fs.readdirSync(SESSION_MANIFEST_DIR)) {
+  // Sort manifest filenames so readdirSync iteration order is deterministic
+  // across filesystems. This gives a stable tie-break by filename when two
+  // eligible tasks share the same numeric priority (the natural tie-break
+  // here is ticket id, since manifest filenames are derived from topic/ticket).
+  const entries = fs.readdirSync(SESSION_MANIFEST_DIR).slice().sort();
+  for (const entry of entries) {
     if (!entry.endsWith('.json')) continue;
     const manifest = readManifestSafe(path.join(SESSION_MANIFEST_DIR, entry));
     if (!manifest) continue;
