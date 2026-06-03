@@ -65,7 +65,7 @@ function fetchPrStatus(prNumber, worktree) {
   const pending = rollup.filter(
     (c) => !c.conclusion && /(PENDING|IN_PROGRESS|QUEUED|WAITING)/i.test(c.status || '')
   );
-  let checksState = 'UNKNOWN';
+  let checksState;
   if (rollup.length === 0) checksState = 'UNKNOWN';
   else if (failing.length > 0) checksState = 'FAILURE';
   else if (pending.length > 0) checksState = 'PENDING';
