@@ -28,6 +28,7 @@ const { makeFlag } = require('../lib/cli-args');
 const { loadDomainRegistry } = require('../lib/domains');
 const { loadStickyState } = require('../lib/sticky-state');
 const { classifyWithSticky, iterateLeafSignals } = require('../lib/classifier');
+const { makePalette } = require('../lib/ansi-palette');
 
 function parseArgs(argv) {
   const flag = makeFlag(argv);
@@ -129,15 +130,7 @@ function safeClassify({ prompt, recentToolCalls, registry, stickyState, sessionI
 }
 
 function makeColors(noColor) {
-  if (noColor) return new Proxy({}, { get: () => (s) => String(s) });
-  return {
-    dim: (s) => `\x1b[2m${s}\x1b[0m`,
-    bold: (s) => `\x1b[1m${s}\x1b[0m`,
-    cyan: (s) => `\x1b[36m${s}\x1b[0m`,
-    green: (s) => `\x1b[32m${s}\x1b[0m`,
-    yellow: (s) => `\x1b[33m${s}\x1b[0m`,
-    magenta: (s) => `\x1b[35m${s}\x1b[0m`,
-  };
+  return makePalette(noColor);
 }
 
 function emitJson(sessionId, active, attribution) {
