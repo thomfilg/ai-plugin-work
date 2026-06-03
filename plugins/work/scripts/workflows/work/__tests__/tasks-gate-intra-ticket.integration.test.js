@@ -81,6 +81,37 @@ describe('tasks-gate intra-ticket scope routing', () => {
   beforeEach(() => setup());
   afterEach(() => teardown());
 
+  it('tasksGateStep (real step function) routes to RUN split-in-tasks with intra-ticket error', () => {
+    // Drives the actual `tasksGateStep` function the workflow engine invokes
+    // for the `tasks_gate` step — not just `validateAll`. This catches any
+    // future regression where the validator still rejects the document but
+    // the gate step accidentally classifies it as DEFER (silent pass).
+    fs.writeFileSync(path.join(tmpDir, 'tasks.md'), INVALID_TASKS_MD, 'utf8');
+
+    const tasksGateStep = require('../steps/tasks-gate');
+    const STEPS = { tasks_gate: 'tasks_gate' };
+    const calls = [];
+    const add = (step, decision, agent, reason, opts) =>
+      calls.push({ step, decision, agent, reason, opts });
+
+    tasksGateStep(add, { hasTasks: true }, {
+      STEPS,
+      tasksDir: tmpDir,
+      path,
+    });
+
+    assert.equal(calls.length, 1, `expected exactly one add() call; got ${JSON.stringify(calls)}`);
+    const [c] = calls;
+    assert.equal(c.step, 'tasks_gate');
+    assert.equal(c.decision, 'RUN', `gate must RUN split-in-tasks, not DEFER; got ${JSON.stringify(c)}`);
+    assert.equal(c.agent, '/work-workflow:split-in-tasks');
+    assert.match(
+      c.reason,
+      /components\/X\.tsx/,
+      `RUN reason must surface the conflicting file path; got: ${c.reason}`
+    );
+  });
+
   it('tasks-gate routes to split-in-tasks when intra-ticket conflict is detected', () => {
     fs.writeFileSync(path.join(tmpDir, 'tasks.md'), INVALID_TASKS_MD, 'utf8');
 

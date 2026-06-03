@@ -181,14 +181,49 @@ function extractEvalScopePairs(testCommand) {
 }
 
 /**
- * Check whether a candidate file path is covered by any of the task's
- * `Files in scope` glob patterns. Performs a simple prefix/segment match
- * sufficient for tasks.md authoring (full glob matching happens at
- * Gate D runtime via micromatch).
+ * Compile a glob pattern to an anchored RegExp. Supports:
+ *   - `**` → `.*` (cross-segment wildcard)
+ *   - `*`  → `[^/]*` (within-segment wildcard)
+ *   - `?`  → `[^/]` (single character within a segment)
  *
- * Returns true when the candidate equals a scope entry, sits under one
- * (treating `**` as a wildcard), or matches the directory prefix of a
- * scope entry that ends with a glob.
+ * All other regex metacharacters are escaped. This is intentionally a
+ * minimal subset — no brace expansion, no extglob — covering the patterns
+ * authors actually write in tasks.md `### Files in scope` blocks.
+ *
+ * @param {string} glob
+ * @returns {RegExp}
+ */
+function globToRegExp(glob) {
+  let re = '';
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i];
+    if (c === '*') {
+      if (glob[i + 1] === '*') {
+        re += '.*';
+        i += 1;
+      } else {
+        re += '[^/]*';
+      }
+    } else if (c === '?') {
+      re += '[^/]';
+    } else if ('.+^$(){}[]|\\'.includes(c)) {
+      re += `\\${c}`;
+    } else {
+      re += c;
+    }
+  }
+  return new RegExp(`^${re}$`);
+}
+
+/**
+ * Check whether a candidate file path is covered by any of the task's
+ * `Files in scope` glob patterns.
+ *
+ * Returns true when the candidate equals a scope entry exactly, or when
+ * any entry — compiled as a proper glob — matches the candidate. Mid-glob
+ * `**` (e.g. `lib/**\/foo.ts`) is honored: only paths whose tail also
+ * matches the literal segment count as a hit, instead of any file under
+ * the leading prefix.
  *
  * @param {string} candidate
  * @param {string[]} scopeGlobs
@@ -199,15 +234,14 @@ function fileMatchesScope(candidate, scopeGlobs) {
   const norm = String(candidate).replace(/^\.\//, '');
   for (const raw of scopeGlobs) {
     if (typeof raw !== 'string' || !raw) continue;
-    const glob = raw.replace(/^\.\//, '');
+    let glob = raw.replace(/^\.\//, '');
     if (glob === norm) return true;
-    // `lib/foo/**` or `lib/foo/**/*.ts` → match anything under lib/foo/
-    const starIdx = glob.indexOf('*');
-    if (starIdx > 0) {
-      const prefix = glob.slice(0, starIdx);
-      if (norm.startsWith(prefix)) return true;
-    } else if (glob.endsWith('/')) {
-      if (norm.startsWith(glob)) return true;
+    // Trailing `/` means "everything under this directory" — desugar to `/**`.
+    if (glob.endsWith('/')) glob += '**';
+    try {
+      if (globToRegExp(glob).test(norm)) return true;
+    } catch {
+      // Malformed pattern — fall through; caller treats no match as "not in scope".
     }
   }
   return false;
@@ -585,7 +619,7 @@ function validateIntraTicketScope(tasks) {
             'Intra-ticket peer ownership is not a sibling-ticket boundary: `### Files explicitly out of scope` ' +
             'is reserved for paths owned by OTHER tickets. Remove the entry from Task ' +
             `${declarant.num ?? '?'} or restructure ownership. ` +
-            'See skills/split-in-tasks/SKILL.md §Files explicitly out of scope (intra-ticket exclusion rule).'
+            'See skills/split-in-tasks/docs/scope-sections.md §Files explicitly out of scope (intra-ticket exclusion rule).'
         );
       }
     }
