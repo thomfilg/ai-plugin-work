@@ -116,7 +116,8 @@ function checkScopedFiles(scopedFiles, changedSet, numstat, failures) {
   return missing;
 }
 
-async function validate(ctx) {
+// Synchronous — see note in reuse_audit_enforcement.js.
+function validate(ctx) {
   const failures = ctx.failures || (ctx.failures = []);
   const startLen = failures.length;
   let scopedFiles;

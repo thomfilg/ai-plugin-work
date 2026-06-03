@@ -229,7 +229,8 @@ function recordZeroCitationsFailure(coverage, failures) {
   return true;
 }
 
-async function validate(ctx) {
+// Synchronous — see note in reuse_audit_enforcement.js.
+function validate(ctx) {
   const failures = ctx.failures || (ctx.failures = []);
   const startLen = failures.length;
   try {

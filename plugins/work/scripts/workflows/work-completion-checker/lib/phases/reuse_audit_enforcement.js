@@ -169,7 +169,10 @@ function recordParserFailure(ctx, failures, err) {
   }
 }
 
-async function validate(ctx) {
+// Synchronous — phase runner calls `handler.validate(ctx)` without await,
+// so an `async` declaration would return a Promise that `advancePhase`
+// cannot read `ok`/`errors` from, silently neutering enforcement.
+function validate(ctx) {
   const failures = ctx.failures || (ctx.failures = []);
   const startLen = failures.length;
   let entries;
