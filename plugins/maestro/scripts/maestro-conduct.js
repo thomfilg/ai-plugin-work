@@ -278,17 +278,18 @@ function runPrStatusDetector(ctx) {
     );
     return;
   }
-  // pr-ready / pr-broken go to the structured alert sink so a downstream
-  // grep can match them distinctly from nudges.
+  // pr-ready / pr-broken → structured alert sink. Target -work explicitly
+  // (pr-status dedups per-ticket so -listen could otherwise own the alert).
+  const workSession = `${ctx.ticket}-work`;
   const failingList = (sHit.failingChecks || [])
     .map((c) => `${c.name}(${c.conclusion})`)
     .join(', ');
   const instruction =
     sHit.kind === 'pr-ready'
-      ? `Spawn work-workflow:code-checker (Agent tool, keep alive in tmux until verdict) on PR #${sHit.prNumber} sha=${(sHit.sha || '').slice(0, 7)} for ${ctx.ticket}. Reviewer must answer FOUR questions: (1) Did the agent complete every requirement/AC in the ticket? (2) Did it introduce any bug (logic errors, regressions, broken edge cases)? (3) Did it add any security vulnerability (injection, secrets, unsafe shell, path traversal)? (4) Did it bypass any /work workflow gate (state edits, set-step CLI, completion-checker skip, fake TDD evidence, --no-verify, deferral annotations)? Verdict must be APPROVED only if ALL four are clean. On NEEDS-WORK → forward verbatim findings to ${ctx.session} via tmux send-keys; re-run after agent pushes. On APPROVED → surface PR URL to operator; operator merges PR and kills tmux sessions ${ctx.ticket}-work + ${ctx.ticket}-listen to free the pool slot.`
-      : `tmux capture-pane -t ${ctx.session} -p | tail -40 — drive agent to fix failing checks IN-PR (no skip, no follow-up issue). Failing: ${failingList || 'see PR'}.`;
+      ? `Spawn work-workflow:code-checker (Agent tool, keep alive in tmux until verdict) on PR #${sHit.prNumber} sha=${(sHit.sha || '').slice(0, 7)} for ${ctx.ticket}. Reviewer must answer FOUR questions: (1) Did the agent complete every requirement/AC in the ticket? (2) Did it introduce any bug (logic errors, regressions, broken edge cases)? (3) Did it add any security vulnerability (injection, secrets, unsafe shell, path traversal)? (4) Did it bypass any /work workflow gate (state edits, set-step CLI, completion-checker skip, fake TDD evidence, --no-verify, deferral annotations)? Verdict must be APPROVED only if ALL four are clean. On NEEDS-WORK → forward verbatim findings to ${workSession} via tmux send-keys; re-run after agent pushes. On APPROVED → surface PR URL to operator; operator merges PR and kills tmux sessions ${ctx.ticket}-work + ${ctx.ticket}-listen to free the pool slot.`
+      : `tmux capture-pane -t ${workSession} -p | tail -40 — drive agent to fix failing checks IN-PR (no skip, no follow-up issue). Failing: ${failingList || 'see PR'}.`;
   actions.alert({
-    session: ctx.session,
+    session: workSession,
     ticket: ctx.ticket,
     kind: sHit.kind,
     phase: ctx.phase,
@@ -299,9 +300,8 @@ function runPrStatusDetector(ctx) {
     failingChecks: sHit.failingChecks,
     instruction,
   });
-  // CI-gate slot rotation removed: auto-freeing on pr-ready killed the -work
-  // session before code-checker could forward NEEDS-WORK findings. Slot freeing
-  // is now operator-driven via maestro-free-slot.sh after APPROVED verdict.
+  // CI-gate slot rotation removed: auto-freeing on pr-ready killed -work before
+  // code-checker could forward NEEDS-WORK. Slot freeing is operator-driven now.
 }
 
 /** Run the per-session pipeline. Returns when the session has been fully processed. */
