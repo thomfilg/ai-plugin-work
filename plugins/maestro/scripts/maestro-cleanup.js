@@ -143,8 +143,15 @@ function wipeAllAlertCounts(dryRun) {
     process.stdout.write(`(dry-run) would wipe ${ALERT_COUNTS}\n`);
     return 0;
   }
-  fs.unlinkSync(ALERT_COUNTS);
-  return 1;
+  // Avoid TOCTOU: try-unlink and treat ENOENT as "already gone" instead of
+  // checking existence first (CodeQL js/file-system-race).
+  try {
+    fs.unlinkSync(ALERT_COUNTS);
+    return 1;
+  } catch (err) {
+    if (err && err.code === 'ENOENT') return 0;
+    throw err;
+  }
 }
 
 function purgeAlertCountsForTicket(ticket, dryRun) {
@@ -170,7 +177,9 @@ function purgeAlertCountsForTicket(ticket, dryRun) {
 }
 
 function purgeAlertCounts(ticket, dryRun) {
-  if (!fs.existsSync(ALERT_COUNTS)) return 0;
+  // No existence pre-check; the inner functions handle a missing file via
+  // their read/unlink try/catch. Avoids TOCTOU between check and use
+  // (CodeQL js/file-system-race).
   if (!ticket) return wipeAllAlertCounts(dryRun);
   return purgeAlertCountsForTicket(ticket, dryRun);
 }
