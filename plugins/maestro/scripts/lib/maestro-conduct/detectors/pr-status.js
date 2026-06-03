@@ -21,59 +21,10 @@
  * Reuses the gh-call pattern from `pr-comments.js` (`gh pr list --head ...`
  * + `gh api`/`gh pr view --json`). Same bot-API and same caching cadence.
  */
-const { spawnSync } = require('child_process');
 const state = require('../state');
+const { spawnOut, repoSlug, prNumberFor } = require('./gh-shared');
 
 const RE_EMIT_MIN = parseInt(process.env.PR_STATUS_RE_EMIT_MIN || '30', 10);
-
-function spawnOut(cmd, args) {
-  const res = spawnSync(cmd, args, {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'ignore'],
-  });
-  return res.status === 0 ? res.stdout || '' : '';
-}
-
-function gitOut(worktree, args) {
-  return spawnOut('git', ['-C', worktree, ...args]).trim();
-}
-
-function deriveRepo(worktree) {
-  const url = gitOut(worktree || '.', ['remote', 'get-url', 'origin']);
-  if (!url) return '';
-  const m = url.match(/[:/]([^/:]+)\/([^/]+?)(?:\.git)?$/);
-  return m ? `${m[1]}/${m[2]}` : '';
-}
-
-function repoSlug(worktree) {
-  return process.env.GITHUB_REPO || deriveRepo(worktree);
-}
-
-function prNumberFor(ticket, worktree) {
-  const repo = repoSlug(worktree);
-  if (!repo) return null;
-  const json = spawnOut('gh', [
-    'pr',
-    'list',
-    '--repo',
-    repo,
-    '--head',
-    `${ticket}-maestro`,
-    '--state',
-    'open',
-    '--json',
-    'number',
-    '--limit',
-    '1',
-  ]);
-  if (!json) return null;
-  try {
-    const arr = JSON.parse(json);
-    return arr[0] && arr[0].number;
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Read PR status from gh. Returns:
@@ -144,28 +95,35 @@ function classify(checksState, mergeable) {
   return null;
 }
 
-function detect({ ticket, worktree }) {
-  if (!ticket || !worktree) return { hit: false };
-
-  const prNumber = prNumberFor(ticket, worktree);
-  if (!prNumber) return { hit: false }; // no open PR yet
-
-  const status = fetchPrStatus(prNumber, worktree);
-  if (!status) return { hit: false };
-
-  const kind = classify(status.checksState, status.mergeable);
-  if (!kind) return { hit: false };
-
-  const prev = state.read(ticket, 'pr-status');
-  const now = state.now();
-
+function computeEmitDecision(prev, status, kind) {
   // First sighting or state change → emit.
   // Rate-limit re-emit of the SAME state to once per RE_EMIT_MIN, so a flapping
   // check (SUCCESS → PENDING → SUCCESS) doesn't spam.
   const shaChanged = !prev || prev.sha !== status.sha;
   const stateChanged = !prev || prev.lastState !== kind;
   const sinceLast = prev && prev.lastEmittedAt ? state.minutesSince(prev.lastEmittedAt) : Infinity;
-  const shouldEmit = stateChanged || shaChanged || sinceLast >= RE_EMIT_MIN;
+  return stateChanged || shaChanged || sinceLast >= RE_EMIT_MIN;
+}
+
+function resolvePrContext({ ticket, worktree }) {
+  if (!ticket || !worktree) return null;
+  const prNumber = prNumberFor(ticket, worktree);
+  if (!prNumber) return null;
+  const status = fetchPrStatus(prNumber, worktree);
+  if (!status) return null;
+  const kind = classify(status.checksState, status.mergeable);
+  if (!kind) return null;
+  return { prNumber, status, kind };
+}
+
+function detect({ ticket, worktree }) {
+  const ctx = resolvePrContext({ ticket, worktree });
+  if (!ctx) return { hit: false };
+  const { prNumber, status, kind } = ctx;
+
+  const prev = state.read(ticket, 'pr-status');
+  const now = state.now();
+  const shouldEmit = computeEmitDecision(prev, status, kind);
 
   // Always write the marker so subsequent reads see the latest state, even
   // if we don't emit this tick.

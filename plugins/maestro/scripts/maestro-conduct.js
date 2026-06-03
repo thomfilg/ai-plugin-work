@@ -21,6 +21,7 @@ const workstate = require('./lib/maestro-conduct/workstate');
 const { phaseFor, escalationFor } = require('./lib/maestro-conduct/phase-registry');
 const actions = require('./lib/maestro-conduct/actions');
 const alerts = require('./lib/maestro-conduct/alerts');
+const heartbeat = require('./lib/maestro-conduct/heartbeat');
 
 const DETECTORS = {
   question: require('./lib/maestro-conduct/detectors/question'),
@@ -57,10 +58,9 @@ function maybeEscalateToDeadEnd(ctx, kind, repeatCount, sha) {
 
 // Only -work sessions are restart-eligible (matches maestro-conduct.sh
 // gating). Helpers like -dev / -listen are surfaced informationally but
-// would re-launch wrong if relaunched as /work <tid>.
-function restartEligible(session) {
-  return /-work$/.test(session);
-}
+// would re-launch wrong if relaunched as /work <tid>. Re-exported from
+// heartbeat.js so module.exports keeps the historical surface.
+const restartEligible = heartbeat.restartEligible;
 
 const REPO_NAME = process.env.REPO_NAME || 'claude-plugin-work';
 const Q_WAIT_MIN = parseInt(process.env.Q_WAIT_MIN || '3', 10);
@@ -68,12 +68,9 @@ const TICK_SEC = parseInt(process.env.TICK_SEC || '60', 10);
 
 /** Build the context object passed to every detector. */
 function ctxFor(session) {
-  // Strip the maestro session-suffix (-work / -dev / -listen). Helper sessions
-  // still derive a meaningful ticket id — they are surfaced informationally
-  // but never auto-restarted (see restartEligible above).
+  // Strip session-suffix to derive ticket id. -dev/-listen are informational only;
+  // restartEligible() gates auto-restart to -work. Snapshot is a single on-disk read.
   const ticket = tmux.ticketIdFor(session);
-  // Single read so phase and step come from the same on-disk snapshot
-  // (the file can be rewritten by /work between reads otherwise).
   const { phase, step } = workstate.snapshot(ticket);
   const worktree = path.join(workstate.WORKTREES_BASE, `${REPO_NAME}-${ticket}`);
   const pane = tmux.capture(session);
@@ -81,9 +78,7 @@ function ctxFor(session) {
 }
 
 function handleQuestion(ctx, qHit) {
-  // Question marker is per-SESSION: a `-work` session showing a prompt while
-  // an `-dev` helper is idle (or vice versa) must not clobber each other's
-  // markers. Multiple sessions can map to the same ticket.
+  // Question marker is per-SESSION so -work/-dev/-listen don't clobber each other.
   const prev = state.read(ctx.session, 'question');
   const now = state.now();
   if (!prev) {
@@ -120,9 +115,7 @@ function isHaltedWaitingForUser(pane) {
   return HALTED_WAITING_PATTERNS.some((re) => re.test(pane));
 }
 
-// Advance a marker after sending a nudge/alert. `alerted=true` flips the
-// one-shot flag so subsequent ticks suppress re-alerting until the marker is
-// reset (phase advance, HEAD change, etc.).
+// Advance marker after a nudge/alert; `alerted=true` flips the one-shot flag.
 function bumpMarker(ticket, key, marker, alerted) {
   state.write(ticket, key, {
     ...marker,
@@ -333,55 +326,11 @@ function tickSession(session) {
   if (detectorsToRun.includes('prStatus')) runPrStatusDetector(ctx);
 }
 
-/**
- * Build the heartbeat summary line. Lists every -work session and its terse
- * state derived from on-disk markers + phase. The HEARTBEAT keyword is the
- * grep handle for downstream tooling.
- */
-function buildHeartbeat(sessions) {
-  const workSessions = sessions.filter(restartEligible);
-  const parts = [];
-  let prReady = 0;
-  let prBroken = 0;
-  let prPending = 0;
-  let wedged = 0;
-  for (const s of workSessions) {
-    const tid = tmux.ticketIdFor(s);
-    const ws = workstate.snapshot(tid);
-    const prMarker = state.read(tid, 'pr-status');
-    const wedgedMarker = state.read(s, 'restart-loop');
-    const commitMarker = state.read(tid, 'commit-stall');
-    const flags = [];
-    if (prMarker && prMarker.lastState === 'pr-ready') {
-      flags.push('pr-ready');
-      prReady++;
-    } else if (prMarker && prMarker.lastState === 'pr-broken') {
-      flags.push('pr-broken');
-      prBroken++;
-    } else if (prMarker && prMarker.lastState === 'pr-pending') {
-      flags.push('pr-pending');
-      prPending++;
-    }
-    if (wedgedMarker && wedgedMarker.wedgedUntil && wedgedMarker.wedgedUntil > state.now()) {
-      flags.push('WEDGED');
-      wedged++;
-    }
-    if (commitMarker && commitMarker.lastThreshold >= 240) {
-      flags.push(`stall=${commitMarker.lastThreshold}m`);
-    }
-    parts.push(`${tid}(${ws.phase || '?'}${flags.length ? ',' + flags.join(',') : ''})`);
-  }
-  return (
-    `HEARTBEAT ${workSessions.length} active, ${prReady} pr-ready, ${prBroken} pr-broken, ${prPending} pr-pending, ${wedged} wedged` +
-    (parts.length ? ` | ${parts.join(' ')}` : '')
-  );
-}
-
 function maybeEmitHeartbeat(sessions) {
   const now = state.now();
   if (lastHeartbeatAt && now - lastHeartbeatAt < HEARTBEAT_MIN * 60) return;
   lastHeartbeatAt = now;
-  alerts.log(buildHeartbeat(sessions));
+  alerts.log(heartbeat.buildHeartbeat(sessions));
 }
 
 function tick() {

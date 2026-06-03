@@ -25,10 +25,13 @@
 
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
 
-const SESSION_DIR =
-  process.env.MAESTRO_SESSION_DIR || path.join(os.homedir(), '.cache', 'maestro', 'sessions');
+const {
+  SESSION_DIR,
+  countByStatus,
+  doneIdSet,
+  eligibleTasks,
+} = require('../scripts/lib/maestro-conduct/session-shared');
 
 try {
   if (!fs.existsSync(SESSION_DIR)) process.exit(0);
@@ -45,20 +48,15 @@ try {
     } catch {
       continue;
     }
-    const counts = { pending: 0, in_progress: 0, done: 0, blocked: 0 };
-    for (const t of s.tasks) counts[t.status] = (counts[t.status] || 0) + 1;
+    const counts = countByStatus(s.tasks);
     lines.push(
       `  • ${s.topic} — slots=${s.slots} | ` +
         `${counts.in_progress} in flight, ${counts.done}/${s.tasks.length} done, ${counts.pending} pending` +
         (counts.blocked ? `, ${counts.blocked} blocked` : '')
     );
     // Show the next 3 eligible tasks (deps resolved, sorted by priority).
-    const doneIds = new Set(s.tasks.filter((t) => t.status === 'done').map((t) => t.id));
-    const eligible = s.tasks
-      .filter((t) => t.status === 'pending')
-      .filter((t) => (t.deps || []).every((d) => doneIds.has(d)))
-      .sort((a, b) => a.priority - b.priority)
-      .slice(0, 3);
+    const doneIds = doneIdSet(s.tasks);
+    const eligible = eligibleTasks(s.tasks).slice(0, 3);
     if (eligible.length) {
       lines.push(
         `    next eligible: ${eligible

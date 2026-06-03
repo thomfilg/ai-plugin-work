@@ -39,17 +39,16 @@
 
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
 
-const SESSION_DIR =
-  process.env.MAESTRO_SESSION_DIR || path.join(os.homedir(), '.cache', 'maestro', 'sessions');
+const shared = require('./lib/maestro-conduct/session-shared');
+const { countByStatus, eligibleTasks, getSessionDir } = shared;
 const VALID_STATUS = new Set(['pending', 'in_progress', 'done', 'blocked']);
 
 function ensureDir() {
-  fs.mkdirSync(SESSION_DIR, { recursive: true });
+  fs.mkdirSync(getSessionDir(), { recursive: true });
 }
 function sessionPath(topic) {
-  return path.join(SESSION_DIR, `${topic}.json`);
+  return path.join(getSessionDir(), `${topic}.json`);
 }
 
 function init(topic, slots, tasks) {
@@ -101,31 +100,35 @@ function update(topic, taskId, status, note) {
 }
 
 function list() {
-  if (!fs.existsSync(SESSION_DIR)) return [];
+  const dir = getSessionDir();
+  if (!fs.existsSync(dir)) return [];
   return fs
-    .readdirSync(SESSION_DIR)
+    .readdirSync(dir)
     .filter((f) => f.endsWith('.json'))
-    .map((f) => JSON.parse(fs.readFileSync(path.join(SESSION_DIR, f), 'utf8')));
+    .map((f) => JSON.parse(fs.readFileSync(path.join(dir, f), 'utf8')));
 }
 
 function nextEligible(topic) {
   const s = read(topic);
   if (!s) return null;
-  const doneIds = new Set(s.tasks.filter((t) => t.status === 'done').map((t) => t.id));
-  const eligible = s.tasks
-    .filter((t) => t.status === 'pending')
-    .filter((t) => (t.deps || []).every((d) => doneIds.has(d)));
-  eligible.sort((a, b) => a.priority - b.priority);
-  return eligible[0] || null;
+  return eligibleTasks(s.tasks)[0] || null;
 }
 
 function summarize(s) {
-  const counts = { pending: 0, in_progress: 0, done: 0, blocked: 0 };
-  for (const t of s.tasks) counts[t.status] = (counts[t.status] || 0) + 1;
+  const counts = countByStatus(s.tasks);
   return (
     `${s.topic}: slots=${s.slots} | ${counts.in_progress} in flight, ${counts.done}/${s.tasks.length} done, ${counts.pending} pending` +
     (counts.blocked ? `, ${counts.blocked} blocked` : '')
   );
+}
+
+function printSummary() {
+  const sessions = list();
+  if (!sessions.length) {
+    console.log('No active maestro sessions.');
+    return;
+  }
+  for (const s of sessions) console.log(summarize(s));
 }
 
 function clear(topic) {
@@ -145,7 +148,9 @@ module.exports = {
   nextEligible,
   summarize,
   clear,
-  SESSION_DIR,
+  get SESSION_DIR() {
+    return getSessionDir();
+  },
   sessionPath,
 };
 
@@ -173,12 +178,9 @@ if (require.main === module) {
       case 'list':
         console.log(JSON.stringify(list(), null, 2));
         break;
-      case 'summary': {
-        const sessions = list();
-        if (!sessions.length) console.log('No active maestro sessions.');
-        else for (const s of sessions) console.log(summarize(s));
+      case 'summary':
+        printSummary();
         break;
-      }
       case 'update':
         update(args[0], args[1], args[2], args.slice(3).join(' ') || undefined);
         console.log('ok');

@@ -32,27 +32,41 @@ const REPO_NAME = process.env.REPO_NAME || 'claude-plugin-work';
  * the next pending task whose deps are all done. Returns { topic, taskId } or
  * null. First match wins (lowest priority across all manifests).
  */
+function readManifestSafe(file) {
+  try {
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function topPendingForManifest(manifest, entry) {
+  const tasks = Array.isArray(manifest.tasks) ? manifest.tasks : [];
+  const doneIds = new Set(tasks.filter((t) => t.status === 'done').map((t) => t.id));
+  const pending = tasks.filter(
+    (t) => t.status === 'pending' && (t.deps || []).every((d) => doneIds.has(d))
+  );
+  if (pending.length === 0) return null;
+  pending.sort((a, b) => (a.priority || 9999) - (b.priority || 9999));
+  const top = pending[0];
+  return {
+    topic: manifest.topic || entry.replace(/\.json$/, ''),
+    taskId: top.id,
+    priority: top.priority,
+  };
+}
+
 function findNextEligibleTask() {
   if (!fs.existsSync(SESSION_MANIFEST_DIR)) return null;
   let best = null;
   for (const entry of fs.readdirSync(SESSION_MANIFEST_DIR)) {
     if (!entry.endsWith('.json')) continue;
-    let manifest;
-    try {
-      manifest = JSON.parse(fs.readFileSync(path.join(SESSION_MANIFEST_DIR, entry), 'utf8'));
-    } catch {
-      continue;
-    }
-    const tasks = Array.isArray(manifest.tasks) ? manifest.tasks : [];
-    const doneIds = new Set(tasks.filter((t) => t.status === 'done').map((t) => t.id));
-    const pending = tasks.filter(
-      (t) => t.status === 'pending' && (t.deps || []).every((d) => doneIds.has(d))
-    );
-    if (pending.length === 0) continue;
-    pending.sort((a, b) => (a.priority || 9999) - (b.priority || 9999));
-    const top = pending[0];
-    if (!best || (top.priority || 9999) < (best.priority || 9999)) {
-      best = { topic: manifest.topic || entry.replace(/\.json$/, ''), taskId: top.id, priority: top.priority };
+    const manifest = readManifestSafe(path.join(SESSION_MANIFEST_DIR, entry));
+    if (!manifest) continue;
+    const candidate = topPendingForManifest(manifest, entry);
+    if (!candidate) continue;
+    if (!best || (candidate.priority || 9999) < (best.priority || 9999)) {
+      best = candidate;
     }
   }
   return best;
@@ -108,6 +122,29 @@ function alert(reasonObj) {
 }
 
 /**
+ * Declare an agent wedged: record marker, log, and emit alert. Extracted from
+ * autoRestart() to keep that function under the max-lines-per-function gate.
+ */
+function declareWedged({ session, ticket, restarts, now, silenceSec }) {
+  const wedgedUntil = now + WEDGED_QUIET_MIN * 60;
+  const count = restarts.length + 1;
+  state.write(session, 'restart-loop', { restarts: [...restarts, now], wedgedUntil });
+  alerts.log(
+    `${session} WEDGED — ${count} auto-restarts in ${RESTART_WINDOW_MIN}m; suppressing restarts for ${WEDGED_QUIET_MIN}m`
+  );
+  alerts.alert({
+    session,
+    ticket,
+    kind: 'wedged',
+    restartsInWindow: count,
+    windowMin: RESTART_WINDOW_MIN,
+    quietMin: WEDGED_QUIET_MIN,
+    silenceSec,
+    instruction: `tmux capture-pane -t ${session} -p | tail -50 — agent restarted ${count}x in ${RESTART_WINDOW_MIN}m. Daemon won't restart for ${WEDGED_QUIET_MIN}m. Diagnose root cause; if dead-end, kill session and bootstrap next bug.`,
+  });
+}
+
+/**
  * Auto-restart a dead -work session in place: kill the existing tmux
  * session, then relaunch `claude --dangerously-skip-permissions /<skill> <ticket>`
  * inside the worktree. Returns true if the restart command was issued.
@@ -116,12 +153,11 @@ function alert(reasonObj) {
  * for restart eligibility (only -work sessions) and for clearing per-ticket
  * markers after the restart so detectors don't fire against the stale state.
  */
-function autoRestart({ session, ticket, worktree, silenceSec }) {
+function checkRestartGuards({ session, ticket, worktree }) {
   if (!worktree || !fs.existsSync(worktree)) {
     alerts.log(`${session} AUTO-RESTART skipped: worktree ${worktree} not found`);
-    return false;
+    return { skip: true };
   }
-
   // CI-gate slot-freed guard. If freeCIGateSlot already killed this ticket's
   // tmux because its PR hit pr-ready, do NOT resurrect it — the agent's job
   // is done until operator merges. Marker is per-ticket, written by
@@ -132,8 +168,13 @@ function autoRestart({ session, ticket, worktree, silenceSec }) {
     alerts.log(
       `${session} AUTO-RESTART skipped: ticket ${ticket} CI-gate-freed at sha=${(ciFreed.sha || '').slice(0, 7)}; awaiting operator merge`
     );
-    return false;
+    return { skip: true };
   }
+  return { skip: false };
+}
+
+function autoRestart({ session, ticket, worktree, silenceSec }) {
+  if (checkRestartGuards({ session, ticket, worktree }).skip) return false;
 
   // Restart-loop guard. Read the per-session marker once and decide whether
   // we're still in the "WEDGED quiet" window from a prior loop. The marker
@@ -156,21 +197,7 @@ function autoRestart({ session, ticket, worktree, silenceSec }) {
   // If we'd be at-or-over the threshold AFTER this restart, declare wedged
   // INSTEAD of restarting. The operator must intervene.
   if (restarts.length + 1 >= RESTART_LOOP_THRESHOLD) {
-    const wedgedUntil = now + WEDGED_QUIET_MIN * 60;
-    state.write(session, 'restart-loop', { restarts: [...restarts, now], wedgedUntil });
-    alerts.log(
-      `${session} WEDGED — ${restarts.length + 1} auto-restarts in ${RESTART_WINDOW_MIN}m; suppressing restarts for ${WEDGED_QUIET_MIN}m`
-    );
-    alerts.alert({
-      session,
-      ticket,
-      kind: 'wedged',
-      restartsInWindow: restarts.length + 1,
-      windowMin: RESTART_WINDOW_MIN,
-      quietMin: WEDGED_QUIET_MIN,
-      silenceSec,
-      instruction: `tmux capture-pane -t ${session} -p | tail -50 — agent restarted ${restarts.length + 1}x in ${RESTART_WINDOW_MIN}m. Daemon won't restart for ${WEDGED_QUIET_MIN}m. Diagnose root cause; if dead-end, kill session and bootstrap next bug.`,
-    });
+    declareWedged({ session, ticket, restarts, now, silenceSec });
     return false;
   }
 
@@ -209,34 +236,23 @@ function autoRestart({ session, ticket, worktree, silenceSec }) {
  *
  * No-op if AUTO_FREE_CI_SLOT=0.
  */
-function freeCIGateSlot({ session, ticket, prNumber, sha }) {
-  if (process.env.AUTO_FREE_CI_SLOT === '0') return false;
-  const marker = state.read(session, 'slot-freed') || {};
-  const ciFreed = state.read(ticket, 'ci-gate-freed') || {};
-  // Always kill any alive tmux sessions for this ticket — defensive against
-  // sessions resurrected by autoRestart between ticks. tmux kill-session is
-  // idempotent and silent when the session is already gone.
+function buildNextActionInstruction({ prefix, suffix, next, autoBootstrapped }) {
+  if (autoBootstrapped) {
+    return `${prefix}NEXT_ACTION=auto-bootstrapped ${next.taskId} from manifest "${next.topic}". No operator action needed unless bootstrap log shows failure.`;
+  }
+  if (next) {
+    return `${prefix}NEXT_ACTION=bootstrap ${next.taskId} (manifest "${next.topic}", priority=${next.priority}). Run: bash plugins/maestro/scripts/maestro-bootstrap.sh ${next.taskId}. Set AUTO_BOOTSTRAP_NEXT=1 to skip this step.${suffix}`;
+  }
+  return `${prefix}NEXT_ACTION=do-nothing — no eligible pending task across orchestration manifests.${suffix}`;
+}
+
+function killTicketTmux(ticket) {
   for (const suffix of ['work', 'listen']) {
     spawnSync('tmux', ['kill-session', '-t', `${ticket}-${suffix}`], { stdio: 'ignore' });
   }
-  // Per-ticket marker that autoRestart consults to refuse resurrection.
-  // Overwritten on each fresh SHA so a force-push that re-opens CI naturally
-  // re-engages the agent.
-  state.write(ticket, 'ci-gate-freed', { killed: true, sha, prNumber, freedAt: state.now() });
-  // Skip alert + bootstrap if this exact SHA was already announced — prevents
-  // spam on every tick. The kill above still runs (defensive).
-  if (marker.sha === sha && ciFreed.sha === sha) return false;
-  state.write(session, 'slot-freed', { sha, prNumber, freedAt: state.now() });
-  const next = findNextEligibleTask();
-  const autoBootstrapped = next && maybeAutoBootstrap(next.taskId);
-  let instruction;
-  if (autoBootstrapped) {
-    instruction = `Slot freed for PR #${prNumber} (sha=${(sha || '').slice(0, 7)}). NEXT_ACTION=auto-bootstrapped ${next.taskId} from manifest "${next.topic}". No operator action needed unless bootstrap log shows failure.`;
-  } else if (next) {
-    instruction = `Slot freed for PR #${prNumber} (sha=${(sha || '').slice(0, 7)}). NEXT_ACTION=bootstrap ${next.taskId} (manifest "${next.topic}", priority=${next.priority}). Run: bash plugins/maestro/scripts/maestro-bootstrap.sh ${next.taskId}. Set AUTO_BOOTSTRAP_NEXT=1 to skip this step. Operator merges PR #${prNumber} separately.`;
-  } else {
-    instruction = `Slot freed for PR #${prNumber} (sha=${(sha || '').slice(0, 7)}). NEXT_ACTION=do-nothing — no eligible pending task across orchestration manifests. Operator merges PR #${prNumber} separately.`;
-  }
+}
+
+function emitSlotFreedAlert({ session, ticket, prNumber, sha, next, autoBootstrapped, instruction }) {
   alerts.log(
     `${session} SLOT-FREED at CI gate — PR #${prNumber} sha=${(sha || '').slice(0, 7)} awaiting operator merge; tmux -work + -listen killed${
       autoBootstrapped ? `; AUTO-BOOTSTRAPPED ${next.taskId}` : ''
@@ -253,6 +269,30 @@ function freeCIGateSlot({ session, ticket, prNumber, sha }) {
     autoBootstrapped: !!autoBootstrapped,
     instruction,
   });
+}
+
+function freeCIGateSlot({ session, ticket, prNumber, sha }) {
+  if (process.env.AUTO_FREE_CI_SLOT === '0') return false;
+  const marker = state.read(session, 'slot-freed') || {};
+  const ciFreed = state.read(ticket, 'ci-gate-freed') || {};
+  // Always kill any alive tmux sessions for this ticket — defensive against
+  // sessions resurrected by autoRestart between ticks. tmux kill-session is
+  // idempotent and silent when the session is already gone.
+  killTicketTmux(ticket);
+  // Per-ticket marker that autoRestart consults to refuse resurrection.
+  // Overwritten on each fresh SHA so a force-push that re-opens CI naturally
+  // re-engages the agent.
+  state.write(ticket, 'ci-gate-freed', { killed: true, sha, prNumber, freedAt: state.now() });
+  // Skip alert + bootstrap if this exact SHA was already announced — prevents
+  // spam on every tick. The kill above still runs (defensive).
+  if (marker.sha === sha && ciFreed.sha === sha) return false;
+  state.write(session, 'slot-freed', { sha, prNumber, freedAt: state.now() });
+  const next = findNextEligibleTask();
+  const autoBootstrapped = next && maybeAutoBootstrap(next.taskId);
+  const prefix = `Slot freed for PR #${prNumber} (sha=${(sha || '').slice(0, 7)}). `;
+  const suffix = ` Operator merges PR #${prNumber} separately.`;
+  const instruction = buildNextActionInstruction({ prefix, suffix, next, autoBootstrapped });
+  emitSlotFreedAlert({ session, ticket, prNumber, sha, next, autoBootstrapped, instruction });
   return true;
 }
 
@@ -270,20 +310,12 @@ function freeDeadEndSlot({ session, ticket, kind, repeatCount, sha }) {
   if (process.env.AUTO_FREE_DEAD_END === '0') return false;
   const marker = state.read(ticket, 'dead-end') || {};
   if (marker.killed) return false; // already freed
-  for (const suffix of ['work', 'listen']) {
-    spawnSync('tmux', ['kill-session', '-t', `${ticket}-${suffix}`], { stdio: 'ignore' });
-  }
+  killTicketTmux(ticket);
   state.write(ticket, 'dead-end', { killed: true, freedAt: state.now(), trigger: kind });
   const next = findNextEligibleTask();
   const autoBootstrapped = next && maybeAutoBootstrap(next.taskId);
-  let instruction;
-  if (autoBootstrapped) {
-    instruction = `DEAD-END on ${ticket} after ${kind} ×${repeatCount}. NEXT_ACTION=auto-bootstrapped ${next.taskId} from manifest "${next.topic}". No operator action needed unless bootstrap log shows failure.`;
-  } else if (next) {
-    instruction = `DEAD-END on ${ticket} after ${kind} ×${repeatCount}. NEXT_ACTION=bootstrap ${next.taskId} (manifest "${next.topic}", priority=${next.priority}). Run: bash plugins/maestro/scripts/maestro-bootstrap.sh ${next.taskId}. Set AUTO_BOOTSTRAP_NEXT=1 to skip this step.`;
-  } else {
-    instruction = `DEAD-END on ${ticket} after ${kind} ×${repeatCount}. NEXT_ACTION=do-nothing — no eligible pending task across orchestration manifests.`;
-  }
+  const prefix = `DEAD-END on ${ticket} after ${kind} ×${repeatCount}. `;
+  const instruction = buildNextActionInstruction({ prefix, suffix: '', next, autoBootstrapped });
   alerts.log(
     `${session} DEAD-END ${kind} re-fired ${repeatCount}x — tmux killed, slot freed${
       autoBootstrapped ? `; AUTO-BOOTSTRAPPED ${next.taskId}` : ''

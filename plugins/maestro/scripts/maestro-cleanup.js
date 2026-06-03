@@ -128,16 +128,16 @@ function killAllTmuxFromMarkers(dryRun) {
   return killed;
 }
 
-function purgeAlertCounts(ticket, dryRun) {
-  if (!fs.existsSync(ALERT_COUNTS)) return 0;
-  if (!ticket) {
-    if (dryRun) {
-      process.stdout.write(`(dry-run) would wipe ${ALERT_COUNTS}\n`);
-      return 0;
-    }
-    fs.unlinkSync(ALERT_COUNTS);
-    return 1;
+function wipeAllAlertCounts(dryRun) {
+  if (dryRun) {
+    process.stdout.write(`(dry-run) would wipe ${ALERT_COUNTS}\n`);
+    return 0;
   }
+  fs.unlinkSync(ALERT_COUNTS);
+  return 1;
+}
+
+function purgeAlertCountsForTicket(ticket, dryRun) {
   let counts;
   try {
     counts = JSON.parse(fs.readFileSync(ALERT_COUNTS, 'utf8'));
@@ -159,36 +159,26 @@ function purgeAlertCounts(ticket, dryRun) {
   return removed;
 }
 
-function main() {
-  const args = process.argv.slice(2);
-  if (args.length === 0) usage();
+function purgeAlertCounts(ticket, dryRun) {
+  if (!fs.existsSync(ALERT_COUNTS)) return 0;
+  if (!ticket) return wipeAllAlertCounts(dryRun);
+  return purgeAlertCountsForTicket(ticket, dryRun);
+}
 
-  if (args.includes('--list')) {
-    listMarkers();
-    return;
-  }
+function runAllMode({ dryRun, wantTmux, wantAlertCounts }) {
+  const files = allTicketMarkers();
+  const removed = deleteFiles(files, dryRun);
+  const killedTmux = wantTmux ? killAllTmuxFromMarkers(dryRun) : 0;
+  const wipedCounts = wantAlertCounts ? purgeAlertCounts(null, dryRun) : 0;
+  process.stdout.write(
+    `cleanup --all: removed ${removed} marker(s)` +
+      (wantTmux ? `, killed ${killedTmux} tmux session(s)` : '') +
+      (wantAlertCounts ? `, alert-counts wiped=${wipedCounts}` : '') +
+      '\n'
+  );
+}
 
-  const dryRun = args.includes('--dry-run');
-  const wantTmux = args.includes('--tmux');
-  const wantAlertCounts = args.includes('--alert-counts');
-  const positional = args.filter((a) => !a.startsWith('--'));
-
-  if (args.includes('--all')) {
-    const files = allTicketMarkers();
-    const removed = deleteFiles(files, dryRun);
-    const killedTmux = wantTmux ? killAllTmuxFromMarkers(dryRun) : 0;
-    const wipedCounts = wantAlertCounts ? purgeAlertCounts(null, dryRun) : 0;
-    process.stdout.write(
-      `cleanup --all: removed ${removed} marker(s)` +
-        (wantTmux ? `, killed ${killedTmux} tmux session(s)` : '') +
-        (wantAlertCounts ? `, alert-counts wiped=${wipedCounts}` : '') +
-        '\n'
-    );
-    return;
-  }
-
-  if (positional.length !== 1) usage();
-  const ticket = positional[0];
+function runTicketMode({ ticket, dryRun, wantTmux, wantAlertCounts }) {
   if (!/^[A-Z]+-\d+$/.test(ticket)) {
     process.stderr.write(`error: ticket "${ticket}" must match /^[A-Z]+-\\d+$/\n`);
     process.exit(1);
@@ -203,6 +193,31 @@ function main() {
       (wantAlertCounts ? `, purged ${purgedCounts} alert-count key(s)` : '') +
       '\n'
   );
+}
+
+function main() {
+  const args = process.argv.slice(2);
+  if (args.length === 0) usage();
+
+  if (args.includes('--list')) {
+    listMarkers();
+    return;
+  }
+
+  const flags = {
+    dryRun: args.includes('--dry-run'),
+    wantTmux: args.includes('--tmux'),
+    wantAlertCounts: args.includes('--alert-counts'),
+  };
+  const positional = args.filter((a) => !a.startsWith('--'));
+
+  if (args.includes('--all')) {
+    runAllMode(flags);
+    return;
+  }
+
+  if (positional.length !== 1) usage();
+  runTicketMode({ ticket: positional[0], ...flags });
 }
 
 main();
