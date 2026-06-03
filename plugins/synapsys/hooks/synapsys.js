@@ -21,7 +21,9 @@ const { discoverStores, listMemoriesFromStore } = require(
 );
 const { selectForEvent } = require(path.join(__dirname, '..', 'lib', 'matcher'));
 const { loadDomainRegistry } = require(path.join(__dirname, '..', 'lib', 'domains'));
-const { classifyWithSticky } = require(path.join(__dirname, '..', 'lib', 'classifier'));
+const { classifyActiveDomains, classifyWithSticky } = require(
+  path.join(__dirname, '..', 'lib', 'classifier')
+);
 const { loadStickyState, saveStickyState } = require(
   path.join(__dirname, '..', 'lib', 'sticky-state')
 );
@@ -88,9 +90,44 @@ function getSessionStartHint(event, stores, memories) {
   return null;
 }
 
+// Serialize the PreToolUse invoking tool (`tool_name` + `tool_input`) into a
+// single string so `signal_pretool` regexes match against the tool under
+// execution, not just historical calls. Returns null when the event is not
+// PreToolUse or no tool fields are present.
+function currentToolCallString(event, payload) {
+  if (event !== 'PreToolUse') return null;
+  const toolName = typeof payload.tool_name === 'string' ? payload.tool_name : '';
+  if (!toolName) return null;
+  let inputStr = '';
+  const input = payload.tool_input;
+  if (input != null) {
+    try {
+      inputStr = typeof input === 'string' ? input : JSON.stringify(input);
+    } catch {
+      inputStr = '';
+    }
+  }
+  return `${toolName} ${inputStr}`.trim();
+}
+
+// Merge sticky-active domains for a session into a raw-active set without
+// mutating streaks. Used for non-prompt events where AC5/AC6 hysteresis
+// (which counts "prompts", not arbitrary hook turns) must not advance.
+function mergeStickyActive(rawActive, stickyState, sessionId) {
+  const merged = new Set(rawActive);
+  const session = (stickyState && stickyState[sessionId]) || {};
+  for (const domain of Object.keys(session)) {
+    const entry = session[domain];
+    if (entry && entry.sticky === true) merged.add(domain);
+  }
+  return merged;
+}
+
 // Classify the payload's prompt + recentToolCalls into a set of active
-// domain tags, persist the next sticky-state, and return an opts object
-// suitable for `selectForEvent(..., opts)`. Fail-open: any error → returns
+// domain tags and return an opts object suitable for `selectForEvent`.
+// Only `UserPromptSubmit` advances sticky-state streaks (AC5/AC6 describe
+// quiet *prompts*, not Stop/PreToolUse turns). Other events read the
+// existing sticky set without mutation. Fail-open: any error → returns
 // `undefined` so the caller falls back to pre-classifier behavior (R3/R4/R7).
 function buildActiveDomainsForPayload(event, payload) {
   try {
@@ -98,28 +135,34 @@ function buildActiveDomainsForPayload(event, payload) {
     if (!registry || !registry.roots || registry.roots.size === 0) return undefined;
 
     const prompt = typeof payload.prompt === 'string' ? payload.prompt : '';
-    const recentToolCalls = Array.isArray(payload.recentToolCalls)
+    const baseToolCalls = Array.isArray(payload.recentToolCalls)
       ? payload.recentToolCalls
       : Array.isArray(payload.recent_tool_calls)
         ? payload.recent_tool_calls
         : [];
+    const currentTool = currentToolCallString(event, payload);
+    const recentToolCalls = currentTool ? [currentTool, ...baseToolCalls] : baseToolCalls;
     const sessionId = payload.session_id || payload.sessionId || 'default';
-
     const stickyState = loadStickyState();
-    const { activeDomains, nextStickyState } = classifyWithSticky({
-      prompt,
-      recentToolCalls,
-      registry,
-      stickyState,
-      sessionId,
-    });
 
-    try {
-      saveStickyState({ state: nextStickyState });
-    } catch {
-      // fail-open: persistence failures must not block injection
+    if (event === 'UserPromptSubmit') {
+      const { activeDomains, nextStickyState } = classifyWithSticky({
+        prompt,
+        recentToolCalls,
+        registry,
+        stickyState,
+        sessionId,
+      });
+      try {
+        saveStickyState({ state: nextStickyState });
+      } catch {
+        // fail-open: persistence failures must not block injection
+      }
+      return { activeDomains };
     }
 
+    const rawActive = classifyActiveDomains({ prompt, recentToolCalls, registry });
+    const activeDomains = mergeStickyActive(rawActive, stickyState, sessionId);
     return { activeDomains };
   } catch {
     return undefined;
