@@ -38,6 +38,38 @@ function resolvePluginRoot(callerDir, levelsUp = 2) {
 }
 
 /**
+ * Like {@link resolvePluginRoot} but honours `CLAUDE_PLUGIN_ROOT` when set:
+ *
+ *  - env set AND probing matches a known layout → probed path (more specific).
+ *  - env set AND probing matches an UNRELATED path (probed didn't derive from
+ *    env) → env value verbatim. The user's explicit setting wins over an
+ *    incidentally-matching probe elsewhere on disk.
+ *  - env set AND probing fails → env value verbatim.
+ *  - env unset → identical to {@link resolvePluginRoot}.
+ *
+ * Use this in contexts where the literal env value carries meaning to the
+ * consumer — typically `${CLAUDE_PLUGIN_ROOT}` string substitution in skill
+ * prompts and registry entries — and falling through to an unrelated probe
+ * would silently rewrite paths to the wrong install.
+ *
+ * @param {string} [callerDir]
+ * @param {number} [levelsUp=2]
+ * @returns {string|null}
+ */
+function resolvePluginRootHonouringEnv(callerDir, levelsUp = 2) {
+  const rawEnvRoot = process.env.CLAUDE_PLUGIN_ROOT;
+  const envRoot = rawEnvRoot ? path.resolve(rawEnvRoot) : '';
+  const probed = resolvePluginRoot(callerDir, levelsUp);
+  if (probed) {
+    if (envRoot && probed !== envRoot && !probed.startsWith(envRoot + path.sep)) {
+      return envRoot;
+    }
+    return probed;
+  }
+  return envRoot || null;
+}
+
+/**
  * @param {string} [callerDir]
  * @param {number} [levelsUp]
  * @returns {{ workDir: string, libDir: string }}
@@ -52,4 +84,4 @@ function resolvePluginPaths(callerDir, levelsUp) {
   };
 }
 
-module.exports = { resolvePluginRoot, resolvePluginPaths };
+module.exports = { resolvePluginRoot, resolvePluginRootHonouringEnv, resolvePluginPaths };

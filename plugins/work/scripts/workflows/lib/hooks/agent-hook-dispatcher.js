@@ -30,6 +30,9 @@ const { spawnSync } = require('child_process');
 const { logHookError } = require(path.join(__dirname, '..', 'hook-error-log'));
 const { isRunningInAgent } = require(path.join(__dirname, '..', 'agent-detection'));
 const { REGISTRY } = require(path.join(__dirname, 'agent-hook-registry'));
+const {
+  resolvePluginRootHonouringEnv,
+} = require('../../work/lib/resolve-plugin-root');
 
 const VALID_HOOK_TYPES = new Set(['PreToolUse', 'PostToolUse', 'Stop']);
 
@@ -69,9 +72,16 @@ function matcherAllows(entry, hookData, hookType) {
 }
 
 function resolvePluginRoot() {
-  if (process.env.CLAUDE_PLUGIN_ROOT) return process.env.CLAUDE_PLUGIN_ROOT;
-  // Fallback: dispatcher lives at <root>/scripts/workflows/lib/hooks/
-  return path.resolve(__dirname, '..', '..', '..', '..');
+  // Dispatcher lives at <root>/scripts/workflows/lib/hooks/ — 4 levels up
+  // reaches the plugin root. Use the env-honouring variant: subprocess scripts
+  // referenced by the registry are resolved relative to CLAUDE_PLUGIN_ROOT, so
+  // we must trust the user's env setting when probing lands on an unrelated
+  // install (which is exactly what happens in test fixtures and in the
+  // marketplace-nesting case tracked by GH-526).
+  return (
+    resolvePluginRootHonouringEnv(__dirname, 4) ||
+    path.resolve(__dirname, '..', '..', '..', '..')
+  );
 }
 
 function runEntry(entry, stdinBuffer, pluginRoot) {

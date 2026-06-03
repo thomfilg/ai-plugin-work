@@ -23,9 +23,15 @@ const { logHookError } = require(
 const { safeExec } = require(
   path.join(__dirname, '..', 'scripts', 'workflows', 'lib', 'safe-exec')
 );
+const { resolvePluginRootHonouringEnv } = require(
+  path.join(__dirname, '..', 'scripts', 'workflows', 'work', 'lib', 'resolve-plugin-root')
+);
 
-// Use CLAUDE_PLUGIN_ROOT if available, otherwise fallback to __dirname
-const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.dirname(__dirname);
+// ORCHESTRATOR_PATH below is derived from PLUGIN_ROOT, so the user's
+// CLAUDE_PLUGIN_ROOT must be honoured verbatim when probing lands on an
+// unrelated install (env-honouring variant). Falls back to __dirname-based
+// probing otherwise, and finally to path.dirname when probing fails too.
+const PLUGIN_ROOT = resolvePluginRootHonouringEnv(__dirname, 1) || path.dirname(__dirname);
 const ORCHESTRATOR_PATH = path.join(
   PLUGIN_ROOT,
   'scripts',

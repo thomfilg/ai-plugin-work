@@ -9,6 +9,10 @@
  *   max-lines               → max-lines (max 400)
  *   max-lines-per-function  → max-lines-per-function (max 80)
  *
+ * Plus one project-specific drift guard:
+ *
+ *   no-restricted-syntax    → plugin-root-direct-access (process.env.CLAUDE_PLUGIN_ROOT)
+ *
  * Config lives at `configs/quality-lint-rules.js` and is passed via
  * `--config` so the file name doesn't have to match ESLint's default-lookup
  * convention.
@@ -33,6 +37,7 @@ const RULE_MAP = {
   'max-depth': 'max-depth',
   'max-lines': 'max-lines',
   'max-lines-per-function': 'max-lines-per-function',
+  'no-restricted-syntax': 'plugin-root-direct-access',
 };
 
 const THRESHOLDS = {
