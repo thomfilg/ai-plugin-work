@@ -43,7 +43,7 @@ let lastHeartbeatAt = 0;
 const DEAD_END_REEMITS = parseInt(process.env.DEAD_END_REEMITS || '3', 10);
 
 function maybeEscalateToDeadEnd(ctx, kind, repeatCount, sha) {
-  if (repeatCount < DEAD_END_REEMITS) return;
+  if (repeatCount < DEAD_END_REEMITS || ['wait_merge', 'ci', 'complete'].includes(ctx.phase)) return;
   actions.freeDeadEndSlot({
     session: ctx.session,
     ticket: ctx.ticket,
