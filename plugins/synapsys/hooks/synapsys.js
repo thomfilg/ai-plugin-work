@@ -15,11 +15,19 @@
  * never block the user's prompt or tool call.
  */
 
+const fs = require('node:fs');
 const path = require('node:path');
 const { discoverStores, listMemoriesFromStore } = require(
   path.join(__dirname, '..', 'lib', 'memory-store')
 );
 const { selectForEvent } = require(path.join(__dirname, '..', 'lib', 'matcher'));
+const {
+  recordFired,
+  recordCited,
+  scanForCitations,
+  resolveSessionId,
+  telemetryDir,
+} = require(path.join(__dirname, '..', 'lib', 'telemetry'));
 
 const VALID_EVENTS = new Set(['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'Stop']);
 const MAX_INJECT_CHARS = 8000;
@@ -83,6 +91,130 @@ function getSessionStartHint(event, stores, memories) {
   return null;
 }
 
+// Read names of memories with event:"fired" from the session JSONL.
+// Fail-open: any error returns an empty Set.
+function readFiredMemoryNames(sessionId) {
+  const out = new Set();
+  try {
+    const file = path.join(telemetryDir(), `${sessionId}.jsonl`);
+    if (!fs.existsSync(file)) return out;
+    const raw = fs.readFileSync(file, 'utf8');
+    for (const line of raw.split('\n')) {
+      if (!line) continue;
+      try {
+        const obj = JSON.parse(line);
+        if (obj && obj.event === 'fired' && typeof obj.memory === 'string') {
+          out.add(obj.memory);
+        }
+      } catch {
+        // skip malformed line
+      }
+    }
+  } catch {
+    // fail-open
+  }
+  return out;
+}
+
+function extractResponseText(payload) {
+  if (payload && typeof payload.response === 'string') return payload.response;
+  if (payload && typeof payload.transcript_path === 'string') {
+    try {
+      const raw = fs.readFileSync(payload.transcript_path, 'utf8');
+      // Take last assistant block — best-effort, JSONL format common in Claude.
+      const lines = raw.split('\n').filter((l) => l.length > 0);
+      for (let i = lines.length - 1; i >= 0; i--) {
+        try {
+          const obj = JSON.parse(lines[i]);
+          if (obj && obj.role === 'assistant' && typeof obj.content === 'string') {
+            return obj.content;
+          }
+        } catch {
+          // skip
+        }
+      }
+    } catch {
+      // fail-open
+    }
+  }
+  return '';
+}
+
+// Re-parse `cite_signals` from a memory's raw file to recover YAML-list
+// frontmatter the simple memory-store parser drops (it only handles
+// inline `key: value` lines). Fail-open: returns the memory unchanged on
+// any error or when nothing extra is found.
+function recoverCiteSignals(memory) {
+  try {
+    if (!memory || !memory.file) return memory;
+    const existing =
+      memory.meta && Array.isArray(memory.meta.cite_signals)
+        ? memory.meta.cite_signals.filter((s) => typeof s === 'string' && s.length > 0)
+        : [];
+    if (existing.length > 0) return memory;
+    const raw = fs.readFileSync(memory.file, 'utf8');
+    const fm = raw.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+    if (!fm) return memory;
+    const lines = fm[1].split(/\r?\n/);
+    const found = [];
+    let inList = false;
+    for (const line of lines) {
+      if (/^cite_signals\s*:\s*$/.test(line)) {
+        inList = true;
+        continue;
+      }
+      if (inList) {
+        const item = line.match(/^\s+-\s+(.+?)\s*$/);
+        if (item) {
+          found.push(item[1].replace(/^["']|["']$/g, ''));
+          continue;
+        }
+        // End of list when we hit any other key or blank
+        if (line.trim() === '' || /^[a-zA-Z_][\w]*\s*:/.test(line)) {
+          inList = false;
+        }
+      }
+    }
+    if (!found.length) return memory;
+    return {
+      ...memory,
+      citeSignals: found.slice(),
+      meta: { ...(memory.meta || {}), cite_signals: found.slice() },
+    };
+  } catch {
+    return memory;
+  }
+}
+
+// Stop-only: scan response text for citations of any previously-fired memory.
+// Dedupes via Set so each memory is recorded at most once per Stop.
+function runCiteScan(payload, memories) {
+  try {
+    const responseText = extractResponseText(payload);
+    if (!responseText) return;
+    const sessionId = resolveSessionId(payload);
+    const firedNames = readFiredMemoryNames(sessionId);
+    if (firedNames.size === 0) return;
+    const candidates = memories
+      .filter((m) => m && firedNames.has(m.name))
+      .map(recoverCiteSignals);
+    if (!candidates.length) return;
+    const hits = scanForCitations(candidates, responseText);
+    const seen = new Set();
+    for (const hit of hits) {
+      if (!hit || !hit.memory || seen.has(hit.memory.name)) continue;
+      seen.add(hit.memory.name);
+      try {
+        recordCited(hit.memory, payload, hit.match);
+      } catch {
+        // fail-open
+      }
+    }
+  } catch {
+    // fail-open
+  }
+}
+
 function formatMatchedOutput(matched) {
   const out = matched.map(formatMemory).join('\n\n---\n\n');
   if (out.length <= MAX_INJECT_CHARS) return out;
@@ -105,11 +237,25 @@ function formatMatchedOutput(matched) {
       process.exit(0);
     }
 
-    if (!memories.length) process.exit(0);
+    if (!memories.length) {
+      if (event === 'Stop') runCiteScan(payload, memories);
+      process.exit(0);
+    }
     const matched = selectForEvent(memories, event, payload);
-    if (!matched.length) process.exit(0);
 
-    process.stdout.write(formatMatchedOutput(matched));
+    if (matched.length) {
+      for (const m of matched) {
+        try {
+          recordFired(m, payload, event);
+        } catch {
+          // fail-open
+        }
+      }
+      process.stdout.write(formatMatchedOutput(matched));
+    }
+
+    if (event === 'Stop') runCiteScan(payload, memories);
+
     process.exit(0);
   } catch {
     process.exit(0);
