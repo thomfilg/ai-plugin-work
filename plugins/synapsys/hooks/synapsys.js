@@ -60,37 +60,55 @@ function reminderLine(memory) {
  * the ledger + decideInjection + recordInjection. The entire call is fail-open
  * (R1): any throw → fall back to formatting every memory as full body.
  */
+const SEP = '\n\n---\n\n';
+
+function commitInjection(ledger, sessionId, memory, isFull) {
+  const entry = ledger.memories[memory.name];
+  const prevCount = Number(entry && entry.injectedCount) || 0;
+  const prevLast = Number(entry && entry.lastFullInjectAt) || 0;
+  const nextCount = prevCount + 1;
+  ledger.memories[memory.name] = {
+    injectedCount: nextCount,
+    lastFullInjectAt: isFull ? nextCount : prevLast,
+  };
+  try {
+    injectLedger.recordInjection(sessionId, memory.name, { full: isFull });
+  } catch {
+    /* fail-open */
+  }
+}
+
+// Cap-aware renderer. Only memories whose rendered text fits within
+// MAX_INJECT_CHARS are recorded in the ledger — anything truncated by the cap
+// keeps its prior injectedCount so it can re-fire (full body) on a later match.
 function renderMatchedMemories(matched, sessionId) {
   try {
     const ledger = injectLedger.loadLedger(sessionId);
     if (!ledger.memories || typeof ledger.memories !== 'object') {
       ledger.memories = {};
     }
-    const out = matched.map((m) => {
-      const entry = ledger.memories[m.name];
-      const decision = decideInjection(m, entry);
-      const text = decision.kind === 'full' ? formatMemory(m) : reminderLine(m);
-      // Update in-memory snapshot BEFORE the next iteration so duplicates of the
-      // same memory name (e.g. same name discovered in multiple stores) see the
-      // incremented count and correctly emit a reminder instead of another full.
-      const prevCount = Number(entry && entry.injectedCount) || 0;
-      const prevLast = Number(entry && entry.lastFullInjectAt) || 0;
-      const nextCount = prevCount + 1;
-      ledger.memories[m.name] = {
-        injectedCount: nextCount,
-        lastFullInjectAt: decision.kind === 'full' ? nextCount : prevLast,
-      };
-      try {
-        injectLedger.recordInjection(sessionId, m.name, { full: decision.kind === 'full' });
-      } catch {
-        /* fail-open */
+    const pieces = [];
+    let used = 0;
+    let truncated = false;
+    for (const m of matched) {
+      const decision = decideInjection(m, ledger.memories[m.name]);
+      const isFull = decision.kind === 'full';
+      const text = isFull ? formatMemory(m) : reminderLine(m);
+      const sepLen = pieces.length ? SEP.length : 0;
+      if (used + sepLen + text.length > MAX_INJECT_CHARS) {
+        truncated = true;
+        break;
       }
-      return text;
-    });
-    return out.join('\n\n---\n\n');
+      pieces.push(text);
+      used += sepLen + text.length;
+      commitInjection(ledger, sessionId, m, isFull);
+    }
+    const body = pieces.join(SEP);
+    return truncated
+      ? `${body}${SEP}[synapsys: output truncated at ${MAX_INJECT_CHARS} chars]`
+      : body;
   } catch {
-    // Fail-open: any ledger error → emit full body for every match.
-    return matched.map(formatMemory).join('\n\n---\n\n');
+    return matched.map(formatMemory).join(SEP);
   }
 }
 
