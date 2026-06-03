@@ -66,6 +66,13 @@ function loadChangedContents(ctx, changed) {
   return out;
 }
 
+// Proxy check: returns true when the symbol appears anywhere in the full
+// content of a changed file — not strictly in the added hunks. A file that
+// already contained the symbol in untouched code passes even if the change
+// added an alternative implementation alongside it. The suffix-candidate
+// hint in `buildMissingFailure` catches the most common drift case
+// (e.g. `ContentPageToolbar` declared MUST-reuse, but the diff introduces
+// `ExploreBulkToolbar` while the original is unreferenced).
 function symbolPresentIn(symbol, fileBlobs) {
   const re = new RegExp(`\\b${escapeRegex(symbol)}\\b`);
   return fileBlobs.some((f) => re.test(f.content));
@@ -108,6 +115,24 @@ function checkMustReuseEntries(entries, blobs, joined, failures) {
   return { mustChecked, mustMissing };
 }
 
+function recordParserFailure(ctx, failures, err) {
+  // Surface parser errors through the failure-store so report.js can include
+  // them in completion-verdict.json instead of only echoing the error in the
+  // phase summary.
+  const record = makeFailure({
+    requirementId: 'REUSE-PARSER',
+    checkType: 'reuse_audit',
+    expected: 'parseable ## Reuse Audit section',
+    observed: errMessage(err),
+  });
+  failures.push(record);
+  try {
+    appendForCheckType(ctx.tasksDir, 'reuse_audit', [record], { reuseChecked: 0 });
+  } catch {
+    /* hook-gated; persistence is best-effort */
+  }
+}
+
 async function validate(ctx) {
   const failures = ctx.failures || (ctx.failures = []);
   const startLen = failures.length;
@@ -115,6 +140,7 @@ async function validate(ctx) {
   try {
     entries = readReuseAudit(ctx.tasksDir);
   } catch (err) {
+    recordParserFailure(ctx, failures, err);
     return {
       ok: false,
       errors: [`parser threw: ${errMessage(err)}`],

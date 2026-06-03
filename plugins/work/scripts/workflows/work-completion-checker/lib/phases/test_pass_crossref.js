@@ -23,11 +23,14 @@ const { appendForCheckType } = require('../failure-store');
 const { hasVerdict, escapeRegex, buildVerdictRegex } = require('../../../lib/parse-completion-status');
 
 const CITATION_RE = /(\S+\.test\.[jt]sx?):(\w+)/;
+const CITATION_RE_G = /(\S+\.test\.[jt]sx?):(\w+)/g;
 const PASS_VERDICTS = ['PASS', 'COMPLETE', 'APPROVED'];
 
 /**
- * Extract a `{ testFile, testName }` citation from an Evidence cell, or null
- * if the cell does not reference a test file.
+ * Extract the first `{ testFile, testName }` citation from an Evidence cell,
+ * or null if the cell does not reference a test file. Kept for backward
+ * compatibility with existing tests; new code should use
+ * `parseEvidenceCitations` to capture every citation in the cell.
  *
  * @param {string} cell
  * @returns {{ testFile: string, testName: string } | null}
@@ -37,6 +40,24 @@ function parseEvidenceCitation(cell) {
   const m = CITATION_RE.exec(cell);
   if (!m) return null;
   return { testFile: m[1], testName: m[2] };
+}
+
+/**
+ * Extract every `{ testFile, testName }` citation from an Evidence cell.
+ * An Evidence cell may list more than one test (e.g.
+ * `foo.test.js:t1, bar.test.js:t2`); each citation must be verified
+ * independently against `tests.check.md`.
+ *
+ * @param {string} cell
+ * @returns {Array<{ testFile: string, testName: string }>}
+ */
+function parseEvidenceCitations(cell) {
+  if (typeof cell !== 'string' || !cell) return [];
+  const out = [];
+  for (const m of cell.matchAll(CITATION_RE_G)) {
+    out.push({ testFile: m[1], testName: m[2] });
+  }
+  return out;
 }
 
 /**
@@ -67,15 +88,21 @@ function collectDeliveredCitations(coverage) {
   const out = [];
   for (const row of coverage) {
     if (!row || String(row.status).toUpperCase() !== 'DELIVERED') continue;
-    const cite = parseEvidenceCitation(row.evidence);
-    if (!cite) continue;
-    out.push({ row, cite });
+    const cites = parseEvidenceCitations(row.evidence);
+    for (const cite of cites) {
+      out.push({ row, cite });
+    }
   }
   return out;
 }
 
 function recordMissingReport(deliveredCitations, failures) {
+  // One failure per requirement row, not per citation — multiple citations
+  // on the same row share the same root cause (tests.check.md missing).
+  const seen = new Set();
   for (const { row } of deliveredCitations) {
+    if (seen.has(row.id)) continue;
+    seen.add(row.id);
     failures.push(
       makeFailure({
         requirementId: row.id,
@@ -209,3 +236,4 @@ module.exports = function register(registerPhase) {
 module.exports.validate = validate;
 module.exports.instructions = instructions;
 module.exports.parseEvidenceCitation = parseEvidenceCitation;
+module.exports.parseEvidenceCitations = parseEvidenceCitations;

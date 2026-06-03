@@ -34,10 +34,21 @@ function readState(tasksDir) {
   }
 }
 
+// Atomic-replace via temp file + rename so concurrent readers never observe a
+// torn write. Two concurrent writers will still race (last writer wins on the
+// final rename), but neither will leave the JSON half-written.
 function writeState(tasksDir, state) {
+  const target = storePath(tasksDir);
+  const tmp = `${target}.${process.pid}.${Date.now()}.tmp`;
   try {
-    fs.writeFileSync(storePath(tasksDir), `${JSON.stringify(state, null, 2)}\n`);
+    fs.writeFileSync(tmp, `${JSON.stringify(state, null, 2)}\n`);
+    fs.renameSync(tmp, target);
   } catch {
+    try {
+      fs.unlinkSync(tmp);
+    } catch {
+      /* tmp may not exist */
+    }
     /* hook-gated; persistence is best-effort */
   }
 }
@@ -58,6 +69,14 @@ function resetStore(tasksDir) {
  * own checkType ('reuse_audit' / 'suggested_scope' / 'test_pass') — when a
  * phase re-runs (e.g. agent retries after a fix) its prior records should be
  * replaced, not duplicated.
+ *
+ * Concurrency note: the read-modify-write pair is not atomic. Two
+ * completion-checker runs against the same `tasksDir` could lose records on
+ * a tight interleave. Under /work, completion-checker is invoked serially
+ * per ticket and `tasksDir` is per-ticket, so this is effectively
+ * single-writer in practice. If that invariant ever changes (parallel
+ * verification of the same ticket, shared tasksDir), upgrade to a
+ * file-level advisory lock.
  */
 function appendForCheckType(tasksDir, checkType, newFailures, summaryPatch) {
   const state = readState(tasksDir);

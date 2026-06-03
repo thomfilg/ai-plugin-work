@@ -271,6 +271,12 @@ test.describe('reuse_audit_enforcement phase', () => {
         result.errors.some((e) => /^parser threw:/.test(String(e))),
         'errors must include a "parser threw: ..." entry',
       );
+      // Parser failure must also be surfaced through the failure-store so
+      // report.js can include it in completion-verdict.json.
+      const parserFailure = ctx.failures.find(
+        (f) => f.checkType === 'reuse_audit' && f.requirementId === 'REUSE-PARSER',
+      );
+      assert.ok(parserFailure, 'parser failure must be pushed onto ctx.failures');
     } finally {
       cleanup();
     }

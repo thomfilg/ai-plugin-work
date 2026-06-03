@@ -20,13 +20,11 @@ const { appendForCheckType } = require('../failure-store');
 const config = require('../../../lib/config');
 
 /**
- * Parse `git diff --numstat` output and decide whether `file` has any
- * non-empty hunks (added or deleted lines > 0). Each numstat line has the
- * shape `<adds>\t<dels>\t<path>` where `adds`/`dels` may be `-` for binary
- * files (treated as a hunk).
+ * Decide whether a single `git diff --numstat` row represents a non-empty
+ * hunk. `adds`/`dels` may be `-` for binary files (treated as a hunk).
  *
- * @param {string} file
- * @param {string} numstatOutput
+ * @param {string} adds
+ * @param {string} dels
  * @returns {boolean}
  */
 function numstatRowHasHunk(adds, dels) {
@@ -38,6 +36,14 @@ function numstatRowHasHunk(adds, dels) {
   return aPos || dPos;
 }
 
+/**
+ * Parse `git diff --numstat` output and decide whether `file` has any
+ * non-empty hunks. Each numstat line has the shape `<adds>\t<dels>\t<path>`.
+ *
+ * @param {string} file
+ * @param {string} numstatOutput
+ * @returns {boolean}
+ */
 function hasNonEmptyHunk(file, numstatOutput) {
   if (!file || !numstatOutput) return false;
   for (const line of numstatOutput.split('\n')) {

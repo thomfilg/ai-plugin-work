@@ -241,3 +241,47 @@ test('observed reports "no verdict marker" when mention exists but no verdict wo
     cleanup();
   }
 });
+
+test('parseEvidenceCitations returns every citation in a cell', () => {
+  const cells = phase.parseEvidenceCitations('foo.test.js:t1, bar.test.ts:t2 and baz.test.tsx:t3');
+  assert.equal(cells.length, 3);
+  assert.deepEqual(cells[0], { testFile: 'foo.test.js', testName: 't1' });
+  assert.deepEqual(cells[1], { testFile: 'bar.test.ts', testName: 't2' });
+  assert.deepEqual(cells[2], { testFile: 'baz.test.tsx', testName: 't3' });
+});
+
+test('DELIVERED row citing two tests verifies both — second failing flips ok:false', async () => {
+  const tasks = coverageTasks([
+    { id: 'R9', status: 'DELIVERED', evidence: '`foo.test.js:test_A, bar.test.js:test_B`' },
+  ]);
+  const report = [
+    '- test_A — Status: PASS',
+    '- test_B — Status: FAIL',
+    '',
+  ].join('\n');
+  const { ctx, cleanup } = buildCtx({ tasks, testReport: report });
+  try {
+    const result = await phase.validate(ctx);
+    assert.equal(result.ok, false);
+    const failing = ctx.failures.filter((f) => f.checkType === 'test_pass');
+    assert.equal(failing.length, 1);
+    assert.match(failing[0].observed, /test_B FAIL/);
+  } finally {
+    cleanup();
+  }
+});
+
+test('Missing tests.check.md collapses multi-citation row to one failure (not one per citation)', async () => {
+  const tasks = coverageTasks([
+    { id: 'R9', status: 'DELIVERED', evidence: '`foo.test.js:test_A, bar.test.js:test_B`' },
+  ]);
+  const { ctx, cleanup } = buildCtx({ tasks });
+  try {
+    const result = await phase.validate(ctx);
+    assert.equal(result.ok, false);
+    const failing = ctx.failures.filter((f) => f.checkType === 'test_pass' && f.requirementId === 'R9');
+    assert.equal(failing.length, 1);
+  } finally {
+    cleanup();
+  }
+});
