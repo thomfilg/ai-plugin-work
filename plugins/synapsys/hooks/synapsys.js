@@ -165,6 +165,10 @@ function formatMatchedOutput(matched, sessionId) {
     let sessionId;
     try {
       sessionId = injectLedger.resolveSessionId(payload);
+      // Publish the resolved id to `.current` so out-of-process callers
+      // (synapsys-list CLI) read the same session ledger the dispatcher
+      // writes to. Fail-open: a write error never blocks the dispatcher.
+      injectLedger.publishCurrentSessionId(sessionId);
     } catch {
       sessionId = '';
     }

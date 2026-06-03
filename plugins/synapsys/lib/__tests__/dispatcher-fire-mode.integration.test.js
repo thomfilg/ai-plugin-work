@@ -10,7 +10,7 @@
 //
 // Each test runs in an isolated tmp HOME so per-session ledger files do not leak.
 
-const { describe, it, before, after, beforeEach } = require('node:test');
+const { describe, it, beforeEach } = require('node:test');
 const assert = require('node:assert/strict');
 const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');

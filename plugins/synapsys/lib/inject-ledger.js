@@ -57,7 +57,7 @@ function ensureDir() {
 
 function hashId(value) {
   return crypto
-    .createHash('sha1')
+    .createHash('sha256')
     .update(String(value))
     .digest('hex')
     .slice(0, 32);
@@ -69,15 +69,35 @@ function resolveFromPayload(payload) {
   return SAFE_ID_RE.test(raw) ? raw : hashId(raw);
 }
 
-function readCurrentSessionFile(currentPath) {
+function readBoundedFile(p, maxBytes) {
+  let fd;
   try {
-    const st = fs.statSync(currentPath);
-    if (!st || st.size <= 0 || st.size >= 256) return null;
-    const v = fs.readFileSync(currentPath, 'utf8').trim();
-    return v && SAFE_ID_RE.test(v) ? v : null;
+    fd = fs.openSync(p, 'r');
+    const st = fs.fstatSync(fd);
+    if (!st || !st.isFile()) return null;
+    if (st.size <= 0 || st.size > maxBytes) return null;
+    const buf = Buffer.alloc(st.size);
+    let off = 0;
+    while (off < st.size) {
+      const n = fs.readSync(fd, buf, off, st.size - off, off);
+      if (n <= 0) break;
+      off += n;
+    }
+    return buf.slice(0, off).toString('utf8');
   } catch {
     return null;
+  } finally {
+    if (fd !== undefined) {
+      try { fs.closeSync(fd); } catch { /* fail-open */ }
+    }
   }
+}
+
+function readCurrentSessionFile(currentPath) {
+  const raw = readBoundedFile(currentPath, 255);
+  if (raw === null) return null;
+  const v = raw.trim();
+  return v && SAFE_ID_RE.test(v) ? v : null;
 }
 
 function writeCurrentSessionFile(currentPath, value) {
@@ -109,11 +129,7 @@ function resolveSessionId(payload) {
 }
 
 function readLedgerFile(sessionId) {
-  const p = ledgerPath(sessionId);
-  const st = fs.statSync(p);
-  if (!st || !st.isFile()) return null;
-  if (st.size > MAX_FILE_BYTES) return null;
-  return fs.readFileSync(p, 'utf8');
+  return readBoundedFile(ledgerPath(sessionId), MAX_FILE_BYTES);
 }
 
 function normalizeLedger(parsed, sessionId, empty) {
@@ -207,6 +223,16 @@ function gcStaleLedgers(opts) {
   }
 }
 
+function publishCurrentSessionId(sessionId) {
+  if (typeof sessionId !== 'string' || !SAFE_ID_RE.test(sessionId)) return;
+  try {
+    ensureDir();
+    writeCurrentSessionFile(path.join(sessionDir(), '.current'), sessionId);
+  } catch {
+    /* fail-open */
+  }
+}
+
 module.exports = {
   resolveSessionId,
   loadLedger,
@@ -214,4 +240,5 @@ module.exports = {
   recordInjection,
   resetLedgerForSession,
   gcStaleLedgers,
+  publishCurrentSessionId,
 };
