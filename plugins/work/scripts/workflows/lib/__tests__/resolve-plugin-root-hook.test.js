@@ -13,7 +13,6 @@ const fs = require('fs');
 const os = require('os');
 
 const HOOK_PATH = path.join(__dirname, '..', 'hooks', 'resolve-plugin-root-hook.js');
-const FAKE_ROOT = '/fake/plugin/root';
 
 // Track temp dirs for cleanup
 const TEMP_DIRS = [];
@@ -33,6 +32,11 @@ function makeFixtureLeafPlugin() {
   fs.mkdirSync(path.join(leaf, 'workflows', 'work'), { recursive: true });
   return leaf;
 }
+// Shared real-leaf fixture used as the default CLAUDE_PLUGIN_ROOT for tests
+// that don't override it. resolvePluginRoot() requires the env path to actually
+// contain workflows/work, so a real directory is needed in place of a fake path.
+const DEFAULT_ROOT = makeFixtureLeafPlugin();
+
 after(() => {
   for (const d of TEMP_DIRS) {
     try {
@@ -45,7 +49,7 @@ function runHook(input, env = {}) {
   return new Promise((resolve, reject) => {
     const proc = spawn('node', [HOOK_PATH], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, CLAUDE_PLUGIN_ROOT: FAKE_ROOT, ...env },
+      env: { ...process.env, CLAUDE_PLUGIN_ROOT: DEFAULT_ROOT, ...env },
     });
     let stdout = '';
     let stderr = '';
@@ -70,8 +74,8 @@ describe('resolve-plugin-root-hook', () => {
       tool_input: { command: 'node ${CLAUDE_PLUGIN_ROOT}/hooks/work-orchestrator.js test' },
     });
     assert.strictEqual(code, 2);
-    assert.ok(stderr.includes(FAKE_ROOT));
-    assert.ok(stderr.includes(`node ${FAKE_ROOT}/hooks/work-orchestrator.js test`));
+    assert.ok(stderr.includes(DEFAULT_ROOT));
+    assert.ok(stderr.includes(`node ${DEFAULT_ROOT}/hooks/work-orchestrator.js test`));
   });
 
   it('should BLOCK when command contains $CLAUDE_PLUGIN_ROOT (no braces)', async () => {
@@ -79,7 +83,7 @@ describe('resolve-plugin-root-hook', () => {
       tool_input: { command: 'node $CLAUDE_PLUGIN_ROOT/hooks/test.js' },
     });
     assert.strictEqual(code, 2);
-    assert.ok(stderr.includes(`node ${FAKE_ROOT}/hooks/test.js`));
+    assert.ok(stderr.includes(`node ${DEFAULT_ROOT}/hooks/test.js`));
   });
 
   it('command without CLAUDE_PLUGIN_ROOT is allowed through unchanged', async () => {
@@ -107,7 +111,7 @@ describe('resolve-plugin-root-hook', () => {
     });
     assert.strictEqual(code, 2);
     assert.ok(
-      stderr.includes(`node ${FAKE_ROOT}/lib/engine.js && node ${FAKE_ROOT}/hooks/test.js`)
+      stderr.includes(`node ${DEFAULT_ROOT}/lib/engine.js && node ${DEFAULT_ROOT}/hooks/test.js`)
     );
   });
 

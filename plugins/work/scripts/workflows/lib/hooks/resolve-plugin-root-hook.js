@@ -26,25 +26,17 @@ process.on('unhandledRejection', (err) => {
   process.exit(0);
 });
 
-function computePluginRoot() {
-  const rawEnvRoot = process.env.CLAUDE_PLUGIN_ROOT;
-  // Normalize to strip trailing slashes so the boundary check is reliable
-  const envRoot = rawEnvRoot ? path.resolve(rawEnvRoot) : '';
-  // Probe env var (handles leaf-dir OR parent plugins-base) and __dirname fallback
-  const probed = resolvePluginRoot(__dirname, 3);
-  if (probed) {
-    // If env var is set, prefer probed result only when it derives from the env var.
-    // When env var is set but doesn't probe (e.g., points to a non-existent dir),
-    // honour it verbatim for backwards compatibility.
-    if (envRoot && probed !== envRoot && !probed.startsWith(envRoot + path.sep)) {
-      return envRoot;
-    }
-    return probed;
-  }
-  if (envRoot) return envRoot;
-  return path.resolve(__dirname, '..', '..', '..');
-}
-const PLUGIN_ROOT = computePluginRoot();
+// Honour CLAUDE_PLUGIN_ROOT verbatim when set: if the env path doesn't match
+// the on-disk leaf/parent layout, resolvePluginRoot silently falls back to a
+// callerDir probe that has nothing to do with what the user set. For the
+// command-substitution use case, prefer the env value over an unrelated probe.
+const envRoot =
+  process.env.CLAUDE_PLUGIN_ROOT && path.resolve(process.env.CLAUDE_PLUGIN_ROOT);
+const probed = resolvePluginRoot(__dirname, 3);
+const PLUGIN_ROOT =
+  envRoot && probed && !probed.startsWith(envRoot)
+    ? envRoot
+    : probed || envRoot || path.resolve(__dirname, '..', '..', '..');
 
 async function main() {
   let input = ''; // read hook JSON from stdin
