@@ -179,6 +179,39 @@ function parseFireCadence(raw, memoryName) {
   return DEFAULT_FIRE_CADENCE;
 }
 
+const PRESETS_PATH = path.join(__dirname, 'synapsys-presets.json');
+let _presetsCache = null;
+
+// Read shipped synapsys-presets.json once and cache the resulting Map.
+// On malformed JSON, degrade to an empty Map and emit a single stderr warning
+// (mirrors the safeRegex fail-closed convention at matcher.js:241).
+function loadPresets() {
+  if (_presetsCache) return _presetsCache;
+  try {
+    const raw = fs.readFileSync(PRESETS_PATH, 'utf8');
+    const obj = JSON.parse(raw);
+    const map = new Map();
+    for (const [k, v] of Object.entries(obj)) {
+      if (typeof v === 'string' && v.length > 0) map.set(k, v);
+    }
+    _presetsCache = map;
+  } catch (err) {
+    process.stderr.write(`[synapsys] presets.json invalid: ${err.message}\n`);
+    _presetsCache = new Map();
+  }
+  return _presetsCache;
+}
+
+// Resolve a preset name to its regex body string. Returns null and emits a
+// single stderr warning for unknown names (caller is expected to call this
+// once per memory at load time so the warning cadence stays sane).
+function resolvePreset(name) {
+  const map = loadPresets();
+  if (map.has(name)) return map.get(name);
+  process.stderr.write(`[synapsys] unknown preset ${name}\n`);
+  return null;
+}
+
 function readMemoryFile(store, name) {
   if (!name.endsWith('.md') || SKIP_FILES.has(name)) return null;
   const file = path.join(store.dir, name);
@@ -190,6 +223,15 @@ function readMemoryFile(store, name) {
   }
   const { meta, body } = parseFrontmatter(raw);
   const memoryName = meta.name || path.basename(name, '.md');
+  const excludePrompt = meta.exclude_prompt || '';
+  const excludePretool = toList(meta.exclude_pretool);
+  const excludePreset = toList(meta.exclude_preset);
+  const excludeResolved = [];
+  for (const presetName of excludePreset) {
+    const resolved = resolvePreset(presetName);
+    if (resolved) excludeResolved.push(resolved);
+  }
+  if (excludePrompt) excludeResolved.push(excludePrompt);
   return {
     store,
     file,
@@ -214,6 +256,10 @@ function readMemoryFile(store, name) {
     // `telemetry` as "enabled" and absent `cite_signals` as "auto-extract".
     citeSignals: normalizeCiteSignals(meta.cite_signals),
     telemetry: normalizeTelemetry(meta.telemetry),
+    excludePrompt,
+    excludePretool,
+    excludePreset,
+    excludeResolved,
     meta,
     body,
   };
@@ -307,5 +353,7 @@ module.exports = {
   parseFrontmatter,
   listMemories,
   listMemoriesFromStore,
+  loadPresets,
+  resolvePreset,
   safeExec,
 };

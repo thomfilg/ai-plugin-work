@@ -8,12 +8,13 @@
  * @property {string} [content_pattern]   The trigger_pretool_content regex that matched.
  * @property {string} [content_substring] The actual substring matched in the tool input content.
  * @property {string} [negative_pattern]  The trigger_pretool_content_not regex that excluded a match.
+ * @property {string} [excluded_pattern]  The exclude_* regex/spec that suppressed an otherwise-positive match.
  */
 
 /**
  * @typedef {Object} MatchResult
  * @property {boolean} fired
- * @property {('events-exclude'|'no-prompt-match'|'no-pretool-match'|'no-content-match'|'negative-excludes'|'no-session-trigger'|'expired'|'disabled'|'domain-mismatch')} [reason]
+ * @property {('events-exclude'|'no-prompt-match'|'no-pretool-match'|'no-content-match'|'negative-excludes'|'exclude-matched'|'no-session-trigger'|'expired'|'disabled'|'domain-mismatch')} [reason]
  * @property {Matched} [matched]
  */
 
@@ -68,6 +69,18 @@ function matchPrompt(memory, prompt) {
       prompt_token = arm;
       break;
     }
+  }
+
+  // Locked evaluation order (GH-510): trigger → exclude. After a positive
+  // trigger_prompt match, evaluate the merged exclude list. Any hit suppresses
+  // the fire and returns reason 'exclude-matched' with the offending pattern.
+  const excluded = evaluateExcludePrompt(memory, prompt || '');
+  if (excluded.excluded) {
+    return {
+      fired: false,
+      reason: 'exclude-matched',
+      matched: makeMatched({ excluded_pattern: excluded.pattern }),
+    };
   }
 
   return {
@@ -172,6 +185,21 @@ function _evaluatePreToolMatch(memory, payload) {
   return { ...stage, matchedSpec: prefix.matchedSpec };
 }
 
+/**
+ * Locked evaluation order for matchPreTool / matchPreToolResult (GH-510):
+ *   1. events gate / disabled / expired
+ *   2. positive trigger_pretool prefix match (`no-pretool-match` on miss)
+ *   3. trigger_pretool_content stage (GH-445): content positive then
+ *      `trigger_pretool_content_not` — produces `'negative-excludes'` which
+ *      retains priority over `'exclude-matched'`
+ *   4. exclude_prompt / exclude_pretool / exclude_preset suppression
+ *      (`'exclude-matched'`)
+ *
+ * The order matters: `'negative-excludes'` is a stage-3 verdict against the
+ * tool input content; `'exclude-matched'` is a stage-4 veto against the same
+ * inputs the trigger considered. Reordering would silently flip which reason
+ * surfaces to memory authors, breaking the explainer contract.
+ */
 function matchPreTool(memory, payload) {
   const gate = gateMemory(memory, 'PreToolUse');
   if (gate) return { fired: false, reason: gate };
@@ -180,6 +208,29 @@ function matchPreTool(memory, payload) {
   }
   const result = _evaluatePreToolMatch(memory, payload);
   if (result.matched) {
+    // Stage 4: exclude evaluation runs AFTER positive + content stages so
+    // negative-excludes retains priority over exclude-matched (locked order).
+    const argBlob = JSON.stringify(payload?.tool_input || {});
+    const toolName = payload?.tool_name || '';
+    const excluded = evaluateExcludePretool(memory, toolName, argBlob);
+    if (excluded.excluded) {
+      return {
+        fired: false,
+        reason: 'exclude-matched',
+        matched: makeMatched({ excluded_pattern: excluded.pattern }),
+      };
+    }
+    // Also evaluate exclude_prompt against the argBlob to honor R11 OR
+    // composition — exclude_prompt patterns apply to any input the trigger
+    // saw (matching the prompt-side semantics consistently).
+    const excludedByPrompt = evaluateExcludePrompt(memory, argBlob);
+    if (excludedByPrompt.excluded) {
+      return {
+        fired: false,
+        reason: 'exclude-matched',
+        matched: makeMatched({ excluded_pattern: excludedByPrompt.pattern }),
+      };
+    }
     return {
       fired: true,
       matched: makeMatched({
@@ -279,6 +330,89 @@ function evaluatePretoolContentNot(memory, contentString) {
   return { excluded: false, pattern: null };
 }
 
+/**
+ * True iff the memory carries any resolved exclude pattern (either inline
+ * `exclude_prompt` / `exclude_preset` flattened into `excludeResolved`, or
+ * any `exclude_pretool` spec).
+ *
+ * @param {object} memory
+ * @returns {boolean}
+ */
+function hasExcludePatterns(memory) {
+  const resolved = Array.isArray(memory.excludeResolved) && memory.excludeResolved.length > 0;
+  const pretool = Array.isArray(memory.excludePretool) && memory.excludePretool.length > 0;
+  return resolved || pretool;
+}
+
+/**
+ * Evaluate the resolved exclude list (inline `exclude_prompt` + flattened
+ * `exclude_preset` bodies, in `memory.excludeResolved`) against an input
+ * string (typically a user prompt or a stringified tool_input blob).
+ * Invalid regex entries are skipped with a stderr warning so a single bad
+ * pattern cannot abort the matcher (fail-closed / R15).
+ *
+ * @param {object} memory
+ * @param {string} input
+ * @returns {{ excluded: boolean, pattern: string|null }}
+ */
+function evaluateExcludePrompt(memory, input) {
+  const patterns = memory.excludeResolved;
+  if (!Array.isArray(patterns) || patterns.length === 0) {
+    return { excluded: false, pattern: null };
+  }
+  const text = input || '';
+  // Two-pass evaluation:
+  //   pass 1 — compile every pattern, emit stderr warnings for invalid ones
+  //            so memory authors are told about all bad regex even when an
+  //            earlier valid one matches (fail-closed / R15).
+  //   pass 2 — return on the first valid regex that matches.
+  const compiled = [];
+  for (const pat of patterns) {
+    const re = safeRegex(pat);
+    if (!re) {
+      process.stderr.write(
+        `[synapsys] memory ${memory.name}: invalid exclude regex "${pat}"\n`
+      );
+      continue;
+    }
+    compiled.push({ pat, re });
+  }
+  for (const { pat, re } of compiled) {
+    if (re.test(text)) return { excluded: true, pattern: pat };
+  }
+  return { excluded: false, pattern: null };
+}
+
+/**
+ * Evaluate `memory.excludePretool` (array of `tool:pattern` specs sharing the
+ * shape of `trigger_pretool`) against a candidate (toolName, argBlob). Reuses
+ * `parsePretoolSpec` / `pretoolSpecMatches` so the spec grammar stays in one
+ * place. Invalid regex inside a spec is fail-closed (no exclude fires).
+ *
+ * @param {object} memory
+ * @param {string} toolName
+ * @param {string} argBlob
+ * @returns {{ excluded: boolean, pattern: string|null }}
+ */
+function evaluateExcludePretool(memory, toolName, argBlob) {
+  const specs = memory.excludePretool;
+  if (!Array.isArray(specs) || specs.length === 0) {
+    return { excluded: false, pattern: null };
+  }
+  for (const spec of specs) {
+    try {
+      if (pretoolSpecMatches(spec, toolName, argBlob || '')) {
+        return { excluded: true, pattern: spec };
+      }
+    } catch (err) {
+      process.stderr.write(
+        `[synapsys] memory ${memory.name}: invalid exclude_pretool spec "${spec}": ${err.message}\n`
+      );
+    }
+  }
+  return { excluded: false, pattern: null };
+}
+
 // matchPreToolResult — object-mode wrapper around matchPreTool.
 //
 // Locked decision (GH-445 brief P0 #8 / spec §Architecture Decisions):
@@ -294,7 +428,26 @@ function evaluatePretoolContentNot(memory, contentString) {
 function matchPreToolResult(memory, payload) {
   if (gateMemory(memory, 'PreToolUse')) return { matched: false };
   const result = _evaluatePreToolMatch(memory, payload);
-  if (result.matched) return { matched: true };
+  if (result.matched) {
+    // Stage 4: exclude evaluation — same locked order as matchPreTool.
+    const argBlob = JSON.stringify(payload?.tool_input || {});
+    const toolName = payload?.tool_name || '';
+    const excluded = evaluateExcludePretool(memory, toolName, argBlob);
+    if (excluded.excluded) {
+      return {
+        reason: 'exclude-matched',
+        matched: { excluded_pattern: excluded.pattern },
+      };
+    }
+    const excludedByPrompt = evaluateExcludePrompt(memory, argBlob);
+    if (excludedByPrompt.excluded) {
+      return {
+        reason: 'exclude-matched',
+        matched: { excluded_pattern: excludedByPrompt.pattern },
+      };
+    }
+    return { matched: true };
+  }
   if (result.negative) {
     return {
       reason: 'negative-excludes',
@@ -388,4 +541,7 @@ module.exports = {
   evaluatePretoolContentNot,
   hasNegativeContentPatterns,
   isDomainMismatch,
+  evaluateExcludePrompt,
+  evaluateExcludePretool,
+  hasExcludePatterns,
 };
