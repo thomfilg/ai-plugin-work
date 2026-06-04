@@ -797,13 +797,19 @@ function cmdRecordRefactor(ticketId, args) {
         '". Transition to refactor first.'
     );
 
+  // Task 4 (GH-528): mirror the GREEN `--docs-exempt` opt-in on REFACTOR so
+  // documentation-only tasks with silent verifiers (e.g. `grep -q`) can
+  // finish the full RED → GREEN → REFACTOR cycle. Default behavior keeps
+  // RC-D armed for every existing caller.
+  const docsExempt = Array.isArray(args) && args.includes('--docs-exempt');
+
   const { exitCode, stdout, stderr } = runTestCommandWithOutput(cmd);
   if (exitCode !== 0) {
     errorExit('Tests must still PASS after refactoring. Tests failed (exit ' + exitCode + ').');
   }
 
   // RC-D defense: same empty-command guard as GREEN. Refuse exit-0-with-no-output.
-  if (stdout.trim() === '' && stderr.trim() === '') {
+  if (!docsExempt && stdout.trim() === '' && stderr.trim() === '') {
     errorExit(
       'REFACTOR test command exited 0 with NO stdout/stderr output. This is the ' +
         'empty-command trap (typically an unbound test-command env var expanded ' +

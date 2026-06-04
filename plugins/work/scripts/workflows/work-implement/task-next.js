@@ -456,7 +456,9 @@ function recordEvidence(phase, ticket, taskNum, cmd, cwd, scope, opts = {}) {
     if (
       opts &&
       opts.docsExempt === true &&
-      (phase === TDD_PHASES.red || phase === TDD_PHASES.green)
+      (phase === TDD_PHASES.red ||
+        phase === TDD_PHASES.green ||
+        phase === TDD_PHASES.refactor)
     ) {
       recordArgs.push('--docs-exempt');
     }
@@ -1002,7 +1004,15 @@ function main() {
     if (!passed) {
       blockReason = `Regression detected — tests failed during refactor (exit ${run.exitCode}). Revert the breaking change before re-invoking me.\n\n${run.combined}`;
     } else {
-      const rec = recordEvidence(TDD_PHASES.refactor, ticket, taskNum, testCmd, repoRoot, scope);
+      // Task 4 (GH-528): docs-exempt / visual-only tasks have no testable
+      // code surface, so their REFACTOR verifier is silent (`grep -q`,
+      // `test -f`, etc.). Forward `--docs-exempt` so the recorder relaxes
+      // RC-D for this single invocation — symmetric with RED and GREEN.
+      const refactorDocsExempt = docsExempt || visualOnly;
+      const rec = recordEvidence(
+        TDD_PHASES.refactor, ticket, taskNum, testCmd, repoRoot, scope,
+        { docsExempt: refactorDocsExempt }
+      );
       if (!rec.ok) {
         blockReason = `Could not record REFACTOR evidence:\n${rec.out}`;
       } else {
