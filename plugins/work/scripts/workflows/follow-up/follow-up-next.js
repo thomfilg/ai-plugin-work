@@ -16,6 +16,8 @@ const fs = require('fs');
 const path = require('path');
 const cp = require('child_process');
 
+const { buildChildEnv } = require('../work/scripts/gh-exec');
+
 if (require.main === module) {
   process.on('uncaughtException', (err) => {
     console.error(
@@ -181,6 +183,7 @@ function buildExecForCtx(worktreeDir) {
         encoding: 'utf8',
         timeout: 30000,
         stdio: ['pipe', 'pipe', 'pipe'],
+        env: buildChildEnv(),
       });
       return { stdout, stderr: '', status: 0 };
     } catch (err) {
