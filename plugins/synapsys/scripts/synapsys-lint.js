@@ -23,6 +23,7 @@ const {
   extractAlternationTokens,
   jaccard,
   triggerMatchesBody,
+  pretoolArgSets,
 } = require('../lib/shared/trigger-tokens');
 
 // Named exit-code constants — single source of truth.
@@ -313,6 +314,181 @@ function computeBodyPairs(memories, bodyDensityHigh, onlyInvolving) {
 }
 
 /**
+ * Generate a small set of concrete sample strings for a `trigger_pretool`
+ * arg-regex source. Replaces common whitespace metas (`\s+`, `\s*`, `\s`) with
+ * a single space and expands every `(a|b|c)` alternation as a cross-product
+ * over literal alternatives. Non-literal alternatives (e.g. nested groups,
+ * character classes) cause that alternation to fall back to the raw source
+ * (sample generation is best-effort — pair scoring still works because the
+ * fallback compares as a string literal).
+ *
+ * Returns an empty array on malformed input. Caps the expansion at 16 samples
+ * to keep the matrix bounded.
+ *
+ * @param {string} argSrc
+ * @returns {string[]}
+ */
+function expandArgSamples(argSrc) {
+  if (typeof argSrc !== 'string' || argSrc.length === 0) return [];
+  // Normalize whitespace metas to a single space so the sample matches itself.
+  let base = argSrc.replace(/\\s[+*]?/g, ' ');
+  // Split base into a sequence of literal chunks and alternation groups.
+  const groupRe = /\(([^()]+)\)/g;
+  const parts = [];
+  let last = 0;
+  let m;
+  while ((m = groupRe.exec(base)) !== null) {
+    if (m.index > last) parts.push({ kind: 'literal', text: base.slice(last, m.index) });
+    const inner = m[1];
+    if (inner.includes('|') && /^[A-Za-z0-9_| -]+$/.test(inner)) {
+      parts.push({ kind: 'alt', options: inner.split('|') });
+    } else {
+      parts.push({ kind: 'literal', text: m[0] });
+    }
+    last = groupRe.lastIndex;
+  }
+  if (last < base.length) parts.push({ kind: 'literal', text: base.slice(last) });
+
+  // Cross-product expansion, capped at 16 samples.
+  let samples = [''];
+  for (const part of parts) {
+    if (part.kind === 'literal') {
+      samples = samples.map((s) => s + part.text);
+    } else {
+      const next = [];
+      for (const s of samples) {
+        for (const opt of part.options) {
+          next.push(s + opt);
+          if (next.length >= 16) break;
+        }
+        if (next.length >= 16) break;
+      }
+      samples = next;
+    }
+  }
+  return samples;
+}
+
+/**
+ * Compile an arg-regex source into a RegExp, anchored as a substring matcher.
+ * Returns null on parse error (memory is skipped — fail-closed).
+ */
+function compileArgRegex(argSrc) {
+  try {
+    return new RegExp(argSrc);
+  } catch (_) {
+    return null;
+  }
+}
+
+/**
+ * True when every sample of `subSrc` is matched by `superSrc`'s compiled
+ * regex. Used to decide strict-subset / equal containment for severity.
+ */
+function argSubsetOf(subSrc, superSrc) {
+  const samples = expandArgSamples(subSrc);
+  if (samples.length === 0) return false;
+  const re = compileArgRegex(superSrc);
+  if (!re) return false;
+  return samples.every((s) => re.test(s));
+}
+
+/**
+ * True when at least one sample of either arg-regex is matched by the other.
+ */
+function argsIntersect(aSrc, bSrc) {
+  const aSamples = expandArgSamples(aSrc);
+  const bSamples = expandArgSamples(bSrc);
+  const aRe = compileArgRegex(aSrc);
+  const bRe = compileArgRegex(bSrc);
+  if (!aRe || !bRe) return false;
+  return aSamples.some((s) => bRe.test(s)) || bSamples.some((s) => aRe.test(s));
+}
+
+/**
+ * Score a single-tool arg-regex Set pair (A vs B).
+ *
+ * Returns `null` when the two sets have no semantic intersection (no pair).
+ * Otherwise returns `{ baseSeverity, score }` where:
+ *   - baseSeverity is `high` when A ⊆ B or B ⊆ A (equal or strict-subset),
+ *     `medium` otherwise (non-empty intersection with disjoint extras).
+ *   - score is the textual Jaccard of the raw arg-source sets, useful for
+ *     deterministic ordering and downstream suggestion generation.
+ *
+ * @param {Set<string>} aSet
+ * @param {Set<string>} bSet
+ * @returns {{baseSeverity:'high'|'medium', score:number} | null}
+ */
+function scoreToolOverlap(aSet, bSet) {
+  const aArgs = Array.from(aSet);
+  const bArgs = Array.from(bSet);
+  if (aArgs.length === 0 || bArgs.length === 0) return null;
+
+  let hasIntersection = false;
+  for (const x of aArgs) {
+    for (const y of bArgs) {
+      if (argsIntersect(x, y)) { hasIntersection = true; break; }
+    }
+    if (hasIntersection) break;
+  }
+  if (!hasIntersection) return null;
+
+  const aCoveredByB = aArgs.every((x) => bArgs.some((y) => argSubsetOf(x, y)));
+  const bCoveredByA = bArgs.every((y) => aArgs.some((x) => argSubsetOf(y, x)));
+  const baseSeverity = aCoveredByB || bCoveredByA ? 'high' : 'medium';
+
+  let interCount = 0;
+  for (const x of aSet) if (bSet.has(x)) interCount++;
+  const union = aSet.size + bSet.size - interCount;
+  const score = union === 0 ? 0 : interCount / union;
+
+  return { baseSeverity, score };
+}
+
+/**
+ * computePretoolPairs — Task 6 (AC-G5).
+ *
+ * For each `(i<j)` memory pair, group their `trigger_pretool` entries by tool
+ * name (via `pretoolArgSets`) and, for each shared tool, intersect the
+ * arg-regex source sets. Severity policy (spec §Architecture):
+ *   - equal sets OR strict-subset (one fully contained in the other) → high
+ *   - non-empty intersection with disjoint extras on both sides     → medium
+ *   - empty intersection                                            → not reported
+ * Domain + `[[link]]` downgrades from Task 4 apply.
+ */
+function computePretoolPairs(memories, onlyInvolving) {
+  const pairs = [];
+  for (let i = 0; i < memories.length; i++) {
+    for (let j = i + 1; j < memories.length; j++) {
+      const a = memories[i];
+      const b = memories[j];
+      if (onlyInvolving && a.name !== onlyInvolving && b.name !== onlyInvolving) continue;
+
+      const aByTool = pretoolArgSets(a.triggerPretool || []);
+      const bByTool = pretoolArgSets(b.triggerPretool || []);
+
+      for (const tool of Object.keys(aByTool)) {
+        const bSet = bByTool[tool];
+        if (!bSet) continue;
+        const scored = scoreToolOverlap(aByTool[tool], bSet);
+        if (!scored) continue;
+        const downgraded = applyIntentionalDowngrades(a, b, scored.baseSeverity);
+        pairs.push({
+          rule: 'pretool-overlap',
+          a: a.name,
+          b: b.name,
+          tool,
+          severity: downgraded.severity,
+          score: scored.score,
+          intentional: downgraded.intentional,
+        });
+      }
+    }
+  }
+  return pairs;
+}
+
+/**
  * Programmatic entry point.
  *
  * @param {object} opts
@@ -340,7 +516,8 @@ function lintStore(opts) {
 
   const triggerPairs = computeTriggerPairs(memories, overlapThreshold, onlyInvolving);
   const bodyPairs = computeBodyPairs(memories, bodyDensityHigh, onlyInvolving);
-  const pairs = triggerPairs.concat(bodyPairs);
+  const pretoolPairs = computePretoolPairs(memories, onlyInvolving);
+  const pairs = triggerPairs.concat(bodyPairs).concat(pretoolPairs);
   const broadTriggers = []; // populated by Task 7
 
   const hasHigh = pairs.some((p) => p.severity === 'high');

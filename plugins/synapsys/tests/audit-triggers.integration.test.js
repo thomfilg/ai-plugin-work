@@ -183,6 +183,51 @@ test('Trigger×body match flags the slack/flake case study as high (AC-G1)', () 
   assert.equal(cliPair.severity, 'high', `CLI pair severity must be high, got ${cliPair.severity}`);
 });
 
+// ─── Task 6: pretool×pretool within-tool arg-set intersection (AC-G5) ───
+
+const PRETOOL_A_FIXTURE = path.join(FIXTURE_ROOT, 'pretool-a.md');
+const PRETOOL_B_FIXTURE = path.join(FIXTURE_ROOT, 'pretool-b.md');
+
+function buildPretoolOverlapStore() {
+  // Per-test isolated store so the existing `proj` fixtures (Task 3/4)
+  // do not pollute pair generation with unrelated overlaps.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-lint-task6-'));
+  const storeDir = path.join(root, '.claude', 'synapsys');
+  fs.mkdirSync(storeDir, { recursive: true });
+  fs.writeFileSync(path.join(storeDir, '.synapsys.json'), '{"version":1,"kind":"project"}\n');
+  fs.copyFileSync(PRETOOL_A_FIXTURE, path.join(storeDir, path.basename(PRETOOL_A_FIXTURE)));
+  fs.copyFileSync(PRETOOL_B_FIXTURE, path.join(storeDir, path.basename(PRETOOL_B_FIXTURE)));
+  const isolatedHome = path.join(root, 'home');
+  fs.mkdirSync(isolatedHome, { recursive: true });
+  return { cwd: root, home: isolatedHome };
+}
+
+test('Pretool×pretool intersection within a tool surfaces as a pair (AC-G5)', () => {
+  const { cwd } = buildPretoolOverlapStore();
+  const { lintStore } = require(CLI);
+  const result = lintStore({ cwd, scope: 'all' });
+  const pretoolPair = result.pairs.find(
+    (p) =>
+      p.rule === 'pretool-overlap' &&
+      [p.a, p.b].sort().join('|') === ['pretool-a', 'pretool-b'].join('|')
+  );
+  assert.ok(
+    pretoolPair,
+    `expected pretool-overlap pair for pretool-a/pretool-b, got pairs=${JSON.stringify(result.pairs)}`
+  );
+  assert.equal(pretoolPair.tool, 'Bash', `pair must carry tool field 'Bash', got ${pretoolPair.tool}`);
+  // A's arg-regex set is a strict subset of B's (A: {gh\s+pr\s+view},
+  // B: {gh\s+pr\s+(view|checkout)} — A ⊂ B) → severity must be `high`
+  // per spec §Architecture (equal/strict-subset → high). At minimum it
+  // must be medium (AC-G5: "severity ≥ medium").
+  assert.ok(
+    pretoolPair.severity === 'high' || pretoolPair.severity === 'medium',
+    `pretool-overlap severity must be at least medium, got ${pretoolPair.severity}`
+  );
+  assert.notEqual(pretoolPair.severity, 'low', 'pretool-overlap with strict-subset must not be low');
+  assert.ok(typeof pretoolPair.score === 'number', `pair.score must be a number, got ${typeof pretoolPair.score}`);
+});
+
 test('Exit code is non-zero only when at least one high-severity pair exists (AC-G7)', () => {
   // With --overlap-threshold=0.99, no pair should reach the `high` cutoff
   // → no high pairs → exit code 0, but pairs are still listed.
