@@ -395,6 +395,30 @@ function handleSnapshot(prNumber) {
             const hashKey = String(cm.id);
             if (seenHashes.has(hashKey)) continue;
             seenHashes.add(hashKey);
+
+            // R1 — Copilot stale-thread heuristic: for Copilot-authored
+            // threads with line:null + position_outdated semantics, only
+            // declare the thread resolved when the originally-commented
+            // hunk has actually changed since `created_at`. Non-Copilot
+            // threads fall through to the legacy unconditional 'resolved'.
+            const previousStatus = previousStatusMap.get(String(cm.id)) || null;
+            let defaultStatus = 'resolved';
+            let defaultResolution = 'Outdated (code changed since comment)';
+            const classification = classifyOutdatedCopilotThread(cm, {
+              previousStatus,
+            });
+            if (classification.applied) {
+              defaultStatus = classification.status;
+              defaultResolution = classification.resolution;
+            } else if (isCopilotAuthor(author) && !previousStatus) {
+              // Copilot author but helper said not-applied AND no prior
+              // status — that means the hunk did NOT change since
+              // created_at (AC5: no false positives). Keep the comment
+              // surfaced as unsolved instead of auto-resolving.
+              defaultStatus = classification.status; // 'unsolved'
+              defaultResolution = classification.resolution; // null
+            }
+
             comments.push({
               id: cm.id,
               hash: computeCommentHash(filePath, body),
@@ -404,17 +428,10 @@ function handleSnapshot(prNumber) {
               line: cm.line || cm.original_line || null,
               original_line: cm.original_line || null,
               priority: classifyCommentPriority(author, body),
-              status: previousStatusMap.get(String(cm.id))?.status
-                ? previousStatusMap.get(String(cm.id)).status
-                : 'resolved',
-              commitSha: previousStatusMap.get(String(cm.id))?.commitSha || null,
-              resolution:
-                previousStatusMap.get(String(cm.id))?.resolution ||
-                'Outdated (code changed since comment)',
-              threadId:
-                commentIdToThreadId.get(cm.id) ||
-                previousStatusMap.get(String(cm.id))?.threadId ||
-                null,
+              status: previousStatus ? previousStatus.status : defaultStatus,
+              commitSha: previousStatus?.commitSha || null,
+              resolution: previousStatus?.resolution || defaultResolution,
+              threadId: commentIdToThreadId.get(cm.id) || previousStatus?.threadId || null,
             });
             continue;
           }
@@ -775,4 +792,5 @@ module.exports = {
   skipLocally,
   classifyOutdatedCopilotThread,
   isCopilotAuthor,
+  handleSnapshot,
 };
