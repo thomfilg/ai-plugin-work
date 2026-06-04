@@ -628,6 +628,70 @@ function validateIntraTicketScope(tasks) {
 }
 
 /**
+ * Validate that no path is owned (via `### Files in scope`) by more than one
+ * peer task within a single ticket. Mirrors `validateIntraTicketScope` but
+ * compares in-scope vs in-scope across every ordered pair (Ti, Tj) with i < j
+ * so symmetric errors emit once per unordered pair.
+ *
+ * Detects three modalities via `fileMatchesScope` / `globToRegExp` (reused —
+ * no parallel regex logic):
+ *   - literal-vs-literal
+ *   - glob-vs-literal (Ti glob covers Tj literal)
+ *   - reverse glob-vs-literal (Tj glob covers Ti literal)
+ *
+ * Within a pair, deduplicates on `${i}|${j}|${path}` so each conflicting path
+ * produces exactly one error.
+ *
+ * @param {Array<object>} tasks
+ * @returns {string[]} validation errors
+ */
+function validateUniqueOwnership(tasks) {
+  if (!Array.isArray(tasks) || tasks.length < 2) return [];
+  const errors = [];
+  for (let i = 0; i < tasks.length; i++) {
+    const ti = tasks[i];
+    if (!ti || !Array.isArray(ti.filesInScope) || ti.filesInScope.length === 0) continue;
+    for (let j = i + 1; j < tasks.length; j++) {
+      const tj = tasks[j];
+      if (!tj || !Array.isArray(tj.filesInScope) || tj.filesInScope.length === 0) continue;
+      const seen = new Set();
+      const conflicts = [];
+      for (const a of ti.filesInScope) {
+        if (typeof a !== 'string' || !a) continue;
+        for (const b of tj.filesInScope) {
+          if (typeof b !== 'string' || !b) continue;
+          let conflictPath = null;
+          if (a === b) {
+            conflictPath = a;
+          } else if (fileMatchesScope(b, [a])) {
+            // Ti glob `a` covers Tj literal `b`
+            conflictPath = b;
+          } else if (fileMatchesScope(a, [b])) {
+            // Tj glob `b` covers Ti literal `a` (reverse direction)
+            conflictPath = a;
+          }
+          if (conflictPath === null) continue;
+          const key = `${ti.num ?? '?'}|${tj.num ?? '?'}|${conflictPath}`;
+          if (seen.has(key)) continue;
+          seen.add(key);
+          conflicts.push(conflictPath);
+        }
+      }
+      for (const p of conflicts) {
+        errors.push(
+          `Task ${ti.num ?? '?'} and Task ${tj.num ?? '?'} both list \`${p}\` under \`### Files in scope\`. ` +
+            'Each path must have exactly one owner per ticket — peer tasks coordinate via ' +
+            'disjoint scope sets, not shared ownership. ' +
+            `Remove \`${p}\` from one task or restructure ownership. ` +
+            'See skills/split-in-tasks/docs/scope-sections.md §Unique-ownership rule.'
+        );
+      }
+    }
+  }
+  return errors;
+}
+
+/**
  * Validate every task and return a flat error list.
  *
  * @param {Array<object>|null|undefined} tasks
@@ -645,6 +709,7 @@ function validateAll(tasks) {
   errors.push(...validateTddCycle(tasks));
   errors.push(...validateCrossTaskDepsOwnership(tasks));
   errors.push(...validateIntraTicketScope(tasks));
+  errors.push(...validateUniqueOwnership(tasks));
   return { valid: errors.length === 0, errors };
 }
 
@@ -763,6 +828,7 @@ module.exports = {
   validateTddCycle,
   validateCrossTaskDepsOwnership,
   validateIntraTicketScope,
+  validateUniqueOwnership,
   validateAll,
   unionFilesInScope,
   findTask,
