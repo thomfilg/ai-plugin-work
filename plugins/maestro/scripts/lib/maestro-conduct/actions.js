@@ -289,7 +289,15 @@ function killTicketTmux(ticket) {
   }
 }
 
-function emitSlotFreedAlert({ session, ticket, prNumber, sha, next, autoBootstrapped, instruction }) {
+function emitSlotFreedAlert({
+  session,
+  ticket,
+  prNumber,
+  sha,
+  next,
+  autoBootstrapped,
+  instruction,
+}) {
   alerts.log(
     `${session} SLOT-FREED at CI gate — PR #${prNumber} sha=${(sha || '').slice(0, 7)} awaiting operator merge; tmux -work + -listen killed${
       autoBootstrapped ? `; AUTO-BOOTSTRAPPED ${next.taskId}` : ''
@@ -324,7 +332,11 @@ function freeCIGateSlot({ session, ticket, prNumber, sha }) {
   // spam on every tick. The kill above still runs (defensive).
   if (marker.sha === sha || ciFreed.sha === sha) return false;
   state.write(session, 'slot-freed', { sha, prNumber, freedAt: state.now() });
-  manifest.updateTaskStatus(ticket, 'awaiting-merge', `PR #${prNumber} CLEAN/SUCCESS at sha=${(sha || '').slice(0, 7)}`);
+  manifest.updateTaskStatus(
+    ticket,
+    'awaiting-merge',
+    `PR #${prNumber} CLEAN/SUCCESS at sha=${(sha || '').slice(0, 7)}`
+  );
   const next = findNextEligibleTask();
   const autoBootstrapped = next && maybeAutoBootstrap(next.taskId);
   const prefix = `Slot freed for PR #${prNumber} (sha=${(sha || '').slice(0, 7)}). `;
@@ -383,6 +395,28 @@ function freeDeadEndSlot({ session, ticket, kind, repeatCount, sha }) {
   return true;
 }
 
+/**
+ * maybeFillPool — when the pool has free slots (active < sum-of-slots) and
+ * AUTO_BOOTSTRAP_NEXT=1, find the next eligible pending task and bootstrap.
+ * Idempotent per tick: one bootstrap per call. Caller invokes once per tick
+ * after syncManifest so reconciliation runs first.
+ */
+function maybeFillPool() {
+  if (process.env.AUTO_BOOTSTRAP_NEXT !== '1') return false;
+  let activeSessions = [];
+  try {
+    activeSessions = tmux.listSessions ? tmux.listSessions() : [];
+  } catch {}
+  if (manifest.poolFull(activeSessions)) return false;
+  const next = findNextEligibleTask();
+  if (!next) return false;
+  // Don't bootstrap a ticket whose tmux session already exists (e.g. -listen).
+  if (activeSessions.includes(`${next.taskId}-work`)) return false;
+  const ok = maybeAutoBootstrap(next.taskId);
+  if (ok) alerts.log(`POOL-FILL auto-bootstrapped ${next.taskId} from manifest "${next.topic}"`);
+  return ok;
+}
+
 module.exports = {
   soft,
   interrupt,
@@ -391,4 +425,5 @@ module.exports = {
   freeCIGateSlot,
   freeDeadEndSlot,
   syncManifest: manifest.syncFromTmux,
+  maybeFillPool,
 };

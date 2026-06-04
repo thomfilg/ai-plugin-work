@@ -59,7 +59,8 @@ let lastHeartbeatBody = '';
 const DEAD_END_REEMITS = parseInt(process.env.DEAD_END_REEMITS || '3', 10);
 
 function maybeEscalateToDeadEnd(ctx, kind, repeatCount, sha) {
-  if (repeatCount < DEAD_END_REEMITS || ['wait_merge', 'ci', 'complete'].includes(ctx.phase)) return;
+  if (repeatCount < DEAD_END_REEMITS || ['wait_merge', 'ci', 'complete'].includes(ctx.phase))
+    return;
   actions.freeDeadEndSlot({
     session: ctx.session,
     ticket: ctx.ticket,
@@ -298,7 +299,9 @@ function tickSession(session) {
   state.clear(ctx.session, 'question');
   // Reset persisted question-pending count so a later prompt in the same
   // phase doesn't inherit [REPEAT N] and fire freeDeadEndSlot prematurely.
-  alerts.resetCount(alerts.alertKey({ session: ctx.session, kind: 'question-pending', phase: ctx.phase }));
+  alerts.resetCount(
+    alerts.alertKey({ session: ctx.session, kind: 'question-pending', phase: ctx.phase })
+  );
 
   const detectorsToRun = phaseFor(ctx.phase).detectors.filter((k) => k !== 'question');
 
@@ -345,7 +348,18 @@ function tick() {
   // Reconcile manifest task statuses against live tmux at the top of each tick.
   // Cheap (≤ N file reads, only writes on drift) and gives the operator a live
   // view of pool occupancy without polling tmux.
-  try { actions.syncManifest(sessions); } catch (e) { alerts.log(`syncManifest failed: ${e.message}`); }
+  try {
+    actions.syncManifest(sessions);
+  } catch (e) {
+    alerts.log(`syncManifest failed: ${e.message}`);
+  }
+  // Top-up the pool when sessions exit outside the slot-freed path (operator
+  // kill, agent crash, manifest re-added). Gated by AUTO_BOOTSTRAP_NEXT=1.
+  try {
+    actions.maybeFillPool();
+  } catch (e) {
+    alerts.log(`maybeFillPool failed: ${e.message}`);
+  }
   if (!sessions.length) {
     alerts.log('no GH-*-work sessions');
     return;
