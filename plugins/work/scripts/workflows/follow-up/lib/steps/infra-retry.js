@@ -235,6 +235,22 @@ function runInfraRetryStep(state, ctx) {
     return null;
   }
 
+  // Bug 542-14: if a prior cycle exhausted infra retries, the spec forbids
+  // dispatching fix-ci even if a later classification would otherwise return
+  // `code-failure`. Stay in the infra-stuck surface so the human handler
+  // resolves it explicitly.
+  if (state.infraRetry && state.infraRetry.exhausted) {
+    state.failureCategory = 'infra-stuck';
+    return {
+      action: 'surface',
+      payload: {
+        reason: 'infra-stuck',
+        attempts: state.infraRetry.attempts,
+        signals: [],
+      },
+    };
+  }
+
   // R1e / R7: consult the classifier.
   const safeState = state || {};
   const safeCtx = ctx || {};
