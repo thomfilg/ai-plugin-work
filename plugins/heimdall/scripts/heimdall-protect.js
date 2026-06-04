@@ -20,7 +20,7 @@
 const path = require('node:path');
 const os = require('node:os');
 const { splitList, editContext } = require(path.join(__dirname, '..', 'lib', 'cli'));
-const { readConfig, writeConfig, upsertLock, SCHEMA_VERSION } = require(
+const { readConfig, writeConfig, upsertLock, SCHEMA_VERSION, SHARED_FOLDER } = require(
   path.join(__dirname, '..', 'lib', 'lock-store')
 );
 
@@ -51,7 +51,17 @@ function isHomeAnchored(p) {
   return false;
 }
 
-if (args.kind === 'shared') {
+const storeDir = dirs[0];
+
+// Shared stores are home-anchored regardless of whether --kind=shared was
+// passed explicitly: when the resolved store dir happens to be the shared
+// store (e.g. it's the only active store, or precedence selects it via
+// `discoverStores`), repo-relative paths like `package.json` still have no
+// meaning in a HOME-wide store. Guard on the resolved store path, not just
+// the --kind flag (Cursor bot PR #545, comment 3354852147).
+const sharedStoreDir = path.join(os.homedir(), '.claude', SHARED_FOLDER);
+const targetsShared = path.resolve(storeDir) === path.resolve(sharedStoreDir);
+if (targetsShared) {
   const nonHome = paths.filter((p) => !isHomeAnchored(p));
   if (nonHome.length > 0) {
     console.error(
@@ -62,8 +72,6 @@ if (args.kind === 'shared') {
     process.exit(1);
   }
 }
-
-const storeDir = dirs[0];
 
 const cfg = readConfig(storeDir);
 if (!cfg) {

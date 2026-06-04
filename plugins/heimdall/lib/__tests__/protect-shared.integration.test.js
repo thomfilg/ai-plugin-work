@@ -152,3 +152,38 @@ describe('heimdall-protect.js --kind=shared accepts home-anchored paths', () => 
     );
   });
 });
+
+// Cursor bot PR #545 (comment 3354852147): the home-anchored guard must also
+// fire when --kind is OMITTED and the resolved store happens to be shared
+// (e.g. shared is the only active store). Without the fix, `dirs[0]` returns
+// the shared store via precedence/discovery and repo-relative paths like
+// `package.json` would be written into the cross-project marker.
+describe('heimdall-protect.js without --kind rejects repo-relative when resolved store is shared', () => {
+  it('rejects --paths=package.json when only shared store is active', () => {
+    const cwd = fs.mkdtempSync(path.join(base, 'proj-implicit-shared-'));
+    // Initialize ONLY the shared store — no local/worktree/global markers.
+    const init = run(initScript, ['--kind=shared', `--cwd=${cwd}`], cwd);
+    assert.equal(init.status, 0, `init failed: ${init.stderr}`);
+
+    // Invoke protect WITHOUT --kind=shared; discoverStores will return the
+    // shared store as the only active one, so dirs[0] is the shared dir.
+    const res = run(
+      protectScript,
+      ['--phrase=edit pkg implicit', '--paths=package.json', `--cwd=${cwd}`],
+      cwd
+    );
+    assert.notEqual(
+      res.status,
+      0,
+      `expected non-zero exit (resolved store is shared), got ${res.status}; stderr: ${res.stderr}; stdout: ${res.stdout}`
+    );
+    assert.match(
+      res.stderr,
+      /home-anchored/,
+      `stderr should mention "home-anchored": ${res.stderr}`
+    );
+    assert.match(res.stderr, /local/, `stderr should mention "local": ${res.stderr}`);
+    assert.match(res.stderr, /worktree/, `stderr should mention "worktree": ${res.stderr}`);
+    assert.match(res.stderr, /global/, `stderr should mention "global": ${res.stderr}`);
+  });
+});
