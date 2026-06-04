@@ -111,6 +111,7 @@ function initState(ticketId, prNumber) {
     attempt: 0,
     maxAttempts: 40,
     lastMonitorResult: null,
+    lastMonitorAt: null,
     failureCategory: null,
     startTime: new Date().toISOString(),
   };
@@ -297,4 +298,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { getNextInstruction };
+module.exports = { getNextInstruction, __test__: { initState } };
