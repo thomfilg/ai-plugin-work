@@ -23,6 +23,7 @@ const { execSync } = require('node:child_process');
 
 const MARKER = '.heimdall.json';
 const FOLDER = 'heimdall';
+const SHARED_FOLDER = `${FOLDER}-shared`;
 const SCHEMA_VERSION = 1;
 
 // jscpd:ignore-start
@@ -59,6 +60,7 @@ function candidateStores(cwd, projectName) {
     { kind: 'local', dir: path.join(cwd, '.claude', FOLDER) },
     { kind: 'worktree', dir: path.resolve(cwd, '..', '.claude', FOLDER) },
     { kind: 'global', dir: path.join(os.homedir(), '.claude', FOLDER, projectName) },
+    { kind: 'shared', dir: path.join(os.homedir(), '.claude', SHARED_FOLDER) },
   ];
 }
 
@@ -92,7 +94,9 @@ function discoverStores(cwd) {
     if (seen.has(key)) return;
     if (!fs.existsSync(path.join(dir, MARKER))) return;
     seen.add(key);
-    out.push({ kind, dir, projectName });
+    // The shared store is cross-project, so it must not be stamped with the
+    // caller's projectName (mirrors the marker written by heimdall-init.js).
+    out.push({ kind, dir, projectName: kind === 'shared' ? null : projectName });
   };
 
   push('local', path.join(resolved, '.claude', FOLDER));
@@ -101,6 +105,11 @@ function discoverStores(cwd) {
   if (wt) push('worktree', wt);
 
   push('global', path.join(os.homedir(), '.claude', FOLDER, projectName));
+
+  // shared: cross-project store under home — discovered for every project,
+  // regardless of cwd or project name. Lives outside the per-project
+  // namespace so it can never collide with a same-named project's global store.
+  push('shared', path.join(os.homedir(), '.claude', SHARED_FOLDER));
 
   return out;
 }
@@ -160,6 +169,7 @@ function removeLock(cfg, phrase, paths = []) {
 module.exports = {
   MARKER,
   FOLDER,
+  SHARED_FOLDER,
   SCHEMA_VERSION,
   safeExec,
   getRepoRoot,

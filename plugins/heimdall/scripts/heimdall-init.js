@@ -4,7 +4,7 @@
 /**
  * Initialize a Heimdall lock store.
  *
- *   node heimdall-init.js --kind=<local|worktree|global> [--cwd=<path>]
+ *   node heimdall-init.js --kind=<local|worktree|global|shared> [--cwd=<path>]
  *
  * Creates the store directory and writes a `.heimdall.json` marker holding an
  * (initially empty) `locks` array. The marker is what makes the store
@@ -31,7 +31,7 @@ const projectName = getProjectName(args.cwd);
 const target = candidateStores(args.cwd, projectName).find((c) => c.kind === kind);
 
 if (!target) {
-  console.error(`unknown kind: ${kind} (use local|worktree|global)`);
+  console.error(`unknown kind: ${kind} (use local|worktree|global|shared)`);
   process.exit(1);
 }
 
