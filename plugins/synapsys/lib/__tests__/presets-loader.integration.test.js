@@ -39,9 +39,8 @@ function withPresetsFile(replacement, fn) {
     return fn(fresh);
   } finally {
     if (original === null) {
-      try {
-        fs.unlinkSync(PRESETS_PATH);
-      } catch (_) {}
+      // rmSync with force:true is idempotent: no check-then-act, no throw on ENOENT.
+      fs.rmSync(PRESETS_PATH, { force: true });
     } else {
       fs.writeFileSync(PRESETS_PATH, original);
     }
