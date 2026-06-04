@@ -471,3 +471,74 @@ test('Task 8 (c) — formatHuman renders header → cause → suggestion → ove
     `severity-tag line must include the overlap rate, got line="${severityLine}"`
   );
 });
+
+// ─── Task 9: synapsys memorize post-write lint hook (AC-G6) ───
+
+const MEMORIZE_CLI = path.join(__dirname, '..', 'scripts', 'synapsys-memorize.js');
+
+test('synapsys memorize warns on a new high-severity pair before commit (AC-G6)', () => {
+  // Build an isolated store seeded with the `flaky-test-fix-protocol` memory.
+  // The new memorize call writes the colliding `slack-handoff-ask-before-clipboard`
+  // memory whose trigger tokens match ≥4 tokens of the flake body, triggering
+  // a `trigger-body-overlap` high-severity pair (mirrors AC-G1 collision).
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-lint-task9-'));
+  const storeDir = path.join(root, '.claude', 'synapsys');
+  fs.mkdirSync(storeDir, { recursive: true });
+  fs.writeFileSync(path.join(storeDir, '.synapsys.json'), '{"version":1,"kind":"project"}\n');
+  fs.copyFileSync(FLAKE_FIXTURE, path.join(storeDir, 'flaky-test-fix-protocol.md'));
+  const isolatedHome = path.join(root, 'home');
+  fs.mkdirSync(isolatedHome, { recursive: true });
+
+  // Body for the new memory — re-use the slack fixture body so the
+  // trigger-body-overlap collision is identical to AC-G1.
+  const slackBody = [
+    'When the user requests a handoff, do not push the handoff body to slack or the',
+    'clipboard until you have explicitly confirmed the recipient channel. The slack',
+    'target frequently changes mid-conversation; assuming the previous slack',
+    'channel is still correct will leak context.',
+  ].join('\n');
+
+  const r = spawnSync(
+    process.execPath,
+    [
+      MEMORIZE_CLI,
+      '--name=slack-handoff-ask-before-clipboard',
+      '--desc=Before pasting handoff content to slack, always confirm with the user.',
+      '--events=UserPromptSubmit',
+      '--prompt=\\b(slack|clipboard|handoff)\\b',
+      '--store=local',
+      `--cwd=${root}`,
+    ],
+    {
+      encoding: 'utf8',
+      input: slackBody,
+      env: Object.assign({}, process.env, { HOME: isolatedHome, NO_COLOR: '1' }),
+    }
+  );
+
+  // AC-G6: memorize exit code remains 0 (warn, not block).
+  assert.equal(
+    r.status,
+    0,
+    `expected memorize exit 0 (warn-not-block), got ${r.status}. stderr=${r.stderr}\nstdout=${r.stdout}`
+  );
+
+  // The written file must exist.
+  const writtenPath = path.join(storeDir, 'slack-handoff-ask-before-clipboard.md');
+  assert.ok(
+    fs.existsSync(writtenPath),
+    `expected memorize to write ${writtenPath}, file missing. stderr=${r.stderr}`
+  );
+
+  // AC-G6: stderr warns with the substring "high severity".
+  assert.ok(
+    r.stderr.includes('high severity'),
+    `expected stderr to contain "high severity", got stderr=${JSON.stringify(r.stderr)}`
+  );
+
+  // AC-G6: stderr names the colliding memory.
+  assert.ok(
+    r.stderr.includes('flaky-test-fix-protocol'),
+    `expected stderr to name colliding memory 'flaky-test-fix-protocol', got stderr=${JSON.stringify(r.stderr)}`
+  );
+});
