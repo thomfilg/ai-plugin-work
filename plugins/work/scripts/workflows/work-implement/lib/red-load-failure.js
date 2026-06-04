@@ -76,39 +76,42 @@ function matchLoadFailureSignature(line) {
  * @param {string} output combined stdout + '\n' + stderr
  * @returns {{ matched: boolean, signature: string|null }}
  */
+function shouldSkipLine(line, state) {
+  if (/^\s+at\s/.test(line)) return true;
+  const trimmed = line.trim();
+  if (state.inYamlBlock) {
+    if (trimmed === '...') state.inYamlBlock = false;
+    return true;
+  }
+  if (trimmed === '---') {
+    state.inYamlBlock = true;
+    return true;
+  }
+  if (state.inDetailsBlock) {
+    if (closesDetailsBlock(line, state.detailsBaseIndent)) {
+      state.inDetailsBlock = false;
+      state.detailsBaseIndent = -1;
+      // fall through — current line is past the block
+    } else {
+      return true;
+    }
+  }
+  if (/^\s*details:\s*$/.test(line)) {
+    state.inDetailsBlock = true;
+    state.detailsBaseIndent = line.match(/^(\s*)/)[1].length;
+    return true;
+  }
+  return false;
+}
+
 function detectRedLoadFailure(output) {
   try {
     if (typeof output !== 'string' || output.length === 0) {
       return { matched: false, signature: null };
     }
-    const lines = output.split(/\r?\n/);
-    let inYamlBlock = false;
-    let inDetailsBlock = false;
-    let detailsBaseIndent = -1;
-    for (const line of lines) {
-      if (/^\s+at\s/.test(line)) continue;
-      const trimmed = line.trim();
-      if (inYamlBlock) {
-        if (trimmed === '...') inYamlBlock = false;
-        continue;
-      }
-      if (trimmed === '---') {
-        inYamlBlock = true;
-        continue;
-      }
-      if (inDetailsBlock) {
-        if (closesDetailsBlock(line, detailsBaseIndent)) {
-          inDetailsBlock = false;
-          detailsBaseIndent = -1;
-        } else {
-          continue;
-        }
-      }
-      if (/^\s*details:\s*$/.test(line)) {
-        inDetailsBlock = true;
-        detailsBaseIndent = line.match(/^(\s*)/)[1].length;
-        continue;
-      }
+    const state = { inYamlBlock: false, inDetailsBlock: false, detailsBaseIndent: -1 };
+    for (const line of output.split(/\r?\n/)) {
+      if (shouldSkipLine(line, state)) continue;
       const hit = matchLoadFailureSignature(line);
       if (hit.matched) return hit;
     }
