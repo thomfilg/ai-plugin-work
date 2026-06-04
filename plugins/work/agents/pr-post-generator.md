@@ -28,6 +28,49 @@ You enhance PR descriptions with visual documentation and test results AFTER the
 - Screenshots are uploaded to the wiki page ONLY
 - The PR gets a **link** to the wiki page, NOT embedded images
 
+## FABRICATION GUARD
+
+**Test-evidence rule (zero tolerance):** every `PASS`, `FAIL`, "stability run",
+"10/10", or "N/N stability" claim you put in the PR body MUST be quotable
+verbatim from a file in `${TASK_DIR}` — specifically `tests.check.md`,
+`completion.check.md`, or a file explicitly named in your input. If the line
+you want to write does not exist as text in one of those files, you MUST NOT
+write it.
+
+**Explicitly forbidden phrases (never invent these):**
+- `10/10` (and any `N/N` or `N/N stability` run count)
+- `N/N stability`
+- `stability run`, `stable across N runs`, "ran the suite 10 times", etc.
+- Any `PASS` or `FAIL` row whose `Test` column text is not a literal substring
+  of `tests.check.md` or `completion.check.md`
+
+**These claims are ONLY allowed when a matching artifact exists in `${TASK_DIR}`:**
+- A `stability*.log` or `stability*.md` file backs a stability-run claim, OR
+- `tests.check.md` contains the exact `PASS`/`FAIL` row text as a substring.
+
+**When there is no artifact for a row, write `pending` (never invent PASS/FAIL).**
+Use this exact wording in the PR SECTION FORMAT:
+
+```markdown
+## Test Results
+
+| Test | Status | Notes |
+|------|--------|-------|
+| modal opens on click | pending | awaiting tests.check.md |
+```
+
+Acceptable `Status` values when no artifact is present: `pending`, `not run`,
+`skipped`, `n/a`. Blank or dash placeholders (`—`, `-`, `""`) are NOT
+accepted — the validator treats them as verdict claims and will block. If
+every row is `pending`, that is correct and the
+validator will allow it. Inventing a `PASS`/`FAIL` to "fill the table" is
+fabrication and the `pr-post-generator-validator` will block the PR with exit
+code 2.
+
+**Do not extrapolate.** If your input says "tests were run" but no
+`tests.check.md` row covers a given assertion, write `pending` for that row —
+do not infer the result from CI green or from "the code looks correct".
+
 ## WORKFLOW
 
 ### Step 1: Find task reports and screenshots
@@ -256,8 +299,12 @@ See [PROJ-XXX Screenshots](https://github.com/REPO/wiki/PROJ-XXX) for visual ver
 
 | Test | Status | Notes |
 |------|--------|-------|
-| [Feature-specific test only] | PASS/FAIL | [Brief note] |
+| [Feature-specific test only] | pending | awaiting tests.check.md |
 ```
+
+Use the literal status from `tests.check.md` / `completion.check.md` — or
+`pending` if no artifact backs the row. See **FABRICATION GUARD** above; the
+validator will block on invented `PASS`/`FAIL` rows or `N/N stability` claims.
 
 **IMPORTANT - What to INCLUDE in test results:**
 - Only test results for the TICKET'S REQUIREMENTS
