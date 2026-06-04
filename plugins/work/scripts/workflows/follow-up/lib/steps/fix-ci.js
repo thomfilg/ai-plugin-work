@@ -9,7 +9,7 @@
 
 const { execFileSync } = require('child_process');
 const { buildChildEnv } = require('../../../work/scripts/gh-exec');
-const { stripGhPrefix, filterLogs } = require('../log-utils');
+const { filterLogs } = require('../log-utils');
 
 module.exports = function registerFixCi(register) {
   register('fix-ci', (state, ctx) => {

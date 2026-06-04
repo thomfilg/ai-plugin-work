@@ -14,6 +14,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const cp = require('child_process');
 
 if (require.main === module) {
   process.on('uncaughtException', (err) => {
@@ -120,6 +121,59 @@ function initState(ticketId, prNumber) {
   };
 }
 
+// Compute the PR diff file list (origin/main...HEAD). Fails open with [].
+function loadPrDiffFiles(worktreeDir) {
+  try {
+    const out = cp.execSync('git diff --name-only origin/main...HEAD', {
+      cwd: worktreeDir,
+      encoding: 'utf8',
+      timeout: 10000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    return out.split('\n').filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+// Build a bound exec function matching the shape signal2 / classifier expect:
+//   exec(cmd) -> { stdout, stderr, status }
+function buildExecForCtx(worktreeDir) {
+  return (cmd) => {
+    try {
+      const stdout = cp.execSync(cmd, {
+        cwd: worktreeDir,
+        encoding: 'utf8',
+        timeout: 30000,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      return { stdout, stderr: '', status: 0 };
+    } catch (err) {
+      return {
+        stdout: (err && err.stdout) || '',
+        stderr: (err && err.stderr) || String((err && err.message) || ''),
+        status: err && typeof err.status === 'number' ? err.status : 1,
+      };
+    }
+  };
+}
+
+// Surface the ctx fields the infra-classifier and infra-retry step depend on.
+// monitor.js populates state._ciFailedJobs / _ciAllJobs / _ciFailedLogs /
+// _ciStatus during its poll; we surface those plus a bound exec and a cached
+// PR diff list so the classifier can run pure (no shell-outs).
+function buildClassifierCtx(state, worktreeDir) {
+  const failedJobs = Array.isArray(state._ciFailedJobs) ? state._ciFailedJobs : [];
+  return {
+    allJobs: Array.isArray(state._ciAllJobs) ? state._ciAllJobs : [],
+    prDiffFiles: loadPrDiffFiles(worktreeDir),
+    rawLogs: typeof state._ciFailedLogs === 'string' ? state._ciFailedLogs : '',
+    exec: buildExecForCtx(worktreeDir),
+    jobId: (failedJobs[0] && failedJobs[0].id) || null,
+    ciStatus: state._ciStatus || null,
+  };
+}
+
 // Dispatch a step result and decide whether the orchestrator loop terminates.
 // Exported for testability (Task 4: action:'surface' is a terminal instruction
 // that stops the loop without marking state.status='complete' — see spec's
@@ -143,11 +197,13 @@ function getNextInstruction(ticketId, prNumber) {
   const tasksDir = path.join(TASKS_BASE, ticketId);
   const candidateWorktree = path.join(WORKTREES_BASE, `${MAIN_WORKTREE_FOLDER}-${ticketId}`);
   const worktreeDir = fs.existsSync(candidateWorktree) ? candidateWorktree : process.cwd();
+
   const ctx = {
     tasksDir,
     worktreeDir,
     TASKS_BASE,
     workScriptsDir: path.join(__dirname, '..', 'work', 'scripts'),
+    ...buildClassifierCtx(state, worktreeDir),
   };
 
   // eslint-disable-next-line no-constant-condition
@@ -212,6 +268,15 @@ function getNextInstruction(ticketId, prNumber) {
       // invocation can resume from a live re-evaluation rather than the cache.
       if (result.action === 'surface') {
         state.currentStep = 'report';
+        // Persist the surface reason as a failureCategory so the next
+        // /follow-up cycle's report step recognises the workflow is still
+        // stuck and does NOT mark status=complete. The reason may live on
+        // the top-level result (legacy shape) or under result.payload.reason
+        // (newer shape, mirrors auto-advance hook).
+        const surfaceReason = (result.payload && result.payload.reason) || result.reason || null;
+        if (surfaceReason) {
+          state.failureCategory = surfaceReason;
+        }
         saveState(ticketId, state);
         return result;
       }

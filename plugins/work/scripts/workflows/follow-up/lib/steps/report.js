@@ -26,13 +26,59 @@ function formatAttemptLine(attempt, repoUrl) {
   ].join(' ');
 }
 
+// Categories whose failureCategory has dedicated handling elsewhere in the
+// workflow (or is being routed to another step); not surfaced from `report`.
+const KNOWN_RESOLVABLE_CATEGORIES = new Set([
+  'infra-stuck',
+  'conflict',
+  'ci_failure',
+  'review_failure',
+]);
+
+/**
+ * Surface a generic failureCategory (e.g. 'github-actions-outage') so report
+ * does not silently mark complete. Bug 3 (GH-508).
+ */
+function buildGenericSurface(state) {
+  return {
+    type: 'follow_up_instruction',
+    action: 'surface',
+    payload: { reason: state.failureCategory },
+    state: {
+      ticket: state.ticketId,
+      currentStep: 'report',
+      attempt: state.attempt,
+    },
+    summary: `Follow-up surfaced for ${state.ticketId}: ${state.failureCategory}. Manual intervention required.`,
+  };
+}
+
+/** R11: infra-stuck diagnostic bundle. */
+function buildInfraStuckSurface(state) {
+  const attempts = (state.infraRetry && state.infraRetry.attempts) || [];
+  const owner = state.repoOwner || 'OWNER';
+  const repo = state.repoName || 'REPO';
+  const repoUrl = `https://github.com/${owner}/${repo}`;
+  const header = `## Infra-stuck after ${attempts.length} retries`;
+  const lines = attempts.map((a) => formatAttemptLine(a, repoUrl));
+  const body = [header, ...lines].join('\n');
+  return {
+    type: 'follow_up_instruction',
+    action: 'surface',
+    payload: { reason: 'infra-stuck', attempts, repoUrl },
+    state: {
+      ticket: state.ticketId,
+      currentStep: 'report',
+      attempt: state.attempt,
+    },
+    summary: body,
+  };
+}
+
 module.exports = function registerReport(register) {
   register('report', (state, ctx) => {
     // Final safety net: never mark complete while the latest monitor cycle
-    // still shows merge conflicts. Catches the case where an earlier step
-    // (triage/fix-ci) routed past a conflict without resolving it — e.g.
-    // fix-ci falling through when there were no failing CI jobs to dispatch
-    // a fix for. Send the workflow back to fix-ci instead.
+    // still shows merge conflicts.
     const lastOutput = (state.lastMonitorResult && state.lastMonitorResult.output) || '';
     if (state._isConflicting || /merge conflict|cannot be merged/i.test(lastOutput)) {
       state.failureCategory = 'conflict';
@@ -40,32 +86,13 @@ module.exports = function registerReport(register) {
       return null;
     }
 
-    // R11: infra-stuck branch — surface the diagnostic bundle (run IDs as
-    // GitHub Actions URLs, signal IDs, attempt timestamps) and require
-    // manual intervention. Mirrors auto-advance's 'surface' terminal action.
+    // Bug 3 (GH-508): unresolved surface categories must NOT mark complete.
+    if (state.failureCategory && !KNOWN_RESOLVABLE_CATEGORIES.has(state.failureCategory)) {
+      return buildGenericSurface(state);
+    }
+
     if (state.failureCategory === 'infra-stuck') {
-      const attempts = (state.infraRetry && state.infraRetry.attempts) || [];
-      const owner = state.repoOwner || 'OWNER';
-      const repo = state.repoName || 'REPO';
-      const repoUrl = `https://github.com/${owner}/${repo}`;
-      const header = `## Infra-stuck after ${attempts.length} retries`;
-      const lines = attempts.map((a) => formatAttemptLine(a, repoUrl));
-      const body = [header, ...lines].join('\n');
-      return {
-        type: 'follow_up_instruction',
-        action: 'surface',
-        payload: {
-          reason: 'infra-stuck',
-          attempts,
-          repoUrl,
-        },
-        state: {
-          ticket: state.ticketId,
-          currentStep: 'report',
-          attempt: state.attempt,
-        },
-        summary: body,
-      };
+      return buildInfraStuckSurface(state);
     }
 
     // Write accountability report if it doesn't exist

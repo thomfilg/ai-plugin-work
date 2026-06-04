@@ -93,6 +93,18 @@ function shouldCheckGhActions(result) {
  * an empty-commit push instead — for environments where `--failed` is
  * unsupported (older gh, forks without write access to the run).
  */
+/**
+ * Resolve the GitHub Actions run ID to retry. monitor.js stores per-job runIds
+ * on state._ciFailedJobs[i].runId — it does NOT populate state.runId. Prefer
+ * the failed-job runId; fall back to state.runId for tests/callers that still
+ * set it explicitly.
+ */
+function resolveRunId(state) {
+  const failedJobs = Array.isArray(state && state._ciFailedJobs) ? state._ciFailedJobs : [];
+  const firstFailedRunId = failedJobs.length > 0 ? failedJobs[0].runId : null;
+  return firstFailedRunId || (state && state.runId) || null;
+}
+
 function buildRetryDelegate(state, runId, attemptNumber) {
   if (!NUMERIC_RUN_ID.test(String(runId || ''))) {
     throw new TypeError(
@@ -182,7 +194,7 @@ module.exports = function registerInfraRetry(register) {
     }
 
     const attemptNumber = retry.count + 1;
-    const runId = state.runId;
+    const runId = resolveRunId(state);
     // Validate before mutating state so a bad runId doesn't consume a retry.
     const delegate = buildRetryDelegate(state, runId, attemptNumber);
     retry.count = attemptNumber;
@@ -191,9 +203,8 @@ module.exports = function registerInfraRetry(register) {
       timestamp: new Date().toISOString(),
       runId: String(runId),
       signals: Array.isArray(result.signals) ? result.signals.slice() : [],
-      retryMethod: getConfig('WORK_INFRA_RETRY_FALLBACK') === 'empty-commit'
-        ? 'empty-commit'
-        : 'rerun-failed',
+      retryMethod:
+        getConfig('WORK_INFRA_RETRY_FALLBACK') === 'empty-commit' ? 'empty-commit' : 'rerun-failed',
       outcome: 'pending',
     });
     state.currentStep = 'monitor';

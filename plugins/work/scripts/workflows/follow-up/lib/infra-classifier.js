@@ -69,11 +69,7 @@ function jobRuntimeMs(job) {
  * @param {Array<object>} allJobs - All jobs from the run.
  * @returns {{ fired: boolean, evidence: object }}
  */
-function signal1_shardAsymmetry(failedJobs, allJobs) {
-  const safeFailed = Array.isArray(failedJobs) ? failedJobs : [];
-  const safeAll = Array.isArray(allJobs) ? allJobs : [];
-
-  // Group all jobs by their matrix-family stem.
+function groupJobsByFamily(safeAll) {
   const families = new Map();
   for (const job of safeAll) {
     const stem = stripShardSuffix(job?.name || '');
@@ -81,46 +77,71 @@ function signal1_shardAsymmetry(failedJobs, allJobs) {
     if (!families.has(stem)) families.set(stem, []);
     families.get(stem).push(job);
   }
+  return families;
+}
 
-  for (const failed of safeFailed) {
-    const stem = stripShardSuffix(failed?.name || '');
-    if (!stem) continue;
-    const family = families.get(stem) || [];
-    if (family.length < 3) {
-      return {
-        fired: false,
-        evidence: {
-          reason: 'matrix family size <3 — N<3 shards cannot establish asymmetry',
-          family: stem,
-          shardCount: family.length,
-        },
-      };
-    }
-    const siblings = family.filter((j) => j !== failed);
-    const siblingRuntimes = siblings
-      .map(jobRuntimeMs)
-      .filter((ms) => ms > 0)
-      .sort((a, b) => a - b);
-    if (siblingRuntimes.length === 0) continue;
-    const mid = Math.floor(siblingRuntimes.length / 2);
-    const medianMs =
-      siblingRuntimes.length % 2 === 0
-        ? (siblingRuntimes[mid - 1] + siblingRuntimes[mid]) / 2
-        : siblingRuntimes[mid];
-    const failedMs = jobRuntimeMs(failed);
-    if (medianMs > 0 && failedMs >= medianMs * 3) {
-      return {
-        fired: true,
-        evidence: {
-          family: stem,
-          failedJob: failed.name,
-          failedRuntimeMs: failedMs,
-          siblingMedianMs: medianMs,
-          ratio: failedMs / medianMs,
-        },
-      };
-    }
+function siblingMedianRuntime(family, failed) {
+  const siblings = family.filter((j) => j !== failed);
+  const siblingRuntimes = siblings
+    .map(jobRuntimeMs)
+    .filter((ms) => ms > 0)
+    .sort((a, b) => a - b);
+  if (siblingRuntimes.length === 0) return 0;
+  const mid = Math.floor(siblingRuntimes.length / 2);
+  return siblingRuntimes.length % 2 === 0
+    ? (siblingRuntimes[mid - 1] + siblingRuntimes[mid]) / 2
+    : siblingRuntimes[mid];
+}
+
+/**
+ * Evaluate one failed job against its family. Returns:
+ *  - { fire: true, evidence } when asymmetry detected
+ *  - { skipReason } when family is too small to evaluate
+ *  - {} otherwise (keep iterating)
+ */
+function evaluateFamilyAsymmetry(failed, families) {
+  const stem = stripShardSuffix(failed?.name || '');
+  if (!stem) return {};
+  const family = families.get(stem) || [];
+  if (family.length < 3) {
+    return {
+      skipReason: {
+        reason: 'matrix family size <3 — N<3 shards cannot establish asymmetry',
+        family: stem,
+        shardCount: family.length,
+      },
+    };
   }
+  const medianMs = siblingMedianRuntime(family, failed);
+  if (medianMs <= 0) return {};
+  const failedMs = jobRuntimeMs(failed);
+  if (failedMs >= medianMs * 3) {
+    return {
+      fire: true,
+      evidence: {
+        family: stem,
+        failedJob: failed.name,
+        failedRuntimeMs: failedMs,
+        siblingMedianMs: medianMs,
+        ratio: failedMs / medianMs,
+      },
+    };
+  }
+  return {};
+}
+
+function signal1_shardAsymmetry(failedJobs, allJobs) {
+  const safeFailed = Array.isArray(failedJobs) ? failedJobs : [];
+  const safeAll = Array.isArray(allJobs) ? allJobs : [];
+  const families = groupJobsByFamily(safeAll);
+
+  let lastSkipReason = null;
+  for (const failed of safeFailed) {
+    const r = evaluateFamilyAsymmetry(failed, families);
+    if (r.fire) return { fired: true, evidence: r.evidence };
+    if (r.skipReason) lastSkipReason = r.skipReason;
+  }
+  if (lastSkipReason) return { fired: false, evidence: lastSkipReason };
   return { fired: false, evidence: { reason: 'no shard with >=3x median runtime' } };
 }
 
@@ -239,8 +260,7 @@ function signal4_setupArtifacts(rawLogs) {
 
   // Require ≥2 hits OR the canonical pair (cache-miss + fallback-install-failed)
   // to avoid firing on isolated transient mentions.
-  const hasCanonicalPair =
-    hits.includes('cache-miss') && hits.includes('fallback-install-failed');
+  const hasCanonicalPair = hits.includes('cache-miss') && hits.includes('fallback-install-failed');
   if (hasCanonicalPair || hits.length >= 2) {
     return { fired: true, evidence: { patterns: hits } };
   }

@@ -10,17 +10,14 @@
  *  4. classify() returns 'code-failure' → return null.
  */
 
-const { describe, it, beforeEach, afterEach } = require('node:test');
+const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
-const Module = require('node:module');
 const path = require('node:path');
 
 // Resolve target modules so we can patch them via the require cache.
 const STEP_PATH = require.resolve('../lib/steps/infra-retry');
 const CLASSIFIER_PATH = require.resolve('../lib/infra-classifier');
-const GET_CONFIG_PATH = require.resolve(
-  path.resolve(__dirname, '..', '..', 'lib', 'get-config')
-);
+const GET_CONFIG_PATH = require.resolve(path.resolve(__dirname, '..', '..', 'lib', 'get-config'));
 
 function loadStep({ envFlag, classifyImpl }) {
   // Clear caches so each test gets a fresh module wired to fresh mocks.
@@ -96,7 +93,11 @@ describe('infra-retry step — short-circuits and bypasses (RED 3.1.1)', () => {
       envFlag: 'true',
       classifyImpl: () => ({ classification: 'code-failure', signals: [], evidence: {} }),
     });
-    const state = { failureCategory: 'ci_failure', runId: '12345', infraRetry: { count: 0, attempts: [] } };
+    const state = {
+      failureCategory: 'ci_failure',
+      runId: '12345',
+      infraRetry: { count: 0, attempts: [] },
+    };
     const result = handler(state, {});
     assert.equal(result, null);
     assert.equal(classifyCalls.length, 1, 'classifier must be consulted exactly once');
@@ -173,8 +174,22 @@ describe('infra-retry step — retry state machine (R2/R3/R4)', () => {
       infraRetry: {
         count: 2,
         attempts: [
-          { attemptNumber: 1, timestamp: 't1', runId: '1', signals: [], retryMethod: 'rerun-failed', outcome: 'pending' },
-          { attemptNumber: 2, timestamp: 't2', runId: '2', signals: [], retryMethod: 'rerun-failed', outcome: 'pending' },
+          {
+            attemptNumber: 1,
+            timestamp: 't1',
+            runId: '1',
+            signals: [],
+            retryMethod: 'rerun-failed',
+            outcome: 'pending',
+          },
+          {
+            attemptNumber: 2,
+            timestamp: 't2',
+            runId: '2',
+            signals: [],
+            retryMethod: 'rerun-failed',
+            outcome: 'pending',
+          },
         ],
       },
     };
@@ -194,9 +209,30 @@ describe('infra-retry step — retry state machine (R2/R3/R4)', () => {
       infraRetry: {
         count: 3,
         attempts: [
-          { attemptNumber: 1, timestamp: 't1', runId: '1', signals: [], retryMethod: 'rerun-failed', outcome: 'pending' },
-          { attemptNumber: 2, timestamp: 't2', runId: '2', signals: [], retryMethod: 'rerun-failed', outcome: 'pending' },
-          { attemptNumber: 3, timestamp: 't3', runId: '3', signals: [], retryMethod: 'rerun-failed', outcome: 'pending' },
+          {
+            attemptNumber: 1,
+            timestamp: 't1',
+            runId: '1',
+            signals: [],
+            retryMethod: 'rerun-failed',
+            outcome: 'pending',
+          },
+          {
+            attemptNumber: 2,
+            timestamp: 't2',
+            runId: '2',
+            signals: [],
+            retryMethod: 'rerun-failed',
+            outcome: 'pending',
+          },
+          {
+            attemptNumber: 3,
+            timestamp: 't3',
+            runId: '3',
+            signals: [],
+            retryMethod: 'rerun-failed',
+            outcome: 'pending',
+          },
         ],
       },
     };
@@ -209,6 +245,26 @@ describe('infra-retry step — retry state machine (R2/R3/R4)', () => {
     assert.equal(state.infraRetry.attempts.length, 3, 'no new attempt appended');
     assert.equal(result.reason, 'infra-stuck-exhausted');
     assert.notEqual(result.action, 'execute', 'fix-ci must NOT be dispatched on infra-stuck');
+  });
+
+  it('case 5b: derives runId from state._ciFailedJobs[0].runId when state.runId is unset', () => {
+    const { handler } = loadStep({ envFlag: 'true', classifyImpl: infraSuspected });
+    const state = {
+      ticketId: 'GH-508',
+      failureCategory: 'ci_failure',
+      // NOTE: no state.runId — monitor.js stores runIds on _ciFailedJobs only.
+      _ciFailedJobs: [{ name: 'e2e [shard-4]', runId: '987654' }],
+      infraRetry: { count: 0, attempts: [] },
+    };
+    const result = handler(state, {});
+    assert.ok(result, 'must dispatch a retry delegate');
+    assert.equal(result.action, 'execute');
+    assert.match(
+      result.delegate && result.delegate.command,
+      /gh run rerun --failed 987654/,
+      'delegate must use runId from _ciFailedJobs[0]'
+    );
+    assert.equal(state.infraRetry.attempts[0].runId, '987654');
   });
 
   it('case 9: prior retry succeeded → marks last attempt outcome=succeeded and advances normally', () => {

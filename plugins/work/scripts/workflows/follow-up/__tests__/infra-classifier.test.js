@@ -35,6 +35,35 @@ describe('infra-classifier', () => {
       assert.ok(result.evidence, 'evidence should be present');
     });
 
+    it('iterates all failed jobs — small family for job A does not abort check on job B in a larger family', () => {
+      const baseStart = new Date('2026-01-01T00:00:00.000Z').getTime();
+      const mkJob = (name, runtimeMin, conclusion) => ({
+        name,
+        conclusion,
+        startedAt: new Date(baseStart).toISOString(),
+        completedAt: new Date(baseStart + runtimeMin * 60_000).toISOString(),
+      });
+      // Job A's family has only 2 shards (cannot establish asymmetry). Job B's
+      // family has 5 shards with the failing one running 6x the median.
+      const allJobs = [
+        mkJob('lint [shard-1]', 1, 'success'),
+        mkJob('lint [shard-2]', 1, 'failure'),
+        mkJob('e2e [shard-1]', 1, 'success'),
+        mkJob('e2e [shard-2]', 1, 'success'),
+        mkJob('e2e [shard-3]', 1, 'success'),
+        mkJob('e2e [shard-4]', 1, 'success'),
+        mkJob('e2e [shard-5]', 6, 'failure'),
+      ];
+      const failedJobs = [allJobs[1], allJobs[6]];
+      const result = signal1_shardAsymmetry(failedJobs, allJobs);
+      assert.equal(
+        result.fired,
+        true,
+        'signal1 must fire on job B even though job A is in a <3-shard family'
+      );
+      assert.equal(result.evidence.family, 'e2e');
+    });
+
     it('does NOT fire on a 2-way matrix (N<3) — rejects with reason in evidence', () => {
       const baseStart = new Date('2026-01-01T00:00:00.000Z').getTime();
       const mkJob = (name, runtimeMin, conclusion) => ({
@@ -43,10 +72,7 @@ describe('infra-classifier', () => {
         startedAt: new Date(baseStart).toISOString(),
         completedAt: new Date(baseStart + runtimeMin * 60_000).toISOString(),
       });
-      const allJobs = [
-        mkJob('e2e [shard-1]', 1, 'success'),
-        mkJob('e2e [shard-2]', 6, 'failure'),
-      ];
+      const allJobs = [mkJob('e2e [shard-1]', 1, 'success'), mkJob('e2e [shard-2]', 6, 'failure')];
       const failedJobs = [allJobs[1]];
       const result = signal1_shardAsymmetry(failedJobs, allJobs);
       assert.equal(result.fired, false);
@@ -76,18 +102,12 @@ describe('infra-classifier', () => {
 
     it('throws TypeError on malformed jobId (non-numeric)', () => {
       const exec = (_cmd) => ({ stdout: '', stderr: '', status: 0 });
-      assert.throws(
-        () => signal2_emptyFailedLog('123456', 'abc; rm -rf /', exec),
-        TypeError
-      );
+      assert.throws(() => signal2_emptyFailedLog('123456', 'abc; rm -rf /', exec), TypeError);
     });
 
     it('throws TypeError on malformed runId (non-numeric)', () => {
       const exec = (_cmd) => ({ stdout: '', stderr: '', status: 0 });
-      assert.throws(
-        () => signal2_emptyFailedLog('not-a-number', '789012', exec),
-        TypeError
-      );
+      assert.throws(() => signal2_emptyFailedLog('not-a-number', '789012', exec), TypeError);
     });
   });
 
@@ -114,20 +134,15 @@ describe('infra-classifier', () => {
 
   describe('signal4_setupArtifacts', () => {
     it('fires when raw log has "e2e-deps cache: MISS" + "fallback install FAILED"', () => {
-      const rawLogs = [
-        'some setup line',
-        'e2e-deps cache: MISS',
-        'fallback install FAILED',
-      ].join('\n');
+      const rawLogs = ['some setup line', 'e2e-deps cache: MISS', 'fallback install FAILED'].join(
+        '\n'
+      );
       const result = signal4_setupArtifacts(rawLogs);
       assert.equal(result.fired, true);
     });
 
     it('does NOT fire when raw log is plain assertion text', () => {
-      const rawLogs = [
-        'Error: expect(received).toBe(expected)',
-        'FAIL src/foo.spec.ts',
-      ].join('\n');
+      const rawLogs = ['Error: expect(received).toBe(expected)', 'FAIL src/foo.spec.ts'].join('\n');
       const result = signal4_setupArtifacts(rawLogs);
       assert.equal(result.fired, false);
     });
@@ -165,9 +180,7 @@ describe('infra-classifier', () => {
     });
 
     it('returns code-failure when only one signal fires', () => {
-      const allJobs = [
-        mkJob('unit', 1, 'failure'),
-      ];
+      const allJobs = [mkJob('unit', 1, 'failure')];
       const state = { _ciFailedJobs: [allJobs[0]], runId: '111' };
       const ctx = {
         allJobs,

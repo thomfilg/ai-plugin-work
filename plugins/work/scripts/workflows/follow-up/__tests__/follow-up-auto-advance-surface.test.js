@@ -14,19 +14,14 @@
  *      action-dispatch / terminal-set handling.
  */
 
-const { describe, it, beforeEach, afterEach } = require('node:test');
+const { describe, it, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const { execFileSync } = require('node:child_process');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const HOOK_PATH = path.resolve(
-  __dirname,
-  '..',
-  'hooks',
-  'follow-up-auto-advance.js'
-);
+const HOOK_PATH = path.resolve(__dirname, '..', 'hooks', 'follow-up-auto-advance.js');
 const HOOK_SRC = fs.readFileSync(HOOK_PATH, 'utf8');
 
 const MARKER = '.follow-up-orchestrator.pid';
@@ -132,11 +127,7 @@ describe('follow-up-auto-advance hook — surface action (Task 6.2)', () => {
     });
 
     assert.equal(r.exitCode, 0, `hook should exit 0; got ${r.exitCode}`);
-    assert.match(
-      r.stdout,
-      /infra-stuck/,
-      'hook stdout must contain the surface reason'
-    );
+    assert.match(r.stdout, /infra-stuck/, 'hook stdout must contain the surface reason');
     assert.match(
       r.stdout,
       /SURFACE|surface/,
