@@ -219,6 +219,22 @@ function classifyWithDefaults(state, ctx) {
   return classify(state || {}, ctx || {});
 }
 
+function needsFreshMonitorBeforeRetry(state, ctx) {
+  if (!state || !state.infraRetry) return false;
+  const attempts = state.infraRetry.attempts;
+  if (!Array.isArray(attempts) || attempts.length === 0) return false;
+  const last = attempts[attempts.length - 1];
+  if (!last || last.outcome !== 'pending') return false;
+  // If freshness is missing OR was stamped by a different process, we cannot
+  // trust the persisted _ciStatus. Re-route through monitor.
+  const freshness = state._ciStatusFreshness;
+  if (freshness && freshness.pid === process.pid) return false;
+  // Don't loop forever: if ctx already says CI is failing in *this* process,
+  // we know real work needs doing — let the classifier run.
+  if (ctx && ctx.ciStatus && ctx.ciStatus !== 'success') return false;
+  return true;
+}
+
 // Bug 542-14: if a prior cycle exhausted infra retries, the spec forbids
 // dispatching fix-ci even if a later classification would otherwise return
 // `code-failure`. Stay in the infra-stuck surface so the human handler
@@ -257,6 +273,17 @@ function runInfraRetryStep(state, ctx) {
   // `ci_failure` category so downstream branches don't dispatch fix-ci.
   if (maybeHandleRetrySuccess(state, ctx)) {
     routeRetrySuccessToReport(state);
+    return null;
+  }
+
+  // Bug 542-16: when this step resumes from disk (e.g. a new /follow-up
+  // process after a previous infra rerun), a pending attempt still exists
+  // but `_ciStatusFreshness` belongs to the prior PID. Don't fall through to
+  // fix-ci dispatch — bounce back to `monitor` to re-poll CI. monitor will
+  // either re-confirm green (next entry hits the retry-success path with a
+  // fresh stamp) or surface the real new failure.
+  if (needsFreshMonitorBeforeRetry(state, ctx)) {
+    state.currentStep = 'monitor';
     return null;
   }
 

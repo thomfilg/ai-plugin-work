@@ -143,6 +143,7 @@ describe('infra-retry step — retry state machine (R2/R3/R4)', () => {
       ticketId: 'GH-508',
       failureCategory: 'ci_failure',
       runId: '22222',
+      _ciStatusFreshness: { pid: process.pid, at: new Date().toISOString() },
       infraRetry: {
         count: 1,
         attempts: [
@@ -171,6 +172,7 @@ describe('infra-retry step — retry state machine (R2/R3/R4)', () => {
       ticketId: 'GH-508',
       failureCategory: 'ci_failure',
       runId: '33333',
+      _ciStatusFreshness: { pid: process.pid, at: new Date().toISOString() },
       infraRetry: {
         count: 2,
         attempts: [
@@ -206,6 +208,7 @@ describe('infra-retry step — retry state machine (R2/R3/R4)', () => {
       ticketId: 'GH-508',
       failureCategory: 'ci_failure',
       runId: '44444',
+      _ciStatusFreshness: { pid: process.pid, at: new Date().toISOString() },
       infraRetry: {
         count: 3,
         attempts: [
