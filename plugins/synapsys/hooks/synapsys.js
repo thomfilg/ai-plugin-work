@@ -292,8 +292,13 @@ function emitMatched(matched, payload, event) {
     }
 
     const matched = memories.length ? selectForEvent(memories, event, payload) : [];
-    emitMatched(matched, payload, event);
+    // On Stop the cite scan must read the session JSONL state from BEFORE
+    // this turn's Stop-time fired writes; Stop-injections happen after the
+    // assistant response, so attributing citations to them would be a
+    // false positive (the response cannot reference a memory that wasn't
+    // yet injected at the time it was written).
     if (event === 'Stop') runCiteScan(payload, memories);
+    emitMatched(matched, payload, event);
 
     process.exit(0);
   } catch {

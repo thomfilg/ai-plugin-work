@@ -612,3 +612,45 @@ test('cite_signals YAML list survives a blank line after the key', (t) => {
   assert.equal(cited.length, 1, `expected 1 cited row using declared signal across YAML blank line, got ${cited.length}`);
   assert.equal(cited[0].match, 'declared-token-beta');
 });
+
+// PR #524 cursor[bot] Medium — Stop-time fires must not produce false cited on the same turn.
+test('Stop event: cite scan ignores memories first fired during this same Stop turn', (t) => {
+  const home = mktemp('synapsys-disp-tel-home-');
+  const fx = makeFixture({ home });
+  t.after(fx.cleanup);
+
+  // Memory that fires ONLY on Stop, with trigger_session so it injects every Stop.
+  fs.writeFileSync(
+    path.join(fx.storeDir, 'stop-injected.md'),
+    [
+      '---',
+      'name: stop-injected',
+      'description: x',
+      'events: Stop',
+      'trigger_session: true',
+      '---',
+      '',
+      'Body for stop-injected.',
+    ].join('\n')
+  );
+
+  const sessionId = 'stop-only-session';
+  // Response mentions the memory name. It would falsely register a cited
+  // event if the cite scan saw the Stop-time fired row written this turn.
+  const stopRes = runDispatcher(
+    'Stop',
+    { cwd: fx.cwd, session_id: sessionId, response: 'I mention stop-injected casually.' },
+    { home }
+  );
+  assert.equal(stopRes.status, 0);
+
+  const jsonl = path.join(telemetryDirFor(home), `${sessionId}.jsonl`);
+  const rows = fs.existsSync(jsonl) ? readJsonl(jsonl) : [];
+  // The fired row for this turn IS recorded.
+  const fired = rows.filter((r) => r.event === 'fired' && r.memory === 'stop-injected');
+  assert.equal(fired.length, 1, `expected 1 fired row this Stop turn, got ${fired.length}`);
+  // But NO cited row, because the Stop-time fired write happens after the
+  // cite scan reads session state.
+  const cited = rows.filter((r) => r.event === 'cited' && r.memory === 'stop-injected');
+  assert.equal(cited.length, 0, `Stop-time fire must not generate a same-turn cited row, got ${cited.length}`);
+});
