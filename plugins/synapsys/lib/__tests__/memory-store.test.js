@@ -171,3 +171,17 @@ test('readMemoryFile keeps a single scalar cite_signal as one token', () => {
   const memories = listMemoriesFromStore(store);
   assert.deepEqual(memories[0].citeSignals, ['solo']);
 });
+
+// PR #524 cursor[bot] Low — single-element bracket scalar must drop the brackets
+test('readMemoryFile strips brackets from a single-element bracket cite_signal', () => {
+  const { storeDir } = makeTempStore();
+  writeMemory(storeDir, 'one-bracket.md', {
+    name: 'one-bracket',
+    description: 'd',
+    cite_signals: '[MAGIC_SIGNAL_X]',
+  });
+
+  const store = { kind: 'local', dir: storeDir, projectName: 'test' };
+  const memories = listMemoriesFromStore(store);
+  assert.deepEqual(memories[0].citeSignals, ['MAGIC_SIGNAL_X']);
+});

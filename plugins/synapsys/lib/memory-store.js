@@ -187,7 +187,13 @@ function normalizeCiteSignals(value) {
   // Inline scalar form matches the README example `cite_signals: A, B, C`;
   // split on commas so each token is a separate signal rather than a single
   // combined string that would never match the assistant response.
-  const tokens = String(value).split(',').map((s) => s.trim()).filter(Boolean);
+  // The frontmatter parser surfaces YAML flow lists like `[A]` / `[A, B]`
+  // as the literal bracketed string when it doesn't recognize the array
+  // form, so strip a single matched pair of outer brackets before splitting.
+  let scalar = String(value).trim();
+  const bracketed = scalar.match(/^\[(.*)\]$/);
+  if (bracketed) scalar = bracketed[1];
+  const tokens = scalar.split(',').map((s) => s.trim()).filter(Boolean);
   return tokens.length ? tokens : undefined;
 }
 
