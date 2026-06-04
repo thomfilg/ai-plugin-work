@@ -1,0 +1,15 @@
+# Override global .claude* exclusion for this plugin repo
+!.claude-plugin/
+
+# Environment config (user-specific)
+.env
+.envrc
+node_modules/
+node_modules
+
+# Runtime-generated hook artifacts
+.claude-code-check-request.json
+
+# Local-only backward-compat symlink for stale sessions (workflows -> scripts/workflows)
+/workflows
+.in_use/

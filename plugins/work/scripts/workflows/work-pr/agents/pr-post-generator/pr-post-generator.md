@@ -1,0 +1,1 @@
+../../../../agents/pr-post-generator.md

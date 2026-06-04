@@ -1,0 +1,1 @@
+../../../skills/create-jira-design-doc/SKILL.md

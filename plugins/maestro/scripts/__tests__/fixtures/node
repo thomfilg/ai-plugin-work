@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Fake `node` provider stub for the maestro test harness (Task 1, GH-429).
+#
+# The maestro scripts derive the session prefix by shelling out to the real
+# `node` binary to evaluate a snippet against ticket-provider.js. This stub
+# stands in for that call so every `resolve_prefix()` branch is reachable
+# without the real provider module. Mode is selected via env:
+#
+#   FAKE_NODE_MODE=projectKey   print $FAKE_NODE_PROJECT_KEY then exit 0
+#                               (empty key → prints nothing, exit 0:
+#                                models github / unconfigured / null).
+#   FAKE_NODE_MODE=fail         exit non-zero (models node/module unavailable).
+#   FAKE_NODE_MODE=garbage      print $FAKE_NODE_GARBAGE (default malformed)
+#                               then exit 0 (models a bad provider prefix).
+#   FAKE_NODE_MODE=real (default) delegate to the real node on PATH so other
+#                               node invocations (e.g. the test runner) still
+#                               work when this stub is shadowing `node`.
+#
+# Only the `-e <script>` form is special-cased; everything else delegates to
+# the real node so the stub is safe to leave first on PATH.
+set -u
+
+real_node() {
+  # Find the next `node` on PATH after this stub's own directory.
+  local self_dir
+  self_dir="$(cd "$(dirname "$0")" && pwd)"
+  local IFS=:
+  for d in $PATH; do
+    [ "$d" = "$self_dir" ] && continue
+    if [ -x "$d/node" ]; then
+      exec "$d/node" "$@"
+    fi
+  done
+  echo "fake node: no real node found on PATH" >&2
+  exit 127
+}
+
+# Only intercept the prefix-resolution `node -e ...` call.
+if [ "${1:-}" != "-e" ]; then
+  real_node "$@"
+fi
+
+case "${FAKE_NODE_MODE:-real}" in
+  projectKey)
+    if [ -n "${FAKE_NODE_PROJECT_KEY:-}" ]; then
+      printf '%s\n' "$FAKE_NODE_PROJECT_KEY"
+    fi
+    exit 0
+    ;;
+  fail)
+    exit 1
+    ;;
+  garbage)
+    printf '%s\n' "${FAKE_NODE_GARBAGE:-ECHO; rm -rf /}"
+    exit 0
+    ;;
+  *)
+    real_node "$@"
+    ;;
+esac

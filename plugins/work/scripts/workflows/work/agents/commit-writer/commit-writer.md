@@ -1,0 +1,1 @@
+../../../../agents/commit-writer.md

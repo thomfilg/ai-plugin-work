@@ -1,0 +1,14 @@
+{
+  "memories": [
+    {
+      "name": "release-tagging-workflow",
+      "description": "Guidance for cutting release tags via gh release",
+      "events": ["UserPromptSubmit"],
+      "trigger_prompt": "\\b(release|version|publish)\\b",
+      "trigger_pretool": ["Bash:gh release"],
+      "trigger_session": false,
+      "inject": "summary",
+      "body": "## Release tagging\n\nUse `gh release create` with semver tags.\nDouble-check changelog before tagging.\nNotify the release channel after publishing."
+    }
+  ]
+}

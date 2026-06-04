@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Fake `git` stub for the maestro test harness (Task 1, GH-429).
+#
+# maestro-conduct.sh's auto-restart path only needs worktree-dir existence to
+# be answerable; maestro-bootstrap.sh uses a handful of git subcommands. This
+# stub keeps those reachable without a real repo. Behaviour via env:
+#
+#   FAKE_GIT_WORKTREE_LIST  scripted stdout for `git ... worktree list ...`.
+#   FAKE_GIT_FETCH_OUTPUT   scripted stdout for `git ... fetch ...`.
+#   FAKE_GIT_FAIL_WORKTREE_ADD  non-empty → `git worktree add` exits 1.
+#
+# Conduct's auto-restart uses a plain `[ -d "$wt" ]` filesystem check rather
+# than git, so directory existence is controlled by the test creating real
+# temp dirs; this stub simply must not abort. Unknown subcommands exit 0.
+set -u
+
+# `git -C <dir> <subcommand> ...` — skip the -C <dir> prefix to find the verb.
+args=("$@")
+i=0
+while [ "$i" -lt "${#args[@]}" ]; do
+  case "${args[$i]}" in
+    -C)
+      i=$((i + 2))
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
+
+sub="${args[$i]:-}"
+case "$sub" in
+  fetch)
+    if [ -n "${FAKE_GIT_FETCH_OUTPUT:-}" ]; then
+      printf '%s\n' "$FAKE_GIT_FETCH_OUTPUT"
+    fi
+    exit 0
+    ;;
+  worktree)
+    verb="${args[$((i + 1))]:-}"
+    case "$verb" in
+      list)
+        if [ -n "${FAKE_GIT_WORKTREE_LIST:-}" ]; then
+          printf '%s\n' "$FAKE_GIT_WORKTREE_LIST"
+        fi
+        exit 0
+        ;;
+      add)
+        if [ -n "${FAKE_GIT_FAIL_WORKTREE_ADD:-}" ]; then
+          echo "fake git: worktree add failed" >&2
+          exit 1
+        fi
+        exit 0
+        ;;
+      *)
+        exit 0
+        ;;
+    esac
+    ;;
+  *)
+    exit 0
+    ;;
+esac
