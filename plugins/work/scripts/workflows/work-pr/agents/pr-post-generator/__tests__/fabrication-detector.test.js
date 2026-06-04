@@ -70,6 +70,19 @@ test('empty stability artifact does NOT suppress stability-claim violation', () 
   assert.ok(stab, 'expected stability-claim violation despite empty artifact');
 });
 
+test('incidental "10/10" mention in tests.check.md does NOT clear stability violation', () => {
+  // Past behavior: any substring match in tests.check.md cleared the claim.
+  // That was bypassable: a warning like "never write 10/10 without proof"
+  // would suppress R11. Now stability claims require a real stability artifact.
+  const dir = makeTaskDir({
+    'tests.check.md': 'Reminder: do not write 10/10 without a stability log.\n',
+  });
+  const prBody = 'Verified with 10/10 stability run on CI.';
+  const { violations } = detectFabrication(prBody, dir);
+  const stab = violations.find((v) => v.reason === 'stability-claim');
+  assert.ok(stab, 'expected stability-claim violation despite incidental phrase in tests.check.md');
+});
+
 test('substantive stability artifact suppresses stability-claim violation', () => {
   const dir = makeTaskDir({
     'stability.log': 'iter 1 ok\niter 2 ok\niter 3 ok\niter 4 ok\niter 5 ok\n',

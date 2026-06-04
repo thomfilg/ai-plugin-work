@@ -61,7 +61,12 @@ function safeReaddir(dirPath) {
 // dropping `touch stability.log` in the task folder.
 const STABILITY_ARTIFACT_MIN_BYTES = 16;
 
-function hasStabilityArtifact(taskDir, claimText) {
+function hasStabilityArtifact(taskDir) {
+  // Stability claims require a real stability*.log/.md artifact with
+  // substantive content. We deliberately do NOT honor a tests.check.md
+  // substring fallback: warnings or negations that incidentally mention a
+  // phrase like "10/10" would otherwise clear the violation. The agent prompt
+  // mandates the stability log if a stability claim is made.
   if (!taskDir) return false;
   const entries = safeReaddir(taskDir);
   for (const entry of entries) {
@@ -69,9 +74,6 @@ function hasStabilityArtifact(taskDir, claimText) {
     const content = safeReadFile(path.join(taskDir, entry));
     if (content && content.trim().length >= STABILITY_ARTIFACT_MIN_BYTES) return true;
   }
-  // tests.check.md containing the literal claim text also counts as evidence.
-  const checks = safeReadFile(path.join(taskDir, 'tests.check.md'));
-  if (checks && claimText && checks.includes(claimText)) return true;
   return false;
 }
 
@@ -98,7 +100,7 @@ function checkStabilityClaims(prBody, taskDir) {
 
   const violations = [];
   for (const c of accepted) {
-    if (hasStabilityArtifact(taskDir, c.phrase)) continue;
+    if (hasStabilityArtifact(taskDir)) continue;
     violations.push({
       phrase: c.phrase,
       reason: 'stability-claim',
