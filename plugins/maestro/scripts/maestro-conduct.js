@@ -27,6 +27,7 @@ const ciGate = require('./lib/maestro-conduct/ci-gate-rotation');
 const waitMute = require('./lib/maestro-conduct/wait-mute');
 const prStatusPayload = require('./lib/maestro-conduct/pr-status-payload');
 const prCommentsHandler = require('./lib/maestro-conduct/pr-comments-handler');
+const questionHandler = require('./lib/maestro-conduct/question-handler');
 
 const DETECTORS = {
   question: require('./lib/maestro-conduct/detectors/question'),
@@ -88,42 +89,14 @@ function ctxFor(session) {
 }
 
 function handleQuestion(ctx, qHit) {
-  // Question marker is per-SESSION so -work/-dev/-listen don't clobber each other.
-  const prev = state.read(ctx.session, 'question');
-  const now = state.now();
-  if (!prev) {
-    state.write(ctx.session, 'question', { startedAt: now, alerted: false });
-    return;
-  }
-  const mins = state.minutesSince(prev.startedAt);
-  if (mins < Q_WAIT_MIN) return;
-  // Re-emit on Q_WAIT_MIN cadence so alert count can grow to DEAD_END_REEMITS
-  // and trigger freeDeadEndSlot (one-shot gate previously capped count at 1).
-  if (prev.alerted) {
-    const sinceLastAlert = prev.lastAlertAt ? state.minutesSince(prev.lastAlertAt) : Infinity;
-    if (sinceLastAlert < Q_WAIT_MIN) return;
-  }
-  // Embed pane tail directly in the event so the orchestrator doesn't have to
-  // re-run tmux capture-pane (saves a Bash round-trip + the pane content is
-  // identical to what the operator would see).
-  const paneTail = (ctx.pane || '').split('\n').slice(-40).join('\n');
-  const r = actions.alert({
-    session: ctx.session,
-    ticket: ctx.ticket,
-    kind: 'question-pending',
-    phase: ctx.phase,
-    elapsedMin: mins,
-    options: qHit.options,
-    promptKind: qHit.promptKind,
-    paneTail,
-    instruction: `UNBLOCK-PROTOCOL: refuse-bypass → verify-real-work-done → fix-artifact-NOT-gate → file-root-cause-bug. Pane tail in paneTail field. Answer within Q_WAIT_MIN (3 repeats → DEAD-END).`,
+  questionHandler.handleQuestion({
+    ctx,
+    qHit,
+    state,
+    actions,
+    qWaitMin: Q_WAIT_MIN,
+    maybeEscalateToDeadEnd,
   });
-  state.write(ctx.session, 'question', {
-    startedAt: prev.startedAt,
-    alerted: true,
-    lastAlertAt: state.now(),
-  });
-  maybeEscalateToDeadEnd(ctx, 'question-pending', r.count, null);
 }
 
 // Healthy "waiting on user" patterns the agent emits to the pane while halted.
