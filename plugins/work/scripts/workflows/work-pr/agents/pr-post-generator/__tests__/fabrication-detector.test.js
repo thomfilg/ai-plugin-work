@@ -142,6 +142,117 @@ test('Unsourced row with synonym status (ok/passed/green) trips a violation', ()
   }
 });
 
+test('Verdict in Notes column with pending Status still trips a violation', () => {
+  // Smuggling: Status=pending but Notes contains "PASS in CI" or similar.
+  const dir = makeTaskDir({ 'tests.check.md': 'unrelated content\n' });
+  const cases = ['PASS in CI', 'works in prod', 'verified manually', 'green', 'OK on staging'];
+  for (const notes of cases) {
+    const prBody = [
+      '## Test Results',
+      '',
+      '| Test | Status | Notes |',
+      '| --- | --- | --- |',
+      `| feature Y | pending | ${notes} |`,
+      '',
+    ].join('\n');
+    const { violations } = detectFabrication(prBody, dir);
+    const row = violations.find((v) => v.reason === 'unsourced-test-row');
+    assert.ok(row, `expected violation for pending row with notes="${notes}"`);
+  }
+});
+
+test('Known over-eager cases: benign Notes containing verdict words DO trip (documented)', () => {
+  // The Notes verdict regex is deliberately over-eager — a false positive
+  // forces the agent to source the row or rewrite Notes, which is the safer
+  // failure mode. This test pins that behavior so future tightening is a
+  // conscious choice, not an accidental drift.
+  const dir = makeTaskDir({ 'tests.check.md': 'unrelated content\n' });
+  const benignCases = [
+    'works in progress',
+    'verified pending product review',
+    'OK to merge after review',
+    'follow-up: passed manual but not yet in tests.check.md',
+  ];
+  for (const notes of benignCases) {
+    const prBody = [
+      '## Test Results',
+      '',
+      '| Test | Status | Notes |',
+      '| --- | --- | --- |',
+      `| feature Z | pending | ${notes} |`,
+      '',
+    ].join('\n');
+    const { violations } = detectFabrication(prBody, dir);
+    const row = violations.find((v) => v.reason === 'unsourced-test-row');
+    assert.ok(row, `over-eager (expected) violation for benign notes="${notes}"`);
+  }
+});
+
+test('Row with no Notes column (2-column row) does not crash and does not trip', () => {
+  // parseTableRow defaults notes to '' when only Test and Status are present.
+  // Guards `!!row.notes` against undefined / null defensively.
+  const dir = makeTaskDir();
+  const prBody = [
+    '## Test Results',
+    '',
+    '| Test | Status |',
+    '| --- | --- |',
+    '| modal opens | pending |',
+    '',
+  ].join('\n');
+  const { violations } = detectFabrication(prBody, dir);
+  assert.equal(violations.length, 0);
+});
+
+test('Plain pending row with non-verdict Notes does not trip', () => {
+  const dir = makeTaskDir();
+  const prBody = [
+    '## Test Results',
+    '',
+    '| Test | Status | Notes |',
+    '| --- | --- | --- |',
+    '| modal opens | pending | awaiting tests.check.md |',
+    '| login flow | pending | follow-up next sprint |',
+    '',
+  ].join('\n');
+  const { violations } = detectFabrication(prBody, dir);
+  assert.equal(violations.length, 0);
+});
+
+test('Sourcing requires word-boundary match, not naive substring', () => {
+  // `login` as a substring of `loginflow` / `logins` must NOT count as evidence.
+  const dir = makeTaskDir({
+    'tests.check.md': 'See logins table and loginflow utility for context.\n',
+  });
+  const prBody = [
+    '## Test Results',
+    '',
+    '| Test | Status | Notes |',
+    '| --- | --- | --- |',
+    '| login | PASS | smoke |',
+    '',
+  ].join('\n');
+  const { violations } = detectFabrication(prBody, dir);
+  const row = violations.find((v) => v.reason === 'unsourced-test-row');
+  assert.ok(row, 'expected violation — "login" inside "loginflow"/"logins" should not source the claim');
+});
+
+test('Whole-word sourcing in tests.check.md clears the claim', () => {
+  const dir = makeTaskDir({
+    'tests.check.md': '- login: verified via smoke run in CI.\n',
+  });
+  const prBody = [
+    '## Test Results',
+    '',
+    '| Test | Status | Notes |',
+    '| --- | --- | --- |',
+    '| login | PASS | smoke |',
+    '',
+  ].join('\n');
+  const { violations } = detectFabrication(prBody, dir);
+  assert.equal(violations.length, 0);
+});
+
 test('Unsourced PASS row under Test Results', () => {
   const dir = makeTaskDir({
     'tests.check.md': 'No matching content here.\n',

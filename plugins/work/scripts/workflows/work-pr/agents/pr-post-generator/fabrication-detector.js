@@ -148,12 +148,27 @@ function parseTestResultsRows(prBody) {
   return rows;
 }
 
+// Verdict-like wording that, when found in the Notes column of an otherwise
+// pending row, indicates the agent is smuggling a claim past the Status check.
+const NOTES_VERDICT_REGEX =
+  /\b(pass(?:ed|es|ing)?|fail(?:ed|s|ing)?|ok|okay|green|success(?:ful)?|verified|works?|confirmed)\b/i;
+
+function escapeRegExp(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function rowIsSourced(testName, taskDir) {
   if (!taskDir || !testName) return false;
+  // Word-boundary match — a test name like "login" must appear as a whole
+  // word, not buried inside "login-flow-broken" or a random URL fragment.
+  // Pad with non-word-char alternatives so tokens that don't start/end on a
+  // word char (e.g. `"modal opens"`) still match.
+  const escaped = escapeRegExp(testName);
+  const re = new RegExp(`(^|[^A-Za-z0-9_])${escaped}([^A-Za-z0-9_]|$)`, 'i');
   const candidates = ['tests.check.md', 'completion.check.md'];
   for (const name of candidates) {
     const content = safeReadFile(path.join(taskDir, name));
-    if (content && content.includes(testName)) return true;
+    if (content && re.test(content)) return true;
   }
   return false;
 }
@@ -163,16 +178,21 @@ function checkTestResultsRows(prBody, taskDir) {
   const rows = parseTestResultsRows(prBody);
   for (const row of rows) {
     const statusLower = row.status.toLowerCase();
-    // Allowed (pending-like) statuses never produce a violation. Every other
-    // status — pass, fail, passed, ok, green, success, verified, etc. — is
-    // treated as a verdict claim that must be sourced. Whitelisting only
-    // `pass`/`fail` previously let synonyms slip through the guard.
-    if (ALLOWED_STATUSES.has(statusLower)) continue;
+    const statusAllowed = ALLOWED_STATUSES.has(statusLower);
+    // If Status is pending-like but the Notes column smuggles a verdict
+    // (e.g. "PASS in CI" or "works in prod"), treat the row as a claim that
+    // still needs sourcing. Otherwise pending rows always pass.
+    const notes = typeof row.notes === 'string' ? row.notes : '';
+    const notesHasVerdict = notes.length > 0 && NOTES_VERDICT_REGEX.test(notes);
+    if (statusAllowed && !notesHasVerdict) continue;
     if (rowIsSourced(row.test, taskDir)) continue;
+    // Surface the offending content — the Notes verdict if that's what
+    // tripped it, otherwise the Status verdict.
+    const offending = statusAllowed ? notes : row.status;
     violations.push({
-      phrase: `| ${row.test} | ${row.status} |`,
+      phrase: `| ${row.test} | ${row.status} | ${notes} |`,
       reason: 'unsourced-test-row',
-      suggestion: `Rewrite Status to "pending" until tests.check.md or completion.check.md contains "${row.test}".`,
+      suggestion: `Rewrite to "pending" — remove "${offending}" or source "${row.test}" in tests.check.md / completion.check.md before claiming a verdict.`,
     });
   }
   return violations;
