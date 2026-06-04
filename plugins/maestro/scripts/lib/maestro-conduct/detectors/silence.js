@@ -18,8 +18,42 @@
  */
 const crypto = require('crypto');
 const state = require('../state');
+const skillRegistry = require('../skill-registry');
 
-const SILENCE_LIMIT_SEC = parseInt(process.env.SILENCE_LIMIT_SEC || '300', 10);
+// Hard default if neither env override nor registry row provides a limit.
+const DEFAULT_SILENCE_LIMIT_SEC = 300;
+
+// Module-level capture is advisory only and kept for backward export
+// compatibility. The authoritative limit is resolved per-call by
+// `resolveSilenceLimit(ctx)` — see GH-514 Task 4 (R3 / AC4): the
+// SILENCE_LIMIT_SEC_FOLLOWUP env var must take effect at detect() time
+// without requiring a daemon restart, and follow-up sessions must honor
+// the registry's larger default (1800s) instead of the work default.
+const SILENCE_LIMIT_SEC = parseInt(process.env.SILENCE_LIMIT_SEC || String(DEFAULT_SILENCE_LIMIT_SEC), 10);
+
+/**
+ * Resolve the silence-limit for a given ctx, per-call.
+ *
+ * Resolution order (spec §Architecture, AC4):
+ *   1. ctx.skill === 'follow-up' AND $SILENCE_LIMIT_SEC_FOLLOWUP set → that value
+ *   2. registry row for ctx.skill → row.silenceLimitSec
+ *   3. ctx.skill === 'work' (or unknown) AND $SILENCE_LIMIT_SEC set → that value
+ *   4. DEFAULT_SILENCE_LIMIT_SEC (300)
+ */
+function resolveSilenceLimit(ctx) {
+  const skill = ctx && ctx.skill;
+  if (skill === 'follow-up') {
+    const envOverride = parseInt(process.env.SILENCE_LIMIT_SEC_FOLLOWUP || '', 10);
+    if (Number.isFinite(envOverride) && envOverride > 0) return envOverride;
+  }
+  const row = skill ? skillRegistry.get(skill) : undefined;
+  if (row && Number.isFinite(row.silenceLimitSec) && row.silenceLimitSec > 0) {
+    return row.silenceLimitSec;
+  }
+  const envWork = parseInt(process.env.SILENCE_LIMIT_SEC || '', 10);
+  if (Number.isFinite(envWork) && envWork > 0) return envWork;
+  return DEFAULT_SILENCE_LIMIT_SEC;
+}
 
 // Shared with detectors/spinner.js — see ../live-spinner.js for the contract.
 // Both detectors MUST consume the same regex; otherwise one classifies a pane
@@ -51,7 +85,7 @@ function isActive(pane, hashNow, toksNow, prev) {
   return false;
 }
 
-function detect({ session, ticket, pane }) {
+function detect({ session, ticket, pane, skill }) {
   // Marker is keyed by SESSION, not ticket. Multiple sessions share a ticket
   // (-work + -dev + -listen all map to the same ticket id) but each has its
   // own pane content; sharing a marker would cause hash ping-pong and leave
@@ -79,9 +113,10 @@ function detect({ session, ticket, pane }) {
     return { hit: false };
   }
 
+  const limitSec = resolveSilenceLimit({ skill });
   const silenceSec = now - prev.lastActiveAt;
-  if (silenceSec < SILENCE_LIMIT_SEC) return { hit: false, silenceSec };
-  return { hit: true, kind: 'silence', silenceSec, limitSec: SILENCE_LIMIT_SEC };
+  if (silenceSec < limitSec) return { hit: false, silenceSec };
+  return { hit: true, kind: 'silence', silenceSec, limitSec };
 }
 
-module.exports = { name: 'silence', detect, SILENCE_LIMIT_SEC };
+module.exports = { name: 'silence', detect, SILENCE_LIMIT_SEC, resolveSilenceLimit };

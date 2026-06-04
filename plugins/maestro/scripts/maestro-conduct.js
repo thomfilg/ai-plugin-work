@@ -22,6 +22,7 @@ const { phaseFor, escalationFor } = require('./lib/maestro-conduct/phase-registr
 const actions = require('./lib/maestro-conduct/actions');
 const alerts = require('./lib/maestro-conduct/alerts');
 const heartbeat = require('./lib/maestro-conduct/heartbeat');
+const skillRegistry = require('./lib/maestro-conduct/skill-registry');
 
 const DETECTORS = {
   question: require('./lib/maestro-conduct/detectors/question'),
@@ -61,15 +62,26 @@ const REPO_NAME = process.env.REPO_NAME || 'claude-plugin-work';
 const Q_WAIT_MIN = parseInt(process.env.Q_WAIT_MIN || '3', 10);
 const TICK_SEC = parseInt(process.env.TICK_SEC || '60', 10);
 
-/** Build the context object passed to every detector. */
+/** Build the context object passed to every detector.
+ *
+ * GH-514 R2/AC3: route per-ticket snapshot through the skill-registry so the
+ * conductor honours non-/work skills (e.g. /follow-up). The skill is read
+ * per-call (not at module load) so daemon restarts and mid-session skill
+ * writes are picked up. When `.maestro-skill` is absent, `readTicketSkill`
+ * falls open to `'work'` and the `work` row's snapshot delegates to
+ * `workstate.snapshot` — identical to legacy behavior.
+ */
 function ctxFor(session) {
   // Strip session-suffix to derive ticket id. -dev/-listen are informational only;
   // restartEligible() gates auto-restart to -work. Snapshot is a single on-disk read.
   const ticket = tmux.ticketIdFor(session);
-  const { phase, step } = workstate.snapshot(ticket);
+  const skill = skillRegistry.readTicketSkill(ticket);
+  const row = skillRegistry.get(skill) || skillRegistry.get('work');
+  const snap = row.snapshot(ticket) || { phase: null, step: null };
+  const { phase, step } = snap;
   const worktree = path.join(workstate.WORKTREES_BASE, `${REPO_NAME}-${ticket}`);
   const pane = tmux.capture(session);
-  return { session, ticket, phase, step, worktree, pane };
+  return { session, ticket, skill, phase, step, worktree, pane };
 }
 
 function handleQuestion(ctx, qHit) {

@@ -117,7 +117,7 @@ function baseEnv(base, fakeHome, extra = {}) {
 
 const RUN_OPTS = { timeout: 30000 };
 
-test('--skill=follow-up writes .maestro-skill and skips .work-state.json stub', () => {
+test('Bootstrap with --skill=follow-up writes .maestro-skill and skips .work-state.json stub', () => {
   const { wrapper, base, fakeHome, helperLog } = makeSandbox();
   const ticket = 'GH-9001';
 
@@ -174,7 +174,7 @@ test('--skill=follow-up writes .maestro-skill and skips .work-state.json stub', 
   );
 });
 
-test('default bootstrap (no --skill, no env) preserves /work behavior bit-for-bit', () => {
+test('Bootstrap default (no --skill, no env) preserves /work behavior bit-for-bit', () => {
   const { wrapper, base, fakeHome, helperLog } = makeSandbox();
   const ticket = 'GH-9001';
 

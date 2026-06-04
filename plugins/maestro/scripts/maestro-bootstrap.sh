@@ -52,6 +52,43 @@ BASE_BRANCH="${BASE_BRANCH#origin/}"
 CLAUDE_BIN="${CLAUDE_BIN:-claude}"
 SKILL_NAME="${SKILL_NAME:-work}"
 
+# ── Skill resolution (GH-514 Task 2)
+#    Precedence: --skill=<name> flag > MAESTRO_SKILL env > legacy SKILL_NAME > "work".
+#    Parses --skill=<name> out of the positional args before the ticket loop,
+#    leaving "$@" containing only ticket IDs.
+SKILL_FLAG=""
+_FILTERED_ARGS=()
+for _arg in "$@"; do
+  case "$_arg" in
+    --skill=*)
+      SKILL_FLAG="${_arg#--skill=}"
+      ;;
+    *)
+      _FILTERED_ARGS+=("$_arg")
+      ;;
+  esac
+done
+set -- "${_FILTERED_ARGS[@]+"${_FILTERED_ARGS[@]}"}"
+
+resolve_skill() {
+  # Echo the resolved skill name following the documented precedence.
+  if [ -n "$SKILL_FLAG" ]; then
+    echo "$SKILL_FLAG"
+  elif [ -n "${MAESTRO_SKILL:-}" ]; then
+    echo "$MAESTRO_SKILL"
+  elif [ -n "${SKILL_NAME:-}" ]; then
+    echo "$SKILL_NAME"
+  else
+    echo "work"
+  fi
+}
+
+RESOLVED_SKILL="$(resolve_skill)"
+
+# Per-ticket file lives under MAESTRO_TASKS_BASE (defaults to ./tasks for
+# back-compat with existing /work bootstrap convention).
+MAESTRO_TASKS_BASE="${MAESTRO_TASKS_BASE:-$PWD/tasks}"
+
 # Provider-derived session-name / ticket prefix. resolve_prefix() (sets global
 # PREFIX, fail-open to "GH"). maestro-conduct.js derives the same prefix
 # independently in tmux.js (TICKET_PREFIX env / git-remote parsing) and also
@@ -121,8 +158,19 @@ for TICKET in "$@"; do
     fi
   fi
 
+  # GH-514 Task 2: persist resolved skill per ticket so the conductor can read
+  # it back (single-line file, no trailing newline noise — registry trims).
+  TICKET_DIR="$MAESTRO_TASKS_BASE/$TICKET"
+  mkdir -p "$TICKET_DIR"
+  printf '%s\n' "$RESOLVED_SKILL" > "$TICKET_DIR/.maestro-skill"
+
   # Per-ticket custom bootstrap (runs only on fresh worktrees).
-  if [ "${SKIP_CUSTOM_SCRIPT:-0}" = "0" ] && [ -n "$BOOTSTRAP_HELPER" ]; then
+  # Stub-skip gate (R4 / AC1): only the legacy `work` skill writes the
+  # `.work-state.json` stub via bootstrap-custom-script.js. For any other
+  # skill (e.g. follow-up) we skip the helper entirely so /follow-up's own
+  # producer owns its state file.
+  if [ "${SKIP_CUSTOM_SCRIPT:-0}" = "0" ] && [ -n "$BOOTSTRAP_HELPER" ] \
+      && [ "$RESOLVED_SKILL" = "work" ]; then
     # bootstrap-custom-script.js is fail-open: warns and exits 0 on errors.
     node "$BOOTSTRAP_HELPER" "$WT" "$TICKET" || true
   fi
@@ -132,8 +180,8 @@ for TICKET in "$@"; do
     echo "[$TICKET] tmux session $SESSION exists — skipping launch"
   else
     tmux new-session -d -s "$SESSION" -c "$WT" \
-      "$CLAUDE_BIN --dangerously-skip-permissions '/$SKILL_NAME $TICKET'"
-    echo "[$TICKET] launched tmux session $SESSION (claude /$SKILL_NAME $TICKET)"
+      "$CLAUDE_BIN --dangerously-skip-permissions '/$RESOLVED_SKILL $TICKET'"
+    echo "[$TICKET] launched tmux session $SESSION (claude /$RESOLVED_SKILL $TICKET)"
   fi
 done
 
