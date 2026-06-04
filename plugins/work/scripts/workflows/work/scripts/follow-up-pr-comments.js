@@ -773,4 +773,6 @@ if (require.main === module) {
 module.exports = {
   solveLocally,
   skipLocally,
+  classifyOutdatedCopilotThread,
+  isCopilotAuthor,
 };
