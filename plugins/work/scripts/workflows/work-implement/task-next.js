@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* eslint-disable max-lines -- allowlisted pre-existing length; see .quality-exceptions */
 
 /**
  * task-next.js
@@ -206,13 +207,16 @@ function extractField(section, header) {
   // capture the first line of the field body (e.g. Suggested Scope returns
   // only the first path). Without `m`, `$` is end-of-string, and the
   // lookahead terminates correctly at the next `### ` / `## ` header or EOF.
-  const re = new RegExp(`### *${header}[^\\n]*\\n([\\s\\S]*?)(?=\\n### |\\n## |$)`);
+  const re = new RegExp(`(?:^|\\n)### *${header}\\b[^\\n]*\\n([\\s\\S]*?)(?=\\n### |\\n## |$)`);
   const m = section.match(re);
   return m ? m[1].trim() : '';
 }
 
 function parseSuggestedScope(section) {
-  const raw = extractField(section, 'Suggested Scope') || extractField(section, 'Files in scope');
+  // Per spec Open Q #3: `Files in scope` is the canonical heading and wins
+  // when both are present. `Suggested Scope` remains as a backward-compatible
+  // fallback for older tasks.md files.
+  const raw = extractField(section, 'Files in scope') || extractField(section, 'Suggested Scope');
   return raw
     .split('\n')
     .map((l) => l.replace(/^[-*+]\s+/, '').trim())
@@ -401,6 +405,7 @@ function mintCompanionToken() {
   }
 }
 
+// eslint-disable-next-line max-lines-per-function, complexity -- allowlisted pre-existing; see .quality-exceptions
 function recordEvidence(phase, ticket, taskNum, cmd, cwd, scope) {
   // Delegate to tdd-phase-state.js — the only authorized writer. Forward
   // `--task N` so the recorder resolves the per-task state path. Records
@@ -519,7 +524,9 @@ function recordEvidence(phase, ticket, taskNum, cmd, cwd, scope) {
 // every regular *source* scope entry triggers a depth-0 scan of its parent
 // directory for colocated `<basename>.test.<ext>` / `<basename>.spec.<ext>`
 // neighbours (e.g. `src/foo.test.js` next to `src/foo.js`).
+// eslint-disable-next-line complexity -- allowlisted pre-existing; see .quality-exceptions
 function findTestFilesInScope(repoRoot, scope) {
+  /* eslint-disable max-depth -- allowlisted pre-existing nested branches; see .quality-exceptions */
   const out = new Set();
   const isTestPath = (p) => /\.(test|spec)\.[jt]sx?$/.test(p);
   // Cache fs.readdirSync results per parent directory so multiple scope
@@ -588,6 +595,7 @@ function findTestFilesInScope(repoRoot, scope) {
     }
   }
   return out;
+  /* eslint-enable max-depth */
 }
 
 // Look for explicit `gherkin('<scenario name>')` annotation calls; fall back
@@ -706,7 +714,9 @@ function _logEvent(payload) {
   }
 }
 
+// eslint-disable-next-line max-lines-per-function, complexity -- allowlisted pre-existing; see .quality-exceptions
 function main() {
+  /* eslint-disable max-depth -- allowlisted pre-existing nested branches; see .quality-exceptions */
   const _startedAt = Date.now();
   const [, , ticketRaw, taskRaw] = process.argv;
   if (!ticketRaw || !taskRaw) {
@@ -1011,6 +1021,7 @@ function main() {
     });
   }
   process.exit(_exitCode);
+  /* eslint-enable max-depth */
 }
 
 module.exports = {
@@ -1019,6 +1030,8 @@ module.exports = {
   wrapStrictMode,
   isDocsExempt,
   isVisualOnlyTask,
+  extractField,
+  parseSuggestedScope,
 };
 
 if (require.main === module) {

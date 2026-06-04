@@ -40,7 +40,7 @@ test('regression - deadlock repro with subsections only', () => {
       assert.match(
         row.evidence,
         /tasks\.md:Task 1/,
-        `row ${row.id} evidence must reference tasks.md:Task 1`,
+        `row ${row.id} evidence must reference tasks.md:Task 1`
       );
     }
   } finally {
@@ -68,11 +68,7 @@ test('empty table falls back to subsections', () => {
   const { root, tasksDir } = makeTasksDir({ tasks });
   try {
     const rows = readRequirementCoverage(tasksDir);
-    assert.equal(
-      rows.length,
-      2,
-      'header-only table must fall through to subsection synthesis',
-    );
+    assert.equal(rows.length, 2, 'header-only table must fall through to subsection synthesis');
     const ids = rows.map((r) => r.id).sort();
     assert.deepEqual(ids, ['R1', 'R2']);
     for (const row of rows) {
@@ -80,14 +76,14 @@ test('empty table falls back to subsections', () => {
       assert.match(
         row.evidence,
         /tasks\.md:Task 1/,
-        `row ${row.id} evidence must reference tasks.md:Task 1`,
+        `row ${row.id} evidence must reference tasks.md:Task 1`
       );
     }
     // Header/separator rows must NOT appear as synthesized rows
     assert.equal(
       rows.find((r) => /^(id|requirement|req)$/i.test(r.id) || /^-+$/.test(r.id)),
       undefined,
-      'header and separator lines must not be counted as data rows',
+      'header and separator lines must not be counted as data rows'
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -108,32 +104,28 @@ test('neither table nor subsections present - clear error', () => {
   // Also write a brief.md with a P0 requirement so coverage_check is exercised
   fs.writeFileSync(
     path.join(tasksDir, 'brief.md'),
-    ['# Brief', '', '## Requirements', '', '- **P0** must do thing', ''].join('\n'),
+    ['# Brief', '', '## Requirements', '', '- **P0** must do thing', ''].join('\n')
   );
   try {
     const result = coverageCheck.validate({ tasksDir });
     assert.equal(result.ok, false, 'validate must return ok=false when no coverage source exists');
     assert.ok(Array.isArray(result.errors), 'errors must be an array (ok:false envelope)');
     const blob = result.errors.join('\n');
-    assert.match(
-      blob,
-      /split-in-tasks/,
-      'error message must reference the split-in-tasks step',
-    );
+    assert.match(blob, /split-in-tasks/, 'error message must reference the split-in-tasks step');
     assert.match(
       blob,
       /Requirement Coverage|Requirements Covered/,
-      'error message must mention Requirement Coverage or Requirements Covered',
+      'error message must mention Requirement Coverage or Requirements Covered'
     );
     assert.match(
       blob,
       /Requirement Coverage/,
-      'error message must mention `## Requirement Coverage`',
+      'error message must mention `## Requirement Coverage`'
     );
     assert.match(
       blob,
       /Requirements Covered/,
-      'error message must mention `### Requirements Covered`',
+      'error message must mention `### Requirements Covered`'
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -172,7 +164,7 @@ test('coverage_check passes when tasks.md has only subsections', () => {
     assert.equal(
       result.ok,
       true,
-      `coverage_check.validate must pass on subsection-only tasks.md; got errors=${JSON.stringify(result.errors)}`,
+      `coverage_check.validate must pass on subsection-only tasks.md; got errors=${JSON.stringify(result.errors)}`
     );
     // Every synthesized row must have status=DELIVERED and non-empty evidence
     const rows = readRequirementCoverage(tasksDir);
@@ -181,7 +173,7 @@ test('coverage_check passes when tasks.md has only subsections', () => {
       assert.equal(row.status, 'DELIVERED', `row ${row.id} must be DELIVERED`);
       assert.ok(
         row.evidence && row.evidence.trim().length > 0,
-        `row ${row.id} must have non-empty evidence`,
+        `row ${row.id} must have non-empty evidence`
       );
     }
     // No write to tasks.md or .work-state.json during validate()
@@ -190,7 +182,7 @@ test('coverage_check passes when tasks.md has only subsections', () => {
     assert.equal(
       fs.existsSync(stateFile),
       stateExistedBefore,
-      '.work-state.json must not be created by validate()',
+      '.work-state.json must not be created by validate()'
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
@@ -223,12 +215,13 @@ test('backward compatibility - top-level table preserved', () => {
       description: 'desc',
       status: 'DELIVERED',
       evidence: 'foo.ts:10',
+      source: 'table',
     });
     // Synthesized rows MUST NOT appear when table has data rows
     assert.equal(
       rows.find((r) => r.id === 'R99'),
       undefined,
-      'fallback must not fire when top-level table has data rows',
+      'fallback must not fire when top-level table has data rows'
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

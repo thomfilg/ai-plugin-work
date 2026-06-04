@@ -46,7 +46,7 @@ function validate(ctx) {
 
 function instructions(ctx) {
   return [
-    '# completion-next — Phase 2 of 8: REQUIREMENTS EXTRACT',
+    '# completion-next — Phase 2 of 11: REQUIREMENTS EXTRACT',
     `Ticket: ${ctx.ticket}`,
     '',
     'I read `## Requirements` (or `## Must-have`) bullets from brief.md and the `## Requirement Coverage` table from tasks.md, then snapshot them into `completion-context.json`. Both sources feed downstream coverage checks.',

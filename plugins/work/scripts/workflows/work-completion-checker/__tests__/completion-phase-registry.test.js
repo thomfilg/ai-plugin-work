@@ -14,12 +14,15 @@ const {
   isCompletionPhase,
 } = require('../completion-phase-registry');
 
-test('COMPLETION_PHASE_ORDER lists 8 phases in declared order', () => {
+test('COMPLETION_PHASE_ORDER lists 11 phases in declared order', () => {
   assert.deepEqual(COMPLETION_PHASE_ORDER, [
     'inputs',
     'requirements_extract',
     'diff_scope',
     'coverage_check',
+    'reuse_audit_enforcement',
+    'suggested_scope_enforcement',
+    'test_pass_crossref',
     'kind_checks',
     'report',
     'memorize',

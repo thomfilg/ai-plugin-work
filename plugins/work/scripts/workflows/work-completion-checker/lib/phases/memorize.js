@@ -35,7 +35,7 @@ function validate(ctx) {
 function instructions(ctx) {
   if (!ctx.memory) {
     return [
-      '# completion-next — Phase 7 of 8: MEMORIZE',
+      '# completion-next — Phase 10 of 11: MEMORIZE',
       `Ticket: ${ctx.ticket}`,
       '',
       'No memory plugin detected — skipping. I will auto-advance.',
@@ -43,7 +43,7 @@ function instructions(ctx) {
     ].join('\n');
   }
   return [
-    '# completion-next — Phase 7 of 8: MEMORIZE',
+    '# completion-next — Phase 10 of 11: MEMORIZE',
     `Ticket: ${ctx.ticket}`,
     '',
     `Memory plugin: **${ctx.memory.name}**`,
