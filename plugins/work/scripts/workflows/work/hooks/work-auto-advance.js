@@ -67,6 +67,24 @@ function main() {
     /* fail-open */
   }
 
+  // Fire OnAgentResponseMatched: for Task/Skill tool responses, extract the
+  // agent's text response and dispatch only to handlers whose `match` regex
+  // hits. Reference extensions (e.g. flaky-test-runbook) rely on this event.
+  // Fail-open: a misbehaving extension must never block the auto-advance.
+  try {
+    const responseText = extractResponseText(hookData?.tool_response);
+    if (responseText) {
+      fireAgentResponseMatched({
+        responseText,
+        tasksBase: TASKS_BASE,
+        tasksDir: marker.tasksDir,
+        repoRoot: marker.worktreeRoot || WORKTREES_BASE || process.cwd(),
+      });
+    }
+  } catch {
+    /* fail-open */
+  }
+
   // Call work-next.js
   const workNextPath = path.join(__dirname, '..', 'work-next.js');
   let result;
@@ -160,6 +178,39 @@ function firePostToolCall(args, deps) {
 }
 
 /**
+ * extractResponseText — best-effort extraction of the human-readable response
+ * text from a Claude Code PostToolUse `tool_response` payload. Shape varies:
+ *   - plain string
+ *   - `{ text: '…' }`
+ *   - `{ content: [{ type:'text', text:'…' }, …] }` (Task/Skill agent results)
+ *   - `{ output: '…' }` (Bash-like tools)
+ * Returns '' when no text is found. Pure / no side effects.
+ *
+ * @param {unknown} toolResponse
+ * @returns {string}
+ */
+function extractResponseText(toolResponse) {
+  if (!toolResponse) return '';
+  if (typeof toolResponse === 'string') return toolResponse;
+  if (typeof toolResponse !== 'object') return '';
+  const r = /** @type {Record<string, unknown>} */ (toolResponse);
+  if (typeof r.text === 'string') return r.text;
+  if (typeof r.output === 'string') return r.output;
+  if (Array.isArray(r.content)) {
+    const parts = [];
+    for (const block of r.content) {
+      if (block && typeof block === 'object' && typeof block.text === 'string') {
+        parts.push(block.text);
+      } else if (typeof block === 'string') {
+        parts.push(block);
+      }
+    }
+    if (parts.length) return parts.join('\n');
+  }
+  return '';
+}
+
+/**
  * fireAgentResponseMatched — iterate registered `OnAgentResponseMatched`
  * handlers and dispatch only when the response text matches each handler's
  * compiled `match` regex (compiled once at registration in event-bus). Gated
@@ -224,7 +275,7 @@ function fireAgentResponseMatched(args, deps) {
   }
 }
 
-module.exports = { firePostToolCall, fireAgentResponseMatched };
+module.exports = { firePostToolCall, fireAgentResponseMatched, extractResponseText };
 
 if (!process.env.WORK_HOOK_NO_MAIN) {
   main();
