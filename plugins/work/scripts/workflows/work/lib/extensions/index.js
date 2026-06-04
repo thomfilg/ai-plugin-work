@@ -101,6 +101,7 @@ function initExtensions(opts) {
     } catch (err) {
       logHandlerError(log, eventName, err);
     }
+    return ctx.getInjectedContext();
   }
 
   /**
@@ -111,7 +112,18 @@ function initExtensions(opts) {
     return statusEntries.slice();
   }
 
-  const api = { dispatch, status };
+  /**
+   * List registered handlers for a given event name. Forwards to event-bus.
+   * Used by `work-auto-advance.js` to iterate `OnAgentResponseMatched`
+   * handlers and perform plugin-level regex matching before dispatch.
+   * @param {string} eventName
+   * @returns {Array<object>}
+   */
+  function listHandlers(eventName) {
+    return eventBus.listHandlers(eventName);
+  }
+
+  const api = { dispatch, status, listHandlers };
   cache.set(key, api);
   return api;
 }
