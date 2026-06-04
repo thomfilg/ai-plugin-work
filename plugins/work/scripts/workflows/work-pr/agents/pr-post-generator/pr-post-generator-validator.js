@@ -217,22 +217,21 @@ async function main() {
 `);
     process.exit(2);
   }
+  // Run the fabrication check unconditionally. Missing TASKS_BASE or ticketId
+  // must not become a silent bypass — without a task folder the detector sees
+  // no artifacts, so unsourced stability/PASS/FAIL claims still trip. Only the
+  // audit-log appendAction is skipped when ticketId is absent.
   if (!tasksBase) {
     process.stderr.write(
-      'PR-POST-GENERATOR VALIDATOR: TASKS_BASE not configured; skipping fabrication check (fail-open).\n'
+      'PR-POST-GENERATOR VALIDATOR: TASKS_BASE not configured; running fabrication check without task folder (no audit log).\n'
     );
-  } else {
-    // Detection runs even without a ticketId — only the audit-log appendAction
-    // requires it. A missing ticketId yields taskDir === tasksBase, which has
-    // no tests.check.md / stability artifacts, so unsourced claims still trip.
-    const taskDir = ticketId ? path.join(tasksBase, ticketId) : tasksBase;
-    if (!ticketId) {
-      process.stderr.write(
-        'PR-POST-GENERATOR VALIDATOR: could not resolve ticket ID; running fabrication check without audit log.\n'
-      );
-    }
-    runFabricationCheck(prBody, taskDir, ticketId);
+  } else if (!ticketId) {
+    process.stderr.write(
+      'PR-POST-GENERATOR VALIDATOR: could not resolve ticket ID; running fabrication check without audit log.\n'
+    );
   }
+  const taskDir = tasksBase && ticketId ? path.join(tasksBase, ticketId) : '';
+  runFabricationCheck(prBody, taskDir, ticketId);
 
   // ========== CHECK IF FRONTEND APPS ARE AFFECTED ==========
   const affectedApps = getAffectedApps();

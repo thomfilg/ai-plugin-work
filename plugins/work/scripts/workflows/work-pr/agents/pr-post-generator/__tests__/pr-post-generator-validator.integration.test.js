@@ -65,19 +65,24 @@ function setStubs({ prBody, affectedJson }) {
   );
 }
 
-function runHook(payload) {
+function runHook(payload, envOverrides = {}) {
   return new Promise((resolve, reject) => {
+    const baseEnv = {
+      ...process.env,
+      PATH: `${BIN_DIR}${path.delimiter}${process.env.PATH || ''}`,
+      WORKTREES_BASE,
+      REPO_NAME: 'my-project',
+      APPS_DIR,
+      TASKS_BASE,
+      TICKET_PROVIDER: 'github',
+    };
+    for (const [k, v] of Object.entries(envOverrides)) {
+      if (v === undefined) delete baseEnv[k];
+      else baseEnv[k] = v;
+    }
     const proc = spawn('node', [HOOK_PATH], {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: {
-        ...process.env,
-        PATH: `${BIN_DIR}${path.delimiter}${process.env.PATH || ''}`,
-        WORKTREES_BASE,
-        REPO_NAME: 'my-project',
-        APPS_DIR,
-        TASKS_BASE,
-        TICKET_PROVIDER: 'github',
-      },
+      env: baseEnv,
     });
 
     let stdout = '';
@@ -271,6 +276,30 @@ describe('pr-post-generator-validator: fabrication check', () => {
       /COULD NOT FETCH PR BODY/,
       `expected block reason in stderr; got:\n${stderr}`
     );
+  });
+
+  it('Runs fabrication check even when TASKS_BASE is unset', async () => {
+    resetTaskDir();
+    const prBody = [
+      '## Summary',
+      'Adds GH-401 fabrication guard.',
+      '',
+      'Verified with 10/10 stability run on CI.',
+    ].join('\n');
+
+    setStubs({ prBody, affectedJson: [] });
+
+    const { code, stderr } = await runHook(
+      { agent_name: 'pr-post-generator', agent_output: AGENT_OUTPUT_STUB },
+      { TASKS_BASE: undefined }
+    );
+
+    assert.equal(
+      code,
+      2,
+      `expected exit 2 even without TASKS_BASE; got ${code}; stderr=\n${stderr}`
+    );
+    assert.match(stderr, /10\/10/, `expected stderr to surface the offending phrase`);
   });
 
   it('Backend-only change still runs the fabrication check', async () => {
