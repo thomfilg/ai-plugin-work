@@ -13,7 +13,7 @@
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { buildChildEnv } = require('../../../work/scripts/gh-exec');
-const { isInfraFailure } = require('../infra-patterns');
+const { isInfraFailure, isStale } = require('../infra-patterns');
 
 /**
  * Build the cached-failure hint paragraph appended to infra-failure outputs.
@@ -64,6 +64,29 @@ function appendInitHintIfInfra(result, previousLastMonitorAt) {
  * @param {object} state - mutable workflow state.
  * @param {{exitCode:number, output:string}} result
  */
+/**
+ * Auto-clear stale infra-failure cache on monitor-step entry (R2, R5, R8, R9, R10).
+ *
+ * Drops ONLY `state.lastMonitorResult` and `state.lastMonitorAt` when BOTH:
+ *   1. the cached output matches `INFRA_FAILURE_PATTERNS` (`isInfraFailure`), AND
+ *   2. the cache entry is stale per `isStale` (>= STALE_THRESHOLD_SECONDS, or
+ *      `lastMonitorAt` is missing — legacy state files written before GH-536
+ *      lacked the timestamp; treat them as infinitely old per R8/R15).
+ *
+ * Non-infra failures are preserved regardless of age (R10). Other state keys
+ * are never touched — this is NOT a full `--init` wipe (R9).
+ *
+ * @param {object} state - mutable workflow state (mutated in place).
+ */
+function clearStaleInfraCache(state) {
+  if (!state || !state.lastMonitorResult) return;
+  const output = state.lastMonitorResult.output;
+  if (!isInfraFailure(output)) return;
+  if (!isStale(state.lastMonitorAt)) return;
+  delete state.lastMonitorResult;
+  delete state.lastMonitorAt;
+}
+
 function writeMonitorResult(state, result) {
   const previousLastMonitorAt = state ? state.lastMonitorAt : null;
   const finalResult = appendInitHintIfInfra(result, previousLastMonitorAt);
@@ -367,6 +390,11 @@ function buildInitialFailedJobs(ci) {
 
 module.exports = function registerMonitor(register) {
   register('monitor', (state, ctx) => {
+    // FIRST statement: auto-clear stale infra cache so a transient infra failure
+    // from a prior tick (DNS hiccup, HTTP 401/403/404, gh CLI flake) does not
+    // wedge the follow-up loop indefinitely. See GH-536 R2/R5/R8.
+    clearStaleInfraCache(state);
+
     const followUpPr = require(path.join(ctx.workScriptsDir, 'follow-up-pr.js'));
     const { getPRInfo, checkCI, getReviews, formatReport } = followUpPr;
     const prArg = state.prNumber || undefined;
@@ -436,4 +464,5 @@ module.exports.__test__ = {
   buildInitialFailedJobs,
   writeMonitorResult,
   appendInitHintIfInfra,
+  clearStaleInfraCache,
 };
