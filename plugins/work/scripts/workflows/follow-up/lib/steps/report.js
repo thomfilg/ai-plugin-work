@@ -58,9 +58,14 @@ function buildGenericSurface(state) {
 // back to `OWNER`/`REPO` placeholders. Tries `gh repo view` first, then parses
 // `git remote get-url origin`. Cached per-process.
 const cp = require('node:child_process');
-let _repoSlug = null;
+// Bug 542-13: cache MUST be keyed per-worktree — a single process can serve
+// multiple tickets across multiple worktrees, each pointing at a different
+// origin remote. The prior single-var cache leaked the first worktree's
+// owner/name into every subsequent ticket's diagnostic URLs.
+const _repoSlugCache = new Map();
 function detectRepoSlug(worktreeDir) {
-  if (_repoSlug !== null) return _repoSlug;
+  const key = worktreeDir || process.cwd();
+  if (_repoSlugCache.has(key)) return _repoSlugCache.get(key);
   const runQuiet = (cmd) => {
     try {
       return cp
@@ -80,8 +85,9 @@ function detectRepoSlug(worktreeDir) {
     try {
       const parsed = JSON.parse(json);
       if (parsed && parsed.owner && parsed.name) {
-        _repoSlug = { owner: parsed.owner.login || parsed.owner, name: parsed.name };
-        return _repoSlug;
+        const slug = { owner: parsed.owner.login || parsed.owner, name: parsed.name };
+        _repoSlugCache.set(key, slug);
+        return slug;
       }
     } catch {
       /* fall through to git remote parse */
@@ -90,11 +96,13 @@ function detectRepoSlug(worktreeDir) {
   const url = runQuiet('git remote get-url origin');
   const m = url.match(/[:/]([^/:]+)\/([^/]+?)(?:\.git)?$/);
   if (m) {
-    _repoSlug = { owner: m[1], name: m[2] };
-    return _repoSlug;
+    const slug = { owner: m[1], name: m[2] };
+    _repoSlugCache.set(key, slug);
+    return slug;
   }
-  _repoSlug = { owner: null, name: null };
-  return _repoSlug;
+  const empty = { owner: null, name: null };
+  _repoSlugCache.set(key, empty);
+  return empty;
 }
 
 /** R11: infra-stuck diagnostic bundle. */
