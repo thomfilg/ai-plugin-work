@@ -125,7 +125,18 @@ function register(entry) {
   if (!registry[eventName]) {
     registry[eventName] = [];
   }
-  registry[eventName].push(record);
+  // Dedupe by (eventName, sourceFile): callers that initExtensions with
+  // different (repoRoot, tasksDir) keys but the same on-disk extension file
+  // (e.g. work-next.js using worktree path vs a step using process.cwd())
+  // would otherwise register the same handler twice and double-fire it.
+  // Replace any existing record for the same sourceFile so the latest
+  // registration wins and handler counts stay correct.
+  const existingIdx = registry[eventName].findIndex((r) => r.sourceFile === sourceFile);
+  if (existingIdx >= 0) {
+    registry[eventName][existingIdx] = record;
+  } else {
+    registry[eventName].push(record);
+  }
   registry[eventName].sort(compareHandlers);
 }
 
