@@ -406,7 +406,7 @@ function mintCompanionToken() {
 }
 
 // eslint-disable-next-line max-lines-per-function, complexity -- allowlisted pre-existing; see .quality-exceptions
-function recordEvidence(phase, ticket, taskNum, cmd, cwd, scope) {
+function recordEvidence(phase, ticket, taskNum, cmd, cwd, scope, opts = {}) {
   // Delegate to tdd-phase-state.js — the only authorized writer. Forward
   // `--task N` so the recorder resolves the per-task state path. Records
   // evidence for the just-completed phase, then (for red/green only)
@@ -448,6 +448,13 @@ function recordEvidence(phase, ticket, taskNum, cmd, cwd, scope) {
       '--cmd',
       wrapStrictMode(cmd),
     ];
+    // Task 4 (GH-528): when the orchestrator detects a docs-exempt or
+    // visual-only GREEN, forward `--docs-exempt` so the recorder relaxes
+    // the RC-D empty-command trap for this single invocation. Sibling of
+    // the RED-side fallback emitted around line 909.
+    if (opts && opts.docsExempt === true && phase === TDD_PHASES.green) {
+      recordArgs.push('--docs-exempt');
+    }
     return spawnSync(process.execPath, recordArgs, {
       cwd,
       stdio: 'pipe',
@@ -954,12 +961,33 @@ function main() {
     if (!passed) {
       blockReason = `Test command still failing (exit ${run.exitCode}). Last output:\n\n${run.combined}`;
     } else {
-      const rec = recordEvidence(TDD_PHASES.green, ticket, taskNum, testCmd, repoRoot, scope);
+      // Task 4 (GH-528): GREEN docs-exempt fallback (sibling of RED block
+      // at ~lines 904-921). When the verification command exits 0 silently
+      // (no stdout/stderr), tdd-phase-state.js's RC-D empty-command trap
+      // normally rejects. For docs-exempt tasks (Type=docs / "docs-only" /
+      // "documentation exempt" markers) and visual-only Storybook tasks,
+      // the verifier IS the test surface — there's no code to assert on —
+      // so we forward `--docs-exempt` to the recorder, which relaxes the
+      // RC-D trap for this one invocation. Emit a diagnostic so operators
+      // see why a silent verifier was accepted. See R8 + R9.
+      const greenDocsExempt = docsExempt || visualOnly;
+      const rec = recordEvidence(
+        TDD_PHASES.green, ticket, taskNum, testCmd, repoRoot, scope,
+        { docsExempt: greenDocsExempt }
+      );
       if (!rec.ok) {
         blockReason = `Could not record GREEN evidence:\n${rec.out}`;
       } else {
         advanced = true;
         phase = TDD_PHASES.refactor;
+        if (greenDocsExempt) {
+          const fallbackLabel = visualOnly
+            ? 'visual-only fallback (Storybook stories-only scope — no testable code surface'
+            : 'docs-exempt fallback (documentation task — no testable code surface';
+          process.stdout.write(
+            `task-next: GREEN accepted via ${fallbackLabel}; verification command exited 0 as required).\n`
+          );
+        }
       }
     }
   } else if (phase === TDD_PHASES.refactor) {

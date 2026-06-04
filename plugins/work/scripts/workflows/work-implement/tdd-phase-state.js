@@ -703,6 +703,11 @@ function cmdRecordGreen(ticketId, args) {
   if (!cmd) errorExit('Missing --cmd argument.');
   const taskNum = safeParseTask(args);
   const opts = taskNum ? { taskNum } : undefined;
+  // --docs-exempt: documentation-only tasks have no testable code surface, so
+  // the RC-D empty-stdout/stderr guard would always trip. Callers (the planner
+  // / task-next driver) opt in via this flag; default false preserves existing
+  // strict behavior for all code tasks.
+  const docsExempt = Array.isArray(args) && args.includes('--docs-exempt');
 
   const state = readState(ticketId, opts);
   if (!state) errorExit('No TDD phase state found. Run "init" first.');
@@ -726,7 +731,11 @@ function cmdRecordGreen(ticketId, args) {
   // was observed on GH-417 / GH-432 / GH-452 — agents could not recover via
   // /work. Real test runners always emit something to stdout or stderr; if
   // both are empty AND exit was 0, the command did no work. Refuse to record.
-  if (stdout.trim() === '' && stderr.trim() === '') {
+  // RC-D armed for non-docs-exempt tasks (R5, GH-528). Documentation-only
+  // tasks have no testable code surface, so callers may opt in via the
+  // `--docs-exempt` CLI flag to bypass the empty-output guard; RC-B and the
+  // `exitCode !== 0` defenses below remain unconditional.
+  if (!docsExempt && stdout.trim() === '' && stderr.trim() === '') {
     errorExit(
       'GREEN test command exited 0 with NO stdout/stderr output. This is the ' +
         'empty-command trap (typically an unbound test-command env var expanded ' +
@@ -979,6 +988,14 @@ function cmdException(ticketId, args) {
 }
 
 // ─── Main ───────────────────────────────────────────────────────────────────
+
+// CLI dispatch only when invoked with subcommand arguments. When `node --test`
+// loads this file (e.g. CHANGED_FILES sweeps that include the source alongside
+// tests), argv has no subcommand — skip dispatch so the runner just records the
+// file with zero tests instead of hitting the subcommand switch + errorExit.
+if (process.argv.length < 3) {
+  return;
+}
 
 const args = process.argv.slice(2);
 const subcommand = args[0];

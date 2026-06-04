@@ -73,14 +73,14 @@ describe('RC-D --docs-exempt relaxation', () => {
   beforeEach(() => { homeDir = mkTempHome(); });
   afterEach(() => { fs.rmSync(homeDir, { recursive: true, force: true }); });
 
-  it('record-green still rejects silent verifiers by default (regression guard)', () => {
+  it('tdd-phase-state record-green still rejects silent verifiers by default', () => {
     seedGreenPhase(homeDir, 'TEST-DOCS-1');
     const r = runCli('record-green TEST-DOCS-1 --cmd \'eval ""\'', homeDir);
     assert.notStrictEqual(r.exitCode, 0, 'default invocation must still reject empty output');
     assert.match(r.stderr, /empty-command trap|NO stdout\/stderr/i);
   });
 
-  it('record-green accepts silent verifiers when --docs-exempt flag is set', () => {
+  it('tdd-phase-state record-green accepts silent verifiers when docs-exempt flag is set', () => {
     const statePath = seedGreenPhase(homeDir, 'TEST-DOCS-2');
     const r = runCli('record-green TEST-DOCS-2 --docs-exempt --cmd \'eval ""\'', homeDir);
     assert.strictEqual(
