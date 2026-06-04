@@ -161,9 +161,51 @@ function readMemoryFile(store, name) {
     inject: meta.inject === 'full' ? 'full' : 'summary',
     disabled: meta.disabled === true || meta.disabled === 'true',
     expired: parseExpired(meta.expires),
+    // Telemetry-related forwarded fields (GH-512 Task 1). These mirror the
+    // values surfaced under `meta`; consumers can read the top-level
+    // properties directly without digging into `meta`. Missing frontmatter
+    // keys leave both as `undefined` so callers can treat absent
+    // `telemetry` as "enabled" and absent `cite_signals` as "auto-extract".
+    citeSignals: normalizeCiteSignals(meta.cite_signals),
+    telemetry: normalizeTelemetry(meta.telemetry),
     meta,
     body,
   };
+}
+
+// Coerce `meta.cite_signals` to an array of non-empty strings, or `undefined`
+// when the frontmatter key is absent. The frontmatter parser already turns
+// `[a, b]` into a JS array, but a single scalar (e.g. `cite_signals: solo`)
+// should still surface as a one-element array so downstream consumers don't
+// have to special-case the shape.
+function normalizeCiteSignals(value) {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (Array.isArray(value)) {
+    const filtered = value.map((s) => String(s).trim()).filter(Boolean);
+    return filtered.length ? filtered : undefined;
+  }
+  // Inline scalar form matches the README example `cite_signals: A, B, C`;
+  // split on commas so each token is a separate signal rather than a single
+  // combined string that would never match the assistant response.
+  // The frontmatter parser surfaces YAML flow lists like `[A]` / `[A, B]`
+  // as the literal bracketed string when it doesn't recognize the array
+  // form, so strip a single matched pair of outer brackets before splitting.
+  let scalar = String(value).trim();
+  const bracketed = scalar.match(/^\[(.*)\]$/);
+  if (bracketed) scalar = bracketed[1];
+  const tokens = scalar.split(',').map((s) => s.trim()).filter(Boolean);
+  return tokens.length ? tokens : undefined;
+}
+
+// Coerce `meta.telemetry` to a boolean when explicitly set, or `undefined`
+// when absent. Consumers treat absent telemetry as enabled (opt-out semantics),
+// so we must distinguish "missing" from "explicit false".
+function normalizeTelemetry(value) {
+  if (value === undefined || value === null || value === '') return undefined;
+  if (typeof value === 'boolean') return value;
+  if (value === 'false') return false;
+  if (value === 'true') return true;
+  return undefined;
 }
 
 function parseExpired(value) {
