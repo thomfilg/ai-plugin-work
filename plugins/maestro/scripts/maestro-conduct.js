@@ -334,13 +334,7 @@ function tickSession(session) {
   // Phase-based rotation runs after all detectors so it sees the freshest
   // marker state, and catches the steady-state pr-ready case independent of
   // pr-status detector dedup.
-  ciGate.maybeRotateOnPhase({
-    ctx,
-    state,
-    actions,
-    prStatusDetector: DETECTORS.prStatus,
-    restartEligible,
-  });
+  ciGate.maybeRotateOnPhase({ ctx, state, actions, restartEligible });
 }
 
 function maybeEmitHeartbeat(sessions) {
@@ -359,6 +353,10 @@ function maybeEmitHeartbeat(sessions) {
 
 function tick() {
   const sessions = tmux.listSessions();
+  // Reconcile manifest task statuses against live tmux at the top of each tick.
+  // Cheap (≤ N file reads, only writes on drift) and gives the operator a live
+  // view of pool occupancy without polling tmux.
+  try { actions.syncManifest(sessions); } catch (e) { alerts.log(`syncManifest failed: ${e.message}`); }
   if (!sessions.length) {
     alerts.log('no GH-*-work sessions');
     return;

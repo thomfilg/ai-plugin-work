@@ -44,21 +44,30 @@ function maybeFreeOnPrReady({ ctx, sHit, workSession, actions }) {
 }
 
 /**
- * Tick-level safety net (see file header). Skips when the rotation has
- * already been recorded so we don't re-emit on every tick.
+ * Tick-level safety net (see file header). Reads the persisted `pr-status`
+ * marker (`lastState`) instead of calling `prStatusDetector.detect`, because
+ * the detector dedups: on the steady-state pr-ready case it returns
+ * `{ hit: false }` with no `checksState`/`mergeable` fields, so calling it
+ * here would never satisfy the green+clean condition.
+ *
+ * `lastState === 'pr-ready'` is the dedup-safe equivalent — `classify()`
+ * (pr-status detector) only sets it to `'pr-ready'` when
+ * `checksState === 'SUCCESS' && mergeable === 'CLEAN'`. The pr-status
+ * detector runs before this function in the tick pipeline so the marker is
+ * always fresh.
  */
-function maybeRotateOnPhase({ ctx, state, actions, prStatusDetector, restartEligible }) {
+function maybeRotateOnPhase({ ctx, state, actions, restartEligible }) {
   if (!CI_OR_LATER_PHASES.has(ctx.phase)) return;
   if (!restartEligible(ctx.session)) return;
   const ciFreed = state.read(ctx.ticket, 'ci-gate-freed') || {};
   if (ciFreed.killed) return;
-  const sHit = prStatusDetector.detect(ctx);
-  if (!isReadyForRotation(sHit, ctx.phase)) return;
+  const prMarker = state.read(ctx.ticket, 'pr-status');
+  if (!prMarker || prMarker.lastState !== 'pr-ready') return;
   actions.freeCIGateSlot({
     session: ctx.session,
     ticket: ctx.ticket,
-    prNumber: sHit.prNumber,
-    sha: sHit.sha,
+    prNumber: prMarker.prNumber,
+    sha: prMarker.sha,
   });
 }
 
