@@ -208,22 +208,17 @@ function _evaluatePreToolMatch(memory, payload) {
  * inputs the trigger considered. Reordering would silently flip which reason
  * surfaces to memory authors, breaking the explainer contract.
  */
-// Stage 4 helper: evaluate exclude_pretool + exclude_prompt against the
-// pre-tool payload. Returns an exclude-matched verdict if any pattern hits,
-// otherwise null. Extracted from matchPreTool to keep cyclomatic complexity
-// of the locked stage ladder under the quality gate.
+// Stage 4 helper: evaluate exclude_pretool against the pre-tool payload.
+// Returns an exclude-matched verdict if any pattern hits, otherwise null.
+// Per R4 (brief P0 #4): exclude_prompt is scoped to the user prompt and
+// is NOT evaluated against the pretool argBlob — there is no prompt
+// string available in the PreToolUse context.
 function _evaluatePreToolExcludes(memory, payload) {
   const argBlob = JSON.stringify(payload?.tool_input || {});
   const toolName = payload?.tool_name || '';
   const excluded = evaluateExcludePretool(memory, toolName, argBlob);
   if (excluded.excluded) {
     return makeMatched({ excluded_pattern: excluded.pattern });
-  }
-  // R11 OR composition: exclude_prompt patterns apply to any input the
-  // trigger saw, matching the prompt-side semantics consistently.
-  const excludedByPrompt = evaluateExcludePrompt(memory, argBlob);
-  if (excludedByPrompt.excluded) {
-    return makeMatched({ excluded_pattern: excludedByPrompt.pattern });
   }
   return null;
 }
@@ -313,13 +308,6 @@ function matchPreToolResult(memory, payload) {
       return {
         reason: 'exclude-matched',
         matched: { excluded_pattern: excluded.pattern },
-      };
-    }
-    const excludedByPrompt = evaluateExcludePrompt(memory, argBlob);
-    if (excludedByPrompt.excluded) {
-      return {
-        reason: 'exclude-matched',
-        matched: { excluded_pattern: excludedByPrompt.pattern },
       };
     }
     return { matched: true };
