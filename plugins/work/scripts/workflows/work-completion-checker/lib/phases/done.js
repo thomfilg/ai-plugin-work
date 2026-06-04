@@ -12,7 +12,7 @@ function validate() {
 
 function instructions(ctx) {
   return [
-    '# completion-next — Phase 8 of 8: DONE',
+    '# completion-next — Phase 11 of 11: DONE',
     `Ticket: ${ctx.ticket}`,
     '',
     'All completion-check phases passed. Return your final report to the orchestrator.',

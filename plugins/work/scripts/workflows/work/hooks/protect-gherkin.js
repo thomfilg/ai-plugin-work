@@ -13,6 +13,12 @@
  * path. Ambiguous diffs (mixed tag + semantic line) default-block to
  * preserve the security invariant.
  *
+ * GH-487: TAG_LINE_RE accepts `/` and `.` so path-bearing tags
+ * (e.g. `@test:plugins/work/.../foo.test.js`) — auto-stamped onto every
+ * scenario by tasks_gate — are recognised as tag lines. Without this the
+ * existing `implement` allow-path is broken for any tasks_gate-stamped
+ * scenario.
+ *
  * Allowed steps: spec
  * All other steps: blocked (exit 2)
  * No workflow active: allowed (exit 0, fail-open)
@@ -24,7 +30,7 @@ const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-e
 const { createArtifactProtector } = require('../../lib/protect-artifact-files');
 
 /** Tag line: zero or more whitespace, then one or more `@token` tokens. */
-const TAG_LINE_RE = /^\s*(@[\w:-]+\s*)+$/;
+const TAG_LINE_RE = /^\s*(@[\w:./-]+\s*)+$/;
 
 /**
  * Detect if an Edit/MultiEdit diff of gherkin.feature touches ONLY tag lines.

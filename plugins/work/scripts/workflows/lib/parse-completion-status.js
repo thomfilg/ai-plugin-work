@@ -57,4 +57,4 @@ function escapeRegex(s) {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-module.exports = { buildVerdictRegex, hasVerdict };
+module.exports = { buildVerdictRegex, hasVerdict, escapeRegex };

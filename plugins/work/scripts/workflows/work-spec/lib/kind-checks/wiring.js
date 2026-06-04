@@ -19,13 +19,19 @@ const {
 } = require('./shared');
 
 function appliesTo(ctx) {
-  const kinds = detectKinds(ctx.tasksDir);
-  if (kinds.includes('wiring')) return true;
-  // Also apply when brief explicitly forbids backend AND no kind tag is
-  // present — wiring is the implicit default for "connect existing" tickets.
+  // Wiring is a spec-time INVARIANT, not a per-task work-type. It fires
+  // whenever the ECHO-4579 contradiction is structurally possible: the
+  // brief forbids backend changes AND the spec's Files to Create/Modify
+  // lists at least one backend file. Gating this on `detectKinds` would
+  // make the check silent on the exact case it's meant to defend — a
+  // brief-forbids-backend ticket whose tasks declare frontend kinds.
+  //
+  // The explicit `### Type: wiring` opt-in is preserved for tickets that
+  // declare wiring as their work-type directly.
+  if (detectKinds(ctx.tasksDir).includes('wiring')) return true;
   const brief = readBrief(ctx.tasksDir);
-  if (briefForbidsBackend(brief) && kinds.length === 0) return true;
-  return false;
+  if (!briefForbidsBackend(brief)) return false;
+  return filesInFilesToModify(readSpec(ctx.tasksDir)).some(isBackendFile);
 }
 
 function validate(ctx) {

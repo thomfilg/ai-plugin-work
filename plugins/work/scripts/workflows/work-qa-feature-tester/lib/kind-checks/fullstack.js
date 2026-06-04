@@ -11,7 +11,12 @@ const backend = require('./backend');
 const { readQaReport, detectKinds } = require('./shared');
 
 function appliesTo(ctx) {
-  return detectKinds(ctx.tasksDir).includes('fullstack');
+  // Structural precondition: tasks declare BOTH frontend and backend kinds
+  // (full-stack ticket by composition). The explicit `### Type: fullstack`
+  // opt-in is preserved for tickets that declare it directly.
+  const kinds = detectKinds(ctx.tasksDir);
+  if (kinds.includes('fullstack')) return true;
+  return kinds.includes('frontend') && kinds.includes('backend');
 }
 
 function validate(ctx) {

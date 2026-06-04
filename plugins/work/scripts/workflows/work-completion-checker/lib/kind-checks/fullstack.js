@@ -11,8 +11,16 @@ const backend = require('./backend');
 const { readChangedFiles, isFrontendFile, isBackendFile, detectKinds } = require('./shared');
 
 function appliesTo(ctx) {
-  return detectKinds(ctx.tasksDir).includes('fullstack');
+  // Structural precondition: completion diff contains BOTH frontend and
+  // backend files. Per-task model authors declare frontend + backend
+  // separately (not `### Type: fullstack`), so file-mix is the signal.
+  const kinds = detectKinds(ctx.tasksDir);
+  if (kinds.includes('fullstack')) return true;
+  if (kinds.includes('frontend') && kinds.includes('backend')) return true;
+  const changed = readChangedFiles(ctx);
+  return changed.some(isFrontendFile) && changed.some(isBackendFile);
 }
+
 
 function validate(ctx) {
   const fr = frontend.validate(ctx);

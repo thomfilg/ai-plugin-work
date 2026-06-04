@@ -43,11 +43,17 @@ describe('agent-authorization: isTrustedScriptPath', () => {
 });
 
 describe('agent-authorization: expandPluginRoot', () => {
-  it('returns input unchanged when env var not set', () => {
+  it('falls back to __dirname-based probing when env var is unset', () => {
+    // With env unset, the env-honouring resolver still probes from the file's
+    // location and substitutes a real plugin root, so the placeholder is
+    // expanded (no longer a no-op). The substituted root must end in the
+    // canonical plugin layout marker.
     const orig = process.env.CLAUDE_PLUGIN_ROOT;
     delete process.env.CLAUDE_PLUGIN_ROOT;
     try {
-      assert.equal(expandPluginRoot('$CLAUDE_PLUGIN_ROOT/x.js'), '$CLAUDE_PLUGIN_ROOT/x.js');
+      const out = expandPluginRoot('$CLAUDE_PLUGIN_ROOT/x.js');
+      assert.notEqual(out, '$CLAUDE_PLUGIN_ROOT/x.js');
+      assert.ok(out.endsWith('/x.js'), `expected suffix /x.js, got: ${out}`);
     } finally {
       if (orig !== undefined) process.env.CLAUDE_PLUGIN_ROOT = orig;
     }

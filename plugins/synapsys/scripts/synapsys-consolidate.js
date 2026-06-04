@@ -26,8 +26,11 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { setupCli } = require('../lib/script-bootstrap');
+const { hashFile } = require('../lib/staleness');
 
-const PROFILES_DIR = path.join(__dirname, 'consolidate-profiles');
+const PROFILES_DIR =
+  process.env.SYNAPSYS_CONSOLIDATE_PROFILES_DIR_FOR_TEST ||
+  path.join(__dirname, 'consolidate-profiles');
 
 function parseProfiles(argv) {
   const out = [];
@@ -126,7 +129,13 @@ function isTypographySentinel(memory) {
 
 function mergeTypographyGroup(typo) {
   const sorted = [...typo].sort((a, b) => a.name.localeCompare(b.name));
-  return {
+  // GH-446: typography members share a single profile source after the
+  // collectProfileMemories stamping hook, so the merged memory inherits the
+  // first member's meta.source / meta.source_hash. Without this, the merged
+  // memory would have no source_hash and the staleness checker would
+  // silently classify it as `skip`, making drift undetectable.
+  const meta = sorted.find((m) => m.meta)?.meta;
+  const merged = {
     name: 'ui-component-typography',
     events: ['PreToolUse'],
     trigger_pretool: ['Edit:.*\\.tsx', 'Write:.*\\.tsx'],
@@ -134,6 +143,8 @@ function mergeTypographyGroup(typo) {
     inject: 'full',
     body: sorted.map((m) => m.body).join('\n\n---\n\n'),
   };
+  if (meta) merged.meta = meta;
+  return merged;
 }
 
 function mergeCollisions(memories) {
@@ -199,7 +210,15 @@ function collectProfileMemories(profile, name, repo) {
   const memories = [];
   for (const { item, source } of items) {
     const memory = profile.toMemory(item, { source, repo, peers });
-    if (memory) memories.push(memory);
+    if (!memory) continue;
+    // GH-446 stamping hook (spec §P0#1): stamp every memory with its
+    // repo-relative `source` and `source_hash` so the staleness checker can
+    // compare stored hashes against current files. Object.assign keeps any
+    // pre-existing meta and lets stamping fields win on collision.
+    const sourceRel = path.relative(repo, source);
+    const source_hash = hashFile(source);
+    memory.meta = Object.assign({}, memory.meta, { source: sourceRel, source_hash });
+    memories.push(memory);
   }
   process.stderr.write(
     `profile=${name} sources=${(profile.sources || []).length} items=${items.length} memories=${memories.length}\n`
