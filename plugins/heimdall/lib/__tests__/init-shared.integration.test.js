@@ -66,6 +66,7 @@ describe('heimdall-init.js --kind=shared', () => {
 
     const cfg = JSON.parse(fs.readFileSync(expectedMarker, 'utf8'));
     assert.equal(cfg.kind, 'shared');
+    assert.equal(cfg.projectName, null, 'shared marker must not embed a project name');
   });
 });
 

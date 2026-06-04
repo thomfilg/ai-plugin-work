@@ -8,12 +8,15 @@
  * per memory), heimdall keeps everything in the marker itself — the marker IS
  * the config and holds the `locks` array.
  *
- * Three store kinds, same precedence as synapsys:
+ * Four store kinds (see `PRECEDENCE_ORDER`):
  *   local    → <cwd>/.claude/heimdall
  *   worktree → nearest ancestor above cwd carrying the marker
  *   global   → ~/.claude/heimdall/<projectName>
+ *   shared   → ~/.claude/heimdall-shared  (user-wide across every project)
  *
- * Locks discovered across all active stores are merged.
+ * Locks discovered across all active stores are merged; on conflict the
+ * earlier kind in `PRECEDENCE_ORDER` (local > worktree > global > shared)
+ * wins.
  */
 
 const fs = require('node:fs');
@@ -74,10 +77,19 @@ function candidateStores(cwd, projectName) {
  * `<ancestor>/.claude/heimdall/.heimdall.json`. Returns the store dir or ''.
  * (Same rationale as synapsys: sessions may run from a sub-directory of a
  * worktree whose shared store sits at the worktree base.)
+ *
+ * Stops at the user's HOME directory: the per-user global / shared stores
+ * live under `~/.claude/` and are already discovered as the `global` and
+ * `shared` kinds; treating `~/.claude/heimdall` as a "worktree" ancestor of
+ * any cwd inside HOME would double-count it and, worse, cause an unrelated
+ * project's marker to leak into sandboxed e2e tests whose tmp HOME is
+ * nested under the real user's HOME (GH-541 R11 / Task 11).
  */
 function findAncestorStore(startDir) {
+  const home = os.homedir();
   let dir = startDir;
   for (;;) {
+    if (dir === home) return '';
     if (fs.existsSync(path.join(dir, '.claude', FOLDER, MARKER))) {
       return path.join(dir, '.claude', FOLDER);
     }

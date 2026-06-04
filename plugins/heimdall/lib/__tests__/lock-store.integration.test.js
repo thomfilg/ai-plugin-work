@@ -92,6 +92,28 @@ describe('discoverStores returns the shared store from any cwd', () => {
   });
 });
 
+describe('discoverStores does not report ~/.claude/heimdall as a worktree ancestor', () => {
+  it('returns no spurious worktree entry when cwd is nested under HOME', () => {
+    // Seed a marker at `<fakeHome>/.claude/heimdall/.heimdall.json`. Without
+    // the HOME-stop in findAncestorStore(), discoverStores() for a cwd nested
+    // under HOME would walk up past HOME and pick this marker up as a
+    // "worktree" ancestor — leaking an unrelated project's locks into this
+    // session. Guards the GH-541 R11 fix in lib/lock-store.js.
+    writeConfig(path.join(fakeHome, '.claude', FOLDER), { kind: 'global', locks: [] });
+
+    const sub = path.join(fakeHome, 'sub', 'dir');
+    fs.mkdirSync(sub, { recursive: true });
+
+    const stores = discoverStores(sub);
+    const worktree = stores.find((s) => s.kind === 'worktree');
+    assert.equal(
+      worktree,
+      undefined,
+      `expected no worktree store, got ${JSON.stringify(worktree)}`
+    );
+  });
+});
+
 describe('discoverStores precedence orders shared last', () => {
   it('returns entries in order local, worktree, global, shared', () => {
     // Layout: <base>/wt/.claude/heimdall (worktree marker)

@@ -39,7 +39,10 @@ const existing = readConfig(target.dir);
 const cfg = {
   schemaVersion: SCHEMA_VERSION,
   kind,
-  projectName,
+  // The shared store is cross-project, so the marker must not embed a real
+  // project name (synapsys parity + GH-541 spec §Data Model). All other
+  // kinds keep the resolved project name so list/scan can show provenance.
+  projectName: kind === 'shared' ? null : projectName,
   createdAt: existing?.createdAt || new Date().toISOString(),
   updatedAt: new Date().toISOString(),
   locks: existing?.locks || [],
@@ -48,5 +51,5 @@ writeConfig(target.dir, cfg);
 
 console.log(
   `initialized heimdall store at ${path.join(target.dir, MARKER)} ` +
-    `(kind=${kind}, project=${projectName}, locks=${cfg.locks.length})`
+    `(kind=${kind}, project=${cfg.projectName ?? '<none>'}, locks=${cfg.locks.length})`
 );

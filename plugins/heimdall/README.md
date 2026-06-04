@@ -47,17 +47,36 @@ Config lives in the store marker `.heimdall.json`:
 
 ## Store kinds (like synapsys)
 
-| kind     | location                              | scope                          |
-|----------|---------------------------------------|--------------------------------|
-| local    | `./.claude/heimdall`                  | this directory                 |
-| worktree | nearest ancestor `../.claude/heimdall`| shared across a worktree base  |
-| global   | `~/.claude/heimdall/<project>`        | survives worktree deletion     |
+| kind     | location                              | scope                                                              |
+|----------|---------------------------------------|--------------------------------------------------------------------|
+| local    | `./.claude/heimdall`                  | this directory                                                     |
+| worktree | nearest ancestor `../.claude/heimdall`| shared across a worktree base                                      |
+| global   | `~/.claude/heimdall/<project>`        | survives worktree deletion (scoped to this project)                |
+| shared   | `~/.claude/heimdall-shared`           | user-wide across every project — e.g. `~/.claude`, `~/.gitconfig`, `~/.ssh`, `~/.aws` |
 
-Locks from every active store are merged at evaluation time.
+Locks from every active store are merged at evaluation time. When the same
+path is protected by more than one store, the earlier kind wins:
+**`local > worktree > global > shared`**. The `shared` store applies last
+and broadest — use it for user-wide paths that should be guarded in every
+project, while keeping per-project locks in `local`/`worktree`/`global`.
+
+### Migrating from the home-level workaround
+
+If you previously worked around the lack of a shared kind by placing a
+marker directly at `~/.claude/heimdall/.heimdall.json`, move it under the
+new shared directory in one shot:
+
+```bash
+mkdir -p ~/.claude/heimdall-shared && \
+  mv ~/.claude/heimdall/.heimdall.json ~/.claude/heimdall-shared/.heimdall.json
+```
+
+Then run `/heimdall:list` to confirm the locks are now reported under the
+`shared` kind.
 
 ## Skills
 
-- **`/heimdall:install [local|worktree|global]`** — create a store (`.heimdall.json`).
+- **`/heimdall:install [local|worktree|global|shared]`** — create a store (`.heimdall.json`).
 - **`/heimdall:protect <paths> [phrase]`** — add/extend a lock block.
 - **`/heimdall:unprotect <phrase> [paths]`** — remove a block or specific paths.
 - **`/heimdall:list`** — show every store, block, phrase, and resolved file/dir.
