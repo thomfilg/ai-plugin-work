@@ -47,11 +47,25 @@ function createTempState(stateData) {
   if (stateData) {
     fs.writeFileSync(stateFile, JSON.stringify(stateData, null, 2));
   }
+  // Snapshot env so test cleanup can restore it after the test body has
+  // exercised the in-process helpers (which need TASKS_BASE/WORK_TICKET_ID
+  // set during the call, not just during require()).
+  const prevTasksBase = process.env.TASKS_BASE;
+  const prevProvider = process.env.TICKET_PROVIDER;
+  const prevTicketId = process.env.WORK_TICKET_ID;
   return {
     tmpDir,
     ticketDir,
     stateFile,
-    cleanup: () => fs.rmSync(tmpDir, { recursive: true, force: true }),
+    cleanup: () => {
+      if (prevTasksBase === undefined) delete process.env.TASKS_BASE;
+      else process.env.TASKS_BASE = prevTasksBase;
+      if (prevProvider === undefined) delete process.env.TICKET_PROVIDER;
+      else process.env.TICKET_PROVIDER = prevProvider;
+      if (prevTicketId === undefined) delete process.env.WORK_TICKET_ID;
+      else process.env.WORK_TICKET_ID = prevTicketId;
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    },
   };
 }
 
@@ -83,26 +97,23 @@ function makeState(comments) {
 }
 
 /**
- * Require the module fresh with TASKS_BASE / cwd pointed at a temp dir so
- * loadState() / saveState() target our fixture rather than the real repo.
+ * Require the module fresh with TASKS_BASE and WORK_TICKET_ID pointed at our
+ * fixture so loadState() / saveState() target the temp dir rather than the
+ * real repo. Env is left set after this returns — the caller's cleanup()
+ * (registered by createTempState) restores it after the test body runs.
+ *
+ * Note: we set WORK_TICKET_ID explicitly because the test runner is itself
+ * spawned from a real git worktree (branch GH-NNN-...), and getCurrentTaskId()
+ * prefers `git branch --show-current` over cwd. Without the override the
+ * in-process helpers would resolve a ticket dir that doesn't match the temp
+ * fixture.
  */
 function freshRequire(ticketDir, tmpDir) {
   delete require.cache[SCRIPT_PATH];
-  const prevCwd = process.cwd();
-  const prevTasksBase = process.env.TASKS_BASE;
-  const prevProvider = process.env.TICKET_PROVIDER;
-  process.chdir(ticketDir);
   process.env.TASKS_BASE = tmpDir;
   process.env.TICKET_PROVIDER = 'github';
-  try {
-    return require(SCRIPT_PATH);
-  } finally {
-    process.chdir(prevCwd);
-    if (prevTasksBase === undefined) delete process.env.TASKS_BASE;
-    else process.env.TASKS_BASE = prevTasksBase;
-    if (prevProvider === undefined) delete process.env.TICKET_PROVIDER;
-    else process.env.TICKET_PROVIDER = prevProvider;
-  }
+  process.env.WORK_TICKET_ID = 'GH-276';
+  return require(SCRIPT_PATH);
 }
 
 describe('follow-up-pr-comments helpers (Task 1 integration)', () => {
