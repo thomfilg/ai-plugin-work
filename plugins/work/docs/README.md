@@ -68,3 +68,32 @@ follow_up → ci → cleanup → reports → complete
 | `spec.md` | `TASKS_BASE/<ticket>/` | Technical specification |
 | `tasks.md` | `TASKS_BASE/<ticket>/` | Task decomposition |
 | `*.check.md` | `TASKS_BASE/<ticket>/` | Quality reports |
+
+## Troubleshooting
+
+### `gh` calls fail with "Could not resolve to a Repository"
+
+`ghExec` (`scripts/workflows/work/scripts/gh-exec.js`) scrubs `GH_TOKEN` and
+`GITHUB_TOKEN` from the child env so `gh` falls back to the keyring's **active**
+`hosts.yml` account. When that active account lacks access to the target repo,
+every gh call fails with the GraphQL message
+`Could not resolve to a Repository with the name '<owner>/<repo>'` — even
+though the repo exists.
+
+To make this faster to diagnose, `ghExec` detects auth-shaped failures
+(`Could not resolve to a Repository`, `Resource not accessible`,
+`HTTP 401/403/404`, `requires authentication`) and appends a diagnostic block
+to the thrown error containing the active gh account, other configured
+accounts, and a `gh auth switch --user <correct-account>` hint.
+
+**If you see the diagnostic block:**
+1. Run `gh auth status` locally to confirm the active account.
+2. Switch to the account that owns the target repo:
+   `gh auth switch --user <correct-account>`
+3. Or unset `GH_TOKEN` / `GITHUB_TOKEN` in your shell so `gh` resolves
+   authentication from the keyring consistently.
+
+**Opt-out:** Set `GH_EXEC_NO_DIAG=1` (strict match) to suppress the
+diagnostic block — e.g. in CI environments where the raw error is preferred.
+The diagnostic is additive to the thrown `Error.message`; it never changes
+return shapes or `ghExec` semantics on the success path.
