@@ -215,6 +215,10 @@ function isInfraSuspected(result) {
   return Boolean(result) && result.classification === 'infra-suspected';
 }
 
+function classifyWithDefaults(state, ctx) {
+  return classify(state || {}, ctx || {});
+}
+
 // Bug 542-14: if a prior cycle exhausted infra retries, the spec forbids
 // dispatching fix-ci even if a later classification would otherwise return
 // `code-failure`. Stay in the infra-stuck surface so the human handler
@@ -260,9 +264,7 @@ function runInfraRetryStep(state, ctx) {
   if (exhaustedSurface) return exhaustedSurface;
 
   // R1e / R7: consult the classifier.
-  const safeState = state || {};
-  const safeCtx = ctx || {};
-  const result = classify(safeState, safeCtx);
+  const result = classifyWithDefaults(state, ctx);
 
   // R14: telemetry append on every classification.
   recordClassification(state, result);
