@@ -25,6 +25,11 @@ const MARKER = '.heimdall.json';
 const FOLDER = 'heimdall';
 const SHARED_FOLDER = `${FOLDER}-shared`;
 const SCHEMA_VERSION = 1;
+// Documented lock-merge precedence (GH-541 R4): when the same path is
+// protected in multiple stores, earlier kinds win. `discoverStores` returns
+// active stores in this order, and downstream merge/scan/list consumers
+// align on this constant rather than hand-rolling string literals.
+const PRECEDENCE_ORDER = Object.freeze(['local', 'worktree', 'global', 'shared']);
 
 // jscpd:ignore-start
 // The store-discovery primitives below intentionally mirror synapsys's
@@ -171,6 +176,7 @@ module.exports = {
   FOLDER,
   SHARED_FOLDER,
   SCHEMA_VERSION,
+  PRECEDENCE_ORDER,
   safeExec,
   getRepoRoot,
   getProjectName,
