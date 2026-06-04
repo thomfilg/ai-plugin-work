@@ -311,3 +311,163 @@ test('Exit code is non-zero only when at least one high-severity pair exists (AC
   assert.equal(activePair.severity, 'high', `cross-domain jaccard≥0.5 pair must be high, got ${activePair.severity}`);
   assert.equal(rLo.status, 1, `expected exit 1 when at least one high pair exists, got ${rLo.status}. stderr=${rLo.stderr}`);
 });
+
+// ─── Task 8: suggestion generator + formatHuman/formatJson ordering ───
+//
+// Three scenarios per tasks.md §Task 8 §Sub-deliverables 8.1.1 RED:
+//   (a) suggestion strings contain a token literal from the pair,
+//   (b) pairs ordered severity desc then score desc,
+//   (c) human output renders pair header, cause, suggestion, overlap rate +
+//       severity tag in that order.
+
+test('Task 8 (a) — suggestion strings reference a concrete token from the pair (AC-G1 / R8)', () => {
+  const { cwd } = buildSlackFlakeStore();
+  const { lintStore } = require(CLI);
+  const result = lintStore({ cwd, scope: 'all' });
+
+  // Every reported trigger-overlap / trigger-body-overlap pair MUST carry a
+  // non-empty suggestion string. (Task 7's `broadTriggers` entries are NOT
+  // pairs and are excluded from this assertion.)
+  assert.ok(result.pairs.length > 0, 'fixture must produce at least one pair');
+  for (const p of result.pairs) {
+    assert.equal(
+      typeof p.suggestion,
+      'string',
+      `pair ${p.a}/${p.b} (${p.rule}) suggestion must be a string, got ${typeof p.suggestion}`
+    );
+    assert.ok(
+      p.suggestion.length > 0,
+      `pair ${p.a}/${p.b} (${p.rule}) suggestion must be non-empty`
+    );
+  }
+
+  // The slack/flake body pair must mention a literal token that appears in
+  // either memory's trigger or body — not a generic recommendation.
+  const slackFlake = result.pairs.find(
+    (p) =>
+      p.rule === 'trigger-body-overlap' &&
+      [p.a, p.b].sort().join('|') ===
+        ['flaky-test-fix-protocol', 'slack-handoff-ask-before-clipboard'].join('|')
+  );
+  assert.ok(slackFlake, `slack/flake body pair must exist, got pairs=${JSON.stringify(result.pairs.map((p) => [p.rule, p.a, p.b]))}`);
+  const concreteTokens = ['slack', 'clipboard', 'handoff', 'flaky', 'flake', 'intermittent', 'quarantine'];
+  const lowered = slackFlake.suggestion.toLowerCase();
+  assert.ok(
+    concreteTokens.some((t) => lowered.includes(t)),
+    `suggestion must name a concrete token from {${concreteTokens.join(', ')}}, got "${slackFlake.suggestion}"`
+  );
+  // R8: a generic phrase like "tighten your trigger" is not acceptable.
+  assert.ok(
+    !/^(tighten|review|fix|consider)\b[^`]*$/i.test(slackFlake.suggestion.trim()) ||
+      concreteTokens.some((t) => lowered.includes(t)),
+    `suggestion must not be generic advice without a token literal, got "${slackFlake.suggestion}"`
+  );
+});
+
+test('Task 8 (b) — pairs are ordered severity desc then score desc (R9)', () => {
+  // Build a mixed fixture by composing the existing per-task stores so we
+  // get pairs across severities (high / medium / low). We invoke `lintStore`
+  // directly on each, then assert the comparator on the slack/flake store
+  // (which produces multiple body pairs) and on the trigger-overlap proj
+  // fixture (which carries low/medium/high mixes from Task-4 downgrades).
+  const { lintStore } = require(CLI);
+
+  const SEVERITY_RANK = { high: 3, medium: 2, low: 1 };
+  function assertOrdered(pairs, label) {
+    for (let i = 1; i < pairs.length; i++) {
+      const prev = pairs[i - 1];
+      const cur = pairs[i];
+      const prevRank = SEVERITY_RANK[prev.severity];
+      const curRank = SEVERITY_RANK[cur.severity];
+      assert.ok(
+        prevRank >= curRank,
+        `${label}: pairs[${i - 1}].severity (${prev.severity}) must be >= pairs[${i}].severity (${cur.severity})`
+      );
+      if (prevRank === curRank) {
+        assert.ok(
+          prev.score >= cur.score,
+          `${label}: same-severity pairs must be score-desc; pairs[${i - 1}].score=${prev.score} < pairs[${i}].score=${cur.score}`
+        );
+      }
+    }
+  }
+
+  const projResult = lintStore({ cwd: PROJ_CWD, scope: 'all' });
+  assert.ok(projResult.pairs.length >= 2, `proj fixture must produce ≥2 pairs to verify ordering, got ${projResult.pairs.length}`);
+  assertOrdered(projResult.pairs, 'proj store');
+
+  const { cwd } = buildSlackFlakeStore();
+  const slackResult = lintStore({ cwd, scope: 'all' });
+  assertOrdered(slackResult.pairs, 'slack/flake store');
+
+  // CLI JSON envelope must also be ordered (R9 explicitly applies to JSON).
+  const r = runLint([`--cwd=${PROJ_CWD}`, '--scope=all', '--json']);
+  const env = parseJson(r.stdout);
+  assert.ok(env, `CLI JSON must parse, stdout=${r.stdout}`);
+  assertOrdered(env.pairs, 'CLI JSON envelope');
+});
+
+test('Task 8 (c) — formatHuman renders header → cause → suggestion → overlap+severity (AC-G10)', () => {
+  const { cwd } = buildSlackFlakeStore();
+  const { lintStore, formatHuman } = require(CLI);
+  const result = lintStore({ cwd, scope: 'all' });
+  const text = formatHuman(result);
+  assert.equal(typeof text, 'string', `formatHuman must return a string, got ${typeof text}`);
+  assert.ok(text.length > 0, 'formatHuman output must be non-empty');
+
+  // Find the slack/flake block. The pair header must use the form `A ⇄ B`
+  // (per tasks.md §Acceptance Criteria). The block then contains, IN ORDER:
+  //   cause line, suggestion line, overlap-rate + `[severity: <tier>]` tag.
+  const slackPair = result.pairs.find(
+    (p) =>
+      p.rule === 'trigger-body-overlap' &&
+      [p.a, p.b].sort().join('|') ===
+        ['flaky-test-fix-protocol', 'slack-handoff-ask-before-clipboard'].join('|')
+  );
+  assert.ok(slackPair, 'slack/flake body pair must exist for human-format assertion');
+  const a = slackPair.a;
+  const b = slackPair.b;
+
+  // Header must contain both names joined by `⇄`.
+  const headerRe = new RegExp(`${a}\\s*⇄\\s*${b}|${b}\\s*⇄\\s*${a}`);
+  const headerMatch = text.match(headerRe);
+  assert.ok(headerMatch, `formatHuman output must contain a '${a} ⇄ ${b}' header line, got:\n${text}`);
+  const blockStart = headerMatch.index;
+  // Block ends at the next header (or end of string).
+  const rest = text.slice(blockStart + headerMatch[0].length);
+  const nextHeader = rest.search(/\n\S.*⇄/);
+  const block = nextHeader === -1 ? rest : rest.slice(0, nextHeader);
+
+  // Identify the four ordered elements WITHIN the block.
+  // - cause: mentions the rule (e.g. "trigger-body-overlap") or the matched token "slack".
+  // - suggestion: equals (or contains) the pair's suggestion string.
+  // - overlap-rate + severity tag: contains "[severity: high]" plus a numeric
+  //   rate (score or jaccard-style number).
+  const idxCause = Math.max(
+    block.indexOf('trigger-body-overlap'),
+    block.toLowerCase().indexOf('cause')
+  );
+  const idxSuggestion = block.indexOf(slackPair.suggestion);
+  const idxSeverityTag = block.indexOf('[severity: high]');
+
+  assert.ok(idxCause >= 0, `block must contain a cause line, got:\n${block}`);
+  assert.ok(idxSuggestion >= 0, `block must contain the suggestion line "${slackPair.suggestion}", got:\n${block}`);
+  assert.ok(idxSeverityTag >= 0, `block must contain "[severity: high]" tag, got:\n${block}`);
+
+  assert.ok(
+    idxCause < idxSuggestion,
+    `cause line must precede suggestion line (cause@${idxCause}, suggestion@${idxSuggestion})`
+  );
+  assert.ok(
+    idxSuggestion < idxSeverityTag,
+    `suggestion line must precede severity tag (suggestion@${idxSuggestion}, severityTag@${idxSeverityTag})`
+  );
+
+  // The overlap rate (numeric) must appear on the same line as the severity
+  // tag (per tasks.md "overlap rate + [severity: <tier>] tag" — single line).
+  const severityLine = block.slice(block.lastIndexOf('\n', idxSeverityTag) + 1).split('\n')[0];
+  assert.ok(
+    /\d/.test(severityLine),
+    `severity-tag line must include the overlap rate, got line="${severityLine}"`
+  );
+});

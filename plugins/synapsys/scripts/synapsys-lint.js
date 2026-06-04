@@ -614,6 +614,12 @@ function lintStore(opts) {
     .concat(pretoolPairs)
     .filter((p) => !broadNames.has(p.a) && !broadNames.has(p.b));
 
+  // Task 8: populate suggestion strings (R8) and order by severity desc → score desc (R9).
+  for (const p of pairs) {
+    p.suggestion = generateSuggestion(p, memories);
+  }
+  pairs.sort(compareBySeverityThenScore);
+
   const hasHigh = pairs.some((p) => p.severity === 'high');
   const exitCode = hasHigh ? EXIT_HIGH_SEVERITY : EXIT_OK;
 
@@ -627,6 +633,113 @@ function lintStore(opts) {
   };
 }
 
+// Severity rank used by the pair comparator.
+const SEVERITY_RANK = { high: 3, medium: 2, low: 1 };
+
+/**
+ * compareBySeverityThenScore — R9 ordering for the `pairs` array.
+ *
+ * Sort key: severity descending (high > medium > low), then `score`
+ * descending. Stable for the small N typical of a memory store; falls back
+ * to (a,b) name tuple as a deterministic tiebreaker.
+ */
+function compareBySeverityThenScore(p, q) {
+  const ps = SEVERITY_RANK[p.severity] || 0;
+  const qs = SEVERITY_RANK[q.severity] || 0;
+  if (ps !== qs) return qs - ps;
+  const pScore = typeof p.score === 'number' ? p.score : 0;
+  const qScore = typeof q.score === 'number' ? q.score : 0;
+  if (pScore !== qScore) return qScore - pScore;
+  const pKey = `${p.a}|${p.b}|${p.rule}`;
+  const qKey = `${q.a}|${q.b}|${q.rule}`;
+  if (pKey < qKey) return -1;
+  if (pKey > qKey) return 1;
+  return 0;
+}
+
+/**
+ * pickPairMemories — locate the two memory records matching pair.a / pair.b
+ * within the discovered memory list. Returns `{ aMem, bMem }` (either may be
+ * null if not found — suggestion generation degrades gracefully).
+ */
+function pickPairMemories(memories, pair) {
+  const byName = new Map(memories.map((m) => [m.name, m]));
+  return { aMem: byName.get(pair.a) || null, bMem: byName.get(pair.b) || null };
+}
+
+/**
+ * generateSuggestion — R8: produce a non-empty advice string that references
+ * a literal token from one of the pair's memories.
+ *
+ * Strategy per rule:
+ *   - trigger-body-overlap: name a matchedToken (from the bodyPair record);
+ *     suggest tightening the receiving memory's trigger to exclude that
+ *     token, or scoping it via context. Pick the first matched token so the
+ *     output is deterministic.
+ *   - trigger-overlap: compute token-set difference (A's alternation tokens
+ *     minus B's, and vice versa) and recommend adding/removing a concrete
+ *     token. Falls back to the shared-token intersection when one side is
+ *     a strict subset.
+ *   - pretool-overlap: name the shared tool + a literal arg-source token.
+ */
+function generateSuggestion(pair, memories) {
+  const { aMem, bMem } = pickPairMemories(memories, pair);
+
+  if (pair.rule === 'trigger-body-overlap') {
+    const matched = Array.isArray(pair.matchedTokens) ? pair.matchedTokens : [];
+    const token = matched[0];
+    if (token) {
+      return `Tighten ${pair.b}.trigger_prompt to exclude the literal token \`${token}\` (matched ${pair.score}× in ${pair.a}'s body), or move the body reference into a [[${pair.b}]] link.`;
+    }
+    return `Tighten ${pair.b}.trigger_prompt — its tokens appear ${pair.score}× inside ${pair.a}'s body.`;
+  }
+
+  if (pair.rule === 'trigger-overlap') {
+    const aTokens = aMem
+      ? new Set(extractAlternationTokens(aMem.triggerPrompt || ''))
+      : new Set();
+    const bTokens = bMem
+      ? new Set(extractAlternationTokens(bMem.triggerPrompt || ''))
+      : new Set();
+    const aOnly = [...aTokens].filter((t) => !bTokens.has(t));
+    const bOnly = [...bTokens].filter((t) => !aTokens.has(t));
+    const shared = [...aTokens].filter((t) => bTokens.has(t));
+    if (aOnly.length > 0 && bOnly.length === 0 && shared.length > 0) {
+      // A is a strict superset → recommend removing a shared token from A.
+      return `Remove the token \`${shared[0]}\` from ${pair.a}.trigger_prompt to disambiguate it from ${pair.b}.`;
+    }
+    if (bOnly.length > 0 && aOnly.length === 0 && shared.length > 0) {
+      return `Remove the token \`${shared[0]}\` from ${pair.b}.trigger_prompt to disambiguate it from ${pair.a}.`;
+    }
+    if (shared.length > 0) {
+      const distinctive = aOnly[0] || bOnly[0] || shared[0];
+      return `Trigger sets share \`${shared[0]}\` — tighten ${pair.a} or ${pair.b} by anchoring on \`${distinctive}\` (or removing the shared token).`;
+    }
+    return `Reduce overlap between ${pair.a} and ${pair.b}.trigger_prompt.`;
+  }
+
+  if (pair.rule === 'pretool-overlap') {
+    const aPretool = (aMem && aMem.triggerPretool) || [];
+    const bPretool = (bMem && bMem.triggerPretool) || [];
+    function firstArgFor(list, tool) {
+      for (const ent of list) {
+        if (ent && ent.tool === tool && typeof ent.arg === 'string') return ent.arg;
+        if (typeof ent === 'string' && ent.startsWith(`${tool}:`)) return ent.slice(tool.length + 1);
+      }
+      return null;
+    }
+    const aArg = firstArgFor(aPretool, pair.tool);
+    const bArg = firstArgFor(bPretool, pair.tool);
+    const sample = aArg || bArg;
+    if (sample) {
+      return `Narrow ${pair.a} or ${pair.b}.trigger_pretool[${pair.tool}] — their arg-patterns overlap on \`${sample}\`.`;
+    }
+    return `Narrow ${pair.a} or ${pair.b}.trigger_pretool[${pair.tool}] to avoid overlap.`;
+  }
+
+  return `Reduce overlap between ${pair.a} and ${pair.b}.`;
+}
+
 function formatJson(result) {
   return JSON.stringify({
     warnings: result.warnings,
@@ -636,12 +749,62 @@ function formatJson(result) {
   });
 }
 
+/**
+ * formatRate — canonical numeric formatter for human-readable overlap rates.
+ * Integer scores (Task-5 body match counts) render as-is; jaccard fractions
+ * render to two decimal places. Centralized so `humanCauseLine` and the
+ * overlap-rate line in `formatHuman` stay consistent.
+ */
+function formatRate(score) {
+  if (typeof score !== 'number') return String(score);
+  return Number.isInteger(score) ? String(score) : score.toFixed(2);
+}
+
+/**
+ * humanCauseLine — one-line summary of why the pair was flagged. Uses the
+ * rule key plus a numeric signal so the cause is self-explanatory.
+ */
+function humanCauseLine(pair) {
+  if (pair.rule === 'trigger-body-overlap') {
+    const matched = Array.isArray(pair.matchedTokens) ? pair.matchedTokens.join(', ') : '';
+    return `cause: trigger-body-overlap — ${pair.b}'s trigger matched ${pair.score}× in ${pair.a}'s body${matched ? ` (tokens: ${matched})` : ''}`;
+  }
+  if (pair.rule === 'pretool-overlap') {
+    return `cause: pretool-overlap on tool \`${pair.tool}\` (jaccard=${formatRate(pair.score)})`;
+  }
+  // trigger-overlap (default)
+  return `cause: trigger-overlap (jaccard=${formatRate(pair.score)})`;
+}
+
+/**
+ * formatHuman — AC-G10: for each pair, emit four lines in order:
+ *   1. pair header `A ⇄ B`
+ *   2. cause line
+ *   3. suggestion line
+ *   4. overlap rate + `[severity: <tier>]` tag (single line)
+ *
+ * Broad-trigger entries follow the pair blocks under a separate heading.
+ */
 function formatHuman(result) {
-  // Task-3 scaffold stub — Task 8 reimplements with full pair-header layout.
   const lines = [];
-  lines.push(`pairs: ${result.pairs.length}`);
-  lines.push(`broadTriggers: ${result.broadTriggers.length}`);
-  return lines.join('\n');
+  if (result.pairs.length === 0 && result.broadTriggers.length === 0) {
+    lines.push('synapsys-lint: no overlap pairs or broad triggers reported.');
+    return lines.join('\n');
+  }
+  for (const p of result.pairs) {
+    lines.push(`${p.a} ⇄ ${p.b}`);
+    lines.push(`  ${humanCauseLine(p)}`);
+    lines.push(`  suggestion: ${p.suggestion || ''}`);
+    lines.push(`  overlap=${formatRate(p.score)} [severity: ${p.severity}]`);
+    lines.push('');
+  }
+  if (result.broadTriggers.length > 0) {
+    lines.push('broad triggers:');
+    for (const e of result.broadTriggers) {
+      lines.push(`  - ${e.name}: ${e.reason} [severity: ${e.severity}]`);
+    }
+  }
+  return lines.join('\n').replace(/\n+$/, '');
 }
 
 function main() {
@@ -679,6 +842,8 @@ module.exports = {
   formatHuman,
   formatJson,
   parseArgs,
+  generateSuggestion,
+  compareBySeverityThenScore,
   // Exit-code constants exported for tests / downstream callers.
   EXIT_OK,
   EXIT_HIGH_SEVERITY,
