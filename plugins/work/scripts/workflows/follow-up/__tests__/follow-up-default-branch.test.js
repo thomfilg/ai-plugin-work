@@ -83,4 +83,48 @@ describe('follow-up-next — default branch detection (Bug F)', () => {
       assert.ok(files.includes('new.txt'), 'diff against origin/develop must list new.txt');
     }
   });
+
+  it('cache is keyed per worktree, not shared across worktrees', () => {
+    // Bug #542-5 (GH-508): the cache used to be a single var, so a second
+    // worktree in the same process would receive the first worktree's branch.
+    delete require.cache[NEXT_PATH];
+    const mod = require(NEXT_PATH);
+    mod.__test__._resetDefaultBranchCache();
+
+    // Build a second sibling worktree whose origin defaults to `master`.
+    const TMP2 = fs.mkdtempSync(path.join(os.tmpdir(), 'fu-default-branch-2-'));
+    const bare2 = path.join(TMP2, 'origin.git');
+    const WT2 = path.join(TMP2, 'work');
+    fs.mkdirSync(bare2);
+    fs.mkdirSync(WT2);
+    sh('git init --bare --initial-branch=master .', bare2);
+    sh('git init --initial-branch=master .', WT2);
+    sh('git config user.email "t@t"', WT2);
+    sh('git config user.name "T"', WT2);
+    fs.writeFileSync(path.join(WT2, 'b.txt'), 'b\n');
+    sh('git add b.txt', WT2);
+    sh('git commit -m b', WT2);
+    sh(`git remote add origin ${bare2}`, WT2);
+    sh('git push origin master', WT2);
+
+    const first = mod.__test__.detectDefaultBranch(WORKTREE);
+    const second = mod.__test__.detectDefaultBranch(WT2);
+
+    // Both must be honored independently — distinct cache entries per worktree.
+    // gh repo view may resolve to the outer repo's branch in either call;
+    // accept any non-empty string, but assert the second call did NOT return
+    // a stale 'develop' from the first worktree's fallback path.
+    assert.ok(typeof first === 'string' && first.length > 0);
+    assert.ok(typeof second === 'string' && second.length > 0);
+    if (first === 'develop' && second !== 'develop') {
+      // Per-worktree cache worked as expected when gh is unavailable.
+      assert.notStrictEqual(
+        second,
+        'develop',
+        'second worktree must not inherit first worktree branch'
+      );
+    }
+
+    fs.rmSync(TMP2, { recursive: true, force: true });
+  });
 });

@@ -126,9 +126,10 @@ function initState(ticketId, prNumber) {
 // default branch via `gh repo view`, fall back to `git remote show origin`,
 // then to 'main'. Cached per-process — the default branch doesn't change
 // during a single follow-up run.
-let _detectedDefaultBranch = null;
+const _detectedDefaultBranch = new Map();
 function detectDefaultBranch(worktreeDir) {
-  if (_detectedDefaultBranch !== null) return _detectedDefaultBranch;
+  const key = worktreeDir || process.cwd();
+  if (_detectedDefaultBranch.has(key)) return _detectedDefaultBranch.get(key);
   const runQuiet = (cmd) => {
     try {
       return cp
@@ -149,8 +150,9 @@ function detectDefaultBranch(worktreeDir) {
     const m = remote.match(/HEAD branch:\s*(\S+)/);
     if (m && m[1] && m[1] !== '(unknown)') detected = m[1];
   }
-  _detectedDefaultBranch = detected || 'main';
-  return _detectedDefaultBranch;
+  const resolved = detected || 'main';
+  _detectedDefaultBranch.set(key, resolved);
+  return resolved;
 }
 
 // Compute the PR diff file list (origin/<default>...HEAD). Fails open with [].
@@ -447,7 +449,7 @@ module.exports = {
     detectDefaultBranch,
     loadPrDiffFiles,
     _resetDefaultBranchCache: () => {
-      _detectedDefaultBranch = null;
+      _detectedDefaultBranch.clear();
     },
   },
 };
