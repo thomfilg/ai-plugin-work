@@ -229,58 +229,6 @@ function parseTaskType(section) {
   return (t || '').toLowerCase();
 }
 
-// Regression tasks that document behaviour which already works (e.g. adding
-// tests around a feature already implemented in a prior task or upstream
-// change) cannot organically produce a failing test command in RED — the
-// source already passes. Authors opt into this by declaring the intent in
-// the task body with BOTH markers co-occurring: the word `pre-existed` (the
-// behaviour is already there) AND the phrase `regression test added` (a
-// real regression test was authored). Requiring both keeps the matcher
-// narrow — a casual mention of `regression test added` in prose, or a
-// stray `pre-existed` elsewhere, won't trip the fallback alone.
-function isPreExistedRegressionTask(section) {
-  if (!section || typeof section !== 'string') return false;
-  return /pre-?existed/i.test(section) && /regression\s+test\s+added/i.test(section);
-}
-
-// Pure decision function for the pre-existed-regression RED gate, extracted
-// so each branch is unit-testable without spawning the full task-next.js
-// orchestrator. Returns either `{ verdict: 'block', reason }` to surface a
-// blockReason, or `{ verdict: 'advance', label }` to drive recordEvidence +
-// the success message.
-function evaluatePreExistedRegressionRed({ scenarios, testFiles, totalBlocks, taskNum }) {
-  if (!Array.isArray(testFiles) || testFiles.length === 0) {
-    return {
-      verdict: 'block',
-      reason:
-        'Pre-existed-regression marker present but no test files found under Suggested Scope. Add the regression test(s) to a *.test.* / *.spec.* file under scope.',
-    };
-  }
-  if (Array.isArray(scenarios) && scenarios.length > 0) {
-    const missing = scenariosCoveredByTests(scenarios, testFiles);
-    if (missing.length > 0) {
-      return {
-        verdict: 'block',
-        reason: `Pre-existed-regression marker present but tests do not yet cover these scenarios (verbatim title match against test files in Suggested Scope):\n  - ${missing.join('\n  - ')}\nAdd a test for each before re-invoking me.`,
-      };
-    }
-    return {
-      verdict: 'advance',
-      label: `tasks.md declared behaviour pre-existed; ${scenarios.length} scenario(s) covered by test files in Suggested Scope`,
-    };
-  }
-  if (!totalBlocks || totalBlocks === 0) {
-    return {
-      verdict: 'block',
-      reason: `Pre-existed-regression marker present but no it()/test() blocks found in ${testFiles.length} test file(s) under Suggested Scope. Add the regression test(s).`,
-    };
-  }
-  return {
-    verdict: 'advance',
-    label: `no @task:${taskNum} gherkin tags; ${testFiles.length} test file(s) under Suggested Scope, ${totalBlocks} test block(s)`,
-  };
-}
-
 // Documentation tasks have no testable code surface — only prose files
 // (*.md, etc), so demanding a *.test.* authorship gate is contradictory.
 // They still run a real verification command (e.g. a grep asserting the docs
@@ -458,7 +406,7 @@ function mintCompanionToken() {
 }
 
 // eslint-disable-next-line max-lines-per-function, complexity -- allowlisted pre-existing; see .quality-exceptions
-function recordEvidence(phase, ticket, taskNum, cmd, cwd, scope, extraArgs) {
+function recordEvidence(phase, ticket, taskNum, cmd, cwd, scope) {
   // Delegate to tdd-phase-state.js — the only authorized writer. Forward
   // `--task N` so the recorder resolves the per-task state path. Records
   // evidence for the just-completed phase, then (for red/green only)
@@ -499,7 +447,6 @@ function recordEvidence(phase, ticket, taskNum, cmd, cwd, scope, extraArgs) {
       String(taskNum),
       '--cmd',
       wrapStrictMode(cmd),
-      ...(Array.isArray(extraArgs) ? extraArgs : []),
     ];
     return spawnSync(process.execPath, recordArgs, {
       cwd,
@@ -538,13 +485,6 @@ function recordEvidence(phase, ticket, taskNum, cmd, cwd, scope, extraArgs) {
 
   if (!target) {
     // refactor recorded — cycle complete, no transition needed
-    return { ok: true, out: (r.stdout || '') + (r.stderr || ''), exitCode: 0 };
-  }
-
-  // The synthesized-cycle bypass (record-red --synthesized) transitions
-  // RED→GREEN inside tdd-phase-state.js itself, so a second explicit
-  // transition here would fail with "already at green". Skip it.
-  if (Array.isArray(extraArgs) && extraArgs.includes('--synthesized')) {
     return { ok: true, out: (r.stdout || '') + (r.stderr || ''), exitCode: 0 };
   }
 
@@ -950,49 +890,8 @@ function main() {
       );
     }
     if (passed) {
-      // Pre-existed regression fallback: tasks.md explicitly authorizes
-      // accepting RED when the test command already passes because the
-      // behaviour being regression-tested predates this task. Author opts in
-      // via a body marker (see isPreExistedRegressionTask). Decision logic
-      // is extracted into evaluatePreExistedRegressionRed for testability.
-      if (isPreExistedRegressionTask(section)) {
-        const testFiles = [...findTestFilesInScope(repoRoot, scope)];
-        const totalBlocks =
-          testFiles.length > 0 && (scenarios?.length || 0) === 0
-            ? countTestBlocksInFiles(testFiles).totalBlocks
-            : 0;
-        const decision = evaluatePreExistedRegressionRed({
-          scenarios,
-          testFiles,
-          totalBlocks,
-          taskNum,
-        });
-        if (decision.verdict === 'block') {
-          blockReason = decision.reason;
-        } else {
-          const rec = recordEvidence(
-            TDD_PHASES.red,
-            ticket,
-            taskNum,
-            testCmd,
-            repoRoot,
-            scope,
-            ['--synthesized', '--reason', 'tasks.md declares behaviour pre-existed; regression test added']
-          );
-          if (!rec.ok) {
-            blockReason = `Could not record RED evidence:\n${rec.out}`;
-          } else {
-            advanced = true;
-            phase = TDD_PHASES.green;
-            process.stdout.write(
-              `task-next: RED accepted via pre-existed-regression fallback (${decision.label}).\n`
-            );
-          }
-        }
-      } else {
-        blockReason =
-          'Your test command exits 0. RED requires a real failing test. Rewrite the assertion so it actually fails before re-invoking me.';
-      }
+      blockReason =
+        'Your test command exits 0. RED requires a real failing test. Rewrite the assertion so it actually fails before re-invoking me.';
     } else {
       const testFiles = [...findTestFilesInScope(repoRoot, scope)];
       const missing = scenariosCoveredByTests(scenarios, testFiles);
@@ -1131,8 +1030,6 @@ module.exports = {
   wrapStrictMode,
   isDocsExempt,
   isVisualOnlyTask,
-  isPreExistedRegressionTask,
-  evaluatePreExistedRegressionRed,
   extractField,
   parseSuggestedScope,
 };
