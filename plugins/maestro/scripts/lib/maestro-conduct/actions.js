@@ -353,10 +353,18 @@ function freeDeadEndSlot({ session, ticket, kind, repeatCount, sha }) {
  */
 function maybeFillPool() {
   if (process.env.AUTO_BOOTSTRAP_NEXT !== '1') return false;
-  let activeSessions = [];
+  let activeSessions = null;
   try {
     activeSessions = tmux.listSessions ? tmux.listSessions() : [];
   } catch {}
+  // Guard: an empty/missing session list is ambiguous — could be a real
+  // "no sessions yet" state or a transient `tmux ls` failure / prefix
+  // mismatch. Bootstrapping on ambiguous signal can over-launch and exceed
+  // manifest slot caps because per-task pool-cap checks also count zero.
+  // Same conservatism as syncFromTmux: no signal → no action.
+  if (!Array.isArray(activeSessions) || activeSessions.length === 0) {
+    return false;
+  }
   // Walk candidates in priority order; bootstrap the first one whose owning
   // manifest still has capacity. A full manifest must not block eligible work
   // in another manifest that still has free slots. Stop after the first
