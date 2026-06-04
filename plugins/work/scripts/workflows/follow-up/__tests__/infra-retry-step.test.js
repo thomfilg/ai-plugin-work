@@ -305,5 +305,15 @@ describe('infra-retry step — retry state machine (R2/R3/R4)', () => {
       0,
       'retry-success short-circuit must NOT consult classifier again'
     );
+    assert.equal(
+      state.currentStep,
+      'report',
+      'retry-success routes directly to report (not fix-ci)'
+    );
+    assert.notEqual(
+      state.failureCategory,
+      'ci_failure',
+      'stale ci_failure category cleared so fix-ci does not fire'
+    );
   });
 });

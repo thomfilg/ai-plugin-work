@@ -214,8 +214,15 @@ function runInfraRetryStep(state, ctx) {
 
   // R15: short-circuit on retry-success before consulting the classifier
   // again — we are simply confirming a green run for an already-recorded
-  // attempt.
-  if (maybeHandleRetrySuccess(state, ctx)) return null;
+  // attempt. Route directly to `report` (CI is green) and clear any stale
+  // `ci_failure` category so downstream branches don't dispatch fix-ci.
+  if (maybeHandleRetrySuccess(state, ctx)) {
+    state.currentStep = 'report';
+    if (state.failureCategory === 'ci_failure') {
+      state.failureCategory = null;
+    }
+    return null;
+  }
 
   // R1e / R7: consult the classifier.
   const safeState = state || {};
