@@ -20,9 +20,9 @@ const state = require('./state');
 const { headSha } = require('./detectors/gh-shared');
 const { eligibleTasks } = require('./session-shared');
 const { purgeAlertCountsForTicket } = require('../../maestro-cleanup');
+const skillRegistry = require('./skill-registry');
 
 const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
-const SKILL_NAME = process.env.SKILL_NAME || 'work';
 
 const SESSION_MANIFEST_DIR =
   process.env.MAESTRO_SESSION_DIR ||
@@ -194,6 +194,42 @@ function checkRestartGuards({ session, ticket, worktree }) {
   return checkDeadEndGuard({ session, ticket });
 }
 
+/**
+ * Resolve the launcher skill for `ticket` AT CALL TIME (GH-514 R1).
+ *
+ * The daemon's module-load env (SKILL_NAME) was captured before any per-ticket
+ * `.maestro-skill` file existed, so we MUST consult skill-registry on each
+ * autoRestart — otherwise a daemon restart on a follow-up ticket would
+ * relaunch /work instead of /follow-up.
+ *
+ * When the stored `.maestro-skill` value fails the whitelist regex (spec
+ * §Security), `readTicketSkill` falls open to 'work'. We additionally inspect
+ * the raw bytes here so an operator-visible warning names the rejected value.
+ */
+function resolveSkillForRestart(ticket, session) {
+  const skill = skillRegistry.readTicketSkill(ticket);
+  // Best-effort: peek at the raw stored value to detect a whitelist reject.
+  const fs2 = require('fs');
+  const os2 = require('os');
+  const path2 = require('path');
+  const tasksBase =
+    process.env.TASKS_BASE ||
+    path2.join(process.env.WORKTREES_BASE || path2.join(os2.homedir(), 'worktrees'), 'tasks');
+  const file = path2.join(tasksBase, ticket, skillRegistry.TICKET_SKILL_BASENAME);
+  let raw = null;
+  try {
+    raw = fs2.readFileSync(file, 'utf8').trim();
+  } catch {
+    raw = null;
+  }
+  if (raw && !skillRegistry.isKnownSkill(raw)) {
+    alerts.log(
+      `${session} AUTO-RESTART .maestro-skill value ${JSON.stringify(raw)} rejected by whitelist — falling open to /work for ${ticket}`
+    );
+  }
+  return skill;
+}
+
 function autoRestart({ session, ticket, worktree, silenceSec }) {
   if (checkRestartGuards({ session, ticket, worktree }).skip) return false;
 
@@ -225,8 +261,11 @@ function autoRestart({ session, ticket, worktree, silenceSec }) {
   // Record this restart and proceed.
   state.write(session, 'restart-loop', { restarts: [...restarts, now] });
 
+  // Resolve the skill per-call (GH-514 R1 / AC2 / AC6).
+  const skill = resolveSkillForRestart(ticket, session);
+
   alerts.log(
-    `${session} AUTO-RESTART after ${silenceSec}s silence — relaunching /${SKILL_NAME} ${ticket}`
+    `${session} AUTO-RESTART after ${silenceSec}s silence — relaunching /${skill} ${ticket}`
   );
   // Kill the dead session (no-op if already gone).
   spawnSync('tmux', ['kill-session', '-t', session], { stdio: 'ignore' });
@@ -241,7 +280,7 @@ function autoRestart({ session, ticket, worktree, silenceSec }) {
       session,
       '-c',
       worktree,
-      `${CLAUDE_BIN} --dangerously-skip-permissions '/${SKILL_NAME} ${ticket}'`,
+      `${CLAUDE_BIN} --dangerously-skip-permissions '/${skill} ${ticket}'`,
     ],
     { stdio: 'ignore' }
   );

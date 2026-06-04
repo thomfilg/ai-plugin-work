@@ -119,4 +119,24 @@ function detect({ session, ticket, pane, skill }) {
   return { hit: true, kind: 'silence', silenceSec, limitSec };
 }
 
-module.exports = { name: 'silence', detect, SILENCE_LIMIT_SEC, resolveSilenceLimit };
+/**
+ * Format a conductor log line for the silence path with a skill-prefixed
+ * token (GH-514 Task 6 / R7). The token shape is:
+ *   `[<ticket>:<skill>] <kind>: <silenceSec>s`
+ * e.g. `[GH-514:follow-up] silence: 120s`.
+ *
+ * Operators grep on this token to separate follow-up vs work activity in
+ * `/tmp/maestro-conduct.log` without re-parsing the session/session-name.
+ * The README's `skill-adapter` section is the single source of truth for
+ * this format. Missing `skill` falls back to 'work' so default `/work`
+ * log shape stays bit-for-bit unchanged (AC5).
+ */
+function formatLogLine({ ticket, skill, silenceSec, kind } = {}) {
+  const t = ticket || '?';
+  const s = skill || 'work';
+  const k = kind || 'silence';
+  const sec = Number.isFinite(silenceSec) ? `${silenceSec}s` : '?s';
+  return `[${t}:${s}] ${k}: ${sec}`;
+}
+
+module.exports = { name: 'silence', detect, SILENCE_LIMIT_SEC, resolveSilenceLimit, formatLogLine };
