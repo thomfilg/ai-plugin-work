@@ -85,9 +85,12 @@ resolve_skill() {
 
 RESOLVED_SKILL="$(resolve_skill)"
 
-# Per-ticket file lives under MAESTRO_TASKS_BASE (defaults to ./tasks for
-# back-compat with existing /work bootstrap convention).
-MAESTRO_TASKS_BASE="${MAESTRO_TASKS_BASE:-$PWD/tasks}"
+# Per-ticket `.maestro-skill` file MUST land where skill-registry.js reads it
+# (`tasksBase()`: TASKS_BASE → $WORKTREES_BASE/tasks → ~/worktrees/tasks). The
+# bot caught a divergence here: defaulting to $PWD/tasks would write to the
+# wrong directory and the conductor would silently keep treating tickets as
+# /work. MAESTRO_TASKS_BASE remains an explicit override for tests.
+MAESTRO_TASKS_BASE="${MAESTRO_TASKS_BASE:-${TASKS_BASE:-${WORKTREES_BASE:-$HOME/worktrees}/tasks}}"
 
 # Provider-derived session-name / ticket prefix. resolve_prefix() (sets global
 # PREFIX, fail-open to "GH"). maestro-conduct.js derives the same prefix
