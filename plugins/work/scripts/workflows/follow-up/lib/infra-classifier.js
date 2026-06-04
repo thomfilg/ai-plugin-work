@@ -220,6 +220,13 @@ function signal3_unrelatedFailures(failedTests, prDiffFiles) {
   if (tests.length === 0) {
     return { fired: false, evidence: { reason: 'no failing tests provided' } };
   }
+  // Bug 542-8: an empty diff (fails-open from loadPrDiffFiles) cannot
+  // distinguish "unrelated failures" from "the PR touches no files we know
+  // about". Refuse to fire signal3 in that case rather than misclassifying
+  // real regressions as infra flakes that get auto-retried.
+  if (diff.length === 0) {
+    return { fired: false, evidence: { reason: 'PR diff unavailable; signal3 inconclusive' } };
+  }
   const diffStems = diff.map((f) => f.replace(/\.[a-z]+$/i, ''));
   const overlapping = [];
   for (const t of tests) {
