@@ -254,6 +254,14 @@ function handleSnapshot(prNumber) {
             status: c.status,
             commitSha: c.commitSha || null,
             resolution: c.resolution || null,
+            threadId: c.threadId || null,
+          });
+        } else if (c.threadId) {
+          // Preserve threadId for non-terminal statuses too, so a transient
+          // GraphQL miss in commentIdToThreadId doesn't wipe a previously
+          // recorded threadId (breaks --also-resolve-on-github).
+          previousStatusMap.set(String(c.id), {
+            threadId: c.threadId,
           });
         }
       }
@@ -288,7 +296,7 @@ function handleSnapshot(prNumber) {
           line: null,
           original_line: null,
           priority: classifyCommentPriority(author, body),
-          status: previousStatusMap.has(String(review.id))
+          status: previousStatusMap.get(String(review.id))?.status
             ? previousStatusMap.get(String(review.id)).status
             : 'unsolved',
           commitSha: previousStatusMap.get(String(review.id))?.commitSha || null,
@@ -339,14 +347,17 @@ function handleSnapshot(prNumber) {
               line: cm.line || cm.original_line || null,
               original_line: cm.original_line || null,
               priority: classifyCommentPriority(author, body),
-              status: previousStatusMap.has(String(cm.id))
+              status: previousStatusMap.get(String(cm.id))?.status
                 ? previousStatusMap.get(String(cm.id)).status
                 : 'resolved',
               commitSha: previousStatusMap.get(String(cm.id))?.commitSha || null,
               resolution:
                 previousStatusMap.get(String(cm.id))?.resolution ||
                 'Outdated (code changed since comment)',
-              threadId: commentIdToThreadId.get(cm.id) || null,
+              threadId:
+                commentIdToThreadId.get(cm.id) ||
+                previousStatusMap.get(String(cm.id))?.threadId ||
+                null,
             });
             continue;
           }
@@ -365,7 +376,7 @@ function handleSnapshot(prNumber) {
             line: cm.line || null,
             original_line: cm.original_line || null,
             priority: classifyCommentPriority(author, body),
-            status: previousStatusMap.has(String(cm.id))
+            status: previousStatusMap.get(String(cm.id))?.status
               ? previousStatusMap.get(String(cm.id)).status
               : isResolved
                 ? 'resolved'
@@ -374,7 +385,10 @@ function handleSnapshot(prNumber) {
             resolution:
               previousStatusMap.get(String(cm.id))?.resolution ||
               (isResolved ? 'Resolved/outdated thread' : null),
-            threadId: commentIdToThreadId.get(cm.id) || null,
+            threadId:
+              commentIdToThreadId.get(cm.id) ||
+              previousStatusMap.get(String(cm.id))?.threadId ||
+              null,
           });
         }
 
