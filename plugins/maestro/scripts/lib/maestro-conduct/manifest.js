@@ -81,7 +81,12 @@ const TERMINAL = new Set(['awaiting-merge', 'blocked', 'done']);
 
 function aliveTicketSet(activeWorkSessions) {
   return new Set(
-    (activeWorkSessions || []).map((s) => (s.match(/^(GH-\d+)-work$/) || [])[1]).filter(Boolean)
+    (activeWorkSessions || [])
+      .map((s) => {
+        const m = s.match(/^([A-Z][A-Z0-9]*-\d+)-work$/);
+        return m ? m[1] : null;
+      })
+      .filter(Boolean)
   );
 }
 
