@@ -130,13 +130,29 @@ function evaluateFamilyAsymmetry(failed, families) {
   return {};
 }
 
+function enrichFailedFromAll(failed, safeAll) {
+  // Bug 542-15: monitor stores only name/runId/jobId on _ciFailedJobs.
+  // jobRuntimeMs needs startedAt/completedAt — look them up on the matching
+  // entry from the richer _ciAllJobs collection (by jobId, fallback name).
+  if (!failed) return failed;
+  if (failed.startedAt && failed.completedAt) return failed;
+  const byId = failed.jobId ? safeAll.find((j) => j && j.jobId === failed.jobId) : null;
+  const matched = byId || safeAll.find((j) => j && j.name === failed.name);
+  if (!matched) return failed;
+  return Object.assign({}, failed, {
+    startedAt: matched.startedAt || failed.startedAt,
+    completedAt: matched.completedAt || failed.completedAt,
+  });
+}
+
 function signal1_shardAsymmetry(failedJobs, allJobs) {
   const safeFailed = Array.isArray(failedJobs) ? failedJobs : [];
   const safeAll = Array.isArray(allJobs) ? allJobs : [];
   const families = groupJobsByFamily(safeAll);
 
   let lastSkipReason = null;
-  for (const failed of safeFailed) {
+  for (const failedRaw of safeFailed) {
+    const failed = enrichFailedFromAll(failedRaw, safeAll);
     const r = evaluateFamilyAsymmetry(failed, families);
     if (r.fire) return { fired: true, evidence: r.evidence };
     if (r.skipReason) lastSkipReason = r.skipReason;
