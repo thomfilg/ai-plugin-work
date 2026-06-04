@@ -204,6 +204,13 @@ function isInfraSuspected(result) {
   return Boolean(result) && result.classification === 'infra-suspected';
 }
 
+function routeRetrySuccessToReport(state) {
+  state.currentStep = 'report';
+  if (state.failureCategory === 'ci_failure') {
+    state.failureCategory = null;
+  }
+}
+
 function runInfraRetryStep(state, ctx) {
   // R12: default the persisted retry record on first read.
   if (state && !state.infraRetry) {
@@ -217,10 +224,7 @@ function runInfraRetryStep(state, ctx) {
   // attempt. Route directly to `report` (CI is green) and clear any stale
   // `ci_failure` category so downstream branches don't dispatch fix-ci.
   if (maybeHandleRetrySuccess(state, ctx)) {
-    state.currentStep = 'report';
-    if (state.failureCategory === 'ci_failure') {
-      state.failureCategory = null;
-    }
+    routeRetrySuccessToReport(state);
     return null;
   }
 
