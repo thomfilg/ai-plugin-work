@@ -44,7 +44,7 @@ beforeEach(() => {
 });
 
 describe('SHARED_FOLDER constant', () => {
-  it('equals `${FOLDER}-shared`', () => {
+  it('equals FOLDER + "-shared"', () => {
     assert.equal(SHARED_FOLDER, `${FOLDER}-shared`);
   });
 });
