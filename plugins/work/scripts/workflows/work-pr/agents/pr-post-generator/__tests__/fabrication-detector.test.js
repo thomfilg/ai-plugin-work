@@ -93,6 +93,25 @@ test('substantive stability artifact suppresses stability-claim violation', () =
   assert.ok(!stab, 'expected no stability-claim violation when artifact has content');
 });
 
+test('Unsourced row with synonym status (ok/passed/green) trips a violation', () => {
+  // Previously only `pass`/`fail` were cross-checked; any other verdict-like
+  // text (passed, ok, green, success, verified) silently bypassed the guard.
+  const dir = makeTaskDir({ 'tests.check.md': 'unrelated content\n' });
+  for (const status of ['passed', 'ok', 'green', 'success', 'verified']) {
+    const prBody = [
+      '## Test Results',
+      '',
+      '| Test | Status | Notes |',
+      '| --- | --- | --- |',
+      `| feature X works | ${status} | manual |`,
+      '',
+    ].join('\n');
+    const { violations } = detectFabrication(prBody, dir);
+    const row = violations.find((v) => v.reason === 'unsourced-test-row');
+    assert.ok(row, `expected unsourced-test-row violation for status="${status}"`);
+  }
+});
+
 test('Unsourced PASS row under Test Results', () => {
   const dir = makeTaskDir({
     'tests.check.md': 'No matching content here.\n',

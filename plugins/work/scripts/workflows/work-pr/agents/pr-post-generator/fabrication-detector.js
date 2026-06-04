@@ -156,8 +156,11 @@ function checkTestResultsRows(prBody, taskDir) {
   const rows = parseTestResultsRows(prBody);
   for (const row of rows) {
     const statusLower = row.status.toLowerCase();
+    // Allowed (pending-like) statuses never produce a violation. Every other
+    // status — pass, fail, passed, ok, green, success, verified, etc. — is
+    // treated as a verdict claim that must be sourced. Whitelisting only
+    // `pass`/`fail` previously let synonyms slip through the guard.
     if (ALLOWED_STATUSES.has(statusLower)) continue;
-    if (statusLower !== 'pass' && statusLower !== 'fail') continue;
     if (rowIsSourced(row.test, taskDir)) continue;
     violations.push({
       phrase: `| ${row.test} | ${row.status} |`,
