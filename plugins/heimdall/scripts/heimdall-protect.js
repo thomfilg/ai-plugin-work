@@ -18,6 +18,7 @@
  */
 
 const path = require('node:path');
+const os = require('node:os');
 const { splitList, editContext } = require(path.join(__dirname, '..', 'lib', 'cli'));
 const { readConfig, writeConfig, upsertLock, SCHEMA_VERSION } = require(
   path.join(__dirname, '..', 'lib', 'lock-store')
@@ -33,11 +34,28 @@ if (paths.length === 0) {
 // paths (a per-project file like package.json has no meaning in a HOME-wide
 // store shared across worktrees). Reject any non-home-anchored path and
 // suggest the three project-scoped alternatives.
+function isHomeAnchored(p) {
+  // ~ or ~/...
+  if (/^~(\/|$)/.test(p)) return true;
+  // $HOME, $HOME/..., ${HOME}, ${HOME}/...
+  if (/^\$\{?HOME\}?(\/|$)/.test(p)) return true;
+  // Absolute path under the current user's home directory.
+  const home = os.homedir();
+  if (home && path.isAbsolute(p)) {
+    const normalized = path.resolve(p);
+    const normalizedHome = path.resolve(home);
+    if (normalized === normalizedHome || normalized.startsWith(normalizedHome + path.sep)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 if (args.kind === 'shared') {
-  const nonHome = paths.filter((p) => !/^~(\/|$)/.test(p));
+  const nonHome = paths.filter((p) => !isHomeAnchored(p));
   if (nonHome.length > 0) {
     console.error(
-      `--kind=shared only accepts home-anchored paths (e.g. ~/.claude/...); ` +
+      `--kind=shared only accepts home-anchored paths (e.g. ~/.claude/..., $HOME/..., ${'${HOME}'}/..., or absolute paths under your home directory); ` +
         `got: ${nonHome.join(', ')}. ` +
         `use --kind=local, --kind=worktree, or --kind=global for project-relative paths`
     );

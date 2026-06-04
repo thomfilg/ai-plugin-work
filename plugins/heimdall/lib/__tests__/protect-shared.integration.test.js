@@ -53,15 +53,14 @@ describe('heimdall-protect.js --kind=shared rejects repo-relative paths', () => 
 
     const res = run(
       protectScript,
-      [
-        '--kind=shared',
-        '--phrase=edit pkg',
-        '--paths=package.json',
-        `--cwd=${cwd}`,
-      ],
+      ['--kind=shared', '--phrase=edit pkg', '--paths=package.json', `--cwd=${cwd}`],
       cwd
     );
-    assert.notEqual(res.status, 0, `expected non-zero exit, got ${res.status}; stderr: ${res.stderr}`);
+    assert.notEqual(
+      res.status,
+      0,
+      `expected non-zero exit, got ${res.status}; stderr: ${res.stderr}`
+    );
     assert.match(res.stderr, /local/, `stderr should mention "local": ${res.stderr}`);
     assert.match(res.stderr, /worktree/, `stderr should mention "worktree": ${res.stderr}`);
     assert.match(res.stderr, /global/, `stderr should mention "global": ${res.stderr}`);
@@ -82,6 +81,68 @@ describe('heimdall-protect.js --kind=shared accepts home-anchored paths', () => 
         '--paths=~/.claude/test-target',
         `--cwd=${cwd}`,
       ],
+      cwd
+    );
+    assert.equal(
+      res.status,
+      0,
+      `expected success exit; stderr: ${res.stderr}; stdout: ${res.stdout}`
+    );
+  });
+
+  it('succeeds with --paths=$HOME/.claude/<something>', () => {
+    const cwd = fs.mkdtempSync(path.join(base, 'proj-accept-dollar-'));
+    const init = run(initScript, ['--kind=shared', `--cwd=${cwd}`], cwd);
+    assert.equal(init.status, 0, `init failed: ${init.stderr}`);
+
+    const res = run(
+      protectScript,
+      [
+        '--kind=shared',
+        '--phrase=edit shared dollar',
+        '--paths=$HOME/.claude/test-dollar',
+        `--cwd=${cwd}`,
+      ],
+      cwd
+    );
+    assert.equal(
+      res.status,
+      0,
+      `expected success exit; stderr: ${res.stderr}; stdout: ${res.stdout}`
+    );
+  });
+
+  it('succeeds with --paths=${HOME}/.claude/<something>', () => {
+    const cwd = fs.mkdtempSync(path.join(base, 'proj-accept-braces-'));
+    const init = run(initScript, ['--kind=shared', `--cwd=${cwd}`], cwd);
+    assert.equal(init.status, 0, `init failed: ${init.stderr}`);
+
+    const res = run(
+      protectScript,
+      [
+        '--kind=shared',
+        '--phrase=edit shared braces',
+        '--paths=${HOME}/.claude/test-braces',
+        `--cwd=${cwd}`,
+      ],
+      cwd
+    );
+    assert.equal(
+      res.status,
+      0,
+      `expected success exit; stderr: ${res.stderr}; stdout: ${res.stdout}`
+    );
+  });
+
+  it('succeeds with --paths=<absolute homedir path>', () => {
+    const cwd = fs.mkdtempSync(path.join(base, 'proj-accept-abs-'));
+    const init = run(initScript, ['--kind=shared', `--cwd=${cwd}`], cwd);
+    assert.equal(init.status, 0, `init failed: ${init.stderr}`);
+
+    const absHomePath = path.join(fakeHome, '.claude', 'test-abs');
+    const res = run(
+      protectScript,
+      ['--kind=shared', '--phrase=edit shared abs', `--paths=${absHomePath}`, `--cwd=${cwd}`],
       cwd
     );
     assert.equal(
