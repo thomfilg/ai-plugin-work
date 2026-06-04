@@ -224,15 +224,14 @@ function freshnessIsCurrentProcess(state) {
   return Boolean(f && f.pid === process.pid);
 }
 
-function ctxIndicatesFreshFailure(ctx) {
-  return Boolean(ctx && ctx.ciStatus && ctx.ciStatus !== 'success');
-}
-
-function needsFreshMonitorBeforeRetry(state, ctx) {
+// Bug 542-17: the previous version exempted `ctx.ciStatus !== 'success'` as
+// "fresh failure", but ciStatus is read from state._ciStatus which can be
+// persisted from a prior PID. The only trustworthy fresh-status signal is
+// the per-process freshness stamp itself, so drop the redundant exemption.
+function needsFreshMonitorBeforeRetry(state, _ctx) {
   const last = lastPendingAttempt(state);
   if (!last) return false;
   if (freshnessIsCurrentProcess(state)) return false;
-  if (ctxIndicatesFreshFailure(ctx)) return false;
   return true;
 }
 
