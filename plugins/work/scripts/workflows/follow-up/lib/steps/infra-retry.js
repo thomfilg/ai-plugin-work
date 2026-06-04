@@ -192,43 +192,41 @@ function dispatchRetryAttempt(state, retry, result) {
   return delegate;
 }
 
+function runInfraRetryStep(state, ctx) {
+  // R12: default the persisted retry record on first read.
+  if (state && !state.infraRetry) {
+    state.infraRetry = { count: 0, attempts: [] };
+  }
+
+  if (shouldBypass(state)) return null;
+
+  // R15: short-circuit on retry-success before consulting the classifier
+  // again — we are simply confirming a green run for an already-recorded
+  // attempt.
+  if (maybeHandleRetrySuccess(state, ctx)) return null;
+
+  // R1e / R7: consult the classifier.
+  const result = classify(state || {}, ctx || {});
+
+  // R14: telemetry append on every classification.
+  recordClassification(state, result);
+
+  if (!result || result.classification !== 'infra-suspected') return null;
+
+  const outage = maybeSurfaceGhActionsOutage(state, result);
+  if (outage) return outage;
+
+  // R2/R3/R4: retry state machine. Cap at MAX_INFRA_RETRIES (3); on exhaust,
+  // surface for human handling. Otherwise dispatch a delegate to re-run.
+  const retry = state.infraRetry;
+  const exhausted = maybeSurfaceExhausted(state, retry, result);
+  if (exhausted) return exhausted;
+
+  return dispatchRetryAttempt(state, retry, result);
+}
+
 module.exports = function registerInfraRetry(register) {
-  register('infra-retry', (state, ctx) => {
-    // R12: default the persisted retry record on first read.
-    if (state && !state.infraRetry) {
-      state.infraRetry = { count: 0, attempts: [] };
-    }
-
-    if (shouldBypass(state)) return null;
-
-    // R15: short-circuit on retry-success before consulting the classifier
-    // again — we are simply confirming a green run for an already-recorded
-    // attempt.
-    if (maybeHandleRetrySuccess(state, ctx)) return null;
-
-    // R1e / R7: consult the classifier.
-    const result = classify(state || {}, ctx || {});
-
-    // R14: telemetry append on every classification.
-    recordClassification(state, result);
-
-    if (!result || result.classification !== 'infra-suspected') return null;
-
-    const outage = maybeSurfaceGhActionsOutage(state, result);
-    if (outage) return outage;
-
-    // R2/R3/R4: retry state machine.
-    //  - cap at MAX_INFRA_RETRIES (3); on exhaust, set failureCategory and
-    //    surface for human handling — DO NOT dispatch fix-ci (the failure is
-    //    infra, not code).
-    //  - otherwise increment count, record an attempt, and dispatch a delegate
-    //    that re-runs the failed jobs.
-    const retry = state.infraRetry;
-    const exhausted = maybeSurfaceExhausted(state, retry, result);
-    if (exhausted) return exhausted;
-
-    return dispatchRetryAttempt(state, retry, result);
-  });
+  register('infra-retry', runInfraRetryStep);
 };
 
 module.exports.RETRY_SUCCESS_LOG = RETRY_SUCCESS_LOG;
