@@ -19,7 +19,11 @@ const alerts = require('./alerts');
 const state = require('./state');
 const { headSha } = require('./detectors/gh-shared');
 const manifest = require('./manifest');
-const { findNextEligibleTask, buildNextActionInstruction } = require('./next-task');
+const {
+  findNextEligibleTask,
+  findEligibleTasks,
+  buildNextActionInstruction,
+} = require('./next-task');
 const { purgeAlertCountsForTicket } = require('../../maestro-cleanup');
 
 const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
@@ -353,15 +357,19 @@ function maybeFillPool() {
   try {
     activeSessions = tmux.listSessions ? tmux.listSessions() : [];
   } catch {}
-  const next = findNextEligibleTask();
-  if (!next) return false;
-  // Pool-cap is checked per-manifest inside maybeAutoBootstrap so a full
-  // manifest only blocks its OWN tickets, not eligible work in others.
-  // Don't bootstrap a ticket whose tmux session already exists (e.g. -listen).
-  if (activeSessions.includes(`${next.taskId}-work`)) return false;
-  const ok = maybeAutoBootstrap(next.taskId);
-  if (ok) alerts.log(`POOL-FILL auto-bootstrapped ${next.taskId} from manifest "${next.topic}"`);
-  return ok;
+  // Walk candidates in priority order; bootstrap the first one whose owning
+  // manifest still has capacity. A full manifest must not block eligible work
+  // in another manifest that still has free slots. Stop after the first
+  // successful bootstrap so the tick stays idempotent.
+  for (const cand of findEligibleTasks()) {
+    if (activeSessions.includes(`${cand.taskId}-work`)) continue;
+    const ok = maybeAutoBootstrap(cand.taskId);
+    if (ok) {
+      alerts.log(`POOL-FILL auto-bootstrapped ${cand.taskId} from manifest "${cand.topic}"`);
+      return true;
+    }
+  }
+  return false;
 }
 
 module.exports = {
