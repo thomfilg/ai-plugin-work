@@ -72,7 +72,11 @@ module.exports = function registerTriage(register) {
 
     if (hasCiFailure) {
       state.failureCategory = 'ci_failure';
-      state.currentStep = 'fix-ci';
+      // Bug A (GH-508): route CI failures to infra-retry first. infra-retry's
+      // shouldBypass returns null (advance to fix-ci) when the feature flag is
+      // off, so the loop naturally falls through to fix-ci. Routing to fix-ci
+      // directly would skip infra-retry entirely when the flag is on.
+      state.currentStep = 'infra-retry';
       return null;
     }
 
@@ -110,7 +114,8 @@ module.exports = function registerTriage(register) {
     // CI cancelled: only care if it blocks the merge
     if (hasCiCancelled && isMergeBlocked && !hasBlockingReviews) {
       state.failureCategory = 'ci_cancelled_blocking';
-      state.currentStep = 'fix-ci';
+      // Bug A (GH-508): same as ci_failure — visit infra-retry first.
+      state.currentStep = 'infra-retry';
       return null;
     }
 

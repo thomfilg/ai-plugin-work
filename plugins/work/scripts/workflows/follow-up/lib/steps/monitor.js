@@ -295,6 +295,74 @@ function computeExitCode(prInfo, ci, reviews) {
   return ciOk && reviewsOk && mergeOk ? 0 : 1;
 }
 
+// Map gh pr checks status → infra-classifier `ciStatus` literal ('success' /
+// 'failure' / 'in_progress'). Used by the retry-success short-circuit in
+// infra-retry.js. Bug B (GH-508): production ctx must surface this.
+function mapCiStatus(ciStatus) {
+  if (ciStatus === 'passing' || ciStatus === 'no-checks') return 'success';
+  if (ciStatus === 'failing') return 'failure';
+  return 'in_progress';
+}
+
+// Fetch all jobs + failed logs for the first failed run. Conservative: only
+// called when CI is failing AND we have a runId. The classifier's signal1
+// needs the full job list; signal2 needs the empty-log evidence; signal4
+// scans the aggregated raw logs. Bug B (GH-508).
+function fetchClassifierContext(failedJobs, worktreeDir) {
+  const out = { allJobs: [], failedLogs: '' };
+  const runId = failedJobs.find((j) => j.runId)?.runId;
+  if (!runId || !/^\d+$/.test(String(runId))) return out;
+  try {
+    const jobsRaw = execFileSync('gh', ['run', 'view', String(runId), '--json', 'jobs'], {
+      encoding: 'utf8',
+      timeout: 20000,
+      cwd: worktreeDir,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      maxBuffer: 5 * 1024 * 1024,
+      env: buildChildEnv(),
+    });
+    const parsed = JSON.parse(jobsRaw || '{}');
+    if (Array.isArray(parsed.jobs)) out.allJobs = parsed.jobs;
+  } catch {
+    /* fail-open — classifier will treat as empty */
+  }
+  try {
+    out.failedLogs = execFileSync('gh', ['run', 'view', String(runId), '--log-failed'], {
+      encoding: 'utf8',
+      timeout: 30000,
+      cwd: worktreeDir,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      maxBuffer: 10 * 1024 * 1024,
+      env: buildChildEnv(),
+    });
+  } catch (err) {
+    out.failedLogs = (err && err.stdout) || '';
+  }
+  return out;
+}
+
+// Annotate each failed job with its `jobId` (gh's databaseId) by joining the
+// failed-job list against the full job list by name. Bug C (GH-508): the
+// infra-classifier's signal2 requires a per-job ID to call
+// `gh run view <runId> --job <jobId> --log-failed`.
+function indexJobsByName(allJobs) {
+  const byName = new Map();
+  if (!Array.isArray(allJobs)) return byName;
+  for (const j of allJobs) {
+    const id = j && (j.databaseId || j.id);
+    if (j && j.name && id) byName.set(j.name, String(id));
+  }
+  return byName;
+}
+
+function attachJobIds(failedJobs, allJobs) {
+  const byName = indexJobsByName(allJobs);
+  if (byName.size === 0) return;
+  for (const fj of failedJobs) {
+    if (!fj.jobId && byName.has(fj.name)) fj.jobId = byName.get(fj.name);
+  }
+}
+
 // Order matters: read `j.url || j.link`. `checkCI()` renames `link → url` for
 // failed jobs that have been normalized, but legacy/un-normalized entries
 // still carry only `link`. Probing `url` first preserves the canonical name
@@ -361,6 +429,22 @@ module.exports = function registerMonitor(register) {
     resolveMissingRunIds(initialFailedJobs, ctx.worktreeDir);
     state._ciFailedJobs = initialFailedJobs;
 
+    // Bug B (GH-508): surface the classifier context the infra-classifier
+    // depends on. Only fetch jobs+logs when CI is actually failing — passing
+    // / pending runs don't need this and we want to keep the hot loop fast.
+    state._ciStatus = mapCiStatus(ci.status);
+    if (ci.status === 'failing' && initialFailedJobs.length > 0) {
+      const classifierCtx = fetchClassifierContext(initialFailedJobs, ctx.worktreeDir);
+      state._ciAllJobs = classifierCtx.allJobs;
+      state._ciFailedLogs = classifierCtx.failedLogs;
+      // Bug C (GH-508): join databaseId from allJobs by name so each failed
+      // job carries the per-job ID signal2 needs.
+      attachJobIds(initialFailedJobs, classifierCtx.allJobs);
+    } else {
+      state._ciAllJobs = [];
+      state._ciFailedLogs = '';
+    }
+
     if (exitCode === 0) state.currentStep = 'report';
     return null;
   });
@@ -375,4 +459,6 @@ module.exports.__test__ = {
   computeExitCode,
   resolveMissingRunIds,
   buildInitialFailedJobs,
+  mapCiStatus,
+  fetchClassifierContext,
 };

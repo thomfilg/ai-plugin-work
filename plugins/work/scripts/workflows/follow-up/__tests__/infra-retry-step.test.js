@@ -243,7 +243,10 @@ describe('infra-retry step — retry state machine (R2/R3/R4)', () => {
     assert.equal(state.infraRetry.exhausted, true, 'exhausted flag set');
     assert.equal(state.infraRetry.count, 3, 'count NOT incremented past the cap');
     assert.equal(state.infraRetry.attempts.length, 3, 'no new attempt appended');
-    assert.equal(result.reason, 'infra-stuck-exhausted');
+    // Bug D+E (GH-508): surface payload now nests reason under .payload to
+    // match the auto-advance hook contract, and reason is 'infra-stuck' so
+    // report.js fires the diagnostic bundle.
+    assert.equal(result.payload && result.payload.reason, 'infra-stuck');
     assert.notEqual(result.action, 'execute', 'fix-ci must NOT be dispatched on infra-stuck');
   });
 

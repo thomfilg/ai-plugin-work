@@ -161,11 +161,19 @@ function maybeSurfaceExhausted(state, retry, result) {
   if (retry.count < MAX_INFRA_RETRIES) return null;
   state.failureCategory = 'infra-stuck';
   retry.exhausted = true;
+  // Bug D+E (GH-508): use the standard surface contract
+  // ({ action, payload: { reason, ... } }) AND set reason to 'infra-stuck' so
+  // report.js's KNOWN_RESOLVABLE_CATEGORIES match fires the diagnostic bundle.
+  // The legacy `reason: 'infra-stuck-exhausted'` was both a shape mismatch
+  // (auto-advance hook reads payload.reason) and clobbered the failureCategory
+  // away from the value report.js looks for.
   return {
     action: 'surface',
-    reason: 'infra-stuck-exhausted',
-    signals: result.signals,
-    attempts: retry.attempts,
+    payload: {
+      reason: 'infra-stuck',
+      signals: result.signals,
+      attempts: retry.attempts,
+    },
   };
 }
 

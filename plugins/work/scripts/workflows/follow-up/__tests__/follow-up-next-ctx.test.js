@@ -63,7 +63,9 @@ describe('follow-up-next.js — ctx wiring (Bug 2)', () => {
       status: 'in_progress',
       attempt: 1,
       maxAttempts: 40,
-      _ciFailedJobs: [{ name: 'e2e [shard-4]', runId: '987654', id: '111' }],
+      // monitor.js stores `jobId` (databaseId from gh API), not `id`. Bug C
+      // (GH-508) aligned buildClassifierCtx with the field monitor actually writes.
+      _ciFailedJobs: [{ name: 'e2e [shard-4]', runId: '987654', jobId: '111' }],
       _ciStatus: 'failing',
       _ciFailedLogs: 'cache: MISS\nfallback install FAILED\n',
       _ciAllJobs: [{ name: 'e2e [shard-1]' }, { name: 'e2e [shard-4]' }],

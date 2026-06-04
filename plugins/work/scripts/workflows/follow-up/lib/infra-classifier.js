@@ -291,12 +291,25 @@ function collectSignals(s, c, failedJobs) {
   };
   return {
     signal1: signal1_shardAsymmetry(failedJobs, c.allJobs || []),
-    signal2: c.exec
-      ? signal2_emptyFailedLog(s.runId, c.jobId, c.exec)
-      : { fired: false, evidence: { reason: 'no exec provided' } },
+    signal2: evaluateSignal2(s, c),
     signal3: signal3_unrelatedFailures(s.failedTests || [], c.prDiffFiles || []),
     signal4,
   };
+}
+
+// Bug C (GH-508): prefer ctx.runId (sourced from _ciFailedJobs[0].runId in
+// production). Fall back to state.runId for tests/callers that still set it
+// directly. Skip signal2 cleanly when ids are missing rather than throwing —
+// the ≥2-signal floor (R7) means missing signal2 alone is fine.
+function evaluateSignal2(s, c) {
+  if (typeof c.exec !== 'function') {
+    return { fired: false, evidence: { reason: 'no exec provided' } };
+  }
+  const runId = c.runId || s.runId || null;
+  if (!runId || !c.jobId) {
+    return { fired: false, evidence: { reason: 'no runId/jobId' } };
+  }
+  return signal2_emptyFailedLog(runId, c.jobId, c.exec);
 }
 
 function isInfraSuspected(firedSignals) {

@@ -224,6 +224,46 @@ describe('infra-classifier', () => {
       assert.ok(result.signals.includes('signal4'));
     });
 
+    it('Bug C: signal2 reads runId/jobId from ctx (production shape) without throwing', () => {
+      // monitor.js shape: _ciFailedJobs[i] = { name, runId, jobId } — NO state.runId.
+      const state = {
+        _ciFailedJobs: [{ name: 'unit', runId: '12345', jobId: '67890' }],
+        failedTests: [],
+      };
+      const ctx = {
+        allJobs: [],
+        prDiffFiles: ['src/foo.ts'],
+        rawLogs: '',
+        exec: (_cmd) => ({ stdout: '', stderr: '', status: 0 }),
+        runId: '12345',
+        jobId: '67890',
+      };
+      // Must not throw — signal2 must accept ctx.runId/ctx.jobId.
+      const result = classify(state, ctx);
+      assert.ok(result, 'classify returns a result');
+      // signal2 should have evaluated successfully (fired=true on empty stdout
+      // with no error markers) — proves the IDs flowed through.
+      assert.ok(
+        result.signals.includes('signal2'),
+        'signal2 must have fired with ctx.runId/jobId passed through'
+      );
+    });
+
+    it('Bug C: classify skips signal2 cleanly (no throw) when ctx has no IDs', () => {
+      const state = { _ciFailedJobs: [], failedTests: [] };
+      const ctx = {
+        allJobs: [],
+        prDiffFiles: [],
+        rawLogs: '',
+        exec: (_cmd) => ({ stdout: '', stderr: '', status: 0 }),
+        // No runId, no jobId.
+      };
+      // Must not throw: previously signal2 called the ID regex on undefined.
+      assert.doesNotThrow(() => classify(state, ctx));
+      const result = classify(state, ctx);
+      assert.equal(result.classification, 'code-failure');
+    });
+
     it('returns infra-suspected when signal2 + signal4 both fire', () => {
       const state = {
         _ciFailedJobs: [],

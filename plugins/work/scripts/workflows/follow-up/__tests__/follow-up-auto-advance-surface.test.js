@@ -133,6 +133,14 @@ describe('follow-up-auto-advance hook — surface action (Task 6.2)', () => {
       /SURFACE|surface/,
       'hook stdout must include a SURFACE banner identifying the terminal action'
     );
+    // Bug D (GH-508): banner reads from payload.reason — must NOT degrade to
+    // 'unknown' when the payload is well-formed.
+    assert.match(r.stdout, /reason:\s*infra-stuck/, 'banner must show the actual reason');
+    assert.doesNotMatch(
+      r.stdout,
+      /reason:\s*unknown/,
+      'banner must NOT fall back to "unknown" for a well-formed surface payload'
+    );
 
     // Single invocation of follow-up-next — the hook MUST NOT loop after surface.
     const calls = fs.existsSync(INVOCATION_LOG)

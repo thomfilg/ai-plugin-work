@@ -88,6 +88,45 @@ describe('follow-up-next.js — surface persists failureCategory (Bug 3)', () =>
     assert.notEqual(persisted.status, 'complete');
   });
 
+  it('Bug E: report renders infra-stuck bundle after infra-retry exhausts (reason=infra-stuck)', () => {
+    // Simulate infra-retry surfacing exhausted: failureCategory already set to
+    // 'infra-stuck' by maybeSurfaceExhausted, infraRetry.attempts populated.
+    delete require.cache[REPORT_PATH];
+    const handlers = Object.create(null);
+    require(REPORT_PATH)((name, fn) => {
+      handlers[name] = fn;
+    });
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'report-infra-stuck-'));
+    const state = {
+      ticketId: 'GH-SURF',
+      prNumber: 100,
+      attempt: 3,
+      currentStep: 'report',
+      failureCategory: 'infra-stuck',
+      repoOwner: 'thomfilg',
+      repoName: 'claude-plugin-work',
+      infraRetry: {
+        count: 3,
+        attempts: [
+          {
+            attemptNumber: 1,
+            timestamp: 't1',
+            runId: '111',
+            signals: ['signal1', 'signal2'],
+            retryMethod: 'rerun-failed',
+          },
+        ],
+      },
+      lastMonitorResult: { exitCode: 1, output: 'CI: FAILED' },
+    };
+    const result = handlers['report'](state, { tasksDir: tmp });
+    assert.equal(result.action, 'surface');
+    assert.equal(result.payload && result.payload.reason, 'infra-stuck');
+    assert.match(result.summary, /Infra-stuck after 1 retries/);
+    assert.notEqual(state.status, 'complete');
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
   it('report.js does NOT mark status=complete when failureCategory=github-actions-outage', () => {
     delete require.cache[REPORT_PATH];
     const handlers = Object.create(null);

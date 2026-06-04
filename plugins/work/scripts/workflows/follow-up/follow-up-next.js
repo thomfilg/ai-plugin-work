@@ -121,10 +121,43 @@ function initState(ticketId, prNumber) {
   };
 }
 
-// Compute the PR diff file list (origin/main...HEAD). Fails open with [].
+// Bug F (GH-508): hardcoding `origin/main` broke repos with non-main default
+// branches (signal3 was scoring against an empty diff). Detect the actual
+// default branch via `gh repo view`, fall back to `git remote show origin`,
+// then to 'main'. Cached per-process — the default branch doesn't change
+// during a single follow-up run.
+let _detectedDefaultBranch = null;
+function detectDefaultBranch(worktreeDir) {
+  if (_detectedDefaultBranch !== null) return _detectedDefaultBranch;
+  const runQuiet = (cmd) => {
+    try {
+      return cp
+        .execSync(cmd, {
+          cwd: worktreeDir,
+          encoding: 'utf8',
+          timeout: 8000,
+          stdio: ['pipe', 'pipe', 'pipe'],
+        })
+        .trim();
+    } catch {
+      return '';
+    }
+  };
+  let detected = runQuiet('gh repo view --json defaultBranchRef --jq .defaultBranchRef.name');
+  if (!detected) {
+    const remote = runQuiet('git remote show origin');
+    const m = remote.match(/HEAD branch:\s*(\S+)/);
+    if (m && m[1] && m[1] !== '(unknown)') detected = m[1];
+  }
+  _detectedDefaultBranch = detected || 'main';
+  return _detectedDefaultBranch;
+}
+
+// Compute the PR diff file list (origin/<default>...HEAD). Fails open with [].
 function loadPrDiffFiles(worktreeDir) {
+  const branch = detectDefaultBranch(worktreeDir);
   try {
-    const out = cp.execSync('git diff --name-only origin/main...HEAD', {
+    const out = cp.execSync(`git diff --name-only origin/${branch}...HEAD`, {
       cwd: worktreeDir,
       encoding: 'utf8',
       timeout: 10000,
@@ -164,12 +197,17 @@ function buildExecForCtx(worktreeDir) {
 // PR diff list so the classifier can run pure (no shell-outs).
 function buildClassifierCtx(state, worktreeDir) {
   const failedJobs = Array.isArray(state._ciFailedJobs) ? state._ciFailedJobs : [];
+  const firstFailed = failedJobs[0] || {};
   return {
     allJobs: Array.isArray(state._ciAllJobs) ? state._ciAllJobs : [],
     prDiffFiles: loadPrDiffFiles(worktreeDir),
     rawLogs: typeof state._ciFailedLogs === 'string' ? state._ciFailedLogs : '',
     exec: buildExecForCtx(worktreeDir),
-    jobId: (failedJobs[0] && failedJobs[0].id) || null,
+    // Bug C (GH-508): monitor.js records IDs on _ciFailedJobs only — state.runId
+    // is never populated. Read both runId and jobId from the failed-job entry so
+    // signal2's NUMERIC_ID validation receives real IDs instead of undefined.
+    runId: firstFailed.runId || null,
+    jobId: firstFailed.jobId || null,
     ciStatus: state._ciStatus || null,
   };
 }
@@ -388,4 +426,16 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { getNextInstruction, initState, dispatchStepResult };
+module.exports = {
+  getNextInstruction,
+  initState,
+  dispatchStepResult,
+  // test-only escape hatch — exposes pure helpers for unit testing.
+  __test__: {
+    detectDefaultBranch,
+    loadPrDiffFiles,
+    _resetDefaultBranchCache: () => {
+      _detectedDefaultBranch = null;
+    },
+  },
+};
