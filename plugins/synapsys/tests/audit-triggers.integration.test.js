@@ -13,6 +13,8 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
@@ -124,6 +126,61 @@ test('[[wiki-link]] body reference downgrades severity (AC-G3)', () => {
   );
   assert.notEqual(pair.severity, 'high', '[[link]] downgrade must prevent `high` severity');
   assert.equal(pair.intentional && pair.intentional.link, true, `intentional.link must be true, got ${pair.intentional && pair.intentional.link}`);
+});
+
+// ─── Task 5: trigger×body match-density (slack/flake case study) ───
+
+const SLACK_FIXTURE = path.join(FIXTURE_ROOT, 'slack-handoff-ask-before-clipboard.md');
+const FLAKE_FIXTURE = path.join(FIXTURE_ROOT, 'flaky-test-fix-protocol.md');
+
+function buildSlackFlakeStore() {
+  // The Task-5 fixtures live at the fixture-root for spec traceability
+  // (tasks.md §Files-in-scope). They are copied into a per-test temp store
+  // so the existing `proj` fixtures (used by Task-3/4 tests above) are
+  // not perturbed by extra memories that would generate cross-pairs.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-lint-task5-'));
+  const storeDir = path.join(root, '.claude', 'synapsys');
+  fs.mkdirSync(storeDir, { recursive: true });
+  fs.writeFileSync(path.join(storeDir, '.synapsys.json'), '{"version":1,"kind":"project"}\n');
+  fs.copyFileSync(SLACK_FIXTURE, path.join(storeDir, path.basename(SLACK_FIXTURE)));
+  fs.copyFileSync(FLAKE_FIXTURE, path.join(storeDir, path.basename(FLAKE_FIXTURE)));
+  // Isolated HOME so global/shared discovery does not leak in real memories.
+  const isolatedHome = path.join(root, 'home');
+  fs.mkdirSync(isolatedHome, { recursive: true });
+  return { cwd: root, home: isolatedHome };
+}
+
+test('Trigger×body match flags the slack/flake case study as high (AC-G1)', () => {
+  const { cwd, home } = buildSlackFlakeStore();
+  // Programmatic API: lintStore must surface a high-severity
+  // trigger-body-overlap pair between the two case-study memories.
+  const { lintStore } = require(CLI);
+  const result = lintStore({ cwd, scope: 'all' });
+  const bodyPair = result.pairs.find(
+    (p) =>
+      p.rule === 'trigger-body-overlap' &&
+      [p.a, p.b].sort().join('|') ===
+        ['flaky-test-fix-protocol', 'slack-handoff-ask-before-clipboard'].join('|')
+  );
+  assert.ok(
+    bodyPair,
+    `expected trigger-body-overlap pair for slack/flake case study, got pairs=${JSON.stringify(result.pairs)}`
+  );
+  assert.equal(bodyPair.severity, 'high', `slack/flake body pair must be high, got ${bodyPair.severity}`);
+  assert.ok(typeof bodyPair.score === 'number' && bodyPair.score >= 4, `score (matchCount) must be ≥4, got ${bodyPair.score}`);
+  assert.ok(
+    Array.isArray(bodyPair.matchedTokens) && bodyPair.matchedTokens.includes('slack'),
+    `matchedTokens must include the literal 'slack' token, got ${JSON.stringify(bodyPair.matchedTokens)}`
+  );
+
+  // CLI exit code: AC-G1 requires `exit 1` when the case study is present.
+  const r = runLint([`--cwd=${cwd}`, '--scope=all', '--json'], { env: { HOME: home } });
+  assert.equal(r.status, 1, `expected exit 1 for slack/flake high pair, got ${r.status}. stderr=${r.stderr}`);
+  const env = parseJson(r.stdout);
+  assert.ok(env, `stdout was not parseable JSON:\n${r.stdout}`);
+  const cliPair = env.pairs.find((p) => p.rule === 'trigger-body-overlap');
+  assert.ok(cliPair, `CLI JSON envelope must include a trigger-body-overlap pair, got pairs=${JSON.stringify(env.pairs)}`);
+  assert.equal(cliPair.severity, 'high', `CLI pair severity must be high, got ${cliPair.severity}`);
 });
 
 test('Exit code is non-zero only when at least one high-severity pair exists (AC-G7)', () => {

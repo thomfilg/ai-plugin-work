@@ -17,10 +17,12 @@
  *   const result = lintStore({ cwd, scope, thresholds, onlyInvolving });
  */
 
+const path = require('node:path');
 const { setupCli, listMemories } = require('../lib/script-bootstrap');
 const {
   extractAlternationTokens,
   jaccard,
+  triggerMatchesBody,
 } = require('../lib/shared/trigger-tokens');
 
 // Named exit-code constants — single source of truth.
@@ -33,6 +35,13 @@ const VALID_SCOPES = new Set(['project', 'shared', 'all']);
 // Severity-threshold constants (Task 4 — single source of truth).
 const DEFAULT_OVERLAP_HIGH = 0.5; // ≥ → high (cross-domain) / medium (unknown)
 const OVERLAP_REPORT_FLOOR = 0.25; // < → not reported as a trigger-overlap pair
+
+// Body-density thresholds (Task 5 / spec §Architecture):
+//   matchCount >= bodyDensityHigh   → high
+//   matchCount >= BODY_DENSITY_FLOOR (and < high) → medium
+//   matchCount <  BODY_DENSITY_FLOOR → not reported (noise)
+const DEFAULT_BODY_DENSITY_HIGH = 4;
+const BODY_DENSITY_FLOOR = 2;
 
 // `[[link]]` regex — anchored to `[a-z0-9][a-z0-9-]*` per spec §Data Model.
 const LINK_RE = /\[\[([a-z0-9][a-z0-9-]*)\]\]/g;
@@ -85,13 +94,26 @@ function parseArgs(flag) {
 
 /**
  * Apply scope + disabled/expired filtering to the memory list returned by
- * `listMemories(cwd)`.
+ * `listMemories(cwd)`. When `boundDir` is provided, only memories whose
+ * store directory is at-or-below that directory are kept — this confines
+ * `--cwd=<fixture>` invocations to the requested subtree so that
+ * `memory-store.findAncestorStore` (which walks toward the filesystem root)
+ * cannot leak the author's real worktree-tier memories into a test fixture
+ * run.
  */
-function filterMemories(memories, scope) {
+function filterMemories(memories, scope, boundDir) {
+  const normalizedBound = boundDir ? path.resolve(boundDir) + path.sep : null;
   return memories.filter((m) => {
     if (m.disabled) return false;
     if (m.expired) return false;
     const kind = m.store && m.store.kind;
+    if (normalizedBound && kind !== 'shared') {
+      const storeDir = path.resolve(m.store.dir) + path.sep;
+      // Keep memories whose store is at-or-below the bound directory. The
+      // `shared` tier lives outside the project tree by design and is
+      // governed by the scope flag, not the bound.
+      if (!storeDir.startsWith(normalizedBound)) return false;
+    }
     if (scope === 'shared') return kind === 'shared';
     if (scope === 'project') return kind !== 'shared';
     return true; // scope === 'all'
@@ -134,6 +156,30 @@ function hasMutualLink(a, b) {
 }
 
 /**
+ * applyIntentionalDowngrades — shared severity cap used by both the
+ * trigger×trigger (Task 4) and trigger×body (Task 5) classifiers. If both
+ * memories share a non-empty `meta.domain`, severity is capped at `low`
+ * and the returned `intentional.domain` records the shared domain. If
+ * either body `[[link]]`-references the other, severity is again capped
+ * at `low` and `intentional.link` is set.
+ */
+function applyIntentionalDowngrades(a, b, severity) {
+  const aDomain = getDomain(a);
+  const bDomain = getDomain(b);
+  const sameDomain = aDomain && bDomain && aDomain === bDomain;
+  const intentional = {};
+  if (sameDomain) {
+    intentional.domain = aDomain;
+    severity = 'low';
+  }
+  if (hasMutualLink(a, b)) {
+    intentional.link = true;
+    severity = 'low';
+  }
+  return { severity, intentional };
+}
+
+/**
  * scorePair — compute raw Jaccard overlap of two memories' alternation-token
  * sets. Returns `{ score }` (numeric in [0,1]).
  */
@@ -165,7 +211,6 @@ function classifyPair(a, b, score, overlapThreshold) {
 
   const aDomain = getDomain(a);
   const bDomain = getDomain(b);
-  const sameDomain = aDomain && bDomain && aDomain === bDomain;
   const eitherDomainKnown = !!(aDomain || bDomain);
 
   let severity;
@@ -176,17 +221,7 @@ function classifyPair(a, b, score, overlapThreshold) {
     severity = eitherDomainKnown ? 'medium' : 'low';
   }
 
-  const intentional = {};
-  if (sameDomain) {
-    intentional.domain = aDomain;
-    severity = 'low';
-  }
-  if (hasMutualLink(a, b)) {
-    intentional.link = true;
-    severity = 'low';
-  }
-
-  return { severity, intentional };
+  return applyIntentionalDowngrades(a, b, severity);
 }
 
 /**
@@ -219,6 +254,65 @@ function computeTriggerPairs(memories, overlapThreshold, onlyInvolving) {
 }
 
 /**
+ * classifyBodyPair — severity for trigger×body match-density (Task 5).
+ *
+ * Severity policy (spec §Architecture):
+ *   - matchCount >= bodyDensityHigh  → high
+ *   - matchCount >= BODY_DENSITY_FLOOR (and < high) → medium
+ *   - matchCount <  BODY_DENSITY_FLOOR → null (not reported as a pair)
+ *
+ * Domain + `[[link]]` downgrades from Task 4 apply identically here.
+ */
+function classifyBodyPair(a, b, matchCount, bodyDensityHigh) {
+  if (matchCount < BODY_DENSITY_FLOOR) return { severity: null, intentional: {} };
+  const severity = matchCount >= bodyDensityHigh ? 'high' : 'medium';
+  return applyIntentionalDowngrades(a, b, severity);
+}
+
+/**
+ * Build the trigger-body-overlap pair array.
+ *
+ * For each ordered pair (A → B) (both directions), evaluate whether B's
+ * `trigger_prompt` regex matches inside A's body. A matchCount >= floor
+ * surfaces as a pair carrying `matchedTokens` for downstream suggestion
+ * generation (Task 8).
+ */
+function computeBodyPairs(memories, bodyDensityHigh, onlyInvolving) {
+  const pairs = [];
+  for (let i = 0; i < memories.length; i++) {
+    for (let j = 0; j < memories.length; j++) {
+      if (i === j) continue;
+      const a = memories[i];
+      const b = memories[j];
+      if (onlyInvolving && a.name !== onlyInvolving && b.name !== onlyInvolving) continue;
+
+      const { matchCount, matchedTokens } = triggerMatchesBody(
+        b.triggerPrompt || '',
+        a.body || ''
+      );
+      const { severity, intentional } = classifyBodyPair(
+        a,
+        b,
+        matchCount,
+        bodyDensityHigh
+      );
+      if (severity === null) continue;
+
+      pairs.push({
+        rule: 'trigger-body-overlap',
+        a: a.name,
+        b: b.name,
+        severity,
+        score: matchCount,
+        matchedTokens,
+        intentional,
+      });
+    }
+  }
+  return pairs;
+}
+
+/**
  * Programmatic entry point.
  *
  * @param {object} opts
@@ -233,11 +327,20 @@ function lintStore(opts) {
   const thresholds = (opts && opts.thresholds) || {};
   const overlapThreshold =
     typeof thresholds.overlap === 'number' ? thresholds.overlap : DEFAULT_OVERLAP_HIGH;
+  const bodyDensityHigh =
+    typeof thresholds.bodyDensity === 'number'
+      ? thresholds.bodyDensity
+      : DEFAULT_BODY_DENSITY_HIGH;
   const onlyInvolving = (opts && opts.onlyInvolving) || null;
 
-  const memories = filterMemories(listMemories(cwd), scope);
+  // Bind memory discovery to the requested cwd subtree so test fixtures
+  // (and explicit `--cwd=<dir>` invocations) cannot inherit worktree-tier
+  // memories from a parent directory via `memory-store.findAncestorStore`.
+  const memories = filterMemories(listMemories(cwd), scope, cwd);
 
-  const pairs = computeTriggerPairs(memories, overlapThreshold, onlyInvolving);
+  const triggerPairs = computeTriggerPairs(memories, overlapThreshold, onlyInvolving);
+  const bodyPairs = computeBodyPairs(memories, bodyDensityHigh, onlyInvolving);
+  const pairs = triggerPairs.concat(bodyPairs);
   const broadTriggers = []; // populated by Task 7
 
   const hasHigh = pairs.some((p) => p.severity === 'high');
