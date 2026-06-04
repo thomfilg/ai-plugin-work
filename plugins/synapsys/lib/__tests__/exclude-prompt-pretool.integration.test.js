@@ -70,12 +70,6 @@ function writeMemory(store, basename, frontmatterLines, body = 'Body line.') {
   return file;
 }
 
-const BASE_MEMORY = {
-  events: ['UserPromptSubmit'],
-  disabled: false,
-  expired: false,
-};
-
 // ---------------------------------------------------------------------------
 // Direct helper assertions
 // ---------------------------------------------------------------------------
