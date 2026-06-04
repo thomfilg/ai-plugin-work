@@ -52,6 +52,39 @@ function main() {
   const markerAge = Date.now() - new Date(marker.startedAt).getTime();
   if (markerAge > 12 * 60 * 60 * 1000) process.exit(0);
 
+  // Fire OnPostToolCall extension event BEFORE the auto-advance dispatch.
+  // Fail-open: a misbehaving extension must never block the auto-advance.
+  try {
+    firePostToolCall({
+      toolName: hookData?.tool_name,
+      toolInput: hookData?.tool_input,
+      toolResult: hookData?.tool_response,
+      tasksBase: TASKS_BASE,
+      tasksDir: marker.tasksDir,
+      repoRoot: WORKTREES_BASE || process.cwd(),
+    });
+  } catch {
+    /* fail-open */
+  }
+
+  // Fire OnAgentResponseMatched: for Task/Skill tool responses, extract the
+  // agent's text response and dispatch only to handlers whose `match` regex
+  // hits. Reference extensions (e.g. flaky-test-runbook) rely on this event.
+  // Fail-open: a misbehaving extension must never block the auto-advance.
+  try {
+    const responseText = extractResponseText(hookData?.tool_response);
+    if (responseText) {
+      fireAgentResponseMatched({
+        responseText,
+        tasksBase: TASKS_BASE,
+        tasksDir: marker.tasksDir,
+        repoRoot: marker.worktreeRoot || WORKTREES_BASE || process.cwd(),
+      });
+    }
+  } catch {
+    /* fail-open */
+  }
+
   // Call work-next.js
   const workNextPath = path.join(__dirname, '..', 'work-next.js');
   let result;
@@ -97,4 +130,153 @@ function main() {
   process.exit(0);
 }
 
-main();
+/**
+ * firePostToolCall — dispatch the OnPostToolCall extension event before the
+ * existing auto-advance logic, gated on an active /work marker. Errors are
+ * swallowed so a misbehaving extension can never crash the hook.
+ *
+ * @param {{toolName: string, toolInput: any, toolResult: any, tasksDir: string, repoRoot: string}} args
+ * @param {{
+ *   findActiveMarker?: Function,
+ *   initExtensions?: Function,
+ * }} [deps]
+ * @returns {void}
+ */
+function firePostToolCall(args, deps) {
+  const { toolName, toolInput, toolResult, tasksBase, tasksDir, repoRoot } = args || {};
+  // Bug fix: findActiveMarker scans CHILDREN of arg1 for `.work.pid`, so it
+  // needs the TASKS_BASE (parent of all per-ticket tasksDirs), not a single
+  // per-ticket tasksDir. Accept `tasksBase` from main() (resolved once via
+  // get-config) and fall back to `tasksDir`'s parent for legacy callers.
+  let marker = null;
+  try {
+    const findMarker =
+      deps?.findActiveMarker ||
+      require(path.join(__dirname, '..', 'lib', 'marker')).findActiveMarker;
+    const base = tasksBase || (tasksDir ? path.dirname(tasksDir) : '');
+    if (!base) return;
+    marker = findMarker(base, '.work.pid');
+  } catch {
+    /* fail-open */
+  }
+  if (!marker) return;
+  try {
+    const init =
+      deps?.initExtensions ||
+      require(path.join(__dirname, '..', 'lib', 'extensions')).initExtensions;
+    // Marker files don't carry tasksDir — derive it from base + ticket.
+    // Prefer marker.worktreeRoot (true repo of the active session) over the
+    // caller-supplied repoRoot (which is the WORKTREES_BASE, not a repo).
+    const resolvedTasksDir =
+      (tasksBase && marker.ticket && path.join(tasksBase, marker.ticket)) || tasksDir;
+    const resolvedRepoRoot = marker.worktreeRoot || repoRoot;
+    const api = init({ repoRoot: resolvedRepoRoot, tasksDir: resolvedTasksDir });
+    api.dispatch('OnPostToolCall', { toolName, toolInput, toolResult });
+  } catch {
+    /* fail-open — extension dispatch errors must never crash the hook */
+  }
+}
+
+/**
+ * extractResponseText — best-effort extraction of the human-readable response
+ * text from a Claude Code PostToolUse `tool_response` payload. Shape varies:
+ *   - plain string
+ *   - `{ text: '…' }`
+ *   - `{ content: [{ type:'text', text:'…' }, …] }` (Task/Skill agent results)
+ *   - `{ output: '…' }` (Bash-like tools)
+ * Returns '' when no text is found. Pure / no side effects.
+ *
+ * @param {unknown} toolResponse
+ * @returns {string}
+ */
+function extractResponseText(toolResponse) {
+  if (!toolResponse) return '';
+  if (typeof toolResponse === 'string') return toolResponse;
+  if (typeof toolResponse !== 'object') return '';
+  const r = /** @type {Record<string, unknown>} */ (toolResponse);
+  if (typeof r.text === 'string') return r.text;
+  if (typeof r.output === 'string') return r.output;
+  if (Array.isArray(r.content)) {
+    const parts = [];
+    for (const block of r.content) {
+      if (block && typeof block === 'object' && typeof block.text === 'string') {
+        parts.push(block.text);
+      } else if (typeof block === 'string') {
+        parts.push(block);
+      }
+    }
+    if (parts.length) return parts.join('\n');
+  }
+  return '';
+}
+
+/**
+ * fireAgentResponseMatched — iterate registered `OnAgentResponseMatched`
+ * handlers and dispatch only when the response text matches each handler's
+ * compiled `match` regex (compiled once at registration in event-bus). Gated
+ * on an active /work marker. Errors are swallowed so a misbehaving extension
+ * can never crash the hook.
+ *
+ * Dispatch payload (G9): `{ responseText, match: { pattern, substring } }`.
+ *
+ * @param {{responseText: string, tasksDir: string, repoRoot: string}} args
+ * @param {{
+ *   findActiveMarker?: Function,
+ *   initExtensions?: Function,
+ * }} [deps]
+ * @returns {void}
+ */
+function fireAgentResponseMatched(args, deps) {
+  const { responseText, tasksBase, tasksDir, repoRoot } = args || {};
+  let marker = null;
+  try {
+    const findMarker =
+      deps?.findActiveMarker ||
+      require(path.join(__dirname, '..', 'lib', 'marker')).findActiveMarker;
+    const base = tasksBase || (tasksDir ? path.dirname(tasksDir) : '');
+    if (!base) return;
+    marker = findMarker(base, '.work.pid');
+  } catch {
+    /* fail-open */
+  }
+  if (!marker) return;
+  try {
+    const init =
+      deps?.initExtensions ||
+      require(path.join(__dirname, '..', 'lib', 'extensions')).initExtensions;
+    const resolvedTasksDir = marker.tasksDir || tasksDir;
+    const api = init({ repoRoot, tasksDir: resolvedTasksDir });
+    const handlers =
+      typeof api.listHandlers === 'function' ? api.listHandlers('OnAgentResponseMatched') : [];
+    for (const record of handlers) {
+      if (!record || !record.match || !record.match.compiled) continue;
+      const m = record.match.compiled.exec(responseText || '');
+      if (!m) continue;
+      // Bug fix: dispatch ONLY to the matched handler (not the entire event
+      // chain) so other OnAgentResponseMatched handlers with different
+      // patterns are not invoked for an unrelated match.
+      const payload = {
+        responseText,
+        match: { pattern: record.match.pattern, substring: m[0] },
+      };
+      try {
+        if (typeof api.dispatchToHandler === 'function') {
+          api.dispatchToHandler(record, payload);
+        } else {
+          // Legacy fallback (API without dispatchToHandler).
+          api.dispatch('OnAgentResponseMatched', payload);
+        }
+      } catch {
+        /* fail-open — extension dispatch errors must never crash the hook */
+      }
+    }
+  } catch {
+    /* fail-open */
+  }
+}
+
+module.exports = { firePostToolCall, fireAgentResponseMatched, extractResponseText };
+
+if (!process.env.WORK_HOOK_NO_MAIN) {
+  main();
+}

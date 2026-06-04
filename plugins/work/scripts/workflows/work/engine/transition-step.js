@@ -338,6 +338,56 @@ function transitionStep(ticket, targetStep, deps) {
   ws.stepStatus[currentStep] = 'completed';
   appendAction(safeTicket, { step: currentStep, what: 'step completed' });
 
+  // Fire OnTicketResolved extension event when the `ticket` step completes
+  // (transition into `bootstrap`). Fail-open: a misbehaving extension must
+  // never block a real step transition. fireTicketResolved is async; we
+  // fire-and-forget here because transitionStep is sync — the appendAction
+  // log entry is best-effort and lands as soon as the promise settles.
+  if (currentStep === STEPS.ticket && isForward) {
+    try {
+      const { fireTicketResolved } = require(path.join(__dirname, '..', 'steps', 'ticket'));
+      // Resolve repoRoot from the active marker (true worktree of this
+      // session) rather than process.cwd() so extension discovery scans the
+      // consumer repo's .claude/work-extensions/ directory, not whichever
+      // cwd the workflow engine happened to be spawned from.
+      let resolvedRepoRoot = process.cwd();
+      try {
+        const { findActiveMarker } = require(path.join(__dirname, '..', 'lib', 'marker'));
+        const marker = findActiveMarker(TASKS_BASE, '.work.pid');
+        if (marker && marker.worktreeRoot) resolvedRepoRoot = marker.worktreeRoot;
+      } catch {
+        /* fail-open — fall back to process.cwd() */
+      }
+      Promise.resolve(
+        fireTicketResolved({
+          ticketId: safeTicket,
+          resolution: 'completed',
+          tasksDir: path.join(TASKS_BASE, safeTicket),
+          repoRoot: resolvedRepoRoot,
+          transitionedToResolved: true,
+        })
+      )
+        .then((result) => {
+          if (result && result.injected) {
+            try {
+              appendAction(safeTicket, {
+                step: currentStep,
+                what: 'OnTicketResolved dispatched',
+                injectedChars: result.injected.length,
+              });
+            } catch {
+              /* fail-open */
+            }
+          }
+        })
+        .catch(() => {
+          /* fail-open */
+        });
+    } catch {
+      /* fail-open */
+    }
+  }
+
   ws.stepStatus[targetStep] = 'in_progress';
   appendAction(safeTicket, { step: targetStep, what: 'step started' });
 
@@ -382,7 +432,9 @@ function transitionStep(ticket, targetStep, deps) {
     let pluginVersion = 'unknown';
     try {
       // __dirname = plugins/work/scripts/workflows/work/engine → repo root is 6 levels up
-      pluginVersion = require(path.join(__dirname, '..', '..', '..', '..', '..', '..', 'package.json')).version;
+      pluginVersion = require(
+        path.join(__dirname, '..', '..', '..', '..', '..', '..', 'package.json')
+      ).version;
     } catch {
       /* fail-open: leave pluginVersion as 'unknown' */
     }

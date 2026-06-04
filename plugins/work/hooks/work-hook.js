@@ -182,4 +182,59 @@ function formatPlan(plan) {
   return lines.join('\n');
 }
 
-main();
+/**
+ * fireOnPreToolCall — dispatch the OnPreToolCall extension event after the
+ * existing PreToolUse hook body, gated on an active /work marker. Errors are
+ * swallowed so a misbehaving extension can never crash the hook.
+ *
+ * Exported for unit testing; the hook itself does not yet wire this into
+ * `main()` because Phase 1 PreToolUse dispatch is invoked from a different
+ * entry point in production (see hooks.json).
+ *
+ * @param {{toolName: string, toolInput: any, tasksDir: string, repoRoot: string}} args
+ * @param {{
+ *   findActiveMarker?: Function,
+ *   initExtensions?: Function,
+ * }} [deps]
+ * @returns {void}
+ */
+async function firePreToolCall(args, deps) {
+  const { toolName, toolInput, tasksBase, tasksDir, repoRoot } = args || {};
+  // Bug fix: findActiveMarker needs TASKS_BASE (parent of all per-ticket
+  // tasksDirs), not a single per-ticket tasksDir. Accept `tasksBase` and fall
+  // back to tasksDir's parent for legacy callers.
+  let marker = null;
+  try {
+    const findMarker =
+      deps?.findActiveMarker ||
+      require(path.join(__dirname, '..', 'scripts', 'workflows', 'work', 'lib', 'marker'))
+        .findActiveMarker;
+    const base = tasksBase || (tasksDir ? path.dirname(tasksDir) : '');
+    if (!base) return;
+    marker = findMarker(base, '.work.pid');
+  } catch {
+    /* fail-open */
+  }
+  if (!marker) return;
+  try {
+    const init =
+      deps?.initExtensions ||
+      require(path.join(__dirname, '..', 'scripts', 'workflows', 'work', 'lib', 'extensions'))
+        .initExtensions;
+    const resolvedTasksDir = marker.tasksDir || tasksDir;
+    const resolvedRepoRoot = marker.worktreeRoot || repoRoot;
+    const api = init({ repoRoot: resolvedRepoRoot, tasksDir: resolvedTasksDir });
+    // Await the dispatch so async extension handlers complete before the
+    // PreToolUse hook process exits. Fail-open: dispatch errors are caught
+    // by the surrounding try/catch.
+    await api.dispatch('OnPreToolCall', { toolName, toolInput });
+  } catch {
+    /* fail-open — extension dispatch errors must never crash the hook */
+  }
+}
+
+module.exports = { firePreToolCall };
+
+if (!process.env.WORK_HOOK_NO_MAIN) {
+  main();
+}

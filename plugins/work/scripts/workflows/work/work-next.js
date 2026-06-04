@@ -118,7 +118,8 @@ const { validateCheckGate: _validateCheckGate } = require(
 // ─── Local modules ──────────────────────────────────────────────────────────
 const { buildInstruction } = require(path.join(__dirname, 'lib', 'instruction-builder'));
 const { buildStateContext } = require(path.join(__dirname, 'lib', 'state-context'));
-const { writeMarkerFile } = require(path.join(__dirname, 'lib', 'marker'));
+const { writeMarkerFile, findActiveMarker } = require(path.join(__dirname, 'lib', 'marker'));
+const { initExtensions } = require(path.join(__dirname, 'lib', 'extensions'));
 const { enrich, runGate } = require(path.join(__dirname, 'lib', 'step-enrichments'));
 const { createDebugLog } = require(path.join(__dirname, 'lib', 'debug-log'));
 
@@ -223,6 +224,66 @@ function buildTransitionDeps() {
 
 function transitionStep(ticket, targetStep) {
   return _transitionStep(ticket, targetStep, buildTransitionDeps());
+}
+
+// ─── OnSessionStart wiring (Task 5) ─────────────────────────────────────────
+
+/**
+ * Process-scoped idempotence flag. The OnSessionStart event MUST fire exactly
+ * once per Node process invocation — repeated calls from within the same
+ * orchestration loop are silently ignored.
+ */
+let _sessionStartFired = false;
+
+/**
+ * Dispatch the `OnSessionStart` event after confirming that an active /work
+ * marker exists for this terminal. Idempotent within a single process.
+ *
+ * @param {{ticketId: string, tasksDir: string, repoRoot: string}} args
+ * @param {{
+ *   findActiveMarker?: typeof findActiveMarker,
+ *   initExtensions?: typeof initExtensions,
+ * }} [deps] - optional dependency injection for testing
+ * @returns {void}
+ */
+function fireSessionStart(args, deps) {
+  if (_sessionStartFired) return;
+  const findMarker = deps?.findActiveMarker || findActiveMarker;
+  const init = deps?.initExtensions || initExtensions;
+  const { ticketId, tasksDir, repoRoot } = args || {};
+  let marker = null;
+  try {
+    marker = findMarker(TASKS_BASE, '.work.pid');
+  } catch {
+    /* fail-open — never crash /work on marker probe failure */
+  }
+  if (!marker) return;
+  _sessionStartFired = true;
+  try {
+    const api = init({ repoRoot, tasksDir });
+    // dispatch() returns the accumulated injected-context string. We can't
+    // synchronously surface it (this is a sync function called from
+    // getNextInstruction), but we forward to debug.md so injected text is
+    // discoverable per session. Extension dispatch errors are caught inside
+    // initExtensions and never propagate.
+    Promise.resolve(api.dispatch('OnSessionStart', { ticketId, tasksDir, repoRoot }))
+      .then((injected) => {
+        if (injected && typeof injected === 'string' && injected.length > 0) {
+          try {
+            const { createDebugLog } = require(path.join(__dirname, 'lib', 'debug-log'));
+            createDebugLog(tasksDir).info('OnSessionStart injected context', {
+              chars: injected.length,
+              preview: injected.slice(0, 240),
+            });
+          } catch {
+            /* fail-open */
+          }
+        }
+      })
+      .catch(() => {});
+  } catch {
+    /* fail-open — extension wiring must never crash /work */
+  }
 }
 
 // ─── Active-session conflict detection ──────────────────────────────────────
@@ -471,6 +532,12 @@ function getNextInstruction(ticketRaw, rework) {
   const log = createDebugLog(tasksDir);
   const args = process.argv.slice(2).join(' ');
   log.call(ticket, args);
+
+  // Fire OnSessionStart once per process invocation — gated on an active
+  // /work marker so non-session callers (e.g. inspection-only) don't trigger
+  // extension dispatch. Safe no-op when the extension dir does not exist (R8).
+  const repoRoot = path.join(WORKTREES_BASE, `${MAIN_WORKTREE_FOLDER}-${safeBase}`);
+  fireSessionStart({ ticketId: ticket, tasksDir, repoRoot });
 
   // GH-398 (ECHO-4552 Issue 2): dispatcher-level early-return when the
   // workflow is in the terminal completed state. Per brief P0 #1, fires on
@@ -884,4 +951,4 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { getNextInstruction, buildStateContext, buildInstruction };
+module.exports = { getNextInstruction, buildStateContext, buildInstruction, fireSessionStart };

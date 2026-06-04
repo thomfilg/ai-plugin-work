@@ -11,6 +11,39 @@
 const _stepRegistry = require('../step-registry');
 void _stepRegistry;
 
+/**
+ * Fire the `OnTicketResolved` extension event when the ticket step transitions
+ * to a resolved state (G3).
+ *
+ * Pure-ish helper: takes a `deps` bag for `initExtensions` so tests can stub
+ * the extension surface without spinning up the real loader. In production
+ * `deps.initExtensions` defaults to the public extensions entry point.
+ *
+ * @param {{ticketId: string, resolution: string, tasksDir: string, repoRoot: string, transitionedToResolved: boolean}} opts
+ * @param {{initExtensions?: Function}} [deps]
+ * @returns {{dispatched: boolean, injected: string[]}}
+ */
+async function fireTicketResolved(opts, deps) {
+  const { ticketId, resolution, tasksDir, repoRoot, transitionedToResolved } = opts || {};
+  if (!transitionedToResolved) {
+    return { dispatched: false, injected: '' };
+  }
+  const initExtensions =
+    (deps && deps.initExtensions) || require('../lib/extensions').initExtensions;
+  const ext = initExtensions({ repoRoot, tasksDir });
+  // dispatch() returns the accumulated injected-context string per index.js
+  // contract. Await so callers actually see the injected text instead of an
+  // empty placeholder (was previously fire-and-forget).
+  let injected = '';
+  try {
+    const r = await ext.dispatch('OnTicketResolved', { ticketId, resolution, tasksDir });
+    if (typeof r === 'string') injected = r;
+  } catch {
+    /* fail-open */
+  }
+  return { dispatched: true, injected };
+}
+
 module.exports = function ticketStep(add, s, ctx) {
   const { STEPS, ticket, description, tp, providerConfig } = ctx;
 
@@ -33,3 +66,5 @@ module.exports = function ticketStep(add, s, ctx) {
     });
   }
 };
+
+module.exports.fireTicketResolved = fireTicketResolved;
