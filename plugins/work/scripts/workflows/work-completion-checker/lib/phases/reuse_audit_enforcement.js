@@ -87,8 +87,15 @@ function extractAddedLines(diffOutput) {
 // satisfy the reuse audit — review feedback: an unscoped repo-wide scan let
 // stray matches in unrelated files pass the gate.
 //
-// Returns '' if git fails OR there are no changed files — callers treat
-// empty addedLines as "no signal" and fall back to whole-file content.
+// Return convention (review feedback):
+//   - string (possibly empty) → git ran successfully; result is authoritative.
+//     An empty string means "PR added zero lines in the scoped files" and
+//     must NOT fall back to the proxy — otherwise a deletion-only PR could
+//     pass MUST-reuse via pre-existing code.
+//   - null                    → git could not run (no candidate base or
+//     every spawn errored). Callers fall back to the full-content proxy so
+//     we don't fail-closed on missing tooling.
+// `changedFiles` empty short-circuits to '' (success, nothing added).
 function readAddedLines(ctx, changedFiles) {
   if (!Array.isArray(changedFiles) || changedFiles.length === 0) return '';
   const root = ctx.worktreeRoot || process.cwd();
@@ -100,14 +107,16 @@ function readAddedLines(ctx, changedFiles) {
     );
     if (r && r.status === 0) return extractAddedLines(r.stdout);
   }
-  return '';
+  return null;
 }
 
 // Strict check (B3): the symbol must appear in lines the PR added — not in
-// pre-existing code. When `addedLines` is empty (git unavailable), fall back
-// to the full-content proxy and let the caller note the degradation.
+// pre-existing code. Distinguishes git-failure (null input → caller falls
+// back) from git-success-with-empty-diff (string input → strict result,
+// even if the string is empty).
 function symbolPresentInAdded(symbol, addedLines) {
-  if (!addedLines) return null; // signal: caller should fall back
+  if (addedLines === null || addedLines === undefined) return null;
+  if (addedLines === '') return false;
   const re = new RegExp(`\\b${escapeRegex(symbol)}\\b`);
   return re.test(addedLines);
 }
