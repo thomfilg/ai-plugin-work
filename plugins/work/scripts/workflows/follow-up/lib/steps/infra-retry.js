@@ -192,6 +192,10 @@ function dispatchRetryAttempt(state, retry, result) {
   return delegate;
 }
 
+function isInfraSuspected(result) {
+  return Boolean(result) && result.classification === 'infra-suspected';
+}
+
 function runInfraRetryStep(state, ctx) {
   // R12: default the persisted retry record on first read.
   if (state && !state.infraRetry) {
@@ -206,12 +210,14 @@ function runInfraRetryStep(state, ctx) {
   if (maybeHandleRetrySuccess(state, ctx)) return null;
 
   // R1e / R7: consult the classifier.
-  const result = classify(state || {}, ctx || {});
+  const safeState = state || {};
+  const safeCtx = ctx || {};
+  const result = classify(safeState, safeCtx);
 
   // R14: telemetry append on every classification.
   recordClassification(state, result);
 
-  if (!result || result.classification !== 'infra-suspected') return null;
+  if (!isInfraSuspected(result)) return null;
 
   const outage = maybeSurfaceGhActionsOutage(state, result);
   if (outage) return outage;
