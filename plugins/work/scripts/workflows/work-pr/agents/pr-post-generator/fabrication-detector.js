@@ -33,7 +33,11 @@ const STABILITY_REGEXES = [
 
 const STABILITY_ARTIFACT_PATTERNS = [/^stability.*\.log$/i, /^stability.*\.md$/i];
 
-const ALLOWED_STATUSES = new Set(['pending', 'not run', 'skipped', 'n/a', '—', '-', '']);
+// Only explicit pending-like words count as "no verdict claimed". Empty cells
+// or dash placeholders are NOT allowed — otherwise a row can leave Status
+// blank and smuggle verdict language into Notes, bypassing the sourcing
+// check. The agent prompt requires "pending" explicitly.
+const ALLOWED_STATUSES = new Set(['pending', 'not run', 'skipped', 'n/a']);
 
 const TEST_RESULTS_HEADING = /^##\s+Test Results\s*$/i;
 const ANY_H2 = /^##\s+/;

@@ -37,7 +37,7 @@ test('case B: only-pending Test Results table yields zero violations', () => {
     '| login flow | not run | — |',
     '| signup flow | skipped | n/a |',
     '| dashboard render | n/a | — |',
-    '| nav link | — | — |',
+    '| nav link | pending | — |',
     '',
   ].join('\n');
   const { violations } = detectFabrication(prBody, dir);
@@ -91,6 +91,26 @@ test('substantive stability artifact suppresses stability-claim violation', () =
   const { violations } = detectFabrication(prBody, dir);
   const stab = violations.find((v) => v.reason === 'stability-claim');
   assert.ok(!stab, 'expected no stability-claim violation when artifact has content');
+});
+
+test('Empty or dash Status no longer bypasses sourcing', () => {
+  // Previously '', '-', '—' were in ALLOWED_STATUSES, so a row could leave
+  // Status blank and smuggle verdict language into Notes. Now those values
+  // must be sourced like any other claim.
+  const dir = makeTaskDir({ 'tests.check.md': 'unrelated content\n' });
+  for (const status of ['', '-', '—']) {
+    const prBody = [
+      '## Test Results',
+      '',
+      '| Test | Status | Notes |',
+      '| --- | --- | --- |',
+      `| sneaky verdict in notes | ${status} | works in prod |`,
+      '',
+    ].join('\n');
+    const { violations } = detectFabrication(prBody, dir);
+    const row = violations.find((v) => v.reason === 'unsourced-test-row');
+    assert.ok(row, `expected unsourced-test-row violation for status="${status}"`);
+  }
 });
 
 test('Unsourced row with synonym status (ok/passed/green) trips a violation', () => {
