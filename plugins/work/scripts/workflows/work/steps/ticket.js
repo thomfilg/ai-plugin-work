@@ -31,9 +31,26 @@ function fireTicketResolved(opts, deps) {
   const initExtensions =
     (deps && deps.initExtensions) || require('../lib/extensions').initExtensions;
   const ext = initExtensions({ repoRoot, tasksDir });
-  ext.dispatch('OnTicketResolved', { ticketId, resolution, tasksDir });
-  const injected =
-    typeof ext.getInjectedContext === 'function' ? ext.getInjectedContext() : [];
+  // dispatch() returns the accumulated injected-context string per index.js
+  // contract (commit fa343cf0). Promise#then keeps this helper sync-callable
+  // from transition-step.js while still capturing any injected text.
+  let injected = '';
+  try {
+    const r = ext.dispatch('OnTicketResolved', { ticketId, resolution, tasksDir });
+    if (r && typeof r.then === 'function') {
+      // fire-and-forget the promise; sync callers won't see injected text but
+      // tests can await fireTicketResolved by returning the promise itself.
+      r.then((s) => {
+        injected = typeof s === 'string' ? s : '';
+      }).catch(() => {
+        /* fail-open */
+      });
+    } else if (typeof r === 'string') {
+      injected = r;
+    }
+  } catch {
+    /* fail-open */
+  }
   return { dispatched: true, injected };
 }
 

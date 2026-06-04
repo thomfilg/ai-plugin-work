@@ -52,6 +52,21 @@ function main() {
   const markerAge = Date.now() - new Date(marker.startedAt).getTime();
   if (markerAge > 12 * 60 * 60 * 1000) process.exit(0);
 
+  // Fire OnPostToolCall extension event BEFORE the auto-advance dispatch.
+  // Fail-open: a misbehaving extension must never block the auto-advance.
+  try {
+    firePostToolCall({
+      toolName: hookData?.tool_name,
+      toolInput: hookData?.tool_input,
+      toolResult: hookData?.tool_response,
+      tasksBase: TASKS_BASE,
+      tasksDir: marker.tasksDir,
+      repoRoot: WORKTREES_BASE || process.cwd(),
+    });
+  } catch {
+    /* fail-open */
+  }
+
   // Call work-next.js
   const workNextPath = path.join(__dirname, '..', 'work-next.js');
   let result;
@@ -110,13 +125,19 @@ function main() {
  * @returns {void}
  */
 function firePostToolCall(args, deps) {
-  const { toolName, toolInput, toolResult, tasksDir, repoRoot } = args || {};
+  const { toolName, toolInput, toolResult, tasksBase, tasksDir, repoRoot } = args || {};
+  // Bug fix: findActiveMarker scans CHILDREN of arg1 for `.work.pid`, so it
+  // needs the TASKS_BASE (parent of all per-ticket tasksDirs), not a single
+  // per-ticket tasksDir. Accept `tasksBase` from main() (resolved once via
+  // get-config) and fall back to `tasksDir`'s parent for legacy callers.
   let marker = null;
   try {
     const findMarker =
       deps?.findActiveMarker ||
       require(path.join(__dirname, '..', 'lib', 'marker')).findActiveMarker;
-    marker = findMarker(tasksDir, '.work.pid');
+    const base = tasksBase || (tasksDir ? path.dirname(tasksDir) : '');
+    if (!base) return;
+    marker = findMarker(base, '.work.pid');
   } catch {
     /* fail-open */
   }
@@ -125,7 +146,11 @@ function firePostToolCall(args, deps) {
     const init =
       deps?.initExtensions ||
       require(path.join(__dirname, '..', 'lib', 'extensions')).initExtensions;
-    const api = init({ repoRoot, tasksDir });
+    // Prefer the marker-derived tasksDir (truth) over caller-supplied value
+    // when available — keeps per-ticket extension scope correct under
+    // concurrent sessions.
+    const resolvedTasksDir = marker.tasksDir || tasksDir;
+    const api = init({ repoRoot, tasksDir: resolvedTasksDir });
     api.dispatch('OnPostToolCall', { toolName, toolInput, toolResult });
   } catch {
     /* fail-open — extension dispatch errors must never crash the hook */
@@ -149,13 +174,15 @@ function firePostToolCall(args, deps) {
  * @returns {void}
  */
 function fireAgentResponseMatched(args, deps) {
-  const { responseText, tasksDir, repoRoot } = args || {};
+  const { responseText, tasksBase, tasksDir, repoRoot } = args || {};
   let marker = null;
   try {
     const findMarker =
       deps?.findActiveMarker ||
       require(path.join(__dirname, '..', 'lib', 'marker')).findActiveMarker;
-    marker = findMarker(tasksDir, '.work.pid');
+    const base = tasksBase || (tasksDir ? path.dirname(tasksDir) : '');
+    if (!base) return;
+    marker = findMarker(base, '.work.pid');
   } catch {
     /* fail-open */
   }
@@ -164,18 +191,28 @@ function fireAgentResponseMatched(args, deps) {
     const init =
       deps?.initExtensions ||
       require(path.join(__dirname, '..', 'lib', 'extensions')).initExtensions;
-    const api = init({ repoRoot, tasksDir });
+    const resolvedTasksDir = marker.tasksDir || tasksDir;
+    const api = init({ repoRoot, tasksDir: resolvedTasksDir });
     const handlers =
       typeof api.listHandlers === 'function' ? api.listHandlers('OnAgentResponseMatched') : [];
     for (const record of handlers) {
       if (!record || !record.match || !record.match.compiled) continue;
       const m = record.match.compiled.exec(responseText || '');
       if (!m) continue;
+      // Bug fix: dispatch ONLY to the matched handler (not the entire event
+      // chain) so other OnAgentResponseMatched handlers with different
+      // patterns are not invoked for an unrelated match.
+      const payload = {
+        responseText,
+        match: { pattern: record.match.pattern, substring: m[0] },
+      };
       try {
-        api.dispatch('OnAgentResponseMatched', {
-          responseText,
-          match: { pattern: record.match.pattern, substring: m[0] },
-        });
+        if (typeof api.dispatchToHandler === 'function') {
+          api.dispatchToHandler(record, payload);
+        } else {
+          // Legacy fallback (API without dispatchToHandler).
+          api.dispatch('OnAgentResponseMatched', payload);
+        }
       } catch {
         /* fail-open — extension dispatch errors must never crash the hook */
       }

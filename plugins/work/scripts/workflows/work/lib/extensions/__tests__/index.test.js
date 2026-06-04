@@ -8,7 +8,7 @@
 
 'use strict';
 
-const { describe, it, beforeEach, afterEach } = require('node:test');
+const { describe, it, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -138,22 +138,18 @@ module.exports = {
     const { initExtensions } = loadIndex();
     const { root, tasksDir } = freshRepo();
     const extDir = makeExtensionsDir(root);
-    writeExt(
-      extDir,
-      'a.js',
-      `module.exports = { events: ['OnSessionStart'], handler: () => {} };`
-    );
+    writeExt(extDir, 'a.js', `module.exports = { events: ['OnSessionStart'], handler: () => {} };`);
     const a = initExtensions({ repoRoot: root, tasksDir });
     const firstStatus = a.status();
     // Add a second extension AFTER init — memoization means it must not appear.
-    writeExt(
-      extDir,
-      'b.js',
-      `module.exports = { events: ['OnSessionStart'], handler: () => {} };`
-    );
+    writeExt(extDir, 'b.js', `module.exports = { events: ['OnSessionStart'], handler: () => {} };`);
     const b = initExtensions({ repoRoot: root, tasksDir });
     assert.equal(a, b, 'same keypair must return the identical API object');
-    assert.deepEqual(b.status(), firstStatus, 'status must be the original loader result, not re-loaded');
+    assert.deepEqual(
+      b.status(),
+      firstStatus,
+      'status must be the original loader result, not re-loaded'
+    );
     assert.equal(b.status().length, 1);
   });
 

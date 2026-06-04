@@ -22,8 +22,20 @@ const path = require('node:path');
 // at require time even if synapsys is not installed in some test contexts.
 function getSafeRegex() {
   try {
-    // plugins/work/scripts/workflows/work/lib/extensions/ → ../../../../../synapsys/lib/matcher
-    const matcherPath = path.resolve(__dirname, '..', '..', '..', '..', '..', 'synapsys', 'lib', 'matcher.js');
+    // plugins/work/scripts/workflows/work/lib/extensions/ → ../../../../../../synapsys/lib/matcher
+    // (6 levels: extensions → lib → work → workflows → scripts → work → plugins)
+    const matcherPath = path.resolve(
+      __dirname,
+      '..',
+      '..',
+      '..',
+      '..',
+      '..',
+      '..',
+      'synapsys',
+      'lib',
+      'matcher.js'
+    );
     return require(matcherPath).safeRegex;
   } catch {
     return (pattern, flags = 'i') => {
@@ -144,24 +156,73 @@ async function dispatch(eventName, payload, ctx) {
     } catch (err) {
       // R6/G5: a throwing handler is caught and treated as passthrough so
       // subsequent handlers in the priority chain still run. The error is
-      // re-thrown via a one-shot async hop so the top-level dispatch caller
-      // (index.js) can log it without aborting the chain.
-      const message = err && err.message;
-      const name = err && err.name;
-      try {
-        process.stderr.write(
-          `[work-extensions] handler error for ${eventName} (${record.sourceFile}): ${name || 'Error'}: ${message}\n`
-        );
-      } catch {
-        /* fail-open */
-      }
+      // logged via debug-log (if ctx carries tasksDir) AND stderr so visibility
+      // matches the index.js error path described in spec §AD.
+      logDispatchError(eventName, record.sourceFile, err, ctx);
     }
+  }
+}
+
+/**
+ * Dual-sink error log for handler-thrown errors during dispatch.
+ * Writes to `<tasksDir>/debug.md` when `ctx.tasksDir` is available and always
+ * emits a stderr warn so /work terminal output surfaces the failure.
+ * Fail-open in both sinks — a logging failure must never crash the dispatcher.
+ *
+ * @param {string} eventName
+ * @param {string} sourceFile
+ * @param {Error} err
+ * @param {{tasksDir?: string}} ctx
+ */
+function logDispatchError(eventName, sourceFile, err, ctx) {
+  const message = err && err.message;
+  const name = err && err.name;
+  if (ctx && ctx.tasksDir) {
+    try {
+      const { createDebugLog } = require('../debug-log');
+      createDebugLog(ctx.tasksDir).error('extension handler threw', {
+        event: eventName,
+        sourceFile,
+        name: name || 'Error',
+        message,
+      });
+    } catch {
+      /* fail-open */
+    }
+  }
+  try {
+    process.stderr.write(
+      `[work-extensions] handler error for ${eventName} (${sourceFile}): ${name || 'Error'}: ${message}\n`
+    );
+  } catch {
+    /* fail-open */
+  }
+}
+
+/**
+ * Dispatch to a single specific handler record (already located via
+ * listHandlers + match). Used by `fireAgentResponseMatched` to invoke ONLY
+ * the handler whose pattern matched, instead of re-dispatching to every
+ * handler for the event. Wraps the call in the same try/catch as `dispatch`.
+ *
+ * @param {{eventName: string, handler: Function, sourceFile: string}} record
+ * @param {object} payload
+ * @param {object} ctx
+ * @returns {Promise<void>}
+ */
+async function dispatchToHandler(record, payload, ctx) {
+  if (!record || typeof record.handler !== 'function') return;
+  try {
+    await record.handler(payload, ctx);
+  } catch (err) {
+    logDispatchError(record.eventName, record.sourceFile, err, ctx);
   }
 }
 
 module.exports = {
   register,
   dispatch,
+  dispatchToHandler,
   listHandlers,
   DEFAULT_PRIORITY,
 };

@@ -8,7 +8,7 @@
 
 'use strict';
 
-const { describe, it, beforeEach, afterEach } = require('node:test');
+const { describe, it, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
@@ -124,10 +124,7 @@ describe('loader', () => {
       tmpDirs.push(root);
       const extDir = makeExtensionsDir(root);
 
-      fs.writeFileSync(
-        path.join(extDir, 'broken.js'),
-        `throw new Error('kaboom at load');`
-      );
+      fs.writeFileSync(path.join(extDir, 'broken.js'), `throw new Error('kaboom at load');`);
       fs.writeFileSync(
         path.join(extDir, 'good.js'),
         `module.exports = { events: ['OnSessionStart'], handler: () => {} };`
@@ -235,10 +232,7 @@ describe('loader', () => {
       const outsideDir = path.join(root, 'outside');
       fs.mkdirSync(outsideDir, { recursive: true });
       const outsideFile = path.join(outsideDir, 'evil.js');
-      fs.writeFileSync(
-        outsideFile,
-        `module.exports = { events: ['OnPwn'], handler: () => {} };`
-      );
+      fs.writeFileSync(outsideFile, `module.exports = { events: ['OnPwn'], handler: () => {} };`);
 
       // Symlink inside extensions dir → outside file
       const linkPath = path.join(extDir, 'evil.js');

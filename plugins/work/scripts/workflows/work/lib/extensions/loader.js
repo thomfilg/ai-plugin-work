@@ -77,14 +77,12 @@ function loadExtensions(opts) {
   const extDir = path.join(repoRoot, EXTENSIONS_REL);
 
   if (!fs.existsSync(extDir)) {
+    // R8 backward compatibility: repos without `.claude/work-extensions/`
+    // MUST NOT see any stderr warning. Debug-log is kept (only visible when
+    // tasksDir is opened) but stderr is silenced for the common no-extensions
+    // case so /work behaves identically to today for non-extension repos.
     try {
       log.error('no extensions directory; skipping', { dir: extDir });
-    } catch {
-      /* fail-open */
-    }
-    // Also emit informationally to stderr so callers without a debug log see it.
-    try {
-      process.stderr.write(`[work-extensions] no extensions directory; skipping (${extDir})\n`);
     } catch {
       /* fail-open */
     }

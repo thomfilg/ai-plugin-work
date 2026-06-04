@@ -261,11 +261,26 @@ function fireSessionStart(args, deps) {
   _sessionStartFired = true;
   try {
     const api = init({ repoRoot, tasksDir });
-    // Fire-and-forget. Extension dispatch errors are caught inside
+    // dispatch() returns the accumulated injected-context string. We can't
+    // synchronously surface it (this is a sync function called from
+    // getNextInstruction), but we forward to debug.md so injected text is
+    // discoverable per session. Extension dispatch errors are caught inside
     // initExtensions and never propagate.
-    Promise.resolve(api.dispatch('OnSessionStart', { ticketId, tasksDir, repoRoot })).catch(
-      () => {}
-    );
+    Promise.resolve(api.dispatch('OnSessionStart', { ticketId, tasksDir, repoRoot }))
+      .then((injected) => {
+        if (injected && typeof injected === 'string' && injected.length > 0) {
+          try {
+            const { createDebugLog } = require(path.join(__dirname, 'lib', 'debug-log'));
+            createDebugLog(tasksDir).info('OnSessionStart injected context', {
+              chars: injected.length,
+              preview: injected.slice(0, 240),
+            });
+          } catch {
+            /* fail-open */
+          }
+        }
+      })
+      .catch(() => {});
   } catch {
     /* fail-open — extension wiring must never crash /work */
   }

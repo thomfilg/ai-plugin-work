@@ -199,15 +199,19 @@ function formatPlan(plan) {
  * @returns {void}
  */
 function firePreToolCall(args, deps) {
-  const { toolName, toolInput, tasksDir, repoRoot } = args || {};
+  const { toolName, toolInput, tasksBase, tasksDir, repoRoot } = args || {};
+  // Bug fix: findActiveMarker needs TASKS_BASE (parent of all per-ticket
+  // tasksDirs), not a single per-ticket tasksDir. Accept `tasksBase` and fall
+  // back to tasksDir's parent for legacy callers.
   let marker = null;
   try {
     const findMarker =
       deps?.findActiveMarker ||
-      require(
-        path.join(__dirname, '..', 'scripts', 'workflows', 'work', 'lib', 'marker')
-      ).findActiveMarker;
-    marker = findMarker(tasksDir, '.work.pid');
+      require(path.join(__dirname, '..', 'scripts', 'workflows', 'work', 'lib', 'marker'))
+        .findActiveMarker;
+    const base = tasksBase || (tasksDir ? path.dirname(tasksDir) : '');
+    if (!base) return;
+    marker = findMarker(base, '.work.pid');
   } catch {
     /* fail-open */
   }
@@ -215,10 +219,10 @@ function firePreToolCall(args, deps) {
   try {
     const init =
       deps?.initExtensions ||
-      require(
-        path.join(__dirname, '..', 'scripts', 'workflows', 'work', 'lib', 'extensions')
-      ).initExtensions;
-    const api = init({ repoRoot, tasksDir });
+      require(path.join(__dirname, '..', 'scripts', 'workflows', 'work', 'lib', 'extensions'))
+        .initExtensions;
+    const resolvedTasksDir = marker.tasksDir || tasksDir;
+    const api = init({ repoRoot, tasksDir: resolvedTasksDir });
     api.dispatch('OnPreToolCall', { toolName, toolInput });
   } catch {
     /* fail-open — extension dispatch errors must never crash the hook */

@@ -338,6 +338,31 @@ function transitionStep(ticket, targetStep, deps) {
   ws.stepStatus[currentStep] = 'completed';
   appendAction(safeTicket, { step: currentStep, what: 'step completed' });
 
+  // Fire OnTicketResolved extension event when the `ticket` step completes
+  // (transition into `bootstrap`). Fail-open: a misbehaving extension must
+  // never block a real step transition.
+  if (currentStep === STEPS.ticket && isForward) {
+    try {
+      const { fireTicketResolved } = require(path.join(__dirname, '..', 'steps', 'ticket'));
+      const result = fireTicketResolved({
+        ticketId: safeTicket,
+        resolution: 'completed',
+        tasksDir: path.join(TASKS_BASE, safeTicket),
+        repoRoot: process.cwd(),
+        transitionedToResolved: true,
+      });
+      if (result && result.injected) {
+        appendAction(safeTicket, {
+          step: currentStep,
+          what: 'OnTicketResolved dispatched',
+          injectedChars: typeof result.injected === 'string' ? result.injected.length : 0,
+        });
+      }
+    } catch {
+      /* fail-open */
+    }
+  }
+
   ws.stepStatus[targetStep] = 'in_progress';
   appendAction(safeTicket, { step: targetStep, what: 'step started' });
 
@@ -382,7 +407,9 @@ function transitionStep(ticket, targetStep, deps) {
     let pluginVersion = 'unknown';
     try {
       // __dirname = plugins/work/scripts/workflows/work/engine → repo root is 6 levels up
-      pluginVersion = require(path.join(__dirname, '..', '..', '..', '..', '..', '..', 'package.json')).version;
+      pluginVersion = require(
+        path.join(__dirname, '..', '..', '..', '..', '..', '..', 'package.json')
+      ).version;
     } catch {
       /* fail-open: leave pluginVersion as 'unknown' */
     }

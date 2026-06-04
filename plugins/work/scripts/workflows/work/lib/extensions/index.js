@@ -95,7 +95,7 @@ function initExtensions(opts) {
    * @returns {Promise<void>}
    */
   async function dispatch(eventName, payload) {
-    const ctx = createCtx({ event: eventName, payload });
+    const ctx = createCtx({ event: eventName, payload, tasksDir });
     try {
       await eventBus.dispatch(eventName, payload, ctx);
     } catch (err) {
@@ -123,7 +123,26 @@ function initExtensions(opts) {
     return eventBus.listHandlers(eventName);
   }
 
-  const api = { dispatch, status, listHandlers };
+  /**
+   * Dispatch to a single handler record located via `listHandlers`. Used by
+   * fireAgentResponseMatched so a regex match invokes ONLY the matched
+   * handler — not every handler subscribed to OnAgentResponseMatched.
+   * Returns the injected-context string for that single handler invocation.
+   * @param {object} record
+   * @param {object} payload
+   * @returns {Promise<string>}
+   */
+  async function dispatchToHandler(record, payload) {
+    const ctx = createCtx({ event: (record && record.eventName) || '', payload, tasksDir });
+    try {
+      await eventBus.dispatchToHandler(record, payload, ctx);
+    } catch (err) {
+      logHandlerError(log, (record && record.eventName) || '', err);
+    }
+    return ctx.getInjectedContext();
+  }
+
+  const api = { dispatch, status, listHandlers, dispatchToHandler };
   cache.set(key, api);
   return api;
 }

@@ -44,13 +44,14 @@ class PhaseNotReadyError extends Error {
  *   callTool: (name: string, args: object) => never,
  * }}
  */
-function createCtx({ event, payload }) {
+function createCtx({ event, payload, tasksDir }) {
   /** @type {string[]} */
   const injected = [];
 
   return {
     event,
     payload,
+    tasksDir,
 
     /**
      * Explicit no-op sentinel — signals "I saw this event and chose to do
