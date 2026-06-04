@@ -159,12 +159,24 @@ function extractVerdictWord(line) {
   return m ? m[1].toUpperCase() : null;
 }
 
+// Review feedback: bare-fail detection. `hasVerdict` requires a
+// `Status:` / `Verdict:` label, so a pasted runner row like
+// `- test_R4 FAIL (TypeError ...)` would slip past the file-level PASS gate
+// because `lineSaysFail` returned false. This pattern matches any
+// recognized FAIL keyword as a standalone word on the line, regardless of
+// label, so bare prose failures are also treated as fail.
+const BARE_FAIL_RE = /\b(FAIL(?:ED|URE)?|BLOCKED|NOT[_\s-]?DELIVERED|NEEDS[_\s-]?WORK)\b/i;
+
+function lineHasBareFail(line) {
+  return Boolean(line) && BARE_FAIL_RE.test(line);
+}
+
 function evaluateCitation(reportContent, overall, cite) {
   const nameRe = new RegExp(`\\b${escapeRegex(cite.testName)}\\b`);
   const named = nameRe.test(reportContent);
   const line = findTestLine(reportContent, cite.testName);
   const lineSaysPass = line !== null && hasVerdict(line, PASS_VERDICTS);
-  const lineSaysFail = line !== null && hasVerdict(line, FAIL_VERDICTS);
+  const lineSaysFail = line !== null && (hasVerdict(line, FAIL_VERDICTS) || lineHasBareFail(line));
   if (lineSaysPass) return { passed: true };
   if (overall === 'PASS' && named && !lineSaysFail) return { passed: true };
   return { passed: false, named, line, lineSaysFail };
