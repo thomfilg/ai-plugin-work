@@ -109,6 +109,14 @@ function reconcileTask(task, aliveTickets) {
 }
 
 function syncFromTmux(activeWorkSessions) {
+  // Guard: an empty input is ambiguous — could be a real "no sessions" state
+  // or a transient `tmux ls` failure / prefix mismatch / mid-restart gap.
+  // Refusing to demote `in_progress → stopped` on empty input means the
+  // operator must manually clear stale entries when they really kill the
+  // whole pool, but it prevents a flapping manifest in the failure cases.
+  if (!Array.isArray(activeWorkSessions) || activeWorkSessions.length === 0) {
+    return;
+  }
   const aliveTickets = aliveTicketSet(activeWorkSessions);
   for (const file of listManifestFiles()) {
     const m = readManifest(file);
