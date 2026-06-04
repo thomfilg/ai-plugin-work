@@ -60,21 +60,25 @@ function recordClassification(state, result) {
  * Task 7.2 (R15): when ctx signals CI is green and the last persisted attempt
  * is still `pending`, mark it `succeeded` and log the canonical literal.
  */
-function maybeHandleRetrySuccess(state, ctx) {
-  if (!state || !state.infraRetry) return false;
+function lastPendingAttempt(state) {
+  if (!state || !state.infraRetry) return null;
   const attempts = state.infraRetry.attempts;
-  if (!Array.isArray(attempts) || attempts.length === 0) return false;
+  if (!Array.isArray(attempts) || attempts.length === 0) return null;
   const last = attempts[attempts.length - 1];
-  if (!last || last.outcome !== 'pending') return false;
-  const ciStatus = ctx && ctx.ciStatus;
-  if (ciStatus !== 'success') return false;
-  // Bug 542-12: refuse to trust a persisted-stale `ciStatus`. monitor.js
-  // stamps `state._ciStatusFreshAt` with `process.uptime()` of its own
-  // process; a later process re-loading from disk has a fresh uptime clock,
-  // so the stamp won't match this process's uptime and we drop through
-  // (which forces the loop to call monitor again first).
+  if (!last || last.outcome !== 'pending') return null;
+  return last;
+}
+
+function ciStatusIsFreshSuccess(state, ctx) {
+  if (!ctx || ctx.ciStatus !== 'success') return false;
   const freshness = state._ciStatusFreshness;
-  if (!freshness || freshness.pid !== process.pid) return false;
+  return Boolean(freshness && freshness.pid === process.pid);
+}
+
+function maybeHandleRetrySuccess(state, ctx) {
+  const last = lastPendingAttempt(state);
+  if (!last) return false;
+  if (!ciStatusIsFreshSuccess(state, ctx)) return false;
   last.outcome = 'succeeded';
   process.stderr.write(`${RETRY_SUCCESS_LOG}\n`);
   return true;
@@ -211,6 +215,23 @@ function isInfraSuspected(result) {
   return Boolean(result) && result.classification === 'infra-suspected';
 }
 
+// Bug 542-14: if a prior cycle exhausted infra retries, the spec forbids
+// dispatching fix-ci even if a later classification would otherwise return
+// `code-failure`. Stay in the infra-stuck surface so the human handler
+// resolves it explicitly.
+function maybeSurfaceAlreadyExhausted(state) {
+  if (!state.infraRetry || !state.infraRetry.exhausted) return null;
+  state.failureCategory = 'infra-stuck';
+  return {
+    action: 'surface',
+    payload: {
+      reason: 'infra-stuck',
+      attempts: state.infraRetry.attempts,
+      signals: [],
+    },
+  };
+}
+
 function routeRetrySuccessToReport(state) {
   state.currentStep = 'report';
   if (state.failureCategory === 'ci_failure') {
@@ -235,21 +256,8 @@ function runInfraRetryStep(state, ctx) {
     return null;
   }
 
-  // Bug 542-14: if a prior cycle exhausted infra retries, the spec forbids
-  // dispatching fix-ci even if a later classification would otherwise return
-  // `code-failure`. Stay in the infra-stuck surface so the human handler
-  // resolves it explicitly.
-  if (state.infraRetry && state.infraRetry.exhausted) {
-    state.failureCategory = 'infra-stuck';
-    return {
-      action: 'surface',
-      payload: {
-        reason: 'infra-stuck',
-        attempts: state.infraRetry.attempts,
-        signals: [],
-      },
-    };
-  }
+  const exhaustedSurface = maybeSurfaceAlreadyExhausted(state);
+  if (exhaustedSurface) return exhaustedSurface;
 
   // R1e / R7: consult the classifier.
   const safeState = state || {};

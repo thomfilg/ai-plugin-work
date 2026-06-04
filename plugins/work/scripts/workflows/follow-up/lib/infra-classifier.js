@@ -167,15 +167,16 @@ function signal2_emptyFailedLog(runId, jobId, exec) {
     throw new TypeError('signal2_emptyFailedLog: exec must be a function');
   }
   const result = exec(`gh run view ${runId} --job ${jobId} --log-failed`);
-  const stdout = (result && result.stdout) || '';
-  const stderr = (result && result.stderr) || '';
+  return evaluateSignal2Result(result || {}, runId, jobId);
+}
+
+const SIGNAL2_MARKER_RE = /error|fail|assert|expect|✗|✕/i;
+
+function evaluateSignal2Result(result, runId, jobId) {
+  const stdout = result.stdout || '';
+  const stderr = result.stderr || '';
   const stripped = filterLogs(stdout).trim();
-  // Treat as "empty" when no error/assertion lines survive the filter AND
-  // neither raw stream has error markers. stderr is checked too: a failed
-  // `gh run view` typically writes its diagnostic to stderr with empty stdout,
-  // which must NOT be misclassified as a flake's empty failed log.
-  const markerRe = /error|fail|assert|expect|✗|✕/i;
-  const hasErrorMarker = markerRe.test(stdout) || markerRe.test(stderr);
+  const hasErrorMarker = SIGNAL2_MARKER_RE.test(stdout) || SIGNAL2_MARKER_RE.test(stderr);
   if (!hasErrorMarker && stripped.length === 0) {
     return {
       fired: true,
