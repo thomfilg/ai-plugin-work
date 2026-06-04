@@ -45,7 +45,7 @@ describe('steps/ticket.js — OnTicketResolved wiring (Task 6)', () => {
         status: () => [],
       }),
     };
-    const result = mod.fireTicketResolved(
+    const result = await mod.fireTicketResolved(
       {
         ticketId: 'GH-999',
         resolution: 'COMPLETED',
@@ -55,8 +55,6 @@ describe('steps/ticket.js — OnTicketResolved wiring (Task 6)', () => {
       },
       deps
     );
-    // Allow the fire-and-forget promise to settle so injected text is captured.
-    await new Promise((r) => setImmediate(r));
     assert.equal(calls.length, 1);
     assert.equal(calls[0].event, 'OnTicketResolved');
     assert.deepEqual(calls[0].payload, {
@@ -65,10 +63,9 @@ describe('steps/ticket.js — OnTicketResolved wiring (Task 6)', () => {
       tasksDir: '/tmp/tasks/GH-999',
     });
     assert.equal(result.dispatched, true);
-    // injected is captured async; the helper returns string via the dispatch
-    // return contract. After settle, the result.injected reflects the handler's
-    // injectContext output.
-    assert.equal(typeof result.injected, 'string');
+    // dispatch return is awaited — injected captures the handler's
+    // injectContext output exactly.
+    assert.equal(result.injected, 'handled:GH-999');
   });
 
   it('does not dispatch when ticket step does not reach resolved transition', () => {

@@ -146,11 +146,13 @@ function firePostToolCall(args, deps) {
     const init =
       deps?.initExtensions ||
       require(path.join(__dirname, '..', 'lib', 'extensions')).initExtensions;
-    // Prefer the marker-derived tasksDir (truth) over caller-supplied value
-    // when available — keeps per-ticket extension scope correct under
-    // concurrent sessions.
-    const resolvedTasksDir = marker.tasksDir || tasksDir;
-    const api = init({ repoRoot, tasksDir: resolvedTasksDir });
+    // Marker files don't carry tasksDir — derive it from base + ticket.
+    // Prefer marker.worktreeRoot (true repo of the active session) over the
+    // caller-supplied repoRoot (which is the WORKTREES_BASE, not a repo).
+    const resolvedTasksDir =
+      (tasksBase && marker.ticket && path.join(tasksBase, marker.ticket)) || tasksDir;
+    const resolvedRepoRoot = marker.worktreeRoot || repoRoot;
+    const api = init({ repoRoot: resolvedRepoRoot, tasksDir: resolvedTasksDir });
     api.dispatch('OnPostToolCall', { toolName, toolInput, toolResult });
   } catch {
     /* fail-open — extension dispatch errors must never crash the hook */

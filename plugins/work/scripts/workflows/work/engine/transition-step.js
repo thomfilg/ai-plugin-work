@@ -340,24 +340,37 @@ function transitionStep(ticket, targetStep, deps) {
 
   // Fire OnTicketResolved extension event when the `ticket` step completes
   // (transition into `bootstrap`). Fail-open: a misbehaving extension must
-  // never block a real step transition.
+  // never block a real step transition. fireTicketResolved is async; we
+  // fire-and-forget here because transitionStep is sync — the appendAction
+  // log entry is best-effort and lands as soon as the promise settles.
   if (currentStep === STEPS.ticket && isForward) {
     try {
       const { fireTicketResolved } = require(path.join(__dirname, '..', 'steps', 'ticket'));
-      const result = fireTicketResolved({
-        ticketId: safeTicket,
-        resolution: 'completed',
-        tasksDir: path.join(TASKS_BASE, safeTicket),
-        repoRoot: process.cwd(),
-        transitionedToResolved: true,
-      });
-      if (result && result.injected) {
-        appendAction(safeTicket, {
-          step: currentStep,
-          what: 'OnTicketResolved dispatched',
-          injectedChars: typeof result.injected === 'string' ? result.injected.length : 0,
+      Promise.resolve(
+        fireTicketResolved({
+          ticketId: safeTicket,
+          resolution: 'completed',
+          tasksDir: path.join(TASKS_BASE, safeTicket),
+          repoRoot: process.cwd(),
+          transitionedToResolved: true,
+        })
+      )
+        .then((result) => {
+          if (result && result.injected) {
+            try {
+              appendAction(safeTicket, {
+                step: currentStep,
+                what: 'OnTicketResolved dispatched',
+                injectedChars: result.injected.length,
+              });
+            } catch {
+              /* fail-open */
+            }
+          }
+        })
+        .catch(() => {
+          /* fail-open */
         });
-      }
     } catch {
       /* fail-open */
     }

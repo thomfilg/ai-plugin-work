@@ -18,35 +18,49 @@ const path = require('path');
 process.on('uncaughtException', () => process.exit(0));
 process.on('unhandledRejection', () => process.exit(0));
 
-function main() {
-  let hookData;
+/**
+ * Read and parse the Claude Code hook stdin payload.
+ * @returns {object|null} parsed payload or null on parse failure
+ */
+function readHookData() {
   try {
     const input = fs.readFileSync(0, 'utf8');
-    hookData = JSON.parse(input);
+    return JSON.parse(input);
   } catch {
-    process.exit(0);
+    return null;
   }
+}
+
+/**
+ * Resolve TASKS_BASE + WORKTREES_BASE via the canonical workflow config.
+ * @returns {{TASKS_BASE: string, WORKTREES_BASE: string}|null}
+ */
+function resolveBases() {
+  try {
+    const resolveMod = require(
+      path.join(__dirname, '..', 'scripts', 'workflows', 'work', 'lib', 'resolve-plugin-root')
+    );
+    const { libDir } = resolveMod.resolvePluginPaths(__dirname, 2);
+    const cfg = require(path.join(libDir, 'get-config'));
+    const wt = cfg('WORKTREES_BASE') || '';
+    const tb = cfg('TASKS_BASE') || (wt ? path.join(wt, 'tasks') : '');
+    return tb ? { TASKS_BASE: tb, WORKTREES_BASE: wt } : null;
+  } catch {
+    return null;
+  }
+}
+
+function main() {
+  const hookData = readHookData();
+  if (!hookData) process.exit(0);
 
   // Guard: do NOT fire inside sub-agents — sub-agent tool calls would
   // double-dispatch extension events at both parent and sub-agent boundaries.
-  const transcriptPath = hookData?.transcript_path || '';
+  const transcriptPath = hookData.transcript_path || '';
   if (transcriptPath.includes('/subagents/')) process.exit(0);
 
-  let TASKS_BASE = '';
-  let WORKTREES_BASE = '';
-  try {
-    const { resolvePluginPaths } = require(
-      path.join(__dirname, '..', 'scripts', 'workflows', 'work', 'lib', 'resolve-plugin-root')
-    );
-    const { libDir } = resolvePluginPaths(__dirname, 2);
-    const getConfig = require(path.join(libDir, 'get-config'));
-    WORKTREES_BASE = getConfig('WORKTREES_BASE') || '';
-    TASKS_BASE =
-      getConfig('TASKS_BASE') || (WORKTREES_BASE ? path.join(WORKTREES_BASE, 'tasks') : '');
-  } catch {
-    process.exit(0);
-  }
-  if (!TASKS_BASE) process.exit(0);
+  const bases = resolveBases();
+  if (!bases) process.exit(0);
 
   try {
     // Prevent work-hook.js's bottom-of-file main() from auto-firing the
@@ -54,10 +68,10 @@ function main() {
     process.env.WORK_HOOK_NO_MAIN = '1';
     const { firePreToolCall } = require(path.join(__dirname, 'work-hook'));
     firePreToolCall({
-      toolName: hookData?.tool_name,
-      toolInput: hookData?.tool_input,
-      tasksBase: TASKS_BASE,
-      repoRoot: WORKTREES_BASE || process.cwd(),
+      toolName: hookData.tool_name,
+      toolInput: hookData.tool_input,
+      tasksBase: bases.TASKS_BASE,
+      repoRoot: bases.WORKTREES_BASE || process.cwd(),
     });
   } catch {
     /* fail-open */

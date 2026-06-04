@@ -85,7 +85,13 @@ function findActiveMarker(tasksBase, markerFilename, caller = ownerStamp()) {
       const markerPath = path.join(tasksBase, entry.name, markerFilename);
       if (!fs.existsSync(markerPath)) continue;
       try {
-        candidates.push(JSON.parse(fs.readFileSync(markerPath, 'utf8')));
+        // Enrich the parsed marker with the resolved tasksDir so callers can
+        // route extension dispatch to the correct per-ticket scope without
+        // re-deriving it from `ticket` (which is the raw input, not the
+        // sanitized directory name).
+        const parsed = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
+        parsed.tasksDir = path.join(tasksBase, entry.name);
+        candidates.push(parsed);
       } catch {
         /* skip corrupt marker */
       }

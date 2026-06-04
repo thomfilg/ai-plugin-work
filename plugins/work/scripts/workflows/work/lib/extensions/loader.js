@@ -107,77 +107,95 @@ function loadExtensions(opts) {
 
   for (const name of entries) {
     const full = path.join(extDir, name);
-    const ext = path.extname(name).toLowerCase();
-
-    if (ext === '.ts') {
-      const msg = `Phase 1 supports .js only — skipping ${name}`;
-      warn(log, full, msg);
-      status.push({ file: full, events: [], loaded: false, error: msg });
-      continue;
-    }
-
-    if (ext !== '.js') {
-      continue;
-    }
-
-    // Path-traversal hardening: ensure realpath sits under realExtDir.
-    let realFile;
-    try {
-      realFile = fs.realpathSync(full);
-    } catch (err) {
-      warn(log, full, `failed to resolve realpath: ${err.message}`);
-      status.push({ file: full, events: [], loaded: false, error: err.message });
-      continue;
-    }
-
-    const rel = path.relative(realExtDir, realFile);
-    if (rel.startsWith('..') || path.isAbsolute(rel)) {
-      const msg = `path traversal rejected — realpath outside extensions dir: ${realFile}`;
-      warn(log, full, msg);
-      status.push({ file: full, events: [], loaded: false, error: msg });
-      continue;
-    }
-
-    let mod;
-    try {
-      // Always re-require to avoid stale module cache across tests / reloads.
-      delete require.cache[realFile];
-      mod = require(realFile);
-    } catch (err) {
-      const msg = `failed to require extension: ${err.message}`;
-      warn(log, full, msg);
-      status.push({ file: full, events: [], loaded: false, error: err.message });
-      continue;
-    }
-
-    const validationError = validateExport(mod);
-    if (validationError) {
-      warn(log, full, validationError);
-      status.push({ file: full, events: [], loaded: false, error: validationError });
-      continue;
-    }
-
-    try {
-      for (const eventName of mod.events) {
-        bus.register({
-          eventName,
-          handler: mod.handler,
-          priority: mod.priority,
-          sourceFile: full,
-          match: mod.match,
-        });
-      }
-    } catch (err) {
-      const msg = `failed to register extension: ${err.message}`;
-      warn(log, full, msg);
-      status.push({ file: full, events: mod.events || [], loaded: false, error: err.message });
-      continue;
-    }
-
-    status.push({ file: full, events: mod.events.slice(), loaded: true });
+    const entry = loadOneExtension(name, full, realExtDir, log, bus);
+    if (entry) status.push(entry);
   }
 
   return status;
+}
+
+/**
+ * Resolve realpath and verify it stays under the extensions dir.
+ * @param {string} full
+ * @param {string} realExtDir
+ * @param {{error: Function}} log
+ * @returns {{realFile: string|null, error: string|null}}
+ */
+function resolveRealFile(full, realExtDir, log) {
+  let realFile;
+  try {
+    realFile = fs.realpathSync(full);
+  } catch (err) {
+    const msg = `failed to resolve realpath: ${err.message}`;
+    warn(log, full, msg);
+    return { realFile: null, error: err.message };
+  }
+  const rel = path.relative(realExtDir, realFile);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    const msg = `path traversal rejected — realpath outside extensions dir: ${realFile}`;
+    warn(log, full, msg);
+    return { realFile: null, error: msg };
+  }
+  return { realFile, error: null };
+}
+
+/**
+ * Process a single candidate file: classify by extension, require, validate,
+ * and register against the bus. Returns a status entry or null when the file
+ * type is silently skipped (non-.js / non-.ts).
+ * Extracted from loadExtensions to keep the parent function under the
+ * cyclomatic-complexity gate.
+ *
+ * @param {string} name  basename
+ * @param {string} full  full filesystem path
+ * @param {string} realExtDir
+ * @param {{error: Function}} log
+ * @param {{register: Function}} bus
+ * @returns {object|null}
+ */
+function loadOneExtension(name, full, realExtDir, log, bus) {
+  const ext = path.extname(name).toLowerCase();
+  if (ext === '.ts') {
+    const msg = `Phase 1 supports .js only — skipping ${name}`;
+    warn(log, full, msg);
+    return { file: full, events: [], loaded: false, error: msg };
+  }
+  if (ext !== '.js') return null;
+
+  const { realFile, error: realErr } = resolveRealFile(full, realExtDir, log);
+  if (!realFile) return { file: full, events: [], loaded: false, error: realErr };
+
+  let mod;
+  try {
+    delete require.cache[realFile];
+    mod = require(realFile);
+  } catch (err) {
+    warn(log, full, `failed to require extension: ${err.message}`);
+    return { file: full, events: [], loaded: false, error: err.message };
+  }
+
+  const validationError = validateExport(mod);
+  if (validationError) {
+    warn(log, full, validationError);
+    return { file: full, events: [], loaded: false, error: validationError };
+  }
+
+  try {
+    for (const eventName of mod.events) {
+      bus.register({
+        eventName,
+        handler: mod.handler,
+        priority: mod.priority,
+        sourceFile: full,
+        match: mod.match,
+      });
+    }
+  } catch (err) {
+    warn(log, full, `failed to register extension: ${err.message}`);
+    return { file: full, events: mod.events || [], loaded: false, error: err.message };
+  }
+
+  return { file: full, events: mod.events.slice(), loaded: true };
 }
 
 module.exports = {

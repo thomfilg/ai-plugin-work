@@ -23,31 +23,21 @@ void _stepRegistry;
  * @param {{initExtensions?: Function}} [deps]
  * @returns {{dispatched: boolean, injected: string[]}}
  */
-function fireTicketResolved(opts, deps) {
+async function fireTicketResolved(opts, deps) {
   const { ticketId, resolution, tasksDir, repoRoot, transitionedToResolved } = opts || {};
   if (!transitionedToResolved) {
-    return { dispatched: false, injected: [] };
+    return { dispatched: false, injected: '' };
   }
   const initExtensions =
     (deps && deps.initExtensions) || require('../lib/extensions').initExtensions;
   const ext = initExtensions({ repoRoot, tasksDir });
   // dispatch() returns the accumulated injected-context string per index.js
-  // contract (commit fa343cf0). Promise#then keeps this helper sync-callable
-  // from transition-step.js while still capturing any injected text.
+  // contract. Await so callers actually see the injected text instead of an
+  // empty placeholder (was previously fire-and-forget).
   let injected = '';
   try {
-    const r = ext.dispatch('OnTicketResolved', { ticketId, resolution, tasksDir });
-    if (r && typeof r.then === 'function') {
-      // fire-and-forget the promise; sync callers won't see injected text but
-      // tests can await fireTicketResolved by returning the promise itself.
-      r.then((s) => {
-        injected = typeof s === 'string' ? s : '';
-      }).catch(() => {
-        /* fail-open */
-      });
-    } else if (typeof r === 'string') {
-      injected = r;
-    }
+    const r = await ext.dispatch('OnTicketResolved', { ticketId, resolution, tasksDir });
+    if (typeof r === 'string') injected = r;
   } catch {
     /* fail-open */
   }
