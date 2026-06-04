@@ -132,7 +132,60 @@ function firePostToolCall(args, deps) {
   }
 }
 
-module.exports = { firePostToolCall };
+/**
+ * fireAgentResponseMatched — iterate registered `OnAgentResponseMatched`
+ * handlers and dispatch only when the response text matches each handler's
+ * compiled `match` regex (compiled once at registration in event-bus). Gated
+ * on an active /work marker. Errors are swallowed so a misbehaving extension
+ * can never crash the hook.
+ *
+ * Dispatch payload (G9): `{ responseText, match: { pattern, substring } }`.
+ *
+ * @param {{responseText: string, tasksDir: string, repoRoot: string}} args
+ * @param {{
+ *   findActiveMarker?: Function,
+ *   initExtensions?: Function,
+ * }} [deps]
+ * @returns {void}
+ */
+function fireAgentResponseMatched(args, deps) {
+  const { responseText, tasksDir, repoRoot } = args || {};
+  let marker = null;
+  try {
+    const findMarker =
+      deps?.findActiveMarker ||
+      require(path.join(__dirname, '..', 'lib', 'marker')).findActiveMarker;
+    marker = findMarker(tasksDir, '.work.pid');
+  } catch {
+    /* fail-open */
+  }
+  if (!marker) return;
+  try {
+    const init =
+      deps?.initExtensions ||
+      require(path.join(__dirname, '..', 'lib', 'extensions')).initExtensions;
+    const api = init({ repoRoot, tasksDir });
+    const handlers =
+      typeof api.listHandlers === 'function' ? api.listHandlers('OnAgentResponseMatched') : [];
+    for (const record of handlers) {
+      if (!record || !record.match || !record.match.compiled) continue;
+      const m = record.match.compiled.exec(responseText || '');
+      if (!m) continue;
+      try {
+        api.dispatch('OnAgentResponseMatched', {
+          responseText,
+          match: { pattern: record.match.pattern, substring: m[0] },
+        });
+      } catch {
+        /* fail-open — extension dispatch errors must never crash the hook */
+      }
+    }
+  } catch {
+    /* fail-open */
+  }
+}
+
+module.exports = { firePostToolCall, fireAgentResponseMatched };
 
 if (!process.env.WORK_HOOK_NO_MAIN) {
   main();
