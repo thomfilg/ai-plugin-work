@@ -25,7 +25,12 @@ function captureStderr(fn) {
 const PRESETS_PATH = path.join(__dirname, '..', 'synapsys-presets.json');
 
 function withPresetsFile(replacement, fn) {
-  const original = fs.existsSync(PRESETS_PATH) ? fs.readFileSync(PRESETS_PATH, 'utf8') : null;
+  let original = null;
+  try {
+    original = fs.readFileSync(PRESETS_PATH, 'utf8');
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err;
+  }
   try {
     fs.writeFileSync(PRESETS_PATH, replacement);
     // Bust require cache so loadPresets re-reads from disk.
