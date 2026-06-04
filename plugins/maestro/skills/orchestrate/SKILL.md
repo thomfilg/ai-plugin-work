@@ -92,10 +92,76 @@ QUESTION-DETECTED|AUTO-RESTART|SESSION-GONE|NUDGE|ACTION|pr-ready|pr-broken|wedg
 - **Wedged sessions** suppress further restarts; operator must inspect the pane to unwedge.
 - **Snapshot** anytime with `bash plugins/maestro/scripts/maestro-pulse.sh` (or `/pulse`).
 
+## Unblocking stuck agents — protocol
+
+When a `kind:"question-pending"` event fires, the agent is asking the orchestrator how to proceed. Answer **within Q_WAIT_MIN minutes** — 3 repeats → DEAD-END + `freeDeadEndSlot` kills the session. Follow this order:
+
+### 1. Bypass check — refuse any of these
+
+- Fake RED/GREEN/REFACTOR evidence (stash, delete, re-record without doing the work)
+- `work-state.js set-step`, `set-check`, `add-error`, `set-test-enhancement`
+- Manual `transition` to skip a step without delegating its work via Skill/Task/Agent
+- `userApproval=true` fabricated in any state file
+- `--no-verify`, `--no-gpg-sign`, or any commit-hook-skip flag
+- **Patching the plugin cache from within a /work ticket** (`~/.claude/plugins/cache/...`) — transient (next sync wipes), global (affects every workflow), out of scope
+
+If every option in the menu is a bypass → surface to operator with analysis. Do not pick one to "make it move."
+
+### 2. Legit-block check
+
+Verify the agent already did the real work the gate is checking:
+- RED gate → failing test exists (or task `Type=docs`/`visual-only` with deliverables on disk)
+- GREEN gate → verification command exits 0 and the deliverables exist
+- Docs/visual-only → the documented files are written
+
+If real work IS done and a gate still blocks → the blocker is almost always a **bad artifact** (tasks.md, brief.md, spec.md, work-state.json), not missing work.
+
+### 3. Fix the artifact, not the gate
+
+This is **not a bypass** — it's correcting a wrong document. Common cases and fixes:
+
+| Symptom | Fix |
+|---|---|
+| GREEN recorder rejects silent `grep -q` Test Command (`tdd-phase-state.js` "empty-command trap") | Edit tasks.md to drop `-q` |
+| `Type=wiring` on task whose AC says "docs-only" | Edit tasks.md to set `Type=docs` |
+| Test Command path is wrong | Edit tasks.md path |
+| Brief gate question already answered in brief.md | Edit brief.md to include the answer |
+| Scope-blocked file edit but file legitimately belongs in scope | Edit tasks.md Files-in-scope list |
+
+The orchestrator can edit these files from outside the ticket's active phase even when the in-phase hook blocks the agent. Edit directly, then `tmux send-keys -t <TICKET>-work` with: `I fixed <path>:<line>. Retry.`
+
+### 4. File a bug at the root cause
+
+Always upstream, not at the symptom:
+
+| Symptom | Root cause to file |
+|---|---|
+| GREEN deadlocks `Type=docs` task | "split-in-tasks validator allowed Type/AC mismatch" + "GREEN missing docs-exempt fallback that RED has" |
+| brief_gate Q loops endlessly | "brief-writer produced ambiguous questions" |
+| Tasks have wrong scope | "split-in-tasks scope detection" |
+| Hook blocks legitimate in-scope edit | "protect-task-scope scope detection" |
+
+Search existing issues first (`gh issue list --search`). Use 2-3 keywords from the proposed title; check closed too. Link related issues.
+
+### 5. Long-term over patch
+
+Given the choice between:
+- "Patch the plugin cache to unblock today" — transient, global
+- "Edit the source-of-truth document" — scoped, persistent
+
+…always pick the source-of-truth fix. Cache patches get wiped on next plugin sync and affect every workflow on the machine.
+
+### Pool discipline
+
+`pool=N` means at most N concurrent `-work` sessions. When a ticket dead-ends or you kill one (e.g. GH-511 wedged on operator decision held the slot for hours), free the slot via `maestro-cleanup.js <TICKET> --tmux` and bootstrap the next queued ticket.
+
 ## Anti-patterns
 
 - Do **not** kill sessions belonging to other tickets — scoped per `<TICKET>-work` only.
 - Do **not** auto-merge PRs without operator approval; the orchestrator does not call `gh pr merge`.
 - Do **not** ignore `pr-ready` — that's the positive signal you were waiting for.
 - Do **not** ignore `HEARTBEAT` — it is the periodic forced re-read that exists specifically because operators desensitize to repeated noise.
+- Do **not** let `question-pending` re-fire to DEAD-END — answer within Q_WAIT_MIN.
+- Do **not** allow agents to patch `~/.claude/plugins/cache/` from inside a /work ticket — revert immediately from `~/.claude/plugins/marketplaces/.../scripts/.../task-next.js` (or equivalent pristine source).
+- Do **not** reply `.` or `!` to `question-pending` or `pr-ready` events — those are actionable, not routine.
 - The inbox at `/tmp/claude-agent-inbox/<TICKET>.log` is human-facing; agents do not read it. Talk to agents via `tmux send-keys`.
