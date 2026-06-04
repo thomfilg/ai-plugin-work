@@ -83,6 +83,18 @@ function log(line) {
  * freeDeadEndSlot at count >= 3). The instruction string gets a [REPEAT N]
  * prefix when count > 1 so the operator can see momentum.
  */
+// Kinds the operator must act on now (answer a menu, decide on PR, kill a
+// wedge). Other kinds are informational reminders the operator can fast-route.
+const ACTION_REQUIRED_KINDS = new Set([
+  'question-pending',
+  'nudges-exhausted',
+  'wedged',
+  'dead-end',
+  'pr-ready',
+  'pr-broken',
+  'pr-comments-stuck',
+]);
+
 function alert(obj) {
   if (!obj || typeof obj.instruction !== 'string' || !obj.instruction.trim()) {
     log(`ALERT-DROPPED (no instruction): ${JSON.stringify(obj)}`);
@@ -92,7 +104,17 @@ function alert(obj) {
   const count = bumpCount(key);
   const prefix = count > 1 ? `[REPEAT ${count}] ` : '';
   const instruction = `${prefix}${obj.instruction}`;
-  const payload = { ts: new Date().toISOString(), ...obj, instruction, repeatCount: count };
+  // action_required is true on first sight of an actionable kind; subsequent
+  // repeats (count > 1) carry the same state, so the operator can skip
+  // investigating them and just acknowledge.
+  const actionRequired = ACTION_REQUIRED_KINDS.has(obj.kind) && count === 1;
+  const payload = {
+    ts: new Date().toISOString(),
+    ...obj,
+    instruction,
+    repeatCount: count,
+    action_required: actionRequired,
+  };
   try {
     fs.appendFileSync(ALERT_FILE, JSON.stringify(payload) + '\n');
   } catch {}

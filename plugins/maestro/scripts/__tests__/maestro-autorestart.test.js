@@ -406,9 +406,13 @@ test('idle helper session does not spam silence log on every tick', () => {
   const skippedLines = logLines.filter((l) =>
     l.includes('AUTO-RESTART skipped: non-work helper session')
   );
+  // Throttle change: helper-session silence emits NOTHING (was once before).
+  // The marker still resets so the detector doesn't fire every tick — that
+  // invariant is what this regression guards. The visible log line was
+  // removed because helper inactivity is not operator-actionable.
   assert.strictEqual(
     skippedLines.length,
-    1,
-    `helper silence skip should be logged ONCE across multiple ticks, not every tick — got ${skippedLines.length}\nlog:\n${logLines.join('\n')}`
+    0,
+    `helper silence skip line was removed — expected 0 occurrences, got ${skippedLines.length}\nlog:\n${logLines.join('\n')}`
   );
 });
