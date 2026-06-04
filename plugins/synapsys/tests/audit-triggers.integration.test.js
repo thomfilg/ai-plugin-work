@@ -86,12 +86,64 @@ test('Disabled and expired memories are skipped', () => {
   assert.ok(names.includes('mem-active-b'), `active memory should be present, got ${names.join(',')}`);
   assert.ok(!names.includes('mem-disabled'), `disabled memory must be skipped, got ${names.join(',')}`);
   assert.ok(!names.includes('mem-expired'), `expired memory must be skipped, got ${names.join(',')}`);
+});
 
-  // Exit code at scaffold stage is 0 (no high pairs yet).
-  const r = runLint([`--cwd=${PROJ_CWD}`, '--scope=all', '--json']);
-  assert.equal(r.status, 0, `expected exit 0, got ${r.status}. stderr=${r.stderr}`);
-  const env = parseJson(r.stdout);
-  assert.ok(env, 'JSON envelope must parse');
-  assert.deepEqual(env.pairs, [], 'scaffold-stage pairs empty');
-  assert.deepEqual(env.broadTriggers, [], 'scaffold-stage broadTriggers empty');
+// ─── Task 4: trigger×trigger scoring + severity + domain/[[link]] downgrade ───
+
+function findPair(pairs, aName, bName) {
+  return pairs.find(
+    (p) =>
+      p.rule === 'trigger-overlap' &&
+      ((p.a === aName && p.b === bName) || (p.a === bName && p.b === aName))
+  );
+}
+
+test('Domain-shared pair is downgraded from high to low (AC-G2)', () => {
+  const { lintStore } = require(CLI);
+  const result = lintStore({ cwd: PROJ_CWD, scope: 'all' });
+  const pair = findPair(result.pairs, 'mem-domain-a', 'mem-domain-b');
+  assert.ok(pair, `expected trigger-overlap pair for mem-domain-a/mem-domain-b, got pairs=${JSON.stringify(result.pairs)}`);
+  // Identical alternation tokens → jaccard = 1.0, would be `high` cross-domain.
+  // Both share domain `release-ops` → severity capped at `low`.
+  assert.equal(pair.severity, 'low', `domain-shared pair must be downgraded to low, got ${pair.severity}`);
+  assert.ok(pair.intentional, 'pair must carry an `intentional` object');
+  assert.equal(pair.intentional.domain, 'release-ops', `intentional.domain must equal shared domain, got ${pair.intentional.domain}`);
+  assert.ok(typeof pair.score === 'number' && pair.score >= 0.5, `score should reflect raw jaccard (≥0.5), got ${pair.score}`);
+});
+
+test('[[wiki-link]] body reference downgrades severity (AC-G3)', () => {
+  const { lintStore } = require(CLI);
+  const result = lintStore({ cwd: PROJ_CWD, scope: 'all' });
+  const pair = findPair(result.pairs, 'mem-link-a', 'mem-link-b');
+  assert.ok(pair, `expected trigger-overlap pair for mem-link-a/mem-link-b, got pairs=${JSON.stringify(result.pairs)}`);
+  // High raw overlap (jaccard 1.0) but mem-link-a.body references [[mem-link-b]]
+  // → severity capped at `low`.
+  assert.ok(
+    pair.severity === 'low' || pair.severity === 'medium',
+    `[[link]]-referenced pair must be at most low/medium, got ${pair.severity}`
+  );
+  assert.notEqual(pair.severity, 'high', '[[link]] downgrade must prevent `high` severity');
+  assert.equal(pair.intentional && pair.intentional.link, true, `intentional.link must be true, got ${pair.intentional && pair.intentional.link}`);
+});
+
+test('Exit code is non-zero only when at least one high-severity pair exists (AC-G7)', () => {
+  // With --overlap-threshold=0.99, no pair should reach the `high` cutoff
+  // → no high pairs → exit code 0, but pairs are still listed.
+  const rHi = runLint([`--cwd=${PROJ_CWD}`, '--scope=all', '--json', '--overlap-threshold=0.99']);
+  assert.equal(rHi.status, 0, `expected exit 0 when no high pairs, got ${rHi.status}. stderr=${rHi.stderr}`);
+  const envHi = parseJson(rHi.stdout);
+  assert.ok(envHi, 'JSON envelope must parse');
+  // With overlap downgrades applied + raised threshold, no pair has severity:'high'.
+  const highPairsHi = envHi.pairs.filter((p) => p.severity === 'high');
+  assert.equal(highPairsHi.length, 0, `expected zero high pairs at threshold 0.99, got ${JSON.stringify(highPairsHi)}`);
+
+  // With the default threshold (0.50), mem-active-a / mem-active-b form a
+  // jaccard=0.5 cross-domain (no shared domain) high pair → exit 1.
+  const rLo = runLint([`--cwd=${PROJ_CWD}`, '--scope=all', '--json']);
+  const envLo = parseJson(rLo.stdout);
+  assert.ok(envLo, `JSON envelope must parse, stdout=${rLo.stdout}`);
+  const activePair = findPair(envLo.pairs, 'mem-active-a', 'mem-active-b');
+  assert.ok(activePair, `expected mem-active-a/mem-active-b pair under default threshold, got ${JSON.stringify(envLo.pairs)}`);
+  assert.equal(activePair.severity, 'high', `cross-domain jaccard≥0.5 pair must be high, got ${activePair.severity}`);
+  assert.equal(rLo.status, 1, `expected exit 1 when at least one high pair exists, got ${rLo.status}. stderr=${rLo.stderr}`);
 });
