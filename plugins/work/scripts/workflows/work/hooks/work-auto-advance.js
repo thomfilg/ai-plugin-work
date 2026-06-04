@@ -97,4 +97,43 @@ function main() {
   process.exit(0);
 }
 
-main();
+/**
+ * firePostToolCall — dispatch the OnPostToolCall extension event before the
+ * existing auto-advance logic, gated on an active /work marker. Errors are
+ * swallowed so a misbehaving extension can never crash the hook.
+ *
+ * @param {{toolName: string, toolInput: any, toolResult: any, tasksDir: string, repoRoot: string}} args
+ * @param {{
+ *   findActiveMarker?: Function,
+ *   initExtensions?: Function,
+ * }} [deps]
+ * @returns {void}
+ */
+function firePostToolCall(args, deps) {
+  const { toolName, toolInput, toolResult, tasksDir, repoRoot } = args || {};
+  let marker = null;
+  try {
+    const findMarker =
+      deps?.findActiveMarker ||
+      require(path.join(__dirname, '..', 'lib', 'marker')).findActiveMarker;
+    marker = findMarker(tasksDir, '.work.pid');
+  } catch {
+    /* fail-open */
+  }
+  if (!marker) return;
+  try {
+    const init =
+      deps?.initExtensions ||
+      require(path.join(__dirname, '..', 'lib', 'extensions')).initExtensions;
+    const api = init({ repoRoot, tasksDir });
+    api.dispatch('OnPostToolCall', { toolName, toolInput, toolResult });
+  } catch {
+    /* fail-open — extension dispatch errors must never crash the hook */
+  }
+}
+
+module.exports = { firePostToolCall };
+
+if (!process.env.WORK_HOOK_NO_MAIN) {
+  main();
+}

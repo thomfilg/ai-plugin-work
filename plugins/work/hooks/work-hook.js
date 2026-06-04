@@ -182,4 +182,51 @@ function formatPlan(plan) {
   return lines.join('\n');
 }
 
-main();
+/**
+ * fireOnPreToolCall — dispatch the OnPreToolCall extension event after the
+ * existing PreToolUse hook body, gated on an active /work marker. Errors are
+ * swallowed so a misbehaving extension can never crash the hook.
+ *
+ * Exported for unit testing; the hook itself does not yet wire this into
+ * `main()` because Phase 1 PreToolUse dispatch is invoked from a different
+ * entry point in production (see hooks.json).
+ *
+ * @param {{toolName: string, toolInput: any, tasksDir: string, repoRoot: string}} args
+ * @param {{
+ *   findActiveMarker?: Function,
+ *   initExtensions?: Function,
+ * }} [deps]
+ * @returns {void}
+ */
+function firePreToolCall(args, deps) {
+  const { toolName, toolInput, tasksDir, repoRoot } = args || {};
+  let marker = null;
+  try {
+    const findMarker =
+      deps?.findActiveMarker ||
+      require(
+        path.join(__dirname, '..', 'scripts', 'workflows', 'work', 'lib', 'marker')
+      ).findActiveMarker;
+    marker = findMarker(tasksDir, '.work.pid');
+  } catch {
+    /* fail-open */
+  }
+  if (!marker) return;
+  try {
+    const init =
+      deps?.initExtensions ||
+      require(
+        path.join(__dirname, '..', 'scripts', 'workflows', 'work', 'lib', 'extensions')
+      ).initExtensions;
+    const api = init({ repoRoot, tasksDir });
+    api.dispatch('OnPreToolCall', { toolName, toolInput });
+  } catch {
+    /* fail-open — extension dispatch errors must never crash the hook */
+  }
+}
+
+module.exports = { firePreToolCall };
+
+if (!process.env.WORK_HOOK_NO_MAIN) {
+  main();
+}
