@@ -42,8 +42,8 @@ function maybeAutoBootstrap(taskId) {
   try {
     const tmuxMod = require('./tmux');
     const activeSessions = tmuxMod.listSessions ? tmuxMod.listSessions() : [];
-    if (manifest.poolFull(activeSessions)) {
-      alerts.log(`AUTO-BOOTSTRAP skipped for ${taskId}: pool full per manifest slots`);
+    if (manifest.poolFullForTask(taskId, activeSessions)) {
+      alerts.log(`AUTO-BOOTSTRAP skipped for ${taskId}: owning manifest at slot cap`);
       return false;
     }
   } catch {}
@@ -353,9 +353,10 @@ function maybeFillPool() {
   try {
     activeSessions = tmux.listSessions ? tmux.listSessions() : [];
   } catch {}
-  if (manifest.poolFull(activeSessions)) return false;
   const next = findNextEligibleTask();
   if (!next) return false;
+  // Pool-cap is checked per-manifest inside maybeAutoBootstrap so a full
+  // manifest only blocks its OWN tickets, not eligible work in others.
   // Don't bootstrap a ticket whose tmux session already exists (e.g. -listen).
   if (activeSessions.includes(`${next.taskId}-work`)) return false;
   const ok = maybeAutoBootstrap(next.taskId);

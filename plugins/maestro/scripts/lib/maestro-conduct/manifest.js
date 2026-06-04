@@ -122,20 +122,22 @@ function syncFromTmux(activeWorkSessions) {
 }
 
 /**
- * Pool-size check, per-manifest. For each manifest, count its OWN live
- * work-sessions (tickets the manifest knows about) and compare to that
- * manifest's `slots`. Pool is full if ANY manifest is at-or-over its cap.
- * This prevents stale manifests from inflating the global total.
+ * Pool-size check scoped to the manifest owning `taskId`. Counts live
+ * work-sessions for tickets in THAT manifest and compares against THAT
+ * manifest's `slots`. Returns false if the task isn't in any manifest
+ * (caller should treat unknown tickets as ungated).
+ *
+ * Per-task scoping prevents one full manifest from blocking auto-bootstrap
+ * of eligible work in a different manifest that still has free capacity.
  */
-function poolFull(activeWorkSessions) {
+function poolFullForTask(taskId, activeWorkSessions) {
+  const hit = findTask(taskId);
+  if (!hit) return false;
+  const { manifest: m } = hit;
+  if (typeof m.slots !== 'number' || !Array.isArray(m.tasks)) return false;
   const aliveTickets = aliveTicketSet(activeWorkSessions);
-  for (const file of listManifestFiles()) {
-    const m = readManifest(file);
-    if (!m || typeof m.slots !== 'number' || !Array.isArray(m.tasks)) continue;
-    const liveInThisManifest = m.tasks.filter((t) => aliveTickets.has(t.id)).length;
-    if (liveInThisManifest >= m.slots) return true;
-  }
-  return false;
+  const liveInThisManifest = m.tasks.filter((t) => aliveTickets.has(t.id)).length;
+  return liveInThisManifest >= m.slots;
 }
 
 module.exports = {
@@ -145,5 +147,5 @@ module.exports = {
   findTask,
   updateTaskStatus,
   syncFromTmux,
-  poolFull,
+  poolFullForTask,
 };
