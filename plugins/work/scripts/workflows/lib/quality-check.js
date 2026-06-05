@@ -29,7 +29,8 @@ const { resolvePluginRootHonouringEnv } = require('../work/lib/resolve-plugin-ro
 // BUNDLED_DEV_CHECK below is derived from PLUGIN_ROOT, so the user's
 // CLAUDE_PLUGIN_ROOT must be honoured verbatim when probing lands on an
 // unrelated install. Falls back to __dirname-based resolution otherwise.
-const PLUGIN_ROOT = resolvePluginRootHonouringEnv(__dirname, 2) || path.join(__dirname, '..', '..');
+const PLUGIN_ROOT =
+  resolvePluginRootHonouringEnv(__dirname, 2) || path.join(__dirname, '..', '..');
 const BUNDLED_DEV_CHECK = path.join(
   PLUGIN_ROOT,
   'workflows',

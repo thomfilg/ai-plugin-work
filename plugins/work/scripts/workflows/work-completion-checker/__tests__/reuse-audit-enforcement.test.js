@@ -27,7 +27,7 @@ function buildCtx({ spec, changedFiles = [], fileContents = {} }) {
   fs.writeFileSync(
     path.join(tasksDir, 'pr-context.json'),
     JSON.stringify({ files: changedFiles }, null, 2),
-    'utf8'
+    'utf8',
   );
   // Write content for each changed file under worktreeRoot
   for (const [rel, body] of Object.entries(fileContents)) {
@@ -99,7 +99,7 @@ test.describe('reuse_audit_enforcement phase', () => {
       assert.equal(
         ctx.failures.filter((f) => f.checkType === 'reuse_audit').length,
         0,
-        'no failure record should be pushed'
+        'no failure record should be pushed',
       );
     } finally {
       cleanup();
@@ -148,7 +148,7 @@ test.describe('reuse_audit_enforcement phase', () => {
       assert.match(
         rec.observed,
         /found ExploreBulkToolbar in diff — did you mean to extend ContentPageToolbar\?/,
-        'observed must include the suffix-candidate hint string'
+        'observed must include the suffix-candidate hint string',
       );
     } finally {
       cleanup();
@@ -183,7 +183,10 @@ test.describe('reuse_audit_enforcement phase', () => {
     try {
       const result = await phase.validate(ctx);
       assert.equal(result.ok, true, 'literal Object.create in diff must satisfy the audit');
-      assert.equal(ctx.failures.filter((f) => f.checkType === 'reuse_audit').length, 0);
+      assert.equal(
+        ctx.failures.filter((f) => f.checkType === 'reuse_audit').length,
+        0,
+      );
     } finally {
       cleanup();
     }
@@ -210,7 +213,7 @@ test.describe('reuse_audit_enforcement phase', () => {
       assert.equal(
         result.ok,
         false,
-        'wildcard match must NOT count — `.` must be escaped to a literal dot'
+        'wildcard match must NOT count — `.` must be escaped to a literal dot',
       );
       const rec = ctx.failures.find((f) => f.checkType === 'reuse_audit');
       assert.ok(rec, 'failure record should be pushed for missing literal symbol');
@@ -245,7 +248,7 @@ test.describe('reuse_audit_enforcement phase', () => {
       const errs = Array.isArray(result.errors) ? result.errors : [];
       assert.ok(
         !errs.some((e) => /SyntaxError|Invalid regular expression/i.test(String(e))),
-        `must not surface a regex SyntaxError; got errors=${JSON.stringify(errs)}`
+        `must not surface a regex SyntaxError; got errors=${JSON.stringify(errs)}`,
       );
     } finally {
       cleanup();
@@ -266,12 +269,12 @@ test.describe('reuse_audit_enforcement phase', () => {
       assert.ok(Array.isArray(result.errors));
       assert.ok(
         result.errors.some((e) => /^parser threw:/.test(String(e))),
-        'errors must include a "parser threw: ..." entry'
+        'errors must include a "parser threw: ..." entry',
       );
       // Parser failure must also be surfaced through the failure-store so
       // report.js can include it in completion-verdict.json.
       const parserFailure = ctx.failures.find(
-        (f) => f.checkType === 'reuse_audit' && f.requirementId === 'REUSE-PARSER'
+        (f) => f.checkType === 'reuse_audit' && f.requirementId === 'REUSE-PARSER',
       );
       assert.ok(parserFailure, 'parser failure must be pushed onto ctx.failures');
     } finally {

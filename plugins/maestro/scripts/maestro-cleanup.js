@@ -177,9 +177,7 @@ function purgeAlertCountsForTicket(ticket, dryRun) {
   if (!dryRun && removed > 0) {
     fs.writeFileSync(ALERT_COUNTS, JSON.stringify(counts, null, 2));
   } else if (dryRun) {
-    process.stdout.write(
-      `(dry-run) would purge ${removed} key(s) for ${ticket} from _alert-counts.json\n`
-    );
+    process.stdout.write(`(dry-run) would purge ${removed} key(s) for ${ticket} from _alert-counts.json\n`);
   }
   return removed;
 }

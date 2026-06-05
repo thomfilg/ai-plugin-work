@@ -53,7 +53,12 @@ test.describe('test_pass_crossref phase', () => {
     const tasks = coverageTasks([
       { id: 'R4', status: 'DELIVERED', evidence: 'foo.test.js:test_R4' },
     ]);
-    const testReport = ['# Tests Check', '', '- test_R4 — Status: FAIL', ''].join('\n');
+    const testReport = [
+      '# Tests Check',
+      '',
+      '- test_R4 — Status: FAIL',
+      '',
+    ].join('\n');
     const { ctx, cleanup } = buildCtx({ tasks, testReport });
     try {
       const result = await phase.validate(ctx);
@@ -71,7 +76,12 @@ test.describe('test_pass_crossref phase', () => {
     const tasks = coverageTasks([
       { id: 'R4', status: 'DELIVERED', evidence: 'foo.test.js:test_R4' },
     ]);
-    const testReport = ['# Tests Check', '', '- test_R4 — Status: PASS', ''].join('\n');
+    const testReport = [
+      '# Tests Check',
+      '',
+      '- test_R4 — Status: PASS',
+      '',
+    ].join('\n');
     const { ctx, cleanup } = buildCtx({ tasks, testReport });
     try {
       const result = await phase.validate(ctx);
@@ -79,7 +89,7 @@ test.describe('test_pass_crossref phase', () => {
       assert.equal(
         ctx.failures.filter((f) => f.checkType === 'test_pass').length,
         0,
-        'no test_pass failure should be pushed'
+        'no test_pass failure should be pushed',
       );
     } finally {
       cleanup();
@@ -97,7 +107,10 @@ test.describe('test_pass_crossref phase', () => {
       assert.equal(result.ok, false, 'phase must fail when tests.check.md is missing');
       const rec = ctx.failures.find((f) => f.checkType === 'test_pass');
       assert.ok(rec, 'a test_pass failure record must be pushed');
-      assert.equal(rec.observed, 'tests.check.md not found — cannot verify test pass');
+      assert.equal(
+        rec.observed,
+        'tests.check.md not found — cannot verify test pass',
+      );
     } finally {
       cleanup();
     }
@@ -107,7 +120,12 @@ test.describe('test_pass_crossref phase', () => {
     const tasks = coverageTasks([
       { id: 'R4', status: 'DELIVERED', evidence: 'foo.test.js:test_R4' },
     ]);
-    const testReport = ['# Tests Check', '', '- test_other — Status: PASS', ''].join('\n');
+    const testReport = [
+      '# Tests Check',
+      '',
+      '- test_other — Status: PASS',
+      '',
+    ].join('\n');
     const { ctx, cleanup } = buildCtx({ tasks, testReport });
     try {
       const result = await phase.validate(ctx);
@@ -118,7 +136,7 @@ test.describe('test_pass_crossref phase', () => {
       assert.match(
         rec.observed,
         /not found in tests\.check\.md/,
-        'observed must distinguish "not found" from FAIL'
+        'observed must distinguish "not found" from FAIL',
       );
       assert.doesNotMatch(rec.observed, /FAIL in tests\.check\.md/);
     } finally {
@@ -127,7 +145,9 @@ test.describe('test_pass_crossref phase', () => {
   });
 
   test('(d) DELIVERED rows but none cite a test ⇒ ok:false (B2: gate has teeth)', async () => {
-    const tasks = coverageTasks([{ id: 'R4', status: 'DELIVERED', evidence: 'tasks.md:Task 4' }]);
+    const tasks = coverageTasks([
+      { id: 'R4', status: 'DELIVERED', evidence: 'tasks.md:Task 4' },
+    ]);
     const { ctx, cleanup } = buildCtx({ tasks });
     try {
       const result = await phase.validate(ctx);
@@ -159,18 +179,10 @@ test('word-boundary match: test_R1 must NOT match test_R10 substring (no false-p
   const { ctx, cleanup } = buildCtx({ tasks, testReport: report });
   try {
     const result = await phase.validate(ctx);
-    assert.equal(
-      result.ok,
-      false,
-      'must NOT silently pass when test_R1 fails (only test_R10 passes)'
-    );
+    assert.equal(result.ok, false, 'must NOT silently pass when test_R1 fails (only test_R10 passes)');
     const failed = ctx.failures.find((f) => f.checkType === 'test_pass');
     assert.ok(failed, 'expected a test_pass failure record');
-    assert.match(
-      failed.observed,
-      /FAIL in tests\.check\.md/,
-      'observed must cite FAIL, not pass via substring'
-    );
+    assert.match(failed.observed, /FAIL in tests\.check\.md/, 'observed must cite FAIL, not pass via substring');
   } finally {
     cleanup();
   }
@@ -247,7 +259,11 @@ test('DELIVERED row citing two tests verifies both — second failing flips ok:f
   const tasks = coverageTasks([
     { id: 'R9', status: 'DELIVERED', evidence: '`foo.test.js:test_A, bar.test.js:test_B`' },
   ]);
-  const report = ['- test_A — Status: PASS', '- test_B — Status: FAIL', ''].join('\n');
+  const report = [
+    '- test_A — Status: PASS',
+    '- test_B — Status: FAIL',
+    '',
+  ].join('\n');
   const { ctx, cleanup } = buildCtx({ tasks, testReport: report });
   try {
     const result = await phase.validate(ctx);
@@ -268,9 +284,7 @@ test('Missing tests.check.md collapses multi-citation row to one failure (not on
   try {
     const result = await phase.validate(ctx);
     assert.equal(result.ok, false);
-    const failing = ctx.failures.filter(
-      (f) => f.checkType === 'test_pass' && f.requirementId === 'R9'
-    );
+    const failing = ctx.failures.filter((f) => f.checkType === 'test_pass' && f.requirementId === 'R9');
     assert.equal(failing.length, 1);
   } finally {
     cleanup();

@@ -27,7 +27,7 @@ function makeTasksDir() {
       '### Final Status:',
       '[COMPLETE]',
       '',
-    ].join('\n')
+    ].join('\n'),
   );
   return { root, tasksDir };
 }
@@ -80,7 +80,9 @@ test('verdict summary reads ctx.{reuseAuditChecked,scopeChecked,testsChecked} wh
     testsChecked: 4,
   };
   report.validate(ctx);
-  const doc = JSON.parse(fs.readFileSync(path.join(tasksDir, 'completion-verdict.json'), 'utf8'));
+  const doc = JSON.parse(
+    fs.readFileSync(path.join(tasksDir, 'completion-verdict.json'), 'utf8'),
+  );
   assert.deepEqual(doc.summary, { reuseChecked: 2, scopeChecked: 3, testsChecked: 4 });
   fs.rmSync(root, { recursive: true, force: true });
 });
@@ -89,7 +91,9 @@ test('verdict ok:true with empty failures when no records were pushed', () => {
   const { root, tasksDir } = makeTasksDir();
   const ctx = { ticket: 'GH-282', tasksDir, failures: [] };
   report.validate(ctx);
-  const doc = JSON.parse(fs.readFileSync(path.join(tasksDir, 'completion-verdict.json'), 'utf8'));
+  const doc = JSON.parse(
+    fs.readFileSync(path.join(tasksDir, 'completion-verdict.json'), 'utf8'),
+  );
   assert.equal(doc.ok, true);
   assert.deepEqual(doc.failures, []);
   fs.rmSync(root, { recursive: true, force: true });
@@ -109,12 +113,12 @@ test('persistVerdict does not create completion.check.md when absent (Bug 5)', (
   report.validate(ctx);
   assert.ok(
     fs.existsSync(path.join(tasksDir, 'completion-verdict.json')),
-    'completion-verdict.json must still be written'
+    'completion-verdict.json must still be written',
   );
   assert.equal(
     fs.existsSync(path.join(tasksDir, 'completion.check.md')),
     false,
-    'completion.check.md must NOT be conjured into existence'
+    'completion.check.md must NOT be conjured into existence',
   );
   fs.rmSync(root, { recursive: true, force: true });
 });

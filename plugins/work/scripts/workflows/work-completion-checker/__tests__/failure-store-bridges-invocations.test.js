@@ -31,7 +31,7 @@ function mkTasksDir() {
       '### Final Status:',
       '[COMPLETE]',
       '',
-    ].join('\n')
+    ].join('\n'),
   );
   return { root, tasksDir };
 }
@@ -51,11 +51,13 @@ test('report.buildVerdictDocument folds persisted failures with empty ctx.failur
           observed: 'Bar imported instead',
         },
       ],
-      { reuseChecked: 1 }
+      { reuseChecked: 1 },
     );
     // Later invocation: fresh ctx, ctx.failures is empty.
     report.validate({ ticket: 'GH-282', tasksDir, failures: [] });
-    const doc = JSON.parse(fs.readFileSync(path.join(tasksDir, 'completion-verdict.json'), 'utf8'));
+    const doc = JSON.parse(
+      fs.readFileSync(path.join(tasksDir, 'completion-verdict.json'), 'utf8'),
+    );
     assert.equal(doc.ok, false, 'verdict must be ok:false because store has a failure');
     assert.equal(doc.failures.length, 1);
     assert.equal(doc.failures[0].requirementId, 'REUSE-1');
@@ -79,7 +81,7 @@ test('resetStore at inputs phase clears previously persisted failures', () => {
           observed: 'y',
         },
       ],
-      { reuseChecked: 1 }
+      { reuseChecked: 1 },
     );
     store.resetStore(tasksDir);
     const state = store.readState(tasksDir);
@@ -104,7 +106,7 @@ test('appendForCheckType replaces records of the same checkType on re-run', () =
           observed: 'b',
         },
       ],
-      { scopeChecked: 1 }
+      { scopeChecked: 1 },
     );
     // Re-run of the same phase replaces, not duplicates.
     store.appendForCheckType(
@@ -118,7 +120,7 @@ test('appendForCheckType replaces records of the same checkType on re-run', () =
           observed: 'd',
         },
       ],
-      { scopeChecked: 1 }
+      { scopeChecked: 1 },
     );
     const state = store.readState(tasksDir);
     assert.equal(state.failures.length, 1);
@@ -141,7 +143,9 @@ test('failures from store + ctx are deduped on exact match', () => {
     };
     store.appendForCheckType(tasksDir, 'reuse_audit', [failure], { reuseChecked: 1 });
     report.validate({ ticket: 'GH-282', tasksDir, failures: [failure] });
-    const doc = JSON.parse(fs.readFileSync(path.join(tasksDir, 'completion-verdict.json'), 'utf8'));
+    const doc = JSON.parse(
+      fs.readFileSync(path.join(tasksDir, 'completion-verdict.json'), 'utf8'),
+    );
     assert.equal(doc.failures.length, 1, 'identical failure must be deduped');
   } finally {
     fs.rmSync(root, { recursive: true, force: true });

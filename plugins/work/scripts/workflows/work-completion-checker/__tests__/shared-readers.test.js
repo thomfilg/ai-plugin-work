@@ -36,7 +36,7 @@ test.describe('readReuseAudit(specDir)', () => {
           '## Other',
           'unrelated',
           '',
-        ].join('\n')
+        ].join('\n'),
       );
       assert.equal(typeof shared.readReuseAudit, 'function', 'readReuseAudit must be exported');
       const result = shared.readReuseAudit(dir);
@@ -94,12 +94,12 @@ test.describe('readSuggestedScopeFiles(tasksDir)', () => {
           '### Suggested Scope',
           '- `path/to/c.js`',
           '',
-        ].join('\n')
+        ].join('\n'),
       );
       assert.equal(
         typeof shared.readSuggestedScopeFiles,
         'function',
-        'readSuggestedScopeFiles must be exported'
+        'readSuggestedScopeFiles must be exported',
       );
       const result = shared.readSuggestedScopeFiles(dir);
       assert.ok(Array.isArray(result));
@@ -125,20 +125,17 @@ test.describe('readSuggestedScopeFiles(tasksDir)', () => {
           '### Files in scope',
           '- `new/path.js`',
           '',
-        ].join('\n')
+        ].join('\n'),
       );
       assert.equal(
         typeof shared.readSuggestedScopeFiles,
         'function',
-        'readSuggestedScopeFiles must be exported'
+        'readSuggestedScopeFiles must be exported',
       );
       const result = shared.readSuggestedScopeFiles(dir);
       assert.ok(Array.isArray(result));
       assert.ok(result.includes('new/path.js'), 'Files in scope should win');
-      assert.ok(
-        !result.includes('legacy/old.js'),
-        'Suggested Scope should not appear when Files in scope is present'
-      );
+      assert.ok(!result.includes('legacy/old.js'), 'Suggested Scope should not appear when Files in scope is present');
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -159,7 +156,7 @@ test.describe('readSuggestedScopeFiles(tasksDir)', () => {
           '### Suggested Scope',
           '- `path/to/fallback.js`',
           '',
-        ].join('\n')
+        ].join('\n'),
       );
       const result = shared.readSuggestedScopeFiles(dir);
       assert.ok(Array.isArray(result));
@@ -177,12 +174,12 @@ test.describe('readSuggestedScopeFiles(tasksDir)', () => {
     try {
       writeTasks(
         dir,
-        ['# Tasks', '', '## Task 1 — alpha', '', '### Requirements Covered', '- R1', ''].join('\n')
+        ['# Tasks', '', '## Task 1 — alpha', '', '### Requirements Covered', '- R1', ''].join('\n'),
       );
       assert.equal(
         typeof shared.readSuggestedScopeFiles,
         'function',
-        'readSuggestedScopeFiles must be exported'
+        'readSuggestedScopeFiles must be exported',
       );
       const result = shared.readSuggestedScopeFiles(dir);
       assert.equal(result, null);

@@ -18,26 +18,21 @@ test('extractField ignores in-prose backticked heading mentions', () => {
     '',
     '### Test Command',
     '',
-  ]
-    .join('\n')
-    .replace(/BACKTICK/g, String.fromCharCode(96));
+  ].join('\n').replace(/BACKTICK/g, String.fromCharCode(96));
   const scope = parseSuggestedScope(section);
-  assert.deepEqual(scope, ['plugins/work/lib/foo.js', 'plugins/work/__tests__/foo.test.js']);
+  assert.deepEqual(scope, [
+    'plugins/work/lib/foo.js',
+    'plugins/work/__tests__/foo.test.js',
+  ]);
 });
 
 test('extractField matches a heading at start-of-string', () => {
-  const section = '### Files in scope\n- BACKTICKfoo/bar.jsBACKTICK\n\n### Test Command\n'.replace(
-    /BACKTICK/g,
-    String.fromCharCode(96)
-  );
+  const section = '### Files in scope\n- BACKTICKfoo/bar.jsBACKTICK\n\n### Test Command\n'.replace(/BACKTICK/g, String.fromCharCode(96));
   assert.equal(extractField(section, 'Files in scope').trim().includes('foo/bar.js'), true);
 });
 
 test('extractField does NOT match heading-like substring without leading newline', () => {
-  const section = 'prefix BACKTICK### Files in scopeBACKTICK inline\n### Other\n'.replace(
-    /BACKTICK/g,
-    String.fromCharCode(96)
-  );
+  const section = 'prefix BACKTICK### Files in scopeBACKTICK inline\n### Other\n'.replace(/BACKTICK/g, String.fromCharCode(96));
   assert.equal(extractField(section, 'Files in scope'), '');
 });
 
@@ -55,13 +50,11 @@ test('parseSuggestedScope: when BOTH headings are present, `Files in scope` wins
     '',
     '### Test Command',
     '',
-  ]
-    .join('\n')
-    .replace(/BACKTICK/g, String.fromCharCode(96));
+  ].join('\n').replace(/BACKTICK/g, String.fromCharCode(96));
   const scope = parseSuggestedScope(section);
   assert.deepEqual(
     scope,
     ['canonical/new-path.js', 'canonical/new-test.test.js'],
-    '`Files in scope` is the canonical heading and must override `Suggested Scope` when both are present'
+    '`Files in scope` is the canonical heading and must override `Suggested Scope` when both are present',
   );
 });

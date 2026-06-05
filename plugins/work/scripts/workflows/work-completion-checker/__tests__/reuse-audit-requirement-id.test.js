@@ -38,7 +38,7 @@ test('readReuseAudit synthesizes REUSE-<n> ids for each entry', () => {
         '- `Bar` MUST be reused from `b.ts`',
         '- `Baz` may be reused from `c.ts`',
         '',
-      ].join('\n')
+      ].join('\n'),
     );
     const result = shared.readReuseAudit(dir);
     assert.equal(result.length, 3);
@@ -65,11 +65,11 @@ test('failure record carries the synthesized REUSE-<n> id, not the legacy R1 def
         '- `AlphaWidget` MUST be reused from `a.ts`',
         '- `BetaWidget` MUST be reused from `b.ts`',
         '',
-      ].join('\n')
+      ].join('\n'),
     );
     fs.writeFileSync(
       path.join(tasksDir, 'pr-context.json'),
-      JSON.stringify({ files: ['x.ts'] }, null, 2)
+      JSON.stringify({ files: ['x.ts'] }, null, 2),
     );
     fs.writeFileSync(path.join(root, 'x.ts'), 'export const z = 1;\n');
     const ctx = { tasksDir, worktreeRoot: root, failures: [] };
