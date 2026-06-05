@@ -72,13 +72,7 @@ function skipQaMarkerPath(ticketId) {
 
 // ─── PHASE 1: PostToolUse/Bash — detect failure, write marker ───
 
-function phase1_detectFailure(hookData) {
-  const command = hookData.tool_input?.command || '';
-  if (!command.includes('check-start-env')) return;
-
-  const transcriptPath = hookData.transcript_path;
-  if (!transcriptPath || !fs.existsSync(transcriptPath)) return;
-
+function readTranscriptOutput(transcriptPath) {
   let output = '';
   try {
     const content = fs.readFileSync(transcriptPath, 'utf8');
@@ -96,64 +90,93 @@ function phase1_detectFailure(hookData) {
       }
     }
   } catch {
-    return;
+    return null;
   }
+  return output;
+}
 
+function extractFailedApps(output) {
+  const failedMatches = output.match(/"name":\s*"([^"]+)"[^}]*"started":\s*false/g) || [];
+  return failedMatches.map((m) => {
+    const n = m.match(/"name":\s*"([^"]+)"/);
+    return n ? n[1] : 'unknown';
+  });
+}
+
+function extractPorts(output) {
+  const portMatches = output.match(/"port":\s*(\d+)/g) || [];
+  return portMatches
+    .map((m) => {
+      const p = m.match(/(\d+)/);
+      return p ? parseInt(p[1], 10) : null;
+    })
+    .filter(Boolean);
+}
+
+function extractUrls(output) {
+  const urlMatches = output.match(/"url":\s*"([^"]+)"/g) || [];
+  return urlMatches
+    .map((m) => {
+      const u = m.match(/"url":\s*"([^"]+)"/);
+      return u ? u[1] : null;
+    })
+    .filter(Boolean);
+}
+
+function writeFailureMarker(mp, ticketId, output, hasFail, hasEmptyApps) {
+  const failedApps = extractFailedApps(output);
+  const ports = extractPorts(output);
+  const urls = extractUrls(output);
+  fs.writeFileSync(
+    mp,
+    JSON.stringify({
+      failedApps,
+      status: ACCESS_FAILED,
+      timestamp: new Date().toISOString(),
+      ticketId,
+      diagnostic: { ports, urls, hasEmptyApps, hasFail },
+    })
+  );
+  process.stderr.write(
+    `ENV_FAILURE [${ACCESS_FAILED}]: marker written (${failedApps.join(', ')})\n`
+  );
+}
+
+function detectFailureSignals(output) {
   const hasFail =
     /"started":\s*false/.test(output) || /Timeout waiting for app to start/.test(output);
   const hasEmptyApps = /"runningApps":\s*\{\s*\}/.test(output) && /"apps":\s*\{/.test(output);
+  return { hasFail, hasEmptyApps };
+}
 
+function unlinkMarkerQuiet(mp) {
+  try {
+    fs.unlinkSync(mp);
+  } catch {
+    /* */
+  }
+}
+
+function getCheckStartEnvOutput(hookData) {
+  const command = hookData.tool_input?.command || '';
+  if (!command.includes('check-start-env')) return null;
+  const transcriptPath = hookData.transcript_path;
+  if (!transcriptPath || !fs.existsSync(transcriptPath)) return null;
+  return readTranscriptOutput(transcriptPath);
+}
+
+function phase1_detectFailure(hookData) {
+  const output = getCheckStartEnvOutput(hookData);
+  if (output === null) return;
+
+  const { hasFail, hasEmptyApps } = detectFailureSignals(output);
   const ticketId = getTicketId();
   const mp = markerPath(ticketId);
 
   if (hasFail || hasEmptyApps) {
-    const failedMatches = output.match(/"name":\s*"([^"]+)"[^}]*"started":\s*false/g) || [];
-    const failedApps = failedMatches.map((m) => {
-      const n = m.match(/"name":\s*"([^"]+)"/);
-      return n ? n[1] : 'unknown';
-    });
-
-    // Extract diagnostic details from the output for the marker payload
-    const portMatches = output.match(/"port":\s*(\d+)/g) || [];
-    const ports = portMatches
-      .map((m) => {
-        const p = m.match(/(\d+)/);
-        return p ? parseInt(p[1], 10) : null;
-      })
-      .filter(Boolean);
-
-    const urlMatches = output.match(/"url":\s*"([^"]+)"/g) || [];
-    const urls = urlMatches
-      .map((m) => {
-        const u = m.match(/"url":\s*"([^"]+)"/);
-        return u ? u[1] : null;
-      })
-      .filter(Boolean);
-
-    fs.writeFileSync(
-      mp,
-      JSON.stringify({
-        failedApps,
-        status: ACCESS_FAILED,
-        timestamp: new Date().toISOString(),
-        ticketId,
-        diagnostic: {
-          ports,
-          urls,
-          hasEmptyApps,
-          hasFail,
-        },
-      })
-    );
-    process.stderr.write(
-      `ENV_FAILURE [${ACCESS_FAILED}]: marker written (${failedApps.join(', ')})\n`
-    );
+    writeFailureMarker(mp, ticketId, output, hasFail, hasEmptyApps);
   } else {
-    try {
-      fs.unlinkSync(mp);
-    } catch {
-      /* */
-    }
+    unlinkMarkerQuiet(mp);
   }
 }
 

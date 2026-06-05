@@ -363,69 +363,57 @@ function createFileProtector(opts) {
     });
   }
 
+  function extractInlineCode(cmd, interpreterMatch) {
+    const flagIdx = interpreterMatch.index;
+    const afterFlag = cmd.slice(flagIdx);
+    const quotedMatch = afterFlag.match(/\s-[ce]\s+(["'])([\s\S]*?)\1/);
+    const unquotedMatch =
+      !quotedMatch && afterFlag.match(/\s-[ce]\s+(.*?)(?:\s*(?:\||;|&&|\|\|)\s|$)/s);
+    return quotedMatch ? quotedMatch[2] : unquotedMatch ? unquotedMatch[1] : cmd;
+  }
+
+  function checkInlineMatch(inlineCode, bareInterpreter, toolInput, hookData) {
+    const tokens = extractTokens(inlineCode);
+    const hasWriteOp = INLINE_INTERPRETER_WRITES.test(inlineCode);
+    for (const token of tokens) {
+      const match = isProtected(token);
+      if (match && hasWriteOp && !isExempt('Bash', toolInput, hookData)) {
+        return {
+          blocked: true,
+          match,
+          vector: `Bash(${bareInterpreter})`,
+          message: fmt(match, `Bash(${bareInterpreter})`),
+          skipRemainingChecks: false,
+        };
+      }
+    }
+    if (
+      BASE64_EVASION_PATTERN.test(inlineCode) &&
+      hasWriteOp &&
+      !isExempt('Bash', toolInput, hookData)
+    ) {
+      return {
+        blocked: true,
+        match: '(base64-encoded)',
+        vector: `Bash(${bareInterpreter} base64)`,
+        message: fmt('(base64-encoded)', `Bash(${bareInterpreter} base64)`),
+        skipRemainingChecks: false,
+      };
+    }
+    return null;
+  }
+
   function checkInlineInterpreterBypass(cmd, toolInput, hookData) {
-    // Use global scan to check ALL inline interpreter occurrences in compound commands
-    // (e.g. `python3 -c "print(1)"; python3 -c "open('.state.json','w')..."`)
     const globalPattern = new RegExp(INLINE_INTERPRETER_PATTERN.source, 'g');
     const allMatches = [...cmd.matchAll(globalPattern)];
     if (allMatches.length === 0) return { blocked: false, skipRemainingChecks: false };
 
     for (const interpreterMatch of allMatches) {
-      // Extract the interpreter name and flag from the match (e.g. "python3 -c", "ruby -e")
-      const matchStr = interpreterMatch[0].trim();
-      // Remove /usr/bin/env prefix if present to get bare interpreter + flag
-      const bareInterpreter = matchStr.replace(/^\/usr\/bin\/env\s+/, '');
-
-      // Extract the inline code portion (everything after -c/-e flag).
-      // This scopes filename and base64 checks to only the interpreter code,
-      // avoiding false positives when protected filenames or base64 appear
-      // in other command segments (e.g. `echo .state.json; python3 -c "..."`)
-      // or in pipeline stages (e.g. `python3 -c "print('hello')" | base64`).
-      const flagIdx = interpreterMatch.index;
-      const afterFlag = cmd.slice(flagIdx);
-      // Try to extract the quoted code argument first (respects quotes around inline code).
-      // If unquoted, capture up to the first unquoted shell operator (|, ;, &&, ||).
-      const quotedMatch = afterFlag.match(/\s-[ce]\s+(["'])([\s\S]*?)\1/);
-      const unquotedMatch =
-        !quotedMatch && afterFlag.match(/\s-[ce]\s+(.*?)(?:\s*(?:\||;|&&|\|\|)\s|$)/s);
-      const inlineCode = quotedMatch ? quotedMatch[2] : unquotedMatch ? unquotedMatch[1] : cmd; // fallback to full cmd
-
-      // Check tokens from inline code only (not full cmd)
-      const tokens = extractTokens(inlineCode);
-
-      // Check for direct protected filename reference + write operation (scoped to inline code)
-      const hasWriteOp = INLINE_INTERPRETER_WRITES.test(inlineCode);
-      for (const token of tokens) {
-        const match = isProtected(token);
-        if (match && hasWriteOp && !isExempt('Bash', toolInput, hookData)) {
-          return {
-            blocked: true,
-            match,
-            vector: `Bash(${bareInterpreter})`,
-            message: fmt(match, `Bash(${bareInterpreter})`),
-            skipRemainingChecks: false,
-          };
-        }
-      }
-
-      // Base64 evasion: block when all three signals present (interpreter + base64 keyword + write op)
-      // even without a visible protected filename, since the filename may be base64-encoded.
-      // This is an intentional over-blocking tradeoff — see GH-107 spec "Open Questions" section.
-      // False positives on non-protected file writes are accepted to prevent evasion.
-      // Scoped to inline code only — base64 CLI usage outside the -c/-e code is not flagged.
-      if (BASE64_EVASION_PATTERN.test(inlineCode) && hasWriteOp) {
-        if (!isExempt('Bash', toolInput, hookData)) {
-          return {
-            blocked: true,
-            match: '(base64-encoded)',
-            vector: `Bash(${bareInterpreter} base64)`,
-            message: fmt('(base64-encoded)', `Bash(${bareInterpreter} base64)`),
-            skipRemainingChecks: false,
-          };
-        }
-      } // end base64 evasion check
-    } // end for each interpreter match
-
+      const bareInterpreter = interpreterMatch[0].trim().replace(/^\/usr\/bin\/env\s+/, '');
+      const inlineCode = extractInlineCode(cmd, interpreterMatch);
+      const result = checkInlineMatch(inlineCode, bareInterpreter, toolInput, hookData);
+      if (result) return result;
+    }
     return { blocked: false, skipRemainingChecks: false };
   }
 
