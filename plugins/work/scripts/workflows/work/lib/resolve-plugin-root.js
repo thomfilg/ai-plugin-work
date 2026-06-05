@@ -22,11 +22,19 @@ const path = require('path');
 function resolvePluginRoot(callerDir, levelsUp = 2) {
   const envRoot = process.env.CLAUDE_PLUGIN_ROOT;
   if (envRoot) {
-    // Direct: already points to the plugin
+    // cache-leaf: env already points at a dir containing workflows/work
     if (fs.existsSync(path.join(envRoot, 'workflows', 'work'))) return envRoot;
-    // Parent: points to plugins dir — resolve to marketplace subdir
-    const mp = path.join(envRoot, 'marketplaces', 'work-workflow');
-    if (fs.existsSync(path.join(mp, 'workflows', 'work'))) return mp;
+    // cache-parent: env points at the plugins-base dir, marketplace cache layout
+    const cacheParent = path.join(envRoot, 'marketplaces', 'work-workflow');
+    if (fs.existsSync(path.join(cacheParent, 'workflows', 'work'))) return cacheParent;
+    // marketplace-leaf: env points at marketplaces/work-workflow with the real
+    // on-disk layout nested under plugins/work
+    const mpLeaf = path.join(envRoot, 'plugins', 'work');
+    if (fs.existsSync(path.join(mpLeaf, 'workflows', 'work'))) return mpLeaf;
+    // marketplace-parent: env points at the parent plugins-base dir with the
+    // real marketplace install layout (marketplaces/work-workflow/plugins/work)
+    const mpParent = path.join(envRoot, 'marketplaces', 'work-workflow', 'plugins', 'work');
+    if (fs.existsSync(path.join(mpParent, 'workflows', 'work'))) return mpParent;
   }
   // Fallback: resolve from caller's __dirname
   if (callerDir) {
