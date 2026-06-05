@@ -71,7 +71,9 @@ test('CASE 3 — orphan memory when source file is missing', () => {
 test('CASE 4 — manual memory without source_hash is silently skipped', () => {
   const memory = {
     name: 'manual.md',
-    meta: { /* no source_hash, possibly no source */ },
+    meta: {
+      /* no source_hash, possibly no source */
+    },
   };
   const result = classifyMemory(memory, { repoRoot });
   assert.equal(result.status, 'skip');
@@ -130,7 +132,10 @@ test('groupResultsBySource groups by source, sorts memories asc, and filters ski
   assert.ok(Array.isArray(grouped));
   assert.equal(grouped.length, 3, 'three source groups (skip filtered)');
   // No skip groups
-  assert.equal(grouped.find((g) => g.status === 'skip'), undefined);
+  assert.equal(
+    grouped.find((g) => g.status === 'skip'),
+    undefined
+  );
 
   const docAGroup = grouped.find((g) => g.source === docARel);
   assert.ok(docAGroup, 'docA group exists');

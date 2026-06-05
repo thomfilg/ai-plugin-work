@@ -11,13 +11,9 @@
  * are exported for unit tests; CLI runs only when invoked directly.
  */
 
-const {
-  fs,
-  path,
-  setupCli,
-  discoverStores,
-  listMemoriesFromStore,
-} = require(require('node:path').join(__dirname, '..', 'lib', 'script-bootstrap'));
+const { fs, path, setupCli, discoverStores, listMemoriesFromStore } = require(
+  require('node:path').join(__dirname, '..', 'lib', 'script-bootstrap')
+);
 const { telemetryDir } = require(require('node:path').join(__dirname, '..', 'lib', 'telemetry'));
 
 const NOISE_FIRED_THRESHOLD = 10;
@@ -36,9 +32,7 @@ function listJsonlFiles(telDir) {
   } catch {
     return [];
   }
-  return entries
-    .filter((n) => n.endsWith('.jsonl'))
-    .map((n) => path.join(telDir, n));
+  return entries.filter((n) => n.endsWith('.jsonl')).map((n) => path.join(telDir, n));
 }
 
 function readJsonlInWindow(file, cutoffMs) {

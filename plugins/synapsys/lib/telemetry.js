@@ -119,9 +119,7 @@ function recordCited(memory, payload, match) {
     if (!memory || isDisabled(memory)) return;
     const sessionId = resolveSessionId(payload);
     const cappedMatch =
-      typeof match === 'string' && match.length > MATCH_CAP
-        ? match.slice(0, MATCH_CAP)
-        : match;
+      typeof match === 'string' && match.length > MATCH_CAP ? match.slice(0, MATCH_CAP) : match;
     const record = {
       ts: new Date().toISOString(),
       memory: memory.name,
@@ -179,9 +177,7 @@ function extractSignals(memory) {
     : Array.isArray(memory.meta && memory.meta.cite_signals)
       ? memory.meta.cite_signals
       : null;
-  const declared = source
-    ? source.filter((s) => typeof s === 'string' && s.length > 0)
-    : [];
+  const declared = source ? source.filter((s) => typeof s === 'string' && s.length > 0) : [];
   if (declared.length > 0) return declared.slice();
   return extractAuto(memory);
 }

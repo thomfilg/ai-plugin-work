@@ -27,19 +27,13 @@
 // nodePath is needed before bootstrap is loaded to construct the require paths below.
 const nodePath = require('node:path');
 const { spawnSync } = require('node:child_process');
-const {
-  fs,
-  path,
-  setupCli,
-  discoverStores,
-  listMemoriesFromStore,
-} = require(nodePath.join(__dirname, '..', 'lib', 'script-bootstrap'));
-const {
-  classifyMemory,
-  groupResultsBySource,
-  summarise,
-  getProfileForSource,
-} = require(nodePath.join(__dirname, '..', 'lib', 'staleness'));
+const { fs, path, setupCli, discoverStores, listMemoriesFromStore } = require(
+  nodePath.join(__dirname, '..', 'lib', 'script-bootstrap')
+);
+const { classifyMemory, groupResultsBySource, summarise, getProfileForSource } = require(
+  nodePath.join(__dirname, '..', 'lib', 'staleness')
+);
+const { loadDomainRegistry } = require(nodePath.join(__dirname, '..', 'lib', 'domains'));
 
 // ---------------------------------------------------------------------------
 // Repo-root resolution
@@ -228,21 +222,15 @@ function dispatchReconsolidate(grouped, opts) {
       continue;
     }
     if (!profile || !profile.name) {
-      stderr.write(
-        `warning: no profile owns source ${g.source}; skipping\n`
-      );
+      stderr.write(`warning: no profile owns source ${g.source}; skipping\n`);
       continue;
     }
     // Route child stdout to stderr when --json is active so the parent's
     // JSON payload remains the only thing on stdout.
-    const childStdio = opts.json
-      ? ['inherit', process.stderr, 'inherit']
-      : 'inherit';
-    const result = spawnSync(
-      process.execPath,
-      [consolidateBin, '--profile=' + profile.name],
-      { stdio: childStdio }
-    );
+    const childStdio = opts.json ? ['inherit', process.stderr, 'inherit'] : 'inherit';
+    const result = spawnSync(process.execPath, [consolidateBin, '--profile=' + profile.name], {
+      stdio: childStdio,
+    });
     if (result.status !== 0) {
       sawSpawnFailure = true;
       stderr.write(
@@ -263,8 +251,71 @@ function parseCliOptions() {
     verbose: !!flag('verbose'),
     noColor: !!flag('no-color') || !!process.env.NO_COLOR,
     reConsolidate: !!flag('re-consolidate'),
+    strict: !!flag('strict'),
     storeFlag: typeof storeFlag === 'string' ? storeFlag : null,
   };
+}
+
+// ---------------------------------------------------------------------------
+// Domain lint (Task 11 / R9 / AC8)
+// ---------------------------------------------------------------------------
+
+/**
+ * Return lint warnings for every `domain:` value on `memory` that is not
+ * registered in the domain registry (neither as a root nor as `root:leaf`).
+ *
+ * Backward-compat: memories with empty / absent `domain` always return [].
+ *
+ * @param {{ name?: string, domain?: string[] }} memory
+ * @param {{ roots: Map<string, { leaves: Map<string, unknown> }> }} registry
+ * @returns {Array<{ memory: string, value: string }>}
+ */
+function isUnknownDomainValue(value, roots) {
+  if (typeof value !== 'string' || value.length === 0) return false;
+  const colonIdx = value.indexOf(':');
+  if (colonIdx === -1) return !roots.has(value);
+  const root = roots.get(value.slice(0, colonIdx));
+  const leafName = value.slice(colonIdx + 1);
+  return !root || !(root.leaves instanceof Map) || !root.leaves.has(leafName);
+}
+
+function lintDomainsForMemory(memory, registry) {
+  if (!memory || !Array.isArray(memory.domain) || memory.domain.length === 0) {
+    return [];
+  }
+  const roots = registry && registry.roots instanceof Map ? registry.roots : new Map();
+  const warnings = [];
+  for (const value of memory.domain) {
+    if (isUnknownDomainValue(value, roots)) {
+      warnings.push({ memory: memory.name || '(unnamed)', value });
+    }
+  }
+  return warnings;
+}
+
+/**
+ * Walk every memory in `stores` and accumulate unknown-domain warnings
+ * against `registry`. Returns a flat array of `{ memory, value }`.
+ */
+function collectDomainWarnings(stores, registry) {
+  const out = [];
+  for (const store of stores) {
+    const memories = listMemoriesFromStore(store);
+    for (const mem of memories) {
+      const ws = lintDomainsForMemory(mem, registry);
+      for (const w of ws) out.push(w);
+    }
+  }
+  return out;
+}
+
+function renderDomainWarnings(warnings) {
+  if (warnings.length === 0) return '';
+  const lines = [`Unknown-domain warnings (${warnings.length}):`];
+  for (const w of warnings) {
+    lines.push(`  - ${w.memory}: unknown domain "${w.value}"`);
+  }
+  return lines.join('\n') + '\n';
 }
 
 function renderReport(grouped, summary, opts) {
@@ -279,8 +330,7 @@ function maybeReconsolidate(grouped, opts) {
     process.env.SYNAPSYS_CONSOLIDATE_BIN_FOR_TEST ||
     path.join(__dirname, 'synapsys-consolidate.js');
   const profilesDir =
-    process.env.SYNAPSYS_PROFILES_DIR_FOR_TEST ||
-    path.join(__dirname, 'consolidate-profiles');
+    process.env.SYNAPSYS_PROFILES_DIR_FOR_TEST || path.join(__dirname, 'consolidate-profiles');
   const dispatched = dispatchReconsolidate(grouped, {
     consolidateBin,
     profilesDir,
@@ -305,9 +355,27 @@ function main() {
 
   process.stdout.write(renderReport(grouped, summary, opts));
 
+  // Unknown-domain lint (Task 11 / R9 / AC8). Loads registry from $HOME
+  // (or bundled fallback). Warnings go to stderr so they don't pollute
+  // --json stdout; --strict promotes any warning to a non-zero exit.
+  const registry = loadDomainRegistry();
+  const domainWarnings = collectDomainWarnings(stores, registry);
+  if (domainWarnings.length > 0) {
+    process.stderr.write(renderDomainWarnings(domainWarnings));
+  }
+
   const sawSpawnFailure = maybeReconsolidate(grouped, opts);
   const hasIssue = summary.drifted > 0 || summary.orphan > 0 || sawSpawnFailure;
-  process.exit(hasIssue ? 1 : 0);
+  const strictDomainFail = opts.strict && domainWarnings.length > 0;
+  process.exit(hasIssue || strictDomainFail ? 1 : 0);
 }
 
-main();
+module.exports = {
+  lintDomainsForMemory,
+  collectDomainWarnings,
+  renderDomainWarnings,
+};
+
+if (require.main === module) {
+  main();
+}

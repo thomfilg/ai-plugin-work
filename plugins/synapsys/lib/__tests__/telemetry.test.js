@@ -36,7 +36,11 @@ function readJsonl(file) {
 test('first recordFired write seeds .telemetry/ dir and .gitignore with *', () => {
   withTempHome((home) => {
     const telemetry = require('../telemetry');
-    telemetry.recordFired({ name: 'demo-mem', meta: {} }, { session_id: 'sess-1' }, 'UserPromptSubmit');
+    telemetry.recordFired(
+      { name: 'demo-mem', meta: {} },
+      { session_id: 'sess-1' },
+      'UserPromptSubmit'
+    );
     const dir = path.join(home, '.claude', 'synapsys', '.telemetry');
     const gi = path.join(dir, '.gitignore');
     assert.ok(fs.existsSync(dir));
@@ -49,7 +53,11 @@ test('first recordFired write seeds .telemetry/ dir and .gitignore with *', () =
 test('recordFired writes one JSONL line with ts, memory, event=fired, reason', () => {
   withTempHome((home) => {
     const telemetry = require('../telemetry');
-    telemetry.recordFired({ name: 'mem-a', meta: {} }, { session_id: 'sess-X' }, 'UserPromptSubmit');
+    telemetry.recordFired(
+      { name: 'mem-a', meta: {} },
+      { session_id: 'sess-X' },
+      'UserPromptSubmit'
+    );
     const file = path.join(home, '.claude', 'synapsys', '.telemetry', 'sess-X.jsonl');
     const rows = readJsonl(file);
     assert.equal(rows.length, 1);
@@ -65,7 +73,11 @@ test('SYNAPSYS_TELEMETRY=0 suppresses recordFired writes', () => {
   withTempHome((home) => {
     process.env.SYNAPSYS_TELEMETRY = '0';
     const telemetry = require('../telemetry');
-    telemetry.recordFired({ name: 'mem-a', meta: {} }, { session_id: 'sess-1' }, 'UserPromptSubmit');
+    telemetry.recordFired(
+      { name: 'mem-a', meta: {} },
+      { session_id: 'sess-1' },
+      'UserPromptSubmit'
+    );
     const file = path.join(home, '.claude', 'synapsys', '.telemetry', 'sess-1.jsonl');
     assert.equal(fs.existsSync(file), false);
   });

@@ -179,7 +179,11 @@ describe('dispatcher fire_mode wiring (Task 3)', () => {
       '[synapsys:active] occasional-memory (fired earlier; full body in this session)',
       'count 2 must be reminder'
     );
-    assert.match(outputs[3], /OCCASIONAL-BODY-PING/, 'count 3 must be full body (cadence boundary)');
+    assert.match(
+      outputs[3],
+      /OCCASIONAL-BODY-PING/,
+      'count 3 must be full body (cadence boundary)'
+    );
   });
 
   it('P0 #4 SessionStart resets the ledger', () => {

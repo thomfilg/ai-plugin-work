@@ -45,7 +45,11 @@ test('CASE 5 (S5) — exit code 1 when store has drifted or orphan sources', () 
 
 test('CASE 6 (S6) — exit code 0 when all sources are fresh', () => {
   const r = run([`--cwd=${SAMPLE_REPO}`, `--store=${STORE_ALL_FRESH}`, '--no-color']);
-  assert.equal(r.status, 0, `expected exit 0, got ${r.status}. stderr=${r.stderr}\nstdout=${r.stdout}`);
+  assert.equal(
+    r.status,
+    0,
+    `expected exit 0, got ${r.status}. stderr=${r.stderr}\nstdout=${r.stdout}`
+  );
   // Summary line should report zero drifted and zero orphan.
   assert.match(r.stdout, /drifted[^0-9]*0/i);
   assert.match(r.stdout, /orphan[^0-9]*0/i);
@@ -97,7 +101,11 @@ test('CASE 7b (AC 4.1.3 / brief P0 #4) — text report caps drifted memory sampl
     );
   }
   const r = run([`--cwd=${SAMPLE_REPO}`, `--store=${tmpStore}`, '--no-color']);
-  assert.equal(r.status, 1, `expected exit 1, got ${r.status}. stderr=${r.stderr}\nstdout=${r.stdout}`);
+  assert.equal(
+    r.status,
+    1,
+    `expected exit 1, got ${r.status}. stderr=${r.stderr}\nstdout=${r.stdout}`
+  );
   // Overflow line MUST be present and report exactly `2 more` (5 memories − 3 sample cap).
   assert.match(
     r.stdout,
@@ -115,7 +123,11 @@ test('CASE 7b (AC 4.1.3 / brief P0 #4) — text report caps drifted memory sampl
 
 test('CASE S8 — exit code 2 + "store not found" on stderr for missing store kind', () => {
   const r = run([`--cwd=${SAMPLE_REPO}`, '--store=does-not-exist', '--no-color']);
-  assert.equal(r.status, 2, `expected exit 2, got ${r.status}. stdout=${r.stdout}\nstderr=${r.stderr}`);
+  assert.equal(
+    r.status,
+    2,
+    `expected exit 2, got ${r.status}. stdout=${r.stdout}\nstderr=${r.stderr}`
+  );
   assert.match(r.stderr, /store not found/i);
 });
 
@@ -187,14 +199,21 @@ test('CASE S10a — --re-consolidate spawns stub with --profile=<owner> for drif
     'good-profile.js': { name: 'good', sources: ['docs/b.md'] },
   });
   const stub = makeStubConsolidate();
-  const r = run([`--cwd=${SAMPLE_REPO}`, `--store=${STORE_MIXED}`, '--re-consolidate', '--no-color'], {
-    env: {
-      SYNAPSYS_CONSOLIDATE_BIN_FOR_TEST: stub.stubPath,
-      SYNAPSYS_PROFILES_DIR_FOR_TEST: profilesDir,
-    },
-  });
+  const r = run(
+    [`--cwd=${SAMPLE_REPO}`, `--store=${STORE_MIXED}`, '--re-consolidate', '--no-color'],
+    {
+      env: {
+        SYNAPSYS_CONSOLIDATE_BIN_FOR_TEST: stub.stubPath,
+        SYNAPSYS_PROFILES_DIR_FOR_TEST: profilesDir,
+      },
+    }
+  );
   // Drift remained (we don't actually mutate hashes) so exit stays non-zero.
-  assert.notEqual(r.status, 0, `expected non-zero exit, got ${r.status}. stderr=${r.stderr}\nstdout=${r.stdout}`);
+  assert.notEqual(
+    r.status,
+    0,
+    `expected non-zero exit, got ${r.status}. stderr=${r.stderr}\nstdout=${r.stdout}`
+  );
   const calls = stub.readCalls();
   assert.ok(calls.length >= 1, `expected at least one spawn call, got ${calls.length}`);
   // Spawn must include --profile=good for the drifted source.
@@ -206,7 +225,11 @@ test('CASE S10a — --re-consolidate spawns stub with --profile=<owner> for drif
   // Orphan source `docs/c-missing.md` must NOT be dispatched: no call should
   // contain a missing-profile argument referencing that path.
   const orphanCall = calls.find((argv) => argv.some((a) => a.includes('c-missing')));
-  assert.equal(orphanCall, undefined, `orphan must not be auto-acted on, got ${JSON.stringify(calls)}`);
+  assert.equal(
+    orphanCall,
+    undefined,
+    `orphan must not be auto-acted on, got ${JSON.stringify(calls)}`
+  );
 });
 
 test('CASE S10b — --re-consolidate emits stderr warning AND skips spawn when source is ambiguous', () => {
@@ -216,27 +239,38 @@ test('CASE S10b — --re-consolidate emits stderr warning AND skips spawn when s
     'second-profile.js': { name: 'second', sources: ['docs/b.md'] },
   });
   const stub = makeStubConsolidate();
-  const r = run([`--cwd=${SAMPLE_REPO}`, `--store=${STORE_MIXED}`, '--re-consolidate', '--no-color'], {
-    env: {
-      SYNAPSYS_CONSOLIDATE_BIN_FOR_TEST: stub.stubPath,
-      SYNAPSYS_PROFILES_DIR_FOR_TEST: profilesDir,
-    },
-  });
+  const r = run(
+    [`--cwd=${SAMPLE_REPO}`, `--store=${STORE_MIXED}`, '--re-consolidate', '--no-color'],
+    {
+      env: {
+        SYNAPSYS_CONSOLIDATE_BIN_FOR_TEST: stub.stubPath,
+        SYNAPSYS_PROFILES_DIR_FOR_TEST: profilesDir,
+      },
+    }
+  );
   // Warning must name both profiles.
   assert.match(r.stderr, /first/, `expected 'first' in ambiguity warning: ${r.stderr}`);
   assert.match(r.stderr, /second/, `expected 'second' in ambiguity warning: ${r.stderr}`);
   assert.match(r.stderr, /ambiguous/i, `expected 'ambiguous' wording: ${r.stderr}`);
   // No spawn at all for the ambiguous source.
   const calls = stub.readCalls();
-  const matched = calls.find((argv) => argv.some((a) => a === '--profile=first' || a === '--profile=second'));
-  assert.equal(matched, undefined, `ambiguous source must be skipped, got ${JSON.stringify(calls)}`);
+  const matched = calls.find((argv) =>
+    argv.some((a) => a === '--profile=first' || a === '--profile=second')
+  );
+  assert.equal(
+    matched,
+    undefined,
+    `ambiguous source must be skipped, got ${JSON.stringify(calls)}`
+  );
 });
 
 test('CASE S10d — getProfileForSource: single match returns { name }, no match returns null, missing dir tolerated', () => {
   const { getProfileForSource } = require('../lib/staleness');
   // Missing dir → null (no crash).
   assert.equal(
-    getProfileForSource('docs/a.md', { profilesDir: path.join(os.tmpdir(), 'definitely-not-here-' + Date.now()) }),
+    getProfileForSource('docs/a.md', {
+      profilesDir: path.join(os.tmpdir(), 'definitely-not-here-' + Date.now()),
+    }),
     null
   );
   // Single match → { name }
@@ -263,12 +297,15 @@ test('CASE S10c — --re-consolidate continues to next source after a spawn fail
     'good-profile.js': { name: 'good', sources: ['docs/b.md'] },
   });
   const stub = makeStubConsolidate({ exitFor: { good: 7 } });
-  const r = run([`--cwd=${SAMPLE_REPO}`, `--store=${STORE_MIXED}`, '--re-consolidate', '--no-color'], {
-    env: {
-      SYNAPSYS_CONSOLIDATE_BIN_FOR_TEST: stub.stubPath,
-      SYNAPSYS_PROFILES_DIR_FOR_TEST: profilesDir,
-    },
-  });
+  const r = run(
+    [`--cwd=${SAMPLE_REPO}`, `--store=${STORE_MIXED}`, '--re-consolidate', '--no-color'],
+    {
+      env: {
+        SYNAPSYS_CONSOLIDATE_BIN_FOR_TEST: stub.stubPath,
+        SYNAPSYS_PROFILES_DIR_FOR_TEST: profilesDir,
+      },
+    }
+  );
   // Stub failed → overall exit code must be non-zero.
   assert.notEqual(r.status, 0, `expected non-zero exit after spawn failure, got ${r.status}`);
   // Stub was actually invoked at least once for the drifted source.
@@ -315,30 +352,36 @@ module.exports = {
   fs.writeFileSync(path.join(profilesDir, 'ui-catalog-fixture.js'), profileBody);
   const outPath = path.join(tmpRepo, 'manifest.json');
   const CONSOLIDATE = path.join(__dirname, '..', 'scripts', 'synapsys-consolidate.js');
-  const r = spawnSync(process.execPath, [
-    CONSOLIDATE,
-    '--profile=ui-catalog-fixture',
-    `--repo=${tmpRepo}`,
-    `--out=${outPath}`,
-  ], {
-    encoding: 'utf8',
-    env: Object.assign({}, process.env, {
-      SYNAPSYS_CONSOLIDATE_PROFILES_DIR_FOR_TEST: profilesDir,
-    }),
-  });
+  const r = spawnSync(
+    process.execPath,
+    [CONSOLIDATE, '--profile=ui-catalog-fixture', `--repo=${tmpRepo}`, `--out=${outPath}`],
+    {
+      encoding: 'utf8',
+      env: Object.assign({}, process.env, {
+        SYNAPSYS_CONSOLIDATE_PROFILES_DIR_FOR_TEST: profilesDir,
+      }),
+    }
+  );
   assert.equal(r.status, 0, `consolidate failed: stderr=${r.stderr}\nstdout=${r.stdout}`);
   const manifest = JSON.parse(fs.readFileSync(outPath, 'utf8'));
-  assert.ok(Array.isArray(manifest.memories) && manifest.memories.length > 0,
-    'expected non-empty memories array');
+  assert.ok(
+    Array.isArray(manifest.memories) && manifest.memories.length > 0,
+    'expected non-empty memories array'
+  );
   for (const m of manifest.memories) {
     assert.ok(m.meta, `memory ${m.name} has no meta`);
-    assert.equal(m.meta.source, 'docs/fixture.md',
-      `memory ${m.name} source=${m.meta.source}, want docs/fixture.md`);
-    assert.match(m.meta.source_hash || '', /^sha256:[0-9a-f]{64}$/,
-      `memory ${m.name} source_hash=${m.meta.source_hash} does not match canonical pattern`);
+    assert.equal(
+      m.meta.source,
+      'docs/fixture.md',
+      `memory ${m.name} source=${m.meta.source}, want docs/fixture.md`
+    );
+    assert.match(
+      m.meta.source_hash || '',
+      /^sha256:[0-9a-f]{64}$/,
+      `memory ${m.name} source_hash=${m.meta.source_hash} does not match canonical pattern`
+    );
     // Pre-existing meta must be preserved (Object.assign semantics).
-    assert.equal(m.meta.pre_existing, 'keep-me',
-      `pre-existing meta dropped on ${m.name}`);
+    assert.equal(m.meta.pre_existing, 'keep-me', `pre-existing meta dropped on ${m.name}`);
   }
 });
 
@@ -351,7 +394,9 @@ test('CASE 9 — stamp stability across runs + E2E drift → --re-consolidate �
   const sourceFile = path.join(tmpRepo, 'packages', 'ui', 'components-catalog.md');
   fs.writeFileSync(sourceFile, '# Catalog\n\nButton\nInput\n');
   const profilesDir = mkTmpDir('synapsys-idempot-profiles-');
-  fs.writeFileSync(path.join(profilesDir, 'ui-catalog-fixture.js'), `'use strict';
+  fs.writeFileSync(
+    path.join(profilesDir, 'ui-catalog-fixture.js'),
+    `'use strict';
 module.exports = {
   name: 'ui-catalog-fixture',
   sources: ['packages/ui/components-catalog.md'],
@@ -363,7 +408,8 @@ module.exports = {
     };
   },
 };
-`);
+`
+  );
   const CONSOLIDATE = path.join(__dirname, '..', 'scripts', 'synapsys-consolidate.js');
   const outA = path.join(tmpRepo, 'a.json');
   const outB = path.join(tmpRepo, 'b.json');
@@ -371,12 +417,11 @@ module.exports = {
     SYNAPSYS_CONSOLIDATE_PROFILES_DIR_FOR_TEST: profilesDir,
   });
   function runConsolidate(out) {
-    return spawnSync(process.execPath, [
-      CONSOLIDATE,
-      '--profile=ui-catalog-fixture',
-      `--repo=${tmpRepo}`,
-      `--out=${out}`,
-    ], { encoding: 'utf8', env: consolidateEnv });
+    return spawnSync(
+      process.execPath,
+      [CONSOLIDATE, '--profile=ui-catalog-fixture', `--repo=${tmpRepo}`, `--out=${out}`],
+      { encoding: 'utf8', env: consolidateEnv }
+    );
   }
   const r1 = runConsolidate(outA);
   assert.equal(r1.status, 0, `first consolidate failed: ${r1.stderr}`);
@@ -388,17 +433,28 @@ module.exports = {
   function stableStringify(obj) {
     return JSON.stringify(obj, (k, v) => {
       if (v && typeof v === 'object' && !Array.isArray(v)) {
-        return Object.keys(v).sort().reduce((acc, key) => { acc[key] = v[key]; return acc; }, {});
+        return Object.keys(v)
+          .sort()
+          .reduce((acc, key) => {
+            acc[key] = v[key];
+            return acc;
+          }, {});
       }
       return v;
     });
   }
-  assert.equal(stableStringify(mA), stableStringify(mB),
-    'manifests diverged across identical consolidate runs');
+  assert.equal(
+    stableStringify(mA),
+    stableStringify(mB),
+    'manifests diverged across identical consolidate runs'
+  );
   // Per-memory source_hash must match exactly.
   for (let i = 0; i < mA.memories.length; i++) {
-    assert.equal(mA.memories[i].meta.source_hash, mB.memories[i].meta.source_hash,
-      `memory[${i}] source_hash differs across runs`);
+    assert.equal(
+      mA.memories[i].meta.source_hash,
+      mB.memories[i].meta.source_hash,
+      `memory[${i}] source_hash differs across runs`
+    );
   }
 
   // ── Part B: E2E drift → --re-consolidate → fresh ──────────────────────
@@ -408,24 +464,31 @@ module.exports = {
   // We re-use the existing SAMPLE_REPO + STORE_MIXED fixtures plus a stub
   // dispatcher to keep the harness inline (factor-out reserved for refactor).
   const profilesDir2 = mkTmpDir('synapsys-e2e-profiles-');
-  fs.writeFileSync(path.join(profilesDir2, 'good-profile.js'),
-    `'use strict'; module.exports = ${JSON.stringify({ name: 'good', sources: ['docs/b.md'] })};\n`);
+  fs.writeFileSync(
+    path.join(profilesDir2, 'good-profile.js'),
+    `'use strict'; module.exports = ${JSON.stringify({ name: 'good', sources: ['docs/b.md'] })};\n`
+  );
   const stub = makeStubConsolidate();
   // Confirm drift first (store-mixed has drifted source docs/b.md).
   const driftCheck = run([`--cwd=${SAMPLE_REPO}`, `--store=${STORE_MIXED}`, '--no-color']);
   assert.equal(driftCheck.status, 1, 'pre-dispatch staleness should exit 1 (drift present)');
   assert.match(driftCheck.stdout, /DRIFTED/, 'pre-dispatch stdout should contain DRIFTED block');
   // Dispatch via --re-consolidate with the stub.
-  const dispatchRes = run([`--cwd=${SAMPLE_REPO}`, `--store=${STORE_MIXED}`, '--re-consolidate', '--no-color'], {
-    env: {
-      SYNAPSYS_CONSOLIDATE_BIN_FOR_TEST: stub.stubPath,
-      SYNAPSYS_PROFILES_DIR_FOR_TEST: profilesDir2,
-    },
-  });
+  const dispatchRes = run(
+    [`--cwd=${SAMPLE_REPO}`, `--store=${STORE_MIXED}`, '--re-consolidate', '--no-color'],
+    {
+      env: {
+        SYNAPSYS_CONSOLIDATE_BIN_FOR_TEST: stub.stubPath,
+        SYNAPSYS_PROFILES_DIR_FOR_TEST: profilesDir2,
+      },
+    }
+  );
   // Stub fired for the drifted source's owning profile.
   const calls = stub.readCalls();
-  assert.ok(calls.some((argv) => argv.includes('--profile=good')),
-    `E2E: expected --profile=good spawn, got ${JSON.stringify(calls)}`);
+  assert.ok(
+    calls.some((argv) => argv.includes('--profile=good')),
+    `E2E: expected --profile=good spawn, got ${JSON.stringify(calls)}`
+  );
   // Dispatch returns non-zero because the underlying drift wasn't actually
   // healed (the stub is a no-op fixture). What we verified end-to-end is
   // that the spawn fired with the right argv. dispatchRes.status is allowed

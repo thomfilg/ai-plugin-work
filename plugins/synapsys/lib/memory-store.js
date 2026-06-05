@@ -92,25 +92,43 @@ function discoverStores(cwd) {
   const wt = findAncestorStore(path.dirname(resolved));
   if (wt) push('worktree', wt);
 
-  // global: per-project store under home.
-  push('global', path.join(os.homedir(), '.claude', FOLDER, projectName));
+  // SYNAPSYS_DISABLE_HOME_STORES lets tests pin discovery to the cwd-rooted
+  // local/worktree stores only, so a developer's real global/shared memories
+  // never leak into fixture-based assertions.
+  if (process.env.SYNAPSYS_DISABLE_HOME_STORES !== '1') {
+    // global: per-project store under home.
+    push('global', path.join(os.homedir(), '.claude', FOLDER, projectName));
 
-  // shared: cross-project store under home — discovered for every project,
-  // regardless of cwd or project name. Lives outside the per-project
-  // namespace so it can never collide with a same-named project's global store.
-  push('shared', path.join(os.homedir(), '.claude', SHARED_FOLDER));
+    // shared: cross-project store under home — discovered for every project,
+    // regardless of cwd or project name. Lives outside the per-project
+    // namespace so it can never collide with a same-named project's global store.
+    push('shared', path.join(os.homedir(), '.claude', SHARED_FOLDER));
+  }
 
   return out;
 }
 
-function coerceFrontmatterValue(raw) {
+// Frontmatter keys whose `[...]` value should be parsed as a YAML-style list.
+// All other keys keep `[...]` as a literal string so regex character classes
+// like `[a-z0-9]` in `trigger_prompt` aren't mis-coerced into arrays.
+const BRACKET_LIST_KEYS = new Set([
+  'domain',
+  'events',
+  'trigger_pretool',
+  'trigger_pretool_content',
+  'trigger_pretool_content_not',
+  'cite_signals',
+]);
+
+function coerceFrontmatterValue(raw, key) {
   const val = raw.trim();
   if (val === '') return '';
   if (val === 'true') return true;
   if (val === 'false') return false;
-  // Bracket-array form: only treat as array when a comma is present.
-  // Single-bracket values like `[a-z]` are regex character classes — keep as string.
-  if (/^\[.*,.*\]$/.test(val)) {
+  // Bracket-array form: only treat `[…]` as a list for known list-typed keys.
+  // Regex character classes (e.g. `[a-z0-9]` in `trigger_prompt`) must stay as
+  // strings, so we gate by key rather than by content shape.
+  if (BRACKET_LIST_KEYS.has(key) && /^\[[\s\S]*\]$/.test(val)) {
     return val
       .slice(1, -1)
       .split(',')
@@ -130,7 +148,7 @@ function parseFrontmatter(content) {
     if (!line || line.startsWith('#')) continue;
     const km = line.match(/^([a-zA-Z_][a-zA-Z0-9_]*):\s*(.*)$/);
     if (!km) continue;
-    meta[km[1]] = coerceFrontmatterValue(km[2]);
+    meta[km[1]] = coerceFrontmatterValue(km[2], km[1]);
   }
   return { meta, body: m[2] || '' };
 }
@@ -183,6 +201,7 @@ function readMemoryFile(store, name) {
     triggerPretoolContent: toList(meta.trigger_pretool_content),
     triggerPretoolContentNot: toList(meta.trigger_pretool_content_not),
     triggerSession: meta.trigger_session === true || meta.trigger_session === 'true',
+    domain: toList(meta.domain),
     inject: meta.inject === 'full' ? 'full' : 'summary',
     disabled: meta.disabled === true || meta.disabled === 'true',
     expired: parseExpired(meta.expires),
@@ -220,7 +239,10 @@ function normalizeCiteSignals(value) {
   let scalar = String(value).trim();
   const bracketed = scalar.match(/^\[(.*)\]$/);
   if (bracketed) scalar = bracketed[1];
-  const tokens = scalar.split(',').map((s) => s.trim()).filter(Boolean);
+  const tokens = scalar
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
   return tokens.length ? tokens : undefined;
 }
 

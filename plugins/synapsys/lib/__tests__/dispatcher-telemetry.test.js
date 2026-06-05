@@ -61,8 +61,13 @@ function makeFixture({ home }) {
     cwd,
     storeDir,
     cleanup: () => {
-      try { fs.rmSync(cwd, { recursive: true, force: true }); } catch {}
-      if (home) try { fs.rmSync(home, { recursive: true, force: true }); } catch {}
+      try {
+        fs.rmSync(cwd, { recursive: true, force: true });
+      } catch {}
+      if (home)
+        try {
+          fs.rmSync(home, { recursive: true, force: true });
+        } catch {}
     },
   };
 }
@@ -159,7 +164,11 @@ test('Opt-out via SYNAPSYS_TELEMETRY=0 suppresses all writes', (t) => {
   assert.ok(result.stdout.includes('mem-optout-env'), 'stdout missing injection');
 
   const jsonl = path.join(telemetryDirFor(home), `${sessionId}.jsonl`);
-  assert.equal(fs.existsSync(jsonl), false, 'telemetry file must not exist with SYNAPSYS_TELEMETRY=0');
+  assert.equal(
+    fs.existsSync(jsonl),
+    false,
+    'telemetry file must not exist with SYNAPSYS_TELEMETRY=0'
+  );
 });
 
 // ---- Scenario (f) — per-memory opt-out -------------------------------------
@@ -468,7 +477,10 @@ test('Cited event fires when Stop reads from transcript_path with Claude Code fo
   const transcript = path.join(home, 'transcript.jsonl');
   const blocks = [
     { type: 'assistant', message: { content: [{ type: 'text', text: 'Some prelude.' }] } },
-    { type: 'assistant', message: { content: [{ type: 'text', text: 'I will use tx-memory next.' }] } },
+    {
+      type: 'assistant',
+      message: { content: [{ type: 'text', text: 'I will use tx-memory next.' }] },
+    },
   ];
   fs.writeFileSync(transcript, blocks.map((b) => JSON.stringify(b)).join('\n') + '\n');
 
@@ -482,7 +494,11 @@ test('Cited event fires when Stop reads from transcript_path with Claude Code fo
   const jsonl = path.join(telemetryDirFor(home), `${sessionId}.jsonl`);
   const rows = readJsonl(jsonl);
   const cited = rows.filter((r) => r.event === 'cited' && r.memory === 'tx-memory');
-  assert.equal(cited.length, 1, `expected 1 cited row for tx-memory, got ${cited.length}. rows: ${JSON.stringify(rows)}`);
+  assert.equal(
+    cited.length,
+    1,
+    `expected 1 cited row for tx-memory, got ${cited.length}. rows: ${JSON.stringify(rows)}`
+  );
 });
 
 // PR #524 cursor[bot] Medium — empty payload.response must not short-circuit transcript_path
@@ -523,7 +539,9 @@ test('Empty payload.response falls through to transcript_path scan', (t) => {
   assert.equal(stopRes.status, 0);
 
   const jsonl = path.join(telemetryDirFor(home), `${sessionId}.jsonl`);
-  const cited = readJsonl(jsonl).filter((r) => r.event === 'cited' && r.memory === 'fallback-memory');
+  const cited = readJsonl(jsonl).filter(
+    (r) => r.event === 'cited' && r.memory === 'fallback-memory'
+  );
   assert.equal(cited.length, 1, `expected 1 cited row when response='' and transcript_path is set`);
 });
 
@@ -563,7 +581,11 @@ test('Stop with missing session_id does not emit cited events', (t) => {
   const unknown = path.join(telemetryDirFor(home), '_unknown-session.jsonl');
   const rows = fs.existsSync(unknown) ? readJsonl(unknown) : [];
   const cited = rows.filter((r) => r.event === 'cited');
-  assert.equal(cited.length, 0, `unknown-session must not emit cited rows, got ${cited.length}: ${JSON.stringify(cited)}`);
+  assert.equal(
+    cited.length,
+    0,
+    `unknown-session must not emit cited rows, got ${cited.length}: ${JSON.stringify(cited)}`
+  );
 });
 
 // PR #524 cursor[bot] Medium — blank line must not break cite_signals YAML block parse
@@ -608,8 +630,14 @@ test('cite_signals YAML list survives a blank line after the key', (t) => {
   assert.equal(stopRes.status, 0);
 
   const jsonl = path.join(telemetryDirFor(home), `${sessionId}.jsonl`);
-  const cited = readJsonl(jsonl).filter((r) => r.event === 'cited' && r.memory === 'blank-line-sig');
-  assert.equal(cited.length, 1, `expected 1 cited row using declared signal across YAML blank line, got ${cited.length}`);
+  const cited = readJsonl(jsonl).filter(
+    (r) => r.event === 'cited' && r.memory === 'blank-line-sig'
+  );
+  assert.equal(
+    cited.length,
+    1,
+    `expected 1 cited row using declared signal across YAML blank line, got ${cited.length}`
+  );
   assert.equal(cited[0].match, 'declared-token-beta');
 });
 
@@ -652,5 +680,9 @@ test('Stop event: cite scan ignores memories first fired during this same Stop t
   // But NO cited row, because the Stop-time fired write happens after the
   // cite scan reads session state.
   const cited = rows.filter((r) => r.event === 'cited' && r.memory === 'stop-injected');
-  assert.equal(cited.length, 0, `Stop-time fire must not generate a same-turn cited row, got ${cited.length}`);
+  assert.equal(
+    cited.length,
+    0,
+    `Stop-time fire must not generate a same-turn cited row, got ${cited.length}`
+  );
 });

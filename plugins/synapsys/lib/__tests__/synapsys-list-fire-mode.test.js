@@ -53,14 +53,10 @@ function seedLedger(home, sessionId, memoriesEntry) {
 }
 
 function runList(cwd, home, extraArgs) {
-  const result = spawnSync(
-    process.execPath,
-    [SCRIPT, `--cwd=${cwd}`, '--no-color', ...extraArgs],
-    {
-      env: { ...process.env, HOME: home, NO_COLOR: '1' },
-      encoding: 'utf8',
-    }
-  );
+  const result = spawnSync(process.execPath, [SCRIPT, `--cwd=${cwd}`, '--no-color', ...extraArgs], {
+    env: { ...process.env, HOME: home, NO_COLOR: '1' },
+    encoding: 'utf8',
+  });
   return result;
 }
 
@@ -108,7 +104,9 @@ test('P0 #7 synapsys:list shows fire_mode and injectedCount — compact + verbos
   const compact = runList(cwd, home, []);
   assert.equal(compact.status, 0, `stderr: ${compact.stderr}`);
   // Find the row line that has the name.
-  const compactRow = compact.stdout.split('\n').find((l) => l.includes('safety') && !l.includes('critical'));
+  const compactRow = compact.stdout
+    .split('\n')
+    .find((l) => l.includes('safety') && !l.includes('critical'));
   assert.ok(compactRow, `expected a row line containing "safety", got:\n${compact.stdout}`);
   assert.match(compactRow, /\bA\b/, `compact row should include A indicator: ${compactRow}`);
 

@@ -27,6 +27,10 @@ const path = require('node:path');
 const { makeFlag } = require(path.join(__dirname, '..', 'lib', 'cli-args'));
 const memoryStore = require(path.join(__dirname, '..', 'lib', 'memory-store'));
 const matcher = require(path.join(__dirname, '..', 'lib', 'matcher'));
+const { buildActiveDomains } = require(path.join(__dirname, '..', 'lib', 'active-domains'));
+const { resolveSessionId: ledgerResolveSessionId } = require(
+  path.join(__dirname, '..', 'lib', 'inject-ledger')
+);
 
 const VALID_EVENTS = new Set(['UserPromptSubmit', 'PreToolUse', 'SessionStart', 'Stop']);
 
@@ -84,7 +88,13 @@ function loadMemories(stores) {
   return all;
 }
 
-function evaluateMemory(memory, event, payload) {
+function evaluateMemory(memory, event, payload, activeDomains) {
+  // Domain gate must run BEFORE per-event trigger checks, mirroring
+  // selectForEvent in the dispatcher hook. Otherwise explain reports
+  // memories as fired that the hook would skip via isDomainMismatch.
+  if (activeDomains && matcher.isDomainMismatch(memory, activeDomains)) {
+    return { fired: false, reason: 'domain-mismatch' };
+  }
   if (event === 'UserPromptSubmit') {
     return matcher.matchPrompt(memory, payload.prompt || '');
   }
@@ -98,6 +108,17 @@ function evaluateMemory(memory, event, payload) {
     return matcher.matchStop(memory);
   }
   return { fired: false, reason: 'events-exclude' };
+}
+
+// Read-only activeDomains resolver — uses the same shared helper as the
+// dispatcher so explain's domain gate agrees with what selectForEvent
+// would do at injection time. Passes the inject-ledger session resolver
+// so sticky-state is read under the SAME bucket the dispatcher writes
+// to (without it, explain reads the 'default' bucket and disagrees with
+// live hysteresis). `onPersistSticky` is omitted so the CLI never
+// mutates sticky state (diagnostic-only).
+function computeActiveDomainsForExplain(event, payload) {
+  return buildActiveDomains(event, payload, { resolveSessionId: ledgerResolveSessionId });
 }
 
 function truncate(str, max) {
@@ -262,9 +283,10 @@ function main() {
   const memories = applyOnlyFilter(loadMemories(stores), only);
   const payload = buildPayload(event, prompt, tool, toolInput, cwd);
 
+  const activeDomains = computeActiveDomainsForExplain(event, payload);
   const results = memories.map((memory) => ({
     memory,
-    result: evaluateMemory(memory, event, payload),
+    result: evaluateMemory(memory, event, payload, activeDomains),
   }));
 
   const rendered = verbose ? renderVerbose(results, event) : renderTable(results);

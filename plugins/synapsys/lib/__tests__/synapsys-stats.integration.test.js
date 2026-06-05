@@ -16,7 +16,15 @@ const path = require('node:path');
 const STATS = path.resolve(__dirname, '..', '..', 'scripts', 'synapsys-stats.js');
 
 function writeMemoryFile(storeDir, name) {
-  const body = ['---', `name: ${name}`, 'description: x', 'events: UserPromptSubmit', 'trigger_prompt: x', '---', ''].join('\n');
+  const body = [
+    '---',
+    `name: ${name}`,
+    'description: x',
+    'events: UserPromptSubmit',
+    'trigger_prompt: x',
+    '---',
+    '',
+  ].join('\n');
   fs.writeFileSync(path.join(storeDir, `${name}.md`), body);
 }
 
@@ -38,8 +46,12 @@ function makeFixture() {
     storeDir,
     telDir,
     cleanup: () => {
-      try { fs.rmSync(cwd, { recursive: true, force: true }); } catch {}
-      try { fs.rmSync(home, { recursive: true, force: true }); } catch {}
+      try {
+        fs.rmSync(cwd, { recursive: true, force: true });
+      } catch {}
+      try {
+        fs.rmSync(home, { recursive: true, force: true });
+      } catch {}
     },
   };
 }
@@ -67,11 +79,24 @@ test('synapsys:stats surfaces top influencers, noise, and never-fired in a 7d wi
     const now = Date.now();
     const lines = [];
     for (let i = 0; i < 5; i++) {
-      lines.push({ ts: new Date(now - 1000 * i).toISOString(), memory: 'mem-influencer', event: 'fired' });
-      lines.push({ ts: new Date(now - 1000 * i).toISOString(), memory: 'mem-influencer', event: 'cited', match: 'x' });
+      lines.push({
+        ts: new Date(now - 1000 * i).toISOString(),
+        memory: 'mem-influencer',
+        event: 'fired',
+      });
+      lines.push({
+        ts: new Date(now - 1000 * i).toISOString(),
+        memory: 'mem-influencer',
+        event: 'cited',
+        match: 'x',
+      });
     }
     for (let i = 0; i < 10; i++) {
-      lines.push({ ts: new Date(now - 1000 * i).toISOString(), memory: 'mem-noise', event: 'fired' });
+      lines.push({
+        ts: new Date(now - 1000 * i).toISOString(),
+        memory: 'mem-noise',
+        event: 'fired',
+      });
     }
     writeJsonl(path.join(fx.telDir, 'session-1.jsonl'), lines);
 
@@ -129,8 +154,16 @@ test('dispatcher write → stats read share the same telemetry directory', () =>
     // Append the trigger_prompt so the dispatcher actually matches.
     fs.writeFileSync(
       path.join(fx.storeDir, 'mem-flow.md'),
-      ['---', 'name: mem-flow', 'description: x', 'events: UserPromptSubmit',
-       'trigger_prompt: flow-token', '---', '', 'Body'].join('\n')
+      [
+        '---',
+        'name: mem-flow',
+        'description: x',
+        'events: UserPromptSubmit',
+        'trigger_prompt: flow-token',
+        '---',
+        '',
+        'Body',
+      ].join('\n')
     );
 
     const DISPATCHER = path.resolve(__dirname, '..', '..', 'hooks', 'synapsys.js');
@@ -156,7 +189,10 @@ test('dispatcher write → stats read share the same telemetry directory', () =>
     // mem-flow fired once → not in Top influencers (no cited yet) but listed somewhere
     // with fired:1; what matters is the Never-fired section excludes it.
     const never = res.stdout.split(/Never-fired/)[1] || '';
-    assert.ok(!/mem-flow/.test(never), `cross-pipeline: mem-flow must NOT be Never-fired. stdout:\n${res.stdout}`);
+    assert.ok(
+      !/mem-flow/.test(never),
+      `cross-pipeline: mem-flow must NOT be Never-fired. stdout:\n${res.stdout}`
+    );
     void top;
   } finally {
     fx.cleanup();

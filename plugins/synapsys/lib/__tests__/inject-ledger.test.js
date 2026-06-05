@@ -110,9 +110,7 @@ test('gcStaleLedgers deletes old files, keeps fresh ones, never throws', () => {
     const tenDaysAgo = Date.now() - 10 * 24 * 60 * 60 * 1000;
     fs.utimesSync(oldPath, tenDaysAgo / 1000, tenDaysAgo / 1000);
 
-    assert.doesNotThrow(() =>
-      ledger.gcStaleLedgers({ maxAgeMs: 7 * 24 * 60 * 60 * 1000 })
-    );
+    assert.doesNotThrow(() => ledger.gcStaleLedgers({ maxAgeMs: 7 * 24 * 60 * 60 * 1000 }));
     assert.equal(fs.existsSync(oldPath), false);
     assert.equal(fs.existsSync(freshPath), true);
 

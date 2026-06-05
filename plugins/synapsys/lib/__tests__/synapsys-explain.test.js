@@ -88,7 +88,11 @@ function runExplain(args, opts = {}) {
   return spawnSync(process.execPath, [EXPLAIN, ...args], {
     encoding: 'utf8',
     input: opts.input,
-    env: { ...process.env, SYNAPSYS_NO_SETUP_HINT: '1' },
+    env: {
+      ...process.env,
+      SYNAPSYS_NO_SETUP_HINT: '1',
+      SYNAPSYS_DISABLE_HOME_STORES: '1',
+    },
   });
 }
 

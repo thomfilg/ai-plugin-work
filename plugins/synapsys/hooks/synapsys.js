@@ -20,6 +20,8 @@ const { discoverStores, listMemoriesFromStore } = require(
   path.join(__dirname, '..', 'lib', 'memory-store')
 );
 const { selectForEvent } = require(path.join(__dirname, '..', 'lib', 'matcher'));
+const { buildActiveDomains } = require(path.join(__dirname, '..', 'lib', 'active-domains'));
+const { saveStickyState } = require(path.join(__dirname, '..', 'lib', 'sticky-state'));
 const injectLedger = require('../lib/inject-ledger');
 const { recordFired } = require(path.join(__dirname, '..', 'lib', 'telemetry'));
 const { runCiteScan } = require(path.join(__dirname, '..', 'lib', 'cite-scan'));
@@ -176,6 +178,19 @@ function getSessionStartHint(event, stores, memories) {
   return null;
 }
 
+// Build the activeDomains opts for selectForEvent. Delegates to the
+// shared resolver so synapsys-explain stays in lockstep. Uses the
+// injectLedger session-id resolver so sticky-state, ledger, and telemetry
+// all key off the same session, and persists the next sticky state on
+// UserPromptSubmit via saveStickyState (the read-only CLI omits this).
+function buildActiveDomainsForPayload(event, payload) {
+  const activeDomains = buildActiveDomains(event, payload, {
+    resolveSessionId: injectLedger.resolveSessionId,
+    onPersistSticky: (state) => saveStickyState({ state }),
+  });
+  return activeDomains ? { activeDomains } : undefined;
+}
+
 function formatMatchedOutput(matched, sessionId) {
   const out = renderMatchedMemories(matched, sessionId);
   if (out.length <= MAX_INJECT_CHARS) return out;
@@ -234,7 +249,11 @@ function emitMatched(matched, payload, event) {
       process.exit(0);
     }
 
-    const matched = memories.length ? selectForEvent(memories, event, payload) : [];
+    // Build activeDomains FIRST so UserPromptSubmit advances sticky-state
+    // even when the memory list is empty. Fail-open: on any error, omit
+    // `opts.activeDomains` to preserve pre-classifier behavior.
+    const selectOpts = buildActiveDomainsForPayload(event, payload);
+    const matched = memories.length ? selectForEvent(memories, event, payload, selectOpts) : [];
     // On Stop the cite scan must read the session JSONL state from BEFORE
     // this turn's Stop-time fired writes; Stop-injections happen after the
     // assistant response, so attributing citations to them would be a

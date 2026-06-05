@@ -28,7 +28,15 @@ try {
 }
 
 function writeMemoryFile(storeDir, name) {
-  const body = ['---', `name: ${name}`, 'description: x', 'events: UserPromptSubmit', 'trigger_prompt: x', '---', ''].join('\n');
+  const body = [
+    '---',
+    `name: ${name}`,
+    'description: x',
+    'events: UserPromptSubmit',
+    'trigger_prompt: x',
+    '---',
+    '',
+  ].join('\n');
   fs.writeFileSync(path.join(storeDir, `${name}.md`), body);
 }
 
@@ -54,8 +62,12 @@ function makeFixture() {
     telDir,
     cleanup: () => {
       process.env.HOME = prevHome;
-      try { fs.rmSync(cwd, { recursive: true, force: true }); } catch {}
-      try { fs.rmSync(home, { recursive: true, force: true }); } catch {}
+      try {
+        fs.rmSync(cwd, { recursive: true, force: true });
+      } catch {}
+      try {
+        fs.rmSync(home, { recursive: true, force: true });
+      } catch {}
     },
   };
 }
@@ -65,7 +77,10 @@ function writeJsonl(file, lines) {
 }
 
 test('synapsys:stats surfaces top influencers, noise, and never-fired in a 7d window', () => {
-  assert.ok(helpers, 'synapsys-stats.js must export pure helpers (parseWindow, aggregate, formatSections)');
+  assert.ok(
+    helpers,
+    'synapsys-stats.js must export pure helpers (parseWindow, aggregate, formatSections)'
+  );
   const { parseWindow, aggregate, formatSections } = helpers;
 
   const fx = makeFixture();
@@ -77,11 +92,24 @@ test('synapsys:stats surfaces top influencers, noise, and never-fired in a 7d wi
     const now = Date.now();
     const lines = [];
     for (let i = 0; i < 5; i++) {
-      lines.push({ ts: new Date(now - 1000 * i).toISOString(), memory: 'mem-influencer', event: 'fired' });
-      lines.push({ ts: new Date(now - 1000 * i).toISOString(), memory: 'mem-influencer', event: 'cited', match: 'x' });
+      lines.push({
+        ts: new Date(now - 1000 * i).toISOString(),
+        memory: 'mem-influencer',
+        event: 'fired',
+      });
+      lines.push({
+        ts: new Date(now - 1000 * i).toISOString(),
+        memory: 'mem-influencer',
+        event: 'cited',
+        match: 'x',
+      });
     }
     for (let i = 0; i < 10; i++) {
-      lines.push({ ts: new Date(now - 1000 * i).toISOString(), memory: 'mem-noise', event: 'fired' });
+      lines.push({
+        ts: new Date(now - 1000 * i).toISOString(),
+        memory: 'mem-noise',
+        event: 'fired',
+      });
     }
     const sessionFile = path.join(fx.telDir, 'session-1.jsonl');
     writeJsonl(sessionFile, lines);
@@ -128,7 +156,10 @@ test('synapsys:stats honors --last 30d window', () => {
 
     const stats7 = aggregate(fx.cwd, { windowMs: parseWindow('7d') });
     const found7 = stats7.perMemory.find((m) => m.name === 'mem-old');
-    assert.ok(!found7 || (found7.fired === 0 && found7.cited === 0), '7d window must exclude 20-day-old file');
+    assert.ok(
+      !found7 || (found7.fired === 0 && found7.cited === 0),
+      '7d window must exclude 20-day-old file'
+    );
 
     const stats30 = aggregate(fx.cwd, { windowMs: parseWindow('30d') });
     const found30 = stats30.perMemory.find((m) => m.name === 'mem-old');
@@ -152,21 +183,43 @@ test('synapsys:stats excludes Stop-only memories from Noise candidates', () => {
     // Stop-only memory — declares only the Stop event.
     fs.writeFileSync(
       path.join(fx.storeDir, 'stop-only-mem.md'),
-      ['---', 'name: stop-only-mem', 'description: x', 'events: Stop',
-       'trigger_session: true', '---', ''].join('\n')
+      [
+        '---',
+        'name: stop-only-mem',
+        'description: x',
+        'events: Stop',
+        'trigger_session: true',
+        '---',
+        '',
+      ].join('\n')
     );
     // Multi-event noise memory — fires on UserPromptSubmit AND Stop.
     fs.writeFileSync(
       path.join(fx.storeDir, 'real-noise.md'),
-      ['---', 'name: real-noise', 'description: x', 'events: [UserPromptSubmit, Stop]',
-       'trigger_prompt: x', '---', ''].join('\n')
+      [
+        '---',
+        'name: real-noise',
+        'description: x',
+        'events: [UserPromptSubmit, Stop]',
+        'trigger_prompt: x',
+        '---',
+        '',
+      ].join('\n')
     );
 
     const now = Date.now();
     const lines = [];
     for (let i = 0; i < 15; i++) {
-      lines.push({ ts: new Date(now - 1000 * i).toISOString(), memory: 'stop-only-mem', event: 'fired' });
-      lines.push({ ts: new Date(now - 1000 * i).toISOString(), memory: 'real-noise', event: 'fired' });
+      lines.push({
+        ts: new Date(now - 1000 * i).toISOString(),
+        memory: 'stop-only-mem',
+        event: 'fired',
+      });
+      lines.push({
+        ts: new Date(now - 1000 * i).toISOString(),
+        memory: 'real-noise',
+        event: 'fired',
+      });
     }
     writeJsonl(path.join(fx.telDir, 'session-1.jsonl'), lines);
 
@@ -174,7 +227,10 @@ test('synapsys:stats excludes Stop-only memories from Noise candidates', () => {
     const out = formatSections(stats, { color: false });
 
     const noiseSection = out.split(/Noise candidates/)[1].split(/Never-fired/)[0];
-    assert.ok(!/stop-only-mem/.test(noiseSection), 'stop-only-mem must NOT appear in Noise candidates');
+    assert.ok(
+      !/stop-only-mem/.test(noiseSection),
+      'stop-only-mem must NOT appear in Noise candidates'
+    );
     assert.ok(/real-noise/.test(noiseSection), 'real-noise (multi-event) should still be flagged');
   } finally {
     fx.cleanup();
@@ -197,29 +253,57 @@ test('synapsys:stats excludes unknown (other-project/deleted) memories from Top 
     const lines = [];
     // Known memory: looks like a top-influencer.
     for (let i = 0; i < 3; i++) {
-      lines.push({ ts: new Date(now - 1000 * i).toISOString(), memory: 'known-mem', event: 'fired' });
-      lines.push({ ts: new Date(now - 1000 * i).toISOString(), memory: 'known-mem', event: 'cited', match: 'x' });
+      lines.push({
+        ts: new Date(now - 1000 * i).toISOString(),
+        memory: 'known-mem',
+        event: 'fired',
+      });
+      lines.push({
+        ts: new Date(now - 1000 * i).toISOString(),
+        memory: 'known-mem',
+        event: 'cited',
+        match: 'x',
+      });
     }
     // UNKNOWN memory (from another project): high fired + cited.
     for (let i = 0; i < 4; i++) {
-      lines.push({ ts: new Date(now - 1000 * i).toISOString(), memory: 'other-project-influencer', event: 'fired' });
-      lines.push({ ts: new Date(now - 1000 * i).toISOString(), memory: 'other-project-influencer', event: 'cited', match: 'y' });
+      lines.push({
+        ts: new Date(now - 1000 * i).toISOString(),
+        memory: 'other-project-influencer',
+        event: 'fired',
+      });
+      lines.push({
+        ts: new Date(now - 1000 * i).toISOString(),
+        memory: 'other-project-influencer',
+        event: 'cited',
+        match: 'y',
+      });
     }
     // UNKNOWN memory: high fired, zero cited — would otherwise be flagged noise.
     for (let i = 0; i < 12; i++) {
-      lines.push({ ts: new Date(now - 1000 * i).toISOString(), memory: 'other-project-noise', event: 'fired' });
+      lines.push({
+        ts: new Date(now - 1000 * i).toISOString(),
+        memory: 'other-project-noise',
+        event: 'fired',
+      });
     }
     writeJsonl(path.join(fx.telDir, 'cross-project.jsonl'), lines);
 
-    const out = formatSections(aggregate(fx.cwd, { windowMs: parseWindow('7d') }), { color: false });
+    const out = formatSections(aggregate(fx.cwd, { windowMs: parseWindow('7d') }), {
+      color: false,
+    });
     const topSection = out.split(/Noise candidates/)[0];
     const noiseSection = out.split(/Noise candidates/)[1].split(/Never-fired/)[0];
 
     assert.match(topSection, /known-mem/);
-    assert.ok(!/other-project-influencer/.test(topSection),
-      'other-project memory must NOT appear in Top influencers');
-    assert.ok(!/other-project-noise/.test(noiseSection),
-      'other-project memory must NOT appear in Noise candidates');
+    assert.ok(
+      !/other-project-influencer/.test(topSection),
+      'other-project memory must NOT appear in Top influencers'
+    );
+    assert.ok(
+      !/other-project-noise/.test(noiseSection),
+      'other-project memory must NOT appear in Noise candidates'
+    );
   } finally {
     fx.cleanup();
   }

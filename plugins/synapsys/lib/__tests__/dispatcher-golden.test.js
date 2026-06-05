@@ -29,8 +29,7 @@ const DISPATCHER = path.resolve(__dirname, '..', '..', 'hooks', 'synapsys.js');
 
 const MEMORY_NAME = 'golden-prompt-memory';
 const KNOWN_PROMPT = 'golden dispatcher regression prompt';
-const MEMORY_BODY =
-  'Body line one for the golden regression memory.\nBody line two.';
+const MEMORY_BODY = 'Body line one for the golden regression memory.\nBody line two.';
 const MEMORY_DESCRIPTION = 'Golden regression memory for dispatcher stdout.';
 
 // Captured verbatim from `node plugins/synapsys/hooks/synapsys.js
@@ -72,7 +71,13 @@ function makeFixtureStore() {
 
 test('dispatcher stdout for UserPromptSubmit payload matches golden', (t) => {
   const { cwd, cleanup } = makeFixtureStore();
-  t.after(cleanup);
+  // Isolate the inject ledger so a stale entry from a previous run
+  // doesn't downgrade the full body to a "fired earlier" reminder.
+  const sessionTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-dispatcher-golden-session-'));
+  t.after(() => {
+    cleanup();
+    fs.rmSync(sessionTmp, { recursive: true, force: true });
+  });
 
   const payload = {
     hook_event_name: 'UserPromptSubmit',
@@ -80,15 +85,15 @@ test('dispatcher stdout for UserPromptSubmit payload matches golden', (t) => {
     cwd,
   };
 
-  const result = spawnSync(
-    process.execPath,
-    [DISPATCHER, 'UserPromptSubmit'],
-    {
-      input: JSON.stringify(payload),
-      encoding: 'utf8',
-      env: { ...process.env, SYNAPSYS_NO_SETUP_HINT: '1' },
-    }
-  );
+  const result = spawnSync(process.execPath, [DISPATCHER, 'UserPromptSubmit'], {
+    input: JSON.stringify(payload),
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      SYNAPSYS_NO_SETUP_HINT: '1',
+      SYNAPSYS_SESSION_DIR: sessionTmp,
+    },
+  });
 
   assert.equal(result.status, 0, `dispatcher exited non-zero: stderr=${result.stderr}`);
   assert.equal(

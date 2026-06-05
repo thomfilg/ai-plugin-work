@@ -6,11 +6,5 @@
     "name": "Custom",
     "email": "custom@local"
   },
-  "keywords": [
-    "memory",
-    "hooks",
-    "injection",
-    "context",
-    "recall"
-  ]
+  "keywords": ["memory", "hooks", "injection", "context", "recall"]
 }
