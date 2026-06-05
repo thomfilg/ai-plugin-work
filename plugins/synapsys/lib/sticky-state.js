@@ -17,7 +17,11 @@ const STREAK_THRESHOLD = 3;
 const TTL_MS = 24 * 60 * 60 * 1000;
 
 function defaultStatePath() {
-  return path.join(os.homedir(), '.claude', 'synapsys', '.state', 'sticky-domains.json');
+  // SYNAPSYS_HOME (set by synapsys-status / install tooling) overrides
+  // the user's home so the dispatcher and the status CLI agree on which
+  // sticky-state file to read. Falls back to HOME, then to os.homedir().
+  const home = process.env.SYNAPSYS_HOME || process.env.HOME || os.homedir();
+  return path.join(home, '.claude', 'synapsys', '.state', 'sticky-domains.json');
 }
 
 function readJsonFile(filePath) {

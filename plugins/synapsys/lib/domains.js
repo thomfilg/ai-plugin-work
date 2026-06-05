@@ -157,7 +157,10 @@ function loadRegistryUncached(home, bundledPath) {
 }
 
 function loadDomainRegistry(opts = {}) {
-  const home = opts.home || os.homedir();
+  // SYNAPSYS_HOME overrides the user's home so the dispatcher reads from
+  // the same root as the synapsys-status CLI. Caller-supplied opts.home
+  // still wins (used by tests).
+  const home = opts.home || process.env.SYNAPSYS_HOME || process.env.HOME || os.homedir();
   const bundledPath = opts.bundledPath || DEFAULT_BUNDLED_PATH;
   try {
     return loadRegistryUncached(home, bundledPath);
