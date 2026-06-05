@@ -63,14 +63,21 @@ function mergeStickyActive(rawActive, stickyState, sessionId) {
   return merged;
 }
 
+// PreToolUse / Stop / SessionStart all read sticky carry-over without
+// mutating streaks. SessionStart returns undefined because it has no
+// prompt/tool signal yet — gating every domain-tagged memory against an
+// empty set on a fresh session would block trigger_session memories
+// before they ever get a chance to match. On PreToolUse and Stop we
+// return the merged set as-is (possibly empty) so isDomainMismatch runs
+// for domain-tagged memories — matching UserPromptSubmit's behavior so
+// a domain-tagged memory cannot inject when the active intersection is
+// empty just because the gate was silently skipped.
 function passiveActiveDomains(event, payload, registry, stickyState, sessionId) {
   if (event === 'SessionStart') return undefined;
   const prompt = typeof payload.prompt === 'string' ? payload.prompt : '';
   const recentToolCalls = getRecentToolCallsWithCurrent(event, payload);
   const rawActive = classifyActiveDomains({ prompt, recentToolCalls, registry });
-  const merged = mergeStickyActive(rawActive, stickyState, sessionId);
-  if (!merged || merged.size === 0) return undefined;
-  return merged;
+  return mergeStickyActive(rawActive, stickyState, sessionId);
 }
 
 /**
