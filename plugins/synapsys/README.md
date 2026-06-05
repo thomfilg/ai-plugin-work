@@ -260,3 +260,41 @@ The `--last <Nd>` flag filters telemetry `.jsonl` files by `mtime`; default is `
 - **Flat frontmatter** — single-line values only, no nested YAML, zero deps.
 - **Marker files** — synapsys only reads from dirs with `.synapsys.json`. Prevents stray `synapsys` directories from being picked up.
 - **Output cap** — injected text is truncated at 8000 characters to protect the context window.
+
+## fire_mode — injection deduplication
+
+The `fire_mode` frontmatter key controls how often a memory's full body re-injects when its trigger matches multiple times in the same Claude Code session. Without it, a 60-line policy memory that fires on every `git push` and `gh pr checks` poll can inject the same body 10-20 times per session — pure token waste once the agent has internalized the rule.
+
+| `fire_mode`    | First match in session     | Subsequent matches in same session                                       |
+| -------------- | -------------------------- | ------------------------------------------------------------------------ |
+| `always`       | Inject per `inject:` field | Inject per `inject:` field (full re-inject every match)                  |
+| `once`         | Inject per `inject:` field | Inject one-line reminder (see below)                                     |
+| `occasionally` | Inject per `inject:` field | One-line reminder for `fire_cadence - 1` matches, then full re-inject    |
+
+**Default:** `once` when omitted. Invalid values fall back to `once` with a stderr warning.
+
+**`fire_cadence`:** positive integer, default `5`. Only meaningful for `fire_mode: occasionally` — the full body re-injects every Nth match.
+
+### Reminder string (exact)
+
+```
+[synapsys:active] <name> (fired earlier; full body in this session)
+```
+
+Look for this in agent transcripts — it confirms the rule is still load-bearing on the current turn even though the full body was suppressed.
+
+### Per-session scope
+
+The injection ledger is keyed by `(session_id, memory_name)` and lives in a per-session JSON file under the user's synapsys session directory. It is **reset at SessionStart** so every new Claude Code session begins with a clean slate. Stale ledger files older than 7 days are opportunistically garbage-collected on the same SessionStart pass. Errors reading or writing the ledger fail open — the dispatcher falls through to full injection (current pre-fire_mode behavior).
+
+### Migration checklist
+
+When upgrading existing memories:
+
+- Safety-critical rules — anything where re-emphasis matters at end-of-session verification — must be explicitly tagged `fire_mode: always`. Starter set:
+  - `never-overclaim-completion` → `always`
+  - `cortex-recall-before-work` → `always`
+- Procedural / workflow rules (the agent only needs to read once) — leave the default `once`. No frontmatter change required.
+- Diagnostic playbooks that the agent might forget over a long session — consider `fire_mode: occasionally` with a tuned `fire_cadence`.
+
+The `synapsys:list` skill displays each memory's `fire_mode` (and `fire_cadence` when `occasionally`) plus the current session's `injectedCount`.

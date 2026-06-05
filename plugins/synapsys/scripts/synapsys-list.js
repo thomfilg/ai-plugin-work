@@ -13,8 +13,39 @@
  */
 
 const { discoverStores, listMemoriesFromStore, setupCli } = require('../lib/script-bootstrap');
+const { resolveSessionId, loadLedger } = require('../lib/inject-ledger');
 
 const { flag } = setupCli();
+
+// fireIndicator — compact one-char marker + verbose suffix for fire_mode.
+// Compact char: A (always), o (once, default), ~ (occasionally).
+// Verbose string: `fire: <mode>[/<cadence>]   count: <n>` (cadence only when occasionally).
+function fireIndicator(memory, count) {
+  const mode = memory && memory.fireMode ? memory.fireMode : 'once';
+  let char;
+  if (mode === 'always') char = 'A';
+  else if (mode === 'occasionally') char = '~';
+  else char = 'o';
+  const cadence = mode === 'occasionally' ? `/${memory.fireCadence}` : '';
+  const verbose = `fire: ${mode}${cadence}   count: ${count}`;
+  return { char, mode, verbose };
+}
+
+// Resolve session id + load ledger once per invocation (fail-open via module).
+let __ledger;
+try {
+  __ledger = loadLedger(resolveSessionId({}));
+} catch {
+  __ledger = { memories: {} };
+}
+function injectedCountFor(name) {
+  try {
+    const e = __ledger && __ledger.memories && __ledger.memories[name];
+    return e && Number.isFinite(Number(e.injectedCount)) ? Number(e.injectedCount) : 0;
+  } catch {
+    return 0;
+  }
+}
 
 const cwd = flag('cwd') || process.cwd();
 const json = !!flag('json');
@@ -41,6 +72,9 @@ if (json) {
           triggerPretool: m.triggerPretool,
           triggerSession: m.triggerSession,
           inject: m.inject,
+          fireMode: m.fireMode || 'once',
+          fireCadence: typeof m.fireCadence === 'number' ? m.fireCadence : 5,
+          injectedCount: injectedCountFor(m.name),
           store: m.store.kind,
           file: m.file,
         })),
@@ -140,10 +174,19 @@ for (const [kind, bucket] of byStore.entries()) {
     const ev = pad(eventCode(m.events), eventsWidth);
     const injChar = m.inject === 'full' ? 'F' : 's';
     const injColored = m.inject === 'full' ? C.bold(C.red(injChar)) : C.gray(injChar);
-    console.log(`  ${C.green(name)}  ${C.yellow(ev)}  ${injColored}`);
+    const count = injectedCountFor(m.name);
+    const fi = fireIndicator(m, count);
+    const fireColored =
+      fi.char === 'A'
+        ? C.bold(C.red(fi.char))
+        : fi.char === '~'
+          ? C.yellow(fi.char)
+          : C.gray(fi.char);
+    console.log(`  ${C.green(name)}  ${C.yellow(ev)}  ${injColored} ${fireColored}`);
     console.log(`    ${m.description}`);
 
     if (verbose) {
+      console.log(`    ${C.dim(fi.verbose)}`);
       if (m.triggerPrompt)
         console.log(`    ${C.dim('prompt:')}  ${C.magenta('/' + m.triggerPrompt + '/i')}`);
       if (m.triggerPretool.length)

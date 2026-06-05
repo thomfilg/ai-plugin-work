@@ -137,6 +137,30 @@ function parseFrontmatter(content) {
 
 const SKIP_FILES = new Set(['INDEX.md', 'README.md']);
 
+const VALID_FIRE_MODES = new Set(['always', 'once', 'occasionally']);
+const DEFAULT_FIRE_MODE = 'once';
+const DEFAULT_FIRE_CADENCE = 5;
+
+function parseFireMode(raw, memoryName) {
+  if (raw === undefined || raw === null || raw === '') return DEFAULT_FIRE_MODE;
+  const val = String(raw).trim();
+  if (VALID_FIRE_MODES.has(val)) return val;
+  process.stderr.write(
+    `[synapsys] memory "${memoryName}": invalid fire_mode "${val}" — falling back to "${DEFAULT_FIRE_MODE}"\n`
+  );
+  return DEFAULT_FIRE_MODE;
+}
+
+function parseFireCadence(raw, memoryName) {
+  if (raw === undefined || raw === null || raw === '') return DEFAULT_FIRE_CADENCE;
+  const n = typeof raw === 'number' ? raw : Number(String(raw).trim());
+  if (Number.isInteger(n) && n > 0) return n;
+  process.stderr.write(
+    `[synapsys] memory "${memoryName}": invalid fire_cadence "${raw}" — falling back to ${DEFAULT_FIRE_CADENCE}\n`
+  );
+  return DEFAULT_FIRE_CADENCE;
+}
+
 function readMemoryFile(store, name) {
   if (!name.endsWith('.md') || SKIP_FILES.has(name)) return null;
   const file = path.join(store.dir, name);
@@ -147,10 +171,11 @@ function readMemoryFile(store, name) {
     return null;
   }
   const { meta, body } = parseFrontmatter(raw);
+  const memoryName = meta.name || path.basename(name, '.md');
   return {
     store,
     file,
-    name: meta.name || path.basename(name, '.md'),
+    name: memoryName,
     description: meta.description || '',
     events: toList(meta.events),
     triggerPrompt: meta.trigger_prompt || '',
@@ -161,6 +186,8 @@ function readMemoryFile(store, name) {
     inject: meta.inject === 'full' ? 'full' : 'summary',
     disabled: meta.disabled === true || meta.disabled === 'true',
     expired: parseExpired(meta.expires),
+    fireMode: parseFireMode(meta.fire_mode, memoryName),
+    fireCadence: parseFireCadence(meta.fire_cadence, memoryName),
     // Telemetry-related forwarded fields (GH-512 Task 1). These mirror the
     // values surfaced under `meta`; consumers can read the top-level
     // properties directly without digging into `meta`. Missing frontmatter
