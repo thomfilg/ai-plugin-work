@@ -20,6 +20,13 @@ const { discoverStores, listMemoriesFromStore } = require(
   path.join(__dirname, '..', 'lib', 'memory-store')
 );
 const { selectForEvent } = require(path.join(__dirname, '..', 'lib', 'matcher'));
+const { loadDomainRegistry } = require(path.join(__dirname, '..', 'lib', 'domains'));
+const { classifyActiveDomains, classifyWithSticky } = require(
+  path.join(__dirname, '..', 'lib', 'classifier')
+);
+const { loadStickyState, saveStickyState } = require(
+  path.join(__dirname, '..', 'lib', 'sticky-state')
+);
 const injectLedger = require('../lib/inject-ledger');
 const { recordFired } = require(path.join(__dirname, '..', 'lib', 'telemetry'));
 const { runCiteScan } = require(path.join(__dirname, '..', 'lib', 'cite-scan'));
@@ -176,6 +183,97 @@ function getSessionStartHint(event, stores, memories) {
   return null;
 }
 
+// Serialize the PreToolUse invoking tool (`tool_name` + `tool_input`) into a
+// single string so `signal_pretool` regexes match against the tool under
+// execution, not just historical calls. Returns null when the event is not
+// PreToolUse or no tool fields are present.
+function currentToolCallString(event, payload) {
+  if (event !== 'PreToolUse') return null;
+  const toolName = typeof payload.tool_name === 'string' ? payload.tool_name : '';
+  if (!toolName) return null;
+  let inputStr = '';
+  const input = payload.tool_input;
+  if (input != null) {
+    try {
+      inputStr = typeof input === 'string' ? input : JSON.stringify(input);
+    } catch {
+      inputStr = '';
+    }
+  }
+  return `${toolName} ${inputStr}`.trim();
+}
+
+// Merge sticky-active domains for a session into a raw-active set without
+// mutating streaks. Used for non-prompt events where AC5/AC6 hysteresis
+// (which counts "prompts", not arbitrary hook turns) must not advance.
+function mergeStickyActive(rawActive, stickyState, sessionId) {
+  const merged = new Set(rawActive);
+  const session = (stickyState && stickyState[sessionId]) || {};
+  for (const domain of Object.keys(session)) {
+    const entry = session[domain];
+    if (entry && entry.sticky === true) merged.add(domain);
+  }
+  return merged;
+}
+
+function getRecentToolCalls(event, payload) {
+  const baseToolCalls = Array.isArray(payload.recentToolCalls)
+    ? payload.recentToolCalls
+    : Array.isArray(payload.recent_tool_calls)
+      ? payload.recent_tool_calls
+      : [];
+  const currentTool = currentToolCallString(event, payload);
+  return currentTool ? [currentTool, ...baseToolCalls] : baseToolCalls;
+}
+
+function classifyForUserPrompt(ctx) {
+  const { activeDomains, nextStickyState } = classifyWithSticky(ctx);
+  try {
+    saveStickyState({ state: nextStickyState });
+  } catch {
+    // fail-open: persistence failures must not block injection
+  }
+  return { activeDomains };
+}
+
+// SessionStart has no prompt/tool signal yet; Stop/PreToolUse can produce an
+// empty merged set. In either case, returning an empty `activeDomains` would
+// hard-gate every domain-tagged memory. Fail-open with `undefined` so unrelated
+// triggers (trigger_session, trigger_pretool) still fire.
+function passiveActiveDomains(event, payload, registry, stickyState, sessionId) {
+  if (event === 'SessionStart') return undefined;
+  const prompt = typeof payload.prompt === 'string' ? payload.prompt : '';
+  const recentToolCalls = getRecentToolCalls(event, payload);
+  const rawActive = classifyActiveDomains({ prompt, recentToolCalls, registry });
+  const activeDomains = mergeStickyActive(rawActive, stickyState, sessionId);
+  if (!activeDomains || activeDomains.size === 0) return undefined;
+  return { activeDomains };
+}
+
+function buildActiveDomainsForPayload(event, payload) {
+  try {
+    const registry = loadDomainRegistry();
+    if (!registry || !registry.roots || registry.roots.size === 0) return undefined;
+
+    const sessionId = payload.session_id || payload.sessionId || 'default';
+    const stickyState = loadStickyState();
+
+    if (event === 'UserPromptSubmit') {
+      return classifyForUserPrompt({
+        prompt: typeof payload.prompt === 'string' ? payload.prompt : '',
+        recentToolCalls: getRecentToolCalls(event, payload),
+        registry,
+        stickyState,
+        sessionId,
+      });
+    }
+
+    return passiveActiveDomains(event, payload, registry, stickyState, sessionId);
+  } catch {
+    return undefined;
+  }
+}
+
 function formatMatchedOutput(matched, sessionId) {
   const out = renderMatchedMemories(matched, sessionId);
   if (out.length <= MAX_INJECT_CHARS) return out;
@@ -234,7 +332,11 @@ function emitMatched(matched, payload, event) {
       process.exit(0);
     }
 
-    const matched = memories.length ? selectForEvent(memories, event, payload) : [];
+    // Build activeDomains FIRST so UserPromptSubmit advances sticky-state
+    // even when the memory list is empty. Fail-open: on any error, omit
+    // `opts.activeDomains` to preserve pre-classifier behavior.
+    const selectOpts = buildActiveDomainsForPayload(event, payload);
+    const matched = memories.length ? selectForEvent(memories, event, payload, selectOpts) : [];
     // On Stop the cite scan must read the session JSONL state from BEFORE
     // this turn's Stop-time fired writes; Stop-injections happen after the
     // assistant response, so attributing citations to them would be a
