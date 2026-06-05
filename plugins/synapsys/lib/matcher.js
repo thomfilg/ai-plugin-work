@@ -257,14 +257,6 @@ function matchPreTool(memory, payload) {
 // matcher-content.js and are re-bound at the top of this file so the public
 // matcher API stays stable for memory-store.js and the explainer CLI.
 
-/**
- * True iff the memory carries any resolved exclude pattern (either inline
- * `exclude_prompt` / `exclude_preset` flattened into `excludeResolved`, or
- * any `exclude_pretool` spec).
- *
- * @param {object} memory
- * @returns {boolean}
- */
 // Stage-4 exclude evaluators are implemented in matcher-excludes.js. These
 // thin wrappers bind matcher.js's pretool spec helpers so call-sites here
 // stay parameter-free and the public API surface is unchanged.

@@ -118,6 +118,8 @@ const BRACKET_LIST_KEYS = new Set([
   'trigger_pretool_content',
   'trigger_pretool_content_not',
   'cite_signals',
+  'exclude_pretool',
+  'exclude_preset',
 ]);
 
 function coerceFrontmatterValue(raw, key) {
