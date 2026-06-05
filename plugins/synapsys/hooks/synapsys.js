@@ -255,7 +255,17 @@ function buildActiveDomainsForPayload(event, payload) {
     const registry = loadDomainRegistry();
     if (!registry || !registry.roots || registry.roots.size === 0) return undefined;
 
-    const sessionId = payload.session_id || payload.sessionId || 'default';
+    // Use the same resolver as injectLedger so sticky-state, ledger, and
+    // telemetry all key off the same session id. The raw payload fallback
+    // (`payload.session_id || 'default'`) diverged from resolveSessionId,
+    // breaking hysteresis carry-over across hook invocations in the same
+    // session. Fail-open to 'default' if the resolver throws.
+    let sessionId;
+    try {
+      sessionId = injectLedger.resolveSessionId(payload);
+    } catch {
+      sessionId = 'default';
+    }
     const stickyState = loadStickyState();
 
     if (event === 'UserPromptSubmit') {

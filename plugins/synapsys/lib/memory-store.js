@@ -92,13 +92,18 @@ function discoverStores(cwd) {
   const wt = findAncestorStore(path.dirname(resolved));
   if (wt) push('worktree', wt);
 
-  // global: per-project store under home.
-  push('global', path.join(os.homedir(), '.claude', FOLDER, projectName));
+  // SYNAPSYS_DISABLE_HOME_STORES lets tests pin discovery to the cwd-rooted
+  // local/worktree stores only, so a developer's real global/shared memories
+  // never leak into fixture-based assertions.
+  if (process.env.SYNAPSYS_DISABLE_HOME_STORES !== '1') {
+    // global: per-project store under home.
+    push('global', path.join(os.homedir(), '.claude', FOLDER, projectName));
 
-  // shared: cross-project store under home — discovered for every project,
-  // regardless of cwd or project name. Lives outside the per-project
-  // namespace so it can never collide with a same-named project's global store.
-  push('shared', path.join(os.homedir(), '.claude', SHARED_FOLDER));
+    // shared: cross-project store under home — discovered for every project,
+    // regardless of cwd or project name. Lives outside the per-project
+    // namespace so it can never collide with a same-named project's global store.
+    push('shared', path.join(os.homedir(), '.claude', SHARED_FOLDER));
+  }
 
   return out;
 }
@@ -112,6 +117,7 @@ const BRACKET_LIST_KEYS = new Set([
   'trigger_pretool',
   'trigger_pretool_content',
   'trigger_pretool_content_not',
+  'cite_signals',
 ]);
 
 function coerceFrontmatterValue(raw, key) {

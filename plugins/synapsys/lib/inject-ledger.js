@@ -32,6 +32,9 @@ const SAFE_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
 const PROCESS_START_TIME = Date.now();
 
 function sessionDir() {
+  // SYNAPSYS_SESSION_DIR lets tests isolate ledger state into a per-test
+  // tmpdir; absent → the real per-user location.
+  if (process.env.SYNAPSYS_SESSION_DIR) return process.env.SYNAPSYS_SESSION_DIR;
   return path.join(os.homedir(), '.claude', 'synapsys', '.session');
 }
 
