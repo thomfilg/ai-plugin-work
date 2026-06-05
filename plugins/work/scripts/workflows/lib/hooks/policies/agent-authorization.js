@@ -16,6 +16,7 @@
 const fs = require('fs');
 const path = require('path');
 const { getNodeInvocations } = require('./command-matching');
+const { resolvePluginRootHonouringEnv } = require('../../../work/lib/resolve-plugin-root');
 
 /**
  * Resolve symlinks and verify the script lives under one of the trusted directories.
@@ -52,12 +53,20 @@ function isTrustedScriptPath(scriptPath, trustedDirs) {
 /**
  * Expand `$CLAUDE_PLUGIN_ROOT` and `${CLAUDE_PLUGIN_ROOT}` in script paths.
  * Hook context does not perform shell variable expansion, so we do it here.
+ *
+ * Uses the env-honouring resolver so the substituted value matches the
+ * plugin root the rest of the workflow uses: prefers a known-layout probe
+ * when it derives from CLAUDE_PLUGIN_ROOT, falls back to the env value
+ * verbatim when probing lands on an unrelated install, and returns null
+ * only when both env is unset and probing fails.
  */
 function expandPluginRoot(scriptPath) {
-  if (!process.env.CLAUDE_PLUGIN_ROOT) return scriptPath;
+  // policies/ lives at <root>/scripts/workflows/lib/hooks/policies — 5 levels up.
+  const root = resolvePluginRootHonouringEnv(__dirname, 5);
+  if (!root) return scriptPath;
   return scriptPath
-    .replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, process.env.CLAUDE_PLUGIN_ROOT)
-    .replace(/\$CLAUDE_PLUGIN_ROOT/g, process.env.CLAUDE_PLUGIN_ROOT);
+    .replace(/\$\{CLAUDE_PLUGIN_ROOT\}/g, root)
+    .replace(/\$CLAUDE_PLUGIN_ROOT/g, root);
 }
 
 /**

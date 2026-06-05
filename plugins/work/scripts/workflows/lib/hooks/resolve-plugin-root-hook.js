@@ -14,6 +14,7 @@
 
 const path = require('path');
 const { logHookError } = require(path.join(__dirname, '..', 'hook-error-log'));
+const { resolvePluginRootHonouringEnv } = require('../../work/lib/resolve-plugin-root');
 
 // Fail-open: unexpected errors should never block unrelated commands
 process.on('uncaughtException', (err) => {
@@ -25,7 +26,13 @@ process.on('unhandledRejection', (err) => {
   process.exit(0);
 });
 
-const PLUGIN_ROOT = process.env.CLAUDE_PLUGIN_ROOT || path.resolve(__dirname, '..', '..', '..');
+// Hook lives at <root>/scripts/workflows/lib/hooks — 3 levels up reaches the
+// plugin-scripts root. The env-honouring variant prefers a known-layout probe
+// when it derives from the env value, falls back to env verbatim when the
+// probe lands on an unrelated install, and only uses the literal path.resolve
+// chain when both the env var is unset and __dirname probing fails.
+const PLUGIN_ROOT =
+  resolvePluginRootHonouringEnv(__dirname, 3) || path.resolve(__dirname, '..', '..', '..');
 
 async function main() {
   let input = ''; // read hook JSON from stdin

@@ -107,7 +107,7 @@ function validate(ctx) {
 
 function instructions(ctx) {
   return [
-    '# completion-next — Phase 5 of 8: KIND CHECKS',
+    '# completion-next — Phase 8 of 11: KIND CHECKS',
     `Ticket: ${ctx.ticket}`,
     '',
     '### What I check (per task kind)',

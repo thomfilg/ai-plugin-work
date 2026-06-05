@@ -16,7 +16,7 @@
  *   --json                Emit machine-readable JSON instead of a text report.
  *   --verbose             Include a `FRESH` block alongside drifted / orphan.
  *   --no-color            Disable ANSI colour codes (also honours $NO_COLOR).
- *   --re-consolidate      Declared here; behaviour wired in Task 4.
+ *   --re-consolidate      For each drifted source, look up the owning profile and re-run consolidate.
  *
  * Exit codes (R7):
  *   0 — no drifted, no orphan
@@ -24,6 +24,7 @@
  *   2 — invalid invocation (store not found, etc.)
  */
 
+// nodePath is needed before bootstrap is loaded to construct the require paths below.
 const nodePath = require('node:path');
 const { spawnSync } = require('node:child_process');
 const {

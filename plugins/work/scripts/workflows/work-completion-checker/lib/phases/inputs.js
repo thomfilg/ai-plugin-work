@@ -10,8 +10,13 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { COMPLETION_PHASES } = require('../../completion-phase-registry');
+const { resetStore } = require('../failure-store');
 
 function validate(ctx) {
+  // Start every completion-checker run with a clean failure store so prior
+  // verdicts don't leak into the new one. Persistence is needed because the
+  // phase-runner builds a fresh ctx per invocation (see failure-store.js).
+  resetStore(ctx.tasksDir);
   const required = ['brief.md', 'spec.md', 'tasks.md'];
   const missing = required.filter((f) => !fs.existsSync(path.join(ctx.tasksDir, f)));
   if (missing.length === required.length) {
@@ -34,7 +39,7 @@ function validate(ctx) {
 
 function instructions(ctx) {
   return [
-    '# completion-next — Phase 1 of 8: INPUTS',
+    '# completion-next — Phase 1 of 11: INPUTS',
     `Ticket: ${ctx.ticket}`,
     '',
     '### What I check',

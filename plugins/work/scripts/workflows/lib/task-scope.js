@@ -181,14 +181,49 @@ function extractEvalScopePairs(testCommand) {
 }
 
 /**
- * Check whether a candidate file path is covered by any of the task's
- * `Files in scope` glob patterns. Performs a simple prefix/segment match
- * sufficient for tasks.md authoring (full glob matching happens at
- * Gate D runtime via micromatch).
+ * Compile a glob pattern to an anchored RegExp. Supports:
+ *   - `**` → `.*` (cross-segment wildcard)
+ *   - `*`  → `[^/]*` (within-segment wildcard)
+ *   - `?`  → `[^/]` (single character within a segment)
  *
- * Returns true when the candidate equals a scope entry, sits under one
- * (treating `**` as a wildcard), or matches the directory prefix of a
- * scope entry that ends with a glob.
+ * All other regex metacharacters are escaped. This is intentionally a
+ * minimal subset — no brace expansion, no extglob — covering the patterns
+ * authors actually write in tasks.md `### Files in scope` blocks.
+ *
+ * @param {string} glob
+ * @returns {RegExp}
+ */
+function globToRegExp(glob) {
+  let re = '';
+  for (let i = 0; i < glob.length; i++) {
+    const c = glob[i];
+    if (c === '*') {
+      if (glob[i + 1] === '*') {
+        re += '.*';
+        i += 1;
+      } else {
+        re += '[^/]*';
+      }
+    } else if (c === '?') {
+      re += '[^/]';
+    } else if ('.+^$(){}[]|\\'.includes(c)) {
+      re += `\\${c}`;
+    } else {
+      re += c;
+    }
+  }
+  return new RegExp(`^${re}$`);
+}
+
+/**
+ * Check whether a candidate file path is covered by any of the task's
+ * `Files in scope` glob patterns.
+ *
+ * Returns true when the candidate equals a scope entry exactly, or when
+ * any entry — compiled as a proper glob — matches the candidate. Mid-glob
+ * `**` (e.g. `lib/**\/foo.ts`) is honored: only paths whose tail also
+ * matches the literal segment count as a hit, instead of any file under
+ * the leading prefix.
  *
  * @param {string} candidate
  * @param {string[]} scopeGlobs
@@ -199,15 +234,14 @@ function fileMatchesScope(candidate, scopeGlobs) {
   const norm = String(candidate).replace(/^\.\//, '');
   for (const raw of scopeGlobs) {
     if (typeof raw !== 'string' || !raw) continue;
-    const glob = raw.replace(/^\.\//, '');
+    let glob = raw.replace(/^\.\//, '');
     if (glob === norm) return true;
-    // `lib/foo/**` or `lib/foo/**/*.ts` → match anything under lib/foo/
-    const starIdx = glob.indexOf('*');
-    if (starIdx > 0) {
-      const prefix = glob.slice(0, starIdx);
-      if (norm.startsWith(prefix)) return true;
-    } else if (glob.endsWith('/')) {
-      if (norm.startsWith(glob)) return true;
+    // Trailing `/` means "everything under this directory" — desugar to `/**`.
+    if (glob.endsWith('/')) glob += '**';
+    try {
+      if (globToRegExp(glob).test(norm)) return true;
+    } catch {
+      // Malformed pattern — fall through; caller treats no match as "not in scope".
     }
   }
   return false;
@@ -523,11 +557,69 @@ function validateCrossTaskDepsOwnership(tasks) {
       if (!ownedByOther) {
         errors.push(
           `${label} declares Cross-Task Dependency \`${entry}\` but no other task lists it in ` +
-            "`### Files in scope`. Either add `" +
+            '`### Files in scope`. Either add `' +
             entry +
             "` to the producing task's `### Files in scope`, or remove it from this task's " +
             '`### Cross-Task Dependencies`. (Cross-task deps must reference paths another task owns; ' +
             'they are not a free-form scope extension.)'
+        );
+      }
+    }
+  }
+  return errors;
+}
+
+/**
+ * ECHO-5538 / GH-485: Detect the intra-ticket scope conflict — a file is
+ * simultaneously `### Files in scope` for one task and `### Files explicitly
+ * out of scope` for a peer task in the SAME tasks.md.
+ *
+ * `### Files explicitly out of scope` is a SIBLING-TICKET boundary: it names
+ * paths owned by other tickets / long-merged modules that the current ticket
+ * must not touch. Listing a peer-task-owned path there is incoherent — the
+ * peer task WILL legitimately edit it, and the out-of-scope declarant gains
+ * no protection from doing so. Hard-fail at tasks-gate so the author either
+ * removes the out-of-scope entry or restructures task ownership.
+ *
+ * For each task M and each entry E in M.filesOutOfScope, check whether any
+ * OTHER task N owns E via `filesInScope` (literal-or-glob via
+ * `fileMatchesScope`). If so, emit one error per (E, M, N) conflict naming
+ * the file and BOTH task numbers.
+ *
+ * @param {Array<object>} tasks
+ * @returns {string[]} validation errors
+ */
+function validateIntraTicketScope(tasks) {
+  if (!Array.isArray(tasks) || tasks.length === 0) return [];
+  const errors = [];
+  for (const declarant of tasks) {
+    if (!declarant || !Array.isArray(declarant.filesOutOfScope)) continue;
+    if (declarant.filesOutOfScope.length === 0) continue;
+    for (const entry of declarant.filesOutOfScope) {
+      if (typeof entry !== 'string' || !entry) continue;
+      for (const owner of tasks) {
+        if (!owner || owner.num === declarant.num) continue;
+        const scope = Array.isArray(owner.filesInScope) ? owner.filesInScope : [];
+        if (scope.length === 0) continue;
+        const literalMatch = scope.includes(entry);
+        const globMatch = fileMatchesScope(entry, scope);
+        // Symmetric direction: the out-of-scope `entry` may itself be a glob
+        // that covers one of the peer's literal in-scope entries (e.g. entry
+        // `app/api/routers/**` covers scope literal `app/api/routers/users.ts`).
+        const reverseGlobMatch =
+          !literalMatch &&
+          !globMatch &&
+          scope.some(
+            (scopeItem) => typeof scopeItem === 'string' && fileMatchesScope(scopeItem, [entry])
+          );
+        if (!literalMatch && !globMatch && !reverseGlobMatch) continue;
+        errors.push(
+          `Task ${declarant.num ?? '?'} lists \`${entry}\` under \`### Files explicitly out of scope\`, ` +
+            `but Task ${owner.num ?? '?'} owns that path via \`### Files in scope\`. ` +
+            'Intra-ticket peer ownership is not a sibling-ticket boundary: `### Files explicitly out of scope` ' +
+            'is reserved for paths owned by OTHER tickets. Remove the entry from Task ' +
+            `${declarant.num ?? '?'} or restructure ownership. ` +
+            'See skills/split-in-tasks/docs/scope-sections.md §Files explicitly out of scope (intra-ticket exclusion rule).'
         );
       }
     }
@@ -552,6 +644,7 @@ function validateAll(tasks) {
   }
   errors.push(...validateTddCycle(tasks));
   errors.push(...validateCrossTaskDepsOwnership(tasks));
+  errors.push(...validateIntraTicketScope(tasks));
   return { valid: errors.length === 0, errors };
 }
 
@@ -669,6 +762,7 @@ module.exports = {
   validateTaskTestScope,
   validateTddCycle,
   validateCrossTaskDepsOwnership,
+  validateIntraTicketScope,
   validateAll,
   unionFilesInScope,
   findTask,

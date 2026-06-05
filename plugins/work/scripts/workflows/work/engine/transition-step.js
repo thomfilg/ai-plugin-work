@@ -241,6 +241,17 @@ function transitionStep(ticket, targetStep, deps) {
       // Edge validated — now mutate state and redirect
       ws.checkInterruptedStep = currentStep;
       ws.checkPassedSha = null;
+      // GH-329: archive stale .check.md reports so the next /check verify starts
+      // fresh. Mirrors the backward-transition archival pattern below; single
+      // source of truth lives in lib/artifact-archival.js.
+      const tasksDir = path.join(TASKS_BASE, safeTicket);
+      const archivePath = archiveStepArtifacts(tasksDir, [STEPS.check]);
+      if (archivePath) {
+        appendAction(safeTicket, {
+          step: currentStep,
+          what: `artifacts archived to ${archivePath} (check-drift)`,
+        });
+      }
       appendAction(safeTicket, {
         step: currentStep,
         what: 'check re-triggered: new commits detected',

@@ -21,38 +21,50 @@
 // Base profile every phase inherits unless overridden.
 // 'silence' runs in every phase — it watches for fully-dead panes and
 // auto-restarts -work sessions (ported from maestro-conduct.sh).
+// 'prStatus' runs in every phase too — it's a no-op when the ticket
+// has no open PR, but ensures pr-ready/pr-broken still surfaces after
+// /work has advanced to 'complete' (the agent's final-step state).
 const BASE = Object.freeze({
   maxNudges: 3,
-  detectors: ['question', 'silence', 'spinner', 'phaseStall'],
+  detectors: ['question', 'silence', 'spinner', 'phaseStall', 'prStatus'],
   exempts: () => false,
 });
 
 // Per-phase overrides — keep one row per phase, terse.
 const PHASES = Object.freeze({
-  bootstrap: { budgetMin: 5, detectors: ['silence', 'spinner', 'phaseStall'] },
-  ticket: { budgetMin: 2 },
-  brief: { budgetMin: 10 },
-  brief_gate: { budgetMin: 5 },
-  spec: { budgetMin: 10 },
-  spec_gate: { budgetMin: 5 },
-  tasks: { budgetMin: 10 },
-  tasks_gate: { budgetMin: 5 },
+  bootstrap: { budgetMin: 10, detectors: ['silence', 'spinner', 'phaseStall'] },
+  ticket: { budgetMin: 5 },
+  brief: { budgetMin: 20 },
+  brief_gate: { budgetMin: 15 },
+  spec: { budgetMin: 20 },
+  spec_gate: { budgetMin: 15 },
+  tasks: { budgetMin: 20 },
+  tasks_gate: { budgetMin: 15 },
   implement: {
-    budgetMin: 60,
-    detectors: ['question', 'silence', 'spinner', 'phaseStall', 'commitStall'],
+    budgetMin: 90,
+    detectors: ['question', 'silence', 'spinner', 'phaseStall', 'commitStall', 'prStatus'],
   },
-  commit: { budgetMin: 5 },
-  task_review: { budgetMin: 30 },
-  check: { budgetMin: 15 },
-  pr: { budgetMin: 10 },
-  ready: { budgetMin: 5 },
+  commit: { budgetMin: 10 },
+  task_review: { budgetMin: 45 },
+  check: { budgetMin: 30 },
+  pr: {
+    budgetMin: 20,
+    detectors: ['question', 'silence', 'spinner', 'phaseStall', 'prStatus'],
+  },
+  ready: {
+    budgetMin: 10,
+    detectors: ['question', 'silence', 'spinner', 'phaseStall', 'prStatus'],
+  },
   follow_up: {
     budgetMin: 60,
-    detectors: ['question', 'silence', 'spinner', 'phaseStall', 'prComments'],
+    detectors: ['question', 'silence', 'spinner', 'phaseStall', 'prComments', 'prStatus'],
   },
-  ci: { budgetMin: 30 },
-  cleanup: { budgetMin: 5 },
-  reports: { budgetMin: 5 },
+  ci: {
+    budgetMin: 30,
+    detectors: ['question', 'silence', 'spinner', 'phaseStall', 'prStatus'],
+  },
+  cleanup: { budgetMin: 10 },
+  reports: { budgetMin: 10 },
   complete: { budgetMin: 1 },
 });
 
