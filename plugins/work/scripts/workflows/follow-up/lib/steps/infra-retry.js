@@ -23,19 +23,23 @@ const MAX_INFRA_RETRIES = 3;
 const NUMERIC_RUN_ID = /^\d+$/;
 
 /**
- * Decide whether the infra-retry step should short-circuit without touching
- * the classifier.
- *
- * @param {object} state
- * @returns {boolean}
+ * Categories that bypass the infra-retry step entirely — these failures are
+ * not infrastructure-related and have dedicated handling elsewhere.
  */
-function shouldBypass(state) {
-  const flag = getConfig('WORK_AUTO_RETRY_INFRA');
-  if (!flag || flag === 'false' || flag === '0') return true;
+function categoryBypass(state) {
   const cat = state && state.failureCategory;
-  if (cat === 'conflict') return true;
-  if (cat === 'review_failure') return true;
-  return false;
+  return cat === 'conflict' || cat === 'review_failure';
+}
+
+/**
+ * Feature-flag bypass. Separated from `categoryBypass` so the exhaustion +
+ * fresh-monitor gates can run even when the auto-retry feature is OFF — a
+ * ticket that already hit MAX_INFRA_RETRIES must surface `infra-stuck`
+ * regardless of the flag (Bug 542-21).
+ */
+function featureFlagOff() {
+  const flag = getConfig('WORK_AUTO_RETRY_INFRA');
+  return !flag || flag === 'false' || flag === '0';
 }
 
 /**
@@ -81,6 +85,7 @@ function maybeHandleRetrySuccess(state, ctx) {
   if (!ciStatusIsFreshSuccess(state, ctx)) return false;
   last.outcome = 'succeeded';
   process.stderr.write(`${RETRY_SUCCESS_LOG}\n`);
+  routeRetrySuccessToReport(state);
   return true;
 }
 
@@ -269,29 +274,34 @@ function routeRetrySuccessToReport(state) {
   }
 }
 
-function runInfraRetryStep(state, ctx) {
+function ensureInfraRetryRecord(state) {
   // R12: default the persisted retry record on first read.
   if (state && !state.infraRetry) {
     state.infraRetry = { count: 0, attempts: [] };
   }
+}
 
-  // Bug 542-18: handle retry-success BEFORE shouldBypass. If a prior
-  // auto-retry left a pending attempt and CI is now green, we must record the
-  // success and route to `report` even after the feature flag was disabled,
-  // so the orchestrator doesn't fall through to fix-ci dispatch.
-  if (maybeHandleRetrySuccess(state, ctx)) {
-    routeRetrySuccessToReport(state);
-    return null;
-  }
+function runInfraRetryStep(state, ctx) {
+  ensureInfraRetryRecord(state);
 
-  if (shouldBypass(state)) return null;
+  // Categories with dedicated handling elsewhere never reach infra-retry.
+  if (categoryBypass(state)) return null;
 
-  // Bug 542-16: when this step resumes from disk (e.g. a new /follow-up
-  // process after a previous infra rerun), a pending attempt still exists
-  // but `_ciStatusFreshness` belongs to the prior PID. Don't fall through to
-  // fix-ci dispatch — bounce back to `monitor` to re-poll CI. monitor will
-  // either re-confirm green (next entry hits the retry-success path with a
-  // fresh stamp) or surface the real new failure.
+  // Bug 542-18: handle retry-success BEFORE the feature-flag check. If a
+  // prior auto-retry left a pending attempt and CI is now green, record the
+  // success and route to `report` even after the feature flag was disabled.
+  // `maybeHandleRetrySuccess` performs the routing internally on success.
+  if (maybeHandleRetrySuccess(state, ctx)) return null;
+
+  // Bug 542-21: exhausted + fresh-monitor gates run BEFORE the feature-flag
+  // bypass. A ticket that already hit MAX_INFRA_RETRIES must surface
+  // `infra-stuck` regardless of the flag, and a pending retry with stale
+  // `_ciStatusFreshness` must re-poll monitor — both must not fall through
+  // to fix-ci.
+
+  // Bug 542-16: when resuming from disk after a previous infra rerun, a
+  // pending attempt exists but `_ciStatusFreshness` belongs to the prior
+  // PID. Bounce back to `monitor` to re-poll CI.
   if (needsFreshMonitorBeforeRetry(state, ctx)) {
     state.currentStep = 'monitor';
     return null;
@@ -299,6 +309,10 @@ function runInfraRetryStep(state, ctx) {
 
   const exhaustedSurface = maybeSurfaceAlreadyExhausted(state);
   if (exhaustedSurface) return exhaustedSurface;
+
+  // Feature flag off: skip the retry attempt itself, but only AFTER the
+  // exhaustion gate above has had a chance to surface infra-stuck.
+  if (featureFlagOff()) return null;
 
   // R1e / R7: consult the classifier.
   const result = classifyWithDefaults(state, ctx);
