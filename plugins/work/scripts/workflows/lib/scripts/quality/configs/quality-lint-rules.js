@@ -40,6 +40,9 @@ module.exports = [
       '**/__tests__/**',
       '**/*.test.js',
       '**/*.spec.js',
+      // stepScaffold templates contain handlebars-style `{{token}}` placeholders
+      // and are not standalone JS until the scaffolder substitutes the tokens.
+      'factories/stepScaffold/templates/**',
     ],
   },
   {
@@ -77,6 +80,19 @@ module.exports = [
     files: ['**/scripts/workflows/work/lib/resolve-plugin-root.js'],
     rules: {
       'no-restricted-syntax': 'off',
+    },
+  },
+  // Tighter cap for /work step + gate handlers. The decision matrix in each
+  // file is small by design — anything that grows past 120 LOC should be
+  // extracted into a sibling `lib/` helper or expressed via a factory in
+  // `factories/`. Keeps step bodies declarative rather than free-form.
+  {
+    files: [
+      '**/plugins/work/scripts/workflows/work/steps/*.js',
+      '**/plugins/work/scripts/workflows/work/gates/*.js',
+    ],
+    rules: {
+      'max-lines': ['error', { max: 120, skipBlankLines: false, skipComments: false }],
     },
   },
 ];

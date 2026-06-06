@@ -19,7 +19,8 @@
       "!external_scripts/**",
       "!references/**",
       "!docs/**",
-      "!**/*.md"
+      "!**/*.md",
+      "!factories/stepScaffold/templates/**"
     ]
   },
   "formatter": {
