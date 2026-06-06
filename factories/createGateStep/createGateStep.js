@@ -1,7 +1,8 @@
 'use strict';
 
 /**
- * createGateStep — declarative builder for /work gate steps.
+ * createGateStep — declarative builder for gate steps in a linear
+ * step machine with retry edges (the `(add, s, ctx) => void` contract).
  *
  * Replaces the hand-written `(add, s, ctx) => void` body for any gate that
  * follows the shape:

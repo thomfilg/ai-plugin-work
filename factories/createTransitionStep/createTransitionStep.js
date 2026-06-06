@@ -1,12 +1,13 @@
 'use strict';
 
 /**
- * createTransitionStep — declarative builder for /work steps whose body is
+ * createTransitionStep — declarative builder for steps whose body is
  * "always RUN one command" or "DEFER on a single precondition, else RUN".
  *
- * Fits: `ready.js`, `complete.js`, and (with `deferExtras`) `cleanup.js`.
- * Does NOT fit `commit.js` (it has 4 branches and emits the third action
- * type `PENDING`) — keep that hand-written.
+ * Fits any step that follows the RUN-or-DEFER shape with at most one
+ * skip condition. Steps with three or more branches, or that emit an
+ * action type other than RUN/DEFER (e.g. a separate PENDING action),
+ * do not fit and stay hand-written.
  *
  * Matrix:
  *   1. `precondition(s, ctx) === false` → DEFER with `skipReason` and

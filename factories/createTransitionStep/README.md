@@ -1,8 +1,8 @@
 # createTransitionStep
 
-Factory for /work steps with one or two cases — "always RUN one command"
-or "DEFER on a single precondition, else RUN". Use for `commit`, `ready`,
-`cleanup`, `complete`-style steps.
+Factory for steps with one or two cases — "always RUN one command" or
+"DEFER on a single precondition, else RUN". Fits any step that emits a
+single RUN or DEFER and nothing more complex.
 
 ## Decision matrix
 

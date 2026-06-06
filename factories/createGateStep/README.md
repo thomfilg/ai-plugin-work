@@ -1,7 +1,9 @@
 # createGateStep
 
-Declarative factory for /work gate steps (`brief-gate`, `spec-gate`,
-`tasks-gate`, `task-review` follow this pattern).
+Declarative factory for gate steps in a linear step machine with retry
+edges. A gate step is one that reads an artifact, validates it, and
+either DEFERs (artifact is ready) or RUNs a skill to fix or regenerate
+it.
 
 ## Decision matrix (fixed, no other branches possible)
 

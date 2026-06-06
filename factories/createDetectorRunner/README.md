@@ -1,13 +1,12 @@
 # createDetectorRunner
 
-Declarative builder for the maestro detector-runner shape. Wraps a
-`{ detect(ctx) → hit }` detector module in the event-loop's
-"guard → detect → dispatch hit/miss → maybe-short-circuit" wrapper.
+Declarative builder for the event-loop detector-runner shape. Wraps a
+`{ detect(ctx) → hit }` detector module in the standard
+"guard → detect → dispatch hit/miss → maybe-short-circuit" envelope an
+event loop needs.
 
-Models the 6 `run<X>Detector` functions currently hand-written in
-`plugins/maestro/scripts/maestro-conduct.js` (`runSpinnerDetector`,
-`runSilenceDetector`, `runPhaseStallDetector`, `runCommitStallDetector`,
-`runPrCommentsDetector`, `runPrStatusDetector`).
+Drop-in target: any place where an event loop runs a list of detector
+modules per tick and acts on hits.
 
 ## Decision matrix
 
@@ -23,7 +22,10 @@ for this tick" (the caller's pipeline loop reads this). When
 `shortCircuit` is false the runner always returns false regardless of
 what `onHit` returns.
 
-## Mapping the 6 maestro detectors to the factory
+## Example callers
+
+Below is a typical pipeline wiring six detectors with the factory. The
+`tickSession` pipeline collapses to a 3-line loop:
 
 ```js
 const RUNNERS = {
@@ -67,46 +69,9 @@ const RUNNERS = {
     onHit: (ctx, hit) => handlePhaseStall(ctx, hit),
   }),
 
-  commitStall: createDetectorRunner({
-    name: 'commitStall',
-    detector: DETECTORS.commitStall,
-    requireRestartEligible: true,
-    onHit: (ctx, hit) =>
-      alerts.log(`${ctx.session} commit-stall ${hit.mins}m in phase=${ctx.phase} (threshold=${hit.threshold}m)`),
-  }),
-
-  prComments: createDetectorRunner({
-    name: 'prComments',
-    detector: DETECTORS.prComments,
-    requireRestartEligible: true,
-    onHit: (ctx, hit) => handlePrComments(ctx, hit),
-    onMiss: (ctx, hit) => {
-      if (hit.reset) {
-        alerts.resetCount(alerts.alertKey({ session: ctx.session, kind: 'pr-comments-stuck', phase: ctx.phase }));
-      }
-    },
-  }),
-
-  prStatus: createDetectorRunner({
-    name: 'prStatus',
-    detector: DETECTORS.prStatus,
-    requireRestartEligible: true,
-    onHit: (ctx, hit) => {
-      if (hit.kind === 'pr-pending') {
-        alerts.log(`${ctx.session} pr-pending PR #${hit.prNumber} ...`);
-        return;
-      }
-      const workSession = `${ctx.ticket}-work`;
-      actions.alert(prStatusPayload.buildPayload({ ctx, sHit: hit, workSession, tmux }));
-      ciGate.maybeFreeOnPrReady({ ctx, sHit: hit, workSession, actions });
-    },
-  }),
+  // ... commitStall, prComments, prStatus follow the same shape
 };
-```
 
-The `tickSession` pipeline collapses to a 3-line loop:
-
-```js
 for (const key of detectorsToRun) {
   const halted = RUNNERS[key]?.(ctx, restartEligible(ctx.session));
   if (halted) return;
@@ -115,12 +80,11 @@ for (const key of detectorsToRun) {
 
 ## What this factory does NOT cover
 
-- The `question` detector is the always-first short-circuit guard that
-  precedes the rest of the pipeline. It's not part of the per-phase
-  detector list, so leave it hand-written.
-- Per-detector cooldowns (spinner's `SPINNER_RE_INTERRUPT_MIN`) live
-  inside the `onHit` callback by design — the factory doesn't model
-  cooldowns generically because they vary in keying strategy
-  (per-session vs per-ticket vs per-(session, kind)).
-- The pipeline composition (which detectors run, in what order) stays
-  with `phaseFor(phase).detectors` and `maestroPhaseValidator`.
+- Always-first short-circuit guards (e.g. a "question" detector that
+  must run before the pipeline) — those aren't per-phase detectors, so
+  keep them hand-written.
+- Per-detector cooldowns. They live inside the `onHit` callback by
+  design because keying strategy varies (per-session vs per-ticket vs
+  per-(session, kind)).
+- The pipeline composition (which detectors run, in what order) — that
+  belongs in a dispatch table validated by `dispatchRegistryValidator`.

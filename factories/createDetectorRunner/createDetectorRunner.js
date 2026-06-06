@@ -1,14 +1,14 @@
 'use strict';
 
 /**
- * createDetectorRunner — declarative builder for the maestro detector-runner
+ * createDetectorRunner — declarative builder for the detector-runner
  * shape that wraps a `{ detect(ctx) => hit }` module in the event-loop's
  * "guard → detect → dispatch hit/miss → short-circuit?" wrapper.
  *
- * Models the 6 `run<X>Detector` functions in
- * `plugins/maestro/scripts/maestro-conduct.js`. Each one does some subset of
- * the same matrix; without a factory the variations drift (e.g. one detector
- * forgets the eligibility guard, another loses its onMiss cleanup).
+ * Fits any event loop that runs a pipeline of detector modules per tick.
+ * Each detector does some subset of the same matrix; without a factory
+ * the variations drift (e.g. one detector forgets the eligibility guard,
+ * another loses its onMiss cleanup).
  *
  * Decision matrix:
  *   1. `requireRestartEligible: true`  + !eligible           → return false (skip)

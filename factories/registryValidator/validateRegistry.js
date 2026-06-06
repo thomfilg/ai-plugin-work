@@ -3,10 +3,10 @@
 /**
  * validateRegistry — completeness checks for the step registry tuple
  * `{ STEPS, STEP_ORDER, STEP_TRANSITIONS, STEP_PIPELINE }`. Returns
- * `{ valid: bool, errors: string[] }`. Designed to consume the shape that
- * `plugins/work/scripts/workflows/work/step-registry.js` actually exports
- * (`STEP_TRANSITIONS` is the merged forward+retry graph; `RETRY_EDGES` is
- * an internal const and is NOT exported).
+ * `{ valid: bool, errors: string[] }`. Validates a linear step machine
+ * with retry edges and a handler pipeline. `STEP_TRANSITIONS` is the
+ * merged forward+retry graph; any retry-edge constant is internal to
+ * the caller and need not be exported.
  *
  * Checks:
  *   R1. Every `STEPS.x` value appears in `STEP_ORDER` (and vice versa).

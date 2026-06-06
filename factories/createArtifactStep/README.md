@@ -1,7 +1,8 @@
 # createArtifactStep
 
-Declarative factory for /work steps that produce an artifact file via a skill
-or agent (`brief.js`, `spec.js`, `tasks.js`).
+Declarative factory for steps that produce an artifact file via a skill
+or agent. Fits any step that follows the "if file missing → RUN to
+produce it; else DEFER" shape.
 
 ## Decision matrix
 

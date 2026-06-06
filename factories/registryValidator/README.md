@@ -1,12 +1,11 @@
 # registryValidator
 
-CI-grade completeness check for the `{ STEPS, STEP_ORDER, STEP_TRANSITIONS,
-STEP_PIPELINE }` tuple in `plugins/work/scripts/workflows/work/step-registry.js`.
+CI-grade completeness check for a linear step machine with retry edges
+and a handler pipeline. Takes the tuple `{ STEPS, STEP_ORDER,
+STEP_TRANSITIONS, STEP_PIPELINE }`.
 
-`STEP_TRANSITIONS` is the merged forward+retry graph the registry actually
-exports (`RETRY_EDGES` is internal and not part of the module's public
-surface). The validator derives backward/forward edge classification from
-the `STEP_ORDER` indices.
+`STEP_TRANSITIONS` is the merged forward+retry graph. The validator
+derives backward / forward edge classification from `STEP_ORDER` indices.
 
 ## What it catches
 
@@ -19,14 +18,14 @@ the `STEP_ORDER` indices.
 | R5 | Factory-built step's `__factoryMeta.retryTo` not reflected as a backward edge in `STEP_TRANSITIONS` |
 | R6 | Duplicate id in `STEP_ORDER` |
 
-## Usage in CI
+## Usage
 
 ```js
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { validateRegistry } = require('../../../../../factories/registryValidator');
-const registry = require('../step-registry');
-const { STEP_PIPELINE } = require('../steps');
+const { validateRegistry } = require('factories/registryValidator');
+const registry = require('./step-registry');
+const { STEP_PIPELINE } = require('./steps');
 
 test('step registry is complete', () => {
   const r = validateRegistry({
@@ -39,9 +38,10 @@ test('step registry is complete', () => {
 });
 ```
 
-The validator's own test file already imports the real registry and
-asserts validity, so the factories' `node --test` run is sufficient on its
-own — no additional wiring required in the plugin's test suite.
+The validator's own test file already self-tests against a real
+linear-step-machine fixture on disk, so the factories' `node --test`
+run is sufficient — no additional wiring required in the caller's test
+suite.
 
-A new step that adds `STEPS.foo` but forgets to add it to `STEP_ORDER`, or
-adds a transition that skips a linear step, fails the check.
+A new step that adds `STEPS.foo` but forgets to add it to `STEP_ORDER`,
+or adds a transition that skips a linear step, fails the check.

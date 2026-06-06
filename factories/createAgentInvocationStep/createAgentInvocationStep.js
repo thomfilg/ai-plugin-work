@@ -1,15 +1,14 @@
 'use strict';
 
 /**
- * createAgentInvocationStep — declarative builder for /work steps that emit
- * a single RUN entry whose `agentPrompt` is assembled from several
+ * createAgentInvocationStep — declarative builder for steps that emit a
+ * single RUN entry whose `agentPrompt` is assembled from several
  * conditional context sections.
  *
- * This is the shape of `implement.js`: one agent invocation per call, but
- * the prompt is built from many independent pieces (current task, claim
- * status, dependency status, worker slot, planning docs, TDD protocol).
- * Without a factory each piece is wired by hand and the ordering / null
- * handling drifts.
+ * Fits any step that invokes one agent per call but builds the prompt
+ * from many independent pieces (current task, claim status, dependency
+ * status, planning docs, TDD protocol, etc.). Without a factory each
+ * piece is wired by hand and the ordering / null handling drifts.
  *
  * The factory takes:
  *   - `precondition(s, ctx)`  — DEFER if false

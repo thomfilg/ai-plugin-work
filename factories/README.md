@@ -1,78 +1,91 @@
-# Plugin factories & registry validators
+# factories
 
-Three kinds of modules live here:
+Plugin-agnostic, reusable building blocks that turn hand-written boilerplate
+into declarative data. Every module here forces plugins toward predictable,
+debuggable behaviors — the point is to make the LLM fill in a *table*, not a
+free-form function body that drifts from its JSDoc.
 
-- **Step factories** (`/work` step machine) — declarative builders that
-  compile to the `(add, s, ctx) => void` step contract used by
-  `plugins/work/scripts/workflows/work/steps/*.js`. The point is to make
-  the decision matrix a piece of *data* the LLM has to fill in, not a
-  free-form function body that drifts from its JSDoc.
-- **Event-loop factories** (`maestro` event machine) — declarative
-  builders for the `(ctx, isEligible) => boolean` detector-runner
-  contract used in `plugins/maestro/scripts/maestro-conduct.js`.
-  Currently: `createDetectorRunner` (wraps a `{detect(ctx) → hit}`
-  module with the guard/dispatch/short-circuit envelope).
-- **Registry validators** — completeness checks over a plugin's registry
-  shape. `registryValidator` covers `/work`'s step graph;
-  `maestroPhaseValidator` covers `maestro`'s phase/detector graph. Both
-  ship a self-test that imports the real registry and asserts validity,
-  so any structural drift fails CI.
+## The three-rule standard
 
-## When to use which factory
+A module belongs in `factories/` if and only if **all three** hold:
 
-| Shape | Factory | Real-world example |
+1. **No plugin imports.** The factory module's `require()` graph does not
+   reach into `plugins/**`. (Self-tests may import the real plugin tree as
+   fixtures — that's how the self-test proves the factory matches reality.
+   The factory module itself must not.)
+2. **No plugin-branded names or hardcoded paths.** Directory names, function
+   names, error messages, README framing, and CLI output may not name a
+   specific plugin. Schemas must accept shapes any plugin could produce.
+3. **The factory enforces a predictable/debuggable behavior.** Either:
+   (a) replaces hand-written boilerplate with a declarative call (decision
+   matrix becomes data), (b) validates that registries / dispatch tables
+   are consistent, or (c) centralizes a cross-cutting concern (safe IO,
+   atomic writes, hook entrypoint protocol).
+
+A module failing any rule gets reworked, relocated, or dropped.
+
+## Taxonomy
+
+### Step builders
+
+Declarative builders that compile to the `(add, s, ctx) => void` step contract
+of a linear step machine with retry edges and a handler pipeline. Decision
+matrix lives in the call options; the factory emits the handler.
+
+| Shape | Builder | Real-world example |
 |---|---|---|
 | "Check artifact → parse → validate → DEFER or RUN /skill" | `createGateStep` | `brief-gate.js`, `spec-gate.js`, `tasks-gate.js` |
 | "If file missing → RUN /skill to produce it; else DEFER" | `createArtifactStep` | `brief.js`, `spec.js`, `tasks.js` |
 | "Always RUN one command; or DEFER on a single precondition" | `createTransitionStep` | `commit.js`, `ready.js`, `cleanup.js` |
 | "One RUN whose agentPrompt is assembled from N optional sections" | `createAgentInvocationStep` | `implement.js` |
 | "Pseudo-step: mutate sibling plan entries instead of emitting one" | `createPlanMutatorStep` | `task-advance.js` |
-| "Wrap a `{detect}` module with guard / dispatch / short-circuit" | `createDetectorRunner` | `runSpinnerDetector`, `runSilenceDetector`, `runPhaseStallDetector`, `runCommitStallDetector`, `runPrCommentsDetector`, `runPrStatusDetector` (all in `maestro-conduct.js`) |
 
-The following stay hand-written by design — they don't fit any factory:
+### Event-handler builders
 
-| File | Why it's hand-written |
+Declarative builders for `{ detect(ctx) → hit }` modules dispatched by an
+event loop. Currently: `createDetectorRunner` (wraps a detector module with
+the guard / dispatch / short-circuit envelope an event runner needs).
+
+### Registry validators
+
+Structural completeness checks over a plugin's registry shape. Each ships a
+self-test that asserts validity against a real fixture so structural drift
+fails CI.
+
+| Validator | What it validates |
 |---|---|
-| `engine/unstick-complete.js` | Recovery orchestrator with its own CLI surface, not a plan-generation step |
-| `steps/commit.js` | Four branches + emits the third action type `PENDING` (not RUN/DEFER); no factory models this |
-| `steps/implement.js` | Has side effects (`execFileSync` task-init, audit `appendAction`), exports `ctx._taskData` / `_allTasksDone` / `_currentTaskIdx` for `task-advance`, and has three distinct DEFER variants — beyond what `createAgentInvocationStep`'s "sections joined by `\n\n`" model covers |
+| `registryValidator` | A linear step machine with retry edges and a handler pipeline — every step id is in the step order, every transition target is a forward / backward / terminal-self edge, every pipeline handler with `__factoryMeta` has a registry entry. |
+| `dispatchRegistryValidator` | An event-driven dispatch registry: `{ handlers, dispatch, baseDispatch?, handlerShape?, tagSet?, allowOrphans? }`. Every name in `dispatch[*]` resolves to a registered handler; no duplicates; (optionally) every dispatch key is in `tagSet`; every handler conforms to `handlerShape`. |
 
 ## Enforcement stack
 
 1. **Factories** make the matrix declarative — the LLM fills in a table, the
    factory emits the handler.
-2. **`registryValidator`** (`/work`) runs in CI to assert that every
-   `STEPS.x` is in `STEP_ORDER`, every `STEP_TRANSITIONS` target is a
-   linear-forward, backward, or terminal-self edge, and every
-   `STEP_PIPELINE` handler with `__factoryMeta` has a registry entry.
-3. **`maestroPhaseValidator`** (`maestro`) runs the analogous check over
-   `phase-registry.PHASES`: every detector name referenced by `BASE` or
-   any `PHASES[*].detectors` must resolve to a real detector module
-   exported from `maestro-conduct.js`, no duplicates, and (when given the
-   /work step-id set) every phase key must be a known step.
-4. **Line-count cap.** Aspirational target: 120 LOC per file under
-   `plugins/work/scripts/workflows/work/steps/*` and `.../gates/*`. NOT
-   yet enforced by `pnpm quality` — six existing step/gate files
-   (`check-gate.js` 316, `implement.js` 311, `task-review-gate.js` 167,
-   `brief-gate.js` 161, `tasks-gate.js` 151, `task-review.js` 122)
-   exceed it. Most shrink dramatically once migrated to the factories
-   above (brief-gate's 161 LOC → ~25 LOC of `createGateStep({…})`). Once
-   migration is done, add a `files: [steps/*, gates/*]` override with
-   `max-lines: 120` to `quality-lint-rules.js`.
-5. **`stepScaffold`** is the CLI the LLM should reach for when adding a new
-   step. `node factories/stepScaffold/cli.js --id=foo --kind=gate
-   --retry-to=bar --out=…` writes the factory call to disk and PRINTS the
-   registry edits the human needs to apply by hand (it does not patch
-   `step-registry.js` or `steps/index.js` itself).
+2. **`registryValidator`** runs in CI to assert step-machine completeness on
+   any registry that opts in.
+3. **`dispatchRegistryValidator`** runs the analogous check over an
+   event-driven dispatch table: every handler name referenced by
+   `baseDispatch` or any `dispatch[*]` list resolves to a registered
+   handler, no duplicates, and (when given a `tagSet`) every dispatch key
+   is a known tag.
+4. **Line-count cap (aspirational).** Many step / gate files shrink
+   dramatically once migrated to the builders above — e.g. a 161-LOC
+   gate becomes ~25 LOC of `createGateStep({…})`. A `max-lines: 120`
+   override on `steps/*` and `gates/*` is the goal once migration is
+   complete.
 
 ## Wiring
 
-These factories are intentionally **stand-alone** today — they don't import
-from `plugins/work/**`, so they can be code-reviewed and tested in isolation.
-To adopt one, replace a hand-written step body with a `createGateStep({...})`
-call and re-export the result. The downstream `STEP_PIPELINE` array consumes
-the returned function exactly as it did the hand-written one.
+Factories are **stand-alone** — they don't import from `plugins/**`, so they
+can be code-reviewed and tested in isolation. To adopt one, replace a
+hand-written step body with the corresponding `createXStep({...})` call and
+re-export the result. The downstream pipeline consumes the returned function
+exactly as it did the hand-written one.
 
 ## Tests
 
-Each factory ships a Node native test file: `node --test factories/**/__tests__/*.test.js`
+Each factory ships a Node native test file:
+
+```bash
+node --test factories/**/__tests__/*.test.js
+```
