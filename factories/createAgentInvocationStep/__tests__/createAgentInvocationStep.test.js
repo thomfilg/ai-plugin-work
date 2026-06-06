@@ -45,6 +45,36 @@ describe('createAgentInvocationStep', () => {
     assert.equal(plan[0].reason, 'not ready');
   });
 
+  it('skipReason/runReason functions receive (s, ctx) — harmonized with sibling factories', () => {
+    // Regression for PR #574 review comment: this factory previously invoked
+    // reason callbacks with `({ s, ctx })` (one wrapper object), inconsistent
+    // with createTransitionStep / createArtifactStep which use `(s, ctx)`.
+    // A caller writing `runReason: (s, ctx) => ...` like the rest of the
+    // codebase used to receive the wrong shape.
+    const { plan: skipPlan, add: skipAdd } = fixture();
+    const skipStep = createAgentInvocationStep({
+      id: 'i',
+      command: '/x',
+      agentType: 'skill',
+      sections: [],
+      precondition: () => false,
+      skipReason: (s, ctx) => `skip ${s.ticket} in ${ctx.worktreeDir}`,
+    });
+    skipStep(skipAdd, { ticket: 'GH-1' }, { worktreeDir: '/wt' });
+    assert.equal(skipPlan[0].reason, 'skip GH-1 in /wt');
+
+    const { plan: runPlan, add: runAdd } = fixture();
+    const runStep = createAgentInvocationStep({
+      id: 'i',
+      command: '/x',
+      agentType: 'skill',
+      sections: [{ id: 'a', build: () => 'A' }],
+      runReason: (s, ctx) => `run ${s.ticket} in ${ctx.worktreeDir}`,
+    });
+    runStep(runAdd, { ticket: 'GH-2' }, { worktreeDir: '/wt2' });
+    assert.equal(runPlan[0].reason, 'run GH-2 in /wt2');
+  });
+
   it('RUN with assembled prompt from non-empty sections', () => {
     const { plan, add } = fixture();
     const step = createAgentInvocationStep({

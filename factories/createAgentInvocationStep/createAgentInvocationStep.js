@@ -63,8 +63,8 @@ function assertConfig(cfg) {
   assertOptionalFns(cfg);
 }
 
-function resolve(value, args) {
-  if (typeof value === 'function') return value(args);
+function resolve(value, s, ctx) {
+  if (typeof value === 'function') return value(s, ctx);
   if (typeof value === 'string') return value;
   return null;
 }
@@ -97,12 +97,12 @@ function createAgentInvocationStep(cfg) {
 
   function agentInvocationStep(add, s, ctx) {
     if (cfg.precondition && !cfg.precondition(s, ctx)) {
-      add(cfg.id, 'DEFER', null, resolve(cfg.skipReason, { s, ctx }) || 'Precondition not met');
+      add(cfg.id, 'DEFER', null, resolve(cfg.skipReason, s, ctx) || 'Precondition not met');
       return;
     }
     const onError = cfg.onSectionError || defaultLogger;
     const agentPrompt = assemblePrompt(cfg.sections, s, ctx, onError);
-    const reason = resolve(cfg.runReason, { s, ctx }) || `Invoke ${cfg.command}`;
+    const reason = resolve(cfg.runReason, s, ctx) || `Invoke ${cfg.command}`;
     const extra = typeof cfg.extras === 'function' ? cfg.extras(s, ctx) || {} : {};
     add(cfg.id, 'RUN', cfg.command, reason, {
       agentType: cfg.agentType,
