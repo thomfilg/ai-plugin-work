@@ -116,12 +116,22 @@ function evaluateFamilyAsymmetry(failed, families) {
 }
 
 function enrichFailedFromAll(failed, safeAll) {
-  // Bug 542-15: monitor stores only name/runId/jobId on _ciFailedJobs.
-  // jobRuntimeMs needs startedAt/completedAt — look them up on the matching
-  // entry from the richer _ciAllJobs collection (by jobId, fallback name).
+  // Bug 542-15 / 542-23: monitor stores only name/runId/jobId on
+  // _ciFailedJobs. jobRuntimeMs needs startedAt/completedAt — look them up on
+  // the matching entry from the richer _ciAllJobs collection.
+  //
+  // _ciAllJobs comes verbatim from `gh run view --json jobs`, which uses
+  // `databaseId` (or `id`) — NOT `jobId`. The id-based lookup must compare
+  // failed.jobId to allJob.databaseId / allJob.id, with name as fallback.
   if (!failed) return failed;
   if (failed.startedAt && failed.completedAt) return failed;
-  const byId = failed.jobId ? safeAll.find((j) => j && j.jobId === failed.jobId) : null;
+  const byId = failed.jobId
+    ? safeAll.find(
+        (j) =>
+          j &&
+          (String(j.databaseId) === String(failed.jobId) || String(j.id) === String(failed.jobId))
+      )
+    : null;
   const matched = byId || safeAll.find((j) => j && j.name === failed.name);
   if (!matched) return failed;
   return Object.assign({}, failed, {

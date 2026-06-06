@@ -35,6 +35,37 @@ describe('infra-classifier', () => {
       assert.ok(result.evidence, 'evidence should be present');
     });
 
+    it('Bug 542-23: enriches failed-job timestamps by matching jobId against allJobs.databaseId', () => {
+      // monitor.js attaches jobId (gh databaseId) to _ciFailedJobs entries
+      // but leaves _ciAllJobs verbatim (databaseId field). Without the
+      // id-based match working, the failed entry — which has NO startedAt /
+      // completedAt — gets jobRuntimeMs=0 and signal1 cannot fire.
+      const baseStart = new Date('2026-01-01T00:00:00.000Z').getTime();
+      const mkAllJob = (name, runtimeMin, conclusion, databaseId) => ({
+        name,
+        databaseId,
+        conclusion,
+        startedAt: new Date(baseStart).toISOString(),
+        completedAt: new Date(baseStart + runtimeMin * 60_000).toISOString(),
+      });
+      const allJobs = [
+        mkAllJob('e2e [shard-1]', 1, 'success', 1001),
+        mkAllJob('e2e [shard-2]', 1, 'success', 1002),
+        mkAllJob('e2e [shard-3]', 1, 'success', 1003),
+        mkAllJob('e2e [shard-4]', 6, 'failure', 1004),
+      ];
+      // Failed entry has jobId (from monitor.attachJobIds) but no timestamps
+      // — they live only on _ciAllJobs. The fix matches failed.jobId against
+      // allJob.databaseId to enrich. Name set so family lookup still works.
+      const failedJobs = [{ name: 'e2e [shard-4]', jobId: '1004' }];
+      const result = signal1_shardAsymmetry(failedJobs, allJobs);
+      assert.equal(
+        result.fired,
+        true,
+        'signal1 must enrich timestamps by databaseId match and detect asymmetry'
+      );
+    });
+
     it('iterates all failed jobs — small family for job A does not abort check on job B in a larger family', () => {
       const baseStart = new Date('2026-01-01T00:00:00.000Z').getTime();
       const mkJob = (name, runtimeMin, conclusion) => ({
