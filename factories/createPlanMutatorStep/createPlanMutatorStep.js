@@ -31,22 +31,26 @@ function isPlainObject(v) {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
 }
 
+function bail(msg) {
+  throw new TypeError(`createPlanMutatorStep: ${msg}`);
+}
+
+function assertMutation(m) {
+  if (!m || typeof m.predicate !== 'function' || typeof m.patch !== 'function') {
+    bail('each mutation needs predicate(s,ctx) and patch(entry,s,ctx)');
+  }
+  if (!Array.isArray(m.targetStepIds) || m.targetStepIds.length === 0) {
+    bail('each mutation needs non-empty targetStepIds');
+  }
+}
+
 function assertConfig(cfg) {
-  if (!isPlainObject(cfg)) throw new TypeError('createPlanMutatorStep: config required');
-  if (!cfg.id) throw new TypeError('createPlanMutatorStep: missing "id"');
+  if (!isPlainObject(cfg)) bail('config required');
+  if (!cfg.id) bail('missing "id"');
   if (!Array.isArray(cfg.mutations) || cfg.mutations.length === 0) {
-    throw new TypeError('createPlanMutatorStep: "mutations" must be a non-empty array');
+    bail('"mutations" must be a non-empty array');
   }
-  for (const m of cfg.mutations) {
-    if (!m || typeof m.predicate !== 'function' || typeof m.patch !== 'function') {
-      throw new TypeError(
-        'createPlanMutatorStep: each mutation needs predicate(s,ctx) and patch(entry,s,ctx)'
-      );
-    }
-    if (!Array.isArray(m.targetStepIds) || m.targetStepIds.length === 0) {
-      throw new TypeError('createPlanMutatorStep: each mutation needs non-empty targetStepIds');
-    }
-  }
+  for (const m of cfg.mutations) assertMutation(m);
 }
 
 function applyMutation(mutation, plan, s, ctx) {
@@ -63,21 +67,27 @@ function applyMutation(mutation, plan, s, ctx) {
   }
 }
 
+function shouldRunMutation(mutation, s, ctx) {
+  try {
+    return Boolean(mutation.predicate(s, ctx));
+  } catch {
+    return false;
+  }
+}
+
+function resolvePlan(ctx) {
+  return ctx && Array.isArray(ctx.plan) ? ctx.plan : null;
+}
+
 function createPlanMutatorStep(cfg) {
   assertConfig(cfg);
 
   function planMutatorStep(_add, s, ctx) {
     if (cfg.precondition && !cfg.precondition(s, ctx)) return;
-    const plan = ctx && Array.isArray(ctx.plan) ? ctx.plan : null;
+    const plan = resolvePlan(ctx);
     if (!plan) return;
     for (const mutation of cfg.mutations) {
-      let runIt;
-      try {
-        runIt = mutation.predicate(s, ctx);
-      } catch {
-        runIt = false;
-      }
-      if (runIt) applyMutation(mutation, plan, s, ctx);
+      if (shouldRunMutation(mutation, s, ctx)) applyMutation(mutation, plan, s, ctx);
     }
   }
 

@@ -30,27 +30,37 @@ function isPlainObject(v) {
   return v !== null && typeof v === 'object' && !Array.isArray(v);
 }
 
-function assertConfig(cfg) {
-  if (!isPlainObject(cfg)) throw new TypeError('createAgentInvocationStep: config required');
-  if (!cfg.id) throw new TypeError('createAgentInvocationStep: missing "id"');
-  if (!cfg.command) throw new TypeError('createAgentInvocationStep: missing "command"');
-  if (!cfg.agentType) throw new TypeError('createAgentInvocationStep: missing "agentType"');
-  if (!Array.isArray(cfg.sections)) {
-    throw new TypeError('createAgentInvocationStep: "sections" must be an array');
-  }
+function bail(msg) {
+  throw new TypeError(`createAgentInvocationStep: ${msg}`);
+}
+
+function assertRequiredKeys(cfg) {
+  if (!isPlainObject(cfg)) bail('config required');
+  if (!cfg.id) bail('missing "id"');
+  if (!cfg.command) bail('missing "command"');
+  if (!cfg.agentType) bail('missing "agentType"');
+}
+
+function assertSections(cfg) {
+  if (!Array.isArray(cfg.sections)) bail('"sections" must be an array');
   for (const sec of cfg.sections) {
-    if (!sec || typeof sec.build !== 'function') {
-      throw new TypeError('createAgentInvocationStep: each section needs build(s, ctx)');
+    if (!sec || typeof sec.build !== 'function') bail('each section needs build(s, ctx)');
+  }
+}
+
+function assertOptionalFns(cfg) {
+  const optionalFns = ['extras', 'onSectionError'];
+  for (const key of optionalFns) {
+    if (cfg[key] !== undefined && typeof cfg[key] !== 'function') {
+      bail(`"${key}" must be a function when provided`);
     }
   }
-  if (cfg.extras !== undefined && typeof cfg.extras !== 'function') {
-    throw new TypeError('createAgentInvocationStep: "extras" must be a function when provided');
-  }
-  if (cfg.onSectionError !== undefined && typeof cfg.onSectionError !== 'function') {
-    throw new TypeError(
-      'createAgentInvocationStep: "onSectionError" must be a function when provided'
-    );
-  }
+}
+
+function assertConfig(cfg) {
+  assertRequiredKeys(cfg);
+  assertSections(cfg);
+  assertOptionalFns(cfg);
 }
 
 function resolve(value, args) {
