@@ -51,30 +51,27 @@ function substitute(template, tokens) {
   });
 }
 
+const TOKEN_BUILDERS = {
+  gate: (base, args) => ({
+    ...base,
+    artifact: args.artifact || 'REPLACE_ME.md',
+    precondition: args.precondition || `(s) => Boolean(s && s.has${capitalize(args.id || 'X')})`,
+  }),
+  artifact: (base, args) => ({
+    ...base,
+    artifact: args.artifact || 'REPLACE_ME.md',
+    agentType: args['agent-type'] || 'skill',
+  }),
+};
+
 function tokensForKind(kind, args) {
   const base = {
     id: args.id,
     command: args.command || '/REPLACE_ME',
     retryTo: args['retry-to'] || '',
   };
-  if (kind === 'gate') {
-    return {
-      ...base,
-      artifact: args.artifact || 'REPLACE_ME.md',
-      precondition: args.precondition || `(s) => Boolean(s && s.has${capitalize(args.id || 'X')})`,
-    };
-  }
-  if (kind === 'artifact') {
-    return {
-      ...base,
-      artifact: args.artifact || 'REPLACE_ME.md',
-      agentType: args['agent-type'] || 'skill',
-    };
-  }
-  if (kind === 'agent-invocation' || kind === 'plan-mutator') {
-    return base;
-  }
-  return base;
+  const builder = TOKEN_BUILDERS[kind];
+  return builder ? builder(base, args) : base;
 }
 
 function capitalize(s) {
