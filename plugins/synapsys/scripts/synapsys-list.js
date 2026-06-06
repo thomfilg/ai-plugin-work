@@ -91,6 +91,9 @@ function emitJsonOutput(stores, memories) {
           triggerPrompt: m.triggerPrompt,
           triggerPretool: m.triggerPretool,
           triggerSession: m.triggerSession,
+          excludePrompt: m.excludePrompt || '',
+          excludePretool: Array.isArray(m.excludePretool) ? m.excludePretool : [],
+          excludePreset: Array.isArray(m.excludePreset) ? m.excludePreset : [],
           inject: m.inject,
           domain: Array.isArray(m.domain) ? m.domain : [],
           fireMode: m.fireMode || 'once',
@@ -140,6 +143,12 @@ function renderVerbose(m, fi, C) {
   if (m.triggerPretool.length)
     console.log(`    ${C.dim('pretool:')} ${C.magenta(m.triggerPretool.join(', '))}`);
   if (m.triggerSession) console.log(`    ${C.dim('session:')} ${C.magenta('yes')}`);
+  if (m.excludePrompt)
+    console.log(`    ${C.dim('exclude_prompt:')}  ${C.magenta('/' + m.excludePrompt + '/i')}`);
+  if (Array.isArray(m.excludePretool) && m.excludePretool.length)
+    console.log(`    ${C.dim('exclude_pretool:')} ${C.magenta(m.excludePretool.join(', '))}`);
+  if (Array.isArray(m.excludePreset) && m.excludePreset.length)
+    console.log(`    ${C.dim('exclude_preset:')}  ${C.magenta(m.excludePreset.join(', '))}`);
   console.log(`    ${C.dim('file:')}    ${C.dim(m.file)}`);
 }
 
