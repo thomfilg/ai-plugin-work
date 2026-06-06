@@ -8,9 +8,10 @@
  *
  *   1. Precondition fails        → DEFER with `noArtifactReason`
  *   2. Artifact unreadable       → RUN `failClosedCommand` (fail-closed)
- *   3. Parser threw              → RUN `runCommand` with the throw message
- *   4. Validator returns valid   → DEFER with `validate.deferReason(parsed)`
- *   5. Validator returns invalid → RUN `runCommand` with `validate.runReason(parsed)`
+ *   3. Parser threw              → RUN `runCommand` with "parser threw" reason
+ *   4. Validator threw           → RUN `runCommand` with "validator threw" reason
+ *   5. Validator returns valid   → DEFER with `validate.deferReason(parsed)`
+ *   6. Validator returns invalid → RUN `runCommand` with `validate.runReason(parsed)`
  *
  * The matrix IS the code — there is no place to add a 6th branch by hand,
  * which is the whole point: the LLM picks values for the table; the factory
@@ -72,6 +73,13 @@ function runParserThrew(add, cfg, err) {
   });
 }
 
+function runValidatorThrew(add, cfg, err) {
+  add(cfg.id, 'RUN', cfg.runCommand, `${cfg.artifact} validator threw: ${err.message}`, {
+    agentType: 'skill',
+    agentPrompt: cfg.runCommand,
+  });
+}
+
 function resolveReason(value, parsed) {
   if (typeof value === 'function') return value(parsed);
   if (typeof value === 'string') return value;
@@ -120,7 +128,7 @@ function createGateStep(cfg) {
     try {
       validation = cfg.validate(parsed);
     } catch (err) {
-      return runParserThrew(add, cfg, err);
+      return runValidatorThrew(add, cfg, err);
     }
 
     if (validation && validation.valid) return deferValid(add, cfg, validation, parsed);

@@ -143,6 +143,27 @@ describe('createGateStep', () => {
     assert.deepEqual(env.plan[0].questions, ['q1', 'q2']);
   });
 
+  it('validator throw uses "validator threw" reason, not "parser threw"', () => {
+    // Regression for PR #574 review comment: previously the validate-throw
+    // catch reused the parser-throw helper, so the RUN reason said the
+    // parser threw even though parsing succeeded.
+    fs.writeFileSync(path.join(env.tasksDir, 'a.md'), 'x');
+    const step = createGateStep({
+      id: 'g',
+      artifact: 'a.md',
+      precondition: () => true,
+      parse: (t) => ({ text: t }),
+      validate: () => {
+        throw new Error('boom');
+      },
+      runCommand: '/fix',
+    });
+    step(env.add, {}, env.ctx);
+    assert.equal(env.plan[0].action, 'RUN');
+    assert.match(env.plan[0].reason, /validator threw: boom/);
+    assert.doesNotMatch(env.plan[0].reason, /parser threw/);
+  });
+
   it('runExtra returning null falls back to default agent metadata', () => {
     // Regression for PR #574 review comment: if a caller's runExtra returns
     // null/undefined (e.g. it short-circuits because there's nothing to add),
