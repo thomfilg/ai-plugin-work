@@ -661,4 +661,90 @@ describe('tdd-phase-state record-red — load-failure rejection (GH-532)', () =>
     );
     assert.ok(/ReferenceError/.test(stderr), `expected ReferenceError diagnostic, got: ${stderr}`);
   });
+
+  it('Recovery round-trip: reject load failure, then fix and re-record successfully (Finding G)', () => {
+    // The documented recovery path is: rejection -> agent fixes the test
+    // file -> re-run record-red succeeds and persists evidence. Prove the
+    // system is not permanently wedged by exercising the full round-trip
+    // against the same ticket+task+cycle.
+    runCli('init GH-532-RECOV', homeDir);
+
+    // 1. First attempt: ReferenceError at load → rejected, no evidence persisted.
+    const brokenScript = createOutputScript(scriptDir, 'broken', {
+      stderr: 'ReferenceError: setupStagedHook is not defined\n',
+      exitCode: 1,
+    });
+    const rejection = runCli(`record-red GH-532-RECOV --cmd "${brokenScript}"`, homeDir, repo);
+    assert.strictEqual(rejection.exitCode, 1, 'first attempt must be rejected');
+    assert.match(rejection.stderr, /ReferenceError/);
+    const afterReject = readState(homeDir, 'GH-532-RECOV');
+    assert.strictEqual(afterReject.currentPhase, 'red');
+    const rejCycle = afterReject.cycles.find((c) => c.cycle === afterReject.currentCycle);
+    assert.ok(!rejCycle || !rejCycle.red, 'no record.red persisted on rejection');
+
+    // 2. Second attempt: agent "fixed" the test → real assertion failure with
+    //    proper TAP envelope → accepted; record.red persists into the same
+    //    cycle, currentCycle unchanged.
+    const fixedScript = createOutputScript(scriptDir, 'fixed', {
+      stdout:
+        'TAP version 13\n' +
+        '# Subtest: feature works\n' +
+        'not ok 1 - feature works\n' +
+        '  ---\n' +
+        '  duration_ms: 1\n' +
+        '  failureType: testCodeFailure\n' +
+        '  error: |-\n' +
+        '    AssertionError [ERR_ASSERTION]: Expected 1 === 2\n' +
+        '  ...\n' +
+        '1..1\n' +
+        '# tests 1\n' +
+        '# pass 0\n' +
+        '# fail 1\n',
+      exitCode: 1,
+    });
+    const acceptance = runCli(`record-red GH-532-RECOV --cmd "${fixedScript}"`, homeDir, repo);
+    assert.strictEqual(
+      acceptance.exitCode,
+      0,
+      `recovery must be accepted, got stderr: ${acceptance.stderr}`
+    );
+    const result = JSON.parse(acceptance.stdout);
+    assert.strictEqual(result.ok, true);
+    assert.strictEqual(result.phase, 'red');
+
+    const afterAccept = readState(homeDir, 'GH-532-RECOV');
+    assert.strictEqual(
+      afterAccept.currentCycle,
+      afterReject.currentCycle,
+      'cycle must not advance during recovery'
+    );
+    const accCycle = afterAccept.cycles.find((c) => c.cycle === afterAccept.currentCycle);
+    assert.ok(accCycle && accCycle.red, 'record.red must be persisted after recovery');
+    assert.strictEqual(accCycle.red.testExitCode, 1);
+
+    // 3. transition red->green is now unblocked (the gate sees real evidence).
+    const tx = runCli(`transition GH-532-RECOV green`, homeDir, repo);
+    assert.strictEqual(
+      tx.exitCode,
+      0,
+      `transition must succeed after recovery, got stderr: ${tx.stderr}`
+    );
+    const afterTx = readState(homeDir, 'GH-532-RECOV');
+    assert.strictEqual(afterTx.currentPhase, 'green', 'phase must advance to green after recovery');
+
+    // 4. Exactly one rejection audit row was appended (the broken attempt);
+    //    the accepted re-run does not add another.
+    const actions = JSON.parse(
+      fs.readFileSync(
+        path.join(homeDir, 'worktrees', 'tasks', 'GH-532-RECOV', '.work-actions.json'),
+        'utf8'
+      )
+    );
+    const rejections = actions.filter((a) => a.action === 'tdd-red-load-failure-rejected');
+    assert.strictEqual(
+      rejections.length,
+      1,
+      `expected exactly one rejection audit row across the round-trip, got ${rejections.length}`
+    );
+  });
 });

@@ -8,9 +8,10 @@
  * because the same crash repeats regardless of source edits (see GH-508
  * Task 6, fixed by GH-532).
  *
- * Exported so `tdd-phase-state.js record-red` and future consumers
- * (e.g. `enforce-tdd-on-stop.js`) share the exact patterns and scan
- * semantics without copy-paste drift.
+ * Extracted as a standalone module in anticipation of reuse by
+ * `enforce-tdd-on-stop.js` and similar future consumers, so the patterns
+ * and scan semantics are not copy-pasted when that work lands. Today the
+ * only importer is `tdd-phase-state.js record-red`.
  *
  * RUNNER ASSUMPTION — node:test ONLY:
  *   The detector assumes node:test TAP output shape, where failing-test
