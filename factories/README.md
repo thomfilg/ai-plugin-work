@@ -50,11 +50,15 @@ The following stay hand-written by design — they don't fit any factory:
    any `PHASES[*].detectors` must resolve to a real detector module
    exported from `maestro-conduct.js`, no duplicates, and (when given the
    /work step-id set) every phase key must be a known step.
-4. **Line-count cap.** Enforced by the existing quality gate
-   (`pnpm quality`), not by a separate linter — `quality-lint-rules.js`
-   has a 120-LOC override for `plugins/work/scripts/workflows/work/steps/*`
-   and `.../gates/*`. Anything larger should be extracted to a sibling
-   `lib/` helper or expressed declaratively via a factory.
+4. **Line-count cap.** Aspirational target: 120 LOC per file under
+   `plugins/work/scripts/workflows/work/steps/*` and `.../gates/*`. NOT
+   yet enforced by `pnpm quality` — six existing step/gate files
+   (`check-gate.js` 316, `implement.js` 311, `task-review-gate.js` 167,
+   `brief-gate.js` 161, `tasks-gate.js` 151, `task-review.js` 122)
+   exceed it. Most shrink dramatically once migrated to the factories
+   above (brief-gate's 161 LOC → ~25 LOC of `createGateStep({…})`). Once
+   migration is done, add a `files: [steps/*, gates/*]` override with
+   `max-lines: 120` to `quality-lint-rules.js`.
 5. **`stepScaffold`** is the CLI the LLM should reach for when adding a new
    step. `node factories/stepScaffold/cli.js --id=foo --kind=gate
    --retry-to=bar --out=…` writes the factory call to disk and PRINTS the
