@@ -35,6 +35,55 @@ describe('infra-classifier', () => {
       assert.ok(result.evidence, 'evidence should be present');
     });
 
+    it('Bug 542-25: excludes the failed shard from the sibling median by id/name, not reference', () => {
+      // `enrichFailedFromAll` returns a COPY of the failed job, so the
+      // `j !== failed` reference check used to fail and the failed shard's
+      // 6min runtime got included in the median — pulling the median up and
+      // blocking the ≥3× asymmetry check.
+      const baseStart = new Date('2026-01-01T00:00:00.000Z').getTime();
+      const mkAllJob = (name, runtimeMin, conclusion, databaseId) => ({
+        name,
+        databaseId,
+        conclusion,
+        startedAt: new Date(baseStart).toISOString(),
+        completedAt: new Date(baseStart + runtimeMin * 60_000).toISOString(),
+      });
+      // 3-shard family: shards 1+2 run 1min, shard 3 runs 6min and fails.
+      // With proper exclusion, median(siblings) = 1min, ratio = 6 → fires.
+      // With reference-equality bug, median(all 3) = 1min still (the failed
+      // is a copy so it's in the set — median of [1,1,6] = 1; ratio 6 → fires).
+      // Actually with 3 entries and copy bug, the failed shard's copy is in
+      // the family too because allJobs has the original. Make this stronger:
+      // use 4-shard family where dropping the failed flips the ratio decision.
+      const allJobs = [
+        mkAllJob('e2e [shard-1]', 1, 'success', 1001),
+        mkAllJob('e2e [shard-2]', 1, 'success', 1002),
+        mkAllJob('e2e [shard-3]', 3, 'success', 1003),
+        mkAllJob('e2e [shard-4]', 6, 'failure', 1004),
+      ];
+      // Failed entry is an enriched copy (no shared reference).
+      const failedJobs = [
+        {
+          name: 'e2e [shard-4]',
+          jobId: '1004',
+          // Pretend monitor pre-enriched (production may do this).
+          startedAt: new Date(baseStart).toISOString(),
+          completedAt: new Date(baseStart + 6 * 60_000).toISOString(),
+        },
+      ];
+      const result = signal1_shardAsymmetry(failedJobs, allJobs);
+      // siblings = [1,1,3] median=1; ratio = 6/1 = 6 ≥ 3 → fire.
+      // Buggy: siblings = [1,1,3,6] median=2; ratio = 6/2 = 3 ≥ 3 → still fires
+      // BUT evidence.siblingMedianMs differs. Assert the median value.
+      assert.equal(result.fired, true);
+      // 60_000ms = 1 minute. Median of [1,1,3] in ms is 60_000.
+      assert.equal(
+        result.evidence.siblingMedianMs,
+        60_000,
+        'failed shard must NOT inflate the sibling median'
+      );
+    });
+
     it('Bug 542-23: enriches failed-job timestamps by matching jobId against allJobs.databaseId', () => {
       // monitor.js attaches jobId (gh databaseId) to _ciFailedJobs entries
       // but leaves _ciAllJobs verbatim (databaseId field). Without the

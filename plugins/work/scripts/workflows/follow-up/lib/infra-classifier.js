@@ -16,13 +16,8 @@ const INFRA_SUSPECTED_PAIRS = [
 
 const NUMERIC_ID_RE = /^\d+$/;
 
-/**
- * Strip matrix shard suffixes from a job name so siblings in the same
- * matrix family collapse to a single stem (e.g. `e2e [shard-3]` -> `e2e`).
- *
- * @param {string} name
- * @returns {string}
- */
+// Strip matrix shard suffixes from a job name so siblings in the same matrix
+// family collapse to a single stem (e.g. `e2e [shard-3]` -> `e2e`).
 function stripShardSuffix(name) {
   if (typeof name !== 'string') return '';
   return name
@@ -65,8 +60,17 @@ function groupJobsByFamily(safeAll) {
   return families;
 }
 
+// Bug 542-25: enriched `failed` is a COPY; reference equality `j !== failed`
+// always returned true, leaking the failed shard into the median. Match by
+// jobId (against databaseId/id) or by name.
+function isSameJob(j, failed) {
+  if (!j || !failed) return false;
+  if (failed.jobId && allJobIdMatches(j, failed.jobId)) return true;
+  return Boolean(failed.name) && j.name === failed.name;
+}
+
 function siblingMedianRuntime(family, failed) {
-  const siblings = family.filter((j) => j !== failed);
+  const siblings = family.filter((j) => !isSameJob(j, failed));
   const siblingRuntimes = siblings
     .map(jobRuntimeMs)
     .filter((ms) => ms > 0)
@@ -121,10 +125,9 @@ function allJobIdMatches(j, jobId) {
   return String(j.databaseId) === s || String(j.id) === s;
 }
 
+// Bug 542-15 / 542-23: enrich _ciFailedJobs with startedAt/completedAt from
+// _ciAllJobs (which uses databaseId/id, not jobId). Name fallback.
 function enrichFailedFromAll(failed, safeAll) {
-  // Bug 542-15 / 542-23: enrich _ciFailedJobs with startedAt/completedAt
-  // from _ciAllJobs. allJobs uses `databaseId`/`id` (gh run view shape),
-  // not `jobId` — match by either, fall back to name.
   if (!failed) return failed;
   if (failed.startedAt && failed.completedAt) return failed;
   const byId = failed.jobId ? safeAll.find((j) => allJobIdMatches(j, failed.jobId)) : null;
