@@ -91,7 +91,7 @@ a top-level load-failure signature instead of an assertion failure:
 - `ReferenceError:` outside `assert.throws`
 - `SyntaxError:` from the test file or its imports
 - `Cannot find module` / `MODULE_NOT_FOUND`
-- Runner reports zero tests executed (`# tests 0`, `\b0 tests?\b`)
+- Runner reports zero tests executed (`# tests 0`, anchored to the TAP summary line)
 
 These crashes exit non-zero but verify nothing — accepting them as RED wedges
 the subsequent GREEN phase (same crash repeats regardless of source edits).

@@ -515,6 +515,127 @@ describe('tdd-phase-state record-red — load-failure rejection (GH-532)', () =>
     );
   });
 
+  it('TAP "not ok" title containing "ReferenceError:" is accepted as valid RED (Finding 1a)', () => {
+    // Symmetric to the existing "0 tests" fix: a real failing test whose
+    // name embeds the literal text "ReferenceError:" emits a top-level
+    // `not ok 1 - throws ReferenceError: ...` line. The detector must NOT
+    // treat that as a load-failure signature — it's a TAP control line for
+    // a genuine assertion failure.
+    runCli('init GH-532-NOK-RE', homeDir);
+    const tap =
+      'TAP version 13\n' +
+      '# Subtest: throws ReferenceError: when given bad arg\n' +
+      'not ok 1 - throws ReferenceError: when given bad arg\n' +
+      '  ---\n' +
+      '  duration_ms: 0.5\n' +
+      '  failureType: testCodeFailure\n' +
+      '  error: |-\n' +
+      '    AssertionError [ERR_ASSERTION]: Expected fn to throw\n' +
+      '  ...\n' +
+      '1..1\n' +
+      '# tests 1\n' +
+      '# pass 0\n' +
+      '# fail 1\n';
+    const script = createOutputScript(scriptDir, 'not-ok-referror', { stdout: tap, exitCode: 1 });
+    const { exitCode, stdout, stderr } = runCli(
+      `record-red GH-532-NOK-RE --cmd "${script}"`,
+      homeDir,
+      repo
+    );
+    assert.strictEqual(
+      exitCode,
+      0,
+      `"not ok" line embedding "ReferenceError:" must be accepted, got stderr: ${stderr}`
+    );
+    const result = JSON.parse(stdout);
+    assert.strictEqual(result.ok, true);
+  });
+
+  it('TAP "not ok" title containing "SyntaxError:" is accepted as valid RED (Finding 1b)', () => {
+    runCli('init GH-532-NOK-SE', homeDir);
+    const tap =
+      'TAP version 13\n' +
+      '# Subtest: emits SyntaxError: on invalid JSON\n' +
+      'not ok 1 - emits SyntaxError: on invalid JSON\n' +
+      '  ---\n' +
+      '  duration_ms: 0.5\n' +
+      '  ...\n' +
+      '1..1\n' +
+      '# tests 1\n' +
+      '# pass 0\n' +
+      '# fail 1\n';
+    const script = createOutputScript(scriptDir, 'not-ok-syntaxerr', { stdout: tap, exitCode: 1 });
+    const { exitCode, stderr } = runCli(
+      `record-red GH-532-NOK-SE --cmd "${script}"`,
+      homeDir,
+      repo
+    );
+    assert.strictEqual(
+      exitCode,
+      0,
+      `"not ok" line embedding "SyntaxError:" must be accepted, got stderr: ${stderr}`
+    );
+  });
+
+  it('TAP "not ok" title containing "MODULE_NOT_FOUND" is accepted as valid RED (Finding 1c)', () => {
+    runCli('init GH-532-NOK-MNF', homeDir);
+    const tap =
+      'TAP version 13\n' +
+      '# Subtest: returns MODULE_NOT_FOUND when path is missing\n' +
+      'not ok 1 - returns MODULE_NOT_FOUND when path is missing\n' +
+      '  ---\n' +
+      '  duration_ms: 0.5\n' +
+      '  ...\n' +
+      '1..1\n' +
+      '# tests 1\n' +
+      '# pass 0\n' +
+      '# fail 1\n';
+    const script = createOutputScript(scriptDir, 'not-ok-mnf', { stdout: tap, exitCode: 1 });
+    const { exitCode, stderr } = runCli(
+      `record-red GH-532-NOK-MNF --cmd "${script}"`,
+      homeDir,
+      repo
+    );
+    assert.strictEqual(
+      exitCode,
+      0,
+      `"not ok" line embedding "MODULE_NOT_FOUND" must be accepted, got stderr: ${stderr}`
+    );
+  });
+
+  it('MODULE_NOT_FOUND code line is rejected with accurate signature (Finding 3)', () => {
+    // When the matched line is the canonical `code: 'MODULE_NOT_FOUND'`
+    // emission from node's module loader, the audit row's
+    // `meta.signature` MUST name `MODULE_NOT_FOUND` (matching the actual
+    // matched substring), not the unrelated `Cannot find module` literal
+    // — operators reading .work-actions.json would otherwise see a name
+    // that doesn't appear in the snippet.
+    runCli('init GH-532-MNF-SIG', homeDir);
+    const script = createOutputScript(scriptDir, 'mnf-code-line', {
+      stderr: "Error: load failed\n    at /tmp/foo.js:1:1\n  code: 'MODULE_NOT_FOUND'\n",
+      exitCode: 1,
+    });
+    const { exitCode } = runCli(`record-red GH-532-MNF-SIG --cmd "${script}"`, homeDir, repo);
+    assert.strictEqual(exitCode, 1, 'expected rejection');
+    const actions = JSON.parse(
+      fs.readFileSync(
+        path.join(homeDir, 'worktrees', 'tasks', 'GH-532-MNF-SIG', '.work-actions.json'),
+        'utf8'
+      )
+    );
+    const row = actions.find((a) => a.action === 'tdd-red-load-failure-rejected');
+    assert.ok(row, 'expected rejection audit row');
+    assert.strictEqual(
+      row.meta.signature,
+      'MODULE_NOT_FOUND',
+      `signature must match the actual matched substring, got: ${row.meta.signature}`
+    );
+    assert.ok(
+      /MODULE_NOT_FOUND/.test(row.meta.snippet),
+      `snippet must include the matched text, got: ${row.meta.snippet}`
+    );
+  });
+
   it('Unindented "---" in test output does not open a YAML envelope (Bug 9)', () => {
     // A test prints a top-level divider `---` followed by a load-failure
     // signature. The TAP YAML envelope is ALWAYS indented under `not ok`;

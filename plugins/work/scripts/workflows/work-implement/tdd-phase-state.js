@@ -34,6 +34,9 @@ const { tddCanTransition, isTestFile } = require('./tdd-phase-registry');
 const { consumeToken, tokenPath } = require('../lib/scripts/write-report');
 const { normalizeAgentName } = require('../lib/agent-detection');
 const { resolveTasksBaseWithFallback } = require('../lib/ticket-validation');
+// GH-532 — RED load-failure heuristic. Shared with future
+// `enforce-tdd-on-stop.js` consumer via `lib/red-load-failure.js`.
+const { detectRedLoadFailure, extractLoadFailureSnippet } = require('./lib/red-load-failure');
 
 let config;
 try {
@@ -352,10 +355,6 @@ function runTestCommandWithOutput(cmd) {
     stderr: result.stderr || '',
   };
 }
-
-// GH-532 — RED load-failure heuristic. Shared with future
-// `enforce-tdd-on-stop.js` consumer via `lib/red-load-failure.js`.
-const { detectRedLoadFailure, extractLoadFailureSnippet } = require('./lib/red-load-failure');
 
 /**
  * Build the rejection diagnostic for a RED load-failure. Multi-sentence,

@@ -35,16 +35,37 @@
 const RED_LOAD_FAILURE_PATTERNS = Object.freeze([
   Object.freeze({ name: 'ReferenceError', regex: /\bReferenceError:/ }),
   Object.freeze({ name: 'SyntaxError', regex: /\bSyntaxError:/ }),
-  Object.freeze({
-    name: 'Cannot find module',
-    regex: /Cannot find module|MODULE_NOT_FOUND/,
-  }),
+  // Split into two named patterns so the audit row's `meta.signature` always
+  // names a substring that actually appears in `meta.snippet`. The shared
+  // diagnostic message in `formatRedLoadFailureDiagnostic` covers both.
+  Object.freeze({ name: 'Cannot find module', regex: /Cannot find module/ }),
+  Object.freeze({ name: 'MODULE_NOT_FOUND', regex: /MODULE_NOT_FOUND/ }),
   // Match only the node:test TAP summary line: `# tests 0` anchored at the
   // start of a line. A loose `\b0\s+tests?\b` alternative would false-positive
   // on legitimate `not ok` lines whose test name contains the phrase
   // "0 tests" (e.g. `not ok 1 - returns 0 tests when input is empty`).
   Object.freeze({ name: '0 tests', regex: /^#\s*tests\s+0\b/ }),
 ]);
+
+/**
+ * Top-level TAP lines that embed a user-supplied test name. A failing test
+ * named `throws ReferenceError: when given bad arg` emits one of these
+ * lines at column 0 — that is NOT a load failure, it is a normal
+ * assertion failure. The detector must skip these lines before signature
+ * matching so symmetric coverage with the `# tests 0` anchor is achieved
+ * for the other patterns.
+ *
+ * Only the *name-embedding* TAP lines are skipped:
+ *   - `not ok N - <name>`
+ *   - `ok N - <name>`
+ *   - `# Subtest: <name>`
+ *
+ * The `# tests N`, `# pass N`, `# fail N`, `# suites N`, `# skipped N`,
+ * `# todo N`, `# duration_ms ...` summary lines are NOT skipped — they
+ * carry fixed labels from node:test (never user names) and the `0 tests`
+ * pattern relies on `# tests 0` flowing through.
+ */
+const TAP_CONTROL_LINE_RE = /^(?:not ok\b|ok\b|# Subtest\b)/;
 
 /**
  * Returns true if `line` closes a `details:` block opened at `baseIndent`.
@@ -102,6 +123,11 @@ function matchLoadFailureSignature(line) {
  */
 function shouldSkipLine(line, state) {
   if (/^\s+at\s/.test(line)) return true;
+  // Skip TAP control lines so a user-supplied test name embedding
+  // `ReferenceError:` / `SyntaxError:` / `MODULE_NOT_FOUND` does not
+  // trigger a false-positive load-failure match. Symmetric with the
+  // anchored `^#\s*tests\s+0` guard for the `0 tests` signature.
+  if (TAP_CONTROL_LINE_RE.test(line)) return true;
   // TAP YAML envelopes are ALWAYS indented under the preceding `not ok` line.
   // Require leading whitespace for the `---` opener and the `...` closer so a
   // top-level, unindented `---` in test output (a divider, a meta-test

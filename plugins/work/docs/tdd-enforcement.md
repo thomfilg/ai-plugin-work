@@ -42,8 +42,8 @@ Only this CLI can record TDD evidence — agents cannot self-report. Evidence in
 **RED load-failure rejection (GH-532):** `record-red` rejects test runs whose
 captured output matches a load-failure signature instead of an assertion
 failure: `ReferenceError:`, `SyntaxError:`, `Cannot find module` /
-`MODULE_NOT_FOUND`, or a runner reporting zero tests (`# tests 0`,
-`\b0 tests?\b`). A crashing test exits non-zero but verifies nothing —
+`MODULE_NOT_FOUND`, or a runner reporting zero tests (`# tests 0`, anchored
+to the TAP summary line). A crashing test exits non-zero but verifies nothing —
 accepting it as RED wedges the subsequent GREEN (the same crash repeats
 regardless of source edits). Stack-frame lines (`  at …`) and lines inside a
 reported test's `details:` block are ignored, so `assert.throws(ReferenceError)`
