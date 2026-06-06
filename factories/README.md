@@ -1,12 +1,17 @@
 # Plugin factories & registry validators
 
-Two kinds of modules live here:
+Three kinds of modules live here:
 
-- **Step factories** — declarative builders that compile to the
-  `(add, s, ctx) => void` step contract used by
+- **Step factories** (`/work` step machine) — declarative builders that
+  compile to the `(add, s, ctx) => void` step contract used by
   `plugins/work/scripts/workflows/work/steps/*.js`. The point is to make
   the decision matrix a piece of *data* the LLM has to fill in, not a
   free-form function body that drifts from its JSDoc.
+- **Event-loop factories** (`maestro` event machine) — declarative
+  builders for the `(ctx, isEligible) => boolean` detector-runner
+  contract used in `plugins/maestro/scripts/maestro-conduct.js`.
+  Currently: `createDetectorRunner` (wraps a `{detect(ctx) → hit}`
+  module with the guard/dispatch/short-circuit envelope).
 - **Registry validators** — completeness checks over a plugin's registry
   shape. `registryValidator` covers `/work`'s step graph;
   `maestroPhaseValidator` covers `maestro`'s phase/detector graph. Both
@@ -22,6 +27,7 @@ Two kinds of modules live here:
 | "Always RUN one command; or DEFER on a single precondition" | `createTransitionStep` | `commit.js`, `ready.js`, `cleanup.js` |
 | "One RUN whose agentPrompt is assembled from N optional sections" | `createAgentInvocationStep` | `implement.js` |
 | "Pseudo-step: mutate sibling plan entries instead of emitting one" | `createPlanMutatorStep` | `task-advance.js` |
+| "Wrap a `{detect}` module with guard / dispatch / short-circuit" | `createDetectorRunner` | `runSpinnerDetector`, `runSilenceDetector`, `runPhaseStallDetector`, `runCommitStallDetector`, `runPrCommentsDetector`, `runPrStatusDetector` (all in `maestro-conduct.js`) |
 
 The following stay hand-written by design — they don't fit any factory:
 
