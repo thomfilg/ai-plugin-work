@@ -1,6 +1,6 @@
 {
   "name": "synapsys",
-  "version": "3.29.1",
+  "version": "3.30.0",
   "description": "Context-triggered memory injection. Memories declare trigger patterns + lifecycle events in frontmatter; matching memories are injected into Claude's context on the right hook.",
   "author": {
     "name": "Custom",
