@@ -289,17 +289,8 @@ function signal4_setupArtifacts(rawLogs) {
   return { fired: false, evidence: { patterns: hits } };
 }
 
-/**
- * Aggregate the four signal collectors and decide between `infra-suspected`
- * and `code-failure`. The classifier itself never shells out — collectors
- * receive payloads / `exec` from `ctx`.
- *
- * @param {object} state - Workflow state. Reads `_ciFailedJobs`, `failedTests`,
- *   `runId`.
- * @param {object} ctx - Pre-fetched context: `allJobs`, `prDiffFiles`,
- *   `rawLogs`, `exec`, `jobId`.
- * @returns {{ classification: 'infra-suspected'|'code-failure', signals: string[], evidence: object }}
- */
+// Aggregate the four signal collectors. classify() (below) decides between
+// `infra-suspected` and `code-failure` using INFRA_SUSPECTED_PAIRS.
 function collectSignals(s, c, failedJobs) {
   const signal4Raw = signal4_setupArtifacts(c.rawLogs || '');
   // R16: when signal4 fires, attach a conservative upper bound on
@@ -342,9 +333,19 @@ function evaluateSignal2(s, c) {
   if (evaluable.length === 0) {
     return { fired: false, evidence: { reason: 'no runId/jobId' } };
   }
+  // Bug 542-27: catch signal2 throws (bad ids) so they don't propagate up
+  // through uncaughtException and block the whole follow-up loop.
   let lastFired = null;
   for (const j of evaluable) {
-    const result = signal2_emptyFailedLog(j.runId, j.jobId, c.exec);
+    let result;
+    try {
+      result = signal2_emptyFailedLog(j.runId, j.jobId, c.exec);
+    } catch (err) {
+      return {
+        fired: false,
+        evidence: { runId: j.runId, jobId: j.jobId, reason: `invalid id: ${err.message}` },
+      };
+    }
     // If ANY failed job has real error markers (fired=false), signal2 must
     // NOT fire — there's a real code failure somewhere.
     if (!result.fired) {

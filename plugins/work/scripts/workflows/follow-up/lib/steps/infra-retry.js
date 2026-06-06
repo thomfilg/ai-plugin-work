@@ -26,10 +26,9 @@ const NUMERIC_RUN_ID = /^\d+$/;
  * Categories that bypass the infra-retry step entirely — these failures are
  * not infrastructure-related and have dedicated handling elsewhere.
  *
- * Note: previously gated additionally by WORK_AUTO_RETRY_INFRA env flag. The
- * flag was removed (always-on per user decision GH-508) — the signal floor
- * (≥2 of 4 INFRA_SUSPECTED_PAIRS), MAX_INFRA_RETRIES cap, and the exhaustion
- * surface are the only safeguards needed.
+ * The auto-retry feature is always on (GH-508 design decision). Safeguards:
+ * ≥2-signal floor (INFRA_SUSPECTED_PAIRS), MAX_INFRA_RETRIES cap, exhaustion
+ * surface. No env-flag opt-out.
  */
 function categoryBypass(state) {
   const cat = state && state.failureCategory;
@@ -328,17 +327,15 @@ function runInfraRetryStep(state, ctx) {
   // Categories with dedicated handling elsewhere never reach infra-retry.
   if (categoryBypass(state)) return null;
 
-  // Bug 542-18: handle retry-success BEFORE the feature-flag check. If a
-  // prior auto-retry left a pending attempt and CI is now green, record the
-  // success and route to `report` even after the feature flag was disabled.
-  // `maybeHandleRetrySuccess` performs the routing internally on success.
+  // Bug 542-18: if a prior auto-retry left a pending attempt and CI is now
+  // green, record the success and route to `report` before any other gate
+  // can fall through to fix-ci. `maybeHandleRetrySuccess` performs the
+  // routing internally on success.
   if (maybeHandleRetrySuccess(state, ctx)) return null;
 
-  // Bug 542-21: exhausted + fresh-monitor gates run BEFORE the feature-flag
-  // bypass. A ticket that already hit MAX_INFRA_RETRIES must surface
-  // `infra-stuck` regardless of the flag, and a pending retry with stale
-  // `_ciStatusFreshness` must re-poll monitor — both must not fall through
-  // to fix-ci.
+  // Bug 542-21: a ticket that already hit MAX_INFRA_RETRIES must surface
+  // `infra-stuck`, and a pending retry with stale `_ciStatusFreshness` must
+  // re-poll monitor — both must not fall through to fix-ci.
 
   // Bug 542-16: when resuming from disk after a previous infra rerun, a
   // pending attempt exists but `_ciStatusFreshness` belongs to the prior
