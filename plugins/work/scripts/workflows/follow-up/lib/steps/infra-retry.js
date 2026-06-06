@@ -199,6 +199,11 @@ function maybeSurfaceExhausted(state, retry, result) {
 function dispatchRetryAttempt(state, retry, result) {
   const attemptNumber = retry.count + 1;
   const runId = resolveRunId(state);
+  // Bug 542-22: if we can't resolve a numeric run id, infra-retry has no
+  // GitHub Actions handle to rerun. Return null so the orchestrator advances
+  // to fix-ci instead of throwing TypeError (the loop has no catch and would
+  // otherwise abort the whole follow-up workflow).
+  if (!NUMERIC_RUN_ID.test(String(runId || ''))) return null;
   // Validate before mutating state so a bad runId doesn't consume a retry.
   const delegate = buildRetryDelegate(state, runId, attemptNumber);
   retry.count = attemptNumber;

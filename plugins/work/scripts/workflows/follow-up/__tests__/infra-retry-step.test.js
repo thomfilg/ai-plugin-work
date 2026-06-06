@@ -243,6 +243,27 @@ describe('infra-retry step — retry state machine (R2/R3/R4)', () => {
     assert.notEqual(result.action, 'execute', 'fix-ci must NOT be dispatched on infra-stuck');
   });
 
+  it('case 5c: missing runId → returns null (orchestrator advances), does NOT throw', () => {
+    // Bug 542-22: a missing/non-numeric runId used to throw TypeError out of
+    // buildRetryDelegate. The follow-up loop had no catch, so the whole
+    // workflow aborted. Now the step returns null and the orchestrator
+    // advances to fix-ci.
+    const { handler } = loadStep({ classifyImpl: infraSuspected });
+    const state = {
+      ticketId: 'GH-508',
+      failureCategory: 'ci_failure',
+      _ciFailedJobs: [{ name: 'e2e [shard-4]' }], // no runId
+      infraRetry: { count: 0, attempts: [] },
+    };
+    let result;
+    assert.doesNotThrow(() => {
+      result = handler(state, {});
+    });
+    assert.equal(result, null, 'must return null to let orchestrator advance');
+    assert.equal(state.infraRetry.count, 0, 'retry count NOT consumed');
+    assert.equal(state.infraRetry.attempts.length, 0, 'no attempt recorded');
+  });
+
   it('case 5b: derives runId from state._ciFailedJobs[0].runId when state.runId is unset', () => {
     const { handler } = loadStep({ classifyImpl: infraSuspected });
     const state = {
