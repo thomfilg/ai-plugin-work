@@ -40,9 +40,6 @@ module.exports = [
       '**/__tests__/**',
       '**/*.test.js',
       '**/*.spec.js',
-      // stepScaffold templates contain handlebars-style `{{token}}` placeholders
-      // and are not standalone JS until the scaffolder substitutes the tokens.
-      'factories/stepScaffold/templates/**',
     ],
   },
   {

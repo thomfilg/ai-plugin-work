@@ -35,7 +35,12 @@ function parseArgs(argv) {
 }
 
 function loadTemplate(kind) {
-  const file = path.join(__dirname, 'templates', `${kind}.template.js`);
+  // Templates are stored as `.template` (not `.template.js`) so static
+  // analysis tools (CodeQL, ESLint, biome) don't try to parse the
+  // unsubstituted `{{token}}` placeholders as JavaScript. The CLI
+  // produces real `.js` files via `substitute()` and `writeFileSync`
+  // — those ARE valid JS once tokens are resolved.
+  const file = path.join(__dirname, 'templates', `${kind}.template`);
   if (!fs.existsSync(file)) {
     throw new Error(
       `stepScaffold: unknown kind "${kind}". Valid: gate, artifact, transition, agent-invocation, plan-mutator`

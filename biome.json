@@ -19,8 +19,7 @@
       "!external_scripts/**",
       "!references/**",
       "!docs/**",
-      "!**/*.md",
-      "!factories/stepScaffold/templates/**"
+      "!**/*.md"
     ]
   },
   "formatter": {
