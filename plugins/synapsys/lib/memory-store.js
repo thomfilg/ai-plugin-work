@@ -181,7 +181,13 @@ function parseFireCadence(raw, memoryName) {
   return DEFAULT_FIRE_CADENCE;
 }
 
-const PRESETS_PATH = path.join(__dirname, 'synapsys-presets.json');
+// Production resolves to the shipped JSON. Tests opt into a temp file via
+// SYNAPSYS_PRESETS_PATH so they never mutate the on-disk shipped file —
+// concurrent workers reading the real file mid-test would otherwise cache
+// an empty preset Map for their lifetime.
+const PRESETS_PATH = process.env.SYNAPSYS_PRESETS_PATH
+  ? path.resolve(process.env.SYNAPSYS_PRESETS_PATH)
+  : path.join(__dirname, 'synapsys-presets.json');
 let _presetsCache = null;
 
 // Read shipped synapsys-presets.json once and cache the resulting Map.

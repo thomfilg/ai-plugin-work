@@ -3,6 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 
 const memoryStore = require('../memory-store');
@@ -22,29 +23,28 @@ function captureStderr(fn) {
   }
 }
 
-const PRESETS_PATH = path.join(__dirname, '..', 'synapsys-presets.json');
-
+// Point memory-store at a tmpdir presets file via SYNAPSYS_PRESETS_PATH so
+// the shipped synapsys-presets.json is never mutated. Mutating the real file
+// would race with any concurrent worker calling loadPresets() — that worker
+// would cache an empty Map for its lifetime.
 function withPresetsFile(replacement, fn) {
-  let original = null;
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-presets-test-'));
+  const tmpPath = path.join(dir, 'synapsys-presets.json');
+  fs.writeFileSync(tmpPath, replacement);
+  const previousEnv = process.env.SYNAPSYS_PRESETS_PATH;
+  process.env.SYNAPSYS_PRESETS_PATH = tmpPath;
   try {
-    original = fs.readFileSync(PRESETS_PATH, 'utf8');
-  } catch (err) {
-    if (err.code !== 'ENOENT') throw err;
-  }
-  try {
-    fs.writeFileSync(PRESETS_PATH, replacement);
-    // Bust require cache so loadPresets re-reads from disk.
     delete require.cache[require.resolve('../memory-store')];
     const fresh = require('../memory-store');
     return fn(fresh);
   } finally {
-    if (original === null) {
-      // rmSync with force:true is idempotent: no check-then-act, no throw on ENOENT.
-      fs.rmSync(PRESETS_PATH, { force: true });
+    if (previousEnv === undefined) {
+      delete process.env.SYNAPSYS_PRESETS_PATH;
     } else {
-      fs.writeFileSync(PRESETS_PATH, original);
+      process.env.SYNAPSYS_PRESETS_PATH = previousEnv;
     }
     delete require.cache[require.resolve('../memory-store')];
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 }
 
