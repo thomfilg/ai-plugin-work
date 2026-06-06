@@ -116,12 +116,20 @@ function main(argv) {
   const body = substitute(tpl, tokens);
 
   const outPath = path.resolve(args.out);
-  if (fs.existsSync(outPath) && !args.force) {
-    process.stderr.write(`Refusing to overwrite ${outPath} (pass --force to override)\n`);
-    process.exit(3);
-  }
   fs.mkdirSync(path.dirname(outPath), { recursive: true });
-  fs.writeFileSync(outPath, body);
+  // Use the 'wx' flag so the existence check and the write are a single
+  // atomic operation — fixes the TOCTOU race that `fs.existsSync` + a
+  // separate `writeFileSync` would otherwise allow. When --force is set we
+  // skip the exclusive flag (caller has explicitly opted into overwrite).
+  try {
+    fs.writeFileSync(outPath, body, { flag: args.force ? 'w' : 'wx' });
+  } catch (err) {
+    if (err && err.code === 'EEXIST') {
+      process.stderr.write(`Refusing to overwrite ${outPath} (pass --force to override)\n`);
+      process.exit(3);
+    }
+    throw err;
+  }
   process.stdout.write(`✓ wrote ${outPath}\n`);
   process.stdout.write(emitRegistryHint(args) + '\n');
 }
