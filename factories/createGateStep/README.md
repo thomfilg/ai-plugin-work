@@ -9,9 +9,10 @@ Declarative factory for /work gate steps (`brief-gate`, `spec-gate`,
 |---|---|---|
 | 1 | `precondition(s, ctx) === false` | DEFER with `noArtifactReason` |
 | 2 | artifact unreadable | RUN `failClosedCommand` (fail-closed) |
-| 3 | `parse(text)` throws | RUN `runCommand` with the throw message |
-| 4 | `validate(parsed).valid === true` | DEFER with `validate.deferReason(parsed)` |
-| 5 | `validate(parsed).valid === false` | RUN `runCommand` with `validate.runReason(parsed)` and `validate.runExtra(parsed, validation, ctx)` |
+| 3 | `parse(text)` throws | RUN `runCommand` with "parser threw" reason |
+| 4 | `validate(parsed)` throws | RUN `runCommand` with "validator threw" reason |
+| 5 | `validate(parsed).valid === true` | DEFER with `validate.deferReason(parsed)` |
+| 6 | `validate(parsed).valid === false` | RUN `runCommand` with `validate.runReason(parsed)` and `validate.runExtra(parsed, validation, ctx)` |
 
 ## Usage
 
