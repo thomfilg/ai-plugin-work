@@ -13,7 +13,7 @@
 
 const path = require('path');
 const { createGateStep } = require(
-  path.join(__dirname, '..', '..', '..', '..', '..', 'factories', 'createGateStep')
+  path.join(__dirname, '..', '..', '..', '..', '..', '..', 'factories', 'createGateStep')
 );
 const { STEPS } = require('../step-registry');
 

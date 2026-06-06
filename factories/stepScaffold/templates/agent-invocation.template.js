@@ -10,7 +10,7 @@
 
 const path = require('path');
 const { createAgentInvocationStep } = require(
-  path.join(__dirname, '..', '..', '..', '..', '..', 'factories', 'createAgentInvocationStep')
+  path.join(__dirname, '..', '..', '..', '..', '..', '..', 'factories', 'createAgentInvocationStep')
 );
 const { STEPS } = require('../step-registry');
 

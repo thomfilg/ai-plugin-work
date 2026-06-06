@@ -9,7 +9,7 @@
 
 const path = require('path');
 const { createPlanMutatorStep } = require(
-  path.join(__dirname, '..', '..', '..', '..', '..', 'factories', 'createPlanMutatorStep')
+  path.join(__dirname, '..', '..', '..', '..', '..', '..', 'factories', 'createPlanMutatorStep')
 );
 const { STEPS } = require('../step-registry');
 

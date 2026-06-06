@@ -7,7 +7,7 @@
 const path = require('path');
 const fs = require('fs');
 const { createArtifactStep } = require(
-  path.join(__dirname, '..', '..', '..', '..', '..', 'factories', 'createArtifactStep')
+  path.join(__dirname, '..', '..', '..', '..', '..', '..', 'factories', 'createArtifactStep')
 );
 const { STEPS } = require('../step-registry');
 

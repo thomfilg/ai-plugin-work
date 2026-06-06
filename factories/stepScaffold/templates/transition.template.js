@@ -6,7 +6,7 @@
 
 const path = require('path');
 const { createTransitionStep } = require(
-  path.join(__dirname, '..', '..', '..', '..', '..', 'factories', 'createTransitionStep')
+  path.join(__dirname, '..', '..', '..', '..', '..', '..', 'factories', 'createTransitionStep')
 );
 const { STEPS } = require('../step-registry');
 
