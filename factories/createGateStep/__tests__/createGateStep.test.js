@@ -143,6 +143,30 @@ describe('createGateStep', () => {
     assert.deepEqual(env.plan[0].questions, ['q1', 'q2']);
   });
 
+  it('runExtra returning null falls back to default agent metadata', () => {
+    // Regression for PR #574 review comment: if a caller's runExtra returns
+    // null/undefined (e.g. it short-circuits because there's nothing to add),
+    // the plan entry MUST still get { agentType, agentPrompt } — otherwise
+    // the orchestrator has no agent to dispatch.
+    fs.writeFileSync(path.join(env.tasksDir, 'a.md'), 'x');
+    const step = createGateStep({
+      id: 'g',
+      artifact: 'a.md',
+      precondition: () => true,
+      parse: (t) => ({ text: t }),
+      validate: () => ({
+        valid: false,
+        runReason: () => 'bad',
+        runExtra: () => null, // returns nullish on purpose
+      }),
+      runCommand: '/fixit',
+    });
+    step(env.add, {}, env.ctx);
+    assert.equal(env.plan[0].action, 'RUN');
+    assert.equal(env.plan[0].agentType, 'skill');
+    assert.equal(env.plan[0].agentPrompt, '/fixit');
+  });
+
   it('records factory metadata on the returned handler', () => {
     const step = createGateStep({
       id: 'g',

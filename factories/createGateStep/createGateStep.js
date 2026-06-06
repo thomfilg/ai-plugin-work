@@ -88,10 +88,14 @@ function runInvalid(add, cfg, validation, parsed, ctx) {
   // `runExtra` receives (parsed, validation, ctx) so it can build payloads
   // that need ctx-derived values — e.g. brief-gate's postResolveCommand
   // needs `path.join(ctx.tasksDir, 'brief.md')`.
-  const extra =
-    typeof validation.runExtra === 'function'
-      ? validation.runExtra(parsed, validation, ctx)
-      : { agentType: 'skill', agentPrompt: cfg.runCommand };
+  //
+  // If runExtra returns null/undefined we MUST still ship the default
+  // `{ agentType, agentPrompt }` — otherwise the plan entry loses its
+  // agent metadata and the orchestrator can't dispatch the RUN.
+  const defaults = { agentType: 'skill', agentPrompt: cfg.runCommand };
+  const built =
+    typeof validation.runExtra === 'function' ? validation.runExtra(parsed, validation, ctx) : null;
+  const extra = built || defaults;
   add(cfg.id, 'RUN', cfg.runCommand, reason, extra);
 }
 
