@@ -262,6 +262,7 @@ function readMemoryFile(store, name) {
     triggerPretool: toList(meta.trigger_pretool),
     triggerPretoolContent: toList(meta.trigger_pretool_content),
     triggerPretoolContentNot: toList(meta.trigger_pretool_content_not),
+    triggerStopResponse: meta.trigger_stop_response || '',
     triggerSession: _truthy(meta.trigger_session),
     domain: toList(meta.domain),
     inject: meta.inject === 'full' ? 'full' : 'summary',
