@@ -393,4 +393,7 @@ function main() {
 }
 
 if (require.main === module) main();
-module.exports = { tick, ctxFor, restartEligible };
+// DETECTORS is exported so the cross-plugin phase-registry validator (in
+// `factories/maestroPhaseValidator`) can assert that every detector name
+// referenced in phase-registry.PHASES[*].detectors resolves to a real module.
+module.exports = { tick, ctxFor, restartEligible, DETECTORS };

@@ -1,9 +1,17 @@
-# /work step factories
+# Plugin factories & registry validators
 
-Declarative builders that compile down to the `(add, s, ctx) => void` step
-contract used by `plugins/work/scripts/workflows/work/steps/*.js`. The point
-is to make the decision matrix a piece of *data* the LLM has to fill in, not
-a free-form function body that drifts from its JSDoc.
+Two kinds of modules live here:
+
+- **Step factories** — declarative builders that compile to the
+  `(add, s, ctx) => void` step contract used by
+  `plugins/work/scripts/workflows/work/steps/*.js`. The point is to make
+  the decision matrix a piece of *data* the LLM has to fill in, not a
+  free-form function body that drifts from its JSDoc.
+- **Registry validators** — completeness checks over a plugin's registry
+  shape. `registryValidator` covers `/work`'s step graph;
+  `maestroPhaseValidator` covers `maestro`'s phase/detector graph. Both
+  ship a self-test that imports the real registry and asserts validity,
+  so any structural drift fails CI.
 
 ## When to use which factory
 
@@ -27,16 +35,21 @@ The following stay hand-written by design — they don't fit any factory:
 
 1. **Factories** make the matrix declarative — the LLM fills in a table, the
    factory emits the handler.
-2. **`registryValidator`** runs in CI to assert that every `STEPS.x` is in
-   `STEP_ORDER`, every `STEP_TRANSITIONS` target is a linear-forward,
-   backward, or terminal-self edge, and every `STEP_PIPELINE` handler with
-   `__factoryMeta` has a registry entry.
-3. **Line-count cap.** Enforced by the existing quality gate
+2. **`registryValidator`** (`/work`) runs in CI to assert that every
+   `STEPS.x` is in `STEP_ORDER`, every `STEP_TRANSITIONS` target is a
+   linear-forward, backward, or terminal-self edge, and every
+   `STEP_PIPELINE` handler with `__factoryMeta` has a registry entry.
+3. **`maestroPhaseValidator`** (`maestro`) runs the analogous check over
+   `phase-registry.PHASES`: every detector name referenced by `BASE` or
+   any `PHASES[*].detectors` must resolve to a real detector module
+   exported from `maestro-conduct.js`, no duplicates, and (when given the
+   /work step-id set) every phase key must be a known step.
+4. **Line-count cap.** Enforced by the existing quality gate
    (`pnpm quality`), not by a separate linter — `quality-lint-rules.js`
    has a 120-LOC override for `plugins/work/scripts/workflows/work/steps/*`
    and `.../gates/*`. Anything larger should be extracted to a sibling
    `lib/` helper or expressed declaratively via a factory.
-4. **`stepScaffold`** is the CLI the LLM should reach for when adding a new
+5. **`stepScaffold`** is the CLI the LLM should reach for when adding a new
    step. `node factories/stepScaffold/cli.js --id=foo --kind=gate
    --retry-to=bar --out=…` writes the factory call to disk and PRINTS the
    registry edits the human needs to apply by hand (it does not patch
