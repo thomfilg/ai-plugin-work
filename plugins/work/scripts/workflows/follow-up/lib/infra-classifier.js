@@ -26,13 +26,7 @@ function stripShardSuffix(name) {
     .trim();
 }
 
-/**
- * Compute the runtime (in milliseconds) of a job from its ISO timestamps.
- * Returns 0 if either timestamp is missing or unparseable.
- *
- * @param {{ startedAt?: string, completedAt?: string }} job
- * @returns {number}
- */
+// Runtime (ms) of a job from its ISO timestamps; 0 if missing/unparseable.
 function jobRuntimeMs(job) {
   if (!job || !job.startedAt || !job.completedAt) return 0;
   const s = Date.parse(job.startedAt);
