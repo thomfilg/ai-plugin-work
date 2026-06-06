@@ -171,6 +171,7 @@ const MATCHED_LABELS = [
   ['pretool_pattern', 'matched.pretool_pattern'],
   ['content_pattern', 'matched.content_pattern'],
   ['content_substring', 'matched.content_substring'],
+  ['excluded_pattern', 'matched.excluded_pattern'],
 ];
 
 function renderFiredBlock(matched) {
@@ -182,8 +183,15 @@ function renderFiredBlock(matched) {
   return lines;
 }
 
-function renderNotFiredBlock(memory, reason) {
+function renderNotFiredBlock(memory, reason, matched) {
   const lines = [`  fired: ✗  (gate: ${reason || 'unknown'})`];
+  // Surface matched.* keys on suppressed results so reasons like
+  // `exclude-matched` (GH-510) or `negative-excludes` (GH-445) show the
+  // offending pattern alongside the gate label.
+  const m = matched || {};
+  for (const [key, label] of MATCHED_LABELS) {
+    if (m[key] !== undefined) lines.push(`  ${label}: ${m[key]}`);
+  }
   const bodyLines = (memory.body || '').split('\n').filter(Boolean).slice(0, 3);
   if (bodyLines.length) {
     lines.push('  body (first 3 lines):');
@@ -200,7 +208,7 @@ function renderVerboseBlock(memory, result, event) {
   if (trig) lines.push(`  trigger: ${trig}`);
   const body = result.fired
     ? renderFiredBlock(result.matched)
-    : renderNotFiredBlock(memory, result.reason);
+    : renderNotFiredBlock(memory, result.reason, result.matched);
   lines.push(...body);
   return lines.join('\n');
 }

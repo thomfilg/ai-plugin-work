@@ -118,6 +118,8 @@ const BRACKET_LIST_KEYS = new Set([
   'trigger_pretool_content',
   'trigger_pretool_content_not',
   'cite_signals',
+  'exclude_pretool',
+  'exclude_preset',
 ]);
 
 function coerceFrontmatterValue(raw, key) {
@@ -179,6 +181,62 @@ function parseFireCadence(raw, memoryName) {
   return DEFAULT_FIRE_CADENCE;
 }
 
+// Production resolves to the shipped JSON. Tests opt into a temp file via
+// SYNAPSYS_PRESETS_PATH so they never mutate the on-disk shipped file —
+// concurrent workers reading the real file mid-test would otherwise cache
+// an empty preset Map for their lifetime.
+const PRESETS_PATH = process.env.SYNAPSYS_PRESETS_PATH
+  ? path.resolve(process.env.SYNAPSYS_PRESETS_PATH)
+  : path.join(__dirname, 'synapsys-presets.json');
+let _presetsCache = null;
+
+// Read shipped synapsys-presets.json once and cache the resulting Map.
+// On malformed JSON, degrade to an empty Map and emit a single stderr warning
+// (mirrors the safeRegex fail-closed convention at matcher.js:241).
+function loadPresets() {
+  if (_presetsCache) return _presetsCache;
+  try {
+    const raw = fs.readFileSync(PRESETS_PATH, 'utf8');
+    const obj = JSON.parse(raw);
+    const map = new Map();
+    for (const [k, v] of Object.entries(obj)) {
+      if (typeof v === 'string' && v.length > 0) map.set(k, v);
+    }
+    _presetsCache = map;
+  } catch (err) {
+    process.stderr.write(`[synapsys] presets.json invalid: ${err.message}\n`);
+    _presetsCache = new Map();
+  }
+  return _presetsCache;
+}
+
+// Resolve a preset name to its regex body string. Returns null and emits a
+// single stderr warning for unknown names (caller is expected to call this
+// once per memory at load time so the warning cadence stays sane).
+function resolvePreset(name) {
+  const map = loadPresets();
+  if (map.has(name)) return map.get(name);
+  process.stderr.write(`[synapsys] unknown preset ${name}\n`);
+  return null;
+}
+
+// Resolve all exclude_preset names through the preset map and concatenate
+// the raw exclude_prompt regex (if any). Skips presets that fail to resolve;
+// resolvePreset already emits its own stderr warning.
+function _buildExcludeResolved(excludePreset, excludePrompt) {
+  const resolved = [];
+  for (const presetName of excludePreset) {
+    const r = resolvePreset(presetName);
+    if (r) resolved.push(r);
+  }
+  if (excludePrompt) resolved.push(excludePrompt);
+  return resolved;
+}
+
+function _truthy(value) {
+  return value === true || value === 'true';
+}
+
 function readMemoryFile(store, name) {
   if (!name.endsWith('.md') || SKIP_FILES.has(name)) return null;
   const file = path.join(store.dir, name);
@@ -190,6 +248,10 @@ function readMemoryFile(store, name) {
   }
   const { meta, body } = parseFrontmatter(raw);
   const memoryName = meta.name || path.basename(name, '.md');
+  const excludePrompt = meta.exclude_prompt || '';
+  const excludePretool = toList(meta.exclude_pretool);
+  const excludePreset = toList(meta.exclude_preset);
+  const excludeResolved = _buildExcludeResolved(excludePreset, excludePrompt);
   return {
     store,
     file,
@@ -200,10 +262,10 @@ function readMemoryFile(store, name) {
     triggerPretool: toList(meta.trigger_pretool),
     triggerPretoolContent: toList(meta.trigger_pretool_content),
     triggerPretoolContentNot: toList(meta.trigger_pretool_content_not),
-    triggerSession: meta.trigger_session === true || meta.trigger_session === 'true',
+    triggerSession: _truthy(meta.trigger_session),
     domain: toList(meta.domain),
     inject: meta.inject === 'full' ? 'full' : 'summary',
-    disabled: meta.disabled === true || meta.disabled === 'true',
+    disabled: _truthy(meta.disabled),
     expired: parseExpired(meta.expires),
     fireMode: parseFireMode(meta.fire_mode, memoryName),
     fireCadence: parseFireCadence(meta.fire_cadence, memoryName),
@@ -214,6 +276,10 @@ function readMemoryFile(store, name) {
     // `telemetry` as "enabled" and absent `cite_signals` as "auto-extract".
     citeSignals: normalizeCiteSignals(meta.cite_signals),
     telemetry: normalizeTelemetry(meta.telemetry),
+    excludePrompt,
+    excludePretool,
+    excludePreset,
+    excludeResolved,
     meta,
     body,
   };
@@ -307,5 +373,7 @@ module.exports = {
   parseFrontmatter,
   listMemories,
   listMemoriesFromStore,
+  loadPresets,
+  resolvePreset,
   safeExec,
 };
