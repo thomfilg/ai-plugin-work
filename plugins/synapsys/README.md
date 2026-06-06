@@ -16,6 +16,9 @@ Memories are markdown files with frontmatter that declares **which events** they
 | `trigger_pretool_content` | csv of regex | *(optional)* Matched against the **content** the tool is writing. Combined with `trigger_pretool` via AND. Per-tool content: `Edit`→`new_string`, `Write`→`content`, `MultiEdit`→`edits[].new_string` joined, `NotebookEdit`→`new_source`; other tools → no content (fail-closed). Flags: `i,m`. Invalid regex → stderr warning + skip; all-invalid or missing content → memory does not fire. |
 | `trigger_pretool_content_not` | csv of regex | *(optional)* Negative content gate. Combined with `trigger_pretool_content` via **AND-NOT**: memory fires when the positive content matches AND none of these patterns match. Use to suppress fires when the file is already conformant (e.g. it already imports the correct component). Same extraction table, same `i,m` flags, same fail-closed regex handling as `trigger_pretool_content`. If **all** negative patterns are invalid, the negative gate is dropped (positive-only fallback). Absent or empty array → no negative gate. |
 | `trigger_session` | bool | Fire on every `SessionStart` |
+| `exclude_prompt` | regex | *(optional)* Negative prompt gate. If the user prompt matches this regex, the memory does NOT fire even if `trigger_prompt` also matches. Use to suppress fires during off-topic prompts that happen to collide with the broader positive trigger. Flags: `i`. Invalid regex → stderr warning + skip. |
+| `exclude_preset` | string or csv of strings | *(optional)* Named exclude patterns sourced from `lib/synapsys-presets.json`. Resolved at load time and concatenated with `exclude_prompt` into one OR-joined exclude list (`memory.excludeResolved`). Built-in presets: `git-ops`, `ci-monitor`, `review-comment-handling` — see [Adopting `exclude_preset`](#adopting-exclude_preset) below. Unknown preset name → stderr warning + skip. |
+| `exclude_pretool` | csv of `<Tool>:<arg-regex>` | *(optional)* Negative pretool gate. Same shape as `trigger_pretool`. If the tool name + serialized tool input matches any spec here, the memory does NOT fire even if `trigger_pretool` matches. Invalid spec → stderr warning + skip. |
 | `inject` | `full` \| `summary` | How much of the body to inject |
 
 ## Four storage tiers
@@ -83,6 +86,70 @@ inject: full
 **Location:** `src/components/form/Button`
 **Docs:** `packages/ui/src/components/form/Button/Button.md`
 ```
+
+## Adopting `exclude_preset`
+
+Use `exclude_preset` to silence a memory during routine workflows where its content doesn't apply. The presets in `lib/synapsys-presets.json` cover the most common collision categories — adopt them on existing memories rather than hand-rolling `exclude_prompt` regexes.
+
+### Built-in presets
+
+| Preset | Suppresses when prompt contains | Pattern |
+|---|---|---|
+| `git-ops` | `git merge/push/rebase/cherry-pick/reset/checkout`, `gh pr merge/view/checks/create/edit`, `cascade-merge`, `merge conflict` | `\b(git\s+(merge\|push\|rebase\|cherry-pick\|reset\|checkout)\|gh\s+pr\s+(merge\|view\|checks\|create\|edit)\|cascade-merge\|merge\s+conflict)\b` |
+| `ci-monitor` | `follow-up-next`, `gh run view/rerun/watch`, `gh pr checks`, `--log-failed` | `\b(follow-up-next\|gh\s+run\s+(view\|rerun\|watch)\|gh\s+pr\s+checks\|--log-failed)\b` |
+| `review-comment-handling` | `--solve-comment`, `--skip-comment`, `cursor[bot]`, `copilot[bot]`, `review thread/comment` | `(--solve-comment\|--skip-comment\|cursor\[bot\]\|copilot\[bot\]\|\breview\s+(thread\|comment)\b)` |
+
+### Picking the right preset(s)
+
+Walk through the decision per memory:
+
+1. **What is this memory actually about?** Read the body. If it's about TDD evidence, plugin bootstrap, environment config, etc. — none of the preset domains apply, so all three presets are safe to exclude.
+2. **Does the memory's purpose overlap with any preset?** If it's about reviews (e.g. *"never blanket-dismiss Copilot comments"*), don't exclude `review-comment-handling` — the memory needs to fire there. Same for PR-creation memories and `git-ops`, CI-failure memories and `ci-monitor`.
+3. **Is `trigger_prompt` broad enough to collide?** Triggers like `\b(review|comment)\b` or `\b(push|deploy)\b` collide easily with routine ops. Narrow ones like `\b(\.envrc|bootstrap)\b` rarely do. Adopt presets aggressively for broad triggers, sparingly for narrow ones.
+
+### Worked example — frontmatter form
+
+Single preset (string form):
+
+```yaml
+---
+name: read-envrc-first
+description: Read ../.envrc before bootstrap actions
+events: UserPromptSubmit,PreToolUse
+trigger_prompt: \b(\.envrc|bootstrap|setup|feature flag)\b
+exclude_preset: git-ops
+inject: full
+---
+```
+
+Multiple presets (bracket-list form):
+
+```yaml
+---
+name: no-fake-tdd-evidence
+description: Never run record commands to fill missing TDD evidence
+events: UserPromptSubmit
+trigger_prompt: \b(tdd|fake.*evidence|record.*phase)\b
+exclude_preset: [git-ops, ci-monitor, review-comment-handling]
+inject: full
+---
+```
+
+Both `exclude_preset` and inline `exclude_prompt` can coexist — they're OR-joined into one resolved exclude list. Add a per-memory `exclude_prompt` when the built-in presets don't cover your collision case.
+
+### Verifying with `synapsys-explain`
+
+After adding `exclude_preset`, replay the trigger against a colliding prompt to confirm the memory now stays silent:
+
+```bash
+node plugins/synapsys/scripts/synapsys-explain.js \
+  --event=UserPromptSubmit \
+  --prompt="rebasing onto main" \
+  --only=read-envrc-first --verbose
+# expect: Fired ✗ — reason cites the matched exclude_preset pattern.
+```
+
+A working exclude shows `excluded_pattern` in the explainer output. If the memory still fires, double-check the preset name spelling and the regex flavor (presets are case-sensitive on their literal patterns).
 
 ## Files
 
