@@ -91,6 +91,7 @@ function emitJsonOutput(stores, memories) {
           triggerPrompt: m.triggerPrompt,
           triggerPretool: m.triggerPretool,
           triggerSession: m.triggerSession,
+          triggerStopResponse: m.triggerStopResponse || '',
           excludePrompt: m.excludePrompt || '',
           excludePretool: Array.isArray(m.excludePretool) ? m.excludePretool : [],
           excludePreset: Array.isArray(m.excludePreset) ? m.excludePreset : [],
@@ -143,6 +144,8 @@ function renderVerbose(m, fi, C) {
   if (m.triggerPretool.length)
     console.log(`    ${C.dim('pretool:')} ${C.magenta(m.triggerPretool.join(', '))}`);
   if (m.triggerSession) console.log(`    ${C.dim('session:')} ${C.magenta('yes')}`);
+  if (m.triggerStopResponse)
+    console.log(`    ${C.dim('stop-response:')} ${C.magenta('/' + m.triggerStopResponse + '/i')}`);
   if (m.excludePrompt)
     console.log(`    ${C.dim('exclude_prompt:')}  ${C.magenta('/' + m.excludePrompt + '/i')}`);
   if (Array.isArray(m.excludePretool) && m.excludePretool.length)
