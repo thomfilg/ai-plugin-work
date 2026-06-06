@@ -34,6 +34,9 @@ const { tddCanTransition, isTestFile } = require('./tdd-phase-registry');
 const { consumeToken, tokenPath } = require('../lib/scripts/write-report');
 const { normalizeAgentName } = require('../lib/agent-detection');
 const { resolveTasksBaseWithFallback } = require('../lib/ticket-validation');
+// GH-532 — RED load-failure heuristic. Shared with future
+// `enforce-tdd-on-stop.js` consumer via `lib/red-load-failure.js`.
+const { detectRedLoadFailure, extractLoadFailureSnippet } = require('./lib/red-load-failure');
 
 let config;
 try {
@@ -354,6 +357,62 @@ function runTestCommandWithOutput(cmd) {
 }
 
 /**
+ * Build the rejection diagnostic for a RED load-failure. Multi-sentence,
+ * names the matched signature, explains the test file is structurally
+ * broken, instructs the agent to fix the test file and re-run record-red.
+ * MUST NOT contain a `BYPASS:` line — this is a structural defect, not a
+ * justified bypass.
+ */
+function formatRedLoadFailureDiagnostic(signature) {
+  return (
+    `Rejected RED: detected ${signature} in test runner output. ` +
+    'The test file is structurally broken (load-time error or zero tests collected), ' +
+    'not a behavior gap. Fix the test file and re-run ' +
+    '`tdd-phase-state.js record-red`.'
+  );
+}
+
+/**
+ * GH-532 Task 2 / R7 / AC10 — append a structured audit row recording the
+ * RED load-failure rejection, then call `errorExit` with the diagnostic.
+ * Audit append is best-effort: wrapped in try/catch so a write failure
+ * does NOT swallow the rejection (errorExit always fires).
+ *
+ * @param {{
+ *   ticketId: string,
+ *   cycle: number,
+ *   testCommand: string,
+ *   signature: string,
+ *   snippet: string,
+ *   taskNum: number | null | undefined,
+ * }} args
+ * @returns {never}
+ */
+function rejectRedLoadFailure(args) {
+  try {
+    const { appendEnforcementAudit } = require('../work/lib/work-actions');
+    appendEnforcementAudit(args.ticketId, {
+      origin: 'ai-subtask',
+      task: args.taskNum || null,
+      phase: 'red',
+      action: 'tdd-red-load-failure-rejected',
+      allow: false,
+      reason: args.signature,
+      outputPath: null,
+      meta: {
+        cycle: args.cycle,
+        testCommand: args.testCommand,
+        signature: args.signature,
+        snippet: args.snippet,
+      },
+    });
+  } catch {
+    /* fail-open on audit write — rejection still fires below */
+  }
+  errorExit(formatRedLoadFailureDiagnostic(args.signature));
+}
+
+/**
  * Inspect a test runner's stdout/stderr for a summary line indicating
  * pass/skip counts. Returns { passed, skipped, parsed } where `parsed` is
  * true only if we found a recognizable summary. Be lenient on format —
@@ -560,9 +619,27 @@ function cmdRecordRed(ticketId, args) {
   }
 
   // Run tests — they must FAIL
-  const exitCode = runTestCommand(cmd);
+  const { exitCode, stdout, stderr } = runTestCommandWithOutput(cmd);
   if (exitCode === 0) {
     errorExit('Tests must FAIL in RED phase. Tests passed (exit 0).');
+  }
+
+  // GH-532: reject fake-RED caused by load failures (ReferenceError /
+  // SyntaxError / Cannot find module / 0 tests reported). These exit
+  // non-zero but the test file never actually ran an assertion.
+  // Scan stdout and stderr independently — concatenating them can leak
+  // an unclosed YAML-envelope state across the seam when stdout is
+  // truncated (timeout / signal) and mask a real stderr load failure.
+  const loadFailure = detectRedLoadFailure({ stdout, stderr });
+  if (loadFailure.matched) {
+    rejectRedLoadFailure({
+      ticketId,
+      cycle: state.currentCycle,
+      testCommand: cmd,
+      signature: loadFailure.signature,
+      snippet: extractLoadFailureSnippet(loadFailure.line),
+      taskNum,
+    });
   }
 
   // Record evidence
@@ -601,8 +678,7 @@ function cmdRecordRed(ticketId, args) {
 function cmdRecordRedSynthesized(ticketId, args, cmd, taskNum, opts) {
   // Validate reason (mirrors cmdException). Empty/missing → BYPASS, no audit.
   const reasonIdx = args.indexOf('--reason');
-  const reason =
-    reasonIdx !== -1 && reasonIdx + 1 < args.length ? args[reasonIdx + 1] : undefined;
+  const reason = reasonIdx !== -1 && reasonIdx + 1 < args.length ? args[reasonIdx + 1] : undefined;
   if (!reason || !reason.trim()) {
     // Write a BYPASS: line to stderr so callers see the recovery hint. Do NOT
     // append an audit row — fail-closed: no justification ⇒ no record.
