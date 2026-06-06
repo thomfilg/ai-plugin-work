@@ -15,6 +15,9 @@
 const fs = require('fs');
 const path = require('path');
 
+const { detectDefaultBranch, loadPrDiffFiles } = require('./lib/repo-meta');
+const { buildClassifierCtx } = require('./lib/classifier-ctx');
+
 if (require.main === module) {
   process.on('uncaughtException', (err) => {
     console.error(
@@ -79,7 +82,9 @@ try {
 }
 
 // ─── Step registry ──────────────────────────────────────────────────────────
-const { runStep, STEPS } = require(path.join(__dirname, 'lib', 'step-registry'));
+const { runStep, STEPS, dispatchStepResult } = require(
+  path.join(__dirname, 'lib', 'step-registry')
+);
 
 // ─── State management ───────────────────────────────────────────────────────
 
@@ -112,6 +117,10 @@ function initState(ticketId, prNumber) {
     maxAttempts: 40,
     lastMonitorResult: null,
     failureCategory: null,
+    // Infra-retry telemetry (GH-508 Task 4). `count` tracks how many
+    // infra-retry attempts have been performed for the current PR; `attempts`
+    // records per-attempt diagnostics for the report step (Task 6).
+    infraRetry: { count: 0, attempts: [] },
     startTime: new Date().toISOString(),
   };
 }
@@ -125,15 +134,22 @@ function getNextInstruction(ticketId, prNumber) {
   const tasksDir = path.join(TASKS_BASE, ticketId);
   const candidateWorktree = path.join(WORKTREES_BASE, `${MAIN_WORKTREE_FOLDER}-${ticketId}`);
   const worktreeDir = fs.existsSync(candidateWorktree) ? candidateWorktree : process.cwd();
-  const ctx = {
+
+  // PR #542 cursor[bot]: monitor mutates state._ciAllJobs / _ciFailedLogs /
+  // _ciStatus mid-loop, so a ctx built once before the loop hands a stale
+  // snapshot to a later step (e.g. infra-retry). Rebuild ctx fresh on every
+  // iteration so subsequent steps observe the post-monitor state.
+  const freshCtx = () => ({
     tasksDir,
     worktreeDir,
     TASKS_BASE,
     workScriptsDir: path.join(__dirname, '..', 'work', 'scripts'),
-  };
+    ...buildClassifierCtx(state, worktreeDir),
+  });
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
+    const ctx = freshCtx();
     if (state.status === 'complete' || !STEPS.includes(state.currentStep)) {
       // Re-verify against GitHub before honoring a saved "complete". The
       // saved state is a cache of a prior run's decision; if anything has
@@ -189,6 +205,39 @@ function getNextInstruction(ticketId, prNumber) {
     const result = runStep(state.currentStep, state, ctx);
 
     if (result) {
+      // action:'surface' is terminal (spec API/Interface Changes — GH-508).
+      // Stop the loop without marking status='complete' so the next /follow-up
+      // invocation can resume from a live re-evaluation rather than the cache.
+      if (result.action === 'surface') {
+        state.currentStep = 'report';
+        // Persist the surface reason as a failureCategory so the next
+        // /follow-up cycle's report step recognises the workflow is still
+        // stuck and does NOT mark status=complete. The reason may live on
+        // the top-level result (legacy shape) or under result.payload.reason
+        // (newer shape, mirrors auto-advance hook).
+        const surfaceReason = (result.payload && result.payload.reason) || result.reason || null;
+        if (surfaceReason) {
+          state.failureCategory = surfaceReason;
+        }
+        // Bug 542-10: build the diagnostic summary BEFORE returning so the
+        // auto-advance hook (which treats `surface` as terminal) shows the
+        // per-attempt GitHub Actions URLs without requiring a second
+        // /follow-up invocation.
+        try {
+          const reportResult = runStep('report', state, ctx);
+          const summary =
+            (reportResult &&
+              (reportResult.summary || (reportResult.payload && reportResult.payload.summary))) ||
+            null;
+          if (summary) {
+            result.payload = Object.assign({}, result.payload || {}, { summary });
+          }
+        } catch (_e) {
+          /* fail open — surface still terminal; user can re-run /follow-up */
+        }
+        saveState(ticketId, state);
+        return result;
+      }
       saveState(ticketId, state);
       return result;
     }
@@ -297,4 +346,15 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { getNextInstruction };
+module.exports = {
+  getNextInstruction,
+  initState,
+  dispatchStepResult,
+  // test-only escape hatch — exposes pure helpers for legacy unit tests. Tests
+  // that need a fresh cache should invalidate the require cache for
+  // `./lib/repo-meta` rather than calling a reset method.
+  __test__: {
+    detectDefaultBranch,
+    loadPrDiffFiles,
+  },
+};

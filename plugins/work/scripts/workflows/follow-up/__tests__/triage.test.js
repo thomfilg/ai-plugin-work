@@ -24,12 +24,16 @@ function makeState(exitCode, output) {
 }
 
 describe('triage step', () => {
-  it('routes CI failure to fix-ci', () => {
+  it('routes CI failure to infra-retry (Bug A — infra-retry visited before fix-ci)', () => {
     const state = makeState(1, 'CI: FAILING\n  ✗ Test (Node 20) — FAILED');
     const result = triage(state, {});
     assert.equal(result, null);
     assert.equal(state.failureCategory, 'ci_failure');
-    assert.equal(state.currentStep, 'fix-ci');
+    assert.equal(
+      state.currentStep,
+      'infra-retry',
+      'STEPS order requires infra-retry before fix-ci; routing to fix-ci would skip retry gating'
+    );
   });
 
   it('routes merge conflict to fix-ci', () => {
@@ -69,12 +73,12 @@ describe('triage step', () => {
     assert.equal(state.currentStep, 'report');
   });
 
-  it('routes CI cancelled to fix-ci when merge is blocked and no reviews', () => {
+  it('routes CI cancelled to infra-retry when merge is blocked and no reviews', () => {
     const state = makeState(1, 'CI: CANCELLED\nMERGE STATUS: BLOCKED');
     const result = triage(state, {});
     assert.equal(result, null);
     assert.equal(state.failureCategory, 'ci_cancelled_blocking');
-    assert.equal(state.currentStep, 'fix-ci');
+    assert.equal(state.currentStep, 'infra-retry');
   });
 
   it('does NOT route CI cancelled to fix-ci when reviews are blocking', () => {
@@ -109,6 +113,7 @@ describe('triage step', () => {
     const state = makeState(1, 'CI: FAILING\nReviews: 1 BLOCKING');
     const result = triage(state, {});
     assert.equal(state.failureCategory, 'ci_failure');
+    assert.equal(state.currentStep, 'infra-retry');
   });
 
   it('blocking reviews take priority over CI pending', () => {

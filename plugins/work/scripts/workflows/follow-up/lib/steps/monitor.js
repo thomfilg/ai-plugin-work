@@ -295,6 +295,105 @@ function computeExitCode(prInfo, ci, reviews) {
   return ciOk && reviewsOk && mergeOk ? 0 : 1;
 }
 
+// Map gh pr checks status → infra-classifier `ciStatus` literal ('success' /
+// 'failure' / 'in_progress'). Used by the retry-success short-circuit in
+// infra-retry.js. Bug B (GH-508): production ctx must surface this.
+function mapCiStatus(ciStatus) {
+  if (ciStatus === 'passing' || ciStatus === 'no-checks') return 'success';
+  if (ciStatus === 'failing') return 'failure';
+  return 'in_progress';
+}
+
+// Fetch all jobs + failed logs for the first failed run. Conservative: only
+// called when CI is failing AND we have a runId. The classifier's signal1
+// needs the full job list; signal2 needs the empty-log evidence; signal4
+// scans the aggregated raw logs. Bug B (GH-508).
+function fetchClassifierContext(failedJobs, worktreeDir) {
+  const out = { allJobs: [], failedLogs: '' };
+  const runId = failedJobs.find((j) => j.runId)?.runId;
+  if (!runId || !/^\d+$/.test(String(runId))) return out;
+  try {
+    const jobsRaw = execFileSync('gh', ['run', 'view', String(runId), '--json', 'jobs'], {
+      encoding: 'utf8',
+      timeout: 20000,
+      cwd: worktreeDir,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      maxBuffer: 5 * 1024 * 1024,
+      env: buildChildEnv(),
+    });
+    const parsed = JSON.parse(jobsRaw || '{}');
+    if (Array.isArray(parsed.jobs)) out.allJobs = parsed.jobs;
+  } catch {
+    /* fail-open — classifier will treat as empty */
+  }
+  try {
+    out.failedLogs = execFileSync('gh', ['run', 'view', String(runId), '--log-failed'], {
+      encoding: 'utf8',
+      timeout: 30000,
+      cwd: worktreeDir,
+      stdio: ['pipe', 'pipe', 'pipe'],
+      maxBuffer: 10 * 1024 * 1024,
+      env: buildChildEnv(),
+    });
+  } catch (err) {
+    out.failedLogs = (err && err.stdout) || '';
+  }
+  return out;
+}
+
+// Annotate each failed job with its `jobId` (gh's databaseId) by joining the
+// failed-job list against the full job list by name. Bug C (GH-508): the
+// infra-classifier's signal2 requires a per-job ID to call
+// `gh run view <runId> --job <jobId> --log-failed`.
+function indexJobsByName(allJobs) {
+  const byName = new Map();
+  if (!Array.isArray(allJobs)) return byName;
+  for (const j of allJobs) {
+    const id = j && (j.databaseId || j.id);
+    if (j && j.name && id) byName.set(j.name, String(id));
+  }
+  return byName;
+}
+
+function attachJobIds(failedJobs, allJobs) {
+  const byName = indexJobsByName(allJobs);
+  if (byName.size === 0) return;
+  for (const fj of failedJobs) {
+    if (!fj.jobId && byName.has(fj.name)) fj.jobId = byName.get(fj.name);
+  }
+}
+
+// Extract failing-test file paths from a CI log blob. Feeds the classifier's
+// signal3 (unrelated failures): if none of the failing tests overlap the PR
+// diff, the failure is likely infra/flake, not code the PR touched.
+//
+// Conservative by design — we'd rather miss a path than hallucinate one and
+// poison signal3. Recognised shapes:
+//   - vitest/jest:  `FAIL <path>.test.ts` or `FAIL <path>.spec.tsx (…)`
+//   - playwright:   `  × <path>.spec.ts:LINE:COL › …` (also `✘`, `✕`)
+//   - generic:      any line containing `FAIL|×|✘|✕|failed` plus a
+//                   `(plugins|apps|packages|src|tests)/.*\.(test|spec)\.[jt]sx?`
+//                   substring.
+const TEST_PATH_RE =
+  /\b((?:plugins|apps|packages|src|tests|test|e2e)\/[\w./@-]+?\.(?:test|spec)\.[jt]sx?)\b/g;
+const FAIL_MARKER_RE = /\b(FAIL|failed)\b|[×✘✕]/;
+
+function extractFailedTestPaths(rawLogs) {
+  if (typeof rawLogs !== 'string' || rawLogs.length === 0) return [];
+  const seen = new Set();
+  for (const line of rawLogs.split('\n')) {
+    if (!FAIL_MARKER_RE.test(line)) continue;
+    let m;
+    TEST_PATH_RE.lastIndex = 0;
+    while ((m = TEST_PATH_RE.exec(line)) !== null) {
+      const p = m[1];
+      if (p.startsWith('/')) continue;
+      seen.add(p);
+    }
+  }
+  return Array.from(seen);
+}
+
 // Order matters: read `j.url || j.link`. `checkCI()` renames `link → url` for
 // failed jobs that have been normalized, but legacy/un-normalized entries
 // still carry only `link`. Probing `url` first preserves the canonical name
@@ -361,10 +460,50 @@ module.exports = function registerMonitor(register) {
     resolveMissingRunIds(initialFailedJobs, ctx.worktreeDir);
     state._ciFailedJobs = initialFailedJobs;
 
-    if (exitCode === 0) state.currentStep = 'report';
+    // Bug B (GH-508): surface the classifier context the infra-classifier
+    // depends on. Only fetch jobs+logs when CI is actually failing — passing
+    // / pending runs don't need this and we want to keep the hot loop fast.
+    state._ciStatus = mapCiStatus(ci.status);
+    // Bug 542-12: stamp the freshness so infra-retry can refuse a persisted
+    // _ciStatus inherited from a prior process (which could be stale).
+    state._ciStatusFreshness = { pid: process.pid, at: new Date().toISOString() };
+    if (ci.status === 'failing' && initialFailedJobs.length > 0) {
+      const classifierCtx = fetchClassifierContext(initialFailedJobs, ctx.worktreeDir);
+      state._ciAllJobs = classifierCtx.allJobs;
+      state._ciFailedLogs = classifierCtx.failedLogs;
+      // Bug C (GH-508): join databaseId from allJobs by name so each failed
+      // job carries the per-job ID signal2 needs.
+      attachJobIds(initialFailedJobs, classifierCtx.allJobs);
+      // PR #542 cursor[bot]: extract failing-test file paths from the raw
+      // logs so classifier signal3 has something to read. Without this,
+      // s.failedTests stays empty and the (signal3 && signal4) path can
+      // never fire from real CI data.
+      state._ciFailedTests = extractFailedTestPaths(classifierCtx.failedLogs);
+    } else {
+      state._ciAllJobs = [];
+      state._ciFailedLogs = '';
+      state._ciFailedTests = [];
+    }
+
+    if (exitCode === 0) state.currentStep = computeNextStepOnGreen(state);
     return null;
   });
 };
+
+/**
+ * R15 (GH-508): when CI turns green after an infra-flake rerun, route through
+ * infra-retry so maybeHandleRetrySuccess can mark the pending attempt
+ * `succeeded` and emit the canonical retry-success log. Otherwise proceed
+ * straight to report.
+ */
+function computeNextStepOnGreen(state) {
+  const attempts = state && state.infraRetry && state.infraRetry.attempts;
+  if (Array.isArray(attempts) && attempts.length > 0) {
+    const last = attempts[attempts.length - 1];
+    if (last && last.outcome === 'pending') return 'infra-retry';
+  }
+  return 'report';
+}
 
 // test-only escape hatch — not public API. Exposes pure + shell-out helpers
 // so monitor.test.js can exercise each one in isolation.
@@ -375,4 +514,8 @@ module.exports.__test__ = {
   computeExitCode,
   resolveMissingRunIds,
   buildInitialFailedJobs,
+  mapCiStatus,
+  fetchClassifierContext,
+  computeNextStepOnGreen,
+  extractFailedTestPaths,
 };
