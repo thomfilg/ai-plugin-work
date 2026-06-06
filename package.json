@@ -1,6 +1,6 @@
 {
   "name": "work-workflow",
-  "version": "3.29.0",
+  "version": "3.29.1",
   "description": "Deterministic workflow orchestrator for Jira task implementation with state machine validation.",
   "license": "MIT",
   "repository": {
