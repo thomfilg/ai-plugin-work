@@ -37,7 +37,15 @@ trap 'on_signal TERM' TERM
 # prune plugins/work/hooks/__tests__: those orchestrator/session-state tests are
 # intentionally excluded from the suite (they share /tmp session-lock + workflow
 # state and flake when run concurrently with the other stateful work tests).
-mapfile -t FILES < <(find plugins -type d \( -name node_modules -o -path 'plugins/work/hooks' \) -prune -o -type f \( -name '*.test.js' -o -name '*.spec.js' \) -print | sort)
+# Discover under plugins/ AND factories/. Factories live at repo root (they're
+# stand-alone declarative builders shared across plugins), so they need to be
+# picked up explicitly — the prior `find plugins …` scope skipped them.
+mapfile -t FILES < <(
+  {
+    find plugins -type d \( -name node_modules -o -path 'plugins/work/hooks' \) -prune -o -type f \( -name '*.test.js' -o -name '*.spec.js' \) -print
+    [ -d factories ] && find factories -type d -name node_modules -prune -o -type f \( -name '*.test.js' -o -name '*.spec.js' \) -print
+  } | sort
+)
 
 if [ -f "$SKIP_FILE" ]; then
   FILTERED=()
