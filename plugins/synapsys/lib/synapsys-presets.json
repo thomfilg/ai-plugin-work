@@ -1,5 +1,5 @@
 {
-  "git-ops": "\\b(git\\s+(push|pull|fetch|merge|rebase|reset|stash|cherry-pick|checkout|switch|branch|tag|remote|clone|init|add|rm|mv|log|diff|status|show|blame|bisect|reflog|worktree|submodule|config))\\b",
-  "ci-monitor": "\\b(gh\\s+run\\s+(list|view|watch|rerun|cancel|download|view-log)|gh\\s+workflow|gh\\s+pr\\s+checks|ci\\s+(status|logs|monitor)|workflow\\s+run|github\\s+actions)\\b",
-  "review-comment-handling": "\\b(resolve\\s+(comment|thread|review)|dismiss\\s+(comment|review)|reply\\s+to\\s+(comment|review)|address\\s+(comment|review|feedback)|gh\\s+pr\\s+review|gh\\s+api\\s+.*/(comments|reviews)|copilot.*comment|cursor.*comment)\\b"
+  "git-ops": "\\b(git\\s+(merge|push|rebase|cherry-pick|reset|checkout)|gh\\s+pr\\s+(merge|view|checks|create|edit)|cascade-merge|merge\\s+conflict)\\b",
+  "ci-monitor": "\\b(follow-up-next|gh\\s+run\\s+(view|rerun|watch)|gh\\s+pr\\s+checks|--log-failed)\\b",
+  "review-comment-handling": "(--solve-comment|--skip-comment|cursor\\[bot\\]|copilot\\[bot\\]|\\breview\\s+(thread|comment)\\b)"
 }
