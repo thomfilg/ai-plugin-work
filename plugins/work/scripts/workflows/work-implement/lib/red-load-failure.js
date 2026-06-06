@@ -11,6 +11,25 @@
  * Exported so `tdd-phase-state.js record-red` and future consumers
  * (e.g. `enforce-tdd-on-stop.js`) share the exact patterns and scan
  * semantics without copy-paste drift.
+ *
+ * RUNNER ASSUMPTION — node:test ONLY:
+ *   The detector assumes node:test TAP output shape, where failing-test
+ *   diagnostics are wrapped in `---` / `...` YAML envelopes. The YAML guard
+ *   in `shouldSkipLine` is what prevents a real failing test whose body
+ *   throws `ReferenceError` (emitted by the runner under `error: |-`) from
+ *   being misclassified as a load failure.
+ *
+ *   jest / vitest / mocha do NOT emit those envelopes. A real failing test
+ *   under those runners that throws `ReferenceError:` / `SyntaxError:`
+ *   would be falsely rejected here. Today the repo is node:test-only (see
+ *   `plugins/work/CLAUDE.md` → "Node built-in test runner"), so this is
+ *   acceptable.
+ *
+ *   If support for jest / vitest / mocha is ever added, the heuristic must
+ *   be revised to require the load-failure signature to appear BEFORE the
+ *   first `TAP version` line (i.e. during test-file load, before the
+ *   runner has started reporting). Until then, do not reuse this module
+ *   against output from other runners.
  */
 
 const RED_LOAD_FAILURE_PATTERNS = Object.freeze([
@@ -20,7 +39,11 @@ const RED_LOAD_FAILURE_PATTERNS = Object.freeze([
     name: 'Cannot find module',
     regex: /Cannot find module|MODULE_NOT_FOUND/,
   }),
-  Object.freeze({ name: '0 tests', regex: /#\s*tests\s+0\b|\b0\s+tests?\b/ }),
+  // Match only the node:test TAP summary line: `# tests 0` anchored at the
+  // start of a line. A loose `\b0\s+tests?\b` alternative would false-positive
+  // on legitimate `not ok` lines whose test name contains the phrase
+  // "0 tests" (e.g. `not ok 1 - returns 0 tests when input is empty`).
+  Object.freeze({ name: '0 tests', regex: /^#\s*tests\s+0\b/ }),
 ]);
 
 /**

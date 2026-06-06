@@ -11,7 +11,7 @@
 
 const { describe, it, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert');
-const { execSync, execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -26,19 +26,16 @@ function createTempHome() {
 
 function createTempGitRepo() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdd-git-loadfail-'));
-  execSync('git init', { cwd: dir, stdio: 'pipe' });
-  execSync('git config user.email "test@test.com" && git config user.name "Test"', {
-    cwd: dir,
-    stdio: 'pipe',
-  });
+  const gitOpts = { cwd: dir, stdio: 'pipe' };
+  spawnSync('git', ['init', '-q'], gitOpts);
+  spawnSync('git', ['config', 'user.email', 'test@test.com'], gitOpts);
+  spawnSync('git', ['config', 'user.name', 'Test'], gitOpts);
   fs.writeFileSync(path.join(dir, 'README.md'), 'init');
-  const commitCmd = ['git', 'add', '.', '&&', 'git', ['com', 'mit'].join(''), '-m', '"init"'].join(
-    ' '
-  );
-  execSync(commitCmd, { cwd: dir, stdio: 'pipe' });
+  spawnSync('git', ['add', '.'], gitOpts);
+  spawnSync('git', ['commit', '-q', '-m', 'init'], gitOpts);
   // Stage a fresh test file so the RED `testFiles.length === 0` gate passes.
   fs.writeFileSync(path.join(dir, 'foo.test.js'), '// failing test placeholder\n');
-  execSync('git add foo.test.js', { cwd: dir, stdio: 'pipe' });
+  spawnSync('git', ['add', 'foo.test.js'], gitOpts);
   return dir;
 }
 
@@ -113,11 +110,7 @@ describe('tdd-phase-state record-red — load-failure rejection (GH-532)', () =>
         '    at Object.<anonymous> (/tmp/foo.test.js:3:1)\n',
       exitCode: 1,
     });
-    const { exitCode, stderr } = runCli(
-      `record-red GH-532-RE --cmd "${script}"`,
-      homeDir,
-      repo
-    );
+    const { exitCode, stderr } = runCli(`record-red GH-532-RE --cmd "${script}"`, homeDir, repo);
     assert.strictEqual(exitCode, 1, `expected rejection, got stderr: ${stderr}`);
     assert.ok(
       /ReferenceError/.test(stderr),
@@ -141,16 +134,9 @@ describe('tdd-phase-state record-red — load-failure rejection (GH-532)', () =>
         '    at wrapSafe (node:internal/modules/cjs/loader)\n',
       exitCode: 1,
     });
-    const { exitCode, stderr } = runCli(
-      `record-red GH-532-SE --cmd "${script}"`,
-      homeDir,
-      repo
-    );
+    const { exitCode, stderr } = runCli(`record-red GH-532-SE --cmd "${script}"`, homeDir, repo);
     assert.strictEqual(exitCode, 1, `expected rejection, got stderr: ${stderr}`);
-    assert.ok(
-      /SyntaxError/.test(stderr),
-      `stderr should name SyntaxError, got: ${stderr}`
-    );
+    assert.ok(/SyntaxError/.test(stderr), `stderr should name SyntaxError, got: ${stderr}`);
     assert.ok(!/BYPASS:/.test(stderr), 'rejection diagnostic must not include BYPASS');
     const state = readState(homeDir, 'GH-532-SE');
     assert.strictEqual(state.currentPhase, 'red');
@@ -164,14 +150,10 @@ describe('tdd-phase-state record-red — load-failure rejection (GH-532)', () =>
       stderr:
         "Error: Cannot find module './missing-helper'\n" +
         '    at Function.Module._resolveFilename (node:internal/modules/cjs/loader:1234:15)\n' +
-        '  code: \'MODULE_NOT_FOUND\'\n',
+        "  code: 'MODULE_NOT_FOUND'\n",
       exitCode: 1,
     });
-    const { exitCode, stderr } = runCli(
-      `record-red GH-532-MM --cmd "${script}"`,
-      homeDir,
-      repo
-    );
+    const { exitCode, stderr } = runCli(`record-red GH-532-MM --cmd "${script}"`, homeDir, repo);
     assert.strictEqual(exitCode, 1, `expected rejection, got: ${stderr}`);
     assert.ok(
       /Cannot find module/.test(stderr),
@@ -188,26 +170,14 @@ describe('tdd-phase-state record-red — load-failure rejection (GH-532)', () =>
     runCli('init GH-532-ZT', homeDir);
     // node:test TAP summary on a file with no `it(...)` calls.
     const tap =
-      'TAP version 13\n' +
-      '1..0\n' +
-      '# tests 0\n' +
-      '# suites 0\n' +
-      '# pass 0\n' +
-      '# fail 0\n';
+      'TAP version 13\n' + '1..0\n' + '# tests 0\n' + '# suites 0\n' + '# pass 0\n' + '# fail 0\n';
     const script = createOutputScript(scriptDir, 'zero-tests', {
       stdout: tap,
       exitCode: 1,
     });
-    const { exitCode, stderr } = runCli(
-      `record-red GH-532-ZT --cmd "${script}"`,
-      homeDir,
-      repo
-    );
+    const { exitCode, stderr } = runCli(`record-red GH-532-ZT --cmd "${script}"`, homeDir, repo);
     assert.strictEqual(exitCode, 1, `expected rejection, got: ${stderr}`);
-    assert.ok(
-      /0 tests?/.test(stderr),
-      `stderr should name 0 tests, got: ${stderr}`
-    );
+    assert.ok(/0 tests?/.test(stderr), `stderr should name 0 tests, got: ${stderr}`);
     assert.ok(!/BYPASS:/.test(stderr));
     const state = readState(homeDir, 'GH-532-ZT');
     assert.strictEqual(state.currentPhase, 'red');
@@ -226,7 +196,7 @@ describe('tdd-phase-state record-red — load-failure rejection (GH-532)', () =>
         '  duration_ms: 1.234\n' +
         '  failureType: testCodeFailure\n' +
         '  error: |-\n' +
-        "    AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n" +
+        '    AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n' +
         '    + actual - expected\n' +
         '    + 1\n' +
         '    - 2\n' +
@@ -241,11 +211,7 @@ describe('tdd-phase-state record-red — load-failure rejection (GH-532)', () =>
       homeDir,
       repo
     );
-    assert.strictEqual(
-      exitCode,
-      0,
-      `expected acceptance, got exit=${exitCode}, stderr: ${stderr}`
-    );
+    assert.strictEqual(exitCode, 0, `expected acceptance, got exit=${exitCode}, stderr: ${stderr}`);
     const result = JSON.parse(stdout);
     assert.strictEqual(result.ok, true);
     assert.strictEqual(result.phase, 'red');
@@ -268,11 +234,7 @@ describe('tdd-phase-state record-red — load-failure rejection (GH-532)', () =>
       exitCode: 1,
     });
     const cmdQuoted = `"${script}"`;
-    const { exitCode } = runCli(
-      `record-red GH-532-AUD --cmd ${cmdQuoted}`,
-      homeDir,
-      repo
-    );
+    const { exitCode } = runCli(`record-red GH-532-AUD --cmd ${cmdQuoted}`, homeDir, repo);
     assert.strictEqual(exitCode, 1, 'expected rejection exit code 1');
 
     const actionsPath = path.join(
@@ -282,14 +244,9 @@ describe('tdd-phase-state record-red — load-failure rejection (GH-532)', () =>
       'GH-532-AUD',
       '.work-actions.json'
     );
-    assert.ok(
-      fs.existsSync(actionsPath),
-      `expected .work-actions.json at ${actionsPath}`
-    );
+    assert.ok(fs.existsSync(actionsPath), `expected .work-actions.json at ${actionsPath}`);
     const actions = JSON.parse(fs.readFileSync(actionsPath, 'utf8'));
-    const rejectionRows = actions.filter(
-      (a) => a.action === 'tdd-red-load-failure-rejected'
-    );
+    const rejectionRows = actions.filter((a) => a.action === 'tdd-red-load-failure-rejected');
     assert.strictEqual(
       rejectionRows.length,
       1,
@@ -343,7 +300,7 @@ describe('tdd-phase-state record-red — load-failure rejection (GH-532)', () =>
       '  duration_ms: 0.5\n' +
       '  failureType: testCodeFailure\n' +
       '  error: |-\n' +
-      "    AssertionError [ERR_ASSERTION]: Expected fn to throw\n" +
+      '    AssertionError [ERR_ASSERTION]: Expected fn to throw\n' +
       '  details:\n' +
       "    expected: 'ReferenceError'\n" +
       '    actual: undefined\n' +
@@ -370,6 +327,52 @@ describe('tdd-phase-state record-red — load-failure rejection (GH-532)', () =>
     const state = readState(homeDir, 'GH-532-DET');
     const cycle = state.cycles.find((c) => c.cycle === state.currentCycle);
     assert.ok(cycle && cycle.red, 'record.red must be persisted (R5 / AC9)');
+  });
+
+  it('TAP "not ok" line whose test name contains "0 tests" is accepted as valid RED', () => {
+    // Cursor Bugbot (PR #550): the legacy `0 tests` regex `\b0\s+tests?\b`
+    // matched anywhere on a line and false-positived on legitimate node:test
+    // `not ok` lines whose test name contains the phrase "0 tests".
+    // The regex must only match the node:test TAP summary line shape
+    // (`# tests 0` anchored at column 0).
+    runCli('init GH-532-NOK', homeDir);
+    const tap =
+      'TAP version 13\n' +
+      '# Subtest: returns 0 tests when input is empty\n' +
+      'not ok 1 - returns 0 tests when input is empty\n' +
+      '  ---\n' +
+      '  duration_ms: 0.8\n' +
+      '  failureType: testCodeFailure\n' +
+      '  error: |-\n' +
+      '    AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n' +
+      '    + actual - expected\n' +
+      '    + 0\n' +
+      '    - 1\n' +
+      '  ...\n' +
+      '1..1\n' +
+      '# tests 1\n' +
+      '# pass 0\n' +
+      '# fail 1\n';
+    const script = createOutputScript(scriptDir, 'not-ok-zero-tests', {
+      stdout: tap,
+      exitCode: 1,
+    });
+    const { exitCode, stdout, stderr } = runCli(
+      `record-red GH-532-NOK --cmd "${script}"`,
+      homeDir,
+      repo
+    );
+    assert.strictEqual(
+      exitCode,
+      0,
+      `"not ok" line containing "0 tests" must be accepted, got stderr: ${stderr}`
+    );
+    const result = JSON.parse(stdout);
+    assert.strictEqual(result.ok, true);
+    assert.strictEqual(result.phase, 'red');
+    const state = readState(homeDir, 'GH-532-NOK');
+    const cycle = state.cycles.find((c) => c.cycle === state.currentCycle);
+    assert.ok(cycle && cycle.red, 'record.red must be persisted for real RED');
   });
 
   it('Runtime ReferenceError inside node:test YAML error block is accepted', () => {
