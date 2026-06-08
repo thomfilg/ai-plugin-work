@@ -10,8 +10,13 @@ function withTempHome(fn) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-telemetry-unit-'));
   const prevHome = process.env.HOME;
   const prevDisable = process.env.SYNAPSYS_TELEMETRY;
+  const prevSessionEnv = process.env.CLAUDE_CODE_SESSION_ID;
   process.env.HOME = tmp;
   delete process.env.SYNAPSYS_TELEMETRY;
+  // Default: stub CLAUDE_CODE_SESSION_ID as unset so payload-only tests keep
+  // exercising the payload path. Tests that exercise env-var precedence opt in
+  // by setting it after withTempHome enters fn.
+  delete process.env.CLAUDE_CODE_SESSION_ID;
   delete require.cache[require.resolve('../telemetry')];
   try {
     return fn(tmp);
@@ -20,6 +25,8 @@ function withTempHome(fn) {
     else process.env.HOME = prevHome;
     if (prevDisable === undefined) delete process.env.SYNAPSYS_TELEMETRY;
     else process.env.SYNAPSYS_TELEMETRY = prevDisable;
+    if (prevSessionEnv === undefined) delete process.env.CLAUDE_CODE_SESSION_ID;
+    else process.env.CLAUDE_CODE_SESSION_ID = prevSessionEnv;
     delete require.cache[require.resolve('../telemetry')];
   }
 }

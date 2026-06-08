@@ -19,6 +19,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
+const sharedSessionId = require('./session-id');
 
 const PROCESS_START_MS = Date.now();
 const MATCH_CAP = 200;
@@ -45,6 +46,12 @@ function isDisabled(memory) {
 const SAFE_SESSION_ID = /^[A-Za-z0-9._-]{1,128}$/;
 
 function resolveSessionId(payload) {
+  // Prefer `process.env.CLAUDE_CODE_SESSION_ID` so telemetry events key on the
+  // same id as the inject-ledger (GH-583) — without this, a memory fire would
+  // increment the ledger under one id and write its telemetry row under a
+  // different one, splitting per-session analytics across two buckets.
+  const fromEnv = sharedSessionId.resolveFromEnv();
+  if (fromEnv) return fromEnv;
   if (!payload || typeof payload.session_id !== 'string' || !payload.session_id) {
     return '_unknown-session';
   }
