@@ -107,6 +107,7 @@ function discoverStores(cwd) {
   const seen = new Set();
 
   const push = (kind, dir) => {
+    if (!dir) return;
     const key = path.resolve(dir);
     if (seen.has(key)) return;
     if (!fs.existsSync(path.join(dir, MARKER))) return;
@@ -116,17 +117,27 @@ function discoverStores(cwd) {
     out.push({ kind, dir, projectName: kind === 'shared' ? null : projectName });
   };
 
-  push('local', path.join(resolved, '.claude', FOLDER));
+  // Build a kind→dir map from the canonical candidate list so the loop below
+  // mirrors PRECEDENCE_ORDER without duplicating literal kind strings.
+  const candidateMap = Object.fromEntries(
+    candidateStores(resolved, projectName).map((c) => [c.kind, c.dir])
+  );
 
-  const wt = findAncestorStore(path.dirname(resolved));
-  if (wt) push('worktree', wt);
-
-  push('global', path.join(os.homedir(), '.claude', FOLDER, projectName));
-
-  // shared: cross-project store under home — discovered for every project,
-  // regardless of cwd or project name. Lives outside the per-project
-  // namespace so it can never collide with a same-named project's global store.
-  push('shared', path.join(os.homedir(), '.claude', SHARED_FOLDER));
+  // Walk PRECEDENCE_ORDER as the single source of truth. Reordering or
+  // extending PRECEDENCE_ORDER automatically reorders this discovery output;
+  // adding a new kind only requires extending candidateStores.
+  for (const kind of PRECEDENCE_ORDER) {
+    if (kind === 'worktree') {
+      // worktree has bespoke discovery (ancestor walk) — the candidateMap
+      // entry is only used by --kind=worktree installs that drop a marker at
+      // the parent .claude/heimdall directly. Discovery prefers the nearest
+      // ancestor carrying a marker, which can be that same path or higher.
+      const wt = findAncestorStore(path.dirname(resolved));
+      if (wt) push('worktree', wt);
+      continue;
+    }
+    push(kind, candidateMap[kind]);
+  }
 
   return out;
 }

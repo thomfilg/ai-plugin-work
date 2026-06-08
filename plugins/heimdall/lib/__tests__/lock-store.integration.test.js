@@ -14,9 +14,15 @@ const os = require('node:os');
 const path = require('node:path');
 
 const lockStorePath = path.resolve(__dirname, '..', 'lock-store');
-const { MARKER, FOLDER, candidateStores, discoverStores, writeConfig, SHARED_FOLDER } = require(
-  lockStorePath
-);
+const {
+  MARKER,
+  FOLDER,
+  candidateStores,
+  discoverStores,
+  writeConfig,
+  SHARED_FOLDER,
+  PRECEDENCE_ORDER,
+} = require(lockStorePath);
 
 let originalHome;
 let base;
@@ -122,6 +128,54 @@ describe('findAncestorStore HOME boundary', () => {
       undefined,
       `expected no worktree store, got ${JSON.stringify(worktree)}`
     );
+  });
+});
+
+describe('discoverStores order is data-driven from PRECEDENCE_ORDER', () => {
+  it('returned kinds match PRECEDENCE_ORDER when all four markers are seeded', () => {
+    // Regression guard: reordering PRECEDENCE_ORDER must transparently
+    // reorder discoverStores output. If the loop ever stops driving off the
+    // constant, this test catches it.
+    const wt = path.join(base, 'pmwt');
+    const repo = path.join(wt, 'repo');
+    fs.mkdirSync(repo, { recursive: true });
+
+    writeConfig(path.join(repo, '.claude', FOLDER), { kind: 'local', locks: [] });
+    writeConfig(path.join(wt, '.claude', FOLDER), { kind: 'worktree', locks: [] });
+    writeConfig(path.join(fakeHome, '.claude', FOLDER, 'repo'), { kind: 'global', locks: [] });
+    writeConfig(sharedDir, { kind: 'shared', locks: [] });
+
+    const stores = discoverStores(repo);
+    assert.deepEqual(
+      stores.map((s) => s.kind),
+      [...PRECEDENCE_ORDER]
+    );
+  });
+});
+
+describe('Backward-compat: pre-shared layouts unchanged', () => {
+  it('discoverStores with only local/worktree/global markers returns same shape as before #545', () => {
+    // Seeds the three pre-existing kinds and asserts that:
+    //   - exactly those three kinds come back, in their canonical order
+    //   - shared is absent (no marker → not surfaced)
+    //   - each non-shared store carries a projectName (not null)
+    const wt = path.join(base, 'bcwt');
+    const repo = path.join(wt, 'repo');
+    fs.mkdirSync(repo, { recursive: true });
+
+    writeConfig(path.join(repo, '.claude', FOLDER), { kind: 'local', locks: [] });
+    writeConfig(path.join(wt, '.claude', FOLDER), { kind: 'worktree', locks: [] });
+    writeConfig(path.join(fakeHome, '.claude', FOLDER, 'repo'), { kind: 'global', locks: [] });
+
+    const stores = discoverStores(repo);
+    assert.deepEqual(
+      stores.map((s) => s.kind),
+      ['local', 'worktree', 'global']
+    );
+    for (const s of stores) {
+      assert.equal(typeof s.projectName, 'string');
+      assert.ok(s.projectName.length > 0);
+    }
   });
 });
 
