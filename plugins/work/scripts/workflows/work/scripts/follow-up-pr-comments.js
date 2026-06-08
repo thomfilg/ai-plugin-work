@@ -2,16 +2,27 @@
 /**
  * follow-up-pr-comments.js
  *
- * Sequential PR comment resolution CLI. Provides subcommands to snapshot
- * PR comments, iterate them one-at-a-time by priority, and build
- * review-accountability.json incrementally.
+ * Sequential PR comment resolution CLI. This tool performs
+ * local tracking only by default: it snapshots PR comments, iterates
+ * them one-at-a-time by priority, and builds review-accountability.json
+ * incrementally — without ever touching the GitHub conversation threads.
  *
  * Subcommands:
- *   --snapshot --pr <N>                     Fetch & cache all PR comments
- *   --next-comment                          Return first unsolved comment
- *   --solve-comment <id> <sha> "<desc>"     Mark comment solved
- *   --skip-comment <id> "<reason>"          Mark comment skipped
- *   --status                                Show summary counts
+ *   --snapshot --pr <N>                            Fetch & cache all PR comments
+ *   --next-comment                                 Return first unsolved comment
+ *   --mark-locally-solved <id> <sha> "<desc>"      Mark comment solved (local only)
+ *   --mark-locally-skipped <id> "<reason>"         Mark comment skipped (local only)
+ *   --status                                       Show summary counts
+ *
+ * Deprecated aliases:
+ *   --solve-comment <id> <sha> "<desc>"     Deprecated alias of
+ *                                           --mark-locally-solved. Still
+ *                                           works for a 2-3 release
+ *                                           window; emits a one-line
+ *                                           stderr deprecation warning.
+ *   --skip-comment <id> "<reason>"          Deprecated alias of
+ *                                           --mark-locally-skipped. Same
+ *                                           deprecation warning behavior.
  *
  * Usage: node follow-up-pr-comments.js <subcommand> [args]
  */
@@ -39,6 +50,17 @@ function getFollowUpPr() {
 
 const getConfig = require('../../lib/get-config');
 const { getCurrentTaskId } = require('../../lib/scripts/get-ticket-id');
+
+// ── Deprecation warnings (Task 3, GH-537) ────────────────────────────────────
+// Legacy flag aliases keep working for a 2-3 release window but must emit
+// exactly one stderr line that names the replacement and clarifies that
+// the default is local-only (no GitHub thread is resolved).
+const DEPRECATION_SOLVE_MSG =
+  'warning: --solve-comment is renamed to --mark-locally-solved ' +
+  '(no GitHub thread is resolved).';
+const DEPRECATION_SKIP_MSG =
+  'warning: --skip-comment is renamed to --mark-locally-skipped ' +
+  '(no GitHub thread is resolved). Skips are local-only audit trail.';
 
 // ── Config & Paths ───────────────────────────────────────────────────────────
 
@@ -192,10 +214,15 @@ function handleSnapshot(prNumber) {
       process.exit(2);
     }
 
-    // Fetch resolved thread IDs to exclude
-    // getResolvedCommentIds returns { resolved: Set, outdatedThreadIds: Set }
+    // Fetch resolved thread IDs to exclude.
+    // getResolvedCommentIds returns:
+    //   { resolved: Set, outdatedThreadIds: Array, commentIdToThreadId: Map }
+    // commentIdToThreadId is persisted onto comment.threadId for
+    // forward-compatibility. The field is currently dormant — the opt-in
+    // GitHub-resolve flag that originally consumed it was withdrawn.
     const resolvedResult = getResolvedCommentIds(repo, prNumber);
     const resolvedIds = resolvedResult?.resolved || new Set();
+    const commentIdToThreadId = resolvedResult?.commentIdToThreadId || new Map();
 
     // Preserve solved/skipped state from previous snapshot to avoid
     // re-presenting comments that were already addressed (GH-358).
@@ -208,6 +235,14 @@ function handleSnapshot(prNumber) {
             status: c.status,
             commitSha: c.commitSha || null,
             resolution: c.resolution || null,
+            threadId: c.threadId || null,
+          });
+        } else if (c.threadId) {
+          // Preserve threadId for non-terminal statuses too, so a transient
+          // GraphQL miss in commentIdToThreadId doesn't wipe a previously
+          // recorded threadId on subsequent snapshots.
+          previousStatusMap.set(String(c.id), {
+            threadId: c.threadId,
           });
         }
       }
@@ -242,11 +277,13 @@ function handleSnapshot(prNumber) {
           line: null,
           original_line: null,
           priority: classifyCommentPriority(author, body),
-          status: previousStatusMap.has(String(review.id))
+          status: previousStatusMap.get(String(review.id))?.status
             ? previousStatusMap.get(String(review.id)).status
             : 'unsolved',
           commitSha: previousStatusMap.get(String(review.id))?.commitSha || null,
           resolution: previousStatusMap.get(String(review.id))?.resolution || null,
+          // Review-level comments are not GraphQL review threads, so no threadId.
+          threadId: null,
         });
       }
     } catch (err) {
@@ -291,13 +328,17 @@ function handleSnapshot(prNumber) {
               line: cm.line || cm.original_line || null,
               original_line: cm.original_line || null,
               priority: classifyCommentPriority(author, body),
-              status: previousStatusMap.has(String(cm.id))
+              status: previousStatusMap.get(String(cm.id))?.status
                 ? previousStatusMap.get(String(cm.id)).status
                 : 'resolved',
               commitSha: previousStatusMap.get(String(cm.id))?.commitSha || null,
               resolution:
                 previousStatusMap.get(String(cm.id))?.resolution ||
                 'Outdated (code changed since comment)',
+              threadId:
+                commentIdToThreadId.get(cm.id) ||
+                previousStatusMap.get(String(cm.id))?.threadId ||
+                null,
             });
             continue;
           }
@@ -316,7 +357,7 @@ function handleSnapshot(prNumber) {
             line: cm.line || null,
             original_line: cm.original_line || null,
             priority: classifyCommentPriority(author, body),
-            status: previousStatusMap.has(String(cm.id))
+            status: previousStatusMap.get(String(cm.id))?.status
               ? previousStatusMap.get(String(cm.id)).status
               : isResolved
                 ? 'resolved'
@@ -325,6 +366,10 @@ function handleSnapshot(prNumber) {
             resolution:
               previousStatusMap.get(String(cm.id))?.resolution ||
               (isResolved ? 'Resolved/outdated thread' : null),
+            threadId:
+              commentIdToThreadId.get(cm.id) ||
+              previousStatusMap.get(String(cm.id))?.threadId ||
+              null,
           });
         }
 
@@ -398,6 +443,77 @@ function handleNextComment() {
   process.exit(0);
 }
 
+// ── Helpers: solveLocally / skipLocally ──────────────────────────────────────
+//
+// These helpers update the local follow-up-comments.json snapshot for a
+// single comment. They are pure side-effecting functions (no argv parsing,
+// no process.exit) so the CLI handlers below and any new flag aliases can
+// share them. See GH-537 / Task 1.
+
+/**
+ * Mark a comment as solved in the local snapshot.
+ * @param {string|number} commentId - The comment id (already validated).
+ * @param {string} commitSha - The commit sha that addresses the comment (already validated).
+ * @param {string} description - Free-form resolution note (already truncated).
+ * @returns {{ solved: string|number, commitSha: string }} payload safe to serialize.
+ * @throws {Error} when the snapshot is missing or the comment id is not present.
+ */
+function solveLocally(commentId, commitSha, description) {
+  const state = loadState();
+  if (!state) {
+    const err = new Error('No snapshot found. Run --snapshot --pr <N> first.');
+    err.code = 'NO_SNAPSHOT';
+    throw err;
+  }
+
+  const comment = state.comments.find((c) => String(c.id) === String(commentId));
+  if (!comment) {
+    const err = new Error(`Comment ID ${commentId} not found in snapshot.`);
+    err.code = 'COMMENT_NOT_FOUND';
+    throw err;
+  }
+
+  comment.status = 'solved';
+  comment.commitSha = commitSha;
+  comment.resolution = description;
+
+  saveState(state);
+  rebuildAccountability(state);
+
+  return { solved: commentId, commitSha };
+}
+
+/**
+ * Mark a comment as skipped in the local snapshot.
+ * @param {string|number} commentId - The comment id (already validated).
+ * @param {string} reason - Free-form skip reason (already truncated).
+ * @returns {{ skipped: string|number }} payload safe to serialize.
+ * @throws {Error} when the snapshot is missing or the comment id is not present.
+ */
+function skipLocally(commentId, reason) {
+  const state = loadState();
+  if (!state) {
+    const err = new Error('No snapshot found. Run --snapshot --pr <N> first.');
+    err.code = 'NO_SNAPSHOT';
+    throw err;
+  }
+
+  const comment = state.comments.find((c) => String(c.id) === String(commentId));
+  if (!comment) {
+    const err = new Error(`Comment ID ${commentId} not found in snapshot.`);
+    err.code = 'COMMENT_NOT_FOUND';
+    throw err;
+  }
+
+  comment.status = 'skipped';
+  comment.resolution = reason;
+
+  saveState(state);
+  rebuildAccountability(state);
+
+  return { skipped: commentId };
+}
+
 // ── Subcommand: --solve-comment ──────────────────────────────────────────────
 
 function handleSolveComment(rawId, rawSha, rawDesc) {
@@ -415,26 +531,15 @@ function handleSolveComment(rawId, rawSha, rawDesc) {
 
   const description = truncate(rawDesc);
 
-  const state = loadState();
-  if (!state) {
-    console.error('Error: No snapshot found. Run --snapshot --pr <N> first.');
+  let payload;
+  try {
+    payload = solveLocally(commentId, commitSha, description);
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
     process.exit(1);
   }
 
-  const comment = state.comments.find((c) => String(c.id) === String(commentId));
-  if (!comment) {
-    console.error(`Error: Comment ID ${commentId} not found in snapshot.`);
-    process.exit(1);
-  }
-
-  comment.status = 'solved';
-  comment.commitSha = commitSha;
-  comment.resolution = description;
-
-  saveState(state);
-  rebuildAccountability(state);
-
-  console.log(JSON.stringify({ solved: commentId, commitSha }));
+  console.log(JSON.stringify(payload));
   process.exit(0);
 }
 
@@ -449,25 +554,15 @@ function handleSkipComment(rawId, rawReason) {
 
   const reason = truncate(rawReason);
 
-  const state = loadState();
-  if (!state) {
-    console.error('Error: No snapshot found. Run --snapshot --pr <N> first.');
+  let payload;
+  try {
+    payload = skipLocally(commentId, reason);
+  } catch (err) {
+    console.error(`Error: ${err.message}`);
     process.exit(1);
   }
 
-  const comment = state.comments.find((c) => String(c.id) === String(commentId));
-  if (!comment) {
-    console.error(`Error: Comment ID ${commentId} not found in snapshot.`);
-    process.exit(1);
-  }
-
-  comment.status = 'skipped';
-  comment.resolution = reason;
-
-  saveState(state);
-  rebuildAccountability(state);
-
-  console.log(JSON.stringify({ skipped: commentId }));
+  console.log(JSON.stringify(payload));
   process.exit(0);
 }
 
@@ -512,11 +607,15 @@ function printUsage() {
   console.error(`Usage: node follow-up-pr-comments.js <subcommand> [args]
 
 Subcommands:
-  --snapshot --pr <N>                     Fetch & cache all PR comments
-  --next-comment                          Return first unsolved comment by priority
-  --solve-comment <id> <sha> "<desc>"     Mark comment as solved
-  --skip-comment <id> "<reason>"          Mark comment as skipped
-  --status                                Show summary counts`);
+  --snapshot --pr <N>                            Fetch & cache all PR comments
+  --next-comment                                 Return first unsolved comment by priority
+  --mark-locally-solved <id> <sha> "<desc>"      Mark comment solved (local only)
+  --mark-locally-skipped <id> "<reason>"         Mark comment skipped (local only)
+  --status                                       Show summary counts
+
+Deprecated aliases (still accepted, but emit a warning):
+  --solve-comment <id> <sha> "<desc>"     Deprecated alias of --mark-locally-solved
+  --skip-comment <id> "<reason>"          Deprecated alias of --mark-locally-skipped`);
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────
@@ -552,21 +651,29 @@ function main() {
       handleNextComment();
       break;
 
-    case '--solve-comment': {
+    case '--solve-comment':
+    case '--mark-locally-solved': {
       if (argv.length < 4) {
-        console.error('Error: --solve-comment requires <commentId> <commitSha> "<description>"');
+        console.error(`Error: ${subcommand} requires <commentId> <commitSha> "<description>"`);
         printUsage();
         process.exit(2);
+      }
+      if (subcommand === '--solve-comment') {
+        console.error(DEPRECATION_SOLVE_MSG);
       }
       handleSolveComment(argv[1], argv[2], argv[3]);
       break;
     }
 
-    case '--skip-comment': {
+    case '--skip-comment':
+    case '--mark-locally-skipped': {
       if (argv.length < 3) {
-        console.error('Error: --skip-comment requires <commentId> "<reason>"');
+        console.error(`Error: ${subcommand} requires <commentId> "<reason>"`);
         printUsage();
         process.exit(2);
+      }
+      if (subcommand === '--skip-comment') {
+        console.error(DEPRECATION_SKIP_MSG);
       }
       handleSkipComment(argv[1], argv[2]);
       break;
@@ -583,4 +690,11 @@ function main() {
   }
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  solveLocally,
+  skipLocally,
+};

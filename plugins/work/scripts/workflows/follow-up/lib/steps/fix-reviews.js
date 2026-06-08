@@ -10,7 +10,7 @@
  *   1. Snapshot comments (first call)
  *   2. Get next unsolved comment
  *   3. Return instruction showing exactly ONE comment
- *   4. Agent addresses it using --solve-comment or --skip-comment
+ *   4. Agent addresses it using --mark-locally-solved or --mark-locally-skipped
  *   5. Re-enter → get next → repeat until done
  *   6. If any skipped → block for user review
  */
@@ -177,9 +177,13 @@ module.exports = function registerFixReviews(register) {
     const commentId = comment.id;
     const fileRef = line ? `${filePath}:${line}` : filePath;
 
-    // Build the solve/skip commands the agent must use
-    const solveCmd = `node "${commentsScript}" --solve-comment "${commentId}" "<COMMIT_SHA>" "<description of what you fixed>"`;
-    const skipCmd = `node "${commentsScript}" --skip-comment "${commentId}" "<reason>"`;
+    // Build the solve/skip commands the agent must use.
+    // The new flag names (GH-537) make the local-only scope explicit; the
+    // legacy aliases still work but emit a deprecation warning. The opt-in
+    // GitHub-resolve flag is intentionally NOT surfaced to the agent here —
+    // it stays reachable only for humans invoking the CLI directly.
+    const solveCmd = `node "${commentsScript}" --mark-locally-solved "${commentId}" "<COMMIT_SHA>" "<description of what you fixed>"`;
+    const skipCmd = `node "${commentsScript}" --mark-locally-skipped "${commentId}" "<reason>"`;
     const nextCmd = `node "${path.join(__dirname, '..', '..', 'follow-up-next.js')}" "${state.ticketId}"${state.prNumber ? ` --pr ${state.prNumber}` : ''}`;
 
     return {
