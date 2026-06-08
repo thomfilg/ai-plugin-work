@@ -199,12 +199,10 @@ function getNextInstruction(ticketId, prNumber) {
             `[follow-up-next] saved state said complete but PR #${state.prNumber} is not mergeable (${blockerSummary}); rewinding and resuming.\n`
           );
           state.status = 'in_progress';
-          // Always reset to the first step on rewind. The saved currentStep
-          // is untrustworthy (the workflow already claimed to have finished
-          // it); resuming from a later step would just loop forward and
-          // re-set status='complete' in the next normal-advance branch.
-          // Restarting from monitor forces a fresh CI rollup read.
-          state.currentStep = STEPS[0];
+          // Always rewind to 'monitor' (the live CI-rollup read). Hardcoded
+          // rather than STEPS[0] so a future reorder of the step registry
+          // can't silently rewind to whatever happens to be first.
+          state.currentStep = 'monitor';
           state.dispatched = null;
           saveState(ticketId, state);
           continue;
@@ -225,7 +223,8 @@ function getNextInstruction(ticketId, prNumber) {
     if (cached && isInfraFailure(cached.output || '') && isStale(state.lastMonitorAt)) {
       delete state.lastMonitorResult;
       delete state.lastMonitorAt;
-      state.currentStep = STEPS[0];
+      // Rewind to 'monitor' explicitly — see rationale above.
+      state.currentStep = 'monitor';
       state.dispatched = null;
       saveState(ticketId, state);
       continue;
