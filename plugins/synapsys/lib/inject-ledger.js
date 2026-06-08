@@ -3,13 +3,25 @@
 /**
  * inject-ledger — per-session injection ledger for synapsys fire_mode.
  *
- * Session-id resolution chain (spec §3.2):
- *   1. `payload.session_id` when it matches /^[A-Za-z0-9_-]{1,128}$/.
- *   2. Unsafe `payload.session_id` is sha1-hashed (path-traversal guard, spec §4.1)
- *      — never used raw on the filesystem.
- *   3. Otherwise read `~/.claude/synapsys/.session/.current` if present.
- *   4. Otherwise compute `sha1(cwd + processStartTime)`, write it to `.current`,
+ * Session-id resolution chain (spec §3.2, GH-583):
+ *   1. `process.env.CLAUDE_CODE_SESSION_ID` — authoritative. Validated by
+ *      /^[A-Za-z0-9_-]{1,128}$/; unsafe values are sha256-hashed (path-traversal
+ *      guard, spec §4.1). Empty/unset falls through to leg 2. Claude Code rotates
+ *      this on `/clear` and per new conversation, which is exactly the semantics
+ *      the ledger needs to model (GH-583). If a future Claude Code release renames
+ *      or removes this var, legs 2–4 keep producing a working — but `/clear`-blind —
+ *      id, so behavior degrades to the pre-GH-583 state rather than crashing.
+ *   2. `payload.session_id` when safe; unsafe values are sha256-hashed.
+ *   3. Otherwise read `~/.claude/synapsys/.session/.current` if present (advisory
+ *      since GH-583 — still written by `publishCurrentSessionId` so out-of-process
+ *      callers like `synapsys-list` can locate the active ledger).
+ *   4. Otherwise compute `sha256(cwd + processStartTime)`, write it to `.current`,
  *      and return it.
+ *
+ * Additive export: `resolveSessionIdWithSource(payload) -> { sessionId, source }`
+ * tags which leg of the chain produced the id (`'env' | 'payload' | 'current' |
+ * 'fallback'`) for telemetry. The primary `resolveSessionId(payload) -> string`
+ * contract is unchanged.
  *
  * Storage (spec §3.3): `~/.claude/synapsys/.session/<session_id>.json` with shape
  *   `{ createdAt, sessionId, memories: { <name>: { injectedCount, lastFullInjectAt } } }`.
@@ -68,6 +80,16 @@ function resolveFromPayload(payload) {
   return SAFE_ID_RE.test(raw) ? raw : hashId(raw);
 }
 
+function resolveFromEnv() {
+  try {
+    const raw = process.env.CLAUDE_CODE_SESSION_ID;
+    if (typeof raw !== 'string' || raw.length === 0) return null;
+    return SAFE_ID_RE.test(raw) ? raw : hashId(raw);
+  } catch {
+    return null;
+  }
+}
+
 function readBoundedFile(p, maxBytes) {
   let fd;
   try {
@@ -115,20 +137,30 @@ function computeFallbackId() {
   return hashId(`${process.cwd()}|${PROCESS_START_TIME}`);
 }
 
-function resolveSessionId(payload) {
+function resolveChain(payload) {
   try {
+    const fromEnv = resolveFromEnv();
+    if (fromEnv) return { sessionId: fromEnv, source: 'env' };
     const fromPayload = resolveFromPayload(payload);
-    if (fromPayload) return fromPayload;
+    if (fromPayload) return { sessionId: fromPayload, source: 'payload' };
     ensureDir();
     const currentPath = path.join(sessionDir(), '.current');
     const existing = readCurrentSessionFile(currentPath);
-    if (existing) return existing;
+    if (existing) return { sessionId: existing, source: 'current' };
     const computed = computeFallbackId();
     writeCurrentSessionFile(currentPath, computed);
-    return computed;
+    return { sessionId: computed, source: 'fallback' };
   } catch {
-    return computeFallbackId();
+    return { sessionId: computeFallbackId(), source: 'fallback' };
   }
+}
+
+function resolveSessionId(payload) {
+  return resolveChain(payload).sessionId;
+}
+
+function resolveSessionIdWithSource(payload) {
+  return resolveChain(payload);
 }
 
 function readLedgerFile(sessionId) {
@@ -238,6 +270,7 @@ function publishCurrentSessionId(sessionId) {
 
 module.exports = {
   resolveSessionId,
+  resolveSessionIdWithSource,
   loadLedger,
   saveLedger,
   recordInjection,
