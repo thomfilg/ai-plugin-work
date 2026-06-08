@@ -37,10 +37,21 @@ function alreadyProtected(cwd, repoRoot) {
   return protectedAbs;
 }
 
+/**
+ * Decide whether a target's anchor surfaces for a given install kind.
+ *   - home-anchored targets surface for `global` and `shared`
+ *   - repo-anchored targets surface for `local|worktree|global` (not `shared`)
+ */
+function isSurfacedForKind(anchor, kind) {
+  if (kind === 'shared') return anchor === 'home';
+  if (anchor === 'home') return kind === 'global';
+  return true;
+}
+
 function suggestionFor(item, kind, repoRoot, protectedAbs) {
   const protect = [];
   for (const target of item.targets) {
-    if (target.anchor === 'home' && kind !== 'global') continue;
+    if (!isSurfacedForKind(target.anchor, kind)) continue;
     const abs = resolveTarget(target, repoRoot);
     if (!fs.existsSync(abs)) continue;
     if (protectedAbs.has(abs)) continue;

@@ -8,12 +8,15 @@
  * per memory), heimdall keeps everything in the marker itself — the marker IS
  * the config and holds the `locks` array.
  *
- * Three store kinds, same precedence as synapsys:
+ * Four store kinds (see `PRECEDENCE_ORDER`):
  *   local    → <cwd>/.claude/heimdall
  *   worktree → nearest ancestor above cwd carrying the marker
  *   global   → ~/.claude/heimdall/<projectName>
+ *   shared   → ~/.claude/heimdall-shared  (user-wide across every project)
  *
- * Locks discovered across all active stores are merged.
+ * Locks discovered across all active stores are merged; on conflict the
+ * earlier kind in `PRECEDENCE_ORDER` (local > worktree > global > shared)
+ * wins.
  */
 
 const fs = require('node:fs');
@@ -23,7 +26,13 @@ const { execSync } = require('node:child_process');
 
 const MARKER = '.heimdall.json';
 const FOLDER = 'heimdall';
+const SHARED_FOLDER = `${FOLDER}-shared`;
 const SCHEMA_VERSION = 1;
+// Documented lock-merge precedence (GH-541 R4): when the same path is
+// protected in multiple stores, earlier kinds win. `discoverStores` returns
+// active stores in this order, and downstream merge/scan/list consumers
+// align on this constant rather than hand-rolling string literals.
+const PRECEDENCE_ORDER = Object.freeze(['local', 'worktree', 'global', 'shared']);
 
 // jscpd:ignore-start
 // The store-discovery primitives below intentionally mirror synapsys's
@@ -59,6 +68,7 @@ function candidateStores(cwd, projectName) {
     { kind: 'local', dir: path.join(cwd, '.claude', FOLDER) },
     { kind: 'worktree', dir: path.resolve(cwd, '..', '.claude', FOLDER) },
     { kind: 'global', dir: path.join(os.homedir(), '.claude', FOLDER, projectName) },
+    { kind: 'shared', dir: path.join(os.homedir(), '.claude', SHARED_FOLDER) },
   ];
 }
 
@@ -67,13 +77,22 @@ function candidateStores(cwd, projectName) {
  * `<ancestor>/.claude/heimdall/.heimdall.json`. Returns the store dir or ''.
  * (Same rationale as synapsys: sessions may run from a sub-directory of a
  * worktree whose shared store sits at the worktree base.)
+ *
+ * Stops AFTER checking the user's HOME directory: a `--kind=worktree` install
+ * from a repo directly under home writes its marker to `~/.claude/heimdall`
+ * via `candidateStores`, and that legitimate worktree marker must remain
+ * discoverable. The walk does not continue past HOME so sandboxed e2e tests
+ * (whose tmp HOME is set via $HOME env) cannot leak the real user's marker
+ * into the test session.
  */
 function findAncestorStore(startDir) {
+  const home = os.homedir();
   let dir = startDir;
   for (;;) {
     if (fs.existsSync(path.join(dir, '.claude', FOLDER, MARKER))) {
       return path.join(dir, '.claude', FOLDER);
     }
+    if (dir === home) return '';
     const parent = path.dirname(dir);
     if (parent === dir) return '';
     dir = parent;
@@ -88,19 +107,37 @@ function discoverStores(cwd) {
   const seen = new Set();
 
   const push = (kind, dir) => {
+    if (!dir) return;
     const key = path.resolve(dir);
     if (seen.has(key)) return;
     if (!fs.existsSync(path.join(dir, MARKER))) return;
     seen.add(key);
-    out.push({ kind, dir, projectName });
+    // The shared store is cross-project, so it must not be stamped with the
+    // caller's projectName (mirrors the marker written by heimdall-init.js).
+    out.push({ kind, dir, projectName: kind === 'shared' ? null : projectName });
   };
 
-  push('local', path.join(resolved, '.claude', FOLDER));
+  // Build a kind→dir map from the canonical candidate list so the loop below
+  // mirrors PRECEDENCE_ORDER without duplicating literal kind strings.
+  const candidateMap = Object.fromEntries(
+    candidateStores(resolved, projectName).map((c) => [c.kind, c.dir])
+  );
 
-  const wt = findAncestorStore(path.dirname(resolved));
-  if (wt) push('worktree', wt);
-
-  push('global', path.join(os.homedir(), '.claude', FOLDER, projectName));
+  // Walk PRECEDENCE_ORDER as the single source of truth. Reordering or
+  // extending PRECEDENCE_ORDER automatically reorders this discovery output;
+  // adding a new kind only requires extending candidateStores.
+  for (const kind of PRECEDENCE_ORDER) {
+    if (kind === 'worktree') {
+      // worktree has bespoke discovery (ancestor walk) — the candidateMap
+      // entry is only used by --kind=worktree installs that drop a marker at
+      // the parent .claude/heimdall directly. Discovery prefers the nearest
+      // ancestor carrying a marker, which can be that same path or higher.
+      const wt = findAncestorStore(path.dirname(resolved));
+      if (wt) push('worktree', wt);
+      continue;
+    }
+    push(kind, candidateMap[kind]);
+  }
 
   return out;
 }
@@ -160,7 +197,9 @@ function removeLock(cfg, phrase, paths = []) {
 module.exports = {
   MARKER,
   FOLDER,
+  SHARED_FOLDER,
   SCHEMA_VERSION,
+  PRECEDENCE_ORDER,
   safeExec,
   getRepoRoot,
   getProjectName,

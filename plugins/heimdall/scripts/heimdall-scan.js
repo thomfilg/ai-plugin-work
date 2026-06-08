@@ -4,7 +4,7 @@
 /**
  * Scan for protectable paths and emit suggestions for the install flow.
  *
- *   node heimdall-scan.js --kind=<local|worktree|global> [--cwd=<path>] [--json]
+ *   node heimdall-scan.js --kind=<local|worktree|global|shared> [--cwd=<path>] [--json]
  *
  * Thin CLI wrapper around lib/scan.js (the logic lives there so it is unit-
  * testable in-process). Output is JSON with --json, else human-readable.
