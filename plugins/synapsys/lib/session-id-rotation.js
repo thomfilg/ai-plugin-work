@@ -13,10 +13,12 @@
  * so `fire_mode: once` becomes `fire_mode: always` and no test catches it.
  *
  * This module persists each rotation it observes to a JSONL file so the
- * cadence is auditable after the fact, and prints a one-line stderr warning
- * the first time a rotation is detected within < 5 s of the previous one
- * (i.e. faster than a human would `/clear`). Operators can `tail` the
- * file or `grep` for the warning to see if cadence has drifted.
+ * cadence is auditable after the fact. The JSONL audit (with
+ * `fastRotation: true` on sub-threshold rows) is the durable signal and
+ * is always written. A complementary one-shot stderr warning fires only
+ * when `SYNAPSYS_DEBUG=1` is set — Claude Code surfaces hook stderr to
+ * operators in some UI configurations, so we keep it opt-in to avoid
+ * default-on noise the day Anthropic changes rotation cadence.
  *
  * Everything is fail-open and synchronous to preserve the sub-millisecond
  * hot-path invariant.
@@ -49,6 +51,13 @@ function lastObservedFile() {
   return path.join(sessionDir(), '.last-observed-id');
 }
 
+/**
+ * Path to the rotation audit JSONL. The leading underscore is intentional
+ * and load-bearing: every reader that iterates the telemetry directory
+ * MUST skip files starting with `_` so these sidecar rows don't get
+ * mis-parsed as per-session memory events. Any future sidecar file in
+ * this directory should follow the same `_<purpose>.jsonl` convention.
+ */
 function rotationsFile() {
   return path.join(telemetryDir(), '_session-rotations.jsonl');
 }
@@ -106,6 +115,13 @@ function emitBurstWarningOnce(prevId, currentId, deltaMs) {
  * Record a rotation if `currentId` differs from the last-observed id.
  * Idempotent: same id → no-op. Distinct id → JSONL append + maybe stderr.
  *
+ * NOT atomic across processes: the read-then-write between
+ * `readLastObserved()` and `writeLastObserved()` can race with a concurrent
+ * hook invocation, so under heavy concurrency a rotation row may be
+ * double-logged or skipped. This is acceptable for best-effort
+ * instrumentation — readers MUST NOT base any anti-bypass or enforcement
+ * decision on this signal.
+ *
  * @param {string|null|undefined} currentId
  */
 function observeRotation(currentId) {
@@ -128,7 +144,7 @@ function observeRotation(currentId) {
     deltaMs,
     fastRotation: deltaMs < FAST_ROTATION_THRESHOLD_MS,
   });
-  if (deltaMs < FAST_ROTATION_THRESHOLD_MS) {
+  if (deltaMs < FAST_ROTATION_THRESHOLD_MS && process.env.SYNAPSYS_DEBUG === '1') {
     emitBurstWarningOnce(prev.id, currentId, deltaMs);
   }
   writeLastObserved(currentId, now);

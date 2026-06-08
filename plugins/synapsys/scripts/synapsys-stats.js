@@ -32,7 +32,13 @@ function listJsonlFiles(telDir) {
   } catch {
     return [];
   }
-  return entries.filter((n) => n.endsWith('.jsonl')).map((n) => path.join(telDir, n));
+  // Skip leading-underscore sidecars (e.g. `_session-rotations.jsonl`) — those
+  // store cross-session instrumentation rows that do NOT follow the per-memory
+  // event schema and would crash or skew stats if parsed as memory events.
+  // See session-id-rotation.js::rotationsFile for the convention.
+  return entries
+    .filter((n) => n.endsWith('.jsonl') && !n.startsWith('_'))
+    .map((n) => path.join(telDir, n));
 }
 
 function readJsonlInWindow(file, cutoffMs) {
@@ -195,6 +201,7 @@ module.exports = {
   readJsonlInWindow,
   aggregate,
   formatSections,
+  listJsonlFiles,
 };
 
 if (require.main === module) {

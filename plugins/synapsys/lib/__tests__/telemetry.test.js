@@ -251,20 +251,32 @@ test('extractSignals honors top-level memory.citeSignals (scalar normalized to a
   });
 });
 
-// PR #524 cursor[bot] Medium — session_id sanitization (path traversal defense)
-test('resolveSessionId rejects unsafe values (path separators, dotdot, absolute)', () => {
+// PR #524 cursor[bot] Medium — session_id sanitization (path traversal defense).
+// After GH-583 followup: telemetry and inject-ledger share resolveFromPayload, so
+// unsafe values are sha256-hashed (path-traversal still impossible — hex hash
+// contains no path separators) rather than bucketed into _unknown-session. Empty/
+// missing payload still falls through to _unknown-session.
+test('resolveSessionId: safe ids pass, unsafe ids are sha256-hashed (no _unknown-session for non-empty)', () => {
   withTempHome(() => {
     const telemetry = require('../telemetry');
-    // Allowed
+    const { hashId } = require('../session-id');
+    // Allowed verbatim
     assert.equal(telemetry.resolveSessionId({ session_id: 'abc123' }), 'abc123');
-    assert.equal(telemetry.resolveSessionId({ session_id: 'a-b_c.1' }), 'a-b_c.1');
-    // Disallowed — fall back to _unknown-session
-    assert.equal(telemetry.resolveSessionId({ session_id: '../evil' }), '_unknown-session');
-    assert.equal(telemetry.resolveSessionId({ session_id: '/etc/passwd' }), '_unknown-session');
-    assert.equal(telemetry.resolveSessionId({ session_id: 'a/b' }), '_unknown-session');
-    assert.equal(telemetry.resolveSessionId({ session_id: 'a\\b' }), '_unknown-session');
-    assert.equal(telemetry.resolveSessionId({ session_id: '..' }), '_unknown-session');
-    assert.equal(telemetry.resolveSessionId({ session_id: '.hidden' }), '_unknown-session');
-    assert.equal(telemetry.resolveSessionId({ session_id: 'x'.repeat(200) }), '_unknown-session');
+    // Dot is no longer in SAFE_ID_RE — hashed instead.
+    assert.equal(telemetry.resolveSessionId({ session_id: 'a-b_c.1' }), hashId('a-b_c.1'));
+    // Path-traversal characters → hashed (hex output contains no '/', '\\', '..').
+    assert.equal(telemetry.resolveSessionId({ session_id: '../evil' }), hashId('../evil'));
+    assert.equal(telemetry.resolveSessionId({ session_id: '/etc/passwd' }), hashId('/etc/passwd'));
+    assert.equal(telemetry.resolveSessionId({ session_id: 'a/b' }), hashId('a/b'));
+    assert.equal(telemetry.resolveSessionId({ session_id: 'a\\b' }), hashId('a\\b'));
+    assert.equal(telemetry.resolveSessionId({ session_id: '..' }), hashId('..'));
+    assert.equal(telemetry.resolveSessionId({ session_id: '.hidden' }), hashId('.hidden'));
+    assert.equal(
+      telemetry.resolveSessionId({ session_id: 'x'.repeat(200) }),
+      hashId('x'.repeat(200))
+    );
+    // Hashed output is filesystem-safe (32 hex chars).
+    const hashed = telemetry.resolveSessionId({ session_id: '../evil' });
+    assert.match(hashed, /^[0-9a-f]{32}$/);
   });
 });

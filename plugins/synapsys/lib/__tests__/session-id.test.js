@@ -111,3 +111,36 @@ test('inject-ledger and telemetry use the same env-var resolution', () => {
     delete require.cache[require.resolve('../telemetry')];
   });
 });
+
+// Blocker 1 regression — payload-path divergence: telemetry's legacy regex
+// (SAFE_SESSION_ID with dot) once accepted "a.b" verbatim while inject-ledger
+// hashed it via SAFE_ID_RE (no dot). After unification both must agree.
+test('inject-ledger and telemetry agree on payload-path resolution (dotted ids hashed in both)', () => {
+  withEnv(() => {
+    delete require.cache[require.resolve('../inject-ledger')];
+    delete require.cache[require.resolve('../telemetry')];
+    const injectLedger = require('../inject-ledger');
+    const telemetry = require('../telemetry');
+    // Dotted id — previously diverged.
+    assert.equal(
+      injectLedger.resolveSessionId({ session_id: 'a.b' }),
+      telemetry.resolveSessionId({ session_id: 'a.b' })
+    );
+    // Safe id — agree, raw passthrough.
+    assert.equal(
+      injectLedger.resolveSessionId({ session_id: 'plain-uuid-1234' }),
+      telemetry.resolveSessionId({ session_id: 'plain-uuid-1234' })
+    );
+    assert.equal(
+      injectLedger.resolveSessionId({ session_id: 'plain-uuid-1234' }),
+      'plain-uuid-1234'
+    );
+    // Path-traversal — both produce identical hash (filesystem-safe).
+    assert.equal(
+      injectLedger.resolveSessionId({ session_id: '../evil' }),
+      telemetry.resolveSessionId({ session_id: '../evil' })
+    );
+    delete require.cache[require.resolve('../inject-ledger')];
+    delete require.cache[require.resolve('../telemetry')];
+  });
+});

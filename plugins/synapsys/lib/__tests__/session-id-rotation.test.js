@@ -11,9 +11,11 @@ function withTempHome(fn) {
   const prevHome = process.env.HOME;
   const prevSessionDir = process.env.SYNAPSYS_SESSION_DIR;
   const prevDisabled = process.env.SYNAPSYS_SESSION_ROTATION_DISABLED;
+  const prevDebug = process.env.SYNAPSYS_DEBUG;
   process.env.HOME = tmp;
   delete process.env.SYNAPSYS_SESSION_DIR;
   delete process.env.SYNAPSYS_SESSION_ROTATION_DISABLED;
+  delete process.env.SYNAPSYS_DEBUG;
   delete require.cache[require.resolve('../session-id-rotation')];
   const mod = require('../session-id-rotation');
   mod.__resetForTests();
@@ -26,7 +28,27 @@ function withTempHome(fn) {
     else process.env.SYNAPSYS_SESSION_DIR = prevSessionDir;
     if (prevDisabled === undefined) delete process.env.SYNAPSYS_SESSION_ROTATION_DISABLED;
     else process.env.SYNAPSYS_SESSION_ROTATION_DISABLED = prevDisabled;
+    if (prevDebug === undefined) delete process.env.SYNAPSYS_DEBUG;
+    else process.env.SYNAPSYS_DEBUG = prevDebug;
     delete require.cache[require.resolve('../session-id-rotation')];
+  }
+}
+
+// Deterministic Date.now stub so fast-rotation timing assertions don't depend
+// on wall-clock or system load. Returns monotonically increasing values
+// `stepMs` apart starting at `startMs`.
+function withFakeNow(startMs, stepMs, fn) {
+  const realNow = Date.now;
+  let cur = startMs;
+  Date.now = () => {
+    const v = cur;
+    cur += stepMs;
+    return v;
+  };
+  try {
+    return fn();
+  } finally {
+    Date.now = realNow;
   }
 }
 
@@ -84,7 +106,41 @@ test('records appear for each rotation in a chain', () => {
   });
 });
 
-test('fast rotation under threshold flags fastRotation: true and warns on stderr (once per process)', () => {
+test('fast rotation under threshold flags fastRotation: true with deterministic 1s steps; warns on stderr only when SYNAPSYS_DEBUG=1', () => {
+  withTempHome((_home, mod) => {
+    process.env.SYNAPSYS_DEBUG = '1';
+    const captured = [];
+    const orig = process.stderr.write.bind(process.stderr);
+    process.stderr.write = (chunk) => {
+      captured.push(String(chunk));
+      return true;
+    };
+    try {
+      withFakeNow(1_000_000, 1000, () => {
+        mod.observeRotation('alpha-12345678');
+        mod.observeRotation('beta-12345678');
+        mod.observeRotation('gamma-12345678');
+      });
+    } finally {
+      process.stderr.write = orig;
+    }
+    const records = readJsonl(mod.rotationsFile());
+    assert.equal(records.length, 2);
+    assert.equal(records[0].fastRotation, true);
+    assert.equal(records[1].fastRotation, true);
+    // Time pinned at 1000ms per step → deltaMs locked.
+    assert.equal(records[0].deltaMs, 1000);
+    assert.equal(records[1].deltaMs, 1000);
+    // Warning emitted exactly once with SYNAPSYS_DEBUG=1.
+    const warnings = captured.filter((s) => s.includes('CLAUDE_CODE_SESSION_ID rotated'));
+    assert.equal(warnings.length, 1);
+  });
+});
+
+// Blocker 2 — stderr is gated. JSONL audit is unconditional; stderr only fires
+// when SYNAPSYS_DEBUG=1. Default-off means production hooks stay quiet even
+// during a rapid rotation regression.
+test('fast rotation: SYNAPSYS_DEBUG unset → JSONL still records, NO stderr write', () => {
   withTempHome((_home, mod) => {
     const captured = [];
     const orig = process.stderr.write.bind(process.stderr);
@@ -93,21 +149,19 @@ test('fast rotation under threshold flags fastRotation: true and warns on stderr
       return true;
     };
     try {
-      mod.observeRotation('alpha-12345678');
-      // Force a rapid second observation by patching readLastObserved-source.
-      mod.observeRotation('beta-12345678');
-      mod.observeRotation('gamma-12345678');
+      withFakeNow(2_000_000, 1000, () => {
+        mod.observeRotation('p-1');
+        mod.observeRotation('p-2');
+      });
     } finally {
       process.stderr.write = orig;
     }
     const records = readJsonl(mod.rotationsFile());
-    assert.equal(records.length, 2);
-    // Both records should be flagged fast (test runs in milliseconds).
+    assert.equal(records.length, 1);
     assert.equal(records[0].fastRotation, true);
-    assert.equal(records[1].fastRotation, true);
-    // Warning emitted exactly once.
+    assert.equal(records[0].deltaMs, 1000);
     const warnings = captured.filter((s) => s.includes('CLAUDE_CODE_SESSION_ID rotated'));
-    assert.equal(warnings.length, 1);
+    assert.equal(warnings.length, 0);
   });
 });
 
