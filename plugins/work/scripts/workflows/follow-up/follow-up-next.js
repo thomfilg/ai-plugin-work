@@ -8,6 +8,16 @@
  * IMPORTANT: No step-specific logic here. Steps live in lib/steps/.
  *
  * Usage: node follow-up-next.js <TICKET_ID> [--pr N] [--init]
+ *
+ * Flags:
+ *   --pr N   Pin the PR number (skips discovery).
+ *   --init   Drop cached state and start a fresh follow-up cycle. Use at
+ *            first-run bootstrap OR after manually fixing an infra-shaped
+ *            failure (gh auth, network, VPN) so the next monitor run
+ *            executes against fresh inputs instead of re-emitting a stale
+ *            cached failure. Note: the monitor step also auto-clears
+ *            stale infra failures (see lib/infra-patterns.js); --init is
+ *            still required for non-infra cached failures.
  */
 
 'use strict';
@@ -85,6 +95,7 @@ try {
 const { runStep, STEPS, dispatchStepResult } = require(
   path.join(__dirname, 'lib', 'step-registry')
 );
+const { isInfraFailure, isStale } = require(path.join(__dirname, 'lib', 'infra-patterns'));
 
 // ─── State management ───────────────────────────────────────────────────────
 
@@ -115,7 +126,9 @@ function initState(ticketId, prNumber) {
     dispatched: null,
     attempt: 0,
     maxAttempts: 40,
+    // monitor cache (see infra-patterns.js for invalidation rules)
     lastMonitorResult: null,
+    lastMonitorAt: null,
     failureCategory: null,
     // Infra-retry telemetry (GH-508 Task 4). `count` tracks how many
     // infra-retry attempts have been performed for the current PR; `attempts`
@@ -186,12 +199,10 @@ function getNextInstruction(ticketId, prNumber) {
             `[follow-up-next] saved state said complete but PR #${state.prNumber} is not mergeable (${blockerSummary}); rewinding and resuming.\n`
           );
           state.status = 'in_progress';
-          // Always reset to the first step on rewind. The saved currentStep
-          // is untrustworthy (the workflow already claimed to have finished
-          // it); resuming from a later step would just loop forward and
-          // re-set status='complete' in the next normal-advance branch.
-          // Restarting from monitor forces a fresh CI rollup read.
-          state.currentStep = STEPS[0];
+          // Always rewind to 'monitor' (the live CI-rollup read). Hardcoded
+          // rather than STEPS[0] so a future reorder of the step registry
+          // can't silently rewind to whatever happens to be first.
+          state.currentStep = 'monitor';
           state.dispatched = null;
           saveState(ticketId, state);
           continue;
@@ -199,6 +210,24 @@ function getNextInstruction(ticketId, prNumber) {
       }
       saveState(ticketId, state);
       return { type: 'follow_up_instruction', action: 'complete', summary: 'Already complete.' };
+    }
+
+    // Auto-clear stale infra-failure cache before ANY step runs (GH-536 #551
+    // round-2 fix). The monitor step's own clearStaleInfraCache only fires
+    // when the workflow re-enters monitor — but triage blocks on exitCode 2
+    // without advancing, so subsequent runs only re-execute triage and the
+    // cache is never invalidated. Lifting the check here ensures downstream
+    // steps (triage, fix-ci, report) also benefit and route the flow back
+    // to monitor for a fresh execution.
+    const cached = state.lastMonitorResult;
+    if (cached && isInfraFailure(cached.output || '') && isStale(state.lastMonitorAt)) {
+      delete state.lastMonitorResult;
+      delete state.lastMonitorAt;
+      // Rewind to 'monitor' explicitly — see rationale above.
+      state.currentStep = 'monitor';
+      state.dispatched = null;
+      saveState(ticketId, state);
+      continue;
     }
 
     const stepIdx = STEPS.indexOf(state.currentStep);
@@ -350,10 +379,8 @@ module.exports = {
   getNextInstruction,
   initState,
   dispatchStepResult,
-  // test-only escape hatch — exposes pure helpers for legacy unit tests. Tests
-  // that need a fresh cache should invalidate the require cache for
-  // `./lib/repo-meta` rather than calling a reset method.
   __test__: {
+    initState,
     detectDefaultBranch,
     loadPrDiffFiles,
   },

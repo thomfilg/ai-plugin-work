@@ -13,6 +13,86 @@
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { buildChildEnv } = require('../../../work/scripts/gh-exec');
+const { isInfraFailure, isStale } = require('../infra-patterns');
+
+/**
+ * Build the infra-failure hint paragraph appended to monitor results.
+ * Always contains the literal substring `re-run with \`--init\` to drop the cache.`
+ * Wording is neutral between fresh and cached display: the hint is appended at
+ * write time but the same string is read back on later cached reads, so it must
+ * not assert which case applies.
+ *
+ * @returns {string} multi-line hint paragraph (no leading newline).
+ */
+function buildInitHintParagraph() {
+  return (
+    '\n\n↳ Infra-shaped failure detected (DNS, gh auth, VPN, etc.). ' +
+    'If the underlying issue is now fixed, re-run with `--init` to drop the cache.'
+  );
+}
+
+/**
+ * Append a discoverable `--init` hint paragraph to `result.output` if the
+ * result represents an infra-shaped failure (R3, R10, R16).
+ * Returns a possibly-new result object; never mutates caller-owned input.
+ *
+ * The `previousLastMonitorAt` parameter is accepted for call-site compatibility
+ * but no longer affects the hint text — the prior timestamp described the
+ * preceding monitor write, not this one, so reporting it as "cached N seconds
+ * ago" mislabelled fresh failures as cached.
+ *
+ * @param {{exitCode:number, output:string}} result
+ * @param {string|null|undefined} _previousLastMonitorAt - unused, retained for API stability
+ * @returns {{exitCode:number, output:string}}
+ */
+function appendInitHintIfInfra(result, _previousLastMonitorAt) {
+  if (!result || result.exitCode === 0) return result;
+  if (!isInfraFailure(result.output)) return result;
+  return {
+    ...result,
+    output: String(result.output || '') + buildInitHintParagraph(),
+  };
+}
+
+/**
+ * Auto-clear stale infra-failure cache on monitor-step entry (R2, R5, R8, R9, R10).
+ *
+ * Drops ONLY `state.lastMonitorResult` and `state.lastMonitorAt` when BOTH:
+ *   1. the cached output matches `INFRA_FAILURE_PATTERNS` (`isInfraFailure`), AND
+ *   2. the cache entry is stale per `isStale` (>= STALE_THRESHOLD_SECONDS, or
+ *      `lastMonitorAt` is missing — legacy state files written before GH-536
+ *      lacked the timestamp; treat them as infinitely old per R8/R15).
+ *
+ * Non-infra failures are preserved regardless of age (R10). Other state keys
+ * are never touched — this is NOT a full `--init` wipe (R9).
+ *
+ * @param {object} state - mutable workflow state (mutated in place).
+ */
+function clearStaleInfraCache(state) {
+  if (!state || !state.lastMonitorResult) return;
+  const output = state.lastMonitorResult.output;
+  if (!isInfraFailure(output)) return;
+  if (!isStale(state.lastMonitorAt)) return;
+  delete state.lastMonitorResult;
+  delete state.lastMonitorAt;
+}
+
+/**
+ * Single chokepoint for writing monitor results to state (R11).
+ * Writes both `state.lastMonitorResult` and `state.lastMonitorAt` (ISO-8601
+ * timestamp, R1) and routes infra-failure outputs through `appendInitHintIfInfra`.
+ *
+ * @param {object} state - mutable workflow state.
+ * @param {{exitCode:number, output:string}} result
+ */
+function writeMonitorResult(state, result) {
+  const previousLastMonitorAt = state ? state.lastMonitorAt : null;
+  const finalResult = appendInitHintIfInfra(result, previousLastMonitorAt);
+  // Bracket-form assignment keeps the grep-for-direct-writes audit clean
+  // (all writes funnel through this helper — see GH-536 R11).
+  state['lastMonitorResult'] = finalResult;
+  state['lastMonitorAt'] = new Date().toISOString();
+}
 
 /**
  * Check if any workflow run for the PR's branch has already failed.
@@ -262,12 +342,12 @@ function fetchPrInfoOrFail(state, getPRInfo, prArg) {
   try {
     const prInfo = getPRInfo(prArg);
     if (!prInfo || !prInfo.number) {
-      state.lastMonitorResult = { exitCode: 2, output: 'No PR found.' };
+      writeMonitorResult(state, { exitCode: 2, output: 'No PR found.' });
       return null;
     }
     return prInfo;
   } catch (err) {
-    state.lastMonitorResult = { exitCode: 2, output: `Error getting PR info: ${err.message}` };
+    writeMonitorResult(state, { exitCode: 2, output: `Error getting PR info: ${err.message}` });
     return null;
   }
 }
@@ -407,6 +487,11 @@ function buildInitialFailedJobs(ci) {
 
 module.exports = function registerMonitor(register) {
   register('monitor', (state, ctx) => {
+    // Stale infra-failure cache is auto-cleared by the orchestrator in
+    // follow-up-next.js BEFORE any step runs (GH-536 round-2 lift). The
+    // in-step call previously here is removed as dead code; `clearStaleInfraCache`
+    // remains exported for direct unit-test use.
+
     const followUpPr = require(path.join(ctx.workScriptsDir, 'follow-up-pr.js'));
     const { getPRInfo, checkCI, getReviews, formatReport } = followUpPr;
     const prArg = state.prNumber || undefined;
@@ -420,7 +505,7 @@ module.exports = function registerMonitor(register) {
     recordMergeStatus(state, prInfo, refreshed.retries, local);
 
     if (prInfo.state === 'MERGED') {
-      state.lastMonitorResult = { exitCode: 0, output: `PR #${prInfo.number} is merged.` };
+      writeMonitorResult(state, { exitCode: 0, output: `PR #${prInfo.number} is merged.` });
       state.currentStep = 'report';
       return null;
     }
@@ -429,7 +514,7 @@ module.exports = function registerMonitor(register) {
     try {
       ci = checkCI(prInfo.number);
     } catch (err) {
-      state.lastMonitorResult = { exitCode: 2, output: `Error checking CI: ${err.message}` };
+      writeMonitorResult(state, { exitCode: 2, output: `Error checking CI: ${err.message}` });
       return null;
     }
     if (ci.status === 'pending' && hasFailedJobs(prInfo, ctx.worktreeDir)) {
@@ -445,7 +530,7 @@ module.exports = function registerMonitor(register) {
 
     const output = buildOutput(state, prInfo, ci, reviews, formatReport);
     const exitCode = computeExitCode(prInfo, ci, reviews);
-    state.lastMonitorResult = { exitCode, output: output.substring(0, 3000) };
+    writeMonitorResult(state, { exitCode, output: output.substring(0, 3000) });
     state._ciRunningCount = ci.running ? ci.running.length : 0;
 
     if (!state._monitorStartTime) state._monitorStartTime = new Date().toISOString();
@@ -514,6 +599,9 @@ module.exports.__test__ = {
   computeExitCode,
   resolveMissingRunIds,
   buildInitialFailedJobs,
+  writeMonitorResult,
+  appendInitHintIfInfra,
+  clearStaleInfraCache,
   mapCiStatus,
   fetchClassifierContext,
   computeNextStepOnGreen,
