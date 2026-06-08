@@ -16,43 +16,41 @@ const { buildChildEnv } = require('../../../work/scripts/gh-exec');
 const { isInfraFailure, isStale } = require('../infra-patterns');
 
 /**
- * Build the cached-failure hint paragraph appended to infra-failure outputs.
+ * Build the infra-failure hint paragraph appended to monitor results.
  * Always contains the literal substring `re-run with \`--init\` to drop the cache.`
- * If `previousLastMonitorAt` is provided, includes a cache-age annotation (R7).
+ * Wording is neutral between fresh and cached display: the hint is appended at
+ * write time but the same string is read back on later cached reads, so it must
+ * not assert which case applies.
  *
- * @param {string|null|undefined} previousLastMonitorAt - ISO-8601 timestamp of the prior write, if any.
  * @returns {string} multi-line hint paragraph (no leading newline).
  */
-function buildInitHintParagraph(previousLastMonitorAt) {
-  let ageNote = '';
-  if (previousLastMonitorAt) {
-    const ageMs = Date.now() - Date.parse(previousLastMonitorAt);
-    if (!Number.isNaN(ageMs) && ageMs >= 0) {
-      const secs = Math.floor(ageMs / 1000);
-      ageNote = ` (cached ${secs} seconds ago)`;
-    }
-  }
+function buildInitHintParagraph() {
   return (
-    `\n\n↳ This is a cached failure${ageNote}. If the underlying infra issue is now fixed, ` +
-    're-run with `--init` to drop the cache.'
+    '\n\n↳ Infra-shaped failure detected (DNS, gh auth, VPN, etc.). ' +
+    'If the underlying issue is now fixed, re-run with `--init` to drop the cache.'
   );
 }
 
 /**
  * Append a discoverable `--init` hint paragraph to `result.output` if the
- * result represents a fresh infra-shaped failure (R3, R10, R16).
+ * result represents an infra-shaped failure (R3, R10, R16).
  * Returns a possibly-new result object; never mutates caller-owned input.
  *
+ * The `previousLastMonitorAt` parameter is accepted for call-site compatibility
+ * but no longer affects the hint text — the prior timestamp described the
+ * preceding monitor write, not this one, so reporting it as "cached N seconds
+ * ago" mislabelled fresh failures as cached.
+ *
  * @param {{exitCode:number, output:string}} result
- * @param {string|null|undefined} previousLastMonitorAt
+ * @param {string|null|undefined} _previousLastMonitorAt - unused, retained for API stability
  * @returns {{exitCode:number, output:string}}
  */
-function appendInitHintIfInfra(result, previousLastMonitorAt) {
+function appendInitHintIfInfra(result, _previousLastMonitorAt) {
   if (!result || result.exitCode === 0) return result;
   if (!isInfraFailure(result.output)) return result;
   return {
     ...result,
-    output: String(result.output || '') + buildInitHintParagraph(previousLastMonitorAt),
+    output: String(result.output || '') + buildInitHintParagraph(),
   };
 }
 
