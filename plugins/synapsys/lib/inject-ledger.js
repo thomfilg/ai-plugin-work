@@ -37,10 +37,11 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
-const crypto = require('node:crypto');
+const sharedSessionId = require('./session-id');
+const sessionIdRotation = require('./session-id-rotation');
 
 const MAX_FILE_BYTES = 64 * 1024;
-const SAFE_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
+const SAFE_ID_RE = sharedSessionId.SAFE_ID_RE;
 const PROCESS_START_TIME = Date.now();
 
 function sessionDir() {
@@ -70,25 +71,9 @@ function ensureDir() {
   }
 }
 
-function hashId(value) {
-  return crypto.createHash('sha256').update(String(value)).digest('hex').slice(0, 32);
-}
-
-function resolveFromPayload(payload) {
-  const raw = payload && payload.session_id;
-  if (typeof raw !== 'string' || raw.length === 0) return null;
-  return SAFE_ID_RE.test(raw) ? raw : hashId(raw);
-}
-
-function resolveFromEnv() {
-  try {
-    const raw = process.env.CLAUDE_CODE_SESSION_ID;
-    if (typeof raw !== 'string' || raw.length === 0) return null;
-    return SAFE_ID_RE.test(raw) ? raw : hashId(raw);
-  } catch {
-    return null;
-  }
-}
+const hashId = sharedSessionId.hashId;
+const resolveFromPayload = sharedSessionId.resolveFromPayload;
+const resolveFromEnv = sharedSessionId.resolveFromEnv;
 
 function readBoundedFile(p, maxBytes) {
   let fd;
@@ -140,7 +125,13 @@ function computeFallbackId() {
 function resolveChain(payload) {
   try {
     const fromEnv = resolveFromEnv();
-    if (fromEnv) return { sessionId: fromEnv, source: 'env' };
+    if (fromEnv) {
+      // Instrumentation pin (GH-583 follow-up): record env-var rotations to a
+      // JSONL audit file so we can verify the once-per-conversation contract
+      // post-hoc and warn if rotations come faster than a human `/clear`.
+      sessionIdRotation.observeRotation(fromEnv);
+      return { sessionId: fromEnv, source: 'env' };
+    }
     const fromPayload = resolveFromPayload(payload);
     if (fromPayload) return { sessionId: fromPayload, source: 'payload' };
     ensureDir();
