@@ -158,6 +158,54 @@ describe('heimdall-protect.js --kind=shared accepts home-anchored paths', () => 
 // (e.g. shared is the only active store). Without the fix, `dirs[0]` returns
 // the shared store via precedence/discovery and repo-relative paths like
 // `package.json` would be written into the cross-project marker.
+describe('heimdall-protect.js --kind=shared rejects `..` traversal and bare relative paths', () => {
+  // Regression: a `path.resolve(p)` happy-path acceptance check would let
+  // `--paths=.claude` from a cwd under HOME silently succeed (cwd lives under
+  // home → resolves under home), and `$HOME/../etc` would slip past the
+  // prefix regex. Both must reject.
+  it('rejects --paths=.github (bare relative path)', () => {
+    const cwd = fs.mkdtempSync(path.join(fakeHome, 'proj-bare-relative-'));
+    const init = run(initScript, ['--kind=shared', `--cwd=${cwd}`], cwd);
+    assert.equal(init.status, 0, `init failed: ${init.stderr}`);
+
+    const res = run(
+      protectScript,
+      ['--kind=shared', '--phrase=edit gh', '--paths=.github', `--cwd=${cwd}`],
+      cwd
+    );
+    assert.notEqual(res.status, 0, `expected non-zero exit; stderr: ${res.stderr}`);
+    assert.match(res.stderr, /home-anchored/);
+  });
+
+  it('rejects --paths=$HOME/../etc (traversal escapes home)', () => {
+    const cwd = fs.mkdtempSync(path.join(base, 'proj-traversal-'));
+    const init = run(initScript, ['--kind=shared', `--cwd=${cwd}`], cwd);
+    assert.equal(init.status, 0, `init failed: ${init.stderr}`);
+
+    const res = run(
+      protectScript,
+      ['--kind=shared', '--phrase=edit esc', '--paths=$HOME/../etc', `--cwd=${cwd}`],
+      cwd
+    );
+    assert.notEqual(res.status, 0, `expected non-zero exit; stderr: ${res.stderr}`);
+    assert.match(res.stderr, /home-anchored/);
+  });
+
+  it('rejects --paths=~/foo/../../etc (traversal under tilde prefix)', () => {
+    const cwd = fs.mkdtempSync(path.join(base, 'proj-traversal-tilde-'));
+    const init = run(initScript, ['--kind=shared', `--cwd=${cwd}`], cwd);
+    assert.equal(init.status, 0, `init failed: ${init.stderr}`);
+
+    const res = run(
+      protectScript,
+      ['--kind=shared', '--phrase=edit tilde-esc', '--paths=~/foo/../../etc', `--cwd=${cwd}`],
+      cwd
+    );
+    assert.notEqual(res.status, 0, `expected non-zero exit; stderr: ${res.stderr}`);
+    assert.match(res.stderr, /home-anchored/);
+  });
+});
+
 describe('heimdall-protect.js without --kind rejects repo-relative when resolved store is shared', () => {
   it('rejects --paths=package.json when only shared store is active', () => {
     const cwd = fs.mkdtempSync(path.join(base, 'proj-implicit-shared-'));

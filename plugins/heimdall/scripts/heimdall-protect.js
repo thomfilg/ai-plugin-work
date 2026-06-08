@@ -35,13 +35,24 @@ if (paths.length === 0) {
 // store shared across worktrees). Reject any non-home-anchored path and
 // suggest the three project-scoped alternatives.
 function isHomeAnchored(p) {
+  // Any `..` traversal escapes home regardless of prefix (~, $HOME, or
+  // absolute). Reject up front — `$HOME/../etc` and `~/foo/../..` would
+  // otherwise pass the prefix tests below and silently escape the
+  // home-anchored contract.
+  if (p.split(/[/\\]/).includes('..')) return false;
   // ~ or ~/...
   if (/^~(\/|$)/.test(p)) return true;
   // $HOME, $HOME/..., ${HOME}, ${HOME}/...
   if (/^\$\{?HOME\}?(\/|$)/.test(p)) return true;
-  // Absolute path under the current user's home directory.
-  const home = os.homedir();
-  if (home && path.isAbsolute(p)) {
+  // Absolute path under the current user's home directory. We deliberately do
+  // NOT accept bare relative paths here: `path.resolve` would resolve them
+  // against `process.cwd()`, and a user running `heimdall-protect
+  // --kind=shared --paths=.github` from `~/myproj` would silently insert
+  // `.github` into the shared store. Require the caller to spell out the
+  // home-anchored shape (~, $HOME, or an absolute path under home).
+  if (path.isAbsolute(p)) {
+    const home = os.homedir();
+    if (!home) return false;
     const normalized = path.resolve(p);
     const normalizedHome = path.resolve(home);
     if (normalized === normalizedHome || normalized.startsWith(normalizedHome + path.sep)) {
@@ -65,7 +76,7 @@ if (targetsShared) {
   const nonHome = paths.filter((p) => !isHomeAnchored(p));
   if (nonHome.length > 0) {
     console.error(
-      `--kind=shared only accepts home-anchored paths (e.g. ~/.claude/..., $HOME/..., ${'${HOME}'}/..., or absolute paths under your home directory); ` +
+      `--kind=shared only accepts explicit home-anchored shapes — ~/..., $HOME/..., ${'${HOME}'}/..., or an absolute path literally under your home directory (no ".." traversal, no bare relative paths); ` +
         `got: ${nonHome.join(', ')}. ` +
         `use --kind=local, --kind=worktree, or --kind=global for project-relative paths`
     );
