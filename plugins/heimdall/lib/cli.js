@@ -9,6 +9,14 @@
 const { getProjectName, candidateStores, discoverStores } = require('./lock-store');
 
 /**
+ * Valid `--kind` values accepted by every heimdall script. Order matches the
+ * documented lock-merge precedence `local > worktree > global > shared`.
+ * Exported so downstream scripts (and `resolveStoreDirs`'s error message) can
+ * keep their usage strings and validation lists in lockstep with this list.
+ */
+const VALID_KINDS = ['local', 'worktree', 'global', 'shared'];
+
+/**
  * Parse `--key=value` flags (and the bare `--json` switch) from argv.
  * Defaults `cwd` to the process cwd. Values may be empty when allowEmpty.
  */
@@ -46,7 +54,10 @@ function resolveStoreDirs(args, { requireActive = true } = {}) {
       (c) => c.kind === args.kind
     );
     if (!target)
-      return { dirs: [], error: `unknown kind: ${args.kind} (use local|worktree|global)` };
+      return {
+        dirs: [],
+        error: `unknown kind: ${args.kind} (use local|worktree|global|shared)`,
+      };
     return { dirs: [target.dir], error: null };
   }
   const dirs = discoverStores(args.cwd).map((s) => s.dir);
@@ -81,4 +92,4 @@ function editContext() {
   return { args, phrase, paths, dirs };
 }
 
-module.exports = { parseArgs, splitList, resolveStoreDirs, editContext };
+module.exports = { parseArgs, splitList, resolveStoreDirs, editContext, VALID_KINDS };
