@@ -354,6 +354,17 @@ Look for this in agent transcripts — it confirms the rule is still load-bearin
 
 The injection ledger is keyed by `(session_id, memory_name)` and lives in a per-session JSON file under the user's synapsys session directory. It is **reset at SessionStart** so every new Claude Code session begins with a clean slate. Stale ledger files older than 7 days are opportunistically garbage-collected on the same SessionStart pass. Errors reading or writing the ledger fail open — the dispatcher falls through to full injection (current pre-fire_mode behavior).
 
+#### `CLAUDE_CODE_SESSION_ID` dependency
+
+The session id used to key the per-session injection ledger is resolved through a four-leg chain, in priority order:
+
+1. **`process.env.CLAUDE_CODE_SESSION_ID`** — the authoritative signal. Claude Code rotates this environment variable on `/clear` and at the start of every new conversation, so the dispatcher automatically reads/writes a fresh ledger file (`~/.claude/synapsys/.session/<CLAUDE_CODE_SESSION_ID>.json`) per session with no explicit clear hook. Values are validated against `SAFE_ID_RE` (`/^[A-Za-z0-9_-]{1,128}$/`); unsafe values are sha256-hashed before touching the filesystem, and empty strings are treated as absent.
+2. **`payload.session_id`** — passed by the hook payload when available.
+3. **`<sessionDir>/.current`** — advisory persistent fallback also published for out-of-process readers (`synapsys-list`, `synapsys-stats`).
+4. **`sha1(cwd + processStartTime)`** — last-resort deterministic fallback.
+
+Graceful degradation: if `CLAUDE_CODE_SESSION_ID` ever disappears in a future Claude Code release, legs 2–4 still produce a usable session id, but `/clear` correctness (a fresh ledger after the user clears the conversation) specifically depends on the env var rotating. Stale `.current` files do not override a present env var, and a new Claude Code session in the same `cwd` always starts with a fresh ledger because the env var changes per conversation.
+
 ### Migration checklist
 
 When upgrading existing memories:

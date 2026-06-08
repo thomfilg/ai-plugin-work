@@ -68,6 +68,16 @@ function resolveFromPayload(payload) {
   return SAFE_ID_RE.test(raw) ? raw : hashId(raw);
 }
 
+function resolveFromEnv() {
+  try {
+    const raw = process.env.CLAUDE_CODE_SESSION_ID;
+    if (typeof raw !== 'string' || raw.length === 0) return null;
+    return SAFE_ID_RE.test(raw) ? raw : hashId(raw);
+  } catch {
+    return null;
+  }
+}
+
 function readBoundedFile(p, maxBytes) {
   let fd;
   try {
@@ -115,20 +125,30 @@ function computeFallbackId() {
   return hashId(`${process.cwd()}|${PROCESS_START_TIME}`);
 }
 
-function resolveSessionId(payload) {
+function resolveChain(payload) {
   try {
+    const fromEnv = resolveFromEnv();
+    if (fromEnv) return { sessionId: fromEnv, source: 'env' };
     const fromPayload = resolveFromPayload(payload);
-    if (fromPayload) return fromPayload;
+    if (fromPayload) return { sessionId: fromPayload, source: 'payload' };
     ensureDir();
     const currentPath = path.join(sessionDir(), '.current');
     const existing = readCurrentSessionFile(currentPath);
-    if (existing) return existing;
+    if (existing) return { sessionId: existing, source: 'current' };
     const computed = computeFallbackId();
     writeCurrentSessionFile(currentPath, computed);
-    return computed;
+    return { sessionId: computed, source: 'fallback' };
   } catch {
-    return computeFallbackId();
+    return { sessionId: computeFallbackId(), source: 'fallback' };
   }
+}
+
+function resolveSessionId(payload) {
+  return resolveChain(payload).sessionId;
+}
+
+function resolveSessionIdWithSource(payload) {
+  return resolveChain(payload);
 }
 
 function readLedgerFile(sessionId) {
@@ -238,6 +258,7 @@ function publishCurrentSessionId(sessionId) {
 
 module.exports = {
   resolveSessionId,
+  resolveSessionIdWithSource,
   loadLedger,
   saveLedger,
   recordInjection,
