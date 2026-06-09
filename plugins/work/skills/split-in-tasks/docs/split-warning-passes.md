@@ -1,6 +1,6 @@
 # Split-Warning Passes
 
-After tasks are decomposed (Step 4) and before the quality review pass (Step 5), the splitter runs three static-analysis passes against the proposed tasks. Each pass that detects a problem emits a single-line `SPLIT-WARNING` token into `tasks.md` (or the splitter's stderr stream) so the operator can decide how to resolve it before committing the split.
+After tasks are decomposed (Step 4) and before the quality review pass (Step 5), the splitter runs four static-analysis passes against the proposed tasks. Each pass that detects a problem emits a single-line `SPLIT-WARNING` token into `tasks.md` (or the splitter's stderr stream) so the operator can decide how to resolve it before committing the split.
 
 Warning line shape (all three passes share this Markdown blockquote template, rendered by `lib/emit-warnings.js`):
 
@@ -61,6 +61,40 @@ The `<suggested-resolution>` text is pass-specific (see each pass below) and nam
 - Pass C does not run formatters (biome / prettier) — formatting drift is intentionally out of scope
 - Pass C falls back to a static AST parse when no `pnpm lint` script is detected; the static parse covers only syntactic rules, not project-specific ESLint plugins
 - The blast-radius heuristic uses directory-level grouping; very large directories may produce noisy warnings that the operator must resolve with `suppress`
+
+## Pass D — Type/AC/Scope Consistency
+
+**When it fires:** After Step 4.1, when a task's `### Type` field, `### Files in scope`, and `### Acceptance Criteria` are not mutually consistent under the closed Type taxonomy. The taxonomy and per-Type allowlists live in [`lib/task-types.js`](../lib/task-types.js); the validator lives in [`lib/lint-type-ac-consistency.js`](../lib/lint-type-ac-consistency.js) and is invoked via the CLI at [`lib/emit-warnings.js`](../lib/emit-warnings.js).
+
+Pass D enforces these contracts per task (each violation = one kind-D warning):
+
+- **Type=tdd-code** — scope must list ≥1 `*.test.*` / `*.spec.*` AND ≥1 non-test source. ACs containing docs-exemption phrases still emit the legacy "propose Type: docs" warning.
+- **Type=tests-only** — scope must contain ONLY `*.test.*` / `*.spec.*` files. AC must describe coverage of EXISTING behavior — wording like "implement", "add feature", "fix bug", "introduce" is flagged.
+- **Type=docs** — scope must contain ONLY `*.md` files. AC must not promise behavior changes (same "implement / add feature / fix bug / introduce" set).
+- **Type=config** — scope must match the config-path allowlist (`package.json`, lockfiles, `tsconfig*.json`, `.eslintrc*`, `biome.json`, `.prettierrc*`, `.editorconfig`, `.nvmrc`, `.envrc`, `.env*`, `.gitignore`, `.gitattributes`, `.quality-exceptions`, `turbo.json`, `nx.json`). Build configs that ship behavior belong to `tdd-code`.
+- **Type=ci** — scope must match `.github/**`, `.circleci/**`, `.gitlab-ci.yml`, `azure-pipelines.y(a)ml`, `.buildkite/**`, `.woodpecker(.yml|/**)`, `Jenkinsfile`.
+- **Unknown Type** — any `### Type` value outside the closed enum warns with a hint to pick a Type from `lib/task-types.js`. Implementers fall back to the strictest contract (`tdd-code`) for fail-closed safety; the planner is expected to fix the Type before commit.
+- **AC declares docs-exemption but Type ≠ docs** — retained from earlier work; hint "propose Type: docs".
+
+**Warning template:**
+
+```
+> ⚠️ SPLIT-WARNING: [Pass D] tasks.md: Task <N>: <one-line problem summary> — hint: <suggested-resolution>
+```
+
+**Limitations:**
+
+- Pass D only validates the literal `### Type` / `### Files in scope` / `### Acceptance Criteria` fields. Globs in scope (e.g. `src/**`) are not expanded — the allowlist regex matches the literal path, so `src/**` against a `ci` Type would correctly warn, but `app/api/**` against a `tdd-code` Type with no test sibling listed will warn unless an actual `*.test.*` file is also enumerated.
+- "New behavior" detection is a small set of English-language patterns; the planner can phrase around it. The intent is a *warn*, not a hard block — operators may resolve and continue.
+- The config allowlist is intentionally narrow. New project-specific config files require extending [`lib/task-types.js`](../lib/task-types.js) — Pass D will not auto-discover unfamiliar config conventions.
+
+**Operator invocation:** SKILL.md Step 5 invokes Pass D as a deterministic gate alongside A/B/C:
+
+```
+node "${CLAUDE_PLUGIN_ROOT}/plugins/work/skills/split-in-tasks/lib/emit-warnings.js" "${TASKS_DIR}"
+```
+
+Exit 0 = no warnings. Exit 1 = warnings printed to stdout (one `[Pass D]` line per violation). Exit 2 = invocation error (missing arg / unreadable tasks.md).
 
 ## De-duplication and operator workflow
 

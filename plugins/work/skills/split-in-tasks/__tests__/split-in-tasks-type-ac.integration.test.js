@@ -26,12 +26,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const { spawnSync } = require('node:child_process');
 
-const EMIT_WARNINGS = path.resolve(
-  __dirname,
-  '..',
-  'lib',
-  'emit-warnings.js',
-);
+const EMIT_WARNINGS = path.resolve(__dirname, '..', 'lib', 'emit-warnings.js');
 
 // The skill's library is intentionally pure (no console.* / process.exit),
 // so the integration test spawns a tiny driver that requires
@@ -49,10 +44,14 @@ if (warnings.length > 0) {
 process.exit(0);
 `;
 
-const DOCS_EXEMPTION_AC =
-  'documentation/manifest only — no RED/GREEN/REFACTOR cycle required';
+const DOCS_EXEMPTION_AC = 'documentation/manifest only — no RED/GREEN/REFACTOR cycle required';
 
 function buildTasksMd({ type }) {
+  // Scope choice depends on Type — Pass D now enforces per-Type scope
+  // allowlists. For Type=docs the scope must consist of *.md files; for
+  // any other Type, src/b.js is a non-test source entry that satisfies
+  // the docs-exemption Type-mismatch check we care about here.
+  const scopeEntries = type === 'docs' ? ['- README.md'] : ['- src/b.js'];
   return [
     '# Tasks',
     '',
@@ -69,7 +68,7 @@ function buildTasksMd({ type }) {
     '- Module B re-exports A.',
     '',
     '### Files in scope',
-    '- src/b.js',
+    ...scopeEntries,
     '',
   ].join('\n');
 }
@@ -108,24 +107,20 @@ describe('split-in-tasks aggregation — Type/AC consistency (kind D)', () => {
     assert.notEqual(
       result.status,
       0,
-      `expected emit-warnings to exit non-zero on mismatched fixture; got status=${result.status} stdout=${result.stdout} stderr=${result.stderr}`,
+      `expected emit-warnings to exit non-zero on mismatched fixture; got status=${result.status} stdout=${result.stdout} stderr=${result.stderr}`
     );
     const blob = `${result.stdout || ''}\n${result.stderr || ''}`;
     assert.match(
       blob,
       /documentation\/manifest only/i,
-      `expected offending AC line substring in output; got: ${blob}`,
+      `expected offending AC line substring in output; got: ${blob}`
     );
     assert.match(
       blob,
       /propose Type:\s*docs/i,
-      `expected hint 'propose Type: docs' in output; got: ${blob}`,
+      `expected hint 'propose Type: docs' in output; got: ${blob}`
     );
-    assert.match(
-      blob,
-      /\bTask\s*1\b/,
-      `expected task number reference in output; got: ${blob}`,
-    );
+    assert.match(blob, /\bTask\s*1\b/, `expected task number reference in output; got: ${blob}`);
   });
 
   it('split-in-tasks accepts Type=docs on the same AC', () => {
@@ -137,18 +132,18 @@ describe('split-in-tasks aggregation — Type/AC consistency (kind D)', () => {
     assert.equal(
       result.status,
       0,
-      `expected emit-warnings to exit 0 on docs fixture; got status=${result.status} stdout=${result.stdout} stderr=${result.stderr}`,
+      `expected emit-warnings to exit 0 on docs fixture; got status=${result.status} stdout=${result.stdout} stderr=${result.stderr}`
     );
     const blob = `${result.stdout || ''}\n${result.stderr || ''}`;
     assert.doesNotMatch(
       blob,
       /propose Type:\s*docs/i,
-      `expected no kind-D 'propose Type: docs' hint on happy-path; got: ${blob}`,
+      `expected no kind-D 'propose Type: docs' hint on happy-path; got: ${blob}`
     );
     assert.doesNotMatch(
       blob,
       /\[Pass D\]/,
-      `expected no '[Pass D]' marker on happy-path; got: ${blob}`,
+      `expected no '[Pass D]' marker on happy-path; got: ${blob}`
     );
   });
 });

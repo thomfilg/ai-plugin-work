@@ -17,7 +17,11 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { lintTypeAcConsistency } = require('./lint-type-ac-consistency');
+const {
+  lintTypeAcConsistency,
+  lintAllPassD,
+  parseFilesInScope,
+} = require('./lint-type-ac-consistency');
 
 const WARNING_PREFIX = '> ⚠️ SPLIT-WARNING:';
 
@@ -161,7 +165,8 @@ function parseTasksMdForTypeAc(md, file) {
     const headerMatch = raw.match(/^(\d+)\b/);
     const number = headerMatch ? Number(headerMatch[1]) : null;
     const acceptanceCriteria = extractAcceptanceCriteria(raw);
-    tasks.push({ number, section, acceptanceCriteria });
+    const filesInScope = parseFilesInScope(section);
+    tasks.push({ number, section, acceptanceCriteria, filesInScope });
   }
   return { file, tasks };
 }
@@ -198,19 +203,79 @@ function aggregateTypeAcWarnings(ticketDir) {
   if (!fs.existsSync(tasksPath)) return [];
   const md = fs.readFileSync(tasksPath, 'utf8');
   const model = parseTasksMdForTypeAc(md, 'tasks.md');
-  const warnings = [];
-  for (const task of model.tasks) {
-    const singleTaskModel = { file: model.file, tasks: [task] };
-    const w = lintTypeAcConsistency(singleTaskModel);
-    if (w) warnings.push(w);
+  // Pass D: collect EVERY kind-D warning (full Type/AC/scope consistency
+  // sweep), not just the first docs-exemption mismatch. The legacy single-
+  // warning helper `lintTypeAcConsistency` is preserved for callers that
+  // only need the binary signal.
+  const warnings = lintAllPassD(model);
+  // Use a stable per-warning key so distinct violations on the same task
+  // don't merge into one cryptic message. dedupe() folds by `file` alone,
+  // which made multi-violation tasks collapse — we use {file, message} to
+  // preserve them.
+  return dedupeByMessage(warnings);
+}
+
+/**
+ * Stable per-warning dedupe: two warnings dedupe only when both `file` AND
+ * `message` match exactly. Used for Pass D where one task may emit several
+ * distinct violations.
+ */
+function dedupeByMessage(warnings) {
+  if (!Array.isArray(warnings) || warnings.length === 0) return [];
+  const seen = new Set();
+  const out = [];
+  for (const w of warnings) {
+    if (!w) continue;
+    const key = `${w.file || ''}::${w.message || ''}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(w);
   }
-  return dedupe(warnings);
+  return out;
 }
 
 module.exports = {
   formatWarnings,
   dedupe,
+  dedupeByMessage,
   parseTasksMdForTypeAc,
   aggregateTypeAcWarnings,
   WARNING_PREFIX,
 };
+
+// ─── CLI entrypoint ─────────────────────────────────────────────────────────
+//
+// Usage: `node emit-warnings.js <ticket-dir>` — parses ticket's tasks.md,
+// runs all Pass D checks via aggregateTypeAcWarnings, prints aggregated
+// SPLIT-WARNING lines, and exits non-zero when any are emitted. Matches the
+// docstring contract.
+//
+// Designed to be invokable both directly and from SKILL.md Step 5 alongside
+// Pass A/B/C. The CLI takes a single positional arg (ticket dir).
+function runCli(argv) {
+  const args = (argv || []).slice(2);
+  const ticketDir = args.find((a) => a && !a.startsWith('-'));
+  if (!ticketDir) {
+    process.stderr.write('usage: emit-warnings.js <ticket-dir>\n');
+    process.exit(2);
+  }
+  let warnings;
+  try {
+    warnings = aggregateTypeAcWarnings(ticketDir);
+  } catch (err) {
+    process.stderr.write(`emit-warnings: ${err && err.message ? err.message : String(err)}\n`);
+    process.exit(2);
+  }
+  if (!warnings || warnings.length === 0) {
+    process.exit(0);
+  }
+  process.stdout.write(formatWarnings(warnings) + '\n');
+  process.exit(1);
+}
+
+// Only dispatch when invoked as a script. Using process.exit(0) instead of
+// top-level `return` because the standalone biome parser used by pre-commit
+// rejects top-level `return` (see commit 497c1d292).
+if (require.main === module) {
+  runCli(process.argv);
+}
