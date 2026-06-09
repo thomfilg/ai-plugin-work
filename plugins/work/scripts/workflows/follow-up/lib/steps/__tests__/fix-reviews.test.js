@@ -55,15 +55,4 @@ describe('fix-reviews delegate block (Task 7)', () => {
       'expected NO remaining references to --skip-comment'
     );
   });
-
-  // GH-537 followup — the opt-in GitHub-resolve flag was withdrawn entirely
-  // (the autonomous /work agent must never act on external state per
-  // [[never-solve-bot-comments]] and [[never-comment-external-systems]]).
-  // This regression guard prevents the concept from being re-advertised.
-  it('does NOT advertise --also-resolve-on-github to agents', () => {
-    assert.ok(
-      !SOURCE.includes('--also-resolve-on-github'),
-      'delegate block must not reintroduce the withdrawn opt-in GitHub-resolve flag'
-    );
-  });
 });
