@@ -17,7 +17,18 @@ All deliverables start with `[ ]`. The workflow engine updates them automaticall
 ## Task N — <title>
 
 ### Type
-<infrastructure | backend | frontend | integration | test | checkpoint>
+<one of the closed enum: tdd-code | tests-only | docs | config | ci | mechanical-refactor | file-move | checkpoint>
+
+The closed enum is defined in [`lib/task-types.js`](../lib/task-types.js). Adding a new Type requires a code change there + a Pass D rule update in [`lib/lint-type-ac-consistency.js`](../lib/lint-type-ac-consistency.js); the planner cannot invent ad-hoc values. Each Type maps to a gate contract (see [`gateContractFor()`](../lib/task-types.js)):
+
+- `tdd-code` — strict TDD: RED requires `*.test.*` authorship; GREEN/REFACTOR keep RC-D empty-output trap armed
+- `tests-only` — RED is intentionally skipped (no failing test → passing impl loop); GREEN requires an in-scope test file to be modified
+- `docs` — `.md`-only scope; verifier may be silent (grep / test -f)
+- `config` — package.json / lockfiles / linter configs (see allowlist in task-types.js)
+- `ci` — CI configs only (`.github/**`, `Jenkinsfile`, etc.)
+- `mechanical-refactor` — pure transforms with no behavior change
+- `file-move` — moves only, no edits beyond import updates
+- `checkpoint` — verification-only; no source, no tests
 
 ### Description
 <1-3 sentence summary of what this task delivers>
