@@ -457,6 +457,149 @@ describe('protect-task-scope — Type-line edit guard', () => {
     assert.doesNotMatch(r.stderr || '', /refusing to (modify|edit) `### Type`/);
   });
 
+  // ── GH-528 round-2 follow-up ITEM 5: regression cases for Type-line
+  //    patch tricks. Cases 1-3 are already covered above; the four below
+  //    plug remaining gaps the checkEditTypeLines simulator must catch.
+
+  it('ITEM 5 — case 4a: MultiEdit replace_all on shared token that FLIPS Type → BLOCKED', () => {
+    // On-disk Type value `tdd-code` collides with no other token, so plant
+    // one inside an AC bullet that the planner authored. replace_all rewrites
+    // every occurrence including the Type-line value → simulated Type
+    // changes → must block.
+    const lines = [
+      '## Task 1 — sample',
+      '',
+      '### Type',
+      'tdd-code',
+      '',
+      '### Acceptance Criteria',
+      '- This task is tdd-code-shaped and lists tdd-code coverage.',
+      '',
+      '### Files in scope',
+      '- src/**',
+      '- tasks/**/tasks.md',
+      '',
+    ];
+    fs.writeFileSync(path.join(tasksDir, 'tasks.md'), lines.join('\n'));
+    const r = runHook({
+      tasksBase,
+      cwd: tmpHome,
+      toolName: 'MultiEdit',
+      toolInput: {
+        file_path: path.join(tasksDir, 'tasks.md'),
+        edits: [{ old_string: 'tdd-code', new_string: 'docs', replace_all: true }],
+      },
+    });
+    assert.equal(r.status, 2, `expected block; stderr=${r.stderr}`);
+    assert.match(r.stderr, /### Type/);
+  });
+
+  it('ITEM 5 — case 4b: MultiEdit replace_all on shared token that does NOT change Type-line → ALLOWED by Type-line guard', () => {
+    // Plant `tdd-code` only inside the Type heading-LINE itself and an AC
+    // bullet of a different task — then replace_all on a token that exists
+    // ONLY in non-Type-line prose must not trigger the guard.
+    const lines = [
+      '## Task 1 — sample',
+      '',
+      '### Type',
+      'tdd-code',
+      '',
+      '### Description',
+      'Reference: see docs/foo.md and docs/bar.md',
+      '',
+      '### Files in scope',
+      '- src/**',
+      '- tasks/**/tasks.md',
+      '',
+    ];
+    fs.writeFileSync(path.join(tasksDir, 'tasks.md'), lines.join('\n'));
+    const r = runHook({
+      tasksBase,
+      cwd: tmpHome,
+      toolName: 'MultiEdit',
+      toolInput: {
+        file_path: path.join(tasksDir, 'tasks.md'),
+        edits: [{ old_string: 'docs/', new_string: 'documentation/', replace_all: true }],
+      },
+    });
+    // Type-line guard must NOT fire — the simulated `### Type` value
+    // (tdd-code) is unchanged. (Other gates may still allow.)
+    assert.doesNotMatch(
+      r.stderr || '',
+      /refusing to (modify|edit) `### Type`/,
+      `Type-line guard fired on a replace_all that didn't touch Type; stderr=${r.stderr}`
+    );
+  });
+
+  it('ITEM 5 — case 5: Edit on an AC bullet containing the word "Type" (not the heading) → NOT blocked by Type-line guard', () => {
+    // Authoring "Type" inside a description bullet (not the `### Type` heading
+    // line) used to be ambiguous in the legacy extractor. With the simulator
+    // approach the on-disk Type value is unchanged → guard must stay quiet.
+    const lines = [
+      '## Task 1 — sample',
+      '',
+      '### Type',
+      'tdd-code',
+      '',
+      '### Acceptance Criteria',
+      '- Document Type taxonomy in README',
+      '',
+      '### Files in scope',
+      '- src/**',
+      '- tasks/**/tasks.md',
+      '',
+    ];
+    fs.writeFileSync(path.join(tasksDir, 'tasks.md'), lines.join('\n'));
+    const r = runHook({
+      tasksBase,
+      cwd: tmpHome,
+      toolName: 'Edit',
+      toolInput: {
+        file_path: path.join(tasksDir, 'tasks.md'),
+        old_string: '- Document Type taxonomy in README',
+        new_string: '- Document Type taxonomy and gate contract in README',
+      },
+    });
+    assert.doesNotMatch(
+      r.stderr || '',
+      /refusing to (modify|edit) `### Type`/,
+      `Type-line guard fired on a non-heading line containing "Type"; stderr=${r.stderr}`
+    );
+  });
+
+  it('ITEM 5 — case 6: Edit that adds whitespace ONLY to the `### Type` heading line → ALLOWED (value unchanged)', () => {
+    // The simulator compares the EXTRACTED Type value lines, not the raw
+    // heading line — trailing whitespace on `### Type` itself is cosmetic
+    // and must not trigger the guard.
+    const lines = [
+      '## Task 1 — sample',
+      '',
+      '### Type',
+      'tdd-code',
+      '',
+      '### Files in scope',
+      '- src/**',
+      '- tasks/**/tasks.md',
+      '',
+    ];
+    fs.writeFileSync(path.join(tasksDir, 'tasks.md'), lines.join('\n'));
+    const r = runHook({
+      tasksBase,
+      cwd: tmpHome,
+      toolName: 'Edit',
+      toolInput: {
+        file_path: path.join(tasksDir, 'tasks.md'),
+        old_string: '### Type',
+        new_string: '### Type   ',
+      },
+    });
+    assert.doesNotMatch(
+      r.stderr || '',
+      /refusing to (modify|edit) `### Type`/,
+      `Type-line guard fired on whitespace-only heading edit; stderr=${r.stderr}`
+    );
+  });
+
   it('one-shot bypass pair still works for Type-line guard when target matches (with WORK_OPERATOR_TOKEN)', () => {
     const target = path.join(tasksDir, 'tasks.md');
     const r = runHook({
