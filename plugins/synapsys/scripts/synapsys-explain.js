@@ -326,8 +326,7 @@ function main() {
   const prompt = flag('prompt') !== undefined ? flag('prompt') : stdinPayload.prompt;
   const tool = flag('tool') !== undefined ? flag('tool') : stdinPayload.tool_name;
   const toolInput = resolveToolInput(flag, stdinPayload);
-  const response =
-    flag('response') !== undefined ? flag('response') : stdinPayload.response;
+  const response = flag('response') !== undefined ? flag('response') : stdinPayload.response;
   const verbose = !!flag('verbose');
   const only = parseOnlyList(flag);
 

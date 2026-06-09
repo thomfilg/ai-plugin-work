@@ -102,11 +102,19 @@ test('@e2e scenario 2: /clear rotates CLAUDE_CODE_SESSION_ID -> a new ledger fil
     ledger.recordInjection(sid, 'policy-a', { full: true });
 
     const postLedgerPath = path.join(sessionDir(home), 'session-post-clear.json');
-    assert.equal(fs.existsSync(postLedgerPath), true, 'rotated env id must get its own ledger file');
+    assert.equal(
+      fs.existsSync(postLedgerPath),
+      true,
+      'rotated env id must get its own ledger file'
+    );
     assert.notEqual(postLedgerPath, preLedgerPath, 'paths must be distinct');
 
     const postLoaded = ledger.loadLedger(sid);
-    assert.equal(postLoaded.memories['policy-a'].injectedCount, 1, 'fresh ledger -> count 1, not 2');
+    assert.equal(
+      postLoaded.memories['policy-a'].injectedCount,
+      1,
+      'fresh ledger -> count 1, not 2'
+    );
     assert.equal(postLoaded.memories['policy-a'].lastFullInjectAt, 1);
 
     // Pre-clear ledger is independent and still shows its own count

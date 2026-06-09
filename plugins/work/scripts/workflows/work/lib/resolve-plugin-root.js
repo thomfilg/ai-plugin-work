@@ -85,9 +85,7 @@ function resolvePluginRootHonouringEnv(callerDir, levelsUp = 2) {
 function resolvePluginPaths(callerDir, levelsUp) {
   const root = resolvePluginRoot(callerDir, levelsUp);
   return {
-    workDir: root
-      ? path.join(root, 'workflows', 'work')
-      : path.join(callerDir, '..', 'work'),
+    workDir: root ? path.join(root, 'workflows', 'work') : path.join(callerDir, '..', 'work'),
     libDir: root ? path.join(root, 'workflows', 'lib') : path.join(callerDir, '..', 'lib'),
   };
 }

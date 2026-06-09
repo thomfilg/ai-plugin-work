@@ -17,8 +17,12 @@ const path = require('path');
 
 const getConfig = require(path.join(__dirname, '..', '..', '..', 'lib', 'get-config'));
 const { detectFabrication } = require('./fabrication-detector');
-const { appendAction } = require(path.join(__dirname, '..', '..', '..', 'work', 'lib', 'work-actions'));
-const { getCurrentTaskId } = require(path.join(__dirname, '..', '..', '..', 'lib', 'scripts', 'get-ticket-id'));
+const { appendAction } = require(
+  path.join(__dirname, '..', '..', '..', 'work', 'lib', 'work-actions')
+);
+const { getCurrentTaskId } = require(
+  path.join(__dirname, '..', '..', '..', 'lib', 'scripts', 'get-ticket-id')
+);
 const WORKTREES_BASE = getConfig.orExit('WORKTREES_BASE');
 const REPO_NAME = getConfig('REPO_NAME') || 'my-project';
 const REPO_DIR = path.join(WORKTREES_BASE, REPO_NAME);

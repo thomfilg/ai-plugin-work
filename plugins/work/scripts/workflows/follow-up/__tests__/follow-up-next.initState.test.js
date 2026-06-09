@@ -7,10 +7,7 @@ const followUpNext = require('../follow-up-next');
 
 describe('follow-up-next.initState', () => {
   it('exposes initState via the __test__ escape hatch', () => {
-    assert.ok(
-      followUpNext.__test__,
-      'expected follow-up-next.js to expose a __test__ object'
-    );
+    assert.ok(followUpNext.__test__, 'expected follow-up-next.js to expose a __test__ object');
     assert.equal(
       typeof followUpNext.__test__.initState,
       'function',
@@ -31,10 +28,6 @@ describe('follow-up-next.initState', () => {
       Object.prototype.hasOwnProperty.call(state, 'lastMonitorAt'),
       'expected initState() output to declare a lastMonitorAt property'
     );
-    assert.equal(
-      state.lastMonitorAt,
-      null,
-      'expected lastMonitorAt to be null on fresh state'
-    );
+    assert.equal(state.lastMonitorAt, null, 'expected lastMonitorAt to be null on fresh state');
   });
 });

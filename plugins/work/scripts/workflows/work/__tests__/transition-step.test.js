@@ -687,9 +687,7 @@ describe('transition-step.js (GH-329): check-drift archives stale check reports'
     assert.equal(result.gate, 'check-drift', 'redirect must annotate gate=check-drift');
     assert.equal(result.to, STEPS.check, 'redirect targets check');
     assert.ok(
-      deps._archiveCalls.some(
-        (c) => c.dir === tasksDir && c.steps.includes(STEPS.check)
-      ),
+      deps._archiveCalls.some((c) => c.dir === tasksDir && c.steps.includes(STEPS.check)),
       'archiveStepArtifacts must be called with tasksDir + [STEPS.check]'
     );
     assert.ok(
@@ -769,10 +767,7 @@ describe('transition-step.js (GH-329): check-drift archives stale check reports'
       deps._archiveCalls.some((c) => c.steps.includes(STEPS.check)),
       'archive helper still invoked (idempotent no-op)'
     );
-    assert.ok(
-      reportsRemoved(tasksDir, deps._reportFiles),
-      'no files to remove (trivially true)'
-    );
+    assert.ok(reportsRemoved(tasksDir, deps._reportFiles), 'no files to remove (trivially true)');
     const archivalRows = deps._actions.filter(
       (a) => typeof a.what === 'string' && a.what.includes('artifacts archived to')
     );
@@ -784,7 +779,11 @@ describe('transition-step.js (GH-329): check-drift archives stale check reports'
     const recheckRows = deps._actions.filter(
       (a) => a.what === 'check re-triggered: new commits detected'
     );
-    assert.equal(recheckRows.length, 1, 're-triggered row still appended even with no reports (R4)');
+    assert.equal(
+      recheckRows.length,
+      1,
+      're-triggered row still appended even with no reports (R4)'
+    );
   });
 
   it('backward transition into check still archives via the same helper', () => {

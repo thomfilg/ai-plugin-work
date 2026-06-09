@@ -22,11 +22,11 @@ const STATUS_URL = 'https://www.githubstatus.com/api/v2/components.json';
  * @returns {object}
  */
 function defaultFetcher() {
-  const stdout = execFileSync(
-    'curl',
-    ['-fsS', '--max-time', '5', STATUS_URL],
-    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 6000 }
-  );
+  const stdout = execFileSync('curl', ['-fsS', '--max-time', '5', STATUS_URL], {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+    timeout: 6000,
+  });
   return JSON.parse(stdout);
 }
 

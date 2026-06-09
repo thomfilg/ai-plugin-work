@@ -20,10 +20,7 @@ function makeTempStore() {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-list-domain-'));
   const storeDir = path.join(cwd, '.claude', 'synapsys');
   fs.mkdirSync(storeDir, { recursive: true });
-  fs.writeFileSync(
-    path.join(storeDir, '.synapsys.json'),
-    JSON.stringify({ projectName: 'test' })
-  );
+  fs.writeFileSync(path.join(storeDir, '.synapsys.json'), JSON.stringify({ projectName: 'test' }));
   return { cwd, storeDir };
 }
 
@@ -31,18 +28,13 @@ function writeMemory(storeDir, fileName, frontmatter) {
   const fm = Object.entries(frontmatter)
     .map(([k, v]) => `${k}: ${v}`)
     .join('\n');
-  fs.writeFileSync(
-    path.join(storeDir, fileName),
-    `---\n${fm}\n---\nbody text\n`
-  );
+  fs.writeFileSync(path.join(storeDir, fileName), `---\n${fm}\n---\nbody text\n`);
 }
 
 function runList(cwd, extraArgs = []) {
-  return spawnSync(
-    process.execPath,
-    [LIST_SCRIPT, `--cwd=${cwd}`, '--no-color', ...extraArgs],
-    { encoding: 'utf8' }
-  );
+  return spawnSync(process.execPath, [LIST_SCRIPT, `--cwd=${cwd}`, '--no-color', ...extraArgs], {
+    encoding: 'utf8',
+  });
 }
 
 function stripAnsi(s) {

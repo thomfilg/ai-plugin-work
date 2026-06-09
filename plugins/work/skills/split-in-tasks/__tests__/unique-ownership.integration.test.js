@@ -87,8 +87,7 @@ describe('validateUniqueOwnership', () => {
       `literal-vs-literal fixture must produce ≥1 error; got ${errors.length}`
     );
     const matched = errors.some(
-      (e) =>
-        /lib\/a\.ts/.test(e) && /\bTask\s*1\b/i.test(e) && /\bTask\s*2\b/i.test(e)
+      (e) => /lib\/a\.ts/.test(e) && /\bTask\s*1\b/i.test(e) && /\bTask\s*2\b/i.test(e)
     );
     assert.ok(
       matched,
@@ -107,10 +106,7 @@ describe('validateUniqueOwnership', () => {
       `glob-vs-literal fixture must produce ≥1 error; got ${errors.length}`
     );
     const matched = errors.some(
-      (e) =>
-        /lib\/foo\/bar\.ts/.test(e) &&
-        /\bTask\s*1\b/i.test(e) &&
-        /\bTask\s*2\b/i.test(e)
+      (e) => /lib\/foo\/bar\.ts/.test(e) && /\bTask\s*1\b/i.test(e) && /\bTask\s*2\b/i.test(e)
     );
     assert.ok(
       matched,
@@ -130,9 +126,7 @@ describe('validateUniqueOwnership', () => {
     );
     const matched = errors.some(
       (e) =>
-        /app\/api\/routers\/users\.ts/.test(e) &&
-        /\bTask\s*1\b/i.test(e) &&
-        /\bTask\s*2\b/i.test(e)
+        /app\/api\/routers\/users\.ts/.test(e) && /\bTask\s*1\b/i.test(e) && /\bTask\s*2\b/i.test(e)
     );
     assert.ok(
       matched,

@@ -201,10 +201,7 @@ function checkTestResultsRows(prBody, taskDir) {
 function detectFabrication(prBody, taskDir) {
   const body = typeof prBody === 'string' ? prBody : '';
   const dir = typeof taskDir === 'string' ? taskDir : '';
-  const violations = [
-    ...checkStabilityClaims(body, dir),
-    ...checkTestResultsRows(body, dir),
-  ];
+  const violations = [...checkStabilityClaims(body, dir), ...checkTestResultsRows(body, dir)];
   return { violations };
 }
 

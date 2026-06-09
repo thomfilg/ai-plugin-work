@@ -88,3 +88,93 @@ tmux new-session -d -s main-orchestrate \
 | `STATE_DIR` | `/tmp/maestro-conduct-state` | Marker location |
 | `ALERT_FILE` | `/tmp/maestro-alerts.jsonl` | Alert sink |
 | `ALERT_SESSION` | `maestro-alerts` | tmux alert pane |
+| `SILENCE_LIMIT_SEC_FOLLOWUP` | `1800` (registry default) | Per-skill silence threshold override for `follow-up`. Read per-call by `detectors/silence.js`. |
+
+## skill-adapter
+
+The maestro daemon multiplexes the same detector loop across multiple
+agent skills (today: `work` and `follow-up`). Each skill is a single row
+in `skill-registry.js` and provides four pieces of behavior the loop
+consumes through one seam.
+
+### Registry row shape
+
+Returned by `skillRegistry.get(name)` — see
+`shared/skill-registry-rows.js` for the row factories.
+
+| Field | Type | Meaning |
+|---|---|---|
+| `stateFile` | `(ticket) => string \| null` | Absolute path to the per-skill state file under `tasks/<ticket>/`. `work` returns `.work-state.json`; `follow-up` returns `null` (no `/work` state; the skill is stateless). |
+| `snapshot(ticket)` | `(ticket) => { exists: boolean, phase?: string, raw?: object, source: 'work-state' \| 'follow-up' \| 'none' }` | One-shot read used by `ctxFor` to resolve the active phase. Must never throw on a missing file — return `{ exists: false, source }` instead. |
+| `isHealthyIdle(ctx)` | `(ctx) => boolean` | Predicate that exempts a skill from the phase-stall escalation chain when "idle is the correct state" (e.g. `follow-up` between bot comment polls). |
+| `silenceLimitSec` | `number` | Default silence threshold for the skill. Overridden per-call by `SILENCE_LIMIT_SEC_<SKILL_UPPER>` (e.g. `SILENCE_LIMIT_SEC_FOLLOWUP`). |
+
+### State-file locations
+
+| Skill | File | Note |
+|---|---|---|
+| `work` | `tasks/<ticket>/.work-state.json` | Authored by `/work` itself. |
+| `follow-up` | _none_ | `follow-up` is stateless; `snapshot()` returns `{ source: 'follow-up' }`. |
+
+The skill identity itself is persisted at `tasks/<ticket>/.maestro-skill`
+(`work` is the default when the file is absent — non-regressive for
+existing tickets). `skillRegistry.readTicketSkill(ticket)` resolves it.
+
+### Healthy-idle predicate semantics
+
+`isHealthyIdle(ctx)` MUST return `true` only when:
+
+1. The skill expects the agent to be idle in the current phase, AND
+2. The conductor would otherwise treat the silence as a stall.
+
+For `work` it always returns `false` (silence is never healthy). For
+`follow-up` it returns `true` when the ctx is between PR-comment polls,
+which is the PR #504 wedge the maestro skill is designed to avoid.
+
+### Silence-threshold env var conventions
+
+Per-call resolution order in `detectors/silence.js#resolveSilenceLimit`:
+
+1. `ctx.skill === 'follow-up'` AND `$SILENCE_LIMIT_SEC_FOLLOWUP` set → that value
+2. `skillRegistry.get(ctx.skill).silenceLimitSec`
+3. `$SILENCE_LIMIT_SEC` (work-only fallback)
+4. Hard default `300`
+
+Naming convention for new skills: `SILENCE_LIMIT_SEC_<SKILL_UPPER>`
+where `<SKILL_UPPER>` is the skill name uppercased with `-` replaced
+by `_`.
+
+### Skill-prefixed log lines
+
+The conductor logs silence-path events with a skill-aware token so
+`grep '\[GH-\d\+:follow-up\]' /tmp/maestro-conduct.log` separates
+follow-up from work traffic. Format (single source of truth —
+`detectors/silence.js#formatLogLine`):
+
+```
+[<TICKET>:<skill>] <kind>: <silenceSec>s
+```
+
+Examples:
+
+```
+[GH-514:follow-up] silence: 120s
+[GH-514:work] silence: 301s
+```
+
+Missing `skill` defaults to `work` so existing `/work` log shape stays
+bit-for-bit unchanged (AC5).
+
+### Adding a new skill (registry row)
+
+1. Add a row factory in `shared/skill-registry-rows.js` — return the
+   four fields above.
+2. Register it in `skill-registry.js`'s `REGISTRY` table.
+3. Add `SILENCE_LIMIT_SEC_<SKILL_UPPER>` to the Tunables table above
+   (and document its default).
+4. Add tests in `__tests__/maestro-skill-registry.test.js` that exercise
+   the new row through `get()`, `snapshot()`, and `isHealthyIdle()`.
+
+The detector loop, the auto-restart launcher, and the log emit path
+all read through the registry — no new switch/case is needed at any
+call site.

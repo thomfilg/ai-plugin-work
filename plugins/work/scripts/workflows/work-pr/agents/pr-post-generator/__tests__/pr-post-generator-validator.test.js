@@ -6,10 +6,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const REPO_ROOT = path.resolve(__dirname, '../../../../../../../..');
-const AGENT_PROMPT = path.join(
-  REPO_ROOT,
-  'plugins/work/agents/pr-post-generator.md'
-);
+const AGENT_PROMPT = path.join(REPO_ROOT, 'plugins/work/agents/pr-post-generator.md');
 const WORKFLOW_COPY = path.join(
   REPO_ROOT,
   'plugins/work/scripts/workflows/work-pr/agents/pr-post-generator/pr-post-generator.md'
@@ -30,12 +27,15 @@ describe('agent prompt — FABRICATION GUARD', () => {
     // test-evidence content.
     assert.match(content, /FABRICATION GUARD/, 'missing FABRICATION GUARD');
     assert.match(content, /\|\s*[^|]+\|\s*pending\s*\|/i, 'missing pending example row');
-    const hasProhibition =
-      /10\/10/.test(content) || /N\/N\s+stability/i.test(content);
+    const hasProhibition = /10\/10/.test(content) || /N\/N\s+stability/i.test(content);
     assert.ok(hasProhibition, 'missing prohibition of 10/10 or N/N stability phrasing');
     // R16 — workflow-referenced copy must mirror the same content.
     assert.ok(fs.existsSync(WORKFLOW_COPY), 'workflow copy must exist (currently broken symlink)');
-    assert.match(readResolved(WORKFLOW_COPY), /FABRICATION GUARD/, 'workflow copy missing FABRICATION GUARD');
+    assert.match(
+      readResolved(WORKFLOW_COPY),
+      /FABRICATION GUARD/,
+      'workflow copy missing FABRICATION GUARD'
+    );
   });
 
   test('AC6/R1 — pr-post-generator.md contains FABRICATION GUARD section', () => {
@@ -58,8 +58,7 @@ describe('agent prompt — FABRICATION GUARD', () => {
 
   test('AC6/R2 — pr-post-generator.md prohibits 10/10 or N/N stability phrasing', () => {
     const content = readResolved(AGENT_PROMPT);
-    const hasProhibition =
-      /10\/10/.test(content) || /N\/N\s+stability/i.test(content);
+    const hasProhibition = /10\/10/.test(content) || /N\/N\s+stability/i.test(content);
     assert.ok(
       hasProhibition,
       'agent prompt must explicitly prohibit 10/10 or N/N stability phrasing'

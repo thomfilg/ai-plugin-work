@@ -234,7 +234,10 @@ test('Sourcing requires word-boundary match, not naive substring', () => {
   ].join('\n');
   const { violations } = detectFabrication(prBody, dir);
   const row = violations.find((v) => v.reason === 'unsourced-test-row');
-  assert.ok(row, 'expected violation — "login" inside "loginflow"/"logins" should not source the claim');
+  assert.ok(
+    row,
+    'expected violation — "login" inside "loginflow"/"logins" should not source the claim'
+  );
 });
 
 test('Whole-word sourcing in tests.check.md clears the claim', () => {

@@ -49,18 +49,14 @@ function makeTempStore() {
 }
 
 function runExplain(cwd, extraArgs = []) {
-  const res = spawnSync(
-    process.execPath,
-    [SCRIPT, '--event=Stop', `--cwd=${cwd}`, ...extraArgs],
-    {
-      encoding: 'utf8',
-      env: {
-        ...process.env,
-        NO_COLOR: '1',
-        SYNAPSYS_DISABLE_HOME_STORES: '1',
-      },
-    }
-  );
+  const res = spawnSync(process.execPath, [SCRIPT, '--event=Stop', `--cwd=${cwd}`, ...extraArgs], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      NO_COLOR: '1',
+      SYNAPSYS_DISABLE_HOME_STORES: '1',
+    },
+  });
   return { stdout: res.stdout || '', stderr: res.stderr || '', status: res.status };
 }
 
@@ -124,7 +120,11 @@ test('synapsys-explain --verbose surfaces the would_fire_if hint when --response
   const { stdout, status } = runExplain(cwd, ['--verbose']);
   assert.equal(status, 0, `expected exit 0, got ${status}; stdout=${stdout}`);
 
-  assert.match(stdout, /fired:\s+\?\s+\(needs --response/, `expected "fired: ?" needs-response label`);
+  assert.match(
+    stdout,
+    /fired:\s+\?\s+\(needs --response/,
+    `expected "fired: ?" needs-response label`
+  );
   assert.match(
     stdout,
     /would_fire_if:\s+response matches \/bump/,
@@ -155,18 +155,14 @@ test('synapsys-explain Stop with NO trigger_stop_response still fires unconditio
   ].join('\n');
   fs.writeFileSync(path.join(storeDir, 'unconditional-stop-memory.md'), frontmatter);
 
-  const res = spawnSync(
-    process.execPath,
-    [SCRIPT, '--event=Stop', `--cwd=${dir}`],
-    {
-      encoding: 'utf8',
-      env: {
-        ...process.env,
-        NO_COLOR: '1',
-        SYNAPSYS_DISABLE_HOME_STORES: '1',
-      },
-    }
-  );
+  const res = spawnSync(process.execPath, [SCRIPT, '--event=Stop', `--cwd=${dir}`], {
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      NO_COLOR: '1',
+      SYNAPSYS_DISABLE_HOME_STORES: '1',
+    },
+  });
   assert.equal(res.status, 0);
   assert.match(res.stdout, /unconditional-stop-memory\s+\|\s+✓/);
 });

@@ -108,7 +108,11 @@ describe('shared lock from project A blocks op invoked from project B', () => {
 
     const res = runHookWithPayload(payload, projectB);
 
-    assert.equal(res.status, 2, `expected block (exit 2), got ${res.status}; stderr: ${res.stderr}`);
+    assert.equal(
+      res.status,
+      2,
+      `expected block (exit 2), got ${res.status}; stderr: ${res.stderr}`
+    );
     assert.match(
       res.stderr,
       /edit shared target/,

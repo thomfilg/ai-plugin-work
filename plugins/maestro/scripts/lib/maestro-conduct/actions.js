@@ -25,9 +25,10 @@ const {
   buildNextActionInstruction,
 } = require('./next-task');
 const { purgeAlertCountsForTicket } = require('../../maestro-cleanup');
+const skillRegistry = require('./skill-registry');
+const { formatLogLine } = require('./detectors/silence');
 
 const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
-const SKILL_NAME = process.env.SKILL_NAME || 'work';
 
 const BOOTSTRAP_SCRIPT = path.join(__dirname, '..', '..', 'maestro-bootstrap.sh');
 const REPO_NAME = process.env.REPO_NAME || 'claude-plugin-work';
@@ -99,8 +100,9 @@ function declareWedged({ session, ticket, restarts, now, silenceSec }) {
   const wedgedUntil = now + WEDGED_QUIET_MIN * 60;
   const count = restarts.length + 1;
   state.write(session, 'restart-loop', { restarts: [...restarts, now], wedgedUntil });
+  const skill = skillRegistry.readTicketSkill(ticket);
   alerts.log(
-    `${session} WEDGED — ${count} auto-restarts in ${RESTART_WINDOW_MIN}m; suppressing restarts for ${WEDGED_QUIET_MIN}m`
+    `${formatLogLine({ ticket, skill, silenceSec, kind: 'wedged' })} ${session} WEDGED — ${count} auto-restarts in ${RESTART_WINDOW_MIN}m; suppressing restarts for ${WEDGED_QUIET_MIN}m`
   );
   const paneTail = tmux.capture(session).split('\n').slice(-50).join('\n');
   alerts.alert({
@@ -167,44 +169,50 @@ function checkRestartGuards({ session, ticket, worktree }) {
   return checkDeadEndGuard({ session, ticket });
 }
 
+// GH-514 R1: resolve skill per-call so daemon restarts honor `.maestro-skill`
+// writes that happened after module load. Falls open to 'work'; on whitelist
+// reject we log the rejected raw value so operators can spot tampering.
+function resolveSkillForRestart(ticket, session) {
+  const skill = skillRegistry.readTicketSkill(ticket);
+  let raw = null;
+  try {
+    raw = fs.readFileSync(skillRegistry.ticketSkillFile(ticket), 'utf8').trim();
+  } catch {
+    /* missing → default, no warning */
+  }
+  if (raw && !skillRegistry.isKnownSkill(raw)) {
+    alerts.log(
+      `${session} AUTO-RESTART .maestro-skill value ${JSON.stringify(raw)} rejected by whitelist — falling open to /work for ${ticket}`
+    );
+  }
+  return skill;
+}
+
 function autoRestart({ session, ticket, worktree, silenceSec }) {
   if (checkRestartGuards({ session, ticket, worktree }).skip) return false;
 
-  // Restart-loop guard. Read the per-session marker once and decide whether
-  // we're still in the "WEDGED quiet" window from a prior loop. The marker
-  // shape:
-  //   { restarts: [unix_ts, ...], wedgedUntil?: unix_ts }
-  // restarts[] is pruned to the last RESTART_WINDOW_MIN.
+  // Restart-loop guard. Marker shape: { restarts: [unix_ts...], wedgedUntil? }.
   const now = state.now();
   const marker = state.read(session, 'restart-loop') || { restarts: [] };
+  if (marker.wedgedUntil && marker.wedgedUntil > now) return false;
 
-  if (marker.wedgedUntil && marker.wedgedUntil > now) {
-    // Already declared wedged — don't restart, don't re-alert. We logged on
-    // entry; further silence triggers can re-read this marker silently.
-    return false;
-  }
-
-  // Prune older entries outside the rolling window.
   const cutoff = now - RESTART_WINDOW_MIN * 60;
   const restarts = (marker.restarts || []).filter((t) => t >= cutoff);
 
-  // If we'd be at-or-over the threshold AFTER this restart, declare wedged
-  // INSTEAD of restarting. The operator must intervene.
   if (restarts.length + 1 >= RESTART_LOOP_THRESHOLD) {
     declareWedged({ session, ticket, restarts, now, silenceSec });
     return false;
   }
 
-  // Record this restart and proceed.
   state.write(session, 'restart-loop', { restarts: [...restarts, now] });
-
+  const skill = resolveSkillForRestart(ticket, session); // GH-514 R1/AC2/AC6
+  // PR #561 follow-up: prefix the production silence log with the skill-aware
+  // token from formatLogLine so operators can grep `[<ticket>:<skill>]` in
+  // /tmp/maestro-conduct.log — the README's skill-adapter section promised it.
   alerts.log(
-    `${session} AUTO-RESTART after ${silenceSec}s silence — relaunching /${SKILL_NAME} ${ticket}`
+    `${formatLogLine({ ticket, skill, silenceSec, kind: 'silence' })} ${session} AUTO-RESTART after ${silenceSec}s silence — relaunching /${skill} ${ticket}`
   );
-  // Kill the dead session (no-op if already gone).
   spawnSync('tmux', ['kill-session', '-t', session], { stdio: 'ignore' });
-  // Relaunch in-place. argv form so the worktree path / ticket can't be
-  // interpreted by a shell.
   spawnSync(
     'tmux',
     [
@@ -214,7 +222,7 @@ function autoRestart({ session, ticket, worktree, silenceSec }) {
       session,
       '-c',
       worktree,
-      `${CLAUDE_BIN} --dangerously-skip-permissions '/${SKILL_NAME} ${ticket}'`,
+      `${CLAUDE_BIN} --dangerously-skip-permissions '/${skill} ${ticket}'`,
     ],
     { stdio: 'ignore' }
   );

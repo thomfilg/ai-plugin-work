@@ -88,17 +88,17 @@ describe('tasks-gate unique-ownership routing', () => {
     const add = (step, decision, agent, reason, opts) =>
       calls.push({ step, decision, agent, reason, opts });
 
-    tasksGateStep(add, { hasTasks: true }, {
-      STEPS,
-      tasksDir: tmpDir,
-      path,
-    });
-
-    assert.equal(
-      calls.length,
-      1,
-      `expected exactly one add() call; got ${JSON.stringify(calls)}`
+    tasksGateStep(
+      add,
+      { hasTasks: true },
+      {
+        STEPS,
+        tasksDir: tmpDir,
+        path,
+      }
     );
+
+    assert.equal(calls.length, 1, `expected exactly one add() call; got ${JSON.stringify(calls)}`);
     const [c] = calls;
     assert.equal(c.step, 'tasks_gate');
     assert.equal(

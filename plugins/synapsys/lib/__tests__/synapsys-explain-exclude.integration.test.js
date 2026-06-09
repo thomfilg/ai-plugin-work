@@ -141,9 +141,7 @@ test('Task 4: table mode shows exclude-matched reason in row', (t) => {
   ]);
 
   assert.equal(result.status, 0, `exit non-zero. stderr=${result.stderr}`);
-  const row = result.stdout
-    .split('\n')
-    .find((l) => l.includes('jira-ops-exclude-demo'));
+  const row = result.stdout.split('\n').find((l) => l.includes('jira-ops-exclude-demo'));
   assert.ok(row, `expected row for jira-ops-exclude-demo. stdout=${result.stdout}`);
   assert.match(row, /exclude-matched/, `expected exclude-matched in row: ${row}`);
   assert.match(row, /✗/, `expected fired ✗ in row: ${row}`);

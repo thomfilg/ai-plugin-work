@@ -154,7 +154,10 @@ test('Multi-domain OR semantics — memory fires when any listed domain is activ
   // OR semantics: presence of e2e:flake-triage alone is enough for the listed
   // memory to fire.
   const tagged = ['e2e:flake-triage', 'ci:failure-diagnosis'];
-  assert.equal(tagged.some((d) => onlyFlake.has(d)), true);
+  assert.equal(
+    tagged.some((d) => onlyFlake.has(d)),
+    true
+  );
 
   const onlyCi = classifyActiveDomains({
     prompt: 'ci failure on main',
@@ -163,5 +166,8 @@ test('Multi-domain OR semantics — memory fires when any listed domain is activ
   });
   assert.equal(onlyCi.has('ci:failure-diagnosis'), true);
   assert.equal(onlyCi.has('e2e:flake-triage'), false);
-  assert.equal(tagged.some((d) => onlyCi.has(d)), true);
+  assert.equal(
+    tagged.some((d) => onlyCi.has(d)),
+    true
+  );
 });

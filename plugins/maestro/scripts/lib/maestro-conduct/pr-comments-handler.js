@@ -33,7 +33,14 @@ function emitAlert({ ctx, cHit, actions, maybeEscalateToDeadEnd }) {
 }
 
 function handlePrComments({
-  ctx, cHit, state, actions, phaseFor, escalationFor, bumpMarker, maybeEscalateToDeadEnd,
+  ctx,
+  cHit,
+  state,
+  actions,
+  phaseFor,
+  escalationFor,
+  bumpMarker,
+  maybeEscalateToDeadEnd,
 }) {
   const marker = cHit.marker;
   const sinceLastNudge = marker.lastNudgeAt ? state.minutesSince(marker.lastNudgeAt) : Infinity;

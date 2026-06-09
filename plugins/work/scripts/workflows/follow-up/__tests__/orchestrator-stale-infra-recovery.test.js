@@ -18,10 +18,7 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 
-const ORCHESTRATOR_SRC = fs.readFileSync(
-  require.resolve('../follow-up-next.js'),
-  'utf8'
-);
+const ORCHESTRATOR_SRC = fs.readFileSync(require.resolve('../follow-up-next.js'), 'utf8');
 
 describe('orchestrator auto-clears stale infra cache before any step (GH-536 PR #551 round-2)', () => {
   it('checks isInfraFailure + isStale before runStep', () => {

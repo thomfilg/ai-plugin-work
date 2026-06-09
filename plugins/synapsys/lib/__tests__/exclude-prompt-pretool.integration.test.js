@@ -248,9 +248,7 @@ test('Scenario 5: invalid exclude regex is skipped with stderr warning; remainin
     'exclude_preset: ci-monitor',
   ]);
   const [mem] = listMemoriesFromStore(fx.store);
-  const { ret, stderr } = captureStderr(() =>
-    matchPrompt(mem, 'gh run watch the deploy workflow')
-  );
+  const { ret, stderr } = captureStderr(() => matchPrompt(mem, 'gh run watch the deploy workflow'));
   assert.equal(ret.fired, false);
   assert.equal(ret.reason, 'exclude-matched');
   assert.match(stderr, /\[synapsys\]/);

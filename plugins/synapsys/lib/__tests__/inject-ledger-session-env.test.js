@@ -66,7 +66,10 @@ test('(b) unsafe env id ("../evil/path") is sha256-hashed; no ".." segment lands
       assert.equal(name.includes('..'), false, `disk entry ${name} must not contain ".."`);
       assert.equal(name.includes('/'), false, `disk entry ${name} must not contain "/"`);
     }
-    assert.ok(entries.some((n) => n === `${sid}.json`), 'hashed-id ledger file should exist');
+    assert.ok(
+      entries.some((n) => n === `${sid}.json`),
+      'hashed-id ledger file should exist'
+    );
   });
 });
 
@@ -136,8 +139,11 @@ test('(g) back-compat: env var unset and no payload → .current still wins', ()
 test('(h) resolveSessionIdWithSource tags source="env" when env var resolves', () => {
   const home = makeTmpHome();
   withHomeAndEnv(home, 'env-tagged', (ledger) => {
-    assert.equal(typeof ledger.resolveSessionIdWithSource, 'function',
-      'resolveSessionIdWithSource must be exported');
+    assert.equal(
+      typeof ledger.resolveSessionIdWithSource,
+      'function',
+      'resolveSessionIdWithSource must be exported'
+    );
     const result = ledger.resolveSessionIdWithSource({ session_id: 'payload-id' });
     assert.equal(result.sessionId, 'env-tagged');
     assert.equal(result.source, 'env');
@@ -147,8 +153,11 @@ test('(h) resolveSessionIdWithSource tags source="env" when env var resolves', (
 test('(i) resolveSessionIdWithSource tags source="payload" when only payload resolves', () => {
   const home = makeTmpHome();
   withHomeAndEnv(home, undefined, (ledger) => {
-    assert.equal(typeof ledger.resolveSessionIdWithSource, 'function',
-      'resolveSessionIdWithSource must be exported');
+    assert.equal(
+      typeof ledger.resolveSessionIdWithSource,
+      'function',
+      'resolveSessionIdWithSource must be exported'
+    );
     const result = ledger.resolveSessionIdWithSource({ session_id: 'payload-only' });
     assert.equal(result.sessionId, 'payload-only');
     assert.equal(result.source, 'payload');
@@ -161,8 +170,11 @@ test('(j) resolveSessionIdWithSource tags source="current" when only .current re
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(path.join(dir, '.current'), 'current-only-id');
   withHomeAndEnv(home, undefined, (ledger) => {
-    assert.equal(typeof ledger.resolveSessionIdWithSource, 'function',
-      'resolveSessionIdWithSource must be exported');
+    assert.equal(
+      typeof ledger.resolveSessionIdWithSource,
+      'function',
+      'resolveSessionIdWithSource must be exported'
+    );
     const result = ledger.resolveSessionIdWithSource({});
     assert.equal(result.sessionId, 'current-only-id');
     assert.equal(result.source, 'current');
@@ -172,8 +184,11 @@ test('(j) resolveSessionIdWithSource tags source="current" when only .current re
 test('(k) resolveSessionIdWithSource tags source="fallback" when only sha1(cwd+processStartTime) leg fires', () => {
   const home = makeTmpHome();
   withHomeAndEnv(home, undefined, (ledger) => {
-    assert.equal(typeof ledger.resolveSessionIdWithSource, 'function',
-      'resolveSessionIdWithSource must be exported');
+    assert.equal(
+      typeof ledger.resolveSessionIdWithSource,
+      'function',
+      'resolveSessionIdWithSource must be exported'
+    );
     const result = ledger.resolveSessionIdWithSource({});
     assert.equal(typeof result.sessionId, 'string');
     assert.ok(result.sessionId.length > 0);

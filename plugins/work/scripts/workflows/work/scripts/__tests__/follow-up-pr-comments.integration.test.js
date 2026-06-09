@@ -171,7 +171,11 @@ describe('follow-up-pr-comments CLI (Task 2 new flags)', () => {
       { TASKS_BASE: ctx.tmpDir, TICKET_PROVIDER: 'github' },
       { cwd: ctx.ticketDir }
     );
-    assert.equal(result.status, 0, `expected exit 0, got ${result.status}; stderr=${result.stderr}`);
+    assert.equal(
+      result.status,
+      0,
+      `expected exit 0, got ${result.status}; stderr=${result.stderr}`
+    );
     assert.equal(result.stderr, '', `expected empty stderr, got: ${result.stderr}`);
 
     const after = JSON.parse(fs.readFileSync(ctx.stateFile, 'utf8'));
@@ -188,7 +192,11 @@ describe('follow-up-pr-comments CLI (Task 2 new flags)', () => {
       { TASKS_BASE: ctx.tmpDir, TICKET_PROVIDER: 'github' },
       { cwd: ctx.ticketDir }
     );
-    assert.equal(result.status, 0, `expected exit 0, got ${result.status}; stderr=${result.stderr}`);
+    assert.equal(
+      result.status,
+      0,
+      `expected exit 0, got ${result.status}; stderr=${result.stderr}`
+    );
     assert.equal(result.stderr, '', `expected empty stderr, got: ${result.stderr}`);
 
     const after = JSON.parse(fs.readFileSync(ctx.stateFile, 'utf8'));

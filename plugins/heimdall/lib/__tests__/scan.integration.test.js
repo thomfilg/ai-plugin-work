@@ -53,7 +53,7 @@ describe("scan kind='shared'", () => {
     assert.ok(cc, "expected 'claude-config' in shared scan suggestions");
     assert.ok(
       cc.protect.includes('~/.claude'),
-      `expected '~/.claude' in cc.protect, got ${JSON.stringify(cc.protect)}`,
+      `expected '~/.claude' in cc.protect, got ${JSON.stringify(cc.protect)}`
     );
   });
 
@@ -61,11 +61,11 @@ describe("scan kind='shared'", () => {
     const ids = scan({ cwd: repo, kind: 'shared' }).map((s) => s.id);
     assert.ok(
       !ids.includes('root-package-json'),
-      `repo-anchored 'root-package-json' must NOT be suggested for shared, got ${JSON.stringify(ids)}`,
+      `repo-anchored 'root-package-json' must NOT be suggested for shared, got ${JSON.stringify(ids)}`
     );
     assert.ok(
       !ids.includes('github-dir'),
-      `repo-anchored 'github-dir' must NOT be suggested for shared, got ${JSON.stringify(ids)}`,
+      `repo-anchored 'github-dir' must NOT be suggested for shared, got ${JSON.stringify(ids)}`
     );
   });
 
@@ -74,7 +74,7 @@ describe("scan kind='shared'", () => {
     assert.ok(cc);
     assert.ok(
       !cc.protect.includes('.claude'),
-      `repo-anchored '.claude' must NOT appear in shared protect list, got ${JSON.stringify(cc.protect)}`,
+      `repo-anchored '.claude' must NOT appear in shared protect list, got ${JSON.stringify(cc.protect)}`
     );
   });
 });
@@ -85,7 +85,7 @@ describe("scan kind='global' regression", () => {
     assert.ok(cc, "expected 'claude-config' in global scan suggestions");
     assert.ok(
       cc.protect.includes('~/.claude'),
-      `expected '~/.claude' in global cc.protect, got ${JSON.stringify(cc.protect)}`,
+      `expected '~/.claude' in global cc.protect, got ${JSON.stringify(cc.protect)}`
     );
   });
 
@@ -93,7 +93,7 @@ describe("scan kind='global' regression", () => {
     const ids = scan({ cwd: repo, kind: 'local' }).map((s) => s.id);
     assert.ok(
       ids.includes('root-package-json'),
-      `expected 'root-package-json' in local scan, got ${JSON.stringify(ids)}`,
+      `expected 'root-package-json' in local scan, got ${JSON.stringify(ids)}`
     );
   });
 });

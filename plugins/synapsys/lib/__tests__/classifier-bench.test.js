@@ -16,12 +16,8 @@ const os = require('node:os');
 const path = require('node:path');
 const { performance } = require('node:perf_hooks');
 
-const { loadDomainRegistry, _resetDomainCache } = require(
-  path.resolve(__dirname, '..', 'domains')
-);
-const { classifyActiveDomains } = require(
-  path.resolve(__dirname, '..', 'classifier')
-);
+const { loadDomainRegistry, _resetDomainCache } = require(path.resolve(__dirname, '..', 'domains'));
+const { classifyActiveDomains } = require(path.resolve(__dirname, '..', 'classifier'));
 
 test('classifier p99 stays under 5ms across a representative corpus', () => {
   // Point loadDomainRegistry at a fresh tmp $HOME so the user-file branch

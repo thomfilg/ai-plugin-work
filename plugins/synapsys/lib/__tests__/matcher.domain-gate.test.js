@@ -39,9 +39,14 @@ test('Memory with non-overlapping domain is skipped even when trigger matches', 
     domain: ['git'],
     triggerPrompt: '\\bdeploy\\b',
   });
-  const picked = selectForEvent([memory], 'UserPromptSubmit', { prompt: 'please deploy now' }, {
-    activeDomains: new Set(['e2e']),
-  });
+  const picked = selectForEvent(
+    [memory],
+    'UserPromptSubmit',
+    { prompt: 'please deploy now' },
+    {
+      activeDomains: new Set(['e2e']),
+    }
+  );
   assert.deepEqual(
     picked.map((m) => m.name),
     [],
@@ -55,10 +60,18 @@ test('Memory with overlapping domain fires when trigger matches', () => {
     domain: ['git'],
     triggerPrompt: '\\bdeploy\\b',
   });
-  const picked = selectForEvent([memory], 'UserPromptSubmit', { prompt: 'please deploy now' }, {
-    activeDomains: new Set(['git', 'ci']),
-  });
-  assert.deepEqual(picked.map((m) => m.name), ['git-mem']);
+  const picked = selectForEvent(
+    [memory],
+    'UserPromptSubmit',
+    { prompt: 'please deploy now' },
+    {
+      activeDomains: new Set(['git', 'ci']),
+    }
+  );
+  assert.deepEqual(
+    picked.map((m) => m.name),
+    ['git-mem']
+  );
 });
 
 test('Memory with empty domain fires regardless of activeDomains (backward compat R10)', () => {
@@ -67,10 +80,18 @@ test('Memory with empty domain fires regardless of activeDomains (backward compa
     domain: [],
     triggerPrompt: '\\bdeploy\\b',
   });
-  const picked = selectForEvent([memory], 'UserPromptSubmit', { prompt: 'please deploy now' }, {
-    activeDomains: new Set(['e2e']),
-  });
-  assert.deepEqual(picked.map((m) => m.name), ['universal']);
+  const picked = selectForEvent(
+    [memory],
+    'UserPromptSubmit',
+    { prompt: 'please deploy now' },
+    {
+      activeDomains: new Set(['e2e']),
+    }
+  );
+  assert.deepEqual(
+    picked.map((m) => m.name),
+    ['universal']
+  );
 });
 
 test('opts.activeDomains omitted leaves selection unchanged (backward compat)', () => {
@@ -81,7 +102,10 @@ test('opts.activeDomains omitted leaves selection unchanged (backward compat)', 
   });
   // No 4th arg at all
   const picked = selectForEvent([memory], 'UserPromptSubmit', { prompt: 'please deploy now' });
-  assert.deepEqual(picked.map((m) => m.name), ['git-mem']);
+  assert.deepEqual(
+    picked.map((m) => m.name),
+    ['git-mem']
+  );
 });
 
 test('opts.activeDomains undefined leaves selection unchanged (backward compat)', () => {
@@ -91,7 +115,10 @@ test('opts.activeDomains undefined leaves selection unchanged (backward compat)'
     triggerPrompt: '\\bdeploy\\b',
   });
   const picked = selectForEvent([memory], 'UserPromptSubmit', { prompt: 'please deploy now' }, {});
-  assert.deepEqual(picked.map((m) => m.name), ['git-mem']);
+  assert.deepEqual(
+    picked.map((m) => m.name),
+    ['git-mem']
+  );
 });
 
 test('Multi-domain OR: fires when any listed domain is active (R6)', () => {
@@ -100,10 +127,18 @@ test('Multi-domain OR: fires when any listed domain is active (R6)', () => {
     domain: ['git', 'ci'],
     triggerPrompt: '\\bdeploy\\b',
   });
-  const picked = selectForEvent([memory], 'UserPromptSubmit', { prompt: 'please deploy now' }, {
-    activeDomains: new Set(['ci']),
-  });
-  assert.deepEqual(picked.map((m) => m.name), ['multi']);
+  const picked = selectForEvent(
+    [memory],
+    'UserPromptSubmit',
+    { prompt: 'please deploy now' },
+    {
+      activeDomains: new Set(['ci']),
+    }
+  );
+  assert.deepEqual(
+    picked.map((m) => m.name),
+    ['multi']
+  );
 });
 
 test('Mixed batch: domain-tagged memory filtered while untagged passes', () => {

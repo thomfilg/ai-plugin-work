@@ -14,7 +14,9 @@ function buildPrReadyInstruction({ ctx, sHit, workSession }) {
 }
 
 function buildPrBrokenInstruction({ sHit }) {
-  const failingList = (sHit.failingChecks || []).map((c) => `${c.name}(${c.conclusion})`).join(', ');
+  const failingList = (sHit.failingChecks || [])
+    .map((c) => `${c.name}(${c.conclusion})`)
+    .join(', ');
   return `UNBLOCK-PROTOCOL: fix-in-PR (no skip, no --no-verify, no scope-creep escape). Failing: ${failingList || 'see PR'}. Never merge red.`;
 }
 

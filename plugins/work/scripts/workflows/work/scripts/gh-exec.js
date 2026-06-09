@@ -14,7 +14,8 @@
  */
 const { execFileSync } = require('child_process');
 
-const AUTH_ERROR_REGEX = /Could not resolve to a Repository|Resource not accessible|HTTP 40[134]|requires authentication/i;
+const AUTH_ERROR_REGEX =
+  /Could not resolve to a Repository|Resource not accessible|HTTP 40[134]|requires authentication/i;
 
 function buildChildEnv() {
   const env = { ...process.env };
@@ -95,7 +96,9 @@ function buildAuthDiagnostic(parsed) {
       lines.push(`   Try: gh auth switch --user ${other}`);
     }
   }
-  lines.push('   If GH_TOKEN or GITHUB_TOKEN is set in your env, unset them so gh uses the keyring.');
+  lines.push(
+    '   If GH_TOKEN or GITHUB_TOKEN is set in your env, unset them so gh uses the keyring.'
+  );
   return lines.join('\n');
 }
 

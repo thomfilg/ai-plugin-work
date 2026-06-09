@@ -545,11 +545,7 @@ describe('clearStaleInfraCache (GH-536 Task 3)', () => {
       undefined,
       'stale infra cache lastMonitorResult must be cleared'
     );
-    assert.equal(
-      state.lastMonitorAt,
-      undefined,
-      'stale infra cache lastMonitorAt must be cleared'
-    );
+    assert.equal(state.lastMonitorAt, undefined, 'stale infra cache lastMonitorAt must be cleared');
   });
 
   it('preserves a STALE NON-INFRA failure (120s old, CI: FAILING) — AC scenario 3 / R10', () => {

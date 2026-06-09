@@ -165,7 +165,7 @@ describe('gh-exec.js — auth diagnostic', () => {
       const { callLog } = installFakeGh();
       setFakeGhEnv({
         mainStderr:
-          'GraphQL: Could not resolve to a Repository with the name \'foo/bar\' (repository)',
+          "GraphQL: Could not resolve to a Repository with the name 'foo/bar' (repository)",
         mainExit: 1,
         authStdout: AUTH_STATUS_OUTPUT_TWO_ACCOUNTS,
         authExit: 0,
@@ -264,7 +264,7 @@ describe('gh-exec.js — auth diagnostic', () => {
       const { callLog } = installFakeGh();
       setFakeGhEnv({
         mainStderr:
-          'GraphQL: Could not resolve to a Repository with the name \'foo/bar\' (repository)',
+          "GraphQL: Could not resolve to a Repository with the name 'foo/bar' (repository)",
         mainExit: 1,
         authStdout: AUTH_STATUS_OUTPUT_TWO_ACCOUNTS,
         authExit: 0,
