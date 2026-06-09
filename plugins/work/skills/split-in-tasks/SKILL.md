@@ -131,7 +131,7 @@ Review all generated tasks and check:
 - Every non-checkpoint implementation task has a `### Test Command` with a real, runnable test command (see [docs/test-command.md](./docs/test-command.md))
 - Gherkin coverage: every scenario from `gherkin.feature` is referenced by at least one task (if `gherkin.feature` exists)
 - Anti-patterns are absent (see anti-pattern blocklist in [docs/decomposition-rules.md](./docs/decomposition-rules.md))
-- Split-Warning Passes (Pass A / Pass B / Pass C / Pass D — see [docs/split-warning-passes.md](./docs/split-warning-passes.md)) emit no unresolved `SPLIT-WARNING` lines, or each emitted warning has an operator-resolution decision recorded. Pass D is invoked deterministically as `node "${CLAUDE_PLUGIN_ROOT}/plugins/work/skills/split-in-tasks/lib/emit-warnings.js" "${TASKS_DIR}"` and exits non-zero when any kind-D violation is emitted; treat its exit code as a gate alongside Pass A/B/C.
+- Split-Warning Passes (Pass A / Pass B / Pass C / Pass D — see [docs/split-warning-passes.md](./docs/split-warning-passes.md)) emit no unresolved `SPLIT-WARNING` lines, or each emitted warning has an operator-resolution decision recorded. Pass D is invoked deterministically as `node "${CLAUDE_PLUGIN_ROOT}/plugins/work/skills/split-in-tasks/lib/emit-warnings.js" "${TASKS_DIR}"` and exits non-zero when any kind-D violation is emitted; treat its exit code as a gate alongside Pass A/B/C. **Severity asymmetry:** Pass A/B/C are advisory (operator resolves inline); Pass D is a hard gate (non-zero exit blocks the commit). See [Severity model](./docs/split-warning-passes.md#severity-model--why-d-is-blocking-and-abc-are-advisory) for the rationale.
 
 Refactor tasks if any issues are found. Re-validate coverage after any refactoring.
 

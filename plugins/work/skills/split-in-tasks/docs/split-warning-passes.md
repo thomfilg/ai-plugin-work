@@ -2,6 +2,14 @@
 
 After tasks are decomposed (Step 4) and before the quality review pass (Step 5), the splitter runs four static-analysis passes against the proposed tasks. Each pass that detects a problem emits a single-line `SPLIT-WARNING` token into `tasks.md` (or the splitter's stderr stream) so the operator can decide how to resolve it before committing the split.
 
+## Severity model — why D is blocking and A/B/C are advisory
+
+**Pass A, B, and C are advisory** (warn + record; the operator resolves them inline before commit). **Pass D is a hard gate** — any kind-D violation exits non-zero and blocks the commit.
+
+The asymmetry is intentional. A/B/C surface judgment calls — overlapping scope, contract divergence, blast-radius lint — that a human operator must weigh against ticket context. They are signals, not verdicts.
+
+Pass D, by contrast, checks whether the declared `### Type` is consistent with `### Files in scope` and `### Acceptance Criteria`. The downstream gate machinery (implement-gate, `gateContractFor()`, protect-task-scope per-Type allowlist) reads `Type` as a fact: tdd-code runs RED→GREEN→REFACTOR, tests-only skips RED, docs accepts silent verifiers, and so on. If `Type` is wrong, every per-Type contract enforced after the split is unsafe — the planner has effectively lied to the implementer. Blocking at split time is cheaper than discovering the mismatch mid-implement when the agent is already wedged.
+
 Warning line shape (all three passes share this Markdown blockquote template, rendered by `lib/emit-warnings.js`):
 
 ```
@@ -15,6 +23,8 @@ The `<suggested-resolution>` text is pass-specific (see each pass below) and nam
 - `(a) add a Task 0 / (b) accept blast-radius takeover / (c) confirm with brief author` — Pass C lists the three remediation options in the hint
 
 ## Pass A — Chronological Simulator
+
+**Severity:** Advisory (warn + record; operator resolves inline before commit).
 
 **When it fires:** After Step 4.1, when two or more tasks declare overlapping `### Files in scope` AND one of them has an empty RED deliverable (no failing test authored). This catches the ECHO-5361-class wedge where a task ships GREEN code without the RED test to gate it.
 
@@ -32,6 +42,8 @@ The `<suggested-resolution>` text is pass-specific (see each pass below) and nam
 
 ## Pass B — Contract Extractor
 
+**Severity:** Advisory (warn + record; operator resolves inline before commit).
+
 **When it fires:** After Step 4.1, when a task's `### Test Command` references a file (via `$CHANGED_FILES`) that is NOT listed under that task's `### Files in scope` and IS listed under a sibling task's `### Files in scope`. This catches the ECHO-5362-class contract divergence where Task A's test depends on a contract owned by Task B.
 
 **Warning template:**
@@ -48,6 +60,8 @@ The `<suggested-resolution>` text is pass-specific (see each pass below) and nam
 
 ## Pass C — Lint Blast Radius
 
+**Severity:** Advisory (warn + record; operator resolves inline before commit).
+
 **When it fires:** After Step 4.1, when a task's `### Files in scope` includes a file that currently has lint violations OR is within a directory where `pnpm lint` would surface pre-existing violations outside the ticket's stated scope. This catches the ECHO-5353-class regression where a task's GREEN edit is blocked by pre-existing lint debt the task never intended to touch.
 
 **Warning template:**
@@ -63,6 +77,8 @@ The `<suggested-resolution>` text is pass-specific (see each pass below) and nam
 - The blast-radius heuristic uses directory-level grouping; very large directories may produce noisy warnings that the operator must resolve with `suppress`
 
 ## Pass D — Type/AC/Scope Consistency
+
+**Severity:** **Hard gate** (non-zero exit blocks the commit). Unlike Pass A/B/C, kind-D warnings cannot be deferred — see the [severity rationale](#severity-model--why-d-is-blocking-and-abc-are-advisory) for why.
 
 **When it fires:** After Step 4.1, when a task's `### Type` field, `### Files in scope`, and `### Acceptance Criteria` are not mutually consistent under the closed Type taxonomy. The taxonomy and per-Type allowlists live in [`lib/task-types.js`](../lib/task-types.js); the validator lives in [`lib/lint-type-ac-consistency.js`](../lib/lint-type-ac-consistency.js) and is invoked via the CLI at [`lib/emit-warnings.js`](../lib/emit-warnings.js).
 
