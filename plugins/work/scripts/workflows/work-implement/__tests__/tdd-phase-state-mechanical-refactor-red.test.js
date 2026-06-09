@@ -378,6 +378,37 @@ describe('tdd-phase-state record-green --docs-exempt — Type gate', () => {
   });
 });
 
+describe('tdd-phase-state --docs-exempt — no-task bypass closed (Cursor[bot] HIGH)', () => {
+  // Earlier draft of ITEM 8 fell through for no-task callers — that left
+  // the gate exploitable by omitting --task. The legacy compat shim is
+  // removed; missing --task fails closed.
+  let tasksBase;
+  afterEach(() => {
+    if (tasksBase) {
+      fs.rmSync(tasksBase, { recursive: true, force: true });
+      tasksBase = null;
+    }
+  });
+
+  it('--docs-exempt without --task is REJECTED (no legacy bypass)', () => {
+    tasksBase = makeTasksBaseWithScope('tdd-code', ['src/**']);
+    // Init at ticket root (no --task) so the legacy ticket-root state path
+    // exists and currentPhase is RED.
+    const init = runCli(['init', TICKET], tasksBase);
+    assert.equal(init.status, 0, `init failed: ${init.stderr}`);
+    const r = runCli(
+      ['record-red', TICKET, '--cmd', 'node -e "process.exit(1)"', '--docs-exempt'],
+      tasksBase
+    );
+    assert.notEqual(
+      r.status,
+      0,
+      `--docs-exempt without --task must be rejected; stderr=${r.stderr}`
+    );
+    assert.match(r.stderr, /--task|docs-exempt/);
+  });
+});
+
 describe('tdd-phase-state record-refactor --docs-exempt — Type gate', () => {
   let tasksBase;
   afterEach(() => {

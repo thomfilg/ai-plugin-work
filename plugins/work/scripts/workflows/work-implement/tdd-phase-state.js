@@ -190,12 +190,22 @@ function isVisualOnlyScope(scope) {
  * `reason` carries an operator-facing message when allowed=false.
  */
 function isDocsExemptAllowed(ticketId, taskNum) {
-  // Legacy compat: callers without --task wrote to the ticket-root state path
-  // (GH-219 pre-per-task). The Type-gate requires --task to resolve the
-  // active block; without it, fall through (the orchestrator always passes
-  // --task on the new code path that the round-2 review is securing).
+  // GH-528 round-2 follow-up (Cursor[bot] HIGH): the gate fires for ALL
+  // callers, including those that omit --task. An earlier draft fell
+  // through for no-task callers under the assumption that legacy
+  // ticket-root state was vestigial, but that left a self-report surface
+  // intact: a tokened agent could simply omit --task to bypass the gate.
+  // Now: missing --task fails closed. The orchestrator always passes
+  // --task (task-next.js recordEvidence builds the argv with it); test
+  // fixtures that need --docs-exempt must seed tasks.md and pass --task.
   if (!Number.isInteger(taskNum) || taskNum < 1) {
-    return { allowed: true, type: null, reason: 'legacy no-task caller' };
+    return {
+      allowed: false,
+      type: null,
+      reason:
+        '--docs-exempt requires --task <N> so the recorder can verify the ' +
+        "active task's Type against on-disk tasks.md. Re-run with --task <N>.",
+    };
   }
   const { type, scope } = readActiveTaskBlock(ticketId, taskNum);
   if (isVisualOnlyScope(scope)) {

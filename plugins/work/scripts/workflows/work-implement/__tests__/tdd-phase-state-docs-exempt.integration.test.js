@@ -46,8 +46,11 @@ function runCli(args, homeDir) {
 }
 
 function seedGreenPhase(homeDir, ticket) {
-  runCli(['init', ticket], homeDir);
-  const statePath = path.join(homeDir, 'worktrees', 'tasks', ticket, 'tdd-phase.json');
+  // GH-528 round-2 follow-up (Cursor[bot] HIGH): --docs-exempt requires
+  // --task <N> so the recorder can resolve the active task block on disk.
+  // Seed with --task 1 (per-task state path) instead of ticket-root.
+  runCli(['init', ticket, '--task', '1'], homeDir);
+  const statePath = path.join(homeDir, 'worktrees', 'tasks', ticket, 'task1', 'tdd-phase.json');
   const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
   state.currentPhase = 'green';
   state.cycles = [
@@ -62,12 +65,7 @@ function seedGreenPhase(homeDir, ticket) {
     },
   ];
   fs.writeFileSync(statePath, JSON.stringify(state, null, 2));
-  // GH-528 round-2 follow-up (Cursor[bot] HIGH/Medium): record-green's
-  // `--docs-exempt` flag is now gated on the active task's Type via on-disk
-  // tasks.md. Plant a Type=docs task so the relaxation contract test still
-  // passes through the new gate. The seed leaves taskNum unset on the CLI
-  // call, so the recorder falls back to the legacy ticket-root state path;
-  // tasks.md still lives at the ticket root and the gate reads `Task 1`.
+  // Plant tasks.md so the Type-gate accepts --docs-exempt for Type=docs.
   fs.writeFileSync(
     path.join(homeDir, 'worktrees', 'tasks', ticket, 'tasks.md'),
     [
@@ -95,14 +93,17 @@ describe('RC-D --docs-exempt relaxation', () => {
 
   it('tdd-phase-state record-green still rejects silent verifiers by default', () => {
     seedGreenPhase(homeDir, 'TEST-DOCS-1');
-    const r = runCli(['record-green', 'TEST-DOCS-1', '--cmd', 'eval ""'], homeDir);
+    const r = runCli(['record-green', 'TEST-DOCS-1', '--task', '1', '--cmd', 'eval ""'], homeDir);
     assert.notStrictEqual(r.exitCode, 0, 'default invocation must still reject empty output');
     assert.match(r.stderr, /empty-command trap|NO stdout\/stderr/i);
   });
 
   it('tdd-phase-state record-green accepts silent verifiers when docs-exempt flag is set', () => {
     const statePath = seedGreenPhase(homeDir, 'TEST-DOCS-2');
-    const r = runCli(['record-green', 'TEST-DOCS-2', '--docs-exempt', '--cmd', 'eval ""'], homeDir);
+    const r = runCli(
+      ['record-green', 'TEST-DOCS-2', '--task', '1', '--docs-exempt', '--cmd', 'eval ""'],
+      homeDir
+    );
     assert.strictEqual(
       r.exitCode,
       0,
