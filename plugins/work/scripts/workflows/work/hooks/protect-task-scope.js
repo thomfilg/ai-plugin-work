@@ -17,14 +17,28 @@
  *
  * Escape hatches (GH-392 Task 8 + follow-up):
  *   1. Env var PAIR — `PROTECT_TASK_SCOPE_BYPASS_REASON` AND
- *      `PROTECT_TASK_SCOPE_BYPASS_TARGET` must BOTH be set. The bypass only
- *      fires when the relativized target matches `BYPASS_TARGET` exactly OR
- *      via the same `findMatch` glob logic used elsewhere (so glob patterns
- *      like `src/shared/**` are honoured). One-shot by design: REASON alone
- *      opens a hole for any path; pairing it with TARGET pins the bypass to
- *      a single planned edit. When fired, appends a `scope-bypass` audit row
+ *      `PROTECT_TASK_SCOPE_BYPASS_TARGET` must BOTH be set, AND
+ *      `WORK_OPERATOR_TOKEN=1` must also be present in the environment
+ *      (GH-528 round-2 follow-up ITEM 1). The bypass only fires when the
+ *      relativized target matches `BYPASS_TARGET` exactly OR via the same
+ *      `findMatch` glob logic used elsewhere (so glob patterns like
+ *      `src/shared/**` are honoured). One-shot by design: REASON alone opens
+ *      a hole for any path; pairing it with TARGET pins the bypass to a
+ *      single planned edit. When fired, appends a `scope-bypass` audit row
  *      via `appendEnforcementAudit` (spec §P0#6) carrying both the configured
  *      TARGET and the actual write path.
+ *
+ *      WORK_OPERATOR_TOKEN gate (GH-528 round-2 ITEM 1): bypass env vars
+ *      inherit into every child process the agent spawns, so an agent that
+ *      can set REASON+TARGET in its own shell would otherwise be able to
+ *      flip the bypass on without operator intent. The token is an
+ *      operator-only env var (same pattern as the `exception` subcommand
+ *      in tdd-phase-state.js) that the agent's harness never carries. When
+ *      the token is missing AND REASON+TARGET match the write target, the
+ *      hook treats the env pair as unset (block stays) and appends a
+ *      `scope-bypass-rejected` audit row carrying the configured target
+ *      and reason — so the rejected attempt is visible without trusting
+ *      caller-supplied state.
  *   2. `### Cross-Task Dependencies` — paths in the active task's
  *      `crossTaskDeps` list bypass the would-be block and append a
  *      `cross-task-dep-allow` audit row (spec §P0#7b).
@@ -56,6 +70,52 @@ const { appendEnforcementAudit } = require(
 );
 
 const FILE_WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
+
+// GH-528 round-2 ITEM 1: WORK_OPERATOR_TOKEN gate on env-bypass.
+// Centralised so all three bypass call sites stay in lockstep.
+function isOperatorTokenPresent() {
+  return process.env.WORK_OPERATOR_TOKEN === '1';
+}
+
+/**
+ * Append a `scope-bypass-rejected` audit row recording that the env-var pair
+ * matched the write target but WORK_OPERATOR_TOKEN was missing. We log this
+ * regardless of guard so an operator can see every rejected attempt across
+ * the three layers.
+ */
+function auditScopeBypassRejected({
+  ticketId,
+  active,
+  relTarget,
+  bypassReason,
+  bypassTargetCfg,
+  guard,
+}) {
+  try {
+    appendEnforcementAudit(ticketId, {
+      origin: 'ai-subtask',
+      task: active.taskNum,
+      phase: null,
+      action: 'scope-bypass-rejected',
+      allow: false,
+      reason: bypassReason,
+      outputPath: relTarget,
+      meta: {
+        taskNum: active.taskNum,
+        target: relTarget,
+        configuredTarget: bypassTargetCfg,
+        guard,
+        rejectReason: 'WORK_OPERATOR_TOKEN missing',
+      },
+    });
+  } catch (err) {
+    try {
+      logHookError(__filename, err);
+    } catch {
+      /* swallow */
+    }
+  }
+}
 
 // ─── Active-ticket discovery (mirrors enforce-step-workflow.getTicketId) ────
 
@@ -350,6 +410,20 @@ function tryTypeLineBypass(toolName, toolInput, cwd, ticketId, active) {
   if (!bypassReason || !bypassTargetCfg || !rel) return false;
   const matched = rel === bypassTargetCfg || findMatch(rel, [bypassTargetCfg]) !== null;
   if (!matched) return false;
+  // GH-528 ITEM 1: WORK_OPERATOR_TOKEN gate — bypass env pair matched the
+  // write target but the operator token is missing. Treat as unset (block
+  // stays) and audit the rejected attempt.
+  if (!isOperatorTokenPresent()) {
+    auditScopeBypassRejected({
+      ticketId,
+      active,
+      relTarget: rel,
+      bypassReason,
+      bypassTargetCfg,
+      guard: 'type-line',
+    });
+    return false;
+  }
   try {
     appendEnforcementAudit(ticketId, {
       origin: 'ai-subtask',
@@ -515,29 +589,43 @@ async function main() {
       const matched =
         relTarget === bypassTargetCfg || findMatch(relTarget, [bypassTargetCfg]) !== null;
       if (matched) {
-        try {
-          appendEnforcementAudit(ticketId, {
-            origin: 'ai-subtask',
-            task: active.taskNum,
-            phase: null,
-            action: 'scope-bypass',
-            allow: true,
-            reason: bypassReason,
-            outputPath: relTarget,
-            meta: {
-              taskNum: active.taskNum,
-              target: relTarget,
-              configuredTarget: bypassTargetCfg,
-            },
+        // GH-528 ITEM 1: WORK_OPERATOR_TOKEN gate — bypass env pair matched
+        // the write target but the operator token is missing. Treat as unset
+        // (block stays) and audit the rejected attempt.
+        if (!isOperatorTokenPresent()) {
+          auditScopeBypassRejected({
+            ticketId,
+            active,
+            relTarget,
+            bypassReason,
+            bypassTargetCfg,
+            guard: 'files-in-scope',
           });
-        } catch (err) {
+        } else {
           try {
-            logHookError(__filename, err);
-          } catch {
-            /* swallow */
+            appendEnforcementAudit(ticketId, {
+              origin: 'ai-subtask',
+              task: active.taskNum,
+              phase: null,
+              action: 'scope-bypass',
+              allow: true,
+              reason: bypassReason,
+              outputPath: relTarget,
+              meta: {
+                taskNum: active.taskNum,
+                target: relTarget,
+                configuredTarget: bypassTargetCfg,
+              },
+            });
+          } catch (err) {
+            try {
+              logHookError(__filename, err);
+            } catch {
+              /* swallow */
+            }
           }
+          process.exit(0);
         }
-        process.exit(0);
       }
       // REASON+TARGET set but TARGET didn't match — fall through to the
       // block. NO audit row: a mis-targeted bypass is indistinguishable
@@ -605,6 +693,22 @@ function checkPerTypeAllowlist(active, toolName, toolInput, cwd, ticketId) {
     bypassTargetCfg &&
     (relTarget === bypassTargetCfg || findMatch(relTarget, [bypassTargetCfg]) !== null);
   if (bypassMatched) {
+    // GH-528 ITEM 1: WORK_OPERATOR_TOKEN gate — env pair matched but token
+    // missing. Treat as unset (fall through to allowlist decision = block)
+    // and audit the rejected attempt.
+    if (!isOperatorTokenPresent()) {
+      if (ticketId) {
+        auditScopeBypassRejected({
+          ticketId,
+          active,
+          relTarget,
+          bypassReason,
+          bypassTargetCfg,
+          guard: 'type-allowlist',
+        });
+      }
+      return typeAllowlistDecision(active.type, relTarget);
+    }
     // Mirror the scope-bypass audit pattern (see main() around L519 and the
     // type-line guard's tryTypeLineBypass) so a closed-allowlist override is
     // never silent. Discriminator: meta.guard='type-allowlist'.

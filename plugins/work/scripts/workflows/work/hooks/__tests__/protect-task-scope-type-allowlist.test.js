@@ -201,7 +201,7 @@ describe('protect-task-scope — per-Type allowlist', () => {
     assert.equal(r.status, 0, `expected allow for tdd-code; stderr=${r.stderr}`);
   });
 
-  it('one-shot bypass pair still works for per-Type layer', () => {
+  it('one-shot bypass pair still works for per-Type layer (with WORK_OPERATOR_TOKEN)', () => {
     writeTasksMd(tasksDir, { type: 'docs', filesInScope: ['**/*'] });
     const target = path.join(tmpHome, 'src/foo.js');
     const reason = 'emergency docs ship';
@@ -211,6 +211,8 @@ describe('protect-task-scope — per-Type allowlist', () => {
       toolName: 'Write',
       toolInput: { file_path: target, content: 'x' },
       env: {
+        // GH-528 ITEM 1: bypass requires the operator token too.
+        WORK_OPERATOR_TOKEN: '1',
         PROTECT_TASK_SCOPE_BYPASS_REASON: reason,
         PROTECT_TASK_SCOPE_BYPASS_TARGET: 'src/foo.js',
       },
@@ -455,7 +457,7 @@ describe('protect-task-scope — Type-line edit guard', () => {
     assert.doesNotMatch(r.stderr || '', /refusing to (modify|edit) `### Type`/);
   });
 
-  it('one-shot bypass pair still works for Type-line guard when target matches', () => {
+  it('one-shot bypass pair still works for Type-line guard when target matches (with WORK_OPERATOR_TOKEN)', () => {
     const target = path.join(tasksDir, 'tasks.md');
     const r = runHook({
       tasksBase,
@@ -467,6 +469,8 @@ describe('protect-task-scope — Type-line edit guard', () => {
         new_string: 'docs',
       },
       env: {
+        // GH-528 ITEM 1: bypass requires the operator token too.
+        WORK_OPERATOR_TOKEN: '1',
         PROTECT_TASK_SCOPE_BYPASS_REASON: 'planner re-keying type mid-cycle',
         PROTECT_TASK_SCOPE_BYPASS_TARGET: path.relative(tmpHome, target),
       },
