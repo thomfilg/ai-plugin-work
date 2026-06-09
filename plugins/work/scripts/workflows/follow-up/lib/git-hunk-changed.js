@@ -28,11 +28,13 @@ const ISO_PREFIX_RE = /^\d{4}-\d{2}-\d{2}T/;
  * @param {string} filePath    repo-relative path to the file under inspection
  * @param {number} originalLine 1-indexed line of the original comment anchor
  * @param {string} sinceIso    ISO-8601 timestamp (must start `YYYY-MM-DDT`)
- * @param {object} [_ctx]      reserved for future cwd/logger plumbing
+ * @param {{ cwd?: string }} [ctx] optional context — `cwd` is forwarded to
+ *   execFileSync so callers can pin the git invocation to a specific worktree.
+ *   When omitted, git inherits `process.cwd()`.
  * @returns {boolean}
  * @throws {Error} if `sinceIso` fails the ISO-prefix regex
  */
-function gitHunkChangedSince(filePath, originalLine, sinceIso, _ctx) {
+function gitHunkChangedSince(filePath, originalLine, sinceIso, ctx) {
   if (typeof sinceIso !== 'string' || !ISO_PREFIX_RE.test(sinceIso)) {
     throw new Error(
       `gitHunkChangedSince: invalid sinceIso — expected ISO-8601 timestamp starting YYYY-MM-DDT, got ${JSON.stringify(sinceIso)}`
@@ -40,10 +42,13 @@ function gitHunkChangedSince(filePath, originalLine, sinceIso, _ctx) {
   }
   const line = Number(originalLine);
   const lArg = `${line},${line}:${filePath}`;
-  const out = execFileSync('git', ['log', '--since', sinceIso, '-L', lArg], {
+  const opts = {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
-  });
+    timeout: 5000,
+  };
+  if (ctx && typeof ctx.cwd === 'string') opts.cwd = ctx.cwd;
+  const out = execFileSync('git', ['log', '--since', sinceIso, '-L', lArg], opts);
   return String(out).trim().length > 0;
 }
 

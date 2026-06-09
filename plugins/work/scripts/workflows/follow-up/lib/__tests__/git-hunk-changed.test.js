@@ -63,6 +63,33 @@ test('gitHunkChangedSince returns false when git log -L output is empty (no chan
   });
 });
 
+test('gitHunkChangedSince passes timeout=5000 and forwards ctx.cwd to execFileSync', () => {
+  const calls = [];
+  const stub = (cmd, args, opts) => {
+    calls.push({ cmd, args, opts });
+    return Buffer.from('');
+  };
+  withStubbedExecFileSync(stub, (mod) => {
+    mod.gitHunkChangedSince('src/foo.js', 10, '2026-01-01T00:00:00Z', { cwd: '/tmp/wt' });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].opts.timeout, 5000, 'timeout option must be 5000ms');
+    assert.equal(calls[0].opts.cwd, '/tmp/wt', 'ctx.cwd must be forwarded');
+  });
+});
+
+test('gitHunkChangedSince omits cwd when ctx has no cwd', () => {
+  const calls = [];
+  const stub = (cmd, args, opts) => {
+    calls.push({ cmd, args, opts });
+    return Buffer.from('');
+  };
+  withStubbedExecFileSync(stub, (mod) => {
+    mod.gitHunkChangedSince('src/foo.js', 10, '2026-01-01T00:00:00Z');
+    assert.equal(calls[0].opts.cwd, undefined, 'cwd should be unset to inherit process.cwd()');
+    assert.equal(calls[0].opts.timeout, 5000);
+  });
+});
+
 test('gitHunkChangedSince throws on invalid sinceIso', () => {
   const stub = () => {
     throw new Error('execFileSync should not be called on invalid sinceIso');
