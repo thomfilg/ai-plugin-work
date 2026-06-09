@@ -608,8 +608,7 @@ function cmdRecordRed(ticketId, args) {
 function cmdRecordRedSynthesized(ticketId, args, cmd, taskNum, opts) {
   // Validate reason (mirrors cmdException). Empty/missing → BYPASS, no audit.
   const reasonIdx = args.indexOf('--reason');
-  const reason =
-    reasonIdx !== -1 && reasonIdx + 1 < args.length ? args[reasonIdx + 1] : undefined;
+  const reason = reasonIdx !== -1 && reasonIdx + 1 < args.length ? args[reasonIdx + 1] : undefined;
   if (!reason || !reason.trim()) {
     // Write a BYPASS: line to stderr so callers see the recovery hint. Do NOT
     // append an audit row — fail-closed: no justification ⇒ no record.
@@ -901,6 +900,23 @@ function auditException(ticketId, taskNum, category, reason, allow) {
 function cmdException(ticketId, args) {
   if (!ticketId) errorExit('Missing ticket ID.');
 
+  // GH-528: `exception` is a runtime escape hatch that lets the agent skip the
+  // entire RED/GREEN/REFACTOR cycle. With closed-Type taxonomy enforced at
+  // planner time, agents never need this — config/docs/ci/tests-only/etc. all
+  // have proper Type-driven contracts now. Keep the subcommand only as an
+  // operator-only escape hatch (e.g. emergency CI rescue) gated behind an env
+  // token the agent's environment never carries. Existing non-test callers
+  // (work-implement-enforce.js, tdd-enforcement.js) only inspect previously-
+  // recorded exception evidence — they do not write new exceptions through
+  // this CLI, so they are unaffected.
+  if (process.env.WORK_OPERATOR_TOKEN !== '1') {
+    errorExit(
+      'The `exception` subcommand is operator-only and requires WORK_OPERATOR_TOKEN=1. ' +
+        'Agents must use the Type taxonomy (docs / tests-only / config / ci / mechanical-refactor / file-move / checkpoint) ' +
+        'set by the planner instead. See plugins/work/skills/split-in-tasks/lib/task-types.js.'
+    );
+  }
+
   // Parse --category (required)
   const category = parseCategory(args);
   const taskNum = safeParseTask(args);
@@ -1006,8 +1022,10 @@ function cmdException(ticketId, args) {
 // loads this file (e.g. CHANGED_FILES sweeps that include the source alongside
 // tests), argv has no subcommand — skip dispatch so the runner just records the
 // file with zero tests instead of hitting the subcommand switch + errorExit.
+// Using process.exit(0) instead of top-level `return` because the standalone
+// biome parser (used by the pre-commit format gate) rejects top-level return.
 if (process.argv.length < 3) {
-  return;
+  process.exit(0);
 }
 
 const args = process.argv.slice(2);
