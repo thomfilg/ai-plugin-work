@@ -79,6 +79,69 @@ describe('Pass D — tdd-code contract', () => {
     );
     assert.equal(ws.length, 0, `expected zero warnings, got: ${JSON.stringify(ws)}`);
   });
+
+  // GH-594: Pass D Type=tdd-code uses the shared glob-aware classifier
+  // scopeEntryAdmitsOnlyTestFiles (same one tests-only uses). Test globs
+  // that constrain to test files must satisfy the "has test file" check.
+  it('GH-594: test-constrained glob src/**/*.test.js satisfies the test-file check', () => {
+    const ws = lintAllPassD(
+      buildModel({
+        type: 'tdd-code',
+        scope: ['src/**/*.test.js', 'src/foo.js'],
+        acLines: ['Behavior X'],
+      })
+    );
+    assert.equal(
+      ws.filter((w) => /no `\*\.test\.\*`/.test(w.message)).length,
+      0,
+      `glob test-constrained scope must satisfy hasTest; got: ${JSON.stringify(ws)}`
+    );
+  });
+
+  it('GH-594: test-constrained glob **/*.spec.ts satisfies the test-file check', () => {
+    const ws = lintAllPassD(
+      buildModel({
+        type: 'tdd-code',
+        scope: ['**/*.spec.ts', 'lib/foo.ts'],
+        acLines: ['Behavior X'],
+      })
+    );
+    assert.equal(
+      ws.filter((w) => /no `\*\.test\.\*`/.test(w.message)).length,
+      0,
+      `**/*.spec.ts must satisfy hasTest; got: ${JSON.stringify(ws)}`
+    );
+  });
+
+  it('GH-594: open-ended glob src/** does NOT satisfy hasTest (still warns)', () => {
+    // Open-ended globs admit non-test files too; the contract must keep
+    // warning so the planner is forced to enumerate a real test surface.
+    const ws = lintAllPassD(
+      buildModel({
+        type: 'tdd-code',
+        scope: ['src/**'],
+        acLines: ['Behavior X'],
+      })
+    );
+    assert.ok(
+      ws.some((w) => /no `\*\.test\.\*`/.test(w.message)),
+      `open-ended glob must still warn; got: ${JSON.stringify(ws)}`
+    );
+  });
+
+  it('GH-594: test-only glob (no source) STILL warns about missing source', () => {
+    const ws = lintAllPassD(
+      buildModel({
+        type: 'tdd-code',
+        scope: ['src/**/*.test.js'],
+        acLines: ['Behavior X'],
+      })
+    );
+    assert.ok(
+      ws.some((w) => /no non-test source file/.test(w.message)),
+      `test-only glob must warn about missing source; got: ${JSON.stringify(ws)}`
+    );
+  });
 });
 
 describe('Pass D — tests-only contract', () => {
