@@ -16,6 +16,21 @@
 #     lint checks — only from the six quality rules in quality.js.
 #   - See docs/quality.md (Task 14) for full rule thresholds and rationale.
 #
+# Touch-to-fix ratchet (GH-592):
+#   - The "(allowlisted)" downgrade only applies to files NOT touched by the
+#     current PR. If `git diff --name-only $BASE_BRANCH...HEAD` includes a
+#     listed path, every violation on it stays severity:error and the gate
+#     fails until the file has zero violations across all six rules — partial
+#     fixes do not pass.
+#   - Editing a listed file is therefore a commitment to either drive its
+#     violation count to zero (and ideally remove it from this list in the
+#     same PR) or revert your change. The runner tags such errors with
+#     "(allowlisted but touched in this PR — fix or remove from .quality-exceptions)".
+#   - Untouched listed files continue to behave as before: their violations
+#     are downgraded to warnings tagged "(allowlisted)" and do not fail the
+#     gate. This is the touch-to-fix ratchet: a hard, code-enforced version
+#     of the burn-down policy above.
+#
 # Format:
 #   - One path per line, repo-relative (POSIX separators).
 #   - Lines starting with '#' and blank lines are ignored.
