@@ -233,10 +233,16 @@ function parseTaskType(section) {
 // (*.md, etc), so demanding a *.test.* authorship gate is contradictory.
 // They still run a real verification command (e.g. a grep asserting the docs
 // now contain the documented strings), so RED/GREEN are validated by that
-// command rather than by test-block authorship. Detected via an explicit
-// `docs` type or a "documentation exempt" / "docs-only" marker in the body.
-function isDocsExempt(type, section) {
-  return (type || '') === 'docs' || /documentation[\s-]*exempt|docs[-\s]?only/i.test(section || '');
+// command rather than by test-block authorship.
+//
+// GH-528 follow-up: Detection is `### Type === 'docs'` ONLY. The previous
+// body-prose regex (matching "docs-only" / "documentation exempt" anywhere
+// in the task body) let the implementer-agent bypass the TDD gate by writing
+// trigger phrases into ACs at implement time. The Type field is authored by
+// the planner, scope-protected at implement time (Type-line edit guard), and
+// cannot be flipped by the agent under the hook.
+function isDocsExempt(type /* , _section unused — see GH-528 */) {
+  return (type || '') === 'docs';
 }
 
 // Storybook stories are visual artifacts — `*.stories.tsx` files have no
@@ -456,9 +462,7 @@ function recordEvidence(phase, ticket, taskNum, cmd, cwd, scope, opts = {}) {
     if (
       opts &&
       opts.docsExempt === true &&
-      (phase === TDD_PHASES.red ||
-        phase === TDD_PHASES.green ||
-        phase === TDD_PHASES.refactor)
+      (phase === TDD_PHASES.red || phase === TDD_PHASES.green || phase === TDD_PHASES.refactor)
     ) {
       recordArgs.push('--docs-exempt');
     }
@@ -773,7 +777,7 @@ function main() {
   const scope = parseSuggestedScope(section);
   const type = parseTaskType(section);
   const taskTestCmd = parseTaskTestCommand(section);
-  const docsExempt = isDocsExempt(type, section);
+  const docsExempt = isDocsExempt(type);
   const visualOnly = isVisualOnlyTask(scope);
 
   // Checkpoint tasks are verification-only — no source change, no test
@@ -920,10 +924,9 @@ function main() {
           // command failed as RED requires (exitCode !== 0 confirmed above).
           // Accept it. Fires for documentation tasks (isDocsExempt) and for
           // Storybook stories-only tasks (isVisualOnlyTask).
-          const rec = recordEvidence(
-            TDD_PHASES.red, ticket, taskNum, testCmd, repoRoot, scope,
-            { docsExempt: true }
-          );
+          const rec = recordEvidence(TDD_PHASES.red, ticket, taskNum, testCmd, repoRoot, scope, {
+            docsExempt: true,
+          });
           if (!rec.ok) {
             blockReason = `Could not record RED evidence:\n${rec.out}`;
           } else {
@@ -981,10 +984,9 @@ function main() {
       // RC-D trap for this one invocation. Emit a diagnostic so operators
       // see why a silent verifier was accepted. See R8 + R9.
       const greenDocsExempt = docsExempt || visualOnly;
-      const rec = recordEvidence(
-        TDD_PHASES.green, ticket, taskNum, testCmd, repoRoot, scope,
-        { docsExempt: greenDocsExempt }
-      );
+      const rec = recordEvidence(TDD_PHASES.green, ticket, taskNum, testCmd, repoRoot, scope, {
+        docsExempt: greenDocsExempt,
+      });
       if (!rec.ok) {
         blockReason = `Could not record GREEN evidence:\n${rec.out}`;
       } else {
@@ -1009,10 +1011,9 @@ function main() {
       // `test -f`, etc.). Forward `--docs-exempt` so the recorder relaxes
       // RC-D for this single invocation — symmetric with RED and GREEN.
       const refactorDocsExempt = docsExempt || visualOnly;
-      const rec = recordEvidence(
-        TDD_PHASES.refactor, ticket, taskNum, testCmd, repoRoot, scope,
-        { docsExempt: refactorDocsExempt }
-      );
+      const rec = recordEvidence(TDD_PHASES.refactor, ticket, taskNum, testCmd, repoRoot, scope, {
+        docsExempt: refactorDocsExempt,
+      });
       if (!rec.ok) {
         blockReason = `Could not record REFACTOR evidence:\n${rec.out}`;
       } else {
@@ -1085,8 +1086,7 @@ module.exports = {
 // with zero test() blocks). Child spawns of this script always pass a ticket
 // + task arg, so they keep running main() — NODE_TEST_CONTEXT propagation
 // via inherited env is harmless when argv carries the real CLI args.
-const _isBareTestLoad =
-  process.env.NODE_TEST_CONTEXT && process.argv.length <= 2;
+const _isBareTestLoad = process.env.NODE_TEST_CONTEXT && process.argv.length <= 2;
 if (require.main === module && !_isBareTestLoad) {
   main();
 }
