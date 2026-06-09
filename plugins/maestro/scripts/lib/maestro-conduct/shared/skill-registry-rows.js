@@ -51,6 +51,13 @@ function followUpIsHealthyIdle(state) {
   return FOLLOW_UP_HEALTHY_STATUSES.has(state.status);
 }
 
+// PR #561 review (verified safe): when /follow-up is NOT in a healthy-idle
+// state we return `phase: 'follow_up'`. The conductor's phase-stall detector
+// then calls `phaseFor('follow_up')` in phase-registry.js, which has an
+// explicit `follow_up` row (budgetMin: 60, detectors include phaseStall) AND
+// falls open to the BASE profile (with `exempts: () => false`) for any phase
+// the registry doesn't know — so `handlePhaseStall` cannot crash on
+// `profile.exempts` regardless of which phase string we surface here.
 function followUpSnapshot(ticket) {
   const s = readFollowUpState(ticket);
   if (!s) return null;

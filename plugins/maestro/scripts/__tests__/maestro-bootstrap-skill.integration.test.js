@@ -301,6 +301,51 @@ test('Unknown --skill value falls open to /work with a stderr warning (PR #561 r
   assert.doesNotMatch(argv, /\/followup GH-9001/);
 });
 
+test('Batch bootstrap: preserved skill for ticket 1 does NOT leak into ticket 2 (PR #561 review)', () => {
+  // Cursor finding: assigning RESOLVED_SKILL=$EXISTING_SKILL inside the loop
+  // leaks the value into the next iteration. A bare batch with [ticket-A
+  // (preserved follow-up), ticket-B (fresh)] would launch ticket-B as
+  // /follow-up instead of /work.
+  const { wrapper, base, fakeHome } = makeSandbox();
+  const ticketA = 'GH-9101';
+  const ticketB = 'GH-9102';
+
+  // Seed ticket A with follow-up.
+  const seed = runScript(wrapper, {
+    ...RUN_OPTS,
+    args: ['--skill=follow-up', ticketA],
+    env: baseEnv(base, fakeHome),
+  });
+  assert.equal(seed.status, 0, `seed: ${seed.stdout}\n${seed.stderr}`);
+
+  // Batch bootstrap A then B with no --skill / no env. A is preserved as
+  // follow-up; B is fresh and must default to work — NOT inherit A's value.
+  const batch = runScript(wrapper, {
+    ...RUN_OPTS,
+    args: [ticketA, ticketB],
+    env: baseEnv(base, fakeHome),
+  });
+  assert.equal(batch.status, 0, `batch: ${batch.stdout}\n${batch.stderr}`);
+
+  const skillA = fs
+    .readFileSync(path.join(base, 'tasks', ticketA, '.maestro-skill'), 'utf8')
+    .trim();
+  const skillB = fs
+    .readFileSync(path.join(base, 'tasks', ticketB, '.maestro-skill'), 'utf8')
+    .trim();
+  assert.equal(skillA, 'follow-up', 'ticket A must keep its preserved follow-up');
+  assert.equal(skillB, 'work', "ticket B must default to work — NOT inherit A's follow-up");
+
+  const argv = batch.newSessionCalls.join('\n');
+  assert.match(argv, /\/follow-up GH-9101/, 'ticket A launcher must use /follow-up');
+  assert.match(argv, /\/work GH-9102/, 'ticket B launcher must use /work (not leaked /follow-up)');
+  assert.doesNotMatch(
+    argv,
+    /\/follow-up GH-9102/,
+    `ticket B must NOT launch /follow-up (leaked from A); got:\n${argv}`
+  );
+});
+
 test('Bootstrap default (no --skill, no env) preserves /work behavior bit-for-bit', () => {
   const { wrapper, base, fakeHome, helperLog } = makeSandbox();
   const ticket = 'GH-9001';

@@ -205,23 +205,25 @@ for TICKET in "$@"; do
   # GH-514 Task 2: persist resolved skill per ticket so the conductor can read
   # it back (single-line file, no trailing newline noise — registry trims).
   # PR #561 review: preserve existing .maestro-skill on bare re-runs so a prior
-  # --skill=follow-up isn't silently reverted to 'work'. CRITICAL: when we
-  # preserve, also re-point RESOLVED_SKILL at the preserved value so the
-  # stub-skip gate and the tmux launcher below agree with what the conductor
-  # will read ("Bootstrap ignores preserved skill" finding).
+  # --skill=follow-up isn't silently reverted to 'work'.
+  #
+  # SCOPE: TICKET_SKILL is per-loop only — never mutate $RESOLVED_SKILL inside
+  # the loop, or a preserved /follow-up for ticket N would silently apply to
+  # ticket N+1 (batch bootstrap "skill state leak" finding, PR #561 review).
   TICKET_DIR="$MAESTRO_TASKS_BASE/$TICKET"
   mkdir -p "$TICKET_DIR"
+  TICKET_SKILL="$RESOLVED_SKILL"
   if [ "$SKILL_EXPLICIT" = "1" ] || [ ! -f "$TICKET_DIR/.maestro-skill" ]; then
-    printf '%s\n' "$RESOLVED_SKILL" > "$TICKET_DIR/.maestro-skill"
-    echo "[$TICKET] .maestro-skill = $RESOLVED_SKILL (written)"
+    printf '%s\n' "$TICKET_SKILL" > "$TICKET_DIR/.maestro-skill"
+    echo "[$TICKET] .maestro-skill = $TICKET_SKILL (written)"
   else
     EXISTING_SKILL="$(head -n1 "$TICKET_DIR/.maestro-skill" | tr -d '[:space:]')"
     if is_known_skill "$EXISTING_SKILL"; then
-      RESOLVED_SKILL="$EXISTING_SKILL"
+      TICKET_SKILL="$EXISTING_SKILL"
       echo "[$TICKET] .maestro-skill = $EXISTING_SKILL (preserved — no explicit skill on this invocation)"
     else
-      echo "[$TICKET] .maestro-skill on disk contains unknown skill '$EXISTING_SKILL' — overwriting with '$RESOLVED_SKILL'" >&2
-      printf '%s\n' "$RESOLVED_SKILL" > "$TICKET_DIR/.maestro-skill"
+      echo "[$TICKET] .maestro-skill on disk contains unknown skill '$EXISTING_SKILL' — overwriting with '$TICKET_SKILL'" >&2
+      printf '%s\n' "$TICKET_SKILL" > "$TICKET_DIR/.maestro-skill"
     fi
   fi
 
@@ -231,7 +233,7 @@ for TICKET in "$@"; do
   # skill (e.g. follow-up) we skip the helper entirely so /follow-up's own
   # producer owns its state file.
   if [ "${SKIP_CUSTOM_SCRIPT:-0}" = "0" ] && [ -n "$BOOTSTRAP_HELPER" ] \
-      && [ "$RESOLVED_SKILL" = "work" ]; then
+      && [ "$TICKET_SKILL" = "work" ]; then
     # bootstrap-custom-script.js is fail-open: warns and exits 0 on errors.
     node "$BOOTSTRAP_HELPER" "$WT" "$TICKET" || true
   fi
@@ -241,8 +243,8 @@ for TICKET in "$@"; do
     echo "[$TICKET] tmux session $SESSION exists — skipping launch"
   else
     tmux new-session -d -s "$SESSION" -c "$WT" \
-      "$CLAUDE_BIN --dangerously-skip-permissions '/$RESOLVED_SKILL $TICKET'"
-    echo "[$TICKET] launched tmux session $SESSION (claude /$RESOLVED_SKILL $TICKET)"
+      "$CLAUDE_BIN --dangerously-skip-permissions '/$TICKET_SKILL $TICKET'"
+    echo "[$TICKET] launched tmux session $SESSION (claude /$TICKET_SKILL $TICKET)"
   fi
 done
 
