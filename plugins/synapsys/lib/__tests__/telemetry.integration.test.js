@@ -10,8 +10,10 @@ function withTempHome(fn) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-telemetry-int-'));
   const prevHome = process.env.HOME;
   const prevDisable = process.env.SYNAPSYS_TELEMETRY;
+  const prevSessionEnv = process.env.CLAUDE_CODE_SESSION_ID;
   process.env.HOME = tmp;
   delete process.env.SYNAPSYS_TELEMETRY;
+  delete process.env.CLAUDE_CODE_SESSION_ID;
   delete require.cache[require.resolve('../telemetry')];
   try {
     return fn(tmp);
@@ -20,6 +22,8 @@ function withTempHome(fn) {
     else process.env.HOME = prevHome;
     if (prevDisable === undefined) delete process.env.SYNAPSYS_TELEMETRY;
     else process.env.SYNAPSYS_TELEMETRY = prevDisable;
+    if (prevSessionEnv === undefined) delete process.env.CLAUDE_CODE_SESSION_ID;
+    else process.env.CLAUDE_CODE_SESSION_ID = prevSessionEnv;
     delete require.cache[require.resolve('../telemetry')];
   }
 }

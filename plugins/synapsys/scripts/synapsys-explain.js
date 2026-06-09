@@ -27,6 +27,10 @@ const path = require('node:path');
 const { makeFlag } = require(path.join(__dirname, '..', 'lib', 'cli-args'));
 const memoryStore = require(path.join(__dirname, '..', 'lib', 'memory-store'));
 const matcher = require(path.join(__dirname, '..', 'lib', 'matcher'));
+const { buildActiveDomains } = require(path.join(__dirname, '..', 'lib', 'active-domains'));
+const { resolveSessionId: ledgerResolveSessionId } = require(
+  path.join(__dirname, '..', 'lib', 'inject-ledger')
+);
 
 const VALID_EVENTS = new Set(['UserPromptSubmit', 'PreToolUse', 'SessionStart', 'Stop']);
 
@@ -84,7 +88,32 @@ function loadMemories(stores) {
   return all;
 }
 
-function evaluateMemory(memory, event, payload) {
+// When the memory carries trigger_stop_response, matchStop needs the agent's
+// response surface to decide. synapsys-explain is a dry-run tool and has no
+// live response, so unless the operator supplies --response=… we short-circuit
+// with an informational pseudo-result rather than lying about fired:false
+// (which is what `matchStop(memory)` with no payload would otherwise return
+// via the empty-string regex path).
+function evaluateStop(memory, payload) {
+  const hasStopResponse = !!memory.triggerStopResponse;
+  const responseProvided = typeof payload.response === 'string' && payload.response !== '';
+  if (hasStopResponse && !responseProvided) {
+    return {
+      fired: null,
+      reason: 'needs-response',
+      triggerStopResponse: memory.triggerStopResponse,
+    };
+  }
+  return matcher.matchStop(memory, payload);
+}
+
+function evaluateMemory(memory, event, payload, activeDomains) {
+  // Domain gate must run BEFORE per-event trigger checks, mirroring
+  // selectForEvent in the dispatcher hook. Otherwise explain reports
+  // memories as fired that the hook would skip via isDomainMismatch.
+  if (activeDomains && matcher.isDomainMismatch(memory, activeDomains)) {
+    return { fired: false, reason: 'domain-mismatch' };
+  }
   if (event === 'UserPromptSubmit') {
     return matcher.matchPrompt(memory, payload.prompt || '');
   }
@@ -94,10 +123,19 @@ function evaluateMemory(memory, event, payload) {
   if (event === 'SessionStart') {
     return matcher.matchSession(memory);
   }
-  if (event === 'Stop') {
-    return matcher.matchStop(memory);
-  }
+  if (event === 'Stop') return evaluateStop(memory, payload);
   return { fired: false, reason: 'events-exclude' };
+}
+
+// Read-only activeDomains resolver — uses the same shared helper as the
+// dispatcher so explain's domain gate agrees with what selectForEvent
+// would do at injection time. Passes the inject-ledger session resolver
+// so sticky-state is read under the SAME bucket the dispatcher writes
+// to (without it, explain reads the 'default' bucket and disagrees with
+// live hysteresis). `onPersistSticky` is omitted so the CLI never
+// mutates sticky state (diagnostic-only).
+function computeActiveDomainsForExplain(event, payload) {
+  return buildActiveDomains(event, payload, { resolveSessionId: ledgerResolveSessionId });
 }
 
 function truncate(str, max) {
@@ -115,9 +153,15 @@ function renderTable(results) {
 
   let fired = 0;
   for (const r of results) {
-    const mark = r.result.fired ? '✓' : '✗';
+    const isNeedsResponse = r.result.fired === null && r.result.reason === 'needs-response';
+    const mark = r.result.fired ? '✓' : isNeedsResponse ? '?' : '✗';
     if (r.result.fired) fired++;
-    const reason = r.result.fired ? '' : r.result.reason || '';
+    let reason = '';
+    if (isNeedsResponse) {
+      reason = `would fire if response matches /${r.result.triggerStopResponse}/i`;
+    } else if (!r.result.fired) {
+      reason = r.result.reason || '';
+    }
     out.push(
       `${r.memory.name.padEnd(nameWidth)} | ${mark}     | ${truncate(reason, REASON_COL_MAX).padEnd(REASON_COL_MAX)}`
     );
@@ -125,6 +169,13 @@ function renderTable(results) {
   out.push('');
   out.push(`${fired}/${results.length} memories fired.`);
   return out.join('\n') + '\n';
+}
+
+function stopTriggerSource(memory) {
+  if (memory.triggerStopResponse) {
+    return `stop_response: /${memory.triggerStopResponse}/i`;
+  }
+  return '(unconditional on Stop)';
 }
 
 function eventTriggerSource(memory, event) {
@@ -140,7 +191,7 @@ function eventTriggerSource(memory, event) {
     return parts.join(' | ');
   }
   if (event === 'SessionStart') return `trigger_session: ${memory.triggerSession}`;
-  if (event === 'Stop') return '(unconditional on Stop)';
+  if (event === 'Stop') return stopTriggerSource(memory);
   return '';
 }
 
@@ -150,6 +201,7 @@ const MATCHED_LABELS = [
   ['pretool_pattern', 'matched.pretool_pattern'],
   ['content_pattern', 'matched.content_pattern'],
   ['content_substring', 'matched.content_substring'],
+  ['excluded_pattern', 'matched.excluded_pattern'],
 ];
 
 function renderFiredBlock(matched) {
@@ -161,8 +213,23 @@ function renderFiredBlock(matched) {
   return lines;
 }
 
-function renderNotFiredBlock(memory, reason) {
+function renderNeedsResponseBlock(memory, result) {
+  return [
+    `  fired: ?  (needs --response=… to evaluate trigger_stop_response)`,
+    `  would_fire_if: response matches /${result.triggerStopResponse}/i`,
+    `  re-run with: --response="<assistant turn text>"`,
+  ];
+}
+
+function renderNotFiredBlock(memory, reason, matched) {
   const lines = [`  fired: ✗  (gate: ${reason || 'unknown'})`];
+  // Surface matched.* keys on suppressed results so reasons like
+  // `exclude-matched` (GH-510) or `negative-excludes` (GH-445) show the
+  // offending pattern alongside the gate label.
+  const m = matched || {};
+  for (const [key, label] of MATCHED_LABELS) {
+    if (m[key] !== undefined) lines.push(`  ${label}: ${m[key]}`);
+  }
   const bodyLines = (memory.body || '').split('\n').filter(Boolean).slice(0, 3);
   if (bodyLines.length) {
     lines.push('  body (first 3 lines):');
@@ -177,9 +244,12 @@ function renderVerboseBlock(memory, result, event) {
   lines.push(`  events: ${eventsList}`);
   const trig = eventTriggerSource(memory, event);
   if (trig) lines.push(`  trigger: ${trig}`);
-  const body = result.fired
-    ? renderFiredBlock(result.matched)
-    : renderNotFiredBlock(memory, result.reason);
+  const isNeedsResponse = result.fired === null && result.reason === 'needs-response';
+  const body = isNeedsResponse
+    ? renderNeedsResponseBlock(memory, result)
+    : result.fired
+      ? renderFiredBlock(result.matched)
+      : renderNotFiredBlock(memory, result.reason, result.matched);
   lines.push(...body);
   return lines.join('\n');
 }
@@ -236,12 +306,13 @@ function applyOnlyFilter(memories, only) {
   return memories.filter((m) => onlySet.has(m.name));
 }
 
-function buildPayload(event, prompt, tool, toolInput, cwd) {
+function buildPayload(event, prompt, tool, toolInput, cwd, response) {
   return {
     hook_event_name: event,
     prompt: prompt === true ? '' : prompt || '',
     tool_name: tool === true ? '' : tool || '',
     tool_input: toolInput || {},
+    response: response === true ? '' : response || '',
     cwd,
   };
 }
@@ -255,16 +326,18 @@ function main() {
   const prompt = flag('prompt') !== undefined ? flag('prompt') : stdinPayload.prompt;
   const tool = flag('tool') !== undefined ? flag('tool') : stdinPayload.tool_name;
   const toolInput = resolveToolInput(flag, stdinPayload);
+  const response = flag('response') !== undefined ? flag('response') : stdinPayload.response;
   const verbose = !!flag('verbose');
   const only = parseOnlyList(flag);
 
   const stores = loadStore(flag('store'), cwd);
   const memories = applyOnlyFilter(loadMemories(stores), only);
-  const payload = buildPayload(event, prompt, tool, toolInput, cwd);
+  const payload = buildPayload(event, prompt, tool, toolInput, cwd, response);
 
+  const activeDomains = computeActiveDomainsForExplain(event, payload);
   const results = memories.map((memory) => ({
     memory,
-    result: evaluateMemory(memory, event, payload),
+    result: evaluateMemory(memory, event, payload, activeDomains),
   }));
 
   const rendered = verbose ? renderVerbose(results, event) : renderTable(results);

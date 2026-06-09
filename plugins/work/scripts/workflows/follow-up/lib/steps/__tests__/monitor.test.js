@@ -361,6 +361,104 @@ describe('refreshPrUntilKnown', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Task 2 (GH-536) — writeMonitorResult helper + --init hint routing
+// ---------------------------------------------------------------------------
+
+describe('writeMonitorResult (GH-536 Task 2)', () => {
+  it('is exposed via __test__ as a function', () => {
+    const monitor = freshLoadMonitor();
+    assert.equal(
+      typeof monitor.__test__.writeMonitorResult,
+      'function',
+      'expected monitor.__test__.writeMonitorResult to be a function'
+    );
+  });
+
+  it('writes both lastMonitorResult and ISO-8601 lastMonitorAt', () => {
+    const monitor = freshLoadMonitor();
+    const { writeMonitorResult } = monitor.__test__;
+    const state = {};
+    writeMonitorResult(state, { exitCode: 0, output: 'ok' });
+    assert.ok(state.lastMonitorResult, 'lastMonitorResult must be set');
+    assert.equal(typeof state.lastMonitorAt, 'string', 'lastMonitorAt must be a string');
+    assert.ok(
+      !Number.isNaN(Date.parse(state.lastMonitorAt)),
+      `lastMonitorAt must be Date.parse-able, got ${state.lastMonitorAt}`
+    );
+    // ISO-8601 shape check
+    assert.match(state.lastMonitorAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+  });
+
+  it('appends --init hint when result is an infra failure', () => {
+    const monitor = freshLoadMonitor();
+    const { writeMonitorResult } = monitor.__test__;
+    const state = {};
+    writeMonitorResult(state, { exitCode: 2, output: 'ENOTFOUND api.github.com' });
+    assert.ok(
+      state.lastMonitorResult.output.includes('re-run with `--init` to drop the cache'),
+      `expected infra-failure output to contain --init hint, got: ${state.lastMonitorResult.output}`
+    );
+  });
+
+  it('does NOT append --init hint for non-infra failures (R16)', () => {
+    const monitor = freshLoadMonitor();
+    const { writeMonitorResult } = monitor.__test__;
+    const state = {};
+    writeMonitorResult(state, { exitCode: 1, output: 'Reviews: 2 BLOCKING' });
+    assert.ok(
+      !state.lastMonitorResult.output.includes('--init'),
+      `non-infra failure must not include --init hint, got: ${state.lastMonitorResult.output}`
+    );
+  });
+
+  it('does NOT append --init hint for successful results (exitCode 0)', () => {
+    const monitor = freshLoadMonitor();
+    const { writeMonitorResult } = monitor.__test__;
+    const state = {};
+    writeMonitorResult(state, { exitCode: 0, output: 'CI: passing\nReviews: CLEAR' });
+    assert.ok(
+      !state.lastMonitorResult.output.includes('--init'),
+      `success must not include --init hint, got: ${state.lastMonitorResult.output}`
+    );
+  });
+});
+
+describe('writeMonitorResult routing in monitor.js (GH-536 Task 2)', () => {
+  it('has zero direct `state.lastMonitorResult =` assignments — all writes routed through helper', () => {
+    // Re-read source after possible edits
+    const src = fs.readFileSync(MONITOR_PATH, 'utf8');
+    const matches = src.match(/state\.lastMonitorResult\s*=/g) || [];
+    assert.equal(
+      matches.length,
+      0,
+      `expected zero direct \`state.lastMonitorResult =\` assignments, found ${matches.length}`
+    );
+  });
+
+  it('defines writeMonitorResult and calls it at least 4 times', () => {
+    const src = fs.readFileSync(MONITOR_PATH, 'utf8');
+    assert.ok(
+      /function\s+writeMonitorResult\s*\(/.test(src),
+      'expected `function writeMonitorResult(` declaration in monitor.js'
+    );
+    const calls = src.match(/writeMonitorResult\s*\(/g) || [];
+    // ≥5 = 1 declaration + 4 call sites
+    assert.ok(
+      calls.length >= 5,
+      `expected ≥5 occurrences of writeMonitorResult( (1 decl + 4 calls), found ${calls.length}`
+    );
+  });
+
+  it('requires ../infra-patterns', () => {
+    const src = fs.readFileSync(MONITOR_PATH, 'utf8');
+    assert.ok(
+      /require\(['"]\.\.\/infra-patterns['"]\)/.test(src),
+      'expected monitor.js to require("../infra-patterns")'
+    );
+  });
+});
+
 describe('resolveMissingRunIds', () => {
   afterEach(() => {
     delete require.cache[MONITOR_ID];
@@ -404,5 +502,136 @@ describe('resolveMissingRunIds', () => {
     for (const token of ['timed_out', 'cancelled', 'action_required', 'stale', 'startup_failure']) {
       assert.ok(jqArg.includes(token), `expected --jq filter to include ${token}`);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Task 3 (GH-536) — clearStaleInfraCache helper + monitor-entry invocation
+// ---------------------------------------------------------------------------
+
+describe('clearStaleInfraCache (GH-536 Task 3)', () => {
+  // Helper: timestamp string `N` seconds in the past.
+  const ago = (seconds) => new Date(Date.now() - seconds * 1000).toISOString();
+
+  it('is exposed via __test__ as a function', () => {
+    const monitor = freshLoadMonitor();
+    assert.equal(
+      typeof monitor.__test__.clearStaleInfraCache,
+      'function',
+      'expected monitor.__test__.clearStaleInfraCache to be a function'
+    );
+  });
+
+  it('preserves a FRESH infra failure (30s old) — AC scenario 1', () => {
+    const monitor = freshLoadMonitor();
+    const { clearStaleInfraCache } = monitor.__test__;
+    const cached = { exitCode: 2, output: 'Could not resolve to a Repository' };
+    const state = { lastMonitorResult: cached, lastMonitorAt: ago(30) };
+    clearStaleInfraCache(state);
+    assert.equal(state.lastMonitorResult, cached, 'fresh infra cache must be preserved');
+    assert.ok(state.lastMonitorAt, 'fresh lastMonitorAt must be preserved');
+  });
+
+  it('CLEARS a STALE infra failure (120s old) — AC scenario 2', () => {
+    const monitor = freshLoadMonitor();
+    const { clearStaleInfraCache } = monitor.__test__;
+    const state = {
+      lastMonitorResult: { exitCode: 2, output: 'Could not resolve to a Repository' },
+      lastMonitorAt: ago(120),
+    };
+    clearStaleInfraCache(state);
+    assert.equal(
+      state.lastMonitorResult,
+      undefined,
+      'stale infra cache lastMonitorResult must be cleared'
+    );
+    assert.equal(state.lastMonitorAt, undefined, 'stale infra cache lastMonitorAt must be cleared');
+  });
+
+  it('preserves a STALE NON-INFRA failure (120s old, CI: FAILING) — AC scenario 3 / R10', () => {
+    const monitor = freshLoadMonitor();
+    const { clearStaleInfraCache } = monitor.__test__;
+    const cached = { exitCode: 1, output: 'CI: FAILING' };
+    const lastAt = ago(120);
+    const state = { lastMonitorResult: cached, lastMonitorAt: lastAt };
+    clearStaleInfraCache(state);
+    assert.equal(state.lastMonitorResult, cached, 'non-infra stale cache must be preserved');
+    assert.equal(state.lastMonitorAt, lastAt, 'non-infra stale lastMonitorAt must be preserved');
+  });
+
+  it('CLEARS legacy state (infra-shape, lastMonitorAt undefined) — R15', () => {
+    const monitor = freshLoadMonitor();
+    const { clearStaleInfraCache } = monitor.__test__;
+    const state = {
+      lastMonitorResult: { exitCode: 2, output: 'ENOTFOUND api.github.com' },
+      // lastMonitorAt omitted — legacy state file
+    };
+    clearStaleInfraCache(state);
+    assert.equal(
+      state.lastMonitorResult,
+      undefined,
+      'legacy-state infra cache must be cleared (missing timestamp = infinitely old)'
+    );
+    assert.equal(state.lastMonitorAt, undefined);
+  });
+
+  it('does NOT delete unrelated state keys — R9 (no full --init wipe)', () => {
+    const monitor = freshLoadMonitor();
+    const { clearStaleInfraCache } = monitor.__test__;
+    const state = {
+      lastMonitorResult: { exitCode: 2, output: 'ENOTFOUND api.github.com' },
+      lastMonitorAt: ago(120),
+      someUnrelated: 'preserve-me',
+      attempt: 7,
+      prNumber: 42,
+    };
+    clearStaleInfraCache(state);
+    assert.equal(state.someUnrelated, 'preserve-me');
+    assert.equal(state.attempt, 7);
+    assert.equal(state.prNumber, 42);
+  });
+
+  it('is a no-op when there is no cached lastMonitorResult', () => {
+    const monitor = freshLoadMonitor();
+    const { clearStaleInfraCache } = monitor.__test__;
+    const state = { attempt: 3 };
+    clearStaleInfraCache(state);
+    assert.equal(state.attempt, 3);
+    assert.equal(state.lastMonitorResult, undefined);
+  });
+});
+
+describe('clearStaleInfraCache wired via orchestrator (GH-536 round-2)', () => {
+  // The in-step call was removed because the orchestrator
+  // (follow-up-next.js) now clears stale infra cache BEFORE any step runs,
+  // including triage/fix-ci/report — the in-step variant only fired when
+  // monitor was reached, which never happened when triage blocked on
+  // exitCode 2. These assertions pin the round-2 lift in place.
+  it('declares clearStaleInfraCache but does NOT call it from inside monitor.js', () => {
+    const src = fs.readFileSync(MONITOR_PATH, 'utf8');
+    assert.ok(
+      /function\s+clearStaleInfraCache\s*\(/.test(src),
+      'expected `function clearStaleInfraCache(` declaration in monitor.js'
+    );
+    const callCount = (src.match(/clearStaleInfraCache\s*\(/g) || []).length;
+    // 1 occurrence = the function declaration itself, no call sites.
+    assert.equal(
+      callCount,
+      1,
+      `expected exactly 1 occurrence of clearStaleInfraCache( (the declaration; orchestrator owns invocation), found ${callCount}`
+    );
+  });
+
+  it('orchestrator (follow-up-next.js) clears stale infra cache before any step runs', () => {
+    const orchestratorPath = path.join(__dirname, '..', '..', '..', 'follow-up-next.js');
+    const src = fs.readFileSync(orchestratorPath, 'utf8');
+    assert.ok(
+      /isInfraFailure\(cached\.output/.test(src),
+      'expected orchestrator to check isInfraFailure(cached.output ...) before step dispatch'
+    );
+    assert.ok(
+      /delete state\.lastMonitorResult/.test(src),
+      'expected orchestrator to delete state.lastMonitorResult when cache is stale infra'
+    );
   });
 });

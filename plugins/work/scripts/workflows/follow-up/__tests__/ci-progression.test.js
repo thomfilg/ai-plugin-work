@@ -196,7 +196,7 @@ describe('CI progression with mocked gh calls', () => {
   });
 
   describe('Scenario 3: CI failing', () => {
-    it('monitor → exitCode 1, triage → fix-ci', () => {
+    it('monitor → exitCode 1, triage → infra-retry (Bug A)', () => {
       setGhMocks({
         checks: [
           { name: 'Test (Node 20)', bucket: 'fail' },
@@ -218,7 +218,7 @@ describe('CI progression with mocked gh calls', () => {
       state.currentStep = 'triage';
       triage(state, {});
       assert.equal(state.failureCategory, 'ci_failure');
-      assert.equal(state.currentStep, 'fix-ci');
+      assert.equal(state.currentStep, 'infra-retry');
     });
   });
 
@@ -271,7 +271,7 @@ describe('CI progression with mocked gh calls', () => {
   });
 
   describe('Scenario 6: pending checks + failure → fail fast', () => {
-    it('2 pending + 1 fail → triage → fix-ci (does not wait for pending)', () => {
+    it('2 pending + 1 fail → triage → infra-retry (does not wait for pending) (Bug A)', () => {
       setGhMocks({
         checks: [
           { name: 'Cursor Bugbot', bucket: 'pending' },
@@ -294,7 +294,7 @@ describe('CI progression with mocked gh calls', () => {
       state.currentStep = 'triage';
       triage(state, {});
       assert.equal(state.failureCategory, 'ci_failure');
-      assert.equal(state.currentStep, 'fix-ci');
+      assert.equal(state.currentStep, 'infra-retry');
     });
   });
 

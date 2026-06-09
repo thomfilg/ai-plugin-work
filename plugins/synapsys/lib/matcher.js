@@ -1,5 +1,13 @@
 'use strict';
 
+const excludes = require('./matcher-excludes');
+const content = require('./matcher-content');
+const { safeRegex } = require('./matcher-regex');
+
+const extractPretoolContent = content.extractPretoolContent;
+const findContentMatch = content.findContentMatch;
+const hasNegativeContentPatterns = content.hasNegativeContentPatterns;
+
 /**
  * @typedef {Object} Matched
  * @property {string} [prompt_token]      The matched alternative arm of trigger_prompt.
@@ -8,22 +16,15 @@
  * @property {string} [content_pattern]   The trigger_pretool_content regex that matched.
  * @property {string} [content_substring] The actual substring matched in the tool input content.
  * @property {string} [negative_pattern]  The trigger_pretool_content_not regex that excluded a match.
+ * @property {string} [excluded_pattern]  The exclude_* regex/spec that suppressed an otherwise-positive match.
  */
 
 /**
  * @typedef {Object} MatchResult
  * @property {boolean} fired
- * @property {('events-exclude'|'no-prompt-match'|'no-pretool-match'|'no-content-match'|'negative-excludes'|'no-session-trigger'|'expired'|'disabled')} [reason]
+ * @property {('events-exclude'|'no-prompt-match'|'no-pretool-match'|'no-content-match'|'negative-excludes'|'exclude-matched'|'no-session-trigger'|'no-stop-response-match'|'expired'|'disabled'|'domain-mismatch')} [reason]
  * @property {Matched} [matched]
  */
-
-function safeRegex(pattern, flags = 'i') {
-  try {
-    return new RegExp(pattern, flags);
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Resolve the deterministic gate ladder: events-exclude → disabled → expired.
@@ -48,28 +49,41 @@ function makeMatched(fields) {
   return matched;
 }
 
+// Find which top-level alternative arm of trigger_prompt matched. Falls back
+// to the full pattern when no individual arm hits (naive split — spec assumes
+// human-authored simple alternation).
+function _resolvePromptToken(triggerPrompt, prompt) {
+  const arms = splitTopLevelAlternation(triggerPrompt);
+  for (const arm of arms) {
+    const armRe = safeRegex(arm);
+    if (armRe && armRe.test(prompt)) return arm;
+  }
+  return triggerPrompt;
+}
+
 function matchPrompt(memory, prompt) {
   const gate = gateMemory(memory, 'UserPromptSubmit');
   if (gate) return { fired: false, reason: gate };
   if (!memory.triggerPrompt) return { fired: false, reason: 'no-prompt-match' };
   const re = safeRegex(memory.triggerPrompt);
   if (!re) return { fired: false, reason: 'no-prompt-match' };
-  const m = re.exec(prompt || '');
+  const promptText = prompt || '';
+  const m = re.exec(promptText);
   if (!m) return { fired: false, reason: 'no-prompt-match' };
 
-  // Determine which top-level alternative arm matched. Split memory.triggerPrompt
-  // by top-level `|` (naive, but trigger_prompt regex is human-authored simple
-  // alternation per the spec). Pick the first arm whose own regex matches.
-  const arms = splitTopLevelAlternation(memory.triggerPrompt);
-  let prompt_token = memory.triggerPrompt;
-  for (const arm of arms) {
-    const armRe = safeRegex(arm);
-    if (armRe && armRe.test(prompt || '')) {
-      prompt_token = arm;
-      break;
-    }
+  // Locked evaluation order (GH-510): trigger → exclude. After a positive
+  // trigger_prompt match, evaluate the merged exclude list. Any hit suppresses
+  // the fire and returns reason 'exclude-matched' with the offending pattern.
+  const excluded = evaluateExcludePrompt(memory, promptText);
+  if (excluded.excluded) {
+    return {
+      fired: false,
+      reason: 'exclude-matched',
+      matched: makeMatched({ excluded_pattern: excluded.pattern }),
+    };
   }
 
+  const prompt_token = _resolvePromptToken(memory.triggerPrompt, promptText);
   return {
     fired: true,
     matched: makeMatched({ prompt_token, prompt_substring: m[0] }),
@@ -172,6 +186,36 @@ function _evaluatePreToolMatch(memory, payload) {
   return { ...stage, matchedSpec: prefix.matchedSpec };
 }
 
+/**
+ * Locked evaluation order for matchPreTool / matchPreToolResult (GH-510):
+ *   1. events gate / disabled / expired
+ *   2. positive trigger_pretool prefix match (`no-pretool-match` on miss)
+ *   3. trigger_pretool_content stage (GH-445): content positive then
+ *      `trigger_pretool_content_not` — produces `'negative-excludes'` which
+ *      retains priority over `'exclude-matched'`
+ *   4. exclude_prompt / exclude_pretool / exclude_preset suppression
+ *      (`'exclude-matched'`)
+ *
+ * The order matters: `'negative-excludes'` is a stage-3 verdict against the
+ * tool input content; `'exclude-matched'` is a stage-4 veto against the same
+ * inputs the trigger considered. Reordering would silently flip which reason
+ * surfaces to memory authors, breaking the explainer contract.
+ */
+// Stage 4 helper: evaluate exclude_pretool against the pre-tool payload.
+// Returns an exclude-matched verdict if any pattern hits, otherwise null.
+// Per R4 (brief P0 #4): exclude_prompt is scoped to the user prompt and
+// is NOT evaluated against the pretool argBlob — there is no prompt
+// string available in the PreToolUse context.
+function _evaluatePreToolExcludes(memory, payload) {
+  const argBlob = JSON.stringify(payload?.tool_input || {});
+  const toolName = payload?.tool_name || '';
+  const excluded = evaluateExcludePretool(memory, toolName, argBlob);
+  if (excluded.excluded) {
+    return makeMatched({ excluded_pattern: excluded.pattern });
+  }
+  return null;
+}
+
 function matchPreTool(memory, payload) {
   const gate = gateMemory(memory, 'PreToolUse');
   if (gate) return { fired: false, reason: gate };
@@ -180,6 +224,12 @@ function matchPreTool(memory, payload) {
   }
   const result = _evaluatePreToolMatch(memory, payload);
   if (result.matched) {
+    // Stage 4: exclude evaluation runs AFTER positive + content stages so
+    // negative-excludes retains priority over exclude-matched (locked order).
+    const excludedMatched = _evaluatePreToolExcludes(memory, payload);
+    if (excludedMatched) {
+      return { fired: false, reason: 'exclude-matched', matched: excludedMatched };
+    }
     return {
       fired: true,
       matched: makeMatched({
@@ -203,80 +253,20 @@ function matchPreTool(memory, payload) {
   return { fired: false, reason: 'no-content-match' };
 }
 
-function extractMultiEditContent(edits) {
-  if (!Array.isArray(edits)) return null;
-  const strings = edits
-    .map((e) => (e && typeof e.new_string === 'string' ? e.new_string : null))
-    .filter((s) => s !== null);
-  if (strings.length === 0) return null;
-  return strings.join('\n');
-}
+// Content helpers (extract*, evaluate*Content*, findContentMatch) live in
+// matcher-content.js and are re-bound at the top of this file so the public
+// matcher API stays stable for memory-store.js and the explainer CLI.
 
-const PRETOOL_CONTENT_EXTRACTORS = {
-  Edit: (i) => (typeof i.new_string === 'string' ? i.new_string : null),
-  Write: (i) => (typeof i.content === 'string' ? i.content : null),
-  MultiEdit: (i) => extractMultiEditContent(i.edits),
-  NotebookEdit: (i) => (typeof i.new_source === 'string' ? i.new_source : null),
-};
-
-function extractPretoolContent(toolName, toolInput) {
-  if (!toolInput || typeof toolInput !== 'object') return null;
-  const extractor = PRETOOL_CONTENT_EXTRACTORS[toolName];
-  return extractor ? extractor(toolInput) : null;
-}
-
-function evaluatePretoolContent(memory, contentString) {
-  return findContentMatch(memory, contentString) !== null;
-}
-
-function findContentMatch(memory, contentString) {
-  const patterns = memory.triggerPretoolContent;
-  if (!Array.isArray(patterns) || patterns.length === 0) return null;
-  let hit = null;
-  for (const pat of patterns) {
-    let re;
-    try {
-      re = new RegExp(pat, 'im');
-    } catch (err) {
-      process.stderr.write(
-        `[synapsys] memory ${memory.name}: invalid trigger_pretool_content regex "${pat}": ${err.message}\n`
-      );
-      continue;
-    }
-    const m = re.exec(contentString);
-    if (m && hit === null) {
-      hit = { pattern: pat, substring: m[0] };
-    }
-  }
-  return hit;
-}
-
-function hasNegativeContentPatterns(memory) {
-  return (
-    Array.isArray(memory.triggerPretoolContentNot) && memory.triggerPretoolContentNot.length > 0
-  );
-}
-
-function evaluatePretoolContentNot(memory, contentString) {
-  const patterns = memory.triggerPretoolContentNot;
-  if (!Array.isArray(patterns) || patterns.length === 0) {
-    return { excluded: false, pattern: null };
-  }
-  for (const pat of patterns) {
-    let re;
-    try {
-      re = new RegExp(pat, 'im');
-    } catch (err) {
-      process.stderr.write(
-        `[synapsys] memory ${memory.name}: invalid trigger_pretool_content_not regex "${pat}": ${err.message}\n`
-      );
-      continue;
-    }
-    if (re.test(contentString)) {
-      return { excluded: true, pattern: pat };
-    }
-  }
-  return { excluded: false, pattern: null };
+// Stage-4 exclude evaluators are implemented in matcher-excludes.js. These
+// thin wrappers bind matcher.js's pretool spec helpers so call-sites here
+// stay parameter-free and the public API surface is unchanged.
+const hasExcludePatterns = excludes.hasExcludePatterns;
+const evaluateExcludePrompt = excludes.evaluateExcludePrompt;
+function evaluateExcludePretool(memory, toolName, argBlob) {
+  return excludes.evaluateExcludePretool(memory, toolName, argBlob, {
+    parsePretoolSpec,
+    pretoolSpecMatches,
+  });
 }
 
 // matchPreToolResult — object-mode wrapper around matchPreTool.
@@ -294,7 +284,19 @@ function evaluatePretoolContentNot(memory, contentString) {
 function matchPreToolResult(memory, payload) {
   if (gateMemory(memory, 'PreToolUse')) return { matched: false };
   const result = _evaluatePreToolMatch(memory, payload);
-  if (result.matched) return { matched: true };
+  if (result.matched) {
+    // Stage 4: exclude evaluation — same locked order as matchPreTool.
+    const argBlob = JSON.stringify(payload?.tool_input || {});
+    const toolName = payload?.tool_name || '';
+    const excluded = evaluateExcludePretool(memory, toolName, argBlob);
+    if (excluded.excluded) {
+      return {
+        reason: 'exclude-matched',
+        matched: { excluded_pattern: excluded.pattern },
+      };
+    }
+    return { matched: true };
+  }
   if (result.negative) {
     return {
       reason: 'negative-excludes',
@@ -311,14 +313,36 @@ function matchSession(memory) {
   return { fired: true };
 }
 
-// Stop event fires at the assistant's turn end. The classifier matrix assigns
-// Stop to memories that are retrospective checks ("did I run follow-up-pr?",
-// "cleanup the tmp file"). They fire unconditionally for any memory listing
-// Stop in events — the body itself IS the reminder, no separate trigger.
-function matchStop(memory) {
-  const gate = gateMemory(memory, 'Stop');
-  if (gate) return { fired: false, reason: gate };
-  return { fired: true };
+const stopMatcher = require('./matcher-stop');
+
+function matchStop(memory, payload) {
+  return stopMatcher.matchStop(memory, payload, { gateMemory, safeRegex, makeMatched });
+}
+
+const _extractStopResponse = stopMatcher._extractStopResponse;
+
+/**
+ * Domain gate (GH-513 R4 / AC2): when `memory.domain` is non-empty AND an
+ * `activeDomains` set is supplied AND their intersection is empty, the memory
+ * is excluded BEFORE trigger evaluation. Returns true when the memory should
+ * be skipped with reason `domain-mismatch`.
+ *
+ * Fail-open semantics:
+ *   - memory.domain empty/missing  -> not gated (backward compat R10/AC1)
+ *   - activeDomains undefined/null -> not gated (backward compat R10)
+ *
+ * @param {object} memory
+ * @param {Set<string>|undefined} activeDomains
+ * @returns {boolean}
+ */
+function isDomainMismatch(memory, activeDomains) {
+  if (!activeDomains) return false;
+  const domains = memory && memory.domain;
+  if (!Array.isArray(domains) || domains.length === 0) return false;
+  for (const d of domains) {
+    if (activeDomains.has(d)) return false;
+  }
+  return true;
 }
 
 /**
@@ -328,16 +352,23 @@ function matchStop(memory) {
  * @param {Array<object>} memories
  * @param {string} event
  * @param {object} payload
+ * @param {{ activeDomains?: Set<string> }} [opts]
  * @returns {Array<object>} subset of `memories` whose matcher fired.
  */
-function selectForEvent(memories, event, payload) {
+const EVENT_MATCHERS = {
+  UserPromptSubmit: (m, payload) => matchPrompt(m, payload?.prompt || ''),
+  PreToolUse: (m, payload) => matchPreTool(m, payload),
+  SessionStart: (m) => matchSession(m),
+  Stop: (m, payload) => matchStop(m, payload),
+};
+
+function selectForEvent(memories, event, payload, opts) {
+  const activeDomains = opts && opts.activeDomains;
+  const matcher = EVENT_MATCHERS[event];
   const matched = [];
   for (const m of memories) {
-    let result = { fired: false };
-    if (event === 'UserPromptSubmit') result = matchPrompt(m, payload?.prompt || '');
-    else if (event === 'PreToolUse') result = matchPreTool(m, payload);
-    else if (event === 'SessionStart') result = matchSession(m);
-    else if (event === 'Stop') result = matchStop(m);
+    if (isDomainMismatch(m, activeDomains)) continue;
+    const result = matcher ? matcher(m, payload) : { fired: false };
     if (result.fired) matched.push(m);
   }
   return matched;
@@ -350,10 +381,15 @@ module.exports = {
   matchPreToolResult,
   matchSession,
   matchStop,
+  _extractStopResponse,
   safeRegex,
   splitTopLevelAlternation,
   extractPretoolContent,
-  evaluatePretoolContent,
-  evaluatePretoolContentNot,
+  evaluatePretoolContent: content.evaluatePretoolContent,
+  evaluatePretoolContentNot: content.evaluatePretoolContentNot,
   hasNegativeContentPatterns,
+  isDomainMismatch,
+  evaluateExcludePrompt,
+  evaluateExcludePretool,
+  hasExcludePatterns,
 };

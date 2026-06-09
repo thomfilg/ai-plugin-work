@@ -47,17 +47,50 @@ Config lives in the store marker `.heimdall.json`:
 
 ## Store kinds (like synapsys)
 
-| kind     | location                              | scope                          |
-|----------|---------------------------------------|--------------------------------|
-| local    | `./.claude/heimdall`                  | this directory                 |
-| worktree | nearest ancestor `../.claude/heimdall`| shared across a worktree base  |
-| global   | `~/.claude/heimdall/<project>`        | survives worktree deletion     |
+| kind     | location                              | scope                                                              |
+|----------|---------------------------------------|--------------------------------------------------------------------|
+| local    | `./.claude/heimdall`                  | this directory                                                     |
+| worktree | nearest ancestor `../.claude/heimdall`| shared across a worktree base                                      |
+| global   | `~/.claude/heimdall/<project>`        | survives worktree deletion (scoped to this project)                |
+| shared   | `~/.claude/heimdall-shared`           | user-wide across every project — e.g. `~/.claude`, `~/.gitconfig`, `~/.ssh`, `~/.aws` |
 
-Locks from every active store are merged at evaluation time.
+Locks from every active store are merged at evaluation time. Entries from
+all active stores remain in force simultaneously and any of the configured
+unlock phrases lifts the lock for the path it covers — sharing the same
+unlock phrase across stores does **not** merge their `allowedPaths` or
+`trustedSubdirs` into a single combined lock.
+
+Precedence order (**`local > worktree > global > shared`**) determines:
+
+- the order entries are evaluated, the order entries are listed by
+  `/heimdall:list`, and the entry that names the rejection message, **not**
+  whether an earlier-kind lock overrides a later-kind lock.
+- when two stores protect the **same exact path**, the earlier-kind
+  entry is the one matched first for that path — so its `allowedPaths`
+  and `unlockPhrase` decide the verdict for that path. Stores protecting
+  **different** paths each enforce their own paths independently.
+
+The `shared` store applies broadest — use it for user-wide paths that
+should be guarded in every project, while keeping per-project locks in
+`local`/`worktree`/`global`.
+
+### Migrating from the home-level workaround
+
+If you previously worked around the lack of a shared kind by placing a
+marker directly at `~/.claude/heimdall/.heimdall.json`, move it under the
+new shared directory in one shot:
+
+```bash
+mkdir -p ~/.claude/heimdall-shared && \
+  mv ~/.claude/heimdall/.heimdall.json ~/.claude/heimdall-shared/.heimdall.json
+```
+
+Then run `/heimdall:list` to confirm the locks are now reported under the
+`shared` kind.
 
 ## Skills
 
-- **`/heimdall:install [local|worktree|global]`** — create a store (`.heimdall.json`).
+- **`/heimdall:install [local|worktree|global|shared]`** — create a store (`.heimdall.json`).
 - **`/heimdall:protect <paths> [phrase]`** — add/extend a lock block.
 - **`/heimdall:unprotect <phrase> [paths]`** — remove a block or specific paths.
 - **`/heimdall:list`** — show every store, block, phrase, and resolved file/dir.

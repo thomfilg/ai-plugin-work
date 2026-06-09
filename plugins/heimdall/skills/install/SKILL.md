@@ -1,7 +1,7 @@
 ---
 name: install
-description: Configure Heimdall file/directory protection storage and scan for paths to protect. Use when the user says "install heimdall", "set up heimdall", "set up protection", "configure heimdall", "create lock store", "initialize heimdall", or asks to start guarding files. Picks local (./.claude/heimdall), worktree (../.claude/heimdall), or global (~/.claude/heimdall/<project>), then suggests protectable paths.
-argument-hint: [local|worktree|global]
+description: Configure Heimdall file/directory protection storage and scan for paths to protect. Use when the user says "install heimdall", "set up heimdall", "set up protection", "configure heimdall", "create lock store", "initialize heimdall", or asks to start guarding files. Picks local (./.claude/heimdall), worktree (../.claude/heimdall), global (~/.claude/heimdall/<project>), or shared (~/.claude/heimdall-shared, user-wide across every project), then suggests protectable paths.
+argument-hint: [local|worktree|global|shared]
 user-invocable: true
 allowed-tools: Bash, AskUserQuestion
 ---
@@ -13,7 +13,7 @@ user opt each one in behind a passphrase.
 
 ## Phase 1 — create the store
 
-1. If the user passed `local`, `worktree`, or `global`, use it. Otherwise pick via `AskUserQuestion`: recommend `worktree` when `git worktree list` shows >1 entry, else `local`; mention `global` survives worktree deletion.
+1. If the user passed `local`, `worktree`, `global`, or `shared`, use it. Otherwise pick via `AskUserQuestion`: recommend `worktree` when `git worktree list` shows >1 entry, else `local`; mention `global` survives worktree deletion, and `shared` survives every project (appropriate for user-wide paths like `~/.claude`, `~/.gitconfig`). If the catalog target anchor is `home` (e.g. `~/.claude`, `~/.ssh`, `~/.aws`, `~/.gitconfig`), recommend `shared` so the lock applies in every project, not just this one.
 2. Run the init script and print its output:
    ```bash
    node "${CLAUDE_PLUGIN_ROOT}/scripts/heimdall-init.js" --kind=<kind>

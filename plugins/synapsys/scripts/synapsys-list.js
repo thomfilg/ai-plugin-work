@@ -13,59 +13,58 @@
  */
 
 const { discoverStores, listMemoriesFromStore, setupCli } = require('../lib/script-bootstrap');
+const { makePalette } = require('../lib/ansi-palette');
+const { resolveSessionId, loadLedger } = require('../lib/inject-ledger');
 
 const { flag } = setupCli();
 
-const cwd = flag('cwd') || process.cwd();
-const json = !!flag('json');
-const verbose = !!flag('verbose');
-const noColor = !!flag('no-color') || process.env.NO_COLOR === '1' || !process.stdout.isTTY;
-const storeFilter = typeof flag('store') === 'string' ? flag('store') : null;
-const eventFilter = typeof flag('event') === 'string' ? flag('event') : null;
-
-const stores = discoverStores(cwd);
-let memories = stores.flatMap(listMemoriesFromStore);
-if (storeFilter) memories = memories.filter((m) => m.store.kind === storeFilter);
-if (eventFilter) memories = memories.filter((m) => m.events.includes(eventFilter));
-
-if (json) {
-  process.stdout.write(
-    `${JSON.stringify(
-      {
-        stores,
-        memories: memories.map((m) => ({
-          name: m.name,
-          description: m.description,
-          events: m.events,
-          triggerPrompt: m.triggerPrompt,
-          triggerPretool: m.triggerPretool,
-          triggerSession: m.triggerSession,
-          inject: m.inject,
-          store: m.store.kind,
-          file: m.file,
-        })),
-      },
-      null,
-      2
-    )}\n`
-  );
-  process.exit(0);
+/**
+ * Pure renderer for the `domain:` line shown per memory in `synapsys-list`.
+ * Memories with a non-empty `domain` array render a comma-joined line;
+ * absent/empty domain returns null (no line). Pre-styled with the palette.
+ */
+function formatDomainLine(domain, palette) {
+  if (!Array.isArray(domain) || domain.length === 0) return null;
+  const dim = palette && typeof palette.dim === 'function' ? palette.dim : (s) => s;
+  const magenta = palette && typeof palette.magenta === 'function' ? palette.magenta : (s) => s;
+  return `    ${dim('domain:')}  ${magenta(domain.join(', '))}`;
 }
 
-// ─── styling ──────────────────────────────────────────────────────────
-const C = noColor
-  ? new Proxy({}, { get: () => (s) => String(s) })
-  : {
-      dim: (s) => `\x1b[2m${s}\x1b[0m`,
-      bold: (s) => `\x1b[1m${s}\x1b[0m`,
-      cyan: (s) => `\x1b[36m${s}\x1b[0m`,
-      green: (s) => `\x1b[32m${s}\x1b[0m`,
-      yellow: (s) => `\x1b[33m${s}\x1b[0m`,
-      magenta: (s) => `\x1b[35m${s}\x1b[0m`,
-      red: (s) => `\x1b[31m${s}\x1b[0m`,
-      blue: (s) => `\x1b[34m${s}\x1b[0m`,
-      gray: (s) => `\x1b[90m${s}\x1b[0m`,
-    };
+// fireIndicator — compact one-char marker + verbose suffix for fire_mode.
+// Compact char: A (always), o (once, default), ~ (occasionally).
+// Verbose string: `fire: <mode>[/<cadence>]   count: <n>` (cadence only when occasionally).
+function fireIndicator(memory, count) {
+  const mode = memory && memory.fireMode ? memory.fireMode : 'once';
+  let char;
+  if (mode === 'always') char = 'A';
+  else if (mode === 'occasionally') char = '~';
+  else char = 'o';
+  const cadence = mode === 'occasionally' ? `/${memory.fireCadence}` : '';
+  const verbose = `fire: ${mode}${cadence}   count: ${count}`;
+  return { char, mode, verbose };
+}
+
+// Resolve session id + load ledger once per invocation (fail-open via module).
+let __ledger;
+try {
+  __ledger = loadLedger(resolveSessionId({}));
+} catch {
+  __ledger = { memories: {} };
+}
+function injectedCountFor(name) {
+  try {
+    const e = __ledger && __ledger.memories && __ledger.memories[name];
+    return e && Number.isFinite(Number(e.injectedCount)) ? Number(e.injectedCount) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+module.exports = { formatDomainLine };
+
+if (require.main === module) {
+  runCli();
+}
 
 function eventCode(events) {
   const parts = [];
@@ -80,87 +79,173 @@ function pad(s, n) {
   return s + ' '.repeat(n - s.length);
 }
 
-// ─── empty cases ──────────────────────────────────────────────────────
-if (!stores.length) {
-  console.log(C.yellow('No Synapsys stores installed.'));
-  console.log(C.dim('Run /synapsys:install to create one.'));
-  process.exit(0);
+function emitJsonOutput(stores, memories) {
+  process.stdout.write(
+    `${JSON.stringify(
+      {
+        stores,
+        memories: memories.map((m) => ({
+          name: m.name,
+          description: m.description,
+          events: m.events,
+          triggerPrompt: m.triggerPrompt,
+          triggerPretool: m.triggerPretool,
+          triggerSession: m.triggerSession,
+          triggerStopResponse: m.triggerStopResponse || '',
+          excludePrompt: m.excludePrompt || '',
+          excludePretool: Array.isArray(m.excludePretool) ? m.excludePretool : [],
+          excludePreset: Array.isArray(m.excludePreset) ? m.excludePreset : [],
+          inject: m.inject,
+          domain: Array.isArray(m.domain) ? m.domain : [],
+          fireMode: m.fireMode || 'once',
+          fireCadence: typeof m.fireCadence === 'number' ? m.fireCadence : 5,
+          injectedCount: injectedCountFor(m.name),
+          store: m.store.kind,
+          file: m.file,
+        })),
+      },
+      null,
+      2
+    )}\n`
+  );
 }
 
-if (!memories.length) {
-  for (const s of stores) {
-    console.log(`${C.cyan(s.kind.toUpperCase())} ${C.dim('·')} ${s.dir}`);
+function groupByStore(stores, memories) {
+  const byStore = new Map();
+  for (const s of stores) byStore.set(s.kind, { dir: s.dir, memories: [] });
+  for (const m of memories) {
+    const bucket = byStore.get(m.store.kind);
+    if (bucket) bucket.memories.push(m);
   }
-  console.log(C.dim('\n(no memories — use /synapsys:memorize or /synapsys:crystallize)'));
-  process.exit(0);
+  return byStore;
 }
 
-// ─── compute counts ───────────────────────────────────────────────────
-const byStore = new Map();
-for (const s of stores) byStore.set(s.kind, { dir: s.dir, memories: [] });
-for (const m of memories) {
-  const bucket = byStore.get(m.store.kind);
-  if (bucket) bucket.memories.push(m);
+function countByEvent(memories) {
+  const out = { total: 0, ups: 0, ptu: 0, ss: 0 };
+  for (const m of memories) {
+    out.total++;
+    if (m.events.includes('UserPromptSubmit')) out.ups++;
+    if (m.events.includes('PreToolUse')) out.ptu++;
+    if (m.events.includes('SessionStart')) out.ss++;
+  }
+  return out;
 }
 
-let total = 0;
-let upsCount = 0;
-let ptuCount = 0;
-let sessionCount = 0;
-for (const m of memories) {
-  total++;
-  if (m.events.includes('UserPromptSubmit')) upsCount++;
-  if (m.events.includes('PreToolUse')) ptuCount++;
-  if (m.events.includes('SessionStart')) sessionCount++;
+function fireColor(fi, C) {
+  if (fi.char === 'A') return C.bold(C.red(fi.char));
+  if (fi.char === '~') return C.yellow(fi.char);
+  return C.gray(fi.char);
 }
 
-// ─── render ───────────────────────────────────────────────────────────
-const termWidth =
-  process.stdout.columns && process.stdout.columns > 80 ? process.stdout.columns : 100;
-const longestName = Math.max(...memories.map((m) => m.name.length));
-const nameWidth = Math.min(50, Math.max(longestName, 20));
-const eventsWidth = 8;
+function renderVerbose(m, fi, C) {
+  console.log(`    ${C.dim(fi.verbose)}`);
+  if (m.triggerPrompt)
+    console.log(`    ${C.dim('prompt:')}  ${C.magenta('/' + m.triggerPrompt + '/i')}`);
+  if (m.triggerPretool.length)
+    console.log(`    ${C.dim('pretool:')} ${C.magenta(m.triggerPretool.join(', '))}`);
+  if (m.triggerSession) console.log(`    ${C.dim('session:')} ${C.magenta('yes')}`);
+  if (m.triggerStopResponse)
+    console.log(`    ${C.dim('stop-response:')} ${C.magenta('/' + m.triggerStopResponse + '/i')}`);
+  if (m.excludePrompt)
+    console.log(`    ${C.dim('exclude_prompt:')}  ${C.magenta('/' + m.excludePrompt + '/i')}`);
+  if (Array.isArray(m.excludePretool) && m.excludePretool.length)
+    console.log(`    ${C.dim('exclude_pretool:')} ${C.magenta(m.excludePretool.join(', '))}`);
+  if (Array.isArray(m.excludePreset) && m.excludePreset.length)
+    console.log(`    ${C.dim('exclude_preset:')}  ${C.magenta(m.excludePreset.join(', '))}`);
+  console.log(`    ${C.dim('file:')}    ${C.dim(m.file)}`);
+}
 
-for (const [kind, bucket] of byStore.entries()) {
-  if (!bucket.memories.length) continue;
+function renderMemoryRow(m, C, widths, verbose) {
+  const name = pad(m.name, widths.name);
+  const ev = pad(eventCode(m.events), widths.events);
+  const injChar = m.inject === 'full' ? 'F' : 's';
+  const injColored = m.inject === 'full' ? C.bold(C.red(injChar)) : C.gray(injChar);
+  const fi = fireIndicator(m, injectedCountFor(m.name));
+  console.log(`  ${C.green(name)}  ${C.yellow(ev)}  ${injColored} ${fireColor(fi, C)}`);
+  console.log(`    ${m.description}`);
+  const domainLine = formatDomainLine(m.domain, C);
+  if (domainLine) console.log(domainLine);
+  if (verbose) renderVerbose(m, fi, C);
+  console.log('');
+}
 
-  // Store header
+function renderBucket(kind, bucket, C, widths, verbose, termWidth) {
+  if (!bucket.memories.length) return;
   console.log(
     `${C.cyan(C.bold(kind.toUpperCase()))} ${C.dim('·')} ${C.dim(bucket.dir)} ${C.dim('·')} ${bucket.memories.length} memories`
   );
   console.log(C.dim('─'.repeat(Math.min(termWidth, 120))));
   console.log('');
-
-  // Rows: 2 lines per memory + blank line between
-  //   line 1: NAME    EVENTS  I
-  //   line 2:   <full description>
   bucket.memories.sort((a, b) => a.name.localeCompare(b.name));
-  for (const m of bucket.memories) {
-    const name = pad(m.name, nameWidth);
-    const ev = pad(eventCode(m.events), eventsWidth);
-    const injChar = m.inject === 'full' ? 'F' : 's';
-    const injColored = m.inject === 'full' ? C.bold(C.red(injChar)) : C.gray(injChar);
-    console.log(`  ${C.green(name)}  ${C.yellow(ev)}  ${injColored}`);
-    console.log(`    ${m.description}`);
-
-    if (verbose) {
-      if (m.triggerPrompt)
-        console.log(`    ${C.dim('prompt:')}  ${C.magenta('/' + m.triggerPrompt + '/i')}`);
-      if (m.triggerPretool.length)
-        console.log(`    ${C.dim('pretool:')} ${C.magenta(m.triggerPretool.join(', '))}`);
-      if (m.triggerSession) console.log(`    ${C.dim('session:')} ${C.magenta('yes')}`);
-      console.log(`    ${C.dim('file:')}    ${C.dim(m.file)}`);
-    }
-    console.log('');
-  }
+  for (const m of bucket.memories) renderMemoryRow(m, C, widths, verbose);
 }
 
-// ─── summary ──────────────────────────────────────────────────────────
-const summary = `${C.bold(`Total: ${total}`)} ${C.dim('·')} UPS: ${C.yellow(upsCount)} ${C.dim('·')} PTU: ${C.yellow(ptuCount)} ${C.dim('·')} SS: ${C.yellow(sessionCount)}`;
-console.log(summary);
-// Build the legend in parts so the inner red/bold "F" doesn't reset the outer
-// dim attribute (an inner \x1b[0m clears ALL attributes on the rest of the line).
-const legendTail = verbose ? 'verbose mode (regexes shown)' : 'pass --verbose for triggers';
-console.log(
-  `${C.dim('Legend: ')}${C.red(C.bold('F'))}${C.dim(` = full inject · s = summary inject · ${legendTail}`)}`
-);
+function printSummary(C, counts, verbose) {
+  console.log(
+    `${C.bold(`Total: ${counts.total}`)} ${C.dim('·')} UPS: ${C.yellow(counts.ups)} ${C.dim('·')} PTU: ${C.yellow(counts.ptu)} ${C.dim('·')} SS: ${C.yellow(counts.ss)}`
+  );
+  const legendTail = verbose ? 'verbose mode (regexes shown)' : 'pass --verbose for triggers';
+  console.log(
+    `${C.dim('Legend: ')}${C.red(C.bold('F'))}${C.dim(` = full inject · s = summary inject · ${legendTail}`)}`
+  );
+}
+
+function printEmptyStoresAndExit(C) {
+  console.log(C.yellow('No Synapsys stores installed.'));
+  console.log(C.dim('Run /synapsys:install to create one.'));
+  process.exit(0);
+}
+
+function printEmptyMemoriesAndExit(stores, C) {
+  for (const s of stores) console.log(`${C.cyan(s.kind.toUpperCase())} ${C.dim('·')} ${s.dir}`);
+  console.log(C.dim('\n(no memories — use /synapsys:memorize or /synapsys:crystallize)'));
+  process.exit(0);
+}
+
+function loadFilteredMemories(cwd, storeFilter, eventFilter) {
+  const stores = discoverStores(cwd);
+  let memories = stores.flatMap(listMemoriesFromStore);
+  if (storeFilter) memories = memories.filter((m) => m.store.kind === storeFilter);
+  if (eventFilter) memories = memories.filter((m) => m.events.includes(eventFilter));
+  return { stores, memories };
+}
+
+function parseCliOpts() {
+  return {
+    cwd: flag('cwd') || process.cwd(),
+    json: !!flag('json'),
+    verbose: !!flag('verbose'),
+    noColor: !!flag('no-color') || process.env.NO_COLOR === '1' || !process.stdout.isTTY,
+    storeFilter: typeof flag('store') === 'string' ? flag('store') : null,
+    eventFilter: typeof flag('event') === 'string' ? flag('event') : null,
+  };
+}
+
+function computeRenderWidths(memories) {
+  const termWidth =
+    process.stdout.columns && process.stdout.columns > 80 ? process.stdout.columns : 100;
+  const longestName = Math.max(...memories.map((m) => m.name.length));
+  return { name: Math.min(50, Math.max(longestName, 20)), events: 8, term: termWidth };
+}
+
+function renderHuman(stores, memories, opts) {
+  const C = makePalette(opts.noColor);
+  if (!stores.length) printEmptyStoresAndExit(C);
+  if (!memories.length) printEmptyMemoriesAndExit(stores, C);
+  const byStore = groupByStore(stores, memories);
+  const widths = computeRenderWidths(memories);
+  for (const [kind, bucket] of byStore.entries()) {
+    renderBucket(kind, bucket, C, widths, opts.verbose, widths.term);
+  }
+  printSummary(C, countByEvent(memories), opts.verbose);
+}
+
+function runCli() {
+  const opts = parseCliOpts();
+  const { stores, memories } = loadFilteredMemories(opts.cwd, opts.storeFilter, opts.eventFilter);
+  if (opts.json) {
+    emitJsonOutput(stores, memories);
+    process.exit(0);
+  }
+  renderHuman(stores, memories, opts);
+}

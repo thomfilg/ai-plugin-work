@@ -8,12 +8,25 @@
  * IMPORTANT: No step-specific logic here. Steps live in lib/steps/.
  *
  * Usage: node follow-up-next.js <TICKET_ID> [--pr N] [--init]
+ *
+ * Flags:
+ *   --pr N   Pin the PR number (skips discovery).
+ *   --init   Drop cached state and start a fresh follow-up cycle. Use at
+ *            first-run bootstrap OR after manually fixing an infra-shaped
+ *            failure (gh auth, network, VPN) so the next monitor run
+ *            executes against fresh inputs instead of re-emitting a stale
+ *            cached failure. Note: the monitor step also auto-clears
+ *            stale infra failures (see lib/infra-patterns.js); --init is
+ *            still required for non-infra cached failures.
  */
 
 'use strict';
 
 const fs = require('fs');
 const path = require('path');
+
+const { detectDefaultBranch, loadPrDiffFiles } = require('./lib/repo-meta');
+const { buildClassifierCtx } = require('./lib/classifier-ctx');
 
 if (require.main === module) {
   process.on('uncaughtException', (err) => {
@@ -79,7 +92,10 @@ try {
 }
 
 // ─── Step registry ──────────────────────────────────────────────────────────
-const { runStep, STEPS } = require(path.join(__dirname, 'lib', 'step-registry'));
+const { runStep, STEPS, dispatchStepResult } = require(
+  path.join(__dirname, 'lib', 'step-registry')
+);
+const { isInfraFailure, isStale } = require(path.join(__dirname, 'lib', 'infra-patterns'));
 
 // ─── State management ───────────────────────────────────────────────────────
 
@@ -110,10 +126,44 @@ function initState(ticketId, prNumber) {
     dispatched: null,
     attempt: 0,
     maxAttempts: 40,
+    // monitor cache (see infra-patterns.js for invalidation rules)
+    // GH-531 Task 6 (AC10): explicitly reset the push-retry counter so the
+    // cap-exhausted recovery path can't immediately re-trigger after
+    // `reset-follow-up`. Was previously `undefined` (incremented to 1 on
+    // first push-retry), which matches the same observable behavior; the
+    // explicit `0` makes the recovery guarantee inspectable by operators.
+    _pushRetryCount: 0,
     lastMonitorResult: null,
+    lastMonitorAt: null,
     failureCategory: null,
+    // Infra-retry telemetry (GH-508 Task 4). `count` tracks how many
+    // infra-retry attempts have been performed for the current PR; `attempts`
+    // records per-attempt diagnostics for the report step (Task 6).
+    infraRetry: { count: 0, attempts: [] },
     startTime: new Date().toISOString(),
   };
+}
+
+/**
+ * Build a fresh /follow-up state object for `ticketId`, persist it to the
+ * canonical state-file path (`TASKS_BASE/<ticket>/.follow-up-state.json`),
+ * and return the new state.
+ *
+ * Idempotent: calling twice overwrites the on-disk state with a fresh one.
+ * Used both by the existing init code path in this module and by the
+ * `/reset-follow-up` command (Task 2) to re-initialize after push-retry
+ * exhaustion (GH-531).
+ *
+ * @param {string} ticketId — sanitized ticket id (e.g. `GH-999`).
+ * @param {object} [opts] — optional overrides.
+ * @param {number|null} [opts.prNumber] — preserve an existing PR number across reset.
+ * @returns {object} the freshly-initialized state object.
+ */
+function initFreshState(ticketId, opts) {
+  const prNumber = opts && opts.prNumber != null ? opts.prNumber : null;
+  const state = initState(ticketId, prNumber);
+  saveState(ticketId, state);
+  return state;
 }
 
 // ─── Core orchestrator loop ─────────────────────────────────────────────────
@@ -125,15 +175,22 @@ function getNextInstruction(ticketId, prNumber) {
   const tasksDir = path.join(TASKS_BASE, ticketId);
   const candidateWorktree = path.join(WORKTREES_BASE, `${MAIN_WORKTREE_FOLDER}-${ticketId}`);
   const worktreeDir = fs.existsSync(candidateWorktree) ? candidateWorktree : process.cwd();
-  const ctx = {
+
+  // PR #542 cursor[bot]: monitor mutates state._ciAllJobs / _ciFailedLogs /
+  // _ciStatus mid-loop, so a ctx built once before the loop hands a stale
+  // snapshot to a later step (e.g. infra-retry). Rebuild ctx fresh on every
+  // iteration so subsequent steps observe the post-monitor state.
+  const freshCtx = () => ({
     tasksDir,
     worktreeDir,
     TASKS_BASE,
     workScriptsDir: path.join(__dirname, '..', 'work', 'scripts'),
-  };
+    ...buildClassifierCtx(state, worktreeDir),
+  });
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
+    const ctx = freshCtx();
     if (state.status === 'complete' || !STEPS.includes(state.currentStep)) {
       // Re-verify against GitHub before honoring a saved "complete". The
       // saved state is a cache of a prior run's decision; if anything has
@@ -170,12 +227,10 @@ function getNextInstruction(ticketId, prNumber) {
             `[follow-up-next] saved state said complete but PR #${state.prNumber} is not mergeable (${blockerSummary}); rewinding and resuming.\n`
           );
           state.status = 'in_progress';
-          // Always reset to the first step on rewind. The saved currentStep
-          // is untrustworthy (the workflow already claimed to have finished
-          // it); resuming from a later step would just loop forward and
-          // re-set status='complete' in the next normal-advance branch.
-          // Restarting from monitor forces a fresh CI rollup read.
-          state.currentStep = STEPS[0];
+          // Always rewind to 'monitor' (the live CI-rollup read). Hardcoded
+          // rather than STEPS[0] so a future reorder of the step registry
+          // can't silently rewind to whatever happens to be first.
+          state.currentStep = 'monitor';
           state.dispatched = null;
           saveState(ticketId, state);
           continue;
@@ -185,10 +240,61 @@ function getNextInstruction(ticketId, prNumber) {
       return { type: 'follow_up_instruction', action: 'complete', summary: 'Already complete.' };
     }
 
+    // Auto-clear stale infra-failure cache before ANY step runs (GH-536 #551
+    // round-2 fix). The monitor step's own clearStaleInfraCache only fires
+    // when the workflow re-enters monitor — but triage blocks on exitCode 2
+    // without advancing, so subsequent runs only re-execute triage and the
+    // cache is never invalidated. Lifting the check here ensures downstream
+    // steps (triage, fix-ci, report) also benefit and route the flow back
+    // to monitor for a fresh execution.
+    const cached = state.lastMonitorResult;
+    if (cached && isInfraFailure(cached.output || '') && isStale(state.lastMonitorAt)) {
+      delete state.lastMonitorResult;
+      delete state.lastMonitorAt;
+      // Rewind to 'monitor' explicitly — see rationale above.
+      state.currentStep = 'monitor';
+      state.dispatched = null;
+      saveState(ticketId, state);
+      continue;
+    }
+
     const stepIdx = STEPS.indexOf(state.currentStep);
     const result = runStep(state.currentStep, state, ctx);
 
     if (result) {
+      // action:'surface' is terminal (spec API/Interface Changes — GH-508).
+      // Stop the loop without marking status='complete' so the next /follow-up
+      // invocation can resume from a live re-evaluation rather than the cache.
+      if (result.action === 'surface') {
+        state.currentStep = 'report';
+        // Persist the surface reason as a failureCategory so the next
+        // /follow-up cycle's report step recognises the workflow is still
+        // stuck and does NOT mark status=complete. The reason may live on
+        // the top-level result (legacy shape) or under result.payload.reason
+        // (newer shape, mirrors auto-advance hook).
+        const surfaceReason = (result.payload && result.payload.reason) || result.reason || null;
+        if (surfaceReason) {
+          state.failureCategory = surfaceReason;
+        }
+        // Bug 542-10: build the diagnostic summary BEFORE returning so the
+        // auto-advance hook (which treats `surface` as terminal) shows the
+        // per-attempt GitHub Actions URLs without requiring a second
+        // /follow-up invocation.
+        try {
+          const reportResult = runStep('report', state, ctx);
+          const summary =
+            (reportResult &&
+              (reportResult.summary || (reportResult.payload && reportResult.payload.summary))) ||
+            null;
+          if (summary) {
+            result.payload = Object.assign({}, result.payload || {}, { summary });
+          }
+        } catch (_e) {
+          /* fail open — surface still terminal; user can re-run /follow-up */
+        }
+        saveState(ticketId, state);
+        return result;
+      }
       saveState(ticketId, state);
       return result;
     }
@@ -297,4 +403,14 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { getNextInstruction };
+module.exports = {
+  getNextInstruction,
+  initState,
+  initFreshState,
+  dispatchStepResult,
+  __test__: {
+    initState,
+    detectDefaultBranch,
+    loadPrDiffFiles,
+  },
+};

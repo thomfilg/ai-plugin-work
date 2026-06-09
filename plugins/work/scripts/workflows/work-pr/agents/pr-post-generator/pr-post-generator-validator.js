@@ -16,10 +16,67 @@ const fs = require('fs');
 const path = require('path');
 
 const getConfig = require(path.join(__dirname, '..', '..', '..', 'lib', 'get-config'));
+const { detectFabrication } = require('./fabrication-detector');
+const { appendAction } = require(
+  path.join(__dirname, '..', '..', '..', 'work', 'lib', 'work-actions')
+);
+const { getCurrentTaskId } = require(
+  path.join(__dirname, '..', '..', '..', 'lib', 'scripts', 'get-ticket-id')
+);
 const WORKTREES_BASE = getConfig.orExit('WORKTREES_BASE');
 const REPO_NAME = getConfig('REPO_NAME') || 'my-project';
 const REPO_DIR = path.join(WORKTREES_BASE, REPO_NAME);
 const APPS_DIR = process.env.APPS_DIR || path.join(REPO_DIR, 'apps');
+
+/**
+ * Run the fabrication-detector against the live PR body and emit a
+ * box-drawn ASCII failure block + `appendAction({type:'fabrication-block'})`
+ * rows when violations exist. Exits the process with code 2 on violation.
+ * Fail-open: missing TASKS_BASE → stderr warning + return (caller continues).
+ */
+function runFabricationCheck(prBody, taskDir, ticketId) {
+  if (!prBody) return;
+  const { violations } = detectFabrication(prBody, taskDir || '');
+  if (!violations || violations.length === 0) return;
+
+  const lines = violations.flatMap((v) => [
+    `Phrase:      ${v.phrase}`,
+    `Reason:      ${v.reason}`,
+    `Suggestion:  ${v.suggestion}`,
+    '',
+  ]);
+  process.stderr.write(`
+╔══════════════════════════════════════════════════════════════════════╗
+║  POST-PR-GENERATOR: FABRICATED TEST EVIDENCE DETECTED                ║
+╠══════════════════════════════════════════════════════════════════════╣
+║                                                                      ║
+${lines.map((l) => `║  ${l.padEnd(68)}║`).join('\n')}
+║  Remove invented PASS/FAIL or stability claims, or attach the        ║
+║  supporting artifact (tests.check.md / stability*.log) to the task   ║
+║  folder before re-running the agent.                                 ║
+║                                                                      ║
+╚══════════════════════════════════════════════════════════════════════╝
+`);
+
+  if (ticketId) {
+    // Route audit rows through appendAction so they land in the same file as
+    // every other action log (safeId-sanitized path). One row per violation
+    // — analytics can count by `what === 'fabrication-block'`.
+    for (const v of violations) {
+      try {
+        appendAction(ticketId, {
+          step: 'pr',
+          what: 'fabrication-block',
+          meta: { phrase: v.phrase, reason: v.reason },
+        });
+      } catch {
+        // fail-open
+      }
+    }
+  }
+
+  process.exit(2);
+}
 
 /**
  * Check if an app is a frontend app by looking for react-router.config.ts
@@ -142,17 +199,54 @@ async function main() {
   const issues = [];
   const warnings = [];
 
+  // ========== FABRICATION CHECK (runs FIRST, regardless of frontend status) ==========
+  const prBody = getPRBody();
+  const ticketId = getCurrentTaskId();
+  const tasksBase = getConfig('TASKS_BASE');
+  // Fail-closed when the PR body cannot be fetched: a transient `gh` failure
+  // must not become a silent bypass for fabricated test evidence. Empty body
+  // (`""`) is fine — nothing to scan — but `null` means we never saw the body.
+  if (prBody === null) {
+    process.stderr.write(`
+╔══════════════════════════════════════════════════════════════════════╗
+║  POST-PR-GENERATOR: COULD NOT FETCH PR BODY                          ║
+╠══════════════════════════════════════════════════════════════════════╣
+║                                                                      ║
+║  \`gh pr view --json body\` failed; fabrication check cannot run.      ║
+║  Blocking to avoid silently accepting unverified PR content.         ║
+║                                                                      ║
+║  Re-run after confirming \`gh\` auth and PR association.               ║
+║                                                                      ║
+╚══════════════════════════════════════════════════════════════════════╝
+`);
+    process.exit(2);
+  }
+  // Run the fabrication check unconditionally. Missing TASKS_BASE or ticketId
+  // must not become a silent bypass — without a task folder the detector sees
+  // no artifacts, so unsourced stability/PASS/FAIL claims still trip. Only the
+  // audit-log appendAction is skipped when ticketId is absent.
+  if (!tasksBase) {
+    process.stderr.write(
+      'PR-POST-GENERATOR VALIDATOR: TASKS_BASE not configured; running fabrication check without task folder (no audit log).\n'
+    );
+  } else if (!ticketId) {
+    process.stderr.write(
+      'PR-POST-GENERATOR VALIDATOR: could not resolve ticket ID; running fabrication check without audit log.\n'
+    );
+  }
+  const taskDir = tasksBase && ticketId ? path.join(tasksBase, ticketId) : '';
+  runFabricationCheck(prBody, taskDir, ticketId);
+
   // ========== CHECK IF FRONTEND APPS ARE AFFECTED ==========
   const affectedApps = getAffectedApps();
   const affectedFrontendApps = getAffectedFrontendApps(affectedApps || []);
 
   if (affectedFrontendApps.length === 0) {
-    // Backend-only changes - images not required
+    // Backend-only changes - images not required (visual-doc checks only)
     process.exit(0);
   }
 
-  // ========== FETCH ACTUAL PR BODY AND VERIFY VISUAL DOCUMENTATION ==========
-  const prBody = getPRBody();
+  // ========== VERIFY VISUAL DOCUMENTATION (frontend only) ==========
   if (prBody) {
     const hasLink = hasWikiLink(prBody);
 

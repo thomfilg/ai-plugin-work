@@ -19,6 +19,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
+const sharedSessionId = require('./session-id');
 
 const PROCESS_START_MS = Date.now();
 const MATCH_CAP = 200;
@@ -37,23 +38,17 @@ function isDisabled(memory) {
   return false;
 }
 
-// Whitelist filename characters so an attacker-controlled session_id (or one
-// containing path separators / "..") can never make appendFileSync escape
-// the telemetry directory. Anything containing characters outside [A-Za-z0-9._-]
-// — including '/', '\\', or "..", and leading dots used to hide files — falls
-// back to the unknown-session bucket.
-const SAFE_SESSION_ID = /^[A-Za-z0-9._-]{1,128}$/;
-
 function resolveSessionId(payload) {
-  if (!payload || typeof payload.session_id !== 'string' || !payload.session_id) {
-    return '_unknown-session';
-  }
-  const candidate = payload.session_id;
-  if (!SAFE_SESSION_ID.test(candidate)) return '_unknown-session';
-  if (candidate.startsWith('.') || candidate === '..' || candidate.includes('..')) {
-    return '_unknown-session';
-  }
-  return candidate;
+  // Both legs go through the shared resolver so inject-ledger and telemetry
+  // always produce the SAME id for the same input. Env-var first (GH-583),
+  // then payload — both legs apply SAFE_ID_RE (no dot) and sha256-hash unsafe
+  // values via hashId, so an id like "sess.v1" becomes the same hashed value
+  // in both modules instead of diverging on the regex.
+  const fromEnv = sharedSessionId.resolveFromEnv();
+  if (fromEnv) return fromEnv;
+  const fromPayload = sharedSessionId.resolveFromPayload(payload);
+  if (fromPayload) return fromPayload;
+  return '_unknown-session';
 }
 
 function unknownSessionToken() {

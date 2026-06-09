@@ -3,32 +3,30 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
-const { execFileSync } = require('node:child_process');
+const { spawnSync } = require('node:child_process');
 
 const SCRIPT = path.join(__dirname, '..', 'follow-up-pr-comments.js');
 
 /**
  * Helper: run the script with args and env overrides.
  * Returns { status, stdout, stderr }.
+ *
+ * Uses spawnSync so that stderr is captured regardless of exit code
+ * (execFileSync only returns stdout on success and discards stderr).
  */
 function run(args, envOverrides = {}, opts = {}) {
   const env = { ...process.env, ...envOverrides };
-  try {
-    const stdout = execFileSync(process.execPath, [SCRIPT, ...args], {
-      encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-      env,
-      cwd: opts.cwd,
-      timeout: 10000,
-    });
-    return { status: 0, stdout, stderr: '' };
-  } catch (err) {
-    return {
-      status: err.status ?? 1,
-      stdout: (err.stdout || '').toString(),
-      stderr: (err.stderr || '').toString(),
-    };
-  }
+  const result = spawnSync(process.execPath, [SCRIPT, ...args], {
+    encoding: 'utf8',
+    env,
+    cwd: opts.cwd,
+    timeout: 10000,
+  });
+  return {
+    status: result.status ?? 1,
+    stdout: (result.stdout || '').toString(),
+    stderr: (result.stderr || '').toString(),
+  };
 }
 
 /**
@@ -104,6 +102,11 @@ describe('follow-up-pr-comments CLI', () => {
       const result = run([]);
       assert.equal(result.status, 2);
       assert.match(result.stderr, /usage/i);
+      // Canonical flag names appear in usage (GH-537 followup).
+      assert.match(result.stderr, /--mark-locally-solved/);
+      assert.match(result.stderr, /--mark-locally-skipped/);
+      // Legacy aliases are still listed but explicitly labeled deprecated.
+      assert.match(result.stderr, /deprecated/i);
     });
 
     it('exits 2 for unknown subcommand', () => {
@@ -503,6 +506,213 @@ describe('follow-up-pr-comments CLI', () => {
     it('exits 2 when --skip-comment has missing reason', () => {
       const result = run(['--skip-comment', '100']);
       assert.equal(result.status, 2);
+    });
+  });
+
+  // ── Task 1 refactor: solveLocally / skipLocally helper exports ─────────────
+
+  describe('solveLocally / skipLocally helpers (Task 1)', () => {
+    const SCRIPT_PATH = path.join(__dirname, '..', 'follow-up-pr-comments.js');
+
+    it('declares a solveLocally helper function', () => {
+      const src = fs.readFileSync(SCRIPT_PATH, 'utf8');
+      assert.match(
+        src,
+        /function\s+solveLocally\s*\(/,
+        'expected follow-up-pr-comments.js to declare `function solveLocally(...)`'
+      );
+    });
+
+    it('declares a skipLocally helper function', () => {
+      const src = fs.readFileSync(SCRIPT_PATH, 'utf8');
+      assert.match(
+        src,
+        /function\s+skipLocally\s*\(/,
+        'expected follow-up-pr-comments.js to declare `function skipLocally(...)`'
+      );
+    });
+
+    it('exports the new helpers on module.exports', () => {
+      const src = fs.readFileSync(SCRIPT_PATH, 'utf8');
+      assert.match(
+        src,
+        /module\.exports[\s\S]*solveLocally/,
+        'expected module.exports to include solveLocally'
+      );
+      assert.match(
+        src,
+        /module\.exports[\s\S]*skipLocally/,
+        'expected module.exports to include skipLocally'
+      );
+    });
+
+    it('handleSolveComment delegates to solveLocally (thin dispatcher)', () => {
+      const src = fs.readFileSync(SCRIPT_PATH, 'utf8');
+      // After refactor, handleSolveComment body must reference solveLocally.
+      const handlerMatch = src.match(
+        /function\s+handleSolveComment\s*\([^)]*\)\s*\{([\s\S]*?)\n\}/
+      );
+      assert.ok(handlerMatch, 'expected handleSolveComment definition');
+      assert.match(
+        handlerMatch[1],
+        /solveLocally\s*\(/,
+        'expected handleSolveComment body to call solveLocally(...)'
+      );
+    });
+
+    it('handleSkipComment delegates to skipLocally (thin dispatcher)', () => {
+      const src = fs.readFileSync(SCRIPT_PATH, 'utf8');
+      const handlerMatch = src.match(/function\s+handleSkipComment\s*\([^)]*\)\s*\{([\s\S]*?)\n\}/);
+      assert.ok(handlerMatch, 'expected handleSkipComment definition');
+      assert.match(
+        handlerMatch[1],
+        /skipLocally\s*\(/,
+        'expected handleSkipComment body to call skipLocally(...)'
+      );
+    });
+  });
+
+  // ── Task 2: new flag aliases ─────────────────────────────────────────────
+
+  describe('--mark-locally-solved / --mark-locally-skipped (Task 2)', () => {
+    let ctx;
+    afterEach(() => ctx?.cleanup());
+
+    it('New flag --mark-locally-solved marks comment solved without warnings', () => {
+      const comments = [makeComment({ id: 100 })];
+      ctx = createTempState(makeState(comments));
+      const result = run(
+        ['--mark-locally-solved', '100', 'abc1234', 'fixed null check'],
+        envFor(ctx.tmpDir),
+        { cwd: cwdFor(ctx) }
+      );
+      assert.equal(
+        result.status,
+        0,
+        `expected exit 0, got ${result.status}; stderr=${result.stderr}`
+      );
+      assert.equal(result.stderr, '', `expected empty stderr, got: ${result.stderr}`);
+
+      const state = JSON.parse(fs.readFileSync(ctx.stateFile, 'utf8'));
+      const comment = state.comments.find((c) => c.id === 100);
+      assert.equal(comment.status, 'solved');
+      assert.equal(comment.commitSha, 'abc1234');
+      assert.equal(comment.resolution, 'fixed null check');
+    });
+
+    it('New flag --mark-locally-skipped marks comment skipped without warnings', () => {
+      const comments = [makeComment({ id: 200 })];
+      ctx = createTempState(makeState(comments));
+      const result = run(['--mark-locally-skipped', '200', 'Out of scope'], envFor(ctx.tmpDir), {
+        cwd: cwdFor(ctx),
+      });
+      assert.equal(
+        result.status,
+        0,
+        `expected exit 0, got ${result.status}; stderr=${result.stderr}`
+      );
+      assert.equal(result.stderr, '', `expected empty stderr, got: ${result.stderr}`);
+
+      const state = JSON.parse(fs.readFileSync(ctx.stateFile, 'utf8'));
+      const comment = state.comments.find((c) => c.id === 200);
+      assert.equal(comment.status, 'skipped');
+      assert.equal(comment.resolution, 'Out of scope');
+    });
+
+    it('--mark-locally-solved exits 2 when missing args', () => {
+      const result = run(['--mark-locally-solved', '100']);
+      assert.equal(result.status, 2);
+    });
+
+    it('--mark-locally-skipped exits 2 when missing reason', () => {
+      const result = run(['--mark-locally-skipped', '200']);
+      assert.equal(result.status, 2);
+    });
+  });
+
+  // ── Task 3: deprecation warnings on legacy flags ─────────────────────────
+
+  describe('--solve-comment / --skip-comment deprecation warnings (Task 3)', () => {
+    let ctx;
+    afterEach(() => ctx?.cleanup());
+
+    it('Deprecated --solve-comment still works but warns', () => {
+      const comments = [makeComment({ id: 100 })];
+      ctx = createTempState(makeState(comments));
+      const result = run(['--solve-comment', '100', 'abc1234', 'desc'], envFor(ctx.tmpDir), {
+        cwd: cwdFor(ctx),
+      });
+      assert.equal(
+        result.status,
+        0,
+        `expected exit 0, got ${result.status}; stderr=${result.stderr}`
+      );
+
+      // Exactly one stderr line, mentioning both replacement flag and local-only scope.
+      const stderrLines = result.stderr.split('\n').filter((l) => l.trim().length > 0);
+      assert.equal(
+        stderrLines.length,
+        1,
+        `expected exactly one stderr line, got ${stderrLines.length}: ${result.stderr}`
+      );
+      assert.match(result.stderr, /--mark-locally-solved/);
+      assert.match(result.stderr, /no GitHub thread is resolved/);
+
+      // Still updates snapshot identically to the new flag.
+      const state = JSON.parse(fs.readFileSync(ctx.stateFile, 'utf8'));
+      const comment = state.comments.find((c) => c.id === 100);
+      assert.equal(comment.status, 'solved');
+      assert.equal(comment.commitSha, 'abc1234');
+      assert.equal(comment.resolution, 'desc');
+    });
+
+    it('Deprecated --skip-comment still works but warns', () => {
+      const comments = [makeComment({ id: 200 })];
+      ctx = createTempState(makeState(comments));
+      const result = run(['--skip-comment', '200', 'reason'], envFor(ctx.tmpDir), {
+        cwd: cwdFor(ctx),
+      });
+      assert.equal(
+        result.status,
+        0,
+        `expected exit 0, got ${result.status}; stderr=${result.stderr}`
+      );
+
+      const stderrLines = result.stderr.split('\n').filter((l) => l.trim().length > 0);
+      assert.equal(
+        stderrLines.length,
+        1,
+        `expected exactly one stderr line, got ${stderrLines.length}: ${result.stderr}`
+      );
+      assert.match(result.stderr, /--mark-locally-skipped/);
+
+      const state = JSON.parse(fs.readFileSync(ctx.stateFile, 'utf8'));
+      const comment = state.comments.find((c) => c.id === 200);
+      assert.equal(comment.status, 'skipped');
+      assert.equal(comment.resolution, 'reason');
+    });
+  });
+
+  // ── Task 8: top-of-file JSDoc documents local-only default ────────────────
+  describe('top-of-file JSDoc (Task 8)', () => {
+    const source = fs.readFileSync(SCRIPT, 'utf8');
+    // Capture only the leading JSDoc block (top-of-file).
+    const headerMatch = source.match(/^#![^\n]*\n\/\*\*[\s\S]*?\*\//);
+    const header = headerMatch ? headerMatch[0] : '';
+
+    it('JSDoc top-of-file states local tracking only by default', () => {
+      assert.ok(header.length > 0, 'expected a top-of-file JSDoc block');
+      assert.match(
+        header,
+        /local tracking only by default/,
+        'top-of-file JSDoc must contain literal "local tracking only by default"'
+      );
+    });
+
+    it('notes --solve-comment / --skip-comment as deprecated aliases', () => {
+      assert.match(header, /--solve-comment/);
+      assert.match(header, /--skip-comment/);
+      assert.match(header, /deprecated/i);
     });
   });
 });

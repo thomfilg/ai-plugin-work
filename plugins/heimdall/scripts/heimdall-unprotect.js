@@ -4,7 +4,7 @@
 /**
  * Remove protection from a Heimdall store.
  *
- *   node heimdall-unprotect.js --phrase="edit .claude" [--paths=".claude"] [--kind=local] [--cwd=<path>]
+ *   node heimdall-unprotect.js --phrase="edit .claude" [--paths=".claude"] [--kind=<local|worktree|global|shared>] [--cwd=<path>]
  *
  * - With --phrase only: removes the entire lock block for that phrase.
  * - With --phrase + --paths: removes only those paths from the block; the

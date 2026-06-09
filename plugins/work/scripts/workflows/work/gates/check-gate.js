@@ -35,36 +35,40 @@ function readFile(p) {
  * @param {Error & { stdout?: string, stderr?: string }} err
  * @returns {string[]}
  */
-function parseSpecVerifyError(err) {
-  const stdout =
-    typeof err.stdout === 'string'
-      ? err.stdout
-      : Buffer.isBuffer(err.stdout)
-        ? err.stdout.toString()
-        : '';
-  const stderr =
-    typeof err.stderr === 'string'
-      ? err.stderr.trim()
-      : Buffer.isBuffer(err.stderr)
-        ? err.stderr.toString().trim()
-        : '';
-  if (stdout) {
-    try {
-      const result = JSON.parse(stdout);
-      if (typeof result.success === 'boolean' && !result.success && Array.isArray(result.checks)) {
-        const failures = result.checks
-          .filter((c) => !c.passed)
-          .map(
-            (c) =>
-              `Spec verification failed: ${c.type} ${Array.isArray(c.args) ? c.args.join(' ') : ''} — ${c.reason || 'check failed'}`
-          );
-        return failures.length > 0
-          ? failures
-          : ['Spec verification failed but no specific check details available'];
-      }
-    } catch {
-      /* stdout wasn't valid JSON, fall through to generic error */
+function streamToString(value, trim) {
+  let str;
+  if (typeof value === 'string') str = value;
+  else if (Buffer.isBuffer(value)) str = value.toString();
+  else return '';
+  return trim ? str.trim() : str;
+}
+
+function parseSpecVerifyStdout(stdout) {
+  try {
+    const result = JSON.parse(stdout);
+    if (typeof result.success !== 'boolean' || result.success || !Array.isArray(result.checks)) {
+      return null;
     }
+    const failures = result.checks
+      .filter((c) => !c.passed)
+      .map(
+        (c) =>
+          `Spec verification failed: ${c.type} ${Array.isArray(c.args) ? c.args.join(' ') : ''} — ${c.reason || 'check failed'}`
+      );
+    return failures.length > 0
+      ? failures
+      : ['Spec verification failed but no specific check details available'];
+  } catch {
+    return null;
+  }
+}
+
+function parseSpecVerifyError(err) {
+  const stdout = streamToString(err.stdout, false);
+  const stderr = streamToString(err.stderr, true);
+  if (stdout) {
+    const parsed = parseSpecVerifyStdout(stdout);
+    if (parsed) return parsed;
   }
   return [`Spec verification script error: ${stderr || err.message || 'unknown error'}`];
 }

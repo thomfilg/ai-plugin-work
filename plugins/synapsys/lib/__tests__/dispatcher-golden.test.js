@@ -25,12 +25,15 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
+const { listMemoriesFromStore } = require('../memory-store');
+const { matchPrompt } = require('../matcher');
+
 const DISPATCHER = path.resolve(__dirname, '..', '..', 'hooks', 'synapsys.js');
+const PRESETS_PATH = path.resolve(__dirname, '..', 'synapsys-presets.json');
 
 const MEMORY_NAME = 'golden-prompt-memory';
 const KNOWN_PROMPT = 'golden dispatcher regression prompt';
-const MEMORY_BODY =
-  'Body line one for the golden regression memory.\nBody line two.';
+const MEMORY_BODY = 'Body line one for the golden regression memory.\nBody line two.';
 const MEMORY_DESCRIPTION = 'Golden regression memory for dispatcher stdout.';
 
 // Captured verbatim from `node plugins/synapsys/hooks/synapsys.js
@@ -70,9 +73,77 @@ function makeFixtureStore() {
   return { cwd, cleanup: () => fs.rmSync(cwd, { recursive: true, force: true }) };
 }
 
+// GH-510 R20 / Task 2.2 — exclude-matched golden row.
+//
+// Contract: when a memory's `trigger_prompt` hits AND its resolved exclude
+// list (from `exclude_preset: git-ops`) also matches the same prompt, the
+// matcher MUST emit:
+//   { fired: false, reason: 'exclude-matched',
+//     matched: { excluded_pattern: <git-ops body resolved from presets.json> } }
+//
+// The asserted `excluded_pattern` is read from the shipped
+// `synapsys-presets.json` at test time so the row stays in sync if the
+// preset body is ever edited (hard-coding the regex would silently drift).
+function makeExcludeFixtureStore() {
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-dispatcher-exclude-'));
+  const storeDir = path.join(cwd, '.claude', 'synapsys');
+  fs.mkdirSync(storeDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(storeDir, '.synapsys.json'),
+    JSON.stringify({ projectName: 'dispatcher-exclude-fixture' })
+  );
+
+  const memoryFile = path.join(storeDir, 'golden-exclude-memory.md');
+  const frontmatter = [
+    '---',
+    'name: golden-exclude-memory',
+    'description: Golden regression memory for exclude-matched reason.',
+    'events: UserPromptSubmit',
+    'trigger_prompt: \\bticket\\b',
+    'exclude_preset: git-ops',
+    'inject: full',
+    '---',
+    '',
+    'Body for exclude-matched golden row.',
+    '',
+  ].join('\n');
+  fs.writeFileSync(memoryFile, frontmatter);
+
+  return { cwd, storeDir, cleanup: () => fs.rmSync(cwd, { recursive: true, force: true }) };
+}
+
+test('matcher emits {fired:false, reason:exclude-matched, excluded_pattern:<git-ops body>} when trigger and git-ops preset both hit', (t) => {
+  const { storeDir, cleanup } = makeExcludeFixtureStore();
+  t.after(cleanup);
+
+  const gitOpsBody = JSON.parse(fs.readFileSync(PRESETS_PATH, 'utf8'))['git-ops'];
+  assert.ok(gitOpsBody, 'git-ops preset body must exist in synapsys-presets.json');
+
+  const memories = listMemoriesFromStore({
+    kind: 'local',
+    dir: storeDir,
+    projectName: 'dispatcher-exclude-fixture',
+  });
+  assert.equal(memories.length, 1, 'expected exactly one fixture memory');
+  const memory = memories[0];
+
+  const result = matchPrompt(memory, 'git rebase the ticket branch');
+  assert.deepEqual(result, {
+    fired: false,
+    reason: 'exclude-matched',
+    matched: { excluded_pattern: gitOpsBody },
+  });
+});
+
 test('dispatcher stdout for UserPromptSubmit payload matches golden', (t) => {
   const { cwd, cleanup } = makeFixtureStore();
-  t.after(cleanup);
+  // Isolate the inject ledger so a stale entry from a previous run
+  // doesn't downgrade the full body to a "fired earlier" reminder.
+  const sessionTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-dispatcher-golden-session-'));
+  t.after(() => {
+    cleanup();
+    fs.rmSync(sessionTmp, { recursive: true, force: true });
+  });
 
   const payload = {
     hook_event_name: 'UserPromptSubmit',
@@ -80,15 +151,15 @@ test('dispatcher stdout for UserPromptSubmit payload matches golden', (t) => {
     cwd,
   };
 
-  const result = spawnSync(
-    process.execPath,
-    [DISPATCHER, 'UserPromptSubmit'],
-    {
-      input: JSON.stringify(payload),
-      encoding: 'utf8',
-      env: { ...process.env, SYNAPSYS_NO_SETUP_HINT: '1' },
-    }
-  );
+  const result = spawnSync(process.execPath, [DISPATCHER, 'UserPromptSubmit'], {
+    input: JSON.stringify(payload),
+    encoding: 'utf8',
+    env: {
+      ...process.env,
+      SYNAPSYS_NO_SETUP_HINT: '1',
+      SYNAPSYS_SESSION_DIR: sessionTmp,
+    },
+  });
 
   assert.equal(result.status, 0, `dispatcher exited non-zero: stderr=${result.stderr}`);
   assert.equal(

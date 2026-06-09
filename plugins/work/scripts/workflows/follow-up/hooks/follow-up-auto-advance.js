@@ -46,7 +46,11 @@ function main() {
   const markerAge = Date.now() - new Date(marker.startedAt).getTime();
   if (markerAge > 12 * 60 * 60 * 1000) process.exit(0);
 
-  const nextPath = path.join(__dirname, '..', 'follow-up-next.js');
+  // Test seam: an absolute path override lets the surface/blocked test stub
+  // follow-up-next.js without staging the entire plugin tree. Production code
+  // never sets FOLLOW_UP_NEXT_PATH; default resolves siblings as before.
+  const nextPath =
+    process.env.FOLLOW_UP_NEXT_PATH || path.join(__dirname, '..', 'follow-up-next.js');
   let result;
   try {
     result = execFileSync(process.execPath, [nextPath, marker.ticket], {
@@ -92,9 +96,18 @@ function main() {
     console.log('\n═══ FOLLOW-UP2: BLOCKED ═══');
     console.log(JSON.stringify(instruction, null, 2));
     console.log('═══════════════════════════\n');
+  } else if (instruction.action === 'surface') {
+    // R13: Treat 'surface' as terminal (same as 'blocked'). The orchestrator
+    // emits this when it needs manual user intervention — e.g. infra-stuck
+    // after 3 retries. We stop the auto-advance loop and surface the reason.
+    const reason = (instruction.payload && instruction.payload.reason) || 'unknown';
+    console.log('\n═══ FOLLOW-UP2: SURFACE ═══');
+    console.log(`reason: ${reason}`);
+    console.log(JSON.stringify(instruction, null, 2));
+    console.log('═══════════════════════════\n');
   }
 
   process.exit(0);
 }
 
-main();
+if (require.main === module && !process.env.NODE_TEST_CONTEXT) main();

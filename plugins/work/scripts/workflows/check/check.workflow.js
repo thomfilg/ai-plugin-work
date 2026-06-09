@@ -33,6 +33,105 @@ const REPO_DIR = config.repoDir();
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
+const STEP_STATE_DETECTORS = {
+  '1_setup': () => ({ action: 'RUN', reason: 'Initialize variables and check cache' }),
+
+  '2_start_env': (d) => {
+    if (d.readmeHashMatch) {
+      return {
+        action: 'SKIP',
+        reason: `Cache valid — hash ${d.changesHash} matches README.md`,
+      };
+    }
+    return {
+      action: 'RUN',
+      reason: `Start dev environment for ${d.impactedApps?.length || 0} app(s)`,
+      command: 'node "${CLAUDE_PLUGIN_ROOT}/hooks/check-start-env.js"',
+    };
+  },
+
+  '3_verify_playwright': (d) => {
+    if (d.readmeHashMatch) {
+      return { action: 'SKIP', reason: 'Cache valid — skipping Playwright check' };
+    }
+    if (d.hasWebApps === false) {
+      return { action: 'SKIP', reason: 'No web apps configured — Playwright not needed' };
+    }
+    return {
+      action: 'RUN',
+      reason: 'Verify Playwright MCP connectivity before launching QA agents',
+      command: 'mcp__playwright__browser_navigate',
+    };
+  },
+
+  '4_phase1_agents': (d) => {
+    if (d.allPhase1ReportsMatch) {
+      return {
+        action: 'SKIP',
+        reason: `All Phase 1 reports exist with matching hash (${d.changesHash})`,
+      };
+    }
+    return {
+      action: 'RUN',
+      reason: d.missingReports?.length
+        ? `Missing/stale reports: ${d.missingReports.join(', ')}`
+        : 'Run all Phase 1 agents',
+      command: 'Task(code-checker, quality-checker, qa-*, completion-checker)',
+    };
+  },
+
+  '5_phase2_consensus': (d) => {
+    if (!d.codeReviewHasSuggestions) {
+      return { action: 'SKIP', reason: 'No suggestions in code-review.check.md' };
+    }
+    if (d.replyExists && d.replyHashMatch && d.consensusLogExists) {
+      return {
+        action: 'SKIP',
+        reason: 'code-review-reply.check.md and consensus log exist with matching hash',
+      };
+    }
+    return {
+      action: 'RUN',
+      reason: 'Code review has suggestions — developers must evaluate',
+      command: 'Task(developer-*, code-checker)',
+    };
+  },
+
+  '6_quality_recheck': (d) => {
+    if (!d.replyHasImplementations) {
+      return {
+        action: 'SKIP',
+        reason: 'No IMPLEMENTED suggestions in reply — no re-check needed',
+      };
+    }
+    return {
+      action: 'RUN',
+      reason: 'Developer(s) implemented suggestions — re-validate affected files',
+      command: 'Task(quality-checker)',
+    };
+  },
+
+  '7_validate_summary': (d) => {
+    if (d.readmeHashMatch) {
+      return { action: 'SKIP', reason: 'Cache valid — summary already generated' };
+    }
+    return {
+      action: 'RUN',
+      reason: 'Validate reports and generate README.md summary',
+      command: 'node check-validate-reports.js + check-generate-summary.js',
+    };
+  },
+
+  '8_output': () => ({ action: 'RUN', reason: 'Display final results to user' }),
+
+  '9_cleanup': (d) => {
+    if (d.readmeHashMatch) {
+      return { action: 'SKIP', reason: 'Cache valid — no environment was started' };
+    }
+    return { action: 'RUN', reason: 'Stop dev servers and cleanup resources' };
+  },
+};
+
 function safeExec(cmd, options = {}) {
   try {
     return execSync(cmd, { encoding: 'utf8', cwd: REPO_DIR, ...options }).trim();
@@ -329,103 +428,9 @@ module.exports = {
    */
   detectStepState(stepId, instanceId, state, inspectData) {
     const d = inspectData || {};
-
-    switch (stepId) {
-      case '1_setup':
-        return { action: 'RUN', reason: 'Initialize variables and check cache' };
-
-      case '2_start_env':
-        if (d.readmeHashMatch) {
-          return {
-            action: 'SKIP',
-            reason: `Cache valid — hash ${d.changesHash} matches README.md`,
-          };
-        }
-        return {
-          action: 'RUN',
-          reason: `Start dev environment for ${d.impactedApps?.length || 0} app(s)`,
-          command: 'node "${CLAUDE_PLUGIN_ROOT}/hooks/check-start-env.js"',
-        };
-
-      case '3_verify_playwright':
-        if (d.readmeHashMatch) {
-          return { action: 'SKIP', reason: 'Cache valid — skipping Playwright check' };
-        }
-        if (d.hasWebApps === false) {
-          return { action: 'SKIP', reason: 'No web apps configured — Playwright not needed' };
-        }
-        return {
-          action: 'RUN',
-          reason: 'Verify Playwright MCP connectivity before launching QA agents',
-          command: 'mcp__playwright__browser_navigate',
-        };
-
-      case '4_phase1_agents':
-        if (d.allPhase1ReportsMatch) {
-          return {
-            action: 'SKIP',
-            reason: `All Phase 1 reports exist with matching hash (${d.changesHash})`,
-          };
-        }
-        return {
-          action: 'RUN',
-          reason: d.missingReports?.length
-            ? `Missing/stale reports: ${d.missingReports.join(', ')}`
-            : 'Run all Phase 1 agents',
-          command: 'Task(code-checker, quality-checker, qa-*, completion-checker)',
-        };
-
-      case '5_phase2_consensus':
-        if (!d.codeReviewHasSuggestions) {
-          return { action: 'SKIP', reason: 'No suggestions in code-review.check.md' };
-        }
-        if (d.replyExists && d.replyHashMatch && d.consensusLogExists) {
-          return {
-            action: 'SKIP',
-            reason: 'code-review-reply.check.md and consensus log exist with matching hash',
-          };
-        }
-        return {
-          action: 'RUN',
-          reason: 'Code review has suggestions — developers must evaluate',
-          command: 'Task(developer-*, code-checker)',
-        };
-
-      case '6_quality_recheck':
-        if (!d.replyHasImplementations) {
-          return {
-            action: 'SKIP',
-            reason: 'No IMPLEMENTED suggestions in reply — no re-check needed',
-          };
-        }
-        return {
-          action: 'RUN',
-          reason: 'Developer(s) implemented suggestions — re-validate affected files',
-          command: 'Task(quality-checker)',
-        };
-
-      case '7_validate_summary':
-        if (d.readmeHashMatch) {
-          return { action: 'SKIP', reason: 'Cache valid — summary already generated' };
-        }
-        return {
-          action: 'RUN',
-          reason: 'Validate reports and generate README.md summary',
-          command: 'node check-validate-reports.js + check-generate-summary.js',
-        };
-
-      case '8_output':
-        return { action: 'RUN', reason: 'Display final results to user' };
-
-      case '9_cleanup':
-        if (d.readmeHashMatch) {
-          return { action: 'SKIP', reason: 'Cache valid — no environment was started' };
-        }
-        return { action: 'RUN', reason: 'Stop dev servers and cleanup resources' };
-
-      default:
-        return { action: 'RUN', reason: 'Unknown step' };
-    }
+    const detector = STEP_STATE_DETECTORS[stepId];
+    if (!detector) return { action: 'RUN', reason: 'Unknown step' };
+    return detector(d);
   },
 
   /** Extra fields to include in initial state */

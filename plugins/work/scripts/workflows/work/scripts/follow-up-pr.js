@@ -569,9 +569,22 @@ function isBlockingPriority(priority) {
   return priority === 'high' || priority === 'medium';
 }
 
+/**
+ * Fetch reviewThreads via GraphQL and derive three views in a single pass:
+ *   - `resolved` — Set of comment databaseIds whose thread is resolved/outdated
+ *     (used to filter out comments that no longer need attention).
+ *   - `outdatedThreadIds` — Array of thread IDs that are outdated but not yet
+ *     resolved (for optional bulk dismissal).
+ *   - `commentIdToThreadId` — Map<databaseId, threadId> covering EVERY thread
+ *     (active, resolved, outdated). Persisted onto `comment.threadId` by
+ *     `--snapshot` for forward-compatibility; currently a dormant payload.
+ *
+ * On failure all three are returned empty so callers stay safe.
+ */
 function getResolvedCommentIds(repo, prNumber, execFn = ghExec) {
   const resolved = new Set();
   const outdatedThreadIds = []; // thread IDs that are outdated but not yet resolved
+  const commentIdToThreadId = new Map(); // databaseId -> threadId, all threads
   try {
     const [owner, name] = repo.split('/');
     const query = `query($owner:String!,$name:String!,$pr:Int!,$cursor:String){repository(owner:$owner,name:$name){pullRequest(number:$pr){reviewThreads(first:100,after:$cursor){pageInfo{hasNextPage endCursor}nodes{id isResolved isOutdated comments(first:100){totalCount nodes{databaseId}}}}}}}`;
@@ -608,9 +621,21 @@ function getResolvedCommentIds(repo, prNumber, execFn = ghExec) {
       const threadData = graphqlResult?.data?.repository?.pullRequest?.reviewThreads;
       const threads = threadData?.nodes || [];
       for (const thread of threads) {
+        const comments = thread.comments || {};
+        const nodes = comments.nodes || [];
+
+        // Map every comment to its parent thread, regardless of resolved/outdated.
+        // Snapshot writers persist `comment.threadId` as a forward-compatible
+        // dormant payload.
+        if (thread.id) {
+          for (const comment of nodes) {
+            if (comment?.databaseId != null) {
+              commentIdToThreadId.set(comment.databaseId, thread.id);
+            }
+          }
+        }
+
         if (thread.isResolved || thread.isOutdated) {
-          const comments = thread.comments || {};
-          const nodes = comments.nodes || [];
           for (const comment of nodes) {
             if (comment?.databaseId) resolved.add(comment.databaseId);
           }
@@ -638,8 +663,9 @@ function getResolvedCommentIds(repo, prNumber, execFn = ghExec) {
     );
     resolved.clear();
     outdatedThreadIds.length = 0;
+    commentIdToThreadId.clear();
   }
-  return { resolved, outdatedThreadIds };
+  return { resolved, outdatedThreadIds, commentIdToThreadId };
 }
 
 /**
@@ -786,9 +812,8 @@ function getReviews(prNumber) {
       return false;
     };
     const botCheckCompleted = (bot) => {
-      const keywords = botCheckKeywords[bot.toLowerCase()] || botCheckKeywords[bot] || [
-        bot.toLowerCase().replace(/\[bot\]$/, ''),
-      ];
+      const keywords = botCheckKeywords[bot.toLowerCase()] ||
+        botCheckKeywords[bot] || [bot.toLowerCase().replace(/\[bot\]$/, '')];
       const matching = checks.filter((ck) => {
         const name = (ck.name || ck.context || '').toLowerCase();
         return keywords.some((kw) => name.includes(kw));
