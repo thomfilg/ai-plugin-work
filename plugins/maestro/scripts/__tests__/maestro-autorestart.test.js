@@ -406,6 +406,16 @@ test('Auto-restart on a follow-up ticket relaunches /follow-up not /work', () =>
     "fake-claude --dangerously-skip-permissions '/follow-up GH-9001'",
     'launcher must use /follow-up resolved from .maestro-skill, not /work'
   );
+
+  // PR #561 follow-up: the production silence log must carry the
+  // [<ticket>:<skill>] token from formatLogLine so operators can grep it in
+  // /tmp/maestro-conduct.log (README skill-adapter promise).
+  const logContents = fs.existsSync(eventLog) ? fs.readFileSync(eventLog, 'utf8') : '';
+  assert.match(
+    logContents,
+    /\[GH-9001:follow-up\] silence:/,
+    `production AUTO-RESTART log must carry the [<ticket>:<skill>] token; got:\n${logContents}`
+  );
 });
 
 test('Unknown skill value in .maestro-skill falls open to /work with a warning', () => {

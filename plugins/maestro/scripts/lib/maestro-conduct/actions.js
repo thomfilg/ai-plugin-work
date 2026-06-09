@@ -26,6 +26,7 @@ const {
 } = require('./next-task');
 const { purgeAlertCountsForTicket } = require('../../maestro-cleanup');
 const skillRegistry = require('./skill-registry');
+const { formatLogLine } = require('./detectors/silence');
 
 const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
 
@@ -99,8 +100,9 @@ function declareWedged({ session, ticket, restarts, now, silenceSec }) {
   const wedgedUntil = now + WEDGED_QUIET_MIN * 60;
   const count = restarts.length + 1;
   state.write(session, 'restart-loop', { restarts: [...restarts, now], wedgedUntil });
+  const skill = skillRegistry.readTicketSkill(ticket);
   alerts.log(
-    `${session} WEDGED — ${count} auto-restarts in ${RESTART_WINDOW_MIN}m; suppressing restarts for ${WEDGED_QUIET_MIN}m`
+    `${formatLogLine({ ticket, skill, silenceSec, kind: 'wedged' })} ${session} WEDGED — ${count} auto-restarts in ${RESTART_WINDOW_MIN}m; suppressing restarts for ${WEDGED_QUIET_MIN}m`
   );
   const paneTail = tmux.capture(session).split('\n').slice(-50).join('\n');
   alerts.alert({
@@ -204,8 +206,11 @@ function autoRestart({ session, ticket, worktree, silenceSec }) {
 
   state.write(session, 'restart-loop', { restarts: [...restarts, now] });
   const skill = resolveSkillForRestart(ticket, session); // GH-514 R1/AC2/AC6
+  // PR #561 follow-up: prefix the production silence log with the skill-aware
+  // token from formatLogLine so operators can grep `[<ticket>:<skill>]` in
+  // /tmp/maestro-conduct.log — the README's skill-adapter section promised it.
   alerts.log(
-    `${session} AUTO-RESTART after ${silenceSec}s silence — relaunching /${skill} ${ticket}`
+    `${formatLogLine({ ticket, skill, silenceSec, kind: 'silence' })} ${session} AUTO-RESTART after ${silenceSec}s silence — relaunching /${skill} ${ticket}`
   );
   spawnSync('tmux', ['kill-session', '-t', session], { stdio: 'ignore' });
   spawnSync(
