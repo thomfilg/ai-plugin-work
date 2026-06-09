@@ -53,9 +53,8 @@ function parseArgs(argv) {
 }
 
 function resolveTasksBase() {
-  const base =
-    getConfig('TASKS_BASE') ||
-    (process.env.WORKTREES_BASE ? path.join(process.env.WORKTREES_BASE, 'tasks') : '');
+  const worktreesBase = getConfig('WORKTREES_BASE') || process.env.WORKTREES_BASE;
+  const base = getConfig('TASKS_BASE') || (worktreesBase ? path.join(worktreesBase, 'tasks') : '');
   if (!base) {
     process.stderr.write(
       'reset-follow-up: TASKS_BASE not configured (check .envrc / get-config).\n'
