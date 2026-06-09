@@ -44,12 +44,16 @@ function loadDetectorFresh(stateDir, env = {}) {
   }
   const silence = require('../lib/maestro-conduct/detectors/silence.js');
   const state = require('../lib/maestro-conduct/state.js');
-  return { silence, state, restore: () => {
-    for (const [k, v] of Object.entries(saved)) {
-      if (v === undefined) delete process.env[k];
-      else process.env[k] = v;
-    }
-  } };
+  return {
+    silence,
+    state,
+    restore: () => {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    },
+  };
 }
 
 function seedSilenceMarker({ state, session, pane, secondsAgo }) {
@@ -93,6 +97,34 @@ test('work skill with no SILENCE_LIMIT_SEC_FOLLOWUP override hits at 600s (defau
     assert.equal(result.hit, true, 'work at 600s with limit 300 should hit');
     assert.equal(result.kind, 'silence');
     assert.equal(result.limitSec, 300);
+  } finally {
+    restore();
+  }
+});
+
+test('work skill honors SILENCE_LIMIT_SEC override above row default', () => {
+  // PR #561 review regression: pre-GH-514, SILENCE_LIMIT_SEC was authoritative
+  // for /work. The first cut consulted the registry row (300) before the env,
+  // so an operator with SILENCE_LIMIT_SEC=600 saw their threshold silently
+  // demoted to 300. Verify env takes precedence over the row for work.
+  const dir = freshTmpStateDir();
+  const env = { SILENCE_LIMIT_SEC_FOLLOWUP: undefined, SILENCE_LIMIT_SEC: '600' };
+  const { silence, state, restore } = loadDetectorFresh(dir, env);
+  try {
+    const session = 'GH-9003-work';
+    const pane = 'idle pane content 11 tokens';
+    seedSilenceMarker({ state, session, pane, secondsAgo: 500 });
+    const r1 = silence.detect({ session, ticket: 'GH-9003', pane, skill: 'work' });
+    assert.equal(r1.hit, false, 'work at 500s with SILENCE_LIMIT_SEC=600 must NOT hit');
+
+    seedSilenceMarker({ state, session, pane, secondsAgo: 700 });
+    const r2 = silence.detect({ session, ticket: 'GH-9003', pane, skill: 'work' });
+    assert.equal(r2.hit, true, 'work at 700s with SILENCE_LIMIT_SEC=600 must hit');
+    assert.equal(
+      r2.limitSec,
+      600,
+      'limitSec must come from SILENCE_LIMIT_SEC, not the row default'
+    );
   } finally {
     restore();
   }

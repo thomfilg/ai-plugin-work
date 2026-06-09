@@ -127,11 +127,7 @@ test('Bootstrap with --skill=follow-up writes .maestro-skill and skips .work-sta
     env: baseEnv(base, fakeHome),
   });
 
-  assert.equal(
-    status,
-    0,
-    `bootstrap should exit 0\nstdout:\n${stdout}\nstderr:\n${stderr}`
-  );
+  assert.equal(status, 0, `bootstrap should exit 0\nstdout:\n${stdout}\nstderr:\n${stderr}`);
 
   // (a) .maestro-skill written with the resolved skill.
   const skillFile = path.join(base, 'tasks', ticket, '.maestro-skill');
@@ -151,9 +147,7 @@ test('Bootstrap with --skill=follow-up writes .maestro-skill and skips .work-sta
 
   // (b') Helper must NOT have been invoked (gate must short-circuit before
   // calling bootstrap-custom-script.js).
-  const helperCalls = fs.existsSync(helperLog)
-    ? fs.readFileSync(helperLog, 'utf8').trim()
-    : '';
+  const helperCalls = fs.existsSync(helperLog) ? fs.readFileSync(helperLog, 'utf8').trim() : '';
   assert.equal(
     helperCalls,
     '',
@@ -174,6 +168,43 @@ test('Bootstrap with --skill=follow-up writes .maestro-skill and skips .work-sta
   );
 });
 
+test('Bare re-bootstrap (no --skill, no env) preserves existing .maestro-skill (PR #561)', () => {
+  const { wrapper, base, fakeHome } = makeSandbox();
+  const ticket = 'GH-9001';
+
+  // First bootstrap with --skill=follow-up to seed the file.
+  const r1 = runScript(wrapper, {
+    ...RUN_OPTS,
+    args: ['--skill=follow-up', ticket],
+    env: baseEnv(base, fakeHome),
+  });
+  assert.equal(
+    r1.status,
+    0,
+    `seed run should exit 0\nstdout:\n${r1.stdout}\nstderr:\n${r1.stderr}`
+  );
+  const skillFile = path.join(base, 'tasks', ticket, '.maestro-skill');
+  assert.equal(fs.readFileSync(skillFile, 'utf8').trim(), 'follow-up');
+
+  // Second bootstrap with NO --skill and NO env — must preserve follow-up.
+  const r2 = runScript(wrapper, {
+    ...RUN_OPTS,
+    args: [ticket],
+    env: baseEnv(base, fakeHome),
+  });
+  assert.equal(r2.status, 0, `re-run should exit 0\nstdout:\n${r2.stdout}\nstderr:\n${r2.stderr}`);
+  assert.equal(
+    fs.readFileSync(skillFile, 'utf8').trim(),
+    'follow-up',
+    'bare re-bootstrap must NOT revert .maestro-skill to "work"'
+  );
+  assert.match(
+    r2.stdout,
+    /preserved/,
+    `re-run stdout should announce that .maestro-skill was preserved; got:\n${r2.stdout}`
+  );
+});
+
 test('Bootstrap default (no --skill, no env) preserves /work behavior bit-for-bit', () => {
   const { wrapper, base, fakeHome, helperLog } = makeSandbox();
   const ticket = 'GH-9001';
@@ -184,11 +215,7 @@ test('Bootstrap default (no --skill, no env) preserves /work behavior bit-for-bi
     env: baseEnv(base, fakeHome),
   });
 
-  assert.equal(
-    status,
-    0,
-    `bootstrap should exit 0\nstdout:\n${stdout}\nstderr:\n${stderr}`
-  );
+  assert.equal(status, 0, `bootstrap should exit 0\nstdout:\n${stdout}\nstderr:\n${stderr}`);
 
   // (c.1) Helper invoked (no stub-skip on default skill).
   const helperCalls = fs.existsSync(helperLog)

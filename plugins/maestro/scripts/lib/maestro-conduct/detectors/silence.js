@@ -29,16 +29,22 @@ const DEFAULT_SILENCE_LIMIT_SEC = 300;
 // SILENCE_LIMIT_SEC_FOLLOWUP env var must take effect at detect() time
 // without requiring a daemon restart, and follow-up sessions must honor
 // the registry's larger default (1800s) instead of the work default.
-const SILENCE_LIMIT_SEC = parseInt(process.env.SILENCE_LIMIT_SEC || String(DEFAULT_SILENCE_LIMIT_SEC), 10);
+const SILENCE_LIMIT_SEC = parseInt(
+  process.env.SILENCE_LIMIT_SEC || String(DEFAULT_SILENCE_LIMIT_SEC),
+  10
+);
 
 /**
  * Resolve the silence-limit for a given ctx, per-call.
  *
- * Resolution order (spec §Architecture, AC4):
- *   1. ctx.skill === 'follow-up' AND $SILENCE_LIMIT_SEC_FOLLOWUP set → that value
- *   2. registry row for ctx.skill → row.silenceLimitSec
- *   3. ctx.skill === 'work' (or unknown) AND $SILENCE_LIMIT_SEC set → that value
- *   4. DEFAULT_SILENCE_LIMIT_SEC (300)
+ * Resolution order (spec §Architecture, AC4; PR #561 review fix):
+ *   - follow-up: $SILENCE_LIMIT_SEC_FOLLOWUP → registry row → 300
+ *   - work / unknown / missing skill: $SILENCE_LIMIT_SEC → registry row → 300
+ *
+ * For the work path, $SILENCE_LIMIT_SEC takes precedence over the registry row
+ * default so operators upgrading from pre-GH-514 (where $SILENCE_LIMIT_SEC was
+ * authoritative) keep their configured threshold. This preserves the "bit-for-
+ * bit identical when .maestro-skill is absent" guarantee.
  */
 function posInt(v) {
   const n = parseInt(v || '', 10);
@@ -50,11 +56,15 @@ function resolveSilenceLimit(ctx) {
   if (skill === 'follow-up') {
     const envFollowup = posInt(process.env.SILENCE_LIMIT_SEC_FOLLOWUP);
     if (envFollowup) return envFollowup;
+  } else {
+    // work / unknown / missing — env override is authoritative (legacy contract).
+    const envWork = posInt(process.env.SILENCE_LIMIT_SEC);
+    if (envWork) return envWork;
   }
   const row = skill ? skillRegistry.get(skill) : null;
   const rowLimit = row && posInt(row.silenceLimitSec);
   if (rowLimit) return rowLimit;
-  return posInt(process.env.SILENCE_LIMIT_SEC) || DEFAULT_SILENCE_LIMIT_SEC;
+  return DEFAULT_SILENCE_LIMIT_SEC;
 }
 
 // Shared with detectors/spinner.js — see ../live-spinner.js for the contract.

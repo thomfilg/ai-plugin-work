@@ -50,6 +50,10 @@ BASE_BRANCH="${BASE_BRANCH:-main}"
 BASE_BRANCH="${BASE_BRANCH#refs/remotes/origin/}"
 BASE_BRANCH="${BASE_BRANCH#origin/}"
 CLAUDE_BIN="${CLAUDE_BIN:-claude}"
+# Capture whether SKILL_NAME was explicitly set BEFORE applying the default,
+# so the preserve-existing logic below can distinguish "operator set it" from
+# "shell default fell through".
+_SKILL_NAME_FROM_ENV="${SKILL_NAME:-}"
 SKILL_NAME="${SKILL_NAME:-work}"
 
 # ── Skill resolution (GH-514 Task 2)
@@ -82,6 +86,16 @@ resolve_skill() {
     echo "work"
   fi
 }
+
+# Track whether the caller EXPLICITLY provided a skill source this invocation.
+# Bare re-runs (no --skill / no env) on an already-bootstrapped ticket must
+# preserve the existing .maestro-skill — otherwise a previous --skill=follow-up
+# would be silently reverted to work on the next plain `bash maestro-bootstrap.sh GH-X`
+# (PR #561 review).
+SKILL_EXPLICIT=0
+if [ -n "$SKILL_FLAG" ] || [ -n "${MAESTRO_SKILL:-}" ] || [ -n "$_SKILL_NAME_FROM_ENV" ]; then
+  SKILL_EXPLICIT=1
+fi
 
 RESOLVED_SKILL="$(resolve_skill)"
 
@@ -163,9 +177,17 @@ for TICKET in "$@"; do
 
   # GH-514 Task 2: persist resolved skill per ticket so the conductor can read
   # it back (single-line file, no trailing newline noise — registry trims).
+  # PR #561 review: preserve existing .maestro-skill on bare re-runs so a prior
+  # --skill=follow-up isn't silently reverted to 'work' by a plain re-bootstrap.
   TICKET_DIR="$MAESTRO_TASKS_BASE/$TICKET"
   mkdir -p "$TICKET_DIR"
-  printf '%s\n' "$RESOLVED_SKILL" > "$TICKET_DIR/.maestro-skill"
+  if [ "$SKILL_EXPLICIT" = "1" ] || [ ! -f "$TICKET_DIR/.maestro-skill" ]; then
+    printf '%s\n' "$RESOLVED_SKILL" > "$TICKET_DIR/.maestro-skill"
+    echo "[$TICKET] .maestro-skill = $RESOLVED_SKILL (written)"
+  else
+    EXISTING_SKILL="$(head -n1 "$TICKET_DIR/.maestro-skill" | tr -d '[:space:]')"
+    echo "[$TICKET] .maestro-skill = $EXISTING_SKILL (preserved — no explicit skill on this invocation)"
+  fi
 
   # Per-ticket custom bootstrap (runs only on fresh worktrees).
   # Stub-skip gate (R4 / AC1): only the legacy `work` skill writes the
