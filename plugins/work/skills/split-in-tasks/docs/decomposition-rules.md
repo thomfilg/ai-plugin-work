@@ -82,16 +82,34 @@ This is the **ECHO-4453-class wedge**. To avoid it:
 ## Task 2 — GREEN: edit get.ts
 ```
 
-Checkpoint tasks, config-only infrastructure tasks, and **Storybook stories-only tasks** are exempt from the RED/GREEN/REFACTOR deliverables requirement. For those exempt tasks, use a non-phase deliverables list that describes the concrete verifiable work in execution order, for example: `- Update config`, `- Validate config`, `- Document rollout/usage` as applicable.
+**TDD-exempt Types** are exempt from the RED/GREEN/REFACTOR deliverables requirement. Per the closed taxonomy in [`lib/task-types.js`](../lib/task-types.js), TDD-required vs exempt partitions as:
+
+- TDD-required: `tdd-code` (the only Type that runs the full RED→GREEN→REFACTOR cycle)
+- TDD-exempt: `tests-only`, `docs`, `config`, `ci`, `mechanical-refactor`, `file-move`, `checkpoint`
+
+**Build configs are NOT `Type: config`.** The `config` allowlist covers inert configuration (package.json, lockfiles, linter/formatter configs); it intentionally excludes build configs because they ship runtime behavior. Use `Type: tdd-code` (TDD-required) for:
+
+- `vite.config.{ts,js,mjs,cjs}`
+- `rollup.config.{ts,js,mjs,cjs}`
+- `webpack.config.{ts,js,mjs,cjs}`
+- `jest.config.{ts,js,mjs,cjs}`
+- `vitest.config.{ts,js,mjs,cjs}`
+- `next.config.{ts,js,mjs,cjs}`
+- `astro.config.{ts,js,mjs,cjs}`
+
+See [output-format.md "Common migration gotchas"](./output-format.md#common-migration-gotchas--build-configs-are-not-type-config) for the full rationale.
+
+For exempt tasks, use a non-phase deliverables list that describes the concrete verifiable work in execution order, for example: `- Update config`, `- Validate config`, `- Document rollout/usage` as applicable. The implement-time gate maps each Type to a specific contract via `gateContractFor()` — `tests-only` for example uses `record-skip-red` for RED and requires an in-scope test-file modification at GREEN; `docs` accepts silent verifiers via the RC-D relaxation. **Storybook stories-only tasks** are detected by scope shape (every entry matches `*.stories.[jt]sx?`) and use the visual-only gate path.
 
 For stories-only tasks, scope shape alone signals the exemption to the implement-gate: when every entry in `### Files in scope` matches `*.stories.[jt]sx?`, `task-next.js`'s `isVisualOnlyTask()` accepts the verification command (typically `pnpm dev:check`) as RED evidence — no `*.test.*` authorship file is required. Use a `### Test Command` of `pnpm dev:check` (lint + typecheck) and document the visual artifact in deliverables. Do NOT mix story files with `.test.*`/`.spec.*` or production source in the same task's scope, or the exemption will not fire.
 
 **Rule 11 — Documentation Task:**
-If the spec references user-facing behavior changes, API changes, configuration changes, or existing `.md` documentation files are related to the changes, add a task of type `checkpoint` titled "Documentation Review" that verifies:
+If the spec references user-facing behavior changes, API changes, configuration changes, or existing `.md` documentation files are related to the changes, add a task of `### Type: docs` titled "Documentation Review" that verifies:
 - Affected `.md` files are updated (README, architecture docs, API docs)
 - New features are documented if user-facing
 - Configuration changes are documented
-This task is checkpoint type (auto-TDD-exception) and should be the second-to-last task (before the final verification checkpoint).
+
+This task uses `Type: docs` (the dedicated documentation contract in the closed taxonomy — see [`lib/task-types.js`](../lib/task-types.js)). It should be the second-to-last task (before the final verification checkpoint). The previous guidance to misuse `Type: checkpoint` for documentation is obsolete: docs tasks have their own scope-allowlist (`.md` only) and gate contract (silent verifiers accepted via the RC-D relaxation), so they get proper enforcement without piggybacking on the checkpoint exception.
 
 **Rule 12 — Shared-Resource Detection (MANDATORY for parallel tasks):**
 After marking tasks as `Parallel: Yes`, scan ALL parallel tasks' Suggested Scope for **overlapping production files**. If two or more parallel tasks modify the **same production file** (not test files — those don't conflict):

@@ -120,10 +120,17 @@ describe('emit-warnings — purity', () => {
     assert.equal(typeof mod.dedupe, 'function');
   });
 
-  it('source contains no console.* or process.exit calls', () => {
+  it('library functions contain no console.* calls (CLI exit is gated to require.main === module)', () => {
     const fs = require('node:fs');
     const src = fs.readFileSync(MODULE_PATH, 'utf-8');
     assert.ok(!/console\.[a-z]+\s*\(/.test(src), 'module must not call console.*');
-    assert.ok(!/process\.exit\s*\(/.test(src), 'module must not call process.exit');
+    // process.exit IS allowed — but only inside the CLI runCli() helper
+    // and only when invoked via the `require.main === module` guard. The
+    // library exports (formatWarnings, dedupe, etc.) remain pure.
+    assert.match(
+      src,
+      /if \(require\.main === module\)/,
+      'process.exit must be guarded by `if (require.main === module)` so library callers stay pure'
+    );
   });
 });

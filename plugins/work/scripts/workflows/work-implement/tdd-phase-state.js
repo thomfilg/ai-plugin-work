@@ -38,6 +38,20 @@ const { resolveTasksBaseWithFallback } = require('../lib/ticket-validation');
 // `enforce-tdd-on-stop.js` consumer via `lib/red-load-failure.js`.
 const { detectRedLoadFailure, extractLoadFailureSnippet } = require('./lib/red-load-failure');
 
+// GH-528 round-2 follow-up (Cursor[bot] HIGH): the recorder reads the active
+// task's Type from on-disk tasks.md to gate `record-skip-red` and
+// `--red-skip-file-guard`. tasks.md is the same source-of-truth the hook
+// layer uses, and the Type-line edit guard (protect-task-scope.js) blocks
+// mid-implement Type flips, so reading it here is trust-equivalent to the
+// planner's authored value.
+let taskTypes;
+try {
+  taskTypes = require('../../../skills/split-in-tasks/lib/task-types');
+} catch (e) {
+  if (e && e.code !== 'MODULE_NOT_FOUND') throw e;
+  taskTypes = null;
+}
+
 let config;
 try {
   config = require('../lib/config');
@@ -57,6 +71,7 @@ const ALLOWED_AGENTS = [
 // Subcommands that require token verification
 const GATED_SUBCOMMANDS = [
   'record-red',
+  'record-skip-red',
   'record-green',
   'record-refactor',
   'transition',
@@ -66,6 +81,157 @@ const GATED_SUBCOMMANDS = [
 const TOKEN_MAX_AGE_MS = 10_000; // 10 seconds
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+/**
+ * GH-528 round-2 follow-up (Cursor[bot] HIGH): read the declared `### Type`
+ * value for the active task from on-disk tasks.md.
+ *
+ * Why on-disk (not caller-supplied): a caller-supplied flag would re-open
+ * the agent self-report surface that the planner-side Type was designed to
+ * close. tasks.md is protected from mid-implement Type flips by the
+ * Type-line edit guard in protect-task-scope.js — so what we read here is
+ * trust-equivalent to what the planner authored.
+ *
+ * Returns the lowercase Type string, or null when:
+ *   - tasks.md is missing (fail-open — pre-existing tickets without the
+ *     closed taxonomy don't break)
+ *   - the requested task block is missing
+ *   - parsing fails
+ *
+ * Callers MUST handle `null` as "Type unknown, fail closed at the gate"
+ * (i.e. do NOT honor `record-skip-red` or `--red-skip-file-guard`).
+ */
+function readActiveTaskBlock(ticketId, taskNum) {
+  if (!ticketId || !Number.isInteger(taskNum) || taskNum < 1) {
+    return { type: null, scope: [] };
+  }
+  try {
+    const base = resolveTasksBaseWithFallback();
+    const safeId = sanitizeId(ticketId);
+    const tasksMdPath = path.resolve(base, safeId, 'tasks.md');
+    if (!fs.existsSync(tasksMdPath)) return { type: null, scope: [] };
+    const md = fs.readFileSync(tasksMdPath, 'utf8');
+    const lines = md.split(/\r?\n/);
+    const headerRe = new RegExp(`^##\\s+Task\\s+${taskNum}\\b`, 'i');
+    let start = -1;
+    for (let i = 0; i < lines.length; i += 1) {
+      if (headerRe.test(lines[i])) {
+        start = i;
+        break;
+      }
+    }
+    if (start === -1) return { type: null, scope: [] };
+    let end = lines.length;
+    for (let i = start + 1; i < lines.length; i += 1) {
+      if (/^##\s+/.test(lines[i])) {
+        end = i;
+        break;
+      }
+    }
+    let type = null;
+    const scope = [];
+    for (let i = start + 1; i < end; i += 1) {
+      const trimmed = lines[i].trim();
+      if (/^###\s+Type\s*$/i.test(trimmed)) {
+        for (let j = i + 1; j < end; j += 1) {
+          const next = lines[j].trim();
+          if (!next) continue;
+          if (next.startsWith('#')) break;
+          type = next.toLowerCase();
+          break;
+        }
+        continue;
+      }
+      if (/^###\s+Files in scope\b/i.test(trimmed)) {
+        for (let j = i + 1; j < end; j += 1) {
+          const next = lines[j].trim();
+          if (!next) continue;
+          if (/^###\s+/.test(next) || /^##\s+/.test(next)) break;
+          const bullet = next.match(/^[-*+]\s+(.*)$/);
+          if (!bullet) continue;
+          const cleaned = bullet[1]
+            .replace(/`/g, '')
+            .replace(/\s+#.*$/, '')
+            .trim();
+          if (cleaned) scope.push(cleaned);
+        }
+      }
+    }
+    return { type, scope };
+  } catch {
+    return { type: null, scope: [] };
+  }
+}
+
+// Backward-compatible helper — returns only the Type, used by the existing
+// record-skip-red and --red-skip-file-guard gates.
+function readActiveTaskType(ticketId, taskNum) {
+  return readActiveTaskBlock(ticketId, taskNum).type;
+}
+
+// Visual-only Storybook detection (mirrors task-next.js isVisualOnlyTask).
+// When every scope entry matches `*.stories.[jt]sx?`, the task has no
+// executable test surface and `--docs-exempt` is legitimate even for
+// Type=tdd-code. See split-in-tasks SKILL.md Rule 10.
+function isVisualOnlyScope(scope) {
+  if (!Array.isArray(scope) || scope.length === 0) return false;
+  return scope.every((p) => typeof p === 'string' && /\.stories\.[jt]sx?$/i.test(p));
+}
+
+/**
+ * GH-528 round-2 follow-up (Cursor[bot] HIGH/Medium): single allow-check
+ * for `--docs-exempt`. Mirrors the orchestrator's `docsExemptForward`
+ * discriminator (task-next.js):
+ *     docsExemptForward = contractAllowsDocsExempt || visualOnly
+ *
+ * `--docs-exempt` is legitimate iff EITHER:
+ *   - gateContractFor(type).rcdEmptyTrap === false
+ *     (docs / config / ci / file-move / checkpoint), OR
+ *   - the task's scope is visual-only Storybook (any Type).
+ *
+ * Returns { allowed: boolean, type: string|null, reason: string }.
+ * `reason` carries an operator-facing message when allowed=false.
+ */
+function isDocsExemptAllowed(ticketId, taskNum) {
+  // GH-528 round-2 follow-up (Cursor[bot] HIGH): the gate fires for ALL
+  // callers, including those that omit --task. An earlier draft fell
+  // through for no-task callers under the assumption that legacy
+  // ticket-root state was vestigial, but that left a self-report surface
+  // intact: a tokened agent could simply omit --task to bypass the gate.
+  // Now: missing --task fails closed. The orchestrator always passes
+  // --task (task-next.js recordEvidence builds the argv with it); test
+  // fixtures that need --docs-exempt must seed tasks.md and pass --task.
+  if (!Number.isInteger(taskNum) || taskNum < 1) {
+    return {
+      allowed: false,
+      type: null,
+      reason:
+        '--docs-exempt requires --task <N> so the recorder can verify the ' +
+        "active task's Type against on-disk tasks.md. Re-run with --task <N>.",
+    };
+  }
+  const { type, scope } = readActiveTaskBlock(ticketId, taskNum);
+  if (isVisualOnlyScope(scope)) {
+    return { allowed: true, type, reason: 'visual-only Storybook scope' };
+  }
+  if (type && taskTypes && typeof taskTypes.gateContractFor === 'function') {
+    const contract = taskTypes.gateContractFor(type);
+    if (contract && contract.rcdEmptyTrap === false) {
+      return { allowed: true, type, reason: 'contract rcdEmptyTrap=false' };
+    }
+  }
+  return {
+    allowed: false,
+    type,
+    reason:
+      `--docs-exempt is restricted to Types whose contract sets ` +
+      `rcdEmptyTrap=false (docs / config / ci / file-move / checkpoint) ` +
+      `or to visual-only Storybook scope. ` +
+      `Task ${taskNum || '?'} has Type="${type || 'unknown'}" and non-visual scope; ` +
+      `the RC-D empty-output trap and RED file guard stay armed. ` +
+      `Either fix the \`### Type\` line in tasks.md or drop --docs-exempt.`,
+  };
+}
 
 function sanitizeId(ticketId) {
   try {
@@ -614,7 +780,64 @@ function cmdRecordRed(ticketId, args) {
   }
   const testFiles = allChanged.filter((f) => isTestFile(f));
 
-  if (testFiles.length === 0) {
+  // Task 4 (GH-528): RED docs-exempt fallback. Documentation-only tasks
+  // have no testable code surface — their "scope" is a .md file and there
+  // are no test files to author. The orchestrator (task-next.js RED block)
+  // already gates this on isDocsExempt/isVisualOnlyTask and forwards
+  // `--docs-exempt`; we relax the "No test files changed" guard for that
+  // explicit opt-in. RC-D semantics still apply to record-green.
+  //
+  // GH-528 round-2 follow-up (Cursor[bot] medium): mechanical-refactor's
+  // gateContractFor sets redRequiresTestFiles=false AND rcdEmptyTrap=true.
+  // task-next.js' RED fallback waives the file guard for any Type with
+  // redRequiresTestFiles===false, but `docsExemptForward` is driven by
+  // rcdEmptyTrap (so RC-D stays armed at GREEN/REFACTOR) — mechanical-
+  // refactor therefore got docsExempt=false here and the recorder
+  // rejected the call with "No test files changed", wedging the cycle.
+  //
+  // Fix: separate the RED file-guard relaxation from the RC-D relaxation.
+  // `--red-skip-file-guard` ONLY relaxes the file guard; `--docs-exempt`
+  // continues to relax both (back-compat). Orchestrator forwards the new
+  // flag for any Type whose contract says redRequiresTestFiles===false.
+  // GH-528 round-2 follow-up (Cursor[bot] HIGH/Medium): --docs-exempt at
+  // record-red waives the "No test files changed" guard. Same Type+scope
+  // gate as record-green/record-refactor so a direct CLI call cannot relax
+  // the guard on a tdd-code task.
+  const docsExemptRequested = Array.isArray(args) && args.includes('--docs-exempt');
+  let docsExempt = false;
+  if (docsExemptRequested) {
+    const check = isDocsExemptAllowed(ticketId, taskNum);
+    if (!check.allowed) errorExit(check.reason);
+    docsExempt = true;
+  }
+  const redSkipFileGuardRequested = Array.isArray(args) && args.includes('--red-skip-file-guard');
+  // GH-528 round-2 follow-up (Cursor[bot] HIGH): the file-guard relaxation
+  // must be cross-checked against the active task's contract — otherwise an
+  // allow-listed agent with a valid token can pass --red-skip-file-guard
+  // for a tdd-code task and bypass the file guard the orchestrator was
+  // supposed to enforce. Read the Type from on-disk tasks.md and verify
+  // gateContractFor(type).redRequiresTestFiles === false. Unknown/missing
+  // tasks.md fails closed (flag rejected → operator must fix tasks.md or
+  // author a real failing test).
+  let redSkipFileGuard = false;
+  if (redSkipFileGuardRequested) {
+    const declaredType = readActiveTaskType(ticketId, taskNum);
+    if (declaredType && taskTypes && typeof taskTypes.gateContractFor === 'function') {
+      const contract = taskTypes.gateContractFor(declaredType);
+      redSkipFileGuard = contract && contract.redRequiresTestFiles === false;
+    }
+    if (!redSkipFileGuard) {
+      errorExit(
+        '--red-skip-file-guard is restricted to Types whose contract sets ' +
+          'redRequiresTestFiles=false (tests-only / docs / config / ci / ' +
+          'mechanical-refactor / file-move / checkpoint). ' +
+          `Task ${taskNum || '?'} has Type="${declaredType || 'unknown'}", ` +
+          'which still requires a *.test.* file modification at RED. ' +
+          'Author a failing test, or fix the `### Type` line in tasks.md.'
+      );
+    }
+  }
+  if (testFiles.length === 0 && !docsExempt && !redSkipFileGuard) {
     errorExit('No test files changed. RED phase requires modified .test or .spec files.');
   }
 
@@ -773,12 +996,97 @@ function cmdRecordRedSynthesized(ticketId, args, cmd, taskNum, opts) {
   });
 }
 
+/**
+ * record-skip-red — tests-only Type RED-skipped contract (GH-528 item 4).
+ *
+ * Type=tests-only tasks add tests against code that already works, so the
+ * "failing test → passing impl" cycle is incoherent — RED is impossible by
+ * design. This subcommand persists an intentional skip so the audit trail
+ * clearly distinguishes a skipped-by-design cycle from a fabricated one
+ * (see [[no-fake-tdd-evidence]]).
+ *
+ * Contract:
+ *   - --reason is required (empty → BYPASS line, no state change).
+ *   - Current phase must be `red`.
+ *   - Persists `cycle.red = { skipped: true, reason, timestamp }` and
+ *     transitions currentPhase RED → GREEN in the same write.
+ *   - Does NOT run any --cmd; the skip is a contract, not a verification.
+ */
+function cmdRecordSkipRed(ticketId, args) {
+  if (!ticketId) errorExit('Missing ticket ID.');
+  const taskNum = safeParseTask(args);
+  const opts = taskNum ? { taskNum } : undefined;
+
+  const reasonIdx = args.indexOf('--reason');
+  const reason = reasonIdx !== -1 && reasonIdx + 1 < args.length ? args[reasonIdx + 1] : undefined;
+  if (!reason || !reason.trim()) {
+    process.stderr.write(
+      'BYPASS: tdd-phase-state.js record-skip-red --reason "<why RED is intentionally skipped>"\n'
+    );
+    process.exit(1);
+  }
+
+  const state = readState(ticketId, opts);
+  if (!state) errorExit('No TDD phase state found. Run "init" first.');
+  if (state.currentPhase !== 'red') {
+    errorExit(
+      'Cannot record skip-red: current phase is "' +
+        state.currentPhase +
+        '". record-skip-red only valid during red phase.'
+    );
+  }
+
+  // GH-528 round-2 follow-up (Cursor[bot] HIGH): Type=tests-only gate.
+  // Without this, any allow-listed developer agent holding a valid token
+  // can call `record-skip-red` for a tdd-code task and skip RED entirely —
+  // exactly the agent self-report surface the closed-Type taxonomy was
+  // designed to close. Read the Type from on-disk tasks.md (trust-
+  // equivalent to the planner's authored value, see readActiveTaskType
+  // docstring) and require it to be exactly `tests-only`. Unknown / non-
+  // tests-only Types fail closed.
+  const declaredType = readActiveTaskType(ticketId, taskNum);
+  if (declaredType !== 'tests-only') {
+    errorExit(
+      'record-skip-red is restricted to Type=tests-only tasks. ' +
+        `Task ${taskNum || '?'} has Type="${declaredType || 'unknown'}". ` +
+        'If this task is genuinely tests-only, fix the `### Type` line in tasks.md ' +
+        '(only the planner may author Type values — see split-in-tasks/lib/task-types.js). ' +
+        'Otherwise run record-red with a real failing test.'
+    );
+  }
+
+  const record = getCurrentCycleRecord(state);
+  record.red = {
+    skipped: true,
+    reason,
+    timestamp: new Date().toISOString(),
+  };
+  state.currentPhase = 'green';
+  writeState(ticketId, state, opts);
+  successOut({ ok: true, phase: 'green', cycle: state.currentCycle, skipped: true, reason });
+}
+
 function cmdRecordGreen(ticketId, args) {
   if (!ticketId) errorExit('Missing ticket ID.');
   const cmd = parseCmd(args);
   if (!cmd) errorExit('Missing --cmd argument.');
   const taskNum = safeParseTask(args);
   const opts = taskNum ? { taskNum } : undefined;
+  // --docs-exempt: documentation-only tasks have no testable code surface, so
+  // the RC-D empty-stdout/stderr guard would always trip. Callers (the planner
+  // / task-next driver) opt in via this flag; default false preserves existing
+  // strict behavior for all code tasks.
+  //
+  // GH-528 round-2 follow-up (Cursor[bot] HIGH/Medium): gate the flag on the
+  // active task's Type + scope. Without this, a tokened agent can pass
+  // --docs-exempt directly to bypass RC-D on a tdd-code task.
+  const docsExemptRequested = Array.isArray(args) && args.includes('--docs-exempt');
+  let docsExempt = false;
+  if (docsExemptRequested) {
+    const check = isDocsExemptAllowed(ticketId, taskNum);
+    if (!check.allowed) errorExit(check.reason);
+    docsExempt = true;
+  }
 
   const state = readState(ticketId, opts);
   if (!state) errorExit('No TDD phase state found. Run "init" first.');
@@ -802,7 +1110,11 @@ function cmdRecordGreen(ticketId, args) {
   // was observed on GH-417 / GH-432 / GH-452 — agents could not recover via
   // /work. Real test runners always emit something to stdout or stderr; if
   // both are empty AND exit was 0, the command did no work. Refuse to record.
-  if (stdout.trim() === '' && stderr.trim() === '') {
+  // RC-D armed for non-docs-exempt tasks (R5, GH-528). Documentation-only
+  // tasks have no testable code surface, so callers may opt in via the
+  // `--docs-exempt` CLI flag to bypass the empty-output guard; RC-B and the
+  // `exitCode !== 0` defenses below remain unconditional.
+  if (!docsExempt && stdout.trim() === '' && stderr.trim() === '') {
     errorExit(
       'GREEN test command exited 0 with NO stdout/stderr output. This is the ' +
         'empty-command trap (typically an unbound test-command env var expanded ' +
@@ -857,13 +1169,28 @@ function cmdRecordRefactor(ticketId, args) {
         '". Transition to refactor first.'
     );
 
+  // Task 4 (GH-528): mirror the GREEN `--docs-exempt` opt-in on REFACTOR so
+  // documentation-only tasks with silent verifiers (e.g. `grep -q`) can
+  // finish the full RED → GREEN → REFACTOR cycle. Default behavior keeps
+  // RC-D armed for every existing caller.
+  //
+  // GH-528 round-2 follow-up (Cursor[bot] HIGH/Medium): same Type+scope gate
+  // as record-red/record-green to close the direct-CLI bypass surface.
+  const docsExemptRequested = Array.isArray(args) && args.includes('--docs-exempt');
+  let docsExempt = false;
+  if (docsExemptRequested) {
+    const check = isDocsExemptAllowed(ticketId, taskNum);
+    if (!check.allowed) errorExit(check.reason);
+    docsExempt = true;
+  }
+
   const { exitCode, stdout, stderr } = runTestCommandWithOutput(cmd);
   if (exitCode !== 0) {
     errorExit('Tests must still PASS after refactoring. Tests failed (exit ' + exitCode + ').');
   }
 
   // RC-D defense: same empty-command guard as GREEN. Refuse exit-0-with-no-output.
-  if (stdout.trim() === '' && stderr.trim() === '') {
+  if (!docsExempt && stdout.trim() === '' && stderr.trim() === '') {
     errorExit(
       'REFACTOR test command exited 0 with NO stdout/stderr output. This is the ' +
         'empty-command trap (typically an unbound test-command env var expanded ' +
@@ -954,6 +1281,23 @@ function auditException(ticketId, taskNum, category, reason, allow) {
 
 function cmdException(ticketId, args) {
   if (!ticketId) errorExit('Missing ticket ID.');
+
+  // GH-528: `exception` is a runtime escape hatch that lets the agent skip the
+  // entire RED/GREEN/REFACTOR cycle. With closed-Type taxonomy enforced at
+  // planner time, agents never need this — config/docs/ci/tests-only/etc. all
+  // have proper Type-driven contracts now. Keep the subcommand only as an
+  // operator-only escape hatch (e.g. emergency CI rescue) gated behind an env
+  // token the agent's environment never carries. Existing non-test callers
+  // (work-implement-enforce.js, tdd-enforcement.js) only inspect previously-
+  // recorded exception evidence — they do not write new exceptions through
+  // this CLI, so they are unaffected.
+  if (process.env.WORK_OPERATOR_TOKEN !== '1') {
+    errorExit(
+      'The `exception` subcommand is operator-only and requires WORK_OPERATOR_TOKEN=1. ' +
+        'Agents must use the Type taxonomy (docs / tests-only / config / ci / mechanical-refactor / file-move / checkpoint) ' +
+        'set by the planner instead. See plugins/work/skills/split-in-tasks/lib/task-types.js.'
+    );
+  }
 
   // Parse --category (required)
   const category = parseCategory(args);
@@ -1056,6 +1400,28 @@ function cmdException(ticketId, args) {
 
 // ─── Main ───────────────────────────────────────────────────────────────────
 
+// CLI dispatch only when invoked with subcommand arguments. When `node --test`
+// loads this file (e.g. CHANGED_FILES sweeps that include the source alongside
+// tests), argv has no subcommand — skip dispatch so the runner just records the
+// file with zero tests instead of hitting the subcommand switch + errorExit.
+// Using process.exit(0) instead of top-level `return` because the standalone
+// biome parser (used by the pre-commit format gate) rejects top-level return.
+//
+// GH-528 round-2 follow-up (Cursor[bot] low): distinguish "loaded by another
+// module / node --test runner" (require.main !== module) from "operator
+// invoked the bare CLI" (require.main === module && argv has no subcommand).
+// The former must stay silent; the latter must error so operators / wrappers
+// don't misread a no-op invocation as success.
+if (process.argv.length < 3) {
+  if (require.main === module) {
+    errorExit(
+      'Missing subcommand. Usage: tdd-phase-state.js <subcommand> <TICKET_ID> [...]. ' +
+        'Valid subcommands: init, current, record-red, record-skip-red, record-green, record-refactor, transition, exception.'
+    );
+  }
+  process.exit(0);
+}
+
 const args = process.argv.slice(2);
 const subcommand = args[0];
 const ticketId = args[1];
@@ -1077,6 +1443,9 @@ switch (subcommand) {
   case 'record-red':
     cmdRecordRed(ticketId, args.slice(2));
     break;
+  case 'record-skip-red':
+    cmdRecordSkipRed(ticketId, args.slice(2));
+    break;
   case 'record-green':
     cmdRecordGreen(ticketId, args.slice(2));
     break;
@@ -1092,6 +1461,6 @@ switch (subcommand) {
   default:
     errorExit(
       `Unknown subcommand: ${subcommand}. ` +
-        'Valid: init, current, record-red, record-green, record-refactor, transition, exception'
+        'Valid: init, current, record-red, record-skip-red, record-green, record-refactor, transition, exception'
     );
 }
