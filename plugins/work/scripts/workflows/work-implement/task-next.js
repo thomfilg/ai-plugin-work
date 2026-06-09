@@ -44,6 +44,7 @@ const TDD_CLI = path.join(__dirname, 'tdd-phase-state.js');
 
 const { TDD_PHASES, TDD_PHASE_TRANSITIONS } = require('./tdd-phase-registry');
 const { gateContractFor } = require('../../../skills/split-in-tasks/lib/task-types');
+const { fileMatchesScope } = require('../lib/task-scope');
 
 // `done` is derived in this script (a cycle with red+green+refactor evidence
 // is treated as complete). It is NOT a state-machine target in the registry.
@@ -422,15 +423,65 @@ function mintCompanionToken() {
  * across all phase writes. Returns `{ ok, out, exitCode }`.
  */
 /**
+ * Pure helper: filter a list of changed POSIX paths down to those that are
+ * test/spec files AND fall under the task's declared scope.
+ *
+ * Scope match delegates to `fileMatchesScope` from `../lib/task-scope` (the
+ * same matcher used by the production scope-protection layer), so glob
+ * patterns like `src/**` or `plugins/work/**\/*.test.js` are honored.
+ * Bare-directory entries (no glob meta, no trailing `/`) keep their legacy
+ * "directory prefix" semantics so existing task definitions don't regress.
+ *
+ * Scope behaviors preserved:
+ *   - exact path entry          → matches that path
+ *   - directory entry (`a/b`)   → matches `a/b/**` (legacy prefix)
+ *   - directory entry (`a/b/`)  → matches `a/b/**` (via fileMatchesScope)
+ *   - glob entry  (`a/**\/*.test.js`) → standard glob match (NEW)
+ *   - empty scope               → any changed test file passes through
+ *
+ * The test-file extension filter always applies last: a file matched by
+ * scope but not ending in `.test.<ext>` / `.spec.<ext>` is excluded.
+ *
+ * @param {string[]} changedPaths POSIX-style paths relative to repoRoot.
+ * @param {string[]} scope        `### Files in scope` entries from tasks.md.
+ * @returns {string[]}            The subset that should count as "agent
+ *                                actually wrote in-scope test code".
+ */
+function filterChangedTestFilesByScope(changedPaths, scope) {
+  const out = [];
+  const scopeList = Array.isArray(scope) ? scope.filter((s) => typeof s === 'string' && s) : [];
+  for (const rel of Array.isArray(changedPaths) ? changedPaths : []) {
+    if (typeof rel !== 'string' || !rel) continue;
+    if (!/\.(test|spec)\.[jt]sx?$/i.test(rel)) continue;
+    if (scopeList.length === 0) {
+      out.push(rel);
+      continue;
+    }
+    const inScope = scopeList.some((s) => {
+      if (rel === s) return true;
+      // Legacy bare-directory prefix: `a/b` matches `a/b/...`. We keep this
+      // because fileMatchesScope would compile `a/b` as a literal glob and
+      // miss the descendants.
+      if (rel.startsWith(s.replace(/\/+$/, '') + '/')) return true;
+      // Delegate everything else (exact match was handled above) to the
+      // shared glob-aware matcher — this is the regression fix for `**`
+      // and `*` segment patterns.
+      return fileMatchesScope(rel, [s]);
+    });
+    if (inScope) out.push(rel);
+  }
+  return out;
+}
+
+/**
  * Return the subset of changed (vs HEAD + staged + untracked) files that are
  * test/spec files AND fall under the task's declared scope. Used by the
  * tests-only GREEN gate to ensure the agent actually wrote new test code
  * (not a no-op cycle).
  *
- * Scope match is intentionally lenient: any changed test file whose POSIX
- * path starts with a scope-listed directory, or matches a scope-listed file
- * exactly, counts. Glob expansion is out of scope — Pass D enforces the
- * planner-side allowlist.
+ * Scope-match semantics live in `filterChangedTestFilesByScope` (pure,
+ * unit-tested). This function is the git-aware wrapper that collects the
+ * "changed" set from working tree + index + untracked files.
  */
 function detectChangedTestFilesInScope(repoRoot, scope) {
   const out = [];
@@ -456,24 +507,17 @@ function detectChangedTestFilesInScope(repoRoot, scope) {
   } catch {
     /* git unavailable — treat as empty */
   }
-  const changed = new Set(
-    [...diff.split('\n'), ...staged.split('\n'), ...untracked.split('\n')]
-      .map((s) => s.trim())
-      .filter(Boolean)
-  );
-  const scopeList = Array.isArray(scope) ? scope : [];
-  for (const rel of changed) {
-    if (!/\.(test|spec)\.[jt]sx?$/i.test(rel)) continue;
-    const inScope = scopeList.some((s) => {
-      if (!s) return false;
-      if (rel === s) return true;
-      if (rel.startsWith(s.replace(/\/+$/, '') + '/')) return true;
-      return false;
-    });
-    // If scope is empty/file-only, treat any changed test file as in-scope.
-    if (scopeList.length === 0 || inScope) out.push(rel);
-  }
-  return out;
+  const changed = [
+    ...new Set(
+      [...diff.split('\n'), ...staged.split('\n'), ...untracked.split('\n')]
+        .map((s) => s.trim())
+        .filter(Boolean)
+    ),
+  ];
+  return filterChangedTestFilesByScope(changed, scope).reduce((acc, rel) => {
+    acc.push(rel);
+    return acc;
+  }, out);
 }
 
 function recordSkipRed(ticket, taskNum, reason, cwd) {
@@ -1271,6 +1315,7 @@ function main() {
 
 module.exports = {
   filterToTestFiles,
+  filterChangedTestFilesByScope,
   findTestFilesInScope,
   wrapStrictMode,
   isDocsExempt,
