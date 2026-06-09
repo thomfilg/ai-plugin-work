@@ -491,24 +491,36 @@ function detectChangedTestFilesInScope(repoRoot, scope) {
   let diff = '';
   let staged = '';
   let untracked = '';
+  // GH-528 round-2 follow-up note: check `git` exit status so a real git
+  // failure (corrupt repo, mid-rebase, missing git binary) is distinguishable
+  // from "no changes" downstream. Without this, all three sources silently
+  // return '' on error and the tests-only GREEN gate fires with the
+  // misleading "No *.test.* file under scope has changes" message.
+  let gitFailed = false;
   try {
-    diff =
-      spawnSync('git', ['diff', '--name-only'], {
-        cwd: repoRoot,
-        encoding: 'utf8',
-      }).stdout || '';
-    staged =
-      spawnSync('git', ['diff', '--cached', '--name-only'], {
-        cwd: repoRoot,
-        encoding: 'utf8',
-      }).stdout || '';
-    untracked =
-      spawnSync('git', ['ls-files', '--others', '--exclude-standard'], {
-        cwd: repoRoot,
-        encoding: 'utf8',
-      }).stdout || '';
+    const r1 = spawnSync('git', ['diff', '--name-only'], { cwd: repoRoot, encoding: 'utf8' });
+    if (r1.status !== 0) gitFailed = true;
+    diff = r1.stdout || '';
+    const r2 = spawnSync('git', ['diff', '--cached', '--name-only'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    if (r2.status !== 0) gitFailed = true;
+    staged = r2.stdout || '';
+    const r3 = spawnSync('git', ['ls-files', '--others', '--exclude-standard'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    if (r3.status !== 0) gitFailed = true;
+    untracked = r3.stdout || '';
   } catch {
-    /* git unavailable — treat as empty */
+    gitFailed = true;
+  }
+  if (gitFailed) {
+    process.stderr.write(
+      'task-next: git change detection failed (corrupt repo or detached state?); ' +
+        'treating changed-files as empty. Downstream gate may block with a misleading message.\n'
+    );
   }
   const changed = [
     ...new Set(

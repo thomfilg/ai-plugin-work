@@ -36,6 +36,23 @@ function makeTasksBase() {
     path.join(dir, TICKET, '.work' + '-state.json'),
     JSON.stringify({ ticketId: TICKET })
   );
+  // GH-528 round-2 follow-up (Cursor[bot] HIGH): record-skip-red now reads
+  // the active task's Type from on-disk tasks.md and requires it to be
+  // exactly `tests-only`. Plant a minimal tasks.md so the tests-only
+  // contract tests still satisfy the new Type gate.
+  fs.writeFileSync(
+    path.join(dir, TICKET, 'tasks.md'),
+    [
+      '## Task 1 — sample',
+      '',
+      '### Type',
+      'tests-only',
+      '',
+      '### Files in scope',
+      '- src/**/*.test.js',
+      '',
+    ].join('\n')
+  );
   return dir;
 }
 

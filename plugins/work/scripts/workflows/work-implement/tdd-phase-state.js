@@ -35,6 +35,20 @@ const { consumeToken, tokenPath } = require('../lib/scripts/write-report');
 const { normalizeAgentName } = require('../lib/agent-detection');
 const { resolveTasksBaseWithFallback } = require('../lib/ticket-validation');
 
+// GH-528 round-2 follow-up (Cursor[bot] HIGH): the recorder reads the active
+// task's Type from on-disk tasks.md to gate `record-skip-red` and
+// `--red-skip-file-guard`. tasks.md is the same source-of-truth the hook
+// layer uses, and the Type-line edit guard (protect-task-scope.js) blocks
+// mid-implement Type flips, so reading it here is trust-equivalent to the
+// planner's authored value.
+let taskTypes;
+try {
+  taskTypes = require('../../../skills/split-in-tasks/lib/task-types');
+} catch (e) {
+  if (e && e.code !== 'MODULE_NOT_FOUND') throw e;
+  taskTypes = null;
+}
+
 let config;
 try {
   config = require('../lib/config');
@@ -64,6 +78,71 @@ const GATED_SUBCOMMANDS = [
 const TOKEN_MAX_AGE_MS = 10_000; // 10 seconds
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+/**
+ * GH-528 round-2 follow-up (Cursor[bot] HIGH): read the declared `### Type`
+ * value for the active task from on-disk tasks.md.
+ *
+ * Why on-disk (not caller-supplied): a caller-supplied flag would re-open
+ * the agent self-report surface that the planner-side Type was designed to
+ * close. tasks.md is protected from mid-implement Type flips by the
+ * Type-line edit guard in protect-task-scope.js — so what we read here is
+ * trust-equivalent to what the planner authored.
+ *
+ * Returns the lowercase Type string, or null when:
+ *   - tasks.md is missing (fail-open — pre-existing tickets without the
+ *     closed taxonomy don't break)
+ *   - the requested task block is missing
+ *   - parsing fails
+ *
+ * Callers MUST handle `null` as "Type unknown, fail closed at the gate"
+ * (i.e. do NOT honor `record-skip-red` or `--red-skip-file-guard`).
+ */
+function readActiveTaskType(ticketId, taskNum) {
+  if (!ticketId || !Number.isInteger(taskNum) || taskNum < 1) return null;
+  try {
+    const base = resolveTasksBaseWithFallback();
+    const safeId = sanitizeId(ticketId);
+    const tasksMdPath = path.resolve(base, safeId, 'tasks.md');
+    if (!fs.existsSync(tasksMdPath)) return null;
+    const md = fs.readFileSync(tasksMdPath, 'utf8');
+    // Locate `## Task <N>` header (case-insensitive, allow em-dash / hyphen
+    // separators). Read forward until the next `## ` heading.
+    const lines = md.split(/\r?\n/);
+    const headerRe = new RegExp(`^##\\s+Task\\s+${taskNum}\\b`, 'i');
+    let start = -1;
+    for (let i = 0; i < lines.length; i += 1) {
+      if (headerRe.test(lines[i])) {
+        start = i;
+        break;
+      }
+    }
+    if (start === -1) return null;
+    let end = lines.length;
+    for (let i = start + 1; i < lines.length; i += 1) {
+      if (/^##\s+/.test(lines[i])) {
+        end = i;
+        break;
+      }
+    }
+    // Inside the task block, find `### Type` and take the next non-blank
+    // non-heading line as the Type value.
+    for (let i = start + 1; i < end; i += 1) {
+      if (/^###\s+Type\s*$/i.test(lines[i].trim())) {
+        for (let j = i + 1; j < end; j += 1) {
+          const next = lines[j].trim();
+          if (!next) continue;
+          if (next.startsWith('#')) return null;
+          return next.toLowerCase();
+        }
+        return null;
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 function sanitizeId(ticketId) {
   try {
@@ -576,7 +655,33 @@ function cmdRecordRed(ticketId, args) {
   // continues to relax both (back-compat). Orchestrator forwards the new
   // flag for any Type whose contract says redRequiresTestFiles===false.
   const docsExempt = Array.isArray(args) && args.includes('--docs-exempt');
-  const redSkipFileGuard = Array.isArray(args) && args.includes('--red-skip-file-guard');
+  const redSkipFileGuardRequested = Array.isArray(args) && args.includes('--red-skip-file-guard');
+  // GH-528 round-2 follow-up (Cursor[bot] HIGH): the file-guard relaxation
+  // must be cross-checked against the active task's contract — otherwise an
+  // allow-listed agent with a valid token can pass --red-skip-file-guard
+  // for a tdd-code task and bypass the file guard the orchestrator was
+  // supposed to enforce. Read the Type from on-disk tasks.md and verify
+  // gateContractFor(type).redRequiresTestFiles === false. Unknown/missing
+  // tasks.md fails closed (flag rejected → operator must fix tasks.md or
+  // author a real failing test).
+  let redSkipFileGuard = false;
+  if (redSkipFileGuardRequested) {
+    const declaredType = readActiveTaskType(ticketId, taskNum);
+    if (declaredType && taskTypes && typeof taskTypes.gateContractFor === 'function') {
+      const contract = taskTypes.gateContractFor(declaredType);
+      redSkipFileGuard = contract && contract.redRequiresTestFiles === false;
+    }
+    if (!redSkipFileGuard) {
+      errorExit(
+        '--red-skip-file-guard is restricted to Types whose contract sets ' +
+          'redRequiresTestFiles=false (tests-only / docs / config / ci / ' +
+          'mechanical-refactor / file-move / checkpoint). ' +
+          `Task ${taskNum || '?'} has Type="${declaredType || 'unknown'}", ` +
+          'which still requires a *.test.* file modification at RED. ' +
+          'Author a failing test, or fix the `### Type` line in tasks.md.'
+      );
+    }
+  }
   if (testFiles.length === 0 && !docsExempt && !redSkipFileGuard) {
     errorExit('No test files changed. RED phase requires modified .test or .spec files.');
   }
@@ -755,6 +860,25 @@ function cmdRecordSkipRed(ticketId, args) {
       'Cannot record skip-red: current phase is "' +
         state.currentPhase +
         '". record-skip-red only valid during red phase.'
+    );
+  }
+
+  // GH-528 round-2 follow-up (Cursor[bot] HIGH): Type=tests-only gate.
+  // Without this, any allow-listed developer agent holding a valid token
+  // can call `record-skip-red` for a tdd-code task and skip RED entirely —
+  // exactly the agent self-report surface the closed-Type taxonomy was
+  // designed to close. Read the Type from on-disk tasks.md (trust-
+  // equivalent to the planner's authored value, see readActiveTaskType
+  // docstring) and require it to be exactly `tests-only`. Unknown / non-
+  // tests-only Types fail closed.
+  const declaredType = readActiveTaskType(ticketId, taskNum);
+  if (declaredType !== 'tests-only') {
+    errorExit(
+      'record-skip-red is restricted to Type=tests-only tasks. ' +
+        `Task ${taskNum || '?'} has Type="${declaredType || 'unknown'}". ` +
+        'If this task is genuinely tests-only, fix the `### Type` line in tasks.md ' +
+        '(only the planner may author Type values — see split-in-tasks/lib/task-types.js). ' +
+        'Otherwise run record-red with a real failing test.'
     );
   }
 

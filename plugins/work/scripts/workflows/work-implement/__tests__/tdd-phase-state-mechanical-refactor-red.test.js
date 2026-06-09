@@ -37,13 +37,27 @@ const { spawnSync } = require('node:child_process');
 const CLI = path.resolve(__dirname, '..', 'tdd-phase-state.js');
 const TICKET = 'TEST-528-MR';
 
-function makeTasksBase() {
+function makeTasksBase(type = 'mechanical-refactor') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdd-mr-'));
   fs.mkdirSync(path.join(dir, TICKET, 'task1'), { recursive: true });
   fs.writeFileSync(
     path.join(dir, TICKET, '.work' + '-state.json'),
     JSON.stringify({ ticketId: TICKET })
   );
+  // GH-528 round-2 follow-up: the recorder now reads the active task's
+  // Type from tasks.md to gate `--red-skip-file-guard` and `record-skip-red`.
+  // Write a minimal tasks.md with the requested Type.
+  const tasksMd = [
+    '## Task 1 — sample',
+    '',
+    '### Type',
+    type,
+    '',
+    '### Files in scope',
+    '- src/**',
+    '',
+  ].join('\n');
+  fs.writeFileSync(path.join(dir, TICKET, 'tasks.md'), tasksMd);
   return dir;
 }
 
@@ -125,6 +139,116 @@ describe('tdd-phase-state record-red — mechanical-refactor / verifier-only', (
     );
     assert.notEqual(r.status, 0, `expected reject when cmd passes; stderr=${r.stderr}`);
     assert.match(r.stderr, /Tests must FAIL/);
+  });
+});
+
+// ── Bug 3: record-skip-red must require Type=tests-only (Cursor[bot] HIGH) ──
+
+describe('tdd-phase-state record-skip-red — Type gate', () => {
+  let tasksBase;
+  afterEach(() => {
+    if (tasksBase) {
+      fs.rmSync(tasksBase, { recursive: true, force: true });
+      tasksBase = null;
+    }
+  });
+
+  it('record-skip-red is REJECTED for Type=tdd-code (closes self-report surface)', () => {
+    tasksBase = makeTasksBase('tdd-code');
+    const init = runCli(['init', TICKET, '--task', '1'], tasksBase);
+    assert.equal(init.status, 0, `init failed: ${init.stderr}`);
+    const r = runCli(
+      ['record-skip-red', TICKET, '--task', '1', '--reason', 'agent claims tests-only'],
+      tasksBase
+    );
+    assert.notEqual(
+      r.status,
+      0,
+      `record-skip-red must reject non-tests-only Types; stderr=${r.stderr}`
+    );
+    assert.match(r.stderr, /tests-only|Type/);
+  });
+
+  it('record-skip-red is REJECTED for Type=mechanical-refactor', () => {
+    tasksBase = makeTasksBase('mechanical-refactor');
+    const init = runCli(['init', TICKET, '--task', '1'], tasksBase);
+    assert.equal(init.status, 0, `init failed: ${init.stderr}`);
+    const r = runCli(
+      ['record-skip-red', TICKET, '--task', '1', '--reason', 'bypass attempt'],
+      tasksBase
+    );
+    assert.notEqual(r.status, 0, `stderr=${r.stderr}`);
+  });
+
+  it('record-skip-red is ACCEPTED for Type=tests-only (contract still works)', () => {
+    tasksBase = makeTasksBase('tests-only');
+    const init = runCli(['init', TICKET, '--task', '1'], tasksBase);
+    assert.equal(init.status, 0, `init failed: ${init.stderr}`);
+    const r = runCli(
+      ['record-skip-red', TICKET, '--task', '1', '--reason', 'tests-only task'],
+      tasksBase
+    );
+    assert.equal(r.status, 0, `expected accept; stderr=${r.stderr}`);
+  });
+});
+
+// ── Bug 4: --red-skip-file-guard must require contract-allowed Type (Cursor[bot] HIGH) ──
+
+describe('tdd-phase-state record-red --red-skip-file-guard — Type gate', () => {
+  let tasksBase;
+  afterEach(() => {
+    if (tasksBase) {
+      fs.rmSync(tasksBase, { recursive: true, force: true });
+      tasksBase = null;
+    }
+  });
+
+  it('--red-skip-file-guard is IGNORED for Type=tdd-code (file guard re-fires)', () => {
+    // For tdd-code, gateContractFor.redRequiresTestFiles === true. A direct
+    // CLI call with --red-skip-file-guard from an allow-listed agent must
+    // NOT relax the guard — agent self-report on the file guard is the exact
+    // shape no-fake-tdd-evidence guards against.
+    tasksBase = makeTasksBase('tdd-code');
+    const init = runCli(['init', TICKET, '--task', '1'], tasksBase);
+    assert.equal(init.status, 0, `init failed: ${init.stderr}`);
+    const r = runCli(
+      [
+        'record-red',
+        TICKET,
+        '--task',
+        '1',
+        '--cmd',
+        'node -e "process.exit(1)"',
+        '--red-skip-file-guard',
+      ],
+      tasksBase
+    );
+    assert.notEqual(
+      r.status,
+      0,
+      `--red-skip-file-guard must be ignored for tdd-code; stderr=${r.stderr}`
+    );
+    assert.match(r.stderr, /No test files changed|tests-only|Type/);
+  });
+
+  it('--red-skip-file-guard is HONORED for Type=mechanical-refactor', () => {
+    // mechanical-refactor.redRequiresTestFiles === false → flag is valid.
+    tasksBase = makeTasksBase('mechanical-refactor');
+    const init = runCli(['init', TICKET, '--task', '1'], tasksBase);
+    assert.equal(init.status, 0, `init failed: ${init.stderr}`);
+    const r = runCli(
+      [
+        'record-red',
+        TICKET,
+        '--task',
+        '1',
+        '--cmd',
+        'node -e "process.exit(1)"',
+        '--red-skip-file-guard',
+      ],
+      tasksBase
+    );
+    assert.equal(r.status, 0, `expected accept; stderr=${r.stderr}`);
   });
 });
 

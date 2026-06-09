@@ -347,6 +347,20 @@ function checkWriteTypeLines(toolInput, onDiskTypes) {
  * cannot be applied (old_string not found) — caller treats null as a fall-
  * through (no change simulated, the real tool would error).
  */
+// GH-528 round-2 follow-up note: when an Edit/MultiEdit's `old_string` is
+// not found, applyEditPatch returns null and the caller skips that single
+// patch in the simulation. The real Edit tool errors on missing
+// `old_string` and aborts the whole tool call, so the simulator's "skip
+// and continue" can diverge if a later patch in a MultiEdit was authored
+// against the expected post-first-patch state. In practice the divergence
+// can only ALLOW patches the real tool would reject (the real tool errors
+// before applying anything; the simulator might allow a residual
+// Type-flipping patch through if it happens to apply against the
+// unchanged file). The block-direction risk is the one we care about —
+// the Type-line guard's final equality check still compares the simulated
+// post-state Type lines against on-disk, so a Type flip still gets
+// caught regardless of upstream patch sequencing. Worth a note for
+// future maintainers.
 function applyEditPatch(content, edit) {
   const oldStr = (edit.old_string || '').toString();
   const newStr = (edit.new_string || '').toString();
@@ -473,6 +487,14 @@ function typeLineGuard(toolName, toolInput, workDir, tasksDir) {
   return { blocked: false };
 }
 
+// GH-528 round-2 follow-up note: extracted Type values are normalized to
+// lowercase. typesEqual is a case-sensitive string compare against the
+// already-normalized arrays, so case-only patches (e.g. `tdd-code` →
+// `TDD-Code`) are treated as no-ops. That is intentional — every
+// downstream Type consumer (gateContractFor, lint-type-ac-consistency,
+// readActiveTaskType in tdd-phase-state.js) also lowercases the value
+// before comparing against the closed enum. Blocking case-only edits
+// would create false positives without closing any real bypass.
 function extractTypeLines(md) {
   const out = [];
   const lines = md.split(/\r?\n/);
