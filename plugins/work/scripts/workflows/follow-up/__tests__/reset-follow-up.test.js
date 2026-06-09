@@ -184,4 +184,35 @@ describe('reset-follow-up', () => {
       assert.equal(fresh.prNumber, 553, 'prNumber preserved across reset');
     });
   });
+
+  describe('reset-follow-up preserves a corrupt .work-actions.json before overwriting', () => {
+    it('renames the corrupt file to .corrupt-<ts> and writes a fresh one-row file', () => {
+      const ticketId = 'GH-777';
+      seedTicketState(ticketId);
+      const dir = path.join(TASKS_BASE, ticketId);
+      const actionsPath = path.join(dir, '.work-actions.json');
+      fs.writeFileSync(actionsPath, '{ this is : not json ]');
+
+      const result = runReset([ticketId, '--yes']);
+      assert.equal(result.status, 0, `exit 0 expected, got ${result.status}: ${result.stderr}`);
+
+      // Corrupt sibling preserved
+      const siblings = fs
+        .readdirSync(dir)
+        .filter((f) => f.startsWith('.work-actions.json.corrupt-'));
+      assert.equal(siblings.length, 1, 'one corrupt-<ts> sibling must exist');
+      assert.equal(
+        fs.readFileSync(path.join(dir, siblings[0]), 'utf8'),
+        '{ this is : not json ]',
+        'corrupt contents must be preserved verbatim'
+      );
+
+      // Fresh file contains exactly one provenance row
+      const fresh = JSON.parse(fs.readFileSync(actionsPath, 'utf8'));
+      assert.ok(Array.isArray(fresh), 'fresh actions file must be an array');
+      assert.equal(fresh.length, 1, 'fresh actions file must contain exactly one row');
+      assert.equal(fresh[0].kind, 'reset-follow-up');
+      assert.equal(fresh[0].ticket, ticketId);
+    });
+  });
 });

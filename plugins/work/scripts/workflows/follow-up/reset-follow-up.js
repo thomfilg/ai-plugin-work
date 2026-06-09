@@ -92,8 +92,18 @@ function appendProvenance(ticketDir, ticket) {
     const parsed = JSON.parse(raw);
     rows = Array.isArray(parsed) ? parsed : Array.isArray(parsed.actions) ? parsed.actions : [];
   } catch (err) {
-    if (!err || err.code !== 'ENOENT') {
-      // Corrupt file — start a fresh array rather than fail the reset.
+    if (err && err.code === 'ENOENT') {
+      rows = [];
+    } else {
+      // Corrupt file — preserve the existing contents under a timestamped
+      // sibling so the audit trail isn't silently dropped, then start fresh.
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      try {
+        fs.renameSync(actionsPath, `${actionsPath}.corrupt-${stamp}`);
+      } catch {
+        // best-effort — if rename fails (e.g. file gone between read+rename)
+        // we still want the reset to proceed with a fresh provenance row.
+      }
       rows = [];
     }
   }
