@@ -34,6 +34,32 @@ describe('push-retry step', () => {
     assert.ok(result.reason.includes('Max push-retry'));
   });
 
+  it('push-retry at cap returns actionable instruction', () => {
+    const state = makeState({ _pushRetryCount: 39, maxAttempts: 40, ticketId: 'GH-531' });
+    const result = pushRetry(state, ctx);
+    assert.equal(result.action, 'blocked');
+    assert.ok(result.reason && result.reason.includes('Max push-retry'));
+    assert.ok(
+      typeof result.instruction === 'string' && result.instruction.includes('reset-follow-up'),
+      'instruction must mention reset-follow-up'
+    );
+    assert.ok(
+      result.instruction.includes('GH-531'),
+      'instruction must include the actual ticket id'
+    );
+    assert.ok(
+      result.nextAction && typeof result.nextAction === 'object',
+      'nextAction object required'
+    );
+    assert.equal(result.nextAction.command, 'workflow-engine');
+    assert.equal(result.nextAction.subcommand, 'reset-follow-up');
+    assert.deepEqual(result.nextAction.args, ['GH-531', '--yes']);
+    assert.ok(
+      result.instruction.includes('--yes'),
+      'instruction must include --yes so the recovery command actually mutates state'
+    );
+  });
+
   it('loops back to monitor when already dispatched', () => {
     const state = makeState({ dispatched: 'push-retry' });
     const result = pushRetry(state, ctx);

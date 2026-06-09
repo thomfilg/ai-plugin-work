@@ -50,6 +50,82 @@ function getFollowUpPr() {
 
 const getConfig = require('../../lib/get-config');
 const { getCurrentTaskId } = require('../../lib/scripts/get-ticket-id');
+const { gitHunkChangedSince } = require('../../follow-up/lib/git-hunk-changed');
+
+const COPILOT_AUTHORS = new Set([
+  'copilot-pull-request-reviewer',
+  'copilot-pull-request-reviewer[bot]',
+  'github-copilot[bot]',
+  'copilot',
+]);
+
+function isCopilotAuthor(login) {
+  if (!login) return false;
+  return COPILOT_AUTHORS.has(String(login).toLowerCase());
+}
+
+/**
+ * Classify a Copilot review thread that GitHub marks as outdated
+ * (line === null, position === null but original_position !== null,
+ * and/or position_outdated === true).
+ *
+ * Returns { status, resolution } where:
+ *   - status === 'resolved' when `gitHunkChangedSince` confirms the
+ *     originally-commented line actually changed since `created_at`
+ *     (R1 — Copilot stale-thread heuristic);
+ *   - status === 'unsolved', resolution null when the hunk has NOT
+ *     changed since `created_at` (AC5 — no false positives).
+ *
+ * For non-Copilot threads the heuristic is NOT applied — callers fall
+ * back to the existing "Outdated (code changed since comment)" path.
+ *
+ * `previousStatus` lets us preserve any prior recorded state (so a
+ * thread the user already marked solved/skipped stays that way).
+ *
+ * @param {object} cm GitHub PR review comment payload.
+ * @param {{ previousStatus?: {status:string,resolution:string,commitSha?:string}|null, logger?: (msg:string)=>void }} [opts]
+ * @returns {{ status: 'resolved'|'unsolved', resolution: string|null, applied: boolean }}
+ */
+function classifyOutdatedCopilotThread(cm, opts = {}) {
+  const { previousStatus = null, logger = console.error } = opts;
+  if (previousStatus && previousStatus.status) {
+    return {
+      status: previousStatus.status,
+      resolution: previousStatus.resolution || null,
+      applied: false,
+    };
+  }
+  const author = cm?.user?.login || '';
+  if (!isCopilotAuthor(author)) {
+    return { status: 'resolved', resolution: null, applied: false };
+  }
+  const filePath = cm?.path || null;
+  const originalLine = cm?.original_line || null;
+  const createdAt = cm?.created_at || null;
+  if (!filePath || !originalLine || !createdAt) {
+    return { status: 'unsolved', resolution: null, applied: false };
+  }
+  let changed = false;
+  try {
+    changed = gitHunkChangedSince(filePath, originalLine, createdAt, {});
+  } catch (err) {
+    logger(
+      `[follow-up-pr-comments] gitHunkChangedSince failed for ${filePath}:${originalLine} — ${err.message}`
+    );
+    return { status: 'unsolved', resolution: null, applied: false };
+  }
+  if (changed) {
+    logger(
+      `[follow-up-pr-comments] Copilot stale-thread heuristic fired for comment ${cm.id} (${filePath}:${originalLine})`
+    );
+    return {
+      status: 'resolved',
+      resolution: 'Outdated (Copilot stale-thread heuristic — code changed since created_at)',
+      applied: true,
+    };
+  }
+  return { status: 'unsolved', resolution: null, applied: false };
+}
 
 // ── Deprecation warnings (Task 3, GH-537) ────────────────────────────────────
 // Legacy flag aliases keep working for a 2-3 release window but must emit
@@ -319,6 +395,30 @@ function handleSnapshot(prNumber) {
             const hashKey = String(cm.id);
             if (seenHashes.has(hashKey)) continue;
             seenHashes.add(hashKey);
+
+            // R1 — Copilot stale-thread heuristic: for Copilot-authored
+            // threads with line:null + position_outdated semantics, only
+            // declare the thread resolved when the originally-commented
+            // hunk has actually changed since `created_at`. Non-Copilot
+            // threads fall through to the legacy unconditional 'resolved'.
+            const previousStatus = previousStatusMap.get(String(cm.id)) || null;
+            let defaultStatus = 'resolved';
+            let defaultResolution = 'Outdated (code changed since comment)';
+            const classification = classifyOutdatedCopilotThread(cm, {
+              previousStatus,
+            });
+            if (classification.applied) {
+              defaultStatus = classification.status;
+              defaultResolution = classification.resolution;
+            } else if (isCopilotAuthor(author) && !previousStatus?.status) {
+              // Copilot author but helper said not-applied AND no prior
+              // status — that means the hunk did NOT change since
+              // created_at (AC5: no false positives). Keep the comment
+              // surfaced as unsolved instead of auto-resolving.
+              defaultStatus = classification.status; // 'unsolved'
+              defaultResolution = classification.resolution; // null
+            }
+
             comments.push({
               id: cm.id,
               hash: computeCommentHash(filePath, body),
@@ -328,17 +428,10 @@ function handleSnapshot(prNumber) {
               line: cm.line || cm.original_line || null,
               original_line: cm.original_line || null,
               priority: classifyCommentPriority(author, body),
-              status: previousStatusMap.get(String(cm.id))?.status
-                ? previousStatusMap.get(String(cm.id)).status
-                : 'resolved',
-              commitSha: previousStatusMap.get(String(cm.id))?.commitSha || null,
-              resolution:
-                previousStatusMap.get(String(cm.id))?.resolution ||
-                'Outdated (code changed since comment)',
-              threadId:
-                commentIdToThreadId.get(cm.id) ||
-                previousStatusMap.get(String(cm.id))?.threadId ||
-                null,
+              status: previousStatus?.status || defaultStatus,
+              commitSha: previousStatus?.commitSha || null,
+              resolution: previousStatus?.resolution || defaultResolution,
+              threadId: commentIdToThreadId.get(cm.id) || previousStatus?.threadId || null,
             });
             continue;
           }
@@ -697,4 +790,7 @@ if (require.main === module) {
 module.exports = {
   solveLocally,
   skipLocally,
+  classifyOutdatedCopilotThread,
+  isCopilotAuthor,
+  handleSnapshot,
 };
