@@ -401,6 +401,15 @@ function main() {
     return;
   }
 
+  // GH-531 R2: `reset-follow-up <TICKET>` — wipe `/follow-up` state files and
+  // re-initialize a fresh state. Routed through workflow-engine.js so it
+  // inherits the existing EXEMPT_SCRIPTS write-rights and does not trip
+  // `protect-state-files` (no new exemption entry is added).
+  if (args[0] === 'reset-follow-up') {
+    const { run } = require(path.join(__dirname, '..', 'follow-up', 'reset-follow-up.js'));
+    process.exit(run(args.slice(1)));
+  }
+
   const workflowName = args[0];
   const command = args[1] || 'plan';
   const rest = args.slice(2);

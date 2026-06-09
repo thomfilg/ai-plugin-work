@@ -19,11 +19,20 @@ module.exports = function registerPushRetry(register) {
     if (state.dispatched !== 'push-retry') {
       state._pushRetryCount = (state._pushRetryCount || 0) + 1;
     }
-    if (state._pushRetryCount >= (state.maxAttempts || 40)) {
+    const maxAttempts = state.maxAttempts || 40;
+    if (state._pushRetryCount >= maxAttempts) {
+      const ticketId = state.ticketId;
+      const instruction = `Run: workflow-engine reset-follow-up ${ticketId} --yes`;
       return {
         type: 'follow_up_instruction',
         action: 'blocked',
-        reason: `Max push-retry cycles (${state.maxAttempts || 40}) reached. PR still has issues.`,
+        reason: `Max push-retry cycles (${maxAttempts}) reached. PR still has issues.`,
+        instruction,
+        nextAction: {
+          command: 'workflow-engine',
+          subcommand: 'reset-follow-up',
+          args: [ticketId, '--yes'],
+        },
       };
     }
 

@@ -127,6 +127,12 @@ function initState(ticketId, prNumber) {
     attempt: 0,
     maxAttempts: 40,
     // monitor cache (see infra-patterns.js for invalidation rules)
+    // GH-531 Task 6 (AC10): explicitly reset the push-retry counter so the
+    // cap-exhausted recovery path can't immediately re-trigger after
+    // `reset-follow-up`. Was previously `undefined` (incremented to 1 on
+    // first push-retry), which matches the same observable behavior; the
+    // explicit `0` makes the recovery guarantee inspectable by operators.
+    _pushRetryCount: 0,
     lastMonitorResult: null,
     lastMonitorAt: null,
     failureCategory: null,
@@ -136,6 +142,28 @@ function initState(ticketId, prNumber) {
     infraRetry: { count: 0, attempts: [] },
     startTime: new Date().toISOString(),
   };
+}
+
+/**
+ * Build a fresh /follow-up state object for `ticketId`, persist it to the
+ * canonical state-file path (`TASKS_BASE/<ticket>/.follow-up-state.json`),
+ * and return the new state.
+ *
+ * Idempotent: calling twice overwrites the on-disk state with a fresh one.
+ * Used both by the existing init code path in this module and by the
+ * `/reset-follow-up` command (Task 2) to re-initialize after push-retry
+ * exhaustion (GH-531).
+ *
+ * @param {string} ticketId — sanitized ticket id (e.g. `GH-999`).
+ * @param {object} [opts] — optional overrides.
+ * @param {number|null} [opts.prNumber] — preserve an existing PR number across reset.
+ * @returns {object} the freshly-initialized state object.
+ */
+function initFreshState(ticketId, opts) {
+  const prNumber = opts && opts.prNumber != null ? opts.prNumber : null;
+  const state = initState(ticketId, prNumber);
+  saveState(ticketId, state);
+  return state;
 }
 
 // ─── Core orchestrator loop ─────────────────────────────────────────────────
@@ -378,6 +406,7 @@ if (require.main === module) main();
 module.exports = {
   getNextInstruction,
   initState,
+  initFreshState,
   dispatchStepResult,
   __test__: {
     initState,
