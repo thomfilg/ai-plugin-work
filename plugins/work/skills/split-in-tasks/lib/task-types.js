@@ -240,6 +240,39 @@ function isTestFilePath(relPath) {
   return new RegExp(TEST_FILE_PATTERN).test(String(relPath || '').replace(/\\/g, '/'));
 }
 
+/**
+ * scopeEntryAdmitsOnlyTestFiles — true iff a `### Files in scope` entry can
+ * ONLY match test files (`*.test.<ext>` / `*.spec.<ext>`). Shared classifier
+ * for the planner-time Pass D gate (lint-type-ac-consistency.js) and the
+ * implement-time Type=tests-only GREEN gate (task-next.js) — keeping both
+ * sides on the same function prevents drift (cursor[bot] follow-up, GH-528).
+ *
+ * Rules:
+ *   - Empty / non-string                                     → false.
+ *   - Glob entry (contains `*`): inspect its basename — the segment after
+ *     the last `/`. Accept iff the basename ends in `*.test.<ext>` /
+ *     `*.spec.<ext>`. This accepts `src/**\/*.test.js` and rejects
+ *     `src/**`, `lib/**\/*.js`.
+ *   - Literal entry: delegate to `isTestFilePath`. Accept `src/foo.test.js`,
+ *     reject `src/foo.js`.
+ *
+ * @param {string} entry
+ * @returns {boolean}
+ */
+function scopeEntryAdmitsOnlyTestFiles(entry) {
+  if (typeof entry !== 'string' || !entry) return false;
+  const isGlob = entry.includes('*');
+  if (!isGlob) {
+    return isTestFilePath(entry);
+  }
+  // Glob: examine the basename. A glob whose final segment ends in a
+  // test-file extension pattern admits ONLY test files; any other shape
+  // could match a non-test file.
+  const lastSlash = entry.lastIndexOf('/');
+  const basename = lastSlash >= 0 ? entry.slice(lastSlash + 1) : entry;
+  return new RegExp(TEST_FILE_PATTERN).test(basename);
+}
+
 module.exports = {
   TASK_TYPES,
   TDD_REQUIRED_TYPES,
@@ -254,4 +287,5 @@ module.exports = {
   scopeRulesFor,
   matchesTypeScope,
   isTestFilePath,
+  scopeEntryAdmitsOnlyTestFiles,
 };

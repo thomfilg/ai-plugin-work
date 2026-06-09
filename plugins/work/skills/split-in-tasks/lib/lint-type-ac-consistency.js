@@ -5,6 +5,7 @@ const {
   scopeRulesFor,
   matchesTypeScope,
   isTestFilePath,
+  scopeEntryAdmitsOnlyTestFiles,
 } = require('./task-types');
 
 // Types that legitimately have no RED/GREEN cycle (exempt from TDD).
@@ -191,7 +192,12 @@ function checkTestsOnlyContract({ file, taskNumber, type, filesInScope, acceptan
       })
     );
   } else {
-    const nonTest = filesInScope.filter((p) => !isTestFilePath(p));
+    // Use the shared scope classifier so Pass D and the implement-time
+    // Type=tests-only GREEN gate (task-next.js) agree on what counts as
+    // a test-only entry — globs whose basename constrains to test files
+    // (e.g. `src/**/*.test.js`) must NOT warn while open-ended globs
+    // (`src/**`) STILL warn. cursor[bot] follow-up, GH-528.
+    const nonTest = filesInScope.filter((p) => !scopeEntryAdmitsOnlyTestFiles(p));
     if (nonTest.length > 0) {
       warnings.push(
         makeWarning({

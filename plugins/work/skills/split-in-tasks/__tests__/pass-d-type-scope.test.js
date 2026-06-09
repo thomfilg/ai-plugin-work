@@ -124,6 +124,65 @@ describe('Pass D — tests-only contract', () => {
     );
     assert.equal(ws.length, 0, `expected zero warnings; got ${JSON.stringify(ws)}`);
   });
+
+  // GH-528 cursor[bot] follow-up: Pass D must use the same scope classifier
+  // as the implement-time gate (scopeEntryAdmitsOnlyTestFiles). Globs whose
+  // basename constrains to test files (e.g. `src/**\/*.test.js`) admit ONLY
+  // test files and must NOT trigger the non-test-file warning at plan time —
+  // otherwise valid tasks fail Step 5 while implementation would accept them.
+  it('does not warn on a test-constrained glob scope (src/**/*.test.js)', () => {
+    const ws = lintAllPassD(
+      buildModel({
+        type: 'tests-only',
+        scope: ['src/**/*.test.js'],
+        acLines: ['cover existing branch'],
+      })
+    );
+    const offenders = ws.filter((w) => /non-test file/.test(w.message));
+    assert.equal(
+      offenders.length,
+      0,
+      `expected no non-test-file warning for glob scope; got ${JSON.stringify(offenders)}`
+    );
+  });
+
+  it('does not warn on **/*.spec.ts glob', () => {
+    const ws = lintAllPassD(
+      buildModel({
+        type: 'tests-only',
+        scope: ['**/*.spec.ts'],
+        acLines: ['cover existing branch'],
+      })
+    );
+    const offenders = ws.filter((w) => /non-test file/.test(w.message));
+    assert.equal(offenders.length, 0, `got ${JSON.stringify(offenders)}`);
+  });
+
+  it('does not warn on nested test glob (src/foo/**/*.test.js)', () => {
+    const ws = lintAllPassD(
+      buildModel({
+        type: 'tests-only',
+        scope: ['src/foo/**/*.test.js'],
+        acLines: ['cover existing branch'],
+      })
+    );
+    const offenders = ws.filter((w) => /non-test file/.test(w.message));
+    assert.equal(offenders.length, 0, `got ${JSON.stringify(offenders)}`);
+  });
+
+  it('STILL warns on open-ended glob that admits non-tests (src/**)', () => {
+    const ws = lintAllPassD(
+      buildModel({
+        type: 'tests-only',
+        scope: ['src/**'],
+        acLines: ['cover existing branch'],
+      })
+    );
+    assert.ok(
+      ws.some((w) => /non-test file/.test(w.message)),
+      `expected non-test-file warning for open-ended glob; got ${JSON.stringify(ws)}`
+    );
+  });
 });
 
 describe('Pass D — docs contract', () => {

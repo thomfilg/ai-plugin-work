@@ -43,7 +43,10 @@ try {
 const TDD_CLI = path.join(__dirname, 'tdd-phase-state.js');
 
 const { TDD_PHASES, TDD_PHASE_TRANSITIONS } = require('./tdd-phase-registry');
-const { gateContractFor } = require('../../../skills/split-in-tasks/lib/task-types');
+const {
+  gateContractFor,
+  scopeEntryAdmitsOnlyTestFiles,
+} = require('../../../skills/split-in-tasks/lib/task-types');
 const { fileMatchesScope } = require('../lib/task-scope');
 
 // `done` is derived in this script (a cycle with red+green+refactor evidence
@@ -67,43 +70,6 @@ const TDD_DERIVED_DONE = 'done';
 function filterToTestFiles(scope) {
   if (!Array.isArray(scope)) return [];
   return scope.filter((p) => typeof p === 'string' && /\.(test|spec)\.[jt]sx?$/i.test(p));
-}
-
-/**
- * Classify a `### Files in scope` entry: does its match set consist
- * EXCLUSIVELY of test/spec files?
- *
- * Used by the Type=tests-only GREEN gate (cursor[bot] review, GH-528):
- * the previous check applied a raw extension test to each entry, which
- * mis-rejected glob patterns whose basename DOES constrain to test
- * files (e.g. `plugins/work/**\/*.test.js`) while needing to keep
- * rejecting open-ended globs like `src/**` that admit non-test files.
- *
- * Rules:
- *   - Empty / non-string                                     → false.
- *   - Glob entry (contains `*`): inspect its basename — the
- *     segment after the last `/`. Accept iff the basename ends in
- *     `*.test.<ext>` / `*.spec.<ext>` (ext one of j/tsx?). This
- *     accepts `src/**\/*.test.js` and rejects `src/**`, `lib/**\/*.js`.
- *   - Literal entry: delegate to the same test-extension regex used
- *     by `filterToTestFiles`. Accept `src/foo.test.js`, reject
- *     `src/foo.js`.
- *
- * @param {string} entry
- * @returns {boolean}
- */
-function scopeEntryAdmitsOnlyTestFiles(entry) {
-  if (typeof entry !== 'string' || !entry) return false;
-  const isGlob = entry.includes('*');
-  if (!isGlob) {
-    return /\.(test|spec)\.[jt]sx?$/i.test(entry);
-  }
-  // Glob: examine the basename. A glob whose final segment ends in a
-  // test-file extension pattern admits ONLY test files; any other
-  // shape could match a non-test file.
-  const lastSlash = entry.lastIndexOf('/');
-  const basename = lastSlash >= 0 ? entry.slice(lastSlash + 1) : entry;
-  return /\.(test|spec)\.[jt]sx?$/i.test(basename);
 }
 
 /**
