@@ -50,12 +50,21 @@ function emptyState() {
   return { expectations: new Map(), dedup: new Set() };
 }
 
+function normalizeExpected(raw) {
+  if (Array.isArray(raw)) return raw.filter((p) => typeof p === 'string' && p.length > 0);
+  if (typeof raw === 'string' && raw.length > 0) return [raw];
+  return [];
+}
+
 function deserializeExpectations(raw, target) {
   if (!raw || typeof raw !== 'object') return;
   for (const [name, entry] of Object.entries(raw)) {
-    if (!entry || typeof entry.expected !== 'string') continue;
+    if (!entry) continue;
+    // Accept legacy `expected: <string>` and new `patterns: [<string>...]`.
+    const patterns = normalizeExpected(entry.patterns || entry.expected);
+    if (patterns.length === 0) continue;
     target.set(name, {
-      expected: entry.expected,
+      patterns,
       ageEvents: Number.isFinite(entry.ageEvents) ? entry.ageEvents : 0,
     });
   }
@@ -135,13 +144,12 @@ function matchesPattern(pattern, observed) {
 
 function recordExpectation(sessionId, memoryName, expectedCommand) {
   try {
+    const patterns = normalizeExpected(expectedCommand);
+    if (patterns.length === 0) return;
     const state = loadSession(sessionId);
     // Re-insert to mark as most recently added for LRU-style eviction.
     state.expectations.delete(memoryName);
-    state.expectations.set(memoryName, {
-      expected: String(expectedCommand),
-      ageEvents: 0,
-    });
+    state.expectations.set(memoryName, { patterns, ageEvents: 0 });
     enforceCap(state.expectations);
     saveSession(sessionId, state);
   } catch (_e) {
@@ -155,12 +163,14 @@ function resolveExpectation(sessionId, observedCommand) {
     if (state.expectations.size === 0) {
       return { divergent: false, expectations: [] };
     }
-    // Clear EVERY expectation whose pattern matches the observed command.
-    // Otherwise a single satisfying command would clear only the first match
-    // and the rest would age to false divergence on later PreToolUse events.
+    // Clear every expectation that has ANY pattern matching the observed
+    // command. A memory with multiple `trigger_pretool` specs only needs one
+    // of them to be satisfied for the agent to be "compliant".
     const matchedNames = [];
     for (const [name, entry] of state.expectations) {
-      if (matchesPattern(entry.expected, observedCommand)) matchedNames.push(name);
+      if (entry.patterns.some((p) => matchesPattern(p, observedCommand))) {
+        matchedNames.push(name);
+      }
     }
     if (matchedNames.length > 0) {
       for (const name of matchedNames) state.expectations.delete(name);
@@ -173,7 +183,7 @@ function resolveExpectation(sessionId, observedCommand) {
     for (const [name, entry] of Array.from(state.expectations.entries())) {
       entry.ageEvents += 1;
       if (entry.ageEvents > WINDOW_INTERVENING) {
-        divergent.push({ memoryName: name, expected: entry.expected });
+        divergent.push({ memoryName: name, expected: entry.patterns.join('|') });
         state.expectations.delete(name);
       }
     }

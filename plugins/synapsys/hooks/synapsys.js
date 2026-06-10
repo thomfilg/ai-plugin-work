@@ -27,7 +27,7 @@ const { recordFired, isDisabled } = require(path.join(__dirname, '..', 'lib', 't
 const { runCiteScan, runBehaviorScan } = require(path.join(__dirname, '..', 'lib', 'cite-scan'));
 const pretoolWindow = require(path.join(__dirname, '..', 'lib', 'pretool-window'));
 const { demoteToFit } = require('../lib/budget');
-const { expectedCommandFor, resolveAndEmitDivergences } = require(
+const { expectedCommandsFor, resolveAndEmitDivergences } = require(
   path.join(__dirname, 'lib', 'behavior-changed')
 );
 
@@ -282,10 +282,10 @@ function emitMatched(matched, payload, event, sessionId) {
     // record the expected command so a subsequent divergent PreToolUse can
     // surface a one-off behavior_changed event.
     if (event === 'PreToolUse' && !isDisabled(m)) {
-      const expected = expectedCommandFor(m);
-      if (expected) {
+      const expectedAll = expectedCommandsFor(m);
+      if (expectedAll.length > 0) {
         try {
-          pretoolWindow.recordExpectation(sessionId, m.name, expected);
+          pretoolWindow.recordExpectation(sessionId, m.name, expectedAll);
         } catch {
           // fail-open
         }

@@ -15,19 +15,22 @@ const { recordBehaviorChanged, isDisabled } = require(
   path.join(__dirname, '..', '..', 'lib', 'telemetry')
 );
 
-// Derive the "expected command" from a matched memory's first
-// `trigger_pretool` spec (`"Tool:pattern"` → `"pattern"`). Used by path A
-// (heuristic divergence) to record an expectation for this turn.
-function expectedCommandFor(memory) {
-  if (!memory || !Array.isArray(memory.triggerPretool) || memory.triggerPretool.length === 0) {
-    return '';
-  }
-  const spec = memory.triggerPretool[0];
+function patternFromSpec(spec) {
   const colon = String(spec).indexOf(':');
   if (colon === -1) return '';
   return String(spec)
     .slice(colon + 1)
     .trim();
+}
+
+// Return EVERY `trigger_pretool` pattern (after `Tool:` prefix) for a memory.
+// The matcher may fire on any spec, so storing only the first pattern would
+// mis-attribute the pending expectation and emit spurious divergence when
+// the agent satisfied a later spec. Caller records the full list and matches
+// fulfillment against any pattern.
+function expectedCommandsFor(memory) {
+  if (!memory || !Array.isArray(memory.triggerPretool)) return [];
+  return memory.triggerPretool.map(patternFromSpec).filter((p) => p);
 }
 
 // Match the matcher's surface: trigger_pretool regexes test the serialized
@@ -81,6 +84,6 @@ function resolveAndEmitDivergences(payload, memories, sessionId) {
 }
 
 module.exports = {
-  expectedCommandFor,
+  expectedCommandsFor,
   resolveAndEmitDivergences,
 };
