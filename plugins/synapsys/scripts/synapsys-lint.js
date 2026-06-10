@@ -157,10 +157,15 @@ function lintStore(opts) {
   const pretoolPairs = computePretoolPairs(memories, onlyInvolving, applyIntentionalDowngrades);
   const broadTriggers = computeBroadTriggers(memories, onlyInvolving);
   const broadNames = new Set(broadTriggers.map((e) => e.name));
+  // Drop low/medium pairs whose endpoint is also flagged by `too-broad-trigger`
+  // — that pair is noise duplicated by the broad-trigger entry. High-severity
+  // pairs are ALWAYS preserved: a real collision involving a too-broad memory
+  // must still surface (and trip the exit-code gate), not be masked by the
+  // adjacent rule firing.
   const pairs = triggerPairs
     .concat(bodyPairs)
     .concat(pretoolPairs)
-    .filter((p) => !broadNames.has(p.a) && !broadNames.has(p.b));
+    .filter((p) => p.severity === 'high' || (!broadNames.has(p.a) && !broadNames.has(p.b)));
 
   for (const p of pairs) {
     p.suggestion = generateSuggestion(p, memories);
