@@ -58,6 +58,29 @@ function renderedSize(entries, sep) {
  * @param {{ limit: number, sep: string, skipBelow?: number }} options
  * @returns {Entry[]} The same `entries` array, with `finalKind` mutated as needed.
  */
+function findDemotableIndices(entries, skipBelow) {
+  const out = [];
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i];
+    if (e.finalKind === 'full' && e.fullText.length >= skipBelow) out.push(i);
+  }
+  return out;
+}
+
+// Demote the highest-indexed demotable entry, reserving the lowest-indexed
+// demotable as the rotation anchor (terminal rotation guarantee). Returns
+// true iff an entry was demoted in this pass.
+function demoteOnePass(entries, demotableIndices) {
+  const anchor = demotableIndices[0];
+  for (let k = demotableIndices.length - 1; k >= 0; k--) {
+    const i = demotableIndices[k];
+    if (i === anchor) continue;
+    entries[i].finalKind = 'reminder';
+    return true;
+  }
+  return false;
+}
+
 function demoteToFit(entries, options) {
   const opts = options || {};
   const limit = opts.limit;
@@ -67,33 +90,12 @@ function demoteToFit(entries, options) {
   if (!Array.isArray(entries) || entries.length === 0) return entries;
 
   // Walk REVERSE; demote one demotable entry at a time until total ≤ limit
-  // or no demotable entries remain. Demotable requires:
-  //   - finalKind === 'full'
-  //   - fullText.length >= skipBelow
-  //   - not the LAST remaining 'full' entry (terminal rotation guarantee)
+  // or no demotable entries remain. The terminal rotation guarantee (P0 R4)
+  // is enforced by reserving the lowest-indexed demotable as anchor.
   while (renderedSize(entries, sep) > limit) {
-    // Demotable = finalKind 'full' AND fullText.length >= skipBelow.
-    const demotableIndices = [];
-    for (let i = 0; i < entries.length; i++) {
-      const e = entries[i];
-      if (e.finalKind === 'full' && e.fullText.length >= skipBelow) {
-        demotableIndices.push(i);
-      }
-    }
-    // Terminal rotation guarantee: keep at least one demotable entry in 'full'
-    // form so the set never collapses to summaries only.
-    if (demotableIndices.length <= 1) break;
-
-    let demotedThisPass = false;
-    for (let k = demotableIndices.length - 1; k >= 0; k--) {
-      const i = demotableIndices[k];
-      // Reserve the FIRST demotable (lowest index) as the rotation anchor.
-      if (i === demotableIndices[0]) continue;
-      entries[i].finalKind = 'reminder';
-      demotedThisPass = true;
-      break;
-    }
-    if (!demotedThisPass) break;
+    const demotable = findDemotableIndices(entries, skipBelow);
+    if (demotable.length <= 1) break;
+    if (!demoteOnePass(entries, demotable)) break;
   }
 
   return entries;

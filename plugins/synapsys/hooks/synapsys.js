@@ -115,6 +115,55 @@ function commitInjection(ledger, sessionId, memory, isFull) {
 //                                                  in full on the next match).
 // The whole call is wrapped in `try` so any throw falls open to the plain
 // formatMemory join — memory injection must never block the user (spec §Security).
+function buildEntry(memory, ledgerMemories) {
+  const kind = decideInjection(memory, ledgerMemories[memory.name]).kind;
+  return {
+    memory,
+    initialKind: kind,
+    finalKind: kind,
+    fullText: formatMemory(memory),
+    summaryText: reminderLine(memory),
+  };
+}
+
+function emitEntries(entries, ledger, sessionId) {
+  let demotedCount = 0;
+  const pieces = [];
+  for (const e of entries) {
+    const isFull = e.finalKind === 'full';
+    pieces.push(isFull ? e.fullText : e.summaryText);
+    if (e.initialKind === 'full' && e.finalKind === 'reminder') {
+      // Budget-induced demotion: do NOT bump the ledger so the memory
+      // re-fires in full on the next match (brief P0 R6 / G5).
+      demotedCount += 1;
+      continue;
+    }
+    commitInjection(ledger, sessionId, e.memory, isFull);
+  }
+  return { body: pieces.join(SEP), demotedCount };
+}
+
+function writeStderrLine(line) {
+  try {
+    process.stderr.write(line);
+  } catch {
+    /* fail-open */
+  }
+}
+
+function emitBudgetAlerts(demotedCount, bodyLength, activeBudget) {
+  // Stderr alert (brief P0 R7 / spec §Security: count-only, no names/bodies).
+  if (demotedCount > 0) {
+    writeStderrLine(
+      `[synapsys] ${demotedCount} memories summarized to fit ${activeBudget}-char budget — they will inject in full on next match.\n`
+    );
+  }
+  // Debug stderr line when SYNAPSYS_DEBUG=1 (brief P1 R11).
+  if (process.env.SYNAPSYS_DEBUG === '1') {
+    writeStderrLine(`[synapsys:debug] budget ${bodyLength}/${activeBudget}\n`);
+  }
+}
+
 function renderMatchedMemories(matched, sessionId) {
   try {
     const ledger = injectLedger.loadLedger(sessionId);
@@ -122,57 +171,14 @@ function renderMatchedMemories(matched, sessionId) {
       ledger.memories = {};
     }
     const activeBudget = resolveActiveBudget();
-    // Build entries with initialKind from decideInjection. finalKind starts
-    // equal to initialKind; demoteToFit flips it to 'reminder' where needed.
-    const entries = matched.map((m) => {
-      const decision = decideInjection(m, ledger.memories[m.name]);
-      const kind = decision.kind;
-      return {
-        memory: m,
-        initialKind: kind,
-        finalKind: kind,
-        fullText: formatMemory(m),
-        summaryText: reminderLine(m),
-      };
-    });
+    const entries = matched.map((m) => buildEntry(m, ledger.memories));
     demoteToFit(entries, {
       limit: activeBudget,
       sep: SEP,
       skipBelow: SKIP_DEMOTION_BELOW,
     });
-
-    let demotedCount = 0;
-    const pieces = [];
-    for (const e of entries) {
-      const isFull = e.finalKind === 'full';
-      pieces.push(isFull ? e.fullText : e.summaryText);
-      if (e.initialKind === 'full' && e.finalKind === 'reminder') {
-        // Budget-induced demotion: do NOT bump the ledger so the memory
-        // re-fires in full on the next match (brief P0 R6 / G5).
-        demotedCount += 1;
-        continue;
-      }
-      commitInjection(ledger, sessionId, e.memory, isFull);
-    }
-    const body = pieces.join(SEP);
-    // Stderr alert (brief P0 R7 / spec §Security: count-only, no names/bodies).
-    if (demotedCount > 0) {
-      try {
-        process.stderr.write(
-          `[synapsys] ${demotedCount} memories summarized to fit ${activeBudget}-char budget — they will inject in full on next match.\n`
-        );
-      } catch {
-        /* fail-open */
-      }
-    }
-    // Debug stderr line when SYNAPSYS_DEBUG=1 (brief P1 R11).
-    if (process.env.SYNAPSYS_DEBUG === '1') {
-      try {
-        process.stderr.write(`[synapsys:debug] budget ${body.length}/${activeBudget}\n`);
-      } catch {
-        /* fail-open */
-      }
-    }
+    const { body, demotedCount } = emitEntries(entries, ledger, sessionId);
+    emitBudgetAlerts(demotedCount, body.length, activeBudget);
     return body;
   } catch {
     return matched.map(formatMemory).join(SEP);
