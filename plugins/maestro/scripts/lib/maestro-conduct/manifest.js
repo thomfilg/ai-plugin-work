@@ -68,6 +68,36 @@ function updateTaskStatus(taskId, status, note) {
 }
 
 /**
+ * incrementTaskAttempts — bump `task.attempts` by 1 (creating the field if
+ * missing) and persist. Returns the new count, or 0 if the task isn't in
+ * any manifest. Used by dead-end rotation to give a ticket multiple tries
+ * before permanently marking it blocked.
+ */
+function incrementTaskAttempts(taskId) {
+  const hit = findTask(taskId);
+  if (!hit) return 0;
+  const next = (hit.task.attempts || 0) + 1;
+  hit.task.attempts = next;
+  hit.task.updatedAt = new Date().toISOString();
+  writeManifest(hit.file, hit.manifest);
+  return next;
+}
+
+/**
+ * resetTaskAttempts — zero out `task.attempts` and persist. Called when an
+ * agent makes real progress (phase advance, fresh commit) so a future
+ * dead-end is treated as a fresh first attempt rather than escalating
+ * straight to kill+rotate.
+ */
+function resetTaskAttempts(taskId) {
+  const hit = findTask(taskId);
+  if (!hit || !hit.task.attempts) return false;
+  hit.task.attempts = 0;
+  hit.task.updatedAt = new Date().toISOString();
+  return writeManifest(hit.file, hit.manifest);
+}
+
+/**
  * Reconcile manifest task statuses against live tmux work-sessions.
  *
  *   - Each ticket with a live `<TICKET>-work` tmux session is marked
@@ -154,6 +184,8 @@ module.exports = {
   writeManifest,
   findTask,
   updateTaskStatus,
+  incrementTaskAttempts,
+  resetTaskAttempts,
   syncFromTmux,
   poolFullForTask,
 };

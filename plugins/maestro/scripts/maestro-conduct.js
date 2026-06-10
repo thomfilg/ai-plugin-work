@@ -286,9 +286,39 @@ function runPrStatusDetector(ctx) {
   ciGate.maybeFreeOnPrReady({ ctx, sHit, workSession, actions });
 }
 
+/** Reset dead-end attempts when the ticket's phase has advanced since last tick.
+ * Real progress (phase forward-step) signals the agent is unstuck, so the
+ * next dead-end should be treated as attempt 1 again, not as continued
+ * escalation from earlier stalls in unrelated phases.
+ */
+const manifestMod = require('./lib/maestro-conduct/manifest');
+function detectPhaseAdvance(ctx) {
+  if (!restartEligible(ctx.session)) return;
+  const prev = state.read(ctx.ticket, 'last-phase') || {};
+  if (prev.phase && prev.phase !== ctx.phase) {
+    const reset = manifestMod.resetTaskAttempts(ctx.ticket);
+    if (reset) {
+      alerts.log(
+        `${ctx.session} phase advance ${prev.phase} → ${ctx.phase} — dead-end attempts reset`
+      );
+    }
+    try {
+      state.clear(ctx.ticket, 'dead-end');
+    } catch {}
+  }
+  if (prev.phase !== ctx.phase) {
+    state.write(ctx.ticket, 'last-phase', { phase: ctx.phase, seenAt: state.now() });
+  }
+}
+
 /** Run the per-session pipeline. Returns when the session has been fully processed. */
 function tickSession(session) {
   const ctx = ctxFor(session);
+
+  // Phase-advance check: clear stale dead-end markers + attempts the moment
+  // the agent makes real progress. Runs before detectors so a freshly-
+  // advanced ticket isn't treated as still-stalled this tick.
+  detectPhaseAdvance(ctx);
 
   // Question always wins — never nudge while the agent is waiting on us.
   const qHit = DETECTORS.question.detect(ctx);
@@ -302,6 +332,11 @@ function tickSession(session) {
   alerts.resetCount(
     alerts.alertKey({ session: ctx.session, kind: 'question-pending', phase: ctx.phase })
   );
+
+  // LOCAL OVERRIDE: agents at ci/complete are doing zero useful work — kill
+  // them immediately to free the slot, regardless of silence/spinner state.
+  // Runs before silence so we don't waste a tick auto-restarting them first.
+  if (ciGate.maybeRotateOnPhase({ ctx, state, actions, restartEligible })) return;
 
   const detectorsToRun = phaseFor(ctx.phase).detectors.filter((k) => k !== 'question');
 
