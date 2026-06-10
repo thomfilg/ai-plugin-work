@@ -26,6 +26,31 @@ function renderedSize(entries, sep) {
   return total;
 }
 
+// Collect indices of entries currently eligible for demotion (finalKind 'full'
+// AND fullText length at or above the skip threshold).
+function findDemotableIndices(entries, skipBelow) {
+  const out = [];
+  for (let i = 0; i < entries.length; i++) {
+    const e = entries[i];
+    if (e.finalKind === 'full' && e.fullText.length >= skipBelow) out.push(i);
+  }
+  return out;
+}
+
+// Demote the highest-indexed demotable entry, reserving the lowest-indexed
+// demotable as the rotation anchor (terminal rotation guarantee). Returns
+// true iff an entry was demoted in this pass.
+function demoteOnePass(entries, demotableIndices) {
+  const anchor = demotableIndices[0];
+  for (let k = demotableIndices.length - 1; k >= 0; k--) {
+    const i = demotableIndices[k];
+    if (i === anchor) continue;
+    entries[i].finalKind = 'reminder';
+    return true;
+  }
+  return false;
+}
+
 /**
  * Reverse-walk demotion: flip `finalKind` from `'full'` to `'reminder'` on
  * demotable entries (last to first) until the total rendered size is `≤ limit`
@@ -58,29 +83,6 @@ function renderedSize(entries, sep) {
  * @param {{ limit: number, sep: string, skipBelow?: number }} options
  * @returns {Entry[]} The same `entries` array, with `finalKind` mutated as needed.
  */
-function findDemotableIndices(entries, skipBelow) {
-  const out = [];
-  for (let i = 0; i < entries.length; i++) {
-    const e = entries[i];
-    if (e.finalKind === 'full' && e.fullText.length >= skipBelow) out.push(i);
-  }
-  return out;
-}
-
-// Demote the highest-indexed demotable entry, reserving the lowest-indexed
-// demotable as the rotation anchor (terminal rotation guarantee). Returns
-// true iff an entry was demoted in this pass.
-function demoteOnePass(entries, demotableIndices) {
-  const anchor = demotableIndices[0];
-  for (let k = demotableIndices.length - 1; k >= 0; k--) {
-    const i = demotableIndices[k];
-    if (i === anchor) continue;
-    entries[i].finalKind = 'reminder';
-    return true;
-  }
-  return false;
-}
-
 function demoteToFit(entries, options) {
   const opts = options || {};
   const limit = opts.limit;

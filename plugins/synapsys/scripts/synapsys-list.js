@@ -51,6 +51,9 @@ try {
 } catch {
   __ledger = { memories: {} };
 }
+// Reads ledger `injectedCount`: emissions this session that bumped the ledger
+// (full body + policy-driven reminders). Budget-demoted matches are excluded
+// by design (GH-588) so they re-fire in full on the next match.
 function injectedCountFor(name) {
   try {
     const e = __ledger && __ledger.memories && __ledger.memories[name];
