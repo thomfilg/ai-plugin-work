@@ -5,10 +5,23 @@
  * dedup primitives for the heuristic divergence emitter (path A) and self-report
  * scan (path B).
  *
- * Pure in-memory module: no `node:fs`, no timers, no async I/O. Event-count
- * eviction only (spec §Architecture/Window). All public functions are wrapped
- * fail-open so a thrown error never propagates into the dispatcher.
+ * Persistence: the Claude Code dispatcher runs as a fresh Node process per hook
+ * event. Module-level Maps alone would never accumulate state, so every public
+ * API call round-trips through `~/.claude/synapsys/.telemetry/<sessionId>.pretool-window.json`
+ * (override dir via SYNAPSYS_PRETOOL_DIR). Atomic writes via tmp + rename;
+ * disabled when SYNAPSYS_TELEMETRY=0. Event-count eviction only (spec
+ * §Architecture/Window). Every public function is fail-open: a thrown error
+ * degrades to an empty result and never propagates into the dispatcher.
+ *
+ * Pattern matching: stored `expected` is treated as a regex source (the same
+ * shape that drives `trigger_pretool` matching), so a `git push` expectation
+ * is cleared by an observed `git push origin main`. Invalid regex sources
+ * fall back to exact-string equality.
  */
+
+const os = require('node:os');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const DEFAULT_MAX = 32;
 const DEFAULT_INTERVENING = 1;
@@ -16,35 +29,118 @@ const DEFAULT_INTERVENING = 1;
 let WINDOW_MAX = DEFAULT_MAX;
 let WINDOW_INTERVENING = DEFAULT_INTERVENING;
 
-/** sessionId -> Map<memoryName, { expected, ageEvents }> (insertion-ordered) */
-const expectations = new Map();
-/** sessionId -> Set<memoryName> dedup per Stop turn */
-const turnDedup = new Map();
-
-function getSessionMap(sessionId) {
-  let m = expectations.get(sessionId);
-  if (!m) {
-    m = new Map();
-    expectations.set(sessionId, m);
-  }
-  return m;
+function persistDisabled() {
+  return process.env.SYNAPSYS_TELEMETRY === '0';
 }
 
-function enforceCap(sessionMap) {
-  while (sessionMap.size > WINDOW_MAX) {
-    const oldestKey = sessionMap.keys().next().value;
+function pretoolDir() {
+  if (process.env.SYNAPSYS_PRETOOL_DIR) return process.env.SYNAPSYS_PRETOOL_DIR;
+  return path.join(os.homedir(), '.claude', 'synapsys', '.telemetry');
+}
+
+function safeId(sessionId) {
+  return String(sessionId).replace(/[^a-zA-Z0-9._-]/g, '_');
+}
+
+function fileFor(sessionId) {
+  return path.join(pretoolDir(), `${safeId(sessionId)}.pretool-window.json`);
+}
+
+function emptyState() {
+  return { expectations: new Map(), dedup: new Set() };
+}
+
+function deserializeExpectations(raw, target) {
+  if (!raw || typeof raw !== 'object') return;
+  for (const [name, entry] of Object.entries(raw)) {
+    if (!entry || typeof entry.expected !== 'string') continue;
+    target.set(name, {
+      expected: entry.expected,
+      ageEvents: Number.isFinite(entry.ageEvents) ? entry.ageEvents : 0,
+    });
+  }
+}
+
+function deserializeDedup(raw, target) {
+  if (!Array.isArray(raw)) return;
+  for (const name of raw) {
+    if (typeof name === 'string') target.add(name);
+  }
+}
+
+function loadSession(sessionId) {
+  if (persistDisabled()) return emptyState();
+  try {
+    const file = fileFor(sessionId);
+    if (!fs.existsSync(file)) return emptyState();
+    const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const state = emptyState();
+    deserializeExpectations(data && data.expectations, state.expectations);
+    deserializeDedup(data && data.dedup, state.dedup);
+    return state;
+  } catch (_e) {
+    return emptyState();
+  }
+}
+
+function serialize(state) {
+  return {
+    expectations: Object.fromEntries(state.expectations),
+    dedup: Array.from(state.dedup),
+  };
+}
+
+function saveSession(sessionId, state) {
+  if (persistDisabled()) return;
+  try {
+    const dir = pretoolDir();
+    fs.mkdirSync(dir, { recursive: true });
+    const file = fileFor(sessionId);
+    const tmp = `${file}.tmp.${process.pid}`;
+    fs.writeFileSync(tmp, JSON.stringify(serialize(state)));
+    fs.renameSync(tmp, file);
+  } catch (_e) {
+    // fail-open
+  }
+}
+
+function deleteSession(sessionId) {
+  if (persistDisabled()) return;
+  try {
+    const file = fileFor(sessionId);
+    if (fs.existsSync(file)) fs.unlinkSync(file);
+  } catch (_e) {
+    // fail-open
+  }
+}
+
+function enforceCap(expectations) {
+  while (expectations.size > WINDOW_MAX) {
+    const oldestKey = expectations.keys().next().value;
     if (oldestKey === undefined) break;
-    sessionMap.delete(oldestKey);
+    expectations.delete(oldestKey);
+  }
+}
+
+function matchesPattern(pattern, observed) {
+  try {
+    return new RegExp(pattern).test(observed);
+  } catch (_e) {
+    return pattern === observed;
   }
 }
 
 function recordExpectation(sessionId, memoryName, expectedCommand) {
   try {
-    const sessionMap = getSessionMap(sessionId);
+    const state = loadSession(sessionId);
     // Re-insert to mark as most recently added for LRU-style eviction.
-    sessionMap.delete(memoryName);
-    sessionMap.set(memoryName, { expected: expectedCommand, ageEvents: 0 });
-    enforceCap(sessionMap);
+    state.expectations.delete(memoryName);
+    state.expectations.set(memoryName, {
+      expected: String(expectedCommand),
+      ageEvents: 0,
+    });
+    enforceCap(state.expectations);
+    saveSession(sessionId, state);
   } catch (_e) {
     // fail-open
   }
@@ -52,31 +148,35 @@ function recordExpectation(sessionId, memoryName, expectedCommand) {
 
 function resolveExpectation(sessionId, observedCommand) {
   try {
-    const sessionMap = expectations.get(sessionId);
-    if (!sessionMap || sessionMap.size === 0) {
+    const state = loadSession(sessionId);
+    if (state.expectations.size === 0) {
       return { divergent: false, expectations: [] };
     }
-    // First check for any exact match — match clears all entries for that
-    // memory (and is non-divergent).
-    for (const [memoryName, entry] of sessionMap) {
-      if (entry.expected === observedCommand) {
-        sessionMap.delete(memoryName);
-        return { divergent: false, expectations: [] };
+    // First check for any pattern match — match clears that one entry.
+    let matchedName = null;
+    for (const [name, entry] of state.expectations) {
+      if (matchesPattern(entry.expected, observedCommand)) {
+        matchedName = name;
+        break;
       }
     }
-    // No match: age every entry. Entries whose age now exceeds the intervening
-    // budget are reported as divergent and evicted.
+    if (matchedName) {
+      state.expectations.delete(matchedName);
+      saveSession(sessionId, state);
+      return { divergent: false, expectations: [] };
+    }
+    // No match: age every entry; entries exceeding the intervening budget are
+    // reported divergent and evicted.
     const divergent = [];
-    for (const [memoryName, entry] of Array.from(sessionMap.entries())) {
+    for (const [name, entry] of Array.from(state.expectations.entries())) {
       entry.ageEvents += 1;
       if (entry.ageEvents > WINDOW_INTERVENING) {
-        divergent.push({ memoryName, expected: entry.expected });
-        sessionMap.delete(memoryName);
+        divergent.push({ memoryName: name, expected: entry.expected });
+        state.expectations.delete(name);
       }
     }
-    if (divergent.length > 0) {
-      return { divergent: true, expectations: divergent };
-    }
+    saveSession(sessionId, state);
+    if (divergent.length > 0) return { divergent: true, expectations: divergent };
     return { divergent: false, expectations: [] };
   } catch (_e) {
     return { divergent: false, expectations: [] };
@@ -85,9 +185,9 @@ function resolveExpectation(sessionId, observedCommand) {
 
 function evictStale(sessionId) {
   try {
-    const sessionMap = expectations.get(sessionId);
-    if (!sessionMap) return;
-    enforceCap(sessionMap);
+    const state = loadSession(sessionId);
+    enforceCap(state.expectations);
+    saveSession(sessionId, state);
   } catch (_e) {
     // fail-open
   }
@@ -95,13 +195,10 @@ function evictStale(sessionId) {
 
 function markBehaviorChanged(sessionId, memoryName) {
   try {
-    let set = turnDedup.get(sessionId);
-    if (!set) {
-      set = new Set();
-      turnDedup.set(sessionId, set);
-    }
-    if (set.has(memoryName)) return false;
-    set.add(memoryName);
+    const state = loadSession(sessionId);
+    if (state.dedup.has(memoryName)) return false;
+    state.dedup.add(memoryName);
+    saveSession(sessionId, state);
     return true;
   } catch (_e) {
     return false;
@@ -110,7 +207,13 @@ function markBehaviorChanged(sessionId, memoryName) {
 
 function clearTurnDedup(sessionId) {
   try {
-    turnDedup.delete(sessionId);
+    const state = loadSession(sessionId);
+    state.dedup.clear();
+    if (state.expectations.size === 0) {
+      deleteSession(sessionId);
+    } else {
+      saveSession(sessionId, state);
+    }
   } catch (_e) {
     // fail-open
   }

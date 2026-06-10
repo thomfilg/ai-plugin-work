@@ -23,9 +23,7 @@ const { selectForEvent } = require(path.join(__dirname, '..', 'lib', 'matcher'))
 const { buildActiveDomains } = require(path.join(__dirname, '..', 'lib', 'active-domains'));
 const { saveStickyState } = require(path.join(__dirname, '..', 'lib', 'sticky-state'));
 const injectLedger = require('../lib/inject-ledger');
-const { recordFired, recordBehaviorChanged, isDisabled } = require(
-  path.join(__dirname, '..', 'lib', 'telemetry')
-);
+const { recordFired, isDisabled } = require(path.join(__dirname, '..', 'lib', 'telemetry'));
 const { runCiteScan, runBehaviorScan } = require(path.join(__dirname, '..', 'lib', 'cite-scan'));
 const pretoolWindow = require(path.join(__dirname, '..', 'lib', 'pretool-window'));
 const { demoteToFit } = require('../lib/budget');

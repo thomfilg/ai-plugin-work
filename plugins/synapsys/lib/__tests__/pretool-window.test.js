@@ -2,6 +2,12 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pretool-window-'));
+process.env.SYNAPSYS_PRETOOL_DIR = tmpDir;
 
 function load() {
   try {
@@ -83,4 +89,42 @@ test('markBehaviorChanged returns true first time and false on repeat per turn; 
   assert.equal(win.markBehaviorChanged(sessionId, 'mem-y'), true);
   win.clearTurnDedup(sessionId);
   assert.equal(win.markBehaviorChanged(sessionId, 'mem-x'), true);
+});
+
+test('state persists across fresh module loads (simulating dispatcher fresh process)', () => {
+  const sessionId = 'sess-persist';
+  // First "process": record an expectation.
+  const w1 = load();
+  w1.setWindowOverrides({ max: 32, intervening: 1 });
+  w1.recordExpectation(sessionId, 'mem-p', 'git push');
+  // Second "process": fresh module load, in-process Maps gone, but file remains.
+  const w2 = load();
+  w2.setWindowOverrides({ max: 32, intervening: 1 });
+  const r = w2.resolveExpectation(sessionId, 'git push origin main');
+  // Regex match: 'git push' pattern should match 'git push origin main' → non-divergent.
+  assert.equal(r.divergent, false);
+});
+
+test('resolveExpectation uses regex semantics (regex match against observed command)', () => {
+  const win = load();
+  win.setWindowOverrides({ max: 32, intervening: 1 });
+  const sessionId = 'sess-regex';
+  win.recordExpectation(sessionId, 'mem-r', 'git push');
+  // Observed `git push origin main` should match the pattern `git push`.
+  const r = win.resolveExpectation(sessionId, 'git push origin main');
+  assert.equal(r.divergent, false);
+  // Expectation should now be cleared.
+  const r2 = win.resolveExpectation(sessionId, 'whatever');
+  assert.equal(r2.divergent, false);
+});
+
+test('cross-path dedup persists across fresh module loads', () => {
+  const sessionId = 'sess-dedup-cross';
+  const w1 = load();
+  assert.equal(w1.markBehaviorChanged(sessionId, 'mem-cd'), true);
+  // Fresh load: in-process state gone, but dedup should still know mem-cd was marked.
+  const w2 = load();
+  assert.equal(w2.markBehaviorChanged(sessionId, 'mem-cd'), false);
+  w2.clearTurnDedup(sessionId);
+  assert.equal(w2.markBehaviorChanged(sessionId, 'mem-cd'), true);
 });

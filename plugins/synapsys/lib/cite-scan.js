@@ -17,6 +17,7 @@ const {
   telemetryDir,
   isDisabled,
 } = require('./telemetry');
+const pretoolWindow = require('./pretool-window');
 
 // Read names of memories with event:"fired" from the session JSONL.
 // Fail-open: any error returns an empty Set.
@@ -219,6 +220,31 @@ function runCiteScan(payload, memories) {
 // emit one `behavior_changed` per matched memory (per-call dedup). Honors
 // `isDisabled(memory)` and never auto-extracts: memories with no
 // `behaviorSignals` produce zero events. Fail-open.
+function hasNonEmptyBehaviorSignals(m) {
+  return (
+    m &&
+    Array.isArray(m.behaviorSignals) &&
+    m.behaviorSignals.some((s) => typeof s === 'string' && s.length > 0)
+  );
+}
+
+function emitBehaviorHit(hit, payload, sessionId) {
+  // Cross-path dedup: skip if path A already emitted for this (session, memory) this turn.
+  try {
+    if (!pretoolWindow.markBehaviorChanged(sessionId, hit.memory.name)) return;
+  } catch {
+    // fail-open
+  }
+  try {
+    recordBehaviorChanged(hit.memory, payload, {
+      reason: 'self-report',
+      evidence: hit.signal,
+    });
+  } catch {
+    // fail-open
+  }
+}
+
 function runBehaviorScan(payload, memories) {
   try {
     const responseText = extractResponseText(payload);
@@ -226,26 +252,15 @@ function runBehaviorScan(payload, memories) {
     const candidates = (memories || [])
       .filter((m) => m && !isDisabled(m))
       .map((m) => recoverSignals(m, { key: 'behavior_signals', field: 'behaviorSignals' }))
-      .filter(
-        (m) =>
-          m &&
-          Array.isArray(m.behaviorSignals) &&
-          m.behaviorSignals.some((s) => typeof s === 'string' && s.length > 0)
-      );
+      .filter(hasNonEmptyBehaviorSignals);
     if (!candidates.length) return;
     const hits = scanForSignalList(candidates, responseText, (m) => m.behaviorSignals);
     const seen = new Set();
+    const sessionId = resolveSessionId(payload);
     for (const hit of hits) {
       if (!hit || !hit.memory || seen.has(hit.memory.name)) continue;
       seen.add(hit.memory.name);
-      try {
-        recordBehaviorChanged(hit.memory, payload, {
-          reason: 'self-report',
-          evidence: hit.signal,
-        });
-      } catch {
-        // fail-open
-      }
+      emitBehaviorHit(hit, payload, sessionId);
     }
   } catch {
     // fail-open

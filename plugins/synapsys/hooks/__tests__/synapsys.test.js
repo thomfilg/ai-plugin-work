@@ -26,7 +26,10 @@ const path = require('node:path');
 
 const DISPATCHER = path.resolve(__dirname, '..', 'synapsys.js');
 const PRETOOL_WINDOW = path.resolve(__dirname, '..', '..', 'lib', 'pretool-window.js');
-const CITE_SCAN = path.resolve(__dirname, '..', '..', 'lib', 'cite-scan.js');
+
+// Redirect pretool-window persistence into a per-run tmpdir so in-process tests
+// don't touch the real ~/.claude/.telemetry dir.
+process.env.SYNAPSYS_PRETOOL_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-disp-pretool-'));
 
 function mktemp(prefix) {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -62,8 +65,12 @@ function makeFixture() {
     cwd,
     storeDir,
     cleanup: () => {
-      try { fs.rmSync(cwd, { recursive: true, force: true }); } catch {}
-      try { fs.rmSync(home, { recursive: true, force: true }); } catch {}
+      try {
+        fs.rmSync(cwd, { recursive: true, force: true });
+      } catch {}
+      try {
+        fs.rmSync(home, { recursive: true, force: true });
+      } catch {}
     },
   };
 }
@@ -133,9 +140,13 @@ test('AC1: PreToolUse divergence emits one behavior_changed with expected/got ev
 
   const sessionId = 'sess-ac1';
   // Fire the expectation
-  let r = runDispatcher('PreToolUse', bashPretoolPayload(sessionId, 'git push origin main', fx.cwd), {
-    home: fx.home,
-  });
+  let r = runDispatcher(
+    'PreToolUse',
+    bashPretoolPayload(sessionId, 'git push origin main', fx.cwd),
+    {
+      home: fx.home,
+    }
+  );
   assert.equal(r.status, 0, r.stderr);
 
   // Intervening divergent command
@@ -160,17 +171,6 @@ test('AC1: PreToolUse divergence emits one behavior_changed with expected/got ev
 // We require the lib modules in this test process; for source-touching we
 // invoke the dispatcher's exported helpers indirectly through a child runner
 // using `node -e`.
-
-function runInProcessScenario(scenarioJs, env = {}) {
-  return spawnSync(
-    process.execPath,
-    ['-e', scenarioJs],
-    {
-      encoding: 'utf8',
-      env: { ...process.env, ...env },
-    }
-  );
-}
 
 test('AC1+AC2+AC3 in-process: divergence emits once; match clears; intervening evicts', () => {
   const win = require(PRETOOL_WINDOW);
@@ -280,11 +280,9 @@ test('AC8 path-B: per-memory telemetry:false skips behavior_changed', (t) => {
   });
 
   const sessionId = 'sess-ac8b';
-  const r = runDispatcher(
-    'Stop',
-    stopPayload(sessionId, 'includes quiet-signal-Q now', fx.cwd),
-    { home: fx.home }
-  );
+  const r = runDispatcher('Stop', stopPayload(sessionId, 'includes quiet-signal-Q now', fx.cwd), {
+    home: fx.home,
+  });
   assert.equal(r.status, 0, r.stderr);
 
   const events = readAllEvents(fx.home, sessionId);
@@ -311,7 +309,13 @@ test('AC11: dispatcher exits 0 when cite-scan throws', (t) => {
 
 // ---- Wiring assertions: dispatcher source imports the required APIs --------
 test('dispatcher wires recordBehaviorChanged + pretool-window + runBehaviorScan', () => {
-  const src = fs.readFileSync(DISPATCHER, 'utf8');
+  // Wiring lives in synapsys.js + hooks/lib/behavior-changed.js after refactor.
+  const dispatcherSrc = fs.readFileSync(DISPATCHER, 'utf8');
+  const behaviorSrc = fs.readFileSync(
+    path.resolve(__dirname, '..', 'lib', 'behavior-changed.js'),
+    'utf8'
+  );
+  const src = dispatcherSrc + '\n' + behaviorSrc;
   assert.match(src, /pretool-window/);
   assert.match(src, /recordExpectation/);
   assert.match(src, /resolveExpectation/);
