@@ -141,6 +141,55 @@ function _checkRunnerNamingConsistency(task, changed, errors) {
   );
 }
 
+// Task types that never author tests and so are exempt from the
+// "must own a test file" authoring guard.
+const _NON_TEST_AUTHORING_TYPES = new Set(['checkpoint', 'docs', 'doc', 'documentation']);
+
+// Signals in a task's deliverables/gherkin that it authors tests: an explicit
+// RED phase or language about writing/adding failing tests.
+const _TEST_AUTHORING_RE =
+  /\*\*RED:\*\*|\bRED phase\b|\b(?:add|write|writing|author)(?:ing)?\b[^\n]*\b(?:failing\s+)?(?:unit\s+|integration\s+|e2e\s+)?tests?\b|\bfailing\s+(?:unit\s+|integration\s+|e2e\s+)?tests?\b/i;
+
+/**
+ * Returns true when this task's deliverables imply it authors test files
+ * (so the RED gate will expect a `*.test.*` / `*.spec.*` to exist).
+ *
+ * @param {object} task
+ * @returns {boolean}
+ */
+function _impliesTestAuthorship(task) {
+  const taskType = typeof task.type === 'string' ? task.type.toLowerCase().trim() : '';
+  if (_NON_TEST_AUTHORING_TYPES.has(taskType)) return false;
+  const body = typeof task.rawContent === 'string' ? task.rawContent : '';
+  return _TEST_AUTHORING_RE.test(body);
+}
+
+/**
+ * Authoring-time guard (GH-491 R3/R6): a TDD-required task whose gherkin
+ * implies test authorship MUST list a `*.test.*` / `*.spec.*` entry in its
+ * `### Files in scope`. Without it the implement-time RED gate has no test
+ * file to discover and deadlocks. Pushes an error naming the task number and
+ * instructing the author to add the test file to `### Files in scope`.
+ *
+ * @param {object} task
+ * @param {string[]} errors
+ */
+function _checkTddTaskOwnsTestFile(task, errors) {
+  if (!_impliesTestAuthorship(task)) return;
+  const scope = Array.isArray(task.filesInScope) ? task.filesInScope : [];
+  const hasTestFile = scope.some((p) => typeof p === 'string' && TEST_FILE_EXT_RE.test(p));
+  if (hasTestFile) return;
+  errors.push(
+    `Task ${task.num ?? '?'} is a TDD task whose deliverables author tests, but its ` +
+      '`### Files in scope` lists no test file (no `*.test.*` / `*.spec.*` path). The ' +
+      'implement-time RED gate discovers the failing test from `### Files in scope`, so with ' +
+      'none listed the gate has nothing to run and the task deadlocks. Add this task’s own ' +
+      'test file to `### Files in scope` (it must own BOTH the test file and the impl file ' +
+      'it tests — see split-in-tasks decomposition Rule 10). If this task authors no test ' +
+      'of its own, MERGE IT INTO THE CONSUMING TASK (split-in-tasks SKILL.md Rule 4b).'
+  );
+}
+
 /**
  * Verify the task's Test Command CHANGED_FILES list is fully covered by
  * this task's `### Files in scope` and follows runner naming conventions.
@@ -152,6 +201,8 @@ function validateTaskTestScope(task) {
   const errors = [];
   if (!task || typeof task !== 'object') return errors;
   if (_isCheckpointTask(task)) return errors;
+
+  _checkTddTaskOwnsTestFile(task, errors);
 
   if (_checkNonTestCommand(task, errors)) return errors;
 
