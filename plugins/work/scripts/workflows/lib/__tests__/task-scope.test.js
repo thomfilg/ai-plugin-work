@@ -822,6 +822,39 @@ describe('validateTaskTestScope: TDD task must own a test file in Files in scope
       `docs task must be unaffected by the own-a-test-file guard; got: ${JSON.stringify(errors)}`
     );
   });
+
+  // GH-491 follow-up (cursor[bot]): the authoring-time guard must exempt
+  // EXACTLY the Types the implement-time contract (`gateContractFor`) exempts
+  // from RED test-file discovery. Types like config / ci / mechanical-refactor
+  // / file-move commonly use `**RED:**` for verification commands with no
+  // *.test.* in scope, and the implement-time RED gate would NOT deadlock —
+  // so the authoring-time guard must NOT flag them.
+  const redVerifyBody =
+    'Bump the formatter config.\n' +
+    '- 5.1.1 **RED:** Run the verification command; confirm it currently fails.\n' +
+    '  - Test: `node --test path/to/check` reports the expected pre-change state.\n' +
+    '- 5.1.2 **GREEN:** Apply the config change.\n';
+
+  for (const type of ['config', 'ci', 'mechanical-refactor', 'file-move']) {
+    it(`(e) does NOT error for a ${type} task using **RED:** with no test file in scope`, () => {
+      const task = {
+        num: 5,
+        type,
+        title: `${type} change with RED verification`,
+        filesInScope: ['package.json'],
+        rawContent: redVerifyBody,
+      };
+      const errors = ts.validateTaskTestScope(task);
+      const owns = errors.find(
+        (e) => /Files in scope/.test(e) && /test file|\*\.test|\.spec/i.test(e)
+      );
+      assert.equal(
+        owns,
+        undefined,
+        `type=${type} is RED-exempt per gateContractFor and must not be flagged by the own-a-test-file guard; got: ${JSON.stringify(errors)}`
+      );
+    });
+  }
 });
 
 describe('findTask', () => {

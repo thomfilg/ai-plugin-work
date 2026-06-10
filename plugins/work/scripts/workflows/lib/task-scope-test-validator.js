@@ -22,6 +22,7 @@ const {
   extractChangedFilesFromTestCommand,
   extractEvalScopePairs,
 } = require('./task-scope-globs');
+const { gateContractFor } = require('../../../skills/split-in-tasks/lib/task-types');
 
 function _isCheckpointTask(task) {
   const taskType = typeof task.type === 'string' ? task.type.toLowerCase().trim() : null;
@@ -141,14 +142,30 @@ function _checkRunnerNamingConsistency(task, changed, errors) {
   );
 }
 
-// Task types that never author tests and so are exempt from the
-// "must own a test file" authoring guard.
-const _NON_TEST_AUTHORING_TYPES = new Set(['checkpoint', 'docs', 'doc', 'documentation']);
-
 // Signals in a task's deliverables/gherkin that it authors tests: an explicit
 // RED phase or language about writing/adding failing tests.
 const _TEST_AUTHORING_RE =
   /\*\*RED:\*\*|\bRED phase\b|\b(?:add|write|writing|author)(?:ing)?\b[^\n]*\b(?:failing\s+)?(?:unit\s+|integration\s+|e2e\s+)?tests?\b|\bfailing\s+(?:unit\s+|integration\s+|e2e\s+)?tests?\b/i;
+
+/**
+ * Returns true when the implement-time RED gate would actually require a
+ * `*.test.*` / `*.spec.*` file to exist for this task — i.e. the task's Type
+ * has `redRequiresTestFiles === true` in the central `gateContractFor`
+ * contract (only `tdd-code`, plus the unknown/freeform fail-closed fallback).
+ *
+ * This is the single source of truth shared with the implement-time gate
+ * (task-next.js / tdd-phase-state.js). Types the contract exempts from
+ * RED test-file discovery (`tests-only`, `docs`, `config`, `ci`,
+ * `mechanical-refactor`, `file-move`, `checkpoint`) commonly use a `**RED:**`
+ * line for verification commands without authoring a test file, so the
+ * authoring-time guard MUST NOT flag them — RED would not deadlock there.
+ *
+ * @param {object} task
+ * @returns {boolean}
+ */
+function _redRequiresTestFile(task) {
+  return gateContractFor(task.type).redRequiresTestFiles === true;
+}
 
 /**
  * Returns true when this task's deliverables imply it authors test files
@@ -158,8 +175,7 @@ const _TEST_AUTHORING_RE =
  * @returns {boolean}
  */
 function _impliesTestAuthorship(task) {
-  const taskType = typeof task.type === 'string' ? task.type.toLowerCase().trim() : '';
-  if (_NON_TEST_AUTHORING_TYPES.has(taskType)) return false;
+  if (!_redRequiresTestFile(task)) return false;
   const body = typeof task.rawContent === 'string' ? task.rawContent : '';
   return _TEST_AUTHORING_RE.test(body);
 }
