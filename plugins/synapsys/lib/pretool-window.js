@@ -22,6 +22,7 @@
 const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
+const sessionIdLib = require('./session-id');
 
 const DEFAULT_MAX = 32;
 const DEFAULT_INTERVENING = 1;
@@ -38,8 +39,12 @@ function pretoolDir() {
   return path.join(os.homedir(), '.claude', 'synapsys', '.telemetry');
 }
 
+// Use the shared SAFE_ID regex / hashId so pretool-window buckets state into
+// the same filename shape used by telemetry and inject-ledger for the same
+// raw session_id. Empty/missing ids → fixed `_unknown-session` bucket.
 function safeId(sessionId) {
-  return String(sessionId).replace(/[^a-zA-Z0-9._-]/g, '_');
+  if (typeof sessionId !== 'string' || sessionId.length === 0) return '_unknown-session';
+  return sessionIdLib.SAFE_ID_RE.test(sessionId) ? sessionId : sessionIdLib.hashId(sessionId);
 }
 
 function fileFor(sessionId) {
