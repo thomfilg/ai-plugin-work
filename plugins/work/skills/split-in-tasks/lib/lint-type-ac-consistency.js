@@ -168,8 +168,15 @@ function checkDocsExemptionTypeMismatch({ file, taskNumber, section, acceptanceC
 function checkTddCodeContract({ file, taskNumber, type, filesInScope, acceptanceCriteria }) {
   if (type !== 'tdd-code') return [];
   const warnings = [];
-  const hasTest = filesInScope.some(isTestFilePath);
-  const hasSource = filesInScope.some((p) => p && !isTestFilePath(p));
+  // GH-594 (Cursor[bot] follow-up): use the shared glob-aware classifier
+  // scopeEntryAdmitsOnlyTestFiles for both checks. Tests-only already uses
+  // it (line ~217); tdd-code did its own thing with isTestFilePath which
+  // happens to agree empirically (the TEST_FILE_PATTERN regex anchors at
+  // end-of-string, so `src/**/*.test.js` matches both), but the asymmetry
+  // is a drift hazard — any future refactor of either helper risks
+  // diverging the two contract checks. Lock them to the same source.
+  const hasTest = filesInScope.some(scopeEntryAdmitsOnlyTestFiles);
+  const hasSource = filesInScope.some((p) => p && !scopeEntryAdmitsOnlyTestFiles(p));
   if (!hasTest) {
     warnings.push(
       makeWarning({
