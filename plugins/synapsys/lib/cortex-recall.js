@@ -20,9 +20,9 @@
 
 const path = require('node:path');
 const { spawn: defaultSpawn } = require('node:child_process');
-const { execSync } = require('node:child_process');
 
 const { getCurrentTaskId } = require('./ticket-id');
+const { safeExec } = require('./memory-store');
 const cache = require('./session-cache');
 const { formatBlock } = require('./cortex-format');
 
@@ -36,34 +36,38 @@ const BG_SCRIPT = path.join(__dirname, '..', 'scripts', 'synapsys-cortex-recall-
  * Worktree affix patterns stripped from a cwd basename when falling back to a
  * cwd-derived project id (R2 step c).
  */
-const AFFIX_PATTERNS = [
-  /^w-/,
-  /-GH-\d+$/i,
-  /-[A-Z]+-\d+$/,
-];
+const AFFIX_PATTERNS = [/^w-/, /-GH-\d+$/i, /-[A-Z]+-\d+$/];
 
 /** Minimal stopword set for keyword derivation (R4). */
 const STOPWORDS = new Set([
-  'the', 'a', 'an', 'and', 'or', 'but', 'of', 'to', 'in', 'on', 'for', 'with',
-  'at', 'by', 'from', 'as', 'is', 'are', 'be', 'this', 'that', 'it', 'add',
-  'fix', 'update', 'remove', 'via',
+  'the',
+  'a',
+  'an',
+  'and',
+  'or',
+  'but',
+  'of',
+  'to',
+  'in',
+  'on',
+  'for',
+  'with',
+  'at',
+  'by',
+  'from',
+  'as',
+  'is',
+  'are',
+  'be',
+  'this',
+  'that',
+  'it',
+  'add',
+  'fix',
+  'update',
+  'remove',
+  'via',
 ]);
-
-/**
- * Default command runner — shells out synchronously. Injectable via `exec`
- * so unit tests never touch a real repo, network, or `gh`.
- *
- * @param {string} cmd shell command
- * @param {string} cwd working directory
- * @returns {string} stdout (trimmed)
- */
-function runExec(cmd, cwd) {
-  return execSync(cmd, {
-    cwd,
-    encoding: 'utf8',
-    stdio: ['pipe', 'pipe', 'pipe'],
-  }).trim();
-}
 
 /**
  * Resolve the project id following the documented precedence (R2):
@@ -77,7 +81,7 @@ function runExec(cmd, cwd) {
  */
 function resolveProjectId(cwd = process.cwd(), opts = {}) {
   const env = opts.env || process.env;
-  const exec = opts.exec || runExec;
+  const exec = opts.exec || safeExec;
 
   // 1. Explicit override.
   if (env.SYNAPSYS_CORTEX_PROJECT) return env.SYNAPSYS_CORTEX_PROJECT;
@@ -103,7 +107,10 @@ function resolveProjectId(cwd = process.cwd(), opts = {}) {
  */
 function remoteBasename(url) {
   if (!url) return '';
-  const last = url.replace(/\.git$/, '').split(/[/:]/).pop();
+  const last = url
+    .replace(/\.git$/, '')
+    .split(/[/:]/)
+    .pop();
   return (last || '').trim();
 }
 
@@ -157,7 +164,7 @@ function tokenize(text) {
  * @returns {string[]} the derived keyword tokens
  */
 function deriveKeywords({ ticketId, cwd = process.cwd() } = {}, opts = {}) {
-  const exec = opts.exec || runExec;
+  const exec = opts.exec || safeExec;
   const maxKeywords = opts.maxKeywords || 6;
 
   const titleTokens = ticketTitleTokens(ticketId, cwd, exec);
@@ -254,9 +261,12 @@ function scheduleRecall({ queries = [], projectId, sessionId, home, spawn } = {}
 
   const args = [
     BG_SCRIPT,
-    '--projectId', String(projectId || ''),
-    '--sessionId', String(sessionId || ''),
-    '--home', String(home || ''),
+    '--projectId',
+    String(projectId || ''),
+    '--sessionId',
+    String(sessionId || ''),
+    '--home',
+    String(home || ''),
     ...bounded.flatMap((q) => ['--query', q]),
   ];
 

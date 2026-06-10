@@ -306,9 +306,14 @@ function recallHome() {
   return process.env.HOME || os.homedir();
 }
 
-/** Resolve a session id from the payload, falling back to a stable token. */
+/**
+ * Resolve a session id from the payload, falling back to the parent process id.
+ * The fallback MUST match `scripts/synapsys-recall.js` (`String(process.ppid)`)
+ * so the status reporter keys off the same id the hook wrote the cache under
+ * when no `session_id` is present in the payload.
+ */
 function sessionIdOf(payload) {
-  return String(payload.session_id || payload.sessionId || 'default');
+  return String(payload.session_id || payload.sessionId || process.ppid);
 }
 
 /**
@@ -330,8 +335,12 @@ function recallEnabled(home) {
  */
 function scheduleSessionRecall(payload) {
   const home = recallHome();
-  const { enabled } = recallEnabled(home);
+  const { config, enabled } = recallEnabled(home);
   if (!enabled) return;
+  // Per-path config sub-switch: `on_session_start:false` disables the
+  // SessionStart background recall while leaving the Phase 2 per-memory path
+  // (`on_memory_fire`) untouched.
+  if (config.on_session_start === false) return;
 
   try {
     const cwd = payload.cwd || process.cwd();
@@ -485,6 +494,10 @@ function cortexQueryContext(payload) {
 function appendCortexQuery(base, memory, ctx) {
   const query = memory.meta?.cortex_query;
   if (!query || !ctx || !ctx.recall) return base;
+  // Per-path config sub-switch: `on_memory_fire:false` disables the Phase 2
+  // per-memory cortex_query append while leaving the SessionStart path
+  // (`on_session_start`) untouched.
+  if (ctx.config && ctx.config.on_memory_fire === false) return base;
   if (suppressedByFireMode(ctx.home, ctx.sessionId, memory)) return base;
 
   try {

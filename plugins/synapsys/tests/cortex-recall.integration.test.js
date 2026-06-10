@@ -81,10 +81,19 @@ function waitForCache(home, sessionId, attempts = 200) {
       return JSON.parse(fs.readFileSync(file, 'utf8'));
     } catch {
       // Busy-wait a bounded number of cheap fs reads; no timer / no sleep.
-      for (let spin = 0; spin < 50000; spin += 1) { /* spin */ }
+      for (let spin = 0; spin < 50000; spin += 1) {
+        /* spin */
+      }
     }
   }
   return null;
+}
+
+/** Write a ~/.claude/synapsys/config.yaml under the test HOME. */
+function seedConfig(home, yaml) {
+  const dir = path.join(home, '.claude', 'synapsys');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'config.yaml'), yaml, 'utf8');
 }
 
 /** Write a tmp module exporting a recall(query, projectId) stub. */
@@ -112,15 +121,19 @@ test('SessionStart schedules two recall queries (ticket + derived keyword) with 
   const home = mkHome();
   const sessionId = `sess-${process.pid}-${Date.now()}`;
   try {
-    const res = runHook('SessionStart', { session_id: sessionId, cwd: home }, {
-      home,
-      env: {
-        SYNAPSYS_CORTEX_TICKET: 'GH-519',
-        SYNAPSYS_CORTEX_PROJECT: 'claude-plugin-work',
-        SYNAPSYS_CORTEX_KEYWORDS: 'maestro cortex recall',
-        SYNAPSYS_NO_SETUP_HINT: '1',
-      },
-    });
+    const res = runHook(
+      'SessionStart',
+      { session_id: sessionId, cwd: home },
+      {
+        home,
+        env: {
+          SYNAPSYS_CORTEX_TICKET: 'GH-519',
+          SYNAPSYS_CORTEX_PROJECT: 'claude-plugin-work',
+          SYNAPSYS_CORTEX_KEYWORDS: 'maestro cortex recall',
+          SYNAPSYS_NO_SETUP_HINT: '1',
+        },
+      }
+    );
 
     assert.equal(res.status, 0, 'SessionStart must exit 0 without blocking');
 
@@ -166,12 +179,20 @@ test('UserPromptSubmit injects the [cortex:auto-recall] block once and consumes 
       ],
     });
 
-    const first = runHook('UserPromptSubmit', { session_id: sessionId, prompt: 'hello', cwd: home }, {
-      home,
-      env: { SYNAPSYS_NO_SETUP_HINT: '1' },
-    });
+    const first = runHook(
+      'UserPromptSubmit',
+      { session_id: sessionId, prompt: 'hello', cwd: home },
+      {
+        home,
+        env: { SYNAPSYS_NO_SETUP_HINT: '1' },
+      }
+    );
     assert.equal(first.status, 0);
-    assert.match(first.stdout, /\[cortex:auto-recall\]/, 'stdout carries the auto-recall header block');
+    assert.match(
+      first.stdout,
+      /\[cortex:auto-recall\]/,
+      'stdout carries the auto-recall header block'
+    );
     assert.match(first.stdout, /mem-abc/, 'result line shows the memory id');
     assert.match(first.stdout, /\d{4}-\d{2}-\d{2}/, 'result line shows the save date');
 
@@ -180,10 +201,14 @@ test('UserPromptSubmit injects the [cortex:auto-recall] block once and consumes 
       'the cache file is consumed (deleted) after injection'
     );
 
-    const second = runHook('UserPromptSubmit', { session_id: sessionId, prompt: 'again', cwd: home }, {
-      home,
-      env: { SYNAPSYS_NO_SETUP_HINT: '1' },
-    });
+    const second = runHook(
+      'UserPromptSubmit',
+      { session_id: sessionId, prompt: 'again', cwd: home },
+      {
+        home,
+        env: { SYNAPSYS_NO_SETUP_HINT: '1' },
+      }
+    );
     assert.equal(second.status, 0);
     assert.ok(
       !/\[cortex:auto-recall\]/.test(second.stdout),
@@ -206,10 +231,14 @@ test('UserPromptSubmit renders "→ no matches" with no memory bodies when both 
       ],
     });
 
-    const res = runHook('UserPromptSubmit', { session_id: sessionId, prompt: 'hi', cwd: home }, {
-      home,
-      env: { SYNAPSYS_NO_SETUP_HINT: '1' },
-    });
+    const res = runHook(
+      'UserPromptSubmit',
+      { session_id: sessionId, prompt: 'hi', cwd: home },
+      {
+        home,
+        env: { SYNAPSYS_NO_SETUP_HINT: '1' },
+      }
+    );
     assert.equal(res.status, 0);
     assert.match(res.stdout, /→ no matches/, 'empty-result marker is present');
     assert.ok(!/saved \d{4}-\d{2}-\d{2}/.test(res.stdout), 'no memory bodies are injected');
@@ -223,16 +252,20 @@ test('SYNAPSYS_CORTEX_AUTO_RECALL=off schedules nothing and writes no cache on S
   const home = mkHome();
   const sessionId = `sess-${process.pid}-${Date.now()}-optout`;
   try {
-    const res = runHook('SessionStart', { session_id: sessionId, cwd: home }, {
-      home,
-      env: {
-        SYNAPSYS_CORTEX_AUTO_RECALL: 'off',
-        SYNAPSYS_CORTEX_TICKET: 'GH-519',
-        SYNAPSYS_CORTEX_PROJECT: 'claude-plugin-work',
-        SYNAPSYS_CORTEX_KEYWORDS: 'maestro cortex recall',
-        SYNAPSYS_NO_SETUP_HINT: '1',
-      },
-    });
+    const res = runHook(
+      'SessionStart',
+      { session_id: sessionId, cwd: home },
+      {
+        home,
+        env: {
+          SYNAPSYS_CORTEX_AUTO_RECALL: 'off',
+          SYNAPSYS_CORTEX_TICKET: 'GH-519',
+          SYNAPSYS_CORTEX_PROJECT: 'claude-plugin-work',
+          SYNAPSYS_CORTEX_KEYWORDS: 'maestro cortex recall',
+          SYNAPSYS_NO_SETUP_HINT: '1',
+        },
+      }
+    );
     assert.equal(res.status, 0);
 
     // Give any (erroneously) scheduled background job a bounded window to write.
@@ -243,15 +276,171 @@ test('SYNAPSYS_CORTEX_AUTO_RECALL=off schedules nothing and writes no cache on S
   }
 });
 
+// Scenario: config sub-switch on_session_start:false disables the SessionStart path
+test('on_session_start:false schedules nothing and writes no cache on SessionStart', () => {
+  const home = mkHome();
+  const sessionId = `sess-${process.pid}-${Date.now()}-noss`;
+  try {
+    seedConfig(home, 'cortex_auto_recall:\n  on_session_start: false\n');
+    const res = runHook(
+      'SessionStart',
+      { session_id: sessionId, cwd: home },
+      {
+        home,
+        env: {
+          SYNAPSYS_CORTEX_TICKET: 'GH-519',
+          SYNAPSYS_CORTEX_PROJECT: 'claude-plugin-work',
+          SYNAPSYS_CORTEX_KEYWORDS: 'maestro cortex recall',
+          SYNAPSYS_NO_SETUP_HINT: '1',
+        },
+      }
+    );
+    assert.equal(res.status, 0);
+
+    // No baseline cache is written and no background job materializes one.
+    const record = waitForCache(home, sessionId, 30);
+    assert.equal(record, null, 'no cache file under on_session_start:false');
+  } finally {
+    cleanup(home);
+  }
+});
+
+// Scenario: config sub-switch on_memory_fire:false disables the Phase 2 append
+test('on_memory_fire:false leaves a fired memory body unchanged (no cortex_query append)', () => {
+  const home = mkHome();
+  const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-cwd-'));
+  const sessionId = `sess-${process.pid}-${Date.now()}-nomf`;
+  try {
+    seedConfig(home, 'cortex_auto_recall:\n  on_memory_fire: false\n');
+    seedStore(
+      cwd,
+      'mem-rebase.md',
+      [
+        '---',
+        'name: rebase-helper',
+        'description: how to rebase stacked PRs',
+        'events: UserPromptSubmit',
+        'trigger_prompt: rebase',
+        'inject: full',
+        'cortex_query: stacked PR rebase',
+        '---',
+        'Always rebase the base branch first.',
+      ].join('\n')
+    );
+
+    // A recall stub that records each call to a counter file AND returns a
+    // result. With the gate in place the stub must never run (counter stays
+    // empty) and its result marker must never appear.
+    const counterFile = path.join(home, 'recall-calls.log');
+    const recallModule = writeRecallModule(
+      home,
+      `'use strict';
+const fs = require('node:fs');
+module.exports = {
+  recall(query, projectId) {
+    fs.appendFileSync(${JSON.stringify(counterFile)}, query + '\\n');
+    return { query, projectId, results: [
+      { id: 'cx-nomf', savedAt: new Date().toISOString(), title: 't', body: 'b', ageDays: 1 },
+    ] };
+  },
+};
+`
+    );
+
+    const res = runHook(
+      'UserPromptSubmit',
+      { session_id: sessionId, prompt: 'help me rebase', cwd },
+      {
+        home,
+        cwd,
+        env: {
+          SYNAPSYS_NO_SETUP_HINT: '1',
+          SYNAPSYS_CORTEX_PROJECT: 'claude-plugin-work',
+          SYNAPSYS_CORTEX_RECALL_MODULE: recallModule,
+        },
+      }
+    );
+
+    assert.equal(res.status, 0, 'hook exits 0');
+    assert.match(
+      res.stdout,
+      /Always rebase the base branch first\./,
+      'memory body injected unchanged'
+    );
+    assert.ok(
+      !/cx-nomf/.test(res.stdout),
+      'no cortex_query result appended under on_memory_fire:false'
+    );
+    assert.ok(
+      !fs.existsSync(counterFile),
+      'the inline recall is never invoked under on_memory_fire:false'
+    );
+  } finally {
+    cleanup(home);
+    cleanup(cwd);
+  }
+});
+
+// Scenario (Fix 2): with no session_id in the payload, the hook keys the cache
+// off process.ppid — the same fallback the status reporter (scripts/synapsys-recall.js)
+// uses — so the two sides agree on the session id.
+test('SessionStart with no session_id keys the baseline cache off the hook child ppid', () => {
+  const home = mkHome();
+  try {
+    // The detached background recall child's ppid is the hook process's pid,
+    // which we cannot know up front. Instead assert the baseline cache lands
+    // under SOME numeric (ppid-derived) id, never the literal "default".
+    const res = runHook(
+      'SessionStart',
+      { cwd: home },
+      {
+        home,
+        env: {
+          SYNAPSYS_CORTEX_TICKET: 'GH-519',
+          SYNAPSYS_CORTEX_PROJECT: 'claude-plugin-work',
+          SYNAPSYS_CORTEX_KEYWORDS: 'maestro cortex recall',
+          SYNAPSYS_NO_SETUP_HINT: '1',
+        },
+      }
+    );
+    assert.equal(res.status, 0);
+
+    const cacheDir = path.join(home, '.claude', 'synapsys', '.cache');
+    // Poll for a cache file to appear without sleeping.
+    let files = [];
+    for (let i = 0; i < 200; i += 1) {
+      files = fs.existsSync(cacheDir)
+        ? fs.readdirSync(cacheDir).filter((f) => f.endsWith('.json'))
+        : [];
+      if (files.length) break;
+      for (let spin = 0; spin < 50000; spin += 1) {
+        /* spin */
+      }
+    }
+    assert.ok(files.length > 0, 'a baseline cache file is written');
+    assert.ok(
+      files.some((f) => /^\d+\.json$/.test(f)),
+      'cache key is numeric (process.ppid), not the literal "default"'
+    );
+    assert.ok(!files.includes('default.json'), 'the fallback is never the literal "default"');
+  } finally {
+    cleanup(home);
+  }
+});
+
 // Scenario: Cortex MCP unavailable degrades gracefully
 test('UserPromptSubmit with no cache and no recall module exits 0 and injects no block', () => {
   const home = mkHome();
   const sessionId = `sess-${process.pid}-${Date.now()}-unavail`;
   try {
-    const res = runHook('UserPromptSubmit', { session_id: sessionId, prompt: 'hi', cwd: home }, {
-      home,
-      env: { SYNAPSYS_NO_SETUP_HINT: '1' },
-    });
+    const res = runHook(
+      'UserPromptSubmit',
+      { session_id: sessionId, prompt: 'hi', cwd: home },
+      {
+        home,
+        env: { SYNAPSYS_NO_SETUP_HINT: '1' },
+      }
+    );
     assert.equal(res.status, 0, 'hook exits 0 even with cortex unavailable');
     assert.ok(!/\[cortex:auto-recall\]/.test(res.stdout), 'no auto-recall block injected');
     assert.equal((res.stderr || '').includes('Error'), false, 'no exception propagates');
@@ -303,15 +492,19 @@ module.exports = {
 `
     );
 
-    const res = runHook('UserPromptSubmit', { session_id: sessionId, prompt: 'help me rebase', cwd }, {
-      home,
-      cwd,
-      env: {
-        SYNAPSYS_NO_SETUP_HINT: '1',
-        SYNAPSYS_CORTEX_PROJECT: 'claude-plugin-work',
-        SYNAPSYS_CORTEX_RECALL_MODULE: recallModule,
-      },
-    });
+    const res = runHook(
+      'UserPromptSubmit',
+      { session_id: sessionId, prompt: 'help me rebase', cwd },
+      {
+        home,
+        cwd,
+        env: {
+          SYNAPSYS_NO_SETUP_HINT: '1',
+          SYNAPSYS_CORTEX_PROJECT: 'claude-plugin-work',
+          SYNAPSYS_CORTEX_RECALL_MODULE: recallModule,
+        },
+      }
+    );
 
     assert.equal(res.status, 0);
     assert.match(res.stdout, /Always rebase the base branch first\./, 'memory body is injected');
@@ -353,19 +546,26 @@ module.exports = { recall() { throw new Error('recall MUST NOT run for a no-cort
 `
     );
 
-    const res = runHook('UserPromptSubmit', { session_id: sessionId, prompt: 'time to deploy', cwd }, {
-      home,
-      cwd,
-      env: {
-        SYNAPSYS_NO_SETUP_HINT: '1',
-        SYNAPSYS_CORTEX_PROJECT: 'claude-plugin-work',
-        SYNAPSYS_CORTEX_RECALL_MODULE: recallModule,
-      },
-    });
+    const res = runHook(
+      'UserPromptSubmit',
+      { session_id: sessionId, prompt: 'time to deploy', cwd },
+      {
+        home,
+        cwd,
+        env: {
+          SYNAPSYS_NO_SETUP_HINT: '1',
+          SYNAPSYS_CORTEX_PROJECT: 'claude-plugin-work',
+          SYNAPSYS_CORTEX_RECALL_MODULE: recallModule,
+        },
+      }
+    );
 
     assert.equal(res.status, 0, 'hook still exits 0 (recall not invoked, so no throw)');
     assert.match(res.stdout, /Run the deploy checklist\./, 'plain memory body injected unchanged');
-    assert.ok(!/\[cortex:auto-recall\]/.test(res.stdout), 'no cortex recall block for a plain memory');
+    assert.ok(
+      !/\[cortex:auto-recall\]/.test(res.stdout),
+      'no cortex recall block for a plain memory'
+    );
   } finally {
     cleanup(home);
     cleanup(cwd);
@@ -419,17 +619,29 @@ module.exports = {
       SYNAPSYS_CORTEX_RECALL_MODULE: recallModule,
     };
 
-    const first = runHook('UserPromptSubmit', { session_id: sessionId, prompt: 'please rebase', cwd }, { home, cwd, env });
+    const first = runHook(
+      'UserPromptSubmit',
+      { session_id: sessionId, prompt: 'please rebase', cwd },
+      { home, cwd, env }
+    );
     assert.equal(first.status, 0);
     assert.match(first.stdout, /cx-fm/, 'first fire runs the cortex_query and appends results');
 
-    const second = runHook('UserPromptSubmit', { session_id: sessionId, prompt: 'rebase again', cwd }, { home, cwd, env });
+    const second = runHook(
+      'UserPromptSubmit',
+      { session_id: sessionId, prompt: 'rebase again', cwd },
+      { home, cwd, env }
+    );
     assert.equal(second.status, 0);
 
     const calls = fs.existsSync(counterFile)
       ? fs.readFileSync(counterFile, 'utf8').split('\n').filter(Boolean)
       : [];
-    assert.equal(calls.length, 1, 'fire_mode suppresses the second cortex_query run within the session');
+    assert.equal(
+      calls.length,
+      1,
+      'fire_mode suppresses the second cortex_query run within the session'
+    );
   } finally {
     cleanup(home);
     cleanup(cwd);
