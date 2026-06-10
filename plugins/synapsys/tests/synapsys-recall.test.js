@@ -3,7 +3,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { renderStatus } = require('../scripts/synapsys-status.js');
+const { renderStatus } = require('../scripts/synapsys-recall.js');
 
 test('renderStatus lists each query string and its result count', () => {
   const cache = {

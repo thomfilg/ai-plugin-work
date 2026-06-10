@@ -20,6 +20,7 @@ Memories are markdown files with frontmatter that declares **which events** they
 | `exclude_preset` | string or csv of strings | *(optional)* Named exclude patterns sourced from `lib/synapsys-presets.json`. Resolved at load time and concatenated with `exclude_prompt` into one OR-joined exclude list (`memory.excludeResolved`). Built-in presets: `git-ops`, `ci-monitor`, `review-comment-handling` — see [Adopting `exclude_preset`](#adopting-exclude_preset) below. Unknown preset name → stderr warning + skip. |
 | `exclude_pretool` | csv of `<Tool>:<arg-regex>` | *(optional)* Negative pretool gate. Same shape as `trigger_pretool`. If the tool name + serialized tool input matches any spec here, the memory does NOT fire even if `trigger_pretool` matches. Invalid spec → stderr warning + skip. |
 | `inject` | `full` \| `summary` | How much of the body to inject |
+| `cortex_query` | string | *(optional)* When the memory fires, also run a Phase 2 cortex auto-recall with this query and inline the results beneath the memory body. See [Cortex auto-recall](#cortex-auto-recall). |
 
 ## Four storage tiers
 
@@ -320,6 +321,57 @@ The output has three sections:
 - **Never-fired** — memories present in active stores with zero `fired` events in the window. Either obsolete or simply not triggered yet.
 
 The `--last <Nd>` flag filters telemetry `.jsonl` files by `mtime`; default is `7d`. `--cwd` overrides discovery. Exit code is always `0` — read errors emit a stderr note but never fail the command.
+
+## Cortex auto-recall
+
+Synapsys surfaces prior-session insights from cortex without any agent action. There are two phases, both deterministic (no LLM call) and both fail-open — if the cortex MCP tool is unregistered, nothing is injected and the session proceeds normally.
+
+### Phase 1 — SessionStart recall
+
+On `SessionStart`, synapsys schedules a fire-and-forget background recall that issues **two bounded `cortex_recall` calls**: one keyed on the ticket id, and one on derived keywords from the session context. Results are persisted to a per-session cache file. At the **next `UserPromptSubmit` boundary**, synapsys reads the cache and injects a `[cortex:auto-recall]` block into its existing stdout channel — the same channel that already carries matched-memory bodies. When a query returns nothing, an empty marker line is emitted:
+
+```
+[cortex:auto-recall] query="<q>" projectId="<p>" → no matches
+```
+
+The SessionStart recall does **not** block the prompt; the cache is consumed on the following prompt, not the one that triggered the session.
+
+### Phase 2 — per-memory `cortex_query`
+
+Add an optional `cortex_query:` field to any memory's frontmatter. When that memory fires through the normal `matcher.js` gates, synapsys also runs `cortex_recall({ query: <cortex_query>, projectId })` and inlines the results directly beneath the memory body in the same injection chunk. Phase 2 inherits all existing gating — the memory must already have passed `selectForEvent` — and the inlined recall output is governed by the same injection budget as memory text.
+
+### Config knobs
+
+Behavior is governed by `~/.claude/synapsys/config.yaml` under a `cortex_auto_recall:` block. Defaults (shipped values):
+
+```yaml
+cortex_auto_recall:
+  enabled: true              # master switch for all auto-recall
+  on_session_start: true     # Phase 1 SessionStart recall
+  on_memory_fire: true       # Phase 2 per-memory cortex_query recall
+  on_user_prompt: false      # reserved (Phase 3, not yet wired)
+  max_age_days: 180          # drop cortex results older than this
+  max_results_per_query: 5   # cap results per cortex_recall call
+  max_chars_per_memory: 500  # truncate per-memory inlined recall output
+  max_keywords: 6            # cap derived keywords for the SessionStart keyword query
+```
+
+Any key omitted from the file falls back to the default above.
+
+### Kill-switch
+
+Set the env var `SYNAPSYS_CORTEX_AUTO_RECALL=off` (case-insensitive) to disable **all** auto-recall paths regardless of `config.yaml`. Any other value, or unset, leaves auto-recall governed by the config.
+
+### Inspecting activity — `synapsys recall`
+
+Run `/synapsys recall` (or `node plugins/synapsys/scripts/synapsys-recall.js`) to see the current session's auto-recall activity. It prints one line per query that ran this session with its result count:
+
+```
+- <query string> → 3 results
+- <other query> → 1 result
+```
+
+When nothing has run yet, it prints `no auto-recall this session`. (This is distinct from `/synapsys status`, which reports the live active-domain set.)
 
 ## Design choices
 
