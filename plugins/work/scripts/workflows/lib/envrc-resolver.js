@@ -144,7 +144,7 @@ function expandOnce(value, vars) {
     }
     // We have a $. Decide between ${NAME} and $NAME.
     let name = '';
-    let consumed = 1;
+    let consumed;
     if (value[i + 1] === '{') {
       const close = value.indexOf('}', i + 2);
       if (close === -1) {
