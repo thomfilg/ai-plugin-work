@@ -6,7 +6,7 @@
 #   1. Source ../.envrc (if present) to pick up WORKTREES_BASE, REPO_NAME,
 #      BASE_BRANCH, BOOTSTRAP_SCRIPT — same convention work-workflow uses.
 #   2. Per ticket: create worktree at <WORKTREES_BASE>/<REPO_NAME>-<TICKET>
-#      from <BASE_BRANCH> on a new branch <TICKET>-maestro.
+#      from <BASE_BRANCH> on a new branch named after <TICKET>.
 #   3. Run work-workflow's bootstrap-custom-script.js if installed (honours
 #      $BOOTSTRAP_SCRIPT just like /work-workflow:bootstrap does). Skipped
 #      gracefully if the helper isn't found.
@@ -106,7 +106,7 @@ for TICKET in "$@"; do
   fi
 
   WT="$WORKTREES_BASE/$REPO_NAME-$TICKET"
-  BRANCH="$TICKET-maestro"
+  BRANCH="$TICKET"
 
   if [ -d "$WT" ]; then
     echo "[$TICKET] worktree exists at $WT — skipping create"

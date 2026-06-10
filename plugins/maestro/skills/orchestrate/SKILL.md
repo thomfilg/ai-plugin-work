@@ -36,6 +36,28 @@ Examples:
 - **Silent agents** auto-restart after `SILENCE_LIMIT_SEC` (default 300s). `/work` is resumable from `.work-state.json`.
 - **Snapshot** anytime with `bash plugins/maestro/scripts/maestro-pulse.sh` (or `/pulse`).
 
+## Task list discipline (MANDATORY)
+
+**Always keep the TaskCreate/TaskUpdate task list in sync with reality.** Update it on EVERY state transition: bootstrap, auto-rotation kill, PR open, merge, queue change. Stale task list = operator confusion.
+
+After any state change, render the snapshot in this exact format:
+
+```
+Active: <TICKET> (<phase or note>)
+Active: <TICKET> (<phase or note>)
+... + N queued, M completed
+```
+
+Examples:
+- `Active: GH-491 (follow_up) | Active: GH-497 (check) | + 3 queued, 2 completed`
+- After a kill+bootstrap: immediately TaskUpdate the killed ticket (status → pending OR deleted) and create/update the newcomer (status → in_progress).
+
+Rules:
+- Re-queued (rotated) tickets → `status: pending`, subject prefixed `Queue:` with note about state preserved
+- Killed-and-dropped tickets → `status: deleted`
+- Done tickets with PR awaiting merge → `status: completed`, subject prefixed `Done:`
+- Never carry a task at `in_progress` after its tmux session is gone — fix it the same turn the kill is detected
+
 ## Daemon event vocabulary (the only thing your Monitor filter should match)
 
 The .js daemon emits exactly these event kinds. Anything else is bookkeeping noise — do not subscribe to it. Each kind below is dedup'd as noted; if you see it, it carries new information.
