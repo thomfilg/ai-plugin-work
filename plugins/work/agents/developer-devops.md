@@ -191,7 +191,7 @@ When this agent does run tests (e.g. for IaC validation scripts, deployment help
 Substitute the literal `$CHANGED_FILES` placeholder with the files you changed (`git diff --name-only HEAD`), then `eval` the command:
 
 ```bash
-CHANGED_FILES="scripts/deploy.ts" eval "$TEST_UNIT_COMMAND"
+[ -n "$TEST_UNIT_COMMAND" ] && CHANGED_FILES="scripts/deploy.ts" eval "$TEST_UNIT_COMMAND"
 ```
 
 If empty/unset, fall back to the project's standard command. Never run the full suite during implementation.

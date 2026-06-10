@@ -53,7 +53,7 @@ Try these in order, use the first one that works:
   bash ${CLAUDE_PLUGIN_ROOT}/scripts/dev-check/dev-check.sh
 
 # Tier 2: $TEST_UNIT_COMMAND envelope (see plugins/work/docs/test-strategy-kinds.md)
-CHANGED_FILES="$(git diff --name-only HEAD)" eval "$TEST_UNIT_COMMAND"
+[ -n "$TEST_UNIT_COMMAND" ] && CHANGED_FILES="$(git diff --name-only HEAD)" eval "$TEST_UNIT_COMMAND"
 
 # Tier 3: Bundled dev-check scripts (if neither above applies)
 ${CLAUDE_PLUGIN_ROOT}/scripts/dev-check/dev-check.sh
@@ -112,7 +112,7 @@ Try in order — use the first that succeeds:
   bash ${CLAUDE_PLUGIN_ROOT}/scripts/dev-check/dev-check.sh
 
 # Otherwise use the $TEST_UNIT_COMMAND envelope
-CHANGED_FILES="$(git diff --name-only HEAD)" eval "$TEST_UNIT_COMMAND"
+[ -n "$TEST_UNIT_COMMAND" ] && CHANGED_FILES="$(git diff --name-only HEAD)" eval "$TEST_UNIT_COMMAND"
 
 # If not, use bundled scripts directly
 # ${CLAUDE_PLUGIN_ROOT}/scripts/dev-check/dev-check.sh
