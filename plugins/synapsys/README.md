@@ -375,4 +375,4 @@ When upgrading existing memories:
 - Procedural / workflow rules (the agent only needs to read once) — leave the default `once`. No frontmatter change required.
 - Diagnostic playbooks that the agent might forget over a long session — consider `fire_mode: occasionally` with a tuned `fire_cadence`.
 
-The `synapsys:list` skill displays each memory's `fire_mode` (and `fire_cadence` when `occasionally`) plus the current session's `injectedCount`.
+The `synapsys:list` skill displays each memory's `fire_mode` (and `fire_cadence` when `occasionally`) plus the current session's `injectedCount`. `injectedCount` counts ledger-committed emissions (full body + policy-driven reminders); budget-demoted matches (see GH-588) are excluded by design so they re-fire in full on the next match.
