@@ -850,7 +850,7 @@ function printPhaseInstructions(phase, ctx) {
     for (const s of scope.filter((s) => /\.(test|spec)\.|fixtures?|\/__tests__\//.test(s)))
       lines.push(`- ${s}`);
     if (!scope.some((s) => /\.(test|spec)\.|fixtures?|\/__tests__\//.test(s))) {
-      lines.push('- (any *.test.* / *.spec.* / fixtures/ files referenced in Suggested Scope)');
+      lines.push('- (any *.test.* / *.spec.* / fixtures/ files referenced in Files in scope)');
     }
     lines.push('');
     lines.push('## How to advance');
@@ -1181,11 +1181,11 @@ function main() {
             );
           }
         } else if (testFiles.length === 0) {
-          blockReason = `No gherkin scenarios tagged @task:${taskNum} AND no *.test.* / *.spec.* files found under Suggested Scope. Add at least one failing test in a file under Suggested Scope, then re-invoke me.`;
+          blockReason = `No gherkin scenarios tagged @task:${taskNum} AND no *.test.* / *.spec.* files found under Files in scope. Add at least one failing test in a file under Files in scope, then re-invoke me.`;
         } else {
           const { totalBlocks, filesWithBlocks } = countTestBlocksInFiles(testFiles);
           if (totalBlocks === 0) {
-            blockReason = `No gherkin scenarios tagged @task:${taskNum}. Found ${testFiles.length} test file(s) in Suggested Scope but none contain it()/test() blocks. Add at least one failing test, then re-invoke me.`;
+            blockReason = `No gherkin scenarios tagged @task:${taskNum}. Found ${testFiles.length} test file(s) in Files in scope but none contain it()/test() blocks. Add at least one failing test, then re-invoke me.`;
           } else {
             const rec = recordEvidence(TDD_PHASES.red, ticket, taskNum, testCmd, repoRoot, scope);
             if (!rec.ok) {
@@ -1194,13 +1194,13 @@ function main() {
               advanced = true;
               phase = TDD_PHASES.green;
               process.stdout.write(
-                `task-next: RED accepted via unit-only fallback (no @task:${taskNum} gherkin tags; ${filesWithBlocks} test file(s) under Suggested Scope, ${totalBlocks} test block(s)).\n`
+                `task-next: RED accepted via unit-only fallback (no @task:${taskNum} gherkin tags; ${filesWithBlocks} test file(s) under Files in scope, ${totalBlocks} test block(s)).\n`
               );
             }
           }
         }
       } else if (missing.length > 0) {
-        blockReason = `Tests do not yet cover these scenarios (verbatim title match against test files in Suggested Scope):\n  - ${missing.join('\n  - ')}\nAdd a test for each (failing) before re-invoking me.`;
+        blockReason = `Tests do not yet cover these scenarios (verbatim title match against test files in Files in scope):\n  - ${missing.join('\n  - ')}\nAdd a test for each (failing) before re-invoking me.`;
       } else {
         const rec = recordEvidence(TDD_PHASES.red, ticket, taskNum, testCmd, repoRoot, scope);
         if (!rec.ok) {
