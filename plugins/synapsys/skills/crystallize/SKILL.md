@@ -103,14 +103,24 @@ For each memory, choose ONE OR MORE of these events:
   "run make health before kubectl"). The trigger_pretool list is the
   load-bearing signal. EXCLUDE if no specific tool is involved.
 
+- PostToolUse: fires AFTER a tool call returns.
+  Include this when the memory reacts to a tool's *result* — exit code,
+  output text, side effect — not to the act of running it. Example:
+  "when `pnpm test` exits nonzero, investigate before retrying" reacts to
+  the failure; "when a command prints ENOTFOUND, check the VPN" reacts to
+  the output. Target the result with trigger_pretool (the tool/path) plus
+  trigger_posttool_exit (exit code: "zero" / "nonzero" / a number) and/or
+  trigger_posttool_content (regex over the tool output). EXCLUDE if the
+  memory should fire BEFORE the tool runs — that's PreToolUse.
+
 - Stop: fires when the assistant's turn ends.
   Include ONLY when the memory is a RETROSPECTIVE check —
   "did I remember to run follow-up-pr?", "did I clean up the tmp file?".
   The body should contain words like "after", "when finished", "did I",
   "cleanup". EXCLUDE for proactive rules.
 
-Output: a non-empty subset like ["PreToolUse"] or ["UserPromptSubmit","PreToolUse"].
-Do not default to all three.
+Output: a non-empty subset like ["PreToolUse"] or ["UserPromptSubmit","PreToolUse"]
+or ["PostToolUse"]. Do not default to all events.
 ```
 
 ##### Worked examples
@@ -131,6 +141,10 @@ Memory: "After git push, auto-run /follow-up-pr"
 Memory: "DiGS retiring 2026-05-09" (project context)
   → ["UserPromptSubmit"]
   (user mentions DiGS — no tool gate, no retrospective)
+
+Memory: "When pnpm test fails, investigate the failure before re-running"
+  → ["PostToolUse"]
+  (reacts to the tool's RESULT — nonzero exit — not to running it)
 ```
 
 ### 6. Cluster duplicates and propose merges
@@ -281,6 +295,30 @@ Import: `import { Button } from '@app-services-monitoring/ui';`
 ```
 
 **Semantics (AND-NOT):** fires only when raw `<button>` is present AND none of the negative patterns match — i.e. the file does NOT already import from `@app-services-monitoring/ui` AND does NOT already pull in `Button` by name. Order of evaluation: positive content match first (early-exit), negative second. If all `trigger_pretool_content_not` patterns are invalid regex, the matcher falls back to positive-only behavior (the negative gate is dropped). If a single pattern is invalid, it's skipped with a stderr warning; the rest still gate. When a memory is excluded by a negative pattern, the matcher result reason is `negative-excludes` and the matched pattern is exposed via `matched.negative_pattern` (consumed by `synapsys-explain`).
+
+## Worked example: PostToolUse exit-code gate
+
+PostToolUse memories react to a tool's *result*, not the act of running it. This `tests-failing-investigate-first` memory fires only **after** `pnpm test` returns with a **nonzero** exit code — a failing-test reminder that stays silent on green runs. `trigger_pretool` targets the tool/command; `trigger_posttool_exit: nonzero` gates on the resolved exit code (accepts `zero` / `nonzero` / a specific number like `1`):
+
+```yaml
+---
+name: tests-failing-investigate-first
+description: When a test run fails, read the failure output and reproduce locally before re-running CI.
+events: PostToolUse
+trigger_prompt: \b(test failed|failing test|tests? red|investigate failure)\b
+trigger_pretool: Bash:pnpm\s+test
+trigger_posttool_exit: nonzero
+inject: full
+---
+
+Tests just failed. Investigate before retrying — read the failure output,
+reproduce locally, and back every re-run with local evidence. Do NOT blindly
+`gh run rerun` or re-run the suite hoping for a different result.
+```
+
+**Semantics:** fires only when `trigger_pretool` matches the tool/command (`Bash` running `pnpm test`) AND the resolved exit code satisfies `trigger_posttool_exit`. The exit code is read from `tool_response.exit_code` → `tool_response.exitCode` → `payload.exit_code`. If the field is set but **no** exit code is present anywhere in the payload, the memory **fails closed** (does not fire).
+
+For an **output-content** PostToolUse gate instead of (or in addition to) an exit-code gate, use `trigger_posttool_content` — a list of regexes matched against the stringified `tool_response` (e.g. `trigger_posttool_content: ENOTFOUND` to fire when a command prints a DNS-resolution error). It pairs with `trigger_posttool_content_not` for AND-NOT suppression, mirroring the pretool content matchers above but reading the tool **output** surface rather than the tool input.
 
 ## TODO (out of scope, deferred)
 

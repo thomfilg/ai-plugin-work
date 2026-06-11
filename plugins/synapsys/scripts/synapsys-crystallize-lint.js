@@ -201,6 +201,33 @@ const RULES = [
     },
   },
   {
+    id: 'R11-untargeted-posttool',
+    severity: 'warn',
+    scope: 'memory',
+    check(memory) {
+      const events = Array.isArray(memory.events) ? memory.events : [];
+      if (!events.includes('PostToolUse')) return [];
+      // A PostToolUse memory needs at least one targeting trigger, else it
+      // fires on every tool call (the catch-all-trigger guard). Mirror the
+      // PreToolUse-without-trigger_pretool rule: any of trigger_pretool /
+      // trigger_posttool_content / trigger_posttool_exit narrows the match.
+      const hasTrigger =
+        (Array.isArray(memory.trigger_pretool) && memory.trigger_pretool.length > 0) ||
+        (Array.isArray(memory.trigger_posttool_content) &&
+          memory.trigger_posttool_content.length > 0) ||
+        (Array.isArray(memory.trigger_posttool_exit) && memory.trigger_posttool_exit.length > 0);
+      if (hasTrigger) return [];
+      return [
+        {
+          rule: 'R11-untargeted-posttool',
+          memory: memory.name,
+          message:
+            'events includes "PostToolUse" without trigger_pretool / trigger_posttool_content / trigger_posttool_exit — memory fires on every tool call',
+        },
+      ];
+    },
+  },
+  {
     id: 'R9-pretool-malformed',
     severity: 'error',
     scope: 'memory',

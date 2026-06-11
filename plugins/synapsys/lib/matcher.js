@@ -321,6 +321,26 @@ function matchStop(memory, payload) {
 
 const _extractStopResponse = stopMatcher._extractStopResponse;
 
+// PostToolUse matcher (GH-473): inspects the tool OUTPUT (tool_response + exit
+// code) — distinct from matchPreToolResult, which reads tool_input. Bound here
+// with the same injected-helper pattern as matchStop above, supplying the
+// shared gate / content / pretool helpers the sub-module needs (P0-3, C-2).
+const postMatcher = require('./matcher-posttool');
+
+function matchPostTool(memory, payload) {
+  return postMatcher.matchPostTool(memory, payload, {
+    gateMemory,
+    safeRegex,
+    makeMatched,
+    pretoolSpecMatches,
+    findContentMatch,
+    hasNegativeContentPatterns,
+    evaluatePretoolContentNot: content.evaluatePretoolContentNot,
+  });
+}
+
+const _extractPostToolResponse = postMatcher._extractPostToolResponse;
+
 /**
  * Domain gate (GH-513 R4 / AC2): when `memory.domain` is non-empty AND an
  * `activeDomains` set is supplied AND their intersection is empty, the memory
@@ -358,6 +378,7 @@ function isDomainMismatch(memory, activeDomains) {
 const EVENT_MATCHERS = {
   UserPromptSubmit: (m, payload) => matchPrompt(m, payload?.prompt || ''),
   PreToolUse: (m, payload) => matchPreTool(m, payload),
+  PostToolUse: (m, payload) => matchPostTool(m, payload),
   SessionStart: (m) => matchSession(m),
   Stop: (m, payload) => matchStop(m, payload),
 };
@@ -379,9 +400,11 @@ module.exports = {
   matchPrompt,
   matchPreTool,
   matchPreToolResult,
+  matchPostTool,
   matchSession,
   matchStop,
   _extractStopResponse,
+  _extractPostToolResponse,
   safeRegex,
   splitTopLevelAlternation,
   extractPretoolContent,

@@ -262,6 +262,11 @@ function readMemoryFile(store, name) {
     triggerPretool: toList(meta.trigger_pretool),
     triggerPretoolContent: toList(meta.trigger_pretool_content),
     triggerPretoolContentNot: toList(meta.trigger_pretool_content_not),
+    triggerPosttoolContent: toList(meta.trigger_posttool_content),
+    triggerPosttoolContentNot: toList(meta.trigger_posttool_content_not),
+    // Scalar (not a list): `?? null` preserves a literal `0` / `"zero"` exit
+    // target — `|| null` would coerce the falsy `0` to null and lose the gate.
+    triggerPosttoolExit: meta.trigger_posttool_exit ?? null,
     triggerStopResponse: meta.trigger_stop_response || '',
     triggerSession: _truthy(meta.trigger_session),
     domain: toList(meta.domain),
