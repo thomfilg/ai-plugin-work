@@ -31,8 +31,12 @@ function buildQuestionAlertPayload({ ctx, qHit, mins }) {
     unblockCmd,
     instruction:
       `OPERATOR ACTION REQUIRED — agent is blocked on a ${qHit.promptKind || 'menu'} prompt. ` +
-      `RUN NOW: ${unblockCmd} (or surface via AskUserQuestion if you are not confident in the choice). ` +
+      `RUN NOW: ${unblockCmd}. ` +
+      'DECIDE YOURSELF — do NOT escalate /work workflow decisions to the user. ' +
+      'AskUserQuestion is ONLY for product/spec intent the user explicitly owns (feature scope, branch deletion, merge timing). ' +
+      'TDD discipline, task scope, gate-vs-artifact fixes, bot-comment triage, brief.md/spec.md/tasks.md corrections — DECIDE based on the protocol below; the user does not want trivial workflow questions. ' +
       'UNBLOCK-PROTOCOL: refuse-bypass → verify-real-work-done → fix-artifact-NOT-gate → file-root-cause-bug. ' +
+      'Default pick: the menu option marked "❯" is the agent\'s own recommendation — it usually IS the workflow-correct choice. ' +
       'INTERACT-UNTIL-UNBLOCKED: after each tmux answer, capture the pane and check for the NEXT question/menu/permission prompt. ' +
       'Keep answering in a loop (read pane → send next answer) until the agent phase advances or the prompt buffer is empty ("❯" with no menu below). ' +
       'A single tmux send-keys is NOT enough — multi-question gates (brief_gate, scope reviews) chain 3-5 prompts in sequence. ' +
