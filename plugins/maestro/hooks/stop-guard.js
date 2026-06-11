@@ -39,7 +39,13 @@
 const fs = require('fs');
 const path = require('path');
 
-if (process.env.MAESTRO_STOP_GUARD === '0') process.exit(0);
+// OPT-IN by default. The conductor session sets MAESTRO_STOP_GUARD=1 when it
+// spawns the maestro daemon (via Monitor). Other Claude sessions on the same
+// machine — including ones doing totally unrelated work — should NOT be
+// blocked from ending turns just because /tmp/maestro-alerts.jsonl exists.
+// Previously this hook was opt-out (gated by ==='0'), which fired across
+// every Claude session globally and trapped unrelated agents.
+if (process.env.MAESTRO_STOP_GUARD !== '1') process.exit(0);
 
 const ALERT_FILE = process.env.ALERT_FILE || '/tmp/maestro-alerts.jsonl';
 const STATE_FILE =
