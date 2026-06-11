@@ -111,6 +111,7 @@ function declareWedged({ session, ticket, restarts, now, silenceSec }) {
     `${session} WEDGED — ${count} auto-restarts in ${RESTART_WINDOW_MIN}m; suppressing restarts for ${WEDGED_QUIET_MIN}m`
   );
   const paneTail = tmux.capture(session).split('\n').slice(-50).join('\n');
+  const unblockCmd = `tmux capture-pane -t ${session} -p | tail -50   # diagnose, then either fix-in-pane or kill: node plugins/maestro/scripts/maestro-cleanup.js ${ticket} --tmux`;
   alerts.alert({
     session,
     ticket,
@@ -120,7 +121,8 @@ function declareWedged({ session, ticket, restarts, now, silenceSec }) {
     quietMin: WEDGED_QUIET_MIN,
     silenceSec,
     paneTail,
-    instruction: `agent restarted ${count}x in ${RESTART_WINDOW_MIN}m. Daemon won't restart for ${WEDGED_QUIET_MIN}m. UNBLOCK-PROTOCOL: diagnose root cause from paneTail; if dead-end, kill session and bootstrap next queued.`,
+    unblockCmd,
+    instruction: `OPERATOR ACTION REQUIRED — agent restarted ${count}x in ${RESTART_WINDOW_MIN}m. Daemon WON'T restart for ${WEDGED_QUIET_MIN}m. RUN NOW: ${unblockCmd}. UNBLOCK-PROTOCOL: diagnose root cause from paneTail; if dead-end, kill session and bootstrap next queued. DO NOT reply with "standing by".`,
   });
 }
 

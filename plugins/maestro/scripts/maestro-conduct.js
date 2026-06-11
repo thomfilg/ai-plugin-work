@@ -145,6 +145,7 @@ function handlePhaseStall(ctx, stallHit) {
 
   if (escalation === 'alert') {
     const paneTail = (ctx.pane || '').split('\n').slice(-40).join('\n');
+    const unblockCmd = `tmux capture-pane -t ${ctx.session} -p | tail -40   # read pane, then either tmux send-keys to unstick or kill via plugins/maestro/scripts/maestro-cleanup.js ${ctx.ticket} --tmux`;
     const r = actions.alert({
       session: ctx.session,
       ticket: ctx.ticket,
@@ -154,7 +155,8 @@ function handlePhaseStall(ctx, stallHit) {
       budgetMin: stallHit.budgetMin,
       nudges: marker.nudges,
       paneTail,
-      instruction: `phase=${ctx.phase} ${stallHit.elapsedMin}m/${stallHit.budgetMin}m. UNBLOCK-PROTOCOL: bad artifact (tasks.md/brief.md) usually root cause, NOT missing work. Pane tail in paneTail field.`,
+      unblockCmd,
+      instruction: `OPERATOR ACTION REQUIRED — agent stalled in phase=${ctx.phase} for ${stallHit.elapsedMin}m/${stallHit.budgetMin}m (${marker.nudges} nudges ignored). RUN NOW: ${unblockCmd}. UNBLOCK-PROTOCOL: bad artifact (tasks.md/brief.md) usually root cause, NOT missing work. Pane tail in paneTail field. DO NOT reply with "standing by" — that is a no-op while the agent burns dead-end attempts.`,
     });
     maybeEscalateToDeadEnd(ctx, 'nudges-exhausted', r.count, ctx.phase);
   } else if (escalation === 'interrupt') {
