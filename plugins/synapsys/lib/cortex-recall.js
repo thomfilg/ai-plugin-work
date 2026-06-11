@@ -19,12 +19,40 @@
  */
 
 const path = require('node:path');
-const { spawn: defaultSpawn } = require('node:child_process');
+const { spawn: defaultSpawn, execFileSync } = require('node:child_process');
 
 const { getCurrentTaskId } = require('./ticket-id');
-const { safeExec } = require('./memory-store');
 const cache = require('./session-cache');
 const { formatBlock } = require('./cortex-format');
+
+/**
+ * Default command runner for the git/gh probes below. Unlike `memory-store`'s
+ * `safeExec` (which runs through a shell via `execSync`), this splits the
+ * command into an argv array and uses `execFileSync` with NO shell. That closes
+ * the CodeQL "shell command built from environment values" / "indirect
+ * uncontrolled command line" sinks: a tainted token (e.g. a ticket number
+ * interpolated into `gh issue view <N>`) becomes a plain argv element rather
+ * than a shell-interpreted word, so it can never be parsed as a command. All
+ * call sites here use fixed, space-separated commands with no quoted arguments,
+ * so a whitespace split is lossless. Never throws — returns '' on any failure.
+ *
+ * @param {string} cmd space-separated command, e.g. `git status --porcelain`
+ * @param {string} cwd working directory
+ * @returns {string} trimmed stdout, or '' on error
+ */
+function shellFreeExec(cmd, cwd) {
+  try {
+    const [file, ...args] = String(cmd).split(/\s+/).filter(Boolean);
+    if (!file) return '';
+    return execFileSync(file, args, {
+      cwd,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+  } catch {
+    return '';
+  }
+}
 
 /** Hard cap on cortex calls per session (R15). */
 const MAX_QUERIES = 2;
@@ -81,7 +109,7 @@ const STOPWORDS = new Set([
  */
 function resolveProjectId(cwd = process.cwd(), opts = {}) {
   const env = opts.env || process.env;
-  const exec = opts.exec || safeExec;
+  const exec = opts.exec || shellFreeExec;
 
   // 1. Explicit override.
   if (env.SYNAPSYS_CORTEX_PROJECT) return env.SYNAPSYS_CORTEX_PROJECT;
@@ -164,7 +192,7 @@ function tokenize(text) {
  * @returns {string[]} the derived keyword tokens
  */
 function deriveKeywords({ ticketId, cwd = process.cwd() } = {}, opts = {}) {
-  const exec = opts.exec || safeExec;
+  const exec = opts.exec || shellFreeExec;
   const maxKeywords = opts.maxKeywords || 6;
 
   const titleTokens = ticketTitleTokens(ticketId, cwd, exec);

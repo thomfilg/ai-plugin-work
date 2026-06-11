@@ -179,13 +179,16 @@ function suppressedByFireMode(home, sessionId, memory) {
   const key = `${memory.name}:${memory.meta.cortex_query}`;
   const marker = fireMarkerFile(home, sessionId, key);
   try {
-    if (fs.existsSync(marker)) return true;
     fs.mkdirSync(path.dirname(marker), { recursive: true });
-    fs.writeFileSync(marker, '1');
-  } catch {
-    // Could not read/write the marker — do not suppress.
+    // Atomic create-or-fail (flag 'wx') — no check-then-act TOCTOU window. A
+    // successful write means this is the first fire (not suppressed); an
+    // EEXIST means the marker already exists this session (suppress). Any
+    // other fs error falls open to "do not suppress".
+    fs.writeFileSync(marker, '1', { flag: 'wx' });
+    return false;
+  } catch (err) {
+    return !!(err && err.code === 'EEXIST');
   }
-  return false;
 }
 
 /** Resolve the injectable inline-recall function, or null when unavailable. */
