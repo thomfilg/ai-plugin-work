@@ -131,6 +131,14 @@ for TICKET in "$@"; do
   if tmux has-session -t "$SESSION" 2>/dev/null; then
     echo "[$TICKET] tmux session $SESSION exists — skipping launch"
   else
+    # Clear per-ticket lifecycle markers from a PRIOR dead-end / ci-rotated
+    # cycle so the conductor's silence-detector doesn't refuse to auto-restart
+    # this fresh launch ("AUTO-RESTART skipped: ticket X dead-end-freed").
+    # maybeAutoBootstrap clears these for daemon-driven bootstraps; this
+    # mirrors it for operator-driven (manual) bootstraps.
+    MAESTRO_STATE_DIR="${HOME}/.cache/maestro-conduct"
+    rm -f "$MAESTRO_STATE_DIR/$TICKET.dead-end.json" \
+          "$MAESTRO_STATE_DIR/$TICKET.ci-rotated.json" 2>/dev/null || true
     tmux new-session -d -s "$SESSION" -c "$WT" \
       "$CLAUDE_BIN --dangerously-skip-permissions '/$SKILL_NAME $TICKET'"
     echo "[$TICKET] launched tmux session $SESSION (claude /$SKILL_NAME $TICKET)"
