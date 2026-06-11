@@ -173,9 +173,14 @@ function poolFullForTask(taskId, activeWorkSessions) {
   if (!hit) return false;
   const { manifest: m } = hit;
   if (typeof m.slots !== 'number' || !Array.isArray(m.tasks)) return false;
-  const aliveTickets = aliveTicketSet(activeWorkSessions);
-  const liveInThisManifest = m.tasks.filter((t) => aliveTickets.has(t.id)).length;
-  return liveInThisManifest >= m.slots;
+  // GLOBAL cap: enforce this manifest's `slots` against ALL live `-work`
+  // sessions, not just the ones in the owning manifest. Per-manifest scoping
+  // let stale/sibling manifests bootstrap past the active pool — sessions
+  // dir is a shared namespace; the cap must be shared too.
+  const liveWork = (Array.isArray(activeWorkSessions) ? activeWorkSessions : []).filter((s) =>
+    /-work$/.test(s)
+  ).length;
+  return liveWork >= m.slots;
 }
 
 module.exports = {

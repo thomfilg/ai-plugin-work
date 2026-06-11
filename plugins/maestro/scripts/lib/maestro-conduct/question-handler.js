@@ -11,6 +11,14 @@
  */
 
 function buildQuestionAlertPayload({ ctx, qHit, mins }) {
+  // Build a copy-paste-able unblock command from the marked option. If the
+  // detector flagged a default with "❯" (qHit.defaultOption), prefer that;
+  // otherwise show the option list verbatim so the operator can pick.
+  const defaultOpt = qHit.defaultOption || (Array.isArray(qHit.options) ? qHit.options[0] : null);
+  const optionNum = defaultOpt && /^\s*(\d+)/.exec(defaultOpt);
+  const unblockCmd = optionNum
+    ? `tmux send-keys -t ${ctx.session} '${optionNum[1]}' Enter`
+    : `tmux capture-pane -t ${ctx.session} -p | tail -40   # read prompt, then: tmux send-keys -t ${ctx.session} '<N>' Enter`;
   return {
     session: ctx.session,
     ticket: ctx.ticket,
@@ -20,11 +28,15 @@ function buildQuestionAlertPayload({ ctx, qHit, mins }) {
     options: qHit.options,
     promptKind: qHit.promptKind,
     paneTail: (ctx.pane || '').split('\n').slice(-40).join('\n'),
+    unblockCmd,
     instruction:
+      `OPERATOR ACTION REQUIRED — agent is blocked on a ${qHit.promptKind || 'menu'} prompt. ` +
+      `RUN NOW: ${unblockCmd} (or surface via AskUserQuestion if you are not confident in the choice). ` +
       'UNBLOCK-PROTOCOL: refuse-bypass → verify-real-work-done → fix-artifact-NOT-gate → file-root-cause-bug. ' +
       'INTERACT-UNTIL-UNBLOCKED: after each tmux answer, capture the pane and check for the NEXT question/menu/permission prompt. ' +
       'Keep answering in a loop (read pane → send next answer) until the agent phase advances or the prompt buffer is empty ("❯" with no menu below). ' +
       'A single tmux send-keys is NOT enough — multi-question gates (brief_gate, scope reviews) chain 3-5 prompts in sequence. ' +
+      'DO NOT reply with "standing by" — that is a no-op while the agent burns dead-end attempts. ' +
       'Pane tail in paneTail field. Each ignored repeat brings DEAD-END closer (3 repeats → DEAD-END).',
   };
 }

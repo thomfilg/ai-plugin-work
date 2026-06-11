@@ -304,7 +304,11 @@ function killAndBootstrapNext({
     }
   }
   manifest.updateTaskStatus(ticket, manifestStatus, manifestNote);
-  const next = findNextEligibleTask();
+  // Exclude the just-killed ticket — even if it's now `pending` and would
+  // otherwise top the queue, immediately re-bootstrapping it defeats the
+  // purpose of the kill. POOL-FILL will pick it back up on a later tick
+  // when a different slot frees, giving the operator a real rotation.
+  const next = findNextEligibleTask(ticket);
   const autoBootstrapped = !!(next && maybeAutoBootstrap(next.taskId));
   const instruction = buildNextActionInstruction({
     prefix: logPrefix,
