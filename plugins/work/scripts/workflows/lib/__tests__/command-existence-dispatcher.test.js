@@ -251,3 +251,27 @@ d2('dispatchScriptRunner with `run` token', () => {
     );
   });
 });
+
+const { describe: d5, it: i5 } = require('node:test');
+const assertEq5 = require('node:assert/strict');
+const dispatcherCh = require('../command-existence-dispatcher');
+
+d5('runtime placeholder vars (cursor[bot] 3423875115)', () => {
+  i5('$CHANGED_FILES in expanded envelope is treated as runtime-bound, not envrc-missing', () => {
+    const envrc = { vars: { TEST_UNIT_COMMAND: 'pnpm test $CHANGED_FILES' } };
+    const ctx = {
+      envrc,
+      packageJson: { manifest: { scripts: { test: 'node --test' } } },
+    };
+    const { ok, errors } = dispatcherCh.dispatch('eval "$TEST_UNIT_COMMAND"', ctx);
+    assertEq5.equal(ok, true, `expected pass, got errors: ${JSON.stringify(errors)}`);
+  });
+  i5('Unknown $VAR with no .envrc still errors', () => {
+    const { ok, errors } = dispatcherCh.dispatch('eval "$NOT_A_RUNTIME_VAR"', { envrc: null });
+    assertEq5.equal(ok, false);
+    assertEq5.ok(
+      errors.some((e) => /NOT_A_RUNTIME_VAR/.test(e)),
+      JSON.stringify(errors)
+    );
+  });
+});

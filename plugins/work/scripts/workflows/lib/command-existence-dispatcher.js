@@ -205,11 +205,21 @@ function dispatchBareBinary(argv, ctx, errors) {
   );
 }
 
+// Variables bound at runtime by the orchestrator (not in `.envrc`). When the
+// expanded envelope template references `$CHANGED_FILES`, the validator must
+// not flag it as missing — it's set by the caller at exec time. Keep this
+// list narrow; add only well-known orchestrator placeholders.
+const RUNTIME_PLACEHOLDER_VARS = new Set(['CHANGED_FILES', 'TICKET', 'TICKET_ID']);
+
 function dispatchVarSegment(segment, ctx, errors, depth) {
   const envrc = loadEnvrc(ctx);
   const name = extractFirstVarName(segment);
   if (!name) {
     errors.push(prefixHeading(ctx.taskHeading, `unresolved variable reference in: ${segment}`));
+    return;
+  }
+  if (RUNTIME_PLACEHOLDER_VARS.has(name)) {
+    // Runtime-bound; treat as already-resolved and stop walking this segment.
     return;
   }
   if (!envrc) {
@@ -218,6 +228,16 @@ function dispatchVarSegment(segment, ctx, errors, depth) {
   }
   const resolved = resolveVar(name, envrc);
   if (resolved === null || resolved === undefined || resolved === '') {
+    // resolveVar returns null when an inner reference can't be fully resolved
+    // (e.g. `TEST_UNIT_COMMAND='pnpm test $CHANGED_FILES'` where CHANGED_FILES
+    // is a runtime placeholder, not an .envrc var). Fall back to the raw
+    // template if defined — the recursive dispatch will then route the inner
+    // $VAR through this same guard, where runtime placeholders are accepted.
+    const raw = envrc.vars && envrc.vars[name];
+    if (typeof raw === 'string' && raw.length > 0) {
+      dispatchInternal(raw, ctx, errors, depth + 1);
+      return;
+    }
     errors.push(prefixHeading(ctx.taskHeading, `$${name}: unresolved or empty in .envrc`));
     return;
   }
