@@ -219,7 +219,17 @@ function dispatchVarSegment(segment, ctx, errors, depth) {
     return;
   }
   if (RUNTIME_PLACEHOLDER_VARS.has(name)) {
-    // Runtime-bound; treat as already-resolved and stop walking this segment.
+    // Runtime-bound: substitute a benign sentinel so the surrounding command
+    // (e.g. `pnpm test $CHANGED_FILES`) still gets its first-token script /
+    // binary check. Strip both `${VAR}` and `$VAR` forms.
+    const sentinel = '__runtime__';
+    const stripped = segment
+      .replace(new RegExp(`\\$\\{${name}\\}`, 'g'), sentinel)
+      .replace(new RegExp(`\\$${name}\\b`, 'g'), sentinel);
+    // If after substitution another $VAR ref remains, recurse so each ref
+    // takes its own dispatch path; otherwise treat the cleaned segment as a
+    // normal command.
+    dispatchInternal(stripped, ctx, errors, depth + 1);
     return;
   }
   if (!envrc) {

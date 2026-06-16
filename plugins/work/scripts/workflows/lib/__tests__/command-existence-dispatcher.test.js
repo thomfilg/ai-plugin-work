@@ -275,3 +275,33 @@ d5('runtime placeholder vars (cursor[bot] 3423875115)', () => {
     );
   });
 });
+
+const { describe: d6, it: i6 } = require('node:test');
+const assertEq6 = require('node:assert/strict');
+const dispatcherR2 = require('../command-existence-dispatcher');
+
+d6('runtime placeholder substitution (cursor[bot] 3423924141)', () => {
+  i6('pnpm test $CHANGED_FILES still validates pnpm script existence', () => {
+    const ctx = {
+      envrc: { vars: { TEST_UNIT_COMMAND: 'pnpm test $CHANGED_FILES' } },
+      packageJson: { manifest: { scripts: { test: 'node --test' } } },
+    };
+    const { ok, errors } = dispatcherR2.dispatch('eval "$TEST_UNIT_COMMAND"', ctx);
+    assertEq6.equal(ok, true, `expected pass, got: ${JSON.stringify(errors)}`);
+  });
+  i6(
+    'pnpm missing-script $CHANGED_FILES surfaces missing-script error despite runtime placeholder',
+    () => {
+      const ctx = {
+        envrc: { vars: { TEST_UNIT_COMMAND: 'pnpm doesnotexist $CHANGED_FILES' } },
+        packageJson: { manifest: { scripts: { test: 'node --test' } } },
+      };
+      const { ok, errors } = dispatcherR2.dispatch('eval "$TEST_UNIT_COMMAND"', ctx);
+      assertEq6.equal(ok, false);
+      assertEq6.ok(
+        errors.some((e) => /doesnotexist/.test(e)),
+        JSON.stringify(errors)
+      );
+    }
+  );
+});
