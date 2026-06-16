@@ -118,6 +118,7 @@ const BRACKET_LIST_KEYS = new Set([
   'trigger_pretool_content',
   'trigger_pretool_content_not',
   'cite_signals',
+  'behavior_signals',
   'exclude_pretool',
   'exclude_preset',
 ]);
@@ -276,6 +277,7 @@ function readMemoryFile(store, name) {
     // keys leave both as `undefined` so callers can treat absent
     // `telemetry` as "enabled" and absent `cite_signals` as "auto-extract".
     citeSignals: normalizeCiteSignals(meta.cite_signals),
+    behaviorSignals: normalizeBehaviorSignals(meta.behavior_signals),
     telemetry: normalizeTelemetry(meta.telemetry),
     excludePrompt,
     excludePretool,
@@ -286,23 +288,25 @@ function readMemoryFile(store, name) {
   };
 }
 
-// Coerce `meta.cite_signals` to an array of non-empty strings, or `undefined`
-// when the frontmatter key is absent. The frontmatter parser already turns
-// `[a, b]` into a JS array, but a single scalar (e.g. `cite_signals: solo`)
-// should still surface as a one-element array so downstream consumers don't
-// have to special-case the shape.
-function normalizeCiteSignals(value) {
+// Coerce a frontmatter signals-list field (cite_signals, behavior_signals)
+// to an array of non-empty strings, or `undefined` when the key is absent.
+// The frontmatter parser already turns `[a, b]` into a JS array (via
+// BRACKET_LIST_KEYS), but a single scalar (e.g. `cite_signals: solo`)
+// should still surface as a one-element array so downstream consumers
+// don't have to special-case the shape.
+//
+// Inline scalar form matches the README example `cite_signals: A, B, C`;
+// we split on commas so each token is a separate signal rather than a
+// single combined string that would never match the assistant response.
+// The frontmatter parser surfaces YAML flow lists like `[A]` / `[A, B]`
+// as the literal bracketed string when it doesn't recognize the array
+// form, so we strip a single matched pair of outer brackets before splitting.
+function normalizeSignalsList(value) {
   if (value === undefined || value === null || value === '') return undefined;
   if (Array.isArray(value)) {
     const filtered = value.map((s) => String(s).trim()).filter(Boolean);
     return filtered.length ? filtered : undefined;
   }
-  // Inline scalar form matches the README example `cite_signals: A, B, C`;
-  // split on commas so each token is a separate signal rather than a single
-  // combined string that would never match the assistant response.
-  // The frontmatter parser surfaces YAML flow lists like `[A]` / `[A, B]`
-  // as the literal bracketed string when it doesn't recognize the array
-  // form, so strip a single matched pair of outer brackets before splitting.
   let scalar = String(value).trim();
   const bracketed = scalar.match(/^\[(.*)\]$/);
   if (bracketed) scalar = bracketed[1];
@@ -311,6 +315,16 @@ function normalizeCiteSignals(value) {
     .map((s) => s.trim())
     .filter(Boolean);
   return tokens.length ? tokens : undefined;
+}
+
+// Thin wrappers preserved so call sites and any downstream introspection
+// keep their semantic name. Both delegate to the shared helper above.
+function normalizeCiteSignals(value) {
+  return normalizeSignalsList(value);
+}
+
+function normalizeBehaviorSignals(value) {
+  return normalizeSignalsList(value);
 }
 
 // Coerce `meta.telemetry` to a boolean when explicitly set, or `undefined`

@@ -392,4 +392,6 @@ module.exports = {
   evaluateExcludePrompt,
   evaluateExcludePretool,
   hasExcludePatterns,
+  parsePretoolSpec,
+  pretoolSpecMatches,
 };

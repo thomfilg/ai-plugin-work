@@ -23,9 +23,13 @@ const { selectForEvent } = require(path.join(__dirname, '..', 'lib', 'matcher'))
 const { buildActiveDomains } = require(path.join(__dirname, '..', 'lib', 'active-domains'));
 const { saveStickyState } = require(path.join(__dirname, '..', 'lib', 'sticky-state'));
 const injectLedger = require('../lib/inject-ledger');
-const { recordFired } = require(path.join(__dirname, '..', 'lib', 'telemetry'));
-const { runCiteScan } = require(path.join(__dirname, '..', 'lib', 'cite-scan'));
+const { recordFired, isDisabled } = require(path.join(__dirname, '..', 'lib', 'telemetry'));
+const { runCiteScan, runBehaviorScan } = require(path.join(__dirname, '..', 'lib', 'cite-scan'));
+const pretoolWindow = require(path.join(__dirname, '..', 'lib', 'pretool-window'));
 const { demoteToFit } = require('../lib/budget');
+const { expectedCommandsFor, resolveAndEmitDivergences } = require(
+  path.join(__dirname, 'lib', 'behavior-changed')
+);
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -266,7 +270,7 @@ function formatMatchedOutput(matched, sessionId) {
   return renderMatchedMemories(matched, sessionId);
 }
 
-function emitMatched(matched, payload, event) {
+function emitMatched(matched, payload, event, sessionId) {
   if (!matched.length) return;
   for (const m of matched) {
     try {
@@ -274,65 +278,115 @@ function emitMatched(matched, payload, event) {
     } catch {
       // fail-open
     }
+    // Path A: when a memory with a trigger_pretool rule fires on PreToolUse,
+    // record the expected command so a subsequent divergent PreToolUse can
+    // surface a one-off behavior_changed event.
+    if (event === 'PreToolUse' && !isDisabled(m)) {
+      const expectedAll = expectedCommandsFor(m);
+      if (expectedAll.length > 0) {
+        try {
+          pretoolWindow.recordExpectation(sessionId, m.name, expectedAll);
+        } catch {
+          // fail-open
+        }
+      }
+    }
   }
+}
+
+function resolveSessionForPayload(payload) {
+  try {
+    const sessionId = injectLedger.resolveSessionId(payload);
+    // Publish the resolved id to `.current` so out-of-process callers
+    // (synapsys-list CLI) read the same session ledger the dispatcher
+    // writes to. Fail-open: a write error never blocks the dispatcher.
+    injectLedger.publishCurrentSessionId(sessionId);
+    return sessionId;
+  } catch {
+    return '';
+  }
+}
+
+function maybeResetSessionLedger(event, sessionId) {
+  // SessionStart resets the per-session ledger (brief AC-4 / spec §3.3) and
+  // opportunistically GCs stale ledger files older than 7 days (spec §4.2).
+  if (event !== 'SessionStart') return;
+  try {
+    injectLedger.resetLedgerForSession(sessionId);
+    injectLedger.gcStaleLedgers({ maxAgeMs: SEVEN_DAYS_MS });
+  } catch {
+    /* fail-open */
+  }
+}
+
+function runStopScans(payload, memories, sessionId) {
+  try {
+    runCiteScan(payload, memories);
+  } catch {
+    // fail-open
+  }
+  try {
+    runBehaviorScan(payload, memories, sessionId);
+  } catch {
+    // fail-open
+  }
+  try {
+    pretoolWindow.clearTurnDedup(sessionId);
+  } catch {
+    // fail-open
+  }
+}
+
+async function dispatch() {
+  const event = process.argv[2];
+  if (!VALID_EVENTS.has(event)) process.exit(0);
+
+  const payload = parsePayload(await readStdin());
+  const cwd = payload.cwd || process.cwd();
+  const stores = discoverStores(cwd);
+  const memories = stores.flatMap(listMemoriesFromStore);
+
+  // Resolve session id once; used for both ledger reset (SessionStart) and
+  // the per-memory render path. Fail-open: any throw → noop and the rest of
+  // the dispatcher behaves like the pre-ledger code path.
+  const sessionId = resolveSessionForPayload(payload);
+  maybeResetSessionLedger(event, sessionId);
+
+  const sessionHint = getSessionStartHint(event, stores, memories);
+  if (sessionHint) {
+    process.stdout.write(sessionHint);
+    process.exit(0);
+  }
+
+  // Build activeDomains FIRST so UserPromptSubmit advances sticky-state
+  // even when the memory list is empty. Fail-open: on any error, omit
+  // `opts.activeDomains` to preserve pre-classifier behavior.
+  const selectOpts = buildActiveDomainsForPayload(event, payload);
+  const matched = memories.length ? selectForEvent(memories, event, payload, selectOpts) : [];
+
+  // On Stop the cite scan must read the session JSONL state from BEFORE
+  // this turn's Stop-time fired writes; Stop-injections happen after the
+  // assistant response, so attributing citations to them would be a
+  // false positive (the response cannot reference a memory that wasn't
+  // yet injected at the time it was written).
+  // Path A on PreToolUse: resolve pending expectations against the observed
+  // command BEFORE recording new ones, so a memory firing this turn does not
+  // immediately get aged out by its own observed command.
+  if (event === 'PreToolUse') {
+    resolveAndEmitDivergences(payload, memories, sessionId);
+  }
+  if (event === 'Stop') {
+    runStopScans(payload, memories, sessionId);
+  }
+  emitMatched(matched, payload, event, sessionId);
+
+  process.stdout.write(formatMatchedOutput(matched, sessionId));
+  process.exit(0);
 }
 
 (async () => {
   try {
-    const event = process.argv[2];
-    if (!VALID_EVENTS.has(event)) process.exit(0);
-
-    const payload = parsePayload(await readStdin());
-    const cwd = payload.cwd || process.cwd();
-    const stores = discoverStores(cwd);
-    const memories = stores.flatMap(listMemoriesFromStore);
-
-    // Resolve session id once; used for both ledger reset (SessionStart) and
-    // the per-memory render path. Fail-open: any throw → noop and the rest of
-    // the dispatcher behaves like the pre-ledger code path.
-    let sessionId;
-    try {
-      sessionId = injectLedger.resolveSessionId(payload);
-      // Publish the resolved id to `.current` so out-of-process callers
-      // (synapsys-list CLI) read the same session ledger the dispatcher
-      // writes to. Fail-open: a write error never blocks the dispatcher.
-      injectLedger.publishCurrentSessionId(sessionId);
-    } catch {
-      sessionId = '';
-    }
-
-    // SessionStart resets the per-session ledger (brief AC-4 / spec §3.3) and
-    // opportunistically GCs stale ledger files older than 7 days (spec §4.2).
-    if (event === 'SessionStart') {
-      try {
-        injectLedger.resetLedgerForSession(sessionId);
-        injectLedger.gcStaleLedgers({ maxAgeMs: SEVEN_DAYS_MS });
-      } catch {
-        /* fail-open */
-      }
-    }
-
-    const sessionHint = getSessionStartHint(event, stores, memories);
-    if (sessionHint) {
-      process.stdout.write(sessionHint);
-      process.exit(0);
-    }
-
-    // Build activeDomains FIRST so UserPromptSubmit advances sticky-state
-    // even when the memory list is empty. Fail-open: on any error, omit
-    // `opts.activeDomains` to preserve pre-classifier behavior.
-    const selectOpts = buildActiveDomainsForPayload(event, payload);
-    const matched = memories.length ? selectForEvent(memories, event, payload, selectOpts) : [];
-    // On Stop the cite scan must read the session JSONL state from BEFORE
-    // this turn's Stop-time fired writes; Stop-injections happen after the
-    // assistant response, so attributing citations to them would be a
-    // false positive (the response cannot reference a memory that wasn't
-    // yet injected at the time it was written).
-    if (event === 'Stop') runCiteScan(payload, memories);
-    emitMatched(matched, payload, event);
-
-    process.stdout.write(formatMatchedOutput(matched, sessionId));
-    process.exit(0);
+    await dispatch();
   } catch {
     process.exit(0);
   }

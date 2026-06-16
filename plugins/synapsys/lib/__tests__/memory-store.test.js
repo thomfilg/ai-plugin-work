@@ -182,3 +182,78 @@ test('readMemoryFile strips brackets from a single-element bracket cite_signal',
   const memories = listMemoriesFromStore(store);
   assert.deepEqual(memories[0].citeSignals, ['MAGIC_SIGNAL_X']);
 });
+
+// --- GH-559 Task 1: behavior_signals frontmatter normalization ---
+// Mirrors the cite_signals coverage above across the four YAML shapes
+// memory-store must normalize identically to cite_signals:
+//   1. bracket-array  (`[a, b, c]`)
+//   2. inline comma list (`a, b, c`)
+//   3. single scalar (`solo`)
+//   4. single-bracket scalar (`[X]`)
+// All four assert a normalized `behaviorSignals` string array on the
+// loaded memory; the raw bracket-array literal must never leak through.
+
+test('readMemoryFile forwards behavior_signals bracket-array to top-level behaviorSignals', () => {
+  const { storeDir } = makeTempStore();
+  writeMemory(storeDir, 'beh-bracket.md', {
+    name: 'beh-bracket',
+    description: 'd',
+    behavior_signals: '[alpha, beta, gamma]',
+  });
+
+  const store = { kind: 'local', dir: storeDir, projectName: 'test' };
+  const memories = listMemoriesFromStore(store);
+  assert.equal(memories.length, 1);
+  assert.deepEqual(memories[0].behaviorSignals, ['alpha', 'beta', 'gamma']);
+});
+
+test('readMemoryFile splits inline comma-separated behavior_signals into tokens', () => {
+  const { storeDir } = makeTempStore();
+  writeMemory(storeDir, 'beh-csv.md', {
+    name: 'beh-csv',
+    description: 'd',
+    behavior_signals: 'Button, packages/ui, @app/foo',
+  });
+
+  const store = { kind: 'local', dir: storeDir, projectName: 'test' };
+  const memories = listMemoriesFromStore(store);
+  assert.deepEqual(memories[0].behaviorSignals, ['Button', 'packages/ui', '@app/foo']);
+});
+
+test('readMemoryFile keeps a single scalar behavior_signal as one token', () => {
+  const { storeDir } = makeTempStore();
+  writeMemory(storeDir, 'beh-solo.md', {
+    name: 'beh-solo',
+    description: 'd',
+    behavior_signals: 'solo',
+  });
+
+  const store = { kind: 'local', dir: storeDir, projectName: 'test' };
+  const memories = listMemoriesFromStore(store);
+  assert.deepEqual(memories[0].behaviorSignals, ['solo']);
+});
+
+test('readMemoryFile strips brackets from a single-element bracket behavior_signal', () => {
+  const { storeDir } = makeTempStore();
+  writeMemory(storeDir, 'beh-one-bracket.md', {
+    name: 'beh-one-bracket',
+    description: 'd',
+    behavior_signals: '[MAGIC_BEHAVIOR_X]',
+  });
+
+  const store = { kind: 'local', dir: storeDir, projectName: 'test' };
+  const memories = listMemoriesFromStore(store);
+  assert.deepEqual(memories[0].behaviorSignals, ['MAGIC_BEHAVIOR_X']);
+});
+
+test('readMemoryFile top-level behaviorSignals is undefined when field absent', () => {
+  const { storeDir } = makeTempStore();
+  writeMemory(storeDir, 'beh-absent.md', {
+    name: 'beh-absent',
+    description: 'd',
+  });
+
+  const store = { kind: 'local', dir: storeDir, projectName: 'test' };
+  const memories = listMemoriesFromStore(store);
+  assert.equal(memories[0].behaviorSignals, undefined);
+});
