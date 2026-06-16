@@ -157,6 +157,16 @@ function _appendPeerErrors(strategy, parsedTasks, task, errors) {
   }
 }
 
+function _appendShapeErrors(strategy, task, errors) {
+  if (typeof strategyModule.validateStrategyShape !== 'function') return;
+  try {
+    const shapeErrors = strategyModule.validateStrategyShape(strategy, task) || [];
+    for (const e of shapeErrors) errors.push(e);
+  } catch {
+    /* shape helper unstable — keep going */
+  }
+}
+
 function _synthesize(strategy, envrc) {
   try {
     return strategyModule.synthesizeCommand(strategy, envrc);
@@ -180,6 +190,7 @@ function _validateOneTask(task, ctx, errors) {
   const strategy = _resolveStrategy(task);
   if (!strategy) return;
   const heading = taskHeadingFor(task);
+  _appendShapeErrors(strategy, task, errors);
   _appendPeerErrors(strategy, ctx.parsedTasks, task, errors);
   const command = _synthesize(strategy, ctx.envrc);
   if (!command) return;

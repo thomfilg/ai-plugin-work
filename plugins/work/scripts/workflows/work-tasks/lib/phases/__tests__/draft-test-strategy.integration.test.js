@@ -215,6 +215,54 @@ test('flag-on: custom body "pnpm dev:typecheck && grep -q foo bar.ts" emits exac
   );
 });
 
+const STRATEGY_TASKS_MD_UNIT_NO_ENTRY = [
+  '## Extracted Requirements',
+  '',
+  '- R1',
+  '',
+  '## Task 1 — kind=unit but no entry line (shape gate must catch this)',
+  '',
+  '### Type',
+  'backend',
+  '',
+  '### Dependencies',
+  'none',
+  '',
+  '### Requirements Covered',
+  '- R1',
+  '',
+  '### Acceptance Criteria',
+  '- does the thing',
+  '',
+  '### Files in scope',
+  '- `src/foo.ts`',
+  '',
+  '### Test Strategy',
+  '```yaml',
+  'kind: unit',
+  '```',
+  '',
+].join('\n');
+
+test('flag-on: kind=unit without entry surfaces the shape error via runStrategyValidators', () => {
+  const dir = mkTasksDir();
+  writeSpec(dir);
+  writeTasks(dir, STRATEGY_TASKS_MD_UNIT_NO_ENTRY);
+  fs.writeFileSync(
+    path.join(dir, 'package.json'),
+    JSON.stringify({ name: 'fixture', scripts: { test: 'node --test' } }),
+    'utf8'
+  );
+
+  const draftStrategy = require('../draft-test-strategy');
+  const errors = withFlag('1', () => draftStrategy.runStrategyValidators(dir), dir);
+  const joined = errors.join('\n');
+  assert.ok(
+    /kind=unit/.test(joined) && /entry/.test(joined),
+    `expected shape error naming kind=unit and the missing entry field; got: ${joined}`
+  );
+});
+
 test('flag-on no-op when validator flag is off — same fixture, no strategy errors', () => {
   const dir = mkTasksDir();
   writeSpec(dir);

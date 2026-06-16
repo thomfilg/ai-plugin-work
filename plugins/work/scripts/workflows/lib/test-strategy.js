@@ -199,10 +199,63 @@ function validatePeerCitation(strategy, allTasks, citingTask) {
   return err ? [err] : [];
 }
 
+const KIND_VALUES = Object.freeze(Object.values(KINDS));
+const ALLOWED_KINDS_LIST = KIND_VALUES.join(', ');
+
+function _hasNonEmptyString(value) {
+  return typeof value === 'string' && value.length > 0;
+}
+
+function _shapeKindError(strategy, heading) {
+  const { kind } = strategy;
+  if (!_hasNonEmptyString(kind)) {
+    return `${heading}: Test Strategy is missing the \`kind:\` field; expected one of: ${ALLOWED_KINDS_LIST}`;
+  }
+  if (!KIND_VALUES.includes(kind)) {
+    return `${heading}: Test Strategy has unknown kind '${kind}'; expected one of: ${ALLOWED_KINDS_LIST}`;
+  }
+  return null;
+}
+
+function _shapeRequiredKeyError(strategy, heading) {
+  const { kind } = strategy;
+  if (ENVELOPE_KIND_SET.has(kind) && !_hasNonEmptyString(strategy.entry)) {
+    return `${heading}: Test Strategy kind=${kind} requires an \`entry:\` line naming the test file`;
+  }
+  if (
+    kind === KINDS.CUSTOM &&
+    !_hasNonEmptyString(strategy.command) &&
+    !_hasNonEmptyString(strategy.customBody)
+  ) {
+    return `${heading}: Test Strategy kind=custom requires a \`command:\` line or a fenced bash body`;
+  }
+  return null;
+}
+
+/**
+ * Validate that a Test Strategy declaration has a known `kind` and the
+ * required keys for that kind. Peer-pointer checks (verified-by /
+ * wiring-citation → peer field present + peer exists) remain the
+ * responsibility of `validatePeerCitation`; this function focuses on the
+ * shape gate so that unknown kinds and missing required keys are caught
+ * even when `synthesizeCommand` returns `null`.
+ *
+ * Returns `string[]` of error messages — empty array means valid.
+ */
+function validateStrategyShape(strategy, citingTask) {
+  if (!strategy || typeof strategy !== 'object') return [];
+  const heading = _citingHeading(citingTask);
+  const kindErr = _shapeKindError(strategy, heading);
+  if (kindErr) return [kindErr];
+  const keyErr = _shapeRequiredKeyError(strategy, heading);
+  return keyErr ? [keyErr] : [];
+}
+
 module.exports = {
   KINDS,
   synthesizeCommand,
   validatePeerCitation,
+  validateStrategyShape,
   // Exported for the REFACTOR-phase helper test seam.
   resolveEnvelope,
 };

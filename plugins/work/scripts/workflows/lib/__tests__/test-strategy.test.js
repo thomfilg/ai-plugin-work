@@ -131,6 +131,98 @@ describe('lib/test-strategy.js', () => {
     });
   });
 
+  describe('validateStrategyShape — enum + required-key gate', () => {
+    const citingTask = { heading: 'Task 4' };
+
+    it('returns error naming the bad kind and listing allowed values', () => {
+      const { validateStrategyShape } = loadModule();
+      const errs = validateStrategyShape({ kind: 'foobar' }, citingTask);
+      assert.equal(errs.length, 1);
+      assert.match(errs[0], /Task 4/);
+      assert.match(errs[0], /foobar/);
+      for (const k of ['unit', 'integration', 'e2e', 'custom', 'verified-by', 'wiring-citation']) {
+        assert.match(errs[0], new RegExp(k));
+      }
+    });
+
+    it('returns error when kind=unit has no entry', () => {
+      const { validateStrategyShape } = loadModule();
+      const errs = validateStrategyShape({ kind: 'unit' }, citingTask);
+      assert.equal(errs.length, 1);
+      assert.match(errs[0], /kind=unit/);
+      assert.match(errs[0], /entry/);
+    });
+
+    it('returns error when kind=integration has no entry', () => {
+      const { validateStrategyShape } = loadModule();
+      const errs = validateStrategyShape({ kind: 'integration' }, citingTask);
+      assert.equal(errs.length, 1);
+      assert.match(errs[0], /kind=integration/);
+      assert.match(errs[0], /entry/);
+    });
+
+    it('returns error when kind=e2e has no entry', () => {
+      const { validateStrategyShape } = loadModule();
+      const errs = validateStrategyShape({ kind: 'e2e' }, citingTask);
+      assert.equal(errs.length, 1);
+      assert.match(errs[0], /kind=e2e/);
+      assert.match(errs[0], /entry/);
+    });
+
+    it('returns error when kind=custom has no command and no customBody', () => {
+      const { validateStrategyShape } = loadModule();
+      const errs = validateStrategyShape({ kind: 'custom' }, citingTask);
+      assert.equal(errs.length, 1);
+      assert.match(errs[0], /kind=custom/);
+      assert.match(errs[0], /command/);
+    });
+
+    it('returns error when kind is missing', () => {
+      const { validateStrategyShape } = loadModule();
+      const errs = validateStrategyShape({ entry: 'foo.test.js' }, citingTask);
+      assert.equal(errs.length, 1);
+      assert.match(errs[0], /kind/);
+    });
+
+    it('returns [] for a valid kind=unit strategy', () => {
+      const { validateStrategyShape } = loadModule();
+      assert.deepEqual(
+        validateStrategyShape({ kind: 'unit', entry: 'src/foo.test.js' }, citingTask),
+        []
+      );
+    });
+
+    it('returns [] for a valid kind=custom strategy with command', () => {
+      const { validateStrategyShape } = loadModule();
+      assert.deepEqual(
+        validateStrategyShape({ kind: 'custom', command: 'pnpm dev:check' }, citingTask),
+        []
+      );
+    });
+
+    it('returns [] for a valid kind=custom strategy with customBody only', () => {
+      const { validateStrategyShape } = loadModule();
+      assert.deepEqual(
+        validateStrategyShape({ kind: 'custom', customBody: 'pnpm dev:check' }, citingTask),
+        []
+      );
+    });
+
+    it("returns [] for kind=verified-by (peer-field is validatePeerCitation's job)", () => {
+      const { validateStrategyShape } = loadModule();
+      assert.deepEqual(
+        validateStrategyShape({ kind: 'verified-by', peer: 'Task 7' }, citingTask),
+        []
+      );
+    });
+
+    it('returns [] for null/undefined strategy (nothing to validate)', () => {
+      const { validateStrategyShape } = loadModule();
+      assert.deepEqual(validateStrategyShape(null, citingTask), []);
+      assert.deepEqual(validateStrategyShape(undefined, citingTask), []);
+    });
+  });
+
   describe('AC11 — validatePeerCitation', () => {
     const citingTask = {
       heading: 'Task 10',
