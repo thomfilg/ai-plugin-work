@@ -289,3 +289,49 @@ describe('lib/test-strategy.js', () => {
     });
   });
 });
+
+const { describe: dAc12, it: iAc12 } = require('node:test');
+const assertAc12 = require('node:assert/strict');
+const stratAc12 = require('../test-strategy');
+
+dAc12('AC12: cross-task-test relaxation — entry may reference peer-owned paths', () => {
+  iAc12(
+    'verified-by accepts when peer entry strip-matches citing scope (peer reads citing-owned path)',
+    () => {
+      // Citing task owns src/feature.ts only (no test of its own). The peer
+      // task's entry src/feature.test.ts strip-matches src/feature.ts — i.e.
+      // the peer test reads the citing task's owned production file. AC12
+      // says: that's legitimate; the implement-step scope hook still blocks
+      // edits outside scope. Validator accepts.
+      const peer = {
+        num: 1,
+        filesInScope: ['src/feature.test.ts'],
+        testStrategy: { kind: 'unit', entry: 'src/feature.test.ts' },
+      };
+      const citing = {
+        num: 2,
+        filesInScope: ['src/feature.ts'],
+        testStrategy: { kind: 'verified-by', peer: 'Task 1' },
+      };
+      const errs = stratAc12.validatePeerCitation(citing.testStrategy, [peer, citing], citing);
+      assertAc12.equal(errs.length, 0, JSON.stringify(errs));
+    }
+  );
+  iAc12(
+    'wiring-citation accepts when peer scope is a superset (peer tests already exercise barrel)',
+    () => {
+      const peer = {
+        num: 1,
+        filesInScope: ['src/new-mod.ts', 'src/new-mod.test.ts', 'src/barrel.ts'],
+        testStrategy: { kind: 'integration', entry: 'src/new-mod.test.ts' },
+      };
+      const citing = {
+        num: 2,
+        filesInScope: ['src/barrel.ts'],
+        testStrategy: { kind: 'wiring-citation', peer: 'Task 1' },
+      };
+      const errs = stratAc12.validatePeerCitation(citing.testStrategy, [peer, citing], citing);
+      assertAc12.equal(errs.length, 0, JSON.stringify(errs));
+    }
+  );
+});

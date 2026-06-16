@@ -14,18 +14,18 @@
  *                                    here; the smoke test layer covers it).
  *   - `eval "$VAR"` / any `$VAR`   → resolve via envrc-resolver, redispatch
  *                                    with a depth cap.
- *   - bare binary                  → `command -v` (spawnSync, shell:false) +
- *                                    fallback to manifest deps.
+ *   - bare binary                  → resolve against $PATH via `fs.statSync`
+ *                                    + fallback to manifest deps.
  *
  * Errors are COLLECTED (no short-circuit, AC9) and prefixed with the task
  * heading (P1.3). Manifest is memoized via `ctx.packageJson` (AC9, P2.1).
  *
  * Security (spec §Security):
- *   - No command execution at validation time beyond `command -v`.
- *   - `spawnSync` is invoked with `shell: false` exclusively.
+ *   - No command execution at validation time. The validator never spawns a
+ *     subprocess. Binary existence is determined by walking `process.env.PATH`
+ *     and probing each candidate with `fs.statSync` — no shell, no `exec`.
  */
 
-const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -86,9 +86,8 @@ function hasManifestDep(manifest, binary) {
 }
 
 function checkBinaryOnPath(binary) {
-  // Use `command -v` via spawnSync with shell:false. We invoke `sh -c` to
-  // get `command` builtin, but that requires shell:true. To stay shell:false
-  // we instead probe the PATH directly using `which`-equivalent logic.
+  // No subprocess: walk `process.env.PATH` and stat each candidate. This is
+  // the secure equivalent of `command -v <binary>` without invoking a shell.
   const PATH = process.env.PATH || '';
   const exts = process.platform === 'win32' ? (process.env.PATHEXT || '').split(';') : [''];
   for (const dir of PATH.split(path.delimiter)) {
@@ -108,13 +107,48 @@ function checkBinaryOnPath(binary) {
   return false;
 }
 
+// Sub-tokens that aren't scripts — they invoke binaries, not package.json
+// scripts. `pnpm exec <bin>`, `npm exec <bin>`, `pnpm dlx <bin>`,
+// `yarn dlx <bin>`, `npx <bin>` all hand off to a binary that we should
+// validate against PATH + manifest deps. `run` is the explicit run form
+// where the next token IS the script name.
+const PASS_THROUGH_TO_BINARY = new Set(['exec', 'dlx']);
+
+function _dispatchPassThroughBinary(runner, sub, argv, ctx, errors) {
+  if (argv.length < 3) {
+    errors.push(
+      prefixHeading(ctx.taskHeading, `${runner} ${sub} invocation missing a binary name`)
+    );
+    return;
+  }
+  dispatchBareBinary(argv.slice(2), ctx, errors);
+}
+
+function _resolveScriptIndex(argv) {
+  const sub = stripQuotes(argv[1] || '');
+  return sub === 'run' ? 2 : 1;
+}
+
+function _emitMissingScript(runner, scriptName, scripts, ctx, errors) {
+  const haystack = Object.keys(scripts);
+  const cache = ctx.__levCache || (ctx.__levCache = new Map());
+  const suggestions = nearest(scriptName, haystack, 3, { cache });
+  const suggestionText =
+    suggestions.length > 0 ? ` (did you mean: ${suggestions.join(', ')}?)` : '';
+  errors.push(
+    prefixHeading(
+      ctx.taskHeading,
+      `${runner} script "${scriptName}" is not in package.json scripts${suggestionText}`
+    )
+  );
+}
+
 function dispatchScriptRunner(argv, ctx, errors) {
-  // argv[0] is pnpm|npm|yarn. argv[1] is the script — except for the explicit
-  // `pnpm run <script>` / `npm run <script>` / `yarn run <script>` form, where
-  // the real script name is argv[2]. Treat a literal `run` token as a
-  // pass-through so common envelopes resolve their actual script.
   const runner = argv[0];
-  const scriptIdx = stripQuotes(argv[1] || '') === 'run' ? 2 : 1;
+  const sub = stripQuotes(argv[1] || '');
+  if (PASS_THROUGH_TO_BINARY.has(sub))
+    return _dispatchPassThroughBinary(runner, sub, argv, ctx, errors);
+  const scriptIdx = _resolveScriptIndex(argv);
   if (argv.length <= scriptIdx) {
     errors.push(prefixHeading(ctx.taskHeading, `${runner} invocation missing a script name`));
     return;
@@ -128,20 +162,8 @@ function dispatchScriptRunner(argv, ctx, errors) {
     return;
   }
   const scripts = pkg.manifest.scripts || {};
-  if (Object.prototype.hasOwnProperty.call(scripts, scriptName)) {
-    return;
-  }
-  const haystack = Object.keys(scripts);
-  const cache = ctx.__levCache || (ctx.__levCache = new Map());
-  const suggestions = nearest(scriptName, haystack, 3, { cache });
-  const suggestionText =
-    suggestions.length > 0 ? ` (did you mean: ${suggestions.join(', ')}?)` : '';
-  errors.push(
-    prefixHeading(
-      ctx.taskHeading,
-      `${runner} script "${scriptName}" is not in package.json scripts${suggestionText}`
-    )
-  );
+  if (Object.prototype.hasOwnProperty.call(scripts, scriptName)) return;
+  _emitMissingScript(runner, scriptName, scripts, ctx, errors);
 }
 
 function dispatchInterpreter(argv, ctx, errors) {
@@ -277,6 +299,17 @@ function _classifyAndDispatch(argv, ctx, errors, depth) {
   const rest = [first, ...argv.slice(1)];
   if (SCRIPT_RUNNERS.has(first)) return dispatchScriptRunner(rest, ctx, errors);
   if (INTERPRETERS.has(first)) return dispatchInterpreter(rest, ctx, errors);
+  // `npx <bin>` validates <bin> against PATH + manifest deps, mirroring AC's
+  // table entry for npx. Skip leading flags like `npx --yes <bin>`.
+  if (first === 'npx') {
+    let i = 1;
+    while (i < argv.length && stripQuotes(argv[i]).startsWith('-')) i += 1;
+    if (i >= argv.length) {
+      errors.push(prefixHeading(ctx.taskHeading, 'npx invocation missing a binary name'));
+      return;
+    }
+    return dispatchBareBinary(argv.slice(i), ctx, errors);
+  }
   if (_isPathLike(first)) return dispatchFilePath(rest, ctx, errors);
   return dispatchBareBinary(rest, ctx, errors);
 }
@@ -334,12 +367,6 @@ function dispatch(command, ctx) {
   dispatchInternal(command, workingCtx, errors, 0);
   return { ok: errors.length === 0, errors };
 }
-
-// Reference spawnSync to satisfy the spec §Security audit (no shell:true).
-// The audit grep checks that this file uses spawnSync exclusively with
-// shell:false; checkBinaryOnPath above implements the PATH lookup without
-// invoking a shell, but we keep the import in case future expansion needs it.
-void spawnSync;
 
 module.exports = {
   dispatch,

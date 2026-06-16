@@ -305,3 +305,60 @@ d6('runtime placeholder substitution (cursor[bot] 3423924141)', () => {
     }
   );
 });
+
+const { describe: d7, it: i7 } = require('node:test');
+const assertEq7 = require('node:assert/strict');
+const dispBug1 = require('../command-existence-dispatcher');
+
+d7('pnpm/npm/yarn exec|dlx and npx route to bare-binary (issue: Bug 1)', () => {
+  i7('pnpm exec tsx file.ts validates tsx as a binary, not as a script', () => {
+    const ctx = { packageJson: { manifest: { scripts: {}, devDependencies: { tsx: '^4.0.0' } } } };
+    const { ok, errors } = dispBug1.dispatch('pnpm exec tsx scripts/dev.ts', ctx);
+    assertEq7.equal(ok, true, `expected pass, got: ${JSON.stringify(errors)}`);
+  });
+  i7('pnpm dlx playwright validates playwright as a binary', () => {
+    const ctx = {
+      packageJson: { manifest: { scripts: {}, devDependencies: { playwright: '*' } } },
+    };
+    const { ok, errors } = dispBug1.dispatch('pnpm dlx playwright test', ctx);
+    assertEq7.equal(ok, true, `expected pass, got: ${JSON.stringify(errors)}`);
+  });
+  i7('npm exec routes the same way', () => {
+    const ctx = { packageJson: { manifest: { scripts: {}, devDependencies: { tsx: '*' } } } };
+    const { ok } = dispBug1.dispatch('npm exec tsx scripts/x.ts', ctx);
+    assertEq7.equal(ok, true);
+  });
+  i7('yarn dlx routes the same way', () => {
+    const ctx = { packageJson: { manifest: { scripts: {}, devDependencies: { tsx: '*' } } } };
+    const { ok } = dispBug1.dispatch('yarn dlx tsx scripts/x.ts', ctx);
+    assertEq7.equal(ok, true);
+  });
+  i7('npx <bin> validates against manifest devDeps when bin not on PATH', () => {
+    const ctx = { packageJson: { manifest: { scripts: {}, devDependencies: { tsx: '*' } } } };
+    const { ok, errors } = dispBug1.dispatch('npx tsx scripts/x.ts', ctx);
+    assertEq7.equal(ok, true, `expected pass, got: ${JSON.stringify(errors)}`);
+  });
+  i7('npx --yes <bin> skips leading flags', () => {
+    const ctx = { packageJson: { manifest: { scripts: {}, devDependencies: { tsx: '*' } } } };
+    const { ok } = dispBug1.dispatch('npx --yes tsx scripts/x.ts', ctx);
+    assertEq7.equal(ok, true);
+  });
+  i7('npx <unknown-bin> with no PATH match and no dep declaration errors', () => {
+    const ctx = { packageJson: { manifest: { scripts: {}, devDependencies: {} } } };
+    const { ok, errors } = dispBug1.dispatch('npx this-bin-doesnt-exist-anywhere arg', ctx);
+    assertEq7.equal(ok, false);
+    assertEq7.ok(
+      errors.some((e) => /this-bin-doesnt-exist-anywhere/.test(e)),
+      JSON.stringify(errors)
+    );
+  });
+  i7('pnpm exec with no binary token errors clearly', () => {
+    const ctx = { packageJson: { manifest: { scripts: {} } } };
+    const { ok, errors } = dispBug1.dispatch('pnpm exec', ctx);
+    assertEq7.equal(ok, false);
+    assertEq7.ok(
+      errors.some((e) => /missing a binary name/.test(e)),
+      JSON.stringify(errors)
+    );
+  });
+});
