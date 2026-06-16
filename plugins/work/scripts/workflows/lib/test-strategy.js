@@ -148,8 +148,10 @@ function _citingHeading(citingTask) {
 
 function _checkPeerKind(peerStrategy, heading, peer) {
   const peerKind = peerStrategy.kind;
-  if (peerKind === KINDS.UNIT || peerKind === KINDS.INTEGRATION) return null;
-  return `${heading}: Test Strategy peer "${peer}" has kind=${peerKind || '<missing>'}; expected kind=unit or kind=integration`;
+  if (peerKind === KINDS.UNIT || peerKind === KINDS.INTEGRATION || peerKind === KINDS.E2E) {
+    return null;
+  }
+  return `${heading}: Test Strategy peer "${peer}" has kind=${peerKind || '<missing>'}; expected kind=unit, kind=integration, or kind=e2e`;
 }
 
 function _checkPeerCoverage(peerStrategy, peerTask, citingTask, heading, peer) {

@@ -25,7 +25,7 @@ const { fileMatchesScope } = require('./task-scope-globs');
 
 const MD_EXT_RE = /\.md$/i;
 const CITATION_KINDS = new Set(['verified-by', 'wiring-citation']);
-const ENTRY_KINDS = new Set(['unit', 'integration']);
+const ENTRY_KINDS = new Set(['unit', 'integration', 'e2e']);
 
 /**
  * Predicate: every file-in-scope path is a Markdown doc.
@@ -80,17 +80,28 @@ function _applyEntryCoverage(graph, entry, taskNum, ownScope) {
   }
 }
 
+function _coverAllScope(graph, ownScope, num) {
+  for (const p of ownScope) graph.get(p).add(num);
+}
+
+function _hasEntry(strat) {
+  return typeof strat.entry === 'string' && strat.entry.length > 0;
+}
+
 function _applyTaskCoverage(graph, task) {
   const strat = task && task.testStrategy;
   if (!strat || typeof strat !== 'object') return;
   const kind = strat.kind;
   const ownScope = _scopeOf(task);
 
-  if (CITATION_KINDS.has(kind)) {
-    for (const p of ownScope) graph.get(p).add(task.num);
+  // Citations + e2e both cover the full task scope. Citations because the peer
+  // task is doing the testing; e2e because an end-to-end run exercises every
+  // production path in the same task. unit/integration narrow via entry→source.
+  if (CITATION_KINDS.has(kind) || (kind === 'e2e' && _hasEntry(strat))) {
+    _coverAllScope(graph, ownScope, task.num);
     return;
   }
-  if (ENTRY_KINDS.has(kind) && typeof strat.entry === 'string' && strat.entry) {
+  if (ENTRY_KINDS.has(kind) && _hasEntry(strat)) {
     _applyEntryCoverage(graph, strat.entry, task.num, ownScope);
   }
 }

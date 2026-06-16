@@ -3,10 +3,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 
-const {
-  buildCoverageGraph,
-  findOrphanedPaths,
-} = require('../tdd-ownership-graph');
+const { buildCoverageGraph, findOrphanedPaths } = require('../tdd-ownership-graph');
 
 /**
  * Build a minimal task object understood by the graph module.
@@ -104,7 +101,7 @@ test('docs-only path without wiring-citation → orphan diagnostic', () => {
   // Docs-only task didn't declare wiring-citation/verified-by → must be flagged.
   assert.ok(
     orphans.some((o) => o.path === 'docs/foo.md' || o.path === 'docs/bar.md'),
-    'expected docs-only task without wiring-citation to surface a diagnostic',
+    'expected docs-only task without wiring-citation to surface a diagnostic'
   );
 });
 
@@ -124,4 +121,23 @@ test('docs-only path WITH wiring-citation → no orphan', () => {
   const graph = buildCoverageGraph(tasks);
   const orphans = findOrphanedPaths(tasks, graph);
   assert.ok(!orphans.some((o) => o.path === 'docs/foo.md'));
+});
+
+const { describe: d3, it: i3 } = require('node:test');
+const assertEq3 = require('node:assert/strict');
+const graph = require('../tdd-ownership-graph');
+
+d3('e2e kind covers its scope (cursor[bot] 3385241040)', () => {
+  i3('Task with kind=e2e + entry covers its in-scope path; no orphan reported', () => {
+    const tasks = [
+      {
+        num: 1,
+        filesInScope: ['app/page.tsx', 'tests/e2e/page.spec.ts'],
+        testStrategy: { kind: 'e2e', entry: 'tests/e2e/page.spec.ts' },
+      },
+    ];
+    const coverage = graph.buildCoverageGraph(tasks);
+    const orphans = graph.findOrphanedPaths(tasks, coverage);
+    assertEq3.equal(orphans.length, 0, `expected zero orphans, got: ${JSON.stringify(orphans)}`);
+  });
 });
