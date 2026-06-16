@@ -11,15 +11,7 @@ const path = require('node:path');
 
 const { TASKS_PHASES } = require('../../tasks-phase-registry');
 const { loadTasksMd, readFileSafe, tasksMdPath } = require('./_tasks-md-loader');
-
-function sliceSection(text, headerRe) {
-  if (!text) return '';
-  const m = text.match(headerRe);
-  if (!m) return '';
-  const after = text.slice(m.index + m[0].length);
-  const next = after.match(/^##\s/m);
-  return next ? after.slice(0, next.index) : after;
-}
+const { sliceSection } = require('../../../work-spec/lib/kind-checks/shared');
 
 function listRequirementIds(text) {
   if (!text) return [];

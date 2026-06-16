@@ -109,13 +109,17 @@ function checkBinaryOnPath(binary) {
 }
 
 function dispatchScriptRunner(argv, ctx, errors) {
-  // argv[0] is pnpm|npm|yarn. argv[1] is the script (or possibly a flag).
+  // argv[0] is pnpm|npm|yarn. argv[1] is the script — except for the explicit
+  // `pnpm run <script>` / `npm run <script>` / `yarn run <script>` form, where
+  // the real script name is argv[2]. Treat a literal `run` token as a
+  // pass-through so common envelopes resolve their actual script.
   const runner = argv[0];
-  if (argv.length < 2) {
+  const scriptIdx = stripQuotes(argv[1] || '') === 'run' ? 2 : 1;
+  if (argv.length <= scriptIdx) {
     errors.push(prefixHeading(ctx.taskHeading, `${runner} invocation missing a script name`));
     return;
   }
-  const scriptName = stripQuotes(argv[1]);
+  const scriptName = stripQuotes(argv[scriptIdx]);
   const pkg = loadManifest(ctx);
   if (!pkg || !pkg.manifest) {
     errors.push(

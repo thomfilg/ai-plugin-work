@@ -218,3 +218,36 @@ describe('lib/command-existence-dispatcher.js — dispatch()', () => {
     }
   });
 });
+
+const { describe: d2, it: i2 } = require('node:test');
+const assertEq = require('node:assert/strict');
+const dispatcherUnderTest = require('../command-existence-dispatcher');
+
+d2('dispatchScriptRunner with `run` token', () => {
+  i2('pnpm run dev:typecheck resolves dev:typecheck (not run)', () => {
+    const ctx = { packageJson: { manifest: { scripts: { 'dev:typecheck': 'tsc -p .' } } } };
+    const { ok, errors } = dispatcherUnderTest.dispatch('pnpm run dev:typecheck', ctx);
+    assertEq.equal(ok, true, `expected pass, got errors: ${JSON.stringify(errors)}`);
+    assertEq.equal(errors.length, 0);
+  });
+
+  i2('npm run test resolves test (not run)', () => {
+    const ctx = { packageJson: { manifest: { scripts: { test: 'node --test' } } } };
+    const { ok, errors } = dispatcherUnderTest.dispatch('npm run test', ctx);
+    assertEq.equal(ok, true, `expected pass, got errors: ${JSON.stringify(errors)}`);
+  });
+
+  i2('pnpm run <missing> errors on the real script name, not "run"', () => {
+    const ctx = { packageJson: { manifest: { scripts: { test: 'node --test' } } } };
+    const { ok, errors } = dispatcherUnderTest.dispatch('pnpm run nope', ctx);
+    assertEq.equal(ok, false);
+    assertEq.ok(
+      errors.some((e) => /nope/.test(e)),
+      `expected error naming "nope", got: ${JSON.stringify(errors)}`
+    );
+    assertEq.ok(
+      !errors.some((e) => /\brun\b/.test(e) && !/nope/.test(e)),
+      `should not report "run" as the missing script`
+    );
+  });
+});
