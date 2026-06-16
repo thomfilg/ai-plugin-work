@@ -45,7 +45,9 @@ function writeMemory(storeDir, name, extraFm = '') {
     '',
     'body',
     '',
-  ].filter(Boolean).join('\n');
+  ]
+    .filter(Boolean)
+    .join('\n');
   fs.writeFileSync(path.join(storeDir, `${name}.md`), fm);
 }
 
@@ -90,7 +92,11 @@ test('synapsys-stats renders Behavior-changers section with columns and ratio-de
 
   const { stdout, status } = runStats(home, cwd);
   assert.equal(status, 0, `expected exit 0, got ${status}; stderr=...`);
-  assert.match(stdout, /Behavior-changers/, `expected "Behavior-changers" section header.\n${stdout}`);
+  assert.match(
+    stdout,
+    /Behavior-changers/,
+    `expected "Behavior-changers" section header.\n${stdout}`
+  );
   assert.match(stdout, /fired/, 'expected "fired" column');
   assert.match(stdout, /cited/, 'expected "cited" column');
   assert.match(stdout, /changed/, 'expected "changed" column');
@@ -103,7 +109,10 @@ test('synapsys-stats renders Behavior-changers section with columns and ratio-de
   const posB = block.indexOf('mem-b');
   const posA = block.indexOf('mem-a');
   const posC = block.indexOf('mem-c');
-  assert.ok(posB > 0 && posA > 0 && posC > 0, `all three memories must appear in Behavior-changers block.\n${block}`);
+  assert.ok(
+    posB > 0 && posA > 0 && posC > 0,
+    `all three memories must appear in Behavior-changers block.\n${block}`
+  );
   assert.ok(posB < posA, `mem-b (ratio 0.80) must appear before mem-a (ratio 0.50).\n${block}`);
   assert.ok(posA < posC, `mem-a (ratio 0.50) must appear before mem-c (ratio 0.10).\n${block}`);
 });
@@ -130,8 +139,47 @@ test('Refined Noise classification excludes memories with changed > 0 (AC10)', (
   const endIdx = afterNoise.indexOf('\nNever-fired');
   const noiseBlock = endIdx >= 0 ? afterNoise.slice(0, endIdx) : afterNoise;
 
-  assert.doesNotMatch(noiseBlock, /mem-x/, `mem-x (changed:3) must NOT be in Noise.\n--- NOISE BLOCK ---\n${noiseBlock}`);
-  assert.match(noiseBlock, /mem-y/, `mem-y (changed:0) MUST be in Noise.\n--- NOISE BLOCK ---\n${noiseBlock}`);
+  assert.doesNotMatch(
+    noiseBlock,
+    /mem-x/,
+    `mem-x (changed:3) must NOT be in Noise.\n--- NOISE BLOCK ---\n${noiseBlock}`
+  );
+  assert.match(
+    noiseBlock,
+    /mem-y/,
+    `mem-y (changed:0) MUST be in Noise.\n--- NOISE BLOCK ---\n${noiseBlock}`
+  );
+});
+
+test('Behavior-changers includes memories with changed > 0 even when fired:0 (review-feedback)', () => {
+  const { home, cwd, storeDir, telDir } = makeTempEnv();
+  writeMemory(storeDir, 'mem-selfreport');
+  writeEvents(telDir, 'sess1', [
+    // Only behavior_changed rows — no `fired` events in this window.
+    ...Array(2).fill({ event: 'behavior_changed', memory: 'mem-selfreport' }),
+  ]);
+
+  const { stdout, status } = runStats(home, cwd);
+  assert.equal(status, 0);
+
+  // The Behavior-changers section must list the memory; the Never-fired
+  // section must not (changed > 0 disqualifies it from never-fired).
+  const changersIdx = stdout.indexOf('Behavior-changers');
+  assert.ok(changersIdx >= 0);
+  const changersBlock = stdout.slice(changersIdx);
+  assert.match(
+    changersBlock,
+    /mem-selfreport/,
+    `mem-selfreport (fired:0 changed:2) MUST appear in Behavior-changers.\n${stdout}`
+  );
+
+  const neverIdx = stdout.indexOf('Never-fired');
+  const neverBlock = stdout.slice(neverIdx, changersIdx);
+  assert.doesNotMatch(
+    neverBlock,
+    /mem-selfreport/,
+    `mem-selfreport must NOT appear in Never-fired.\n${neverBlock}`
+  );
 });
 
 test('--changers-only suppresses Top influencers, Noise candidates, and Never-fired sections (R9)', () => {
@@ -153,6 +201,10 @@ test('--changers-only suppresses Top influencers, Noise candidates, and Never-fi
   assert.equal(status, 0);
   assert.match(stdout, /Behavior-changers/, 'Behavior-changers section must still render');
   assert.doesNotMatch(stdout, /Top influencers/, `Top influencers must be suppressed.\n${stdout}`);
-  assert.doesNotMatch(stdout, /Noise candidates/, `Noise candidates must be suppressed.\n${stdout}`);
+  assert.doesNotMatch(
+    stdout,
+    /Noise candidates/,
+    `Noise candidates must be suppressed.\n${stdout}`
+  );
   assert.doesNotMatch(stdout, /Never-fired/, `Never-fired must be suppressed.\n${stdout}`);
 });

@@ -134,9 +134,15 @@ function aggregate(cwd, { windowMs }) {
 }
 
 function formatBehaviorChangers(perMemory) {
+  // Include any known memory with at least one behavior_changed event, even
+  // when fired is 0 in this window — a Stop self-report can land a `changed`
+  // row without a paired `fired` row (the trigger fired in a prior window or
+  // the cite scan ran without a matcher hit). Without this, those memories
+  // appear in NO section: Behavior-changers excluded them on fired:0 and
+  // Never-fired excludes them on changed>0.
   const changers = perMemory
-    .filter((m) => m.known && (m.changed || 0) > 0 && m.fired > 0)
-    .map((m) => ({ ...m, ratio: m.changed / m.fired }))
+    .filter((m) => m.known && (m.changed || 0) > 0)
+    .map((m) => ({ ...m, ratio: m.fired > 0 ? m.changed / m.fired : Infinity }))
     .sort((a, b) => {
       if (b.ratio !== a.ratio) return b.ratio - a.ratio;
       return b.changed - a.changed;
