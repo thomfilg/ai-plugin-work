@@ -222,6 +222,13 @@ function _strategyValidatorReady() {
   return strategyFlagOn() && strategyModule && dispatcherModule;
 }
 
+function _missingStrategyModules() {
+  const missing = [];
+  if (!strategyModule) missing.push('lib/test-strategy');
+  if (!dispatcherModule) missing.push('lib/command-existence-dispatcher');
+  return missing;
+}
+
 function _normalizeStrategyCtx(ctx) {
   const safeCtx = ctx || {};
   return {
@@ -234,7 +241,18 @@ function _normalizeStrategyCtx(ctx) {
 
 function validateTestStrategy(_tasksDir, ctx) {
   const errors = [];
-  if (!_strategyValidatorReady()) return errors;
+  // Flag off → silent pass (legacy ### Test Command path remains active).
+  if (!strategyFlagOn()) return errors;
+  // Flag on but helper modules failed to load → fail closed with a hard
+  // error so the draft gate doesn't silently pass on a half-installed plugin.
+  const missing = _missingStrategyModules();
+  if (missing.length > 0) {
+    errors.push(
+      `Test Strategy validator could not load required helper module(s): ${missing.join(', ')}. ` +
+        `With WORK_TEST_STRATEGY_VALIDATOR=1 every helper must be loadable.`
+    );
+    return errors;
+  }
   const fullCtx = _normalizeStrategyCtx(ctx);
   if (!Array.isArray(fullCtx.parsedTasks)) {
     // Flag is ON but parseTasks returned null (parser missing or threw).
@@ -311,6 +329,10 @@ function _ownershipReady() {
   return strategyFlagOn() && ownershipModule;
 }
 
+function _ownershipModuleMissing() {
+  return strategyFlagOn() && !ownershipModule;
+}
+
 function _collectOrphans(parsedTasks) {
   const buildResult = _safeBuildGraph(parsedTasks);
   if (buildResult.error)
@@ -319,9 +341,21 @@ function _collectOrphans(parsedTasks) {
   return _safeFindOrphans(parsedTasks, buildResult.graph);
 }
 
+function _ownershipPreflight(errors) {
+  if (!strategyFlagOn()) return false;
+  if (_ownershipModuleMissing()) {
+    errors.push(
+      'TDD-ownership validator could not load required helper module: lib/tdd-ownership-graph. ' +
+        'With WORK_TEST_STRATEGY_VALIDATOR=1 every helper must be loadable.'
+    );
+    return false;
+  }
+  return true;
+}
+
 function validateTddOwnership(_tasksDir, ctx) {
   const errors = [];
-  if (!_ownershipReady()) return errors;
+  if (!_ownershipPreflight(errors)) return errors;
   const parsedTasks = (ctx && ctx.parsedTasks) || null;
   if (!Array.isArray(parsedTasks) || parsedTasks.length === 0) return errors;
   const { orphans, error: collectError } = _collectOrphans(parsedTasks);
