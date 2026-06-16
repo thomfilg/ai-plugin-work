@@ -79,15 +79,58 @@ test('--scope=shared narrows discovery to the shared tier', () => {
   }
 });
 
+test('Worktree-tier memories are included when the store sits one level above cwd', () => {
+  // Regression for the worktree-tier exclusion bug: lintStore must not drop
+  // memories whose store lives at `<cwd>/../.claude/synapsys` (the worktree
+  // convention). Build a tmp layout:
+  //   <tmp>/.claude/synapsys/.synapsys.json + mem-wt.md   (worktree tier)
+  //   <tmp>/proj/                                          (cwd; no local store)
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-wt-'));
+  try {
+    const wtStore = path.join(tmp, '.claude', 'synapsys');
+    fs.mkdirSync(wtStore, { recursive: true });
+    fs.writeFileSync(path.join(wtStore, '.synapsys.json'), '{}');
+    fs.writeFileSync(
+      path.join(wtStore, 'mem-wt.md'),
+      '---\nname: mem-wt\ntrigger_prompt: /\\bwidget\\b/\n---\nbody\n'
+    );
+    const projCwd = path.join(tmp, 'proj');
+    fs.mkdirSync(projCwd);
+
+    const { lintStore } = require(CLI);
+    const result = lintStore({ cwd: projCwd, scope: 'all' });
+    const wt = result.memories.find((m) => m.name === 'mem-wt');
+    assert.ok(
+      wt,
+      `worktree-tier memory must be discovered, got names=${result.memories.map((m) => m.name).join(',')}`
+    );
+    assert.equal(wt.store.kind, 'worktree');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('Disabled and expired memories are skipped', () => {
   const { lintStore } = require(CLI);
   // scope=all so we capture project + shared.
   const result = lintStore({ cwd: PROJ_CWD, scope: 'all' });
   const names = result.memories.map((m) => m.name);
-  assert.ok(names.includes('mem-active-a'), `active memory should be present, got ${names.join(',')}`);
-  assert.ok(names.includes('mem-active-b'), `active memory should be present, got ${names.join(',')}`);
-  assert.ok(!names.includes('mem-disabled'), `disabled memory must be skipped, got ${names.join(',')}`);
-  assert.ok(!names.includes('mem-expired'), `expired memory must be skipped, got ${names.join(',')}`);
+  assert.ok(
+    names.includes('mem-active-a'),
+    `active memory should be present, got ${names.join(',')}`
+  );
+  assert.ok(
+    names.includes('mem-active-b'),
+    `active memory should be present, got ${names.join(',')}`
+  );
+  assert.ok(
+    !names.includes('mem-disabled'),
+    `disabled memory must be skipped, got ${names.join(',')}`
+  );
+  assert.ok(
+    !names.includes('mem-expired'),
+    `expired memory must be skipped, got ${names.join(',')}`
+  );
 });
 
 // ─── Task 4: trigger×trigger scoring + severity + domain/[[link]] downgrade ───
@@ -104,20 +147,37 @@ test('Domain-shared pair is downgraded from high to low (AC-G2)', () => {
   const { lintStore } = require(CLI);
   const result = lintStore({ cwd: PROJ_CWD, scope: 'all' });
   const pair = findPair(result.pairs, 'mem-domain-a', 'mem-domain-b');
-  assert.ok(pair, `expected trigger-overlap pair for mem-domain-a/mem-domain-b, got pairs=${JSON.stringify(result.pairs)}`);
+  assert.ok(
+    pair,
+    `expected trigger-overlap pair for mem-domain-a/mem-domain-b, got pairs=${JSON.stringify(result.pairs)}`
+  );
   // Identical alternation tokens → jaccard = 1.0, would be `high` cross-domain.
   // Both share domain `release-ops` → severity capped at `low`.
-  assert.equal(pair.severity, 'low', `domain-shared pair must be downgraded to low, got ${pair.severity}`);
+  assert.equal(
+    pair.severity,
+    'low',
+    `domain-shared pair must be downgraded to low, got ${pair.severity}`
+  );
   assert.ok(pair.intentional, 'pair must carry an `intentional` object');
-  assert.equal(pair.intentional.domain, 'release-ops', `intentional.domain must equal shared domain, got ${pair.intentional.domain}`);
-  assert.ok(typeof pair.score === 'number' && pair.score >= 0.5, `score should reflect raw jaccard (≥0.5), got ${pair.score}`);
+  assert.equal(
+    pair.intentional.domain,
+    'release-ops',
+    `intentional.domain must equal shared domain, got ${pair.intentional.domain}`
+  );
+  assert.ok(
+    typeof pair.score === 'number' && pair.score >= 0.5,
+    `score should reflect raw jaccard (≥0.5), got ${pair.score}`
+  );
 });
 
 test('[[wiki-link]] body reference downgrades severity (AC-G3)', () => {
   const { lintStore } = require(CLI);
   const result = lintStore({ cwd: PROJ_CWD, scope: 'all' });
   const pair = findPair(result.pairs, 'mem-link-a', 'mem-link-b');
-  assert.ok(pair, `expected trigger-overlap pair for mem-link-a/mem-link-b, got pairs=${JSON.stringify(result.pairs)}`);
+  assert.ok(
+    pair,
+    `expected trigger-overlap pair for mem-link-a/mem-link-b, got pairs=${JSON.stringify(result.pairs)}`
+  );
   // High raw overlap (jaccard 1.0) but mem-link-a.body references [[mem-link-b]]
   // → severity capped at `low`.
   assert.ok(
@@ -125,7 +185,11 @@ test('[[wiki-link]] body reference downgrades severity (AC-G3)', () => {
     `[[link]]-referenced pair must be at most low/medium, got ${pair.severity}`
   );
   assert.notEqual(pair.severity, 'high', '[[link]] downgrade must prevent `high` severity');
-  assert.equal(pair.intentional && pair.intentional.link, true, `intentional.link must be true, got ${pair.intentional && pair.intentional.link}`);
+  assert.equal(
+    pair.intentional && pair.intentional.link,
+    true,
+    `intentional.link must be true, got ${pair.intentional && pair.intentional.link}`
+  );
 });
 
 // ─── Task 5: trigger×body match-density (slack/flake case study) ───
@@ -166,8 +230,15 @@ test('Trigger×body match flags the slack/flake case study as high (AC-G1)', () 
     bodyPair,
     `expected trigger-body-overlap pair for slack/flake case study, got pairs=${JSON.stringify(result.pairs)}`
   );
-  assert.equal(bodyPair.severity, 'high', `slack/flake body pair must be high, got ${bodyPair.severity}`);
-  assert.ok(typeof bodyPair.score === 'number' && bodyPair.score >= 4, `score (matchCount) must be ≥4, got ${bodyPair.score}`);
+  assert.equal(
+    bodyPair.severity,
+    'high',
+    `slack/flake body pair must be high, got ${bodyPair.severity}`
+  );
+  assert.ok(
+    typeof bodyPair.score === 'number' && bodyPair.score >= 4,
+    `score (matchCount) must be ≥4, got ${bodyPair.score}`
+  );
   assert.ok(
     Array.isArray(bodyPair.matchedTokens) && bodyPair.matchedTokens.includes('slack'),
     `matchedTokens must include the literal 'slack' token, got ${JSON.stringify(bodyPair.matchedTokens)}`
@@ -175,11 +246,18 @@ test('Trigger×body match flags the slack/flake case study as high (AC-G1)', () 
 
   // CLI exit code: AC-G1 requires `exit 1` when the case study is present.
   const r = runLint([`--cwd=${cwd}`, '--scope=all', '--json'], { env: { HOME: home } });
-  assert.equal(r.status, 1, `expected exit 1 for slack/flake high pair, got ${r.status}. stderr=${r.stderr}`);
+  assert.equal(
+    r.status,
+    1,
+    `expected exit 1 for slack/flake high pair, got ${r.status}. stderr=${r.stderr}`
+  );
   const env = parseJson(r.stdout);
   assert.ok(env, `stdout was not parseable JSON:\n${r.stdout}`);
   const cliPair = env.pairs.find((p) => p.rule === 'trigger-body-overlap');
-  assert.ok(cliPair, `CLI JSON envelope must include a trigger-body-overlap pair, got pairs=${JSON.stringify(env.pairs)}`);
+  assert.ok(
+    cliPair,
+    `CLI JSON envelope must include a trigger-body-overlap pair, got pairs=${JSON.stringify(env.pairs)}`
+  );
   assert.equal(cliPair.severity, 'high', `CLI pair severity must be high, got ${cliPair.severity}`);
 });
 
@@ -215,7 +293,11 @@ test('Pretool×pretool intersection within a tool surfaces as a pair (AC-G5)', (
     pretoolPair,
     `expected pretool-overlap pair for pretool-a/pretool-b, got pairs=${JSON.stringify(result.pairs)}`
   );
-  assert.equal(pretoolPair.tool, 'Bash', `pair must carry tool field 'Bash', got ${pretoolPair.tool}`);
+  assert.equal(
+    pretoolPair.tool,
+    'Bash',
+    `pair must carry tool field 'Bash', got ${pretoolPair.tool}`
+  );
   // A's arg-regex set is a strict subset of B's (A: {gh\s+pr\s+view},
   // B: {gh\s+pr\s+(view|checkout)} — A ⊂ B) → severity must be `high`
   // per spec §Architecture (equal/strict-subset → high). At minimum it
@@ -224,8 +306,15 @@ test('Pretool×pretool intersection within a tool surfaces as a pair (AC-G5)', (
     pretoolPair.severity === 'high' || pretoolPair.severity === 'medium',
     `pretool-overlap severity must be at least medium, got ${pretoolPair.severity}`
   );
-  assert.notEqual(pretoolPair.severity, 'low', 'pretool-overlap with strict-subset must not be low');
-  assert.ok(typeof pretoolPair.score === 'number', `pair.score must be a number, got ${typeof pretoolPair.score}`);
+  assert.notEqual(
+    pretoolPair.severity,
+    'low',
+    'pretool-overlap with strict-subset must not be low'
+  );
+  assert.ok(
+    typeof pretoolPair.score === 'number',
+    `pair.score must be a number, got ${typeof pretoolPair.score}`
+  );
 });
 
 // ─── Task 7: too-broad-trigger per-memory rule (AC-G4) ───
@@ -251,9 +340,7 @@ test('too-broad-trigger rule flags a trivially short trigger (AC-G4)', () => {
   const result = lintStore({ cwd, scope: 'all' });
 
   // The broad-trigger memory must NOT appear in `pairs` (R7: distinct rule, not pairwise).
-  const broadInPairs = result.pairs.find(
-    (p) => p.a === 'too-broad-ci' || p.b === 'too-broad-ci'
-  );
+  const broadInPairs = result.pairs.find((p) => p.a === 'too-broad-ci' || p.b === 'too-broad-ci');
   assert.equal(
     broadInPairs,
     undefined,
@@ -270,7 +357,11 @@ test('too-broad-trigger rule flags a trivially short trigger (AC-G4)', () => {
     entry,
     `expected broadTriggers entry for too-broad-ci, got broadTriggers=${JSON.stringify(result.broadTriggers)}`
   );
-  assert.equal(entry.rule, 'too-broad-trigger', `rule field must be 'too-broad-trigger', got ${entry.rule}`);
+  assert.equal(
+    entry.rule,
+    'too-broad-trigger',
+    `rule field must be 'too-broad-trigger', got ${entry.rule}`
+  );
   assert.equal(entry.severity, 'medium', `severity must be 'medium', got ${entry.severity}`);
   assert.ok(
     typeof entry.reason === 'string' && entry.reason.length > 0,
@@ -279,7 +370,11 @@ test('too-broad-trigger rule flags a trivially short trigger (AC-G4)', () => {
 
   // Exit code is unaffected (medium, never high).
   const r = runLint([`--cwd=${cwd}`, '--scope=all', '--json'], { env: { HOME: home } });
-  assert.equal(r.status, 0, `expected exit 0 (broad-trigger is medium, never high), got ${r.status}. stderr=${r.stderr}`);
+  assert.equal(
+    r.status,
+    0,
+    `expected exit 0 (broad-trigger is medium, never high), got ${r.status}. stderr=${r.stderr}`
+  );
   const env = parseJson(r.stdout);
   assert.ok(env, `stdout was not parseable JSON:\n${r.stdout}`);
   const cliEntry = env.broadTriggers.find((e) => e.name === 'too-broad-ci');
@@ -287,19 +382,31 @@ test('too-broad-trigger rule flags a trivially short trigger (AC-G4)', () => {
     cliEntry,
     `CLI JSON envelope must include too-broad-ci in broadTriggers, got broadTriggers=${JSON.stringify(env.broadTriggers)}`
   );
-  assert.equal(cliEntry.severity, 'medium', `CLI broad entry severity must be 'medium', got ${cliEntry.severity}`);
+  assert.equal(
+    cliEntry.severity,
+    'medium',
+    `CLI broad entry severity must be 'medium', got ${cliEntry.severity}`
+  );
 });
 
 test('Exit code is non-zero only when at least one high-severity pair exists (AC-G7)', () => {
   // With --overlap-threshold=0.99, no pair should reach the `high` cutoff
   // → no high pairs → exit code 0, but pairs are still listed.
   const rHi = runLint([`--cwd=${PROJ_CWD}`, '--scope=all', '--json', '--overlap-threshold=0.99']);
-  assert.equal(rHi.status, 0, `expected exit 0 when no high pairs, got ${rHi.status}. stderr=${rHi.stderr}`);
+  assert.equal(
+    rHi.status,
+    0,
+    `expected exit 0 when no high pairs, got ${rHi.status}. stderr=${rHi.stderr}`
+  );
   const envHi = parseJson(rHi.stdout);
   assert.ok(envHi, 'JSON envelope must parse');
   // With overlap downgrades applied + raised threshold, no pair has severity:'high'.
   const highPairsHi = envHi.pairs.filter((p) => p.severity === 'high');
-  assert.equal(highPairsHi.length, 0, `expected zero high pairs at threshold 0.99, got ${JSON.stringify(highPairsHi)}`);
+  assert.equal(
+    highPairsHi.length,
+    0,
+    `expected zero high pairs at threshold 0.99, got ${JSON.stringify(highPairsHi)}`
+  );
 
   // With the default threshold (0.50), mem-active-a / mem-active-b form a
   // jaccard=0.5 cross-domain (no shared domain) high pair → exit 1.
@@ -307,9 +414,20 @@ test('Exit code is non-zero only when at least one high-severity pair exists (AC
   const envLo = parseJson(rLo.stdout);
   assert.ok(envLo, `JSON envelope must parse, stdout=${rLo.stdout}`);
   const activePair = findPair(envLo.pairs, 'mem-active-a', 'mem-active-b');
-  assert.ok(activePair, `expected mem-active-a/mem-active-b pair under default threshold, got ${JSON.stringify(envLo.pairs)}`);
-  assert.equal(activePair.severity, 'high', `cross-domain jaccard≥0.5 pair must be high, got ${activePair.severity}`);
-  assert.equal(rLo.status, 1, `expected exit 1 when at least one high pair exists, got ${rLo.status}. stderr=${rLo.stderr}`);
+  assert.ok(
+    activePair,
+    `expected mem-active-a/mem-active-b pair under default threshold, got ${JSON.stringify(envLo.pairs)}`
+  );
+  assert.equal(
+    activePair.severity,
+    'high',
+    `cross-domain jaccard≥0.5 pair must be high, got ${activePair.severity}`
+  );
+  assert.equal(
+    rLo.status,
+    1,
+    `expected exit 1 when at least one high pair exists, got ${rLo.status}. stderr=${rLo.stderr}`
+  );
 });
 
 // ─── Task 8: suggestion generator + formatHuman/formatJson ordering ───
@@ -349,8 +467,19 @@ test('Task 8 (a) — suggestion strings reference a concrete token from the pair
       [p.a, p.b].sort().join('|') ===
         ['flaky-test-fix-protocol', 'slack-handoff-ask-before-clipboard'].join('|')
   );
-  assert.ok(slackFlake, `slack/flake body pair must exist, got pairs=${JSON.stringify(result.pairs.map((p) => [p.rule, p.a, p.b]))}`);
-  const concreteTokens = ['slack', 'clipboard', 'handoff', 'flaky', 'flake', 'intermittent', 'quarantine'];
+  assert.ok(
+    slackFlake,
+    `slack/flake body pair must exist, got pairs=${JSON.stringify(result.pairs.map((p) => [p.rule, p.a, p.b]))}`
+  );
+  const concreteTokens = [
+    'slack',
+    'clipboard',
+    'handoff',
+    'flaky',
+    'flake',
+    'intermittent',
+    'quarantine',
+  ];
   const lowered = slackFlake.suggestion.toLowerCase();
   assert.ok(
     concreteTokens.some((t) => lowered.includes(t)),
@@ -393,7 +522,10 @@ test('Task 8 (b) — pairs are ordered severity desc then score desc (R9)', () =
   }
 
   const projResult = lintStore({ cwd: PROJ_CWD, scope: 'all' });
-  assert.ok(projResult.pairs.length >= 2, `proj fixture must produce ≥2 pairs to verify ordering, got ${projResult.pairs.length}`);
+  assert.ok(
+    projResult.pairs.length >= 2,
+    `proj fixture must produce ≥2 pairs to verify ordering, got ${projResult.pairs.length}`
+  );
   assertOrdered(projResult.pairs, 'proj store');
 
   const { cwd } = buildSlackFlakeStore();
@@ -431,7 +563,10 @@ test('Task 8 (c) — formatHuman renders header → cause → suggestion → ove
   // Header must contain both names joined by `⇄`.
   const headerRe = new RegExp(`${a}\\s*⇄\\s*${b}|${b}\\s*⇄\\s*${a}`);
   const headerMatch = text.match(headerRe);
-  assert.ok(headerMatch, `formatHuman output must contain a '${a} ⇄ ${b}' header line, got:\n${text}`);
+  assert.ok(
+    headerMatch,
+    `formatHuman output must contain a '${a} ⇄ ${b}' header line, got:\n${text}`
+  );
   const blockStart = headerMatch.index;
   // Block ends at the next header (or end of string).
   const rest = text.slice(blockStart + headerMatch[0].length);
@@ -451,7 +586,10 @@ test('Task 8 (c) — formatHuman renders header → cause → suggestion → ove
   const idxSeverityTag = block.indexOf('[severity: high]');
 
   assert.ok(idxCause >= 0, `block must contain a cause line, got:\n${block}`);
-  assert.ok(idxSuggestion >= 0, `block must contain the suggestion line "${slackPair.suggestion}", got:\n${block}`);
+  assert.ok(
+    idxSuggestion >= 0,
+    `block must contain the suggestion line "${slackPair.suggestion}", got:\n${block}`
+  );
   assert.ok(idxSeverityTag >= 0, `block must contain "[severity: high]" tag, got:\n${block}`);
 
   assert.ok(

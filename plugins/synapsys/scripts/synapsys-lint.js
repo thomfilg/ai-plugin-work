@@ -49,20 +49,24 @@ const LINK_RE = /\[\[([a-z0-9][a-z0-9-]*)\]\]/g;
  * `boundDir` is provided, the clamp only restricts the `worktree` tier —
  * the only tier whose path is discovered via `memory-store.findAncestorStore`
  * (an upward walk that could otherwise leak the author's real ancestor store
- * into a test fixture run). `local` lives at `<cwd>/.claude/...` (always
- * inside cwd), `global` and `shared` live at fixed paths under `$HOME` (which
- * tests isolate via the HOME env var), so clamping those tiers dropped
- * legitimate global/parent-worktree memories from default production runs.
+ * into a test fixture run).
+ *
+ * The convention is one-level-up: a worktree-tier store sits at
+ * `<boundDir>/../.claude/synapsys`. Stores discovered by `findAncestorStore`
+ * walking further up the filesystem (the leak case) are rejected. `local`
+ * lives at `<cwd>/.claude/...` (always inside cwd), `global` and `shared`
+ * live at fixed paths under `$HOME` (which tests isolate via the HOME env
+ * var), so neither needs clamping.
  */
 function filterMemories(memories, scope, boundDir) {
-  const normalizedBound = boundDir ? path.resolve(boundDir) + path.sep : null;
+  const expectedWorktreeDir = boundDir ? path.resolve(boundDir, '..', '.claude', 'synapsys') : null;
   return memories.filter((m) => {
     if (m.disabled) return false;
     if (m.expired) return false;
     const kind = m.store && m.store.kind;
-    if (normalizedBound && kind === 'worktree') {
-      const storeDir = path.resolve(m.store.dir) + path.sep;
-      if (!storeDir.startsWith(normalizedBound)) return false;
+    if (expectedWorktreeDir && kind === 'worktree') {
+      const storeDir = path.resolve(m.store.dir);
+      if (storeDir !== expectedWorktreeDir) return false;
     }
     if (scope === 'shared') return kind === 'shared';
     if (scope === 'project') return kind !== 'shared';
