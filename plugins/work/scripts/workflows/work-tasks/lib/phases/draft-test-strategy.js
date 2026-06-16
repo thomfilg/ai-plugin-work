@@ -1,12 +1,6 @@
 'use strict';
 
-/**
- * draft-test-strategy.js — GH-590 Task 11 validators split out of draft.js
- * to satisfy the static-quality gate (max-lines, cyclomatic-complexity,
- * cognitive-complexity). All public functions remain feature-flagged via
- * `WORK_TEST_STRATEGY_VALIDATOR` and tolerantly handle missing helper
- * modules so the legacy ### Test Command path keeps working.
- */
+// GH-590 Task 11 — strategy + ownership validators, feature-flagged.
 
 const config = require('../../../lib/config');
 
@@ -201,9 +195,18 @@ function _dispatchAndAppend(command, dispatchCtx, heading, errors) {
   }
 }
 
+const { hasLegacyTestCommand: _hasLegacyTestCommand } = require('./_legacy-test-command');
+
 function _validateOneTask(task, ctx, errors) {
   const strategy = _resolveStrategy(task);
-  if (!strategy) return;
+  if (!strategy) {
+    if (_hasLegacyTestCommand(task)) {
+      errors.push(
+        `${taskHeadingFor(task)}: flag on but task still uses legacy \`### Test Command\`. Convert to \`### Test Strategy\` (kind: unit|integration|e2e|custom|verified-by|wiring-citation). See skills/split-in-tasks/docs/test-strategy.md.`
+      );
+    }
+    return;
+  }
   const heading = taskHeadingFor(task);
   _appendShapeErrors(strategy, task, errors);
   _appendPeerErrors(strategy, ctx.parsedTasks, task, errors);
