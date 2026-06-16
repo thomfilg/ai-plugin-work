@@ -281,3 +281,21 @@ test('flag-on no-op when validator flag is off — same fixture, no strategy err
     `flag-off must NOT run the new strategy/dispatcher validators; got: ${joined}`
   );
 });
+
+test('parser-failure surfacing (cursor[bot] 3423427166): flag-on parseTasks failure emits hard error, not silent pass', () => {
+  const draftStrategy = require('../draft-test-strategy');
+  const prev = process.env.WORK_TEST_STRATEGY_VALIDATOR;
+  process.env.WORK_TEST_STRATEGY_VALIDATOR = '1';
+  try {
+    const errors = draftStrategy.validateTestStrategy('/tmp/nonexistent', {
+      parsedTasks: null,
+    });
+    assert.ok(
+      errors.some((e) => /could not parse tasks\.md/i.test(e)),
+      `expected parser-failure error, got: ${JSON.stringify(errors)}`
+    );
+  } finally {
+    if (prev === undefined) delete process.env.WORK_TEST_STRATEGY_VALIDATOR;
+    else process.env.WORK_TEST_STRATEGY_VALIDATOR = prev;
+  }
+});

@@ -226,7 +226,16 @@ function validateTestStrategy(_tasksDir, ctx) {
   const errors = [];
   if (!_strategyValidatorReady()) return errors;
   const fullCtx = _normalizeStrategyCtx(ctx);
-  if (!Array.isArray(fullCtx.parsedTasks)) return errors;
+  if (!Array.isArray(fullCtx.parsedTasks)) {
+    // Flag is ON but parseTasks returned null (parser missing or threw).
+    // Don't silently pass — surface a hard error so the draft gate fails
+    // visibly instead of giving a false green.
+    errors.push(
+      'Test Strategy validator could not parse tasks.md (task-parser unavailable or threw). ' +
+        'With WORK_TEST_STRATEGY_VALIDATOR=1, every task must be parseable so its strategy can be validated.'
+    );
+    return errors;
+  }
   for (const task of fullCtx.parsedTasks) {
     _validateOneTask(task, fullCtx, errors);
   }
