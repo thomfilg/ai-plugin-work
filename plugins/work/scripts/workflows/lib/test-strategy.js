@@ -256,6 +256,8 @@ module.exports = {
   synthesizeCommand,
   validatePeerCitation,
   validateStrategyShape,
+  entryReferencesScope,
+  peerScopeCoversCitingScope,
   // Exported for the REFACTOR-phase helper test seam.
   resolveEnvelope,
 };

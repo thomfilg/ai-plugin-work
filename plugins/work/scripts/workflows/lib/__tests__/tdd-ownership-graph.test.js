@@ -141,3 +141,16 @@ d3('e2e kind covers its scope (cursor[bot] 3385241040)', () => {
     assertEq3.equal(orphans.length, 0, `expected zero orphans, got: ${JSON.stringify(orphans)}`);
   });
 });
+
+const { describe: d4, it: i4 } = require('node:test');
+const assertEq4 = require('node:assert/strict');
+const { entryReferencesScope: entryRefScope4 } = require('../test-strategy');
+
+d4('entryReferencesScope respects glob scope (cursor[bot] 3385241046)', () => {
+  i4('test entry under a glob scope matches via fileMatchesScope', () => {
+    assertEq4.equal(entryRefScope4('lib/foo/__tests__/bar.test.ts', ['lib/**/*.ts']), true);
+  });
+  i4('stripped entry under a glob scope matches', () => {
+    assertEq4.equal(entryRefScope4('lib/foo/bar.test.ts', ['lib/foo/**']), true);
+  });
+});

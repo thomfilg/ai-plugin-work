@@ -228,7 +228,18 @@ function validateTestStrategy(_tasksDir, ctx) {
   return errors;
 }
 
+// Delegate to the glob-aware reference check in lib/test-strategy.js so a
+// test entry can cover an orphan declared via a glob like `lib/**/*.ts`
+// — string equality alone would miss this.
 function _entryCoversOrphan(entry, orphanPath) {
+  try {
+    const { entryReferencesScope } = require('../../../lib/test-strategy');
+    if (typeof entryReferencesScope === 'function') {
+      return entryReferencesScope(entry, [orphanPath]);
+    }
+  } catch {
+    /* fall through to local check */
+  }
   if (entry === orphanPath) return true;
   const stripped = entry.replace(/\.(?:test|spec)(\.[a-zA-Z0-9]+)$/, '$1');
   if (stripped === orphanPath) return true;
