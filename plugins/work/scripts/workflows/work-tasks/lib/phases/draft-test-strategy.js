@@ -152,13 +152,21 @@ function _resolveStrategy(task) {
   return rawBody ? { kind: 'custom', customBody: rawBody } : null;
 }
 
+function _headingFor(task) {
+  return taskHeadingFor(task);
+}
+
 function _appendPeerErrors(strategy, parsedTasks, task, errors) {
   if (typeof strategyModule.validatePeerCitation !== 'function') return;
   try {
     const peerErrors = strategyModule.validatePeerCitation(strategy, parsedTasks, task) || [];
     for (const e of peerErrors) errors.push(e);
-  } catch {
-    /* peer-citation helper unstable — keep going */
+  } catch (err) {
+    // Don't swallow — surface a hard error so a malformed task can't slip
+    // past the gate when validatePeerCitation throws on it.
+    errors.push(
+      `${_headingFor(task)}: peer-citation validator threw — ${err && err.message ? err.message : 'unknown error'}`
+    );
   }
 }
 
@@ -167,8 +175,10 @@ function _appendShapeErrors(strategy, task, errors) {
   try {
     const shapeErrors = strategyModule.validateStrategyShape(strategy, task) || [];
     for (const e of shapeErrors) errors.push(e);
-  } catch {
-    /* shape helper unstable — keep going */
+  } catch (err) {
+    errors.push(
+      `${_headingFor(task)}: shape validator threw — ${err && err.message ? err.message : 'unknown error'}`
+    );
   }
 }
 
