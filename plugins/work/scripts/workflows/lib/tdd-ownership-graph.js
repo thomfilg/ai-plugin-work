@@ -89,7 +89,8 @@ function _hasEntry(strat) {
 }
 
 function _applyTaskCoverage(graph, task) {
-  const strat = task && task.testStrategy;
+  if (!task) return;
+  const strat = task.testStrategy;
   if (!strat || typeof strat !== 'object') return;
   const kind = strat.kind;
   const ownScope = _scopeOf(task);
