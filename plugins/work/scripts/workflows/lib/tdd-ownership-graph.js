@@ -124,7 +124,9 @@ function buildCoverageGraph(tasks) {
  * @returns {string[]}
  */
 function _remediationOptions(task) {
-  const heading = (task && task.heading) || `Task ${task && task.num}`;
+  // Caller (`findOrphanedPaths` via `_buildOwnerMap`) only stores non-null
+  // tasks in the owner map, so `task` is guaranteed truthy here.
+  const heading = task.heading || `Task ${task.num}`;
   return [
     `fold into peer task that already exercises this path`,
     `declare kind: wiring-citation with verified-by: <peer task> in ${heading}`,
