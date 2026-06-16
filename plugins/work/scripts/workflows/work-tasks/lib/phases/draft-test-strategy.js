@@ -285,17 +285,17 @@ function _isRealOrphan(orphan, parsedTasks) {
 
 function _safeBuildGraph(parsedTasks) {
   try {
-    return ownershipModule.buildCoverageGraph(parsedTasks);
-  } catch {
-    return null;
+    return { graph: ownershipModule.buildCoverageGraph(parsedTasks), error: null };
+  } catch (err) {
+    return { graph: null, error: err && err.message ? err.message : 'unknown error' };
   }
 }
 
 function _safeFindOrphans(parsedTasks, graph) {
   try {
-    return ownershipModule.findOrphanedPaths(parsedTasks, graph) || [];
-  } catch {
-    return null;
+    return { orphans: ownershipModule.findOrphanedPaths(parsedTasks, graph) || [], error: null };
+  } catch (err) {
+    return { orphans: null, error: err && err.message ? err.message : 'unknown error' };
   }
 }
 
@@ -312,9 +312,11 @@ function _ownershipReady() {
 }
 
 function _collectOrphans(parsedTasks) {
-  const graph = _safeBuildGraph(parsedTasks);
-  if (!graph) return null;
-  return _safeFindOrphans(parsedTasks, graph);
+  const buildResult = _safeBuildGraph(parsedTasks);
+  if (buildResult.error)
+    return { orphans: null, error: `coverage graph build failed: ${buildResult.error}` };
+  if (!buildResult.graph) return { orphans: null, error: 'coverage graph builder returned null' };
+  return _safeFindOrphans(parsedTasks, buildResult.graph);
 }
 
 function validateTddOwnership(_tasksDir, ctx) {
@@ -322,7 +324,15 @@ function validateTddOwnership(_tasksDir, ctx) {
   if (!_ownershipReady()) return errors;
   const parsedTasks = (ctx && ctx.parsedTasks) || null;
   if (!Array.isArray(parsedTasks) || parsedTasks.length === 0) return errors;
-  const orphans = _collectOrphans(parsedTasks);
+  const { orphans, error: collectError } = _collectOrphans(parsedTasks);
+  if (collectError) {
+    // Fail closed — graph build / orphan detection failure must not silently
+    // bypass the gate. Surface a hard error so reviewers see what broke.
+    errors.push(
+      `TDD-ownership graph validator failed — ${collectError}. With WORK_TEST_STRATEGY_VALIDATOR=1 every task's coverage must be derivable.`
+    );
+    return errors;
+  }
   if (!orphans) return errors;
   for (const orphan of orphans) {
     if (_isRealOrphan(orphan, parsedTasks)) errors.push(_formatOrphanError(orphan));
