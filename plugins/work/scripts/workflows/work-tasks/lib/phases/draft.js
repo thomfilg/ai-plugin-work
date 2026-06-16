@@ -169,6 +169,44 @@ function validate(ctx) {
   return { ok: true, summary: `${count} task block(s) parsed` };
 }
 
+// Flag-aware template for the test-command/strategy block. When
+// WORK_TEST_STRATEGY_VALIDATOR=1, emit the `### Test Strategy` enum template
+// so the splitter agent writes the new shape (legacy `### Test Command`
+// would otherwise be rejected by the migration error in
+// draft-test-strategy.js). When the flag is off (default), emit the legacy
+// `### Test Command` template — that path is still consumed by the implement
+// gate (GH-610 will wire Test Strategy at implement time).
+function _testCommandOrStrategyTemplate() {
+  const flagOn = process.env.WORK_TEST_STRATEGY_VALIDATOR === '1';
+  if (flagOn) {
+    return [
+      '### Test Strategy',
+      '```yaml',
+      '# Pick exactly one kind from the closed enum:',
+      '#   unit | integration | e2e | custom | verified-by | wiring-citation',
+      '#',
+      '# Required keys per kind:',
+      '#   unit / integration / e2e → entry: <path to test file>',
+      '#   custom                    → command: <verbatim shell command>',
+      '#   verified-by / wiring-citation → peer: Task N',
+      '#',
+      '# See plugins/work/skills/split-in-tasks/docs/test-strategy.md.',
+      'kind: unit',
+      'entry: path/to/file.test.ts',
+      '```',
+    ];
+  }
+  return [
+    '### Test Command',
+    '```bash',
+    '# Use the canonical envelope so repos can override the runner via .envrc.',
+    '# Pick ONE of: $TEST_UNIT_COMMAND, $TEST_INTEGRATION_COMMAND, $TEST_E2E_COMMAND.',
+    '# Never hardcode `pnpm test`/`pnpm vitest`/etc. — the implement-gate runs this verbatim.',
+    'CHANGED_FILES="path/to/file.test.ts" eval "$TEST_UNIT_COMMAND"',
+    '```',
+  ];
+}
+
 function instructions(ctx) {
   return [
     `# tasks-next — Phase 3 of 7: DRAFT`,
@@ -209,14 +247,7 @@ function instructions(ctx) {
     '<!-- files owned by other tasks that this task legitimately needs to edit; one bullet per path, optional `(owned by Task N)` suffix -->',
     '- `src/shared/schema.ts` (owned by Task 4)',
     '',
-    '### Test Command',
-    '```bash',
-    '# Use the canonical envelope so repos can override the runner via .envrc.',
-    '# Pick ONE of: $TEST_UNIT_COMMAND, $TEST_INTEGRATION_COMMAND, $TEST_E2E_COMMAND.',
-    '# Never hardcode `pnpm test`/`pnpm vitest`/etc. — the implement-gate runs this verbatim.',
-    'CHANGED_FILES="path/to/file.test.ts" eval "$TEST_UNIT_COMMAND"',
-    '```',
-    '```',
+    ..._testCommandOrStrategyTemplate(),
     '',
     'Keep the `## Extracted Requirements` section at the top of the file.',
     '',

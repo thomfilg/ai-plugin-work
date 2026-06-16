@@ -54,7 +54,7 @@ cites: server/api/admin/general-settings.router.ts
 
 ## When `kind: custom` is appropriate
 
-`kind: custom` exists for genuine non-test verification (visual-only tasks, codegen audits, schema sync checks). It is NOT a way to opt out of writing a test for behavioral changes — the draft-time validator rejects `kind: custom` when the task's scope shape contains production source. Use `kind: unit` instead.
+`kind: custom` exists for genuine non-test verification (visual-only tasks, codegen audits, schema sync checks). It is NOT a way to opt out of writing a test for behavioral changes — the TDD-ownership-graph validator (`lib/tdd-ownership-graph.js`) flags every path in `### Files in scope` that no task's Test Strategy `entry` transitively covers. A `kind: custom` task whose scope contains production source therefore produces "owned but uncovered" orphan errors during the draft phase. Use `kind: unit` (or `kind: integration` / `kind: e2e` as appropriate) when the task ships behavioral code.
 
 ## Feature flag
 

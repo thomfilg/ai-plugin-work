@@ -69,12 +69,12 @@ The closed enum is defined in [`lib/task-types.js`](../lib/task-types.js). Addin
 
 ### Test Strategy
 ```
-kind: <unit | integration | e2e | custom | verified-by>
+kind: <unit | integration | e2e | custom | verified-by | wiring-citation>
 # unit / integration / e2e:
 entry: <test file path under this task's Files in scope>
 # custom:
 command: <verbatim shell command — see test-strategy.md>
-# verified-by:
+# verified-by / wiring-citation:
 peer: Task <N>
 cites: <path or symbol exercised by the peer's test>
 ```

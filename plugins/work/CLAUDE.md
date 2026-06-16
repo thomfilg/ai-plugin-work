@@ -67,6 +67,14 @@ See **[AGENTS.md](./AGENTS.md)** for the agent catalog. See **[docs/README.md](.
   to preserve the legacy `### Test Command` path so in-flight `tasks.md` files
   are not blocked mid-stream. Read via `getConfig('WORK_TEST_STRATEGY_VALIDATOR')`.
 
+  > ⚠ **DO NOT enable this flag in any environment until GH-610 lands.**
+  > The implement-gate, `tdd-phase-state.js`, and `enforce-tdd-on-stop.js`
+  > still read only `### Test Command` — they do not yet consume
+  > `task.testStrategy`. With the flag ON, a Test-Strategy-authored task
+  > passes draft but wedges at implement with "test command is missing or
+  > unrunnable" (`implement-gate.js:886`). GH-610 wires the implement-side
+  > consumer via `lib/test-strategy.js synthesizeCommand`.
+
 ### Ticket Providers
 - Configured via `TICKET_PROVIDER` env var: `jira`, `linear`, `github`, `none`.
 - GitHub issues use `#N` IDs, sanitized to `GH-N` for filesystem paths.
