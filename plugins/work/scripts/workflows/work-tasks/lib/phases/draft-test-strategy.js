@@ -54,7 +54,12 @@ function strategyFlagOn() {
   return v === STRATEGY_FLAG_ON_VALUE;
 }
 
-function resolveWorkDir() {
+function resolveWorkDir(override) {
+  // Precedence: explicit override from the orchestrator (ctx.worktreeRoot) →
+  // env-var test seam → process.cwd() last-resort fallback. Caller passes the
+  // override to avoid resolving package.json / .envrc against the wrong tree
+  // when /work-tasks runs from a cwd that isn't the ticket worktree.
+  if (override && typeof override === 'string') return override;
   const explicit = process.env.WORK_DRAFT_WORKDIR;
   if (explicit && typeof explicit === 'string') return explicit;
   return process.cwd();
@@ -88,8 +93,8 @@ function _loadParsedTasks(tasksDir) {
   }
 }
 
-function loadStrategyContext(tasksDir) {
-  const workDir = resolveWorkDir();
+function loadStrategyContext(tasksDir, workDirOverride) {
+  const workDir = resolveWorkDir(workDirOverride);
   return {
     parsedTasks: _loadParsedTasks(tasksDir),
     envrc: _loadEnvrc(workDir),
@@ -306,9 +311,9 @@ function validateTddOwnership(_tasksDir, ctx) {
   return errors;
 }
 
-function runStrategyValidators(tasksDir) {
+function runStrategyValidators(tasksDir, workDirOverride) {
   if (!strategyFlagOn()) return [];
-  const ctx = loadStrategyContext(tasksDir);
+  const ctx = loadStrategyContext(tasksDir, workDirOverride);
   return [...validateTestStrategy(tasksDir, ctx), ...validateTddOwnership(tasksDir, ctx)];
 }
 

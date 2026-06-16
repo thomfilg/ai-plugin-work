@@ -119,7 +119,7 @@ function validateSharedComponentOrdering(tasksDir, taskBlocks) {
   return errors;
 }
 
-function validateArtifacts(tasksDir) {
+function validateArtifacts(tasksDir, opts) {
   const errors = [];
   const p = path.join(tasksDir, 'tasks.md');
   const text = readFile(p);
@@ -150,12 +150,12 @@ function validateArtifacts(tasksDir) {
   const taskBlocks = parseTaskBlocks(text);
   errors.push(...validateSharedComponentOrdering(tasksDir, taskBlocks));
   // GH-590 Task 11: feature-flagged validators. No-op when flag off (AC17).
-  errors.push(...runStrategyValidators(tasksDir));
+  errors.push(...runStrategyValidators(tasksDir, opts && opts.workDir));
   return errors;
 }
 
 function validate(ctx) {
-  const errors = validateArtifacts(ctx.tasksDir);
+  const errors = validateArtifacts(ctx.tasksDir, { workDir: ctx.worktreeRoot || ctx.repoRoot });
   if (errors.length) return { ok: false, errors };
   let count = 0;
   if (parseTasks) {
