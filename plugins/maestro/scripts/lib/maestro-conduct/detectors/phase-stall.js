@@ -38,7 +38,7 @@ function detect({ ticket, phase, step }) {
     budgetMin: profile.budgetMin,
     reNudgeMin: profile.reNudgeMin,
     maxNudges: profile.maxNudges,
-    marker: prev,    // give the caller the existing nudge counter
+    marker: prev, // give the caller the existing nudge counter
   };
 }
 
