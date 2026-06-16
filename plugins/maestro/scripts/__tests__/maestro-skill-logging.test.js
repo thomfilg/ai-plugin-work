@@ -25,7 +25,7 @@ test('silence.formatLogLine prefixes with [GH-XXX:<skill>] token for follow-up',
   assert.match(
     line,
     /\[GH-514:follow-up\]/,
-    'log line must include [GH-514:follow-up] skill token',
+    'log line must include [GH-514:follow-up] skill token'
   );
   assert.match(line, /\[GH-\d+:(work|follow-up)\]/, 'must match the documented token shape');
   assert.match(line, /silence/, 'must mention the detector kind');
@@ -51,6 +51,6 @@ test('silence.formatLogLine falls back to skill=work when skill missing (non-reg
   assert.match(
     line,
     /\[GH-9999:work\]/,
-    'missing skill must default to work so default /work logs are unchanged in shape',
+    'missing skill must default to work so default /work logs are unchanged in shape'
   );
 });

@@ -27,7 +27,10 @@ function loadFresh(stateDir, env = {}) {
     require.resolve('../lib/maestro-conduct/shared/skill-registry-rows.js'),
   ];
   for (const p of modPaths) delete require.cache[p];
-  const saved = { STATE_DIR: process.env.STATE_DIR, SILENCE_LIMIT_SEC: process.env.SILENCE_LIMIT_SEC };
+  const saved = {
+    STATE_DIR: process.env.STATE_DIR,
+    SILENCE_LIMIT_SEC: process.env.SILENCE_LIMIT_SEC,
+  };
   process.env.STATE_DIR = stateDir;
   for (const [k, v] of Object.entries(env)) {
     if (v === undefined) delete process.env[k];

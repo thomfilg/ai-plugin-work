@@ -6,12 +6,5 @@
     "name": "Custom",
     "email": "custom@local"
   },
-  "keywords": [
-    "guard",
-    "protection",
-    "hooks",
-    "pretooluse",
-    "lock",
-    "safety"
-  ]
+  "keywords": ["guard", "protection", "hooks", "pretooluse", "lock", "safety"]
 }

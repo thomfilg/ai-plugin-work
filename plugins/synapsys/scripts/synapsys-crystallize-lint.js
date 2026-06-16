@@ -24,28 +24,7 @@
  */
 
 const { STOP_WORDS } = require('../lib/lint-stopwords');
-
-/**
- * Extract alternation tokens from a `trigger_prompt` regex source. Picks out
- * pipe-separated word-ish tokens inside parenthesised groups, e.g.
- * `\b(release|version|publish)\b` → ['release','version','publish'].
- * Returns lowercase tokens; non-word tokens are skipped.
- */
-function extractAlternationTokens(triggerPrompt) {
-  if (typeof triggerPrompt !== 'string' || triggerPrompt.length === 0) return [];
-  const tokens = [];
-  const groupRe = /\(([^()]+)\)/g;
-  let m;
-  while ((m = groupRe.exec(triggerPrompt)) !== null) {
-    const inner = m[1];
-    if (!inner.includes('|')) continue;
-    for (const raw of inner.split('|')) {
-      const t = raw.trim();
-      if (/^[A-Za-z0-9_-]+$/.test(t)) tokens.push(t.toLowerCase());
-    }
-  }
-  return tokens;
-}
+const { extractAlternationTokens } = require('../lib/shared/trigger-tokens');
 
 const PERMISSIVE_PRETOOL = new Set(['Edit:.*', 'Write:.*', 'Bash:.*']);
 

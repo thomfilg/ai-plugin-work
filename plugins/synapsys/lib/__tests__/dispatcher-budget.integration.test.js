@@ -325,7 +325,10 @@ describe('dispatcher 16k budget + demote-instead-of-drop (GH-588 Task 2)', () =>
     assert.match(r.stdout, /SENTINEL-a/, 'full body present');
     assert.match(r.stdout, /fired earlier; full body in this session/, 'summary line present');
     // Stderr begins with [synapsys].
-    assert.ok(r.stderr.startsWith('[synapsys]'), `stderr must start with [synapsys], got ${JSON.stringify(r.stderr.slice(0, 40))}`);
+    assert.ok(
+      r.stderr.startsWith('[synapsys]'),
+      `stderr must start with [synapsys], got ${JSON.stringify(r.stderr.slice(0, 40))}`
+    );
   });
 
   it('R11 SYNAPSYS_DEBUG=1 emits "[synapsys:debug] budget <used>/<limit>" to stderr', () => {

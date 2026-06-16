@@ -19,7 +19,8 @@
     "format:check": "biome format .",
     "prepare": "command -v git >/dev/null 2>&1 && git rev-parse --is-inside-work-tree >/dev/null 2>&1 && git config core.hooksPath plugins/work/scripts/hooks || true",
     "quality": "node plugins/work/scripts/workflows/lib/scripts/quality/quality.js",
-    "quality:changed": "node plugins/work/scripts/workflows/lib/scripts/quality/quality.js --changed"
+    "quality:changed": "node plugins/work/scripts/workflows/lib/scripts/quality/quality.js --changed",
+    "synapsys:lint": "node plugins/synapsys/scripts/synapsys-lint.js"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.11",
