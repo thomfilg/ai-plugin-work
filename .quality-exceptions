@@ -111,7 +111,6 @@ plugins/work/scripts/workflows/work/work-state/task-readiness.js
 plugins/work/scripts/workflows/work/work-state/graph-validation.js
 plugins/work/scripts/workflows/lib/quality-check.js
 plugins/work/scripts/workflows/check/lib/app-access.js
-plugins/work/scripts/workflows/work-tasks/lib/phases/kind_assign.js
 plugins/work/scripts/workflows/work/lib/work-enforcement-context.js
 plugins/work/scripts/workflows/check/agents/qa-feature-tester/qa-pretooluse-hooks.js
 plugins/work/scripts/workflows/check2/lib/step-enrichments/completion-context.js

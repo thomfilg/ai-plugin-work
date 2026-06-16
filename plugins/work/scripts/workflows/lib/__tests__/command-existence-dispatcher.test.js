@@ -46,11 +46,15 @@ describe('lib/command-existence-dispatcher.js — dispatch()', () => {
     try {
       writeFile(
         path.join(root, 'package.json'),
-        JSON.stringify({ scripts: { test: 'node --test' } }),
+        JSON.stringify({ scripts: { test: 'node --test' } })
       );
       const { dispatch } = loadModule();
       const result = dispatch('pnpm test', baseCtx(root));
-      assert.equal(result.ok, true, `expected ok:true, got errors=${JSON.stringify(result.errors)}`);
+      assert.equal(
+        result.ok,
+        true,
+        `expected ok:true, got errors=${JSON.stringify(result.errors)}`
+      );
       assert.deepEqual(result.errors, []);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
@@ -70,13 +74,17 @@ describe('lib/command-existence-dispatcher.js — dispatch()', () => {
             build: 'tsc -p .',
             lint: 'biome lint',
           },
-        }),
+        })
       );
       const { dispatch } = loadModule();
       // Typo: dev:typcheck (missing 'e')
       const result = dispatch('pnpm dev:typcheck', baseCtx(root));
       assert.equal(result.ok, false);
-      assert.equal(result.errors.length, 1, `expected exactly 1 error, got ${JSON.stringify(result.errors)}`);
+      assert.equal(
+        result.errors.length,
+        1,
+        `expected exactly 1 error, got ${JSON.stringify(result.errors)}`
+      );
       const msg = result.errors[0];
       assert.match(msg, /dev:typcheck/, 'error names the missing script');
       assert.match(msg, /dev:typecheck/, 'error suggests dev:typecheck (top-1)');
@@ -130,7 +138,10 @@ describe('lib/command-existence-dispatcher.js — dispatch()', () => {
   it('bare-binary-miss-no-dep: unknown binary not on PATH and not in manifest deps fails', () => {
     const root = mkdtemp('cmd-disp-bare-miss-');
     try {
-      writeFile(path.join(root, 'package.json'), JSON.stringify({ scripts: {}, dependencies: {}, devDependencies: {} }));
+      writeFile(
+        path.join(root, 'package.json'),
+        JSON.stringify({ scripts: {}, dependencies: {}, devDependencies: {} })
+      );
       const { dispatch } = loadModule();
       const result = dispatch('definitely-not-a-real-binary-xyz123 --flag', baseCtx(root));
       assert.equal(result.ok, false);
@@ -143,7 +154,10 @@ describe('lib/command-existence-dispatcher.js — dispatch()', () => {
   it('$VAR-resolve-recursive: `eval "$TEST_UNIT_COMMAND"` resolves via .envrc and redispatches', () => {
     const root = mkdtemp('cmd-disp-var-');
     try {
-      writeFile(path.join(root, 'package.json'), JSON.stringify({ scripts: { test: 'node --test' } }));
+      writeFile(
+        path.join(root, 'package.json'),
+        JSON.stringify({ scripts: { test: 'node --test' } })
+      );
       writeFile(path.join(root, '.envrc'), 'export TEST_UNIT_COMMAND="pnpm test"\n');
       const { dispatch } = loadModule();
       const result = dispatch('eval "$TEST_UNIT_COMMAND"', baseCtx(root));
@@ -167,35 +181,38 @@ describe('lib/command-existence-dispatcher.js — dispatch()', () => {
     }
   });
 
-  it('AC14 two-errors case: `pnpm dev:typecheck && grep -q foo bar.ts` produces exactly the two AC14 errors', () => {
+  it('AC14 / AC6 case: `pnpm dev:typecheck && grep -q foo bar.ts` produces exactly one error (missing pnpm script only)', () => {
     const root = mkdtemp('cmd-disp-ac14-');
     try {
       writeFile(
         path.join(root, 'package.json'),
-        // No dev:typecheck script. grep is a bare binary (resolved via command -v).
-        // bar.ts is missing on disk too — but AC14 only requires the pnpm-script
-        // error and the grep-resolution / file-target dual; the canonical AC14
-        // case is two errors collected (no short-circuit).
-        JSON.stringify({ scripts: { test: 'node --test' } }),
+        // No dev:typecheck script. grep is a bare binary resolved via PATH.
+        // Per AC6 the failure condition is (not on PATH) AND (not declared
+        // in deps). grep IS on PATH, so PATH-resolution alone is sufficient
+        // and must NOT emit an error. The "AC14 confirms grep resolves" is
+        // confirmed by the ABSENCE of a grep error in the output, not by
+        // emitting a confirmation string into errors[].
+        JSON.stringify({ scripts: { test: 'node --test' } })
       );
-      writeFile(path.join(root, 'bar.ts'), '// exists so grep target check is not the failure\n');
+      writeFile(path.join(root, 'bar.ts'), '// exists so grep target check passes\n');
       const { dispatch } = loadModule();
       const result = dispatch('pnpm dev:typecheck && grep -q foo bar.ts', baseCtx(root));
       assert.equal(result.ok, false);
-      // AC9: collected failures, no short-circuit. The dev:typecheck miss must
-      // be present even though it is the FIRST segment. AC14 wording: "produces
-      // two errors".
+      // AC6: only the missing pnpm script is an error. grep on PATH passes
+      // silently (no diagnostic, no error). AC9: collected failures, no
+      // short-circuit — but in this case there is only one failure to collect.
       assert.equal(
         result.errors.length,
-        2,
-        `AC14 requires exactly two errors; got ${result.errors.length}: ${JSON.stringify(result.errors)}`,
+        1,
+        `expected exactly one error (dev:typecheck miss); got ${result.errors.length}: ${JSON.stringify(result.errors)}`
       );
       const joined = result.errors.join('\n');
-      assert.match(joined, /dev:typecheck/, 'first error names missing dev:typecheck script');
-      // Second error: grep resolved via command -v but bar.ts dispatched? Per
-      // AC14 the second error confirms grep resolved; for safety the test just
-      // checks the second segment surfaced as an error string.
-      assert.match(joined, /grep/, 'second error mentions grep segment');
+      assert.match(joined, /dev:typecheck/, 'sole error names missing dev:typecheck script');
+      assert.doesNotMatch(
+        joined,
+        /grep/,
+        'grep resolved via PATH and must not produce an error per AC6'
+      );
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }

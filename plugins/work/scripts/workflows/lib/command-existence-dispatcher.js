@@ -187,18 +187,10 @@ function dispatchBareBinary(argv, ctx, errors) {
     return;
   }
   if (checkBinaryOnPath(binary)) {
-    // AC14: bare binary resolved via PATH only (not declared as a project
-    // dep) emits a confirmation diagnostic. The validator surfaces this so
-    // operators can see exactly which command -v path was taken — and so
-    // the AC14 fixture (`pnpm dev:typecheck && grep -q foo bar.ts`) produces
-    // exactly two errors: one for the missing pnpm script, one for the
-    // PATH-only grep resolution.
-    errors.push(
-      prefixHeading(
-        ctx.taskHeading,
-        `${binary}: resolved via \`command -v\` only (not declared in package.json dependencies)`
-      )
-    );
+    // AC6: PATH-resolution alone is sufficient to pass. A binary that is
+    // on PATH but not declared in package.json deps must NOT produce an
+    // error — the failure condition is the AND of (not on PATH) AND (not
+    // declared). See GH-590 brief AC6.
     return;
   }
   errors.push(

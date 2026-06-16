@@ -185,7 +185,7 @@ test('flag-on: valid kind=unit ### Test Strategy passes draft validation', () =>
   );
 });
 
-test('flag-on: custom body "pnpm dev:typecheck && grep -q foo bar.ts" emits both AC14 errors', () => {
+test('flag-on: custom body "pnpm dev:typecheck && grep -q foo bar.ts" emits exactly the dev:typecheck miss (AC6/AC14)', () => {
   const dir = mkTasksDir();
   writeSpec(dir);
   writeTasks(dir, STRATEGY_TASKS_MD_BAD_CUSTOM);
@@ -204,9 +204,14 @@ test('flag-on: custom body "pnpm dev:typecheck && grep -q foo bar.ts" emits both
     /dev:typecheck/.test(joined),
     `expected an error naming "dev:typecheck" missing from manifest; got: ${joined}`
   );
+  // Per AC6 the failure condition for a bare binary is (not on PATH) AND
+  // (not declared in package.json deps). `grep` is on PATH, so PATH-
+  // resolution alone is sufficient — it must NOT produce an error. The
+  // "AC14 confirms grep resolves" is confirmed by the ABSENCE of a grep
+  // error, not by emitting a confirmation diagnostic into errors[].
   assert.ok(
-    errors.length >= 2,
-    `expected at least two collected errors (no short-circuit per AC9); got ${errors.length}: ${joined}`
+    !/grep/.test(joined),
+    `grep is on PATH and must not produce an error per AC6; got: ${joined}`
   );
 });
 

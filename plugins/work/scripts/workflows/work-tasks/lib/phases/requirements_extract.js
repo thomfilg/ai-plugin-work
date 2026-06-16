@@ -7,18 +7,10 @@
 
 'use strict';
 
-const fs = require('node:fs');
 const path = require('node:path');
 
 const { TASKS_PHASES } = require('../../tasks-phase-registry');
-
-function readFile(p) {
-  try {
-    return fs.readFileSync(p, 'utf8');
-  } catch {
-    return null;
-  }
-}
+const { loadTasksMd, readFileSafe, tasksMdPath } = require('./_tasks-md-loader');
 
 function sliceSection(text, headerRe) {
   if (!text) return '';
@@ -40,15 +32,12 @@ function listRequirementIds(text) {
 }
 
 function validateArtifacts(tasksDir) {
-  const errors = [];
-  const p = path.join(tasksDir, 'tasks.md');
-  const text = readFile(p);
-  if (!text) {
-    errors.push(
+  const { text, errors } = loadTasksMd(
+    tasksDir,
+    (p) =>
       `Missing ${p}. Create it with a top section \`## Extracted Requirements\` listing every requirement before drafting tasks.`
-    );
-    return errors;
-  }
+  );
+  if (text === null) return errors;
   const section = sliceSection(text, /^##\s+Extracted Requirements(?=\s|$)/im);
   if (!section || section.trim().length < 30) {
     errors.push(
@@ -68,7 +57,7 @@ function validateArtifacts(tasksDir) {
 function validate(ctx) {
   const errors = validateArtifacts(ctx.tasksDir);
   if (errors.length) return { ok: false, errors };
-  const text = readFile(path.join(ctx.tasksDir, 'tasks.md'));
+  const text = readFileSafe(tasksMdPath(ctx.tasksDir));
   const ids = listRequirementIds(sliceSection(text, /^##\s+Extracted Requirements(?=\s|$)/im));
   return { ok: true, summary: `${ids.length} requirement IDs extracted` };
 }

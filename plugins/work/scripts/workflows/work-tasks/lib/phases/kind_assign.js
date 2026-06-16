@@ -15,10 +15,9 @@
 
 'use strict';
 
-const fs = require('node:fs');
-const path = require('node:path');
-
 const { TASKS_PHASES } = require('../../tasks-phase-registry');
+const { iterTaskBlocks } = require('./_task-block-iter');
+const { loadTasksMd, readFileSafe, tasksMdPath } = require('./_tasks-md-loader');
 
 const VALID_KINDS = new Set([
   'frontend',
@@ -29,16 +28,6 @@ const VALID_KINDS = new Set([
   'fullstack',
   'checkpoint',
 ]);
-
-function readFile(p) {
-  try {
-    return fs.readFileSync(p, 'utf8');
-  } catch {
-    return null;
-  }
-}
-
-const { iterTaskBlocks } = require('./_task-block-iter');
 
 function parseBlocks(text) {
   const out = [];
@@ -103,62 +92,85 @@ function isAppSourceFile(p) {
   return /(^|\/)app\//.test(p) || /(^|\/)lib\//.test(p) || /(^|\/)components\//.test(p);
 }
 
-function validateBlock(b) {
-  const errors = [];
-  if (!VALID_KINDS.has(b.type)) {
-    errors.push(
-      `Task ${b.num} \`### Type\` is "${b.type}" — must be one of: ${[...VALID_KINDS].join(', ')}.`
-    );
-    return errors;
-  }
-  if (b.type === 'checkpoint') return errors;
+// Per-kind validators — each returns an array of error strings for the block.
+// Keeping these as small named functions lets `validateBlock` stay a flat
+// dispatch (cc = 3) instead of a giant if/else ladder.
 
-  if (b.type === 'backend' && !b.filesInScope.some(isIntegrationTest)) {
+function _validateBackend(b) {
+  if (b.filesInScope.some(isIntegrationTest)) return [];
+  return [
+    `Task ${b.num} kind=backend but no \`*.integration.test.*\` file in \`### Files in scope\`. Backend tasks must ship with integration test coverage.`,
+  ];
+}
+
+function _validateFrontend(b) {
+  if (b.filesInScope.some(isFrontendFile)) return [];
+  return [`Task ${b.num} kind=frontend but no component/page/hook file in \`### Files in scope\`.`];
+}
+
+function _validateE2e(b) {
+  if (b.filesInScope.some(isE2eFile)) return [];
+  return [
+    `Task ${b.num} kind=e2e but no \`tests/e2e/**/*.spec.*\` file in \`### Files in scope\`.`,
+  ];
+}
+
+function _validateWiring(b) {
+  const backendDrift = b.filesInScope.filter(isBackendFile);
+  if (!backendDrift.length) return [];
+  return [
+    `Task ${b.num} kind=wiring but \`### Files in scope\` includes backend files (${backendDrift
+      .map((f) => `\`${f}\``)
+      .join(
+        ', '
+      )}). Wiring tasks must not touch backend — escalate to a sibling owner instead. (ECHO-4579 defense at task granularity.)`,
+  ];
+}
+
+function _validateDevops(b) {
+  const errors = [];
+  const appDrift = b.filesInScope.filter(isAppSourceFile);
+  if (appDrift.length) {
     errors.push(
-      `Task ${b.num} kind=backend but no \`*.integration.test.*\` file in \`### Files in scope\`. Backend tasks must ship with integration test coverage.`
+      `Task ${b.num} kind=devops but \`### Files in scope\` includes app-source files (${appDrift
+        .map((f) => `\`${f}\``)
+        .join(', ')}). Split into a separate task with a different kind.`
     );
   }
-  if (b.type === 'frontend' && !b.filesInScope.some(isFrontendFile)) {
+  if (!b.filesInScope.some(isDevopsFile)) {
     errors.push(
-      `Task ${b.num} kind=frontend but no component/page/hook file in \`### Files in scope\`.`
+      `Task ${b.num} kind=devops but no infra file (\`.github/\`, \`scripts/\`, \`*.yml\`, \`Dockerfile\`) in scope.`
     );
-  }
-  if (b.type === 'e2e' && !b.filesInScope.some(isE2eFile)) {
-    errors.push(
-      `Task ${b.num} kind=e2e but no \`tests/e2e/**/*.spec.*\` file in \`### Files in scope\`.`
-    );
-  }
-  if (b.type === 'wiring') {
-    const backendDrift = b.filesInScope.filter(isBackendFile);
-    if (backendDrift.length) {
-      errors.push(
-        `Task ${b.num} kind=wiring but \`### Files in scope\` includes backend files (${backendDrift.map((f) => `\`${f}\``).join(', ')}). Wiring tasks must not touch backend — escalate to a sibling owner instead. (ECHO-4579 defense at task granularity.)`
-      );
-    }
-  }
-  if (b.type === 'devops') {
-    const appDrift = b.filesInScope.filter(isAppSourceFile);
-    if (appDrift.length) {
-      errors.push(
-        `Task ${b.num} kind=devops but \`### Files in scope\` includes app-source files (${appDrift.map((f) => `\`${f}\``).join(', ')}). Split into a separate task with a different kind.`
-      );
-    }
-    if (!b.filesInScope.some(isDevopsFile)) {
-      errors.push(
-        `Task ${b.num} kind=devops but no infra file (\`.github/\`, \`scripts/\`, \`*.yml\`, \`Dockerfile\`) in scope.`
-      );
-    }
   }
   return errors;
 }
 
-function validateArtifacts(tasksDir) {
-  const errors = [];
-  const text = readFile(path.join(tasksDir, 'tasks.md'));
-  if (!text) {
-    errors.push(`Missing ${path.join(tasksDir, 'tasks.md')}.`);
-    return errors;
+// Dispatch table keyed on `### Type`. checkpoint + fullstack have no extra
+// per-kind sanity (fullstack intentionally accepts any mix); both map to a
+// no-op validator.
+const _KIND_VALIDATORS = {
+  backend: _validateBackend,
+  frontend: _validateFrontend,
+  e2e: _validateE2e,
+  wiring: _validateWiring,
+  devops: _validateDevops,
+  fullstack: () => [],
+  checkpoint: () => [],
+};
+
+function validateBlock(b) {
+  if (!VALID_KINDS.has(b.type)) {
+    return [
+      `Task ${b.num} \`### Type\` is "${b.type}" — must be one of: ${[...VALID_KINDS].join(', ')}.`,
+    ];
   }
+  const validator = _KIND_VALIDATORS[b.type];
+  return validator ? validator(b) : [];
+}
+
+function validateArtifacts(tasksDir) {
+  const { text, errors } = loadTasksMd(tasksDir, (p) => `Missing ${p}.`);
+  if (text === null) return errors;
   const blocks = parseBlocks(text);
   if (!blocks.length) {
     errors.push('No `## Task N` blocks — re-run draft phase first.');
@@ -171,7 +183,7 @@ function validateArtifacts(tasksDir) {
 function validate(ctx) {
   const errors = validateArtifacts(ctx.tasksDir);
   if (errors.length) return { ok: false, errors };
-  const text = readFile(path.join(ctx.tasksDir, 'tasks.md'));
+  const text = readFileSafe(tasksMdPath(ctx.tasksDir));
   const blocks = parseBlocks(text);
   return {
     ok: true,
