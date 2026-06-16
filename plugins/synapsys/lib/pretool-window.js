@@ -23,6 +23,7 @@ const os = require('node:os');
 const fs = require('node:fs');
 const path = require('node:path');
 const sessionIdLib = require('./session-id');
+const { parsePretoolSpec } = require('./matcher');
 
 const DEFAULT_MAX = 32;
 const DEFAULT_INTERVENING = 1;
@@ -136,14 +137,29 @@ function enforceCap(expectations) {
   }
 }
 
-function matchesPattern(pattern, observed) {
+// Spec gating mirrors matcher.pretoolSpecMatches: a `Bash:git push` expectation
+// must only resolve when the observed PreToolUse tool_name is `Bash`. Legacy
+// on-disk entries (bare patterns with no colon) are treated as `*:<pattern>`
+// so older state files keep resolving.
+function parseSpec(spec) {
+  const s = String(spec);
+  if (s.indexOf(':') === -1) return { tool: '*', pat: s };
+  return parsePretoolSpec(s);
+}
+
+function matchesPattern(spec, observedToolName, observed) {
   try {
+    const { tool, pat } = parseSpec(spec);
+    if (tool && tool !== '*' && observedToolName != null && tool !== observedToolName) {
+      return false;
+    }
+    if (!pat) return true;
     // Mirror the matcher's `safeRegex(pattern, 'i')` so a follow-up command
     // that matches the trigger case-insensitively is treated as fulfillment,
     // not divergence.
-    return new RegExp(pattern, 'i').test(observed);
+    return new RegExp(pat, 'i').test(observed);
   } catch (_e) {
-    return pattern === observed;
+    return spec === observed;
   }
 }
 
@@ -162,7 +178,7 @@ function recordExpectation(sessionId, memoryName, expectedCommand) {
   }
 }
 
-function resolveExpectation(sessionId, observedCommand) {
+function resolveExpectation(sessionId, observedCommand, observedToolName) {
   try {
     const state = loadSession(sessionId);
     if (state.expectations.size === 0) {
@@ -173,7 +189,7 @@ function resolveExpectation(sessionId, observedCommand) {
     // of them to be satisfied for the agent to be "compliant".
     const matchedNames = [];
     for (const [name, entry] of state.expectations) {
-      if (entry.patterns.some((p) => matchesPattern(p, observedCommand))) {
+      if (entry.patterns.some((p) => matchesPattern(p, observedToolName, observedCommand))) {
         matchedNames.push(name);
       }
     }

@@ -15,22 +15,17 @@ const { recordBehaviorChanged, isDisabled } = require(
   path.join(__dirname, '..', '..', 'lib', 'telemetry')
 );
 
-function patternFromSpec(spec) {
-  const colon = String(spec).indexOf(':');
-  if (colon === -1) return '';
-  return String(spec)
-    .slice(colon + 1)
-    .trim();
-}
-
-// Return EVERY `trigger_pretool` pattern (after `Tool:` prefix) for a memory.
-// The matcher may fire on any spec, so storing only the first pattern would
+// Return EVERY `trigger_pretool` spec (in `Tool:pattern` form) for a memory.
+// The matcher may fire on any spec, so storing only the first would
 // mis-attribute the pending expectation and emit spurious divergence when
-// the agent satisfied a later spec. Caller records the full list and matches
-// fulfillment against any pattern.
+// the agent satisfied a later spec. Keep the `Tool:` prefix so the divergence
+// resolver in pretool-window can gate fulfillment on tool_name — the matcher's
+// own contract for `Bash:git push` is that it ONLY matches when tool_name ===
+// 'Bash'. Stripping the prefix here let any tool's JSON containing the pattern
+// clear the expectation, diverging from the matcher's gate.
 function expectedCommandsFor(memory) {
   if (!memory || !Array.isArray(memory.triggerPretool)) return [];
-  return memory.triggerPretool.map(patternFromSpec).filter((p) => p);
+  return memory.triggerPretool.map((s) => String(s).trim()).filter((s) => s.length > 0);
 }
 
 // Match the matcher's surface: trigger_pretool regexes test the serialized
@@ -40,7 +35,8 @@ function expectedCommandsFor(memory) {
 // when the agent ran a compliant follow-up.
 function observedFromPayload(payload) {
   const toolInput = (payload && payload.tool_input) || {};
-  return JSON.stringify(toolInput);
+  const toolName = (payload && payload.tool_name) || '';
+  return { toolName, blob: JSON.stringify(toolInput) };
 }
 
 function indexMemoriesByName(memories) {
@@ -71,12 +67,12 @@ function emitDivergence(entry, byName, payload, observed, sessionId) {
 // per `(session, memory)` per Stop turn (per-turn dedup via markBehaviorChanged).
 function resolveAndEmitDivergences(payload, memories, sessionId) {
   try {
-    const observed = observedFromPayload(payload);
-    const result = pretoolWindow.resolveExpectation(sessionId, observed);
+    const { toolName, blob } = observedFromPayload(payload);
+    const result = pretoolWindow.resolveExpectation(sessionId, blob, toolName);
     if (!result || !result.divergent) return;
     const byName = indexMemoriesByName(memories);
     for (const entry of result.expectations) {
-      emitDivergence(entry, byName, payload, observed, sessionId);
+      emitDivergence(entry, byName, payload, blob, sessionId);
     }
   } catch {
     // fail-open

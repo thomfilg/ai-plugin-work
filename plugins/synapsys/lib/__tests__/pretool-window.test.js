@@ -118,6 +118,45 @@ test('resolveExpectation uses regex semantics (regex match against observed comm
   assert.equal(r2.divergent, false);
 });
 
+test('expectation recorded as Bash:<pat> is gated on observed tool_name (fidelity with matcher)', () => {
+  const win = load();
+  win.setWindowOverrides({ max: 32, intervening: 1 });
+  const sessionId = 'sess-tool-gate';
+  // Mirror what expectedCommandsFor returns: full Tool:pattern specs.
+  win.recordExpectation(sessionId, 'mem-bash', ['Bash:git push']);
+  // A non-Bash tool whose JSON blob happens to contain "git push" must NOT
+  // clear the expectation — the matcher would not have fired on it.
+  const blob = JSON.stringify({ file_path: '/notes/git push.md', content: 'x' });
+  const r1 = win.resolveExpectation(sessionId, blob, 'Write');
+  assert.equal(r1.divergent, false); // first non-match within intervening budget
+  const r2 = win.resolveExpectation(sessionId, blob, 'Write');
+  assert.equal(r2.divergent, true);
+  assert.equal(r2.expectations[0].memoryName, 'mem-bash');
+});
+
+test('Bash:<pat> expectation IS cleared by a Bash tool whose input matches', () => {
+  const win = load();
+  win.setWindowOverrides({ max: 32, intervening: 1 });
+  const sessionId = 'sess-tool-gate-pos';
+  win.recordExpectation(sessionId, 'mem-bash2', ['Bash:git push']);
+  const blob = JSON.stringify({ command: 'git push origin main' });
+  const r = win.resolveExpectation(sessionId, blob, 'Bash');
+  assert.equal(r.divergent, false);
+  // Cleared — a subsequent unrelated observation is non-divergent.
+  const r2 = win.resolveExpectation(sessionId, JSON.stringify({ command: 'ls' }), 'Bash');
+  assert.equal(r2.divergent, false);
+});
+
+test('legacy bare-pattern expectation (no colon) still resolves (* tool)', () => {
+  const win = load();
+  win.setWindowOverrides({ max: 32, intervening: 1 });
+  const sessionId = 'sess-legacy';
+  // Simulate an on-disk entry that predates the Tool: prefix.
+  win.recordExpectation(sessionId, 'mem-legacy', 'git push');
+  const r = win.resolveExpectation(sessionId, 'git push origin main', 'Bash');
+  assert.equal(r.divergent, false);
+});
+
 test('cross-path dedup persists across fresh module loads', () => {
   const sessionId = 'sess-dedup-cross';
   const w1 = load();
