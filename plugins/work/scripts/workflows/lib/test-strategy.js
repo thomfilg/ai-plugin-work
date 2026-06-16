@@ -52,32 +52,29 @@ function resolveEnvelope(envrc, kind) {
  * - `custom`: returns `strategy.command` (preferred) or `strategy.customBody`
  *   (legacy fenced-bash body) verbatim.
  */
+const CITATION_KIND_SET = new Set([KINDS.VERIFIED_BY, KINDS.WIRING_CITATION]);
+const ENVELOPE_KIND_SET = new Set([KINDS.UNIT, KINDS.INTEGRATION, KINDS.E2E]);
+
+function _synthesizeCustom(strategy) {
+  if (typeof strategy.command === 'string' && strategy.command.length > 0) {
+    return strategy.command;
+  }
+  return typeof strategy.customBody === 'string' ? strategy.customBody : null;
+}
+
+function _synthesizeEnvelope(strategy, envrc, kind) {
+  const entry = strategy.entry;
+  if (typeof entry !== 'string' || entry.length === 0) return null;
+  const envelope = resolveEnvelope(envrc, kind);
+  return envelope ? `CHANGED_FILES="${entry}" eval "$${envelope.varName}"` : `pnpm test ${entry}`;
+}
+
 function synthesizeCommand(strategy, envrc) {
   if (!strategy || typeof strategy !== 'object') return null;
   const { kind } = strategy;
-
-  if (kind === KINDS.VERIFIED_BY || kind === KINDS.WIRING_CITATION) {
-    return null;
-  }
-
-  if (kind === KINDS.CUSTOM) {
-    if (typeof strategy.command === 'string' && strategy.command.length > 0) {
-      return strategy.command;
-    }
-    return typeof strategy.customBody === 'string' ? strategy.customBody : null;
-  }
-
-  if (kind === KINDS.UNIT || kind === KINDS.INTEGRATION || kind === KINDS.E2E) {
-    const entry = strategy.entry;
-    if (typeof entry !== 'string' || entry.length === 0) return null;
-
-    const envelope = resolveEnvelope(envrc, kind);
-    if (envelope) {
-      return `CHANGED_FILES="${entry}" eval "$${envelope.varName}"`;
-    }
-    return `pnpm test ${entry}`;
-  }
-
+  if (CITATION_KIND_SET.has(kind)) return null;
+  if (kind === KINDS.CUSTOM) return _synthesizeCustom(strategy);
+  if (ENVELOPE_KIND_SET.has(kind)) return _synthesizeEnvelope(strategy, envrc, kind);
   return null;
 }
 
@@ -142,53 +139,62 @@ function findTaskByHeading(allTasks, heading) {
  *
  * Returns `string[]` of error messages — empty array means valid.
  */
-function validatePeerCitation(strategy, allTasks, citingTask) {
-  const errors = [];
-  if (!strategy || typeof strategy !== 'object') return errors;
+function _citingHeading(citingTask) {
+  if (!citingTask) return '<unknown task>';
+  if (citingTask.heading) return citingTask.heading;
+  if (citingTask.num != null) return `Task ${citingTask.num}`;
+  return '<unknown task>';
+}
 
-  const { kind } = strategy;
-  const peer = strategy.peer || strategy.verifiedBy;
-  if (kind !== KINDS.VERIFIED_BY && kind !== KINDS.WIRING_CITATION) {
-    return errors;
-  }
+function _checkPeerKind(peerStrategy, heading, peer) {
+  const peerKind = peerStrategy.kind;
+  if (peerKind === KINDS.UNIT || peerKind === KINDS.INTEGRATION) return null;
+  return `${heading}: Test Strategy peer "${peer}" has kind=${peerKind || '<missing>'}; expected kind=unit or kind=integration`;
+}
 
-  const citingHeading =
-    (citingTask &&
-      (citingTask.heading || (citingTask.num != null ? `Task ${citingTask.num}` : null))) ||
-    '<unknown task>';
-
-  if (typeof peer !== 'string' || peer.length === 0) {
-    errors.push(`${citingHeading}: Test Strategy kind=${kind} is missing the peer field`);
-    return errors;
-  }
-
-  const peerTask = findTaskByHeading(allTasks, peer);
-  if (!peerTask) {
-    errors.push(`${citingHeading}: Test Strategy peer "${peer}" not found in tasks.md`);
-    return errors;
-  }
-
-  const peerStrategy = peerTask.testStrategy || peerTask.strategy || {};
-  if (peerStrategy.kind !== KINDS.UNIT && peerStrategy.kind !== KINDS.INTEGRATION) {
-    errors.push(
-      `${citingHeading}: Test Strategy peer "${peer}" has kind=${peerStrategy.kind || '<missing>'}; expected kind=unit or kind=integration`
-    );
-    return errors;
-  }
-
+function _checkPeerCoverage(peerStrategy, peerTask, citingTask, heading, peer) {
   const citingScope = (citingTask && citingTask.filesInScope) || [];
   const peerScope = (peerTask && peerTask.filesInScope) || [];
   const peerEntry = peerStrategy.entry;
   const scopeSuperset = peerScopeCoversCitingScope(peerScope, citingScope);
   const entryOverlap =
     typeof peerEntry === 'string' && entryReferencesScope(peerEntry, citingScope);
-  if (!scopeSuperset && !entryOverlap) {
-    errors.push(
-      `${citingHeading}: Test Strategy peer "${peer}" does not cover this task's Files in scope (peer's filesInScope must be a superset, or peer's entry "${peerEntry}" must match)`
-    );
-  }
+  if (scopeSuperset || entryOverlap) return null;
+  return `${heading}: Test Strategy peer "${peer}" does not cover this task's Files in scope (peer's filesInScope must be a superset, or peer's entry "${peerEntry}" must match)`;
+}
 
-  return errors;
+function _findPeerOrError(strategy, allTasks, heading, kind) {
+  const peer = strategy.peer || strategy.verifiedBy;
+  if (typeof peer !== 'string' || peer.length === 0) {
+    return { err: `${heading}: Test Strategy kind=${kind} is missing the peer field` };
+  }
+  const peerTask = findTaskByHeading(allTasks, peer);
+  if (!peerTask) {
+    return { err: `${heading}: Test Strategy peer "${peer}" not found in tasks.md` };
+  }
+  return { peer, peerTask };
+}
+
+function _firstPeerError(strategy, allTasks, citingTask) {
+  if (!strategy || typeof strategy !== 'object') return null;
+  const { kind } = strategy;
+  if (!CITATION_KIND_SET.has(kind)) return null;
+
+  const heading = _citingHeading(citingTask);
+  const found = _findPeerOrError(strategy, allTasks, heading, kind);
+  if (found.err) return found.err;
+
+  const { peer, peerTask } = found;
+  const peerStrategy = peerTask.testStrategy || peerTask.strategy || {};
+  return (
+    _checkPeerKind(peerStrategy, heading, peer) ||
+    _checkPeerCoverage(peerStrategy, peerTask, citingTask, heading, peer)
+  );
+}
+
+function validatePeerCitation(strategy, allTasks, citingTask) {
+  const err = _firstPeerError(strategy, allTasks, citingTask);
+  return err ? [err] : [];
 }
 
 module.exports = {

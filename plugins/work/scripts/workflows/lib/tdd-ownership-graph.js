@@ -55,69 +55,52 @@ function isDocsOnlyScope(paths) {
  * @param {Array<object>} tasks
  * @returns {Map<string, Set<number>>}
  */
+function _scopeOf(task) {
+  return Array.isArray(task && task.filesInScope) ? task.filesInScope : [];
+}
+
+function _seedGraph(tasks, graph) {
+  for (const t of tasks) {
+    for (const p of _scopeOf(t)) {
+      if (typeof p === 'string' && p && !graph.has(p)) graph.set(p, new Set());
+    }
+  }
+}
+
+function _entryCoversPath(entry, p) {
+  return entry === p || fileMatchesScope(entry, [p]) || fileMatchesScope(p, [entry]);
+}
+
+function _applyEntryCoverage(graph, entry, taskNum, ownScope) {
+  for (const [path] of graph) {
+    if (_entryCoversPath(entry, path)) graph.get(path).add(taskNum);
+  }
+  for (const p of ownScope) {
+    if (_entryCoversPath(entry, p)) graph.get(p).add(taskNum);
+  }
+}
+
+function _applyTaskCoverage(graph, task) {
+  const strat = task && task.testStrategy;
+  if (!strat || typeof strat !== 'object') return;
+  const kind = strat.kind;
+  const ownScope = _scopeOf(task);
+
+  if (CITATION_KINDS.has(kind)) {
+    for (const p of ownScope) graph.get(p).add(task.num);
+    return;
+  }
+  if (ENTRY_KINDS.has(kind) && typeof strat.entry === 'string' && strat.entry) {
+    _applyEntryCoverage(graph, strat.entry, task.num, ownScope);
+  }
+}
+
 function buildCoverageGraph(tasks) {
   /** @type {Map<string, Set<number>>} */
   const graph = new Map();
   if (!Array.isArray(tasks)) return graph;
-
-  // Seed the graph with every declared path.
-  for (const t of tasks) {
-    const files = Array.isArray(t && t.filesInScope) ? t.filesInScope : [];
-    for (const p of files) {
-      if (typeof p === 'string' && p) {
-        if (!graph.has(p)) graph.set(p, new Set());
-      }
-    }
-  }
-
-  // Apply coverage from each task's strategy.
-  for (const t of tasks) {
-    const strat = t && t.testStrategy;
-    if (!strat || typeof strat !== 'object') continue;
-    const kind = strat.kind;
-    const ownScope = Array.isArray(t.filesInScope) ? t.filesInScope : [];
-
-    if (CITATION_KINDS.has(kind)) {
-      // Citation kinds cover their own scope by reference.
-      for (const p of ownScope) graph.get(p).add(t.num);
-      continue;
-    }
-
-    if (ENTRY_KINDS.has(kind) && typeof strat.entry === 'string' && strat.entry) {
-      const entry = strat.entry;
-      // For every path in the graph, mark task as a coverer if its entry
-      // matches that path's owning scope.
-      for (const [path] of graph) {
-        // The task covers a path iff its `entry` is "in scope" of that path:
-        // i.e. some task's scope (including this task's) globs match entry,
-        // and the path itself is among those scope paths.
-        // Simpler: a unit/integration test entry covers the path when the
-        // path matches a scope glob list that includes the entry.
-        // For the common case where files-in-scope contains the entry
-        // verbatim, this is just an entry === path check on either side,
-        // OR the entry path lies under the same scope as `path`.
-        if (
-          entry === path ||
-          fileMatchesScope(entry, [path]) ||
-          fileMatchesScope(path, [entry])
-        ) {
-          graph.get(path).add(t.num);
-        }
-      }
-
-      // Also: any of this task's own scope paths whose glob matches `entry`.
-      for (const p of ownScope) {
-        if (
-          entry === p ||
-          fileMatchesScope(entry, [p]) ||
-          fileMatchesScope(p, [entry])
-        ) {
-          graph.get(p).add(t.num);
-        }
-      }
-    }
-  }
-
+  _seedGraph(tasks, graph);
+  for (const t of tasks) _applyTaskCoverage(graph, t);
   return graph;
 }
 
@@ -146,50 +129,38 @@ function _remediationOptions(task) {
  * @param {Map<string, Set<number>>} graph
  * @returns {{ path: string, owner: number, remediation: string[] }[]}
  */
+function _buildOwnerMap(tasks) {
+  /** @type {Map<string, object>} */
+  const owners = new Map();
+  for (const t of tasks) {
+    for (const p of _scopeOf(t)) {
+      if (typeof p === 'string' && p && !owners.has(p)) owners.set(p, t);
+    }
+  }
+  return owners;
+}
+
+function _isOrphan(owner, coverers) {
+  const ownerKind = owner.testStrategy && owner.testStrategy.kind;
+  if (isDocsOnlyScope(_scopeOf(owner)) && !CITATION_KINDS.has(ownerKind)) {
+    return true;
+  }
+  return !coverers || coverers.size === 0;
+}
+
 function findOrphanedPaths(tasks, graph) {
   /** @type {{ path: string, owner: number, remediation: string[] }[]} */
   const out = [];
   if (!Array.isArray(tasks) || !(graph instanceof Map)) return out;
 
-  // Map every path to its declaring task (first owner wins; ownership
-  // uniqueness is enforced separately by validateUniqueOwnership).
-  /** @type {Map<string, object>} */
-  const owners = new Map();
-  for (const t of tasks) {
-    const files = Array.isArray(t && t.filesInScope) ? t.filesInScope : [];
-    for (const p of files) {
-      if (typeof p === 'string' && p && !owners.has(p)) owners.set(p, t);
-    }
-  }
-
+  const owners = _buildOwnerMap(tasks);
   for (const [path, coverers] of graph) {
     const owner = owners.get(path);
     if (!owner) continue;
-
-    const ownerScope = Array.isArray(owner.filesInScope) ? owner.filesInScope : [];
-    const ownerStrat = owner.testStrategy || null;
-    const ownerKind = ownerStrat && ownerStrat.kind;
-
-    // Docs-only policy: an owner whose entire scope is *.md must declare a
-    // citation kind. Otherwise every docs path it owns is an orphan.
-    if (isDocsOnlyScope(ownerScope) && !CITATION_KINDS.has(ownerKind)) {
-      out.push({
-        path,
-        owner: owner.num,
-        remediation: _remediationOptions(owner),
-      });
-      continue;
-    }
-
-    if (!coverers || coverers.size === 0) {
-      out.push({
-        path,
-        owner: owner.num,
-        remediation: _remediationOptions(owner),
-      });
+    if (_isOrphan(owner, coverers)) {
+      out.push({ path, owner: owner.num, remediation: _remediationOptions(owner) });
     }
   }
-
   return out;
 }
 

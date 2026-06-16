@@ -21,42 +21,40 @@
  * @param {string} b
  * @returns {number} edit distance (insertions + deletions + substitutions)
  */
-function distance(a, b) {
-  if (a === b) {
-    return 0;
+function _min3(a, b, c) {
+  const ab = a < b ? a : b;
+  return ab < c ? ab : c;
+}
+
+function _initRow(n) {
+  const row = new Array(n + 1);
+  for (let j = 0; j <= n; j += 1) {
+    row[j] = j;
   }
+  return row;
+}
+
+function _fillRow(prev, curr, a, b, i, n) {
+  curr[0] = i;
+  const ai = a.charCodeAt(i - 1);
+  for (let j = 1; j <= n; j += 1) {
+    const cost = ai === b.charCodeAt(j - 1) ? 0 : 1;
+    curr[j] = _min3(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+  }
+}
+
+function distance(a, b) {
+  if (a === b) return 0;
   const m = a.length;
   const n = b.length;
-  if (m === 0) {
-    return n;
-  }
-  if (n === 0) {
-    return m;
-  }
+  if (m === 0) return n;
+  if (n === 0) return m;
 
-  let prev = new Array(n + 1);
+  let prev = _initRow(n);
   let curr = new Array(n + 1);
-  for (let j = 0; j <= n; j += 1) {
-    prev[j] = j;
-  }
 
   for (let i = 1; i <= m; i += 1) {
-    curr[0] = i;
-    const ai = a.charCodeAt(i - 1);
-    for (let j = 1; j <= n; j += 1) {
-      const cost = ai === b.charCodeAt(j - 1) ? 0 : 1;
-      const del = prev[j] + 1;
-      const ins = curr[j - 1] + 1;
-      const sub = prev[j - 1] + cost;
-      let min = del;
-      if (ins < min) {
-        min = ins;
-      }
-      if (sub < min) {
-        min = sub;
-      }
-      curr[j] = min;
-    }
+    _fillRow(prev, curr, a, b, i, n);
     const tmp = prev;
     prev = curr;
     curr = tmp;

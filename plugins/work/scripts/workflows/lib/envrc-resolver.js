@@ -49,33 +49,38 @@ function walkUpFor(startDir, filename) {
  * Rejects `$(...)` and backtick command substitution.
  * Returns `{ name, value }` or `null` to skip.
  */
+const VALID_NAME_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+function _isSkippableLine(line) {
+  return line === '' || line.startsWith('#');
+}
+
+function _hasCommandSubstitution(line) {
+  return line.includes('$(') || line.includes('`');
+}
+
+function _stripExportPrefix(line) {
+  return line.startsWith('export ') ? line.slice('export '.length) : line;
+}
+
+function _stripMatchingQuotes(value) {
+  if (value.length < 2) return value;
+  const isDouble = value.startsWith('"') && value.endsWith('"');
+  const isSingle = value.startsWith("'") && value.endsWith("'");
+  return isDouble || isSingle ? value.slice(1, -1) : value;
+}
+
 function parseEnvrcLine(rawLine) {
   const line = rawLine.trim();
-  if (line === '' || line.startsWith('#')) {
+  if (_isSkippableLine(line) || _hasCommandSubstitution(line)) {
     return null;
   }
-  // Reject command substitution (security).
-  if (line.includes('$(') || line.includes('`')) {
-    return null;
-  }
-  const body = line.startsWith('export ') ? line.slice('export '.length) : line;
+  const body = _stripExportPrefix(line);
   const eq = body.indexOf('=');
-  if (eq <= 0) {
-    return null;
-  }
+  if (eq <= 0) return null;
   const name = body.slice(0, eq).trim();
-  let value = body.slice(eq + 1).trim();
-  // Strip a single layer of matching quotes.
-  if (
-    value.length >= 2 &&
-    ((value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'")))
-  ) {
-    value = value.slice(1, -1);
-  }
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
-    return null;
-  }
+  if (!VALID_NAME_RE.test(name)) return null;
+  const value = _stripMatchingQuotes(body.slice(eq + 1).trim());
   return { name, value };
 }
 
@@ -130,6 +135,22 @@ function findNearestPackageJson(startDir) {
  *
  * Returns `{ expanded, sawRef, allRefsKnown }`.
  */
+// Parse a $VAR or ${VAR} reference starting at index `i` in `value`.
+// Returns { name, consumed } when a valid ref is found; null otherwise.
+function _parseVarRef(value, i) {
+  if (value[i + 1] === '{') {
+    const close = value.indexOf('}', i + 2);
+    if (close === -1) return null;
+    return { name: value.slice(i + 2, close), consumed: close - i + 1 };
+  }
+  let j = i + 1;
+  while (j < value.length && /[A-Za-z0-9_]/.test(value[j])) {
+    j += 1;
+  }
+  if (j === i + 1) return null;
+  return { name: value.slice(i + 1, j), consumed: j - i };
+}
+
 function expandOnce(value, vars) {
   let out = '';
   let i = 0;
@@ -137,43 +158,19 @@ function expandOnce(value, vars) {
   let allRefsKnown = true;
   while (i < value.length) {
     const ch = value[i];
-    if (ch !== '$') {
+    const ref = ch === '$' ? _parseVarRef(value, i) : null;
+    if (!ref) {
       out += ch;
       i += 1;
       continue;
     }
-    // We have a $. Decide between ${NAME} and $NAME.
-    let name = '';
-    let consumed;
-    if (value[i + 1] === '{') {
-      const close = value.indexOf('}', i + 2);
-      if (close === -1) {
-        out += ch;
-        i += 1;
-        continue;
-      }
-      name = value.slice(i + 2, close);
-      consumed = close - i + 1;
-    } else {
-      let j = i + 1;
-      while (j < value.length && /[A-Za-z0-9_]/.test(value[j])) {
-        j += 1;
-      }
-      if (j === i + 1) {
-        out += ch;
-        i += 1;
-        continue;
-      }
-      name = value.slice(i + 1, j);
-      consumed = j - i;
-    }
     sawRef = true;
-    if (Object.prototype.hasOwnProperty.call(vars, name)) {
-      out += vars[name];
+    if (Object.prototype.hasOwnProperty.call(vars, ref.name)) {
+      out += vars[ref.name];
     } else {
       allRefsKnown = false;
     }
-    i += consumed;
+    i += ref.consumed;
   }
   return { expanded: out, sawRef, allRefsKnown };
 }

@@ -32,72 +32,16 @@ const path = require('node:path');
 const { splitTopLevelCommands } = require('./shell-tokenizer');
 const { nearest } = require('./levenshtein');
 const { findNearestEnvrc, findNearestPackageJson, resolveVar } = require('./envrc-resolver');
+const {
+  stripQuotes,
+  argvSplit,
+  containsVarRef,
+  extractFirstVarName,
+} = require('./dispatcher-helpers');
 
 const MAX_REDISPATCH_DEPTH = 8;
 const SCRIPT_RUNNERS = new Set(['pnpm', 'npm', 'yarn']);
 const INTERPRETERS = new Set(['node', 'bash', 'sh', 'zsh']);
-
-/**
- * Strip surrounding quotes from a single token (after tokenizer segmentation,
- * quoting may still appear inside a segment when arguments are quoted).
- */
-function stripQuotes(s) {
-  if (s.length >= 2) {
-    const first = s[0];
-    const last = s[s.length - 1];
-    if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
-      return s.slice(1, -1);
-    }
-  }
-  return s;
-}
-
-/**
- * Split a single command segment into argv-style tokens. We reuse the
- * shell-tokenizer (it surfaces whitespace boundaries via its segment
- * concatenation behavior); fall back to a quote-aware whitespace split.
- */
-function argvSplit(segment) {
-  const out = [];
-  let buf = '';
-  let inSingle = false;
-  let inDouble = false;
-  let escaped = false;
-  for (let i = 0; i < segment.length; i += 1) {
-    const ch = segment[i];
-    if (escaped) {
-      buf += ch;
-      escaped = false;
-      continue;
-    }
-    if (ch === '\\' && !inSingle) {
-      escaped = true;
-      continue;
-    }
-    if (ch === "'" && !inDouble) {
-      inSingle = !inSingle;
-      buf += ch;
-      continue;
-    }
-    if (ch === '"' && !inSingle) {
-      inDouble = !inDouble;
-      buf += ch;
-      continue;
-    }
-    if (!inSingle && !inDouble && (ch === ' ' || ch === '\t')) {
-      if (buf.length > 0) {
-        out.push(buf);
-        buf = '';
-      }
-      continue;
-    }
-    buf += ch;
-  }
-  if (buf.length > 0) {
-    out.push(buf);
-  }
-  return out;
-}
 
 function prefixHeading(taskHeading, msg) {
   if (!taskHeading) {
@@ -174,7 +118,9 @@ function dispatchScriptRunner(argv, ctx, errors) {
   const scriptName = stripQuotes(argv[1]);
   const pkg = loadManifest(ctx);
   if (!pkg || !pkg.manifest) {
-    errors.push(prefixHeading(ctx.taskHeading, `${runner} ${scriptName}: no package.json found in worktree`));
+    errors.push(
+      prefixHeading(ctx.taskHeading, `${runner} ${scriptName}: no package.json found in worktree`)
+    );
     return;
   }
   const scripts = pkg.manifest.scripts || {};
@@ -184,12 +130,13 @@ function dispatchScriptRunner(argv, ctx, errors) {
   const haystack = Object.keys(scripts);
   const cache = ctx.__levCache || (ctx.__levCache = new Map());
   const suggestions = nearest(scriptName, haystack, 3, { cache });
-  const suggestionText = suggestions.length > 0 ? ` (did you mean: ${suggestions.join(', ')}?)` : '';
+  const suggestionText =
+    suggestions.length > 0 ? ` (did you mean: ${suggestions.join(', ')}?)` : '';
   errors.push(
     prefixHeading(
       ctx.taskHeading,
-      `${runner} script "${scriptName}" is not in package.json scripts${suggestionText}`,
-    ),
+      `${runner} script "${scriptName}" is not in package.json scripts${suggestionText}`
+    )
   );
 }
 
@@ -249,58 +196,17 @@ function dispatchBareBinary(argv, ctx, errors) {
     errors.push(
       prefixHeading(
         ctx.taskHeading,
-        `${binary}: resolved via \`command -v\` only (not declared in package.json dependencies)`,
-      ),
+        `${binary}: resolved via \`command -v\` only (not declared in package.json dependencies)`
+      )
     );
     return;
   }
   errors.push(
     prefixHeading(
       ctx.taskHeading,
-      `${binary}: command not found on PATH and not declared in package.json dependencies`,
-    ),
+      `${binary}: command not found on PATH and not declared in package.json dependencies`
+    )
   );
-}
-
-function containsVarRef(s) {
-  // Quick check for a $-reference outside of single quotes. Acceptable to
-  // be slightly permissive — the resolveVar path handles unresolved refs.
-  let inSingle = false;
-  for (let i = 0; i < s.length; i += 1) {
-    const ch = s[i];
-    if (ch === "'" && !inSingle) {
-      inSingle = true;
-      continue;
-    }
-    if (ch === "'" && inSingle) {
-      inSingle = false;
-      continue;
-    }
-    if (!inSingle && ch === '$' && i + 1 < s.length) {
-      const next = s[i + 1];
-      if (next === '{' || /[A-Za-z_]/.test(next)) {
-        return true;
-      }
-    }
-  }
-  return false;
-}
-
-function extractFirstVarName(s) {
-  for (let i = 0; i < s.length; i += 1) {
-    if (s[i] !== '$') continue;
-    if (s[i + 1] === '{') {
-      const close = s.indexOf('}', i + 2);
-      if (close === -1) continue;
-      return s.slice(i + 2, close);
-    }
-    let j = i + 1;
-    while (j < s.length && /[A-Za-z0-9_]/.test(s[j])) j += 1;
-    if (j > i + 1) {
-      return s.slice(i + 1, j);
-    }
-  }
-  return null;
 }
 
 function dispatchVarSegment(segment, ctx, errors, depth) {
@@ -323,44 +229,42 @@ function dispatchVarSegment(segment, ctx, errors, depth) {
   dispatchInternal(resolved, ctx, errors, depth + 1);
 }
 
-function dispatchSegment(segment, ctx, errors, depth) {
-  const trimmed = segment.trim();
-  if (trimmed === '') {
+function _isPathLike(token) {
+  return token.startsWith('./') || token.startsWith('/') || token.includes('/');
+}
+
+function _handleEval(argv, ctx, errors, depth) {
+  const body = stripQuotes(argv.slice(1).join(' '));
+  if (containsVarRef(body)) {
+    dispatchVarSegment(body, ctx, errors, depth);
+  } else {
+    dispatchInternal(body, ctx, errors, depth + 1);
+  }
+}
+
+function _classifyAndDispatch(argv, ctx, errors, depth) {
+  const first = stripQuotes(argv[0]);
+  if (first === 'eval' && argv.length >= 2) {
+    _handleEval(argv, ctx, errors, depth);
     return;
   }
+  const rest = [first, ...argv.slice(1)];
+  if (SCRIPT_RUNNERS.has(first)) return dispatchScriptRunner(rest, ctx, errors);
+  if (INTERPRETERS.has(first)) return dispatchInterpreter(rest, ctx, errors);
+  if (_isPathLike(first)) return dispatchFilePath(rest, ctx, errors);
+  return dispatchBareBinary(rest, ctx, errors);
+}
+
+function dispatchSegment(segment, ctx, errors, depth) {
+  const trimmed = segment.trim();
+  if (trimmed === '') return;
   if (containsVarRef(trimmed)) {
     dispatchVarSegment(trimmed, ctx, errors, depth);
     return;
   }
   const argv = argvSplit(trimmed);
-  if (argv.length === 0) {
-    return;
-  }
-  const first = stripQuotes(argv[0]);
-  if (first === 'eval' && argv.length >= 2) {
-    // `eval "$VAR"` — strip the quoted body and redispatch.
-    const body = stripQuotes(argv.slice(1).join(' '));
-    if (containsVarRef(body)) {
-      dispatchVarSegment(body, ctx, errors, depth);
-    } else {
-      dispatchInternal(body, ctx, errors, depth + 1);
-    }
-    return;
-  }
-  if (SCRIPT_RUNNERS.has(first)) {
-    dispatchScriptRunner([first, ...argv.slice(1)], ctx, errors);
-    return;
-  }
-  if (INTERPRETERS.has(first)) {
-    dispatchInterpreter([first, ...argv.slice(1)], ctx, errors);
-    return;
-  }
-  if (first.startsWith('./') || first.startsWith('/') || first.includes('/')) {
-    dispatchFilePath([first, ...argv.slice(1)], ctx, errors);
-    return;
-  }
-  // Bare binary.
-  dispatchBareBinary([first, ...argv.slice(1)], ctx, errors);
+  if (argv.length === 0) return;
+  _classifyAndDispatch(argv, ctx, errors, depth);
 }
 
 function dispatchInternal(command, ctx, errors, depth) {

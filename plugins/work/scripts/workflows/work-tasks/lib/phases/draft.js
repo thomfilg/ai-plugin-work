@@ -12,7 +12,6 @@ const path = require('node:path');
 
 const { TASKS_PHASES } = require('../../tasks-phase-registry');
 const { parseShapeFromSpec } = require('../../../work-spec/lib/component-shape');
-const config = require('../../../lib/config');
 
 let parseTasks;
 try {
@@ -21,36 +20,9 @@ try {
   parseTasks = null;
 }
 
-// GH-590 Task 11: feature-flagged Test Strategy + TDD-ownership validators.
-// Loaded lazily and tolerantly so the legacy path keeps working if any of
-// the helper modules are unavailable.
-let strategyModule = null;
-let dispatcherModule = null;
-let ownershipModule = null;
-let envrcModule = null;
-try {
-  strategyModule = require('../../../lib/test-strategy');
-} catch {
-  strategyModule = null;
-}
-try {
-  dispatcherModule = require('../../../lib/command-existence-dispatcher');
-} catch {
-  dispatcherModule = null;
-}
-try {
-  ownershipModule = require('../../../lib/tdd-ownership-graph');
-} catch {
-  ownershipModule = null;
-}
-try {
-  envrcModule = require('../../../lib/envrc-resolver');
-} catch {
-  envrcModule = null;
-}
-
-const STRATEGY_FLAG_KEY = 'WORK_TEST_STRATEGY_VALIDATOR';
-const STRATEGY_FLAG_ON_VALUE = '1';
+const draftStrategy = require('./draft-test-strategy');
+const { validateTestStrategy, validateTddOwnership, runStrategyValidators, STRATEGY_FLAG_KEY } =
+  draftStrategy;
 
 const REQUIRED_SUBSECTIONS = [
   'Type',
@@ -70,19 +42,14 @@ function readFile(p) {
   }
 }
 
+const { iterTaskBlocks } = require('./_task-block-iter');
+
 function parseTaskBlocks(text) {
-  const parts = text.split(/^##\s+Task\s+(\d+)/m);
-  const blocks = [];
-  for (let i = 1; i < parts.length; i += 2) {
-    const num = Number(parts[i]);
-    const rest = parts[i + 1] || '';
-    // First line after the number is the title (after the dash).
+  return iterTaskBlocks(text).map(({ num, rest, body }) => {
     const firstNewline = rest.indexOf('\n');
     const titleLine = firstNewline === -1 ? rest : rest.slice(0, firstNewline);
-    const body = rest.replace(/\n## (?!Task\s)\S[\s\S]*$/, '');
-    blocks.push({ num, title: titleLine.replace(/^[\s—\-:]+/, '').trim(), body });
-  }
-  return blocks;
+    return { num: Number(num), title: titleLine.replace(/^[\s—\-:]+/, '').trim(), body };
+  });
 }
 
 function extractFilesInScope(body) {
@@ -152,268 +119,6 @@ function validateSharedComponentOrdering(tasksDir, taskBlocks) {
   return errors;
 }
 
-function strategyFlagOn() {
-  // Read process.env directly so runtime overrides (tests, ad-hoc invocations)
-  // are honored; config.js snapshots process.env at module-load time and
-  // wouldn't reflect later changes. config[KEY] remains as the dotenv-loaded
-  // fallback when process.env isn't set.
-  const v = process.env[STRATEGY_FLAG_KEY] ?? config[STRATEGY_FLAG_KEY];
-  return v === STRATEGY_FLAG_ON_VALUE;
-}
-
-/**
- * Resolve the code worktree root for command-existence validation. The tasks
- * directory (`tasks/<TICKET>/`) is NOT a valid root for `pnpm <script>` lookup
- * or `node|bash <file>` existence checks — those must resolve against the
- * repo worktree (where `package.json`, sources, and `.envrc` live). Tests can
- * pin the worktree via `WORK_DRAFT_WORKDIR` so fixtures stay self-contained;
- * production callers fall through to `process.cwd()` (the directory the user
- * invoked `/work` from).
- *
- * @returns {string}
- */
-function resolveWorkDir() {
-  const explicit = process.env.WORK_DRAFT_WORKDIR;
-  if (explicit && typeof explicit === 'string') return explicit;
-  return process.cwd();
-}
-
-function loadStrategyContext(tasksDir) {
-  const workDir = resolveWorkDir();
-  let parsedTasks = null;
-  if (parseTasks) {
-    try {
-      parsedTasks = parseTasks(tasksDir);
-    } catch {
-      parsedTasks = null;
-    }
-  }
-  let envrc = null;
-  if (envrcModule && typeof envrcModule.findNearestEnvrc === 'function') {
-    try {
-      envrc = envrcModule.findNearestEnvrc(workDir);
-    } catch {
-      envrc = null;
-    }
-  }
-  let packageJson = null;
-  if (envrcModule && typeof envrcModule.findNearestPackageJson === 'function') {
-    try {
-      packageJson = envrcModule.findNearestPackageJson(workDir) || null;
-    } catch {
-      packageJson = null;
-    }
-  }
-  return { parsedTasks, envrc, packageJson, workDir };
-}
-
-function taskHeadingFor(task) {
-  if (!task) return '<unknown task>';
-  if (task.title) return `Task ${task.num} — ${task.title}`;
-  return `Task ${task.num}`;
-}
-
-/**
- * Extract the raw bash/shell fence body inside a task's `### Test Strategy`
- * section when the parser did not classify it as a recognized kind. This
- * mirrors the `kind: custom` synthesis at the integration layer so authors
- * who drop a single bash fence under `### Test Strategy` still get the
- * command-existence dispatcher's enforcement.
- *
- * @param {string} rawContent
- * @returns {string|null}
- */
-function extractRawStrategyBody(rawContent) {
-  if (typeof rawContent !== 'string' || !rawContent) return null;
-  // Locate `### Test Strategy` section body.
-  const m = rawContent.match(/(?:^|\n)###\s+Test Strategy[^\n]*\n([\s\S]*?)(?=\n###|\n## |$)/);
-  if (!m) return null;
-  const body = m[1];
-  // Walk fenced blocks and return the first non-empty body that does NOT
-  // look like a yaml `kind:` key block.
-  const lines = body.split('\n');
-  let inFence = false;
-  let buf = [];
-  for (const raw of lines) {
-    if (/^\s*```/.test(raw)) {
-      if (!inFence) {
-        inFence = true;
-        buf = [];
-      } else {
-        const content = buf.join('\n').trim();
-        if (content && !/^\s*kind\s*:/m.test(content)) return content;
-        inFence = false;
-        buf = [];
-      }
-      continue;
-    }
-    if (inFence) buf.push(raw);
-  }
-  return null;
-}
-
-/**
- * GH-590 Task 11 / AC9 + AC14: feature-flagged Test Strategy validator.
- *
- * Walks every parsed task's `testStrategy`, synthesizes the runnable command
- * (or treats the custom body verbatim), and dispatches it through the
- * command-existence checker. Collects all errors — does NOT short-circuit.
- *
- * No-op when WORK_TEST_STRATEGY_VALIDATOR !== '1' (AC17) or when any
- * required helper module is missing.
- *
- * @param {string} tasksDir
- * @param {{ parsedTasks: object[]|null, envrc: object|null, manifest: object|null }} ctx
- * @returns {string[]}
- */
-function validateTestStrategy(tasksDir, ctx) {
-  const errors = [];
-  if (!strategyFlagOn()) return errors;
-  if (!strategyModule || !dispatcherModule) return errors;
-
-  const parsedTasks = (ctx && ctx.parsedTasks) || null;
-  if (!Array.isArray(parsedTasks)) return errors;
-
-  const envrc = (ctx && ctx.envrc) || null;
-  const packageJson = (ctx && ctx.packageJson) || null;
-  const workDir = (ctx && ctx.workDir) || resolveWorkDir();
-
-  for (const task of parsedTasks) {
-    let strategy = task && task.testStrategy;
-    const heading = taskHeadingFor(task);
-
-    // Integration-layer fallback: if the task declares a `### Test Strategy`
-    // block whose first fence is a raw shell body (no `kind:` line), treat
-    // it as `kind: custom` so the command-existence dispatcher still fires.
-    // This mirrors the AC8 intent (empty/prose-only rejection) and AC14
-    // (custom-body dispatch) for authors using the minimal fence shape.
-    if (!strategy || typeof strategy !== 'object') {
-      const rawBody = task && task.rawContent ? extractRawStrategyBody(task.rawContent) : null;
-      if (rawBody) {
-        strategy = { kind: 'custom', customBody: rawBody };
-      } else {
-        continue;
-      }
-    }
-
-    // Peer-citation validation (AC11) for verified-by / wiring-citation.
-    if (typeof strategyModule.validatePeerCitation === 'function') {
-      try {
-        const peerErrors = strategyModule.validatePeerCitation(strategy, parsedTasks, task) || [];
-        for (const e of peerErrors) errors.push(e);
-      } catch {
-        /* peer-citation helper unstable — keep going */
-      }
-    }
-
-    let command = null;
-    try {
-      command = strategyModule.synthesizeCommand(strategy, envrc);
-    } catch {
-      command = null;
-    }
-    if (!command) continue; // verified-by / wiring-citation skip synthesis.
-
-    const dispatchCtx = {
-      // Resolve `node|bash <file>` and pnpm-script existence against the code
-      // worktree, NOT the tasks directory. The tasks dir only contains
-      // tasks.md/spec.md/brief.md; walking up from it would find an unrelated
-      // package.json or .envrc above the repo.
-      worktree: workDir,
-      packageJson,
-      envrc,
-      taskHeading: heading,
-    };
-    try {
-      const result = dispatcherModule.dispatch(command, dispatchCtx);
-      if (result && Array.isArray(result.errors)) {
-        for (const e of result.errors) errors.push(e);
-      }
-    } catch (err) {
-      errors.push(`${heading}: command-existence dispatcher failed: ${err && err.message}`);
-    }
-  }
-
-  return errors;
-}
-
-/**
- * GH-590 Task 11 / AC10: feature-flagged TDD-ownership graph validator.
- *
- * Builds the coverage graph from parsed tasks and reports orphaned paths
- * (paths declared in `### Files in scope` that no task's strategy exercises).
- *
- * No-op when WORK_TEST_STRATEGY_VALIDATOR !== '1'.
- *
- * @param {string} _tasksDir
- * @param {{ parsedTasks: object[]|null }} ctx
- * @returns {string[]}
- */
-function validateTddOwnership(_tasksDir, ctx) {
-  const errors = [];
-  if (!strategyFlagOn()) return errors;
-  if (!ownershipModule) return errors;
-
-  const parsedTasks = (ctx && ctx.parsedTasks) || null;
-  if (!Array.isArray(parsedTasks) || parsedTasks.length === 0) return errors;
-
-  let graph = null;
-  try {
-    graph = ownershipModule.buildCoverageGraph(parsedTasks);
-  } catch {
-    return errors;
-  }
-  let orphans = [];
-  try {
-    orphans = ownershipModule.findOrphanedPaths(parsedTasks, graph) || [];
-  } catch {
-    return errors;
-  }
-
-  // GH-590 Task 11 wiring: narrow the bare-graph orphan set so legitimate
-  // test-source pairings (e.g. `entry: foo.test.ts` covering `foo.ts`) do
-  // NOT false-positive at the integration layer. We strip the `.test.` /
-  // `.spec.` infix and the `__tests__/` segment from any task's entry and
-  // compare to the orphan path — mirroring the same mapping that
-  // test-strategy.entryReferencesScope applies internally.
-  const realOrphans = orphans.filter((o) => {
-    if (!o || !o.path) return false;
-    for (const t of parsedTasks) {
-      const strat = t && t.testStrategy;
-      if (!strat || typeof strat !== 'object') continue;
-      const entry = strat.entry;
-      if (typeof entry !== 'string' || !entry) continue;
-      if (entry === o.path) return false;
-      const stripped = entry.replace(/\.(?:test|spec)(\.[a-zA-Z0-9]+)$/, '$1');
-      if (stripped === o.path) return false;
-      const noTestsDir = stripped.replace(/(^|\/)__tests__\//, '$1');
-      if (noTestsDir === o.path) return false;
-    }
-    return true;
-  });
-
-  for (const orphan of realOrphans) {
-    if (!orphan || !orphan.path) continue;
-    const heading = `Task ${orphan.owner}`;
-    const remediation = Array.isArray(orphan.remediation)
-      ? orphan.remediation.map((r) => `  - ${r}`).join('\n')
-      : '';
-    errors.push(
-      `${heading}: \`${orphan.path}\` is owned by ${heading} but no task's Test Strategy entry transitively touches it. Remediation options:\n${remediation}`
-    );
-  }
-  return errors;
-}
-
-function runStrategyValidators(tasksDir) {
-  if (!strategyFlagOn()) return [];
-  const ctx = loadStrategyContext(tasksDir);
-  const errors = [];
-  errors.push(...validateTestStrategy(tasksDir, ctx));
-  errors.push(...validateTddOwnership(tasksDir, ctx));
-  return errors;
-}
-
 function validateArtifacts(tasksDir) {
   const errors = [];
   const p = path.join(tasksDir, 'tasks.md');
@@ -431,10 +136,7 @@ function validateArtifacts(tasksDir) {
     return errors;
   }
   // For each block, check required subsections.
-  const parts = text.split(/^##\s+Task\s+(\d+)/m);
-  for (let i = 1; i < parts.length; i += 2) {
-    const num = parts[i];
-    const body = (parts[i + 1] || '').replace(/\n## (?!Task\s)\S[\s\S]*$/, '');
+  for (const { num, body } of iterTaskBlocks(text)) {
     for (const sub of REQUIRED_SUBSECTIONS) {
       const re = new RegExp(`^###\\s+${sub}\\b`, 'm');
       if (!re.test(body)) {

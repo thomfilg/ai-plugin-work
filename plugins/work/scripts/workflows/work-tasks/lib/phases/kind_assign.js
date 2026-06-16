@@ -38,13 +38,11 @@ function readFile(p) {
   }
 }
 
+const { iterTaskBlocks } = require('./_task-block-iter');
+
 function parseBlocks(text) {
   const out = [];
-  if (!text) return out;
-  const parts = text.split(/^##\s+Task\s+(\d+)/m);
-  for (let i = 1; i < parts.length; i += 2) {
-    const num = parts[i];
-    const body = (parts[i + 1] || '').replace(/\n## (?!Task\s)\S[\s\S]*$/, '');
+  for (const { num, body } of iterTaskBlocks(text)) {
     const typeMatch = body.match(/###\s+Type\s*\n([^\n#]+)/);
     const type = typeMatch ? typeMatch[1].trim().toLowerCase() : 'unknown';
     // See note in traceability.js — `$` in multiline mode matches every
