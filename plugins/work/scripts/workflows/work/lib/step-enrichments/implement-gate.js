@@ -24,6 +24,78 @@ const { markProgress } = require(path.join(__dirname, '..', 'mark-task-progress'
 const { resolveTaskType } = require(path.join(__dirname, '..', 'resolve-task-type'));
 const { parseTasks } = require(path.join(__dirname, '..', 'task-graph'));
 
+// GH-610: Test Strategy → implement-side consumer. These are STABLE APIs
+// owned by GH-590; consumed here, never edited.
+//   - synthesizeCommand(strategy, envrc): runnable command for
+//     unit/integration/e2e/custom kinds; null for citation kinds.
+//   - findNearestEnvrc(worktreeDir): worktree-rooted `.envrc` parse (no shell).
+//   - parseTasks(tasksDir) from task-parser: exposes `task.testStrategy`.
+const { synthesizeCommand } = require(path.join(__dirname, '..', '..', '..', 'lib', 'test-strategy'));
+const { findNearestEnvrc } = require(path.join(__dirname, '..', '..', '..', 'lib', 'envrc-resolver'));
+const {
+  parseTasks: parseTasksWithStrategy,
+} = require(path.join(__dirname, '..', 'task-parser'));
+// (task-parser lives at work/lib/task-parser.js — one level up from here.)
+
+// Strategy kinds that carry no runnable command — they piggyback on a peer's
+// tests via a citation, so `synthesizeCommand` returns null by design (C3).
+const CITATION_STRATEGY_KINDS = new Set(['verified-by', 'wiring-citation']);
+
+/** True when the GH-590/GH-610 Test Strategy consumer is enabled. */
+function isTestStrategyValidatorEnabled() {
+  return process.env.WORK_TEST_STRATEGY_VALIDATOR === '1';
+}
+
+/**
+ * Build the environment a synthesized test command runs in.
+ *
+ * Strategy-synthesized envelope commands reference the test-command env var
+ * by name (e.g. `eval "$TEST_INTEGRATION_COMMAND"`). That var lives in the
+ * worktree's `.envrc`, which is NOT sourced into the gate's process env — so
+ * without this the `eval` expands to the empty string and the command no-ops
+ * to exit 0 (the empty-command trap). Fold the worktree `.envrc` vars into the
+ * base env, with the worktree `.envrc` winning over any ambient value: the
+ * `.envrc` is the worktree's authoritative test envelope, so a `TEST_*_COMMAND`
+ * that leaked into the gate's process env (e.g. from a parent test harness that
+ * runs the gate under its own `$TEST_INTEGRATION_COMMAND`) must not shadow the
+ * value the worktree actually declares.
+ *
+ * @param {object} baseEnv - the env the gate would otherwise use
+ * @param {string} worktreeDir - worktree root used to resolve `.envrc`
+ * @returns {object}
+ */
+function withEnvrcVars(baseEnv, worktreeDir) {
+  if (!isTestStrategyValidatorEnabled() || !worktreeDir) return baseEnv;
+  let resolved;
+  try {
+    resolved = findNearestEnvrc(worktreeDir);
+  } catch {
+    return baseEnv;
+  }
+  if (!resolved || !resolved.vars) return baseEnv;
+  const merged = { ...baseEnv };
+  for (const [name, value] of Object.entries(resolved.vars)) {
+    // The worktree `.envrc` is authoritative for its own test envelope. Skip
+    // only empty/undefined `.envrc` values so a real ambient export still
+    // survives the empty-command trap; otherwise the `.envrc` value wins.
+    if (value === undefined || value === '') continue;
+    merged[name] = value;
+  }
+  return merged;
+}
+
+/** Locate a parsed task by 1-indexed task number. */
+function findTaskByNum(tasksDir, taskNum) {
+  let tasks;
+  try {
+    tasks = parseTasksWithStrategy(tasksDir);
+  } catch {
+    return null;
+  }
+  if (!Array.isArray(tasks)) return null;
+  return tasks.find((t) => t && t.num === Number(taskNum)) || null;
+}
+
 /**
  * Reconcile `ws.tasksMeta` against the current tasks.md.
  *
@@ -168,13 +240,42 @@ function writeTestLog(taskDir, phase, cmd, exitCode, output, nowIso) {
 }
 
 /**
- * Read the `### Test Command` for a specific task from tasks.md.
+ * Read the runnable test command for a specific task from tasks.md.
  *
+ * Legacy path: returns the verbatim `### Test Command` body when present.
+ * GH-610: when the Test Strategy validator flag is ON and there is no
+ * `### Test Command`, fall back to synthesising a command from the task's
+ * `### Test Strategy` block (resolving the test-command envelope from the
+ * worktree-rooted `.envrc`). Citation kinds (`verified-by` /
+ * `wiring-citation`) synthesise to `null` by design — they have no command.
+ *
+ * @param {string} tasksDir
+ * @param {number} taskNum - 1-indexed task number
+ * @param {string} [worktreeDir] - worktree root used to resolve `.envrc`
+ *   for strategy synthesis. Omitting it preserves byte-for-byte legacy
+ *   behaviour (no synthesis fallback).
+ * @returns {string|null}
+ */
+function readTaskTestCommand(tasksDir, taskNum, worktreeDir) {
+  const legacy = readLegacyTestCommand(tasksDir, taskNum);
+  if (legacy) return legacy;
+
+  // Synthesis fallback only when the flag is ON and a worktreeDir is given.
+  if (!isTestStrategyValidatorEnabled() || !worktreeDir) return null;
+  const task = findTaskByNum(tasksDir, taskNum);
+  const strategy = task && task.testStrategy;
+  if (!strategy) return null;
+  if (CITATION_STRATEGY_KINDS.has(strategy.kind)) return null;
+  return synthesizeCommand(strategy, findNearestEnvrc(worktreeDir));
+}
+
+/**
+ * Legacy reader: the verbatim `### Test Command` body for a task, or null.
  * @param {string} tasksDir
  * @param {number} taskNum - 1-indexed task number
  * @returns {string|null}
  */
-function readTaskTestCommand(tasksDir, taskNum) {
+function readLegacyTestCommand(tasksDir, taskNum) {
   if (!tasksDir) return null;
   const tasksMdPath = path.join(tasksDir, 'tasks.md');
   if (!fs.existsSync(tasksMdPath)) return null;
@@ -190,6 +291,61 @@ function readTaskTestCommand(tasksDir, taskNum) {
   } catch {
     return null;
   }
+}
+
+/**
+ * Resolve how a task's tests are executed, distinguishing the three sources:
+ *   - `command`: a verbatim `### Test Command` (legacy, always honoured).
+ *   - `strategy`: a synthesised command (or a citation) from `### Test Strategy`
+ *     when the validator flag is ON.
+ *   - `null`: neither is present.
+ *
+ * For citation kinds (`verified-by` / `wiring-citation`) the synthesised
+ * `command` is `null` BY DESIGN — that is not a missing command — and the
+ * `citation` field carries the strategy object so the gate can defer to the
+ * peer task's evidence.
+ *
+ * Throws a distinct error when a non-citation strategy synthesises to null
+ * (e.g. a `custom` kind with neither a command nor a fenced body), so the
+ * caller can tell that apart from "no strategy at all".
+ *
+ * @param {string} tasksDir
+ * @param {number} taskNum - 1-indexed task number
+ * @param {string} [worktreeDir] - worktree root used to resolve `.envrc`
+ * @returns {{ command: string|null, strategyKind: string|null,
+ *             citation: object|null, source: 'command'|'strategy'|null }}
+ */
+function resolveTaskTestExecution(tasksDir, taskNum, worktreeDir) {
+  const legacy = readLegacyTestCommand(tasksDir, taskNum);
+  if (legacy) {
+    return { command: legacy, strategyKind: null, citation: null, source: 'command' };
+  }
+
+  if (!isTestStrategyValidatorEnabled() || !worktreeDir) {
+    return { command: null, strategyKind: null, citation: null, source: null };
+  }
+
+  const task = findTaskByNum(tasksDir, taskNum);
+  const strategy = task && task.testStrategy;
+  if (!strategy) {
+    return { command: null, strategyKind: null, citation: null, source: null };
+  }
+
+  const kind = strategy.kind || null;
+
+  // Citation kinds: no runnable command, the citation IS the resolution.
+  if (CITATION_STRATEGY_KINDS.has(kind)) {
+    return { command: null, strategyKind: kind, citation: strategy, source: 'strategy' };
+  }
+
+  const command = synthesizeCommand(strategy, findNearestEnvrc(worktreeDir));
+  if (command == null) {
+    throw new Error(
+      `Task ${taskNum}: Test Strategy synthesis returned null for a non-citation kind=${kind || '<missing>'} ` +
+        '(expected a runnable command — check the strategy entry/command body)'
+    );
+  }
+  return { command, strategyKind: kind, citation: null, source: 'strategy' };
 }
 
 /**
@@ -751,9 +907,9 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
       evidence.cycles.length > 0 &&
       evidence.cycles[0]?.red;
     if (!hasUsableRed && !preTestDone && ctx.tasksDir) {
-      const testCmd = readTaskTestCommand(ctx.tasksDir, taskNum);
+      const workingDir = ctx.worktreeDir || (ws.worktreeDir ? ws.worktreeDir : process.cwd());
+      const testCmd = readTaskTestCommand(ctx.tasksDir, taskNum, workingDir);
       if (testCmd) {
-        const workingDir = ctx.worktreeDir || (ws.worktreeDir ? ws.worktreeDir : process.cwd());
         // Gate D' — gherkin @test:<path> existence check.
         // Before running the test command, verify that every test file
         // declared in gherkin.feature for this task actually exists on
@@ -787,7 +943,8 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
         } catch {
           /* fail-open — gherkin parse failure shouldn't deadlock the gate */
         }
-        const runEnv = gateTasksBase ? { ...process.env, TASKS_BASE: gateTasksBase } : process.env;
+        const baseEnv = gateTasksBase ? { ...process.env, TASKS_BASE: gateTasksBase } : process.env;
+        const runEnv = withEnvrcVars(baseEnv, workingDir);
         const pre = runPreImplementTest(
           testCmd,
           safeName,
@@ -824,11 +981,12 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
     // skipped). Stop hooks don't fire for plugin subagents (Anthropic bug
     // #29767), so the gate is the only reliable place to record GREEN.
     if (ctx.tasksDir) {
-      const testCmd = readTaskTestCommand(ctx.tasksDir, taskNum);
+      const workingDir = ctx.worktreeDir || (ws.worktreeDir ? ws.worktreeDir : process.cwd());
+      const testCmd = readTaskTestCommand(ctx.tasksDir, taskNum, workingDir);
       const needsGreen = !exists || !Array.isArray(evidence?.cycles) || !evidence.cycles[0]?.green;
       if (testCmd && needsGreen) {
-        const workingDir = ctx.worktreeDir || (ws.worktreeDir ? ws.worktreeDir : process.cwd());
-        const runEnv = gateTasksBase ? { ...process.env, TASKS_BASE: gateTasksBase } : process.env;
+        const baseEnv = gateTasksBase ? { ...process.env, TASKS_BASE: gateTasksBase } : process.env;
+        const runEnv = withEnvrcVars(baseEnv, workingDir);
         const result = runTestAndRecord(
           testCmd,
           safeName,
@@ -992,4 +1150,6 @@ module.exports = {
   isE2eCommand,
   shouldSkipTestExecution,
   writeSkipStubEvidence,
+  readTaskTestCommand,
+  resolveTaskTestExecution,
 };

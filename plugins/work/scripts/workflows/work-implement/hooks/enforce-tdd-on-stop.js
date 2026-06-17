@@ -159,7 +159,7 @@ try {
   const { readTddEvidence, validateTddEvidence } = require(
     path.join(__dirname, '..', '..', 'work', 'lib', 'tdd-enforcement')
   );
-  const result = readTddEvidence(safeTicket, 'implement', taskNum);
+  const result = readTddEvidence(TASKS_BASE, safeTicket, 'implement', taskNum);
   exists = result.exists;
   if (exists) {
     valid = validateTddEvidence(result.evidence).valid;
@@ -179,14 +179,38 @@ if (exists && valid) {
 const { execFileSync, execSync } = require('child_process');
 const tasksDir = path.join(TASKS_BASE, safeTicket);
 
+// Resolve the runnable command via the shared resolution path (GH-610):
+//   - legacy `### Test Command` is honoured verbatim;
+//   - else, with the Test Strategy validator flag ON, an envelope-kind
+//     `### Test Strategy` synthesises a runnable command (auto-run/record below);
+//   - citation kinds (`verified-by`/`wiring-citation`) resolve to NO command by
+//     design — they are satisfied by the peer-citation green evidence checked
+//     above. We must NOT treat that null as "missing command + bypass"; instead
+//     fall through to the manual block so the agent records citation evidence.
+//   - a task with neither a command nor a strategy resolves to null/source:null,
+//     preserving the legacy "no test command → allow stop" bypass.
+// Fail-open: any error here behaves as the legacy path (testCommand stays null).
 let testCommand = null;
+let isStrategyResolution = false;
 try {
-  const { parseTasks } = require(path.join(__dirname, '..', '..', 'work', 'lib', 'task-parser'));
-  const tasks = parseTasks(tasksDir);
-  const currentTask = tasks?.find((t) => t.num === taskNum);
-  testCommand = currentTask?.testCommand || null;
+  const { resolveTaskTestExecution } = require(
+    path.join(__dirname, '..', '..', 'work', 'lib', 'step-enrichments', 'implement-gate')
+  );
+  const worktreeDir = process.cwd();
+  const resolved = resolveTaskTestExecution(tasksDir, taskNum, worktreeDir);
+  testCommand = resolved.command || null;
+  isStrategyResolution = resolved.source === 'strategy';
 } catch {
-  // Can't parse tasks — fall through to manual block
+  // Synthesis threw (e.g. non-citation strategy → null) or the module failed to
+  // load — fall back to the legacy verbatim reader so the hook stays fail-open.
+  try {
+    const { parseTasks } = require(path.join(__dirname, '..', '..', 'work', 'lib', 'task-parser'));
+    const tasks = parseTasks(tasksDir);
+    const currentTask = tasks?.find((t) => t.num === taskNum);
+    testCommand = currentTask?.testCommand || null;
+  } catch {
+    // Can't parse tasks — fall through to manual block
+  }
 }
 
 if (testCommand) {
@@ -353,6 +377,31 @@ if (testCommand) {
     process.stderr.write(`Fix the issue and try stopping again.\n`);
     process.exit(2);
   }
+}
+
+// ─── Citation-kind strategy with no valid evidence — block (do NOT bypass) ───
+// A citation-kind `### Test Strategy` (verified-by / wiring-citation) resolves
+// to NO runnable command by design, but it is NOT a task "without tests": its
+// evidence is a peer-citation green entry recorded via tdd-phase-state.js. If we
+// reached here, the evidence check above did not find a valid completed cycle,
+// so the agent must record citation evidence before stopping. Falling through to
+// the legacy bypass would let the agent stop with zero evidence.
+if (isStrategyResolution && !testCommand) {
+  debugLog('BLOCK: citation-kind strategy without valid evidence');
+  process.stderr.write(
+    [
+      '',
+      `STOP BLOCKED: task ${taskNum} uses a citation-kind \`### Test Strategy\` (no`,
+      'runnable command). It is satisfied by peer-citation evidence, which is not',
+      'yet recorded.',
+      '',
+      'What to do:',
+      `  Run: node $CLAUDE_PLUGIN_ROOT/scripts/workflows/work-implement/task-next.js ${safeTicket} task${taskNum}`,
+      '  It will validate the peer citation and record the green evidence for you.',
+      '',
+    ].join('\n')
+  );
+  process.exit(2);
 }
 
 // ─── No test command in tasks.md — allow stop (bypass evidence) ──────────────

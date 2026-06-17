@@ -60,6 +60,25 @@ try {
   config = null;
 }
 
+// GH-610 Task 2 — Test Strategy synthesis + peer-citation APIs (GH-590-owned,
+// consumed as stable). `synthesizeCommand` returns null for citation kinds by
+// design; `validatePeerCitation` returns string[] errors (empty == valid).
+let testStrategyLib;
+try {
+  testStrategyLib = require('../lib/test-strategy');
+} catch (e) {
+  if (e && e.code !== 'MODULE_NOT_FOUND') throw e;
+  testStrategyLib = null;
+}
+
+let taskParser;
+try {
+  taskParser = require('../work/lib/task-parser');
+} catch (e) {
+  if (e && e.code !== 'MODULE_NOT_FOUND') throw e;
+  taskParser = null;
+}
+
 // Agents authorized to call gated subcommands
 const ALLOWED_AGENTS = [
   'developer-nodejs-tdd',
@@ -639,6 +658,101 @@ function getCurrentCycleRecord(state) {
   return record;
 }
 
+// ─── GH-610 Task 2 — Citation-kind evidence ─────────────────────────────────
+
+const CITATION_KINDS = new Set(['verified-by', 'wiring-citation']);
+
+/**
+ * True when the GH-590 Test Strategy validator flag is enabled. Read via the
+ * shared config accessor (never re-implement the flag logic). Fail-safe to
+ * disabled when config is unavailable so legacy `--cmd` recording is inert.
+ */
+function strategyFlagOn() {
+  if (config && typeof config.WORK_TEST_STRATEGY_VALIDATOR === 'string') {
+    return config.WORK_TEST_STRATEGY_VALIDATOR === '1';
+  }
+  return process.env.WORK_TEST_STRATEGY_VALIDATOR === '1';
+}
+
+/**
+ * Resolve the active task's parsed Test Strategy plus the full task list for a
+ * ticket from on-disk tasks.md. Returns `{ strategy, allTasks, citingTask }` or
+ * `null` when the flag is off, parsing is unavailable, the task is missing, or
+ * the task has no `### Test Strategy` block. Mirrors the on-disk trust model of
+ * `readActiveTaskBlock` (planner-authored, scope-guarded).
+ */
+function resolveActiveTaskStrategy(ticketId, taskNum) {
+  if (!strategyFlagOn()) return null;
+  if (!taskParser || typeof taskParser.parseTasks !== 'function') return null;
+  if (!ticketId || !Number.isInteger(taskNum) || taskNum < 1) return null;
+  try {
+    const base = resolveTasksBaseWithFallback();
+    const safeId = sanitizeId(ticketId);
+    const tasksDir = path.resolve(base, safeId);
+    const allTasks = taskParser.parseTasks(tasksDir);
+    if (!Array.isArray(allTasks)) return null;
+    const citingTask = allTasks.find((t) => t && t.num === taskNum);
+    if (!citingTask || !citingTask.testStrategy) return null;
+    return { strategy: citingTask.testStrategy, allTasks, citingTask };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolve the current git SHA of the worktree as the `peerSha` provenance
+ * stamp for a citation evidence entry. Best-effort: returns 'unknown' when git
+ * is unavailable so the citation path never wedges on a missing SHA.
+ */
+function resolvePeerSha() {
+  try {
+    return execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim() || 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+/**
+ * Record peer-citation evidence for a `verified-by` / `wiring-citation` task.
+ *
+ * For citation kinds `synthesizeCommand` returns null by design — there is no
+ * command to run. Instead we validate the peer pointer via
+ * `validatePeerCitation`. On an empty error array we persist a green evidence
+ * entry `{ kind, peer, peerSha, scopeOverlap: true, recordedAt }` (no command
+ * executed). On non-empty errors we surface the strings and record nothing.
+ *
+ * @param {string} ticketId
+ * @param {object} state - mutable phase state (will be written on success)
+ * @param {{strategy:object, allTasks:object[], citingTask:object}} resolved
+ * @param {object|undefined} opts - state-path opts (taskNum)
+ * @returns {boolean} true when evidence was recorded (caller returns)
+ */
+function recordCitationEvidence(ticketId, state, resolved, opts) {
+  const { strategy, allTasks, citingTask } = resolved;
+  const errors = testStrategyLib.validatePeerCitation(strategy, allTasks, citingTask);
+  if (Array.isArray(errors) && errors.length > 0) {
+    errorExit(errors.join('\n'));
+  }
+  const record = getCurrentCycleRecord(state);
+  record.green = {
+    kind: strategy.kind,
+    peer: strategy.peer || strategy.verifiedBy,
+    peerSha: resolvePeerSha(),
+    scopeOverlap: true,
+    recordedAt: new Date().toISOString(),
+  };
+  writeState(ticketId, state, opts);
+  successOut({
+    ok: true,
+    phase: 'green',
+    cycle: state.currentCycle,
+    citation: true,
+    kind: record.green.kind,
+    peer: record.green.peer,
+  });
+  return true;
+}
+
 // ─── Token Verification ─────────────────────────────────────────────────────
 
 function verifyToken(expectedTicketId) {
@@ -1068,10 +1182,33 @@ function cmdRecordSkipRed(ticketId, args) {
 
 function cmdRecordGreen(ticketId, args) {
   if (!ticketId) errorExit('Missing ticket ID.');
-  const cmd = parseCmd(args);
-  if (!cmd) errorExit('Missing --cmd argument.');
   const taskNum = safeParseTask(args);
   const opts = taskNum ? { taskNum } : undefined;
+
+  // GH-610 Task 2 — citation-kind evidence path. For `verified-by` /
+  // `wiring-citation` strategies `synthesizeCommand` returns null by design:
+  // there is no command to run, so the recorder validates the peer pointer and
+  // records evidence by citation instead. This must short-circuit BEFORE the
+  // `--cmd` requirement below (citation callers pass no `--cmd`). Envelope /
+  // custom kinds fall through to the existing `--cmd` execution path unchanged.
+  const cmd = parseCmd(args);
+  if (!cmd && testStrategyLib && typeof testStrategyLib.validatePeerCitation === 'function') {
+    const resolved = resolveActiveTaskStrategy(ticketId, taskNum);
+    if (resolved && CITATION_KINDS.has(resolved.strategy.kind)) {
+      const state = readState(ticketId, opts);
+      if (!state) errorExit('No TDD phase state found. Run "init" first.');
+      if (state.currentPhase !== 'green') {
+        errorExit(
+          'Cannot record GREEN evidence: current phase is "' +
+            state.currentPhase +
+            '". Transition to green first.'
+        );
+      }
+      recordCitationEvidence(ticketId, state, resolved, opts);
+      return;
+    }
+  }
+  if (!cmd) errorExit('Missing --cmd argument.');
   // --docs-exempt: documentation-only tasks have no testable code surface, so
   // the RC-D empty-stdout/stderr guard would always trip. Callers (the planner
   // / task-next driver) opt in via this flag; default false preserves existing
