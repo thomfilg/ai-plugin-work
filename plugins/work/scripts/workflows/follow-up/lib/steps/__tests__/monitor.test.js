@@ -21,6 +21,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const MONITOR_PATH = path.resolve(__dirname, '..', 'monitor.js');
+// Sibling modules extracted from monitor.js for the file-size budget. Several
+// structural assertions below now target whichever module a helper lives in.
+const CI_CONTEXT_PATH = path.resolve(__dirname, '..', 'monitor-ci-context.js');
+const INFRA_CACHE_PATH = path.resolve(__dirname, '..', 'monitor-infra-cache.js');
 const SOURCE = fs.readFileSync(MONITOR_PATH, 'utf8');
 const LINES = SOURCE.split('\n');
 
@@ -64,6 +68,14 @@ function phraseNearHelper(helperName, pattern) {
 
 const CHILD_PROCESS_ID = require.resolve('child_process');
 const MONITOR_ID = require.resolve('../monitor.js');
+// monitor.js re-exports helpers from these siblings (which destructure
+// child_process at load). To make a child_process stub reach them, their cache
+// must be busted alongside monitor.js so they re-bind to the stubbed module.
+const MONITOR_SIBLING_IDS = [
+  require.resolve('../monitor-ci-context.js'),
+  require.resolve('../monitor-status-line.js'),
+  require.resolve('../monitor-infra-cache.js'),
+];
 
 function freshLoadMonitor() {
   delete require.cache[MONITOR_ID];
@@ -75,6 +87,7 @@ function withStubbedChildProcess(stub, fn) {
   const stubModule = { exports: stub };
   require.cache[CHILD_PROCESS_ID] = stubModule;
   delete require.cache[MONITOR_ID];
+  for (const id of MONITOR_SIBLING_IDS) delete require.cache[id];
   try {
     const monitor = require('../monitor.js');
     return fn(monitor);
@@ -82,6 +95,7 @@ function withStubbedChildProcess(stub, fn) {
     if (originalCp) require.cache[CHILD_PROCESS_ID] = originalCp;
     else delete require.cache[CHILD_PROCESS_ID];
     delete require.cache[MONITOR_ID];
+    for (const id of MONITOR_SIBLING_IDS) delete require.cache[id];
   }
 }
 
@@ -105,9 +119,15 @@ describe('monitor.js retains the four load-bearing comments', () => {
   });
 
   it('j.url || j.link ordering rationale lives near buildInitialFailedJobs', () => {
+    // buildInitialFailedJobs + its rationale moved together to monitor-ci-context.js.
+    const src = fs.readFileSync(CI_CONTEXT_PATH, 'utf8');
     assert.ok(
-      phraseNearHelper('buildInitialFailedJobs', /j\.url \|\| j\.link/),
-      'expected /j.url || j.link/ comment within ±10 lines of buildInitialFailedJobs'
+      /function\s+buildInitialFailedJobs\s*\(/.test(src),
+      'expected buildInitialFailedJobs to live in monitor-ci-context.js'
+    );
+    assert.ok(
+      /\/\/.*j\.url \|\| j\.link/.test(src),
+      'expected /j.url || j.link/ rationale comment in monitor-ci-context.js'
     );
   });
 
@@ -437,24 +457,26 @@ describe('writeMonitorResult routing in monitor.js (GH-536 Task 2)', () => {
   });
 
   it('defines writeMonitorResult and calls it at least 4 times', () => {
-    const src = fs.readFileSync(MONITOR_PATH, 'utf8');
+    // The chokepoint is defined in monitor-infra-cache.js and called by monitor.js.
+    const cacheSrc = fs.readFileSync(INFRA_CACHE_PATH, 'utf8');
     assert.ok(
-      /function\s+writeMonitorResult\s*\(/.test(src),
-      'expected `function writeMonitorResult(` declaration in monitor.js'
+      /function\s+writeMonitorResult\s*\(/.test(cacheSrc),
+      'expected `function writeMonitorResult(` declaration in monitor-infra-cache.js'
     );
+    const src = fs.readFileSync(MONITOR_PATH, 'utf8');
     const calls = src.match(/writeMonitorResult\s*\(/g) || [];
-    // ≥5 = 1 declaration + 4 call sites
     assert.ok(
-      calls.length >= 5,
-      `expected ≥5 occurrences of writeMonitorResult( (1 decl + 4 calls), found ${calls.length}`
+      calls.length >= 4,
+      `expected ≥4 writeMonitorResult( call sites in monitor.js, found ${calls.length}`
     );
   });
 
   it('requires ../infra-patterns', () => {
-    const src = fs.readFileSync(MONITOR_PATH, 'utf8');
+    // isInfraFailure/isStale are consumed by the infra-cache chokepoint module.
+    const src = fs.readFileSync(INFRA_CACHE_PATH, 'utf8');
     assert.ok(
       /require\(['"]\.\.\/infra-patterns['"]\)/.test(src),
-      'expected monitor.js to require("../infra-patterns")'
+      'expected monitor-infra-cache.js to require("../infra-patterns")'
     );
   });
 });
@@ -608,17 +630,20 @@ describe('clearStaleInfraCache wired via orchestrator (GH-536 round-2)', () => {
   // monitor was reached, which never happened when triage blocked on
   // exitCode 2. These assertions pin the round-2 lift in place.
   it('declares clearStaleInfraCache but does NOT call it from inside monitor.js', () => {
-    const src = fs.readFileSync(MONITOR_PATH, 'utf8');
+    // Declaration lives in monitor-infra-cache.js; monitor.js must not invoke it
+    // (the orchestrator owns invocation). monitor.js only re-exports the symbol.
+    const cacheSrc = fs.readFileSync(INFRA_CACHE_PATH, 'utf8');
     assert.ok(
-      /function\s+clearStaleInfraCache\s*\(/.test(src),
-      'expected `function clearStaleInfraCache(` declaration in monitor.js'
+      /function\s+clearStaleInfraCache\s*\(/.test(cacheSrc),
+      'expected `function clearStaleInfraCache(` declaration in monitor-infra-cache.js'
     );
+    const src = fs.readFileSync(MONITOR_PATH, 'utf8');
     const callCount = (src.match(/clearStaleInfraCache\s*\(/g) || []).length;
-    // 1 occurrence = the function declaration itself, no call sites.
+    // 0 call sites — monitor.js references the symbol only in import + __test__.
     assert.equal(
       callCount,
-      1,
-      `expected exactly 1 occurrence of clearStaleInfraCache( (the declaration; orchestrator owns invocation), found ${callCount}`
+      0,
+      `expected monitor.js to NOT call clearStaleInfraCache( (orchestrator owns invocation), found ${callCount}`
     );
   });
 
