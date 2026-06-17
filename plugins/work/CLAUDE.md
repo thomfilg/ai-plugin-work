@@ -60,12 +60,13 @@ See **[AGENTS.md](./AGENTS.md)** for the agent catalog. See **[docs/README.md](.
 
 ### Feature Flags
 
-- `WORK_TEST_STRATEGY_VALIDATOR` (default `0`) — gates the GH-590 tasks-draft
+- `WORK_TEST_STRATEGY_VALIDATOR` (default `1`) — gates the GH-590 tasks-draft
   Test Strategy validator (enum-driven `### Test Strategy` blocks, command-
-  existence dispatcher, and TDD-ownership graph). Set to `1` to enable the new
-  draft-time validators in `work-tasks` draft phase; leave at `0` (the default)
-  to preserve the legacy `### Test Command` path so in-flight `tasks.md` files
-  are not blocked mid-stream. Read via `getConfig('WORK_TEST_STRATEGY_VALIDATOR')`.
+  existence dispatcher, and TDD-ownership graph) plus the GH-610 implement-side
+  synthesis/citation consumer. Default `1` (on) now that both GH-590 and GH-610
+  have landed. Set to `0` to fall back to the legacy `### Test Command` path
+  (e.g. for in-flight `tasks.md` files authored before GH-590). Read via
+  `getConfig('WORK_TEST_STRATEGY_VALIDATOR')`.
 
   **Implement-side synthesis flow.** When the flag is ON and a task carries a
   `### Test Strategy` block but no legacy `### Test Command`, the implement side

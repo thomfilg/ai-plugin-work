@@ -58,4 +58,4 @@ cites: server/api/admin/general-settings.router.ts
 
 ## Feature flag
 
-The draft-time enum validator is gated by `WORK_TEST_STRATEGY_VALIDATOR=1` (default `0`). Until set in `.envrc`, in-flight tasks using the legacy `### Test Command` shell line continue to validate so authors are not blocked mid-stream.
+The draft-time enum validator (and the GH-610 implement-side synthesis/citation consumer) is gated by `WORK_TEST_STRATEGY_VALIDATOR` (default `1`, on, now that GH-590 and GH-610 have landed). Set `WORK_TEST_STRATEGY_VALIDATOR=0` in `.envrc` to fall back to the legacy `### Test Command` shell line for in-flight tasks authored before GH-590.
