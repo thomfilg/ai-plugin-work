@@ -84,12 +84,12 @@ describe('config — WORK_TEST_STRATEGY_VALIDATOR feature flag (AC17)', () => {
     }
   });
 
-  it('defaults to "0" when WORK_TEST_STRATEGY_VALIDATOR is unset', () => {
+  it('defaults to "1" when WORK_TEST_STRATEGY_VALIDATOR is unset', () => {
     const config = freshRequire({ [FLAG_KEY]: undefined });
     assert.equal(
       config.WORK_TEST_STRATEGY_VALIDATOR,
-      '0',
-      'flag should default to "0" (off) when env var is not set',
+      '1',
+      'flag should default to "1" (on) when env var is not set — GH-590 + GH-610 have landed',
     );
   });
 
