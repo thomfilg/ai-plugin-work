@@ -22,22 +22,12 @@ void _loadWorkWorkflowLazy;
 
 const fs = require('fs');
 const path = require('path');
+const { fileExists, readFile } = require('./work-helpers');
+const taskParserStrategy = require('./task-parser-strategy');
+const { extractTestCommand } = taskParserStrategy;
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function fileExists(p) {
-  try {
-    return fs.existsSync(p);
-  } catch {
-    return false;
-  }
-}
-function readFile(p) {
-  try {
-    return fs.readFileSync(p, 'utf-8');
-  } catch {
-    return '';
-  }
+function extractTestStrategy(taskBody) {
+  return taskParserStrategy.extractTestStrategy(taskBody, extractSectionByHeading);
 }
 
 /**
@@ -143,15 +133,69 @@ function extractSectionByHeading(body, heading) {
   // newline. Section body terminates at the next ### / ## heading or EOF.
   // The `[^\\n]*` after the heading preserves the legacy tolerance for
   // trailing heading text (e.g. `### Suggested Scope (legacy)`).
-  const pattern = new RegExp(
-    `(?:^|\\n)${heading}[^\\n]*\\n([\\s\\S]*?)(?=\\n###|\\n## |$)`
-  );
+  const pattern = new RegExp(`(?:^|\\n)${heading}[^\\n]*\\n([\\s\\S]*?)(?=\\n###|\\n## |$)`);
   const m = body.match(pattern);
   if (!m) return null;
   return [m[0], m[1]];
 }
 
 // ─── Task Parsing ────────────────────────────────────────────────────────────
+
+function _extractTitle(body, num) {
+  const titleMatch = body.match(/^[\s]*[—–-]+\s*(.+?)$/m);
+  const firstLine = body.split('\n')[0]?.trim();
+  return titleMatch ? titleMatch[1].trim() : firstLine || `Task ${num}`;
+}
+
+function _extractType(body) {
+  const typeMatch = body.match(/### Type\s*\n([^\n#]+)/);
+  return typeMatch ? typeMatch[1].trim().toLowerCase() : 'unknown';
+}
+
+function _extractDependencies(body) {
+  const depsMatch = body.match(/### Dependencies\s*\n([\s\S]*?)(?=\n###|\n## |$)/);
+  const depsText = depsMatch ? depsMatch[1].trim() : '';
+  const dependencies = [];
+  const depNums = depsText.match(/Task\s+(\d+)/g);
+  if (!depNums) return dependencies;
+  for (const d of depNums) {
+    const n = parseInt(d.replace(/Task\s+/, ''), 10);
+    if (!isNaN(n)) dependencies.push(n);
+  }
+  return dependencies;
+}
+
+function _sectionText(body, heading) {
+  const m = extractSectionByHeading(body, heading);
+  return m ? m[1].trim() : '';
+}
+
+function _parseTaskBlock(num, rawBody) {
+  // Strip trailing non-task ## sections (e.g. ## Requirement Coverage, ## Extracted Requirements)
+  const body = rawBody.replace(/\n## (?!Task\s)\S[\s\S]*$/, '').trim();
+  const title = _extractTitle(body, num);
+  const type = _extractType(body);
+  const isCheckpoint = type === 'checkpoint' || /checkpoint/i.test(title);
+  return {
+    id: `task_${num}`,
+    num,
+    title,
+    type,
+    isCheckpoint,
+    dependencies: _extractDependencies(body),
+    requirementsCovered: _sectionText(body, '### Requirements Covered'),
+    acceptanceCriteria: _sectionText(body, '### Acceptance Criteria'),
+    suggestedScope: _sectionText(body, '### Suggested Scope'),
+    filesInScope: _parseScopeList(extractSectionByHeading(body, '### Files in scope')),
+    filesOutOfScope: _parseScopeList(
+      extractSectionByHeading(body, '### Files explicitly out of scope')
+    ),
+    crossTaskDeps: _parseScopeList(extractSectionByHeading(body, '### Cross-Task Dependencies')),
+    testCommand: extractTestCommand(body),
+    testStrategy: extractTestStrategy(body),
+    rawContent: `## Task ${num} ${body}`,
+  };
+}
 
 function parseTasks(tasksDir) {
   const tasksFile = path.join(tasksDir, 'tasks.md');
@@ -167,136 +211,10 @@ function parseTasks(tasksDir) {
   for (let i = 1; i < parts.length; i += 2) {
     const num = parseInt(parts[i], 10);
     const rawBody = (parts[i + 1] || '').trim();
-
-    // Strip trailing non-task ## sections (e.g. ## Requirement Coverage, ## Extracted Requirements)
-    const body = rawBody.replace(/\n## (?!Task\s)\S[\s\S]*$/, '').trim();
-
-    // Extract title from first line: " — <title>", "— <title>", or "- <title>"
-    const titleMatch = body.match(/^[\s]*[—–-]+\s*(.+?)$/m);
-    // Fallback: use the first non-empty line as title if no dash pattern found
-    const firstLine = body.split('\n')[0]?.trim();
-    const title = titleMatch ? titleMatch[1].trim() : firstLine || `Task ${num}`;
-
-    // Extract ### Type section
-    const typeMatch = body.match(/### Type\s*\n([^\n#]+)/);
-    const type = typeMatch ? typeMatch[1].trim().toLowerCase() : 'unknown';
-
-    // Extract ### Dependencies section
-    const depsMatch = body.match(/### Dependencies\s*\n([\s\S]*?)(?=\n###|\n## |$)/);
-    const depsText = depsMatch ? depsMatch[1].trim() : '';
-    const dependencies = [];
-    const depNums = depsText.match(/Task\s+(\d+)/g);
-    if (depNums) {
-      depNums.forEach((d) => {
-        const n = parseInt(d.replace(/Task\s+/, ''), 10);
-        if (!isNaN(n)) dependencies.push(n);
-      });
-    }
-
-    // Extract ### Requirements Covered (line-anchored via extractSectionByHeading
-    // so inline-backtick mentions earlier in the body don't shadow the real section)
-    const reqMatch = extractSectionByHeading(body, '### Requirements Covered');
-    const requirementsCovered = reqMatch ? reqMatch[1].trim() : '';
-
-    // Extract ### Acceptance Criteria
-    const acMatch = extractSectionByHeading(body, '### Acceptance Criteria');
-    const acceptanceCriteria = acMatch ? acMatch[1].trim() : '';
-
-    // Extract ### Suggested Scope (legacy, kept for backwards compat)
-    const scopeMatch = extractSectionByHeading(body, '### Suggested Scope');
-    const suggestedScope = scopeMatch ? scopeMatch[1].trim() : '';
-
-    // Gate C: ### Files in scope (glob patterns or paths the task may edit)
-    const filesInScope = _parseScopeList(
-      extractSectionByHeading(body, '### Files in scope')
-    );
-
-    // Gate C: ### Files explicitly out of scope (sibling-owned paths the task must NOT edit)
-    const filesOutOfScope = _parseScopeList(
-      extractSectionByHeading(body, '### Files explicitly out of scope')
-    );
-
-    // GH-392: ### Cross-Task Dependencies (paths owned by sibling tasks but
-    // legitimately needed by this task — bypass the scope hook with audit)
-    const crossTaskDeps = _parseScopeList(
-      extractSectionByHeading(body, '### Cross-Task Dependencies')
-    );
-
-    // Extract ### Test Command (machine-parseable command for gate-driven TDD).
-    // Skip ```bash``` fence markers, leading shell comments, and inline-code
-    // backticks. Concatenates lines joined by trailing `\` continuations.
-    const testCommand = extractTestCommand(body);
-
-    const isCheckpoint = type === 'checkpoint' || /checkpoint/i.test(title);
-
-    tasks.push({
-      id: `task_${num}`,
-      num,
-      title,
-      type,
-      isCheckpoint,
-      dependencies,
-      requirementsCovered,
-      acceptanceCriteria,
-      suggestedScope,
-      filesInScope,
-      filesOutOfScope,
-      crossTaskDeps,
-      testCommand,
-      rawContent: `## Task ${num} ${body}`,
-    });
+    tasks.push(_parseTaskBlock(num, rawBody));
   }
 
   return tasks.length > 0 ? tasks : null;
-}
-
-/**
- * Pull the actual command out of a `### Test Command` section, ignoring
- * markdown noise (fenced code blocks, inline-code backticks, comments).
- *
- * @param {string} taskBody - the body text from `## Task N` to next `## Task`
- * @returns {string|null}
- */
-function extractTestCommand(taskBody) {
-  const headingMatch = taskBody.match(
-    /### Test Command[^\n]*\n([\s\S]*?)(?=\n### |\n## |\n---\s*\n|$)/
-  );
-  if (!headingMatch) return null;
-  const cmdLines = [];
-  let inFence = false;
-  for (const raw of headingMatch[1].split('\n')) {
-    const line = raw.trimEnd();
-    if (/^\s*```/.test(line)) {
-      inFence = !inFence;
-      continue;
-    }
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    if (trimmed.startsWith('#')) continue;
-    const stripped = trimmed.replace(/^`+|`+$/g, '').trim();
-    if (!stripped) continue;
-    // Skip parser artefacts that would silently `execSync` to garbage:
-    //   - bare interpreter names ("bash", "sh", "node") with no args
-    //   - leftover backticks / fence markers
-    if (/^(?:bash|sh|zsh|fish|node|python|python3)\s*$/i.test(stripped)) continue;
-    if (/^[`]+$/.test(stripped)) continue;
-    // Skip markdown prose lines that are obviously not shell commands —
-    // bullet-prefix italics (`- _Documentation only_`) or plain italic
-    // (`_Documentation only_`). These appear in checkpoint/doc-only tasks
-    // where the author meant "no test runs here" but the implement-gate
-    // would otherwise try to execSync the prose.
-    const bulletStripped = stripped.replace(/^[-*+]\s+/, '').trim();
-    if (/^_[^_]*_\s*$/.test(bulletStripped)) continue;
-    if (/^_/.test(bulletStripped) && /_$/.test(bulletStripped)) continue;
-    // Skip markdown horizontal-rule separators (`---`, `***`, `___`).
-    // These can leak into the captured body when the heading lookahead
-    // doesn't terminate cleanly (trailing newline missing, etc).
-    if (/^-{3,}$|^\*{3,}$|^_{3,}$/.test(stripped)) continue;
-    cmdLines.push(stripped);
-    if (!stripped.endsWith('\\')) break;
-  }
-  if (cmdLines.length === 0) return null;
-  return cmdLines.map((l) => l.replace(/\\$/, '').trim()).join(' ');
 }
 
 /**
@@ -305,68 +223,76 @@ function extractTestCommand(taskBody) {
  * @param {Array|null} allTasks - All tasks from parseTasks(), used to build task context
  * @param {object|null} taskState - tasksMeta from work state, used to show completion status
  */
-function buildTaskPrompt(task, tasksDir, allTasks, taskState) {
+function _formatPendingLabel(tasksDir, t) {
+  const claimOwner = _readClaimOwner(tasksDir, t.num);
+  return claimOwner
+    ? `in progress by ${claimOwner} — do NOT duplicate work`
+    : 'pending — do NOT implement yet';
+}
+
+function _scopeReservedLine(suggestedScope) {
+  if (!suggestedScope) return null;
+  const scopeLines = suggestedScope
+    .split('\n')
+    .map((l) => _normalizeScope(l))
+    .filter(Boolean);
+  return scopeLines.length > 0 ? `  Reserved files: ${scopeLines.join(', ')}` : null;
+}
+
+function _renderPeerTaskLines(t, tasksDir, currentNum, persistedTasks) {
   const lines = [];
-  lines.push(`## Current Task: Task ${task.num} — ${task.title}`);
-  lines.push('');
-  lines.push('You are implementing ONE task from the task plan. Do NOT implement other tasks.');
-  lines.push('');
-
-  // ── Task Context: show scope of all tasks to prevent agent drift ─────────
-  if (allTasks && allTasks.length > 1) {
-    const persistedTasks = Array.isArray(taskState?.tasks) ? taskState.tasks : [];
-    lines.push('### Task Context');
-    lines.push(
-      `This is Task ${task.num} of ${allTasks.length}. Scope boundaries are listed below to prevent drift:`
-    );
-    lines.push('');
-    for (const t of allTasks) {
-      const taskMeta = persistedTasks.find((tm) => tm.id === `task_${t.num}`);
-      const isCompleted = taskMeta?.status === 'completed';
-      const isCurrent = t.num === task.num;
-      if (isCurrent) {
-        lines.push(`- **Task ${t.num} — ${t.title}** ← YOU ARE IMPLEMENTING THIS`);
-      } else if (isCompleted) {
-        lines.push(`- Task ${t.num} — ${t.title} [✓ completed — do NOT re-implement]`);
-      } else {
-        const claimOwner = _readClaimOwner(tasksDir, t.num);
-        const label = claimOwner
-          ? `in progress by ${claimOwner} — do NOT duplicate work`
-          : 'pending — do NOT implement yet';
-        lines.push(`- Task ${t.num} — ${t.title} [${label}]`);
-        if (t.suggestedScope) {
-          const scopeLines = t.suggestedScope
-            .split('\n')
-            .map((l) => _normalizeScope(l))
-            .filter(Boolean);
-          if (scopeLines.length > 0) {
-            lines.push(`  Reserved files: ${scopeLines.join(', ')}`);
-          }
-        }
-      }
-    }
-    lines.push('');
+  if (t.num === currentNum) {
+    lines.push(`- **Task ${t.num} — ${t.title}** ← YOU ARE IMPLEMENTING THIS`);
+    return lines;
   }
+  const taskMeta = persistedTasks.find((tm) => tm.id === `task_${t.num}`);
+  if (taskMeta?.status === 'completed') {
+    lines.push(`- Task ${t.num} — ${t.title} [✓ completed — do NOT re-implement]`);
+    return lines;
+  }
+  lines.push(`- Task ${t.num} — ${t.title} [${_formatPendingLabel(tasksDir, t)}]`);
+  const reserved = _scopeReservedLine(t.suggestedScope);
+  if (reserved) lines.push(reserved);
+  return lines;
+}
 
-  lines.push('### Task Details');
-  lines.push(task.rawContent);
+function _renderTaskContext(task, tasksDir, allTasks, taskState) {
+  if (!allTasks || allTasks.length <= 1) return [];
+  const persistedTasks = Array.isArray(taskState?.tasks) ? taskState.tasks : [];
+  const lines = [
+    '### Task Context',
+    `This is Task ${task.num} of ${allTasks.length}. Scope boundaries are listed below to prevent drift:`,
+    '',
+  ];
+  for (const t of allTasks) {
+    lines.push(..._renderPeerTaskLines(t, tasksDir, task.num, persistedTasks));
+  }
   lines.push('');
-  lines.push('### Rules');
-  lines.push('- Implement ONLY the deliverables listed in this task');
-  lines.push(
-    "- Do NOT modify files outside this task's suggested scope unless necessary for this task's deliverables"
-  );
-  lines.push('- Every acceptance criterion must be met before this task is complete');
-  lines.push('');
-  lines.push('### Reference Documents');
-  lines.push(
-    'The full brief and spec are available for context but your scope is LIMITED to this task:'
-  );
-  lines.push(`- Brief: ${path.join(tasksDir, 'brief.md')}`);
-  lines.push(`- Spec: ${path.join(tasksDir, 'spec.md')}`);
-  lines.push(`- Full task plan: ${path.join(tasksDir, 'tasks.md')}`);
+  return lines;
+}
 
+function buildTaskPrompt(task, tasksDir, allTasks, taskState) {
+  const lines = [
+    `## Current Task: Task ${task.num} — ${task.title}`,
+    '',
+    'You are implementing ONE task from the task plan. Do NOT implement other tasks.',
+    '',
+    ..._renderTaskContext(task, tasksDir, allTasks, taskState),
+    '### Task Details',
+    task.rawContent,
+    '',
+    '### Rules',
+    '- Implement ONLY the deliverables listed in this task',
+    "- Do NOT modify files outside this task's suggested scope unless necessary for this task's deliverables",
+    '- Every acceptance criterion must be met before this task is complete',
+    '',
+    '### Reference Documents',
+    'The full brief and spec are available for context but your scope is LIMITED to this task:',
+    `- Brief: ${path.join(tasksDir, 'brief.md')}`,
+    `- Spec: ${path.join(tasksDir, 'spec.md')}`,
+    `- Full task plan: ${path.join(tasksDir, 'tasks.md')}`,
+  ];
   return lines.join('\n');
 }
 
-module.exports = { parseTasks, buildTaskPrompt };
+module.exports = { parseTasks, buildTaskPrompt, extractTestStrategy };

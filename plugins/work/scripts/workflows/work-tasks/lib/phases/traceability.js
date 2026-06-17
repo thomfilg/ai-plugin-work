@@ -21,23 +21,17 @@ function readFile(p) {
   }
 }
 
+const { iterTaskBlocks } = require('./_task-block-iter');
+
 function parseTaskBlocks(text) {
-  const out = [];
-  if (!text) return out;
-  const parts = text.split(/^##\s+Task\s+(\d+)/m);
-  for (let i = 1; i < parts.length; i += 2) {
-    const num = parts[i];
-    const body = (parts[i + 1] || '').replace(/\n## (?!Task\s)\S[\s\S]*$/, '');
-    // Note: must NOT use the `m` flag with `$` in the lookahead — `$` in
-    // multiline mode matches every end-of-line and the non-greedy
-    // quantifier terminates at the first one. Drop the `^` anchor + `m`
-    // flag and rely on `\n###` / `\n## ` / true end-of-string as the
-    // section terminators.
+  // Note: must NOT use the `m` flag with `$` in the lookahead — `$` in
+  // multiline mode matches every end-of-line and the non-greedy quantifier
+  // terminates at the first one. Drop the `^` anchor + `m` flag and rely
+  // on `\n###` / `\n## ` / true end-of-string as the section terminators.
+  return iterTaskBlocks(text).map(({ num, body }) => {
     const m = body.match(/###\s+Requirements Covered\s*\n([\s\S]*?)(?=\n###\s|\n## |$(?![\s\S]))/);
-    const reqText = m ? m[1] : '';
-    out.push({ num: Number(num), reqText });
-  }
-  return out;
+    return { num: Number(num), reqText: m ? m[1] : '' };
+  });
 }
 
 function validateArtifacts(tasksDir) {
