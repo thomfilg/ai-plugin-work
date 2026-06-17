@@ -72,6 +72,12 @@ function debugLog(message) {
   }
 }
 
+// Pure helpers (debug-section append, phase test flags, block messages) live in
+// the sibling module to keep this entrypoint under the static-quality budget.
+const { appendDebugSection, applyPhaseTestFlags, redPassedMessage, citationBlockMessage } = require(
+  path.join(__dirname, 'enforce-tdd-on-stop-helpers')
+);
+
 if (!ticketId) {
   debugLog('SKIP: no WORK_TICKET_ID');
   process.exit(0);
@@ -245,18 +251,7 @@ if (testCommand) {
   // Apply phase-aware test flags:
   //   RED:   run ALL tests (need full failure picture)
   //   GREEN/REFACTOR: fail-fast on first failure (no point running rest)
-  let phaseTestCommand = testCommand;
-  if (currentPhase === 'green' || currentPhase === 'refactor') {
-    // Append fail-fast flags for common test runners
-    // vitest/jest: --bail    playwright: already fails fast by default
-    // Only append if not already present
-    if (!/--bail\b/.test(phaseTestCommand)) {
-      phaseTestCommand = phaseTestCommand.replace(
-        /(pnpm\s+test(?::unit|:integration)?)/g,
-        '$1 --bail'
-      );
-    }
-  }
+  const phaseTestCommand = applyPhaseTestFlags(testCommand, currentPhase);
 
   // Run test command and record evidence through the authorized writer.
   // The hook MUST NOT write phase state directly — tdd-phase-state.js is the
@@ -278,24 +273,7 @@ if (testCommand) {
       // Tests passed in RED — block the stop with a clear instruction. Do NOT
       // fabricate GREEN. The agent must reconcile: either record a real failing
       // test (RED), or call task-next.js to get the next instruction.
-      process.stderr.write(
-        [
-          '',
-          'STOP BLOCKED: RED phase has no failing-test evidence yet, but the',
-          'current test command exits 0. This means one of:',
-          '  (a) You skipped writing the failing test first.',
-          '  (b) The test was already passing before this cycle started.',
-          '  (c) You implemented the production code before recording RED.',
-          '',
-          'The hook will NOT fabricate evidence for you — that would corrupt the',
-          'TDD audit trail (see RC-C in implement-gate stuckness investigation).',
-          '',
-          'What to do:',
-          `  Run: node $CLAUDE_PLUGIN_ROOT/scripts/workflows/work-implement/task-next.js ${safeTicket} task${taskNum}`,
-          '  It will tell you precisely which phase you are in and what to do next.',
-          '',
-        ].join('\n')
-      );
+      process.stderr.write(redPassedMessage(safeTicket, taskNum));
       debugLog('STOP BLOCKED: tests passed in RED, refused to fabricate evidence');
       process.exit(2); // block the stop — agent must call task-next.js
     } catch {
@@ -334,16 +312,11 @@ if (testCommand) {
     }
 
     // Log success
-    try {
-      const debugPath = path.join(TASKS_BASE, safeTicket, 'debug.md');
-      const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
-      fs.appendFileSync(
-        debugPath,
-        `\n## ${timestamp} — enforce-tdd-on-stop\n\n- **[AUTO-RECORDED]** task ${taskNum}: ${currentPhase} phase recorded via test command\n`
-      );
-    } catch {
-      /* best-effort */
-    }
+    appendDebugSection(
+      TASKS_BASE,
+      safeTicket,
+      `- **[AUTO-RECORDED]** task ${taskNum}: ${currentPhase} phase recorded via test command`
+    );
 
     // If we recorded GREEN or REFACTOR, allow stop
     if (effectivePhase === 'green' || effectivePhase === 'refactor') {
@@ -359,16 +332,11 @@ if (testCommand) {
   } catch (err) {
     // record-* failed — likely test command error or phase mismatch
     const msg = err.stderr || err.stdout || err.message || 'unknown';
-    try {
-      const debugPath = path.join(TASKS_BASE, safeTicket, 'debug.md');
-      const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
-      fs.appendFileSync(
-        debugPath,
-        `\n## ${timestamp} — enforce-tdd-on-stop\n\n- **[AUTO-RUN FAILED]** task ${taskNum}: ${currentPhase} phase — ${String(msg).substring(0, 200)}\n`
-      );
-    } catch {
-      /* best-effort */
-    }
+    appendDebugSection(
+      TASKS_BASE,
+      safeTicket,
+      `- **[AUTO-RUN FAILED]** task ${taskNum}: ${currentPhase} phase — ${String(msg).substring(0, 200)}`
+    );
 
     // Test command exists but recording failed — block the agent
     debugLog('BLOCK: recording failed');
@@ -388,19 +356,7 @@ if (testCommand) {
 // the legacy bypass would let the agent stop with zero evidence.
 if (isStrategyResolution && !testCommand) {
   debugLog('BLOCK: citation-kind strategy without valid evidence');
-  process.stderr.write(
-    [
-      '',
-      `STOP BLOCKED: task ${taskNum} uses a citation-kind \`### Test Strategy\` (no`,
-      'runnable command). It is satisfied by peer-citation evidence, which is not',
-      'yet recorded.',
-      '',
-      'What to do:',
-      `  Run: node $CLAUDE_PLUGIN_ROOT/scripts/workflows/work-implement/task-next.js ${safeTicket} task${taskNum}`,
-      '  It will validate the peer citation and record the green evidence for you.',
-      '',
-    ].join('\n')
-  );
+  process.stderr.write(citationBlockMessage(safeTicket, taskNum));
   process.exit(2);
 }
 
@@ -410,16 +366,11 @@ if (isStrategyResolution && !testCommand) {
 // Allow the agent to stop — evidence verification is skipped for tasks without
 // a test command.
 
-try {
-  const debugPath = path.join(TASKS_BASE, safeTicket, 'debug.md');
-  const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
-  fs.appendFileSync(
-    debugPath,
-    `\n## ${timestamp} — enforce-tdd-on-stop\n\n- **[BYPASS]** task ${taskNum}: No ### Test Command in tasks.md — evidence check skipped\n`
-  );
-} catch {
-  // fail-open
-}
+appendDebugSection(
+  TASKS_BASE,
+  safeTicket,
+  `- **[BYPASS]** task ${taskNum}: No ### Test Command in tasks.md — evidence check skipped`
+);
 
 debugLog('BYPASS: no test command in tasks.md');
 process.exit(0);

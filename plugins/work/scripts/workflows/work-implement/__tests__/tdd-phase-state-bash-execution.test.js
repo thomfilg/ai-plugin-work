@@ -16,9 +16,11 @@
  * wrappers execute under bash, matching task-next.js's own runTest()
  * invocation.
  *
- * This regression test asserts the source of tdd-phase-state.js calls
- * `spawnSync('bash', ['-lc', cmd], ...)` for its test-command runner,
- * rather than the previous `spawnSync(cmd, { shell: true, ... })` form.
+ * This regression test asserts the source of the test-command runner calls
+ * `spawnSync('bash', ['-lc', cmd], ...)`, rather than the previous
+ * `spawnSync(cmd, { shell: true, ... })` form. The runner
+ * (`runTestCommandWithOutput`) was extracted to `tdd-phase-state/io.js` during
+ * the GH-610 static-quality refactor; the behavioral guarantee is unchanged.
  * A behavioral end-to-end test would require driving the full
  * record-red CLI path with git-tracked test files and a valid token,
  * which is exercised by auto-init-record.test.js. This narrower test
@@ -33,7 +35,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
-const TDD_PHASE_STATE_PATH = path.resolve(__dirname, '..', 'tdd-phase-state.js');
+// runTestCommandWithOutput lives in the io helper module (extracted from
+// tdd-phase-state.js during the GH-610 static-quality refactor).
+const TDD_PHASE_STATE_PATH = path.resolve(__dirname, '..', 'tdd-phase-state', 'io.js');
 
 describe('tdd-phase-state.js test-command execution path (review-comment-2)', () => {
   it('runTestCommandWithOutput invokes the cmd via bash -lc, not via shell: true', () => {

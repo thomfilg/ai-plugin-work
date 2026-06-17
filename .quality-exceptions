@@ -42,11 +42,9 @@
 
 plugins/work/scripts/workflows/work/scripts/follow-up-pr.js
 plugins/work/scripts/workflows/lib/hooks/enforce-step-workflow.js
-plugins/work/scripts/workflows/work/lib/step-enrichments/implement-gate.js
 plugins/work/scripts/workflows/work/work-state.js
 plugins/work/scripts/workflows/work/workflow-definition.js
 plugins/work/scripts/workflows/work-implement/task-next.js
-plugins/work/scripts/workflows/work-implement/tdd-phase-state.js
 plugins/work/scripts/workflows/work/work-next.js
 plugins/work/scripts/workflows/lib/hooks/session-guard.js
 plugins/work/scripts/workflows/check/scripts/spec-verify.js
@@ -72,7 +70,6 @@ plugins/work/scripts/workflows/work/hooks/work-suggestion-replies.js
 plugins/work/scripts/workflows/check/hooks/check-validate-reports.js
 plugins/work/scripts/workflows/follow-up/lib/steps/monitor.js
 plugins/work/scripts/workflows/lib/hooks/enforce-ui-imports.js
-plugins/work/scripts/workflows/work-implement/hooks/enforce-tdd-on-stop.js
 plugins/work/scripts/workflows/work-spec/lib/phases/surface_audit.js
 plugins/work/scripts/workflows/work/agents/commit-writer/commit-writer-block-write.js
 plugins/work/scripts/workflows/work/lib/task-parser.js
