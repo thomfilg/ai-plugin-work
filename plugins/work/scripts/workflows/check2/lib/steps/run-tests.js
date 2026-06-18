@@ -183,3 +183,6 @@ function registerRunTests(register) {
 
 module.exports = registerRunTests;
 module.exports.runQualityGate = runQualityGate;
+// Shared single command runner — also used by lib/run-affected-suite.js so the
+// whole /check2 subsystem has one combined-stdout/stderr exec site.
+module.exports.runCommand = runCommand;

@@ -10,17 +10,9 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
-
-// Run the suite command, capturing combined stdout/stderr. Never throws — a
-// non-zero exit is reported via the returned exitCode.
-function runSuiteCommand(cmd, timeout) {
-  try {
-    return { output: execSync(`${cmd} 2>&1`, { encoding: 'utf8', timeout }), exitCode: 0 };
-  } catch (err) {
-    return { output: (err.stdout || '') + (err.stderr || ''), exitCode: err.status || 1 };
-  }
-}
+// Reuse the single command runner from run-tests.js rather than spawning here —
+// one combined-output exec site for the whole /check2 subsystem.
+const { runCommand } = require('./steps/run-tests');
 
 // Pull pass/fail counts out of the runner output (best-effort; '?' when absent).
 function parseCounts(output) {
@@ -57,7 +49,7 @@ function runAffectedSuite({ envVar, stepName, reportFile, label, timeout }) {
     const reportFolder = state.setupResult?.reportFolder || ctx.tasksDir;
     const reportPath = path.join(reportFolder, reportFile);
 
-    const { output, exitCode } = runSuiteCommand(cmd, timeout);
+    const { output, exitCode } = runCommand(cmd, timeout);
     const { passCount, failCount } = parseCounts(output);
     const status = exitCode === 0 ? 'APPROVED' : 'NEEDS_WORK';
 
