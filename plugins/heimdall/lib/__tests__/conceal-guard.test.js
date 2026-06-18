@@ -137,6 +137,20 @@ describe('malformed deny pattern does not fail open', () => {
   });
 });
 
+describe('conceal refuses to overwrite a corrupt config', () => {
+  it('exits non-zero and leaves the invalid file untouched', () => {
+    const r = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-corrupt-'));
+    fs.mkdirSync(path.join(r, '.claude'), { recursive: true });
+    const cfgPath = path.join(r, '.claude', 'heimdall-conceal.json');
+    const original = '{ "secretsFiles": ["x"], not valid json';
+    fs.writeFileSync(cfgPath, original);
+    const res = spawnSync('node', [SCRIPT, 'foo.txt', r], { encoding: 'utf8' });
+    assert.notEqual(res.status, 0);
+    assert.equal(fs.readFileSync(cfgPath, 'utf8'), original); // not overwritten
+    fs.rmSync(r, { recursive: true, force: true });
+  });
+});
+
 describe('conceal seeding preserves existing secrets coverage', () => {
   let secretsRepo;
   const guardIn = (dir, payload) =>

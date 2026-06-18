@@ -56,19 +56,34 @@ function buildPatterns(repo, resolved) {
 }
 
 function loadOrCreateConfig(cfgPath) {
+  let raw;
   try {
-    return { cfg: JSON.parse(fs.readFileSync(cfgPath, 'utf8')), created: false };
-  } catch {
-    return {
-      created: true,
-      cfg: {
-        _doc: 'heimdall guard policy (Layer 2). Created by /heimdall:conceal. Each denyFilePattern/denyCommandPattern is a JS regexp matched against tool target paths / Bash commands.',
-        denyFilePatterns: [],
-        denyCommandPatterns: [],
-        denyMessage:
-          'BLOCKED: this path is protected by heimdall. Reading or modifying it is not permitted for agents.',
-      },
-    };
+    raw = fs.readFileSync(cfgPath, 'utf8');
+  } catch (err) {
+    // Only a genuinely absent file gets a fresh template. Any other read error
+    // (permissions, etc.) must NOT be silently replaced.
+    if (err.code === 'ENOENT') {
+      return {
+        created: true,
+        cfg: {
+          _doc: 'heimdall guard policy (Layer 2). Created by /heimdall:conceal. Each denyFilePattern/denyCommandPattern is a JS regexp matched against tool target paths / Bash commands.',
+          denyFilePatterns: [],
+          denyCommandPatterns: [],
+          denyMessage:
+            'BLOCKED: this path is protected by heimdall. Reading or modifying it is not permitted for agents.',
+        },
+      };
+    }
+    return die(`cannot read ${cfgPath}: ${err.message}`);
+  }
+  // The file exists — if it is invalid JSON, REFUSE rather than overwrite it
+  // (that would drop secretsFiles/allowlist/wrapper and other harden settings).
+  try {
+    return { cfg: JSON.parse(raw), created: false };
+  } catch (err) {
+    return die(
+      `${cfgPath} exists but is not valid JSON (${err.message}); fix or remove it before concealing.`
+    );
   }
 }
 
