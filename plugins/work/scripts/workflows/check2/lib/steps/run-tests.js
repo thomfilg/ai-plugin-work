@@ -29,46 +29,63 @@ function runCommand(cmd, timeout) {
 }
 
 /**
- * Run quality gate and return { output, exitCode, tier }.
- *
- * Tier 0 (preferred): per-suite SCRIPT_RUN_AFFECTED_* env vars. Each set
- *   suite is run in sequence; the first non-zero exit short-circuits.
- *   This lets repos plug in their own affected-detection (nx, turbo, custom).
- * Tier 1: $LINT_COMMAND / $TYPECHECK_COMMAND / $TEST_COMMAND env vars routed
- *   through the bundled dev-check.sh which evaluates them with $CHANGED_FILES.
- * Tier 2: pnpm dev:check
- * Tier 3: bundled dev-check.sh
- * Tier 4: pnpm test fallback
+ * Tier 0 (preferred): per-suite SCRIPT_RUN_AFFECTED_* env vars. Each set suite
+ * is run in sequence; the first non-zero exit short-circuits. This lets repos
+ * plug in their own affected-detection (nx, turbo, custom). Returns a result,
+ * or null when no affected-suite env vars are configured.
  */
-function runQualityGate(checkHooksDir) {
-  // Tier 0: per-suite SCRIPT_RUN_AFFECTED_* — run each defined suite, stop on first failure
+function runAffectedSuites() {
   const suites = [
     { name: 'unit', cmd: process.env.SCRIPT_RUN_AFFECTED_UNIT },
     { name: 'integration', cmd: process.env.SCRIPT_RUN_AFFECTED_INTEGRATION },
     { name: 'e2e', cmd: process.env.SCRIPT_RUN_AFFECTED_E2E },
   ].filter((s) => s.cmd);
 
-  if (suites.length > 0) {
-    const outputs = [];
-    for (const { name, cmd } of suites) {
-      outputs.push(`### ${name} (${cmd})`);
-      const result = runCommand(cmd, 600000);
-      outputs.push(result.output);
-      if (result.exitCode !== 0) {
-        return {
-          output: outputs.join('\n'),
-          exitCode: result.exitCode,
-          tier: `affected-${name} (failed)`,
-        };
-      }
-    }
-    return {
-      output: outputs.join('\n'),
-      exitCode: 0,
-      tier: `affected (${suites.map((s) => s.name).join('+')})`,
-    };
-  }
+  if (suites.length === 0) return null;
 
+  const outputs = [];
+  for (const { name, cmd } of suites) {
+    outputs.push(`### ${name} (${cmd})`);
+    const result = runCommand(cmd, 600000);
+    outputs.push(result.output);
+    if (result.exitCode !== 0) {
+      return {
+        output: outputs.join('\n'),
+        exitCode: result.exitCode,
+        tier: `affected-${name} (failed)`,
+      };
+    }
+  }
+  return {
+    output: outputs.join('\n'),
+    exitCode: 0,
+    tier: `affected (${suites.map((s) => s.name).join('+')})`,
+  };
+}
+
+// Tier 2: pnpm dev:check (project-defined). Returns a result, or null when the
+// repo has no package.json or no dev:check script.
+function tryPnpmDevCheck() {
+  try {
+    const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+    if (pkg.scripts && pkg.scripts['dev:check']) {
+      return { ...runCommand('pnpm dev:check', 120000), tier: 'pnpm dev:check' };
+    }
+  } catch {
+    /* no package.json */
+  }
+  return null;
+}
+
+/**
+ * Tiers 1-4 (fallback when no affected-suite env vars are set):
+ * Tier 1: $LINT_COMMAND / $TYPECHECK_COMMAND / $TEST_COMMAND routed through the
+ *   bundled dev-check.sh (which evaluates them with $CHANGED_FILES).
+ * Tier 2: pnpm dev:check
+ * Tier 3: bundled dev-check.sh
+ * Tier 4: pnpm test / node --test fallback
+ */
+function runDevCheckTiers(checkHooksDir) {
   const devCheckScript = path.join(
     checkHooksDir,
     '..',
@@ -84,30 +101,31 @@ function runQualityGate(checkHooksDir) {
   const envOverridesPresent =
     process.env.LINT_COMMAND || process.env.TYPECHECK_COMMAND || process.env.TEST_COMMAND;
   if (envOverridesPresent && fs.existsSync(devCheckScript)) {
-    const result = runCommand(`bash "${devCheckScript}"`, 120000);
-    return { ...result, tier: 'dev-check.sh ($LINT/$TYPECHECK/$TEST_COMMAND)' };
+    return {
+      ...runCommand(`bash "${devCheckScript}"`, 120000),
+      tier: 'dev-check.sh ($LINT/$TYPECHECK/$TEST_COMMAND)',
+    };
   }
 
-  // Tier 2: pnpm dev:check
-  try {
-    const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-    if (pkg.scripts && pkg.scripts['dev:check']) {
-      const result = runCommand('pnpm dev:check', 120000);
-      return { ...result, tier: 'pnpm dev:check' };
-    }
-  } catch {
-    /* no package.json */
-  }
+  const pnpmResult = tryPnpmDevCheck();
+  if (pnpmResult) return pnpmResult;
 
   // Tier 3: bundled dev-check script
   if (fs.existsSync(devCheckScript)) {
-    const result = runCommand(`bash "${devCheckScript}"`, 120000);
-    return { ...result, tier: 'dev-check.sh' };
+    return { ...runCommand(`bash "${devCheckScript}"`, 120000), tier: 'dev-check.sh' };
   }
 
   // Tier 4: pnpm test or node --test
-  const result = runCommand('pnpm test || node --test', 120000);
-  return { ...result, tier: 'pnpm test' };
+  return { ...runCommand('pnpm test || node --test', 120000), tier: 'pnpm test' };
+}
+
+/**
+ * Run quality gate and return { output, exitCode, tier }. Tier 0
+ * (affected-suite env vars) wins when configured; otherwise fall back through
+ * the dev-check tiers.
+ */
+function runQualityGate(checkHooksDir) {
+  return runAffectedSuites() || runDevCheckTiers(checkHooksDir);
 }
 
 function registerRunTests(register) {
