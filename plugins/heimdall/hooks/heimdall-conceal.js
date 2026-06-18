@@ -3,8 +3,8 @@
  * heimdall-conceal — PreToolUse hook (plugin). Deny agent reads of protected secrets.
  *
  * Config-driven and SAFE-BY-DEFAULT-OFF: if the target project has no
- * `.claude/heimdall-conceal.json` (or `.heimdall-conceal.json`), this hook is a no-op, so
- * installing the plugin globally never breaks unrelated repos.
+ * `.claude/heimdall-conceal.json`, this hook is a no-op, so installing the
+ * plugin globally never breaks unrelated repos.
  *
  * Scoping (avoids false positives):
  *   - File tools (Read/Grep/Glob/Edit/Write/MultiEdit): scan ONLY the target
@@ -23,29 +23,27 @@ const fs = require('fs');
 const path = require('path');
 
 function loadConfig(root) {
-  for (const f of [
-    path.join(root, '.claude', 'heimdall-conceal.json'),
-    path.join(root, '.heimdall-conceal.json'),
-  ]) {
-    let raw;
-    try {
-      raw = fs.readFileSync(f, 'utf8');
-    } catch (err) {
-      if (err.code === 'ENOENT') continue; // this candidate absent → try next
-      // A config file IS present but unreadable: do NOT silently no-op (that
-      // would allow reads despite a policy). Throw → fail closed via main()'s wrapper.
-      throw new Error(`cannot read ${f}: ${err.message}`);
-    }
-    try {
-      const cfg = JSON.parse(raw);
-      cfg.__root = root;
-      return cfg;
-    } catch (err) {
-      // Present but invalid JSON: fail closed rather than disable the guard.
-      throw new Error(`${f} is not valid JSON: ${err.message}`);
-    }
+  // Single source of truth, matching setup-secrets-heimdall.sh and
+  // heimdall-conceal-status.js. (A repo-root variant would let the guard run
+  // while harden/audit report no config.)
+  const f = path.join(root, '.claude', 'heimdall-conceal.json');
+  let raw;
+  try {
+    raw = fs.readFileSync(f, 'utf8');
+  } catch (err) {
+    if (err.code === 'ENOENT') return null; // no policy for this project → no-op
+    // Present but unreadable: do NOT silently no-op (that would allow reads
+    // despite a policy). Throw → fail closed via main()'s wrapper.
+    throw new Error(`cannot read ${f}: ${err.message}`);
   }
-  return null;
+  try {
+    const cfg = JSON.parse(raw);
+    cfg.__root = root;
+    return cfg;
+  } catch (err) {
+    // Present but invalid JSON: fail closed rather than disable the guard.
+    throw new Error(`${f} is not valid JSON: ${err.message}`);
+  }
 }
 
 function esc(s) {
