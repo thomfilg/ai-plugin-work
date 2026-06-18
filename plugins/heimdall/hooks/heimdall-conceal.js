@@ -72,19 +72,25 @@ function toRegexes(patterns) {
 
 function filePatterns(cfg) {
   if (Array.isArray(cfg.denyFilePatterns) && cfg.denyFilePatterns.length) {
-    return toRegexes(cfg.denyFilePatterns);
+    const res = toRegexes(cfg.denyFilePatterns);
+    // A configured deny list that compiles to NOTHING (every pattern invalid)
+    // must not silently allow reads — fail closed (the wrapper turns this into
+    // a block). A partially-valid list keeps its valid entries (see toRegexes).
+    if (res.length === 0) throw new Error('all denyFilePatterns are invalid regex');
+    return res;
   }
   return toRegexes((cfg.secretsFiles || []).map((f) => esc(path.basename(f))));
 }
 
 // Patterns matched against Bash COMMANDS (file names + environ + password var).
 function cmdPatterns(cfg) {
-  const base = filePatterns(cfg).map((re) => re.source);
-  const extra =
-    Array.isArray(cfg.denyCommandPatterns) && cfg.denyCommandPatterns.length
-      ? cfg.denyCommandPatterns
-      : ['/proc/[^/]+/environ', '\\bPGPASSWORD\\b'];
-  return toRegexes([...base, ...extra]);
+  const fileRe = filePatterns(cfg); // throws if an explicit file deny list is all-invalid
+  const hasCustom = Array.isArray(cfg.denyCommandPatterns) && cfg.denyCommandPatterns.length;
+  const extra = hasCustom ? cfg.denyCommandPatterns : ['/proc/[^/]+/environ', '\\bPGPASSWORD\\b'];
+  const extraRe = toRegexes(extra);
+  if (hasCustom && extraRe.length === 0)
+    throw new Error('all denyCommandPatterns are invalid regex');
+  return [...fileRe, ...extraRe];
 }
 
 const FILE_TOOLS = new Set(['Read', 'Grep', 'Glob', 'Edit', 'Write', 'MultiEdit']);
