@@ -80,9 +80,11 @@ function buildInfraStuckSurface(state, ctx) {
   };
 }
 
-// Write the accountability report once (skips if it already exists). Fail-open.
+// Write the accountability report once (never overwrites an existing one).
+// Uses the write-exclusive 'wx' flag so the create-once check is atomic — no
+// check-then-write race — and fails open if the file already exists or the
+// write errors.
 function writeAccountabilityReport(reportPath, state, solvedReviews, skippedReviews) {
-  if (fs.existsSync(reportPath)) return;
   try {
     fs.writeFileSync(
       reportPath,
@@ -97,10 +99,11 @@ function writeAccountabilityReport(reportPath, state, solvedReviews, skippedRevi
         },
         null,
         2
-      )
+      ),
+      { flag: 'wx' }
     );
   } catch {
-    /* fail-open */
+    /* fail-open — report already exists or write failed */
   }
 }
 

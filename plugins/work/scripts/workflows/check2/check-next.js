@@ -21,9 +21,7 @@ if (require.main === module) {
 
 // ─── Resolve paths ──────────────────────────────────────────────────────────
 const { resolvePluginConfig } = require('../lib/plugin-config');
-const { workDir, libDir, getConfig, WORKTREES_BASE, TASKS_BASE } = resolvePluginConfig(
-  path.join(__dirname, '..', 'work')
-);
+const { libDir, TASKS_BASE } = resolvePluginConfig(path.join(__dirname, '..', 'work'));
 
 if (!TASKS_BASE) {
   console.log(

@@ -114,13 +114,39 @@ function computeCounts(st) {
   };
 }
 
+// Remove HTML comments (`<!-- ... -->`) by scanning with indexOf rather than a
+// regex. A regex HTML-comment filter is hard to make complete (it must also
+// treat `--!>` as a terminator and can leave a stray `<!--`), so we slice the
+// markers out directly: everything from a `<!--` up to and including the next
+// `-->` is dropped, and an unterminated `<!--` drops the remainder. This leaves
+// no `<!--` behind and uses no regex sanitizer for CodeQL to flag as incomplete.
+function stripHtmlComments(s) {
+  let out = '';
+  let i = 0;
+  while (i < s.length) {
+    const start = s.indexOf('<!--', i);
+    if (start === -1) {
+      out += s.slice(i);
+      break;
+    }
+    out += s.slice(i, start);
+    const end = s.indexOf('-->', start + 4);
+    if (end === -1) break; // unterminated comment — drop the rest
+    i = end + 3;
+  }
+  return out;
+}
+
 // Strip noise from Cursor Bugbot comments: HTML links, base64 URLs, metadata.
+// This is cosmetic markdown cleanup for CLI/agent-prompt display — NOT HTML
+// sanitization for a browser (the output is never rendered as HTML).
 function cleanCommentBody(rawBody) {
-  return rawBody
+  let body = rawBody
     .replace(/<div>[\s\S]*?<\/div>/g, '') // cursor fix-in-cursor/fix-in-web buttons
     .replace(/<details>[\s\S]*?<\/details>/g, '') // collapsed additional locations
-    .replace(/<sup>[\s\S]*?<\/sup>/g, '') // "Reviewed by Cursor Bugbot" footer
-    .replace(/<!--[\s\S]*?-->/g, '') // HTML comments (BUGBOT_BUG_ID, LOCATIONS, DESCRIPTION markers)
+    .replace(/<sup>[\s\S]*?<\/sup>/g, ''); // "Reviewed by Cursor Bugbot" footer
+  body = stripHtmlComments(body); // HTML comments (BUGBOT_BUG_ID, LOCATIONS markers)
+  return body
     .replace(/<\/?picture>|<source[^>]*>|<img[^>]*>/g, '') // image tags
     .replace(/<a[^>]*>[\s\S]*?<\/a>/g, '') // remaining anchor tags
     .replace(/\n{3,}/g, '\n\n') // collapse excessive blank lines
