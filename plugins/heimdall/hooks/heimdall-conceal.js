@@ -71,15 +71,18 @@ function toRegexes(patterns) {
 }
 
 function filePatterns(cfg) {
+  // ALWAYS derive from secretsFiles so the hook stays in sync with harden: a
+  // secrets file added later must be protected even though it isn't (yet) in
+  // denyFilePatterns. The explicit deny list is unioned on top, never instead.
+  const fromSecrets = toRegexes((cfg.secretsFiles || []).map((f) => esc(path.basename(f))));
   if (Array.isArray(cfg.denyFilePatterns) && cfg.denyFilePatterns.length) {
-    const res = toRegexes(cfg.denyFilePatterns);
+    const explicit = toRegexes(cfg.denyFilePatterns);
     // A configured deny list that compiles to NOTHING (every pattern invalid)
-    // must not silently allow reads — fail closed (the wrapper turns this into
-    // a block). A partially-valid list keeps its valid entries (see toRegexes).
-    if (res.length === 0) throw new Error('all denyFilePatterns are invalid regex');
-    return res;
+    // must not silently allow — fail closed (the wrapper turns this into a block).
+    if (explicit.length === 0) throw new Error('all denyFilePatterns are invalid regex');
+    return [...fromSecrets, ...explicit];
   }
-  return toRegexes((cfg.secretsFiles || []).map((f) => esc(path.basename(f))));
+  return fromSecrets;
 }
 
 // Patterns matched against Bash COMMANDS (file names + environ + password var).

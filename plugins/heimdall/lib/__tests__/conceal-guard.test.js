@@ -159,6 +159,32 @@ describe('malformed deny pattern does not fail open', () => {
   });
 });
 
+describe('secretsFiles stay protected alongside an explicit deny list', () => {
+  it('denies a secrets file not present in denyFilePatterns', () => {
+    const r = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-sync-'));
+    fs.mkdirSync(path.join(r, '.claude'), { recursive: true });
+    // secretsFiles names a credential the hook must protect even though only an
+    // unrelated folder is in denyFilePatterns (simulates a later-added secret).
+    fs.writeFileSync(
+      path.join(r, '.claude', 'heimdall-conceal.json'),
+      JSON.stringify({
+        secretsFiles: ['creds/new-secret.json'],
+        denyFilePatterns: ['(^|/)somefolder(/|$)'],
+        denyCommandPatterns: [],
+      })
+    );
+    const status = (p) =>
+      spawnSync('node', [HOOK], {
+        input: JSON.stringify(readPayload(p)),
+        env: { ...process.env, CLAUDE_PROJECT_DIR: r },
+        encoding: 'utf8',
+      }).status;
+    assert.equal(status(path.join(r, 'creds', 'new-secret.json')), 2);
+    assert.equal(status(path.join(r, 'somefolder', 'x')), 2);
+    fs.rmSync(r, { recursive: true, force: true });
+  });
+});
+
 describe('all-invalid deny list fails closed', () => {
   it('blocks (exit 2) when every denyFilePattern is invalid regex', () => {
     const r = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-allbad-'));
