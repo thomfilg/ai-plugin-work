@@ -4,19 +4,38 @@
  * Usage: node heimdall-conceal-status.js [repo-dir]
  */
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
-const { execFileSync } = require('child_process');
 
 const repo = path.resolve(process.argv[2] || process.env.CLAUDE_PROJECT_DIR || process.cwd());
 const abs = (p) => (path.isAbsolute(p) ? p : path.join(repo, p));
 
+// Resolve uid/gid → name from /etc/passwd /etc/group (plain file reads). We
+// deliberately avoid spawning `stat`/`id`: passing env/argv-derived paths to a
+// subprocess is what CodeQL flags (shell- and indirect-command-line-injection),
+// and fs.statSync already carries the numeric owner + mode.
+function buildIdMap(file, idCol, nameCol) {
+  const m = new Map();
+  try {
+    for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
+      const f = line.split(':');
+      if (f.length > idCol) m.set(Number(f[idCol]), f[nameCol]);
+    }
+  } catch {
+    /* best-effort: fall back to numeric ids */
+  }
+  return m;
+}
+const UID_NAMES = buildIdMap('/etc/passwd', 2, 0);
+const GID_NAMES = buildIdMap('/etc/group', 2, 0);
+const uname = (uid) => UID_NAMES.get(uid) || String(uid);
+const gname = (gid) => GID_NAMES.get(gid) || String(gid);
+
 function stat(p) {
   try {
     const s = fs.statSync(p);
-    // execFileSync (no shell) — p is config/repo-derived, so a shell string
-    // would be an injection vector (CodeQL js/shell-command-injection-from-environment).
-    const owner = execFileSync('stat', ['-c', '%U:%G %a', p]).toString().trim();
-    return `${owner}${s.isDirectory() ? ' (dir)' : ''}`;
+    const mode = (s.mode & 0o777).toString(8).padStart(3, '0');
+    return `${uname(s.uid)}:${gname(s.gid)} ${mode}${s.isDirectory() ? ' (dir)' : ''}`;
   } catch {
     return 'MISSING';
   }
@@ -35,22 +54,23 @@ function loadConfig(cfgPath) {
   }
 }
 
-function canAgentRead(agentUser, p) {
+// This script runs AS the agent uid, so a direct read check is the decisive
+// test of whether the agent can read the secrets — no `sudo` subprocess needed.
+function canAgentRead(p) {
   try {
-    // execFileSync (no shell): agentUser/p are environment-derived.
-    execFileSync('sudo', ['-n', '-u', agentUser, 'cat', p], { stdio: 'ignore' });
+    fs.accessSync(p, fs.constants.R_OK);
     return true;
   } catch {
     return false;
   }
 }
 
-function reportSecretsFiles(cfg, agentUser) {
+function reportSecretsFiles(cfg) {
   console.log('Secrets files:');
   let denied = 0;
   const files = cfg.secretsFiles || [];
   for (const f of files) {
-    const exposed = canAgentRead(agentUser, abs(f));
+    const exposed = canAgentRead(abs(f));
     if (!exposed) denied++;
     console.log(`  ${f}  [${stat(abs(f))}]  agent-read: ${exposed ? 'YES (exposed!)' : 'denied'}`);
   }
@@ -78,13 +98,15 @@ function main() {
     process.exit(0);
   }
 
-  const agentUser = execFileSync('stat', ['-c', '%U', repo]).toString().trim();
+  // The user running this audit IS the agent uid (that's whose read access we
+  // test below), so report it directly rather than shelling out.
+  const agentUser = os.userInfo().username;
   console.log(`Repo:        ${repo}`);
   console.log(`Agent uid:   ${agentUser}`);
   console.log(`Runner:      ${cfg.runnerUser || 'mcp-runner'}`);
   console.log('');
 
-  const { files, denied } = reportSecretsFiles(cfg, agentUser);
+  const { files, denied } = reportSecretsFiles(cfg);
   console.log('');
   console.log(`Wrapper:     ${cfg.wrapper}  [${stat(abs(cfg.wrapper))}]`);
   const broker = cfg.brokerPath || DEFAULT_BROKER;
