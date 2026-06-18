@@ -46,11 +46,22 @@ function stat(p) {
 const repoSlug = path.basename(repo).replace(/[^A-Za-z0-9._-]/g, '_');
 const DEFAULT_BROKER = `/usr/local/lib/mcp-broker/${repoSlug}/mcp-pg-broker`;
 
+// Distinguish absent (guard genuinely inactive) from present-but-broken. The
+// PreToolUse hook FAILS CLOSED on an unreadable/invalid config (blocks every
+// tool call), so the audit must not report "inactive" in those cases.
 function loadConfig(cfgPath) {
+  let raw;
   try {
-    return JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
-  } catch {
-    return null;
+    raw = fs.readFileSync(cfgPath, 'utf8');
+  } catch (err) {
+    return err.code === 'ENOENT'
+      ? { state: 'absent' }
+      : { state: 'unreadable', error: err.message };
+  }
+  try {
+    return { state: 'ok', cfg: JSON.parse(raw) };
+  } catch (err) {
+    return { state: 'invalid', error: err.message };
   }
 }
 
@@ -92,11 +103,19 @@ function reportMcpWiring(cfg) {
 
 function main() {
   const cfgPath = abs('.claude/heimdall-conceal.json');
-  const cfg = loadConfig(cfgPath);
-  if (!cfg) {
+  const loaded = loadConfig(cfgPath);
+  if (loaded.state === 'absent') {
     console.log(`heimdall: no config at ${cfgPath} → guard inactive for this project.`);
     process.exit(0);
   }
+  if (loaded.state !== 'ok') {
+    console.log(`heimdall: config at ${cfgPath} is present but ${loaded.state} (${loaded.error}).`);
+    console.log(
+      'STATUS: the PreToolUse conceal guard is FAILING CLOSED — it blocks all tool calls until this config is fixed.'
+    );
+    process.exit(1);
+  }
+  const cfg = loaded.cfg;
 
   // The user running this audit IS the agent uid (that's whose read access we
   // test below), so report it directly rather than shelling out.
