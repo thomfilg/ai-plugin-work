@@ -1,27 +1,12 @@
+/**
+ * CI phase dispatcher.
+ */
+
 'use strict';
 
-const handlers = Object.create(null);
+const { makePhaseRegistry } = require('../../lib/make-phase-registry');
 
-function registerPhase(name, handler) {
-  if (
-    !handler ||
-    typeof handler.validate !== 'function' ||
-    typeof handler.instructions !== 'function'
-  ) {
-    throw new Error(`Invalid phase handler for "${name}"`);
-  }
-  handlers[name] = handler;
-}
-
-function getPhase(name) {
-  const h = handlers[name];
-  if (!h) throw new Error(`No ci phase handler registered for "${name}"`);
-  return h;
-}
-
-function hasPhase(name) {
-  return Boolean(handlers[name]);
-}
+const { registerPhase, getPhase, hasPhase } = makePhaseRegistry('ci');
 
 require('./phases/inputs')(registerPhase);
 require('./phases/wait')(registerPhase);

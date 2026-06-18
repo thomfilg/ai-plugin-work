@@ -1,34 +1,12 @@
 /**
- * Reports phase dispatcher. Mirrors work-pr-reviewer/lib/phase-registry.js
- * but without a per-kind branch.
+ * Reports phase dispatcher.
  */
 
 'use strict';
 
-const handlers = Object.create(null);
+const { makePhaseRegistry } = require('../../lib/make-phase-registry');
 
-function registerPhase(phaseName, handler) {
-  if (
-    !handler ||
-    typeof handler.validate !== 'function' ||
-    typeof handler.instructions !== 'function'
-  ) {
-    throw new Error(
-      `Invalid phase handler for "${phaseName}" — must expose validate() and instructions()`
-    );
-  }
-  handlers[phaseName] = handler;
-}
-
-function getPhase(phaseName) {
-  const h = handlers[phaseName];
-  if (!h) throw new Error(`No reports phase handler registered for "${phaseName}"`);
-  return h;
-}
-
-function hasPhase(phaseName) {
-  return Boolean(handlers[phaseName]);
-}
+const { registerPhase, getPhase, hasPhase } = makePhaseRegistry('reports');
 
 require('./phases/inputs')(registerPhase);
 require('./phases/collect_artifacts')(registerPhase);

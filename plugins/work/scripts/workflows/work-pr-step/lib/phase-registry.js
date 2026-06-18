@@ -1,31 +1,12 @@
 /**
- * PR-step phase dispatcher. Mirrors work-spec/lib/phase-registry.js.
+ * PR-step phase dispatcher.
  */
 
 'use strict';
 
-const handlers = Object.create(null);
+const { makePhaseRegistry } = require('../../lib/make-phase-registry');
 
-function registerPhase(name, handler) {
-  if (
-    !handler ||
-    typeof handler.validate !== 'function' ||
-    typeof handler.instructions !== 'function'
-  ) {
-    throw new Error(`Invalid phase handler for "${name}"`);
-  }
-  handlers[name] = handler;
-}
-
-function getPhase(name) {
-  const h = handlers[name];
-  if (!h) throw new Error(`No pr-step phase handler registered for "${name}"`);
-  return h;
-}
-
-function hasPhase(name) {
-  return Boolean(handlers[name]);
-}
+const { registerPhase, getPhase, hasPhase } = makePhaseRegistry('pr-step');
 
 require('./phases/inputs')(registerPhase);
 require('./phases/diff_audit')(registerPhase);
