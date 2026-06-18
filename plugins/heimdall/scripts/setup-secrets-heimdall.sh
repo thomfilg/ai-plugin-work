@@ -164,7 +164,9 @@ for (const [name, s] of Object.entries(cfg.mcpServers || {})) {
   if (path.basename(s.args[0]) !== wrapperBase) continue; // only wrapper-launched servers
   const serverName = s.args[1];
   if (!allow.has(serverName)) continue;                   // only allow-listed (skips playwright etc.)
-  cfg.mcpServers[name] = { command: broker, args: [serverName], type: 'stdio' };
+  // Preserve any other fields (env, cwd, ...) the server/wrapper relies on;
+  // only the launch command/args/type are redirected through the broker.
+  cfg.mcpServers[name] = { ...s, command: broker, args: [serverName], type: 'stdio' };
   n++;
 }
 fs.writeFileSync(file, JSON.stringify(cfg, null, 2) + '\n');
