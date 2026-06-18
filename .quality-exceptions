@@ -106,9 +106,7 @@ plugins/work/scripts/workflows/lib/quality-check.js
 plugins/work/scripts/workflows/check/lib/app-access.js
 plugins/work/scripts/workflows/work/lib/work-enforcement-context.js
 plugins/work/scripts/workflows/check/agents/qa-feature-tester/qa-pretooluse-hooks.js
-plugins/work/scripts/workflows/check2/lib/step-enrichments/completion-context.js
 plugins/work/scripts/workflows/work-spec/lib/component-shape.js
-plugins/work/scripts/workflows/check2/check-next.js
 plugins/work/scripts/workflows/check/scripts/write-code-review.js
 plugins/work/scripts/workflows/work/hooks/enforce-screenshot-gate.js
 plugins/work/scripts/workflows/work/lib/step-enrichments/implement.js
@@ -124,7 +122,6 @@ plugins/work/scripts/workflows/work/lib/mark-task-progress.js
 plugins/work/scripts/workflows/lib/hooks/agent-hook-dispatcher.js
 plugins/work/scripts/workflows/work-spec/lib/kind-checks/e2e.js
 plugins/work/scripts/workflows/lib/allocate-output-folder.js
-plugins/work/scripts/workflows/check2/lib/steps/run-tests.js
 plugins/work/scripts/workflows/check/scripts/write-tests-report.js
 plugins/work/scripts/listen-all.js
 plugins/work/scripts/workflows/work/hooks/enforce-review-accountability.js
@@ -147,7 +144,6 @@ plugins/work/scripts/workflows/lib/hooks/inject-inbox-messages.js
 plugins/work/scripts/workflows/work-ci/lib/phases/wait.js
 plugins/work/scripts/workflows/work-brief/lib/phases/draft.js
 plugins/work/scripts/workflows/work-pr/agents/pr-generator/pr-generator-validator.js
-plugins/work/scripts/workflows/check2/lib/steps/phase1-agents.js
 plugins/work/scripts/workflows/work-spec/lib/phases/kind_checks.js
 plugins/work/scripts/workflows/check/scripts/write-completion-report.js
 plugins/work/scripts/workflows/work-ci/lib/phases/wait_merge.js
@@ -167,7 +163,6 @@ plugins/work/scripts/workflows/work/hooks/work-auto-advance.js
 plugins/work/scripts/workflows/lib/hooks/enforce-dev-commands.js
 plugins/work/scripts/workflows/work/lib/task-graph.js
 plugins/work/scripts/workflows/work-brief/lib/phases/inputs.js
-plugins/work/scripts/workflows/check2/hooks/check-auto-advance.js
 plugins/work/scripts/workflows/work-tasks/lib/phases/requirements_extract.js
 plugins/work/scripts/workflows/work/lib/debug-log.js
 plugins/work/scripts/workflows/work/agents/commit-writer/commit-writer-precommit-guard.js
@@ -179,7 +174,6 @@ plugins/work/scripts/workflows/work-brief/lib/phases/overlap.js
 plugins/work/scripts/workflows/work-ci/lib/phases/fix_or_document.js
 plugins/work/scripts/workflows/work/lib/work-helpers.js
 plugins/work/scripts/workflows/work-cleanup/lib/phases/inputs.js
-plugins/work/scripts/workflows/check2/lib/steps/phase2-consensus.js
 plugins/work/scripts/workflows/work-brief/lib/phases/validate.js
 plugins/work/scripts/workflows/work-reports/lib/phases/emit.js
 plugins/work/scripts/workflows/check/agents/qa-feature-tester/screenshot-size-validator.js
@@ -212,8 +206,6 @@ plugins/work/scripts/workflows/work-completion-checker/lib/phases/memorize.js
 plugins/work/scripts/workflows/work-qa-feature-tester/lib/kind-checks/shared.js
 plugins/work/scripts/workflows/work/lib/git-utils.js
 plugins/work/scripts/workflows/work-pr-reviewer/lib/kind-checks/e2e.js
-plugins/work/scripts/workflows/check2/lib/steps/run-e2e.js
-plugins/work/scripts/workflows/check2/lib/steps/run-integration.js
 plugins/work/scripts/workflows/work-task-review/lib/kind-checks/wiring.js
 plugins/work/scripts/workflows/work/scripts/gh-exec.js
 plugins/work/scripts/workflows/work/steps/task-advance.js
