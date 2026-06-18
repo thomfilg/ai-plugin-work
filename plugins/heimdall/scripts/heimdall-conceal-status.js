@@ -78,14 +78,19 @@ function canAgentRead(p) {
 
 function reportSecretsFiles(cfg) {
   console.log('Secrets files:');
-  let denied = 0;
+  let protectedCount = 0;
   const files = cfg.secretsFiles || [];
   for (const f of files) {
-    const exposed = canAgentRead(abs(f));
-    if (!exposed) denied++;
-    console.log(`  ${f}  [${stat(abs(f))}]  agent-read: ${exposed ? 'YES (exposed!)' : 'denied'}`);
+    const p = abs(f);
+    // A MISSING file also fails the read check, but it is not a locked
+    // credential — it must NOT count toward "boundary active".
+    const present = fs.existsSync(p);
+    const exposed = present && canAgentRead(p);
+    if (present && !exposed) protectedCount++;
+    const note = !present ? 'MISSING (not locked)' : exposed ? 'YES (exposed!)' : 'denied';
+    console.log(`  ${f}  [${stat(p)}]  agent-read: ${note}`);
   }
-  return { files, denied };
+  return { files, protectedCount };
 }
 
 function reportMcpWiring(cfg) {
@@ -125,7 +130,7 @@ function main() {
   console.log(`Runner:      ${cfg.runnerUser || 'mcp-runner'}`);
   console.log('');
 
-  const { files, denied } = reportSecretsFiles(cfg);
+  const { files, protectedCount } = reportSecretsFiles(cfg);
   console.log('');
   console.log(`Wrapper:     ${cfg.wrapper}  [${stat(abs(cfg.wrapper))}]`);
   const broker = cfg.brokerPath || DEFAULT_BROKER;
@@ -136,8 +141,8 @@ function main() {
   reportMcpWiring(cfg);
 
   console.log('');
-  if (files.length && denied === files.length) {
-    console.log('STATUS: boundary ACTIVE — agent uid is denied on all secrets files.');
+  if (files.length && protectedCount === files.length) {
+    console.log('STATUS: boundary ACTIVE — agent uid is denied on all (existing) secrets files.');
   } else {
     console.log('STATUS: boundary NOT fully active — run /heimdall:harden (sudo setup).');
   }
