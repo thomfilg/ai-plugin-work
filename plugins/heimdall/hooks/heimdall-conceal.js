@@ -43,11 +43,28 @@ function esc(s) {
 }
 
 // Patterns matched against TARGET PATHS of file tools.
+// Compile pattern strings to case-insensitive RegExps, skipping any malformed
+// one instead of throwing. A single bad user-supplied pattern must not crash
+// the guard (an uncaught throw would exit non-2 = fail OPEN); the remaining
+// valid patterns still enforce, and a wholesale-broken config is caught by the
+// fail-closed wrapper around main().
+function toRegexes(patterns) {
+  const out = [];
+  for (const p of patterns) {
+    try {
+      out.push(new RegExp(p, 'i'));
+    } catch {
+      /* skip malformed pattern */
+    }
+  }
+  return out;
+}
+
 function filePatterns(cfg) {
   if (Array.isArray(cfg.denyFilePatterns) && cfg.denyFilePatterns.length) {
-    return cfg.denyFilePatterns.map((p) => new RegExp(p, 'i'));
+    return toRegexes(cfg.denyFilePatterns);
   }
-  return (cfg.secretsFiles || []).map((f) => new RegExp(esc(path.basename(f)), 'i'));
+  return toRegexes((cfg.secretsFiles || []).map((f) => esc(path.basename(f))));
 }
 
 // Patterns matched against Bash COMMANDS (file names + environ + password var).
@@ -57,7 +74,7 @@ function cmdPatterns(cfg) {
     Array.isArray(cfg.denyCommandPatterns) && cfg.denyCommandPatterns.length
       ? cfg.denyCommandPatterns
       : ['/proc/[^/]+/environ', '\\bPGPASSWORD\\b'];
-  return [...base, ...extra].map((s) => new RegExp(s, 'i'));
+  return toRegexes([...base, ...extra]);
 }
 
 const FILE_TOOLS = new Set(['Read', 'Grep', 'Glob', 'Edit', 'Write', 'MultiEdit']);
@@ -128,4 +145,12 @@ function main() {
   process.exit(2);
 }
 
-main();
+// Fail CLOSED: main() exits 0 before any policy is confirmed, so an exception
+// escaping here means a config was active when something went wrong — block the
+// tool call (exit 2) rather than letting it through on a non-2 crash exit.
+try {
+  main();
+} catch (err) {
+  process.stderr.write(`heimdall-conceal hook error: ${err.message}. Blocking for safety.\n`);
+  process.exit(2);
+}

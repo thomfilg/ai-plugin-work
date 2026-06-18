@@ -104,6 +104,39 @@ describe('heimdall conceal guard', () => {
   });
 });
 
+describe('malformed deny pattern does not fail open', () => {
+  let badRepo;
+  before(() => {
+    badRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-badrx-'));
+    fs.mkdirSync(path.join(badRepo, '.claude'), { recursive: true });
+    // A malformed regex ("[") alongside a valid one: the bad pattern must be
+    // skipped (not crash the hook), and the valid pattern must still enforce.
+    fs.writeFileSync(
+      path.join(badRepo, '.claude', 'heimdall-conceal.json'),
+      JSON.stringify({
+        denyFilePatterns: ['[', '(^|/)secret-folder(/|$)'],
+        denyCommandPatterns: [],
+      })
+    );
+  });
+  after(() => fs.rmSync(badRepo, { recursive: true, force: true }));
+
+  const guardIn = (payload) =>
+    spawnSync('node', [HOOK], {
+      input: JSON.stringify(payload),
+      env: { ...process.env, CLAUDE_PROJECT_DIR: badRepo },
+      encoding: 'utf8',
+    }).status;
+
+  it('still denies the path covered by the valid pattern', () => {
+    assert.equal(guardIn(readPayload(path.join(badRepo, 'secret-folder', 'x'))), 2);
+  });
+
+  it('does not crash (allows unrelated) despite the malformed pattern', () => {
+    assert.equal(guardIn(readPayload(path.join(badRepo, 'other.txt'))), 0);
+  });
+});
+
 describe('conceal seeding preserves existing secrets coverage', () => {
   let secretsRepo;
   const guardIn = (dir, payload) =>
