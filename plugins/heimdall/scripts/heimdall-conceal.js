@@ -47,12 +47,23 @@ function buildPatterns(repo, resolved) {
   // Anchor on the repo-relative path when inside the repo, else the absolute path.
   const rel = path.relative(repo, resolved);
   const inRepo = rel && !rel.startsWith('..') && !path.isAbsolute(rel);
-  const relPosix = toPosix(rel);
-  const anchor = inRepo ? `(^|/)${esc(relPosix)}` : esc(toPosix(resolved));
-  // File tools match the exact target path: `(/|$)` covers the path itself and
-  // (for a folder) everything beneath it. Bash commands embed the path mid-line,
-  // so commands use a word boundary instead of `$`.
-  return { label: relPosix || resolved, filePat: `${anchor}(/|$)`, cmdPat: `${anchor}\\b` };
+  const body = inRepo ? esc(toPosix(rel)) : esc(toPosix(resolved));
+  // File tools see a resolved (usually absolute) target, so `(^|/)` is the right
+  // left boundary; `(/|$)` on the right covers the path itself and (for a folder)
+  // everything beneath it.
+  const fileAnchor = inRepo ? `(^|/)${body}` : body;
+  // Bash commands embed the path mid-line and often reference it as a BARE
+  // repo-relative token (e.g. `cat credentials/token.txt`), where the char
+  // before it is a space — not `/`. Use a boundary that is start-of-string or
+  // any non-path character (which includes `/`, whitespace, quotes, `=`), so
+  // both `cat credentials/x` and `cat /abs/credentials/x` match while
+  // `mycredentials/x` does not.
+  const cmdAnchor = inRepo ? `(^|[^\\w.-])${body}` : body;
+  return {
+    label: toPosix(rel) || resolved,
+    filePat: `${fileAnchor}(/|$)`,
+    cmdPat: `${cmdAnchor}\\b`,
+  };
 }
 
 function loadOrCreateConfig(cfgPath) {

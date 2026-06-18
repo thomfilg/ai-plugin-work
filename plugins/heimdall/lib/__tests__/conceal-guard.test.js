@@ -75,6 +75,10 @@ describe('heimdall conceal guard', () => {
     assert.equal(guard(bashPayload(`cat ${repo}/credentials/token.txt | jq .`)), 2);
   });
 
+  it('denies a Bash read referencing the path as a bare repo-relative token', () => {
+    assert.equal(guard(bashPayload('cat credentials/token.txt')), 2);
+  });
+
   it('allows reads of unrelated paths', () => {
     assert.equal(guard(readPayload(path.join(repo, 'README.md'))), 0);
   });
