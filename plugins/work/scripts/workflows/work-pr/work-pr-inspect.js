@@ -66,23 +66,28 @@ function collectScreenshotFiles(dir, base) {
 // Stream a file in 64KB chunks → sha256 hex; null if not a regular file,
 // oversized (>50MB), or unreadable.
 function hashFile(fullPath) {
+  let fd;
   try {
-    const stat = fs.statSync(fullPath);
-    if (!stat.isFile() || stat.size > 50 * 1024 * 1024) return null;
-    const fd = fs.openSync(fullPath, 'r');
-    try {
-      const fileHash = crypto.createHash('sha256');
-      const buf = Buffer.alloc(65536);
-      let bytesRead;
-      while ((bytesRead = fs.readSync(fd, buf, 0, buf.length)) > 0) {
-        fileHash.update(buf.subarray(0, bytesRead));
-      }
-      return fileHash.digest('hex');
-    } finally {
-      fs.closeSync(fd);
-    }
+    fd = fs.openSync(fullPath, 'r');
   } catch {
     return null;
+  }
+  try {
+    // fstat the open descriptor (not statSync on the path) so the size/type
+    // check and the read operate on the same file — no check-then-use race.
+    const stat = fs.fstatSync(fd);
+    if (!stat.isFile() || stat.size > 50 * 1024 * 1024) return null;
+    const fileHash = crypto.createHash('sha256');
+    const buf = Buffer.alloc(65536);
+    let bytesRead;
+    while ((bytesRead = fs.readSync(fd, buf, 0, buf.length)) > 0) {
+      fileHash.update(buf.subarray(0, bytesRead));
+    }
+    return fileHash.digest('hex');
+  } catch {
+    return null;
+  } finally {
+    fs.closeSync(fd);
   }
 }
 
