@@ -25,6 +25,8 @@ const heartbeat = require('./lib/maestro-conduct/heartbeat');
 const skillRegistry = require('./lib/maestro-conduct/skill-registry');
 
 const ciGate = require('./lib/maestro-conduct/ci-gate-rotation');
+const manifest = require('./lib/maestro-conduct/manifest');
+const stopCondition = require('./lib/maestro-conduct/stop-condition');
 const waitMute = require('./lib/maestro-conduct/wait-mute');
 const prStatusPayload = require('./lib/maestro-conduct/pr-status-payload');
 const prCommentsHandler = require('./lib/maestro-conduct/pr-comments-handler');
@@ -301,6 +303,12 @@ function tickSession(session) {
   alerts.resetCount(
     alerts.alertKey({ session: ctx.session, kind: 'question-pending', phase: ctx.phase })
   );
+
+  // Stop-condition runs before the detectors: a ticket whose oracle reports
+  // done must be reaped (kill + rotate to the next queued ticket) BEFORE the
+  // silence detector tries to auto-restart the now-idle agent. No-op for
+  // tickets without a compiled oracle.
+  if (stopCondition.maybeStopOnOracle({ ctx, actions, manifest, restartEligible })) return;
 
   const detectorsToRun = phaseFor(ctx.phase).detectors.filter((k) => k !== 'question');
 

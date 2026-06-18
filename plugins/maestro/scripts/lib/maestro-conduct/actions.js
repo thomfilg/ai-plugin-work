@@ -100,7 +100,9 @@ function declareWedged({ session, ticket, restarts, now, silenceSec }) {
   const wedgedUntil = now + WEDGED_QUIET_MIN * 60;
   const count = restarts.length + 1;
   state.write(session, 'restart-loop', { restarts: [...restarts, now], wedgedUntil });
-  const skill = skillRegistry.readTicketSkill(ticket);
+  const skill = skillRegistry.readTicketSkill(ticket, {
+    hasOracle: !!manifest.stopOracleForTask(ticket),
+  });
   alerts.log(
     `${formatLogLine({ ticket, skill, silenceSec, kind: 'wedged' })} ${session} WEDGED — ${count} auto-restarts in ${RESTART_WINDOW_MIN}m; suppressing restarts for ${WEDGED_QUIET_MIN}m`
   );
@@ -173,14 +175,18 @@ function checkRestartGuards({ session, ticket, worktree }) {
 // writes that happened after module load. Falls open to 'work'; on whitelist
 // reject we log the rejected raw value so operators can spot tampering.
 function resolveSkillForRestart(ticket, session) {
-  const skill = skillRegistry.readTicketSkill(ticket);
+  // An oracle-backed ticket may legitimately run a non-whitelisted command —
+  // pass the oracle existence so readTicketSkill honors it instead of falling
+  // open to /work (GH-514 generic-row decision).
+  const hasOracle = !!manifest.stopOracleForTask(ticket);
+  const skill = skillRegistry.readTicketSkill(ticket, { hasOracle });
   let raw = null;
   try {
     raw = fs.readFileSync(skillRegistry.ticketSkillFile(ticket), 'utf8').trim();
   } catch {
     /* missing → default, no warning */
   }
-  if (raw && !skillRegistry.isKnownSkill(raw)) {
+  if (raw && !skillRegistry.isAllowedSkill(raw, { hasOracle })) {
     alerts.log(
       `${session} AUTO-RESTART .maestro-skill value ${JSON.stringify(raw)} rejected by whitelist — falling open to /work for ${ticket}`
     );
@@ -351,6 +357,47 @@ function freeDeadEndSlot({ session, ticket, kind, repeatCount, sha }) {
 }
 
 /**
+ * freeStopConditionSlot — the ticket's stop-condition oracle returned exit 0,
+ * so the agent has SUCCEEDED. Same kill+rotate mechanics as freeDeadEndSlot,
+ * but the manifest status is `done` (not `blocked`) and the alert kind is
+ * `stop-condition-met` (a positive signal). Idempotent per ticket via the
+ * `stop-condition` marker. No-op when AUTO_FREE_STOP_CONDITION=0.
+ */
+function freeStopConditionSlot({ session, ticket, oracle }) {
+  if (process.env.AUTO_FREE_STOP_CONDITION === '0') return false;
+  const marker = state.read(ticket, 'stop-condition') || {};
+  if (marker.killed) return false; // already freed this lifecycle
+  killTicketTmux(ticket);
+  try {
+    purgeAlertCountsForTicket(ticket, false);
+  } catch (err) {
+    alerts.log(`${session} freeStopConditionSlot: purgeAlertCountsForTicket failed: ${err.message}`);
+  }
+  state.write(ticket, 'stop-condition', { killed: true, freedAt: state.now() });
+  manifest.updateTaskStatus(ticket, 'done', 'stop-condition oracle exited 0');
+  const next = findNextEligibleTask();
+  const autoBootstrapped = next && maybeAutoBootstrap(next.taskId);
+  const prefix = `STOP-CONDITION met on ${ticket} (oracle exit 0) — agent done. `;
+  const instruction = buildNextActionInstruction({ prefix, suffix: '', next, autoBootstrapped });
+  alerts.log(
+    `${session} STOP-CONDITION-MET — tmux killed, slot freed${
+      autoBootstrapped ? `; AUTO-BOOTSTRAPPED ${next.taskId}` : ''
+    }`
+  );
+  alert({
+    session,
+    ticket,
+    kind: 'stop-condition-met',
+    oracle,
+    nextTask: next ? next.taskId : null,
+    nextTopic: next ? next.topic : null,
+    autoBootstrapped: !!autoBootstrapped,
+    instruction,
+  });
+  return true;
+}
+
+/**
  * maybeFillPool — when the pool has free slots (active < sum-of-slots) and
  * AUTO_BOOTSTRAP_NEXT=1, find the next eligible pending task and bootstrap.
  * Idempotent per tick: one bootstrap per call. Caller invokes once per tick
@@ -392,6 +439,7 @@ module.exports = {
   autoRestart,
   freeCIGateSlot,
   freeDeadEndSlot,
+  freeStopConditionSlot,
   syncManifest: manifest.syncFromTmux,
   maybeFillPool,
 };

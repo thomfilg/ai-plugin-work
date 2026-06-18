@@ -51,7 +51,7 @@ function sessionPath(topic) {
   return path.join(getSessionDir(), `${topic}.json`);
 }
 
-function init(topic, slots, tasks) {
+function init(topic, slots, tasks, opts = {}) {
   if (!topic || !/^[A-Za-z0-9_.-]+$/.test(topic)) throw new Error(`bad topic: ${topic}`);
   if (!(slots > 0)) throw new Error(`slots must be > 0`);
   if (!tasks.length) throw new Error(`at least one task required`);
@@ -66,6 +66,14 @@ function init(topic, slots, tasks) {
   const session = {
     topic,
     slots,
+    // Per-run launch config. `command` is the skill the bootstrap/auto-restart
+    // path launches (default 'work'); `stopOracle` is the compiled, shell-
+    // executable predicate the conductor evaluates each tick to decide when a
+    // ticket is done. Persisted here (not just env) so a daemon restart can't
+    // silently revert to /work with no stop condition.
+    command: opts.command || 'work',
+    stopOracle: opts.stopOracle || null,
+    stopSource: opts.stopSource || null,
     createdAt: new Date().toISOString(),
     tasks: tasks.map((t) => ({
       id: t.id,
@@ -159,7 +167,17 @@ if (require.main === module) {
   try {
     switch (cmd) {
       case 'init': {
-        const [topic, slotsStr, ...taskSpecs] = args;
+        // Separate `--flag=value` launch config from positional task specs so
+        // the command/oracle can carry shell metacharacters without clashing
+        // with the `id:prio:deps` grammar.
+        const opts = {};
+        const positional = [];
+        for (const a of args) {
+          const m = a.match(/^--([a-z][a-z-]*)=([\s\S]*)$/);
+          if (m) opts[m[1]] = m[2];
+          else positional.push(a);
+        }
+        const [topic, slotsStr, ...taskSpecs] = positional;
         const slots = parseInt(slotsStr, 10);
         const tasks = taskSpecs.map((spec) => {
           const [id, prio, deps] = spec.split(':');
@@ -169,7 +187,17 @@ if (require.main === module) {
             deps: deps ? deps.split(',').filter(Boolean) : [],
           };
         });
-        console.log(JSON.stringify(init(topic, slots, tasks), null, 2));
+        console.log(
+          JSON.stringify(
+            init(topic, slots, tasks, {
+              command: opts.command,
+              stopOracle: opts['stop-oracle'],
+              stopSource: opts['stop-source'],
+            }),
+            null,
+            2
+          )
+        );
         break;
       }
       case 'show':

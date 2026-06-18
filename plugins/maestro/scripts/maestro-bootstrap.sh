@@ -57,11 +57,19 @@ SKILL_NAME="${SKILL_NAME:-work}"
 #    Parses --skill=<name> out of the positional args before the ticket loop,
 #    leaving "$@" containing only ticket IDs.
 SKILL_FLAG=""
+# --allow-generic relaxes the whitelist: any regex-valid skill name is accepted
+# (used for an operator command backed by a stop-condition oracle, where the
+# oracle — not a bespoke registry row — defines "done"). Mirrors the JS
+# skill-registry.isAllowedSkill(name, {hasOracle:true}) decision (GH-514).
+ALLOW_GENERIC=0
 _FILTERED_ARGS=()
 for _arg in "$@"; do
   case "$_arg" in
     --skill=*)
       SKILL_FLAG="${_arg#--skill=}"
+      ;;
+    --allow-generic)
+      ALLOW_GENERIC=1
       ;;
     *)
       _FILTERED_ARGS+=("$_arg")
@@ -76,12 +84,25 @@ set -- "${_FILTERED_ARGS[@]+"${_FILTERED_ARGS[@]}"}"
 # tmux while the conductor reads .maestro-skill, fails the same whitelist, and
 # falls open to /work. That split state is the bug PR #561 review flagged.
 _KNOWN_SKILLS=("work" "follow-up")
+# Mirrors SKILL_NAME_REGEX in skill-registry.js.
+_SKILL_NAME_RE='^[a-z][a-z0-9-]{0,31}$'
 
 is_known_skill() {
   local cand="$1"
   for s in "${_KNOWN_SKILLS[@]}"; do
     [ "$s" = "$cand" ] && return 0
   done
+  return 1
+}
+
+# Allowed = whitelisted, OR (generic mode on AND regex-valid). The generic path
+# is what lets an oracle-backed `command=/qc-work` launch on the first try.
+is_allowed_skill() {
+  local cand="$1"
+  is_known_skill "$cand" && return 0
+  if [ "$ALLOW_GENERIC" = "1" ] && [[ "$cand" =~ $_SKILL_NAME_RE ]]; then
+    return 0
+  fi
   return 1
 }
 
@@ -98,10 +119,10 @@ resolve_skill() {
   else
     candidate="work"
   fi
-  if is_known_skill "$candidate"; then
+  if is_allowed_skill "$candidate"; then
     echo "$candidate"
   else
-    echo "[maestro] WARNING: unknown skill '$candidate' (not in registry) — falling open to 'work'" >&2
+    echo "[maestro] WARNING: unknown skill '$candidate' (not in registry, no --allow-generic) — falling open to 'work'" >&2
     echo "work"
   fi
 }
@@ -218,7 +239,7 @@ for TICKET in "$@"; do
     echo "[$TICKET] .maestro-skill = $TICKET_SKILL (written)"
   else
     EXISTING_SKILL="$(head -n1 "$TICKET_DIR/.maestro-skill" | tr -d '[:space:]')"
-    if is_known_skill "$EXISTING_SKILL"; then
+    if is_allowed_skill "$EXISTING_SKILL"; then
       TICKET_SKILL="$EXISTING_SKILL"
       echo "[$TICKET] .maestro-skill = $EXISTING_SKILL (preserved — no explicit skill on this invocation)"
     else
