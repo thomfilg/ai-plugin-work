@@ -27,6 +27,7 @@ const { execSync } = require('child_process');
 
 const config = require(path.join(__dirname, '..', 'lib', 'config'));
 const { normalizeTicketId } = require(path.join(__dirname, '..', 'lib', 'ticket-provider'));
+const { normalizeTicketArg } = require(path.join(__dirname, '..', 'lib', 'ticket-args'));
 const { discoverApps } = require(path.join(__dirname, 'lib', 'app-access'));
 const TASKS_BASE = config.TASKS_BASE;
 const REPO_DIR = config.repoDir();
@@ -316,18 +317,12 @@ module.exports = {
    */
   params(args) {
     const raw = args.trim();
-    let ticketId = raw;
-
-    if (!ticketId) {
-      // Use branch name as fallback
-      ticketId = safeExec('git branch --show-current') || 'unknown';
-    } else if (/^\d+$/.test(ticketId)) {
-      ticketId = `${process.env.TICKET_PROJECT_KEY || process.env.JIRA_PROJECT_KEY || 'PROJ'}-${ticketId}`;
+    if (!raw) {
+      // Use branch name as fallback (not project-key prefixed)
+      const ticketId = normalizeTicketId(safeExec('git branch --show-current') || 'unknown');
+      return { instanceId: ticketId, ticketId };
     }
-
-    // Uppercase only the ticket base, preserve suffix case (GH-146)
-    ticketId = normalizeTicketId(ticketId);
-
+    const ticketId = normalizeTicketArg(raw);
     return { instanceId: ticketId, ticketId };
   },
 
