@@ -137,6 +137,21 @@ describe('malformed deny pattern does not fail open', () => {
   });
 });
 
+describe('guard fails closed on a present-but-invalid config', () => {
+  it('blocks (exit 2) instead of no-opping when the config is invalid JSON', () => {
+    const r = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-badcfg-'));
+    fs.mkdirSync(path.join(r, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(r, '.claude', 'heimdall-conceal.json'), '{ broken json');
+    const res = spawnSync('node', [HOOK], {
+      input: JSON.stringify(readPayload(path.join(r, 'anything.txt'))),
+      env: { ...process.env, CLAUDE_PROJECT_DIR: r },
+      encoding: 'utf8',
+    });
+    assert.equal(res.status, 2);
+    fs.rmSync(r, { recursive: true, force: true });
+  });
+});
+
 describe('conceal refuses to overwrite a corrupt config', () => {
   it('exits non-zero and leaves the invalid file untouched', () => {
     const r = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-corrupt-'));

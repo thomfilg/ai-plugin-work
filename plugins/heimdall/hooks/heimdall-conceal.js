@@ -27,12 +27,22 @@ function loadConfig(root) {
     path.join(root, '.claude', 'heimdall-conceal.json'),
     path.join(root, '.heimdall-conceal.json'),
   ]) {
+    let raw;
     try {
-      const cfg = JSON.parse(fs.readFileSync(f, 'utf8'));
+      raw = fs.readFileSync(f, 'utf8');
+    } catch (err) {
+      if (err.code === 'ENOENT') continue; // this candidate absent → try next
+      // A config file IS present but unreadable: do NOT silently no-op (that
+      // would allow reads despite a policy). Throw → fail closed via main()'s wrapper.
+      throw new Error(`cannot read ${f}: ${err.message}`);
+    }
+    try {
+      const cfg = JSON.parse(raw);
       cfg.__root = root;
       return cfg;
-    } catch {
-      /* try next */
+    } catch (err) {
+      // Present but invalid JSON: fail closed rather than disable the guard.
+      throw new Error(`${f} is not valid JSON: ${err.message}`);
     }
   }
   return null;
