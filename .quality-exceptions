@@ -68,7 +68,6 @@ plugins/work/scripts/workflows/check/hooks/check-start-env.js
 plugins/work/scripts/workflows/work/engine/transition-step.js
 plugins/work/scripts/workflows/work/hooks/work-suggestion-replies.js
 plugins/work/scripts/workflows/check/hooks/check-validate-reports.js
-plugins/work/scripts/workflows/follow-up/lib/steps/monitor.js
 plugins/work/scripts/workflows/lib/hooks/enforce-ui-imports.js
 plugins/work/scripts/workflows/work-spec/lib/phases/surface_audit.js
 plugins/work/scripts/workflows/work/agents/commit-writer/commit-writer-block-write.js
@@ -81,7 +80,6 @@ plugins/work/scripts/workflows/work/work-state/parallel-workers.js
 plugins/work/scripts/workflows/work/gates/check-gate.js
 plugins/work/scripts/workflows/lib/config.js
 plugins/work/scripts/workflows/work/lib/parse-gherkin.js
-plugins/work/scripts/workflows/follow-up/follow-up-next.js
 plugins/work/scripts/workflows/work-spec/lib/phases/reuse_audit.js
 plugins/work/scripts/workflows/work/engine/unstick-complete.js
 plugins/work/scripts/workflows/work/lib/gherkin-task-refs.js
@@ -91,7 +89,6 @@ plugins/work/scripts/workflows/work/engine/cli.js
 plugins/work/scripts/workflows/work/lib/work-actions.js
 plugins/work/scripts/workflows/lib/agent-detection.js
 plugins/work/scripts/workflows/lib/hooks/enforce-screenshot-requirement.js
-plugins/work/scripts/workflows/follow-up/lib/steps/fix-ci.js
 plugins/work/scripts/workflows/work/hooks/protect-task-scope.js
 plugins/work/scripts/workflows/check/hooks/enforce-env-start-failure.js
 plugins/work/scripts/workflows/work/steps/implement.js
@@ -102,7 +99,6 @@ plugins/work/scripts/workflows/check/hooks/check-generate-summary.js
 plugins/work/scripts/workflows/lib/request-index.js
 plugins/work/scripts/workflows/lib/hooks/policies/task-description-quality.js
 plugins/work/scripts/workflows/work/engine/inspect.js
-plugins/work/scripts/workflows/follow-up/lib/steps/fix-reviews.js
 plugins/work/scripts/workflows/work-pr/agents/pr-post-generator/pr-post-generator-validator.js
 plugins/work/scripts/workflows/work/work-state/task-readiness.js
 plugins/work/scripts/workflows/work/work-state/graph-validation.js
@@ -154,7 +150,6 @@ plugins/work/scripts/workflows/work-pr/agents/pr-generator/pr-generator-validato
 plugins/work/scripts/workflows/check2/lib/steps/phase1-agents.js
 plugins/work/scripts/workflows/work-spec/lib/phases/kind_checks.js
 plugins/work/scripts/workflows/check/scripts/write-completion-report.js
-plugins/work/scripts/workflows/follow-up/lib/steps/triage.js
 plugins/work/scripts/workflows/work-ci/lib/phases/wait_merge.js
 plugins/work/scripts/workflows/work-completion-checker/lib/phases/kind_checks.js
 plugins/work/scripts/workflows/work-task-review/lib/phases/kind_checks.js
@@ -174,7 +169,6 @@ plugins/work/scripts/workflows/work/lib/task-graph.js
 plugins/work/scripts/workflows/work-brief/lib/phases/inputs.js
 plugins/work/scripts/workflows/check2/hooks/check-auto-advance.js
 plugins/work/scripts/workflows/work-tasks/lib/phases/requirements_extract.js
-plugins/work/scripts/workflows/follow-up/hooks/follow-up-auto-advance.js
 plugins/work/scripts/workflows/work/lib/debug-log.js
 plugins/work/scripts/workflows/work/agents/commit-writer/commit-writer-precommit-guard.js
 plugins/work/scripts/workflows/work-task-review/lib/phases/reuse_check.js
@@ -204,7 +198,6 @@ plugins/work/scripts/workflows/work/agents/developer-quality-gate.js
 plugins/work/scripts/workflows/work-code-checker/lib/kind-checks/devops.js
 plugins/work/scripts/workflows/work-task-review/lib/kind-checks/shared.js
 plugins/work/scripts/workflows/work-task-review/lib/phases/report.js
-plugins/work/scripts/workflows/follow-up/lib/steps/push-retry.js
 plugins/work/scripts/workflows/lib/hooks/policies/step-gate.js
 plugins/work/scripts/workflows/lib/scripts/get-ticket-id.js
 plugins/work/scripts/workflows/work-tasks/lib/phases/memorize.js
@@ -221,7 +214,6 @@ plugins/work/scripts/workflows/work/lib/git-utils.js
 plugins/work/scripts/workflows/work-pr-reviewer/lib/kind-checks/e2e.js
 plugins/work/scripts/workflows/check2/lib/steps/run-e2e.js
 plugins/work/scripts/workflows/check2/lib/steps/run-integration.js
-plugins/work/scripts/workflows/follow-up/lib/steps/report.js
 plugins/work/scripts/workflows/work-task-review/lib/kind-checks/wiring.js
 plugins/work/scripts/workflows/work/scripts/gh-exec.js
 plugins/work/scripts/workflows/work/steps/task-advance.js

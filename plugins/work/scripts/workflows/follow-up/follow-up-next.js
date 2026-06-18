@@ -29,40 +29,14 @@ const { detectDefaultBranch, loadPrDiffFiles } = require('./lib/repo-meta');
 const { buildClassifierCtx } = require('./lib/classifier-ctx');
 
 if (require.main === module) {
-  process.on('uncaughtException', (err) => {
-    console.error(
-      JSON.stringify({
-        type: 'follow_up_instruction',
-        action: 'blocked',
-        reason: `Uncaught exception: ${err.message}`,
-        stack: err.stack,
-      })
-    );
-    process.exit(1);
-  });
-  process.on('unhandledRejection', (err) => {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(
-      JSON.stringify({
-        type: 'follow_up_instruction',
-        action: 'blocked',
-        reason: `Unhandled rejection: ${msg}`,
-      })
-    );
-    process.exit(1);
-  });
+  require('../lib/instruction-guards').installInstructionGuards('follow_up_instruction');
 }
 
 // ─── Resolve paths ──────────────────────────────────────────────────────────
-const { resolvePluginPaths } = require(
-  path.join(__dirname, '..', 'work', 'lib', 'resolve-plugin-root')
+const { resolvePluginConfig } = require('../lib/plugin-config');
+const { libDir, WORKTREES_BASE, TASKS_BASE } = resolvePluginConfig(
+  path.join(__dirname, '..', 'work')
 );
-const { libDir } = resolvePluginPaths(path.join(__dirname, '..', 'work'), 2);
-const getConfig = require(path.join(libDir, 'get-config'));
-
-const WORKTREES_BASE = getConfig('WORKTREES_BASE') || '';
-const TASKS_BASE =
-  getConfig('TASKS_BASE') || (WORKTREES_BASE ? path.join(WORKTREES_BASE, 'tasks') : '');
 const MAIN_WORKTREE_FOLDER = process.env.REPO_NAME || 'my-project';
 
 if (!TASKS_BASE) {
@@ -99,78 +73,168 @@ const { isInfraFailure, isStale } = require(path.join(__dirname, 'lib', 'infra-p
 
 // ─── State management ───────────────────────────────────────────────────────
 
-function stateFile(ticketId) {
-  return path.join(TASKS_BASE, ticketId, '.follow-up-state.json');
-}
-
-function loadState(ticketId) {
-  try {
-    return JSON.parse(fs.readFileSync(stateFile(ticketId), 'utf8'));
-  } catch {
-    return null;
-  }
-}
-
-function saveState(ticketId, state) {
-  const dir = path.join(TASKS_BASE, ticketId);
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(stateFile(ticketId), JSON.stringify(state, null, 2));
-}
-
-function initState(ticketId, prNumber) {
-  return {
-    ticketId,
-    prNumber: prNumber || null,
-    currentStep: STEPS[0],
-    status: 'in_progress',
-    dispatched: null,
-    attempt: 0,
-    maxAttempts: 40,
-    // monitor cache (see infra-patterns.js for invalidation rules)
-    // GH-531 Task 6 (AC10): explicitly reset the push-retry counter so the
-    // cap-exhausted recovery path can't immediately re-trigger after
-    // `reset-follow-up`. Was previously `undefined` (incremented to 1 on
-    // first push-retry), which matches the same observable behavior; the
-    // explicit `0` makes the recovery guarantee inspectable by operators.
-    _pushRetryCount: 0,
-    lastMonitorResult: null,
-    lastMonitorAt: null,
-    failureCategory: null,
-    // Infra-retry telemetry (GH-508 Task 4). `count` tracks how many
-    // infra-retry attempts have been performed for the current PR; `attempts`
-    // records per-attempt diagnostics for the report step (Task 6).
-    infraRetry: { count: 0, attempts: [] },
-    startTime: new Date().toISOString(),
-  };
-}
-
-/**
- * Build a fresh /follow-up state object for `ticketId`, persist it to the
- * canonical state-file path (`TASKS_BASE/<ticket>/.follow-up-state.json`),
- * and return the new state.
- *
- * Idempotent: calling twice overwrites the on-disk state with a fresh one.
- * Used both by the existing init code path in this module and by the
- * `/reset-follow-up` command (Task 2) to re-initialize after push-retry
- * exhaustion (GH-531).
- *
- * @param {string} ticketId — sanitized ticket id (e.g. `GH-999`).
- * @param {object} [opts] — optional overrides.
- * @param {number|null} [opts.prNumber] — preserve an existing PR number across reset.
- * @returns {object} the freshly-initialized state object.
- */
-function initFreshState(ticketId, opts) {
-  const prNumber = opts && opts.prNumber != null ? opts.prNumber : null;
-  const state = initState(ticketId, prNumber);
-  saveState(ticketId, state);
-  return state;
-}
+const { loadState, saveState, initState, initFreshState } =
+  require('./lib/follow-up-state')(TASKS_BASE);
 
 // ─── Core orchestrator loop ─────────────────────────────────────────────────
 
-function getNextInstruction(ticketId, prNumber) {
-  let state = loadState(ticketId) || initState(ticketId, prNumber);
+// Re-verify a saved "complete"/invalid-step state against live GitHub before
+// honoring it. The saved state is a cache of a prior run's decision; if
+// anything changed (new pushes, checks now running, merge state now blocked)
+// we must NOT silently return "Already complete" — that's how PR #1929 cleared
+// its session guard with 9 in-progress checks and 2 unpushed commits.
+//
+// Returns { loop: true } to rewind+continue, or { result } to return.
+function reconcileSavedComplete(state, ticketId) {
+  if (state.prNumber) {
+    let actionable = false;
+    let realBlockers = [];
+    try {
+      const { assessMergeable, hasActionableBlockers } = require(
+        path.join(__dirname, '..', 'work', 'lib', 'pr-mergeable.js')
+      );
+      // hasActionableBlockers centralises the two guards (filter out gh_error
+      // transients, require prState=OPEN) shared with ci-gate.js.
+      const action = hasActionableBlockers(assessMergeable(state.prNumber));
+      actionable = action.actionable;
+      realBlockers = action.realBlockers;
+    } catch {
+      actionable = false;
+    }
+    if (actionable) {
+      const blockerSummary = realBlockers.map((b) => b.kind).join(', ');
+      process.stderr.write(
+        `[follow-up-next] saved state said complete but PR #${state.prNumber} is not mergeable (${blockerSummary}); rewinding and resuming.\n`
+      );
+      state.status = 'in_progress';
+      // Always rewind to 'monitor' (the live CI-rollup read). Hardcoded rather
+      // than STEPS[0] so a future reorder of the step registry can't silently
+      // rewind to whatever happens to be first.
+      state.currentStep = 'monitor';
+      state.dispatched = null;
+      saveState(ticketId, state);
+      return { loop: true };
+    }
+  }
+  saveState(ticketId, state);
+  return {
+    result: { type: 'follow_up_instruction', action: 'complete', summary: 'Already complete.' },
+  };
+}
+
+// Auto-clear stale infra-failure cache before ANY step runs (GH-536 #551
+// round-2 fix). The monitor step's own clearStaleInfraCache only fires when the
+// workflow re-enters monitor — but triage blocks on exitCode 2 without
+// advancing, so subsequent runs only re-execute triage and the cache is never
+// invalidated. Lifting the check here ensures downstream steps (triage, fix-ci,
+// report) also benefit and route the flow back to monitor for a fresh run.
+// Returns true when it rewound to monitor (caller should `continue`).
+function maybeClearStaleInfra(state, ticketId) {
+  const cached = state.lastMonitorResult;
+  if (cached && isInfraFailure(cached.output || '') && isStale(state.lastMonitorAt)) {
+    delete state.lastMonitorResult;
+    delete state.lastMonitorAt;
+    // Rewind to 'monitor' explicitly — see rationale above.
+    state.currentStep = 'monitor';
+    state.dispatched = null;
+    saveState(ticketId, state);
+    return true;
+  }
+  return false;
+}
+
+// action:'surface' is terminal (spec API/Interface Changes — GH-508). Mutate
+// state to route to report and attach a diagnostic summary, but do NOT mark
+// status='complete' so the next /follow-up invocation resumes from a live
+// re-evaluation rather than the cache.
+// The reason may live on the top-level result (legacy shape) or under
+// result.payload.reason (newer shape).
+function surfaceReasonOf(result) {
+  return (result.payload && result.payload.reason) || result.reason || null;
+}
+
+function summaryOf(reportResult) {
+  if (!reportResult) return null;
+  return reportResult.summary || (reportResult.payload && reportResult.payload.summary) || null;
+}
+
+function applySurface(result, state, ctx) {
+  state.currentStep = 'report';
+  // Persist the surface reason as a failureCategory so the next /follow-up
+  // cycle's report step recognises the workflow is still stuck and does NOT
+  // mark status=complete.
+  const reason = surfaceReasonOf(result);
+  if (reason) state.failureCategory = reason;
+
+  // Bug 542-10: build the diagnostic summary BEFORE returning so the
+  // auto-advance hook (which treats `surface` as terminal) shows the
+  // per-attempt GitHub Actions URLs without requiring a second invocation.
+  try {
+    const summary = summaryOf(runStep('report', state, ctx));
+    if (summary) result.payload = Object.assign({}, result.payload || {}, { summary });
+  } catch (_e) {
+    /* fail open — surface still terminal; user can re-run /follow-up */
+  }
+}
+
+// A step returned null → advance. Returns { loop: true } when the step set its
+// own currentStep (looping), or { result } on workflow completion, or
+// { loop: true } after advancing to the next step.
+function advanceStep(state, ticketId, stepIdx) {
+  // Step changed currentStep (e.g., triage → fix-ci, or push-retry → monitor)
+  if (state.currentStep !== STEPS[stepIdx]) {
+    state.dispatched = null;
+    saveState(ticketId, state);
+    return { loop: true };
+  }
+
+  const nextIdx = stepIdx + 1;
+  if (nextIdx >= STEPS.length) {
+    state.status = 'complete';
+    saveState(ticketId, state);
+    return {
+      result: {
+        type: 'follow_up_instruction',
+        action: 'complete',
+        summary: `Follow-up complete for ${ticketId}.`,
+      },
+    };
+  }
+
+  state.currentStep = STEPS[nextIdx];
+  state.dispatched = null;
+  saveState(ticketId, state);
+  return { loop: true };
+}
+
+function loadOrInitState(ticketId, prNumber) {
+  const state = loadState(ticketId) || initState(ticketId, prNumber);
   if (prNumber && !state.prNumber) state.prNumber = prNumber;
+  return state;
+}
+
+function isTerminalState(state) {
+  return state.status === 'complete' || !STEPS.includes(state.currentStep);
+}
+
+// Run a single orchestrator iteration. Returns { loop: true } to continue the
+// loop, or { result } to return that instruction to the caller.
+function stepOnce(state, ticketId, ctx) {
+  if (isTerminalState(state)) return reconcileSavedComplete(state, ticketId);
+  if (maybeClearStaleInfra(state, ticketId)) return { loop: true };
+
+  const stepIdx = STEPS.indexOf(state.currentStep);
+  const result = runStep(state.currentStep, state, ctx);
+  if (result) {
+    if (result.action === 'surface') applySurface(result, state, ctx);
+    saveState(ticketId, state);
+    return { result };
+  }
+  return advanceStep(state, ticketId, stepIdx);
+}
+
+function getNextInstruction(ticketId, prNumber) {
+  const state = loadOrInitState(ticketId, prNumber);
 
   const tasksDir = path.join(TASKS_BASE, ticketId);
   const candidateWorktree = path.join(WORKTREES_BASE, `${MAIN_WORKTREE_FOLDER}-${ticketId}`);
@@ -190,139 +254,9 @@ function getNextInstruction(ticketId, prNumber) {
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
-    const ctx = freshCtx();
-    if (state.status === 'complete' || !STEPS.includes(state.currentStep)) {
-      // Re-verify against GitHub before honoring a saved "complete". The
-      // saved state is a cache of a prior run's decision; if anything has
-      // changed (new pushes, checks now running, merge state now blocked)
-      // we must NOT silently return "Already complete" — that's how PR
-      // #1929 cleared its session guard with 9 in-progress checks and 2
-      // unpushed commits.
-      //
-      // Rule: honor the cache only when the PR mirrors a clickable
-      // Squash-and-merge button (mergeable === true). Otherwise rewind
-      // status to in_progress and let the loop re-evaluate the current
-      // step from live GitHub state.
-      if (state.prNumber) {
-        let liveMergeable = null;
-        let actionable = false;
-        let realBlockers = [];
-        try {
-          const { assessMergeable, hasActionableBlockers } = require(
-            path.join(__dirname, '..', 'work', 'lib', 'pr-mergeable.js')
-          );
-          liveMergeable = assessMergeable(state.prNumber);
-          // hasActionableBlockers centralises the two guards (filter out
-          // gh_error transients, require prState=OPEN) shared with
-          // ci-gate.js. See pr-mergeable.js for the full rationale.
-          const action = hasActionableBlockers(liveMergeable);
-          actionable = action.actionable;
-          realBlockers = action.realBlockers;
-        } catch {
-          liveMergeable = null;
-        }
-        if (actionable) {
-          const blockerSummary = realBlockers.map((b) => b.kind).join(', ');
-          process.stderr.write(
-            `[follow-up-next] saved state said complete but PR #${state.prNumber} is not mergeable (${blockerSummary}); rewinding and resuming.\n`
-          );
-          state.status = 'in_progress';
-          // Always rewind to 'monitor' (the live CI-rollup read). Hardcoded
-          // rather than STEPS[0] so a future reorder of the step registry
-          // can't silently rewind to whatever happens to be first.
-          state.currentStep = 'monitor';
-          state.dispatched = null;
-          saveState(ticketId, state);
-          continue;
-        }
-      }
-      saveState(ticketId, state);
-      return { type: 'follow_up_instruction', action: 'complete', summary: 'Already complete.' };
-    }
-
-    // Auto-clear stale infra-failure cache before ANY step runs (GH-536 #551
-    // round-2 fix). The monitor step's own clearStaleInfraCache only fires
-    // when the workflow re-enters monitor — but triage blocks on exitCode 2
-    // without advancing, so subsequent runs only re-execute triage and the
-    // cache is never invalidated. Lifting the check here ensures downstream
-    // steps (triage, fix-ci, report) also benefit and route the flow back
-    // to monitor for a fresh execution.
-    const cached = state.lastMonitorResult;
-    if (cached && isInfraFailure(cached.output || '') && isStale(state.lastMonitorAt)) {
-      delete state.lastMonitorResult;
-      delete state.lastMonitorAt;
-      // Rewind to 'monitor' explicitly — see rationale above.
-      state.currentStep = 'monitor';
-      state.dispatched = null;
-      saveState(ticketId, state);
-      continue;
-    }
-
-    const stepIdx = STEPS.indexOf(state.currentStep);
-    const result = runStep(state.currentStep, state, ctx);
-
-    if (result) {
-      // action:'surface' is terminal (spec API/Interface Changes — GH-508).
-      // Stop the loop without marking status='complete' so the next /follow-up
-      // invocation can resume from a live re-evaluation rather than the cache.
-      if (result.action === 'surface') {
-        state.currentStep = 'report';
-        // Persist the surface reason as a failureCategory so the next
-        // /follow-up cycle's report step recognises the workflow is still
-        // stuck and does NOT mark status=complete. The reason may live on
-        // the top-level result (legacy shape) or under result.payload.reason
-        // (newer shape, mirrors auto-advance hook).
-        const surfaceReason = (result.payload && result.payload.reason) || result.reason || null;
-        if (surfaceReason) {
-          state.failureCategory = surfaceReason;
-        }
-        // Bug 542-10: build the diagnostic summary BEFORE returning so the
-        // auto-advance hook (which treats `surface` as terminal) shows the
-        // per-attempt GitHub Actions URLs without requiring a second
-        // /follow-up invocation.
-        try {
-          const reportResult = runStep('report', state, ctx);
-          const summary =
-            (reportResult &&
-              (reportResult.summary || (reportResult.payload && reportResult.payload.summary))) ||
-            null;
-          if (summary) {
-            result.payload = Object.assign({}, result.payload || {}, { summary });
-          }
-        } catch (_e) {
-          /* fail open — surface still terminal; user can re-run /follow-up */
-        }
-        saveState(ticketId, state);
-        return result;
-      }
-      saveState(ticketId, state);
-      return result;
-    }
-
-    // null → advance (unless step set currentStep for looping)
-    const currentStepAfter = state.currentStep;
-    if (currentStepAfter !== STEPS[stepIdx]) {
-      // Step changed currentStep (e.g., triage → fix-ci, or push-retry → monitor)
-      state.dispatched = null;
-      saveState(ticketId, state);
-      continue;
-    }
-
-    // Normal advance to next step
-    const nextIdx = stepIdx + 1;
-    if (nextIdx >= STEPS.length) {
-      state.status = 'complete';
-      saveState(ticketId, state);
-      return {
-        type: 'follow_up_instruction',
-        action: 'complete',
-        summary: `Follow-up complete for ${ticketId}.`,
-      };
-    }
-
-    state.currentStep = STEPS[nextIdx];
-    state.dispatched = null;
-    saveState(ticketId, state);
+    const outcome = stepOnce(state, ticketId, freshCtx());
+    if (outcome.loop) continue;
+    return outcome.result;
   }
 }
 
