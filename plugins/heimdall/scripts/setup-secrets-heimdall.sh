@@ -79,6 +79,10 @@ fi
 
 [ -n "${NODE_BIN}" ] || die "node not found (set nodeBin in config)"
 [ -n "${ALLOWED_CSV}" ] || die "allowlist is empty in config"
+# Refuse to "harden" with nothing to lock — otherwise we would install the
+# broker, rewrite .mcp.json, and report the boundary active while no secrets
+# file is actually protected.
+[ "${#SECRETS_FILES[@]}" -gt 0 ] || die "secretsFiles is empty in config — nothing to harden"
 # Need EITHER a compiler + source OR the committed prebuilt for this arch.
 if ! command -v gcc >/dev/null 2>&1 && [ ! -f "${BROKER_PREBUILT}" ]; then
   die "no compiler and no prebuilt broker for $(uname -m) (${BROKER_PREBUILT}); install gcc (build-essential) and retry"
