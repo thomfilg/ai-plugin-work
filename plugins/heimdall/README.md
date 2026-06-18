@@ -139,7 +139,9 @@ config and hook — it does not touch lock blocks.
   the calling uid cannot read the secrets file or scrape `/proc/<pid>/environ`,
   and `.mcp.json` is rewritten to launch those servers through the broker. The
   broker reads its paths + allow-list at runtime from a **root-owned**
-  `/usr/local/lib/mcp-broker/broker.conf`, so **no compiler is required**: a
+  `broker.conf` co-located with the broker binary (which defaults to a per-repo
+  path `/usr/local/lib/mcp-broker/<repo>/...`, so projects don't share one
+  global config), and **no compiler is required**: a
   prebuilt `linux-x86_64` binary ships in `scripts/bin/` and is installed when
   `gcc` is absent (the installer compiles from source when `gcc` is present).
   This layer is meaningless on Windows (no setuid / uid file-ownership) — only

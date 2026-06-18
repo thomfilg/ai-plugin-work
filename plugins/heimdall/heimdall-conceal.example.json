@@ -5,7 +5,8 @@
   "secretsFiles": ["credentials/mcp-secrets.json"],
   "wrapper": "scripts/mcp-wrapper.js",
   "nodeBin": "",
-  "brokerPath": "/usr/local/lib/mcp-broker/mcp-pg-broker",
+  "_brokerPath_doc": "Optional. Leave empty to default to a PER-REPO path (/usr/local/lib/mcp-broker/<repo>/mcp-pg-broker) so hardening/reverting one project never clobbers another. broker.conf is always written next to the broker binary.",
+  "brokerPath": "",
   "allowlist": [
     "atlassian",
     "postgres-local-dashboard",

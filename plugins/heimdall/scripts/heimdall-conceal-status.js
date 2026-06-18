@@ -22,8 +22,10 @@ function stat(p) {
   }
 }
 
-const DEFAULT_BROKER = '/usr/local/lib/mcp-broker/mcp-pg-broker';
-const BROKER_CONF = '/usr/local/lib/mcp-broker/broker.conf';
+// Mirror setup-secrets-heimdall.sh: the broker (and its co-located broker.conf)
+// default to a per-repo directory so projects don't share one global config.
+const repoSlug = path.basename(repo).replace(/[^A-Za-z0-9._-]/g, '_');
+const DEFAULT_BROKER = `/usr/local/lib/mcp-broker/${repoSlug}/mcp-pg-broker`;
 
 function loadConfig(cfgPath) {
   try {
@@ -87,8 +89,9 @@ function main() {
   console.log('');
   console.log(`Wrapper:     ${cfg.wrapper}  [${stat(abs(cfg.wrapper))}]`);
   const broker = cfg.brokerPath || DEFAULT_BROKER;
+  const brokerConf = path.join(path.dirname(broker), 'broker.conf');
   console.log(`Broker:      ${broker}  [${stat(broker)}]`);
-  console.log(`Broker conf: ${BROKER_CONF}  [${stat(BROKER_CONF)}]`);
+  console.log(`Broker conf: ${brokerConf}  [${stat(brokerConf)}]`);
 
   reportMcpWiring(cfg);
 

@@ -17,10 +17,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BROKER_SRC="${SCRIPT_DIR}/mcp-pg-broker.c"
-# Committed, generic prebuilt for hosts without a compiler. Must match the
-# BROKER_CONF path baked into mcp-pg-broker.c (and build-broker.sh output name).
+# Committed, generic prebuilt for hosts without a compiler (build-broker.sh
+# output name). The broker reads broker.conf co-located with itself, so
+# BROKER_CONF below is derived from the (per-repo) broker path, not global.
 BROKER_PREBUILT="${SCRIPT_DIR}/bin/mcp-pg-broker.linux-$(uname -m)"
-BROKER_CONF="/usr/local/lib/mcp-broker/broker.conf"
 
 REPO_DIR="${1:-${CLAUDE_PROJECT_DIR:-$PWD}}"
 [ "${REPO_DIR}" = "--revert" ] && { REPO_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"; REVERT=1; }
@@ -41,10 +41,14 @@ const repo = process.env.REPO_DIR;
 const cfg = JSON.parse(fs.readFileSync(process.env.CONFIG, 'utf8'));
 const q = (s) => "'" + String(s).replace(/'/g, "'\\''") + "'";
 const abs = (p) => path.isAbsolute(p) ? p : path.join(repo, p);
+// Default the broker (and its co-located broker.conf) to a PER-REPO directory so
+// hardening or reverting one project never clobbers another's shared config.
+const repoSlug = path.basename(repo).replace(/[^A-Za-z0-9._-]/g, '_');
+const brokerDefault = `/usr/local/lib/mcp-broker/${repoSlug}/mcp-pg-broker`;
 const out = [];
 out.push(`RUN_USER=${q(cfg.runnerUser || 'mcp-runner')}`);
 out.push(`WRAPPER=${q(abs(cfg.wrapper))}`);
-out.push(`BROKER_BIN=${q(cfg.brokerPath || '/usr/local/lib/mcp-broker/mcp-pg-broker')}`);
+out.push(`BROKER_BIN=${q(cfg.brokerPath || brokerDefault)}`);
 out.push(`NODE_BIN=${q(cfg.nodeBin || process.env.NODE_DEFAULT)}`);
 out.push(`ALLOWED_CSV=${q((cfg.allowlist || []).join(','))}`);
 out.push(`MCP_JSON=${q(abs(cfg.mcpJson || '.mcp.json'))}`);
@@ -53,6 +57,10 @@ out.push(`SECRETS_FILES=(${(cfg.secretsFiles || []).map((f) => q(abs(f))).join('
 process.stdout.write(out.join('\n') + '\n');
 NODE
 )"
+
+# broker.conf lives next to the broker binary (per-repo), matching the
+# self-relative path the broker resolves at runtime.
+BROKER_CONF="$(dirname "${BROKER_BIN}")/broker.conf"
 
 AGENT_USER="$(stat -c '%U' "${REPO_DIR}")"
 

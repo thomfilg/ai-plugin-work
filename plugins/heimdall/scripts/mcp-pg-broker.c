@@ -31,9 +31,29 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
+/* Fallback only. The config is normally read from `broker.conf` co-located with
+ * THIS binary (see resolve_conf_path), so multiple repos can each install their
+ * own broker+conf under a distinct path without sharing a single global file. */
 #ifndef BROKER_CONF
 #define BROKER_CONF "/usr/local/lib/mcp-broker/broker.conf"
 #endif
+
+/* Resolve broker.conf next to this executable (/proc/self/exe), falling back to
+ * the compiled default if the self-path cannot be read. */
+static void resolve_conf_path(char *buf, size_t n) {
+    char exe[2048];
+    ssize_t len = readlink("/proc/self/exe", exe, sizeof exe - 1);
+    if (len > 0) {
+        exe[len] = 0;
+        char *slash = strrchr(exe, '/');
+        if (slash) {
+            *slash = 0;
+            snprintf(buf, n, "%s/broker.conf", exe);
+            return;
+        }
+    }
+    snprintf(buf, n, "%s", BROKER_CONF);
+}
 
 static char NODE_BIN[4096];
 static char WRAPPER[4096];
@@ -51,8 +71,10 @@ static void assign(const char *k, const char *v) {
  * owned by root or is group/world writable (a tampered config could redirect
  * WRAPPER or widen the allow-list). Returns 1 on success, 0 on failure. */
 static int load_config(void) {
-    FILE *f = fopen(BROKER_CONF, "r");
-    if (!f) { fprintf(stderr, "mcp-pg-broker: cannot open config %s\n", BROKER_CONF); return 0; }
+    char confPath[4096];
+    resolve_conf_path(confPath, sizeof confPath);
+    FILE *f = fopen(confPath, "r");
+    if (!f) { fprintf(stderr, "mcp-pg-broker: cannot open config %s\n", confPath); return 0; }
 
     /* BROKER_TEST_SKIP_OWNER_CHECK is defined ONLY by the unit-test build so the
      * parse/allow logic can run against a non-root tmp config. It is NEVER set
@@ -61,7 +83,7 @@ static int load_config(void) {
     struct stat st;
     if (fstat(fileno(f), &st) != 0) { perror("fstat"); fclose(f); return 0; }
     if (st.st_uid != 0 || (st.st_mode & (S_IWGRP | S_IWOTH))) {
-        fprintf(stderr, "mcp-pg-broker: config %s must be root-owned and not group/world writable\n", BROKER_CONF);
+        fprintf(stderr, "mcp-pg-broker: config %s must be root-owned and not group/world writable\n", confPath);
         fclose(f);
         return 0;
     }
