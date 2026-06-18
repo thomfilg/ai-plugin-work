@@ -37,15 +37,22 @@ function inspectTarget(repo, target) {
   return { resolved, exists, isDir };
 }
 
+// Normalize OS-native separators to forward slashes. path.relative/resolve emit
+// backslashes on Windows, but the guard matches against tool file_path values
+// (forward slashes); anchoring on backslashes would silently fail to match
+// concealed paths on Windows. The guard normalizes targets the same way.
+const toPosix = (p) => p.split(path.sep).join('/');
+
 function buildPatterns(repo, resolved) {
   // Anchor on the repo-relative path when inside the repo, else the absolute path.
   const rel = path.relative(repo, resolved);
   const inRepo = rel && !rel.startsWith('..') && !path.isAbsolute(rel);
-  const anchor = inRepo ? `(^|/)${esc(rel)}` : esc(resolved);
+  const relPosix = toPosix(rel);
+  const anchor = inRepo ? `(^|/)${esc(relPosix)}` : esc(toPosix(resolved));
   // File tools match the exact target path: `(/|$)` covers the path itself and
   // (for a folder) everything beneath it. Bash commands embed the path mid-line,
   // so commands use a word boundary instead of `$`.
-  return { label: rel || resolved, filePat: `${anchor}(/|$)`, cmdPat: `${anchor}\\b` };
+  return { label: relPosix || resolved, filePat: `${anchor}(/|$)`, cmdPat: `${anchor}\\b` };
 }
 
 function loadOrCreateConfig(cfgPath) {

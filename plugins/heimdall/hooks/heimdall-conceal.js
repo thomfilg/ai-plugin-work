@@ -87,13 +87,21 @@ function readStdin() {
   }
 }
 
+// Deny patterns are anchored on forward slashes (see heimdall-conceal.js
+// buildPatterns); normalize Windows backslash separators in the target so the
+// match holds cross-platform. (Match-only — the command is never executed from
+// this normalized copy.)
+const toPosix = (s) => s.replace(/\\/g, '/');
+
 function evaluate(cfg, toolName, input) {
   if (toolName === 'Bash') {
-    const cmd = String(input.command || '');
+    const cmd = toPosix(String(input.command || ''));
     return cmdPatterns(cfg).find((re) => re.test(cmd)) || null;
   }
   if (FILE_TOOLS.has(toolName)) {
-    const target = [input.file_path, input.path, input.notebook_path].filter(Boolean).join('\n');
+    const target = toPosix(
+      [input.file_path, input.path, input.notebook_path].filter(Boolean).join('\n')
+    );
     return filePatterns(cfg).find((re) => re.test(target)) || null;
   }
   return null;
