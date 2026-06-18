@@ -1,41 +1,12 @@
 /**
  * Completion-checker phase dispatcher.
- *
- * Mirrors `work-spec/lib/phase-registry.js`. Each phase registers a handler:
- *
- *   {
- *     next: string|null,
- *     validate(ctx) => { ok, errors?: string[], warnings?: string[], summary?: string },
- *     instructions(ctx) => string,
- *   }
  */
 
 'use strict';
 
-const handlers = Object.create(null);
+const { makePhaseRegistry } = require('../../lib/make-phase-registry');
 
-function registerPhase(phaseName, handler) {
-  if (
-    !handler ||
-    typeof handler.validate !== 'function' ||
-    typeof handler.instructions !== 'function'
-  ) {
-    throw new Error(
-      `Invalid phase handler for "${phaseName}" — must expose validate() and instructions()`
-    );
-  }
-  handlers[phaseName] = handler;
-}
-
-function getPhase(phaseName) {
-  const h = handlers[phaseName];
-  if (!h) throw new Error(`No completion phase handler registered for "${phaseName}"`);
-  return h;
-}
-
-function hasPhase(phaseName) {
-  return Boolean(handlers[phaseName]);
-}
+const { registerPhase, getPhase, hasPhase } = makePhaseRegistry('completion');
 
 require('./phases/inputs')(registerPhase);
 require('./phases/requirements_extract')(registerPhase);
