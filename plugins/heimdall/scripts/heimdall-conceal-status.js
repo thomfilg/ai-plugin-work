@@ -5,7 +5,7 @@
  */
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 
 const repo = path.resolve(process.argv[2] || process.env.CLAUDE_PROJECT_DIR || process.cwd());
 const abs = (p) => (path.isAbsolute(p) ? p : path.join(repo, p));
@@ -13,9 +13,9 @@ const abs = (p) => (path.isAbsolute(p) ? p : path.join(repo, p));
 function stat(p) {
   try {
     const s = fs.statSync(p);
-    const owner = execSync(`stat -c '%U:%G %a' ${JSON.stringify(p)}`)
-      .toString()
-      .trim();
+    // execFileSync (no shell) — p is config/repo-derived, so a shell string
+    // would be an injection vector (CodeQL js/shell-command-injection-from-environment).
+    const owner = execFileSync('stat', ['-c', '%U:%G %a', p]).toString().trim();
     return `${owner}${s.isDirectory() ? ' (dir)' : ''}`;
   } catch {
     return 'MISSING';
@@ -37,7 +37,8 @@ function loadConfig(cfgPath) {
 
 function canAgentRead(agentUser, p) {
   try {
-    execSync(`sudo -n -u ${agentUser} cat ${JSON.stringify(p)} >/dev/null 2>&1`);
+    // execFileSync (no shell): agentUser/p are environment-derived.
+    execFileSync('sudo', ['-n', '-u', agentUser, 'cat', p], { stdio: 'ignore' });
     return true;
   } catch {
     return false;
@@ -77,9 +78,7 @@ function main() {
     process.exit(0);
   }
 
-  const agentUser = execSync(`stat -c '%U' ${JSON.stringify(repo)}`)
-    .toString()
-    .trim();
+  const agentUser = execFileSync('stat', ['-c', '%U', repo]).toString().trim();
   console.log(`Repo:        ${repo}`);
   console.log(`Agent uid:   ${agentUser}`);
   console.log(`Runner:      ${cfg.runnerUser || 'mcp-runner'}`);
