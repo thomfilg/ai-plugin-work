@@ -12,9 +12,9 @@
  * If it fails, the agent must stop — not fix anything.
  */
 
-const { logHookError } = require(
-  require('path').join(__dirname, '..', '..', '..', 'lib', 'hook-error-log')
-);
+const path = require('path');
+const { logHookError } = require(path.join(__dirname, '..', '..', '..', 'lib', 'hook-error-log'));
+const { readStdin, resolveAgentName } = require(path.join(__dirname, '..', 'lib', 'hook-io'));
 
 // Patterns for commands that modify files
 const FILE_MODIFY_PATTERNS = [
@@ -53,7 +53,8 @@ const FIX_ATTEMPT_PATTERNS = [
 ];
 
 // Allowed git subcommands — read-only + commit + push (no merge, rebase, reset, etc.)
-const ALLOWED_GIT_SUBCOMMANDS = /^\s*git\s+(diff|log|show|status|branch|rev-parse|ls-files|fetch|commit|push)\b/;
+const ALLOWED_GIT_SUBCOMMANDS =
+  /^\s*git\s+(diff|log|show|status|branch|rev-parse|ls-files|fetch|commit|push)\b/;
 
 // Explicitly allowed commands (quality gate + git/gh)
 const ALLOWED_COMMANDS = [
@@ -104,11 +105,14 @@ function isBlockedCommand(command) {
   return null;
 }
 
+// Extract the Bash command from the hook payload's tool input ('' when absent).
+function extractCommand(hookData) {
+  const toolInput = hookData.tool_input || hookData.input || {};
+  return toolInput.command || '';
+}
+
 async function main() {
-  let input = '';
-  for await (const chunk of process.stdin) {
-    input += chunk;
-  }
+  const input = await readStdin();
 
   let hookData;
   try {
@@ -119,18 +123,12 @@ async function main() {
   }
 
   // Only guard pr-generator agent
-  const agentName = hookData.agent_name || hookData.subagent_type || '';
-  if (
-    !agentName.toLowerCase().includes('pr-generator') ||
-    agentName.toLowerCase().includes('post')
-  ) {
+  const agentName = resolveAgentName(hookData);
+  if (!agentName.includes('pr-generator') || agentName.includes('post')) {
     process.exit(0);
   }
 
-  // Extract the Bash command from the tool input
-  const toolInput = hookData.tool_input || hookData.input || {};
-  const command = toolInput.command || '';
-
+  const command = extractCommand(hookData);
   if (!command) {
     process.exit(0);
   }

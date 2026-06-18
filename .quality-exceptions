@@ -63,7 +63,6 @@ plugins/work/scripts/workflows/work/lib/work-claims.js
 plugins/work/scripts/workflows/check/hooks/check-setup.js
 plugins/work/scripts/workflows/lib/protect-state-files.js
 plugins/work/scripts/workflows/check/check.workflow.js
-plugins/work/scripts/workflows/work-pr/work-pr.workflow.js
 plugins/work/scripts/workflows/check/hooks/check-start-env.js
 plugins/work/scripts/workflows/work/engine/transition-step.js
 plugins/work/scripts/workflows/work/hooks/work-suggestion-replies.js
@@ -99,7 +98,6 @@ plugins/work/scripts/workflows/check/hooks/check-generate-summary.js
 plugins/work/scripts/workflows/lib/request-index.js
 plugins/work/scripts/workflows/lib/hooks/policies/task-description-quality.js
 plugins/work/scripts/workflows/work/engine/inspect.js
-plugins/work/scripts/workflows/work-pr/agents/pr-post-generator/pr-post-generator-validator.js
 plugins/work/scripts/workflows/work/work-state/task-readiness.js
 plugins/work/scripts/workflows/work/work-state/graph-validation.js
 plugins/work/scripts/workflows/lib/quality-check.js
@@ -127,7 +125,6 @@ plugins/work/scripts/listen-all.js
 plugins/work/scripts/workflows/work/hooks/enforce-review-accountability.js
 plugins/work/scripts/workflows/lib/hook-error-log.js
 plugins/work/scripts/workflows/work/steps/brief-gate.js
-plugins/work/scripts/workflows/work-pr/agents/pr-generator/pr-generator-readonly-guard.js
 plugins/work/scripts/communicate.js
 plugins/work/scripts/workflows/work/lib/artifact-archival.js
 plugins/work/scripts/workflows/work/lib/gherkin-coverage.js
@@ -143,7 +140,6 @@ plugins/work/scripts/workflows/lib/hooks/policies/agent-authorization.js
 plugins/work/scripts/workflows/lib/hooks/inject-inbox-messages.js
 plugins/work/scripts/workflows/work-ci/lib/phases/wait.js
 plugins/work/scripts/workflows/work-brief/lib/phases/draft.js
-plugins/work/scripts/workflows/work-pr/agents/pr-generator/pr-generator-validator.js
 plugins/work/scripts/workflows/work-spec/lib/phases/kind_checks.js
 plugins/work/scripts/workflows/check/scripts/write-completion-report.js
 plugins/work/scripts/workflows/work-ci/lib/phases/wait_merge.js
