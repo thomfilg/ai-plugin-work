@@ -130,15 +130,17 @@ function completeSubtask(ticketId, subtaskIndex) {
   const prefix = `.work-state-${safeId(ticketId)}-subtask-`;
   const statePath = path.join(taskDir, `${prefix}${subtaskIndex}.json`);
 
-  if (!fs.existsSync(statePath)) {
-    throw new Error(`Subtask state file not found: ${statePath}`);
-  }
-
+  // Read directly and key off ENOENT rather than an existsSync precheck — the
+  // check-then-read split is a TOCTOU race (CodeQL js/file-system-race). Error
+  // messages are unchanged.
   let content, state;
   try {
     content = fs.readFileSync(statePath, 'utf8');
     state = JSON.parse(content);
   } catch (err) {
+    if (err.code === 'ENOENT') {
+      throw new Error(`Subtask state file not found: ${statePath}`);
+    }
     throw new Error(`Failed to read subtask state: ${err.message}`);
   }
 
