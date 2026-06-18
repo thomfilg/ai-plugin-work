@@ -82,8 +82,11 @@ function cmdInit(args) {
   fs.writeFileSync(path.join(target.dir, MARKER), `${JSON.stringify(marker, null, 2)}\n`);
 
   const indexPath = path.join(target.dir, 'INDEX.md');
-  if (!fs.existsSync(indexPath)) {
-    const scope = kind === 'shared' ? 'all projects' : projectName;
+  const scope = kind === 'shared' ? 'all projects' : projectName;
+  // Exclusive create (`wx`) instead of existsSync-then-write: writes the
+  // starter index atomically and leaves an already-present one untouched,
+  // without the check-then-write race (CodeQL).
+  try {
     fs.writeFileSync(
       indexPath,
       [
@@ -104,8 +107,11 @@ function cmdInit(args) {
         '---',
         '```',
         '',
-      ].join('\n')
+      ].join('\n'),
+      { flag: 'wx' }
     );
+  } catch (e) {
+    if (e.code !== 'EEXIST') throw e; // starter index already present — keep it
   }
   const scopeNote = kind === 'shared' ? 'scope=all projects' : `project=${projectName}`;
   console.log(`initialized maestro schema store at ${target.dir} (tier=${kind}, ${scopeNote})`);
@@ -125,10 +131,6 @@ function cmdSave(args) {
   }
 
   const file = path.join(target.dir, `${name}.md`);
-  if (fs.existsSync(file) && !args.force) {
-    die(`schema '${name}' already exists in tier '${kind}' (use --force to overwrite)`);
-  }
-
   const meta = {
     name,
     description: args.description || '',
@@ -139,8 +141,18 @@ function cmdSave(args) {
     compiled_from: args['compiled-from'] || undefined,
     compiled_at: new Date().toISOString().slice(0, 10),
   };
-  const body = args.body || '';
-  fs.writeFileSync(file, serializeFrontmatter(meta, body));
+  const content = serializeFrontmatter(meta, args.body || '');
+  // Exclusive create unless --force: `wx` fails atomically when the schema
+  // already exists, so there is no existsSync-then-write race (CodeQL). With
+  // --force we intentionally overwrite.
+  try {
+    fs.writeFileSync(file, content, args.force ? undefined : { flag: 'wx' });
+  } catch (e) {
+    if (e.code === 'EEXIST') {
+      die(`schema '${name}' already exists in tier '${kind}' (use --force to overwrite)`);
+    }
+    throw e;
+  }
   console.log(`saved schema '${name}' to ${file} (tier=${kind})`);
 }
 
