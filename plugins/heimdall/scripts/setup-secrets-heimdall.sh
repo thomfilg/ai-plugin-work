@@ -62,7 +62,12 @@ NODE
 # self-relative path the broker resolves at runtime.
 BROKER_CONF="$(dirname "${BROKER_BIN}")/broker.conf"
 
-AGENT_USER="$(stat -c '%U' "${REPO_DIR}")"
+# The agent uid is whoever runs Claude Code — NOT necessarily the repo-dir owner
+# (shared clones, CI, sudo installs differ). Prefer an explicit AGENT_USER
+# override, then the sudo invoker ($SUDO_USER, the operator who ran this), and
+# only fall back to the repo owner. Verification ("can the agent read secrets?")
+# and revert (restore ownership) both depend on getting this right.
+AGENT_USER="${AGENT_USER:-${SUDO_USER:-$(stat -c '%U' "${REPO_DIR}")}}"
 
 # --- Revert ----------------------------------------------------------------
 if [ "${REVERT:-}" = "1" ]; then
