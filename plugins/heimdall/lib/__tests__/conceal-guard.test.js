@@ -79,6 +79,24 @@ describe('heimdall conceal guard', () => {
     assert.equal(guard(readPayload(path.join(repo, 'README.md'))), 0);
   });
 
+  it('honors the payload cwd when CLAUDE_PROJECT_DIR is unset', () => {
+    // No env var and a process cwd that differs from the project root: the guard
+    // must resolve config from the payload's cwd (parity with the lock hook).
+    const env = { ...process.env };
+    delete env.CLAUDE_PROJECT_DIR;
+    const res = spawnSync('node', [HOOK], {
+      input: JSON.stringify({
+        cwd: repo,
+        tool_name: 'Read',
+        tool_input: { file_path: path.join(repo, 'credentials', 'token.txt') },
+      }),
+      env,
+      cwd: os.tmpdir(),
+      encoding: 'utf8',
+    });
+    assert.equal(res.status, 2);
+  });
+
   it('is idempotent — re-concealing the same path makes no new entry', () => {
     const before = readCfg().denyFilePatterns.length;
     assert.equal(conceal('secret-folder').status, 0);

@@ -22,8 +22,7 @@
 const fs = require('fs');
 const path = require('path');
 
-function loadConfig() {
-  const root = process.env.CLAUDE_PROJECT_DIR || process.cwd();
+function loadConfig(root) {
   for (const f of [
     path.join(root, '.claude', 'heimdall-conceal.json'),
     path.join(root, '.heimdall-conceal.json'),
@@ -95,15 +94,20 @@ function log(cfg, payload) {
 }
 
 function main() {
-  const cfg = loadConfig();
-  if (!cfg) process.exit(0); // no policy for this project → no-op
-
+  // Parse the payload FIRST so config resolution can honor its cwd — the lock
+  // hook (heimdall.js) keys off hookData.cwd, and the conceal guard must agree
+  // or it would no-op on a valid config when CLAUDE_PROJECT_DIR is unset and the
+  // process cwd differs from the project root.
   let event;
   try {
     event = JSON.parse(readStdin() || '{}');
   } catch {
     process.exit(0);
   }
+
+  const root = event.cwd || process.env.CLAUDE_PROJECT_DIR || process.cwd();
+  const cfg = loadConfig(root);
+  if (!cfg) process.exit(0); // no policy for this project → no-op
 
   const matched = evaluate(cfg, event.tool_name || '', event.tool_input || {});
   if (!matched) process.exit(0);
