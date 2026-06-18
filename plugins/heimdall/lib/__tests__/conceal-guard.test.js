@@ -185,6 +185,33 @@ describe('secretsFiles stay protected alongside an explicit deny list', () => {
   });
 });
 
+describe('secrets command defaults persist after conceal', () => {
+  it('still blocks /proc environ when denyCommandPatterns is already populated', () => {
+    const r = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-cmddef-'));
+    fs.mkdirSync(path.join(r, '.claude'), { recursive: true });
+    // A secrets config where conceal has already populated denyCommandPatterns
+    // with a non-default entry: the /proc-environ + PGPASSWORD baseline must
+    // still apply (they would otherwise be dropped).
+    fs.writeFileSync(
+      path.join(r, '.claude', 'heimdall-conceal.json'),
+      JSON.stringify({
+        secretsFiles: ['creds/secret.json'],
+        denyFilePatterns: ['(^|/)logs(/|$)'],
+        denyCommandPatterns: ['(^|[^\\w.-])logs\\b'],
+      })
+    );
+    const status = (cmd) =>
+      spawnSync('node', [HOOK], {
+        input: JSON.stringify(bashPayload(cmd)),
+        env: { ...process.env, CLAUDE_PROJECT_DIR: r },
+        encoding: 'utf8',
+      }).status;
+    assert.equal(status('cat /proc/123/environ'), 2);
+    assert.equal(status('echo $PGPASSWORD'), 2);
+    fs.rmSync(r, { recursive: true, force: true });
+  });
+});
+
 describe('all-invalid deny list fails closed', () => {
   it('blocks (exit 2) when every denyFilePattern is invalid regex', () => {
     const r = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-allbad-'));

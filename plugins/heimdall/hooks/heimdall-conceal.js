@@ -86,12 +86,21 @@ function filePatterns(cfg) {
 // Patterns matched against Bash COMMANDS (file names + environ + password var).
 function cmdPatterns(cfg) {
   const fileRe = filePatterns(cfg); // throws if an explicit file deny list is all-invalid
-  const hasCustom = Array.isArray(cfg.denyCommandPatterns) && cfg.denyCommandPatterns.length;
-  const extra = hasCustom ? cfg.denyCommandPatterns : ['/proc/[^/]+/environ', '\\bPGPASSWORD\\b'];
-  const extraRe = toRegexes(extra);
-  if (hasCustom && extraRe.length === 0)
+  const custom = Array.isArray(cfg.denyCommandPatterns) ? cfg.denyCommandPatterns : [];
+  const customRe = toRegexes(custom);
+  if (custom.length && customRe.length === 0) {
     throw new Error('all denyCommandPatterns are invalid regex');
-  return [...fileRe, ...extraRe];
+  }
+  // The /proc-environ + PGPASSWORD guards are the baseline secrets defense and
+  // must persist whenever this is a secrets config — even after
+  // denyCommandPatterns is populated (e.g. by /heimdall:conceal before harden).
+  // Also applied when there are no custom command patterns at all.
+  const hasSecrets = Array.isArray(cfg.secretsFiles) && cfg.secretsFiles.length;
+  const defaults =
+    hasSecrets || customRe.length === 0
+      ? toRegexes(['/proc/[^/]+/environ', '\\bPGPASSWORD\\b'])
+      : [];
+  return [...fileRe, ...customRe, ...defaults];
 }
 
 const FILE_TOOLS = new Set(['Read', 'Grep', 'Glob', 'Edit', 'Write', 'MultiEdit']);
