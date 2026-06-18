@@ -115,10 +115,20 @@ function evaluate(cfg, toolName, input) {
     return cmdPatterns(cfg).find((re) => re.test(cmd)) || null;
   }
   if (FILE_TOOLS.has(toolName)) {
-    const target = toPosix(
-      [input.file_path, input.path, input.notebook_path].filter(Boolean).join('\n')
-    );
-    return filePatterns(cfg).find((re) => re.test(target)) || null;
+    // Glob carries the search in `pattern` (often with a separate `path` dir),
+    // so include it and the path+pattern join. Test each candidate SEPARATELY:
+    // joining with a separator would break the `(/|$)` right-boundary (a dir at
+    // a field's end is followed by the separator, not `/` or end-of-string).
+    const { file_path, path: p, notebook_path, pattern } = input;
+    const candidates = [file_path, p, notebook_path, pattern];
+    if (p && pattern) candidates.push(`${p}/${pattern}`);
+    const targets = candidates.filter(Boolean).map(toPosix);
+    const pats = filePatterns(cfg);
+    for (const t of targets) {
+      const hit = pats.find((re) => re.test(t));
+      if (hit) return hit;
+    }
+    return null;
   }
   return null;
 }

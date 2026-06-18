@@ -71,6 +71,24 @@ describe('heimdall conceal guard', () => {
     assert.equal(guard(readPayload(path.join(repo, 'secret-folder', 'nested', 'x.env'))), 2);
   });
 
+  it('denies a Glob whose pattern targets a concealed folder', () => {
+    assert.equal(guard({ tool_name: 'Glob', tool_input: { pattern: 'secret-folder/**' } }), 2);
+  });
+
+  it('denies a Glob whose path is a concealed folder (separate pattern)', () => {
+    assert.equal(
+      guard({
+        tool_name: 'Glob',
+        tool_input: { path: path.join(repo, 'secret-folder'), pattern: '*.env' },
+      }),
+      2
+    );
+  });
+
+  it('allows a Glob over unrelated paths', () => {
+    assert.equal(guard({ tool_name: 'Glob', tool_input: { pattern: 'src/**/*.ts' } }), 0);
+  });
+
   it('denies a Bash read of a concealed path mid-pipe', () => {
     assert.equal(guard(bashPayload(`cat ${repo}/credentials/token.txt | jq .`)), 2);
   });
