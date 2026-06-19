@@ -118,6 +118,14 @@ function mergeOne(out, dir, cfg) {
 function mergeForAudit(configs) {
   const out = { secretsFiles: [] };
   for (const c of configs) mergeOne(out, c.dir, c.cfg);
+  // The broker slug is derived (by setup-secrets-heimdall.sh) from the dir of
+  // the config that actually defines the secrets boundary — NOT necessarily the
+  // nearest config. Use that dir so the audit reports the broker path harden
+  // installed, even when run from a subdirectory under a guard-only config.
+  const sb = configs.find(
+    (c) => (c.cfg.secretsFiles || []).length || c.cfg.wrapper || c.cfg.brokerPath
+  );
+  out.secretsBase = sb ? sb.dir : undefined;
   return out;
 }
 
@@ -193,7 +201,7 @@ function main() {
   const protectedCount = reportSecretsFiles(m.secretsFiles);
   console.log('');
   console.log(`Wrapper:     ${m.wrapper || '(none)'}  [${stat(m.wrapper)}]`);
-  const broker = m.brokerPath || brokerDefaultFor(base);
+  const broker = m.brokerPath || brokerDefaultFor(m.secretsBase || base);
   const brokerConf = path.join(path.dirname(broker), 'broker.conf');
   console.log(`Broker:      ${broker}  [${stat(broker)}]`);
   console.log(`Broker conf: ${brokerConf}  [${stat(brokerConf)}]`);
