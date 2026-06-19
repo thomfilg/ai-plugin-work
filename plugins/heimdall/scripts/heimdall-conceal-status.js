@@ -53,31 +53,42 @@ function brokerDefaultFor(base) {
   return `/usr/local/lib/mcp-broker/${slug}/mcp-pg-broker`;
 }
 
-// Walk UP from startDir to the filesystem root collecting EVERY conceal config —
-// mirrors the PreToolUse hook (which merges all ancestors and fails closed on
-// any broken one). Returns { state, configs?, baseDir?, cfgPath?, error? }:
-//   absent      — no config anywhere up the tree
+// Read one config file: { state: 'absent'|'ok'|'unreadable'|'invalid', cfg?, error? }.
+function readConfigAt(cfgPath) {
+  let raw;
+  try {
+    raw = fs.readFileSync(cfgPath, 'utf8');
+  } catch (err) {
+    return err.code === 'ENOENT'
+      ? { state: 'absent' }
+      : { state: 'unreadable', error: err.message };
+  }
+  try {
+    return { state: 'ok', cfg: JSON.parse(raw) };
+  } catch (err) {
+    return { state: 'invalid', error: err.message };
+  }
+}
+
+// Walk UP from startDir collecting EVERY conceal config, bounded at $HOME
+// (matches the hook: merges all ancestors, fails closed on any broken one, and
+// never climbs above $HOME). Returns { state, configs?, baseDir?, cfgPath?, error? }:
+//   absent      — no config at or above startDir (up to $HOME)
 //   unreadable  — a present config could not be read   (hook fails closed)
 //   invalid     — a present config is not valid JSON   (hook fails closed)
 //   ok          — configs[] (nearest-first) with their dirs + the nearest baseDir
 function collectConfigs(start) {
+  const home = os.homedir();
   let dir = path.resolve(start);
   const configs = [];
   for (;;) {
     const cfgPath = path.join(dir, '.claude', 'heimdall-conceal.json');
-    let raw = null;
-    try {
-      raw = fs.readFileSync(cfgPath, 'utf8');
-    } catch (err) {
-      if (err.code !== 'ENOENT') return { state: 'unreadable', cfgPath, error: err.message };
+    const r = readConfigAt(cfgPath);
+    if (r.state === 'unreadable' || r.state === 'invalid') {
+      return { state: r.state, cfgPath, error: r.error };
     }
-    if (raw !== null) {
-      try {
-        configs.push({ dir, cfg: JSON.parse(raw) });
-      } catch (err) {
-        return { state: 'invalid', cfgPath, error: err.message };
-      }
-    }
+    if (r.state === 'ok') configs.push({ dir, cfg: r.cfg });
+    if (dir === home) break; // bounded at $HOME, matching the hook
     const parent = path.dirname(dir);
     if (parent === dir) break;
     dir = parent;

@@ -192,6 +192,42 @@ describe('conceal config is found from a subdirectory', () => {
   });
 });
 
+describe('config discovery is bounded at $HOME', () => {
+  it('does not discover a config above $HOME, but does find one AT $HOME', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-home-'));
+    const home = path.join(root, 'home');
+    const sub = path.join(home, 'proj', 'deep');
+    fs.mkdirSync(sub, { recursive: true });
+    const policy = JSON.stringify({
+      denyFilePatterns: ['(^|/)secret-folder(/|$)'],
+      denyCommandPatterns: [],
+    });
+    // A conceal config ABOVE $HOME (at root) — must NOT govern sessions under $HOME.
+    fs.mkdirSync(path.join(root, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.claude', 'heimdall-conceal.json'), policy);
+
+    const env = { ...process.env, HOME: home }; // os.homedir() honors $HOME on POSIX
+    delete env.CLAUDE_PROJECT_DIR;
+    const status = (file) =>
+      spawnSync('node', [HOOK], {
+        input: JSON.stringify({ cwd: sub, ...readPayload(file) }),
+        env,
+        cwd: os.tmpdir(),
+        encoding: 'utf8',
+      }).status;
+
+    // Boundary holds: the above-$HOME config is not discovered → allowed.
+    assert.equal(status(path.join(home, 'secret-folder', 'x')), 0);
+
+    // But a config AT $HOME itself IS discovered (boundary is inclusive).
+    fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.claude', 'heimdall-conceal.json'), policy);
+    assert.equal(status(path.join(home, 'secret-folder', 'x')), 2);
+
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+});
+
 describe('nested config does not shadow an ancestor policy', () => {
   it('merges ancestor secretsFiles even when a subdir has a guard-only config', () => {
     const r = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-nested-'));

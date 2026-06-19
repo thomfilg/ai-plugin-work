@@ -20,6 +20,7 @@
  */
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 // Try to load the conceal config at <dir>/.claude/heimdall-conceal.json.
@@ -66,16 +67,20 @@ function mergeConfigs(list) {
   return merged;
 }
 
-// Walk up from startDir to the filesystem root, collecting EVERY conceal config
-// (matches the lock guard's repo-canonicalization while never letting a nested
-// config shadow an ancestor). Single filename, matching
-// setup-secrets-heimdall.sh and heimdall-conceal-status.js.
+// Walk up from startDir collecting EVERY conceal config (so a nested config can
+// never shadow an ancestor), bounded at $HOME — exactly like the lock guard's
+// findAncestorStore. $HOME ITSELF is checked, then the walk stops: this prevents
+// a config at/above $HOME from governing every descendant session (and a broken
+// one freezing them all), and keeps sandboxed e2e tests (tmp $HOME) from leaking
+// the real user's config. Paths outside $HOME walk to the filesystem root.
 function loadConfig(startDir) {
+  const home = os.homedir();
   let dir = path.resolve(startDir);
   const found = [];
   for (;;) {
     const cfg = tryLoadAt(dir); // null on ENOENT; throws (fail-closed) on broken
     if (cfg) found.push(cfg);
+    if (dir === home) break; // checked $HOME, stop — do not climb above it
     const parent = path.dirname(dir);
     if (parent === dir) break; // reached filesystem root
     dir = parent;
