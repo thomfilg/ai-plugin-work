@@ -119,13 +119,34 @@ function readStdin() {
 // this normalized copy.)
 const toPosix = (s) => s.replace(/\\/g, '/');
 
-// Path candidates for a file tool. Path-bearing fields are always candidates.
-// `pattern` is a PATH glob ONLY for Glob — for Grep it is a content-search regex,
-// so treating it as a path would wrongly block e.g. Grep(pattern: "logs") just
-// because a folder named "logs" is concealed.
+// Resolve symlinks (tolerating a non-existent leaf, e.g. Write to a new file),
+// mirroring the lock guard's resolvePathSafe. A symlink whose own path doesn't
+// match the deny pattern must not reach a concealed target.
+function resolveSafe(p) {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    try {
+      return path.join(fs.realpathSync(path.dirname(p)), path.basename(p));
+    } catch {
+      return p;
+    }
+  }
+}
+
+// Path candidates for a file tool. Path-bearing fields are matched both raw AND
+// symlink-resolved (a symlink into a concealed dir must be caught). `pattern` is
+// a PATH glob ONLY for Glob — for Grep it is a content-search regex, so treating
+// it as a path would wrongly block e.g. Grep(pattern: "logs") when a folder
+// "logs" is concealed.
 function fileToolCandidates(toolName, input) {
   const { file_path, path: p, notebook_path, pattern } = input;
-  const candidates = [file_path, p, notebook_path];
+  const candidates = [];
+  for (const f of [file_path, p, notebook_path].filter(Boolean)) {
+    candidates.push(f);
+    const real = resolveSafe(f);
+    if (real !== f) candidates.push(real);
+  }
   if (toolName === 'Glob') {
     if (pattern) candidates.push(pattern);
     if (p && pattern) candidates.push(`${p}/${pattern}`);

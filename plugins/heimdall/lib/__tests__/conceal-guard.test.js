@@ -121,6 +121,14 @@ describe('heimdall conceal guard', () => {
     );
   });
 
+  it('denies a Read via a symlink that resolves into a concealed folder', () => {
+    fs.writeFileSync(path.join(repo, 'secret-folder', 'real.txt'), 'sek\n');
+    const link = path.join(repo, 'innocent.txt');
+    fs.symlinkSync(path.join(repo, 'secret-folder', 'real.txt'), link);
+    // The symlink path itself does not match the deny pattern; resolving it must.
+    assert.equal(guard(readPayload(link)), 2);
+  });
+
   it('denies a Bash read of a concealed path mid-pipe', () => {
     assert.equal(guard(bashPayload(`cat ${repo}/credentials/token.txt | jq .`)), 2);
   });
