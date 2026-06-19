@@ -148,6 +148,31 @@ function poolFullForTask(taskId, activeWorkSessions) {
   return liveInThisManifest >= m.slots;
 }
 
+/**
+ * stopOracleForTask — the compiled shell predicate the conductor evaluates each
+ * tick to decide whether a ticket is done. Null when the owning manifest
+ * declares none (then no stop-condition rotation happens for that ticket, and
+ * the ticket's command must be a whitelisted skill). Reading from the manifest
+ * (not env) is what lets a daemon restart re-derive the oracle.
+ */
+function stopOracleForTask(taskId) {
+  const hit = findTask(taskId);
+  const oracle = hit && hit.manifest && hit.manifest.stopOracle;
+  return oracle ? String(oracle) : null;
+}
+
+/**
+ * commandForTask — the command recorded in the owning manifest for a ticket
+ * (informational / generic-row gating). Null when unknown. The authoritative
+ * launch skill still lives in the per-ticket `.maestro-skill` file
+ * (skill-registry); this is the orchestration record's copy.
+ */
+function commandForTask(taskId) {
+  const hit = findTask(taskId);
+  const cmd = hit && hit.manifest && hit.manifest.command;
+  return cmd ? String(cmd).replace(/^\//, '') : null;
+}
+
 module.exports = {
   listManifestFiles,
   readManifest,
@@ -156,4 +181,6 @@ module.exports = {
   updateTaskStatus,
   syncFromTmux,
   poolFullForTask,
+  stopOracleForTask,
+  commandForTask,
 };
