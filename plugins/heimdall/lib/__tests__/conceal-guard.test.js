@@ -228,6 +228,30 @@ describe('config discovery is bounded at $HOME', () => {
   });
 });
 
+describe('conceal builder does not append above $HOME', () => {
+  it('creates a new config under the repo instead of appending above $HOME', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-cli-home-'));
+    const home = path.join(root, 'home');
+    const repo = path.join(home, 'proj');
+    fs.mkdirSync(repo, { recursive: true });
+    // An existing config ABOVE $HOME that the hook would never load.
+    fs.mkdirSync(path.join(root, '.claude'), { recursive: true });
+    const aboveCfg = path.join(root, '.claude', 'heimdall-conceal.json');
+    fs.writeFileSync(aboveCfg, JSON.stringify({ denyFilePatterns: [], denyCommandPatterns: [] }));
+    const before = fs.readFileSync(aboveCfg, 'utf8');
+
+    const env = { ...process.env, HOME: home };
+    delete env.CLAUDE_PROJECT_DIR;
+    const r = spawnSync('node', [SCRIPT, 'secret-folder', repo], { env, encoding: 'utf8' });
+    assert.equal(r.status, 0);
+    // The above-$HOME config is untouched…
+    assert.equal(fs.readFileSync(aboveCfg, 'utf8'), before);
+    // …and a fresh config was written under the repo (the hook can load it).
+    assert.ok(fs.existsSync(path.join(repo, '.claude', 'heimdall-conceal.json')));
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+});
+
 describe('nested config does not shadow an ancestor policy', () => {
   it('merges ancestor secretsFiles even when a subdir has a guard-only config', () => {
     const r = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-nested-'));

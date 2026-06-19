@@ -13,6 +13,7 @@
  * use /heimdall:harden instead, which also locks the file at the uid level.
  */
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 function esc(s) {
@@ -133,12 +134,16 @@ function report({ exists, isDir, label, cfgPath, created, filePat, cmdPat }) {
 
 // Walk up from startDir for an EXISTING conceal config; null if none. Appending
 // to the ancestor config (instead of creating a nested one) prevents a
-// subdirectory config from shadowing a parent policy at hook time.
+// subdirectory config from shadowing a parent policy at hook time. Bounded at
+// $HOME — exactly like the hook's loadConfig — so conceal never appends to a
+// config above $HOME that the hook would never load.
 function findExistingConfig(startDir) {
+  const home = os.homedir();
   let dir = path.resolve(startDir);
   for (;;) {
     const f = path.join(dir, '.claude', 'heimdall-conceal.json');
     if (fs.existsSync(f)) return f;
+    if (dir === home) return null; // bounded at $HOME, matching the hook
     const parent = path.dirname(dir);
     if (parent === dir) return null;
     dir = parent;
