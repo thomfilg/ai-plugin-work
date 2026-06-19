@@ -90,10 +90,19 @@ Then run `/heimdall:list` to confirm the locks are now reported under the
 
 ## Skills
 
+Lock blocks (write-protection, liftable by a phrase):
+
 - **`/heimdall:install [local|worktree|global|shared]`** — create a store (`.heimdall.json`).
 - **`/heimdall:protect <paths> [phrase]`** — add/extend a lock block.
 - **`/heimdall:unprotect <phrase> [paths]`** — remove a block or specific paths.
 - **`/heimdall:list`** — show every store, block, phrase, and resolved file/dir.
+
+Conceal + secrets boundary (read-denial, no unlock — see below):
+
+- **`/heimdall:conceal <path>`** — hard read+write deny a file/folder (hook only, no sudo).
+- **`/heimdall:harden [repo]`** — install the setuid OS boundary for MCP secrets (sudo).
+- **`/heimdall:audit [repo]`** — report the secrets/conceal posture (live agent-read check).
+- **`/heimdall:unharden [repo]`** — revert the OS boundary (sudo).
 
 ## How blocking works
 
@@ -109,6 +118,82 @@ On each guarded tool call the hook:
 Failure is **fail-open before any store exists** (installing the plugin without
 locks never bricks normal work) and **fail-closed once a store is configured and
 evaluation throws** (a configured guard errs on the side of blocking).
+
+## Conceal & the secrets boundary
+
+Lock blocks stop **writes** and are liftable by an unlock phrase — a guardrail
+against accidental edits. Some paths (credentials especially) you want the agent
+to never **read**, with no phrase escape. That is **conceal**, plus an optional
+OS-level boundary for MCP secrets. This is a separate subsystem with its own
+config and hook — it does not touch lock blocks.
+
+### Two layers
+
+- **Layer 2 — conceal (hook, no sudo).** A `PreToolUse` guard
+  (`hooks/heimdall-conceal.js`) hard-denies `Read`/`Grep`/`Glob`/`Edit`/`Write`/
+  `MultiEdit`/`NotebookEdit` on concealed paths and Bash commands that reference
+  them. There is **no unlock phrase** — it is a flat deny. It is
+  *defense-in-depth*: it stops the agent's own tool calls, not a raw subprocess
+  or sudo.
+- **Layer 1 — harden (setuid, sudo, Linux/Unix only).** The real boundary. A
+  setuid broker runs the credential-reading MCP servers as a dedicated uid so
+  the calling uid cannot read the secrets file or scrape `/proc/<pid>/environ`,
+  and `.mcp.json` is rewritten to launch those servers through the broker. The
+  broker reads its paths + allow-list at runtime from a **root-owned**
+  `broker.conf` co-located with the broker binary (which defaults to a per-repo
+  path `/usr/local/lib/mcp-broker/<repo>/...`, so projects don't share one
+  global config), and **no compiler is required**: a
+  prebuilt `linux-x86_64` binary ships in `scripts/bin/` and is installed when
+  `gcc` is absent (the installer compiles from source when `gcc` is present).
+  This layer is meaningless on Windows (no setuid / uid file-ownership) — only
+  conceal (Layer 2) runs there.
+
+### Config
+
+Both layers read `<repo>/.claude/heimdall-conceal.json` (safe-by-default-off —
+no file means the conceal hook is a no-op). Copy `heimdall-conceal.example.json`
+and tune. `/heimdall:conceal` maintains the `denyFilePatterns` /
+`denyCommandPatterns` for you; the `secretsFiles`/`wrapper`/`allowlist` keys
+drive `/heimdall:harden`.
+
+```
+/heimdall:conceal credentials/                 # hard-deny reads under a folder
+/heimdall:harden                               # then lock secrets at the OS level (sudo)
+/heimdall:audit                                # verify the agent uid is actually denied
+```
+
+The OS boundary holds only if the agent uid has **no** sudo and **no**
+docker-socket access — both are root-equivalent and bypass file permissions.
+
+### Recovering from a broken config
+
+If `heimdall-conceal.json` is present but unreadable or invalid JSON, the hook
+**fails closed** (blocks every tool call) rather than silently allowing reads.
+To avoid trapping you, the guard makes one exception: a file tool (`Edit`/
+`Write`/`Read`/…) targeting the offending config file itself is **allowed**, so
+you can fix the JSON from inside Claude Code. Everything else stays blocked, and
+the deny message names the file to repair. (`/heimdall:audit` likewise reports
+the guard as *failing closed* — never "inactive" — in this state.)
+
+### Verifying the committed broker binary
+
+`scripts/bin/mcp-pg-broker.linux-x86_64` is a committed, setuid-capable ELF, so
+its provenance matters. `build-broker.sh` writes a `.sha256` next to it. To
+verify the committed binary matches `mcp-pg-broker.c`:
+
+```bash
+# 1. Check the committed binary against its recorded digest
+cd plugins/heimdall/scripts/bin && sha256sum -c mcp-pg-broker.linux-x86_64.sha256
+
+# 2. Or rebuild from source and compare
+bash plugins/heimdall/scripts/build-broker.sh
+git status --short plugins/heimdall/scripts/bin/   # unchanged ⇒ reproduces
+```
+
+`gcc` output is not guaranteed bit-reproducible across compiler/libc versions,
+so the authoritative check remains: read `mcp-pg-broker.c` and rebuild on your
+own toolchain. The installer also prefers compiling from source whenever `gcc`
+is present, using the committed binary only as a no-compiler fallback.
 
 ## Quick start
 
