@@ -22,9 +22,18 @@ BROKER_SRC="${SCRIPT_DIR}/mcp-pg-broker.c"
 # BROKER_CONF below is derived from the (per-repo) broker path, not global.
 BROKER_PREBUILT="${SCRIPT_DIR}/bin/mcp-pg-broker.linux-$(uname -m)"
 
-REPO_DIR="${1:-${CLAUDE_PROJECT_DIR:-$PWD}}"
-[ "${REPO_DIR}" = "--revert" ] && { REPO_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"; REVERT=1; }
-[ "${2:-}" = "--revert" ] && REVERT=1
+# Parse args position-independently: `--revert` and the repo path may appear in
+# either order (`--revert <repo>`, `<repo> --revert`, `<repo>`, `--revert`, none).
+REVERT=
+REPO_ARG=
+for a in "${1:-}" "${2:-}"; do
+  case "$a" in
+    --revert) REVERT=1 ;;
+    "") : ;;
+    *) [ -z "${REPO_ARG}" ] && REPO_ARG="$a" ;;
+  esac
+done
+REPO_DIR="${REPO_ARG:-${CLAUDE_PROJECT_DIR:-$PWD}}"
 REPO_DIR="$(cd "${REPO_DIR}" && pwd)"
 CONFIG="${REPO_DIR}/.claude/heimdall-conceal.json"
 
