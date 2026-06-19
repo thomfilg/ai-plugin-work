@@ -71,3 +71,28 @@ test('re-acquire by the same pid is idempotent (ok, not refused)', () => {
   assert.equal(r.ok, true);
   lock.release(file);
 });
+
+test('acquire uses atomic create-exclusive (no read-check-write TOCTOU window)', () => {
+  // GH-622 review: the first acquire must atomically create the file; a second
+  // caller racing an already-present LIVE holder must see EEXIST and refuse,
+  // never read-then-overwrite. We assert the post-condition: with a live holder
+  // already present, acquire refuses rather than clobbering.
+  const file = tmpLock();
+  fs.writeFileSync(file, JSON.stringify({ pid: 1, startedAt: 0, host: 'x' }));
+  const before = fs.readFileSync(file, 'utf8');
+  const r = lock.acquire(file);
+  assert.equal(r.ok, false);
+  assert.equal(fs.readFileSync(file, 'utf8'), before, 'must not overwrite a live holder');
+});
+
+test('an unreadable/empty lock file is not stolen unless forced', () => {
+  const file = tmpLock();
+  fs.writeFileSync(file, ''); // present but unparseable (e.g. a creator mid-write)
+  const refused = lock.acquire(file);
+  assert.equal(refused.ok, false, 'must refuse a present-but-unreadable lock');
+  // Forced takeover reclaims it.
+  const forcedTake = lock.acquire(file, { force: true });
+  assert.equal(forcedTake.ok, true);
+  assert.equal(lock.readLock(file).pid, process.pid);
+  lock.release(file);
+});
