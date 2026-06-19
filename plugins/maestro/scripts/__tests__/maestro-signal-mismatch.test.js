@@ -1,0 +1,65 @@
+// maestro-signal.js footgun guard (GH-622 follow-up): a /signal that finds no
+// listener must warn LOUDLY when the agent is running under a different
+// namespace, instead of silently dropping the message.
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const path = require('node:path');
+
+const { buildMismatchWarning } = require(path.resolve(__dirname, '..', 'maestro-signal.js'));
+
+test('warns when an agent for the channel runs under a different namespace', () => {
+  const w = buildMismatchWarning({
+    channel: 'GH-42',
+    inboxDir: '/tmp/claude-agent-inbox',
+    ownNs: '', // signaling from a global/unnamespaced shell
+    sessionNames: ['proj-a/GH-42-work', 'proj-a/GH-42-listen', 'maestro-alerts'],
+  });
+  assert.ok(w, 'expected a warning');
+  assert.match(w, /different namespace/);
+  assert.match(w, /proj-a\/GH-42-work/);
+  assert.match(w, /set MAESTRO_NS=proj-a/);
+});
+
+test('no warning when the matching session is in OUR namespace', () => {
+  const w = buildMismatchWarning({
+    channel: 'GH-42',
+    inboxDir: '/tmp/claude-agent-inbox/proj-a',
+    ownNs: 'proj-a',
+    sessionNames: ['proj-a/GH-42-work'], // same namespace — just no -listen pane
+  });
+  assert.equal(w, null);
+});
+
+test('no warning when no session matches the channel', () => {
+  const w = buildMismatchWarning({
+    channel: 'GH-99',
+    inboxDir: '/tmp/claude-agent-inbox',
+    ownNs: '',
+    sessionNames: ['proj-a/GH-42-work', 'unrelated'],
+  });
+  assert.equal(w, null);
+});
+
+test('warns the other way: namespaced signaler, agent in global (or another ns)', () => {
+  const w = buildMismatchWarning({
+    channel: 'ECHO-7',
+    inboxDir: '/tmp/claude-agent-inbox/proj-b',
+    ownNs: 'proj-b',
+    sessionNames: ['ECHO-7-work'], // bare = global namespace ≠ proj-b
+  });
+  assert.ok(w);
+  assert.match(w, /ECHO-7-work/);
+  assert.match(w, /<their-namespace>/); // global session has no ns segment
+});
+
+test('channel with regex-special chars is matched literally (no injection)', () => {
+  const w = buildMismatchWarning({
+    channel: 'GH-1.0',
+    inboxDir: '/tmp/claude-agent-inbox',
+    ownNs: '',
+    sessionNames: ['proj-a/GH-1X0-work'], // '.' must NOT match 'X'
+  });
+  assert.equal(w, null);
+});
