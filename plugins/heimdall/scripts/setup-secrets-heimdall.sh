@@ -171,11 +171,15 @@ const wrapperBase = path.basename(process.env.WRAPPER);
 const allow = new Set(process.env.ALLOWED_CSV.split(','));
 const cfg = JSON.parse(fs.readFileSync(file, 'utf8'));
 let n = 0;
+const base = (x) => (x ? path.basename(x) : '');
 for (const [name, s] of Object.entries(cfg.mcpServers || {})) {
-  if (!Array.isArray(s.args) || s.args.length < 2) continue;
-  if (path.basename(s.args[0]) !== wrapperBase) continue; // only wrapper-launched servers
-  const serverName = s.args[1];
-  if (!allow.has(serverName)) continue;                   // only allow-listed (skips playwright etc.)
+  const args = Array.isArray(s.args) ? s.args : [];
+  // Detect the wrapper whether it is the `command` itself (server name in
+  // args[0]) or passed as the first arg (e.g. `node <wrapper> <server>`).
+  let serverName = null;
+  if (base(s.command) === wrapperBase) serverName = args[0];
+  else if (args.length >= 2 && base(args[0]) === wrapperBase) serverName = args[1];
+  if (!serverName || !allow.has(serverName)) continue;    // only allow-listed (skips playwright etc.)
   // Preserve any other fields (env, cwd, ...) the server/wrapper relies on;
   // only the launch command/args/type are redirected through the broker.
   cfg.mcpServers[name] = { ...s, command: broker, args: [serverName], type: 'stdio' };
