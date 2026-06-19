@@ -181,15 +181,28 @@ function resolveSafe(p) {
 // a PATH glob ONLY for Glob — for Grep it is a content-search regex, so treating
 // it as a path would wrongly block e.g. Grep(pattern: "logs") when a folder
 // "logs" is concealed.
+// All path-bearing fields a tool may carry, in BOTH snake_case and camelCase —
+// the lock guard accepts `filePath` too, so the conceal guard must as well or a
+// camelCase payload would skip the check.
+function pathFieldsOf(input) {
+  return [
+    input.file_path,
+    input.filePath,
+    input.path,
+    input.notebook_path,
+    input.notebookPath,
+  ].filter(Boolean);
+}
+
 function fileToolCandidates(toolName, input) {
-  const { file_path, path: p, notebook_path, pattern } = input;
   const candidates = [];
-  for (const f of [file_path, p, notebook_path].filter(Boolean)) {
+  for (const f of pathFieldsOf(input)) {
     candidates.push(f);
     const real = resolveSafe(f);
     if (real !== f) candidates.push(real);
   }
   if (toolName === 'Glob') {
+    const { path: p, pattern } = input;
     if (pattern) candidates.push(pattern);
     if (p && pattern) candidates.push(`${p}/${pattern}`);
   }
@@ -220,7 +233,7 @@ function evaluate(cfg, toolName, input) {
 function targetsConfigFile(toolName, input, cfgPath) {
   if (!cfgPath || !FILE_TOOLS.has(toolName)) return false;
   const real = resolveSafe(cfgPath);
-  for (const t of [input.file_path, input.path, input.notebook_path].filter(Boolean)) {
+  for (const t of pathFieldsOf(input)) {
     if (t === cfgPath || resolveSafe(t) === real) return true;
   }
   return false;

@@ -121,6 +121,16 @@ describe('heimdall conceal guard', () => {
     );
   });
 
+  it('denies a payload using the camelCase filePath field', () => {
+    assert.equal(
+      guard({
+        tool_name: 'Read',
+        tool_input: { filePath: path.join(repo, 'credentials', 'token.txt') },
+      }),
+      2
+    );
+  });
+
   it('denies a Read via a symlink that resolves into a concealed folder', () => {
     fs.writeFileSync(path.join(repo, 'secret-folder', 'real.txt'), 'sek\n');
     const link = path.join(repo, 'innocent.txt');
