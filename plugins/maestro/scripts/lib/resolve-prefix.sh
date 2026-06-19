@@ -37,3 +37,15 @@ resolve_prefix() {
     PREFIX="GH"
   fi
 }
+
+# GH-622: namespace segment for tmux session names. Mirrors namespace.js
+# sessionSeg(): "<MAESTRO_NS>/" when MAESTRO_NS is set + valid, else "". Sets the
+# global NS_SEG so a second conductor's agents live under a distinct tmux path.
+# Fail-open: an empty/malformed MAESTRO_NS collapses to "" (machine-global).
+resolve_ns_seg() {
+  if [[ "${MAESTRO_NS:-}" =~ ^[A-Za-z0-9_-]+$ ]]; then
+    NS_SEG="${MAESTRO_NS}/"
+  else
+    NS_SEG=""
+  fi
+}

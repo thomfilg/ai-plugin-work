@@ -140,6 +140,8 @@ QUESTION-DETECTED|AUTO-RESTART|SESSION-GONE|NUDGE|ACTION|pr-ready|pr-broken|stop
 
 | Variable | Default | What it tunes |
 |---|---|---|
+| `MAESTRO_NS` | (unset) | Namespace key (`[A-Za-z0-9_-]+`). Isolates state/log/alert/inbox/lock + tmux session names (`<ns>/<TICKET>-work`) so N maestro instances run on one machine without racing. Set it in each project's `.envrc`. See `docs/OPERATOR_PLAYBOOK.md` → "Running concurrent maestro instances". |
+| `MAESTRO_FORCE` | (unset) | `1` takes over a live per-namespace conductor lock instead of refusing to start. |
 | `WORKTREES_BASE` | — | Where worktrees live |
 | `REPO_NAME` | `claude-plugin-work` | Resolves to `<base>/<repo>-<ticket>` worktree path |
 | `BASE_BRANCH` | `main` | Branch the worktree forks from |

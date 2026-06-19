@@ -11,16 +11,20 @@
 'use strict';
 
 const fs = require('node:fs');
+const path = require('node:path');
 const { INBOX_DIR, validateChannelOrExit, ensureChannelFile } = require('../lib/inbox');
 
 function listListeners(channel) {
-  // Best-effort: list pids holding /tmp/claude-agent-inbox/<channel>.log open.
+  // Best-effort: list pids holding <inbox>/<channel>.log open. Use spawnSync
+  // argv (no shell) so the INBOX_DIR path (which can carry MAESTRO_NS) and the
+  // channel can never be interpreted by a shell (js/indirect-command-line-injection).
   try {
-    const { execSync } = require('node:child_process');
-    const out = execSync(`lsof -t '${INBOX_DIR}/${channel}.log' 2>/dev/null || true`, {
+    const { spawnSync } = require('node:child_process');
+    const res = spawnSync('lsof', ['-t', path.join(INBOX_DIR, `${channel}.log`)], {
       encoding: 'utf8',
       timeout: 2000,
-    }).trim();
+    });
+    const out = (res.stdout || '').trim();
     if (!out) return [];
     return out.split('\n').filter(Boolean);
   } catch {

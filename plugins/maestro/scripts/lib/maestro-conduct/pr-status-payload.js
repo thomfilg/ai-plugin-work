@@ -8,9 +8,12 @@
  * surface; only the instruction string and the conditional paneTail differ.
  */
 
-function buildPrReadyInstruction({ ctx, sHit, workSession }) {
+function buildPrReadyInstruction({ ctx, sHit, workSession, tmux }) {
   const sha7 = (sHit.sha || '').slice(0, 7);
-  return `Spawn work-workflow:code-checker (Agent tool, keep alive in tmux until verdict) on PR #${sHit.prNumber} sha=${sha7} for ${ctx.ticket}. Reviewer must answer FOUR questions: (1) Did the agent complete every requirement/AC in the ticket? (2) Did it introduce any bug (logic errors, regressions, broken edge cases)? (3) Did it add any security vulnerability (injection, secrets, unsafe shell, path traversal)? (4) Did it bypass any /work workflow gate (state edits, set-step CLI, completion-checker skip, fake TDD evidence, --no-verify, deferral annotations)? Verdict must be APPROVED only if ALL four are clean. On NEEDS-WORK → forward verbatim findings to ${workSession} via tmux send-keys; re-run after agent pushes. On APPROVED → surface PR URL to operator; operator merges PR and kills tmux sessions ${ctx.ticket}-work + ${ctx.ticket}-listen to free the pool slot.`;
+  // NS-scoped session names so the operator's kill instructions are correct
+  // under MAESTRO_NS (e.g. "proj-a/GH-42-work", not the aliased "GH-42-work").
+  const listenSession = tmux.sessionName(ctx.ticket, 'listen');
+  return `Spawn work-workflow:code-checker (Agent tool, keep alive in tmux until verdict) on PR #${sHit.prNumber} sha=${sha7} for ${ctx.ticket}. Reviewer must answer FOUR questions: (1) Did the agent complete every requirement/AC in the ticket? (2) Did it introduce any bug (logic errors, regressions, broken edge cases)? (3) Did it add any security vulnerability (injection, secrets, unsafe shell, path traversal)? (4) Did it bypass any /work workflow gate (state edits, set-step CLI, completion-checker skip, fake TDD evidence, --no-verify, deferral annotations)? Verdict must be APPROVED only if ALL four are clean. On NEEDS-WORK → forward verbatim findings to ${workSession} via tmux send-keys; re-run after agent pushes. On APPROVED → surface PR URL to operator; operator merges PR and kills tmux sessions ${workSession} + ${listenSession} to free the pool slot.`;
 }
 
 function buildPrBrokenInstruction({ sHit }) {
@@ -28,7 +31,7 @@ function buildPrBrokenInstruction({ sHit }) {
 function buildPayload({ ctx, sHit, workSession, tmux }) {
   const isReady = sHit.kind === 'pr-ready';
   const instruction = isReady
-    ? buildPrReadyInstruction({ ctx, sHit, workSession })
+    ? buildPrReadyInstruction({ ctx, sHit, workSession, tmux })
     : buildPrBrokenInstruction({ sHit });
   const paneTail = isReady
     ? undefined

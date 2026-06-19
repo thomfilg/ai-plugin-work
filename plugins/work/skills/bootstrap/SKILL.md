@@ -185,7 +185,9 @@ Next steps:
 **Note:** Bootstrap does NOT start the orchestrator listener. The
 `<TICKET>-listen` tmux session is started by `/work` on every
 invocation (idempotent) so the worker — not the worktree creator —
-owns the channel.
+owns the channel. Under maestro's `MAESTRO_NS`, that session is
+namespaced (`<ns>/<TICKET>-listen`) to match the namespaced `-work`
+session and avoid cross-project collisions (GH-622).
 
 ## Notes
 

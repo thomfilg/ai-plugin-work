@@ -163,6 +163,26 @@ _MAESTRO_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$_MAESTRO_SCRIPT_DIR/lib/resolve-prefix.sh"
 
 resolve_prefix
+# GH-622: namespace segment ("<MAESTRO_NS>/" or "") for tmux session names so a
+# second maestro instance on this machine never aliases this batch's sessions.
+resolve_ns_seg
+
+# GH-622: when isolated (a namespace or an explicit MAESTRO_INBOX_DIR override),
+# resolve the mailbox dir via namespace.inboxDir() — the SAME source maestro's
+# /signal + /listen use — and export it to /work as CLAUDE_AGENT_INBOX_DIR so both
+# halves of the channel agree. Resolving through the JS module (not a hardcoded
+# path) honors MAESTRO_INBOX_DIR. Single-quote-escaped so an override containing
+# shell metacharacters can't break out of the launch command. Fail-open: any node
+# error leaves INBOX_ENV empty and /work falls back to its own default.
+INBOX_ENV=""
+if [ -n "$NS_SEG" ] || [ -n "${MAESTRO_INBOX_DIR:-}" ]; then
+  _INBOX_DIR="$(node -e 'process.stdout.write(require(process.argv[1]).inboxDir())' \
+    "$_MAESTRO_SCRIPT_DIR/lib/maestro-conduct/namespace.js" 2>/dev/null || true)"
+  if [ -n "$_INBOX_DIR" ]; then
+    _INBOX_ESC="$(printf '%s' "$_INBOX_DIR" | sed "s/'/'\\\\''/g")"
+    INBOX_ENV="CLAUDE_AGENT_INBOX_DIR='${_INBOX_ESC}' "
+  fi
+fi
 
 REPO_DIR="$WORKTREES_BASE/$REPO_NAME"
 if [ ! -d "$REPO_DIR/.git" ]; then
@@ -259,12 +279,12 @@ for TICKET in "$@"; do
     node "$BOOTSTRAP_HELPER" "$WT" "$TICKET" || true
   fi
 
-  SESSION="$TICKET-work"
+  SESSION="${NS_SEG}$TICKET-work"
   if tmux has-session -t "$SESSION" 2>/dev/null; then
     echo "[$TICKET] tmux session $SESSION exists — skipping launch"
   else
     tmux new-session -d -s "$SESSION" -c "$WT" \
-      "$CLAUDE_BIN --dangerously-skip-permissions '/$TICKET_SKILL $TICKET'"
+      "${INBOX_ENV}$CLAUDE_BIN --dangerously-skip-permissions '/$TICKET_SKILL $TICKET'"
     echo "[$TICKET] launched tmux session $SESSION (claude /$TICKET_SKILL $TICKET)"
   fi
 done
@@ -275,4 +295,4 @@ echo "Active sessions:"
 # conductor discovers a wider set (SESSION_PATTERN defaults to
 # -(work|dev|listen)); this summary intentionally shows only the -work agents
 # bootstrap is responsible for.
-tmux list-sessions 2>/dev/null | grep -E "^${PREFIX}-[0-9]+-work:" || echo "  (none)"
+tmux list-sessions 2>/dev/null | grep -E "^${NS_SEG}${PREFIX}-[0-9]+-work:" || echo "  (none)"
