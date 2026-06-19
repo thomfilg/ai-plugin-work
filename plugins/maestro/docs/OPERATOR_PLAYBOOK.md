@@ -136,6 +136,46 @@ over the NS-derived default if you need to pin a single sink.
 > Unset `MAESTRO_NS` reproduces the historical machine-global behaviour exactly,
 > so existing single-project setups need no change.
 
+### The inbox channel — keep both halves on the same namespace
+
+The mailbox is a **human coordination channel**, not an agent pipe. For the
+agent's listener and your `/signal` to meet, both must resolve the **same**
+inbox dir. Under maestro orchestration this is automatic — bootstrap exports
+`CLAUDE_AGENT_INBOX_DIR=/tmp/claude-agent-inbox/<ns>` into the agent (and the
+`-listen` pane), and your operator shell resolves the same path from `MAESTRO_NS`
+in `.envrc`.
+
+> **The one footgun:** a *mismatched* config inside what should be one namespace.
+> If the agent runs under `MAESTRO_NS=proj-a` but you run `/signal` from a shell
+> where `MAESTRO_NS` is unset, the signal lands in the global dir, the agent tails
+> `proj-a/`, and the message is **silently dropped**. `/signal` now detects this:
+> when it finds **0 listeners** but an agent session for that channel exists under
+> a different namespace, it prints a `⚠️` pointing at the namespace to set. Heed it.
+>
+> Mitigation: put `MAESTRO_NS` (and, for **standalone `/work`** launched outside
+> maestro, `CLAUDE_AGENT_INBOX_DIR=/tmp/claude-agent-inbox/$MAESTRO_NS`) in each
+> project's `.envrc` so every shell — orchestrator, agent, and operator — agrees.
+
+**Coordination vs isolation, decided by the namespace:**
+
+- **Agents must coordinate?** Keep them in the **same** namespace (or both unset →
+  global, or point both at the same `MAESTRO_INBOX_DIR`).
+- **Agents must be walled off?** Give them **different** namespaces — exactly what
+  this delivers. (Cross-*project* coordination is explicitly out of scope; maestro
+  isolates, it does not bridge namespaces.)
+
+### Known limitation — `-dev` / check-agent sessions are not namespaced
+
+Only the sessions maestro owns (`-work`, `-listen`) and the resources it writes
+carry the namespace. The `<ticket>-dev` and `<ticket>-<agent>` (e.g.
+`<ticket>-code-checker`) tmux sessions are created by an **external operator
+convention**, not by either plugin — `check-gate.js`/`cleanup.js`/`inspect.js`
+only *check or kill* them by their bare names. Prefixing those references would
+break the match, so they stay bare. Practical impact under `MAESTRO_NS`: if you
+run the **same ticket number** concurrently across two repos, those helper
+sessions can alias. Avoid by giving concurrent batches distinct ticket-number
+ranges (or distinct prefixes), which the rest of the isolation already assumes.
+
 ## When you're unsure
 
 Ask the operator. Do not invent state. Do not edit `.work-state.json` directly. Do not call `work-state.js set-step`. Those are bypass attempts and the next bypass-check will catch them.
