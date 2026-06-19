@@ -163,6 +163,9 @@ _MAESTRO_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "$_MAESTRO_SCRIPT_DIR/lib/resolve-prefix.sh"
 
 resolve_prefix
+# GH-622: namespace segment ("<MAESTRO_NS>/" or "") for tmux session names so a
+# second maestro instance on this machine never aliases this batch's sessions.
+resolve_ns_seg
 
 REPO_DIR="$WORKTREES_BASE/$REPO_NAME"
 if [ ! -d "$REPO_DIR/.git" ]; then
@@ -259,7 +262,7 @@ for TICKET in "$@"; do
     node "$BOOTSTRAP_HELPER" "$WT" "$TICKET" || true
   fi
 
-  SESSION="$TICKET-work"
+  SESSION="${NS_SEG}$TICKET-work"
   if tmux has-session -t "$SESSION" 2>/dev/null; then
     echo "[$TICKET] tmux session $SESSION exists — skipping launch"
   else
@@ -275,4 +278,4 @@ echo "Active sessions:"
 # conductor discovers a wider set (SESSION_PATTERN defaults to
 # -(work|dev|listen)); this summary intentionally shows only the -work agents
 # bootstrap is responsible for.
-tmux list-sessions 2>/dev/null | grep -E "^${PREFIX}-[0-9]+-work:" || echo "  (none)"
+tmux list-sessions 2>/dev/null | grep -E "^${NS_SEG}${PREFIX}-[0-9]+-work:" || echo "  (none)"

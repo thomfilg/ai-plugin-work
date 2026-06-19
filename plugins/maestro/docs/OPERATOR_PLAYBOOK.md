@@ -63,6 +63,79 @@ When `QUESTION-DETECTED` lands:
 
 When an agent's PR is in `pr-ready` AND the bypass checker has APPROVED it, that agent's slot is effectively free — it sits in `wait_merge` doing nothing while it waits for human merge. You may bootstrap another ticket into a new slot at that point. Do not kill the existing tmux session; let it persist so the agent can pick up review comments after the operator merges (or doesn't).
 
+## Running concurrent maestro instances (one machine, N projects)
+
+Maestro's runtime state is machine-global and keyed by **ticket id** — tmux
+sessions (`<TICKET>-work`), conductor markers (`~/.cache/maestro-conduct/`),
+alert/log sinks (`/tmp/maestro-*`), and the mailbox (`/tmp/claude-agent-inbox/`).
+Two things follow from that:
+
+- **Two *batches* of distinct tickets in one project coexist fine.** A single
+  conductor is designed to watch all `<PREFIX>-*-work` sessions at once;
+  bootstrap skips sessions that already exist.
+- **Two *conductors* in the same namespace conflict.** Both discover every agent
+  globally and both nudge / restart / answer the same panes, racing on the same
+  marker files. **The rule is one conductor per namespace.**
+
+### The one-conductor rule is now enforced
+
+`maestro-conduct.js --daemon` claims a per-namespace lockfile
+(`<STATE_DIR>/conductor.lock`) on start. A second daemon in the **same**
+namespace detects the first and **refuses** with:
+
+```
+CONDUCTOR-EXISTS namespace="(global)" — a conductor (pid NNNN) already holds … Refusing to start.
+```
+
+- A **stale** lock (the holder process is dead) is reclaimed silently.
+- `MAESTRO_FORCE=1` takes the lock over deliberately (logs `CONDUCTOR-FORCED`).
+  Only do this when you are sure the previous conductor is gone.
+
+### Isolating a second instance with `MAESTRO_NS`
+
+To run a *fully independent* maestro for another project/worktree on the same
+box, set **one** variable — `MAESTRO_NS=<name>` (`[A-Za-z0-9_-]+`). It fans out
+to a per-namespace default for every shared resource:
+
+| Resource | Global default | `MAESTRO_NS=proj-a` default |
+|---|---|---|
+| State dir | `~/.cache/maestro-conduct/` | `~/.cache/maestro-conduct/proj-a/` |
+| Conductor lock | `…/conductor.lock` | `…/proj-a/conductor.lock` |
+| Log file | `/tmp/maestro-conduct.log` | `/tmp/maestro-conduct-proj-a.log` |
+| Alert file | `/tmp/maestro-alerts.jsonl` | `/tmp/maestro-alerts-proj-a.jsonl` |
+| Alert tmux session | `maestro-alerts` | `maestro-alerts-proj-a` |
+| Inbox dir | `/tmp/claude-agent-inbox/` | `/tmp/claude-agent-inbox/proj-a/` |
+| tmux session names | `GH-42-work` | `proj-a/GH-42-work` |
+| Discovery pattern | `^GH-\d+-(work\|dev\|listen)$` | `^proj-a/GH-\d+-(work\|dev\|listen)$` |
+
+Because the namespace is part of the **tmux session name**, two repos that share
+a prefix *and* a ticket number (both `GH-42-work`) no longer alias — they become
+`proj-a/GH-42-work` and `proj-b/GH-42-work`. The namespaced discovery pattern
+means each conductor only ever sees its own batch.
+
+Recipe — two isolated instances, each with its own conductor:
+
+```sh
+# Project A
+export MAESTRO_NS=proj-a REPO_NAME=repo-a WORKTREES_BASE=~/wt-a
+bash scripts/maestro-bootstrap.sh 42 43
+node scripts/maestro-conduct.js --daemon          # claims proj-a/conductor.lock
+
+# Project B (separate shell)
+export MAESTRO_NS=proj-b REPO_NAME=repo-b WORKTREES_BASE=~/wt-b
+bash scripts/maestro-bootstrap.sh 42 99
+node scripts/maestro-conduct.js --daemon          # claims proj-b/conductor.lock — no conflict
+```
+
+Set `MAESTRO_NS` in each project's `.envrc` so it's inherited by every maestro
+command (`/orchestrate`, `/conduct`, `/pulse`, `/signal`, `/cleanup`)
+automatically. Explicit per-resource overrides (`STATE_DIR`, `LOG_FILE`,
+`ALERT_FILE`, `ALERT_SESSION`, `MAESTRO_INBOX_DIR`, `SESSION_PATTERN`) still win
+over the NS-derived default if you need to pin a single sink.
+
+> Unset `MAESTRO_NS` reproduces the historical machine-global behaviour exactly,
+> so existing single-project setups need no change.
+
 ## When you're unsure
 
 Ask the operator. Do not invent state. Do not edit `.work-state.json` directly. Do not call `work-state.js set-step`. Those are bypass attempts and the next bypass-check will catch them.

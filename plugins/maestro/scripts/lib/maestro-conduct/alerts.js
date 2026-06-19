@@ -7,17 +7,16 @@
  * and the main loop decides when to escalate.
  */
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const tmux = require('./tmux');
+const namespace = require('./namespace');
 
-const ALERT_FILE = process.env.ALERT_FILE || '/tmp/maestro-alerts.jsonl';
-const ALERT_SESSION = process.env.ALERT_SESSION || 'maestro-alerts';
-// Must match state.js default so persisted alert counts live alongside the
-// per-ticket markers that gate dead-end escalation. Previously defaulted to
-// /tmp/maestro-conduct, which diverged from state.js (~/.cache/maestro-conduct)
-// and caused repeat counts to be stored in the wrong place.
-const STATE_DIR = process.env.STATE_DIR || path.join(os.homedir(), '.cache', 'maestro-conduct');
+const ALERT_FILE = namespace.alertFile();
+const ALERT_SESSION = namespace.alertSession();
+// Must match state.js so persisted alert counts live alongside the per-ticket
+// markers that gate dead-end escalation. Both flow through namespace.stateDir()
+// so a MAESTRO_NS run keeps counts in its own per-namespace subdir (GH-622).
+const STATE_DIR = namespace.stateDir();
 
 // In-process emit counter keyed by `${session}|${kind}|${sha||phase}`. Cleared
 // by the caller (typically via freeDeadEndSlot or phase advance). Persisted to
@@ -58,7 +57,7 @@ function log(line) {
   const out = `[${ts}] ${line}\n`;
   process.stderr.write(out);
   try {
-    fs.appendFileSync(process.env.LOG_FILE || '/tmp/maestro-conduct.log', out);
+    fs.appendFileSync(namespace.logFile(), out);
   } catch {}
 }
 

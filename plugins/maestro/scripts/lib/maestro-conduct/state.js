@@ -5,8 +5,8 @@
  * the bash-era pipe-separated format.
  */
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
+const namespace = require('./namespace');
 
 // Default state location lives under the user's home dir (XDG-ish) instead of
 // /tmp. Predictable filenames inside a shared world-writable tmp directory
@@ -14,7 +14,10 @@ const path = require('path');
 // pre-create or symlink the path before us. Using $HOME and 0o700 perms makes
 // symlink-substitution impractical. Override via STATE_DIR env when callers
 // need a custom location (e.g. tests using mkdtempSync-derived paths).
-const STATE_DIR = process.env.STATE_DIR || path.join(os.homedir(), '.cache', 'maestro-conduct');
+//
+// When MAESTRO_NS is set, namespace.stateDir() nests under a per-namespace
+// subdir so two conductors on one machine never share marker files (GH-622).
+const STATE_DIR = namespace.stateDir();
 fs.mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 });
 
 function file(ticket, kind) {

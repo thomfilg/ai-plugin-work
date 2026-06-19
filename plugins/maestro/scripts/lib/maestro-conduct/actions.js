@@ -154,7 +154,9 @@ function autoRestart({ session, ticket, worktree, silenceSec }) {
  */
 function killTicketTmux(ticket) {
   for (const suffix of ['work', 'listen']) {
-    spawnSync('tmux', ['kill-session', '-t', `${ticket}-${suffix}`], { stdio: 'ignore' });
+    spawnSync('tmux', ['kill-session', '-t', tmux.sessionName(ticket, suffix)], {
+      stdio: 'ignore',
+    });
   }
 }
 
@@ -332,7 +334,7 @@ function maybeFillPool() {
   // in another manifest that still has free slots. Stop after the first
   // successful bootstrap so the tick stays idempotent.
   for (const cand of findEligibleTasks()) {
-    if (activeSessions.includes(`${cand.taskId}-work`)) continue;
+    if (activeSessions.includes(tmux.sessionName(cand.taskId, 'work'))) continue;
     const ok = maybeAutoBootstrap(cand.taskId);
     if (ok) {
       alerts.log(`POOL-FILL auto-bootstrapped ${cand.taskId} from manifest "${cand.topic}"`);

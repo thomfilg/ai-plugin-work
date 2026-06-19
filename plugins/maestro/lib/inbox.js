@@ -10,8 +10,11 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const namespace = require('../scripts/lib/maestro-conduct/namespace');
 
-const INBOX_DIR = '/tmp/claude-agent-inbox';
+// Per-namespace mailbox dir when MAESTRO_NS is set (GH-622), else the historical
+// global /tmp/claude-agent-inbox. Override with MAESTRO_INBOX_DIR.
+const INBOX_DIR = namespace.inboxDir();
 const VALID_CHANNEL = /^[A-Za-z0-9_.-]+$/;
 
 function validateChannelOrExit(channel, usage) {

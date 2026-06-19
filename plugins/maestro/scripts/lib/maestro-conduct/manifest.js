@@ -83,7 +83,9 @@ function aliveTicketSet(activeWorkSessions) {
   return new Set(
     (activeWorkSessions || [])
       .map((s) => {
-        const m = s.match(/^([A-Z][A-Z0-9]*-\d+)-work$/);
+        // Tolerate an optional "<ns>/" segment so MAESTRO_NS-scoped session
+        // names (e.g. "proj-a/GH-42-work") still reconcile to the ticket id.
+        const m = s.match(/(?:^|\/)([A-Z][A-Z0-9]*-\d+)-work$/);
         return m ? m[1] : null;
       })
       .filter(Boolean)
