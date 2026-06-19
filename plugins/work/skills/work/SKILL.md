@@ -44,9 +44,16 @@ LISTEN_SESSION="${NS_SEG}${ARGUMENTS%% *}-listen"
 # CLAUDE_AGENT_INBOX_DIR (set by maestro-bootstrap under a namespace) into the
 # listener's command — otherwise it tails the global mailbox while maestro
 # /signal uses the per-namespace one. Empty when unset (standalone /work).
+# Single quotes in the value are escaped ('\'') so an inbox path containing a
+# quote can't break out of the single-quoted assignment.
+INBOX_FWD=""
+if [ -n "${CLAUDE_AGENT_INBOX_DIR:-}" ]; then
+  _esc=${CLAUDE_AGENT_INBOX_DIR//\'/\'\\\'\'}
+  INBOX_FWD="CLAUDE_AGENT_INBOX_DIR='${_esc}' "
+fi
 if ! tmux has-session -t "$LISTEN_SESSION" 2>/dev/null; then
   tmux new-session -d -s "$LISTEN_SESSION" \
-    "${CLAUDE_AGENT_INBOX_DIR:+CLAUDE_AGENT_INBOX_DIR='${CLAUDE_AGENT_INBOX_DIR}' }node \"${CLAUDE_PLUGIN_ROOT}/scripts/listen-communication.js\" ${ARGUMENTS%% *}"
+    "${INBOX_FWD}node \"${CLAUDE_PLUGIN_ROOT}/scripts/listen-communication.js\" ${ARGUMENTS%% *}"
   echo "  ✓ listener started: tmux session $LISTEN_SESSION"
 else
   echo "  ✓ listener already running: tmux session $LISTEN_SESSION"

@@ -19,9 +19,15 @@ SESS="${NS_SEG}${TICKET}-listen"
 # GH-622: a new tmux session doesn't inherit this shell's env, so forward
 # CLAUDE_AGENT_INBOX_DIR (set by maestro-bootstrap under a namespace) into the
 # listener command — else it tails the global mailbox while maestro /signal uses
-# the per-namespace one. Empty when unset (standalone /work).
+# the per-namespace one. Empty when unset (standalone /work). Single quotes in
+# the value are escaped ('\'') so a quoted path can't break out of the assignment.
+INBOX_FWD=""
+if [ -n "${CLAUDE_AGENT_INBOX_DIR:-}" ]; then
+  _esc=${CLAUDE_AGENT_INBOX_DIR//\'/\'\\\'\'}
+  INBOX_FWD="CLAUDE_AGENT_INBOX_DIR='${_esc}' "
+fi
 tmux has-session -t "$SESS" 2>/dev/null || \
-  tmux new-session -d -s "$SESS" "${CLAUDE_AGENT_INBOX_DIR:+CLAUDE_AGENT_INBOX_DIR='${CLAUDE_AGENT_INBOX_DIR}' }exec node ${CLAUDE_PLUGIN_ROOT}/scripts/listen-all.js"
+  tmux new-session -d -s "$SESS" "${INBOX_FWD}exec node ${CLAUDE_PLUGIN_ROOT}/scripts/listen-all.js"
 tmux list-sessions | grep "$SESS"
 ```
 
