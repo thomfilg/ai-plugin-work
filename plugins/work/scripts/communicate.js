@@ -3,12 +3,11 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { resolveInboxDir } = require('./inbox-dir');
 
-// NS-aware (GH-622): under MAESTRO_NS this nests under /tmp/claude-agent-inbox/<ns>
-// so /work messaging shares maestro's per-namespace mailbox. CLAUDE_AGENT_INBOX_DIR
-// still overrides; unset NS = the historical global path.
-const INBOX_DIR = resolveInboxDir();
+// GH-622: when maestro runs this agent under a namespace it exports
+// CLAUDE_AGENT_INBOX_DIR=/tmp/claude-agent-inbox/<ns> so /work messaging shares
+// maestro's per-namespace mailbox; unset = the historical global path.
+const INBOX_DIR = process.env.CLAUDE_AGENT_INBOX_DIR || '/tmp/claude-agent-inbox';
 
 const DONE_SENTINEL = '__MONITOR_DONE__';
 

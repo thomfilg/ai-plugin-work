@@ -4,11 +4,11 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
-const { resolveInboxDir } = require('./inbox-dir');
 
-// NS-aware (GH-622): tails the per-namespace mailbox under MAESTRO_NS so the
-// worker sees the same channel maestro signals. CLAUDE_AGENT_INBOX_DIR overrides.
-const INBOX_DIR = resolveInboxDir();
+// GH-622: maestro exports CLAUDE_AGENT_INBOX_DIR=/tmp/claude-agent-inbox/<ns>
+// when conducting under a namespace, so this tails the same per-namespace
+// mailbox maestro signals; unset = the historical global path.
+const INBOX_DIR = process.env.CLAUDE_AGENT_INBOX_DIR || '/tmp/claude-agent-inbox';
 
 function usage(code) {
   process.stderr.write(

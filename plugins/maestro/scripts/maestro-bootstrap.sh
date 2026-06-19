@@ -263,11 +263,17 @@ for TICKET in "$@"; do
   fi
 
   SESSION="${NS_SEG}$TICKET-work"
+  # GH-622: under a namespace, point /work's mailbox at the per-namespace inbox so
+  # its messaging (communicate.js / listen-all.js) shares the same dir maestro's
+  # /signal + /listen use (namespace.inboxDir() → /tmp/claude-agent-inbox/<ns>).
+  # MAESTRO_NS is already validated by resolve_ns_seg, so the path is metachar-free.
+  INBOX_ENV=""
+  [ -n "$NS_SEG" ] && INBOX_ENV="CLAUDE_AGENT_INBOX_DIR='/tmp/claude-agent-inbox/${MAESTRO_NS}' "
   if tmux has-session -t "$SESSION" 2>/dev/null; then
     echo "[$TICKET] tmux session $SESSION exists — skipping launch"
   else
     tmux new-session -d -s "$SESSION" -c "$WT" \
-      "$CLAUDE_BIN --dangerously-skip-permissions '/$TICKET_SKILL $TICKET'"
+      "${INBOX_ENV}$CLAUDE_BIN --dangerously-skip-permissions '/$TICKET_SKILL $TICKET'"
     echo "[$TICKET] launched tmux session $SESSION (claude /$TICKET_SKILL $TICKET)"
   fi
 done
