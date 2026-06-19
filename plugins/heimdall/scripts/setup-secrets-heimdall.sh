@@ -6,7 +6,8 @@
 #   - creates the dedicated runner uid (with a home for npx cache)
 #   - locks each secrets file to it (0600)
 #   - hardens the wrapper (root-owned, not agent-writable)
-#   - compiles + installs the setuid+setgid broker (paths + allow-list baked in)
+#   - installs the setuid (chmod 4711) broker; paths + allow-list are read at
+#     runtime from a root-owned broker.conf beside the binary (NOT baked in)
 #   - rewrites .mcp.json so credentialed servers launch via the broker
 #   - verifies the agent uid can no longer read the secrets
 #
