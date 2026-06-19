@@ -21,7 +21,12 @@ const STATE_DIR = namespace.stateDir();
 fs.mkdirSync(STATE_DIR, { recursive: true, mode: 0o700 });
 
 function file(ticket, kind) {
-  return path.join(STATE_DIR, `${ticket}.${kind}.json`);
+  // Marker keys may be full tmux session names, which under MAESTRO_NS carry a
+  // "<ns>/" segment (e.g. "proj-a/GH-42-work"). STATE_DIR is already per-namespace
+  // so flatten the key to a single filename segment — otherwise path.join would
+  // target a non-existent nested dir (ENOENT on write) and cleanup's bare-id
+  // marker matcher would miss it (GH-622).
+  return path.join(STATE_DIR, `${namespace.flattenKey(ticket)}.${kind}.json`);
 }
 
 function read(ticket, kind) {

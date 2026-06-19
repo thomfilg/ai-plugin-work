@@ -92,6 +92,21 @@ function ticketIdFor(session, suffixAlt) {
   return noSeg.replace(new RegExp(`-(${suffixAlt})$`), '');
 }
 
+/**
+ * Flatten a persistence key: strip any leading "<ns>/" segment from a value
+ * that may be a full tmux session name (e.g. "proj-a/GH-42-work" → "GH-42-work").
+ *
+ * Marker files and alert-count keys live under per-namespace stores
+ * (namespace.stateDir()), so the namespace is already encoded in the path — a
+ * "/" left in the key would make path.join target a non-existent nested dir and
+ * would break the flat-`<id>`-prefixed matchers in maestro-cleanup.js. Bare
+ * ids and global (non-namespaced) names contain no "/", so this is a no-op for
+ * them (GH-622).
+ */
+function flattenKey(key) {
+  return String(key).replace(/^.*\//, '');
+}
+
 /** Escape a literal string for inclusion in a RegExp source. */
 function reEscape(s) {
   return s.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&');
@@ -117,5 +132,6 @@ module.exports = {
   lockFile,
   sessionName,
   ticketIdFor,
+  flattenKey,
   defaultSessionPattern,
 };

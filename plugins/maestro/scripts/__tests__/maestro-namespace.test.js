@@ -6,8 +6,10 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const os = require('node:os');
 const path = require('node:path');
+const fs = require('node:fs');
 
 const NS_LIB = path.resolve(__dirname, '..', 'lib', 'maestro-conduct', 'namespace.js');
+const STATE_LIB = path.resolve(__dirname, '..', 'lib', 'maestro-conduct', 'state.js');
 
 // Reload with a fresh env so each case sees its own MAESTRO_NS / overrides.
 function load(env = {}) {
@@ -98,4 +100,34 @@ test('global defaultSessionPattern matches bare names but not namespaced ones', 
   const re = ns.defaultSessionPattern('GH', 'work|dev|listen');
   assert.ok(re.test('GH-42-work'));
   assert.ok(!re.test('proj-a/GH-42-work'));
+});
+
+test('state markers keyed by a namespaced SESSION name round-trip (no ENOENT)', () => {
+  // Regression for GH-622: per-session markers (spinner/silence/restart-loop)
+  // are keyed by the FULL session name, which under MAESTRO_NS contains a "/".
+  // Before flattenKey, path.join built a nested path whose parent dir didn't
+  // exist and writeFileSync threw ENOENT, breaking the conduct loop.
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ns-state-rt-'));
+  delete require.cache[require.resolve(STATE_LIB)];
+  delete require.cache[require.resolve(NS_LIB)];
+  process.env.MAESTRO_NS = 'proj-a';
+  process.env.STATE_DIR = stateDir;
+  const state = require(STATE_LIB);
+  assert.doesNotThrow(() => state.write('proj-a/GH-42-work', 'spinner', { lastInterruptAt: 1 }));
+  assert.deepEqual(state.read('proj-a/GH-42-work', 'spinner'), { lastInterruptAt: 1 });
+  // File lands flat (cleanup's bare-id matcher relies on this), not nested.
+  assert.ok(fs.existsSync(path.join(stateDir, 'GH-42-work.spinner.json')));
+  assert.ok(!fs.existsSync(path.join(stateDir, 'proj-a')));
+  delete require.cache[require.resolve(STATE_LIB)];
+  delete process.env.STATE_DIR;
+});
+
+test('flattenKey strips the <ns>/ segment so persistence keys stay flat', () => {
+  const ns = load({ MAESTRO_NS: 'proj-a' });
+  // Full session names → bare filename segment (no "/" → no nested-path ENOENT).
+  assert.equal(ns.flattenKey('proj-a/GH-42-work'), 'GH-42-work');
+  assert.equal(ns.flattenKey('proj-a/ECHO-7-listen'), 'ECHO-7-listen');
+  // Bare ids and global names are unchanged (no segment to strip).
+  assert.equal(ns.flattenKey('GH-42'), 'GH-42');
+  assert.equal(ns.flattenKey('GH-42-work'), 'GH-42-work');
 });

@@ -49,7 +49,10 @@ function resetCount(key) {
   }
 }
 function alertKey(obj) {
-  return `${obj.session || obj.ticket}|${obj.kind}|${obj.sha || obj.phase || '_'}`;
+  // Flatten the "<ns>/" segment so persisted alert-count keys stay flat
+  // (`<ticket>[-suffix]|kind|…`) and maestro-cleanup's bare-id purge matcher
+  // finds them under MAESTRO_NS (GH-622).
+  return `${namespace.flattenKey(obj.session || obj.ticket)}|${obj.kind}|${obj.sha || obj.phase || '_'}`;
 }
 
 function log(line) {
