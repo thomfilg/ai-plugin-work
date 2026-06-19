@@ -166,6 +166,32 @@ describe('heimdall conceal guard', () => {
   });
 });
 
+describe('conceal config is found from a subdirectory', () => {
+  it('walks up to a repo-root config when the session cwd is a subdir', () => {
+    const r = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-subdir-'));
+    fs.mkdirSync(path.join(r, '.claude'), { recursive: true });
+    fs.mkdirSync(path.join(r, 'sub', 'deep'), { recursive: true });
+    fs.writeFileSync(
+      path.join(r, '.claude', 'heimdall-conceal.json'),
+      JSON.stringify({ denyFilePatterns: ['(^|/)secret-folder(/|$)'], denyCommandPatterns: [] })
+    );
+    const env = { ...process.env };
+    delete env.CLAUDE_PROJECT_DIR; // force root resolution from the payload cwd
+    const res = spawnSync('node', [HOOK], {
+      input: JSON.stringify({
+        cwd: path.join(r, 'sub', 'deep'),
+        tool_name: 'Read',
+        tool_input: { file_path: path.join(r, 'secret-folder', 'x') },
+      }),
+      env,
+      cwd: os.tmpdir(),
+      encoding: 'utf8',
+    });
+    assert.equal(res.status, 2);
+    fs.rmSync(r, { recursive: true, force: true });
+  });
+});
+
 describe('malformed deny pattern does not fail open', () => {
   let badRepo;
   before(() => {

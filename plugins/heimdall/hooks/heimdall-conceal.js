@@ -22,27 +22,40 @@
 const fs = require('fs');
 const path = require('path');
 
-function loadConfig(root) {
-  // Single source of truth, matching setup-secrets-heimdall.sh and
-  // heimdall-conceal-status.js. (A repo-root variant would let the guard run
-  // while harden/audit report no config.)
-  const f = path.join(root, '.claude', 'heimdall-conceal.json');
+// Try to load the conceal config at <dir>/.claude/heimdall-conceal.json.
+// Returns the parsed config (stamped with __root = dir) when present, null when
+// genuinely absent (ENOENT), and THROWS when present-but-unreadable/invalid so
+// the caller fails closed rather than silently allowing reads.
+function tryLoadAt(dir) {
+  const f = path.join(dir, '.claude', 'heimdall-conceal.json');
   let raw;
   try {
     raw = fs.readFileSync(f, 'utf8');
   } catch (err) {
-    if (err.code === 'ENOENT') return null; // no policy for this project → no-op
-    // Present but unreadable: do NOT silently no-op (that would allow reads
-    // despite a policy). Throw → fail closed via main()'s wrapper.
+    if (err.code === 'ENOENT') return null;
     throw new Error(`cannot read ${f}: ${err.message}`);
   }
   try {
     const cfg = JSON.parse(raw);
-    cfg.__root = root;
+    cfg.__root = dir;
     return cfg;
   } catch (err) {
-    // Present but invalid JSON: fail closed rather than disable the guard.
     throw new Error(`${f} is not valid JSON: ${err.message}`);
+  }
+}
+
+// Walk up from startDir to the NEAREST ancestor carrying the config, so a
+// session running in a repo subdirectory still finds a config written at the
+// repo root (matches the lock guard, which canonicalizes to the repo). Single
+// filename, matching setup-secrets-heimdall.sh and heimdall-conceal-status.js.
+function loadConfig(startDir) {
+  let dir = path.resolve(startDir);
+  for (;;) {
+    const cfg = tryLoadAt(dir);
+    if (cfg) return cfg;
+    const parent = path.dirname(dir);
+    if (parent === dir) return null; // reached filesystem root, no policy
+    dir = parent;
   }
 }
 
