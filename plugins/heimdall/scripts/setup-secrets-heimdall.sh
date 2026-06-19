@@ -57,7 +57,7 @@ const abs = (p) => path.isAbsolute(p) ? p : path.join(repo, p);
 // ABSOLUTE repo path. MUST stay in sync with heimdall-conceal-status.js.
 const repoSlug =
   path.basename(repo).replace(/[^A-Za-z0-9._-]/g, '_') +
-  '-' + crypto.createHash('sha1').update(repo).digest('hex').slice(0, 8);
+  '-' + crypto.createHash('sha256').update(repo).digest('hex').slice(0, 8);
 const brokerDefault = `/usr/local/lib/mcp-broker/${repoSlug}/mcp-pg-broker`;
 const out = [];
 out.push(`RUN_USER=${q(cfg.runnerUser || 'mcp-runner')}`);

@@ -49,7 +49,7 @@ function brokerDefaultFor(base) {
   const slug =
     path.basename(base).replace(/[^A-Za-z0-9._-]/g, '_') +
     '-' +
-    crypto.createHash('sha1').update(base).digest('hex').slice(0, 8);
+    crypto.createHash('sha256').update(base).digest('hex').slice(0, 8);
   return `/usr/local/lib/mcp-broker/${slug}/mcp-pg-broker`;
 }
 
