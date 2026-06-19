@@ -40,9 +40,13 @@ worker can see via `tmux capture-pane`. Both are required.
 NS_SEG=""
 case "${MAESTRO_NS:-}" in ""|*[!A-Za-z0-9_-]*) NS_SEG="" ;; *) NS_SEG="${MAESTRO_NS}/" ;; esac
 LISTEN_SESSION="${NS_SEG}${ARGUMENTS%% *}-listen"
+# GH-622: a new tmux session does NOT inherit this shell's env, so forward
+# CLAUDE_AGENT_INBOX_DIR (set by maestro-bootstrap under a namespace) into the
+# listener's command — otherwise it tails the global mailbox while maestro
+# /signal uses the per-namespace one. Empty when unset (standalone /work).
 if ! tmux has-session -t "$LISTEN_SESSION" 2>/dev/null; then
   tmux new-session -d -s "$LISTEN_SESSION" \
-    "node \"${CLAUDE_PLUGIN_ROOT}/scripts/listen-communication.js\" ${ARGUMENTS%% *}"
+    "${CLAUDE_AGENT_INBOX_DIR:+CLAUDE_AGENT_INBOX_DIR='${CLAUDE_AGENT_INBOX_DIR}' }node \"${CLAUDE_PLUGIN_ROOT}/scripts/listen-communication.js\" ${ARGUMENTS%% *}"
   echo "  ✓ listener started: tmux session $LISTEN_SESSION"
 else
   echo "  ✓ listener already running: tmux session $LISTEN_SESSION"
