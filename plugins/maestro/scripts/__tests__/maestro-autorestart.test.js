@@ -62,6 +62,10 @@ test('autoRestart on -work session issues kill-session + new-session', () => {
   const actions = loadFreshActions(fakeDir, {
     CLAUDE_BIN: 'fake-claude',
     SKILL_NAME: 'work',
+    // Isolate restart-loop markers to this test's temp dir — without STATE_DIR
+    // they leak to ~/.cache/maestro-conduct/ and accumulate across runs, which
+    // trips RESTART_LOOP_THRESHOLD and wedges the session (flaky in isolation).
+    STATE_DIR: path.join(tmpDir, 'state'),
   });
 
   const ok = actions.autoRestart({
@@ -96,7 +100,10 @@ test('autoRestart no-ops when worktree directory is missing', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autorestart-miss-'));
   const logPath = path.join(tmpDir, 'tmux.log');
   const fakeDir = makeFakeTmuxDir(logPath);
-  const actions = loadFreshActions(fakeDir, { CLAUDE_BIN: 'fake-claude' });
+  const actions = loadFreshActions(fakeDir, {
+    CLAUDE_BIN: 'fake-claude',
+    STATE_DIR: path.join(tmpDir, 'state'),
+  });
 
   const ok = actions.autoRestart({
     session: 'ECHO-9-work',

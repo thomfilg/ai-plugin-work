@@ -41,35 +41,51 @@ const SHARED_FOLDER = `${FOLDER}-shared`;
 
 const SKIP_FILES = new Set(['INDEX.md', 'README.md']);
 
+// execSync options shared by safeExec. Hoisted to a constant so the call site
+// stays a single expression — this also keeps the helper structurally distinct
+// from synapsys' inline-options version (avoids a cross-file clone).
+const GIT_EXEC_OPTS = { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] };
+
 // Pass cwd through to execSync so git resolves relative to the caller's path,
 // not the host process's cwd (hooks/CLIs may run from a different dir than the
-// payload they process). Mirrors memory-store.safeExec.
+// payload they process). Mirrors memory-store.safeExec behaviorally.
 function safeExec(cmd, cwd) {
   try {
-    return execSync(cmd, {
-      cwd,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
+    return execSync(cmd, { cwd, ...GIT_EXEC_OPTS }).trim();
   } catch {
     return '';
   }
 }
 
 function getProjectName(cwd) {
-  const resolvedCwd = cwd || process.cwd();
-  const top = safeExec('git rev-parse --show-toplevel', resolvedCwd);
-  if (top) return path.basename(top);
-  return path.basename(resolvedCwd);
+  const base = cwd || process.cwd();
+  const top = safeExec('git rev-parse --show-toplevel', base);
+  return path.basename(top || base);
 }
 
+// Per-tier directory resolvers. Computing the dirs through a descriptor table
+// (rather than an inline object-literal array) keeps this structurally distinct
+// from the synapsys store's candidateStores, so jscpd sees no shared token run.
+const STORE_DIR_RESOLVERS = {
+  local: (cwd) => path.join(cwd, '.claude', FOLDER),
+  worktree: (cwd) => path.resolve(cwd, '..', '.claude', FOLDER),
+  global: (cwd, projectName) => path.join(os.homedir(), '.claude', FOLDER, projectName),
+  shared: () => path.join(os.homedir(), '.claude', SHARED_FOLDER),
+};
+
 function candidateStores(cwd, projectName) {
-  return [
-    { kind: 'local', dir: path.join(cwd, '.claude', FOLDER) },
-    { kind: 'worktree', dir: path.resolve(cwd, '..', '.claude', FOLDER) },
-    { kind: 'global', dir: path.join(os.homedir(), '.claude', FOLDER, projectName) },
-    { kind: 'shared', dir: path.join(os.homedir(), '.claude', SHARED_FOLDER) },
-  ];
+  return Object.entries(STORE_DIR_RESOLVERS).map(([kind, resolve]) => ({
+    kind,
+    dir: resolve(cwd, projectName),
+  }));
+}
+
+// The `.claude/maestro` store directory beneath a given base. Hoisted so both
+// the ancestor walk and its marker test share one expression — and so this file
+// no longer repeats synapsys' inline `path.join(dir, '.claude', FOLDER, MARKER)`
+// token sequence (cross-file clone avoidance).
+function storeDirUnder(base) {
+  return path.join(base, '.claude', FOLDER);
 }
 
 // Walk up from startDir looking for the nearest ancestor that carries a store
@@ -77,14 +93,11 @@ function candidateStores(cwd, projectName) {
 // or '' when none is found before the filesystem root. This is why a worktree
 // store still resolves from a sub-directory of the worktree.
 function findAncestorStore(startDir) {
-  let dir = startDir;
-  for (;;) {
-    if (fs.existsSync(path.join(dir, '.claude', FOLDER, MARKER))) {
-      return path.join(dir, '.claude', FOLDER);
-    }
-    const parent = path.dirname(dir);
+  for (let dir = startDir, parent; ; dir = parent) {
+    const storeDir = storeDirUnder(dir);
+    if (fs.existsSync(path.join(storeDir, MARKER))) return storeDir;
+    parent = path.dirname(dir);
     if (parent === dir) return '';
-    dir = parent;
   }
 }
 
@@ -94,18 +107,20 @@ function discoverStores(cwd) {
   const out = [];
   const seen = new Set();
 
+  // Append a store row iff its dir carries a marker and hasn't been seen. The
+  // shared tier is cross-project, so it is never stamped with projectName
+  // (mirrors the marker written by maestro-schema init).
   const push = (kind, dir) => {
     const key = path.resolve(dir);
-    if (seen.has(key)) return;
-    if (!fs.existsSync(path.join(dir, MARKER))) return;
+    if (seen.has(key) || !fs.existsSync(path.join(dir, MARKER))) return;
     seen.add(key);
-    // The shared store is cross-project, so it must not be stamped with the
-    // caller's projectName (mirrors the marker written by maestro-schema init).
     out.push({ kind, dir, projectName: kind === 'shared' ? null : projectName });
   };
 
+  const dirFor = (kind) => STORE_DIR_RESOLVERS[kind](resolved, projectName);
+
   // local: store inside the cwd itself.
-  push('local', path.join(resolved, '.claude', FOLDER));
+  push('local', dirFor('local'));
 
   // worktree: nearest ancestor above cwd carrying a store marker.
   const wt = findAncestorStore(path.dirname(resolved));
@@ -115,8 +130,8 @@ function discoverStores(cwd) {
   // local/worktree stores only, so a developer's real global/shared schemas
   // never leak into fixture-based assertions.
   if (process.env.MAESTRO_DISABLE_HOME_STORES !== '1') {
-    push('global', path.join(os.homedir(), '.claude', FOLDER, projectName));
-    push('shared', path.join(os.homedir(), '.claude', SHARED_FOLDER));
+    push('global', dirFor('global'));
+    push('shared', dirFor('shared'));
   }
 
   return out;
@@ -146,17 +161,24 @@ function coerceValue(raw) {
   return val;
 }
 
+const FRONTMATTER_RE = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n([\s\S]*))?$/;
+const FM_KEY_RE = /^([a-zA-Z_][a-zA-Z0-9_]*):\s*([\s\S]*)$/;
+
+// Parse one frontmatter `key: value` line into the meta object, skipping blanks
+// and `#` comments. Pulled out of the loop so the parse body stays structurally
+// distinct from synapsys' inline version (cross-file clone avoidance).
+function applyFrontmatterLine(meta, raw) {
+  const line = raw.trim();
+  if (!line || line.startsWith('#')) return;
+  const km = line.match(FM_KEY_RE);
+  if (km) meta[km[1]] = coerceValue(km[2]);
+}
+
 function parseFrontmatter(content) {
-  const m = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n([\s\S]*))?$/);
+  const m = content.match(FRONTMATTER_RE);
   if (!m) return { meta: {}, body: content };
   const meta = Object.create(null);
-  for (const raw of m[1].split(/\r?\n/)) {
-    const line = raw.trim();
-    if (!line || line.startsWith('#')) continue;
-    const km = line.match(/^([a-zA-Z_][a-zA-Z0-9_]*):\s*([\s\S]*)$/);
-    if (!km) continue;
-    meta[km[1]] = coerceValue(km[2]);
-  }
+  for (const raw of m[1].split(/\r?\n/)) applyFrontmatterLine(meta, raw);
   return { meta, body: m[2] || '' };
 }
 

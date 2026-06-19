@@ -66,7 +66,8 @@ function parseArgs(argv) {
 
 function cmdInit(args) {
   const kind = args._[0];
-  if (!VALID_TIERS.has(kind)) die(`init needs a tier: local|worktree|global|shared (got '${kind}')`);
+  if (!VALID_TIERS.has(kind))
+    die(`init needs a tier: local|worktree|global|shared (got '${kind}')`);
   const cwd = args.cwd || process.cwd();
   const projectName = getProjectName(cwd);
   const target = candidateStores(cwd, projectName).find((c) => c.kind === kind);
@@ -117,21 +118,28 @@ function cmdInit(args) {
   console.log(`initialized maestro schema store at ${target.dir} (tier=${kind}, ${scopeNote})`);
 }
 
-function cmdSave(args) {
+// Validate the `save` name/tier args and resolve the target store. Dies with
+// the same messages as the inline checks it replaces; returns the store row.
+function resolveSaveTarget(args) {
   const name = args._[0];
   if (!name) die('save needs a <name>');
   if (!NAME_RE.test(name)) die(`name must be kebab-case (got '${name}')`);
   const kind = args.tier;
-  if (!VALID_TIERS.has(kind)) die(`save needs --tier=<local|worktree|global|shared> (got '${kind}')`);
-
+  if (!VALID_TIERS.has(kind)) {
+    die(`save needs --tier=<local|worktree|global|shared> (got '${kind}')`);
+  }
   const cwd = args.cwd || process.cwd();
   const target = discoverStores(cwd).find((s) => s.kind === kind);
   if (!target) {
     die(`no maestro store in tier '${kind}' — run: maestro-schema.js init ${kind}`);
   }
+  return { name, kind, target };
+}
 
-  const file = path.join(target.dir, `${name}.md`);
-  const meta = {
+// Build the frontmatter meta object from save flags. Optional knobs collapse to
+// undefined so serializeFrontmatter omits them.
+function buildSaveMeta(args, name) {
+  return {
     name,
     description: args.description || '',
     pool_size: args.pool !== undefined ? parseInt(args.pool, 10) : undefined,
@@ -141,18 +149,27 @@ function cmdSave(args) {
     compiled_from: args['compiled-from'] || undefined,
     compiled_at: new Date().toISOString().slice(0, 10),
   };
-  const content = serializeFrontmatter(meta, args.body || '');
-  // Exclusive create unless --force: `wx` fails atomically when the schema
-  // already exists, so there is no existsSync-then-write race (CodeQL). With
-  // --force we intentionally overwrite.
+}
+
+// Write the schema file. Exclusive create unless --force: `wx` fails atomically
+// when the schema already exists, so there is no existsSync-then-write race
+// (CodeQL). With --force we intentionally overwrite.
+function writeSchemaFile({ file, content, force, name, kind }) {
   try {
-    fs.writeFileSync(file, content, args.force ? undefined : { flag: 'wx' });
+    fs.writeFileSync(file, content, force ? undefined : { flag: 'wx' });
   } catch (e) {
     if (e.code === 'EEXIST') {
       die(`schema '${name}' already exists in tier '${kind}' (use --force to overwrite)`);
     }
     throw e;
   }
+}
+
+function cmdSave(args) {
+  const { name, kind, target } = resolveSaveTarget(args);
+  const file = path.join(target.dir, `${name}.md`);
+  const content = serializeFrontmatter(buildSaveMeta(args, name), args.body || '');
+  writeSchemaFile({ file, content, force: args.force, name, kind });
   console.log(`saved schema '${name}' to ${file} (tier=${kind})`);
 }
 
@@ -181,7 +198,9 @@ function cmdDelete(args) {
   if (args.tier) hits = hits.filter((h) => h.store === args.tier);
   if (hits.length === 0) die(`no schema '${name}'${args.tier ? ` in tier '${args.tier}'` : ''}`);
   if (hits.length > 1) {
-    die(`schema '${name}' exists in tiers ${hits.map((h) => h.store).join(', ')}; pass --tier to pick one`);
+    die(
+      `schema '${name}' exists in tiers ${hits.map((h) => h.store).join(', ')}; pass --tier to pick one`
+    );
   }
   fs.unlinkSync(hits[0].file);
   console.log(`deleted schema '${name}' (tier=${hits[0].store})`);
