@@ -201,7 +201,13 @@ function main() {
   reportMcpWiring(m.mcpJson, broker);
 
   console.log('');
-  if (m.secretsFiles.length && protectedCount === m.secretsFiles.length) {
+  if (m.secretsFiles.length === 0) {
+    // Conceal-only project: hook-level deny patterns with no MCP secrets to lock.
+    // There is nothing for harden to do, so don't suggest it.
+    console.log(
+      'STATUS: conceal-only — hook-level deny patterns active; no secretsFiles configured, so /heimdall:harden does not apply.'
+    );
+  } else if (protectedCount === m.secretsFiles.length) {
     console.log('STATUS: boundary ACTIVE — agent uid is denied on all (existing) secrets files.');
   } else {
     console.log('STATUS: boundary NOT fully active — run /heimdall:harden (sudo setup).');
