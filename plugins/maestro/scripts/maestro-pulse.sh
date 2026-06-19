@@ -5,10 +5,18 @@ set -u
 WORKTREES_BASE="${WORKTREES_BASE:-$HOME/worktrees}"
 REPO_NAME="${REPO_NAME:-claude-plugin-work}"
 
+# GH-622: resolve the provider prefix + the MAESTRO_NS session segment so pulse
+# snapshots only the namespace it was launched in (matches conduct discovery).
+_MAESTRO_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=lib/resolve-prefix.sh
+. "$_MAESTRO_SCRIPT_DIR/lib/resolve-prefix.sh"
+resolve_prefix
+resolve_ns_seg
+
 echo "=== Active /work agents ==="
-sessions=$(tmux list-sessions -F '#S' 2>/dev/null | grep -E '^GH-[0-9]+-work$' || true)
+sessions=$(tmux list-sessions -F '#S' 2>/dev/null | grep -E "^${NS_SEG}${PREFIX}-[0-9]+-work$" || true)
 if [ -z "$sessions" ]; then
-  echo "  (no GH-*-work sessions)"
+  echo "  (no ${NS_SEG}${PREFIX}-*-work sessions)"
 else
   printf "  %-15s %-30s %-12s\n" "SESSION" "SPINNER" "TOKENS"
   while IFS= read -r s; do

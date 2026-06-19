@@ -15,6 +15,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const tmux = require('./tmux');
+const namespace = require('./namespace');
 const alerts = require('./alerts');
 const state = require('./state');
 const manifest = require('./manifest');
@@ -136,11 +137,25 @@ function autoRestart({ session, ticket, worktree, silenceSec }) {
       session,
       '-c',
       worktree,
-      `${CLAUDE_BIN} --dangerously-skip-permissions '/${skill} ${ticket}'`,
+      `${inboxEnvPrefix()}${CLAUDE_BIN} --dangerously-skip-permissions '/${skill} ${ticket}'`,
     ],
     { stdio: 'ignore' }
   );
   return true;
+}
+
+// GH-622: on an auto-restart, relaunch /work with the SAME mailbox dir
+// maestro-bootstrap.sh sets on the initial launch — otherwise the restarted
+// agent's messaging drifts back to the global mailbox while maestro /signal
+// stays isolated. Fires when isolated (a namespace OR an explicit
+// MAESTRO_INBOX_DIR override) and resolves through namespace.inboxDir() so the
+// path equals maestro's own /signal side (and honors MAESTRO_INBOX_DIR). The
+// value is single-quote-escaped so an override with shell metacharacters can't
+// break out of the launch command.
+function inboxEnvPrefix() {
+  if (!namespace.ns() && !process.env.MAESTRO_INBOX_DIR) return '';
+  const esc = namespace.inboxDir().replace(/'/g, "'\\''");
+  return `CLAUDE_AGENT_INBOX_DIR='${esc}' `;
 }
 
 /**
@@ -154,7 +169,9 @@ function autoRestart({ session, ticket, worktree, silenceSec }) {
  */
 function killTicketTmux(ticket) {
   for (const suffix of ['work', 'listen']) {
-    spawnSync('tmux', ['kill-session', '-t', `${ticket}-${suffix}`], { stdio: 'ignore' });
+    spawnSync('tmux', ['kill-session', '-t', tmux.sessionName(ticket, suffix)], {
+      stdio: 'ignore',
+    });
   }
 }
 
@@ -332,7 +349,7 @@ function maybeFillPool() {
   // in another manifest that still has free slots. Stop after the first
   // successful bootstrap so the tick stays idempotent.
   for (const cand of findEligibleTasks()) {
-    if (activeSessions.includes(`${cand.taskId}-work`)) continue;
+    if (activeSessions.includes(tmux.sessionName(cand.taskId, 'work'))) continue;
     const ok = maybeAutoBootstrap(cand.taskId);
     if (ok) {
       alerts.log(`POOL-FILL auto-bootstrapped ${cand.taskId} from manifest "${cand.topic}"`);

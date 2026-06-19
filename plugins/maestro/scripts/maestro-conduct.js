@@ -32,6 +32,7 @@ const prStatusPayload = require('./lib/maestro-conduct/pr-status-payload');
 const prCommentsHandler = require('./lib/maestro-conduct/pr-comments-handler');
 const questionHandler = require('./lib/maestro-conduct/question-handler');
 const { isHaltedWaitingForUser } = require('./lib/maestro-conduct/halted-waiting');
+const singletonGuard = require('./lib/maestro-conduct/singleton-guard');
 
 const DETECTORS = {
   question: require('./lib/maestro-conduct/detectors/question'),
@@ -255,7 +256,7 @@ function runPrStatusDetector(ctx) {
   }
   // pr-ready / pr-broken → structured alert sink. Target -work explicitly
   // (pr-status dedups per-ticket so -listen could otherwise own the alert).
-  const workSession = `${ctx.ticket}-work`;
+  const workSession = tmux.sessionName(ctx.ticket, 'work');
   actions.alert(prStatusPayload.buildPayload({ ctx, sHit, workSession, tmux }));
   ciGate.maybeFreeOnPrReady({ ctx, sHit, workSession, actions });
 }
@@ -325,7 +326,7 @@ function tick() {
     alerts.log(`maybeFillPool failed: ${e.message}`);
   }
   if (!sessions.length) {
-    alerts.log('no GH-*-work sessions');
+    alerts.log(`no ${tmux.sessionName(`${tmux.resolveTicketPrefix()}-*`, 'work')} sessions`);
     return;
   }
   for (const session of sessions) tickSession(session);
@@ -345,13 +346,18 @@ function handlePrComments(ctx, cHit) {
   });
 }
 
+// GH-622: a long-running conductor claims a per-namespace lock (singleton-guard)
+// so a second daemon in the SAME namespace is detected instead of both driving
+// (and racing on) the same agents. One-shot ticks don't lock — the conflict is
+// specific to two persistent daemons.
 function main() {
   const daemon = process.argv.includes('--daemon');
   if (!daemon) {
     tick();
     return;
   }
-  alerts.log(`orchestrate daemon starting, tick=${TICK_SEC}s`);
+  const nsLabel = singletonGuard.acquireOrExit();
+  alerts.log(`orchestrate daemon starting, tick=${TICK_SEC}s namespace="${nsLabel}"`);
   setInterval(tick, TICK_SEC * 1000);
   tick();
 }
