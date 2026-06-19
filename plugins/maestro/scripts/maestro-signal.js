@@ -52,10 +52,16 @@ function escapeRe(s) {
  * warning string, or null when there's nothing to flag.
  */
 function buildMismatchWarning({ channel, inboxDir, ownNs, sessionNames }) {
-  const re = new RegExp(`(?:^|/)${escapeRe(channel)}-(work|listen|dev)$`);
-  const elsewhere = (sessionNames || []).filter((s) => re.test(s) && sessionNsOf(s) !== ownNs);
-  if (!elsewhere.length) return null;
-  const theirNs = sessionNsOf(elsewhere[0]);
+  // Only -work / -listen carry the namespace and correlate with the mailbox.
+  // -dev is intentionally un-namespaced (a separate known limitation) and says
+  // nothing about which inbox the agent uses, so it must not trigger a warning.
+  const re = new RegExp(`(?:^|/)${escapeRe(channel)}-(work|listen)$`);
+  const matches = (sessionNames || []).filter((s) => re.test(s));
+  // If a channel session already lives in OUR namespace the operator is aligned
+  // with the agent — 0 listeners then just means no -listen pane, not a wrong
+  // mailbox — so don't cry mismatch on an unrelated session in another namespace.
+  if (!matches.length || matches.some((s) => sessionNsOf(s) === ownNs)) return null;
+  const theirNs = sessionNsOf(matches[0]);
   const here = ownNs ? `MAESTRO_NS=${ownNs}` : 'the global';
   // The agent's side dictates the fix: a namespaced agent → set MAESTRO_NS to it;
   // a bare (global) agent → UNSET MAESTRO_NS so /signal uses the global mailbox.
@@ -64,7 +70,7 @@ function buildMismatchWarning({ channel, inboxDir, ownNs, sessionNames }) {
     : 'unset MAESTRO_NS so /signal uses the global mailbox';
   return (
     `⚠️  0 listeners on ${inboxDir}, but agent session(s) exist in a different namespace: ` +
-    `${elsewhere.join(', ')}.\n   This signal went to ${here} mailbox and will NOT reach them. ` +
+    `${matches.join(', ')}.\n   This signal went to ${here} mailbox and will NOT reach them. ` +
     `Align namespaces — ${fix}, or point both halves at one CLAUDE_AGENT_INBOX_DIR / MAESTRO_INBOX_DIR.`
   );
 }

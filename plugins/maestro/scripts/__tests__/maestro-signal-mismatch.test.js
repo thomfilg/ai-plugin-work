@@ -57,6 +57,28 @@ test('namespaced signaler, agent in GLOBAL ns → tells operator to UNSET MAESTR
   assert.doesNotMatch(w, /<their-namespace>/);
 });
 
+test('no false warning when our-namespace -work exists alongside a bare global -dev', () => {
+  // Regression: a bare <ticket>-dev (un-namespaced by design) must NOT trigger a
+  // mismatch when the operator's MAESTRO_NS already matches the -work session.
+  const w = buildMismatchWarning({
+    channel: 'GH-42',
+    inboxDir: '/tmp/claude-agent-inbox/proj-a',
+    ownNs: 'proj-a',
+    sessionNames: ['proj-a/GH-42-work', 'GH-42-dev'],
+  });
+  assert.equal(w, null);
+});
+
+test('-dev sessions are ignored entirely (never the basis for a warning)', () => {
+  const w = buildMismatchWarning({
+    channel: 'GH-42',
+    inboxDir: '/tmp/claude-agent-inbox',
+    ownNs: '',
+    sessionNames: ['proj-a/GH-42-dev'], // only a dev session, in another ns
+  });
+  assert.equal(w, null);
+});
+
 test('channel with regex-special chars is matched literally (no injection)', () => {
   const w = buildMismatchWarning({
     channel: 'GH-1.0',
