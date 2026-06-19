@@ -32,6 +32,7 @@ const uname = (uid) => UID_NAMES.get(uid) || String(uid);
 const gname = (gid) => GID_NAMES.get(gid) || String(gid);
 
 function stat(p) {
+  if (!p) return 'n/a';
   try {
     const s = fs.statSync(p);
     const mode = (s.mode & 0o777).toString(8).padStart(3, '0');
@@ -52,35 +53,61 @@ function brokerDefaultFor(base) {
   return `/usr/local/lib/mcp-broker/${slug}/mcp-pg-broker`;
 }
 
-// Find the conceal config by walking UP from startDir to the nearest ancestor
-// carrying .claude/heimdall-conceal.json — mirrors the PreToolUse hook, so an
-// audit run from a subdirectory reports the SAME active/inactive state the hook
-// enforces. Distinguishes absent (genuinely inactive) from present-but-broken
-// (the hook fails closed → must not be reported "inactive").
-function findConfig(start) {
+// Walk UP from startDir to the filesystem root collecting EVERY conceal config —
+// mirrors the PreToolUse hook (which merges all ancestors and fails closed on
+// any broken one). Returns { state, configs?, baseDir?, cfgPath?, error? }:
+//   absent      — no config anywhere up the tree
+//   unreadable  — a present config could not be read   (hook fails closed)
+//   invalid     — a present config is not valid JSON   (hook fails closed)
+//   ok          — configs[] (nearest-first) with their dirs + the nearest baseDir
+function collectConfigs(start) {
   let dir = path.resolve(start);
+  const configs = [];
   for (;;) {
     const cfgPath = path.join(dir, '.claude', 'heimdall-conceal.json');
-    let raw;
+    let raw = null;
     try {
       raw = fs.readFileSync(cfgPath, 'utf8');
     } catch (err) {
       if (err.code !== 'ENOENT') return { state: 'unreadable', cfgPath, error: err.message };
-      const parent = path.dirname(dir);
-      if (parent === dir)
-        return {
-          state: 'absent',
-          cfgPath: path.join(path.resolve(start), '.claude', 'heimdall-conceal.json'),
-        };
-      dir = parent;
-      continue;
     }
-    try {
-      return { state: 'ok', dir, cfgPath, cfg: JSON.parse(raw) };
-    } catch (err) {
-      return { state: 'invalid', cfgPath, error: err.message };
+    if (raw !== null) {
+      try {
+        configs.push({ dir, cfg: JSON.parse(raw) });
+      } catch (err) {
+        return { state: 'invalid', cfgPath, error: err.message };
+      }
     }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
   }
+  if (configs.length === 0) return { state: 'absent' };
+  return { state: 'ok', configs, baseDir: configs[0].dir };
+}
+
+const absUnder = (dir, p) => (path.isAbsolute(p) ? p : path.join(dir, p));
+// Take the first (nearest) defined value for a scalar field.
+function pick(out, key, value) {
+  if (out[key] === undefined && value) out[key] = value;
+}
+
+// Merge collected configs into one audit view. secretsFiles/wrapper/mcpJson are
+// resolved to ABSOLUTE paths against the dir of the config they came from (so an
+// ancestor's relative path isn't mis-resolved); scalar fields take the nearest
+// defined value.
+function mergeOne(out, dir, cfg) {
+  for (const f of cfg.secretsFiles || []) out.secretsFiles.push(absUnder(dir, f));
+  pick(out, 'wrapper', cfg.wrapper && absUnder(dir, cfg.wrapper));
+  pick(out, 'mcpJson', cfg.mcpJson && absUnder(dir, cfg.mcpJson));
+  pick(out, 'brokerPath', cfg.brokerPath);
+  pick(out, 'runnerUser', cfg.runnerUser);
+}
+
+function mergeForAudit(configs) {
+  const out = { secretsFiles: [] };
+  for (const c of configs) mergeOne(out, c.dir, c.cfg);
+  return out;
 }
 
 // This script runs AS the agent uid, so a direct read check is the decisive
@@ -94,26 +121,28 @@ function canAgentRead(p) {
   }
 }
 
-function reportSecretsFiles(cfg, abs) {
+function reportSecretsFiles(secretsFiles) {
   console.log('Secrets files:');
   let protectedCount = 0;
-  const files = cfg.secretsFiles || [];
-  for (const f of files) {
-    const p = abs(f);
+  for (const p of secretsFiles) {
     // A MISSING file also fails the read check, but it is not a locked
     // credential — it must NOT count toward "boundary active".
     const present = fs.existsSync(p);
     const exposed = present && canAgentRead(p);
     if (present && !exposed) protectedCount++;
     const note = !present ? 'MISSING (not locked)' : exposed ? 'YES (exposed!)' : 'denied';
-    console.log(`  ${f}  [${stat(p)}]  agent-read: ${note}`);
+    console.log(`  ${p}  [${stat(p)}]  agent-read: ${note}`);
   }
-  return { files, protectedCount };
+  return protectedCount;
 }
 
-function reportMcpWiring(cfg, abs, broker) {
+function reportMcpWiring(mcpJson, broker) {
+  if (!mcpJson) {
+    console.log('.mcp.json:   not configured');
+    return;
+  }
   try {
-    const mcp = JSON.parse(fs.readFileSync(abs(cfg.mcpJson || '.mcp.json'), 'utf8'));
+    const mcp = JSON.parse(fs.readFileSync(mcpJson, 'utf8'));
     const viaBroker = Object.values(mcp.mcpServers || {}).filter(
       (s) => s.command === broker
     ).length;
@@ -124,7 +153,7 @@ function reportMcpWiring(cfg, abs, broker) {
 }
 
 function main() {
-  const found = findConfig(startDir);
+  const found = collectConfigs(startDir);
   if (found.state === 'absent') {
     console.log(`heimdall: no config at or above ${startDir} → guard inactive for this project.`);
     process.exit(0);
@@ -138,32 +167,30 @@ function main() {
     );
     process.exit(1);
   }
-  const cfg = found.cfg;
-  // Resolve the config's relative paths against the dir the config lives in
-  // (which the hook walked up to), not the audit's cwd.
-  const base = found.dir;
-  const abs = (p) => (path.isAbsolute(p) ? p : path.join(base, p));
+
+  const base = found.baseDir; // nearest config dir — broker slug + display root
+  const m = mergeForAudit(found.configs);
 
   // The user running this audit IS the agent uid (that's whose read access we
   // test below), so report it directly rather than shelling out.
-  const agentUser = os.userInfo().username;
   console.log(`Repo:        ${base}`);
-  console.log(`Agent uid:   ${agentUser}`);
-  console.log(`Runner:      ${cfg.runnerUser || 'mcp-runner'}`);
+  console.log(`Agent uid:   ${os.userInfo().username}`);
+  console.log(`Runner:      ${m.runnerUser || 'mcp-runner'}`);
+  console.log(`Configs:     ${found.configs.length} (merged, nearest-first)`);
   console.log('');
 
-  const { files, protectedCount } = reportSecretsFiles(cfg, abs);
+  const protectedCount = reportSecretsFiles(m.secretsFiles);
   console.log('');
-  console.log(`Wrapper:     ${cfg.wrapper}  [${stat(abs(cfg.wrapper))}]`);
-  const broker = cfg.brokerPath || brokerDefaultFor(base);
+  console.log(`Wrapper:     ${m.wrapper || '(none)'}  [${stat(m.wrapper)}]`);
+  const broker = m.brokerPath || brokerDefaultFor(base);
   const brokerConf = path.join(path.dirname(broker), 'broker.conf');
   console.log(`Broker:      ${broker}  [${stat(broker)}]`);
   console.log(`Broker conf: ${brokerConf}  [${stat(brokerConf)}]`);
 
-  reportMcpWiring(cfg, abs, broker);
+  reportMcpWiring(m.mcpJson, broker);
 
   console.log('');
-  if (files.length && protectedCount === files.length) {
+  if (m.secretsFiles.length && protectedCount === m.secretsFiles.length) {
     console.log('STATUS: boundary ACTIVE — agent uid is denied on all (existing) secrets files.');
   } else {
     console.log('STATUS: boundary NOT fully active — run /heimdall:harden (sudo setup).');
