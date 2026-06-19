@@ -41,6 +41,56 @@ function readLock(file) {
  *   { ok:true, info, forced }   — acquired (forced=true ⇒ took over a live lock)
  *   { ok:false, held }          — a live conductor holds it and force was false
  */
+// True when `existing` names a live process other than us.
+function isLiveOther(existing) {
+  return !!(existing && existing.pid && existing.pid !== process.pid && pidAlive(existing.pid));
+}
+
+/**
+ * Atomic create-exclusive (O_CREAT|O_EXCL via 'wx'): only ONE concurrent caller
+ * can win, which closes the read-check-write TOCTOU window that previously let
+ * two daemons both acquire the same namespace (GH-622). 0o600: the lock holds
+ * only pid/host/ns; mode is explicit so it never depends on the umask (parent
+ * dir is already 0o700). Returns true on create, false if the file exists.
+ */
+function createExclusive(file, payload) {
+  let fd;
+  try {
+    fd = fs.openSync(file, 'wx', 0o600);
+  } catch (e) {
+    if (e.code === 'EEXIST') return false;
+    throw e;
+  }
+  try {
+    fs.writeSync(fd, payload);
+  } finally {
+    fs.closeSync(fd);
+  }
+  return true;
+}
+
+function unlinkIfPresent(file) {
+  try {
+    fs.unlinkSync(file);
+  } catch (e) {
+    if (e.code !== 'ENOENT') throw e;
+  }
+}
+
+/**
+ * Decide what to do when a lock file already exists this iteration:
+ *   { refuse:true, held }  — bail out (a live other holds it, or it's
+ *                            present-but-unreadable and we aren't forcing)
+ *   { takeover:true, forced } — unlink + retry (stale / our own / forced)
+ */
+function evaluateHolder(file, force) {
+  const existing = readLock(file);
+  const liveOther = isLiveOther(existing);
+  if (liveOther && !force) return { refuse: true, held: existing };
+  if (existing === null && !force) return { refuse: true, held: { pid: null } };
+  return { takeover: true, forced: liveOther };
+}
+
 function acquire(file, { force = false } = {}) {
   fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
   const info = {
@@ -56,41 +106,11 @@ function acquire(file, { force = false } = {}) {
   // lose that re-create to a concurrent starter — re-evaluate instead of
   // looping forever.
   for (let attempt = 0; attempt < 5; attempt += 1) {
-    // Atomic create-exclusive (O_CREAT|O_EXCL via 'wx'): only ONE concurrent
-    // caller can win, which closes the read-check-write TOCTOU window that
-    // previously let two daemons both acquire the same namespace (GH-622).
-    // 0o600: the lock holds only pid/host/ns; set the mode explicitly so it
-    // never depends on the umask (parent dir is already 0o700).
-    try {
-      const fd = fs.openSync(file, 'wx', 0o600);
-      try {
-        fs.writeSync(fd, payload);
-      } finally {
-        fs.closeSync(fd);
-      }
-      return { ok: true, info, forced };
-    } catch (e) {
-      if (e.code !== 'EEXIST') throw e;
-    }
-
-    // A lock file already exists — decide whether we may take it over.
-    const existing = readLock(file);
-    if (existing === null) {
-      // Present but unreadable — most likely a concurrent creator mid-write.
-      // Never steal it unless forced; refusing preserves the singleton guarantee.
-      if (!force) return { ok: false, held: { pid: null } };
-    } else {
-      const liveOther =
-        existing.pid && existing.pid !== process.pid && pidAlive(existing.pid);
-      if (liveOther && !force) return { ok: false, held: existing };
-      if (liveOther) forced = true;
-    }
-    // Stale holder, our own pid, or a forced takeover: remove and retry create.
-    try {
-      fs.unlinkSync(file);
-    } catch (e) {
-      if (e.code !== 'ENOENT') throw e;
-    }
+    if (createExclusive(file, payload)) return { ok: true, info, forced };
+    const verdict = evaluateHolder(file, force);
+    if (verdict.refuse) return { ok: false, held: verdict.held };
+    if (verdict.forced) forced = true;
+    unlinkIfPresent(file);
   }
   // Lost the create race repeatedly — fail closed rather than risk two holders.
   return { ok: false, held: readLock(file) || { pid: null } };
