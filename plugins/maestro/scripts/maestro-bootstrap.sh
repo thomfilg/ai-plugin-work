@@ -167,6 +167,23 @@ resolve_prefix
 # second maestro instance on this machine never aliases this batch's sessions.
 resolve_ns_seg
 
+# GH-622: when isolated (a namespace or an explicit MAESTRO_INBOX_DIR override),
+# resolve the mailbox dir via namespace.inboxDir() — the SAME source maestro's
+# /signal + /listen use — and export it to /work as CLAUDE_AGENT_INBOX_DIR so both
+# halves of the channel agree. Resolving through the JS module (not a hardcoded
+# path) honors MAESTRO_INBOX_DIR. Single-quote-escaped so an override containing
+# shell metacharacters can't break out of the launch command. Fail-open: any node
+# error leaves INBOX_ENV empty and /work falls back to its own default.
+INBOX_ENV=""
+if [ -n "$NS_SEG" ] || [ -n "${MAESTRO_INBOX_DIR:-}" ]; then
+  _INBOX_DIR="$(node -e 'process.stdout.write(require(process.argv[1]).inboxDir())' \
+    "$_MAESTRO_SCRIPT_DIR/lib/maestro-conduct/namespace.js" 2>/dev/null || true)"
+  if [ -n "$_INBOX_DIR" ]; then
+    _INBOX_ESC="$(printf '%s' "$_INBOX_DIR" | sed "s/'/'\\\\''/g")"
+    INBOX_ENV="CLAUDE_AGENT_INBOX_DIR='${_INBOX_ESC}' "
+  fi
+fi
+
 REPO_DIR="$WORKTREES_BASE/$REPO_NAME"
 if [ ! -d "$REPO_DIR/.git" ]; then
   echo "ERROR: $REPO_DIR is not a git repo" >&2
@@ -263,12 +280,6 @@ for TICKET in "$@"; do
   fi
 
   SESSION="${NS_SEG}$TICKET-work"
-  # GH-622: under a namespace, point /work's mailbox at the per-namespace inbox so
-  # its messaging (communicate.js / listen-all.js) shares the same dir maestro's
-  # /signal + /listen use (namespace.inboxDir() → /tmp/claude-agent-inbox/<ns>).
-  # MAESTRO_NS is already validated by resolve_ns_seg, so the path is metachar-free.
-  INBOX_ENV=""
-  [ -n "$NS_SEG" ] && INBOX_ENV="CLAUDE_AGENT_INBOX_DIR='/tmp/claude-agent-inbox/${MAESTRO_NS}' "
   if tmux has-session -t "$SESSION" 2>/dev/null; then
     echo "[$TICKET] tmux session $SESSION exists — skipping launch"
   else

@@ -144,15 +144,18 @@ function autoRestart({ session, ticket, worktree, silenceSec }) {
   return true;
 }
 
-// GH-622: on an auto-restart, relaunch /work with the SAME per-namespace inbox
+// GH-622: on an auto-restart, relaunch /work with the SAME mailbox dir
 // maestro-bootstrap.sh sets on the initial launch — otherwise the restarted
 // agent's messaging drifts back to the global mailbox while maestro /signal
-// stays namespaced. Emitted only under a namespace (matches bootstrap); the
-// path comes from namespace.inboxDir() so it equals maestro's own /signal side.
-// The namespace is validated (no shell metacharacters), so single-quoting is safe.
+// stays isolated. Fires when isolated (a namespace OR an explicit
+// MAESTRO_INBOX_DIR override) and resolves through namespace.inboxDir() so the
+// path equals maestro's own /signal side (and honors MAESTRO_INBOX_DIR). The
+// value is single-quote-escaped so an override with shell metacharacters can't
+// break out of the launch command.
 function inboxEnvPrefix() {
-  if (!namespace.ns()) return '';
-  return `CLAUDE_AGENT_INBOX_DIR='${namespace.inboxDir()}' `;
+  if (!namespace.ns() && !process.env.MAESTRO_INBOX_DIR) return '';
+  const esc = namespace.inboxDir().replace(/'/g, "'\\''");
+  return `CLAUDE_AGENT_INBOX_DIR='${esc}' `;
 }
 
 /**
