@@ -8,8 +8,7 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 
-const repo = path.resolve(process.argv[2] || process.env.CLAUDE_PROJECT_DIR || process.cwd());
-const abs = (p) => (path.isAbsolute(p) ? p : path.join(repo, p));
+const startDir = path.resolve(process.argv[2] || process.env.CLAUDE_PROJECT_DIR || process.cwd());
 
 // Resolve uid/gid → name from /etc/passwd /etc/group (plain file reads). We
 // deliberately avoid spawning `stat`/`id`: passing env/argv-derived paths to a
@@ -42,31 +41,45 @@ function stat(p) {
   }
 }
 
-// Mirror setup-secrets-heimdall.sh EXACTLY: the broker (and co-located
-// broker.conf) default to a PER-PATH directory — basename + short hash of the
-// absolute repo path — so two worktrees sharing a dir name don't collide.
-const repoSlug =
-  path.basename(repo).replace(/[^A-Za-z0-9._-]/g, '_') +
-  '-' +
-  crypto.createHash('sha1').update(repo).digest('hex').slice(0, 8);
-const DEFAULT_BROKER = `/usr/local/lib/mcp-broker/${repoSlug}/mcp-pg-broker`;
+// Per-path broker default — MUST match setup-secrets-heimdall.sh (basename +
+// short hash of the absolute config-dir path) so the audit reports the same
+// broker path the installer uses.
+function brokerDefaultFor(base) {
+  const slug =
+    path.basename(base).replace(/[^A-Za-z0-9._-]/g, '_') +
+    '-' +
+    crypto.createHash('sha1').update(base).digest('hex').slice(0, 8);
+  return `/usr/local/lib/mcp-broker/${slug}/mcp-pg-broker`;
+}
 
-// Distinguish absent (guard genuinely inactive) from present-but-broken. The
-// PreToolUse hook FAILS CLOSED on an unreadable/invalid config (blocks every
-// tool call), so the audit must not report "inactive" in those cases.
-function loadConfig(cfgPath) {
-  let raw;
-  try {
-    raw = fs.readFileSync(cfgPath, 'utf8');
-  } catch (err) {
-    return err.code === 'ENOENT'
-      ? { state: 'absent' }
-      : { state: 'unreadable', error: err.message };
-  }
-  try {
-    return { state: 'ok', cfg: JSON.parse(raw) };
-  } catch (err) {
-    return { state: 'invalid', error: err.message };
+// Find the conceal config by walking UP from startDir to the nearest ancestor
+// carrying .claude/heimdall-conceal.json — mirrors the PreToolUse hook, so an
+// audit run from a subdirectory reports the SAME active/inactive state the hook
+// enforces. Distinguishes absent (genuinely inactive) from present-but-broken
+// (the hook fails closed → must not be reported "inactive").
+function findConfig(start) {
+  let dir = path.resolve(start);
+  for (;;) {
+    const cfgPath = path.join(dir, '.claude', 'heimdall-conceal.json');
+    let raw;
+    try {
+      raw = fs.readFileSync(cfgPath, 'utf8');
+    } catch (err) {
+      if (err.code !== 'ENOENT') return { state: 'unreadable', cfgPath, error: err.message };
+      const parent = path.dirname(dir);
+      if (parent === dir)
+        return {
+          state: 'absent',
+          cfgPath: path.join(path.resolve(start), '.claude', 'heimdall-conceal.json'),
+        };
+      dir = parent;
+      continue;
+    }
+    try {
+      return { state: 'ok', dir, cfgPath, cfg: JSON.parse(raw) };
+    } catch (err) {
+      return { state: 'invalid', cfgPath, error: err.message };
+    }
   }
 }
 
@@ -81,7 +94,7 @@ function canAgentRead(p) {
   }
 }
 
-function reportSecretsFiles(cfg) {
+function reportSecretsFiles(cfg, abs) {
   console.log('Secrets files:');
   let protectedCount = 0;
   const files = cfg.secretsFiles || [];
@@ -98,8 +111,7 @@ function reportSecretsFiles(cfg) {
   return { files, protectedCount };
 }
 
-function reportMcpWiring(cfg) {
-  const broker = cfg.brokerPath || DEFAULT_BROKER;
+function reportMcpWiring(cfg, abs, broker) {
   try {
     const mcp = JSON.parse(fs.readFileSync(abs(cfg.mcpJson || '.mcp.json'), 'utf8'));
     const viaBroker = Object.values(mcp.mcpServers || {}).filter(
@@ -112,38 +124,43 @@ function reportMcpWiring(cfg) {
 }
 
 function main() {
-  const cfgPath = abs('.claude/heimdall-conceal.json');
-  const loaded = loadConfig(cfgPath);
-  if (loaded.state === 'absent') {
-    console.log(`heimdall: no config at ${cfgPath} → guard inactive for this project.`);
+  const found = findConfig(startDir);
+  if (found.state === 'absent') {
+    console.log(`heimdall: no config at or above ${startDir} → guard inactive for this project.`);
     process.exit(0);
   }
-  if (loaded.state !== 'ok') {
-    console.log(`heimdall: config at ${cfgPath} is present but ${loaded.state} (${loaded.error}).`);
+  if (found.state !== 'ok') {
+    console.log(
+      `heimdall: config at ${found.cfgPath} is present but ${found.state} (${found.error}).`
+    );
     console.log(
       'STATUS: the PreToolUse conceal guard is FAILING CLOSED — it blocks all tool calls until this config is fixed.'
     );
     process.exit(1);
   }
-  const cfg = loaded.cfg;
+  const cfg = found.cfg;
+  // Resolve the config's relative paths against the dir the config lives in
+  // (which the hook walked up to), not the audit's cwd.
+  const base = found.dir;
+  const abs = (p) => (path.isAbsolute(p) ? p : path.join(base, p));
 
   // The user running this audit IS the agent uid (that's whose read access we
   // test below), so report it directly rather than shelling out.
   const agentUser = os.userInfo().username;
-  console.log(`Repo:        ${repo}`);
+  console.log(`Repo:        ${base}`);
   console.log(`Agent uid:   ${agentUser}`);
   console.log(`Runner:      ${cfg.runnerUser || 'mcp-runner'}`);
   console.log('');
 
-  const { files, protectedCount } = reportSecretsFiles(cfg);
+  const { files, protectedCount } = reportSecretsFiles(cfg, abs);
   console.log('');
   console.log(`Wrapper:     ${cfg.wrapper}  [${stat(abs(cfg.wrapper))}]`);
-  const broker = cfg.brokerPath || DEFAULT_BROKER;
+  const broker = cfg.brokerPath || brokerDefaultFor(base);
   const brokerConf = path.join(path.dirname(broker), 'broker.conf');
   console.log(`Broker:      ${broker}  [${stat(broker)}]`);
   console.log(`Broker conf: ${brokerConf}  [${stat(brokerConf)}]`);
 
-  reportMcpWiring(cfg);
+  reportMcpWiring(cfg, abs, broker);
 
   console.log('');
   if (files.length && protectedCount === files.length) {
