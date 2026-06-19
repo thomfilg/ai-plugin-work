@@ -15,6 +15,7 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const tmux = require('./tmux');
+const namespace = require('./namespace');
 const alerts = require('./alerts');
 const state = require('./state');
 const manifest = require('./manifest');
@@ -136,11 +137,22 @@ function autoRestart({ session, ticket, worktree, silenceSec }) {
       session,
       '-c',
       worktree,
-      `${CLAUDE_BIN} --dangerously-skip-permissions '/${skill} ${ticket}'`,
+      `${inboxEnvPrefix()}${CLAUDE_BIN} --dangerously-skip-permissions '/${skill} ${ticket}'`,
     ],
     { stdio: 'ignore' }
   );
   return true;
+}
+
+// GH-622: on an auto-restart, relaunch /work with the SAME per-namespace inbox
+// maestro-bootstrap.sh sets on the initial launch — otherwise the restarted
+// agent's messaging drifts back to the global mailbox while maestro /signal
+// stays namespaced. Emitted only under a namespace (matches bootstrap); the
+// path comes from namespace.inboxDir() so it equals maestro's own /signal side.
+// The namespace is validated (no shell metacharacters), so single-quoting is safe.
+function inboxEnvPrefix() {
+  if (!namespace.ns()) return '';
+  return `CLAUDE_AGENT_INBOX_DIR='${namespace.inboxDir()}' `;
 }
 
 /**
