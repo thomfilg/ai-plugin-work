@@ -199,8 +199,16 @@ console.log(`>> Rewrote ${file} (${n} servers -> broker)`);
 NODE
 fi
 
-# 8. Verify agent uid is denied
+# 8. Verify agent uid is denied.
+# A bare `cat` failure is ambiguous: it could mean "permission denied" (good) OR
+# that sudo/the user is misconfigured (inconclusive). Establish that we can
+# actually run a command as the agent uid FIRST, so a subsequent read failure is
+# a genuine denial rather than a sudo/policy error misread as success.
 echo ">> Verifying agent uid cannot read secrets..."
+command -v sudo >/dev/null 2>&1 || die "sudo not found — cannot verify the boundary"
+id -u "${AGENT_USER}" >/dev/null 2>&1 || die "agent user '${AGENT_USER}' not found — cannot verify the boundary"
+sudo -n -u "${AGENT_USER}" true >/dev/null 2>&1 ||
+  die "cannot run a command as '${AGENT_USER}' via sudo -n — unable to verify; check sudoers or set AGENT_USER, then re-run"
 for f in "${SECRETS_FILES[@]}"; do
   if sudo -n -u "${AGENT_USER}" cat "$f" >/dev/null 2>&1; then
     die "agent uid CAN still read $f — boundary FAILED"
