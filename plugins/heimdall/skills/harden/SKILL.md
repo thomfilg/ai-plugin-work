@@ -16,8 +16,10 @@ exists; the broker needs one privileged (sudo) run.
 Windows does not have (use `/heimdall:conceal` there). **No compiler needed**:
 the installer compiles the broker from source when `gcc` is present, otherwise
 installs the committed prebuilt `scripts/bin/mcp-pg-broker.linux-<arch>`; either
-way the broker reads its config at runtime from the root-owned
-`/usr/local/lib/mcp-broker/broker.conf` the script writes.
+way the broker reads its config at runtime from a root-owned, **per-repo**
+`broker.conf` co-located with the binary
+(`/usr/local/lib/mcp-broker/<repo-slug>/broker.conf`, where `<repo-slug>` is the
+repo basename plus a short hash of its absolute path) that the script writes.
 
 ## Phase 1 — config
 

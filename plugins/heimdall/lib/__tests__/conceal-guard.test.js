@@ -89,6 +89,38 @@ describe('heimdall conceal guard', () => {
     assert.equal(guard({ tool_name: 'Glob', tool_input: { pattern: 'src/**/*.ts' } }), 0);
   });
 
+  it('allows a Grep whose content pattern matches a concealed name but targets an unrelated dir', () => {
+    // 'secret-folder' here is a CONTENT regex, not a path — Grep over src/ must
+    // not be blocked just because a folder named secret-folder is concealed.
+    assert.equal(
+      guard({
+        tool_name: 'Grep',
+        tool_input: { pattern: 'secret-folder', path: path.join(repo, 'src') },
+      }),
+      0
+    );
+  });
+
+  it('still denies a Grep whose path is a concealed folder', () => {
+    assert.equal(
+      guard({
+        tool_name: 'Grep',
+        tool_input: { pattern: 'TODO', path: path.join(repo, 'secret-folder') },
+      }),
+      2
+    );
+  });
+
+  it('denies NotebookEdit on a concealed path', () => {
+    assert.equal(
+      guard({
+        tool_name: 'NotebookEdit',
+        tool_input: { notebook_path: path.join(repo, 'secret-folder', 'analysis.ipynb') },
+      }),
+      2
+    );
+  });
+
   it('denies a Bash read of a concealed path mid-pipe', () => {
     assert.equal(guard(bashPayload(`cat ${repo}/credentials/token.txt | jq .`)), 2);
   });

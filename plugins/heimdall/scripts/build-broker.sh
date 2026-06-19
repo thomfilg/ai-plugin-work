@@ -3,7 +3,9 @@
 # build-broker.sh — produce the committed, generic mcp-pg-broker binary.
 #
 # The binary reads its config (NODE_BIN/WRAPPER/RUN_USER/ALLOWED_CSV) at runtime
-# from a root-owned BROKER_CONF, so a single static build works for every
+# from a root-owned broker.conf co-located with itself — a per-repo path
+# /usr/local/lib/mcp-broker/<repo-slug>/broker.conf resolved via /proc/self/exe
+# (see resolve_conf_path in mcp-pg-broker.c) — so a single build works for every
 # project and no compiler is needed at install time.
 #
 # Dynamically linked on purpose: getpwnam() resolves RUN_USER via glibc NSS, and

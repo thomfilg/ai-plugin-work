@@ -37,13 +37,18 @@ NODE_BIN_DEFAULT="$(command -v node || true)"
 eval "$(REPO_DIR="${REPO_DIR}" CONFIG="${CONFIG}" NODE_DEFAULT="${NODE_BIN_DEFAULT}" node <<'NODE'
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const repo = process.env.REPO_DIR;
 const cfg = JSON.parse(fs.readFileSync(process.env.CONFIG, 'utf8'));
 const q = (s) => "'" + String(s).replace(/'/g, "'\\''") + "'";
 const abs = (p) => path.isAbsolute(p) ? p : path.join(repo, p);
-// Default the broker (and its co-located broker.conf) to a PER-REPO directory so
-// hardening or reverting one project never clobbers another's shared config.
-const repoSlug = path.basename(repo).replace(/[^A-Za-z0-9._-]/g, '_');
+// Default the broker (and its co-located broker.conf) to a PER-PATH directory so
+// hardening/reverting one project never clobbers another's. The basename alone
+// collides when two worktrees share a dir name, so append a short hash of the
+// ABSOLUTE repo path. MUST stay in sync with heimdall-conceal-status.js.
+const repoSlug =
+  path.basename(repo).replace(/[^A-Za-z0-9._-]/g, '_') +
+  '-' + crypto.createHash('sha1').update(repo).digest('hex').slice(0, 8);
 const brokerDefault = `/usr/local/lib/mcp-broker/${repoSlug}/mcp-pg-broker`;
 const out = [];
 out.push(`RUN_USER=${q(cfg.runnerUser || 'mcp-runner')}`);
@@ -132,9 +137,11 @@ chown root:root "${BROKER_CONF}"
 chmod 0644 "${BROKER_CONF}"
 echo ">> Wrote ${BROKER_CONF} (root:root 0644)"
 
-# 5. Install the setuid+setgid broker — compile from source when a compiler is
+# 5. Install the setuid-root broker — compile from source when a compiler is
 #    present (most trustworthy: builds the source you can read), else fall back
-#    to the committed generic prebuilt for this arch.
+#    to the committed generic prebuilt for this arch. setuid root is required so
+#    the broker can drop the caller's supplementary groups (initgroups) before
+#    dropping irrevocably to RUN_USER.
 install -d -o root -g root -m 0755 "$(dirname "${BROKER_BIN}")"
 if command -v gcc >/dev/null 2>&1 && [ -f "${BROKER_SRC}" ]; then
   gcc -Wall -Wextra -O2 -s -o "${BROKER_BIN}" "${BROKER_SRC}"
@@ -143,9 +150,9 @@ else
   install -m 0755 "${BROKER_PREBUILT}" "${BROKER_BIN}"
   echo ">> Installed prebuilt broker (${BROKER_PREBUILT##*/}) — no compiler present"
 fi
-chown "${RUN_USER}:${RUN_USER}" "${BROKER_BIN}"
-chmod 6711 "${BROKER_BIN}"
-echo ">> Installed broker -> ${BROKER_BIN} (mode 6711, owner ${RUN_USER})"
+chown root:root "${BROKER_BIN}"
+chmod 4711 "${BROKER_BIN}"
+echo ">> Installed broker -> ${BROKER_BIN} (mode 4711 setuid root)"
 
 # 6. docker group for atlassian (root-equivalent — only if present)
 if getent group docker >/dev/null 2>&1 && echo "${ALLOWED_CSV}" | grep -q atlassian; then

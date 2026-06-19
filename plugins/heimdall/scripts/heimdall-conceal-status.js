@@ -6,6 +6,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const crypto = require('crypto');
 
 const repo = path.resolve(process.argv[2] || process.env.CLAUDE_PROJECT_DIR || process.cwd());
 const abs = (p) => (path.isAbsolute(p) ? p : path.join(repo, p));
@@ -41,9 +42,13 @@ function stat(p) {
   }
 }
 
-// Mirror setup-secrets-heimdall.sh: the broker (and its co-located broker.conf)
-// default to a per-repo directory so projects don't share one global config.
-const repoSlug = path.basename(repo).replace(/[^A-Za-z0-9._-]/g, '_');
+// Mirror setup-secrets-heimdall.sh EXACTLY: the broker (and co-located
+// broker.conf) default to a PER-PATH directory — basename + short hash of the
+// absolute repo path — so two worktrees sharing a dir name don't collide.
+const repoSlug =
+  path.basename(repo).replace(/[^A-Za-z0-9._-]/g, '_') +
+  '-' +
+  crypto.createHash('sha1').update(repo).digest('hex').slice(0, 8);
 const DEFAULT_BROKER = `/usr/local/lib/mcp-broker/${repoSlug}/mcp-pg-broker`;
 
 // Distinguish absent (guard genuinely inactive) from present-but-broken. The

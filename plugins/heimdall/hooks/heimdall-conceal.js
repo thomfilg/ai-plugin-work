@@ -103,7 +103,7 @@ function cmdPatterns(cfg) {
   return [...fileRe, ...customRe, ...defaults];
 }
 
-const FILE_TOOLS = new Set(['Read', 'Grep', 'Glob', 'Edit', 'Write', 'MultiEdit']);
+const FILE_TOOLS = new Set(['Read', 'Grep', 'Glob', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 
 function readStdin() {
   try {
@@ -119,22 +119,31 @@ function readStdin() {
 // this normalized copy.)
 const toPosix = (s) => s.replace(/\\/g, '/');
 
+// Path candidates for a file tool. Path-bearing fields are always candidates.
+// `pattern` is a PATH glob ONLY for Glob — for Grep it is a content-search regex,
+// so treating it as a path would wrongly block e.g. Grep(pattern: "logs") just
+// because a folder named "logs" is concealed.
+function fileToolCandidates(toolName, input) {
+  const { file_path, path: p, notebook_path, pattern } = input;
+  const candidates = [file_path, p, notebook_path];
+  if (toolName === 'Glob') {
+    if (pattern) candidates.push(pattern);
+    if (p && pattern) candidates.push(`${p}/${pattern}`);
+  }
+  return candidates.filter(Boolean).map(toPosix);
+}
+
 function evaluate(cfg, toolName, input) {
   if (toolName === 'Bash') {
     const cmd = toPosix(String(input.command || ''));
     return cmdPatterns(cfg).find((re) => re.test(cmd)) || null;
   }
   if (FILE_TOOLS.has(toolName)) {
-    // Glob carries the search in `pattern` (often with a separate `path` dir),
-    // so include it and the path+pattern join. Test each candidate SEPARATELY:
-    // joining with a separator would break the `(/|$)` right-boundary (a dir at
-    // a field's end is followed by the separator, not `/` or end-of-string).
-    const { file_path, path: p, notebook_path, pattern } = input;
-    const candidates = [file_path, p, notebook_path, pattern];
-    if (p && pattern) candidates.push(`${p}/${pattern}`);
-    const targets = candidates.filter(Boolean).map(toPosix);
+    // Test each candidate SEPARATELY: joining with a separator would break the
+    // `(/|$)` right-boundary (a dir at a field's end is followed by the
+    // separator, not `/` or end-of-string).
     const pats = filePatterns(cfg);
-    for (const t of targets) {
+    for (const t of fileToolCandidates(toolName, input)) {
       const hit = pats.find((re) => re.test(t));
       if (hit) return hit;
     }

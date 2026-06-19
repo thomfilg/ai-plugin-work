@@ -29,7 +29,7 @@
         ]
       },
       {
-        "matcher": "Read|Grep|Glob|Edit|Write|MultiEdit|Bash",
+        "matcher": "Read|Grep|Glob|Edit|Write|MultiEdit|NotebookEdit|Bash",
         "hooks": [
           {
             "type": "command",

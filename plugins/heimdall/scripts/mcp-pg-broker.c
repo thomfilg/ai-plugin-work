@@ -18,7 +18,10 @@
  *
  * PREREQUISITES (enforced by the installer):
  *   1. secrets file -> owner RUN_USER, mode 0600
- *   2. this binary  -> owner RUN_USER, mode 6711 (setuid+setgid), not agent-writable
+ *   2. this binary  -> owner root, mode 4711 (setuid root), not agent-writable.
+ *      setuid root is required so it can drop the caller's supplementary groups
+ *      (initgroups) before dropping to RUN_USER; it immediately and irrevocably
+ *      drops all privilege below and only ever exec()s the fixed wrapper.
  *   3. BROKER_CONF  -> owner root, not group/world writable (verified at runtime below)
  *   4. WRAPPER (+ dir) -> not agent-writable
  *   5. agent uid must NOT have a root-equivalent path (docker socket / sudo)
@@ -28,6 +31,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <pwd.h>
+#include <grp.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 
@@ -134,8 +138,14 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    /* Drop fully to RUN_USER (real, effective, saved) for gid then uid. Requires
-     * the binary to be setuid+setgid RUN_USER (mode 6711). */
+    /* Replace the CALLER's supplementary groups with RUN_USER's own groups
+     * BEFORE dropping uid — otherwise the agent's supplementary groups stay
+     * attached to the RUN_USER process (privilege leak). initgroups (not
+     * setgroups(0,NULL)) keeps RUN_USER's legitimate groups, e.g. the `docker`
+     * group the installer adds for the atlassian MCP. Requires the binary to be
+     * setuid ROOT (mode 4711) — a non-root euid cannot change groups. */
+    if (initgroups(pw->pw_name, pw->pw_gid) != 0) { perror("initgroups"); return 1; }
+    /* Drop fully to RUN_USER (real, effective, saved) for gid then uid. */
     if (setresgid(pw->pw_gid, pw->pw_gid, pw->pw_gid) != 0) { perror("setresgid"); return 1; }
     if (setresuid(pw->pw_uid, pw->pw_uid, pw->pw_uid) != 0) { perror("setresuid"); return 1; }
     if (pw->pw_uid != 0 && setuid(0) == 0) {
