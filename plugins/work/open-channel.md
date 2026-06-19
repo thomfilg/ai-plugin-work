@@ -10,7 +10,12 @@ A monitor session may need to nudge you mid-workflow (e.g. "your test path is wr
 
 ```bash
 TICKET=<TICKET-ID>
-SESS="${TICKET}-listen"
+# GH-622: under maestro's MAESTRO_NS, prefix with "<ns>/" so the listener matches
+# the namespaced -work session and same-numbered tickets across projects don't
+# collide. The case-glob rejects any MAESTRO_NS outside [A-Za-z0-9_-] (and empty).
+NS_SEG=""
+case "${MAESTRO_NS:-}" in ""|*[!A-Za-z0-9_-]*) NS_SEG="" ;; *) NS_SEG="${MAESTRO_NS}/" ;; esac
+SESS="${NS_SEG}${TICKET}-listen"
 tmux has-session -t "$SESS" 2>/dev/null || \
   tmux new-session -d -s "$SESS" "exec node ${CLAUDE_PLUGIN_ROOT}/scripts/listen-all.js"
 tmux list-sessions | grep "$SESS"
