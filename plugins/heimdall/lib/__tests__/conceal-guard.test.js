@@ -311,6 +311,31 @@ describe('guard fails closed on a present-but-invalid config', () => {
   });
 });
 
+describe('a broken config can still be repaired from inside Claude Code', () => {
+  let r;
+  before(() => {
+    r = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-recover-'));
+    fs.mkdirSync(path.join(r, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(r, '.claude', 'heimdall-conceal.json'), '{ broken json');
+  });
+  after(() => fs.rmSync(r, { recursive: true, force: true }));
+  const g = (payload) =>
+    spawnSync('node', [HOOK], {
+      input: JSON.stringify(payload),
+      env: { ...process.env, CLAUDE_PROJECT_DIR: r },
+      encoding: 'utf8',
+    }).status;
+
+  it('fails closed on an unrelated Read', () => {
+    assert.equal(g(readPayload(path.join(r, 'anything.txt'))), 2);
+  });
+
+  it('allows an Edit that targets the broken config file (recovery)', () => {
+    const cfgPath = path.join(r, '.claude', 'heimdall-conceal.json');
+    assert.equal(g({ tool_name: 'Edit', tool_input: { file_path: cfgPath } }), 0);
+  });
+});
+
 describe('conceal refuses to overwrite a corrupt config', () => {
   it('exits non-zero and leaves the invalid file untouched', () => {
     const r = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-corrupt-'));

@@ -33,14 +33,14 @@ function tryLoadAt(dir) {
     raw = fs.readFileSync(f, 'utf8');
   } catch (err) {
     if (err.code === 'ENOENT') return null;
-    throw new Error(`cannot read ${f}: ${err.message}`);
+    throw Object.assign(new Error(`cannot read ${f}: ${err.message}`), { cfgPath: f });
   }
   try {
     const cfg = JSON.parse(raw);
     cfg.__root = dir;
     return cfg;
   } catch (err) {
-    throw new Error(`${f} is not valid JSON: ${err.message}`);
+    throw Object.assign(new Error(`${f} is not valid JSON: ${err.message}`), { cfgPath: f });
   }
 }
 
@@ -186,6 +186,35 @@ function evaluate(cfg, toolName, input) {
   return null;
 }
 
+// True when a file tool targets the given config path (raw or symlink-resolved).
+// Used to let the user edit a broken config to recover from a fail-closed state.
+function targetsConfigFile(toolName, input, cfgPath) {
+  if (!cfgPath || !FILE_TOOLS.has(toolName)) return false;
+  const real = resolveSafe(cfgPath);
+  for (const t of [input.file_path, input.path, input.notebook_path].filter(Boolean)) {
+    if (t === cfgPath || resolveSafe(t) === real) return true;
+  }
+  return false;
+}
+
+// Load the config, or handle a broken one with a recovery exit. Returns the
+// parsed config, or null when no policy applies. On a present-but-invalid config
+// it either ALLOWS (exit 0) a file tool editing the offending file (so the user
+// can repair it) or fails closed (exit 2) with a recovery note.
+function resolveConfig(root, toolName, input) {
+  try {
+    return loadConfig(root);
+  } catch (err) {
+    if (targetsConfigFile(toolName, input, err.cfgPath)) process.exit(0);
+    process.stderr.write(
+      `BLOCKED (heimdall conceal): ${err.message}\n` +
+        'The conceal policy is unreadable/invalid, so the guard is failing closed. ' +
+        'Fix or remove that file to restore normal operation — editing the file itself is allowed.\n'
+    );
+    return process.exit(2);
+  }
+}
+
 function log(cfg, payload) {
   try {
     fs.appendFileSync(
@@ -210,16 +239,19 @@ function main() {
   }
 
   const root = event.cwd || process.env.CLAUDE_PROJECT_DIR || process.cwd();
-  const cfg = loadConfig(root);
+  const toolName = event.tool_name || '';
+  const input = event.tool_input || {};
+
+  const cfg = resolveConfig(root, toolName, input);
   if (!cfg) process.exit(0); // no policy for this project → no-op
 
-  const matched = evaluate(cfg, event.tool_name || '', event.tool_input || {});
+  const matched = evaluate(cfg, toolName, input);
   if (!matched) process.exit(0);
 
   log(cfg, {
     ts: new Date().toISOString(),
-    tool: event.tool_name,
-    input: event.tool_input,
+    tool: toolName,
+    input,
     matched: String(matched),
   });
 

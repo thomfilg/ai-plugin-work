@@ -131,9 +131,10 @@ config and hook — it does not touch lock blocks.
 
 - **Layer 2 — conceal (hook, no sudo).** A `PreToolUse` guard
   (`hooks/heimdall-conceal.js`) hard-denies `Read`/`Grep`/`Glob`/`Edit`/`Write`/
-  `MultiEdit` on concealed paths and Bash commands that reference them. There is
-  **no unlock phrase** — it is a flat deny. It is *defense-in-depth*: it stops
-  the agent's own tool calls, not a raw subprocess or sudo.
+  `MultiEdit`/`NotebookEdit` on concealed paths and Bash commands that reference
+  them. There is **no unlock phrase** — it is a flat deny. It is
+  *defense-in-depth*: it stops the agent's own tool calls, not a raw subprocess
+  or sudo.
 - **Layer 1 — harden (setuid, sudo, Linux/Unix only).** The real boundary. A
   setuid broker runs the credential-reading MCP servers as a dedicated uid so
   the calling uid cannot read the secrets file or scrape `/proc/<pid>/environ`,
@@ -163,6 +164,36 @@ drive `/heimdall:harden`.
 
 The OS boundary holds only if the agent uid has **no** sudo and **no**
 docker-socket access — both are root-equivalent and bypass file permissions.
+
+### Recovering from a broken config
+
+If `heimdall-conceal.json` is present but unreadable or invalid JSON, the hook
+**fails closed** (blocks every tool call) rather than silently allowing reads.
+To avoid trapping you, the guard makes one exception: a file tool (`Edit`/
+`Write`/`Read`/…) targeting the offending config file itself is **allowed**, so
+you can fix the JSON from inside Claude Code. Everything else stays blocked, and
+the deny message names the file to repair. (`/heimdall:audit` likewise reports
+the guard as *failing closed* — never "inactive" — in this state.)
+
+### Verifying the committed broker binary
+
+`scripts/bin/mcp-pg-broker.linux-x86_64` is a committed, setuid-capable ELF, so
+its provenance matters. `build-broker.sh` writes a `.sha256` next to it. To
+verify the committed binary matches `mcp-pg-broker.c`:
+
+```bash
+# 1. Check the committed binary against its recorded digest
+cd plugins/heimdall/scripts/bin && sha256sum -c mcp-pg-broker.linux-x86_64.sha256
+
+# 2. Or rebuild from source and compare
+bash plugins/heimdall/scripts/build-broker.sh
+git status --short plugins/heimdall/scripts/bin/   # unchanged ⇒ reproduces
+```
+
+`gcc` output is not guaranteed bit-reproducible across compiler/libc versions,
+so the authoritative check remains: read `mcp-pg-broker.c` and rebuild on your
+own toolchain. The installer also prefers compiling from source whenever `gcc`
+is present, using the committed binary only as a no-compiler fallback.
 
 ## Quick start
 

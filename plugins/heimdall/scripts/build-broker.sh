@@ -27,3 +27,14 @@ mkdir -p "${SCRIPT_DIR}/bin"
 gcc -Wall -Wextra -O2 -s -o "${OUT}" "${SRC}"
 echo "built ${OUT}"
 file "${OUT}" 2>/dev/null || true
+
+# Provenance: record a sha256 of the committed binary next to it so reviewers can
+# confirm the committed ELF corresponds to mcp-pg-broker.c. To verify: re-run
+# this script on a matching toolchain and `sha256sum -c` the .sha256 file, or
+# read the C source and rebuild. (Note: gcc output is not guaranteed
+# bit-reproducible across compiler/libc versions; the authoritative check is
+# reading the source + rebuilding. See README "Verifying the committed broker".)
+if command -v sha256sum >/dev/null 2>&1; then
+  (cd "${SCRIPT_DIR}/bin" && sha256sum "$(basename "${OUT}")" >"$(basename "${OUT}").sha256")
+  echo "checksum: $(cat "${OUT}.sha256")"
+fi
