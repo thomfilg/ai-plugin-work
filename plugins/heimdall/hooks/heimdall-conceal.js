@@ -44,19 +44,43 @@ function tryLoadAt(dir) {
   }
 }
 
-// Walk up from startDir to the NEAREST ancestor carrying the config, so a
-// session running in a repo subdirectory still finds a config written at the
-// repo root (matches the lock guard, which canonicalizes to the repo). Single
-// filename, matching setup-secrets-heimdall.sh and heimdall-conceal-status.js.
+// Union policy from EVERY ancestor config so a nested config cannot SHADOW a
+// parent's secretsFiles / deny patterns (a guard-only config in a subdir must
+// not drop a root policy that protects credentials). Deny patterns are
+// position-independent regexes and secretsFiles are basenames, so unioning
+// across directories is sound. The nearest config's dir is the log root and its
+// denyMessage (if any) wins.
+function mergeConfigs(list) {
+  const merged = {
+    __root: list[0].__root,
+    denyFilePatterns: [],
+    denyCommandPatterns: [],
+    secretsFiles: [],
+  };
+  for (const c of list) {
+    for (const k of ['denyFilePatterns', 'denyCommandPatterns', 'secretsFiles']) {
+      if (Array.isArray(c[k])) merged[k].push(...c[k]);
+    }
+    if (!merged.denyMessage && c.denyMessage) merged.denyMessage = c.denyMessage;
+  }
+  return merged;
+}
+
+// Walk up from startDir to the filesystem root, collecting EVERY conceal config
+// (matches the lock guard's repo-canonicalization while never letting a nested
+// config shadow an ancestor). Single filename, matching
+// setup-secrets-heimdall.sh and heimdall-conceal-status.js.
 function loadConfig(startDir) {
   let dir = path.resolve(startDir);
+  const found = [];
   for (;;) {
-    const cfg = tryLoadAt(dir);
-    if (cfg) return cfg;
+    const cfg = tryLoadAt(dir); // null on ENOENT; throws (fail-closed) on broken
+    if (cfg) found.push(cfg);
     const parent = path.dirname(dir);
-    if (parent === dir) return null; // reached filesystem root, no policy
+    if (parent === dir) break; // reached filesystem root
     dir = parent;
   }
+  return found.length ? mergeConfigs(found) : null;
 }
 
 function esc(s) {

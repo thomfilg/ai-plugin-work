@@ -192,6 +192,37 @@ describe('conceal config is found from a subdirectory', () => {
   });
 });
 
+describe('nested config does not shadow an ancestor policy', () => {
+  it('merges ancestor secretsFiles even when a subdir has a guard-only config', () => {
+    const r = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-nested-'));
+    // Root policy protects a credential; nested subdir has only a folder rule.
+    fs.mkdirSync(path.join(r, '.claude'), { recursive: true });
+    fs.writeFileSync(
+      path.join(r, '.claude', 'heimdall-conceal.json'),
+      JSON.stringify({ secretsFiles: ['creds/root-secret.json'], denyCommandPatterns: [] })
+    );
+    fs.mkdirSync(path.join(r, 'sub', '.claude'), { recursive: true });
+    fs.writeFileSync(
+      path.join(r, 'sub', '.claude', 'heimdall-conceal.json'),
+      JSON.stringify({ denyFilePatterns: ['(^|/)logs(/|$)'], denyCommandPatterns: [] })
+    );
+    const env = { ...process.env };
+    delete env.CLAUDE_PROJECT_DIR;
+    const status = (file) =>
+      spawnSync('node', [HOOK], {
+        input: JSON.stringify({ cwd: path.join(r, 'sub'), ...readPayload(file) }),
+        env,
+        cwd: os.tmpdir(),
+        encoding: 'utf8',
+      }).status;
+    // From the subdir, the root's secrets file MUST still be denied (not shadowed)…
+    assert.equal(status(path.join(r, 'creds', 'root-secret.json')), 2);
+    // …and the subdir's own rule also applies.
+    assert.equal(status(path.join(r, 'sub', 'logs', 'x')), 2);
+    fs.rmSync(r, { recursive: true, force: true });
+  });
+});
+
 describe('malformed deny pattern does not fail open', () => {
   let badRepo;
   before(() => {

@@ -131,6 +131,20 @@ function report({ exists, isDir, label, cfgPath, created, filePat, cmdPat }) {
   if (isDir) console.log('Every path under this folder is now denied to agents.');
 }
 
+// Walk up from startDir for an EXISTING conceal config; null if none. Appending
+// to the ancestor config (instead of creating a nested one) prevents a
+// subdirectory config from shadowing a parent policy at hook time.
+function findExistingConfig(startDir) {
+  let dir = path.resolve(startDir);
+  for (;;) {
+    const f = path.join(dir, '.claude', 'heimdall-conceal.json');
+    if (fs.existsSync(f)) return f;
+    const parent = path.dirname(dir);
+    if (parent === dir) return null;
+    dir = parent;
+  }
+}
+
 function main() {
   const target = process.argv[2];
   if (!target) die('missing <path-to-file-or-folder>');
@@ -139,7 +153,9 @@ function main() {
   const { resolved, exists, isDir } = inspectTarget(repo, target);
   const { label, filePat, cmdPat } = buildPatterns(repo, resolved);
 
-  const cfgPath = path.join(repo, '.claude', 'heimdall-conceal.json');
+  // Reuse an ancestor config if one exists so we never create a nested config
+  // that shadows it; otherwise create one at the repo root.
+  const cfgPath = findExistingConfig(repo) || path.join(repo, '.claude', 'heimdall-conceal.json');
   const { cfg, created } = loadOrCreateConfig(cfgPath);
   seedExistingCoverage(cfg);
 
