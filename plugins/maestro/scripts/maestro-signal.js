@@ -55,13 +55,17 @@ function buildMismatchWarning({ channel, inboxDir, ownNs, sessionNames }) {
   const re = new RegExp(`(?:^|/)${escapeRe(channel)}-(work|listen|dev)$`);
   const elsewhere = (sessionNames || []).filter((s) => re.test(s) && sessionNsOf(s) !== ownNs);
   if (!elsewhere.length) return null;
-  const theirNs = sessionNsOf(elsewhere[0]) || '<their-namespace>';
+  const theirNs = sessionNsOf(elsewhere[0]);
   const here = ownNs ? `MAESTRO_NS=${ownNs}` : 'the global';
+  // The agent's side dictates the fix: a namespaced agent → set MAESTRO_NS to it;
+  // a bare (global) agent → UNSET MAESTRO_NS so /signal uses the global mailbox.
+  const fix = theirNs
+    ? `set MAESTRO_NS=${theirNs} (e.g. in .envrc)`
+    : 'unset MAESTRO_NS so /signal uses the global mailbox';
   return (
     `⚠️  0 listeners on ${inboxDir}, but agent session(s) exist in a different namespace: ` +
     `${elsewhere.join(', ')}.\n   This signal went to ${here} mailbox and will NOT reach them. ` +
-    `Align namespaces — set MAESTRO_NS=${theirNs} (e.g. in .envrc), or point both halves at one ` +
-    `CLAUDE_AGENT_INBOX_DIR / MAESTRO_INBOX_DIR.`
+    `Align namespaces — ${fix}, or point both halves at one CLAUDE_AGENT_INBOX_DIR / MAESTRO_INBOX_DIR.`
   );
 }
 

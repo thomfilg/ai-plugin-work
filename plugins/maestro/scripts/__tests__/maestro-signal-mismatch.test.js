@@ -42,7 +42,7 @@ test('no warning when no session matches the channel', () => {
   assert.equal(w, null);
 });
 
-test('warns the other way: namespaced signaler, agent in global (or another ns)', () => {
+test('namespaced signaler, agent in GLOBAL ns → tells operator to UNSET MAESTRO_NS', () => {
   const w = buildMismatchWarning({
     channel: 'ECHO-7',
     inboxDir: '/tmp/claude-agent-inbox/proj-b',
@@ -51,7 +51,10 @@ test('warns the other way: namespaced signaler, agent in global (or another ns)'
   });
   assert.ok(w);
   assert.match(w, /ECHO-7-work/);
-  assert.match(w, /<their-namespace>/); // global session has no ns segment
+  // The fix for a global agent is to unset — NOT "set MAESTRO_NS=<placeholder>".
+  assert.match(w, /unset MAESTRO_NS/);
+  assert.doesNotMatch(w, /set MAESTRO_NS=/);
+  assert.doesNotMatch(w, /<their-namespace>/);
 });
 
 test('channel with regex-special chars is matched literally (no injection)', () => {
