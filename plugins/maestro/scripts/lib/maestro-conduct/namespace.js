@@ -75,6 +75,19 @@ function lockFile() {
   return path.join(stateDir(), 'conductor.lock');
 }
 
+/**
+ * Orchestration-manifest directory (one <topic>.json per pool). Per-namespace
+ * when MAESTRO_NS is set so a namespaced conductor reconciles only ITS pools
+ * against its namespace-narrow alive set — otherwise it would mark another
+ * project's running tasks stopped (GH-622). MAESTRO_SESSION_DIR overrides.
+ */
+function sessionManifestDir() {
+  if (process.env.MAESTRO_SESSION_DIR) return process.env.MAESTRO_SESSION_DIR;
+  const base = path.join(os.homedir(), '.cache', 'maestro', 'sessions');
+  const n = ns();
+  return n ? path.join(base, n) : base;
+}
+
 // ── Session-name helpers ────────────────────────────────────────────────────
 
 /** Build a maestro session name, NS-scoped: "[<ns>/]<ticket>-<suffix>". */
@@ -130,6 +143,7 @@ module.exports = {
   alertSession,
   inboxDir,
   lockFile,
+  sessionManifestDir,
   sessionName,
   ticketIdFor,
   flattenKey,

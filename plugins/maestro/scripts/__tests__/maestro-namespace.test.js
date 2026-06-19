@@ -21,6 +21,7 @@ function load(env = {}) {
     'ALERT_FILE',
     'ALERT_SESSION',
     'MAESTRO_INBOX_DIR',
+    'MAESTRO_SESSION_DIR',
   ]) {
     delete process.env[k];
   }
@@ -37,6 +38,7 @@ test('unset MAESTRO_NS → historical global defaults (back-compat)', () => {
   assert.equal(ns.alertFile(), '/tmp/maestro-alerts.jsonl');
   assert.equal(ns.alertSession(), 'maestro-alerts');
   assert.equal(ns.inboxDir(), '/tmp/claude-agent-inbox');
+  assert.equal(ns.sessionManifestDir(), path.join(os.homedir(), '.cache', 'maestro', 'sessions'));
   assert.equal(ns.sessionName('GH-42', 'work'), 'GH-42-work');
 });
 
@@ -50,6 +52,10 @@ test('MAESTRO_NS=proj-a → every resource gets the namespace segment', () => {
   assert.equal(ns.alertSession(), 'maestro-alerts-proj-a');
   assert.equal(ns.inboxDir(), '/tmp/claude-agent-inbox/proj-a');
   assert.equal(ns.lockFile(), path.join(ns.stateDir(), 'conductor.lock'));
+  assert.equal(
+    ns.sessionManifestDir(),
+    path.join(os.homedir(), '.cache', 'maestro', 'sessions', 'proj-a')
+  );
   assert.equal(ns.sessionName('GH-42', 'work'), 'proj-a/GH-42-work');
 });
 
