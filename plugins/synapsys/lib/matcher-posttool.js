@@ -37,16 +37,32 @@ function _stringifyResponse(resp) {
   }
 }
 
+// Coerce an exit-code value to a number. Accepts a real number, or a string
+// that is a finite integer (e.g. "1", "-2") — hooks sometimes deliver
+// exit_code/exitCode as a numeric STRING. Returns undefined for absent or
+// non-numeric values so the caller still fails closed.
+function _coerceExitCode(value) {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+  if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) return Number(value);
+  return undefined;
+}
+
 // Resolve the process exit code from the payload, in the locked read order:
 //   tool_response.exit_code → tool_response.exitCode → payload.exit_code.
-// Returns undefined when none is present (caller fails closed).
+// Numeric-string codes are coerced to numbers. Returns undefined when none is
+// present (caller fails closed).
 function _resolveExitCode(payload) {
   const resp = payload && payload.tool_response;
   if (resp && typeof resp === 'object') {
-    if (typeof resp.exit_code === 'number') return resp.exit_code;
-    if (typeof resp.exitCode === 'number') return resp.exitCode;
+    const fromResp = _coerceExitCode(resp.exit_code);
+    if (fromResp !== undefined) return fromResp;
+    const fromCamel = _coerceExitCode(resp.exitCode);
+    if (fromCamel !== undefined) return fromCamel;
   }
-  if (payload && typeof payload.exit_code === 'number') return payload.exit_code;
+  if (payload) {
+    const fromPayload = _coerceExitCode(payload.exit_code);
+    if (fromPayload !== undefined) return fromPayload;
+  }
   return undefined;
 }
 

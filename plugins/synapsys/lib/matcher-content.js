@@ -29,14 +29,19 @@ function extractPretoolContent(toolName, toolInput) {
   return extractor ? extractor(toolInput) : null;
 }
 
-// Generic, field-agnostic positive content matcher. Scans `patterns` against
-// `contentString`, returning the FIRST match as { pattern, substring } or null.
-// Invalid regexes are warned-and-skipped (C-5); `label` is the trigger field
-// name used only in the warning text (e.g. 'trigger_pretool_content' vs
-// 'trigger_posttool_content'), `memoryName` identifies the offending memory.
-// Shared by both the pretool and posttool surfaces so the loop body lives once.
-function findContentMatchInPatterns(patterns, contentString, { label, memoryName }) {
-  if (!Array.isArray(patterns) || patterns.length === 0) return null;
+// Single shared regex-scan engine for BOTH the positive ('find') and AND-NOT
+// ('not') content surfaces, so the Array-guard → for-loop → new RegExp →
+// warn-and-skip → match/test body lives in exactly ONE place (jscpd clone
+// removal). `label` is the trigger field name used only in the warning text
+// (e.g. 'trigger_pretool_content'); `memoryName` identifies the offending
+// memory; `mode` selects the return shape:
+//   'find' → returns { pattern, substring } on the first match, else null
+//   'not'  → returns { excluded: true, pattern } on the first match,
+//            else { excluded: false, pattern: null }
+// Invalid regexes are warned-and-skipped (C-5). Cyclomatic complexity ~7 (≤10).
+function _scanPatterns(patterns, contentString, { label, memoryName, mode }) {
+  const miss = mode === 'not' ? { excluded: false, pattern: null } : null;
+  if (!Array.isArray(patterns) || patterns.length === 0) return miss;
   for (const pat of patterns) {
     let re;
     try {
@@ -47,36 +52,30 @@ function findContentMatchInPatterns(patterns, contentString, { label, memoryName
       );
       continue;
     }
-    const m = re.exec(contentString);
-    if (m) return { pattern: pat, substring: m[0] };
+    if (mode === 'not') {
+      if (re.test(contentString)) return { excluded: true, pattern: pat };
+    } else {
+      const m = re.exec(contentString);
+      if (m) return { pattern: pat, substring: m[0] };
+    }
   }
-  return null;
+  return miss;
+}
+
+// Generic, field-agnostic positive content matcher. Scans `patterns` against
+// `contentString`, returning the FIRST match as { pattern, substring } or null.
+// Thin wrapper over _scanPatterns (mode 'find'). Shared by both the pretool and
+// posttool surfaces.
+function findContentMatchInPatterns(patterns, contentString, { label, memoryName }) {
+  return _scanPatterns(patterns, contentString, { label, memoryName, mode: 'find' });
 }
 
 // Generic, field-agnostic AND-NOT content gate. Returns { excluded, pattern }
 // where excluded is true on the FIRST pattern that matches `contentString`.
-// Invalid regexes are warned-and-skipped (C-5); `label` / `memoryName` shape
-// the warning text exactly as findContentMatchInPatterns. Shared by both the
-// pretool and posttool negative surfaces.
+// Thin wrapper over _scanPatterns (mode 'not'). Shared by both the pretool and
+// posttool negative surfaces.
 function evaluateContentNot(patterns, contentString, { label, memoryName }) {
-  if (!Array.isArray(patterns) || patterns.length === 0) {
-    return { excluded: false, pattern: null };
-  }
-  for (const pat of patterns) {
-    let re;
-    try {
-      re = new RegExp(pat, 'im');
-    } catch (err) {
-      process.stderr.write(
-        `[synapsys] memory ${memoryName}: invalid ${label} regex "${pat}": ${err.message}\n`
-      );
-      continue;
-    }
-    if (re.test(contentString)) {
-      return { excluded: true, pattern: pat };
-    }
-  }
-  return { excluded: false, pattern: null };
+  return _scanPatterns(patterns, contentString, { label, memoryName, mode: 'not' });
 }
 
 function findContentMatch(memory, contentString) {

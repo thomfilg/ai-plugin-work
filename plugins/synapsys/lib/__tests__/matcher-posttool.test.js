@@ -360,6 +360,26 @@ test('_evaluatePostToolExit reads order tool_response.exit_code -> .exitCode -> 
   );
 });
 
+test('_evaluatePostToolExit coerces numeric-STRING exit codes (string "1" == numeric 1)', () => {
+  const mem = makeMemory({ triggerPosttoolExit: 'nonzero' });
+  // tool_response.exit_code as a string
+  assert.equal(_evaluatePostToolExit(mem, { tool_response: { exit_code: '1' } }).matched, true);
+  // string "0" is still zero → nonzero gate rejects
+  assert.equal(_evaluatePostToolExit(mem, { tool_response: { exit_code: '0' } }).matched, false);
+  // string exitCode fallback
+  assert.equal(_evaluatePostToolExit(mem, { tool_response: { exitCode: '2' } }).matched, true);
+  // payload.exit_code string fallback
+  assert.equal(
+    _evaluatePostToolExit(mem, { tool_response: {}, exit_code: '7' }).matched,
+    true
+  );
+  // non-numeric string is not a code → fail closed
+  assert.equal(
+    _evaluatePostToolExit(mem, { tool_response: { exit_code: 'boom' } }).matched,
+    false
+  );
+});
+
 test('_evaluatePostToolExit fails closed when no exit code is present', () => {
   const result = _evaluatePostToolExit(makeMemory({ triggerPosttoolExit: 'nonzero' }), {
     tool_response: 'no exit code anywhere',
@@ -401,6 +421,20 @@ test('matchPostTool exit gate fails closed (no-exit-match) when exit code absent
   });
   assert.equal(result.fired, false);
   assert.equal(result.reason, 'no-exit-match');
+});
+
+test('matchPostTool fires trigger_posttool_exit:nonzero on a STRING exit_code "1" like numeric 1', () => {
+  const memory = makeMemory({
+    triggerPretool: ['Bash:pnpm test'],
+    triggerPosttoolExit: 'nonzero',
+  });
+  const stringResult = run(memory, {
+    tool_name: 'Bash',
+    tool_input: { command: 'pnpm test' },
+    tool_response: { stdout: '', stderr: 'FAIL', exit_code: '1' },
+  });
+  assert.equal(stringResult.fired, true);
+  assert.equal(stringResult.matched.posttool_exit, 'nonzero');
 });
 
 // ---- gate / distinctness ----

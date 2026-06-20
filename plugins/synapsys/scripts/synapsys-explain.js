@@ -32,6 +32,13 @@ const { buildActiveDomains } = require(path.join(__dirname, '..', 'lib', 'active
 const { resolveSessionId: ledgerResolveSessionId } = require(
   path.join(__dirname, '..', 'lib', 'inject-ledger')
 );
+// Payload / flag-resolution helpers live in a sibling lib module so this CLI
+// stays under the quality gate's max-lines budget.
+const {
+  resolveToolInput,
+  resolveToolResponse,
+  buildPayload,
+} = require(path.join(__dirname, 'lib', 'explain-payload'));
 
 const VALID_EVENTS = new Set([
   'UserPromptSubmit',
@@ -61,15 +68,6 @@ function parseStdinPayload(raw) {
     return JSON.parse(raw);
   } catch (err) {
     die(`invalid stdin JSON: ${err.message}`, 2);
-  }
-}
-
-function parseToolInput(raw) {
-  if (raw === undefined || raw === '' || raw === true) return undefined;
-  try {
-    return JSON.parse(raw);
-  } catch (err) {
-    die(`invalid --tool-input JSON: ${err.message}`, 2);
   }
 }
 
@@ -314,35 +312,6 @@ function resolveEvent(flag, stdinPayload) {
   return event;
 }
 
-function resolveToolInput(flag, stdinPayload) {
-  if (flag('tool-input') !== undefined) return parseToolInput(flag('tool-input'));
-  if (stdinPayload.tool_input !== undefined) return stdinPayload.tool_input;
-  return undefined;
-}
-
-// Parse a --tool-response flag value. PostToolUse responses are commonly an
-// object (e.g. { stdout, stderr, exit_code }) so a JSON value is parsed to drive
-// both the content gates and the exit-code gate; a non-JSON value passes through
-// verbatim as the string tool_response surface. Mirrors parseToolInput's lenient
-// empty handling.
-function parseToolResponse(raw) {
-  if (raw === undefined || raw === '' || raw === true) return '';
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return raw;
-  }
-}
-
-// Resolve tool_response with a flag fallback so flag-only --event=PostToolUse
-// runs (no --stdin) still exercise the content/exit gates instead of failing
-// closed. --tool-response wins when provided; otherwise carry through the raw
-// stdin payload's tool_response. Mirrors the --tool/--response resolution order.
-function resolveToolResponse(flag, stdinPayload) {
-  if (flag('tool-response') !== undefined) return parseToolResponse(flag('tool-response'));
-  return stdinPayload.tool_response;
-}
-
 function parseOnlyList(flag) {
   const raw = flag('only');
   if (typeof raw !== 'string') return null;
@@ -364,21 +333,6 @@ function applyOnlyFilter(memories, only) {
   return memories.filter((m) => onlySet.has(m.name));
 }
 
-function buildPayload(event, prompt, tool, toolInput, cwd, response, toolResponse) {
-  return {
-    hook_event_name: event,
-    prompt: prompt === true ? '' : prompt || '',
-    tool_name: tool === true ? '' : tool || '',
-    tool_input: toolInput || {},
-    // PostToolUse matching inspects the tool OUTPUT surface (tool_response +
-    // exit code). Carry it through from the raw stdin payload so matchPostTool
-    // sees the same shape the dispatcher hook would.
-    tool_response: toolResponse,
-    response: response === true ? '' : response || '',
-    cwd,
-  };
-}
-
 function main() {
   const flag = makeFlag(process.argv.slice(2));
   const stdinPayload = readStdinPayloadIfRequested(flag);
@@ -387,7 +341,7 @@ function main() {
   const cwd = flag('cwd') || stdinPayload.cwd || process.cwd();
   const prompt = flag('prompt') !== undefined ? flag('prompt') : stdinPayload.prompt;
   const tool = flag('tool') !== undefined ? flag('tool') : stdinPayload.tool_name;
-  const toolInput = resolveToolInput(flag, stdinPayload);
+  const toolInput = resolveToolInput(flag, stdinPayload, die);
   const response = flag('response') !== undefined ? flag('response') : stdinPayload.response;
   const toolResponse = resolveToolResponse(flag, stdinPayload);
   const verbose = !!flag('verbose');
