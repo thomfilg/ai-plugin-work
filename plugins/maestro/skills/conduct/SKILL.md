@@ -34,14 +34,20 @@ Per tick (every `TICK_SEC`, default 60s) each `${PREFIX}-*-work` session runs th
 
 | Var | Default | Effect |
 |-----|---------|--------|
+| `MAESTRO_NS` | (unset) | Namespace key (`[A-Za-z0-9_-]+`). When set, isolates state/log/alert/inbox/lock **and** tmux session names so N conductors run on one machine without racing (GH-622). |
+| `MAESTRO_FORCE` | (unset) | `1` takes over a live per-namespace conductor lock instead of refusing. Use only when the prior conductor is gone. |
 | `SILENCE_LIMIT_SEC` | `300` | Real-silence threshold before auto-restart |
 | `TICK_SEC` | `60` | Tick cadence |
 | `CLAUDE_BIN` | `claude` | Binary used for auto-restart |
 | `SKILL_NAME` | `work` | Skill name passed to the auto-restart command |
-| `STATE_DIR` | `/tmp/maestro-conduct-state` | Per-ticket marker location |
-| `LOG_FILE` | `/tmp/maestro-conduct.log` | Where event lines are appended |
+| `STATE_DIR` | `~/.cache/maestro-conduct[/<ns>]` | Per-ticket marker location (NS-derived; explicit value wins) |
+| `LOG_FILE` | `/tmp/maestro-conduct[-<ns>].log` | Where event lines are appended |
 | `WORKTREES_BASE` | `$HOME/worktrees` | Where worktrees live (must match bootstrap) |
 | `REPO_NAME` | `claude-plugin-work` | Worktree dirname suffix (must match bootstrap) |
+
+Concurrent instances: see the "Running concurrent maestro instances" section in
+`docs/OPERATOR_PLAYBOOK.md` for the one-conductor rule and the `MAESTRO_NS`
+isolation recipe.
 
 ## Stop
 

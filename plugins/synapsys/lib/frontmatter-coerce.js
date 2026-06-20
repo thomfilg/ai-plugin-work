@@ -21,6 +21,7 @@ const BRACKET_LIST_KEYS = new Set([
   'trigger_posttool_content',
   'trigger_posttool_content_not',
   'cite_signals',
+  'behavior_signals',
   'exclude_pretool',
   'exclude_preset',
 ]);

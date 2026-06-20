@@ -8,6 +8,25 @@ const path = require('node:path');
 
 const draft = require('../lib/phases/draft');
 
+// These tests exercise the legacy shared-scaffold rule in isolation, with
+// minimal fixtures that carry no `### Test Strategy` block. Now that
+// WORK_TEST_STRATEGY_VALIDATOR defaults to `1`, the unrelated GH-590
+// TDD-ownership-graph validator would otherwise fire on these fixtures and
+// add spurious errors. Pin the flag off so this suite tests only the
+// shared-scaffold rule it is about. (Test Strategy validation has its own
+// dedicated suites.)
+const ORIGINAL_STRATEGY_FLAG = process.env.WORK_TEST_STRATEGY_VALIDATOR;
+test.before(() => {
+  process.env.WORK_TEST_STRATEGY_VALIDATOR = '0';
+});
+test.after(() => {
+  if (ORIGINAL_STRATEGY_FLAG === undefined) {
+    delete process.env.WORK_TEST_STRATEGY_VALIDATOR;
+  } else {
+    process.env.WORK_TEST_STRATEGY_VALIDATOR = ORIGINAL_STRATEGY_FLAG;
+  }
+});
+
 function mkDir(files) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'draft-shared-'));
   const tasksDir = path.join(root, 'ECHO-9999');

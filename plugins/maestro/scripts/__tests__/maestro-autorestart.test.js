@@ -62,6 +62,10 @@ test('autoRestart on -work session issues kill-session + new-session', () => {
   const actions = loadFreshActions(fakeDir, {
     CLAUDE_BIN: 'fake-claude',
     SKILL_NAME: 'work',
+    // Isolate restart-loop markers to this test's temp dir — without STATE_DIR
+    // they leak to ~/.cache/maestro-conduct/ and accumulate across runs, which
+    // trips RESTART_LOOP_THRESHOLD and wedges the session (flaky in isolation).
+    STATE_DIR: path.join(tmpDir, 'state'),
   });
 
   const ok = actions.autoRestart({
@@ -92,11 +96,72 @@ test('autoRestart on -work session issues kill-session + new-session', () => {
   );
 });
 
+test('autoRestart under MAESTRO_NS relaunches with the namespaced inbox dir (GH-622)', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autorestart-ns-'));
+  const logPath = path.join(tmpDir, 'tmux.log');
+  const fakeDir = makeFakeTmuxDir(logPath);
+  const worktree = path.join(tmpDir, 'wt');
+  fs.mkdirSync(worktree, { recursive: true });
+  delete process.env.MAESTRO_INBOX_DIR;
+  const actions = loadFreshActions(fakeDir, {
+    CLAUDE_BIN: 'fake-claude',
+    SKILL_NAME: 'work',
+    STATE_DIR: path.join(tmpDir, 'state'),
+    MAESTRO_NS: 'proj-a',
+  });
+
+  const ok = actions.autoRestart({
+    session: 'proj-a/ECHO-5-work',
+    ticket: 'ECHO-5',
+    worktree,
+    silenceSec: 600,
+  });
+  assert.strictEqual(ok, true);
+
+  const inv = readInvocations(logPath);
+  // The relaunch command must carry CLAUDE_AGENT_INBOX_DIR so the restarted
+  // agent keeps sharing maestro's per-namespace mailbox (else it drifts back to
+  // the global inbox while /signal stays namespaced).
+  assert.strictEqual(
+    inv[1][6],
+    "CLAUDE_AGENT_INBOX_DIR='/tmp/claude-agent-inbox/proj-a' fake-claude --dangerously-skip-permissions '/work ECHO-5'"
+  );
+  delete process.env.MAESTRO_NS;
+});
+
+test('autoRestart honors MAESTRO_INBOX_DIR override even without a namespace (GH-622)', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autorestart-inbox-'));
+  const logPath = path.join(tmpDir, 'tmux.log');
+  const fakeDir = makeFakeTmuxDir(logPath);
+  const worktree = path.join(tmpDir, 'wt');
+  fs.mkdirSync(worktree, { recursive: true });
+  delete process.env.MAESTRO_NS;
+  const actions = loadFreshActions(fakeDir, {
+    CLAUDE_BIN: 'fake-claude',
+    SKILL_NAME: 'work',
+    STATE_DIR: path.join(tmpDir, 'state'),
+    MAESTRO_INBOX_DIR: '/custom/mail',
+  });
+
+  actions.autoRestart({ session: 'ECHO-5-work', ticket: 'ECHO-5', worktree, silenceSec: 600 });
+
+  const inv = readInvocations(logPath);
+  // Override must flow through so a restart keeps matching maestro's /signal.
+  assert.strictEqual(
+    inv[1][6],
+    "CLAUDE_AGENT_INBOX_DIR='/custom/mail' fake-claude --dangerously-skip-permissions '/work ECHO-5'"
+  );
+  delete process.env.MAESTRO_INBOX_DIR;
+});
+
 test('autoRestart no-ops when worktree directory is missing', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autorestart-miss-'));
   const logPath = path.join(tmpDir, 'tmux.log');
   const fakeDir = makeFakeTmuxDir(logPath);
-  const actions = loadFreshActions(fakeDir, { CLAUDE_BIN: 'fake-claude' });
+  const actions = loadFreshActions(fakeDir, {
+    CLAUDE_BIN: 'fake-claude',
+    STATE_DIR: path.join(tmpDir, 'state'),
+  });
 
   const ok = actions.autoRestart({
     session: 'ECHO-9-work',

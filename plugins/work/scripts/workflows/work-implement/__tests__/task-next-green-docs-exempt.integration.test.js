@@ -72,11 +72,11 @@ function runTaskNext(tasksBase, cwd, ticket, taskNum) {
 }
 
 function runTddInit(tasksBase, cwd, ticket, taskNum) {
-  const r = spawnSync(
-    'node',
-    [TDD_CLI, 'init', ticket, '--task', String(taskNum)],
-    { cwd, encoding: 'utf8', env: childEnv(tasksBase) }
-  );
+  const r = spawnSync('node', [TDD_CLI, 'init', ticket, '--task', String(taskNum)], {
+    cwd,
+    encoding: 'utf8',
+    env: childEnv(tasksBase),
+  });
   return {
     stdout: r.stdout || '',
     stderr: r.stderr || '',
@@ -206,10 +206,7 @@ describe('task-next.js GREEN docs-exempt fallback', () => {
     // Author the marker that the GREEN verifier greps for (setup mirrors
     // the fixture docstring: "then we write the marker and the GREEN
     // verifier exits 0 silently").
-    fs.writeFileSync(
-      path.join(repo, 'docs', 'README.md'),
-      'placeholder DOCS_MARKER\n'
-    );
+    fs.writeFileSync(path.join(repo, 'docs', 'README.md'), 'placeholder DOCS_MARKER\n');
 
     // Invocation 2: GREEN. Same silent `true` cmd exits 0. Without the
     // GREEN docs-exempt fallback, recordEvidence forwards no flag and
@@ -224,9 +221,16 @@ describe('task-next.js GREEN docs-exempt fallback', () => {
       state.currentPhase,
       'refactor',
       'docs-exempt task should advance to refactor.\n' +
-        'r1 stdout:\n' + r1.stdout + '\nr1 stderr:\n' + r1.stderr +
-        '\nr2 stdout:\n' + r2.stdout + '\nr2 stderr:\n' + r2.stderr +
-        '\nstate: ' + JSON.stringify(state, null, 2)
+        'r1 stdout:\n' +
+        r1.stdout +
+        '\nr1 stderr:\n' +
+        r1.stderr +
+        '\nr2 stdout:\n' +
+        r2.stdout +
+        '\nr2 stderr:\n' +
+        r2.stderr +
+        '\nstate: ' +
+        JSON.stringify(state, null, 2)
     );
 
     // Diagnostic line must surface the GREEN docs-exempt fallback so the
@@ -236,7 +240,8 @@ describe('task-next.js GREEN docs-exempt fallback', () => {
       combined2,
       /docs-exempt fallback/,
       'GREEN docs-exempt path must emit a diagnostic containing the literal ' +
-        '"docs-exempt fallback". Got:\n' + combined2
+        '"docs-exempt fallback". Got:\n' +
+        combined2
     );
   });
 
@@ -251,9 +256,7 @@ describe('task-next.js GREEN docs-exempt fallback', () => {
 
     // Seed phase state to green so we exercise the GREEN branch directly
     // (skip the RED dance, which is not the regression surface).
-    const statePath = path.join(
-      tasksBase, TICKET, 'task' + TASK_NUM, 'tdd-phase.json'
-    );
+    const statePath = path.join(tasksBase, TICKET, 'task' + TASK_NUM, 'tdd-phase.json');
     const state0 = JSON.parse(fs.readFileSync(statePath, 'utf8'));
     state0.currentPhase = 'green';
     state0.cycles = [
@@ -280,21 +283,27 @@ describe('task-next.js GREEN docs-exempt fallback', () => {
       stateAfter.currentPhase,
       'green',
       'non-docs task with silent verifier must remain wedged at GREEN. ' +
-        'stdout:\n' + r.stdout + '\nstderr:\n' + r.stderr +
-        '\nstate: ' + JSON.stringify(stateAfter, null, 2)
+        'stdout:\n' +
+        r.stdout +
+        '\nstderr:\n' +
+        r.stderr +
+        '\nstate: ' +
+        JSON.stringify(stateAfter, null, 2)
     );
     assert.notEqual(
       r.exitCode,
       0,
       'non-docs silent verifier should produce a non-zero exit. ' +
-        'stdout:\n' + r.stdout + '\nstderr:\n' + r.stderr
+        'stdout:\n' +
+        r.stdout +
+        '\nstderr:\n' +
+        r.stderr
     );
     const combined = r.stdout + r.stderr;
     assert.doesNotMatch(
       combined,
       /docs-exempt fallback/,
-      'non-docs path must NOT emit the docs-exempt fallback diagnostic. ' +
-        'Got:\n' + combined
+      'non-docs path must NOT emit the docs-exempt fallback diagnostic. ' + 'Got:\n' + combined
     );
   });
 });

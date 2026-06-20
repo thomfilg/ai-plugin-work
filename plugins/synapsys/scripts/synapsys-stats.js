@@ -98,9 +98,10 @@ function collectStopOnlyMemoryNames(stores) {
 
 function tallyEvent(counts, ev) {
   if (!ev || !ev.memory || !ev.event) return;
-  const c = counts.get(ev.memory) || { fired: 0, cited: 0 };
+  const c = counts.get(ev.memory) || { fired: 0, cited: 0, changed: 0 };
   if (ev.event === 'fired') c.fired += 1;
   else if (ev.event === 'cited') c.cited += 1;
+  else if (ev.event === 'behavior_changed') c.changed += 1;
   counts.set(ev.memory, c);
 }
 
@@ -117,13 +118,14 @@ function aggregate(cwd, { windowMs }) {
 
   // Include zero-fire known memories so Never-fired can list them.
   for (const name of known) {
-    if (!counts.has(name)) counts.set(name, { fired: 0, cited: 0 });
+    if (!counts.has(name)) counts.set(name, { fired: 0, cited: 0, changed: 0 });
   }
 
   const perMemory = Array.from(counts.entries()).map(([name, c]) => ({
     name,
     fired: c.fired,
     cited: c.cited,
+    changed: c.changed || 0,
     known: known.has(name),
     stopOnly: stopOnly.has(name),
   }));
@@ -131,52 +133,117 @@ function aggregate(cwd, { windowMs }) {
   return { perMemory, known: Array.from(known) };
 }
 
-function formatSections(stats, { color = false } = {}) {
+function formatBehaviorChangers(perMemory) {
+  // Include any known memory with at least one behavior_changed event, even
+  // when fired is 0 in this window — a Stop self-report can land a `changed`
+  // row without a paired `fired` row (the trigger fired in a prior window or
+  // the cite scan ran without a matcher hit). Without this, those memories
+  // appear in NO section: Behavior-changers excluded them on fired:0 and
+  // Never-fired excludes them on changed>0.
+  const changers = perMemory
+    .filter((m) => m.known && (m.changed || 0) > 0)
+    .map((m) => ({ ...m, ratio: m.fired > 0 ? m.changed / m.fired : Infinity }))
+    .sort((a, b) => {
+      if (b.ratio !== a.ratio) return b.ratio - a.ratio;
+      return b.changed - a.changed;
+    });
+  const lines = [];
+  lines.push('Behavior-changers (sorted by changed/fired ratio):');
+  lines.push('  name   fired   cited   changed   verdict');
+  if (changers.length === 0) lines.push('  (none)');
+  for (const m of changers) {
+    const verdict = m.ratio >= 0.5 ? 'keep' : 'review';
+    lines.push(
+      `  ${m.name}   fired:${m.fired}   cited:${m.cited}   changed:${m.changed}   ${verdict}`
+    );
+  }
+  return lines;
+}
+
+function selectTopInfluencers(perMemory) {
+  return perMemory
+    .filter((m) => m.known && m.cited > 0)
+    .sort((a, b) => {
+      if (b.cited !== a.cited) return b.cited - a.cited;
+      return b.fired * b.cited - a.fired * a.cited;
+    });
+}
+
+function selectNoiseCandidates(perMemory) {
+  // Stop-only memories fire on every assistant turn by design; the
+  // "tighten triggers" advice does not apply to them, so they're excluded
+  // from noise classification regardless of fired count.
+  return perMemory
+    .filter(
+      (m) =>
+        m.known &&
+        !m.stopOnly &&
+        m.fired >= NOISE_FIRED_THRESHOLD &&
+        m.cited === 0 &&
+        m.changed === 0
+    )
+    .sort((a, b) => b.fired - a.fired);
+}
+
+function selectNeverFired(perMemory) {
+  // Exclude memories with behavior_changed telemetry — a memory that changed
+  // behavior at least once is not "never fired" even if no `fired` row exists
+  // (Stop self-report can land a `changed` event without a paired fire).
+  return perMemory
+    .filter((m) => m.known && m.fired === 0 && m.cited === 0 && m.changed === 0)
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+function formatTopSection(top) {
+  const lines = ['Top influencers (fired × cited):'];
+  if (top.length === 0) lines.push('  (none)');
+  for (const m of top) {
+    const ratio = m.fired === 0 ? 0 : (m.cited / m.fired).toFixed(2);
+    lines.push(`  ${m.name}   fired:${m.fired}  cited:${m.cited}  influence:${ratio}  keep`);
+  }
+  return lines;
+}
+
+function formatNoiseSection(noise) {
+  const lines = ['Noise candidates (fired ≥10, cited:0):'];
+  if (noise.length === 0) lines.push('  (none)');
+  for (const m of noise) {
+    lines.push(`  ${m.name}   fired:${m.fired}  cited:${m.cited}  narrow trigger or delete`);
+  }
+  return lines;
+}
+
+function formatNeverSection(never) {
+  const lines = ['Never-fired (consider deletion or session-start docs instead):'];
+  if (never.length === 0) lines.push('  (none)');
+  for (const m of never) {
+    lines.push(`  ${m.name}   fired:0  cited:0`);
+  }
+  return lines;
+}
+
+function formatSections(stats, { color = false, changersOnly = false } = {}) {
   const { perMemory } = stats;
+  void color;
+
+  if (changersOnly) {
+    return formatBehaviorChangers(perMemory).join('\n') + '\n';
+  }
 
   // All three sections must restrict to memories discovered via --cwd
   // (`m.known`). The global ~/.claude/synapsys/.telemetry/ aggregates events
   // from every project, so without this filter Top influencers and Noise
   // candidates would surface deleted or other-project memories that the
   // current store no longer (or never) owned.
-  const top = perMemory
-    .filter((m) => m.known && m.cited > 0)
-    .sort((a, b) => {
-      if (b.cited !== a.cited) return b.cited - a.cited;
-      return b.fired * b.cited - a.fired * a.cited;
-    });
-
-  // Stop-only memories fire on every assistant turn by design; the
-  // "tighten triggers" advice does not apply to them, so they're excluded
-  // from noise classification regardless of fired count.
-  const noise = perMemory
-    .filter((m) => m.known && !m.stopOnly && m.fired >= NOISE_FIRED_THRESHOLD && m.cited === 0)
-    .sort((a, b) => b.fired - a.fired);
-
-  const never = perMemory
-    .filter((m) => m.known && m.fired === 0 && m.cited === 0)
-    .sort((a, b) => a.name.localeCompare(b.name));
-
-  const lines = [];
-  lines.push('Top influencers (fired × cited):');
-  if (top.length === 0) lines.push('  (none)');
-  for (const m of top) {
-    const ratio = m.fired === 0 ? 0 : (m.cited / m.fired).toFixed(2);
-    lines.push(`  ${m.name}   fired:${m.fired}  cited:${m.cited}  influence:${ratio}  keep`);
-  }
-  lines.push('');
-  lines.push('Noise candidates (fired ≥10, cited:0):');
-  if (noise.length === 0) lines.push('  (none)');
-  for (const m of noise) {
-    lines.push(`  ${m.name}   fired:${m.fired}  cited:${m.cited}  narrow trigger or delete`);
-  }
-  lines.push('');
-  lines.push('Never-fired (consider deletion or session-start docs instead):');
-  if (never.length === 0) lines.push('  (none)');
-  for (const m of never) {
-    lines.push(`  ${m.name}   fired:0  cited:0`);
-  }
-  void color;
+  const lines = [
+    ...formatTopSection(selectTopInfluencers(perMemory)),
+    '',
+    ...formatNoiseSection(selectNoiseCandidates(perMemory)),
+    '',
+    ...formatNeverSection(selectNeverFired(perMemory)),
+    '',
+    ...formatBehaviorChangers(perMemory),
+  ];
   return lines.join('\n') + '\n';
 }
 
@@ -184,6 +251,7 @@ function main() {
   const { flag, cwd } = setupCli();
   const windowMs = parseWindow(flag('last') || '7d');
   const useColor = !flag('no-color');
+  const changersOnly = !!flag('changers-only');
   let stats;
   try {
     stats = aggregate(cwd, { windowMs });
@@ -194,7 +262,7 @@ function main() {
   if (flag('json')) {
     process.stdout.write(JSON.stringify(stats, null, 2) + '\n');
   } else {
-    process.stdout.write(formatSections(stats, { color: useColor }));
+    process.stdout.write(formatSections(stats, { color: useColor, changersOnly }));
   }
   process.exit(0);
 }

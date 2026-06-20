@@ -5,13 +5,12 @@
  */
 'use strict';
 
-const path = require('path');
-const os = require('os');
+const namespace = require('./namespace');
 
 function getSessionDir() {
-  return (
-    process.env.MAESTRO_SESSION_DIR || path.join(os.homedir(), '.cache', 'maestro', 'sessions')
-  );
+  // Per-namespace when MAESTRO_NS is set so a namespaced conductor never
+  // reconciles another project's pools (GH-622). MAESTRO_SESSION_DIR overrides.
+  return namespace.sessionManifestDir();
 }
 
 function countByStatus(tasks) {

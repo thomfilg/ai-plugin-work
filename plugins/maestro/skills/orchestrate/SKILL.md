@@ -1,7 +1,7 @@
 ---
 name: orchestrate
 description: Orchestrate multiple /work agents in parallel. Use when the user says "orchestrate these tickets", "launch agents", "bootstrap multiple tickets", "run all of these in parallel", "start a swarm", or lists several ticket IDs to work on simultaneously. Creates one tmux session per ticket in its own worktree, auto-restarts silent agents, and surfaces real questions to the operator.
-argument-hint: <ticket-ids...>
+argument-hint: <ticket-ids...> | queue=… [poolSize=N] [command=/X] [stopCondition="…"] [save=name|schema=name]
 user-invocable: true
 allowed-tools: Bash, Read, Write, AskUserQuestion, Skill
 ---
@@ -19,6 +19,75 @@ Run several `/work GH-<N>` agents at once. Each ticket gets its own worktree at 
 Examples:
 - `/orchestrate GH-397 GH-398 GH-414` — bootstrap + launch three agents in parallel
 - `/orchestrate 397 398` — bare numbers are accepted; project key is prepended
+
+## Parameterized form (queue / pool / command / stopCondition / schema)
+
+```
+/maestro:orchestrate queue=5915,5956,5945 poolSize=1 command=/qc-work \
+    stopCondition="when /follow-up skill says that it passed" save=opera1
+/maestro:orchestrate queue=5915,5956,5945 poolSize=1 schema=opera1
+```
+
+| Param | Meaning |
+|---|---|
+| `queue=` | Comma-separated ticket ids (bare numbers get the project prefix). Per-run; NEVER saved into a schema. |
+| `poolSize=` | Max concurrent `-work` sessions (manifest `slots`). The conductor tops the pool up from the queue as slots free (needs `AUTO_BOOTSTRAP_NEXT=1`). |
+| `command=` | The skill each queued ticket runs (e.g. `/qc-work`). Whitelisted skills (`work`, `follow-up`) run as-is; ANY other command is allowed ONLY when a `stopCondition` is also given (it then runs under a generic conductor row — the oracle, not a bespoke registry row, defines "done"). |
+| `stopCondition=` | Natural-language completion condition. The skill COMPILES it once into a deterministic shell oracle (see below). The daemon then evaluates that oracle every tick; exit 0 ⇒ the agent is done ⇒ kill + free slot + bootstrap the next queued ticket. |
+| `save=` | After compiling, persist `{poolSize, command, stopCondition.oracle}` as a reusable named schema (synapsys-style store). `queue` is excluded. |
+| `schema=` | Load a saved schema's `poolSize`/`command`/`oracle`; combine with this run's `queue=`. Explicit CLI params override the schema (warn on conflict). The pinned oracle is reused as-is unless `recompile=true`. |
+
+### Compiling `stopCondition` into an oracle (LLM, once — never at eval time)
+
+The constraint is hard: **the daemon must NEVER call an LLM to judge "is it done".** So you (the skill) translate the prose into a shell predicate up front:
+
+1. Parse the named skill from the condition (e.g. `/follow-up`).
+2. Locate its runnable script and a machine-readable verdict — exit code, JSON field, or marker file. For `/follow-up`: `follow-up-next.js` reaches `action:'complete'` (state `complete`) only after re-verifying the PR is mergeable, CI green, comments resolved. Compile to:
+   ```sh
+   node "$FOLLOWUP/follow-up-next.js" "$TICKET" --json | jq -e '.action=="complete"'
+   ```
+   (`$TICKET` and `$WORKTREE` are injected into the oracle's env by the conductor — do not interpolate them into the command string.)
+3. The oracle must exit 0 iff done, non-zero otherwise. Keep it cheap (runs every tick × every session).
+4. **Refuse to compile** if the named skill exposes no deterministic verdict (pure-LLM skill). Surface via `AskUserQuestion`: "give me a shell predicate, or pick another condition" — do NOT emit an oracle that would need LLM evaluation.
+
+### Saving / reusing schemas (synapsys-mirrored store)
+
+Schemas persist as one markdown-with-frontmatter file per name in a tiered, marker-gated store (`local`/`worktree`/`global`/`shared`), exactly like synapsys memories. CLI: `node scripts/maestro-schema.js {init|save|list|show|delete}`.
+
+- **No default tier.** When `save=` (or any store write) needs a tier and none was passed, `AskUserQuestion` to pick — recommend `worktree` when `git worktree list` shows >1 entry, else `local`; offer `global` (per-project) and `shared` (reused across ALL projects). If the chosen tier has no store yet, run `maestro-schema.js init <tier>` first (idempotent).
+- **`save=opera1`** → compile the oracle, then `maestro-schema.js save opera1 --tier=<kind> --pool=N --command=/qc-work --stop-source="…" --stop-oracle='…' --compiled-from='follow-up@<ver> (follow-up-next.js)'`. Show a one-time note that the oracle runs as shell on every tick.
+- **`schema=opera1`** → `maestro-schema.js show opera1`. If the name exists in >1 tier, `AskUserQuestion` to disambiguate. Reuse the pinned oracle as-is.
+- **`schema=` omitted but reuse wanted** → `maestro-schema.js list` → `AskUserQuestion` menu of saved schemas.
+
+### Managing saved schemas
+
+These are management-only commands (no `queue` needed) — invoked when the user asks to see or remove saved schemas:
+
+| Intent | Action |
+|---|---|
+| "list schemas" / "what schemas do I have" | `node scripts/maestro-schema.js list` → render name, tier, poolSize, command, stopSource per row |
+| "show opera1" | `node scripts/maestro-schema.js show opera1` (errors if the name exists in >1 tier) |
+| "delete opera1" / "forget that schema" | `node scripts/maestro-schema.js delete opera1` — if it exists in >1 tier, pass `--tier=<kind>`. Confirm before deleting (it is permanent; mirror synapsys's never-`rm`-without-ack posture). |
+
+When the user says "delete a schema" without naming one, `list` first, then `AskUserQuestion` with the names, then `delete` the chosen one.
+
+### Launching a parameterized run
+
+Seed the manifest with the command + compiled oracle so a daemon restart can't revert to `/work`:
+
+```
+node scripts/maestro-session.js init <topic> <poolSize> \
+    --command=<cmd> --stop-oracle='<oracle>' --stop-source='<prose>' \
+    5915:1 5956:2 5945:3 …
+```
+
+Then bootstrap the first `poolSize` tickets, passing the command and (for a non-whitelisted command) `--allow-generic` so the whitelist is relaxed for the oracle-backed launch:
+
+```
+bash scripts/maestro-bootstrap.sh --skill=qc-work --allow-generic 5915
+```
+
+`--allow-generic` is required only for commands outside the `work`/`follow-up` whitelist; it accepts any regex-valid skill name and persists it to the per-ticket `.maestro-skill` file that the conductor reads on restart. Finally start the daemon with `AUTO_BOOTSTRAP_NEXT=1` so it tops the pool up from the queue as each ticket's oracle frees a slot.
 
 ## What it does
 
@@ -54,6 +123,7 @@ The .js daemon emits exactly these event kinds. Anything else is bookkeeping noi
 | `nudges-exhausted` | `ACTION … kind=nudges-exhausted` | `handlePhaseStall` | One alert per phase, until phase advances |
 | `pr-comments-stuck` | `ACTION … kind=pr-comments-stuck` | `handlePrComments` | One alert until comment count or HEAD changes |
 | `commit-stall NNNm` | `<S> commit-stall NNNm in phase=… (threshold=TTTm)` | `runCommitStallDetector` | **Threshold-only**: emits at `[30, 60, 120, 240, 480]` minutes, at most 5 lines per stall |
+| `stop-condition-met` | `ACTION … kind=stop-condition-met oracle=…` + `<S> STOP-CONDITION-MET — tmux killed, slot freed` | `stop-condition.maybeStopOnOracle` → `actions.freeStopConditionSlot` | Once per ticket lifecycle (`stop-condition` marker); ticket marked `done` |
 | `HEARTBEAT N active, X pr-ready, Y pr-broken, Z pr-pending, W wedged ‖ …` | log-only | `maybeEmitHeartbeat` (main loop) | Once per `HEARTBEAT_MIN` (default 30m); always emits even when nothing else changed |
 
 ## Recommended Monitor filter
@@ -61,15 +131,17 @@ The .js daemon emits exactly these event kinds. Anything else is bookkeeping noi
 Use this exact regex. Anything outside it is noise:
 
 ```
-QUESTION-DETECTED|AUTO-RESTART|SESSION-GONE|NUDGE|ACTION|pr-ready|pr-broken|wedged|WEDGED|HEARTBEAT|commit-stall
+QUESTION-DETECTED|AUTO-RESTART|SESSION-GONE|NUDGE|ACTION|pr-ready|pr-broken|stop-condition-met|wedged|WEDGED|HEARTBEAT|commit-stall
 ```
 
-`pr-ready` is the **positive** signal — when you see it, the agent's PR is CLEAN and all checks are green; merge it (or hold per `[[never-auto-merge-pr]]`). `wedged` is the **escalation** signal — auto-restart loop hit its cap; operator must inspect. `HEARTBEAT` is the periodic forced re-read; never ignore it.
+`stop-condition-met` is a **positive** signal — the ticket's compiled oracle exited 0, the agent finished, its slot was freed and the next queued ticket bootstrapped. `pr-ready` is the **positive** signal — when you see it, the agent's PR is CLEAN and all checks are green; merge it (or hold per `[[never-auto-merge-pr]]`). `wedged` is the **escalation** signal — auto-restart loop hit its cap; operator must inspect. `HEARTBEAT` is the periodic forced re-read; never ignore it.
 
 ## Env
 
 | Variable | Default | What it tunes |
 |---|---|---|
+| `MAESTRO_NS` | (unset) | Namespace key (`[A-Za-z0-9_-]+`). Isolates state/log/alert/inbox/lock + tmux session names (`<ns>/<TICKET>-work`) so N maestro instances run on one machine without racing. Set it in each project's `.envrc`. See `docs/OPERATOR_PLAYBOOK.md` → "Running concurrent maestro instances". |
+| `MAESTRO_FORCE` | (unset) | `1` takes over a live per-namespace conductor lock instead of refusing to start. |
 | `WORKTREES_BASE` | — | Where worktrees live |
 | `REPO_NAME` | `claude-plugin-work` | Resolves to `<base>/<repo>-<ticket>` worktree path |
 | `BASE_BRANCH` | `main` | Branch the worktree forks from |
@@ -82,6 +154,9 @@ QUESTION-DETECTED|AUTO-RESTART|SESSION-GONE|NUDGE|ACTION|pr-ready|pr-broken|wedg
 | `RESTART_WINDOW_MIN` | 30 | Rolling window for restart-loop counter |
 | `WEDGED_QUIET_MIN` | 60 | How long to suppress restarts after WEDGED |
 | `HEARTBEAT_MIN` | 30 | Heartbeat cadence |
+| `ORACLE_TIMEOUT_MS` | 30000 | Per-tick wall-clock budget for a stopCondition oracle |
+| `AUTO_FREE_STOP_CONDITION` | (on) | Set `0` to disable stop-condition kill/rotate |
+| `AUTO_BOOTSTRAP_NEXT` | (off) | Set `1` so the conductor tops the pool up from the queue |
 
 ## After launch
 
