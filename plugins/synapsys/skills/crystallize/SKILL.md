@@ -305,7 +305,6 @@ PostToolUse memories react to a tool's *result*, not the act of running it. This
 name: tests-failing-investigate-first
 description: When a test run fails, read the failure output and reproduce locally before re-running CI.
 events: PostToolUse
-trigger_prompt: \b(test failed|failing test|tests? red|investigate failure)\b
 trigger_pretool: Bash:pnpm\s+test
 trigger_posttool_content: \b(FAIL|failed|failing|\d+ failing)\b
 trigger_posttool_content_not: 0 failing
