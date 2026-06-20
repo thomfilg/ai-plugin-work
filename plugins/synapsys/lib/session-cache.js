@@ -3,6 +3,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
+const { sanitizeSessionId } = require('./session-id');
+
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
 /**
@@ -23,7 +25,13 @@ function cacheDir(home) {
  * @returns {string}
  */
 function cacheFile(home, sessionId) {
-  return path.join(cacheDir(home), `${sessionId}.json`);
+  // Sanitize before embedding in the path: an id containing `..` or path
+  // separators would otherwise escape the cache directory via path.join.
+  // `sanitizeSessionId` passes safe ids through unchanged and hashes unsafe
+  // ones, so write/read stay consistent for a given id. Defense-in-depth —
+  // callers now resolve via injectLedger.resolveSessionId (already sanitized).
+  const safe = sanitizeSessionId(sessionId) || 'default';
+  return path.join(cacheDir(home), `${safe}.json`);
 }
 
 /**
