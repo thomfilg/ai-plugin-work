@@ -1,33 +1,12 @@
 /**
- * Code-checker phase dispatcher. Mirrors work-spec/lib/phase-registry.js.
+ * Code-checker phase dispatcher.
  */
 
 'use strict';
 
-const handlers = Object.create(null);
+const { makePhaseRegistry } = require('../../lib/make-phase-registry');
 
-function registerPhase(phaseName, handler) {
-  if (
-    !handler ||
-    typeof handler.validate !== 'function' ||
-    typeof handler.instructions !== 'function'
-  ) {
-    throw new Error(
-      `Invalid phase handler for "${phaseName}" — must expose validate() and instructions()`
-    );
-  }
-  handlers[phaseName] = handler;
-}
-
-function getPhase(phaseName) {
-  const h = handlers[phaseName];
-  if (!h) throw new Error(`No code phase handler registered for "${phaseName}"`);
-  return h;
-}
-
-function hasPhase(phaseName) {
-  return Boolean(handlers[phaseName]);
-}
+const { registerPhase, getPhase, hasPhase } = makePhaseRegistry('code');
 
 require('./phases/inputs')(registerPhase);
 require('./phases/change_classify')(registerPhase);

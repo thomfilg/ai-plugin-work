@@ -36,9 +36,13 @@ const { selectForEvent } = require(path.join(__dirname, '..', 'lib', 'matcher'))
 const { buildActiveDomains } = require(path.join(__dirname, '..', 'lib', 'active-domains'));
 const { saveStickyState } = require(path.join(__dirname, '..', 'lib', 'sticky-state'));
 const injectLedger = require('../lib/inject-ledger');
-const { recordFired } = require(path.join(__dirname, '..', 'lib', 'telemetry'));
-const { runCiteScan } = require(path.join(__dirname, '..', 'lib', 'cite-scan'));
+const { recordFired, isDisabled } = require(path.join(__dirname, '..', 'lib', 'telemetry'));
+const { runCiteScan, runBehaviorScan } = require(path.join(__dirname, '..', 'lib', 'cite-scan'));
+const pretoolWindow = require(path.join(__dirname, '..', 'lib', 'pretool-window'));
 const { demoteToFit } = require('../lib/budget');
+const { expectedCommandsFor, resolveAndEmitDivergences } = require(
+  path.join(__dirname, 'lib', 'behavior-changed')
+);
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -256,13 +260,26 @@ function formatMatchedOutput(matched, sessionId, payload) {
   return renderMatchedMemories(matched, sessionId, cortexQueryContext(payload));
 }
 
-function emitMatched(matched, payload, event) {
+function emitMatched(matched, payload, event, sessionId) {
   if (!matched.length) return;
   for (const m of matched) {
     try {
       recordFired(m, payload, event);
     } catch {
       // fail-open
+    }
+    // Path A: when a memory with a trigger_pretool rule fires on PreToolUse,
+    // record the expected command so a subsequent divergent PreToolUse can
+    // surface a one-off behavior_changed event.
+    if (event === 'PreToolUse' && !isDisabled(m)) {
+      const expectedAll = expectedCommandsFor(m);
+      if (expectedAll.length > 0) {
+        try {
+          pretoolWindow.recordExpectation(sessionId, m.name, expectedAll);
+        } catch {
+          // fail-open
+        }
+      }
     }
   }
 }
@@ -292,10 +309,11 @@ function formatMemoryForRender(memory, cortexCtx) {
 
 /**
  * Resolve the session id for the dispatch and publish it to `.current` so
- * out-of-process callers (synapsys-list CLI) read the same ledger. Fail-open:
- * any throw → '' and the dispatcher behaves like the pre-ledger code path.
+ * out-of-process callers (synapsys-list CLI) read the same session ledger the
+ * dispatcher writes to. Fail-open: any throw → '' and the dispatcher behaves
+ * like the pre-ledger code path.
  */
-function resolveDispatchSessionId(payload) {
+function resolveSessionForPayload(payload) {
   try {
     const sessionId = injectLedger.resolveSessionId(payload);
     injectLedger.publishCurrentSessionId(sessionId);
@@ -310,27 +328,14 @@ function resolveDispatchSessionId(payload) {
  * §3.3) and opportunistically GC stale ledger files older than 7 days (spec
  * §4.2). Fail-open.
  */
-function resetSessionLedger(sessionId) {
+function maybeResetSessionLedger(event, sessionId) {
+  if (event !== 'SessionStart') return;
   try {
     injectLedger.resetLedgerForSession(sessionId);
     injectLedger.gcStaleLedgers({ maxAgeMs: SEVEN_DAYS_MS });
   } catch {
     /* fail-open */
   }
-}
-
-/**
- * Select the fired memories for this event and record telemetry. On `Stop` the
- * cite scan reads the session JSONL state from BEFORE this turn's Stop-time
- * fired writes (Stop-injections happen after the assistant response, so
- * attributing citations to them would be a false positive).
- */
-function selectAndRecord(memories, event, payload) {
-  const selectOpts = buildActiveDomainsForPayload(event, payload);
-  const matched = memories.length ? selectForEvent(memories, event, payload, selectOpts) : [];
-  if (event === 'Stop') runCiteScan(payload, memories);
-  emitMatched(matched, payload, event);
-  return matched;
 }
 
 /**
@@ -346,6 +351,31 @@ function buildOutput(autoBlock, matched, sessionId, payload) {
   return sections.join(SEP);
 }
 
+/**
+ * Stop-time scans. The cite scan reads the session JSONL state from BEFORE
+ * this turn's Stop-time fired writes (Stop-injections happen after the
+ * assistant response, so attributing citations to them would be a false
+ * positive). Also runs the behavior-changed scan and clears the per-turn
+ * pretool-window dedup. Each scan is independently fail-open.
+ */
+function runStopScans(payload, memories, sessionId) {
+  try {
+    runCiteScan(payload, memories);
+  } catch {
+    // fail-open
+  }
+  try {
+    runBehaviorScan(payload, memories, sessionId);
+  } catch {
+    // fail-open
+  }
+  try {
+    pretoolWindow.clearTurnDedup(sessionId);
+  } catch {
+    // fail-open
+  }
+}
+
 async function dispatch() {
   const event = process.argv[2];
   if (!VALID_EVENTS.has(event)) process.exit(0);
@@ -359,8 +389,11 @@ async function dispatch() {
   const stores = discoverStores(cwd);
   const memories = stores.flatMap(listMemoriesFromStore);
 
-  const sessionId = resolveDispatchSessionId(payload);
-  if (event === 'SessionStart') resetSessionLedger(sessionId);
+  // Resolve session id once; used for both ledger reset (SessionStart) and
+  // the per-memory render path. Fail-open: any throw → noop and the rest of
+  // the dispatcher behaves like the pre-ledger code path.
+  const sessionId = resolveSessionForPayload(payload);
+  maybeResetSessionLedger(event, sessionId);
 
   // UserPromptSubmit: the Phase 1 auto-recall block is prepended to any memory
   // output (consumes + deletes the background recall cache).
@@ -372,14 +405,35 @@ async function dispatch() {
     process.exit(0);
   }
 
-  const matched = selectAndRecord(memories, event, payload);
-  const output = buildOutput(autoBlock, matched, sessionId, payload);
+  // Build activeDomains FIRST so UserPromptSubmit advances sticky-state
+  // even when the memory list is empty. Fail-open: on any error, omit
+  // `opts.activeDomains` to preserve pre-classifier behavior.
+  const selectOpts = buildActiveDomainsForPayload(event, payload);
+  const matched = memories.length ? selectForEvent(memories, event, payload, selectOpts) : [];
 
-  if (!output) process.exit(0);
-  // Memory text is already governed by the budget-aware renderer (demote, don't
-  // truncate); the Phase 1 auto-recall block is independently bounded by the
-  // cortex config. No hard clamp here — that would contradict the
+  // On Stop the cite scan must read the session JSONL state from BEFORE
+  // this turn's Stop-time fired writes; Stop-injections happen after the
+  // assistant response, so attributing citations to them would be a
+  // false positive (the response cannot reference a memory that wasn't
+  // yet injected at the time it was written).
+  // Path A on PreToolUse: resolve pending expectations against the observed
+  // command BEFORE recording new ones, so a memory firing this turn does not
+  // immediately get aged out by its own observed command.
+  if (event === 'PreToolUse') {
+    resolveAndEmitDivergences(payload, memories, sessionId);
+  }
+  if (event === 'Stop') {
+    runStopScans(payload, memories, sessionId);
+  }
+  emitMatched(matched, payload, event, sessionId);
+
+  // Assemble the Phase 1 auto-recall block (prepended) with the budget-aware
+  // rendered memory output. Memory text is already governed by the renderer
+  // (demote, don't truncate); the auto-recall block is independently bounded
+  // by the cortex config. No hard clamp here — that would contradict the
   // graceful-demotion contract (dispatcher-budget).
+  const output = buildOutput(autoBlock, matched, sessionId, payload);
+  if (!output) process.exit(0);
   process.stdout.write(output);
   process.exit(0);
 }

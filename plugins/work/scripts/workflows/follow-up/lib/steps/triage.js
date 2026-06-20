@@ -22,114 +22,126 @@ function waitSeconds(seconds) {
   });
 }
 
+function buildBlocked(reason) {
+  return { type: 'follow_up_instruction', action: 'blocked', reason };
+}
+
+// Unrecoverable guards: max polling attempts exhausted, or a monitor exit-2.
+// Returns a blocked instruction, or null when neither applies.
+function checkBlocked(state, result, output) {
+  // Attempt is incremented only for wait-loops (pending CI, bot reviews)
+  // not for actionable routes (fix-ci, fix-reviews, report).
+  const maxAttempts = state.maxAttempts || 40;
+  if ((state.attempt || 0) >= maxAttempts) {
+    return buildBlocked(
+      `Max polling attempts (${maxAttempts}) reached. CI still not resolved.\nLast status: ${output.substring(0, 300)}`
+    );
+  }
+  if (result.exitCode === 2) {
+    return buildBlocked(`Monitor error: ${output.substring(0, 500)}`);
+  }
+  return null;
+}
+
+// Parse the monitor output into the structured routing signals. Compound
+// conditions are pre-computed here so routeTriage stays single-branch.
+function extractSignals(output, state) {
+  const hasBlockingReviews = /Reviews:.*BLOCKING/i.test(output);
+  const hasOngoingReview = /awaiting bot reviews/i.test(output);
+  const botStillRunning = /Cursor Bugbot.*running/i.test(output);
+  const hasCiCancelled = /CI:\s*CANCELLED/i.test(output);
+  const isMergeBlocked = /MERGE STATUS:\s*BLOCKED/i.test(output);
+  return {
+    // Structured signal `state._isConflicting` is set by monitor.js after a
+    // bounded retry on `mergeable: UNKNOWN`; regex fallback covers older state
+    // files written before this field existed.
+    hasConflict: !!state._isConflicting || /merge conflict|cannot be merged/i.test(output),
+    hasCiFailure: /CI:\s*FAILING/i.test(output),
+    hasCiPending: /CI:\s*PENDING/i.test(output),
+    hasBlockingReviews,
+    hasOngoingReview,
+    // Blocking reviews are actionable only once the bot has finished reviewing
+    // (it may still dismiss old comments while running).
+    reviewsActionable: hasBlockingReviews && !hasOngoingReview && !botStillRunning,
+    reviewsWaiting: hasBlockingReviews && botStillRunning,
+    ciCancelledBlocking: hasCiCancelled && isMergeBlocked && !hasBlockingReviews,
+  };
+}
+
+// Adaptive CI-pending poll interval: shorter when few checks remain.
+function ciPendingInterval(state) {
+  const running = state._ciRunningCount || 0;
+  if (running <= 2) return 15;
+  if (state.attempt <= 5) return 30;
+  return 60;
+}
+
+function bumpAttempt(state) {
+  state.attempt = (state.attempt || 0) + 1;
+}
+
+function ongoingReviewInterval(state) {
+  return state.attempt <= 5 ? 30 : 60;
+}
+
+// Wait, then route back to monitor for a fresh read. Returns null (advance).
+function waitAndMonitor(state, seconds) {
+  waitSeconds(seconds);
+  state.currentStep = 'monitor';
+  return null;
+}
+
+function routeTo(state, step, failureCategory) {
+  if (failureCategory) state.failureCategory = failureCategory;
+  state.currentStep = step;
+  return null;
+}
+
+function routeTriage(state, signals) {
+  // PRIORITY 0: conflict ALWAYS preempts everything else.
+  if (signals.hasConflict) return routeTo(state, 'fix-ci', 'conflict');
+
+  // Bug A (GH-508): route CI failures to infra-retry first. When its feature
+  // flag is off, infra-retry falls through to fix-ci; routing to fix-ci
+  // directly would skip infra-retry entirely when the flag is on.
+  if (signals.hasCiFailure) return routeTo(state, 'infra-retry', 'ci_failure');
+
+  // Blocking reviews take priority over waiting for CI.
+  if (signals.reviewsActionable) return routeTo(state, 'fix-reviews', 'reviews');
+
+  // Bot check still running with blocking reviews — wait for it to finish.
+  if (signals.reviewsWaiting) {
+    bumpAttempt(state);
+    return waitAndMonitor(state, 15);
+  }
+
+  // CI still running — wait before re-checking.
+  if (signals.hasCiPending) {
+    bumpAttempt(state);
+    return waitAndMonitor(state, ciPendingInterval(state));
+  }
+
+  // CI cancelled: only care if it blocks the merge.
+  if (signals.ciCancelledBlocking) return routeTo(state, 'infra-retry', 'ci_cancelled_blocking');
+
+  // Bot still reviewing — wait before re-checking.
+  if (signals.hasOngoingReview) {
+    bumpAttempt(state);
+    return waitAndMonitor(state, ongoingReviewInterval(state));
+  }
+
+  // Only reach report when CI passed AND no blocking reviews.
+  return routeTo(state, 'report');
+}
+
 module.exports = function registerTriage(register) {
   register('triage', (state) => {
     const result = state.lastMonitorResult || {};
     const output = result.output || '';
 
-    // Max attempts guard — prevent infinite polling
-    // Attempt is incremented only for wait-loops (pending CI, bot reviews)
-    // not for actionable routes (fix-ci, fix-reviews, report)
-    const maxAttempts = state.maxAttempts || 40;
-    if ((state.attempt || 0) >= maxAttempts) {
-      return {
-        type: 'follow_up_instruction',
-        action: 'blocked',
-        reason: `Max polling attempts (${maxAttempts}) reached. CI still not resolved.\nLast status: ${output.substring(0, 300)}`,
-      };
-    }
+    const blocked = checkBlocked(state, result, output);
+    if (blocked) return blocked;
 
-    // Error (exit 2) — unrecoverable
-    if (result.exitCode === 2) {
-      return {
-        type: 'follow_up_instruction',
-        action: 'blocked',
-        reason: `Monitor error: ${output.substring(0, 500)}`,
-      };
-    }
-
-    // ── PRIORITY 0: merge conflict ──────────────────────────────────────
-    // Conflict ALWAYS preempts everything else (CI status, reviews, etc).
-    // Structured signal `state._isConflicting` is set by monitor.js after
-    // a bounded retry on `mergeable: UNKNOWN`, so it survives the case
-    // where formatReport didn't emit a "CONFLICTS:" line yet (e.g. when
-    // GitHub was mid-recompute). Regex fallback covers older state files
-    // written before this field existed.
-    const structuredConflict = !!state._isConflicting;
-    const hasConflict = structuredConflict || /merge conflict|cannot be merged/i.test(output);
-    if (hasConflict) {
-      state.failureCategory = 'conflict';
-      state.currentStep = 'fix-ci';
-      return null;
-    }
-
-    const hasCiFailure = /CI:\s*FAILING/i.test(output);
-    const hasCiPending = /CI:\s*PENDING/i.test(output);
-    const hasCiCancelled = /CI:\s*CANCELLED/i.test(output);
-    const isMergeBlocked = /MERGE STATUS:\s*BLOCKED/i.test(output);
-    const hasBlockingReviews = /Reviews:.*BLOCKING/i.test(output);
-    const hasOngoingReview = /awaiting bot reviews/i.test(output);
-
-    if (hasCiFailure) {
-      state.failureCategory = 'ci_failure';
-      // Bug A (GH-508): route CI failures to infra-retry first. infra-retry's
-      // shouldBypass returns null (advance to fix-ci) when the feature flag is
-      // off, so the loop naturally falls through to fix-ci. Routing to fix-ci
-      // directly would skip infra-retry entirely when the flag is on.
-      state.currentStep = 'infra-retry';
-      return null;
-    }
-
-    // Blocking reviews take priority over waiting for CI —
-    // but only when the bot has finished reviewing (check completed).
-    // While the bot check is still running, it may dismiss old comments.
-    const botStillRunning = /Cursor Bugbot.*running/i.test(output);
-    if (hasBlockingReviews && !hasOngoingReview && !botStillRunning) {
-      state.failureCategory = 'reviews';
-      state.currentStep = 'fix-reviews';
-      return null;
-    }
-
-    // Bot check still running with blocking reviews — wait for it to finish
-    if (hasBlockingReviews && botStillRunning) {
-      state.attempt = (state.attempt || 0) + 1;
-      waitSeconds(15);
-      state.currentStep = 'monitor';
-      return null;
-    }
-
-    // CI still running — wait before re-checking.
-    // Adaptive interval: shorter when few checks remain.
-    if (hasCiPending) {
-      state.attempt = (state.attempt || 0) + 1;
-      const running = state._ciRunningCount || 0;
-      let interval = 60;
-      if (running <= 2) interval = 15;
-      else if (state.attempt <= 5) interval = 30;
-      waitSeconds(interval);
-      state.currentStep = 'monitor';
-      return null;
-    }
-
-    // CI cancelled: only care if it blocks the merge
-    if (hasCiCancelled && isMergeBlocked && !hasBlockingReviews) {
-      state.failureCategory = 'ci_cancelled_blocking';
-      // Bug A (GH-508): same as ci_failure — visit infra-retry first.
-      state.currentStep = 'infra-retry';
-      return null;
-    }
-
-    // Bot still reviewing — wait before re-checking
-    if (hasOngoingReview) {
-      state.attempt = (state.attempt || 0) + 1;
-      const interval = state.attempt <= 5 ? 30 : 60;
-      waitSeconds(interval);
-      state.currentStep = 'monitor';
-      return null;
-    }
-
-    // Only reach report when CI passed AND no blocking reviews
-    state.currentStep = 'report';
-    return null;
+    return routeTriage(state, extractSignals(output, state));
   });
 };

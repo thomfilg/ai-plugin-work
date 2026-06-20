@@ -15,6 +15,9 @@ const { execSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
+const { readHookDataStrict, resolveAgentName, resolveAgentOutput } = require(
+  path.join(__dirname, '..', 'lib', 'hook-io')
+);
 const getConfig = require(path.join(__dirname, '..', '..', '..', 'lib', 'get-config'));
 const { detectFabrication } = require('./fabrication-detector');
 const { appendAction } = require(
@@ -153,36 +156,7 @@ function hasWikiLink(text) {
   return wikiLinkPattern.test(text);
 }
 
-async function main() {
-  let input = '';
-  for await (const chunk of process.stdin) {
-    input += chunk;
-  }
-
-  let hookData;
-  try {
-    hookData = JSON.parse(input);
-  } catch (err) {
-    process.stderr.write(
-      `PR-POST-GENERATOR VALIDATOR: Failed to parse hook input: ${err.message}\n`
-    );
-    process.exit(2);
-  }
-
-  // Only validate pr-post-generator subagent
-  const agentName = hookData.agent_name || hookData.subagent_type || '';
-  if (
-    !agentName.toLowerCase().includes('pr-post-generator') &&
-    !agentName.toLowerCase().includes('post-pr')
-  ) {
-    process.exit(0);
-  }
-
-  // Get the agent's output/response
-  const agentOutput = hookData.agent_output || hookData.response || hookData.result || '';
-
-  if (!agentOutput || agentOutput.length < 50) {
-    process.stderr.write(`
+const NO_OUTPUT_BOX = `
 ╔══════════════════════════════════════════════════════════════════════╗
 ║  POST-PR-GENERATOR: NO OUTPUT                                       ║
 ╠══════════════════════════════════════════════════════════════════════╣
@@ -192,22 +166,9 @@ async function main() {
 ║  Expected: Confirmation of screenshots uploaded and PR updated       ║
 ║                                                                      ║
 ╚══════════════════════════════════════════════════════════════════════╝
-`);
-    process.exit(2);
-  }
+`;
 
-  const issues = [];
-  const warnings = [];
-
-  // ========== FABRICATION CHECK (runs FIRST, regardless of frontend status) ==========
-  const prBody = getPRBody();
-  const ticketId = getCurrentTaskId();
-  const tasksBase = getConfig('TASKS_BASE');
-  // Fail-closed when the PR body cannot be fetched: a transient `gh` failure
-  // must not become a silent bypass for fabricated test evidence. Empty body
-  // (`""`) is fine — nothing to scan — but `null` means we never saw the body.
-  if (prBody === null) {
-    process.stderr.write(`
+const NO_PR_BODY_BOX = `
 ╔══════════════════════════════════════════════════════════════════════╗
 ║  POST-PR-GENERATOR: COULD NOT FETCH PR BODY                          ║
 ╠══════════════════════════════════════════════════════════════════════╣
@@ -218,13 +179,26 @@ async function main() {
 ║  Re-run after confirming \`gh\` auth and PR association.               ║
 ║                                                                      ║
 ╚══════════════════════════════════════════════════════════════════════╝
-`);
-    process.exit(2);
-  }
-  // Run the fabrication check unconditionally. Missing TASKS_BASE or ticketId
-  // must not become a silent bypass — without a task folder the detector sees
-  // no artifacts, so unsourced stability/PASS/FAIL claims still trip. Only the
-  // audit-log appendAction is skipped when ticketId is absent.
+`;
+
+function buildFailureBox(issues, warnings) {
+  return `
+╔══════════════════════════════════════════════════════════════════════╗
+║  POST-PR-GENERATOR: VALIDATION FAILED                               ║
+╠══════════════════════════════════════════════════════════════════════╣
+║                                                                      ║
+${issues.map((i) => `║  ${i.padEnd(66)}║`).join('\n')}
+${warnings.length > 0 ? warnings.map((w) => `║  ${w.padEnd(66)}║`).join('\n') : ''}
+║                                                                      ║
+║  Ensure screenshots are uploaded to wiki and PR has a wiki link.     ║
+║                                                                      ║
+╚══════════════════════════════════════════════════════════════════════╝
+`;
+}
+
+// Fabrication check must run even without a task folder/ticket — only the audit
+// log is skipped. Surface why via stderr (never a silent bypass).
+function warnMissingAuditContext(tasksBase, ticketId) {
   if (!tasksBase) {
     process.stderr.write(
       'PR-POST-GENERATOR VALIDATOR: TASKS_BASE not configured; running fabrication check without task folder (no audit log).\n'
@@ -234,8 +208,96 @@ async function main() {
       'PR-POST-GENERATOR VALIDATOR: could not resolve ticket ID; running fabrication check without audit log.\n'
     );
   }
+}
+
+// Verify visual documentation for frontend changes. Returns { issues, warnings }.
+function collectVisualIssues(agentOutput, prBody, affectedFrontendApps) {
+  const issues = [];
+  const warnings = [];
+
+  if (prBody) {
+    if (!hasWikiLink(prBody)) {
+      issues.push(
+        `PR body has no wiki link for visual documentation (frontend apps affected: ${affectedFrontendApps.join(', ')}). Add a wiki link.`
+      );
+    }
+  } else {
+    warnings.push('Could not fetch PR body to verify visual documentation');
+  }
+
+  const hasWikiMention = /wiki|github\.com.*wiki/i.test(agentOutput);
+  if (!hasWikiMention) {
+    issues.push('No wiki upload confirmation found');
+  }
+
+  // Local file paths are a negative indicator (should be wiki URLs)
+  const localPathPattern = /!\[.*\]\(\.\/|!\[.*\]\(tasks\/|!\[.*\]\(screenshots\//;
+  if (localPathPattern.test(agentOutput)) {
+    issues.push('Found local file paths instead of wiki URLs');
+  }
+
+  const prUpdatePatterns = [
+    /PR.*updated/i,
+    /updated.*PR/i,
+    /gh pr edit/i,
+    /pull request.*updated/i,
+  ];
+  if (!prUpdatePatterns.some((p) => p.test(agentOutput))) {
+    warnings.push('No PR update confirmation found');
+  }
+
+  const genericTestPatterns = [
+    /Page loads.*PASS/i,
+    /Navigation works.*PASS/i,
+    /Theme toggle.*PASS/i,
+    /Common functionality/i,
+  ];
+  if (genericTestPatterns.some((p) => p.test(agentOutput))) {
+    warnings.push('Contains generic page tests (should focus on feature-specific)');
+  }
+
+  return { issues, warnings };
+}
+
+// Fetch the PR body, run the fabrication check (fail-closed when the body can't
+// be fetched), and return the PR body for downstream visual-doc checks. Exits 2
+// on a fetch failure or detected fabrication.
+function runFabricationGate() {
+  const prBody = getPRBody();
+  const ticketId = getCurrentTaskId();
+  const tasksBase = getConfig('TASKS_BASE');
+  // Fail-closed when the PR body cannot be fetched: a transient `gh` failure
+  // must not become a silent bypass for fabricated test evidence. Empty body
+  // (`""`) is fine — nothing to scan — but `null` means we never saw the body.
+  if (prBody === null) {
+    process.stderr.write(NO_PR_BODY_BOX);
+    process.exit(2);
+  }
+  warnMissingAuditContext(tasksBase, ticketId);
   const taskDir = tasksBase && ticketId ? path.join(tasksBase, ticketId) : '';
   runFabricationCheck(prBody, taskDir, ticketId);
+  return prBody;
+}
+
+async function main() {
+  const hookData = await readHookDataStrict('PR-POST-GENERATOR VALIDATOR');
+
+  // Only validate pr-post-generator subagent
+  const agentName = resolveAgentName(hookData);
+  if (!agentName.includes('pr-post-generator') && !agentName.includes('post-pr')) {
+    process.exit(0);
+  }
+
+  // Get the agent's output/response
+  const agentOutput = resolveAgentOutput(hookData);
+
+  if (!agentOutput || agentOutput.length < 50) {
+    process.stderr.write(NO_OUTPUT_BOX);
+    process.exit(2);
+  }
+
+  // ========== FABRICATION CHECK (runs FIRST, regardless of frontend status) ==========
+  const prBody = runFabricationGate();
 
   // ========== CHECK IF FRONTEND APPS ARE AFFECTED ==========
   const affectedApps = getAffectedApps();
@@ -247,69 +309,10 @@ async function main() {
   }
 
   // ========== VERIFY VISUAL DOCUMENTATION (frontend only) ==========
-  if (prBody) {
-    const hasLink = hasWikiLink(prBody);
-
-    if (!hasLink) {
-      issues.push(
-        `PR body has no wiki link for visual documentation (frontend apps affected: ${affectedFrontendApps.join(', ')}). Add a wiki link.`
-      );
-    }
-  } else {
-    warnings.push('Could not fetch PR body to verify visual documentation');
-  }
-
-  // Check if wiki upload was mentioned
-  const hasWikiMention = /wiki|github\.com.*wiki/i.test(agentOutput);
-  if (!hasWikiMention) {
-    issues.push('No wiki upload confirmation found');
-  }
-
-  // Check for local file paths (negative indicator)
-  const localPathPattern = /!\[.*\]\(\.\/|!\[.*\]\(tasks\/|!\[.*\]\(screenshots\//;
-  const hasLocalPaths = localPathPattern.test(agentOutput);
-
-  if (hasLocalPaths) {
-    issues.push('Found local file paths instead of wiki URLs');
-  }
-
-  // Check if PR was updated
-  const prUpdatePatterns = [
-    /PR.*updated/i,
-    /updated.*PR/i,
-    /gh pr edit/i,
-    /pull request.*updated/i,
-  ];
-  const hasPRUpdate = prUpdatePatterns.some((p) => p.test(agentOutput));
-  if (!hasPRUpdate) {
-    warnings.push('No PR update confirmation found');
-  }
-
-  // Check for generic test results (should focus on feature-specific)
-  const genericTestPatterns = [
-    /Page loads.*PASS/i,
-    /Navigation works.*PASS/i,
-    /Theme toggle.*PASS/i,
-    /Common functionality/i,
-  ];
-  const hasGenericTests = genericTestPatterns.some((p) => p.test(agentOutput));
-  if (hasGenericTests) {
-    warnings.push('Contains generic page tests (should focus on feature-specific)');
-  }
+  const { issues, warnings } = collectVisualIssues(agentOutput, prBody, affectedFrontendApps);
 
   if (issues.length > 0) {
-    process.stderr.write(`
-╔══════════════════════════════════════════════════════════════════════╗
-║  POST-PR-GENERATOR: VALIDATION FAILED                               ║
-╠══════════════════════════════════════════════════════════════════════╣
-║                                                                      ║
-${issues.map((i) => `║  ${i.padEnd(66)}║`).join('\n')}
-${warnings.length > 0 ? warnings.map((w) => `║  ${w.padEnd(66)}║`).join('\n') : ''}
-║                                                                      ║
-║  Ensure screenshots are uploaded to wiki and PR has a wiki link.     ║
-║                                                                      ║
-╚══════════════════════════════════════════════════════════════════════╝
-`);
+    process.stderr.write(buildFailureBox(issues, warnings));
     process.exit(2);
   }
 

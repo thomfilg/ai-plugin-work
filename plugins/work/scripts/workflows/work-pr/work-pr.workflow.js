@@ -18,7 +18,6 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -26,8 +25,11 @@ const config = require(path.join(__dirname, '..', 'lib', 'config'));
 const getConfig = require(path.join(__dirname, '..', 'lib', 'get-config'));
 const WORKTREES_BASE = getConfig.require('WORKTREES_BASE');
 const TASKS_BASE = getConfig('TASKS_BASE') || path.join(WORKTREES_BASE, 'tasks');
-const { normalizeTicketId } = require(path.join(__dirname, '..', 'lib', 'ticket-provider'));
+const { normalizeTicketArg } = require(path.join(__dirname, '..', 'lib', 'ticket-args'));
 const safeTicketId = config.safeTicketId;
+const { safeExec, computeScreenshotHash, buildInspectData } = require(
+  path.join(__dirname, 'work-pr-inspect')
+);
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -40,77 +42,84 @@ function getWorktreeDir(ticketId) {
   return config.worktreeDir(safe) || path.join(WORKTREES_BASE, `${config.REPO_NAME}-${safe}`);
 }
 
-function safeExec(cmd, options = {}) {
-  try {
-    return execSync(cmd, { encoding: 'utf8', ...options }).trim();
-  } catch {
-    return '';
+// ─── Step deciders (detectStepState helpers) ────────────────────────────────
+
+// Rebase guard: BLOCKED when the worktree is behind base beyond threshold.
+function prGenRebaseBlock(d) {
+  const parsed = parseInt(process.env.REBASE_GUARD_THRESHOLD || '0', 10);
+  const threshold = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+  if (d.commitsBehindMain > threshold) {
+    return {
+      action: 'BLOCKED',
+      reason: `Worktree is ${d.commitsBehindMainCapped ? '>= ' : ''}${d.commitsBehindMain} commit(s) behind ${d.baseBranch || 'origin/main'}. Rebase before creating PR.`,
+    };
   }
+  return null;
 }
 
-/**
- * Compute a deterministic hash of screenshot files in a directory.
- * Uses Node.js crypto to avoid shell injection risks entirely.
- * @param {string} screenshotDir - Absolute path to screenshots directory
- * @returns {string} SHA256 hash or 'none' if no screenshots
- */
-function computeScreenshotHash(screenshotDir) {
-  if (!fs.existsSync(screenshotDir)) return 'none';
-  const crypto = require('crypto');
-  const extensions = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp']);
-  // Manual recursive traversal — avoids reliance on { recursive: true } (Node 18.17+)
-  function walkDir(dir, base) {
-    let results = [];
-    let entries;
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch (err) {
-      if (err.code !== 'ENOENT')
-        process.stderr.write(
-          `[work-pr] computeScreenshotHash: cannot read ${dir}: ${err.message}\n`
-        );
-      return results;
-    }
-    for (const entry of entries) {
-      const rel = base ? `${base}/${entry.name}` : entry.name;
-      if (entry.isDirectory()) {
-        results = results.concat(walkDir(path.join(dir, entry.name), rel));
-      } else if (entry.isFile() && extensions.has(path.extname(entry.name).toLowerCase())) {
-        results.push(rel);
-      }
-    }
-    return results;
+// SHA-skip: compound key unchanged and not forced.
+function prGenSkip(d, force) {
+  if (!force && d.prUpToDate) {
+    return {
+      action: 'SKIP',
+      reason: `Compound key matches (${d.headSha?.slice(0, 8)}|${d.screenshotHash?.slice(0, 8)})`,
+    };
   }
-  const files = walkDir(screenshotDir, '').sort();
-  if (files.length === 0) return 'none';
-  const hash = crypto.createHash('sha256');
-  let filesHashed = 0;
-  for (const file of files) {
-    const fullPath = path.join(screenshotDir, file);
-    try {
-      const stat = fs.statSync(fullPath);
-      if (!stat.isFile() || stat.size > 50 * 1024 * 1024) continue;
-      // Stream file in 64KB chunks to bound memory usage
-      const fd = fs.openSync(fullPath, 'r');
-      try {
-        const fileHash = crypto.createHash('sha256');
-        const buf = Buffer.alloc(65536);
-        let bytesRead;
-        while ((bytesRead = fs.readSync(fd, buf, 0, buf.length)) > 0) {
-          fileHash.update(buf.subarray(0, bytesRead));
-        }
-        hash.update(`${fileHash.digest('hex')}  ${file}\n`);
-        filesHashed++;
-      } finally {
-        fs.closeSync(fd);
-      }
-    } catch {
-      /* skip unreadable files */
-    }
-  }
-  if (filesHashed === 0) return 'none';
-  return hash.digest('hex');
+  return null;
 }
+
+function prGenRunReason(d, force) {
+  if (force) return 'Force mode — regenerating PR description';
+  if (d.lastPrSha) return `Key changed: ${d.lastPrSha?.slice(0, 16)}… → ${d.prKey?.slice(0, 16)}…`;
+  return 'No previous PR update recorded';
+}
+
+// 3_pr_gen: rebase-guard block → SHA-skip → run.
+function decidePrGen(d, force) {
+  return (
+    prGenRebaseBlock(d) ||
+    prGenSkip(d, force) || {
+      action: 'RUN',
+      reason: prGenRunReason(d, force),
+      command: 'Task(pr-generator)',
+    }
+  );
+}
+
+// 4_screenshot_gate: skip unless TSX/JSX changed without screenshots.
+function decideScreenshotGate(d) {
+  if (!d.hasTsxChanges) {
+    return { action: 'SKIP', reason: 'No TSX/JSX files changed' };
+  }
+  if (d.screenshotsExist) {
+    return { action: 'SKIP', reason: `${d.screenshotCount} screenshot(s) found` };
+  }
+  return {
+    action: 'RUN',
+    reason: 'TSX/JSX changed but no screenshots — gate required',
+    command: 'AskUserQuestion',
+  };
+}
+
+// 5_post_pr_gen: skip when no content or content SHA unchanged.
+function decidePostPrGen(d, force) {
+  if (!d.hasContent) {
+    return { action: 'SKIP', reason: 'No content to post (no check reports or screenshots)' };
+  }
+  if (!force && d.postPrUpToDate) {
+    return { action: 'SKIP', reason: 'Content SHA matches .post-pr-update-sha' };
+  }
+  return {
+    action: 'RUN',
+    reason: force
+      ? 'Force mode — regenerating post-PR content'
+      : d.lastPostPrSha
+        ? 'Content changed since last run'
+        : 'No previous post-PR update recorded',
+    command: 'Task(pr-post-generator)',
+  };
+}
+
 // ─── Workflow Definition ────────────────────────────────────────────────────
 
 module.exports = {
@@ -149,14 +158,7 @@ module.exports = {
     }
 
     const force = parts.includes('--force');
-    let ticketId = parts[0];
-
-    // Prefix with project key if just a number
-    if (/^\d+$/.test(ticketId)) {
-      ticketId = `${process.env.TICKET_PROJECT_KEY || process.env.JIRA_PROJECT_KEY || 'PROJ'}-${ticketId}`;
-    }
-    // Uppercase only the ticket base, preserve suffix case (GH-146)
-    ticketId = normalizeTicketId(ticketId);
+    const ticketId = normalizeTicketArg(parts[0]);
 
     return { instanceId: ticketId, ticketId, force };
   },
@@ -168,126 +170,7 @@ module.exports = {
    * @returns {object} Inspection data
    */
   inspect(instanceId) {
-    const tasksDir = getTasksDir(instanceId);
-    const worktreeDir = getWorktreeDir(instanceId);
-    const data = {
-      tasksDir,
-      tasksDirExists: fs.existsSync(tasksDir),
-      worktreeDir,
-      worktreeExists: fs.existsSync(worktreeDir),
-    };
-
-    // Current HEAD SHA (from ticket worktree)
-    data.headSha = safeExec('git rev-parse HEAD', { cwd: worktreeDir });
-
-    // .pr-update-sha (stores compound key: HEAD_SHA|SCREENSHOT_HASH)
-    const prShaFile = path.join(tasksDir, '.pr-update-sha');
-    data.prShaFile = prShaFile;
-    data.lastPrSha = '';
-    if (fs.existsSync(prShaFile)) {
-      try {
-        data.lastPrSha = fs.readFileSync(prShaFile, 'utf8').trim();
-      } catch {
-        /* */
-      }
-    }
-
-    // TSX/JSX changes vs main (from ticket worktree)
-    let baseBranch = 'origin/main';
-    try {
-      baseBranch = require(path.join(__dirname, '..', 'lib', 'config')).getBaseBranch({
-        cwd: worktreeDir,
-      });
-    } catch {
-      /* */
-    }
-    data.tsxChanged = safeExec(`git diff --name-only ${baseBranch}...HEAD -- '*.tsx' '*.jsx'`, {
-      cwd: worktreeDir,
-    });
-    data.hasTsxChanges = data.tsxChanged.length > 0;
-
-    // Rebase guard: count commits behind base branch (opt-in via REBASE_GUARD_ENABLED=1)
-    data.baseBranch = baseBranch;
-    data.commitsBehindMain = 0;
-    if (data.worktreeExists && process.env.REBASE_GUARD_ENABLED === '1') {
-      const parts = baseBranch.split('/');
-      const remote = parts.length > 1 ? parts[0] : 'origin';
-      const branch = parts.length > 1 ? parts.slice(1).join('/') : parts[0];
-      // Validate remote/branch to prevent command injection
-      const validRef = /^[a-zA-Z0-9_\-./]+$/.test(remote) && /^[a-zA-Z0-9_\-./]+$/.test(branch);
-      if (!validRef) {
-        process.stderr.write(
-          `[work-pr] rebase guard: invalid baseBranch "${baseBranch}" — skipping\n`
-        );
-      } else {
-        const guardThreshold = parseInt(process.env.REBASE_GUARD_THRESHOLD || '0', 10);
-        const fetchDepth = Math.max((Number.isFinite(guardThreshold) ? guardThreshold : 0) + 2, 2);
-        safeExec(`git fetch ${remote} ${branch} --quiet --depth=${fetchDepth} --no-tags`, {
-          cwd: worktreeDir,
-          timeout: 5000,
-        });
-        const fetchedRef = `${remote}/${branch}`;
-        const behind = safeExec(
-          `git rev-list --count --max-count=${fetchDepth} HEAD..${fetchedRef}`,
-          { cwd: worktreeDir }
-        );
-        data.commitsBehindMain = parseInt(behind || '0', 10); // capped by fetchDepth, flagged via commitsBehindMainCapped
-        data.commitsBehindMainCapped = data.commitsBehindMain >= fetchDepth;
-      }
-    }
-
-    // Screenshot count
-    const screenshotDir = path.join(tasksDir, 'screenshots');
-    data.screenshotDir = screenshotDir;
-    data.screenshotCount = 0;
-    if (fs.existsSync(screenshotDir)) {
-      try {
-        const files = safeExec(
-          `find "${screenshotDir}" -type f \\( -name '*.png' -o -name '*.jpg' -o -name '*.jpeg' -o -name '*.gif' -o -name '*.webp' \\) 2>/dev/null`
-        );
-        data.screenshotCount = files ? files.split('\n').filter(Boolean).length : 0;
-      } catch {
-        /* */
-      }
-    }
-    data.screenshotsExist = data.screenshotCount > 0;
-
-    // Screenshot hash for compound gating key
-    const screenshotHash = computeScreenshotHash(screenshotDir);
-    data.screenshotHash = screenshotHash;
-
-    // Compound pr-gen gating key: HEAD_SHA|SCREENSHOT_HASH
-    data.prKey = `${data.headSha}|${data.screenshotHash}`;
-    data.prUpToDate = !!(data.prKey && data.prKey === data.lastPrSha);
-
-    // Content SHA for post-pr (all *.check.md + screenshots)
-    data.contentSha = safeExec(
-      `(
-        find "${tasksDir}" -maxdepth 1 -name '*.check.md' -print0 2>/dev/null | sort -z | xargs -0 sha256sum 2>/dev/null
-        find "${tasksDir}/screenshots" -type f -print0 2>/dev/null | sort -z | xargs -0 sha256sum 2>/dev/null
-      ) | sha256sum | cut -d' ' -f1`
-    );
-
-    // .post-pr-update-sha
-    const postPrShaFile = path.join(tasksDir, '.post-pr-update-sha');
-    data.postPrShaFile = postPrShaFile;
-    data.lastPostPrSha = '';
-    if (fs.existsSync(postPrShaFile)) {
-      try {
-        data.lastPostPrSha = fs.readFileSync(postPrShaFile, 'utf8').trim();
-      } catch {
-        /* */
-      }
-    }
-    data.postPrUpToDate = !!(data.contentSha && data.contentSha === data.lastPostPrSha);
-
-    // SKIP 5_post_pr_gen if no content to post
-    data.hasContent = !!(
-      data.contentSha &&
-      data.contentSha !== 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855'
-    );
-
-    return data;
+    return buildInspectData(getTasksDir(instanceId), getWorktreeDir(instanceId));
   },
 
   /**
@@ -306,79 +189,16 @@ module.exports = {
     switch (stepId) {
       case '1_preflight':
         return { action: 'RUN', reason: 'Check memory & zombie processes' };
-
       case '2_setup':
         return { action: 'RUN', reason: 'Parse args and set variables' };
-
-      case '3_pr_gen': {
-        // Rebase guard: block if worktree is behind main
-        const parsed = parseInt(process.env.REBASE_GUARD_THRESHOLD || '0', 10);
-        const threshold = Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-        if (d.commitsBehindMain > threshold) {
-          return {
-            action: 'BLOCKED',
-            reason: `Worktree is ${d.commitsBehindMainCapped ? '>= ' : ''}${d.commitsBehindMain} commit(s) behind ${d.baseBranch || 'origin/main'}. Rebase before creating PR.`,
-          };
-        }
-        if (!force && d.prUpToDate) {
-          return {
-            action: 'SKIP',
-            reason: `Compound key matches (${d.headSha?.slice(0, 8)}|${d.screenshotHash?.slice(0, 8)})`,
-          };
-        }
-        return {
-          action: 'RUN',
-          reason: force
-            ? 'Force mode — regenerating PR description'
-            : d.lastPrSha
-              ? `Key changed: ${d.lastPrSha?.slice(0, 16)}… → ${d.prKey?.slice(0, 16)}…`
-              : 'No previous PR update recorded',
-          command: 'Task(pr-generator)',
-        };
-      }
-
+      case '3_pr_gen':
+        return decidePrGen(d, force);
       case '4_screenshot_gate':
-        if (!d.hasTsxChanges) {
-          return { action: 'SKIP', reason: 'No TSX/JSX files changed' };
-        }
-        if (d.screenshotsExist) {
-          return {
-            action: 'SKIP',
-            reason: `${d.screenshotCount} screenshot(s) found`,
-          };
-        }
-        return {
-          action: 'RUN',
-          reason: 'TSX/JSX changed but no screenshots — gate required',
-          command: 'AskUserQuestion',
-        };
-
+        return decideScreenshotGate(d);
       case '5_post_pr_gen':
-        if (!d.hasContent) {
-          return {
-            action: 'SKIP',
-            reason: 'No content to post (no check reports or screenshots)',
-          };
-        }
-        if (!force && d.postPrUpToDate) {
-          return {
-            action: 'SKIP',
-            reason: 'Content SHA matches .post-pr-update-sha',
-          };
-        }
-        return {
-          action: 'RUN',
-          reason: force
-            ? 'Force mode — regenerating post-PR content'
-            : d.lastPostPrSha
-              ? 'Content changed since last run'
-              : 'No previous post-PR update recorded',
-          command: 'Task(pr-post-generator)',
-        };
-
+        return decidePostPrGen(d, force);
       case '6_summary':
         return { action: 'RUN', reason: 'Print completion summary' };
-
       default:
         return { action: 'RUN', reason: 'Unknown step' };
     }

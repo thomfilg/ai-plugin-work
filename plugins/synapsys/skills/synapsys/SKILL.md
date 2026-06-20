@@ -26,6 +26,14 @@ Synapsys is a memory injection plugin: memories are markdown files with frontmat
 
   Run: `node ${CLAUDE_PLUGIN_ROOT}/scripts/synapsys-recall.js`
 
+- `/synapsys lint` — Static audit of every discovered memory: flags overlapping trigger patterns, trigger-body collisions, and too-broad triggers. Exits non-zero when high-severity overlaps are present so CI / pre-commit gates can hold the line.
+
+  Run: `node ${CLAUDE_PLUGIN_ROOT}/scripts/synapsys-lint.js`
+
+- `/synapsys audit triggers` — Alias of `/synapsys lint`. Same script, same output; named to match how users describe the action ("audit my triggers").
+
+  Run: `node ${CLAUDE_PLUGIN_ROOT}/scripts/synapsys-lint.js`
+
 ## Memory file template
 
 ```markdown

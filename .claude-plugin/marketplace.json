@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Deterministic workflow orchestrator for Jira task implementation with state machine validation.",
-    "version": "3.40.3"
+    "version": "3.49.0"
   },
   "plugins": [
     {
@@ -14,45 +14,26 @@
       "source": "./plugins/work",
       "description": "Orchestrated /work command with pre-computed action plans",
       "category": "workflow",
-      "tags": [
-        "workflow",
-        "jira",
-        "orchestrator",
-        "state-machine",
-        "automation"
-      ]
+      "tags": ["workflow", "jira", "orchestrator", "state-machine", "automation"]
     },
     {
       "name": "synapsys",
       "source": "./plugins/synapsys",
       "description": "Context-triggered memory injection — memories declare event hooks + trigger patterns and are injected when matched",
       "category": "memory",
-      "tags": [
-        "memory",
-        "hooks",
-        "injection",
-        "context",
-        "recall"
-      ]
+      "tags": ["memory", "hooks", "injection", "context", "recall"]
     },
     {
       "name": "maestro",
       "source": "./plugins/maestro",
       "description": "Multi-agent orchestrator — bootstraps per-ticket tmux sessions, conducts them (silence detection + auto-restart), and surfaces real prompts to the operator",
       "category": "orchestration",
-      "tags": [
-        "orchestrate",
-        "conduct",
-        "agents",
-        "tmux",
-        "workflow",
-        "multi-agent"
-      ]
+      "tags": ["orchestrate", "conduct", "agents", "tmux", "workflow", "multi-agent"]
     },
     {
       "name": "heimdall",
       "source": "./plugins/heimdall",
-      "description": "Config-driven file/directory guard — lock blocks pair protected paths with an unlock phrase; a PreToolUse hook blocks Edit/Write/Bash/Task mutations unless the phrase is spoken",
+      "description": "Config-driven file/directory guard — lock blocks pair protected paths with an unlock phrase and a PreToolUse hook blocks Edit/Write/Bash/Task mutations unless the phrase is spoken; also conceals paths (hard read+write deny, no unlock) and hardens MCP secrets behind a setuid OS boundary",
       "category": "safety",
       "tags": [
         "guard",
@@ -60,6 +41,10 @@
         "hooks",
         "pretooluse",
         "lock",
+        "conceal",
+        "secrets",
+        "setuid",
+        "mcp",
         "safety"
       ]
     }

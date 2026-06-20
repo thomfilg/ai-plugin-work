@@ -251,6 +251,139 @@ test('extractSignals honors top-level memory.citeSignals (scalar normalized to a
   });
 });
 
+// Task 2 (GH-559) R1 — recordBehaviorChanged writes JSONL line with reason+evidence
+test('recordBehaviorChanged appends one JSONL line with event=behavior_changed, reason, evidence', () => {
+  withTempHome((home) => {
+    const telemetry = require('../telemetry');
+    telemetry.recordBehaviorChanged(
+      { name: 'mem-b', meta: {} },
+      { session_id: 'sess-bc' },
+      { reason: 'pretool-divergence', evidence: 'expected=git push got=git commit' }
+    );
+    const file = path.join(home, '.claude', 'synapsys', '.telemetry', 'sess-bc.jsonl');
+    const rows = readJsonl(file);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].memory, 'mem-b');
+    assert.equal(rows[0].event, 'behavior_changed');
+    assert.equal(rows[0].reason, 'pretool-divergence');
+    assert.equal(rows[0].evidence, 'expected=git push got=git commit');
+    assert.match(rows[0].ts, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+  });
+});
+
+// Task 2 (GH-559) R8 — evidence capped at MATCH_CAP=200
+test('recordBehaviorChanged caps evidence at MATCH_CAP (200 chars)', () => {
+  withTempHome((home) => {
+    const telemetry = require('../telemetry');
+    const huge = 'e'.repeat(500);
+    telemetry.recordBehaviorChanged(
+      { name: 'mem-cap', meta: {} },
+      { session_id: 'sess-cap' },
+      { reason: 'self-report', evidence: huge }
+    );
+    const file = path.join(home, '.claude', 'synapsys', '.telemetry', 'sess-cap.jsonl');
+    const rows = readJsonl(file);
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].evidence.length, 200);
+    assert.equal(rows[0].evidence, 'e'.repeat(200));
+  });
+});
+
+// Task 2 (GH-559) R6 — isDisabled propagation
+test('recordBehaviorChanged is suppressed when memory is disabled (per-memory + env)', () => {
+  withTempHome((home) => {
+    const telemetry = require('../telemetry');
+    telemetry.recordBehaviorChanged(
+      { name: 'silent', meta: { telemetry: false } },
+      { session_id: 'sess-dis' },
+      { reason: 'self-report', evidence: 'x' }
+    );
+    const file = path.join(home, '.claude', 'synapsys', '.telemetry', 'sess-dis.jsonl');
+    assert.equal(fs.existsSync(file), false);
+
+    process.env.SYNAPSYS_TELEMETRY = '0';
+    telemetry.recordBehaviorChanged(
+      { name: 'loud', meta: {} },
+      { session_id: 'sess-dis2' },
+      { reason: 'self-report', evidence: 'x' }
+    );
+    const file2 = path.join(home, '.claude', 'synapsys', '.telemetry', 'sess-dis2.jsonl');
+    assert.equal(fs.existsSync(file2), false);
+  });
+});
+
+// Task 2 (GH-559) R7 — fail-open when writeLine throws
+test('recordBehaviorChanged is fail-open when fs.appendFileSync throws', () => {
+  withTempHome(() => {
+    const telemetry = require('../telemetry');
+    const orig = fs.appendFileSync;
+    fs.appendFileSync = () => {
+      const e = new Error('EACCES');
+      e.code = 'EACCES';
+      throw e;
+    };
+    try {
+      assert.doesNotThrow(() => {
+        telemetry.recordBehaviorChanged(
+          { name: 'm', meta: {} },
+          { session_id: 's' },
+          { reason: 'self-report', evidence: 'x' }
+        );
+      });
+    } finally {
+      fs.appendFileSync = orig;
+    }
+  });
+});
+
+// Task 2 (GH-559) R3 — extracted scanForSignalList works for cite + behavior getters
+test('scanForSignalList returns [{memory, signal}] for cite_signals (regression)', () => {
+  withTempHome(() => {
+    const telemetry = require('../telemetry');
+    const memories = [
+      { name: 'alpha', meta: { cite_signals: ['alpha'] }, citeSignals: ['alpha'] },
+      { name: 'beta', meta: { cite_signals: ['beta'] }, citeSignals: ['beta'] },
+      { name: 'gamma', meta: { cite_signals: ['gamma'] }, citeSignals: ['gamma'] },
+    ];
+    const text = 'alpha and beta are here, no g.';
+    const hits = telemetry.scanForSignalList(memories, text, (m) => m.citeSignals);
+    assert.equal(hits.length, 2);
+    const names = hits.map((h) => h.memory.name).sort();
+    assert.deepEqual(names, ['alpha', 'beta']);
+    for (const h of hits) {
+      assert.equal(typeof h.signal, 'string');
+    }
+  });
+});
+
+test('scanForSignalList works with behavior_signals getter', () => {
+  withTempHome(() => {
+    const telemetry = require('../telemetry');
+    const memories = [
+      { name: 'mem-x', behaviorSignals: ['skipped-review'] },
+      { name: 'mem-y', behaviorSignals: ['not-mentioned'] },
+    ];
+    const text = 'I skipped-review on this one.';
+    const hits = telemetry.scanForSignalList(memories, text, (m) => m.behaviorSignals);
+    assert.equal(hits.length, 1);
+    assert.equal(hits[0].memory.name, 'mem-x');
+    assert.equal(hits[0].signal, 'skipped-review');
+  });
+});
+
+test('scanForSignalList skips disabled memories', () => {
+  withTempHome(() => {
+    const telemetry = require('../telemetry');
+    const memories = [
+      { name: 'on', meta: {}, behaviorSignals: ['hit'] },
+      { name: 'off', meta: { telemetry: false }, behaviorSignals: ['hit'] },
+    ];
+    const hits = telemetry.scanForSignalList(memories, 'we hit it', (m) => m.behaviorSignals);
+    assert.equal(hits.length, 1);
+    assert.equal(hits[0].memory.name, 'on');
+  });
+});
+
 // PR #524 cursor[bot] Medium — session_id sanitization (path traversal defense).
 // After GH-583 followup: telemetry and inject-ledger share resolveFromPayload, so
 // unsafe values are sha256-hashed (path-traversal still impossible — hex hash

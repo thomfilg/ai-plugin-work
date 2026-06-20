@@ -28,11 +28,7 @@ test('SKIP_DEMOTION_BELOW_DEFAULT exported as 2000', () => {
 });
 
 test('no-op when total is already under the limit', () => {
-  const entries = [
-    makeEntry('a', 3000, 50),
-    makeEntry('b', 4000, 50),
-    makeEntry('c', 2500, 50),
-  ];
+  const entries = [makeEntry('a', 3000, 50), makeEntry('b', 4000, 50), makeEntry('c', 2500, 50)];
   const sep = '\n\n';
   const result = demoteToFit(entries, { limit: 16000, sep, skipBelow: 2000 });
   assert.equal(result.length, 3);
@@ -42,11 +38,7 @@ test('no-op when total is already under the limit', () => {
 });
 
 test('reverse-walk order: demotes from last to first', () => {
-  const entries = [
-    makeEntry('m1', 7000, 50),
-    makeEntry('m2', 7000, 50),
-    makeEntry('m3', 7000, 50),
-  ];
+  const entries = [makeEntry('m1', 7000, 50), makeEntry('m2', 7000, 50), makeEntry('m3', 7000, 50)];
   const sep = '\n\n';
   const result = demoteToFit(entries, { limit: 16000, sep, skipBelow: 2000 });
   // total full = 21000+4 = 21004; demote m3 → 14000+50+4 = 14054 ≤ 16000
@@ -56,10 +48,7 @@ test('reverse-walk order: demotes from last to first', () => {
 });
 
 test('skip threshold: entries with fullText.length < skipBelow are never demoted', () => {
-  const entries = [
-    makeEntry('big', 9000, 50),
-    makeEntry('tiny', 1500, 50),
-  ];
+  const entries = [makeEntry('big', 9000, 50), makeEntry('tiny', 1500, 50)];
   const sep = '\n\n';
   // total = 9000 + 1500 + 2 = 10502 ≤ 16000 → no demotion needed
   // Force an overflow by using a small limit
@@ -71,9 +60,7 @@ test('skip threshold: entries with fullText.length < skipBelow are never demoted
 });
 
 test('terminal rotation guarantee: never demote the last remaining full entry', () => {
-  const entries = [
-    makeEntry('only', 20000, 50),
-  ];
+  const entries = [makeEntry('only', 20000, 50)];
   const sep = '\n\n';
   const result = demoteToFit(entries, { limit: 16000, sep, skipBelow: 2000 });
   assert.equal(result[0].finalKind, 'full', 'single oversized entry must stay full');
