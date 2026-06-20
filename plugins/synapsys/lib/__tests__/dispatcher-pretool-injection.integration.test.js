@@ -356,6 +356,41 @@ describe('dispatcher PreToolUse injection (GH-497 Task 1)', () => {
     );
   });
 
+  // "SessionStart subagent domain gating mismatch": a domain-tagged
+  // trigger_session memory must propagate to a subagent even when the subagent
+  // prompt does NOT activate its domain — on a real SessionStart, domain gating
+  // is skipped, and the subagent SessionStart pass must mirror that.
+  it('domain-tagged trigger_session memory propagates to subagent regardless of prompt domain', () => {
+    writeDomains(fixture.home, 'root: deploydom\n  leaf: l1\n    signal_prompt: \\bdeploy\\b\n');
+    writeMemory(
+      fixture.storeDir,
+      'session-domain.md',
+      {
+        name: 'session-domain-policy',
+        description: 'domain-tagged startup memory',
+        events: 'SessionStart',
+        trigger_session: 'true',
+        domain: 'deploydom',
+        inject: 'full',
+      },
+      'SESSION-DOMAIN-BODY'
+    );
+
+    // Prompt does NOT contain "deploy", so deploydom is NOT in the prompt-derived
+    // domains — but SessionStart gating is skipped, so the memory must still fire.
+    const r = runDispatcher({
+      event: 'PreToolUse',
+      payload: subagentPayload('Task', 'please refactor the auth module', fixture.cwd),
+      home: fixture.home,
+    });
+    assert.equal(r.status, 0, `dispatcher failed: ${r.stderr}`);
+    assert.match(
+      parseHookOutput(r.stdout).hookSpecificOutput.additionalContext,
+      /SESSION-DOMAIN-BODY/,
+      'domain-tagged trigger_session memory must propagate to the subagent (SessionStart skips gating)'
+    );
+  });
+
   // "Stop matcher spurious subagent injection": a Stop-scope memory with no
   // trigger_stop_response fires unconditionally on the Stop matcher; it must NOT
   // be propagated into a subagent spawn (Stop is excluded from the loop).

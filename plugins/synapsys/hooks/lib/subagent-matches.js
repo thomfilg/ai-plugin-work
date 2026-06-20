@@ -29,15 +29,21 @@ const injectLedger = require('../../lib/inject-ledger');
 const SUBAGENT_TOOLS = new Set(['Task', 'Agent']);
 const SUBAGENT_PROMPT_EVENTS = ['UserPromptSubmit', 'SessionStart'];
 
-// Recompute activeDomains from the synthetic prompt payload rather than reusing
-// the outer PreToolUse selectOpts, whose activeDomains reflect the parent
-// payload (often an empty `prompt`) and would wrongly skip/allow domain-tagged
-// memories (PR #605, Cursor "Wrong domains for subagent prompts"). Read-only:
-// onPersistSticky is a no-op so a subagent spawn never advances the parent
-// session's sticky-domain run. Fail-open: any classifier throw → undefined opts.
-function buildSubagentSelectOpts(synthetic) {
+// Recompute activeDomains for the matcher event from the synthetic prompt
+// payload rather than reusing the outer PreToolUse selectOpts, whose
+// activeDomains reflect the parent payload (often an empty `prompt`) and would
+// wrongly skip/allow domain-tagged memories (PR #605, Cursor "Wrong domains for
+// subagent prompts"). The event is passed through so each matcher gets the
+// gating it would get on a real hook: `UserPromptSubmit` derives domains from
+// the prompt, while `SessionStart` is passive (`buildActiveDomains` returns
+// undefined → no domain gating, so domain-tagged `trigger_session` memories are
+// not wrongly dropped on Task/Agent spawns — PR #605, Cursor "SessionStart
+// subagent domain gating mismatch"). Read-only: onPersistSticky is a no-op so a
+// subagent spawn never advances the parent session's sticky-domain run.
+// Fail-open: any classifier throw → undefined opts.
+function buildSubagentSelectOpts(event, synthetic) {
   try {
-    const activeDomains = buildActiveDomains('UserPromptSubmit', synthetic, {
+    const activeDomains = buildActiveDomains(event, synthetic, {
       resolveSessionId: injectLedger.resolveSessionId,
       onPersistSticky: () => {},
     });
@@ -52,10 +58,10 @@ function collectSubagentMatches(payload, memories) {
   const promptText = payload && payload.tool_input && payload.tool_input.prompt;
   if (!SUBAGENT_TOOLS.has(toolName) || typeof promptText !== 'string') return [];
   const synthetic = { ...payload, prompt: promptText };
-  const subagentOpts = buildSubagentSelectOpts(synthetic);
   const collected = [];
   for (const ev of SUBAGENT_PROMPT_EVENTS) {
     try {
+      const subagentOpts = buildSubagentSelectOpts(ev, synthetic);
       const hits = selectForEvent(memories, ev, synthetic, subagentOpts);
       if (Array.isArray(hits)) collected.push(...hits);
     } catch {
