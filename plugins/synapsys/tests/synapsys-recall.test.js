@@ -2,6 +2,9 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 
 const { renderStatus, resolveSessionId } = require('../scripts/synapsys-recall.js');
 const cortexHook = require('../lib/cortex-hook.js');
@@ -71,4 +74,59 @@ test('recall CLI and cortex hook resolve the SAME session id from payload.sessio
     if (prev === undefined) delete process.env.CLAUDE_CODE_SESSION_ID;
     else process.env.CLAUDE_CODE_SESSION_ID = prev;
   }
+});
+
+// suppressedByFireMode must resolve the effective mode from the PARSED
+// `memory.fireMode` (whose default is `once`, per memory-store.parseFireMode)
+// so Phase 2 cortex_query suppression matches the injection cadence in
+// render-budget.decideInjection. Reading only the raw `meta.fire_mode` string
+// (default '') let a memory WITHOUT explicit fire_mode re-run its inline
+// cortex_query on every trigger — the two paths disagreed (cursor[bot] #...).
+function withTmpHome(fn) {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-firemode-'));
+  try {
+    fn(home);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+}
+
+test('suppressedByFireMode: memory with NO explicit fire_mode is suppressed after the first fire (parsed default once)', () => {
+  withTmpHome((home) => {
+    const sessionId = 'sess-default-once';
+    // Mirrors a memory parsed by memory-store: fireMode defaults to 'once',
+    // and the raw frontmatter (meta.fire_mode) is absent.
+    const memory = { name: 'mem-a', fireMode: 'once', meta: { cortex_query: 'GH-519' } };
+
+    // First fire: not suppressed (writes the marker).
+    assert.equal(cortexHook.suppressedByFireMode(home, sessionId, memory), false);
+    // Second fire in the same session: suppressed.
+    assert.equal(cortexHook.suppressedByFireMode(home, sessionId, memory), true);
+  });
+});
+
+test('suppressedByFireMode: memory with fire_mode: always is NOT suppressed and re-runs every time', () => {
+  withTmpHome((home) => {
+    const sessionId = 'sess-always';
+    const memory = {
+      name: 'mem-b',
+      fireMode: 'always',
+      meta: { fire_mode: 'always', cortex_query: 'GH-519' },
+    };
+
+    assert.equal(cortexHook.suppressedByFireMode(home, sessionId, memory), false);
+    assert.equal(cortexHook.suppressedByFireMode(home, sessionId, memory), false);
+    assert.equal(cortexHook.suppressedByFireMode(home, sessionId, memory), false);
+  });
+});
+
+test('suppressedByFireMode: falls back to raw meta.fire_mode when parsed fireMode is absent', () => {
+  withTmpHome((home) => {
+    const sessionId = 'sess-raw-fallback';
+    // No parsed fireMode field at all — fall back to the raw frontmatter string.
+    const memory = { name: 'mem-c', meta: { fire_mode: 'once_per_session', cortex_query: 'q' } };
+
+    assert.equal(cortexHook.suppressedByFireMode(home, sessionId, memory), false);
+    assert.equal(cortexHook.suppressedByFireMode(home, sessionId, memory), true);
+  });
 });

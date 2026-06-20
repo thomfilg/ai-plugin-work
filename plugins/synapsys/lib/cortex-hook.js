@@ -172,7 +172,11 @@ function fireMarkerFile(home, sessionId, key) {
  * leaves the query un-suppressed.
  */
 function suppressedByFireMode(home, sessionId, memory) {
-  const mode = String(memory.meta?.fire_mode || '').toLowerCase();
+  // Resolve the effective mode from the parsed `memory.fireMode` (default
+  // `once` via parseFireMode) so Phase 2 suppression matches the injection
+  // cadence in render-budget's decideInjection. Fall back to the raw
+  // frontmatter string, then to `once`, when the parsed field is absent.
+  const mode = String(memory.fireMode || memory.meta?.fire_mode || 'once').toLowerCase();
   const oncePerSession = mode === 'once_per_session' || mode === 'once';
   if (!oncePerSession) return false;
 
