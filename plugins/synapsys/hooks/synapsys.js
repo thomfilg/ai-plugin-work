@@ -122,12 +122,11 @@ function buildEntry(memory, ledgerMemories, subagentNames) {
   // is a fresh context that has never seen the memory, so the parent session's
   // inject-ledger reminder demotion must not apply (PR #605, Cursor "Subagent
   // context uses reminder ledger"). Budget demotion (demoteToFit) still applies.
-  const kind =
-    subagentNames && subagentNames.has(memory.name)
-      ? 'full'
-      : decideInjection(memory, ledgerMemories[memory.name]).kind;
+  const subagentOrigin = !!(subagentNames && subagentNames.has(memory.name));
+  const kind = subagentOrigin ? 'full' : decideInjection(memory, ledgerMemories[memory.name]).kind;
   return {
     memory,
+    subagentOrigin,
     initialKind: kind,
     finalKind: kind,
     fullText: formatMemory(memory),
@@ -147,6 +146,12 @@ function emitEntries(entries, ledger, sessionId) {
       demotedCount += 1;
       continue;
     }
+    // Subagent-propagated matches inject into a separate fresh subagent context,
+    // NOT the main session. Bumping the parent ledger here would demote a later
+    // main-thread match of the same memory to a one-line reminder for a body the
+    // main context never received (PR #605 review B1 — the read-side
+    // force-full's mirror image on the write side).
+    if (e.subagentOrigin) continue;
     commitInjection(ledger, sessionId, e.memory, isFull);
   }
   return { body: pieces.join(SEP), demotedCount };
