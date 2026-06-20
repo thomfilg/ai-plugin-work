@@ -29,26 +29,61 @@ function extractPretoolContent(toolName, toolInput) {
   return extractor ? extractor(toolInput) : null;
 }
 
-function findContentMatch(memory, contentString) {
-  const patterns = memory.triggerPretoolContent;
+// Generic, field-agnostic positive content matcher. Scans `patterns` against
+// `contentString`, returning the FIRST match as { pattern, substring } or null.
+// Invalid regexes are warned-and-skipped (C-5); `label` is the trigger field
+// name used only in the warning text (e.g. 'trigger_pretool_content' vs
+// 'trigger_posttool_content'), `memoryName` identifies the offending memory.
+// Shared by both the pretool and posttool surfaces so the loop body lives once.
+function findContentMatchInPatterns(patterns, contentString, { label, memoryName }) {
   if (!Array.isArray(patterns) || patterns.length === 0) return null;
-  let hit = null;
   for (const pat of patterns) {
     let re;
     try {
       re = new RegExp(pat, 'im');
     } catch (err) {
       process.stderr.write(
-        `[synapsys] memory ${memory.name}: invalid trigger_pretool_content regex "${pat}": ${err.message}\n`
+        `[synapsys] memory ${memoryName}: invalid ${label} regex "${pat}": ${err.message}\n`
       );
       continue;
     }
     const m = re.exec(contentString);
-    if (m && hit === null) {
-      hit = { pattern: pat, substring: m[0] };
+    if (m) return { pattern: pat, substring: m[0] };
+  }
+  return null;
+}
+
+// Generic, field-agnostic AND-NOT content gate. Returns { excluded, pattern }
+// where excluded is true on the FIRST pattern that matches `contentString`.
+// Invalid regexes are warned-and-skipped (C-5); `label` / `memoryName` shape
+// the warning text exactly as findContentMatchInPatterns. Shared by both the
+// pretool and posttool negative surfaces.
+function evaluateContentNot(patterns, contentString, { label, memoryName }) {
+  if (!Array.isArray(patterns) || patterns.length === 0) {
+    return { excluded: false, pattern: null };
+  }
+  for (const pat of patterns) {
+    let re;
+    try {
+      re = new RegExp(pat, 'im');
+    } catch (err) {
+      process.stderr.write(
+        `[synapsys] memory ${memoryName}: invalid ${label} regex "${pat}": ${err.message}\n`
+      );
+      continue;
+    }
+    if (re.test(contentString)) {
+      return { excluded: true, pattern: pat };
     }
   }
-  return hit;
+  return { excluded: false, pattern: null };
+}
+
+function findContentMatch(memory, contentString) {
+  return findContentMatchInPatterns(memory.triggerPretoolContent, contentString, {
+    label: 'trigger_pretool_content',
+    memoryName: memory.name,
+  });
 }
 
 function evaluatePretoolContent(memory, contentString) {
@@ -62,25 +97,10 @@ function hasNegativeContentPatterns(memory) {
 }
 
 function evaluatePretoolContentNot(memory, contentString) {
-  const patterns = memory.triggerPretoolContentNot;
-  if (!Array.isArray(patterns) || patterns.length === 0) {
-    return { excluded: false, pattern: null };
-  }
-  for (const pat of patterns) {
-    let re;
-    try {
-      re = new RegExp(pat, 'im');
-    } catch (err) {
-      process.stderr.write(
-        `[synapsys] memory ${memory.name}: invalid trigger_pretool_content_not regex "${pat}": ${err.message}\n`
-      );
-      continue;
-    }
-    if (re.test(contentString)) {
-      return { excluded: true, pattern: pat };
-    }
-  }
-  return { excluded: false, pattern: null };
+  return evaluateContentNot(memory.triggerPretoolContentNot, contentString, {
+    label: 'trigger_pretool_content_not',
+    memoryName: memory.name,
+  });
 }
 
 module.exports = {
@@ -90,4 +110,8 @@ module.exports = {
   findContentMatch,
   hasNegativeContentPatterns,
   evaluatePretoolContentNot,
+  // Generic, field-agnostic helpers shared with matcher-posttool.js so the
+  // regex-list loop bodies live in exactly one place (jscpd clone removal).
+  findContentMatchInPatterns,
+  evaluateContentNot,
 };

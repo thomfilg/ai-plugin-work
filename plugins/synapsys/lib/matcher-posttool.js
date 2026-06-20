@@ -6,10 +6,14 @@
  * which reads `tool_input`. Split out of matcher.js (same self-contained
  * sub-module pattern as matcher-stop.js / matcher-content.js) so matcher.js
  * stays under the quality gate's max-lines budget. The shared helpers
- * (gateMemory, safeRegex, makeMatched, pretoolSpecMatches, findContentMatch,
- * hasNegativeContentPatterns, evaluatePretoolContentNot) are injected from
- * matcher.js at re-bind time.
+ * (gateMemory, safeRegex, makeMatched, pretoolSpecMatches) are injected from
+ * matcher.js at re-bind time; the field-agnostic content helpers
+ * (findContentMatchInPatterns / evaluateContentNot) are required directly from
+ * matcher-content.js — the matcher-stop.js sibling-require pattern — so the
+ * regex-list loop bodies live in exactly one place (jscpd clone removal).
  */
+
+const { findContentMatchInPatterns, evaluateContentNot } = require('./matcher-content');
 
 // Resolve the tool-output text surface that the trigger_posttool_* gates
 // evaluate against. A string tool_response passes through verbatim; an object
@@ -96,49 +100,26 @@ function _hasPretoolTarget(memory) {
 }
 
 // Find the first matching positive trigger_posttool_content pattern against the
-// stringified tool_response. Mirrors matcher-content.findContentMatch but reads
-// the POSTTOOL content field (the injected pretool helper reads triggerPretoolContent,
-// the wrong surface for PostToolUse). Invalid regexes are warned-and-skipped (C-5).
+// stringified tool_response. Delegates to the shared field-agnostic helper,
+// pinning the POSTTOOL content field + warning label (the pretool surface reads
+// triggerPretoolContent, the wrong field for PostToolUse). Invalid regexes are
+// warned-and-skipped (C-5) inside the helper.
 function _findPosttoolContentMatch(memory, responseText) {
-  const patterns = memory.triggerPosttoolContent;
-  if (!Array.isArray(patterns) || patterns.length === 0) return null;
-  for (const pat of patterns) {
-    let re;
-    try {
-      re = new RegExp(pat, 'im');
-    } catch (err) {
-      process.stderr.write(
-        `[synapsys] memory ${memory.name}: invalid trigger_posttool_content regex "${pat}": ${err.message}\n`
-      );
-      continue;
-    }
-    const m = re.exec(responseText);
-    if (m) return { pattern: pat, substring: m[0] };
-  }
-  return null;
+  return findContentMatchInPatterns(memory.triggerPosttoolContent, responseText, {
+    label: 'trigger_posttool_content',
+    memoryName: memory.name,
+  });
 }
 
 // Evaluate the trigger_posttool_content_not AND-NOT gate against the stringified
-// tool_response. Mirrors matcher-content.evaluatePretoolContentNot but reads the
-// POSTTOOL negative field. Invalid regexes are warned-and-skipped (C-5).
+// tool_response. Delegates to the shared field-agnostic helper, pinning the
+// POSTTOOL negative field + warning label. Invalid regexes are warned-and-
+// skipped (C-5) inside the helper.
 function _evaluatePosttoolContentNot(memory, responseText) {
-  const patterns = memory.triggerPosttoolContentNot;
-  if (!Array.isArray(patterns) || patterns.length === 0) {
-    return { excluded: false, pattern: null };
-  }
-  for (const pat of patterns) {
-    let re;
-    try {
-      re = new RegExp(pat, 'im');
-    } catch (err) {
-      process.stderr.write(
-        `[synapsys] memory ${memory.name}: invalid trigger_posttool_content_not regex "${pat}": ${err.message}\n`
-      );
-      continue;
-    }
-    if (re.test(responseText)) return { excluded: true, pattern: pat };
-  }
-  return { excluded: false, pattern: null };
+  return evaluateContentNot(memory.triggerPosttoolContentNot, responseText, {
+    label: 'trigger_posttool_content_not',
+    memoryName: memory.name,
+  });
 }
 
 // Stage 3 (C-1): content gate over the tool_response surface. Runs the positive

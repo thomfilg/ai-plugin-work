@@ -142,6 +142,98 @@ test('PostToolUse verbose: network-error memory shows matched posttool_content_s
   );
 });
 
+// Flag-only --tool-response path (PR #608 bot comment): a flag-only
+// --event=PostToolUse run with --tool-response must drive the content/exit
+// gates just like the --stdin path, instead of leaving tool_response undefined
+// and failing those gates closed.
+test('PostToolUse flag-only --tool-response fires the content gate', (t) => {
+  const memories = [
+    {
+      name: 'network-error-reminder',
+      frontmatter: {
+        description: 'Remind on network errors',
+        events: 'PostToolUse',
+        trigger_pretool: 'Bash:.*',
+        trigger_posttool_content: 'ENOTFOUND',
+      },
+      body: 'Network lookup failed — check connectivity.',
+    },
+  ];
+  const { cwd, cleanup } = makeFixtureStore(memories);
+  t.after(cleanup);
+
+  const toolResponse = JSON.stringify({
+    stdout: 'getaddrinfo ENOTFOUND registry.npmjs.org',
+    stderr: '',
+  });
+  const result = runExplain([
+    '--event=PostToolUse',
+    '--tool=Bash',
+    `--tool-response=${toolResponse}`,
+    '--verbose',
+    `--cwd=${cwd}`,
+  ]);
+
+  assert.equal(result.status, 0, `exit non-zero. stderr=${result.stderr}`);
+  assert.match(result.stdout, /fired: ✓/, `expected fire. stdout=${result.stdout}`);
+  assert.match(
+    result.stdout,
+    /matched\.posttool_content_substring:.*ENOTFOUND/,
+    `expected matched substring. stdout=${result.stdout}`
+  );
+});
+
+// Flag-only --tool-response with an exit-code object must drive the exit gate,
+// producing the SAME fire the stdin path produces for the equivalent payload.
+test('PostToolUse flag-only --tool-response matches the stdin path for exit gate', (t) => {
+  const memories = [
+    {
+      name: 'failing-test-reminder',
+      frontmatter: {
+        description: 'Remind on failing tests',
+        events: 'PostToolUse',
+        trigger_pretool: 'Bash:.*test.*',
+        trigger_posttool_exit: 'nonzero',
+      },
+      body: 'A test just failed — investigate before continuing.',
+    },
+  ];
+  const { cwd, cleanup } = makeFixtureStore(memories);
+  t.after(cleanup);
+
+  const toolResponse = { stdout: '1 failing', stderr: '', exit_code: 1 };
+
+  const flagResult = runExplain([
+    '--event=PostToolUse',
+    '--tool=Bash',
+    '--tool-input={"command":"pnpm test"}',
+    `--tool-response=${JSON.stringify(toolResponse)}`,
+    '--verbose',
+    `--cwd=${cwd}`,
+  ]);
+
+  const stdinResult = runExplain(['--stdin', '--verbose', `--cwd=${cwd}`], {
+    input: JSON.stringify({
+      hook_event_name: 'PostToolUse',
+      tool_name: 'Bash',
+      tool_input: { command: 'pnpm test' },
+      tool_response: toolResponse,
+      cwd,
+    }),
+  });
+
+  assert.equal(flagResult.status, 0, `flag exit non-zero. stderr=${flagResult.stderr}`);
+  assert.equal(stdinResult.status, 0, `stdin exit non-zero. stderr=${stdinResult.stderr}`);
+  assert.match(flagResult.stdout, /fired: ✓/, `expected flag fire. stdout=${flagResult.stdout}`);
+  assert.match(
+    flagResult.stdout,
+    /matched\.posttool_exit:\s*nonzero/,
+    `expected flag matched.posttool_exit. stdout=${flagResult.stdout}`
+  );
+  assert.match(flagResult.stdout, /1\/1 memories fired\./);
+  assert.match(stdinResult.stdout, /1\/1 memories fired\./);
+});
+
 // --event=PostToolUse must be accepted (not rejected as unknown --event).
 test('PostToolUse is an accepted --event (not rejected as unknown)', (t) => {
   const memories = [

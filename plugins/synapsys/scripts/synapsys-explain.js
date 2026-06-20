@@ -6,6 +6,7 @@
  *
  *   node synapsys-explain.js --event=UserPromptSubmit --prompt="<text>"
  *   node synapsys-explain.js --event=PreToolUse --tool=Edit --tool-input='{...}'
+ *   node synapsys-explain.js --event=PostToolUse --tool=Bash --tool-response='{...}'
  *   node synapsys-explain.js --stdin   (reads raw hook event JSON from stdin)
  *   node synapsys-explain.js [...] --only=name1,name2 --verbose --store=<name|path>
  *
@@ -319,6 +320,29 @@ function resolveToolInput(flag, stdinPayload) {
   return undefined;
 }
 
+// Parse a --tool-response flag value. PostToolUse responses are commonly an
+// object (e.g. { stdout, stderr, exit_code }) so a JSON value is parsed to drive
+// both the content gates and the exit-code gate; a non-JSON value passes through
+// verbatim as the string tool_response surface. Mirrors parseToolInput's lenient
+// empty handling.
+function parseToolResponse(raw) {
+  if (raw === undefined || raw === '' || raw === true) return '';
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return raw;
+  }
+}
+
+// Resolve tool_response with a flag fallback so flag-only --event=PostToolUse
+// runs (no --stdin) still exercise the content/exit gates instead of failing
+// closed. --tool-response wins when provided; otherwise carry through the raw
+// stdin payload's tool_response. Mirrors the --tool/--response resolution order.
+function resolveToolResponse(flag, stdinPayload) {
+  if (flag('tool-response') !== undefined) return parseToolResponse(flag('tool-response'));
+  return stdinPayload.tool_response;
+}
+
 function parseOnlyList(flag) {
   const raw = flag('only');
   if (typeof raw !== 'string') return null;
@@ -365,20 +389,13 @@ function main() {
   const tool = flag('tool') !== undefined ? flag('tool') : stdinPayload.tool_name;
   const toolInput = resolveToolInput(flag, stdinPayload);
   const response = flag('response') !== undefined ? flag('response') : stdinPayload.response;
+  const toolResponse = resolveToolResponse(flag, stdinPayload);
   const verbose = !!flag('verbose');
   const only = parseOnlyList(flag);
 
   const stores = loadStore(flag('store'), cwd);
   const memories = applyOnlyFilter(loadMemories(stores), only);
-  const payload = buildPayload(
-    event,
-    prompt,
-    tool,
-    toolInput,
-    cwd,
-    response,
-    stdinPayload.tool_response
-  );
+  const payload = buildPayload(event, prompt, tool, toolInput, cwd, response, toolResponse);
 
   const activeDomains = computeActiveDomainsForExplain(event, payload);
   const results = memories.map((memory) => ({
