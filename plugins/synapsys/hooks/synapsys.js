@@ -19,17 +19,15 @@ const path = require('node:path');
 const { discoverStores, listMemoriesFromStore } = require(
   path.join(__dirname, '..', 'lib', 'memory-store')
 );
-const { selectForEvent } = require(path.join(__dirname, '..', 'lib', 'matcher'));
+const { computeMatched } = require(path.join(__dirname, 'lib', 'subagent-matches'));
+const { emitMatched } = require(path.join(__dirname, 'lib', 'emit-matched'));
 const { buildActiveDomains } = require(path.join(__dirname, '..', 'lib', 'active-domains'));
 const { saveStickyState } = require(path.join(__dirname, '..', 'lib', 'sticky-state'));
 const injectLedger = require('../lib/inject-ledger');
-const { recordFired, isDisabled } = require(path.join(__dirname, '..', 'lib', 'telemetry'));
 const { runCiteScan, runBehaviorScan } = require(path.join(__dirname, '..', 'lib', 'cite-scan'));
 const pretoolWindow = require(path.join(__dirname, '..', 'lib', 'pretool-window'));
 const { demoteToFit } = require('../lib/budget');
-const { expectedCommandsFor, resolveAndEmitDivergences } = require(
-  path.join(__dirname, 'lib', 'behavior-changed')
-);
+const { resolveAndEmitDivergences } = require(path.join(__dirname, 'lib', 'behavior-changed'));
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -270,93 +268,6 @@ function formatMatchedOutput(matched, sessionId) {
   return renderMatchedMemories(matched, sessionId);
 }
 
-// collectSubagentMatches — GH-497 R3/R6. When a PreToolUse payload spawns a
-// subagent (`tool_name` is 'Task' or 'Agent') carrying a string
-// `tool_input.prompt`, run the prompt-scope matchers (UserPromptSubmit plus
-// SessionStart per P1 R6 — startup/prompt scope) against a synthetic prompt
-// payload so the subagent inherits those memories in its initial context.
-// `Stop` is intentionally excluded: it is end-of-turn retrospective and
-// semantically wrong at spawn time, and Stop memories without a
-// `trigger_stop_response` fire unconditionally — including them here would
-// inject end-of-turn policies into unrelated subagent spawns (PR #605, Cursor
-// "Stop matcher spurious subagent injection"; see tasks/GH-497/decisions.md).
-// Strictly fail-open: any matcher throw is swallowed per-call, never blocking.
-const SUBAGENT_TOOLS = new Set(['Task', 'Agent']);
-const SUBAGENT_PROMPT_EVENTS = ['UserPromptSubmit', 'SessionStart'];
-
-// Recompute activeDomains from the synthetic prompt payload rather than reusing
-// the outer PreToolUse selectOpts, whose activeDomains reflect the parent
-// payload (often an empty `prompt`) and would wrongly skip/allow domain-tagged
-// memories (PR #605, Cursor "Wrong domains for subagent prompts"). Read-only:
-// onPersistSticky is a no-op so a subagent spawn never advances the parent
-// session's sticky-domain run. Fail-open: any classifier throw → undefined opts.
-function buildSubagentSelectOpts(synthetic) {
-  try {
-    const activeDomains = buildActiveDomains('UserPromptSubmit', synthetic, {
-      resolveSessionId: injectLedger.resolveSessionId,
-      onPersistSticky: () => {},
-    });
-    return activeDomains ? { activeDomains } : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function collectSubagentMatches(payload, memories) {
-  const toolName = payload && payload.tool_name;
-  const promptText = payload && payload.tool_input && payload.tool_input.prompt;
-  if (!SUBAGENT_TOOLS.has(toolName) || typeof promptText !== 'string') return [];
-  const synthetic = { ...payload, prompt: promptText };
-  const subagentOpts = buildSubagentSelectOpts(synthetic);
-  const collected = [];
-  for (const ev of SUBAGENT_PROMPT_EVENTS) {
-    try {
-      const hits = selectForEvent(memories, ev, synthetic, subagentOpts);
-      if (Array.isArray(hits)) collected.push(...hits);
-    } catch {
-      /* fail-open: a matcher throw never blocks the subagent spawn */
-    }
-  }
-  return collected;
-}
-
-// unionByName — append `extra` matches onto `primary`, skipping any whose
-// `memory.name` already appears in `primary` (dedupe-by-name; GH-497 R3 G5).
-function unionByName(primary, extra) {
-  const seen = new Set(primary.map((m) => m.name));
-  const merged = primary.slice();
-  for (const m of extra) {
-    if (seen.has(m.name)) continue;
-    seen.add(m.name);
-    merged.push(m);
-  }
-  return merged;
-}
-
-function emitMatched(matched, payload, event, sessionId) {
-  if (!matched.length) return;
-  for (const m of matched) {
-    try {
-      recordFired(m, payload, event);
-    } catch {
-      // fail-open
-    }
-    // Path A: when a memory with a trigger_pretool rule fires on PreToolUse,
-    // record the expected command so a subsequent divergent PreToolUse can
-    // surface a one-off behavior_changed event.
-    if (event === 'PreToolUse' && !isDisabled(m)) {
-      const expectedAll = expectedCommandsFor(m);
-      if (expectedAll.length > 0) {
-        try {
-          pretoolWindow.recordExpectation(sessionId, m.name, expectedAll);
-        } catch {
-          // fail-open
-        }
-      }
-    }
-  }
-}
-
 function resolveSessionForPayload(payload) {
   try {
     const sessionId = injectLedger.resolveSessionId(payload);
@@ -368,17 +279,6 @@ function resolveSessionForPayload(payload) {
   } catch {
     return '';
   }
-}
-
-// GH-497 R3/R6: on a PreToolUse subagent spawn (Task/Agent), union the
-// prompt-scope matches (deduped by name) so a memory matching both injects once.
-function computeMatched(event, memories, payload, selectOpts) {
-  let matched = memories.length ? selectForEvent(memories, event, payload, selectOpts) : [];
-  if (event === 'PreToolUse' && memories.length) {
-    const subagentMatches = collectSubagentMatches(payload, memories);
-    if (subagentMatches.length) matched = unionByName(matched, subagentMatches);
-  }
-  return matched;
 }
 
 // GH-497 R1/R2: branch the on-match write by event. PreToolUse emits the
