@@ -38,8 +38,20 @@ test('formatBlock renders one result line per memory with the documented schema'
         query: 'GH-519',
         projectId: 'claude-plugin-work',
         results: [
-          makeResult({ id: 'mem-1', savedAt: '2026-06-05T00:00:00.000Z', title: 'First', body: 'body one', ageDays: 5 }),
-          makeResult({ id: 'mem-2', savedAt: '2026-06-01T00:00:00.000Z', title: 'Second', body: 'body two', ageDays: 9 }),
+          makeResult({
+            id: 'mem-1',
+            savedAt: '2026-06-05T00:00:00.000Z',
+            title: 'First',
+            body: 'body one',
+            ageDays: 5,
+          }),
+          makeResult({
+            id: 'mem-2',
+            savedAt: '2026-06-01T00:00:00.000Z',
+            title: 'Second',
+            body: 'body two',
+            ageDays: 9,
+          }),
         ],
       },
     ],
@@ -56,7 +68,15 @@ test('formatBlock result line matches `- {id} (saved YYYY-MM-DD, {age}) — {tit
       {
         query: 'GH-519',
         projectId: 'claude-plugin-work',
-        results: [makeResult({ id: 'mem-7', savedAt: '2026-06-05T00:00:00.000Z', title: 'Title here', body: 'Body here', ageDays: 5 })],
+        results: [
+          makeResult({
+            id: 'mem-7',
+            savedAt: '2026-06-05T00:00:00.000Z',
+            title: 'Title here',
+            body: 'Body here',
+            ageDays: 5,
+          }),
+        ],
       },
     ],
     maxAgeDays: 180,
@@ -94,7 +114,7 @@ test('formatBlock emits the empty-result marker ending in → no matches', () =>
   assert.match(
     out,
     /\[cortex:auto-recall\] query="nothing here" projectId="claude-plugin-work" → no matches/,
-    'empty query renders the documented no-matches marker line',
+    'empty query renders the documented no-matches marker line'
   );
 });
 
@@ -114,7 +134,11 @@ test('formatBlock hard-cuts a body longer than maxChars with a … suffix at exa
   });
   const line = out.split('\n').find((l) => l.startsWith('- '));
   const bodyPart = line.split(' :: ')[1];
-  assert.equal(bodyPart.length, maxChars, 'truncated body is exactly maxChars long including the … suffix');
+  assert.equal(
+    bodyPart.length,
+    maxChars,
+    'truncated body is exactly maxChars long including the … suffix'
+  );
   assert.ok(bodyPart.endsWith('…'), 'truncated body ends with the … suffix');
   assert.equal(bodyPart, 'abcdefghi…', 'body hard-cut to maxChars-1 visible chars plus …');
 });
@@ -156,6 +180,60 @@ test('formatBlock excludes results older than maxAgeDays and keeps fresh ones', 
   assert.doesNotMatch(out, /stale/, 'the 200-day result (> maxAgeDays) is excluded');
 });
 
+test('formatBlock caps results per query at maxResults after age filtering', () => {
+  const out = formatBlock({
+    queries: [
+      {
+        query: 'GH-519',
+        projectId: 'claude-plugin-work',
+        results: [
+          makeResult({ id: 'r1', body: 'one', ageDays: 1 }),
+          makeResult({ id: 'r2', body: 'two', ageDays: 2 }),
+          makeResult({ id: 'r3', body: 'three', ageDays: 3 }),
+          makeResult({ id: 'r4', body: 'four', ageDays: 4 }),
+        ],
+      },
+    ],
+    maxAgeDays: 180,
+    maxChars: 500,
+    maxResults: 2,
+  });
+  const lines = out.split('\n').filter((l) => l.startsWith('- '));
+  assert.equal(lines.length, 2, 'only the first maxResults results are rendered');
+  assert.match(out, /r1/, 'first result is kept');
+  assert.match(out, /r2/, 'second result is kept');
+  assert.doesNotMatch(out, /r3/, 'result beyond the cap is dropped');
+  assert.doesNotMatch(out, /r4/, 'result beyond the cap is dropped');
+});
+
+test('formatBlock applies maxResults only to fresh results (age filter runs first)', () => {
+  const out = formatBlock({
+    queries: [
+      {
+        query: 'GH-519',
+        projectId: 'claude-plugin-work',
+        results: [
+          makeResult({ id: 'stale1', ageDays: 365 }),
+          makeResult({ id: 'fresh1', ageDays: 5 }),
+          makeResult({ id: 'fresh2', ageDays: 6 }),
+        ],
+      },
+    ],
+    maxAgeDays: 180,
+    maxChars: 500,
+    maxResults: 2,
+  });
+  const lines = out.split('\n').filter((l) => l.startsWith('- '));
+  assert.equal(
+    lines.length,
+    2,
+    'both fresh results survive — the cap is not consumed by stale entries'
+  );
+  assert.match(out, /fresh1/);
+  assert.match(out, /fresh2/);
+  assert.doesNotMatch(out, /stale1/);
+});
+
 test('formatBlock renders → no matches when every result is filtered out as stale', () => {
   const out = formatBlock({
     queries: [
@@ -168,5 +246,9 @@ test('formatBlock renders → no matches when every result is filtered out as st
     maxAgeDays: 180,
     maxChars: 500,
   });
-  assert.match(out, /→ no matches/, 'a query whose results are all stale renders the no-matches marker');
+  assert.match(
+    out,
+    /→ no matches/,
+    'a query whose results are all stale renders the no-matches marker'
+  );
 });

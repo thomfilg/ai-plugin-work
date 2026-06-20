@@ -368,7 +368,7 @@ function consumeCache(sessionId, { home, config = {} } = {}) {
  * the config age/char bounds. Returns '' on any failure (R14).
  *
  * @param {Array} queries cached `{ query, projectId, results, ranAt }` records
- * @param {{ max_age_days?: number, max_chars_per_memory?: number }} config
+ * @param {{ max_age_days?: number, max_chars_per_memory?: number, max_results_per_query?: number }} config
  * @returns {string} the formatted block, or '' on failure
  */
 function formatRecallBlock(queries, config) {
@@ -377,6 +377,7 @@ function formatRecallBlock(queries, config) {
       queries,
       maxAgeDays: config.max_age_days ?? 180,
       maxChars: config.max_chars_per_memory ?? 500,
+      maxResults: config.max_results_per_query ?? 5,
     });
   } catch {
     return '';

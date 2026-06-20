@@ -57,17 +57,20 @@ function formatLine(result, maxChars) {
 /**
  * Render the `[cortex:auto-recall]` injection block.
  *
- * For each query: results older than `maxAgeDays` are filtered out; remaining
- * results render one line each. A query with no surviving results renders the
- * empty-result marker `[cortex:auto-recall] query="<q>" projectId="<p>" → no matches`.
+ * For each query: results older than `maxAgeDays` are filtered out; the
+ * surviving results are then capped at `maxResults` (the documented
+ * `max_results_per_query` budget) and render one line each. A query with no
+ * surviving results renders the empty-result marker
+ * `[cortex:auto-recall] query="<q>" projectId="<p>" → no matches`.
  *
- * @param {{queries:Array<{query:string,projectId:string,results:Array}>,maxAgeDays:number,maxChars:number}} args Block inputs.
+ * @param {{queries:Array<{query:string,projectId:string,results:Array}>,maxAgeDays:number,maxChars:number,maxResults?:number}} args Block inputs.
  * @returns {string} The rendered multi-line block.
  */
-function formatBlock({ queries, maxAgeDays, maxChars }) {
+function formatBlock({ queries, maxAgeDays, maxChars, maxResults }) {
+  const cap = Number.isFinite(maxResults) && maxResults >= 0 ? maxResults : Infinity;
   const blocks = [];
   for (const q of queries) {
-    const fresh = (q.results || []).filter((r) => r.ageDays <= maxAgeDays);
+    const fresh = (q.results || []).filter((r) => r.ageDays <= maxAgeDays).slice(0, cap);
     if (fresh.length === 0) {
       blocks.push(`${HEADER} query="${q.query}" projectId="${q.projectId}" → no matches`);
       continue;

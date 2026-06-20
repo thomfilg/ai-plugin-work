@@ -257,6 +257,7 @@ function appendCortexQuery(base, memory, ctx) {
       queries: [queryRecord],
       maxAgeDays: ctx.config.max_age_days ?? 180,
       maxChars: ctx.config.max_chars_per_memory ?? 500,
+      maxResults: ctx.config.max_results_per_query ?? 5,
     });
     return block ? `${base}\n\n${block}` : base;
   } catch {
