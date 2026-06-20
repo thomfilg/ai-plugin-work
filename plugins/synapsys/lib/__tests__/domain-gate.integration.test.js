@@ -61,10 +61,15 @@ function writeMemory(storeDir, name, frontmatter, body) {
 }
 
 function runHook({ event, payload, env }) {
+  const spawnEnv = { ...process.env, ...env, SYNAPSYS_NO_SETUP_HINT: '1' };
+  // session-id resolver (GH-583) prefers CLAUDE_CODE_SESSION_ID over the
+  // payload's session_id; this test drives the session via the payload, so an
+  // inherited env value would route the ledger to the wrong bucket. Scrub it.
+  delete spawnEnv.CLAUDE_CODE_SESSION_ID;
   return spawnSync(process.execPath, [HOOK, event], {
     input: JSON.stringify(payload),
     encoding: 'utf8',
-    env: { ...process.env, ...env, SYNAPSYS_NO_SETUP_HINT: '1' },
+    env: spawnEnv,
   });
 }
 

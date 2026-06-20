@@ -25,11 +25,14 @@ function readRecentToolCalls(payload) {
   return [];
 }
 
-// Serialize a PreToolUse invoking tool (tool_name + tool_input) into a
-// single string so signal_pretool regexes match against the tool under
-// execution. Returns null when not PreToolUse or no tool present.
+// Serialize an invoking tool (tool_name + tool_input) into a single string so
+// signal_pretool regexes match against the tool under execution. PostToolUse
+// payloads carry the same tool_name/tool_input surface, so both PreToolUse and
+// PostToolUse are serialized identically — otherwise domain-tagged PostToolUse
+// memories would see an empty tool list and get wrongly domain-mismatched.
+// Returns null for any other event or when no tool is present.
 function currentToolCallString(event, payload) {
-  if (event !== 'PreToolUse') return null;
+  if (event !== 'PreToolUse' && event !== 'PostToolUse') return null;
   const toolName = typeof payload.tool_name === 'string' ? payload.tool_name : '';
   if (!toolName) return null;
   let inputStr = '';
