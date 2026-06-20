@@ -14,7 +14,7 @@
  *   3. Validate the result against phase rules:
  *        - red:  command must fail (exit != 0) AND every gherkin scenario tagged
  *                `@task:N` must appear in at least one test/spec file under the
- *                task's Suggested Scope.
+ *                task's Files in scope.
  *        - green: command must pass (exit == 0).
  *        - refactor: command must still pass.
  *   4. If validation succeeds, record evidence via tdd-phase-state.js (the only
