@@ -234,6 +234,30 @@ test('formatBlock applies maxResults only to fresh results (age filter runs firs
   assert.doesNotMatch(out, /stale1/);
 });
 
+test('formatBlock keeps results whose ageDays is missing (treated as fresh, not dropped)', () => {
+  const out = formatBlock({
+    queries: [
+      {
+        query: 'GH-519',
+        projectId: 'claude-plugin-work',
+        results: [
+          makeResult({ id: 'no-age', ageDays: undefined }),
+          makeResult({ id: 'fresh', ageDays: 3 }),
+        ],
+      },
+    ],
+    maxAgeDays: 180,
+    maxChars: 500,
+  });
+  assert.doesNotMatch(
+    out,
+    /→ no matches/,
+    'a non-empty results set must not render the empty marker'
+  );
+  assert.match(out, /no-age/, 'result with missing ageDays is treated as fresh and kept');
+  assert.match(out, /fresh/, 'normally-fresh result is kept');
+});
+
 test('formatBlock renders → no matches when every result is filtered out as stale', () => {
   const out = formatBlock({
     queries: [

@@ -70,7 +70,12 @@ function formatBlock({ queries, maxAgeDays, maxChars, maxResults }) {
   const cap = Number.isFinite(maxResults) && maxResults >= 0 ? maxResults : Infinity;
   const blocks = [];
   for (const q of queries) {
-    const fresh = (q.results || []).filter((r) => r.ageDays <= maxAgeDays).slice(0, cap);
+    // A missing/non-finite ageDays means the recall result carried no age
+    // metadata — treat it as fresh (age 0) rather than letting `undefined <=
+    // maxAgeDays` evaluate false and silently drop every such result.
+    const fresh = (q.results || [])
+      .filter((r) => (Number.isFinite(r.ageDays) ? r.ageDays : 0) <= maxAgeDays)
+      .slice(0, cap);
     if (fresh.length === 0) {
       blocks.push(`${HEADER} query="${q.query}" projectId="${q.projectId}" → no matches`);
       continue;
