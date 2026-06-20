@@ -122,9 +122,17 @@ function buildEntry(memory, ledgerMemories, cortexCtx) {
   const kind = decideInjection(memory, ledgerMemories[memory.name]).kind;
   return {
     memory,
+    cortexCtx,
     initialKind: kind,
     finalKind: kind,
-    fullText: formatMemoryForRender(memory, cortexCtx),
+    // Base body only. The Phase 2 `cortex_query` block is appended lazily in
+    // emitEntries — and ONLY for entries that survive demotion as `full`. A
+    // memory demoted to a reminder by the budget pass therefore never runs its
+    // inline cortex recall nor burns its once-per-session fire marker for
+    // output the user never sees (GH-519 review: "Demoted memories still run
+    // recall"). Demotion sizing uses the base body; the appended cortex block
+    // is bounded by max_results/max_chars and tolerated by demote-not-drop.
+    fullText: formatMemory(memory),
     summaryText: reminderLine(memory),
   };
 }
@@ -134,7 +142,10 @@ function emitEntries(entries, ledger, sessionId) {
   const pieces = [];
   for (const e of entries) {
     const isFull = e.finalKind === 'full';
-    pieces.push(isFull ? e.fullText : e.summaryText);
+    // Run the Phase 2 cortex_query append (recall + fire-marker side effects)
+    // only now, for entries actually rendered in full. appendCortexQuery is a
+    // no-op when cortexCtx is null / the memory has no cortex_query.
+    pieces.push(isFull ? appendCortexQuery(e.fullText, e.memory, e.cortexCtx) : e.summaryText);
     if (e.initialKind === 'full' && e.finalKind === 'reminder') {
       // Budget-induced demotion: do NOT bump the ledger so the memory
       // re-fires in full on the next match (brief P0 R6 / G5).

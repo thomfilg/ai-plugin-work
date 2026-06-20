@@ -177,7 +177,7 @@ test('deriveKeywords: falls back to branch-name tokens when gh fails', () => {
   const kws = deriveKeywords({ ticketId: 'GH-1', cwd: '/work/repo' }, { exec, maxKeywords: 6 });
   assert.ok(
     kws.includes('cortex') || kws.includes('recall') || kws.includes('orchestrator'),
-    `expected a branch token in ${JSON.stringify(kws)}`,
+    `expected a branch token in ${JSON.stringify(kws)}`
   );
 });
 
@@ -217,7 +217,7 @@ test('scheduleRecall: spawns at most two queries worth of work and never throws'
         sessionId: 'sess-sched',
         home,
         spawn,
-      }),
+      })
     );
     assert.ok(calls.length >= 1, 'spawn should be invoked at least once');
     // The cost bound: only the `--query` flag values are forwarded, and there
@@ -226,7 +226,10 @@ test('scheduleRecall: spawns at most two queries worth of work and never throws'
       const args = c.args || [];
       return args.filter((a, i) => args[i - 1] === '--query');
     });
-    assert.ok(passedQueries.length <= 2, `at most two queries scheduled, got ${passedQueries.length}`);
+    assert.ok(
+      passedQueries.length <= 2,
+      `at most two queries scheduled, got ${passedQueries.length}`
+    );
     assert.ok(!passedQueries.includes('a third query that must be ignored'), 'third query dropped');
   } finally {
     cleanup(home);
@@ -247,7 +250,7 @@ test('scheduleRecall: never throws when spawn itself fails (graceful degrade)', 
         sessionId: 'sess-fail',
         home,
         spawn,
-      }),
+      })
     );
   } finally {
     cleanup(home);
@@ -278,10 +281,13 @@ test('consumeCache: formats the cached queries then deletes the cache file', () 
           },
         ],
       },
-      { home },
+      { home }
     );
 
-    const block = consumeCache('sess-consume', { home, config: { max_age_days: 180, max_chars_per_memory: 500 } });
+    const block = consumeCache('sess-consume', {
+      home,
+      config: { max_age_days: 180, max_chars_per_memory: 500 },
+    });
     assert.ok(typeof block === 'string', 'returns a formatted string block');
     assert.ok(block.includes('[cortex:auto-recall]'), 'block has the header');
     assert.ok(block.includes('m1'), 'block includes the result id');
@@ -297,9 +303,47 @@ test('consumeCache: returns empty string and does not throw when no cache exists
   try {
     let block;
     assert.doesNotThrow(() => {
-      block = consumeCache('never', { home, config: { max_age_days: 180, max_chars_per_memory: 500 } });
+      block = consumeCache('never', {
+        home,
+        config: { max_age_days: 180, max_chars_per_memory: 500 },
+      });
     });
     assert.equal(block, '');
+  } finally {
+    cleanup(home);
+  }
+});
+
+test('consumeCache: single-consume — a late background write after the first consume is NOT injected again', () => {
+  const { consumeCache } = loadRecall();
+  const cache = require('../lib/session-cache');
+  const home = mkHome();
+  const cfg = { max_age_days: 180, max_chars_per_memory: 500 };
+  const record = {
+    queries: [
+      {
+        query: 'GH-519',
+        projectId: 'claude-plugin-work',
+        results: [
+          { id: 'm1', savedAt: new Date().toISOString(), ageDays: 1, title: 'T', body: 'B' },
+        ],
+      },
+    ],
+  };
+  try {
+    // SessionStart baseline / first cache, first UserPromptSubmit consumes it.
+    cache.write('sess-once', record, { home });
+    const first = consumeCache('sess-once', { home, config: cfg });
+    assert.ok(first.includes('[cortex:auto-recall]'), 'first consume injects the block');
+    assert.ok(!fs.existsSync(cacheFile(home, 'sess-once')), 'cache deleted after first consume');
+
+    // Detached background job finishes LATE and writes a fresh cache.
+    cache.write('sess-once', record, { home });
+    // The next prompt must NOT inject a second time (single-consume), and the
+    // late cache must be cleaned up.
+    const second = consumeCache('sess-once', { home, config: cfg });
+    assert.equal(second, '', 'second consume returns empty — single-consume enforced');
+    assert.ok(!fs.existsSync(cacheFile(home, 'sess-once')), 'late-written cache is dropped');
   } finally {
     cleanup(home);
   }

@@ -60,8 +60,12 @@ test('runBackground: invokes recallFn once per query (ticket + keyword)', async 
 test('runBackground: writes exactly one cache record with both query entries', async () => {
   const { runBackground } = loadBg();
   const cache = stubCache();
-  const results1 = [{ id: 'm1', savedAt: '2026-01-01T00:00:00.000Z', title: 't1', body: 'b1', ageDays: 1 }];
-  const results2 = [{ id: 'm2', savedAt: '2026-01-02T00:00:00.000Z', title: 't2', body: 'b2', ageDays: 2 }];
+  const results1 = [
+    { id: 'm1', savedAt: '2026-01-01T00:00:00.000Z', title: 't1', body: 'b1', ageDays: 1 },
+  ];
+  const results2 = [
+    { id: 'm2', savedAt: '2026-01-02T00:00:00.000Z', title: 't2', body: 'b2', ageDays: 2 },
+  ];
   const byQuery = { 'GH-519': results1, keyword: results2 };
   const recallFn = async (query) => byQuery[query];
 
@@ -125,7 +129,7 @@ test('runBackground: a throwing recallFn still writes a record without crashing'
       sessionId: 'sess-4',
       recallFn,
       cache,
-    }),
+    })
   );
 
   assert.equal(cache.calls.length, 1, 'a record is still written when recall throws');
@@ -146,4 +150,61 @@ test('synapsys-cortex-recall-bg exposes runBackground and main', () => {
   const mod = loadBg();
   assert.equal(typeof mod.runBackground, 'function', 'exports runBackground');
   assert.equal(typeof mod.main, 'function', 'exports a CLI main()');
+});
+
+// ---------------------------------------------------------------------------
+// resolveRecallFn — production honors the SYNAPSYS_CORTEX_RECALL_MODULE bridge
+// (the same injected-provider contract Phase 2 inline recall uses), so a
+// configured provider actually drives Phase 1 background recall instead of the
+// worker falling through to an empty stub (GH-519: "Background recall never
+// calls cortex"). Fail-open when unset / unloadable.
+// ---------------------------------------------------------------------------
+
+test('resolveRecallFn: returns the recall fn from SYNAPSYS_CORTEX_RECALL_MODULE when set', async () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+  const mod = loadBg();
+  assert.equal(typeof mod.resolveRecallFn, 'function', 'exports resolveRecallFn');
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-bridge-'));
+  const bridgePath = path.join(dir, 'bridge.js');
+  fs.writeFileSync(
+    bridgePath,
+    'module.exports = { recall: (query, projectId) => [{ id: "x", query, projectId }] };'
+  );
+  const prev = process.env.SYNAPSYS_CORTEX_RECALL_MODULE;
+  try {
+    process.env.SYNAPSYS_CORTEX_RECALL_MODULE = bridgePath;
+    const fn = mod.resolveRecallFn();
+    const out = await fn('GH-519', 'proj-z');
+    assert.deepEqual(
+      out,
+      [{ id: 'x', query: 'GH-519', projectId: 'proj-z' }],
+      'bridge recall is invoked'
+    );
+  } finally {
+    if (prev === undefined) delete process.env.SYNAPSYS_CORTEX_RECALL_MODULE;
+    else process.env.SYNAPSYS_CORTEX_RECALL_MODULE = prev;
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('resolveRecallFn: falls open to an empty-result stub when the module env is unset or unloadable', async () => {
+  const mod = loadBg();
+  const prev = process.env.SYNAPSYS_CORTEX_RECALL_MODULE;
+  try {
+    delete process.env.SYNAPSYS_CORTEX_RECALL_MODULE;
+    assert.deepEqual(await mod.resolveRecallFn()('q', 'p'), [], 'unset → empty stub');
+
+    process.env.SYNAPSYS_CORTEX_RECALL_MODULE = '/no/such/bridge-module-xyz.js';
+    assert.deepEqual(
+      await mod.resolveRecallFn()('q', 'p'),
+      [],
+      'unloadable → empty stub (fail-open)'
+    );
+  } finally {
+    if (prev === undefined) delete process.env.SYNAPSYS_CORTEX_RECALL_MODULE;
+    else process.env.SYNAPSYS_CORTEX_RECALL_MODULE = prev;
+  }
 });

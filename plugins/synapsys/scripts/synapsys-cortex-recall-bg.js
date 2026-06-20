@@ -130,9 +130,37 @@ function applyArg(out, name, value) {
 }
 
 /**
+ * Resolve the production recall function from `SYNAPSYS_CORTEX_RECALL_MODULE`,
+ * the SAME injected-provider contract Phase 2 inline recall uses
+ * (`cortex-hook.resolveInlineRecall`). The detached worker inherits the parent
+ * process env, so a configured bridge module is honored here too — without this
+ * the worker fell straight through to an empty stub and Phase 1 auto-recall
+ * never invoked a real `cortex_recall` in production even when a provider was
+ * configured (GH-519 review: "Background recall never calls cortex"). Fail-open:
+ * an absent / unloadable / malformed module degrades to the empty stub, so
+ * shipped hooks with no cortex provider behave exactly as before.
+ *
+ * @returns {(query:string, projectId:string)=>Promise<Array>|Array}
+ */
+function resolveRecallFn() {
+  const modPath = process.env.SYNAPSYS_CORTEX_RECALL_MODULE;
+  if (!modPath) return async () => [];
+  try {
+    // eslint-disable-next-line global-require, import/no-dynamic-require
+    const mod = require(modPath);
+    if (mod && typeof mod.recall === 'function') return mod.recall.bind(mod);
+  } catch {
+    // Fall through to the empty stub — never crash the detached process (R14).
+  }
+  return async () => [];
+}
+
+/**
  * CLI shell. Parses argv, wires the real session-cache writer, and resolves a
- * recall function (injectable for tests). Never throws — a top-level failure
- * degrades to a silent no-op so the detached process exits cleanly (R14).
+ * recall function (injectable for tests; production uses
+ * `SYNAPSYS_CORTEX_RECALL_MODULE` via resolveRecallFn). Never throws — a
+ * top-level failure degrades to a silent no-op so the detached process exits
+ * cleanly (R14).
  *
  * @param {string[]} [argv] args after `node script.js` (defaults to process.argv)
  * @param {{
@@ -145,14 +173,14 @@ async function main(argv = process.argv.slice(2), deps = {}) {
   try {
     const { queries, projectId, sessionId, home } = parseArgs(argv);
     const cache = deps.cache || cacheLib;
-    const recallFn = deps.recallFn || (async () => []);
+    const recallFn = deps.recallFn || resolveRecallFn();
     await runBackground({ queries, projectId, sessionId, recallFn, cache, home });
   } catch {
     // Detached background process — degrade silently (R14).
   }
 }
 
-module.exports = { runBackground, main, parseArgs, MAX_QUERIES };
+module.exports = { runBackground, main, parseArgs, resolveRecallFn, MAX_QUERIES };
 
 /* istanbul ignore next */
 if (require.main === module) {

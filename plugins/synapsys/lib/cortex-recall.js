@@ -23,6 +23,7 @@ const { spawn: defaultSpawn, execFileSync } = require('node:child_process');
 
 const { getCurrentTaskId } = require('./ticket-id');
 const cache = require('./session-cache');
+const sentinel = require('./consume-sentinel');
 const { formatBlock } = require('./cortex-format');
 
 /**
@@ -335,14 +336,22 @@ function buildRecallArgs({ bounded, projectId, sessionId, home }) {
 
 /**
  * Consume the background cache for a session: read the record, format the
- * `[cortex:auto-recall]` block, delete the cache file. Returns '' when no
- * cache exists. Never throws (R14).
+ * `[cortex:auto-recall]` block, delete the cache file, and set a single-consume
+ * sentinel. Returns '' when nothing to consume or when already consumed. Never
+ * throws (R14).
  *
  * @param {string} sessionId session identifier
  * @param {{ home: string, config?: { max_age_days?: number, max_chars_per_memory?: number } }} opts
  * @returns {string} the formatted block, or '' when nothing to consume
  */
 function consumeCache(sessionId, { home, config = {} } = {}) {
+  // Single-consume guard (see lib/consume-sentinel): an already-consumed session
+  // drops any late-written cache and returns '' (no second injection).
+  if (sentinel.isConsumed(cache, sessionId, home)) {
+    sentinel.dropStaleCache(cache, sessionId, home);
+    return '';
+  }
+
   let record;
   try {
     record = cache.read(sessionId, { home });
@@ -360,17 +369,13 @@ function consumeCache(sessionId, { home, config = {} } = {}) {
   } catch {
     // Ignore — best-effort cleanup.
   }
+  sentinel.markConsumed(cache, sessionId, home);
   return block;
 }
 
-/**
- * Format the `[cortex:auto-recall]` block from cached query records, applying
- * the config age/char bounds. Returns '' on any failure (R14).
- *
- * @param {Array} queries cached `{ query, projectId, results, ranAt }` records
- * @param {{ max_age_days?: number, max_chars_per_memory?: number, max_results_per_query?: number }} config
- * @returns {string} the formatted block, or '' on failure
- */
+// Format the `[cortex:auto-recall]` block from cached `{ query, projectId,
+// results, ranAt }` records, applying the config age/char/result bounds.
+// Returns '' on any failure (R14).
 function formatRecallBlock(queries, config) {
   try {
     return formatBlock({
