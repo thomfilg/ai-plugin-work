@@ -6,7 +6,7 @@
   },
   "metadata": {
     "description": "Deterministic workflow orchestrator for Jira task implementation with state machine validation.",
-    "version": "3.40.3"
+    "version": "3.49.0"
   },
   "plugins": [
     {
@@ -52,7 +52,7 @@
     {
       "name": "heimdall",
       "source": "./plugins/heimdall",
-      "description": "Config-driven file/directory guard — lock blocks pair protected paths with an unlock phrase; a PreToolUse hook blocks Edit/Write/Bash/Task mutations unless the phrase is spoken",
+      "description": "Config-driven file/directory guard — lock blocks pair protected paths with an unlock phrase and a PreToolUse hook blocks Edit/Write/Bash/Task mutations unless the phrase is spoken; also conceals paths (hard read+write deny, no unlock) and hardens MCP secrets behind a setuid OS boundary",
       "category": "safety",
       "tags": [
         "guard",
@@ -60,6 +60,10 @@
         "hooks",
         "pretooluse",
         "lock",
+        "conceal",
+        "secrets",
+        "setuid",
+        "mcp",
         "safety"
       ]
     }

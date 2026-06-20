@@ -1,33 +1,12 @@
 /**
- * Task-review phase dispatcher. Mirrors work-pr-reviewer/lib/phase-registry.js.
+ * Task-review phase dispatcher.
  */
 
 'use strict';
 
-const handlers = Object.create(null);
+const { makePhaseRegistry } = require('../../lib/make-phase-registry');
 
-function registerPhase(phaseName, handler) {
-  if (
-    !handler ||
-    typeof handler.validate !== 'function' ||
-    typeof handler.instructions !== 'function'
-  ) {
-    throw new Error(
-      `Invalid phase handler for "${phaseName}" — must expose validate() and instructions()`
-    );
-  }
-  handlers[phaseName] = handler;
-}
-
-function getPhase(phaseName) {
-  const h = handlers[phaseName];
-  if (!h) throw new Error(`No task-review phase handler registered for "${phaseName}"`);
-  return h;
-}
-
-function hasPhase(phaseName) {
-  return Boolean(handlers[phaseName]);
-}
+const { registerPhase, getPhase, hasPhase } = makePhaseRegistry('task-review');
 
 require('./phases/inputs')(registerPhase);
 require('./phases/diff_audit')(registerPhase);

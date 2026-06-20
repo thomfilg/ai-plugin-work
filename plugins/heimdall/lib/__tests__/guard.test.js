@@ -214,6 +214,21 @@ describe('evaluate: bash', () => {
     assert.equal(r.exitCode, 2);
   });
 
+  it('blocks moving a protected file OUT to an unprotected dest (mv removes the source)', () => {
+    const r = run(`mv ${path.join(baseDir, '.claude', 'settings.json')} /tmp/heimdall-stash.bak`);
+    assert.equal(r.exitCode, 2, 'mv of a protected source is destructive, not a read');
+  });
+
+  it('blocks moving a protected file OUT via a relative path', () => {
+    const r = run('mv .claude/settings.json /tmp/heimdall-stash.bak');
+    assert.equal(r.exitCode, 2);
+  });
+
+  it('still allows cp of a protected file as source (source survives — a read)', () => {
+    const r = run(`cp ${path.join(baseDir, '.claude', 'settings.json')} /tmp/heimdall-copy.bak`);
+    assert.equal(r.exitCode, 0, 'cp leaves the protected source intact, so it is a read');
+  });
+
   it('blocks when a compound command also targets a still-locked entry (.claude unlocked, package.json not)', () => {
     // .claude is unlocked via transcript; the command also writes package.json
     // (locked under a different phrase) — must still block on package.json.

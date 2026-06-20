@@ -104,4 +104,25 @@ const fm = [
 ].join('\n');
 
 fs.writeFileSync(outPath, fm);
+
+// R11 / AC-G6: after writing, run `synapsys lint` scoped to pairs involving
+// the new memory and warn on high-severity collisions via stderr. Always a
+// warning — never a block: exit code is unaffected by the lint result.
+try {
+  const { lintStore } = require('./synapsys-lint');
+  const result = lintStore({ cwd, scope: 'all', onlyInvolving: name });
+  const highPairs = (result && Array.isArray(result.pairs) ? result.pairs : []).filter(
+    (p) => p.severity === 'high'
+  );
+  for (const p of highPairs) {
+    const colliding = p.a === name ? p.b : p.a;
+    console.error(
+      `warn: synapsys memorize: new memory '${name}' creates a high severity ${p.rule} pair with '${colliding}'`
+    );
+  }
+} catch (err) {
+  // Lint failure must never block memorize; surface a soft note on stderr.
+  console.error(`warn: synapsys memorize: post-write lint skipped (${err && err.message ? err.message : err})`);
+}
+
 console.log(JSON.stringify({ written: outPath, store: target.kind, name }, null, 2));

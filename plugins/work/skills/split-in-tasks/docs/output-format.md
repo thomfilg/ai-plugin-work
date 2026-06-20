@@ -1,7 +1,7 @@
 # Output Format
 
 Defines the exact structure of `tasks.md`. See related docs:
-- [test-command.md](./test-command.md) — `### Test Command` block details (runner env vars, file-name patterns, scope rules)
+- [test-strategy.md](./test-strategy.md) — `### Test Strategy` block details (kind enum, runner env vars, file-name patterns, scope rules). Folds in (and supersedes) the legacy `test-command.md`.
 - [scope-sections.md](./scope-sections.md) — `### Files in scope` / `### Files explicitly out of scope` rules (Gate C + intra-ticket exclusion)
 
 ## Checkbox Legend
@@ -67,8 +67,18 @@ The closed enum is defined in [`lib/task-types.js`](../lib/task-types.js). Addin
 ### Parallel
 - Yes | No | Partial (reason)
 
-### Test Command
-<shell command — see test-command.md for full rules>
+### Test Strategy
+```
+kind: <unit | integration | e2e | custom | verified-by | wiring-citation>
+# unit / integration / e2e:
+entry: <test file path under this task's Files in scope>
+# custom:
+command: <verbatim shell command — see test-strategy.md>
+# verified-by / wiring-citation:
+peer: Task <N>
+cites: <path or symbol exercised by the peer's test>
+```
+<see [test-strategy.md](./test-strategy.md) for the closed enum and full rules>
 
 ### Suggested Scope, Files in scope, Files explicitly out of scope
 <see scope-sections.md for full rules>

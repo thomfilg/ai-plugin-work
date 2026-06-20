@@ -23,9 +23,13 @@ const { selectForEvent } = require(path.join(__dirname, '..', 'lib', 'matcher'))
 const { buildActiveDomains } = require(path.join(__dirname, '..', 'lib', 'active-domains'));
 const { saveStickyState } = require(path.join(__dirname, '..', 'lib', 'sticky-state'));
 const injectLedger = require('../lib/inject-ledger');
-const { recordFired } = require(path.join(__dirname, '..', 'lib', 'telemetry'));
-const { runCiteScan } = require(path.join(__dirname, '..', 'lib', 'cite-scan'));
+const { recordFired, isDisabled } = require(path.join(__dirname, '..', 'lib', 'telemetry'));
+const { runCiteScan, runBehaviorScan } = require(path.join(__dirname, '..', 'lib', 'cite-scan'));
+const pretoolWindow = require(path.join(__dirname, '..', 'lib', 'pretool-window'));
 const { demoteToFit } = require('../lib/budget');
+const { expectedCommandsFor, resolveAndEmitDivergences } = require(
+  path.join(__dirname, 'lib', 'behavior-changed')
+);
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -268,22 +272,46 @@ function formatMatchedOutput(matched, sessionId) {
 
 // collectSubagentMatches — GH-497 R3/R6. When a PreToolUse payload spawns a
 // subagent (`tool_name` is 'Task' or 'Agent') carrying a string
-// `tool_input.prompt`, run the prompt-scope matchers (UserPromptSubmit, plus
-// SessionStart/Stop per P1 R6) against a synthetic prompt payload so the
-// subagent inherits prompt-scope memories in its initial context. Strictly
-// fail-open: any matcher throw is swallowed per-call, never blocking the tool.
+// `tool_input.prompt`, run the prompt-scope matchers (UserPromptSubmit plus
+// SessionStart per P1 R6 — startup/prompt scope) against a synthetic prompt
+// payload so the subagent inherits those memories in its initial context.
+// `Stop` is intentionally excluded: it is end-of-turn retrospective and
+// semantically wrong at spawn time, and Stop memories without a
+// `trigger_stop_response` fire unconditionally — including them here would
+// inject end-of-turn policies into unrelated subagent spawns (PR #605, Cursor
+// "Stop matcher spurious subagent injection"; see tasks/GH-497/decisions.md).
+// Strictly fail-open: any matcher throw is swallowed per-call, never blocking.
 const SUBAGENT_TOOLS = new Set(['Task', 'Agent']);
-const SUBAGENT_PROMPT_EVENTS = ['UserPromptSubmit', 'SessionStart', 'Stop'];
+const SUBAGENT_PROMPT_EVENTS = ['UserPromptSubmit', 'SessionStart'];
 
-function collectSubagentMatches(payload, memories, selectOpts) {
+// Recompute activeDomains from the synthetic prompt payload rather than reusing
+// the outer PreToolUse selectOpts, whose activeDomains reflect the parent
+// payload (often an empty `prompt`) and would wrongly skip/allow domain-tagged
+// memories (PR #605, Cursor "Wrong domains for subagent prompts"). Read-only:
+// onPersistSticky is a no-op so a subagent spawn never advances the parent
+// session's sticky-domain run. Fail-open: any classifier throw → undefined opts.
+function buildSubagentSelectOpts(synthetic) {
+  try {
+    const activeDomains = buildActiveDomains('UserPromptSubmit', synthetic, {
+      resolveSessionId: injectLedger.resolveSessionId,
+      onPersistSticky: () => {},
+    });
+    return activeDomains ? { activeDomains } : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function collectSubagentMatches(payload, memories) {
   const toolName = payload && payload.tool_name;
   const promptText = payload && payload.tool_input && payload.tool_input.prompt;
   if (!SUBAGENT_TOOLS.has(toolName) || typeof promptText !== 'string') return [];
   const synthetic = { ...payload, prompt: promptText };
+  const subagentOpts = buildSubagentSelectOpts(synthetic);
   const collected = [];
   for (const ev of SUBAGENT_PROMPT_EVENTS) {
     try {
-      const hits = selectForEvent(memories, ev, synthetic, selectOpts);
+      const hits = selectForEvent(memories, ev, synthetic, subagentOpts);
       if (Array.isArray(hits)) collected.push(...hits);
     } catch {
       /* fail-open: a matcher throw never blocks the subagent spawn */
@@ -305,7 +333,7 @@ function unionByName(primary, extra) {
   return merged;
 }
 
-function emitMatched(matched, payload, event) {
+function emitMatched(matched, payload, event, sessionId) {
   if (!matched.length) return;
   for (const m of matched) {
     try {
@@ -313,14 +341,28 @@ function emitMatched(matched, payload, event) {
     } catch {
       // fail-open
     }
+    // Path A: when a memory with a trigger_pretool rule fires on PreToolUse,
+    // record the expected command so a subsequent divergent PreToolUse can
+    // surface a one-off behavior_changed event.
+    if (event === 'PreToolUse' && !isDisabled(m)) {
+      const expectedAll = expectedCommandsFor(m);
+      if (expectedAll.length > 0) {
+        try {
+          pretoolWindow.recordExpectation(sessionId, m.name, expectedAll);
+        } catch {
+          // fail-open
+        }
+      }
+    }
   }
 }
 
-// Resolve session id once (ledger reset + per-memory render). Publish to
-// `.current` so out-of-process callers (synapsys-list CLI) share it. Fail-open.
-function resolveSession(payload) {
+function resolveSessionForPayload(payload) {
   try {
     const sessionId = injectLedger.resolveSessionId(payload);
+    // Publish the resolved id to `.current` so out-of-process callers
+    // (synapsys-list CLI) read the same session ledger the dispatcher
+    // writes to. Fail-open: a write error never blocks the dispatcher.
     injectLedger.publishCurrentSessionId(sessionId);
     return sessionId;
   } catch {
@@ -333,7 +375,7 @@ function resolveSession(payload) {
 function computeMatched(event, memories, payload, selectOpts) {
   let matched = memories.length ? selectForEvent(memories, event, payload, selectOpts) : [];
   if (event === 'PreToolUse' && memories.length) {
-    const subagentMatches = collectSubagentMatches(payload, memories, selectOpts);
+    const subagentMatches = collectSubagentMatches(payload, memories);
     if (subagentMatches.length) matched = unionByName(matched, subagentMatches);
   }
   return matched;
@@ -356,44 +398,86 @@ function writeMatchedOutput(event, matched, sessionId) {
   }
 }
 
+function maybeResetSessionLedger(event, sessionId) {
+  // SessionStart resets the per-session ledger (brief AC-4 / spec §3.3) and
+  // opportunistically GCs stale ledger files older than 7 days (spec §4.2).
+  if (event !== 'SessionStart') return;
+  try {
+    injectLedger.resetLedgerForSession(sessionId);
+    injectLedger.gcStaleLedgers({ maxAgeMs: SEVEN_DAYS_MS });
+  } catch {
+    /* fail-open */
+  }
+}
+
+function runStopScans(payload, memories, sessionId) {
+  try {
+    runCiteScan(payload, memories);
+  } catch {
+    // fail-open
+  }
+  try {
+    runBehaviorScan(payload, memories, sessionId);
+  } catch {
+    // fail-open
+  }
+  try {
+    pretoolWindow.clearTurnDedup(sessionId);
+  } catch {
+    // fail-open
+  }
+}
+
+async function dispatch() {
+  const event = process.argv[2];
+  if (!VALID_EVENTS.has(event)) process.exit(0);
+
+  const payload = parsePayload(await readStdin());
+  const cwd = payload.cwd || process.cwd();
+  const stores = discoverStores(cwd);
+  const memories = stores.flatMap(listMemoriesFromStore);
+
+  // Resolve session id once; used for both ledger reset (SessionStart) and
+  // the per-memory render path. Fail-open: any throw → noop and the rest of
+  // the dispatcher behaves like the pre-ledger code path.
+  const sessionId = resolveSessionForPayload(payload);
+  maybeResetSessionLedger(event, sessionId);
+
+  const sessionHint = getSessionStartHint(event, stores, memories);
+  if (sessionHint) {
+    process.stdout.write(sessionHint);
+    process.exit(0);
+  }
+
+  // Build activeDomains FIRST so UserPromptSubmit advances sticky-state
+  // even when the memory list is empty. Fail-open: on any error, omit
+  // `opts.activeDomains` to preserve pre-classifier behavior.
+  const selectOpts = buildActiveDomainsForPayload(event, payload);
+  const matched = computeMatched(event, memories, payload, selectOpts);
+
+  // On Stop the cite scan must read the session JSONL state from BEFORE
+  // this turn's Stop-time fired writes; Stop-injections happen after the
+  // assistant response, so attributing citations to them would be a
+  // false positive (the response cannot reference a memory that wasn't
+  // yet injected at the time it was written).
+  // Path A on PreToolUse: resolve pending expectations against the observed
+  // command BEFORE recording new ones, so a memory firing this turn does not
+  // immediately get aged out by its own observed command.
+  if (event === 'PreToolUse') {
+    resolveAndEmitDivergences(payload, memories, sessionId);
+  }
+  if (event === 'Stop') {
+    runStopScans(payload, memories, sessionId);
+  }
+  emitMatched(matched, payload, event, sessionId);
+
+  writeMatchedOutput(event, matched, sessionId);
+  process.exit(0);
+}
+
 (async () => {
   try {
-    const event = process.argv[2];
-    if (!VALID_EVENTS.has(event)) process.exit(0);
-
-    const payload = parsePayload(await readStdin());
-    const cwd = payload.cwd || process.cwd();
-    const stores = discoverStores(cwd);
-    const memories = stores.flatMap(listMemoriesFromStore);
-
-    const sessionId = resolveSession(payload);
-
-    // SessionStart resets the ledger (brief AC-4 / spec §3.3) + GCs files >7d old (spec §4.2). Fail-open.
-    if (event === 'SessionStart') {
-      try {
-        injectLedger.resetLedgerForSession(sessionId);
-        injectLedger.gcStaleLedgers({ maxAgeMs: SEVEN_DAYS_MS });
-      } catch {
-        /* fail-open */
-      }
-    }
-
-    const sessionHint = getSessionStartHint(event, stores, memories);
-    if (sessionHint) {
-      process.stdout.write(sessionHint);
-      process.exit(0);
-    }
-
-    // Build activeDomains FIRST so UserPromptSubmit advances sticky-state even with an empty memory list. Fail-open.
-    const selectOpts = buildActiveDomainsForPayload(event, payload);
-    const matched = computeMatched(event, memories, payload, selectOpts);
-    // On Stop the cite scan reads session JSONL from BEFORE this turn's fired
-    // writes; Stop-injections land after the response, so crediting them = FP.
-    if (event === 'Stop') runCiteScan(payload, memories);
-    emitMatched(matched, payload, event);
-
-    writeMatchedOutput(event, matched, sessionId);
-    process.exit(0);
+    await dispatch();
   } catch {
     process.exit(0);
   }

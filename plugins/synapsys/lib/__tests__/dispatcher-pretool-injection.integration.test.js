@@ -61,6 +61,14 @@ function setupFixture() {
   return { base, home, cwd, storeDir };
 }
 
+// Seed a user DOMAINS.md (takes precedence over the bundled registry) so a
+// known prompt token activates a known domain for the classifier.
+function writeDomains(home, body) {
+  const dir = path.join(home, '.claude', 'synapsys');
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, 'DOMAINS.md'), body);
+}
+
 const SESSION_ID = 'pretool-inject-session-abc';
 
 // PreToolUse Bash payload matching a `Bash:git push` trigger_pretool memory.
@@ -309,6 +317,87 @@ describe('dispatcher PreToolUse injection (GH-497 Task 1)', () => {
       occurrences,
       1,
       `a both-matching memory must appear exactly once (saw ${occurrences})`
+    );
+  });
+
+  // ── 1.2b Bot-flagged regressions (PR #605, Cursor Bugbot) ─────────────────
+
+  // "Wrong domains for subagent prompts": activeDomains must be recomputed from
+  // the synthetic prompt payload, not reused from the outer PreToolUse selectOpts
+  // (whose payload.prompt is empty → domain-tagged memory wrongly gated out).
+  it('domain-tagged prompt memory propagates to subagent when synthetic prompt activates the domain', () => {
+    writeDomains(fixture.home, 'root: testdom\n  leaf: l1\n    signal_prompt: \\brefactor\\b\n');
+    writeMemory(
+      fixture.storeDir,
+      'domain-scope.md',
+      {
+        name: 'domain-scope-policy',
+        description: 'domain-tagged prompt memory',
+        events: 'UserPromptSubmit',
+        trigger_prompt: 'refactor',
+        domain: 'testdom',
+        inject: 'full',
+      },
+      'DOMAIN-SCOPE-BODY'
+    );
+
+    const r = runDispatcher({
+      event: 'PreToolUse',
+      payload: subagentPayload('Task', 'please refactor the auth module', fixture.cwd),
+      home: fixture.home,
+    });
+    assert.equal(r.status, 0, `dispatcher failed: ${r.stderr}`);
+
+    const parsed = parseHookOutput(r.stdout);
+    assert.match(
+      parsed.hookSpecificOutput.additionalContext,
+      /DOMAIN-SCOPE-BODY/,
+      'domain-tagged memory must inject when the subagent prompt activates its domain'
+    );
+  });
+
+  // "Stop matcher spurious subagent injection": a Stop-scope memory with no
+  // trigger_stop_response fires unconditionally on the Stop matcher; it must NOT
+  // be propagated into a subagent spawn (Stop is excluded from the loop).
+  it('Stop-scope memory is NOT propagated to a subagent spawn', () => {
+    writeMemory(
+      fixture.storeDir,
+      'prompt-scope.md',
+      {
+        name: 'prompt-scope-policy',
+        description: 'prompt-scope memory that should inject',
+        events: 'UserPromptSubmit',
+        trigger_prompt: 'refactor',
+        inject: 'full',
+      },
+      'SUBAGENT-PROMPT-SCOPE-BODY'
+    );
+    writeMemory(
+      fixture.storeDir,
+      'stop-scope.md',
+      {
+        name: 'stop-scope-policy',
+        description: 'end-of-turn Stop policy — must not reach subagents',
+        events: 'Stop',
+        inject: 'full',
+      },
+      'STOP-SCOPE-BODY'
+    );
+
+    const r = runDispatcher({
+      event: 'PreToolUse',
+      payload: subagentPayload('Task', 'please refactor the auth module', fixture.cwd),
+      home: fixture.home,
+    });
+    assert.equal(r.status, 0, `dispatcher failed: ${r.stderr}`);
+
+    const parsed = parseHookOutput(r.stdout);
+    const body = parsed.hookSpecificOutput.additionalContext;
+    assert.match(body, /SUBAGENT-PROMPT-SCOPE-BODY/, 'prompt-scope memory must still inject');
+    assert.doesNotMatch(
+      body,
+      /STOP-SCOPE-BODY/,
+      'end-of-turn Stop policy must NOT be injected into a subagent spawn'
     );
   });
 

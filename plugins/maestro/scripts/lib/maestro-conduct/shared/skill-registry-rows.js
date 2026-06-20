@@ -90,12 +90,36 @@ function followUpRow() {
   };
 }
 
+// Generic row for an operator-supplied command that is NOT in the whitelist
+// but IS paired with a stop-condition oracle. The conductor doesn't understand
+// the command's internal state — the oracle is the authoritative done-signal —
+// so this row reads no skill-specific state file and never reports healthy-idle
+// on its own. snapshot() returns null (phase resolution falls back to the BASE
+// profile in phase-registry, whose `exempts` is a no-op, so nothing crashes).
+const GENERIC_SILENCE_LIMIT_SEC = 300;
+
+function genericRow() {
+  return {
+    stateFile: null,
+    snapshot() {
+      return null;
+    },
+    isHealthyIdle() {
+      return false;
+    },
+    silenceLimitSec: GENERIC_SILENCE_LIMIT_SEC,
+    generic: true,
+  };
+}
+
 module.exports = {
   workRow,
   followUpRow,
+  genericRow,
   FOLLOW_UP_STATE_BASENAME,
   WORK_STATE_BASENAME,
   FOLLOW_UP_HEALTHY_STATUSES,
   WORK_SILENCE_LIMIT_SEC,
   FOLLOW_UP_SILENCE_LIMIT_SEC,
+  GENERIC_SILENCE_LIMIT_SEC,
 };
