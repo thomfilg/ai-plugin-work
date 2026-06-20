@@ -835,7 +835,7 @@ describe('validateTaskTestScope: TDD task must own a test file in Files in scope
     '  - Test: `node --test path/to/check` reports the expected pre-change state.\n' +
     '- 5.1.2 **GREEN:** Apply the config change.\n';
 
-  for (const type of ['config', 'ci', 'mechanical-refactor', 'file-move']) {
+  for (const type of ['config', 'ci', 'mechanical-refactor', 'file-move', 'tests-only']) {
     it(`(e) does NOT error for a ${type} task using **RED:** with no test file in scope`, () => {
       const task = {
         num: 5,
