@@ -77,6 +77,43 @@ test('does NOT warn when trigger_pretool targets the PostToolUse memory', () => 
   );
 });
 
+test('R10 warns on trigger_posttool_content_not without a positive trigger_posttool_content', () => {
+  const manifest = {
+    memories: [
+      {
+        name: 'posttool-neg-without-pos',
+        events: ['PostToolUse'],
+        trigger_pretool: ['Bash:pnpm test'],
+        trigger_posttool_content_not: ['timeout'],
+      },
+    ],
+  };
+  const result = lint(manifest);
+  const r10 = result.warnings.filter((w) => w.rule === 'R10-neg-without-pos');
+  assert.equal(r10.length, 1, `expected one R10 warning, got: ${JSON.stringify(result.warnings)}`);
+  assert.match(r10[0].message, /trigger_posttool_content_not/);
+  assert.match(r10[0].message, /trigger_posttool_content\b/);
+});
+
+test('R10 does NOT warn when trigger_posttool_content_not has a positive trigger_posttool_content', () => {
+  const manifest = {
+    memories: [
+      {
+        name: 'posttool-neg-with-pos',
+        events: ['PostToolUse'],
+        trigger_pretool: ['Bash:pnpm test'],
+        trigger_posttool_content: ['FAIL'],
+        trigger_posttool_content_not: ['timeout'],
+      },
+    ],
+  };
+  const result = lint(manifest);
+  assert.ok(
+    !warningRules(result).includes('R10-neg-without-pos'),
+    `expected no R10 warning, got: ${JSON.stringify(result.warnings)}`,
+  );
+});
+
 test('does NOT warn when memory has no PostToolUse event', () => {
   const manifest = {
     memories: [

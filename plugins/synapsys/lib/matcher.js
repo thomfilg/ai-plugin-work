@@ -22,7 +22,7 @@ const hasNegativeContentPatterns = content.hasNegativeContentPatterns;
 /**
  * @typedef {Object} MatchResult
  * @property {boolean} fired
- * @property {('events-exclude'|'no-prompt-match'|'no-pretool-match'|'no-content-match'|'negative-excludes'|'exclude-matched'|'no-session-trigger'|'no-stop-response-match'|'expired'|'disabled'|'domain-mismatch')} [reason]
+ * @property {('events-exclude'|'no-prompt-match'|'no-pretool-match'|'no-content-match'|'no-exit-match'|'negative-excludes'|'exclude-matched'|'no-session-trigger'|'no-stop-response-match'|'expired'|'disabled'|'domain-mismatch')} [reason]
  * @property {Matched} [matched]
  */
 

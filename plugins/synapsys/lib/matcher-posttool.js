@@ -51,6 +51,17 @@ function _coerceExitCode(value) {
 //   tool_response.exit_code → tool_response.exitCode → payload.exit_code.
 // Numeric-string codes are coerced to numbers. Returns undefined when none is
 // present (caller fails closed).
+//
+// CONFIRMED REAL SHAPE (captured 2026-06-20 from a live Claude Code PostToolUse
+// hook, see matcher-posttool.realshape.integration.test.js): the Bash tool's
+// `tool_response` is an object with keys { stdout, stderr, interrupted, isImage,
+// noOutputExpected } (plus `returnCodeInterpretation` on some failures) and does
+// NOT carry a numeric exit code under ANY of the three keys above. Consequence:
+// for the Bash tool, trigger_posttool_exit always fails closed (silent no-op) —
+// the supported way to gate Bash failures is trigger_posttool_content (regex
+// over the stringified tool_response, e.g. /FAIL|failed/). The three-key read
+// order below is retained as defensive forward-compat for hook payloads / tools
+// that DO surface an exit code; it is not a Bash contract.
 function _resolveExitCode(payload) {
   const resp = payload && payload.tool_response;
   if (resp && typeof resp === 'object') {
@@ -161,6 +172,20 @@ function _evaluateContentStage(memory, responseText) {
   return { ok: true, hit };
 }
 
+// Stage 4 (C-1): exclude_* suppression veto. Mirrors matchPreTool's stage-4 —
+// exclude_pretool / exclude_preset are evaluated against tool_name + tool_input
+// (the same target the trigger_pretool prefix considered). Returns the
+// makeMatched diagnostics on a hit, or null when nothing excludes.
+function _evaluatePostToolExcludes(memory, payload, evaluateExcludePretool, makeMatched) {
+  const toolName = payload?.tool_name || '';
+  const argBlob = JSON.stringify(payload?.tool_input || {});
+  const excluded = evaluateExcludePretool(memory, toolName, argBlob);
+  if (excluded.excluded) {
+    return makeMatched({ excluded_pattern: excluded.pattern });
+  }
+  return null;
+}
+
 /**
  * matchPostTool — fire a PostToolUse memory against a tool's OUTPUT.
  *
@@ -178,24 +203,12 @@ function _evaluateContentStage(memory, responseText) {
  *
  * @param {object} memory
  * @param {object} payload PostToolUse hook payload (tool_name, tool_input,
- *   tool_response, exit_code).
+ *   tool_response). NOTE: the Bash tool_response does NOT carry an exit code
+ *   (see _resolveExitCode) — exit gating only resolves for payloads that supply
+ *   one.
  * @param {object} helpers shared utilities injected from matcher.js.
  * @returns {{ fired: boolean, reason?: string, matched?: object }}
  */
-// Stage 4 (C-1): exclude_* suppression veto. Mirrors matchPreTool's stage-4 —
-// exclude_pretool / exclude_preset are evaluated against tool_name + tool_input
-// (the same target the trigger_pretool prefix considered). Returns the
-// makeMatched diagnostics on a hit, or null when nothing excludes.
-function _evaluatePostToolExcludes(memory, payload, evaluateExcludePretool, makeMatched) {
-  const toolName = payload?.tool_name || '';
-  const argBlob = JSON.stringify(payload?.tool_input || {});
-  const excluded = evaluateExcludePretool(memory, toolName, argBlob);
-  if (excluded.excluded) {
-    return makeMatched({ excluded_pattern: excluded.pattern });
-  }
-  return null;
-}
-
 function matchPostTool(memory, payload, helpers) {
   const { gateMemory, makeMatched, pretoolSpecMatches, evaluateExcludePretool } = helpers;
 

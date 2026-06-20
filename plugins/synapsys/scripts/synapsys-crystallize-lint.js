@@ -259,21 +259,29 @@ const RULES = [
     severity: 'warn',
     scope: 'memory',
     check(memory) {
-      const neg = Array.isArray(memory.trigger_pretool_content_not)
-        ? memory.trigger_pretool_content_not
-        : [];
-      if (neg.length === 0) return [];
-      const pos = Array.isArray(memory.trigger_pretool_content)
-        ? memory.trigger_pretool_content
-        : [];
-      if (pos.length > 0) return [];
-      return [
-        {
+      // A negative content gate (AND-NOT) is silently ignored by the matcher
+      // when there is no positive content match to gate. Guard BOTH content
+      // surfaces: the pretool (tool input) and posttool (tool output) fields.
+      // The posttool case mirrors _evaluateContentStage in matcher-posttool.js,
+      // which returns { ok: true } without ever evaluating the negative gate
+      // when the positive list is empty — a quiet footgun for posttool authors.
+      const pairs = [
+        ['trigger_pretool_content_not', 'trigger_pretool_content'],
+        ['trigger_posttool_content_not', 'trigger_posttool_content'],
+      ];
+      const issues = [];
+      for (const [negField, posField] of pairs) {
+        const neg = Array.isArray(memory[negField]) ? memory[negField] : [];
+        if (neg.length === 0) continue;
+        const pos = Array.isArray(memory[posField]) ? memory[posField] : [];
+        if (pos.length > 0) continue;
+        issues.push({
           rule: 'R10-neg-without-pos',
           memory: memory.name,
-          message: `memory "${memory.name}" has trigger_pretool_content_not without a positive trigger_pretool_content — negative gate has nothing to gate`,
-        },
-      ];
+          message: `memory "${memory.name}" has ${negField} without a positive ${posField} — negative gate has nothing to gate`,
+        });
+      }
+      return issues;
     },
   },
   {
