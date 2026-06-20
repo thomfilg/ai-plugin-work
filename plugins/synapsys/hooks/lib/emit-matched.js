@@ -14,7 +14,7 @@ const { recordFired, isDisabled } = require(path.join(__dirname, '..', '..', 'li
 const { expectedCommandsFor } = require(path.join(__dirname, 'behavior-changed'));
 const pretoolWindow = require(path.join(__dirname, '..', '..', 'lib', 'pretool-window'));
 
-function emitMatched(matched, payload, event, sessionId) {
+function emitMatched(matched, payload, event, sessionId, subagentNames) {
   if (!matched.length) return;
   for (const m of matched) {
     try {
@@ -24,8 +24,13 @@ function emitMatched(matched, payload, event, sessionId) {
     }
     // Path A: when a memory with a trigger_pretool rule fires on PreToolUse,
     // record the expected command so a subsequent divergent PreToolUse can
-    // surface a one-off behavior_changed event.
-    if (event === 'PreToolUse' && !isDisabled(m)) {
+    // surface a one-off behavior_changed event. Skip subagent-propagated
+    // (prompt-scope) matches: they matched the synthetic Task/Agent prompt, not
+    // the tool under execution, so recording a pretool expectation for them
+    // would be spurious (PR #605, Cursor "Pretool expectations on prompt-only
+    // matches").
+    const isSubagentOrigin = subagentNames && subagentNames.has(m.name);
+    if (event === 'PreToolUse' && !isDisabled(m) && !isSubagentOrigin) {
       const expectedAll = expectedCommandsFor(m);
       if (expectedAll.length > 0) {
         try {

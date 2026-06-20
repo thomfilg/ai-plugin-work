@@ -117,8 +117,15 @@ function commitInjection(ledger, sessionId, memory, isFull) {
 //                                                  in full on the next match).
 // The whole call is wrapped in `try` so any throw falls open to the plain
 // formatMemory join — memory injection must never block the user (spec §Security).
-function buildEntry(memory, ledgerMemories) {
-  const kind = decideInjection(memory, ledgerMemories[memory.name]).kind;
+function buildEntry(memory, ledgerMemories, subagentNames) {
+  // Subagent-propagated (prompt-scope) matches render full: the spawned subagent
+  // is a fresh context that has never seen the memory, so the parent session's
+  // inject-ledger reminder demotion must not apply (PR #605, Cursor "Subagent
+  // context uses reminder ledger"). Budget demotion (demoteToFit) still applies.
+  const kind =
+    subagentNames && subagentNames.has(memory.name)
+      ? 'full'
+      : decideInjection(memory, ledgerMemories[memory.name]).kind;
   return {
     memory,
     initialKind: kind,
@@ -166,14 +173,14 @@ function emitBudgetAlerts(demotedCount, bodyLength, activeBudget) {
   }
 }
 
-function renderMatchedMemories(matched, sessionId) {
+function renderMatchedMemories(matched, sessionId, subagentNames) {
   try {
     const ledger = injectLedger.loadLedger(sessionId);
     if (!ledger.memories || typeof ledger.memories !== 'object') {
       ledger.memories = {};
     }
     const activeBudget = resolveActiveBudget();
-    const entries = matched.map((m) => buildEntry(m, ledger.memories));
+    const entries = matched.map((m) => buildEntry(m, ledger.memories, subagentNames));
     demoteToFit(entries, {
       limit: activeBudget,
       sep: SEP,
@@ -264,8 +271,8 @@ function buildActiveDomainsForPayload(event, payload) {
 // Pass-through wrapper retained for call-site symmetry. The renderer now owns
 // the budget pass (demote-instead-of-drop), so no slice fallback is needed —
 // brief P0 R8 / spec §P0 #8 explicitly forbids silent truncation.
-function formatMatchedOutput(matched, sessionId) {
-  return renderMatchedMemories(matched, sessionId);
+function formatMatchedOutput(matched, sessionId, subagentNames) {
+  return renderMatchedMemories(matched, sessionId, subagentNames);
 }
 
 function resolveSessionForPayload(payload) {
@@ -284,8 +291,8 @@ function resolveSessionForPayload(payload) {
 // GH-497 R1/R2: branch the on-match write by event. PreToolUse emits the
 // injection as `hookSpecificOutput.additionalContext` JSON (additive context, also
 // to subagents); other events keep raw stdout. Empty guard = no-match identity.
-function writeMatchedOutput(event, matched, sessionId) {
-  const out = formatMatchedOutput(matched, sessionId);
+function writeMatchedOutput(event, matched, sessionId, subagentNames) {
+  const out = formatMatchedOutput(matched, sessionId, subagentNames);
   if (!out) return;
   if (event === 'PreToolUse') {
     process.stdout.write(
@@ -353,7 +360,7 @@ async function dispatch() {
   // even when the memory list is empty. Fail-open: on any error, omit
   // `opts.activeDomains` to preserve pre-classifier behavior.
   const selectOpts = buildActiveDomainsForPayload(event, payload);
-  const matched = computeMatched(event, memories, payload, selectOpts);
+  const { matched, subagentNames } = computeMatched(event, memories, payload, selectOpts);
 
   // On Stop the cite scan must read the session JSONL state from BEFORE
   // this turn's Stop-time fired writes; Stop-injections happen after the
@@ -369,9 +376,9 @@ async function dispatch() {
   if (event === 'Stop') {
     runStopScans(payload, memories, sessionId);
   }
-  emitMatched(matched, payload, event, sessionId);
+  emitMatched(matched, payload, event, sessionId, subagentNames);
 
-  writeMatchedOutput(event, matched, sessionId);
+  writeMatchedOutput(event, matched, sessionId, subagentNames);
   process.exit(0);
 }
 

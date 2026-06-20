@@ -80,13 +80,27 @@ function unionByName(primary, extra) {
 
 // GH-497 R3/R6: on a PreToolUse subagent spawn (Task/Agent), union the
 // prompt-scope matches (deduped by name) so a memory matching both injects once.
+// Returns `{ matched, subagentNames }` where `subagentNames` is the set of names
+// that entered `matched` ONLY via the subagent prompt path (not a genuine
+// PreToolUse tool match). Downstream render/emit treat those specially: they are
+// rendered full (the subagent is a fresh context — PR #605 "Subagent context
+// uses reminder ledger") and excluded from pretool-expectation recording (they
+// matched the synthetic prompt, not the tool — PR #605 "Pretool expectations on
+// prompt-only matches").
 function computeMatched(event, memories, payload, selectOpts) {
   let matched = memories.length ? selectForEvent(memories, event, payload, selectOpts) : [];
+  const subagentNames = new Set();
   if (event === 'PreToolUse' && memories.length) {
     const subagentMatches = collectSubagentMatches(payload, memories);
-    if (subagentMatches.length) matched = unionByName(matched, subagentMatches);
+    if (subagentMatches.length) {
+      const beforeNames = new Set(matched.map((m) => m.name));
+      matched = unionByName(matched, subagentMatches);
+      for (const m of subagentMatches) {
+        if (!beforeNames.has(m.name)) subagentNames.add(m.name);
+      }
+    }
   }
-  return matched;
+  return { matched, subagentNames };
 }
 
 module.exports = { computeMatched };

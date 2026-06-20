@@ -401,6 +401,50 @@ describe('dispatcher PreToolUse injection (GH-497 Task 1)', () => {
     );
   });
 
+  // "Subagent context uses reminder ledger": a `once` memory already injected
+  // full in this session (via UserPromptSubmit) must still render its FULL body
+  // when propagated to a subagent spawn — the subagent is a fresh context that
+  // has never seen it, so the parent's reminder-ledger demotion must not apply.
+  it('subagent-propagated memory renders full even after a prior parent injection', () => {
+    writeMemory(
+      fixture.storeDir,
+      'prompt-scope.md',
+      {
+        name: 'prompt-scope-policy',
+        description: 'once-mode prompt-scope memory',
+        events: 'UserPromptSubmit',
+        trigger_prompt: 'refactor',
+        fire_mode: 'once',
+        inject: 'full',
+      },
+      'SUBAGENT-FULL-BODY-ONCE'
+    );
+
+    // 1) Parent injection: marks the ledger injected (count → 1) for this session.
+    const first = runDispatcher({
+      event: 'UserPromptSubmit',
+      payload: promptPayload('please refactor the auth module', fixture.cwd),
+      home: fixture.home,
+    });
+    assert.equal(first.status, 0, `parent dispatch failed: ${first.stderr}`);
+    assert.match(first.stdout, /SUBAGENT-FULL-BODY-ONCE/, 'parent injection should be full');
+
+    // 2) Subagent spawn in the SAME session: must get the full body, not a reminder.
+    const r = runDispatcher({
+      event: 'PreToolUse',
+      payload: subagentPayload('Task', 'please refactor the auth module', fixture.cwd),
+      home: fixture.home,
+    });
+    assert.equal(r.status, 0, `subagent dispatch failed: ${r.stderr}`);
+    const body = parseHookOutput(r.stdout).hookSpecificOutput.additionalContext;
+    assert.match(body, /SUBAGENT-FULL-BODY-ONCE/, 'subagent must receive the full memory body');
+    assert.doesNotMatch(
+      body,
+      /fired earlier/,
+      'subagent must NOT receive the one-line reminder (fresh context)'
+    );
+  });
+
   // ── 1.3 Non-blocking contract ─────────────────────────────────────────────
 
   it('Non-blocking contract holds on match', () => {
