@@ -215,6 +215,15 @@ function _parseInject(value) {
   return value === 'full' ? 'full' : 'summary';
 }
 
+// Absent OR empty/whitespace-only trigger_posttool_exit means "no exit gate"
+// (null) — consistent with the R11 lint rule. A literal 0 / "0" / "zero" is a
+// real target and must be preserved (so `|| null` would be wrong — it drops 0).
+function _normalizeExitTarget(value) {
+  if (value === undefined || value === null) return null;
+  if (typeof value === 'string' && value.trim() === '') return null;
+  return value;
+}
+
 function readMemoryFile(store, name) {
   if (!name.endsWith('.md') || SKIP_FILES.has(name)) return null;
   const file = path.join(store.dir, name);
@@ -242,9 +251,11 @@ function readMemoryFile(store, name) {
     triggerPretoolContentNot: toList(meta.trigger_pretool_content_not),
     triggerPosttoolContent: toList(meta.trigger_posttool_content),
     triggerPosttoolContentNot: toList(meta.trigger_posttool_content_not),
-    // Scalar (not a list): `?? null` preserves a literal `0` / `"zero"` exit
-    // target — `|| null` would coerce the falsy `0` to null and lose the gate.
-    triggerPosttoolExit: meta.trigger_posttool_exit ?? null,
+    // Scalar (not a list): _normalizeExitTarget treats an absent OR
+    // empty/whitespace-only value as "no exit gate" (null) — matching the R11
+    // lint rule — while preserving a literal `0` / `"0"` / `"zero"` target (a
+    // plain `|| null` would coerce the falsy `0` to null and lose the gate).
+    triggerPosttoolExit: _normalizeExitTarget(meta.trigger_posttool_exit),
     triggerStopResponse: meta.trigger_stop_response || '',
     triggerSession: _truthy(meta.trigger_session),
     domain: toList(meta.domain),

@@ -100,3 +100,22 @@ test('readMemoryFile preserves trigger_posttool_exit numeric 0 and string "zero"
   assert.equal(byName['exit-zero'].triggerPosttoolExit, '0');
   assert.equal(byName['exit-zero-word'].triggerPosttoolExit, 'zero');
 });
+
+// cursor[bot] Medium — a PRESENT-but-EMPTY trigger_posttool_exit must normalize
+// to null (no exit gate), NOT '' (which downstream coerces Number('')===0 and
+// silently success-only-gates). Matches the R11 lint rule's empty == non-targeting.
+
+test('readMemoryFile normalizes an empty trigger_posttool_exit to null (no exit gate)', () => {
+  const { storeDir } = makeTempStore();
+  // Trailing space after the colon yields an empty-string value from the parser.
+  writeMemory(storeDir, 'exit-empty.md', {
+    name: 'exit-empty',
+    description: 'd',
+    trigger_posttool_exit: '',
+  });
+
+  const memories = listMemoriesFromStore(store(storeDir));
+  assert.equal(memories.length, 1);
+  assert.equal(memories[0].triggerPosttoolExit, null);
+  assert.notEqual(memories[0].triggerPosttoolExit, '');
+});

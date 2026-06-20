@@ -437,6 +437,50 @@ test('matchPostTool fires trigger_posttool_exit:nonzero on a STRING exit_code "1
   assert.equal(stringResult.matched.posttool_exit, 'nonzero');
 });
 
+// cursor[bot] Medium — an empty trigger_posttool_exit (normalized to null at
+// parse time) imposes NO exit gate: a content-only memory fires on a NON-zero
+// run the same as a zero run. Contrast with trigger_posttool_exit: 0, which
+// still gates to exit 0 only (the empty field must NOT degrade into 0-gating).
+
+test('empty (null) trigger_posttool_exit imposes no exit gate: fires on zero AND nonzero alike', () => {
+  const memory = makeMemory({
+    triggerPosttoolContent: ['boom'],
+    triggerPosttoolExit: null, // what an empty `trigger_posttool_exit:` parses to
+  });
+  const onZero = run(memory, {
+    tool_name: 'Bash',
+    tool_input: { command: 'pnpm test' },
+    tool_response: { stdout: 'boom', stderr: '', exit_code: 0 },
+  });
+  const onNonzero = run(memory, {
+    tool_name: 'Bash',
+    tool_input: { command: 'pnpm test' },
+    tool_response: { stdout: 'boom', stderr: '', exit_code: 1 },
+  });
+  assert.equal(onZero.fired, true);
+  assert.equal(onNonzero.fired, true);
+});
+
+test('trigger_posttool_exit: 0 still gates to exit 0 only (contrast with the empty field)', () => {
+  const memory = makeMemory({
+    triggerPosttoolContent: ['boom'],
+    triggerPosttoolExit: 0,
+  });
+  const onZero = run(memory, {
+    tool_name: 'Bash',
+    tool_input: { command: 'pnpm test' },
+    tool_response: { stdout: 'boom', stderr: '', exit_code: 0 },
+  });
+  const onNonzero = run(memory, {
+    tool_name: 'Bash',
+    tool_input: { command: 'pnpm test' },
+    tool_response: { stdout: 'boom', stderr: '', exit_code: 1 },
+  });
+  assert.equal(onZero.fired, true);
+  assert.equal(onNonzero.fired, false);
+  assert.equal(onNonzero.reason, 'no-exit-match');
+});
+
 // ---- gate / distinctness ----
 
 test('matchPostTool respects the events gate (events-exclude)', () => {
