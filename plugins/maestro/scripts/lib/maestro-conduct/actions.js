@@ -220,18 +220,20 @@ function freeCIGateSlot({ session, ticket, prNumber, sha }) {
  * tick: no diagnostic probe, no attempt counter (that's freeDeadEndSlot's path).
  * Idempotent via the `ci-rotated` marker. Gated by AUTO_FREE_CI_SLOT.
  */
-function freeCiPhaseSlot({ session, ticket }) {
+function freeCiPhaseSlot({ session, ticket, phase }) {
   if (process.env.AUTO_FREE_CI_SLOT === '0') return false;
   const marker = state.read(ticket, 'ci-rotated') || {};
   if (marker.killed) return false; // already rotated this lifecycle
   state.write(ticket, 'ci-rotated', { killed: true, freedAt: state.now() });
+  // `complete` is a terminal done state; only `ci` is genuinely awaiting merge.
+  const phaseLabel = phase || 'ci/complete';
   killAndBootstrapNext({
     session,
     ticket,
     alertKind: 'kill-during-ci',
-    manifestStatus: 'awaiting-merge',
-    manifestNote: 'killed at ci/complete phase — slot rotated',
-    logPrefix: 'KILL-DURING-CI at ci/complete phase — agent parked, slot rotated; ',
+    manifestStatus: phase === 'complete' ? 'done' : 'awaiting-merge',
+    manifestNote: `killed at ${phaseLabel} phase — slot rotated`,
+    logPrefix: `KILL-DURING-CI at ${phaseLabel} phase — agent parked, slot rotated; `,
     purgeCounts: true,
   });
   return true;
