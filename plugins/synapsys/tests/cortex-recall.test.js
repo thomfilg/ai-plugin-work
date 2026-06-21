@@ -348,3 +348,41 @@ test('consumeCache: single-consume — a late background write after the first c
     cleanup(home);
   }
 });
+
+test('consumeCache: an empty/missing cache on the first consume still marks the session consumed (no late re-inject)', () => {
+  const { consumeCache } = loadRecall();
+  const cache = require('../lib/session-cache');
+  const home = mkHome();
+  const cfg = { max_age_days: 180, max_chars_per_memory: 500 };
+  try {
+    // First UserPromptSubmit: no cache yet (baseline missing / not ready). The
+    // early-return path must STILL mark the session consumed.
+    const first = consumeCache('sess-empty-first', { home, config: cfg });
+    assert.equal(first, '', 'first consume of a missing cache returns empty');
+
+    // Detached background job finishes LATE and writes real results.
+    cache.write(
+      'sess-empty-first',
+      {
+        queries: [
+          {
+            query: 'GH-519',
+            projectId: 'claude-plugin-work',
+            results: [
+              { id: 'm1', savedAt: new Date().toISOString(), ageDays: 1, title: 'T', body: 'B' },
+            ],
+          },
+        ],
+      },
+      { home }
+    );
+
+    // A later prompt must NOT inject — the first (empty) consume already burned
+    // the single-consume budget.
+    const second = consumeCache('sess-empty-first', { home, config: cfg });
+    assert.equal(second, '', 'late background write is not injected after an empty first consume');
+    assert.ok(!fs.existsSync(cacheFile(home, 'sess-empty-first')), 'late-written cache is dropped');
+  } finally {
+    cleanup(home);
+  }
+});

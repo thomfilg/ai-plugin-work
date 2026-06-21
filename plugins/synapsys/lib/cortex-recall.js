@@ -358,18 +358,18 @@ function consumeCache(sessionId, { home, config = {} } = {}) {
   } catch {
     record = null;
   }
+  // Mark consumed at this first attempt regardless of content (GH-519:
+  // late-recall-without-sentinel) so a late background write can't re-inject.
+  sentinel.markConsumed(cache, sessionId, home);
   if (!record || !Array.isArray(record.queries) || record.queries.length === 0) {
     return '';
   }
-
   const block = formatRecallBlock(record.queries, config);
-
   try {
     cache.delete(sessionId, { home });
   } catch {
     // Ignore — best-effort cleanup.
   }
-  sentinel.markConsumed(cache, sessionId, home);
   return block;
 }
 

@@ -67,14 +67,17 @@ function recallEnabled(home) {
  * Build the (≤2) recall queries for SessionStart. The keyword query honors a
  * test/CI override (`SYNAPSYS_CORTEX_KEYWORDS`) that skips the live git
  * extraction so the second query is deterministic without a working tree.
+ * `config.max_keywords` caps the derived keyword count (GH-519 review: the
+ * documented YAML knob must take effect, not the hardcoded default).
  */
-function buildSessionQueries(cwd) {
+function buildSessionQueries(cwd, config = {}) {
   const projectId = cortexRecall.resolveProjectId(cwd, { env: process.env });
   const ticketId = cortexRecall.resolveTicketId(cwd, { env: process.env });
 
   let keywordQuery = String(process.env.SYNAPSYS_CORTEX_KEYWORDS || '').trim();
   if (!keywordQuery) {
-    const keywords = cortexRecall.deriveKeywords({ ticketId, cwd });
+    const opts = config.max_keywords != null ? { maxKeywords: config.max_keywords } : {};
+    const keywords = cortexRecall.deriveKeywords({ ticketId, cwd }, opts);
     keywordQuery = keywords.join(' ');
   }
 
@@ -96,7 +99,7 @@ function scheduleSessionRecall(payload) {
 
   try {
     const cwd = payload.cwd || process.cwd();
-    const { projectId, queries } = buildSessionQueries(cwd);
+    const { projectId, queries } = buildSessionQueries(cwd, config);
     const sessionId = sessionIdOf(payload);
 
     // Write a synchronous baseline record (the scheduled queries with empty
@@ -292,6 +295,7 @@ module.exports = {
   sessionIdOf,
   recallEnabled,
   scheduleSessionRecall,
+  buildSessionQueries,
   writeBaselineRecall,
   consumeAutoRecall,
   fireMarkerFile,
