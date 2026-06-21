@@ -398,7 +398,7 @@ The `--last <Nd>` flag filters telemetry `.jsonl` files by `mtime`; default is `
 
 ## Cortex auto-recall
 
-Synapsys surfaces prior-session insights from cortex without any agent action. There are two phases, both deterministic (no LLM call) and both fail-open — if the cortex MCP tool is unregistered, nothing is injected and the session proceeds normally.
+Synapsys surfaces prior-session insights from cortex without any agent action. There are two phases, both deterministic (no LLM call) and both fail-open — if no recall provider is configured (see [Recall provider](#recall-provider--synapsys_cortex_recall_module)), nothing is injected and the session proceeds normally.
 
 ### Phase 1 — SessionStart recall
 
@@ -413,6 +413,12 @@ The SessionStart recall does **not** block the prompt; the cache is consumed on 
 ### Phase 2 — per-memory `cortex_query`
 
 Add an optional `cortex_query:` field to any memory's frontmatter. When that memory fires through the normal `matcher.js` gates, synapsys also runs `cortex_recall({ query: <cortex_query>, projectId })` and inlines the results directly beneath the memory body in the same injection chunk. Phase 2 inherits all existing gating — the memory must already have passed `selectForEvent` — and the inlined recall output is governed by the same injection budget as memory text.
+
+### Recall provider — `SYNAPSYS_CORTEX_RECALL_MODULE`
+
+Both phases reach cortex through an **injected provider module**, not by calling the MCP tool directly. The Phase 1 background worker is a detached Node process and the Phase 2 inline path runs inside the hook — neither can invoke an MCP tool, which is only reachable by the live agent. Instead, each resolves a recall function from the `SYNAPSYS_CORTEX_RECALL_MODULE` env var: a path to a Node module exporting `recall(query, projectId) → Array | Promise<Array>`.
+
+**The shipped hook sets no default module, so out of the box both phases resolve to an empty stub and inject nothing — this is intentional, not a bug.** Auto-recall is opt-in: an integrator who wants live results points `SYNAPSYS_CORTEX_RECALL_MODULE` at a bridge module that reads from their cortex store (e.g. a thin wrapper over the cortex CLI/storage). Resolution is fail-open — an unset, unloadable, or malformed module degrades silently to the empty stub (R14), so a misconfigured provider never breaks a session.
 
 ### Config knobs
 

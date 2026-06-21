@@ -223,6 +223,49 @@ test('UserPromptSubmit injects the [cortex:auto-recall] block once and consumes 
   }
 });
 
+// Scenario: a repeat SessionStart after Phase 1 was consumed must not re-schedule
+// recall work the sentinel would only discard (GH-519: rerun-recall-after-consume)
+test('SessionStart after a consumed Phase 1 schedules nothing (no new baseline cache)', () => {
+  const home = mkHome();
+  const sessionId = `sess-${process.pid}-${Date.now()}-rerun`;
+  try {
+    // Seed + consume Phase 1 so the single-consume sentinel is set.
+    seedCache(home, sessionId, {
+      queries: [{ query: 'GH-519', projectId: 'claude-plugin-work', results: [] }],
+    });
+    const consume = runHook(
+      'UserPromptSubmit',
+      { session_id: sessionId, prompt: 'hi', cwd: home },
+      { home, env: { SYNAPSYS_NO_SETUP_HINT: '1' } }
+    );
+    assert.equal(consume.status, 0);
+    assert.ok(!fs.existsSync(cacheFilePath(home, sessionId)), 'cache consumed');
+
+    // A second SessionStart (resume/compact) must short-circuit: no baseline
+    // write and no detached worker, so no cache file reappears.
+    const restart = runHook(
+      'SessionStart',
+      { session_id: sessionId, cwd: home },
+      {
+        home,
+        env: {
+          SYNAPSYS_CORTEX_TICKET: 'GH-519',
+          SYNAPSYS_CORTEX_KEYWORDS: 'maestro cortex recall',
+          SYNAPSYS_NO_SETUP_HINT: '1',
+        },
+      }
+    );
+    assert.equal(restart.status, 0, 'SessionStart still exits 0');
+    assert.equal(
+      waitForCache(home, sessionId, 20),
+      null,
+      'no recall is scheduled once the session has already consumed Phase 1'
+    );
+  } finally {
+    cleanup(home);
+  }
+});
+
 // Scenario: Empty result marker is emitted when cortex returns no matches
 test('UserPromptSubmit renders "→ no matches" with no memory bodies when both queries are empty', () => {
   const home = mkHome();

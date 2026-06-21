@@ -26,6 +26,7 @@ const path = require('node:path');
 
 const cortexRecall = require(path.join(__dirname, 'cortex-recall'));
 const sessionCache = require(path.join(__dirname, 'session-cache'));
+const consumeSentinel = require(path.join(__dirname, 'consume-sentinel'));
 const cortexConfig = require(path.join(__dirname, 'cortex-config'));
 const injectLedger = require(path.join(__dirname, 'inject-ledger'));
 const { formatBlock } = require(path.join(__dirname, 'cortex-format'));
@@ -101,6 +102,11 @@ function scheduleSessionRecall(payload) {
     const cwd = payload.cwd || process.cwd();
     const { projectId, queries } = buildSessionQueries(cwd, config);
     const sessionId = sessionIdOf(payload);
+
+    // Skip when this session already consumed Phase 1: a repeat SessionStart
+    // (resume/compact) would otherwise spawn recall work the sentinel discards
+    // (GH-519: rerun-recall-after-consume).
+    if (consumeSentinel.isConsumed(sessionCache, sessionId, home)) return;
 
     // Write a synchronous baseline record (the scheduled queries with empty
     // results) BEFORE spawning the detached recall. This guarantees a
@@ -207,7 +213,17 @@ function suppressedByFireMode(home, sessionId, memory) {
   }
 }
 
-/** Resolve the injectable inline-recall function, or null when unavailable. */
+/**
+ * Resolve the injectable inline-recall function, or null when unavailable.
+ *
+ * PRODUCTION CONTRACT: cortex is reached through a provider module named by
+ * `SYNAPSYS_CORTEX_RECALL_MODULE` (exporting `recall(query, projectId)`), NOT by
+ * calling the MCP tool — the hook (and the detached Phase 1 worker) cannot
+ * invoke an MCP tool, which only the live agent can reach. The shipped hook sets
+ * no default module, so auto-recall is opt-in: with the var unset both phases
+ * resolve to an empty stub and inject nothing (by design). See README
+ * "Recall provider". Fail-open: an unset/unloadable/malformed module → null.
+ */
 function resolveInlineRecall() {
   const modPath = process.env.SYNAPSYS_CORTEX_RECALL_MODULE;
   if (!modPath) return null;
