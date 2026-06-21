@@ -2,7 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { logHookError } = require(path.join(__dirname, '..', '..', '..', 'lib', 'hook-error-log'));
+const { runJsonHook } = require(path.join(__dirname, '..', '..', '..', 'lib', 'hook-error-log'));
 
 /**
  * PostToolUse hook: Validates screenshot file sizes after capture.
@@ -15,41 +15,37 @@ const { logHookError } = require(path.join(__dirname, '..', '..', '..', 'lib', '
 const WARN_SIZE_KB = 150;
 const DELETE_SIZE_KB = 200;
 
-async function main() {
-  let input = '';
-  for await (const chunk of process.stdin) {
-    input += chunk;
-  }
-
+/**
+ * Parse stdin JSON and extract the screenshot filename to validate.
+ * Returns the filename, or '' when this invocation should be a no-op
+ * (non-screenshot tool, missing filename, or malformed input).
+ */
+function resolveScreenshotFilename(input) {
   let hookData;
   try {
     hookData = JSON.parse(input);
   } catch {
-    console.log(JSON.stringify({}));
-    return;
+    return '';
   }
 
   const toolName = hookData.tool_name || '';
-
-  // Only check screenshot tools
   if (!toolName.includes('browser_take_screenshot')) {
-    console.log(JSON.stringify({}));
-    return;
+    return '';
   }
 
   const toolInput = hookData.tool_input || {};
-  const filename = toolInput.filename || '';
+  return toolInput.filename || '';
+}
 
-  if (!filename) {
-    console.log(JSON.stringify({}));
-    return;
-  }
-
-  // Check if file exists and get size
+/**
+ * Inspect a screenshot file and return the hook response payload.
+ * Auto-deletes oversized captures and returns the appropriate message;
+ * returns `{}` when the file is within limits, missing, or unreadable.
+ */
+function evaluateScreenshot(filename) {
   try {
     if (!fs.existsSync(filename)) {
-      console.log(JSON.stringify({}));
-      return;
+      return {};
     }
 
     const stats = fs.statSync(filename);
@@ -71,9 +67,9 @@ async function main() {
         '  3. Element screenshots should be 20-100KB',
         '─'.repeat(50),
       ].join('\n');
-      console.log(JSON.stringify({ message }));
-      return;
-    } else if (sizeKB > WARN_SIZE_KB) {
+      return { message };
+    }
+    if (sizeKB > WARN_SIZE_KB) {
       // Warn but keep — UI-dense pages can produce legit large element screenshots
       const message = [
         '',
@@ -81,17 +77,28 @@ async function main() {
         'Consider using ref parameter for tighter element focus.',
         '',
       ].join('\n');
-      console.log(JSON.stringify({ message }));
-      return;
+      return { message };
     }
   } catch {
     // File access error, don't block
   }
 
-  console.log(JSON.stringify({}));
+  return {};
 }
 
-main().catch((err) => {
-  logHookError(__filename, err);
-  console.log(JSON.stringify({}));
-});
+async function main() {
+  let input = '';
+  for await (const chunk of process.stdin) {
+    input += chunk;
+  }
+
+  const filename = resolveScreenshotFilename(input);
+  if (!filename) {
+    console.log(JSON.stringify({}));
+    return;
+  }
+
+  console.log(JSON.stringify(evaluateScreenshot(filename)));
+}
+
+runJsonHook(__filename, main);

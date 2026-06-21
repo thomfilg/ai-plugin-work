@@ -17,6 +17,7 @@ function buildReason(cHit) {
 }
 
 function emitAlert({ ctx, cHit, actions, maybeEscalateToDeadEnd }) {
+  const unblockCmd = `gh pr view ${cHit.prNumber} --repo thomfilg/claude-plugin-work --json reviews,comments && tmux capture-pane -t ${ctx.session} -p | tail -40   # read every comment, then either fix-in-pane or nudge agent via tmux send-keys`;
   const r = actions.alert({
     session: ctx.session,
     ticket: ctx.ticket,
@@ -27,7 +28,8 @@ function emitAlert({ ctx, cHit, actions, maybeEscalateToDeadEnd }) {
     elapsedMin: cHit.minsStuck,
     summary: cHit.summary,
     paneTail: (ctx.pane || '').split('\n').slice(-40).join('\n'),
-    instruction: `agent left ${cHit.count} bot comment(s) on PR #${cHit.prNumber} unaddressed for ${cHit.minsStuck}m, HEAD unchanged. Address each bot comment in the PR (never blanket-dismiss as stale). Pane tail in paneTail field.`,
+    unblockCmd,
+    instruction: `OPERATOR ACTION REQUIRED — agent left ${cHit.count} bot comment(s) on PR #${cHit.prNumber} unaddressed for ${cHit.minsStuck}m, HEAD unchanged. RUN NOW: ${unblockCmd}. Address each bot comment in the PR (never blanket-dismiss as stale). Pane tail in paneTail field. DO NOT reply with "standing by".`,
   });
   maybeEscalateToDeadEnd(ctx, 'pr-comments-stuck', r.count, null);
 }

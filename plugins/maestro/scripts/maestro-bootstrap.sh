@@ -6,7 +6,7 @@
 #   1. Source ../.envrc (if present) to pick up WORKTREES_BASE, REPO_NAME,
 #      BASE_BRANCH, BOOTSTRAP_SCRIPT — same convention work-workflow uses.
 #   2. Per ticket: create worktree at <WORKTREES_BASE>/<REPO_NAME>-<TICKET>
-#      from <BASE_BRANCH> on a new branch <TICKET>-maestro.
+#      from <BASE_BRANCH> on a new branch named after <TICKET>.
 #   3. Run work-workflow's bootstrap-custom-script.js if installed (honours
 #      $BOOTSTRAP_SCRIPT just like /work-workflow:bootstrap does). Skipped
 #      gracefully if the helper isn't found.
@@ -228,7 +228,7 @@ for TICKET in "$@"; do
   fi
 
   WT="$WORKTREES_BASE/$REPO_NAME-$TICKET"
-  BRANCH="$TICKET-maestro"
+  BRANCH="$TICKET"
 
   if [ -d "$WT" ]; then
     echo "[$TICKET] worktree exists at $WT — skipping create"
@@ -283,6 +283,18 @@ for TICKET in "$@"; do
   if tmux has-session -t "$SESSION" 2>/dev/null; then
     echo "[$TICKET] tmux session $SESSION exists — skipping launch"
   else
+    # Clear per-ticket lifecycle markers from a PRIOR dead-end / ci-rotated
+    # cycle so the conductor's silence-detector doesn't refuse to auto-restart
+    # this fresh launch ("AUTO-RESTART skipped: ticket X dead-end-freed"), and so
+    # the next dead-end gets a fresh diagnostic probe before any kill.
+    # maybeAutoBootstrap clears these for daemon-driven bootstraps; this mirrors
+    # it for operator-driven (manual) bootstraps. We intentionally do NOT reset
+    # the manifest attempt counter here: attempts is the cross-lifecycle strike
+    # count, so repeated dead-ends keep accumulating toward `blocked` across
+    # re-bootstraps; it resets only on real progress (phase advance).
+    MAESTRO_STATE_DIR="${HOME}/.cache/maestro-conduct"
+    rm -f "$MAESTRO_STATE_DIR/$TICKET.dead-end.json" \
+          "$MAESTRO_STATE_DIR/$TICKET.ci-rotated.json" 2>/dev/null || true
     tmux new-session -d -s "$SESSION" -c "$WT" \
       "${INBOX_ENV}$CLAUDE_BIN --dangerously-skip-permissions '/$TICKET_SKILL $TICKET'"
     echo "[$TICKET] launched tmux session $SESSION (claude /$TICKET_SKILL $TICKET)"

@@ -1,15 +1,12 @@
 /**
- * actions.js — what to do when a detector fires.
- *
- * Three actions, mapped from phase-registry.escalationFor():
+ * actions.js — what to do when a detector fires. Three actions, mapped from
+ * phase-registry.escalationFor():
  *   soft      → send a message into the agent prompt (no interrupt)
- *   interrupt → send Esc, wait, send message (used when soft nudge was ignored
- *               or when a spinner is clearly hung)
+ *   interrupt → send Esc, wait, send message (soft nudge ignored / spinner hung)
  *   alert     → no agent action; write to the maestro alert sink
- *
- * Nudge text is intentionally generic; the agent decides how to land
- * uncommitted work (the 'commit agent' is the orchestrator's commit-writer).
- * Avoid literal CLI strings that trip the enforce-agent-usage hook.
+ * Nudge text is intentionally generic; the agent decides how to land uncommitted
+ * work (the 'commit agent' is the orchestrator's commit-writer). Avoid literal
+ * CLI strings that trip the enforce-agent-usage hook.
  */
 const fs = require('fs');
 const path = require('path');
@@ -34,6 +31,9 @@ const {
   checkRestartGuards,
   resolveSkillForRestart,
 } = require('./restart-guards');
+const slotRotation = require('./slot-rotation');
+const { killTicketTmux } = slotRotation;
+const deadEndRotation = require('./dead-end-rotation');
 
 const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
 
@@ -62,6 +62,16 @@ function maybeAutoBootstrap(taskId) {
   });
   if (res.status === 0) {
     manifest.updateTaskStatus(taskId, 'in_progress', 'auto-bootstrapped by daemon');
+    // Clear ONLY the per-lifecycle dead-end/ci-rotated markers so the freshly
+    // bootstrapped agent gets a fresh diagnostic probe before any kill next
+    // lifecycle. Intentionally does NOT reset manifest.attempts: that counter is
+    // the cross-lifecycle strike count, so repeated dead-ends must keep
+    // accumulating toward `blocked` across re-bootstraps. attempts is reset only
+    // on real progress (phase advance → resetTaskAttempts), never here.
+    try {
+      state.clear(taskId, 'dead-end');
+      state.clear(taskId, 'ci-rotated');
+    } catch {}
   }
   return res.status === 0;
 }
@@ -166,119 +176,87 @@ function inboxEnvPrefix() {
  * on the same SHA don't try to kill an already-killed session.
  *
  * No-op if AUTO_FREE_CI_SLOT=0.
+ *
+ * The kill + bootstrap-next primitives (killTicketTmux, emitSlotFreedAlert,
+ * killAndBootstrapNext) live in slot-rotation.js. killAndBootstrapNext is
+ * called through this thin wrapper so maybeAutoBootstrap + alert (which depend
+ * on actions.js internals) are injected without a circular require.
  */
-function killTicketTmux(ticket) {
-  for (const suffix of ['work', 'listen']) {
-    spawnSync('tmux', ['kill-session', '-t', tmux.sessionName(ticket, suffix)], {
-      stdio: 'ignore',
-    });
-  }
-}
-
-function emitSlotFreedAlert({
-  session,
-  ticket,
-  prNumber,
-  sha,
-  next,
-  autoBootstrapped,
-  instruction,
-}) {
-  alerts.log(
-    `${session} SLOT-FREED at CI gate — PR #${prNumber} sha=${(sha || '').slice(0, 7)} awaiting operator merge; tmux -work + -listen killed${
-      autoBootstrapped ? `; AUTO-BOOTSTRAPPED ${next.taskId}` : ''
-    }`
-  );
-  alert({
-    session,
-    ticket,
-    kind: 'slot-freed',
-    prNumber,
-    sha,
-    nextTask: next ? next.taskId : null,
-    nextTopic: next ? next.topic : null,
-    autoBootstrapped: !!autoBootstrapped,
-    instruction,
-  });
+function killAndBootstrapNext(args) {
+  return slotRotation.killAndBootstrapNext({ ...args, maybeAutoBootstrap, alert });
 }
 
 function freeCIGateSlot({ session, ticket, prNumber, sha }) {
   if (process.env.AUTO_FREE_CI_SLOT === '0') return false;
   const marker = state.read(session, 'slot-freed') || {};
   const ciFreed = state.read(ticket, 'ci-gate-freed') || {};
-  // Always kill any alive tmux sessions for this ticket — defensive against
-  // sessions resurrected by autoRestart between ticks. tmux kill-session is
-  // idempotent and silent when the session is already gone.
-  killTicketTmux(ticket);
-  // Per-ticket marker that autoRestart consults to refuse resurrection.
-  // Overwritten on each fresh SHA so a force-push that re-opens CI naturally
-  // re-engages the agent.
+  // Per-ticket marker overwritten on each fresh SHA so force-push re-engages
+  // the agent. autoRestart consults it to refuse resurrection.
   state.write(ticket, 'ci-gate-freed', { killed: true, sha, prNumber, freedAt: state.now() });
-  // Skip alert + bootstrap if this exact SHA was already announced — prevents
-  // spam on every tick. The kill above still runs (defensive).
-  if (marker.sha === sha || ciFreed.sha === sha) return false;
+  // Kill defensively even on dup-SHA (autoRestart guard); on a fresh SHA the
+  // kill is performed once by killAndBootstrapNext below, so only the dup-SHA
+  // early-return path needs its own kill — avoids a double kill-session.
+  if (marker.sha === sha || ciFreed.sha === sha) {
+    killTicketTmux(ticket);
+    return false;
+  }
   state.write(session, 'slot-freed', { sha, prNumber, freedAt: state.now() });
-  manifest.updateTaskStatus(
+  const shaShort = (sha || '').slice(0, 7);
+  killAndBootstrapNext({
+    session,
     ticket,
-    'awaiting-merge',
-    `PR #${prNumber} CLEAN/SUCCESS at sha=${(sha || '').slice(0, 7)}`
-  );
-  const next = findNextEligibleTask();
-  const autoBootstrapped = next && maybeAutoBootstrap(next.taskId);
-  const prefix = `Slot freed for PR #${prNumber} (sha=${(sha || '').slice(0, 7)}). `;
-  const suffix = ` Operator merges PR #${prNumber} separately.`;
-  const instruction = buildNextActionInstruction({ prefix, suffix, next, autoBootstrapped });
-  emitSlotFreedAlert({ session, ticket, prNumber, sha, next, autoBootstrapped, instruction });
+    alertKind: 'slot-freed',
+    manifestStatus: 'awaiting-merge',
+    manifestNote: `PR #${prNumber} CLEAN/SUCCESS at sha=${shaShort}`,
+    logPrefix: `SLOT-FREED at CI gate — PR #${prNumber} sha=${shaShort} awaiting operator merge; `,
+    logSuffix: ` Operator merges PR #${prNumber} separately.`,
+    alertExtra: { prNumber, sha },
+    purgeCounts: false,
+  });
   return true;
 }
 
 /**
- * freeDeadEndSlot — same kill mechanics as freeCIGateSlot but for an agent
- * stuck in a non-recoverable state (e.g. every menu option is a workflow
- * bypass; PR has no path forward without manual intervention). Triggered by
- * the re-emit escalation: when the same alert kind fires ≥ DEAD_END_REEMITS
- * times on the same session+sha+phase, the caller invokes this.
- *
- * Emits a kind=dead-end alert with a crystal-clear instruction so the
- * operator knows to bootstrap the next ticket. Idempotent per ticket.
+ * freeCiPhaseSlot — a -work session reached `ci`/`complete`, so the agent is
+ * parked (awaiting merge / already done). Kill + rotate IMMEDIATELY on the first
+ * tick: no diagnostic probe, no attempt counter (that's freeDeadEndSlot's path).
+ * Idempotent via the `ci-rotated` marker. Gated by AUTO_FREE_CI_SLOT.
  */
-function freeDeadEndSlot({ session, ticket, kind, repeatCount, sha }) {
-  if (process.env.AUTO_FREE_DEAD_END === '0') return false;
-  const marker = state.read(ticket, 'dead-end') || {};
-  if (marker.killed) return false; // already freed
-  killTicketTmux(ticket);
-  // Purge persisted alert counts so a fresh agent on the same ticket starts
-  // with a clean repeat-count slate (otherwise it could inherit a count
-  // already ≥ DEAD_END_REEMITS and immediately re-trigger rotation).
-  try {
-    purgeAlertCountsForTicket(ticket, false);
-  } catch (err) {
-    alerts.log(`${session} freeDeadEndSlot: purgeAlertCountsForTicket failed: ${err.message}`);
-  }
-  state.write(ticket, 'dead-end', { killed: true, freedAt: state.now(), trigger: kind });
-  manifest.updateTaskStatus(ticket, 'blocked', `dead-end after ${kind} ×${repeatCount}`);
-  const next = findNextEligibleTask();
-  const autoBootstrapped = next && maybeAutoBootstrap(next.taskId);
-  const prefix = `DEAD-END on ${ticket} after ${kind} ×${repeatCount}. `;
-  const instruction = buildNextActionInstruction({ prefix, suffix: '', next, autoBootstrapped });
-  alerts.log(
-    `${session} DEAD-END ${kind} re-fired ${repeatCount}x — tmux killed, slot freed${
-      autoBootstrapped ? `; AUTO-BOOTSTRAPPED ${next.taskId}` : ''
-    }`
-  );
-  alert({
+function freeCiPhaseSlot({ session, ticket, phase }) {
+  if (process.env.AUTO_FREE_CI_SLOT === '0') return false;
+  const marker = state.read(ticket, 'ci-rotated') || {};
+  if (marker.killed) return false; // already rotated this lifecycle
+  state.write(ticket, 'ci-rotated', { killed: true, freedAt: state.now() });
+  // `complete` is a terminal done state; only `ci` is genuinely awaiting merge.
+  const phaseLabel = phase || 'ci/complete';
+  killAndBootstrapNext({
     session,
     ticket,
-    kind: 'dead-end',
-    trigger: kind,
-    repeatCount,
-    sha,
-    nextTask: next ? next.taskId : null,
-    nextTopic: next ? next.topic : null,
-    autoBootstrapped: !!autoBootstrapped,
-    instruction,
+    alertKind: 'kill-during-ci',
+    manifestStatus: phase === 'complete' ? 'done' : 'awaiting-merge',
+    manifestNote: `killed at ${phaseLabel} phase — slot rotated`,
+    logPrefix: `KILL-DURING-CI at ${phaseLabel} phase — agent parked, slot rotated; `,
+    purgeCounts: true,
   });
   return true;
+}
+
+/**
+ * freeDeadEndSlot — thin wrapper over dead-end-rotation.js. The attempt-based
+ * recovery + grace-window logic lives there (extracted to keep this file under
+ * the max-lines gate); killAndBootstrapNext + alert are injected here so the
+ * extracted module needs no circular require back into actions.js.
+ */
+function freeDeadEndSlot({ session, ticket, kind, repeatCount, sha }) {
+  return deadEndRotation.freeDeadEndSlot({
+    session,
+    ticket,
+    kind,
+    repeatCount,
+    sha,
+    killAndBootstrapNext,
+    alert,
+  });
 }
 
 /**
@@ -365,6 +343,7 @@ module.exports = {
   alert,
   autoRestart,
   freeCIGateSlot,
+  freeCiPhaseSlot,
   freeDeadEndSlot,
   freeStopConditionSlot,
   syncManifest: manifest.syncFromTmux,

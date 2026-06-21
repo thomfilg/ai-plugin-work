@@ -33,6 +33,7 @@ const prCommentsHandler = require('./lib/maestro-conduct/pr-comments-handler');
 const questionHandler = require('./lib/maestro-conduct/question-handler');
 const { isHaltedWaitingForUser } = require('./lib/maestro-conduct/halted-waiting');
 const singletonGuard = require('./lib/maestro-conduct/singleton-guard');
+const { detectPhaseAdvance } = require('./lib/maestro-conduct/phase-advance');
 
 const DETECTORS = {
   question: require('./lib/maestro-conduct/detectors/question'),
@@ -125,6 +126,7 @@ function handlePhaseStall(ctx, stallHit) {
 
   if (escalation === 'alert') {
     const paneTail = (ctx.pane || '').split('\n').slice(-40).join('\n');
+    const unblockCmd = `tmux capture-pane -t ${ctx.session} -p | tail -40   # read pane, then either tmux send-keys to unstick or kill via plugins/maestro/scripts/maestro-cleanup.js ${ctx.ticket} --tmux`;
     const r = actions.alert({
       session: ctx.session,
       ticket: ctx.ticket,
@@ -134,7 +136,8 @@ function handlePhaseStall(ctx, stallHit) {
       budgetMin: stallHit.budgetMin,
       nudges: marker.nudges,
       paneTail,
-      instruction: `phase=${ctx.phase} ${stallHit.elapsedMin}m/${stallHit.budgetMin}m. UNBLOCK-PROTOCOL: bad artifact (tasks.md/brief.md) usually root cause, NOT missing work. Pane tail in paneTail field.`,
+      unblockCmd,
+      instruction: `OPERATOR ACTION REQUIRED — agent stalled in phase=${ctx.phase} for ${stallHit.elapsedMin}m/${stallHit.budgetMin}m (${marker.nudges} nudges ignored). RUN NOW: ${unblockCmd}. UNBLOCK-PROTOCOL: bad artifact (tasks.md/brief.md) usually root cause, NOT missing work. Pane tail in paneTail field. DO NOT reply with "standing by" — that is a no-op while the agent burns dead-end attempts.`,
     });
     maybeEscalateToDeadEnd(ctx, 'nudges-exhausted', r.count, ctx.phase);
   } else if (escalation === 'interrupt') {
@@ -285,6 +288,18 @@ function runPhaseDetectors(ctx) {
 /** Run the per-session pipeline. Returns when the session has been fully processed. */
 function tickSession(session) {
   const ctx = ctxFor(session);
+
+  // Phase-advance check: clear stale dead-end markers + attempts the moment
+  // the agent makes real progress. Runs before detectors so a freshly-
+  // advanced ticket isn't treated as still-stalled this tick.
+  detectPhaseAdvance(ctx, restartEligible);
+
+  // Agents at ci/complete are doing zero useful work — kill them immediately to
+  // free the slot, regardless of question/silence/spinner state. Runs BEFORE
+  // question detection so a parked agent still showing a menu can't hold its
+  // -work slot indefinitely, and before silence so we don't waste a tick
+  // auto-restarting them first.
+  if (ciGate.maybeRotateOnPhase({ ctx, state, actions, restartEligible })) return;
 
   // Question always wins — never nudge while the agent is waiting on us.
   const qHit = DETECTORS.question.detect(ctx);
