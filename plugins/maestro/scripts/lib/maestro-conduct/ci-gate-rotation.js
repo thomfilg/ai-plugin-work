@@ -33,7 +33,7 @@ function maybeFreeOnPrReady(_args) {
 function maybeRotateOnPhase({ ctx, state: _state, actions, restartEligible }) {
   if (!restartEligible(ctx.session)) return false;
   if (!CI_OR_LATER_PHASES.has(ctx.phase)) return false;
-  return actions.freeCiPhaseSlot({ session: ctx.session, ticket: ctx.ticket });
+  return actions.freeCiPhaseSlot({ session: ctx.session, ticket: ctx.ticket, phase: ctx.phase });
 }
 
 module.exports = {

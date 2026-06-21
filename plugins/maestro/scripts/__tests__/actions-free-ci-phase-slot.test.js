@@ -72,11 +72,41 @@ test('freeCiPhaseSlot sets manifest status awaiting-merge', () => {
   process.env.MAESTRO_SESSION_DIR = sessionDir;
   const actions = freshActions({ stateDir, alertFile, tmuxStub });
 
-  actions.freeCiPhaseSlot({ session: 'GH-11-work', ticket: 'GH-11' });
+  actions.freeCiPhaseSlot({ session: 'GH-11-work', ticket: 'GH-11', phase: 'ci' });
 
   const after = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
   const task = after.tasks.find((t) => t.id === 'GH-11');
   assert.equal(task.status, 'awaiting-merge');
+  delete process.env.MAESTRO_SESSION_DIR;
+});
+
+test('freeCiPhaseSlot sets manifest status done for the terminal complete phase', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'fcp-done-'));
+  const stateDir = path.join(root, 'state');
+  const sessionDir = path.join(root, 'sessions');
+  fs.mkdirSync(stateDir, { recursive: true });
+  fs.mkdirSync(sessionDir, { recursive: true });
+  const alertFile = path.join(stateDir, 'alerts.jsonl');
+  const tmuxStub = [];
+
+  const manifestPath = path.join(sessionDir, 'GH-14.json');
+  fs.writeFileSync(
+    manifestPath,
+    JSON.stringify({ topic: 'GH-14', tasks: [{ id: 'GH-14', status: 'in_progress', slots: 1 }] })
+  );
+
+  const cache = require.cache;
+  for (const k of Object.keys(cache)) {
+    if (k.includes('/maestro-conduct')) delete cache[k];
+  }
+  process.env.MAESTRO_SESSION_DIR = sessionDir;
+  const actions = freshActions({ stateDir, alertFile, tmuxStub });
+
+  actions.freeCiPhaseSlot({ session: 'GH-14-work', ticket: 'GH-14', phase: 'complete' });
+
+  const after = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+  const task = after.tasks.find((t) => t.id === 'GH-14');
+  assert.equal(task.status, 'done');
   delete process.env.MAESTRO_SESSION_DIR;
 });
 
@@ -169,7 +199,7 @@ test('maybeRotateOnPhase delegates to freeCiPhaseSlot only for ci/complete + res
     }),
     true
   );
-  assert.deepEqual(calls[calls.length - 1], { session: 's', ticket: 't' });
+  assert.deepEqual(calls[calls.length - 1], { session: 's', ticket: 't', phase: 'ci' });
 
   // complete phase + eligible: delegates.
   ciGate.maybeRotateOnPhase({
