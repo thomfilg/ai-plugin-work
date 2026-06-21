@@ -28,10 +28,7 @@ const FIXTURE_DIR = path.resolve(
 const FIXTURE_FILE = path.join(FIXTURE_DIR, 'mem-worked-example.md');
 
 test('worked-example fixture file exists under tests/fixtures/', () => {
-  assert.ok(
-    fs.existsSync(FIXTURE_FILE),
-    `worked-example fixture missing at ${FIXTURE_FILE}`
-  );
+  assert.ok(fs.existsSync(FIXTURE_FILE), `worked-example fixture missing at ${FIXTURE_FILE}`);
 });
 
 test('loading the worked-example store yields excludePreset=[git-ops] with non-empty excludeResolved', () => {

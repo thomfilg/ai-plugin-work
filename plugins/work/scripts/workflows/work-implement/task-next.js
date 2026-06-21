@@ -43,6 +43,11 @@ try {
 const TDD_CLI = path.join(__dirname, 'tdd-phase-state.js');
 
 const { TDD_PHASES, TDD_PHASE_TRANSITIONS } = require('./tdd-phase-registry');
+const {
+  gateContractFor,
+  scopeEntryAdmitsOnlyTestFiles,
+} = require('../../../skills/split-in-tasks/lib/task-types');
+const { fileMatchesScope } = require('../lib/task-scope');
 
 // `done` is derived in this script (a cycle with red+green+refactor evidence
 // is treated as complete). It is NOT a state-machine target in the registry.
@@ -233,10 +238,16 @@ function parseTaskType(section) {
 // (*.md, etc), so demanding a *.test.* authorship gate is contradictory.
 // They still run a real verification command (e.g. a grep asserting the docs
 // now contain the documented strings), so RED/GREEN are validated by that
-// command rather than by test-block authorship. Detected via an explicit
-// `docs` type or a "documentation exempt" / "docs-only" marker in the body.
-function isDocsExempt(type, section) {
-  return (type || '') === 'docs' || /documentation[\s-]*exempt|docs[-\s]?only/i.test(section || '');
+// command rather than by test-block authorship.
+//
+// GH-528 follow-up: Detection is `### Type === 'docs'` ONLY. The previous
+// body-prose regex (matching "docs-only" / "documentation exempt" anywhere
+// in the task body) let the implementer-agent bypass the TDD gate by writing
+// trigger phrases into ACs at implement time. The Type field is authored by
+// the planner, scope-protected at implement time (Type-line edit guard), and
+// cannot be flipped by the agent under the hook.
+function isDocsExempt(type /* , _section unused — see GH-528 */) {
+  return (type || '') === 'docs';
 }
 
 // Storybook stories are visual artifacts — `*.stories.tsx` files have no
@@ -406,7 +417,169 @@ function mintCompanionToken() {
 }
 
 // eslint-disable-next-line max-lines-per-function, complexity -- allowlisted pre-existing; see .quality-exceptions
-function recordEvidence(phase, ticket, taskNum, cmd, cwd, scope) {
+/**
+ * Persist an intentional RED skip via `tdd-phase-state.js record-skip-red`.
+ *
+ * Used for Type=tests-only tasks where RED is incoherent by design (no
+ * failing-test → passing-impl loop exists). Mirrors the spawn pattern of
+ * `recordEvidence` so token re-minting / token verification stay aligned
+ * across all phase writes. Returns `{ ok, out, exitCode }`.
+ */
+/**
+ * Pure helper: filter a list of changed POSIX paths down to those that are
+ * test/spec files AND fall under the task's declared scope.
+ *
+ * Scope match delegates to `fileMatchesScope` from `../lib/task-scope` (the
+ * same matcher used by the production scope-protection layer), so glob
+ * patterns like `src/**` or `plugins/work/**\/*.test.js` are honored.
+ * Bare-directory entries (no glob meta, no trailing `/`) keep their legacy
+ * "directory prefix" semantics so existing task definitions don't regress.
+ *
+ * Scope behaviors preserved:
+ *   - exact path entry          → matches that path
+ *   - directory entry (`a/b`)   → matches `a/b/**` (legacy prefix)
+ *   - directory entry (`a/b/`)  → matches `a/b/**` (via fileMatchesScope)
+ *   - glob entry  (`a/**\/*.test.js`) → standard glob match (NEW)
+ *   - empty scope               → any changed test file passes through
+ *
+ * The test-file extension filter always applies last: a file matched by
+ * scope but not ending in `.test.<ext>` / `.spec.<ext>` is excluded.
+ *
+ * @param {string[]} changedPaths POSIX-style paths relative to repoRoot.
+ * @param {string[]} scope        `### Files in scope` entries from tasks.md.
+ * @returns {string[]}            The subset that should count as "agent
+ *                                actually wrote in-scope test code".
+ */
+function filterChangedTestFilesByScope(changedPaths, scope) {
+  const out = [];
+  const scopeList = Array.isArray(scope) ? scope.filter((s) => typeof s === 'string' && s) : [];
+  for (const rel of Array.isArray(changedPaths) ? changedPaths : []) {
+    if (typeof rel !== 'string' || !rel) continue;
+    if (!/\.(test|spec)\.[jt]sx?$/i.test(rel)) continue;
+    if (scopeList.length === 0) {
+      out.push(rel);
+      continue;
+    }
+    const inScope = scopeList.some((s) => {
+      if (rel === s) return true;
+      // Legacy bare-directory prefix: `a/b` matches `a/b/...`. We keep this
+      // because fileMatchesScope would compile `a/b` as a literal glob and
+      // miss the descendants.
+      if (rel.startsWith(s.replace(/\/+$/, '') + '/')) return true;
+      // Delegate everything else (exact match was handled above) to the
+      // shared glob-aware matcher — this is the regression fix for `**`
+      // and `*` segment patterns.
+      return fileMatchesScope(rel, [s]);
+    });
+    if (inScope) out.push(rel);
+  }
+  return out;
+}
+
+/**
+ * Return the subset of changed (vs HEAD + staged + untracked) files that are
+ * test/spec files AND fall under the task's declared scope. Used by the
+ * tests-only GREEN gate to ensure the agent actually wrote new test code
+ * (not a no-op cycle).
+ *
+ * Scope-match semantics live in `filterChangedTestFilesByScope` (pure,
+ * unit-tested). This function is the git-aware wrapper that collects the
+ * "changed" set from working tree + index + untracked files.
+ */
+function detectChangedTestFilesInScope(repoRoot, scope) {
+  const out = [];
+  let diff = '';
+  let staged = '';
+  let untracked = '';
+  // GH-528 round-2 follow-up note: check `git` exit status so a real git
+  // failure (corrupt repo, mid-rebase, missing git binary) is distinguishable
+  // from "no changes" downstream. Without this, all three sources silently
+  // return '' on error and the tests-only GREEN gate fires with the
+  // misleading "No *.test.* file under scope has changes" message.
+  let gitFailed = false;
+  try {
+    const r1 = spawnSync('git', ['diff', '--name-only'], { cwd: repoRoot, encoding: 'utf8' });
+    if (r1.status !== 0) gitFailed = true;
+    diff = r1.stdout || '';
+    const r2 = spawnSync('git', ['diff', '--cached', '--name-only'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    if (r2.status !== 0) gitFailed = true;
+    staged = r2.stdout || '';
+    const r3 = spawnSync('git', ['ls-files', '--others', '--exclude-standard'], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    if (r3.status !== 0) gitFailed = true;
+    untracked = r3.stdout || '';
+  } catch {
+    gitFailed = true;
+  }
+  if (gitFailed) {
+    process.stderr.write(
+      'task-next: git change detection failed (corrupt repo or detached state?); ' +
+        'treating changed-files as empty. Downstream gate may block with a misleading message.\n'
+    );
+  }
+  const changed = [
+    ...new Set(
+      [...diff.split('\n'), ...staged.split('\n'), ...untracked.split('\n')]
+        .map((s) => s.trim())
+        .filter(Boolean)
+    ),
+  ];
+  return filterChangedTestFilesByScope(changed, scope).reduce((acc, rel) => {
+    acc.push(rel);
+    return acc;
+  }, out);
+}
+
+function recordSkipRed(ticket, taskNum, reason, cwd) {
+  mintCompanionToken();
+  const args = [TDD_CLI, 'record-skip-red', ticket, '--task', String(taskNum), '--reason', reason];
+  // Auto-init the state file the first time, mirroring recordEvidence().
+  function runOnce() {
+    mintCompanionToken();
+    return spawnSync(process.execPath, args, {
+      cwd,
+      stdio: 'pipe',
+      encoding: 'utf8',
+      env: { ...process.env },
+    });
+  }
+  let r = runOnce();
+  if (r.status !== 0) {
+    const combined = (r.stdout || '') + (r.stderr || '');
+    if (/No TDD phase state found/i.test(combined)) {
+      mintCompanionToken();
+      const initRes = spawnSync(
+        process.execPath,
+        [TDD_CLI, 'init', ticket, '--task', String(taskNum)],
+        { cwd, stdio: 'pipe', encoding: 'utf8', env: { ...process.env } }
+      );
+      if (initRes.status !== 0) {
+        return {
+          ok: false,
+          out:
+            combined +
+            '\n--- auto-init failed ---\n' +
+            (initRes.stdout || '') +
+            (initRes.stderr || ''),
+          exitCode: initRes.status,
+        };
+      }
+      r = runOnce();
+    }
+  }
+  return {
+    ok: r.status === 0,
+    out: (r.stdout || '') + (r.stderr || ''),
+    exitCode: r.status,
+  };
+}
+
+function recordEvidence(phase, ticket, taskNum, cmd, cwd, scope, opts = {}) {
   // Delegate to tdd-phase-state.js — the only authorized writer. Forward
   // `--task N` so the recorder resolves the per-task state path. Records
   // evidence for the just-completed phase, then (for red/green only)
@@ -448,6 +621,26 @@ function recordEvidence(phase, ticket, taskNum, cmd, cwd, scope) {
       '--cmd',
       wrapStrictMode(cmd),
     ];
+    // Task 4 (GH-528): caller opt-in for `--docs-exempt` (symmetric across
+    // RED and GREEN). Only the docs-exempt / visual-only RED and GREEN
+    // fallback call sites pass `opts.docsExempt: true`. All other callers
+    // get default behavior so the RED test-file guard and GREEN RC-D
+    // empty-command trap stay armed for normal code tasks.
+    if (
+      opts &&
+      opts.docsExempt === true &&
+      (phase === TDD_PHASES.red || phase === TDD_PHASES.green || phase === TDD_PHASES.refactor)
+    ) {
+      recordArgs.push('--docs-exempt');
+    }
+    // GH-528 round-2 follow-up (Cursor[bot] medium): mechanical-refactor
+    // and other Types whose contract sets `redRequiresTestFiles === false`
+    // need the RED "no test files changed" guard relaxed without
+    // implying RC-D relaxation at GREEN/REFACTOR. The `--docs-exempt`
+    // flag conflated both; this flag covers only the RED file guard.
+    if (opts && opts.redSkipFileGuard === true && phase === TDD_PHASES.red) {
+      recordArgs.push('--red-skip-file-guard');
+    }
     return spawnSync(process.execPath, recordArgs, {
       cwd,
       stdio: 'pipe',
@@ -759,8 +952,20 @@ function main() {
   const scope = parseSuggestedScope(section);
   const type = parseTaskType(section);
   const taskTestCmd = parseTaskTestCommand(section);
-  const docsExempt = isDocsExempt(type, section);
+  const docsExempt = isDocsExempt(type);
   const visualOnly = isVisualOnlyTask(scope);
+  const testsOnly = type === 'tests-only';
+  // GH-528 review comment #3 (cursor[bot]): single source of truth for
+  // whether `--docs-exempt` should be forwarded to the recorder. The
+  // recorder relaxes RC-D (empty-output trap) only when this flag is set.
+  // Per the central contract in skills/split-in-tasks/lib/task-types.js,
+  // ONLY Types with `rcdEmptyTrap === false` (docs, config, ci, file-move,
+  // checkpoint) qualify. tests-only / tdd-code / mechanical-refactor keep
+  // the trap armed. Visual-only Storybook tasks have no executable surface
+  // and inherit the docs-exempt semantics by scope shape (orthogonal to
+  // Type) — they are added on as an OR.
+  const contractAllowsDocsExempt = gateContractFor(type, scope).rcdEmptyTrap === false;
+  const docsExemptForward = contractAllowsDocsExempt || visualOnly;
 
   // Checkpoint tasks are verification-only — no source change, no test
   // authorship, no gherkin scenarios. Asking the agent to satisfy a TDD
@@ -869,6 +1074,32 @@ function main() {
     );
   }
 
+  // Task 4 (GH-528): Type=tests-only RED-skipped contract. Tests-only tasks
+  // add coverage for code that already works — there is no "failing test →
+  // passing impl" loop, so RED is incoherent by design. Skip straight to
+  // GREEN via the dedicated record-skip-red subcommand, which persists a
+  // structured `{skipped: true, reason}` marker so the audit trail shows
+  // an intentional skip (not faked evidence — see [[no-fake-tdd-evidence]]).
+  // Verifier (test command) is then re-run by the GREEN branch below as the
+  // first real validation step.
+  if (testsOnly && phase === TDD_PHASES.red) {
+    const skip = recordSkipRed(ticket, taskNum, 'tests-only: Type contract', repoRoot);
+    if (!skip.ok) {
+      process.stdout.write(
+        `task-next: ${ticket} task${taskNum} — ${taskTitle}\n` +
+          `  state file: ${tddPath}\n` +
+          `  result:     BLOCKED in red (tests-only skip failed)\n\n` +
+          `## Why you did not advance\n\n${skip.out}\n\n`
+      );
+      process.exit(2);
+    }
+    process.stdout.write(
+      `task-next: RED skipped via tests-only Type contract; ` +
+        `cycle red slot persisted with {skipped: true}. Re-invoke me for GREEN.\n`
+    );
+    process.exit(0);
+  }
+
   // Run the test command.
   const run = runTest(testCmd, repoRoot, scope);
   const passed = run.exitCode === 0;
@@ -901,20 +1132,50 @@ function main() {
         // proving there is at least one failing test block under Suggested
         // Scope. The test command already failed (exitCode !== 0) above —
         // we just need to confirm authorship intent.
-        if (testFiles.length === 0 && (docsExempt || visualOnly)) {
+        // GH-528 review comment #7: the RED-fallback entry condition
+        // predates the closed-Type taxonomy. Drive it from the central
+        // contract — any Type whose `redRequiresTestFiles === false`
+        // (docs, config, ci, file-move, mechanical-refactor, checkpoint,
+        // tests-only) qualifies. Visual-only Storybook scope inherits the
+        // same semantics by scope shape (orthogonal to Type) and is added
+        // as an OR. tdd-code keeps `redRequiresTestFiles: true`, so it
+        // continues to require a `*.test.*` file in scope.
+        const redFileGuardWaived =
+          gateContractFor(type, scope).redRequiresTestFiles === false || visualOnly;
+        if (testFiles.length === 0 && redFileGuardWaived) {
           // Test-exempt: no `*.test.*` authorship surface, but the verification
           // command failed as RED requires (exitCode !== 0 confirmed above).
-          // Accept it. Fires for documentation tasks (isDocsExempt) and for
-          // Storybook stories-only tasks (isVisualOnlyTask).
-          const rec = recordEvidence(TDD_PHASES.red, ticket, taskNum, testCmd, repoRoot, scope);
+          // Accept it. Fires for the silent-verifier-exempt Types listed above
+          // and for Storybook stories-only tasks (isVisualOnlyTask).
+          // `docsExemptForward` (driven by `rcdEmptyTrap === false || visualOnly`)
+          // is the right `--docs-exempt` forwarding value for the recorder:
+          // it stays armed for `mechanical-refactor` / `tests-only` even though
+          // they bypass the RED file guard, keeping RC-D protection intact for
+          // GREEN/REFACTOR. For docs/config/ci/file-move/checkpoint the trap
+          // is also relaxed by contract.
+          //
+          // GH-528 round-2 follow-up (Cursor[bot] medium): the recorder also
+          // has a "No test files changed" guard at RED that fires
+          // independently of RC-D. Without forwarding `--red-skip-file-guard`,
+          // mechanical-refactor (redRequiresTestFiles=false, rcdEmptyTrap=true)
+          // wedges: the orchestrator accepts the fallback, the recorder
+          // rejects it. Forward `redSkipFileGuard: true` whenever this branch
+          // fires — by definition the contract has waived the file guard.
+          const rec = recordEvidence(TDD_PHASES.red, ticket, taskNum, testCmd, repoRoot, scope, {
+            docsExempt: docsExemptForward,
+            redSkipFileGuard: true,
+          });
           if (!rec.ok) {
             blockReason = `Could not record RED evidence:\n${rec.out}`;
           } else {
             advanced = true;
             phase = TDD_PHASES.green;
+            const contractKind = gateContractFor(type, scope).kind;
             const fallbackLabel = visualOnly
               ? 'visual-only fallback (Storybook stories-only scope — no testable code surface'
-              : 'docs-exempt fallback (documentation task — no testable code surface';
+              : docsExempt
+                ? 'docs-exempt fallback (documentation task — no testable code surface'
+                : `contract fallback (Type=${contractKind} — no *.test.* authorship surface required by gate contract`;
             process.stdout.write(
               `task-next: RED accepted via ${fallbackLabel}; verification command failed as required).\n`
             );
@@ -953,20 +1214,100 @@ function main() {
   } else if (phase === TDD_PHASES.green) {
     if (!passed) {
       blockReason = `Test command still failing (exit ${run.exitCode}). Last output:\n\n${run.combined}`;
+    } else if (testsOnly) {
+      // Task 4 (GH-528): tests-only GREEN gate. Beyond the verifier exiting
+      // 0, require (a) scope contains ONLY test files (planner-side Pass D
+      // also checks this — defense in depth), and (b) at least one in-scope
+      // test file was actually modified vs. HEAD. Without (b) the agent
+      // could no-op into GREEN.
+      // cursor[bot] review (GH-528): classify each scope entry via
+      // scopeEntryAdmitsOnlyTestFiles so glob patterns whose basename
+      // constrains to test files (e.g. `src/**\/*.test.js`) are accepted,
+      // while open-ended globs (`src/**`, `lib/**\/*.js`) that admit
+      // non-test matches are still rejected. The old raw-extension test
+      // mis-rejected the former case before detectChangedTestFilesInScope
+      // had a chance to run.
+      const nonTestInScope = scope.filter((p) => p && !scopeEntryAdmitsOnlyTestFiles(p));
+      if (nonTestInScope.length > 0) {
+        blockReason =
+          `Type=tests-only requires scope to contain ONLY *.test.* / *.spec.* files. ` +
+          `Non-test entries in scope: ${nonTestInScope.join(', ')}. ` +
+          `Move source edits to a tdd-code task, or change Type.`;
+      } else {
+        const changedTestFiles = detectChangedTestFilesInScope(repoRoot, scope);
+        if (changedTestFiles.length === 0) {
+          blockReason =
+            'Type=tests-only GREEN requires at least one in-scope test file to be modified. ' +
+            'No `*.test.*` / `*.spec.*` file under scope has changes vs. HEAD.';
+        } else {
+          // GH-528 review comment #3 (cursor[bot]): tests-only's gate contract
+          // is `rcdEmptyTrap: true` (see gateContractFor('tests-only')). We
+          // therefore MUST NOT forward `--docs-exempt` here — doing so would
+          // disable the RC-D empty-output trap and let a silent verifier
+          // (e.g. `node -e ""`) record GREEN after merely touching a test
+          // file. `docsExemptForward` is driven by the central contract and
+          // resolves to `false` for tests-only, keeping the trap armed.
+          const rec = recordEvidence(TDD_PHASES.green, ticket, taskNum, testCmd, repoRoot, scope, {
+            docsExempt: docsExemptForward,
+          });
+          if (!rec.ok) {
+            blockReason = `Could not record GREEN evidence:\n${rec.out}`;
+          } else {
+            advanced = true;
+            phase = TDD_PHASES.refactor;
+            process.stdout.write(
+              `task-next: GREEN accepted via tests-only contract; ` +
+                `${changedTestFiles.length} in-scope test file(s) modified.\n`
+            );
+          }
+        }
+      }
     } else {
-      const rec = recordEvidence(TDD_PHASES.green, ticket, taskNum, testCmd, repoRoot, scope);
+      // Task 4 (GH-528): GREEN docs-exempt fallback (sibling of RED block
+      // at ~lines 904-921). When the verification command exits 0 silently
+      // (no stdout/stderr), tdd-phase-state.js's RC-D empty-command trap
+      // normally rejects. For docs-exempt tasks (Type=docs / "docs-only" /
+      // "documentation exempt" markers) and visual-only Storybook tasks,
+      // the verifier IS the test surface — there's no code to assert on —
+      // so we forward `--docs-exempt` to the recorder, which relaxes the
+      // RC-D trap for this one invocation. Emit a diagnostic so operators
+      // see why a silent verifier was accepted. See R8 + R9.
+      // GH-528 review comment #3: `docsExemptForward` is now driven by the
+      // central `gateContractFor()` contract (plus visual-only OR), not by
+      // ad-hoc `docsExempt || visualOnly`. Same observable behaviour for
+      // docs/visual-only but routed through the single source of truth.
+      const rec = recordEvidence(TDD_PHASES.green, ticket, taskNum, testCmd, repoRoot, scope, {
+        docsExempt: docsExemptForward,
+      });
       if (!rec.ok) {
         blockReason = `Could not record GREEN evidence:\n${rec.out}`;
       } else {
         advanced = true;
         phase = TDD_PHASES.refactor;
+        if (docsExemptForward) {
+          const fallbackLabel = visualOnly
+            ? 'visual-only fallback (Storybook stories-only scope — no testable code surface'
+            : 'docs-exempt fallback (documentation task — no testable code surface';
+          process.stdout.write(
+            `task-next: GREEN accepted via ${fallbackLabel}; verification command exited 0 as required).\n`
+          );
+        }
       }
     }
   } else if (phase === TDD_PHASES.refactor) {
     if (!passed) {
       blockReason = `Regression detected — tests failed during refactor (exit ${run.exitCode}). Revert the breaking change before re-invoking me.\n\n${run.combined}`;
     } else {
-      const rec = recordEvidence(TDD_PHASES.refactor, ticket, taskNum, testCmd, repoRoot, scope);
+      // Task 4 (GH-528): docs-exempt / visual-only tasks have no testable
+      // code surface, so their REFACTOR verifier is silent (`grep -q`,
+      // `test -f`, etc.). Forward `--docs-exempt` so the recorder relaxes
+      // RC-D for this single invocation — symmetric with RED and GREEN.
+      // GH-528 review comment #3: same single-source-of-truth routing as
+      // the GREEN branch above. `docsExemptForward` is `false` for tests-only
+      // (rcdEmptyTrap stays armed) and for any tdd-code task.
+      const rec = recordEvidence(TDD_PHASES.refactor, ticket, taskNum, testCmd, repoRoot, scope, {
+        docsExempt: docsExemptForward,
+      });
       if (!rec.ok) {
         blockReason = `Could not record REFACTOR evidence:\n${rec.out}`;
       } else {
@@ -1026,6 +1367,8 @@ function main() {
 
 module.exports = {
   filterToTestFiles,
+  scopeEntryAdmitsOnlyTestFiles,
+  filterChangedTestFilesByScope,
   findTestFilesInScope,
   wrapStrictMode,
   isDocsExempt,
@@ -1034,6 +1377,12 @@ module.exports = {
   parseSuggestedScope,
 };
 
-if (require.main === module) {
+// Main guard: skip CLI dispatch when node:test loaded this file as a test
+// target with no CLI args (it would otherwise print usage and fail the suite
+// with zero test() blocks). Child spawns of this script always pass a ticket
+// + task arg, so they keep running main() — NODE_TEST_CONTEXT propagation
+// via inherited env is harmless when argv carries the real CLI args.
+const _isBareTestLoad = process.env.NODE_TEST_CONTEXT && process.argv.length <= 2;
+if (require.main === module && !_isBareTestLoad) {
   main();
 }

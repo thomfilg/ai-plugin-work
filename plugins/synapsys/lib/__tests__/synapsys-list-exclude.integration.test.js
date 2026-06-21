@@ -21,10 +21,7 @@ function makeTempStore() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-list-exclude-'));
   const storeDir = path.join(dir, '.claude', 'synapsys');
   fs.mkdirSync(storeDir, { recursive: true });
-  fs.writeFileSync(
-    path.join(storeDir, '.synapsys.json'),
-    JSON.stringify({ projectName: 'test' })
-  );
+  fs.writeFileSync(path.join(storeDir, '.synapsys.json'), JSON.stringify({ projectName: 'test' }));
   return { cwd: dir, storeDir };
 }
 
@@ -37,11 +34,10 @@ function writeMemory(storeDir, name, frontmatter) {
 }
 
 function runList(cwd, args) {
-  return spawnSync(
-    process.execPath,
-    [LIST_SCRIPT, `--cwd=${cwd}`, '--no-color', ...args],
-    { encoding: 'utf8', env: { ...process.env, NO_COLOR: '1' } }
-  );
+  return spawnSync(process.execPath, [LIST_SCRIPT, `--cwd=${cwd}`, '--no-color', ...args], {
+    encoding: 'utf8',
+    env: { ...process.env, NO_COLOR: '1' },
+  });
 }
 
 test('synapsys-list --json includes excludePrompt, excludePretool, excludePreset per memory', () => {

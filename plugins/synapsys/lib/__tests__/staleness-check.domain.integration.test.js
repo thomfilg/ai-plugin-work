@@ -19,13 +19,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
-const STALENESS_CLI = path.resolve(
-  __dirname,
-  '..',
-  '..',
-  'scripts',
-  'synapsys-staleness-check.js'
-);
+const STALENESS_CLI = path.resolve(__dirname, '..', '..', 'scripts', 'synapsys-staleness-check.js');
 
 const SEEDED_DOMAINS = [
   'root: e2e',
@@ -53,10 +47,7 @@ function makeFixture() {
   // Local store under repo .claude/synapsys.
   const storeDir = path.join(root, '.claude', 'synapsys');
   fs.mkdirSync(storeDir, { recursive: true });
-  fs.writeFileSync(
-    path.join(storeDir, '.synapsys.json'),
-    JSON.stringify({ projectName: 'test' })
-  );
+  fs.writeFileSync(path.join(storeDir, '.synapsys.json'), JSON.stringify({ projectName: 'test' }));
   return { root, fakeHome, storeDir };
 }
 
@@ -64,10 +55,7 @@ function writeMemory(storeDir, fileName, frontmatter) {
   const fm = Object.entries(frontmatter)
     .map(([k, v]) => `${k}: ${v}`)
     .join('\n');
-  fs.writeFileSync(
-    path.join(storeDir, fileName),
-    `---\n${fm}\n---\nbody text\n`
-  );
+  fs.writeFileSync(path.join(storeDir, fileName), `---\n${fm}\n---\nbody text\n`);
 }
 
 function run(args, opts = {}) {
@@ -99,11 +87,7 @@ test('Lint warns when a memory references an unknown domain (integration)', () =
   // Warning naming the memory and the unresolved domain must appear in
   // stderr or stdout; the CLI may emit lint warnings on either channel.
   const combined = (r.stdout || '') + '\n' + (r.stderr || '');
-  assert.match(
-    combined,
-    /bad-leaf-mem/,
-    `warning should name the memory; output:\n${combined}`
-  );
+  assert.match(combined, /bad-leaf-mem/, `warning should name the memory; output:\n${combined}`);
   assert.match(
     combined,
     /e2e:nonexistent-leaf/,
@@ -119,10 +103,9 @@ test('--strict exits non-zero when an unknown-domain warning is emitted', () => 
     domain: 'totally-unknown-root',
   });
 
-  const r = run(
-    [`--cwd=${root}`, `--store=${storeDir}`, '--strict', '--no-color'],
-    { home: fakeHome }
-  );
+  const r = run([`--cwd=${root}`, `--store=${storeDir}`, '--strict', '--no-color'], {
+    home: fakeHome,
+  });
   assert.notEqual(
     r.status,
     0,
@@ -158,10 +141,9 @@ test('backward-compat: memory without `domain:` produces no unknown-domain warni
     trigger_prompt: '/\\bfoo\\b/',
   });
 
-  const r = run(
-    [`--cwd=${root}`, `--store=${storeDir}`, '--strict', '--no-color'],
-    { home: fakeHome }
-  );
+  const r = run([`--cwd=${root}`, `--store=${storeDir}`, '--strict', '--no-color'], {
+    home: fakeHome,
+  });
   assert.equal(
     r.status,
     0,
@@ -188,10 +170,9 @@ test('valid registered domains emit no warnings under --strict', () => {
     domain: 'git:plumbing-ops',
   });
 
-  const r = run(
-    [`--cwd=${root}`, `--store=${storeDir}`, '--strict', '--no-color'],
-    { home: fakeHome }
-  );
+  const r = run([`--cwd=${root}`, `--store=${storeDir}`, '--strict', '--no-color'], {
+    home: fakeHome,
+  });
   assert.equal(
     r.status,
     0,

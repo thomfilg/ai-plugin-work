@@ -82,3 +82,25 @@ Scripts gated to specific agents:
 | `write-tests-report.js` | quality-checker |
 | `write-code-review.js` | code-checker |
 | `write-completion-report.js` | completion-checker |
+
+## TDD RED rejection: test-load failures (GH-532)
+
+`record-red` (in `tdd-phase-state.js`) rejects test runs whose output contains
+a top-level load-failure signature instead of an assertion failure:
+
+- `ReferenceError:` outside `assert.throws`
+- `SyntaxError:` from the test file or its imports
+- `Cannot find module` / `MODULE_NOT_FOUND`
+- Runner reports zero tests executed (`# tests 0`, anchored to the TAP summary line)
+
+These crashes exit non-zero but verify nothing — accepting them as RED wedges
+the subsequent GREEN phase (same crash repeats regardless of source edits).
+Stack-frame lines (`  at …`) and lines inside a reported test's `details:`
+block are ignored, so `assert.throws(ReferenceError)` remains a valid RED.
+
+**Recovery (this is NOT a bypass, NOT a behavior gap):** fix the test file so
+it loads cleanly and produces a real assertion failure, then re-run
+`tdd-phase-state.js record-red`. Each rejection appends a
+`tdd-red-load-failure-rejected` row to `.work-actions.json` via
+`appendEnforcementAudit` (action: `tdd-red-load-failure-rejected`,
+`allow: false`, `meta: { cycle, testCommand, signature, snippet }`).

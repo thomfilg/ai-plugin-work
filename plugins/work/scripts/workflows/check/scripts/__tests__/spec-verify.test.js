@@ -342,10 +342,7 @@ describe('spec-verify.js', () => {
   // ── REUSES multi-line + alias-path imports (GH-304) ────────────────────
 
   it('REUSES matches symbol in multi-line import block', () => {
-    writeFile(
-      'src/app.js',
-      "import {\n  useAuth,\n  useUser,\n} from './hooks';"
-    );
+    writeFile('src/app.js', "import {\n  useAuth,\n  useUser,\n} from './hooks';");
     const specPath = writeSpec(['- REUSES src/app.js useAuth']);
     const result = runScript(specPath, { json: true });
     assert.equal(result.exitCode, 0);
@@ -363,10 +360,7 @@ describe('spec-verify.js', () => {
   });
 
   it('REUSES matches symbol in multi-line import that uses an alias path', () => {
-    writeFile(
-      'src/app.js',
-      "import {\n  fetchUsers,\n  createUser,\n} from '@/app/api/users';"
-    );
+    writeFile('src/app.js', "import {\n  fetchUsers,\n  createUser,\n} from '@/app/api/users';");
     const specPath = writeSpec(['- REUSES src/app.js createUser']);
     const result = runScript(specPath, { json: true });
     assert.equal(result.exitCode, 0);

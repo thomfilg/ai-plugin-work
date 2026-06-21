@@ -48,10 +48,7 @@ function writeStubBin(name, body) {
 function setStubs({ prBody, affectedJson }) {
   // gh — only `gh pr view --json body -q .body` is invoked.
   // Quote body so newlines survive heredoc indirection.
-  writeStubBin(
-    'gh',
-    `#!/usr/bin/env bash\ncat <<'__PR_BODY_EOF__'\n${prBody}\n__PR_BODY_EOF__\n`
-  );
+  writeStubBin('gh', `#!/usr/bin/env bash\ncat <<'__PR_BODY_EOF__'\n${prBody}\n__PR_BODY_EOF__\n`);
   // git — only `git branch --show-current` is invoked by the new fabrication wiring.
   writeStubBin('git', `#!/usr/bin/env bash\necho '${TICKET_BRANCH}'\n`);
   // get-affected.js — invoked via `node <REPO_DIR>/scripts/get-affected.js main json`.
@@ -166,11 +163,7 @@ describe('pr-post-generator-validator: fabrication check', () => {
       /10\/10/,
       `expected stderr to surface the offending phrase; got:\n${stderr}`
     );
-    assert.match(
-      stderr,
-      /[╔╗╚╝═║]/,
-      `expected box-drawn ASCII failure block; got:\n${stderr}`
-    );
+    assert.match(stderr, /[╔╗╚╝═║]/, `expected box-drawn ASCII failure block; got:\n${stderr}`);
 
     const actions = loadActions();
     const fab = actions.filter((a) => a && a.what === 'fabrication-block');
@@ -266,11 +259,7 @@ describe('pr-post-generator-validator: fabrication check', () => {
       agent_output: AGENT_OUTPUT_STUB,
     });
 
-    assert.equal(
-      code,
-      2,
-      `expected exit 2 when gh pr view fails; got ${code}; stderr=\n${stderr}`
-    );
+    assert.equal(code, 2, `expected exit 2 when gh pr view fails; got ${code}; stderr=\n${stderr}`);
     assert.match(
       stderr,
       /COULD NOT FETCH PR BODY/,

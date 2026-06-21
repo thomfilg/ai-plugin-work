@@ -16,40 +16,12 @@ const fs = require('fs');
 const path = require('path');
 
 if (require.main === module) {
-  process.on('uncaughtException', (err) => {
-    console.error(
-      JSON.stringify({
-        type: 'check_instruction',
-        action: 'blocked',
-        reason: `Uncaught exception: ${err.message}`,
-        stack: err.stack,
-      })
-    );
-    process.exit(1);
-  });
-  process.on('unhandledRejection', (err) => {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(
-      JSON.stringify({
-        type: 'check_instruction',
-        action: 'blocked',
-        reason: `Unhandled rejection: ${msg}`,
-      })
-    );
-    process.exit(1);
-  });
+  require('../lib/instruction-guards').installInstructionGuards('check_instruction');
 }
 
 // ─── Resolve paths ──────────────────────────────────────────────────────────
-const { resolvePluginPaths } = require(
-  path.join(__dirname, '..', 'work', 'lib', 'resolve-plugin-root')
-);
-const { workDir, libDir } = resolvePluginPaths(path.join(__dirname, '..', 'work'), 2);
-const getConfig = require(path.join(libDir, 'get-config'));
-
-const WORKTREES_BASE = getConfig('WORKTREES_BASE') || '';
-const TASKS_BASE =
-  getConfig('TASKS_BASE') || (WORKTREES_BASE ? path.join(WORKTREES_BASE, 'tasks') : '');
+const { resolvePluginConfig } = require('../lib/plugin-config');
+const { libDir, TASKS_BASE } = resolvePluginConfig(path.join(__dirname, '..', 'work'));
 
 if (!TASKS_BASE) {
   console.log(

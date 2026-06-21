@@ -13,11 +13,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 
-const {
-  loadStickyState,
-  saveStickyState,
-  updateStickyState,
-} = require('../sticky-state');
+const { loadStickyState, saveStickyState, updateStickyState } = require('../sticky-state');
 
 function tmpStateFile() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-sticky-int-'));

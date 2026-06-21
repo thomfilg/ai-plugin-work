@@ -57,10 +57,7 @@ for (const [root, leaves] of Object.entries(EXPECTED)) {
     const rootEntry = registry.roots.get(root);
     assert.ok(rootEntry.leaves instanceof Map, `root "${root}" has leaves Map`);
     for (const leaf of leaves) {
-      assert.ok(
-        rootEntry.leaves.has(leaf),
-        `root "${root}" missing leaf "${leaf}"`,
-      );
+      assert.ok(rootEntry.leaves.has(leaf), `root "${root}" missing leaf "${leaf}"`);
     }
   });
 
@@ -70,11 +67,11 @@ for (const [root, leaves] of Object.entries(EXPECTED)) {
       const leafEntry = registry.roots.get(root).leaves.get(leaf);
       assert.ok(
         Array.isArray(leafEntry.signal_prompt) && leafEntry.signal_prompt.length >= 1,
-        `${root}:${leaf} missing signal_prompt`,
+        `${root}:${leaf} missing signal_prompt`
       );
       assert.ok(
         Array.isArray(leafEntry.signal_pretool) && leafEntry.signal_pretool.length >= 1,
-        `${root}:${leaf} missing signal_pretool`,
+        `${root}:${leaf} missing signal_pretool`
       );
     });
 
@@ -85,7 +82,7 @@ for (const [root, leaves] of Object.entries(EXPECTED)) {
       for (const re of all) {
         assert.ok(
           re.source.includes('\\b'),
-          `${root}:${leaf} pattern /${re.source}/ missing \\b boundary`,
+          `${root}:${leaf} pattern /${re.source}/ missing \\b boundary`
         );
       }
     });
@@ -97,14 +94,14 @@ test('bundled DOMAINS.md includes a worked-example section (R13)', () => {
   assert.match(
     body,
     /worked[- ]example/i,
-    'expected a worked-example heading/section in DOMAINS.md',
+    'expected a worked-example heading/section in DOMAINS.md'
   );
   // R13 calls for at least two prompt → active-domains → memories-fired tables.
   // Look for at least two markdown tables (lines starting with `|`).
   const tableRowMatches = body.match(/^\|.*\|\s*$/gm) || [];
   assert.ok(
     tableRowMatches.length >= 4, // at least two tables, header + ≥1 row each
-    `expected ≥2 markdown tables in worked-example section, found ${tableRowMatches.length} rows`,
+    `expected ≥2 markdown tables in worked-example section, found ${tableRowMatches.length} rows`
   );
 });
 
@@ -113,10 +110,14 @@ test('bundled DOMAINS.md includes an authoring-guidance section (R14)', () => {
   assert.match(
     body,
     /authoring[- ]guidance|authoring guidance/i,
-    'expected an authoring-guidance heading/section',
+    'expected an authoring-guidance heading/section'
   );
   // Sanity: it should mention narrowest leaf, multi-domain, and universal rules.
   assert.match(body, /narrowest/i, 'authoring guidance mentions narrowest leaf');
-  assert.match(body, /multi[- ]domain|multiple domains/i, 'authoring guidance mentions multi-domain');
+  assert.match(
+    body,
+    /multi[- ]domain|multiple domains/i,
+    'authoring guidance mentions multi-domain'
+  );
   assert.match(body, /universal/i, 'authoring guidance mentions universal rules');
 });

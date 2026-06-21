@@ -18,33 +18,37 @@ const path = require('path');
 
 // ─── .env Loader ────────────────────────────────────────────────────────────
 
+const QUOTE_RE = /^(['"])(.*)\1$/;
+
+function _parseEnvLine(line) {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed[0] === '#') return null;
+  const eqIdx = trimmed.indexOf('=');
+  if (eqIdx === -1) return null;
+  const key = trimmed.slice(0, eqIdx).trim();
+  const rawValue = trimmed.slice(eqIdx + 1).trim();
+  const quoteMatch = rawValue.match(QUOTE_RE);
+  return { key, value: quoteMatch ? quoteMatch[2] : rawValue };
+}
+
+function _applyEnvFile(envPath) {
+  for (const line of fs.readFileSync(envPath, 'utf-8').split('\n')) {
+    const parsed = _parseEnvLine(line);
+    if (parsed && !process.env[parsed.key]) {
+      process.env[parsed.key] = parsed.value;
+    }
+  }
+}
+
 function loadEnvFile() {
   const locations = [
     // __dirname = plugins/work/scripts/workflows/lib → repo root is 5 levels up
     path.join(__dirname, '..', '..', '..', '..', '..', '.env'),
     path.join(process.cwd(), '.env'),
   ];
-
   for (const envPath of locations) {
     if (fs.existsSync(envPath)) {
-      const content = fs.readFileSync(envPath, 'utf-8');
-      for (const line of content.split('\n')) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith('#')) continue;
-        const eqIdx = trimmed.indexOf('=');
-        if (eqIdx === -1) continue;
-        const key = trimmed.slice(0, eqIdx).trim();
-        let value = trimmed.slice(eqIdx + 1).trim();
-        if (
-          (value.startsWith('"') && value.endsWith('"')) ||
-          (value.startsWith("'") && value.endsWith("'"))
-        ) {
-          value = value.slice(1, -1);
-        }
-        if (!process.env[key]) {
-          process.env[key] = value;
-        }
-      }
+      _applyEnvFile(envPath);
       break;
     }
   }
@@ -135,6 +139,14 @@ const config = {
   SCRIPT_RUN_AFFECTED_UNIT: process.env.SCRIPT_RUN_AFFECTED_UNIT || '',
   SCRIPT_RUN_AFFECTED_INTEGRATION: process.env.SCRIPT_RUN_AFFECTED_INTEGRATION || '',
   SCRIPT_RUN_AFFECTED_E2E: process.env.SCRIPT_RUN_AFFECTED_E2E || '',
+
+  // GH-590 (AC17) — feature flag for the tasks-draft Test Strategy validator
+  // (enum + command-existence dispatcher + TDD-ownership graph) and the GH-610
+  // implement-side synthesis/citation consumer. Default '1' (on) now that both
+  // the draft validator (GH-590) and the implement-gate/tdd-phase-state/stop-hook
+  // wiring (GH-610) have landed. Set to '0' to fall back to the legacy
+  // `### Test Command` path (e.g. for in-flight tasks.md authored pre-GH-590).
+  WORK_TEST_STRATEGY_VALIDATOR: process.env.WORK_TEST_STRATEGY_VALIDATOR || '1',
 
   // Web apps list — each repo defines its own via WEB_APPS env var (JSON)
   // Example .env: WEB_APPS='[{"name":"my-app","defaultPort":3000,"type":"vite"}]'

@@ -11,6 +11,13 @@
  * 5. Has no emojis (professional requirement)
  */
 
+'use strict';
+
+const path = require('path');
+const { readHookDataStrict, resolveAgentName, resolveAgentOutput } = require(
+  path.join(__dirname, '..', 'lib', 'hook-io')
+);
+
 // More lenient patterns that handle potential wrapping or variations
 const REQUIRED_SECTIONS = [
   { name: 'Existing Behavior', pattern: /(?:^|\n)##?\s*Existing\s*Behavior/i },
@@ -29,34 +36,7 @@ const FORBIDDEN_PATTERNS = [
 // More comprehensive than manual ranges and auto-updates with Unicode versions
 const EMOJI_PATTERN = /\p{Emoji_Presentation}|\p{Extended_Pictographic}/u;
 
-async function main() {
-  let input = '';
-  for await (const chunk of process.stdin) {
-    input += chunk;
-  }
-
-  let hookData;
-  try {
-    hookData = JSON.parse(input);
-  } catch (err) {
-    process.stderr.write(`PR-GENERATOR VALIDATOR: Failed to parse hook input: ${err.message}\n`);
-    process.exit(2);
-  }
-
-  // Only validate pr-generator subagent
-  const agentName = hookData.agent_name || hookData.subagent_type || '';
-  if (
-    !agentName.toLowerCase().includes('pr-generator') ||
-    agentName.toLowerCase().includes('post')
-  ) {
-    process.exit(0);
-  }
-
-  // Get the agent's output/response
-  const agentOutput = hookData.agent_output || hookData.response || hookData.result || '';
-
-  if (!agentOutput || agentOutput.length < 100) {
-    process.stderr.write(`
+const SHORT_OUTPUT_BOX = `
 ╔══════════════════════════════════════════════════════════════════════╗
 ║  🛑 PR-GENERATOR: OUTPUT TOO SHORT                                   ║
 ╠══════════════════════════════════════════════════════════════════════╣
@@ -66,56 +46,10 @@ async function main() {
 ║  Expected: Complete PR template with all required sections           ║
 ║                                                                      ║
 ╚══════════════════════════════════════════════════════════════════════╝
-`);
-    process.exit(2);
-  }
+`;
 
-  const issues = [];
-
-  // Check required sections
-  for (const section of REQUIRED_SECTIONS) {
-    if (!section.pattern.test(agentOutput)) {
-      issues.push(`Missing section: "${section.name}"`);
-    }
-  }
-
-  // Check forbidden patterns
-  for (const forbidden of FORBIDDEN_PATTERNS) {
-    if (forbidden.pattern.test(agentOutput)) {
-      issues.push(`Found ${forbidden.name}`);
-    }
-  }
-
-  // Check for emojis
-  if (EMOJI_PATTERN.test(agentOutput)) {
-    issues.push('Contains emojis (not allowed in PR descriptions)');
-  }
-
-  // Check Testing Plan has actual content
-  const testingPlanMatch = agentOutput.match(/##\s*Testing\s*Plan[^\n]*\n([\s\S]*?)(?=##|$)/i);
-  if (testingPlanMatch) {
-    const testingPlanContent = testingPlanMatch[1].trim();
-    // Strip markdown list markers, whitespace, and newlines to get substantive content
-    const strippedContent = testingPlanContent.replace(/[-*\s\n]/g, '');
-    // Must have at least 30 chars of actual content
-    if (strippedContent.length < 30) {
-      issues.push('Testing Plan section lacks substantive content');
-    }
-  }
-
-  // Check Dev Checks has proper checkbox format
-  const devChecksMatch = agentOutput.match(/##\s*Dev\s*Checks[^\n]*\n([\s\S]*?)(?=##|$)/i);
-  if (devChecksMatch) {
-    const devChecksContent = devChecksMatch[1];
-    const checkboxes = devChecksContent.match(/\[.\]/g) || [];
-    const validCheckboxes = checkboxes.filter((cb) => cb === '[Y]' || cb === '[ ]');
-    if (checkboxes.length > 0 && validCheckboxes.length !== checkboxes.length) {
-      issues.push('Dev Checks has invalid checkbox format (use [Y] or [ ] only)');
-    }
-  }
-
-  if (issues.length > 0) {
-    process.stderr.write(`
+function buildFailureBox(issues) {
+  return `
 ╔══════════════════════════════════════════════════════════════════════╗
 ║  🛑 PR-GENERATOR: VALIDATION FAILED                                  ║
 ╠══════════════════════════════════════════════════════════════════════╣
@@ -125,7 +59,66 @@ ${issues.map((i) => `║  ❌ ${i.padEnd(64)}║`).join('\n')}
 ║  Fix these issues and regenerate the PR description.                 ║
 ║                                                                      ║
 ╚══════════════════════════════════════════════════════════════════════╝
-`);
+`;
+}
+
+function checkRequiredSections(output) {
+  return REQUIRED_SECTIONS.filter((s) => !s.pattern.test(output)).map(
+    (s) => `Missing section: "${s.name}"`
+  );
+}
+
+function checkForbiddenPatterns(output) {
+  return FORBIDDEN_PATTERNS.filter((f) => f.pattern.test(output)).map((f) => `Found ${f.name}`);
+}
+
+// Testing Plan must carry ≥30 chars of substantive content (markers stripped).
+function checkTestingPlan(output) {
+  const match = output.match(/##\s*Testing\s*Plan[^\n]*\n([\s\S]*?)(?=##|$)/i);
+  if (!match) return [];
+  const stripped = match[1].trim().replace(/[-*\s\n]/g, '');
+  return stripped.length < 30 ? ['Testing Plan section lacks substantive content'] : [];
+}
+
+// Dev Checks checkboxes must all be [Y] or [ ] (no [x]/[X]).
+function checkDevChecks(output) {
+  const match = output.match(/##\s*Dev\s*Checks[^\n]*\n([\s\S]*?)(?=##|$)/i);
+  if (!match) return [];
+  const checkboxes = match[1].match(/\[.\]/g) || [];
+  const valid = checkboxes.filter((cb) => cb === '[Y]' || cb === '[ ]');
+  return checkboxes.length > 0 && valid.length !== checkboxes.length
+    ? ['Dev Checks has invalid checkbox format (use [Y] or [ ] only)']
+    : [];
+}
+
+function collectIssues(output) {
+  const issues = [...checkRequiredSections(output), ...checkForbiddenPatterns(output)];
+  if (EMOJI_PATTERN.test(output)) {
+    issues.push('Contains emojis (not allowed in PR descriptions)');
+  }
+  return [...issues, ...checkTestingPlan(output), ...checkDevChecks(output)];
+}
+
+async function main() {
+  const hookData = await readHookDataStrict('PR-GENERATOR VALIDATOR');
+
+  // Only validate pr-generator subagent
+  const agentName = resolveAgentName(hookData);
+  if (!agentName.includes('pr-generator') || agentName.includes('post')) {
+    process.exit(0);
+  }
+
+  // Get the agent's output/response
+  const agentOutput = resolveAgentOutput(hookData);
+
+  if (!agentOutput || agentOutput.length < 100) {
+    process.stderr.write(SHORT_OUTPUT_BOX);
+    process.exit(2);
+  }
+
+  const issues = collectIssues(agentOutput);
+  if (issues.length > 0) {
+    process.stderr.write(buildFailureBox(issues));
     process.exit(2);
   }
 

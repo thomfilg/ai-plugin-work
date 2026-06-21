@@ -156,10 +156,7 @@ test('Full hook flow — UserPromptSubmit injects only domain-matching memories'
 
   // --- Side-effect: sticky-state file should exist after hook runs ---
   const statePath = path.join(synapsysHome, '.state', 'sticky-domains.json');
-  assert.ok(
-    fs.existsSync(statePath),
-    `expected sticky-state persisted at ${statePath}`
-  );
+  assert.ok(fs.existsSync(statePath), `expected sticky-state persisted at ${statePath}`);
   const persisted = JSON.parse(fs.readFileSync(statePath, 'utf8'));
   assert.equal(typeof persisted, 'object', 'sticky-state must be a JSON object');
 });

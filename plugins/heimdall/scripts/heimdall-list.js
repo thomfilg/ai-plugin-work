@@ -52,8 +52,10 @@ if (args.json) {
 }
 
 for (const store of report) {
-  console.log(`\n# ${store.kind} store — ${store.dir}`);
-  if (store.locks.length === 0) {
+  const lockCount = store.locks.length;
+  const lockSuffix = `(${lockCount} lock${lockCount === 1 ? '' : 's'})`;
+  console.log(`\n# ${store.kind} store — ${store.dir} ${lockSuffix}`);
+  if (lockCount === 0) {
     console.log('  (no lock blocks)');
     continue;
   }

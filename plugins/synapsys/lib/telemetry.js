@@ -19,6 +19,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
+const sharedSessionId = require('./session-id');
 
 const PROCESS_START_MS = Date.now();
 const MATCH_CAP = 200;
@@ -37,23 +38,17 @@ function isDisabled(memory) {
   return false;
 }
 
-// Whitelist filename characters so an attacker-controlled session_id (or one
-// containing path separators / "..") can never make appendFileSync escape
-// the telemetry directory. Anything containing characters outside [A-Za-z0-9._-]
-// — including '/', '\\', or "..", and leading dots used to hide files — falls
-// back to the unknown-session bucket.
-const SAFE_SESSION_ID = /^[A-Za-z0-9._-]{1,128}$/;
-
 function resolveSessionId(payload) {
-  if (!payload || typeof payload.session_id !== 'string' || !payload.session_id) {
-    return '_unknown-session';
-  }
-  const candidate = payload.session_id;
-  if (!SAFE_SESSION_ID.test(candidate)) return '_unknown-session';
-  if (candidate.startsWith('.') || candidate === '..' || candidate.includes('..')) {
-    return '_unknown-session';
-  }
-  return candidate;
+  // Both legs go through the shared resolver so inject-ledger and telemetry
+  // always produce the SAME id for the same input. Env-var first (GH-583),
+  // then payload — both legs apply SAFE_ID_RE (no dot) and sha256-hash unsafe
+  // values via hashId, so an id like "sess.v1" becomes the same hashed value
+  // in both modules instead of diverging on the regex.
+  const fromEnv = sharedSessionId.resolveFromEnv();
+  if (fromEnv) return fromEnv;
+  const fromPayload = sharedSessionId.resolveFromPayload(payload);
+  if (fromPayload) return fromPayload;
+  return '_unknown-session';
 }
 
 function unknownSessionToken() {
@@ -190,26 +185,73 @@ function findFirstSignal(signals, responseText) {
   return undefined;
 }
 
-function scanForCitations(memories, responseText) {
+/**
+ * Generic signal-list scanner shared by cite + behavior paths.
+ * Returns [{memory, signal}] entries — one per memory whose getSignals(memory)
+ * list contains a substring of responseText. Skips disabled memories and
+ * memories whose getSignals returns a non-array. Signals are capped at
+ * MATCH_CAP characters (parallel to scanForCitations behavior).
+ */
+function matchMemorySignal(memory, responseText, getSignals) {
+  if (!memory || isDisabled(memory)) return undefined;
+  let signals;
+  try {
+    signals = getSignals(memory);
+  } catch {
+    return undefined;
+  }
+  if (!Array.isArray(signals) || signals.length === 0) return undefined;
+  const matched = findFirstSignal(signals, responseText);
+  if (matched === undefined) return undefined;
+  return matched.length > MATCH_CAP ? matched.slice(0, MATCH_CAP) : matched;
+}
+
+function scanForSignalList(memories, responseText, getSignals) {
   const results = [];
   if (typeof responseText !== 'string' || responseText.length === 0) return results;
   if (!Array.isArray(memories)) return results;
+  if (typeof getSignals !== 'function') return results;
 
   for (const memory of memories) {
-    if (!memory || isDisabled(memory)) continue;
-    const matched = findFirstSignal(extractSignals(memory), responseText);
-    if (matched !== undefined) {
-      const capped = matched.length > MATCH_CAP ? matched.slice(0, MATCH_CAP) : matched;
-      results.push({ memory, match: capped });
-    }
+    const capped = matchMemorySignal(memory, responseText, getSignals);
+    if (capped !== undefined) results.push({ memory, signal: capped });
   }
   return results;
+}
+
+function scanForCitations(memories, responseText) {
+  // Delegate to the shared scanner, then re-shape `{signal}` → `{match}` to
+  // preserve the existing public contract for cite callers.
+  const hits = scanForSignalList(memories, responseText, (memory) => extractSignals(memory));
+  return hits.map(({ memory, signal }) => ({ memory, match: signal }));
+}
+
+function recordBehaviorChanged(memory, payload, opts) {
+  try {
+    if (!memory || isDisabled(memory)) return;
+    const sessionId = resolveSessionId(payload);
+    const reason = opts && typeof opts.reason === 'string' ? opts.reason : '';
+    const rawEvidence = opts && typeof opts.evidence === 'string' ? opts.evidence : '';
+    const evidence = rawEvidence.length > MATCH_CAP ? rawEvidence.slice(0, MATCH_CAP) : rawEvidence;
+    const record = {
+      ts: new Date().toISOString(),
+      memory: memory.name,
+      event: 'behavior_changed',
+      reason,
+      evidence,
+    };
+    writeLine(sessionId, record);
+  } catch {
+    // fail-open
+  }
 }
 
 module.exports = {
   recordFired,
   recordCited,
+  recordBehaviorChanged,
   scanForCitations,
+  scanForSignalList,
   extractSignals,
   resolveSessionId,
   telemetryDir,

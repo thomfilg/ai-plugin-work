@@ -39,6 +39,20 @@ Only this CLI can record TDD evidence — agents cannot self-report. Evidence in
 | GREEN | Test command, exit code (must be 0), timestamp |
 | REFACTOR | Test command, exit code (must be 0), timestamp |
 
+**RED load-failure rejection (GH-532):** `record-red` rejects test runs whose
+captured output matches a load-failure signature instead of an assertion
+failure: `ReferenceError:`, `SyntaxError:`, `Cannot find module` /
+`MODULE_NOT_FOUND`, or a runner reporting zero tests (`# tests 0`, anchored
+to the TAP summary line). A crashing test exits non-zero but verifies nothing —
+accepting it as RED wedges the subsequent GREEN (the same crash repeats
+regardless of source edits). Stack-frame lines (`  at …`) and lines inside a
+reported test's `details:` block are ignored, so `assert.throws(ReferenceError)`
+remains a valid RED. **Recovery is NOT a bypass:** fix the test file so it
+loads cleanly and produces a real assertion failure, then re-run `record-red`.
+Each rejection appends a `tdd-red-load-failure-rejected` row to
+`.work-actions.json` via `appendEnforcementAudit`
+(`allow: false`, `meta: { cycle, testCommand, signature, snippet }`).
+
 **Token gating:** Gated subcommands (`record-red`, `record-green`, `record-refactor`, `transition`) require a token issued by `enforce-step-workflow.js` Rule 5. This prevents unauthorized evidence injection.
 
 **Authorized agents:** `developer-nodejs-tdd`, `developer-react-senior`, `developer-react-ui-architect`, `developer-devops`

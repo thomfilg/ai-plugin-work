@@ -193,6 +193,8 @@ test('loadDomainRegistry: fail-open on EACCES (unreadable file)', () => {
     });
     assert.ok(registry.roots instanceof Map);
   } finally {
-    try { fs.chmodSync(userFile, 0o644); } catch {}
+    try {
+      fs.chmodSync(userFile, 0o644);
+    } catch {}
   }
 });

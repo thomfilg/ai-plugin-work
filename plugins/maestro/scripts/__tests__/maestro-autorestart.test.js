@@ -62,6 +62,10 @@ test('autoRestart on -work session issues kill-session + new-session', () => {
   const actions = loadFreshActions(fakeDir, {
     CLAUDE_BIN: 'fake-claude',
     SKILL_NAME: 'work',
+    // Isolate restart-loop markers to this test's temp dir — without STATE_DIR
+    // they leak to ~/.cache/maestro-conduct/ and accumulate across runs, which
+    // trips RESTART_LOOP_THRESHOLD and wedges the session (flaky in isolation).
+    STATE_DIR: path.join(tmpDir, 'state'),
   });
 
   const ok = actions.autoRestart({
@@ -92,11 +96,72 @@ test('autoRestart on -work session issues kill-session + new-session', () => {
   );
 });
 
+test('autoRestart under MAESTRO_NS relaunches with the namespaced inbox dir (GH-622)', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autorestart-ns-'));
+  const logPath = path.join(tmpDir, 'tmux.log');
+  const fakeDir = makeFakeTmuxDir(logPath);
+  const worktree = path.join(tmpDir, 'wt');
+  fs.mkdirSync(worktree, { recursive: true });
+  delete process.env.MAESTRO_INBOX_DIR;
+  const actions = loadFreshActions(fakeDir, {
+    CLAUDE_BIN: 'fake-claude',
+    SKILL_NAME: 'work',
+    STATE_DIR: path.join(tmpDir, 'state'),
+    MAESTRO_NS: 'proj-a',
+  });
+
+  const ok = actions.autoRestart({
+    session: 'proj-a/ECHO-5-work',
+    ticket: 'ECHO-5',
+    worktree,
+    silenceSec: 600,
+  });
+  assert.strictEqual(ok, true);
+
+  const inv = readInvocations(logPath);
+  // The relaunch command must carry CLAUDE_AGENT_INBOX_DIR so the restarted
+  // agent keeps sharing maestro's per-namespace mailbox (else it drifts back to
+  // the global inbox while /signal stays namespaced).
+  assert.strictEqual(
+    inv[1][6],
+    "CLAUDE_AGENT_INBOX_DIR='/tmp/claude-agent-inbox/proj-a' fake-claude --dangerously-skip-permissions '/work ECHO-5'"
+  );
+  delete process.env.MAESTRO_NS;
+});
+
+test('autoRestart honors MAESTRO_INBOX_DIR override even without a namespace (GH-622)', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autorestart-inbox-'));
+  const logPath = path.join(tmpDir, 'tmux.log');
+  const fakeDir = makeFakeTmuxDir(logPath);
+  const worktree = path.join(tmpDir, 'wt');
+  fs.mkdirSync(worktree, { recursive: true });
+  delete process.env.MAESTRO_NS;
+  const actions = loadFreshActions(fakeDir, {
+    CLAUDE_BIN: 'fake-claude',
+    SKILL_NAME: 'work',
+    STATE_DIR: path.join(tmpDir, 'state'),
+    MAESTRO_INBOX_DIR: '/custom/mail',
+  });
+
+  actions.autoRestart({ session: 'ECHO-5-work', ticket: 'ECHO-5', worktree, silenceSec: 600 });
+
+  const inv = readInvocations(logPath);
+  // Override must flow through so a restart keeps matching maestro's /signal.
+  assert.strictEqual(
+    inv[1][6],
+    "CLAUDE_AGENT_INBOX_DIR='/custom/mail' fake-claude --dangerously-skip-permissions '/work ECHO-5'"
+  );
+  delete process.env.MAESTRO_INBOX_DIR;
+});
+
 test('autoRestart no-ops when worktree directory is missing', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autorestart-miss-'));
   const logPath = path.join(tmpDir, 'tmux.log');
   const fakeDir = makeFakeTmuxDir(logPath);
-  const actions = loadFreshActions(fakeDir, { CLAUDE_BIN: 'fake-claude' });
+  const actions = loadFreshActions(fakeDir, {
+    CLAUDE_BIN: 'fake-claude',
+    STATE_DIR: path.join(tmpDir, 'state'),
+  });
 
   const ok = actions.autoRestart({
     session: 'ECHO-9-work',
@@ -355,6 +420,116 @@ test('per-session keying: -work + helper sharing a ticket do NOT clobber each ot
     markers.sort(),
     ['ECHO-1-dev.silence.json', 'ECHO-1-work.silence.json'].sort(),
     'each session must have its own silence marker keyed by full session name'
+  );
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// GH-514 Task 5: autoRestart must read .maestro-skill per-call via
+// skill-registry.readTicketSkill(ticket) and build launcher `/${skill} ${ticket}`.
+// Unknown / invalid skill values fall open to `work` AND emit a warning to
+// alerts.log naming the rejected value.
+// ────────────────────────────────────────────────────────────────────────────
+
+test('Auto-restart on a follow-up ticket relaunches /follow-up not /work', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autorestart-followup-'));
+  const logPath = path.join(tmpDir, 'tmux.log');
+  const fakeDir = makeFakeTmuxDir(logPath);
+  const worktree = path.join(tmpDir, 'wt');
+  fs.mkdirSync(worktree, { recursive: true });
+
+  // Write .maestro-skill=follow-up in a real ticket directory the registry
+  // reads via TASKS_BASE/<ticket>/.maestro-skill.
+  const tasksBase = path.join(tmpDir, 'tasks');
+  const ticketDir = path.join(tasksBase, 'GH-9001');
+  fs.mkdirSync(ticketDir, { recursive: true });
+  fs.writeFileSync(path.join(ticketDir, '.maestro-skill'), 'follow-up\n');
+
+  const eventLog = path.join(tmpDir, 'events.log');
+  const actions = loadFreshActions(fakeDir, {
+    CLAUDE_BIN: 'fake-claude',
+    // Intentionally do NOT set SKILL_NAME — autoRestart must derive from
+    // the per-ticket .maestro-skill file, not a daemon-level env var that
+    // could have been captured at module load before bootstrap wrote the file.
+    SKILL_NAME: '',
+    TASKS_BASE: tasksBase,
+    LOG_FILE: eventLog,
+    STATE_DIR: path.join(tmpDir, 'state'),
+  });
+
+  const ok = actions.autoRestart({
+    session: 'GH-9001-work',
+    ticket: 'GH-9001',
+    worktree,
+    silenceSec: 600,
+  });
+  assert.strictEqual(ok, true, 'autoRestart should succeed for follow-up ticket');
+
+  const inv = readInvocations(logPath);
+  assert.deepStrictEqual(inv[0], ['kill-session', '-t', 'GH-9001-work']);
+  assert.strictEqual(
+    inv[1][6],
+    "fake-claude --dangerously-skip-permissions '/follow-up GH-9001'",
+    'launcher must use /follow-up resolved from .maestro-skill, not /work'
+  );
+
+  // PR #561 follow-up: the production silence log must carry the
+  // [<ticket>:<skill>] token from formatLogLine so operators can grep it in
+  // /tmp/maestro-conduct.log (README skill-adapter promise).
+  const logContents = fs.existsSync(eventLog) ? fs.readFileSync(eventLog, 'utf8') : '';
+  assert.match(
+    logContents,
+    /\[GH-9001:follow-up\] silence:/,
+    `production AUTO-RESTART log must carry the [<ticket>:<skill>] token; got:\n${logContents}`
+  );
+});
+
+test('Unknown skill value in .maestro-skill falls open to /work with a warning', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'autorestart-bad-skill-'));
+  const logPath = path.join(tmpDir, 'tmux.log');
+  const fakeDir = makeFakeTmuxDir(logPath);
+  const worktree = path.join(tmpDir, 'wt');
+  fs.mkdirSync(worktree, { recursive: true });
+
+  const tasksBase = path.join(tmpDir, 'tasks');
+  const ticketDir = path.join(tasksBase, 'GH-9002');
+  fs.mkdirSync(ticketDir, { recursive: true });
+  const rejectedValue = 'evil; rm -rf /';
+  fs.writeFileSync(path.join(ticketDir, '.maestro-skill'), `${rejectedValue}\n`);
+
+  const eventLog = path.join(tmpDir, 'events.log');
+  const actions = loadFreshActions(fakeDir, {
+    CLAUDE_BIN: 'fake-claude',
+    SKILL_NAME: '',
+    TASKS_BASE: tasksBase,
+    LOG_FILE: eventLog,
+    STATE_DIR: path.join(tmpDir, 'state'),
+  });
+
+  const ok = actions.autoRestart({
+    session: 'GH-9002-work',
+    ticket: 'GH-9002',
+    worktree,
+    silenceSec: 600,
+  });
+  assert.strictEqual(ok, true, 'autoRestart should still succeed (falls open to work)');
+
+  const inv = readInvocations(logPath);
+  assert.strictEqual(
+    inv[1][6],
+    "fake-claude --dangerously-skip-permissions '/work GH-9002'",
+    'invalid skill must fall open to /work launcher'
+  );
+
+  // alerts.log writes to LOG_FILE. The warning must name the rejected value
+  // so the operator can see which .maestro-skill value tripped the whitelist.
+  const logContents = fs.existsSync(eventLog) ? fs.readFileSync(eventLog, 'utf8') : '';
+  assert.ok(
+    logContents.includes(rejectedValue),
+    `alerts log must name the rejected skill value ${JSON.stringify(rejectedValue)}; got:\n${logContents}`
+  );
+  assert.ok(
+    /skill|maestro-skill|whitelist|reject/i.test(logContents),
+    `alerts log must describe the rejection (skill/whitelist/reject); got:\n${logContents}`
   );
 });
 

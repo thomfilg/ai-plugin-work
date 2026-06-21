@@ -1,0 +1,28 @@
+{
+  "_doc": "Copy to <project>/.claude/heimdall-conceal.json and tune. Drives BOTH the PreToolUse guard (deny patterns) and setup-secrets-heimdall.sh (install).",
+
+  "runnerUser": "mcp-runner",
+  "secretsFiles": ["credentials/mcp-secrets.json"],
+  "wrapper": "scripts/mcp-wrapper.js",
+  "nodeBin": "",
+  "_brokerPath_doc": "Optional. Leave empty to default to a PER-REPO path (/usr/local/lib/mcp-broker/<repo>/mcp-pg-broker) so hardening/reverting one project never clobbers another. broker.conf is always written next to the broker binary.",
+  "brokerPath": "",
+  "allowlist": [
+    "atlassian",
+    "postgres-local-dashboard",
+    "postgres-local-status",
+    "postgres-qa-dashboard",
+    "postgres-qa-status",
+    "postgres-dev-dashboard",
+    "postgres-dev-status",
+    "postgres-prod-dashboard",
+    "postgres-prod-status"
+  ],
+  "rewriteMcpJson": true,
+  "mcpJson": ".mcp.json",
+
+  "_guard_overrides": "Optional. If omitted, file patterns derive from secretsFiles basenames; command patterns default to /proc environ + PGPASSWORD.",
+  "denyFilePatterns": [],
+  "denyCommandPatterns": [],
+  "denyMessage": ""
+}

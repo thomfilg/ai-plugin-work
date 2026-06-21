@@ -79,7 +79,11 @@ test('integration: Multi-domain OR semantics — memory fires when any listed do
     registry,
   });
   assert.equal(flakeOnly.has('e2e:flake-triage'), true);
-  assert.equal(tagged.some((d) => flakeOnly.has(d)), true, 'fires via e2e:flake-triage');
+  assert.equal(
+    tagged.some((d) => flakeOnly.has(d)),
+    true,
+    'fires via e2e:flake-triage'
+  );
 
   const ciOnly = classifyActiveDomains({
     prompt: 'ci failure on main',
@@ -87,5 +91,9 @@ test('integration: Multi-domain OR semantics — memory fires when any listed do
     registry,
   });
   assert.equal(ciOnly.has('ci:failure-diagnosis'), true);
-  assert.equal(tagged.some((d) => ciOnly.has(d)), true, 'fires via ci:failure-diagnosis');
+  assert.equal(
+    tagged.some((d) => ciOnly.has(d)),
+    true,
+    'fires via ci:failure-diagnosis'
+  );
 });

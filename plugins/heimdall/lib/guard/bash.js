@@ -101,11 +101,19 @@ function hasGenericWriteIntent(command) {
   return GENERIC_WRITE_RE.test(stripFdRedirects(command.replace(/\s*\n+\s*/g, ' ')));
 }
 
-/** For cp/mv/rsync/ln/install: is the protected path only the SOURCE (a read)? */
+/**
+ * For cp/rsync/ln/install: is the protected path only the SOURCE (a read)?
+ *
+ * `mv` is deliberately excluded: it REMOVES the source, so moving a protected
+ * file out (`mv <protected> /tmp/dest`) is a destructive write to the protected
+ * path, not a read. Letting `mv` qualify here was a bypass — a protected file
+ * could be relocated away with no unlock. The remaining commands leave the
+ * source intact, so source-only references stay genuine reads.
+ */
 function isDirectionSensitiveRead(command, expanded, marker) {
   command = command.replace(/\s*\n+\s*/g, ' ');
   expanded = expanded.replace(/\s*\n+\s*/g, ' ');
-  if (!/\b(?:cp|mv|rsync|ln|install)\b/i.test(command)) return false;
+  if (!/\b(?:cp|rsync|ln|install)\b/i.test(command)) return false;
   if (/\b(?:find\s+.*-exec|xargs|sh\s+-c|bash\s+-c|eval)\b/i.test(command)) return false;
   // Any shell separator/operator (| || & && ;) means the "last arg is the
   // destination" heuristic is unreliable — fail closed (not a pure read) so the

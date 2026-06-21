@@ -257,6 +257,80 @@ node plugins/synapsys/scripts/synapsys-staleness-check.js || {
 
 Passing `--re-consolidate` dispatches the owning profile for each drifted source by spawning the sibling consolidate script with `--profile=<name>`. Profile ownership is resolved by intersecting each profile module's declared source paths against the drifted source. Orphan sources (whose source file no longer exists) are skipped — they require human judgement. Ambiguous sources (claimed by multiple profiles) emit a warning and are skipped. Profile lookup requires the `consolidate-profiles/` directory, which is delivered by GH-442; until it lands, `--re-consolidate` will warn that no profile owns the source and exit non-zero.
 
+## Case study: `slack-handoff-ask-before-clipboard` ⇄ `flaky-test-fix-protocol`
+
+This worked example shows why `synapsys lint` (alias: `synapsys audit triggers`) catches collisions that pairwise trigger inspection misses: the trigger of one memory accidentally fires every time the *body* of another memory is part of the conversation context.
+
+### Inputs
+
+Two memories coexist in the same store. Both are individually reasonable.
+
+`slack-handoff-ask-before-clipboard.md` — guards Slack handoffs.
+
+```markdown
+---
+name: slack-handoff-ask-before-clipboard
+description: Before pasting handoff content to slack, always confirm with the user.
+trigger_prompt: \b(slack|clipboard|handoff)\b
+---
+When the user requests a handoff, do not push the handoff body to slack or the
+clipboard until you have explicitly confirmed the recipient channel. The slack
+target frequently changes mid-conversation; assuming the previous slack
+channel is still correct will leak context.
+```
+
+`flaky-test-fix-protocol.md` — describes how to triage flaky tests. Its body mentions Slack repeatedly because the protocol *starts* in Slack.
+
+```markdown
+---
+name: flaky-test-fix-protocol
+description: When a test is flaky, follow the quarantine + reproduce protocol.
+trigger_prompt: \b(flaky|flake|intermittent|quarantine)\b
+---
+The flaky test fix protocol starts by triaging the failure in the team slack
+channel so other engineers can correlate. Drop the failure URL in slack, link
+the slack thread back to the issue tracker, and only after the slack
+discussion converges should you attempt to reproduce the flake locally. If
+slack history is unavailable, fall back to the issue tracker.
+```
+
+Neither trigger overlaps lexically. But the slack memory's trigger word (`slack`) appears **four times** in the flake memory's body — so any conversation about flaky tests will haul both memories into context, even when the user never typed "slack". That's a silent false-positive surface.
+
+### Lint output
+
+Running the audit surfaces the collision as a trigger×body match-density finding:
+
+```
+$ node plugins/synapsys/scripts/synapsys-lint.js
+slack-handoff-ask-before-clipboard ⇄ flaky-test-fix-protocol
+  cause: trigger of `slack-handoff-ask-before-clipboard` matches body of `flaky-test-fix-protocol` (4 hits on /slack/)
+  suggestion: tighten trigger to the handoff context, e.g. `\b(handoff|paste\s+to\s+slack)\b`
+  overlap=4 hits [severity: high]
+```
+
+Exit code is non-zero, so a CI step or pre-commit hook can block the offending memory from landing.
+
+### Tightened trigger
+
+Replace the overly broad `\b(slack|clipboard|handoff)\b` with a phrase-scoped pattern that fires only on the *handoff* intent — not every passing mention of Slack:
+
+```diff
+ ---
+ name: slack-handoff-ask-before-clipboard
+ description: Before pasting handoff content to slack, always confirm with the user.
+-trigger_prompt: \b(slack|clipboard|handoff)\b
++trigger_prompt: \b(handoff|paste\s+to\s+slack|copy\s+to\s+clipboard)\b
+ ---
+```
+
+Re-running `synapsys lint` after the edit produces:
+
+```
+synapsys-lint: no overlap pairs or broad triggers reported.
+```
+
+Exit code 0, ready to commit.
+
 ## Telemetry
 
 Synapsys records two kinds of events per session so you can measure which memories actually matter:
@@ -354,6 +428,17 @@ Look for this in agent transcripts — it confirms the rule is still load-bearin
 
 The injection ledger is keyed by `(session_id, memory_name)` and lives in a per-session JSON file under the user's synapsys session directory. It is **reset at SessionStart** so every new Claude Code session begins with a clean slate. Stale ledger files older than 7 days are opportunistically garbage-collected on the same SessionStart pass. Errors reading or writing the ledger fail open — the dispatcher falls through to full injection (current pre-fire_mode behavior).
 
+#### `CLAUDE_CODE_SESSION_ID` dependency
+
+The session id used to key the per-session injection ledger is resolved through a four-leg chain, in priority order:
+
+1. **`process.env.CLAUDE_CODE_SESSION_ID`** — the authoritative signal. Claude Code rotates this environment variable on `/clear` and at the start of every new conversation, so the dispatcher automatically reads/writes a fresh ledger file (`~/.claude/synapsys/.session/<CLAUDE_CODE_SESSION_ID>.json`) per session with no explicit clear hook. Values are validated against `SAFE_ID_RE` (`/^[A-Za-z0-9_-]{1,128}$/`); unsafe values are sha256-hashed before touching the filesystem, and empty strings are treated as absent.
+2. **`payload.session_id`** — passed by the hook payload when available.
+3. **`<sessionDir>/.current`** — advisory persistent fallback also published for out-of-process readers (`synapsys-list`, `synapsys-stats`).
+4. **`sha1(cwd + processStartTime)`** — last-resort deterministic fallback.
+
+Graceful degradation: if `CLAUDE_CODE_SESSION_ID` ever disappears in a future Claude Code release, legs 2–4 still produce a usable session id, but `/clear` correctness (a fresh ledger after the user clears the conversation) specifically depends on the env var rotating. Stale `.current` files do not override a present env var, and a new Claude Code session in the same `cwd` always starts with a fresh ledger because the env var changes per conversation.
+
 ### Migration checklist
 
 When upgrading existing memories:
@@ -364,4 +449,4 @@ When upgrading existing memories:
 - Procedural / workflow rules (the agent only needs to read once) — leave the default `once`. No frontmatter change required.
 - Diagnostic playbooks that the agent might forget over a long session — consider `fire_mode: occasionally` with a tuned `fire_cadence`.
 
-The `synapsys:list` skill displays each memory's `fire_mode` (and `fire_cadence` when `occasionally`) plus the current session's `injectedCount`.
+The `synapsys:list` skill displays each memory's `fire_mode` (and `fire_cadence` when `occasionally`) plus the current session's `injectedCount`. `injectedCount` counts ledger-committed emissions (full body + policy-driven reminders); budget-demoted matches (see GH-588) are excluded by design so they re-fire in full on the next match.

@@ -63,8 +63,7 @@ function shouldSkipDir(name, isRoot, parentRelative) {
   // (`plugins/<name>/external_scripts`, `plugins/<name>/docs`, etc.).
   // The plugin root is functionally equivalent to the repo root for these
   // dev-only directories.
-  if (SKIP_DIRS_ROOT_ONLY.has(name) && /^plugins[\\/][^\\/]+$/.test(parentRelative))
-    return true;
+  if (SKIP_DIRS_ROOT_ONLY.has(name) && /^plugins[\\/][^\\/]+$/.test(parentRelative)) return true;
   return false;
 }
 
@@ -178,12 +177,54 @@ function collectViolations(absFiles, repoRoot) {
   return violations;
 }
 
-function applyAllowlist(violations, allowlist) {
-  if (!(allowlist instanceof Set) || allowlist.size === 0) return violations;
-  return violations.map((v) => (allowlist.has(v.file) ? { ...v, severity: 'warning' } : v));
+/**
+ * Compute the set of files touched by the current branch against its base
+ * (`${base}...HEAD`). Returns repo-relative POSIX paths.
+ *
+ * Fail-open: any non-zero git exit, missing `git`, unresolved base, or
+ * thrown exception → returns `new Set()`. The gate stays green when the
+ * diff cannot be computed (mirrors shallow-clone CI environments).
+ */
+function touchedFiles(repoRoot) {
+  try {
+    const base = config.getBaseBranch({ cwd: repoRoot }) || 'origin/main';
+    const res = spawnSync('git', ['diff', '--name-only', `${base}...HEAD`], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    if (!res || res.status !== 0) return new Set();
+    const out = new Set();
+    for (const line of res.stdout.split('\n')) {
+      const trimmed = line.trim();
+      if (trimmed.length > 0) out.add(path.normalize(trimmed));
+    }
+    return out;
+  } catch {
+    return new Set();
+  }
 }
 
-function formatHuman(violations) {
+function applyAllowlist(violations, allowlist, touched) {
+  if (!(allowlist instanceof Set) || allowlist.size === 0) return violations;
+  const touchedSet = touched instanceof Set ? touched : new Set();
+  return violations.map((v) => {
+    if (!allowlist.has(v.file)) return v;
+    if (touchedSet.has(v.file)) return v; // touched + allowlisted → stays error
+    return { ...v, severity: 'warning' }; // legacy downgrade
+  });
+}
+
+function violationTag(v, allowlist, touched) {
+  const onAllowlist = allowlist instanceof Set && allowlist.has(v.file);
+  const wasTouched = touched instanceof Set && touched.has(v.file);
+  if (onAllowlist && wasTouched) {
+    return ' (allowlisted but touched in this PR — fix or remove from .quality-exceptions)';
+  }
+  if (v.severity === 'warning' && onAllowlist) return ' (allowlisted)';
+  return '';
+}
+
+function formatHuman(violations, allowlist, touched) {
   if (violations.length === 0) return 'quality: clean\n';
   const byRule = new Map();
   for (const v of violations) {
@@ -194,8 +235,7 @@ function formatHuman(violations) {
   for (const [rule, list] of byRule) {
     lines.push(`# ${rule}`);
     for (const v of list) {
-      const tag = v.severity === 'warning' ? ' (allowlisted)' : '';
-      lines.push(`  ${v.file}:${v.line}  ${v.message}${tag}`);
+      lines.push(`  ${v.file}:${v.line}  ${v.message}${violationTag(v, allowlist, touched)}`);
     }
   }
   return `${lines.join('\n')}\n`;
@@ -233,8 +273,11 @@ function main(argv) {
     return 2;
   }
 
-  violations = applyAllowlist(violations, allowlist);
-  process.stdout.write(opts.json ? formatJson(violations) : formatHuman(violations));
+  const touched = touchedFiles(repoRoot);
+  violations = applyAllowlist(violations, allowlist, touched);
+  process.stdout.write(
+    opts.json ? formatJson(violations) : formatHuman(violations, allowlist, touched)
+  );
   return violations.some((v) => v.severity === 'error') ? 1 : 0;
 }
 

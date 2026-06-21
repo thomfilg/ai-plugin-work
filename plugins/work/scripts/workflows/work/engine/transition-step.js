@@ -393,7 +393,9 @@ function transitionStep(ticket, targetStep, deps) {
     let pluginVersion = 'unknown';
     try {
       // __dirname = plugins/work/scripts/workflows/work/engine → repo root is 6 levels up
-      pluginVersion = require(path.join(__dirname, '..', '..', '..', '..', '..', '..', 'package.json')).version;
+      pluginVersion = require(
+        path.join(__dirname, '..', '..', '..', '..', '..', '..', 'package.json')
+      ).version;
     } catch {
       /* fail-open: leave pluginVersion as 'unknown' */
     }

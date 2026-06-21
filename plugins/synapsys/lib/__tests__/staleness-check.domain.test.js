@@ -45,10 +45,7 @@ const REGISTRY = makeRegistry({
 test('Lint warns when a memory references an unknown domain — unknown root', () => {
   const { lintDomainsForMemory } = require(STALENESS_SCRIPT);
   assert.equal(typeof lintDomainsForMemory, 'function', 'helper is exported');
-  const warnings = lintDomainsForMemory(
-    { name: 'mem-bad-root', domain: ['nope'] },
-    REGISTRY
-  );
+  const warnings = lintDomainsForMemory({ name: 'mem-bad-root', domain: ['nope'] }, REGISTRY);
   assert.equal(warnings.length, 1, 'one warning for one unknown value');
   const w = warnings[0];
   assert.equal(w.memory, 'mem-bad-root');
@@ -68,10 +65,7 @@ test('Lint warns when a memory references an unknown domain — unknown leaf und
 
 test('no warning when memory references a known root', () => {
   const { lintDomainsForMemory } = require(STALENESS_SCRIPT);
-  const warnings = lintDomainsForMemory(
-    { name: 'mem-root', domain: ['e2e'] },
-    REGISTRY
-  );
+  const warnings = lintDomainsForMemory({ name: 'mem-root', domain: ['e2e'] }, REGISTRY);
   assert.deepEqual(warnings, []);
 });
 
@@ -86,15 +80,9 @@ test('no warning when memory references a known root:leaf', () => {
 
 test('backward-compat: memory without `domain:` produces no warnings', () => {
   const { lintDomainsForMemory } = require(STALENESS_SCRIPT);
-  assert.deepEqual(
-    lintDomainsForMemory({ name: 'mem-none', domain: [] }, REGISTRY),
-    []
-  );
+  assert.deepEqual(lintDomainsForMemory({ name: 'mem-none', domain: [] }, REGISTRY), []);
   // undefined domain too
-  assert.deepEqual(
-    lintDomainsForMemory({ name: 'mem-undef' }, REGISTRY),
-    []
-  );
+  assert.deepEqual(lintDomainsForMemory({ name: 'mem-undef' }, REGISTRY), []);
 });
 
 test('mixed valid/invalid: only invalid values produce warnings', () => {
