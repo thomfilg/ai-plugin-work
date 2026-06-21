@@ -167,6 +167,32 @@ test('first-ever call (no marker): sends probe, attempt 1, no kill — regressio
   assert.equal(probeAlerts.length, 1, 'dead-end-probe alert emitted');
 });
 
+test('ticket not in any manifest (attempts=0): bails — no probe, no kill', () => {
+  const { stateDir, sessionDir, alertFile } = setup();
+  // Intentionally do NOT seed a manifest, so incrementTaskAttempts returns 0.
+  const { actions, tmuxStub } = freshEnv({ stateDir, alertFile, sessionDir });
+
+  const result = actions.freeDeadEndSlot({
+    session: `${TICKET}-work`,
+    ticket: TICKET,
+    kind: 'question',
+    repeatCount: 5,
+  });
+
+  assert.equal(result, false, 'untracked ticket must bail');
+  assert.equal(kills(tmuxStub).length, 0, 'no kill for an untracked ticket');
+  const probes = tmuxStub.filter(
+    (c) =>
+      c.args[0] === 'send-keys' &&
+      c.args.some((a) => typeof a === 'string' && a.includes('MAESTRO DIAGNOSTIC'))
+  );
+  assert.equal(probes.length, 0, 'no diagnostic probe for an untracked ticket');
+  const ended = alerts(alertFile).filter(
+    (a) => a.kind === 'dead-end' || a.kind === 'dead-end-probe'
+  );
+  assert.equal(ended.length, 0, 'no dead-end/probe alert for an untracked ticket');
+});
+
 test('AUTO_FREE_DEAD_END=0 disables freeDeadEndSlot entirely', () => {
   const { stateDir, sessionDir, alertFile } = setup();
   seedManifest(sessionDir, TICKET);
