@@ -291,6 +291,12 @@ for TICKET in "$@"; do
     MAESTRO_STATE_DIR="${HOME}/.cache/maestro-conduct"
     rm -f "$MAESTRO_STATE_DIR/$TICKET.dead-end.json" \
           "$MAESTRO_STATE_DIR/$TICKET.ci-rotated.json" 2>/dev/null || true
+    # Also reset the manifest attempt counter (mirrors maybeAutoBootstrap), so a
+    # manually re-bootstrapped ticket starts at attempt 1 instead of jumping to
+    # `blocked` on the next stall. Uses the same manifest module the daemon does
+    # so namespace / session-dir resolution matches. Fail-open.
+    node -e 'require(process.argv[1]).resetTaskAttempts(process.argv[2])' \
+      "$_MAESTRO_SCRIPT_DIR/lib/maestro-conduct/manifest.js" "$TICKET" 2>/dev/null || true
     tmux new-session -d -s "$SESSION" -c "$WT" \
       "${INBOX_ENV}$CLAUDE_BIN --dangerously-skip-permissions '/$TICKET_SKILL $TICKET'"
     echo "[$TICKET] launched tmux session $SESSION (claude /$TICKET_SKILL $TICKET)"
