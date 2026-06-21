@@ -294,6 +294,13 @@ function tickSession(session) {
   // advanced ticket isn't treated as still-stalled this tick.
   detectPhaseAdvance(ctx, restartEligible);
 
+  // Agents at ci/complete are doing zero useful work — kill them immediately to
+  // free the slot, regardless of question/silence/spinner state. Runs BEFORE
+  // question detection so a parked agent still showing a menu can't hold its
+  // -work slot indefinitely, and before silence so we don't waste a tick
+  // auto-restarting them first.
+  if (ciGate.maybeRotateOnPhase({ ctx, state, actions, restartEligible })) return;
+
   // Question always wins — never nudge while the agent is waiting on us.
   const qHit = DETECTORS.question.detect(ctx);
   if (qHit.hit) {
@@ -306,11 +313,6 @@ function tickSession(session) {
   alerts.resetCount(
     alerts.alertKey({ session: ctx.session, kind: 'question-pending', phase: ctx.phase })
   );
-
-  // Agents at ci/complete are doing zero useful work — kill them immediately
-  // to free the slot, regardless of silence/spinner state. Runs before silence
-  // so we don't waste a tick auto-restarting them first.
-  if (ciGate.maybeRotateOnPhase({ ctx, state, actions, restartEligible })) return;
 
   // Stop-condition runs before the detectors: a ticket whose oracle reports
   // done must be reaped (kill + rotate to the next queued ticket) BEFORE the
