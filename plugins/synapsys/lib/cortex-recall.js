@@ -27,20 +27,17 @@ const sentinel = require('./consume-sentinel');
 const { formatBlock } = require('./cortex-format');
 
 /**
- * Default command runner for the git/gh probes below. Unlike `memory-store`'s
- * `safeExec` (which runs through a shell via `execSync`), this splits the
- * command into an argv array and uses `execFileSync` with NO shell. That closes
- * the CodeQL "shell command built from environment values" / "indirect
- * uncontrolled command line" sinks: a tainted token (e.g. a ticket number
- * interpolated into `gh issue view <N>`) becomes a plain argv element rather
- * than a shell-interpreted word, so it can never be parsed as a command. All
- * call sites here use fixed, space-separated commands with no quoted arguments,
- * so a whitespace split is lossless. Never throws — returns '' on any failure.
- *
+ * Default command runner for the git/gh probes below. Splits the command into an
+ * argv array and uses `execFileSync` with NO shell — a tainted token (e.g. a
+ * ticket number in `gh issue view <N>`) is a plain argv element, never shell-
+ * interpreted, closing the CodeQL "uncontrolled command line" sinks. All call
+ * sites use fixed, space-separated commands, so a whitespace split is lossless.
+ * Never throws — returns '' on any failure.
  * @param {string} cmd space-separated command, e.g. `git status --porcelain`
  * @param {string} cwd working directory
  * @returns {string} trimmed stdout, or '' on error
  */
+const EXEC_TIMEOUT_MS = 2000;
 function shellFreeExec(cmd, cwd) {
   try {
     const [file, ...args] = String(cmd).split(/\s+/).filter(Boolean);
@@ -49,6 +46,9 @@ function shellFreeExec(cmd, cwd) {
       cwd,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
+      // Bound the networked `gh issue view` so a slow/offline call can't block SessionStart — timeout throws → local fallback, honoring R1 (R14).
+      timeout: EXEC_TIMEOUT_MS,
+      killSignal: 'SIGKILL',
     }).trim();
   } catch {
     return '';

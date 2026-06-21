@@ -402,7 +402,9 @@ Synapsys surfaces prior-session insights from cortex without any agent action. T
 
 ### Phase 1 — SessionStart recall
 
-On `SessionStart`, synapsys schedules a fire-and-forget background recall that issues **two bounded `cortex_recall` calls**: one keyed on the ticket id, and one on derived keywords from the session context. Results are persisted to a per-session cache file. At the **next `UserPromptSubmit` boundary**, synapsys reads the cache and injects a `[cortex:auto-recall]` block into its existing stdout channel — the same channel that already carries matched-memory bodies. When a query returns nothing, an empty marker line is emitted:
+Phase 1 runs **only when a recall provider is resolvable** (see [Recall provider](#recall-provider--synapsys_cortex_recall_module)). With no provider — the shipped default — SessionStart schedules nothing, writes no cache, and injects nothing; the session is entirely unaffected and no marker is emitted.
+
+When a provider *is* configured: on `SessionStart`, synapsys schedules a fire-and-forget background recall that issues **two bounded provider `recall` calls** (the provider's bridge to `cortex_recall`): one keyed on the ticket id, and one on derived keywords from the session context. Results are persisted to a per-session cache file. At the **next `UserPromptSubmit` boundary**, synapsys reads the cache and injects a `[cortex:auto-recall]` block into its existing stdout channel — the same channel that already carries matched-memory bodies. When a configured provider's query returns nothing, an empty marker line is emitted (the recall genuinely ran and found nothing):
 
 ```
 [cortex:auto-recall] query="<q>" projectId="<p>" → no matches

@@ -99,14 +99,23 @@ function scheduleSessionRecall(payload) {
   if (config.on_session_start === false) return;
 
   try {
-    const cwd = payload.cwd || process.cwd();
-    const { projectId, queries } = buildSessionQueries(cwd, config);
-    const sessionId = sessionIdOf(payload);
+    // Gate BEFORE any derivation (cheap, no network). No resolvable recall
+    // provider → Phase 1 is silently disabled: the shipped default has no
+    // provider, so without this the detached worker writes empty results and the
+    // next prompt injects a "→ no matches" marker that falsely claims cortex ran
+    // when it never did (GH-519 review: baseline marker lies). Returning here
+    // also means the networked `gh issue view` keyword derivation never runs in
+    // the default case, keeping SessionStart non-blocking (R1).
+    if (resolveInlineRecall() == null) return;
 
+    const sessionId = sessionIdOf(payload);
     // Skip when this session already consumed Phase 1: a repeat SessionStart
     // (resume/compact) would otherwise spawn recall work the sentinel discards
     // (GH-519: rerun-recall-after-consume).
     if (consumeSentinel.isConsumed(sessionCache, sessionId, home)) return;
+
+    const cwd = payload.cwd || process.cwd();
+    const { projectId, queries } = buildSessionQueries(cwd, config);
 
     // Write a synchronous baseline record (the scheduled queries with empty
     // results) BEFORE spawning the detached recall. This guarantees a

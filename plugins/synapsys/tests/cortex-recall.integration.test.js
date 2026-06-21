@@ -107,6 +107,11 @@ function writeRecallModule(home, body) {
   return file;
 }
 
+/** Path to a minimal recall provider (empty results) — enough to resolve Phase 1. */
+function writeStubRecall(home) {
+  return writeRecallModule(home, "'use strict';\nmodule.exports = { recall() { return []; } };\n");
+}
+
 /** Build a local synapsys store under cwd with a single memory file. */
 function seedStore(cwd, fileName, contents) {
   const storeDir = path.join(cwd, '.claude', 'synapsys');
@@ -134,6 +139,7 @@ test('SessionStart schedules two recall queries (ticket + derived keyword) with 
           SYNAPSYS_CORTEX_TICKET: 'GH-519',
           SYNAPSYS_CORTEX_PROJECT: 'claude-plugin-work',
           SYNAPSYS_CORTEX_KEYWORDS: 'maestro cortex recall',
+          SYNAPSYS_CORTEX_RECALL_MODULE: writeStubRecall(home),
           SYNAPSYS_NO_SETUP_HINT: '1',
         },
       }
@@ -155,6 +161,45 @@ test('SessionStart schedules two recall queries (ticket + derived keyword) with 
     for (const q of record.queries) {
       assert.equal(q.projectId, 'claude-plugin-work', 'projectId resolved to the git-remote repo');
     }
+  } finally {
+    cleanup(home);
+  }
+});
+
+// Scenario (review BLOCKER 1): the shipped default has no recall provider, so
+// Phase 1 must stay silent — schedule nothing and never inject a "→ no matches"
+// marker that would falsely claim cortex ran.
+test('SessionStart with no recall provider schedules nothing and stays silent (default)', () => {
+  const home = mkHome();
+  const sessionId = `sess-${process.pid}-${Date.now()}-noprov`;
+  try {
+    const start = runHook(
+      'SessionStart',
+      { session_id: sessionId, cwd: home },
+      {
+        home,
+        // No SYNAPSYS_CORTEX_RECALL_MODULE — the out-of-the-box default.
+        env: {
+          SYNAPSYS_CORTEX_TICKET: 'GH-519',
+          SYNAPSYS_CORTEX_KEYWORDS: 'maestro cortex recall',
+          SYNAPSYS_NO_SETUP_HINT: '1',
+        },
+      }
+    );
+    assert.equal(start.status, 0, 'SessionStart still exits 0');
+    assert.equal(waitForCache(home, sessionId, 30), null, 'no baseline/worker cache is written');
+
+    // The next prompt injects no auto-recall block at all (no lying marker).
+    const prompt = runHook(
+      'UserPromptSubmit',
+      { session_id: sessionId, prompt: 'hello', cwd: home },
+      { home, env: { SYNAPSYS_NO_SETUP_HINT: '1' } }
+    );
+    assert.equal(prompt.status, 0);
+    assert.ok(
+      !/\[cortex:auto-recall\]/.test(prompt.stdout),
+      'no marker is injected when no provider ran'
+    );
   } finally {
     cleanup(home);
   }
@@ -251,6 +296,7 @@ test('SessionStart after a consumed Phase 1 schedules nothing (no new baseline c
         env: {
           SYNAPSYS_CORTEX_TICKET: 'GH-519',
           SYNAPSYS_CORTEX_KEYWORDS: 'maestro cortex recall',
+          SYNAPSYS_CORTEX_RECALL_MODULE: writeStubRecall(home),
           SYNAPSYS_NO_SETUP_HINT: '1',
         },
       }
@@ -445,6 +491,7 @@ test('SessionStart with no session_id keys the baseline cache off the shared res
           SYNAPSYS_CORTEX_TICKET: 'GH-519',
           SYNAPSYS_CORTEX_PROJECT: 'claude-plugin-work',
           SYNAPSYS_CORTEX_KEYWORDS: 'maestro cortex recall',
+          SYNAPSYS_CORTEX_RECALL_MODULE: writeStubRecall(home),
           SYNAPSYS_NO_SETUP_HINT: '1',
         },
       }
