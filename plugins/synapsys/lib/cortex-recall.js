@@ -355,27 +355,27 @@ function consumeCache(sessionId, { home, config = {} } = {}) {
   } catch {
     record = null;
   }
-  // Defer the SessionStart `baseline:true` placeholder (GH-519:
-  // early-consume-drops-recall): consuming its empty results would inject "no
-  // matches" and sentinel-drop the real detached write. Leave it for a later
-  // prompt to pick up the real write (which never carries `baseline`).
-  if (record && record.baseline === true) return '';
-  // Mark consumed at this first real attempt regardless of content so a late
-  // background write can't re-inject (GH-519: late-recall-without-sentinel).
+  // Defer the baseline placeholder so the real detached write survives (GH-519).
+  if (isBaselineRecord(record)) return '';
+  // Mark consumed regardless of content so a late write can't re-inject (GH-519).
   sentinel.markConsumed(cache, sessionId, home);
   if (!record || !Array.isArray(record.queries) || record.queries.length === 0) return '';
   const block = formatRecallBlock(record.queries, config);
   try {
     cache.delete(sessionId, { home });
   } catch {
-    // Ignore — best-effort cleanup.
+    /* best-effort cleanup */
   }
   return block;
 }
 
-// Format the `[cortex:auto-recall]` block from cached `{ query, projectId,
-// results, ranAt }` records, applying the config age/char/result bounds.
-// Returns '' on any failure (R14).
+// The SessionStart `baseline:true` placeholder consumeCache defers (GH-519).
+function isBaselineRecord(record) {
+  return record?.baseline === true;
+}
+
+// Format the `[cortex:auto-recall]` block from cached records, applying the
+// config age/char/result bounds. Returns '' on any failure (R14).
 function formatRecallBlock(queries, config) {
   try {
     return formatBlock({
