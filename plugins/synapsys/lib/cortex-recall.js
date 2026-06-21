@@ -22,9 +22,7 @@ const path = require('node:path');
 const { spawn: defaultSpawn, execFileSync } = require('node:child_process');
 
 const { getCurrentTaskId } = require('./ticket-id');
-const cache = require('./session-cache');
-const sentinel = require('./consume-sentinel');
-const { formatBlock } = require('./cortex-format');
+const { consumeCache } = require('./consume-cache');
 
 /**
  * Default command runner for the git/gh probes below. Splits the command into an
@@ -331,71 +329,6 @@ function buildRecallArgs({ bounded, projectId, sessionId, home }) {
     String(home || ''),
     ...bounded.flatMap((q) => ['--query', q]),
   ];
-}
-
-/**
- * Consume the background cache for a session: read the record, format the
- * `[cortex:auto-recall]` block, delete the cache file, and set a single-consume
- * sentinel. Returns '' when nothing to consume or when already consumed. Never
- * throws (R14).
- * @param {string} sessionId session identifier
- * @param {{ home: string, config?: { max_age_days?: number, max_chars_per_memory?: number } }} opts
- * @returns {string} the formatted block, or '' when nothing to consume
- */
-function consumeCache(sessionId, { home, config = {} } = {}) {
-  // Single-consume guard: an already-consumed session drops late cache, no inject.
-  if (sentinel.isConsumed(cache, sessionId, home)) {
-    sentinel.dropStaleCache(cache, sessionId, home);
-    return '';
-  }
-
-  let record;
-  try {
-    record = cache.read(sessionId, { home });
-  } catch {
-    record = null;
-  }
-  // Defer the baseline placeholder so the real detached write survives (GH-519).
-  if (isBaselineRecord(record)) return '';
-  // Atomically claim Phase 1 regardless of content so a late write can't
-  // re-inject (GH-519). A lost claim means a concurrent consume already injected
-  // this turn — drop the cache and inject nothing (closes the TOCTOU window).
-  if (!sentinel.markConsumed(cache, sessionId, home)) {
-    sentinel.dropStaleCache(cache, sessionId, home);
-    return '';
-  }
-  if (!record || !Array.isArray(record.queries) || record.queries.length === 0) return '';
-  const block = formatRecallBlock(record.queries, config);
-  // Persist a READ-ONLY summary (last query + hit counts, no bodies) BEFORE
-  // deleting the data cache so `/synapsys recall` can still report this
-  // session's recall after the single-consume delete (GH-519 review).
-  sentinel.writeSummary(cache, sessionId, home, record.queries);
-  try {
-    cache.delete(sessionId, { home });
-  } catch {
-    /* best-effort cleanup */
-  }
-  return block;
-}
-
-// The SessionStart `baseline:true` placeholder consumeCache defers (GH-519).
-function isBaselineRecord(record) {
-  return record?.baseline === true;
-}
-
-// Format the `[cortex:auto-recall]` block from cached records, applying the
-// config age/char/result bounds. Returns '' on any failure (R14).
-function formatRecallBlock(queries, config) {
-  try {
-    return formatBlock({
-      queries,
-      maxAgeDays: config.max_age_days ?? 180,
-      maxChars: config.max_chars_per_memory ?? 500,
-      maxResults: config.max_results_per_query ?? 5,
-    });
-  } catch {
-    return '';
-  }
 }
 
 module.exports = {
