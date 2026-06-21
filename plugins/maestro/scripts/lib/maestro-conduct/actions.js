@@ -61,13 +61,13 @@ function maybeAutoBootstrap(taskId) {
   });
   if (res.status === 0) {
     manifest.updateTaskStatus(taskId, 'in_progress', 'auto-bootstrapped by daemon');
-    // Clear the per-lifecycle dead-end marker so the freshly-bootstrapped
-    // agent gets a clean slate. Without this, freeDeadEndSlot's
-    // `if (marker.killed) return false` would mute every future rotation
-    // for this ticket.
+    // Clear per-lifecycle dead-end/ci-rotated markers AND reset the manifest
+    // attempt counter so the freshly-bootstrapped agent gets a clean slate —
+    // without the reset it could jump straight to `blocked` on the next stall.
     try {
       state.clear(taskId, 'dead-end');
       state.clear(taskId, 'ci-rotated');
+      manifest.resetTaskAttempts(taskId);
     } catch {}
   }
   return res.status === 0;
