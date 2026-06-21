@@ -54,6 +54,17 @@ function freeDeadEndSlot({ session, ticket, kind, repeatCount, sha, killAndBoots
 
   const attempts = manifest.incrementTaskAttempts(ticket);
 
+  // incrementTaskAttempts returns 0 when the ticket isn't registered in any
+  // manifest. An untracked session has no pool slot to account for, so dead-end
+  // rotation does not apply — bail without probing or killing rather than fall
+  // through to rotateDeadEnd and kill a session we can't attempt-account for.
+  if (attempts === 0) {
+    alerts.log(
+      `${session} DEAD-END skipped — ticket ${ticket} not in any manifest; no attempt accounting, no rotation`
+    );
+    return false;
+  }
+
   // First attempt: don't kill — ask the agent to diagnose itself first so the
   // operator can read what's actually blocking before rotating the slot.
   if (attempts === 1) {
