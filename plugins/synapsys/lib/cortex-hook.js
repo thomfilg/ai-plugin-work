@@ -152,9 +152,13 @@ function writeBaselineRecall({ queries, projectId, sessionId, home }) {
 function consumeAutoRecall(payload) {
   const home = recallHome();
   const { config, enabled } = recallEnabled(home);
-  if (!enabled) return '';
   try {
-    return cortexRecall.consumeCache(sessionIdOf(payload), { home, config });
+    // Always consume the cache — even when auto-recall is disabled — so an
+    // existing SessionStart cache is marked with the single-consume sentinel
+    // and deleted on this first prompt. Skipping cleanup would let a later
+    // prompt (with recall re-enabled) inject Phase 1 output on the wrong turn.
+    const block = cortexRecall.consumeCache(sessionIdOf(payload), { home, config });
+    return enabled ? block : '';
   } catch {
     return '';
   }
