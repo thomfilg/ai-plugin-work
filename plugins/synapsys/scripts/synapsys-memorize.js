@@ -122,7 +122,9 @@ try {
   }
 } catch (err) {
   // Lint failure must never block memorize; surface a soft note on stderr.
-  console.error(`warn: synapsys memorize: post-write lint skipped (${err && err.message ? err.message : err})`);
+  console.error(
+    `warn: synapsys memorize: post-write lint skipped (${err && err.message ? err.message : err})`
+  );
 }
 
 console.log(JSON.stringify({ written: outPath, store: target.kind, name }, null, 2));
