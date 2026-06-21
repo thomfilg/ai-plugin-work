@@ -38,6 +38,7 @@
 'use strict';
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
 
 // OPT-IN by default. The conductor session sets MAESTRO_STOP_GUARD=1 when it
 // spawns the maestro daemon (via Monitor). Other Claude sessions on the same
@@ -50,7 +51,7 @@ if (process.env.MAESTRO_STOP_GUARD !== '1') process.exit(0);
 const ALERT_FILE = process.env.ALERT_FILE || '/tmp/maestro-alerts.jsonl';
 const STATE_FILE =
   process.env.MAESTRO_STOP_GUARD_STATE ||
-  path.join(process.env.HOME || '/tmp', '.cache', 'maestro-stop-guard.state');
+  path.join(os.homedir(), '.cache', 'maestro-stop-guard.state');
 
 if (!fs.existsSync(ALERT_FILE)) process.exit(0);
 
