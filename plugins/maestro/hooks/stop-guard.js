@@ -48,7 +48,17 @@ const os = require('os');
 // every Claude session globally and trapped unrelated agents.
 if (process.env.MAESTRO_STOP_GUARD !== '1') process.exit(0);
 
-const ALERT_FILE = process.env.ALERT_FILE || '/tmp/maestro-alerts.jsonl';
+// Resolve the alert file through the same namespace helper the conductor uses
+// (namespace.alertFile() honors ALERT_FILE, else /tmp/maestro-alerts[-<MAESTRO_NS>].jsonl)
+// so a namespaced conductor and this Stop hook read the SAME file instead of the
+// hook tailing the global path while the daemon writes a namespaced one. Fail
+// open to the global default if the helper can't be loaded.
+let ALERT_FILE;
+try {
+  ALERT_FILE = require('../scripts/lib/maestro-conduct/namespace').alertFile();
+} catch {
+  ALERT_FILE = process.env.ALERT_FILE || '/tmp/maestro-alerts.jsonl';
+}
 const STATE_FILE =
   process.env.MAESTRO_STOP_GUARD_STATE ||
   path.join(os.homedir(), '.cache', 'maestro-stop-guard.state');
