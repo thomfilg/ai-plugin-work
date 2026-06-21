@@ -72,6 +72,12 @@ function debugLog(message) {
   }
 }
 
+// Pure helpers (debug-section append, phase test flags, block messages) live in
+// the sibling module to keep this entrypoint under the static-quality budget.
+const { appendDebugSection, applyPhaseTestFlags, redPassedMessage, citationBlockMessage } = require(
+  path.join(__dirname, 'enforce-tdd-on-stop-helpers')
+);
+
 if (!ticketId) {
   debugLog('SKIP: no WORK_TICKET_ID');
   process.exit(0);
@@ -159,7 +165,7 @@ try {
   const { readTddEvidence, validateTddEvidence } = require(
     path.join(__dirname, '..', '..', 'work', 'lib', 'tdd-enforcement')
   );
-  const result = readTddEvidence(safeTicket, 'implement', taskNum);
+  const result = readTddEvidence(TASKS_BASE, safeTicket, 'implement', taskNum);
   exists = result.exists;
   if (exists) {
     valid = validateTddEvidence(result.evidence).valid;
@@ -179,14 +185,38 @@ if (exists && valid) {
 const { execFileSync, execSync } = require('child_process');
 const tasksDir = path.join(TASKS_BASE, safeTicket);
 
+// Resolve the runnable command via the shared resolution path (GH-610):
+//   - legacy `### Test Command` is honoured verbatim;
+//   - else, with the Test Strategy validator flag ON, an envelope-kind
+//     `### Test Strategy` synthesises a runnable command (auto-run/record below);
+//   - citation kinds (`verified-by`/`wiring-citation`) resolve to NO command by
+//     design — they are satisfied by the peer-citation green evidence checked
+//     above. We must NOT treat that null as "missing command + bypass"; instead
+//     fall through to the manual block so the agent records citation evidence.
+//   - a task with neither a command nor a strategy resolves to null/source:null,
+//     preserving the legacy "no test command → allow stop" bypass.
+// Fail-open: any error here behaves as the legacy path (testCommand stays null).
 let testCommand = null;
+let isStrategyResolution = false;
 try {
-  const { parseTasks } = require(path.join(__dirname, '..', '..', 'work', 'lib', 'task-parser'));
-  const tasks = parseTasks(tasksDir);
-  const currentTask = tasks?.find((t) => t.num === taskNum);
-  testCommand = currentTask?.testCommand || null;
+  const { resolveTaskTestExecution } = require(
+    path.join(__dirname, '..', '..', 'work', 'lib', 'step-enrichments', 'implement-gate')
+  );
+  const worktreeDir = process.cwd();
+  const resolved = resolveTaskTestExecution(tasksDir, taskNum, worktreeDir);
+  testCommand = resolved.command || null;
+  isStrategyResolution = resolved.source === 'strategy';
 } catch {
-  // Can't parse tasks — fall through to manual block
+  // Synthesis threw (e.g. non-citation strategy → null) or the module failed to
+  // load — fall back to the legacy verbatim reader so the hook stays fail-open.
+  try {
+    const { parseTasks } = require(path.join(__dirname, '..', '..', 'work', 'lib', 'task-parser'));
+    const tasks = parseTasks(tasksDir);
+    const currentTask = tasks?.find((t) => t.num === taskNum);
+    testCommand = currentTask?.testCommand || null;
+  } catch {
+    // Can't parse tasks — fall through to manual block
+  }
 }
 
 if (testCommand) {
@@ -221,18 +251,7 @@ if (testCommand) {
   // Apply phase-aware test flags:
   //   RED:   run ALL tests (need full failure picture)
   //   GREEN/REFACTOR: fail-fast on first failure (no point running rest)
-  let phaseTestCommand = testCommand;
-  if (currentPhase === 'green' || currentPhase === 'refactor') {
-    // Append fail-fast flags for common test runners
-    // vitest/jest: --bail    playwright: already fails fast by default
-    // Only append if not already present
-    if (!/--bail\b/.test(phaseTestCommand)) {
-      phaseTestCommand = phaseTestCommand.replace(
-        /(pnpm\s+test(?::unit|:integration)?)/g,
-        '$1 --bail'
-      );
-    }
-  }
+  const phaseTestCommand = applyPhaseTestFlags(testCommand, currentPhase);
 
   // Run test command and record evidence through the authorized writer.
   // The hook MUST NOT write phase state directly — tdd-phase-state.js is the
@@ -254,24 +273,7 @@ if (testCommand) {
       // Tests passed in RED — block the stop with a clear instruction. Do NOT
       // fabricate GREEN. The agent must reconcile: either record a real failing
       // test (RED), or call task-next.js to get the next instruction.
-      process.stderr.write(
-        [
-          '',
-          'STOP BLOCKED: RED phase has no failing-test evidence yet, but the',
-          'current test command exits 0. This means one of:',
-          '  (a) You skipped writing the failing test first.',
-          '  (b) The test was already passing before this cycle started.',
-          '  (c) You implemented the production code before recording RED.',
-          '',
-          'The hook will NOT fabricate evidence for you — that would corrupt the',
-          'TDD audit trail (see RC-C in implement-gate stuckness investigation).',
-          '',
-          'What to do:',
-          `  Run: node $CLAUDE_PLUGIN_ROOT/scripts/workflows/work-implement/task-next.js ${safeTicket} task${taskNum}`,
-          '  It will tell you precisely which phase you are in and what to do next.',
-          '',
-        ].join('\n')
-      );
+      process.stderr.write(redPassedMessage(safeTicket, taskNum));
       debugLog('STOP BLOCKED: tests passed in RED, refused to fabricate evidence');
       process.exit(2); // block the stop — agent must call task-next.js
     } catch {
@@ -310,16 +312,11 @@ if (testCommand) {
     }
 
     // Log success
-    try {
-      const debugPath = path.join(TASKS_BASE, safeTicket, 'debug.md');
-      const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
-      fs.appendFileSync(
-        debugPath,
-        `\n## ${timestamp} — enforce-tdd-on-stop\n\n- **[AUTO-RECORDED]** task ${taskNum}: ${currentPhase} phase recorded via test command\n`
-      );
-    } catch {
-      /* best-effort */
-    }
+    appendDebugSection(
+      TASKS_BASE,
+      safeTicket,
+      `- **[AUTO-RECORDED]** task ${taskNum}: ${currentPhase} phase recorded via test command`
+    );
 
     // If we recorded GREEN or REFACTOR, allow stop
     if (effectivePhase === 'green' || effectivePhase === 'refactor') {
@@ -335,16 +332,11 @@ if (testCommand) {
   } catch (err) {
     // record-* failed — likely test command error or phase mismatch
     const msg = err.stderr || err.stdout || err.message || 'unknown';
-    try {
-      const debugPath = path.join(TASKS_BASE, safeTicket, 'debug.md');
-      const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
-      fs.appendFileSync(
-        debugPath,
-        `\n## ${timestamp} — enforce-tdd-on-stop\n\n- **[AUTO-RUN FAILED]** task ${taskNum}: ${currentPhase} phase — ${String(msg).substring(0, 200)}\n`
-      );
-    } catch {
-      /* best-effort */
-    }
+    appendDebugSection(
+      TASKS_BASE,
+      safeTicket,
+      `- **[AUTO-RUN FAILED]** task ${taskNum}: ${currentPhase} phase — ${String(msg).substring(0, 200)}`
+    );
 
     // Test command exists but recording failed — block the agent
     debugLog('BLOCK: recording failed');
@@ -355,22 +347,30 @@ if (testCommand) {
   }
 }
 
+// ─── Citation-kind strategy with no valid evidence — block (do NOT bypass) ───
+// A citation-kind `### Test Strategy` (verified-by / wiring-citation) resolves
+// to NO runnable command by design, but it is NOT a task "without tests": its
+// evidence is a peer-citation green entry recorded via tdd-phase-state.js. If we
+// reached here, the evidence check above did not find a valid completed cycle,
+// so the agent must record citation evidence before stopping. Falling through to
+// the legacy bypass would let the agent stop with zero evidence.
+if (isStrategyResolution && !testCommand) {
+  debugLog('BLOCK: citation-kind strategy without valid evidence');
+  process.stderr.write(citationBlockMessage(safeTicket, taskNum));
+  process.exit(2);
+}
+
 // ─── No test command in tasks.md — allow stop (bypass evidence) ──────────────
 // Gate-driven TDD requires ### Test Command in tasks.md. If missing, the task
 // was created before this feature or the split-in-tasks agent didn't include it.
 // Allow the agent to stop — evidence verification is skipped for tasks without
 // a test command.
 
-try {
-  const debugPath = path.join(TASKS_BASE, safeTicket, 'debug.md');
-  const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
-  fs.appendFileSync(
-    debugPath,
-    `\n## ${timestamp} — enforce-tdd-on-stop\n\n- **[BYPASS]** task ${taskNum}: No ### Test Command in tasks.md — evidence check skipped\n`
-  );
-} catch {
-  // fail-open
-}
+appendDebugSection(
+  TASKS_BASE,
+  safeTicket,
+  `- **[BYPASS]** task ${taskNum}: No ### Test Command in tasks.md — evidence check skipped`
+);
 
 debugLog('BYPASS: no test command in tasks.md');
 process.exit(0);

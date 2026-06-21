@@ -51,21 +51,35 @@ function sessionPath(topic) {
   return path.join(getSessionDir(), `${topic}.json`);
 }
 
-function init(topic, slots, tasks) {
+// Validate the task list shape before persisting: topic/slots/non-empty and
+// every dep referencing a task in the same session. Throws on the first
+// violation (identical messages to the inline checks it replaces).
+function validateInit(topic, slots, tasks) {
   if (!topic || !/^[A-Za-z0-9_.-]+$/.test(topic)) throw new Error(`bad topic: ${topic}`);
   if (!(slots > 0)) throw new Error(`slots must be > 0`);
   if (!tasks.length) throw new Error(`at least one task required`);
-  // Validate dep references — every dep must be a task in the same session.
   const ids = new Set(tasks.map((t) => t.id));
   for (const t of tasks) {
     for (const d of t.deps || []) {
       if (!ids.has(d)) throw new Error(`task ${t.id} depends on unknown ${d}`);
     }
   }
+}
+
+function init(topic, slots, tasks, opts = {}) {
+  validateInit(topic, slots, tasks);
   ensureDir();
   const session = {
     topic,
     slots,
+    // Per-run launch config. `command` is the skill the bootstrap/auto-restart
+    // path launches (default 'work'); `stopOracle` is the compiled, shell-
+    // executable predicate the conductor evaluates each tick to decide when a
+    // ticket is done. Persisted here (not just env) so a daemon restart can't
+    // silently revert to /work with no stop condition.
+    command: opts.command || 'work',
+    stopOracle: opts.stopOracle || null,
+    stopSource: opts.stopSource || null,
     createdAt: new Date().toISOString(),
     tasks: tasks.map((t) => ({
       id: t.id,
@@ -140,6 +154,30 @@ function clear(topic) {
   }
 }
 
+// Split CLI `init` argv into launch `--flag=value` opts and positional task
+// specs, then parse the positionals into { topic, slots, tasks }. Extracted
+// from the CLI switch so the dispatcher stays shallow (max-depth gate).
+function parseInitArgs(args) {
+  const opts = {};
+  const positional = [];
+  for (const a of args) {
+    const m = a.match(/^--([a-z][a-z-]*)=([\s\S]*)$/);
+    if (m) opts[m[1]] = m[2];
+    else positional.push(a);
+  }
+  const [topic, slotsStr, ...taskSpecs] = positional;
+  const slots = parseInt(slotsStr, 10);
+  const tasks = taskSpecs.map((spec) => {
+    const [id, prio, deps] = spec.split(':');
+    return {
+      id,
+      priority: parseInt(prio, 10),
+      deps: deps ? deps.split(',').filter(Boolean) : [],
+    };
+  });
+  return { topic, slots, tasks, opts };
+}
+
 module.exports = {
   init,
   read,
@@ -159,17 +197,21 @@ if (require.main === module) {
   try {
     switch (cmd) {
       case 'init': {
-        const [topic, slotsStr, ...taskSpecs] = args;
-        const slots = parseInt(slotsStr, 10);
-        const tasks = taskSpecs.map((spec) => {
-          const [id, prio, deps] = spec.split(':');
-          return {
-            id,
-            priority: parseInt(prio, 10),
-            deps: deps ? deps.split(',').filter(Boolean) : [],
-          };
-        });
-        console.log(JSON.stringify(init(topic, slots, tasks), null, 2));
+        // Separate `--flag=value` launch config from positional task specs so
+        // the command/oracle can carry shell metacharacters without clashing
+        // with the `id:prio:deps` grammar.
+        const { topic, slots, tasks, opts } = parseInitArgs(args);
+        console.log(
+          JSON.stringify(
+            init(topic, slots, tasks, {
+              command: opts.command,
+              stopOracle: opts['stop-oracle'],
+              stopSource: opts['stop-source'],
+            }),
+            null,
+            2
+          )
+        );
         break;
       }
       case 'show':

@@ -58,6 +58,29 @@ See **[AGENTS.md](./AGENTS.md)** for the agent catalog. See **[docs/README.md](.
 - Agent-gated scripts require both correct agent identity AND correct workflow step.
 - `protect-task-scope.js` blocks edits outside the active task's `### Files in scope`. The env-var escape hatch is ONE-SHOT and requires BOTH `PROTECT_TASK_SCOPE_BYPASS_REASON="<reason>"` AND `PROTECT_TASK_SCOPE_BYPASS_TARGET="<exact-rel-path-or-glob>"` to be set; the bypass only fires when the actual write target matches `BYPASS_TARGET` (exact or glob). REASON alone never opens the gate. Each fired bypass appends a `scope-bypass` row to `.work-actions.json` recording both the configured target and the actual write path.
 
+### Feature Flags
+
+- `WORK_TEST_STRATEGY_VALIDATOR` (default `1`) — gates the GH-590 tasks-draft
+  Test Strategy validator (enum-driven `### Test Strategy` blocks, command-
+  existence dispatcher, and TDD-ownership graph) plus the GH-610 implement-side
+  synthesis/citation consumer. Default `1` (on) now that both GH-590 and GH-610
+  have landed. Set to `0` to fall back to the legacy `### Test Command` path
+  (e.g. for in-flight `tasks.md` files authored before GH-590). Read via
+  `getConfig('WORK_TEST_STRATEGY_VALIDATOR')`.
+
+  **Implement-side synthesis flow.** When the flag is ON and a task carries a
+  `### Test Strategy` block but no legacy `### Test Command`, the implement side
+  synthesizes the runnable command instead of wedging. `readTaskTestCommand` /
+  `resolveTaskTestExecution` (`implement-gate.js`) call
+  `lib/test-strategy.js synthesizeCommand(strategy, findNearestEnvrc(worktreeDir))`
+  to produce the command for envelope kinds (`unit`/`integration`/`e2e`/`custom`),
+  threading the orchestrator's worktree-rooted `.envrc`. For citation kinds
+  (`verified-by`/`wiring-citation`) `synthesizeCommand` returns `null`; instead of
+  executing, `tdd-phase-state.js` records green evidence by peer citation
+  (`validatePeerCitation` + peer evidence sha + scope-overlap), and
+  `enforce-tdd-on-stop.js` accepts that citation evidence. With the flag OFF,
+  behavior is byte-for-byte unchanged — only `### Test Command` is read.
+
 ### Ticket Providers
 - Configured via `TICKET_PROVIDER` env var: `jira`, `linear`, `github`, `none`.
 - GitHub issues use `#N` IDs, sanitized to `GH-N` for filesystem paths.

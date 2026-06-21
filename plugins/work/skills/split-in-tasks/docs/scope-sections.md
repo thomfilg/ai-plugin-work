@@ -34,6 +34,43 @@ That is: start from the surfaces owned by **other tickets** (sibling-ticket boun
 
 **Worked example (ECHO-5538 four-task shape):** Task 3 owns `components/X.tsx` under its `### Files in scope`. Tasks 1, 2, and 4 — peers within the same ticket — MUST NOT list `components/X.tsx` under ANY scope section (neither `### Files in scope` nor `### Files explicitly out of scope`). The exclusion list is reserved for files owned by other tickets entirely.
 
+## Unique-ownership rule (hard-failed at `tasks-gate`)
+
+Peer tasks inside the same ticket must coordinate via **disjoint** `### Files in scope` sets — each path may appear under `### Files in scope` of **at most one** task per ticket. Two tasks claiming the same path (literal, via overlapping glob, or via reverse glob coverage) is a structural error: the implement-step hook would let either task edit the file, the peer's TDD evidence would be split across uncoordinated cycles, and the planner has not actually decomposed the work. The `validateUniqueOwnership` validator in `plugins/work/scripts/workflows/lib/task-scope.js` enforces this and hard-fails `tasks-gate` on any violation.
+
+The same three modalities `validateIntraTicketScope` uses apply here, scanned over every unordered pair `(Ti, Tj)`:
+
+- **literal-vs-literal** — both tasks list the exact same path string.
+- **glob-vs-literal** — Task A lists a glob (e.g. `lib/foo/**`) and Task B lists a literal (`lib/foo/bar.ts`) covered by it.
+- **reverse glob-vs-literal** — symmetric to the above (Task A literal, Task B glob).
+
+**Worked example — conflicting tasks.md (REJECTED):**
+
+```markdown
+## Task 1 — Own lib/foo
+### Files in scope
+- `lib/foo/**`
+
+## Task 2 — Edit bar
+### Files in scope
+- `lib/foo/bar.ts`        ← covered by Task 1's glob — unique-ownership conflict
+```
+
+**Corrected disjoint version (ACCEPTED):** restructure so `lib/foo/bar.ts` is owned by exactly one task. Either fold Task 2's work into Task 1, or narrow Task 1's scope:
+
+```markdown
+## Task 1 — Own lib/foo (excluding bar)
+### Files in scope
+- `lib/foo/index.ts`
+- `lib/foo/helpers.ts`
+
+## Task 2 — Edit bar
+### Files in scope
+- `lib/foo/bar.ts`
+```
+
+See also: the `validateIntraTicketScope` rule above — the two validators are complementary. `validateIntraTicketScope` enforces that `### Files explicitly out of scope` may not list peer-owned paths; `validateUniqueOwnership` enforces that `### Files in scope` may not double-claim a path across peers.
+
 ## Marker convention for `### Files in scope`
 
 (enforced by the `scope_exists` phase):

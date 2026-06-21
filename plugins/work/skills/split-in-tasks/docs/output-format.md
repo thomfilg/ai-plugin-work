@@ -1,7 +1,7 @@
 # Output Format
 
 Defines the exact structure of `tasks.md`. See related docs:
-- [test-command.md](./test-command.md) — `### Test Command` block details (runner env vars, file-name patterns, scope rules)
+- [test-strategy.md](./test-strategy.md) — `### Test Strategy` block details (kind enum, runner env vars, file-name patterns, scope rules). Folds in (and supersedes) the legacy `test-command.md`.
 - [scope-sections.md](./scope-sections.md) — `### Files in scope` / `### Files explicitly out of scope` rules (Gate C + intra-ticket exclusion)
 
 ## Checkbox Legend
@@ -17,7 +17,18 @@ All deliverables start with `[ ]`. The workflow engine updates them automaticall
 ## Task N — <title>
 
 ### Type
-<infrastructure | backend | frontend | integration | test | checkpoint>
+<one of the closed enum: tdd-code | tests-only | docs | config | ci | mechanical-refactor | file-move | checkpoint>
+
+The closed enum is defined in [`lib/task-types.js`](../lib/task-types.js). Adding a new Type requires a code change there + a Pass D rule update in [`lib/lint-type-ac-consistency.js`](../lib/lint-type-ac-consistency.js); the planner cannot invent ad-hoc values. Each Type maps to a gate contract (see [`gateContractFor()`](../lib/task-types.js)):
+
+- `tdd-code` — strict TDD: RED requires `*.test.*` authorship; GREEN/REFACTOR keep RC-D empty-output trap armed
+- `tests-only` — RED is intentionally skipped (no failing test → passing impl loop); GREEN requires an in-scope test file to be modified
+- `docs` — `.md`-only scope; verifier may be silent (grep / test -f)
+- `config` — package.json / lockfiles / linter configs (see allowlist in task-types.js)
+- `ci` — CI configs only (`.github/**`, `Jenkinsfile`, etc.)
+- `mechanical-refactor` — pure transforms with no behavior change
+- `file-move` — moves only, no edits beyond import updates
+- `checkpoint` — verification-only; no source, no tests
 
 ### Description
 <1-3 sentence summary of what this task delivers>
@@ -56,14 +67,40 @@ All deliverables start with `[ ]`. The workflow engine updates them automaticall
 ### Parallel
 - Yes | No | Partial (reason)
 
-### Test Command
-<shell command — see test-command.md for full rules>
+### Test Strategy
+```
+kind: <unit | integration | e2e | custom | verified-by | wiring-citation>
+# unit / integration / e2e:
+entry: <test file path under this task's Files in scope>
+# custom:
+command: <verbatim shell command — see test-strategy.md>
+# verified-by / wiring-citation:
+peer: Task <N>
+cites: <path or symbol exercised by the peer's test>
+```
+<see [test-strategy.md](./test-strategy.md) for the closed enum and full rules>
 
 ### Suggested Scope, Files in scope, Files explicitly out of scope
 <see scope-sections.md for full rules>
 
 ---
 ```
+
+## Common migration gotchas — build configs are NOT `Type: config`
+
+`Type: config` is reserved for inert configuration (package.json, lockfiles, linter/formatter configs, `.editorconfig`, etc. — see `TYPE_SCOPE_RULES.config.scopePatterns` in [`../lib/task-types.js`](../lib/task-types.js) for the full allowlist). Build configs are deliberately excluded because they ship runtime behavior — a vite plugin, a webpack loader, or a jest setup file directly affects what runs in production or test.
+
+When migrating an in-flight `tasks.md` to the closed Type taxonomy, the following files should use **`Type: tdd-code`**, not `Type: config`:
+
+- `vite.config.{ts,js,mjs,cjs}`
+- `rollup.config.{ts,js,mjs,cjs}`
+- `webpack.config.{ts,js,mjs,cjs}`
+- `jest.config.{ts,js,mjs,cjs}`
+- `vitest.config.{ts,js,mjs,cjs}`
+- `next.config.{ts,js,mjs,cjs}`
+- `astro.config.{ts,js,mjs,cjs}`
+
+These ship runtime behavior, so they need the full RED → GREEN → REFACTOR TDD cycle. Pass D will warn (`config allowlist`) if you list one under `Type: config`; the per-Type write guard in [`protect-task-scope.js`](../../../scripts/workflows/work/hooks/protect-task-scope.js) will then block the edit at implement time.
 
 ## Task format (checkpoint tasks)
 

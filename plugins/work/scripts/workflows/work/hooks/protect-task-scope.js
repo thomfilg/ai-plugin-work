@@ -17,14 +17,28 @@
  *
  * Escape hatches (GH-392 Task 8 + follow-up):
  *   1. Env var PAIR — `PROTECT_TASK_SCOPE_BYPASS_REASON` AND
- *      `PROTECT_TASK_SCOPE_BYPASS_TARGET` must BOTH be set. The bypass only
- *      fires when the relativized target matches `BYPASS_TARGET` exactly OR
- *      via the same `findMatch` glob logic used elsewhere (so glob patterns
- *      like `src/shared/**` are honoured). One-shot by design: REASON alone
- *      opens a hole for any path; pairing it with TARGET pins the bypass to
- *      a single planned edit. When fired, appends a `scope-bypass` audit row
+ *      `PROTECT_TASK_SCOPE_BYPASS_TARGET` must BOTH be set, AND
+ *      `WORK_OPERATOR_TOKEN=1` must also be present in the environment
+ *      (GH-528 round-2 follow-up ITEM 1). The bypass only fires when the
+ *      relativized target matches `BYPASS_TARGET` exactly OR via the same
+ *      `findMatch` glob logic used elsewhere (so glob patterns like
+ *      `src/shared/**` are honoured). One-shot by design: REASON alone opens
+ *      a hole for any path; pairing it with TARGET pins the bypass to a
+ *      single planned edit. When fired, appends a `scope-bypass` audit row
  *      via `appendEnforcementAudit` (spec §P0#6) carrying both the configured
  *      TARGET and the actual write path.
+ *
+ *      WORK_OPERATOR_TOKEN gate (GH-528 round-2 ITEM 1): bypass env vars
+ *      inherit into every child process the agent spawns, so an agent that
+ *      can set REASON+TARGET in its own shell would otherwise be able to
+ *      flip the bypass on without operator intent. The token is an
+ *      operator-only env var (same pattern as the `exception` subcommand
+ *      in tdd-phase-state.js) that the agent's harness never carries. When
+ *      the token is missing AND REASON+TARGET match the write target, the
+ *      hook treats the env pair as unset (block stays) and appends a
+ *      `scope-bypass-rejected` audit row carrying the configured target
+ *      and reason — so the rejected attempt is visible without trusting
+ *      caller-supplied state.
  *   2. `### Cross-Task Dependencies` — paths in the active task's
  *      `crossTaskDeps` list bypass the would-be block and append a
  *      `cross-task-dep-allow` audit row (spec §P0#7b).
@@ -48,11 +62,60 @@ const { decideEdit, relativizePath, findMatch } = require(
   path.join(__dirname, '..', '..', 'lib', 'hooks', 'policies', 'scope-protection')
 );
 const { parseTasks } = require(path.join(__dirname, '..', '..', 'work', 'lib', 'task-parser'));
+const { matchesTypeScope, scopeRulesFor, isTestFilePath } = require(
+  path.join(__dirname, '..', '..', '..', '..', 'skills', 'split-in-tasks', 'lib', 'task-types')
+);
 const { appendEnforcementAudit } = require(
   path.join(__dirname, '..', '..', 'work', 'lib', 'work-actions')
 );
 
 const FILE_WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
+
+// GH-528 round-2 ITEM 1: WORK_OPERATOR_TOKEN gate on env-bypass.
+// Centralised so all three bypass call sites stay in lockstep.
+function isOperatorTokenPresent() {
+  return process.env.WORK_OPERATOR_TOKEN === '1';
+}
+
+/**
+ * Append a `scope-bypass-rejected` audit row recording that the env-var pair
+ * matched the write target but WORK_OPERATOR_TOKEN was missing. We log this
+ * regardless of guard so an operator can see every rejected attempt across
+ * the three layers.
+ */
+function auditScopeBypassRejected({
+  ticketId,
+  active,
+  relTarget,
+  bypassReason,
+  bypassTargetCfg,
+  guard,
+}) {
+  try {
+    appendEnforcementAudit(ticketId, {
+      origin: 'ai-subtask',
+      task: active.taskNum,
+      phase: null,
+      action: 'scope-bypass-rejected',
+      allow: false,
+      reason: bypassReason,
+      outputPath: relTarget,
+      meta: {
+        taskNum: active.taskNum,
+        target: relTarget,
+        configuredTarget: bypassTargetCfg,
+        guard,
+        rejectReason: 'WORK_OPERATOR_TOKEN missing',
+      },
+    });
+  } catch (err) {
+    try {
+      logHookError(__filename, err);
+    } catch {
+      /* swallow */
+    }
+  }
+}
 
 // ─── Active-ticket discovery (mirrors enforce-step-workflow.getTicketId) ────
 
@@ -144,6 +207,13 @@ function getActiveTask(tasksDir) {
     // by sibling tasks). decideEdit blocks would be overridden to exit 0 with
     // a `cross-task-dep-allow` audit row.
     crossTaskDeps: Array.isArray(task.crossTaskDeps) ? task.crossTaskDeps : [],
+    // GH-528 item 5: per-Type allowlist layer. tdd-code / checkpoint /
+    // mechanical-refactor / file-move keep existing behavior (no per-Type
+    // restriction beyond the filesInScope/filesOutOfScope check). The
+    // closed-allowlist types (tests-only, docs, config, ci) additionally
+    // require the write target to match their per-Type pattern set in
+    // skills/split-in-tasks/lib/task-types.js.
+    type: typeof task.type === 'string' ? task.type : '',
   };
 }
 
@@ -207,6 +277,252 @@ function extractBashWriteTargets(cmd) {
 
 // ─── Main hook ──────────────────────────────────────────────────────────────
 
+// ─── GH-528 item 5: per-Type allowlist + Type-line edit guard ───────────────
+
+/**
+ * Per-Type closed-allowlist types. For these, the write target must match
+ * the Type's scopePatterns regex in addition to the active task's filesInScope.
+ * Types not in this set keep the existing behavior (filesInScope check only).
+ */
+const TYPE_ENFORCED_KINDS = new Set(['tests-only', 'docs', 'config', 'ci']);
+
+function typeAllowlistDecision(type, relTarget) {
+  if (!type || !TYPE_ENFORCED_KINDS.has(type)) return { blocked: false };
+  const rules = scopeRulesFor(type);
+  if (!rules || !rules.scopePatterns) return { blocked: false };
+  if (matchesTypeScope(type, relTarget)) {
+    // For tests-only also require the target to be a test file. matchesTypeScope
+    // already enforces this via the TEST_FILE_PATTERN pattern but keep an
+    // explicit check so the error message is precise.
+    if (type === 'tests-only' && !isTestFilePath(relTarget)) {
+      return {
+        blocked: true,
+        reason:
+          `Type=tests-only restricts writes to *.test.* / *.spec.* files. ` +
+          `Target "${relTarget}" is not a test file.`,
+      };
+    }
+    return { blocked: false };
+  }
+  return {
+    blocked: true,
+    reason:
+      `Type=${type} restricts writes to a closed allowlist (see ` +
+      `plugins/work/skills/split-in-tasks/lib/task-types.js). ` +
+      `Target "${relTarget}" is not in the ${type} allowlist.`,
+  };
+}
+
+/**
+ * Detect attempts to edit the `### Type` line inside a tasks.md write. The
+ * planner authors `### Type`; the implementer must not be able to flip it
+ * mid-implement (which would let them switch from tdd-code to docs to bypass
+ * the TDD gate). For Write tool calls targeting tasks.md, reject when the
+ * new content's `### Type` line differs from the on-disk version.
+ *
+ * Returns `{ blocked: true, reason }` to block, `{ blocked: false }` to allow.
+ *
+ * Scope: only triggers when the target relative path ends with `tasks.md`.
+ * Edit / MultiEdit tools that operate via `old_string` / `new_string` patches
+ * are checked by scanning the patches for the `### Type` line.
+ */
+function checkWriteTypeLines(toolInput, onDiskTypes) {
+  const newContent = (toolInput.content || '').toString();
+  const newTypes = extractTypeLines(newContent);
+  if (typesEqual(onDiskTypes, newTypes)) return { blocked: false };
+  return {
+    blocked: true,
+    reason:
+      `protect-task-scope: refusing to modify \`### Type\` lines in tasks.md ` +
+      `mid-implement. The planner sets Type; the implementer cannot change it ` +
+      `(would bypass the per-Type TDD contract). On disk: ${JSON.stringify(onDiskTypes)} ` +
+      `→ new: ${JSON.stringify(newTypes)}.`,
+  };
+}
+
+/**
+ * Apply a single Edit patch in memory using the same semantics Claude Code's
+ * Edit tool uses: literal string replacement, first occurrence only unless
+ * `replace_all` is true. Returns the patched content, or null when the patch
+ * cannot be applied (old_string not found) — caller treats null as a fall-
+ * through (no change simulated, the real tool would error).
+ */
+// GH-528 round-2 follow-up note: when an Edit/MultiEdit's `old_string` is
+// not found, applyEditPatch returns null and the caller skips that single
+// patch in the simulation. The real Edit tool errors on missing
+// `old_string` and aborts the whole tool call, so the simulator's "skip
+// and continue" can diverge if a later patch in a MultiEdit was authored
+// against the expected post-first-patch state. In practice the divergence
+// can only ALLOW patches the real tool would reject (the real tool errors
+// before applying anything; the simulator might allow a residual
+// Type-flipping patch through if it happens to apply against the
+// unchanged file). The block-direction risk is the one we care about —
+// the Type-line guard's final equality check still compares the simulated
+// post-state Type lines against on-disk, so a Type flip still gets
+// caught regardless of upstream patch sequencing. Worth a note for
+// future maintainers.
+function applyEditPatch(content, edit) {
+  const oldStr = (edit.old_string || '').toString();
+  const newStr = (edit.new_string || '').toString();
+  if (!oldStr) return content;
+  if (edit.replace_all) {
+    return content.split(oldStr).join(newStr);
+  }
+  const idx = content.indexOf(oldStr);
+  if (idx === -1) return null;
+  return content.slice(0, idx) + newStr + content.slice(idx + oldStr.length);
+}
+
+/**
+ * Cursor[bot] Comment 5 (GH-528): value-only patches must be detected.
+ *
+ * The old heuristic (string-match `### Type` in patch text) missed:
+ *   - `old: "tdd-code", new: "docs"` (no header in patch strings)
+ *   - whitespace tricks (`old: "tdd-code  ", new: "docs"`)
+ *   - MultiEdit split across two edits that combine to flip the value
+ *
+ * The source of truth is "what does the resolved file look like after the
+ * patch?" — so we read tasks.md from disk, simulate the Edit/MultiEdit, and
+ * compare extracted `### Type` lines before vs after. If they differ, block.
+ *
+ * This function is invoked only when the write target IS tasks.md (caller
+ * guarantees), so the cost of reading + simulating is bounded.
+ */
+function checkEditTypeLines(toolName, toolInput, onDiskContent, onDiskTypes) {
+  const edits =
+    toolName === 'Edit' ? [toolInput] : Array.isArray(toolInput.edits) ? toolInput.edits : [];
+  if (edits.length === 0) return { blocked: false };
+
+  let simulated = onDiskContent;
+  for (const edit of edits) {
+    const next = applyEditPatch(simulated, edit);
+    // null = old_string not found; the real tool would error, so the file
+    // wouldn't change. Skip this edit in the simulation.
+    if (next !== null) simulated = next;
+  }
+
+  const newTypes = extractTypeLines(simulated);
+  if (typesEqual(onDiskTypes, newTypes)) return { blocked: false };
+
+  return {
+    blocked: true,
+    reason:
+      `protect-task-scope: refusing to edit \`### Type\` line in tasks.md ` +
+      `mid-implement. Type is planner-authored. On disk: ${JSON.stringify(onDiskTypes)} ` +
+      `→ after patch: ${JSON.stringify(newTypes)}.`,
+  };
+}
+
+/**
+ * Honor the one-shot env-var escape hatch for the Type-line guard. Returns
+ * true when the bypass fired (audit appended, caller should exit 0).
+ */
+function tryTypeLineBypass(toolName, toolInput, cwd, ticketId, active) {
+  const rel = relativizePath(extractTargetPath(toolName, toolInput) || '', cwd);
+  const bypassReason = (process.env.PROTECT_TASK_SCOPE_BYPASS_REASON || '').trim();
+  const bypassTargetCfg = (process.env.PROTECT_TASK_SCOPE_BYPASS_TARGET || '').trim();
+  if (!bypassReason || !bypassTargetCfg || !rel) return false;
+  const matched = rel === bypassTargetCfg || findMatch(rel, [bypassTargetCfg]) !== null;
+  if (!matched) return false;
+  // GH-528 ITEM 1: WORK_OPERATOR_TOKEN gate — bypass env pair matched the
+  // write target but the operator token is missing. Treat as unset (block
+  // stays) and audit the rejected attempt.
+  if (!isOperatorTokenPresent()) {
+    auditScopeBypassRejected({
+      ticketId,
+      active,
+      relTarget: rel,
+      bypassReason,
+      bypassTargetCfg,
+      guard: 'type-line',
+    });
+    return false;
+  }
+  try {
+    appendEnforcementAudit(ticketId, {
+      origin: 'ai-subtask',
+      task: active.taskNum,
+      phase: null,
+      action: 'scope-bypass',
+      allow: true,
+      reason: bypassReason,
+      outputPath: rel,
+      meta: {
+        taskNum: active.taskNum,
+        target: rel,
+        configuredTarget: bypassTargetCfg,
+        guard: 'type-line',
+      },
+    });
+  } catch (err) {
+    try {
+      logHookError(__filename, err);
+    } catch {
+      /* swallow */
+    }
+  }
+  return true;
+}
+
+function typeLineGuard(toolName, toolInput, workDir, tasksDir) {
+  if (!toolInput || !tasksDir) return { blocked: false };
+  const target = (toolInput.file_path || '').toString();
+  if (!target) return { blocked: false };
+  const resolvedTarget = path.isAbsolute(target) ? target : path.resolve(workDir, target);
+  const tasksMdPath = path.resolve(tasksDir, 'tasks.md');
+  if (resolvedTarget !== tasksMdPath) return { blocked: false };
+
+  let onDisk = '';
+  try {
+    onDisk = fs.readFileSync(tasksMdPath, 'utf8');
+  } catch {
+    return { blocked: false };
+  }
+  const onDiskTypes = extractTypeLines(onDisk);
+
+  if (toolName === 'Write') return checkWriteTypeLines(toolInput, onDiskTypes);
+  if (toolName === 'Edit' || toolName === 'MultiEdit') {
+    return checkEditTypeLines(toolName, toolInput, onDisk, onDiskTypes);
+  }
+  return { blocked: false };
+}
+
+// GH-528 round-2 follow-up note: extracted Type values are normalized to
+// lowercase. typesEqual is a case-sensitive string compare against the
+// already-normalized arrays, so case-only patches (e.g. `tdd-code` →
+// `TDD-Code`) are treated as no-ops. That is intentional — every
+// downstream Type consumer (gateContractFor, lint-type-ac-consistency,
+// readActiveTaskType in tdd-phase-state.js) also lowercases the value
+// before comparing against the closed enum. Blocking case-only edits
+// would create false positives without closing any real bypass.
+function extractTypeLines(md) {
+  const out = [];
+  const lines = md.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i += 1) {
+    if (/^###\s+Type\s*$/i.test(lines[i].trim())) {
+      // Find the next non-blank line.
+      for (let j = i + 1; j < lines.length; j += 1) {
+        const next = lines[j].trim();
+        if (!next) continue;
+        if (next.startsWith('#')) {
+          out.push('');
+          break;
+        }
+        out.push(next.toLowerCase());
+        break;
+      }
+    }
+  }
+  return out;
+}
+
+function typesEqual(a, b) {
+  if (!Array.isArray(a) || !Array.isArray(b)) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) if (a[i] !== b[i]) return false;
+  return true;
+}
+
 function evaluateTool(toolName, toolInput, active, workDir) {
   if (FILE_WRITE_TOOLS.has(toolName)) {
     const filePath = toolInput && toolInput.file_path;
@@ -261,6 +577,16 @@ async function main() {
   const toolName = hookData.tool_name || '';
   const toolInput = hookData.tool_input || {};
 
+  // GH-528 item 5: Type-line edit guard runs before scope evaluation.
+  // tasks.md is generally out of scope already, but this specifically
+  // blocks the bypass of flipping `### Type` mid-implement.
+  const typeLineDecision = typeLineGuard(toolName, toolInput, cwd, tasksDir);
+  if (typeLineDecision.blocked) {
+    if (tryTypeLineBypass(toolName, toolInput, cwd, ticketId, active)) process.exit(0);
+    process.stderr.write(typeLineDecision.reason + '\n');
+    process.exit(2);
+  }
+
   const decision = evaluateTool(toolName, toolInput, active, cwd);
   if (decision && decision.blocked) {
     const target = extractTargetPath(toolName, toolInput) || '';
@@ -285,29 +611,43 @@ async function main() {
       const matched =
         relTarget === bypassTargetCfg || findMatch(relTarget, [bypassTargetCfg]) !== null;
       if (matched) {
-        try {
-          appendEnforcementAudit(ticketId, {
-            origin: 'ai-subtask',
-            task: active.taskNum,
-            phase: null,
-            action: 'scope-bypass',
-            allow: true,
-            reason: bypassReason,
-            outputPath: relTarget,
-            meta: {
-              taskNum: active.taskNum,
-              target: relTarget,
-              configuredTarget: bypassTargetCfg,
-            },
+        // GH-528 ITEM 1: WORK_OPERATOR_TOKEN gate — bypass env pair matched
+        // the write target but the operator token is missing. Treat as unset
+        // (block stays) and audit the rejected attempt.
+        if (!isOperatorTokenPresent()) {
+          auditScopeBypassRejected({
+            ticketId,
+            active,
+            relTarget,
+            bypassReason,
+            bypassTargetCfg,
+            guard: 'files-in-scope',
           });
-        } catch (err) {
+        } else {
           try {
-            logHookError(__filename, err);
-          } catch {
-            /* swallow */
+            appendEnforcementAudit(ticketId, {
+              origin: 'ai-subtask',
+              task: active.taskNum,
+              phase: null,
+              action: 'scope-bypass',
+              allow: true,
+              reason: bypassReason,
+              outputPath: relTarget,
+              meta: {
+                taskNum: active.taskNum,
+                target: relTarget,
+                configuredTarget: bypassTargetCfg,
+              },
+            });
+          } catch (err) {
+            try {
+              logHookError(__filename, err);
+            } catch {
+              /* swallow */
+            }
           }
+          process.exit(0);
         }
-        process.exit(0);
       }
       // REASON+TARGET set but TARGET didn't match — fall through to the
       // block. NO audit row: a mis-targeted bypass is indistinguishable
@@ -346,7 +686,82 @@ async function main() {
     process.stderr.write(decision.reason + '\n');
     process.exit(2);
   }
+
+  const typeBlock = checkPerTypeAllowlist(active, toolName, toolInput, cwd, ticketId);
+  if (typeBlock.blocked) {
+    process.stderr.write(typeBlock.reason + '\n');
+    process.exit(2);
+  }
   process.exit(0);
+}
+
+/**
+ * GH-528 item 5: per-Type closed-allowlist check. Runs after the standard
+ * filesInScope decision has allowed the write. For tdd-code / checkpoint /
+ * mechanical-refactor / file-move, returns {blocked:false} unconditionally
+ * (their existing behavior). Honors the one-shot env-var bypass pair so
+ * operators can still pin a single override target across this layer.
+ */
+function checkPerTypeAllowlist(active, toolName, toolInput, cwd, ticketId) {
+  if (!active.type || !TYPE_ENFORCED_KINDS.has(active.type)) return { blocked: false };
+  const target = extractTargetPath(toolName, toolInput) || '';
+  if (!target) return { blocked: false };
+  const relTarget = relativizePath(target, cwd);
+  if (!relTarget) return { blocked: false };
+  const bypassReason = (process.env.PROTECT_TASK_SCOPE_BYPASS_REASON || '').trim();
+  const bypassTargetCfg = (process.env.PROTECT_TASK_SCOPE_BYPASS_TARGET || '').trim();
+  const bypassMatched =
+    bypassReason &&
+    bypassTargetCfg &&
+    (relTarget === bypassTargetCfg || findMatch(relTarget, [bypassTargetCfg]) !== null);
+  if (bypassMatched) {
+    // GH-528 ITEM 1: WORK_OPERATOR_TOKEN gate — env pair matched but token
+    // missing. Treat as unset (fall through to allowlist decision = block)
+    // and audit the rejected attempt.
+    if (!isOperatorTokenPresent()) {
+      if (ticketId) {
+        auditScopeBypassRejected({
+          ticketId,
+          active,
+          relTarget,
+          bypassReason,
+          bypassTargetCfg,
+          guard: 'type-allowlist',
+        });
+      }
+      return typeAllowlistDecision(active.type, relTarget);
+    }
+    // Mirror the scope-bypass audit pattern (see main() around L519 and the
+    // type-line guard's tryTypeLineBypass) so a closed-allowlist override is
+    // never silent. Discriminator: meta.guard='type-allowlist'.
+    if (ticketId) {
+      try {
+        appendEnforcementAudit(ticketId, {
+          origin: 'ai-subtask',
+          task: active.taskNum,
+          phase: null,
+          action: 'scope-bypass',
+          allow: true,
+          reason: bypassReason,
+          outputPath: relTarget,
+          meta: {
+            taskNum: active.taskNum,
+            target: relTarget,
+            configuredTarget: bypassTargetCfg,
+            guard: 'type-allowlist',
+          },
+        });
+      } catch (err) {
+        try {
+          logHookError(__filename, err);
+        } catch {
+          /* swallow */
+        }
+      }
+    }
+    return { blocked: false };
+  }
+  return typeAllowlistDecision(active.type, relTarget);
 }
 
 /**
@@ -377,4 +792,13 @@ if (require.main === module) {
   });
 }
 
-module.exports = { evaluateTool, extractBashWriteTargets, getTicketId, getActiveTask };
+module.exports = {
+  evaluateTool,
+  extractBashWriteTargets,
+  getTicketId,
+  getActiveTask,
+  typeAllowlistDecision,
+  typeLineGuard,
+  extractTypeLines,
+  TYPE_ENFORCED_KINDS,
+};

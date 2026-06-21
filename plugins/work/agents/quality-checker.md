@@ -52,8 +52,8 @@ Try these in order, use the first one that works:
 [ -n "$LINT_COMMAND$TYPECHECK_COMMAND$TEST_COMMAND" ] && \
   bash ${CLAUDE_PLUGIN_ROOT}/scripts/dev-check/dev-check.sh
 
-# Tier 2: Project has dev:check in package.json
-pnpm dev:check
+# Tier 2: $TEST_UNIT_COMMAND envelope (see plugins/work/docs/test-strategy-kinds.md)
+[ -n "$TEST_UNIT_COMMAND" ] && CHANGED_FILES="$(git diff --name-only HEAD)" eval "$TEST_UNIT_COMMAND"
 
 # Tier 3: Bundled dev-check scripts (if neither above applies)
 ${CLAUDE_PLUGIN_ROOT}/scripts/dev-check/dev-check.sh
@@ -111,8 +111,8 @@ Try in order — use the first that succeeds:
 [ -n "$LINT_COMMAND$TYPECHECK_COMMAND$TEST_COMMAND" ] && \
   bash ${CLAUDE_PLUGIN_ROOT}/scripts/dev-check/dev-check.sh
 
-# Otherwise check if project has dev:check
-cat package.json | grep -q '"dev:check"' && pnpm dev:check
+# Otherwise use the $TEST_UNIT_COMMAND envelope
+[ -n "$TEST_UNIT_COMMAND" ] && CHANGED_FILES="$(git diff --name-only HEAD)" eval "$TEST_UNIT_COMMAND"
 
 # If not, use bundled scripts directly
 # ${CLAUDE_PLUGIN_ROOT}/scripts/dev-check/dev-check.sh

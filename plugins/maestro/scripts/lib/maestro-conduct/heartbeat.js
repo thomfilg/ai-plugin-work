@@ -8,6 +8,22 @@
 const tmux = require('./tmux');
 const state = require('./state');
 const workstate = require('./workstate');
+const alerts = require('./alerts');
+
+// Heartbeat: emit on state-change, with a max-staleness cap so the operator
+// always gets a positive signal every HEARTBEAT_MAX_MIN even if nothing has
+// changed (proves the daemon is alive). State-change beats include any of:
+// activeCount, wedgedCount, prReady/prBroken/prPending counts, ticket set.
+//
+// HEARTBEAT_MIN was previously a hard floor that suppressed ALL beats in the
+// first 15m, including real state changes — which contradicted the
+// "state-change-driven" contract (review feedback). It now only rate-limits
+// max-staleness (unchanged-body) beats; a real state change emits
+// immediately regardless of when the last beat was.
+const HEARTBEAT_MIN = parseInt(process.env.HEARTBEAT_MIN || '15', 10); // min gap between two UNCHANGED-state beats
+const HEARTBEAT_MAX_MIN = parseInt(process.env.HEARTBEAT_MAX_MIN || '60', 10); // force-emit cap
+let lastHeartbeatAt = 0;
+let lastHeartbeatBody = '';
 
 // Only -work sessions are restart-eligible / counted in active totals.
 function restartEligible(session) {
@@ -60,4 +76,34 @@ function buildHeartbeat(sessions) {
   );
 }
 
-module.exports = { restartEligible, collectPrFlag, classifySession, buildHeartbeat };
+function maybeEmitHeartbeat(sessions) {
+  const now = state.now();
+  const body = buildHeartbeat(sessions);
+  const sinceLast = lastHeartbeatAt ? now - lastHeartbeatAt : Infinity;
+  const bodyChanged = body !== lastHeartbeatBody;
+  const stale = sinceLast >= HEARTBEAT_MAX_MIN * 60;
+
+  // Body changed → emit immediately (state-change-driven contract; review
+  // feedback fixed: the floor used to suppress these for the first 15m).
+  // Body unchanged → respect HEARTBEAT_MIN as a floor and emit only when
+  // we've also hit HEARTBEAT_MAX_MIN (daemon-alive signal).
+  if (bodyChanged) {
+    // emit
+  } else if (stale && sinceLast >= HEARTBEAT_MIN * 60) {
+    // emit
+  } else {
+    return;
+  }
+
+  lastHeartbeatAt = now;
+  lastHeartbeatBody = body;
+  alerts.log(body);
+}
+
+module.exports = {
+  restartEligible,
+  collectPrFlag,
+  classifySession,
+  buildHeartbeat,
+  maybeEmitHeartbeat,
+};

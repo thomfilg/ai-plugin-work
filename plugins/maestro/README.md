@@ -35,7 +35,17 @@ Quick status table: each agent's last commit, current step, pane spinner, token 
 
 ### `scripts/maestro-signal.js` / `maestro-listen.js`
 
-File-mailbox at `/tmp/claude-agent-inbox/<TICKET>.log`. `signal` appends a line, `listen` does `tail -F` with a bell. **Note:** the listener is a human-facing alert, not an agent input pipe — the agent reads its prompt via tmux send-keys, not the inbox. The mailbox is for human-to-human coordination across multiple terminal windows.
+File-mailbox at `/tmp/claude-agent-inbox/<TICKET>.log` (per-namespace `/tmp/claude-agent-inbox/<MAESTRO_NS>/` when `MAESTRO_NS` is set). `signal` appends a line, `listen` does `tail -F` with a bell. **Note:** the listener is a human-facing alert, not an agent input pipe — the agent reads its prompt via tmux send-keys, not the inbox. The mailbox is for human-to-human coordination across multiple terminal windows.
+
+### Running N maestro instances on one machine
+
+Set `MAESTRO_NS=<name>` (per project / worktree) to isolate everything maestro
+keys by ticket — state dir, conductor lock, log/alert sinks, the inbox, **and**
+tmux session names (`<ns>/<TICKET>-work`). The conductor enforces one instance
+per namespace via a lockfile and refuses (or, with `MAESTRO_FORCE=1`, takes
+over) a second daemon in the same namespace. Unset = the historical
+machine-global behaviour. Full recipe: `docs/OPERATOR_PLAYBOOK.md` → "Running
+concurrent maestro instances".
 
 ## Skills (slash commands)
 

@@ -13,7 +13,13 @@ function makeTmpHome() {
 
 function withHome(home, fn) {
   const prev = process.env.HOME;
+  // Stub CLAUDE_CODE_SESSION_ID unset so legacy assertions about .current /
+  // payload / hash-fallback legs are not pre-empted by the new env-var leg 1.
+  const ENV_KEY = 'CLAUDE_CODE_SESSION_ID';
+  const hadEnv = Object.prototype.hasOwnProperty.call(process.env, ENV_KEY);
+  const prevEnv = process.env[ENV_KEY];
   process.env.HOME = home;
+  delete process.env[ENV_KEY];
   // Force fresh module each test so any module-level caches respect HOME
   const modPath = require.resolve('../inject-ledger');
   delete require.cache[modPath];
@@ -22,6 +28,11 @@ function withHome(home, fn) {
     return fn(mod);
   } finally {
     process.env.HOME = prev;
+    if (hadEnv) {
+      process.env[ENV_KEY] = prevEnv;
+    } else {
+      delete process.env[ENV_KEY];
+    }
     delete require.cache[require.resolve('../inject-ledger')];
   }
 }

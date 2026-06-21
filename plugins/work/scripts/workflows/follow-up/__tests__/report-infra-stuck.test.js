@@ -112,7 +112,9 @@ describe('report step: infra-stuck diagnostic bundle (Task 6.1)', () => {
         }
         assert.match(
           text,
-          new RegExp(`attemptNumber.*${a.attemptNumber}|#${a.attemptNumber}|attempt ${a.attemptNumber}`),
+          new RegExp(
+            `attemptNumber.*${a.attemptNumber}|#${a.attemptNumber}|attempt ${a.attemptNumber}`
+          ),
           `expected attemptNumber ${a.attemptNumber} reference in report output`
         );
         assert.match(

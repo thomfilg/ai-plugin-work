@@ -12,6 +12,12 @@ const { phaseFor } = require('../phase-registry');
 
 function detect({ ticket, phase, step }) {
   if (!phase) return { hit: false };
+  // GH-514 R2/AC3: 'complete' is a healthy-idle terminal phase. Both the
+  // legacy /work workflow (all stepStatus completed) and the /follow-up
+  // skill (status ∈ {awaiting_ci, awaiting_user, complete}) collapse to
+  // phase='complete' via the skill-registry. Treat it as non-escalating so
+  // the conductor stays silent on idle agents waiting on CI/user.
+  if (phase === 'complete') return { hit: false };
   const profile = phaseFor(phase);
   const prev = state.read(ticket, 'phase');
   const now = state.now();
@@ -32,7 +38,7 @@ function detect({ ticket, phase, step }) {
     budgetMin: profile.budgetMin,
     reNudgeMin: profile.reNudgeMin,
     maxNudges: profile.maxNudges,
-    marker: prev,    // give the caller the existing nudge counter
+    marker: prev, // give the caller the existing nudge counter
   };
 }
 

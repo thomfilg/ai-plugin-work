@@ -46,12 +46,12 @@ test('integration: Sticky-domain hysteresis keeps a domain active after the sign
   const baseNow = 1_700_000_000_000;
 
   const prompts = [
-    { text: 'please git merge feature', active: true },   // 1
-    { text: 'continue git merge work',  active: true },   // 2
-    { text: 'finalize git merge step',  active: true },   // 3 — sticky establishes
-    { text: 'unrelated question',       active: false },  // 4 — hysteresis keeps active
-    { text: 'still unrelated',          active: false },  // 5
-    { text: 'totally different topic',  active: false },  // 6 — should drop
+    { text: 'please git merge feature', active: true }, // 1
+    { text: 'continue git merge work', active: true }, // 2
+    { text: 'finalize git merge step', active: true }, // 3 — sticky establishes
+    { text: 'unrelated question', active: false }, // 4 — hysteresis keeps active
+    { text: 'still unrelated', active: false }, // 5
+    { text: 'totally different topic', active: false }, // 6 — should drop
   ];
 
   const activeHistory = [];
@@ -83,11 +83,7 @@ test('integration: Sticky-domain hysteresis keeps a domain active after the sign
   );
 
   // Prompt 6 (third quiet in a row) → dropped (AC6).
-  assert.equal(
-    activeHistory[5],
-    false,
-    'AC6: Sticky-domain drops after 3 quiet prompts'
-  );
+  assert.equal(activeHistory[5], false, 'AC6: Sticky-domain drops after 3 quiet prompts');
 
   // File should exist and parse as JSON.
   const persisted = JSON.parse(fs.readFileSync(file, 'utf8'));

@@ -22,18 +22,11 @@
 const fs = require('fs');
 const path = require('path');
 const { TASKS_PHASES } = require('../../tasks-phase-registry');
+const { loadTasksMd } = require('./_tasks-md-loader');
 
 const PLACEHOLDER_RE = /<[^>]+>|\{[^}]+\}|\bTBD\b|\bXXX\b|\?\?\?/;
 const GLOB_CHAR_RE = /[*?[\]{}]/;
 const VALID_MARKERS = new Set(['NEW', 'DELETE']);
-
-function readFile(p) {
-  try {
-    return fs.readFileSync(p, 'utf8');
-  } catch {
-    return null;
-  }
-}
 
 /**
  * Parse one `### Files in scope` section's bullet list. Each bullet looks
@@ -163,12 +156,8 @@ function validateBlock(b, repoRoot) {
  * @returns {string[]} flat list of error messages (empty when valid)
  */
 function validateArtifacts(tasksDir, repoRoot) {
-  const errors = [];
-  const text = readFile(path.join(tasksDir, 'tasks.md'));
-  if (!text) {
-    errors.push(`Missing ${path.join(tasksDir, 'tasks.md')}.`);
-    return errors;
-  }
+  const { text, errors } = loadTasksMd(tasksDir, (p) => `Missing ${p}.`);
+  if (text === null) return errors;
   const blocks = parseTaskBlocks(text);
   if (!blocks.length) {
     errors.push('No `## Task N` blocks — re-run draft phase first.');

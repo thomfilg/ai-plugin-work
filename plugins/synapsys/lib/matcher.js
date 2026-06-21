@@ -22,7 +22,7 @@ const hasNegativeContentPatterns = content.hasNegativeContentPatterns;
 /**
  * @typedef {Object} MatchResult
  * @property {boolean} fired
- * @property {('events-exclude'|'no-prompt-match'|'no-pretool-match'|'no-content-match'|'negative-excludes'|'exclude-matched'|'no-session-trigger'|'expired'|'disabled'|'domain-mismatch')} [reason]
+ * @property {('events-exclude'|'no-prompt-match'|'no-pretool-match'|'no-content-match'|'negative-excludes'|'exclude-matched'|'no-session-trigger'|'no-stop-response-match'|'expired'|'disabled'|'domain-mismatch')} [reason]
  * @property {Matched} [matched]
  */
 
@@ -313,15 +313,13 @@ function matchSession(memory) {
   return { fired: true };
 }
 
-// Stop event fires at the assistant's turn end. The classifier matrix assigns
-// Stop to memories that are retrospective checks ("did I run follow-up-pr?",
-// "cleanup the tmp file"). They fire unconditionally for any memory listing
-// Stop in events — the body itself IS the reminder, no separate trigger.
-function matchStop(memory) {
-  const gate = gateMemory(memory, 'Stop');
-  if (gate) return { fired: false, reason: gate };
-  return { fired: true };
+const stopMatcher = require('./matcher-stop');
+
+function matchStop(memory, payload) {
+  return stopMatcher.matchStop(memory, payload, { gateMemory, safeRegex, makeMatched });
 }
+
+const _extractStopResponse = stopMatcher._extractStopResponse;
 
 /**
  * Domain gate (GH-513 R4 / AC2): when `memory.domain` is non-empty AND an
@@ -361,7 +359,7 @@ const EVENT_MATCHERS = {
   UserPromptSubmit: (m, payload) => matchPrompt(m, payload?.prompt || ''),
   PreToolUse: (m, payload) => matchPreTool(m, payload),
   SessionStart: (m) => matchSession(m),
-  Stop: (m) => matchStop(m),
+  Stop: (m, payload) => matchStop(m, payload),
 };
 
 function selectForEvent(memories, event, payload, opts) {
@@ -383,6 +381,7 @@ module.exports = {
   matchPreToolResult,
   matchSession,
   matchStop,
+  _extractStopResponse,
   safeRegex,
   splitTopLevelAlternation,
   extractPretoolContent,
@@ -393,4 +392,6 @@ module.exports = {
   evaluateExcludePrompt,
   evaluateExcludePretool,
   hasExcludePatterns,
+  parsePretoolSpec,
+  pretoolSpecMatches,
 };

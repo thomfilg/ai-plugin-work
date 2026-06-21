@@ -9,10 +9,13 @@
  */
 const fs = require('fs');
 const path = require('path');
+const namespace = require('./namespace');
 
-const SESSION_MANIFEST_DIR =
-  process.env.MAESTRO_SESSION_DIR ||
-  path.join(process.env.HOME || '/tmp', '.cache', 'maestro', 'sessions');
+// Per-namespace when MAESTRO_NS is set (GH-622) so syncFromTmux reconciles only
+// this namespace's pools against its (namespace-narrow) alive set — otherwise a
+// second conductor would mark another project's running tasks stopped.
+// MAESTRO_SESSION_DIR overrides.
+const SESSION_MANIFEST_DIR = namespace.sessionManifestDir();
 
 function listManifestFiles() {
   if (!fs.existsSync(SESSION_MANIFEST_DIR)) return [];
@@ -113,7 +116,9 @@ function aliveTicketSet(activeWorkSessions) {
   return new Set(
     (activeWorkSessions || [])
       .map((s) => {
-        const m = s.match(/^([A-Z][A-Z0-9]*-\d+)-work$/);
+        // Tolerate an optional "<ns>/" segment so MAESTRO_NS-scoped session
+        // names (e.g. "proj-a/GH-42-work") still reconcile to the ticket id.
+        const m = s.match(/(?:^|\/)([A-Z][A-Z0-9]*-\d+)-work$/);
         return m ? m[1] : null;
       })
       .filter(Boolean)
@@ -183,6 +188,31 @@ function poolFullForTask(taskId, activeWorkSessions) {
   return liveWork >= m.slots;
 }
 
+/**
+ * stopOracleForTask — the compiled shell predicate the conductor evaluates each
+ * tick to decide whether a ticket is done. Null when the owning manifest
+ * declares none (then no stop-condition rotation happens for that ticket, and
+ * the ticket's command must be a whitelisted skill). Reading from the manifest
+ * (not env) is what lets a daemon restart re-derive the oracle.
+ */
+function stopOracleForTask(taskId) {
+  const hit = findTask(taskId);
+  const oracle = hit && hit.manifest && hit.manifest.stopOracle;
+  return oracle ? String(oracle) : null;
+}
+
+/**
+ * commandForTask — the command recorded in the owning manifest for a ticket
+ * (informational / generic-row gating). Null when unknown. The authoritative
+ * launch skill still lives in the per-ticket `.maestro-skill` file
+ * (skill-registry); this is the orchestration record's copy.
+ */
+function commandForTask(taskId) {
+  const hit = findTask(taskId);
+  const cmd = hit && hit.manifest && hit.manifest.command;
+  return cmd ? String(cmd).replace(/^\//, '') : null;
+}
+
 module.exports = {
   listManifestFiles,
   readManifest,
@@ -193,4 +223,6 @@ module.exports = {
   resetTaskAttempts,
   syncFromTmux,
   poolFullForTask,
+  stopOracleForTask,
+  commandForTask,
 };

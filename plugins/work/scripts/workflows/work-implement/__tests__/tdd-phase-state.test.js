@@ -26,9 +26,10 @@ function createExitScript(dir, exitCode) {
   // completely empty output (that's the empty-command trap). Real test
   // runners always print something, so test fixtures that stand in for
   // them must too.
-  const body = exitCode === 0
-    ? `#!/bin/sh\necho 'simulated test runner: 1 passed'\nexit 0\n`
-    : `#!/bin/sh\necho 'simulated test runner: 1 failed' >&2\nexit ${exitCode}\n`;
+  const body =
+    exitCode === 0
+      ? `#!/bin/sh\necho 'simulated test runner: 1 passed'\nexit 0\n`
+      : `#!/bin/sh\necho 'simulated test runner: 1 failed' >&2\nexit ${exitCode}\n`;
   fs.writeFileSync(scriptPath, body, { mode: 0o755 });
   return scriptPath;
 }
@@ -70,6 +71,9 @@ function runCli(args, homeDir, cwd) {
         TASKS_BASE: tasksBase,
         WORK_TDD_TOKEN_SKIP: '1',
         WORK_TDD_SKIP_WORKSPACE_CHECK: '1',
+        // GH-528: `exception` subcommand is now operator-only.
+        // Tests act as the operator.
+        WORK_OPERATOR_TOKEN: '1',
       },
       stdio: ['pipe', 'pipe', 'pipe'],
       ...(cwd ? { cwd } : {}),

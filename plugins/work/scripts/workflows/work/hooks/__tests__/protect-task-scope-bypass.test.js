@@ -123,6 +123,10 @@ describe('protect-task-scope.js escape hatch + cross-task allow-list (GH-392 Tas
       toolName: 'Edit',
       toolInput: { file_path: target },
       env: {
+        // GH-528 ITEM 1: bypass requires the operator token in addition to
+        // REASON+TARGET. Env vars inherit into the agent shell; the token
+        // doesn't.
+        WORK_OPERATOR_TOKEN: '1',
         PROTECT_TASK_SCOPE_BYPASS_REASON: reason,
         PROTECT_TASK_SCOPE_BYPASS_TARGET: 'src/shared/schema.ts',
       },
@@ -151,7 +155,9 @@ describe('protect-task-scope.js escape hatch + cross-task allow-list (GH-392 Tas
       `audit row meta should record configuredTarget; got: ${serialized}`
     );
     assert.ok(
-      row.task === 1 || row.task === '1' || (row.meta && (row.meta.taskNum === 1 || row.meta.task === 1)),
+      row.task === 1 ||
+        row.task === '1' ||
+        (row.meta && (row.meta.taskNum === 1 || row.meta.task === 1)),
       `audit row should reference task 1; got: ${serialized}`
     );
   });
@@ -205,6 +211,8 @@ describe('protect-task-scope.js escape hatch + cross-task allow-list (GH-392 Tas
       toolName: 'Edit',
       toolInput: { file_path: target },
       env: {
+        // GH-528 ITEM 1: bypass requires WORK_OPERATOR_TOKEN.
+        WORK_OPERATOR_TOKEN: '1',
         PROTECT_TASK_SCOPE_BYPASS_REASON: 'pattern bypass',
         PROTECT_TASK_SCOPE_BYPASS_TARGET: 'src/shared/**',
       },
@@ -229,7 +237,11 @@ describe('protect-task-scope.js escape hatch + cross-task allow-list (GH-392 Tas
       // no bypass reason, no cross-task deps → must block
     });
 
-    assert.equal(r.status, 2, `expected exit 2 when no bypass and no cross-task dep; stderr=${r.stderr}`);
+    assert.equal(
+      r.status,
+      2,
+      `expected exit 2 when no bypass and no cross-task dep; stderr=${r.stderr}`
+    );
     const stderr = r.stderr.trimEnd();
     const lastLine = stderr.split('\n').pop() || '';
     assert.match(

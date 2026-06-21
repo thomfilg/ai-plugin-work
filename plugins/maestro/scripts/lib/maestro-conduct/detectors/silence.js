@@ -18,8 +18,54 @@
  */
 const crypto = require('crypto');
 const state = require('../state');
+const skillRegistry = require('../skill-registry');
 
-const SILENCE_LIMIT_SEC = parseInt(process.env.SILENCE_LIMIT_SEC || '300', 10);
+// Hard default if neither env override nor registry row provides a limit.
+const DEFAULT_SILENCE_LIMIT_SEC = 300;
+
+// Module-level capture is advisory only and kept for backward export
+// compatibility. The authoritative limit is resolved per-call by
+// `resolveSilenceLimit(ctx)` — see GH-514 Task 4 (R3 / AC4): the
+// SILENCE_LIMIT_SEC_FOLLOWUP env var must take effect at detect() time
+// without requiring a daemon restart, and follow-up sessions must honor
+// the registry's larger default (1800s) instead of the work default.
+const SILENCE_LIMIT_SEC = parseInt(
+  process.env.SILENCE_LIMIT_SEC || String(DEFAULT_SILENCE_LIMIT_SEC),
+  10
+);
+
+/**
+ * Resolve the silence-limit for a given ctx, per-call.
+ *
+ * Resolution order (spec §Architecture, AC4; PR #561 review fix):
+ *   - follow-up: $SILENCE_LIMIT_SEC_FOLLOWUP → registry row → 300
+ *   - work / unknown / missing skill: $SILENCE_LIMIT_SEC → registry row → 300
+ *
+ * For the work path, $SILENCE_LIMIT_SEC takes precedence over the registry row
+ * default so operators upgrading from pre-GH-514 (where $SILENCE_LIMIT_SEC was
+ * authoritative) keep their configured threshold. This preserves the "bit-for-
+ * bit identical when .maestro-skill is absent" guarantee.
+ */
+function posInt(v) {
+  const n = parseInt(v || '', 10);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+function resolveSilenceLimit(ctx) {
+  const skill = (ctx && ctx.skill) || null;
+  if (skill === 'follow-up') {
+    const envFollowup = posInt(process.env.SILENCE_LIMIT_SEC_FOLLOWUP);
+    if (envFollowup) return envFollowup;
+  } else {
+    // work / unknown / missing — env override is authoritative (legacy contract).
+    const envWork = posInt(process.env.SILENCE_LIMIT_SEC);
+    if (envWork) return envWork;
+  }
+  const row = skill ? skillRegistry.get(skill) : null;
+  const rowLimit = row && posInt(row.silenceLimitSec);
+  if (rowLimit) return rowLimit;
+  return DEFAULT_SILENCE_LIMIT_SEC;
+}
 
 // Shared with detectors/spinner.js — see ../live-spinner.js for the contract.
 // Both detectors MUST consume the same regex; otherwise one classifies a pane
@@ -51,7 +97,7 @@ function isActive(pane, hashNow, toksNow, prev) {
   return false;
 }
 
-function detect({ session, ticket, pane }) {
+function detect({ session, ticket, pane, skill }) {
   // Marker is keyed by SESSION, not ticket. Multiple sessions share a ticket
   // (-work + -dev + -listen all map to the same ticket id) but each has its
   // own pane content; sharing a marker would cause hash ping-pong and leave
@@ -79,9 +125,30 @@ function detect({ session, ticket, pane }) {
     return { hit: false };
   }
 
+  const limitSec = resolveSilenceLimit({ skill });
   const silenceSec = now - prev.lastActiveAt;
-  if (silenceSec < SILENCE_LIMIT_SEC) return { hit: false, silenceSec };
-  return { hit: true, kind: 'silence', silenceSec, limitSec: SILENCE_LIMIT_SEC };
+  if (silenceSec < limitSec) return { hit: false, silenceSec };
+  return { hit: true, kind: 'silence', silenceSec, limitSec };
 }
 
-module.exports = { name: 'silence', detect, SILENCE_LIMIT_SEC };
+/**
+ * Format a conductor log line for the silence path with a skill-prefixed
+ * token (GH-514 Task 6 / R7). The token shape is:
+ *   `[<ticket>:<skill>] <kind>: <silenceSec>s`
+ * e.g. `[GH-514:follow-up] silence: 120s`.
+ *
+ * Operators grep on this token to separate follow-up vs work activity in
+ * `/tmp/maestro-conduct.log` without re-parsing the session/session-name.
+ * The README's `skill-adapter` section is the single source of truth for
+ * this format. Missing `skill` falls back to 'work' so default `/work`
+ * log shape stays bit-for-bit unchanged (AC5).
+ */
+function formatLogLine({ ticket, skill, silenceSec, kind } = {}) {
+  const t = ticket || '?';
+  const s = skill || 'work';
+  const k = kind || 'silence';
+  const sec = Number.isFinite(silenceSec) ? `${silenceSec}s` : '?s';
+  return `[${t}:${s}] ${k}: ${sec}`;
+}
+
+module.exports = { name: 'silence', detect, SILENCE_LIMIT_SEC, resolveSilenceLimit, formatLogLine };

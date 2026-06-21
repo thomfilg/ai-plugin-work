@@ -48,10 +48,6 @@ describe('step-registry — infra-retry wiring (Task 4)', () => {
     const result = { action: 'surface', payload: { reason: 'infra exhausted' } };
     const decision = followUpNext.dispatchStepResult(state, result);
     assert.equal(decision.terminate, true, 'surface must set terminate=true');
-    assert.notEqual(
-      state.status,
-      'complete',
-      'surface must NOT mark state.status=complete'
-    );
+    assert.notEqual(state.status, 'complete', 'surface must NOT mark state.status=complete');
   });
 });

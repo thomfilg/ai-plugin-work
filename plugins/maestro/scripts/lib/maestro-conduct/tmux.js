@@ -4,6 +4,7 @@
  * Pure side-effect wrappers around tmux CLI calls. No detection logic.
  */
 const { execSync, spawnSync } = require('child_process');
+const namespace = require('./namespace');
 
 function sh(cmd) {
   try {
@@ -70,7 +71,10 @@ function listSessions(pattern) {
       // A character class including '-' here would let "GH-42-dev-work"
       // greedily consume the helper-suffix, with the suffix group then
       // matching '-work' and yielding the wrong ticket id "GH-42-dev".
-      regex = new RegExp(`^${resolveTicketPrefix()}-[0-9]+-(${SESSION_SUFFIX_ALT})$`);
+      // namespace.defaultSessionPattern prepends the "<ns>/" segment when
+      // MAESTRO_NS is set so a second conductor in another namespace never
+      // discovers this batch's agents (GH-622).
+      regex = namespace.defaultSessionPattern(resolveTicketPrefix(), SESSION_SUFFIX_ALT);
     }
   }
   return sh('tmux ls 2>/dev/null')
@@ -80,11 +84,17 @@ function listSessions(pattern) {
 }
 
 /**
- * Strip the maestro session-suffix (`-work`, `-dev`, `-listen`) to derive the
- * underlying ticket id. Mirrors ticket_id_for from maestro-conduct.sh.
+ * Strip the optional "<ns>/" segment and the maestro session-suffix
+ * (`-work`, `-dev`, `-listen`) to derive the underlying ticket id.
+ * Mirrors ticket_id_for from maestro-conduct.sh.
  */
 function ticketIdFor(session) {
-  return session.replace(new RegExp(`-(${SESSION_SUFFIX_ALT})$`), '');
+  return namespace.ticketIdFor(session, SESSION_SUFFIX_ALT);
+}
+
+/** Build an NS-scoped maestro session name: "[<ns>/]<ticket>-<suffix>". */
+function sessionName(ticket, suffix) {
+  return namespace.sessionName(ticket, suffix);
 }
 
 /** Capture pane (visible + extra scrollback so tall menus aren't truncated). */
@@ -136,6 +146,7 @@ module.exports = {
   sendKey,
   ensureSession,
   ticketIdFor,
+  sessionName,
   resolveTicketPrefix,
   SESSION_SUFFIX_ALT,
 };

@@ -10,8 +10,11 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const namespace = require('../scripts/lib/maestro-conduct/namespace');
 
-const INBOX_DIR = '/tmp/claude-agent-inbox';
+// Per-namespace mailbox dir when MAESTRO_NS is set (GH-622), else the historical
+// global /tmp/claude-agent-inbox. Override with MAESTRO_INBOX_DIR.
+const INBOX_DIR = namespace.inboxDir();
 const VALID_CHANNEL = /^[A-Za-z0-9_.-]+$/;
 
 function validateChannelOrExit(channel, usage) {
@@ -26,9 +29,17 @@ function validateChannelOrExit(channel, usage) {
 }
 
 function ensureChannelFile(channel) {
-  fs.mkdirSync(INBOX_DIR, { recursive: true });
+  // 0o700 dir + atomic 'wx' (O_CREAT|O_EXCL) create: the inbox lives in the
+  // shared /tmp tree, so a pre-planted symlink at the predictable channel path
+  // could otherwise be followed and truncate a victim file. O_EXCL fails
+  // instead of following an existing path (CWE-377 / js/insecure-temporary-file).
+  fs.mkdirSync(INBOX_DIR, { recursive: true, mode: 0o700 });
   const file = path.join(INBOX_DIR, `${channel}.log`);
-  if (!fs.existsSync(file)) fs.writeFileSync(file, '');
+  try {
+    fs.writeFileSync(file, '', { flag: 'wx', mode: 0o600 });
+  } catch (e) {
+    if (e.code !== 'EEXIST') throw e; // already present → it's our mailbox, reuse it
+  }
   return file;
 }
 

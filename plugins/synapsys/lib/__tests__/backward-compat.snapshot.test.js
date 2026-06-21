@@ -16,9 +16,7 @@ const path = require('node:path');
 const { listMemoriesFromStore, MARKER, FOLDER } = require(
   path.resolve(__dirname, '..', 'memory-store')
 );
-const { selectForEvent, isDomainMismatch } = require(
-  path.resolve(__dirname, '..', 'matcher')
-);
+const { selectForEvent, isDomainMismatch } = require(path.resolve(__dirname, '..', 'matcher'));
 
 const SAMPLE_PROMPT = 'please git merge feature/x and then deploy';
 
@@ -72,12 +70,9 @@ after(() => {
 describe('R10 backward compatibility — domain-less memories are unaffected by the gate', () => {
   it('baseline: selection with no opts.activeDomains picks both untagged memories', () => {
     const memories = listMemoriesFromStore(store);
-    const picked = selectForEvent(
-      memories,
-      'UserPromptSubmit',
-      { prompt: SAMPLE_PROMPT },
-      {}
-    ).map((m) => m.name).sort();
+    const picked = selectForEvent(memories, 'UserPromptSubmit', { prompt: SAMPLE_PROMPT }, {})
+      .map((m) => m.name)
+      .sort();
 
     // In-test snapshot baseline (no separate snapshot file).
     const baseline = ['universal-deploy', 'universal-merge'];
@@ -86,19 +81,18 @@ describe('R10 backward compatibility — domain-less memories are unaffected by 
 
   it('passing activeDomains is a no-op for untagged memories (matches baseline)', () => {
     const memories = listMemoriesFromStore(store);
-    const baseline = selectForEvent(
-      memories,
-      'UserPromptSubmit',
-      { prompt: SAMPLE_PROMPT },
-      {}
-    ).map((m) => m.name).sort();
+    const baseline = selectForEvent(memories, 'UserPromptSubmit', { prompt: SAMPLE_PROMPT }, {})
+      .map((m) => m.name)
+      .sort();
 
     const gated = selectForEvent(
       memories,
       'UserPromptSubmit',
       { prompt: SAMPLE_PROMPT },
       { activeDomains: new Set(['e2e', 'git']) }
-    ).map((m) => m.name).sort();
+    )
+      .map((m) => m.name)
+      .sort();
 
     assert.deepEqual(gated, baseline, 'untagged memories must be unaffected by activeDomains');
   });
@@ -125,7 +119,9 @@ describe('R10 backward compatibility — domain-less memories are unaffected by 
       'UserPromptSubmit',
       { prompt: SAMPLE_PROMPT },
       { activeDomains: new Set(['e2e']) }
-    ).map((m) => m.name).sort();
+    )
+      .map((m) => m.name)
+      .sort();
 
     assert.deepEqual(
       picked,
