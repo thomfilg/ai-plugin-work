@@ -63,6 +63,21 @@ test('renderStatus renders the READ-ONLY post-consume summary (query + count, ta
   assert.match(out, /already injected this session/i);
 });
 
+test('renderStatus marks the baseline placeholder as pending, not 0 results (GH-519)', () => {
+  const baseline = {
+    baseline: true,
+    queries: [
+      { query: 'GH-519', projectId: 'p', results: [], ranAt: '2026-06-21T00:00:00.000Z' },
+      { query: 'cortex recall', projectId: 'p', results: [], ranAt: '2026-06-21T00:00:00.000Z' },
+    ],
+  };
+  const out = renderStatus(baseline);
+  assert.match(out, /GH-519 → pending/);
+  assert.match(out, /cortex recall → pending/);
+  assert.match(out, /still running in the background/i);
+  assert.doesNotMatch(out, /0 results/);
+});
+
 test('main falls back to the post-consume summary once the live cache is deleted (GH-519)', () => {
   withTmpHome((home) => {
     const prev = process.env.CLAUDE_CODE_SESSION_ID;

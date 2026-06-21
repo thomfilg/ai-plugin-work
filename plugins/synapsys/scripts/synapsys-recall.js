@@ -20,13 +20,22 @@ const EMPTY_MESSAGE = 'no auto-recall this session';
  * the summary form is tagged so the status surface still works after consume.
  * When neither is present (or holds no queries), a single empty-state line shows.
  *
- * @param {{ summary?: boolean, queries?: Array<{query: string, results?: unknown[], count?: number}> }|null|undefined} cache
+ * @param {{ baseline?: boolean, summary?: boolean, queries?: Array<{query: string, results?: unknown[], count?: number}> }|null|undefined} cache
  * @returns {string}
  */
 function renderStatus(cache) {
   const queries = cache && Array.isArray(cache.queries) ? cache.queries : [];
   if (queries.length === 0) {
     return EMPTY_MESSAGE;
+  }
+  // The SessionStart `baseline:true` placeholder carries the scheduled queries
+  // with empty `results` before the detached recall lands. Reporting those as
+  // `→ 0 results` reads like recall already ran with no hits; instead surface
+  // that the background job is still pending (GH-519).
+  if (cache && cache.baseline === true) {
+    const pending = queries.map((q) => `- ${q.query} → pending`);
+    pending.push('(auto-recall still running in the background)');
+    return pending.join('\n');
   }
   const lines = queries.map((q) => {
     const count = Array.isArray(q.results) ? q.results.length : Number(q.count) || 0;
