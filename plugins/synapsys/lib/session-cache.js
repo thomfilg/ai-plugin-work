@@ -53,6 +53,32 @@ function write(sessionId, data, { home } = {}) {
 }
 
 /**
+ * Atomically claim the cache slot for `sessionId`: create the file with the
+ * `wx` flag (create-or-fail) so exactly one caller wins under concurrency.
+ * Returns true when THIS call created the file, false when it already existed
+ * (EEXIST). Any other fs error rethrows to the caller's fail-open handler.
+ * Used by the single-consume sentinel to close the check-then-act TOCTOU
+ * window (two concurrent first-prompt consumes can't both claim Phase 1).
+ *
+ * @param {string} sessionId
+ * @param {unknown} data
+ * @param {{ home: string }} opts
+ * @returns {boolean}
+ */
+function claim(sessionId, data, { home } = {}) {
+  const dir = cacheDir(home);
+  fs.mkdirSync(dir, { recursive: true });
+  const file = cacheFile(home, sessionId);
+  try {
+    fs.writeFileSync(file, JSON.stringify(data), { flag: 'wx', mode: 0o600 });
+    return true;
+  } catch (err) {
+    if (err && err.code === 'EEXIST') return false;
+    throw err;
+  }
+}
+
+/**
  * Read and parse the cache for `sessionId`. Returns null when the file is
  * absent or cannot be parsed.
  *
@@ -106,4 +132,4 @@ function pruneStale({ home, now = Date.now() } = {}) {
   }
 }
 
-module.exports = { write, read, delete: del, pruneStale };
+module.exports = { write, claim, read, delete: del, pruneStale };

@@ -448,3 +448,50 @@ test('consumeCache: a baseline placeholder defers — a later real background wr
     cleanup(home);
   }
 });
+
+test('consumeCache: persists a READ-ONLY summary (query + count, no bodies) for the recall status surface', () => {
+  const { consumeCache } = loadRecall();
+  const cache = require('../lib/session-cache');
+  const sentinel = require('../lib/consume-sentinel');
+  const home = mkHome();
+  const cfg = { max_age_days: 180, max_chars_per_memory: 500 };
+  const record = {
+    queries: [
+      {
+        query: 'GH-519',
+        projectId: 'claude-plugin-work',
+        results: [
+          { id: 'm1', savedAt: new Date().toISOString(), ageDays: 1, title: 'T', body: 'secret' },
+          { id: 'm2', savedAt: new Date().toISOString(), ageDays: 1, title: 'T2', body: 'body2' },
+        ],
+      },
+    ],
+  };
+  try {
+    cache.write('sess-summary', record, { home });
+    consumeCache('sess-summary', { home, config: cfg });
+
+    const summary = sentinel.readSummary(cache, 'sess-summary', home);
+    assert.ok(summary && summary.summary === true, 'summary record is persisted');
+    assert.deepEqual(summary.queries, [{ query: 'GH-519', count: 2 }], 'query + count only');
+    // The summary must NOT carry re-injectable result bodies.
+    assert.equal(JSON.stringify(summary).includes('secret'), false, 'no result bodies leak');
+  } finally {
+    cleanup(home);
+  }
+});
+
+test('markConsumed is atomic (TOCTOU): only the first caller claims Phase 1, the second loses', () => {
+  const cache = require('../lib/session-cache');
+  const sentinel = require('../lib/consume-sentinel');
+  const home = mkHome();
+  try {
+    // Two concurrent first-prompt consumes both passed `isConsumed` (false) and
+    // race to claim. The atomic create-or-fail guarantees exactly one wins, so
+    // they can't both inject — closing the non-atomic check-then-act window.
+    assert.equal(sentinel.markConsumed(cache, 'sess-race', home), true, 'first caller claims');
+    assert.equal(sentinel.markConsumed(cache, 'sess-race', home), false, 'second caller loses');
+  } finally {
+    cleanup(home);
+  }
+});

@@ -61,6 +61,34 @@ test('write creates the cache file with mode 0o600', () => {
   }
 });
 
+test('claim atomically creates once: first wins, second sees EEXIST → false', () => {
+  const home = mkHome();
+  const cache = loadCache();
+  try {
+    // First claim creates the file and wins.
+    assert.equal(cache.claim('sess-claim', { a: 1 }, { home }), true);
+    assert.ok(fs.existsSync(cacheFile(home, 'sess-claim')), 'claim creates the file');
+    // Second claim must NOT overwrite — it sees the existing file and loses.
+    assert.equal(cache.claim('sess-claim', { a: 2 }, { home }), false);
+    // The original payload is preserved (no truncate-on-claim).
+    assert.deepEqual(cache.read('sess-claim', { home }), { a: 1 });
+  } finally {
+    cleanup(home);
+  }
+});
+
+test('claim writes the file with mode 0o600', () => {
+  const home = mkHome();
+  const cache = loadCache();
+  try {
+    cache.claim('sess-claim-mode', { ok: true }, { home });
+    const mode = fs.statSync(cacheFile(home, 'sess-claim-mode')).mode & 0o777;
+    assert.equal(mode, 0o600, `expected 0o600, got 0o${mode.toString(8)}`);
+  } finally {
+    cleanup(home);
+  }
+});
+
 test('read returns null when the cache file is missing', () => {
   const home = mkHome();
   const cache = loadCache();

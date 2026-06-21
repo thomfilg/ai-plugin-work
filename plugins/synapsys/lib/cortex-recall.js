@@ -357,10 +357,19 @@ function consumeCache(sessionId, { home, config = {} } = {}) {
   }
   // Defer the baseline placeholder so the real detached write survives (GH-519).
   if (isBaselineRecord(record)) return '';
-  // Mark consumed regardless of content so a late write can't re-inject (GH-519).
-  sentinel.markConsumed(cache, sessionId, home);
+  // Atomically claim Phase 1 regardless of content so a late write can't
+  // re-inject (GH-519). A lost claim means a concurrent consume already injected
+  // this turn — drop the cache and inject nothing (closes the TOCTOU window).
+  if (!sentinel.markConsumed(cache, sessionId, home)) {
+    sentinel.dropStaleCache(cache, sessionId, home);
+    return '';
+  }
   if (!record || !Array.isArray(record.queries) || record.queries.length === 0) return '';
   const block = formatRecallBlock(record.queries, config);
+  // Persist a READ-ONLY summary (last query + hit counts, no bodies) BEFORE
+  // deleting the data cache so `/synapsys recall` can still report this
+  // session's recall after the single-consume delete (GH-519 review).
+  sentinel.writeSummary(cache, sessionId, home, record.queries);
   try {
     cache.delete(sessionId, { home });
   } catch {

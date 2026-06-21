@@ -28,12 +28,62 @@ function isConsumed(cache, sessionId, home) {
   }
 }
 
-/** Mark a session consumed so later prompts / late background writes never re-inject. */
+/**
+ * Atomically mark a session consumed so later prompts / late background writes
+ * never re-inject. Uses the cache's atomic create-or-fail `claim` (flag `wx`)
+ * — NOT a non-atomic write — so two concurrent first-prompt consumes can't both
+ * pass the earlier `isConsumed` check and both inject (low-prob TOCTOU). Returns
+ * true when THIS call claimed Phase 1 (proceed to inject), false when a
+ * concurrent consume already claimed it (suppress). Fail-open: any fs error
+ * other than EEXIST returns true, degrading to the pre-fix single-delete
+ * behavior rather than blocking the dispatcher.
+ */
 function markConsumed(cache, sessionId, home) {
   try {
-    cache.write(consumedKey(sessionId), { consumedAt: new Date().toISOString() }, { home });
+    return cache.claim(consumedKey(sessionId), { consumedAt: new Date().toISOString() }, { home });
   } catch {
     // Best-effort sentinel — fall back to the pre-fix single-delete behavior.
+    return true;
+  }
+}
+
+/** Derive the READ-ONLY post-consume summary key (kept distinct from the data cache). */
+function summaryKey(sessionId) {
+  return `${sessionId}__summary`;
+}
+
+/**
+ * Persist a small READ-ONLY summary of the just-consumed recall so
+ * `/synapsys recall` can still report the session's last query + hit counts
+ * after the single-consume cache was deleted. Stores ONLY query + count — never
+ * the result bodies — so the summary can never be re-injected as recall output.
+ * Best-effort: any fs error degrades the status surface to its empty-state line.
+ */
+function writeSummary(cache, sessionId, home, queries) {
+  try {
+    cache.write(
+      summaryKey(sessionId),
+      {
+        summary: true,
+        consumedAt: new Date().toISOString(),
+        queries: (queries || []).map((q) => ({
+          query: q.query,
+          count: Array.isArray(q.results) ? q.results.length : 0,
+        })),
+      },
+      { home }
+    );
+  } catch {
+    // Best-effort — the status surface falls back to "no auto-recall this session".
+  }
+}
+
+/** Read the READ-ONLY post-consume summary for a session, or null when absent. */
+function readSummary(cache, sessionId, home) {
+  try {
+    return cache.read(summaryKey(sessionId), { home });
+  } catch {
+    return null;
   }
 }
 
@@ -46,4 +96,12 @@ function dropStaleCache(cache, sessionId, home) {
   }
 }
 
-module.exports = { consumedKey, isConsumed, markConsumed, dropStaleCache };
+module.exports = {
+  consumedKey,
+  isConsumed,
+  markConsumed,
+  dropStaleCache,
+  summaryKey,
+  writeSummary,
+  readSummary,
+};

@@ -6,8 +6,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
-const { renderStatus, resolveSessionId } = require('../scripts/synapsys-recall.js');
+const { renderStatus, main, resolveSessionId } = require('../scripts/synapsys-recall.js');
 const cortexHook = require('../lib/cortex-hook.js');
+const cortexRecall = require('../lib/cortex-recall.js');
+const sessionCache = require('../lib/session-cache.js');
 
 test('renderStatus lists each query string and its result count', () => {
   const cache = {
@@ -44,6 +46,68 @@ test('renderStatus prints a clear message when no cache exists', () => {
   assert.match(renderStatus(null), /no auto-recall this session/i);
   assert.match(renderStatus(undefined), /no auto-recall this session/i);
   assert.match(renderStatus({ queries: [] }), /no auto-recall this session/i);
+});
+
+test('renderStatus renders the READ-ONLY post-consume summary (query + count, tagged)', () => {
+  const summary = {
+    summary: true,
+    consumedAt: '2026-06-21T00:00:00.000Z',
+    queries: [
+      { query: 'GH-519', count: 2 },
+      { query: 'cortex recall', count: 0 },
+    ],
+  };
+  const out = renderStatus(summary);
+  assert.match(out, /GH-519 → 2 results/);
+  assert.match(out, /cortex recall → 0 results/);
+  assert.match(out, /already injected this session/i);
+});
+
+test('main falls back to the post-consume summary once the live cache is deleted (GH-519)', () => {
+  withTmpHome((home) => {
+    const prev = process.env.CLAUDE_CODE_SESSION_ID;
+    process.env.CLAUDE_CODE_SESSION_ID = 'sess-recall-fallback';
+    try {
+      const sessionId = resolveSessionId({});
+      // SessionStart writes the live cache; the first UserPromptSubmit consumes
+      // it (single-consume deletes the data cache but persists the summary).
+      sessionCache.write(
+        sessionId,
+        {
+          queries: [
+            {
+              query: 'GH-519',
+              projectId: 'p',
+              results: [
+                {
+                  id: 'm1',
+                  savedAt: new Date().toISOString(),
+                  ageDays: 1,
+                  title: 'T',
+                  body: 'B',
+                },
+              ],
+              ranAt: 't',
+            },
+          ],
+        },
+        { home }
+      );
+      const block = cortexRecall.consumeCache(sessionId, { home, config: {} });
+      assert.ok(block, 'first consume injects the recall block');
+      assert.equal(sessionCache.read(sessionId, { home }), null, 'data cache is deleted');
+
+      // `/synapsys recall` after consume must still report the recall.
+      const lines = [];
+      main({ home, payload: {}, log: (s) => lines.push(s) });
+      const out = lines.join('\n');
+      assert.match(out, /GH-519 → 1 result\b/);
+      assert.match(out, /already injected this session/i);
+    } finally {
+      if (prev === undefined) delete process.env.CLAUDE_CODE_SESSION_ID;
+      else process.env.CLAUDE_CODE_SESSION_ID = prev;
+    }
+  });
 });
 
 test('recall CLI and cortex hook resolve the SAME session id for an env-sourced id', () => {
