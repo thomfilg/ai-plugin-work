@@ -39,7 +39,11 @@ function mkHome() {
 }
 
 function cleanup(dir) {
-  fs.rmSync(dir, { recursive: true, force: true });
+  // Detached background recall jobs may still be writing into the store when a
+  // test reaches teardown, so a plain recursive rmSync can lose the rmdir/readdir
+  // race and throw ENOTEMPTY (observed only under Node 20's timing). maxRetries
+  // makes rmSync re-walk the tree until the writer settles.
+  fs.rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 });
 }
 
 function cacheFilePath(home, sessionId) {
