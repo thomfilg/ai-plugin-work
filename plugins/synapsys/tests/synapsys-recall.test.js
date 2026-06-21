@@ -194,3 +194,40 @@ test('suppressedByFireMode: falls back to raw meta.fire_mode when parsed fireMod
     assert.equal(cortexHook.suppressedByFireMode(home, sessionId, memory), true);
   });
 });
+
+// A throwing inline recall must NOT burn the once-per-session fire marker.
+// shouldSkipCortexQuery atomically CLAIMS the marker before the recall runs;
+// if the recall throws (transient provider error), appendCortexQuery must
+// RELEASE the marker so the memory's cortex_query can fire again later in the
+// session. Otherwise a single transient failure fail-closes the query for the
+// rest of the session.
+test('appendCortexQuery: a throwing recall does NOT burn the once_per_session marker', () => {
+  withTmpHome((home) => {
+    const sessionId = 'sess-throwing-recall';
+    const memory = {
+      name: 'mem-throw',
+      fireMode: 'once_per_session',
+      meta: { fire_mode: 'once_per_session', cortex_query: 'GH-519' },
+    };
+
+    let calls = 0;
+    const throwingCtx = {
+      home,
+      sessionId,
+      projectId: 'claude-plugin-work',
+      config: {},
+      recall: () => {
+        calls += 1;
+        throw new Error('transient provider failure');
+      },
+    };
+
+    // First dispatch: recall throws → body unchanged, marker released.
+    assert.equal(cortexHook.appendCortexQuery('BASE', memory, throwingCtx), 'BASE');
+    assert.equal(calls, 1);
+
+    // The query is NOT suppressed afterward — the marker was released, so the
+    // memory can run its cortex_query again later in the same session.
+    assert.equal(cortexHook.suppressedByFireMode(home, sessionId, memory), false);
+  });
+});

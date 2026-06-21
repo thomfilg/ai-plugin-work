@@ -223,6 +223,24 @@ function suppressedByFireMode(home, sessionId, memory) {
 }
 
 /**
+ * Release a once-per-session fire marker so the memory's cortex_query can fire
+ * again later in this session. Called when the recall this dispatch claimed the
+ * marker for throws — otherwise a transient recall failure would permanently
+ * (fail-closed) suppress the query for the rest of the session. The atomic
+ * `wx`-create claim in suppressedByFireMode stays intact; this only undoes the
+ * claim on failure. Best-effort: a missing marker (non-once mode, or never
+ * claimed) or any unlink error is ignored.
+ */
+function releaseFireMarker(home, sessionId, memory) {
+  const key = `${memory.name}:${memory.meta?.cortex_query}`;
+  try {
+    fs.unlinkSync(fireMarkerFile(home, sessionId, key));
+  } catch {
+    // No marker to release (non-once mode / never claimed) or fs error — ignore.
+  }
+}
+
+/**
  * Resolve the injectable inline-recall function, or null when unavailable.
  *
  * PRODUCTION CONTRACT: cortex is reached through a provider module named by
@@ -302,7 +320,11 @@ function appendCortexQuery(base, memory, ctx) {
     });
     return block ? `${base}\n\n${block}` : base;
   } catch {
-    // Inline recall failed — leave the memory body unchanged (R14/R18).
+    // Inline recall failed — leave the memory body unchanged (R14/R18) and
+    // release the once-per-session marker shouldSkipCortexQuery just claimed so
+    // a transient failure does not permanently suppress this query (fail-open,
+    // not fail-closed).
+    releaseFireMarker(ctx.home, ctx.sessionId, memory);
     return base;
   }
 }
