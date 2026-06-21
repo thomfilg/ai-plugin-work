@@ -386,3 +386,65 @@ test('consumeCache: an empty/missing cache on the first consume still marks the 
     cleanup(home);
   }
 });
+
+test('consumeCache: a baseline placeholder defers — a later real background write IS injected', () => {
+  const { consumeCache } = loadRecall();
+  const cache = require('../lib/session-cache');
+  const home = mkHome();
+  const cfg = { max_age_days: 180, max_chars_per_memory: 500 };
+  try {
+    // SessionStart writes the `baseline:true` placeholder (empty results) BEFORE
+    // the detached job lands. A prompt arriving in this window must NOT consume
+    // it (no "no matches" injection, no sentinel) so the real results survive.
+    cache.write(
+      'sess-baseline',
+      {
+        baseline: true,
+        queries: [{ query: 'GH-519', projectId: 'claude-plugin-work', results: [] }],
+      },
+      { home }
+    );
+    const first = consumeCache('sess-baseline', { home, config: cfg });
+    assert.equal(first, '', 'baseline placeholder is not consumed');
+    assert.ok(
+      fs.existsSync(cacheFile(home, 'sess-baseline')),
+      'baseline cache is left in place for the real write'
+    );
+
+    // Detached background job finishes and overwrites with real results (no
+    // baseline flag).
+    cache.write(
+      'sess-baseline',
+      {
+        queries: [
+          {
+            query: 'GH-519',
+            projectId: 'claude-plugin-work',
+            results: [
+              { id: 'm1', savedAt: new Date().toISOString(), ageDays: 1, title: 'T', body: 'B' },
+            ],
+          },
+        ],
+      },
+      { home }
+    );
+
+    // The next prompt now injects the real results exactly once.
+    const second = consumeCache('sess-baseline', { home, config: cfg });
+    assert.ok(
+      second.includes('[cortex:auto-recall]'),
+      'real results inject after the baseline defer'
+    );
+    assert.ok(
+      !fs.existsSync(cacheFile(home, 'sess-baseline')),
+      'cache deleted after the real consume'
+    );
+
+    // And single-consume still holds for any further late write.
+    cache.write('sess-baseline', { queries: [] }, { home });
+    const third = consumeCache('sess-baseline', { home, config: cfg });
+    assert.equal(third, '', 'single-consume enforced after the real injection');
+  } finally {
+    cleanup(home);
+  }
+});

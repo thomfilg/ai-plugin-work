@@ -319,8 +319,7 @@ function scheduleRecall({ queries = [], projectId, sessionId, home, spawn } = {}
  * path, the single-value flags, and one repeated `--query` flag per query.
  *
  * @param {{ bounded: string[], projectId?: string, sessionId?: string, home?: string }} args
- * @returns {string[]} the argv passed to `node`
- */
+ * @returns {string[]} the argv passed to `node` */
 function buildRecallArgs({ bounded, projectId, sessionId, home }) {
   return [
     BG_SCRIPT,
@@ -339,14 +338,12 @@ function buildRecallArgs({ bounded, projectId, sessionId, home }) {
  * `[cortex:auto-recall]` block, delete the cache file, and set a single-consume
  * sentinel. Returns '' when nothing to consume or when already consumed. Never
  * throws (R14).
- *
  * @param {string} sessionId session identifier
  * @param {{ home: string, config?: { max_age_days?: number, max_chars_per_memory?: number } }} opts
  * @returns {string} the formatted block, or '' when nothing to consume
  */
 function consumeCache(sessionId, { home, config = {} } = {}) {
-  // Single-consume guard (see lib/consume-sentinel): an already-consumed session
-  // drops any late-written cache and returns '' (no second injection).
+  // Single-consume guard: an already-consumed session drops late cache, no inject.
   if (sentinel.isConsumed(cache, sessionId, home)) {
     sentinel.dropStaleCache(cache, sessionId, home);
     return '';
@@ -358,12 +355,15 @@ function consumeCache(sessionId, { home, config = {} } = {}) {
   } catch {
     record = null;
   }
-  // Mark consumed at this first attempt regardless of content (GH-519:
-  // late-recall-without-sentinel) so a late background write can't re-inject.
+  // Defer the SessionStart `baseline:true` placeholder (GH-519:
+  // early-consume-drops-recall): consuming its empty results would inject "no
+  // matches" and sentinel-drop the real detached write. Leave it for a later
+  // prompt to pick up the real write (which never carries `baseline`).
+  if (record && record.baseline === true) return '';
+  // Mark consumed at this first real attempt regardless of content so a late
+  // background write can't re-inject (GH-519: late-recall-without-sentinel).
   sentinel.markConsumed(cache, sessionId, home);
-  if (!record || !Array.isArray(record.queries) || record.queries.length === 0) {
-    return '';
-  }
+  if (!record || !Array.isArray(record.queries) || record.queries.length === 0) return '';
   const block = formatRecallBlock(record.queries, config);
   try {
     cache.delete(sessionId, { home });

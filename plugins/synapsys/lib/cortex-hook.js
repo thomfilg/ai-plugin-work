@@ -131,6 +131,11 @@ function scheduleSessionRecall(payload) {
 function writeBaselineRecall({ queries, projectId, sessionId, home }) {
   try {
     const record = {
+      // `baseline:true` marks this as the pre-recall placeholder so consumeCache
+      // defers instead of single-consuming empty results before the detached job
+      // lands (GH-519: early-consume-drops-recall). The background write never
+      // carries this flag, so the real results consume normally.
+      baseline: true,
       queries: queries.map((query) => ({
         query,
         projectId,
