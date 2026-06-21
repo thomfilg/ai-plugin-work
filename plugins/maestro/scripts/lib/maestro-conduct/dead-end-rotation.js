@@ -25,16 +25,27 @@ const DEAD_END_PROBE_GRACE_MIN = parseInt(process.env.DEAD_END_PROBE_GRACE_MIN |
 /**
  * freeDeadEndSlot — agent is stuck (operator didn't respond; every menu option
  * a bypass; PR has no forward path). Triggered by re-emit escalation when the
- * same alert kind fires ≥ DEAD_END_REEMITS times. Attempt-based recovery: each
- * dead-end bumps `task.attempts`; < DEAD_END_MAX_ATTEMPTS → `pending` (re-eligible),
- * ≥ DEAD_END_MAX_ATTEMPTS → `blocked` (operator must intervene). The per-tick
- * `dead-end` marker prevents duplicate kills; cleared by maybeAutoBootstrap.
+ * same alert kind fires ≥ DEAD_END_REEMITS times.
  *
- * After the attempt-1 probe, a DEAD_END_PROBE_GRACE_MIN grace window is
- * enforced: re-emits that land inside the window no-op (no attempt bump, no
- * kill) so the agent has time to answer the diagnostic before the slot rotates.
- * Only a re-emit after the grace window elapses advances to attempt 2 and
- * kill+rotate.
+ * TWO decoupled counters drive recovery:
+ *
+ *   1. Probe-vs-kill tier = the PER-LIFECYCLE `dead-end` state marker (NOT
+ *      manifest.attempts). The first dead-end of a lifecycle (`!marker.diagnosed`)
+ *      sends the diagnostic probe — a probe is NOT a strike, so attempts is left
+ *      untouched. A later re-emit (after the grace window) is the kill: it bumps
+ *      manifest.attempts once and rotates. Because bootstrap clears this marker,
+ *      every re-bootstrapped lifecycle gets a fresh probe before any kill.
+ *
+ *   2. Blocked tier = manifest.attempts, accumulating ACROSS lifecycles. Bumped
+ *      once per lifecycle (only on the kill path). When attempts reach
+ *      DEAD_END_MAX_ATTEMPTS the ticket goes `blocked`; below that, `pending`
+ *      (re-eligible). attempts is reset ONLY on real progress (phase advance),
+ *      never on re-bootstrap — so repeated dead-ends genuinely march toward
+ *      `blocked` (lifecycle1 kill→1 pending, …, lifecycle3 kill→3 blocked).
+ *
+ * After the probe, a DEAD_END_PROBE_GRACE_MIN grace window is enforced: re-emits
+ * inside the window no-op (no attempt bump, no kill) so the agent has time to
+ * answer the diagnostic before the slot rotates.
  *
  * killAndBootstrapNext + alert are injected by the caller (actions.js) to avoid
  * a circular require.
@@ -44,61 +55,80 @@ function freeDeadEndSlot({ session, ticket, kind, repeatCount, sha, killAndBoots
   const marker = state.read(ticket, 'dead-end') || {};
   if (marker.killed) return false; // already freed this lifecycle
 
-  // Grace guard: the attempt-1 probe was already sent and we're still inside
-  // the grace window — no-op WITHOUT bumping attempts or killing so the agent
-  // can answer the probe first. diagnosedAt and state.now() are both unix
-  // seconds, so the comparison is in seconds.
+  // Grace guard: the probe was already sent and we're still inside the grace
+  // window — no-op WITHOUT bumping attempts or killing so the agent can answer
+  // the probe first. diagnosedAt and state.now() are both unix seconds.
   if (marker.diagnosed && state.now() - (marker.diagnosedAt || 0) < DEAD_END_PROBE_GRACE_MIN * 60) {
     return false;
   }
 
-  const attempts = manifest.incrementTaskAttempts(ticket);
-
-  // incrementTaskAttempts returns 0 when the ticket isn't registered in any
-  // manifest. An untracked session has no pool slot to account for, so dead-end
-  // rotation does not apply — bail without probing or killing rather than fall
-  // through to rotateDeadEnd and kill a session we can't attempt-account for.
-  if (attempts === 0) {
+  // Untracked guard (TOP of the live path): a session with no manifest entry has
+  // no pool slot to attempt-account for, so dead-end rotation does not apply —
+  // bail WITHOUT probing or killing. getTaskAttempts returns null only when the
+  // ticket is registered in no manifest (0 is a tracked, zero-strike ticket).
+  // This must sit before the probe tier because the probe no longer increments
+  // attempts, so the old post-increment `attempts===0` bail can't cover it.
+  const attempts = manifest.getTaskAttempts(ticket);
+  if (attempts === null) {
     alerts.log(
       `${session} DEAD-END skipped — ticket ${ticket} not in any manifest; no attempt accounting, no rotation`
     );
     return false;
   }
 
-  // First attempt: don't kill — ask the agent to diagnose itself first so the
-  // operator can read what's actually blocking before rotating the slot.
-  if (attempts === 1) {
+  // First dead-end of THIS lifecycle: don't kill — ask the agent to diagnose
+  // itself first so the operator can read what's blocking before rotating. A
+  // probe is not a strike, so attempts stays put; the display reads current
+  // strikes (+1 to show the strike this lifecycle would land on if it kills).
+  if (!marker.diagnosed) {
     sendDeadEndProbe({ session, ticket, kind, repeatCount, sha, attempts, alert });
     return true;
   }
 
-  rotateDeadEnd({ session, ticket, kind, repeatCount, sha, attempts, killAndBootstrapNext });
+  // marker.diagnosed AND grace elapsed → this is the kill. Bump attempts exactly
+  // once (the strike) then rotate.
+  const struck = manifest.incrementTaskAttempts(ticket);
+  rotateDeadEnd({
+    session,
+    ticket,
+    kind,
+    repeatCount,
+    sha,
+    attempts: struck,
+    killAndBootstrapNext,
+  });
   return true;
 }
 
 /**
- * sendDeadEndProbe — attempt-1 path: write the diagnosed `dead-end` marker,
- * push a diagnostic prompt into the agent pane, and emit a `dead-end-probe`
- * alert telling the operator to wait for the reply. No kill, no rotation.
+ * sendDeadEndProbe — probe path (first dead-end of this lifecycle): write the
+ * diagnosed `dead-end` marker, push a diagnostic prompt into the agent pane, and
+ * emit a `dead-end-probe` alert telling the operator to wait for the reply. No
+ * kill, no rotation, and — crucially — NO attempt bump (a probe is not a strike).
+ *
+ * `attempts` is the CURRENT (un-incremented) cross-lifecycle strike count. The
+ * display strike is `attempts + 1` — the strike this lifecycle's kill would land
+ * on — so the operator sees how close the ticket is to `blocked`.
  */
 function sendDeadEndProbe({ session, ticket, kind, repeatCount, sha, attempts, alert }) {
+  const strike = attempts + 1;
   state.write(ticket, 'dead-end', {
     diagnosed: true,
     diagnosedAt: state.now(),
     trigger: kind,
     attempts,
   });
-  const probe = `MAESTRO DIAGNOSTIC (attempt 1/${DEAD_END_MAX_ATTEMPTS}): you have been stalled on ${kind} for ${repeatCount}+ cycles. Reply with: (1) what step/phase you are on, (2) the exact prompt or condition blocking you, (3) what input or decision you need from the operator. Do NOT take any other action.`;
+  const probe = `MAESTRO DIAGNOSTIC (strike ${strike}/${DEAD_END_MAX_ATTEMPTS}): you have been stalled on ${kind} for ${repeatCount}+ cycles. Reply with: (1) what step/phase you are on, (2) the exact prompt or condition blocking you, (3) what input or decision you need from the operator. Do NOT take any other action.`;
   try {
     spawnSync('tmux', ['send-keys', '-t', session, probe, 'Enter'], { stdio: 'ignore' });
   } catch {}
   manifest.updateTaskStatus(
     ticket,
     'in_progress',
-    `dead-end probe sent (attempt 1/${DEAD_END_MAX_ATTEMPTS}); waiting for agent reply`
+    `dead-end probe sent (strike ${strike}/${DEAD_END_MAX_ATTEMPTS}); waiting for agent reply`
   );
   alerts.log(
-    `${session} DEAD-END attempt 1/${DEAD_END_MAX_ATTEMPTS} — diagnostic probe sent to agent; NO kill, NO rotation. Operator should read pane reply via tmux capture-pane.`
+    `${session} DEAD-END strike ${strike}/${DEAD_END_MAX_ATTEMPTS} — diagnostic probe sent to agent; NO kill, NO rotation. Operator should read pane reply via tmux capture-pane.`
   );
   alert({
     session,
@@ -108,7 +138,7 @@ function sendDeadEndProbe({ session, ticket, kind, repeatCount, sha, attempts, a
     repeatCount,
     sha,
     attempts,
-    instruction: `Attempt 1/${DEAD_END_MAX_ATTEMPTS}: agent received diagnostic prompt asking what's blocking. Wait ~30s, then capture pane to read reply: \`tmux capture-pane -t ${session} -p | tail -40\`. If reply is actionable, intervene; otherwise next dead-end attempt (2/${DEAD_END_MAX_ATTEMPTS}) will rotate.`,
+    instruction: `Strike ${strike}/${DEAD_END_MAX_ATTEMPTS}: agent received diagnostic prompt asking what's blocking. Wait ~30s, then capture pane to read reply: \`tmux capture-pane -t ${session} -p | tail -40\`. If reply is actionable, intervene; otherwise the next dead-end re-emit (after the grace window) will rotate.`,
   });
 }
 

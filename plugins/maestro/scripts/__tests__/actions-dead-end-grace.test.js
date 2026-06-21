@@ -141,7 +141,7 @@ test('after grace window: re-emit proceeds — increments to attempt 2 and kill+
   assert.equal(deadEnd[0].attempts, 2);
 });
 
-test('first-ever call (no marker): sends probe, attempt 1, no kill — regression guard', () => {
+test('first-ever call (no marker): sends probe, attempts STAY 0, no kill — regression guard', () => {
   const { stateDir, sessionDir, alertFile } = setup();
   const manifestPath = seedManifest(sessionDir, TICKET);
   const { actions, tmuxStub } = freshEnv({ stateDir, alertFile, sessionDir });
@@ -155,21 +155,23 @@ test('first-ever call (no marker): sends probe, attempt 1, no kill — regressio
 
   assert.equal(result, true);
   assert.equal(kills(tmuxStub).length, 0, 'first call must NOT kill');
-  // Probe is `tmux send-keys -t <session> <probe-text> Enter` → text at args[3].
+  // Probe is sent because !marker.diagnosed (first dead-end of this lifecycle),
+  // NOT because attempts===1. A probe is not a strike, so attempts stays 0.
   const probes = tmuxStub.filter(
     (c) =>
       c.args[0] === 'send-keys' &&
       c.args.some((a) => typeof a === 'string' && a.includes('MAESTRO DIAGNOSTIC'))
   );
   assert.equal(probes.length, 1, 'diagnostic probe sent on first call');
-  assert.equal(readTask(manifestPath, TICKET).attempts, 1, 'attempts bumped to 1');
+  assert.equal(readTask(manifestPath, TICKET).attempts || 0, 0, 'probe must NOT bump attempts');
   const probeAlerts = alerts(alertFile).filter((a) => a.kind === 'dead-end-probe');
   assert.equal(probeAlerts.length, 1, 'dead-end-probe alert emitted');
 });
 
-test('ticket not in any manifest (attempts=0): bails — no probe, no kill', () => {
+test('ticket not in any manifest: bails at top — no probe, no kill', () => {
   const { stateDir, sessionDir, alertFile } = setup();
-  // Intentionally do NOT seed a manifest, so incrementTaskAttempts returns 0.
+  // Intentionally do NOT seed a manifest, so getTaskAttempts returns null and
+  // the untracked guard at the top of freeDeadEndSlot bails before the probe.
   const { actions, tmuxStub } = freshEnv({ stateDir, alertFile, sessionDir });
 
   const result = actions.freeDeadEndSlot({
@@ -213,4 +215,79 @@ test('AUTO_FREE_DEAD_END=0 disables freeDeadEndSlot entirely', () => {
   assert.equal(result, false);
   assert.equal(tmuxStub.length, 0, 'no tmux activity when disabled');
   assert.equal(fs.existsSync(alertFile), false, 'no alert when disabled');
+});
+
+test('manifest.getTaskAttempts: number when tracked, null when untracked', () => {
+  const { stateDir, sessionDir, alertFile } = setup();
+  seedManifest(sessionDir, TICKET, { attempts: 2 });
+  const { actions } = freshEnv({ stateDir, alertFile, sessionDir });
+  void actions; // ensure module cache primed under this env
+  const manifest = require(path.resolve(__dirname, '..', 'lib', 'maestro-conduct', 'manifest'));
+  assert.equal(manifest.getTaskAttempts(TICKET), 2, 'tracked → attempts number');
+  assert.equal(manifest.getTaskAttempts('GH-999'), null, 'untracked → null');
+
+  // A tracked task with no attempts field defaults to 0 (not null).
+  seedManifest(sessionDir, 'GH-78');
+  assert.equal(manifest.getTaskAttempts('GH-78'), 0, 'tracked, no field → 0');
+});
+
+// Drive one full lifecycle: fresh probe (no strike) → grace elapses → kill
+// (one strike). `state.clear(ticket,'dead-end')` afterwards emulates the
+// per-lifecycle marker wipe that re-bootstrap performs, WITHOUT touching the
+// cross-lifecycle manifest attempts.
+function driveLifecycle({ actions, state }, ticket) {
+  // Probe: first dead-end of this lifecycle (no marker yet).
+  actions.freeDeadEndSlot({ session: `${ticket}-work`, ticket, kind: 'question', repeatCount: 5 });
+  // Push diagnosedAt past the grace window so the next call is the kill.
+  const marker = state.read(ticket, 'dead-end');
+  state.write(ticket, 'dead-end', {
+    ...marker,
+    diagnosedAt: state.now() - (GRACE_MIN * 60 + 60),
+  });
+  // Kill: grace elapsed → strike + rotate.
+  actions.freeDeadEndSlot({ session: `${ticket}-work`, ticket, kind: 'question', repeatCount: 6 });
+  // Emulate re-bootstrap: clear ONLY the per-lifecycle marker (attempts intact).
+  state.clear(ticket, 'dead-end');
+}
+
+test('cross-lifecycle accumulation: third lifecycle kill reaches blocked (attempts===3)', () => {
+  const { stateDir, sessionDir, alertFile } = setup();
+  const manifestPath = seedManifest(sessionDir, TICKET);
+  const { actions, state } = freshEnv({ stateDir, alertFile, sessionDir });
+
+  driveLifecycle({ actions, state }, TICKET);
+  assert.equal(readTask(manifestPath, TICKET).attempts, 1, 'lifecycle 1 kill → 1 strike');
+  driveLifecycle({ actions, state }, TICKET);
+  assert.equal(readTask(manifestPath, TICKET).attempts, 2, 'lifecycle 2 kill → 2 strikes');
+  driveLifecycle({ actions, state }, TICKET);
+
+  const task = readTask(manifestPath, TICKET);
+  assert.equal(task.attempts, 3, 'lifecycle 3 kill → 3 strikes (cross-lifecycle)');
+  assert.equal(task.status, 'blocked', 'blocked tier is reachable at the 3rd strike');
+
+  const blocked = alerts(alertFile)
+    .filter((a) => a.kind === 'dead-end')
+    .filter((a) => a.exhausted === true);
+  assert.equal(blocked.length, 1, 'exactly one exhausted (blocked) dead-end alert');
+});
+
+test('phase-advance reset restores a fresh budget: next kill is pending, not blocked', () => {
+  const { stateDir, sessionDir, alertFile } = setup();
+  const manifestPath = seedManifest(sessionDir, TICKET);
+  const { actions, state } = freshEnv({ stateDir, alertFile, sessionDir });
+  const manifest = require(path.resolve(__dirname, '..', 'lib', 'maestro-conduct', 'manifest'));
+
+  driveLifecycle({ actions, state }, TICKET);
+  driveLifecycle({ actions, state }, TICKET);
+  assert.equal(readTask(manifestPath, TICKET).attempts, 2, 'two strikes accumulated');
+
+  // Real progress (phase advance) resets the cross-lifecycle strike count.
+  manifest.resetTaskAttempts(TICKET);
+  assert.equal(readTask(manifestPath, TICKET).attempts, 0, 'phase advance zeroes attempts');
+
+  // Next lifecycle's kill lands on strike 1 → pending, NOT blocked.
+  driveLifecycle({ actions, state }, TICKET);
+  const task = readTask(manifestPath, TICKET);
+  assert.equal(task.attempts, 1, 'fresh budget: kill is strike 1 again');
+  assert.notEqual(task.status, 'blocked', 'not blocked after a phase-advance reset');
 });
