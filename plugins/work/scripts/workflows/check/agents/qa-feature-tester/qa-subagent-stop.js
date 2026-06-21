@@ -5,7 +5,7 @@
  */
 const fs = require('fs');
 const path = require('path');
-const { logHookError } = require(path.join(__dirname, '..', '..', '..', 'lib', 'hook-error-log'));
+const { runJsonHook } = require(path.join(__dirname, '..', '..', '..', 'lib', 'hook-error-log'));
 
 async function main() {
   let input = '';
@@ -23,7 +23,4 @@ async function main() {
   console.log(JSON.stringify({}));
 }
 
-main().catch((err) => {
-  logHookError(__filename, err);
-  console.log(JSON.stringify({}));
-});
+runJsonHook(__filename, main);

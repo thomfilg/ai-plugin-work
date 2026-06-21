@@ -171,7 +171,6 @@ plugins/work/scripts/workflows/work/lib/work-helpers.js
 plugins/work/scripts/workflows/work-cleanup/lib/phases/inputs.js
 plugins/work/scripts/workflows/work-brief/lib/phases/validate.js
 plugins/work/scripts/workflows/work-reports/lib/phases/emit.js
-plugins/work/scripts/workflows/check/agents/qa-feature-tester/screenshot-size-validator.js
 plugins/work/scripts/workflows/lib/hooks/policies/transition-gate.js
 plugins/work/scripts/workflows/work-code-checker/lib/kind-checks/wiring.js
 plugins/work/scripts/workflows/work-pr-reviewer/lib/phases/diff_audit.js
@@ -228,4 +227,3 @@ plugins/work/scripts/workflows/work-pr-reviewer/lib/kind-checks/fullstack.js
 plugins/work/scripts/workflows/work-pr-reviewer/lib/kind-checks/kind-registry.js
 plugins/work/scripts/workflows/work-qa-feature-tester/lib/kind-checks/kind-registry.js
 plugins/work/scripts/workflows/work-task-review/lib/kind-checks/kind-registry.js
-plugins/work/scripts/workflows/check/agents/qa-feature-tester/qa-subagent-stop.js
