@@ -4,11 +4,15 @@ const HEADER = '[cortex:auto-recall]';
 
 /**
  * Render a calendar date (UTC) as `YYYY-MM-DD` from an ISO-8601 timestamp.
+ * A missing or invalid timestamp degrades to `null` (the caller omits the
+ * `saved …` annotation) rather than throwing and discarding the whole block.
  * @param {string} savedAt ISO-8601 timestamp.
- * @returns {string} `YYYY-MM-DD`.
+ * @returns {string|null} `YYYY-MM-DD`, or `null` when the timestamp is missing/invalid.
  */
 function savedDate(savedAt) {
-  return new Date(savedAt).toISOString().slice(0, 10);
+  const ms = new Date(savedAt).getTime();
+  if (!Number.isFinite(ms)) return null;
+  return new Date(ms).toISOString().slice(0, 10);
 }
 
 /**
@@ -51,7 +55,10 @@ function formatLine(result, maxChars) {
   const date = savedDate(result.savedAt);
   const age = relativeAge(result.ageDays);
   const body = truncateBody(result.body, maxChars);
-  return `- ${result.id} (saved ${date}, ${age}) — ${result.title} :: ${body}`;
+  // Omit the `saved …` segment when the timestamp is missing/invalid so a bad
+  // savedAt degrades to `(age)` instead of throwing and dropping the block.
+  const meta = date ? `(saved ${date}, ${age})` : `(${age})`;
+  return `- ${result.id} ${meta} — ${result.title} :: ${body}`;
 }
 
 /**

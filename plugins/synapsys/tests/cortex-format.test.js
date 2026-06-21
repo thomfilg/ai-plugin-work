@@ -258,6 +258,43 @@ test('formatBlock keeps results whose ageDays is missing (treated as fresh, not 
   assert.match(out, /fresh/, 'normally-fresh result is kept');
 });
 
+test('formatBlock renders a result with a missing savedAt without throwing or dropping siblings', () => {
+  let out;
+  assert.doesNotThrow(() => {
+    out = formatBlock({
+      queries: [
+        {
+          query: 'GH-519',
+          projectId: 'claude-plugin-work',
+          results: [
+            makeResult({
+              id: 'no-date',
+              savedAt: undefined,
+              title: 'No date',
+              body: 'body',
+              ageDays: 5,
+            }),
+            makeResult({ id: 'has-date', title: 'Has date', body: 'body', ageDays: 3 }),
+          ],
+        },
+      ],
+      maxAgeDays: 180,
+      maxChars: 500,
+    });
+  }, 'a missing savedAt must not throw');
+  const lines = out.split('\n').filter((l) => l.startsWith('- '));
+  assert.equal(
+    lines.length,
+    2,
+    'both results render — the missing-date entry does not drop the block'
+  );
+  assert.match(out, /no-date/, 'the result with no savedAt still renders its line');
+  assert.match(out, /has-date/, 'the sibling result is not lost');
+  const noDateLine = lines.find((l) => l.includes('no-date'));
+  assert.doesNotMatch(noDateLine, /saved/, 'the missing-date line omits the saved annotation');
+  assert.match(noDateLine, /5 days ago/, 'the missing-date line still shows its relative age');
+});
+
 test('formatBlock renders → no matches when every result is filtered out as stale', () => {
   const out = formatBlock({
     queries: [
