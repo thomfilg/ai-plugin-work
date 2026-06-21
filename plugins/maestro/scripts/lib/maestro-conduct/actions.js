@@ -33,6 +33,7 @@ const {
 } = require('./restart-guards');
 const slotRotation = require('./slot-rotation');
 const { killTicketTmux } = slotRotation;
+const deadEndRotation = require('./dead-end-rotation');
 
 const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
 
@@ -237,75 +238,21 @@ function freeCiPhaseSlot({ session, ticket }) {
 }
 
 /**
- * freeDeadEndSlot — agent is stuck (operator didn't respond; every menu option
- * a bypass; PR has no forward path). Triggered by re-emit escalation when the
- * same alert kind fires ≥ DEAD_END_REEMITS times. Attempt-based recovery: each
- * dead-end bumps `task.attempts`; < DEAD_END_MAX_ATTEMPTS → `pending` (re-eligible),
- * ≥ DEAD_END_MAX_ATTEMPTS → `blocked` (operator must intervene). The per-tick
- * `dead-end` marker prevents duplicate kills; cleared by maybeAutoBootstrap.
+ * freeDeadEndSlot — thin wrapper over dead-end-rotation.js. The attempt-based
+ * recovery + grace-window logic lives there (extracted to keep this file under
+ * the max-lines gate); killAndBootstrapNext + alert are injected here so the
+ * extracted module needs no circular require back into actions.js.
  */
-const DEAD_END_MAX_ATTEMPTS = parseInt(process.env.DEAD_END_MAX_ATTEMPTS || '3', 10);
-
 function freeDeadEndSlot({ session, ticket, kind, repeatCount, sha }) {
-  if (process.env.AUTO_FREE_DEAD_END === '0') return false;
-  const marker = state.read(ticket, 'dead-end') || {};
-  if (marker.killed) return false; // already freed this lifecycle
-  const attempts = manifest.incrementTaskAttempts(ticket);
-
-  // First attempt: don't kill — ask the agent to diagnose itself first so the
-  // operator can read what's actually blocking before rotating the slot.
-  if (attempts === 1) {
-    state.write(ticket, 'dead-end', {
-      diagnosed: true,
-      diagnosedAt: state.now(),
-      trigger: kind,
-      attempts,
-    });
-    const probe = `MAESTRO DIAGNOSTIC (attempt 1/${DEAD_END_MAX_ATTEMPTS}): you have been stalled on ${kind} for ${repeatCount}+ cycles. Reply with: (1) what step/phase you are on, (2) the exact prompt or condition blocking you, (3) what input or decision you need from the operator. Do NOT take any other action.`;
-    try {
-      spawnSync('tmux', ['send-keys', '-t', session, probe, 'Enter'], { stdio: 'ignore' });
-    } catch {}
-    manifest.updateTaskStatus(
-      ticket,
-      'in_progress',
-      `dead-end probe sent (attempt 1/${DEAD_END_MAX_ATTEMPTS}); waiting for agent reply`
-    );
-    alerts.log(
-      `${session} DEAD-END attempt 1/${DEAD_END_MAX_ATTEMPTS} — diagnostic probe sent to agent; NO kill, NO rotation. Operator should read pane reply via tmux capture-pane.`
-    );
-    alert({
-      session,
-      ticket,
-      kind: 'dead-end-probe',
-      trigger: kind,
-      repeatCount,
-      sha,
-      attempts,
-      instruction: `Attempt 1/${DEAD_END_MAX_ATTEMPTS}: agent received diagnostic prompt asking what's blocking. Wait ~30s, then capture pane to read reply: \`tmux capture-pane -t ${session} -p | tail -40\`. If reply is actionable, intervene; otherwise next dead-end attempt (2/${DEAD_END_MAX_ATTEMPTS}) will rotate.`,
-    });
-    return true;
-  }
-
-  const exhausted = attempts >= DEAD_END_MAX_ATTEMPTS;
-  state.write(ticket, 'dead-end', {
-    killed: true,
-    freedAt: state.now(),
-    trigger: kind,
-    attempts,
-  });
-  killAndBootstrapNext({
+  return deadEndRotation.freeDeadEndSlot({
     session,
     ticket,
-    alertKind: 'dead-end',
-    manifestStatus: exhausted ? 'blocked' : 'pending',
-    manifestNote: exhausted
-      ? `dead-end after ${kind} ×${repeatCount}; ${attempts} attempts exhausted`
-      : `dead-end after ${kind} ×${repeatCount}; attempt ${attempts}/${DEAD_END_MAX_ATTEMPTS}, re-eligible`,
-    logPrefix: `DEAD-END ${kind} re-fired ${repeatCount}x (attempt ${attempts}/${DEAD_END_MAX_ATTEMPTS}) — `,
-    alertExtra: { trigger: kind, repeatCount, sha, attempts, exhausted },
-    purgeCounts: true,
+    kind,
+    repeatCount,
+    sha,
+    killAndBootstrapNext,
+    alert,
   });
-  return true;
 }
 
 /**
