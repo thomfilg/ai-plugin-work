@@ -34,6 +34,8 @@ const {
   checkRestartGuards,
   resolveSkillForRestart,
 } = require('./restart-guards');
+const slotRotation = require('./slot-rotation');
+const { killTicketTmux } = slotRotation;
 
 const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
 
@@ -174,101 +176,14 @@ function inboxEnvPrefix() {
  * on the same SHA don't try to kill an already-killed session.
  *
  * No-op if AUTO_FREE_CI_SLOT=0.
- */
-function killTicketTmux(ticket) {
-  for (const suffix of ['work', 'listen']) {
-    spawnSync('tmux', ['kill-session', '-t', tmux.sessionName(ticket, suffix)], {
-      stdio: 'ignore',
-    });
-  }
-}
-
-function emitSlotFreedAlert({
-  session,
-  ticket,
-  prNumber,
-  sha,
-  next,
-  autoBootstrapped,
-  instruction,
-}) {
-  alerts.log(
-    `${session} SLOT-FREED at CI gate — PR #${prNumber} sha=${(sha || '').slice(0, 7)} awaiting operator merge; tmux -work + -listen killed${
-      autoBootstrapped ? `; AUTO-BOOTSTRAPPED ${next.taskId}` : ''
-    }`
-  );
-  alert({
-    session,
-    ticket,
-    kind: 'slot-freed',
-    prNumber,
-    sha,
-    nextTask: next ? next.taskId : null,
-    nextTopic: next ? next.topic : null,
-    autoBootstrapped: !!autoBootstrapped,
-    instruction,
-  });
-}
-
-/**
- * killAndBootstrapNext — the single canonical "kill this ticket's tmux + try
- * to bootstrap the next pending task" primitive. Every slot-freeing path
- * (CI-gate rotation, dead-end rotation, future kinds) goes through here.
  *
- * Caller customizes only the labels: alert kind, manifest status string,
- * log prefix/suffix. Mechanics — kill, alert-count purge, manifest update,
- * findNext, maybeAutoBootstrap, emit alert — are identical.
- *
- * @returns {{ next: object|null, autoBootstrapped: boolean }}
+ * The kill + bootstrap-next primitives (killTicketTmux, emitSlotFreedAlert,
+ * killAndBootstrapNext) live in slot-rotation.js. killAndBootstrapNext is
+ * called through this thin wrapper so maybeAutoBootstrap + alert (which depend
+ * on actions.js internals) are injected without a circular require.
  */
-function killAndBootstrapNext({
-  session,
-  ticket,
-  alertKind,
-  manifestStatus,
-  manifestNote,
-  logPrefix,
-  logSuffix,
-  alertExtra,
-  purgeCounts,
-}) {
-  // Always kill any alive tmux sessions for this ticket — defensive against
-  // resurrection by autoRestart between ticks. tmux kill-session is idempotent.
-  killTicketTmux(ticket);
-  if (purgeCounts) {
-    try {
-      purgeAlertCountsForTicket(ticket, false);
-    } catch (err) {
-      alerts.log(`${session} ${alertKind}: purgeAlertCountsForTicket failed: ${err.message}`);
-    }
-  }
-  manifest.updateTaskStatus(ticket, manifestStatus, manifestNote);
-  // Exclude the just-killed ticket — even if it's now `pending` and would
-  // otherwise top the queue, immediately re-bootstrapping it defeats the
-  // purpose of the kill. POOL-FILL will pick it back up on a later tick
-  // when a different slot frees, giving the operator a real rotation.
-  const next = findNextEligibleTask(ticket);
-  const autoBootstrapped = !!(next && maybeAutoBootstrap(next.taskId));
-  const instruction = buildNextActionInstruction({
-    prefix: logPrefix,
-    suffix: logSuffix || '',
-    next,
-    autoBootstrapped,
-  });
-  alerts.log(
-    `${session} ${logPrefix}tmux killed, slot freed${autoBootstrapped ? `; AUTO-BOOTSTRAPPED ${next.taskId}` : ''}`
-  );
-  alert({
-    session,
-    ticket,
-    kind: alertKind,
-    nextTask: next ? next.taskId : null,
-    nextTopic: next ? next.topic : null,
-    autoBootstrapped,
-    instruction,
-    ...(alertExtra || {}),
-  });
-  return { next, autoBootstrapped };
+function killAndBootstrapNext(args) {
+  return slotRotation.killAndBootstrapNext({ ...args, maybeAutoBootstrap, alert });
 }
 
 function freeCIGateSlot({ session, ticket, prNumber, sha }) {

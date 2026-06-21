@@ -33,6 +33,7 @@ const prCommentsHandler = require('./lib/maestro-conduct/pr-comments-handler');
 const questionHandler = require('./lib/maestro-conduct/question-handler');
 const { isHaltedWaitingForUser } = require('./lib/maestro-conduct/halted-waiting');
 const singletonGuard = require('./lib/maestro-conduct/singleton-guard');
+const { detectPhaseAdvance } = require('./lib/maestro-conduct/phase-advance');
 
 const DETECTORS = {
   question: require('./lib/maestro-conduct/detectors/question'),
@@ -263,30 +264,6 @@ function runPrStatusDetector(ctx) {
   ciGate.maybeFreeOnPrReady({ ctx, sHit, workSession, actions });
 }
 
-/** Reset dead-end attempts when the ticket's phase has advanced since last tick.
- * Real progress (phase forward-step) signals the agent is unstuck, so the
- * next dead-end should be treated as attempt 1 again, not as continued
- * escalation from earlier stalls in unrelated phases.
- */
-function detectPhaseAdvance(ctx) {
-  if (!restartEligible(ctx.session)) return;
-  const prev = state.read(ctx.ticket, 'last-phase') || {};
-  if (prev.phase && prev.phase !== ctx.phase) {
-    const reset = manifest.resetTaskAttempts(ctx.ticket);
-    if (reset) {
-      alerts.log(
-        `${ctx.session} phase advance ${prev.phase} → ${ctx.phase} — dead-end attempts reset`
-      );
-    }
-    try {
-      state.clear(ctx.ticket, 'dead-end');
-    } catch {}
-  }
-  if (prev.phase !== ctx.phase) {
-    state.write(ctx.ticket, 'last-phase', { phase: ctx.phase, seenAt: state.now() });
-  }
-}
-
 // Run the phase's detector set in priority order. Silence/spinner short-circuit
 // the tick (return true) when they fire a restart/interrupt; the remaining
 // detectors are advisory and always run. Extracted from tickSession to keep its
@@ -315,7 +292,7 @@ function tickSession(session) {
   // Phase-advance check: clear stale dead-end markers + attempts the moment
   // the agent makes real progress. Runs before detectors so a freshly-
   // advanced ticket isn't treated as still-stalled this tick.
-  detectPhaseAdvance(ctx);
+  detectPhaseAdvance(ctx, restartEligible);
 
   // Question always wins — never nudge while the agent is waiting on us.
   const qHit = DETECTORS.question.detect(ctx);
