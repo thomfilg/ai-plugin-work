@@ -87,6 +87,19 @@ function incrementTaskAttempts(taskId) {
 }
 
 /**
+ * getTaskAttempts — read-only accessor for a task's cross-lifecycle strike
+ * count. Returns the number (default 0) when the task is found in some
+ * manifest, or null when the task is not registered anywhere. Lets dead-end
+ * rotation display the current strike on the probe path WITHOUT bumping it,
+ * and distinguish "tracked, 0 strikes" from "untracked" (the null bail).
+ */
+function getTaskAttempts(taskId) {
+  const hit = findTask(taskId);
+  if (!hit) return null;
+  return hit.task.attempts || 0;
+}
+
+/**
  * resetTaskAttempts — zero out `task.attempts` and persist. Called when an
  * agent makes real progress (phase advance, fresh commit) so a future
  * dead-end is treated as a fresh first attempt rather than escalating
@@ -220,6 +233,7 @@ module.exports = {
   findTask,
   updateTaskStatus,
   incrementTaskAttempts,
+  getTaskAttempts,
   resetTaskAttempts,
   syncFromTmux,
   poolFullForTask,

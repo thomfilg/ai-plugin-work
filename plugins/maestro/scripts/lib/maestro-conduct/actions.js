@@ -62,13 +62,15 @@ function maybeAutoBootstrap(taskId) {
   });
   if (res.status === 0) {
     manifest.updateTaskStatus(taskId, 'in_progress', 'auto-bootstrapped by daemon');
-    // Clear per-lifecycle dead-end/ci-rotated markers AND reset the manifest
-    // attempt counter so the freshly-bootstrapped agent gets a clean slate —
-    // without the reset it could jump straight to `blocked` on the next stall.
+    // Clear ONLY the per-lifecycle dead-end/ci-rotated markers so the freshly
+    // bootstrapped agent gets a fresh diagnostic probe before any kill next
+    // lifecycle. Intentionally does NOT reset manifest.attempts: that counter is
+    // the cross-lifecycle strike count, so repeated dead-ends must keep
+    // accumulating toward `blocked` across re-bootstraps. attempts is reset only
+    // on real progress (phase advance → resetTaskAttempts), never here.
     try {
       state.clear(taskId, 'dead-end');
       state.clear(taskId, 'ci-rotated');
-      manifest.resetTaskAttempts(taskId);
     } catch {}
   }
   return res.status === 0;
