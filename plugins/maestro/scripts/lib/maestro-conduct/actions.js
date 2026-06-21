@@ -1,15 +1,12 @@
 /**
- * actions.js — what to do when a detector fires.
- *
- * Three actions, mapped from phase-registry.escalationFor():
+ * actions.js — what to do when a detector fires. Three actions, mapped from
+ * phase-registry.escalationFor():
  *   soft      → send a message into the agent prompt (no interrupt)
- *   interrupt → send Esc, wait, send message (used when soft nudge was ignored
- *               or when a spinner is clearly hung)
+ *   interrupt → send Esc, wait, send message (soft nudge ignored / spinner hung)
  *   alert     → no agent action; write to the maestro alert sink
- *
- * Nudge text is intentionally generic; the agent decides how to land
- * uncommitted work (the 'commit agent' is the orchestrator's commit-writer).
- * Avoid literal CLI strings that trip the enforce-agent-usage hook.
+ * Nudge text is intentionally generic; the agent decides how to land uncommitted
+ * work (the 'commit agent' is the orchestrator's commit-writer). Avoid literal
+ * CLI strings that trip the enforce-agent-usage hook.
  */
 const fs = require('fs');
 const path = require('path');
@@ -217,17 +214,35 @@ function freeCIGateSlot({ session, ticket, prNumber, sha }) {
 }
 
 /**
+ * freeCiPhaseSlot — a -work session reached `ci`/`complete`, so the agent is
+ * parked (awaiting merge / already done). Kill + rotate IMMEDIATELY on the first
+ * tick: no diagnostic probe, no attempt counter (that's freeDeadEndSlot's path).
+ * Idempotent via the `ci-rotated` marker. Gated by AUTO_FREE_CI_SLOT.
+ */
+function freeCiPhaseSlot({ session, ticket }) {
+  if (process.env.AUTO_FREE_CI_SLOT === '0') return false;
+  const marker = state.read(ticket, 'ci-rotated') || {};
+  if (marker.killed) return false; // already rotated this lifecycle
+  state.write(ticket, 'ci-rotated', { killed: true, freedAt: state.now() });
+  killAndBootstrapNext({
+    session,
+    ticket,
+    alertKind: 'kill-during-ci',
+    manifestStatus: 'awaiting-merge',
+    manifestNote: 'killed at ci/complete phase — slot rotated',
+    logPrefix: 'KILL-DURING-CI at ci/complete phase — agent parked, slot rotated; ',
+    purgeCounts: true,
+  });
+  return true;
+}
+
+/**
  * freeDeadEndSlot — agent is stuck (operator didn't respond; every menu option
  * a bypass; PR has no forward path). Triggered by re-emit escalation when the
- * same alert kind fires ≥ DEAD_END_REEMITS times.
- *
- * Attempt-based recovery: each dead-end bumps `task.attempts` in the manifest.
- * - attempts < DEAD_END_MAX_ATTEMPTS → mark `pending`, eligible for re-bootstrap
- * - attempts ≥ DEAD_END_MAX_ATTEMPTS → mark `blocked`, operator must intervene
- *
- * The per-tick `dead-end` state marker prevents duplicate kills within the
- * same tmux lifecycle but is cleared by maybeAutoBootstrap on a fresh launch
- * so the new agent gets a clean slate.
+ * same alert kind fires ≥ DEAD_END_REEMITS times. Attempt-based recovery: each
+ * dead-end bumps `task.attempts`; < DEAD_END_MAX_ATTEMPTS → `pending` (re-eligible),
+ * ≥ DEAD_END_MAX_ATTEMPTS → `blocked` (operator must intervene). The per-tick
+ * `dead-end` marker prevents duplicate kills; cleared by maybeAutoBootstrap.
  */
 const DEAD_END_MAX_ATTEMPTS = parseInt(process.env.DEAD_END_MAX_ATTEMPTS || '3', 10);
 
@@ -377,6 +392,7 @@ module.exports = {
   alert,
   autoRestart,
   freeCIGateSlot,
+  freeCiPhaseSlot,
   freeDeadEndSlot,
   freeStopConditionSlot,
   syncManifest: manifest.syncFromTmux,
