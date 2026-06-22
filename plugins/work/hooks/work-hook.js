@@ -26,6 +26,9 @@ const { safeExec } = require(
 const { resolvePluginRootHonouringEnv } = require(
   path.join(__dirname, '..', 'scripts', 'workflows', 'work', 'lib', 'resolve-plugin-root')
 );
+const { maybeUpdateBanner } = require(
+  path.join(__dirname, '..', 'scripts', 'workflows', 'work', 'lib', 'update-check')
+);
 
 // ORCHESTRATOR_PATH below is derived from PLUGIN_ROOT, so the user's
 // CLAUDE_PLUGIN_ROOT must be honoured verbatim when probing lands on an
@@ -48,7 +51,47 @@ function tokenizeArgs(rawArgs) {
   return rawArgs.split(/\s+/).filter((token) => token.length > 0);
 }
 
-function main() {
+// Build maybeUpdateBanner() options from the environment. The default path
+// injects nothing (real cache + real HTTPS fetch). Test-only env seams let a
+// spawned-hook integration test supply a deterministic version source without
+// touching the network:
+//   WORK_UPDATE_CHECK_TEST_LATEST=<X.Y.Z> → fetch shim resolving that version
+//   WORK_UPDATE_CHECK_TEST_FAIL=1         → fetch shim that throws (offline)
+//   WORK_UPDATE_CHECK_MARKER_DIR=<dir>    → isolate the per-session marker dir
+function buildBannerOpts() {
+  const opts = {};
+  if (process.env.WORK_UPDATE_CHECK_MARKER_DIR) {
+    opts.markerDir = process.env.WORK_UPDATE_CHECK_MARKER_DIR;
+  }
+  if (process.env.WORK_UPDATE_CHECK_TEST_FAIL === '1') {
+    opts.fetch = () => Promise.reject(new Error('injected offline'));
+  } else if (process.env.WORK_UPDATE_CHECK_TEST_LATEST) {
+    const latest = process.env.WORK_UPDATE_CHECK_TEST_LATEST;
+    opts.fetch = () =>
+      Promise.resolve({ status: 200, body: JSON.stringify({ metadata: { version: latest } }) });
+  }
+  return opts;
+}
+
+// Prepend the (possibly empty) update banner to the plan output. Empty banner
+// leaves the plan byte-for-byte unchanged so the no-banner path is identical to
+// the pre-GH-314 behavior.
+function prependBanner(banner, output) {
+  return banner ? `${banner}\n${output}` : output;
+}
+
+// Resolve the (non-blocking) update banner. Fail-open: any error is logged and
+// swallowed so the orchestrator plan always renders. Returns '' on no-banner.
+async function resolveBanner() {
+  try {
+    return (await maybeUpdateBanner(buildBannerOpts())) || '';
+  } catch (err) {
+    logHookError(__filename, err);
+    return '';
+  }
+}
+
+async function main() {
   const userPrompt = process.env.CLAUDE_USER_PROMPT || '';
 
   // Check if this is a /work invocation. Match /work followed by whitespace
@@ -101,9 +144,12 @@ function main() {
     });
   }
 
-  // Format the plan for injection
+  // Format the plan for injection. Prepend the non-blocking update banner
+  // (empty when there is nothing to show). The banner is additive — it never
+  // delays or aborts plan emission, and the hook still exits 0.
+  const banner = await resolveBanner();
   const output = formatPlan(plan);
-  console.log(output);
+  console.log(prependBanner(banner, output));
 
   process.exit(0);
 }
@@ -182,4 +228,8 @@ function formatPlan(plan) {
   return lines.join('\n');
 }
 
-main();
+// Fail-open: a rejected main() must never crash the hook (exit non-zero).
+main().catch((err) => {
+  logHookError(__filename, err);
+  process.exit(0);
+});
