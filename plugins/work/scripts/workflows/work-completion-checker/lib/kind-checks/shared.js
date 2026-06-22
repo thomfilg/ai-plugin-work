@@ -78,10 +78,25 @@ function readRequirementCoverageFromSubsections(tasksText) {
     const nextHeading = reqAfter.match(/^#{2,3}\s/m);
     const reqBlock = nextHeading ? reqAfter.slice(0, nextHeading.index) : reqAfter;
     for (const line of reqBlock.split('\n')) {
-      const m = line.match(/^\s*[-*]\s+([A-Za-z0-9_-]+)\s*$/);
-      if (m) {
+      const bulletMatch = line.match(/^\s*[-*]\s+(.+?)\s*$/);
+      if (!bulletMatch) continue;
+      // GH-498: accept comma/whitespace-separated IDs on one bullet (compat
+      // fallback). A single trailing `\s*$` anchor previously rejected any
+      // bullet carrying more than one token (e.g. `- R1, R6, R7`), yielding
+      // zero rows and re-triggering the GH-462 requirement_coverage_missing
+      // deadlock. Tokenize the payload on commas/whitespace. To avoid
+      // over-synthesizing on prose bullets (e.g. `- some prose with a stop.`),
+      // EVERY token must be ID-shaped; a single non-ID token (a word ending in
+      // punctuation, lowercase prose) disqualifies the whole bullet. Requirement
+      // IDs are alphanumeric/`-`/`_` and carry at least one digit (R1, R10,
+      // REUSE-1) — plain English words do not.
+      const tokens = bulletMatch[1].split(/[\s,]+/).filter(Boolean);
+      const isIdToken = (t) => /^[A-Za-z0-9_-]+$/.test(t) && /\d/.test(t);
+      if (tokens.length === 0 || !tokens.every(isIdToken)) continue;
+      const ids = tokens;
+      for (const id of ids) {
         rows.push({
-          id: m[1],
+          id,
           description: '',
           status: 'DELIVERED',
           evidence: `tasks.md:Task ${taskNum}`,

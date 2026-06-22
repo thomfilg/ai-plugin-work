@@ -126,14 +126,14 @@ After generating all tasks, verify coverage:
 - R7
 ```
 
-The **non-canonical** comma-separated form (multiple IDs on one bullet) is rejected:
+The **non-canonical** comma-separated form (multiple IDs on one bullet) is accepted as a compatibility fallback:
 
 ```markdown
 ### Requirements Covered
-- R1, R6, R7   <!-- NOT canonical — splitter emits a SPLIT-WARNING -->
+- R1, R6, R7   <!-- non-canonical but parsed — splitter still emits a SPLIT-WARNING -->
 ```
 
-This is the one canonical contract for the subsection fallback parser (see GH-498). Comma-separated bullets are historically ambiguous and were silently dropped by the fallback parser, re-triggering the GH-462 `requirement_coverage_missing` deadlock. Always emit one ID per line.
+One ID per line remains the one canonical contract for the subsection fallback parser. As of GH-498 the parser also accepts comma/whitespace-separated IDs on a single bullet and synthesizes identical rows (one per ID), so the historically ambiguous form is no longer silently dropped and no longer re-triggers the GH-462 `requirement_coverage_missing` deadlock. Prefer one ID per line; the comma-separated form is tolerated only for backward compatibility.
 
 ### Step 5: Quality review pass (MANDATORY — do this BEFORE saving)
 

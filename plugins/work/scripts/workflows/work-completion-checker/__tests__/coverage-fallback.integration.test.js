@@ -189,6 +189,102 @@ test('coverage_check passes when tasks.md has only subsections', () => {
   }
 });
 
+// Case F — comma-separated multi-ID bullet synthesizes one row per ID (GH-498)
+test('comma-separated multi-ID bullet synthesizes one row per ID', () => {
+  const tasks = [
+    '# Tasks',
+    '',
+    '## Task 1 — Foo',
+    '',
+    '### Requirements Covered',
+    '- R1, R6, R7, R8, R9, R10',
+    '',
+  ].join('\n');
+  const brief = [
+    '# Brief',
+    '',
+    '## Requirements',
+    '',
+    '- **P0** R1 — must do thing one',
+    '- **P0** R6 — must do thing six',
+    '- **P0** R7 — must do thing seven',
+    '- **P0** R8 — must do thing eight',
+    '- **P0** R9 — must do thing nine',
+    '- **P0** R10 — must do thing ten',
+    '',
+  ].join('\n');
+  const { root, tasksDir } = makeTasksDir({ tasks });
+  fs.writeFileSync(path.join(tasksDir, 'brief.md'), brief);
+  try {
+    const rows = readRequirementCoverage(tasksDir);
+    assert.equal(rows.length, 6, 'expected 6 synthesized rows from one comma-separated bullet');
+    const ids = rows.map((r) => r.id).sort();
+    assert.deepEqual(ids, ['R1', 'R10', 'R6', 'R7', 'R8', 'R9']);
+    for (const row of rows) {
+      assert.equal(row.status, 'DELIVERED', `row ${row.id} must default to DELIVERED`);
+      assert.match(
+        row.evidence,
+        /tasks\.md:Task 1/,
+        `row ${row.id} evidence must reference tasks.md:Task 1`
+      );
+    }
+    const result = coverageCheck.validate({ tasksDir });
+    assert.equal(
+      result.ok,
+      true,
+      `coverage_check.validate must pass on comma-separated bullet; got errors=${JSON.stringify(result.errors)}`
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Whitespace variant — space-separated IDs on one bullet synthesize one row each (GH-498)
+test('whitespace-separated multi-ID bullet synthesizes one row per ID', () => {
+  const tasks = [
+    '# Tasks',
+    '',
+    '## Task 1 — Foo',
+    '',
+    '### Requirements Covered',
+    '- R1 R2 R3',
+    '',
+  ].join('\n');
+  const { root, tasksDir } = makeTasksDir({ tasks });
+  try {
+    const rows = readRequirementCoverage(tasksDir);
+    assert.equal(rows.length, 3, 'expected 3 synthesized rows from one space-separated bullet');
+    const ids = rows.map((r) => r.id).sort();
+    assert.deepEqual(ids, ['R1', 'R2', 'R3']);
+    for (const row of rows) {
+      assert.equal(row.status, 'DELIVERED', `row ${row.id} must default to DELIVERED`);
+      assert.match(row.evidence, /tasks\.md:Task 1/, `row ${row.id} evidence must reference task`);
+    }
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Prose guard — a prose bullet with a trailing stop must NOT over-synthesize (GH-498)
+test('prose bullet does not over-synthesize rows', () => {
+  const tasks = [
+    '# Tasks',
+    '',
+    '## Task 1 — Foo',
+    '',
+    '### Requirements Covered',
+    '- some prose with a stop.',
+    '',
+  ].join('\n');
+  const { root, tasksDir } = makeTasksDir({ tasks });
+  try {
+    const rows = readRequirementCoverage(tasksDir);
+    assert.equal(rows.length, 0, 'prose bullet (with trailing period) must synthesize 0 rows');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // Case B — backward compatibility - top-level table preserved
 test('backward compatibility - top-level table preserved', () => {
   const tasks = [
