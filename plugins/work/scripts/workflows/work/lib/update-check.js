@@ -45,7 +45,8 @@ function isValidVersion(v) {
 function readInstalledVersion(pluginJsonPath) {
   try {
     const target =
-      pluginJsonPath || path.join(__dirname, '..', '..', '..', '..', '.claude-plugin', 'plugin.json');
+      pluginJsonPath ||
+      path.join(__dirname, '..', '..', '..', '..', '.claude-plugin', 'plugin.json');
     const parsed = JSON.parse(fs.readFileSync(target, 'utf8'));
     return parsed.version != null ? String(parsed.version) : null;
   } catch {
@@ -136,6 +137,50 @@ function format(latest, installed) {
   );
 }
 
+/** Resolve the option-derived inputs (clock, versions, ids, paths) in one place. */
+function resolveBannerInputs(opts) {
+  const now = typeof opts.now === 'number' ? opts.now : Date.now();
+  const installed = opts.installedVersion || readInstalledVersion();
+  const sessionId = opts.sessionId || 'default';
+  const cacheDir = opts.cacheDir || process.env.WORK_UPDATE_CHECK_CACHE_DIR || os.tmpdir();
+  return { now, installed, sessionId, cacheDir };
+}
+
+/** True if this session's de-dup marker already exists. Swallows read errors. */
+function sessionAlreadyChecked(markerPath) {
+  try {
+    return fs.existsSync(markerPath);
+  } catch {
+    return false;
+  }
+}
+
+/** Write the per-session de-dup marker. Best-effort; never throws. */
+function writeSessionMarker(markerPath, now) {
+  try {
+    fs.mkdirSync(path.dirname(markerPath), { recursive: true });
+    fs.writeFileSync(markerPath, String(now));
+  } catch {
+    // ignore marker write failures
+  }
+}
+
+/**
+ * Resolve the latest version: prefer a fresh (<24h) cache entry, otherwise fetch
+ * and rewrite the cache. Returns the (possibly null/invalid) version string.
+ */
+async function resolveLatestVersion(cacheDir, now, opts) {
+  const cached = readCache(cacheDir);
+  if (cached && isValidVersion(cached.latest) && now - cached.fetchedAt < DAY_MS) {
+    return cached.latest;
+  }
+  const latest = await fetchLatestVersion(2500, { fetch: opts.fetch });
+  if (isValidVersion(latest)) {
+    writeCache(cacheDir, { latest, fetchedAt: now });
+  }
+  return latest;
+}
+
 /**
  * Orchestrate the update-check and return a banner string (or "" for no banner).
  *
@@ -147,41 +192,17 @@ async function maybeUpdateBanner(opts = {}) {
   try {
     if (process.env.WORK_DISABLE_UPDATE_CHECK === '1') return '';
 
-    const now = typeof opts.now === 'number' ? opts.now : Date.now();
-    const installed = opts.installedVersion || readInstalledVersion();
+    const { now, installed, sessionId, cacheDir } = resolveBannerInputs(opts);
     if (!isValidVersion(installed)) return '';
 
-    const sessionId = opts.sessionId || 'default';
     const markerPath = sessionMarkerPath(opts.markerDir, sessionId);
-    try {
-      if (fs.existsSync(markerPath)) return '';
-    } catch {
-      // ignore marker read failures
-    }
+    if (sessionAlreadyChecked(markerPath)) return '';
 
-    const cacheDir =
-      opts.cacheDir || process.env.WORK_UPDATE_CHECK_CACHE_DIR || os.tmpdir();
-
-    let latest = null;
-    const cached = readCache(cacheDir);
-    if (cached && isValidVersion(cached.latest) && now - cached.fetchedAt < DAY_MS) {
-      latest = cached.latest;
-    } else {
-      latest = await fetchLatestVersion(2500, { fetch: opts.fetch });
-      if (isValidVersion(latest)) {
-        writeCache(cacheDir, { latest, fetchedAt: now });
-      }
-    }
-
+    const latest = await resolveLatestVersion(cacheDir, now, opts);
     if (!isValidVersion(latest)) return '';
 
     // Mark this session as checked regardless of outcome.
-    try {
-      fs.mkdirSync(path.dirname(markerPath), { recursive: true });
-      fs.writeFileSync(markerPath, String(now));
-    } catch {
-      // ignore marker write failures
-    }
+    writeSessionMarker(markerPath, now);
 
     return compareSemver(latest, installed) > 0 ? format(latest, installed) : '';
   } catch {

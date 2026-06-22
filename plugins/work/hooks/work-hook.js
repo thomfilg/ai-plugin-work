@@ -91,6 +91,18 @@ async function resolveBanner() {
   }
 }
 
+// Record a "plan generated" action for real tickets (TBD placeholders skipped).
+function logPlanGenerated(plan) {
+  if (!plan.ticket || plan.ticket.startsWith('TBD')) return;
+  const runCount = plan.summary?.run || 0;
+  const mode = plan.mode || 'unknown';
+  const currentStep = plan.currentStep || 'ticket';
+  appendAction(plan.ticket, {
+    step: currentStep,
+    what: `plan generated (${mode}, ${runCount} RUN)`,
+  });
+}
+
 async function main() {
   const userPrompt = process.env.CLAUDE_USER_PROMPT || '';
 
@@ -133,16 +145,7 @@ async function main() {
     process.exit(0);
   }
 
-  // Log plan generation action
-  if (plan.ticket && !plan.ticket.startsWith('TBD')) {
-    const runCount = plan.summary?.run || 0;
-    const mode = plan.mode || 'unknown';
-    const currentStep = plan.currentStep || 'ticket';
-    appendAction(plan.ticket, {
-      step: currentStep,
-      what: `plan generated (${mode}, ${runCount} RUN)`,
-    });
-  }
+  logPlanGenerated(plan);
 
   // Format the plan for injection. Prepend the non-blocking update banner
   // (empty when there is nothing to show). The banner is additive — it never
@@ -152,6 +155,51 @@ async function main() {
   console.log(prependBanner(banner, output));
 
   process.exit(0);
+}
+
+// Map a step action to its display icon.
+function stepIcon(action) {
+  if (action === 'RUN') return '🔄';
+  if (action === 'SKIP') return '⏭️';
+  if (action === 'DEFER') return '🔮';
+  return '⏳';
+}
+
+// Build the STATE summary block as an array of lines.
+function formatStateLines(state) {
+  const lines = ['  STATE:'];
+  lines.push(
+    state.worktreeExists
+      ? `    Worktree: EXISTS (branch: ${state.branch})`
+      : '    Worktree: NOT FOUND'
+  );
+  if (state.pr) {
+    lines.push(`    PR: #${state.pr.number} (draft: ${state.pr.isDraft})`);
+  }
+  if (state.hasDiffVsMain) {
+    lines.push(`    Changes: ${state.diffSummary}`);
+  }
+  if (state.hasUncommitted) {
+    lines.push(`    Uncommitted: ${state.uncommittedCount} file(s)`);
+  }
+  lines.push('');
+  return lines;
+}
+
+// Build the SUMMARY block as an array of lines.
+function formatSummaryLines(summary) {
+  const lines = [];
+  lines.push(
+    `  SUMMARY: ${summary.run} RUN, ${summary.defer || 0} DEFER, ${summary.skip} SKIP, ${summary.pending} PENDING`
+  );
+  lines.push(`  FIRST ACTION: ${summary.firstAction}`);
+  if (summary.stepsToRun.length > 0) {
+    lines.push(`  STEPS TO RUN: ${summary.stepsToRun.join(' → ')}`);
+  }
+  if (summary.stepsDeferred && summary.stepsDeferred.length > 0) {
+    lines.push(`  STEPS DEFERRED: ${summary.stepsDeferred.join(' → ')}`);
+  }
+  return lines;
 }
 
 function formatPlan(plan) {
@@ -166,35 +214,13 @@ function formatPlan(plan) {
 
   // State summary
   if (plan.state) {
-    lines.push('  STATE:');
-    if (plan.state.worktreeExists) {
-      lines.push(`    Worktree: EXISTS (branch: ${plan.state.branch})`);
-    } else {
-      lines.push('    Worktree: NOT FOUND');
-    }
-    if (plan.state.pr) {
-      lines.push(`    PR: #${plan.state.pr.number} (draft: ${plan.state.pr.isDraft})`);
-    }
-    if (plan.state.hasDiffVsMain) {
-      lines.push(`    Changes: ${plan.state.diffSummary}`);
-    }
-    if (plan.state.hasUncommitted) {
-      lines.push(`    Uncommitted: ${plan.state.uncommittedCount} file(s)`);
-    }
-    lines.push('');
+    lines.push(...formatStateLines(plan.state));
   }
 
   // Plan steps
   lines.push('  PLAN:');
   for (const step of plan.plan) {
-    const icon =
-      step.action === 'RUN'
-        ? '🔄'
-        : step.action === 'SKIP'
-          ? '⏭️'
-          : step.action === 'DEFER'
-            ? '🔮'
-            : '⏳';
+    const icon = stepIcon(step.action);
     const cmd = step.command ? ` → ${step.command}` : '';
     lines.push(`    ${icon} ${step.step.padEnd(20)} ${step.action.padEnd(7)} ${step.reason}${cmd}`);
   }
@@ -202,16 +228,7 @@ function formatPlan(plan) {
 
   // Summary
   if (plan.summary) {
-    lines.push(
-      `  SUMMARY: ${plan.summary.run} RUN, ${plan.summary.defer || 0} DEFER, ${plan.summary.skip} SKIP, ${plan.summary.pending} PENDING`
-    );
-    lines.push(`  FIRST ACTION: ${plan.summary.firstAction}`);
-    if (plan.summary.stepsToRun.length > 0) {
-      lines.push(`  STEPS TO RUN: ${plan.summary.stepsToRun.join(' → ')}`);
-    }
-    if (plan.summary.stepsDeferred && plan.summary.stepsDeferred.length > 0) {
-      lines.push(`  STEPS DEFERRED: ${plan.summary.stepsDeferred.join(' → ')}`);
-    }
+    lines.push(...formatSummaryLines(plan.summary));
   }
 
   lines.push('');
