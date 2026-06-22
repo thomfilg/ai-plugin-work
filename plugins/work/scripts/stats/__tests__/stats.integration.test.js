@@ -241,6 +241,19 @@ describe('stats.js all — aggregation table (4.5, R5)', () => {
     const rows = res.stdout.split('\n').filter((l) => /GH-\d00/.test(l));
     assert.equal(rows.length, 3, 'exactly one row per ticket dir');
   });
+
+  it('keeps aggregating and exits 0 when one ticket dir has corrupt state', () => {
+    writeState('GH-100', implementState('GH-100'));
+    // A second ticket dir with unreadable JSON must not abort the whole table.
+    const badDir = path.join(tasksBase, 'GH-200');
+    fs.mkdirSync(badDir, { recursive: true });
+    fs.writeFileSync(path.join(badDir, '.work-state.json'), '{ not json at all');
+    const res = runStats(['all']);
+    assert.equal(res.status, 0, `aggregation must not fail on one bad dir, stderr: ${res.stderr}`);
+    assert.match(res.stdout, /GH-100/, 'valid ticket row must still render');
+    // The corrupt ticket is surfaced rather than silently dropped.
+    assert.match(res.stdout, /GH-200/, 'corrupt ticket must still appear in the table');
+  });
 });
 
 describe('stats.js — token degradation (4.5, R13)', () => {
