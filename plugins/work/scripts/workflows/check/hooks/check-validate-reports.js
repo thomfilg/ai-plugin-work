@@ -18,6 +18,51 @@ const AppAccessStatus = require(path.join(__dirname, '..', 'lib', 'app-access-st
 const { detectSeverityMarkers } = require(path.join(__dirname, '..', 'lib', 'severity-detection'));
 
 /**
+ * Whitelisted env vars captured in the missing-report diag artifact.
+ * Security (spec §3.1): never dump `process.env` wholesale — only these keys.
+ */
+const DIAG_ENV_WHITELIST = Object.freeze(['CLAUDE_PLUGIN_ROOT', 'TASKS_BASE', 'PWD']);
+
+/**
+ * Compute the canonical set of expected `*.check.md` reports for a run.
+ * Base trio is always required; one `qa-<app>.check.md` is appended per
+ * impacted app. (Single-source equivalent of `getExpectedReports`.)
+ *
+ * @param {string[]} impactedApps
+ * @returns {string[]}
+ */
+function getExpectedReports(impactedApps) {
+  const base = ['code-review.check.md', 'tests.check.md', 'completion.check.md'];
+  const qa = (impactedApps || []).map((app) => `qa-${app}.check.md`);
+  return [...base, ...qa];
+}
+
+/**
+ * Build the missing-report diagnostic artifact payload. Captures the offending
+ * report names, expected folder, cwd, parent worktree, a whitelisted env
+ * snapshot, and an ISO timestamp — the forensic context for a silent loss.
+ *
+ * @param {object} args
+ * @param {string} args.reportFolder
+ * @param {string[]} args.missingReports
+ * @returns {object}
+ */
+function buildMissingReportDiag({ reportFolder, missingReports }) {
+  const env = {};
+  for (const key of DIAG_ENV_WHITELIST) {
+    if (process.env[key] !== undefined) env[key] = process.env[key];
+  }
+  return {
+    missingReports,
+    expectedFolder: reportFolder,
+    cwd: process.cwd(),
+    worktree: path.dirname(reportFolder),
+    env,
+    timestamp: new Date().toISOString(),
+  };
+}
+
+/**
  * Check if a file exists
  */
 function fileExists(filePath) {
@@ -367,17 +412,36 @@ function main() {
     results.overall.status = 'APPROVED_WITH_NOTES';
   }
 
-  // Check if all required files exist
-  const requiredFiles = [
-    'tests.check.md',
-    'code-review.check.md',
-    'completion.check.md',
-    'README.md',
-  ];
-  for (const file of requiredFiles) {
-    if (!fileExists(path.join(REPORT_FOLDER, file))) {
+  // Hard fail on any silently-lost expected report (GH-343, brief P0-2/P0-5).
+  // A checker may claim success yet leave its `*.check.md` absent — surface the
+  // offending name(s), write a forensic diag artifact, and refuse auto-advance.
+  const missingReports = getExpectedReports(IMPACTED_APPS).filter(
+    (file) => !fileExists(path.join(REPORT_FOLDER, file))
+  );
+  results.missingReports = missingReports;
+
+  // README is required for the run but is not a checker-produced report; track
+  // it as an issue without folding it into the diag-worthy missingReports list.
+  if (!fileExists(path.join(REPORT_FOLDER, 'README.md'))) {
+    results.overall.issues.push('Missing required file: README.md');
+  }
+
+  if (missingReports.length > 0) {
+    for (const file of missingReports) {
       results.overall.issues.push(`Missing required file: ${file}`);
     }
+    results.overall.valid = false;
+    results.overall.status = 'NEEDS_WORK';
+
+    const diag = buildMissingReportDiag({ reportFolder: REPORT_FOLDER, missingReports });
+    fs.mkdirSync(REPORT_FOLDER, { recursive: true });
+    fs.writeFileSync(
+      path.join(REPORT_FOLDER, 'check-missing-report.diag.json'),
+      JSON.stringify(diag, null, 2)
+    );
+
+    console.log(JSON.stringify(results, null, 2));
+    process.exit(1);
   }
 
   console.log(JSON.stringify(results, null, 2));
