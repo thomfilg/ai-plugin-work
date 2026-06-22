@@ -6,7 +6,8 @@ const os = require('os');
 const { spawnSync } = require('child_process');
 
 const SCRIPT = path.resolve(__dirname, '..', 'check-validate-reports.js');
-const TEMP = path.join(os.tmpdir(), 'check-validate-reports-integ-' + process.pid);
+// Created with mkdtempSync in before() so the path is unpredictable (js/insecure-temporary-file).
+let TEMP;
 
 /** QA report missing Playwright section + screenshots, with standard markers. */
 function buildQAReportNoPlaywright(statusToken) {
@@ -40,7 +41,7 @@ function runCli(reportFolder, impactedAppsJson, playwrightSkippedArg) {
 }
 
 before(() => {
-  fs.mkdirSync(TEMP, { recursive: true });
+  TEMP = fs.mkdtempSync(path.join(os.tmpdir(), 'check-validate-reports-integ-'));
 });
 
 after(() => {

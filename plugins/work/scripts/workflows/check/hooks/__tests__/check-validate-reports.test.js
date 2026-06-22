@@ -7,7 +7,8 @@ const { execFileSync } = require('child_process');
 
 const SCRIPT = path.resolve(__dirname, '..', 'check-validate-reports.js');
 const { validateQAReport } = require(SCRIPT);
-const TEMP = path.join(os.tmpdir(), 'check-validate-reports-test-' + process.pid);
+// Created with mkdtempSync in before() so the path is unpredictable (js/insecure-temporary-file).
+let TEMP;
 
 /**
  * Build a minimal QA report with the given status token.
@@ -81,7 +82,7 @@ function setupDir(name) {
 }
 
 before(() => {
-  fs.mkdirSync(TEMP, { recursive: true });
+  TEMP = fs.mkdtempSync(path.join(os.tmpdir(), 'check-validate-reports-test-'));
 });
 
 after(() => {
