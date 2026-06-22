@@ -875,12 +875,21 @@ function getReviews(prNumber) {
     priority: classifyCommentPriority(cm.author, cm.body),
   }));
 
-  // Mark stale comments as non-blocking
+  // Mark comments by position/commit state.
   for (const item of [...actionable, ...classifiedComments]) {
-    const isOutdated = item.line === null && item.original_line != null;
+    // Position-outdated (R1/R2): the line moved (line===null) but GitHub still
+    // anchors it via original_line. These are NOT downgraded — they keep their
+    // classifyCommentPriority/CHANGES_REQUESTED priority and stay blocking; we
+    // only tag them so the exit output can render a distinct marker.
+    const isPositionOutdated = item.line === null && item.original_line != null;
+    // Old-commit (R6): a force-push left this comment anchored to a commit no
+    // longer on the branch. These remain downgraded to low/stale.
     const isOldCommit =
       branchCommits.size > 0 && item.commit_id && !branchCommits.has(item.commit_id);
-    if (isOutdated || isOldCommit) {
+    if (isPositionOutdated) {
+      item.position_outdated = true;
+    }
+    if (isOldCommit) {
       item.priority = 'low';
       item.stale = true;
     }
@@ -973,6 +982,46 @@ function formatNonBlockingItems(items, lines) {
       lines.push(`    ${c.dim('"' + preview + '"')}`);
     }
   }
+}
+
+/**
+ * Render one "Full Comment Bodies" line for a single comment with its complete
+ * (untruncated) body, uppercased priority, author, distinct state markers, and
+ * path:line location. Extracted to keep printFullCommentBodies simple.
+ */
+function formatFullCommentLine(item, index, color) {
+  const loc = item.path ? `${item.path}${item.line ? ':' + item.line : ''}` : 'N/A';
+  const priority = (item.priority || 'unknown').toUpperCase();
+  const staleTag = item.stale ? color.dim(' (stale)') : '';
+  const positionTag = item.position_outdated ? color.dim(' (position outdated)') : '';
+  const dedupTag = item.deduplicated ? color.dim(' (deduped)') : '';
+  const body = (item.body || '').trim();
+  return `  ${color.cyan(`Comment ${index + 1}:`)} [${priority}] @${item.author}${staleTag}${positionTag}${dedupTag} ${loc} — ${body}`;
+}
+
+/**
+ * GH-248 (R3/R4): print every comment (blocking + non-blocking) with its full,
+ * untruncated body on exit. Invoked from BOTH exit-fail (code 1) and
+ * exit-success (code 0) so the agent always receives complete context.
+ */
+function printFullCommentBodies(reviews, color) {
+  const allExitComments = [
+    ...(reviews.blocking || []).map((item) => ({ ...item, _section: 'BLOCKING' })),
+    ...(reviews.nonBlocking || []).map((item) => ({ ...item, _section: 'NON-BLOCKING' })),
+  ];
+  if (allExitComments.length === 0) return;
+  console.log('');
+  console.log(color.bold('--- Full Comment Bodies (All Reviews) ---'));
+  let currentSection = '';
+  allExitComments.forEach((item, i) => {
+    if (item._section !== currentSection) {
+      currentSection = item._section;
+      console.log('');
+      console.log(color.bold(`  [${currentSection}]`));
+    }
+    console.log(formatFullCommentLine(item, i, color));
+  });
+  console.log('');
 }
 
 function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts, decision) {
@@ -1582,33 +1631,9 @@ async function main() {
       state.finalStatus = decision.finalStatus;
       saveState(state);
 
-      // GH-248: Show brief comment previews (80 chars) for ALL comments on exit
-      // so the agent has context. Non-blocking comments must be evaluated too.
-      const allExitComments = [
-        ...(reviews.blocking || []).map((item) => ({ ...item, _section: 'BLOCKING' })),
-        ...(reviews.nonBlocking || []).map((item) => ({ ...item, _section: 'NON-BLOCKING' })),
-      ];
-      if (allExitComments.length > 0) {
-        console.log('');
-        console.log(c.bold('--- Brief Comment Bodies (All Reviews) ---'));
-        let currentSection = '';
-        allExitComments.forEach((item, i) => {
-          if (item._section !== currentSection) {
-            currentSection = item._section;
-            console.log('');
-            console.log(c.bold(`  [${currentSection}]`));
-          }
-          const loc = item.path ? `${item.path}${item.line ? ':' + item.line : ''}` : 'N/A';
-          const priority = (item.priority || 'unknown').toUpperCase();
-          const staleTag = item.stale ? c.dim(' (stale)') : '';
-          const dedupTag = item.deduplicated ? c.dim(' (deduped)') : '';
-          const briefBody = (item.body || '').trim().replace(/\n/g, ' ').substring(0, 80);
-          console.log(
-            `  ${c.cyan(`Comment ${i + 1}:`)} [${priority}] @${item.author}${staleTag}${dedupTag} ${loc} — ${briefBody}`
-          );
-        });
-        console.log('');
-      }
+      // GH-248 (R3): print full untruncated comment bodies for ALL comments on
+      // exit so the agent has complete context. Non-blocking comments included.
+      printFullCommentBodies(reviews, c);
 
       process.exit(1);
     }
@@ -1726,6 +1751,10 @@ async function main() {
             `The follow_up → ci transition gate will block until this file exists.\n`
         );
       }
+
+      // GH-248 (R3): print full untruncated comment bodies on the success path
+      // too, so the agent receives complete context regardless of exit code.
+      printFullCommentBodies(reviews, c);
 
       process.exit(0);
     }
@@ -1896,6 +1925,8 @@ module.exports = {
   getCodeContext,
   buildAccountabilityEntries,
   formatReport,
+  formatNonBlockingItems,
+  printFullCommentBodies,
   partitionByRequired,
   // Gate-check exports: used by workflow-definition.js verify()
   isPRGateReady,
