@@ -57,6 +57,29 @@ function readChangedFiles(ctx) {
 }
 
 /**
+ * Extract requirement IDs from a single `### Requirements Covered` bullet line.
+ * Returns one ID per comma/whitespace-separated token, or [] when the line is
+ * not a bullet OR any token is not ID-shaped (prose guard).
+ *
+ * GH-498: accept comma/whitespace-separated IDs on one bullet (compat fallback).
+ * A single trailing `\s*$` anchor previously rejected any bullet carrying more
+ * than one token (e.g. `- R1, R6, R7`), yielding zero rows and re-triggering the
+ * GH-462 requirement_coverage_missing deadlock. To avoid over-synthesizing on
+ * prose bullets (e.g. `- some prose with a stop.`), EVERY token must be
+ * ID-shaped; a single non-ID token disqualifies the whole bullet. Requirement
+ * IDs are alphanumeric/`-`/`_` and carry at least one digit (R1, R10, REUSE-1)
+ * — plain English words do not.
+ */
+function extractBulletIds(line) {
+  const bulletMatch = line.match(/^\s*[-*]\s+(.+?)\s*$/);
+  if (!bulletMatch) return [];
+  const tokens = bulletMatch[1].split(/[\s,]+/).filter(Boolean);
+  const isIdToken = (t) => /^[A-Za-z0-9_-]+$/.test(t) && /\d/.test(t);
+  if (tokens.length === 0 || !tokens.every(isIdToken)) return [];
+  return tokens;
+}
+
+/**
  * Walk `## Task N — <title>` blocks and synthesize coverage rows from each
  * block's `### Requirements Covered` bullet list. Used as a fallback when
  * the top-level `## Requirement Coverage` table is absent. Synthesized rows
@@ -78,23 +101,7 @@ function readRequirementCoverageFromSubsections(tasksText) {
     const nextHeading = reqAfter.match(/^#{2,3}\s/m);
     const reqBlock = nextHeading ? reqAfter.slice(0, nextHeading.index) : reqAfter;
     for (const line of reqBlock.split('\n')) {
-      const bulletMatch = line.match(/^\s*[-*]\s+(.+?)\s*$/);
-      if (!bulletMatch) continue;
-      // GH-498: accept comma/whitespace-separated IDs on one bullet (compat
-      // fallback). A single trailing `\s*$` anchor previously rejected any
-      // bullet carrying more than one token (e.g. `- R1, R6, R7`), yielding
-      // zero rows and re-triggering the GH-462 requirement_coverage_missing
-      // deadlock. Tokenize the payload on commas/whitespace. To avoid
-      // over-synthesizing on prose bullets (e.g. `- some prose with a stop.`),
-      // EVERY token must be ID-shaped; a single non-ID token (a word ending in
-      // punctuation, lowercase prose) disqualifies the whole bullet. Requirement
-      // IDs are alphanumeric/`-`/`_` and carry at least one digit (R1, R10,
-      // REUSE-1) — plain English words do not.
-      const tokens = bulletMatch[1].split(/[\s,]+/).filter(Boolean);
-      const isIdToken = (t) => /^[A-Za-z0-9_-]+$/.test(t) && /\d/.test(t);
-      if (tokens.length === 0 || !tokens.every(isIdToken)) continue;
-      const ids = tokens;
-      for (const id of ids) {
+      for (const id of extractBulletIds(line)) {
         rows.push({
           id,
           description: '',
