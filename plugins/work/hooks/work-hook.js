@@ -60,6 +60,13 @@ function tokenizeArgs(rawArgs) {
 //   WORK_UPDATE_CHECK_MARKER_DIR=<dir>    → isolate the per-session marker dir
 function buildBannerOpts() {
   const opts = {};
+  // De-dup the banner PER Claude session, not per machine. Claude Code exposes
+  // the session identifier to hooks via CLAUDE_SESSION_ID; thread it through so
+  // each session gets its own marker file. When absent, update-check.js keeps
+  // its `|| 'default'` safety net (shared marker) rather than crashing.
+  if (process.env.CLAUDE_SESSION_ID) {
+    opts.sessionId = process.env.CLAUDE_SESSION_ID;
+  }
   if (process.env.WORK_UPDATE_CHECK_MARKER_DIR) {
     opts.markerDir = process.env.WORK_UPDATE_CHECK_MARKER_DIR;
   }
