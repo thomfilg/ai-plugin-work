@@ -1,4 +1,4 @@
-const { describe, it, before, after } = require('node:test');
+const { describe, it, test, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
@@ -6,6 +6,7 @@ const os = require('os');
 const { execFileSync } = require('child_process');
 
 const SCRIPT = path.resolve(__dirname, '..', 'check-validate-reports.js');
+const { validateQAReport } = require(SCRIPT);
 const TEMP = path.join(os.tmpdir(), 'check-validate-reports-test-' + process.pid);
 
 /**
@@ -33,11 +34,30 @@ function buildQAReport(statusToken, opts = {}) {
 }
 
 /**
- * Run the validate-reports script and return parsed JSON + exit code.
+ * Build a minimal QA report that is MISSING the Playwright Verification section
+ * and screenshots, but still carries the standard markers.
  */
-function runScript(reportFolder, impactedApps) {
+function buildQAReportNoPlaywright(statusToken, opts = {}) {
+  const lines = ['**Changes Hash:** abc123', '', `Status: ${statusToken}`, ''];
+  if (opts.omitChangesHash) {
+    lines.shift(); // drop "**Changes Hash:**"
+    lines.shift(); // drop the blank line after it
+  }
+  return lines.join('\n');
+}
+
+/**
+ * Run the validate-reports script and return parsed JSON + exit code.
+ * Optionally pass a 3rd CLI arg (PLAYWRIGHT_SKIPPED_JSON) verbatim.
+ */
+function runScript(reportFolder, impactedApps, playwrightSkippedArg) {
+  const args = [SCRIPT, reportFolder];
+  args.push(typeof impactedApps === 'string' ? impactedApps : JSON.stringify(impactedApps));
+  if (playwrightSkippedArg !== undefined) {
+    args.push(playwrightSkippedArg);
+  }
   try {
-    const stdout = execFileSync('node', [SCRIPT, reportFolder, JSON.stringify(impactedApps)], {
+    const stdout = execFileSync('node', args, {
       encoding: 'utf-8',
       timeout: 10000,
     });
@@ -170,4 +190,105 @@ describe('check-validate-reports.js — validateQAReport canonical status matchi
     const statusIssues = result.reports.qa.myapp.issues.filter((i) => i.includes('Missing'));
     assert.deepEqual(statusIssues, [], 'NEEDS_WORK should be recognized as a valid status');
   });
+});
+
+const PLAYWRIGHT_ISSUE = 'Missing "## Playwright Verification" section';
+const SCREENSHOT_ISSUE = 'No screenshots found - QA reports must include visual evidence';
+const CHANGES_HASH_ISSUE = 'Missing "**Changes Hash:**" at top of report';
+
+// --- Task 2: playwrightSkipped support ---
+
+test('P0 #1 — QA report without Playwright section is APPROVED when playwright-skipped flag is set', () => {
+  const dir = setupDir('pw-skipped-valid');
+  const file = path.join(dir, 'qa-app.check.md');
+  fs.writeFileSync(file, buildQAReportNoPlaywright('APPROVED'));
+
+  const result = validateQAReport(file, 'app', true);
+  assert.ok(result.valid, 'report should be valid when playwright is skipped');
+  assert.ok(
+    !result.issues.includes(PLAYWRIGHT_ISSUE),
+    'should not flag missing Playwright section when skipped'
+  );
+  assert.ok(
+    !result.issues.includes(SCREENSHOT_ISSUE),
+    'should not flag missing screenshots when skipped'
+  );
+});
+
+test('P0 #4 — Web-app QA report still requires Playwright section when not skipped', () => {
+  const dir = setupDir('pw-not-skipped-invalid');
+  const file = path.join(dir, 'qa-app.check.md');
+  fs.writeFileSync(file, buildQAReportNoPlaywright('APPROVED'));
+
+  const result = validateQAReport(file, 'app', false);
+  assert.ok(!result.valid, 'report should be invalid when playwright is required');
+  assert.ok(
+    result.issues.includes(PLAYWRIGHT_ISSUE),
+    'should flag missing Playwright section when not skipped'
+  );
+  assert.ok(
+    result.issues.includes(SCREENSHOT_ISSUE),
+    'should flag missing screenshots when not skipped'
+  );
+});
+
+test('P0 #3 — Standard markers still required when Playwright is skipped', () => {
+  const dir = setupDir('pw-skipped-no-hash');
+  const file = path.join(dir, 'qa-app.check.md');
+  fs.writeFileSync(file, buildQAReportNoPlaywright('APPROVED', { omitChangesHash: true }));
+
+  const result = validateQAReport(file, 'app', true);
+  assert.ok(!result.valid, 'report missing Changes Hash should be invalid even when skipped');
+  assert.ok(
+    result.issues.includes(CHANGES_HASH_ISSUE),
+    'should flag missing Changes Hash even when playwright is skipped'
+  );
+});
+
+test('P1 — JSON output records playwrightSkipped per app', () => {
+  const dir = setupDir('pw-skipped-flag');
+  const file = path.join(dir, 'qa-app.check.md');
+  fs.writeFileSync(file, buildQAReportNoPlaywright('APPROVED'));
+
+  assert.equal(validateQAReport(file, 'app', true).playwrightSkipped, true);
+  assert.equal(validateQAReport(file, 'app', false).playwrightSkipped, false);
+  assert.equal(validateQAReport(file, 'app').playwrightSkipped, false);
+});
+
+test('CLI: 3rd arg "true" relaxes Playwright checks and records playwrightSkipped per app', () => {
+  const dir = setupDir('cli-skip-true');
+  fs.writeFileSync(path.join(dir, 'tests.check.md'), '**Changes Hash:** x\n✅ PASS');
+  fs.writeFileSync(path.join(dir, 'code-review.check.md'), '**Changes Hash:** x\nNo issues');
+  fs.writeFileSync(path.join(dir, 'completion.check.md'), '**Changes Hash:** x\nCOMPLETE');
+  fs.writeFileSync(path.join(dir, 'README.md'), 'readme');
+  fs.writeFileSync(path.join(dir, 'qa-app.check.md'), buildQAReportNoPlaywright('APPROVED'));
+
+  const { result } = runScript(dir, ['app'], 'true');
+  assert.equal(result.reports.qa.app.playwrightSkipped, true);
+  assert.ok(
+    !result.reports.qa.app.issues.includes(PLAYWRIGHT_ISSUE),
+    'no Playwright issue when skipped via CLI'
+  );
+});
+
+test('CLI: 3rd arg per-app map relaxes only the named app', () => {
+  const dir = setupDir('cli-skip-map');
+  fs.writeFileSync(path.join(dir, 'tests.check.md'), '**Changes Hash:** x\n✅ PASS');
+  fs.writeFileSync(path.join(dir, 'code-review.check.md'), '**Changes Hash:** x\nNo issues');
+  fs.writeFileSync(path.join(dir, 'completion.check.md'), '**Changes Hash:** x\nCOMPLETE');
+  fs.writeFileSync(path.join(dir, 'README.md'), 'readme');
+  fs.writeFileSync(path.join(dir, 'qa-app.check.md'), buildQAReportNoPlaywright('APPROVED'));
+  fs.writeFileSync(path.join(dir, 'qa-other.check.md'), buildQAReportNoPlaywright('APPROVED'));
+
+  const { result } = runScript(dir, ['app', 'other'], JSON.stringify({ app: true, other: false }));
+  assert.equal(result.reports.qa.app.playwrightSkipped, true);
+  assert.equal(result.reports.qa.other.playwrightSkipped, false);
+  assert.ok(
+    !result.reports.qa.app.issues.includes(PLAYWRIGHT_ISSUE),
+    'app should be relaxed in per-app map'
+  );
+  assert.ok(
+    result.reports.qa.other.issues.includes(PLAYWRIGHT_ISSUE),
+    'other should still require Playwright section'
+  );
 });
