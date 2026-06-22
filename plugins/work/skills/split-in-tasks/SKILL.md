@@ -117,6 +117,24 @@ After generating all tasks, verify coverage:
 
 **The trailing `## Requirement Coverage` table MUST be emitted in every `tasks.md`** even when per-task `### Requirements Covered` subsections are also present. The completion-checker parser primarily reads the top-level table; the subsection fallback exists as a safety net (see GH-462) but the table is still the source of truth. Omitting it forces the parser into the fallback path and obscures rollup status.
 
+**Canonical `### Requirements Covered` bullet format — one ID per line.** Each requirement ID listed in a per-task `### Requirements Covered` subsection MUST be its own bullet:
+
+```markdown
+### Requirements Covered
+- R1
+- R6
+- R7
+```
+
+The **non-canonical** comma-separated form (multiple IDs on one bullet) is accepted as a compatibility fallback:
+
+```markdown
+### Requirements Covered
+- R1, R6, R7   <!-- non-canonical but parsed — splitter still emits a SPLIT-WARNING -->
+```
+
+One ID per line remains the one canonical contract for the subsection fallback parser. As of GH-498 the parser also accepts comma/whitespace-separated IDs on a single bullet and synthesizes identical rows (one per ID), so the historically ambiguous form is no longer silently dropped and no longer re-triggers the GH-462 `requirement_coverage_missing` deadlock. Prefer one ID per line; the comma-separated form is tolerated only for backward compatibility.
+
 ### Step 5: Quality review pass (MANDATORY — do this BEFORE saving)
 
 Review all generated tasks and check:
@@ -130,6 +148,7 @@ Review all generated tasks and check:
 - TDD ordering is correct (RED before GREEN before REFACTOR in every non-exempt implementation task — see Rule 10 in [docs/decomposition-rules.md](./docs/decomposition-rules.md) for exemptions)
 - Every non-checkpoint implementation task has a `### Test Command` with a real, runnable test command (see [docs/test-command.md](./docs/test-command.md))
 - Gherkin coverage: every scenario from `gherkin.feature` is referenced by at least one task (if `gherkin.feature` exists)
+- Canonical `### Requirements Covered` bullets: every per-task subsection lists exactly one requirement ID per bullet (see Step 4.3). Any comma-separated multi-ID bullet is non-canonical — the splitter emits a `SPLIT-WARNING` for it, and the operator MUST split it to one ID per line before saving.
 - Anti-patterns are absent (see anti-pattern blocklist in [docs/decomposition-rules.md](./docs/decomposition-rules.md))
 - Split-Warning Passes (Pass A / Pass B / Pass C / Pass D — see [docs/split-warning-passes.md](./docs/split-warning-passes.md)) emit no unresolved `SPLIT-WARNING` lines, or each emitted warning has an operator-resolution decision recorded. Pass D is invoked deterministically as `node "${CLAUDE_PLUGIN_ROOT}/plugins/work/skills/split-in-tasks/lib/emit-warnings.js" "${TASKS_DIR}"` and exits non-zero when any kind-D violation is emitted; treat its exit code as a gate alongside Pass A/B/C. **Severity asymmetry:** Pass A/B/C are advisory (operator resolves inline); Pass D is a hard gate (non-zero exit blocks the commit). See [Severity model](./docs/split-warning-passes.md#severity-model--why-d-is-blocking-and-abc-are-advisory) for the rationale.
 
