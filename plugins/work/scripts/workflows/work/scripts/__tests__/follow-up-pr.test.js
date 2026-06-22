@@ -1495,3 +1495,288 @@ describe('decideNextAction — e2e single-cycle exit (GH-349)', () => {
     assert.equal(decision.finalStatus, 'reviews-blocking');
   });
 });
+
+// ── GH-248: position-outdated retention + full comment bodies on exit ─────────
+
+const path = require('node:path');
+
+/**
+ * Load a fresh copy of follow-up-pr.js with `gh-exec.js#ghExec` replaced by a
+ * deterministic dispatcher. Returns the module's exports so we can exercise
+ * `getReviews()` without spawning the real `gh` CLI.
+ */
+function loadFollowUpWithMockGh(ghExecMock) {
+  const ghExecPath = require.resolve('../gh-exec.js');
+  const followUpPath = require.resolve('../follow-up-pr.js');
+  const prevGh = require.cache[ghExecPath];
+  const prevFollow = require.cache[followUpPath];
+  delete require.cache[ghExecPath];
+  delete require.cache[followUpPath];
+  // Seed a stub gh-exec module so follow-up-pr destructures the mock at load.
+  require.cache[ghExecPath] = {
+    id: ghExecPath,
+    filename: ghExecPath,
+    loaded: true,
+    exports: { ghExec: ghExecMock, buildChildEnv: () => ({ ...process.env }) },
+  };
+  try {
+    delete require.cache[followUpPath];
+    return require('../follow-up-pr.js');
+  } finally {
+    // Restore caches so other suites see the real modules.
+    if (prevGh) require.cache[ghExecPath] = prevGh;
+    else delete require.cache[ghExecPath];
+    if (prevFollow) require.cache[followUpPath] = prevFollow;
+    else delete require.cache[followUpPath];
+  }
+}
+
+/**
+ * Build a gh dispatcher for getReviews(). `inlineComments` are returned from
+ * the REST pulls/comments endpoint. `commitOids` populate branchCommits.
+ */
+function makeGhMock({ reviews = [], inlineComments = [], commitOids = ['HEADSHA'] } = {}) {
+  return (ghArgs) => {
+    const args = typeof ghArgs === 'string' ? ghArgs.split(/\s+/) : ghArgs;
+    const joined = args.join(' ');
+    if (joined.includes('--json reviews,statusCheckRollup')) {
+      return { reviews, statusCheckRollup: [] };
+    }
+    if (joined.includes('repo view') && joined.includes('nameWithOwner')) {
+      return { nameWithOwner: 'octo/repo' };
+    }
+    if (joined.includes('--json commits')) {
+      return { commits: commitOids.map((oid) => ({ oid })) };
+    }
+    if (args[0] === 'api' && args[1] === 'graphql') {
+      return {
+        data: {
+          repository: {
+            pullRequest: {
+              reviewThreads: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [] },
+            },
+          },
+        },
+      };
+    }
+    if (args[0] === 'api' && joined.includes('requested_reviewers')) {
+      return { users: [] };
+    }
+    if (args[0] === 'api' && joined.includes('/comments')) {
+      // page=1 returns the comments; subsequent pages are empty.
+      if (joined.includes('page=1')) return inlineComments;
+      return [];
+    }
+    return {};
+  };
+}
+
+function findItem(list, predicate) {
+  return (list || []).find(predicate);
+}
+
+describe('GH-248 getReviews — position-outdated retention (R1/R2/R6)', () => {
+  it('keeps a high position-outdated comment at high priority, flags position_outdated, no stale, blocking', () => {
+    const ghMock = makeGhMock({
+      inlineComments: [
+        {
+          id: 1,
+          user: { login: 'human-reviewer' },
+          body: 'This is a CRITICAL bug that must be fixed before merge.',
+          path: 'src/a.js',
+          line: null,
+          original_line: 12,
+          commit_id: 'HEADSHA',
+        },
+      ],
+    });
+    const mod = loadFollowUpWithMockGh(ghMock);
+    const result = mod.getReviews(7);
+    const item = findItem(
+      [...result.comments, ...(result.blocking || []), ...(result.nonBlocking || [])],
+      (c) => c.id === 1
+    );
+    assert.ok(item, 'comment 1 should be present');
+    assert.equal(item.priority, 'high', 'position-outdated comment keeps high priority');
+    assert.equal(item.position_outdated, true, 'position_outdated flag is set');
+    assert.ok(!item.stale, 'stale must NOT be set for position-outdated comments');
+    assert.ok(
+      result.blocking.some((c) => c.id === 1),
+      'position-outdated high comment lands in blocking'
+    );
+  });
+
+  it('keeps a CHANGES_REQUESTED medium position-outdated review at medium with position_outdated', () => {
+    const ghMock = makeGhMock({
+      reviews: [
+        {
+          id: 'R1',
+          author: { login: 'Copilot' },
+          state: 'CHANGES_REQUESTED',
+          body: 'Please reconsider this approach.',
+          submittedAt: '2026-01-01T00:00:00Z',
+        },
+      ],
+      inlineComments: [
+        {
+          id: 2,
+          user: { login: 'Copilot' },
+          body: 'Please reconsider this approach.',
+          path: 'src/b.js',
+          line: null,
+          original_line: 4,
+          commit_id: 'HEADSHA',
+        },
+      ],
+    });
+    const mod = loadFollowUpWithMockGh(ghMock);
+    const result = mod.getReviews(7);
+    const item = findItem(result.comments, (c) => c.id === 2);
+    assert.ok(item, 'inline comment 2 present');
+    assert.equal(item.priority, 'medium', 'CHANGES_REQUESTED-bumped medium is retained');
+    assert.equal(item.position_outdated, true, 'position_outdated flag is set');
+    assert.ok(!item.stale, 'stale must NOT be set');
+  });
+
+  it('still downgrades a force-push old-commit comment to low/stale without position_outdated', () => {
+    const ghMock = makeGhMock({
+      commitOids: ['NEWSHA'],
+      inlineComments: [
+        {
+          id: 3,
+          user: { login: 'human-reviewer' },
+          body: 'This is a CRITICAL bug.',
+          path: 'src/c.js',
+          line: 9,
+          original_line: 9,
+          commit_id: 'OLDSHA',
+        },
+      ],
+    });
+    const mod = loadFollowUpWithMockGh(ghMock);
+    const result = mod.getReviews(7);
+    const item = findItem(
+      [...result.comments, ...(result.nonBlocking || [])],
+      (c) => c.id === 3
+    );
+    assert.ok(item, 'comment 3 present');
+    assert.equal(item.priority, 'low', 'old-commit comment downgraded to low');
+    assert.equal(item.stale, true, 'old-commit comment is stale');
+    assert.ok(!item.position_outdated, 'old-commit comment is NOT position_outdated');
+  });
+});
+
+describe('GH-248 printFullCommentBodies — full untruncated bodies on exit (R3/R4/R2)', () => {
+  const { printFullCommentBodies } = require('../follow-up-pr.js');
+  const plainC = {
+    red: (s) => s,
+    green: (s) => s,
+    yellow: (s) => s,
+    cyan: (s) => s,
+    bold: (s) => s,
+    dim: (s) => s,
+  };
+
+  function capture(fn) {
+    const orig = console.log;
+    const out = [];
+    console.log = (...a) => out.push(a.join(' '));
+    try {
+      fn();
+    } finally {
+      console.log = orig;
+    }
+    return out.join('\n');
+  }
+
+  it('prints a "Full Comment Bodies" section with untruncated (>80 char) bodies', () => {
+    assert.equal(typeof printFullCommentBodies, 'function', 'helper is exported');
+    const longBody =
+      'This body is definitely longer than eighty characters so we can prove the exit output is not truncated at all.';
+    assert.ok(longBody.length > 80, 'fixture body exceeds 80 chars');
+    const reviews = {
+      blocking: [
+        {
+          id: 1,
+          author: 'human',
+          body: longBody,
+          path: 'src/a.js',
+          line: 3,
+          priority: 'high',
+          position_outdated: true,
+        },
+      ],
+      nonBlocking: [
+        {
+          id: 2,
+          author: 'bot[bot]',
+          body: 'short non-blocking note',
+          path: 'src/b.js',
+          line: 8,
+          priority: 'low',
+          stale: true,
+        },
+      ],
+    };
+    const output = capture(() => printFullCommentBodies(reviews, plainC));
+    assert.match(output, /Full Comment Bodies/, 'section header present');
+    assert.ok(output.includes(longBody), 'full untruncated body is printed');
+    assert.match(output, /HIGH/, 'priority is uppercased');
+    assert.match(output, /@human/, 'author rendered');
+    assert.match(output, /src\/a\.js:3/, 'path:line location rendered');
+  });
+
+  it('renders a distinct (position outdated) tag separate from (stale)', () => {
+    const reviews = {
+      blocking: [
+        {
+          id: 1,
+          author: 'human',
+          body: 'position outdated comment body',
+          path: 'src/a.js',
+          line: 3,
+          priority: 'high',
+          position_outdated: true,
+        },
+      ],
+      nonBlocking: [
+        {
+          id: 2,
+          author: 'human2',
+          body: 'old commit comment body',
+          path: 'src/b.js',
+          line: 8,
+          priority: 'low',
+          stale: true,
+        },
+      ],
+    };
+    const output = capture(() => printFullCommentBodies(reviews, plainC));
+    assert.match(output, /\(position outdated\)/, 'position-outdated tag present');
+    assert.match(output, /\(stale\)/, 'stale tag present');
+    // The position-outdated comment must NOT carry the (stale) tag on its line.
+    const posLine = output.split('\n').find((l) => l.includes('position outdated comment body'));
+    assert.ok(posLine, 'position-outdated comment line found');
+    assert.ok(!posLine.includes('(stale)'), 'position-outdated line is not tagged (stale)');
+  });
+});
+
+describe('GH-248 formatNonBlockingItems — in-loop preview stays truncated (R5)', () => {
+  const { formatNonBlockingItems } = require('../follow-up-pr.js');
+
+  it('truncates a >80-char body with an ellipsis in the in-loop preview', () => {
+    assert.equal(typeof formatNonBlockingItems, 'function', 'renderer is exported');
+    const longBody =
+      'This in-loop preview body is well over eighty characters long and therefore must be truncated with an ellipsis by the polling renderer.';
+    assert.ok(longBody.length > 80, 'fixture exceeds 80 chars');
+    const lines = [];
+    formatNonBlockingItems(
+      [{ author: 'human', body: longBody, path: 'src/a.js', line: 2, priority: 'low' }],
+      lines
+    );
+    const text = lines.join('\n');
+    assert.match(text, /\.\.\./, 'preview contains ellipsis');
+    assert.ok(!text.includes(longBody), 'full body is NOT printed in the in-loop preview');
+  });
+});
+
