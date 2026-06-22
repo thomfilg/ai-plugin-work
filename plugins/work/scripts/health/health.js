@@ -20,6 +20,8 @@ const path = require('node:path');
 const getConfig = require('../workflows/lib/get-config');
 const { listTicketDirs } = require('../stats/lib/ticket-dirs');
 const { statusLine } = require('../stats/lib/report-format');
+const { readStateFile } = require('../stats/lib/state-io');
+const { runMain } = require('../stats/lib/cli-runner');
 
 /** Keys every `.work-state.json` must carry (GH-317 / R6). */
 const REQUIRED_KEYS = ['ticketId', 'currentStep', 'status', 'stepStatus', 'startTime'];
@@ -97,12 +99,7 @@ function readTicketState(ticket) {
   const base = getConfig('TASKS_BASE');
   if (!base) return { ok: false, reason: 'missing' };
   const statePath = path.join(base, ticket, '.work-state.json');
-  if (!fs.existsSync(statePath)) return { ok: false, reason: 'missing' };
-  try {
-    return { ok: true, state: JSON.parse(fs.readFileSync(statePath, 'utf8')) };
-  } catch (_err) {
-    return { ok: false, reason: 'corrupt' };
-  }
+  return readStateFile(statePath);
 }
 
 /**
@@ -122,7 +119,7 @@ function validationLines(tickets) {
     const missing = validateState(read.state);
     if (missing.length > 0) {
       lines.push(
-        statusLine({ status: 'FAIL', label: ticket, detail: `missing keys: ${missing.join(', ')}` }),
+        statusLine({ status: 'FAIL', label: ticket, detail: `missing keys: ${missing.join(', ')}` })
       );
     } else {
       lines.push(statusLine({ status: 'PASS', label: ticket, detail: 'state valid' }));
@@ -143,13 +140,17 @@ function detectOrphansAndStale(tickets) {
     const wt = worktreePath(ticket);
     if (!wt || !fs.existsSync(wt)) {
       lines.push(
-        statusLine({ status: 'WARN', label: ticket, detail: 'orphaned task dir (no worktree)' }),
+        statusLine({ status: 'WARN', label: ticket, detail: 'orphaned task dir (no worktree)' })
       );
       continue;
     }
     if (!hasLivePid(wt)) {
       lines.push(
-        statusLine({ status: 'WARN', label: ticket, detail: 'stale worktree (no live session, no open PR)' }),
+        statusLine({
+          status: 'WARN',
+          label: ticket,
+          detail: 'stale worktree (no live session, no open PR)',
+        })
       );
     }
   }
@@ -212,9 +213,13 @@ function repairOrphans(tickets, { dryRun }) {
     const dir = path.join(base, ticket);
     try {
       fs.rmSync(dir, { recursive: true, force: true });
-      lines.push(statusLine({ status: 'PASS', label: ticket, detail: 'removed orphaned task dir' }));
+      lines.push(
+        statusLine({ status: 'PASS', label: ticket, detail: 'removed orphaned task dir' })
+      );
     } catch (_err) {
-      lines.push(statusLine({ status: 'WARN', label: ticket, detail: 'could not remove orphaned task dir' }));
+      lines.push(
+        statusLine({ status: 'WARN', label: ticket, detail: 'could not remove orphaned task dir' })
+      );
     }
   }
   return lines;
@@ -242,14 +247,7 @@ function main(argv) {
 }
 
 if (require.main === module) {
-  let code = 1;
-  try {
-    code = main(process.argv.slice(2));
-  } catch (_err) {
-    // Contract: never surface an uncaught stack trace.
-    code = 1;
-  }
-  process.exit(code);
+  runMain(main);
 }
 
 module.exports = {

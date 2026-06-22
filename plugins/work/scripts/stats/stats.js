@@ -21,6 +21,8 @@ const { ALL_STEPS } = require('../workflows/work/step-registry');
 const { getStatePath } = require('../workflows/work/work-state/core');
 const { listTicketDirs } = require('./lib/ticket-dirs');
 const { statusLine, metricBlock } = require('./lib/report-format');
+const { readStateFile } = require('./lib/state-io');
+const { runMain } = require('./lib/cli-runner');
 
 const NA = 'n/a';
 
@@ -78,6 +80,25 @@ function computeRetries(state) {
 }
 
 /**
+ * Sum a `git diff --numstat` payload into added/removed/files totals.
+ * @param {string} numstat - raw `git diff --numstat` stdout.
+ * @returns {{ added: number, removed: number, files: number }}
+ */
+function sumNumstat(numstat) {
+  let added = 0;
+  let removed = 0;
+  let files = 0;
+  for (const line of numstat.split('\n')) {
+    if (!line.trim()) continue;
+    const [a, r] = line.split('\t');
+    added += parseInt(a, 10) || 0;
+    removed += parseInt(r, 10) || 0;
+    files += 1;
+  }
+  return { added, removed, files };
+}
+
+/**
  * Read git metrics (commits ahead + numstat) for a ticket worktree vs base.
  * Pure read: never mutates the repo. Returns `null` when the worktree is
  * missing or git is unavailable, so the caller can render `n/a`.
@@ -92,23 +113,12 @@ function gitMetrics(ticket) {
   if (!fs.existsSync(worktree)) return null;
 
   const base = getConfig('BASE_BRANCH') || 'main';
-  const run = (args) =>
-    execFileSync('git', args, { cwd: worktree, encoding: 'utf8' }).trim();
+  const run = (args) => execFileSync('git', args, { cwd: worktree, encoding: 'utf8' }).trim();
 
   try {
     const range = `${base}..HEAD`;
     const commits = parseInt(run(['rev-list', '--count', range]), 10) || 0;
-    const numstat = run(['diff', '--numstat', range]);
-    let added = 0;
-    let removed = 0;
-    let files = 0;
-    for (const line of numstat.split('\n')) {
-      if (!line.trim()) continue;
-      const [a, r] = line.split('\t');
-      added += parseInt(a, 10) || 0;
-      removed += parseInt(r, 10) || 0;
-      files += 1;
-    }
+    const { added, removed, files } = sumNumstat(run(['diff', '--numstat', range]));
     return { commits, added, removed, files };
   } catch (_err) {
     return null;
@@ -127,12 +137,7 @@ function readState(ticket) {
   } catch (_err) {
     return { ok: false, reason: 'missing' };
   }
-  if (!statePath || !fs.existsSync(statePath)) return { ok: false, reason: 'missing' };
-  try {
-    return { ok: true, state: JSON.parse(fs.readFileSync(statePath, 'utf8')) };
-  } catch (_err) {
-    return { ok: false, reason: 'corrupt' };
-  }
+  return readStateFile(statePath);
 }
 
 /**
@@ -191,7 +196,7 @@ function main(argv) {
   const target = argv[0];
   if (!target) {
     process.stderr.write(
-      `${statusLine({ status: 'FAIL', label: 'usage', detail: 'stats <TICKET_ID|all>' })}\n`,
+      `${statusLine({ status: 'FAIL', label: 'usage', detail: 'stats <TICKET_ID|all>' })}\n`
     );
     return 1;
   }
@@ -206,11 +211,11 @@ function main(argv) {
   if (!read.ok) {
     if (read.reason === 'corrupt') {
       process.stdout.write(
-        `${statusLine({ status: 'FAIL', label: 'unreadable state', detail: target })}\n`,
+        `${statusLine({ status: 'FAIL', label: 'unreadable state', detail: target })}\n`
       );
     } else {
       process.stdout.write(
-        `${statusLine({ status: 'FAIL', label: `no .work-state.json for ${target}` })}\n`,
+        `${statusLine({ status: 'FAIL', label: `no .work-state.json for ${target}` })}\n`
       );
     }
     return 1;
@@ -221,14 +226,7 @@ function main(argv) {
 }
 
 if (require.main === module) {
-  let code = 1;
-  try {
-    code = main(process.argv.slice(2));
-  } catch (_err) {
-    // Contract: never surface an uncaught stack trace.
-    code = 1;
-  }
-  process.exit(code);
+  runMain(main);
 }
 
 module.exports = {
