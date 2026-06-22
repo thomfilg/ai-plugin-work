@@ -13,7 +13,7 @@
  */
 const { loadActions, analyzeActions, USAGE_KIND } = require('../lib/work-actions');
 const { renderCostReport } = require('../lib/cost-report');
-const getConfig = require('../../lib/get-config');
+const { WORK_PRICING } = require('../../lib/config');
 
 module.exports = function reportsStep(add, s, ctx) {
   const { STEPS, tasksDir, ticket } = ctx;
@@ -38,7 +38,12 @@ function buildCostReport(ticket) {
   const actions = loadActions(ticket) || [];
   const usageRecords = actions.filter((a) => a && a.kind === USAGE_KIND);
   const stepDurations = stepDurationMap(analyzeActions(actions));
-  const pricingTable = getConfig('WORK_PRICING') || {};
+  // GH-311 fix: read the parsed pricing table from config.js (its IIFE
+  // JSON-parses the WORK_PRICING env override and falls back to the default
+  // table). Using get-config's raw `process.env[key]` here returned the JSON
+  // string when WORK_PRICING was set as an env var, so Object.keys() yielded
+  // character indices and every cost report showed $0.00.
+  const pricingTable = WORK_PRICING || {};
   const model = Object.keys(pricingTable)[0];
 
   return renderCostReport({ ticket, usageRecords, stepDurations, model, pricingTable });
