@@ -200,3 +200,5 @@ The completion-checker parser accepts two formats for requirement coverage in `t
 The parser (`lib/kind-checks/shared.js::readRequirementCoverage`) tries the top-level table first. When the table is absent OR header-only (header + separator rows with zero data rows), it falls through to the subsection aggregator. When neither path resolves any rows, `coverage_check.validate` returns `ok:false` with an error pointing the operator at `/work-workflow:split-in-tasks`.
 
 The split-in-tasks skill mandates emitting BOTH formats so the rollup table stays authoritative and the fallback is rarely exercised.
+
+**Bullet lines in `### Requirements Covered` accept either one ID per bullet (canonical, recommended) or multiple IDs separated by commas/whitespace on a single bullet. Both forms synthesize identical rows. Emitters in `split-in-tasks` should produce the canonical form.** (GH-498)
