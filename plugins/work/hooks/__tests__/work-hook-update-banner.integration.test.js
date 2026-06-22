@@ -101,6 +101,50 @@ describe('work-hook update banner integration', () => {
     );
   });
 
+  it('de-dups PER SESSION: two distinct CLAUDE_SESSION_ID values each re-show the banner via separate marker files', async () => {
+    // Both runs share the SAME marker dir (default runHook isolation) but differ
+    // only in CLAUDE_SESSION_ID. A correct per-session implementation derives
+    // opts.sessionId from CLAUDE_SESSION_ID, so each session writes its OWN
+    // marker file and the banner re-shows for the second, distinct session.
+    const first = await runHook('/work GH-1', {
+      WORK_UPDATE_CHECK_TEST_LATEST: '3.99.0',
+      CLAUDE_SESSION_ID: 'session-alpha',
+    });
+    assert.strictEqual(first.code, 0);
+    assert.ok(
+      first.stdout.includes(BANNER_MARKER),
+      `first session should show the banner, got:\n${first.stdout}`
+    );
+
+    const second = await runHook('/work GH-1', {
+      WORK_UPDATE_CHECK_TEST_LATEST: '3.99.0',
+      CLAUDE_SESSION_ID: 'session-beta',
+    });
+    assert.strictEqual(second.code, 0);
+    assert.ok(
+      second.stdout.includes(BANNER_MARKER),
+      `second, DISTINCT session should re-show the banner (per-session de-dup), got:\n${second.stdout}`
+    );
+
+    // Two distinct sessions must produce two distinct marker files.
+    const markerDir = path.join(tmpRoot, 'marker');
+    const markers = fs
+      .readdirSync(markerDir)
+      .filter((f) => f.startsWith('work-update-check.') && f.endsWith('.marker'));
+    assert.ok(
+      markers.includes('work-update-check.session-alpha.marker'),
+      `expected a per-session marker for session-alpha, got: ${markers.join(', ')}`
+    );
+    assert.ok(
+      markers.includes('work-update-check.session-beta.marker'),
+      `expected a per-session marker for session-beta, got: ${markers.join(', ')}`
+    );
+    assert.ok(
+      !markers.includes('work-update-check.default.marker'),
+      `marker must be keyed by CLAUDE_SESSION_ID, not the shared 'default' fallback, got: ${markers.join(', ')}`
+    );
+  });
+
   it('emits the plan section with NO banner and exits 0 when the source is unreachable', async () => {
     const { code, stdout } = await runHook('/work GH-1', {
       WORK_UPDATE_CHECK_TEST_FAIL: '1',
