@@ -18,7 +18,7 @@
  * @returns {void} always calls `process.exit`.
  */
 function runMain(main) {
-  let code = 1;
+  let code;
   try {
     code = main(process.argv.slice(2));
   } catch (_err) {
