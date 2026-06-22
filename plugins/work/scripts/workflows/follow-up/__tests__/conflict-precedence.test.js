@@ -150,6 +150,10 @@ describe('follow-up: merge conflict has absolute precedence', () => {
       assert.match(result.reason, /Merge conflicts found/i);
       assert.match(result.reason, /sync your branch/i);
       assert.match(result.reason, /#1611/);
+      // GH-572: full remediation sequence, not a single sync-only sentence.
+      assert.match(result.reason, /resolve/i);
+      assert.match(result.reason, /push/i);
+      assert.match(result.reason, /re-run \/follow-up/);
       // Crucially: no delegate. The agent does NOT get an auto-rebase dispatch.
       assert.equal(result.delegate, undefined);
     } finally {
