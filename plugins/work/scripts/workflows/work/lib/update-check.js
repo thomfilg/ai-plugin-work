@@ -124,9 +124,24 @@ async function fetchLatestVersion(timeoutMs, opts = {}) {
   }
 }
 
+/**
+ * Default base directory for the cache + per-session marker files.
+ *
+ * Uses a user-private cache directory (XDG_CACHE_HOME, else ~/.cache/work-workflow)
+ * instead of the world-writable OS temp dir. Writing predictable filenames into
+ * the shared temp dir is vulnerable to symlink/TOCTOU hijack by another local
+ * user (CodeQL js/insecure-temporary-file). The home cache dir is owned by, and
+ * writable only by, the current user, so it carries no such race. Callers may
+ * still override via opts/env; tests inject an isolated dir.
+ */
+function defaultStateDir() {
+  const base = process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache');
+  return path.join(base, 'work-workflow');
+}
+
 /** Path of the per-session de-dup marker file. */
 function sessionMarkerPath(markerDir, sessionId) {
-  const dir = markerDir || os.tmpdir();
+  const dir = markerDir || defaultStateDir();
   return path.join(dir, `work-update-check.${sessionId}.marker`);
 }
 
@@ -142,7 +157,7 @@ function resolveBannerInputs(opts) {
   const now = typeof opts.now === 'number' ? opts.now : Date.now();
   const installed = opts.installedVersion || readInstalledVersion();
   const sessionId = opts.sessionId || 'default';
-  const cacheDir = opts.cacheDir || process.env.WORK_UPDATE_CHECK_CACHE_DIR || os.tmpdir();
+  const cacheDir = opts.cacheDir || process.env.WORK_UPDATE_CHECK_CACHE_DIR || defaultStateDir();
   return { now, installed, sessionId, cacheDir };
 }
 
