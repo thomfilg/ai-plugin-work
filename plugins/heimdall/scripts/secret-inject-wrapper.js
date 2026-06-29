@@ -67,6 +67,19 @@ function unquote(v) {
   return v;
 }
 
+// Parse one secrets-file line into a [key, value] pair, or null to skip it
+// (blank, comment, no '=', or a non-identifier key).
+function parseSecretLine(rawLine) {
+  let line = rawLine.trim();
+  if (!line || line.startsWith('#')) return null;
+  if (line.startsWith('export ')) line = line.slice(7).trim();
+  const eq = line.indexOf('=');
+  if (eq <= 0) return null;
+  const key = line.slice(0, eq).trim();
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) return null;
+  return [key, unquote(line.slice(eq + 1).trim())];
+}
+
 // Parse a shell-style secrets file (KEY=value / export KEY=value) into env vars.
 // Not a shell: no expansion/command substitution, just literal assignments, so
 // the agent-unreadable file's values land in the child env verbatim.
@@ -78,16 +91,9 @@ function parseSecrets(file) {
     die(`cannot read secrets file ${file}: ${err.message}`);
   }
   const env = {};
-  for (let line of text.split('\n')) {
-    line = line.trim();
-    if (!line || line.startsWith('#')) continue;
-    if (line.startsWith('export ')) line = line.slice(7).trim();
-    const eq = line.indexOf('=');
-    if (eq <= 0) continue;
-    const key = line.slice(0, eq).trim();
-    if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
-      env[key] = unquote(line.slice(eq + 1).trim());
-    }
+  for (const rawLine of text.split('\n')) {
+    const pair = parseSecretLine(rawLine);
+    if (pair) env[pair[0]] = pair[1];
   }
   return env;
 }
