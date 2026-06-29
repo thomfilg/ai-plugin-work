@@ -58,6 +58,15 @@ function loadCommands() {
   }
 }
 
+// Strip one matching pair of surrounding single/double quotes, if present.
+function unquote(v) {
+  const q = v[0];
+  if ((q === '"' || q === "'") && v.length >= 2 && v[v.length - 1] === q) {
+    return v.slice(1, -1);
+  }
+  return v;
+}
+
 // Parse a shell-style secrets file (KEY=value / export KEY=value) into env vars.
 // Not a shell: no expansion/command substitution, just literal assignments, so
 // the agent-unreadable file's values land in the child env verbatim.
@@ -76,14 +85,9 @@ function parseSecrets(file) {
     const eq = line.indexOf('=');
     if (eq <= 0) continue;
     const key = line.slice(0, eq).trim();
-    let val = line.slice(eq + 1).trim();
-    if (
-      (val.startsWith('"') && val.endsWith('"')) ||
-      (val.startsWith("'") && val.endsWith("'"))
-    ) {
-      val = val.slice(1, -1);
+    if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+      env[key] = unquote(line.slice(eq + 1).trim());
     }
-    if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) env[key] = val;
   }
   return env;
 }
