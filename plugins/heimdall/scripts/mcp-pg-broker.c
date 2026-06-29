@@ -182,8 +182,10 @@ int main(int argc, char **argv) {
 
     /* Forward argv[1..] to the wrapper: NODE_BIN WRAPPER <name> [args...].
      * For an MCP server argc==2, so this is exactly {NODE_BIN, WRAPPER, name,
-     * NULL} as before. argc is capped above, so this stack array stays bounded. */
-    char *newargv[argc + 2];
+     * NULL} as before. argc is capped at 256 above, so a fixed 258-slot array
+     * (256 args + NODE_BIN/WRAPPER, less argv[0], plus the NULL terminator)
+     * always fits — avoiding a VLA keeps this portable across C11 impls. */
+    char *newargv[258];
     newargv[0] = NODE_BIN;
     newargv[1] = WRAPPER;
     for (int i = 1; i < argc; i++) newargv[i + 1] = argv[i];
