@@ -13,8 +13,11 @@
  * modify, exactly as the compile-time -D values were immutable before.
  *
  * WHY SAFE TO LET THE AGENT RUN: it only ever exec()s the configured wrapper
- * with an allow-listed server name in a sanitized env; it never prints secrets.
- * Running it yields only the wrapped MCP server's stdio protocol.
+ * with an allow-listed name (plus optional trailing args, which reach only the
+ * unprivileged wrapper) in a sanitized env; it never prints secrets. Running it
+ * yields only the wrapped MCP server's stdio protocol, or — for CLI command
+ * injection — the allow-listed command run as RUN_USER with the secret in its
+ * environment.
  *
  * PREREQUISITES (enforced by the installer):
  *   1. secrets file -> owner RUN_USER, mode 0600
@@ -123,14 +126,29 @@ int main(int argc, char **argv) {
         fprintf(stderr, "mcp-pg-broker: config missing NODE_BIN/WRAPPER/RUN_USER\n");
         return 1;
     }
-    if (argc != 2) {
-        fprintf(stderr, "usage: %s <server-name>\n", argv[0]);
+    /* Require at least a name; allow trailing args, forwarded to the wrapper for
+     * CLI command injection (an MCP server simply passes none, so argc==2 keeps
+     * the old behavior exactly). Cap argc so the forwarded-args array stays small
+     * and bounded. The allow-list still gates argv[1] (the logical name); the
+     * trailing args reach only the UNPRIVILEGED wrapper, never a root process. */
+    if (argc < 2) {
+        fprintf(stderr, "usage: %s <name> [args...]\n", argv[0]);
+        return 2;
+    }
+    if (argc > 256) {
+        fprintf(stderr, "mcp-pg-broker: too many arguments\n");
         return 2;
     }
     if (!allowed(argv[1])) {
-        fprintf(stderr, "mcp-pg-broker: server '%s' not allowed\n", argv[1]);
+        fprintf(stderr, "mcp-pg-broker: name '%s' not allowed\n", argv[1]);
         return 2;
     }
+
+    /* Capture the CALLER's real uid BEFORE dropping privileges. The broker drops
+     * to RUN_USER, so the launched command would otherwise have no way to learn
+     * who invoked it; exposing it as HEIMDALL_CALLER_UID lets a CLI consumer
+     * chown its outputs back to the invoking user. */
+    const uid_t caller_uid = getuid();
 
     struct passwd *pw = getpwnam(RUN_USER);
     if (!pw) {
@@ -158,9 +176,20 @@ int main(int argc, char **argv) {
     static char api[]  = "DOCKER_API_VERSION=1.44";
     char home[512];
     snprintf(home, sizeof home, "HOME=%s", pw->pw_dir);
-    char *newenv[] = { path, home, api, NULL };
+    char calleruid[64];
+    snprintf(calleruid, sizeof calleruid, "HEIMDALL_CALLER_UID=%u", (unsigned)caller_uid);
+    char *newenv[] = { path, home, api, calleruid, NULL };
 
-    char *newargv[] = { NODE_BIN, WRAPPER, argv[1], NULL };
+    /* Forward argv[1..] to the wrapper: NODE_BIN WRAPPER <name> [args...].
+     * For an MCP server argc==2, so this is exactly {NODE_BIN, WRAPPER, name,
+     * NULL} as before. argc is capped at 256 above, so a fixed 258-slot array
+     * (256 args + NODE_BIN/WRAPPER, less argv[0], plus the NULL terminator)
+     * always fits — avoiding a VLA keeps this portable across C11 impls. */
+    char *newargv[258];
+    newargv[0] = NODE_BIN;
+    newargv[1] = WRAPPER;
+    for (int i = 1; i < argc; i++) newargv[i + 1] = argv[i];
+    newargv[argc + 1] = NULL;
     execve(NODE_BIN, newargv, newenv);
     perror("execve");
     return 1;

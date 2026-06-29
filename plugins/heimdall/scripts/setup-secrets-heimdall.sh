@@ -44,7 +44,10 @@ die() { echo "ERROR: $*" >&2; exit 1; }
 NODE_BIN_DEFAULT="$(command -v node || true)"
 
 # --- Parse config into shell vars via node --------------------------------
-eval "$(REPO_DIR="${REPO_DIR}" CONFIG="${CONFIG}" NODE_DEFAULT="${NODE_BIN_DEFAULT}" node <<'NODE'
+# Capture FIRST so a config error (node exits non-zero) aborts here with a clear
+# message — `eval "$(...)"` would otherwise swallow the failure and continue with
+# unset vars.
+PARSED="$(REPO_DIR="${REPO_DIR}" CONFIG="${CONFIG}" NODE_DEFAULT="${NODE_BIN_DEFAULT}" node <<'NODE'
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -60,18 +63,53 @@ const repoSlug =
   path.basename(repo).replace(/[^A-Za-z0-9._-]/g, '_') +
   '-' + crypto.createHash('sha256').update(repo).digest('hex').slice(0, 8);
 const brokerDefault = `/usr/local/lib/mcp-broker/${repoSlug}/mcp-pg-broker`;
+const brokerBin = cfg.brokerPath || brokerDefault;
+const brokerDir = path.dirname(brokerBin);
+
+// CLI command injection (Layer 1 for non-MCP consumers): each entry runs an
+// allow-listed command via the broker with a secret in its env — no sudo. The
+// broker runs ONE wrapper, so a repo uses EITHER a custom MCP wrapper OR
+// injectCommands, never both.
+const inject = Array.isArray(cfg.injectCommands) ? cfg.injectCommands : [];
+const hasInject = inject.length > 0;
+if (hasInject && cfg.wrapper) {
+  process.stderr.write('ERROR: set EITHER wrapper (MCP) OR injectCommands (CLI) — the broker runs one wrapper.\n');
+  process.exit(3);
+}
+if (!hasInject && !cfg.wrapper) {
+  process.stderr.write('ERROR: config needs either "wrapper" (MCP) or "injectCommands" (CLI).\n');
+  process.exit(3);
+}
+for (const c of inject) {
+  if (!c || !c.name || !c.exec || !c.secretsFile) {
+    process.stderr.write('ERROR: each injectCommands entry needs name, exec, secretsFile.\n');
+    process.exit(3);
+  }
+}
+// The shipped command-wrapper is installed beside the broker (root-owned dir).
+const injectWrapper = path.join(brokerDir, 'secret-inject-wrapper.js');
+const commandsMap = {};
+for (const c of inject) commandsMap[c.name] = { exec: abs(c.exec), secretsFile: abs(c.secretsFile) };
+const groups = [...new Set(inject.flatMap((c) => (Array.isArray(c.groups) ? c.groups : [])))];
+const allow = [...(cfg.allowlist || []), ...inject.map((c) => c.name)];
+const secretsFiles = [...(cfg.secretsFiles || []), ...inject.map((c) => c.secretsFile)];
+
 const out = [];
 out.push(`RUN_USER=${q(cfg.runnerUser || 'mcp-runner')}`);
-out.push(`WRAPPER=${q(abs(cfg.wrapper))}`);
-out.push(`BROKER_BIN=${q(cfg.brokerPath || brokerDefault)}`);
+out.push(`WRAPPER=${q(hasInject ? injectWrapper : abs(cfg.wrapper))}`);
+out.push(`BROKER_BIN=${q(brokerBin)}`);
 out.push(`NODE_BIN=${q(cfg.nodeBin || process.env.NODE_DEFAULT)}`);
-out.push(`ALLOWED_CSV=${q((cfg.allowlist || []).join(','))}`);
+out.push(`ALLOWED_CSV=${q(allow.join(','))}`);
 out.push(`MCP_JSON=${q(abs(cfg.mcpJson || '.mcp.json'))}`);
-out.push(`REWRITE_MCP=${q(cfg.rewriteMcpJson === false ? '' : '1')}`);
-out.push(`SECRETS_FILES=(${(cfg.secretsFiles || []).map((f) => q(abs(f))).join(' ')})`);
+out.push(`REWRITE_MCP=${q(cfg.rewriteMcpJson === false || hasInject ? '' : '1')}`);
+out.push(`SECRETS_FILES=(${secretsFiles.map((f) => q(abs(f))).join(' ')})`);
+out.push(`HAS_INJECT=${q(hasInject ? '1' : '')}`);
+out.push(`INJECT_GROUPS=${q(groups.join(','))}`);
+out.push(`COMMANDS_JSON_B64=${q(Buffer.from(JSON.stringify(commandsMap, null, 2)).toString('base64'))}`);
 process.stdout.write(out.join('\n') + '\n');
 NODE
-)"
+)" || die "failed to parse ${CONFIG} (see error above)"
+eval "${PARSED}"
 
 # broker.conf lives next to the broker binary (per-repo), matching the
 # self-relative path the broker resolves at runtime.
@@ -90,7 +128,14 @@ if [ "${REVERT:-}" = "1" ]; then
   for f in "${SECRETS_FILES[@]}"; do
     [ -f "$f" ] && chown "${AGENT_USER}:${AGENT_USER}" "$f" && chmod 0600 "$f" && echo "   restored $f"
   done
-  [ -f "${WRAPPER}" ] && chown "${AGENT_USER}:${AGENT_USER}" "${WRAPPER}" && echo "   restored wrapper"
+  if [ -n "${HAS_INJECT}" ]; then
+    # Our shipped wrapper + command map are root-owned installs — remove them
+    # (there is no project wrapper to restore ownership of).
+    rm -f "${WRAPPER}" && echo "   removed command-wrapper ${WRAPPER}"
+    rm -f "$(dirname "${WRAPPER}")/commands.json" && echo "   removed commands.json"
+  else
+    [ -f "${WRAPPER}" ] && chown "${AGENT_USER}:${AGENT_USER}" "${WRAPPER}" && echo "   restored wrapper"
+  fi
   rm -f "${BROKER_BIN}" && echo "   removed ${BROKER_BIN}"
   rm -f "${BROKER_CONF}" && echo "   removed ${BROKER_CONF}"
   echo "   NOTE: .mcp.json not auto-restored (use git); user '${RUN_USER}' left intact."
@@ -128,10 +173,14 @@ for f in "${SECRETS_FILES[@]}"; do
   echo ">> Locked $f -> ${RUN_USER} 0600"
 done
 
-# 3. Harden the wrapper (agent must not rewrite privileged code)
-chown root:root "${WRAPPER}"
-chmod 0644 "${WRAPPER}"
-echo ">> Hardened ${WRAPPER} -> root:root 0644"
+# 3. Harden the project wrapper (agent must not rewrite privileged code).
+#    For injectCommands the wrapper is OUR shipped script, installed root-owned
+#    beside the broker in step 5b — there is no project wrapper to harden here.
+if [ -z "${HAS_INJECT}" ]; then
+  chown root:root "${WRAPPER}"
+  chmod 0644 "${WRAPPER}"
+  echo ">> Hardened ${WRAPPER} -> root:root 0644"
+fi
 
 # 4. Write the root-owned runtime config the broker reads (paths + allow-list).
 #    Root-owned and not agent-writable: the broker refuses a tampered config.
@@ -163,6 +212,31 @@ fi
 chown root:root "${BROKER_BIN}"
 chmod 4711 "${BROKER_BIN}"
 echo ">> Installed broker -> ${BROKER_BIN} (mode 4711 setuid root)"
+
+# 5b. CLI command injection: install the shipped wrapper + the root-owned command
+#     map beside the broker, and add the runner to any groups the commands need.
+#     Both are root-owned so the agent cannot rewrite the command/secret mapping;
+#     the wrapper refuses a non-root-owned map at runtime.
+if [ -n "${HAS_INJECT}" ]; then
+  install -m 0755 "${SCRIPT_DIR}/secret-inject-wrapper.js" "${WRAPPER}"
+  chown root:root "${WRAPPER}"
+  echo ">> Installed command-wrapper -> ${WRAPPER} (root:root 0755)"
+  COMMANDS_JSON="$(dirname "${WRAPPER}")/commands.json"
+  printf '%s' "${COMMANDS_JSON_B64}" | base64 -d >"${COMMANDS_JSON}"
+  chown root:root "${COMMANDS_JSON}"
+  chmod 0644 "${COMMANDS_JSON}"
+  echo ">> Wrote ${COMMANDS_JSON} (root:root 0644)"
+  if [ -n "${INJECT_GROUPS}" ]; then
+    IFS=',' read -ra _grps <<<"${INJECT_GROUPS}"
+    for g in "${_grps[@]}"; do
+      if getent group "$g" >/dev/null 2>&1; then
+        usermod -aG "$g" "${RUN_USER}" && echo ">> Added ${RUN_USER} to group '$g'"
+      else
+        echo ">> WARNING: group '$g' not found — skipped (the command may fail without it)"
+      fi
+    done
+  fi
+fi
 
 # 6. docker group for atlassian (root-equivalent — only if present)
 if getent group docker >/dev/null 2>&1 && echo "${ALLOWED_CSV}" | grep -q atlassian; then
@@ -217,16 +291,22 @@ for f in "${SECRETS_FILES[@]}"; do
 done
 echo "   OK: ${AGENT_USER} is denied on all secrets files"
 
-cat <<EOF
-
-==============================================================
- Secrets safe installed for ${REPO_DIR}.
-   1. Restart Claude Code (reloads .mcp.json -> broker)
-   2. Confirm an MCP query works
-   3. Rotate the secrets (old values may have leaked pre-install)
-
- Hard-boundary prerequisite (verify yourself): the agent uid
- (${AGENT_USER}) must NOT have sudo or docker socket access.
- Undo:  sudo bash setup-secrets-heimdall.sh ${REPO_DIR} --revert
-==============================================================
-EOF
+echo
+echo "=============================================================="
+echo " Secrets safe installed for ${REPO_DIR}."
+if [ -n "${HAS_INJECT}" ]; then
+  echo "   CLI command injection active. Invoke (no sudo, no secret on argv):"
+  echo "     ${BROKER_BIN} <name> [args...]"
+  echo "   allow-listed names: ${ALLOWED_CSV}"
+  echo "   The command runs as ${RUN_USER} with the secret in its environment;"
+  echo "   it sees HEIMDALL_CALLER_UID=<invoker> to chown outputs back."
+else
+  echo "   1. Restart Claude Code (reloads .mcp.json -> broker)"
+  echo "   2. Confirm an MCP query works"
+fi
+echo "   Rotate the secrets (old values may have leaked pre-install)."
+echo
+echo " Hard-boundary prerequisite (verify yourself): the agent uid"
+echo " (${AGENT_USER}) must NOT have sudo or docker socket access."
+echo " Undo:  sudo bash setup-secrets-heimdall.sh ${REPO_DIR} --revert"
+echo "=============================================================="
