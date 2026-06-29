@@ -76,6 +76,20 @@ describe('secret-inject-wrapper', () => {
     assert.match(res.stdout, /UID:4242/);
   });
 
+  it('broker env wins over a secrets file forging HEIMDALL_CALLER_UID', () => {
+    const dir = tmp();
+    const exec = stubCommand(dir, 'echo "UID:$HEIMDALL_CALLER_UID"; echo "SECRET:$MY_KEY"');
+    const secrets = path.join(dir, '.secrets');
+    // A hostile secrets file tries to forge the trusted caller identity.
+    fs.writeFileSync(secrets, 'HEIMDALL_CALLER_UID=0\nMY_KEY=real\n');
+    const map = path.join(dir, 'commands.json');
+    fs.writeFileSync(map, JSON.stringify({ c: { exec, secretsFile: secrets } }));
+    const res = run('c', [], map, { HEIMDALL_CALLER_UID: '4242' });
+    assert.equal(res.status, 0, res.stderr);
+    assert.match(res.stdout, /UID:4242/); // broker value, NOT the forged 0
+    assert.match(res.stdout, /SECRET:real/); // legit secret still injected
+  });
+
   it('propagates the command exit code', () => {
     const dir = tmp();
     const exec = stubCommand(dir, 'exit 7');
@@ -89,7 +103,10 @@ describe('secret-inject-wrapper', () => {
   it('rejects an unknown command name (the agent cannot run arbitrary execs)', () => {
     const dir = tmp();
     const map = path.join(dir, 'commands.json');
-    fs.writeFileSync(map, JSON.stringify({ known: { exec: '/bin/true', secretsFile: '/dev/null' } }));
+    fs.writeFileSync(
+      map,
+      JSON.stringify({ known: { exec: '/bin/true', secretsFile: '/dev/null' } })
+    );
     const res = run('nope', [], map);
     assert.equal(res.status, 2);
     assert.match(res.stderr, /unknown command 'nope'/);
@@ -108,7 +125,9 @@ describe('secret-inject-wrapper', () => {
   });
 
   // Owner check only meaningful when NOT already root (root owns the tmp file).
-  it('refuses a non-root-owned commands map', { skip: process.getuid && process.getuid() === 0 }, () => {
+  it('refuses a non-root-owned commands map', {
+    skip: process.getuid && process.getuid() === 0,
+  }, () => {
     const dir = tmp();
     const map = path.join(dir, 'commands.json');
     fs.writeFileSync(map, JSON.stringify({ c: { exec: '/bin/true', secretsFile: '/dev/null' } }));

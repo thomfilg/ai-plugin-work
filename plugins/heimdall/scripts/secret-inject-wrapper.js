@@ -104,9 +104,11 @@ function main() {
   }
 
   const secretEnv = parseSecrets(entry.secretsFile);
-  // process.env is already the broker's sanitized env (PATH, HOME,
-  // DOCKER_API_VERSION, HEIMDALL_CALLER_UID); layer the secret on top.
-  const env = { ...process.env, ...secretEnv };
+  // Broker env is AUTHORITATIVE: layer the secrets file in FIRST, then let the
+  // broker's sanitized vars (PATH, HOME, DOCKER_API_VERSION, and especially the
+  // trusted HEIMDALL_CALLER_UID captured before the privilege drop) overwrite any
+  // same-named key — so a secrets file cannot forge the caller identity or PATH.
+  const env = { ...secretEnv, ...process.env };
 
   const res = spawnSync(entry.exec, args, { stdio: 'inherit', env });
   if (res.error) die(`failed to run ${entry.exec}: ${res.error.message}`);
