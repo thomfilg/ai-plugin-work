@@ -21,6 +21,7 @@
 'use strict';
 
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
@@ -119,8 +120,11 @@ function main() {
   const res = spawnSync(entry.exec, args, { stdio: 'inherit', env });
   if (res.error) die(`failed to run ${entry.exec}: ${res.error.message}`);
   if (typeof res.status === 'number') process.exit(res.status);
-  // Killed by a signal — mirror the shell's 128+signal convention.
-  process.exit(res.signal ? 128 : 1);
+  // Killed by a signal — mirror the shell's 128+signal convention (e.g.
+  // SIGKILL=9 -> 137). res.signal is a name like 'SIGKILL'; map it to its
+  // number via os.constants.signals, falling back to a bare 128.
+  const signum = (res.signal && os.constants.signals[res.signal]) || 0;
+  process.exit(128 + signum);
 }
 
 main();
