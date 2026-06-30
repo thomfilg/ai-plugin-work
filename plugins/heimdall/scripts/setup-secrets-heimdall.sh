@@ -326,6 +326,14 @@ if sudo -n -u "${AGENT_USER}" test -r /var/run/docker.sock 2>/dev/null; then
   DSEC="$(sudo -n -u "${AGENT_USER}" docker -H unix:///var/run/docker.sock info --format '{{.SecurityOptions}}' 2>/dev/null || true)"
   case "${DSEC}" in
     *rootless*) echo "   docker: agent reaches a ROOTLESS daemon — not a bypass (OK)" ;;
+    "")
+      # Empty = the query itself failed (docker CLI not in PATH, or daemon
+      # unreachable) — we could NOT confirm the daemon type. The agent can still
+      # reach the socket (raw HTTP works without the CLI), so fail CLOSED, but
+      # say so honestly instead of asserting a confirmed rootful socket.
+      ESCALATION_FOUND=1
+      echo "   !! docker: ${AGENT_USER} can reach /var/run/docker.sock but the daemon type could not be queried (docker CLI missing / daemon down) — treating as ROOTFUL (fail-closed)"
+      ;;
     *)
       ESCALATION_FOUND=1
       echo "   !! docker: ${AGENT_USER} can reach the ROOTFUL docker socket — root-equivalent, can read the secret"
