@@ -178,6 +178,15 @@ describe('gh-exec.js — buildChildEnv token precedence', () => {
     });
   });
 
+  it('(g) treats empty GH_TOKEN as absent and honors GITHUB_TOKEN', () => {
+    withTokenEnv({ GH_TOKEN: '', GITHUB_TOKEN: 'tok-b' }, () => {
+      const { buildChildEnv } = freshRequire();
+      const env = buildChildEnv();
+      assert.equal(env.GITHUB_TOKEN, 'tok-b');
+      assert.equal('GH_TOKEN' in env, false);
+    });
+  });
+
   it('(f) passes GH_CONFIG_DIR through unchanged', () => {
     withTokenEnv({ GH_CONFIG_DIR: '/iso/path' }, () => {
       const { buildChildEnv } = freshRequire();
