@@ -239,6 +239,100 @@ describe('evaluate: bash', () => {
     assert.equal(r.exitCode, 2);
     assert.match(r.message, /edit repository config/);
   });
+
+  // ─── GH-642: bare-basename markers must anchor to path boundaries ──────────
+  // Short protect basenames (ui, db, api, lib, src) were matched with a raw
+  // String.includes, so any command whose text merely CONTAINED the basename as
+  // a mid-word substring (build → "ui", require → "ui", glibc → "lib") was
+  // wrongly treated as touching the protected dir. These cases assert the
+  // marker only matches on a path-like boundary.
+  const BOUNDARY_LOCKS = [
+    {
+      protect: ['packages/ui', 'packages/db', 'packages/api', 'packages/lib', 'src'],
+      unlockPhrase: 'edit boundary',
+    },
+  ];
+  const runB = (command) =>
+    evaluate({
+      toolName: 'Bash',
+      toolInput: { command },
+      transcriptPath: transcriptEmpty,
+      entries: buildEntries(BOUNDARY_LOCKS, baseDir),
+    });
+
+  // NEGATIVE — basename appears only as a mid-word substring → must be ALLOWED.
+  it('ui: allows `pnpm build` (basename buried in "build")', () => {
+    assert.equal(runB('pnpm build').exitCode, 0);
+  });
+
+  it('ui: allows `node -e "require(...)"` (basename buried in "require")', () => {
+    assert.equal(runB(`node -e "require('x')"`).exitCode, 0);
+  });
+
+  it('ui: allows `cat guide.md` (basename buried in "guide")', () => {
+    assert.equal(runB('cat guide.md').exitCode, 0);
+  });
+
+  it('ui: allows a write to an unrelated mid-word file `equityuikit.txt`', () => {
+    assert.equal(runB('sed -i s/x/y/ equityuikit.txt').exitCode, 0);
+  });
+
+  it('ui: allows `rm guidance.txt` (basename buried in "guidance")', () => {
+    assert.equal(runB('rm guidance.txt').exitCode, 0);
+  });
+
+  it('ui: allows `mv buildkit.tar /tmp/x` (basename buried in "buildkit")', () => {
+    assert.equal(runB('mv buildkit.tar /tmp/x').exitCode, 0);
+  });
+
+  it('db: allows `pnpm dbml` (basename buried in "dbml")', () => {
+    assert.equal(runB('pnpm dbml').exitCode, 0);
+  });
+
+  it('api: allows `echo apiary` (basename buried in "apiary")', () => {
+    assert.equal(runB('echo apiary').exitCode, 0);
+  });
+
+  it('lib: allows `cat glibc.txt` (basename buried in "glibc")', () => {
+    assert.equal(runB('cat glibc.txt').exitCode, 0);
+  });
+
+  it('src: allows `echo transcript` (basename not on any boundary)', () => {
+    assert.equal(runB('echo transcript').exitCode, 0);
+  });
+
+  // POSITIVE — basename sits on a real path boundary → must be BLOCKED.
+  it('ui: blocks `rm packages/ui/config.json`', () => {
+    assert.equal(runB('rm packages/ui/config.json').exitCode, 2);
+  });
+
+  it('ui: blocks a redirect-write `echo hi > ui/x`', () => {
+    assert.equal(runB('echo hi > ui/x').exitCode, 2);
+  });
+
+  it('ui: blocks `sed -i s/a/b/ packages/ui/secret`', () => {
+    assert.equal(runB('sed -i s/a/b/ packages/ui/secret').exitCode, 2);
+  });
+
+  it('ui: blocks `rm packages/ui` (basename at trailing boundary)', () => {
+    assert.equal(runB('rm packages/ui').exitCode, 2);
+  });
+
+  it('ui: blocks `node -e "require(\'ui\')"` (quoted path token)', () => {
+    assert.equal(runB(`node -e "require('ui')"`).exitCode, 2);
+  });
+
+  it('db: blocks `rm packages/db/schema.sql`', () => {
+    assert.equal(runB('rm packages/db/schema.sql').exitCode, 2);
+  });
+
+  it('api: blocks `sed -i s/a/b/ packages/api/x`', () => {
+    assert.equal(runB('sed -i s/a/b/ packages/api/x').exitCode, 2);
+  });
+
+  it('src: blocks `rm src/index.js`', () => {
+    assert.equal(runB('rm src/index.js').exitCode, 2);
+  });
 });
 
 // ─── Task ─────────────────────────────────────────────────────────────────────

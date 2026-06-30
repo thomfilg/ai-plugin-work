@@ -183,12 +183,36 @@ function markerWriteMatch(marker, v) {
   return false;
 }
 
+/**
+ * Does `marker` appear in `text` sitting on a path-like boundary? The marker is
+ * regex-escaped (same escape as the cp/rsync read check above) and must be
+ * preceded by start-of-string, `/`, whitespace, or a quote, and followed by
+ * end-of-string, `/`, whitespace, a quote, or `.`.
+ */
+function markerOnPathBoundary(marker, text) {
+  const esc = marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?:^|[/\\s"'])${esc}(?:$|[/\\s"'.])`).test(text);
+}
+
 function markerPresent(marker, v) {
+  // Markers containing `/` are already path-qualified — a raw substring match is
+  // safe and intentional (relative-path writes like `sed -i .claude/x`).
+  if (marker.includes('/')) {
+    return (
+      v.command.includes(marker) ||
+      v.expanded.includes(marker) ||
+      v.collapsed.includes(marker) ||
+      v.expandedCollapsed.includes(marker)
+    );
+  }
+  // Bare basenames anchor to a path boundary so short names (ui, db, api, lib,
+  // src) no longer match a mid-word substring (build → "ui", require → "ui",
+  // glibc → "lib") and wrongly flag unrelated commands. See GH-642.
   return (
-    v.command.includes(marker) ||
-    v.expanded.includes(marker) ||
-    v.collapsed.includes(marker) ||
-    v.expandedCollapsed.includes(marker)
+    markerOnPathBoundary(marker, v.command) ||
+    markerOnPathBoundary(marker, v.expanded) ||
+    markerOnPathBoundary(marker, v.collapsed) ||
+    markerOnPathBoundary(marker, v.expandedCollapsed)
   );
 }
 
