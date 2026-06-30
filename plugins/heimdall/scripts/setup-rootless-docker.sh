@@ -42,14 +42,22 @@ else
 fi
 
 # 2. Ensure subuid/subgid ranges exist (rootless maps container uids into these).
-if ! grep -q "^${AGENT_USER}:" /etc/subuid 2>/dev/null; then
-  echo "${AGENT_USER}:100000:65536" >>/etc/subuid
-  echo ">> Added /etc/subuid range for ${AGENT_USER}"
-fi
-if ! grep -q "^${AGENT_USER}:" /etc/subgid 2>/dev/null; then
-  echo "${AGENT_USER}:100000:65536" >>/etc/subgid
-  echo ">> Added /etc/subgid range for ${AGENT_USER}"
-fi
+#    Do NOT hardcode 100000:65536 — on a multi-user host that range is usually
+#    already claimed by the first system user, and a collision makes newuidmap
+#    fail with an opaque "invalid mapping". Allocate the next free block instead:
+#    start just past the highest existing (start+count) end in the file.
+SUBID_COUNT=65536
+add_subid_range() {
+  local file="$1"
+  if grep -q "^${AGENT_USER}:" "$file" 2>/dev/null; then return 0; fi
+  local start
+  start=$(awk -F: 'NF>=3 {e=$2+$3; if (e>m) m=e} END {print (m>0?m:100000)}' "$file" 2>/dev/null)
+  [ -n "$start" ] || start=100000
+  echo "${AGENT_USER}:${start}:${SUBID_COUNT}" >>"$file"
+  echo ">> Added ${file##*/} range for ${AGENT_USER} (${start}:${SUBID_COUNT})"
+}
+add_subid_range /etc/subuid
+add_subid_range /etc/subgid
 
 # 3. Remove the agent from the rootful docker group — this is the escalation we
 #    are closing. After this the agent can only use the rootless socket.
