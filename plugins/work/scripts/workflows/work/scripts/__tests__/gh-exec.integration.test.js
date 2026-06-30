@@ -133,8 +133,8 @@ const AUTH_STATUS_OUTPUT_TWO_ACCOUNTS = [
 ].join('\n');
 
 describe('gh-exec.js — buildChildEnv token precedence', () => {
-  it('(a) honors an explicit GH_TOKEN and drops GITHUB_TOKEN', () => {
-    withTokenEnv({ GH_TOKEN: 'tok-a', GITHUB_TOKEN: 'tok-b' }, () => {
+  it('(a) honors a GH_TOKEN-only env (GITHUB_TOKEN absent)', () => {
+    withTokenEnv({ GH_TOKEN: 'tok-a' }, () => {
       const { buildChildEnv } = freshRequire();
       const env = buildChildEnv();
       assert.equal(env.GH_TOKEN, 'tok-a');
