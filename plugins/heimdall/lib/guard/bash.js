@@ -186,8 +186,10 @@ function markerWriteMatch(marker, v) {
 /**
  * Does `marker` appear in `text` sitting on a path-like boundary? The marker is
  * regex-escaped (same escape as the cp/rsync read check above) and must be
- * preceded by start-of-string, `/`, whitespace, or a quote, and followed by
- * end-of-string, `/`, whitespace, a quote, or `.`.
+ * preceded by start-of-string, `/`, whitespace, a quote, or `>`, and followed
+ * by end-of-string, `/`, whitespace, a quote, or `.`.
+ *
+ * The `>` leading boundary covers no-space redirect-writes (`>ui/x`).
  */
 function markerOnPathBoundary(marker, text) {
   const esc = marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
