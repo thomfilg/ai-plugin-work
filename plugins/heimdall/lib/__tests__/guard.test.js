@@ -297,8 +297,11 @@ describe('evaluate: bash', () => {
     assert.equal(runB('cat glibc.txt').exitCode, 0);
   });
 
-  it('src: allows `echo transcript` (basename not on any boundary)', () => {
-    assert.equal(runB('echo transcript').exitCode, 0);
+  it('src: allows `rm usrconfig.txt` (basename buried mid-word in "usrconfig")', () => {
+    // "usrconfig" embeds the substring "src" mid-word — the pre-fix
+    // String.includes would have wrongly blocked this; the boundary anchor must
+    // not. (The old `echo transcript` case was inert: "transcript" has no "src".)
+    assert.equal(runB('rm usrconfig.txt').exitCode, 0);
   });
 
   // POSITIVE — basename sits on a real path boundary → must be BLOCKED.
@@ -308,6 +311,12 @@ describe('evaluate: bash', () => {
 
   it('ui: blocks a redirect-write `echo hi > ui/x`', () => {
     assert.equal(runB('echo hi > ui/x').exitCode, 2);
+  });
+
+  it('ui: blocks a no-space redirect-write `echo hi >ui/x`', () => {
+    // No space after `>`: `ui` is preceded by `>` and followed by `/` — still a
+    // genuine path-token write, must stay blocked (fail-closed). See GH-642.
+    assert.equal(runB('echo hi >ui/x').exitCode, 2);
   });
 
   it('ui: blocks `sed -i s/a/b/ packages/ui/secret`', () => {

@@ -191,7 +191,10 @@ function markerWriteMatch(marker, v) {
  */
 function markerOnPathBoundary(marker, text) {
   const esc = marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`(?:^|[/\\s"'])${esc}(?:$|[/\\s"'.])`).test(text);
+  // Leading boundary also accepts `>` so a no-space redirect into the protected
+  // dir (`>ui/x`) stays blocked — a genuine path-token write, fail-closed like
+  // its spaced form `> ui/x`. See GH-642.
+  return new RegExp(`(?:^|[/\\s"'>])${esc}(?:$|[/\\s"'.])`).test(text);
 }
 
 function markerPresent(marker, v) {
