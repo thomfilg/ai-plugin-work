@@ -31,7 +31,19 @@ fi
 
 if command -v pkexec >/dev/null 2>&1 && [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]; then
   echo ">> escalating via pkexec (a desktop auth dialog will appear)" >&2
-  exec pkexec bash "${TARGET}" "$@"
+  # Do NOT `exec` here: if the user dismisses the polkit dialog, pkexec exits
+  # 126/127 and would terminate us before the NEEDS_PASSWORD fallback. Run it,
+  # then decide: 126/127 = auth cancelled/denied -> fall through to instructions;
+  # any other code = auth succeeded and the wrapped script ran, so propagate ITS
+  # real exit code (0 ok, 1 bypassable, 10 needs-password, ...).
+  set +e
+  pkexec bash "${TARGET}" "$@"
+  rc=$?
+  set -e
+  if [ "${rc}" -ne 126 ] && [ "${rc}" -ne 127 ]; then
+    exit "${rc}"
+  fi
+  echo ">> pkexec auth was cancelled/denied — falling back to terminal instructions" >&2
 fi
 
 # No non-interactive path. Build the exact command the user should run in their
