@@ -157,7 +157,7 @@ function renderWarning(w) {
   if (w.kind === 'unknown-key') {
     return w.suggestion
       ? `  - unknown config key "${w.key}" — did you mean "${w.suggestion}"?`
-      : `  - unknown config key "${w.key}" (no close known key)`;
+      : `  - unrecognized config key "${w.key}" — not a known /work key (may belong to another tool)`;
   }
   return `  - invalid value for "${w.key}": "${w.value}" — expected ${w.expected}`;
 }

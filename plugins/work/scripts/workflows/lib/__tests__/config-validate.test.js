@@ -278,6 +278,35 @@ describe('formatWarnings (R7)', () => {
     assert.match(block, /ENABEL_DRAFT_PR/, 'block names the typo key');
     assert.match(block, /ENABLE_SYMLINK/, 'block names the malformed key');
   });
+
+  it('renders a "did you mean" line for a prefixed near-miss typo', () => {
+    const { validateEnv, formatWarnings } = loadValidateModule();
+    const block = formatWarnings(
+      validateEnv({ ENABEL_DRAFT_PR: '1' }, testSchema()),
+    );
+    assert.match(
+      block,
+      /did you mean "ENABLE_DRAFT_PR"\?/,
+      'a near-miss keeps the typo-suggestion message',
+    );
+  });
+
+  it('renders an "another tool" note for a prefixed unknown key with no near-miss', () => {
+    const { validateEnv, formatWarnings } = loadValidateModule();
+    const block = formatWarnings(
+      validateEnv({ ENABLE_TELEMETRY: '1' }, testSchema()),
+    );
+    assert.match(
+      block,
+      /may belong to another tool/,
+      'a prefixed key with no near-miss notes it may belong to another tool',
+    );
+    assert.doesNotMatch(
+      block,
+      /no close known key/,
+      'the old "no close known key" phrasing is gone',
+    );
+  });
 });
 
 describe('runStartupValidation — non-blocking + once-per-invocation', () => {
