@@ -56,7 +56,7 @@ function tasksGateStep(add, s, ctx) {
     return;
   }
 
-  const validation = validateAll(tasks);
+  const validation = validateAll(tasks, process.cwd());
   if (validation.valid) {
     // Gate C passed — now run Gate D: gherkin↔tasks consistency.
     // Every Scenario in gherkin.feature must reference a real task via
