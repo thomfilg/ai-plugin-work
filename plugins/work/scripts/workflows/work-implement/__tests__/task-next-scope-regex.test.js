@@ -14,6 +14,34 @@ const {
 const BT = String.fromCharCode(96); // backtick, kept out of template literals
 const TASK_NEXT_SRC = path.join(__dirname, '..', 'task-next.js');
 
+// Reconstruct the FULL logical statement for each user-facing block-reason /
+// help-text anchor, joining continuation lines up to the `;` terminator. This
+// makes the "never say Suggested Scope" guard robust to multi-line string
+// concatenations where the anchor (`blockReason =`) and a `'Suggested Scope'`
+// fragment land on different lines — a per-line filter would miss those
+// (greptile GH-491 follow-up). Bounded to guard against a runaway join.
+function collectUserFacingStatements(src) {
+  const lines = src.split('\n');
+  const isAnchor = (line) =>
+    /blockReason\s*=/.test(line) ||
+    /lines\.push\(/.test(line) ||
+    /RED accepted via unit-only fallback/.test(line) ||
+    /verbatim title match against test files/.test(line);
+  const statementFrom = (startIdx) => {
+    let stmt = lines[startIdx];
+    for (let i = startIdx + 1; i < lines.length && i - startIdx < 25; i++) {
+      if (/;\s*$/.test(stmt.trimEnd())) break; // statement already terminated
+      stmt += `\n${lines[i]}`;
+    }
+    return stmt;
+  };
+  const statements = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (isAnchor(lines[i])) statements.push(statementFrom(i));
+  }
+  return statements;
+}
+
 test('extractField ignores in-prose backticked heading mentions', () => {
   const section = [
     '## Task 2',
@@ -194,30 +222,43 @@ test('in-prose backticked `Files in scope` heading is ignored; only the real blo
 // module source because the reason-builder is internal (not exported).
 test('RED-gate block-reason / help-text strings name `Files in scope`, never "Suggested Scope"', () => {
   const src = fs.readFileSync(TASK_NEXT_SRC, 'utf8');
+  const userFacingStatements = collectUserFacingStatements(src);
 
-  // Only inspect user-facing block-reason / help-text lines (those that push a
-  // string the implementer reads), not parser-internal comments or the
-  // extractField fallback call which legitimately references both headings.
-  const userFacingLines = src
-    .split('\n')
-    .filter((line) => {
-      const isReason = /blockReason\s*=/.test(line);
-      const isHelpPush = /lines\.push\(/.test(line);
-      const isFallbackLog = /RED accepted via unit-only fallback/.test(line);
-      const isMissingMatch = /verbatim title match against test files/.test(line);
-      return isReason || isHelpPush || isFallbackLog || isMissingMatch;
-    });
-
-  const offenders = userFacingLines.filter((line) => /Suggested Scope/.test(line));
+  const offenders = userFacingStatements.filter((stmt) => /Suggested Scope/.test(stmt));
   assert.deepEqual(
     offenders,
     [],
-    'no user-facing block reason / help text may direct the implementer to "Suggested Scope"; they must name the canonical `Files in scope` section',
+    'no user-facing block reason / help text may direct the implementer to "Suggested Scope" (checked across multi-line statements); they must name the canonical `Files in scope` section',
   );
 
-  const namesCanonical = userFacingLines.some((line) => /Files in scope/.test(line));
+  const namesCanonical = userFacingStatements.some((stmt) => /Files in scope/.test(stmt));
   assert.ok(
     namesCanonical,
     'at least one user-facing block reason / help-text line must name the canonical `Files in scope` section',
   );
+});
+
+// 1.2.2 — the guard itself must survive a multi-line split: a `blockReason =`
+// whose value is concatenated across lines with the stale `Suggested Scope`
+// wording on a *continuation* line must still be detected. Proves the
+// statement-join is stronger than a per-line filter (greptile GH-491 follow-up).
+test('block-reason guard detects "Suggested Scope" split onto a continuation line', () => {
+  const fakeSrc = [
+    'function build() {',
+    '  blockReason =',
+    "    'No test files found. Add a failing test under ' +",
+    "    'Suggested Scope, then re-invoke me.';",
+    '}',
+  ].join('\n');
+  const statements = collectUserFacingStatements(fakeSrc);
+  const offenders = statements.filter((stmt) => /Suggested Scope/.test(stmt));
+  assert.equal(
+    offenders.length,
+    1,
+    `multi-line block reason splitting "Suggested Scope" onto a continuation line must be caught; statements=${JSON.stringify(statements)}`,
+  );
+
+  // Control: the same wording on a single-line comment (no anchor) is ignored.
+  const noAnchor = collectUserFacingStatements('// mentions Suggested Scope in prose only\n');
+  assert.deepEqual(noAnchor, [], 'non-anchor lines must not be collected');
 });
