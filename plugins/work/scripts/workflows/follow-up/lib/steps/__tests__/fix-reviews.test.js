@@ -90,10 +90,15 @@ describe('fix-reviews judgment step (Task 1, GH-352)', () => {
 
   it('instructs the agent to read the referenced code at fileRef', () => {
     assert.ok(
-      /read the (referenced )?code/i.test(SOURCE),
-      'expected an instruction to read the referenced code'
+      /read the (referenced )?code/i.test(PROMPT),
+      'expected an instruction to read the referenced code in the assembled prompt'
     );
-    assert.ok(SOURCE.includes('fileRef'), 'expected the judgment step to reference fileRef');
+    // Assert the actual fileRef VALUE reaches the prompt, not just that the
+    // parameter name 'fileRef' appears in source (which is always true).
+    assert.ok(
+      PROMPT.includes('a.js:12'),
+      'expected the assembled prompt to reference the concrete file:line the agent must read'
+    );
   });
 
   it("instructs the agent to verify the bot's claim against the current code", () => {
