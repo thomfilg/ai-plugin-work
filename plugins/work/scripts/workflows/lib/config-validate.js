@@ -120,6 +120,11 @@ function scanValues(env, schema, knownKeys) {
     if (!Object.prototype.hasOwnProperty.call(env, key)) continue;
     const value = env[key];
     if (value === undefined) continue;
+    // An empty string is falsy under config.js's uniform `process.env.KEY ||
+    // default` resolution, so it is semantically "unset" at runtime and gets
+    // replaced by the default. Skip it to avoid spurious invalid-value
+    // warnings (matches config.js default semantics exactly).
+    if (value === '') continue;
     const warning = checkValue(key, value, schema[key]);
     if (warning) warnings.push(warning);
   }

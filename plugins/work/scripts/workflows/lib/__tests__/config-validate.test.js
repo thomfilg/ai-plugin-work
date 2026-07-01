@@ -160,6 +160,39 @@ describe('validateEnv — value-format validation', () => {
     );
   });
 
+  it('treats an empty-string value as unset (matches config.js || default) and does not warn', () => {
+    const { validateEnv } = loadValidateModule();
+    // config.js resolves every value via `process.env.KEY || default`, so an
+    // empty string is falsy and uniformly replaced by the default — i.e. an
+    // empty value is semantically "unset". The validator must not emit
+    // spurious invalid-value warnings for these.
+    const warnings = validateEnv(
+      {
+        FOLLOW_UP_PR_POLL_REVIEWS: '',
+        WEB_APPS: '',
+        ENABLE_DRAFT_PR: '',
+      },
+      testSchema(),
+    );
+    const invalid = warnings.filter((w) => w.kind === 'invalid-value');
+    assert.deepEqual(invalid, [], 'empty-string values produce no invalid-value warnings');
+  });
+
+  it('still flags a genuinely-invalid non-empty value (guards against over-skipping)', () => {
+    const { validateEnv } = loadValidateModule();
+    const warnings = validateEnv(
+      { FOLLOW_UP_PR_POLL_REVIEWS: 'maybe' },
+      testSchema(),
+    );
+    assert.ok(
+      warnings.some(
+        (w) =>
+          w.kind === 'invalid-value' && w.key === 'FOLLOW_UP_PR_POLL_REVIEWS',
+      ),
+      'a non-empty invalid value is still flagged',
+    );
+  });
+
   it('accepts valid values for every type with no warning', () => {
     const { validateEnv } = loadValidateModule();
     const warnings = validateEnv(
