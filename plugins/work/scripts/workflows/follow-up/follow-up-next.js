@@ -332,7 +332,9 @@ function main() {
     }
     // Clear the status-bar live file so the /follow-up bar disappears on finish.
     try {
-      fs.unlinkSync(path.join(require('os').tmpdir(), `followup-live-${safeName}.json`));
+      fs.unlinkSync(
+        path.join(require('os').homedir(), '.cache', 'followup', 'live', `${safeName}.json`)
+      );
     } catch {
       /* nothing to clear */
     }

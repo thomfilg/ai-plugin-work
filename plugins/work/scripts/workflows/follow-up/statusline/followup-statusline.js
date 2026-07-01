@@ -4,7 +4,7 @@
  * followup-statusline.js — agent-free renderer for the /follow-up status bar.
  *
  * Reads the live progress files monitor.js writes each CI-wait poll
- * ($TMPDIR/followup-live-<ticket>.json) and prints one compact line per
+ * (~/.cache/followup/live/<ticket>.json) and prints one compact line per
  * actively-running follow-up. No agent, no polling — Claude Code re-runs the
  * parent .sh on its refreshInterval and shows stdout.
  *
@@ -29,12 +29,10 @@ try {
 }
 
 function liveEntries() {
-  const dir = os.tmpdir();
+  const dir = path.join(os.homedir(), '.cache', 'followup', 'live');
   let files = [];
   try {
-    files = fs
-      .readdirSync(dir)
-      .filter((f) => f.startsWith('followup-live-') && f.endsWith('.json'));
+    files = fs.readdirSync(dir).filter((f) => f.endsWith('.json'));
   } catch {
     return [];
   }

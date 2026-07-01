@@ -230,12 +230,21 @@ function fetchReviews(prInfo, getReviews) {
 
 // Publish live CI-wait progress for the /follow-up status bar (agent-free —
 // followup-statusline.js reads this). Best-effort: never break the monitor loop.
+// Live-file location: a user-owned dir (~/.cache/followup/live), NOT os.tmpdir()
+// — writing a predictable name into world-writable /tmp is a symlink-attack
+// vector (CodeQL CWE-377). ~/.cache is 0700 and single-user, so a fixed name
+// per ticket is safe there.
+function followupLiveDir() {
+  return path.join(require('os').homedir(), '.cache', 'followup', 'live');
+}
+
 function writeFollowupLive(state, prInfo, statusLine, detail, ctx) {
   try {
-    const osMod = require('os');
     const fsMod = require('fs');
+    const dir = followupLiveDir();
+    fsMod.mkdirSync(dir, { recursive: true });
     fsMod.writeFileSync(
-      path.join(osMod.tmpdir(), `followup-live-${state.ticketId}.json`),
+      path.join(dir, `${state.ticketId}.json`),
       JSON.stringify({
         ticket: state.ticketId,
         pr: (prInfo && prInfo.number) || state.prNumber || null,
