@@ -350,6 +350,27 @@ function handlePrComments(ctx, cHit) {
 // so a second daemon in the SAME namespace is detected instead of both driving
 // (and racing on) the same agents. One-shot ticks don't lock — the conflict is
 // specific to two persistent daemons.
+// Record which Claude session launched this orchestration + its ticket prefix,
+// so the status bar (maestro-statusline.js) can show this fleet's live tmux
+// sessions ONLY in the owning session — no manifest needed, no global pin.
+function writeActiveMarker() {
+  try {
+    const session = process.env.CLAUDE_CODE_SESSION_ID;
+    const prefix = process.env.TICKET_PREFIX;
+    if (!session || !prefix) return;
+    const osMod = require('os');
+    const p = require('path');
+    const dir = p.join(osMod.homedir(), '.cache', 'maestro', 'active');
+    require('fs').mkdirSync(dir, { recursive: true });
+    require('fs').writeFileSync(
+      p.join(dir, `${session}.json`),
+      JSON.stringify({ session, prefix, repo: process.env.REPO_NAME || '' })
+    );
+  } catch {
+    /* best effort — the status bar is advisory */
+  }
+}
+
 function main() {
   const daemon = process.argv.includes('--daemon');
   if (!daemon) {
@@ -357,6 +378,7 @@ function main() {
     return;
   }
   const nsLabel = singletonGuard.acquireOrExit();
+  writeActiveMarker();
   alerts.log(`orchestrate daemon starting, tick=${TICK_SEC}s namespace="${nsLabel}"`);
   setInterval(tick, TICK_SEC * 1000);
   tick();

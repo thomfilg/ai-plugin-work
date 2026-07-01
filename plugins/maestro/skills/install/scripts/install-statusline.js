@@ -25,15 +25,6 @@ const os = require('os');
 const HOME = os.homedir();
 const SETTINGS = path.join(HOME, '.claude', 'settings.json');
 const CHAIN_FILE = path.join(HOME, '.cache', 'maestro', 'statusline-chain.cmd');
-const PIN_FILE = path.join(HOME, '.cache', 'maestro', 'statusline-session.pin');
-
-function clearPin() {
-  try {
-    fs.unlinkSync(PIN_FILE);
-  } catch {
-    /* none */
-  }
-}
 
 function rendererPath() {
   // Resolve relative to this file's own location so the registered command
@@ -95,9 +86,8 @@ function install() {
 
   s.statusLine = block(renderer);
   writeSettings(s);
-  clearPin(); // fresh claim: the next orchestrator session to render owns the line
   console.log('registered maestro status line -> ' + renderer);
-  console.log('pin reset — the first non-worktree (orchestrator) session to render claims it.');
+  console.log('each orchestrator session shows only the fleet it launched.');
   console.log('run /reload-plugins or restart the statusLine refresh to see it.');
 }
 
@@ -126,10 +116,5 @@ function remove() {
 
 const arg = process.argv[2];
 if (arg === '--print') print();
-else if (arg === '--remove') {
-  remove();
-  clearPin();
-} else if (arg === '--unpin') {
-  clearPin();
-  console.log('pin cleared — the next non-worktree session to render will claim the status line.');
-} else install();
+else if (arg === '--remove') remove();
+else install();
