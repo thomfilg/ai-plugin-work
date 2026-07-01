@@ -23,6 +23,21 @@ if (require.main === module) {
 const { resolvePluginConfig } = require('../lib/plugin-config');
 const { libDir, TASKS_BASE } = resolvePluginConfig(path.join(__dirname, '..', 'work'));
 
+// Load lib/config.js for its side-effect: it reads the repo `.env` into
+// process.env (WEB_APPS, etc.). resolvePluginConfig() above uses getConfig(),
+// which loads config lazily and is short-circuited when WORKTREES_BASE is
+// already exported (the direnv case) — so config.js's `.env` loader may never
+// run. The deterministic playwright-skip signal in 3_verify_playwright and
+// 10_validate_summary reads process.env.WEB_APPS via hasWebApps(); without this
+// eager load a real web-app project can be mis-detected as Playwright-skipped
+// and QA reports accepted without the Playwright section/screenshots. Mirrors
+// legacy check.workflow.js. (GH-280 review: cursor[bot] — skip signal & dotenv)
+try {
+  require(path.join(libDir, 'config'));
+} catch {
+  /* fail-open: config.js is optional; steps fall back to ambient process.env */
+}
+
 if (!TASKS_BASE) {
   console.log(
     JSON.stringify({
