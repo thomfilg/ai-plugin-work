@@ -231,9 +231,9 @@ function fetchReviews(prInfo, getReviews) {
 function emitStatusLine(state, ci, reviews) {
   if (!state._monitorStartTime) state._monitorStartTime = new Date().toISOString();
   const { line1, detail } = buildStatusLine(state, ci, reviews);
-  process.stderr.write(line1 + '\n');
-  if (detail) process.stderr.write(detail + '\n');
-  process.stderr.write('\n');
+  // Progress is persisted to state (_ciStatusLine) and surfaced by the
+  // /follow-up status bar (agent-free) — no per-poll stderr spam. The final
+  // JSON instruction is what keeps the agent posted.
   state._ciStatusLine = line1;
   state._ciStatusDetail = detail || '';
 }
