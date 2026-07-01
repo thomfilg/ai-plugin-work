@@ -167,6 +167,18 @@ function _redRequiresTestFile(task) {
   return gateContractFor(task.type).redRequiresTestFiles === true;
 }
 
+// Mirrors task-next.js `isVisualOnlyTask`: a task whose `### Files in scope`
+// consists exclusively of `.stories.[jt]sx?` entries is a visual-only Storybook
+// task. Story files have no executable assertions, so the implement-time RED
+// gate exempts them from `*.test.*` authorship discovery (see split-in-tasks
+// SKILL.md Rule 10). The authoring-time guard MUST honour the same exemption or
+// a stories-only task passes `task-next.js` RED but fails tasks-gate.
+function _isVisualOnlyScope(task) {
+  const scope = Array.isArray(task.filesInScope) ? task.filesInScope : [];
+  if (scope.length === 0) return false;
+  return scope.every((p) => typeof p === 'string' && /\.stories\.[jt]sx?$/i.test(p));
+}
+
 /**
  * Returns true when this task's deliverables imply it authors test files
  * (so the RED gate will expect a `*.test.*` / `*.spec.*` to exist).
@@ -176,6 +188,7 @@ function _redRequiresTestFile(task) {
  */
 function _impliesTestAuthorship(task) {
   if (!_redRequiresTestFile(task)) return false;
+  if (_isVisualOnlyScope(task)) return false;
   const body = typeof task.rawContent === 'string' ? task.rawContent : '';
   return _TEST_AUTHORING_RE.test(body);
 }
