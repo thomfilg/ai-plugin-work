@@ -855,6 +855,44 @@ describe('validateTaskTestScope: TDD task must own a test file in Files in scope
       );
     });
   }
+
+  // GH-491 follow-up (cursor[bot]): the authoring-time guard must mirror the
+  // implement-time RED path's visual-only Storybook exemption (task-next.js
+  // `isVisualOnlyTask`). A tdd-code task whose `### Files in scope` lists ONLY
+  // `*.stories.*` files proves RED/GREEN via the verification command (the
+  // story file's presence), so it must NOT be flagged for lacking a *.test.*.
+  it('(f) does NOT error for a visual-only Storybook task (stories-only scope)', () => {
+    const task = {
+      num: 6,
+      type: 'tdd-code',
+      title: 'Add Button stories',
+      filesInScope: ['src/components/Button.stories.tsx'],
+      rawContent: tddBody,
+    };
+    const errors = ts.validateTaskTestScope(task);
+    const owns = errors.find((e) => /Files in scope/.test(e) && /test file|\*\.test|\.spec/i.test(e));
+    assert.equal(
+      owns,
+      undefined,
+      `visual-only stories-only task is RED-exempt per isVisualOnlyTask and must not be flagged; got: ${JSON.stringify(errors)}`
+    );
+  });
+
+  it('(g) still errors when a stories file is mixed with non-story impl (not visual-only)', () => {
+    const task = {
+      num: 7,
+      type: 'tdd-code',
+      title: 'Button component + stories',
+      filesInScope: ['src/components/Button.tsx', 'src/components/Button.stories.tsx'],
+      rawContent: tddBody,
+    };
+    const errors = ts.validateTaskTestScope(task);
+    const owns = errors.find((e) => /Files in scope/.test(e) && /test file|\*\.test|\.spec/i.test(e));
+    assert.ok(
+      owns,
+      `mixed impl+stories scope is not visual-only and must still require a test file; got: ${JSON.stringify(errors)}`
+    );
+  });
 });
 
 describe('findTask', () => {
