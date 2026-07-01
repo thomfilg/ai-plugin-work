@@ -243,6 +243,9 @@ function writeFollowupLive(state, prInfo, statusLine, detail, ctx) {
         status: statusLine || '',
         detail: detail || '',
         cwd: (ctx && ctx.worktreeDir) || '',
+        // The Claude session that launched this /follow-up. The status bar
+        // shows the line ONLY in that session (not every open chat).
+        session: process.env.CLAUDE_CODE_SESSION_ID || '',
         ts: new Date().toISOString(),
       })
     );

@@ -8,10 +8,10 @@
  * actively-running follow-up. No agent, no polling — Claude Code re-runs the
  * parent .sh on its refreshInterval and shows stdout.
  *
- * Scoping: freshness only. An entry is shown while its live file is fresh (a
- * follow-up is actively polling); a finished/idle follow-up ages out or is
- * deleted on completion. Shown in whatever session is watching, since a
- * follow-up may run in a worktree agent OR be driven from the operator session.
+ * Scoping: by Claude session. Each live file records the session that launched
+ * its /follow-up (CLAUDE_CODE_SESSION_ID); this renders a line ONLY in that
+ * session — never other open chats. Freshness-gated too, so a finished/idle
+ * follow-up ages out (and follow-up-next deletes the file on completion).
  */
 const fs = require('fs');
 const path = require('path');
@@ -19,10 +19,11 @@ const os = require('os');
 
 const FRESH_MS = 120000; // a live file older than this ⇒ follow-up not actively polling
 
-// Drain stdin (Claude passes session JSON) so the pipe from the .sh never
-// blocks — the bar is freshness-scoped, not cwd-scoped.
+// The session Claude runs this statusLine in (session_id on stdin). An entry
+// shows only when it was launched by this same session.
+let SESSION = '';
 try {
-  fs.readFileSync(0, 'utf8');
+  SESSION = JSON.parse(fs.readFileSync(0, 'utf8') || '{}').session_id || '';
 } catch {
   /* no stdin */
 }
@@ -60,7 +61,11 @@ function segment(e) {
 }
 
 function render() {
-  return liveEntries().map(segment).join('      |      ');
+  if (!SESSION) return ''; // can't attribute → show nothing (never leak to other chats)
+  return liveEntries()
+    .filter((e) => e.session === SESSION)
+    .map(segment)
+    .join('      |      ');
 }
 
 process.stdout.write(render());
