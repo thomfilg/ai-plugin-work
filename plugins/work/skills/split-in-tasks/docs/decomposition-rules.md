@@ -56,9 +56,11 @@ Standard implementation tasks MUST order deliverables following the TDD cycle: R
 - But the impl file is in Task N+1's scope, listed as out-of-scope for Task N → the implementing agent loops forever, blocked by its own decomposition
 
 This is the **ECHO-4453-class wedge**. To avoid it:
-- The same task must own BOTH the test file and the impl file in `### Files in scope`.
+- The same task must own BOTH the test file and the impl file in `### Files in scope`. This is no longer advisory: the authoring-time validator `_checkTddTaskOwnsTestFile` (folded into `validateTaskTestScope` in [`task-scope-test-validator.js`](../../../scripts/workflows/lib/task-scope-test-validator.js)) emits a tasks-gate error naming the task number when a TDD-required, test-authoring task lists no `*.test.*` / `*.spec.*` entry in `### Files in scope`, instructing the author to add the test file there. The contract is therefore **enforced at write time**, not merely documented.
 - The same task's Test Command must exercise the test added in its RED deliverable.
 - Both test and impl edits must be reachable from inside ONE task's allowed surface.
+
+> **RED-gate discovery vs. editable scope — same breadth, different governors (GH-491 Open Q #1/#2).** The implement-gate's RED-gate *discovery* scans the task's declared scope for failing tests via `parseSuggestedScope` ([`work-implement/task-next.js`](../../../scripts/workflows/work-implement/task-next.js)), which treats `### Files in scope` as the **canonical** heading (winning over the legacy `### Suggested Scope`). This widens *discovery* to every `### Files in scope` entry — exactly what lets a task whose test file lives only in `### Files in scope` reach a satisfiable RED gate with zero manual scope edits. Crucially, this discovery breadth does **NOT** widen the *editable* source scope: which files an agent may actually write is governed independently by `protect-task-scope.js`, which derives its allow-list from the parsed task's `filesInScope`/`filesOutOfScope` without calling `parseSuggestedScope`. Widening discovery reach therefore has no effect on the write gate. This source-tree behavior is **equivalent (for RED-gate reachability)** to the alternative cache-patch workaround that kept `### Suggested Scope` primary and merged in only test-path entries: both make the RED-gate test discoverable; the source-tree fix simply does so through one canonical heading rather than a path-filtered merge, and neither relaxes `protect-task-scope.js`.
 
 ✅ Correct (R/G/R inside one task):
 ```

@@ -22,6 +22,7 @@ const {
   extractChangedFilesFromTestCommand,
   extractEvalScopePairs,
 } = require('./task-scope-globs');
+const { gateContractFor } = require('../../../skills/split-in-tasks/lib/task-types');
 
 function _isCheckpointTask(task) {
   const taskType = typeof task.type === 'string' ? task.type.toLowerCase().trim() : null;
@@ -141,17 +142,154 @@ function _checkRunnerNamingConsistency(task, changed, errors) {
   );
 }
 
+// Signals in a task's deliverables/gherkin that it authors tests: an explicit
+// RED phase or language about writing/adding failing tests.
+const _TEST_AUTHORING_RE =
+  /\*\*RED:\*\*|\bRED phase\b|\b(?:add|write|writing|author)(?:ing)?\b[^\n]*\b(?:failing\s+)?(?:unit\s+|integration\s+|e2e\s+)?tests?\b|\bfailing\s+(?:unit\s+|integration\s+|e2e\s+)?tests?\b/i;
+
+/**
+ * Returns true when the implement-time RED gate would actually require a
+ * `*.test.*` / `*.spec.*` file to exist for this task — i.e. the task's Type
+ * has `redRequiresTestFiles === true` in the central `gateContractFor`
+ * contract (only `tdd-code`, plus the unknown/freeform fail-closed fallback).
+ *
+ * This is the single source of truth shared with the implement-time gate
+ * (task-next.js / tdd-phase-state.js). Types the contract exempts from
+ * RED test-file discovery (`tests-only`, `docs`, `config`, `ci`,
+ * `mechanical-refactor`, `file-move`, `checkpoint`) commonly use a `**RED:**`
+ * line for verification commands without authoring a test file, so the
+ * authoring-time guard MUST NOT flag them — RED would not deadlock there.
+ *
+ * @param {object} task
+ * @returns {boolean}
+ */
+function _redRequiresTestFile(task) {
+  return gateContractFor(task.type).redRequiresTestFiles === true;
+}
+
+// Mirrors task-next.js `isVisualOnlyTask`: a task whose `### Files in scope`
+// consists exclusively of `.stories.[jt]sx?` entries is a visual-only Storybook
+// task. Story files have no executable assertions, so the implement-time RED
+// gate exempts them from `*.test.*` authorship discovery (see split-in-tasks
+// SKILL.md Rule 10). The authoring-time guard MUST honour the same exemption or
+// a stories-only task passes `task-next.js` RED but fails tasks-gate.
+function _isVisualOnlyScope(task) {
+  const scope = Array.isArray(task.filesInScope) ? task.filesInScope : [];
+  if (scope.length === 0) return false;
+  return scope.every((p) => typeof p === 'string' && /\.stories\.[jt]sx?$/i.test(p));
+}
+
+/**
+ * Returns true when this task's deliverables imply it authors test files
+ * (so the RED gate will expect a `*.test.*` / `*.spec.*` to exist).
+ *
+ * @param {object} task
+ * @returns {boolean}
+ */
+function _impliesTestAuthorship(task) {
+  if (!_redRequiresTestFile(task)) return false;
+  if (_isVisualOnlyScope(task)) return false;
+  const body = typeof task.rawContent === 'string' ? task.rawContent : '';
+  return _TEST_AUTHORING_RE.test(body);
+}
+
+// Mirrors task-next.js `findTestFilesInScope` colocation branch: for a concrete
+// (non-glob) source file listed in scope, a colocated `<base>.test.<ext>` /
+// `<base>.spec.<ext>` sibling that exists ON DISK in the same directory
+// satisfies the implement-time RED discovery even when that sibling is not
+// itself listed in `### Files in scope`. The authoring-time guard honours the
+// same discovery so it is never stricter than the gate it protects. Glob
+// entries are skipped (findTestFilesInScope also skips them — a literal
+// `fs.existsSync` on a glob string fails). Returns false when `repoRoot` is
+// not supplied (hermetic callers keep the conservative explicit-listing check).
+//
+// @param {string} abs absolute path to a concrete source file
+// @returns {boolean} true when a `<base>.test.*` / `<base>.spec.*` sibling exists
+function _colocatedSiblingExists(abs) {
+  const fs = require('fs');
+  const path = require('path');
+  let stat;
+  try {
+    stat = fs.statSync(abs);
+  } catch {
+    return false;
+  }
+  if (!stat.isFile()) return false;
+  const base = path.basename(abs, path.extname(abs));
+  const escaped = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const colocatedRe = new RegExp('^' + escaped + '\\.(test|spec)\\.(?:m?[cj]sx?|tsx?)$');
+  let entries;
+  try {
+    entries = fs.readdirSync(path.dirname(abs), { withFileTypes: true });
+  } catch {
+    return false;
+  }
+  return entries.some((e) => e.isFile() && colocatedRe.test(e.name));
+}
+
+// @param {string[]} scope
+// @param {string|undefined} repoRoot
+// @returns {boolean}
+function _hasColocatedTestOnDisk(scope, repoRoot) {
+  if (!repoRoot || typeof repoRoot !== 'string') return false;
+  const path = require('path');
+  return scope.some((rel) => {
+    if (typeof rel !== 'string' || /[*?[\]{}]/.test(rel)) return false; // skip globs
+    if (TEST_FILE_EXT_RE.test(rel)) return false; // explicit test files handled by caller
+    return _colocatedSiblingExists(path.join(repoRoot, rel));
+  });
+}
+
+/**
+ * Authoring-time guard (GH-491 R3/R6): a TDD-required task whose gherkin
+ * implies test authorship MUST have a `*.test.*` / `*.spec.*` the implement-time
+ * RED gate can discover. RED discovers tests either from an explicit entry in
+ * `### Files in scope` OR — mirroring `findTestFilesInScope` — from a colocated
+ * test sibling on disk next to a source file in scope. The guard fires only when
+ * NEITHER is present, so it is never stricter than the gate it protects. Pushes
+ * an error naming the task number and instructing the author to add (or colocate)
+ * the test file.
+ *
+ * @param {object} task
+ * @param {string[]} errors
+ * @param {string|undefined} repoRoot optional repo root for colocation discovery
+ */
+function _checkTddTaskOwnsTestFile(task, errors, repoRoot) {
+  if (!_impliesTestAuthorship(task)) return;
+  const scope = Array.isArray(task.filesInScope) ? task.filesInScope : [];
+  const hasTestFile = scope.some((p) => typeof p === 'string' && TEST_FILE_EXT_RE.test(p));
+  if (hasTestFile) return;
+  if (_hasColocatedTestOnDisk(scope, repoRoot)) return;
+  errors.push(
+    `Task ${task.num ?? '?'} is a TDD task whose deliverables author tests, but its ` +
+      '`### Files in scope` lists no test file (no `*.test.*` / `*.spec.*` path) and no ' +
+      'source file in scope has a colocated test sibling on disk. The implement-time RED ' +
+      'gate discovers the failing test from `### Files in scope` (or a colocated ' +
+      '`<name>.test.*` next to a source file in scope), so with neither present the gate ' +
+      'has nothing to run and the task deadlocks. Add this task’s own test file to ' +
+      '`### Files in scope` (it must own BOTH the test file and the impl file it tests — ' +
+      'see split-in-tasks decomposition Rule 10). If this task authors no test of its ' +
+      'own, MERGE IT INTO THE CONSUMING TASK (split-in-tasks SKILL.md Rule 4b).'
+  );
+}
+
 /**
  * Verify the task's Test Command CHANGED_FILES list is fully covered by
  * this task's `### Files in scope` and follows runner naming conventions.
  *
  * @param {object} task
+ * @param {string} [repoRoot=process.cwd()] repo root; the own-test guard also
+ *   honours colocated test siblings on disk (mirrors the implement-time
+ *   `findTestFilesInScope` discovery). Defaults to the process cwd (the repo
+ *   root during `/work`); pass `''` for a hermetic explicit-listing-only check.
  * @returns {string[]} validation errors
  */
-function validateTaskTestScope(task) {
+function validateTaskTestScope(task, repoRoot = process.cwd()) {
   const errors = [];
   if (!task || typeof task !== 'object') return errors;
   if (_isCheckpointTask(task)) return errors;
+
+  _checkTddTaskOwnsTestFile(task, errors, repoRoot);
 
   if (_checkNonTestCommand(task, errors)) return errors;
 

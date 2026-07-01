@@ -6,7 +6,7 @@
 
 'use strict';
 
-const { describe, it } = require('node:test');
+const { describe, it, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 
 const ts = require('../task-scope');
@@ -131,7 +131,7 @@ describe('validateCrossTaskDepsOwnership', () => {
     assert.match(errors[0], /no other task lists it in/);
   });
 
-  it('accepts a crossTaskDep that literally appears in another task\'s scope', () => {
+  it("accepts a crossTaskDep that literally appears in another task's scope", () => {
     const tasks = [
       { num: 1, filesInScope: ['src/a.ts'], crossTaskDeps: ['src/shared/schema.ts'] },
       { num: 2, filesInScope: ['src/shared/schema.ts', 'src/b.ts'] },
@@ -139,7 +139,7 @@ describe('validateCrossTaskDepsOwnership', () => {
     assert.deepEqual(ts.validateCrossTaskDepsOwnership(tasks), []);
   });
 
-  it('accepts a crossTaskDep covered by another task\'s glob scope', () => {
+  it("accepts a crossTaskDep covered by another task's glob scope", () => {
     const tasks = [
       { num: 1, filesInScope: ['src/a.ts'], crossTaskDeps: ['src/shared/schema.ts'] },
       { num: 2, filesInScope: ['src/shared/**'] },
@@ -735,6 +735,250 @@ describe('validateTddCycle (ECHO-4453 wedge detection)', () => {
     const result = ts.validateAll(tasks);
     assert.equal(result.valid, false);
     assert.ok(result.errors.some((e) => /ECHO-4453 wedge/.test(e)));
+  });
+});
+
+describe('validateTaskTestScope: TDD task must own a test file in Files in scope (GH-491 R3/R6)', () => {
+  // A TDD-required task whose deliverables/gherkin imply test authorship
+  // (e.g. a `**RED:**` phase that adds failing tests) MUST list a
+  // `*.test.*` / `*.spec.*` entry in its `### Files in scope`, or the
+  // implement-time RED gate has nothing to discover and deadlocks. The
+  // authoring-time validator catches this at tasks-gate instead.
+  const tddBody =
+    'Add a helper folded into validateTaskTestScope.\n' +
+    '- 2.1.1 **RED:** Add failing unit tests exercising the new check.\n' +
+    '  - Test: Tests fail — the new check does not exist yet.\n' +
+    '- 2.1.2 **GREEN:** Implement the helper.\n';
+
+  it('(a) errors when a TDD test-authoring task lists no test file in Files in scope', () => {
+    const task = {
+      num: 2,
+      type: 'tdd-code',
+      title: 'Authoring-time guard',
+      filesInScope: [
+        'plugins/work/scripts/workflows/lib/task-scope-test-validator.js',
+        'plugins/work/scripts/workflows/lib/task-scope-validators.js',
+      ],
+      rawContent: tddBody,
+    };
+    const errors = ts.validateTaskTestScope(task);
+    const owns = errors.find(
+      (e) => /Files in scope/.test(e) && /test file|\*\.test|\.spec/i.test(e)
+    );
+    assert.ok(
+      owns,
+      `expected an error telling the author to add a test file to Files in scope; got: ${JSON.stringify(errors)}`
+    );
+    assert.match(owns, /Task 2/);
+  });
+
+  it('(b) does NOT error when the TDD task lists a *.test.js in Files in scope', () => {
+    const task = {
+      num: 2,
+      type: 'tdd-code',
+      title: 'Authoring-time guard',
+      filesInScope: [
+        'plugins/work/scripts/workflows/lib/task-scope-test-validator.js',
+        'plugins/work/scripts/workflows/lib/__tests__/task-scope.test.js',
+      ],
+      rawContent: tddBody,
+    };
+    const errors = ts.validateTaskTestScope(task);
+    const owns = errors.find(
+      (e) => /Files in scope/.test(e) && /must (own|list).*test|add.*test file/i.test(e)
+    );
+    assert.equal(
+      owns,
+      undefined,
+      `expected no own-a-test-file error when a test file is in scope; got: ${JSON.stringify(errors)}`
+    );
+  });
+
+  it('(c) does NOT error for a checkpoint task (type=checkpoint)', () => {
+    const task = {
+      num: 4,
+      type: 'checkpoint',
+      title: 'Checkpoint: verify everything',
+      filesInScope: ['lib/foo.js'],
+      rawContent: tddBody,
+    };
+    assert.deepEqual(ts.validateTaskTestScope(task), []);
+  });
+
+  it('(d) does NOT error for a docs task (type=docs)', () => {
+    const task = {
+      num: 3,
+      type: 'docs',
+      title: 'Documentation review',
+      filesInScope: ['plugins/work/skills/split-in-tasks/docs/decomposition-rules.md'],
+      rawContent:
+        'Document the equivalence finding.\n- 3.1 Record the note in decomposition-rules.md.\n',
+    };
+    const errors = ts.validateTaskTestScope(task);
+    const owns = errors.find(
+      (e) => /Files in scope/.test(e) && /must (own|list).*test|add.*test file/i.test(e)
+    );
+    assert.equal(
+      owns,
+      undefined,
+      `docs task must be unaffected by the own-a-test-file guard; got: ${JSON.stringify(errors)}`
+    );
+  });
+
+  // GH-491 follow-up (cursor[bot]): the authoring-time guard must exempt
+  // EXACTLY the Types the implement-time contract (`gateContractFor`) exempts
+  // from RED test-file discovery. Types like config / ci / mechanical-refactor
+  // / file-move commonly use `**RED:**` for verification commands with no
+  // *.test.* in scope, and the implement-time RED gate would NOT deadlock —
+  // so the authoring-time guard must NOT flag them.
+  const redVerifyBody =
+    'Bump the formatter config.\n' +
+    '- 5.1.1 **RED:** Run the verification command; confirm it currently fails.\n' +
+    '  - Test: `node --test path/to/check` reports the expected pre-change state.\n' +
+    '- 5.1.2 **GREEN:** Apply the config change.\n';
+
+  for (const type of ['config', 'ci', 'mechanical-refactor', 'file-move', 'tests-only']) {
+    it(`(e) does NOT error for a ${type} task using **RED:** with no test file in scope`, () => {
+      const task = {
+        num: 5,
+        type,
+        title: `${type} change with RED verification`,
+        filesInScope: ['package.json'],
+        rawContent: redVerifyBody,
+      };
+      const errors = ts.validateTaskTestScope(task);
+      const owns = errors.find(
+        (e) => /Files in scope/.test(e) && /test file|\*\.test|\.spec/i.test(e)
+      );
+      assert.equal(
+        owns,
+        undefined,
+        `type=${type} is RED-exempt per gateContractFor and must not be flagged by the own-a-test-file guard; got: ${JSON.stringify(errors)}`
+      );
+    });
+  }
+
+  // GH-491 follow-up (cursor[bot]): the authoring-time guard must mirror the
+  // implement-time RED path's visual-only Storybook exemption (task-next.js
+  // `isVisualOnlyTask`). A tdd-code task whose `### Files in scope` lists ONLY
+  // `*.stories.*` files proves RED/GREEN via the verification command (the
+  // story file's presence), so it must NOT be flagged for lacking a *.test.*.
+  it('(f) does NOT error for a visual-only Storybook task (stories-only scope)', () => {
+    const task = {
+      num: 6,
+      type: 'tdd-code',
+      title: 'Add Button stories',
+      filesInScope: ['src/components/Button.stories.tsx'],
+      rawContent: tddBody,
+    };
+    const errors = ts.validateTaskTestScope(task);
+    const owns = errors.find(
+      (e) => /Files in scope/.test(e) && /test file|\*\.test|\.spec/i.test(e)
+    );
+    assert.equal(
+      owns,
+      undefined,
+      `visual-only stories-only task is RED-exempt per isVisualOnlyTask and must not be flagged; got: ${JSON.stringify(errors)}`
+    );
+  });
+
+  it('(g) still errors when a stories file is mixed with non-story impl (not visual-only)', () => {
+    const task = {
+      num: 7,
+      type: 'tdd-code',
+      title: 'Button component + stories',
+      filesInScope: ['src/components/Button.tsx', 'src/components/Button.stories.tsx'],
+      rawContent: tddBody,
+    };
+    const errors = ts.validateTaskTestScope(task);
+    const owns = errors.find(
+      (e) => /Files in scope/.test(e) && /test file|\*\.test|\.spec/i.test(e)
+    );
+    assert.ok(
+      owns,
+      `mixed impl+stories scope is not visual-only and must still require a test file; got: ${JSON.stringify(errors)}`
+    );
+  });
+});
+
+// GH-491 follow-up (greptile-apps[bot]): the authoring-time own-test guard must
+// not be stricter than the implement-time `findTestFilesInScope` colocation
+// discovery. A task whose scope lists only a source file that has a colocated
+// `<name>.test.*` sibling ON DISK passes the implement-time RED gate without a
+// scope change, so the authoring-time guard must accept it too. `repoRoot`
+// defaults to `process.cwd()` (the repo root during `/work`); pass `''` for a
+// hermetic explicit-listing-only check.
+describe('validateTaskTestScope: colocated-test-on-disk exemption (GH-491 greptile)', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+
+  const tddBody =
+    'Widget behavior.\n' +
+    '- 1.1 **RED:** Add failing unit tests exercising Widget.\n' +
+    '- 1.2 **GREEN:** Implement Widget.\n';
+
+  let tmp;
+  let origCwd;
+  beforeEach(() => {
+    origCwd = process.cwd();
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'colocate-'));
+    fs.mkdirSync(path.join(tmp, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'src', 'Widget.js'), 'module.exports = {};\n');
+  });
+  afterEach(() => {
+    process.chdir(origCwd);
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const task = () => ({
+    num: 1,
+    type: 'tdd-code',
+    filesInScope: ['src/Widget.js'],
+    rawContent: tddBody,
+  });
+  const ownTestError = (errors) =>
+    errors.find((e) => /Files in scope/.test(e) && /test file|\*\.test|\.spec/i.test(e));
+
+  it('does NOT error when a source file in scope has a colocated *.test.js on disk (explicit repoRoot)', () => {
+    fs.writeFileSync(path.join(tmp, 'src', 'Widget.test.js'), "it('x', () => {});\n");
+    const errors = ts.validateTaskTestScope(task(), tmp);
+    assert.equal(
+      ownTestError(errors),
+      undefined,
+      `colocated Widget.test.js on disk must satisfy the guard; got: ${JSON.stringify(errors)}`
+    );
+  });
+
+  it('STILL errors when no colocated test exists on disk (explicit repoRoot)', () => {
+    const errors = ts.validateTaskTestScope(task(), tmp);
+    assert.ok(
+      ownTestError(errors),
+      `no colocated test on disk must still trip the guard; got: ${JSON.stringify(errors)}`
+    );
+  });
+
+  it('resolves colocation against process.cwd() when repoRoot is omitted (production default)', () => {
+    // Production gate callers pass no repoRoot; the guard must resolve scope
+    // against the cwd (the repo root during /work).
+    fs.writeFileSync(path.join(tmp, 'src', 'Widget.test.js'), "it('x', () => {});\n");
+    process.chdir(tmp);
+    const errors = ts.validateTaskTestScope(task());
+    assert.equal(
+      ownTestError(errors),
+      undefined,
+      `default repoRoot=process.cwd() must discover the colocated test; got: ${JSON.stringify(errors)}`
+    );
+  });
+
+  it('forces the hermetic explicit-listing-only check when repoRoot is "" even if a colocated test exists', () => {
+    fs.writeFileSync(path.join(tmp, 'src', 'Widget.test.js'), "it('x', () => {});\n");
+    process.chdir(tmp);
+    const errors = ts.validateTaskTestScope(task(), '');
+    assert.ok(
+      ownTestError(errors),
+      `repoRoot="" must disable colocation discovery (conservative); got: ${JSON.stringify(errors)}`
+    );
   });
 });
 

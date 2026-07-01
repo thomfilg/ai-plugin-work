@@ -48,16 +48,21 @@ const { validateTaskTestScope } = require('./task-scope-test-validator');
  * Validate every task and return a flat error list.
  *
  * @param {Array<object>|null|undefined} tasks
+ * @param {string} [repoRoot=process.cwd()] repo root forwarded to
+ *   `validateTaskTestScope` so the own-test guard honours colocated test
+ *   siblings on disk (mirrors implement-time discovery). Defaults to the
+ *   process cwd (the repo root during `/work`); pass `''` to force the
+ *   hermetic explicit-listing-only check.
  * @returns {{ valid:boolean, errors:string[] }}
  */
-function validateAll(tasks) {
+function validateAll(tasks, repoRoot = process.cwd()) {
   if (!Array.isArray(tasks) || tasks.length === 0) {
     return { valid: false, errors: ['no tasks parsed from tasks.md'] };
   }
   const errors = [];
   for (const t of tasks) {
     errors.push(...validateTask(t));
-    errors.push(...validateTaskTestScope(t));
+    errors.push(...validateTaskTestScope(t, repoRoot));
   }
   errors.push(...validateTddCycle(tasks));
   errors.push(...validateCrossTaskDepsOwnership(tasks));
