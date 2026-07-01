@@ -292,6 +292,7 @@ module.exports = function registerFixReviews(register) {
 };
 
 // Exposed for tests so ordering/content assertions run against the ACTUAL
-// assembled prompt string rather than the raw source-file layout.
+// assembled prompt string rather than the raw source-file layout. The judgment
+// block's content is covered transitively via buildReviewPrompt, so it is not
+// exported separately.
 module.exports.buildReviewPrompt = buildReviewPrompt;
-module.exports.reviewJudgmentBlock = reviewJudgmentBlock;
