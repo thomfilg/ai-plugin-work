@@ -27,15 +27,21 @@ function writeMemory(dir, file, frontmatter, body) {
 }
 
 function runDispatcher({ event, payload, home, env = {} }) {
+  const spawnEnv = {
+    ...process.env,
+    HOME: home,
+    SYNAPSYS_NO_SETUP_HINT: '1',
+    ...env,
+  };
+  // The dispatcher's session-id resolver reads CLAUDE_CODE_SESSION_ID (GH-583)
+  // ahead of payload.session_id. These tests drive the session id via the
+  // payload, so an inherited env value would route telemetry/ledger writes to
+  // the wrong bucket. Scrub it for hermetic, payload-authoritative runs.
+  delete spawnEnv.CLAUDE_CODE_SESSION_ID;
   const res = spawnSync(process.execPath, [DISPATCHER, event], {
     input: JSON.stringify(payload),
     encoding: 'utf8',
-    env: {
-      ...process.env,
-      HOME: home,
-      SYNAPSYS_NO_SETUP_HINT: '1',
-      ...env,
-    },
+    env: spawnEnv,
   });
   return { stdout: res.stdout || '', stderr: res.stderr || '', status: res.status };
 }

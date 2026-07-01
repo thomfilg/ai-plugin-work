@@ -4,6 +4,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { execSync } = require('node:child_process');
+// Frontmatter value-coercion machinery lives in a sibling module so this file
+// stays under the quality gate's max-lines budget. Re-exported below so callers
+// and tests that reach for these internals keep working unchanged.
+const { BRACKET_LIST_KEYS, coerceFrontmatterValue, toList } = require('./frontmatter-coerce');
 
 const MARKER = '.synapsys.json';
 const FOLDER = 'synapsys';
@@ -108,40 +112,6 @@ function discoverStores(cwd) {
   return out;
 }
 
-// Frontmatter keys whose `[...]` value should be parsed as a YAML-style list.
-// All other keys keep `[...]` as a literal string so regex character classes
-// like `[a-z0-9]` in `trigger_prompt` aren't mis-coerced into arrays.
-const BRACKET_LIST_KEYS = new Set([
-  'domain',
-  'events',
-  'trigger_pretool',
-  'trigger_pretool_content',
-  'trigger_pretool_content_not',
-  'cite_signals',
-  'behavior_signals',
-  'exclude_pretool',
-  'exclude_preset',
-]);
-
-function coerceFrontmatterValue(raw, key) {
-  const val = raw.trim();
-  if (val === '') return '';
-  if (val === 'true') return true;
-  if (val === 'false') return false;
-  // Bracket-array form: only treat `[…]` as a list for known list-typed keys.
-  // Regex character classes (e.g. `[a-z0-9]` in `trigger_prompt`) must stay as
-  // strings, so we gate by key rather than by content shape.
-  if (BRACKET_LIST_KEYS.has(key) && /^\[[\s\S]*\]$/.test(val)) {
-    return val
-      .slice(1, -1)
-      .split(',')
-      .map((s) => s.trim().replace(/^["']|["']$/g, ''))
-      .filter(Boolean);
-  }
-  if (/^["'].*["']$/.test(val)) return val.slice(1, -1);
-  return val;
-}
-
 function parseFrontmatter(content) {
   const m = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n([\s\S]*))?$/);
   if (!m) return { meta: {}, body: content };
@@ -238,6 +208,22 @@ function _truthy(value) {
   return value === true || value === 'true';
 }
 
+// Inject mode is 'full' only when explicitly requested; everything else
+// (including missing) falls back to 'summary'. Extracted as a named helper to
+// keep readMemoryFile under the complexity gate.
+function _parseInject(value) {
+  return value === 'full' ? 'full' : 'summary';
+}
+
+// Absent OR empty/whitespace-only trigger_posttool_exit means "no exit gate"
+// (null) — consistent with the R11 lint rule. A literal 0 / "0" / "zero" is a
+// real target and must be preserved (so `|| null` would be wrong — it drops 0).
+function _normalizeExitTarget(value) {
+  if (value === undefined || value === null) return null;
+  if (typeof value === 'string' && value.trim() === '') return null;
+  return value;
+}
+
 function readMemoryFile(store, name) {
   if (!name.endsWith('.md') || SKIP_FILES.has(name)) return null;
   const file = path.join(store.dir, name);
@@ -263,10 +249,17 @@ function readMemoryFile(store, name) {
     triggerPretool: toList(meta.trigger_pretool),
     triggerPretoolContent: toList(meta.trigger_pretool_content),
     triggerPretoolContentNot: toList(meta.trigger_pretool_content_not),
+    triggerPosttoolContent: toList(meta.trigger_posttool_content),
+    triggerPosttoolContentNot: toList(meta.trigger_posttool_content_not),
+    // Scalar (not a list): _normalizeExitTarget treats an absent OR
+    // empty/whitespace-only value as "no exit gate" (null) — matching the R11
+    // lint rule — while preserving a literal `0` / `"0"` / `"zero"` target (a
+    // plain `|| null` would coerce the falsy `0` to null and lose the gate).
+    triggerPosttoolExit: _normalizeExitTarget(meta.trigger_posttool_exit),
     triggerStopResponse: meta.trigger_stop_response || '',
     triggerSession: _truthy(meta.trigger_session),
     domain: toList(meta.domain),
-    inject: meta.inject === 'full' ? 'full' : 'summary',
+    inject: _parseInject(meta.inject),
     disabled: _truthy(meta.disabled),
     expired: parseExpired(meta.expires),
     fireMode: parseFireMode(meta.fire_mode, memoryName),
@@ -369,15 +362,6 @@ function listMemories(cwd) {
   return memories;
 }
 
-function toList(v) {
-  if (!v) return [];
-  if (Array.isArray(v)) return v;
-  return String(v)
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-}
-
 module.exports = {
   MARKER,
   FOLDER,
@@ -391,4 +375,9 @@ module.exports = {
   loadPresets,
   resolvePreset,
   safeExec,
+  // Re-exported from frontmatter-coerce.js so existing import paths/tests that
+  // reach for these internals via memory-store keep resolving unchanged.
+  BRACKET_LIST_KEYS,
+  coerceFrontmatterValue,
+  toList,
 };

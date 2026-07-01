@@ -53,8 +53,13 @@ function seedLedger(home, sessionId, memoriesEntry) {
 }
 
 function runList(cwd, home, extraArgs) {
+  const env = { ...process.env, HOME: home, NO_COLOR: '1' };
+  // session-id resolver (GH-583) prefers CLAUDE_CODE_SESSION_ID over the
+  // pinned `.current` ledger file these tests seed; an inherited env value
+  // would point the CLI at a different (empty) session ledger. Scrub it.
+  delete env.CLAUDE_CODE_SESSION_ID;
   const result = spawnSync(process.execPath, [SCRIPT, `--cwd=${cwd}`, '--no-color', ...extraArgs], {
-    env: { ...process.env, HOME: home, NO_COLOR: '1' },
+    env,
     encoding: 'utf8',
   });
   return result;
