@@ -32,10 +32,15 @@ const { libDir, TASKS_BASE } = resolvePluginConfig(path.join(__dirname, '..', 'w
 // eager load a real web-app project can be mis-detected as Playwright-skipped
 // and QA reports accepted without the Playwright section/screenshots. Mirrors
 // legacy check.workflow.js. (GH-280 review: cursor[bot] — skip signal & dotenv)
+const configPath = path.join(libDir, 'config');
 try {
-  require(path.join(libDir, 'config'));
-} catch {
-  /* fail-open: config.js is optional; steps fall back to ambient process.env */
+  require(configPath);
+} catch (err) {
+  // Fail-open ONLY when config.js itself is absent (optional module). A runtime
+  // error inside config.js (e.g. a malformed `.env`) or a missing transitive
+  // dep must surface — swallowing it would leave WEB_APPS unset and silently
+  // re-introduce the mis-skip bug this load prevents. Mirrors get-config.js.
+  if (!(err?.code === 'MODULE_NOT_FOUND' && err.message?.includes(configPath))) throw err;
 }
 
 if (!TASKS_BASE) {
