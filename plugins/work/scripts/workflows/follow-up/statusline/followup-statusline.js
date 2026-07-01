@@ -60,12 +60,24 @@ function tasksBase() {
 // unreadable (so the bar shows nothing).
 function activeState(base, ticket) {
   const stateFile = path.join(base, ticket, '.follow-up-state.json');
+  let fd;
   try {
-    if (Date.now() - fs.statSync(stateFile).mtimeMs > FRESH_MS) return null;
-    const st = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+    // Open once; stat + read on the SAME descriptor so there's no
+    // check-then-use gap (CodeQL file-system-race / TOCTOU).
+    fd = fs.openSync(stateFile, 'r');
+    if (Date.now() - fs.fstatSync(fd).mtimeMs > FRESH_MS) return null;
+    const st = JSON.parse(fs.readFileSync(fd, 'utf8'));
     return st.status === 'complete' ? null : st;
   } catch {
     return null;
+  } finally {
+    if (fd !== undefined) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        /* ignore */
+      }
+    }
   }
 }
 
