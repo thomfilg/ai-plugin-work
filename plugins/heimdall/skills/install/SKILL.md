@@ -51,3 +51,45 @@ user opt each one in behind a passphrase.
 6. Finish by running `/heimdall:list` (or the list script) and showing the resulting protection.
 
 The user can always add more later with `/heimdall:protect` or remove with `/heimdall:unprotect`.
+
+## Phase 3 — offer the OS boundary (first-time root bootstrap)
+
+Phases 1–2 are hook-level (no sudo). For a **secrets/credentials** file the agent
+must never read even via a non-hooked process, offer the OS boundary too. If the
+scan/config shows a secrets file (or the user asks to "really" lock a secret):
+
+1. Ensure an OS-layer config exists (`/heimdall:harden` builds `heimdall-conceal.json`
+   with `injectCommands`/`wrapper`; reuse it if present).
+2. Run the privileged install through the bootstrap — it does NOT require the user
+   to hand-author a sudo line. It escalates automatically: already-root → cached/
+   NOPASSWD sudo → `pkexec` GUI → else it prints one `! sudo …` line to run in the
+   user's terminal:
+   ```bash
+   bash "${CLAUDE_PLUGIN_ROOT}/scripts/heimdall-run-privileged.sh" \
+     "${CLAUDE_PLUGIN_ROOT}/scripts/setup-secrets-heimdall.sh" "<repo>"
+   ```
+   On exit code 10 (`NEEDS_PASSWORD`), surface the printed `! sudo …` line verbatim.
+3. **ENFORCE — verify, or block.** After the privileged step, gate on the audit
+   exit code:
+   ```bash
+   node "${CLAUDE_PLUGIN_ROOT}/scripts/heimdall-conceal-status.js" "<repo>"; echo "exit=$?"
+   ```
+   - **exit 0** → protected; finish.
+   - **exit 2** → NOT installed (user skipped sudo) or docker still open. You MUST
+     NOT report success. Use **`AskUserQuestion`** to force an explicit choice — do
+     not just print a note the user can scroll past:
+     - question: *"`.secrets` is NOT protected — the LLM can still read it. The sudo
+       install hasn't run. What now?"*
+     - options: `I ran it — re-verify` · `Show the sudo command again` · `Leave it
+       UNPROTECTED (I accept the LLM can read it)`
+     On `re-verify`, re-run the audit; if still 2, ask again. On `show command`,
+     re-emit the `! sudo …` line. Only `Leave it UNPROTECTED` ends the loop — and
+     then say plainly it is unprotected.
+
+4. **Persistent reminder.** A SessionStart hook (`heimdall-secrets-reminder.js`)
+   re-emits a blunt NOT-PROTECTED warning every session while a configured secret
+   is still readable — so a skipped install can never quietly look done.
+
+This is the "find a way to run root stuff" path: the only unavoidable cost is one
+authentication, because an OS boundary needs root once — but the flow refuses to
+report protection until verified, asks at install time, and nags every session.
