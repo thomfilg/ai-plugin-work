@@ -131,7 +131,7 @@ describe('validateCrossTaskDepsOwnership', () => {
     assert.match(errors[0], /no other task lists it in/);
   });
 
-  it('accepts a crossTaskDep that literally appears in another task\'s scope', () => {
+  it("accepts a crossTaskDep that literally appears in another task's scope", () => {
     const tasks = [
       { num: 1, filesInScope: ['src/a.ts'], crossTaskDeps: ['src/shared/schema.ts'] },
       { num: 2, filesInScope: ['src/shared/schema.ts', 'src/b.ts'] },
@@ -139,7 +139,7 @@ describe('validateCrossTaskDepsOwnership', () => {
     assert.deepEqual(ts.validateCrossTaskDepsOwnership(tasks), []);
   });
 
-  it('accepts a crossTaskDep covered by another task\'s glob scope', () => {
+  it("accepts a crossTaskDep covered by another task's glob scope", () => {
     const tasks = [
       { num: 1, filesInScope: ['src/a.ts'], crossTaskDeps: ['src/shared/schema.ts'] },
       { num: 2, filesInScope: ['src/shared/**'] },
@@ -762,7 +762,9 @@ describe('validateTaskTestScope: TDD task must own a test file in Files in scope
       rawContent: tddBody,
     };
     const errors = ts.validateTaskTestScope(task);
-    const owns = errors.find((e) => /Files in scope/.test(e) && /test file|\*\.test|\.spec/i.test(e));
+    const owns = errors.find(
+      (e) => /Files in scope/.test(e) && /test file|\*\.test|\.spec/i.test(e)
+    );
     assert.ok(
       owns,
       `expected an error telling the author to add a test file to Files in scope; got: ${JSON.stringify(errors)}`
@@ -870,7 +872,9 @@ describe('validateTaskTestScope: TDD task must own a test file in Files in scope
       rawContent: tddBody,
     };
     const errors = ts.validateTaskTestScope(task);
-    const owns = errors.find((e) => /Files in scope/.test(e) && /test file|\*\.test|\.spec/i.test(e));
+    const owns = errors.find(
+      (e) => /Files in scope/.test(e) && /test file|\*\.test|\.spec/i.test(e)
+    );
     assert.equal(
       owns,
       undefined,
@@ -887,7 +891,9 @@ describe('validateTaskTestScope: TDD task must own a test file in Files in scope
       rawContent: tddBody,
     };
     const errors = ts.validateTaskTestScope(task);
-    const owns = errors.find((e) => /Files in scope/.test(e) && /test file|\*\.test|\.spec/i.test(e));
+    const owns = errors.find(
+      (e) => /Files in scope/.test(e) && /test file|\*\.test|\.spec/i.test(e)
+    );
     assert.ok(
       owns,
       `mixed impl+stories scope is not visual-only and must still require a test file; got: ${JSON.stringify(errors)}`
@@ -899,8 +905,9 @@ describe('validateTaskTestScope: TDD task must own a test file in Files in scope
 // not be stricter than the implement-time `findTestFilesInScope` colocation
 // discovery. A task whose scope lists only a source file that has a colocated
 // `<name>.test.*` sibling ON DISK passes the implement-time RED gate without a
-// scope change, so the authoring-time guard must accept it too when a repoRoot
-// is supplied.
+// scope change, so the authoring-time guard must accept it too. `repoRoot`
+// defaults to `process.cwd()` (the repo root during `/work`); pass `''` for a
+// hermetic explicit-listing-only check.
 describe('validateTaskTestScope: colocated-test-on-disk exemption (GH-491 greptile)', () => {
   const fs = require('node:fs');
   const os = require('node:os');
@@ -912,22 +919,30 @@ describe('validateTaskTestScope: colocated-test-on-disk exemption (GH-491 grepti
     '- 1.2 **GREEN:** Implement Widget.\n';
 
   let tmp;
+  let origCwd;
   beforeEach(() => {
+    origCwd = process.cwd();
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'colocate-'));
     fs.mkdirSync(path.join(tmp, 'src'), { recursive: true });
     fs.writeFileSync(path.join(tmp, 'src', 'Widget.js'), 'module.exports = {};\n');
   });
   afterEach(() => {
+    process.chdir(origCwd);
     fs.rmSync(tmp, { recursive: true, force: true });
   });
 
+  const task = () => ({
+    num: 1,
+    type: 'tdd-code',
+    filesInScope: ['src/Widget.js'],
+    rawContent: tddBody,
+  });
   const ownTestError = (errors) =>
     errors.find((e) => /Files in scope/.test(e) && /test file|\*\.test|\.spec/i.test(e));
 
-  it('does NOT error when a source file in scope has a colocated *.test.js on disk (repoRoot supplied)', () => {
+  it('does NOT error when a source file in scope has a colocated *.test.js on disk (explicit repoRoot)', () => {
     fs.writeFileSync(path.join(tmp, 'src', 'Widget.test.js'), "it('x', () => {});\n");
-    const task = { num: 1, type: 'tdd-code', filesInScope: ['src/Widget.js'], rawContent: tddBody };
-    const errors = ts.validateTaskTestScope(task, tmp);
+    const errors = ts.validateTaskTestScope(task(), tmp);
     assert.equal(
       ownTestError(errors),
       undefined,
@@ -935,22 +950,34 @@ describe('validateTaskTestScope: colocated-test-on-disk exemption (GH-491 grepti
     );
   });
 
-  it('STILL errors when no colocated test exists on disk (repoRoot supplied)', () => {
-    const task = { num: 1, type: 'tdd-code', filesInScope: ['src/Widget.js'], rawContent: tddBody };
-    const errors = ts.validateTaskTestScope(task, tmp);
+  it('STILL errors when no colocated test exists on disk (explicit repoRoot)', () => {
+    const errors = ts.validateTaskTestScope(task(), tmp);
     assert.ok(
       ownTestError(errors),
       `no colocated test on disk must still trip the guard; got: ${JSON.stringify(errors)}`
     );
   });
 
-  it('errors when repoRoot is omitted even if a colocated test exists (hermetic default)', () => {
+  it('resolves colocation against process.cwd() when repoRoot is omitted (production default)', () => {
+    // Production gate callers pass no repoRoot; the guard must resolve scope
+    // against the cwd (the repo root during /work).
     fs.writeFileSync(path.join(tmp, 'src', 'Widget.test.js'), "it('x', () => {});\n");
-    const task = { num: 1, type: 'tdd-code', filesInScope: ['src/Widget.js'], rawContent: tddBody };
-    const errors = ts.validateTaskTestScope(task);
+    process.chdir(tmp);
+    const errors = ts.validateTaskTestScope(task());
+    assert.equal(
+      ownTestError(errors),
+      undefined,
+      `default repoRoot=process.cwd() must discover the colocated test; got: ${JSON.stringify(errors)}`
+    );
+  });
+
+  it('forces the hermetic explicit-listing-only check when repoRoot is "" even if a colocated test exists', () => {
+    fs.writeFileSync(path.join(tmp, 'src', 'Widget.test.js'), "it('x', () => {});\n");
+    process.chdir(tmp);
+    const errors = ts.validateTaskTestScope(task(), '');
     assert.ok(
       ownTestError(errors),
-      `without repoRoot the guard stays conservative (explicit-listing only); got: ${JSON.stringify(errors)}`
+      `repoRoot="" must disable colocation discovery (conservative); got: ${JSON.stringify(errors)}`
     );
   });
 });

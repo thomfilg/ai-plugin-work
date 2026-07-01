@@ -203,37 +203,41 @@ function _impliesTestAuthorship(task) {
 // `fs.existsSync` on a glob string fails). Returns false when `repoRoot` is
 // not supplied (hermetic callers keep the conservative explicit-listing check).
 //
+// @param {string} abs absolute path to a concrete source file
+// @returns {boolean} true when a `<base>.test.*` / `<base>.spec.*` sibling exists
+function _colocatedSiblingExists(abs) {
+  const fs = require('fs');
+  const path = require('path');
+  let stat;
+  try {
+    stat = fs.statSync(abs);
+  } catch {
+    return false;
+  }
+  if (!stat.isFile()) return false;
+  const base = path.basename(abs, path.extname(abs));
+  const escaped = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const colocatedRe = new RegExp('^' + escaped + '\\.(test|spec)\\.(?:m?[cj]sx?|tsx?)$');
+  let entries;
+  try {
+    entries = fs.readdirSync(path.dirname(abs), { withFileTypes: true });
+  } catch {
+    return false;
+  }
+  return entries.some((e) => e.isFile() && colocatedRe.test(e.name));
+}
+
 // @param {string[]} scope
 // @param {string|undefined} repoRoot
 // @returns {boolean}
 function _hasColocatedTestOnDisk(scope, repoRoot) {
   if (!repoRoot || typeof repoRoot !== 'string') return false;
-  const fs = require('fs');
   const path = require('path');
-  for (const rel of scope) {
-    if (typeof rel !== 'string' || /[*?[\]{}]/.test(rel)) continue; // skip globs
-    if (TEST_FILE_EXT_RE.test(rel)) continue; // explicit test files handled by caller
-    const abs = path.join(repoRoot, rel);
-    let stat;
-    try {
-      stat = fs.statSync(abs);
-    } catch {
-      continue;
-    }
-    if (!stat.isFile()) continue;
-    const ext = path.extname(abs);
-    const base = path.basename(abs, ext);
-    const escaped = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    const colocatedRe = new RegExp('^' + escaped + '\\.(test|spec)\\.(?:m?[cj]sx?|tsx?)$');
-    let entries;
-    try {
-      entries = fs.readdirSync(path.dirname(abs), { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    if (entries.some((e) => e.isFile() && colocatedRe.test(e.name))) return true;
-  }
-  return false;
+  return scope.some((rel) => {
+    if (typeof rel !== 'string' || /[*?[\]{}]/.test(rel)) return false; // skip globs
+    if (TEST_FILE_EXT_RE.test(rel)) return false; // explicit test files handled by caller
+    return _colocatedSiblingExists(path.join(repoRoot, rel));
+  });
 }
 
 /**
@@ -274,13 +278,13 @@ function _checkTddTaskOwnsTestFile(task, errors, repoRoot) {
  * this task's `### Files in scope` and follows runner naming conventions.
  *
  * @param {object} task
- * @param {string|undefined} repoRoot optional repo root; when supplied the
- *   own-test guard also honours colocated test siblings on disk (mirrors the
- *   implement-time `findTestFilesInScope` discovery). Omit for a hermetic,
- *   explicit-listing-only check.
+ * @param {string} [repoRoot=process.cwd()] repo root; the own-test guard also
+ *   honours colocated test siblings on disk (mirrors the implement-time
+ *   `findTestFilesInScope` discovery). Defaults to the process cwd (the repo
+ *   root during `/work`); pass `''` for a hermetic explicit-listing-only check.
  * @returns {string[]} validation errors
  */
-function validateTaskTestScope(task, repoRoot) {
+function validateTaskTestScope(task, repoRoot = process.cwd()) {
   const errors = [];
   if (!task || typeof task !== 'object') return errors;
   if (_isCheckpointTask(task)) return errors;
