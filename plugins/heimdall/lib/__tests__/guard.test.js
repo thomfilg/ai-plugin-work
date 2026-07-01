@@ -304,6 +304,13 @@ describe('evaluate: bash', () => {
     assert.equal(runB('rm usrconfig.txt').exitCode, 0);
   });
 
+  it('ui: allows a bare assignment `x=ui` (not a path token)', () => {
+    // `=` precedes the marker but there is no trailing `/`, so `ui` is an
+    // assignment value, not a path INTO the protected dir. Must stay allowed —
+    // the `=marker/` alternative must not over-block. See GH-642.
+    assert.equal(runB('x=ui').exitCode, 0);
+  });
+
   // POSITIVE — basename sits on a real path boundary → must be BLOCKED.
   it('ui: blocks `rm packages/ui/config.json`', () => {
     assert.equal(runB('rm packages/ui/config.json').exitCode, 2);
@@ -341,6 +348,14 @@ describe('evaluate: bash', () => {
 
   it('src: blocks `rm src/index.js`', () => {
     assert.equal(runB('rm src/index.js').exitCode, 2);
+  });
+
+  it('src: blocks a `flag=path` write `dd if=/dev/zero of=src/output.dat`', () => {
+    // Regression: `src` is preceded by `=` (from `of=src`) and followed by `/` —
+    // a genuine write INTO the protected dir. The boundary anchor originally
+    // omitted `=`, letting this bypass the write guard that String.includes had
+    // caught. The `=marker/` alternative restores the block. See GH-642.
+    assert.equal(runB('dd if=/dev/zero of=src/output.dat').exitCode, 2);
   });
 });
 

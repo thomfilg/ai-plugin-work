@@ -189,7 +189,9 @@ function markerWriteMatch(marker, v) {
  * preceded by start-of-string, `/`, whitespace, a quote, or `>`, and followed
  * by end-of-string, `/`, whitespace, a quote, or `.`.
  *
- * The `>` leading boundary covers no-space redirect-writes (`>ui/x`).
+ * The `>` leading boundary covers no-space redirect-writes (`>ui/x`). A second
+ * alternative (`=marker/`) covers `flag=path` writes such as dd's
+ * `of=src/output.dat`, where the marker is preceded by `=`.
  */
 const _boundaryCache = new Map();
 function getBoundaryPattern(marker) {
@@ -198,7 +200,13 @@ function getBoundaryPattern(marker) {
   // Leading boundary also accepts `>` so a no-space redirect into the protected
   // dir (`>ui/x`) stays blocked — a genuine path-token write, fail-closed like
   // its spaced form `> ui/x`. See GH-642.
-  const pattern = new RegExp(`(?:^|[/\\s"'>])${esc}(?:$|[/\\s"'.])`);
+  //
+  // The `=${esc}/` alternative restores blocking of `flag=path` writes (dd's
+  // `of=src/output.dat`) that String.includes caught before the boundary anchor.
+  // It requires a trailing `/` so it only fires on a path INTO the protected dir
+  // — a bare assignment like `x=ui` (marker at end, no `/`) is not a path token
+  // and must stay allowed. See GH-642.
+  const pattern = new RegExp(`(?:^|[/\\s"'>])${esc}(?:$|[/\\s"'.])|=${esc}/`);
   _boundaryCache.set(marker, pattern);
   return pattern;
 }
