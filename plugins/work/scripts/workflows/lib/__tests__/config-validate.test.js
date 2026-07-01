@@ -106,6 +106,26 @@ describe('validateEnv — unknown-key scan', () => {
     );
   });
 
+  it('breaks ties by first-by-index when a typo is equidistant from two known keys', () => {
+    const { validateEnv } = loadValidateModule();
+    // FOO and FOB are both at edit distance 1 from FOX. The nearest-candidate
+    // selection must keep the FIRST known key by declaration order (FOO),
+    // matching the prior stable tie-break of `nearest(key, knownKeys, 1)`.
+    const schema = {
+      FOO: { type: 'string' },
+      FOB: { type: 'string' },
+    };
+    const warnings = validateEnv({ FOX: 'x' }, schema);
+    const unknown = warnings.filter((w) => w.kind === 'unknown-key');
+    assert.equal(unknown.length, 1, 'one unknown-key warning');
+    assert.equal(unknown[0].key, 'FOX', 'names the typo key');
+    assert.equal(
+      unknown[0].suggestion,
+      'FOO',
+      'tie resolves to the first known key by index',
+    );
+  });
+
   it('non-prefixed unknown keys are ignored by the unknown-key scan (R5)', () => {
     const { validateEnv } = loadValidateModule();
     const warnings = validateEnv({ SOME_RANDOM_PATH: '/tmp/x' }, testSchema());

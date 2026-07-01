@@ -19,7 +19,7 @@
  */
 
 const { SCHEMA, KNOWN_KEYS, PREFIXES } = require('./config-schema');
-const { nearest, distance } = require('./levenshtein');
+const { distance } = require('./levenshtein');
 
 const PREFIX_RE = new RegExp(`^(${PREFIXES.join('|')})`);
 const SUGGEST_MAX_DISTANCE = 2;
@@ -92,9 +92,20 @@ function scanUnknownKeys(env, knownKeys, knownSet) {
   for (const key of Object.keys(env)) {
     if (knownSet.has(key)) continue;
 
-    const [best] = nearest(key, knownKeys, 1);
-    const bestDistance =
-      best === undefined ? Infinity : distance(key, best);
+    // Single-pass nearest scan: track the minimum edit distance while
+    // computing each candidate's distance exactly once. The strict `<`
+    // comparison keeps the FIRST candidate by index on ties, matching the
+    // stable tie-break of the previous `nearest(key, knownKeys, 1)` call, and
+    // leaves `best`/`bestDistance` as `undefined`/`Infinity` for empty keys.
+    let best;
+    let bestDistance = Infinity;
+    for (const known of knownKeys) {
+      const d = distance(key, known);
+      if (d < bestDistance) {
+        bestDistance = d;
+        best = known;
+      }
+    }
 
     // A key is in scope for the unknown-key scan when it carries a known
     // prefix OR is a near miss of a known key (a typo in the prefix itself,
