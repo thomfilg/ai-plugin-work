@@ -6,7 +6,7 @@
 
 'use strict';
 
-const { describe, it } = require('node:test');
+const { describe, it, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 
 const ts = require('../task-scope');
@@ -891,6 +891,66 @@ describe('validateTaskTestScope: TDD task must own a test file in Files in scope
     assert.ok(
       owns,
       `mixed impl+stories scope is not visual-only and must still require a test file; got: ${JSON.stringify(errors)}`
+    );
+  });
+});
+
+// GH-491 follow-up (greptile-apps[bot]): the authoring-time own-test guard must
+// not be stricter than the implement-time `findTestFilesInScope` colocation
+// discovery. A task whose scope lists only a source file that has a colocated
+// `<name>.test.*` sibling ON DISK passes the implement-time RED gate without a
+// scope change, so the authoring-time guard must accept it too when a repoRoot
+// is supplied.
+describe('validateTaskTestScope: colocated-test-on-disk exemption (GH-491 greptile)', () => {
+  const fs = require('node:fs');
+  const os = require('node:os');
+  const path = require('node:path');
+
+  const tddBody =
+    'Widget behavior.\n' +
+    '- 1.1 **RED:** Add failing unit tests exercising Widget.\n' +
+    '- 1.2 **GREEN:** Implement Widget.\n';
+
+  let tmp;
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'colocate-'));
+    fs.mkdirSync(path.join(tmp, 'src'), { recursive: true });
+    fs.writeFileSync(path.join(tmp, 'src', 'Widget.js'), 'module.exports = {};\n');
+  });
+  afterEach(() => {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const ownTestError = (errors) =>
+    errors.find((e) => /Files in scope/.test(e) && /test file|\*\.test|\.spec/i.test(e));
+
+  it('does NOT error when a source file in scope has a colocated *.test.js on disk (repoRoot supplied)', () => {
+    fs.writeFileSync(path.join(tmp, 'src', 'Widget.test.js'), "it('x', () => {});\n");
+    const task = { num: 1, type: 'tdd-code', filesInScope: ['src/Widget.js'], rawContent: tddBody };
+    const errors = ts.validateTaskTestScope(task, tmp);
+    assert.equal(
+      ownTestError(errors),
+      undefined,
+      `colocated Widget.test.js on disk must satisfy the guard; got: ${JSON.stringify(errors)}`
+    );
+  });
+
+  it('STILL errors when no colocated test exists on disk (repoRoot supplied)', () => {
+    const task = { num: 1, type: 'tdd-code', filesInScope: ['src/Widget.js'], rawContent: tddBody };
+    const errors = ts.validateTaskTestScope(task, tmp);
+    assert.ok(
+      ownTestError(errors),
+      `no colocated test on disk must still trip the guard; got: ${JSON.stringify(errors)}`
+    );
+  });
+
+  it('errors when repoRoot is omitted even if a colocated test exists (hermetic default)', () => {
+    fs.writeFileSync(path.join(tmp, 'src', 'Widget.test.js'), "it('x', () => {});\n");
+    const task = { num: 1, type: 'tdd-code', filesInScope: ['src/Widget.js'], rawContent: tddBody };
+    const errors = ts.validateTaskTestScope(task);
+    assert.ok(
+      ownTestError(errors),
+      `without repoRoot the guard stays conservative (explicit-listing only); got: ${JSON.stringify(errors)}`
     );
   });
 });

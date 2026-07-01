@@ -193,29 +193,79 @@ function _impliesTestAuthorship(task) {
   return _TEST_AUTHORING_RE.test(body);
 }
 
+// Mirrors task-next.js `findTestFilesInScope` colocation branch: for a concrete
+// (non-glob) source file listed in scope, a colocated `<base>.test.<ext>` /
+// `<base>.spec.<ext>` sibling that exists ON DISK in the same directory
+// satisfies the implement-time RED discovery even when that sibling is not
+// itself listed in `### Files in scope`. The authoring-time guard honours the
+// same discovery so it is never stricter than the gate it protects. Glob
+// entries are skipped (findTestFilesInScope also skips them — a literal
+// `fs.existsSync` on a glob string fails). Returns false when `repoRoot` is
+// not supplied (hermetic callers keep the conservative explicit-listing check).
+//
+// @param {string[]} scope
+// @param {string|undefined} repoRoot
+// @returns {boolean}
+function _hasColocatedTestOnDisk(scope, repoRoot) {
+  if (!repoRoot || typeof repoRoot !== 'string') return false;
+  const fs = require('fs');
+  const path = require('path');
+  for (const rel of scope) {
+    if (typeof rel !== 'string' || /[*?[\]{}]/.test(rel)) continue; // skip globs
+    if (TEST_FILE_EXT_RE.test(rel)) continue; // explicit test files handled by caller
+    const abs = path.join(repoRoot, rel);
+    let stat;
+    try {
+      stat = fs.statSync(abs);
+    } catch {
+      continue;
+    }
+    if (!stat.isFile()) continue;
+    const ext = path.extname(abs);
+    const base = path.basename(abs, ext);
+    const escaped = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const colocatedRe = new RegExp('^' + escaped + '\\.(test|spec)\\.(?:m?[cj]sx?|tsx?)$');
+    let entries;
+    try {
+      entries = fs.readdirSync(path.dirname(abs), { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    if (entries.some((e) => e.isFile() && colocatedRe.test(e.name))) return true;
+  }
+  return false;
+}
+
 /**
  * Authoring-time guard (GH-491 R3/R6): a TDD-required task whose gherkin
- * implies test authorship MUST list a `*.test.*` / `*.spec.*` entry in its
- * `### Files in scope`. Without it the implement-time RED gate has no test
- * file to discover and deadlocks. Pushes an error naming the task number and
- * instructing the author to add the test file to `### Files in scope`.
+ * implies test authorship MUST have a `*.test.*` / `*.spec.*` the implement-time
+ * RED gate can discover. RED discovers tests either from an explicit entry in
+ * `### Files in scope` OR — mirroring `findTestFilesInScope` — from a colocated
+ * test sibling on disk next to a source file in scope. The guard fires only when
+ * NEITHER is present, so it is never stricter than the gate it protects. Pushes
+ * an error naming the task number and instructing the author to add (or colocate)
+ * the test file.
  *
  * @param {object} task
  * @param {string[]} errors
+ * @param {string|undefined} repoRoot optional repo root for colocation discovery
  */
-function _checkTddTaskOwnsTestFile(task, errors) {
+function _checkTddTaskOwnsTestFile(task, errors, repoRoot) {
   if (!_impliesTestAuthorship(task)) return;
   const scope = Array.isArray(task.filesInScope) ? task.filesInScope : [];
   const hasTestFile = scope.some((p) => typeof p === 'string' && TEST_FILE_EXT_RE.test(p));
   if (hasTestFile) return;
+  if (_hasColocatedTestOnDisk(scope, repoRoot)) return;
   errors.push(
     `Task ${task.num ?? '?'} is a TDD task whose deliverables author tests, but its ` +
-      '`### Files in scope` lists no test file (no `*.test.*` / `*.spec.*` path). The ' +
-      'implement-time RED gate discovers the failing test from `### Files in scope`, so with ' +
-      'none listed the gate has nothing to run and the task deadlocks. Add this task’s own ' +
-      'test file to `### Files in scope` (it must own BOTH the test file and the impl file ' +
-      'it tests — see split-in-tasks decomposition Rule 10). If this task authors no test ' +
-      'of its own, MERGE IT INTO THE CONSUMING TASK (split-in-tasks SKILL.md Rule 4b).'
+      '`### Files in scope` lists no test file (no `*.test.*` / `*.spec.*` path) and no ' +
+      'source file in scope has a colocated test sibling on disk. The implement-time RED ' +
+      'gate discovers the failing test from `### Files in scope` (or a colocated ' +
+      '`<name>.test.*` next to a source file in scope), so with neither present the gate ' +
+      'has nothing to run and the task deadlocks. Add this task’s own test file to ' +
+      '`### Files in scope` (it must own BOTH the test file and the impl file it tests — ' +
+      'see split-in-tasks decomposition Rule 10). If this task authors no test of its ' +
+      'own, MERGE IT INTO THE CONSUMING TASK (split-in-tasks SKILL.md Rule 4b).'
   );
 }
 
@@ -224,14 +274,18 @@ function _checkTddTaskOwnsTestFile(task, errors) {
  * this task's `### Files in scope` and follows runner naming conventions.
  *
  * @param {object} task
+ * @param {string|undefined} repoRoot optional repo root; when supplied the
+ *   own-test guard also honours colocated test siblings on disk (mirrors the
+ *   implement-time `findTestFilesInScope` discovery). Omit for a hermetic,
+ *   explicit-listing-only check.
  * @returns {string[]} validation errors
  */
-function validateTaskTestScope(task) {
+function validateTaskTestScope(task, repoRoot) {
   const errors = [];
   if (!task || typeof task !== 'object') return errors;
   if (_isCheckpointTask(task)) return errors;
 
-  _checkTddTaskOwnsTestFile(task, errors);
+  _checkTddTaskOwnsTestFile(task, errors, repoRoot);
 
   if (_checkNonTestCommand(task, errors)) return errors;
 
