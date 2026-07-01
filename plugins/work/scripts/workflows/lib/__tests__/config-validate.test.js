@@ -193,6 +193,31 @@ describe('validateEnv — value-format validation', () => {
     );
   });
 
+  it('enforces a declared pattern on a string-type key even when the type check passes', () => {
+    const { validateEnv } = loadValidateModule();
+    const schema = {
+      SOMEKEY: { type: 'string', pattern: /^[a-zA-Z0-9_/-]+$/ },
+    };
+
+    const bad = validateEnv({ SOMEKEY: '../../evil' }, schema);
+    const invalid = bad.filter(
+      (w) => w.kind === 'invalid-value' && w.key === 'SOMEKEY',
+    );
+    assert.equal(invalid.length, 1, 'a pattern mismatch on a string key warns');
+    assert.match(
+      String(invalid[0].expected),
+      /matching/,
+      'expected text mentions the pattern',
+    );
+
+    const good = validateEnv({ SOMEKEY: 'feature/x' }, schema);
+    assert.deepEqual(
+      good.filter((w) => w.kind === 'invalid-value'),
+      [],
+      'a pattern-matching value produces no invalid-value warning',
+    );
+  });
+
   it('accepts valid values for every type with no warning', () => {
     const { validateEnv } = loadValidateModule();
     const warnings = validateEnv(

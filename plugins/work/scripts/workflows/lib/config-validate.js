@@ -68,9 +68,12 @@ const TYPE_CHECKERS = {
 function checkValue(key, value, entry) {
   const checker = TYPE_CHECKERS[entry && entry.type];
   if (!checker) return null;
-  if (checker.valid(value, entry)) return null;
+  const typeOk = checker.valid(value, entry);
+  const patternOk =
+    !(entry.pattern instanceof RegExp) || entry.pattern.test(String(value));
+  if (typeOk && patternOk) return null;
   let expected = checker.expected(entry);
-  if (entry.pattern instanceof RegExp && !entry.pattern.test(String(value))) {
+  if (!patternOk) {
     expected = `${expected} matching ${entry.pattern}`;
   }
   return { kind: 'invalid-value', key, value, expected };
