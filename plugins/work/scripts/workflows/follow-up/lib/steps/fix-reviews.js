@@ -153,6 +153,32 @@ function cleanCommentBody(rawBody) {
     .trim();
 }
 
+// Mandatory judgment/triage step (GH-352). Lifted to module scope so
+// buildReviewPrompt stays under the 80-line/function cap (R8). The agent must
+// read the referenced code and verify the bot's claim BEFORE choosing Option
+// A / Option B, classify into one of six categories, and record the chosen
+// category inside the solve/skip reason so it persists in comment.resolution.
+function reviewJudgmentBlock(fileRef) {
+  return [
+    '## Before you act — judge the comment:',
+    `1. **Read the referenced code** at \`${fileRef}\` (the file/line above).`,
+    "2. **Verify the bot's claim** is accurate against the current code — do not trust it blindly.",
+    '3. **Classify** the comment into exactly one category and take the prescribed action:',
+    '   - **real bug** → fix (Option A)',
+    '   - **real improvement** (perf/maintainability, related to this PR) → fix (Option A)',
+    '   - **style/naming preference** → skip with reason (Option B)',
+    '   - **false positive** (bot misread the code) → skip with evidence (Option B)',
+    '   - **conflicts with user intent / ticket requirements** → skip with reason (Option B)',
+    '   - **ambiguous** (unsure whether it applies) → ask the user',
+    '4. **Record the classification**: put a leading `[<category>]` token at the start of the',
+    '   `<reason>` you pass to `--mark-locally-skipped` and the `<description>` you pass to',
+    '   `--mark-locally-solved`, so the category persists in the comment resolution.',
+    '',
+    '---',
+    '',
+  ];
+}
+
 function buildReviewPrompt(comment, fileRef, counts, commands) {
   const author = comment.author || 'unknown';
   const priority = comment.priority || 'unknown';
@@ -168,6 +194,7 @@ function buildReviewPrompt(comment, fileRef, counts, commands) {
     codeContext ? `### Current code:\n\`\`\`\n${codeContext}\n\`\`\`\n` : '',
     '---',
     '',
+    ...reviewJudgmentBlock(fileRef),
     '## You MUST do exactly ONE of these:',
     '',
     '### Option A — Fix the code:',
@@ -263,3 +290,9 @@ module.exports = function registerFixReviews(register) {
     return buildReviewExecute(state, comment, commentsScript, counts);
   });
 };
+
+// Exposed for tests so ordering/content assertions run against the ACTUAL
+// assembled prompt string rather than the raw source-file layout. The judgment
+// block's content is covered transitively via buildReviewPrompt, so it is not
+// exported separately.
+module.exports.buildReviewPrompt = buildReviewPrompt;
