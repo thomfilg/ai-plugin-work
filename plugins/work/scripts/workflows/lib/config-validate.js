@@ -201,7 +201,7 @@ function runStartupValidation(env = process.env, schema = SCHEMA) {
     process.env[MARKER] = '1';
 
     const block = formatWarnings(validateEnv(env, schema));
-    if (block) process.stderr.write(`${block}\n`);
+    if (block) process.stderr.write(block);
   } catch {
     // Fail-open: swallow any internal error; never disturb the caller.
   }

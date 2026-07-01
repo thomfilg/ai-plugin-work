@@ -323,6 +323,24 @@ describe('runStartupValidation — non-blocking + once-per-invocation', () => {
     assert.equal(captured.join(''), '', 'no stderr output for a clean env');
   });
 
+  it('terminates the stderr block in exactly one trailing newline, not two', () => {
+    const { runStartupValidation } = freshValidateModule();
+    const env = { ENABEL_DRAFT_PR: '1', ENABLE_SYMLINK: 'yes' };
+
+    runStartupValidation(env, testSchema());
+
+    const out = captured.join('');
+    assert.ok(out.length > 0, 'a warning block was written to stderr');
+    assert.ok(
+      out.endsWith('\n'),
+      'block ends with a single trailing newline',
+    );
+    assert.ok(
+      !out.endsWith('\n\n'),
+      'block does not end with a double newline (no trailing blank line)',
+    );
+  });
+
   it('is guarded by a once-per-invocation flag: a second call is a no-op (R9)', () => {
     const { runStartupValidation } = freshValidateModule();
     const env = { ENABEL_DRAFT_PR: '1' };
