@@ -36,25 +36,10 @@ function clearPin() {
 }
 
 function rendererPath() {
-  // Prefer $CLAUDE_PLUGIN_ROOT (correct at plugin runtime), but only if it
-  // actually resolves to the renderer — when run by hand the env var may be a
-  // generic default. Fall back to this file's own location (the live source).
-  const candidates = [];
-  if (process.env.CLAUDE_PLUGIN_ROOT) {
-    candidates.push(
-      path.join(process.env.CLAUDE_PLUGIN_ROOT, 'skills', 'lib', 'maestro-statusline.sh')
-    );
-  }
+  // Resolve relative to this file's own location so the registered command
+  // always points at this plugin's renderer, regardless of install layout.
   // this file: <plugin>/skills/install/scripts/install-statusline.js
-  candidates.push(path.join(__dirname, '..', '..', 'lib', 'maestro-statusline.sh'));
-  for (const c of candidates) {
-    try {
-      if (fs.existsSync(c)) return c;
-    } catch {
-      /* try next */
-    }
-  }
-  return candidates[candidates.length - 1];
+  return path.join(__dirname, '..', '..', 'lib', 'maestro-statusline.sh');
 }
 
 function readSettings() {

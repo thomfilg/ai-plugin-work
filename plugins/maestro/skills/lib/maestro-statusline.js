@@ -144,40 +144,42 @@ function isOperatorSession() {
   return !isWorktreeCwd(CWD);
 }
 
+// Render the "▶ …" active portion. One active ticket shows inline with its
+// two-word label; multiple rotate one-per-refresh ([i/N]) via wall-clock time
+// (statusLine re-runs ~every refreshInterval second) so the label stays readable.
+function formatActive(active) {
+  const i = active.length === 1 ? 0 : Math.floor(Date.now() / 3000) % active.length;
+  const a = active[i];
+  const w = twoWords(a.id);
+  const label = `${a.id}${w ? ` — ${w}` : ''}`;
+  if (active.length === 1) return `   ▶  1  (${label})`;
+  return `   ▶  ${active.length}  [${i + 1}/${active.length}] ${label}`;
+}
+
+// One status segment for a topic, or null when it has no active/pending work.
+function topicSegment(j, kinds) {
+  const t = j.tasks;
+  const active = t.filter((x) => x.status === 'in_progress');
+  const pending = t.filter((x) => x.status === 'pending').length;
+  if (active.length === 0 && pending === 0) return null;
+  const done = t.filter((x) => x.status === 'done').length;
+  const broken = t.filter((x) => x.status !== 'done' && kinds[x.id] === 'pr-broken').length;
+  const ready = active.filter((x) => kinds[x.id] === 'pr-ready').length;
+  let seg = `🎼 ${j.topic}   ${done}/${t.length} ✓`;
+  if (active.length) seg += formatActive(active);
+  if (pending) seg += `   ⏳ ${pending}`;
+  if (ready) seg += `   ✅ ${ready}`;
+  if (broken) seg += `   ⚠  ${broken}`;
+  return seg;
+}
+
 function render() {
   if (!isOperatorSession()) return '';
   const kinds = latestKindByTicket();
-  const segs = [];
-  for (const j of readManifests()) {
-    const t = j.tasks;
-    const total = t.length;
-    const done = t.filter((x) => x.status === 'done').length;
-    const active = t.filter((x) => x.status === 'in_progress');
-    const pending = t.filter((x) => x.status === 'pending').length;
-    // Hide fully-done / idle topics so the line disappears when work finishes.
-    if (active.length === 0 && pending === 0) continue;
-    const broken = t.filter((x) => x.status !== 'done' && kinds[x.id] === 'pr-broken').length;
-    const ready = active.filter((x) => kinds[x.id] === 'pr-ready').length;
-
-    let seg = `🎼 ${j.topic}   ${done}/${total} ✓`;
-    if (active.length === 1) {
-      const w = twoWords(active[0].id);
-      seg += `   ▶  1  (${active[0].id}${w ? ` — ${w}` : ''})`;
-    } else if (active.length > 1) {
-      // Rotate one active ticket per refresh so the label stays readable.
-      // Stateless: the index comes from wall-clock time (statusLine re-runs
-      // ~every refreshInterval seconds), so it advances one slot each tick.
-      const i = Math.floor(Date.now() / 3000) % active.length;
-      const a = active[i];
-      const w = twoWords(a.id);
-      seg += `   ▶  ${active.length}  [${i + 1}/${active.length}] ${a.id}${w ? ` — ${w}` : ''}`;
-    }
-    if (pending) seg += `   ⏳ ${pending}`;
-    if (ready) seg += `   ✅ ${ready}`;
-    if (broken) seg += `   ⚠  ${broken}`;
-    segs.push(seg);
-  }
-  return segs.join('      |      ');
+  return readManifests()
+    .map((j) => topicSegment(j, kinds))
+    .filter(Boolean)
+    .join('      |      ');
 }
 
 process.stdout.write(render());
