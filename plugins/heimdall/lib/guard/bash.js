@@ -183,12 +183,57 @@ function markerWriteMatch(marker, v) {
   return false;
 }
 
+/**
+ * Does `marker` appear in `text` sitting on a path-like boundary? The marker is
+ * regex-escaped (same escape as the cp/rsync read check above) and must be
+ * preceded by start-of-string, `/`, whitespace, a quote, or `>`, and followed
+ * by end-of-string, `/`, whitespace, a quote, or `.`.
+ *
+ * The `>` leading boundary covers no-space redirect-writes (`>ui/x`). A second
+ * alternative (`=marker/`) covers `flag=path` writes such as dd's
+ * `of=src/output.dat`, where the marker is preceded by `=`.
+ */
+const _boundaryCache = new Map();
+function getBoundaryPattern(marker) {
+  if (_boundaryCache.has(marker)) return _boundaryCache.get(marker);
+  const esc = marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // Leading boundary also accepts `>` so a no-space redirect into the protected
+  // dir (`>ui/x`) stays blocked — a genuine path-token write, fail-closed like
+  // its spaced form `> ui/x`. See GH-642.
+  //
+  // The `=${esc}/` alternative restores blocking of `flag=path` writes (dd's
+  // `of=src/output.dat`) that String.includes caught before the boundary anchor.
+  // It requires a trailing `/` so it only fires on a path INTO the protected dir
+  // — a bare assignment like `x=ui` (marker at end, no `/`) is not a path token
+  // and must stay allowed. See GH-642.
+  const pattern = new RegExp(`(?:^|[/\\s"'>])${esc}(?:$|[/\\s"'.])|=${esc}/`);
+  _boundaryCache.set(marker, pattern);
+  return pattern;
+}
+
+function markerOnPathBoundary(marker, text) {
+  return getBoundaryPattern(marker).test(text);
+}
+
 function markerPresent(marker, v) {
+  // Markers containing `/` are already path-qualified — a raw substring match is
+  // safe and intentional (relative-path writes like `sed -i .claude/x`).
+  if (marker.includes('/')) {
+    return (
+      v.command.includes(marker) ||
+      v.expanded.includes(marker) ||
+      v.collapsed.includes(marker) ||
+      v.expandedCollapsed.includes(marker)
+    );
+  }
+  // Bare basenames anchor to a path boundary so short names (ui, db, api, lib,
+  // src) no longer match a mid-word substring (build → "ui", require → "ui",
+  // glibc → "lib") and wrongly flag unrelated commands. See GH-642.
   return (
-    v.command.includes(marker) ||
-    v.expanded.includes(marker) ||
-    v.collapsed.includes(marker) ||
-    v.expandedCollapsed.includes(marker)
+    markerOnPathBoundary(marker, v.command) ||
+    markerOnPathBoundary(marker, v.expanded) ||
+    markerOnPathBoundary(marker, v.collapsed) ||
+    markerOnPathBoundary(marker, v.expandedCollapsed)
   );
 }
 
