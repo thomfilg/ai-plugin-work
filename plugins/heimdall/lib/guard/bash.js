@@ -191,12 +191,20 @@ function markerWriteMatch(marker, v) {
  *
  * The `>` leading boundary covers no-space redirect-writes (`>ui/x`).
  */
-function markerOnPathBoundary(marker, text) {
+const _boundaryCache = new Map();
+function getBoundaryPattern(marker) {
+  if (_boundaryCache.has(marker)) return _boundaryCache.get(marker);
   const esc = marker.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   // Leading boundary also accepts `>` so a no-space redirect into the protected
   // dir (`>ui/x`) stays blocked — a genuine path-token write, fail-closed like
   // its spaced form `> ui/x`. See GH-642.
-  return new RegExp(`(?:^|[/\\s"'>])${esc}(?:$|[/\\s"'.])`).test(text);
+  const pattern = new RegExp(`(?:^|[/\\s"'>])${esc}(?:$|[/\\s"'.])`);
+  _boundaryCache.set(marker, pattern);
+  return pattern;
+}
+
+function markerOnPathBoundary(marker, text) {
+  return getBoundaryPattern(marker).test(text);
 }
 
 function markerPresent(marker, v) {
