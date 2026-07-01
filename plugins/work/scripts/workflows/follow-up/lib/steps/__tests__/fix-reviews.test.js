@@ -122,29 +122,31 @@ describe('fix-reviews judgment step (Task 1, GH-352)', () => {
     );
   });
 
-  // 1.2 — Six-category classification taxonomy with prescribed actions
+  // 1.2 — Six-category classification taxonomy with prescribed actions.
+  // Assert against PROMPT (the assembled string) so the taxonomy is proven to
+  // actually reach the agent, not merely exist in a comment or dead branch.
   it('lists all six classification categories', () => {
-    assert.ok(/real bug/i.test(SOURCE), 'expected "real bug" category');
-    assert.ok(/real improvement/i.test(SOURCE), 'expected "real improvement" category');
-    assert.ok(/style\/naming/i.test(SOURCE), 'expected "style/naming preference" category');
-    assert.ok(/false positive/i.test(SOURCE), 'expected "false positive" category');
+    assert.ok(/real bug/i.test(PROMPT), 'expected "real bug" category');
+    assert.ok(/real improvement/i.test(PROMPT), 'expected "real improvement" category');
+    assert.ok(/style\/naming/i.test(PROMPT), 'expected "style/naming preference" category');
+    assert.ok(/false positive/i.test(PROMPT), 'expected "false positive" category');
     assert.ok(
-      /conflicts with (the )?user intent/i.test(SOURCE),
+      /conflicts with (the )?user intent/i.test(PROMPT),
       'expected "conflicts with user intent" category'
     );
-    assert.ok(/ambiguous/i.test(SOURCE), 'expected "ambiguous" category');
+    assert.ok(/ambiguous/i.test(PROMPT), 'expected "ambiguous" category');
   });
 
   it('states the prescribed action for false positive (skip with evidence)', () => {
     assert.ok(
-      /false positive[\s\S]{0,80}skip[\s\S]{0,40}evidence/i.test(SOURCE),
+      /false positive[\s\S]{0,80}skip[\s\S]{0,40}evidence/i.test(PROMPT),
       'expected "false positive" to prescribe skip with evidence'
     );
   });
 
   it('states the prescribed action for ambiguous (ask the user)', () => {
     assert.ok(
-      /ambiguous[\s\S]{0,80}ask the user/i.test(SOURCE),
+      /ambiguous[\s\S]{0,80}ask the user/i.test(PROMPT),
       'expected "ambiguous" to prescribe asking the user'
     );
   });
@@ -152,23 +154,23 @@ describe('fix-reviews judgment step (Task 1, GH-352)', () => {
   // 1.3 — Record the classification inside the solve/skip reason
   it('requires the chosen category in the skip reason string', () => {
     assert.ok(
-      /classification|category/i.test(SOURCE),
+      /classification|category/i.test(PROMPT),
       'expected an instruction referencing the chosen classification/category'
     );
     assert.ok(
-      /<reason>/.test(SOURCE),
+      /<reason>/.test(PROMPT),
       'expected the skip reason placeholder <reason> to be referenced'
     );
-    assert.ok(/\[<category>\]/.test(SOURCE), 'expected a leading [<category>] token instruction');
+    assert.ok(/\[<category>\]/.test(PROMPT), 'expected a leading [<category>] token instruction');
   });
 
   it('requires the chosen category in the solve description string', () => {
     assert.ok(
-      /<description>/.test(SOURCE),
+      /<description>/.test(PROMPT),
       'expected the solve description placeholder <description> to be referenced'
     );
     assert.ok(
-      /--mark-locally-solved/.test(SOURCE),
+      /--mark-locally-solved/.test(PROMPT),
       'expected the solve command to remain referenced'
     );
   });
