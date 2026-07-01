@@ -228,12 +228,35 @@ function fetchReviews(prInfo, getReviews) {
   }
 }
 
-function emitStatusLine(state, ci, reviews) {
+// Publish live CI-wait progress for the /follow-up status bar (agent-free —
+// followup-statusline.js reads this). Best-effort: never break the monitor loop.
+function writeFollowupLive(state, prInfo, statusLine, detail, ctx) {
+  try {
+    const osMod = require('os');
+    const fsMod = require('fs');
+    fsMod.writeFileSync(
+      path.join(osMod.tmpdir(), `followup-live-${state.ticketId}.json`),
+      JSON.stringify({
+        ticket: state.ticketId,
+        pr: (prInfo && prInfo.number) || state.prNumber || null,
+        step: state.currentStep,
+        status: statusLine || '',
+        detail: detail || '',
+        cwd: (ctx && ctx.worktreeDir) || '',
+        ts: new Date().toISOString(),
+      })
+    );
+  } catch {
+    /* best effort */
+  }
+}
+
+function emitStatusLine(state, ci, reviews, prInfo, ctx) {
   if (!state._monitorStartTime) state._monitorStartTime = new Date().toISOString();
   const { line1, detail } = buildStatusLine(state, ci, reviews);
-  process.stderr.write(line1 + '\n');
-  if (detail) process.stderr.write(detail + '\n');
-  process.stderr.write('\n');
+  // Progress → status bar (agent-free), not the console. The final JSON
+  // instruction is what keeps the agent posted.
+  writeFollowupLive(state, prInfo, line1, detail, ctx);
   state._ciStatusLine = line1;
   state._ciStatusDetail = detail || '';
 }
@@ -304,7 +327,7 @@ module.exports = function registerMonitor(register) {
     writeMonitorResult(state, { exitCode, output: output.substring(0, 3000) });
     state._ciRunningCount = ci.running ? ci.running.length : 0;
 
-    emitStatusLine(state, ci, reviews);
+    emitStatusLine(state, ci, reviews, prInfo, ctx);
     const initialFailedJobs = populateFailedJobs(state, ci, ctx.worktreeDir);
     attachClassifierContext(state, ci, initialFailedJobs, ctx.worktreeDir);
 
