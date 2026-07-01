@@ -3,28 +3,45 @@
 /**
  * followup-statusline.js — agent-free renderer for the /follow-up status bar.
  *
- * Reads the live progress files monitor.js writes each CI-wait poll
- * (~/.cache/followup/live/<ticket>.json) and prints one compact line per
- * actively-running follow-up. No agent, no polling — Claude Code re-runs the
- * parent .sh on its refreshInterval and shows stdout.
+ * Reads the SAME artifacts the plugin already writes — it creates NO files:
+ *   - <TASKS_BASE>/<ticket>/.follow-up-orchestrator.pid  (marker, carries sessionId)
+ *   - <TASKS_BASE>/<ticket>/.follow-up-state.json         (currentStep, prNumber, _ciStatusLine)
  *
- * Scoping: by Claude session. Each live file records the session that launched
- * its /follow-up (CLAUDE_CODE_SESSION_ID); this renders a line ONLY in that
- * session — never other open chats. Freshness-gated too, so a finished/idle
- * follow-up ages out (and follow-up-next deletes the file on completion).
+ * It reuses the plugin's own detection — marker.js `findActiveMarker` — to locate
+ * the active follow-up OWNED BY THIS Claude session (matched on CLAUDE_CODE_SESSION_ID),
+ * so the bar shows only in the session that launched /follow-up, never other chats.
  */
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
+const { execFileSync } = require('child_process');
 
-// Show while a follow-up is in progress. follow-up-next deletes the file on
-// completion, so this window is only a crash/abandon safety net — it must be
-// long enough to span the gaps between steps (an agent fixing CI can take many
-// minutes between monitor polls), or the bar would flicker out mid-run.
-const FRESH_MS = 30 * 60 * 1000; // 30 min
+const { findActiveMarker } = require(path.join(__dirname, '..', '..', 'work', 'lib', 'marker'));
 
-// The session Claude runs this statusLine in (session_id on stdin). An entry
-// shows only when it was launched by this same session.
+const FRESH_MS = 30 * 60 * 1000; // safety net: hide an abandoned follow-up after 30 min
+
+// OSC 8 terminal hyperlink (ctrl/cmd-click). Terminals without support render
+// just the text. Bytes: ESC ] 8 ;; <url> BEL <text> ESC ] 8 ;; BEL
+function hyperlink(url, text) {
+  return url ? `]8;;${url}${text}]8;;` : text;
+}
+
+// PR URL from the worktree's git origin (execFileSync = no shell, no injection).
+function prUrl(worktreeRoot, pr) {
+  if (!worktreeRoot || !pr) return '';
+  try {
+    const remote = execFileSync('git', ['-C', worktreeRoot, 'remote', 'get-url', 'origin'], {
+      encoding: 'utf8',
+      timeout: 1000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    const m = remote.match(/github\.com[:/]([^/]+)\/(.+?)(?:\.git)?$/);
+    return m ? `https://github.com/${m[1]}/${m[2]}/pull/${pr}` : '';
+  } catch {
+    return '';
+  }
+}
+
+// The Claude session Claude runs this statusLine in (session_id on stdin).
 let SESSION = '';
 try {
   SESSION = JSON.parse(fs.readFileSync(0, 'utf8') || '{}').session_id || '';
@@ -32,42 +49,48 @@ try {
   /* no stdin */
 }
 
-function liveEntries() {
-  const dir = path.join(os.homedir(), '.cache', 'followup', 'live');
-  let files = [];
-  try {
-    files = fs.readdirSync(dir).filter((f) => f.endsWith('.json'));
-  } catch {
-    return [];
-  }
-  const now = Date.now();
-  const out = [];
-  for (const f of files) {
-    const p = path.join(dir, f);
-    try {
-      if (now - fs.statSync(p).mtimeMs > FRESH_MS) continue;
-      out.push(JSON.parse(fs.readFileSync(p, 'utf8')));
-    } catch {
-      /* skip unreadable/partial */
-    }
-  }
-  return out;
+// TASKS_BASE for the current project — direnv exports it into the session env.
+function tasksBase() {
+  if (process.env.TASKS_BASE) return process.env.TASKS_BASE;
+  if (process.env.WORKTREES_BASE) return path.join(process.env.WORKTREES_BASE, 'tasks');
+  return '';
 }
 
-function segment(e) {
-  const label = e.pr ? `#${e.pr}` : e.ticket || 'pr';
-  const bits = [`🔄 follow-up ${label}`];
-  if (e.step) bits.push(e.step);
-  if (e.status) bits.push(e.status);
-  return bits.join('   ·   ');
+// The follow-up state for a ticket, or null when it's finished, stale, or
+// unreadable (so the bar shows nothing).
+function activeState(base, ticket) {
+  const stateFile = path.join(base, ticket, '.follow-up-state.json');
+  try {
+    if (Date.now() - fs.statSync(stateFile).mtimeMs > FRESH_MS) return null;
+    const st = JSON.parse(fs.readFileSync(stateFile, 'utf8'));
+    return st.status === 'complete' ? null : st;
+  } catch {
+    return null;
+  }
 }
 
 function render() {
-  if (!SESSION) return ''; // can't attribute → show nothing (never leak to other chats)
-  return liveEntries()
-    .filter((e) => e.session === SESSION)
-    .map(segment)
-    .join('      |      ');
+  if (!SESSION) return '';
+  const base = tasksBase();
+  if (!base) return '';
+  // Same discovery the plugin uses under concurrent agents: only a marker owned
+  // by THIS session is returned.
+  const marker = findActiveMarker(base, '.follow-up-orchestrator.pid', {
+    sessionId: SESSION,
+    worktreeRoot: null,
+  });
+  if (!marker || !marker.ticket) return '';
+
+  const st = activeState(base, marker.ticket);
+  if (!st) return '';
+
+  const label = st.prNumber
+    ? hyperlink(prUrl(marker.worktreeRoot, st.prNumber), `#${st.prNumber}`)
+    : marker.ticket;
+  const bits = [`🔄 follow-up ${label}`];
+  if (st.currentStep) bits.push(st.currentStep);
+  if (st._ciStatusLine) bits.push(st._ciStatusLine);
+  return bits.join('   ·   ');
 }
 
 process.stdout.write(render());

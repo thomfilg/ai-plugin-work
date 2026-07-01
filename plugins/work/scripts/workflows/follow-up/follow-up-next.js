@@ -306,7 +306,7 @@ function main() {
       const { spawnSync } = require('child_process');
       const sessionGuardPath = path.join(__dirname, '..', 'lib', 'hooks', 'session-guard.js');
       spawnSync('node', [sessionGuardPath, 'init', safeName, '/follow-up'], {
-        stdio: 'ignore',
+        stdio: 'inherit',
         timeout: 5000,
       });
     } catch {
@@ -324,19 +324,11 @@ function main() {
       const { spawnSync } = require('child_process');
       const sessionGuardPath = path.join(__dirname, '..', 'lib', 'hooks', 'session-guard.js');
       spawnSync('node', [sessionGuardPath, 'complete', safeName, '/follow-up'], {
-        stdio: 'ignore',
+        stdio: 'inherit',
         timeout: 5000,
       });
     } catch {
       /* fail-open */
-    }
-    // Clear the status-bar live file so the /follow-up bar disappears on finish.
-    try {
-      fs.unlinkSync(
-        path.join(require('os').homedir(), '.cache', 'followup', 'live', `${safeName}.json`)
-      );
-    } catch {
-      /* nothing to clear */
     }
   }
 

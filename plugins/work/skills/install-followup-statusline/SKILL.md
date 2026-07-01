@@ -8,9 +8,10 @@ user_invocable: true
 # /follow-up status bar
 
 Registers a Claude Code `statusLine` that renders live `/follow-up` progress —
-agent-free. `monitor.js` writes each CI-wait poll to
-`~/.cache/followup/live/<ticket>.json`; the status bar just reads it, so it stays
-current with zero agent involvement (Claude re-runs it on `refreshInterval`).
+agent-free. It reads the artifacts the plugin **already** writes — no new files:
+the `.follow-up-orchestrator.pid` marker (located via the plugin's own
+`findActiveMarker`, scoped to this Claude session) and `.follow-up-state.json`
+(`currentStep`, `prNumber`, `_ciStatusLine`) under `<TASKS_BASE>/<ticket>/`.
 
 This replaces the old per-poll stderr spam: the console is now near-silent
 (only the final JSON instruction the agent acts on), and progress lives here.
@@ -35,5 +36,5 @@ After installing, run `/reload-plugins` (or wait for the next refresh tick).
 ## How it fits together
 
 - **Renderer:** `scripts/workflows/follow-up/statusline/followup-statusline.sh` → `followup-statusline.js`.
-- **Data source:** `~/.cache/followup/live/<ticket>.json`, written by `monitor.js` and deleted by `follow-up-next.js` on completion.
+- **Data source:** the plugin's existing `<TASKS_BASE>/<ticket>/.follow-up-state.json` + `.follow-up-orchestrator.pid` (no files created by the bar).
 - **Chain file:** `~/.cache/followup/statusline-chain.cmd` holds the prior status line command; the renderer runs it beneath the follow-up line.
