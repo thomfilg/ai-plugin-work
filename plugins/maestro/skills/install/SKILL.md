@@ -1,7 +1,7 @@
 ---
 name: install
 description: Register (or remove) the maestro fleet status line — a live, agent-free 🎼 bar in Claude Code showing per-topic done/active/pending/broken counts from the conductor's manifests. Use when the user says "install the maestro statusline", "set up the maestro status bar", "show fleet status in the status line", "register the maestro statusline", or "remove the maestro statusline".
-argument-hint: "[--print | --remove]"
+argument-hint: "[--print | --remove | --unpin]"
 user-invocable: true
 allowed-tools: Bash
 ---

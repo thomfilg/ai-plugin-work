@@ -17,7 +17,7 @@
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 
 const WORKTREES_BASE =
   process.env.WORKTREES_BASE || path.join(os.homedir(), 'p', 'w-claude-plugin');
@@ -25,11 +25,15 @@ const REPO_NAME = process.env.REPO_NAME || 'claude-plugin-work';
 
 // Two-word label for an active ticket, taken from its worktree's last commit
 // subject (local git — instant, no network, keeps the statusline agent-free).
-// Only used when the fleet is quiet (≤2 active) so there's room to show it.
+// Called only for the ONE ticket currently displayed (the single active ticket,
+// or the rotation's current slot), so at most one git call fires per render.
 function twoWords(ticket) {
   try {
     const wt = path.join(WORKTREES_BASE, `${REPO_NAME}-${ticket}`);
-    const subj = execSync(`git -C ${JSON.stringify(wt)} log -1 --format=%s`, {
+    // execFileSync (no shell) — args are passed directly to git, so ticket /
+    // env-derived paths can't be interpreted as shell commands (CodeQL: no
+    // indirect uncontrolled command line).
+    const subj = execFileSync('git', ['-C', wt, 'log', '-1', '--format=%s'], {
       encoding: 'utf8',
       timeout: 1500,
       stdio: ['ignore', 'pipe', 'ignore'],
@@ -134,11 +138,18 @@ function isOperatorSession() {
   if (SESSION_ID) {
     try {
       fs.mkdirSync(path.dirname(PIN_FILE), { recursive: true });
-      fs.writeFileSync(PIN_FILE, SESSION_ID + '\n');
+      // Atomic claim: 'wx' fails if a racing session already created the pin,
+      // so exactly one writer wins — no two-sessions-both-operator window.
+      fs.writeFileSync(PIN_FILE, SESSION_ID + '\n', { flag: 'wx' });
+      return true;
     } catch {
-      /* best effort */
+      // Lost the race (or write failed) — honor whoever actually holds the pin.
+      try {
+        return fs.readFileSync(PIN_FILE, 'utf8').trim() === SESSION_ID;
+      } catch {
+        return false;
+      }
     }
-    return true;
   }
   // No session_id from host → fall back to cwd (non-worktree only).
   return !isWorktreeCwd(CWD);

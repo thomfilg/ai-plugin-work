@@ -27,8 +27,12 @@ if [ -s "$CHAIN_FILE" ]; then
   case "$CHAIN_CMD" in
     *maestro-statusline.sh*) CHAIN_CMD="" ;;
   esac
-  if [ -n "$CHAIN_CMD" ]; then
-    CHAIN_OUT="$(printf '%s' "$STDIN_JSON" | eval "$CHAIN_CMD" 2>/dev/null || true)"
+  # Invoke the previously-registered status line directly (NO eval) so a
+  # tampered chain file can't run arbitrary shell. The common case — a bare
+  # executable path like the qc bar — is supported; commands needing shell
+  # parsing are intentionally not chained.
+  if [ -n "$CHAIN_CMD" ] && [ -x "$CHAIN_CMD" ]; then
+    CHAIN_OUT="$(printf '%s' "$STDIN_JSON" | "$CHAIN_CMD" 2>/dev/null || true)"
   fi
 fi
 
