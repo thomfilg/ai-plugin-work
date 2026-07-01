@@ -274,7 +274,9 @@ function main() {
   };
 
   if (!REPORT_FOLDER) {
-    console.error('Usage: node check-validate-reports.js <REPORT_FOLDER> <IMPACTED_APPS_JSON>');
+    console.error(
+      'Usage: node check-validate-reports.js <REPORT_FOLDER> <IMPACTED_APPS_JSON> [PLAYWRIGHT_SKIPPED_JSON]'
+    );
     process.exit(1);
   }
 
