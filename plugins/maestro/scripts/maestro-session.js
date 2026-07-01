@@ -80,9 +80,6 @@ function init(topic, slots, tasks, opts = {}) {
     command: opts.command || 'work',
     stopOracle: opts.stopOracle || null,
     stopSource: opts.stopSource || null,
-    // The Claude session that launched this orchestration — the status bar shows
-    // this fleet only in its owning session (not every open chat).
-    session: process.env.CLAUDE_CODE_SESSION_ID || '',
     createdAt: new Date().toISOString(),
     tasks: tasks.map((t) => ({
       id: t.id,
