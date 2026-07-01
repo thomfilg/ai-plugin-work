@@ -181,3 +181,55 @@ test('autoRestart skips when dead-end marker is set (slot rotated, do not resurr
     'dead-end short-circuit must not touch restart-loop state'
   );
 });
+
+test('autoRestart skips while a dead-end probe is pending inside the grace window', () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rl-probe-'));
+  const alertFile = path.join(stateDir, 'alerts.jsonl');
+  const tmuxStub = [];
+  process.env.DEAD_END_PROBE_GRACE_MIN = '3';
+  const actions = freshActions({ stateDir, alertFile, tmuxStub });
+  const worktree = fakeWorktree();
+
+  // Probe sent (diagnosed) but NOT killed, diagnosedAt = now → inside grace.
+  fs.writeFileSync(
+    path.join(stateDir, 'GH-PB.dead-end.json'),
+    JSON.stringify({
+      diagnosed: true,
+      diagnosedAt: Math.floor(Date.now() / 1000),
+      trigger: 'question',
+    })
+  );
+
+  const args = { session: 'GH-PB-work', ticket: 'GH-PB', worktree, silenceSec: 600 };
+  assert.equal(actions.autoRestart(args), false, 'must not restart during the probe grace window');
+  const tmuxCalls = tmuxStub.filter(
+    (c) => c.args[0] === 'kill-session' || c.args[0] === 'new-session'
+  );
+  assert.equal(tmuxCalls.length, 0, 'no tmux restart while probe is pending');
+  delete process.env.DEAD_END_PROBE_GRACE_MIN;
+});
+
+test('autoRestart proceeds once the dead-end probe grace window has elapsed', () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rl-probe-elapsed-'));
+  const alertFile = path.join(stateDir, 'alerts.jsonl');
+  const tmuxStub = [];
+  process.env.DEAD_END_PROBE_GRACE_MIN = '3';
+  const actions = freshActions({ stateDir, alertFile, tmuxStub });
+  const worktree = fakeWorktree();
+
+  // diagnosed, not killed, diagnosedAt pushed past the grace window (+60s).
+  fs.writeFileSync(
+    path.join(stateDir, 'GH-PE.dead-end.json'),
+    JSON.stringify({
+      diagnosed: true,
+      diagnosedAt: Math.floor(Date.now() / 1000) - (3 * 60 + 60),
+      trigger: 'question',
+    })
+  );
+
+  const args = { session: 'GH-PE-work', ticket: 'GH-PE', worktree, silenceSec: 600 };
+  assert.equal(actions.autoRestart(args), true, 'must restart after the grace window elapses');
+  const restarted = tmuxStub.filter((c) => c.args[0] === 'new-session');
+  assert.equal(restarted.length, 1, 'one relaunch issued after grace elapsed');
+  delete process.env.DEAD_END_PROBE_GRACE_MIN;
+});

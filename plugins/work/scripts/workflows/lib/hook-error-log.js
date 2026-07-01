@@ -165,5 +165,23 @@ function logHookError(sourceFile, err, context) {
   writeLogLine(fd, line, timestamp);
 }
 
+/**
+ * Run an async `main` for a stdout-JSON hook with the fail-open convention:
+ * on error, log via logHookError and emit an empty JSON object on stdout so
+ * Claude Code treats the hook as a no-op rather than a failure.
+ *
+ * Usage:
+ *   runJsonHook(__filename, main);
+ *
+ * @param {string} sourceFile - typically __filename, for accurate log attribution
+ * @param {() => Promise<void>} main - the hook's async entry point
+ */
+function runJsonHook(sourceFile, main) {
+  main().catch((err) => {
+    logHookError(sourceFile, err);
+    console.log(JSON.stringify({}));
+  });
+}
+
 /** @see lib/__tests__/hook-error-log.test.js for tests covering fd-based writes, rotation, symlink guard, and truncation */
-module.exports = { logHookError, LOG_FILE };
+module.exports = { logHookError, runJsonHook, LOG_FILE };

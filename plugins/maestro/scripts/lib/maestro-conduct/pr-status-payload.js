@@ -36,6 +36,9 @@ function buildPayload({ ctx, sHit, workSession, tmux }) {
   const paneTail = isReady
     ? undefined
     : tmux.capture(workSession).split('\n').slice(-40).join('\n');
+  const unblockCmd = isReady
+    ? `gh pr view ${sHit.prNumber} --repo thomfilg/claude-plugin-work --web   # inspect, then merge per never-auto-merge-pr`
+    : `gh pr checks ${sHit.prNumber} --repo thomfilg/claude-plugin-work && tmux capture-pane -t ${workSession} -p | tail -40   # see failures + nudge agent`;
   return {
     session: workSession,
     ticket: ctx.ticket,
@@ -47,6 +50,7 @@ function buildPayload({ ctx, sHit, workSession, tmux }) {
     mergeable: sHit.mergeable,
     failingChecks: sHit.failingChecks,
     ...(paneTail ? { paneTail } : {}),
+    unblockCmd,
     instruction,
   };
 }
