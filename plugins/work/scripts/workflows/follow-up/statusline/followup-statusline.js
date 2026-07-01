@@ -17,7 +17,11 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 
-const FRESH_MS = 120000; // a live file older than this ⇒ follow-up not actively polling
+// Show while a follow-up is in progress. follow-up-next deletes the file on
+// completion, so this window is only a crash/abandon safety net — it must be
+// long enough to span the gaps between steps (an agent fixing CI can take many
+// minutes between monitor polls), or the bar would flicker out mid-run.
+const FRESH_MS = 30 * 60 * 1000; // 30 min
 
 // The session Claude runs this statusLine in (session_id on stdin). An entry
 // shows only when it was launched by this same session.
