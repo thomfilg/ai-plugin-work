@@ -42,6 +42,28 @@ const getConfig = require('../../lib/get-config');
  */
 const ENFORCEMENT_KIND = 'enforcement';
 
+/**
+ * Discriminator value for usage-capture rows (GH-311).
+ * Carries per-step / per-agent token, tool-use, and duration figures parsed
+ * from a Task() result's `<usage>` block. Like enforcement rows, usage rows
+ * are excluded from `analyzeActions()` step accounting.
+ * @type {'usage'}
+ */
+const USAGE_KIND = 'usage';
+
+/**
+ * True for any row that is NOT a legacy step-transition row — i.e. it carries
+ * a non-legacy `kind` discriminator (`enforcement` or `usage`). Such rows lack
+ * the `step`/`what` shape `analyzeActions()` accounts on and are excluded from
+ * per-step duration/command accounting and the totalDuration boundary, while
+ * still counting in `actionCount`.
+ * @param {object} row
+ * @returns {boolean}
+ */
+function isNonLegacyRow(row) {
+  return !!row && (row.kind === ENFORCEMENT_KIND || row.kind === USAGE_KIND);
+}
+
 let _tasksBase;
 function getTasksBase() {
   if (!_tasksBase) _tasksBase = getConfig.require('TASKS_BASE');
@@ -160,6 +182,83 @@ function appendEnforcementAudit(ticketId, entry) {
 }
 
 /**
+ * Coerce a captured `<usage>` field to a non-negative-safe number.
+ * Any non-numeric / missing value yields `0` (NaN → 0) so the report never
+ * propagates `NaN`. Never throws.
+ * @param {string|number|undefined} value
+ * @returns {number}
+ */
+function coerceUsageNumber(value) {
+  const n = Number(value);
+  return Number.isNaN(n) ? 0 : n;
+}
+
+/**
+ * Parse a `<usage>` block out of a Task() result string into a numeric record.
+ *
+ * GH-311 — Task 1, R1 (capture total_tokens/tool_uses/duration_ms), R7/C6
+ * (graceful degradation, numeric coercion, no throw).
+ *
+ * Returns `{ totalTokens, toolUses, durationMs }` with each field coerced via
+ * `Number(...)` (NaN → 0) when a `<usage>...</usage>` block is present, and
+ * `null` when no such block exists or `text` is not a string. Missing
+ * individual fields inside the block coerce to `0`; the function never throws.
+ *
+ * @param {string} text — raw Task() result string.
+ * @returns {{totalTokens: number, toolUses: number, durationMs: number} | null}
+ */
+function parseUsageBlock(text) {
+  if (typeof text !== 'string') return null;
+  const block = text.match(/<usage>([\s\S]*?)<\/usage>/);
+  if (!block) return null;
+
+  const body = block[1];
+  const field = (name) => {
+    const m = body.match(new RegExp(`${name}\\s*:\\s*([^\\n\\r]*)`));
+    return m ? m[1].trim() : undefined;
+  };
+
+  return {
+    totalTokens: coerceUsageNumber(field('total_tokens')),
+    toolUses: coerceUsageNumber(field('tool_uses')),
+    durationMs: coerceUsageNumber(field('duration_ms')),
+  };
+}
+
+/**
+ * Append a usage-capture record to `.work-actions.json`.
+ *
+ * GH-311 — Task 1, R2 (kind:'usage' row keyed by step + agent for later
+ * per-step / per-agent rollups), C2 (written only through the guarded
+ * `appendRow()` helper — never a direct `fs.writeFileSync`).
+ *
+ * Usage records share the same file as legacy step rows and enforcement rows,
+ * discriminated by `kind: USAGE_KIND`. `loadActions()` returns them verbatim;
+ * `analyzeActions()` excludes them from per-step accounting (see
+ * `isNonLegacyRow`) while still counting them in `actionCount`.
+ *
+ * @param {string} ticketId
+ * @param {{
+ *   step: string,
+ *   agentType: string,
+ *   totalTokens: number,
+ *   toolUses: number,
+ *   durationMs: number
+ * }} record
+ */
+function appendUsage(ticketId, record) {
+  appendRow(ticketId, {
+    kind: USAGE_KIND,
+    timestamp: new Date().toISOString(),
+    step: record.step,
+    agentType: record.agentType,
+    totalTokens: coerceUsageNumber(record.totalTokens),
+    toolUses: coerceUsageNumber(record.toolUses),
+    durationMs: coerceUsageNumber(record.durationMs),
+  });
+}
+
+/**
  * Compute per-step durations, bottleneck, block/retry counts from an actions array.
  * @param {Array<{step: string, timestamp: string, what: string, meta?: object}>} actions
  * @returns {{steps: Array, totalDuration: string, bottleneck: string, bottleneckDuration: string, actionCount: number}}
@@ -178,11 +277,12 @@ function analyzeActions(actions) {
   const stepMap = new Map();
 
   for (const action of actions) {
-    // IDEA2 / GH-219: skip enforcement audit rows — they do not carry `step` /
-    // `what` fields and would corrupt step-duration accounting. Their record
-    // count still feeds `actionCount` below. Enforcement rows are also
-    // excluded from totalDuration boundary computation (see legacyActions filter ~line 236).
-    if (action && action.kind === ENFORCEMENT_KIND) continue;
+    // IDEA2 / GH-219 + GH-311: skip non-legacy rows (enforcement AND usage) —
+    // they do not carry the `step` / `what` shape and would corrupt
+    // step-duration accounting. Their record count still feeds `actionCount`
+    // below. Non-legacy rows are also excluded from the totalDuration boundary
+    // computation (see legacyActions filter below).
+    if (isNonLegacyRow(action)) continue;
 
     if (!stepMap.has(action.step)) {
       stepMap.set(action.step, {
@@ -232,8 +332,9 @@ function analyzeActions(actions) {
   }
 
   // Total duration: first legacy action to last legacy action.
-  // Enforcement rows are excluded so they do not skew boundary timestamps.
-  const legacyActions = actions.filter((a) => !(a && a.kind === ENFORCEMENT_KIND));
+  // Non-legacy rows (enforcement + usage) are excluded so they do not skew
+  // boundary timestamps.
+  const legacyActions = actions.filter((a) => !isNonLegacyRow(a));
   let totalDuration = 0;
   if (legacyActions.length > 0) {
     const firstTs = new Date(legacyActions[0].timestamp).getTime();
@@ -253,9 +354,12 @@ function analyzeActions(actions) {
 module.exports = {
   appendAction,
   appendEnforcementAudit,
+  appendUsage,
+  parseUsageBlock,
   loadActions,
   analyzeActions,
   ENFORCEMENT_KIND,
+  USAGE_KIND,
   get TASKS_BASE() {
     return getTasksBase();
   },
