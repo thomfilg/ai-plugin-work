@@ -420,7 +420,7 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
             const dir = path.join(TASKS_BASE, safeTicketPath(ticketId));
             const tasks = parseTasks(dir);
             if (!tasks) return false;
-            return validateAll(tasks, process.cwd()).valid;
+            return validateAll(tasks).valid;
           } catch {
             return false;
           }

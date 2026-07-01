@@ -54,7 +54,7 @@ module.exports = function registerTasksScopeGate(register) {
     }
     if (!tasks) return;
 
-    const validation = validateAll(tasks, process.cwd());
+    const validation = validateAll(tasks);
     if (validation.valid) {
       // Pass-through: leave entry as-is so the orchestrator advances to implement.
       return;
