@@ -97,6 +97,31 @@ function readCalls(callLog) {
     .filter((line) => line.length > 0);
 }
 
+/**
+ * Run `fn` with the token/config env vars set to `vars` (any key not listed is
+ * deleted), restoring the real values afterward. Lets the precedence tests
+ * drive `buildChildEnv()` deterministically without leaking into sibling tests.
+ */
+function withTokenEnv(vars, fn) {
+  const keys = ['GH_TOKEN', 'GITHUB_TOKEN', 'GH_CONFIG_DIR'];
+  const saved = {};
+  for (const k of keys) {
+    saved[k] = Object.prototype.hasOwnProperty.call(process.env, k)
+      ? process.env[k]
+      : undefined;
+    delete process.env[k];
+  }
+  for (const [k, v] of Object.entries(vars)) process.env[k] = v;
+  try {
+    return fn();
+  } finally {
+    for (const k of keys) {
+      if (saved[k] === undefined) delete process.env[k];
+      else process.env[k] = saved[k];
+    }
+  }
+}
+
 const AUTH_STATUS_OUTPUT_TWO_ACCOUNTS = [
   'github.com',
   '  ✓ Logged in to github.com account thomfilg (keyring)',
@@ -106,6 +131,79 @@ const AUTH_STATUS_OUTPUT_TWO_ACCOUNTS = [
   '  - Active account: false',
   '',
 ].join('\n');
+
+describe('gh-exec.js — buildChildEnv token precedence', () => {
+  it('(a) honors a GH_TOKEN-only env (GITHUB_TOKEN absent)', () => {
+    withTokenEnv({ GH_TOKEN: 'tok-a' }, () => {
+      const { buildChildEnv } = freshRequire();
+      const env = buildChildEnv();
+      assert.equal(env.GH_TOKEN, 'tok-a');
+      assert.equal('GITHUB_TOKEN' in env, false);
+    });
+  });
+
+  it('(b) honors a GITHUB_TOKEN-only env', () => {
+    withTokenEnv({ GITHUB_TOKEN: 'tok-b' }, () => {
+      const { buildChildEnv } = freshRequire();
+      const env = buildChildEnv();
+      assert.equal(env.GITHUB_TOKEN, 'tok-b');
+      assert.equal('GH_TOKEN' in env, false);
+    });
+  });
+
+  it('(c) GH_TOKEN wins when both are set', () => {
+    withTokenEnv({ GH_TOKEN: 'tok-a', GITHUB_TOKEN: 'tok-b' }, () => {
+      const { buildChildEnv } = freshRequire();
+      const env = buildChildEnv();
+      assert.equal(env.GH_TOKEN, 'tok-a');
+      assert.equal('GITHUB_TOKEN' in env, false);
+    });
+  });
+
+  it('(d) deletes both when neither is set (keyring fallback)', () => {
+    withTokenEnv({}, () => {
+      const { buildChildEnv } = freshRequire();
+      const env = buildChildEnv();
+      assert.equal('GH_TOKEN' in env, false);
+      assert.equal('GITHUB_TOKEN' in env, false);
+    });
+  });
+
+  it('(e) treats an empty-string GH_TOKEN as absent', () => {
+    withTokenEnv({ GH_TOKEN: '' }, () => {
+      const { buildChildEnv } = freshRequire();
+      const env = buildChildEnv();
+      assert.equal('GH_TOKEN' in env, false);
+      assert.equal('GITHUB_TOKEN' in env, false);
+    });
+  });
+
+  it('(g) treats empty GH_TOKEN as absent and honors GITHUB_TOKEN', () => {
+    withTokenEnv({ GH_TOKEN: '', GITHUB_TOKEN: 'tok-b' }, () => {
+      const { buildChildEnv } = freshRequire();
+      const env = buildChildEnv();
+      assert.equal(env.GITHUB_TOKEN, 'tok-b');
+      assert.equal('GH_TOKEN' in env, false);
+    });
+  });
+
+  it('(f) passes GH_CONFIG_DIR through unchanged', () => {
+    withTokenEnv({ GH_CONFIG_DIR: '/iso/path' }, () => {
+      const { buildChildEnv } = freshRequire();
+      const env = buildChildEnv();
+      assert.equal(env.GH_CONFIG_DIR, '/iso/path');
+    });
+  });
+
+  it('returns a fresh object (no mutation of process.env)', () => {
+    withTokenEnv({ GH_TOKEN: 'tok-a' }, () => {
+      const { buildChildEnv } = freshRequire();
+      const env = buildChildEnv();
+      assert.notEqual(env, process.env);
+      assert.equal(process.env.GH_TOKEN, 'tok-a');
+    });
+  });
+});
 
 describe('gh-exec.js — auth diagnostic', () => {
   describe('clean success path', () => {
@@ -181,7 +279,7 @@ describe('gh-exec.js — auth diagnostic', () => {
             assert.match(err.message, /Active gh account:\s*thomfilg/);
             assert.match(err.message, /gh auth switch --user otherbot/);
             assert.match(err.message, /GH_TOKEN/);
-            assert.match(err.message, /GITHUB_TOKEN/);
+            assert.doesNotMatch(err.message, /unset (your )?(GH_TOKEN|GITHUB_TOKEN)/i);
             return true;
           }
         );
@@ -190,6 +288,32 @@ describe('gh-exec.js — auth diagnostic', () => {
           calls.some((c) => c.startsWith('auth status')),
           true,
           'gh auth status MUST be spawned to build diagnostic'
+        );
+      } finally {
+        clearFakeGhEnv();
+      }
+    });
+
+    it('reconciled advice honors GH_TOKEN and never tells users to unset it', () => {
+      installFakeGh();
+      setFakeGhEnv({
+        mainStderr:
+          "GraphQL: Could not resolve to a Repository with the name 'foo/bar' (repository)",
+        mainExit: 1,
+        authStdout: AUTH_STATUS_OUTPUT_TWO_ACCOUNTS,
+        authExit: 0,
+      });
+      try {
+        const { ghExec } = freshRequire();
+        assert.throws(
+          () => ghExec(['api', 'repos/foo/bar']),
+          (err) => {
+            assert.match(err.message, /Likely auth issue/);
+            assert.match(err.message, /GH_TOKEN/);
+            assert.match(err.message, /now honored/i);
+            assert.doesNotMatch(err.message, /unset (your )?(GH_TOKEN|GITHUB_TOKEN)/i);
+            return true;
+          }
         );
       } finally {
         clearFakeGhEnv();
