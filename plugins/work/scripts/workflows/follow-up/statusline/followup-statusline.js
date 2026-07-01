@@ -8,9 +8,10 @@
  * actively-running follow-up. No agent, no polling — Claude Code re-runs the
  * parent .sh on its refreshInterval and shows stdout.
  *
- * Scoping: a follow-up runs inside a specific PR worktree, so an entry is shown
- * only in the session whose cwd matches the entry's worktree (and only while
- * the file is fresh — a finished/idle follow-up ages out or is deleted).
+ * Scoping: freshness only. An entry is shown while its live file is fresh (a
+ * follow-up is actively polling); a finished/idle follow-up ages out or is
+ * deleted on completion. Shown in whatever session is watching, since a
+ * follow-up may run in a worktree agent OR be driven from the operator session.
  */
 const fs = require('fs');
 const path = require('path');
@@ -18,16 +19,13 @@ const os = require('os');
 
 const FRESH_MS = 120000; // a live file older than this ⇒ follow-up not actively polling
 
-// Session JSON on stdin (best-effort) → the session cwd, used to scope the
-// follow-up line to the PR worktree it is running in.
-let CTX = {};
+// Drain stdin (Claude passes session JSON) so the pipe from the .sh never
+// blocks — the bar is freshness-scoped, not cwd-scoped.
 try {
-  CTX = JSON.parse(fs.readFileSync(0, 'utf8') || '{}');
+  fs.readFileSync(0, 'utf8');
 } catch {
-  CTX = {};
+  /* no stdin */
 }
-const WS = CTX.workspace || {};
-const CWD = CTX.cwd || WS.current_dir || WS.project_dir || '';
 
 function liveEntries() {
   const dir = os.tmpdir();
@@ -62,10 +60,7 @@ function segment(e) {
 }
 
 function render() {
-  // Only show a follow-up in the session sitting in its worktree (cwd match);
-  // fall back to showing fresh entries when the host provides no cwd.
-  const entries = liveEntries().filter((e) => !CWD || !e.cwd || e.cwd === CWD);
-  return entries.map(segment).join('      |      ');
+  return liveEntries().map(segment).join('      |      ');
 }
 
 process.stdout.write(render());
