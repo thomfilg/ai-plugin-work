@@ -89,7 +89,7 @@ describe('config — WORK_TEST_STRATEGY_VALIDATOR feature flag (AC17)', () => {
     assert.equal(
       config.WORK_TEST_STRATEGY_VALIDATOR,
       '1',
-      'flag should default to "1" (on) when env var is not set — GH-590 + GH-610 have landed',
+      'flag should default to "1" (on) when env var is not set — GH-590 + GH-610 have landed'
     );
   });
 
@@ -98,7 +98,7 @@ describe('config — WORK_TEST_STRATEGY_VALIDATOR feature flag (AC17)', () => {
     assert.equal(
       config.WORK_TEST_STRATEGY_VALIDATOR,
       '1',
-      'flag should be "1" when WORK_TEST_STRATEGY_VALIDATOR=1',
+      'flag should be "1" when WORK_TEST_STRATEGY_VALIDATOR=1'
     );
   });
 
@@ -107,7 +107,7 @@ describe('config — WORK_TEST_STRATEGY_VALIDATOR feature flag (AC17)', () => {
     assert.equal(
       config.WORK_TEST_STRATEGY_VALIDATOR,
       '0',
-      'flag should be "0" when WORK_TEST_STRATEGY_VALIDATOR=0',
+      'flag should be "0" when WORK_TEST_STRATEGY_VALIDATOR=0'
     );
   });
 
@@ -116,7 +116,7 @@ describe('config — WORK_TEST_STRATEGY_VALIDATOR feature flag (AC17)', () => {
     assert.equal(
       config.get('WORK_TEST_STRATEGY_VALIDATOR'),
       '1',
-      'config.get() should read the flag from env/config',
+      'config.get() should read the flag from env/config'
     );
   });
 });

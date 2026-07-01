@@ -111,7 +111,10 @@ function writeWorkState(ticket, taskNum, nTasks = taskNum) {
 
 // A worktree-rooted `.envrc` exporting the envelope var used by synthesis.
 function writeEnvrc(varName, value) {
-  fs.writeFileSync(path.join(worktreeDir, '.envrc'), `export ${varName}=${JSON.stringify(value)}\n`);
+  fs.writeFileSync(
+    path.join(worktreeDir, '.envrc'),
+    `export ${varName}=${JSON.stringify(value)}\n`
+  );
 }
 
 // Single-task tasks.md: a backend task carrying a `### Test Strategy` block and
@@ -300,7 +303,16 @@ describe('GH-610 Task 3 — stop hook synthesis/citation fallback', () => {
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
       path.join(dir, 'tasks.md'),
-      ['## Task 1 — Bare task', '', '### Type', 'backend', '', '### Files in scope', '- src/x.js', ''].join('\n')
+      [
+        '## Task 1 — Bare task',
+        '',
+        '### Type',
+        'backend',
+        '',
+        '### Files in scope',
+        '- src/x.js',
+        '',
+      ].join('\n')
     );
 
     const res = runHook(ticket);
