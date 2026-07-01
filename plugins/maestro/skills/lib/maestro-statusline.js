@@ -110,50 +110,11 @@ function readCtx() {
   }
 }
 const CTX = readCtx();
+// The Claude session Claude runs this statusLine in. Each manifest records the
+// session that launched its orchestration (maestro-session.js), so the bar shows
+// a topic ONLY in its owning session — every orchestrator gets its own fleet,
+// and other chats show nothing. No global pin (which only one session could win).
 const SESSION_ID = CTX.session_id || CTX.sessionId || '';
-const CWD =
-  CTX.cwd || (CTX.workspace && (CTX.workspace.current_dir || CTX.workspace.project_dir)) || '';
-const PIN_FILE =
-  process.env.MAESTRO_STATUSLINE_PIN ||
-  path.join(os.homedir(), '.cache', 'maestro', 'statusline-session.pin');
-
-function isWorktreeCwd(c) {
-  if (!c) return false;
-  const esc = REPO_NAME.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp('/' + esc + '-[^/]+(?:/|$)').test(c);
-}
-
-// True only for the orchestrator session. Auto-claims the pin for the first
-// non-worktree session that renders; thereafter only that session matches.
-// Falls back to a cwd rule when session_id isn't provided by the host.
-function isOperatorSession() {
-  let pin = '';
-  try {
-    pin = fs.readFileSync(PIN_FILE, 'utf8').trim();
-  } catch {
-    /* none yet */
-  }
-  if (pin) return !!SESSION_ID && SESSION_ID === pin;
-  if (isWorktreeCwd(CWD)) return false; // an agent tab must never claim the pin
-  if (SESSION_ID) {
-    try {
-      fs.mkdirSync(path.dirname(PIN_FILE), { recursive: true });
-      // Atomic claim: 'wx' fails if a racing session already created the pin,
-      // so exactly one writer wins — no two-sessions-both-operator window.
-      fs.writeFileSync(PIN_FILE, SESSION_ID + '\n', { flag: 'wx' });
-      return true;
-    } catch {
-      // Lost the race (or write failed) — honor whoever actually holds the pin.
-      try {
-        return fs.readFileSync(PIN_FILE, 'utf8').trim() === SESSION_ID;
-      } catch {
-        return false;
-      }
-    }
-  }
-  // No session_id from host → fall back to cwd (non-worktree only).
-  return !isWorktreeCwd(CWD);
-}
 
 // Render the "▶ …" active portion. One active ticket shows inline with its
 // two-word label; multiple rotate one-per-refresh ([i/N]) via wall-clock time
@@ -185,9 +146,10 @@ function topicSegment(j, kinds) {
 }
 
 function render() {
-  if (!isOperatorSession()) return '';
+  if (!SESSION_ID) return '';
   const kinds = latestKindByTicket();
   return readManifests()
+    .filter((j) => j.session === SESSION_ID) // only fleets this session launched
     .map((j) => topicSegment(j, kinds))
     .filter(Boolean)
     .join('      |      ');
