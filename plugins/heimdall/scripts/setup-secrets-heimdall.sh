@@ -27,9 +27,15 @@ BROKER_PREBUILT="${SCRIPT_DIR}/bin/mcp-pg-broker.linux-$(uname -m)"
 # either order (`--revert <repo>`, `<repo> --revert`, `<repo>`, `--revert`, none).
 REVERT=
 REPO_ARG=
-for a in "${1:-}" "${2:-}"; do
+# By default we REFUSE to report success when the agent uid can still reach the
+# secret via a root-equivalent path (rootful docker socket / passwordless sudo) —
+# the file boundary is meaningless against root. --allow-escalation downgrades
+# that hard failure to a loud warning for operators who accept the residual risk.
+ALLOW_ESCALATION=
+for a in "${1:-}" "${2:-}" "${3:-}"; do
   case "$a" in
     --revert) REVERT=1 ;;
+    --allow-escalation) ALLOW_ESCALATION=1 ;;
     "") : ;;
     *) [ -z "${REPO_ARG}" ] && REPO_ARG="$a" ;;
   esac
@@ -105,6 +111,10 @@ out.push(`REWRITE_MCP=${q(cfg.rewriteMcpJson === false || hasInject ? '' : '1')}
 out.push(`SECRETS_FILES=(${secretsFiles.map((f) => q(abs(f))).join(' ')})`);
 out.push(`HAS_INJECT=${q(hasInject ? '1' : '')}`);
 out.push(`INJECT_GROUPS=${q(groups.join(','))}`);
+// Exec targets the broker will run as RUN_USER. These MUST be root-owned, else
+// the agent could rewrite one to dump the (runner-readable) secret. Emit them so
+// step 5b can lock them down.
+out.push(`EXEC_TARGETS=(${inject.map((c) => q(abs(c.exec))).join(' ')})`);
 out.push(`COMMANDS_JSON_B64=${q(Buffer.from(JSON.stringify(commandsMap, null, 2)).toString('base64'))}`);
 process.stdout.write(out.join('\n') + '\n');
 NODE
@@ -226,6 +236,16 @@ if [ -n "${HAS_INJECT}" ]; then
   chown root:root "${COMMANDS_JSON}"
   chmod 0644 "${COMMANDS_JSON}"
   echo ">> Wrote ${COMMANDS_JSON} (root:root 0644)"
+  # Root-own each exec target. The broker runs these as RUN_USER (which CAN read
+  # the secret), so an agent-writable exec would be a trivial exfil path: rewrite
+  # it to `cat <secret>`. Locking to root:root 0755 keeps it agent-runnable (via
+  # the broker) but not agent-modifiable. The agent never edits these directly.
+  for x in "${EXEC_TARGETS[@]}"; do
+    [ -e "$x" ] || die "injectCommands exec not found: $x"
+    chown root:root "$x"
+    chmod 0755 "$x"
+    echo ">> Hardened exec ${x} -> root:root 0755 (agent cannot rewrite it)"
+  done
   if [ -n "${INJECT_GROUPS}" ]; then
     IFS=',' read -ra _grps <<<"${INJECT_GROUPS}"
     for g in "${_grps[@]}"; do
@@ -289,7 +309,58 @@ for f in "${SECRETS_FILES[@]}"; do
     die "agent uid CAN still read $f — boundary FAILED"
   fi
 done
-echo "   OK: ${AGENT_USER} is denied on all secrets files"
+echo "   OK: ${AGENT_USER} is denied a direct read on all secrets files"
+
+# 8b. The direct-read denial above is worthless if the agent uid can become root.
+#     A rootful docker socket and passwordless sudo are each root-equivalent and
+#     read any file regardless of ownership. Detect both; by default FAIL (an
+#     honest boundary refuses to claim success it cannot deliver), or WARN under
+#     --allow-escalation.
+echo ">> Checking the agent uid has no root-equivalent escalation path..."
+ESCALATION_FOUND=
+
+# Rootful docker socket: agent can reach /var/run/docker.sock AND the daemon is
+# rootful (rootless docker maps container-root to the user, so it CANNOT read a
+# foreign uid's 0600 file — that variant is fine and is not flagged).
+if sudo -n -u "${AGENT_USER}" test -r /var/run/docker.sock 2>/dev/null; then
+  DSEC="$(sudo -n -u "${AGENT_USER}" docker -H unix:///var/run/docker.sock info --format '{{.SecurityOptions}}' 2>/dev/null || true)"
+  case "${DSEC}" in
+    *rootless*) echo "   docker: agent reaches a ROOTLESS daemon — not a bypass (OK)" ;;
+    "")
+      # Empty = the query itself failed (docker CLI not in PATH, or daemon
+      # unreachable) — we could NOT confirm the daemon type. The agent can still
+      # reach the socket (raw HTTP works without the CLI), so fail CLOSED, but
+      # say so honestly instead of asserting a confirmed rootful socket.
+      ESCALATION_FOUND=1
+      echo "   !! docker: ${AGENT_USER} can reach /var/run/docker.sock but the daemon type could not be queried (docker CLI missing / daemon down) — treating as ROOTFUL (fail-closed)"
+      ;;
+    *)
+      ESCALATION_FOUND=1
+      echo "   !! docker: ${AGENT_USER} can reach the ROOTFUL docker socket — root-equivalent, can read the secret"
+      ;;
+  esac
+fi
+
+# Passwordless sudo (cached creds or NOPASSWD) lets the agent read anything now.
+# Password-required sudo is fine: the agent cannot supply it non-interactively.
+if sudo -n -u "${AGENT_USER}" sudo -n true >/dev/null 2>&1; then
+  ESCALATION_FOUND=1
+  echo "   !! sudo: ${AGENT_USER} has PASSWORDLESS sudo — root-equivalent, can read the secret"
+fi
+
+if [ -n "${ESCALATION_FOUND}" ]; then
+  echo
+  echo "   The file boundary holds, but ${AGENT_USER} can become root and walk around it."
+  echo "   To close it (keeps docker for your apps):"
+  echo "     - rootless docker:  sudo bash ${SCRIPT_DIR}/setup-rootless-docker.sh ${AGENT_USER}"
+  echo "     - or remove the agent from the 'docker' group / revoke passwordless sudo"
+  if [ -z "${ALLOW_ESCALATION}" ]; then
+    die "agent uid has a root-equivalent escalation path — boundary is BYPASSABLE. Close it (above), or re-run with --allow-escalation to accept the risk."
+  fi
+  echo "   WARNING: --allow-escalation set — proceeding with a BYPASSABLE boundary."
+else
+  echo "   OK: no rootful-docker / passwordless-sudo escalation path for ${AGENT_USER}"
+fi
 
 echo
 echo "=============================================================="

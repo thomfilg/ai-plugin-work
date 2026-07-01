@@ -35,21 +35,70 @@ repo basename plus a short hash of its absolute path) that the script writes.
    `wrapper`/`allowlist` (see "CLI consumers" below). Confirm values with the
    user before proceeding.
 
-## Phase 2 — privileged install (user runs)
+## Phase 2 — privileged install (auto-escalating)
 
-The plugin cannot run sudo. Tell the user to run, and explain each step:
+Do NOT hand the user a raw `sudo` line. Run the install through the bootstrap,
+which escalates as automatically as the host allows (root → cached/NOPASSWD sudo
+→ pkexec GUI → else a single `!`-prefixed command for the user's terminal):
 ```bash
-sudo bash "${CLAUDE_PLUGIN_ROOT}/scripts/setup-secrets-heimdall.sh" "<repo>"
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/heimdall-run-privileged.sh" \
+  "${CLAUDE_PLUGIN_ROOT}/scripts/setup-secrets-heimdall.sh" "<repo>"
 ```
-This creates the runner uid, locks the secrets file (0600), hardens the wrapper,
-compiles+installs the setuid broker, rewrites `.mcp.json`, and verifies the
-agent uid is denied.
+The wrapped installer creates the runner uid, locks each secrets file (0600),
+installs the setuid broker + (for `injectCommands`) the shipped wrapper, command
+map, and **root-owns every `exec` target** (so the agent cannot rewrite one to
+dump the secret), rewrites `.mcp.json` when applicable, and verifies the agent
+uid is denied — both a direct read AND any root-equivalent escalation path.
 
-## Phase 3 — after
+**If the bootstrap exits 10 (`NEEDS_PASSWORD`)**: it printed the exact
+`! sudo …` line. Surface that line verbatim and tell the user to run it in their
+terminal (the `!` prefix runs it in-session so sudo can prompt). Then continue.
 
-1. Restart Claude Code so MCP reloads `.mcp.json`.
-2. Confirm an MCP query works (proves the broker can read).
-3. Advise rotating the secrets — old values may have leaked before the install.
+**If the installer dies with "boundary is BYPASSABLE"** (the agent uid can reach
+a rootful docker socket or has passwordless sudo): the file lock is in place but
+root can walk around it. Do NOT report success. Close the gap, keeping docker for
+the user's apps, by switching the agent to **rootless docker**:
+```bash
+bash "${CLAUDE_PLUGIN_ROOT}/scripts/heimdall-run-privileged.sh" \
+  "${CLAUDE_PLUGIN_ROOT}/scripts/setup-rootless-docker.sh" "<agent-user>"
+```
+That does the root half (deps, subuid/subgid, removes the agent from the `docker`
+group, linger). Then tell the user to finish as themselves:
+`dockerd-rootless-setuptool.sh install && docker context use rootless`. Re-run
+the Phase 2 install; the escalation gate now passes. Only if the user explicitly
+accepts the residual risk, re-run the installer with a trailing
+`--allow-escalation` to downgrade the hard failure to a warning.
+
+> An app that needs `--privileged` or host networking can't use rootless — use a
+> docker-socket proxy that denies host bind-mounts instead, and keep the agent
+> off the raw socket.
+
+## Phase 3 — ENFORCE: verify, or tell the user it does NOT work
+
+You cannot type the user's password, but you MUST NOT let the flow end pretending
+the secret is protected when it isn't. After Phase 2, ALWAYS verify and gate:
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/heimdall-conceal-status.js" "<repo>"; echo "exit=$?"
+```
+- **exit 0 (PROTECTED)** → done. Then: restart Claude Code (MCP reload), confirm a
+  broker query works, advise rotating the secrets (old values may have pre-leaked).
+- **exit 2 (NOT PROTECTED)** → the user did NOT complete the privileged install (or
+  the docker path is still open). Do **not** report success. Tell the user verbatim
+  and bluntly:
+
+  > ⚠️ NOT PROTECTED. You did not run the privileged install, so Heimdall is doing
+  > **nothing** — the LLM/agent can still read `<secrets file>`. This is hook-and-OS
+  > theatre until you run the sudo step. Run the `! sudo …` command above and
+  > authenticate; I will re-verify and will keep telling you it's unprotected until
+  > the audit passes.
+
+  Then re-emit the `! sudo …` line and stop — re-verify on the next turn. Never
+  downgrade this to a soft "you may want to…". The whole point is the boundary is
+  worthless unless the privileged step actually ran.
+
+This is the enforcement: the flow refuses to claim protection until the audit exits
+0, and states plainly that an un-installed Heimdall blocks nothing.
 
 ## CLI consumers (injectCommands) — a secret for a command, not an MCP server
 
@@ -81,8 +130,17 @@ command path or the secret — and cannot read the secret file or the command's
 `/proc/<pid>/environ`. Undo with the same `--revert` (removes the wrapper, command
 map, broker, and restores the secrets).
 
-## Caveat to surface
+## The escalation gate (enforced, not advisory)
 
-The boundary holds only if the agent uid has **no** sudo or docker-socket
-access (both are root-equivalent and bypass file permissions). State this
-explicitly.
+A file-ownership boundary is worthless if the agent uid can become root, because
+root reads every file. The installer therefore **refuses to report success**
+while the agent uid has a root-equivalent path:
+- **rootful docker socket** — `docker run -v /:/host …` reads anything. Fixed by
+  rootless docker (above); a *rootless* daemon is fine and is not flagged.
+- **passwordless sudo** (cached creds or NOPASSWD) — reads anything now.
+  Password-required sudo is fine: the agent can't supply it non-interactively.
+
+This is physics, not a Heimdall limitation: "the agent has the rootful docker
+socket" and "a host file the agent can't read" cannot both be true on one host.
+The honest resolutions are rootless/proxied docker, or running Claude as a uid
+with neither sudo nor docker. `/heimdall:audit` re-checks this each time.
