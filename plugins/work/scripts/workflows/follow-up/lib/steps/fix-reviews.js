@@ -290,3 +290,8 @@ module.exports = function registerFixReviews(register) {
     return buildReviewExecute(state, comment, commentsScript, counts);
   });
 };
+
+// Exposed for tests so ordering/content assertions run against the ACTUAL
+// assembled prompt string rather than the raw source-file layout.
+module.exports.buildReviewPrompt = buildReviewPrompt;
+module.exports.reviewJudgmentBlock = reviewJudgmentBlock;

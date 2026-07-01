@@ -14,6 +14,28 @@ const path = require('node:path');
 const FIX_REVIEWS_PATH = path.resolve(__dirname, '..', 'fix-reviews.js');
 const SOURCE = fs.readFileSync(FIX_REVIEWS_PATH, 'utf8');
 
+// Build the ACTUAL assembled prompt so ordering/spread assertions test the
+// emitted string, not the raw source-file layout (a source-text check passes
+// even if reviewJudgmentBlock is never spread into the prompt array).
+const { buildReviewPrompt } = require('../fix-reviews.js');
+const PROMPT = buildReviewPrompt(
+  {
+    author: 'cursor',
+    priority: 'Medium',
+    body: 'body',
+    codeContext: 'code',
+    path: 'a.js',
+    line: 12,
+  },
+  'a.js:12',
+  { currentIndex: 1, totalComments: 1 },
+  {
+    solveCmd: 'node c --mark-locally-solved',
+    skipCmd: 'node c --mark-locally-skipped',
+    nextCmd: 'node n',
+  }
+);
+
 describe('fix-reviews delegate block (Task 7)', () => {
   it('Delegate-block text in fix-reviews.js uses the new flag names', () => {
     assert.ok(
@@ -83,10 +105,12 @@ describe('fix-reviews judgment step (Task 1, GH-352)', () => {
   });
 
   it('places the judgment step before the Option A / Option B action block', () => {
-    const judgmentIdx = SOURCE.search(/Before you act/i);
-    const actionIdx = SOURCE.indexOf('## You MUST do exactly ONE of these:');
-    assert.ok(judgmentIdx !== -1, 'expected a judgment heading');
-    assert.ok(actionIdx !== -1, 'expected the existing action block');
+    // Assert against the ASSEMBLED prompt, not source layout: this fails if
+    // reviewJudgmentBlock is removed from buildReviewPrompt's prompt array.
+    const judgmentIdx = PROMPT.search(/Before you act/i);
+    const actionIdx = PROMPT.indexOf('## You MUST do exactly ONE of these:');
+    assert.ok(judgmentIdx !== -1, 'expected a judgment heading in the assembled prompt');
+    assert.ok(actionIdx !== -1, 'expected the action block in the assembled prompt');
     assert.ok(
       judgmentIdx < actionIdx,
       'expected the judgment step to appear before the action block'
