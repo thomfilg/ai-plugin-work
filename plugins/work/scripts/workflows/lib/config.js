@@ -146,7 +146,6 @@ const config = {
   // the draft validator (GH-590) and the implement-gate/tdd-phase-state/stop-hook
   // wiring (GH-610) have landed. Set to '0' to fall back to the legacy
   // `### Test Command` path (e.g. for in-flight tasks.md authored pre-GH-590).
-  WORK_TEST_STRATEGY_VALIDATOR: process.env.WORK_TEST_STRATEGY_VALIDATOR || '1',
 
   // Web apps list — each repo defines its own via WEB_APPS env var (JSON)
   // Example .env: WEB_APPS='[{"name":"my-app","defaultPort":3000,"type":"vite"}]'

@@ -186,18 +186,14 @@ function readReuseAudit(specDir) {
 }
 
 /**
- * Collect the union of file paths declared under per-task scope subsections
- * in tasks.md. For each `## Task N` block:
- *   - If `### Files in scope` is present (even with zero bullets), its bullet
- *     list wins (Open Q #3: Files-in-scope is canonical when authored).
- *   - Otherwise, fall back to `### Suggested Scope` bullets.
- * Returns `null` when neither subsection appears in any task.
+ * Collect the union of file paths declared under each `## Task N` block's
+ * `### Files in scope` bullet list — the only recognized scope heading.
+ * Returns `null` when no task declares the subsection.
  *
- * B7 fix: `extractBulletPaths` now returns `[]` for present-but-empty
- * sections and `null` only when the heading is absent. An author who
- * explicitly authors `### Files in scope` with zero bullets ("no files
- * required") is honored instead of silently falling through to the legacy
- * Suggested Scope, which may enforce different files.
+ * B7 fix: `extractBulletPaths` returns `[]` for present-but-empty sections
+ * and `null` only when the heading is absent, so an author who explicitly
+ * writes `### Files in scope` with zero bullets ("no files required") is
+ * honored.
  */
 function readSuggestedScopeFiles(tasksDir) {
   const text = specShared.readTasks(tasksDir);
@@ -214,12 +210,6 @@ function readSuggestedScopeFiles(tasksDir) {
     if (filesInScope !== null) {
       sawAny = true;
       for (const p of filesInScope) files.add(p);
-      continue;
-    }
-    const suggested = extractBulletPaths(block, /^###\s+Suggested Scope\b/im);
-    if (suggested !== null) {
-      sawAny = true;
-      for (const p of suggested) files.add(p);
     }
   }
   if (!sawAny) return null;
@@ -238,8 +228,7 @@ function extractBulletPaths(block, headingRe) {
     if (m) out.push(m[1]);
   }
   // Present-but-empty: return [] so the caller distinguishes it from absent
-  // (null). Honors authored intent: empty Files-in-scope means "no files",
-  // not "fall back to Suggested Scope".
+  // (null). Honors authored intent: empty Files-in-scope means "no files".
   return out;
 }
 

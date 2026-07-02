@@ -49,7 +49,7 @@ describe('implement enrichment — task number extraction', () => {
         '## Task 1 — Only task',
         '### Type',
         'backend',
-        '### Suggested Scope',
+        '### Files in scope',
         '- src/foo.js',
         '',
       ].join('\n')
@@ -84,7 +84,7 @@ describe('implement enrichment — task number extraction', () => {
         '## Task 2 — Second task',
         '### Type',
         'backend',
-        '### Suggested Scope',
+        '### Files in scope',
         '- src/bar.js',
         '',
       ].join('\n')

@@ -126,7 +126,7 @@ grep -r "pattern" <paths>
 - Check the Requirement Coverage table — every requirement must be DELIVERED
 
 **Layer 5 — Regressions:**
-- Verify no files outside `### Suggested Scope` were modified unexpectedly
+- Verify no files outside `### Files in scope` were modified unexpectedly
 - Check that existing functionality wasn't broken (imports, exports still intact)
 
 **If the Verification Context section is missing from your prompt**, fall back to reading the files directly from `${TASKS_BASE}/${TICKET_ID}/` (ticket.json, brief.md, spec.md, tasks.md).

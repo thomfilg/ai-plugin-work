@@ -2,6 +2,13 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+
+// This suite targets validateSharedComponentOrdering only. Fixtures do not
+// carry `### Test Strategy` blocks, so the always-on strategy/ownership
+// validators emit unrelated errors — filter to the scaffold concern.
+function scaffoldErrors(errors) {
+  return errors.filter((e) => /must scaffold|mention the shared component name/i.test(e));
+}
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -93,7 +100,11 @@ test('PASSES when Task 1 scaffolds Generic shell in shared/', () => {
     }),
   });
   const errors = draft.validateArtifacts(tasksDir);
-  assert.equal(errors.length, 0, `expected no errors, got: ${JSON.stringify(errors)}`);
+  assert.equal(
+    scaffoldErrors(errors).length,
+    0,
+    `expected no errors, got: ${JSON.stringify(errors)}`
+  );
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -138,7 +149,11 @@ test('does NOT enforce shared-scaffold rule when spec has no Generic-split rows'
     }),
   });
   const errors = draft.validateArtifacts(tasksDir);
-  assert.equal(errors.length, 0, `expected no errors, got: ${JSON.stringify(errors)}`);
+  assert.equal(
+    scaffoldErrors(errors).length,
+    0,
+    `expected no errors, got: ${JSON.stringify(errors)}`
+  );
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -150,7 +165,11 @@ test('does NOT enforce shared-scaffold rule when spec.md is missing', () => {
     }),
   });
   const errors = draft.validateArtifacts(tasksDir);
-  assert.equal(errors.length, 0, `expected no errors when no spec, got: ${JSON.stringify(errors)}`);
+  assert.equal(
+    scaffoldErrors(errors).length,
+    0,
+    `expected no errors when no spec, got: ${JSON.stringify(errors)}`
+  );
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -163,7 +182,11 @@ test('accepts shared paths under packages/ui/', () => {
     }),
   });
   const errors = draft.validateArtifacts(tasksDir);
-  assert.equal(errors.length, 0, `expected no errors, got: ${JSON.stringify(errors)}`);
+  assert.equal(
+    scaffoldErrors(errors).length,
+    0,
+    `expected no errors, got: ${JSON.stringify(errors)}`
+  );
   fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -208,7 +231,11 @@ test('finds the task numbered 1 even when it appears AFTER Task 2 in document or
   // Task 1 (actually numbered 1) scaffolds the shared component → no error.
   // The buggy version would have evaluated Task 2 (first in file) and reported
   // "Task 1 must scaffold..." even though Task 1 is correct.
-  assert.equal(errors.length, 0, `expected no errors, got: ${JSON.stringify(errors)}`);
+  assert.equal(
+    scaffoldErrors(errors).length,
+    0,
+    `expected no errors, got: ${JSON.stringify(errors)}`
+  );
   fs.rmSync(root, { recursive: true, force: true });
 });
 

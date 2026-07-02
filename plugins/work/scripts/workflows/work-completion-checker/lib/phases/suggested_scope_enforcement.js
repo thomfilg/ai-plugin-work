@@ -1,7 +1,7 @@
 /**
  * Phase: suggested_scope_enforcement.
  *
- * GH-282 Task 5. Reads `### Files in scope` / `### Suggested Scope` entries
+ * GH-282 Task 5. Reads `### Files in scope` entries
  * from tasks.md (via Task 2's `readSuggestedScopeFiles`) and verifies each
  * declared file appears in the changed-file set AND has non-empty diff hunks
  * (`git diff --numstat`).
@@ -163,7 +163,7 @@ function validate(ctx) {
 
   if (scopedFiles === null) {
     appendForCheckType(ctx.tasksDir, 'suggested_scope', [], { scopeChecked: 0 });
-    return { ok: true, summary: 'no Suggested Scope section — skipped' };
+    return { ok: true, summary: 'no Files in scope sections — skipped' };
   }
 
   try {
@@ -189,7 +189,7 @@ function validate(ctx) {
     if (missing > 0) {
       return {
         ok: false,
-        errors: [`${missing} Suggested Scope file(s) missing from diff`],
+        errors: [`${missing} Files-in-scope file(s) missing from diff`],
         summary: `suggested scope: ${scopedFiles.length} checked, ${missing} missing`,
         scopeChecked: scopedFiles.length,
       };

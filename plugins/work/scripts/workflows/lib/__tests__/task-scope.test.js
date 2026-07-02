@@ -50,7 +50,7 @@ describe('validateTask', () => {
     assert.equal(errors.length, 1);
   });
 
-  it('accepts legacy suggestedScope as fallback when filesInScope is missing', () => {
+  it('rejects legacy suggestedScope-only tasks (canonical Files in scope required)', () => {
     const errors = ts.validateTask({
       num: 5,
       type: 'tdd-code',
@@ -58,7 +58,8 @@ describe('validateTask', () => {
       suggestedScope: '- lib/x.ts',
       filesOutOfScope: [],
     });
-    assert.deepEqual(errors, []);
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /missing `### Files in scope`/);
   });
 
   it('fails when filesOutOfScope is non-array (malformed)', () => {

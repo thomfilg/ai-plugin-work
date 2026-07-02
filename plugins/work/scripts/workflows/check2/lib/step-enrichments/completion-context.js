@@ -132,7 +132,7 @@ function buildTaskVerification(num, body) {
   const acMatch = body.match(/### Acceptance Criteria\s*\n([\s\S]*?)(?=\n###|\n## |$)/);
   const ac = acMatch ? acMatch[1].trim() : '';
 
-  const scopeMatch = body.match(/### Suggested Scope[^\n]*\n([\s\S]*?)(?=\n###|\n## |$)/);
+  const scopeMatch = body.match(/### Files in scope[^\n]*\n([\s\S]*?)(?=\n###|\n## |$)/);
   const scope = scopeMatch ? scopeMatch[1].trim() : '';
 
   return [

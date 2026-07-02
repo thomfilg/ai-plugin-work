@@ -45,15 +45,12 @@ try {
 const CITATION_KINDS = new Set(['verified-by', 'wiring-citation']);
 
 /**
- * True when the GH-590 Test Strategy validator flag is enabled. Read via the
- * shared config accessor (never re-implement the flag logic). Fail-safe to
- * disabled when config is unavailable so legacy `--cmd` recording is inert.
+ * The GH-590 Test Strategy validator is permanently on — the flag-off
+ * escape hatch (legacy `### Test Command` era) was removed with the rest
+ * of the legacy generation paths.
  */
 function strategyFlagOn() {
-  if (config && typeof config.WORK_TEST_STRATEGY_VALIDATOR === 'string') {
-    return config.WORK_TEST_STRATEGY_VALIDATOR === '1';
-  }
-  return process.env.WORK_TEST_STRATEGY_VALIDATOR === '1';
+  return true;
 }
 
 /**
@@ -68,7 +65,6 @@ function strategyFlagOn() {
  * task parser is available, and the ticket/task identifiers are well-formed.
  */
 function strategyResolvable(ticketId, taskNum) {
-  if (!strategyFlagOn()) return false;
   if (!taskParser || typeof taskParser.parseTasks !== 'function') return false;
   if (!ticketId || !Number.isInteger(taskNum) || taskNum < 1) return false;
   return true;

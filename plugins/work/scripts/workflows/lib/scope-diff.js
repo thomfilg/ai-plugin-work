@@ -8,8 +8,8 @@
  *
  * Inputs are pure data:
  *   - `diffFiles`: string[] (output of `git diff --name-only origin/main...HEAD`)
- *   - `tasks`:     Array<{filesInScope?: string[], filesOutOfScope?: string[],
- *                          suggestedScope?: string}> (from task-parser.parseTasks)
+ *   - `tasks`:     Array<{filesInScope?: string[], filesOutOfScope?: string[]}>
+ *                  (from task-parser.parseTasks)
  *
  * Output:
  *   {
@@ -24,26 +24,8 @@
 
 const { globToRegex } = require('./hooks/policies/scope-protection');
 
-function _parseLegacySuggestedScope(text) {
-  if (!text || typeof text !== 'string') return [];
-  return text
-    .split('\n')
-    .map((l) =>
-      l
-        .trim()
-        .replace(/^[-*+]\s+/, '')
-        .replace(/^`+|`+$/g, '')
-        .trim()
-    )
-    .filter((l) => l && !l.startsWith('<!--'));
-}
-
 function _scopeForTask(task) {
-  if (Array.isArray(task.filesInScope) && task.filesInScope.length > 0) {
-    return task.filesInScope;
-  }
-  // Legacy fallback so tasks written before Gate C still inform Gate E.
-  return _parseLegacySuggestedScope(task.suggestedScope);
+  return Array.isArray(task.filesInScope) ? task.filesInScope : [];
 }
 
 function _compileMany(patterns) {

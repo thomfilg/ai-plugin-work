@@ -108,7 +108,7 @@ describe('task-next.js auto-init in recordEvidence (regression for ea27b7f6)', (
         'node tmp/dbg/multiply.test.js',
         '```',
         '',
-        '### Suggested Scope',
+        '### Files in scope',
         '- `tmp/dbg/multiply.test.js`',
         '- `tmp/dbg/multiply.js`',
         '',

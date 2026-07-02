@@ -14,7 +14,7 @@
  *   3. Validate the result against phase rules:
  *        - red:  command must fail (exit != 0) AND every gherkin scenario tagged
  *                `@task:N` must appear in at least one test/spec file under the
- *                task's Suggested Scope.
+ *                task's Files in scope.
  *        - green: command must pass (exit == 0).
  *        - refactor: command must still pass.
  *   4. If validation succeeds, record evidence via tdd-phase-state.js (the only
@@ -54,7 +54,7 @@ const { fileMatchesScope } = require('../lib/task-scope');
 const TDD_DERIVED_DONE = 'done';
 
 /**
- * Filter a Suggested Scope list down to just test/spec files.
+ * Filter a Files in scope list down to just test/spec files.
  *
  * Used to defensively sanitize CHANGED_FILES injected into the test
  * subprocess and recorder env (spec §P0#2 — RED-phase CHANGED_FILES must
@@ -209,7 +209,7 @@ function extractTaskSection(tasksMd, taskNum) {
 function extractField(section, header) {
   // NOTE: no `m` flag. With `m`, `$` in the lookahead matches end-of-LINE,
   // so the lazy `[\s\S]*?` terminates at the first newline and we only
-  // capture the first line of the field body (e.g. Suggested Scope returns
+  // capture the first line of the field body (e.g. Files in scope returns
   // only the first path). Without `m`, `$` is end-of-string, and the
   // lookahead terminates correctly at the next `### ` / `## ` header or EOF.
   const re = new RegExp(`(?:^|\\n)### *${header}\\b[^\\n]*\\n([\\s\\S]*?)(?=\\n### |\\n## |$)`);
@@ -218,10 +218,11 @@ function extractField(section, header) {
 }
 
 function parseSuggestedScope(section) {
-  // Per spec Open Q #3: `Files in scope` is the canonical heading and wins
-  // when both are present. `Suggested Scope` remains as a backward-compatible
-  // fallback for older tasks.md files.
-  const raw = extractField(section, 'Files in scope') || extractField(section, 'Suggested Scope');
+  // `Files in scope` is the only recognized heading. The legacy
+  // `### Files in scope` fallback was removed — the planner pipeline
+  // (draft REQUIRED_SUBSECTIONS + tasks_gate validateTask) guarantees the
+  // canonical section exists before implement ever runs.
+  const raw = extractField(section, 'Files in scope');
   return raw
     .split('\n')
     .map((l) => l.replace(/^[-*+]\s+/, '').trim())
@@ -323,7 +324,7 @@ function runTest(cmd, cwd, scope) {
   // workflow. Override via TASK_NEXT_TEST_TIMEOUT_MS env var.
   const timeoutMs = Number(process.env.TASK_NEXT_TEST_TIMEOUT_MS) || 5 * 60 * 1000;
   // Inject CHANGED_FILES into the subprocess env from the task's
-  // Suggested Scope. Many tasks.md test commands use a pattern like
+  // Files in scope. Many tasks.md test commands use a pattern like
   // `CHANGED_FILES="..." eval "$TEST_UNIT_COMMAND"` — but in some bash
   // configurations (login shells, posix mode) the inline env-assignment
   // does not propagate into the eval's variable scope, so $CHANGED_FILES
@@ -709,7 +710,7 @@ function recordEvidence(phase, ticket, taskNum, cmd, cwd, scope, opts = {}) {
   };
 }
 
-// Collect every test/spec file referenced by Suggested Scope. Scope entries
+// Collect every test/spec file referenced by Files in scope. Scope entries
 // may name a file directly OR a directory; for directories we walk for
 // *.test.* / *.spec.* up to a small depth.
 //
@@ -797,7 +798,7 @@ function findTestFilesInScope(repoRoot, scope) {
 // annotation helper.
 // For unit-only tasks (no @task:N gherkin scenarios — e.g. pure Zod schemas
 // with no E2E behavior to tag), the RED gate falls back to verifying that
-// at least one test file in Suggested Scope contains at least one test
+// at least one test file in Files in scope contains at least one test
 // block. Returns { totalBlocks, filesWithBlocks }.
 function countTestBlocksInFiles(testFiles) {
   let totalBlocks = 0;
@@ -850,7 +851,7 @@ function printPhaseInstructions(phase, ctx) {
     for (const s of scope.filter((s) => /\.(test|spec)\.|fixtures?|\/__tests__\//.test(s)))
       lines.push(`- ${s}`);
     if (!scope.some((s) => /\.(test|spec)\.|fixtures?|\/__tests__\//.test(s))) {
-      lines.push('- (any *.test.* / *.spec.* / fixtures/ files referenced in Suggested Scope)');
+      lines.push('- (any *.test.* / *.spec.* / fixtures/ files referenced in Files in scope)');
     }
     lines.push('');
     lines.push('## How to advance');
@@ -1109,7 +1110,7 @@ function main() {
   let blockReason = '';
 
   if (phase === TDD_PHASES.red) {
-    // spec §P0#2 — Sanitize CHANGED_FILES defensively. If Suggested Scope
+    // spec §P0#2 — Sanitize CHANGED_FILES defensively. If Files in scope
     // mixed source + test entries, we already stripped sources in runTest /
     // recordEvidence via filterToTestFiles(); surface a single diagnostic
     // so the operator notices, but DO NOT abort the cycle.
@@ -1181,11 +1182,11 @@ function main() {
             );
           }
         } else if (testFiles.length === 0) {
-          blockReason = `No gherkin scenarios tagged @task:${taskNum} AND no *.test.* / *.spec.* files found under Suggested Scope. Add at least one failing test in a file under Suggested Scope, then re-invoke me.`;
+          blockReason = `No gherkin scenarios tagged @task:${taskNum} AND no *.test.* / *.spec.* files found under Files in scope. Add at least one failing test in a file under Files in scope, then re-invoke me.`;
         } else {
           const { totalBlocks, filesWithBlocks } = countTestBlocksInFiles(testFiles);
           if (totalBlocks === 0) {
-            blockReason = `No gherkin scenarios tagged @task:${taskNum}. Found ${testFiles.length} test file(s) in Suggested Scope but none contain it()/test() blocks. Add at least one failing test, then re-invoke me.`;
+            blockReason = `No gherkin scenarios tagged @task:${taskNum}. Found ${testFiles.length} test file(s) in Files in scope but none contain it()/test() blocks. Add at least one failing test, then re-invoke me.`;
           } else {
             const rec = recordEvidence(TDD_PHASES.red, ticket, taskNum, testCmd, repoRoot, scope);
             if (!rec.ok) {
@@ -1194,13 +1195,13 @@ function main() {
               advanced = true;
               phase = TDD_PHASES.green;
               process.stdout.write(
-                `task-next: RED accepted via unit-only fallback (no @task:${taskNum} gherkin tags; ${filesWithBlocks} test file(s) under Suggested Scope, ${totalBlocks} test block(s)).\n`
+                `task-next: RED accepted via unit-only fallback (no @task:${taskNum} gherkin tags; ${filesWithBlocks} test file(s) under Files in scope, ${totalBlocks} test block(s)).\n`
               );
             }
           }
         }
       } else if (missing.length > 0) {
-        blockReason = `Tests do not yet cover these scenarios (verbatim title match against test files in Suggested Scope):\n  - ${missing.join('\n  - ')}\nAdd a test for each (failing) before re-invoking me.`;
+        blockReason = `Tests do not yet cover these scenarios (verbatim title match against test files in Files in scope):\n  - ${missing.join('\n  - ')}\nAdd a test for each (failing) before re-invoking me.`;
       } else {
         const rec = recordEvidence(TDD_PHASES.red, ticket, taskNum, testCmd, repoRoot, scope);
         if (!rec.ok) {
