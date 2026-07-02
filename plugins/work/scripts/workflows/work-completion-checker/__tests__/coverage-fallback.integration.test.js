@@ -260,8 +260,9 @@ test('comma-separated Requirements Covered bullets synthesize one row per ID (#4
   }
 });
 
-// Case G — legacy bare-token bullet (non-canonical ID convention) still parses
-test('legacy single-bare-token bullet is preserved for backward compatibility', () => {
+// Case G — non-canonical bare-token bullets are NOT recognized (canonical
+// grammar only; the generation side enforces canonical IDs via traceability)
+test('non-canonical bare-token bullet synthesizes no coverage row', () => {
   const tasks = [
     '# Tasks',
     '',
@@ -274,8 +275,7 @@ test('legacy single-bare-token bullet is preserved for backward compatibility', 
   const { root, tasksDir } = makeTasksDir({ tasks });
   try {
     const rows = readRequirementCoverage(tasksDir);
-    assert.equal(rows.length, 1);
-    assert.equal(rows[0].id, 'REQ_CUSTOM_1');
+    assert.deepEqual(rows, []);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

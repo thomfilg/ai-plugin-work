@@ -60,26 +60,23 @@ See **[AGENTS.md](./AGENTS.md)** for the agent catalog. See **[docs/README.md](.
 
 ### Feature Flags
 
-- `WORK_TEST_STRATEGY_VALIDATOR` (default `1`) — gates the GH-590 tasks-draft
-  Test Strategy validator (enum-driven `### Test Strategy` blocks, command-
-  existence dispatcher, and TDD-ownership graph) plus the GH-610 implement-side
-  synthesis/citation consumer. Default `1` (on) now that both GH-590 and GH-610
-  have landed. Set to `0` to fall back to the legacy `### Test Command` path
-  (e.g. for in-flight `tasks.md` files authored before GH-590). Read via
-  `getConfig('WORK_TEST_STRATEGY_VALIDATOR')`.
+(None currently. The `WORK_TEST_STRATEGY_VALIDATOR` flag was removed — the
+GH-590 Test Strategy validators and the GH-610 implement-side synthesis
+consumer are permanently on. Legacy `### Test Command` blocks are rejected
+at the draft gate with a migration error pointing at
+`skills/split-in-tasks/docs/test-strategy.md`.)
 
-  **Implement-side synthesis flow.** When the flag is ON and a task carries a
-  `### Test Strategy` block but no legacy `### Test Command`, the implement side
-  synthesizes the runnable command instead of wedging. `readTaskTestCommand` /
-  `resolveTaskTestExecution` (`implement-gate.js`) call
-  `lib/test-strategy.js synthesizeCommand(strategy, findNearestEnvrc(worktreeDir))`
-  to produce the command for envelope kinds (`unit`/`integration`/`e2e`/`custom`),
-  threading the orchestrator's worktree-rooted `.envrc`. For citation kinds
-  (`verified-by`/`wiring-citation`) `synthesizeCommand` returns `null`; instead of
-  executing, `tdd-phase-state.js` records green evidence by peer citation
-  (`validatePeerCitation` + peer evidence sha + scope-overlap), and
-  `enforce-tdd-on-stop.js` accepts that citation evidence. With the flag OFF,
-  behavior is byte-for-byte unchanged — only `### Test Command` is read.
+**Implement-side synthesis flow.** When a task carries a `### Test Strategy`
+block but no legacy `### Test Command`, the implement side synthesizes the
+runnable command instead of wedging. `readTaskTestCommand` /
+`resolveTaskTestExecution` (`implement-gate.js`) call
+`lib/test-strategy.js synthesizeCommand(strategy, findNearestEnvrc(worktreeDir))`
+to produce the command for envelope kinds (`unit`/`integration`/`e2e`/`custom`),
+threading the orchestrator's worktree-rooted `.envrc`. For citation kinds
+(`verified-by`/`wiring-citation`) `synthesizeCommand` returns `null`; instead of
+executing, `tdd-phase-state.js` records green evidence by peer citation
+(`validatePeerCitation` + peer evidence sha + scope-overlap), and
+`enforce-tdd-on-stop.js` accepts that citation evidence.
 
 ### Ticket Providers
 - Configured via `TICKET_PROVIDER` env var: `jira`, `linear`, `github`, `none`.

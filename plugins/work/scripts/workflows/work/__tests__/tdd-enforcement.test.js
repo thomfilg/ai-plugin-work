@@ -159,7 +159,7 @@ function writeTaskArtifacts(ticket) {
   fs.writeFileSync(path.join(dir, 'gherkin.feature'), '<!-- gherkin-skip: test artifact -->\n');
   // tasks.md → tasks verify + tasks_gate (Gate C) verify pass.
   // Gate C requires every `## Task N` block to declare `### Files in scope`
-  // (or the legacy `### Suggested Scope` as fallback).
+
   fs.writeFileSync(
     path.join(dir, 'tasks.md'),
     [

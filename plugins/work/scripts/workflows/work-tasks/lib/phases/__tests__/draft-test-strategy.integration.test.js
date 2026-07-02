@@ -155,13 +155,16 @@ test('draft.js exports the two new strategy validators (Task 11 wiring)', () => 
   );
 });
 
-test('flag-off: legacy ### Test Command path still passes draft validation', () => {
+test('legacy ### Test Command is rejected even with the removed flag set to 0', () => {
   const dir = mkTasksDir();
   writeSpec(dir);
   writeTasks(dir, LEGACY_TASKS_MD);
 
   const errors = withFlag('0', () => draft.validateArtifacts(dir));
-  assert.deepEqual(errors, [], `flag-off legacy path should pass; got: ${JSON.stringify(errors)}`);
+  assert.ok(
+    errors.some((e) => /still uses legacy `### Test Command`/.test(e)),
+    `expected the migration error; got: ${JSON.stringify(errors)}`
+  );
 });
 
 test('flag-on: valid kind=unit ### Test Strategy passes draft validation', () => {
@@ -263,7 +266,7 @@ test('flag-on: kind=unit without entry surfaces the shape error via runStrategyV
   );
 });
 
-test('flag-on no-op when validator flag is off — same fixture, no strategy errors', () => {
+test('strategy validators run even with the removed flag set to 0', () => {
   const dir = mkTasksDir();
   writeSpec(dir);
   writeTasks(dir, STRATEGY_TASKS_MD_BAD_CUSTOM);
@@ -274,11 +277,11 @@ test('flag-on no-op when validator flag is off — same fixture, no strategy err
     'utf8'
   );
 
-  const errors = withFlag('0', () => draft.validateArtifacts(dir));
+  const errors = withFlag('0', () => draft.validateArtifacts(dir, { workDir: dir }));
   const joined = errors.join('\n');
   assert.ok(
-    !/dev:typecheck/.test(joined),
-    `flag-off must NOT run the new strategy/dispatcher validators; got: ${joined}`
+    /dev:typecheck/.test(joined),
+    `validators are always on — expected the dev:typecheck dispatcher miss; got: ${joined}`
   );
 });
 
@@ -357,14 +360,14 @@ test('flag-on: checkpoint task without a Test Strategy stays exempt', () => {
   );
 });
 
-test('flag-off: missing verification block is not enforced (legacy path unchanged)', () => {
+test('missing verification block is enforced even with the removed flag set to 0', () => {
   const dir = mkTasksDir();
   writeSpec(dir);
   writeTasks(dir, tasksMdWithoutVerification('docs'));
 
   const errors = withFlag('0', () => draft.validateArtifacts(dir));
   assert.ok(
-    !errors.some((e) => /has neither/.test(e)),
-    `flag-off must stay byte-for-byte legacy; got: ${JSON.stringify(errors)}`
+    errors.some((e) => /has neither/.test(e)),
+    `validators are always on; got: ${JSON.stringify(errors)}`
   );
 });

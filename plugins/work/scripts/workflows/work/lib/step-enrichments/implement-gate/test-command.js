@@ -35,9 +35,9 @@ const { parseTasks: parseTasksWithStrategy } = require(path.join(ENRICH_DIR, '..
 // tests via a citation, so `synthesizeCommand` returns null by design (C3).
 const CITATION_STRATEGY_KINDS = new Set(['verified-by', 'wiring-citation']);
 
-/** True when the GH-590/GH-610 Test Strategy consumer is enabled. */
+/** The GH-590/GH-610 Test Strategy consumer is permanently enabled. */
 function isTestStrategyValidatorEnabled() {
-  return process.env.WORK_TEST_STRATEGY_VALIDATOR === '1';
+  return true;
 }
 
 /** Locate a parsed task by 1-indexed task number. */

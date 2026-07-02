@@ -49,12 +49,8 @@ function _checkTypeKnown(task, label, errors) {
 
 function _checkScopePresence(task, label, errors) {
   const hasInScope = Array.isArray(task.filesInScope) && task.filesInScope.length > 0;
-  const hasLegacyScope =
-    typeof task.suggestedScope === 'string' && task.suggestedScope.trim().length > 0;
-  if (!hasInScope && !hasLegacyScope) {
-    errors.push(
-      `${label} is missing both \`### Files in scope\` AND \`### Suggested Scope\` (need at least one)`
-    );
+  if (!hasInScope) {
+    errors.push(`${label} is missing \`### Files in scope\` (non-empty list required)`);
   }
   if (task.filesOutOfScope !== undefined && !Array.isArray(task.filesOutOfScope)) {
     errors.push(`${label} has malformed \`### Files explicitly out of scope\` section`);

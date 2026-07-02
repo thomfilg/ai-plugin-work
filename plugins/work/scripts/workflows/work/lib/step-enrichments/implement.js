@@ -37,25 +37,24 @@ function resolveAgentType(tasksDir, taskNum) {
   if (process.env.IMPLEMENT_AGENT) return process.env.IMPLEMENT_AGENT;
 
   let taskType = null;
-  let suggestedScope = '';
+  let scopeText = '';
   try {
     const content = fs.readFileSync(path.join(tasksDir, 'tasks.md'), 'utf8');
     const pattern = new RegExp(
-      `## Task ${taskNum}\\b[\\s\\S]*?### Type\\s*\\n(\\w+)[\\s\\S]*?### Suggested Scope[^\\n]*\\n([\\s\\S]*?)(?=\\n###|\\n## |$)`,
+      `## Task ${taskNum}\\b[\\s\\S]*?### Type\\s*\\n(\\w+)[\\s\\S]*?### Files in scope[^\\n]*\\n([\\s\\S]*?)(?=\\n###|\\n## |$)`,
       'm'
     );
     const match = content.match(pattern);
     if (match) {
       taskType = match[1].trim().toLowerCase();
-      suggestedScope = match[2].trim().toLowerCase();
+      scopeText = match[2].trim().toLowerCase();
     }
   } catch {
     /* no tasks.md */
   }
 
-  const hasReactFiles =
-    /\.(tsx|jsx)\b/.test(suggestedScope) || /react|component/i.test(suggestedScope);
-  const hasInfraFiles = /dockerfile|\.ya?ml|terraform|\.tf\b|ci\/cd|pipeline/i.test(suggestedScope);
+  const hasReactFiles = /\.(tsx|jsx)\b/.test(scopeText) || /react|component/i.test(scopeText);
+  const hasInfraFiles = /dockerfile|\.ya?ml|terraform|\.tf\b|ci\/cd|pipeline/i.test(scopeText);
 
   if (hasReactFiles) return 'developer-react-senior';
   if (hasInfraFiles) return 'developer-devops';

@@ -1,12 +1,8 @@
 # Scope Sections — Files in scope / out of scope
 
-Covers the `### Suggested Scope`, `### Files in scope`, and `### Files explicitly out of scope` blocks inside each task. See [output-format.md](./output-format.md) for the surrounding task structure.
+Covers the `### Files in scope` and `### Files explicitly out of scope` blocks inside each task. See [output-format.md](./output-format.md) for the surrounding task structure.
 
 ```markdown
-### Suggested Scope (optional — include when file paths are inferable from the spec)
-- `<path/to/likely/file.ts>`
-- `<path/to/another/file.ts>`
-
 ### Files in scope (REQUIRED — Gate C)
 - `<path/or/glob/the/task/may/edit/**>`
 - `<another/specific-file.ts>`
@@ -80,4 +76,4 @@ See also: the `validateIntraTicketScope` rule above — the two validators are c
 
 The `scope_exists` phase blocks when any entry without `(NEW)` does not exist on disk, when any `(DELETE)` target is missing, or when any path contains placeholder syntax. Glob patterns (`lib/foo/**/*.ts`) are accepted when their non-glob directory prefix exists.
 
-The `### Suggested Scope` field is the legacy precursor — leave it in place for backwards compatibility, but ALSO emit the two new sections above.
+Do NOT emit a `### Suggested Scope` section — that legacy heading is no longer read by any gate or parser; `### Files in scope` is the single scope surface. Dual headings were a drift source (test files declared under one heading, invisible under the other — the GH-491 wedge).

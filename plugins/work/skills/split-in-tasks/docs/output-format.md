@@ -82,7 +82,7 @@ cites: <path or symbol exercised by the peer's test>
 ```
 <see [test-strategy.md](./test-strategy.md) for the closed enum and full rules>
 
-### Suggested Scope, Files in scope, Files explicitly out of scope
+### Files in scope, Files explicitly out of scope
 <see scope-sections.md for full rules>
 
 ---

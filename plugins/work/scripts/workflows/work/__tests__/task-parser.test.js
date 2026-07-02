@@ -128,7 +128,7 @@ feature
     assert.ok(tasks[0].requirementsCovered.includes('REQ-002'));
   });
 
-  it('extracts suggested scope section', () => {
+  it('ignores the legacy Suggested Scope heading (field removed)', () => {
     writeTasksFile(`## Task 1 — Widget
 
 ### Type
@@ -140,7 +140,7 @@ feature
 `);
     const tasks = parseTasks(tmpDir);
     assert.ok(tasks);
-    assert.ok(tasks[0].suggestedScope.includes('src/widget.js'));
+    assert.equal(tasks[0].suggestedScope, undefined);
   });
 
   it('identifies checkpoint tasks', () => {
@@ -262,12 +262,20 @@ Inline mentions appear earlier than the real sections:
     const tasks = parseTasks(tmpDir);
     assert.ok(tasks);
     const t = tasks[0];
-    assert.ok(t.requirementsCovered && t.requirementsCovered.length > 0, 'requirementsCovered non-empty');
-    assert.ok(/R1/.test(t.requirementsCovered), 'requirementsCovered references R1 from real section');
-    assert.ok(t.acceptanceCriteria && t.acceptanceCriteria.length > 0, 'acceptanceCriteria non-empty');
+    assert.ok(
+      t.requirementsCovered && t.requirementsCovered.length > 0,
+      'requirementsCovered non-empty'
+    );
+    assert.ok(
+      /R1/.test(t.requirementsCovered),
+      'requirementsCovered references R1 from real section'
+    );
+    assert.ok(
+      t.acceptanceCriteria && t.acceptanceCriteria.length > 0,
+      'acceptanceCriteria non-empty'
+    );
     assert.ok(/AC item one/.test(t.acceptanceCriteria), 'acceptanceCriteria reflects real section');
-    assert.ok(t.suggestedScope && t.suggestedScope.length > 0, 'suggestedScope non-empty');
-    assert.ok(/src\/bar\.ts/.test(t.suggestedScope), 'suggestedScope reflects real section');
+    assert.equal(t.suggestedScope, undefined, 'legacy suggestedScope field removed');
     assert.deepEqual(t.filesInScope, ['src/foo.ts'], 'filesInScope from real section');
     assert.deepEqual(t.filesOutOfScope, ['src/excluded.ts'], 'filesOutOfScope from real section');
   });
@@ -361,11 +369,11 @@ describe('buildTaskPrompt', () => {
     assert.ok(prompt.includes('completed — do NOT re-implement'));
   });
 
-  it('includes reserved files for pending tasks that have suggestedScope', () => {
+  it('includes reserved files for pending tasks that have filesInScope', () => {
     const task = { num: 1, title: 'Current', rawContent: 'content', suggestedScope: '' };
     const allTasks = [
       task,
-      { num: 2, title: 'Upcoming', suggestedScope: '- src/foo.ts\n- src/bar.ts' },
+      { num: 2, title: 'Upcoming', filesInScope: ['src/foo.ts', 'src/bar.ts'] },
     ];
     const prompt = buildTaskPrompt(task, tmpDir, allTasks);
     assert.ok(prompt.includes('Reserved files:'));
@@ -373,9 +381,9 @@ describe('buildTaskPrompt', () => {
     assert.ok(prompt.includes('src/bar.ts'));
   });
 
-  it('does not include reserved files for pending tasks with no suggestedScope', () => {
+  it('does not include reserved files for pending tasks with empty filesInScope', () => {
     const task = { num: 1, title: 'Current', rawContent: 'content', suggestedScope: '' };
-    const allTasks = [task, { num: 2, title: 'No scope', suggestedScope: '' }];
+    const allTasks = [task, { num: 2, title: 'No scope', filesInScope: [] }];
     const prompt = buildTaskPrompt(task, tmpDir, allTasks);
     assert.ok(!prompt.includes('Reserved files:'));
   });
@@ -392,54 +400,13 @@ describe('buildTaskPrompt', () => {
 
   it('shows all reserved files when scope exceeds the old 5-line cap', () => {
     const task = { num: 1, title: 'Current', rawContent: 'content', suggestedScope: '' };
-    const manyFiles = Array.from({ length: 8 }, (_, i) => `- src/file${i + 1}.ts`).join('\n');
-    const allTasks = [task, { num: 2, title: 'Big scope', suggestedScope: manyFiles }];
+    const manyFiles = Array.from({ length: 8 }, (_, i) => `src/file${i + 1}.ts`);
+    const allTasks = [task, { num: 2, title: 'Big scope', filesInScope: manyFiles }];
     const prompt = buildTaskPrompt(task, tmpDir, allTasks);
     // All 8 files must appear, not just 5
     for (let i = 1; i <= 8; i++) {
       assert.ok(prompt.includes(`src/file${i}.ts`), `missing src/file${i}.ts`);
     }
-  });
-
-  it('normalizes list markers in suggestedScope reserved files', () => {
-    const task = { num: 1, title: 'Current', rawContent: 'content', suggestedScope: '' };
-    const allTasks = [
-      task,
-      {
-        num: 2,
-        title: 'Mixed markers',
-        suggestedScope: '- src/a.ts\n* src/b.ts\n+ src/c.ts\nsrc/d.ts',
-      },
-    ];
-    const prompt = buildTaskPrompt(task, tmpDir, allTasks);
-    // Markers must be stripped — raw "- src/a.ts" must not appear
-    assert.ok(prompt.includes('src/a.ts'));
-    assert.ok(prompt.includes('src/b.ts'));
-    assert.ok(prompt.includes('src/c.ts'));
-    assert.ok(prompt.includes('src/d.ts'));
-    assert.ok(!prompt.includes('- src/a.ts'));
-    assert.ok(!prompt.includes('* src/b.ts'));
-    assert.ok(!prompt.includes('+ src/c.ts'));
-  });
-
-  it('normalizes indented list markers in suggestedScope reserved files', () => {
-    const task = { num: 1, title: 'Current', rawContent: 'content', suggestedScope: '' };
-    const allTasks = [
-      task,
-      {
-        num: 2,
-        title: 'Indented markers',
-        suggestedScope: '  - src/a.ts\n   * src/b.ts\n\t+ src/c.ts',
-      },
-    ];
-    const prompt = buildTaskPrompt(task, tmpDir, allTasks);
-    // Leading whitespace + marker must be stripped
-    assert.ok(prompt.includes('src/a.ts'));
-    assert.ok(prompt.includes('src/b.ts'));
-    assert.ok(prompt.includes('src/c.ts'));
-    assert.ok(!prompt.includes('- src/a.ts'));
-    assert.ok(!prompt.includes('* src/b.ts'));
-    assert.ok(!prompt.includes('+ src/c.ts'));
   });
 
   it('treats task with no matching taskState entry as pending', () => {

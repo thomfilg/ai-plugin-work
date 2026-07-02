@@ -17,18 +17,13 @@ function withFlag(value, fn) {
   }
 }
 
-test('draft instructions emit legacy ### Test Command template when flag off', () => {
+test('draft instructions emit ### Test Strategy template with no flag set', () => {
   const out = withFlag(undefined, () =>
     draft.instructions({ ticket: '#590', tasksDir: '/tmp/draft-instr-test' })
   );
   const joined = typeof out === 'string' ? out : out.join('\n');
-  assert.match(joined, /### Test Command/, 'expected legacy ### Test Command heading');
-  assert.match(joined, /TEST_UNIT_COMMAND/, 'expected envelope reference');
-  assert.doesNotMatch(
-    joined,
-    /### Test Strategy/,
-    'must NOT emit Test Strategy template when flag off'
-  );
+  assert.match(joined, /### Test Strategy/, 'expected ### Test Strategy heading');
+  assert.doesNotMatch(joined, /### Test Command/, 'legacy template must never be emitted');
 });
 
 test('draft instructions emit ### Test Strategy template when flag on', () => {
@@ -47,11 +42,11 @@ test('draft instructions emit ### Test Strategy template when flag on', () => {
   assert.doesNotMatch(joined, /### Test Command/, 'must NOT emit legacy block when flag on');
 });
 
-test('draft instructions emit legacy ### Test Command when flag explicitly off ("0")', () => {
+test('legacy env WORK_TEST_STRATEGY_VALIDATOR=0 is ignored (flag removed)', () => {
   const out = withFlag('0', () =>
     draft.instructions({ ticket: '#590', tasksDir: '/tmp/draft-instr-test' })
   );
   const joined = typeof out === 'string' ? out : out.join('\n');
-  assert.match(joined, /### Test Command/);
-  assert.doesNotMatch(joined, /### Test Strategy/);
+  assert.match(joined, /### Test Strategy/);
+  assert.doesNotMatch(joined, /### Test Command/);
 });

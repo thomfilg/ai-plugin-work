@@ -112,7 +112,7 @@ If the spec references user-facing behavior changes, API changes, configuration 
 This task uses `Type: docs` (the dedicated documentation contract in the closed taxonomy — see [`lib/task-types.js`](../lib/task-types.js)). It should be the second-to-last task (before the final verification checkpoint). The previous guidance to misuse `Type: checkpoint` for documentation is obsolete: docs tasks have their own scope-allowlist (`.md` only) and gate contract (silent verifiers accepted via the RC-D relaxation), so they get proper enforcement without piggybacking on the checkpoint exception.
 
 **Rule 12 — Shared-Resource Detection (MANDATORY for parallel tasks):**
-After marking tasks as `Parallel: Yes`, scan ALL parallel tasks' Suggested Scope for **overlapping production files**. If two or more parallel tasks modify the **same production file** (not test files — those don't conflict):
+After marking tasks as `Parallel: Yes`, scan ALL parallel tasks' `### Files in scope` for **overlapping production files**. If two or more parallel tasks modify the **same production file** (not test files — those don't conflict):
 1. Extract the shared changes into a new **prerequisite task** that makes the shared modifications first
 2. **Reorder all tasks** — the prerequisite becomes the first task (Task 1), and all subsequent tasks renumber accordingly. Never use "Task 0" — all tasks are numbered sequentially starting from 1.
 3. Mark the prerequisite as `Parallel: No` with dependency `None`

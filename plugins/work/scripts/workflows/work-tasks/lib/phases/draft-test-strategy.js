@@ -43,9 +43,12 @@ function _loadParseTasks() {
 const STRATEGY_FLAG_KEY = 'WORK_TEST_STRATEGY_VALIDATOR';
 const STRATEGY_FLAG_ON_VALUE = '1';
 
+// The GH-590 validators are permanently on. The flag-off escape hatch
+// (legacy `### Test Command` era, pre-GH-590 artifacts) was removed with
+// the rest of the legacy generation paths; the key constants remain only
+// for historical exports.
 function strategyFlagOn() {
-  const v = process.env[STRATEGY_FLAG_KEY] ?? config[STRATEGY_FLAG_KEY];
-  return v === STRATEGY_FLAG_ON_VALUE;
+  return true;
 }
 
 function resolveWorkDir(override) {
@@ -219,7 +222,7 @@ function _validateOneTask(task, ctx, errors) {
 }
 
 function _strategyValidatorReady() {
-  return strategyFlagOn() && strategyModule && dispatcherModule;
+  return Boolean(strategyModule && dispatcherModule);
 }
 
 function _missingStrategyModules() {
@@ -241,15 +244,13 @@ function _normalizeStrategyCtx(ctx) {
 
 function validateTestStrategy(_tasksDir, ctx) {
   const errors = [];
-  // Flag off → silent pass (legacy ### Test Command path remains active).
-  if (!strategyFlagOn()) return errors;
-  // Flag on but helper modules failed to load → fail closed with a hard
-  // error so the draft gate doesn't silently pass on a half-installed plugin.
+  // Helper modules failed to load → fail closed with a hard error so the
+  // draft gate doesn't silently pass on a half-installed plugin.
   const missing = _missingStrategyModules();
   if (missing.length > 0) {
     errors.push(
       `Test Strategy validator could not load required helper module(s): ${missing.join(', ')}. ` +
-        `With WORK_TEST_STRATEGY_VALIDATOR=1 every helper must be loadable.`
+        `The Test Strategy validators are always on, so every helper must be loadable.`
     );
     return errors;
   }
@@ -260,7 +261,7 @@ function validateTestStrategy(_tasksDir, ctx) {
     // visibly instead of giving a false green.
     errors.push(
       'Test Strategy validator could not parse tasks.md (task-parser unavailable or threw). ' +
-        'With WORK_TEST_STRATEGY_VALIDATOR=1, every task must be parseable so its strategy can be validated.'
+        'The Test Strategy validators are always on — every task must be parseable so its strategy can be validated.'
     );
     return errors;
   }
@@ -326,11 +327,11 @@ function _formatOrphanError(orphan) {
 }
 
 function _ownershipReady() {
-  return strategyFlagOn() && ownershipModule;
+  return Boolean(ownershipModule);
 }
 
 function _ownershipModuleMissing() {
-  return strategyFlagOn() && !ownershipModule;
+  return !ownershipModule;
 }
 
 function _collectOrphans(parsedTasks) {
@@ -342,11 +343,10 @@ function _collectOrphans(parsedTasks) {
 }
 
 function _ownershipPreflight(errors) {
-  if (!strategyFlagOn()) return false;
   if (_ownershipModuleMissing()) {
     errors.push(
       'TDD-ownership validator could not load required helper module: lib/tdd-ownership-graph. ' +
-        'With WORK_TEST_STRATEGY_VALIDATOR=1 every helper must be loadable.'
+        'The Test Strategy validators are always on, so every helper must be loadable.'
     );
     return false;
   }
@@ -363,7 +363,7 @@ function validateTddOwnership(_tasksDir, ctx) {
     // Fail closed — graph build / orphan detection failure must not silently
     // bypass the gate. Surface a hard error so reviewers see what broke.
     errors.push(
-      `TDD-ownership graph validator failed — ${collectError}. With WORK_TEST_STRATEGY_VALIDATOR=1 every task's coverage must be derivable.`
+      `TDD-ownership graph validator failed — ${collectError}. The Test Strategy validators are always on — every task's coverage must be derivable.`
     );
     return errors;
   }
@@ -375,7 +375,6 @@ function validateTddOwnership(_tasksDir, ctx) {
 }
 
 function runStrategyValidators(tasksDir, workDirOverride) {
-  if (!strategyFlagOn()) return [];
   const ctx = loadStrategyContext(tasksDir, workDirOverride);
   return [...validateTestStrategy(tasksDir, ctx), ...validateTddOwnership(tasksDir, ctx)];
 }

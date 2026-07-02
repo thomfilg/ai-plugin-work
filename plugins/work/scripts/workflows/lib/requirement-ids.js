@@ -35,20 +35,14 @@ function listRequirementIds(text) {
 }
 
 /**
- * Requirement IDs from a `### Requirements Covered` bullet block. Canonical
- * IDs are extracted with the shared grammar; additionally, a bullet whose
- * ENTIRE content is one bare identifier token (the shape the old
- * completion-checker fallback required, e.g. `- REQ_CUSTOM_1`) is kept for
- * backward compatibility with non-canonical ID conventions.
+ * Requirement IDs from a `### Requirements Covered` bullet block, extracted
+ * with the canonical grammar only. Non-canonical ID conventions (bare tokens
+ * like `REQ_CUSTOM_1`, `C1`, `G5`) are NOT recognized — the generation side
+ * (requirements_extract / traceability) enforces canonical IDs, so anything
+ * else in this block is an authoring error to surface, not to absorb.
  */
 function extractRequirementIdsFromBulletBlock(blockText) {
-  if (!blockText) return [];
-  const out = new Set(listRequirementIds(blockText));
-  for (const line of blockText.split('\n')) {
-    const m = line.match(/^\s*[-*]\s+([A-Za-z0-9_-]+)\s*$/);
-    if (m) out.add(m[1]);
-  }
-  return [...out];
+  return listRequirementIds(blockText);
 }
 
 module.exports = {

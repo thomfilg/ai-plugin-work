@@ -2,9 +2,9 @@
 
 /**
  * Detect whether a parsed task still carries the legacy `### Test Command`
- * block (instead of the new `### Test Strategy`). Used by draft-test-strategy
- * to emit a clear migration error when WORK_TEST_STRATEGY_VALIDATOR=1 but a
- * task hasn't been migrated yet.
+ * block (instead of the canonical `### Test Strategy`). Used by
+ * draft-test-strategy to emit a clear migration error — the legacy block is
+ * always rejected at the draft gate.
  */
 function hasLegacyTestCommand(task) {
   if (!task) return false;
