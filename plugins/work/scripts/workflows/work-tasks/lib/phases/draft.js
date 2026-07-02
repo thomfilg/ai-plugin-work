@@ -149,7 +149,7 @@ function validateArtifacts(tasksDir, opts) {
   // This is the ECHO-4452 lesson translated into an implementation-order rule.
   const taskBlocks = parseTaskBlocks(text);
   errors.push(...validateSharedComponentOrdering(tasksDir, taskBlocks));
-  // GH-590 Task 11: feature-flagged validators. No-op when flag off (AC17).
+  // GH-590 Task 11 validators — always on (the flag-off escape was removed).
   errors.push(...runStrategyValidators(tasksDir, opts && opts.workDir));
   return errors;
 }
@@ -169,40 +169,24 @@ function validate(ctx) {
   return { ok: true, summary: `${count} task block(s) parsed` };
 }
 
-// Flag-aware template for the test-command/strategy block. When
-// WORK_TEST_STRATEGY_VALIDATOR=1, emit the `### Test Strategy` enum template
-// so the splitter agent writes the new shape (legacy `### Test Command`
-// would otherwise be rejected by the migration error in
-// draft-test-strategy.js). When the flag is off (default), emit the legacy
-// `### Test Command` template — that path is still consumed by the implement
-// gate (GH-610 will wire Test Strategy at implement time).
+// Template for the `### Test Strategy` block — the only recognized
+// verification shape (legacy `### Test Command` is rejected by the
+// migration error in draft-test-strategy.js).
 function _testCommandOrStrategyTemplate() {
-  const flagOn = process.env.WORK_TEST_STRATEGY_VALIDATOR === '1';
-  if (flagOn) {
-    return [
-      '### Test Strategy',
-      '```yaml',
-      '# Pick exactly one kind from the closed enum:',
-      '#   unit | integration | e2e | custom | verified-by | wiring-citation',
-      '#',
-      '# Required keys per kind:',
-      '#   unit / integration / e2e → entry: <path to test file>',
-      '#   custom                    → command: <verbatim shell command>',
-      '#   verified-by / wiring-citation → peer: Task N',
-      '#',
-      '# See plugins/work/skills/split-in-tasks/docs/test-strategy.md.',
-      'kind: unit',
-      'entry: path/to/file.test.ts',
-      '```',
-    ];
-  }
   return [
-    '### Test Command',
-    '```bash',
-    '# Use the canonical envelope so repos can override the runner via .envrc.',
-    '# Pick ONE of: $TEST_UNIT_COMMAND, $TEST_INTEGRATION_COMMAND, $TEST_E2E_COMMAND.',
-    '# Never hardcode `pnpm test`/`pnpm vitest`/etc. — the implement-gate runs this verbatim.',
-    'CHANGED_FILES="path/to/file.test.ts" eval "$TEST_UNIT_COMMAND"',
+    '### Test Strategy',
+    '```yaml',
+    '# Pick exactly one kind from the closed enum:',
+    '#   unit | integration | e2e | custom | verified-by | wiring-citation',
+    '#',
+    '# Required keys per kind:',
+    '#   unit / integration / e2e → entry: <path to test file>',
+    '#   custom                    → command: <verbatim shell command>',
+    '#   verified-by / wiring-citation → peer: Task N',
+    '#',
+    '# See plugins/work/skills/split-in-tasks/docs/test-strategy.md.',
+    'kind: unit',
+    'entry: path/to/file.test.ts',
     '```',
   ];
 }

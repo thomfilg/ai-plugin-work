@@ -107,4 +107,4 @@ Rules:
 
 - The previous `### Test Command` shell line is REPLACED by `### Test Strategy` with a `kind:` discriminator.
 - The free-form shell remains accessible via `kind: custom` with a `command:` key (the same shell you used to write).
-- The `WORK_TEST_STRATEGY_VALIDATOR=1` feature flag gates the new draft-time validators. Until the flag is enabled in `.envrc`, in-flight `tasks.md` files using the legacy `### Test Command` continue to validate.
+- The draft-time validators are always on. A legacy `### Test Command` block is rejected at the draft gate with a migration error — convert it to a `### Test Strategy` block.

@@ -410,8 +410,8 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
       },
       {
         // Gate C — tasks_gate. Verify passes when tasks.md parses and every
-        // task declares `### Files in scope`. Legacy `### Suggested Scope`
-        // is accepted as fallback (see lib/task-scope.js#validateTask).
+        // task declares a non-empty `### Files in scope`
+        // (see lib/task-scope.js#validateTask).
         step: STEPS.tasks_gate,
         verify: (ticketId) => {
           try {
