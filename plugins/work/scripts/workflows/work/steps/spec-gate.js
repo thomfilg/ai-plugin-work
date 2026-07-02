@@ -7,6 +7,10 @@
  *
  * Decision matrix:
  *   1. `!s.hasSpec`                           → DEFER "No spec.md present"
+ *   1b. `## Reuse Audit` present but unparseable → RUN "/spec" with the
+ *       exact grammar (fails HERE, where spec.md is editable — at the
+ *       `check` step the file is hook-locked and the reuse_audit gate
+ *       fail-closes with no self-correction path; issue #629)
  *   2. `gherkin.feature` missing/unreadable   → RUN  "/spec" regenerate spec
  *   3. gherkin-skip override in gherkin.feature → DEFER with override reason
  *   4. parseRaw() + validate() passes         → DEFER with scenario count
@@ -17,6 +21,13 @@
 
 const fs = require('fs');
 const parseGherkin = require('../lib/parse-gherkin');
+
+let readReuseAudit;
+try {
+  ({ readReuseAudit } = require('../../work-completion-checker/lib/kind-checks/shared'));
+} catch {
+  readReuseAudit = null;
+}
 
 /**
  * @param {Function} add
@@ -30,6 +41,26 @@ function specGateStep(add, s, ctx) {
   if (!s || !s.hasSpec) {
     add(STEPS.spec_gate, 'DEFER', null, 'No spec.md present');
     return;
+  }
+
+  // Case 1b: Reuse Audit grammar — run the SAME parser the completion
+  // checker's reuse_audit_enforcement gate will run at `check`, so a
+  // format slip fails here (spec.md editable) instead of there (locked).
+  if (readReuseAudit) {
+    try {
+      readReuseAudit(tasksDir);
+    } catch (err) {
+      add(
+        STEPS.spec_gate,
+        'RUN',
+        '/spec',
+        `Reuse Audit unparseable: ${err.message} Rewrite each entry as a bullet: ` +
+          '`- \\`Symbol\\` MUST be reused from \\`path\\` — reason` (MUST only for symbols the change will actually reference; ' +
+          '`may be reused` for mirrored-but-not-imported patterns), or `- None — no reusable symbols found`.',
+        { agentType: 'skill', agentPrompt: '/spec' }
+      );
+      return;
+    }
   }
 
   // Case 2: gherkin.feature missing/unreadable

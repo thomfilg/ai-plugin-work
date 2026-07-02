@@ -10,51 +10,14 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
 
 const specShared = require('../../../work-spec/lib/kind-checks/shared');
-const config = require('../../../lib/config');
-
-function readFile(p) {
-  try {
-    return fs.readFileSync(p, 'utf8');
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Get the changed-file list. Prefer the snapshot pr-context.json (written
- * by pr-next.js diff_audit) so completion-checker sees the same diff the
- * PR phase locked in. Fall back to git diff if absent.
- */
-function readChangedFiles(ctx) {
-  const ctxPath = path.join(ctx.tasksDir, 'pr-context.json');
-  if (fs.existsSync(ctxPath)) {
-    try {
-      const j = JSON.parse(fs.readFileSync(ctxPath, 'utf8'));
-      if (Array.isArray(j.files)) return j.files.slice();
-    } catch {
-      /* fall through */
-    }
-  }
-  const root = ctx.worktreeRoot || process.cwd();
-  // Honor BASE_BRANCH / symbolic-ref so dev-based repos don't fall back to
-  // origin/main (which is behind merges and surfaces phantom files).
-  for (const base of config.getDiffBaseCandidates({ cwd: root })) {
-    const r = spawnSync('git', ['diff', '--name-only', `${base}...HEAD`], {
-      cwd: root,
-      encoding: 'utf8',
-    });
-    if (r.status === 0) {
-      return r.stdout
-        .split('\n')
-        .map((s) => s.trim())
-        .filter(Boolean);
-    }
-  }
-  return [];
-}
+const {
+  readFile,
+  readChangedFiles,
+  specSharedReexports,
+} = require('../../../lib/kind-checks-shared-base');
+const { extractRequirementIdsFromBulletBlock } = require('../../../lib/requirement-ids');
 
 /**
  * Walk `## Task N — <title>` blocks and synthesize coverage rows from each
@@ -77,23 +40,46 @@ function readRequirementCoverageFromSubsections(tasksText) {
     const reqAfter = block.slice(reqMatch.index + reqMatch[0].length);
     const nextHeading = reqAfter.match(/^#{2,3}\s/m);
     const reqBlock = nextHeading ? reqAfter.slice(0, nextHeading.index) : reqAfter;
-    for (const line of reqBlock.split('\n')) {
-      const m = line.match(/^\s*[-*]\s+([A-Za-z0-9_-]+)\s*$/);
-      if (m) {
-        rows.push({
-          id: m[1],
-          description: '',
-          status: 'DELIVERED',
-          evidence: `tasks.md:Task ${taskNum}`,
-          // Tag synthesized rows so downstream gates (test_pass_crossref B2)
-          // can avoid forcing test citations on the R4 fallback, which has
-          // no concept of per-row test evidence by design.
-          source: 'subsection',
-        });
-      }
+    // #498: parse with the SAME canonical grammar the tasks-phase generator
+    // uses (shared lib/requirement-ids.js), so comma-separated bullets like
+    // `- R1, R6, R7` synthesize one row per ID instead of silently yielding
+    // zero rows and re-triggering the requirement_coverage_missing deadlock.
+    for (const id of extractRequirementIdsFromBulletBlock(reqBlock)) {
+      rows.push({
+        id,
+        description: '',
+        status: 'DELIVERED',
+        evidence: `tasks.md:Task ${taskNum}`,
+        // Tag synthesized rows so downstream gates (test_pass_crossref B2)
+        // can avoid forcing test citations on the R4 fallback, which has
+        // no concept of per-row test evidence by design.
+        source: 'subsection',
+      });
     }
   }
   return rows;
+}
+
+/**
+ * Parse one `| id | desc | status | evidence |` table line into a coverage
+ * row, or null for non-row lines (separators, headers, prose).
+ */
+function parseCoverageTableRow(line) {
+  if (!/^\|/.test(line)) return null;
+  const cells = line
+    .split('|')
+    .slice(1, -1)
+    .map((c) => c.trim());
+  if (cells.length < 2) return null;
+  if (/^-+$/.test(cells[0])) return null;
+  if (/^(id|requirement|req)$/i.test(cells[0])) return null;
+  return {
+    id: cells[0],
+    description: cells[1] || '',
+    status: cells[2] || '',
+    evidence: cells[3] || '',
+    source: 'table',
+  };
 }
 
 /**
@@ -102,31 +88,11 @@ function readRequirementCoverageFromSubsections(tasksText) {
  * Falls back to per-task `### Requirements Covered` subsections when the
  * top-level table is absent (R4).
  */
-// eslint-disable-next-line complexity -- allowlisted pre-existing complexity; see .quality-exceptions
 function readRequirementCoverage(tasksDir) {
   const text = specShared.readTasks(tasksDir);
   if (!text) return [];
   const block = specShared.sliceSection(text, /^##\s+Requirement Coverage\b/im);
-  const rows = [];
-  if (block) {
-    for (const line of block.split('\n')) {
-      if (!/^\|/.test(line)) continue;
-      const cells = line
-        .split('|')
-        .slice(1, -1)
-        .map((c) => c.trim());
-      if (cells.length < 2) continue;
-      if (/^-+$/.test(cells[0])) continue;
-      if (/^(id|requirement|req)$/i.test(cells[0])) continue;
-      rows.push({
-        id: cells[0],
-        description: cells[1] || '',
-        status: cells[2] || '',
-        evidence: cells[3] || '',
-        source: 'table',
-      });
-    }
-  }
+  const rows = (block ? block.split('\n') : []).map(parseCoverageTableRow).filter(Boolean);
   if (rows.length === 0) return readRequirementCoverageFromSubsections(text);
   return rows;
 }
@@ -153,13 +119,18 @@ function readBriefRequirements(tasksDir) {
 /**
  * Parse the `## Reuse Audit` section of spec.md and return an array of
  * `{ symbol, line, mustReuse }` records. Returns `null` when the section
- * is absent (signals "spec doesn't declare reuse"). Throws when the
- * section is present but contains no parseable entries (signals
- * malformed authoring rather than absence).
+ * is absent (signals "spec doesn't declare reuse"), and `[]` when the
+ * section carries an explicit none-marker bullet (`- None — ...`), which
+ * declares "audited, nothing reusable found". Throws when the section is
+ * present but contains no parseable entries (signals malformed authoring
+ * rather than absence).
  *
- * Recognized bullet shape:
- *   - `Symbol` MUST be reused from `path/to/file.ext`
- * Soft-reuse lines (without MUST) are captured with `mustReuse: false`.
+ * Recognized bullet shapes (#629 — grammar must match what spec-writer is
+ * instructed to emit; see agents/spec-writer.md "Reuse Declarations"):
+ *   - `Symbol` MUST be reused from `path/to/file.ext` — reason
+ *   - `Symbol` (`path/to/file.ext`) MUST be reused — reason
+ *   - `Symbol` may be reused from `path` — reason (soft, mustReuse: false)
+ *   - None — no reusable symbols found (explicit empty declaration)
  */
 function readReuseAudit(specDir) {
   const text = specShared.readSpec(specDir);
@@ -174,10 +145,17 @@ function readReuseAudit(specDir) {
   const headingLine = text.slice(0, headingOffset).split('\n').length;
   const entries = [];
   const blockLines = (block || '').split('\n');
+  let sawNoneMarker = false;
   for (let i = 0; i < blockLines.length; i += 1) {
     const raw = blockLines[i];
+    if (/^\s*[-*]\s+None\b/i.test(raw)) {
+      sawNoneMarker = true;
+      continue;
+    }
+    // Optional parenthesized path between the symbol and the verb tolerates
+    // the common `` `Symbol` (`path`) MUST be reused `` ordering (#629).
     const m = raw.match(
-      /^\s*[-*]\s+`([^`]+)`\s+(MUST\s+be\s+reused|be\s+reused|may\s+be\s+reused)/i
+      /^\s*[-*]\s+`([^`]+)`\s*(?:\([^)]*\)\s*)?(MUST\s+be\s+reused|be\s+reused|may\s+be\s+reused)/i
     );
     if (!m) continue;
     const mustReuse = /MUST/i.test(m[2]);
@@ -197,8 +175,11 @@ function readReuseAudit(specDir) {
     });
   }
   if (entries.length === 0) {
+    if (sawNoneMarker) return entries; // audited, nothing reusable — valid empty
     throw new Error(
-      `readReuseAudit: '## Reuse Audit' section in ${path.join(specDir, 'spec.md')} contains no parseable entries`
+      `readReuseAudit: '## Reuse Audit' section in ${path.join(specDir, 'spec.md')} contains no parseable entries. ` +
+        'Expected bullets shaped `- \\`Symbol\\` MUST be reused from \\`path\\` — reason` ' +
+        '(or `may be reused` for mirrored patterns), or `- None — no reusable symbols found`.'
     );
   }
   return entries;
@@ -283,19 +264,5 @@ module.exports = {
   readSuggestedScopeFiles,
   readTestReport,
   // Re-exports from spec-side shared:
-  readBrief: specShared.readBrief,
-  readSpec: specShared.readSpec,
-  readTasks: specShared.readTasks,
-  sliceSection: specShared.sliceSection,
-  filesInFilesToModify: specShared.filesInFilesToModify,
-  detectKinds: specShared.detectKinds,
-  MalformedTasksError: specShared.MalformedTasksError,
-  preflightTasksManifest: specShared.preflightTasksManifest,
-  briefForbidsBackend: specShared.briefForbidsBackend,
-  isBackendFile: specShared.isBackendFile,
-  isFrontendFile: specShared.isFrontendFile,
-  isE2eFile: specShared.isE2eFile,
-  isDevopsFile: specShared.isDevopsFile,
-  isAppSourceFile: specShared.isAppSourceFile,
-  KIND_NAMES: specShared.KIND_NAMES,
+  ...specSharedReexports(specShared),
 };

@@ -9,46 +9,13 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { spawnSync } = require('node:child_process');
 
 const specShared = require('../../../work-spec/lib/kind-checks/shared');
-const config = require('../../../lib/config');
-
-function readFile(p) {
-  try {
-    return fs.readFileSync(p, 'utf8');
-  } catch {
-    return null;
-  }
-}
-
-function readChangedFiles(ctx) {
-  const ctxPath = path.join(ctx.tasksDir, 'pr-context.json');
-  if (fs.existsSync(ctxPath)) {
-    try {
-      const j = JSON.parse(fs.readFileSync(ctxPath, 'utf8'));
-      if (Array.isArray(j.files)) return j.files.slice();
-    } catch {
-      /* fall through */
-    }
-  }
-  const root = ctx.worktreeRoot || process.cwd();
-  // Honor BASE_BRANCH / symbolic-ref so dev-based repos don't fall back to
-  // origin/main (which is behind merges and surfaces phantom files).
-  for (const base of config.getDiffBaseCandidates({ cwd: root })) {
-    const r = spawnSync('git', ['diff', '--name-only', `${base}...HEAD`], {
-      cwd: root,
-      encoding: 'utf8',
-    });
-    if (r.status === 0) {
-      return r.stdout
-        .split('\n')
-        .map((s) => s.trim())
-        .filter(Boolean);
-    }
-  }
-  return [];
-}
+const {
+  readFile,
+  readChangedFiles,
+  specSharedReexports,
+} = require('../../../lib/kind-checks-shared-base');
 
 function readFileFromWorktree(ctx, relPath) {
   const root = ctx.worktreeRoot || process.cwd();
@@ -111,19 +78,5 @@ module.exports = {
   hasCompanionTest,
   TS_VIOLATIONS,
   // Re-exports from spec-side shared:
-  readBrief: specShared.readBrief,
-  readSpec: specShared.readSpec,
-  readTasks: specShared.readTasks,
-  sliceSection: specShared.sliceSection,
-  filesInFilesToModify: specShared.filesInFilesToModify,
-  detectKinds: specShared.detectKinds,
-  MalformedTasksError: specShared.MalformedTasksError,
-  preflightTasksManifest: specShared.preflightTasksManifest,
-  briefForbidsBackend: specShared.briefForbidsBackend,
-  isBackendFile: specShared.isBackendFile,
-  isFrontendFile: specShared.isFrontendFile,
-  isE2eFile: specShared.isE2eFile,
-  isDevopsFile: specShared.isDevopsFile,
-  isAppSourceFile: specShared.isAppSourceFile,
-  KIND_NAMES: specShared.KIND_NAMES,
+  ...specSharedReexports(specShared),
 };

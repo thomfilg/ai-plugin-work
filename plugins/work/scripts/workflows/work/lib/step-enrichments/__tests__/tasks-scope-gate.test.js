@@ -30,7 +30,7 @@ const validTaskBody = (num, includeInScope = true, includeOutScope = true) => {
     `## Task ${num} — Sample task`,
     '',
     '### Type',
-    'implementation',
+    'tdd-code',
     '',
     '### Description',
     'A task.',
@@ -94,6 +94,9 @@ describe('tasks-scope-gate', () => {
     // Out-of-scope section header with no items → parser returns [] → validator accepts.
     const body = [
       '## Task 1 — Sample',
+      '',
+      '### Type',
+      'tdd-code',
       '',
       '### Files in scope',
       '- a.ts',

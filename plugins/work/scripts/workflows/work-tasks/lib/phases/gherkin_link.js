@@ -1,6 +1,8 @@
 /**
  * Phase: gherkin_link — if gherkin.feature exists, every scenario must be
- * referenced by ≥1 task. Reuses work-orchestrator/lib/gherkin-task-refs when available.
+ * referenced by ≥1 task, AND every task carrying `@task:N` scenarios must
+ * have a scope under which the implement-time RED gate can find/author test
+ * files. Reuses work-orchestrator/lib/gherkin-task-refs when available.
  */
 
 'use strict';
@@ -9,6 +11,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { TASKS_PHASES } = require('../../tasks-phase-registry');
+const { parseBlocks } = require('./kind_assign');
+const {
+  scopeEntryCanMatchTestFiles,
+} = require('../../../../../skills/split-in-tasks/lib/task-types');
 
 let validateConsistency;
 try {
@@ -34,44 +40,88 @@ function extractScenarioTitles(text) {
   return out;
 }
 
-function validateArtifacts(tasksDir) {
-  const errors = [];
-  const gherkin = readFile(path.join(tasksDir, 'gherkin.feature'));
-  if (!gherkin) {
-    // No gherkin.feature → nothing to link → auto-pass.
-    return errors;
-  }
-  const tasks = readFile(path.join(tasksDir, 'tasks.md'));
-  if (!tasks) {
-    errors.push(`Missing tasks.md.`);
-    return errors;
-  }
-  // Use the canonical validator if available.
-  if (typeof validateConsistency === 'function') {
-    try {
-      const result = validateConsistency({ gherkinText: gherkin, tasksMdText: tasks });
-      if (result && Array.isArray(result.errors) && result.errors.length) {
-        for (const e of result.errors) errors.push(`gherkin-task-refs: ${e}`);
-        return errors;
+/**
+ * Count `@task:N`-tagged scenarios per task number. Tag semantics mirror the
+ * implement-side parser (task-next.js parseGherkinScenarios) EXACTLY: tag
+ * lines accumulate until the next `Scenario:` / `Scenario Outline:` line
+ * consumes them, and intervening non-tag lines (blank lines, comments,
+ * `Feature:` headers) do NOT reset the pending set. Deliberately NOT
+ * "improved" here — this validator must predict what the implement gate
+ * will see, so any divergence from task-next.js reintroduces the very
+ * gate-vs-generator drift this phase exists to prevent.
+ */
+function countTaggedScenarios(gherkin) {
+  const counts = new Map();
+  let pendingTags = [];
+  for (const raw of gherkin.split('\n')) {
+    const t = raw.trim();
+    if (t.startsWith('@')) {
+      pendingTags = pendingTags.concat(t.split(/\s+/));
+      continue;
+    }
+    if (/^(Scenario|Scenario Outline):/.test(t)) {
+      for (const tag of pendingTags) {
+        const m = tag.match(/^@task:(\d+)$/);
+        if (m) {
+          const n = Number(m[1]);
+          counts.set(n, (counts.get(n) || 0) + 1);
+        }
       }
-      // Canonical validator passed — trust it and skip the naive fallback,
-      // which can produce false positives by tasks.includes(title) on titles
-      // referenced via Acceptance Criteria or Requirements Covered.
-      if (result && result.valid === true) {
-        return errors;
-      }
-    } catch (e) {
-      // Validator threw — fall through to our own check below.
-      errors.push(`gherkin-task-refs threw: ${e.message}`);
+      pendingTags = [];
     }
   }
-  // Fallback: best-effort coverage check.
-  const scenarios = extractScenarioTitles(gherkin);
-  if (!scenarios.length) {
-    return errors;
+  return counts;
+}
+
+/**
+ * #489 / #491 defense: a task that owns `@task:N` scenarios but whose
+ * `### Files in scope` cannot match any test file is unimplementable — at
+ * RED, `scenariosCoveredByTests` demands each tagged scenario appear in a
+ * test file under the task's scope, while `protect-task-scope` blocks
+ * creating test files outside it. Catch the contradiction here, where
+ * tasks.md and gherkin.feature are still editable.
+ */
+function validateScenarioSatisfiability(gherkin, tasksText) {
+  const errors = [];
+  const counts = countTaggedScenarios(gherkin);
+  if (!counts.size) return errors;
+  for (const block of parseBlocks(tasksText)) {
+    const n = counts.get(block.num);
+    if (!n) continue;
+    if (block.filesInScope.some(scopeEntryCanMatchTestFiles)) continue;
+    errors.push(
+      `Task ${block.num} owns ${n} @task:${block.num}-tagged scenario(s) in gherkin.feature but its \`### Files in scope\` admits no test files — the RED gate would be unsatisfiable at implement. Either add a \`*.test.*\` entry (or a directory/glob that admits one) to the task's scope, move the @task:${block.num} tag to the task that owns the tests, or drop the tag and verify via the task's \`### Test Strategy\` command.`
+    );
   }
-  for (const title of scenarios) {
-    // Look for the scenario title literal in tasks.md.
+  return errors;
+}
+
+/**
+ * Run the canonical gherkin-task-refs validator. Returns
+ * `{ done: boolean, errors: string[] }` — `done: true` means the canonical
+ * verdict is final (pass or fail) and the naive fallback must be skipped
+ * (it can produce false positives via tasks.includes(title) on titles
+ * referenced through Acceptance Criteria or Requirements Covered).
+ */
+function runCanonicalConsistency(gherkin, tasks) {
+  if (typeof validateConsistency !== 'function') return { done: false, errors: [] };
+  try {
+    const result = validateConsistency({ gherkinText: gherkin, tasksMdText: tasks });
+    if (result && Array.isArray(result.errors) && result.errors.length) {
+      return { done: true, errors: result.errors.map((e) => `gherkin-task-refs: ${e}`) };
+    }
+    if (result && result.valid === true) return { done: true, errors: [] };
+    return { done: false, errors: [] };
+  } catch (e) {
+    // Validator threw — surface it and fall through to the naive check.
+    return { done: false, errors: [`gherkin-task-refs threw: ${e.message}`] };
+  }
+}
+
+/** Naive fallback: every scenario title must appear somewhere in tasks.md. */
+function naiveScenarioCoverage(gherkin, tasks) {
+  const errors = [];
+  for (const title of extractScenarioTitles(gherkin)) {
     if (!tasks.includes(title)) {
       errors.push(
         `Scenario "${title}" from gherkin.feature is not referenced by any task in tasks.md. Add the scenario title to the relevant task's \`### Acceptance Criteria\` or \`### Requirements Covered\`.`
@@ -79,6 +129,24 @@ function validateArtifacts(tasksDir) {
     }
   }
   return errors;
+}
+
+function validateArtifacts(tasksDir) {
+  const gherkin = readFile(path.join(tasksDir, 'gherkin.feature'));
+  // No gherkin.feature → nothing to link → auto-pass.
+  if (!gherkin) return [];
+  const tasks = readFile(path.join(tasksDir, 'tasks.md'));
+  if (!tasks) return ['Missing tasks.md.'];
+  // Satisfiability failures short-circuit the consistency checks on purpose:
+  // the remediation (moving/dropping @task tags, re-scoping) changes which
+  // task owns which scenario, which invalidates any canonical-consistency
+  // verdict computed against the pre-fix tag layout. Reporting both at once
+  // would surface errors that evaporate after the satisfiability fix.
+  const satisfiability = validateScenarioSatisfiability(gherkin, tasks);
+  if (satisfiability.length) return satisfiability;
+  const canonical = runCanonicalConsistency(gherkin, tasks);
+  if (canonical.done) return canonical.errors;
+  return [...canonical.errors, ...naiveScenarioCoverage(gherkin, tasks)];
 }
 
 function validate(ctx) {
@@ -99,6 +167,7 @@ function instructions(ctx) {
     '### What I check',
     '- If `gherkin.feature` exists: every `Scenario:` (and `Scenario Outline:`) is referenced by ≥1 task.',
     '- Reference can be in the task title, `### Acceptance Criteria`, or `### Requirements Covered`.',
+    '- Every task with `@task:N`-tagged scenarios has a `### Files in scope` that admits test files (RED-gate satisfiability).',
     '',
     'If no `gherkin.feature` exists, this phase auto-passes.',
     '',
@@ -119,3 +188,5 @@ module.exports.validate = validate;
 module.exports.instructions = instructions;
 module.exports.validateArtifacts = validateArtifacts;
 module.exports.extractScenarioTitles = extractScenarioTitles;
+module.exports.countTaggedScenarios = countTaggedScenarios;
+module.exports.validateScenarioSatisfiability = validateScenarioSatisfiability;

@@ -34,14 +34,16 @@ function freshTicket(prefix) {
 describe('initTasksMeta — kind persistence (GH-410)', () => {
   it('persists `kind` from descriptor `type` verbatim for every taxonomy kind', () => {
     const ticket = freshTicket('GH-410-KIND-ALL');
+    // Descriptor types come from the closed gate-contract taxonomy
+    // (task-types.js) — the same enum kind_assign validates.
     const descriptors = [
-      { num: 1, type: 'frontend' },
+      { num: 1, type: 'tdd-code' },
       { num: 2, type: 'checkpoint' },
-      { num: 3, type: 'backend' },
-      { num: 4, type: 'e2e' },
-      { num: 5, type: 'devops' },
-      { num: 6, type: 'wiring' },
-      { num: 7, type: 'fullstack' },
+      { num: 3, type: 'tests-only' },
+      { num: 4, type: 'docs' },
+      { num: 5, type: 'config' },
+      { num: 6, type: 'ci' },
+      { num: 7, type: 'mechanical-refactor' },
     ];
 
     const result = initTasksMeta(ticket, descriptors);
@@ -51,13 +53,13 @@ describe('initTasksMeta — kind persistence (GH-410)', () => {
     assert.equal(tasks.length, 7);
 
     // Each entry's kind should equal the descriptor type verbatim.
-    assert.equal(tasks[0].kind, 'frontend');
+    assert.equal(tasks[0].kind, 'tdd-code');
     assert.equal(tasks[1].kind, 'checkpoint');
-    assert.equal(tasks[2].kind, 'backend');
-    assert.equal(tasks[3].kind, 'e2e');
-    assert.equal(tasks[4].kind, 'devops');
-    assert.equal(tasks[5].kind, 'wiring');
-    assert.equal(tasks[6].kind, 'fullstack');
+    assert.equal(tasks[2].kind, 'tests-only');
+    assert.equal(tasks[3].kind, 'docs');
+    assert.equal(tasks[4].kind, 'config');
+    assert.equal(tasks[5].kind, 'ci');
+    assert.equal(tasks[6].kind, 'mechanical-refactor');
 
     // Existing fields preserved.
     assert.equal(tasks[1].id, 'task_2');
@@ -67,10 +69,7 @@ describe('initTasksMeta — kind persistence (GH-410)', () => {
 
   it('omits `kind` when descriptor lacks `type` (legacy descriptor array)', () => {
     const ticket = freshTicket('GH-410-KIND-NONE');
-    const descriptors = [
-      { num: 1 },
-      { num: 2 },
-    ];
+    const descriptors = [{ num: 1 }, { num: 2 }];
 
     const result = initTasksMeta(ticket, descriptors);
     assert.ok(result.success);
@@ -80,12 +79,12 @@ describe('initTasksMeta — kind persistence (GH-410)', () => {
     assert.equal(
       Object.prototype.hasOwnProperty.call(tasks[0], 'kind'),
       false,
-      'tasks[0] must NOT carry a `kind` field when descriptor has no `type`',
+      'tasks[0] must NOT carry a `kind` field when descriptor has no `type`'
     );
     assert.equal(
       Object.prototype.hasOwnProperty.call(tasks[1], 'kind'),
       false,
-      'tasks[1] must NOT carry a `kind` field when descriptor has no `type`',
+      'tasks[1] must NOT carry a `kind` field when descriptor has no `type`'
     );
     assert.equal(tasks[0].kind, undefined);
     assert.equal(tasks[1].kind, undefined);
@@ -102,7 +101,7 @@ describe('initTasksMeta — kind persistence (GH-410)', () => {
       assert.equal(
         Object.prototype.hasOwnProperty.call(t, 'kind'),
         false,
-        `legacy count-only entry ${t.id} must NOT carry a kind field`,
+        `legacy count-only entry ${t.id} must NOT carry a kind field`
       );
     }
   });
@@ -132,7 +131,10 @@ describe('initTasksMeta — kind persistence (GH-410)', () => {
     const result = initTasksMeta(ticket, descriptors);
     assert.ok(result.success);
     assert.equal(result.tasksMeta.tasks[0].title, 'End-to-end verification');
-    assert.equal(result.tasksMeta.tasks[1].title, undefined,
-      'descriptor without title must NOT carry a title field');
+    assert.equal(
+      result.tasksMeta.tasks[1].title,
+      undefined,
+      'descriptor without title must NOT carry a title field'
+    );
   });
 });

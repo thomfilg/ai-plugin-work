@@ -228,7 +228,7 @@ function writeTaskArtifacts(tasksBase, ticket) {
       '## Task 1 — Test task',
       '',
       '### Type',
-      'backend',
+      'tdd-code',
       '',
       '### Files in scope',
       '- src/**',
@@ -2019,7 +2019,7 @@ describe('GH-211: task_review in plan generation', () => {
     for (let i = 1; i <= taskCount; i++) {
       content += `## Task ${i}\n`;
       content += `— Task ${i} title\n\n`;
-      content += `### Type\nimplementation\n\n`;
+      content += `### Type\ntdd-code\n\n`;
       content += `### Deliverables\n- ${i}.1 Deliverable\n\n`;
     }
     fs.writeFileSync(path.join(dir, 'tasks.md'), content);

@@ -195,16 +195,13 @@ function _dispatchAndAppend(command, dispatchCtx, heading, errors) {
   }
 }
 
-const { hasLegacyTestCommand: _hasLegacyTestCommand } = require('./_legacy-test-command');
+const { noStrategyError: _noStrategyError } = require('./_legacy-test-command');
 
 function _validateOneTask(task, ctx, errors) {
   const strategy = _resolveStrategy(task);
   if (!strategy) {
-    if (_hasLegacyTestCommand(task)) {
-      errors.push(
-        `${taskHeadingFor(task)}: flag on but task still uses legacy \`### Test Command\`. Convert to \`### Test Strategy\` (kind: unit|integration|e2e|custom|verified-by|wiring-citation). See skills/split-in-tasks/docs/test-strategy.md.`
-      );
-    }
+    const msg = _noStrategyError(task, taskHeadingFor(task));
+    if (msg) errors.push(msg);
     return;
   }
   const heading = taskHeadingFor(task);
