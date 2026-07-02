@@ -92,46 +92,32 @@ function validateScenarioSatisfiability(gherkin, tasksText) {
   return errors;
 }
 
-function validateArtifacts(tasksDir) {
-  const errors = [];
-  const gherkin = readFile(path.join(tasksDir, 'gherkin.feature'));
-  if (!gherkin) {
-    // No gherkin.feature → nothing to link → auto-pass.
-    return errors;
-  }
-  const tasks = readFile(path.join(tasksDir, 'tasks.md'));
-  if (!tasks) {
-    errors.push(`Missing tasks.md.`);
-    return errors;
-  }
-  errors.push(...validateScenarioSatisfiability(gherkin, tasks));
-  if (errors.length) return errors;
-  // Use the canonical validator if available.
-  if (typeof validateConsistency === 'function') {
-    try {
-      const result = validateConsistency({ gherkinText: gherkin, tasksMdText: tasks });
-      if (result && Array.isArray(result.errors) && result.errors.length) {
-        for (const e of result.errors) errors.push(`gherkin-task-refs: ${e}`);
-        return errors;
-      }
-      // Canonical validator passed — trust it and skip the naive fallback,
-      // which can produce false positives by tasks.includes(title) on titles
-      // referenced via Acceptance Criteria or Requirements Covered.
-      if (result && result.valid === true) {
-        return errors;
-      }
-    } catch (e) {
-      // Validator threw — fall through to our own check below.
-      errors.push(`gherkin-task-refs threw: ${e.message}`);
+/**
+ * Run the canonical gherkin-task-refs validator. Returns
+ * `{ done: boolean, errors: string[] }` — `done: true` means the canonical
+ * verdict is final (pass or fail) and the naive fallback must be skipped
+ * (it can produce false positives via tasks.includes(title) on titles
+ * referenced through Acceptance Criteria or Requirements Covered).
+ */
+function runCanonicalConsistency(gherkin, tasks) {
+  if (typeof validateConsistency !== 'function') return { done: false, errors: [] };
+  try {
+    const result = validateConsistency({ gherkinText: gherkin, tasksMdText: tasks });
+    if (result && Array.isArray(result.errors) && result.errors.length) {
+      return { done: true, errors: result.errors.map((e) => `gherkin-task-refs: ${e}`) };
     }
+    if (result && result.valid === true) return { done: true, errors: [] };
+    return { done: false, errors: [] };
+  } catch (e) {
+    // Validator threw — surface it and fall through to the naive check.
+    return { done: false, errors: [`gherkin-task-refs threw: ${e.message}`] };
   }
-  // Fallback: best-effort coverage check.
-  const scenarios = extractScenarioTitles(gherkin);
-  if (!scenarios.length) {
-    return errors;
-  }
-  for (const title of scenarios) {
-    // Look for the scenario title literal in tasks.md.
+}
+
+/** Naive fallback: every scenario title must appear somewhere in tasks.md. */
+function naiveScenarioCoverage(gherkin, tasks) {
+  const errors = [];
+  for (const title of extractScenarioTitles(gherkin)) {
     if (!tasks.includes(title)) {
       errors.push(
         `Scenario "${title}" from gherkin.feature is not referenced by any task in tasks.md. Add the scenario title to the relevant task's \`### Acceptance Criteria\` or \`### Requirements Covered\`.`
@@ -139,6 +125,19 @@ function validateArtifacts(tasksDir) {
     }
   }
   return errors;
+}
+
+function validateArtifacts(tasksDir) {
+  const gherkin = readFile(path.join(tasksDir, 'gherkin.feature'));
+  // No gherkin.feature → nothing to link → auto-pass.
+  if (!gherkin) return [];
+  const tasks = readFile(path.join(tasksDir, 'tasks.md'));
+  if (!tasks) return ['Missing tasks.md.'];
+  const satisfiability = validateScenarioSatisfiability(gherkin, tasks);
+  if (satisfiability.length) return satisfiability;
+  const canonical = runCanonicalConsistency(gherkin, tasks);
+  if (canonical.done) return canonical.errors;
+  return [...canonical.errors, ...naiveScenarioCoverage(gherkin, tasks)];
 }
 
 function validate(ctx) {

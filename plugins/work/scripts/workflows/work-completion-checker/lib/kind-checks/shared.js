@@ -99,36 +99,38 @@ function readRequirementCoverageFromSubsections(tasksText) {
 }
 
 /**
+ * Parse one `| id | desc | status | evidence |` table line into a coverage
+ * row, or null for non-row lines (separators, headers, prose).
+ */
+function parseCoverageTableRow(line) {
+  if (!/^\|/.test(line)) return null;
+  const cells = line
+    .split('|')
+    .slice(1, -1)
+    .map((c) => c.trim());
+  if (cells.length < 2) return null;
+  if (/^-+$/.test(cells[0])) return null;
+  if (/^(id|requirement|req)$/i.test(cells[0])) return null;
+  return {
+    id: cells[0],
+    description: cells[1] || '',
+    status: cells[2] || '',
+    evidence: cells[3] || '',
+    source: 'table',
+  };
+}
+
+/**
  * Parse `## Requirement Coverage` table out of tasks.md.
  * Returns array of { id, description, status, evidence } records.
  * Falls back to per-task `### Requirements Covered` subsections when the
  * top-level table is absent (R4).
  */
-// eslint-disable-next-line complexity -- allowlisted pre-existing complexity; see .quality-exceptions
 function readRequirementCoverage(tasksDir) {
   const text = specShared.readTasks(tasksDir);
   if (!text) return [];
   const block = specShared.sliceSection(text, /^##\s+Requirement Coverage\b/im);
-  const rows = [];
-  if (block) {
-    for (const line of block.split('\n')) {
-      if (!/^\|/.test(line)) continue;
-      const cells = line
-        .split('|')
-        .slice(1, -1)
-        .map((c) => c.trim());
-      if (cells.length < 2) continue;
-      if (/^-+$/.test(cells[0])) continue;
-      if (/^(id|requirement|req)$/i.test(cells[0])) continue;
-      rows.push({
-        id: cells[0],
-        description: cells[1] || '',
-        status: cells[2] || '',
-        evidence: cells[3] || '',
-        source: 'table',
-      });
-    }
-  }
+  const rows = (block ? block.split('\n') : []).map(parseCoverageTableRow).filter(Boolean);
   if (rows.length === 0) return readRequirementCoverageFromSubsections(text);
   return rows;
 }
