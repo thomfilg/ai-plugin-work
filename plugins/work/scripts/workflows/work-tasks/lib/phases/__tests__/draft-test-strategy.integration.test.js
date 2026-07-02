@@ -299,3 +299,72 @@ test('parser-failure surfacing (cursor[bot] 3423427166): flag-on parseTasks fail
     else process.env.WORK_TEST_STRATEGY_VALIDATOR = prev;
   }
 });
+
+// --- #606 defense: missing verification block -------------------------------
+
+function tasksMdWithoutVerification(type) {
+  return [
+    '## Extracted Requirements',
+    '',
+    '- R1',
+    '',
+    `## Task 1 — ${type} task with no Test Strategy at all`,
+    '',
+    '### Type',
+    type,
+    '',
+    '### Dependencies',
+    'none',
+    '',
+    '### Requirements Covered',
+    '- R1',
+    '',
+    '### Acceptance Criteria',
+    '- content updated',
+    '',
+    '### Files in scope',
+    '- `README.md`',
+    '',
+  ].join('\n');
+}
+
+test('flag-on: docs task with neither Test Strategy nor Test Command is blocked (#606)', () => {
+  const dir = mkTasksDir();
+  writeSpec(dir);
+  writeTasks(dir, tasksMdWithoutVerification('docs'));
+
+  const errors = withFlag('1', () => draft.validateArtifacts(dir), dir);
+  const joined = errors.join('\n');
+  assert.ok(
+    /has neither `### Test Strategy` nor legacy `### Test Command`/.test(joined),
+    `expected missing-verification error; got: ${JSON.stringify(errors)}`
+  );
+  assert.ok(
+    /kind: custom/.test(joined),
+    `error should carry the docs-task remediation hint; got: ${JSON.stringify(errors)}`
+  );
+});
+
+test('flag-on: checkpoint task without a Test Strategy stays exempt', () => {
+  const dir = mkTasksDir();
+  writeSpec(dir);
+  writeTasks(dir, tasksMdWithoutVerification('checkpoint'));
+
+  const errors = withFlag('1', () => draft.validateArtifacts(dir), dir);
+  assert.ok(
+    !errors.some((e) => /has neither/.test(e)),
+    `checkpoint should not require a verification block; got: ${JSON.stringify(errors)}`
+  );
+});
+
+test('flag-off: missing verification block is not enforced (legacy path unchanged)', () => {
+  const dir = mkTasksDir();
+  writeSpec(dir);
+  writeTasks(dir, tasksMdWithoutVerification('docs'));
+
+  const errors = withFlag('0', () => draft.validateArtifacts(dir));
+  assert.ok(
+    !errors.some((e) => /has neither/.test(e)),
+    `flag-off must stay byte-for-byte legacy; got: ${JSON.stringify(errors)}`
+  );
+});

@@ -14,6 +14,7 @@
 'use strict';
 
 const { _isAbsolutePathEntry, fileMatchesScope } = require('./task-scope-globs');
+const { TASK_TYPES, isKnownTaskType } = require('../../../skills/split-in-tasks/lib/task-types');
 
 // ---------------------------------------------------------------------------
 // validateTask
@@ -22,6 +23,28 @@ const { _isAbsolutePathEntry, fileMatchesScope } = require('./task-scope-globs')
 function _isCheckpointTask(task) {
   const taskType = typeof task.type === 'string' ? task.type.toLowerCase().trim() : null;
   return taskType === 'checkpoint' || task.isCheckpoint === true;
+}
+
+/**
+ * `### Type` must be a member of the closed gate-contract enum
+ * (task-types.js). An unknown value is not cosmetic: `gateContractFor()`
+ * falls back to the strictest tdd-code contract at implement, so a docs or
+ * config task carrying a freeform Type wedges at RED demanding test files
+ * (GH-498 shape). Catch it here — at tasks_gate, where tasks.md is still
+ * editable — instead of at implement where it is hook-locked.
+ */
+function _checkTypeKnown(task, label, errors) {
+  const t = typeof task.type === 'string' ? task.type.trim() : '';
+  if (!t) {
+    errors.push(`${label} is missing \`### Type\` — must be one of: ${TASK_TYPES.join(', ')}.`);
+    return;
+  }
+  if (!isKnownTaskType(t)) {
+    errors.push(
+      `${label} \`### Type\` "${task.type}" is not in the closed enum (${TASK_TYPES.join(', ')}). ` +
+        'Unknown Types fall back to the strictest tdd-code gate contract at implement and wedge non-code tasks at RED.'
+    );
+  }
 }
 
 function _checkScopePresence(task, label, errors) {
@@ -75,6 +98,7 @@ function validateTask(task) {
   if (!task || typeof task !== 'object') return ['task must be an object'];
   const errors = [];
   const label = `Task ${task.num ?? '?'}`;
+  _checkTypeKnown(task, label, errors);
   if (_isCheckpointTask(task)) return errors;
 
   _checkScopePresence(task, label, errors);

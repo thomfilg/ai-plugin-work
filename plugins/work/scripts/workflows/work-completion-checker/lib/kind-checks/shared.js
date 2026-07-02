@@ -14,6 +14,7 @@ const { spawnSync } = require('node:child_process');
 
 const specShared = require('../../../work-spec/lib/kind-checks/shared');
 const config = require('../../../lib/config');
+const { extractRequirementIdsFromBulletBlock } = require('../../../lib/requirement-ids');
 
 function readFile(p) {
   try {
@@ -77,20 +78,21 @@ function readRequirementCoverageFromSubsections(tasksText) {
     const reqAfter = block.slice(reqMatch.index + reqMatch[0].length);
     const nextHeading = reqAfter.match(/^#{2,3}\s/m);
     const reqBlock = nextHeading ? reqAfter.slice(0, nextHeading.index) : reqAfter;
-    for (const line of reqBlock.split('\n')) {
-      const m = line.match(/^\s*[-*]\s+([A-Za-z0-9_-]+)\s*$/);
-      if (m) {
-        rows.push({
-          id: m[1],
-          description: '',
-          status: 'DELIVERED',
-          evidence: `tasks.md:Task ${taskNum}`,
-          // Tag synthesized rows so downstream gates (test_pass_crossref B2)
-          // can avoid forcing test citations on the R4 fallback, which has
-          // no concept of per-row test evidence by design.
-          source: 'subsection',
-        });
-      }
+    // #498: parse with the SAME canonical grammar the tasks-phase generator
+    // uses (shared lib/requirement-ids.js), so comma-separated bullets like
+    // `- R1, R6, R7` synthesize one row per ID instead of silently yielding
+    // zero rows and re-triggering the requirement_coverage_missing deadlock.
+    for (const id of extractRequirementIdsFromBulletBlock(reqBlock)) {
+      rows.push({
+        id,
+        description: '',
+        status: 'DELIVERED',
+        evidence: `tasks.md:Task ${taskNum}`,
+        // Tag synthesized rows so downstream gates (test_pass_crossref B2)
+        // can avoid forcing test citations on the R4 fallback, which has
+        // no concept of per-row test evidence by design.
+        source: 'subsection',
+      });
     }
   }
   return rows;
@@ -153,13 +155,18 @@ function readBriefRequirements(tasksDir) {
 /**
  * Parse the `## Reuse Audit` section of spec.md and return an array of
  * `{ symbol, line, mustReuse }` records. Returns `null` when the section
- * is absent (signals "spec doesn't declare reuse"). Throws when the
- * section is present but contains no parseable entries (signals
- * malformed authoring rather than absence).
+ * is absent (signals "spec doesn't declare reuse"), and `[]` when the
+ * section carries an explicit none-marker bullet (`- None — ...`), which
+ * declares "audited, nothing reusable found". Throws when the section is
+ * present but contains no parseable entries (signals malformed authoring
+ * rather than absence).
  *
- * Recognized bullet shape:
- *   - `Symbol` MUST be reused from `path/to/file.ext`
- * Soft-reuse lines (without MUST) are captured with `mustReuse: false`.
+ * Recognized bullet shapes (#629 — grammar must match what spec-writer is
+ * instructed to emit; see agents/spec-writer.md "Reuse Declarations"):
+ *   - `Symbol` MUST be reused from `path/to/file.ext` — reason
+ *   - `Symbol` (`path/to/file.ext`) MUST be reused — reason
+ *   - `Symbol` may be reused from `path` — reason (soft, mustReuse: false)
+ *   - None — no reusable symbols found (explicit empty declaration)
  */
 function readReuseAudit(specDir) {
   const text = specShared.readSpec(specDir);
@@ -174,10 +181,17 @@ function readReuseAudit(specDir) {
   const headingLine = text.slice(0, headingOffset).split('\n').length;
   const entries = [];
   const blockLines = (block || '').split('\n');
+  let sawNoneMarker = false;
   for (let i = 0; i < blockLines.length; i += 1) {
     const raw = blockLines[i];
+    if (/^\s*[-*]\s+None\b/i.test(raw)) {
+      sawNoneMarker = true;
+      continue;
+    }
+    // Optional parenthesized path between the symbol and the verb tolerates
+    // the common `` `Symbol` (`path`) MUST be reused `` ordering (#629).
     const m = raw.match(
-      /^\s*[-*]\s+`([^`]+)`\s+(MUST\s+be\s+reused|be\s+reused|may\s+be\s+reused)/i
+      /^\s*[-*]\s+`([^`]+)`\s*(?:\([^)]*\)\s*)?(MUST\s+be\s+reused|be\s+reused|may\s+be\s+reused)/i
     );
     if (!m) continue;
     const mustReuse = /MUST/i.test(m[2]);
@@ -197,8 +211,11 @@ function readReuseAudit(specDir) {
     });
   }
   if (entries.length === 0) {
+    if (sawNoneMarker) return entries; // audited, nothing reusable — valid empty
     throw new Error(
-      `readReuseAudit: '## Reuse Audit' section in ${path.join(specDir, 'spec.md')} contains no parseable entries`
+      `readReuseAudit: '## Reuse Audit' section in ${path.join(specDir, 'spec.md')} contains no parseable entries. ` +
+        'Expected bullets shaped `- \\`Symbol\\` MUST be reused from \\`path\\` — reason` ' +
+        '(or `may be reused` for mirrored patterns), or `- None — no reusable symbols found`.'
     );
   }
   return entries;

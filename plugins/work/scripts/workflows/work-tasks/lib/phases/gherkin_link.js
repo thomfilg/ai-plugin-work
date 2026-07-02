@@ -1,6 +1,8 @@
 /**
  * Phase: gherkin_link — if gherkin.feature exists, every scenario must be
- * referenced by ≥1 task. Reuses work-orchestrator/lib/gherkin-task-refs when available.
+ * referenced by ≥1 task, AND every task carrying `@task:N` scenarios must
+ * have a scope under which the implement-time RED gate can find/author test
+ * files. Reuses work-orchestrator/lib/gherkin-task-refs when available.
  */
 
 'use strict';
@@ -9,6 +11,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { TASKS_PHASES } = require('../../tasks-phase-registry');
+const { parseBlocks } = require('./kind_assign');
+const {
+  scopeEntryCanMatchTestFiles,
+} = require('../../../../../skills/split-in-tasks/lib/task-types');
 
 let validateConsistency;
 try {
@@ -34,6 +40,58 @@ function extractScenarioTitles(text) {
   return out;
 }
 
+/**
+ * Count `@task:N`-tagged scenarios per task number. Tag semantics mirror the
+ * implement-side parser (task-next.js parseGherkinScenarios): tag lines
+ * accumulate until the next `Scenario:` / `Scenario Outline:` line consumes
+ * them.
+ */
+function countTaggedScenarios(gherkin) {
+  const counts = new Map();
+  let pendingTags = [];
+  for (const raw of gherkin.split('\n')) {
+    const t = raw.trim();
+    if (t.startsWith('@')) {
+      pendingTags = pendingTags.concat(t.split(/\s+/));
+      continue;
+    }
+    if (/^(Scenario|Scenario Outline):/.test(t)) {
+      for (const tag of pendingTags) {
+        const m = tag.match(/^@task:(\d+)$/);
+        if (m) {
+          const n = Number(m[1]);
+          counts.set(n, (counts.get(n) || 0) + 1);
+        }
+      }
+      pendingTags = [];
+    }
+  }
+  return counts;
+}
+
+/**
+ * #489 / #491 defense: a task that owns `@task:N` scenarios but whose
+ * `### Files in scope` cannot match any test file is unimplementable — at
+ * RED, `scenariosCoveredByTests` demands each tagged scenario appear in a
+ * test file under the task's scope, while `protect-task-scope` blocks
+ * creating test files outside it. Catch the contradiction here, where
+ * tasks.md and gherkin.feature are still editable.
+ */
+function validateScenarioSatisfiability(gherkin, tasksText) {
+  const errors = [];
+  const counts = countTaggedScenarios(gherkin);
+  if (!counts.size) return errors;
+  for (const block of parseBlocks(tasksText)) {
+    const n = counts.get(block.num);
+    if (!n) continue;
+    if (block.filesInScope.some(scopeEntryCanMatchTestFiles)) continue;
+    errors.push(
+      `Task ${block.num} owns ${n} @task:${block.num}-tagged scenario(s) in gherkin.feature but its \`### Files in scope\` admits no test files — the RED gate would be unsatisfiable at implement. Either add a \`*.test.*\` entry (or a directory/glob that admits one) to the task's scope, move the @task:${block.num} tag to the task that owns the tests, or drop the tag and verify via the task's \`### Test Strategy\` command.`
+    );
+  }
+  return errors;
+}
+
 function validateArtifacts(tasksDir) {
   const errors = [];
   const gherkin = readFile(path.join(tasksDir, 'gherkin.feature'));
@@ -46,6 +104,8 @@ function validateArtifacts(tasksDir) {
     errors.push(`Missing tasks.md.`);
     return errors;
   }
+  errors.push(...validateScenarioSatisfiability(gherkin, tasks));
+  if (errors.length) return errors;
   // Use the canonical validator if available.
   if (typeof validateConsistency === 'function') {
     try {
@@ -99,6 +159,7 @@ function instructions(ctx) {
     '### What I check',
     '- If `gherkin.feature` exists: every `Scenario:` (and `Scenario Outline:`) is referenced by ≥1 task.',
     '- Reference can be in the task title, `### Acceptance Criteria`, or `### Requirements Covered`.',
+    '- Every task with `@task:N`-tagged scenarios has a `### Files in scope` that admits test files (RED-gate satisfiability).',
     '',
     'If no `gherkin.feature` exists, this phase auto-passes.',
     '',
@@ -119,3 +180,5 @@ module.exports.validate = validate;
 module.exports.instructions = instructions;
 module.exports.validateArtifacts = validateArtifacts;
 module.exports.extractScenarioTitles = extractScenarioTitles;
+module.exports.countTaggedScenarios = countTaggedScenarios;
+module.exports.validateScenarioSatisfiability = validateScenarioSatisfiability;
