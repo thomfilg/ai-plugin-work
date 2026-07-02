@@ -148,7 +148,6 @@ plugins/work/scripts/workflows/work-task-review/lib/phases/diff_audit.js
 plugins/work/scripts/workflows/work-pr-reviewer/lib/kind-checks/shared.js
 plugins/work/scripts/workflows/work-pr-reviewer/lib/phases/kind_checks.js
 plugins/work/scripts/workflows/work-ci/lib/phases/rerun_check.js
-plugins/work/scripts/workflows/work-completion-checker/lib/kind-checks/shared.js
 plugins/work/scripts/workflows/work-qa-feature-tester/lib/phases/kind_checks.js
 plugins/work/scripts/workflows/work/hooks/protect-gherkin.js
 plugins/work/scripts/workflows/work-ci/lib/phases/triage.js

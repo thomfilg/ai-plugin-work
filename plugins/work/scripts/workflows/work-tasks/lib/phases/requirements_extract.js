@@ -12,16 +12,10 @@ const path = require('node:path');
 const { TASKS_PHASES } = require('../../tasks-phase-registry');
 const { loadTasksMd, readFileSafe, tasksMdPath } = require('./_tasks-md-loader');
 const { sliceSection } = require('../../../work-spec/lib/kind-checks/shared');
-
-function listRequirementIds(text) {
-  if (!text) return [];
-  // Match "R1", "R10", "R-3", "spec §2.1", "brief AC-3", "AC1"
-  const out = new Set();
-  const re = /\b(R-?\d+|AC-?\d+|spec\s*§[\d.]+|brief\s+AC-\d+)\b/gi;
-  let m;
-  while ((m = re.exec(text)) !== null) out.add(m[0]);
-  return [...out];
-}
+// Canonical grammar shared with the completion-checker coverage fallback —
+// keeping both sides on one module prevents the #498 drift (generator
+// accepts a format the checker rejects).
+const { listRequirementIds } = require('../../../lib/requirement-ids');
 
 function validateArtifacts(tasksDir) {
   const { text, errors } = loadTasksMd(

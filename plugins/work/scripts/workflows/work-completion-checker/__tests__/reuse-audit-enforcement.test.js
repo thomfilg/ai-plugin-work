@@ -27,7 +27,7 @@ function buildCtx({ spec, changedFiles = [], fileContents = {} }) {
   fs.writeFileSync(
     path.join(tasksDir, 'pr-context.json'),
     JSON.stringify({ files: changedFiles }, null, 2),
-    'utf8',
+    'utf8'
   );
   // Write content for each changed file under worktreeRoot
   for (const [rel, body] of Object.entries(fileContents)) {
@@ -99,7 +99,7 @@ test.describe('reuse_audit_enforcement phase', () => {
       assert.equal(
         ctx.failures.filter((f) => f.checkType === 'reuse_audit').length,
         0,
-        'no failure record should be pushed',
+        'no failure record should be pushed'
       );
     } finally {
       cleanup();
@@ -148,7 +148,7 @@ test.describe('reuse_audit_enforcement phase', () => {
       assert.match(
         rec.observed,
         /found ExploreBulkToolbar in diff — did you mean to extend ContentPageToolbar\?/,
-        'observed must include the suffix-candidate hint string',
+        'observed must include the suffix-candidate hint string'
       );
     } finally {
       cleanup();
@@ -183,10 +183,7 @@ test.describe('reuse_audit_enforcement phase', () => {
     try {
       const result = await phase.validate(ctx);
       assert.equal(result.ok, true, 'literal Object.create in diff must satisfy the audit');
-      assert.equal(
-        ctx.failures.filter((f) => f.checkType === 'reuse_audit').length,
-        0,
-      );
+      assert.equal(ctx.failures.filter((f) => f.checkType === 'reuse_audit').length, 0);
     } finally {
       cleanup();
     }
@@ -213,7 +210,7 @@ test.describe('reuse_audit_enforcement phase', () => {
       assert.equal(
         result.ok,
         false,
-        'wildcard match must NOT count — `.` must be escaped to a literal dot',
+        'wildcard match must NOT count — `.` must be escaped to a literal dot'
       );
       const rec = ctx.failures.find((f) => f.checkType === 'reuse_audit');
       assert.ok(rec, 'failure record should be pushed for missing literal symbol');
@@ -248,7 +245,7 @@ test.describe('reuse_audit_enforcement phase', () => {
       const errs = Array.isArray(result.errors) ? result.errors : [];
       assert.ok(
         !errs.some((e) => /SyntaxError|Invalid regular expression/i.test(String(e))),
-        `must not surface a regex SyntaxError; got errors=${JSON.stringify(errs)}`,
+        `must not surface a regex SyntaxError; got errors=${JSON.stringify(errs)}`
       );
     } finally {
       cleanup();
@@ -269,14 +266,109 @@ test.describe('reuse_audit_enforcement phase', () => {
       assert.ok(Array.isArray(result.errors));
       assert.ok(
         result.errors.some((e) => /^parser threw:/.test(String(e))),
-        'errors must include a "parser threw: ..." entry',
+        'errors must include a "parser threw: ..." entry'
       );
       // Parser failure must also be surfaced through the failure-store so
       // report.js can include it in completion-verdict.json.
       const parserFailure = ctx.failures.find(
-        (f) => f.checkType === 'reuse_audit' && f.requirementId === 'REUSE-PARSER',
+        (f) => f.checkType === 'reuse_audit' && f.requirementId === 'REUSE-PARSER'
       );
       assert.ok(parserFailure, 'parser failure must be pushed onto ctx.failures');
+    } finally {
+      cleanup();
+    }
+  });
+});
+
+// --- #629: grammar tolerance + explicit none-marker --------------------------
+
+test.describe('readReuseAudit grammar (#629)', () => {
+  const { readReuseAudit } = require('../lib/kind-checks/shared');
+
+  function specDirWith(body) {
+    const root = mkTmp();
+    const dir = path.join(root, 'tasks', 'GH-629');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'spec.md'), body, 'utf8');
+    return { dir, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) };
+  }
+
+  test('accepts the parenthesized-path variant `Symbol` (`path`) MUST be reused', () => {
+    const { dir, cleanup } = specDirWith(
+      [
+        '# Spec',
+        '',
+        '## Reuse Audit',
+        '',
+        '- `distance` (`plugins/lib/levenshtein.js:46`) MUST be reused — typo suggestions',
+        '- `nearest` (`plugins/lib/levenshtein.js:96`) may be reused — mirrored only',
+        '',
+      ].join('\n')
+    );
+    try {
+      const entries = readReuseAudit(dir);
+      assert.equal(entries.length, 2);
+      assert.equal(entries[0].symbol, 'distance');
+      assert.equal(entries[0].mustReuse, true);
+      assert.equal(entries[1].symbol, 'nearest');
+      assert.equal(entries[1].mustReuse, false);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('explicit none-marker returns an empty (valid) declaration set', () => {
+    const { dir, cleanup } = specDirWith(
+      [
+        '# Spec',
+        '',
+        '## Reuse Audit',
+        '',
+        '- None — no reusable symbols found (see Broad Search Evidence)',
+        '',
+      ].join('\n')
+    );
+    try {
+      assert.deepEqual(readReuseAudit(dir), []);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('prose-only section still throws with the grammar in the message', () => {
+    const { dir, cleanup } = specDirWith(
+      [
+        '# Spec',
+        '',
+        '## Reuse Audit',
+        '',
+        '- `plugins/lib/levenshtein.js:46` and `:96` — pure helpers. Reused directly.',
+        '',
+      ].join('\n')
+    );
+    try {
+      assert.throws(() => readReuseAudit(dir), /MUST be reused from/);
+    } finally {
+      cleanup();
+    }
+  });
+
+  test('none-marker plus real entries keeps the real entries', () => {
+    const { dir, cleanup } = specDirWith(
+      [
+        '# Spec',
+        '',
+        '## Reuse Audit',
+        '',
+        '- None of the legacy helpers apply here',
+        '- `distance` MUST be reused from `plugins/lib/levenshtein.js:46` — typo suggestions',
+        '',
+      ].join('\n')
+    );
+    try {
+      const entries = readReuseAudit(dir);
+      assert.equal(entries.length, 1);
+      assert.equal(entries[0].symbol, 'distance');
     } finally {
       cleanup();
     }

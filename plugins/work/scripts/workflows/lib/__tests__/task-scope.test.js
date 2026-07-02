@@ -15,6 +15,7 @@ describe('validateTask', () => {
   it('passes when both sections are populated', () => {
     const errors = ts.validateTask({
       num: 1,
+      type: 'tdd-code',
       filesInScope: ['lib/x.ts'],
       filesOutOfScope: ['lib/y.ts'],
     });
@@ -24,6 +25,7 @@ describe('validateTask', () => {
   it('passes with empty filesOutOfScope (no siblings)', () => {
     const errors = ts.validateTask({
       num: 1,
+      type: 'tdd-code',
       filesInScope: ['lib/x.ts'],
       filesOutOfScope: [],
     });
@@ -31,7 +33,7 @@ describe('validateTask', () => {
   });
 
   it('fails when both filesInScope and suggestedScope are missing', () => {
-    const errors = ts.validateTask({ num: 2, filesOutOfScope: [] });
+    const errors = ts.validateTask({ num: 2, type: 'tdd-code', filesOutOfScope: [] });
     assert.equal(errors.length, 1);
     assert.match(errors[0], /Task 2/);
     assert.match(errors[0], /Files in scope/);
@@ -40,6 +42,7 @@ describe('validateTask', () => {
   it('fails when both filesInScope and suggestedScope are empty', () => {
     const errors = ts.validateTask({
       num: 3,
+      type: 'tdd-code',
       filesInScope: [],
       suggestedScope: '',
       filesOutOfScope: [],
@@ -50,6 +53,7 @@ describe('validateTask', () => {
   it('accepts legacy suggestedScope as fallback when filesInScope is missing', () => {
     const errors = ts.validateTask({
       num: 5,
+      type: 'tdd-code',
       filesInScope: [],
       suggestedScope: '- lib/x.ts',
       filesOutOfScope: [],
@@ -63,7 +67,7 @@ describe('validateTask', () => {
   });
 
   it('tolerates missing filesOutOfScope (legacy task)', () => {
-    const errors = ts.validateTask({ num: 6, filesInScope: ['x.ts'] });
+    const errors = ts.validateTask({ num: 6, type: 'tdd-code', filesInScope: ['x.ts'] });
     assert.deepEqual(errors, []);
   });
 
@@ -75,7 +79,7 @@ describe('validateTask', () => {
   it('exempts checkpoint tasks from the Files-in-scope requirement', () => {
     // Checkpoint tasks don't ship code, so they don't need a scope envelope.
     assert.deepEqual(ts.validateTask({ num: 9, type: 'checkpoint' }), []);
-    assert.deepEqual(ts.validateTask({ num: 10, isCheckpoint: true }), []);
+    assert.deepEqual(ts.validateTask({ num: 10, type: 'checkpoint', isCheckpoint: true }), []);
   });
 
   // GH-392 follow-up: cross-task deps must be repo-relative.
@@ -101,10 +105,51 @@ describe('validateTask', () => {
   it('accepts repo-relative crossTaskDeps', () => {
     const errors = ts.validateTask({
       num: 13,
+      type: 'tdd-code',
       filesInScope: ['src/a.ts'],
       crossTaskDeps: ['src/shared/schema.ts', 'lib/**/*.ts'],
     });
     assert.deepEqual(errors, []);
+  });
+
+  // GH-498-shape defense: unknown/missing `### Type` falls back to the
+  // strictest tdd-code contract at implement and wedges non-code tasks at
+  // RED. Catch it at tasks_gate where tasks.md is still editable.
+  it('rejects a task with a missing Type', () => {
+    const errors = ts.validateTask({ num: 20, filesInScope: ['src/a.ts'] });
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /Task 20 is missing `### Type`/);
+    assert.match(errors[0], /tdd-code/);
+  });
+
+  it('rejects a task with a legacy domain-kind Type (devops)', () => {
+    const errors = ts.validateTask({
+      num: 21,
+      type: 'devops',
+      filesInScope: ['scripts/deploy.yml'],
+    });
+    assert.equal(errors.length, 1);
+    assert.match(errors[0], /"devops" is not in the closed enum/);
+    assert.match(errors[0], /strictest tdd-code gate contract/);
+  });
+
+  it('accepts every member of the closed Type enum', () => {
+    for (const type of [
+      'tdd-code',
+      'tests-only',
+      'docs',
+      'config',
+      'ci',
+      'mechanical-refactor',
+      'file-move',
+      'checkpoint',
+    ]) {
+      const errors = ts.validateTask({ num: 22, type, filesInScope: ['src/a.ts'] });
+      assert.ok(
+        !errors.some((e) => /### Type/.test(e)),
+        `Type "${type}" should be accepted; got: ${errors.join(' | ')}`
+      );
+    }
   });
 
   it('rejects absolute path in filesInScope and filesOutOfScope', () => {
@@ -131,7 +176,7 @@ describe('validateCrossTaskDepsOwnership', () => {
     assert.match(errors[0], /no other task lists it in/);
   });
 
-  it('accepts a crossTaskDep that literally appears in another task\'s scope', () => {
+  it("accepts a crossTaskDep that literally appears in another task's scope", () => {
     const tasks = [
       { num: 1, filesInScope: ['src/a.ts'], crossTaskDeps: ['src/shared/schema.ts'] },
       { num: 2, filesInScope: ['src/shared/schema.ts', 'src/b.ts'] },
@@ -139,7 +184,7 @@ describe('validateCrossTaskDepsOwnership', () => {
     assert.deepEqual(ts.validateCrossTaskDepsOwnership(tasks), []);
   });
 
-  it('accepts a crossTaskDep covered by another task\'s glob scope', () => {
+  it("accepts a crossTaskDep covered by another task's glob scope", () => {
     const tasks = [
       { num: 1, filesInScope: ['src/a.ts'], crossTaskDeps: ['src/shared/schema.ts'] },
       { num: 2, filesInScope: ['src/shared/**'] },
@@ -186,8 +231,8 @@ describe('validateCrossTaskDepsOwnership', () => {
 describe('validateAll', () => {
   it('returns valid:true when all tasks pass', () => {
     const result = ts.validateAll([
-      { num: 1, filesInScope: ['a.ts'], filesOutOfScope: [] },
-      { num: 2, filesInScope: ['b.ts'], filesOutOfScope: ['c.ts'] },
+      { num: 1, type: 'tdd-code', filesInScope: ['a.ts'], filesOutOfScope: [] },
+      { num: 2, type: 'tdd-code', filesInScope: ['b.ts'], filesOutOfScope: ['c.ts'] },
     ]);
     assert.equal(result.valid, true);
     assert.deepEqual(result.errors, []);

@@ -168,7 +168,7 @@ function writeTaskArtifacts(ticket) {
       '## Task 1 — TDD enforcement fixture',
       '',
       '### Type',
-      'backend',
+      'tdd-code',
       '',
       '### Files in scope',
       '- src/**',

@@ -376,3 +376,74 @@ describe('spec-gate with standalone gherkin.feature', () => {
     assert.match(entries[0].reason, /2 @integration/);
   });
 });
+
+// ─── #629: Reuse Audit grammar gate (Case 1b) ───────────────────────────────
+
+describe('spec-gate Reuse Audit grammar (#629)', () => {
+  let specGateStep;
+  const createdDirs = [];
+
+  before(() => {
+    const mod = require(path.join(__dirname, '..', 'spec-gate.js'));
+    specGateStep = typeof mod === 'function' ? mod : mod.specGateStep;
+  });
+
+  afterEach(() => {
+    while (createdDirs.length) rmrf(createdDirs.pop());
+  });
+
+  function run(specContent) {
+    const dir = makeTmpTasksDir(specContent, GHERKIN_VALID);
+    createdDirs.push(dir);
+    const { add, entries } = makeAdd();
+    specGateStep(add, makeState(), makeCtx({ tasksDir: dir }));
+    return entries;
+  }
+
+  it('RUNs /spec when the Reuse Audit section is prose-only (unparseable)', () => {
+    const entries = run(
+      [
+        '# Spec',
+        '',
+        '## Reuse Audit',
+        '',
+        '- `plugins/lib/levenshtein.js:46` — pure helper, reused directly.',
+        '',
+      ].join('\n')
+    );
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].action, 'RUN');
+    assert.equal(entries[0].command, '/spec');
+    assert.match(entries[0].reason, /Reuse Audit unparseable/);
+    assert.match(entries[0].reason, /MUST be reused from/);
+  });
+
+  it('passes through to gherkin validation when Reuse Audit bullets parse', () => {
+    const entries = run(
+      [
+        '# Spec',
+        '',
+        '## Reuse Audit',
+        '',
+        '- `distance` MUST be reused from `plugins/lib/levenshtein.js:46` — typo suggestions',
+        '',
+      ].join('\n')
+    );
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].action, 'DEFER');
+  });
+
+  it('passes with the explicit none-marker', () => {
+    const entries = run(
+      ['# Spec', '', '## Reuse Audit', '', '- None — no reusable symbols found', ''].join('\n')
+    );
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].action, 'DEFER');
+  });
+
+  it('skips the check when spec.md has no Reuse Audit section (backward compatible)', () => {
+    const entries = run(SPEC_PROSE);
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0].action, 'DEFER');
+  });
+});

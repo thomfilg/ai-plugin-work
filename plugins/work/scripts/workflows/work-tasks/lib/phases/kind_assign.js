@@ -1,16 +1,24 @@
 /**
  * Phase: kind_assign — every task has a recognized `### Type` value AND
- * per-kind sanity checks pass.
+ * per-Type structural scope checks pass.
  *
- * - backend: at least one `*.integration.test.*` file in scope.
- * - frontend: at least one component / page / hook file in scope.
- * - e2e: at least one tests/e2e Playwright spec file in scope.
- * - wiring: NO file in `Files in scope` matches the backend pattern when
- *   `Files explicitly out of scope` mentions a backend file (the ECHO-4579
- *   defense at task granularity).
- * - devops: only infra/config files (`.github/`, `scripts/`, `*.yml`,
- *   Dockerfile) in scope.
- * - checkpoint: no per-kind sanity (just a synchronization marker).
+ * The `### Type` enum is the closed gate-contract taxonomy defined in
+ * skills/split-in-tasks/lib/task-types.js (tdd-code | tests-only | docs |
+ * config | ci | mechanical-refactor | file-move | checkpoint). It is the
+ * SAME enum the implement gate reads via `gateContractFor()` — validating a
+ * different vocabulary here is exactly the drift that wedged docs/devops
+ * tasks at RED (GH-498 / issues #489, #606): kind_assign used to demand the
+ * legacy domain kinds (frontend/backend/wiring/e2e/devops/fullstack) which
+ * `gateContractFor()` does not know, so every non-checkpoint task fell back
+ * to the strictest fail-closed tdd-code contract at implement.
+ *
+ * Structural checks derive from TYPE_SCOPE_RULES (same source Pass D and
+ * protect-task-scope.js use):
+ *   - scopePatterns  — every `### Files in scope` entry must match the
+ *     Type's allowlist (docs → *.md, config/ci → their allowlists).
+ *   - mustHaveTest   — tdd-code / tests-only need a test-authorship entry,
+ *     otherwise the RED gate is unsatisfiable at implement.
+ *   - mustHaveSource — tdd-code needs at least one non-test source entry.
  */
 
 'use strict';
@@ -18,16 +26,31 @@
 const { TASKS_PHASES } = require('../../tasks-phase-registry');
 const { iterTaskBlocks } = require('./_task-block-iter');
 const { loadTasksMd, readFileSafe, tasksMdPath } = require('./_tasks-md-loader');
+const {
+  TASK_TYPES,
+  isKnownTaskType,
+  scopeRulesFor,
+  matchesTypeScope,
+  scopeEntryAdmitsOnlyTestFiles,
+} = require('../../../../../skills/split-in-tasks/lib/task-types');
 
-const VALID_KINDS = new Set([
-  'frontend',
-  'backend',
-  'wiring',
-  'e2e',
-  'devops',
-  'fullstack',
-  'checkpoint',
-]);
+// Derived from the canonical closed enum — kept exported under the historical
+// name because work-state/task-readiness.js allowlists persisted task kinds
+// against this set.
+const VALID_KINDS = new Set(TASK_TYPES);
+
+// Migration hints for the legacy domain-kind vocabulary this phase used to
+// accept. Emitted alongside the unknown-Type error so the planner converges
+// in one pass instead of guessing.
+const LEGACY_KIND_HINTS = Object.freeze({
+  frontend: '`tdd-code`',
+  backend: '`tdd-code`',
+  fullstack: '`tdd-code`',
+  wiring: '`tdd-code` (or `mechanical-refactor` for pure re-wiring with no behavior change)',
+  e2e: '`tdd-code` (or `tests-only` when the task only adds e2e specs)',
+  devops:
+    '`ci` (CI configs), `config` (inert configuration), or `tdd-code` (scripts that ship behavior)',
+});
 
 function parseBlocks(text) {
   const out = [];
@@ -58,114 +81,44 @@ function extractScopeList(match) {
   return [...out];
 }
 
-function isBackendFile(p) {
-  return (
-    /(^|\/)app\/api\//.test(p) ||
-    /(^|\/)lib\/.*\/schemas?\.(ts|js)$/.test(p) ||
-    /(^|\/)prisma\//.test(p) ||
-    /(^|\/)server\//.test(p)
-  );
-}
-function isFrontendFile(p) {
-  return (
-    /(^|\/)components\//.test(p) ||
-    /(^|\/)app\/.*\.(tsx|jsx)$/.test(p) ||
-    /(^|\/)hooks\//.test(p) ||
-    /(^|\/)pages\//.test(p)
-  );
-}
-function isE2eFile(p) {
-  return /(^|\/)tests\/e2e\//.test(p) || /\.spec\.(ts|tsx|js|jsx)$/.test(p);
-}
-function isIntegrationTest(p) {
-  return /\.integration\.test\.(ts|tsx|js|jsx)$/.test(p);
-}
-function isDevopsFile(p) {
-  return (
-    /^\.github\//.test(p) ||
-    /(^|\/)scripts\//.test(p) ||
-    /\.(yml|yaml)$/.test(p) ||
-    /(^|\/)Dockerfile/.test(p)
-  );
-}
-function isAppSourceFile(p) {
-  return /(^|\/)app\//.test(p) || /(^|\/)lib\//.test(p) || /(^|\/)components\//.test(p);
+function _unknownTypeError(b) {
+  const base = `Task ${b.num} \`### Type\` is "${b.type}" — must be one of: ${TASK_TYPES.join(', ')}.`;
+  const hint = LEGACY_KIND_HINTS[b.type];
+  if (!hint) return base;
+  return `${base} Legacy kind "${b.type}" maps to ${hint}. The \`### Type\` field drives the implement-time gate contract (gateContractFor in task-types.js); unknown values fall back to the strictest tdd-code contract and wedge non-code tasks at RED.`;
 }
 
-// Per-kind validators — each returns an array of error strings for the block.
-// Keeping these as small named functions lets `validateBlock` stay a flat
-// dispatch (cc = 3) instead of a giant if/else ladder.
-
-function _validateBackend(b) {
-  if (b.filesInScope.some(isIntegrationTest)) return [];
+function _scopePatternErrors(b, rules) {
+  if (!rules.scopePatterns) return [];
+  const offenders = b.filesInScope.filter((p) => !matchesTypeScope(b.type, p));
+  if (!offenders.length) return [];
   return [
-    `Task ${b.num} kind=backend but no \`*.integration.test.*\` file in \`### Files in scope\`. Backend tasks must ship with integration test coverage.`,
-  ];
-}
-
-function _validateFrontend(b) {
-  if (b.filesInScope.some(isFrontendFile)) return [];
-  return [`Task ${b.num} kind=frontend but no component/page/hook file in \`### Files in scope\`.`];
-}
-
-function _validateE2e(b) {
-  if (b.filesInScope.some(isE2eFile)) return [];
-  return [
-    `Task ${b.num} kind=e2e but no \`tests/e2e/**/*.spec.*\` file in \`### Files in scope\`.`,
-  ];
-}
-
-function _validateWiring(b) {
-  const backendDrift = b.filesInScope.filter(isBackendFile);
-  if (!backendDrift.length) return [];
-  return [
-    `Task ${b.num} kind=wiring but \`### Files in scope\` includes backend files (${backendDrift
+    `Task ${b.num} Type=${b.type} but \`### Files in scope\` includes entries outside the ${b.type} allowlist (${offenders
       .map((f) => `\`${f}\``)
-      .join(
-        ', '
-      )}). Wiring tasks must not touch backend — escalate to a sibling owner instead. (ECHO-4579 defense at task granularity.)`,
+      .join(', ')}). Move them to a task whose Type covers them, or change this task's Type.`,
   ];
 }
 
-function _validateDevops(b) {
+function _testSurfaceErrors(b, rules) {
   const errors = [];
-  const appDrift = b.filesInScope.filter(isAppSourceFile);
-  if (appDrift.length) {
+  if (rules.mustHaveTest && !b.filesInScope.some(scopeEntryAdmitsOnlyTestFiles)) {
     errors.push(
-      `Task ${b.num} kind=devops but \`### Files in scope\` includes app-source files (${appDrift
-        .map((f) => `\`${f}\``)
-        .join(', ')}). Split into a separate task with a different kind.`
+      `Task ${b.num} Type=${b.type} requires at least one \`*.test.*\` / \`*.spec.*\` entry in \`### Files in scope\` — without a test-authorship surface the RED gate is unsatisfiable at implement.`
     );
   }
-  if (!b.filesInScope.some(isDevopsFile)) {
+  if (rules.mustHaveSource && !b.filesInScope.some((p) => !scopeEntryAdmitsOnlyTestFiles(p))) {
     errors.push(
-      `Task ${b.num} kind=devops but no infra file (\`.github/\`, \`scripts/\`, \`*.yml\`, \`Dockerfile\`) in scope.`
+      `Task ${b.num} Type=${b.type} requires at least one non-test source entry in \`### Files in scope\`.`
     );
   }
   return errors;
 }
 
-// Dispatch table keyed on `### Type`. checkpoint + fullstack have no extra
-// per-kind sanity (fullstack intentionally accepts any mix); both map to a
-// no-op validator.
-const _KIND_VALIDATORS = {
-  backend: _validateBackend,
-  frontend: _validateFrontend,
-  e2e: _validateE2e,
-  wiring: _validateWiring,
-  devops: _validateDevops,
-  fullstack: () => [],
-  checkpoint: () => [],
-};
-
 function validateBlock(b) {
-  if (!VALID_KINDS.has(b.type)) {
-    return [
-      `Task ${b.num} \`### Type\` is "${b.type}" — must be one of: ${[...VALID_KINDS].join(', ')}.`,
-    ];
-  }
-  const validator = _KIND_VALIDATORS[b.type];
-  return validator ? validator(b) : [];
+  if (!isKnownTaskType(b.type)) return [_unknownTypeError(b)];
+  const rules = scopeRulesFor(b.type);
+  if (!rules) return [];
+  return [..._scopePatternErrors(b, rules), ..._testSurfaceErrors(b, rules)];
 }
 
 function validateArtifacts(tasksDir) {
@@ -197,12 +150,12 @@ function instructions(ctx) {
     `Ticket: ${ctx.ticket}`,
     '',
     '### What I check',
-    `- Every task's \`### Type\` is one of: ${[...VALID_KINDS].join(', ')}.`,
-    '- backend tasks have a `*.integration.test.*` in scope.',
-    '- frontend tasks have a component / page / hook file in scope.',
-    '- e2e tasks have a `tests/e2e/**/*.spec.*` file in scope.',
-    '- wiring tasks have NO backend file in scope (ECHO-4579 defense).',
-    '- devops tasks touch only infra/config; no app/lib/components.',
+    `- Every task's \`### Type\` is one of the closed gate-contract enum: ${TASK_TYPES.join(', ')} (see skills/split-in-tasks/docs/output-format.md).`,
+    '- tdd-code tasks have a `*.test.*` / `*.spec.*` entry AND a non-test source entry in scope.',
+    '- tests-only tasks list ONLY test files in scope.',
+    '- docs tasks list ONLY `*.md` files in scope.',
+    '- config / ci tasks stay inside their file allowlists (task-types.js TYPE_SCOPE_RULES).',
+    '- checkpoint / mechanical-refactor / file-move have no scope-pattern constraint.',
     '',
     'Re-invoke me to verify.',
     '',

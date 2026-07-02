@@ -37,6 +37,8 @@ The closed enum is defined in [`lib/task-types.js`](../lib/task-types.js). Addin
 - <requirement ID from Step 4.0>
 - <requirement ID from Step 4.0>
 
+One requirement ID per bullet is the canonical format. Comma-separated bullets (`- R1, R6, R7`) are tolerated by the parsers (both sides share `lib/requirement-ids.js`), but prefer one-per-line — it keeps diffs reviewable and the coverage table trivially greppable.
+
 ### Deliverables
 - [ ] N.1 <subtask description>
   - Test: <acceptance criterion>

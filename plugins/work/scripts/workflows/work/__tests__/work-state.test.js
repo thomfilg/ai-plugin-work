@@ -809,7 +809,6 @@ describe('work-state.js', () => {
     });
   });
 
-
   describe('completeWork checkpoint auto-completion (GH-410)', () => {
     const TICKET_APPROVED = 'TEST-CHK-APPROVED-001';
     const TICKET_NO_REPORT = 'TEST-CHK-NOREPORT-001';
@@ -846,11 +845,11 @@ describe('work-state.js', () => {
       // or `opts.tasksMdKinds` to deliberately desync tasks.md from state
       // (e.g. for the tampering-defense test).
       if (!opts.skipTasksMd) {
-        const kinds = opts.tasksMdKinds || tasks.map((t) => (t && t.kind) || 'backend');
+        const kinds = opts.tasksMdKinds || tasks.map((t) => (t && t.kind) || 'tdd-code');
         const sections = tasks.map((t, i) => {
           const num = i + 1;
           const title = (t && t.title) || `Task ${num}`;
-          return `## Task ${num} — ${title}\n\n### Type\n${kinds[i] || 'backend'}\n`;
+          return `## Task ${num} — ${title}\n\n### Type\n${kinds[i] || 'tdd-code'}\n`;
         });
         fs.writeFileSync(path.join(dir, 'tasks.md'), sections.join('\n'));
       }
@@ -861,9 +860,10 @@ describe('work-state.js', () => {
       // Per-task linkage (security review on PR #470): auto-completion now
       // requires the checkpoint task's id or title to appear in the report.
       // Tests that expect auto-completion must pass the relevant task ids.
-      const names = Array.isArray(namedTasks) && namedTasks.length
-        ? `\nVerified: ${namedTasks.join(', ')}\n`
-        : '';
+      const names =
+        Array.isArray(namedTasks) && namedTasks.length
+          ? `\nVerified: ${namedTasks.join(', ')}\n`
+          : '';
       fs.writeFileSync(
         path.join(dir, 'completion.check.md'),
         `# Completion Report\nStatus: ${status}\n${names}`
@@ -872,7 +872,7 @@ describe('work-state.js', () => {
 
     it('auto-completes a pending checkpoint task when completion.check.md is APPROVED', async () => {
       const dir = seedTicket(TICKET_APPROVED, [
-        { id: 'task_1', status: 'completed', kind: 'backend' },
+        { id: 'task_1', status: 'completed', kind: 'tdd-code' },
         { id: 'task_2', status: 'pending', kind: 'checkpoint', title: 'Wrap-up verification' },
       ]);
       writeReport(dir, 'APPROVED', ['task_2']);
@@ -882,8 +882,11 @@ describe('work-state.js', () => {
       assert.ok(Array.isArray(result.autoCompleted));
       assert.equal(result.autoCompleted.length, 1);
       assert.equal(result.autoCompleted[0].taskId, 'task_2');
-      assert.equal(result.autoCompleted[0].title, 'Wrap-up verification',
-        'audit must capture human-readable title, not just task id');
+      assert.equal(
+        result.autoCompleted[0].title,
+        'Wrap-up verification',
+        'audit must capture human-readable title, not just task id'
+      );
       assert.match(result.autoCompleted[0].reason, /APPROVED/);
     });
 
@@ -891,21 +894,24 @@ describe('work-state.js', () => {
       const TICKET_COMPLETE = 'TEST-CHK-COMPLETE-001';
       cleanupTempWorkState(TICKET_COMPLETE);
       const dir = seedTicket(TICKET_COMPLETE, [
-        { id: 'task_1', status: 'completed', kind: 'backend' },
+        { id: 'task_1', status: 'completed', kind: 'tdd-code' },
         { id: 'task_2', status: 'pending', kind: 'checkpoint', title: 'Wrap-up' },
       ]);
       writeReport(dir, 'COMPLETE', ['task_2']);
       const { result, code } = await runWorkState(['complete', TICKET_COMPLETE]);
       assert.equal(code, 0);
       assert.equal(result.autoCompleted.length, 1);
-      assert.match(result.autoCompleted[0].reason, /^COMPLETE /,
-        'reason must use the actual verdict from the report, not a hardcoded string');
+      assert.match(
+        result.autoCompleted[0].reason,
+        /^COMPLETE /,
+        'reason must use the actual verdict from the report, not a hardcoded string'
+      );
       cleanupTempWorkState(TICKET_COMPLETE);
     });
 
     it('blocks completion when checkpoint task has no completion.check.md', async () => {
       seedTicket(TICKET_NO_REPORT, [
-        { id: 'task_1', status: 'completed', kind: 'backend' },
+        { id: 'task_1', status: 'completed', kind: 'tdd-code' },
         { id: 'task_2', status: 'pending', kind: 'checkpoint' },
       ]);
       const { code, stderr } = await runWorkState(['complete', TICKET_NO_REPORT]);
@@ -925,7 +931,7 @@ describe('work-state.js', () => {
 
     it('does NOT auto-complete non-checkpoint pending tasks even with APPROVED report', async () => {
       const dir = seedTicket(TICKET_NON_CKPT, [
-        { id: 'task_1', status: 'pending', kind: 'backend' },
+        { id: 'task_1', status: 'pending', kind: 'tdd-code' },
       ]);
       writeReport(dir, 'APPROVED');
       const { code, stderr } = await runWorkState(['complete', TICKET_NON_CKPT]);
@@ -934,9 +940,7 @@ describe('work-state.js', () => {
     });
 
     it('does NOT auto-complete tasks lacking a kind field (legacy state)', async () => {
-      const dir = seedTicket(TICKET_LEGACY, [
-        { id: 'task_1', status: 'pending' },
-      ]);
+      const dir = seedTicket(TICKET_LEGACY, [{ id: 'task_1', status: 'pending' }]);
       writeReport(dir, 'APPROVED');
       const { code, stderr } = await runWorkState(['complete', TICKET_LEGACY]);
       assert.notEqual(code, 0);
@@ -985,8 +989,7 @@ describe('work-state.js', () => {
           `# Report\n${cases[i]}\n\nVerified: task_1\n`
         );
         const { code } = await runWorkState(['complete', ticket]);
-        assert.notEqual(code, 0,
-          `verdict prefix "${cases[i]}" must NOT pass the gate`);
+        assert.notEqual(code, 0, `verdict prefix "${cases[i]}" must NOT pass the gate`);
         cleanupTempWorkState(ticket);
       }
     });
@@ -1014,8 +1017,11 @@ describe('work-state.js', () => {
       const { result, code } = await runWorkState(['complete', TICKET_DRIFT]);
       assert.equal(code, 0);
       assert.equal(result.autoCompleted.length, 1);
-      assert.match(result.autoCompleted[0].reason, /^APPROVED /,
-        'audit reason must reflect the authentic line-anchored verdict, not the quoted one');
+      assert.match(
+        result.autoCompleted[0].reason,
+        /^APPROVED /,
+        'audit reason must reflect the authentic line-anchored verdict, not the quoted one'
+      );
       cleanupTempWorkState(TICKET_DRIFT);
     });
 
@@ -1051,12 +1057,11 @@ describe('work-state.js', () => {
       const dir = seedTicket(
         TICKET_TITLE,
         [{ id: 'task_1', status: 'pending', kind: 'checkpoint', title: 'checkpoint review' }],
-        { tasksMdKinds: ['backend'] } // tasks.md says backend, not checkpoint
+        { tasksMdKinds: ['tdd-code'] } // tasks.md says tdd-code, not checkpoint
       );
       writeReport(dir, 'APPROVED', ['task_1']);
       const { code } = await runWorkState(['complete', TICKET_TITLE]);
-      assert.notEqual(code, 0,
-        'title-based heuristic must NOT pass the kind re-verify gate');
+      assert.notEqual(code, 0, 'title-based heuristic must NOT pass the kind re-verify gate');
       cleanupTempWorkState(TICKET_TITLE);
     });
 
@@ -1067,16 +1072,15 @@ describe('work-state.js', () => {
       // the tasks.md re-check defeats that path.
       const TICKET_TAMPER = 'TEST-CHK-TAMPER-001';
       cleanupTempWorkState(TICKET_TAMPER);
-      // tasksMeta claims task_1 is checkpoint, but tasks.md says backend.
+      // tasksMeta claims task_1 is checkpoint, but tasks.md says tdd-code.
       const dir = seedTicket(
         TICKET_TAMPER,
         [{ id: 'task_1', status: 'pending', kind: 'checkpoint', title: 'fake checkpoint' }],
-        { tasksMdKinds: ['backend'] }
+        { tasksMdKinds: ['tdd-code'] }
       );
       writeReport(dir, 'APPROVED', ['task_1']);
       const { code, stderr } = await runWorkState(['complete', TICKET_TAMPER]);
-      assert.notEqual(code, 0,
-        'complete must fail — tasks.md disagrees with state on kind');
+      assert.notEqual(code, 0, 'complete must fail — tasks.md disagrees with state on kind');
       assert.match(stderr, /tasks still pending|checkpoint/i);
       cleanupTempWorkState(TICKET_TAMPER);
     });
@@ -1119,9 +1123,7 @@ describe('work-state.js', () => {
     });
 
     it('emits a checkpoint-directive error when all pending are checkpoint without report', async () => {
-      seedTicket(TICKET_MSG, [
-        { id: 'task_1', status: 'pending', kind: 'checkpoint' },
-      ]);
+      seedTicket(TICKET_MSG, [{ id: 'task_1', status: 'pending', kind: 'checkpoint' }]);
       const { code, stderr } = await runWorkState(['complete', TICKET_MSG]);
       assert.notEqual(code, 0);
       assert.match(stderr, /checkpoint/i);
@@ -1130,7 +1132,7 @@ describe('work-state.js', () => {
 
     it('emits the generic message when at least one pending task is not checkpoint', async () => {
       seedTicket(TICKET_MSG_MIXED, [
-        { id: 'task_1', status: 'pending', kind: 'backend' },
+        { id: 'task_1', status: 'pending', kind: 'tdd-code' },
         { id: 'task_2', status: 'pending', kind: 'checkpoint' },
       ]);
       const { code, stderr } = await runWorkState(['complete', TICKET_MSG_MIXED]);
@@ -1157,9 +1159,9 @@ describe('work-state.js', () => {
     it('accepts descriptor array via stdin and persists kind per entry', async () => {
       await runWorkState(['init', TICKET_STDIN]);
       const descriptors = [
-        { num: 1, type: 'frontend' },
-        { num: 2, type: 'backend' },
-        { num: 3, type: 'e2e' },
+        { num: 1, type: 'docs' },
+        { num: 2, type: 'tdd-code' },
+        { num: 3, type: 'ci' },
       ];
       const { result, code, stderr } = await runWorkState(['task-init', TICKET_STDIN], {
         stdin: JSON.stringify(descriptors),
@@ -1168,9 +1170,9 @@ describe('work-state.js', () => {
       assert.equal(result.success, true);
       assert.ok(Array.isArray(result.tasksMeta.tasks));
       assert.equal(result.tasksMeta.tasks.length, 3);
-      assert.equal(result.tasksMeta.tasks[0].kind, 'frontend');
-      assert.equal(result.tasksMeta.tasks[1].kind, 'backend');
-      assert.equal(result.tasksMeta.tasks[2].kind, 'e2e');
+      assert.equal(result.tasksMeta.tasks[0].kind, 'docs');
+      assert.equal(result.tasksMeta.tasks[1].kind, 'tdd-code');
+      assert.equal(result.tasksMeta.tasks[2].kind, 'ci');
     });
 
     it('ignores TASK_INIT_DESCRIPTORS env var (dropped as security hardening)', async () => {
@@ -1180,7 +1182,7 @@ describe('work-state.js', () => {
       // bypass the TDD gate via auto-completion. Stdin is now the only path.
       await runWorkState(['init', TICKET_ENV]);
       const descriptors = [
-        { num: 1, type: 'backend' },
+        { num: 1, type: 'tdd-code' },
         { num: 2, type: 'docs' },
       ];
       const { result, code, stderr } = await runWorkState(['task-init', TICKET_ENV, '2'], {
@@ -1204,23 +1206,22 @@ describe('work-state.js', () => {
       cleanupTempWorkState(TICKET_UNKNOWN_KIND);
       await runWorkState(['init', TICKET_UNKNOWN_KIND]);
       const descriptors = [
-        { num: 1, type: 'backend' },
+        { num: 1, type: 'tdd-code' },
         { num: 2, type: 'totally-made-up-kind' },
       ];
       const { result, code } = await runWorkState(['task-init', TICKET_UNKNOWN_KIND], {
         stdin: JSON.stringify(descriptors),
       });
       assert.equal(code, 0);
-      assert.equal(result.tasksMeta.tasks[0].kind, 'backend');
-      assert.equal(result.tasksMeta.tasks[1].kind, undefined,
-        'unknown kind must not be persisted');
+      assert.equal(result.tasksMeta.tasks[0].kind, 'tdd-code');
+      assert.equal(result.tasksMeta.tasks[1].kind, undefined, 'unknown kind must not be persisted');
       cleanupTempWorkState(TICKET_UNKNOWN_KIND);
     });
 
     it('persists kind for checkpoint type', async () => {
       await runWorkState(['init', TICKET_CHECKPOINT]);
       const descriptors = [
-        { num: 1, type: 'backend' },
+        { num: 1, type: 'tdd-code' },
         { num: 2, type: 'checkpoint' },
       ];
       const { result, code } = await runWorkState(['task-init', TICKET_CHECKPOINT], {
