@@ -98,6 +98,11 @@ function validateTask(task) {
   if (!task || typeof task !== 'object') return ['task must be an object'];
   const errors = [];
   const label = `Task ${task.num ?? '?'}`;
+  // Runs BEFORE the checkpoint early-return on purpose: a title-derived
+  // checkpoint (`isCheckpoint: true`) with no `### Type` line is NOT safe —
+  // the implement-side isCheckpointTask() (exception-validator.js) honors
+  // only `type === 'checkpoint'`, so without the explicit line the task
+  // falls to the strictest tdd-code contract and wedges. Require the line.
   _checkTypeKnown(task, label, errors);
   if (_isCheckpointTask(task)) return errors;
 

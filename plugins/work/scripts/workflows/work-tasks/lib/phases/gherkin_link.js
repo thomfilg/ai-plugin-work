@@ -42,9 +42,13 @@ function extractScenarioTitles(text) {
 
 /**
  * Count `@task:N`-tagged scenarios per task number. Tag semantics mirror the
- * implement-side parser (task-next.js parseGherkinScenarios): tag lines
- * accumulate until the next `Scenario:` / `Scenario Outline:` line consumes
- * them.
+ * implement-side parser (task-next.js parseGherkinScenarios) EXACTLY: tag
+ * lines accumulate until the next `Scenario:` / `Scenario Outline:` line
+ * consumes them, and intervening non-tag lines (blank lines, comments,
+ * `Feature:` headers) do NOT reset the pending set. Deliberately NOT
+ * "improved" here — this validator must predict what the implement gate
+ * will see, so any divergence from task-next.js reintroduces the very
+ * gate-vs-generator drift this phase exists to prevent.
  */
 function countTaggedScenarios(gherkin) {
   const counts = new Map();
@@ -133,6 +137,11 @@ function validateArtifacts(tasksDir) {
   if (!gherkin) return [];
   const tasks = readFile(path.join(tasksDir, 'tasks.md'));
   if (!tasks) return ['Missing tasks.md.'];
+  // Satisfiability failures short-circuit the consistency checks on purpose:
+  // the remediation (moving/dropping @task tags, re-scoping) changes which
+  // task owns which scenario, which invalidates any canonical-consistency
+  // verdict computed against the pre-fix tag layout. Reporting both at once
+  // would surface errors that evaporate after the satisfiability fix.
   const satisfiability = validateScenarioSatisfiability(gherkin, tasks);
   if (satisfiability.length) return satisfiability;
   const canonical = runCanonicalConsistency(gherkin, tasks);
