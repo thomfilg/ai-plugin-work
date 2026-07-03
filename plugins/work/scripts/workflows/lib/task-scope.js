@@ -25,13 +25,6 @@ const {
   TEST_FILE_EXT_RE,
   isIntegrationTestPath,
   isE2eTestPath,
-  usesIntegrationRunner,
-  usesUnitRunner,
-  usesE2eRunner,
-  usesRecognisedRunner,
-  detectNonTestCommand,
-  extractChangedFilesFromTestCommand,
-  extractEvalScopePairs,
 } = require('./task-scope-globs');
 
 const {
@@ -41,8 +34,6 @@ const {
   validateUniqueOwnership,
   validateTddCycle,
 } = require('./task-scope-validators');
-
-const { validateTaskTestScope } = require('./task-scope-test-validator');
 
 /**
  * Validate every task and return a flat error list.
@@ -57,7 +48,6 @@ function validateAll(tasks) {
   const errors = [];
   for (const t of tasks) {
     errors.push(...validateTask(t));
-    errors.push(...validateTaskTestScope(t));
   }
   errors.push(...validateTddCycle(tasks));
   errors.push(...validateCrossTaskDepsOwnership(tasks));
@@ -99,7 +89,6 @@ function findTask(tasks, taskNum) {
 
 module.exports = {
   validateTask,
-  validateTaskTestScope,
   validateTddCycle,
   validateCrossTaskDepsOwnership,
   validateIntraTicketScope,
@@ -107,15 +96,8 @@ module.exports = {
   validateAll,
   unionFilesInScope,
   findTask,
-  extractChangedFilesFromTestCommand,
-  extractEvalScopePairs,
   fileMatchesScope,
   isIntegrationTestPath,
   isE2eTestPath,
-  usesIntegrationRunner,
-  usesUnitRunner,
-  usesE2eRunner,
-  usesRecognisedRunner,
-  detectNonTestCommand,
   TEST_FILE_EXT_RE,
 };

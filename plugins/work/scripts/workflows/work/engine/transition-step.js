@@ -114,28 +114,30 @@ function transitionStep(ticket, targetStep, deps) {
     const { exists, parseError, evidence } = readTddEvidence(safeTicket, currentStep, taskNum);
     if (!exists || parseError) {
       const taskLabel = taskNum ? ` for task ${taskNum}` : '';
-      // /work flow: implement-gate.js runs the task's `### Test Command` and
-      // writes tdd-phase.json itself. Agents must NOT invoke tdd-phase-state.js
-      // (the legacy CLI) — its writes to tdd-phase.json are blocked by the
-      // protect-orchestrator-state hook. Surface the gate-driven failure modes
-      // and the diagnostic that's actually available (state file).
+      // /work flow: implement-gate.js runs the command synthesized from the
+      // task's `### Test Strategy` and writes tdd-phase.json itself. Agents
+      // must NOT invoke tdd-phase-state.js (the legacy CLI) — its writes to
+      // tdd-phase.json are blocked by the protect-orchestrator-state hook.
+      // Surface the gate-driven failure modes and the diagnostic that's
+      // actually available (state file).
       const wsPath = path.join(TASKS_BASE, safeTicket, '.work-state.json');
       const msg = [
         `Cannot leave ${currentStep} without TDD evidence${taskLabel}.`,
         '',
-        "In /work the implement-gate runs your task's `### Test Command`",
-        'automatically and writes tdd-phase.json. Agents do NOT invoke',
-        'tdd-phase-state.js, and direct writes to tdd-phase.json are blocked.',
+        'In /work the implement-gate runs the command synthesized from your',
+        "task's `### Test Strategy` automatically and writes tdd-phase.json.",
+        'Agents do NOT invoke tdd-phase-state.js, and direct writes to',
+        'tdd-phase.json are blocked.',
         '',
         'If the gate keeps failing, diagnose:',
         `  1. Open ${wsPath} and read \`_tddRetryReason\` /`,
         '     `_tddRetryCommand` / `_tddRetryExitCode` / `_tddRetryOutputTail`',
         '     — they name the exact gate failure.',
-        `  2. Confirm tasks.md "## Task ${taskNum || '<N>'}" has a \`### Test Command\``,
-        '     block with a runnable shell command.',
+        `  2. Confirm tasks.md "## Task ${taskNum || '<N>'}" has a \`### Test Strategy\``,
+        '     block (kind: unit|integration|e2e|custom|verified-by|wiring-citation).',
         '  3. Common causes: required env var (e.g. $TEST_UNIT_COMMAND) unset,',
-        "     test command references files that don't exist yet, malformed",
-        '     parser output (fence remnant, bare interpreter name).',
+        "     strategy entry/command references files that don't exist yet,",
+        '     malformed parser output (fence remnant, bare interpreter name).',
         '',
         'If the state file is corrupted and needs manual repair, stop and ask the user.',
       ].join('\n');

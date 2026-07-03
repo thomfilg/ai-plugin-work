@@ -57,7 +57,7 @@ This is non-negotiable: Gate D (file-edit hook) will block any task whose implem
 
 ## Required per-task sections (Gate C)
 
-Every `## Task N` block in tasks.md MUST include both of these sections, in addition to the existing Type / Description / Requirements Covered / Deliverables / Acceptance Criteria / Dependencies / Test Command sections:
+Every `## Task N` block in tasks.md MUST include both of these sections, in addition to the existing Type / Description / Requirements Covered / Deliverables / Acceptance Criteria / Dependencies / Test Strategy sections:
 
 ```markdown
 ### Files in scope

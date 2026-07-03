@@ -66,9 +66,9 @@ consumer are permanently on. Legacy `### Test Command` blocks are rejected
 at the draft gate with a migration error pointing at
 `skills/split-in-tasks/docs/test-strategy.md`.)
 
-**Implement-side synthesis flow.** When a task carries a `### Test Strategy`
-block but no legacy `### Test Command`, the implement side synthesizes the
-runnable command instead of wedging. `readTaskTestCommand` /
+**Implement-side synthesis flow.** The implement side synthesizes the
+runnable command from the task's `### Test Strategy` (the legacy
+`### Test Command` readers were fully removed in GH-653). `readTaskTestCommand` /
 `resolveTaskTestExecution` (`implement-gate.js`) call
 `lib/test-strategy.js synthesizeCommand(strategy, findNearestEnvrc(worktreeDir))`
 to produce the command for envelope kinds (`unit`/`integration`/`e2e`/`custom`),

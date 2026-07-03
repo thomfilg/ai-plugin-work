@@ -172,8 +172,8 @@ function malformedPreTestBlock(cmd, taskNum, malformed) {
       `Test command for task ${taskNum} is malformed in tasks.md ` +
       `(parser returned: ${JSON.stringify(String(cmd || '').slice(0, 120))}, ` +
       `category: ${malformed}). ` +
-      `Open tasks.md and fix the \`### Test Command\` section under "## Task ${taskNum}". ` +
-      `Use a single shell command on its own line, optionally inside a fenced \`\`\`bash\`\`\` block.`,
+      `Open tasks.md and fix the \`### Test Strategy\` section under "## Task ${taskNum}". ` +
+      `For kind=custom, use a single shell command on the \`command:\` line or inside a fenced \`\`\`bash\`\`\` block.`,
     command: String(cmd || ''),
     exitCode: null,
     outputTail: '',

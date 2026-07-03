@@ -9,8 +9,12 @@
  *
  * On each invocation:
  *   1. Determine the current TDD phase for the task (red | green | refactor | done).
- *   2. Run the configured test command (### Test Command from tasks.md, or
- *      $TEST_<SUITE>_COMMAND fallback).
+ *   2. Resolve the task's runnable command from its ### Test Strategy block
+ *      via the SAME shared resolver the implement gate and the
+ *      enforce-tdd-on-stop hook use (envelope kinds synthesize
+ *      `CHANGED_FILES="<entry>" eval "$TEST_*_COMMAND"`, custom kinds run
+ *      their verbatim command, citation kinds carry no command and defer to
+ *      the recorder's peer-evidence path).
  *   3. Validate the result against phase rules:
  *        - red:  command must fail (exit != 0) AND every gherkin scenario tagged
  *                `@task:N` must appear in at least one test/spec file under the
@@ -48,6 +52,19 @@ const {
   scopeEntryAdmitsOnlyTestFiles,
 } = require('../../../skills/split-in-tasks/lib/task-types');
 const { fileMatchesScope } = require('../lib/task-scope');
+// GH-653: single strategy→command resolution shared with the implement gate
+// and the enforce-tdd-on-stop hook. All three MUST resolve the same command
+// for a task, or the runner and the gate disagree on what RED/GREEN mean.
+const { resolveTaskTestExecution } = require(
+  path.join(__dirname, '..', 'work', 'lib', 'step-enrichments', 'implement-gate', 'test-command')
+);
+// Synthesized envelope commands reference `$TEST_*_COMMAND` by name; those
+// vars live in the worktree's `.envrc`, not necessarily in this process's
+// env. Fold them in exactly like the implement gate does (same helper), so
+// the runner and the gate execute the command in the same environment.
+const { withEnvrcVars } = require(
+  path.join(__dirname, '..', 'work', 'lib', 'step-enrichments', 'implement-gate', 'test-runner')
+);
 
 // `done` is derived in this script (a cycle with red+green+refactor evidence
 // is treated as complete). It is NOT a state-machine target in the registry.
@@ -264,11 +281,6 @@ function isVisualOnlyTask(scope) {
   return scope.every((p) => typeof p === 'string' && /\.stories\.[jt]sx?$/i.test(p));
 }
 
-function parseTaskTestCommand(section) {
-  const m = section.match(/### *Test Command[^\n]*\n+```(?:[a-zA-Z]+)?\n([\s\S]*?)\n```/);
-  return m ? m[1].trim() : '';
-}
-
 function parseGherkinScenarios(gherkin, taskNum) {
   if (!gherkin) return [];
   const lines = gherkin.split('\n');
@@ -297,26 +309,11 @@ function parseGherkinScenarios(gherkin, taskNum) {
   return scenarios;
 }
 
-function detectSuiteEnvVar(scope, type, title) {
-  const blob = [scope, type, title].join(' ').toLowerCase();
-  if (/\be2e\b|playwright/.test(blob)) return 'TEST_E2E_COMMAND';
-  if (/integration|\.int\./.test(blob)) return 'TEST_INTEGRATION_COMMAND';
-  return 'TEST_UNIT_COMMAND';
-}
-
-function resolveTestCommand(taskTestCmd, suiteEnvVar) {
-  if (taskTestCmd) return { cmd: taskTestCmd, source: '### Test Command (tasks.md)' };
-  let envCmd = '';
-  if (config?.getConfig) {
-    try {
-      envCmd = config.getConfig(suiteEnvVar) || '';
-    } catch {
-      /* empty */
-    }
-  }
-  if (!envCmd && process.env[suiteEnvVar]) envCmd = process.env[suiteEnvVar];
-  return { cmd: envCmd, source: `$${suiteEnvVar}` };
-}
+// Base env for the test subprocess and the recorder spawns. Assigned once in
+// main() after the worktree root is known: process.env with the worktree's
+// `.envrc` vars folded in (via the gate's withEnvrcVars), so synthesized
+// envelope commands find their `$TEST_*_COMMAND` binding.
+let _runBaseEnv = process.env;
 
 function runTest(cmd, cwd, scope) {
   // Bound the test command so a hung subprocess (watch mode, dev server,
@@ -343,7 +340,7 @@ function runTest(cmd, cwd, scope) {
     timeout: timeoutMs,
     killSignal: 'SIGKILL',
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, CHANGED_FILES: changedFiles },
+    env: { ..._runBaseEnv, CHANGED_FILES: changedFiles },
   });
   const stdout = result.stdout || '';
   const stderr = result.stderr || '';
@@ -580,6 +577,56 @@ function recordSkipRed(ticket, taskNum, reason, cwd) {
   };
 }
 
+/**
+ * Record peer-citation GREEN evidence via `tdd-phase-state.js record-green`
+ * with NO --cmd (GH-653). Citation-kind strategies (`verified-by` /
+ * `wiring-citation`) have no runnable command by design; the recorder itself
+ * validates the peer pointer (peer exists, peer kind is an envelope kind,
+ * peer covers this task's scope) and records the green citation entry.
+ * task-next never writes evidence — the recorder stays the sole authority,
+ * including its phase assertion (citation green is only valid in the green
+ * phase). Mirrors the spawn/auto-init pattern of `recordSkipRed`.
+ */
+function recordCitationGreen(ticket, taskNum, cwd) {
+  function runOnce() {
+    mintCompanionToken();
+    return spawnSync(
+      process.execPath,
+      [TDD_CLI, 'record-green', ticket, '--task', String(taskNum)],
+      { cwd, stdio: 'pipe', encoding: 'utf8', env: { ...process.env } }
+    );
+  }
+  let r = runOnce();
+  if (r.status !== 0) {
+    const combined = (r.stdout || '') + (r.stderr || '');
+    if (/No TDD phase state found/i.test(combined)) {
+      mintCompanionToken();
+      const initRes = spawnSync(
+        process.execPath,
+        [TDD_CLI, 'init', ticket, '--task', String(taskNum)],
+        { cwd, stdio: 'pipe', encoding: 'utf8', env: { ...process.env } }
+      );
+      if (initRes.status !== 0) {
+        return {
+          ok: false,
+          out:
+            combined +
+            '\n--- auto-init failed ---\n' +
+            (initRes.stdout || '') +
+            (initRes.stderr || ''),
+          exitCode: initRes.status,
+        };
+      }
+      r = runOnce();
+    }
+  }
+  return {
+    ok: r.status === 0,
+    out: (r.stdout || '') + (r.stderr || ''),
+    exitCode: r.status,
+  };
+}
+
 function recordEvidence(phase, ticket, taskNum, cmd, cwd, scope, opts = {}) {
   // Delegate to tdd-phase-state.js — the only authorized writer. Forward
   // `--task N` so the recorder resolves the per-task state path. Records
@@ -608,7 +655,7 @@ function recordEvidence(phase, ticket, taskNum, cmd, cwd, scope, opts = {}) {
   // can disagree with ours (e.g. CHANGED_FILES injection failing in
   // its subshell would make pnpm test:unit run the whole suite).
   const changedFiles = filterToTestFiles(scope).join(' ');
-  const childEnv = { ...process.env, CHANGED_FILES: changedFiles };
+  const childEnv = { ..._runBaseEnv, CHANGED_FILES: changedFiles };
   function runRecord() {
     mintCompanionToken();
     // Strict-mode wrap the cmd forwarded to the recorder so its internal
@@ -952,7 +999,6 @@ function main() {
   const taskTitle = (section.match(/^## *Task \d+\s*[—-]?\s*(.+)$/m) || [, ''])[1].trim();
   const scope = parseSuggestedScope(section);
   const type = parseTaskType(section);
-  const taskTestCmd = parseTaskTestCommand(section);
   const docsExempt = isDocsExempt(type);
   const visualOnly = isVisualOnlyTask(scope);
   const testsOnly = type === 'tests-only';
@@ -1004,7 +1050,7 @@ function main() {
         '',
         '## What to do',
         `1. Read the "## Task ${taskNum}" section in ${path.join(tasksDir, 'tasks.md')}.`,
-        '2. Run each verification command listed under "### Acceptance" / "### Test Command" exactly as written.',
+        '2. Run each verification command listed under "### Acceptance" / "### Test Strategy" exactly as written.',
         '3. Report which commands passed and which (if any) did not.',
         '',
         advanceCode === 0
@@ -1032,14 +1078,32 @@ function main() {
   const gherkin = readFile(path.join(tasksDir, 'gherkin.feature')) || '';
   const scenarios = parseGherkinScenarios(gherkin, taskNum);
 
-  const suiteEnvVar = detectSuiteEnvVar(scope.join(' '), type, taskTitle);
-  const { cmd: testCmd, source: testCmdSource } = resolveTestCommand(taskTestCmd, suiteEnvVar);
-
   // Prefer git's view of the worktree (correct for git-worktree layouts where
   // tasks/ lives outside the actual checkout). Fall back to dirname(tasksBase)
-  // only when not inside a git repo.
+  // only when not inside a git repo. Resolved before command resolution:
+  // strategy synthesis reads the test-command envelope from the
+  // worktree-rooted `.envrc`.
   const worktreeRoot = resolveWorktreeRoot();
   const repoRoot = worktreeRoot || path.dirname(tasksBase);
+  _runBaseEnv = withEnvrcVars(process.env, repoRoot);
+
+  // GH-653: resolve the runnable command from `### Test Strategy` via the
+  // shared resolver — the same synthesis the implement gate and the
+  // enforce-tdd-on-stop hook use. Citation kinds resolve to NO command by
+  // design (handled below); a non-citation strategy that synthesizes to null
+  // throws with a precise diagnosis.
+  let execution;
+  try {
+    execution = resolveTaskTestExecution(tasksDir, taskNum, repoRoot);
+  } catch (e) {
+    die(e.message);
+  }
+  const isCitation = Boolean(execution.citation);
+  const testCmd = execution.command || '';
+  const testCmdSource = execution.strategyKind
+    ? `### Test Strategy (kind: ${execution.strategyKind})`
+    : '### Test Strategy';
+
   const { state, tddPath } = readPhaseState(tasksBase, ticket, taskNum);
   let phase = currentPhase(state);
 
@@ -1069,9 +1133,37 @@ function main() {
     process.exit(0);
   }
 
+  // Citation-kind strategies (`verified-by` / `wiring-citation`): no command
+  // to run. Defer entirely to the recorder's peer-evidence path — it validates
+  // the peer pointer and enforces its own phase assertion. task-next neither
+  // runs a command nor writes evidence for these tasks.
+  if (isCitation) {
+    const rec = recordCitationGreen(ticket, taskNum, repoRoot);
+    if (!rec.ok) {
+      process.stdout.write(
+        `task-next: ${ticket} task${taskNum} — ${taskTitle}\n` +
+          `  state file: ${tddPath}\n` +
+          `  result:     BLOCKED in ${phase} (citation-kind strategy: kind=${execution.strategyKind})\n\n` +
+          `## Why you did not advance\n\n${rec.out}\n\n` +
+          'Citation-kind tasks run NO command of their own — their evidence is the peer\n' +
+          "citation recorded by the tdd-phase-state.js recorder. Complete the cited peer's\n" +
+          'cycle first, then re-invoke me.\n'
+      );
+      process.exit(2);
+    }
+    process.stdout.write(
+      `task-next: peer-citation GREEN recorded via kind=${execution.strategyKind} Test Strategy; ` +
+        "no command executed (citation kinds defer to the cited peer's tests).\n"
+    );
+    process.exit(0);
+  }
+
   if (!testCmd) {
     die(
-      `No test command resolved. Tried '### Test Command' in tasks.md and $${suiteEnvVar}. Cannot validate phase.`
+      `No runnable command resolved from '### Test Strategy' for Task ${taskNum}. ` +
+        'Every non-checkpoint task must declare a `### Test Strategy` ' +
+        '(kind: unit|integration|e2e|custom|verified-by|wiring-citation). ' +
+        'Fix tasks.md, then re-invoke me. Cannot validate phase.'
     );
   }
 
