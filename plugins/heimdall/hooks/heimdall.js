@@ -25,12 +25,18 @@ async function readStdin() {
   return input;
 }
 
-/** Merge lock blocks from every active store at cwd; '' when none apply. */
+/**
+ * Merge lock blocks from every active store at cwd; [] when none apply. Each
+ * block is tagged with its store kind (`_storeKind`) so a rejection can surface
+ * that it came from the shared (cross-project) store. See GH-585.
+ */
 function collectLocks(cwd) {
   const locks = [];
   for (const store of discoverStores(cwd)) {
     const cfg = readConfig(store.dir);
-    if (cfg && Array.isArray(cfg.locks)) locks.push(...cfg.locks);
+    if (cfg && Array.isArray(cfg.locks)) {
+      for (const lock of cfg.locks) locks.push({ ...lock, _storeKind: store.kind });
+    }
   }
   return locks;
 }

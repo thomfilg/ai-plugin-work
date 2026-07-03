@@ -118,12 +118,10 @@ describe('shared lock from project A blocks op invoked from project B', () => {
       /edit shared target/,
       `stderr should reference unlock phrase: ${res.stderr}`
     );
-    // Note: Operator-authorized contract loosening — earlier draft asserted
-    // a literal "(shared)" token and a case-insensitive /shared/i match in
-    // the rejection stderr. Production rejection format does not emit those
-    // tokens, and Task 11 forbids production edits, so the cross-project-
-    // origin contract here is reduced to "block + unlock phrase surfaces".
-    // The remaining assertions (exit 2, no-block / override paths in other
-    // tests) still prove the shared store gated project B.
+    // AC8 (GH-585): the rejection must surface that the blocking lock came from
+    // the shared (cross-project) store, so the user isn't confused by a block
+    // with no origin in project B's own config.
+    assert.match(res.stderr, /\(shared\)/, `stderr should carry the (shared) token: ${res.stderr}`);
+    assert.match(res.stderr, /shared/i, `stderr should mention shared origin: ${res.stderr}`);
   });
 });

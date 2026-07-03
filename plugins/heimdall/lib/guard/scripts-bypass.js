@@ -9,9 +9,6 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { commandAccessesProtectedPaths } = require('../command-analysis');
 
-const WRITE_OPS_IN_SCRIPT =
-  /\b(?:writeFileSync|appendFileSync|writeFile|createWriteStream|unlink|unlinkSync|rmSync|renameSync|rename|rmdir|rmdirSync|copyFileSync|exec|execSync|fs\.promises\.writeFile|fs\.promises\.rm|fs\.promises\.rename|fs\.writeFile|fs\.appendFile)\b/;
-
 function isTrustedScript(scriptPath, entries) {
   for (const entry of entries) {
     for (const subdir of entry.trustedSubdirs || []) {
@@ -31,14 +28,26 @@ function scriptPatternsFor(entry) {
   return patterns;
 }
 
-function scriptHasWriteOps(content) {
-  return (
-    WRITE_OPS_IN_SCRIPT.test(content) ||
-    />{1,2}\s*['"]/.test(content) ||
-    />\|\s*['"]/.test(content) ||
-    /\btee\s+-a\b/.test(content) ||
-    /open\(.*['"]w/.test(content)
-  );
+const WRITE_OP_LINE =
+  /(?:writeFileSync|appendFileSync|writeFile\b|createWriteStream|\bunlink|\brmSync|\brmdir|renameSync|\brename\b|copyFileSync|\bexec|fs\.promises\.(?:writeFile|rm|rename)|fs\.writeFile|fs\.appendFile|>{1,2}\s*['"]|>\|\s*['"]|\btee\s+-a\b|open\([^)]*['"][^'"]*[wax])/;
+
+/**
+ * Correlate the write op to the protected path: block only when a SINGLE
+ * statement both performs a write AND references the protected marker (GH-657).
+ * This stops the false positive where a script merely READS a protected path and
+ * writes elsewhere (e.g. to /tmp), and where a test file references a marker as a
+ * string fixture while writing to temp dirs — without weakening the realistic
+ * threat (`fs.writeFileSync('<protected>/x', …)` keeps write + marker on one
+ * statement). Known limitation: a write whose target is bound to a variable on a
+ * separate line is not correlated here.
+ */
+function scriptWritesToProtected(content, entry) {
+  const markerPats = scriptPatternsFor(entry);
+  for (const stmt of content.split(/[\n;]/)) {
+    if (!WRITE_OP_LINE.test(stmt)) continue;
+    if (markerPats.some((p) => p.test(stmt))) return true;
+  }
+  return false;
 }
 
 /**
@@ -63,7 +72,11 @@ function checkScriptBypass(collapsedCmd, entry, entries) {
   } catch (err) {
     return { blocked: true, error: `Cannot read script "${found.scriptPath}": ${err.message}` };
   }
-  return scriptHasWriteOps(content)
+  // Require the write op and the protected-path reference to co-occur in one
+  // statement (GH-657). A script that only reads the protected path — or one
+  // (e.g. a test file) that names it as a fixture while writing to temp — is not
+  // a bypass and must not be blocked.
+  return scriptWritesToProtected(content, entry)
     ? { blocked: true, scriptPath: found.scriptPath }
     : { blocked: false };
 }

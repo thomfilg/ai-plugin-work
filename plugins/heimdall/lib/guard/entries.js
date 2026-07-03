@@ -55,6 +55,10 @@ function buildEntry(raw, lock, baseDir) {
     unlockPhrase: String(lock.unlockPhrase || '').trim(),
     allowedPaths: Array.isArray(lock.allowedPaths) ? lock.allowedPaths : null,
     trustedSubdirs: Array.isArray(lock.trustedSubdirs) ? lock.trustedSubdirs : [],
+    // Store kind the block came from (local|worktree|global|shared), tagged by
+    // the hook's collectLocks so a rejection can flag a cross-project origin.
+    // See GH-585.
+    kind: lock._storeKind || null,
   };
 }
 

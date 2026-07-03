@@ -47,20 +47,14 @@ const BASH_WRITE_TEMPLATES = [
   /tar\s+.*-C\s*["']?[^|&;]*MARKER/i,
   /tar\s+.*--directory\s*["']?[^|&;]*MARKER/i,
   /unzip\s+.*-d\s*["']?[^|&;]*MARKER/i,
-  /python[23]?\s+-c\s+.*MARKER/i,
-  /MARKER.*python[23]?\s+-c/i,
-  /node\s+-e\s+.*MARKER/i,
-  /MARKER.*node\s+-e/i,
-  /perl\s+-e\s+.*MARKER/i,
-  /MARKER.*perl\s+-e/i,
-  /ruby\s+-e\s+.*MARKER/i,
-  /MARKER.*ruby\s+-e/i,
+  // Interpreter invocations (node -e, python -c, perl/ruby -e, sh/bash -c, eval)
+  // that merely NAME the marker are NOT writes — `node -e "require('X/.claude/c')"`
+  // and `python -c "print(open('X/.claude/c').read())"` are pure reads. Their
+  // actual writes carry a redirect (`>`, caught by the generic template above) or
+  // a write API (caught by BASH_WRITE_GLOBAL below), so no bare-interpreter marker
+  // template is needed here. Dropping them removes the highest-volume false
+  // positive (read-only introspection). See GH-656.
   /cd\s+.*MARKER.*(?:&&|;|\|\||&)/i,
-  /sh\s+-c\s+.*MARKER/i,
-  /MARKER.*sh\s+-c/i,
-  /bash\s+-c\s+.*MARKER/i,
-  /MARKER.*bash\s+-c/i,
-  /eval\s+.*MARKER/i,
   /git\s+clone\s+.*MARKER/i,
   /git\s+checkout\s+.*MARKER/i,
   /git\s+pull\s+.*MARKER/i,
@@ -73,13 +67,22 @@ const BASH_WRITE_TEMPLATES = [
   /<<.*>\s*["']?[^|&;]*MARKER/i,
 ];
 
+// Interpreter WRITE detection: a `node -e`/`python -c` invocation is a write
+// only when its inline code calls a write API (not merely `open(`/`require`,
+// which are reads). `open(` is required to carry a write mode ('w'/'a'/'x') so a
+// read-open is not flagged. See GH-656.
 const BASH_WRITE_GLOBAL = [
-  /node\s+-e\s+.*(?:writeFileSync|appendFileSync|writeFile|createWriteStream)/i,
-  /python[23]?\s+-c\s+.*(?:open\(|write\(|\.write|write_text|write_bytes|\.unlink|\.rename|\.replace\(|\.mkdir|shutil\.\w*copy|shutil\.move|shutil\.rmtree)/i,
+  /node\s+-e\s+.*(?:writeFileSync|appendFileSync|writeFile\b|createWriteStream|\brmSync|\bunlinkSync|\brenameSync)/i,
+  /python[23]?\s+-c\s+.*(?:open\([^)]*,\s*['"][^'"]*[wax]|write_text|write_bytes|\.write\(|\.unlink|\.rename|\.replace\(|\.mkdir|shutil\.\w*copy|shutil\.move|shutil\.rmtree)/i,
 ];
 
+// Bare interpreter tokens (node -e, python -c, sh -c, eval, …) are deliberately
+// NOT generic write signals: naming a protected path inside an interpreter read
+// (`node -e "require('X/.claude/c')"`) must not count as an absolute-path write.
+// Real interpreter writes carry a redirect (`>`) or a write API (BASH_WRITE_GLOBAL)
+// and are still detected. See GH-656.
 const GENERIC_WRITE_RE =
-  /(?:>{1,2}|>\||\btee\b|\bcp\b|\bmv\b|\brm\b|\brmdir\b|\btouch\b|\bmkdir\b|\bchmod\b|\bchown\b|\bln\b|\binstall\b|\brsync\b|\bdd\b|\btruncate\b|\bsed\s+-i|\bpatch\b|\bsponge\b|\bunlink\b|\bcurl\s+-o|\bcurl\s+--output|\bwget\s+-O|\bwget\s+--output|\btar\s+-C|\btar\s+--directory|\bunzip\s+-d|\bfind\s+.*-exec|\bxargs\b|\bnode\s+-e\b|\bpython[23]?\s+-c\b|\bperl\s+-e\b|\bruby\s+-e\b|\bsh\s+-c\b|\bbash\s+-c\b|\beval\b)/i;
+  /(?:>{1,2}|>\||\btee\b|\bcp\b|\bmv\b|\brm\b|\brmdir\b|\btouch\b|\bmkdir\b|\bchmod\b|\bchown\b|\bln\b|\binstall\b|\brsync\b|\bdd\b|\btruncate\b|\bsed\s+-i|\bpatch\b|\bsponge\b|\bunlink\b|\bcurl\s+-o|\bcurl\s+--output|\bwget\s+-O|\bwget\s+--output|\btar\s+-C|\btar\s+--directory|\bunzip\s+-d|\bfind\s+.*-exec|\bxargs\b)/i;
 
 const _patternCache = new Map();
 function getPatternsForMarker(marker) {

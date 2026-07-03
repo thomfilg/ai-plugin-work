@@ -316,6 +316,14 @@ describe('evaluate: bash', () => {
     assert.equal(runB('rm packages/ui/config.json').exitCode, 2);
   });
 
+  it('ui: blocks a `./`-prefixed write `rm ./packages/ui/config.json` (GH-642)', () => {
+    // Settles the skipped review claim that a `./` prefix bypasses the boundary:
+    // the char before `ui` in `./packages/ui/` is `/`, which IS in the boundary
+    // class, so this stays blocked.
+    assert.equal(runB('rm ./packages/ui/config.json').exitCode, 2);
+    assert.equal(runB('rm ./src/config.json').exitCode, 2);
+  });
+
   it('ui: blocks a redirect-write `echo hi > ui/x`', () => {
     assert.equal(runB('echo hi > ui/x').exitCode, 2);
   });
@@ -334,8 +342,13 @@ describe('evaluate: bash', () => {
     assert.equal(runB('rm packages/ui').exitCode, 2);
   });
 
-  it('ui: blocks `node -e "require(\'ui\')"` (quoted path token)', () => {
-    assert.equal(runB(`node -e "require('ui')"`).exitCode, 2);
+  it('ui: allows `node -e "require(\'ui\')"` (a read, not a write) — GH-656', () => {
+    // `require('ui')` reads the package; the lock is a WRITE gate, so this must
+    // NOT be blocked. Genuine interpreter writes (writeFileSync into the dir) are
+    // still caught by BASH_WRITE_GLOBAL. This corrects the GH-642-era assertion
+    // that treated any `node -e` naming the marker as a write.
+    assert.equal(runB(`node -e "require('ui')"`).exitCode, 0);
+    assert.equal(runB(`node -e "require('fs').writeFileSync('packages/ui/x','y')"`).exitCode, 2);
   });
 
   it('db: blocks `rm packages/db/schema.sql`', () => {
@@ -427,6 +440,130 @@ describe('evaluate: bash obfuscation (GH-655)', () => {
   it('does not flag unrelated globs / build commands', () => {
     for (const command of ['ls src/*', 'rm *.log', 'pnpm build', 'require("x")']) {
       assert.equal(bash(command).exitCode, 0, `should allow: ${command}`);
+    }
+  });
+});
+
+describe('evaluate: script-bypass correlates write to the protected path (GH-657)', () => {
+  const os2 = require('node:os');
+  let scriptsDir;
+  let readerScript;
+  let writerScript;
+
+  before(() => {
+    scriptsDir = fs.mkdtempSync(path.join(os2.tmpdir(), 'heimdall-scripts-'));
+    readerScript = path.join(scriptsDir, 'reader.js');
+    writerScript = path.join(scriptsDir, 'writer.js');
+    // Reads a protected path, writes ONLY to /tmp — must be allowed.
+    fs.writeFileSync(
+      readerScript,
+      "const fs = require('fs');\n" +
+        `const d = fs.readFileSync('${path.join(baseDir, '.claude', 'config')}', 'utf8');\n` +
+        "fs.writeFileSync('/tmp/heimdall-reader-out', d);\n"
+    );
+    // Writes INTO the protected path — must still be blocked.
+    fs.writeFileSync(
+      writerScript,
+      "const fs = require('fs');\n" +
+        `fs.writeFileSync('${path.join(baseDir, '.claude', 'settings.json')}', 'x');\n`
+    );
+  });
+
+  after(() => fs.rmSync(scriptsDir, { recursive: true, force: true }));
+
+  const bash = (command) =>
+    evaluate({
+      toolName: 'Bash',
+      toolInput: { command },
+      transcriptPath: transcriptEmpty,
+      entries: entries(),
+    });
+
+  it('allows a script that reads a protected path but writes elsewhere', () => {
+    assert.equal(bash(`node ${readerScript}`).exitCode, 0);
+  });
+
+  it('still blocks a script that writes into the protected path', () => {
+    assert.equal(bash(`node ${writerScript}`).exitCode, 2);
+  });
+});
+
+describe('evaluate: skills subdir is execute-trusted but edit-gated (GH-637)', () => {
+  const os2 = require('node:os');
+  let cfgRoot;
+  let skillScript;
+  const skillLocks = () => [
+    {
+      protect: ['.claude'],
+      unlockPhrase: 'edit .claude',
+      trustedSubdirs: ['hooks', 'plugins', 'external_scripts', 'skills'],
+    },
+  ];
+  const ent = () => buildEntries(skillLocks(), cfgRoot);
+
+  before(() => {
+    cfgRoot = fs.mkdtempSync(path.join(os2.homedir(), '.heimdall-skills-'));
+    skillScript = path.join(cfgRoot, '.claude', 'skills', 'demo', 'run.js');
+    fs.mkdirSync(path.dirname(skillScript), { recursive: true });
+    // Script both references the protected dir and performs a write op — without
+    // the skills trust it would be flagged as a script-bypass write.
+    fs.writeFileSync(
+      skillScript,
+      "const fs = require('fs');\nfs.writeFileSync('/tmp/out', '.claude ran');\n"
+    );
+  });
+
+  after(() => fs.rmSync(cfgRoot, { recursive: true, force: true }));
+
+  it('allows executing a skill script under .claude/skills without unlock', () => {
+    const r = evaluate({
+      toolName: 'Bash',
+      toolInput: { command: `node ${skillScript} --flag` },
+      transcriptPath: transcriptEmpty,
+      entries: ent(),
+    });
+    assert.equal(r.exitCode, 0, r.message);
+  });
+
+  it('still blocks EDITING a file under .claude/skills', () => {
+    const r = evaluate({
+      toolName: 'Edit',
+      toolInput: { file_path: skillScript },
+      transcriptPath: transcriptEmpty,
+      entries: ent(),
+    });
+    assert.equal(r.exitCode, 2);
+  });
+});
+
+describe('evaluate: bash interpreter reads are not writes (GH-656)', () => {
+  const bash = (command) =>
+    evaluate({
+      toolName: 'Bash',
+      toolInput: { command },
+      transcriptPath: transcriptEmpty,
+      entries: entries(),
+    });
+  const dir = path.join(baseDir, '.claude');
+
+  it('allows read-only interpreter idioms that merely name a protected path', () => {
+    for (const command of [
+      `node -e "const c = require('${dir}/config'); console.log(c)"`,
+      `node -e "require('./package.json')"`,
+      `python3 -c "print(open('${dir}/x').read())"`,
+      `node ${dir}/../thing.js --flag`,
+    ]) {
+      assert.equal(bash(command).exitCode, 0, `should allow: ${command}`);
+    }
+  });
+
+  it('still blocks genuine interpreter writes into a protected path', () => {
+    for (const command of [
+      `node -e "require('fs').writeFileSync('${dir}/x','y')"`,
+      `python3 -c "open('${dir}/x','w').write('y')"`,
+      `echo x > ${dir}/x`,
+    ]) {
+      assert.equal(bash(command).exitCode, 2, `should block: ${command}`);
     }
   });
 });
