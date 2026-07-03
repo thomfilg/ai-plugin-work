@@ -27,8 +27,14 @@ Adds (or extends) a lock block: a set of protected paths paired with one unlock 
    node "${CLAUDE_PLUGIN_ROOT}/scripts/heimdall-protect.js" --phrase="<phrase>" --paths="<comma,separated,paths>"
    ```
    Optional flags for directory locks:
-   - `--allowed="sub1,sub2"` — subdirs always writable (e.g. `plans,projects` under `.claude`)
-   - `--trusted="hooks,scripts"` — subdirs whose internal scripts are trusted (script-bypass exemption)
+   - `--allowed="sub1,sub2"` — subdirs always **writable** without the phrase (e.g. `plans,projects` under `.claude`)
+   - `--trusted="hooks,scripts"` — subdirs whose scripts may be **executed** without the phrase, while EDITS to them stay gated (script-bypass exemption)
+
+   `--allowed` lifts the edit gate for a subtree; `--trusted` lifts only the
+   execute gate (running a script under it) and keeps edits gated. For the
+   `.claude` config lock, `hooks`, `plugins`, `external_scripts` and `skills`
+   are trusted-for-execute by default (so plugin skill scripts run without an
+   unlock; editing them still requires the phrase — see GH-637).
 
 5. Print the script output verbatim.
 

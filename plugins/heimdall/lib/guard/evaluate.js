@@ -21,8 +21,16 @@ function blockMessage(reason, entry, matchContext) {
   // Only the USER typing the phrase unlocks (see transcript.js): tool output —
   // including this very message echoed back as a tool_result — is never trusted,
   // so an agent cannot self-unlock by emitting the phrase.
-  let msg = `BLOCKED (heimdall): ${reason}\n`;
+  // Surface a cross-project origin: when the blocking lock came from the shared
+  // store, the user may not expect it (it is not this project's own config). The
+  // literal `(shared)` token is the contract asserted by the cross-project e2e.
+  // See GH-585 (AC8 from GH-541).
+  const origin = entry && entry.kind === 'shared' ? ' (shared)' : '';
+  let msg = `BLOCKED (heimdall)${origin}: ${reason}\n`;
   if (entry) {
+    if (origin) {
+      msg += `This lock comes from your shared (cross-project) heimdall store, not this project.\n`;
+    }
     const phrase = entry.unlockPhrase || `edit ${path.basename(entry.dir)}`;
     msg += `\nACTION REQUIRED: Stop and ask the user to UNLOCK this path. Tell them to reply with the\n`;
     msg += `exact phrase (they must type it themselves — only a user message unlocks it):\n`;

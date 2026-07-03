@@ -9,9 +9,6 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { commandAccessesProtectedPaths } = require('../command-analysis');
 
-const WRITE_OPS_IN_SCRIPT =
-  /\b(?:writeFileSync|appendFileSync|writeFile|createWriteStream|unlink|unlinkSync|rmSync|renameSync|rename|rmdir|rmdirSync|copyFileSync|exec|execSync|fs\.promises\.writeFile|fs\.promises\.rm|fs\.promises\.rename|fs\.writeFile|fs\.appendFile)\b/;
-
 function isTrustedScript(scriptPath, entries) {
   for (const entry of entries) {
     for (const subdir of entry.trustedSubdirs || []) {
@@ -30,6 +27,17 @@ function scriptPatternsFor(entry) {
   }
   return patterns;
 }
+
+// Any write op in the script content. Kept intentionally BROAD and fail-closed:
+// a script that both references a protected marker and performs a write is
+// blocked, because static content analysis cannot reliably prove which path a
+// write targets (a target can be built via variables, path.join, concatenation,
+// etc.). Correlating "write ↔ marker" was attempted (GH-657) but every static
+// correlation leaves an indirection bypass, so per the fail-closed policy the
+// broad check stands. Legitimate scripts are exempted by location via
+// `trustedSubdirs`, or by the user speaking the unlock phrase once.
+const WRITE_OPS_IN_SCRIPT =
+  /\b(?:writeFileSync|appendFileSync|writeFile|createWriteStream|unlink|unlinkSync|rmSync|renameSync|rename|rmdir|rmdirSync|copyFileSync|exec|execSync|fs\.promises\.writeFile|fs\.promises\.rm|fs\.promises\.rename|fs\.writeFile|fs\.appendFile)\b/;
 
 function scriptHasWriteOps(content) {
   return (
