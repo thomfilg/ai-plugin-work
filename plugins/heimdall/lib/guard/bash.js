@@ -73,7 +73,7 @@ const BASH_WRITE_TEMPLATES = [
 // read-open is not flagged. See GH-656.
 const BASH_WRITE_GLOBAL = [
   /node\s+-e\s+.*(?:writeFileSync|appendFileSync|writeFile\b|createWriteStream|\brmSync|\bunlinkSync|\brenameSync)/i,
-  /python[23]?\s+-c\s+.*(?:open\([^)]*,\s*['"][^'"]*[wax]|write_text|write_bytes|\.write\(|\.unlink|\.rename|\.replace\(|\.mkdir|shutil\.\w*copy|shutil\.move|shutil\.rmtree)/i,
+  /python[23]?\s+-c\s+.*(?:open\([^)]*,\s*['"][^'"]*(?:[wax]|r[^'"]*\+)|write_text|write_bytes|\.write\(|\.unlink|\.rename|\.replace\(|\.mkdir|shutil\.\w*copy|shutil\.move|shutil\.rmtree)/i,
 ];
 
 // Bare interpreter tokens (node -e, python -c, sh -c, eval, …) are deliberately

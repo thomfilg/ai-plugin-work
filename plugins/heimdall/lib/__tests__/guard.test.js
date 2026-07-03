@@ -486,6 +486,17 @@ describe('evaluate: script-bypass correlates write to the protected path (GH-657
   it('still blocks a script that writes into the protected path', () => {
     assert.equal(bash(`node ${writerScript}`).exitCode, 2);
   });
+
+  it('blocks a script that writes through a variable holding the protected path', () => {
+    const viaVar = path.join(scriptsDir, 'viavar.js');
+    fs.writeFileSync(
+      viaVar,
+      "const fs = require('fs');\n" +
+        `const target = '${path.join(baseDir, '.claude', 'settings.json')}';\n` +
+        "fs.writeFileSync(target, 'x');\n"
+    );
+    assert.equal(bash(`node ${viaVar}`).exitCode, 2);
+  });
 });
 
 describe('evaluate: skills subdir is execute-trusted but edit-gated (GH-637)', () => {
@@ -561,6 +572,7 @@ describe('evaluate: bash interpreter reads are not writes (GH-656)', () => {
     for (const command of [
       `node -e "require('fs').writeFileSync('${dir}/x','y')"`,
       `python3 -c "open('${dir}/x','w').write('y')"`,
+      `python3 -c "open('${dir}/x','r+').write('y')"`,
       `echo x > ${dir}/x`,
     ]) {
       assert.equal(bash(command).exitCode, 2, `should block: ${command}`);
