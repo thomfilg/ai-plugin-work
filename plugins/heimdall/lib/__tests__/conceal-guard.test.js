@@ -490,3 +490,52 @@ describe('conceal seeding preserves existing secrets coverage', () => {
     assert.equal(guardIn(secretsRepo, bashPayload('cat /proc/123/environ')), 2);
   });
 });
+
+describe('conceal guard resists shell obfuscation (GH-655)', () => {
+  let oRepo;
+  const guardIn = (dir, payload) =>
+    spawnSync('node', [HOOK], {
+      input: JSON.stringify(payload),
+      env: { ...process.env, CLAUDE_PROJECT_DIR: dir },
+      encoding: 'utf8',
+    }).status;
+
+  before(() => {
+    oRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'heimdall-obf-'));
+    fs.mkdirSync(path.join(oRepo, '.claude'), { recursive: true });
+    fs.mkdirSync(path.join(oRepo, 'secret-folder'), { recursive: true });
+    // Folder conceal only (no secretsFiles) so the folder name is the sole marker.
+    fs.writeFileSync(
+      path.join(oRepo, '.claude', 'heimdall-conceal.json'),
+      JSON.stringify({
+        denyFilePatterns: ['secret-folder(/|$)'],
+        denyCommandPatterns: ['(^|[^\\w.-])secret-folder\\b'],
+        secretsFiles: [],
+      })
+    );
+  });
+
+  after(() => fs.rmSync(oRepo, { recursive: true, force: true }));
+
+  const cases = {
+    plain: `cat ${'{r}'}/secret-folder/creds.txt`,
+    'glob-bracket': `cat ${'{r}'}/secret-fold[e]r/creds.txt`,
+    'glob-star': `cat ${'{r}'}/secret-fol*/creds.txt`,
+    'quote-split': `cat ${'{r}'}/secret-fol""der/creds.txt`,
+    backslash: `cat ${'{r}'}/secret-fol\\der/creds.txt`,
+    brace: `cat ${'{r}'}/{secret,x}-folder/creds.txt`,
+  };
+
+  for (const [name, tmpl] of Object.entries(cases)) {
+    it(`blocks obfuscated Bash read: ${name}`, () => {
+      const cmd = tmpl.replace('{r}', oRepo);
+      assert.equal(guardIn(oRepo, bashPayload(cmd)), 2, cmd);
+    });
+  }
+
+  it('still allows unrelated Bash commands', () => {
+    for (const cmd of ['pnpm build', 'ls *.log', `cat ${oRepo}/other/x.txt`]) {
+      assert.equal(guardIn(oRepo, bashPayload(cmd)), 0, cmd);
+    }
+  });
+});
