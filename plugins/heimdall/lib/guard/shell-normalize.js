@@ -33,6 +33,25 @@ const MAX_BRACE_VARIANTS = 64;
  * concatenated with its neighbours, exactly as the shell would: `.cl""aude` and
  * `'.claude'` and `.cla\ude` all collapse to `.claude`.
  */
+// Scan a quoted run starting just after the opening quote `q`; returns the
+// unquoted content and the index just past the closing quote (or end-of-string
+// for an unbalanced quote). Inside double quotes a backslash still escapes;
+// inside single quotes it is literal (bash semantics).
+function scanQuote(s, start, q) {
+  let out = '';
+  let i = start;
+  while (i < s.length && s[i] !== q) {
+    if (q === '"' && s[i] === '\\' && i + 1 < s.length) {
+      out += s[i + 1];
+      i += 2;
+    } else {
+      out += s[i];
+      i += 1;
+    }
+  }
+  return { out, next: i + 1 };
+}
+
 function dequote(s) {
   let out = '';
   for (let i = 0; i < s.length; i++) {
@@ -40,25 +59,13 @@ function dequote(s) {
     if (c === '\\') {
       i += 1;
       if (i < s.length) out += s[i];
-      continue;
+    } else if (c === '"' || c === "'") {
+      const r = scanQuote(s, i + 1, c);
+      out += r.out;
+      i = r.next - 1;
+    } else {
+      out += c;
     }
-    if (c === '"' || c === "'") {
-      const q = c;
-      i += 1;
-      while (i < s.length && s[i] !== q) {
-        // Inside double quotes a backslash still escapes; inside single quotes
-        // it is literal (bash semantics).
-        if (q === '"' && s[i] === '\\' && i + 1 < s.length) {
-          out += s[i + 1];
-          i += 2;
-          continue;
-        }
-        out += s[i];
-        i += 1;
-      }
-      continue; // skip the closing quote (or end-of-string for an unbalanced one)
-    }
-    out += c;
   }
   return out;
 }
@@ -118,6 +125,26 @@ function tokenize(s) {
   return s.split(/[\s"'`,;()|<>&=]+/).filter(Boolean);
 }
 
+// Copy a bracket char-class verbatim from index `i` (which points at `[`).
+// Returns the compiled class and the index of its closing `]`.
+function readCharClass(seg, i) {
+  let j = i + 1;
+  let cls = '[';
+  if (seg[j] === '!' || seg[j] === '^') {
+    cls += '^';
+    j += 1;
+  }
+  if (seg[j] === ']') {
+    cls += '\\]';
+    j += 1;
+  }
+  while (j < seg.length && seg[j] !== ']') {
+    cls += seg[j] === '\\' ? '\\\\' : seg[j];
+    j += 1;
+  }
+  return { cls: `${cls}]`, next: j };
+}
+
 /** Compile one path SEGMENT glob to an anchored regex with `[^/]` semantics. */
 function segGlobToRegExp(seg) {
   let re = '^';
@@ -128,28 +155,14 @@ function segGlobToRegExp(seg) {
     } else if (c === '?') {
       re += '[^/]';
     } else if (c === '[') {
-      let j = i + 1;
-      let cls = '[';
-      if (seg[j] === '!' || seg[j] === '^') {
-        cls += '^';
-        j += 1;
-      }
-      if (seg[j] === ']') {
-        cls += '\\]';
-        j += 1;
-      }
-      while (j < seg.length && seg[j] !== ']') {
-        cls += seg[j] === '\\' ? '\\\\' : seg[j];
-        j += 1;
-      }
-      cls += ']';
-      re += cls;
-      i = j;
+      const r = readCharClass(seg, i);
+      re += r.cls;
+      i = r.next;
     } else {
       re += c.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     }
   }
-  return new RegExp(re + '$');
+  return new RegExp(`${re}$`);
 }
 
 /**
@@ -186,6 +199,24 @@ function commandGlobReferencesMarker(command, marker) {
  * child of it. At least one aligned segment must carry a glob metachar, so pure
  * literals (already handled by substring checks) don't double-count here.
  */
+// Do `litPath`'s segments align onto `tSegs` starting at `start`, using at least
+// one glob metachar (so a pure literal — already handled by substring checks —
+// doesn't double-count here)?
+function segmentsAlignAt(tSegs, lSegs, start) {
+  let usedGlob = false;
+  for (let i = 0; i < lSegs.length; i += 1) {
+    const t = tSegs[start + i];
+    const l = lSegs[i];
+    if (hasGlobMeta(t)) {
+      usedGlob = true;
+      if (!segGlobToRegExp(t).test(l)) return false;
+    } else if (t !== l) {
+      return false;
+    }
+  }
+  return usedGlob;
+}
+
 function commandGlobReferencesPath(command, litPath) {
   if (!litPath) return false;
   const lSegs = litPath.split('/');
@@ -193,23 +224,7 @@ function commandGlobReferencesPath(command, litPath) {
     if (!hasGlobMeta(tok)) continue;
     const tSegs = tok.split('/');
     for (let start = 0; start + lSegs.length <= tSegs.length; start += 1) {
-      let ok = true;
-      let usedGlob = false;
-      for (let i = 0; i < lSegs.length; i += 1) {
-        const t = tSegs[start + i];
-        const l = lSegs[i];
-        if (hasGlobMeta(t)) {
-          usedGlob = true;
-          if (!segGlobToRegExp(t).test(l)) {
-            ok = false;
-            break;
-          }
-        } else if (t !== l) {
-          ok = false;
-          break;
-        }
-      }
-      if (ok && usedGlob) return true;
+      if (segmentsAlignAt(tSegs, lSegs, start)) return true;
     }
   }
   return false;
