@@ -44,7 +44,7 @@ The `<suggested-resolution>` text is pass-specific (see each pass below) and nam
 
 **Severity:** Advisory (warn + record; operator resolves inline before commit).
 
-**When it fires:** After Step 4.1, when a task's `### Test Command` references a file (via `$CHANGED_FILES`) that is NOT listed under that task's `### Files in scope` and IS listed under a sibling task's `### Files in scope`. This catches the ECHO-5362-class contract divergence where Task A's test depends on a contract owned by Task B.
+**When it fires:** After Step 4.1, when a task's `### Test Strategy` references a file (via its `entry:` or a `CHANGED_FILES` list in a custom command) that is NOT listed under that task's `### Files in scope` and IS listed under a sibling task's `### Files in scope`. This catches the ECHO-5362-class contract divergence where Task A's test depends on a contract owned by Task B.
 
 **Warning template:**
 

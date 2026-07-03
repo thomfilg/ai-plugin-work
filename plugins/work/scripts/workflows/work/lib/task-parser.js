@@ -24,7 +24,6 @@ const fs = require('fs');
 const path = require('path');
 const { fileExists, readFile } = require('./work-helpers');
 const taskParserStrategy = require('./task-parser-strategy');
-const { extractTestCommand } = taskParserStrategy;
 
 function extractTestStrategy(taskBody) {
   return taskParserStrategy.extractTestStrategy(taskBody, extractSectionByHeading);
@@ -190,7 +189,6 @@ function _parseTaskBlock(num, rawBody) {
       extractSectionByHeading(body, '### Files explicitly out of scope')
     ),
     crossTaskDeps: _parseScopeList(extractSectionByHeading(body, '### Cross-Task Dependencies')),
-    testCommand: extractTestCommand(body),
     testStrategy: extractTestStrategy(body),
     rawContent: `## Task ${num} ${body}`,
   };

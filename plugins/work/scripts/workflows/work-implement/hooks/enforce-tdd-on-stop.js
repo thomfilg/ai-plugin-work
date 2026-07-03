@@ -185,17 +185,18 @@ if (exists && valid) {
 const { execFileSync, execSync } = require('child_process');
 const tasksDir = path.join(TASKS_BASE, safeTicket);
 
-// Resolve the runnable command via the shared resolution path (GH-610):
-//   - legacy `### Test Command` is honoured verbatim;
-//   - else, with the Test Strategy validator flag ON, an envelope-kind
-//     `### Test Strategy` synthesises a runnable command (auto-run/record below);
+// Resolve the runnable command via the shared resolution path (GH-610/GH-653):
+//   - an envelope-kind `### Test Strategy` synthesises a runnable command
+//     (auto-run/record below); custom kinds resolve to their verbatim command;
 //   - citation kinds (`verified-by`/`wiring-citation`) resolve to NO command by
 //     design — they are satisfied by the peer-citation green evidence checked
 //     above. We must NOT treat that null as "missing command + bypass"; instead
 //     fall through to the manual block so the agent records citation evidence.
-//   - a task with neither a command nor a strategy resolves to null/source:null,
-//     preserving the legacy "no test command → allow stop" bypass.
-// Fail-open: any error here behaves as the legacy path (testCommand stays null).
+//   - a task with no strategy resolves to null/source:null, preserving the
+//     "no verification declared → allow stop" bypass (broken artifact; the
+//     draft/tasks_gate validators reject that shape at generation).
+// Fail-open: any error here (synthesis threw, module failed to load) leaves
+// testCommand null and falls through to the manual block below.
 let testCommand = null;
 let isStrategyResolution = false;
 try {
@@ -207,16 +208,7 @@ try {
   testCommand = resolved.command || null;
   isStrategyResolution = resolved.source === 'strategy';
 } catch {
-  // Synthesis threw (e.g. non-citation strategy → null) or the module failed to
-  // load — fall back to the legacy verbatim reader so the hook stays fail-open.
-  try {
-    const { parseTasks } = require(path.join(__dirname, '..', '..', 'work', 'lib', 'task-parser'));
-    const tasks = parseTasks(tasksDir);
-    const currentTask = tasks?.find((t) => t.num === taskNum);
-    testCommand = currentTask?.testCommand || null;
-  } catch {
-    // Can't parse tasks — fall through to manual block
-  }
+  // Fall through to the manual block with no runnable command.
 }
 
 if (testCommand) {
@@ -360,17 +352,17 @@ if (isStrategyResolution && !testCommand) {
   process.exit(2);
 }
 
-// ─── No test command in tasks.md — allow stop (bypass evidence) ──────────────
-// Gate-driven TDD requires ### Test Command in tasks.md. If missing, the task
-// was created before this feature or the split-in-tasks agent didn't include it.
-// Allow the agent to stop — evidence verification is skipped for tasks without
-// a test command.
+// ─── No Test Strategy resolution — allow stop (bypass evidence) ─────────────
+// Gate-driven TDD requires a `### Test Strategy` block in tasks.md; the
+// draft/tasks_gate validators reject task documents without one, so reaching
+// here means a broken or hand-edited artifact. Allow the agent to stop —
+// evidence verification is skipped when no verification is declared.
 
 appendDebugSection(
   TASKS_BASE,
   safeTicket,
-  `- **[BYPASS]** task ${taskNum}: No ### Test Command in tasks.md — evidence check skipped`
+  `- **[BYPASS]** task ${taskNum}: no ### Test Strategy resolution — evidence check skipped`
 );
 
-debugLog('BYPASS: no test command in tasks.md');
+debugLog('BYPASS: no Test Strategy resolution for task');
 process.exit(0);

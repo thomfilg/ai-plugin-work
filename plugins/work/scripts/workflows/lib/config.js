@@ -140,13 +140,6 @@ const config = {
   SCRIPT_RUN_AFFECTED_INTEGRATION: process.env.SCRIPT_RUN_AFFECTED_INTEGRATION || '',
   SCRIPT_RUN_AFFECTED_E2E: process.env.SCRIPT_RUN_AFFECTED_E2E || '',
 
-  // GH-590 (AC17) — feature flag for the tasks-draft Test Strategy validator
-  // (enum + command-existence dispatcher + TDD-ownership graph) and the GH-610
-  // implement-side synthesis/citation consumer. Default '1' (on) now that both
-  // the draft validator (GH-590) and the implement-gate/tdd-phase-state/stop-hook
-  // wiring (GH-610) have landed. Set to '0' to fall back to the legacy
-  // `### Test Command` path (e.g. for in-flight tasks.md authored pre-GH-590).
-
   // Web apps list — each repo defines its own via WEB_APPS env var (JSON)
   // Example .env: WEB_APPS='[{"name":"my-app","defaultPort":3000,"type":"vite"}]'
   // Fields per app: name (string), defaultPort (number), type (string: "vite"|"remix")

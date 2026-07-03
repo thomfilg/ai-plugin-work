@@ -8,7 +8,9 @@
  */
 function hasLegacyTestCommand(task) {
   if (!task) return false;
-  if (typeof task.testCommand === 'string' && task.testCommand.trim().length > 0) return true;
+  // Detect by raw section heading only — the parser no longer extracts a
+  // testCommand field (GH-653), so the heading in rawContent is the sole
+  // trace of a legacy-authored task body.
   return (
     typeof task.rawContent === 'string' && /(?:^|\n)###\s+Test Command\b/.test(task.rawContent)
   );
@@ -34,7 +36,7 @@ function isCheckpointTask(task) {
  */
 function noStrategyError(task, heading) {
   if (hasLegacyTestCommand(task)) {
-    return `${heading}: flag on but task still uses legacy \`### Test Command\`. Convert to \`### Test Strategy\` (kind: unit|integration|e2e|custom|verified-by|wiring-citation). See skills/split-in-tasks/docs/test-strategy.md.`;
+    return `${heading}: task still uses legacy \`### Test Command\`. Convert to \`### Test Strategy\` (kind: unit|integration|e2e|custom|verified-by|wiring-citation). See skills/split-in-tasks/docs/test-strategy.md.`;
   }
   if (isCheckpointTask(task)) return null;
   return `${heading}: has neither \`### Test Strategy\` nor legacy \`### Test Command\`. Every non-checkpoint task must declare its verification (kind: unit|integration|e2e|custom|verified-by|wiring-citation). For docs/config tasks use \`kind: custom\` with a command that FAILS before the change lands and PASSES after (e.g. a grep asserting the new content). See skills/split-in-tasks/docs/test-strategy.md.`;

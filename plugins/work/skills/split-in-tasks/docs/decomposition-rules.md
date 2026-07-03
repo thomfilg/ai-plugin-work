@@ -15,12 +15,12 @@ Every task must be testable in isolation. If you can't write a test for it, it's
 No two tasks should deliver the same code or satisfy the same requirement. If a requirement needs work across multiple tasks, split the requirement's concerns explicitly so each task owns a distinct piece.
 
 **Rule 4b — Every task MUST have a testable surface of its own:**
-A task ships code OR tests that can be verified by THIS task's `### Test Command`, against ONLY files in THIS task's `### Files in scope`. Forbidden patterns (every one of these is a `split-in-tasks` authoring bug — merge with the consumer):
+A task ships code OR tests that can be verified by THIS task's `### Test Strategy`, against ONLY files in THIS task's `### Files in scope`. Forbidden patterns (every one of these is a `split-in-tasks` authoring bug — merge with the consumer):
 
 - **Helper-only task:** ships a pure helper or seed used solely by another task's test. There is no test for this helper in isolation. Merge it INTO the consuming task and list both the helper and its consumer's tests in that task's Files in scope.
 - **Schema-narrowing-without-consumer task:** narrows a type/schema that another task's integration test depends on. The narrowing has no behavior change observable in isolation — merge it INTO the task whose test would otherwise fail without the narrowing.
-- **"Run the dependent task's test" task:** a task whose Test Command points at a test file owned by another task. This is the ECHO-4637-class deadlock — caught by the tasks_gate validator.
-- **"Run typecheck only" task:** Test Command is `pnpm typecheck` or any other compile-check that doesn't exercise behavior. Typecheck is not a behavior gate; if your task has no behavior to verify, merge it.
+- **"Run the dependent task's test" task:** a task whose Test Strategy entry points at a test file owned by another task (use `kind: verified-by` with a `peer:` citation instead). This is the ECHO-4637-class deadlock — caught by the tasks_gate validator.
+- **"Run typecheck only" task:** the Test Strategy command is `pnpm typecheck` or any other compile-check that doesn't exercise behavior. Typecheck is not a behavior gate; if your task has no behavior to verify, merge it.
 
 If you cannot write a unit or properly-scoped integration test for the task in isolation, the task should NOT exist as a separate task — merge it with its consumer.
 
@@ -57,7 +57,7 @@ Standard implementation tasks MUST order deliverables following the TDD cycle: R
 
 This is the **ECHO-4453-class wedge**. To avoid it:
 - The same task must own BOTH the test file and the impl file in `### Files in scope`.
-- The same task's Test Command must exercise the test added in its RED deliverable.
+- The same task's Test Strategy must exercise the test added in its RED deliverable (its `entry:` names that test file).
 - Both test and impl edits must be reachable from inside ONE task's allowed surface.
 
 ✅ Correct (R/G/R inside one task):

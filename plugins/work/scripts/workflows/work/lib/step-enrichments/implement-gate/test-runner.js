@@ -13,7 +13,7 @@ const path = require('path');
 const fs = require('fs');
 const { execSync } = require('child_process');
 
-const { isTestStrategyValidatorEnabled, findNearestEnvrc, detectMalformedTestCommand } = require(
+const { findNearestEnvrc, detectMalformedTestCommand } = require(
   path.join(__dirname, 'test-command')
 );
 
@@ -48,7 +48,7 @@ const {
  * @returns {object}
  */
 function withEnvrcVars(baseEnv, worktreeDir) {
-  if (!isTestStrategyValidatorEnabled() || !worktreeDir) return baseEnv;
+  if (!worktreeDir) return baseEnv;
   let resolved;
   try {
     resolved = findNearestEnvrc(worktreeDir);
