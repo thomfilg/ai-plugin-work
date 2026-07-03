@@ -414,15 +414,6 @@ function mintCompanionToken() {
   }
 }
 
-// eslint-disable-next-line max-lines-per-function, complexity -- allowlisted pre-existing; see .quality-exceptions
-/**
- * Persist an intentional RED skip via `tdd-phase-state.js record-skip-red`.
- *
- * Used for Type=tests-only tasks where RED is incoherent by design (no
- * failing-test → passing-impl loop exists). Mirrors the spawn pattern of
- * `recordEvidence` so token re-minting / token verification stay aligned
- * across all phase writes. Returns `{ ok, out, exitCode }`.
- */
 /**
  * Pure helper: filter a list of changed POSIX paths down to those that are
  * test/spec files AND fall under the task's declared scope.
@@ -533,48 +524,56 @@ function detectChangedTestFilesInScope(repoRoot, scope) {
   }, out);
 }
 
-function recordSkipRed(ticket, taskNum, reason, cwd) {
+/** Spawn a tdd-phase-state.js subcommand with a freshly minted companion token. */
+function _spawnTdd(args, cwd, env) {
   mintCompanionToken();
-  const args = [TDD_CLI, 'record-skip-red', ticket, '--task', String(taskNum), '--reason', reason];
-  // Auto-init the state file the first time, mirroring recordEvidence().
-  function runOnce() {
-    mintCompanionToken();
-    return spawnSync(process.execPath, args, {
-      cwd,
-      stdio: 'pipe',
-      encoding: 'utf8',
-      env: { ...process.env },
-    });
-  }
-  let r = runOnce();
-  if (r.status !== 0) {
-    const combined = (r.stdout || '') + (r.stderr || '');
-    if (/No TDD phase state found/i.test(combined)) {
-      mintCompanionToken();
-      const initRes = spawnSync(
-        process.execPath,
-        [TDD_CLI, 'init', ticket, '--task', String(taskNum)],
-        { cwd, stdio: 'pipe', encoding: 'utf8', env: { ...process.env } }
-      );
-      if (initRes.status !== 0) {
-        return {
-          ok: false,
-          out:
-            combined +
-            '\n--- auto-init failed ---\n' +
-            (initRes.stdout || '') +
-            (initRes.stderr || ''),
-          exitCode: initRes.status,
-        };
-      }
-      r = runOnce();
+  return spawnSync(process.execPath, args, { cwd, stdio: 'pipe', encoding: 'utf8', env });
+}
+
+/** Concatenate a spawn result's stdout+stderr. */
+function _tddOut(r) {
+  return (r.stdout || '') + (r.stderr || '');
+}
+
+/**
+ * Run a tdd-phase-state.js subcommand, auto-initing the per-task state file
+ * on first use. tdd-phase-state.js record-* requires the state file to
+ * exist; it does NOT auto-init, and `init` itself overwrites existing state
+ * (so we cannot just always init). Strategy: try the subcommand first; if it
+ * fails with "No TDD phase state found", run init ONCE and retry. Existing
+ * cycle history is preserved (init only runs when there is no state).
+ *
+ * Returns `{ ok, out, exitCode }` — the shared result shape of every
+ * recorder wrapper below. `initLabel` customizes the auto-init failure text.
+ */
+function _runTddWithAutoInit(args, ticket, taskNum, cwd, env, initLabel) {
+  let r = _spawnTdd(args, cwd, env);
+  if (r.status !== 0 && /No TDD phase state found/i.test(_tddOut(r))) {
+    const firstOut = _tddOut(r);
+    const initRes = _spawnTdd([TDD_CLI, 'init', ticket, '--task', String(taskNum)], cwd, env);
+    if (initRes.status !== 0) {
+      return {
+        ok: false,
+        out: firstOut + `\n--- ${initLabel} ---\n` + _tddOut(initRes),
+        exitCode: initRes.status,
+      };
     }
+    r = _spawnTdd(args, cwd, env);
   }
-  return {
-    ok: r.status === 0,
-    out: (r.stdout || '') + (r.stderr || ''),
-    exitCode: r.status,
-  };
+  return { ok: r.status === 0, out: _tddOut(r), exitCode: r.status };
+}
+
+/**
+ * Persist an intentional RED skip via `tdd-phase-state.js record-skip-red`.
+ *
+ * Used for Type=tests-only tasks where RED is incoherent by design (no
+ * failing-test → passing-impl loop exists). Shares the spawn/auto-init
+ * pattern of `recordEvidence` so token re-minting / token verification stay
+ * aligned across all phase writes. Returns `{ ok, out, exitCode }`.
+ */
+function recordSkipRed(ticket, taskNum, reason, cwd) {
+  const args = [TDD_CLI, 'record-skip-red', ticket, '--task', String(taskNum), '--reason', reason];
+  return _runTddWithAutoInit(args, ticket, taskNum, cwd, { ...process.env }, 'auto-init failed');
 }
 
 /**
@@ -585,176 +584,95 @@ function recordSkipRed(ticket, taskNum, reason, cwd) {
  * peer covers this task's scope) and records the green citation entry.
  * task-next never writes evidence — the recorder stays the sole authority,
  * including its phase assertion (citation green is only valid in the green
- * phase). Mirrors the spawn/auto-init pattern of `recordSkipRed`.
+ * phase).
  */
 function recordCitationGreen(ticket, taskNum, cwd) {
-  function runOnce() {
-    mintCompanionToken();
-    return spawnSync(
-      process.execPath,
-      [TDD_CLI, 'record-green', ticket, '--task', String(taskNum)],
-      { cwd, stdio: 'pipe', encoding: 'utf8', env: { ...process.env } }
-    );
-  }
-  let r = runOnce();
-  if (r.status !== 0) {
-    const combined = (r.stdout || '') + (r.stderr || '');
-    if (/No TDD phase state found/i.test(combined)) {
-      mintCompanionToken();
-      const initRes = spawnSync(
-        process.execPath,
-        [TDD_CLI, 'init', ticket, '--task', String(taskNum)],
-        { cwd, stdio: 'pipe', encoding: 'utf8', env: { ...process.env } }
-      );
-      if (initRes.status !== 0) {
-        return {
-          ok: false,
-          out:
-            combined +
-            '\n--- auto-init failed ---\n' +
-            (initRes.stdout || '') +
-            (initRes.stderr || ''),
-          exitCode: initRes.status,
-        };
-      }
-      r = runOnce();
-    }
-  }
-  return {
-    ok: r.status === 0,
-    out: (r.stdout || '') + (r.stderr || ''),
-    exitCode: r.status,
-  };
+  const args = [TDD_CLI, 'record-green', ticket, '--task', String(taskNum)];
+  return _runTddWithAutoInit(args, ticket, taskNum, cwd, { ...process.env }, 'auto-init failed');
 }
 
-function recordEvidence(phase, ticket, taskNum, cmd, cwd, scope, opts = {}) {
-  // Delegate to tdd-phase-state.js — the only authorized writer. Forward
-  // `--task N` so the recorder resolves the per-task state path. Records
-  // evidence for the just-completed phase, then (for red/green only)
-  // transitions currentPhase to the next phase.
-  //
-  // The TDD model here is cycle-based: valid transitions are red→green,
-  // green→refactor, refactor→red (start a new cycle). There is no
-  // "refactor→done" transition. A task is considered complete when its
-  // latest cycle has evidence for all three phases — that's an in-script
-  // determination, not a state-machine target. So after recording refactor,
-  // we stop. currentPhase remains "refactor" on disk, but task-next.js's
-  // currentPhase() helper treats a fully-evidenced cycle as `done`.
-  const sub = recordSubcommandFor(phase);
-  const target = nextPhaseTarget(phase);
+/**
+ * Build the record-* argv for a phase, forwarding the recorder opt-ins:
+ *  - `--docs-exempt` (GH-528 Task 4): only the docs-exempt / visual-only
+ *    call sites pass `opts.docsExempt: true`; all other callers keep the
+ *    RED test-file guard and the GREEN/REFACTOR RC-D empty-command trap
+ *    armed. The cmd is strict-mode wrapped so the recorder's internal bash
+ *    invocation surfaces middle-of-chain failures (spec §P0#3).
+ *  - `--red-skip-file-guard` (GH-528 round-2, Cursor[bot] medium):
+ *    mechanical-refactor and other Types whose contract sets
+ *    `redRequiresTestFiles === false` need the RED "no test files changed"
+ *    guard relaxed WITHOUT implying RC-D relaxation at GREEN/REFACTOR.
+ */
+function _recordArgsFor(phase, ticket, taskNum, cmd, opts) {
+  const args = [
+    TDD_CLI,
+    recordSubcommandFor(phase),
+    ticket,
+    '--task',
+    String(taskNum),
+    '--cmd',
+    wrapStrictMode(cmd),
+  ];
+  if (opts && opts.docsExempt === true) args.push('--docs-exempt');
+  if (opts && opts.redSkipFileGuard === true && phase === TDD_PHASES.red) {
+    args.push('--red-skip-file-guard');
+  }
+  return args;
+}
 
-  // tdd-phase-state.js record-* requires the per-task state file to exist;
-  // it does NOT auto-init, and `init` itself overwrites existing state (so
-  // we cannot just always init). Strategy: try record first; if it fails
-  // with "No TDD phase state found", run init ONCE and retry. Existing
-  // cycle history is preserved (init only runs when there is no state).
-  //
-  // tdd-phase-state.js re-runs the test command itself (intentional
-  // anti-fake-evidence design) so we must propagate the SAME env we
-  // used in our own runTest, otherwise the recorder's internal run
-  // can disagree with ours (e.g. CHANGED_FILES injection failing in
-  // its subshell would make pnpm test:unit run the whole suite).
+/**
+ * Record evidence for a just-completed phase, then (for red/green only)
+ * transition currentPhase to the next phase. Delegates to tdd-phase-state.js
+ * — the only authorized writer — forwarding `--task N` so the recorder
+ * resolves the per-task state path.
+ *
+ * The TDD model here is cycle-based: valid transitions are red→green,
+ * green→refactor, refactor→red (start a new cycle). There is no
+ * "refactor→done" transition. A task is considered complete when its latest
+ * cycle has evidence for all three phases — that's an in-script
+ * determination, not a state-machine target. So after recording refactor we
+ * stop: currentPhase remains "refactor" on disk, but currentPhase() treats a
+ * fully-evidenced cycle as `done`.
+ *
+ * tdd-phase-state.js re-runs the test command itself (intentional
+ * anti-fake-evidence design) so we propagate the SAME env we used in our own
+ * runTest — otherwise the recorder's internal run can disagree with ours
+ * (e.g. CHANGED_FILES injection failing in its subshell would make the
+ * envelope command run the whole suite).
+ */
+function recordEvidence(phase, ticket, taskNum, cmd, cwd, scope, opts = {}) {
+  const target = nextPhaseTarget(phase);
   const changedFiles = filterToTestFiles(scope).join(' ');
   const childEnv = { ..._runBaseEnv, CHANGED_FILES: changedFiles };
-  function runRecord() {
-    mintCompanionToken();
-    // Strict-mode wrap the cmd forwarded to the recorder so its internal
-    // bash invocation surfaces middle-of-chain failures (spec §P0#3).
-    const recordArgs = [
-      TDD_CLI,
-      sub,
-      ticket,
-      '--task',
-      String(taskNum),
-      '--cmd',
-      wrapStrictMode(cmd),
-    ];
-    // Task 4 (GH-528): caller opt-in for `--docs-exempt` (symmetric across
-    // RED and GREEN). Only the docs-exempt / visual-only RED and GREEN
-    // fallback call sites pass `opts.docsExempt: true`. All other callers
-    // get default behavior so the RED test-file guard and GREEN RC-D
-    // empty-command trap stay armed for normal code tasks.
-    if (
-      opts &&
-      opts.docsExempt === true &&
-      (phase === TDD_PHASES.red || phase === TDD_PHASES.green || phase === TDD_PHASES.refactor)
-    ) {
-      recordArgs.push('--docs-exempt');
-    }
-    // GH-528 round-2 follow-up (Cursor[bot] medium): mechanical-refactor
-    // and other Types whose contract sets `redRequiresTestFiles === false`
-    // need the RED "no test files changed" guard relaxed without
-    // implying RC-D relaxation at GREEN/REFACTOR. The `--docs-exempt`
-    // flag conflated both; this flag covers only the RED file guard.
-    if (opts && opts.redSkipFileGuard === true && phase === TDD_PHASES.red) {
-      recordArgs.push('--red-skip-file-guard');
-    }
-    return spawnSync(process.execPath, recordArgs, {
-      cwd,
-      stdio: 'pipe',
-      encoding: 'utf8',
-      env: childEnv,
-    });
-  }
-  let r = runRecord();
-  if (r.status !== 0) {
-    const combined = (r.stdout || '') + (r.stderr || '');
-    if (/No TDD phase state found/i.test(combined)) {
-      mintCompanionToken();
-      const initRes = spawnSync(
-        process.execPath,
-        [TDD_CLI, 'init', ticket, '--task', String(taskNum)],
-        { cwd, stdio: 'pipe', encoding: 'utf8', env: childEnv }
-      );
-      if (initRes.status !== 0) {
-        return {
-          ok: false,
-          out:
-            combined +
-            `\n--- auto-init ${ticket} task${taskNum} failed ---\n` +
-            (initRes.stdout || '') +
-            (initRes.stderr || ''),
-          exitCode: initRes.status,
-        };
-      }
-      r = runRecord();
-    }
-    if (r.status !== 0) {
-      return { ok: false, out: (r.stdout || '') + (r.stderr || ''), exitCode: r.status };
-    }
-  }
+
+  const rec = _runTddWithAutoInit(
+    _recordArgsFor(phase, ticket, taskNum, cmd, opts),
+    ticket,
+    taskNum,
+    cwd,
+    childEnv,
+    `auto-init ${ticket} task${taskNum} failed`
+  );
+  if (!rec.ok) return rec;
 
   if (!target) {
     // refactor recorded — cycle complete, no transition needed
-    return { ok: true, out: (r.stdout || '') + (r.stderr || ''), exitCode: 0 };
+    return rec;
   }
 
-  mintCompanionToken();
-  const transitionArgs = [TDD_CLI, 'transition', ticket, target, '--task', String(taskNum)];
-  const t = spawnSync(process.execPath, transitionArgs, {
+  const t = _spawnTdd(
+    [TDD_CLI, 'transition', ticket, target, '--task', String(taskNum)],
     cwd,
-    stdio: 'pipe',
-    encoding: 'utf8',
-    env: childEnv,
-  });
+    childEnv
+  );
   if (t.status !== 0) {
     return {
       ok: false,
-      out:
-        (r.stdout || '') +
-        (r.stderr || '') +
-        `\n--- transition ${phase}→${target} failed ---\n` +
-        (t.stdout || '') +
-        (t.stderr || ''),
+      out: rec.out + `\n--- transition ${phase}→${target} failed ---\n` + _tddOut(t),
       exitCode: t.status,
     };
   }
-
-  return {
-    ok: true,
-    out: (r.stdout || '') + (r.stderr || '') + (t.stdout || '') + (t.stderr || ''),
-    exitCode: 0,
-  };
+  return { ok: true, out: rec.out + _tddOut(t), exitCode: 0 };
 }
 
 // Collect every test/spec file referenced by Files in scope. Scope entries
