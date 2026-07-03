@@ -152,7 +152,7 @@ function postResultRetry(result, taskNum, ws, recordRetry, saveWorkState, safeNa
       `Test command for task ${taskNum} is malformed in tasks.md ` +
         `(parser returned: ${JSON.stringify(String(result.command || '').slice(0, 120))}, ` +
         `category: ${result.malformed}). ` +
-        `Open tasks.md and fix the \`### Test Command\` section under "## Task ${taskNum}".`,
+        `Open tasks.md and fix the \`### Test Strategy\` section under "## Task ${taskNum}".`,
       { command: result.command, exitCode: null, outputTail: '' }
     );
     return;
@@ -206,14 +206,14 @@ function testTaskEvidenceOk(evidence) {
  */
 function validateNonCheckpointEvidence(exists, evidence, taskType, taskNum, validateTddEvidence) {
   if (!exists) {
-    return `No TDD evidence found at task${taskNum}/tdd-phase.json. The gate will record evidence by running the task's \`### Test Command\` — if you keep seeing this, the test command is missing or unrunnable in tasks.md under "## Task ${taskNum}".`;
+    return `No TDD evidence found at task${taskNum}/tdd-phase.json. The gate will record evidence by running the command synthesized from the task's \`### Test Strategy\` — if you keep seeing this, the strategy is missing or unrunnable in tasks.md under "## Task ${taskNum}".`;
   }
 
   if (taskType === 'test') {
     // Accept any evidence (even RED-only) for test tasks, or exception evidence.
     return testTaskEvidenceOk(evidence)
       ? null
-      : `TDD evidence exists but has no cycles or exception. Gate will retry by running the task's \`### Test Command\`.`;
+      : `TDD evidence exists but has no cycles or exception. Gate will retry by running the command synthesized from the task's \`### Test Strategy\`.`;
   }
 
   const validation = validateTddEvidence(evidence);

@@ -17,7 +17,7 @@ Split a technical specification into small, ordered, dependency-aware tasks. Eac
 | [docs/decomposition-rules.md](./docs/decomposition-rules.md) | Rules 1–12 + anti-patterns for Step 4.1 |
 | [docs/split-warning-passes.md](./docs/split-warning-passes.md) | Pass A / B / C / D static-analysis warnings emitted after Step 4 |
 | [docs/output-format.md](./docs/output-format.md) | Exact `tasks.md` structure — task formats, file layout, format rules |
-| [docs/test-command.md](./docs/test-command.md) | `### Test Command` block: runner env vars, file-name patterns, scope rules |
+| [docs/test-strategy.md](./docs/test-strategy.md) | `### Test Strategy` block: kinds, envelope env vars, citation rules, scope rules |
 | [docs/scope-sections.md](./docs/scope-sections.md) | `### Files in scope` / `### Files explicitly out of scope` — Gate C + intra-ticket exclusion rule |
 
 ## Usage
@@ -128,7 +128,7 @@ Review all generated tasks and check:
 - Shared-resource detection: parallel tasks don't modify the same production files (if they do, extract a prerequisite — Rule 12 in [docs/decomposition-rules.md](./docs/decomposition-rules.md))
 - Checkpoint tasks are present after every 3 implementation tasks or subsystem boundary
 - TDD ordering is correct (RED before GREEN before REFACTOR in every non-exempt implementation task — see Rule 10 in [docs/decomposition-rules.md](./docs/decomposition-rules.md) for exemptions)
-- Every non-checkpoint implementation task has a `### Test Command` with a real, runnable test command (see [docs/test-command.md](./docs/test-command.md))
+- Every non-checkpoint implementation task has a `### Test Strategy` (kind: unit|integration|e2e|custom|verified-by|wiring-citation) declaring a real, runnable verification (see [docs/test-strategy.md](./docs/test-strategy.md))
 - Gherkin coverage: every scenario from `gherkin.feature` is referenced by at least one task (if `gherkin.feature` exists)
 - Anti-patterns are absent (see anti-pattern blocklist in [docs/decomposition-rules.md](./docs/decomposition-rules.md))
 - Split-Warning Passes (Pass A / Pass B / Pass C / Pass D — see [docs/split-warning-passes.md](./docs/split-warning-passes.md)) emit no unresolved `SPLIT-WARNING` lines, or each emitted warning has an operator-resolution decision recorded. Pass D is invoked deterministically as `node "${CLAUDE_PLUGIN_ROOT}/plugins/work/skills/split-in-tasks/lib/emit-warnings.js" "${TASKS_DIR}"` and exits non-zero when any kind-D violation is emitted; treat its exit code as a gate alongside Pass A/B/C. **Severity asymmetry:** Pass A/B/C are advisory (operator resolves inline); Pass D is a hard gate (non-zero exit blocks the commit). See [Severity model](./docs/split-warning-passes.md#severity-model--why-d-is-blocking-and-abc-are-advisory) for the rationale.

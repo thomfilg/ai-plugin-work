@@ -118,11 +118,12 @@ function writeContractFixture({ tasksDir, repo, taskNum, type, scopePath, scopeB
     '### Files in scope',
     '- ' + scopePath,
     '',
-    '### Test Command',
-    '```bash',
+    '### Test Strategy',
+    '```',
+    'kind: custom',
     // `grep -q` is a real verifier (not flagged as a fake-test-command).
     // The marker is never present in scopeBody → exit code 1 → RED satisfied.
-    'grep -q ZZZ_NEVER_PRESENT_MARKER ' + scopePath,
+    'command: grep -q ZZZ_NEVER_PRESENT_MARKER ' + scopePath,
     '```',
     '',
     '### Scenarios',
@@ -237,13 +238,14 @@ describe('task-next.js RED contract-driven fallback', () => {
       '- src/thing.js',
       '- src/thing.test.js',
       '',
-      '### Test Command',
-      '```bash',
+      '### Test Strategy',
+      '```',
+      'kind: custom',
       // Real verifier (not on FAKE_CMD_PATTERNS) that exits 1 — proves the
       // RED test-command-failed gate. The fixture's *.test.* file is what
       // task-next's "Allowed file globs" / authorship check inspects; the
       // verifier merely needs to fail.
-      'grep -q ZZZ_NEVER_PRESENT_MARKER src/thing.test.js',
+      'command: grep -q ZZZ_NEVER_PRESENT_MARKER src/thing.test.js',
       '```',
       '',
       '### Scenarios',

@@ -19,7 +19,7 @@
  * RED-phase scenarios covered (verbatim titles must match task-next.js scope):
  *   - Synthesizable Test-Strategy task resolves a command instead of bypassing
  *   - Citation-kind task is satisfied by citation green evidence
- *   - Legacy/no-strategy task keeps the allow-stop bypass
+ *   - No-strategy task keeps the allow-stop bypass
  *
  * Run with:
  *   node --test scripts/workflows/work-implement/__tests__/enforce-tdd-on-stop-test-strategy.integration.test.js
@@ -111,7 +111,10 @@ function writeWorkState(ticket, taskNum, nTasks = taskNum) {
 
 // A worktree-rooted `.envrc` exporting the envelope var used by synthesis.
 function writeEnvrc(varName, value) {
-  fs.writeFileSync(path.join(worktreeDir, '.envrc'), `export ${varName}=${JSON.stringify(value)}\n`);
+  fs.writeFileSync(
+    path.join(worktreeDir, '.envrc'),
+    `export ${varName}=${JSON.stringify(value)}\n`
+  );
 }
 
 // Single-task tasks.md: a backend task carrying a `### Test Strategy` block and
@@ -249,7 +252,7 @@ describe('GH-610 Task 3 — stop hook synthesis/citation fallback', () => {
     const debug = readDebug(ticket);
     assert.doesNotMatch(
       debug,
-      /No ### Test Command in tasks\.md — evidence check skipped/,
+      /no ### Test Strategy resolution — evidence check skipped/,
       `hook must resolve via Test Strategy, not bypass.\ndebug:\n${debug}\nstderr:\n${res.stderr}`
     );
     // A failing synthesized command in RED blocks the stop (exit 2), records RED,
@@ -291,16 +294,25 @@ describe('GH-610 Task 3 — stop hook synthesis/citation fallback', () => {
     );
   });
 
-  // Verbatim scenario — do not rename. Regression: the legacy bypass survives.
-  it('Legacy/no-strategy task keeps the allow-stop bypass', () => {
+  // Regression: a task with no `### Test Strategy` keeps the allow-stop bypass.
+  it('No-strategy task keeps the allow-stop bypass', () => {
     const ticket = 'TEST-STOP-LEGACY';
     writeWorkState(ticket, 1);
-    // A task with neither a `### Test Command` nor a `### Test Strategy`.
+    // A task with no `### Test Strategy` (resolution is null).
     const dir = ticketDir(ticket);
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(
       path.join(dir, 'tasks.md'),
-      ['## Task 1 — Bare task', '', '### Type', 'backend', '', '### Files in scope', '- src/x.js', ''].join('\n')
+      [
+        '## Task 1 — Bare task',
+        '',
+        '### Type',
+        'backend',
+        '',
+        '### Files in scope',
+        '- src/x.js',
+        '',
+      ].join('\n')
     );
 
     const res = runHook(ticket);
@@ -314,8 +326,8 @@ describe('GH-610 Task 3 — stop hook synthesis/citation fallback', () => {
     const debug = readDebug(ticket);
     assert.match(
       debug,
-      /No ### Test Command in tasks\.md — evidence check skipped/,
-      `expected the legacy bypass marker in debug.md.\ndebug:\n${debug}`
+      /no ### Test Strategy resolution — evidence check skipped/,
+      `expected the no-strategy bypass marker in debug.md.\ndebug:\n${debug}`
     );
   });
 });

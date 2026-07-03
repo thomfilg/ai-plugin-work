@@ -4,9 +4,6 @@
  * Validation functions extracted from task-scope.js. Each validator returns
  * an array of human-readable error messages (empty when clean).
  *
- * `validateTaskTestScope` lives in `task-scope-test-validator.js` (large
- * enough to warrant its own file) and is re-exported via task-scope.js.
- *
  * Behavior preserved exactly — refactor only reduces cyclomatic complexity
  * and nesting depth via helper extraction.
  */
