@@ -22,7 +22,7 @@ const hasNegativeContentPatterns = content.hasNegativeContentPatterns;
 /**
  * @typedef {Object} MatchResult
  * @property {boolean} fired
- * @property {('events-exclude'|'no-prompt-match'|'no-pretool-match'|'no-content-match'|'negative-excludes'|'exclude-matched'|'no-session-trigger'|'no-stop-response-match'|'expired'|'disabled'|'domain-mismatch')} [reason]
+ * @property {('events-exclude'|'no-prompt-match'|'no-pretool-match'|'no-content-match'|'no-exit-match'|'negative-excludes'|'exclude-matched'|'no-session-trigger'|'no-stop-response-match'|'expired'|'disabled'|'domain-mismatch')} [reason]
  * @property {Matched} [matched]
  */
 
@@ -321,29 +321,25 @@ function matchStop(memory, payload) {
 
 const _extractStopResponse = stopMatcher._extractStopResponse;
 
-/**
- * Domain gate (GH-513 R4 / AC2): when `memory.domain` is non-empty AND an
- * `activeDomains` set is supplied AND their intersection is empty, the memory
- * is excluded BEFORE trigger evaluation. Returns true when the memory should
- * be skipped with reason `domain-mismatch`.
- *
- * Fail-open semantics:
- *   - memory.domain empty/missing  -> not gated (backward compat R10/AC1)
- *   - activeDomains undefined/null -> not gated (backward compat R10)
- *
- * @param {object} memory
- * @param {Set<string>|undefined} activeDomains
- * @returns {boolean}
- */
-function isDomainMismatch(memory, activeDomains) {
-  if (!activeDomains) return false;
-  const domains = memory && memory.domain;
-  if (!Array.isArray(domains) || domains.length === 0) return false;
-  for (const d of domains) {
-    if (activeDomains.has(d)) return false;
-  }
-  return true;
+// PostToolUse matcher (GH-473): inspects the tool OUTPUT (tool_response + exit
+// code) — distinct from matchPreToolResult, which reads tool_input. Same
+// injected-helper pattern as matchStop above (P0-3, C-2).
+const postMatcher = require('./matcher-posttool');
+
+function matchPostTool(memory, payload) {
+  return postMatcher.matchPostTool(memory, payload, {
+    gateMemory,
+    makeMatched,
+    pretoolSpecMatches,
+    evaluateExcludePretool,
+  });
 }
+
+const _extractPostToolResponse = postMatcher._extractPostToolResponse;
+
+// Domain gate (GH-513) — extracted to matcher-domain.js to keep matcher.js
+// under the max-lines gate; re-exported below for backward compat.
+const { isDomainMismatch } = require('./matcher-domain');
 
 /**
  * Select memories that fire for the given event payload.
@@ -358,6 +354,7 @@ function isDomainMismatch(memory, activeDomains) {
 const EVENT_MATCHERS = {
   UserPromptSubmit: (m, payload) => matchPrompt(m, payload?.prompt || ''),
   PreToolUse: (m, payload) => matchPreTool(m, payload),
+  PostToolUse: (m, payload) => matchPostTool(m, payload),
   SessionStart: (m) => matchSession(m),
   Stop: (m, payload) => matchStop(m, payload),
 };
@@ -379,9 +376,11 @@ module.exports = {
   matchPrompt,
   matchPreTool,
   matchPreToolResult,
+  matchPostTool,
   matchSession,
   matchStop,
   _extractStopResponse,
+  _extractPostToolResponse,
   safeRegex,
   splitTopLevelAlternation,
   extractPretoolContent,

@@ -199,7 +199,13 @@ function renderMatchedMemories(matched, sessionId, subagentNames) {
   }
 }
 
-const VALID_EVENTS = new Set(['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'Stop']);
+const VALID_EVENTS = new Set([
+  'SessionStart',
+  'UserPromptSubmit',
+  'PreToolUse',
+  'PostToolUse',
+  'Stop',
+]);
 
 async function readStdin() {
   if (process.stdin.isTTY) return '';
