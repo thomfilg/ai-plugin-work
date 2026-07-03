@@ -31,8 +31,14 @@ const MEMORY_NAME = 'posttool-dispatch-memory';
 const MEMORY_DESCRIPTION = 'PostToolUse dispatch acceptance memory.';
 const MEMORY_BODY = 'PostToolUse body line one.\nPostToolUse body line two.';
 
-const EXPECTED_STDOUT =
-  `[synapsys:local] ${MEMORY_NAME} — ${MEMORY_DESCRIPTION}\n\n` + MEMORY_BODY;
+// PostToolUse stdout is NOT added to model context by Claude Code — like
+// PreToolUse (GH-497), delivery requires the hookSpecificOutput JSON envelope.
+const EXPECTED_STDOUT = JSON.stringify({
+  hookSpecificOutput: {
+    hookEventName: 'PostToolUse',
+    additionalContext: `[synapsys:local] ${MEMORY_NAME} — ${MEMORY_DESCRIPTION}\n\n${MEMORY_BODY}`,
+  },
+});
 
 function makeFixtureStore() {
   const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-posttool-dispatch-'));
