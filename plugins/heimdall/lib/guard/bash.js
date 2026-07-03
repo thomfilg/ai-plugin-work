@@ -8,7 +8,12 @@
  * mirroring the original protect-package-json hook).
  */
 
-const { expandHomePaths, allRefsUnderAllowedPaths } = require('./paths');
+const { expandHomePaths, allRefsUnderAllowedPaths, markerOnlyInTempPaths } = require('./paths');
+const {
+  normalizedVariants,
+  commandGlobReferencesMarker,
+  commandGlobReferencesPath,
+} = require('./shell-normalize');
 
 // Generic write-op templates; `MARKER` is replaced per protected marker.
 const BASH_WRITE_TEMPLATES = [
@@ -148,26 +153,28 @@ function isReadOnlyBashCommand(command) {
   return true;
 }
 
-/** All command variants (raw / expanded / collapsed) for matching. */
+/**
+ * All command variants for matching. `command`/`collapsed`/`expanded`/
+ * `expandedCollapsed` are the named forms other heuristics key off; `all` is the
+ * de-duplicated set of those PLUS shell-deobfuscated forms (dequoted,
+ * single-char-class reduced, brace-expanded) so quote/backslash/brace/`[x]`
+ * evasions collapse back to the literal path before matching. See GH-655.
+ */
 function commandVariants(command) {
   const collapsed = command.replace(/\s*\n+\s*/g, ' ');
-  return {
-    command,
-    collapsed,
-    expanded: expandHomePaths(command),
-    expandedCollapsed: expandHomePaths(collapsed),
-  };
+  const expanded = expandHomePaths(command);
+  const expandedCollapsed = expandHomePaths(collapsed);
+  const all = new Set();
+  for (const base of [command, collapsed, expanded, expandedCollapsed]) {
+    for (const variant of normalizedVariants(base)) all.add(variant);
+  }
+  return { command, collapsed, expanded, expandedCollapsed, all: [...all] };
 }
 
 function anyMatches(patterns, v) {
   for (const p of patterns) {
-    if (
-      p.test(v.command) ||
-      p.test(v.expanded) ||
-      p.test(v.collapsed) ||
-      p.test(v.expandedCollapsed)
-    ) {
-      return true;
+    for (const s of v.all) {
+      if (p.test(s)) return true;
     }
   }
   return false;
@@ -217,24 +224,24 @@ function markerOnPathBoundary(marker, text) {
 
 function markerPresent(marker, v) {
   // Markers containing `/` are already path-qualified — a raw substring match is
-  // safe and intentional (relative-path writes like `sed -i .claude/x`).
+  // safe and intentional (relative-path writes like `sed -i .claude/x`). Tested
+  // over `v.all` so a dequoted/brace-expanded form is also caught, plus a
+  // wildcard token that could expand onto the path (GH-655).
   if (marker.includes('/')) {
-    return (
-      v.command.includes(marker) ||
-      v.expanded.includes(marker) ||
-      v.collapsed.includes(marker) ||
-      v.expandedCollapsed.includes(marker)
-    );
+    for (const s of v.all) {
+      if (s.includes(marker) || commandGlobReferencesPath(s, marker)) return true;
+    }
+    return false;
   }
   // Bare basenames anchor to a path boundary so short names (ui, db, api, lib,
   // src) no longer match a mid-word substring (build → "ui", require → "ui",
-  // glibc → "lib") and wrongly flag unrelated commands. See GH-642.
-  return (
-    markerOnPathBoundary(marker, v.command) ||
-    markerOnPathBoundary(marker, v.expanded) ||
-    markerOnPathBoundary(marker, v.collapsed) ||
-    markerOnPathBoundary(marker, v.expandedCollapsed)
-  );
+  // glibc → "lib") and wrongly flag unrelated commands (GH-642). Wildcard tokens
+  // are matched only when anchored by a substantial literal prefix/suffix, so
+  // `ls src/*` still does not flag `ui` (GH-655).
+  for (const s of v.all) {
+    if (markerOnPathBoundary(marker, s) || commandGlobReferencesMarker(s, marker)) return true;
+  }
+  return false;
 }
 
 /**
@@ -249,6 +256,11 @@ function markerPresent(marker, v) {
  */
 function markerEligible(entry, marker, v) {
   if (!markerPresent(marker, v)) return false;
+  // Temp-path parity with the file-tool guard (findProtectedTarget exempts temp
+  // paths): a write whose only marker hit sits inside a scratch temp path — e.g.
+  // scaffolding `/tmp/x/.claude/fixture` — is not a write to the protected path.
+  // See GH-658.
+  if (markerOnlyInTempPaths(v.expandedCollapsed, marker)) return false;
   if (!entry.isFile && allRefsUnderAllowedPaths(v.expandedCollapsed, entry)) return false;
   return true;
 }
@@ -258,12 +270,15 @@ function absolutePathWrite(entry, v, dirPresent) {
     dirPresent &&
     hasGenericWriteIntent(v.collapsed) &&
     !isDirectionSensitiveRead(v.command, v.expanded, entry.dir) &&
+    !markerOnlyInTempPaths(v.expandedCollapsed, entry.dir) && // GH-658 temp parity
     !allRefsUnderAllowedPaths(v.expandedCollapsed, entry)
   );
 }
 
 function entryWriteMatch(entry, v) {
-  const dirPresent = v.expanded.includes(entry.dir) || v.expandedCollapsed.includes(entry.dir);
+  const dirPresent =
+    v.all.some((s) => s.includes(entry.dir)) ||
+    v.all.some((s) => commandGlobReferencesPath(s, entry.dir));
   if (absolutePathWrite(entry, v, dirPresent)) return 'absolute-path';
   for (const marker of entry.markers) {
     if (!markerEligible(entry, marker, v)) continue;

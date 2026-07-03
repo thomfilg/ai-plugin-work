@@ -22,6 +22,11 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const {
+  normalizedVariants,
+  commandGlobReferencesMarker,
+  commandGlobReferencesPath,
+} = require('../lib/guard/shell-normalize');
 
 // Try to load the conceal config at <dir>/.claude/heimdall-conceal.json.
 // Returns the parsed config (stamped with __root = dir) when present, null when
@@ -209,10 +214,73 @@ function fileToolCandidates(toolName, input) {
   return candidates.filter(Boolean).map(toPosix);
 }
 
+// Literal path strings a wildcard token could resolve onto: secretsFiles
+// basenames plus the literal core of each deny pattern (leading/trailing anchor
+// groups stripped, regex unescaped). Anything that isn't a plain literal path is
+// skipped — those are matched by the regex-over-variants pass instead.
+function literalCore(pattern) {
+  let s = String(pattern)
+    .replace(/^\([^)]*\)/, '') // drop a leading (^|/) / (^|[^\w.-]) anchor group
+    .replace(/^\^/, '')
+    .replace(/\([^)]*\)$/, '') // drop a trailing (/|$) anchor group
+    .replace(/\\b$/, '')
+    .replace(/\$$/, '');
+  s = s.replace(/\\(.)/g, '$1'); // unescape \x -> x
+  return /^[\w./-]+$/.test(s) ? s : '';
+}
+
+function concealLiterals(cfg) {
+  const out = new Set();
+  for (const f of cfg.secretsFiles || []) {
+    const b = path.basename(String(f));
+    if (b) out.add(b);
+  }
+  for (const key of ['denyFilePatterns', 'denyCommandPatterns']) {
+    for (const p of cfg[key] || []) {
+      const core = literalCore(p);
+      if (core) out.add(core);
+    }
+  }
+  return [...out];
+}
+
+// A wildcard token (`*`, `?`) can't be reduced to a literal, so glob-match
+// command tokens against the known concealed literals. Returns a descriptive
+// match token (truthy) or null. See GH-655.
+function globMatchesConcealed(cfg, variants) {
+  const literals = concealLiterals(cfg);
+  if (!literals.length) return null;
+  for (const variant of variants) {
+    for (const lit of literals) {
+      const ref = lit.includes('/')
+        ? commandGlobReferencesPath(variant, lit)
+        : commandGlobReferencesMarker(variant, lit);
+      if (ref) return `glob:${lit}`;
+    }
+  }
+  return null;
+}
+
 function evaluate(cfg, toolName, input) {
   if (toolName === 'Bash') {
-    const cmd = toPosix(String(input.command || ''));
-    return cmdPatterns(cfg).find((re) => re.test(cmd)) || null;
+    const raw = String(input.command || '');
+    // Deobfuscate the RAW command first (a shell backslash escape must be
+    // resolved before toPosix would rewrite `\`→`/`), then also carry a toPosix
+    // form of each variant for Windows-separator configs. Quote/backslash/brace/
+    // [x] evasions (cat ~/.se[c]rets, .se""crets, {.sec,x}rets) collapse to the
+    // literal path before matching. See GH-655.
+    const variantSet = new Set();
+    for (const v of normalizedVariants(raw)) {
+      variantSet.add(v);
+      variantSet.add(toPosix(v));
+    }
+    const variants = [...variantSet];
+    const pats = cmdPatterns(cfg);
+    for (const variant of variants) {
+      const hit = pats.find((re) => re.test(variant));
+      if (hit) return hit;
+    }
+    return globMatchesConcealed(cfg, variants);
   }
   if (FILE_TOOLS.has(toolName)) {
     // Test each candidate SEPARATELY: joining with a separator would break the

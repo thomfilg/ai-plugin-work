@@ -399,3 +399,56 @@ describe('evaluate: passthrough', () => {
     assert.equal(r.exitCode, 0);
   });
 });
+
+// ─── Shell-obfuscation resistance + temp-path parity (GH-655 / GH-658) ─────────
+
+describe('evaluate: bash obfuscation (GH-655)', () => {
+  const bash = (command) =>
+    evaluate({
+      toolName: 'Bash',
+      toolInput: { command },
+      transcriptPath: transcriptEmpty,
+      entries: entries(),
+    });
+  const dir = path.join(baseDir, '.claude');
+
+  it('blocks obfuscated writes into a protected dir', () => {
+    for (const command of [
+      `echo x > ${path.join(baseDir, '.cl[a]ude')}/settings.json`,
+      `echo x > ${path.join(baseDir, '.cl""aude')}/settings.json`,
+      `echo x > ${path.join(baseDir, '.cla\\ude')}/settings.json`,
+      `echo x > ${path.dirname(dir)}/.cl*ude/settings.json`,
+      `echo x > ${path.join(baseDir, '{.claude,z}')}/settings.json`,
+    ]) {
+      assert.equal(bash(command).exitCode, 2, `should block: ${command}`);
+    }
+  });
+
+  it('does not flag unrelated globs / build commands', () => {
+    for (const command of ['ls src/*', 'rm *.log', 'pnpm build', 'require("x")']) {
+      assert.equal(bash(command).exitCode, 0, `should allow: ${command}`);
+    }
+  });
+});
+
+describe('evaluate: bash temp-path parity (GH-658)', () => {
+  const os2 = require('node:os');
+  const bash = (command) =>
+    evaluate({
+      toolName: 'Bash',
+      toolInput: { command },
+      transcriptPath: transcriptEmpty,
+      entries: entries(),
+    });
+
+  it('allows a write into a throwaway temp .claude fixture', () => {
+    const tmp = fs.mkdtempSync(path.join(os2.tmpdir(), 'heimdall-fixture-'));
+    const r = bash(`mkdir -p ${tmp}/.claude && echo x > ${tmp}/.claude/settings.json`);
+    fs.rmSync(tmp, { recursive: true, force: true });
+    assert.equal(r.exitCode, 0);
+  });
+
+  it('still blocks a write into the real protected .claude', () => {
+    assert.equal(bash(`echo x > ${path.join(baseDir, '.claude')}/settings.json`).exitCode, 2);
+  });
+});
