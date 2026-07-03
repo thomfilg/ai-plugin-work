@@ -272,6 +272,20 @@ describe('task-next.js — citation kind defers to the recorder peer-evidence pa
     const cycle = after.cycles.find((c) => c.cycle === 1);
     assert.equal(cycle.green.kind, 'verified-by');
     assert.equal(cycle.green.peer, 'Task 1');
+
+    // Re-invocation must be idempotent and terminal: the citation is already
+    // recorded, so the runner reports the task complete instead of
+    // re-recording the same green entry forever (PR #654 review, greptile P1).
+    const again = runTaskNext(tasksBase, repoRoot, 'task2');
+    assert.equal(again.status, 0, `expected 0; stdout=${again.stdout} stderr=${again.stderr}`);
+    assert.match(again.stdout, /peer-citation GREEN already recorded/);
+    assert.match(again.stdout, /Task 2 complete/);
+    const rerecorded = readState(tasksBase, 'task2');
+    assert.equal(
+      rerecorded.cycles.find((c) => c.cycle === 1).green.recordedAt,
+      cycle.green.recordedAt,
+      'green evidence must not be re-written on re-invocation'
+    );
   });
 });
 

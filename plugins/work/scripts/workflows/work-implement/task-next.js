@@ -1077,8 +1077,31 @@ function printDoneAndExit(ctx) {
 // to run. Defer entirely to the recorder's peer-evidence path — it validates
 // the peer pointer and enforces its own phase assertion. task-next neither
 // runs a command nor writes evidence for these tasks. Exits the process.
+/**
+ * True when the latest cycle already carries a peer-citation GREEN entry.
+ * Citation tasks record no red/refactor evidence (there is no command to
+ * run), so the generic red+green+refactor "done" derivation can never fire
+ * for them — without this check every re-invocation would re-record the
+ * same citation forever (PR #654 review, greptile P1).
+ */
+function _citationAlreadyRecorded(state) {
+  const cycles = Array.isArray(state && state.cycles) ? state.cycles : [];
+  const latest = cycles[cycles.length - 1];
+  const kind = latest && latest.green && latest.green.kind;
+  return kind === 'verified-by' || kind === 'wiring-citation';
+}
+
 function runCitationFlow(ctx) {
   const { ticket, taskNum, taskTitle, tddPath, phase, execution, repoRoot } = ctx;
+  if (_citationAlreadyRecorded(ctx.state)) {
+    process.stdout.write(
+      `task-next: peer-citation GREEN already recorded via kind=${execution.strategyKind} ` +
+        'Test Strategy — nothing further to run for this task.\n\n' +
+        `# Task ${taskNum} complete\n\n` +
+        'No further work in this task. Move to the next ready task in the plan.\n'
+    );
+    process.exit(0);
+  }
   const rec = recordCitationGreen(ticket, taskNum, repoRoot);
   if (!rec.ok) {
     process.stdout.write(
@@ -1471,6 +1494,7 @@ function main() {
 
   const { state, tddPath } = readPhaseState(ctx.tasksBase, ticket, taskNum);
   ctx.tddPath = tddPath;
+  ctx.state = state;
   ctx.phase = currentPhase(state);
 
   if (ctx.phase === 'done') printDoneAndExit(ctx); // exits
