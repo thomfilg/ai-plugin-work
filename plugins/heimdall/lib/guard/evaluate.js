@@ -2,7 +2,10 @@
 
 /**
  * Orchestrates the per-tool checks and returns a verdict:
- *   { exitCode: 0 } → allow   |   { exitCode: 2, message } → block.
+ *   { exitCode: 0 } → allow
+ *   { exitCode: 2, message } → block
+ *   { exitCode: 0, rewrite } → allow but run the command with the runtime shim
+ *     preloaded (GH-657); the hook emits it as updatedInput.command.
  */
 
 const os = require('node:os');
@@ -12,6 +15,7 @@ const { isReadOnlyBashCommand, bashTargets } = require('./bash');
 const { isReadOnlyTaskPrompt } = require('./task');
 const { findUnlockedPhrases, isEntryUnlocked } = require('./transcript');
 const { checkScriptBypass } = require('./scripts-bypass');
+const { shimPath, runsExternalScript, buildShimRewrite } = require('./fsguard');
 
 // Frozen: returned by reference from every allow-path and exported, so freezing
 // prevents a consumer from silently corrupting all future evaluations.
@@ -84,6 +88,19 @@ function evaluateTask(toolInput, entries, unlocked) {
 }
 
 function evaluateBashScripts(command, entries, unlocked) {
+  // Runtime shim (GH-657): when the command runs an external script and there
+  // are still-locked protected DIRECTORIES, don't guess the write target from
+  // the script's text — preload the interposer, which denies writes under the
+  // locked dirs at runtime (covering variable/path.join/subprocess targets) and
+  // lets everything else through (clearing the read-elsewhere / test-run false
+  // positives). Scoped to LOCKED dirs only, so an unlocked entry writes freely.
+  const lockedDirs = entries.filter((e) => !e.isFile && !isEntryUnlocked(e, unlocked));
+  if (lockedDirs.length && runsExternalScript(command)) {
+    const so = shimPath();
+    if (so) return { exitCode: 0, rewrite: buildShimRewrite(command, lockedDirs, so) };
+    // No shim for this platform → fall through to the static fail-closed check.
+  }
+
   const collapsedCmd = command.replace(/\s*\n+\s*/g, ' ');
   for (const entry of entries) {
     if (entry.isFile) continue;

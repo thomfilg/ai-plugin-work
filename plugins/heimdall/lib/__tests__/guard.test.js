@@ -190,16 +190,21 @@ describe('evaluate: bash', () => {
     assert.equal(r.exitCode, 0);
   });
 
-  it('blocks running an EXTERNAL script whose content writes into a protected dir', () => {
+  it('fail-closed fallback blocks an EXTERNAL script when the runtime shim is unavailable', () => {
+    // With the shim disabled (non-Linux, missing .so, or kill-switch) the static
+    // fail-closed check still blocks. GH-657: with the shim available the command
+    // is instead routed through it (covered below and in the runtime e2e).
     const evil = path.join(os.tmpdir(), `heimdall-evil-${process.pid}.js`);
     fs.writeFileSync(
       evil,
       `require('fs').writeFileSync('${path.join(baseDir, '.claude', 'x')}', 'y')\n`
     );
+    process.env.HEIMDALL_DISABLE_SHIM = '1';
     try {
       const r = run(`node ${evil}`);
       assert.equal(r.exitCode, 2, 'external script writing to a protected dir must be blocked');
     } finally {
+      delete process.env.HEIMDALL_DISABLE_SHIM;
       fs.rmSync(evil, { force: true });
     }
   });
@@ -444,7 +449,7 @@ describe('evaluate: bash obfuscation (GH-655)', () => {
   });
 });
 
-describe('evaluate: script-bypass stays fail-closed (no indirection bypass)', () => {
+describe('evaluate: script-bypass routing (GH-657)', () => {
   const os2 = require('node:os');
   let scriptsDir;
 
@@ -467,30 +472,46 @@ describe('evaluate: script-bypass stays fail-closed (no indirection bypass)', ()
   };
   const target = path.join(baseDir, '.claude', 'settings.json');
 
-  // Every static way to hide the write target must stay BLOCKED — correlating
-  // the write to the protected path via content analysis is not reliable
-  // (variables, path.join, concatenation), so the guard is intentionally
-  // fail-closed: any non-trusted script that references the marker AND writes.
-  it('blocks a direct write into the protected path', () => {
-    const s = write('direct.js', `require('fs').writeFileSync('${target}', 'x');\n`);
-    assert.equal(bash(`node ${s}`).exitCode, 2);
-  });
+  // With the runtime shim available, a script-running command is ALLOWED but
+  // rewritten to preload the interposer, which denies the write at runtime — so
+  // static indirection (variable / path.join / separate line) no longer needs to
+  // be detected. The actual EACCES enforcement is proven in the runtime e2e.
+  const shimAvailable = require(
+    path.resolve(__dirname, '..', 'guard', 'fsguard')
+  ).shimPath();
 
-  it('blocks a write through a variable holding the protected path', () => {
-    const s = write('viavar.js', `const t = '${target}';\nrequire('fs').writeFileSync(t, 'x');\n`);
-    assert.equal(bash(`node ${s}`).exitCode, 2);
-  });
-
-  it('blocks even when the write op sits on a different line from the marker', () => {
-    // Fail-closed: discovery keys off the marker appearing anywhere in content;
-    // once discovered, ANY write op blocks — the write need not be correlated to
-    // the marker on the same statement.
-    const s = write(
+  const cases = [
+    ['direct.js', `require('fs').writeFileSync('${target}', 'x');\n`],
+    ['viavar.js', `const t = '${target}';\nrequire('fs').writeFileSync(t, 'x');\n`],
+    [
       'split.js',
       `// touches ${path.join(baseDir, '.claude')}/config\n` +
-        "require('fs').writeFileSync('/tmp/heimdall-split-out', 'x');\n"
-    );
-    assert.equal(bash(`node ${s}`).exitCode, 2);
+        "require('fs').writeFileSync('/tmp/heimdall-split-out', 'x');\n",
+    ],
+  ];
+
+  for (const [name, body] of cases) {
+    it(`routes '${name}' through the runtime shim when available, else fail-closed`, () => {
+      const s = write(name, body);
+      const r = bash(`node ${s}`);
+      if (shimAvailable) {
+        assert.equal(r.exitCode, 0);
+        assert.match(r.rewrite || '', /LD_PRELOAD=.*heimdall-fsguard/);
+        assert.match(r.rewrite || '', /HEIMDALL_PROTECTED=/);
+      } else {
+        assert.equal(r.exitCode, 2);
+      }
+    });
+  }
+
+  it('fail-closed fallback blocks when the shim is force-disabled', () => {
+    const s = write('direct2.js', `require('fs').writeFileSync('${target}', 'x');\n`);
+    process.env.HEIMDALL_DISABLE_SHIM = '1';
+    try {
+      assert.equal(bash(`node ${s}`).exitCode, 2);
+    } finally {
+      delete process.env.HEIMDALL_DISABLE_SHIM;
+    }
   });
 });
 
