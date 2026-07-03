@@ -444,31 +444,13 @@ describe('evaluate: bash obfuscation (GH-655)', () => {
   });
 });
 
-describe('evaluate: script-bypass correlates write to the protected path (GH-657)', () => {
+describe('evaluate: script-bypass stays fail-closed (no indirection bypass)', () => {
   const os2 = require('node:os');
   let scriptsDir;
-  let readerScript;
-  let writerScript;
 
   before(() => {
     scriptsDir = fs.mkdtempSync(path.join(os2.tmpdir(), 'heimdall-scripts-'));
-    readerScript = path.join(scriptsDir, 'reader.js');
-    writerScript = path.join(scriptsDir, 'writer.js');
-    // Reads a protected path, writes ONLY to /tmp — must be allowed.
-    fs.writeFileSync(
-      readerScript,
-      "const fs = require('fs');\n" +
-        `const d = fs.readFileSync('${path.join(baseDir, '.claude', 'config')}', 'utf8');\n` +
-        "fs.writeFileSync('/tmp/heimdall-reader-out', d);\n"
-    );
-    // Writes INTO the protected path — must still be blocked.
-    fs.writeFileSync(
-      writerScript,
-      "const fs = require('fs');\n" +
-        `fs.writeFileSync('${path.join(baseDir, '.claude', 'settings.json')}', 'x');\n`
-    );
   });
-
   after(() => fs.rmSync(scriptsDir, { recursive: true, force: true }));
 
   const bash = (command) =>
@@ -478,24 +460,37 @@ describe('evaluate: script-bypass correlates write to the protected path (GH-657
       transcriptPath: transcriptEmpty,
       entries: entries(),
     });
+  const write = (name, body) => {
+    const p = path.join(scriptsDir, name);
+    fs.writeFileSync(p, body);
+    return p;
+  };
+  const target = path.join(baseDir, '.claude', 'settings.json');
 
-  it('allows a script that reads a protected path but writes elsewhere', () => {
-    assert.equal(bash(`node ${readerScript}`).exitCode, 0);
+  // Every static way to hide the write target must stay BLOCKED — correlating
+  // the write to the protected path via content analysis is not reliable
+  // (variables, path.join, concatenation), so the guard is intentionally
+  // fail-closed: any non-trusted script that references the marker AND writes.
+  it('blocks a direct write into the protected path', () => {
+    const s = write('direct.js', `require('fs').writeFileSync('${target}', 'x');\n`);
+    assert.equal(bash(`node ${s}`).exitCode, 2);
   });
 
-  it('still blocks a script that writes into the protected path', () => {
-    assert.equal(bash(`node ${writerScript}`).exitCode, 2);
+  it('blocks a write through a variable holding the protected path', () => {
+    const s = write('viavar.js', `const t = '${target}';\nrequire('fs').writeFileSync(t, 'x');\n`);
+    assert.equal(bash(`node ${s}`).exitCode, 2);
   });
 
-  it('blocks a script that writes through a variable holding the protected path', () => {
-    const viaVar = path.join(scriptsDir, 'viavar.js');
-    fs.writeFileSync(
-      viaVar,
-      "const fs = require('fs');\n" +
-        `const target = '${path.join(baseDir, '.claude', 'settings.json')}';\n` +
-        "fs.writeFileSync(target, 'x');\n"
+  it('blocks even when the write op sits on a different line from the marker', () => {
+    // Fail-closed: discovery keys off the marker appearing anywhere in content;
+    // once discovered, ANY write op blocks — the write need not be correlated to
+    // the marker on the same statement.
+    const s = write(
+      'split.js',
+      `// touches ${path.join(baseDir, '.claude')}/config\n` +
+        "require('fs').writeFileSync('/tmp/heimdall-split-out', 'x');\n"
     );
-    assert.equal(bash(`node ${viaVar}`).exitCode, 2);
+    assert.equal(bash(`node ${s}`).exitCode, 2);
   });
 });
 

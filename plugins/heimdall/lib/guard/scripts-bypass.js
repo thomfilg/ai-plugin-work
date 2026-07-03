@@ -28,45 +28,25 @@ function scriptPatternsFor(entry) {
   return patterns;
 }
 
-const WRITE_OP_LINE =
-  /(?:writeFileSync|appendFileSync|writeFile\b|createWriteStream|\bunlink|\brmSync|\brmdir|renameSync|\brename\b|copyFileSync|\bexec|fs\.promises\.(?:writeFile|rm|rename)|fs\.writeFile|fs\.appendFile|>{1,2}\s*['"]|>\|\s*['"]|\btee\s+-a\b|open\([^)]*['"][^'"]*[wax])/;
+// Any write op in the script content. Kept intentionally BROAD and fail-closed:
+// a script that both references a protected marker and performs a write is
+// blocked, because static content analysis cannot reliably prove which path a
+// write targets (a target can be built via variables, path.join, concatenation,
+// etc.). Correlating "write ↔ marker" was attempted (GH-657) but every static
+// correlation leaves an indirection bypass, so per the fail-closed policy the
+// broad check stands. Legitimate scripts are exempted by location via
+// `trustedSubdirs`, or by the user speaking the unlock phrase once.
+const WRITE_OPS_IN_SCRIPT =
+  /\b(?:writeFileSync|appendFileSync|writeFile|createWriteStream|unlink|unlinkSync|rmSync|renameSync|rename|rmdir|rmdirSync|copyFileSync|exec|execSync|fs\.promises\.writeFile|fs\.promises\.rm|fs\.promises\.rename|fs\.writeFile|fs\.appendFile)\b/;
 
-// Variables assigned a STRING LITERAL that contains a protected marker — a path
-// stored for a later write, e.g. `const target = '/repo/.claude/settings.json'`.
-// Only bare string literals are tainted, NOT calls: `const d =
-// fs.readFileSync('<protected>')` binds file CONTENT, not a path, and writing
-// that content elsewhere is a read, not a protected-path write.
-function taintedPathVars(content, markerPats) {
-  const vars = new Set();
-  const assignRe = /([A-Za-z_$][\w$]*)\s*=\s*(['"`])((?:\\.|(?!\2).)*)\2/g;
-  let m;
-  while ((m = assignRe.exec(content)) !== null) {
-    if (markerPats.some((p) => p.test(m[3]))) vars.add(m[1]);
-  }
-  return vars;
-}
-
-/**
- * Correlate the write op to the protected path: block when a statement both
- * performs a write AND references the protected marker (GH-657) — directly, or
- * via a variable that was assigned a marker-bearing path literal (closes the
- * variable-indirection bypass). This stops the false positive where a script
- * merely READS a protected path and writes elsewhere (e.g. to /tmp), or where a
- * test file names a marker as a fixture while writing to temp dirs, without
- * letting `const t = '<protected>/x'; writeFileSync(t, …)` escape.
- */
-function scriptWritesToProtected(content, entry) {
-  const markerPats = scriptPatternsFor(entry);
-  const tainted = taintedPathVars(content, markerPats);
-  const taintedRe = tainted.size
-    ? new RegExp(`\\b(?:${[...tainted].map((v) => v.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\b`)
-    : null;
-  for (const stmt of content.split(/[\n;]/)) {
-    if (!WRITE_OP_LINE.test(stmt)) continue;
-    if (markerPats.some((p) => p.test(stmt))) return true;
-    if (taintedRe && taintedRe.test(stmt)) return true;
-  }
-  return false;
+function scriptHasWriteOps(content) {
+  return (
+    WRITE_OPS_IN_SCRIPT.test(content) ||
+    />{1,2}\s*['"]/.test(content) ||
+    />\|\s*['"]/.test(content) ||
+    /\btee\s+-a\b/.test(content) ||
+    /open\(.*['"]w/.test(content)
+  );
 }
 
 /**
@@ -91,11 +71,7 @@ function checkScriptBypass(collapsedCmd, entry, entries) {
   } catch (err) {
     return { blocked: true, error: `Cannot read script "${found.scriptPath}": ${err.message}` };
   }
-  // Require the write op and the protected-path reference to co-occur in one
-  // statement (GH-657). A script that only reads the protected path — or one
-  // (e.g. a test file) that names it as a fixture while writing to temp — is not
-  // a bypass and must not be blocked.
-  return scriptWritesToProtected(content, entry)
+  return scriptHasWriteOps(content)
     ? { blocked: true, scriptPath: found.scriptPath }
     : { blocked: false };
 }
