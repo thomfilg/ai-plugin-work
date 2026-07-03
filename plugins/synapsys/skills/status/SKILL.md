@@ -10,7 +10,9 @@ allowed-tools: Bash
 
 Run the script. Pass through its output verbatim. The script computes the
 active domain set from the registry + sticky state for the current session
-and renders attribution per active domain. No agent post-processing.
+and renders attribution per active domain, followed by an **Enforce** section:
+memories with `enforce ≠ advise` (level + classifier) and the current
+session's `block`/`override` telemetry counts. No agent post-processing.
 
 ```bash
 node "${CLAUDE_PLUGIN_ROOT}/scripts/synapsys-status.js" $ARGUMENTS

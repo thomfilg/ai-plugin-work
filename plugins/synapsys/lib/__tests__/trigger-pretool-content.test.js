@@ -447,3 +447,59 @@ test('Crystallize writer omits trigger_pretool_content line when field is absent
   const raw = fs.readFileSync(path.join(storeDir, 'mem-absent.md'), 'utf8');
   assert.doesNotMatch(raw, /trigger_pretool_content:/);
 });
+
+// --- _scanPatterns must validate EVERY pattern, even after an early match ---
+// (an early return silenced invalid-regex warnings for later patterns, so the
+// author of a half-broken list got no signal).
+
+test('findContentMatchInPatterns warns about invalid regexes listed AFTER an already-matching pattern', () => {
+  const { findContentMatchInPatterns } = require('../matcher-content');
+
+  const captured = [];
+  const originalWrite = process.stderr.write.bind(process.stderr);
+  process.stderr.write = (chunk) => {
+    captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+    return true;
+  };
+  let hit;
+  try {
+    hit = findContentMatchInPatterns(['needle', '[broken'], 'hay needle stack', {
+      label: 'trigger_pretool_content',
+      memoryName: 'half-broken-mem',
+    });
+  } finally {
+    process.stderr.write = originalWrite;
+  }
+
+  // First (valid) pattern still wins…
+  assert.deepEqual(hit, { pattern: 'needle', substring: 'needle' });
+  // …but the invalid later pattern is still validated and warned about.
+  const stderrText = captured.join('');
+  assert.ok(stderrText.includes('half-broken-mem'), `stderr: ${stderrText}`);
+  assert.ok(stderrText.includes('[broken'), `stderr: ${stderrText}`);
+});
+
+test('evaluateContentNot warns about invalid regexes listed AFTER an already-matching negative pattern', () => {
+  const { evaluateContentNot } = require('../matcher-content');
+
+  const captured = [];
+  const originalWrite = process.stderr.write.bind(process.stderr);
+  process.stderr.write = (chunk) => {
+    captured.push(typeof chunk === 'string' ? chunk : chunk.toString());
+    return true;
+  };
+  let verdict;
+  try {
+    verdict = evaluateContentNot(['needle', '(unclosed'], 'hay needle stack', {
+      label: 'trigger_pretool_content_not',
+      memoryName: 'half-broken-not-mem',
+    });
+  } finally {
+    process.stderr.write = originalWrite;
+  }
+
+  assert.deepEqual(verdict, { excluded: true, pattern: 'needle' });
+  const stderrText = captured.join('');
+  assert.ok(stderrText.includes('half-broken-not-mem'), `stderr: ${stderrText}`);
+  assert.ok(stderrText.includes('(unclosed'), `stderr: ${stderrText}`);
+});

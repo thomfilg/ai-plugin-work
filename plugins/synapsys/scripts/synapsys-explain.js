@@ -26,7 +26,9 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { makeFlag } = require(path.join(__dirname, '..', 'lib', 'cli-args'));
-const memoryStore = require(path.join(__dirname, '..', 'lib', 'memory-store'));
+const { selectStores, loadMemories } = require(
+  path.join(__dirname, '..', 'lib', 'replay-cli-shared')
+);
 const matcher = require(path.join(__dirname, '..', 'lib', 'matcher'));
 const { buildActiveDomains } = require(path.join(__dirname, '..', 'lib', 'active-domains'));
 const { resolveSessionId: ledgerResolveSessionId } = require(
@@ -34,11 +36,9 @@ const { resolveSessionId: ledgerResolveSessionId } = require(
 );
 // Payload / flag-resolution helpers live in a sibling lib module so this CLI
 // stays under the quality gate's max-lines budget.
-const {
-  resolveToolInput,
-  resolveToolResponse,
-  buildPayload,
-} = require(path.join(__dirname, 'lib', 'explain-payload'));
+const { resolveToolInput, resolveToolResponse, buildPayload } = require(
+  path.join(__dirname, 'lib', 'explain-payload')
+);
 
 const VALID_EVENTS = new Set([
   'UserPromptSubmit',
@@ -71,26 +71,12 @@ function parseStdinPayload(raw) {
   }
 }
 
+// Store selection (kind name → absolute path → bare .synapsys.json dir) and
+// memory loading are shared with the replay CLIs via lib/replay-cli-shared.
 function loadStore(storeFlag, cwd) {
-  const stores = memoryStore.discoverStores(cwd);
-  if (!storeFlag || storeFlag === true) {
-    return stores;
-  }
-  // Match by kind name first, then by absolute path.
-  const byName = stores.filter((s) => s.kind === storeFlag);
-  if (byName.length) return byName;
-  const abs = path.resolve(storeFlag);
-  const byPath = stores.filter((s) => path.resolve(s.dir) === abs);
-  if (byPath.length) return byPath;
-  die(`unknown --store "${storeFlag}" (no matching discovered store)`, 2);
-}
-
-function loadMemories(stores) {
-  const all = [];
-  for (const s of stores) {
-    all.push(...memoryStore.listMemoriesFromStore(s));
-  }
-  return all;
+  const stores = selectStores(storeFlag, cwd);
+  if (!stores) die(`unknown --store "${storeFlag}" (no matching discovered store)`, 2);
+  return stores;
 }
 
 // When the memory carries trigger_stop_response, matchStop needs the agent's

@@ -51,14 +51,22 @@ const FIXTURES = [
   {
     name: 'UserPromptSubmit positive (prompt matches)',
     event: 'UserPromptSubmit',
-    memory: makeMemory({ name: 'prompt', events: ['UserPromptSubmit'], triggerPrompt: '\\bdeploy\\b' }),
+    memory: makeMemory({
+      name: 'prompt',
+      events: ['UserPromptSubmit'],
+      triggerPrompt: '\\bdeploy\\b',
+    }),
     payload: { prompt: 'please deploy now' },
     fires: true,
   },
   {
     name: 'UserPromptSubmit negative (no prompt match)',
     event: 'UserPromptSubmit',
-    memory: makeMemory({ name: 'prompt', events: ['UserPromptSubmit'], triggerPrompt: '\\bdeploy\\b' }),
+    memory: makeMemory({
+      name: 'prompt',
+      events: ['UserPromptSubmit'],
+      triggerPrompt: '\\bdeploy\\b',
+    }),
     payload: { prompt: 'just chatting' },
     fires: false,
   },
@@ -77,13 +85,23 @@ const FIXTURES = [
     payload: { tool_name: 'Edit', tool_input: { file_path: '/tmp/x' } },
     fires: false,
   },
-  // Stop — positive: Stop in events fires; negative: Stop not listed.
+  // Stop — positive: Stop in events + matching trigger_stop_response fires;
+  // negative: Stop not listed. A Stop memory WITHOUT trigger_stop_response
+  // intentionally never fires (no-stop-response-configured): Stop stdout never
+  // reaches the model, so an unconditional fire only churned the ledger.
   {
-    name: 'Stop positive (Stop in events)',
+    name: 'Stop positive (Stop in events + matching stop response)',
+    event: 'Stop',
+    memory: makeMemory({ name: 'stop', events: ['Stop'], triggerStopResponse: 'done' }),
+    payload: { response: 'all done' },
+    fires: true,
+  },
+  {
+    name: 'Stop negative (no trigger_stop_response -> never fires)',
     event: 'Stop',
     memory: makeMemory({ name: 'stop', events: ['Stop'] }),
     payload: {},
-    fires: true,
+    fires: false,
   },
   {
     name: 'Stop negative (Stop not in events)',

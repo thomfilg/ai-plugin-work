@@ -143,7 +143,7 @@ function buildEntry(memory, ledgerMemories, cortexCtx, subagentNames) {
   };
 }
 
-function emitEntries(entries, ledger, sessionId) {
+function emitEntries(entries, ledger, sessionId, commitLedger) {
   let demotedCount = 0;
   const pieces = [];
   for (const e of entries) {
@@ -164,6 +164,12 @@ function emitEntries(entries, ledger, sessionId) {
     // main context never received (PR #605 review B1 — the read-side
     // force-full's mirror image on the write side).
     if (e.subagentOrigin) continue;
+    // commitLedger=false (the Stop dispatch): Stop stdout never reaches the
+    // model, so consuming e.g. a `fire_mode: once` memory's single full-body
+    // injection here would invisibly burn it for output the model never sees.
+    // Telemetry (`fired` via emitMatched) is unaffected — only the ledger
+    // write is skipped.
+    if (!commitLedger) continue;
     commitInjection(ledger, sessionId, e.memory, isFull);
   }
   return { body: pieces.join(SEP), demotedCount };
@@ -194,8 +200,14 @@ function emitBudgetAlerts(demotedCount, bodyLength, activeBudget) {
  * renderMatchedMemories — per-memory loop wrapper. Routes each match through
  * the ledger + decideInjection + recordInjection. The entire call is fail-open
  * (R1): any throw → fall back to formatting every memory as full body.
+ *
+ * `opts.commitLedger` (default true): when false, the render is read-only with
+ * respect to the fire_mode ledger — decideInjection still consults it for
+ * full/reminder selection, but no injection is recorded. Used by the Stop
+ * dispatch, whose stdout never reaches the model.
  */
-function renderMatchedMemories(matched, sessionId, cortexCtx, subagentNames) {
+function renderMatchedMemories(matched, sessionId, cortexCtx, subagentNames, opts) {
+  const commitLedger = !opts || opts.commitLedger !== false;
   try {
     const ledger = injectLedger.loadLedger(sessionId);
     if (!ledger.memories || typeof ledger.memories !== 'object') {
@@ -208,7 +220,7 @@ function renderMatchedMemories(matched, sessionId, cortexCtx, subagentNames) {
       sep: SEP,
       skipBelow: SKIP_DEMOTION_BELOW,
     });
-    const { body, demotedCount } = emitEntries(entries, ledger, sessionId);
+    const { body, demotedCount } = emitEntries(entries, ledger, sessionId, commitLedger);
     emitBudgetAlerts(demotedCount, body.length, activeBudget);
     return body;
   } catch {

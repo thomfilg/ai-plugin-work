@@ -10,8 +10,11 @@
 //   1.2 collectSubagentMatches — Task/Agent `tool_input.prompt` matches the
 //       UserPromptSubmit/SessionStart/Stop matchers and unions into `matched`,
 //       deduped by `memory.name`, so prompt-scope memories reach the subagent.
-//   1.3 Non-blocking contract — no decision/block/deny in stdout; exit 0 on
-//       match and on a forced internal error.
+//   1.3 Non-blocking contract — for memories WITHOUT `enforce: block` (the
+//       default), no decision/block/deny in stdout; exit 0 on match and on a
+//       forced internal error. Memories with `enforce: block` (GH-520) are the
+//       ONE sanctioned deny path — covered in
+//       dispatcher-enforce.integration.test.js.
 //
 // The dispatcher is invoked end-to-end via a child process (mirroring the
 // spawnSync harness from dispatcher-fire-mode.integration.test.js), in an
@@ -100,7 +103,11 @@ function subagentPayload(toolName, prompt, cwd) {
 // surfaces as an AssertionError (the expected RED behavior gap) rather than a
 // raw JSON.parse SyntaxError.
 function parseHookOutput(stdout) {
-  assert.notEqual(stdout, '', 'expected PreToolUse to emit hookSpecificOutput JSON, got empty stdout');
+  assert.notEqual(
+    stdout,
+    '',
+    'expected PreToolUse to emit hookSpecificOutput JSON, got empty stdout'
+  );
   let parsed;
   let parsedOk = false;
   try {
@@ -527,9 +534,12 @@ describe('dispatcher PreToolUse injection (GH-497 Task 1)', () => {
     );
   });
 
-  // ── 1.3 Non-blocking contract ─────────────────────────────────────────────
+  // ── 1.3 Non-blocking contract (memories without enforce: block) ───────────
+  // GH-520 narrowed this pin: the dispatcher must never deny for the default
+  // enforce level (advise, i.e. every pre-GH-520 memory). The enforce: block
+  // deny envelope is asserted in dispatcher-enforce.integration.test.js.
 
-  it('Non-blocking contract holds on match', () => {
+  it('Non-blocking contract holds on match for memories without enforce: block', () => {
     writeMemory(
       fixture.storeDir,
       'push-policy.md',

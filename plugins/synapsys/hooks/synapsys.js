@@ -40,6 +40,9 @@ const injectLedger = require('../lib/inject-ledger');
 const { runCiteScan, runBehaviorScan } = require(path.join(__dirname, '..', 'lib', 'cite-scan'));
 const pretoolWindow = require(path.join(__dirname, '..', 'lib', 'pretool-window'));
 const { resolveAndEmitDivergences } = require(path.join(__dirname, 'lib', 'behavior-changed'));
+// GH-520 enforce mode (advise|suggest|block). All enforcement logic lives in
+// hooks/lib/enforce.js to keep this dispatcher under the static-gate budget.
+const enforce = require(path.join(__dirname, 'lib', 'enforce'));
 // Budget-aware renderer (decideInjection policy, reverse-walk demotion, ledger
 // commit, subagent force-full, cortex_query-augmented body formatting) lives in
 // lib/render-budget.js (extracted to keep this dispatcher under the static-gate
@@ -99,8 +102,15 @@ function buildActiveDomainsForPayload(event, payload) {
 // Pass-through wrapper retained for call-site symmetry. The renderer now owns
 // the budget pass (demote-instead-of-drop), so no slice fallback is needed —
 // brief P0 R8 / spec §P0 #8 explicitly forbids silent truncation.
-function formatMatchedOutput(matched, sessionId, payload, subagentNames) {
-  return renderMatchedMemories(matched, sessionId, cortexQueryContext(payload), subagentNames);
+//
+// Stop renders WITHOUT committing the fire_mode ledger: Stop stdout never
+// reaches the model, so a ledger commit here would invisibly burn e.g. a
+// `fire_mode: once` memory's single full-body injection for output the model
+// never sees. Telemetry (`fired` via emitMatched) is unaffected.
+function formatMatchedOutput(event, matched, sessionId, payload, subagentNames) {
+  return renderMatchedMemories(matched, sessionId, cortexQueryContext(payload), subagentNames, {
+    commitLedger: event !== 'Stop',
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -170,11 +180,11 @@ function maybeResetSessionLedger(event, sessionId) {
  * plus the budget-aware rendered memory output. Returns '' when neither
  * produces content. Both halves are independently budget-governed.
  */
-function buildOutput(autoBlock, matched, sessionId, payload, subagentNames) {
+function buildOutput(event, autoBlock, matched, sessionId, payload, subagentNames) {
   const sections = [];
   if (autoBlock) sections.push(autoBlock);
   const memOutput = matched.length
-    ? formatMatchedOutput(matched, sessionId, payload, subagentNames)
+    ? formatMatchedOutput(event, matched, sessionId, payload, subagentNames)
     : '';
   if (memOutput) sections.push(memOutput);
   return sections.join(SEP);
@@ -203,6 +213,22 @@ function runStopScans(payload, memories, sessionId) {
   } catch {
     // fail-open
   }
+}
+
+// A block deny is the ONLY response — no additionalContext mixing, and no
+// fire_mode ledger commit (buildOutput is skipped so the blocked memory
+// re-injects in full on its next legitimate match).
+function emitDeny(deny) {
+  process.stdout.write(
+    JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason: deny.message,
+      },
+    })
+  );
+  process.exit(0);
 }
 
 async function dispatch() {
@@ -248,13 +274,20 @@ async function dispatch() {
   // Path A on PreToolUse: resolve pending expectations against the observed
   // command BEFORE recording new ones, so a memory firing this turn does not
   // immediately get aged out by its own observed command.
+  // GH-520: enforce evaluation (block/suggest/override + classifier state
+  // observation) runs on every PreToolUse dispatch. Fail-open inside
+  // evaluatePreTool — a fault degrades to plain advise injection, never deny.
+  let enforcement = { deny: null, nudges: [] };
   if (event === 'PreToolUse') {
     resolveAndEmitDivergences(payload, memories, sessionId);
+    enforcement = enforce.evaluatePreTool(matched, payload, sessionId, subagentNames);
   }
   if (event === 'Stop') {
     runStopScans(payload, memories, sessionId);
   }
   emitMatched(matched, payload, event, sessionId, subagentNames);
+
+  if (enforcement.deny) emitDeny(enforcement.deny);
 
   // Assemble the Phase 1 auto-recall block (prepended) with the budget-aware
   // rendered memory output. Memory text is already governed by the renderer
@@ -262,7 +295,10 @@ async function dispatch() {
   // by the cortex config. No hard clamp here — that would contradict the
   // graceful-demotion contract (dispatcher-budget). Tool-use events wrap the
   // text in the additionalContext JSON envelope (GH-497/GH-473).
-  const output = buildOutput(autoBlock, matched, sessionId, payload, subagentNames);
+  const output = enforce.appendNudges(
+    buildOutput(event, autoBlock, matched, sessionId, payload, subagentNames),
+    enforcement.nudges
+  );
   writeMatchedOutput(event, output);
   process.exit(0);
 }

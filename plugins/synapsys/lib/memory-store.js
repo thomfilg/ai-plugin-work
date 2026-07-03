@@ -8,6 +8,22 @@ const { execSync } = require('node:child_process');
 // stays under the quality gate's max-lines budget. Re-exported below so callers
 // and tests that reach for these internals keep working unchanged.
 const { BRACKET_LIST_KEYS, coerceFrontmatterValue, toList } = require('./frontmatter-coerce');
+// Per-field frontmatter normalization (fire_mode / enforce / signals /
+// telemetry / expiry coercion) lives in a sibling module for the same
+// max-lines reason. Same names, byte-identical behavior.
+const {
+  parseFireMode,
+  parseFireCadence,
+  parseEnforce,
+  _enforceScalar,
+  _truthy,
+  _parseInject,
+  _normalizeExitTarget,
+  normalizeCiteSignals,
+  normalizeBehaviorSignals,
+  normalizeTelemetry,
+  parseExpired,
+} = require('./memory-fields');
 
 const MARKER = '.synapsys.json';
 const FOLDER = 'synapsys';
@@ -37,6 +53,16 @@ function safeExec(cmd, cwd) {
 
 function getProjectName(cwd) {
   const resolvedCwd = cwd || process.cwd();
+  // Prefer the git COMMON dir: inside a linked worktree, --show-toplevel
+  // returns the worktree directory (e.g. `repo-GH-123`), which would derive a
+  // divergent global-store name. The common dir is `<main-checkout>/.git` for
+  // both the main checkout and every linked worktree, so its parent's basename
+  // is the real repo name. Guarded on the `.git` basename so bare repos and
+  // exotic GIT_DIR layouts fall through to the legacy logic.
+  const commonDir = safeExec('git rev-parse --path-format=absolute --git-common-dir', resolvedCwd);
+  if (commonDir && path.basename(commonDir) === '.git') {
+    return path.basename(path.dirname(commonDir));
+  }
   const top = safeExec('git rev-parse --show-toplevel', resolvedCwd);
   if (top) return path.basename(top);
   return path.basename(resolvedCwd);
@@ -112,45 +138,55 @@ function discoverStores(cwd) {
   return out;
 }
 
+// Collect the `  - item` lines of a YAML block-list that starts right after a
+// bare `key:` line at index `start`. Blank lines inside the list are tolerated
+// (common YAML formatting puts one between the key and its items); the list
+// ends at the first non-blank, non-item line. Returns { items, next } where
+// `next` is the index of the first line NOT consumed. Items are NOT
+// comma-split — each `- item` line is one whole list value, so regexes with
+// commas survive intact.
+function _collectBlockList(lines, start) {
+  const items = [];
+  let i = start;
+  for (; i < lines.length; i++) {
+    const item = lines[i].match(/^\s+-\s+(.+?)\s*$/);
+    if (item) {
+      items.push(item[1].replace(/^["']|["']$/g, ''));
+      continue;
+    }
+    if (lines[i].trim() === '') continue;
+    break;
+  }
+  return { items, next: i };
+}
+
 function parseFrontmatter(content) {
   const m = content.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n([\s\S]*))?$/);
   if (!m) return { meta: {}, body: content };
   const meta = Object.create(null);
-  for (const raw of m[1].split(/\r?\n/)) {
-    const line = raw.trim();
+  const lines = m[1].split(/\r?\n/);
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
     if (!line || line.startsWith('#')) continue;
     const km = line.match(/^([a-zA-Z_][a-zA-Z0-9_]*):\s*(.*)$/);
     if (!km) continue;
+    // YAML block-list form: a bare `key:` followed by `  - item` lines. The
+    // collected items become the list value directly (no comma-splitting), so
+    // block-list authored triggers are never silently dropped.
+    if (km[2] === '') {
+      const { items, next } = _collectBlockList(lines, i + 1);
+      if (items.length) {
+        meta[km[1]] = items;
+        i = next - 1;
+        continue;
+      }
+    }
     meta[km[1]] = coerceFrontmatterValue(km[2], km[1]);
   }
   return { meta, body: m[2] || '' };
 }
 
 const SKIP_FILES = new Set(['INDEX.md', 'README.md']);
-
-const VALID_FIRE_MODES = new Set(['always', 'once', 'occasionally']);
-const DEFAULT_FIRE_MODE = 'once';
-const DEFAULT_FIRE_CADENCE = 5;
-
-function parseFireMode(raw, memoryName) {
-  if (raw === undefined || raw === null || raw === '') return DEFAULT_FIRE_MODE;
-  const val = String(raw).trim();
-  if (VALID_FIRE_MODES.has(val)) return val;
-  process.stderr.write(
-    `[synapsys] memory "${memoryName}": invalid fire_mode "${val}" — falling back to "${DEFAULT_FIRE_MODE}"\n`
-  );
-  return DEFAULT_FIRE_MODE;
-}
-
-function parseFireCadence(raw, memoryName) {
-  if (raw === undefined || raw === null || raw === '') return DEFAULT_FIRE_CADENCE;
-  const n = typeof raw === 'number' ? raw : Number(String(raw).trim());
-  if (Number.isInteger(n) && n > 0) return n;
-  process.stderr.write(
-    `[synapsys] memory "${memoryName}": invalid fire_cadence "${raw}" — falling back to ${DEFAULT_FIRE_CADENCE}\n`
-  );
-  return DEFAULT_FIRE_CADENCE;
-}
 
 // Production resolves to the shipped JSON. Tests opt into a temp file via
 // SYNAPSYS_PRESETS_PATH so they never mutate the on-disk shipped file —
@@ -204,26 +240,6 @@ function _buildExcludeResolved(excludePreset, excludePrompt) {
   return resolved;
 }
 
-function _truthy(value) {
-  return value === true || value === 'true';
-}
-
-// Inject mode is 'full' only when explicitly requested; everything else
-// (including missing) falls back to 'summary'. Extracted as a named helper to
-// keep readMemoryFile under the complexity gate.
-function _parseInject(value) {
-  return value === 'full' ? 'full' : 'summary';
-}
-
-// Absent OR empty/whitespace-only trigger_posttool_exit means "no exit gate"
-// (null) — consistent with the R11 lint rule. A literal 0 / "0" / "zero" is a
-// real target and must be preserved (so `|| null` would be wrong — it drops 0).
-function _normalizeExitTarget(value) {
-  if (value === undefined || value === null) return null;
-  if (typeof value === 'string' && value.trim() === '') return null;
-  return value;
-}
-
 function readMemoryFile(store, name) {
   if (!name.endsWith('.md') || SKIP_FILES.has(name)) return null;
   const file = path.join(store.dir, name);
@@ -264,6 +280,12 @@ function readMemoryFile(store, name) {
     expired: parseExpired(meta.expires),
     fireMode: parseFireMode(meta.fire_mode, memoryName),
     fireCadence: parseFireCadence(meta.fire_cadence, memoryName),
+    // GH-520 enforce mode: 'advise' (default, no behavior change) | 'suggest'
+    // | 'block', plus the optional classifier name + satisfier regex read by
+    // hooks/lib/enforce.js on PreToolUse.
+    enforce: parseEnforce(meta.enforce, memoryName),
+    enforceClassifier: _enforceScalar(meta.enforce_classifier),
+    enforceSatisfiedBy: _enforceScalar(meta.enforce_satisfied_by),
     // Telemetry-related forwarded fields (GH-512 Task 1). These mirror the
     // values surfaced under `meta`; consumers can read the top-level
     // properties directly without digging into `meta`. Missing frontmatter
@@ -279,63 +301,6 @@ function readMemoryFile(store, name) {
     meta,
     body,
   };
-}
-
-// Coerce a frontmatter signals-list field (cite_signals, behavior_signals)
-// to an array of non-empty strings, or `undefined` when the key is absent.
-// The frontmatter parser already turns `[a, b]` into a JS array (via
-// BRACKET_LIST_KEYS), but a single scalar (e.g. `cite_signals: solo`)
-// should still surface as a one-element array so downstream consumers
-// don't have to special-case the shape.
-//
-// Inline scalar form matches the README example `cite_signals: A, B, C`;
-// we split on commas so each token is a separate signal rather than a
-// single combined string that would never match the assistant response.
-// The frontmatter parser surfaces YAML flow lists like `[A]` / `[A, B]`
-// as the literal bracketed string when it doesn't recognize the array
-// form, so we strip a single matched pair of outer brackets before splitting.
-function normalizeSignalsList(value) {
-  if (value === undefined || value === null || value === '') return undefined;
-  if (Array.isArray(value)) {
-    const filtered = value.map((s) => String(s).trim()).filter(Boolean);
-    return filtered.length ? filtered : undefined;
-  }
-  let scalar = String(value).trim();
-  const bracketed = scalar.match(/^\[(.*)\]$/);
-  if (bracketed) scalar = bracketed[1];
-  const tokens = scalar
-    .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean);
-  return tokens.length ? tokens : undefined;
-}
-
-// Thin wrappers preserved so call sites and any downstream introspection
-// keep their semantic name. Both delegate to the shared helper above.
-function normalizeCiteSignals(value) {
-  return normalizeSignalsList(value);
-}
-
-function normalizeBehaviorSignals(value) {
-  return normalizeSignalsList(value);
-}
-
-// Coerce `meta.telemetry` to a boolean when explicitly set, or `undefined`
-// when absent. Consumers treat absent telemetry as enabled (opt-out semantics),
-// so we must distinguish "missing" from "explicit false".
-function normalizeTelemetry(value) {
-  if (value === undefined || value === null || value === '') return undefined;
-  if (typeof value === 'boolean') return value;
-  if (value === 'false') return false;
-  if (value === 'true') return true;
-  return undefined;
-}
-
-function parseExpired(value) {
-  if (!value) return false;
-  const date = new Date(String(value));
-  if (Number.isNaN(date.getTime())) return false;
-  return date.getTime() < Date.now();
 }
 
 function listMemoriesFromStore(store) {

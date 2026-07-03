@@ -20,8 +20,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { makeFlag } = require('../lib/cli-args');
-const memoryStore = require('../lib/memory-store');
+const cliShared = require('../lib/replay-cli-shared');
 const events = require('../lib/replay-events');
 const aggregate = require('../lib/replay-aggregate');
 const report = require('../lib/replay-report');
@@ -55,24 +54,7 @@ function recomputePendingNumbered(runDir, batchCount) {
   return pending;
 }
 
-function parseFlags(argv) {
-  const flag = makeFlag(argv);
-  const sinceRaw = flag('since');
-  const maxJudgesRaw = flag('max-judges');
-  return {
-    since: sinceRaw === undefined || sinceRaw === true ? '7d' : sinceRaw,
-    project: typeof flag('project') === 'string' ? flag('project') : undefined,
-    noJudge: flag('no-judge') === true,
-    json: flag('json') === true,
-    only: typeof flag('only') === 'string' ? flag('only') : undefined,
-    store: typeof flag('store') === 'string' ? flag('store') : undefined,
-    maxJudges: maxJudgesRaw === undefined || maxJudgesRaw === true ? 200 : Number(maxJudgesRaw),
-    allProjects: flag('all-projects') === true,
-    transcriptsBase:
-      typeof flag('transcripts-base') === 'string' ? flag('transcripts-base') : undefined,
-    runDir: typeof flag('run-dir') === 'string' ? flag('run-dir') : undefined,
-  };
-}
+const { parseReplayFlags: parseFlags } = cliShared;
 
 function die(msg, code = 2) {
   process.stderr.write(`synapsys-replay-next: ${msg}\n`);
@@ -95,34 +77,18 @@ function resolveRunDir(flags, cwd) {
   return path.resolve(flags.runDir || path.join(cwd, DEFAULT_RUN_DIR));
 }
 
+// Store selection + memory loading are fail-open here (phase-next runner):
+// an unknown --store or unreadable store yields an empty run, not a die().
 function tryLoadStores(flags, cwd) {
   try {
-    const stores = memoryStore.discoverStores(cwd);
-    if (!flags.store) return stores;
-    const byKind = stores.filter((s) => s.kind === flags.store);
-    if (byKind.length) return byKind;
-    const abs = path.resolve(flags.store);
-    const byPath = stores.filter((s) => path.resolve(s.dir) === abs);
-    if (byPath.length) return byPath;
-    if (fs.existsSync(path.join(abs, '.synapsys.json'))) {
-      return [{ kind: 'path', dir: abs, projectName: path.basename(abs) }];
-    }
-    return [];
+    return cliShared.selectStores(flags.store, cwd) || [];
   } catch {
     return [];
   }
 }
 
 function loadMemories(stores) {
-  const all = [];
-  for (const s of stores) {
-    try {
-      all.push(...memoryStore.listMemoriesFromStore(s));
-    } catch {
-      /* skip */
-    }
-  }
-  return all;
+  return cliShared.loadMemories(stores, { skipErrors: true });
 }
 
 function applyOnlyFilter(memories, onlyFlag) {
@@ -136,19 +102,24 @@ function applyOnlyFilter(memories, onlyFlag) {
   return memories.filter((m) => allow.has(m.name));
 }
 
+// Tally one replay event: counters + replay tuples (fired UPS keep prompt).
+function tallyEvent(ev, memories, tuples, counts) {
+  counts.total += 1;
+  if (ev.event === 'UserPromptSubmit') counts.ups += 1;
+  else if (ev.event === 'PreToolUse') counts.ptu += 1;
+  for (const t of replayEvent(memories, ev)) {
+    if (t.fired && ev.event === 'UserPromptSubmit') t.prompt = ev.prompt;
+    tuples.push(t);
+  }
+}
+
 function collectTuples(files, memories) {
   const tuples = [];
   const counts = { total: 0, ups: 0, ptu: 0 };
   for (const file of files) {
     for (const parsed of iterLines(file)) {
       for (const ev of extractEvents(parsed)) {
-        counts.total += 1;
-        if (ev.event === 'UserPromptSubmit') counts.ups += 1;
-        else if (ev.event === 'PreToolUse') counts.ptu += 1;
-        for (const t of replayEvent(memories, ev)) {
-          if (t.fired && ev.event === 'UserPromptSubmit') t.prompt = ev.prompt;
-          tuples.push(t);
-        }
+        tallyEvent(ev, memories, tuples, counts);
       }
     }
   }
@@ -179,7 +150,11 @@ function persistTuples(runDir, tuples, counts, meta) {
 function loadTuplesFile(runDir) {
   const f = path.join(runDir, 'tuples.json');
   if (!fs.existsSync(f)) return null;
-  try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; }
+  try {
+    return JSON.parse(fs.readFileSync(f, 'utf8'));
+  } catch {
+    return null;
+  }
 }
 
 function writeBatchInputs(runDir, batches) {
@@ -247,7 +222,12 @@ function doWalk(flags, runDir, cwd) {
   };
   saveState(runDir, state);
 
-  return { current_phase: 'walk', action: 'continue', next_phase: skipJudge ? 'aggregate' : 'judge', ticket: null };
+  return {
+    current_phase: 'walk',
+    action: 'continue',
+    next_phase: skipJudge ? 'aggregate' : 'judge',
+    ticket: null,
+  };
 }
 
 function doJudge(state, runDir) {
@@ -270,7 +250,8 @@ function doJudge(state, runDir) {
 }
 
 function tallyJudgment(judgments, entry) {
-  if (!judgments[entry.memory]) judgments[entry.memory] = { relevant: 0, irrelevant: 0, judge_failed: 0 };
+  if (!judgments[entry.memory])
+    judgments[entry.memory] = { relevant: 0, irrelevant: 0, judge_failed: 0 };
   if (entry.relevant === 'yes') judgments[entry.memory].relevant += 1;
   else if (entry.relevant === 'no') judgments[entry.memory].irrelevant += 1;
   else judgments[entry.memory].judge_failed += 1;
@@ -323,43 +304,69 @@ function buildReportMeta(state, tup, flags) {
   };
 }
 
-function doReport(state, runDir, flags) {
-  const tup = loadTuplesFile(runDir) || { tuples: [], counts: {}, meta: {} };
-  const aggFile = path.join(runDir, 'aggregate.json');
-  const agg = fs.existsSync(aggFile) ? JSON.parse(fs.readFileSync(aggFile, 'utf8')) : {};
-  const triggers = (tup.meta && tup.meta.memoryTriggers) || [];
+// Collect per-memory tightening suggestions for every trigger with one.
+function buildSuggestions(triggers, agg) {
   const suggestions = [];
   for (const m of triggers) {
     const sug = suggestTightening(m, agg[m.name]);
     if (sug) suggestions.push(sug);
   }
+  return suggestions;
+}
+
+function doReport(state, runDir, flags) {
+  const tup = loadTuplesFile(runDir) || { tuples: [], counts: {}, meta: {} };
+  const aggFile = path.join(runDir, 'aggregate.json');
+  const agg = fs.existsSync(aggFile) ? JSON.parse(fs.readFileSync(aggFile, 'utf8')) : {};
+  const suggestions = buildSuggestions((tup.meta && tup.meta.memoryTriggers) || [], agg);
   const meta = buildReportMeta(state, tup, flags);
   const useJson = !!(state.flags && state.flags.json) || !!flags.json;
-  const payload = useJson ? renderJson(agg, suggestions, meta) : renderReport(agg, suggestions, meta);
+  const payload = useJson
+    ? renderJson(agg, suggestions, meta)
+    : renderReport(agg, suggestions, meta);
   const reportPath = path.join(runDir, useJson ? 'report.json' : 'report.txt');
   fs.writeFileSync(reportPath, payload);
   state.phase = 'done';
   saveState(runDir, state);
-  return { current_phase: 'report', action: 'done', report_path: reportPath, stdout_payload: payload };
+  return {
+    current_phase: 'report',
+    action: 'done',
+    report_path: reportPath,
+    stdout_payload: payload,
+  };
 }
 
 function emptyReportEnvelope(runDir, flags) {
   fs.mkdirSync(runDir, { recursive: true });
   const meta = {
-    store: '', window: flags.since, events_total: 0, events_ups: 0, events_ptu: 0,
-    judgeCalls: 0, itemsJudged: 0, extrapolated: false,
+    store: '',
+    window: flags.since,
+    events_total: 0,
+    events_ups: 0,
+    events_ptu: 0,
+    judgeCalls: 0,
+    itemsJudged: 0,
+    extrapolated: false,
   };
   const payload = flags.json ? renderJson({}, [], meta) : 'no transcripts in window\n';
   const reportPath = path.join(runDir, flags.json ? 'report.json' : 'report.txt');
   fs.writeFileSync(reportPath, payload);
-  return { current_phase: 'report', action: 'done', report_path: reportPath, stdout_payload: payload };
+  return {
+    current_phase: 'report',
+    action: 'done',
+    report_path: reportPath,
+    stdout_payload: payload,
+  };
 }
 
 function maybeEmptyReport(flags, runDir, cwd) {
   const stores = tryLoadStores(flags, cwd);
   const files = walkTranscripts({
-    since: flags.since, project: flags.project, baseDir: flags.transcriptsBase,
-    cwd, allProjects: flags.allProjects || !!flags.transcriptsBase,
+    since: flags.since,
+    project: flags.project,
+    baseDir: flags.transcriptsBase,
+    cwd,
+    allProjects: flags.allProjects || !!flags.transcriptsBase,
   });
   return stores.length === 0 && files.length === 0;
 }
@@ -384,8 +391,9 @@ function main(argv) {
 module.exports = { parseFlags, main };
 
 if (require.main === module) {
-  try { main(process.argv.slice(2)); }
-  catch (err) {
+  try {
+    main(process.argv.slice(2));
+  } catch (err) {
     process.stderr.write(`synapsys-replay-next: ${err && err.message ? err.message : err}\n`);
     process.exit(1);
   }

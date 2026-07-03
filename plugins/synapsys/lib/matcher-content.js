@@ -38,28 +38,46 @@ function extractPretoolContent(toolName, toolInput) {
 //   'find' → returns { pattern, substring } on the first match, else null
 //   'not'  → returns { excluded: true, pattern } on the first match,
 //            else { excluded: false, pattern: null }
-// Invalid regexes are warned-and-skipped (C-5). Cyclomatic complexity ~7 (≤10).
+// Invalid regexes are warned-and-skipped (C-5). Every pattern in the list is
+// compiled/validated even after an earlier one already matched — an early
+// return would silence the invalid-regex warning for later patterns, leaving
+// the author with no signal that a pattern is broken. The FIRST hit still
+// wins; validation of the remainder has no effect on the result.
+// Compile one pattern with the standard warn-and-skip diagnostics. Returns the
+// RegExp, or null on an invalid pattern (after writing the stderr warning).
+function _compilePattern(pat, label, memoryName) {
+  try {
+    return new RegExp(pat, 'im');
+  } catch (err) {
+    process.stderr.write(
+      `[synapsys] memory ${memoryName}: invalid ${label} regex "${pat}": ${err.message}\n`
+    );
+    return null;
+  }
+}
+
+// Evaluate one compiled pattern in the given mode. Returns the mode's hit
+// shape, or null on a miss.
+function _matchPattern(re, pat, contentString, mode) {
+  if (mode === 'not') {
+    return re.test(contentString) ? { excluded: true, pattern: pat } : null;
+  }
+  const m = re.exec(contentString);
+  return m ? { pattern: pat, substring: m[0] } : null;
+}
+
 function _scanPatterns(patterns, contentString, { label, memoryName, mode }) {
   const miss = mode === 'not' ? { excluded: false, pattern: null } : null;
   if (!Array.isArray(patterns) || patterns.length === 0) return miss;
+  let hit = null;
   for (const pat of patterns) {
-    let re;
-    try {
-      re = new RegExp(pat, 'im');
-    } catch (err) {
-      process.stderr.write(
-        `[synapsys] memory ${memoryName}: invalid ${label} regex "${pat}": ${err.message}\n`
-      );
-      continue;
-    }
-    if (mode === 'not') {
-      if (re.test(contentString)) return { excluded: true, pattern: pat };
-    } else {
-      const m = re.exec(contentString);
-      if (m) return { pattern: pat, substring: m[0] };
-    }
+    const re = _compilePattern(pat, label, memoryName);
+    // Already matched — later patterns are still compiled (for warnings) but
+    // not evaluated; the FIRST hit wins.
+    if (!re || hit) continue;
+    hit = _matchPattern(re, pat, contentString, mode);
   }
-  return miss;
+  return hit || miss;
 }
 
 // Generic, field-agnostic positive content matcher. Scans `patterns` against

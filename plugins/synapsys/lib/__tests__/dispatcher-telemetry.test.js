@@ -651,7 +651,9 @@ test('Stop event: cite scan ignores memories first fired during this same Stop t
   const fx = makeFixture({ home });
   t.after(fx.cleanup);
 
-  // Memory that fires ONLY on Stop, with trigger_session so it injects every Stop.
+  // Memory that fires ONLY on Stop. trigger_stop_response is required for a
+  // Stop memory to fire at all (memories without it never fire on Stop) and
+  // matches the response below, so the Stop turn still records a fired row.
   fs.writeFileSync(
     path.join(fx.storeDir, 'stop-injected.md'),
     [
@@ -659,7 +661,7 @@ test('Stop event: cite scan ignores memories first fired during this same Stop t
       'name: stop-injected',
       'description: x',
       'events: Stop',
-      'trigger_session: true',
+      'trigger_stop_response: stop-injected',
       '---',
       '',
       'Body for stop-injected.',

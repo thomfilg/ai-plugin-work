@@ -146,7 +146,7 @@ function resolveRecallFn() {
   const modPath = process.env.SYNAPSYS_CORTEX_RECALL_MODULE;
   if (!modPath) return async () => [];
   try {
-    // eslint-disable-next-line global-require, import/no-dynamic-require
+    // Dynamic provider require — path comes from SYNAPSYS_CORTEX_RECALL_MODULE.
     const mod = require(modPath);
     if (mod && typeof mod.recall === 'function') return mod.recall.bind(mod);
   } catch {

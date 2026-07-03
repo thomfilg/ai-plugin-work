@@ -55,9 +55,7 @@ function mkTranscripts(tmp, prompts) {
   const jsonl = path.join(projDir, 'session.jsonl');
   fs.writeFileSync(
     jsonl,
-    prompts
-      .map((p) => JSON.stringify({ type: 'user', message: { content: p } }))
-      .join('\n') + '\n'
+    prompts.map((p) => JSON.stringify({ type: 'user', message: { content: p } })).join('\n') + '\n'
   );
   return baseDir;
 }
@@ -90,7 +88,10 @@ function runScript(args, { cwd, env } = {}) {
 
 function parseEnvelope(stdout) {
   // Script may emit multiple lines; the envelope is the last JSON line.
-  const lines = stdout.split('\n').map((s) => s.trim()).filter(Boolean);
+  const lines = stdout
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean);
   for (let i = lines.length - 1; i >= 0; i--) {
     try {
       return JSON.parse(lines[i]);
@@ -204,8 +205,14 @@ test('judge phase dispatches the numbered/clipped agent payload with the correct
   assert.equal(env.action, 'dispatch_agent', 'envelope action is dispatch_agent');
   assert.equal(env.subagent_type, 'synapsys-replay-judge', 'subagent_type is the judge agent');
   assert.equal(env.current_phase, 'judge', 'dispatch happens in the judge phase');
-  assert.ok(typeof env.input_file === 'string' && env.input_file.length > 0, 'input_file path present');
-  assert.ok(typeof env.output_file === 'string' && env.output_file.length > 0, 'output_file path present');
+  assert.ok(
+    typeof env.input_file === 'string' && env.input_file.length > 0,
+    'input_file path present'
+  );
+  assert.ok(
+    typeof env.output_file === 'string' && env.output_file.length > 0,
+    'output_file path present'
+  );
   assert.equal(typeof env.remaining, 'number', 'remaining is a numeric batch count');
   // Numbered payload: the FIRST batch is human-numbered batch-1 (1-based), not batch-0.
   assert.match(
@@ -219,9 +226,13 @@ test('judge phase dispatches the numbered/clipped agent payload with the correct
     `first dispatch output_file is the numbered batch-1.out.json, got ${env.output_file}`
   );
   // Envelope-only dispatch: nothing references the legacy direct API surface.
+  // Absence assertion on the vendor marker, not the full hostname: a hostname
+  // substring/regex here trips CodeQL (missing-regexp-anchor /
+  // incomplete-url-substring-sanitization) even though this is not
+  // sanitization — any 'anthropic' mention would mean the legacy judge leaked.
   assert.ok(
-    !/api\.anthropic\.com/.test(JSON.stringify(env)),
-    'envelope makes no api.anthropic.com reference'
+    !JSON.stringify(env).toLowerCase().includes('anthropic'),
+    'envelope makes no legacy direct-API (anthropic) reference'
   );
 
   // (b) The on-disk batch-1.in.json holds the clipped, numbered payload.
@@ -232,7 +243,11 @@ test('judge phase dispatches the numbered/clipped agent payload with the correct
   const entry = onDisk[0];
   assert.equal(entry.memory, 'ups-bug', 'memory name preserved verbatim');
   // body preserved (up to the 200-char preview) — not clipped with an ellipsis.
-  assert.equal(entry.body, memoryBody.slice(0, 200), 'body preserved (first 200 chars, no ellipsis)');
+  assert.equal(
+    entry.body,
+    memoryBody.slice(0, 200),
+    'body preserved (first 200 chars, no ellipsis)'
+  );
   assert.ok(!entry.body.includes('…'), 'body is not ellipsis-clipped');
   // prompt clipped within the 600-char preview budget.
   assert.ok(entry.prompt.length <= 600, `prompt clipped to <=600, got ${entry.prompt.length}`);

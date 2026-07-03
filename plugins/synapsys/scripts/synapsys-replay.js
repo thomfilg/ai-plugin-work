@@ -27,8 +27,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const { makeFlag } = require('../lib/cli-args');
-const memoryStore = require('../lib/memory-store');
+const cliShared = require('../lib/replay-cli-shared');
 const events = require('../lib/replay-events');
 const aggregate = require('../lib/replay-aggregate');
 const report = require('../lib/replay-report');
@@ -41,25 +40,10 @@ const NEXT_RUNNER = path.resolve(__dirname, 'synapsys-replay-next.js');
 
 /**
  * Pure flag parser — retained so consumers that imported `parseFlags`
- * directly continue to work. No I/O, no process exits.
+ * directly continue to work. Shared with the phase-next runner via
+ * lib/replay-cli-shared (this alias simply ignores `runDir`).
  */
-function parseFlags(argv) {
-  const flag = makeFlag(argv);
-  const sinceRaw = flag('since');
-  const maxJudgesRaw = flag('max-judges');
-  return {
-    since: sinceRaw === undefined || sinceRaw === true ? '7d' : sinceRaw,
-    project: typeof flag('project') === 'string' ? flag('project') : undefined,
-    noJudge: flag('no-judge') === true,
-    json: flag('json') === true,
-    only: typeof flag('only') === 'string' ? flag('only') : undefined,
-    store: typeof flag('store') === 'string' ? flag('store') : undefined,
-    maxJudges: maxJudgesRaw === undefined || maxJudgesRaw === true ? 200 : Number(maxJudgesRaw),
-    allProjects: flag('all-projects') === true,
-    transcriptsBase:
-      typeof flag('transcripts-base') === 'string' ? flag('transcripts-base') : undefined,
-  };
-}
+const { parseReplayFlags: parseFlags, selectStores, loadMemories } = cliShared;
 
 function die(msg, code = 2) {
   process.stderr.write(`synapsys-replay: ${msg}\n`);
@@ -67,26 +51,9 @@ function die(msg, code = 2) {
 }
 
 function loadStore({ storeFlag, cwd } = {}) {
-  const resolvedCwd = cwd || process.cwd();
-  const stores = memoryStore.discoverStores(resolvedCwd);
-  if (!storeFlag || storeFlag === true) return stores;
-  const byKind = stores.filter((s) => s.kind === storeFlag);
-  if (byKind.length) return byKind;
-  const abs = path.resolve(storeFlag);
-  const byPath = stores.filter((s) => path.resolve(s.dir) === abs);
-  if (byPath.length) return byPath;
-  if (fs.existsSync(path.join(abs, '.synapsys.json'))) {
-    return [{ kind: 'path', dir: abs, projectName: path.basename(abs) }];
-  }
-  die(`unknown --store "${storeFlag}" (no matching discovered store)`, 2);
-}
-
-function loadMemories(stores) {
-  const all = [];
-  for (const s of stores) {
-    all.push(...memoryStore.listMemoriesFromStore(s));
-  }
-  return all;
+  const stores = selectStores(storeFlag, cwd || process.cwd());
+  if (!stores) die(`unknown --store "${storeFlag}" (no matching discovered store)`, 2);
+  return stores;
 }
 
 // Phase-next is a one-envelope-per-invocation runner: walk → judge →
@@ -121,6 +88,23 @@ function lastJsonLine(stdout) {
  * `dispatch_agent` envelope ends the loop with the dispatch instruction left
  * for the caller (matching the deprecated command's hands-off behavior).
  */
+// Run one phase turn of the next-runner, propagating its stdout/stderr
+// verbatim. Exits the process on a spawn error; otherwise returns the child's
+// exit status plus the last JSON envelope it printed (or null).
+function runPhaseTurn(childArgs) {
+  const result = spawnSync(process.execPath, [NEXT_RUNNER, ...childArgs], {
+    encoding: 'utf8',
+  });
+  if (result.error) {
+    process.stderr.write(`synapsys-replay: ${result.error.message}\n`);
+    process.exit(1);
+  }
+  if (result.stdout) process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
+  const status = typeof result.status === 'number' ? result.status : 1;
+  return { status, envelope: lastJsonLine(result.stdout) };
+}
+
 function main(argv) {
   process.stderr.write(
     'synapsys-replay: deprecated entrypoint — delegating to synapsys-replay-next.js\n'
@@ -128,24 +112,17 @@ function main(argv) {
   // Pin a single run directory so runner state persists across phase turns,
   // unless the caller already chose one.
   const hasRunDir = argv.some((a) => a === '--run-dir' || a.startsWith('--run-dir='));
-  const runDir = hasRunDir ? null : fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'synapsys-replay-'));
+  const runDir = hasRunDir
+    ? null
+    : fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'synapsys-replay-'));
   const childArgs = hasRunDir ? argv : [...argv, `--run-dir=${runDir}`];
 
   let lastStatus = 1;
   for (let i = 0; i < MAX_PHASE_ITERS; i++) {
-    const result = spawnSync(process.execPath, [NEXT_RUNNER, ...childArgs], {
-      encoding: 'utf8',
-    });
-    if (result.error) {
-      process.stderr.write(`synapsys-replay: ${result.error.message}\n`);
-      process.exit(1);
-    }
-    if (result.stdout) process.stdout.write(result.stdout);
-    if (result.stderr) process.stderr.write(result.stderr);
-    lastStatus = typeof result.status === 'number' ? result.status : 1;
+    const { status, envelope } = runPhaseTurn(childArgs);
+    lastStatus = status;
     if (lastStatus !== 0) break;
 
-    const envelope = lastJsonLine(result.stdout);
     // Terminal report, an instruction the alias cannot fulfil, or an
     // unparseable line all stop the loop. `continue`/`walk` re-invoke.
     if (!envelope || envelope.action === 'done' || envelope.action === 'dispatch_agent') break;

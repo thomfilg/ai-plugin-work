@@ -207,7 +207,7 @@ function suppressedByFireMode(home, sessionId, memory) {
   const oncePerSession = mode === 'once_per_session' || mode === 'once';
   if (!oncePerSession) return false;
 
-  const key = `${memory.name}:${memory.meta.cortex_query}`;
+  const key = `${memory.name}:${memory.meta?.cortex_query}`;
   const marker = fireMarkerFile(home, sessionId, key);
   try {
     fs.mkdirSync(path.dirname(marker), { recursive: true });
@@ -255,7 +255,7 @@ function resolveInlineRecall() {
   const modPath = process.env.SYNAPSYS_CORTEX_RECALL_MODULE;
   if (!modPath) return null;
   try {
-    // eslint-disable-next-line global-require, import/no-dynamic-require
+    // Dynamic provider require — path comes from SYNAPSYS_CORTEX_RECALL_MODULE.
     const mod = require(modPath);
     return typeof mod.recall === 'function' ? mod.recall.bind(mod) : null;
   } catch {

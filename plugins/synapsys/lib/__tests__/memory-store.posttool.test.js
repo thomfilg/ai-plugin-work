@@ -119,3 +119,33 @@ test('readMemoryFile normalizes an empty trigger_posttool_exit to null (no exit 
   assert.equal(memories[0].triggerPosttoolExit, null);
   assert.notEqual(memories[0].triggerPosttoolExit, '');
 });
+
+// A boolean `trigger_posttool_exit: false` (coerced by the frontmatter parser)
+// must normalize to null like every other non-string/non-number falsy value —
+// it previously passed through and downstream Number(false)===0 would silently
+// turn it into a success-only gate.
+
+test('readMemoryFile normalizes a boolean-false trigger_posttool_exit to null (no exit gate)', () => {
+  const { storeDir } = makeTempStore();
+  writeMemory(storeDir, 'exit-false.md', {
+    name: 'exit-false',
+    description: 'd',
+    trigger_posttool_exit: 'false',
+  });
+
+  const memories = listMemoriesFromStore(store(storeDir));
+  assert.equal(memories.length, 1);
+  assert.equal(memories[0].triggerPosttoolExit, null);
+});
+
+test('readMemoryFile still preserves numeric 0 exit target alongside the falsy guard', () => {
+  const { storeDir } = makeTempStore();
+  writeMemory(storeDir, 'exit-num-zero.md', {
+    name: 'exit-num-zero',
+    description: 'd',
+    trigger_posttool_exit: '0',
+  });
+
+  const memories = listMemoriesFromStore(store(storeDir));
+  assert.equal(memories[0].triggerPosttoolExit, '0');
+});
