@@ -184,22 +184,24 @@ node plugins/synapsys/scripts/synapsys-explain.js --event=... --verbose
 
 ## Measuring false positives with `synapsys replay`
 
-Once a store has more than a handful of memories, gut-feel trigger tuning stops scaling. `synapsys-replay.js` walks recent transcripts under `~/.claude/projects/<hash>/*.jsonl`, replays every `UserPromptSubmit` and `PreToolUse` event against the current store, optionally asks a lightweight LLM judge whether each fired match was actually relevant, and emits a per-memory report ranked by false-positive rate.
+Once a store has more than a handful of memories, gut-feel trigger tuning stops scaling. `synapsys-replay.js` walks recent transcripts under `~/.claude/projects/<hash>/*.jsonl`, replays every `UserPromptSubmit` and `PreToolUse` event against the current store, optionally dispatches a `Task(synapsys-replay-judge)` subagent to judge whether each fired match was actually relevant, and emits a per-memory report ranked by false-positive rate.
 
 ```bash
 # Zero-cost path: no LLM calls, ranks memories by raw fire counts.
 node plugins/synapsys/scripts/synapsys-replay.js --since=7d --no-judge
 
-# Full pipeline with judge (requires ANTHROPIC_API_KEY).
+# Full pipeline with the judge subagent (no API key required).
 node plugins/synapsys/scripts/synapsys-replay.js --since=14d
 
 # Machine-readable output.
 node plugins/synapsys/scripts/synapsys-replay.js --since=7d --no-judge --json
 ```
 
-Defaults: `--since=7d`, `--max-judges=200` (hard cap with even sampling + extrapolation note), `claude-haiku-4-5` as the judge model. Scope is the **current project only** — the cwd path with `/` replaced by `-` (matching Claude Code's `~/.claude/projects/<hash>` layout). Use `--project=<hash>` to target a different project, `--all-projects` to scan every project under `~/.claude/projects/`, `--only=<csv>` to restrict to specific memories, `--store=<name|path>` to override store auto-detection.
+Defaults: `--since=7d`, `--max-judges=200` (hard cap with even sampling + extrapolation note). The judge runs as a `Task(synapsys-replay-judge)` subagent driven by a file-mailbox phase-next loop — the runner writes a numbered/clipped batch to `batch-N.in.json`, dispatches the subagent, and reads its verdicts back from `batch-N.out.json`. Scope is the **current project only** — the cwd path with `/` replaced by `-` (matching Claude Code's `~/.claude/projects/<hash>` layout). Use `--project=<hash>` to target a different project, `--all-projects` to scan every project under `~/.claude/projects/`, `--only=<csv>` to restrict to specific memories, `--store=<name|path>` to override store auto-detection.
 
-`--no-judge` makes zero outbound HTTP calls and requires no `ANTHROPIC_API_KEY` — `relevant` and `fp_rate` are `null`, but `fires` and `sample_matches` are still populated. With the judge enabled, expected cost is well under **$0.05** per default run (~500 input + ~5 output tokens × ≤200 calls). See `skills/replay/SKILL.md` for the full cost model, security note, and the PTU-not-judged decision.
+No API key is required in any mode: the judge subagent runs against the already-authenticated in-session model, so data leaves the local box only via that session (never a separate API console). `--no-judge` skips the subagent dispatch entirely — `relevant` and `fp_rate` are `null`, but `fires` and `sample_matches` are still populated — and is the documented non-interactive / CI path (judged runs auto-downgrade to this when no dispatcher is available). See `skills/replay/SKILL.md` for the full cost framing, security note, and the PTU-not-judged decision.
+
+> **Migration note:** older installs that exported the Anthropic API key env var for replay can drop it from their shell config — the judge no longer reads any API credential.
 
 ## Staleness check
 
