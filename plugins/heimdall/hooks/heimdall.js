@@ -67,6 +67,19 @@ async function main() {
     process.stderr.write(result.message);
     process.exit(2);
   }
+  // GH-657: allow the command but run it with the runtime write-guard preloaded.
+  // PreToolUse honors hookSpecificOutput.updatedInput to rewrite the tool input.
+  if (result.rewrite) {
+    process.stdout.write(
+      JSON.stringify({
+        hookSpecificOutput: {
+          hookEventName: 'PreToolUse',
+          updatedInput: { command: result.rewrite },
+        },
+      })
+    );
+    process.exit(0);
+  }
   process.exit(0);
 }
 
