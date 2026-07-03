@@ -32,9 +32,12 @@ function scriptPatternsFor(entry) {
 // a script that both references a protected marker and performs a write is
 // blocked, because static content analysis cannot reliably prove which path a
 // write targets (a target can be built via variables, path.join, concatenation,
-// etc.). Correlating "write ↔ marker" was attempted (GH-657) but every static
-// correlation leaves an indirection bypass, so per the fail-closed policy the
-// broad check stands. Legitimate scripts are exempted by location via
+// etc.). This static check is now the FALLBACK: when the runtime write-guard
+// interposer is available (Linux/glibc, see lib/guard/fsguard.js), the command
+// is instead run with the interposer preloaded and this broad check is skipped
+// (GH-657) — the interposer denies the real write at runtime and clears the
+// read-elsewhere / test-run false positives. This check still applies on hosts
+// where the shim can't run. Legitimate scripts are exempted by location via
 // `trustedSubdirs`, or by the user speaking the unlock phrase once.
 const WRITE_OPS_IN_SCRIPT =
   /\b(?:writeFileSync|appendFileSync|writeFile|createWriteStream|unlink|unlinkSync|rmSync|renameSync|rename|rmdir|rmdirSync|copyFileSync|exec|execSync|fs\.promises\.writeFile|fs\.promises\.rm|fs\.promises\.rename|fs\.writeFile|fs\.appendFile)\b/;
