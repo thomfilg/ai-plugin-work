@@ -54,7 +54,7 @@ test('AC18: pnpm dev:check is stripped from all four prompt files', () => {
     assert.ok(content !== null, `expected prompt file to exist: ${rel}`);
     assert.ok(
       !/pnpm\s+dev:check/.test(content),
-      `${rel} still contains "pnpm dev:check" — strip per AC18`,
+      `${rel} still contains "pnpm dev:check" — strip per AC18`
     );
   }
 });
@@ -64,20 +64,14 @@ test('AC1: skills/split-in-tasks/docs/test-strategy.md exists and mentions all f
   const content = readIfExists(rel);
   assert.ok(content !== null, `expected ${rel} to exist`);
   for (const kind of FIVE_KINDS) {
-    assert.ok(
-      content.includes(kind),
-      `${rel} must mention kind "${kind}"`,
-    );
+    assert.ok(content.includes(kind), `${rel} must mention kind "${kind}"`);
   }
 });
 
 test('AC1: skills/split-in-tasks/docs/test-command.md is deleted (folded into test-strategy.md)', () => {
   const rel = 'plugins/work/skills/split-in-tasks/docs/test-command.md';
   const abs = repoPath(rel);
-  assert.ok(
-    !fs.existsSync(abs),
-    `${rel} must be deleted (folded into test-strategy.md)`,
-  );
+  assert.ok(!fs.existsSync(abs), `${rel} must be deleted (folded into test-strategy.md)`);
 });
 
 test('P2.2: docs/test-strategy-kinds.md explainer exists and mentions all five kinds', () => {
@@ -85,9 +79,6 @@ test('P2.2: docs/test-strategy-kinds.md explainer exists and mentions all five k
   const content = readIfExists(rel);
   assert.ok(content !== null, `expected ${rel} to exist`);
   for (const kind of FIVE_KINDS) {
-    assert.ok(
-      content.includes(kind),
-      `${rel} must mention kind "${kind}"`,
-    );
+    assert.ok(content.includes(kind), `${rel} must mention kind "${kind}"`);
   }
 });

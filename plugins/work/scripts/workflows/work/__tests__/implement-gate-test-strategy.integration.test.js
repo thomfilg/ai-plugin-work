@@ -113,13 +113,7 @@ function makeDeps(state) {
       return { valid, reason: valid ? '' : 'incomplete cycle' };
     },
     stepName: 'implement',
-    workDir: path.join(
-      __dirname,
-      '..',
-      '..',
-      '..',
-      'work-implement'
-    ),
+    workDir: path.join(__dirname, '..', '..', '..', 'work-implement'),
     log: Object.assign(() => {}, { recurse: () => {} }),
     recursionDepth: 0,
   };

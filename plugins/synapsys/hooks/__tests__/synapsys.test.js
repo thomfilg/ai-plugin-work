@@ -309,13 +309,19 @@ test('AC11: dispatcher exits 0 when cite-scan throws', (t) => {
 
 // ---- Wiring assertions: dispatcher source imports the required APIs --------
 test('dispatcher wires recordBehaviorChanged + pretool-window + runBehaviorScan', () => {
-  // Wiring lives in synapsys.js + hooks/lib/behavior-changed.js after refactor.
+  // Wiring lives in synapsys.js + hooks/lib/behavior-changed.js + the extracted
+  // hooks/lib/emit-matched.js (GH-497 max-lines split — emitMatched, which owns
+  // the pretool-window recordExpectation call, moved there).
   const dispatcherSrc = fs.readFileSync(DISPATCHER, 'utf8');
   const behaviorSrc = fs.readFileSync(
     path.resolve(__dirname, '..', 'lib', 'behavior-changed.js'),
     'utf8'
   );
-  const src = dispatcherSrc + '\n' + behaviorSrc;
+  const emitMatchedSrc = fs.readFileSync(
+    path.resolve(__dirname, '..', 'lib', 'emit-matched.js'),
+    'utf8'
+  );
+  const src = dispatcherSrc + '\n' + behaviorSrc + '\n' + emitMatchedSrc;
   assert.match(src, /pretool-window/);
   assert.match(src, /recordExpectation/);
   assert.match(src, /resolveExpectation/);

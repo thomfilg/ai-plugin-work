@@ -2,332 +2,132 @@
 'use strict';
 
 /**
- * synapsys-replay — replay recent Claude Code transcripts against the
- * runtime trigger matcher to surface noisy / mis-tuned synapsys memories.
+ * synapsys-replay — thin alias around `synapsys-replay-next.js` (GH-517 Task 3).
  *
- * GH-444. The implementation is split across sibling modules to keep this
- * CLI entrypoint under the 400-line quality cap:
+ * The legacy direct-API judge path is gone. This entrypoint now exists only
+ * to keep the historical command name working: it prints a single-line
+ * deprecation notice on stderr and delegates to the phase-next runner.
  *
- *   - lib/replay-events.js    — extractEvents, walkTranscripts, iterLines, replayEvent, parseSince
- *   - lib/replay-aggregate.js — aggregateReport, suggestTightening, splitTopLevelAlternation, fpRate
- *   - lib/replay-judge.js     — judgeBatch, judgePipeline, sampleForCap
- *   - lib/replay-report.js    — renderJson, renderReport
+ * Removed surfaces (intentional):
+ *   - `judgeBatch`, `judgePipeline`, `sampleForCap`, `shouldJudge` re-exports
+ *   - `process.env.ANTHROPIC_API_KEY` reads
+ *   - the "ANTHROPIC_API_KEY not set; proceeding as --no-judge" stderr warning
+ *   - `require('../lib/replay-judge')` (the file is deleted)
  *
- * This file owns flag parsing, validation, store loading, the main()
- * pipeline orchestration, and the public re-exports consumed by tests.
+ * Preserved module surface (still consumed by sibling integration tests):
+ *   - pure flag parser + validators
+ *   - re-exports of `extractEvents`, `walkTranscripts`, `iterLines`,
+ *     `replayEvent`, `parseSince`, `aggregateReport`, `suggestTightening`,
+ *     `splitTopLevelAlternation`, `fpRate`, `renderJson`, `renderReport`,
+ *     `loadStore`, `loadMemories`
+ *
+ * Exit codes match the next-runner: 0 success, 2 misconfig, 1 unexpected error.
  */
 
 const fs = require('node:fs');
 const path = require('node:path');
-const { makeFlag } = require('../lib/cli-args');
-const memoryStore = require('../lib/memory-store');
+const { spawnSync } = require('node:child_process');
+const cliShared = require('../lib/replay-cli-shared');
 const events = require('../lib/replay-events');
 const aggregate = require('../lib/replay-aggregate');
-const judge = require('../lib/replay-judge');
 const report = require('../lib/replay-report');
 
 const { extractEvents, parseSince, walkTranscripts, iterLines, replayEvent } = events;
 const { splitTopLevelAlternation, fpRate, aggregateReport, suggestTightening } = aggregate;
-const { judgeBatch, sampleForCap, judgePipeline, JUDGE_BATCH_SIZE } = judge;
 const { renderJson, renderReport } = report;
 
-/**
- * Pure flag parser — no I/O, no process exits. Tests call this directly
- * with a synthetic argv array. The main() entrypoint is responsible for
- * validation + side effects.
- *
- * Recognised R10 flags (all optional):
- *   --since=<Nd>        transcript window (default '7d')
- *   --project=<hash>    restrict to a single ~/.claude/projects/<hash>
- *   --no-judge          skip LLM judge calls; produce null relevance
- *   --json              emit machine-readable JSON to stdout
- *   --only=<csv>        comma-separated memory-name filter
- *   --store=<name|path> store selector (auto-detect like synapsys-explain)
- *   --max-judges=<N>    hard cap on judge API calls (default 200)
- *   --all-projects      scan every ~/.claude/projects/* dir (default: only the cwd-hashed project)
- */
-function parseFlags(argv) {
-  const flag = makeFlag(argv);
-  const sinceRaw = flag('since');
-  const maxJudgesRaw = flag('max-judges');
-  return {
-    since: sinceRaw === undefined || sinceRaw === true ? '7d' : sinceRaw,
-    project: typeof flag('project') === 'string' ? flag('project') : undefined,
-    noJudge: flag('no-judge') === true,
-    json: flag('json') === true,
-    only: typeof flag('only') === 'string' ? flag('only') : undefined,
-    store: typeof flag('store') === 'string' ? flag('store') : undefined,
-    maxJudges: maxJudgesRaw === undefined || maxJudgesRaw === true ? 200 : Number(maxJudgesRaw),
-    allProjects: flag('all-projects') === true,
-    transcriptsBase:
-      typeof flag('transcripts-base') === 'string' ? flag('transcripts-base') : undefined,
-  };
-}
+const NEXT_RUNNER = path.resolve(__dirname, 'synapsys-replay-next.js');
 
 /**
- * Print message to stderr and exit with the given code. Default code 2 per
- * spec §CLI: exit 2 on misconfig (unknown --store, invalid --since/--project).
+ * Pure flag parser — retained so consumers that imported `parseFlags`
+ * directly continue to work. Shared with the phase-next runner via
+ * lib/replay-cli-shared (this alias simply ignores `runDir`).
  */
+const { parseReplayFlags: parseFlags, selectStores, loadMemories } = cliShared;
+
 function die(msg, code = 2) {
   process.stderr.write(`synapsys-replay: ${msg}\n`);
   process.exit(code);
 }
 
-/**
- * Centralised judge gate. Returns true only when judging is allowed AND warranted:
- *   - `--no-judge` not set, `ANTHROPIC_API_KEY` present, ≥1 UPS fire.
- */
-function shouldJudge({ noJudge, apiKey, upsFires }) {
-  if (noJudge) return false;
-  if (!apiKey) return false;
-  if (!upsFires || upsFires <= 0) return false;
-  return true;
-}
-
-/**
- * Resolve `--store` flag against `discoverStores(cwd)`. Mirrors the selector
- * logic in scripts/synapsys-explain.js (GH-443). Dies(2) on unknown store.
- */
 function loadStore({ storeFlag, cwd } = {}) {
-  const resolvedCwd = cwd || process.cwd();
-  const stores = memoryStore.discoverStores(resolvedCwd);
-  if (!storeFlag || storeFlag === true) return stores;
-  const byKind = stores.filter((s) => s.kind === storeFlag);
-  if (byKind.length) return byKind;
-  const abs = path.resolve(storeFlag);
-  const byPath = stores.filter((s) => path.resolve(s.dir) === abs);
-  if (byPath.length) return byPath;
-  if (fs.existsSync(path.join(abs, '.synapsys.json'))) {
-    return [{ kind: 'path', dir: abs, projectName: path.basename(abs) }];
+  const stores = selectStores(storeFlag, cwd || process.cwd());
+  if (!stores) die(`unknown --store "${storeFlag}" (no matching discovered store)`, 2);
+  return stores;
+}
+
+// Phase-next is a one-envelope-per-invocation runner: walk → judge →
+// aggregate → report. The deprecated alias preserves the historical
+// single-command UX by driving that loop to completion itself, re-invoking the
+// next runner until it emits a terminal `action:'done'` (or a `dispatch_agent`,
+// which the alias cannot fulfil — see below). A shared `--run-dir` threads the
+// runner state across invocations.
+const MAX_PHASE_ITERS = 200;
+
+function lastJsonLine(stdout) {
+  const lines = String(stdout || '')
+    .split('\n')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  for (let i = lines.length - 1; i >= 0; i--) {
+    try {
+      return JSON.parse(lines[i]);
+    } catch {
+      /* not json */
+    }
   }
-  die(`unknown --store "${storeFlag}" (no matching discovered store)`, 2);
+  return null;
 }
 
 /**
- * Load all memories from a list of discovered stores.
+ * Delegate to `synapsys-replay-next.js`. Prints a one-line deprecation notice
+ * on stderr, then drives the phase-next loop to its terminal report envelope,
+ * propagating the runner's stdout/stderr verbatim each turn. A non-judge run
+ * (`--no-judge`, or a window with no fires) walks straight through to the
+ * report; the alias does not dispatch the judge subagent itself, so a
+ * `dispatch_agent` envelope ends the loop with the dispatch instruction left
+ * for the caller (matching the deprecated command's hands-off behavior).
  */
-function loadMemories(stores) {
-  const all = [];
-  for (const s of stores) {
-    all.push(...memoryStore.listMemoriesFromStore(s));
+// Run one phase turn of the next-runner, propagating its stdout/stderr
+// verbatim. Exits the process on a spawn error; otherwise returns the child's
+// exit status plus the last JSON envelope it printed (or null).
+function runPhaseTurn(childArgs) {
+  const result = spawnSync(process.execPath, [NEXT_RUNNER, ...childArgs], {
+    encoding: 'utf8',
+  });
+  if (result.error) {
+    process.stderr.write(`synapsys-replay: ${result.error.message}\n`);
+    process.exit(1);
   }
-  return all;
+  if (result.stdout) process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
+  const status = typeof result.status === 'number' ? result.status : 1;
+  return { status, envelope: lastJsonLine(result.stdout) };
 }
 
-function validateFlags(flags) {
-  if (!/^\d+d$/.test(flags.since)) {
-    die(`invalid --since=${flags.since} (expected format like 7d, 14d)`);
-  }
-  if (flags.project !== undefined) {
-    // Reject path-traversal: `..`, `.`, or any value containing consecutive
-    // dots. The character class `[\w.-]+` alone permits `..` which
-    // `path.join` resolves outside ~/.claude/projects/.
-    if (!/^[\w.-]+$/.test(flags.project) || /\.\./.test(flags.project) || flags.project === '.') {
-      die(`invalid --project=${flags.project}`);
-    }
-  }
-  if (!Number.isInteger(flags.maxJudges) || flags.maxJudges < 1) {
-    die(`invalid --max-judges=${flags.maxJudges} (expected positive integer)`);
-  }
-}
-
-function applyOnlyFilter(memories, onlyFlag) {
-  if (!onlyFlag) return memories;
-  const allow = new Set(
-    onlyFlag
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean)
+function main(argv) {
+  process.stderr.write(
+    'synapsys-replay: deprecated entrypoint — delegating to synapsys-replay-next.js\n'
   );
-  const known = new Set(memories.map((m) => m.name));
-  const unknown = [...allow].filter((n) => !known.has(n));
-  if (unknown.length > 0) {
-    process.stderr.write(
-      `synapsys-replay: --only references unknown memory name(s): ${unknown.join(', ')}\n`
-    );
+  // Pin a single run directory so runner state persists across phase turns,
+  // unless the caller already chose one.
+  const hasRunDir = argv.some((a) => a === '--run-dir' || a.startsWith('--run-dir='));
+  const runDir = hasRunDir
+    ? null
+    : fs.mkdtempSync(path.join(require('node:os').tmpdir(), 'synapsys-replay-'));
+  const childArgs = hasRunDir ? argv : [...argv, `--run-dir=${runDir}`];
+
+  let lastStatus = 1;
+  for (let i = 0; i < MAX_PHASE_ITERS; i++) {
+    const { status, envelope } = runPhaseTurn(childArgs);
+    lastStatus = status;
+    if (lastStatus !== 0) break;
+
+    // Terminal report, an instruction the alias cannot fulfil, or an
+    // unparseable line all stop the loop. `continue`/`walk` re-invoke.
+    if (!envelope || envelope.action === 'done' || envelope.action === 'dispatch_agent') break;
   }
-  if (unknown.length === allow.size && allow.size > 0) {
-    die(`--only matched no memories in the store (unknown: ${[...allow].join(', ')})`, 2);
-  }
-  return memories.filter((m) => allow.has(m.name));
-}
-
-function bumpCounts(counts, eventKind) {
-  counts.total += 1;
-  if (eventKind === 'UserPromptSubmit') counts.ups += 1;
-  else if (eventKind === 'PreToolUse') counts.ptu += 1;
-}
-
-function processEvent(ev, memories, tuples) {
-  for (const t of replayEvent(memories, ev)) {
-    if (t.fired && ev.event === 'UserPromptSubmit') t.prompt = ev.prompt;
-    tuples.push(t);
-  }
-}
-
-function collectTuplesFromFiles(files, memories) {
-  const tuples = [];
-  const counts = { total: 0, ups: 0, ptu: 0 };
-  for (const file of files) {
-    for (const parsed of iterLines(file)) {
-      for (const ev of extractEvents(parsed)) {
-        bumpCounts(counts, ev.event);
-        processEvent(ev, memories, tuples);
-      }
-    }
-  }
-  return { tuples, counts };
-}
-
-function tallyJudgmentResult(judgments, r) {
-  if (!judgments[r.memory]) {
-    judgments[r.memory] = { relevant: 0, irrelevant: 0, judge_failed: 0 };
-  }
-  if (r.judge_failed) judgments[r.memory].judge_failed += 1;
-  else if (r.relevant === true) judgments[r.memory].relevant += 1;
-  else if (r.relevant === false) judgments[r.memory].irrelevant += 1;
-}
-
-async function runJudgePhase(tuples, flags, apiKey, memories) {
-  const bodyByName = new Map((memories || []).map((m) => [m.name, (m.body || '').slice(0, 200)]));
-  const items = tuples
-    .filter((t) => t.fired && t.event === 'UserPromptSubmit')
-    .map((t) => ({
-      memory: t.memory_name,
-      body: bodyByName.get(t.memory_name) || '',
-      prompt: t.prompt,
-      matched: t.matched_substring,
-    }));
-  const pipeline = await judgePipeline(items, {
-    apiKey,
-    model: 'claude-haiku-4-5',
-    maxJudges: flags.maxJudges,
-  });
-  const judgments = {};
-  for (const r of pipeline.results) tallyJudgmentResult(judgments, r);
-  return {
-    judgments,
-    judgeCalls: Math.ceil(pipeline.results.length / JUDGE_BATCH_SIZE),
-    itemsJudged: pipeline.results.length,
-    extrapolated: pipeline.extrapolated,
-  };
-}
-
-function nullOutRelevance(agg) {
-  for (const name of Object.keys(agg)) {
-    agg[name].relevant = null;
-    agg[name].irrelevant = null;
-    agg[name].fp_rate = null;
-  }
-}
-
-function buildSuggestions(memories, agg) {
-  const suggestions = [];
-  for (const memory of memories) {
-    const sug = suggestTightening(memory, agg[memory.name]);
-    if (sug) suggestions.push(sug);
-  }
-  return suggestions;
-}
-
-function writeOutput(flags, agg, suggestions, meta) {
-  if (flags.json) {
-    process.stdout.write(renderJson(agg, suggestions, meta) + '\n');
-  } else {
-    process.stdout.write(renderReport(agg, suggestions, meta));
-  }
-}
-
-/**
- * Wired main() entrypoint. Pipeline:
- *   parseFlags → validate → loadStore → loadMemories (apply --only)
- *   → walkTranscripts → iterLines → extractEvents → replayEvent
- *   → (optional) judgePipeline → aggregateReport → suggestTightening
- *   → renderReport / renderJson → exit
- *
- * Validation precedes I/O so misconfigs exit 2 before any filesystem/network
- * touches. No-transcripts window prints a friendly message (R12 / G10).
- * Missing `ANTHROPIC_API_KEY` without `--no-judge` emits a single stderr
- * notice and proceeds as `--no-judge` (spec §Security / AC5).
- */
-async function main(argv) {
-  const flags = parseFlags(argv);
-  validateFlags(flags);
-
-  const stores = loadStore({ storeFlag: flags.store, cwd: process.cwd() });
-  const memories = applyOnlyFilter(loadMemories(stores), flags.only);
-
-  const apiKey = process.env.ANTHROPIC_API_KEY || '';
-  if (!flags.noJudge && !apiKey) {
-    process.stderr.write('synapsys-replay: ANTHROPIC_API_KEY not set; proceeding as --no-judge\n');
-  }
-
-  const files = walkTranscripts({
-    since: flags.since,
-    project: flags.project,
-    baseDir: flags.transcriptsBase,
-    cwd: process.cwd(),
-    // --transcripts-base is a test escape hatch with synthetic project layouts,
-    // so treat it like --all-projects to keep test fixtures cwd-independent.
-    allProjects: flags.allProjects || !!flags.transcriptsBase,
-  });
-  if (files.length === 0) {
-    if (flags.json) {
-      process.stdout.write(
-        `${JSON.stringify({
-          memories: [],
-          suggestions: [],
-          store: stores.map((s) => s.dir).join(','),
-          window: flags.since,
-          events_total: 0,
-          events_ups: 0,
-          events_ptu: 0,
-          judge_calls: 0,
-          items_judged: 0,
-          extrapolated: false,
-          message: 'no transcripts in window',
-        })}\n`
-      );
-    } else {
-      process.stdout.write('no transcripts in window\n');
-    }
-    process.exit(0);
-  }
-
-  const { tuples, counts } = collectTuplesFromFiles(files, memories);
-
-  const upsFires = tuples.filter((t) => t.fired && t.event === 'UserPromptSubmit').length;
-  const judging = shouldJudge({ noJudge: flags.noJudge, apiKey, upsFires });
-
-  let judgments;
-  let judgeCalls = 0;
-  let itemsJudged = 0;
-  let extrapolated = false;
-  if (judging) {
-    ({ judgments, judgeCalls, itemsJudged, extrapolated } = await runJudgePhase(
-      tuples,
-      flags,
-      apiKey,
-      memories
-    ));
-  }
-
-  const agg = aggregateReport(tuples, judgments);
-  if (!judging) nullOutRelevance(agg);
-  const suggestions = buildSuggestions(memories, agg);
-
-  const meta = {
-    store: stores.map((s) => s.dir).join(','),
-    window: flags.since,
-    events_total: counts.total,
-    events_ups: counts.ups,
-    events_ptu: counts.ptu,
-    judgeCalls,
-    itemsJudged,
-    extrapolated,
-  };
-  writeOutput(flags, agg, suggestions, meta);
-  process.exit(0);
+  process.exit(lastStatus);
 }
 
 module.exports = {
@@ -346,16 +146,9 @@ module.exports = {
   fpRate,
   renderJson,
   renderReport,
-  judgeBatch,
-  sampleForCap,
-  judgePipeline,
-  shouldJudge,
   main,
 };
 
 if (require.main === module) {
-  main(process.argv.slice(2)).catch((err) => {
-    process.stderr.write(`synapsys-replay: ${err && err.message ? err.message : err}\n`);
-    process.exit(1);
-  });
+  main(process.argv.slice(2));
 }

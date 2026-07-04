@@ -24,6 +24,8 @@
 const path = require('node:path');
 const os = require('node:os');
 
+const fs = require('node:fs');
+
 const { makeFlag } = require('../lib/cli-args');
 const { loadDomainRegistry } = require('../lib/domains');
 const { loadStickyState } = require('../lib/sticky-state');
@@ -138,7 +140,84 @@ function makeColors(noColor) {
   return makePalette(noColor);
 }
 
-function emitJson(sessionId, active, attribution) {
+// ── GH-520 enforce surface ───────────────────────────────────────────────────
+// Memories with enforce ≠ advise, plus block/override telemetry counts for the
+// current session. Everything is fail-open: any error → empty section.
+
+function collectEnforceMemories() {
+  try {
+    const { listMemories } = require('../lib/memory-store');
+    return listMemories(process.cwd())
+      .filter((m) => m.enforce && m.enforce !== 'advise')
+      .map((m) => ({
+        name: m.name,
+        enforce: m.enforce,
+        classifier: m.enforceClassifier || '',
+      }));
+  } catch (_) {
+    return [];
+  }
+}
+
+function resolveEnforceSessionId(optsSessionId) {
+  try {
+    const telemetry = require('../lib/telemetry');
+    // parseArgs defaults --session-id to 'default'; an explicit id wins,
+    // otherwise resolve the live session the same way the dispatcher does.
+    if (optsSessionId && optsSessionId !== 'default') return optsSessionId;
+    return telemetry.resolveSessionId({});
+  } catch (_) {
+    return optsSessionId || 'default';
+  }
+}
+
+function countEnforceEvents(sessionId) {
+  const counts = { block: 0, override: 0 };
+  try {
+    const telemetry = require('../lib/telemetry');
+    const file = path.join(telemetry.telemetryDir(), `${sessionId}.jsonl`);
+    const raw = fs.readFileSync(file, 'utf8');
+    for (const line of raw.split('\n')) {
+      if (!line.trim()) continue;
+      try {
+        const rec = JSON.parse(line);
+        if (rec.event === 'block') counts.block += 1;
+        else if (rec.event === 'override') counts.override += 1;
+      } catch (_) {
+        /* skip bad line */
+      }
+    }
+  } catch (_) {
+    /* no telemetry yet — zero counts */
+  }
+  return counts;
+}
+
+function buildEnforceReport(optsSessionId) {
+  const sessionId = resolveEnforceSessionId(optsSessionId);
+  return {
+    sessionId,
+    memories: collectEnforceMemories(),
+    counts: countEnforceEvents(sessionId),
+  };
+}
+
+function emitEnforceHuman(report, C) {
+  process.stdout.write(`${C.bold('Enforce')} ${C.dim('·')} session=${report.sessionId}\n`);
+  if (report.memories.length === 0) {
+    process.stdout.write(`  ${C.dim('no memories with enforce ≠ advise')}\n`);
+  } else {
+    for (const m of report.memories) {
+      const cls = m.classifier ? ` classifier=${m.classifier}` : '';
+      process.stdout.write(`  ${C.green(m.name)}  ${C.dim('—')} ${C.magenta(m.enforce)}${cls}\n`);
+    }
+  }
+  process.stdout.write(
+    `  ${C.dim('events:')} block=${report.counts.block} override=${report.counts.override}\n`
+  );
+}
+
+function emitJson(sessionId, active, attribution, enforceReport) {
   const sortedActive = [...active].sort();
   process.stdout.write(
     `${JSON.stringify(
@@ -149,6 +228,7 @@ function emitJson(sessionId, active, attribution) {
           domain: d,
           ...(attribution.get(d) || { kind: 'unknown', detail: '' }),
         })),
+        enforce: enforceReport,
       },
       null,
       2
@@ -192,12 +272,16 @@ function main(argv) {
     stickySession,
   });
 
+  const enforceReport = buildEnforceReport(opts.sessionId);
+
   if (opts.json) {
-    emitJson(opts.sessionId, active, attribution);
+    emitJson(opts.sessionId, active, attribution, enforceReport);
     return 0;
   }
 
-  emitHuman(opts, active, attribution, makeColors(opts.noColor));
+  const C = makeColors(opts.noColor);
+  emitHuman(opts, active, attribution, C);
+  emitEnforceHuman(enforceReport, C);
   return 0;
 }
 

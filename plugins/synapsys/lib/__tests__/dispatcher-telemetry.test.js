@@ -75,6 +75,10 @@ function makeFixture({ home }) {
 function runDispatcher(event, payload, { home, extraEnv } = {}) {
   const env = { ...process.env, SYNAPSYS_NO_SETUP_HINT: '1', HOME: home };
   delete env.SYNAPSYS_TELEMETRY;
+  // session-id resolver (GH-583) prefers CLAUDE_CODE_SESSION_ID over the
+  // payload's session_id; these tests assert on payload-keyed JSONL files, so
+  // an inherited env value would route writes to a UUID bucket. Scrub it.
+  delete env.CLAUDE_CODE_SESSION_ID;
   if (extraEnv) Object.assign(env, extraEnv);
   return spawnSync(process.execPath, [DISPATCHER, event], {
     input: JSON.stringify(payload),
@@ -647,7 +651,9 @@ test('Stop event: cite scan ignores memories first fired during this same Stop t
   const fx = makeFixture({ home });
   t.after(fx.cleanup);
 
-  // Memory that fires ONLY on Stop, with trigger_session so it injects every Stop.
+  // Memory that fires ONLY on Stop. trigger_stop_response is required for a
+  // Stop memory to fire at all (memories without it never fire on Stop) and
+  // matches the response below, so the Stop turn still records a fired row.
   fs.writeFileSync(
     path.join(fx.storeDir, 'stop-injected.md'),
     [
@@ -655,7 +661,7 @@ test('Stop event: cite scan ignores memories first fired during this same Stop t
       'name: stop-injected',
       'description: x',
       'events: Stop',
-      'trigger_session: true',
+      'trigger_stop_response: stop-injected',
       '---',
       '',
       'Body for stop-injected.',

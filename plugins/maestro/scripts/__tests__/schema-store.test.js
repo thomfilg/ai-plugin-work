@@ -73,7 +73,7 @@ test('init writes marker; save then round-trips through list/show', () => {
     '--pool=1',
     '--command=/qc-work',
     '--stop-source=when /follow-up skill says that it passed',
-    "--stop-oracle=node f.js \"$TICKET\" --json | jq -e '.action==\"complete\"'",
+    '--stop-oracle=node f.js "$TICKET" --json | jq -e \'.action=="complete"\'',
   ]);
   assert.equal(save.status, 0, save.stderr);
 

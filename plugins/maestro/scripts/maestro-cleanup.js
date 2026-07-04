@@ -28,8 +28,7 @@ const namespace = require('./lib/maestro-conduct/namespace');
 // namespace.stateDir() honors STATE_DIR and nests under MAESTRO_NS when set so
 // cleanup purges the same per-namespace markers the daemon wrote (GH-622).
 // MAESTRO_STATE_DIR kept as a legacy fallback ahead of the NS-derived default.
-const STATE_DIR =
-  process.env.STATE_DIR || process.env.MAESTRO_STATE_DIR || namespace.stateDir();
+const STATE_DIR = process.env.STATE_DIR || process.env.MAESTRO_STATE_DIR || namespace.stateDir();
 const ALERT_COUNTS = path.join(STATE_DIR, '_alert-counts.json');
 
 function usage(code = 1) {
@@ -179,7 +178,9 @@ function purgeAlertCountsForTicket(ticket, dryRun) {
   if (!dryRun && removed > 0) {
     fs.writeFileSync(ALERT_COUNTS, JSON.stringify(counts, null, 2));
   } else if (dryRun) {
-    process.stdout.write(`(dry-run) would purge ${removed} key(s) for ${ticket} from _alert-counts.json\n`);
+    process.stdout.write(
+      `(dry-run) would purge ${removed} key(s) for ${ticket} from _alert-counts.json\n`
+    );
   }
   return removed;
 }

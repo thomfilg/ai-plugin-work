@@ -6,6 +6,7 @@
  *
  *   node synapsys-explain.js --event=UserPromptSubmit --prompt="<text>"
  *   node synapsys-explain.js --event=PreToolUse --tool=Edit --tool-input='{...}'
+ *   node synapsys-explain.js --event=PostToolUse --tool=Bash --tool-response='{...}'
  *   node synapsys-explain.js --stdin   (reads raw hook event JSON from stdin)
  *   node synapsys-explain.js [...] --only=name1,name2 --verbose --store=<name|path>
  *
@@ -25,14 +26,27 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { makeFlag } = require(path.join(__dirname, '..', 'lib', 'cli-args'));
-const memoryStore = require(path.join(__dirname, '..', 'lib', 'memory-store'));
+const { selectStores, loadMemories } = require(
+  path.join(__dirname, '..', 'lib', 'replay-cli-shared')
+);
 const matcher = require(path.join(__dirname, '..', 'lib', 'matcher'));
 const { buildActiveDomains } = require(path.join(__dirname, '..', 'lib', 'active-domains'));
 const { resolveSessionId: ledgerResolveSessionId } = require(
   path.join(__dirname, '..', 'lib', 'inject-ledger')
 );
+// Payload / flag-resolution helpers live in a sibling lib module so this CLI
+// stays under the quality gate's max-lines budget.
+const { resolveToolInput, resolveToolResponse, buildPayload } = require(
+  path.join(__dirname, 'lib', 'explain-payload')
+);
 
-const VALID_EVENTS = new Set(['UserPromptSubmit', 'PreToolUse', 'SessionStart', 'Stop']);
+const VALID_EVENTS = new Set([
+  'UserPromptSubmit',
+  'PreToolUse',
+  'PostToolUse',
+  'SessionStart',
+  'Stop',
+]);
 
 const REASON_COL_MAX = 24;
 
@@ -57,35 +71,12 @@ function parseStdinPayload(raw) {
   }
 }
 
-function parseToolInput(raw) {
-  if (raw === undefined || raw === '' || raw === true) return undefined;
-  try {
-    return JSON.parse(raw);
-  } catch (err) {
-    die(`invalid --tool-input JSON: ${err.message}`, 2);
-  }
-}
-
+// Store selection (kind name → absolute path → bare .synapsys.json dir) and
+// memory loading are shared with the replay CLIs via lib/replay-cli-shared.
 function loadStore(storeFlag, cwd) {
-  const stores = memoryStore.discoverStores(cwd);
-  if (!storeFlag || storeFlag === true) {
-    return stores;
-  }
-  // Match by kind name first, then by absolute path.
-  const byName = stores.filter((s) => s.kind === storeFlag);
-  if (byName.length) return byName;
-  const abs = path.resolve(storeFlag);
-  const byPath = stores.filter((s) => path.resolve(s.dir) === abs);
-  if (byPath.length) return byPath;
-  die(`unknown --store "${storeFlag}" (no matching discovered store)`, 2);
-}
-
-function loadMemories(stores) {
-  const all = [];
-  for (const s of stores) {
-    all.push(...memoryStore.listMemoriesFromStore(s));
-  }
-  return all;
+  const stores = selectStores(storeFlag, cwd);
+  if (!stores) die(`unknown --store "${storeFlag}" (no matching discovered store)`, 2);
+  return stores;
 }
 
 // When the memory carries trigger_stop_response, matchStop needs the agent's
@@ -119,6 +110,9 @@ function evaluateMemory(memory, event, payload, activeDomains) {
   }
   if (event === 'PreToolUse') {
     return matcher.matchPreTool(memory, payload);
+  }
+  if (event === 'PostToolUse') {
+    return matcher.matchPostTool(memory, payload);
   }
   if (event === 'SessionStart') {
     return matcher.matchSession(memory);
@@ -178,18 +172,40 @@ function stopTriggerSource(memory) {
   return '(unconditional on Stop)';
 }
 
+// Render the PreToolUse trigger surface (tool/path target + input content).
+// Extracted from eventTriggerSource to keep it under the complexity gate.
+function preToolTriggerSource(memory) {
+  const parts = [];
+  if (memory.triggerPretool && memory.triggerPretool.length) {
+    parts.push(`pretool: ${memory.triggerPretool.join(', ')}`);
+  }
+  if (memory.triggerPretoolContent && memory.triggerPretoolContent.length) {
+    parts.push(`content: ${memory.triggerPretoolContent.join(', ')}`);
+  }
+  return parts.join(' | ');
+}
+
+// Render the PostToolUse trigger surface (tool/path target + output content +
+// exit gate). Extracted from eventTriggerSource to keep it under the
+// complexity gate.
+function postToolTriggerSource(memory) {
+  const parts = [];
+  if (memory.triggerPretool && memory.triggerPretool.length) {
+    parts.push(`pretool: ${memory.triggerPretool.join(', ')}`);
+  }
+  if (memory.triggerPosttoolContent && memory.triggerPosttoolContent.length) {
+    parts.push(`content: ${memory.triggerPosttoolContent.join(', ')}`);
+  }
+  if (memory.triggerPosttoolExit !== null && memory.triggerPosttoolExit !== undefined) {
+    parts.push(`exit: ${memory.triggerPosttoolExit}`);
+  }
+  return parts.join(' | ');
+}
+
 function eventTriggerSource(memory, event) {
   if (event === 'UserPromptSubmit') return memory.triggerPrompt || '';
-  if (event === 'PreToolUse') {
-    const parts = [];
-    if (memory.triggerPretool && memory.triggerPretool.length) {
-      parts.push(`pretool: ${memory.triggerPretool.join(', ')}`);
-    }
-    if (memory.triggerPretoolContent && memory.triggerPretoolContent.length) {
-      parts.push(`content: ${memory.triggerPretoolContent.join(', ')}`);
-    }
-    return parts.join(' | ');
-  }
+  if (event === 'PreToolUse') return preToolTriggerSource(memory);
+  if (event === 'PostToolUse') return postToolTriggerSource(memory);
   if (event === 'SessionStart') return `trigger_session: ${memory.triggerSession}`;
   if (event === 'Stop') return stopTriggerSource(memory);
   return '';
@@ -201,6 +217,9 @@ const MATCHED_LABELS = [
   ['pretool_pattern', 'matched.pretool_pattern'],
   ['content_pattern', 'matched.content_pattern'],
   ['content_substring', 'matched.content_substring'],
+  ['posttool_content_pattern', 'matched.posttool_content_pattern'],
+  ['posttool_content_substring', 'matched.posttool_content_substring'],
+  ['posttool_exit', 'matched.posttool_exit'],
   ['excluded_pattern', 'matched.excluded_pattern'],
 ];
 
@@ -279,12 +298,6 @@ function resolveEvent(flag, stdinPayload) {
   return event;
 }
 
-function resolveToolInput(flag, stdinPayload) {
-  if (flag('tool-input') !== undefined) return parseToolInput(flag('tool-input'));
-  if (stdinPayload.tool_input !== undefined) return stdinPayload.tool_input;
-  return undefined;
-}
-
 function parseOnlyList(flag) {
   const raw = flag('only');
   if (typeof raw !== 'string') return null;
@@ -306,17 +319,6 @@ function applyOnlyFilter(memories, only) {
   return memories.filter((m) => onlySet.has(m.name));
 }
 
-function buildPayload(event, prompt, tool, toolInput, cwd, response) {
-  return {
-    hook_event_name: event,
-    prompt: prompt === true ? '' : prompt || '',
-    tool_name: tool === true ? '' : tool || '',
-    tool_input: toolInput || {},
-    response: response === true ? '' : response || '',
-    cwd,
-  };
-}
-
 function main() {
   const flag = makeFlag(process.argv.slice(2));
   const stdinPayload = readStdinPayloadIfRequested(flag);
@@ -325,14 +327,15 @@ function main() {
   const cwd = flag('cwd') || stdinPayload.cwd || process.cwd();
   const prompt = flag('prompt') !== undefined ? flag('prompt') : stdinPayload.prompt;
   const tool = flag('tool') !== undefined ? flag('tool') : stdinPayload.tool_name;
-  const toolInput = resolveToolInput(flag, stdinPayload);
+  const toolInput = resolveToolInput(flag, stdinPayload, die);
   const response = flag('response') !== undefined ? flag('response') : stdinPayload.response;
+  const toolResponse = resolveToolResponse(flag, stdinPayload);
   const verbose = !!flag('verbose');
   const only = parseOnlyList(flag);
 
   const stores = loadStore(flag('store'), cwd);
   const memories = applyOnlyFilter(loadMemories(stores), only);
-  const payload = buildPayload(event, prompt, tool, toolInput, cwd, response);
+  const payload = buildPayload(event, prompt, tool, toolInput, cwd, response, toolResponse);
 
   const activeDomains = computeActiveDomainsForExplain(event, payload);
   const results = memories.map((memory) => ({

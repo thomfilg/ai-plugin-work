@@ -6,12 +6,5 @@
     "name": "Custom",
     "email": "custom@local"
   },
-  "keywords": [
-    "orchestrate",
-    "conduct",
-    "agents",
-    "tmux",
-    "workflow",
-    "multi-agent"
-  ]
+  "keywords": ["orchestrate", "conduct", "agents", "tmux", "workflow", "multi-agent"]
 }

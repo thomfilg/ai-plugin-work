@@ -9,8 +9,12 @@
 // GH-521 Task 2 extends matchStop with `trigger_stop_response` regex
 // evaluation: when the memory carries the field, matchStop must consult
 // payload.response (and fallbacks) and only fire on a regex hit, returning
-// `'no-stop-response-match'` otherwise. When the field is absent, matchStop
-// preserves its prior unconditional-fire behavior.
+// `'no-stop-response-match'` otherwise.
+//
+// INTENTIONAL BEHAVIOR CHANGE: a Stop memory WITHOUT trigger_stop_response no
+// longer fires unconditionally. Stop stdout never reaches the model, so the
+// old fail-open fire only churned the ledger/telemetry every turn end. Such
+// memories now return { fired: false, reason: 'no-stop-response-configured' }.
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
@@ -32,14 +36,18 @@ function makeMemory(overrides) {
   );
 }
 
-// ---------- Pre-existing tests (backward-compat regression guards) -------
+// ---------- Event-gate regression guards ----------------------------------
 
-test('matchStop returns { fired: true } when memory has Stop in events', () => {
-  assert.equal(matchStop(makeMemory({ events: ['Stop'] })).fired, true);
+test('matchStop without trigger_stop_response returns no-stop-response-configured', () => {
+  const result = matchStop(makeMemory({ events: ['Stop'] }));
+  assert.equal(result.fired, false);
+  assert.equal(result.reason, 'no-stop-response-configured');
 });
 
-test('matchStop returns { fired: true } even when other events are also listed', () => {
-  assert.equal(matchStop(makeMemory({ events: ['PreToolUse', 'Stop'] })).fired, true);
+test('matchStop without trigger_stop_response does not fire even when other events are also listed', () => {
+  const result = matchStop(makeMemory({ events: ['PreToolUse', 'Stop'] }));
+  assert.equal(result.fired, false);
+  assert.equal(result.reason, 'no-stop-response-configured');
 });
 
 test('matchStop returns { fired: false, reason: "events-exclude" } when memory has no Stop event', () => {
@@ -48,13 +56,15 @@ test('matchStop returns { fired: false, reason: "events-exclude" } when memory h
   assert.equal(result.reason, 'events-exclude');
 });
 
-test('selectForEvent("Stop", ...) picks only Stop-event memories', () => {
+test('selectForEvent("Stop", ...) picks only Stop-event memories with a matching stop response', () => {
   const memories = [
-    makeMemory({ name: 'stop-mem', events: ['Stop'] }),
-    makeMemory({ name: 'prompt-mem', events: ['UserPromptSubmit'] }),
-    makeMemory({ name: 'multi-mem', events: ['PreToolUse', 'Stop'] }),
+    makeMemory({ name: 'stop-mem', events: ['Stop'], triggerStopResponse: 'done' }),
+    makeMemory({ name: 'prompt-mem', events: ['UserPromptSubmit'], triggerStopResponse: 'done' }),
+    makeMemory({ name: 'multi-mem', events: ['PreToolUse', 'Stop'], triggerStopResponse: 'done' }),
+    // No trigger_stop_response → never fires on Stop (no-stop-response-configured).
+    makeMemory({ name: 'bare-stop-mem', events: ['Stop'] }),
   ];
-  const picked = selectForEvent(memories, 'Stop', {}).map((m) => m.name);
+  const picked = selectForEvent(memories, 'Stop', { response: 'all done' }).map((m) => m.name);
   assert.deepEqual(picked.sort(), ['multi-mem', 'stop-mem']);
 });
 
@@ -81,12 +91,14 @@ test('matchStop (b): triggerStopResponse present but response does not match -> 
   assert.equal(result.reason, 'no-stop-response-match');
 });
 
-// (c) field-absent + any payload -> { fired: true } (backward compat)
-test('matchStop (c): no triggerStopResponse field -> fires unconditionally', () => {
+// (c) field-absent + any payload -> never fires (no-stop-response-configured).
+// Formerly fired unconditionally (fail-open every turn end); intentionally
+// changed because Stop stdout never reaches the model.
+test('matchStop (c): no triggerStopResponse field -> no-stop-response-configured', () => {
   const memory = makeMemory({ name: 'classic-stop' });
-  // No triggerStopResponse on memory; payload is irrelevant.
   const result = matchStop(memory, { response: 'whatever' });
-  assert.equal(result.fired, true);
+  assert.equal(result.fired, false);
+  assert.equal(result.reason, 'no-stop-response-configured');
 });
 
 // (d) field-present + response empty but tool_inputs/tool_results contain the pattern

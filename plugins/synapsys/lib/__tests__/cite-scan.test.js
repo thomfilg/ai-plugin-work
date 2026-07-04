@@ -110,9 +110,7 @@ test('runBehaviorScan does not auto-extract when behaviorSignals is absent', () 
   withTempHome((home) => {
     const cs = require('../cite-scan');
     const telemetry = require('../telemetry');
-    const memories = [
-      { name: 'mem-noauto', meta: {}, behaviorSignals: [] },
-    ];
+    const memories = [{ name: 'mem-noauto', meta: {}, behaviorSignals: [] }];
     const payload = {
       session_id: 'sess-y',
       response: 'mem-noauto appears literally in this response text',

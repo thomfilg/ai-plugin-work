@@ -132,9 +132,11 @@ test('synapsys-explain --verbose surfaces the would_fire_if hint when --response
   );
 });
 
-test('synapsys-explain Stop with NO trigger_stop_response still fires unconditionally', () => {
-  // Backward-compat: memories without trigger_stop_response should still
-  // report fired ✓ for any Stop event invocation, regardless of --response.
+test('synapsys-explain Stop with NO trigger_stop_response reports no-stop-response-configured', () => {
+  // INTENTIONAL BEHAVIOR CHANGE: a Stop memory without trigger_stop_response
+  // never fires (Stop stdout never reaches the model, so the old unconditional
+  // fire only churned the ledger/telemetry). explain must surface the
+  // no-stop-response-configured reason so the author gets a signal.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-explain-stopresp-uncond-'));
   const storeDir = path.join(dir, '.claude', 'synapsys');
   fs.mkdirSync(storeDir, { recursive: true });
@@ -164,5 +166,6 @@ test('synapsys-explain Stop with NO trigger_stop_response still fires unconditio
     },
   });
   assert.equal(res.status, 0);
-  assert.match(res.stdout, /unconditional-stop-memory\s+\|\s+✓/);
+  assert.match(res.stdout, /unconditional-stop-memory\s+\|\s+✗/);
+  assert.match(res.stdout, /no-stop-response-config/);
 });

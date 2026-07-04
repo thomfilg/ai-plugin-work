@@ -63,6 +63,10 @@ function writeJsonl(file, lines) {
 function runCli(args, fixtureCwd, home) {
   const env = { ...process.env };
   if (home) env.HOME = home;
+  // session-id resolver (GH-583) prefers CLAUDE_CODE_SESSION_ID; these tests
+  // seed telemetry/ledger files under a fixture session, so an inherited env
+  // value would route reads to the wrong (empty) session bucket. Scrub it.
+  delete env.CLAUDE_CODE_SESSION_ID;
   return spawnSync(process.execPath, [STATS, ...args, `--cwd=${fixtureCwd}`, '--no-color'], {
     encoding: 'utf8',
     env,
@@ -169,6 +173,10 @@ test('dispatcher write → stats read share the same telemetry directory', () =>
     const DISPATCHER = path.resolve(__dirname, '..', '..', 'hooks', 'synapsys.js');
     const env = { ...process.env, HOME: fx.home, SYNAPSYS_NO_SETUP_HINT: '1' };
     delete env.SYNAPSYS_TELEMETRY;
+    // session-id resolver (GH-583) prefers CLAUDE_CODE_SESSION_ID over the
+    // payload's session_id; this flow keys telemetry on `flow-session-1`, so an
+    // inherited env value would write to a different bucket. Scrub it.
+    delete env.CLAUDE_CODE_SESSION_ID;
     const sessionId = 'flow-session-1';
     const payload = { cwd: fx.cwd, session_id: sessionId, prompt: 'contains flow-token here' };
     const fired = spawnSync(process.execPath, [DISPATCHER, 'UserPromptSubmit'], {

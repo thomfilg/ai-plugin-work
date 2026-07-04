@@ -127,6 +127,39 @@ function recordCited(memory, payload, match) {
   }
 }
 
+// GH-520 enforce-mode events. Same JSONL writer, same opt-outs
+// (per-memory `telemetry: false` + SYNAPSYS_TELEMETRY=0) as fired/cited.
+function recordBlock(memory, payload) {
+  try {
+    if (!memory || isDisabled(memory)) return;
+    const sessionId = resolveSessionId(payload);
+    writeLine(sessionId, {
+      ts: new Date().toISOString(),
+      memory: memory.name,
+      event: 'block',
+      tool: (payload && payload.tool_name) || '',
+    });
+  } catch {
+    // fail-open
+  }
+}
+
+function recordOverride(memory, payload, reason) {
+  try {
+    if (!memory || isDisabled(memory)) return;
+    const sessionId = resolveSessionId(payload);
+    const raw = typeof reason === 'string' ? reason : '';
+    writeLine(sessionId, {
+      ts: new Date().toISOString(),
+      memory: memory.name,
+      event: 'override',
+      reason: raw.length > MATCH_CAP ? raw.slice(0, MATCH_CAP) : raw,
+    });
+  } catch {
+    // fail-open
+  }
+}
+
 /**
  * Strip fenced code blocks from a markdown body so we don't auto-extract
  * identifiers from inside them.
@@ -249,6 +282,8 @@ function recordBehaviorChanged(memory, payload, opts) {
 module.exports = {
   recordFired,
   recordCited,
+  recordBlock,
+  recordOverride,
   recordBehaviorChanged,
   scanForCitations,
   scanForSignalList,
