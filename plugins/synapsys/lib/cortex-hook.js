@@ -28,6 +28,7 @@ const cortexRecall = require(path.join(__dirname, 'cortex-recall'));
 const sessionCache = require(path.join(__dirname, 'session-cache'));
 const consumeSentinel = require(path.join(__dirname, 'consume-sentinel'));
 const cortexConfig = require(path.join(__dirname, 'cortex-config'));
+const cortexProvider = require(path.join(__dirname, 'cortex-provider'));
 const injectLedger = require(path.join(__dirname, 'inject-ledger'));
 const { formatBlock } = require(path.join(__dirname, 'cortex-format'));
 
@@ -243,21 +244,20 @@ function releaseFireMarker(home, sessionId, memory) {
 /**
  * Resolve the injectable inline-recall function, or null when unavailable.
  *
- * PRODUCTION CONTRACT: cortex is reached through a provider module named by
- * `SYNAPSYS_CORTEX_RECALL_MODULE` (exporting `recall(query, projectId)`), NOT by
+ * PRODUCTION CONTRACT: cortex is reached through an injected provider, NOT by
  * calling the MCP tool — the hook (and the detached Phase 1 worker) cannot
- * invoke an MCP tool, which only the live agent can reach. The shipped hook sets
- * no default module, so auto-recall is opt-in: with the var unset both phases
- * resolve to an empty stub and inject nothing (by design). See README
- * "Recall provider". Fail-open: an unset/unloadable/malformed module → null.
+ * invoke an MCP tool, which only the live agent can reach. Resolution goes
+ * through the single shared `lib/cortex-provider.resolveRecall`: an explicit
+ * `SYNAPSYS_CORTEX_RECALL_MODULE` (exporting `recall(query, projectId)`) wins;
+ * with the var unset the zero-config default bridge (`lib/cortex-bridge`,
+ * read-only keyword recall over `~/.cortex/memory.db`, GH-662) is used when
+ * detectable; otherwise recall is disabled. See README "Recall provider".
+ * Fail-open: an unloadable/malformed module or an undetectable bridge → null
+ * (a broken configured module NEVER falls back to the bridge).
  */
 function resolveInlineRecall() {
-  const modPath = process.env.SYNAPSYS_CORTEX_RECALL_MODULE;
-  if (!modPath) return null;
   try {
-    // Dynamic provider require — path comes from SYNAPSYS_CORTEX_RECALL_MODULE.
-    const mod = require(modPath);
-    return typeof mod.recall === 'function' ? mod.recall.bind(mod) : null;
+    return cortexProvider.resolveRecall({ env: process.env, home: recallHome() }).recall;
   } catch {
     return null;
   }

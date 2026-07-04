@@ -485,11 +485,11 @@ The `--last <Nd>` flag filters telemetry `.jsonl` files by `mtime`; default is `
 
 ## Cortex auto-recall
 
-Synapsys surfaces prior-session insights from cortex without any agent action. There are two phases, both deterministic (no LLM call) and both fail-open — if no recall provider is configured (see [Recall provider](#recall-provider--synapsys_cortex_recall_module)), nothing is injected and the session proceeds normally.
+Synapsys surfaces prior-session insights from cortex without any agent action. There are two phases, both deterministic (no LLM call) and both fail-open — if no recall provider resolves (see [Recall provider](#recall-provider--synapsys_cortex_recall_module)), nothing is injected and the session proceeds normally.
 
 ### Phase 1 — SessionStart recall
 
-Phase 1 runs **only when a recall provider is resolvable** (see [Recall provider](#recall-provider--synapsys_cortex_recall_module)). With no provider — the shipped default — SessionStart schedules nothing, writes no cache, and injects nothing; the session is entirely unaffected and no marker is emitted.
+Phase 1 runs **only when a recall provider is resolvable** (see [Recall provider](#recall-provider--synapsys_cortex_recall_module)): an explicit `SYNAPSYS_CORTEX_RECALL_MODULE`, or the zero-config default bridge when a cortex sqlite store is detectable (GH-662). With no resolvable provider, SessionStart schedules nothing, writes no cache, and injects nothing; the session is entirely unaffected and no marker is emitted.
 
 When a provider *is* configured: on `SessionStart`, synapsys schedules a fire-and-forget background recall that issues **two bounded provider `recall` calls** (the provider's bridge to `cortex_recall`): one keyed on the ticket id, and one on derived keywords from the session context. Results are persisted to a per-session cache file. At the **next `UserPromptSubmit` boundary**, synapsys reads the cache and injects a `[cortex:auto-recall]` block into its existing stdout channel — the same channel that already carries matched-memory bodies. When a configured provider's query returns nothing, an empty marker line is emitted (the recall genuinely ran and found nothing):
 
@@ -505,9 +505,20 @@ Add an optional `cortex_query:` field to any memory's frontmatter. When that mem
 
 ### Recall provider — `SYNAPSYS_CORTEX_RECALL_MODULE`
 
-Both phases reach cortex through an **injected provider module**, not by calling the MCP tool directly. The Phase 1 background worker is a detached Node process and the Phase 2 inline path runs inside the hook — neither can invoke an MCP tool, which is only reachable by the live agent. Instead, each resolves a recall function from the `SYNAPSYS_CORTEX_RECALL_MODULE` env var: a path to a Node module exporting `recall(query, projectId) → Array | Promise<Array>`.
+Both phases reach cortex through an **injected provider**, not by calling the MCP tool directly. The Phase 1 background worker is a detached Node process and the Phase 2 inline path runs inside the hook — neither can invoke an MCP tool, which is only reachable by the live agent. Both paths resolve their recall function through the single shared resolver in `lib/cortex-provider.js`, in this order:
 
-**The shipped hook sets no default module, so out of the box both phases resolve to an empty stub and inject nothing — this is intentional, not a bug.** Auto-recall is opt-in: an integrator who wants live results points `SYNAPSYS_CORTEX_RECALL_MODULE` at a bridge module that reads from their cortex store (e.g. a thin wrapper over the cortex CLI/storage). Resolution is fail-open — an unset, unloadable, or malformed module degrades silently to the empty stub (R14), so a misconfigured provider never breaks a session.
+1. **Explicit module** — `SYNAPSYS_CORTEX_RECALL_MODULE` set: a path to a Node module exporting `recall(query, projectId) → Array | Promise<Array>`. A valid module always wins. A set-but-broken (unloadable/malformed) module disables recall entirely — the default bridge is **never** used as a fallback for an explicitly configured module.
+2. **Default bridge (zero-config, GH-662)** — env var unset: synapsys probes for a cortex sqlite store at `~/.cortex/memory.db` (override the path with `SYNAPSYS_CORTEX_DB`). When the db exists, opens read-only, and has a `memories` table, `lib/cortex-bridge.js` serves recalls directly from it — no configuration needed.
+3. **Disabled** — neither resolves: both phases inject nothing and the session proceeds normally.
+
+Notes on the default bridge:
+
+- **Node >= 22.5 required** — the bridge uses the built-in `node:sqlite` module (experimental). On older Nodes it reports "unavailable" and recall stays disabled; nothing crashes.
+- **Keyword + recency, not semantic** — the hook path has no embedder, so the bridge ranks rows by how many query keywords their content matches (then by recency), capped at 5 per query. Rows older than `max_age_days` are excluded inside the query itself (so stale rows can never crowd fresher eligible ones out of the cap), and results — shaped `{ id, savedAt, title, body, ageDays }` — still pass the downstream `max_age_days` / `max_results_per_query` budgets.
+- **Read-only** — the bridge opens the db with `readOnly: true` and never writes memories (R17).
+- The kill switch `SYNAPSYS_CORTEX_AUTO_RECALL=off` still disables **everything**, bridge included (see [Kill-switch](#kill-switch)).
+
+Resolution is fail-open throughout (R14) — a misconfigured provider or an undetectable bridge never breaks a session. Run `/synapsys recall` to see which provider is in effect.
 
 ### Config knobs
 
@@ -533,9 +544,10 @@ Set the env var `SYNAPSYS_CORTEX_AUTO_RECALL=off` (case-insensitive) to disable 
 
 ### Inspecting activity — `synapsys recall`
 
-Run `/synapsys recall` (or `node plugins/synapsys/scripts/synapsys-recall.js`) to see the current session's auto-recall activity. It prints one line per query that ran this session with its result count:
+Run `/synapsys recall` (or `node plugins/synapsys/scripts/synapsys-recall.js`) to see the current session's auto-recall activity. It first prints the resolved recall provider — `provider: module <path>`, `provider: default bridge (cortex sqlite, read-only): <db path>`, or `provider: none (<reason>)` — then one line per query that ran this session with its result count:
 
 ```
+provider: default bridge (cortex sqlite, read-only): /home/me/.cortex/memory.db
 - <query string> → 3 results
 - <other query> → 1 result
 ```

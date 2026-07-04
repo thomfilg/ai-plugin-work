@@ -22,7 +22,7 @@ Synapsys is a memory injection plugin: memories are markdown files with frontmat
 
 - `/synapsys new <name>` — Create a new memory file in the user-chosen store. Ask the user which store and which events the memory should listen to. Use the template below.
 
-- `/synapsys recall` — Show the active session's cortex auto-recall activity: each query string that was run this session and how many results it returned. Prints `no auto-recall this session` when nothing has run yet. (Distinct from `/synapsys status`, which reports the live active-domain set.)
+- `/synapsys recall` — Show the active session's cortex auto-recall activity: the resolved recall provider (explicit `SYNAPSYS_CORTEX_RECALL_MODULE` module, the zero-config default sqlite bridge over `~/.cortex/memory.db`, or `none` with the reason), then each query string that was run this session and how many results it returned. Prints `no auto-recall this session` when nothing has run yet. (Distinct from `/synapsys status`, which reports the live active-domain set.)
 
   Run: `node ${CLAUDE_PLUGIN_ROOT}/scripts/synapsys-recall.js`
 

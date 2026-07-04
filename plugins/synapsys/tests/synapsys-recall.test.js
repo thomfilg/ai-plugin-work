@@ -246,3 +246,52 @@ test('appendCortexQuery: a throwing recall does NOT burn the once_per_session ma
     assert.equal(cortexHook.suppressedByFireMode(home, sessionId, memory), false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// renderProvider (GH-662) — the provider line `/synapsys recall` prints first
+// ---------------------------------------------------------------------------
+
+const { renderProvider } = require('../scripts/synapsys-recall.js');
+
+test('renderProvider: explicit module form', () => {
+  assert.equal(
+    renderProvider({ provider: 'module', source: '/opt/bridge.js', recall: () => [] }),
+    'provider: module /opt/bridge.js'
+  );
+});
+
+test('renderProvider: default bridge form names the db path', () => {
+  assert.equal(
+    renderProvider({ provider: 'bridge', source: '/home/me/.cortex/memory.db', recall: () => [] }),
+    'provider: default bridge (cortex sqlite, read-only): /home/me/.cortex/memory.db'
+  );
+});
+
+test('renderProvider: none form carries the reason; null resolution degrades to unresolved', () => {
+  assert.equal(
+    renderProvider({ provider: null, source: 'no cortex db at /x', recall: null }),
+    'provider: none (no cortex db at /x)'
+  );
+  assert.equal(renderProvider(null), 'provider: none (unresolved)');
+});
+
+test('main prints the provider line FIRST, before the recall status', () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'synapsys-recall-provider-'));
+  const prevMod = process.env.SYNAPSYS_CORTEX_RECALL_MODULE;
+  const prevDb = process.env.SYNAPSYS_CORTEX_DB;
+  try {
+    // Hermetic: no module, and the db override points nowhere → provider none.
+    delete process.env.SYNAPSYS_CORTEX_RECALL_MODULE;
+    process.env.SYNAPSYS_CORTEX_DB = path.join(home, 'absent', 'memory.db');
+    const lines = [];
+    main({ home, payload: {}, log: (s) => lines.push(s) });
+    assert.match(lines[0], /^provider: none \(/, 'provider line is the first line');
+    assert.equal(lines[1], 'no auto-recall this session');
+  } finally {
+    if (prevMod === undefined) delete process.env.SYNAPSYS_CORTEX_RECALL_MODULE;
+    else process.env.SYNAPSYS_CORTEX_RECALL_MODULE = prevMod;
+    if (prevDb === undefined) delete process.env.SYNAPSYS_CORTEX_DB;
+    else process.env.SYNAPSYS_CORTEX_DB = prevDb;
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
