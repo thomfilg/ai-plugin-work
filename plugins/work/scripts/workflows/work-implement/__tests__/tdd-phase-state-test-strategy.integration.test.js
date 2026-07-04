@@ -171,7 +171,11 @@ describe('GH-610 Task 2 — citation-kind evidence recording', () => {
     // Citation evidence shape: kind + peer + peerSha + scopeOverlap + recordedAt.
     assert.equal(cyc.green.kind, 'verified-by', 'green.kind must be the citation kind');
     assert.equal(cyc.green.peer, 'Task 1', 'green.peer must name the cited peer');
-    assert.equal(cyc.green.scopeOverlap, true, 'green.scopeOverlap must be true on a valid citation');
+    assert.equal(
+      cyc.green.scopeOverlap,
+      true,
+      'green.scopeOverlap must be true on a valid citation'
+    );
     assert.ok(
       typeof cyc.green.peerSha === 'string' && cyc.green.peerSha.length > 0,
       'green.peerSha must be a non-empty string'

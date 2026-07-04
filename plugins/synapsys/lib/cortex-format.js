@@ -1,0 +1,96 @@
+'use strict';
+
+const HEADER = '[cortex:auto-recall]';
+
+/**
+ * Render a calendar date (UTC) as `YYYY-MM-DD` from an ISO-8601 timestamp.
+ * A missing or invalid timestamp degrades to `null` (the caller omits the
+ * `saved …` annotation) rather than throwing and discarding the whole block.
+ * @param {string} savedAt ISO-8601 timestamp.
+ * @returns {string|null} `YYYY-MM-DD`, or `null` when the timestamp is missing/invalid.
+ */
+function savedDate(savedAt) {
+  const ms = new Date(savedAt).getTime();
+  if (!Number.isFinite(ms)) return null;
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+/**
+ * Render an integer age-in-days as a human relative-age annotation.
+ * @param {number} ageDays Age of the memory in days.
+ * @returns {string} e.g. `5 days ago`, `1 day ago`, `7 months ago`.
+ */
+function relativeAge(ageDays) {
+  if (ageDays < 1) return 'today';
+  if (ageDays < 30) {
+    return ageDays === 1 ? '1 day ago' : `${ageDays} days ago`;
+  }
+  if (ageDays < 365) {
+    const months = Math.floor(ageDays / 30);
+    return months === 1 ? '1 month ago' : `${months} months ago`;
+  }
+  const years = Math.floor(ageDays / 365);
+  return years === 1 ? '1 year ago' : `${years} years ago`;
+}
+
+/**
+ * Hard-cut a body to at most `maxChars`, appending `…` when truncated so the
+ * returned string is exactly `maxChars` long (maxChars-1 visible chars + `…`).
+ * @param {string} body Raw memory body.
+ * @param {number} maxChars Maximum rendered length including the `…` suffix.
+ * @returns {string} The body, truncated when longer than `maxChars`.
+ */
+function truncateBody(body, maxChars) {
+  if (typeof body !== 'string' || body.length <= maxChars) return body;
+  return `${body.slice(0, maxChars - 1)}…`;
+}
+
+/**
+ * Render a single result as a `- {id} (saved {YYYY-MM-DD}, {age}) — {title} :: {body}` line.
+ * @param {{id:string,savedAt:string,title:string,body:string,ageDays:number}} result Result entry.
+ * @param {number} maxChars Body truncation budget.
+ * @returns {string} The formatted result line.
+ */
+function formatLine(result, maxChars) {
+  const date = savedDate(result.savedAt);
+  const age = relativeAge(result.ageDays);
+  const body = truncateBody(result.body, maxChars);
+  // Omit the `saved …` segment when the timestamp is missing/invalid so a bad
+  // savedAt degrades to `(age)` instead of throwing and dropping the block.
+  const meta = date ? `(saved ${date}, ${age})` : `(${age})`;
+  return `- ${result.id} ${meta} — ${result.title} :: ${body}`;
+}
+
+/**
+ * Render the `[cortex:auto-recall]` injection block.
+ *
+ * For each query: results older than `maxAgeDays` are filtered out; the
+ * surviving results are then capped at `maxResults` (the documented
+ * `max_results_per_query` budget) and render one line each. A query with no
+ * surviving results renders the empty-result marker
+ * `[cortex:auto-recall] query="<q>" projectId="<p>" → no matches`.
+ *
+ * @param {{queries:Array<{query:string,projectId:string,results:Array}>,maxAgeDays:number,maxChars:number,maxResults?:number}} args Block inputs.
+ * @returns {string} The rendered multi-line block.
+ */
+function formatBlock({ queries, maxAgeDays, maxChars, maxResults }) {
+  const cap = Number.isFinite(maxResults) && maxResults >= 0 ? maxResults : Infinity;
+  const blocks = [];
+  for (const q of queries) {
+    // A missing/non-finite ageDays means the recall result carried no age
+    // metadata — treat it as fresh (age 0) rather than letting `undefined <=
+    // maxAgeDays` evaluate false and silently drop every such result.
+    const fresh = (q.results || [])
+      .filter((r) => (Number.isFinite(r.ageDays) ? r.ageDays : 0) <= maxAgeDays)
+      .slice(0, cap);
+    if (fresh.length === 0) {
+      blocks.push(`${HEADER} query="${q.query}" projectId="${q.projectId}" → no matches`);
+      continue;
+    }
+    const lines = [HEADER, ...fresh.map((r) => formatLine(r, maxChars))];
+    blocks.push(lines.join('\n'));
+  }
+  return blocks.join('\n');
+}
+
+module.exports = { formatBlock, relativeAge, formatLine, truncateBody };

@@ -21,10 +21,11 @@ function _extractStopResponse(payload) {
 
 // Stop event fires at the assistant's turn end. The classifier matrix assigns
 // Stop to memories that are retrospective checks ("did I run follow-up-pr?",
-// "cleanup the tmp file"). When `triggerStopResponse` is absent, the memory
-// fires unconditionally for any Stop hook (backward-compat). When present, the
-// memory only fires if the assistant's response (NOT tool inputs/results)
-// matches the regex.
+// "cleanup the tmp file"). A memory with NO `trigger_stop_response` never
+// fires on Stop: Stop stdout does not reach the model, so an unconditional
+// fire would only churn the ledger/telemetry every turn end (fail-open noise
+// with zero signal). When the field is present, the memory only fires if the
+// assistant's response (NOT tool inputs/results) matches the regex.
 //
 // @param {object} memory
 // @param {object} [payload] Stop hook payload; consulted only when
@@ -34,7 +35,9 @@ function matchStop(memory, payload, helpers) {
   const { gateMemory, safeRegex, makeMatched } = helpers;
   const gate = gateMemory(memory, 'Stop');
   if (gate) return { fired: false, reason: gate };
-  if (!memory.triggerStopResponse) return { fired: true };
+  if (!memory.triggerStopResponse) {
+    return { fired: false, reason: 'no-stop-response-configured' };
+  }
 
   const regex = safeRegex(memory.triggerStopResponse, 'i');
   if (!regex) {

@@ -13,183 +13,54 @@
  *
  * Fail-open: any error → exit 0 with no output. Memory injection must
  * never block the user's prompt or tool call.
+ *
+ * Cortex auto-recall (Task 9, R1/R7/R13/R14/R18):
+ *   - SessionStart fires a detached, fire-and-forget background recall of up to
+ *     two queries (the ticket id + a derived keyword query) via
+ *     `cortex-recall.scheduleRecall`. Results land in a session-cache file.
+ *   - UserPromptSubmit consumes that cache and prepends a `[cortex:auto-recall]`
+ *     block to the normal injection output, then deletes the cache (single
+ *     consume).
+ *   - Any fired memory carrying a `cortex_query` frontmatter field triggers an
+ *     inline recall whose formatted results are appended below the memory body.
+ *     This path is additive: memories without the field are byte-for-byte
+ *     unchanged, and the whole feature degrades silently when cortex is
+ *     unavailable.
  */
 
 const path = require('node:path');
 const { discoverStores, listMemoriesFromStore } = require(
   path.join(__dirname, '..', 'lib', 'memory-store')
 );
-const { selectForEvent } = require(path.join(__dirname, '..', 'lib', 'matcher'));
+const { computeMatched } = require(path.join(__dirname, 'lib', 'subagent-matches'));
+const { emitMatched } = require(path.join(__dirname, 'lib', 'emit-matched'));
 const { buildActiveDomains } = require(path.join(__dirname, '..', 'lib', 'active-domains'));
 const { saveStickyState } = require(path.join(__dirname, '..', 'lib', 'sticky-state'));
 const injectLedger = require('../lib/inject-ledger');
-const { recordFired, isDisabled } = require(path.join(__dirname, '..', 'lib', 'telemetry'));
 const { runCiteScan, runBehaviorScan } = require(path.join(__dirname, '..', 'lib', 'cite-scan'));
 const pretoolWindow = require(path.join(__dirname, '..', 'lib', 'pretool-window'));
-const { demoteToFit } = require('../lib/budget');
-const { expectedCommandsFor, resolveAndEmitDivergences } = require(
-  path.join(__dirname, 'lib', 'behavior-changed')
-);
+const { resolveAndEmitDivergences } = require(path.join(__dirname, 'lib', 'behavior-changed'));
+// GH-520 enforce mode (advise|suggest|block). All enforcement logic lives in
+// hooks/lib/enforce.js to keep this dispatcher under the static-gate budget.
+const enforce = require(path.join(__dirname, 'lib', 'enforce'));
+// Budget-aware renderer (decideInjection policy, reverse-walk demotion, ledger
+// commit, subagent force-full, cortex_query-augmented body formatting) lives in
+// lib/render-budget.js (extracted to keep this dispatcher under the static-gate
+// line budget). The dispatcher consumes the destructured entry points below.
+const { SEP, renderMatchedMemories } = require(path.join(__dirname, '..', 'lib', 'render-budget'));
 
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Budget constants (brief P0 R1 / R3 / spec §P0 #1).
-//
-// MAX_INJECT_CHARS — soft cap on total injected text. Memories that cause the
-//   matched set to exceed this limit are demoted to summary form (reverse-walk),
-//   never silently dropped (brief P0 R8 / spec §P0 #8).
-// SKIP_DEMOTION_BELOW — memories whose full body is below this size are never
-//   chosen for demotion: their full text is small enough to always inject
-//   in full (brief P0 R3 / spec §P0 #3).
-//
-// Both may be overridden at runtime via `SYNAPSYS_INJECT_BUDGET` (positive
-// integer; brief P2 R12 / spec §P2 #1). See `resolveActiveBudget`.
-// ─────────────────────────────────────────────────────────────────────────────
-const MAX_INJECT_CHARS = 16000;
-const SKIP_DEMOTION_BELOW = 2000;
+const cortexHook = require(path.join(__dirname, '..', 'lib', 'cortex-hook'));
+const { scheduleSessionRecall, consumeAutoRecall, cortexQueryContext } = cortexHook;
 
-function resolveActiveBudget() {
-  const raw = process.env.SYNAPSYS_INJECT_BUDGET;
-  if (raw == null || raw === '') return MAX_INJECT_CHARS;
-  const parsed = parseInt(raw, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : MAX_INJECT_CHARS;
-}
-
-/**
- * decideInjection — pure helper implementing the brief AC-5 renderer policy.
- *
- *   always       → full body on every match
- *   once         → full body iff injectedCount === 0, else reminder
- *   occasionally → full body iff injectedCount % fireCadence === 0, else reminder
- *
- * `ledgerEntry` is the per-memory record from `loadLedger().memories[name]`
- * (or `undefined` for "never injected this session").
- */
-function resolveCadence(memory) {
-  const raw = Number(memory && memory.fireCadence);
-  return raw > 0 ? raw : 5;
-}
-
-function decideInjection(memory, ledgerEntry) {
-  const mode = (memory && memory.fireMode) || 'once';
-  const count = Number(ledgerEntry && ledgerEntry.injectedCount) || 0;
-  if (mode === 'always') return { kind: 'full' };
-  if (mode === 'occasionally') {
-    const cadence = resolveCadence(memory);
-    return { kind: count % cadence === 0 ? 'full' : 'reminder' };
-  }
-  // default: once
-  return { kind: count === 0 ? 'full' : 'reminder' };
-}
-
-function reminderLine(memory) {
-  return `[synapsys:active] ${memory.name} (fired earlier; full body in this session)`;
-}
-
-/**
- * renderMatchedMemories — per-memory loop wrapper. Routes each match through
- * the ledger + decideInjection + recordInjection. The entire call is fail-open
- * (R1): any throw → fall back to formatting every memory as full body.
- */
-const SEP = '\n\n---\n\n';
-
-function commitInjection(ledger, sessionId, memory, isFull) {
-  const entry = ledger.memories[memory.name];
-  const prevCount = Number(entry && entry.injectedCount) || 0;
-  const prevLast = Number(entry && entry.lastFullInjectAt) || 0;
-  const nextCount = prevCount + 1;
-  ledger.memories[memory.name] = {
-    injectedCount: nextCount,
-    lastFullInjectAt: isFull ? nextCount : prevLast,
-  };
-  try {
-    injectLedger.recordInjection(sessionId, memory.name, { full: isFull });
-  } catch {
-    /* fail-open */
-  }
-}
-
-// Budget-aware renderer (brief P0 R1/R2/R4–R8). After the per-memory
-// decideInjection pass, run a reverse-walk demotion to bring the total under
-// `activeBudget`. Ledger semantics (brief P0 R6):
-//   initialKind='full'  && finalKind='full'     → commitInjection(..., true)
-//   initialKind='reminder'                       → commitInjection(..., false)
-//   initialKind='full'  && finalKind='reminder' → NO commitInjection (re-fires
-//                                                  in full on the next match).
-// The whole call is wrapped in `try` so any throw falls open to the plain
-// formatMemory join — memory injection must never block the user (spec §Security).
-function buildEntry(memory, ledgerMemories) {
-  const kind = decideInjection(memory, ledgerMemories[memory.name]).kind;
-  return {
-    memory,
-    initialKind: kind,
-    finalKind: kind,
-    fullText: formatMemory(memory),
-    summaryText: reminderLine(memory),
-  };
-}
-
-function emitEntries(entries, ledger, sessionId) {
-  let demotedCount = 0;
-  const pieces = [];
-  for (const e of entries) {
-    const isFull = e.finalKind === 'full';
-    pieces.push(isFull ? e.fullText : e.summaryText);
-    if (e.initialKind === 'full' && e.finalKind === 'reminder') {
-      // Budget-induced demotion: do NOT bump the ledger so the memory
-      // re-fires in full on the next match (brief P0 R6 / G5).
-      demotedCount += 1;
-      continue;
-    }
-    commitInjection(ledger, sessionId, e.memory, isFull);
-  }
-  return { body: pieces.join(SEP), demotedCount };
-}
-
-function writeStderrLine(line) {
-  try {
-    process.stderr.write(line);
-  } catch {
-    /* fail-open */
-  }
-}
-
-function emitBudgetAlerts(demotedCount, bodyLength, activeBudget) {
-  // Stderr alert (brief P0 R7 / spec §Security: count-only, no names/bodies).
-  if (demotedCount > 0) {
-    writeStderrLine(
-      `[synapsys] ${demotedCount} memories summarized to fit ${activeBudget}-char budget — they will inject in full on next match.\n`
-    );
-  }
-  // Debug stderr line when SYNAPSYS_DEBUG=1 (brief P1 R11).
-  if (process.env.SYNAPSYS_DEBUG === '1') {
-    writeStderrLine(`[synapsys:debug] budget ${bodyLength}/${activeBudget}\n`);
-  }
-}
-
-function renderMatchedMemories(matched, sessionId) {
-  try {
-    const ledger = injectLedger.loadLedger(sessionId);
-    if (!ledger.memories || typeof ledger.memories !== 'object') {
-      ledger.memories = {};
-    }
-    const activeBudget = resolveActiveBudget();
-    const entries = matched.map((m) => buildEntry(m, ledger.memories));
-    demoteToFit(entries, {
-      limit: activeBudget,
-      sep: SEP,
-      skipBelow: SKIP_DEMOTION_BELOW,
-    });
-    const { body, demotedCount } = emitEntries(entries, ledger, sessionId);
-    emitBudgetAlerts(demotedCount, body.length, activeBudget);
-    return body;
-  } catch {
-    return matched.map(formatMemory).join(SEP);
-  }
-}
-
-const VALID_EVENTS = new Set(['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'Stop']);
+const VALID_EVENTS = new Set([
+  'SessionStart',
+  'UserPromptSubmit',
+  'PreToolUse',
+  'PostToolUse',
+  'Stop',
+]);
 
 async function readStdin() {
   if (process.stdin.isTTY) return '';
@@ -213,42 +84,7 @@ function parsePayload(raw) {
   }
 }
 
-function formatMemory(m) {
-  const header = `[synapsys:${m.store.kind}] ${m.name} — ${m.description || '(no description)'}`;
-  if (m.inject === 'full') {
-    return `${header}\n\n${m.body.trim()}`;
-  }
-  return `${header}\n  source: ${m.file}`;
-}
-
-const SETUP_REQUIRED_HINT =
-  '[synapsys:setup-required] No Synapsys memory store is configured for this repo/worktree.\n\n' +
-  'AGENT: As your FIRST action this session, surface this to the user and offer to run `/synapsys:install`. Recommend the kind based on context:\n' +
-  '  - If `git worktree list` shows >1 entry → recommend `worktree` (shared across all worktrees of this repo)\n' +
-  '  - Otherwise → recommend `local`\n' +
-  '  - Mention `global` (per-project, survives worktree deletion) and `shared` (one store reused across ALL projects) as options\n\n' +
-  'Do NOT install without asking — present the recommendation via `AskUserQuestion` so the user can confirm or choose differently. If the user declines, set SYNAPSYS_NO_SETUP_HINT=1 to silence this prompt for future sessions.';
-
-function emptyStoreHint(stores) {
-  const dirs = stores.map((s) => `${s.kind} (${s.dir})`).join(', ');
-  return (
-    `[synapsys:empty-store] Memory store(s) ready: ${dirs}. No memories yet.\n\n` +
-    'AGENT: Mention this to the user and offer two paths:\n' +
-    "  - `/synapsys:crystallize` — import Claude's existing auto-memories (if any exist for this repo)\n" +
-    '  - `/synapsys:memorize "<what to remember>"` — add a memory manually\n\n' +
-    'Do not auto-run either — let the user pick. If they decline, set SYNAPSYS_NO_SETUP_HINT=1 to silence.'
-  );
-}
-
-// Returns a hint string when SessionStart fires with no store or no memories.
-// Returns null when no hint should be emitted (hint disabled or store + memories present).
-function getSessionStartHint(event, stores, memories) {
-  if (event !== 'SessionStart') return null;
-  if (process.env.SYNAPSYS_NO_SETUP_HINT === '1') return null;
-  if (!stores.length) return SETUP_REQUIRED_HINT;
-  if (!memories.length) return emptyStoreHint(stores);
-  return null;
-}
+const { getSessionStartHint } = require(path.join(__dirname, '..', 'lib', 'setup-hints'));
 
 // Build the activeDomains opts for selectForEvent. Delegates to the
 // shared resolver so synapsys-explain stays in lockstep. Uses the
@@ -266,40 +102,37 @@ function buildActiveDomainsForPayload(event, payload) {
 // Pass-through wrapper retained for call-site symmetry. The renderer now owns
 // the budget pass (demote-instead-of-drop), so no slice fallback is needed —
 // brief P0 R8 / spec §P0 #8 explicitly forbids silent truncation.
-function formatMatchedOutput(matched, sessionId) {
-  return renderMatchedMemories(matched, sessionId);
+//
+// Stop renders WITHOUT committing the fire_mode ledger: Stop stdout never
+// reaches the model, so a ledger commit here would invisibly burn e.g. a
+// `fire_mode: once` memory's single full-body injection for output the model
+// never sees. Telemetry (`fired` via emitMatched) is unaffected.
+function formatMatchedOutput(event, matched, sessionId, payload, subagentNames) {
+  return renderMatchedMemories(matched, sessionId, cortexQueryContext(payload), subagentNames, {
+    commitLedger: event !== 'Stop',
+  });
 }
 
-function emitMatched(matched, payload, event, sessionId) {
-  if (!matched.length) return;
-  for (const m of matched) {
-    try {
-      recordFired(m, payload, event);
-    } catch {
-      // fail-open
-    }
-    // Path A: when a memory with a trigger_pretool rule fires on PreToolUse,
-    // record the expected command so a subsequent divergent PreToolUse can
-    // surface a one-off behavior_changed event.
-    if (event === 'PreToolUse' && !isDisabled(m)) {
-      const expectedAll = expectedCommandsFor(m);
-      if (expectedAll.length > 0) {
-        try {
-          pretoolWindow.recordExpectation(sessionId, m.name, expectedAll);
-        } catch {
-          // fail-open
-        }
-      }
-    }
-  }
-}
+// ---------------------------------------------------------------------------
+// Cortex auto-recall wiring lives in lib/cortex-hook.js and the budget-aware
+// renderer lives in lib/render-budget.js (both extracted to keep this
+// dispatcher under the static-gate line budget). The dispatcher consumes the
+// destructured entry points pulled in at the top of this file.
+// ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Dispatcher entry point
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the session id for the dispatch and publish it to `.current` so
+ * out-of-process callers (synapsys-list CLI) read the same session ledger the
+ * dispatcher writes to. Fail-open: any throw → '' and the dispatcher behaves
+ * like the pre-ledger code path.
+ */
 function resolveSessionForPayload(payload) {
   try {
     const sessionId = injectLedger.resolveSessionId(payload);
-    // Publish the resolved id to `.current` so out-of-process callers
-    // (synapsys-list CLI) read the same session ledger the dispatcher
-    // writes to. Fail-open: a write error never blocks the dispatcher.
     injectLedger.publishCurrentSessionId(sessionId);
     return sessionId;
   } catch {
@@ -307,9 +140,32 @@ function resolveSessionForPayload(payload) {
   }
 }
 
+// GH-497 R1/R2 (+GH-473): branch the on-match write by event. PreToolUse and
+// PostToolUse emit the injection as `hookSpecificOutput.additionalContext`
+// JSON — raw stdout is NOT added to model context for tool-use events, only
+// for UserPromptSubmit/SessionStart. Other events keep raw stdout. Empty
+// guard = no-match identity.
+const ENVELOPE_EVENTS = new Set(['PreToolUse', 'PostToolUse']);
+
+function writeMatchedOutput(event, out) {
+  if (!out) return;
+  if (ENVELOPE_EVENTS.has(event)) {
+    process.stdout.write(
+      JSON.stringify({
+        hookSpecificOutput: { hookEventName: event, additionalContext: out },
+      })
+    );
+  } else {
+    process.stdout.write(out);
+  }
+}
+
+/**
+ * SessionStart housekeeping: reset the per-session ledger (brief AC-4 / spec
+ * §3.3) and opportunistically GC stale ledger files older than 7 days (spec
+ * §4.2). Fail-open.
+ */
 function maybeResetSessionLedger(event, sessionId) {
-  // SessionStart resets the per-session ledger (brief AC-4 / spec §3.3) and
-  // opportunistically GCs stale ledger files older than 7 days (spec §4.2).
   if (event !== 'SessionStart') return;
   try {
     injectLedger.resetLedgerForSession(sessionId);
@@ -319,6 +175,28 @@ function maybeResetSessionLedger(event, sessionId) {
   }
 }
 
+/**
+ * Assemble the final injection text: the Phase 1 auto-recall block (prepended)
+ * plus the budget-aware rendered memory output. Returns '' when neither
+ * produces content. Both halves are independently budget-governed.
+ */
+function buildOutput(event, autoBlock, matched, sessionId, payload, subagentNames) {
+  const sections = [];
+  if (autoBlock) sections.push(autoBlock);
+  const memOutput = matched.length
+    ? formatMatchedOutput(event, matched, sessionId, payload, subagentNames)
+    : '';
+  if (memOutput) sections.push(memOutput);
+  return sections.join(SEP);
+}
+
+/**
+ * Stop-time scans. The cite scan reads the session JSONL state from BEFORE
+ * this turn's Stop-time fired writes (Stop-injections happen after the
+ * assistant response, so attributing citations to them would be a false
+ * positive). Also runs the behavior-changed scan and clears the per-turn
+ * pretool-window dedup. Each scan is independently fail-open.
+ */
 function runStopScans(payload, memories, sessionId) {
   try {
     runCiteScan(payload, memories);
@@ -337,12 +215,32 @@ function runStopScans(payload, memories, sessionId) {
   }
 }
 
+// A block deny is the ONLY response — no additionalContext mixing, and no
+// fire_mode ledger commit (buildOutput is skipped so the blocked memory
+// re-injects in full on its next legitimate match).
+function emitDeny(deny) {
+  process.stdout.write(
+    JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason: deny.message,
+      },
+    })
+  );
+  process.exit(0);
+}
+
 async function dispatch() {
   const event = process.argv[2];
   if (!VALID_EVENTS.has(event)) process.exit(0);
 
   const payload = parsePayload(await readStdin());
   const cwd = payload.cwd || process.cwd();
+
+  // SessionStart: kick off the detached background recall before anything else.
+  if (event === 'SessionStart') scheduleSessionRecall(payload);
+
   const stores = discoverStores(cwd);
   const memories = stores.flatMap(listMemoriesFromStore);
 
@@ -351,6 +249,10 @@ async function dispatch() {
   // the dispatcher behaves like the pre-ledger code path.
   const sessionId = resolveSessionForPayload(payload);
   maybeResetSessionLedger(event, sessionId);
+
+  // UserPromptSubmit: the Phase 1 auto-recall block is prepended to any memory
+  // output (consumes + deletes the background recall cache).
+  const autoBlock = event === 'UserPromptSubmit' ? consumeAutoRecall(payload) : '';
 
   const sessionHint = getSessionStartHint(event, stores, memories);
   if (sessionHint) {
@@ -362,7 +264,7 @@ async function dispatch() {
   // even when the memory list is empty. Fail-open: on any error, omit
   // `opts.activeDomains` to preserve pre-classifier behavior.
   const selectOpts = buildActiveDomainsForPayload(event, payload);
-  const matched = memories.length ? selectForEvent(memories, event, payload, selectOpts) : [];
+  const { matched, subagentNames } = computeMatched(event, memories, payload, selectOpts);
 
   // On Stop the cite scan must read the session JSONL state from BEFORE
   // this turn's Stop-time fired writes; Stop-injections happen after the
@@ -372,15 +274,32 @@ async function dispatch() {
   // Path A on PreToolUse: resolve pending expectations against the observed
   // command BEFORE recording new ones, so a memory firing this turn does not
   // immediately get aged out by its own observed command.
+  // GH-520: enforce evaluation (block/suggest/override + classifier state
+  // observation) runs on every PreToolUse dispatch. Fail-open inside
+  // evaluatePreTool — a fault degrades to plain advise injection, never deny.
+  let enforcement = { deny: null, nudges: [] };
   if (event === 'PreToolUse') {
     resolveAndEmitDivergences(payload, memories, sessionId);
+    enforcement = enforce.evaluatePreTool(matched, payload, sessionId, subagentNames);
   }
   if (event === 'Stop') {
     runStopScans(payload, memories, sessionId);
   }
-  emitMatched(matched, payload, event, sessionId);
+  emitMatched(matched, payload, event, sessionId, subagentNames);
 
-  process.stdout.write(formatMatchedOutput(matched, sessionId));
+  if (enforcement.deny) emitDeny(enforcement.deny);
+
+  // Assemble the Phase 1 auto-recall block (prepended) with the budget-aware
+  // rendered memory output. Memory text is already governed by the renderer
+  // (demote, don't truncate); the auto-recall block is independently bounded
+  // by the cortex config. No hard clamp here — that would contradict the
+  // graceful-demotion contract (dispatcher-budget). Tool-use events wrap the
+  // text in the additionalContext JSON envelope (GH-497/GH-473).
+  const output = enforce.appendNudges(
+    buildOutput(event, autoBlock, matched, sessionId, payload, subagentNames),
+    enforcement.nudges
+  );
+  writeMatchedOutput(event, output);
   process.exit(0);
 }
 

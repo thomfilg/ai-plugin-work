@@ -31,10 +31,17 @@ Apply judgment per field:
 |---|---|
 | `name` | Short kebab-slug from the gist (e.g. `jira-search-first`, `rm-rf-confirm`). Must be unique. |
 | `desc` | One line under ~100 chars: when it should fire + what to do |
-| `events` | **ALWAYS `UserPromptSubmit,PreToolUse`** (user rule — no exceptions, even for "conversation-state" memories). Add `SessionStart` only if the memory must inject unconditionally at session start. |
+| `events` | **ALWAYS `UserPromptSubmit,PreToolUse`** (user rule — no exceptions, even for "conversation-state" memories). Add `SessionStart` only if the memory must inject unconditionally at session start. `PostToolUse` (tool-output inspection) and `Stop` (retrospective turn-end checks against the assistant's response) are also valid. PreToolUse/PostToolUse output IS delivered to the model — via the `hookSpecificOutput.additionalContext` envelope. |
 | `prompt` | REQUIRED. Form: `\b(kw1\|kw2\|...)\b`, lowercase. Match is case-insensitive. Be specific — avoid catch-all alternation. Pull 3–8 keywords from the description and body. |
-| `pretool` | REQUIRED. Comma list of `<Tool>:<arg-regex>`. Pick the tool actions that should remind the agent (e.g. `Bash:gh\s+pr` for PR-related memories, `Edit:\.claude/` for plugin-folder memories). Use `*:<regex>` to match any tool if the memory applies broadly. Never leave empty. |
+| `pretool` | REQUIRED (also for `PostToolUse` targeting). Comma list of `<Tool>:<arg-regex>`. Pick the tool actions that should remind the agent (e.g. `Bash:gh\s+pr` for PR-related memories, `Edit:\.claude/` for plugin-folder memories). Use `*:<regex>` to match any tool if the memory applies broadly. Never leave empty. |
+| `stop-response` | REQUIRED when events includes `Stop`. Regex matched (case-insensitive) against the assistant's turn-end response — a Stop memory without it never fires. Writes `trigger_stop_response`. |
+| `fire-mode` | Optional: `always`, `once` (default), or `occasionally` — how often the full body re-injects per session. |
+| `fire-cadence` | Optional positive integer (default 5). Only meaningful with `fire-mode=occasionally`: full body re-injects every Nth match. |
+| `domain` | Optional csv of domain tags gating the memory to the live domain classifier (see `/synapsys:status`). |
 | `inject` | `full` for short critical rules (≤ ~20 body lines). `summary` for long playbooks where the agent should Read on demand. |
+| `enforce` | Optional: `advise` (default — inject only), `suggest` (inject + one-line nudge), or `block` (deny the tool call on PreToolUse match, overridable per-call via `# synapsys:override=<name> reason="<10+ chars>"`). `block`/`suggest` require at least one `pretool` trigger. Reserve `block` for rules the user explicitly wants ENFORCED, not just remembered. |
+| `enforce-classifier` | Optional, only with `enforce=block`: `symbol-shape` (block identifier-shaped grep/rg lookups) or `first-edit-of-session` (block the session's first edit unless a satisfier tool ran). Without it, the pretool trigger itself is the block condition. |
+| `enforce-satisfied-by` | Optional tool-name regex for `first-edit-of-session` (e.g. `cortex_recall`) — a prior tool call matching it satisfies the gate. |
 
 ### 3. Confirm the derived form with the user
 
@@ -60,6 +67,8 @@ cat <<'BODY' | node "${CLAUDE_PLUGIN_ROOT}/scripts/synapsys-memorize.js" \
 <the body markdown the agent composed>
 BODY
 ```
+
+Optional flags: `--stop-response='<regex>'` (required if events includes `Stop`), `--fire-mode=<always|once|occasionally>`, `--fire-cadence=<n>`, `--domain=<csv>`, `--enforce=<advise|suggest|block>`, `--enforce-classifier=<symbol-shape|first-edit-of-session>`, `--enforce-satisfied-by='<tool-name regex>'`.
 
 The script validates name/events/triggers and writes the file. It prints JSON with the path written.
 

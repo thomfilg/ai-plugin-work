@@ -22,7 +22,7 @@ const COST_PER_JUDGED_ITEM =
 /**
  * Render the aggregated report as machine-readable JSON (R9, G6).
  *
- * Spec §Security — `ANTHROPIC_API_KEY` is never included in output; this
+ * Spec §Security — no separate API credential is serialised into output; this
  * function only serialises the inputs it is handed (no env access).
  */
 /**
