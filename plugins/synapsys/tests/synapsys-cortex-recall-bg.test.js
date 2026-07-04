@@ -193,8 +193,13 @@ test('resolveRecallFn: returns the recall fn from SYNAPSYS_CORTEX_RECALL_MODULE 
 test('resolveRecallFn: falls open to an empty-result stub when the module env is unset or unloadable', async () => {
   const mod = loadBg();
   const prev = process.env.SYNAPSYS_CORTEX_RECALL_MODULE;
+  const prevDb = process.env.SYNAPSYS_CORTEX_DB;
   try {
     delete process.env.SYNAPSYS_CORTEX_RECALL_MODULE;
+    // Hermetic (GH-662): with the module env unset, resolution now probes the
+    // default cortex bridge. Pin the db override to a nonexistent path so a
+    // real ~/.cortex on the test machine cannot make the bridge resolve here.
+    process.env.SYNAPSYS_CORTEX_DB = '/no/such/cortex-662/memory.db';
     assert.deepEqual(await mod.resolveRecallFn()('q', 'p'), [], 'unset → empty stub');
 
     process.env.SYNAPSYS_CORTEX_RECALL_MODULE = '/no/such/bridge-module-xyz.js';
@@ -206,5 +211,7 @@ test('resolveRecallFn: falls open to an empty-result stub when the module env is
   } finally {
     if (prev === undefined) delete process.env.SYNAPSYS_CORTEX_RECALL_MODULE;
     else process.env.SYNAPSYS_CORTEX_RECALL_MODULE = prev;
+    if (prevDb === undefined) delete process.env.SYNAPSYS_CORTEX_DB;
+    else process.env.SYNAPSYS_CORTEX_DB = prevDb;
   }
 });

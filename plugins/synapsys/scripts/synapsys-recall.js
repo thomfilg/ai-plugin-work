@@ -5,6 +5,7 @@ const os = require('node:os');
 const sessionCache = require('../lib/session-cache.js');
 const injectLedger = require('../lib/inject-ledger.js');
 const consumeSentinel = require('../lib/consume-sentinel.js');
+const cortexProvider = require('../lib/cortex-provider.js');
 
 const EMPTY_MESSAGE = 'no auto-recall this session';
 
@@ -51,6 +52,26 @@ function renderStatus(cache) {
 }
 
 /**
+ * Render the resolved recall-provider line for the status report (GH-662):
+ * the explicit module path, the default sqlite bridge with its db path, or
+ * `none` with the reason recall is disabled.
+ *
+ * @param {{ provider?: string|null, source?: string }|null|undefined} resolved
+ *   output of `cortex-provider.resolveRecall` (null when resolution threw)
+ * @returns {string}
+ */
+function renderProvider(resolved) {
+  if (resolved && resolved.provider === 'module') {
+    return `provider: module ${resolved.source}`;
+  }
+  if (resolved && resolved.provider === 'bridge') {
+    return `provider: default bridge (cortex sqlite, read-only): ${resolved.source}`;
+  }
+  const reason = resolved && resolved.source ? resolved.source : 'unresolved';
+  return `provider: none (${reason})`;
+}
+
+/**
  * Resolve the active session id through the SAME resolver the hook's cortex
  * cache uses (`injectLedger.resolveSessionId`): env `CLAUDE_CODE_SESSION_ID` →
  * sanitized `payload.session_id` → `.current` → hashed-cwd fallback. Using the
@@ -71,6 +92,15 @@ function resolveSessionId({ payload = {} } = {}) {
  */
 function main({ home = os.homedir(), payload = {}, log = console.log } = {}) {
   const sessionId = resolveSessionId({ payload });
+  // Surface which recall provider is in effect (explicit module > default
+  // bridge > none) so a silent-because-unconfigured session is diagnosable.
+  let resolved = null;
+  try {
+    resolved = cortexProvider.resolveRecall({ env: process.env, home });
+  } catch {
+    resolved = null;
+  }
+  log(renderProvider(resolved));
   // Prefer the live pre-consume cache; once the first UserPromptSubmit has
   // single-consumed (and deleted) it, fall back to the READ-ONLY post-consume
   // summary so the status surface still reports this session's recall (GH-519).
@@ -82,7 +112,7 @@ function main({ home = os.homedir(), payload = {}, log = console.log } = {}) {
   log(renderStatus(record));
 }
 
-module.exports = { renderStatus, main, resolveSessionId };
+module.exports = { renderStatus, renderProvider, main, resolveSessionId };
 
 if (require.main === module) {
   main();
