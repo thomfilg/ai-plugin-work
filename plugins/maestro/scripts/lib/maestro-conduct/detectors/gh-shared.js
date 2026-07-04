@@ -71,23 +71,26 @@ function prNumberForBranch(repo, branch) {
 /**
  * Look up the open PR for a ticket. The worktree's CHECKED-OUT branch is the
  * authoritative head (exact match — never a fuzzy `--search`, which has
- * mis-matched another ticket's PR and reaped the wrong agent); the historical
- * `<ticket>-maestro` name is the fallback for worktrees that moved off their
- * original branch. Some remotes reject `*-maestro` branch names entirely, so
- * agents push under repo-convention names — branch-blind detection was why
- * live PRs showed `0 pr-pending` heartbeats.
+ * mis-matched another ticket's PR and reaped the wrong agent); the bare
+ * ticket id (current bootstrap default) and the historical `<ticket>-maestro`
+ * name are fallbacks for worktrees that moved off their original branch. Some
+ * remotes reject `*-maestro` branch names entirely, so agents push under
+ * repo-convention names — branch-blind detection was why live PRs showed
+ * `0 pr-pending` heartbeats.
  * Returns the PR number or null when no open PR exists / lookup fails.
  */
 function prNumberFor(ticket, worktree) {
   const repo = repoSlug(worktree);
   if (!repo) return null;
+  const tried = new Set();
   const currentBranch = gitOut(worktree, ['rev-parse', '--abbrev-ref', 'HEAD']);
-  if (currentBranch && currentBranch !== 'HEAD') {
-    const hit = prNumberForBranch(repo, currentBranch);
+  for (const branch of [currentBranch, ticket, `${ticket}-maestro`]) {
+    if (!branch || branch === 'HEAD' || tried.has(branch)) continue;
+    tried.add(branch);
+    const hit = prNumberForBranch(repo, branch);
     if (hit) return hit;
-    if (currentBranch === `${ticket}-maestro`) return null; // already checked
   }
-  return prNumberForBranch(repo, `${ticket}-maestro`);
+  return null;
 }
 
 module.exports = { spawnOut, gitOut, headSha, deriveRepo, repoSlug, prNumberFor };

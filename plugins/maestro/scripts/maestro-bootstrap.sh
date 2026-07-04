@@ -223,11 +223,13 @@ git -C "$REPO_DIR" fetch origin "$BASE_BRANCH" 2>&1 | tail -1
 
 # ── Branch naming (was a hardcoded "$TICKET-maestro" literal). Some remotes
 #    reject `*-maestro` branch names outright, forcing agents onto ad-hoc
-#    branches the conductor's PR detection couldn't see. MAESTRO_BRANCH_TEMPLATE
+#    branches the conductor's PR detection couldn't see — and the operator
+#    explicitly asked for the suffix to go ("I don't like {ticket}-maestro").
+#    Default is now the bare ticket id (PR #603 decision). MAESTRO_BRANCH_TEMPLATE
 #    supports {ticket} (e.g. ECHO-6245) and {ticket_lower} placeholders; set it
 #    in the project's ../.envrc to match the repo's branch-name rules, e.g.
 #    MAESTRO_BRANCH_TEMPLATE='feature/{ticket_lower}'.
-BRANCH_TEMPLATE="${MAESTRO_BRANCH_TEMPLATE:-{ticket}-maestro}"
+BRANCH_TEMPLATE="${MAESTRO_BRANCH_TEMPLATE:-{ticket}}"
 
 branch_for_ticket() {
   local t="$1" out="$BRANCH_TEMPLATE"

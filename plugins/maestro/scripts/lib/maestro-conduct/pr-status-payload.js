@@ -36,17 +36,27 @@ function buildPayload({ ctx, sHit, workSession, tmux }) {
   const paneTail = isReady
     ? undefined
     : tmux.capture(workSession).split('\n').slice(-40).join('\n');
+  // Copy-paste-able first move (PR #603). Repo resolved from the worktree —
+  // never hardcoded, maestro drives fleets across arbitrary repos.
+  const { repoSlug } = require('./detectors/gh-shared');
+  const repo = repoSlug(ctx.worktree);
+  const repoFlag = repo ? ` --repo ${repo}` : '';
+  const unblockCmd = isReady
+    ? `gh pr view ${sHit.prNumber}${repoFlag} --web   # inspect, then merge per never-auto-merge-pr`
+    : `gh pr checks ${sHit.prNumber}${repoFlag} && tmux capture-pane -t ${workSession} -p | tail -40   # see failures + nudge agent`;
   return {
     session: workSession,
     ticket: ctx.ticket,
     kind: sHit.kind,
     phase: ctx.phase,
+    skill: ctx.skill,
     prNumber: sHit.prNumber,
     sha: sHit.sha,
     checksState: sHit.checksState,
     mergeable: sHit.mergeable,
     failingChecks: sHit.failingChecks,
     ...(paneTail ? { paneTail } : {}),
+    unblockCmd,
     instruction,
   };
 }

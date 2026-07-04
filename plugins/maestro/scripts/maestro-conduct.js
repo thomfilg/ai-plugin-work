@@ -37,6 +37,7 @@ const questionHandler = require('./lib/maestro-conduct/question-handler');
 const singletonGuard = require('./lib/maestro-conduct/singleton-guard');
 const progress = require('./lib/maestro-conduct/progress');
 const runners = require('./lib/maestro-conduct/detector-runners');
+const { detectPhaseAdvance } = require('./lib/maestro-conduct/phase-advance');
 
 const DETECTORS = {
   question: require('./lib/maestro-conduct/detectors/question'),
@@ -194,6 +195,9 @@ function tickSession(session) {
   const ctx = ctxFor(session);
   // One progress observation per session per tick; detectors read the marker.
   const prog = progress.observe(ctx.ticket, ctx.worktree);
+  // Real progress (phase forward-step) resets the dead-end strike counter so
+  // an old stall in an unrelated phase can't escalate a fresh one (PR #603).
+  detectPhaseAdvance(ctx, restartEligible);
 
   // Question always wins — never nudge while the agent is waiting on us.
   const qHit = DETECTORS.question.detect(ctx);
@@ -209,6 +213,7 @@ function tickSession(session) {
   );
 
   runners.runStuckInputDetector(ctx, { restartEligible });
+  runners.runAuthBrokenDetector(ctx, { restartEligible });
 
   // Stop-condition runs before the detectors: a ticket whose oracle reports
   // done must be reaped (kill + rotate to the next queued ticket) BEFORE the

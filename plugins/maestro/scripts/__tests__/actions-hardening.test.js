@@ -86,22 +86,64 @@ test('freeDeadEndSlot: question-pending with NO eligible next task holds the ses
   assert.equal(tmuxKills.length, 0, 'no tmux kill may be issued');
 });
 
-test('freeDeadEndSlot: non-question triggers still rotate', () => {
+test('freeDeadEndSlot tiers: untracked skips; probe first (no kill); kill after grace; blocked at max', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'deadend-rotate-'));
   const logPath = path.join(tmpDir, 'calls.log');
   const fakeDir = makeFakeBinDir(logPath);
-  const { actions } = loadFresh(fakeDir);
+  const { actions, state } = loadFresh(fakeDir);
+  const kills = () =>
+    invocations(logPath).filter((i) => i[0] === 'tmux' && i[1] === 'kill-session').length;
+  const args = { session: 'GH-2-work', ticket: 'GH-2', kind: 'nudges-exhausted', repeatCount: 3 };
 
-  const killed = actions.freeDeadEndSlot({
-    session: 'GH-2-work',
-    ticket: 'GH-2',
-    kind: 'nudges-exhausted',
-    repeatCount: 3,
-    sha: null,
-  });
-  assert.equal(killed, true);
-  const tmuxKills = invocations(logPath).filter((i) => i[0] === 'tmux' && i[1] === 'kill-session');
-  assert.ok(tmuxKills.length >= 1, 'rotation must kill the ticket tmux');
+  // Untracked ticket (no manifest anywhere) → no probe, no kill, no rotation.
+  assert.equal(actions.freeDeadEndSlot(args), false);
+  assert.equal(kills(), 0, 'untracked ticket must never be killed');
+
+  // Track the ticket in a manifest → first dead-end sends the diagnostic
+  // probe: handled=true but NO kill, and attempts stays at 0.
+  const manifestMod = require(
+    path.resolve(__dirname, '..', 'lib', 'maestro-conduct', 'manifest.js')
+  );
+  fs.mkdirSync(process.env.MAESTRO_SESSION_DIR, { recursive: true });
+  fs.writeFileSync(
+    path.join(process.env.MAESTRO_SESSION_DIR, 'topic.json'),
+    JSON.stringify({
+      topic: 'topic',
+      slots: 2,
+      createdAt: new Date().toISOString(),
+      tasks: [
+        { id: 'GH-2', priority: 1, deps: [], status: 'in_progress' },
+        { id: 'GH-3', priority: 2, deps: [], status: 'pending' },
+      ],
+    })
+  );
+  assert.equal(actions.freeDeadEndSlot(args), true, 'probe path handles the event');
+  assert.equal(kills(), 0, 'probe must not kill');
+  assert.equal(manifestMod.getTaskAttempts('GH-2'), 0, 'a probe is not a strike');
+
+  // Inside the grace window a re-emit no-ops (no kill, no attempt bump).
+  assert.equal(actions.freeDeadEndSlot(args), false);
+  assert.equal(kills(), 0);
+
+  // Backdate the probe past the grace window → this re-emit is the kill:
+  // attempts 1, status pending (re-eligible), tmux killed.
+  const marker = state.read('GH-2', 'dead-end');
+  state.write('GH-2', 'dead-end', { ...marker, diagnosedAt: state.now() - 60 * 60 });
+  assert.equal(actions.freeDeadEndSlot(args), true);
+  assert.ok(kills() >= 1, 'post-grace re-emit must rotate');
+  assert.equal(manifestMod.getTaskAttempts('GH-2'), 1);
+  assert.equal(manifestMod.findTask('GH-2').task.status, 'pending', 're-eligible below max');
+
+  // Third lifecycle at max attempts → blocked. Simulate two prior strikes and
+  // a fresh lifecycle (bootstrap cleared the dead-end marker).
+  manifestMod.incrementTaskAttempts('GH-2'); // 2
+  state.clear('GH-2', 'dead-end');
+  actions.freeDeadEndSlot(args); // fresh lifecycle → probe again
+  const m2 = state.read('GH-2', 'dead-end');
+  state.write('GH-2', 'dead-end', { ...m2, diagnosedAt: state.now() - 60 * 60 });
+  actions.freeDeadEndSlot(args); // kill → attempts 3 → blocked
+  assert.equal(manifestMod.getTaskAttempts('GH-2'), 3);
+  assert.equal(manifestMod.findTask('GH-2').task.status, 'blocked');
 });
 
 test('autoRestart: fresh worktree progress suppresses the restart', () => {

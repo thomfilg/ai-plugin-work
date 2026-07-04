@@ -26,6 +26,7 @@ const { isHaltedWaitingForUser } = require('./halted-waiting');
 const spinnerDetector = require('./detectors/spinner');
 const silenceDetector = require('./detectors/silence');
 const stuckInputDetector = require('./detectors/stuck-input');
+const authBrokenDetector = require('./detectors/auth-broken');
 
 const SPINNER_RE_INTERRUPT_MIN = parseInt(process.env.SPINNER_RE_INTERRUPT_MIN || '5', 10);
 // Esc-on-spinner-hang is OPT-IN (SPINNER_AUTO_INTERRUPT=1). The blind Esc
@@ -175,10 +176,15 @@ function runSilenceDetector(ctx, { restartEligible }) {
   });
   if (ok) {
     // After a restart, wipe both per-SESSION markers (silence/spinner/question
-    // — keyed by session) AND per-TICKET markers (phase/pr-comments — keyed by
-    // ticket because the workflow state belongs to the ticket, not the pane).
+    // — keyed by session) AND per-TICKET markers (phase/pr-comments/dead-end —
+    // keyed by ticket because the workflow state belongs to the ticket, not
+    // the pane). Clearing `dead-end` restores the probe entitlement: every
+    // lifecycle gets a diagnostic probe before any kill, and an autoRestart
+    // starts a new lifecycle just like an operator bootstrap does. (A
+    // `killed` dead-end never reaches here — checkDeadEndGuard blocks the
+    // restart first — so only stale `diagnosed` markers are wiped.)
     ['silence', 'spinner', 'question'].forEach((k) => state.clear(ctx.session, k));
-    ['phase', 'pr-comments'].forEach((k) => state.clear(ctx.ticket, k));
+    ['phase', 'pr-comments', 'dead-end'].forEach((k) => state.clear(ctx.ticket, k));
     return true;
   }
   // autoRestart skipped (wedged quiet window, ci-gate-freed, dead-end, fresh
@@ -217,6 +223,35 @@ function runStuckInputDetector(ctx, { restartEligible }) {
       `Intended → submit it: tmux send-keys -t ${ctx.session} C-m. ` +
       `Stale/unwanted → clear it: tmux send-keys -t ${ctx.session} C-u. ` +
       'Unsubmitted directives have silently stalled agents for hours — do not ignore.',
+  });
+}
+
+// ── Auth broken ─────────────────────────────────────────────────────────────
+
+const AUTH_BROKEN_RE_EMIT_MIN = parseInt(process.env.AUTH_BROKEN_RE_EMIT_MIN || '30', 10);
+
+function runAuthBrokenDetector(ctx, { restartEligible }) {
+  if (!restartEligible(ctx.session)) return;
+  const hit = authBrokenDetector.detect(ctx);
+  if (!hit.hit) {
+    if (state.read(ctx.session, 'auth-broken')) state.clear(ctx.session, 'auth-broken');
+    return;
+  }
+  const marker = state.read(ctx.session, 'auth-broken') || {};
+  if (marker.lastAt && state.minutesSince(marker.lastAt) < AUTH_BROKEN_RE_EMIT_MIN) return;
+  state.write(ctx.session, 'auth-broken', { lastAt: state.now() });
+  actions.alert({
+    session: ctx.session,
+    ticket: ctx.ticket,
+    kind: 'auth-broken',
+    phase: ctx.phase,
+    skill: ctx.skill,
+    line: hit.line,
+    paneTail: paneTail(ctx),
+    unblockCmd: `git -C ${ctx.worktree} config user.email && gh auth status`,
+    instruction:
+      `agent pane shows a credential failure: "${hit.line}". The gh active account flaps across concurrent agents and stale tokens leak via tmux global env — every gh/git call in this worktree may be failing. ` +
+      'Verify the expected account (repo wrapper ../.envrc pins it), fix auth (gh auth switch / refresh GH_TOKEN in the pane env), then tell the agent to retry its last command.',
   });
 }
 
@@ -322,6 +357,7 @@ module.exports = {
   runSpinnerDetector,
   runSilenceDetector,
   runStuckInputDetector,
+  runAuthBrokenDetector,
   runNoProgressCheck,
   handlePhaseStall,
   bumpMarker,

@@ -38,6 +38,16 @@ function fetchBotComments(prNumber, worktree) {
   });
 }
 
+// LOOP tracking (GH-627): a push that STILL leaves bot comments open is one
+// fix→push→re-comment cycle. Count-based detection is blind to this — the
+// count looks "fresh" every cycle while the agent chases a nitpick bot
+// forever. The cycles counter survives per-push watch resets; only a clean PR
+// (count===0) clears it. The handler escalates at COMMENT_LOOP_CYCLES.
+function bumpLoopCycles(ticket) {
+  const loop = state.read(ticket, 'pr-comments-loop') || { cycles: 0 };
+  state.write(ticket, 'pr-comments-loop', { ...loop, cycles: (loop.cycles || 0) + 1 });
+}
+
 function summarize(comments) {
   return comments.slice(0, 5).map((c) => {
     const sev = (c.body || '').match(/\*\*([A-Z][a-z]+) Severity\*\*/);
@@ -69,6 +79,7 @@ function detect({ ticket, worktree }) {
   // cycle would inherit the prior count and fire freeDeadEndSlot too soon.
   if (count === 0) {
     if (prev) state.clear(ticket, 'pr-comments');
+    state.clear(ticket, 'pr-comments-loop');
     return { hit: false, reset: !!prev };
   }
 
@@ -81,6 +92,7 @@ function detect({ ticket, worktree }) {
   // HEAD moved since last check → agent has pushed; reset the watch. Also
   // reset the persisted alert repeat count so a new stuck cycle starts at 1.
   if (prev.sha !== sha) {
+    bumpLoopCycles(ticket);
     state.write(ticket, 'pr-comments', { count, sha, firstSeenAt: now, alerted: false });
     return { hit: false, reset: true };
   }

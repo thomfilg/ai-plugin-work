@@ -24,7 +24,19 @@
 const Q_RE_NUDGE_MIN = parseInt(process.env.Q_RE_NUDGE_MIN || '10', 10);
 const Q_DEAD_END_MIN = parseInt(process.env.Q_DEAD_END_MIN || '45', 10);
 
+// Copy-paste-able unblock command (PR #603): when a numbered option is
+// visible, offer the literal send-keys; otherwise offer the capture+answer
+// recipe. The ❯-marked option is the agent's own recommendation.
+function buildUnblockCmd(session, options) {
+  const marked = (options || []).find((o) => /^❯/.test(o)) || (options || [])[0];
+  const optionNum = marked && /(\d+)\./.exec(marked);
+  return optionNum
+    ? `tmux send-keys -t ${session} '${optionNum[1]}' Enter`
+    : `tmux capture-pane -t ${session} -p | tail -40   # read prompt, then: tmux send-keys -t ${session} '<N>' Enter`;
+}
+
 function buildQuestionAlertPayload({ ctx, qHit, mins }) {
+  const unblockCmd = buildUnblockCmd(ctx.session, qHit.options);
   return {
     session: ctx.session,
     ticket: ctx.ticket,
@@ -37,13 +49,17 @@ function buildQuestionAlertPayload({ ctx, qHit, mins }) {
     options: qHit.options,
     promptKind: qHit.promptKind,
     paneTail: (ctx.pane || '').split('\n').slice(-40).join('\n'),
+    unblockCmd,
     instruction:
+      `OPERATOR ACTION REQUIRED — agent is blocked on a ${qHit.promptKind || 'menu'} prompt. RUN NOW: ${unblockCmd}. ` +
       `Agent runs /${ctx.skill || 'work'} — answer in THAT workflow's terms (commandBrief field has its summary; read the skill's SKILL.md before answering if unsure). ` +
+      'DECIDE YOURSELF — do NOT escalate workflow decisions to the user; AskUserQuestion is ONLY for product/spec intent the user explicitly owns. ' +
       'UNBLOCK-PROTOCOL: refuse-bypass → verify-real-work-done → fix-artifact-NOT-gate → file-root-cause-bug. ' +
       'INTERACT-UNTIL-UNBLOCKED: after each tmux answer, capture the pane and check for the NEXT question/menu/permission prompt. ' +
       'Keep answering in a loop (read pane → send next answer) until the agent phase advances or the prompt buffer is empty ("❯" with no menu below). ' +
       'A single tmux send-keys is NOT enough — multi-question gates chain 3-5 prompts in sequence. ' +
-      `Pane tail in paneTail field. Unanswered for ${Q_DEAD_END_MIN}m+ with queued work waiting → slot is rotated.`,
+      'DO NOT reply with "standing by" — that is a no-op while the agent stays blocked. ' +
+      `Pane tail in paneTail field. Unanswered for ${Q_DEAD_END_MIN}m+ with queued work waiting → slot is rotated (after a diagnostic probe).`,
   };
 }
 
