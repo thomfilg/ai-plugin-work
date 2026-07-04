@@ -22,6 +22,7 @@
  */
 
 const cacheLib = require('../lib/session-cache');
+const cortexProvider = require('../lib/cortex-provider');
 
 /** Hard cap on cortex calls per background run (R15). */
 const MAX_QUERIES = 2;
@@ -130,25 +131,30 @@ function applyArg(out, name, value) {
 }
 
 /**
- * Resolve the production recall function from `SYNAPSYS_CORTEX_RECALL_MODULE`,
- * the SAME injected-provider contract Phase 2 inline recall uses
- * (`cortex-hook.resolveInlineRecall`). The detached worker inherits the parent
- * process env, so a configured bridge module is honored here too — without this
- * the worker fell straight through to an empty stub and Phase 1 auto-recall
- * never invoked a real `cortex_recall` in production even when a provider was
- * configured (GH-519 review: "Background recall never calls cortex"). Fail-open:
- * an absent / unloadable / malformed module degrades to the empty stub, so
- * shipped hooks with no cortex provider behave exactly as before.
+ * Resolve the production recall function through the SAME shared resolver
+ * Phase 2 inline recall uses (`lib/cortex-provider.resolveRecall`, GH-662).
+ * The detached worker inherits the parent process env, so an explicitly
+ * configured `SYNAPSYS_CORTEX_RECALL_MODULE` is honored here too — without
+ * this the worker fell straight through to an empty stub and Phase 1
+ * auto-recall never invoked a real `cortex_recall` in production even when a
+ * provider was configured (GH-519 review: "Background recall never calls
+ * cortex"). With the var unset, the zero-config default bridge
+ * (`lib/cortex-bridge`, read-only keyword recall over `~/.cortex/memory.db`)
+ * is used when detectable. Fail-open: a broken configured module or an
+ * undetectable bridge degrades to the empty stub, so shipped hooks with no
+ * cortex store behave exactly as before (a broken module never falls back to
+ * the bridge — explicit env wins).
  *
+ * @param {string} [home] cache/home root from the `--home` flag (bridge db discovery)
  * @returns {(query:string, projectId:string)=>Promise<Array>|Array}
  */
-function resolveRecallFn() {
-  const modPath = process.env.SYNAPSYS_CORTEX_RECALL_MODULE;
-  if (!modPath) return async () => [];
+function resolveRecallFn(home) {
   try {
-    // Dynamic provider require — path comes from SYNAPSYS_CORTEX_RECALL_MODULE.
-    const mod = require(modPath);
-    if (mod && typeof mod.recall === 'function') return mod.recall.bind(mod);
+    const { recall } = cortexProvider.resolveRecall({
+      env: process.env,
+      home: home || undefined,
+    });
+    if (typeof recall === 'function') return recall;
   } catch {
     // Fall through to the empty stub — never crash the detached process (R14).
   }
@@ -157,8 +163,9 @@ function resolveRecallFn() {
 
 /**
  * CLI shell. Parses argv, wires the real session-cache writer, and resolves a
- * recall function (injectable for tests; production uses
- * `SYNAPSYS_CORTEX_RECALL_MODULE` via resolveRecallFn). Never throws — a
+ * recall function (injectable for tests; production resolves through the
+ * shared provider — explicit `SYNAPSYS_CORTEX_RECALL_MODULE`, else the default
+ * cortex-bridge — via resolveRecallFn). Never throws — a
  * top-level failure degrades to a silent no-op so the detached process exits
  * cleanly (R14).
  *
@@ -173,7 +180,7 @@ async function main(argv = process.argv.slice(2), deps = {}) {
   try {
     const { queries, projectId, sessionId, home } = parseArgs(argv);
     const cache = deps.cache || cacheLib;
-    const recallFn = deps.recallFn || resolveRecallFn();
+    const recallFn = deps.recallFn || resolveRecallFn(home);
     await runBackground({ queries, projectId, sessionId, recallFn, cache, home });
   } catch {
     // Detached background process — degrade silently (R14).
