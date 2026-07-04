@@ -43,17 +43,26 @@ function writeManifest(file, manifest) {
 }
 
 /**
- * Find the manifest file + task entry for a ticket id. First match across
- * all manifests wins. Returns { file, manifest, task } or null.
+ * Find the manifest file + task entry for a ticket id. When the same ticket
+ * appears in SEVERAL manifests (a re-orchestrated batch next to a stale
+ * 12-day-old one), the manifest with the NEWEST createdAt wins — readdir
+ * order used to pick whichever sorted first, which silently resolved a
+ * ticket to the stale manifest's null stopOracle and disabled the whole
+ * stop-condition pipeline for the live run.
+ * Returns { file, manifest, task } or null.
  */
 function findTask(taskId) {
+  let best = null;
   for (const file of listManifestFiles()) {
     const manifest = readManifest(file);
     if (!manifest || !Array.isArray(manifest.tasks)) continue;
     const task = manifest.tasks.find((t) => t.id === taskId);
-    if (task) return { file, manifest, task };
+    if (!task) continue;
+    const createdAt = Date.parse(manifest.createdAt || '') || 0;
+    if (!best || createdAt > best.createdAt) best = { file, manifest, task, createdAt };
   }
-  return null;
+  if (!best) return null;
+  return { file: best.file, manifest: best.manifest, task: best.task };
 }
 
 /**
@@ -149,7 +158,11 @@ function poolFullForTask(taskId, activeWorkSessions) {
   const { manifest: m } = hit;
   if (typeof m.slots !== 'number' || !Array.isArray(m.tasks)) return false;
   const aliveTickets = aliveTicketSet(activeWorkSessions);
-  const liveInThisManifest = m.tasks.filter((t) => aliveTickets.has(t.id)).length;
+  // `done` tickets whose session is deliberately kept alive (post-oracle
+  // park, operator inspection) must not hold a slot against fresh work.
+  const liveInThisManifest = m.tasks.filter(
+    (t) => aliveTickets.has(t.id) && t.status !== 'done'
+  ).length;
   return liveInThisManifest >= m.slots;
 }
 
@@ -178,6 +191,23 @@ function commandForTask(taskId) {
   return cmd ? String(cmd).replace(/^\//, '') : null;
 }
 
+/**
+ * launchConfigForTask — one manifest lookup returning everything ctxFor needs
+ * about how the ticket was launched: the command and the operator-authored
+ * command brief (what the command does / what "done" means). The brief rides
+ * along in alert payloads so the operator LLM answers agent questions in the
+ * agent's OWN workflow vocabulary instead of guessing /work semantics.
+ */
+function launchConfigForTask(taskId) {
+  const hit = findTask(taskId);
+  if (!hit || !hit.manifest) return { command: null, commandBrief: null };
+  const m = hit.manifest;
+  return {
+    command: m.command ? String(m.command).replace(/^\//, '') : null,
+    commandBrief: m.commandBrief ? String(m.commandBrief) : null,
+  };
+}
+
 module.exports = {
   listManifestFiles,
   readManifest,
@@ -188,4 +218,5 @@ module.exports = {
   poolFullForTask,
   stopOracleForTask,
   commandForTask,
+  launchConfigForTask,
 };

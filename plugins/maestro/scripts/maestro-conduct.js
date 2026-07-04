@@ -3,12 +3,16 @@
  * maestro-conduct.js — the maestro's active conducting loop.
  *
  * The conductor keeps each player on tempo. For every GH-*-work tmux session:
- *   1. Determine current phase from the /work state file (workstate.js)
+ *   1. Determine current phase via the skill-registry row for the ticket's
+ *      persisted skill (never raw .work-state.json — a stale one applied
+ *      /work phase coaching to foreign workflows)
  *   2. Look up the detectors registered for this phase (phase-registry.js)
  *   3. Question detection always runs first — if the agent is waiting on
  *      a decision, never nudge it; track pending time and escalate to a
  *      maestro alert if it sits unanswered.
- *   4. Spinner-hang is an immediate interrupt (Esc + cue).
+ *   4. Every activity heuristic (spinner, silence, phase budget) is gated on
+ *      the worktree-progress signal — a changing worktree means the agent is
+ *      WORKING, however the pane looks (detector-runners.js).
  *   5. Phase-budget stall drives the soft → interrupt → alert chain via
  *      phase-registry.escalationFor().
  *
@@ -27,12 +31,12 @@ const skillRegistry = require('./lib/maestro-conduct/skill-registry');
 const ciGate = require('./lib/maestro-conduct/ci-gate-rotation');
 const manifest = require('./lib/maestro-conduct/manifest');
 const stopCondition = require('./lib/maestro-conduct/stop-condition');
-const waitMute = require('./lib/maestro-conduct/wait-mute');
 const prStatusPayload = require('./lib/maestro-conduct/pr-status-payload');
 const prCommentsHandler = require('./lib/maestro-conduct/pr-comments-handler');
 const questionHandler = require('./lib/maestro-conduct/question-handler');
-const { isHaltedWaitingForUser } = require('./lib/maestro-conduct/halted-waiting');
 const singletonGuard = require('./lib/maestro-conduct/singleton-guard');
+const progress = require('./lib/maestro-conduct/progress');
+const runners = require('./lib/maestro-conduct/detector-runners');
 
 const DETECTORS = {
   question: require('./lib/maestro-conduct/detectors/question'),
@@ -42,6 +46,7 @@ const DETECTORS = {
   commitStall: require('./lib/maestro-conduct/detectors/commit-stall'),
   prComments: require('./lib/maestro-conduct/detectors/pr-comments'),
   prStatus: require('./lib/maestro-conduct/detectors/pr-status'),
+  stuckInput: require('./lib/maestro-conduct/detectors/stuck-input'),
 };
 
 // Re-emit escalation: when the same (session, kind, sha/phase) alert fires
@@ -70,7 +75,12 @@ const TICK_SEC = parseInt(process.env.TICK_SEC || '60', 10);
 
 // ctxFor: build the context object passed to every detector.
 // GH-514 R2/AC3: skill is read per-call via skill-registry so /follow-up etc.
-// are honored and daemon restarts pick up mid-session skill writes.
+// are honored and daemon restarts pick up mid-session skill writes. A
+// regex-valid non-whitelisted skill (qc-work, …) resolves to the GENERIC row
+// — it must never fall through to the work row, which would read a stale
+// .work-state.json and apply /work phase coaching to a foreign workflow.
+// command/commandBrief come from the owning manifest so alert payloads can
+// tell the operator WHAT the agent is running (and what "done" means).
 function ctxFor(session) {
   const ticket = tmux.ticketIdFor(session);
   const skill = skillRegistry.readTicketSkill(ticket);
@@ -79,7 +89,18 @@ function ctxFor(session) {
   const { phase, step } = snap;
   const worktree = path.join(workstate.WORKTREES_BASE, `${REPO_NAME}-${ticket}`);
   const pane = tmux.capture(session);
-  return { session, ticket, skill, phase, step, worktree, pane };
+  const launch = manifest.launchConfigForTask(ticket);
+  return {
+    session,
+    ticket,
+    skill,
+    phase,
+    step,
+    worktree,
+    pane,
+    command: launch.command,
+    commandBrief: launch.commandBrief,
+  };
 }
 
 function handleQuestion(ctx, qHit) {
@@ -93,126 +114,12 @@ function handleQuestion(ctx, qHit) {
   });
 }
 
-// Advance marker after a nudge/alert; `alerted=true` flips the one-shot flag.
-function bumpMarker(ticket, key, marker, alerted) {
-  state.write(ticket, key, {
-    ...marker,
-    nudges: (marker.nudges || 0) + 1,
-    lastNudgeAt: state.now(),
-    ...(alerted ? { alerted: true } : {}),
-  });
-}
-
-function handlePhaseStall(ctx, stallHit) {
-  const profile = phaseFor(ctx.phase);
-  if (profile.exempts(ctx)) {
-    alerts.log(`${ctx.session} phase-stall exempted by registry for phase=${ctx.phase}`);
-    return;
-  }
-  // Suppress when the agent is correctly waiting for a human action (merge, etc.)
-  if (isHaltedWaitingForUser(ctx.pane)) {
-    waitMute.noteWaitingForUser({ session: ctx.session, phase: ctx.phase, state, alerts });
-    return;
-  }
-  const marker = stallHit.marker;
-  const sinceLastNudge = marker.lastNudgeAt ? state.minutesSince(marker.lastNudgeAt) : Infinity;
-  // Don't re-nudge before the per-phase cooldown.
-  if (marker.lastNudgeAt && sinceLastNudge < stallHit.reNudgeMin) return;
-  // Re-emit on reNudgeMin cadence so alert count grows to DEAD_END_REEMITS
-  // (marker resets on phase change, so re-emits stop naturally on advance).
-  const escalation = escalationFor(ctx.phase, marker.nudges);
-  const reason = `phase=${ctx.phase} stuck ${stallHit.elapsedMin}m budget=${stallHit.budgetMin}m nudge ${marker.nudges + 1}/${stallHit.maxNudges}`;
-
-  if (escalation === 'alert') {
-    const paneTail = (ctx.pane || '').split('\n').slice(-40).join('\n');
-    const r = actions.alert({
-      session: ctx.session,
-      ticket: ctx.ticket,
-      kind: 'nudges-exhausted',
-      phase: ctx.phase,
-      elapsedMin: stallHit.elapsedMin,
-      budgetMin: stallHit.budgetMin,
-      nudges: marker.nudges,
-      paneTail,
-      instruction: `phase=${ctx.phase} ${stallHit.elapsedMin}m/${stallHit.budgetMin}m. UNBLOCK-PROTOCOL: bad artifact (tasks.md/brief.md) usually root cause, NOT missing work. Pane tail in paneTail field.`,
-    });
-    maybeEscalateToDeadEnd(ctx, 'nudges-exhausted', r.count, ctx.phase);
-  } else if (escalation === 'interrupt') {
-    actions.interrupt(ctx.session, reason);
-  } else {
-    actions.soft(ctx.session, reason);
-  }
-  bumpMarker(ctx.ticket, 'phase', marker, escalation === 'alert');
-}
-
-const SPINNER_RE_INTERRUPT_MIN = parseInt(process.env.SPINNER_RE_INTERRUPT_MIN || '5', 10);
-
-// Spinner hang → immediate interrupt; returns true only when a fresh interrupt
-// was sent so the caller skips remaining detectors this tick.
-function runSpinnerDetector(ctx) {
-  const sHit = DETECTORS.spinner.detect(ctx);
-  // Spinner marker is per-SESSION: a hung `-work` pane and an idle `-dev`
-  // helper share a ticket but have different pane buffers; sharing the
-  // marker would let one clear the other's cooldown.
-  if (!sHit.hit) {
-    if (state.read(ctx.session, 'spinner')) state.clear(ctx.session, 'spinner');
-    return false;
-  }
-  const prev = state.read(ctx.session, 'spinner');
-  if (prev && state.minutesSince(prev.lastInterruptAt) < SPINNER_RE_INTERRUPT_MIN) {
-    // Within cooldown — already nudged this hang. Stay quiet on the spinner,
-    // but let other detectors run; they observe independent signals.
-    return false;
-  }
-  actions.interrupt(ctx.session, `spinner stuck ${sHit.elapsedMin}m: ${sHit.line}`);
-  state.write(ctx.session, 'spinner', { lastInterruptAt: state.now() });
-  return true;
-}
-
-// Silence = "session dead"; on hit, auto-restart -work and clear markers.
-// Returns true when handled so the tick skips remaining detectors.
-function runSilenceDetector(ctx) {
-  const sHit = DETECTORS.silence.detect(ctx);
-  if (!sHit.hit) return false;
-  if (!restartEligible(ctx.session)) {
-    // Helper (-dev / -listen) idle past SILENCE_LIMIT_SEC — don't kill. Refresh
-    // marker so silence timer restarts (else fires every tick → log spam).
-    // Helper sessions (-listen / -dev) are inert by design; their idleness
-    // carries zero information for the operator. Refresh the marker so the
-    // detector doesn't re-fire each tick, but emit nothing.
-    state.write(ctx.session, 'silence', {
-      hash: null,
-      tokens: null,
-      lastActiveAt: state.now(),
-    });
-    return false;
-  }
-  const ok = actions.autoRestart({
-    session: ctx.session,
-    ticket: ctx.ticket,
-    worktree: ctx.worktree,
-    silenceSec: sHit.silenceSec,
-  });
-  if (ok) {
-    // After a restart, wipe both per-SESSION markers (silence/spinner/question
-    // — keyed by session) AND per-TICKET markers (phase/pr-comments — keyed by
-    // ticket because the workflow state belongs to the ticket, not the pane).
-    ['silence', 'spinner', 'question'].forEach((k) => state.clear(ctx.session, k));
-    ['phase', 'pr-comments'].forEach((k) => state.clear(ctx.ticket, k));
-    return true;
-  }
-  // autoRestart skipped (wedged quiet window, ci-gate-freed, dead-end, or
-  // missing worktree) — pane is still alive and listed, so let downstream
-  // detectors (notably prStatus) keep emitting pr-ready/pr-broken transitions.
-  return false;
-}
-
 function runPhaseStallDetector(ctx) {
   // -listen/-dev helpers inherit ticket phase but have no agent to make progress;
   // running phase-stall on them accumulates nudges that never resolve → cascade kill.
   if (!restartEligible(ctx.session)) return;
   const pHit = DETECTORS.phaseStall.detect(ctx);
-  if (pHit.hit) handlePhaseStall(ctx, pHit);
+  if (pHit.hit) runners.handlePhaseStall(ctx, pHit, { maybeEscalateToDeadEnd });
 }
 
 function runCommitStallDetector(ctx) {
@@ -263,15 +170,15 @@ function runPrStatusDetector(ctx) {
 
 // Run the phase's detector set in priority order. Silence/spinner short-circuit
 // the tick (return true) when they fire a restart/interrupt; the remaining
-// detectors are advisory and always run. Extracted from tickSession to keep its
-// cyclomatic complexity under the gate.
+// detectors are advisory and always run.
 function runPhaseDetectors(ctx) {
   const detectorsToRun = phaseFor(ctx.phase).detectors.filter((k) => k !== 'question');
 
   // Silence runs before spinner: a totally-dead pane is more urgent than a
   // hung spinner, and the restart wipes spinner state anyway.
-  if (detectorsToRun.includes('silence') && runSilenceDetector(ctx)) return;
-  if (detectorsToRun.includes('spinner') && runSpinnerDetector(ctx)) return;
+  if (detectorsToRun.includes('silence') && runners.runSilenceDetector(ctx, { restartEligible }))
+    return;
+  if (detectorsToRun.includes('spinner') && runners.runSpinnerDetector(ctx)) return;
   if (detectorsToRun.includes('phaseStall')) runPhaseStallDetector(ctx);
   if (detectorsToRun.includes('commitStall')) runCommitStallDetector(ctx);
   if (detectorsToRun.includes('prComments')) runPrCommentsDetector(ctx);
@@ -285,6 +192,8 @@ function runPhaseDetectors(ctx) {
 /** Run the per-session pipeline. Returns when the session has been fully processed. */
 function tickSession(session) {
   const ctx = ctxFor(session);
+  // One progress observation per session per tick; detectors read the marker.
+  const prog = progress.observe(ctx.ticket, ctx.worktree);
 
   // Question always wins — never nudge while the agent is waiting on us.
   const qHit = DETECTORS.question.detect(ctx);
@@ -299,6 +208,8 @@ function tickSession(session) {
     alerts.alertKey({ session: ctx.session, kind: 'question-pending', phase: ctx.phase })
   );
 
+  runners.runStuckInputDetector(ctx, { restartEligible });
+
   // Stop-condition runs before the detectors: a ticket whose oracle reports
   // done must be reaped (kill + rotate to the next queued ticket) BEFORE the
   // silence detector tries to auto-restart the now-idle agent. No-op for
@@ -306,6 +217,7 @@ function tickSession(session) {
   if (stopCondition.maybeStopOnOracle({ ctx, actions, manifest, restartEligible })) return;
 
   runPhaseDetectors(ctx);
+  runners.runNoProgressCheck(ctx, prog, { restartEligible });
 }
 
 function tick() {
@@ -329,7 +241,18 @@ function tick() {
     alerts.log(`no ${tmux.sessionName(`${tmux.resolveTicketPrefix()}-*`, 'work')} sessions`);
     return;
   }
-  for (const session of sessions) tickSession(session);
+  // Per-session isolation: one throwing detector must not abort the tick for
+  // every other session — and in daemon mode an escaped exception killed the
+  // whole process SILENTLY (setInterval → uncaughtException → exit with no
+  // log line), leaving the fleet unwatched until someone noticed. Observed as
+  // unexplained daemon restarts with dead windows between them.
+  for (const session of sessions) {
+    try {
+      tickSession(session);
+    } catch (e) {
+      alerts.log(`TICK-ERROR ${session}: ${(e && e.stack) || e}`);
+    }
+  }
   heartbeat.maybeEmitHeartbeat(sessions);
 }
 
@@ -341,7 +264,7 @@ function handlePrComments(ctx, cHit) {
     actions,
     phaseFor,
     escalationFor,
-    bumpMarker,
+    bumpMarker: runners.bumpMarker,
     maybeEscalateToDeadEnd,
   });
 }
@@ -371,6 +294,22 @@ function writeActiveMarker() {
   }
 }
 
+// Last-resort visibility: any error that escapes the per-session guards must
+// land in the log file, not vanish on a detached stderr. The daemon keeps
+// ticking on uncaughtException — each tick is self-contained, and a running
+// (slightly bruised) conductor beats an unwatched fleet.
+function installCrashHandlers() {
+  process.on('uncaughtException', (e) => {
+    alerts.log(`DAEMON-CRASH uncaughtException: ${(e && e.stack) || e}`);
+  });
+  process.on('unhandledRejection', (r) => {
+    alerts.log(`DAEMON-CRASH unhandledRejection: ${(r && r.stack) || r}`);
+  });
+  process.on('exit', (code) => {
+    alerts.log(`daemon exiting code=${code} pid=${process.pid}`);
+  });
+}
+
 function main() {
   const daemon = process.argv.includes('--daemon');
   if (!daemon) {
@@ -378,10 +317,24 @@ function main() {
     return;
   }
   const nsLabel = singletonGuard.acquireOrExit();
+  installCrashHandlers();
   writeActiveMarker();
   alerts.log(`orchestrate daemon starting, tick=${TICK_SEC}s namespace="${nsLabel}"`);
-  setInterval(tick, TICK_SEC * 1000);
-  tick();
+  const guardedTick = () => {
+    // MAESTRO_FORCE=1 lets a new conductor STEAL the lock without killing the
+    // incumbent — which then kept ticking, double-driving every agent (two
+    // daemons were observed Esc-interrupting the same panes). Yield the loop
+    // the moment the lock is no longer ours.
+    if (!singletonGuard.stillOwner()) {
+      alerts.log(
+        `CONDUCTOR-USURPED namespace="${nsLabel}" — lock taken over by another conductor; this daemon (pid ${process.pid}) exits`
+      );
+      process.exit(4);
+    }
+    tick();
+  };
+  setInterval(guardedTick, TICK_SEC * 1000);
+  guardedTick();
 }
 
 if (require.main === module) main();

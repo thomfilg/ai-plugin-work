@@ -42,4 +42,16 @@ function acquireOrExit() {
   return nsLabel;
 }
 
-module.exports = { acquireOrExit };
+/**
+ * True while THIS process still holds the namespace lock. MAESTRO_FORCE=1
+ * lets a newer conductor STEAL the lock without killing the incumbent — which
+ * then kept ticking, double-driving every agent (two daemons were observed
+ * interrupting the same panes). The daemon checks this each tick and exits
+ * the moment it has been usurped.
+ */
+function stillOwner() {
+  const cur = conductorLock.readLock(namespace.lockFile());
+  return !!(cur && cur.pid === process.pid);
+}
+
+module.exports = { acquireOrExit, stillOwner };

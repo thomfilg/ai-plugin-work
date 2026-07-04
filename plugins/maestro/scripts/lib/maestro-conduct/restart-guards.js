@@ -35,9 +35,7 @@ function declareWedged({ session, ticket, restarts, now, silenceSec }) {
   const wedgedUntil = now + WEDGED_QUIET_MIN * 60;
   const count = restarts.length + 1;
   state.write(session, 'restart-loop', { restarts: [...restarts, now], wedgedUntil });
-  const skill = skillRegistry.readTicketSkill(ticket, {
-    hasOracle: !!manifest.stopOracleForTask(ticket),
-  });
+  const skill = skillRegistry.readTicketSkill(ticket);
   alerts.log(
     `${formatLogLine({ ticket, skill, silenceSec, kind: 'wedged' })} ${session} WEDGED — ${count} auto-restarts in ${RESTART_WINDOW_MIN}m; suppressing restarts for ${WEDGED_QUIET_MIN}m`
   );
@@ -98,23 +96,23 @@ function checkRestartGuards({ session, ticket, worktree }) {
 }
 
 // GH-514 R1: resolve skill per-call so daemon restarts honor `.maestro-skill`
-// writes that happened after module load. Falls open to 'work'; on whitelist
-// reject we log the rejected raw value so operators can spot tampering.
+// writes that happened after module load. Any regex-valid persisted skill is
+// now honored as-is (the write path already validates) — the old
+// whitelist-or-oracle read gate relaunched `/work` on qc-work fleets whose
+// manifest lookup failed, restarting a foreign workflow on delivered tickets.
+// Only a MALFORMED value falls open to /work, with a log so operators can
+// spot tampering.
 function resolveSkillForRestart(ticket, session) {
-  // An oracle-backed ticket may legitimately run a non-whitelisted command —
-  // pass the oracle existence so readTicketSkill honors it instead of falling
-  // open to /work (GH-514 generic-row decision).
-  const hasOracle = !!manifest.stopOracleForTask(ticket);
-  const skill = skillRegistry.readTicketSkill(ticket, { hasOracle });
+  const skill = skillRegistry.readTicketSkill(ticket);
   let raw = null;
   try {
     raw = fs.readFileSync(skillRegistry.ticketSkillFile(ticket), 'utf8').trim();
   } catch {
     /* missing → default, no warning */
   }
-  if (raw && !skillRegistry.isAllowedSkill(raw, { hasOracle })) {
+  if (raw && raw !== skill) {
     alerts.log(
-      `${session} AUTO-RESTART .maestro-skill value ${JSON.stringify(raw)} rejected by whitelist — falling open to /work for ${ticket}`
+      `${session} AUTO-RESTART .maestro-skill value ${JSON.stringify(raw)} is malformed — falling open to /work for ${ticket}`
     );
   }
   return skill;

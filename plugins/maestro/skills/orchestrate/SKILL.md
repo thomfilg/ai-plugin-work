@@ -20,6 +20,17 @@ Examples:
 - `/orchestrate GH-397 GH-398 GH-414` — bootstrap + launch three agents in parallel
 - `/orchestrate 397 398` — bare numbers are accepted; project key is prepended
 
+## Step 0 — resolve the command (ALWAYS, before anything else)
+
+**If no `command=` and no `schema=` was given, do NOT silently default to `/work`.** Run `node scripts/maestro-schema.js list`, then `AskUserQuestion` with ONE question listing every choice: `/work` (default ticket-to-PR workflow), `/follow-up` (PR follow-up loop), and each saved schema by name + its `description`. Launch what the user picks. (This is the ONE launch-time question that is allowed; see "Never ask, just act" below for everything else.)
+
+**Once the command is known, READ it before launching anyone.** You are about to supervise N agents running that command — nudging or answering them without knowing their workflow produces wrong instructions (a `/qc-work` agent was told to "re-run task-next.js to advance the gate": /work vocabulary, meaningless to it, and it derailed chasing that advice). Concretely:
+
+1. Locate the command's `SKILL.md` (search `~/.claude/plugins/*/skills/<name>/SKILL.md`, plugin marketplaces, and project `.claude/skills/`). Read it fully. If the command has state files, phases, or its own sub-commands, note them.
+2. Distill a **commandBrief** (3-6 sentences): what the command does, how it signals progress, what "done" means, what its common questions/gates look like, and what an operator should NEVER tell its agents to do.
+3. Pass it to the manifest: `maestro-session.js init <topic> <slots> --command=<cmd> --command-brief='<brief>' …`. The conductor embeds it into every `question-pending`/`nudges-exhausted` alert so you (and any future operator session) answer agents in their own vocabulary.
+4. If a schema with a `context` body was loaded (or the user provided standing instructions), write them to `${TASKS_BASE}/<TICKET>/.maestro-context.md` for EVERY ticket BEFORE bootstrap — the bootstrap sends each agent a pointer to that file as its first message, and auto-restarts re-send it. This is the sanctioned channel for standing agent instructions; tmux-broadcast prose is not (it lands in menus and gets lost on restarts).
+
 ## Parameterized form (queue / pool / command / stopCondition / schema)
 
 ```
@@ -34,8 +45,8 @@ Examples:
 | `poolSize=` | Max concurrent `-work` sessions (manifest `slots`). The conductor tops the pool up from the queue as slots free (needs `AUTO_BOOTSTRAP_NEXT=1`). |
 | `command=` | The skill each queued ticket runs (e.g. `/qc-work`). Whitelisted skills (`work`, `follow-up`) run as-is; ANY other command is allowed ONLY when a `stopCondition` is also given (it then runs under a generic conductor row — the oracle, not a bespoke registry row, defines "done"). |
 | `stopCondition=` | Natural-language completion condition. The skill COMPILES it once into a deterministic shell oracle (see below). The daemon then evaluates that oracle every tick; exit 0 ⇒ the agent is done ⇒ kill + free slot + bootstrap the next queued ticket. |
-| `save=` | After compiling, persist `{poolSize, command, stopCondition.oracle}` as a reusable named schema (synapsys-style store). `queue` is excluded. |
-| `schema=` | Load a saved schema's `poolSize`/`command`/`oracle`; combine with this run's `queue=`. Explicit CLI params override the schema (warn on conflict). The pinned oracle is reused as-is unless `recompile=true`. |
+| `save=` | After compiling, persist `{poolSize, command, stopCondition.oracle, context}` as a reusable named schema (synapsys-style store). `queue` is excluded. When saving, ALWAYS fill `--context=` with the agent-facing briefing: everything an agent running this command needs to know (conventions, gotchas, stop criteria in prose, repo specifics). It is injected into every launched agent via `.maestro-context.md`. |
+| `schema=` | Load a saved schema's `poolSize`/`command`/`oracle`/`context`; combine with this run's `queue=`. Explicit CLI params override the schema (warn on conflict). The pinned oracle is reused as-is unless `recompile=true`. The `context` body MUST be written to each ticket's `.maestro-context.md` (Step 0.4). |
 
 ### Compiling `stopCondition` into an oracle (LLM, once — never at eval time)
 
@@ -49,6 +60,8 @@ The constraint is hard: **the daemon must NEVER call an LLM to judge "is it done
    (`$TICKET` and `$WORKTREE` are injected into the oracle's env by the conductor — do not interpolate them into the command string.)
 3. The oracle must exit 0 iff done, non-zero otherwise. Keep it cheap (runs every tick × every session).
 4. **Refuse to compile** if the named skill exposes no deterministic verdict (pure-LLM skill). Surface via `AskUserQuestion`: "give me a shell predicate, or pick another condition" — do NOT emit an oracle that would need LLM evaluation.
+5. **PR identity = head branch, NEVER free-text.** An oracle that finds "the ticket's PR" via `gh pr list --search "$TICKET"` will fuzzy-match ANOTHER ticket's PR whose body merely mentions this ticket — a live fleet reaped an agent as "done" against a sibling's green PR before it ever opened its own. Compile PR lookups as `gh pr list --head <branch>` using the worktree's checked-out branch. Refuse to compile free-text PR matching.
+6. **Completion markers must be sha-pinned.** If the oracle honors a marker file (e.g. `.qc-verify-pass.json`), the marker must record the HEAD sha/PR it was produced for and the oracle must re-check the match — a stale `all_passed:true` marker instantly re-reaped a relaunched agent.
 
 ### Saving / reusing schemas (synapsys-mirrored store)
 
@@ -124,6 +137,11 @@ The .js daemon emits exactly these event kinds. Anything else is bookkeeping noi
 | `pr-comments-stuck` | `ACTION … kind=pr-comments-stuck` | `handlePrComments` | One alert until comment count or HEAD changes |
 | `commit-stall NNNm` | `<S> commit-stall NNNm in phase=… (threshold=TTTm)` | `runCommitStallDetector` | **Threshold-only**: emits at `[30, 60, 120, 240, 480]` minutes, at most 5 lines per stall |
 | `stop-condition-met` | `ACTION … kind=stop-condition-met oracle=…` + `<S> STOP-CONDITION-MET — tmux killed, slot freed` | `stop-condition.maybeStopOnOracle` → `actions.freeStopConditionSlot` | Once per ticket lifecycle (`stop-condition` marker); ticket marked `done` |
+| `spinner-hang` | `ACTION … kind=spinner-hang elapsedMin=N line=…` | `runSpinnerDetector` | Progress-gated: never fires while the worktree changed <`PROGRESS_FRESH_MIN`; re-emits per `SPINNER_RE_INTERRUPT_MIN`. Default is ALERT-ONLY (`SPINNER_AUTO_INTERRUPT=1` restores the old blind Esc) |
+| `stuck-input` | `ACTION … kind=stuck-input text=…` | `runStuckInputDetector` | Text sat unsubmitted in an IDLE agent's composer ≥`STUCK_INPUT_MIN` (5m); re-emits per `STUCK_INPUT_RE_EMIT_MIN` (15m). Alert-only unless `STUCK_INPUT_AUTO_SUBMIT=1` |
+| `no-progress` | `ACTION … kind=no-progress elapsedMin=N` | `runNoProgressCheck` | Worktree unchanged ≥`NO_PROGRESS_ALERT_MIN` (45m) while the pane LOOKS active — the backstop for panes that defeat silence detection (tail -f, polling loops). Re-emits per `NO_PROGRESS_RE_EMIT_MIN` (60m) |
+| `DEAD-END-HOLD` | log-only | `actions.freeDeadEndSlot` | A question-pending dead-end with NO queued work to rotate to holds the session alive instead of killing it (one line per 30m) |
+| `TICK-ERROR` / `DAEMON-CRASH` / `CONDUCTOR-USURPED` | log-only | main loop guards | A detector threw (session skipped, others unaffected) / an exception escaped (daemon logs + keeps ticking) / the lock was force-taken by a newer conductor (this one exits) |
 | `HEARTBEAT N active, X pr-ready, Y pr-broken, Z pr-pending, W wedged ‖ …` | log-only | `maybeEmitHeartbeat` (main loop) | Once per `HEARTBEAT_MIN` (default 30m); always emits even when nothing else changed |
 
 ## Recommended Monitor filter
@@ -131,7 +149,7 @@ The .js daemon emits exactly these event kinds. Anything else is bookkeeping noi
 Use this exact regex. Anything outside it is noise:
 
 ```
-QUESTION-DETECTED|AUTO-RESTART|SESSION-GONE|NUDGE|ACTION|pr-ready|pr-broken|stop-condition-met|wedged|WEDGED|HEARTBEAT|commit-stall
+QUESTION-DETECTED|AUTO-RESTART|SESSION-GONE|NUDGE|ACTION|pr-ready|pr-broken|stop-condition-met|wedged|WEDGED|HEARTBEAT|commit-stall|spinner-hang|stuck-input|no-progress|DEAD-END-HOLD|DAEMON-CRASH|CONDUCTOR-USURPED|TICK-ERROR
 ```
 
 `stop-condition-met` is a **positive** signal — the ticket's compiled oracle exited 0, the agent finished, its slot was freed and the next queued ticket bootstrapped. `pr-ready` is the **positive** signal — when you see it, the agent's PR is CLEAN and all checks are green; merge it (or hold per `[[never-auto-merge-pr]]`). `wedged` is the **escalation** signal — auto-restart loop hit its cap; operator must inspect. `HEARTBEAT` is the periodic forced re-read; never ignore it.
@@ -157,6 +175,18 @@ QUESTION-DETECTED|AUTO-RESTART|SESSION-GONE|NUDGE|ACTION|pr-ready|pr-broken|stop
 | `ORACLE_TIMEOUT_MS` | 30000 | Per-tick wall-clock budget for a stopCondition oracle |
 | `AUTO_FREE_STOP_CONDITION` | (on) | Set `0` to disable stop-condition kill/rotate |
 | `AUTO_BOOTSTRAP_NEXT` | (off) | Set `1` so the conductor tops the pool up from the queue |
+| `PROGRESS_FRESH_MIN` | 10 | Worktree change younger than this suppresses spinner/phase-stall/restart actions (agent is WORKING, however the pane looks) |
+| `Q_RE_NUDGE_MIN` | 10 | Cooldown between question-pending re-alerts (was: every tick — killed waiting agents in ~2 min) |
+| `Q_DEAD_END_MIN` | 45 | A question must be pending this long before dead-end rotation is even considered |
+| `SPINNER_AUTO_INTERRUPT` | (off) | `1` restores blind Esc on spinner-hang; default emits a `spinner-hang` alert for the operator to judge |
+| `STUCK_INPUT_MIN` / `STUCK_INPUT_RE_EMIT_MIN` | 5 / 15 | Composer-text persistence before `stuck-input` fires / re-emits |
+| `STUCK_INPUT_AUTO_SUBMIT` | (off) | `1` auto-presses End+C-m on stuck composer text (careful: submits whatever is queued) |
+| `NO_PROGRESS_ALERT_MIN` / `NO_PROGRESS_RE_EMIT_MIN` | 45 / 60 | No-worktree-change alert threshold / re-emit cadence |
+| `NUDGE_STORM_MUTE_MIN` | 60 | Past 2× maxNudges, phase-stall reminders drop to one per this interval |
+| `GH_CALL_TIMEOUT_MS` / `GIT_CALL_TIMEOUT_MS` | 15000 / 10000 | Hard caps on gh/git subprocesses inside the tick (a hung gh froze the whole daemon) |
+| `MAESTRO_RESTART_MODE` | (auto) | `fresh` or `continue` forces the restart style; default: `--continue` for generic commands with a resumable conversation, fresh `/skill` for work/follow-up |
+| `MAESTRO_BRANCH_TEMPLATE` | `{ticket}-maestro` | Worktree branch name template (`{ticket}`, `{ticket_lower}`) — set when the remote rejects `*-maestro` names |
+| `MAESTRO_PENDING_WINDOW_MIN` | 90 | How far back the UserPromptSubmit hook surfaces unanswered actionable alerts |
 
 ## After launch
 
@@ -169,7 +199,7 @@ QUESTION-DETECTED|AUTO-RESTART|SESSION-GONE|NUDGE|ACTION|pr-ready|pr-broken|stop
 
 ## Unblocking stuck agents — protocol
 
-When a `kind:"question-pending"` event fires, the agent is asking the orchestrator how to proceed. Answer **within Q_WAIT_MIN minutes** — 3 repeats → DEAD-END + `freeDeadEndSlot` kills the session. Follow this order:
+When a `kind:"question-pending"` event fires, the agent is asking the orchestrator how to proceed. **Answer promptly** — re-alerts come every `Q_RE_NUDGE_MIN`; after `Q_DEAD_END_MIN` of no answer WITH queued work waiting, the slot is rotated (with no queued work the session is held alive, but the agent stays blocked until you act). Read the alert's `commandBrief` field and answer in the AGENT'S OWN workflow vocabulary — never /work jargon to a non-/work agent. Follow this order:
 
 ### 1. Bypass check — refuse any of these
 
@@ -229,6 +259,28 @@ Given the choice between:
 ### Pool discipline
 
 `pool=N` means at most N concurrent `-work` sessions. When a ticket dead-ends or you kill one (e.g. GH-511 wedged on operator decision held the slot for hours), free the slot via `maestro-cleanup.js <TICKET> --tmux` and bootstrap the next queued ticket.
+
+## Never block the loop on the operator ("ask me when I'm looking")
+
+You are the fleet's only event processor — while you sit inside `AskUserQuestion`, NO agent event gets handled (fleets have sat parked 15-60+ minutes on one blocking question while dead-end timers ran). Rules:
+
+- **The only sanctioned `AskUserQuestion` moments**: Step 0 command selection, schema-tier selection, and a genuine scope decision the user must own — all BEFORE the fleet is live. While conducting: never.
+- While conducting, a decision you can't make alone goes into your final message as a clearly-marked `⚑ DECISION NEEDED` line — then KEEP PROCESSING events. Unanswered actionable alerts are re-surfaced automatically by the UserPromptSubmit hook (PENDING DECISIONS block) the moment the user types anything, i.e. exactly when they are looking at the screen. You lose nothing by not blocking.
+- Apply documented defaults instead of asking (a skill that documents its default answer gets that answer). Never re-type "still waiting" at a pending menu — answer it or surface it.
+- After a chat rewind/compaction, re-read the recent alert sink (`tail -50 /tmp/maestro-alerts.jsonl`) — pending questions survive there even when your context lost them.
+
+## Conductor conduct — the ten rules (each one is paid for in lost hours)
+
+1. **Resume, never re-run.** A dead/stuck session with prior work gets `claude --continue` in its worktree (the daemon now does this for generic commands automatically) — NEVER a fresh `/command` relaunch that starts the task over, and NEVER close its PRs / throw away green work.
+2. **Communicate, don't act.** You message agents (`tmux send-keys`, `.maestro-context.md`); you do not edit files in their worktrees, commit their branches, push their PRs, or chase their CI. If a directive doesn't land, fix the DELIVERY (check the `stuck-input` alert, verify with a pane capture), don't do their job.
+3. **Verify every send.** After `tmux send-keys`, capture the pane and confirm the text SUBMITTED (not sitting in the composer). The daemon's sendLine does this automatically; your manual sends must too. `End` + `Enter`, retry with `C-m` if unconsumed.
+4. **Check pane state BEFORE sending.** A broadcast into an open menu corrupts the menu; text into a mid-turn agent queues invisibly. Capture first, send second, one session at a time.
+5. **Never cross-pollinate branches.** Do not tell agent B to `git merge` agent A's branch to "share" a dependency — it drags A's entire diff into B's PR. Share files via cherry-pick of a dedicated commit, or wait for A to merge.
+6. **Scope discipline.** Only the tickets you were given, only this repo's tracker (GH issues here — NEVER Linear/other repos), no extra agents beyond poolSize, no unsolicited stops/kills.
+7. **Identity check at bootstrap.** Before launching in a new wrapper, `git -C <worktree> config user.email` + `gh auth status` must match the repo's expected account (read `../.envrc`) — agents have committed under the wrong identity for hours.
+8. **Trust `.envrc`, not memories.** Repo paths, prefixes, and flags come from the wrapper's `../.envrc` read NOW — injected memories about "where this runs" go stale and have bootstrapped whole fleets into the wrong repo.
+9. **Oversized PR → `/pr-split`.** When an agent's PR crosses ~800 changed LOC, direct it to split (or run `/pr-split` on it) BEFORE review-bot comment storms start.
+10. **When output stalls but the pane looks busy**, believe the `no-progress` alert over the spinner: inspect, ask the agent for a one-line status, and only then decide interrupt/restart/wait.
 
 ## Anti-patterns
 

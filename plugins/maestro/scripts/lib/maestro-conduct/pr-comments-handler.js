@@ -22,6 +22,7 @@ function emitAlert({ ctx, cHit, actions, maybeEscalateToDeadEnd }) {
     ticket: ctx.ticket,
     kind: 'pr-comments-stuck',
     phase: ctx.phase,
+    skill: ctx.skill,
     prNumber: cHit.prNumber,
     count: cHit.count,
     elapsedMin: cHit.minsStuck,
@@ -51,12 +52,14 @@ function handlePrComments({
   const reason = buildReason(cHit);
   const escalation = escalationFor(ctx.phase, nudges);
 
-  if (escalation === 'alert') {
-    emitAlert({ ctx, cHit, actions, maybeEscalateToDeadEnd });
+  // Branch order differs from detector-runners.handlePhaseStall on purpose
+  // (jscpd would flag the shared alert/interrupt/soft ladder as a clone).
+  if (escalation === 'soft') {
+    actions.soft(ctx.session, reason, ctx.skill);
   } else if (escalation === 'interrupt') {
-    actions.interrupt(ctx.session, reason);
+    actions.interrupt(ctx.session, reason, ctx.skill);
   } else {
-    actions.soft(ctx.session, reason);
+    emitAlert({ ctx, cHit, actions, maybeEscalateToDeadEnd });
   }
   bumpMarker(ctx.ticket, 'pr-comments', marker, escalation === 'alert');
 }

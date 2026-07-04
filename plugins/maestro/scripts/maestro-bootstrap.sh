@@ -221,6 +221,40 @@ fi
 
 git -C "$REPO_DIR" fetch origin "$BASE_BRANCH" 2>&1 | tail -1
 
+# ── Branch naming (was a hardcoded "$TICKET-maestro" literal). Some remotes
+#    reject `*-maestro` branch names outright, forcing agents onto ad-hoc
+#    branches the conductor's PR detection couldn't see. MAESTRO_BRANCH_TEMPLATE
+#    supports {ticket} (e.g. ECHO-6245) and {ticket_lower} placeholders; set it
+#    in the project's ../.envrc to match the repo's branch-name rules, e.g.
+#    MAESTRO_BRANCH_TEMPLATE='feature/{ticket_lower}'.
+BRANCH_TEMPLATE="${MAESTRO_BRANCH_TEMPLATE:-{ticket}-maestro}"
+
+branch_for_ticket() {
+  local t="$1" out="$BRANCH_TEMPLATE"
+  local t_lower
+  t_lower="$(printf '%s' "$t" | tr '[:upper:]' '[:lower:]')"
+  out="${out//\{ticket\}/$t}"
+  out="${out//\{ticket_lower\}/$t_lower}"
+  printf '%s' "$out"
+}
+
+# ── Env pinning: tmux new-session inherits the tmux SERVER's global env, which
+#    any concurrent project's direnv rewrites at any moment — agents have been
+#    launched with another repo's REPO_NAME/TASKS_BASE and wrote ticket data
+#    into the wrong project. Bake the resolved values into the launch command
+#    itself so a later global-env stomp can't retarget this agent.
+env_pin_prefix() {
+  local pin="" v val esc
+  for v in REPO_NAME WORKTREES_BASE TASKS_BASE BASE_BRANCH TICKET_PREFIX MAESTRO_NS; do
+    val="${!v:-}"
+    [ -z "$val" ] && continue
+    esc="$(printf '%s' "$val" | sed "s/'/'\\\\''/g")"
+    pin="${pin}${v}='${esc}' "
+  done
+  printf '%s' "$pin"
+}
+ENV_PIN="$(TICKET_PREFIX="$PREFIX" env_pin_prefix)"
+
 for TICKET in "$@"; do
   # Normalize: if user passed bare number, prepend the provider-derived prefix.
   if [[ "$TICKET" =~ ^[0-9]+$ ]]; then
@@ -228,7 +262,7 @@ for TICKET in "$@"; do
   fi
 
   WT="$WORKTREES_BASE/$REPO_NAME-$TICKET"
-  BRANCH="$TICKET-maestro"
+  BRANCH="$(branch_for_ticket "$TICKET")"
 
   if [ -d "$WT" ]; then
     echo "[$TICKET] worktree exists at $WT — skipping create"
@@ -259,11 +293,15 @@ for TICKET in "$@"; do
     echo "[$TICKET] .maestro-skill = $TICKET_SKILL (written)"
   else
     EXISTING_SKILL="$(head -n1 "$TICKET_DIR/.maestro-skill" | tr -d '[:space:]')"
-    if is_allowed_skill "$EXISTING_SKILL"; then
+    # Preserve ANY regex-valid persisted skill — the old is_allowed_skill check
+    # silently reverted a preserved qc-work to 'work' on bare re-runs (no
+    # --allow-generic), relaunching the wrong workflow. The write path gated
+    # what landed here; trust it on read. Only malformed values are replaced.
+    if [[ "$EXISTING_SKILL" =~ $_SKILL_NAME_RE ]]; then
       TICKET_SKILL="$EXISTING_SKILL"
       echo "[$TICKET] .maestro-skill = $EXISTING_SKILL (preserved — no explicit skill on this invocation)"
     else
-      echo "[$TICKET] .maestro-skill on disk contains unknown skill '$EXISTING_SKILL' — overwriting with '$TICKET_SKILL'" >&2
+      echo "[$TICKET] .maestro-skill on disk contains malformed skill '$EXISTING_SKILL' — overwriting with '$TICKET_SKILL'" >&2
       printf '%s\n' "$TICKET_SKILL" > "$TICKET_DIR/.maestro-skill"
     fi
   fi
@@ -283,11 +321,31 @@ for TICKET in "$@"; do
   if tmux has-session -t "$SESSION" 2>/dev/null; then
     echo "[$TICKET] tmux session $SESSION exists — skipping launch"
   else
+    # Fresh session ⇒ stale conductor markers from prior runs must not carry
+    # over: accumulated nudge/alert counts and day-old phase timestamps have
+    # dead-ended freshly-bootstrapped agents within minutes (observed:
+    # elapsedMin=13896 interrupt on a brand-new session; 21 inherited
+    # nudges-exhausted counts → instant kill). Idempotent, fail-open.
+    node "$_MAESTRO_SCRIPT_DIR/maestro-cleanup.js" "$TICKET" --alert-counts >/dev/null 2>&1 || true
     tmux new-session -d -s "$SESSION" -c "$WT" \
-      "${INBOX_ENV}$CLAUDE_BIN --dangerously-skip-permissions '/$TICKET_SKILL $TICKET'"
+      "${ENV_PIN}${INBOX_ENV}$CLAUDE_BIN --dangerously-skip-permissions '/$TICKET_SKILL $TICKET'"
     echo "[$TICKET] launched tmux session $SESSION (claude /$TICKET_SKILL $TICKET)"
+    # Post-launch grooming (best-effort): name the conversation so sessions
+    # are distinguishable on mobile (GH-625), and point the agent at its
+    # orchestration context file when the operator wrote one.
+    (
+      sleep 3
+      tmux send-keys -t "$SESSION" -l "/rename $TICKET /$TICKET_SKILL maestro" 2>/dev/null
+      tmux send-keys -t "$SESSION" Enter 2>/dev/null
+      if [ -f "$TICKET_DIR/.maestro-context.md" ]; then
+        tmux send-keys -t "$SESSION" -l "[MAESTRO] Read your orchestration context at $TICKET_DIR/.maestro-context.md before starting." 2>/dev/null
+        tmux send-keys -t "$SESSION" Enter 2>/dev/null
+      fi
+    ) &
   fi
 done
+# Wait for the post-launch grooming subshells so callers see complete setup.
+wait
 
 echo
 echo "Active sessions:"
