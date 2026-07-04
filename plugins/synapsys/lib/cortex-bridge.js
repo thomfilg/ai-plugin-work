@@ -25,6 +25,8 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
+const cortexConfig = require('./cortex-config');
+
 /** Max results per recall call — downstream re-caps via max_results_per_query. */
 const MAX_RESULTS = 5;
 
@@ -149,12 +151,42 @@ function buildQuery(tokens) {
   const like = "content LIKE ? ESCAPE '\\'";
   const hits = tokens.map(() => `(${like})`).join(' + ');
   const anyMatch = tokens.map(() => like).join(' OR ');
+  // Age cutoff INSIDE the query: downstream formatBlock drops results older
+  // than max_age_days AFTER the LIMIT, so without this a handful of stale
+  // high-hit rows could crowd out a fresh eligible row inside the LIMIT and
+  // render a false "no matches". ISO-8601 text compares chronologically.
+  // Rows with no usable date at all stay eligible (they map to ageDays 0
+  // downstream, matching the pre-cutoff behavior).
+  const notStale =
+    '(COALESCE(timestamp, created_at) >= ? OR COALESCE(timestamp, created_at) IS NULL)';
   const sql =
     'SELECT id, content, timestamp, created_at, ' +
     `(${hits}) AS hits FROM memories ` +
-    `WHERE (project_id = ? OR ? = '') AND (${anyMatch}) ` +
+    `WHERE (project_id = ? OR ? = '') AND ${notStale} AND (${anyMatch}) ` +
     `ORDER BY hits DESC, timestamp DESC LIMIT ${MAX_RESULTS}`;
   return sql;
+}
+
+/**
+ * ISO cutoff for the in-query age filter, aligned with the same
+ * `max_age_days` budget `formatBlock` applies downstream (config-overridable,
+ * default 180). Fail-open: any config error → the default window.
+ *
+ * @param {{ home?: string, env?: object }} [opts]
+ * @returns {string} ISO-8601 timestamp; rows saved before it are stale
+ */
+function ageCutoffIso(opts = {}) {
+  let days = cortexConfig.DEFAULTS.max_age_days;
+  try {
+    const home = opts.home || (opts.env || process.env).HOME || os.homedir();
+    const config = cortexConfig.loadConfig({ home, env: opts.env || process.env });
+    if (Number.isFinite(config.max_age_days) && config.max_age_days > 0) {
+      days = config.max_age_days;
+    }
+  } catch {
+    // Fail-open to the default window.
+  }
+  return new Date(Date.now() - days * 86400000).toISOString();
 }
 
 /** LIKE parameter (`%kw%`, wildcards escaped) for one token. */
@@ -212,8 +244,11 @@ function recall(query, projectId, opts = {}) {
     db = new sqlite.DatabaseSync(dbPath(opts), { readOnly: true });
     const likes = tokens.map(likeParam);
     const project = String(projectId || '');
-    // Param order mirrors buildQuery: hit-count LIKEs, project pair, any-match LIKEs.
-    const rows = db.prepare(buildQuery(tokens)).all(...likes, project, project, ...likes);
+    // Param order mirrors buildQuery: hit-count LIKEs, project pair, age
+    // cutoff, any-match LIKEs.
+    const rows = db
+      .prepare(buildQuery(tokens))
+      .all(...likes, project, project, ageCutoffIso(opts), ...likes);
     return rows.map(toResult);
   } catch {
     return [];

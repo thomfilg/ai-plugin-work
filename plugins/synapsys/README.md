@@ -514,7 +514,7 @@ Both phases reach cortex through an **injected provider**, not by calling the MC
 Notes on the default bridge:
 
 - **Node >= 22.5 required** — the bridge uses the built-in `node:sqlite` module (experimental). On older Nodes it reports "unavailable" and recall stays disabled; nothing crashes.
-- **Keyword + recency, not semantic** — the hook path has no embedder, so the bridge ranks rows by how many query keywords their content matches (then by recency), capped at 5 per query. Results are shaped `{ id, savedAt, title, body, ageDays }` and still pass the downstream `max_age_days` / `max_results_per_query` budgets.
+- **Keyword + recency, not semantic** — the hook path has no embedder, so the bridge ranks rows by how many query keywords their content matches (then by recency), capped at 5 per query. Rows older than `max_age_days` are excluded inside the query itself (so stale rows can never crowd fresher eligible ones out of the cap), and results — shaped `{ id, savedAt, title, body, ageDays }` — still pass the downstream `max_age_days` / `max_results_per_query` budgets.
 - **Read-only** — the bridge opens the db with `readOnly: true` and never writes memories (R17).
 - The kill switch `SYNAPSYS_CORTEX_AUTO_RECALL=off` still disables **everything**, bridge included (see [Kill-switch](#kill-switch)).
 

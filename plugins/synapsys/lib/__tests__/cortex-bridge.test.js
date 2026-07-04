@@ -241,6 +241,34 @@ test('recall: caps results at 5', { skip: !sqlite }, async () => {
   }
 });
 
+test('recall: stale high-hit rows cannot crowd a fresh row out of the LIMIT (in-query age cutoff)', {
+  skip: !sqlite,
+}, () => {
+  const dir = mkTmp();
+  try {
+    const file = path.join(dir, 'memory.db');
+    // Six stale (200d) two-keyword rows would fill the LIMIT-5 window ahead of
+    // the fresh one-keyword row; downstream formatBlock would then drop all
+    // five as older than max_age_days (180) and render a false "no matches".
+    const rows = [];
+    for (let i = 0; i < 6; i += 1) {
+      rows.push({ content: `alpha beta stale row ${i}`, timestamp: isoDaysAgo(200) });
+    }
+    rows.push({ content: 'alpha fresh row', timestamp: isoDaysAgo(5) });
+    makeDb(file, rows);
+
+    const out = bridge.recall('alpha beta', '', { env: { SYNAPSYS_CORTEX_DB: file } });
+    assert.equal(out.length, 1, 'stale rows are filtered in the query, not post-LIMIT');
+    assert.match(out[0].body, /alpha fresh row/);
+    assert.ok(
+      out.every((r) => r.ageDays <= 180),
+      'no returned row is past the age window'
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('recall: missing db / any error fails open to []', async () => {
   const out = await bridge.recall('alpha keywords', '', {
     env: { SYNAPSYS_CORTEX_DB: path.join(os.tmpdir(), 'no-such-cortex-db-662', 'memory.db') },

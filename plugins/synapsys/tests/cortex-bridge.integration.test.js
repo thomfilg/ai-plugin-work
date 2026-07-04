@@ -120,6 +120,38 @@ test('SessionStart with a detectable cortex db (no env module) schedules Phase 1
   }
 });
 
+test('kill switch OFF beats a detectable bridge: SessionStart schedules nothing (AC: disables regardless of detection)', {
+  skip: !sqlite,
+}, () => {
+  const home = mkHome();
+  const sessionId = `sess-${process.pid}-${Date.now()}-killswitch`;
+  try {
+    const dbFile = makeDb(home); // the bridge WOULD resolve…
+    const res = runHook(
+      'SessionStart',
+      { session_id: sessionId, cwd: home },
+      {
+        home,
+        env: {
+          SYNAPSYS_CORTEX_AUTO_RECALL: 'off',
+          SYNAPSYS_CORTEX_DB: dbFile,
+          SYNAPSYS_CORTEX_TICKET: 'GH-662',
+          SYNAPSYS_CORTEX_KEYWORDS: 'maestro cortex recall',
+          SYNAPSYS_NO_SETUP_HINT: '1',
+        },
+      }
+    );
+    assert.equal(res.status, 0, 'SessionStart exits 0');
+    assert.equal(
+      waitForCache(home, sessionId, 30),
+      null,
+      'kill switch disables recall even with a detectable cortex db'
+    );
+  } finally {
+    cleanup(home);
+  }
+});
+
 test('SessionStart with no module and no cortex db has zero cortex side effects', () => {
   const home = mkHome();
   const sessionId = `sess-${process.pid}-${Date.now()}-nodb`;
