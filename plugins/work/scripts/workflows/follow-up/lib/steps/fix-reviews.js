@@ -19,6 +19,7 @@
 
 const path = require('path');
 const { execFileSync } = require('child_process');
+const { hasUnpushedCommits } = require('../git-unpushed');
 
 function blocked(reason) {
   return { type: 'follow_up_instruction', action: 'blocked', reason };
@@ -86,11 +87,19 @@ function fetchNextComment(state, commentsScript, ctx, scriptEnv) {
   }
 }
 
-// No more actionable comments. When all remaining comments are terminal (solved
-// or skipped), advance directly to `report` and let the workflow finish — the
-// rationale for each skip is preserved in follow-up-comments.json for later
-// review. Previously this returned `action: 'blocked'` which forced a manual
-// "I have reviewed, re-run" ack-loop even after the user had approved the skips.
+// No more actionable comments. When all remaining comments are terminal
+// (solved or skipped), record the counts and finish — the rationale for each
+// disposition is preserved in follow-up-comments.json and itemized by the
+// report step. Previously this returned `action: 'blocked'` which forced a
+// manual "I have reviewed, re-run" ack-loop even after the user had approved
+// the skips.
+//
+// Routing: when review-fix commits are still unpushed, go through push-retry
+// first (the old skipped>0 path jumped straight to report and completed the
+// workflow with the fixes never pushed). Otherwise go to report. Counts are
+// recorded on EVERY done-path — including all-solved — so the completion
+// summary can itemize what was addressed (previously the skipped===0 path
+// fell through with no counts and the summary never mentioned reviews).
 //
 // Loop-break invariant: routing to `report` marks the workflow `status:
 // complete`, so re-running /follow-up without --init returns "Already complete"
@@ -98,11 +107,11 @@ function fetchNextComment(state, commentsScript, ctx, scriptEnv) {
 function handleNoMoreComments(state, commentsScript, ctx, scriptEnv) {
   delete state._reviewSnapshotDone;
   const statusResult = readCommentsStatus(commentsScript, ctx, scriptEnv);
-  if (statusResult && statusResult.skipped > 0) {
-    state._skippedReviewsCount = statusResult.skipped;
+  if (statusResult) {
+    state._skippedReviewsCount = statusResult.skipped || 0;
     state._solvedReviewsCount = statusResult.solved || 0;
-    state.currentStep = 'report';
   }
+  state.currentStep = hasUnpushedCommits(ctx.worktreeDir) ? 'push-retry' : 'report';
   return null;
 }
 

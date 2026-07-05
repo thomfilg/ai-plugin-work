@@ -27,6 +27,7 @@ const {
   extractFailedTestPaths,
 } = require('./monitor-ci-context');
 const { buildOutput, buildStatusLine } = require('./monitor-status-line');
+const { notifyOperator } = require('../notify');
 
 /**
  * Check if any workflow run for the PR's branch has already failed.
@@ -67,14 +68,7 @@ function hasFailedJobs(prInfo, worktreeDir) {
 }
 
 // Synchronous sleep via Atomics.wait — no subprocess, no event-loop dependency.
-function sleepSync(ms) {
-  try {
-    const sab = new SharedArrayBuffer(4);
-    Atomics.wait(new Int32Array(sab), 0, 0, ms);
-  } catch {
-    /* sleep best-effort */
-  }
-}
+const { sleepSync } = require('../sleep');
 
 // GitHub returns `mergeable: UNKNOWN` for up to ~30s after a push or sibling-PR
 // merge. Retry a few times before trusting UNKNOWN. Bounded (3 * 3s = 9s).
@@ -230,12 +224,15 @@ function fetchReviews(prInfo, getReviews) {
 
 function emitStatusLine(state, ci, reviews) {
   if (!state._monitorStartTime) state._monitorStartTime = new Date().toISOString();
-  const { line1, detail } = buildStatusLine(state, ci, reviews);
+  const { line1, detail, parts } = buildStatusLine(state, ci, reviews);
   // Progress is persisted to state (_ciStatusLine) and surfaced by the
   // /follow-up status bar (agent-free) — no per-poll stderr spam. The final
   // JSON instruction is what keeps the agent posted.
   state._ciStatusLine = line1;
   state._ciStatusDetail = detail || '';
+  // Structured parts let the status bar recompute the elapsed timer LIVE on
+  // every refresh instead of re-printing the string frozen at monitor time.
+  state._ciStatusParts = parts;
 }
 
 function populateFailedJobs(state, ci, worktreeDir) {
@@ -270,6 +267,21 @@ function attachClassifierContext(state, ci, initialFailedJobs, worktreeDir) {
   }
 }
 
+// Ping the operator mailbox when the blocking-comment count GROWS — new bot
+// review comments used to arrive silently while the agent idled in the poll
+// loop ("agents get stuck with no notifications of messages").
+function notifyOnNewBlockingComments(state, reviews) {
+  const count = reviews && reviews.blocking ? reviews.blocking.length : 0;
+  const previous = state._lastBlockingCount || 0;
+  if (count > previous) {
+    notifyOperator(
+      state.ticketId,
+      `${count - previous} new blocking review comment(s) on PR #${state.prNumber || '?'} (${count} total)`
+    );
+  }
+  state._lastBlockingCount = count;
+}
+
 module.exports = function registerMonitor(register) {
   register('monitor', (state, ctx) => {
     // Stale infra-failure cache is auto-cleared by the orchestrator in
@@ -283,6 +295,12 @@ module.exports = function registerMonitor(register) {
 
     let prInfo = fetchPrInfoOrFail(state, getPRInfo, prArg);
     if (!prInfo) return null;
+
+    // Persist the discovered PR number: downstream consumers (fix-reviews
+    // `--snapshot --pr`, the /work follow-up gate's assessMergeable) bail on a
+    // null prNumber even after monitor printed the number itself (echo-5363,
+    // echo-5820).
+    if (!state.prNumber && prInfo.number) state.prNumber = prInfo.number;
 
     const refreshed = refreshPrUntilKnown(getPRInfo, prArg, prInfo);
     prInfo = refreshed.prInfo;
@@ -308,10 +326,21 @@ module.exports = function registerMonitor(register) {
     const initialFailedJobs = populateFailedJobs(state, ci, ctx.worktreeDir);
     attachClassifierContext(state, ci, initialFailedJobs, ctx.worktreeDir);
 
-    if (exitCode === 0) state.currentStep = computeNextStepOnGreen(state);
+    notifyOnNewBlockingComments(state, reviews);
+
+    if (exitCode === 0) routeOnGreen(state);
     return null;
   });
 };
+
+// Fully green (CI passed, reviews clear, mergeable). A failureCategory left
+// over from an earlier cycle (e.g. 'reviews' after comments were fixed) is
+// stale — clear it when routing to report so the report step completes
+// instead of surfacing forever (echo-6204).
+function routeOnGreen(state) {
+  state.currentStep = computeNextStepOnGreen(state);
+  if (state.currentStep === 'report') state.failureCategory = null;
+}
 
 /**
  * R15 (GH-508): when CI turns green after an infra-flake rerun, route through
@@ -344,4 +373,5 @@ module.exports.__test__ = {
   fetchClassifierContext,
   computeNextStepOnGreen,
   extractFailedTestPaths,
+  notifyOnNewBlockingComments,
 };

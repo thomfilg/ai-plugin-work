@@ -262,6 +262,24 @@ function getNextInstruction(ticketId, prNumber) {
 
 // ─── CLI ────────────────────────────────────────────────────────────────────
 
+// Terminal states used to leave only a JSON blob in the transcript — ping
+// the operator mailbox + terminal bell so a blocked/complete follow-up is
+// never silent ("agents get stuck with no notifications").
+function notifyTerminalInstruction(instruction, safeName) {
+  if (!instruction || !['blocked', 'surface', 'complete'].includes(instruction.action)) return;
+  try {
+    const { notifyOperator } = require('./lib/notify');
+    const detail =
+      instruction.summary ||
+      instruction.reason ||
+      (instruction.payload && instruction.payload.reason) ||
+      '';
+    notifyOperator(safeName, `${instruction.action}: ${String(detail).split('\n')[0]}`);
+  } catch {
+    /* fail-open — notification is best-effort */
+  }
+}
+
 function main() {
   const args = process.argv.slice(2);
   if (args.length === 0) {
@@ -315,6 +333,8 @@ function main() {
   }
 
   const instruction = getNextInstruction(safeName, prNumber);
+
+  notifyTerminalInstruction(instruction, safeName);
 
   // When the workflow completes, release the session guard ONLY if /follow-up
   // owns it (the `complete <id> <workflow>` filter is a no-op when a parent
