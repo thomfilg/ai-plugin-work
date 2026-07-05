@@ -7,31 +7,18 @@
 
 'use strict';
 
-const fs = require('fs');
 const path = require('path');
 const { runAutoAdvance } = require('../../lib/auto-advance');
+const { persistInstruction } = require('../lib/instruction-file');
 
 // Test seam: an absolute path override lets the surface/blocked test stub
 // follow-up-next.js without staging the entire plugin tree. Production code
 // never sets FOLLOW_UP_NEXT_PATH; default resolves siblings as before.
 const nextPath = process.env.FOLLOW_UP_NEXT_PATH || path.join(__dirname, '..', 'follow-up-next.js');
 
-// Persist the latest instruction so the Stop hook (session-guard) can surface
-// it inline when the agent tries to stop. Without this the agent gets only
-// "go run follow-up-next.js again" with no context. Fail-open.
-function persistInstruction(TASKS_BASE, ticket, instruction) {
-  try {
-    const instructionPath = path.join(TASKS_BASE, ticket, '.follow-up-next.json');
-    if (instruction.action === 'complete') {
-      // Clean up so a future run doesn't surface a stale completion blob
-      if (fs.existsSync(instructionPath)) fs.unlinkSync(instructionPath);
-    } else {
-      fs.writeFileSync(instructionPath, JSON.stringify(instruction, null, 2));
-    }
-  } catch {
-    /* fail-open */
-  }
-}
+// The latest instruction is persisted (shared lib/instruction-file.js) so the
+// Stop hook (session-guard) can surface it inline when the agent tries to
+// stop, and so state-file-first callers (GH-214) can read it from disk.
 
 const BANNERS = {
   execute: ['═══ FOLLOW-UP2: NEXT STEP ═══', '══════════════════════════════'],

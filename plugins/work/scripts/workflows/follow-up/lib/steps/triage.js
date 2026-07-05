@@ -125,7 +125,13 @@ function routeTriage(state, signals) {
   // directly would skip infra-retry entirely when the flag is on.
   if (signals.hasCiFailure) return routeTo(state, 'infra-retry', 'ci_failure');
 
-  // Blocking reviews take priority over waiting for CI.
+  // GH-268: blocking reviews take priority over waiting for CI — actionable
+  // review comments are surfaced immediately instead of holding them until
+  // the CI pipeline finishes. The reviewer-done signal is reliable by
+  // construction: `reviewsActionable` requires blocking comments to exist AND
+  // the bot to have SUBMITTED its review (not listed in pendingBots / not
+  // still running). An in-progress review falls through to the wait branches
+  // below, preserving the old wait-for-CI behavior (no partial reviews).
   if (signals.reviewsActionable) return routeTo(state, 'fix-reviews', 'reviews');
 
   // Bot check still running with blocking reviews — wait for it to finish.

@@ -20,6 +20,7 @@ const {
 } = require('./monitor-infra-cache');
 const {
   buildInitialFailedJobs,
+  collectRunIds,
   resolveMissingRunIds,
   mapCiStatus,
   fetchClassifierContext,
@@ -321,6 +322,10 @@ module.exports = function registerMonitor(register) {
     const exitCode = computeExitCode(prInfo, ci, reviews);
     writeMonitorResult(state, { exitCode, output: output.substring(0, 3000) });
     state._ciRunningCount = ci.running ? ci.running.length : 0;
+    // GH-214: persist the observed run IDs so monitoring is resumable — a
+    // fresh invocation (or an operator) can inspect the same runs directly
+    // (`gh run view <id>`) instead of re-deriving them from output.
+    state._ciRunIds = collectRunIds(ci);
 
     emitStatusLine(state, ci, reviews);
     const initialFailedJobs = populateFailedJobs(state, ci, ctx.worktreeDir);

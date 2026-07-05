@@ -875,12 +875,19 @@ function getReviews(prNumber) {
     priority: classifyCommentPriority(cm.author, cm.body),
   }));
 
-  // Mark stale comments as non-blocking
+  // GH-248: position-outdated comments (line===null but original_line set)
+  // KEEP their original priority — GitHub merely failed to map them onto the
+  // current diff (moved code, rebase, hunk-boundary churn); the underlying
+  // concern may still be valid. They get a display tag instead of a silent
+  // downgrade. Only comments from commits no longer on the branch
+  // (force-push/rebase leftovers) are downgraded to non-blocking.
   for (const item of [...actionable, ...classifiedComments]) {
-    const isOutdated = item.line === null && item.original_line != null;
+    if (item.line === null && item.original_line != null) {
+      item.positionOutdated = true;
+    }
     const isOldCommit =
       branchCommits.size > 0 && item.commit_id && !branchCommits.has(item.commit_id);
-    if (isOutdated || isOldCommit) {
+    if (isOldCommit) {
       item.priority = 'low';
       item.stale = true;
     }
@@ -973,6 +980,50 @@ function formatNonBlockingItems(items, lines) {
       lines.push(`    ${c.dim('"' + preview + '"')}`);
     }
   }
+}
+
+// GH-248: on exit (fail OR success), print EVERY comment — blocking and
+// non-blocking — with its FULL body, priority, and stale/position-outdated/
+// dedup markers, so the agent can evaluate each one without re-fetching.
+// Polling iterations keep the 80-char previews for conciseness.
+function printExitCommentBodies(reviews) {
+  const allExitComments = [
+    ...((reviews && reviews.blocking) || []).map((item) => ({ ...item, _section: 'BLOCKING' })),
+    ...((reviews && reviews.nonBlocking) || []).map((item) => ({
+      ...item,
+      _section: 'NON-BLOCKING',
+    })),
+  ];
+  if (allExitComments.length === 0) return;
+  console.log('');
+  console.log(c.bold('--- Full Comment Bodies (All Reviews) ---'));
+  let currentSection = '';
+  allExitComments.forEach((item, i) => {
+    if (item._section !== currentSection) {
+      currentSection = item._section;
+      console.log('');
+      console.log(c.bold(`  [${currentSection}]`));
+    }
+    const loc = item.path ? `${item.path}${item.line ? ':' + item.line : ''}` : 'N/A';
+    const priority = (item.priority || 'unknown').toUpperCase();
+    const tags =
+      (item.stale ? ' (stale)' : '') +
+      (item.positionOutdated ? ' (position outdated)' : '') +
+      (item.deduplicated ? ' (deduped)' : '');
+    console.log(
+      `  ${c.cyan(`Comment ${i + 1}:`)} [${priority}] @${item.author}${c.dim(tags)} ${loc}`
+    );
+    const body = (item.body || '').trim();
+    if (body) {
+      console.log(
+        body
+          .split('\n')
+          .map((l) => `    ${l}`)
+          .join('\n')
+      );
+    }
+  });
+  console.log('');
 }
 
 function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts, decision) {
@@ -1114,8 +1165,13 @@ function formatReport(prInfo, ci, reviews, attempt, maxAttempts, opts, decision)
       lines.push(c.red(`Reviews: ${reviews.blocking.length} BLOCKING`));
       for (const item of reviews.blocking) {
         const priorityTag = item.priority === 'high' ? c.red('[HIGH]') : c.yellow('[MEDIUM]');
+        // GH-248: position-outdated comments keep their priority; the tag is
+        // display-only so the agent knows to re-verify the location.
+        const outdatedTag = item.positionOutdated ? c.dim(' (position outdated)') : '';
         const loc = item.path ? ` ${c.dim(item.path + (item.line ? ':' + item.line : ''))}` : '';
-        lines.push(`  ${c.red('✗')} ${c.cyan('@' + item.author)} ${priorityTag}${loc}`);
+        lines.push(
+          `  ${c.red('✗')} ${c.cyan('@' + item.author)} ${priorityTag}${outdatedTag}${loc}`
+        );
         if (item.body) {
           const normalized = item.body.replace(/\s+/g, ' ');
           const preview = normalized.length > 80 ? normalized.slice(0, 77) + '...' : normalized;
@@ -1582,33 +1638,7 @@ async function main() {
       state.finalStatus = decision.finalStatus;
       saveState(state);
 
-      // GH-248: Show brief comment previews (80 chars) for ALL comments on exit
-      // so the agent has context. Non-blocking comments must be evaluated too.
-      const allExitComments = [
-        ...(reviews.blocking || []).map((item) => ({ ...item, _section: 'BLOCKING' })),
-        ...(reviews.nonBlocking || []).map((item) => ({ ...item, _section: 'NON-BLOCKING' })),
-      ];
-      if (allExitComments.length > 0) {
-        console.log('');
-        console.log(c.bold('--- Brief Comment Bodies (All Reviews) ---'));
-        let currentSection = '';
-        allExitComments.forEach((item, i) => {
-          if (item._section !== currentSection) {
-            currentSection = item._section;
-            console.log('');
-            console.log(c.bold(`  [${currentSection}]`));
-          }
-          const loc = item.path ? `${item.path}${item.line ? ':' + item.line : ''}` : 'N/A';
-          const priority = (item.priority || 'unknown').toUpperCase();
-          const staleTag = item.stale ? c.dim(' (stale)') : '';
-          const dedupTag = item.deduplicated ? c.dim(' (deduped)') : '';
-          const briefBody = (item.body || '').trim().replace(/\n/g, ' ').substring(0, 80);
-          console.log(
-            `  ${c.cyan(`Comment ${i + 1}:`)} [${priority}] @${item.author}${staleTag}${dedupTag} ${loc} — ${briefBody}`
-          );
-        });
-        console.log('');
-      }
+      printExitCommentBodies(reviews);
 
       process.exit(1);
     }
@@ -1656,6 +1686,7 @@ async function main() {
           state.headAtLastExit = currentHead;
           state.finalStatus = 'reviews-blocking';
           saveState(state);
+          printExitCommentBodies(reviews);
           process.exit(1);
         }
       }
@@ -1727,6 +1758,7 @@ async function main() {
         );
       }
 
+      printExitCommentBodies(reviews);
       process.exit(0);
     }
 
@@ -1745,6 +1777,7 @@ async function main() {
   );
   state.finalStatus = 'timeout';
   saveState(state);
+  printExitCommentBodies(reviews);
   process.exit(1);
 }
 
@@ -1896,6 +1929,7 @@ module.exports = {
   getCodeContext,
   buildAccountabilityEntries,
   formatReport,
+  printExitCommentBodies,
   partitionByRequired,
   // Gate-check exports: used by workflow-definition.js verify()
   isPRGateReady,

@@ -280,6 +280,21 @@ function notifyTerminalInstruction(instruction, safeName) {
   }
 }
 
+// GH-214 (state-file-first): persist the instruction on EVERY run so callers
+// can invoke this script in the background and read the compact JSON from
+// `<TASKS_BASE>/<ticket>/.follow-up-next.json` instead of parsing stdout.
+// Then fire the terminal-state operator notification.
+function applyInstructionSideEffects(instruction, safeName) {
+  if (instruction) {
+    try {
+      require('./lib/instruction-file').persistInstruction(TASKS_BASE, safeName, instruction);
+    } catch {
+      /* fail-open */
+    }
+  }
+  notifyTerminalInstruction(instruction, safeName);
+}
+
 function main() {
   const args = process.argv.slice(2);
   if (args.length === 0) {
@@ -334,7 +349,7 @@ function main() {
 
   const instruction = getNextInstruction(safeName, prNumber);
 
-  notifyTerminalInstruction(instruction, safeName);
+  applyInstructionSideEffects(instruction, safeName);
 
   // When the workflow completes, release the session guard ONLY if /follow-up
   // owns it (the `complete <id> <workflow>` filter is a no-op when a parent
