@@ -76,13 +76,43 @@ describe('fix-reviews — done-path routing and counts', () => {
     assert.equal(state.currentStep, 'report');
   });
 
-  it('routes through push-retry when the worktree has unpushed work', () => {
+  it('routes through push-retry when commits exist ahead of upstream', () => {
+    // Real upstream: bare remote + clone, push -u, then one more commit.
+    const bareDir = path.join(tmpDir, 'origin.git');
     const repoDir = path.join(tmpDir, 'repo');
-    fs.mkdirSync(repoDir);
-    execFileSync('git', ['init', '-q'], { cwd: repoDir });
-    fs.writeFileSync(path.join(repoDir, 'fix.js'), '// review fix\n'); // dirty tree
+    execFileSync('git', ['init', '-q', '--bare', bareDir]);
+    execFileSync('git', ['clone', '-q', bareDir, repoDir]);
+    const git = (args) =>
+      execFileSync('git', args, {
+        cwd: repoDir,
+        env: {
+          ...process.env,
+          GIT_AUTHOR_NAME: 't',
+          GIT_AUTHOR_EMAIL: 't@t',
+          GIT_COMMITTER_NAME: 't',
+          GIT_COMMITTER_EMAIL: 't@t',
+        },
+      });
+    fs.writeFileSync(path.join(repoDir, 'a.js'), '// base\n');
+    git(['add', '.']);
+    git(['commit', '-q', '-m', 'base']);
+    git(['push', '-q', '-u', 'origin', 'HEAD']);
+    fs.writeFileSync(path.join(repoDir, 'fix.js'), '// review fix\n');
+    git(['add', '.']);
+    git(['commit', '-q', '-m', 'fix(review): x']); // 1 ahead of upstream
     const { state } = runDonePath(repoDir, '{"remaining":0,"total":1,"solved":1,"skipped":0}');
     assert.equal(state.currentStep, 'push-retry', 'unpushed fixes must go through push-retry');
+  });
+
+  it('a dirty no-upstream worktree does NOT loop into push-retry (strict probe)', () => {
+    // Regression: the dirty-tree fallback used to send done→push-retry every
+    // cycle for a stray untracked file, spinning _pushRetryCount to the cap.
+    const repoDir = path.join(tmpDir, 'dirty-repo');
+    fs.mkdirSync(repoDir);
+    execFileSync('git', ['init', '-q'], { cwd: repoDir });
+    fs.writeFileSync(path.join(repoDir, 'stray.log'), 'junk\n'); // dirty, no upstream
+    const { state } = runDonePath(repoDir, '{"remaining":0,"total":1,"solved":1,"skipped":0}');
+    assert.equal(state.currentStep, 'report', 'no unpushed COMMITS → report, not push-retry');
   });
 
   it('skipped>0: still records both counts', () => {

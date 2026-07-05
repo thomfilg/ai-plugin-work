@@ -19,7 +19,7 @@
 
 const path = require('path');
 const { execFileSync } = require('child_process');
-const { hasUnpushedCommits } = require('../git-unpushed');
+const { hasUnpushedCommitsStrict } = require('../git-unpushed');
 
 function blocked(reason) {
   return { type: 'follow_up_instruction', action: 'blocked', reason };
@@ -111,7 +111,10 @@ function handleNoMoreComments(state, commentsScript, ctx, scriptEnv) {
     state._skippedReviewsCount = statusResult.skipped || 0;
     state._solvedReviewsCount = statusResult.solved || 0;
   }
-  state.currentStep = hasUnpushedCommits(ctx.worktreeDir) ? 'push-retry' : 'report';
+  // STRICT commits-only probe: the dirty-tree fallback would misroute a
+  // no-upstream worktree with stray untracked files into an endless
+  // done→push-retry cycle (review finding on PR #666).
+  state.currentStep = hasUnpushedCommitsStrict(ctx.worktreeDir) ? 'push-retry' : 'report';
   return null;
 }
 

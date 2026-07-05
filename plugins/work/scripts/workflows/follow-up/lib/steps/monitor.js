@@ -271,9 +271,18 @@ function attachClassifierContext(state, ci, initialFailedJobs, worktreeDir) {
 // Ping the operator mailbox when the blocking-comment count GROWS — new bot
 // review comments used to arrive silently while the agent idled in the poll
 // loop ("agents get stuck with no notifications of messages").
+//
+// The first observation only SEEDS the counter: comments already present at
+// workflow start are being actively processed by fix-reviews anyway, and
+// notifying for them meant every `--init` re-announced already-known comments
+// (review finding on PR #666).
 function notifyOnNewBlockingComments(state, reviews) {
   const count = reviews && reviews.blocking ? reviews.blocking.length : 0;
-  const previous = state._lastBlockingCount || 0;
+  if (state._lastBlockingCount === undefined) {
+    state._lastBlockingCount = count;
+    return;
+  }
+  const previous = state._lastBlockingCount;
   if (count > previous) {
     notifyOperator(
       state.ticketId,
