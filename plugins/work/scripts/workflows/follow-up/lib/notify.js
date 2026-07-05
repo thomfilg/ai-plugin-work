@@ -41,8 +41,10 @@ function inboxPath(ticketId) {
 function notifyOperator(ticketId, message) {
   const line = `${FOLLOW_UP_TAG} ${new Date().toISOString()} ${message}\n`;
   try {
-    fs.mkdirSync(inboxDir(), { recursive: true });
-    fs.appendFileSync(inboxPath(ticketId), line);
+    // Owner-only modes: the mailbox lives under a shared temp root, so the
+    // directory is 0o700 and the log 0o600 (CodeQL js/insecure-temporary-file).
+    fs.mkdirSync(inboxDir(), { recursive: true, mode: 0o700 });
+    fs.appendFileSync(inboxPath(ticketId), line, { mode: 0o600 });
   } catch {
     /* fail-open — mailbox is best-effort */
   }
@@ -61,32 +63,42 @@ function notifyOperator(ticketId, message) {
  * @returns {string[]} new operator lines (possibly empty)
  */
 function readNewInboxMessages(ticketId, state) {
+  let fd;
   try {
-    const file = inboxPath(ticketId);
-    const stat = fs.statSync(file);
-    const offset = typeof state._inboxOffset === 'number' ? state._inboxOffset : stat.size;
+    // Open once, then fstat + read on the SAME descriptor — no
+    // check-then-use gap (CodeQL file-system-race / TOCTOU).
+    fd = fs.openSync(inboxPath(ticketId), 'r');
+    const size = fs.fstatSync(fd).size;
+    const offset = typeof state._inboxOffset === 'number' ? state._inboxOffset : size;
     if (state._inboxOffset === undefined) {
       // First sighting: start from the current end so historical chatter
       // doesn't replay as "new" messages.
-      state._inboxOffset = stat.size;
+      state._inboxOffset = size;
       return [];
     }
-    if (stat.size <= offset) return [];
-    const fd = fs.openSync(file, 'r');
-    try {
-      const buf = Buffer.alloc(stat.size - offset);
-      fs.readSync(fd, buf, 0, buf.length, offset);
-      state._inboxOffset = stat.size;
-      return buf
-        .toString('utf8')
-        .split('\n')
-        .map((l) => l.trim())
-        .filter((l) => l.length > 0 && !l.includes(FOLLOW_UP_TAG));
-    } finally {
-      fs.closeSync(fd);
-    }
+    if (size <= offset) return [];
+    const buf = Buffer.alloc(size - offset);
+    fs.readSync(fd, buf, 0, buf.length, offset);
+    state._inboxOffset = size;
+    return buf
+      .toString('utf8')
+      .split('\n')
+      .map((l) => l.trim())
+      .filter((l) => l.length > 0 && !l.includes(FOLLOW_UP_TAG));
   } catch {
+    // No mailbox file yet: anchor at 0 so a message that CREATES the file
+    // mid-wait is picked up as new (everything in a file born after the
+    // anchor is, by definition, new — there is no historical chatter).
+    if (state._inboxOffset === undefined) state._inboxOffset = 0;
     return [];
+  } finally {
+    if (fd !== undefined) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        /* ignore */
+      }
+    }
   }
 }
 

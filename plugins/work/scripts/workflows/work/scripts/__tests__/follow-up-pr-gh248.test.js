@@ -27,7 +27,7 @@ function captureStdout(fn) {
   return lines.join('\n');
 }
 
-describe('GH-248 — position-outdated comments keep their priority', () => {
+describe('GH-248/GH-249 — the script never pre-judges comment priority', () => {
   it('no longer downgrades position-outdated comments to low (source guard)', () => {
     assert.ok(
       !SOURCE.includes('if (isOutdated || isOldCommit)'),
@@ -36,6 +36,18 @@ describe('GH-248 — position-outdated comments keep their priority', () => {
     assert.ok(
       SOURCE.includes('item.positionOutdated = true'),
       'position-outdated comments must be tagged instead'
+    );
+  });
+
+  it('GH-249: old-commit comments are no longer downgraded either — marker only', () => {
+    assert.ok(
+      !/isOldCommit[\s\S]{0,120}priority = 'low'/.test(SOURCE) &&
+        !/branchCommits[\s\S]{0,160}priority = 'low'/.test(SOURCE),
+      'no priority downgrade may remain in the stale-marker loop'
+    );
+    assert.ok(
+      SOURCE.includes('display-only marker — priority unchanged (GH-249)'),
+      'old-commit comments keep a display-only stale marker'
     );
   });
 

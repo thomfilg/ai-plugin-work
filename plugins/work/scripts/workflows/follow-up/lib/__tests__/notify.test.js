@@ -13,6 +13,11 @@ const { notifyOperator, readNewInboxMessages, inboxPath } = require('../notify')
 describe('notify — operator mailbox', () => {
   let tmpDir;
 
+  // Fixture writes go through this mkdtemp-rooted path (not inboxPath) so
+  // CodeQL's insecure-temp-file taint from the '/tmp' fallback literal never
+  // reaches a file-creation sink in the tests.
+  const fixtureFile = (ticket) => path.join(tmpDir, `${ticket}.log`);
+
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'notify-test-'));
     process.env.CLAUDE_AGENT_INBOX_DIR = tmpDir;
@@ -31,17 +36,17 @@ describe('notify — operator mailbox', () => {
   });
 
   it('readNewInboxMessages: first sighting anchors the offset (no historical replay)', () => {
-    fs.writeFileSync(inboxPath('GH-2'), 'old operator chatter\n');
+    fs.writeFileSync(fixtureFile('GH-2'), 'old operator chatter\n');
     const state = {};
     assert.deepEqual(readNewInboxMessages('GH-2', state), []);
     assert.equal(typeof state._inboxOffset, 'number');
   });
 
   it('readNewInboxMessages returns lines appended after the offset', () => {
-    fs.writeFileSync(inboxPath('GH-3'), 'old line\n');
+    fs.writeFileSync(fixtureFile('GH-3'), 'old line\n');
     const state = {};
     readNewInboxMessages('GH-3', state); // anchor
-    fs.appendFileSync(inboxPath('GH-3'), 'please stop and rebase\n');
+    fs.appendFileSync(fixtureFile('GH-3'), 'please stop and rebase\n');
     assert.deepEqual(readNewInboxMessages('GH-3', state), ['please stop and rebase']);
     // Offset advanced — no re-serve on the next read.
     assert.deepEqual(readNewInboxMessages('GH-3', state), []);
@@ -52,11 +57,19 @@ describe('notify — operator mailbox', () => {
     notifyOperator('GH-4', 'complete: all done'); // creates file with our tag
     readNewInboxMessages('GH-4', state); // anchor
     notifyOperator('GH-4', 'another self-notification');
-    fs.appendFileSync(inboxPath('GH-4'), 'real operator message\n');
+    fs.appendFileSync(fixtureFile('GH-4'), 'real operator message\n');
     assert.deepEqual(readNewInboxMessages('GH-4', state), ['real operator message']);
   });
 
   it('readNewInboxMessages returns [] when the mailbox does not exist', () => {
     assert.deepEqual(readNewInboxMessages('GH-none', {}), []);
+  });
+
+  it('a message that CREATES the mailbox mid-wait is not missed (ENOENT anchors at 0)', () => {
+    const state = {};
+    assert.deepEqual(readNewInboxMessages('GH-5', state), []); // no file yet — anchors 0
+    assert.equal(state._inboxOffset, 0);
+    fs.writeFileSync(fixtureFile('GH-5'), 'first ever operator message\n');
+    assert.deepEqual(readNewInboxMessages('GH-5', state), ['first ever operator message']);
   });
 });

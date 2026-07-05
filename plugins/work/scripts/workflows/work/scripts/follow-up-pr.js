@@ -875,21 +875,18 @@ function getReviews(prNumber) {
     priority: classifyCommentPriority(cm.author, cm.body),
   }));
 
-  // GH-248: position-outdated comments (line===null but original_line set)
-  // KEEP their original priority — GitHub merely failed to map them onto the
-  // current diff (moved code, rebase, hunk-boundary churn); the underlying
-  // concern may still be valid. They get a display tag instead of a silent
-  // downgrade. Only comments from commits no longer on the branch
-  // (force-push/rebase leftovers) are downgraded to non-blocking.
+  // GH-248/GH-249: the script never pre-judges — no comment is downgraded or
+  // hidden. Position-outdated comments (line===null but original_line set)
+  // and comments from commits no longer on the branch (force-push/rebase)
+  // KEEP their reviewer-assigned priority; they only get display markers so
+  // the agent knows to re-verify against the current code. Only the agent,
+  // reading the actual code, decides whether a comment still applies.
   for (const item of [...actionable, ...classifiedComments]) {
     if (item.line === null && item.original_line != null) {
       item.positionOutdated = true;
     }
-    const isOldCommit =
-      branchCommits.size > 0 && item.commit_id && !branchCommits.has(item.commit_id);
-    if (isOldCommit) {
-      item.priority = 'low';
-      item.stale = true;
+    if (branchCommits.size > 0 && item.commit_id && !branchCommits.has(item.commit_id)) {
+      item.stale = true; // display-only marker — priority unchanged (GH-249)
     }
   }
 
@@ -986,6 +983,29 @@ function formatNonBlockingItems(items, lines) {
 // non-blocking — with its FULL body, priority, and stale/position-outdated/
 // dedup markers, so the agent can evaluate each one without re-fetching.
 // Polling iterations keep the 80-char previews for conciseness.
+function formatExitCommentLines(item, index) {
+  const lines = [];
+  const loc = item.path ? `${item.path}${item.line ? ':' + item.line : ''}` : 'N/A';
+  const priority = (item.priority || 'unknown').toUpperCase();
+  const tags =
+    (item.stale ? ' (stale)' : '') +
+    (item.positionOutdated ? ' (position outdated)' : '') +
+    (item.deduplicated ? ' (deduped)' : '');
+  lines.push(
+    `  ${c.cyan(`Comment ${index + 1}:`)} [${priority}] @${item.author}${c.dim(tags)} ${loc}`
+  );
+  const body = (item.body || '').trim();
+  if (body) {
+    lines.push(
+      body
+        .split('\n')
+        .map((l) => `    ${l}`)
+        .join('\n')
+    );
+  }
+  return lines;
+}
+
 function printExitCommentBodies(reviews) {
   const allExitComments = [
     ...((reviews && reviews.blocking) || []).map((item) => ({ ...item, _section: 'BLOCKING' })),
@@ -1004,24 +1024,7 @@ function printExitCommentBodies(reviews) {
       console.log('');
       console.log(c.bold(`  [${currentSection}]`));
     }
-    const loc = item.path ? `${item.path}${item.line ? ':' + item.line : ''}` : 'N/A';
-    const priority = (item.priority || 'unknown').toUpperCase();
-    const tags =
-      (item.stale ? ' (stale)' : '') +
-      (item.positionOutdated ? ' (position outdated)' : '') +
-      (item.deduplicated ? ' (deduped)' : '');
-    console.log(
-      `  ${c.cyan(`Comment ${i + 1}:`)} [${priority}] @${item.author}${c.dim(tags)} ${loc}`
-    );
-    const body = (item.body || '').trim();
-    if (body) {
-      console.log(
-        body
-          .split('\n')
-          .map((l) => `    ${l}`)
-          .join('\n')
-      );
-    }
+    for (const line of formatExitCommentLines(item, i)) console.log(line);
   });
   console.log('');
 }
