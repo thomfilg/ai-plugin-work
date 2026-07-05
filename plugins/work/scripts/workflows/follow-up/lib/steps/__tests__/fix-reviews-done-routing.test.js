@@ -115,6 +115,16 @@ describe('fix-reviews — done-path routing and counts', () => {
     assert.equal(state.currentStep, 'report', 'no unpushed COMMITS → report, not push-retry');
   });
 
+  it('"N of M" counter uses the stable total, not the shrinking remaining', () => {
+    const { computeCounts } = require('../fix-reviews.js');
+    // 3 comments, 2 already terminal → agent is on comment 3 of 3.
+    const counts = computeCounts({ remaining: 1, total: 3, solved: 1, skipped: 1 });
+    assert.equal(counts.totalComments, 3, 'denominator must be the stable total');
+    assert.equal(counts.currentIndex, 3);
+    // No status → unknowns, no crash.
+    assert.deepEqual(computeCounts(null), { totalComments: '?', currentIndex: '?' });
+  });
+
   it('skipped>0: still records both counts', () => {
     const cleanDir = path.join(tmpDir, 'clean2');
     fs.mkdirSync(cleanDir);

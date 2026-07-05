@@ -118,10 +118,13 @@ function handleNoMoreComments(state, commentsScript, ctx, scriptEnv) {
   return null;
 }
 
+// The denominator must be the STABLE total: `remaining` shrinks while
+// currentIndex grows, so preferring it produced counters that ran backwards
+// ("Comment 3 of 1" on the last of three) — review finding on PR #666.
 function computeCounts(st) {
   if (!st) return { totalComments: '?', currentIndex: '?' };
   return {
-    totalComments: st.remaining || st.total || '?',
+    totalComments: st.total || st.remaining || '?',
     currentIndex: (st.solved || 0) + (st.skipped || 0) + 1,
   };
 }
@@ -308,3 +311,4 @@ module.exports = function registerFixReviews(register) {
 // block's content is covered transitively via buildReviewPrompt, so it is not
 // exported separately.
 module.exports.buildReviewPrompt = buildReviewPrompt;
+module.exports.computeCounts = computeCounts;
