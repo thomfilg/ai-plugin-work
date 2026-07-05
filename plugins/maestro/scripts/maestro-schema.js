@@ -18,9 +18,14 @@
  *
  *   save  <name> --tier=<kind>
  *         [--pool=<N>] [--command=/X] [--stop-source="…"] [--stop-oracle="…"]
- *         [--compiled-from="skill@ver (script)"] [--description="…"] [--force]
+ *         [--compiled-from="skill@ver (script)"] [--description="…"]
+ *         [--context="…"] [--force]
  *         Write <name>.md into the chosen tier's store. Refuses if the tier has
  *         no marker (run init first) or the name exists (unless --force).
+ *         --context is the agent-facing briefing (markdown body): everything an
+ *         agent launched under this schema must know about the command it runs.
+ *         The orchestrate skill copies it into each ticket's
+ *         .maestro-context.md at bootstrap so it is injected into agent context.
  *
  *   list                  JSON array of every schema across discovered tiers.
  *   show  <name>          JSON for the named schema (errors if ambiguous).
@@ -168,7 +173,14 @@ function writeSchemaFile({ file, content, force, name, kind }) {
 function cmdSave(args) {
   const { name, kind, target } = resolveSaveTarget(args);
   const file = path.join(target.dir, `${name}.md`);
-  const content = serializeFrontmatter(buildSaveMeta(args, name), args.body || '');
+  // --context is the AGENT-FACING briefing: everything an agent launched under
+  // this schema needs to know (what the command does, conventions, gotchas,
+  // stop criteria in prose). It is stored as the markdown body; the orchestrate
+  // skill writes it to each ticket's .maestro-context.md at bootstrap so the
+  // agent actually receives it (a schema body nothing reads back is dead weight
+  // — the exact gap operators kept hitting).
+  const body = args.context || args.body || '';
+  const content = serializeFrontmatter(buildSaveMeta(args, name), body);
   writeSchemaFile({ file, content, force: args.force, name, kind });
   console.log(`saved schema '${name}' to ${file} (tier=${kind})`);
 }

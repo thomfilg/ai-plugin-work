@@ -92,9 +92,13 @@ const ACTION_REQUIRED_KINDS = new Set([
   'nudges-exhausted',
   'wedged',
   'dead-end',
+  'dead-end-probe',
   'pr-ready',
   'pr-broken',
   'pr-comments-stuck',
+  'comment-loop',
+  'stuck-input',
+  'auth-broken',
 ]);
 
 function alert(obj) {
@@ -106,10 +110,13 @@ function alert(obj) {
   const count = bumpCount(key);
   const prefix = count > 1 ? `[REPEAT ${count}] ` : '';
   const instruction = `${prefix}${obj.instruction}`;
-  // action_required is true on first sight of an actionable kind; subsequent
-  // repeats (count > 1) carry the same state, so the operator can skip
-  // investigating them and just acknowledge.
-  const actionRequired = ACTION_REQUIRED_KINDS.has(obj.kind) && count === 1;
+  // action_required stays true for EVERY repeat of an actionable kind (PR
+  // #603). Earlier behavior set it only on count===1, which let operators
+  // tune out [REPEAT N] events as informational — a brief_gate stall would
+  // chain 5-9 menus before dead-end with action_required=false on every one
+  // but the first. Idempotency comes from the operator (re-answering the same
+  // menu is harmless), not from hiding the alert.
+  const actionRequired = ACTION_REQUIRED_KINDS.has(obj.kind);
   const payload = {
     ts: new Date().toISOString(),
     ...obj,

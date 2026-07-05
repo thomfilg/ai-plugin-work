@@ -16,9 +16,12 @@ const tmux = require('./tmux');
 const alerts = require('./alerts');
 const state = require('./state');
 const { headSha } = require('./detectors/gh-shared');
-const manifest = require('./manifest');
 const skillRegistry = require('./skill-registry');
 const { formatLogLine } = require('./detectors/silence');
+// Single source of truth for the dead-end probe grace window so the
+// auto-restart guard and the rotation path agree (no require cycle:
+// dead-end-rotation pulls alerts/state/manifest/progress/next-task only).
+const { DEAD_END_PROBE_GRACE_MIN } = require('./dead-end-rotation');
 
 // Restart-loop guard: how many auto-restarts within RESTART_WINDOW_MIN before
 // we declare the session WEDGED and stop restarting. Caller is freed of state
@@ -35,13 +38,12 @@ function declareWedged({ session, ticket, restarts, now, silenceSec }) {
   const wedgedUntil = now + WEDGED_QUIET_MIN * 60;
   const count = restarts.length + 1;
   state.write(session, 'restart-loop', { restarts: [...restarts, now], wedgedUntil });
-  const skill = skillRegistry.readTicketSkill(ticket, {
-    hasOracle: !!manifest.stopOracleForTask(ticket),
-  });
+  const skill = skillRegistry.readTicketSkill(ticket);
   alerts.log(
     `${formatLogLine({ ticket, skill, silenceSec, kind: 'wedged' })} ${session} WEDGED — ${count} auto-restarts in ${RESTART_WINDOW_MIN}m; suppressing restarts for ${WEDGED_QUIET_MIN}m`
   );
   const paneTail = tmux.capture(session).split('\n').slice(-50).join('\n');
+  const unblockCmd = `tmux capture-pane -t ${session} -p | tail -50   # diagnose, then either fix-in-pane or kill: node plugins/maestro/scripts/maestro-cleanup.js ${ticket} --tmux`;
   alerts.alert({
     session,
     ticket,
@@ -51,7 +53,8 @@ function declareWedged({ session, ticket, restarts, now, silenceSec }) {
     quietMin: WEDGED_QUIET_MIN,
     silenceSec,
     paneTail,
-    instruction: `agent restarted ${count}x in ${RESTART_WINDOW_MIN}m. Daemon won't restart for ${WEDGED_QUIET_MIN}m. UNBLOCK-PROTOCOL: diagnose root cause from paneTail; if dead-end, kill session and bootstrap next queued.`,
+    unblockCmd,
+    instruction: `OPERATOR ACTION REQUIRED — agent restarted ${count}x in ${RESTART_WINDOW_MIN}m. Daemon WON'T restart for ${WEDGED_QUIET_MIN}m. RUN NOW: ${unblockCmd}. UNBLOCK-PROTOCOL: diagnose root cause from paneTail; if dead-end, kill session and bootstrap next queued. DO NOT reply with "standing by".`,
   });
 }
 
@@ -77,14 +80,29 @@ function checkCiGateFreedGuard({ session, ticket, worktree }) {
 
 function checkDeadEndGuard({ session, ticket }) {
   const deadEnd = state.read(ticket, 'dead-end');
-  if (!deadEnd || !deadEnd.killed) return { skip: false };
-  if (!deadEnd.skipLogged) {
-    alerts.log(
-      `${session} AUTO-RESTART skipped: ticket ${ticket} dead-end-freed (trigger=${deadEnd.trigger || 'unknown'}); slot rotated, do not resurrect`
-    );
-    state.write(ticket, 'dead-end', { ...deadEnd, skipLogged: true });
+  if (!deadEnd) return { skip: false };
+  if (deadEnd.killed) {
+    if (!deadEnd.skipLogged) {
+      alerts.log(
+        `${session} AUTO-RESTART skipped: ticket ${ticket} dead-end-freed (trigger=${deadEnd.trigger || 'unknown'}); slot rotated, do not resurrect`
+      );
+      state.write(ticket, 'dead-end', { ...deadEnd, skipLogged: true });
+    }
+    return { skip: true };
   }
-  return { skip: true };
+  // Probe pending inside the grace window: a diagnostic probe was sent and
+  // the agent is being given time to reply. Auto-restarting now would wipe
+  // the pane (and the reply) before the operator could read it.
+  if (
+    deadEnd.diagnosed &&
+    state.now() - (deadEnd.diagnosedAt || 0) < DEAD_END_PROBE_GRACE_MIN * 60
+  ) {
+    alerts.log(
+      `${session} AUTO-RESTART skipped: dead-end probe pending on ${ticket} (grace ${DEAD_END_PROBE_GRACE_MIN}m)`
+    );
+    return { skip: true };
+  }
+  return { skip: false };
 }
 
 function checkRestartGuards({ session, ticket, worktree }) {
@@ -98,23 +116,23 @@ function checkRestartGuards({ session, ticket, worktree }) {
 }
 
 // GH-514 R1: resolve skill per-call so daemon restarts honor `.maestro-skill`
-// writes that happened after module load. Falls open to 'work'; on whitelist
-// reject we log the rejected raw value so operators can spot tampering.
+// writes that happened after module load. Any regex-valid persisted skill is
+// now honored as-is (the write path already validates) — the old
+// whitelist-or-oracle read gate relaunched `/work` on qc-work fleets whose
+// manifest lookup failed, restarting a foreign workflow on delivered tickets.
+// Only a MALFORMED value falls open to /work, with a log so operators can
+// spot tampering.
 function resolveSkillForRestart(ticket, session) {
-  // An oracle-backed ticket may legitimately run a non-whitelisted command —
-  // pass the oracle existence so readTicketSkill honors it instead of falling
-  // open to /work (GH-514 generic-row decision).
-  const hasOracle = !!manifest.stopOracleForTask(ticket);
-  const skill = skillRegistry.readTicketSkill(ticket, { hasOracle });
+  const skill = skillRegistry.readTicketSkill(ticket);
   let raw = null;
   try {
     raw = fs.readFileSync(skillRegistry.ticketSkillFile(ticket), 'utf8').trim();
   } catch {
     /* missing → default, no warning */
   }
-  if (raw && !skillRegistry.isAllowedSkill(raw, { hasOracle })) {
+  if (raw && raw !== skill) {
     alerts.log(
-      `${session} AUTO-RESTART .maestro-skill value ${JSON.stringify(raw)} rejected by whitelist — falling open to /work for ${ticket}`
+      `${session} AUTO-RESTART .maestro-skill value ${JSON.stringify(raw)} is malformed — falling open to /work for ${ticket}`
     );
   }
   return skill;

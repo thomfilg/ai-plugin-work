@@ -7,7 +7,7 @@
  */
 const tmux = require('./tmux');
 const state = require('./state');
-const workstate = require('./workstate');
+const skillRegistry = require('./skill-registry');
 const alerts = require('./alerts');
 
 // Heartbeat: emit on state-change, with a max-staleness cap so the operator
@@ -47,22 +47,32 @@ function collectPrFlag(prMarker, totals) {
   return null;
 }
 
-function classifySession(session, totals) {
-  const tid = tmux.ticketIdFor(session);
-  const ws = workstate.snapshot(tid);
-  const prMarker = state.read(tid, 'pr-status');
-  const wedgedMarker = state.read(session, 'restart-loop');
-  const commitMarker = state.read(tid, 'commit-stall');
+function sessionFlags(tid, session, totals) {
   const flags = [];
-  const prFlag = collectPrFlag(prMarker, totals);
+  const prFlag = collectPrFlag(state.read(tid, 'pr-status'), totals);
   if (prFlag) flags.push(prFlag);
+  const wedgedMarker = state.read(session, 'restart-loop');
   if (wedgedMarker && wedgedMarker.wedgedUntil && wedgedMarker.wedgedUntil > state.now()) {
     flags.push('WEDGED');
     totals.wedged++;
   }
+  const commitMarker = state.read(tid, 'commit-stall');
   if (commitMarker && commitMarker.lastThreshold >= 240) {
     flags.push(`stall=${commitMarker.lastThreshold}m`);
   }
+  return flags;
+}
+
+function classifySession(session, totals) {
+  const tid = tmux.ticketIdFor(session);
+  // Phase must come from the SAME skill-registry row the detectors use — the
+  // old direct workstate read showed stale /work phases ("ECHO-6249(spec)")
+  // for qc-work tickets whose .work-state.json was a leftover from an
+  // earlier /work run, misleading the operator.
+  const skill = skillRegistry.readTicketSkill(tid);
+  const row = skillRegistry.get(skill) || skillRegistry.get('work');
+  const ws = row.snapshot(tid) || { phase: null };
+  const flags = sessionFlags(tid, session, totals);
   return `${tid}(${ws.phase || '?'}${flags.length ? ',' + flags.join(',') : ''})`;
 }
 

@@ -31,13 +31,19 @@ function makeFakeTmuxDir(sessions) {
   return dir;
 }
 
-function loadFreshTmux(prefix, fakeDir) {
+function loadFreshTmux(prefix, fakeDir, { sessionDir } = {}) {
   // Reset env + module cache so resolveTicketPrefix re-reads TICKET_PREFIX and
   // the new PATH binding takes effect.
-  delete require.cache[require.resolve(TMUX_LIB)];
+  for (const k of Object.keys(require.cache)) {
+    if (k.includes('/maestro-conduct/')) delete require.cache[k];
+  }
   if (prefix === null) delete process.env.TICKET_PREFIX;
   else process.env.TICKET_PREFIX = prefix;
   delete process.env.SESSION_PATTERN;
+  // Isolate manifest-derived prefix discovery from the developer's REAL
+  // manifests (~/.cache/maestro/sessions) — default to an empty dir.
+  process.env.MAESTRO_SESSION_DIR =
+    sessionDir || fs.mkdtempSync(path.join(os.tmpdir(), 'discovery-sessions-'));
   process.env.PATH = `${fakeDir}:${process.env.PATH}`;
   return require(TMUX_LIB);
 }
@@ -58,13 +64,39 @@ test('listSessions discovers ECHO -work, -dev, -listen helpers', () => {
   assert.deepStrictEqual(discovered.sort(), ['ECHO-1-work', 'ECHO-2-dev', 'ECHO-3-listen'].sort());
 });
 
-test('listSessions defaults to GH when TICKET_PREFIX is unset', () => {
+test('listSessions defaults to GH when TICKET_PREFIX is unset and no manifests exist', () => {
   const sessions = ['GH-7-work', 'GH-7-dev', 'GH-7-listen', 'ECHO-1-work'];
   const fakeDir = makeFakeTmuxDir(sessions);
   const tmux = loadFreshTmux(null, fakeDir);
 
   const discovered = tmux.listSessions();
   assert.deepStrictEqual(discovered.sort(), ['GH-7-work', 'GH-7-dev', 'GH-7-listen'].sort());
+});
+
+test('listSessions also discovers prefixes recorded in orchestration manifests (M3)', () => {
+  // TICKET_PREFIX unset AND an ECHO fleet manifest present: the daemon used
+  // to hunt GH-* only and silently ignore the live ECHO agents unless the
+  // operator remembered to export TICKET_PREFIX on the daemon side too.
+  const sessions = ['GH-7-work', 'ECHO-1-work', 'ECHO-2-listen', 'QQ-3-work'];
+  const fakeDir = makeFakeTmuxDir(sessions);
+  const sessionDir = fs.mkdtempSync(path.join(os.tmpdir(), 'discovery-manifests-'));
+  fs.writeFileSync(
+    path.join(sessionDir, 'shack.json'),
+    JSON.stringify({
+      topic: 'shack',
+      slots: 2,
+      createdAt: new Date().toISOString(),
+      tasks: [{ id: 'ECHO-1', priority: 1, deps: [], status: 'in_progress' }],
+    })
+  );
+  const tmux = loadFreshTmux(null, fakeDir, { sessionDir });
+
+  const discovered = tmux.listSessions();
+  assert.deepStrictEqual(
+    discovered.sort(),
+    ['GH-7-work', 'ECHO-1-work', 'ECHO-2-listen'].sort(),
+    'GH default + manifest-derived ECHO must both match; unrelated QQ must not'
+  );
 });
 
 test('ticketIdFor strips work | dev | listen suffix', () => {

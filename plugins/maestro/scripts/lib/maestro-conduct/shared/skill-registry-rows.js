@@ -67,6 +67,39 @@ function followUpSnapshot(ticket) {
   };
 }
 
+// Per-skill nudge templates. The nudge text lands in the AGENT's prompt, so
+// it must speak the agent's own workflow vocabulary — the old single template
+// told every agent to "re-run task-next.js to advance the gate", which is
+// /work-only advice and reads as noise (or worse, a mis-direction) to a
+// /follow-up or /qc-work agent. `reason` is the detector's one-line cause;
+// `mode` is 'soft' | 'interrupt'.
+function workNudge(reason, mode) {
+  const base = `MAESTRO (${mode}): ${reason}. Audit uncommitted files via git status. If any are present, dispatch the commit agent with 'autonomous' to land them, then push. Re-run task-next.js to advance the gate.`;
+  if (mode === 'interrupt') {
+    return `${base} I sent Esc to break any stuck subagent — do NOT re-dispatch the same one without diagnosing why it hung.`;
+  }
+  return base;
+}
+
+function followUpNudge(reason, mode) {
+  const base = `MAESTRO (${mode}): ${reason}. Check the PR state: unresolved review comments, failing checks, and merge conflicts. Continue the follow-up loop; if you are waiting on CI, say so in one line.`;
+  if (mode === 'interrupt') {
+    return `${base} I sent Esc to break a stuck foreground wait — re-check state before resuming any polling loop.`;
+  }
+  return base;
+}
+
+// Neutral wording for commands maestro does not understand: no /work jargon,
+// no assumptions about gates or state files. Ask for a status line instead of
+// prescribing recovery steps that may not exist in this workflow.
+function genericNudge(reason, mode) {
+  const base = `MAESTRO (${mode}): ${reason}. If you are blocked, state the blocker in one line. If you are waiting on something external, say what and for how long. Otherwise continue your current task.`;
+  if (mode === 'interrupt') {
+    return `${base} I sent Esc in case a subprocess was hung — if you were mid-operation, re-check its result before assuming it completed.`;
+  }
+  return base;
+}
+
 function workRow() {
   return {
     stateFile: WORK_STATE_BASENAME,
@@ -78,6 +111,7 @@ function workRow() {
       return !!state && state.phase === 'complete';
     },
     silenceLimitSec: WORK_SILENCE_LIMIT_SEC,
+    nudge: workNudge,
   };
 }
 
@@ -87,12 +121,13 @@ function followUpRow() {
     snapshot: followUpSnapshot,
     isHealthyIdle: followUpIsHealthyIdle,
     silenceLimitSec: FOLLOW_UP_SILENCE_LIMIT_SEC,
+    nudge: followUpNudge,
   };
 }
 
-// Generic row for an operator-supplied command that is NOT in the whitelist
-// but IS paired with a stop-condition oracle. The conductor doesn't understand
-// the command's internal state — the oracle is the authoritative done-signal —
+// Generic row for an operator-supplied command that is NOT in the whitelist.
+// The conductor doesn't understand the command's internal state — a
+// stop-condition oracle (when present) is the authoritative done-signal —
 // so this row reads no skill-specific state file and never reports healthy-idle
 // on its own. snapshot() returns null (phase resolution falls back to the BASE
 // profile in phase-registry, whose `exempts` is a no-op, so nothing crashes).
@@ -109,6 +144,7 @@ function genericRow() {
     },
     silenceLimitSec: GENERIC_SILENCE_LIMIT_SEC,
     generic: true,
+    nudge: genericNudge,
   };
 }
 

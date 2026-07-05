@@ -53,13 +53,42 @@ function resolveTicketPrefix() {
 const SESSION_SUFFIX_ALT = 'work|dev|listen';
 
 /**
+ * Prefix alternation for session discovery. TICKET_PREFIX env is the primary
+ * source, but the daemon and bootstrap are separate process launches and
+ * forgetting the env on ONE of them silently blinded the conductor to a whole
+ * fleet (an ECHO-* batch was hunted as GH-*). The orchestration manifests
+ * already record every ticket id, so their prefixes are added automatically —
+ * the manifest is the single source of truth the env used to duplicate.
+ */
+function discoveryPrefixAlternation() {
+  const prefixes = new Set([resolveTicketPrefix()]);
+  try {
+    const manifest = require('./manifest');
+    for (const file of manifest.listManifestFiles()) {
+      const m = manifest.readManifest(file);
+      if (!m || !Array.isArray(m.tasks)) continue;
+      for (const t of m.tasks) {
+        const match = /^([A-Z][A-Z0-9]*)-\d+$/.exec((t && t.id) || '');
+        if (match) prefixes.add(match[1]);
+      }
+    }
+  } catch {
+    /* fail-open: env/default prefix only */
+  }
+  const list = [...prefixes];
+  return list.length === 1 ? list[0] : `(?:${list.join('|')})`;
+}
+
+/**
  * List sessions matching a regex.
  *
- * Default pattern is built dynamically from TICKET_PREFIX (default "GH") so
- * non-GitHub providers (Linear ECHO-*, Jira PROJ-*, etc.) are discovered too.
- * The default suffix set is `work|dev|listen` so helper sessions surface
- * informationally. Callers can pass an explicit RegExp to override entirely;
- * `SESSION_PATTERN` env wins over the dynamic default.
+ * Default pattern is built dynamically from TICKET_PREFIX (default "GH") plus
+ * every prefix found in orchestration manifests, so non-GitHub providers
+ * (Linear ECHO-*, Jira PROJ-*, etc.) are discovered even when the env var was
+ * only set on the bootstrap side. The default suffix set is `work|dev|listen`
+ * so helper sessions surface informationally. Callers can pass an explicit
+ * RegExp to override entirely; `SESSION_PATTERN` env wins over the dynamic
+ * default.
  */
 function listSessions(pattern) {
   let regex = pattern;
@@ -74,7 +103,7 @@ function listSessions(pattern) {
       // namespace.defaultSessionPattern prepends the "<ns>/" segment when
       // MAESTRO_NS is set so a second conductor in another namespace never
       // discovers this batch's agents (GH-622).
-      regex = namespace.defaultSessionPattern(resolveTicketPrefix(), SESSION_SUFFIX_ALT);
+      regex = namespace.defaultSessionPattern(discoveryPrefixAlternation(), SESSION_SUFFIX_ALT);
     }
   }
   return sh('tmux ls 2>/dev/null')
@@ -103,7 +132,19 @@ function capture(session) {
 }
 
 /**
- * Send a literal string into a session prompt + Enter to submit.
+ * Send a literal string into a session prompt + Enter to submit, then VERIFY
+ * the submission (receipt contract, GH-449 mode 6/10).
+ *
+ * `tmux send-keys … Enter` is fire-and-forget: the Enter is delivered to the
+ * pty, but a busy TUI can swallow it, leaving the text sitting unsubmitted in
+ * the composer. Observed repeatedly in live fleets — a directive sat queued
+ * for 1.5h while its agent idled; three agents were found overnight with
+ * conductor text frozen in their input boxes. So after sending we capture the
+ * pane: if the composer (`❯ …`) still shows our text, we retry Enter once via
+ * the alternate C-m keycode, re-check, and report.
+ *
+ * Returns a delivery status the caller should log:
+ *   'submitted' | 'submitted-on-retry' | 'stuck-in-composer'
  *
  * Uses spawnSync argv form (no shell) so shell metacharacters in `text`
  * (e.g. backticks, $, \, quotes) — which can flow in from external sources
@@ -111,12 +152,31 @@ function capture(session) {
  * command substitution or arbitrary shell execution.
  */
 function sendLine(session, text) {
+  // Newlines would submit mid-text under send-keys -l; flatten to a marker.
+  const str = String(text).replace(/\r?\n/g, ' ⏎ ');
   // -l forces literal delivery so short strings like "Enter" or "Space" can't
   // collide with tmux's key-name table.
   // End ensures we're at end-of-line so Enter submits instead of inserting newline.
-  spawnVoid('tmux', ['send-keys', '-l', '-t', session, String(text)]);
+  spawnVoid('tmux', ['send-keys', '-l', '-t', session, str]);
   spawnVoid('tmux', ['send-keys', '-t', session, 'End']);
   spawnVoid('tmux', ['send-keys', '-t', session, 'Enter']);
+  // Receipt check. Probe on a short prefix: the composer renders at most one
+  // pane-width of our text before wrapping.
+  const probe = str.slice(0, 25);
+  if (!probe.trim()) return 'submitted';
+  const stillQueued = () =>
+    spawnOut('tmux', ['capture-pane', '-t', session, '-p'])
+      .split('\n')
+      .some((l) => /^\s*❯\s/.test(l) && l.includes(probe));
+  const verifyDelay = process.env.MAESTRO_SEND_VERIFY_DELAY_SEC || '0.7';
+  if (verifyDelay !== '0') spawnSync('sleep', [verifyDelay]);
+  if (!stillQueued()) return 'submitted';
+  // Enter didn't land — retry once via C-m (a distinct key path that has
+  // empirically submitted when Enter did not).
+  spawnVoid('tmux', ['send-keys', '-t', session, 'End']);
+  spawnVoid('tmux', ['send-keys', '-t', session, 'C-m']);
+  if (verifyDelay !== '0') spawnSync('sleep', [verifyDelay]);
+  return stillQueued() ? 'stuck-in-composer' : 'submitted-on-retry';
 }
 
 /** Send a raw key (Escape, Enter, etc.). */

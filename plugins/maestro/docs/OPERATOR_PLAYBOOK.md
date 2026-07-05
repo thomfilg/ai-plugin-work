@@ -22,9 +22,22 @@ canonical Monitor regex.
 | `ACTION … kind=pr-comments-stuck` | Unaddressed bot review comments on the agent's PR with no new HEAD | Direct the agent to address them in this PR |
 | `ACTION … kind=question-pending` | Question sat ≥`Q_WAIT_MIN` minutes | Same as QUESTION-DETECTED — pick the legitimate option |
 | `commit-stall NNNm (threshold=TTTm)` | Worktree had no new commits across one of the thresholds (`30/60/120/240/480` by default) | If agent is in `implement` and threshold escalated → capture pane. If agent is in `wait_merge`/`complete` → ignore, expected |
-| `NUDGE soft` / `NUDGE interrupt` | Daemon already poked the agent's pane | No operator action — daemon handles escalation |
-| `AUTO-RESTART after Ns silence` | Daemon relaunched a dead `-work` session | Only act if a `wedged` alert follows |
+| `NUDGE soft` / `NUDGE interrupt` | Daemon poked the agent's pane, in the AGENT'S OWN skill vocabulary, with a delivery status suffix `[submitted…]` | No operator action — unless the status is `[stuck-in-composer]`, then the pane needs a manual look |
+| `AUTO-RESTART after Ns silence` | Daemon relaunched a dead `-work` session — fresh `/skill` for work/follow-up; `--continue` resume for generic commands | Only act if a `wedged` alert follows. A `--continue` relaunch of a large session can show an interactive "Resume from summary / full session" menu — that surfaces as a question; answer it |
+| `AUTO-RESTART skipped: worktree changed <Nm ago` | Silent pane but the worktree is moving — agent working headless | Ignore — the progress guard protected real work |
+| `silence deferred: live tool subprocess` | Pane silent but a tool (docker/make/tests) is alive under it | Ignore — "working quietly" is not "frozen" |
 | `AUTO-RESTART skipped: non-work helper` | Throttled log when an idle `-listen` or `-dev` pane was checked | Ignore — informational |
+| `ACTION … kind=spinner-hang` | Spinner ran ≥threshold with NO worktree change. Alert-only by default (`SPINNER_AUTO_INTERRUPT=1` restores the old blind Esc) | Read paneTail. Legit long op (build, calibration run) → do nothing. Confirmed hang → `tmux send-keys -t <S> Escape`, then tell the agent what to retry |
+| `ACTION … kind=stuck-input` | Text sat unsubmitted in an IDLE agent's composer ≥5m (the Enter was swallowed) | Intended text → submit: `tmux send-keys -t <S> C-m`. Stale/unwanted → clear: `tmux send-keys -t <S> C-u`. Unsubmitted directives have silently stalled agents for hours — never ignore |
+| `ACTION … kind=no-progress` | Worktree unchanged ≥45m while the pane LOOKS active (tail -f / polling / spinner redraws defeat pane-hash silence detection) | Inspect paneTail; ask the agent for a one-line status; recover with kill + `claude --continue` in its worktree only if unresponsive |
+| `DEAD-END-HOLD` | Rotation suppressed: no queued work to rotate to (question-pending), or the worktree is still progressing | Answer the agent's prompt / let it work |
+| `ACTION … kind=dead-end-probe` | First dead-end of a lifecycle: the agent got a diagnostic prompt ("what step, what's blocking, what do you need"). A probe is NOT a strike | Wait the grace window, `tmux capture-pane` to read the reply, then intervene — or let the next re-emit rotate |
+| `ACTION … kind=dead-end attempts=N` | Kill+rotate strike; manifest goes `pending` (re-eligible) below `DEAD_END_MAX_ATTEMPTS`, `blocked` at max. Attempts persist across re-bootstraps; only phase advance resets them | A ticket at 2/3 needs a root-cause fix before its next bootstrap, not another spin |
+| `ACTION … kind=kill-during-ci` | /work agent parked at ci/complete was killed to free its pool slot (`complete`→done, `ci`→awaiting-merge). /work-only; oracle-driven pools are exempt | Merge the PR when ready; worktree + state files survive, so review follow-ups relaunch via bootstrap or `--continue` |
+| `ACTION … kind=comment-loop cycles=N` | N fix→push→re-comment cycles with the review bot — nudging is suppressed because it FEEDS the loop | Read the threads yourself: fix-vs-false-positive per comment (never blanket-dismiss), then give the agent one specific directive |
+| `ACTION … kind=auth-broken` | Credential failure in the pane (403 / Bad credentials / Could not resolve) — the gh active account flaps across concurrent agents | Verify the expected account from `../.envrc`, fix auth in that pane's env, tell the agent to retry its last command |
+| `DAEMON-CRASH …` / `TICK-ERROR …` | An exception was caught (daemon keeps ticking / that session skipped one tick) | File the stack trace as a maestro bug; the fleet is still watched |
+| `CONDUCTOR-USURPED` | A newer conductor took the lock (`MAESTRO_FORCE=1`); the old one exited by itself | Expected during a deliberate takeover — verify exactly one conductor remains |
 | `HEARTBEAT N active, X pr-ready, Y pr-broken, Z pr-pending, W wedged \| <per-ticket>` | Periodic summary, default every 30m | **Re-read it.** This is the forced re-check that exists because operators desensitize to noisy ticks. If `X >= 1` and you have not yet surfaced those PRs, do it now |
 
 ## Anti-patterns that cause operators to fail
@@ -175,6 +188,53 @@ break the match, so they stay bare. Practical impact under `MAESTRO_NS`: if you
 run the **same ticket number** concurrently across two repos, those helper
 sessions can alias. Avoid by giving concurrent batches distinct ticket-number
 ranges (or distinct prefixes), which the rest of the isolation already assumes.
+
+## Recovery recipes
+
+**Frozen TUI (input box dead, text stuck at `❯`, Esc/Enter do nothing).** The
+`stuck-input` / `no-progress` alerts surface it; the fix that reliably works:
+`tmux kill-session -t <S>` then relaunch in the SAME worktree with
+`claude --dangerously-skip-permissions --continue` — it resumes the same
+conversation from disk with full context. NEVER relaunch the bare `/command`
+on a task that already started: that re-runs it from scratch and throws the
+context away. (The daemon does continue-restarts automatically for generic
+commands; whitelisted /work//follow-up resume from their own state files.)
+
+**A `--continue` relaunch sits at a resume menu.** Large sessions prompt
+"Resume from summary / full session". The question detector surfaces it —
+answer it like any menu. "Resume from summary" then runs a `/compact` that
+blanks the pane for tens of seconds; that transient is normal.
+
+**Clean shutdown (never ad-hoc `pkill -f maestro`).** A broad pkill pattern
+has matched the operator's own shell and killed it mid-command. Instead:
+kill the daemon via its recorded pid (`cat <STATE_DIR>/conductor.lock`),
+stop Monitor tasks via TaskStop, and use `maestro-cleanup.js <TICKET> --tmux`
+per ticket (or `--all`) for sessions/markers.
+
+**Manifest went stale after manual kills** (`in_progress` ghosts, "where are
+my agents?"): `node scripts/maestro-session.js sync` reconciles it against
+live tmux once, without a daemon.
+
+## Pre-launch checklist (per fleet)
+
+1. Read `../.envrc` of the wrapper NOW — repo, prefix, tokens, flags. Never
+   trust memory for where a fleet runs.
+2. Verify identity per worktree: `git config user.email` + `gh auth status`
+   must match the repo's expected account (agents have committed under the
+   wrong identity for hours).
+3. Permission prep: `--dangerously-skip-permissions` does NOT cover
+   `sudo`, some cross-dir reads, and other rules — those prompts stall every
+   agent until answered. Pre-authorize the skill's known commands in the
+   repo/worktree `.claude/settings.json` allowlist BEFORE launching N agents,
+   or budget for answering prompt storms.
+4. `/follow-up` under maestro-launched generic agents is a known
+   incompatibility: the `enforce-step-workflow` hook blocks its state writes
+   without a `.work-state.json`. Compile stop-oracles against `gh` directly
+   (`gh pr view --json mergeStateStatus,statusCheckRollup`), not `/follow-up`.
+5. Dependent/stacked tickets: dependents must NEVER `git merge` the keystone's
+   branch (it drags the keystone's whole diff into their PRs). Sequence via
+   manifest deps (`id:prio:dep`) so dependents start after the keystone merges,
+   or share a dedicated cherry-pickable commit.
 
 ## When you're unsure
 

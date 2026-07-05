@@ -27,12 +27,14 @@
  *   }
  *
  * CLI:
- *   init <topic> <slots> <id>:<prio>[:dep,dep] ...    create
+ *   init <topic> <slots> [--command=X] [--command-brief='…']
+ *        [--stop-oracle='…'] [--stop-source='…'] <id>:<prio>[:dep,dep] ...
  *   show <topic>                                       print full session
  *   list                                               all active sessions
  *   summary                                            short status per session
  *   update <topic> <id> <status> [note]                update one task
  *   next <topic>                                       next eligible task
+ *   sync                                               one-shot manifest ↔ tmux reconcile
  *   clear <topic>                                      remove session file
  */
 'use strict';
@@ -78,6 +80,11 @@ function init(topic, slots, tasks, opts = {}) {
     // ticket is done. Persisted here (not just env) so a daemon restart can't
     // silently revert to /work with no stop condition.
     command: opts.command || 'work',
+    // Operator-authored one-paragraph summary of WHAT the command does and
+    // what "done" means. The conductor embeds it in question-pending /
+    // nudges-exhausted alert payloads so the operator LLM answers agents in
+    // their own workflow's vocabulary instead of guessing /work semantics.
+    commandBrief: opts.commandBrief || null,
     stopOracle: opts.stopOracle || null,
     stopSource: opts.stopSource || null,
     createdAt: new Date().toISOString(),
@@ -205,6 +212,7 @@ if (require.main === module) {
           JSON.stringify(
             init(topic, slots, tasks, {
               command: opts.command,
+              commandBrief: opts['command-brief'],
               stopOracle: opts['stop-oracle'],
               stopSource: opts['stop-source'],
             }),
@@ -230,11 +238,24 @@ if (require.main === module) {
       case 'next':
         console.log(JSON.stringify(nextEligible(args[0]), null, 2));
         break;
+      case 'sync': {
+        // One-shot manifest ↔ tmux reconciliation for conductor-less moments:
+        // operators killing sessions by hand froze manifests at stale
+        // in_progress states ("where are my agents? they're gone"), because
+        // reconciliation only ran inside the daemon tick.
+        const tmux = require('./lib/maestro-conduct/tmux');
+        const manifestMod = require('./lib/maestro-conduct/manifest');
+        manifestMod.syncFromTmux(tmux.listSessions());
+        printSummary();
+        break;
+      }
       case 'clear':
         console.log(clear(args[0]) ? 'cleared' : 'not found');
         break;
       default:
-        console.error('usage: maestro-session.js <init|show|list|summary|update|next|clear> ...');
+        console.error(
+          'usage: maestro-session.js <init|show|list|summary|update|next|sync|clear> ...'
+        );
         process.exit(1);
     }
   } catch (e) {

@@ -91,7 +91,10 @@ function paneHash(pane) {
 
 function isActive(pane, hashNow, toksNow, prev) {
   if (LIVE_SPINNER_RE.test(pane)) return true;
-  if (toksNow !== null && prev.tokens !== null && toksNow !== prev.tokens) return true;
+  // STRICT increase only (GH-449 mode 3): a token counter that oscillates or
+  // resets (compaction, TUI redraw quirks) is not evidence of new output.
+  // Decreases and jitter fall through to the pane-hash check.
+  if (toksNow !== null && prev.tokens !== null && toksNow > prev.tokens) return true;
   if (!prev.hash) return true; // first sighting
   if (hashNow !== prev.hash) return true;
   return false;

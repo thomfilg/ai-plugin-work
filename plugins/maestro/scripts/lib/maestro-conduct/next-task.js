@@ -33,8 +33,12 @@ function topPendingForManifest(manifest, entry) {
   };
 }
 
-function findEligibleTasks() {
+function findEligibleTasks(excludeIds) {
   if (!fs.existsSync(SESSION_MANIFEST_DIR)) return [];
+  // Exclusion set: rotation paths pass the just-killed ticket so a kill that
+  // re-queues it as `pending` can't immediately re-bootstrap the same ticket
+  // (self-rebootstrap loop). POOL-FILL picks it back up on a later tick.
+  const exclude = new Set(Array.isArray(excludeIds) ? excludeIds : excludeIds ? [excludeIds] : []);
   // Sort manifest filenames so readdirSync iteration order is deterministic
   // across filesystems. This gives a stable tie-break by filename when two
   // eligible tasks share the same numeric priority (the natural tie-break
@@ -45,15 +49,18 @@ function findEligibleTasks() {
     if (!entry.endsWith('.json')) continue;
     const manifest = readManifestSafe(path.join(SESSION_MANIFEST_DIR, entry));
     if (!manifest) continue;
-    const candidate = topPendingForManifest(manifest, entry);
+    const filtered = exclude.size
+      ? { ...manifest, tasks: (manifest.tasks || []).filter((t) => !exclude.has(t.id)) }
+      : manifest;
+    const candidate = topPendingForManifest(filtered, entry);
     if (candidate) candidates.push(candidate);
   }
   candidates.sort((a, b) => (a.priority || 999) - (b.priority || 999));
   return candidates;
 }
 
-function findNextEligibleTask() {
-  return findEligibleTasks()[0] || null;
+function findNextEligibleTask(excludeIds) {
+  return findEligibleTasks(excludeIds)[0] || null;
 }
 
 function buildNextActionInstruction({ prefix, suffix, next, autoBootstrapped }) {
