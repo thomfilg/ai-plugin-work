@@ -7,7 +7,7 @@
 
 'use strict';
 
-const { execFileSync } = require('child_process');
+const { hasUnpushedCommits } = require('../git-unpushed');
 
 // Loop back to monitor for the next cycle. Returns null (the "advance" signal).
 function loopBackToMonitor(state) {
@@ -30,28 +30,6 @@ function buildMaxAttemptsBlocked(state, maxAttempts) {
       args: [ticketId, '--yes'],
     },
   };
-}
-
-// True when there are commits ahead of upstream. Falls back to a porcelain
-// dirty-tree check when there's no upstream (or git errors).
-function hasUnpushedCommits(ctx) {
-  const opts = {
-    encoding: 'utf8',
-    timeout: 5000,
-    cwd: ctx.worktreeDir,
-    stdio: ['pipe', 'pipe', 'pipe'],
-  };
-  try {
-    const count = execFileSync('git', ['rev-list', '--count', '@{upstream}..HEAD'], opts).trim();
-    return parseInt(count, 10) > 0;
-  } catch {
-    // No upstream or git error — check for uncommitted changes as fallback
-    try {
-      return execFileSync('git', ['status', '--porcelain'], opts).trim().length > 0;
-    } catch {
-      return false;
-    }
-  }
 }
 
 function buildPushDelegate(state, ctx) {
@@ -85,7 +63,7 @@ module.exports = function registerPushRetry(register) {
     if (state.dispatched === 'push-retry') return loopBackToMonitor(state);
 
     // Nothing to push — all comments were skipped, loop back
-    if (!hasUnpushedCommits(ctx)) return loopBackToMonitor(state);
+    if (!hasUnpushedCommits(ctx.worktreeDir)) return loopBackToMonitor(state);
 
     state.dispatched = 'push-retry';
     return buildPushDelegate(state, ctx);
