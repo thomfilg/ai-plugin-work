@@ -23,6 +23,21 @@ function buildInitialFailedJobs(ci) {
   });
 }
 
+// GH-214: collect the unique GitHub Actions run IDs across ALL job buckets
+// (running/passed/failed/cancelled/neutral) so the monitor can persist them to
+// state each cycle — a later invocation (or an operator) can resume/inspect
+// the same runs without re-deriving them from terminal output.
+function collectRunIds(ci) {
+  const ids = new Set();
+  for (const bucket of ['running', 'passed', 'failed', 'cancelled', 'neutral']) {
+    for (const j of ci[bucket] || []) {
+      const m = String(j.url || j.link || '').match(/runs\/(\d+)/);
+      if (m) ids.add(m[1]);
+    }
+  }
+  return [...ids];
+}
+
 // Resolve missing runIds via the check-runs API at HEAD SHA. Matrix parent
 // checks ("🧪 Run Integration Tests [tests]") often have no `link` in
 // `gh pr checks`, so fix-ci would have nothing to fetch.
@@ -175,6 +190,7 @@ function extractFailedTestPaths(rawLogs) {
 
 module.exports = {
   buildInitialFailedJobs,
+  collectRunIds,
   resolveMissingRunIds,
   mapCiStatus,
   fetchClassifierContext,

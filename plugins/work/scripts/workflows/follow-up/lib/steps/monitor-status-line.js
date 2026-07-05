@@ -66,17 +66,26 @@ function ciDetail(ci) {
   return '';
 }
 
+// Compose the one-line summary from structured parts + a (re)computed
+// elapsed string. Shared by the monitor step (persist time) and the status
+// bar renderer (refresh time) so the timer ticks live instead of freezing at
+// whatever the last monitor cycle stringified.
+function composeStatusLine(parts, elapsed) {
+  return [parts.statusLabel, parts.poll, elapsed, parts.counts].filter(Boolean).join(' · ');
+}
+
 function buildStatusLine(state, ci, reviews) {
   const attempt = state.attempt || 1;
   const maxAttempts = state.maxAttempts || 40;
-  const parts = ciCountParts(ci, reviews);
-  const statusLabel = ciStatusLabel(ci.status);
+  const countParts = ciCountParts(ci, reviews);
   const detail = ciDetail(ci);
-  const elapsed = formatElapsed(state._monitorStartTime);
-  const counts = parts.length > 0 ? parts.join(' ╎ ') : '';
-  const poll = `${attempt}/${maxAttempts}`;
-  const line1 = [statusLabel, poll, elapsed, counts].filter(Boolean).join(' · ');
-  return { line1, detail };
+  const parts = {
+    statusLabel: ciStatusLabel(ci.status),
+    poll: `${attempt}/${maxAttempts}`,
+    counts: countParts.length > 0 ? countParts.join(' ╎ ') : '',
+  };
+  const line1 = composeStatusLine(parts, formatElapsed(state._monitorStartTime));
+  return { line1, detail, parts };
 }
 
-module.exports = { buildOutput, buildStatusLine };
+module.exports = { buildOutput, buildStatusLine, composeStatusLine, formatElapsed };
