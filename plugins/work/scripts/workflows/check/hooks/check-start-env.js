@@ -14,6 +14,7 @@
 
 const { spawn, execSync } = require('child_process');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const config = require(path.join(__dirname, '..', '..', 'lib', 'config'));
 const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
@@ -35,6 +36,63 @@ try {
   IMPACTED_APPS = JSON.parse(process.argv[2] || '[]');
 } catch {
   IMPACTED_APPS = [];
+}
+
+// Timeouts (env-overridable for tests/ops)
+const DB_START_TIMEOUT_MS = parseInt(process.env.CHECK_ENV_DB_TIMEOUT_MS, 10) || 30000;
+const APP_START_TIMEOUT_MS = parseInt(process.env.CHECK_ENV_APP_TIMEOUT_MS, 10) || 60000;
+const READY_WAIT_MS = parseInt(process.env.CHECK_ENV_READY_WAIT_MS, 10) || 5000;
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Poll `predicate` every `intervalMs` until truthy or `timeoutMs` elapses.
+ * @returns {Promise<boolean>} last predicate result
+ */
+async function waitFor(predicate, timeoutMs, intervalMs = 1000) {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (await predicate()) return true;
+    if (Date.now() >= deadline) return false;
+    await sleep(Math.min(intervalMs, Math.max(1, deadline - Date.now())));
+  }
+}
+
+/**
+ * Spawn a long-running server command DETACHED with its output redirected to
+ * a log file instead of parent pipes.
+ *
+ * Zombie-leak fix (check-start-env-zombies-001): stdio 'pipe' streams keep
+ * the parent hook's event loop alive for as long as the child runs — even
+ * after child.unref() — so every /check run left this hook resident. Log-file
+ * fds give the child a valid output target that survives parent exit, letting
+ * the hook terminate while the started server keeps running.
+ *
+ * @returns {{ proc: import('child_process').ChildProcess, logPath: string }}
+ */
+function spawnDetachedToLog(command, label, extraEnv = {}) {
+  const logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'check-start-env-'));
+  const logPath = path.join(logDir, `${label}.log`);
+  const fd = fs.openSync(logPath, 'a', 0o600);
+  const proc = spawn(command, {
+    cwd: process.cwd(),
+    shell: true,
+    env: { ...process.env, ...extraEnv },
+    stdio: ['ignore', fd, fd],
+    detached: true,
+  });
+  fs.closeSync(fd); // child holds its own copy of the fd
+  proc.unref();
+  return { proc, logPath };
+}
+
+/** Read a child's log file (best-effort). */
+function readLog(logPath) {
+  try {
+    return fs.readFileSync(logPath, 'utf8');
+  } catch {
+    return '';
+  }
 }
 
 /**
@@ -192,40 +250,19 @@ async function startDatabase() {
   const devCommand = config.DEV_COMMAND || 'make dev-local';
   console.error(`Starting database with ${devCommand}...`);
 
-  return new Promise((resolve) => {
-    const proc = spawn(devCommand, {
-      cwd: process.cwd(),
-      shell: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-      detached: true,
-    });
+  const { proc, logPath } = spawnDetachedToLog(devCommand, 'database');
 
-    let output = '';
+  const ready = await waitFor(() => {
+    const log = readLog(logPath);
+    if (log.includes('database system is ready') || log.includes('PostgreSQL init')) return true;
+    return isDatabaseRunning();
+  }, DB_START_TIMEOUT_MS);
 
-    proc.stdout.on('data', (data) => {
-      output += data.toString();
-      // Check if database is ready
-      if (output.includes('database system is ready') || output.includes('PostgreSQL init')) {
-        console.error('Database started');
-        resolve({ started: true, pid: proc.pid });
-      }
-    });
-
-    proc.stderr.on('data', (data) => {
-      output += data.toString();
-    });
-
-    // Timeout after 30 seconds
-    setTimeout(() => {
-      if (isDatabaseRunning()) {
-        resolve({ started: true, pid: proc.pid });
-      } else {
-        resolve({ started: false, error: 'Timeout waiting for database' });
-      }
-    }, 30000);
-
-    proc.unref();
-  });
+  if (ready) {
+    console.error('Database started');
+    return { started: true, pid: proc.pid, logPath };
+  }
+  return { started: false, error: 'Timeout waiting for database', logPath };
 }
 
 /**
@@ -252,66 +289,52 @@ async function startApp(appName, appConfig) {
 
   console.error(`Starting ${appName} on port ${port}...`);
 
-  return new Promise((resolve) => {
-    const startCmd = appConfig.startCommand || `pnpm dev --filter=${appName}`;
-    const proc = spawn(startCmd, {
-      cwd: process.cwd(),
-      shell: true,
-      env: { ...process.env, PORT: port.toString() },
-      stdio: ['ignore', 'pipe', 'pipe'],
-      detached: true,
-    });
-
-    let output = '';
-    let resolved = false;
-
-    const handleOutput = (data) => {
-      output += data.toString();
-
-      // Look for "Local:" URL in output
-      const match = output.match(/Local:\s*http:\/\/localhost:(\d+)/);
-      if (match && !resolved) {
-        resolved = true;
-        const actualPort = parseInt(match[1], 10);
-        console.error(`${appName} started on port ${actualPort}`);
-        resolve({
-          name: appName,
-          port: actualPort,
-          url: `http://host.docker.internal:${actualPort}`,
-          pid: proc.pid,
-          started: true,
-        });
-      }
-    };
-
-    proc.stdout.on('data', handleOutput);
-    proc.stderr.on('data', handleOutput);
-
-    // Timeout after 60 seconds
-    setTimeout(() => {
-      if (!resolved) {
-        resolved = true;
-        if (isPortInUse(port)) {
-          resolve({
-            name: appName,
-            port: port,
-            url: `http://host.docker.internal:${port}`,
-            pid: proc.pid,
-            started: true,
-            note: 'Started but did not detect URL output',
-          });
-        } else {
-          resolve({
-            name: appName,
-            error: 'Timeout waiting for app to start',
-            started: false,
-          });
-        }
-      }
-    }, 60000);
-
-    proc.unref();
+  const startCmd = appConfig.startCommand || `pnpm dev --filter=${appName}`;
+  const { proc, logPath } = spawnDetachedToLog(startCmd, `app-${appName}`, {
+    PORT: port.toString(),
   });
+
+  // Poll the child's log for the "Local:" URL (dev servers print their port)
+  let actualPort = null;
+  await waitFor(() => {
+    const match = readLog(logPath).match(/Local:\s*http:\/\/localhost:(\d+)/);
+    if (match) {
+      actualPort = parseInt(match[1], 10);
+      return true;
+    }
+    return false;
+  }, APP_START_TIMEOUT_MS);
+
+  if (actualPort !== null) {
+    console.error(`${appName} started on port ${actualPort}`);
+    return {
+      name: appName,
+      port: actualPort,
+      url: `http://host.docker.internal:${actualPort}`,
+      pid: proc.pid,
+      started: true,
+      logPath,
+    };
+  }
+
+  if (isPortInUse(port)) {
+    return {
+      name: appName,
+      port: port,
+      url: `http://host.docker.internal:${port}`,
+      pid: proc.pid,
+      started: true,
+      note: 'Started but did not detect URL output',
+      logPath,
+    };
+  }
+
+  return {
+    name: appName,
+    error: 'Timeout waiting for app to start',
+    started: false,
+    logPath,
+  };
 }
 
 /**
@@ -333,13 +356,13 @@ async function main() {
 
   // Re-detect after starting database (in case it wasn't running before)
   if (result.database.started) {
-    await new Promise((resolve) => setTimeout(resolve, 3000)); // Wait for container to be ready
+    await sleep(Math.min(3000, READY_WAIT_MS)); // Wait for container to be ready
     const updatedConfig = detectDatabaseConfig(IMPACTED_APPS);
     result.env = updatedConfig;
   }
 
   // Wait a bit for database to be fully ready
-  await new Promise((resolve) => setTimeout(resolve, 5000));
+  await sleep(READY_WAIT_MS);
 
   // Discover apps from manifest via app-access module
   // Filter out CLI apps since they don't have dev servers to start
@@ -408,9 +431,27 @@ async function main() {
 
   // Output result
   console.log(JSON.stringify(result, null, 2));
+  return result;
 }
 
-main().catch((err) => {
-  logHookError(__filename, err);
-  process.exit(0);
-});
+if (require.main === module) {
+  main()
+    .then(() => {
+      // Explicit exit (check-start-env-zombies-001): started servers are
+      // detached with their own log fds, so nothing here must keep running.
+      // Without this the hook process lingered indefinitely (17 zombies/day).
+      process.exit(0);
+    })
+    .catch((err) => {
+      logHookError(__filename, err);
+      process.exit(0);
+    });
+}
+
+module.exports = {
+  startApp,
+  startDatabase,
+  findAvailablePort,
+  isPortInUse,
+  detectDatabaseConfig,
+};

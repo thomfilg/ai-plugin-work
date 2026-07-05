@@ -15,10 +15,23 @@
 const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const { writeReportAtomic } = require('../report-utils');
+const { classifyRun, shouldRetry } = require('../test-run-analysis');
+const { readBaseline, writeBaseline, splitFailures } = require('../tests-baseline');
+const {
+  computeChangedSpecs,
+  buildE2eEnv,
+  computeImpactTests,
+  buildUnitEnv,
+} = require('../changed-specs');
 
-function runCommand(cmd, timeout) {
+function runCommand(cmd, timeout, env) {
   try {
-    const output = execSync(`${cmd} 2>&1`, { encoding: 'utf8', timeout });
+    const output = execSync(`${cmd} 2>&1`, {
+      encoding: 'utf8',
+      timeout,
+      ...(env ? { env: { ...process.env, ...env } } : {}),
+    });
     return { output, exitCode: 0 };
   } catch (err) {
     return {
@@ -34,6 +47,37 @@ function runCommand(cmd, timeout) {
  * plug in their own affected-detection (nx, turbo, custom). Returns a result,
  * or null when no affected-suite env vars are configured.
  */
+/**
+ * Lazy per-suite env resolver (computed at most once per suite kind):
+ * - e2e: scoped CHANGED_SPECS + configurable per-spec budget — strictly-changed
+ *   spec files (plus importers of changed helpers), so the repo's reliability
+ *   sweep can't drag in unchanged siblings (echo-5224).
+ * - unit: impact-aware selection (echo-5820-3): IMPACT_TEST_FILES = test files
+ *   that import a changed source file (one hop), so api-contract changes that
+ *   break consumer-test mocks surface here instead of in full CI. Default on;
+ *   CHECK_IMPACT_TESTS=0 disables.
+ */
+function createSuiteEnvResolver(outputs) {
+  const cache = {};
+  return function envForSuite(name) {
+    if (name in cache) return cache[name];
+    if (name === 'e2e') {
+      cache.e2e = buildE2eEnv(computeChangedSpecs());
+    } else if (name === 'unit') {
+      const impact = computeImpactTests();
+      cache.unit = buildUnitEnv(impact) || undefined;
+      if (cache.unit) {
+        outputs.push(
+          `### impact-aware selection: +${impact.impactTests.length} test file(s) importing changed sources (IMPACT_TEST_FILES, base ${impact.baseRef})`
+        );
+      }
+    } else {
+      cache[name] = undefined;
+    }
+    return cache[name];
+  };
+}
+
 function runAffectedSuites() {
   const suites = [
     { name: 'unit', cmd: process.env.SCRIPT_RUN_AFFECTED_UNIT },
@@ -44,9 +88,11 @@ function runAffectedSuites() {
   if (suites.length === 0) return null;
 
   const outputs = [];
+  const envForSuite = createSuiteEnvResolver(outputs);
   for (const { name, cmd } of suites) {
+    const suiteEnv = envForSuite(name);
     outputs.push(`### ${name} (${cmd})`);
-    const result = runCommand(cmd, 600000);
+    const result = runCommand(cmd, 600000, suiteEnv);
     outputs.push(result.output);
     if (result.exitCode !== 0) {
       return {
@@ -128,51 +174,204 @@ function runQualityGate(checkHooksDir) {
   return runAffectedSuites() || runDevCheckTiers(checkHooksDir);
 }
 
+// --- tests.check.md report sections (GH-394) --------------------------------
+// The report carries: Result (PASSED/FAILED/CRASHED/FLAKY), Crash Signature,
+// Flaky-passed list, Net-new vs pre-existing (when a baseline is available),
+// Output, Verdict. The first line after Changes Hash is the canonical
+// machine-readable `**Status:**` line — gates parse it FIRST.
+
+function crashSection(analysis) {
+  return [
+    '## Crash Signature',
+    '',
+    'The test RUNNER crashed — this is an infrastructure failure, not a test failure.',
+    `> "${analysis.crashSignature}"`,
+    '',
+  ];
+}
+
+function flakySection(flakyTests, retryNote) {
+  const trigger = retryNote ? ` (retry trigger — ${retryNote})` : '';
+  const items =
+    flakyTests.length > 0
+      ? flakyTests.map((t) => `- ${t}`)
+      : ['- (failing tests could not be itemized from runner output)'];
+  return [
+    '## Flaky (passed on retry)',
+    '',
+    `The following failed on the first run and passed on the single retry round${trigger}:`,
+    ...items,
+    '',
+  ];
+}
+
+function deltaList(title, entries) {
+  const items = entries.length > 0 ? entries.map((t) => `- ${t}`) : ['- none'];
+  return [`### ${title} (${entries.length})`, ...items];
+}
+
+function baselineSection({ baseline, delta, outcome }) {
+  const lines = ['## Baseline', ''];
+  if (!baseline) {
+    lines.push(
+      'Baseline unavailable — no `tests-baseline.json`; all failures treated as blocking (same as before).'
+    );
+  } else {
+    lines.push(
+      `**Baseline:** ${baseline.ref || 'unknown ref'} (recorded ${baseline.recordedAt}, ${baseline.failures.length} known failure(s))`
+    );
+    if (delta && (outcome === 'FAILED' || outcome === 'CRASHED')) {
+      lines.push('', ...deltaList('Net-new failures', delta.netNew));
+      lines.push('', ...deltaList('Pre-existing failures', delta.preExisting));
+    }
+  }
+  lines.push('');
+  return lines;
+}
+
+function verdictLine({ status, outcome, analysis, flakyTests }) {
+  const byOutcome = Object.create(null);
+  byOutcome.PASSED = `**${status}** - All tests pass`;
+  byOutcome.FLAKY = `**${status}** - Tests pass (with warning: ${flakyTests.length || 'some'} flaky test(s) passed only on retry — see Flaky section)`;
+  byOutcome.CRASHED = `**${status}** - Test runner CRASHED (infra failure, not test failures)`;
+  return byOutcome[outcome] || `**${status}** - ${analysis.counts.failed ?? '?'} test(s) failing`;
+}
+
+function buildTestsReport(input) {
+  const { changesHash, status, outcome, result, analysis, flakyTests, retryNote } = input;
+
+  const lines = [
+    `**Changes Hash:** ${changesHash}`,
+    '',
+    `**Status:** ${status}`,
+    '',
+    '# Test Results Report',
+    '',
+    `**Result:** ${outcome}`,
+    `**Runner:** ${result.tier}`,
+    `**Exit code:** ${result.exitCode}`,
+    `**Pass:** ${analysis.counts.passed ?? '?'} | **Fail:** ${analysis.counts.failed ?? '?'}`,
+    '',
+  ];
+
+  if (outcome === 'CRASHED') lines.push(...crashSection(analysis));
+
+  if (outcome === 'FLAKY') {
+    lines.push(...flakySection(flakyTests, retryNote));
+  } else if (retryNote) {
+    lines.push(`**Flake retry:** attempted (${retryNote}) — still failing after retry.`, '');
+  }
+
+  lines.push(...baselineSection(input));
+  lines.push('## Output', '```', result.output.substring(0, 5000), '```', '');
+  lines.push('## Verdict', verdictLine(input));
+
+  return lines.join('\n');
+}
+
+/**
+ * Flake-aware single retry round (echo-4492-001). Only FAILED runs with a
+ * small failing set or a transient signature qualify; CRASHED runs are NEVER
+ * retried; cap is one round. Returns the (possibly retried) run state.
+ */
+function applyFlakeRetry(first, firstAnalysis, checkHooksDir) {
+  const noRetry = {
+    result: first,
+    analysis: firstAnalysis,
+    outcome: firstAnalysis.result,
+    flakyTests: [],
+    retryNote: null,
+  };
+  if (firstAnalysis.result !== 'FAILED') return noRetry;
+  const { retry, reason } = shouldRetry(firstAnalysis);
+  if (!retry) return noRetry;
+
+  const retryResult = runQualityGate(checkHooksDir);
+  const retryAnalysis = classifyRun(retryResult);
+  if (retryAnalysis.result === 'PASSED') {
+    // Pass with warning — flaky, not red.
+    return {
+      result: { ...retryResult, tier: `${first.tier} (retried once)` },
+      analysis: retryAnalysis,
+      outcome: 'FLAKY',
+      flakyTests: firstAnalysis.failingTests,
+      retryNote: reason,
+    };
+  }
+  // Keep the retry run (fresher evidence); classification may have shifted
+  // (e.g. FAILED → CRASHED under memory pressure).
+  return {
+    result: { ...retryResult, tier: `${first.tier} (retried once, still failing)` },
+    analysis: retryAnalysis,
+    outcome: retryAnalysis.result,
+    flakyTests: [],
+    retryNote: reason,
+  };
+}
+
+function failureReason({ outcome, analysis, delta, baseline }) {
+  if (outcome === 'CRASHED') {
+    return `Test runner CRASHED (infrastructure failure, not test failures): "${analysis.crashSignature}". Fix the environment or rerun — do NOT treat as failing tests.`;
+  }
+  if (delta && baseline && delta.netNew.length !== analysis.failingTests.length) {
+    return `Tests failed (${analysis.counts.failed ?? '?'} failing; ${delta.netNew.length} net-new vs baseline, ${delta.preExisting.length} pre-existing). Needs fix in implement step.`;
+  }
+  return `Tests failed (${analysis.counts.failed ?? '?'} failing). Needs fix in implement step.`;
+}
+
+// Baseline delta (echo-5137-4): split failures into net-new vs
+// pre-existing when a cached baseline exists; refresh it on green runs.
+function assessBaseline(outcome, analysis) {
+  const green = outcome === 'PASSED' || outcome === 'FLAKY';
+  const baseline = readBaseline();
+  const delta =
+    outcome === 'FAILED' || outcome === 'CRASHED'
+      ? splitFailures(analysis.failingTests, baseline)
+      : null;
+  if (green) writeBaseline(undefined, []);
+  return { baseline, delta, status: green ? 'APPROVED' : 'NEEDS_WORK' };
+}
+
 function registerRunTests(register) {
   register('4_run_tests', (state, ctx) => {
     const reportFolder = state.setupResult?.reportFolder || ctx.tasksDir;
     const changesHash = state.changesHash || 'unknown';
     const reportPath = path.join(reportFolder, 'tests.check.md');
 
-    const result = runQualityGate(ctx.checkHooksDir);
+    const firstRun = runQualityGate(ctx.checkHooksDir);
+    // Flake-aware retry (echo-4492-001): one retry round for small failing
+    // sets or transient signatures. CRASHED runs are NEVER retried.
+    const { result, analysis, outcome, flakyTests, retryNote } = applyFlakeRetry(
+      firstRun,
+      classifyRun(firstRun),
+      ctx.checkHooksDir
+    );
 
-    // Parse counts
-    const passMatch = result.output.match(/pass\s+(\d+)/i);
-    const failMatch = result.output.match(/fail\s+(\d+)/i);
-    const passCount = passMatch ? passMatch[1] : '?';
-    const failCount = failMatch ? failMatch[1] : '?';
-    const status = result.exitCode === 0 ? 'APPROVED' : 'NEEDS_WORK';
+    const { baseline, delta, status } = assessBaseline(outcome, analysis);
 
-    // Write report
-    const report = [
-      `**Changes Hash:** ${changesHash}`,
-      '',
-      `Status: ${status}`,
-      '',
-      '# Test Results Report',
-      '',
-      `**Runner:** ${result.tier}`,
-      `**Exit code:** ${result.exitCode}`,
-      `**Pass:** ${passCount} | **Fail:** ${failCount}`,
-      '',
-      '## Output',
-      '```',
-      result.output.substring(0, 5000),
-      '```',
-      '',
-      '## Verdict',
-      `**${status}**${result.exitCode === 0 ? ' - All tests pass' : ` - ${failCount} test(s) failing`}`,
-    ].join('\n');
+    const report = buildTestsReport({
+      changesHash,
+      status,
+      outcome,
+      result,
+      analysis,
+      flakyTests,
+      retryNote,
+      baseline,
+      delta,
+    });
 
-    fs.writeFileSync(reportPath, report);
+    // Atomic (tmp + rename) so concurrent readers never see a 0-byte report (GH-611)
+    writeReportAtomic(reportPath, report);
 
-    if (result.exitCode !== 0) {
+    if (status !== 'APPROVED') {
       state.testsFailed = true;
+      const reason = failureReason({ outcome, analysis, delta, baseline });
       return {
         type: 'check_instruction',
         action: 'failed',
         state: { ticket: state.ticketId, currentStep: '4_run_tests', progress: '4/9' },
-        reason: `Tests failed (${failCount} failing). Needs fix in implement step.`,
+        reason,
         report: reportPath,
       };
     }

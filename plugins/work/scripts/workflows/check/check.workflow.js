@@ -156,6 +156,11 @@ function getCurrentChangesHash() {
   return crypto.createHash('sha256').update(diff).digest('hex').substring(0, 12);
 }
 
+function getCurrentHeadSha() {
+  const sha = safeExec('git rev-parse HEAD');
+  return /^[0-9a-f]{7,40}$/i.test(sha) ? sha : null;
+}
+
 function reportHasMatchingHash(folder, filename, hash) {
   const filePath = path.join(folder, filename);
   if (!fs.existsSync(filePath)) return false;
@@ -310,6 +315,73 @@ module.exports = {
     { source: '8_output', targets: ['9_cleanup'] },
     { source: '9_cleanup', targets: [] },
   ],
+
+  /**
+   * GH-307: SHA-anchored staleness check for a `status: completed` instance.
+   * Called by workflow-engine before planning when prior state is completed.
+   * Reset is authorized ONLY when a SHA condition proves the inputs changed
+   * (enforcement, not bypass):
+   *   1. current changes hash differs from the hash recorded at completion
+   *   2. current HEAD differs from the HEAD recorded at completion
+   *   3. any report's `**Changes Hash:**` header doesn't match the current hash
+   * Legacy states without recorded completion SHAs fall back to the README
+   * hash comparison. `probes` is a test-injection point.
+   *
+   * @returns {{stale: boolean, reasons: string[], currentHash: string, currentHead: string|null}}
+   */
+  completedStaleCheck(instanceId, state, probes = {}) {
+    const currentHash =
+      probes.currentHash !== undefined ? probes.currentHash : getCurrentChangesHash();
+    const currentHead = probes.currentHead !== undefined ? probes.currentHead : getCurrentHeadSha();
+    const reasons = [];
+
+    const recordedHash = state.completedChangesHash || state.changesHash || null;
+    if (recordedHash && currentHash && currentHash !== recordedHash) {
+      reasons.push(`sha-drift: changes hash ${recordedHash} → ${currentHash}`);
+    }
+    if (state.completedHeadSha && currentHead && currentHead !== state.completedHeadSha) {
+      reasons.push(`sha-drift: HEAD ${state.completedHeadSha} → ${currentHead}`);
+    }
+
+    // Stale-report check: a report left over from a previous cycle whose
+    // Changes Hash no longer matches the current diff (see GH-329).
+    if (reasons.length === 0 && currentHash) {
+      const folder = probes.reportFolder || getReportFolder(instanceId);
+      for (const report of ['tests.check.md', 'code-review.check.md', 'completion.check.md']) {
+        if (
+          fs.existsSync(path.join(folder, report)) &&
+          !reportHasMatchingHash(folder, report, currentHash)
+        ) {
+          reasons.push(`sha-drift: ${report} Changes Hash does not match current ${currentHash}`);
+          break;
+        }
+      }
+      // Legacy fallback: no completion SHAs recorded at all — anchor on README.
+      if (reasons.length === 0 && !recordedHash && !state.completedHeadSha) {
+        if (!reportHasMatchingHash(folder, 'README.md', currentHash)) {
+          reasons.push(
+            `sha-drift: no completion SHAs recorded and README.md hash does not match current ${currentHash}`
+          );
+        }
+      }
+    }
+
+    return { stale: reasons.length > 0, reasons, currentHash, currentHead };
+  },
+
+  /**
+   * GH-307: record completion SHAs when the workflow reaches its terminal
+   * step (the engine flips status → completed on transition INTO 9_cleanup).
+   */
+  onTransition(fromStep, toStep, instanceId, { stateInstance }) {
+    if (toStep !== '9_cleanup') return;
+    const st = stateInstance.load(instanceId);
+    if (!st) return;
+    st.completedChangesHash = getCurrentChangesHash();
+    st.completedHeadSha = getCurrentHeadSha();
+    st.completedAt = new Date().toISOString();
+    stateInstance.save(instanceId, st);
+  },
 
   /**
    * Parse CLI arguments into workflow params.

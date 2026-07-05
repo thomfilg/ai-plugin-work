@@ -13,6 +13,19 @@ const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
+const { parseReportStatus } = require(
+  path.join(__dirname, '..', '..', 'lib', 'parse-report-status')
+);
+
+// Report-type mapping for the parse-report-status fallback (echo-5219: reviewer
+// agents emit prose verdicts like "## Overall Assessment: ✅ Well-Implemented"
+// or "### Final Status:\n[COMPLETE]" that the strict passPattern regexes miss;
+// without the fallback the check step re-dispatches check2 in a loop).
+const REPORT_TYPE_BY_FILE = Object.create(null);
+REPORT_TYPE_BY_FILE['tests.check.md'] = 'tests';
+REPORT_TYPE_BY_FILE['code-review.check.md'] = 'codeReview';
+REPORT_TYPE_BY_FILE['completion.check.md'] = 'completion';
+
 /**
  * @param {string} ticket
  * @param {object} providerConfig
@@ -58,7 +71,9 @@ function inspect(ticket, providerConfig, suffix, deps) {
     s.headSha = run(`git -C "${c}" rev-parse HEAD`);
     let baseBranch = 'origin/main';
     try {
-      baseBranch = require(path.join(__dirname, '..', '..', 'lib', 'config')).getBaseBranch({ cwd: c });
+      baseBranch = require(path.join(__dirname, '..', '..', 'lib', 'config')).getBaseBranch({
+        cwd: c,
+      });
     } catch {
       /* */
     }
@@ -105,14 +120,21 @@ function inspect(ticket, providerConfig, suffix, deps) {
   s.allReportsPass = true;
   s.missingReports = [];
   s.failedReports = [];
-  for (const { file, passPattern } of REQUIRED_REPORTS) {
+  for (const { file, passPattern, type } of REQUIRED_REPORTS) {
     const fp = path.join(s.tasksDir, file);
     if (!fileExists(fp)) {
       s.reports[file] = { exists: false, passes: false };
       s.allReportsPass = false;
       s.missingReports.push(file);
     } else {
-      const passes = passPattern.test(readFile(fp));
+      const content = readFile(fp);
+      // Fast path: strict passPattern. Fallback: the shared status parser,
+      // which understands the canonical **Status:** line and the reviewer
+      // agents' real-world prose verdicts (echo-5219 issue 2).
+      const reportType = type || REPORT_TYPE_BY_FILE[file];
+      const passes =
+        passPattern.test(content) ||
+        (reportType ? parseReportStatus(content, reportType).status === 'APPROVED' : false);
       s.reports[file] = { exists: true, passes };
       if (!passes) {
         s.allReportsPass = false;
@@ -122,7 +144,12 @@ function inspect(ticket, providerConfig, suffix, deps) {
   }
   for (const qp of listFiles(s.tasksDir, /^qa-.*\.check\.md$/)) {
     const name = path.basename(qp);
-    const passes = /Status:\s*APPROVED/i.test(readFile(qp));
+    const qaContent = readFile(qp);
+    const qaStatus = parseReportStatus(qaContent, 'qa').status;
+    const passes =
+      /Status:\s*APPROVED/i.test(qaContent) ||
+      qaStatus === 'APPROVED' ||
+      qaStatus === 'NOT_APPLICABLE';
     s.reports[name] = { exists: true, passes };
     s.qaReportCount = (s.qaReportCount || 0) + 1;
     if (!passes) {

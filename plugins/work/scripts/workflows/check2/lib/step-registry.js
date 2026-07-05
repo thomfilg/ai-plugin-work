@@ -44,12 +44,13 @@ const STEPS = [
   '1_setup',
   '2_start_env',
   '3_verify_playwright',
-  '4_run_tests',           // unit tests (affected-only if SCRIPT_RUN_AFFECTED_UNIT set)
-  '5_phase1_agents',       // code-checker + completion-checker
-  '6_phase2_consensus',    // re-review loop if NEEDS_WORK
-  '7_quality_recheck',     // verify reports APPROVED
-  '8_run_integration',     // integration tests (skipped if env var not set)
-  '9_run_e2e',             // e2e tests (skipped if env var not set)
+  '4_run_tests', // unit tests (affected-only if SCRIPT_RUN_AFFECTED_UNIT set)
+  '4b_gherkin_scope', // GH-247: declared Gherkin scope vs actual committed diff
+  '5_phase1_agents', // code-checker + completion-checker
+  '6_phase2_consensus', // re-review loop if NEEDS_WORK
+  '7_quality_recheck', // verify reports APPROVED
+  '8_run_integration', // integration tests (skipped if env var not set)
+  '9_run_e2e', // e2e tests (skipped if env var not set)
   '10_validate_summary',
   '11_output',
 ];
@@ -59,6 +60,7 @@ require('./steps/setup')(registerStep);
 require('./steps/start-env')(registerStep);
 require('./steps/verify-playwright')(registerStep);
 require('./steps/run-tests')(registerStep);
+require('./steps/gherkin-scope')(registerStep);
 require('./steps/phase1-agents')(registerStep);
 require('./steps/phase2-consensus')(registerStep);
 require('./steps/quality-recheck')(registerStep);

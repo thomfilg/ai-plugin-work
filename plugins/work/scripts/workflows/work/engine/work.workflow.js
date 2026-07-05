@@ -83,7 +83,9 @@ const { generatePlan: _generatePlan } = require(path.join(__dirname, 'plan-gener
 // Explicit reference to steps/ index for spec verification (plan-generator consumes these internally)
 const _stepHandlers = require(path.join(__dirname, '..', 'steps', 'index'));
 void _stepHandlers;
-const { validateCheckGate: _validateCheckGate } = require(path.join(__dirname, '..', 'gates', 'check-gate'));
+const { validateCheckGate: _validateCheckGate } = require(
+  path.join(__dirname, '..', 'gates', 'check-gate')
+);
 const {
   transitionStep: _transitionStep,
   getAvailableTransitions: _getAvailableTransitions,
@@ -91,10 +93,23 @@ const {
 const { main: _main } = require(path.join(__dirname, 'cli'));
 
 const TDD_GATED_STEPS = [STEPS.implement];
+// passPattern is the fast path (now tolerant of the bold canonical form
+// `**Status:** APPROVED`); `type` lets inspect.js fall back to the shared
+// parse-report-status parser for real-world prose verdicts like
+// "Overall Assessment: ✅ Well-Implemented" / "### Final Status:\n[COMPLETE]"
+// (echo-5219 issue 2 — the strict regexes caused a check→pr re-dispatch loop).
 const REQUIRED_REPORTS = [
-  { file: 'tests.check.md', passPattern: /Status:\s*APPROVED/i },
-  { file: 'code-review.check.md', passPattern: /Status:\s*APPROVED/i },
-  { file: 'completion.check.md', passPattern: /Status:\s*(COMPLETE|APPROVED)/i },
+  { file: 'tests.check.md', passPattern: /\*{0,2}Status:\*{0,2}\s*APPROVED/i, type: 'tests' },
+  {
+    file: 'code-review.check.md',
+    passPattern: /\*{0,2}Status:\*{0,2}\s*APPROVED/i,
+    type: 'codeReview',
+  },
+  {
+    file: 'completion.check.md',
+    passPattern: /\*{0,2}Status:\*{0,2}\s*(COMPLETE|APPROVED)/i,
+    type: 'completion',
+  },
 ];
 
 // Thin wrappers: inject TASKS_BASE / STEPS / ALL_STEPS into extracted modules

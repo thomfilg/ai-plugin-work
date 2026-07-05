@@ -7,7 +7,13 @@
  * - Code review doesn't have unaddressed CRITICAL/IMPORTANT issues
  * - All expected report files exist
  *
- * Usage: node check-validate-reports.js <REPORT_FOLDER> <IMPACTED_APPS_JSON>
+ * Usage: node check-validate-reports.js <REPORT_FOLDER> <IMPACTED_APPS_JSON> [PLAYWRIGHT_SKIPPED_JSON]
+ *
+ * PLAYWRIGHT_SKIPPED_JSON (optional, GH-280): `true`/`false` for a global
+ * signal, or a per-app map like {"my-app":true}. When the check plan skipped
+ * 3_verify_playwright (no web apps configured), pass `true` so QA reports are
+ * accepted without a "## Playwright Verification" section or screenshots.
+ * Malformed values fail CLOSED (Playwright evidence remains required).
  *
  * Output: JSON object with validation results
  */
@@ -18,10 +24,15 @@ const AppAccessStatus = require(path.join(__dirname, '..', 'lib', 'app-access-st
 const { detectSeverityMarkers } = require(path.join(__dirname, '..', 'lib', 'severity-detection'));
 
 /**
- * Check if a file exists
+ * Check if a file exists AND is non-empty. A 0-byte report is a clobber-race
+ * victim (GH-611) and must be treated as missing, not present.
  */
 function fileExists(filePath) {
-  return fs.existsSync(filePath);
+  try {
+    return fs.statSync(filePath).size > 0;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -33,9 +44,44 @@ function readFile(filePath) {
 }
 
 /**
- * Validate QA report has required content
+ * Parse the PLAYWRIGHT_SKIPPED_JSON CLI argument (GH-280).
+ * Accepts a boolean (`true`/`false`) or a per-app map ({"app": true}).
+ * Malformed input fails CLOSED — Playwright evidence stays required.
+ * @returns {(appName: string) => boolean}
  */
-function validateQAReport(filePath, appName) {
+function parsePlaywrightSkipSignal(raw) {
+  if (raw === undefined || raw === null || raw === '') return () => false;
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return () => false; // fail closed
+  }
+  if (typeof parsed === 'boolean') return () => parsed;
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    return (appName) => parsed[appName] === true;
+  }
+  return () => false; // fail closed on any other shape
+}
+
+/**
+ * Detect an explicit in-report skip status: "APPROVED (SKIPPED)".
+ * Written when QA was intentionally skipped (e.g. no web apps configured),
+ * so Playwright evidence must not be demanded (GH-280).
+ */
+function reportDeclaresSkip(content) {
+  return /^Status:\s*APPROVED\s*\(SKIPPED\)/im.test(content);
+}
+
+/**
+ * Validate QA report has required content.
+ *
+ * When `playwrightSkipped` is true (the check plan skipped 3_verify_playwright
+ * — no web apps configured), or the report itself declares
+ * "Status: APPROVED (SKIPPED)", the "## Playwright Verification" section and
+ * screenshot requirements are relaxed. All other markers stay mandatory.
+ */
+function validateQAReport(filePath, appName, playwrightSkipped = false) {
   const content = readFile(filePath);
 
   if (!content) {
@@ -78,9 +124,14 @@ function validateQAReport(filePath, appName) {
     };
   }
 
-  // Check for Playwright Verification section (MANDATORY)
+  // Playwright section + screenshots are mandatory UNLESS the check plan
+  // skipped Playwright verification (no web apps) or the report explicitly
+  // declares "APPROVED (SKIPPED)" (GH-280).
+  const effectivePlaywrightSkipped = playwrightSkipped === true || reportDeclaresSkip(content);
+
+  // Check for Playwright Verification section (MANDATORY when not skipped)
   const hasPlaywrightVerification = content.includes('## Playwright Verification');
-  if (!hasPlaywrightVerification) {
+  if (!hasPlaywrightVerification && !effectivePlaywrightSkipped) {
     issues.push('Missing "## Playwright Verification" section');
   }
 
@@ -89,9 +140,9 @@ function validateQAReport(filePath, appName) {
     issues.push('Missing "**Changes Hash:**" at top of report');
   }
 
-  // Check for screenshots (required for QA)
+  // Check for screenshots (required for QA when Playwright is not skipped)
   const hasScreenshots = content.includes('![') || content.includes('./screenshots/');
-  if (!hasScreenshots) {
+  if (!hasScreenshots && !effectivePlaywrightSkipped) {
     issues.push('No screenshots found - QA reports must include visual evidence');
   }
 
@@ -124,6 +175,7 @@ function validateQAReport(filePath, appName) {
     issues,
     failed,
     hasScreenshots,
+    playwrightSkipped: effectivePlaywrightSkipped,
     infrastructureFailure: false,
     accessFailed: false,
   };
@@ -251,6 +303,8 @@ function main() {
   // Get args
   const REPORT_FOLDER = process.argv[2];
   const IMPACTED_APPS = JSON.parse(process.argv[3] || '[]');
+  // Optional 3rd arg: playwright-skip signal from the check plan (GH-280)
+  const isPlaywrightSkipped = parsePlaywrightSkipSignal(process.argv[4]);
 
   if (!REPORT_FOLDER) {
     console.error('Usage: node check-validate-reports.js <REPORT_FOLDER> <IMPACTED_APPS_JSON>');
@@ -279,7 +333,7 @@ function main() {
 
   for (const app of IMPACTED_APPS) {
     const qaPath = path.join(REPORT_FOLDER, `qa-${app}.check.md`);
-    const validation = validateQAReport(qaPath, app);
+    const validation = validateQAReport(qaPath, app, isPlaywrightSkipped(app));
     results.reports.qa[app] = validation;
 
     // Check for infrastructure failure FIRST
@@ -390,4 +444,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { validateCodeReview };
+module.exports = { validateCodeReview, validateQAReport, parsePlaywrightSkipSignal };

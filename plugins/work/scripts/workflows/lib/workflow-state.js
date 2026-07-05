@@ -112,6 +112,31 @@ class WorkflowState {
     return this.save(instanceId, state);
   }
 
+  /**
+   * Archive an instance's state file (GH-307): copy it to
+   * `<state-file>.archived-<ts>` with the reason embedded, then remove the
+   * live file so the next plan/transition starts a fresh instance. Archival
+   * (never silent deletion) preserves the audit trail of SHA-gated resets.
+   * @param {string} instanceId
+   * @param {string} reason - Why the state was invalidated (e.g. "sha-drift: ...")
+   * @returns {string|null} Path of the archived file, or null when no state exists
+   */
+  archive(instanceId, reason) {
+    const p = this._statePath(instanceId);
+    if (!fs.existsSync(p)) return null;
+    const target = `${p}.archived-${Date.now()}`;
+    try {
+      const state = JSON.parse(fs.readFileSync(p, 'utf8'));
+      state.archivedReason = reason || 'unspecified';
+      state.archivedAt = new Date().toISOString();
+      fs.writeFileSync(target, JSON.stringify(state, null, 2));
+    } catch {
+      fs.copyFileSync(p, target); // unparseable state — archive verbatim
+    }
+    fs.unlinkSync(p);
+    return target;
+  }
+
   /** Set a step's status */
   setStepStatus(instanceId, step, status) {
     let state = this.load(instanceId);

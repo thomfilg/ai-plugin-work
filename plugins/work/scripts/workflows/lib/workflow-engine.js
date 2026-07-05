@@ -182,6 +182,52 @@ function defaultPlanGenerator(workflow, instanceId, args, stateInstance) {
   return plan;
 }
 
+// ─── Completed-state SHA gate (GH-307) ──────────────────────────────────────
+
+/**
+ * Resolve a `status: completed` instance before planning.
+ *
+ * When the workflow provides `completedStaleCheck(instanceId, state)` and the
+ * prior instance is completed:
+ *   - stale (a SHA condition proves the inputs changed) → the old state is
+ *     ARCHIVED (not deleted) with the drift reason, and planning proceeds
+ *     from a fresh instance. This is SHA-gated enforcement — a reset can
+ *     only be produced by a real diff, so it is not a bypass path.
+ *   - not stale → the completed state is kept and the caller reports
+ *     "still valid, nothing to do".
+ *
+ * @returns {null | {reset: boolean, reasons: string[], archivedTo?: string|null, message?: string}}
+ */
+function resolveCompletedState(workflow, stateInstance, instanceId) {
+  if (typeof workflow.completedStaleCheck !== 'function') return null;
+  const existing = stateInstance.load(instanceId);
+  if (!existing || existing.status !== 'completed') return null;
+
+  let verdict;
+  try {
+    verdict = workflow.completedStaleCheck(instanceId, existing);
+  } catch (err) {
+    // Fail-safe: cannot prove drift → keep the completed state.
+    return {
+      reset: false,
+      reasons: [],
+      message: `completedStaleCheck failed (${err.message}) — keeping completed state`,
+    };
+  }
+
+  if (verdict && verdict.stale) {
+    const archivedTo = stateInstance.archive(instanceId, verdict.reasons.join('; '));
+    return { reset: true, reasons: verdict.reasons, archivedTo };
+  }
+
+  return {
+    reset: false,
+    reasons: verdict?.reasons || [],
+    message:
+      'Workflow already completed and all SHAs match the current working tree — nothing to re-run.',
+  };
+}
+
 // ─── Transition Command ──────────────────────────────────────────────────────
 
 function transitionStep(workflow, stateInstance, instanceId, targetStep) {
@@ -450,6 +496,11 @@ function main() {
 
       const instanceId = params.instanceId || params.slug || rawArgs;
 
+      // GH-307: SHA-gated release of a completed instance BEFORE planning —
+      // re-invoking the workflow after completion starts a fresh cycle when
+      // the SHAs drifted, and reports "still valid" when unchanged.
+      const completedState = resolveCompletedState(workflow, stateInstance, instanceId);
+
       // Generate plan
       let plan;
       if (workflow.generatePlan) {
@@ -487,6 +538,7 @@ function main() {
         params,
         plan,
         summary,
+        ...(completedState ? { completedState } : {}),
         timestamp: new Date().toISOString(),
         currentStep: stateInstance.getCurrentStep(instanceId),
         allowedTransitions:
@@ -563,6 +615,7 @@ module.exports = {
   discoverWorkflows,
   loadWorkflow,
   defaultPlanGenerator,
+  resolveCompletedState,
   transitionStep,
   getAvailableTransitions,
   defaultFormatPlan,

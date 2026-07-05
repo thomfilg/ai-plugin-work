@@ -6,9 +6,9 @@
 
 'use strict';
 
-const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
+const { writeReportAtomic } = require('../report-utils');
 
 module.exports = function registerQualityRecheck(register) {
   register('7_quality_recheck', (state, ctx) => {
@@ -55,7 +55,8 @@ module.exports = function registerQualityRecheck(register) {
     ].join('\n');
 
     const reportPath = path.join(reportFolder, 'recheck.check.md');
-    fs.writeFileSync(reportPath, report);
+    // Atomic (tmp + rename) so concurrent readers never see a 0-byte report (GH-611)
+    writeReportAtomic(reportPath, report);
 
     if (result.exitCode !== 0) {
       return {

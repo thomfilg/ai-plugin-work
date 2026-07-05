@@ -210,11 +210,84 @@ function buildAccessPayload(app, healthResult) {
   };
 }
 
+/**
+ * Ensure an app is running, self-starting it from the manifest when needed
+ * (GH-213). This makes the QA path work standalone — /check's 2_start_env
+ * becomes best-effort pre-warming instead of a hard prerequisite.
+ *
+ * Flow:
+ *   1. No manifest entry for the app     → NOT_CONFIGURED (clean, no start attempt)
+ *   2. Health check READY                → return payload (selfStarted: false)
+ *   3. Otherwise start via manifest startCommand (check-start-env machinery),
+ *      then re-run the health check     → READY (selfStarted: true) or ACCESS_FAILED
+ *
+ * @param {string} appName
+ * @param {object} [options]
+ * @param {object} [options.healthOptions] - passed to checkHealth (host/retries/timeout)
+ * @param {Function} [options.discover]    - DI for tests (defaults to discoverApps)
+ * @param {Function} [options.health]      - DI for tests (defaults to checkHealth)
+ * @param {Function} [options.startApp]    - DI for tests (defaults to check-start-env's startApp)
+ * @returns {Promise<object>} access payload + { selfStarted, startError? }
+ */
+async function ensureAppRunning(appName, options = {}) {
+  const discover = options.discover || discoverApps;
+  const health = options.health || checkHealth;
+
+  const app = discover().find((a) => a.name === appName);
+  if (!app) {
+    return {
+      appName,
+      status: AppAccessStatus.NOT_CONFIGURED,
+      selfStarted: false,
+      reason: `No manifest entry for "${appName}" — add it to WEB_APPS in .env to enable QA`,
+    };
+  }
+
+  const healthOptions = { host: 'localhost', ...options.healthOptions };
+
+  // 1st pass — is it already running? (RUNNING_APPS is a hint, never a requirement)
+  const initial = await health(app, healthOptions);
+  if (initial.status === AppAccessStatus.READY) {
+    return { ...buildAccessPayload(app, initial), selfStarted: false };
+  }
+
+  // Self-start via the same manifest-driven machinery /check's 2_start_env uses.
+  // Lazy require avoids a cycle (check-start-env requires this module).
+  const startApp = options.startApp || require('../hooks/check-start-env').startApp;
+
+  let startResult;
+  try {
+    startResult = await startApp(appName, app);
+  } catch (err) {
+    startResult = { started: false, error: err.message };
+  }
+
+  if (!startResult || (!startResult.started && !startResult.alreadyRunning)) {
+    return {
+      ...buildAccessPayload(app, initial),
+      selfStarted: false,
+      startError: startResult?.error || 'Failed to start app from manifest startCommand',
+    };
+  }
+
+  // 2nd pass — health check against the port the server actually took
+  const effectiveApp = { ...app, defaultPort: startResult.port || app.defaultPort };
+  const after = await health(effectiveApp, healthOptions);
+  return {
+    ...buildAccessPayload(effectiveApp, after),
+    selfStarted: true,
+    ...(after.status !== AppAccessStatus.READY
+      ? { startError: 'App started but health check still failing' }
+      : {}),
+  };
+}
+
 module.exports = {
   discoverApps,
   validateManifestEntry,
   checkHealth,
   classifyResult,
   buildAccessPayload,
+  ensureAppRunning,
   AppAccessStatus,
 };

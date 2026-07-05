@@ -3593,6 +3593,115 @@ describe('enforce-step-workflow', () => {
     });
   });
 
+  // ═══════════════════════════════════════════════════════════════════════════
+  // Check-runner invocation cluster (ECHO-4578 issue 1 / ECHO-4450 issue 2)
+  // code-next.js / completion-next.js must live in TRUSTED_SCRIPT_DIRS and get
+  // a FRESH token minted on EVERY invocation (not once per step).
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  describe('check-runner trusted dirs + per-invocation token mint (ECHO-4578/ECHO-4450)', () => {
+    const CODE_NEXT = path.resolve(__dirname, '..', '..', 'work-code-checker', 'code-next.js');
+    const COMPLETION_NEXT = path.resolve(
+      __dirname,
+      '..',
+      '..',
+      'work-completion-checker',
+      'completion-next.js'
+    );
+    const TOKEN_DIR = '/tmp/.claude-write-tokens';
+    const TOKEN_BASENAMES = [
+      'code-next.js',
+      'code-phase-state.js',
+      'completion-next.js',
+      'completion-phase-state.js',
+    ];
+    const tokenFile = (basename) => path.join(TOKEN_DIR, `${basename}.${TEST_TICKET}`);
+
+    function cleanTokens() {
+      for (const b of TOKEN_BASENAMES) {
+        try {
+          fs.unlinkSync(tokenFile(b));
+        } catch {}
+      }
+    }
+    beforeEach(cleanTokens);
+    afterEach(cleanTokens);
+
+    it('code-next.js resolves under a TRUSTED_SCRIPT_DIR and is allowed for code-checker during check step', async () => {
+      assert.ok(fs.existsSync(CODE_NEXT), 'code-next.js must exist');
+      writeWorkState(makeStepStatus('check', WORK_STEPS));
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node "${CODE_NEXT}" ${TEST_TICKET}` } },
+        'PreToolUse',
+        { CLAUDE_CURRENT_AGENT: 'code-checker' }
+      );
+      assert.equal(code, 0, `code-next.js should be allowed. stderr: ${stderr}`);
+      assert.ok(
+        !stderr.includes('not in a trusted directory'),
+        `must not hit the trusted-dir block: ${stderr}`
+      );
+      assert.ok(fs.existsSync(tokenFile('code-next.js')), 'runner token should be minted');
+      assert.ok(
+        fs.existsSync(tokenFile('code-phase-state.js')),
+        'companion phase-state token should be minted'
+      );
+    });
+
+    it('completion-next.js resolves under a TRUSTED_SCRIPT_DIR and is allowed for completion-checker during check step', async () => {
+      assert.ok(fs.existsSync(COMPLETION_NEXT), 'completion-next.js must exist');
+      writeWorkState(makeStepStatus('check', WORK_STEPS));
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `node "${COMPLETION_NEXT}" ${TEST_TICKET}` } },
+        'PreToolUse',
+        { CLAUDE_CURRENT_AGENT: 'completion-checker' }
+      );
+      assert.equal(code, 0, `completion-next.js should be allowed. stderr: ${stderr}`);
+      assert.ok(
+        !stderr.includes('not in a trusted directory'),
+        `must not hit the trusted-dir block: ${stderr}`
+      );
+      assert.ok(fs.existsSync(tokenFile('completion-next.js')), 'runner token should be minted');
+      assert.ok(
+        fs.existsSync(tokenFile('completion-phase-state.js')),
+        'companion phase-state token should be minted'
+      );
+    });
+
+    it('re-mints fresh tokens on EVERY invocation after the previous one-shot was consumed (ECHO-4450)', async () => {
+      writeWorkState(makeStepStatus('check', WORK_STEPS));
+      const invoke = () =>
+        runHook(
+          { tool_name: 'Bash', tool_input: { command: `node "${CODE_NEXT}" ${TEST_TICKET}` } },
+          'PreToolUse',
+          { CLAUDE_CURRENT_AGENT: 'code-checker' }
+        );
+
+      const first = await invoke();
+      assert.equal(first.code, 0, `first invocation blocked: ${first.stderr}`);
+      const firstToken = JSON.parse(fs.readFileSync(tokenFile('code-phase-state.js'), 'utf8'));
+
+      // Simulate the phase-state CLI consuming the one-shot tokens.
+      fs.unlinkSync(tokenFile('code-phase-state.js'));
+      fs.unlinkSync(tokenFile('code-next.js'));
+
+      const second = await invoke();
+      assert.equal(second.code, 0, `second invocation blocked: ${second.stderr}`);
+      assert.ok(
+        fs.existsSync(tokenFile('code-phase-state.js')),
+        'companion token must be re-minted on the second invocation'
+      );
+      assert.ok(
+        fs.existsSync(tokenFile('code-next.js')),
+        'runner token must be re-minted on the second invocation'
+      );
+      const secondToken = JSON.parse(fs.readFileSync(tokenFile('code-phase-state.js'), 'utf8'));
+      assert.ok(
+        secondToken.timestamp >= firstToken.timestamp,
+        'second mint must be a fresh token, not a stale leftover'
+      );
+    });
+  });
+
   describe('commit verifier fallback (GH-144)', () => {
     // These tests validate that the commit verifier accepts commits even when
     // the commit message does NOT contain the ticket ID.
@@ -4873,13 +4982,7 @@ describe('enforce-step-workflow', () => {
       // Pick a known trusted script that lives under one of the TRUSTED_SCRIPT_DIRS
       // (workflows/work/work-state.js is referenced by the agent-gated list and
       // resolves under workflows/work/).
-      const trustedScript = path.resolve(
-        __dirname,
-        '..',
-        '..',
-        'work',
-        'work-state.js'
-      );
+      const trustedScript = path.resolve(__dirname, '..', '..', 'work', 'work-state.js');
       assert.ok(
         fs.existsSync(trustedScript),
         'trusted candidate script must exist for this test fixture'
@@ -5183,9 +5286,7 @@ describe('enforce-step-workflow', () => {
     // The fake's basename is preserved so the hook's basename-based exempt-
     // script matcher fires, then the trust-prefix check rejects it.
     async function withTempFakeScript(name, fn) {
-      const tmpDir = fs.mkdtempSync(
-        path.join(os.tmpdir(), `gh452-task3-fake-${process.pid}-`)
-      );
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `gh452-task3-fake-${process.pid}-`));
       const fakePath = path.join(tmpDir, name);
       fs.writeFileSync(
         fakePath,

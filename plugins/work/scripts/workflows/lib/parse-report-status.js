@@ -30,11 +30,16 @@ BASE_ALIASES['PENDING'] = 'NEEDS_WORK';
 BASE_ALIASES['NOT_APPLICABLE'] = 'NOT_APPLICABLE';
 
 // Per-type alias maps extend BASE_ALIASES with type-specific keywords.
-// tests and codeReview must use explicit APPROVED/PASS/PASSED.
+// tests must use explicit APPROVED/PASS/PASSED.
 const TYPE_ALIASES = Object.create(null);
 TYPE_ALIASES['completion'] = Object.assign(Object.create(null), BASE_ALIASES, {
   COMPLETE: 'APPROVED',
   DELIVERED: 'APPROVED',
+});
+// codeReview accepts WELL_IMPLEMENTED — the code-checker agent template's
+// real-world verdict wording ("## Overall Assessment: ✅ Well-Implemented").
+TYPE_ALIASES['codeReview'] = Object.assign(Object.create(null), BASE_ALIASES, {
+  WELL_IMPLEMENTED: 'APPROVED',
 });
 // QA accepts SUCCESS as APPROVED (used by QA report generators),
 // and recognizes infrastructure/access failure statuses from write-qa-report.js.
@@ -76,6 +81,7 @@ TYPE_CHECKS['codeReview'] = Object.create(null);
 TYPE_CHECKS['codeReview'].fail = ['(?<!No )CRITICAL(?!\\s*ISSUES?\\b)', 'NEEDS_WORK'];
 TYPE_CHECKS['codeReview'].pass = [
   '\\bAPPROVED\\b',
+  '\\bWell[- ]Implemented\\b',
   '\\bNo critical issues\\b',
   '\\bNo issues found\\b',
 ];
@@ -131,9 +137,35 @@ function checkInfrastructureFailure(content, type) {
   return null;
 }
 
+// Negation words that neutralize a fail marker when they appear earlier in the
+// same clause (echo-5349: "**NOT incomplete** for THIS ticket" must not force
+// NEEDS_WORK). Clause = text since the last sentence/clause boundary.
+const NEGATION_WORD_RE = /\b(?:not|no|none|never|isn'?t|aren'?t|wasn'?t|weren'?t)\b/i;
+const CLAUSE_BOUNDARY_CHARS = ['\n', '.', ';', ':', ',', '!', '?'];
+
+/**
+ * True when the match at `matchIndex` is preceded by a negation word within
+ * the same clause (no sentence/clause boundary between the negation and the marker).
+ * @param {string} content
+ * @param {number} matchIndex
+ * @returns {boolean}
+ */
+function isNegatedAt(content, matchIndex) {
+  const before = content.slice(0, matchIndex);
+  let boundary = -1;
+  for (const ch of CLAUSE_BOUNDARY_CHARS) {
+    const idx = before.lastIndexOf(ch);
+    if (idx > boundary) boundary = idx;
+  }
+  const clause = before.slice(boundary + 1);
+  return NEGATION_WORD_RE.test(clause);
+}
+
 /**
  * Check for type-specific fail markers.
  * Fail markers are checked first to enforce fail-first precedence (R10).
+ * Negation-aware: a marker occurrence preceded by not/no/none/isn't/... within
+ * the same clause is ignored; any non-negated occurrence still fails.
  * @param {string} content
  * @param {string} type
  * @returns {string|null}
@@ -142,8 +174,14 @@ function checkFailMarkers(content, type) {
   const checks = TYPE_CHECKS[type];
   if (!checks) return null;
   for (const pattern of checks.fail) {
-    if (new RegExp(pattern, 'i').test(content)) {
-      return 'NEEDS_WORK';
+    const re = new RegExp(pattern, 'gi');
+    let m;
+    while ((m = re.exec(content)) !== null) {
+      if (!isNegatedAt(content, m.index)) {
+        return 'NEEDS_WORK';
+      }
+      // Zero-width safety for exotic patterns
+      if (m.index === re.lastIndex) re.lastIndex++;
     }
   }
   return null;
@@ -208,9 +246,11 @@ function checkPassMarkers(content, type) {
  *
  * Patterns (checked in order):
  *   1. Standalone bold status on own line: **APPROVED**, **NEEDS_WORK**, etc.
- *   2. "Overall Assessment: <status>" pattern
- *   3. "Result: <status>" pattern
- *   4. Standalone status at line start followed by dash: COMPLETE — ...
+ *   2. "Overall Assessment: <status>" pattern (incl. "✅ Well-Implemented")
+ *   2b. Icon-only "Overall Assessment: ✅ / ❌" (code-checker template verdict)
+ *   3. "Final Status:" verdict (incl. bracketed "[COMPLETE]" on the next line)
+ *   4. "Result: <status>" pattern
+ *   5. Standalone status at line start followed by dash: COMPLETE — ...
  *
  * Only returns a value when the raw match resolves via resolveAlias for the
  * given type. Returns null otherwise (lets other checks handle it).
@@ -229,17 +269,35 @@ function checkFreeformStatus(content, type) {
     if (resolved) return resolved;
   }
 
-  // 2. "Overall Assessment: <status>"
+  // 2. "Overall Assessment: <status>" — includes the code-checker agent's
+  //    real-world verdict wording "✅ Well-Implemented" (echo-5219/echo-5349)
   const assessmentMatch = content.match(
-    /Overall\s+Assessment:\s*(?:✅|❌)?\s*(Approved|Needs[_ ]Work|Pass|Fail)/im
+    /Overall\s+Assessment:\s*(?:✅|❌)?\s*(Approved|Needs[_ ]Work|Pass|Fail|Well[- ]Implemented)/im
   );
   if (assessmentMatch) {
-    const raw = assessmentMatch[1].replace(/[_ ]/g, '_').toUpperCase();
+    const raw = assessmentMatch[1].replace(/[-_ ]/g, '_').toUpperCase();
     const resolved = resolveAlias(raw, type);
     if (resolved) return resolved;
   }
 
-  // 3. "Result: <status>"
+  // 2b. Icon-only "Overall Assessment: ✅ / ❌" — the code-checker report
+  //     template's verdict line when no word follows the icon.
+  const iconAssessmentMatch = content.match(/Overall\s+Assessment:\s*(✅|❌)\s*$/im);
+  if (iconAssessmentMatch) {
+    return iconAssessmentMatch[1] === '✅' ? 'APPROVED' : 'NEEDS_WORK';
+  }
+
+  // 3. "Final Status:" verdict — completion-checker template writes
+  //    "### Final Status:" followed by "[COMPLETE]" on the next line.
+  const finalStatusMatch = content.match(
+    /Final\s+Status:?\s*\n{0,2}\s*\*{0,2}\[?(COMPLETE|INCOMPLETE|APPROVED|NEEDS_WORK|DELIVERED)\]?\*{0,2}/i
+  );
+  if (finalStatusMatch) {
+    const resolved = resolveAlias(finalStatusMatch[1].toUpperCase(), type);
+    if (resolved) return resolved;
+  }
+
+  // 4. "Result: <status>"
   const resultMatch = content.match(
     /Result:\s*(APPROVED|NEEDS_WORK|COMPLETE|INCOMPLETE|PASS|FAIL)/im
   );
@@ -248,7 +306,7 @@ function checkFreeformStatus(content, type) {
     if (resolved) return resolved;
   }
 
-  // 4. Standalone status at line start followed by dash
+  // 5. Standalone status at line start followed by dash
   const dashMatch = content.match(/^(COMPLETE|APPROVED|NEEDS_WORK|INCOMPLETE)\s*[—–-]/m);
   if (dashMatch) {
     const resolved = resolveAlias(dashMatch[1].toUpperCase(), type);

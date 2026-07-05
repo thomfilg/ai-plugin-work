@@ -30,3 +30,10 @@ Execute the returned instruction. The PostToolUse auto-advance hook will call ch
 
 Steps 1-3 and 7-9 are deterministic and execute inline (no AI delegation needed).
 Only steps 4-6 require AI agent delegation.
+
+## Agent dispatch rules (MANDATORY)
+
+- Launch checker agents in the **FOREGROUND** — never with `run_in_background: true`. Reports written by background agents have silently disappeared (GH-343).
+- Each checker agent MUST create its `*.check.md` report with the **Write tool** (bash heredocs have silently failed) and verify the file exists and is **non-empty** before finishing. A chat-only verdict does NOT count.
+- If the orchestrator returns `action: "blocked"` naming a missing/empty report after repeated dispatches, do NOT re-dispatch: recover the verdict from the agent's transcript, write the report yourself with the Write tool (including the changes hash), then re-run check-next.js.
+- Never run two check-next.js invocations concurrently — the orchestrator holds a per-ticket lock and reports `action: "locked"` if you try; just wait and re-run.

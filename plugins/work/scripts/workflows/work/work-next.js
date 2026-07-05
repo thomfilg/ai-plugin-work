@@ -125,10 +125,20 @@ const { createDebugLog } = require(path.join(__dirname, 'lib', 'debug-log'));
 // ─── Constants ──────────────────────────────────────────────────────────────
 const TDD_GATED_STEPS = [STEPS.implement];
 const { buildVerdictRegex } = require(path.join(__dirname, '..', 'lib', 'parse-completion-status'));
+// `type` enables the parse-report-status fallback in engine/inspect.js for
+// real-world prose verdicts (e.g. "Overall Assessment: ✅ Well-Implemented").
 const REQUIRED_REPORTS = [
-  { file: 'tests.check.md', passPattern: buildVerdictRegex(['APPROVED']) },
-  { file: 'code-review.check.md', passPattern: buildVerdictRegex(['APPROVED']) },
-  { file: 'completion.check.md', passPattern: buildVerdictRegex(['COMPLETE', 'APPROVED']) },
+  { file: 'tests.check.md', passPattern: buildVerdictRegex(['APPROVED']), type: 'tests' },
+  {
+    file: 'code-review.check.md',
+    passPattern: buildVerdictRegex(['APPROVED']),
+    type: 'codeReview',
+  },
+  {
+    file: 'completion.check.md',
+    passPattern: buildVerdictRegex(['COMPLETE', 'APPROVED']),
+    type: 'completion',
+  },
 ];
 
 // ─── DI wrappers (same pattern as work.workflow.js) ─────────────────────────
@@ -633,8 +643,26 @@ function getNextInstruction(ticketRaw, rework) {
     return instr;
   }
 
-  // Enrichment context for step overrides
-  const enrichCtx = { tasksDir, ticket, workDir, path, fs, tp, TASKS_BASE };
+  // Enrichment context for step overrides. `workDir` is the PLUGIN's own
+  // workflows/work directory (for lib requires) — NOT the ticket worktree.
+  // `worktreeDir` is the canonical ticket worktree; enrichments that shell
+  // out to git (e.g. the check step's Gate E scope-diff) MUST use it, or
+  // they end up diffing the plugin checkout (ECHO-5818/5821: 240 phantom
+  // "unaccounted" plugin files injected into the check2 prompt).
+  const enrichWorktreeDir =
+    WORKTREES_BASE && MAIN_WORKTREE_FOLDER
+      ? path.join(WORKTREES_BASE, `${MAIN_WORKTREE_FOLDER}-${safeBase}`)
+      : undefined;
+  const enrichCtx = {
+    tasksDir,
+    ticket,
+    workDir,
+    worktreeDir: enrichWorktreeDir,
+    path,
+    fs,
+    tp,
+    TASKS_BASE,
+  };
 
   for (const entry of plan) {
     if (entry.action === 'SKIP') continue;

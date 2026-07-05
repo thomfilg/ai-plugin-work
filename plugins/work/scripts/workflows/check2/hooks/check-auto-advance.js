@@ -19,6 +19,7 @@ const BANNERS = {
   display: ['═══ CHECK2: NEXT STEP ═══', '═════════════════════════'],
   complete: ['═══ CHECK2: COMPLETE ═══', '════════════════════════'],
   blocked: ['═══ CHECK2: BLOCKED ═══', '═══════════════════════'],
+  needs_work: ['═══ CHECK2: NEEDS WORK ═══', '══════════════════════════'],
 };
 
 if (require.main === module) {

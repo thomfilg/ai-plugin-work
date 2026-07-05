@@ -59,6 +59,20 @@ function extractBashTargetPath(cmd, basename) {
 const NODE_FS_WRITES = /\b(?:writeFileSync|appendFileSync|writeFile|createWriteStream)\b/;
 
 /**
+ * Whole-basename reference test for Bash command strings.
+ * A raw `cmd.includes(basename)` also fires on unrelated files that merely
+ * CONTAIN the artifact basename as a substring — e.g. `subtasks.md`,
+ * `tasks.md.bak`, `tasks.mdx` for artifact `tasks.md` (ECHO-5538 secondary
+ * bug). Require the basename to be delimited: preceded by start-of-string,
+ * a path separator, or a shell delimiter, and not followed by a word
+ * character, dot, or dash.
+ */
+function bashReferencesBasename(cmd, basename) {
+  const esc = basename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?:^|[/\\s'"\`=(<>|;&])${esc}(?![\\w.-])`).test(cmd);
+}
+
+/**
  * @typedef {object} ArtifactRule
  * @property {string} [basename] — exact file basename to match
  * @property {RegExp} [pattern] — regex to match against file basename
@@ -123,9 +137,10 @@ function createArtifactProtector(opts) {
         BASH_WRITE_OPS.test(cmd) || NODE_FS_WRITES.test(cmd) || /\bsed\s+-i\b/.test(cmd);
       if (!hasWrite) return { blocked: false };
 
-      // Check if any artifact basename appears in the command
+      // Check if any artifact basename appears in the command (whole-basename
+      // match — substring hits like `subtasks.md` must not trigger the rule)
       for (const a of artifacts) {
-        if (a.basename && cmd.includes(a.basename)) {
+        if (a.basename && bashReferencesBasename(cmd, a.basename)) {
           bn = a.basename;
           filePath = cmd; // Use cmd as context for ticket ID check
           rule = a;
@@ -342,4 +357,4 @@ function createArtifactProtector(opts) {
   return { check, matchesRule };
 }
 
-module.exports = { createArtifactProtector, matchesRule };
+module.exports = { createArtifactProtector, matchesRule, bashReferencesBasename };

@@ -9,7 +9,11 @@
  * Refactored to use createArtifactProtector factory (GH-258 code review).
  *
  * Allowed steps: tasks, tasks_gate, complete
- * All other steps: blocked (exit 2)
+ * All other steps: blocked (exit 2) — UNLESS a one-shot write token minted by
+ * completion-next.js is present (see lib/tasks-md-write-token.js), which
+ * permits exactly one tasks.md write for this ticket. This breaks the
+ * coverage_check ↔ protect-tasks-md deadlock during the `check` step
+ * (ECHO-5139/5145/5218/5320/5350/5818/5821).
  * No workflow active: allowed (exit 0, fail-open)
  */
 
@@ -17,8 +21,23 @@ const fs = require('fs');
 const path = require('path');
 const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
 const { createArtifactProtector } = require('../../lib/protect-artifact-files');
+const { consumeTasksMdWriteToken } = require('../../lib/tasks-md-write-token');
 
 const ALLOWED_STEPS = new Set(['tasks', 'tasks_gate', 'complete']);
+
+/**
+ * Basename-boundary matcher for `tasks.md` references inside a Bash command.
+ * A raw `cmd.includes('tasks.md')` substring test also fires on UNRELATED
+ * paths like `subtasks.md`, `tasks.md.bak`, or `tasks.mdx` (ECHO-5538
+ * secondary bug). Require the match to be a whole basename: preceded by
+ * start-of-string / path separator / shell delimiter, and not followed by a
+ * word character, dot, or dash.
+ */
+const TASKS_MD_REF_RE = /(?:^|[/\s'"`=(<>|;&])tasks\.md(?![\w.-])/;
+
+function bashReferencesTasksMd(cmd) {
+  return TASKS_MD_REF_RE.test(cmd);
+}
 
 /**
  * Check whether a file named tasks.md is the root-level workflow artifact
@@ -122,7 +141,9 @@ function getStepInProgress(ticketId) {
 }
 
 const protector = createArtifactProtector({
-  artifacts: [{ basename: 'tasks.md', step: 'tasks', allowedSteps: ['tasks_gate'] }],
+  // Keep in sync with ALLOWED_STEPS above (ECHO-5145: the header comment
+  // promised `complete` but the registration only carried tasks/tasks_gate).
+  artifacts: [{ basename: 'tasks.md', step: 'tasks', allowedSteps: ['tasks_gate', 'complete'] }],
   getStepInProgress,
   getTicketId,
   // Bash write-vector detection is handled by createArtifactProtector (checks basename in command strings)
@@ -146,7 +167,7 @@ async function main() {
   const ticketId = getTicketId(hookData);
   const targetBasename = toolInput.file_path ? path.basename(toolInput.file_path) : '';
   const hasTasksMdReference =
-    targetBasename === 'tasks.md' || (toolName === 'Bash' && cmd.includes('tasks.md'));
+    targetBasename === 'tasks.md' || (toolName === 'Bash' && bashReferencesTasksMd(cmd));
   if (ticketId && hasTasksMdReference) {
     try {
       const getConfig = require(path.join(__dirname, '..', '..', 'lib', 'get-config'));
@@ -164,7 +185,7 @@ async function main() {
       // root-level tasks.md (e.g. `cat subfolder/tasks.md >> root/tasks.md`).
       // Only exit 0 if subfolder references exist AND no root-level reference exists.
       // Bare tokens (no '/') are resolved against cwd to handle relative paths.
-      if (toolName === 'Bash' && cmd.includes('tasks.md')) {
+      if (toolName === 'Bash' && bashReferencesTasksMd(cmd)) {
         let hasSubfolderRef = false;
         let hasRootLevelRef = false;
         const cwd = process.cwd();
@@ -190,7 +211,7 @@ async function main() {
   // Additional Bash vector: resolve relative paths against cwd
   if (
     toolName === 'Bash' &&
-    cmd.includes('tasks.md') &&
+    bashReferencesTasksMd(cmd) &&
     ticketId &&
     !cmd.includes('/' + ticketId + '/')
   ) {
@@ -219,6 +240,11 @@ async function main() {
         // We're inside the ticket directory — relative tasks.md is ticket-scoped
         const step = getStepInProgress(ticketId);
         if (!ALLOWED_STEPS.has(step)) {
+          // One-shot completion-next.js write token — legitimate repair path
+          // for the coverage_check ↔ protect-tasks-md deadlock.
+          if (consumeTasksMdWriteToken(ticketId)) {
+            process.exit(0);
+          }
           process.stderr.write(
             'BLOCKED: Bash write to tasks.md via relative path during ' +
               (step || 'unknown') +
@@ -234,7 +260,25 @@ async function main() {
 
   const result = protector.check(toolName, toolInput, hookData);
   if (result.blocked) {
-    process.stderr.write(result.message);
+    // Step-gated tasks.md block: honor a one-shot write token minted by
+    // completion-next.js (coverage_check). The token is consumed (deleted)
+    // whether or not it is valid, so it authorizes at most one write.
+    if (
+      result.rule === 'step' &&
+      result.file === 'tasks.md' &&
+      ticketId &&
+      consumeTasksMdWriteToken(ticketId)
+    ) {
+      process.exit(0);
+    }
+    let message = result.message;
+    if (result.rule === 'step' && result.file === 'tasks.md') {
+      message +=
+        'If you are repairing the Requirement Coverage table for the completion check, ' +
+        're-run completion-next.js — when coverage_check blocks it mints a one-shot ' +
+        'tasks.md write token that this hook honors.\n';
+    }
+    process.stderr.write(message);
     process.exit(2);
   }
   process.exit(0);

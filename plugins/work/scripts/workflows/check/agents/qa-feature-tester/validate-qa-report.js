@@ -38,6 +38,14 @@ async function main() {
   } else {
     const content = fs.readFileSync(reportPath, 'utf8');
 
+    // MCP-disconnect BLOCKED reports (echo-5528-issue-003): no browser tool ever
+    // ran, so Playwright evidence/screenshots cannot exist. Require only the
+    // actionable remediation line and pass through.
+    const mcpBlocked = /BLOCKED:\s*.*MCP not connected/i.test(content) && content.includes('/mcp');
+    if (mcpBlocked) {
+      process.exit(0);
+    }
+
     // Check: Playwright Verification section
     if (!content.includes('## Playwright Verification')) {
       issues.push('Missing "## Playwright Verification" section');

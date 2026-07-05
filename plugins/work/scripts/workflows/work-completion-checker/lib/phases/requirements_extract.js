@@ -22,7 +22,7 @@ function validate(ctx) {
     return {
       ok: false,
       errors: [
-        'No requirements found. brief.md has no `## Requirements` / `## Must-have` bullets AND tasks.md has no `## Requirement Coverage` table. Cannot verify completion.',
+        'No requirements found. brief.md has no `## Requirements` / `## Must-have` bullets, no MoSCoW `### Must Have (P0)` sections, AND tasks.md has no `## Requirement Coverage` table. Cannot verify completion.',
       ],
     };
   }
@@ -49,11 +49,11 @@ function instructions(ctx) {
     '# completion-next — Phase 2 of 11: REQUIREMENTS EXTRACT',
     `Ticket: ${ctx.ticket}`,
     '',
-    'I read `## Requirements` (or `## Must-have`) bullets from brief.md and the `## Requirement Coverage` table from tasks.md, then snapshot them into `completion-context.json`. Both sources feed downstream coverage checks.',
+    'I read requirements from brief.md — `## Requirements` (or `## Must-have`) `- P0: …` bullets, OR the MoSCoW headings `### Must Have (P0)` / `### Should Have (P1)` / `### Could Have (P2)` with numbered or bulleted items — and the `## Requirement Coverage` table from tasks.md, then snapshot them into `completion-context.json`. Both sources feed downstream coverage checks.',
     '',
     'If both are missing, add at least one of:',
-    '- a `## Requirements` section in brief.md with `- P0: …` bullets',
-    '- a `## Requirement Coverage` table in tasks.md with columns: ID | Requirement | Status | Evidence',
+    '- a `## Requirements` section in brief.md with `- P0: …` bullets (or MoSCoW `### Must Have (P0)` subsections)',
+    '- a `## Requirement Coverage` table in tasks.md with columns: ID | Description | Status | Evidence',
     '',
   ].join('\n');
 }

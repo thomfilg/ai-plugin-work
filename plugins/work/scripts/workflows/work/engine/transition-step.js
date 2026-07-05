@@ -28,8 +28,19 @@ let _postCheckSteps = null;
 function getPostCheckSteps(allSteps, STEPS) {
   if (!_postCheckSteps) {
     const checkIdx = allSteps.indexOf(STEPS.check);
-    // Steps after check, excluding 'complete' (terminal step)
-    _postCheckSteps = new Set(allSteps.slice(checkIdx + 1).filter((s) => s !== STEPS.complete));
+    // Steps after check, excluding:
+    //   - 'complete' (terminal step)
+    //   - post-merge steps 'cleanup' and 'reports' (echo-4465 issue 5): once
+    //     the PR is merged, HEAD legitimately moves (merge commit, main
+    //     pull) — firing the drift gate from cleanup/reports rewound a
+    //     COMPLETED check back to in_progress and looped /check2 ("Already
+    //     complete") forever. Drift detection is only meaningful while the
+    //     verified code can still change before merge (pr/ready/follow_up/ci).
+    _postCheckSteps = new Set(
+      allSteps
+        .slice(checkIdx + 1)
+        .filter((s) => s !== STEPS.complete && s !== STEPS.cleanup && s !== STEPS.reports)
+    );
   }
   return _postCheckSteps;
 }

@@ -133,13 +133,16 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
       qaReportPattern: /^qa-.*\.check\.md$/,
     },
     [STEPS.reports]: {
+      // \*{0,2} around the label: the canonical machine-readable status line
+      // is `**Status:** APPROVED` (bold), but plain `Status:` from older
+      // report writers must keep matching too.
       requiredApprovals: [
-        { file: 'tests.check.md', pattern: /Status:\s*APPROVED/i },
-        { file: 'code-review.check.md', pattern: /Status:\s*APPROVED/i },
-        { file: 'completion.check.md', pattern: /Status:\s*(COMPLETE|APPROVED)/i },
+        { file: 'tests.check.md', pattern: /\*{0,2}Status:\*{0,2}\s*APPROVED/i },
+        { file: 'code-review.check.md', pattern: /\*{0,2}Status:\*{0,2}\s*APPROVED/i },
+        { file: 'completion.check.md', pattern: /\*{0,2}Status:\*{0,2}\s*(COMPLETE|APPROVED)/i },
       ],
       qaReportPattern: /^qa-.*\.check\.md$/,
-      qaApprovalPattern: /Status:\s*APPROVED/i,
+      qaApprovalPattern: /\*{0,2}Status:\*{0,2}\s*APPROVED/i,
     },
   };
 

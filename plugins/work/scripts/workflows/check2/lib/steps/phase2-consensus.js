@@ -82,7 +82,14 @@ function buildFreshReviewDelegate(state, crPath, changesHash) {
       type: 'task',
       agentType: 'work-workflow:code-checker',
       description: `Fresh code review (round ${state.consensusIteration + 1})`,
-      prompt: `Review code changes for ${state.ticketId}. Write report to ${crPath}. Changes hash: ${changesHash}. This is a fresh review — evaluate current code state.`,
+      prompt: [
+        `Review code changes for ${state.ticketId}. Write report to ${crPath}. Changes hash: ${changesHash}.`,
+        'This is a fresh review AFTER a fix — the code has changed since the previous report.',
+        'Freshness contract (echo-5352): re-verify EVERY cited file:line against the CURRENT',
+        'working tree with a fresh Read/grep before including it — never repeat findings from a',
+        'previous run or from memory; the cited code may no longer exist.',
+        `End the report with the footer line: \`Verified at ${changesHash}\`.`,
+      ].join(' '),
       note: 'Pass the prompt directly to the agent.',
     },
   };
