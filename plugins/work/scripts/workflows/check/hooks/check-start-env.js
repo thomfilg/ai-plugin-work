@@ -39,61 +39,13 @@ try {
 }
 
 // Timeouts (env-overridable for tests/ops)
-const DB_START_TIMEOUT_MS = parseInt(process.env.CHECK_ENV_DB_TIMEOUT_MS, 10) || 30000;
 const APP_START_TIMEOUT_MS = parseInt(process.env.CHECK_ENV_APP_TIMEOUT_MS, 10) || 60000;
 const READY_WAIT_MS = parseInt(process.env.CHECK_ENV_READY_WAIT_MS, 10) || 5000;
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-/**
- * Poll `predicate` every `intervalMs` until truthy or `timeoutMs` elapses.
- * @returns {Promise<boolean>} last predicate result
- */
-async function waitFor(predicate, timeoutMs, intervalMs = 1000) {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    if (await predicate()) return true;
-    if (Date.now() >= deadline) return false;
-    await sleep(Math.min(intervalMs, Math.max(1, deadline - Date.now())));
-  }
-}
-
-/**
- * Spawn a long-running server command DETACHED with its output redirected to
- * a log file instead of parent pipes.
- *
- * Zombie-leak fix (check-start-env-zombies-001): stdio 'pipe' streams keep
- * the parent hook's event loop alive for as long as the child runs — even
- * after child.unref() — so every /check run left this hook resident. Log-file
- * fds give the child a valid output target that survives parent exit, letting
- * the hook terminate while the started server keeps running.
- *
- * @returns {{ proc: import('child_process').ChildProcess, logPath: string }}
- */
-function spawnDetachedToLog(command, label, extraEnv = {}) {
-  const logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'check-start-env-'));
-  const logPath = path.join(logDir, `${label}.log`);
-  const fd = fs.openSync(logPath, 'a', 0o600);
-  const proc = spawn(command, {
-    cwd: process.cwd(),
-    shell: true,
-    env: { ...process.env, ...extraEnv },
-    stdio: ['ignore', fd, fd],
-    detached: true,
-  });
-  fs.closeSync(fd); // child holds its own copy of the fd
-  proc.unref();
-  return { proc, logPath };
-}
-
-/** Read a child's log file (best-effort). */
-function readLog(logPath) {
-  try {
-    return fs.readFileSync(logPath, 'utf8');
-  } catch {
-    return '';
-  }
-}
+// Detached-process helpers live in ../lib/detached-spawn.js
+const { sleep, waitFor, spawnDetachedToLog, readLog } = require(
+  path.join(__dirname, '..', 'lib', 'detached-spawn')
+);
 
 /**
  * Derive ticket prefix (e.g., PROJ-964) from current worktree path or git branch.
@@ -112,14 +64,10 @@ const TICKET_PREFIX = getTicketPrefix();
 const { discoverApps, checkHealth } = require(path.join(__dirname, '..', 'lib', 'app-access'));
 const { ACCESS_FAILED } = require(path.join(__dirname, '..', 'lib', 'app-access-status'));
 
-// Database environment variables for integration tests (port will be detected dynamically)
-const DB_ENV = {
-  DATABASE_HOST: 'localhost',
-  DATABASE_PORT: '5432', // Will be updated by detectDatabasePort()
-  DATABASE_NAME: 'status-site',
-  DATABASE_MASTER_USER_NAME: 'postgres',
-  DATABASE_MASTER_PASSWORD: 'mypassword',
-};
+// Database detection + startup live in ../lib/database-env.js
+const { detectDatabaseConfig, startDatabase } = require(
+  path.join(__dirname, '..', 'lib', 'database-env')
+);
 
 /**
  * Execute a command synchronously
@@ -130,72 +78,6 @@ function exec(cmd, options = {}) {
   } catch (error) {
     return null;
   }
-}
-
-/**
- * Check if database is already running
- */
-function isDatabaseRunning() {
-  const result = exec('docker ps --filter "name=postgres" --format "{{.Names}}"');
-  return result && result.includes('postgres');
-}
-
-/**
- * Detect the actual database port from running Docker containers
- * @param {string} containerName - Name of the container to check (e.g., 'status-site', 'as-dashboard')
- * @returns {string|null} - The host port mapped to 5432, or null if not found
- */
-function detectDatabasePort(containerName) {
-  // Try to get the port mapping from Docker
-  const portMapping = exec(`docker port ${containerName} 5432 2>/dev/null`);
-  if (portMapping) {
-    // Format is "0.0.0.0:5433" or "[::]:5433" - extract the port
-    const match = portMapping.match(/:(\d+)/);
-    if (match) {
-      return match[1];
-    }
-  }
-  return null;
-}
-
-/**
- * Detect database configuration for impacted apps
- * Returns an object with database env vars, preferring status-site container
- * @param {string[]} impactedApps - List of impacted app names
- * @returns {object} - Database environment configuration
- */
-function detectDatabaseConfig(impactedApps) {
-  const config = { ...DB_ENV };
-
-  // Determine which container to use based on impacted apps
-  // Priority: status-site > as-dashboard (since status-site is the main app)
-  const containersToCheck = ['status-site', 'as-dashboard'];
-
-  for (const containerName of containersToCheck) {
-    const port = detectDatabasePort(containerName);
-    if (port) {
-      config.DATABASE_PORT = port;
-      // Set database name based on container
-      if (containerName === 'as-dashboard') {
-        config.DATABASE_NAME = 'as-dashboard';
-      }
-      console.error(`Detected database on port ${port} (container: ${containerName})`);
-      break;
-    }
-  }
-
-  // If no container found, check if any postgres container is running
-  if (config.DATABASE_PORT === '5432') {
-    const postgresPort = exec(
-      'docker ps --filter "expose=5432" --format "{{.Ports}}" | grep -oE "[0-9]+->5432" | head -1 | cut -d"-" -f1'
-    );
-    if (postgresPort) {
-      config.DATABASE_PORT = postgresPort;
-      console.error(`Detected generic postgres on port ${postgresPort}`);
-    }
-  }
-
-  return config;
 }
 
 /**
@@ -234,35 +116,6 @@ function findAvailablePort(startPort) {
     port++;
   }
   return port;
-}
-
-/**
- * Start database if not running
- */
-async function startDatabase() {
-  if (isDatabaseRunning()) {
-    console.error('Database already running');
-    return { started: false, alreadyRunning: true };
-  }
-
-  // Support custom dev commands per repo via config
-  // e.g. DEV_COMMAND="~/g2i/scripts/dev-squire.sh" in .env
-  const devCommand = config.DEV_COMMAND || 'make dev-local';
-  console.error(`Starting database with ${devCommand}...`);
-
-  const { proc, logPath } = spawnDetachedToLog(devCommand, 'database');
-
-  const ready = await waitFor(() => {
-    const log = readLog(logPath);
-    if (log.includes('database system is ready') || log.includes('PostgreSQL init')) return true;
-    return isDatabaseRunning();
-  }, DB_START_TIMEOUT_MS);
-
-  if (ready) {
-    console.error('Database started');
-    return { started: true, pid: proc.pid, logPath };
-  }
-  return { started: false, error: 'Timeout waiting for database', logPath };
 }
 
 /**
@@ -338,6 +191,66 @@ async function startApp(appName, appConfig) {
 }
 
 /**
+ * Pick web apps to start — if none directly impacted, start all for mandatory
+ * QA coverage (e.g., when only shared packages changed, all consumers must
+ * be QA'd).
+ */
+function selectWebAppsToStart(appsMap) {
+  const impacted = IMPACTED_APPS.filter((app) => appsMap[app]);
+  if (impacted.length > 0) return impacted;
+
+  const allWebApps = Object.keys(appsMap); // cli apps are already filtered out of appsMap
+  if (IMPACTED_APPS.length > 0) {
+    // Non-web apps or packages changed — start all web apps for mandatory QA
+    if (allWebApps.length > 0) {
+      console.error(
+        `Package/non-web changes detected (${IMPACTED_APPS.join(', ')}) — starting all ${allWebApps.length} web apps for mandatory QA`
+      );
+      return allWebApps;
+    }
+    console.error(
+      `Impacted changes detected (${IMPACTED_APPS.join(', ')}) but no WEB_APPS configured in .env — cannot start apps for QA`
+    );
+    return [];
+  }
+  // No impacted apps at all — start all web apps to avoid enforce-env-start-failure
+  // treating empty runningApps as a failure
+  if (allWebApps.length === 0) {
+    console.error('No impacted apps and no WEB_APPS configured in .env — nothing to start');
+    return [];
+  }
+  console.error(
+    `No impacted apps detected — starting all ${allWebApps.length} web apps as default`
+  );
+  return allWebApps;
+}
+
+/** Start one app and gate it behind a health check before registering it. */
+async function startAndHealthCheckApp(result, appName, appConfig) {
+  const appResult = await startApp(appName, appConfig);
+  result.apps[appName] = appResult;
+  if (!appResult.started && !appResult.alreadyRunning) return;
+
+  // Health-check gate
+  const healthResult = await checkHealth(
+    { ...appConfig, defaultPort: appResult.port },
+    { host: 'localhost', retries: 3, retryInterval: 2000, timeout: 5000 }
+  );
+
+  if (healthResult.status === ACCESS_FAILED) {
+    console.error(`Health check failed for ${appName}: ${healthResult.error || 'unknown'}`);
+    result.apps[appName].healthCheckFailed = true;
+    result.apps[appName].diagnostics = healthResult.diagnostics;
+    return;
+  }
+  result.runningApps[appName] = {
+    port: appResult.port,
+    url: appResult.url,
+    appType: appConfig.appType,
+  };
+}
+
+/**
  * Main execution
  */
 async function main() {
@@ -371,62 +284,10 @@ async function main() {
     discoveredApps.filter((a) => a.appType !== 'cli').map((a) => [a.name, a])
   );
 
-  // Start web apps — if none directly impacted, start all for mandatory QA coverage
-  // (e.g., when only shared packages changed, all consumers must be QA'd)
-  let webAppsToStart = IMPACTED_APPS.filter((app) => appsMap[app]);
-
-  if (webAppsToStart.length === 0 && IMPACTED_APPS.length > 0) {
-    // Non-web apps or packages changed — start all web apps for mandatory QA
-    const allWebApps = Object.keys(appsMap);
-    if (allWebApps.length > 0) {
-      console.error(
-        // cli apps are already filtered out of appsMap
-        `Package/non-web changes detected (${IMPACTED_APPS.join(', ')}) — starting all ${allWebApps.length} web apps for mandatory QA`
-      );
-      webAppsToStart = allWebApps;
-    } else {
-      console.error(
-        `Impacted changes detected (${IMPACTED_APPS.join(', ')}) but no WEB_APPS configured in .env — cannot start apps for QA`
-      );
-    }
-  } else if (webAppsToStart.length === 0) {
-    // No impacted apps at all — start all web apps to avoid enforce-env-start-failure
-    // treating empty runningApps as a failure
-    const allWebApps = Object.keys(appsMap);
-    if (allWebApps.length === 0) {
-      console.error('No impacted apps and no WEB_APPS configured in .env — nothing to start');
-    } else {
-      console.error(
-        `No impacted apps detected — starting all ${allWebApps.length} web apps as default`
-      );
-      webAppsToStart = allWebApps;
-    }
-  }
+  const webAppsToStart = selectWebAppsToStart(appsMap);
 
   for (const appName of webAppsToStart) {
-    const appConfig = appsMap[appName];
-    const appResult = await startApp(appName, appConfig);
-    result.apps[appName] = appResult;
-
-    if (appResult.started || appResult.alreadyRunning) {
-      // Health-check gate
-      const healthResult = await checkHealth(
-        { ...appConfig, defaultPort: appResult.port },
-        { host: 'localhost', retries: 3, retryInterval: 2000, timeout: 5000 }
-      );
-
-      if (healthResult.status === ACCESS_FAILED) {
-        console.error(`Health check failed for ${appName}: ${healthResult.error || 'unknown'}`);
-        result.apps[appName].healthCheckFailed = true;
-        result.apps[appName].diagnostics = healthResult.diagnostics;
-      } else {
-        result.runningApps[appName] = {
-          port: appResult.port,
-          url: appResult.url,
-          appType: appConfig.appType,
-        };
-      }
-    }
+    await startAndHealthCheckApp(result, appName, appsMap[appName]);
   }
 
   // Output result

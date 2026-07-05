@@ -34,6 +34,9 @@ const path = require('path');
 const { execSync } = require('child_process');
 
 const { resolveBaseRef } = require('./changed-specs');
+const { resolveTicketWorktree } = require(
+  path.join(__dirname, '..', '..', 'lib', 'resolve-ticket-worktree')
+);
 const parseGherkin = require(path.join(__dirname, '..', '..', 'work', 'lib', 'parse-gherkin'));
 const { isBackendFile, isFrontendFile, isE2eFile } = require(
   path.join(__dirname, '..', '..', 'work-spec', 'lib', 'kind-checks', 'shared')
@@ -228,13 +231,27 @@ function evaluateGherkinScope({ specText, files }) {
 // ─── Git side (worktree diff) ───────────────────────────────────────────────
 
 /**
- * Resolve the worktree root of `cwd` (defaults to process cwd — in /check2
- * the orchestrator runs INSIDE the ticket worktree; every subsequent git call
- * is pinned to this root via `git -C`, never the ambient cwd).
+ * Resolve the worktree root cwd-independently (PR #669 review): the ticket id
+ * resolves through the shared resolveTicketWorktree (WORKTREES_BASE/REPO_NAME
+ * convention first, guarded cwd git-detection second). Only when that yields
+ * nothing do we fall back to the ambient `git rev-parse --show-toplevel` —
+ * the historical behavior. Every subsequent git call is pinned to the
+ * returned root via `git -C`, never the ambient cwd.
  * @param {string} [cwd]
+ * @param {string} [ticketId] - e.g. "GH-247"; enables config-based resolution
+ * @param {object} [deps] - injectable resolveTicketWorktree opts (tests):
+ *   { config, pluginToplevel }
  * @returns {string|null}
  */
-function resolveWorktreeRoot(cwd) {
+function resolveWorktreeRoot(cwd, ticketId, deps = {}) {
+  if (ticketId) {
+    try {
+      const resolved = resolveTicketWorktree(ticketId, { ...(cwd ? { cwd } : {}), ...deps });
+      if (resolved) return resolved;
+    } catch {
+      /* fall through to ambient detection */
+    }
+  }
   try {
     return execSync('git rev-parse --show-toplevel', {
       encoding: 'utf8',
@@ -271,10 +288,10 @@ function committedChangedFiles(worktree, baseRef) {
 /**
  * Full pipeline: resolve worktree + base, diff, evaluate.
  * Fail-open on unresolvable git state (verdict WARN, never BLOCK).
- * @param {{ specText: string|null, cwd?: string }} input
+ * @param {{ specText: string|null, cwd?: string, ticketId?: string }} input
  */
-function runGherkinScopeCheck({ specText, cwd }) {
-  const worktree = resolveWorktreeRoot(cwd);
+function runGherkinScopeCheck({ specText, cwd, ticketId }) {
+  const worktree = resolveWorktreeRoot(cwd, ticketId);
   if (!worktree) {
     return {
       verdict: 'WARN',

@@ -1,5 +1,5 @@
 /**
- * Step: 7_validate_summary — Run validate-reports + generate-summary inline (deterministic).
+ * Step: 10_validate_summary — Run validate-reports + generate-summary inline (deterministic).
  */
 
 'use strict';

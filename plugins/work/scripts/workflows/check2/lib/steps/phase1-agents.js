@@ -21,6 +21,13 @@
 
 'use strict';
 
+// Registry-derived 'N/M' progress label. Lazy require: the registry requires
+// this module at load time, so a top-level require back would see a partial
+// module through the cycle (PR #669 review — stale hardcoded counts).
+function stepProgress(name) {
+  return require('../step-registry').stepProgress(name);
+}
+
 const fs = require('fs');
 const path = require('path');
 const { reportStatus } = require('../report-utils');
@@ -219,7 +226,11 @@ module.exports = function registerPhase1(register) {
         return {
           type: 'check_instruction',
           action: 'blocked',
-          state: { ticket: state.ticketId, currentStep: '5_phase1_agents', progress: '5/9' },
+          state: {
+            ticket: state.ticketId,
+            currentStep: '5_phase1_agents',
+            progress: stepProgress('5_phase1_agents'),
+          },
           reason:
             `Phase-1 agent(s) completed but their report is still missing after ` +
             `${MAX_DISPATCH_ATTEMPTS} dispatch attempts:\n` +
@@ -250,7 +261,11 @@ module.exports = function registerPhase1(register) {
     return {
       type: 'check_instruction',
       action: 'execute',
-      state: { ticket: state.ticketId, currentStep: '5_phase1_agents', progress: '5/9' },
+      state: {
+        ticket: state.ticketId,
+        currentStep: '5_phase1_agents',
+        progress: stepProgress('5_phase1_agents'),
+      },
       continue: true,
       parallel: delegates.length > 1,
       delegates,

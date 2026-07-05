@@ -299,3 +299,84 @@ describe('step registry wiring', () => {
     assert.equal(STEPS[i + 1], '5_phase1_agents');
   });
 });
+
+// ─── Cwd-independent worktree resolution (PR #669 review) ───────────────────
+
+describe('resolveWorktreeRoot — ticket-config resolution beats ambient cwd', () => {
+  const { resolveWorktreeRoot } = require('../lib/gherkin-scope');
+
+  let ticketRepo;
+  let otherRepo;
+
+  before(() => {
+    ticketRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'gherkin-ticket-repo-'));
+    otherRepo = fs.mkdtempSync(path.join(os.tmpdir(), 'gherkin-other-repo-'));
+    sh('git init -q -b main', ticketRepo);
+    sh('git init -q -b main', otherRepo);
+  });
+
+  after(() => {
+    fs.rmSync(ticketRepo, { recursive: true, force: true });
+    fs.rmSync(otherRepo, { recursive: true, force: true });
+  });
+
+  it('resolves the TICKET worktree from config even when cwd is a different repo', () => {
+    const fakeConfig = {
+      safeTicketId: (t) => t,
+      worktreeDir: () => ticketRepo,
+    };
+    const root = resolveWorktreeRoot(otherRepo, 'GH-247', { config: fakeConfig });
+    assert.equal(fs.realpathSync(root), fs.realpathSync(ticketRepo));
+  });
+
+  it('falls back to ambient git toplevel when the ticket resolves to nothing', () => {
+    const fakeConfig = {
+      safeTicketId: (t) => t,
+      worktreeDir: () => path.join(os.tmpdir(), 'does-not-exist-anywhere-12345'),
+    };
+    // pluginToplevel: null → resolveTicketWorktree's own cwd fallback also
+    // engages; either way the ambient repo must win.
+    const root = resolveWorktreeRoot(otherRepo, 'GH-247', {
+      config: fakeConfig,
+      pluginToplevel: null,
+    });
+    assert.equal(fs.realpathSync(root), fs.realpathSync(otherRepo));
+  });
+
+  it('without a ticket id, behaves as before (ambient git toplevel)', () => {
+    const root = resolveWorktreeRoot(otherRepo);
+    assert.equal(fs.realpathSync(root), fs.realpathSync(otherRepo));
+  });
+});
+
+describe('4b_gherkin_scope step — CHECK_GHERKIN_SCOPE=0 off-switch', () => {
+  let tasksDir2;
+  let savedToggle;
+
+  before(() => {
+    tasksDir2 = fs.mkdtempSync(path.join(os.tmpdir(), 'gherkin-toggle-tasks-'));
+    savedToggle = process.env.CHECK_GHERKIN_SCOPE;
+    process.env.CHECK_GHERKIN_SCOPE = '0';
+  });
+
+  after(() => {
+    if (savedToggle === undefined) delete process.env.CHECK_GHERKIN_SCOPE;
+    else process.env.CHECK_GHERKIN_SCOPE = savedToggle;
+    fs.rmSync(tasksDir2, { recursive: true, force: true });
+  });
+
+  it('auto-passes with a SKIPPED note and never blocks', () => {
+    // Spec that would BLOCK if the validator ran (no tags, UI diff irrelevant
+    // — the step must not even look at git).
+    fs.writeFileSync(path.join(tasksDir2, 'spec.md'), SPEC_UNIT_ONLY);
+    const handler = getHandler();
+    const state = { ticketId: 'GH-247', changesHash: 'abc123', setupResult: null };
+    const result = handler(state, { tasksDir: tasksDir2 });
+
+    assert.equal(result, null, 'must auto-advance');
+    const report = fs.readFileSync(path.join(tasksDir2, 'gherkin-scope.check.md'), 'utf8');
+    assert.ok(report.startsWith('**Status:** APPROVED'));
+    assert.match(report, /\*\*Verdict:\*\* SKIPPED/);
+    assert.match(report, /CHECK_GHERKIN_SCOPE=0/);
+  });
+});

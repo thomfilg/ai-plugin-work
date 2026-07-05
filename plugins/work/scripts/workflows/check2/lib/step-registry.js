@@ -55,6 +55,23 @@ const STEPS = [
   '11_output',
 ];
 
+/**
+ * Registry-derived "N/M" progress label for a step — the single source of
+ * truth for step counts (stale hardcoded "4/9"-style literals drifted every
+ * time a step was added; PR #669 review).
+ * @param {string} stepName
+ * @returns {string|null} e.g. "6/12", or null for unknown steps
+ */
+function stepProgress(stepName) {
+  const idx = STEPS.indexOf(stepName);
+  return idx >= 0 ? `${idx + 1}/${STEPS.length}` : null;
+}
+
+// Export BEFORE requiring the step modules below: step files may require this
+// registry back (for stepProgress), and a late export would hand them an
+// empty object through the require cycle.
+module.exports = { registerStep, runStep, STEPS, stepProgress };
+
 // ─── Register steps ─────────────────────────────────────────────────────────
 require('./steps/setup')(registerStep);
 require('./steps/start-env')(registerStep);
@@ -68,5 +85,3 @@ require('./steps/run-integration')(registerStep);
 require('./steps/run-e2e')(registerStep);
 require('./steps/validate-summary')(registerStep);
 require('./steps/output')(registerStep);
-
-module.exports = { registerStep, runStep, STEPS };

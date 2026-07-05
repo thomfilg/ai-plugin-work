@@ -64,35 +64,16 @@ function requirePaths() {
   }
 }
 
-// ─── Extracted modules (wrappers thread runtime deps through) ───────────────
-const { STEPS, STEP_TRANSITIONS, ALL_STEPS, workflowCanTransition } = require(
-  path.join(__dirname, '..', 'step-registry')
-);
-const { run, fileExists, readFile, listFiles, ...helpers } = require(
-  path.join(__dirname, '..', 'lib', 'work-helpers')
-);
+// ─── Extracted modules (shared orchestrator wiring) ─────────────────────────
 const { parseTicketInput } = require(path.join(__dirname, '..', '..', 'lib', 'ticket-provider'));
-const { parseTasks, buildTaskPrompt } = require(path.join(__dirname, '..', 'lib', 'task-parser'));
-const { archiveStepArtifacts } = require(path.join(__dirname, '..', 'lib', 'artifact-archival'));
-const { getHeadSha } = require(path.join(__dirname, '..', 'lib', 'git-utils'));
-const { TDD_PROTOCOL, readTddEvidence: _readTddEvidence, validateTddEvidence } = require(
-  path.join(__dirname, '..', 'lib', 'tdd-enforcement')
-);
-const { inspect: _inspect } = require(path.join(__dirname, 'inspect'));
-const { generatePlan: _generatePlan } = require(path.join(__dirname, 'plan-generator'));
 // Explicit reference to steps/ index for spec verification (plan-generator consumes these internally)
 const _stepHandlers = require(path.join(__dirname, '..', 'steps', 'index'));
 void _stepHandlers;
-const { validateCheckGate: _validateCheckGate } = require(
-  path.join(__dirname, '..', 'gates', 'check-gate')
-);
-const {
-  transitionStep: _transitionStep,
-  getAvailableTransitions: _getAvailableTransitions,
-} = require(path.join(__dirname, 'transition-step'));
 const { main: _main } = require(path.join(__dirname, 'cli'));
+const { createOrchestratorContext } = require(
+  path.join(__dirname, '..', 'lib', 'orchestrator-context')
+);
 
-const TDD_GATED_STEPS = [STEPS.implement];
 // passPattern is the fast path (now tolerant of the bold canonical form
 // `**Status:** APPROVED`); `type` lets inspect.js fall back to the shared
 // parse-report-status parser for real-world prose verdicts like
@@ -112,103 +93,27 @@ const REQUIRED_REPORTS = [
   },
 ];
 
-// Thin wrappers: inject TASKS_BASE / STEPS / ALL_STEPS into extracted modules
-function loadWorkState(ticket) {
-  return helpers.loadWorkState(TASKS_BASE, ticket);
-}
-function saveWorkState(ticket, state) {
-  return helpers.saveWorkState(TASKS_BASE, ticket, state);
-}
-function getCurrentStep(workState) {
-  return helpers.getCurrentStep(workState, STEPS, ALL_STEPS);
-}
-function readTddEvidence(ticketId, stepId, taskNum) {
-  return _readTddEvidence(TASKS_BASE, ticketId, stepId, taskNum);
-}
-function validateCheckGate(ticket) {
-  return _validateCheckGate(TASKS_BASE, ticket);
-}
-function inspect(ticket, providerConfig, suffix) {
-  return _inspect(ticket, providerConfig, suffix, {
-    tp,
-    run,
-    fileExists,
-    readFile,
-    listFiles,
-    loadWorkState,
-    getCurrentStep,
-    REQUIRED_REPORTS,
-    WORKTREES_BASE,
-    TASKS_BASE,
-    MAIN_WORKTREE_FOLDER,
-  });
-}
-function generatePlan(ticket, description, s, rework, callerProviderCfg, suffix) {
-  return _generatePlan(ticket, description, s, rework, callerProviderCfg, suffix, {
-    tp,
-    TDD_PROTOCOL,
-    TDD_GATED_STEPS,
-    STEPS,
-    parseTasks,
-    buildTaskPrompt,
-    fileExists,
-    run,
-    WORKTREES_BASE,
-    TASKS_BASE,
-    MAIN_WORKTREE_FOLDER,
-  });
-}
-// GH-260: Lazy-init workflow definition for step-verify gate in transitions.
-// Cached after first call to avoid re-creating on every transition.
-let _workflowDef = null;
-function getWorkflowDefinition() {
-  if (!_workflowDef) {
-    const createWorkflowDefinition = require(path.join(__dirname, '..', 'workflow-definition'));
-    // Compute providerConfig once (avoids repeated execSync/file reads)
-    const providerConfig = tp.getProviderConfig({ skipPrompt: true });
-    _workflowDef = createWorkflowDefinition({
-      TASKS_BASE,
-      safeTicketPath: (id) => tp.sanitizeTicketIdForPath(id, providerConfig),
-      resolveGitHead: () => {
-        const { resolveGitHead } = require(path.join(__dirname, '..', 'lib', 'git-utils'));
-        return resolveGitHead();
-      },
-    });
-  }
-  return _workflowDef;
-}
-function buildTransitionDeps() {
-  const { workflow } = getWorkflowDefinition();
-  return {
-    tp,
-    STEPS,
-    ALL_STEPS,
-    STEP_TRANSITIONS,
-    workflowCanTransition,
-    TDD_GATED_STEPS,
-    readTddEvidence,
-    validateTddEvidence,
-    validateCheckGate,
-    archiveStepArtifacts,
-    appendAction,
-    loadWorkState,
-    saveWorkState,
-    getCurrentStep,
-    TASKS_BASE,
-    // GH-260: generic step-verify gate — always uses real verify functions.
-    // Tests must provide the necessary filesystem/git state for verify to pass.
-    softSteps: workflow.softSteps,
-    commandMap: workflow.commandMap,
-    // GH-299: check-drift gate dep
-    getHeadSha,
-  };
-}
-function transitionStep(ticket, targetStep) {
-  return _transitionStep(ticket, targetStep, buildTransitionDeps());
-}
-function getAvailableTransitions(ticket) {
-  return _getAvailableTransitions(ticket, buildTransitionDeps());
-}
+const {
+  STEPS,
+  STEP_TRANSITIONS,
+  ALL_STEPS,
+  parseTasks,
+  buildTaskPrompt,
+  loadWorkState,
+  saveWorkState,
+  inspect,
+  generatePlan,
+  transitionStep,
+  getAvailableTransitions,
+} = createOrchestratorContext({
+  workDir: path.join(__dirname, '..'),
+  tp,
+  appendAction,
+  TASKS_BASE,
+  WORKTREES_BASE,
+  MAIN_WORKTREE_FOLDER,
+  REQUIRED_REPORTS,
+});
 
 function main() {
   _main({

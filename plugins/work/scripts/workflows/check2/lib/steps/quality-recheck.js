@@ -6,6 +6,13 @@
 
 'use strict';
 
+// Registry-derived 'N/M' progress label. Lazy require: the registry requires
+// this module at load time, so a top-level require back would see a partial
+// module through the cycle (PR #669 review — stale hardcoded counts).
+function stepProgress(name) {
+  return require('../step-registry').stepProgress(name);
+}
+
 const path = require('path');
 const { execSync } = require('child_process');
 const { writeReportAtomic } = require('../report-utils');
@@ -62,7 +69,11 @@ module.exports = function registerQualityRecheck(register) {
       return {
         type: 'check_instruction',
         action: 'failed',
-        state: { ticket: state.ticketId, currentStep: '7_quality_recheck', progress: '7/9' },
+        state: {
+          ticket: state.ticketId,
+          currentStep: '7_quality_recheck',
+          progress: stepProgress('7_quality_recheck'),
+        },
         reason: `Quality re-check failed (${failCount} failing). Code review fixes broke tests.`,
         report: reportPath,
       };

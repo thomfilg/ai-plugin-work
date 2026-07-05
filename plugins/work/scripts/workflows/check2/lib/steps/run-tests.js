@@ -321,14 +321,18 @@ function failureReason({ outcome, analysis, delta, baseline }) {
 
 // Baseline delta (echo-5137-4): split failures into net-new vs
 // pre-existing when a cached baseline exists; refresh it on green runs.
-function assessBaseline(outcome, analysis) {
+// The baseline lives in the ticket TASKS dir (same place .check2-state.json
+// lives) — writing it to the app worktree root polluted consumer repos and
+// made 7_quality_recheck's `git status --porcelain` trigger fire every run
+// (PR #669 review).
+function assessBaseline(outcome, analysis, baselineDir) {
   const green = outcome === 'PASSED' || outcome === 'FLAKY';
-  const baseline = readBaseline();
+  const baseline = readBaseline(baselineDir);
   const delta =
     outcome === 'FAILED' || outcome === 'CRASHED'
       ? splitFailures(analysis.failingTests, baseline)
       : null;
-  if (green) writeBaseline(undefined, []);
+  if (green) writeBaseline(baselineDir, []);
   return { baseline, delta, status: green ? 'APPROVED' : 'NEEDS_WORK' };
 }
 
@@ -347,7 +351,7 @@ function registerRunTests(register) {
       ctx.checkHooksDir
     );
 
-    const { baseline, delta, status } = assessBaseline(outcome, analysis);
+    const { baseline, delta, status } = assessBaseline(outcome, analysis, ctx.tasksDir);
 
     const report = buildTestsReport({
       changesHash,
@@ -367,10 +371,17 @@ function registerRunTests(register) {
     if (status !== 'APPROVED') {
       state.testsFailed = true;
       const reason = failureReason({ outcome, analysis, delta, baseline });
+      // Lazy require: registry-derived progress (cycle-safe — the registry
+      // itself requires this module at load time).
+      const { stepProgress } = require('../step-registry');
       return {
         type: 'check_instruction',
         action: 'failed',
-        state: { ticket: state.ticketId, currentStep: '4_run_tests', progress: '4/9' },
+        state: {
+          ticket: state.ticketId,
+          currentStep: '4_run_tests',
+          progress: stepProgress('4_run_tests'),
+        },
         reason,
         report: reportPath,
       };

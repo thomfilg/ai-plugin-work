@@ -123,6 +123,42 @@ function buildFailureResult(url, healthEndpoint, port, responseCode, error) {
 }
 
 /**
+ * One health-check attempt. Returns { ready, result } on 2xx/3xx, or
+ * { ready: false, failure } describing the failed attempt.
+ */
+async function attemptHealthCheck({ url, timeout, host, port, healthEndpoint }) {
+  try {
+    const result = await httpGet(url, timeout);
+    if (result.statusCode >= 200 && result.statusCode < 400) {
+      return {
+        ready: true,
+        result: {
+          status: AppAccessStatus.READY,
+          url: `http://${host}:${port}`,
+          healthEndpoint,
+          responseCode: result.statusCode,
+        },
+      };
+    }
+    return {
+      ready: false,
+      failure: buildFailureResult(
+        url,
+        healthEndpoint,
+        port,
+        result.statusCode,
+        `HTTP ${result.statusCode}`
+      ),
+    };
+  } catch (err) {
+    return {
+      ready: false,
+      failure: buildFailureResult(url, healthEndpoint, port, null, err.message),
+    };
+  }
+}
+
+/**
  * Perform a health check against an app with retries.
  * @param {object} app - App configuration from discoverApps
  * @param {object} options - Options for the health check
@@ -140,35 +176,12 @@ async function checkHealth(app, options = {}) {
   const url = `http://${host}:${port}${healthEndpoint}`;
 
   for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      const result = await httpGet(url, timeout);
-      if (result.statusCode >= 200 && result.statusCode < 400) {
-        return {
-          status: AppAccessStatus.READY,
-          url: `http://${host}:${port}`,
-          healthEndpoint,
-          responseCode: result.statusCode,
-        };
-      }
-      // Non-success status code
-      if (attempt === retries) {
-        return buildFailureResult(
-          url,
-          healthEndpoint,
-          port,
-          result.statusCode,
-          `HTTP ${result.statusCode}`
-        );
-      }
-    } catch (err) {
-      if (attempt === retries) {
-        return buildFailureResult(url, healthEndpoint, port, null, err.message);
-      }
-    }
+    const outcome = await attemptHealthCheck({ url, timeout, host, port, healthEndpoint });
+    if (outcome.ready) return outcome.result;
+    // Non-success status code / request error — fail only on the last attempt
+    if (attempt === retries) return outcome.failure;
     // Wait before retry (only if not last attempt)
-    if (attempt < retries) {
-      await new Promise((resolve) => setTimeout(resolve, retryInterval));
-    }
+    await new Promise((resolve) => setTimeout(resolve, retryInterval));
   }
 
   // Guard: handle edge case where retries=0 (no iterations executed)
@@ -251,8 +264,15 @@ async function ensureAppRunning(appName, options = {}) {
     return { ...buildAccessPayload(app, initial), selfStarted: false };
   }
 
-  // Self-start via the same manifest-driven machinery /check's 2_start_env uses.
-  // Lazy require avoids a cycle (check-start-env requires this module).
+  return selfStartAndRecheck({ appName, app, options, initial, health, healthOptions });
+}
+
+/**
+ * Self-start via the same manifest-driven machinery /check's 2_start_env
+ * uses, then re-run the health check against the port the server actually
+ * took. Lazy require avoids a cycle (check-start-env requires this module).
+ */
+async function selfStartAndRecheck({ appName, app, options, initial, health, healthOptions }) {
   const startApp = options.startApp || require('../hooks/check-start-env').startApp;
 
   let startResult;

@@ -240,13 +240,17 @@ function unblockAfterChoice(hookData) {
   }
 }
 
-async function main() {
-  let input = '';
+/** Read and parse the hook payload from stdin. */
+async function readHookPayload() {
+  const chunks = [];
   for await (const chunk of process.stdin) {
-    input += chunk;
+    chunks.push(chunk);
   }
+  return JSON.parse(chunks.join(''));
+}
 
-  const hookData = JSON.parse(input);
+async function main() {
+  const hookData = await readHookPayload();
   const hookType = process.env.CLAUDE_HOOK_TYPE || 'PostToolUse';
   const toolName = hookData.tool_name || '';
 

@@ -10,6 +10,13 @@
 
 'use strict';
 
+// Registry-derived 'N/M' progress label. Lazy require: the registry requires
+// this module at load time, so a top-level require back would see a partial
+// module through the cycle (PR #669 review — stale hardcoded counts).
+function stepProgress(name) {
+  return require('../step-registry').stepProgress(name);
+}
+
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
@@ -60,7 +67,11 @@ function buildDevFixDelegate(state, crPath, developerAgent) {
   return {
     type: 'check_instruction',
     action: 'execute',
-    state: { ticket: state.ticketId, currentStep: '6_phase2_consensus', progress: '6/9' },
+    state: {
+      ticket: state.ticketId,
+      currentStep: '6_phase2_consensus',
+      progress: stepProgress('6_phase2_consensus'),
+    },
     continue: true,
     delegate: {
       type: 'task',
@@ -76,7 +87,11 @@ function buildFreshReviewDelegate(state, crPath, changesHash) {
   return {
     type: 'check_instruction',
     action: 'execute',
-    state: { ticket: state.ticketId, currentStep: '6_phase2_consensus', progress: '6/9' },
+    state: {
+      ticket: state.ticketId,
+      currentStep: '6_phase2_consensus',
+      progress: stepProgress('6_phase2_consensus'),
+    },
     continue: true,
     delegate: {
       type: 'task',

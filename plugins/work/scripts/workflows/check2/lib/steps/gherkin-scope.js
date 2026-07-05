@@ -116,9 +116,36 @@ module.exports = function registerGherkinScope(register) {
     const reportPath = path.join(reportFolder, REPORT_FILE);
     const changesHash = state.changesHash || 'unknown';
 
+    // Off-switch (CHECK_GHERKIN_SCOPE=0), consistent with CHECK_FLAKE_RETRY /
+    // CHECK_IMPACT_TESTS: the step auto-passes with a note.
+    if (process.env.CHECK_GHERKIN_SCOPE === '0') {
+      writeReportAtomic(
+        reportPath,
+        [
+          '**Status:** APPROVED',
+          '',
+          '# Gherkin Scope Validation (GH-247)',
+          '',
+          '**Verdict:** SKIPPED',
+          '',
+          '- Disabled via `CHECK_GHERKIN_SCOPE=0` — declared-scope vs actual-diff validation not performed.',
+          '',
+          `Verified at ${changesHash}`,
+        ].join('\n')
+      );
+      return null; // auto-advance
+    }
+
     let result;
     try {
-      result = runGherkinScopeCheck({ specText: readSpecText(ctx.tasksDir) });
+      result = runGherkinScopeCheck({
+        specText: readSpecText(ctx.tasksDir),
+        // Cwd-independent worktree resolution (PR #669 review): the ticket id
+        // resolves the worktree via the shared WORKTREES_BASE/REPO_NAME
+        // convention, so an orchestrator running outside the ticket worktree
+        // (tasks dir, plugin checkout) can't diff the wrong repo.
+        ticketId: state.ticketId,
+      });
     } catch (err) {
       // Fail-open: an internal error must not brick the check pipeline.
       result = {

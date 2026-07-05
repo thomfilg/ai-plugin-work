@@ -4,7 +4,10 @@
  *
  * Answers "did MY changes regress tests?" instead of "is the whole repo
  * green?". Running the suite at origin/<BASE> is too expensive inline, so we
- * keep a cached baseline file (`tests-baseline.json`) at the repo root:
+ * keep a cached baseline file (`tests-baseline.json`) in the ticket TASKS dir
+ * (same place `.check2-state.json` lives — writing it to the consumer repo
+ * root polluted worktrees and made 7_quality_recheck's `git status
+ * --porcelain` trigger fire on every run; PR #669 review):
  *
  *   - written after every classified run of 4_run_tests (green runs record
  *     failures: []; red runs are NOT recorded — a red baseline could only
@@ -30,7 +33,7 @@ function baselinePath(dir) {
 /**
  * Read the cached baseline. Returns null when missing/unparseable/disabled
  * (CHECK_TESTS_BASELINE=0).
- * @param {string} [dir] repo root (default cwd)
+ * @param {string} [dir] ticket tasks dir (default cwd)
  * @returns {{ref: string|null, recordedAt: string, failures: string[]}|null}
  */
 function readBaseline(dir) {
@@ -53,7 +56,7 @@ function readBaseline(dir) {
  * after a PASSED/FLAKY run — a passing run proves every test green at this
  * commit, which is the cheapest trustworthy baseline available.
  * Best-effort: failures to write never break the step.
- * @param {string} [dir] repo root (default cwd)
+ * @param {string} [dir] ticket tasks dir (default cwd)
  * @param {string[]} [failures] known failures (default [])
  */
 function writeBaseline(dir, failures = []) {

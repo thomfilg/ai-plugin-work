@@ -55,9 +55,10 @@ The plugin uses environment variables for configuration, resolved through `scrip
 | `SCRIPT_RUN_AFFECTED_E2E` | | Affected-suite script for **/check2**. Receives `CHANGED_SPECS` (newline-separated, strictly-changed spec files + specs importing a changed helper), `CHANGED_SPECS_BASE`, and `E2E_PER_SPEC_TIMEOUT_MS` in its environment |
 | `CHECK_FLAKE_RETRY` | `1` | Set to `0` to disable the /check2 single flake-retry round on small/transient test failures |
 | `CHECK_FLAKE_RETRY_MAX` | `5` | Max failing tests for a run to qualify for the flake retry (transient signatures always qualify) |
-| `CHECK_TESTS_BASELINE` | `1` | Set to `0` to disable the `tests-baseline.json` net-new vs pre-existing failure split in /check2 |
+| `CHECK_TESTS_BASELINE` | `1` | Set to `0` to disable the `tests-baseline.json` net-new vs pre-existing failure split in /check2 (the baseline file lives in the ticket tasks dir, next to `.check2-state.json`) |
 | `CHECK_E2E_SPEC_TIMEOUT_MS` | `60000` | Per-spec time budget exported to the e2e suite as `E2E_PER_SPEC_TIMEOUT_MS` (30s is too tight under `--repeat-each --workers=1`) |
 | `CHECK_IMPACT_TESTS` | `1` | Set to `0` to disable /check2 impact-aware unit-test selection (the one-hop `IMPACT_TEST_FILES` set of test files importing a changed source file, exported to `SCRIPT_RUN_AFFECTED_UNIT`) |
+| `CHECK_GHERKIN_SCOPE` | `1` | Set to `0` to disable the /check2 `4b_gherkin_scope` step (declared Gherkin scope in spec.md vs actual committed diff) — the step auto-passes with a SKIPPED note in `gherkin-scope.check.md` |
 | `SESSION_GUARD_ENABLED` | `1` | Prevent concurrent /work sessions |
 | `TASK_REVIEW_MAX_FIXES` | `2` | Max fix rounds per task review |
 | `READ_DOCS_ON_BRIEF` | | Paths to docs the brief-writer should read |

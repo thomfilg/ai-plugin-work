@@ -7,7 +7,7 @@
  *
  * IMPORTANT: No step-specific logic here. Steps live in lib/steps/.
  *
- * Usage: node check-next.js <TICKET_ID> [--init]
+ * Usage: node check-next.js <TICKET_ID> [--init] [--force-reset --reason "<text>"]
  */
 
 'use strict';
@@ -148,6 +148,14 @@ function answerNeedsWork(safeName, state, assessment) {
 
 function answerStillValid(safeName, state, assessment) {
   // Same hash, reports passing → genuinely still valid.
+  // Livelock fix (PR #669 review): when a terminal needs_work state re-assesses
+  // as valid (reports re-written APPROVED at the same hash), PROMOTE it to
+  // complete and record completion SHAs — otherwise work's check-gate keeps
+  // refusing on status 'needs_work' while we keep answering "nothing to do".
+  if (state.status !== 'complete') {
+    state.status = 'complete';
+    recordCompletion(state, { currentHead: assessment.currentHead });
+  }
   saveState(safeName, state);
   return {
     state,
@@ -225,7 +233,63 @@ function getNextInstruction(safeName, opts = {}) {
   return runOrchestratorLoop(safeName, state, ctx, probes);
 }
 
+// ─── Force reset (GH-307 AC) ────────────────────────────────────────────────
+// Operator escape hatch: archive the current (typically terminal) state with a
+// MANDATORY reason, then start a fresh cycle. Mirrors WorkflowState.archive
+// (state copied to `<state-file>.archived-<ts>` with the reason embedded) plus
+// the previousCycle audit trail resetStaleCycle records.
+
+function archiveStateFile(safeName, state, reason) {
+  if (!state) return null;
+  const archivedTo = `${stateFile(safeName)}.archived-${Date.now()}`;
+  const payload = {
+    ...state,
+    archivedReason: `force-reset: ${reason}`,
+    archivedAt: new Date().toISOString(),
+  };
+  fs.writeFileSync(archivedTo, JSON.stringify(payload, null, 2));
+  return archivedTo;
+}
+
+function buildPreviousCycle(state, reason) {
+  const prior = state || {};
+  return {
+    changesHash: prior.completedChangesHash || prior.changesHash || null,
+    completedHeadSha: prior.completedHeadSha || null,
+    completedAt: prior.completedAt || null,
+    status: prior.status || null,
+    invalidatedAt: new Date().toISOString(),
+    reason: `force-reset: ${reason}`,
+  };
+}
+
+function forceResetState(safeName, reason) {
+  const state = loadState(safeName);
+  const archivedTo = archiveStateFile(safeName, state, reason);
+  const fresh = initState(safeName);
+  fresh.previousCycle = buildPreviousCycle(state, reason);
+  saveState(safeName, fresh);
+  const priorStatus = (state && state.status) || 'none';
+  console.error(
+    `[check-next] FORCE-RESET ${safeName}: previous state (status: ${priorStatus}) archived to ${archivedTo || '(no prior state file)'} — reason: ${reason}`
+  );
+}
+
 // ─── CLI ────────────────────────────────────────────────────────────────────
+
+function parseArgs(argv) {
+  const flags = { init: false, forceReset: false, reason: null };
+  const positional = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (a === '--init') flags.init = true;
+    else if (a === '--force-reset') flags.forceReset = true;
+    else if (a === '--reason') flags.reason = argv[++i] ?? null;
+    else if (a.startsWith('--reason=')) flags.reason = a.slice('--reason='.length);
+    else if (!a.startsWith('--')) positional.push(a);
+  }
+  return { flags, ticketRaw: positional[0] };
+}
 
 function main() {
   const args = process.argv.slice(2);
@@ -240,8 +304,24 @@ function main() {
     process.exit(0);
   }
 
-  const ticketRaw = args.filter((a) => !a.startsWith('--'))[0];
-  const isInit = args.includes('--init');
+  const { flags, ticketRaw } = parseArgs(args);
+  const isInit = flags.init;
+
+  if (flags.forceReset && !(flags.reason && flags.reason.trim())) {
+    console.log(
+      JSON.stringify(
+        {
+          type: 'check_instruction',
+          action: 'blocked',
+          reason:
+            '--force-reset requires --reason "<text>" — the reason is recorded in the archived state audit trail. Refusing to reset without one.',
+        },
+        null,
+        2
+      )
+    );
+    return;
+  }
 
   // Sanitize ticket ID: #279 → GH-279, PROJ-123 → PROJ-123
   const providerConfig = tp.getProviderConfig({ skipPrompt: true });
@@ -284,6 +364,7 @@ function main() {
 
   let instruction;
   try {
+    if (flags.forceReset) forceResetState(safeName, flags.reason.trim());
     instruction = getNextInstruction(safeName);
   } finally {
     releaseLock(lockPath);

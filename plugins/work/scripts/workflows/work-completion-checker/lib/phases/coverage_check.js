@@ -38,11 +38,22 @@ const { mintTasksMdWriteToken, TOKEN_MAX_AGE_MS } = require('../../../lib/tasks-
  * completion agents actually author (ECHO-5818): Covered, Verified,
  * "Verified N/A", Respected, and a whole-cell N/A / NA.
  */
+// Exact-token matching (word boundaries via non-letter/digit edges) so
+// negated/partial statuses never count: "Uncovered" must NOT match "covered",
+// "incomplete" must NOT match "complete".
+const DELIVERED_TOKEN_RE =
+  /(^|[^a-z0-9])(delivered|done|completed?|ok|covered|verified|respected)(?=$|[^a-z0-9])/i;
+// Explicit negation/partial rejection: "Not covered", "NOT VERIFIED",
+// "partially covered", "pending", "missing", and un-prefixed token forms.
+const NEGATED_STATUS_RE =
+  /(^|[^a-z0-9])(not?|never|partial(?:ly)?|pending|missing|incomplete|un(?:delivered|done|completed?|covered|verified|respected))(?=$|[^a-z0-9])/i;
+
 function isDeliveredStatus(status) {
   const s = String(status || '').trim();
   if (!s) return false;
   if (/^n\/?a$/i.test(s)) return true; // whole-cell "N/A" / "NA"
-  return /delivered|done|complete|ok|✓|covered|verified|respected/i.test(s);
+  if (NEGATED_STATUS_RE.test(s)) return false;
+  return DELIVERED_TOKEN_RE.test(s) || s.includes('✓');
 }
 
 /**

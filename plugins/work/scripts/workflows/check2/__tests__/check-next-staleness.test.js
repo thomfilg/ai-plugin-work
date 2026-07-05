@@ -57,8 +57,8 @@ function currentChangesHash() {
   return crypto.createHash('sha256').update(diff).digest('hex').substring(0, 12);
 }
 
-function runCheckNext() {
-  const stdout = execFileSync(process.execPath, [scriptPath, TICKET], {
+function runCheckNext(extraArgs = []) {
+  const stdout = execFileSync(process.execPath, [scriptPath, TICKET, ...extraArgs], {
     encoding: 'utf8',
     timeout: 90000,
     stdio: ['pipe', 'pipe', 'pipe'],
@@ -211,5 +211,148 @@ describe('check-next.js — SHA-gated terminal state', () => {
     const state = loadState();
     assert.equal(state.status, 'in_progress');
     assert.match(state.previousCycle.reason, /sha-drift/);
+  });
+});
+
+describe('check-next.js — needs_work → valid promotion (PR #669 review livelock)', () => {
+  it('promotes a needs_work state to complete when reports re-parse APPROVED at the same hash, and the /work check gate then advances', () => {
+    const hash = currentChangesHash();
+    const head = git(['rev-parse', 'HEAD']);
+    // Terminal needs_work state, but every report at the CURRENT hash passes
+    // (the reports were re-written APPROVED without a new commit).
+    writeReport('tests.check.md', 'APPROVED', hash);
+    writeReport('code-review.check.md', 'APPROVED', hash);
+    writeReport('completion.check.md', 'COMPLETE', hash);
+    writeCompleteState({ status: 'needs_work', changesHash: hash });
+
+    const out = runCheckNext();
+    assert.equal(out.action, 'complete');
+    assert.match(out.summary, /still valid/i);
+
+    // The state must be PROMOTED — answering "nothing to do" while leaving
+    // status needs_work livelocked against work's check gate.
+    const state = loadState();
+    assert.equal(state.status, 'complete');
+    assert.equal(state.completedChangesHash, hash);
+    assert.ok(state.completedHeadSha, 'completion HEAD must be recorded');
+    assert.equal(state.completedHeadSha, head);
+
+    // ...and the /work check gate now advances check → pr.
+    const { dispatchAdvanceGate } = require('../../work/lib/step-enrichments/check-gate');
+    const ws = { stepStatus: { check: 'in_progress' }, currentStep: 0 };
+    let saved = null;
+    const gateResult = dispatchAdvanceGate(
+      TICKET,
+      { tasksDir: ticketDir, worktreeDir: repoDir },
+      {
+        loadWorkState: () => ws,
+        saveWorkState: (_n, s) => {
+          saved = s;
+        },
+        recursionDepth: 0,
+        probes: { currentHash: hash, currentHead: head },
+      }
+    );
+    assert.deepEqual(gateResult, { recurse: true });
+    assert.equal(saved.stepStatus.check, 'completed');
+    assert.equal(saved.stepStatus.pr, 'in_progress');
+  });
+
+  it('check gate itself promotes a stale needs_work status when the assessment is valid (order-independent)', () => {
+    const hash = currentChangesHash();
+    const head = git(['rev-parse', 'HEAD']);
+    writeReport('tests.check.md', 'APPROVED', hash);
+    writeReport('code-review.check.md', 'APPROVED', hash);
+    writeReport('completion.check.md', 'COMPLETE', hash);
+    // The gate runs BEFORE any check-next invocation could promote the state.
+    writeCompleteState({ status: 'needs_work', changesHash: hash });
+
+    const { dispatchAdvanceGate } = require('../../work/lib/step-enrichments/check-gate');
+    const ws = { stepStatus: { check: 'in_progress' }, currentStep: 0 };
+    const gateResult = dispatchAdvanceGate(
+      TICKET,
+      { tasksDir: ticketDir, worktreeDir: repoDir },
+      {
+        loadWorkState: () => ws,
+        saveWorkState: () => {},
+        recursionDepth: 0,
+        probes: { currentHash: hash, currentHead: head },
+      }
+    );
+    assert.deepEqual(gateResult, { recurse: true }, 'gate must advance, not refuse');
+    // The check2 state file was promoted on disk too.
+    const state = loadState();
+    assert.equal(state.status, 'complete');
+    assert.equal(state.completedChangesHash, hash);
+  });
+
+  it('check gate still REFUSES while a report is genuinely NEEDS_WORK at the current hash', () => {
+    const hash = currentChangesHash();
+    const head = git(['rev-parse', 'HEAD']);
+    writeReport('tests.check.md', 'APPROVED', hash);
+    writeReport('code-review.check.md', 'NEEDS_WORK', hash);
+    writeReport('completion.check.md', 'COMPLETE', hash);
+    writeCompleteState({ status: 'needs_work', changesHash: hash });
+
+    const { dispatchAdvanceGate } = require('../../work/lib/step-enrichments/check-gate');
+    const ws = { stepStatus: { check: 'in_progress' }, currentStep: 0 };
+    const gateResult = dispatchAdvanceGate(
+      TICKET,
+      { tasksDir: ticketDir, worktreeDir: repoDir },
+      {
+        loadWorkState: () => ws,
+        saveWorkState: () => {},
+        recursionDepth: 0,
+        probes: { currentHash: hash, currentHead: head },
+      }
+    );
+    assert.equal(gateResult.action, 'blocked');
+    assert.match(gateResult.reason, /code-review\.check\.md/);
+  });
+});
+
+describe('check-next.js — --force-reset (GH-307 AC)', () => {
+  it('refuses --force-reset without --reason and leaves the state untouched', () => {
+    const hash = currentChangesHash();
+    writeReport('tests.check.md', 'APPROVED', hash);
+    writeReport('code-review.check.md', 'APPROVED', hash);
+    writeReport('completion.check.md', 'COMPLETE', hash);
+    writeCompleteState({ changesHash: hash, completedChangesHash: hash });
+
+    const out = runCheckNext(['--force-reset']);
+    assert.equal(out.action, 'blocked');
+    assert.match(out.reason, /--reason/);
+    assert.equal(loadState().status, 'complete', 'state must be untouched');
+  });
+
+  it('archives the terminal state with the reason and starts a fresh cycle', () => {
+    const hash = currentChangesHash();
+    const head = git(['rev-parse', 'HEAD']);
+    writeReport('tests.check.md', 'APPROVED', hash);
+    writeReport('code-review.check.md', 'APPROVED', hash);
+    writeReport('completion.check.md', 'COMPLETE', hash);
+    writeCompleteState({
+      changesHash: hash,
+      completedChangesHash: hash,
+      completedHeadSha: head,
+    });
+
+    const out = runCheckNext(['--force-reset', '--reason', 'manual re-verify after infra fix']);
+    // Fresh cycle runs from 1_setup until the first delegation.
+    assert.equal(out.action, 'execute');
+
+    const state = loadState();
+    assert.equal(state.status, 'in_progress');
+    assert.ok(state.previousCycle, 'previousCycle audit trail must be recorded');
+    assert.match(state.previousCycle.reason, /force-reset: manual re-verify after infra fix/);
+    assert.equal(state.previousCycle.changesHash, hash);
+    assert.equal(state.previousCycle.status, 'complete');
+
+    // Archived copy exists with the reason embedded (WorkflowState.archive pattern).
+    const archived = fs.readdirSync(ticketDir).filter((f) => f.includes('.archived-'));
+    assert.equal(archived.length, 1, 'exactly one archived state file');
+    const archivedState = JSON.parse(fs.readFileSync(path.join(ticketDir, archived[0]), 'utf8'));
+    assert.match(archivedState.archivedReason, /force-reset: manual re-verify after infra fix/);
+    assert.equal(archivedState.status, 'complete');
   });
 });

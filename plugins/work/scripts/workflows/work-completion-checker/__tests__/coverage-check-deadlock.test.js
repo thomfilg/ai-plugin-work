@@ -73,6 +73,36 @@ test.describe('isDeliveredStatus — as-authored status values (ECHO-5818)', () 
   }
 });
 
+test.describe('isDeliveredStatus — negated/partial statuses must NOT match (PR #669 review)', () => {
+  const negated = [
+    'Not covered',
+    'not delivered',
+    'Uncovered',
+    'UNVERIFIED',
+    'NOT VERIFIED',
+    'partially covered',
+    'Partial',
+    'partially done',
+    'no evidence — pending verification',
+    'incomplete',
+    'undelivered',
+    'missing — verified needed',
+    'never delivered',
+  ];
+  for (const s of negated) {
+    test(`rejects "${s}"`, () => {
+      assert.equal(coverageCheck.isDeliveredStatus(s), false, `"${s}" must NOT count as delivered`);
+    });
+  }
+  // Word-boundary positives that must survive the negation hardening.
+  const stillAccepted = ['Covered', 'Verified N/A', 'Delivered (see tasks.md)', 'done ✓'];
+  for (const s of stillAccepted) {
+    test(`still accepts "${s}"`, () => {
+      assert.equal(coverageCheck.isDeliveredStatus(s), true, `"${s}" must count as delivered`);
+    });
+  }
+});
+
 test('coverage_check passes a split-in-tasks-authored table (Status=Covered)', () => {
   const { root, tasksDir } = makeTasksDir({
     'brief.md': BRIEF_WITH_P0,

@@ -14,6 +14,13 @@ const fs = require('fs');
 const path = require('path');
 const { evaluateReports, blockingReports, recordCompletion } = require('../staleness');
 
+// Registry-derived 'N/M' progress label. Lazy require: the registry requires
+// this module at load time, so a top-level require back would see a partial
+// module through the cycle (PR #669 review — stale hardcoded counts).
+function stepProgress(name) {
+  return require('../step-registry').stepProgress(name);
+}
+
 module.exports = function registerOutput(register) {
   register('11_output', (state, ctx) => {
     const reportFolder = state.setupResult?.reportFolder || ctx.tasksDir;
@@ -29,7 +36,11 @@ module.exports = function registerOutput(register) {
       return {
         type: 'check_instruction',
         action: 'needs_work',
-        state: { ticket: state.ticketId, currentStep: '11_output', progress: '8/8' },
+        state: {
+          ticket: state.ticketId,
+          currentStep: '11_output',
+          progress: stepProgress('11_output'),
+        },
         reason:
           `Check finished but is NOT approved — ` +
           blocking.map((r) => `${r.file} parses as ${r.status}`).join('; ') +
@@ -53,7 +64,11 @@ module.exports = function registerOutput(register) {
     return {
       type: 'check_instruction',
       action: 'complete',
-      state: { ticket: state.ticketId, currentStep: '9_output', progress: '8/8' },
+      state: {
+        ticket: state.ticketId,
+        currentStep: '11_output',
+        progress: stepProgress('11_output'),
+      },
       content: readme,
     };
   });

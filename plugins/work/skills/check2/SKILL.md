@@ -21,15 +21,19 @@ Execute the returned instruction. The PostToolUse auto-advance hook will call ch
 1. Setup (deterministic — runs inline)
 2. Start dev environment (deterministic — runs inline)
 3. Verify Playwright (skip if no web apps)
-4. **Phase 1**: Launch code-checker, quality-checker, completion-checker in parallel
-5. **Phase 2**: Consensus loop (developer evaluates suggestions, code-checker validates)
-6. Quality re-check (if code was modified during consensus)
-7. Validate reports + generate summary (deterministic — runs inline)
-8. Display results
-9. Cleanup
+4. Run tests (deterministic — runs inline; affected-only when `SCRIPT_RUN_AFFECTED_*` set)
+5. Gherkin scope validation (`4b_gherkin_scope`, deterministic — declared spec scope vs actual committed diff; disable with `CHECK_GHERKIN_SCOPE=0`)
+6. **Phase 1**: Launch code-checker, quality-checker, completion-checker in parallel
+7. **Phase 2**: Consensus loop (developer evaluates suggestions, code-checker validates)
+8. Quality re-check (if code was modified during consensus; deterministic — runs inline)
+9. Run integration tests (skipped unless configured)
+10. Run e2e tests (skipped unless configured)
+11. Validate reports + generate summary (deterministic — runs inline)
+12. Display results
 
-Steps 1-3 and 7-9 are deterministic and execute inline (no AI delegation needed).
-Only steps 4-6 require AI agent delegation.
+Only the Phase 1 / Phase 2 steps (`5_phase1_agents`, `6_phase2_consensus`) require
+AI agent delegation — every other step is deterministic and executes inline.
+The canonical step order lives in `scripts/workflows/check2/lib/step-registry.js`.
 
 ## Agent dispatch rules (MANDATORY)
 

@@ -242,3 +242,51 @@ describe('4_run_tests — baseline delta (echo-5137-4)', () => {
     assert.match(result.reason, /1 net-new .* 1 pre-existing/);
   });
 });
+
+describe('4_run_tests — baseline location (PR #669 review)', () => {
+  it('writes tests-baseline.json into the ticket tasks dir, NOT the cwd/app worktree', () => {
+    const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), 'run-tests-tasksdir-'));
+    try {
+      process.env.SCRIPT_RUN_AFFECTED_UNIT = makeScript(
+        'pass2.sh',
+        'echo " Tests  5 passed (5)"; exit 0'
+      );
+      const state = { setupResult: { reportFolder: dir }, changesHash: 'abc123', ticketId: 'T-1' };
+      const result = handler(state, { tasksDir, checkHooksDir: dir });
+      assert.equal(result, null);
+      assert.ok(
+        fs.existsSync(path.join(tasksDir, BASELINE_FILE)),
+        'baseline must live in the tasks dir (same place the check2 state lives)'
+      );
+      assert.equal(
+        fs.existsSync(path.join(dir, BASELINE_FILE)),
+        false,
+        'baseline must NOT pollute the app worktree root (cwd)'
+      );
+    } finally {
+      fs.rmSync(tasksDir, { recursive: true, force: true });
+    }
+  });
+
+  it('reads the cached baseline from the tasks dir for the net-new split', () => {
+    const tasksDir = fs.mkdtempSync(path.join(os.tmpdir(), 'run-tests-tasksdir2-'));
+    try {
+      process.env.CHECK_FLAKE_RETRY = '0';
+      fs.writeFileSync(
+        path.join(tasksDir, BASELINE_FILE),
+        JSON.stringify({ ref: 'base123', recordedAt: 'x', failures: ['src/old.test.ts > known'] })
+      );
+      process.env.SCRIPT_RUN_AFFECTED_UNIT = makeScript(
+        'fail3.sh',
+        'echo " FAIL  src/old.test.ts > known"; echo " Tests  1 failed | 1 passed (2)"; exit 1'
+      );
+      const state = { setupResult: { reportFolder: dir }, changesHash: 'abc123', ticketId: 'T-1' };
+      const result = handler(state, { tasksDir, checkHooksDir: dir });
+      assert.equal(result.action, 'failed');
+      const report = fs.readFileSync(path.join(dir, 'tests.check.md'), 'utf8');
+      assert.match(report, /### Pre-existing failures \(1\)/);
+    } finally {
+      fs.rmSync(tasksDir, { recursive: true, force: true });
+    }
+  });
+});

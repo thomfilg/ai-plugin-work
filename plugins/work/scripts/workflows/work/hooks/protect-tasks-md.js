@@ -149,138 +149,172 @@ const protector = createArtifactProtector({
   // Bash write-vector detection is handled by createArtifactProtector (checks basename in command strings)
 });
 
-async function main() {
+/** Read and parse the hook payload from stdin. */
+async function readHookData() {
   let input = '';
   for await (const chunk of process.stdin) {
     input += chunk;
   }
+  return JSON.parse(input);
+}
 
-  const hookData = JSON.parse(input);
+/**
+ * Scan ALL whitespace-separated tokens of a Bash command for tasks.md
+ * references and classify each as root-level or subfolder. A command may
+ * reference both (e.g. `cat subfolder/tasks.md >> root/tasks.md`).
+ * Bare tokens (no '/') are resolved against cwd to handle relative paths.
+ */
+function classifyBashTokenRefs(cmd, ticketId, tasksBase) {
+  let hasSubfolderRef = false;
+  let hasRootLevelRef = false;
+  const cwd = process.cwd();
+  for (const token of cmd.split(/\s+/)) {
+    const cleaned = token.replace(/^[>]+/, '').replace(/['"]/g, '');
+    if (!cleaned.includes('tasks.md')) continue;
+    // Resolve: absolute paths stay absolute, relative paths resolve against cwd
+    const resolved = cleaned.includes('/') ? cleaned : path.resolve(cwd, cleaned);
+    const depth = isRootLevelTasksMd(resolved, ticketId, tasksBase);
+    if (depth === false) hasSubfolderRef = true;
+    if (depth === true) hasRootLevelRef = true;
+  }
+  return { hasSubfolderRef, hasRootLevelRef };
+}
+
+/**
+ * GH-309: Early exit for subfolder tasks.md files.
+ * Only the root-level <ticketId>/tasks.md is the workflow artifact that needs
+ * step-gated protection. Subfolder tasks.md files (e.g. flaky-tests/tasks.md)
+ * are user-created and should not be blocked. Returns true when the tool call
+ * only touches subfolder tasks.md files and must be allowed unconditionally.
+ */
+function isSubfolderOnlyReference(toolName, toolInput, cmd, ticketId) {
+  try {
+    const getConfig = require(path.join(__dirname, '..', '..', 'lib', 'get-config'));
+    const tasksBase = getConfig.require('TASKS_BASE');
+
+    // For Write/Edit/MultiEdit: check file_path directly
+    if (['Write', 'Edit', 'MultiEdit'].includes(toolName)) {
+      if (isRootLevelTasksMd(toolInput.file_path, ticketId, tasksBase) === false) {
+        return true; // Subfolder tasks.md — allow unconditionally
+      }
+    }
+
+    // For Bash: extract all target paths from the command and check depth.
+    // Only exit 0 if subfolder references exist AND no root-level reference exists.
+    if (toolName === 'Bash' && bashReferencesTasksMd(cmd)) {
+      const { hasSubfolderRef, hasRootLevelRef } = classifyBashTokenRefs(cmd, ticketId, tasksBase);
+      if (hasSubfolderRef && !hasRootLevelRef) {
+        return true; // Only subfolder tasks.md refs — allow unconditionally
+      }
+    }
+  } catch {
+    /* fail-open: if config is unavailable, fall through to protector.check */
+  }
+  return false;
+}
+
+/**
+ * GH-309: Extract ALL relative paths referencing tasks.md from the command,
+ * resolve each against cwd. This handles ../tasks.md, ./sub/tasks.md,
+ * cp tasks.md ../tasks.md, etc.
+ */
+function classifyRelativeRefs(cmd, cwd, ticketId, tasksBase) {
+  const refPattern = /[^\s;|&]*tasks\.md/g;
+  const refs = cmd.match(refPattern) || ['tasks.md'];
+  let anyRoot = false;
+  let anySub = false;
+  for (const ref of refs) {
+    const cleaned = ref.replace(/^[>]+/, '').replace(/['"]/g, '');
+    const resolved = path.resolve(cwd, cleaned);
+    const depth = isRootLevelTasksMd(resolved, ticketId, tasksBase);
+    if (depth === true) anyRoot = true;
+    if (depth === false) anySub = true;
+  }
+  return { anyRoot, anySub };
+}
+
+/**
+ * We're inside the ticket directory — relative tasks.md is ticket-scoped.
+ * Blocks (exit 2) unless the step allows it or a one-shot completion-next.js
+ * write token — the legitimate repair path for the coverage_check ↔
+ * protect-tasks-md deadlock — is present.
+ */
+function blockRelativeWriteUnlessAllowed(ticketId) {
+  const step = getStepInProgress(ticketId);
+  if (ALLOWED_STEPS.has(step)) return;
+  if (consumeTasksMdWriteToken(ticketId)) {
+    process.exit(0);
+  }
+  process.stderr.write(
+    'BLOCKED: Bash write to tasks.md via relative path during ' + (step || 'unknown') + ' step.\n'
+  );
+  process.exit(2);
+}
+
+/** Additional Bash vector: resolve relative paths against cwd. */
+function handleRelativeBashVector(toolName, cmd, ticketId) {
+  if (toolName !== 'Bash' || !bashReferencesTasksMd(cmd) || !ticketId) return;
+  if (cmd.includes('/' + ticketId + '/')) return;
+  try {
+    const cwd = process.cwd();
+    const getConfig = require(path.join(__dirname, '..', '..', 'lib', 'get-config'));
+    const tasksBase = getConfig.require('TASKS_BASE');
+    if (!cwd.startsWith(path.join(tasksBase, ticketId))) return;
+    // Only allow if ALL resolve to subfolder (not root).
+    const { anyRoot, anySub } = classifyRelativeRefs(cmd, cwd, ticketId, tasksBase);
+    if (anySub && !anyRoot) {
+      process.exit(0);
+    }
+    blockRelativeWriteUnlessAllowed(ticketId);
+  } catch {
+    /* fail-open */
+  }
+}
+
+/**
+ * Enforce the protector verdict. Step-gated tasks.md block: honor a one-shot
+ * write token minted by completion-next.js (coverage_check). The token is
+ * consumed (deleted) whether or not it is valid, so it authorizes at most
+ * one write.
+ */
+function enforceProtectorResult(result, ticketId) {
+  if (!result.blocked) return;
+  const isTasksMdStepBlock = result.rule === 'step' && result.file === 'tasks.md';
+  if (isTasksMdStepBlock && ticketId && consumeTasksMdWriteToken(ticketId)) {
+    process.exit(0);
+  }
+  let message = result.message;
+  if (isTasksMdStepBlock) {
+    message +=
+      'If you are repairing the Requirement Coverage table for the completion check, ' +
+      're-run completion-next.js — when coverage_check blocks it mints a one-shot ' +
+      'tasks.md write token that this hook honors.\n';
+  }
+  process.stderr.write(message);
+  process.exit(2);
+}
+
+async function main() {
+  const hookData = await readHookData();
   const toolName = hookData.tool_name;
   const toolInput = hookData.tool_input || {};
   const cmd = toolInput.command || '';
 
-  // GH-309: Early exit for subfolder tasks.md files.
-  // Only the root-level <ticketId>/tasks.md is the workflow artifact that needs
-  // step-gated protection. Subfolder tasks.md files (e.g. flaky-tests/tasks.md)
-  // are user-created and should not be blocked.
   const ticketId = getTicketId(hookData);
   const targetBasename = toolInput.file_path ? path.basename(toolInput.file_path) : '';
   const hasTasksMdReference =
     targetBasename === 'tasks.md' || (toolName === 'Bash' && bashReferencesTasksMd(cmd));
-  if (ticketId && hasTasksMdReference) {
-    try {
-      const getConfig = require(path.join(__dirname, '..', '..', 'lib', 'get-config'));
-      const tasksBase = getConfig.require('TASKS_BASE');
-
-      // For Write/Edit/MultiEdit: check file_path directly
-      if (['Write', 'Edit', 'MultiEdit'].includes(toolName)) {
-        if (isRootLevelTasksMd(toolInput.file_path, ticketId, tasksBase) === false) {
-          process.exit(0); // Subfolder tasks.md — allow unconditionally
-        }
-      }
-
-      // For Bash: extract all target paths from the command and check depth.
-      // We must scan ALL tokens — a command may reference both subfolder and
-      // root-level tasks.md (e.g. `cat subfolder/tasks.md >> root/tasks.md`).
-      // Only exit 0 if subfolder references exist AND no root-level reference exists.
-      // Bare tokens (no '/') are resolved against cwd to handle relative paths.
-      if (toolName === 'Bash' && bashReferencesTasksMd(cmd)) {
-        let hasSubfolderRef = false;
-        let hasRootLevelRef = false;
-        const cwd = process.cwd();
-        const tokens = cmd.split(/\s+/);
-        for (const token of tokens) {
-          const cleaned = token.replace(/^[>]+/, '').replace(/['"]/g, '');
-          if (!cleaned.includes('tasks.md')) continue;
-          // Resolve: absolute paths stay absolute, relative paths resolve against cwd
-          const resolved = cleaned.includes('/') ? cleaned : path.resolve(cwd, cleaned);
-          const depth = isRootLevelTasksMd(resolved, ticketId, tasksBase);
-          if (depth === false) hasSubfolderRef = true;
-          if (depth === true) hasRootLevelRef = true;
-        }
-        if (hasSubfolderRef && !hasRootLevelRef) {
-          process.exit(0); // Only subfolder tasks.md refs — allow unconditionally
-        }
-      }
-    } catch {
-      /* fail-open: if config is unavailable, fall through to protector.check */
-    }
-  }
-
-  // Additional Bash vector: resolve relative paths against cwd
   if (
-    toolName === 'Bash' &&
-    bashReferencesTasksMd(cmd) &&
     ticketId &&
-    !cmd.includes('/' + ticketId + '/')
+    hasTasksMdReference &&
+    isSubfolderOnlyReference(toolName, toolInput, cmd, ticketId)
   ) {
-    try {
-      const cwd = process.cwd();
-      const getConfig = require(path.join(__dirname, '..', '..', 'lib', 'get-config'));
-      const tasksBase = getConfig.require('TASKS_BASE');
-      if (cwd.startsWith(path.join(tasksBase, ticketId))) {
-        // GH-309: Extract ALL relative paths referencing tasks.md from the command,
-        // resolve each against cwd. Only allow if ALL resolve to subfolder (not root).
-        // This handles ../tasks.md, ./sub/tasks.md, cp tasks.md ../tasks.md, etc.
-        const refPattern = /[^\s;|&]*tasks\.md/g;
-        const refs = cmd.match(refPattern) || ['tasks.md'];
-        let anyRoot = false;
-        let anySub = false;
-        for (const ref of refs) {
-          const cleaned = ref.replace(/^[>]+/, '').replace(/['"]/g, '');
-          const resolved = path.resolve(cwd, cleaned);
-          const depth = isRootLevelTasksMd(resolved, ticketId, tasksBase);
-          if (depth === true) anyRoot = true;
-          if (depth === false) anySub = true;
-        }
-        if (anySub && !anyRoot) {
-          process.exit(0);
-        }
-        // We're inside the ticket directory — relative tasks.md is ticket-scoped
-        const step = getStepInProgress(ticketId);
-        if (!ALLOWED_STEPS.has(step)) {
-          // One-shot completion-next.js write token — legitimate repair path
-          // for the coverage_check ↔ protect-tasks-md deadlock.
-          if (consumeTasksMdWriteToken(ticketId)) {
-            process.exit(0);
-          }
-          process.stderr.write(
-            'BLOCKED: Bash write to tasks.md via relative path during ' +
-              (step || 'unknown') +
-              ' step.\n'
-          );
-          process.exit(2);
-        }
-      }
-    } catch {
-      /* fail-open */
-    }
+    process.exit(0);
   }
 
-  const result = protector.check(toolName, toolInput, hookData);
-  if (result.blocked) {
-    // Step-gated tasks.md block: honor a one-shot write token minted by
-    // completion-next.js (coverage_check). The token is consumed (deleted)
-    // whether or not it is valid, so it authorizes at most one write.
-    if (
-      result.rule === 'step' &&
-      result.file === 'tasks.md' &&
-      ticketId &&
-      consumeTasksMdWriteToken(ticketId)
-    ) {
-      process.exit(0);
-    }
-    let message = result.message;
-    if (result.rule === 'step' && result.file === 'tasks.md') {
-      message +=
-        'If you are repairing the Requirement Coverage table for the completion check, ' +
-        're-run completion-next.js — when coverage_check blocks it mints a one-shot ' +
-        'tasks.md write token that this hook honors.\n';
-    }
-    process.stderr.write(message);
-    process.exit(2);
-  }
+  handleRelativeBashVector(toolName, cmd, ticketId);
+
+  enforceProtectorResult(protector.check(toolName, toolInput, hookData), ticketId);
   process.exit(0);
 }
 
