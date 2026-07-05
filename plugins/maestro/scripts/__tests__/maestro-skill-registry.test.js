@@ -53,10 +53,16 @@ test('readTicketSkill: missing .maestro-skill file falls open to "work"', () => 
   assert.equal(reg.readTicketSkill('GH-9001'), 'work');
 });
 
-test('readTicketSkill: unknown stored value falls open to "work"', () => {
+test('readTicketSkill: regex-valid unknown value is HONORED; malformed falls open to "work"', () => {
   const tasksBase = mkTasksBase();
+  // Regex-valid non-whitelisted skill (qc-work class): honored as written —
+  // the write path already gated it, and falling open to /work restarted a
+  // foreign workflow on delivered tickets (observed live).
   writeTicketFile(tasksBase, 'GH-9002', '.maestro-skill', 'totally-unknown-skill\n');
   const reg = freshRegistry(tasksBase);
+  assert.equal(reg.readTicketSkill('GH-9002'), 'totally-unknown-skill');
+  // Malformed (fails SKILL_NAME_REGEX) still falls open to /work.
+  writeTicketFile(tasksBase, 'GH-9002', '.maestro-skill', 'Evil; rm -rf /\n');
   assert.equal(reg.readTicketSkill('GH-9002'), 'work');
 });
 

@@ -7,24 +7,30 @@
  *               or when a spinner is clearly hung)
  *   alert     → no agent action; write to the maestro alert sink
  *
- * Nudge text is intentionally generic; the agent decides how to land
- * uncommitted work (the 'commit agent' is the orchestrator's commit-writer).
- * Avoid literal CLI strings that trip the enforce-agent-usage hook.
+ * Nudge text is per-skill (skill-registry row `nudge` template) so a
+ * /follow-up or /qc-work agent is never coached in /work vocabulary. Avoid
+ * literal CLI strings that trip the enforce-agent-usage hook.
+ *
+ * Slot-freeing paths (CI-phase rotation, dead-end rotation, stop-condition
+ * reap) all flow through slot-rotation.killAndBootstrapNext; the dead-end
+ * probe/strike tiers live in dead-end-rotation.js (PR #603).
  */
 const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const tmux = require('./tmux');
-const namespace = require('./namespace');
 const alerts = require('./alerts');
 const state = require('./state');
 const manifest = require('./manifest');
+const progress = require('./progress');
+const restartLaunch = require('./restart-launch');
+const slotRotation = require('./slot-rotation');
+const deadEndRotation = require('./dead-end-rotation');
 const {
   findNextEligibleTask,
   findEligibleTasks,
   buildNextActionInstruction,
 } = require('./next-task');
-const { purgeAlertCountsForTicket } = require('../../maestro-cleanup');
 const skillRegistry = require('./skill-registry');
 const { formatLogLine } = require('./detectors/silence');
 const {
@@ -35,10 +41,21 @@ const {
   resolveSkillForRestart,
 } = require('./restart-guards');
 
-const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
-
 const BOOTSTRAP_SCRIPT = path.join(__dirname, '..', '..', 'maestro-bootstrap.sh');
 const REPO_NAME = process.env.REPO_NAME || 'claude-plugin-work';
+
+// GH-626: inherit the orchestration's command. Without --skill the bootstrap
+// falls open to /work — observed live: a `command=/follow-up` pool topped up
+// with `.maestro-skill = work` agents that then re-entered /work gates.
+function bootstrapArgsFor(taskId) {
+  const args = [BOOTSTRAP_SCRIPT];
+  const command = manifest.commandForTask(taskId);
+  if (command && command !== 'work') {
+    args.push(`--skill=${command}`, '--allow-generic');
+  }
+  args.push(taskId);
+  return args;
+}
 
 /**
  * Optionally bootstrap a fresh tmux + worktree for the next ticket. Returns
@@ -49,14 +66,15 @@ function maybeAutoBootstrap(taskId) {
   if (process.env.AUTO_BOOTSTRAP_NEXT !== '1') return false;
   if (!taskId || !/^[A-Z]+-\d+$/.test(taskId)) return false;
   if (!fs.existsSync(BOOTSTRAP_SCRIPT)) return false;
-  // Respect manifest-declared pool size (sum of `slots` across manifests).
-  // Avoids over-bootstrapping when an operator pre-launched sessions.
+  // Respect manifest-declared pool size (global live -work count vs the
+  // owning manifest's slots). Avoids over-bootstrapping when an operator
+  // pre-launched sessions or a sibling manifest already fills the machine.
   try {
     const tmuxMod = require('./tmux');
     const activeSessions = tmuxMod.listSessions ? tmuxMod.listSessions() : [];
     if (manifest.poolFullForTask(taskId, activeSessions)) return false;
   } catch {}
-  const res = spawnSync('bash', [BOOTSTRAP_SCRIPT, taskId], {
+  const res = spawnSync('bash', bootstrapArgsFor(taskId), {
     stdio: 'ignore',
     env: { ...process.env, REPO_NAME },
   });
@@ -66,45 +84,57 @@ function maybeAutoBootstrap(taskId) {
   return res.status === 0;
 }
 
-function msgFor(reason, mode) {
-  const base = `MAESTRO (${mode}): ${reason}. Audit uncommitted files via git status. If any are present, dispatch the commit agent with 'autonomous' to land them, then push. Re-run task-next.js to advance the gate.`;
-  if (mode === 'interrupt') {
-    return `${base} I sent Esc to break any stuck subagent — do NOT re-dispatch the same one without diagnosing why it hung.`;
-  }
-  return base;
+// Resolve the nudge template from the skill's registry row so the text speaks
+// the agent's own workflow vocabulary. Undefined/unknown skill → work row
+// (back-compat with callers that don't thread a skill through).
+function msgFor(reason, mode, skill) {
+  const row = skillRegistry.get(skill) || skillRegistry.get('work');
+  return row.nudge(reason, mode);
 }
 
-function soft(session, reason) {
-  alerts.log(`${session} NUDGE soft: ${reason}`);
-  tmux.sendLine(session, msgFor(reason, 'soft'));
+function soft(session, reason, skill) {
+  const delivery = tmux.sendLine(session, msgFor(reason, 'soft', skill));
+  alerts.log(`${session} NUDGE soft [${delivery}]: ${reason}`);
 }
 
-function interrupt(session, reason) {
-  alerts.log(`${session} NUDGE interrupt: ${reason}`);
+function interrupt(session, reason, skill) {
   tmux.sendKey(session, 'Escape');
   // Brief pause so the TUI registers the Esc before we push text.
   // Use spawnSync('sleep') so we block without pinning a CPU core.
   spawnSync('sleep', ['1.5']);
-  tmux.sendLine(session, msgFor(reason, 'interrupt'));
+  const delivery = tmux.sendLine(session, msgFor(reason, 'interrupt', skill));
+  alerts.log(`${session} NUDGE interrupt [${delivery}]: ${reason}`);
 }
 
 function alert(reasonObj) {
   return alerts.alert(reasonObj);
 }
 
+/** killAndBootstrapNext with this module's maybeAutoBootstrap + alert bound. */
+function killAndBootstrapNext(args) {
+  return slotRotation.killAndBootstrapNext({ ...args, maybeAutoBootstrap, alert });
+}
+
 /**
- * Auto-restart a dead -work session in place: kill the existing tmux
- * session, then relaunch `claude --dangerously-skip-permissions /<skill> <ticket>`
- * inside the worktree. Returns true if the restart command was issued.
+ * Auto-restart a dead -work session in place: kill the existing tmux session,
+ * then relaunch inside the worktree — fresh (`/<skill> <ticket>`) or resumed
+ * (`--continue`) per restart-launch.restartModeFor(). Returns true if the
+ * restart was issued.
  *
- * Ported from maestro-conduct.sh's auto-restart branch. Caller is responsible
- * for restart eligibility (only -work sessions) and for clearing per-ticket
- * markers after the restart so detectors don't fire against the stale state.
- *
- * Eligibility guards and the wedged-loop declaration live in restart-guards.js.
+ * Caller is responsible for restart eligibility (only -work sessions) and for
+ * clearing per-ticket markers after the restart so detectors don't fire
+ * against the stale state. Eligibility guards and the wedged-loop declaration
+ * live in restart-guards.js; launch mechanics in restart-launch.js.
  */
 function autoRestart({ session, ticket, worktree, silenceSec }) {
   if (checkRestartGuards({ session, ticket, worktree }).skip) return false;
+
+  // Progress guard: a "silent" pane with a worktree that changed within the
+  // freshness window means the agent is producing. Skip and re-evaluate next tick.
+  if (progress.hasFreshProgress(ticket)) {
+    restartLaunch.logProgressSkip(session, ticket);
+    return false;
+  }
 
   // Restart-loop guard. Marker shape: { restarts: [unix_ts...], wedgedUntil? }.
   const now = state.now();
@@ -121,58 +151,28 @@ function autoRestart({ session, ticket, worktree, silenceSec }) {
 
   state.write(session, 'restart-loop', { restarts: [...restarts, now] });
   const skill = resolveSkillForRestart(ticket, session); // GH-514 R1/AC2/AC6
+  const mode = restartLaunch.restartModeFor(skill, worktree);
   // PR #561 follow-up: prefix the production silence log with the skill-aware
   // token from formatLogLine so operators can grep `[<ticket>:<skill>]` in
   // /tmp/maestro-conduct.log — the README's skill-adapter section promised it.
   alerts.log(
-    `${formatLogLine({ ticket, skill, silenceSec, kind: 'silence' })} ${session} AUTO-RESTART after ${silenceSec}s silence — relaunching /${skill} ${ticket}`
+    `${formatLogLine({ ticket, skill, silenceSec, kind: 'silence' })} ${session} AUTO-RESTART after ${silenceSec}s silence — ${
+      mode === 'continue' ? 'resuming conversation (--continue)' : `relaunching /${skill} ${ticket}`
+    }`
   );
+  const launch = restartLaunch.buildLaunchCommand(mode, skill, ticket);
   spawnSync('tmux', ['kill-session', '-t', session], { stdio: 'ignore' });
-  spawnSync(
-    'tmux',
-    [
-      'new-session',
-      '-d',
-      '-s',
+  spawnSync('tmux', ['new-session', '-d', '-s', session, '-c', worktree, launch], {
+    stdio: 'ignore',
+  });
+  restartLaunch.groomRestartedSession(session, ticket, skill);
+  if (mode === 'continue') {
+    tmux.sendLine(
       session,
-      '-c',
-      worktree,
-      `${inboxEnvPrefix()}${CLAUDE_BIN} --dangerously-skip-permissions '/${skill} ${ticket}'`,
-    ],
-    { stdio: 'ignore' }
-  );
-  return true;
-}
-
-// GH-622: on an auto-restart, relaunch /work with the SAME mailbox dir
-// maestro-bootstrap.sh sets on the initial launch — otherwise the restarted
-// agent's messaging drifts back to the global mailbox while maestro /signal
-// stays isolated. Fires when isolated (a namespace OR an explicit
-// MAESTRO_INBOX_DIR override) and resolves through namespace.inboxDir() so the
-// path equals maestro's own /signal side (and honors MAESTRO_INBOX_DIR). The
-// value is single-quote-escaped so an override with shell metacharacters can't
-// break out of the launch command.
-function inboxEnvPrefix() {
-  if (!namespace.ns() && !process.env.MAESTRO_INBOX_DIR) return '';
-  const esc = namespace.inboxDir().replace(/'/g, "'\\''");
-  return `CLAUDE_AGENT_INBOX_DIR='${esc}' `;
-}
-
-/**
- * freeCIGateSlot — kill the -work and -listen panes of a ticket whose PR has
- * reached CI gate (CLEAN/SUCCESS, awaiting operator merge). Emits a
- * structured alert kind=slot-freed so the orchestrator can bootstrap the next
- * ticket. Idempotent: writes a per-ticket marker so repeated pr-ready emits
- * on the same SHA don't try to kill an already-killed session.
- *
- * No-op if AUTO_FREE_CI_SLOT=0.
- */
-function killTicketTmux(ticket) {
-  for (const suffix of ['work', 'listen']) {
-    spawnSync('tmux', ['kill-session', '-t', tmux.sessionName(ticket, suffix)], {
-      stdio: 'ignore',
-    });
+      `MAESTRO: your session was auto-restarted after ${silenceSec}s of silence. Continue the task from where you left off; if a subprocess died with the old session, re-run it.`
+    );
   }
+  return true;
 }
 
 function emitSlotFreedAlert({
@@ -202,14 +202,20 @@ function emitSlotFreedAlert({
   });
 }
 
+/**
+ * freeCIGateSlot — kill the -work and -listen panes of a ticket whose PR has
+ * reached CI gate (CLEAN/SUCCESS, awaiting operator merge). Emits a
+ * structured alert kind=slot-freed so the orchestrator can bootstrap the next
+ * ticket. Idempotent: a per-ticket marker keeps repeated pr-ready emits on
+ * the same SHA from re-killing. No-op if AUTO_FREE_CI_SLOT=0.
+ */
 function freeCIGateSlot({ session, ticket, prNumber, sha }) {
   if (process.env.AUTO_FREE_CI_SLOT === '0') return false;
   const marker = state.read(session, 'slot-freed') || {};
   const ciFreed = state.read(ticket, 'ci-gate-freed') || {};
   // Always kill any alive tmux sessions for this ticket — defensive against
-  // sessions resurrected by autoRestart between ticks. tmux kill-session is
-  // idempotent and silent when the session is already gone.
-  killTicketTmux(ticket);
+  // sessions resurrected by autoRestart between ticks; kill is idempotent.
+  slotRotation.killTicketTmux(ticket);
   // Per-ticket marker that autoRestart consults to refuse resurrection.
   // Overwritten on each fresh SHA so a force-push that re-opens CI naturally
   // re-engages the agent.
@@ -223,7 +229,7 @@ function freeCIGateSlot({ session, ticket, prNumber, sha }) {
     'awaiting-merge',
     `PR #${prNumber} CLEAN/SUCCESS at sha=${(sha || '').slice(0, 7)}`
   );
-  const next = findNextEligibleTask();
+  const next = findNextEligibleTask(ticket);
   const autoBootstrapped = next && maybeAutoBootstrap(next.taskId);
   const prefix = `Slot freed for PR #${prNumber} (sha=${(sha || '').slice(0, 7)}). `;
   const suffix = ` Operator merges PR #${prNumber} separately.`;
@@ -233,93 +239,73 @@ function freeCIGateSlot({ session, ticket, prNumber, sha }) {
 }
 
 /**
- * freeDeadEndSlot — same kill mechanics as freeCIGateSlot but for an agent
- * stuck in a non-recoverable state (e.g. every menu option is a workflow
- * bypass; PR has no path forward without manual intervention). Triggered by
- * the re-emit escalation: when the same alert kind fires ≥ DEAD_END_REEMITS
- * times on the same session+sha+phase, the caller invokes this.
- *
- * Emits a kind=dead-end alert with a crystal-clear instruction so the
- * operator knows to bootstrap the next ticket. Idempotent per ticket.
+ * freeCiPhaseSlot — /work phase reached ci/complete: the agent is parked
+ * (waiting on CI or operator merge, or fully done) and holds a pool slot for
+ * nothing. Kill immediately + rotate (PR #603 operator decision — no probe,
+ * no attempt counter). Manifest status: `done` at complete, `awaiting-merge`
+ * at ci. Idempotent per ticket via the `ci-rotated` marker; the
+ * `ci-gate-freed` marker stops autoRestart from resurrecting the session.
+ * Gated by AUTO_FREE_CI_SLOT (independent of AUTO_FREE_DEAD_END).
  */
-function freeDeadEndSlot({ session, ticket, kind, repeatCount, sha }) {
-  if (process.env.AUTO_FREE_DEAD_END === '0') return false;
-  const marker = state.read(ticket, 'dead-end') || {};
-  if (marker.killed) return false; // already freed
-  killTicketTmux(ticket);
-  // Purge persisted alert counts so a fresh agent on the same ticket starts
-  // with a clean repeat-count slate (otherwise it could inherit a count
-  // already ≥ DEAD_END_REEMITS and immediately re-trigger rotation).
-  try {
-    purgeAlertCountsForTicket(ticket, false);
-  } catch (err) {
-    alerts.log(`${session} freeDeadEndSlot: purgeAlertCountsForTicket failed: ${err.message}`);
-  }
-  state.write(ticket, 'dead-end', { killed: true, freedAt: state.now(), trigger: kind });
-  manifest.updateTaskStatus(ticket, 'blocked', `dead-end after ${kind} ×${repeatCount}`);
-  const next = findNextEligibleTask();
-  const autoBootstrapped = next && maybeAutoBootstrap(next.taskId);
-  const prefix = `DEAD-END on ${ticket} after ${kind} ×${repeatCount}. `;
-  const instruction = buildNextActionInstruction({ prefix, suffix: '', next, autoBootstrapped });
-  alerts.log(
-    `${session} DEAD-END ${kind} re-fired ${repeatCount}x — tmux killed, slot freed${
-      autoBootstrapped ? `; AUTO-BOOTSTRAPPED ${next.taskId}` : ''
-    }`
-  );
-  alert({
+function freeCiPhaseSlot({ session, ticket, phase }) {
+  if (process.env.AUTO_FREE_CI_SLOT === '0') return false;
+  const marker = state.read(ticket, 'ci-rotated') || {};
+  if (marker.killed) return false; // already rotated this lifecycle
+  state.write(ticket, 'ci-rotated', { killed: true, phase, freedAt: state.now() });
+  state.write(ticket, 'ci-gate-freed', { killed: true, sha: null, freedAt: state.now() });
+  const done = phase === 'complete';
+  killAndBootstrapNext({
     session,
     ticket,
-    kind: 'dead-end',
-    trigger: kind,
-    repeatCount,
-    sha,
-    nextTask: next ? next.taskId : null,
-    nextTopic: next ? next.topic : null,
-    autoBootstrapped: !!autoBootstrapped,
-    instruction,
+    alertKind: 'kill-during-ci',
+    manifestStatus: done ? 'done' : 'awaiting-merge',
+    manifestNote: done
+      ? 'workflow complete; slot rotated'
+      : `parked at phase=${phase}; slot rotated, operator merges separately`,
+    logPrefix: `CI-PHASE rotation (phase=${phase}) — `,
+    alertExtra: { phase },
+    purgeCounts: true,
   });
   return true;
 }
 
 /**
+ * freeDeadEndSlot — attempt-based dead-end recovery (probe → kill+requeue →
+ * blocked). Tiers, grace windows, and the question/progress holds live in
+ * dead-end-rotation.js; this wrapper injects the bound rotation primitives.
+ */
+function freeDeadEndSlot({ session, ticket, kind, repeatCount, sha }) {
+  return deadEndRotation.freeDeadEndSlot({
+    session,
+    ticket,
+    kind,
+    repeatCount,
+    sha,
+    killAndBootstrapNext,
+    alert,
+  });
+}
+
+/**
  * freeStopConditionSlot — the ticket's stop-condition oracle returned exit 0,
- * so the agent has SUCCEEDED. Same kill+rotate mechanics as freeDeadEndSlot,
- * but the manifest status is `done` (not `blocked`) and the alert kind is
- * `stop-condition-met` (a positive signal). Idempotent per ticket via the
- * `stop-condition` marker. No-op when AUTO_FREE_STOP_CONDITION=0.
+ * so the agent has SUCCEEDED. Kill + rotate; manifest status `done`; alert
+ * kind `stop-condition-met` (a positive signal). Idempotent per ticket via
+ * the `stop-condition` marker. No-op when AUTO_FREE_STOP_CONDITION=0.
  */
 function freeStopConditionSlot({ session, ticket, oracle }) {
   if (process.env.AUTO_FREE_STOP_CONDITION === '0') return false;
   const marker = state.read(ticket, 'stop-condition') || {};
   if (marker.killed) return false; // already freed this lifecycle
-  killTicketTmux(ticket);
-  try {
-    purgeAlertCountsForTicket(ticket, false);
-  } catch (err) {
-    alerts.log(
-      `${session} freeStopConditionSlot: purgeAlertCountsForTicket failed: ${err.message}`
-    );
-  }
   state.write(ticket, 'stop-condition', { killed: true, freedAt: state.now() });
-  manifest.updateTaskStatus(ticket, 'done', 'stop-condition oracle exited 0');
-  const next = findNextEligibleTask();
-  const autoBootstrapped = next && maybeAutoBootstrap(next.taskId);
-  const prefix = `STOP-CONDITION met on ${ticket} (oracle exit 0) — agent done. `;
-  const instruction = buildNextActionInstruction({ prefix, suffix: '', next, autoBootstrapped });
-  alerts.log(
-    `${session} STOP-CONDITION-MET — tmux killed, slot freed${
-      autoBootstrapped ? `; AUTO-BOOTSTRAPPED ${next.taskId}` : ''
-    }`
-  );
-  alert({
+  killAndBootstrapNext({
     session,
     ticket,
-    kind: 'stop-condition-met',
-    oracle,
-    nextTask: next ? next.taskId : null,
-    nextTopic: next ? next.topic : null,
-    autoBootstrapped: !!autoBootstrapped,
-    instruction,
+    alertKind: 'stop-condition-met',
+    manifestStatus: 'done',
+    manifestNote: 'stop-condition oracle exited 0',
+    logPrefix: 'STOP-CONDITION-MET — ',
+    alertExtra: { oracle },
+    purgeCounts: true,
   });
   return true;
 }
@@ -336,18 +322,16 @@ function maybeFillPool() {
   try {
     activeSessions = tmux.listSessions ? tmux.listSessions() : [];
   } catch {}
-  // Guard: an empty/missing session list is ambiguous — could be a real
-  // "no sessions yet" state or a transient `tmux ls` failure / prefix
-  // mismatch. Bootstrapping on ambiguous signal can over-launch and exceed
-  // manifest slot caps because per-task pool-cap checks also count zero.
+  // Guard: an empty/missing session list is ambiguous — real "no sessions
+  // yet" vs transient `tmux ls` failure / prefix mismatch. Bootstrapping on
+  // ambiguous signal over-launches past slot caps (which also count zero).
   // Same conservatism as syncFromTmux: no signal → no action.
   if (!Array.isArray(activeSessions) || activeSessions.length === 0) {
     return false;
   }
   // Walk candidates in priority order; bootstrap the first one whose owning
-  // manifest still has capacity. A full manifest must not block eligible work
-  // in another manifest that still has free slots. Stop after the first
-  // successful bootstrap so the tick stays idempotent.
+  // manifest still has capacity (a full manifest must not block another with
+  // free slots). Stop after one bootstrap so the tick stays idempotent.
   for (const cand of findEligibleTasks()) {
     if (activeSessions.includes(tmux.sessionName(cand.taskId, 'work'))) continue;
     const ok = maybeAutoBootstrap(cand.taskId);
@@ -365,8 +349,10 @@ module.exports = {
   alert,
   autoRestart,
   freeCIGateSlot,
+  freeCiPhaseSlot,
   freeDeadEndSlot,
   freeStopConditionSlot,
   syncManifest: manifest.syncFromTmux,
   maybeFillPool,
+  maybeAutoBootstrap,
 };

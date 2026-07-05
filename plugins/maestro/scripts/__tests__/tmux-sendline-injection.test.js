@@ -66,9 +66,11 @@ test('sendLine passes backtick/$ payload to tmux as a literal arg (no shell eval
     .filter((line) => line.length > 0)
     .map((line) => line.split('\0').filter((s) => s.length > 0));
 
-  assert.equal(invocations.length, 3, 'expected three tmux send-keys calls');
+  // text + End + Enter, then the receipt-contract capture-pane verification
+  // (the fake tmux returns empty output = composer clear = submitted).
+  assert.equal(invocations.length, 4, 'expected three send-keys calls + one capture-pane');
 
-  const [first, second, third] = invocations;
+  const [first, second, third, fourth] = invocations;
   // sendLine uses -l for literal delivery so short payloads can't collide with
   // tmux key names (e.g. "Enter", "Space").
   assert.deepEqual(first.slice(0, 4), ['send-keys', '-l', '-t', 'GH-TEST-work']);
@@ -79,6 +81,7 @@ test('sendLine passes backtick/$ payload to tmux as a literal arg (no shell eval
   );
   assert.deepEqual(second, ['send-keys', '-t', 'GH-TEST-work', 'End']);
   assert.deepEqual(third, ['send-keys', '-t', 'GH-TEST-work', 'Enter']);
+  assert.deepEqual(fourth.slice(0, 2), ['capture-pane', '-t']);
 });
 
 test('sendKey passes raw key as a literal argv entry', () => {
