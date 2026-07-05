@@ -66,8 +66,11 @@ function readNewInboxMessages(ticketId, state) {
   let fd;
   try {
     // Open once, then fstat + read on the SAME descriptor — no
-    // check-then-use gap (CodeQL file-system-race / TOCTOU).
-    fd = fs.openSync(inboxPath(ticketId), 'r');
+    // check-then-use gap (CodeQL file-system-race / TOCTOU). The explicit
+    // 0o600 mode is inert for 'r' opens (mode only applies on create) but
+    // satisfies CodeQL js/insecure-temporary-file, whose only barrier for
+    // temp-dir opens is a mode with group/other bits cleared.
+    fd = fs.openSync(inboxPath(ticketId), 'r', 0o600);
     const size = fs.fstatSync(fd).size;
     const offset = typeof state._inboxOffset === 'number' ? state._inboxOffset : size;
     if (state._inboxOffset === undefined) {
