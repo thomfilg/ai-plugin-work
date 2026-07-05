@@ -16,6 +16,9 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 
 const { findActiveMarker } = require(path.join(__dirname, '..', '..', 'work', 'lib', 'marker'));
+const { composeStatusLine, formatElapsed } = require(
+  path.join(__dirname, '..', 'lib', 'steps', 'monitor-status-line')
+);
 
 const FRESH_MS = 30 * 60 * 1000; // safety net: hide an abandoned follow-up after 30 min
 
@@ -101,8 +104,35 @@ function render() {
     : marker.ticket;
   const bits = [`🔄 follow-up ${label}`];
   if (st.currentStep) bits.push(st.currentStep);
-  if (st._ciStatusLine) bits.push(st._ciStatusLine);
-  return bits.join('   ·   ');
+  bits.push(...statusBits(st));
+  const pending = pendingActionMarker(base, marker.ticket);
+  if (pending) bits.push(pending);
+  return bits.filter(Boolean).join('   ·   ');
+}
+
+// The CI summary line. When structured parts are available, recompute the
+// elapsed timer NOW so it ticks on every 3s refresh — the pre-baked
+// `_ciStatusLine` string carries the elapsed frozen at monitor time.
+function statusBits(st) {
+  if (st._ciStatusParts) {
+    return [composeStatusLine(st._ciStatusParts, formatElapsed(st._monitorStartTime))];
+  }
+  return st._ciStatusLine ? [st._ciStatusLine] : [];
+}
+
+// ⚠ marker when the last persisted instruction is terminal (blocked/surface)
+// — the workflow is waiting on the operator, not on CI.
+function pendingActionMarker(base, ticket) {
+  try {
+    const raw = fs.readFileSync(path.join(base, ticket, '.follow-up-next.json'), 'utf8');
+    const instruction = JSON.parse(raw);
+    if (instruction.action === 'blocked' || instruction.action === 'surface') {
+      return `⚠ ${instruction.action}`;
+    }
+  } catch {
+    /* no persisted instruction */
+  }
+  return '';
 }
 
 process.stdout.write(render());

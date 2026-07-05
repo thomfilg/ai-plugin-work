@@ -24,3 +24,54 @@ node "${CLAUDE_PLUGIN_ROOT}/scripts/workflows/follow-up/follow-up-next.js" <TICK
 - After executing, re-run follow-up-next.js (without --init) for the next instruction.
 - Repeat until `action: "complete"` or `action: "blocked"`.
 - **Never stop early.** If the script is running, it is working. Wait for it.
+
+## Background mode (state-file-first, GH-214)
+
+Every run persists its instruction to
+`<TASKS_BASE>/<TICKET>/.follow-up-next.json` (removed on `complete`), so the
+stdout JSON never needs to be parsed or piped. For long CI waits you may run
+the script in the background (`run_in_background`) and, when it finishes, read
+the instruction from that file instead of the terminal output:
+
+- `.follow-up-next.json` — the exact instruction the run printed (act on it).
+- `.follow-up-state.json` — compact progress (`currentStep`, `attempt`,
+  `_ciStatusLine`, `_ciRunIds` for `gh run view <id>`, `prNumber`).
+
+This is the sanctioned alternative to piping through `head`/`tail`: same data,
+no truncated JSON. Foreground raw invocation remains the default.
+
+## Judging bot review comments (GH-352)
+
+When the script dispatches a review comment for you to address, do **not** blindly
+apply the bot's suggestion. Before choosing to fix (Option A) or skip (Option B):
+
+1. **Read the referenced code** at the file/line the comment points to (`fileRef`).
+2. **Verify the bot's claim** against the *current* code — bots frequently misread
+   context, flag already-handled cases, or comment on stale lines.
+3. **Classify** the comment into exactly one of these six categories, each with its
+   prescribed action:
+   - **real bug** → fix (Option A)
+   - **real improvement** (perf/maintainability, related to this PR) → fix (Option A)
+   - **style/naming preference** → skip with reason (Option B)
+   - **false positive** (bot misread the code) → skip with evidence (Option B)
+   - **conflicts with user intent / ticket requirements** → skip with reason (Option B)
+   - **ambiguous** (unsure whether it applies) → ask the user
+
+### Record the classification
+
+Persist the chosen category so it survives in `comment.resolution`: put a leading
+`[<category>]` token at the start of the `<reason>` you pass to
+`--mark-locally-skipped` and the `<description>` you pass to `--mark-locally-solved`.
+For example: `[false positive] guard already handles null at line 42` or
+`[real bug] off-by-one in loop bound`. The classification is written verbatim into
+the comment resolution, so the audit trail shows *why* each comment was fixed or
+skipped.
+
+## Early review surfacing (GH-268)
+
+Reviews do NOT wait for CI. The triage step routes actionable review comments
+to fix-reviews **before** checking CI-pending, using the reviewer-done signal
+from the GitHub review API: a bot review is "done" when it is no longer in
+`pendingBots` (its review is submitted, not in-progress) and its blocking
+comments are present. While a bot review is still running, comments are held
+(the bot may dismiss them on completion) and the workflow keeps waiting.

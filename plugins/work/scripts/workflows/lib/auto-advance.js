@@ -39,8 +39,11 @@ function findMarker(TASKS_BASE, markerFile, workLibDir) {
   return marker;
 }
 
-// Run an orchestrator script for `ticket` and return its parsed instruction, or
-// null on any spawn/parse error (fail-open).
+// Run an orchestrator script for `ticket` and return its parsed instruction.
+// On spawn/parse error, returns null AND prints a one-line warning — the
+// previous fully-silent failure meant a timed-out orchestrator (monitor
+// cycles legitimately sleep past the spawn timeout) simply never advanced
+// the workflow and nobody was told.
 function runOrchestrator(scriptPath, ticket, timeout) {
   try {
     const result = execFileSync(process.execPath, [scriptPath, ticket], {
@@ -49,7 +52,15 @@ function runOrchestrator(scriptPath, ticket, timeout) {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     return JSON.parse(result);
-  } catch {
+  } catch (err) {
+    const why =
+      err && (err.code === 'ETIMEDOUT' || err.signal === 'SIGTERM')
+        ? `timed out after ${Math.round(timeout / 1000)}s (long CI wait)`
+        : `failed: ${String((err && err.message) || err).slice(0, 120)}`;
+    console.log(
+      `\n⚠ [auto-advance] orchestrator ${why} — workflow did NOT advance. ` +
+        `Re-run \`node ${scriptPath} ${ticket}\` to continue.\n`
+    );
     return null;
   }
 }

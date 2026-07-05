@@ -84,7 +84,12 @@ describe('worktree store discovery', () => {
 
 describe('worktree-level injection', () => {
   function matchedNames(event, payload) {
-    const memories = discoverStores(worktreeCwd).flatMap(listMemoriesFromStore);
+    // Restrict to the worktree tier under test — the process's real HOME can
+    // carry live global/shared stores whose memories would otherwise leak
+    // into the deep-equal assertions (machine-dependent failures).
+    const memories = discoverStores(worktreeCwd)
+      .filter((s) => s.kind === 'worktree')
+      .flatMap(listMemoriesFromStore);
     return selectForEvent(memories, event, payload).map((m) => m.name);
   }
 
@@ -124,7 +129,10 @@ describe('multi-level discovery', () => {
   it('injects a matching memory from a nested sub-directory', () => {
     const nested = path.join(worktreeCwd, 'packages', 'app');
     fs.mkdirSync(nested, { recursive: true });
-    const memories = discoverStores(nested).flatMap(listMemoriesFromStore);
+    // Worktree tier only — see matchedNames above for why.
+    const memories = discoverStores(nested)
+      .filter((s) => s.kind === 'worktree')
+      .flatMap(listMemoriesFromStore);
     const names = selectForEvent(memories, 'UserPromptSubmit', { prompt: 're-run ci' }).map(
       (m) => m.name
     );

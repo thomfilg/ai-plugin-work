@@ -11,7 +11,12 @@ Registers a Claude Code `statusLine` that renders live `/follow-up` progress —
 agent-free. It reads the artifacts the plugin **already** writes — no new files:
 the `.follow-up-orchestrator.pid` marker (located via the plugin's own
 `findActiveMarker`, scoped to this Claude session) and `.follow-up-state.json`
-(`currentStep`, `prNumber`, `_ciStatusLine`) under `<TASKS_BASE>/<ticket>/`.
+(`currentStep`, `prNumber`, `_ciStatusParts` + `_monitorStartTime` — the
+elapsed timer is recomputed live on every refresh, with `_ciStatusLine` as a
+fallback for older state files) under `<TASKS_BASE>/<ticket>/`. When the last
+persisted instruction (`.follow-up-next.json`) is `blocked`/`surface`, the bar
+appends a `⚠ blocked` / `⚠ surface` marker so a workflow waiting on the
+operator is visible at a glance.
 
 This replaces the old per-poll stderr spam: the console is now near-silent
 (only the final JSON instruction the agent acts on), and progress lives here.
