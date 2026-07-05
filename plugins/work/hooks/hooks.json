@@ -163,7 +163,8 @@
           },
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/follow-up/hooks/follow-up-auto-advance.js"
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/follow-up/hooks/follow-up-auto-advance.js",
+            "timeout": 180
           },
           {
             "type": "command",

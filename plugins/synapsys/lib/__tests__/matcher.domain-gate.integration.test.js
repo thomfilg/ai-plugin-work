@@ -30,6 +30,13 @@ function write(storeDir, name, body) {
   fs.writeFileSync(path.join(storeDir, name), body);
 }
 
+// listMemories discovers ALL tiers — including the machine's real
+// global/shared stores via HOME — so restrict to the tmpdir fixture store or
+// live memories on the host leak into the deep-equal assertions.
+function listFixtureMemories(cwd, storeDir) {
+  return listMemories(cwd).filter((m) => path.resolve(m.store.dir) === path.resolve(storeDir));
+}
+
 test('Memory with non-overlapping domain is skipped even when trigger matches (end-to-end)', () => {
   const { cwd, storeDir } = makeStore();
 
@@ -54,7 +61,7 @@ test('Memory with non-overlapping domain is skipped even when trigger matches (e
     '---\nname: e2e-tagged\ndescription: d\nevents: UserPromptSubmit\ndomain: e2e\ntrigger_prompt: \\bdeploy\\b\n---\nbody\n'
   );
 
-  const memories = listMemories(cwd);
+  const memories = listFixtureMemories(cwd, storeDir);
   // Sanity: all three loaded
   const names = memories.map((m) => m.name).sort();
   assert.ok(names.includes('universal'), `expected 'universal' in ${names}`);
@@ -91,7 +98,7 @@ test('Backward compat: omitting opts.activeDomains leaves domain-tagged memories
     '---\nname: universal\ndescription: d\nevents: UserPromptSubmit\ntrigger_prompt: \\bdeploy\\b\n---\nbody\n'
   );
 
-  const memories = listMemories(cwd);
+  const memories = listFixtureMemories(cwd, storeDir);
 
   // No 4th arg
   const picked = selectForEvent(memories, 'UserPromptSubmit', { prompt: 'please deploy now' });
