@@ -42,6 +42,11 @@ const {
 const MAX_REDISPATCH_DEPTH = 8;
 const SCRIPT_RUNNERS = new Set(['pnpm', 'npm', 'yarn']);
 const INTERPRETERS = new Set(['node', 'bash', 'sh', 'zsh']);
+// Shell builtins that never resolve on PATH. `set` segments come from the
+// strict-mode prefix (`set -e; set -o pipefail; ...`) that
+// lib/test-strategy.js prepends to chained custom commands (W9) — skip them
+// instead of emitting a false "command not found" at the draft gate.
+const SHELL_BUILTINS = new Set(['set']);
 
 function prefixHeading(taskHeading, msg) {
   if (!taskHeading) {
@@ -323,6 +328,7 @@ function dispatchSegment(segment, ctx, errors, depth) {
   }
   const argv = argvSplit(trimmed);
   if (argv.length === 0) return;
+  if (SHELL_BUILTINS.has(stripQuotes(argv[0]))) return;
   _classifyAndDispatch(argv, ctx, errors, depth);
 }
 

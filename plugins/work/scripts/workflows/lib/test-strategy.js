@@ -7,8 +7,9 @@
  * - `synthesizeCommand(strategy, envrc)` (AC2)
  * - `validatePeerCitation(strategy, allTasks, citingTask)` (AC11)
  *
- * Pure module; no side effects. `validatePeerCitation` consumes
- * `fileMatchesScope` from the existing `task-scope-globs.js` helper.
+ * Pure module; no side effects — except `validateStrategySatisfiability`,
+ * which probes the filesystem (read-only `fs.existsSync`) to verify an
+ * envelope entry exists.
  */
 
 const { fileMatchesScope } = require('./task-scope-globs');
@@ -55,11 +56,34 @@ function resolveEnvelope(envrc, kind) {
 const CITATION_KIND_SET = new Set([KINDS.VERIFIED_BY, KINDS.WIRING_CITATION]);
 const ENVELOPE_KIND_SET = new Set([KINDS.UNIT, KINDS.INTEGRATION, KINDS.E2E]);
 
+// W9 (echo-4449/5152): multi-line / chained / PIPED custom bodies execute
+// under `bash -lc <body>`, where the exit code is the LAST segment's (or the
+// pipe tail's — a single `|` masks too: `pytest | tee` exits with tee's 0).
+// Prefix chained bodies with strict mode so any failing segment fails the
+// whole synthesized command; a single unchained, unpiped command is returned
+// verbatim (its exit code cannot be masked). FAKE_CMD_PATTERNS interplay
+// (tdd-phase-state/io.js): those anchored patterns guard the recorder's
+// agent-supplied `--cmd` ARGUMENT, not synthesized values — the recorder
+// re-verifies `--cmd` against this same resolution (resume-completed
+// `_assertCmdMatchesStrategy`), so the prefix cannot hide a fake command.
+// The already-strict guard requires an errexit prefix (`set -e…`): non-strict
+// `set -x` / `set -f` bodies still get the prefix (bypass review). pipefail
+// is a bash-ism — every executor runs synthesized commands under bash.
+const CHAINED_COMMAND_RE = /\n|&&|;|\|/;
+const STRICT_MODE_PREFIX = 'set -e; set -o pipefail; ';
+
+function _wrapCustomStrict(body) {
+  if (!CHAINED_COMMAND_RE.test(body)) return body;
+  // Already errexit-strict (`set -e`, `set -eu`, `set -euo pipefail`, …).
+  if (/^\s*set\s+-e/.test(body)) return body;
+  return STRICT_MODE_PREFIX + body;
+}
+
 function _synthesizeCustom(strategy) {
   if (typeof strategy.command === 'string' && strategy.command.length > 0) {
-    return strategy.command;
+    return _wrapCustomStrict(strategy.command);
   }
-  return typeof strategy.customBody === 'string' ? strategy.customBody : null;
+  return typeof strategy.customBody === 'string' ? _wrapCustomStrict(strategy.customBody) : null;
 }
 
 function _synthesizeEnvelope(strategy, envrc, kind) {
@@ -202,6 +226,15 @@ function validatePeerCitation(strategy, allTasks, citingTask) {
 const KIND_VALUES = Object.freeze(Object.values(KINDS));
 const ALLOWED_KINDS_LIST = KIND_VALUES.join(', ');
 
+// GH-570 — optional `red-mode:` key. `ablation` is the ONLY legal value:
+// the task pins already-working behavior, so RED evidence is produced by a
+// temporary source mutation (recorded with a mutation sha) instead of a
+// naturally-failing new test. Only runnable kinds can ablate — citation
+// kinds execute no command of their own.
+const RED_MODES = Object.freeze({ ABLATION: 'ablation' });
+const RED_MODE_VALUES = Object.freeze(Object.values(RED_MODES));
+const ABLATION_LEGAL_KINDS = new Set([KINDS.UNIT, KINDS.INTEGRATION, KINDS.E2E, KINDS.CUSTOM]);
+
 function _hasNonEmptyString(value) {
   return typeof value === 'string' && value.length > 0;
 }
@@ -233,6 +266,24 @@ function _shapeRequiredKeyError(strategy, heading) {
 }
 
 /**
+ * GH-570 — validate the optional `red-mode:` key. Absent → fine. Present:
+ * the value must be a known red mode (`ablation`), and the strategy kind
+ * must be a runnable kind (unit / integration / e2e / custom) — citation
+ * kinds run no command, so there is nothing to ablate.
+ */
+function _shapeRedModeError(strategy, heading) {
+  const { redMode, kind } = strategy;
+  if (redMode == null) return null;
+  if (!RED_MODE_VALUES.includes(redMode)) {
+    return `${heading}: Test Strategy has unknown red-mode '${redMode}'; expected one of: ${RED_MODE_VALUES.join(', ')}`;
+  }
+  if (!ABLATION_LEGAL_KINDS.has(kind)) {
+    return `${heading}: Test Strategy red-mode: ablation is only legal for kind=unit, kind=integration, kind=e2e, or kind=custom (got kind=${kind || '<missing>'})`;
+  }
+  return null;
+}
+
+/**
  * Validate that a Test Strategy declaration has a known `kind` and the
  * required keys for that kind. Peer-pointer checks (verified-by /
  * wiring-citation → peer field present + peer exists) remain the
@@ -248,16 +299,54 @@ function validateStrategyShape(strategy, citingTask) {
   const kindErr = _shapeKindError(strategy, heading);
   if (kindErr) return [kindErr];
   const keyErr = _shapeRequiredKeyError(strategy, heading);
-  return keyErr ? [keyErr] : [];
+  if (keyErr) return [keyErr];
+  const redModeErr = _shapeRedModeError(strategy, heading);
+  return redModeErr ? [redModeErr] : [];
 }
+
+/**
+ * Detect a synthesized/custom command that leaked from markdown formatting
+ * (fenced-block fragment, bare shell name, unmatched backtick) — these would
+ * exec silently and starve the gate of a real exit code. W12 unification:
+ * moved here from implement-gate/test-command.js (which re-exports it) so the
+ * draft gate applies the SAME rule at generation that the implement gate
+ * applies at execution. Returns a reason string, or null when usable.
+ */
+function detectMalformedTestCommand(cmd) {
+  const raw = String(cmd || '').trim();
+  if (!raw) return 'empty';
+  // Bare shell launchers with no arguments — the parser dropped the body
+  if (/^(?:bash|sh|zsh|fish|node|python|python3)\s*$/i.test(raw)) return 'bare-interpreter';
+  if (/^[`]+$/.test(raw)) return 'backticks-only';
+  // Fence opener must be checked before the broader stray-backtick check.
+  if (/^```/.test(raw)) return 'fence-opener';
+  if (/^`/.test(raw) || /`$/.test(raw)) return 'stray-backtick';
+  return null;
+}
+
+// ── W12 — generation-time strategy satisfiability (GH-509/echo-5219 class):
+// verify the strategy can actually EXECUTE, while tasks.md is still editable.
+// Implementation lives in ./test-strategy-satisfiability (split purely for
+// the static-quality line budget) and is re-exported below so both phases
+// keep importing lib/test-strategy — still ONE implementation.
+const { validateStrategySatisfiability } = require('./test-strategy-satisfiability');
 
 module.exports = {
   KINDS,
+  RED_MODES,
+  // Shared citation-kind set — consumed by tdd-enforcement.js (citation-green
+  // evidence validation) and the implement gate so the kind list never forks.
+  CITATION_KIND_SET,
   synthesizeCommand,
   validatePeerCitation,
   validateStrategyShape,
+  validateStrategySatisfiability,
+  detectMalformedTestCommand,
   entryReferencesScope,
   peerScopeCoversCitingScope,
   // Exported for the REFACTOR-phase helper test seam.
   resolveEnvelope,
+  // Consumed by ./test-strategy-satisfiability (lazy back-require).
+  ENVELOPE_KIND_SET,
+  _citingHeading,
 };

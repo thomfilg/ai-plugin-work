@@ -29,6 +29,14 @@
  *
  * Output is structured Markdown so the agent can quote it back if needed.
  * Exit codes: 0 = phase progressed or already correct, 2 = phase blocked.
+ *
+ * GH-509: `node task-next.js <TICKET> <task_id> --resume-completed` is the
+ * machine-verified resume path for work already committed in a prior
+ * interrupted session. The recorder verifies (a) no existing cycles, (b)
+ * in-scope test files with test blocks on disk, (c) a passing test command,
+ * and (d) branch commits touching the task's scope, before recording a
+ * complete cycle stamped `resumedCompleted: true` + a `tdd-resume-completed`
+ * audit row. Nothing is trusted from the invoker.
  */
 
 'use strict';
@@ -884,13 +892,19 @@ function parseCliArgs() {
   const [, , ticketRaw, taskRaw] = process.argv;
   if (!ticketRaw || !taskRaw) {
     process.stderr.write(
-      'usage: task-next.js <TICKET> <task_id>\n' +
+      'usage: task-next.js <TICKET> <task_id> [--resume-completed]\n' +
         '  TICKET   ticket id, e.g. ECHO-4467 (or #56 → GH-56)\n' +
-        "  task_id  'task1', 'task2', ...\n"
+        "  task_id  'task1', 'task2', ...\n" +
+        '  --resume-completed  machine-verified resume for work already\n' +
+        '                      committed in a prior session (GH-509)\n'
     );
     process.exit(2);
   }
-  return { ticket: sanitizeTicketId(ticketRaw), taskNum: parseTaskId(taskRaw) };
+  return {
+    ticket: sanitizeTicketId(ticketRaw),
+    taskNum: parseTaskId(taskRaw),
+    resumeCompleted: process.argv.slice(4).includes('--resume-completed'),
+  };
 }
 
 /**
@@ -1056,6 +1070,8 @@ function resolveExecutionContext(ctx) {
   ctx.execution = execution;
   ctx.isCitation = Boolean(execution.citation);
   ctx.testCmd = execution.command || '';
+  // GH-570 — planner-declared ablation-RED mode ('ablation' | null).
+  ctx.redMode = execution.redMode || null;
   ctx.testCmdSource = execution.strategyKind
     ? `### Test Strategy (kind: ${execution.strategyKind})`
     : '### Test Strategy';
@@ -1146,6 +1162,66 @@ function runTestsOnlyRedSkip(ctx) {
     `task-next: RED skipped via tests-only Type contract; ` +
       `cycle red slot persisted with {skipped: true}. Re-invoke me for GREEN.\n`
   );
+  process.exit(0);
+}
+
+// GH-509 — machine-verified resume path (`--resume-completed`). Delegates the
+// whole grant decision to the recorder's `record-resume-completed`
+// subcommand, which verifies ALL of: (a) no completed cycles (stale red-only
+// evidence is superseded + audited), (b) in-scope test files with
+// it()/test() blocks on disk, (c) the test command passes, (d) branch
+// commits (vs the configured base) touch the task's scope. Every condition
+// is machine-verified from git/fs — task-next forwards nothing the agent
+// asserted, and the recorder re-verifies the forwarded command against the
+// strategy resolution. Exits the process (0 = recorded, 2 = rejected).
+function runResumeCompletedFlow(ctx) {
+  const { ticket, taskNum, taskTitle, tddPath, testCmd, repoRoot, scope } = ctx;
+  if (ctx.isCitation || !testCmd) {
+    process.stdout.write(
+      `task-next: ${ticket} task${taskNum} — ${taskTitle}\n` +
+        '  result:     BLOCKED (--resume-completed rejected)\n\n' +
+        '## Why you did not advance\n\n' +
+        "--resume-completed requires a runnable test command, but this task's " +
+        '`### Test Strategy` resolves to none (citation kinds defer to the cited ' +
+        "peer's evidence). Re-invoke me WITHOUT the flag.\n"
+    );
+    process.exit(2);
+  }
+  const changedFiles = filterToTestFiles(scope).join(' ');
+  const rec = _runTddWithAutoInit(
+    [
+      TDD_CLI,
+      'record-resume-completed',
+      ticket,
+      '--task',
+      String(taskNum),
+      '--cmd',
+      wrapStrictMode(testCmd),
+    ],
+    ticket,
+    taskNum,
+    repoRoot,
+    { ..._runBaseEnv, CHANGED_FILES: changedFiles },
+    'auto-init failed'
+  );
+  if (!rec.ok) {
+    process.stdout.write(
+      `task-next: ${ticket} task${taskNum} — ${taskTitle}\n` +
+        `  state file: ${tddPath}\n` +
+        '  result:     BLOCKED (--resume-completed rejected)\n\n' +
+        `## Why you did not advance\n\n${rec.out}\n`
+    );
+    _logCompleted({ phase: ctx.phase, advanced: false, blocked: true, exitCode: 2 });
+    process.exit(2);
+  }
+  process.stdout.write(
+    `task-next: resume-completed cycle recorded for ${ticket} task${taskNum} ` +
+      '(all four conditions machine-verified from git/fs; audited as ' +
+      'tdd-resume-completed).\n\n' +
+      `# Task ${taskNum} complete\n\n` +
+      'No further work in this task. Move to the next ready task in the plan.\n'
+  );
+  _logCompleted({ phase: TDD_DERIVED_DONE, advanced: true, blocked: false, exitCode: 0 });
   process.exit(0);
 }
 
@@ -1260,13 +1336,106 @@ function evaluateRedZeroScenarios(ctx, testFiles) {
   return acceptRedUnitOnlyFallback(ctx, testFiles);
 }
 
+// GH-584 — a timed-out run is a hang, never a valid failing RED. Follows the
+// W3 message policy: name the defect, state tasks.md is planner-owned,
+// instruct the agent to STOP and report — never to edit tasks.md.
+const RED_HANG_BLOCK_MSG =
+  'Your test command timed out and was killed — a hang is not an assertion ' +
+  'failure. RED requires the command to run to completion and fail. This ' +
+  'usually means a watch-mode or interactive command in the `### Test ' +
+  'Strategy` block, which is a planner defect. tasks.md is planner-owned and ' +
+  'LOCKED during implement — do NOT edit it. STOP and report ' +
+  '`BLOCKED (planner-defect): test command hangs (watch-mode/interactive)` ' +
+  'back to the orchestrator.';
+
+// GH-509 — when RED blocks with "command exits 0", surface the machine-
+// verified resume path IF it looks eligible: no COMPLETED evidence yet (a —
+// a stale red-only record from an interrupted session is superseded by the
+// recorder, so it does not suppress the hint; that red-only state IS the
+// GH-509 field case), in-scope test files with test blocks exist on disk
+// (b), and branch commits touch the task's scope (d). The recorder
+// re-verifies everything (including the passing run, c) before recording —
+// this hint is advisory, not a grant. Fail-open to '' on any probe error.
+function _resumeCompletedHint(ctx) {
+  try {
+    const cycles = Array.isArray(ctx.state && ctx.state.cycles) ? ctx.state.cycles : [];
+    if (cycles.some((c) => c && (c.green || c.refactor))) return '';
+    const testFiles = [...findTestFilesInScope(ctx.repoRoot, ctx.scope)];
+    if (countTestBlocksInFiles(testFiles).totalBlocks === 0) return '';
+    const { findScopeCommits } = require('./tdd-phase-state/resume-completed');
+    const { commits, baseRef } = findScopeCommits(ctx.repoRoot, ctx.scope);
+    if (commits.length === 0) return '';
+    return (
+      `\n\nPossible RESUME detected: in-scope test files already contain test blocks and ` +
+      `${commits.length} commit(s) on this branch (vs ${baseRef}) touch this task's scope — ` +
+      'the implementation may already exist from a prior interrupted session. If so, do NOT ' +
+      'invert assertions or revert committed work to force a failing test. Re-invoke me with ' +
+      'the machine-verified resume flag:\n\n' +
+      `  node ${path.relative(process.cwd(), __filename)} ${ctx.ticket} task${ctx.taskNum} --resume-completed\n\n` +
+      'Every resume condition is verified from git and the filesystem before any evidence is ' +
+      'recorded (audited as tdd-resume-completed).'
+    );
+  } catch {
+    return '';
+  }
+}
+
+// GH-570 — RED guidance for `red-mode: ablation` tasks. A passing run is
+// EXPECTED here (the task pins already-working behavior); the failing RED is
+// produced by a temporary source mutation, never by inverting assertions.
+const ABLATION_RED_GUIDANCE =
+  'This task declares `red-mode: ablation` — the test passing against ' +
+  'unmodified source is expected. Produce RED evidence by ablation:\n' +
+  '  1. Apply a TEMPORARY mutation to a tracked in-scope source (non-test) ' +
+  'file that breaks the behavior under test (do NOT commit it).\n' +
+  '  2. Re-invoke me — the recorder verifies the mutation diff exists, ' +
+  'requires the command to fail, and records its hash as mutationSha.\n' +
+  '  3. After RED, revert the mutation; GREEN verifies the revert and the ' +
+  'passing run (audited as tdd-ablation-cycle).\n' +
+  'Do NOT invert assertions or weaken the test to force a failure.';
+
+// Downstream review (implement-phase fix follow-up) — the primary /work flow
+// pre-captures RED at the gate (gate-writer.js writeGateRed leaves
+// currentPhase 'red' with red.capturedByGate). When the agent has already
+// implemented and the command now PASSES, the cycle is mid-flight, not
+// broken: the orchestrator gate records GREEN against that captured RED on
+// its post-implement pass. Advising assertion inversion here taught the
+// exact fabrication the design forbids.
+function _gateCapturedRedPending(state) {
+  const cycles = Array.isArray(state && state.cycles) ? state.cycles : [];
+  const latest = cycles[cycles.length - 1];
+  return Boolean(latest && latest.red && latest.red.capturedByGate && !latest.green);
+}
+
+const GATE_RED_PASSING_MSG =
+  'A real failing RED was already captured for this task by the implement ' +
+  'gate (red.capturedByGate), and the test command now exits 0 — the ' +
+  'implementation appears complete. Do NOT invert or weaken assertions to ' +
+  'force a new failure, and do NOT revert committed work. Finish your turn ' +
+  'and report the task as implemented: the orchestrator gate re-runs this ' +
+  'command and records GREEN against the captured RED automatically on its ' +
+  'next pass.';
+
 /** RED phase gate: command must fail AND scenario/authorship coverage holds. */
 function evaluateRedPhase(ctx, run, passed) {
   _warnFilteredScopeEntries(ctx.scope);
+  if (run.timedOut) {
+    return _blocked(TDD_PHASES.red, `${RED_HANG_BLOCK_MSG}\n\n${run.combined}`);
+  }
+  if (passed && ctx.redMode === 'ablation') {
+    return _blocked(TDD_PHASES.red, ABLATION_RED_GUIDANCE);
+  }
+  if (passed && _gateCapturedRedPending(ctx.state)) {
+    // The machine-verified resume hint is appended only when its conditions
+    // plausibly hold (in-scope test blocks + prior scope commits) — the
+    // recorder re-verifies everything before recording.
+    return _blocked(TDD_PHASES.red, GATE_RED_PASSING_MSG + _resumeCompletedHint(ctx));
+  }
   if (passed) {
     return _blocked(
       TDD_PHASES.red,
-      'Your test command exits 0. RED requires a real failing test. Rewrite the assertion so it actually fails before re-invoking me.'
+      'Your test command exits 0. RED requires a real failing test. Rewrite the assertion so it actually fails before re-invoking me.' +
+        _resumeCompletedHint(ctx)
     );
   }
   const testFiles = [...findTestFilesInScope(ctx.repoRoot, ctx.scope)];
@@ -1465,7 +1634,7 @@ function printEpilogueAndExit(ctx, run, result) {
 
 function main() {
   const _startedAt = Date.now();
-  const { ticket, taskNum } = parseCliArgs();
+  const { ticket, taskNum, resumeCompleted } = parseCliArgs();
   _logEvent({
     event: 'invoked',
     ticket,
@@ -1499,6 +1668,11 @@ function main() {
 
   if (ctx.phase === 'done') printDoneAndExit(ctx); // exits
 
+  // GH-509: machine-verified resume path — checked before the citation flow
+  // so citation tasks get an explicit "flag does not apply" rejection rather
+  // than a silently ignored flag.
+  if (resumeCompleted) runResumeCompletedFlow(ctx); // exits
+
   if (ctx.isCitation) runCitationFlow(ctx); // exits
 
   if (!ctx.testCmd) {
@@ -1506,7 +1680,10 @@ function main() {
       `No runnable command resolved from '### Test Strategy' for Task ${taskNum}. ` +
         'Every non-checkpoint task must declare a `### Test Strategy` ' +
         '(kind: unit|integration|e2e|custom|verified-by|wiring-citation). ' +
-        'Fix tasks.md, then re-invoke me. Cannot validate phase.'
+        'A missing or unresolvable strategy is a planner defect: tasks.md is ' +
+        'planner-owned and LOCKED during implement — do NOT edit it. STOP and ' +
+        `report \`BLOCKED (planner-defect): no runnable Test Strategy for task ${taskNum}\` ` +
+        'back to the orchestrator. Cannot validate phase.'
     );
   }
 
@@ -1523,6 +1700,7 @@ module.exports = {
   scopeEntryAdmitsOnlyTestFiles,
   filterChangedTestFilesByScope,
   findTestFilesInScope,
+  countTestBlocksInFiles,
   wrapStrictMode,
   isDocsExempt,
   isVisualOnlyTask,

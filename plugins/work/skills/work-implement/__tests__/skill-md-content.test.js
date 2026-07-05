@@ -203,3 +203,82 @@ describe('work-implement SKILL.md — orchestrator completion (GH-231)', () => {
     });
   });
 });
+
+describe('work-implement SKILL.md — current TDD flow pins (W10, implement-phase fix design)', () => {
+  it('Step 2.5 teaches task-next.js as the single entrypoint when tasks.md exists', () => {
+    assert.match(
+      content,
+      /task-next\.js.*<TICKET_ID> task<N>/,
+      'Step 2.5 must show the task-next.js invocation shape'
+    );
+    assert.match(
+      content,
+      /single entrypoint/i,
+      'Step 2.5 must state task-next.js is the single entrypoint in multi-task mode'
+    );
+  });
+
+  it('Step 2.5 documents Test Strategy synthesis instead of a manual command', () => {
+    assert.match(content, /### Test Strategy/, 'must reference the ### Test Strategy block');
+    assert.match(
+      content,
+      /do NOT pass any test command/i,
+      'must tell the agent not to hand-pick a test command in multi-task mode'
+    );
+  });
+
+  it('Step 2.5 documents citation kinds and the machine-verified resume path', () => {
+    assert.match(content, /verified-by/, 'must mention the verified-by citation kind');
+    assert.match(content, /wiring-citation/, 'must mention the wiring-citation kind');
+    assert.match(content, /--resume-completed/, 'must mention the machine-verified resume flag');
+    assert.match(content, /tdd-resume-completed/, 'must name the resume audit row');
+  });
+
+  it('references the actually-registered enforcement hooks (W1 wiring)', () => {
+    assert.match(content, /work-implement-enforce\.js/, 'must name the phase file-gating hook');
+    assert.match(content, /enforce-tdd-on-stop\.js/, 'must name the stop-gating hook');
+    assert.match(content, /SubagentStop/, 'must name the SubagentStop event the stop hook uses');
+    assert.match(
+      content,
+      /Edit\|Write\|MultiEdit/,
+      'must name the PreToolUse matcher for the phase-gating hook'
+    );
+  });
+
+  it('describes exception mode as operator-only (no agent-facing exception flow)', () => {
+    assert.match(content, /operator-only/i, 'exception mode must be described as operator-only');
+    assert.match(
+      content,
+      /WORK_OPERATOR_TOKEN=1/,
+      'must name the operator token gate for the exception subcommand'
+    );
+    assert.doesNotMatch(
+      content,
+      /Allowed categories: `checkpoint`, `config-only`/,
+      'the stale agent-facing exception category list must be gone'
+    );
+  });
+
+  it('lists the full TDD-exempt Type enum from task-types.js (W2 taxonomy)', () => {
+    const { TDD_EXEMPT_TYPES } = require('../../split-in-tasks/lib/task-types');
+    for (const type of TDD_EXEMPT_TYPES) {
+      assert.ok(content.includes(`\`${type}\``), `SKILL.md must list TDD-exempt type \`${type}\``);
+    }
+  });
+
+  it('never instructs the agent to edit tasks.md (W3 message policy)', () => {
+    const forbidden = [
+      new RegExp(`${'update'} tasks\\.md`, 'i'),
+      new RegExp(`${'fix'} tasks\\.md`, 'i'),
+      new RegExp(`(?<!not\\s)(?<!never\\s)(?<!never to\\s)${'edit'} tasks\\.md`, 'i'),
+    ];
+    for (const re of forbidden) {
+      assert.doesNotMatch(content, re, `SKILL.md must not match forbidden phrasing ${re}`);
+    }
+    assert.match(
+      content,
+      /BLOCKED \(planner-defect\)/,
+      'SKILL.md must teach the BLOCKED (planner-defect) report convention instead'
+    );
+  });
+});

@@ -13,6 +13,7 @@ const {
   parseCmd,
   safeParseTask,
   runTestCommandWithOutput,
+  formatTestTimeout,
   getCurrentCycleRecord,
   errorExit,
   successOut,
@@ -33,22 +34,55 @@ const {
   isEmptyTestOutput,
   rejectAllSkipped,
 } = require('./record-helpers');
+// GH-570 — ablation-GREEN revert verification + audit row.
+const { recordAblationGreen } = require('./ablation');
 
-// RC-D empty-command-trap messages. Preserved byte-for-byte; GREEN names the
-// specific env vars, REFACTOR uses the generic phrasing — matching the originals.
+// RC-D empty-command-trap messages. GREEN names the specific env vars,
+// REFACTOR uses the generic phrasing — matching the originals. Both carry the
+// silent-verifier resolution (W2.4, APPSUPEN-1239): a command that is
+// legitimately silent on success (e.g. a bare `grep` verifier on a
+// mechanical-refactor task) can NEVER satisfy this trap — the Test Strategy
+// needs a noisy command (one that emits output on success). tasks.md is
+// planner-owned and LOCKED during implement, so that is a planner defect to
+// report, not something the agent may edit around.
+const SILENT_VERIFIER_RESOLUTION =
+  ' If the command is legitimately silent on success (e.g. a bare grep ' +
+  'verifier), it can never satisfy this check — the Test Strategy needs a ' +
+  'noisy command that emits output on success. That is a planner defect: ' +
+  'STOP and report `BLOCKED (planner-defect): silent-success test command` ' +
+  'to the orchestrator. Do NOT edit tasks.md.';
+
 const GREEN_EMPTY_MSG =
   'GREEN test command exited 0 with NO stdout/stderr output. This is the ' +
   'empty-command trap (typically an unbound test-command env var expanded ' +
   'to `eval ""`). Real test runs always emit output. Source the worktree' +
   "'s .envrc so $TEST_UNIT_COMMAND / $TEST_INTEGRATION_COMMAND are bound, " +
-  'verify the command runs real tests, then retry.';
+  'verify the command runs real tests, then retry.' +
+  SILENT_VERIFIER_RESOLUTION;
 
 const REFACTOR_EMPTY_MSG =
   'REFACTOR test command exited 0 with NO stdout/stderr output. This is the ' +
   'empty-command trap (typically an unbound test-command env var expanded ' +
   'to `eval ""`). Real test runs always emit output. Source the worktree' +
   "'s .envrc so test-command env vars are bound, verify the command runs " +
-  'real tests, then retry.';
+  'real tests, then retry.' +
+  SILENT_VERIFIER_RESOLUTION;
+
+/**
+ * GH-584 — a hang is not a passing run either. Name the hang explicitly
+ * instead of emitting the generic "Tests failed (exit N)" message the killed
+ * run's non-zero exit would otherwise produce. Neutral on cause: at GREEN /
+ * REFACTOR the hang may be an implementation bug (infinite loop) rather than
+ * a planner defect, so no planner-defect verdict here.
+ */
+function formatHangDiagnostic(phaseLabel, timeoutMs) {
+  return (
+    `${phaseLabel} test command timed out (${formatTestTimeout(timeoutMs)}) and was killed. ` +
+    'A hang is not a passing run — the command must run to completion and ' +
+    'exit 0. Check for an infinite loop in the implementation or a ' +
+    'watch-mode/interactive command, fix the cause, then retry.'
+  );
+}
 
 function cmdInit(ticketId, args) {
   if (!ticketId) {
@@ -91,6 +125,17 @@ function tryRecordCitationGreen(ticketId, cmd, taskNum, opts) {
   return true;
 }
 
+/**
+ * GH-570 — dispatch to the ablation-GREEN recorder when this cycle's RED
+ * evidence carries `ablation: true`. Returns true when handled (caller
+ * returns); false routes to the standard GREEN write.
+ */
+function _maybeRecordAblationGreen(params) {
+  if (!params.record.red || params.record.red.ablation !== true) return false;
+  recordAblationGreen(params);
+  return true;
+}
+
 function cmdRecordGreen(ticketId, args) {
   if (!ticketId) errorExit('Missing ticket ID.');
   const taskNum = safeParseTask(args);
@@ -107,7 +152,12 @@ function cmdRecordGreen(ticketId, args) {
   const state = requireState(ticketId, opts);
   assertRecordPhase(state, 'green', 'GREEN', 'green');
 
-  const { exitCode, stdout, stderr } = runTestCommandWithOutput(cmd);
+  const { exitCode, stdout, stderr, timedOut, timeoutMs } = runTestCommandWithOutput(cmd);
+  // GH-584: reject hangs BEFORE the exit-code check so the killed run is
+  // named as a hang rather than a generic failure.
+  if (timedOut) {
+    errorExit(formatHangDiagnostic('GREEN', timeoutMs));
+  }
   if (exitCode !== 0) {
     errorExit('Tests must PASS in GREEN phase. Tests failed (exit ' + exitCode + ').');
   }
@@ -122,6 +172,14 @@ function cmdRecordGreen(ticketId, args) {
   rejectAllSkipped(stdout, stderr, 'GREEN');
 
   const record = getCurrentCycleRecord(state);
+
+  // GH-570 — ablation-GREEN: when this cycle's RED evidence was recorded via
+  // the ablation path, verify the source mutation was reverted, stamp
+  // revertSha, and append the tdd-ablation-cycle audit row (both shas).
+  if (_maybeRecordAblationGreen({ ticketId, state, record, cmd, exitCode, taskNum, opts })) {
+    return;
+  }
+
   record.green = {
     testCommand: cmd,
     testExitCode: exitCode,
@@ -143,7 +201,11 @@ function cmdRecordRefactor(ticketId, args) {
   // Mirror the GREEN `--docs-exempt` opt-in on REFACTOR.
   const docsExempt = resolveDocsExempt(ticketId, taskNum, args);
 
-  const { exitCode, stdout, stderr } = runTestCommandWithOutput(cmd);
+  const { exitCode, stdout, stderr, timedOut, timeoutMs } = runTestCommandWithOutput(cmd);
+  // GH-584: same hang rejection as GREEN.
+  if (timedOut) {
+    errorExit(formatHangDiagnostic('REFACTOR', timeoutMs));
+  }
   if (exitCode !== 0) {
     errorExit('Tests must still PASS after refactoring. Tests failed (exit ' + exitCode + ').');
   }
