@@ -149,32 +149,25 @@ function _resolveStrategy(task) {
   return rawBody ? { kind: 'custom', customBody: rawBody } : null;
 }
 
-function _headingFor(task) {
-  return taskHeadingFor(task);
-}
-
-function _appendPeerErrors(strategy, parsedTasks, task, errors) {
-  if (typeof strategyModule.validatePeerCitation !== 'function') return;
+/**
+ * Run one lib/test-strategy.js validator and append its errors.
+ * Don't swallow a thrown validator — surface a hard error so a malformed
+ * task can't slip past the gate (e.g. validatePeerCitation throwing on it).
+ *
+ * W12 note: `validateStrategySatisfiability` is the generation-time
+ * satisfiability rule (envelope entries must be test-file shaped and exist
+ * or be created by the task's own scope; custom commands must pass the SAME
+ * detectMalformedTestCommand trap the implement gate runs) — it lives in
+ * lib/test-strategy.js, shared with the implement phase.
+ */
+function _appendValidatorErrors({ fnName, label, args, task, errors }) {
+  if (typeof strategyModule[fnName] !== 'function') return;
   try {
-    const peerErrors = strategyModule.validatePeerCitation(strategy, parsedTasks, task) || [];
-    for (const e of peerErrors) errors.push(e);
-  } catch (err) {
-    // Don't swallow — surface a hard error so a malformed task can't slip
-    // past the gate when validatePeerCitation throws on it.
-    errors.push(
-      `${_headingFor(task)}: peer-citation validator threw — ${err && err.message ? err.message : 'unknown error'}`
-    );
-  }
-}
-
-function _appendShapeErrors(strategy, task, errors) {
-  if (typeof strategyModule.validateStrategyShape !== 'function') return;
-  try {
-    const shapeErrors = strategyModule.validateStrategyShape(strategy, task) || [];
-    for (const e of shapeErrors) errors.push(e);
+    const found = strategyModule[fnName](...args) || [];
+    for (const e of found) errors.push(e);
   } catch (err) {
     errors.push(
-      `${_headingFor(task)}: shape validator threw — ${err && err.message ? err.message : 'unknown error'}`
+      `${taskHeadingFor(task)}: ${label} validator threw — ${err && err.message ? err.message : 'unknown error'}`
     );
   }
 }
@@ -208,8 +201,27 @@ function _validateOneTask(task, ctx, errors) {
     return;
   }
   const heading = taskHeadingFor(task);
-  _appendShapeErrors(strategy, task, errors);
-  _appendPeerErrors(strategy, ctx.parsedTasks, task, errors);
+  _appendValidatorErrors({
+    fnName: 'validateStrategyShape',
+    label: 'shape',
+    args: [strategy, task],
+    task,
+    errors,
+  });
+  _appendValidatorErrors({
+    fnName: 'validatePeerCitation',
+    label: 'peer-citation',
+    args: [strategy, ctx.parsedTasks, task],
+    task,
+    errors,
+  });
+  _appendValidatorErrors({
+    fnName: 'validateStrategySatisfiability',
+    label: 'satisfiability',
+    args: [strategy, task, { workDir: ctx.workDir }],
+    task,
+    errors,
+  });
   const command = _synthesize(strategy, ctx.envrc);
   if (!command) return;
   const dispatchCtx = {
@@ -219,10 +231,6 @@ function _validateOneTask(task, ctx, errors) {
     taskHeading: heading,
   };
   _dispatchAndAppend(command, dispatchCtx, heading, errors);
-}
-
-function _strategyValidatorReady() {
-  return Boolean(strategyModule && dispatcherModule);
 }
 
 function _missingStrategyModules() {
@@ -324,10 +332,6 @@ function _formatOrphanError(orphan) {
     ? orphan.remediation.map((r) => `  - ${r}`).join('\n')
     : '';
   return `${heading}: \`${orphan.path}\` is owned by ${heading} but no task's Test Strategy entry transitively touches it. Remediation options:\n${remediation}`;
-}
-
-function _ownershipReady() {
-  return Boolean(ownershipModule);
 }
 
 function _ownershipModuleMissing() {

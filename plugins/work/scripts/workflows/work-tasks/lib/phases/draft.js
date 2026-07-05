@@ -12,6 +12,12 @@ const path = require('node:path');
 
 const { TASKS_PHASES } = require('../../tasks-phase-registry');
 const { parseShapeFromSpec } = require('../../../work-spec/lib/component-shape');
+// Canonical closed `### Type` enum — the SAME source kind_assign validates
+// against and gateContractFor() reads at implement. The instructions template
+// derives from it so this phase can never teach a vocabulary the gate rejects
+// (the legacy frontend/backend/... list here manufactured unknown-Type
+// planner defects — W12).
+const { TASK_TYPES } = require('../../../../../skills/split-in-tasks/lib/task-types');
 
 let parseTasks;
 try {
@@ -203,7 +209,7 @@ function instructions(ctx) {
     '## Task 1 — <one-line title>',
     '',
     '### Type',
-    'frontend | backend | wiring | e2e | devops | fullstack | checkpoint',
+    TASK_TYPES.join(' | '),
     '',
     '### Dependencies',
     'Task 0 (or "none")',

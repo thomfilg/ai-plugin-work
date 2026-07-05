@@ -220,3 +220,44 @@ pnpm test legacy
     assert.equal(task.testCommand, undefined);
   });
 });
+
+describe('extractTestStrategy — red-mode key (GH-570)', () => {
+  it('parses `red-mode: ablation` into strategy.redMode', () => {
+    const body = `### Test Strategy
+\`\`\`yaml
+kind: unit
+entry: lib/__tests__/x.test.js
+red-mode: ablation
+\`\`\`
+`;
+    const strategy = extractTestStrategy(body);
+    assert.ok(strategy);
+    assert.equal(strategy.kind, 'unit');
+    assert.equal(strategy.redMode, 'ablation');
+  });
+
+  it('defaults strategy.redMode to null when the key is absent', () => {
+    const body = `### Test Strategy
+\`\`\`yaml
+kind: unit
+entry: lib/__tests__/x.test.js
+\`\`\`
+`;
+    const strategy = extractTestStrategy(body);
+    assert.ok(strategy);
+    assert.equal(strategy.redMode, null);
+  });
+
+  it('preserves unknown red-mode values verbatim for the validator to reject', () => {
+    const body = `### Test Strategy
+\`\`\`yaml
+kind: unit
+entry: lib/__tests__/x.test.js
+red-mode: mutation-party
+\`\`\`
+`;
+    const strategy = extractTestStrategy(body);
+    assert.ok(strategy);
+    assert.equal(strategy.redMode, 'mutation-party');
+  });
+});

@@ -57,7 +57,8 @@ The plugin uses environment variables for configuration, resolved through `scrip
 | `TASK_REVIEW_MAX_FIXES` | `2` | Max fix rounds per task review |
 | `READ_DOCS_ON_BRIEF` | | Paths to docs the brief-writer should read |
 | `READ_DOCS_ON_SPEC` | | Paths to docs the spec-writer should read |
-| `WORK_SKIP_E2E` | | Set to `1` to make implement-gate skip executing E2E test commands. Detected E2E patterns (`pnpm e2e`, `playwright`, `$TEST_E2E_COMMAND`) get skip-stub evidence so the workflow advances without spending minutes on browser tests. Alias: `WORK_SKIP_E2E_TESTS=1`. |
+| `WORK_SKIP_E2E` | | Set to `1` to make implement-gate skip executing E2E test commands. Detected E2E patterns (`pnpm e2e`, `playwright`, `$TEST_E2E_COMMAND`) get skip-stub evidence so the workflow advances without spending minutes on browser tests. Each stub is written via the shared gate-writer and audited to `.work-actions.json` as `tdd-e2e-skip-stub` so the fabricated cycle stays visible. Alias: `WORK_SKIP_E2E_TESTS=1`. |
+| `WORK_OPERATOR_TOKEN` | | Set to `1` to enable the operator-only `tdd-phase-state.js exception` subcommand. Agent environments never carry it. |
 
 ### Debug Variables
 

@@ -44,9 +44,12 @@ beforeEach(() => {
   // gate must resolve `.envrc` from the worktree root.
   flagFile = path.join(worktreeDir, 'green.marker');
   const checkScript = path.join(worktreeDir, 'check.js');
+  // Noisy on success: the gate now applies the recorder's RC-D empty-output
+  // trap (gate-writer.js writeGateGreen), so a zero-output exit-0 run would
+  // be refused — like a real test runner, the fixture emits a summary line.
   fs.writeFileSync(
     checkScript,
-    `const fs=require('fs');process.exit(fs.existsSync(${JSON.stringify(flagFile)})?0:1);\n`
+    `const fs=require('fs');const ok=fs.existsSync(${JSON.stringify(flagFile)});console.log(ok?'1 passing':'1 failing');process.exit(ok?0:1);\n`
   );
   fs.writeFileSync(
     path.join(worktreeDir, '.envrc'),

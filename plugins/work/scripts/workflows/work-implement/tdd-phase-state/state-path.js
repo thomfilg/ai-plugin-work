@@ -161,8 +161,14 @@ function readState(ticketId, opts) {
   return JSON.parse(fs.readFileSync(statePath, 'utf8'));
 }
 
-function writeState(ticketId, state, opts) {
-  const statePath = getStatePath(ticketId, { ...opts, forWrite: true });
+/**
+ * Atomic JSON write at an explicit path: tmp file + rename so readers never
+ * observe a torn/empty state file. Shared by `writeState` (recorder path,
+ * TASKS_BASE-resolved) and the gate-writer (W11 — the implement gate resolves
+ * its own evidence path from ctx.tasksDir and must use the SAME atomic
+ * semantics instead of a raw writeFileSync).
+ */
+function writeStateAtomic(statePath, state) {
   const dir = path.dirname(statePath);
   fs.mkdirSync(dir, { recursive: true });
   const tmpPath = `${statePath}.${process.pid}.${Date.now()}.tmp`;
@@ -175,9 +181,15 @@ function writeState(ticketId, state, opts) {
   fs.renameSync(tmpPath, statePath);
 }
 
+function writeState(ticketId, state, opts) {
+  const statePath = getStatePath(ticketId, { ...opts, forWrite: true });
+  writeStateAtomic(statePath, state);
+}
+
 module.exports = {
   sanitizeId,
   getStatePath,
   readState,
   writeState,
+  writeStateAtomic,
 };

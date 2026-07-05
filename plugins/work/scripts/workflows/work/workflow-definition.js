@@ -87,10 +87,15 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
 
   // GH-259 Task 7.2: Helper to verify per-task TDD evidence when tasks.md exists.
   // Returns true if no tasks.md, or if every taskN/ dir has valid tdd-phase.json.
-  // Uses validateTddEvidence from tdd-enforcement.js (single source of truth).
+  // Uses validateTddEvidenceForType from tdd-enforcement.js — the ONE shared
+  // contract-aware validator (same acceptance rule the implement gate applied
+  // when it advanced each task, so gate-accepted exempt-type evidence —
+  // e.g. a docs task's red-only stub — can never dead-end this verify).
   function verifyPerTaskTDD(ticketId) {
     try {
-      const { validateTddEvidence } = require(path.join(__dirname, 'lib', 'tdd-enforcement'));
+      const { validateTddEvidenceForType } = require(
+        path.join(__dirname, 'lib', 'tdd-enforcement')
+      );
       const taskParser = require(path.join(__dirname, 'lib', 'task-parser'));
       const dir = path.join(TASKS_BASE, safeTicketPath(ticketId));
       const tasksPath = path.join(dir, 'tasks.md');
@@ -103,9 +108,9 @@ module.exports = function createWorkflowDefinition({ TASKS_BASE, safeTicketPath,
         const tddPath = path.join(dir, `task${task.num}`, 'tdd-phase.json');
         if (!fs.existsSync(tddPath)) return false;
         const state = JSON.parse(fs.readFileSync(tddPath, 'utf-8'));
-        const validation = validateTddEvidence(state);
+        const validation = validateTddEvidenceForType(state, task.type);
         if (!validation.valid) return false;
-      } // validated via shared validateTddEvidence (tdd-enforcement.js)
+      } // validated via the shared contract-aware validator (tdd-enforcement.js)
       return true;
     } catch {
       return false;

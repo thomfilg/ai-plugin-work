@@ -15,6 +15,14 @@ const fs = require('fs');
 const path = require('path');
 const { taskSegment } = require(path.join(__dirname, '..', '..', 'lib', 'allocate-output-folder'));
 const { SHA_REGEX } = require(path.join(__dirname, '..', 'lib', 'git-utils'));
+// Shared `### Type` reader + the ONE contract-aware evidence validator — the
+// SAME functions the implement gate, the SubagentStop hook, and the check
+// validators use, so this implement→commit gate can never apply a stricter
+// rule than the gate that advanced the task (unification invariant).
+const { resolveTaskType } = require(path.join(__dirname, '..', 'lib', 'resolve-task-type'));
+const { validateTddEvidenceForType } = require(
+  path.join(__dirname, '..', 'lib', 'tdd-enforcement')
+);
 
 /**
  * Derive the set of steps that come after `check` in the workflow.
@@ -48,7 +56,6 @@ function transitionStep(ticket, targetStep, deps) {
     workflowCanTransition,
     TDD_GATED_STEPS,
     readTddEvidence,
-    validateTddEvidence,
     validateCheckGate,
     archiveStepArtifacts,
     appendAction,
@@ -97,19 +104,11 @@ function transitionStep(ticket, targetStep, deps) {
   // NOTE: This validates TDD evidence for the CURRENT task only (per tasksMeta.currentTaskIndex).
   // The multi-task guard below separately blocks leaving implement when tasks remain.
   // Checkpoint tasks skip TDD entirely — they verify, they don't write code.
-  const _isCheckpointTask = (() => {
-    if (!taskNum) return false;
-    try {
-      const tasksFile = path.join(TASKS_BASE, safeTicket, 'tasks.md');
-      const content = fs.readFileSync(tasksFile, 'utf8');
-      const m = content.match(
-        new RegExp(`## Task ${taskNum}\\b[\\s\\S]*?### Type\\s*\\n(\\w+)`, 'm')
-      );
-      return m && m[1].trim().toLowerCase() === 'checkpoint';
-    } catch {
-      return false;
-    }
-  })();
+  // Type resolution goes through the shared resolveTaskType (not a parallel
+  // inline regex) and feeds the contract-aware validator below; a null Type
+  // (single-task mode / unreadable tasks.md) validates strictly (fail closed).
+  const _taskType = taskNum ? resolveTaskType(path.join(TASKS_BASE, safeTicket), taskNum) : null;
+  const _isCheckpointTask = _taskType === 'checkpoint';
   if (TDD_GATED_STEPS.includes(currentStep) && currentStep !== targetStep && !_isCheckpointTask) {
     const { exists, parseError, evidence } = readTddEvidence(safeTicket, currentStep, taskNum);
     if (!exists || parseError) {
@@ -141,7 +140,7 @@ function transitionStep(ticket, targetStep, deps) {
       ].join('\n');
       return { error: true, message: msg };
     }
-    const validation = validateTddEvidence(evidence);
+    const validation = validateTddEvidenceForType(evidence, _taskType);
     if (!validation.valid) {
       return { error: true, message: `TDD evidence invalid: ${validation.reason}` };
     }

@@ -217,12 +217,20 @@ const CHECK_GATE_RULES = [
     check(dir) {
       const tasksPath = path.join(dir, 'tasks.md');
       if (!fileExists(tasksPath)) return []; // single-task mode, skip
-      const { validateTddEvidence } = require(path.join(__dirname, '..', 'lib', 'tdd-enforcement'));
+      // ONE shared contract-aware validator (tdd-enforcement.js) — the same
+      // acceptance rule the implement gate applied when it advanced each
+      // task, so gate-accepted evidence can never dead-end here. ('test' is
+      // not in the closed Type enum — the old `t.type !== 'test'` filter
+      // exempted a nonexistent Type while strict-validating the real
+      // TDD-exempt ones.)
+      const { validateTddEvidenceForType } = require(
+        path.join(__dirname, '..', 'lib', 'tdd-enforcement')
+      );
       const taskParser = require(path.join(__dirname, '..', 'lib', 'task-parser'));
       const tasks = taskParser.parseTasks(dir);
       if (!tasks || tasks.length === 0)
         return ['Unable to parse tasks.md — cannot verify per-task TDD evidence'];
-      const expectedTasks = tasks.filter((t) => !t.isCheckpoint && t.type !== 'test');
+      const expectedTasks = tasks.filter((t) => !t.isCheckpoint);
       if (expectedTasks.length === 0) return []; // all checkpoint tasks
       const reasons = [];
       for (const task of expectedTasks) {
@@ -235,7 +243,7 @@ const CHECK_GATE_RULES = [
         }
         try {
           const state = JSON.parse(readFile(tddPath));
-          const validation = validateTddEvidence(state);
+          const validation = validateTddEvidenceForType(state, task.type);
           if (!validation.valid) {
             reasons.push(`${taskName}/tdd-phase.json: ${validation.reason}`);
           }

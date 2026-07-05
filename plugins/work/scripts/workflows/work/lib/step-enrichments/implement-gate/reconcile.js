@@ -12,6 +12,7 @@
 const path = require('path');
 
 const { parseTasks } = require(path.join(__dirname, '..', '..', 'task-graph'));
+const { RETRY_KEYS } = require(path.join(__dirname, 'planner-hold'));
 
 /**
  * Decide whether tasksMeta should be truncated to match tasks.md, returning the
@@ -45,12 +46,7 @@ function plannedTruncation(ws, tasksDir) {
 /** Clear retry/pre-test state that pointed at a now-missing task. */
 function clearStaleTaskState(ws, fileCount) {
   if (typeof ws._tddRetryTask === 'number' && ws._tddRetryTask > fileCount) {
-    delete ws._tddRetryReason;
-    delete ws._tddRetryCount;
-    delete ws._tddRetryCommand;
-    delete ws._tddRetryExitCode;
-    delete ws._tddRetryOutputTail;
-    delete ws._tddRetryTask;
+    for (const k of RETRY_KEYS) delete ws[k];
   }
   if (ws._preTestForTask !== undefined && ws._preTestForTask !== null) {
     const preTestNum = Number(ws._preTestForTask);

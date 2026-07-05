@@ -200,7 +200,11 @@ function isDocsExemptAllowed(ticketId, taskNum) {
       `or to visual-only Storybook scope. ` +
       `Task ${taskNum || '?'} has Type="${type || 'unknown'}" and non-visual scope; ` +
       `the RC-D empty-output trap and RED file guard stay armed. ` +
-      `Either fix the \`### Type\` line in tasks.md or drop --docs-exempt.`,
+      `Drop --docs-exempt and run the full TDD cycle. If the \`### Type\` line ` +
+      `is wrong, that is a planner defect: tasks.md is planner-owned and ` +
+      `LOCKED during implement — do NOT edit it. STOP and report ` +
+      `\`BLOCKED (planner-defect): Type/docs-exempt mismatch for task ${taskNum || '?'}\` ` +
+      `back to the orchestrator.`,
   };
 }
 

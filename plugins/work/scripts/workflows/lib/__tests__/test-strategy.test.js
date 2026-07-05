@@ -10,6 +10,7 @@ const { describe, it } = require('node:test');
 const assert = require('node:assert/strict');
 const path = require('node:path');
 const fs = require('node:fs');
+const { spawnSync } = require('node:child_process');
 
 const MODULE_PATH = path.join(__dirname, '..', 'test-strategy.js');
 
@@ -88,7 +89,9 @@ describe('lib/test-strategy.js', () => {
       assert.equal(synthesizeCommand(strategy, { vars: {} }), null);
     });
 
-    it('returns customBody verbatim for kind=custom', () => {
+    it('returns customBody with a strict-mode prefix for chained kind=custom bodies (W9)', () => {
+      // Chained bodies get `set -e; set -o pipefail; ` prepended so a failing
+      // middle segment can no longer be masked by a passing final one.
       const { synthesizeCommand } = loadModule();
       const strategy = {
         kind: 'custom',
@@ -96,7 +99,7 @@ describe('lib/test-strategy.js', () => {
       };
       assert.equal(
         synthesizeCommand(strategy, { vars: {} }),
-        'pnpm dev:typecheck && grep -q foo bar.ts'
+        'set -e; set -o pipefail; pnpm dev:typecheck && grep -q foo bar.ts'
       );
     });
 
@@ -108,6 +111,100 @@ describe('lib/test-strategy.js', () => {
         customBody: 'stale legacy body',
       };
       assert.equal(synthesizeCommand(strategy, { vars: {} }), 'pnpm dev:check');
+    });
+
+    it('returns single unchained kind=custom commands verbatim (no strict prefix)', () => {
+      // An unchained command's exit code cannot be masked; leaving it verbatim
+      // also preserves the recorder's anchored fake-command detection.
+      const { synthesizeCommand } = loadModule();
+      const strategy = { kind: 'custom', command: 'pnpm dev:check' };
+      assert.equal(synthesizeCommand(strategy, { vars: {} }), 'pnpm dev:check');
+    });
+
+    it('prefixes multi-line kind=custom bodies with strict mode (W9)', () => {
+      const { synthesizeCommand } = loadModule();
+      const strategy = {
+        kind: 'custom',
+        customBody: 'node scripts/check-a.js\nnode scripts/check-b.js',
+      };
+      assert.equal(
+        synthesizeCommand(strategy, { vars: {} }),
+        'set -e; set -o pipefail; node scripts/check-a.js\nnode scripts/check-b.js'
+      );
+    });
+
+    it('does not double-prefix a body that already begins with set -', () => {
+      const { synthesizeCommand } = loadModule();
+      const strategy = {
+        kind: 'custom',
+        command: 'set -euo pipefail; pnpm lint && pnpm test',
+      };
+      assert.equal(
+        synthesizeCommand(strategy, { vars: {} }),
+        'set -euo pipefail; pnpm lint && pnpm test'
+      );
+    });
+
+    it('multi-line custom body where line 1 fails exits non-zero when run (W9 regression)', () => {
+      // echo-4449/5152: under `bash -lc`, a multi-line body's exit code is the
+      // LAST line's — `false` on line 1 was masked by `true` on line 2. The
+      // synthesized command must fail.
+      const { synthesizeCommand } = loadModule();
+      const cmd = synthesizeCommand({ kind: 'custom', customBody: 'false\ntrue' }, { vars: {} });
+      const run = spawnSync('bash', ['-lc', cmd], { encoding: 'utf8' });
+      assert.notEqual(run.status, 0, `expected non-zero exit for: ${cmd}`);
+    });
+
+    it('multi-line custom body where every line passes still exits 0 when run', () => {
+      const { synthesizeCommand } = loadModule();
+      const cmd = synthesizeCommand({ kind: 'custom', customBody: 'true\ntrue' }, { vars: {} });
+      const run = spawnSync('bash', ['-lc', cmd], { encoding: 'utf8' });
+      assert.equal(run.status, 0, `expected exit 0 for: ${cmd}, stderr: ${run.stderr}`);
+    });
+
+    it('pipeline failure in a chained body is not masked (pipefail active)', () => {
+      const { synthesizeCommand } = loadModule();
+      const cmd = synthesizeCommand(
+        { kind: 'custom', customBody: 'false | cat; true' },
+        { vars: {} }
+      );
+      const run = spawnSync('bash', ['-lc', cmd], { encoding: 'utf8' });
+      assert.notEqual(run.status, 0, `expected non-zero exit for: ${cmd}`);
+    });
+
+    // Bypass review (W9 follow-up): a SINGLE pipe is chaining too — without
+    // the prefix, `pytest | tee out.log` exits with tee's 0 and the exact
+    // echo-4449/5152 masking survives via `|`.
+    it('prefixes single-pipe custom commands with strict mode (W9 follow-up)', () => {
+      const { synthesizeCommand } = loadModule();
+      const strategy = { kind: 'custom', command: 'pnpm test | tee out.log' };
+      assert.equal(
+        synthesizeCommand(strategy, { vars: {} }),
+        'set -e; set -o pipefail; pnpm test | tee out.log'
+      );
+    });
+
+    it('single-pipe failure is not masked by the pipe tail when run', () => {
+      const { synthesizeCommand } = loadModule();
+      const cmd = synthesizeCommand({ kind: 'custom', customBody: 'false | cat' }, { vars: {} });
+      const run = spawnSync('bash', ['-lc', cmd], { encoding: 'utf8' });
+      assert.notEqual(run.status, 0, `expected non-zero exit for: ${cmd}`);
+    });
+
+    // Bypass review (W9 follow-up): only an errexit prefix counts as already
+    // strict. `set -x`/`set -f` bodies previously matched `/^\s*set\s+-/` and
+    // silently skipped the strict prefix — failure masking returned.
+    it('a body starting with non-strict set -x still gets the strict prefix', () => {
+      const { synthesizeCommand } = loadModule();
+      const strategy = { kind: 'custom', customBody: 'set -x; false; true' };
+      assert.equal(
+        synthesizeCommand(strategy, { vars: {} }),
+        'set -e; set -o pipefail; set -x; false; true'
+      );
+      const run = spawnSync('bash', ['-lc', 'set -e; set -o pipefail; set -x; false; true'], {
+        encoding: 'utf8',
+      });
+      assert.notEqual(run.status, 0, 'the failing middle segment must fail the command');
     });
 
     it('returns envelope with CHANGED_FILES=entry when $TEST_E2E_COMMAND is set (kind=e2e)', () => {
