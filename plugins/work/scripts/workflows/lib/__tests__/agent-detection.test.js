@@ -11,11 +11,24 @@ const os = require('os');
 const path = require('path');
 const { normalizeAgentName, isRunningInAgent } = require('../agent-detection');
 
+// Transcripts are written inside a private, permission-restricted directory
+// (fs.mkdtempSync → mode 0700, unpredictable name) rather than directly in the
+// world-writable OS temp dir, so a predictable filename cannot be exploited via
+// a symlink/race attack (CodeQL js/insecure-temporary-file).
+const TRANSCRIPT_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-detect-'));
+process.on('exit', () => {
+  try {
+    fs.rmSync(TRANSCRIPT_DIR, { recursive: true, force: true });
+  } catch {
+    /* best-effort cleanup */
+  }
+});
+
 // Build a JSONL transcript file from an array of line objects; returns its path.
 function writeTranscript(lines) {
   const tmp = path.join(
-    os.tmpdir(),
-    `agent-detect-initprompt-${process.pid}-${Math.random().toString(36).slice(2)}.jsonl`
+    TRANSCRIPT_DIR,
+    `initprompt-${process.pid}-${Math.random().toString(36).slice(2)}.jsonl`
   );
   fs.writeFileSync(tmp, `${lines.map((l) => JSON.stringify(l)).join('\n')}\n`);
   return tmp;
