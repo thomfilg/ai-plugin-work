@@ -42,7 +42,7 @@ describe('triage — early review surfacing (GH-268)', () => {
   it('routes to fix-reviews while CI is still PENDING when the bot review is submitted', () => {
     const { state } = run('CI: PENDING\nReviews: 2 BLOCKING');
     assert.equal(state.currentStep, 'fix-reviews', 'reviews must preempt the CI wait');
-    assert.equal(state.failureCategory, 'reviews');
+    assert.equal(state.failureCategory, 'review_failure'); // GH-670 canonical spelling
   });
 
   it('keeps waiting when the bot review is still in progress (no partial reviews)', () => {

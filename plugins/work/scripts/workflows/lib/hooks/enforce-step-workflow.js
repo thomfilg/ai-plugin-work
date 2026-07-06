@@ -16,45 +16,15 @@
  *   Clears evidence on backward transitions.
  *
  * Both /work and /work-pr can be active simultaneously (work-pr runs inside
- * /work at step pr). Each workflow is checked independently.
- *
- * Fail-open: Any error → exit 0 (allow).
+ * /work at step pr); each is checked independently. Fail-open: any error →
+ * exit 0 (allow).
  *
  * ─── Decomposition (GH-206 Task 9) ─────────────────────────────────────────
- * Pure rule logic lives in workflows/lib/hooks/policies/* and is unit-tested
- * in isolation. This file remains the source of truth for the wiring, the
- * documented patches (1–14), and the orchestration of the per-workflow loop.
- *
- * ─── GH-452: Node 20 CI hardening ──────────────────────────
- * The Node 20 GitHub Actions runner exposed two latent issues invisible on
- * developer machines and on Node 22/24 CI:
- *
- *   1. Trust-prefix drift. On the runner, the plugin cache path that
- *      path.resolve(__dirname, '..') computes can diverge from the realpath
- *      of the same directory (symlinks in the cache layer, cwd differences
- *      between the spawned hook and the test parent). isTrustedScriptPath
- *      realpaths BOTH sides per-call as defence-in-depth, but the prefix
- *      containment compared the raw TRUSTED_SCRIPT_DIRS entries against the
- *      resolved candidate, occasionally returning false on CI for
- *      genuinely-trusted scripts and tripping Vector 3 assertions. Fix:
- *      normalise TRUSTED_SCRIPT_DIRS via fs.realpathSync at module load
- *      (per-entry, fail-open on failure with a stderr warning). Membership
- *      is NOT widened — same set of directories, realpath form.
- *
- *   2. State-file ENOENT race. Tests that fs.writeFileSync a JSON state file
- *      (e.g. .work-state.json) and immediately spawn the hook can race
- *      the spawned subprocess on the runner: the child reads the file before
- *      the parent's write becomes visible. Tests now route every JSON-state
- *      write through an atomicWriteJson helper (tmp + rename + directory
- *      fsync) which closes the window.
- *
- *   3. Diagnostic switch. ENFORCE_HOOK_DEBUG=1 dumps __dirname, each
- *      TRUSTED_SCRIPT_DIRS entry alongside its realpath, and a per-call
- *      GH-452 candidate=<path> realpath=<resolved> line. Used to classify
- *      future drift fast on CI. Output is stderr-only, absolute paths only.
- *
- * The fix preserves the trust boundary: an untrusted script under
- * os.tmpdir() still exits 2 with BLOCKED. Tracking: GH-452.
+ * Pure rule logic lives in workflows/lib/hooks/policies/* (hook-config,
+ * workflow-context, state-script-gate, agent-gate-rule, hook-wiring,
+ * workflow-loop-rules, …) and is unit-tested in isolation. This file remains
+ * the source of truth for the wiring calls, the documented patches (1–14),
+ * and the per-workflow loop orchestration.
  */
 
 const fs = require('fs');
@@ -76,42 +46,28 @@ process.on('unhandledRejection', (err) => {
   process.exit(didBlock ? 2 : 0);
 });
 
-// (Patch 1) Lazy-load appendAction with fallback
 // Agent detection for report file protection
 const { isRunningInAgent, normalizeAgentName } = require(
   path.join(__dirname, '..', 'agent-detection')
 );
-
-const { createArtifactProtector } = require(path.join(__dirname, '..', 'protect-artifact-files'));
 const { logHookError } = require(path.join(__dirname, '..', 'hook-error-log'));
 
 // Policy modules — pure decision functions (GH-206 Task 9)
-const {
-  getNodeInvocations,
-  buildCommandIndex,
-  matchToolToStep,
-  isExempt,
-  parseTransition,
-} = require(path.join(__dirname, 'policies/command-matching'));
-const { isTrustedScriptPath, expandPluginRoot, extractSubCommand, isSafeSubCommand } = require(
-  path.join(__dirname, 'policies', 'agent-authorization')
+const { buildCommandIndex, parseTransition } = require(
+  path.join(__dirname, 'policies/command-matching')
 );
-const { buildBasenameToHintMap, createStateFileProtector, createFollowUpStateProtector } = require(
-  path.join(__dirname, 'policies', 'state-protection')
+const { EXEMPT_SCRIPTS, CHECK_AGENTS } = require(path.join(__dirname, 'policies', 'hook-config'));
+const { discoverWorkflows } = require(path.join(__dirname, 'policies', 'workflow-discovery'));
+const { resolveTicketId, getCurrentStep } = require(
+  path.join(__dirname, 'policies', 'workflow-context')
 );
-const { evaluateTransitionGate, formatTransitionBlockMessage } = require(
-  path.join(__dirname, 'policies', 'transition-gate')
+const { createHookWiring } = require(path.join(__dirname, 'policies', 'hook-wiring'));
+const { createWorkflowLoopRules } = require(
+  path.join(__dirname, 'policies', 'workflow-loop-rules')
 );
-const { evaluateStepGate, formatStepBlockMessage } = require(
-  path.join(__dirname, 'policies', 'step-gate')
-);
-const {
-  loadEvidence: loadEvidencePolicy,
-  saveEvidence: saveEvidencePolicy,
-  recordEvidenceEntry,
-  clearBackwardEvidence,
-} = require(path.join(__dirname, 'policies', 'evidence-recorder'));
+const { logHookFired } = require(path.join(__dirname, 'policies', 'hook-telemetry'));
 
+// (Patch 1) Lazy-load appendAction with fallback
 let appendAction;
 try {
   appendAction = require(
@@ -140,59 +96,22 @@ function safeTicketPath(ticketId) {
 }
 
 // ─── Workflow Definitions ───────────────────────────────────────────────────
-//
 // Auto-discovered from workflows/*/workflow-definition.js (Open/Closed Principle).
-// Each workflow directory exports a factory function that receives shared deps.
 
 const { STEPS, ALL_STEPS: WORK_STEPS } = require(
   path.join(__dirname, '..', '..', 'work', 'step-registry')
 );
 
 const workflowDeps = { TASKS_BASE, safeTicketPath, resolveGitHead };
+const { workflows: WORKFLOWS, artifactRules: ARTIFACT_RULES } = discoverWorkflows(workflowDeps);
 
-function discoverWorkflows() {
-  const workflowsDir = path.join(__dirname, '..', '..');
-  const discovered = [];
-  const allArtifactRules = [];
-
-  try {
-    const entries = fs.readdirSync(workflowsDir, { withFileTypes: true });
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const defPath = path.join(workflowsDir, entry.name, 'workflow-definition.js');
-      if (!fs.existsSync(defPath)) continue;
-
-      try {
-        const factory = require(defPath);
-        const { workflow, artifactRules = [] } = factory(workflowDeps);
-        discovered.push(workflow);
-        allArtifactRules.push(...artifactRules);
-      } catch (err) {
-        if (DEBUG)
-          process.stderr.write(
-            `WARNING: Failed to load workflow from ${defPath}: ${err?.message}\n`
-          );
-        // fail-open: broken workflow definitions don't block tool use
-      }
-    }
-  } catch (err) {
-    if (DEBUG) process.stderr.write(`WARNING: Failed to discover workflows: ${err?.message}\n`);
-  }
-
-  return { workflows: discovered, artifactRules: allArtifactRules };
-}
-
-const { workflows: WORKFLOWS, artifactRules: ARTIFACT_RULES } = discoverWorkflows();
-
-// all workflow definitions auto-discovered above
 // Protected state file basenames — block direct Edit/Write/MultiEdit/Bash writes
-// Note: createFileProtector is consumed indirectly via policies/state-protection.js,
-// which calls it for the state and follow-up protectors. Re-imported here so the
-// historical Patch tests (which inspect this source for `createFileProtector`) keep
-// passing — see (Patch 14)/Rule 3 source assertions.
+// Note: createFileProtector is consumed indirectly via policies/state-protection.js.
+// Re-imported here so the historical Patch tests (which inspect this source for
+// `createFileProtector`) keep passing — see (Patch 14)/Rule 3 source assertions.
 const { buildProtectedBasenames, createFileProtector } = require(
   path.join(__dirname, '..', 'protect-state-files')
-); // task-* commands allowlisted in SAFE_SUBCOMMANDS below
+); // task-* commands allowlisted in SAFE_SUBCOMMANDS (policies/hook-config.js)
 void createFileProtector; // referenced for test introspection — actual usage lives in policies/state-protection.js
 const PROTECTED_STATE_BASENAMES = buildProtectedBasenames(WORKFLOWS, [
   '.work-actions.json',
@@ -202,185 +121,43 @@ const PROTECTED_STATE_BASENAMES = buildProtectedBasenames(WORKFLOWS, [
   '.check2-state.json', // legacy name — still protected for in-flight tickets
   '.follow-up-state.json',
   'follow-up-comments.json',
+  // Check-step delta baselines: deleting one silently resets the net-new-vs-baseline signal.
+  'tests-baseline.json',
+  'typecheck-baseline.json',
 ]);
 
-// Map each protected basename to its workflow's transition hint
-const BASENAME_TO_HINT = buildBasenameToHintMap(WORKFLOWS);
-
-const artifactProtector = createArtifactProtector({
-  artifacts: ARTIFACT_RULES,
-  getStepInProgress: (ticketId) => {
-    const state = loadStateFile(ticketId, '.work-state.json');
-    return state?.stepStatus
-      ? WORK_STEPS.find((s) => state.stepStatus[s] === 'in_progress') || null
-      : null;
-  },
-  isRunningInAgent,
-  getTicketId: () => getTicketId(),
-});
-
-// Exempt orchestrator and workflow-engine scripts from Vector 3 (script bypass detection)
-// These are the legitimate writers of state files.
-const EXEMPT_SCRIPTS = new Set([
-  'work.workflow.js',
-  'workflow-engine.js',
-  'work-state.js',
-  'workflow-state.js',
-  'session-guard.js',
-  'check-next.js',
-  'follow-up-next.js',
-  'follow-up-pr-comments.js',
-  'work-next.js',
-  // Orchestrator-side health monitor: read-only on state files, writes
-  // throttle markers to /tmp only. Mentions .work-state.json in source
-  // (for the path argument) which trips Vector 3 — exempt here.
-  'workflow-monitor.js',
-]);
-
-// Sub-command filtering for state scripts (GH-89).
-// work-state.js: exempt for get, resume-info, init, active-subtask, add-error.
-// workflow-state.js: exempt for get, resume-info, add-error (init blocked — not idempotent).
-// Mutating sub-commands (set-step, set-check, complete, etc.) must go through the orchestrator.
-// Exception: 'complete' is step-conditionally allowed at the terminal step via strict match (GH-276).
-const SAFE_SUBCOMMANDS = {
-  'work-state.js': new Set([
-    'get',
-    'resume-info',
-    'init',
-    'active-subtask',
-    'add-error',
-    'task-init',
-    'task-current',
-    'task-advance',
-    'task-get',
-  ]),
-  'workflow-state.js': new Set(['get', 'resume-info', 'add-error']), // init excluded: not idempotent (resets all steps). exemptPatterns (line ~327) aligned.
-  'session-guard.js': new Set(['init', 'status']), // SAFE_SUBCOMMANDS session-guard (GH-338)
-};
-
-// Trusted directories where exempt scripts are allowed to live.
-// Only scripts resolved under these paths are exempt — prevents basename spoofing.
-const TRUSTED_SCRIPT_DIRS = [
-  path.resolve(__dirname), // workflows/lib/hooks/
-  path.resolve(__dirname, '..'), // workflows/lib/
-  path.resolve(__dirname, '..', 'scripts'), // workflows/lib/scripts/
-  path.resolve(__dirname, '..', '..', 'work'), // workflows/work/
-  path.resolve(__dirname, '..', '..', 'work', 'scripts'), // workflows/work/scripts/
-  path.resolve(__dirname, '..', '..', 'check', 'scripts'), // workflows/check/scripts/
-  path.resolve(__dirname, '..', '..', 'work-implement'), // workflows/work-implement/
-  path.resolve(__dirname, '..', '..', 'work-brief'), // workflows/work-brief/
-  path.resolve(__dirname, '..', '..', 'work-spec'), // workflows/work-spec/
-  path.resolve(__dirname, '..', '..', 'work-tasks'), // workflows/work-tasks/
-  path.resolve(__dirname, '..', '..', 'work-pr-step'), // workflows/work-pr-step/
-  path.resolve(__dirname, '..', '..', 'work-ci'), // workflows/work-ci/
-  path.resolve(__dirname, '..', '..', 'work-completion-checker'), // workflows/work-completion-checker/
-  path.resolve(__dirname, '..', '..', 'work-code-checker'), // workflows/work-code-checker/
-  path.resolve(__dirname, '..', '..', 'work-qa-feature-tester'), // workflows/work-qa-feature-tester/
-  path.resolve(__dirname, '..', '..', 'work-pr-reviewer'), // workflows/work-pr-reviewer/
-  path.resolve(__dirname, '..', '..', 'work-task-review'), // workflows/work-task-review/
-  path.resolve(__dirname, '..', '..', 'work-reports'), // workflows/work-reports/
-  path.resolve(__dirname, '..', '..', 'work-cleanup'), // workflows/work-cleanup/
-  path.resolve(__dirname, '..', '..', 'work'), // workflows/work/
-  path.resolve(__dirname, '..', '..', 'check'), // workflows/check/
-  path.resolve(__dirname, '..', '..', 'follow-up'), // workflows/follow-up/
-];
-
-// GH-452: Normalise TRUSTED_SCRIPT_DIRS via fs.realpathSync at module load so the
-// prefix containment check does not depend on per-call realpath resolution
-// against a possibly-symlinked plugin-cache directory. Membership is NOT
-// widened — the same set of directories is normalised in place. Per-entry
-// realpath failure is fail-open (keep the unresolved path so
-// isTrustedScriptPath defence-in-depth per-call realpath retains today's
-// behaviour) and emits a `GH-452 trusted-dir realpath failed` warning on
-// stderr.
-function safeRealpath(entry) {
-  try {
-    return fs.realpathSync(entry);
-  } catch (err) {
-    process.stderr.write(
-      `GH-452 trusted-dir realpath failed: ${entry} (${err && err.code ? err.code : 'EUNKNOWN'})\n`
-    );
-    return entry;
-  }
-}
-for (let i = 0; i < TRUSTED_SCRIPT_DIRS.length; i++) {
-  TRUSTED_SCRIPT_DIRS[i] = safeRealpath(TRUSTED_SCRIPT_DIRS[i]);
-}
-
-// GH-452: Diagnostic instrumentation gated behind ENFORCE_HOOK_DEBUG=1.
-// Dumps __dirname and each TRUSTED_SCRIPT_DIRS entry alongside its realpath at
-// module load, plus a per-call candidate=<path> realpath=<resolved> line inside
-// the authorization decision path. Used to classify CI failure modes (resolve
-// drift, symlink skew, race) without altering trust semantics. Absolute paths
-// only — no secrets. See GH-452.
-function debugLogTrustedDirs() {
-  if (process.env.ENFORCE_HOOK_DEBUG !== '1') return;
-  process.stderr.write(`GH-452 __dirname=${__dirname}\n`);
-  for (const dir of TRUSTED_SCRIPT_DIRS) {
-    let realpath;
-    try {
-      realpath = fs.realpathSync(dir);
-    } catch (err) {
-      realpath = `<realpath-error: ${err && err.code ? err.code : 'EUNKNOWN'}>`;
-    }
-    process.stderr.write(`GH-452 trusted-dir entry=${dir} realpath=${realpath}\n`);
-  }
-}
-function debugLogCandidatePath(candidate) {
-  if (process.env.ENFORCE_HOOK_DEBUG !== '1') return;
-  let realpath;
-  try {
-    realpath = fs.realpathSync(path.resolve(candidate));
-  } catch (err) {
-    realpath = `<realpath-error: ${err && err.code ? err.code : 'EUNKNOWN'}>`;
-  }
-  process.stderr.write(`GH-452 candidate=${candidate} realpath=${realpath}\n`);
-}
-debugLogTrustedDirs();
-
-// Agent-gated writer scripts — map script basename to { agents, step }.
-// When a Bash command invokes one of these scripts, the hook verifies:
-//   1. The caller is an authorized agent (from `agents`)
-//   2. The correct workflow step is active (from `step`) — enforced per script (GH-184)
-// The script itself also validates, providing defense-in-depth.
-//
-// GH-206 Task 12: Sourced from workflow-definition.js (declarative policy config).
-// Merged across all discovered workflows so future workflows can register their
-// own gated scripts without editing this file.
-const AGENT_GATED_SCRIPTS = (() => {
-  const merged = {};
-  for (const wf of WORKFLOWS) {
-    if (wf && wf.agentGatedScripts && typeof wf.agentGatedScripts === 'object') {
-      Object.assign(merged, wf.agentGatedScripts);
-    }
-  }
-  return merged;
-})();
-
-// Vector 3 (script-content bypass) of the state-file protector must skip
-// agent-gated writer scripts. Those scripts legitimately reference protected
-// basenames (e.g. tdd-phase-state.js calls appendEnforcementAudit on
-// .work-actions.json) and Rule 5 below is the authoritative gate for them
-// (agent identity + step + token mint). Without this, Rule 3 would block the
-// invocation before Rule 5 ever runs.
-const AGENT_GATED_EXEMPT_SCRIPTS = new Set([
-  ...EXEMPT_SCRIPTS,
-  ...Object.keys(AGENT_GATED_SCRIPTS),
-]);
-
-const stateFileProtector = createStateFileProtector({
-  protectedBasenames: PROTECTED_STATE_BASENAMES,
-  exemptScripts: AGENT_GATED_EXEMPT_SCRIPTS,
-  safeSubcommands: SAFE_SUBCOMMANDS,
-  trustedDirs: TRUSTED_SCRIPT_DIRS,
-});
-
-// Protected follow-up PR state files — only the follow-up-pr agent during follow_up step
-const followUpStateProtector = createFollowUpStateProtector({
-  getTicketId: () => getTicketId(),
+// Protectors + gates (Rules 3/3b/3c/4/5) — see policies/hook-wiring.js
+const {
   loadStateFile,
+  checkStateFileRule,
+  checkProtectors,
+  checkUnsafeSubcommands,
+  agentGateRule,
+} = createHookWiring({
+  workflows: WORKFLOWS,
+  artifactRules: ARTIFACT_RULES,
+  protectedBasenames: PROTECTED_STATE_BASENAMES,
+  exemptScripts: EXEMPT_SCRIPTS,
+  tasksBase: TASKS_BASE,
+  safeTicketPath,
+  steps: STEPS,
+  workSteps: WORK_STEPS,
+  getTicketId: () => getTicketId(),
   isRunningInAgent,
-  STEPS,
+  normalizeAgentName,
+  hookFilename: __filename,
+});
+
+// Per-workflow loop bodies (Rules 1+2, evidence recording)
+const loopRules = createWorkflowLoopRules({
+  loadStateFile,
+  getCurrentStep,
+  checkAgents: CHECK_AGENTS,
+  tasksBase: TASKS_BASE,
+  safeTicketPath,
+  appendAction: (ticketId, entry) => appendAction(ticketId, entry),
+  prStepName: STEPS.pr,
+  prShaMatchesHead,
 });
 
 // (Patch 7) Validate workflow config at startup
@@ -408,26 +185,10 @@ try {
   // fail-open: config errors don't block tool use
 }
 
-// Agents legitimately used by /check that should bypass /work step blocking
-const CHECK_AGENTS = new Set([
-  'quality-checker',
-  'work-workflow:quality-checker',
-  'code-checker',
-  'work-workflow:code-checker',
-  'completion-checker',
-  'work-workflow:completion-checker',
-  'qa-feature-tester',
-  'work-workflow:qa-feature-tester',
-  'qa-api-tester',
-  'work-workflow:qa-api-tester',
-]);
-
 // Pre-index commandMap by tool name for O(1) lookup — delegated to command-matching policy
 for (const wf of WORKFLOWS) {
   wf.commandIndex = buildCommandIndex(wf.commandMap);
 }
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
 
 // Cache git branch per invocation
 let _cachedTicketId;
@@ -450,414 +211,54 @@ function resolveGitHead() {
   throw new Error('unexpected .git content');
 }
 
+// Current HEAD ref: resolveGitHead() with a plain-repo direct-read fallback.
+function readGitHeadRef() {
+  let head;
+  try {
+    head = resolveGitHead();
+  } catch {
+    head = fs.readFileSync(path.join('.git', 'HEAD'), 'utf-8').trim();
+  }
+  return head.startsWith('ref: ') ? head.slice(5) : head;
+}
+
+// (Patch 6+9) Active-ticket detection — env override > command > .git/HEAD >
+// transcript_path (GH-146 phase suffix). Resolution lives in
+// policies/workflow-context.js, broad [A-Z]+-\d+ pattern (no project prefix).
 function getTicketId(hookData) {
   if (_ticketIdResolved) return _cachedTicketId;
   _ticketIdResolved = true;
-  // Allow override for testing — empty string explicitly opts out (no git fallback)
-  if ('ENFORCE_HOOK_TICKET_ID' in process.env) {
-    _cachedTicketId = process.env.ENFORCE_HOOK_TICKET_ID || null;
-    // Compose with suffix when present (GH-146: phase-aware state paths)
-    // Only append if ticketId doesn't already contain a '/' (prevent double-suffixing)
-    if (
-      _cachedTicketId &&
-      !_cachedTicketId.includes('/') &&
-      process.env.ENFORCE_HOOK_SUFFIX &&
-      /^[a-zA-Z0-9_-]+$/.test(process.env.ENFORCE_HOOK_SUFFIX)
-    ) {
-      _cachedTicketId = _cachedTicketId + '/' + process.env.ENFORCE_HOOK_SUFFIX;
-    }
-    return _cachedTicketId;
-  }
-  // Priority order: command > .git/HEAD > transcript_path.
-  // The Bash command itself (when present) is the most explicit signal —
-  // a developer running `node task-next.js ECHO-XXXX taskN` literally
-  // states which ticket they're working on. .git/HEAD is *usually* right
-  // but breaks in symlinked-worktree setups where the worktree directory
-  // name doesn't match the checked-out branch (e.g. tabwoah-ECHO-4628/
-  // with branch ECHO-4465 checked out — observed in real incidents).
-  // transcript_path is the weakest signal but a useful last resort when
-  // neither command nor cwd identify a ticket.
-  if (hookData) {
-    const cmd = hookData?.tool_input?.command;
-    if (typeof cmd === 'string') {
-      const m = cmd.match(/\b[A-Z]+-\d+\b/);
-      if (m) _cachedTicketId = m[0];
-    }
-  }
-  if (!_cachedTicketId) {
-    // (Patch 6+9) Worktree-aware .git/HEAD read — no subprocess spawn
-    try {
-      let head;
-      try {
-        head = resolveGitHead();
-      } catch {
-        head = fs.readFileSync(path.join('.git', 'HEAD'), 'utf-8').trim();
-      }
-      const ref = head.startsWith('ref: ') ? head.slice(5) : head;
-      const match = ref.match(/[A-Z]+-\d+/);
-      _cachedTicketId = match ? match[0] : null;
-    } catch {
-      _cachedTicketId = null;
-    }
-  }
-  if (!_cachedTicketId && hookData && typeof hookData?.transcript_path === 'string') {
-    const m = hookData.transcript_path.match(/\b[A-Z]+-\d+\b/);
-    if (m) _cachedTicketId = m[0];
-  }
-  // Compose with suffix when present (GH-146: phase-aware state paths)
-  // Only append if ticketId doesn't already contain a '/' (prevent double-suffixing)
-  if (
-    _cachedTicketId &&
-    !_cachedTicketId.includes('/') &&
-    process.env.ENFORCE_HOOK_SUFFIX &&
-    /^[a-zA-Z0-9_-]+$/.test(process.env.ENFORCE_HOOK_SUFFIX)
-  ) {
-    _cachedTicketId = _cachedTicketId + '/' + process.env.ENFORCE_HOOK_SUFFIX;
-  }
+  _cachedTicketId = resolveTicketId(hookData, readGitHeadRef);
   return _cachedTicketId;
 }
 
-function loadStateFile(ticketId, stateFile) {
-  const p = path.join(TASKS_BASE, safeTicketPath(ticketId), stateFile);
-  // GH-452: on slow GitHub Actions runners, a parent's fs.writeFileSync can
-  // return before the just-spawned child's readFileSync sees the file. Retry
-  // once with a short busy-wait to cover that visibility window.
-  const readOnce = () => {
-    try {
-      return JSON.parse(fs.readFileSync(p, 'utf-8'));
-    } catch (err) {
-      if (err && err.code === 'ENOENT') return undefined;
-      return null;
+// (Patch 14) Strengthen pr evidence: verify .pr-update-sha matches HEAD
+function prShaMatchesHead(ticketId) {
+  const tasksDir = path.join(TASKS_BASE, safeTicketPath(ticketId));
+  const prShaFile = path.join(tasksDir, '.pr-update-sha');
+  try {
+    const ref = readGitHeadRef();
+    // For ref pointers, we can't easily get the SHA without git — skip validation
+    if (/^[0-9a-f]{40}$/.test(ref)) {
+      const storedSha = fs.readFileSync(prShaFile, 'utf-8').trim();
+      return storedSha.split('|')[0] === ref;
     }
-  };
-  let parsed = readOnce();
-  if (parsed === undefined) {
-    const sab = new SharedArrayBuffer(4);
-    Atomics.wait(new Int32Array(sab), 0, 0, 50);
-    parsed = readOnce();
+    // Can't compare ref to SHA — trust the file exists
+    return fs.existsSync(prShaFile);
+  } catch {
+    return false;
   }
-  if (parsed !== undefined && parsed !== null) return parsed;
-  // Legacy fallback: per-workflow files (e.g. .work-pr.workflow-state.json)
-  // may not exist if the state was written before per-workflow split.
-  // Try the legacy .workflow-state.json and check the workflow field matches.
-  if (stateFile !== '.workflow-state.json' && stateFile.endsWith('.workflow-state.json')) {
-    const legacyPath = path.join(TASKS_BASE, safeTicketPath(ticketId), '.workflow-state.json');
-    try {
-      const legacy = JSON.parse(fs.readFileSync(legacyPath, 'utf-8'));
-      // Derive expected workflow name from stateFile: .work-pr.workflow-state.json -> work-pr
-      const expectedWorkflow = stateFile.replace(/^\./, '').replace(/\.workflow-state\.json$/, '');
-      if (legacy?.workflow === expectedWorkflow) return legacy;
-    } catch {} /* no legacy file either */
-  }
-  return null;
 }
 
-// Dual in_progress detection — warn but still fail-open
-function getCurrentStep(state, steps) {
-  if (!state?.stepStatus) return null;
-  const active = steps.filter((s) => state.stepStatus[s] === 'in_progress');
-  if (active.length > 1) {
-    if (DEBUG)
-      process.stderr.write(
-        `WARNING: Multiple steps in_progress: ${active.join(', ')}. Using first.\n`
-      );
-  }
-  return active[0] || null;
-}
-
-/**
- * Quote-aware shell tokenizer for the strict bypass parser.
- *
- * Splits on whitespace EXCEPT within balanced ASCII single or double quotes,
- * so paths containing spaces (e.g. `/Users/John Smith/...`) remain a single
- * token. Surrounding quotes are stripped from each token before return.
- *
- * Rejects (returns null) on:
- *   - Unbalanced quotes (open `"` or `'` with no matching close).
- *   - Nested/mixed quotes within a token are simply treated literally — we do
- *     not support shell-style escaping (`\"`, `$'..'`, etc.); the bypass is
- *     for the orchestrator's strict, direct invocation only.
- *
- * @param {string} input
- * @returns {string[] | null}
- */
-function shellTokenize(input) {
-  const tokens = [];
-  let current = '';
-  let inToken = false;
-  let quote = null; // either '"' or "'" when inside a quoted run
-
-  for (let idx = 0; idx < input.length; idx++) {
-    const ch = input[idx];
-
-    if (quote) {
-      if (ch === quote) {
-        quote = null; // close quote — token continues (allows `a"b"c` style)
-      } else {
-        current += ch;
-      }
-      continue;
-    }
-
-    if (ch === '"' || ch === "'") {
-      quote = ch;
-      inToken = true;
-      continue;
-    }
-
-    if (/\s/.test(ch)) {
-      if (inToken) {
-        tokens.push(current);
-        current = '';
-        inToken = false;
-      }
-      continue;
-    }
-
-    current += ch;
-    inToken = true;
-  }
-
-  if (quote) return null; // unbalanced
-  if (inToken) tokens.push(current);
-  return tokens;
-}
-
-/**
- * Step-conditional bypass for `work-state.js complete` at the terminal step (GH-276).
- * Returns true ONLY when ALL conditions are met:
- *   1. Command is a strict `node <path>/work-state.js complete <ticketId>` invocation
- *   2. No shell operators, substitutions, or extra arguments
- *   3. Target ticket matches the active ticket
- *   4. The workflow is at the terminal `complete` step
- *
- * @param {string} cmd — the Bash command string
- * @param {string} ticketId — the active ticket ID
- * @returns {boolean}
- */
-function isTerminalCompleteBypass(cmd, ticketId) {
-  const DEBUG_BYPASS = process.env.ENFORCE_HOOK_DEBUG === '1';
-  const trace = (reason, extra) => {
-    if (DEBUG_BYPASS) {
-      try {
-        process.stderr.write(
-          `[isTerminalCompleteBypass] ${reason}` +
-            (extra ? ` | ${JSON.stringify(extra)}` : '') +
-            '\n'
-        );
-      } catch {
-        /* never throw from debug */
-      }
-    }
-  };
-
-  // Reject shell operators and substitutions FIRST — cheapest fail-fast.
-  if (/[;&|$`<>(){}\n]/.test(cmd)) {
-    trace('reject: shell metachars');
-    return false;
-  }
-
-  // Quote-aware tokenizer: split on whitespace BUT treat quoted runs as one
-  // token. This is critical for paths containing spaces (e.g. macOS
-  // `/Users/John Smith/...`) — splitting after quote-stripping would break
-  // such paths into multiple tokens and fail the strict 4-token check.
-  // We honor only balanced ASCII " and ' pairs (no backslash escapes), which
-  // matches the strict shape of the bypass: orchestrator-issued commands.
-  // Unbalanced quotes return null → reject (caller treats as not-a-bypass).
-  const tokens = shellTokenize(String(cmd).trim());
-  if (tokens === null) {
-    trace('reject: unbalanced quotes');
-    return false;
-  }
-  trace('tokens', { count: tokens.length, tokens });
-
-  // Expect: node <path/work-state.js> complete <ticket>
-  // Env-assignment prefixes (FOO=bar node ...) are DISALLOWED entirely — they
-  // would let an attacker inject `NODE_OPTIONS=--require=/evil/module` (or
-  // NODE_PATH, LD_PRELOAD, DYLD_*, NODE_TLS_REJECT_UNAUTHORIZED, etc.) which
-  // Node.js honors before executing the legitimate script. The bypass is for
-  // the orchestrator's strict, direct call only — no wrappers, no env prefix.
-  if (tokens.length !== 4) {
-    trace('reject: token count not 4');
-    return false;
-  }
-
-  let i = 0;
-  if (!/^(?:node|nodejs)$/.test(tokens[i])) {
-    trace('reject: no node token', { i, token: tokens[i] });
-    return false;
-  }
-  i++;
-
-  // Strict bypass: no node flags allowed before the script path.
-  if (i < tokens.length && tokens[i].startsWith('-')) {
-    trace('reject: node flag before script', { token: tokens[i] });
-    return false;
-  }
-
-  // Script path token. Quote-stripping is unnecessary after normalization but
-  // kept defensively for nested-quote pathological inputs.
-  if (i >= tokens.length) {
-    trace('reject: no script token');
-    return false;
-  }
-  const scriptPath = tokens[i].replace(/^['"]|['"]$/g, '');
-  i++;
-  if (!/[\\/]work-state\.js$/.test(scriptPath)) {
-    trace('reject: not work-state.js', { scriptPath });
-    return false;
-  }
-
-  // Sub-command must be exactly `complete`.
-  if (i >= tokens.length || tokens[i] !== 'complete') {
-    trace('reject: sub-command not complete', { token: tokens[i] });
-    return false;
-  }
-  i++;
-
-  // Ticket arg.
-  if (i >= tokens.length) {
-    trace('reject: no ticket token');
-    return false;
-  }
-  const targetTicket = tokens[i];
-  i++;
-
-  // No trailing tokens allowed — strict format only.
-  if (i !== tokens.length) {
-    trace('reject: trailing tokens', { remaining: tokens.slice(i) });
-    return false;
-  }
-
-  // Verify script path is trusted.
-  const resolvedPath = expandPluginRoot(scriptPath);
-  debugLogCandidatePath(resolvedPath);
-  if (!isTrustedScriptPath(resolvedPath, TRUSTED_SCRIPT_DIRS)) {
-    trace('reject: untrusted script path', { resolvedPath });
-    return false;
-  }
-
-  // Verify ticket arg matches active ticket.
-  if (targetTicket !== ticketId) {
-    trace('reject: ticket mismatch', { targetTicket, ticketId });
-    return false;
-  }
-
-  // Verify terminal step — reuse shared helper for consistent multi-in_progress handling.
-  const state = loadStateFile(ticketId, '.work-state.json');
-  const currentStep = getCurrentStep(state, WORK_STEPS);
-  if (currentStep !== 'complete') {
-    if (DEBUG_BYPASS) {
-      trace('reject: not at terminal step', {
-        currentStep,
-        ticketId,
-        TASKS_BASE,
-        safeTicketed: safeTicketPath(ticketId),
-        stateLoaded: !!state,
-        stateHasStepStatus: !!state?.stepStatus,
-        stepStatusKeys: state?.stepStatus ? Object.keys(state.stepStatus) : null,
-        completeVal: state?.stepStatus?.complete,
-        WORK_STEPS_len: WORK_STEPS.length,
-      });
-    } else {
-      trace('reject: not at terminal step', { currentStep });
-    }
-    return false;
-  }
-  trace('allow');
-  return true;
-}
-
-/**
- * Step-conditional bypass for session-guard.js finish/reveal/complete at terminal step (GH-338).
- *
- * Mirrors isTerminalCompleteBypass() but for session-guard.js subcommands.
- * Only allows finish, reveal, or complete when the workflow is at the terminal `complete` step.
- *
- * Security checks:
- *   1. Command is a strict `node <path>/session-guard.js <finish|reveal|complete> <ticketId>` invocation
- *   2. No shell operators, substitutions, or extra arguments
- *   3. Target ticket matches the active ticket
- *   4. The workflow is at the terminal `complete` step
- *
- * @param {string} cmd — the Bash command string
- * @param {string} ticketId — the active ticket ID
- * @returns {boolean}
- */
-function isTerminalSessionGuardBypass(cmd, ticketId) {
-  // Reject shell operators and substitutions FIRST — cheapest fail-fast.
-  if (/[;&|$`<>(){}\n]/.test(cmd)) return false;
-
-  // Normalize by stripping balanced surrounding quote pairs (see
-  // isTerminalCompleteBypass for rationale). Keeps quoted and unquoted forms
-  // tokenizing identically on every Node version / OS.
-  const normalized = String(cmd)
-    .trim()
-    .replace(/"([^"]*)"/g, '$1')
-    .replace(/'([^']*)'/g, '$1');
-
-  // Token-based parsing (see isTerminalCompleteBypass for rationale).
-  const tokens = normalized.split(/\s+/);
-  if (tokens.length < 4) return false;
-
-  let i = 0;
-  while (i < tokens.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(tokens[i])) i++;
-  if (i >= tokens.length || !/^(?:node|nodejs)$/.test(tokens[i])) return false;
-  i++;
-
-  if (i < tokens.length && tokens[i].startsWith('-')) return false;
-
-  if (i >= tokens.length) return false;
-  const scriptPath = tokens[i].replace(/^['"]|['"]$/g, '');
-  i++;
-  if (!/[\\/]session-guard\.js$/.test(scriptPath)) return false;
-
-  if (i >= tokens.length) return false;
-  const subCmd = tokens[i];
-  if (subCmd !== 'finish' && subCmd !== 'reveal' && subCmd !== 'complete') return false;
-  i++;
-
-  if (i >= tokens.length) return false;
-  const targetTicket = tokens[i];
-  i++;
-
-  if (i !== tokens.length) return false;
-
-  const resolvedPath = expandPluginRoot(scriptPath);
-  debugLogCandidatePath(resolvedPath);
-  if (!isTrustedScriptPath(resolvedPath, TRUSTED_SCRIPT_DIRS)) return false;
-
-  if (targetTicket !== ticketId) return false;
-
-  const state = loadStateFile(ticketId, '.work-state.json');
-  return getCurrentStep(state, WORK_STEPS) === 'complete';
-}
-
-function loadEvidence(ticketId, evidenceFile) {
-  return loadEvidencePolicy({ tasksBase: TASKS_BASE, ticketId, evidenceFile, safeTicketPath });
-}
-
-// Atomic evidence writes — write to tmp then rename (delegated to evidence-recorder policy)
-function saveEvidence(ticketId, evidenceFile, evidence) {
-  saveEvidencePolicy({ tasksBase: TASKS_BASE, ticketId, evidenceFile, evidence, safeTicketPath });
-}
-
-// matchToolToStep / isExempt / parseTransition: thin wrappers re-exported for legacy callers
-// (logic lives in policies/command-matching.js).
-//
 // (Patch 13) isExempt uses String() coercion — kept inline so the source-pattern test
-// can verify the coercion remains in place.
+// can verify the coercion remains in place (logic lives in policies/command-matching.js).
 // eslint-disable-next-line no-unused-vars
 function isExemptLocal(toolName, toolInput, exemptPatterns) {
   if (toolName !== 'Bash') return false;
   const cmd = String(toolInput?.command || '');
   return exemptPatterns.some((p) => p.test(cmd));
 }
-// Source-marker reference: function isExempt — see policies/command-matching.js for canonical impl.
-// (Patch 13) The inlined isExemptLocal above mirrors the policy and is what tests inspect.
-//
-// parseTransition wraps the policy version with the project-specific ticket sanitizer
-// so callers don't need to thread it through.
+// parseTransition wraps the policy version with the project-specific ticket sanitizer.
 function parseTransitionLocal(toolName, toolInput, transitionPattern) {
   // (Patch 4) Coerce command to string — String(toolInput?.command || '') is enforced inside the policy
   const _ = String(toolInput?.command || ''); // marker for source-pattern test
@@ -875,389 +276,74 @@ function parseTransitionLocal(toolName, toolInput, transitionPattern) {
   return result;
 }
 
+// BLOCKED paths funnel here — didBlock is set BEFORE writing (Patch 2).
+function exitBlocked(message) {
+  didBlock = true;
+  process.stderr.write(message);
+  process.exit(2);
+}
+
 // ─── PreToolUse ─────────────────────────────────────────────────────────────
+
+// Rules 3 → 3b → 3c → 4 → 5, in order. Each blocked result exits 2.
+function runPreBlockingRules(toolName, toolInput, hookData, ticketId) {
+  const cmd = String(toolInput?.command || '');
+
+  // Rule 3: Block direct writes to workflow state files (+ terminal-step bypasses)
+  const rule3 = checkStateFileRule(toolName, toolInput, ticketId);
+  if (rule3.blocked) exitBlocked(rule3.message);
+
+  // Rule 3b: Block unsafe sub-commands on state scripts invoked via node (GH-89)
+  // Fail-open when no ticket context — nothing to protect without a workflow.
+  if (toolName === 'Bash' && ticketId) {
+    const rule3b = checkUnsafeSubcommands(cmd.trim(), ticketId);
+    if (rule3b) exitBlocked(rule3b.message);
+  }
+
+  // Rule 3c (follow-up PR state files) + Rule 4 (step-gated artifact files)
+  const protector = checkProtectors(toolName, toolInput, hookData);
+  if (protector.blocked) exitBlocked(protector.message);
+
+  // Rule 5: Enforce agent identity for agent-gated writer scripts — runs even
+  // without a ticket so token minting works outside a worktree.
+  if (toolName === 'Bash') {
+    const rule5 = agentGateRule.check(cmd, hookData, ticketId);
+    if (rule5) {
+      didBlock = true;
+      process.stderr.write(rule5.message);
+      process.exit(2);
+    }
+  }
+  return rule3;
+}
+
+// Check each workflow independently (Rules 1+2); block-exit on the first hit.
+function runPreWorkflowLoop(ticketId, toolName, toolInput) {
+  for (const wf of WORKFLOWS) {
+    const transition = parseTransitionLocal(toolName, toolInput, wf.transitionPattern);
+    // (Patch 10) Validate target is a real step in this workflow
+    if (transition.isTransition && !wf.steps.includes(transition.targetStep)) continue;
+    const block = loopRules.checkWorkflowPre(wf, { ticketId, toolName, toolInput, transition });
+    if (!block) continue;
+    if (block.action) appendAction(ticketId, block.action);
+    exitBlocked(block.message);
+  }
+}
 
 function handlePreToolUse(hookData) {
   const toolName = hookData.tool_name || '';
   const toolInput = hookData.tool_input || {};
 
-  // 1. Find active ticket. May be null when the hook's own CWD is not a
-  //    worktree (e.g. parent session lives in the plugin source tree).
-  //    Do NOT early-return on null — Rule 5 (agent-gated writer-script
-  //    token mint) does not need a ticket. Rules that genuinely require
-  //    one already guard with `if (ticketId) { ... }` below.
+  // Find active ticket. May be null when the hook's CWD is not a worktree.
+  // Do NOT early-return on null — Rule 5 (token mint) does not need a ticket.
   const ticketId = getTicketId(hookData);
 
-  // Rule 3: Block direct writes to workflow state files
-  // Prevents agents from bypassing the state machine by directly editing state files.
-  // Fail-open when no ticket context: without a workflow there is nothing to protect,
-  // and the hook should not block tool use it cannot reason about. Rule 5 below still
-  // runs unconditionally so agent-gated writer-script token minting works when the
-  // hook is invoked outside a worktree (e.g. plugin source tree parent sessions).
-  const rule3 = ticketId ? stateFileProtector.check(toolName, toolInput) : { blocked: false };
-  if (rule3.blocked) {
-    if (toolName === 'Bash') {
-      const cmd = String(toolInput?.command || '').trim();
-      // Step-conditional bypass: work-state.js complete is allowed at the terminal step (GH-276)
-      if (rule3.match === '.work-state.json' && isTerminalCompleteBypass(cmd, ticketId)) {
-        rule3.blocked = false;
-      }
-      // Step-conditional bypass: session-guard.js finish/reveal/complete at terminal step (GH-338)
-      // Not gated on rule3.match — session-guard.js may trigger Rule 3 via different state files
-      if (rule3.blocked && isTerminalSessionGuardBypass(cmd, ticketId)) {
-        rule3.blocked = false;
-      }
-    }
-    if (rule3.blocked) {
-      didBlock = true;
-      const hint = BASENAME_TO_HINT[rule3.match] || WORKFLOWS[0].transitionHint;
-      process.stderr.write(rule3.message + `Use: ${hint} ${ticketId} <step>\n`);
-      process.exit(2);
-    }
-  }
-  // Rule 3b: Block unsafe sub-commands on state scripts invoked via node (GH-89)
-  // Defense-in-depth: the stateFileProtector's isExempt/Vector 3 may miss the script when
-  // multi-arg flags (--require, -r, etc.) cause INTERPRETER_PATTERN to capture the flag
-  // argument instead of the actual script. This rule uses the improved nodePattern directly.
-  // Fail-open when no ticket context — see Rule 3 comment above.
-  if (toolName === 'Bash' && ticketId) {
-    const cmd = String(toolInput?.command || '').trim();
-    const stateMatches = getNodeInvocations(cmd);
-    for (const m of stateMatches) {
-      const scriptPath = m[1] || m[2] || m[3];
-      const scriptBase = path.basename(scriptPath);
-      const safeSet = SAFE_SUBCOMMANDS[scriptBase];
-      if (safeSet) {
-        const resolvedPath = expandPluginRoot(scriptPath);
-        // Verify trusted directory - skip untrusted (Vector 3 handles those)
-        debugLogCandidatePath(resolvedPath);
-        if (!isTrustedScriptPath(resolvedPath, TRUSTED_SCRIPT_DIRS)) continue;
-
-        const subCmd = extractSubCommand(cmd, m, scriptBase);
-        if (!isSafeSubCommand(scriptBase, subCmd, SAFE_SUBCOMMANDS)) {
-          // Step-conditional bypass: work-state.js complete at terminal step (GH-276)
-          if (
-            scriptBase === 'work-state.js' &&
-            subCmd === 'complete' &&
-            isTerminalCompleteBypass(cmd, ticketId)
-          ) {
-            continue;
-          }
-          // Step-conditional bypass: session-guard.js finish/reveal/complete at terminal step (GH-338)
-          if (
-            scriptBase === 'session-guard.js' &&
-            (subCmd === 'finish' || subCmd === 'reveal' || subCmd === 'complete') &&
-            isTerminalSessionGuardBypass(cmd, ticketId)
-          ) {
-            continue;
-          }
-          didBlock = true;
-          process.stderr.write(
-            `BLOCKED: Direct Bash call to ${scriptBase} with sub-command '${subCmd}' is not allowed.\n` +
-              `State files must only be modified through the orchestrator/workflow-engine scripts.\n`
-          );
-          process.exit(2);
-        }
-      }
-    }
-  }
-
-  // Rule 3c: Block direct writes to follow-up PR state files
-  const rule3c = followUpStateProtector.check(toolName, toolInput, hookData);
-  if (rule3c.blocked) {
-    didBlock = true;
-    process.stderr.write(rule3c.message);
-    process.exit(2);
-  }
-
-  // Rule 4: Block writes to step-gated artifact files outside their owning step/agent
-  // Must run BEFORE skipRemainingChecks — Edit/Write/MultiEdit need artifact protection
-  const rule4 = artifactProtector.check(toolName, toolInput, hookData);
-  if (rule4.blocked) {
-    didBlock = true;
-    process.stderr.write(rule4.message);
-    process.exit(2);
-  }
-
-  // Rule 5: Enforce agent identity for agent-gated writer scripts
-  // When a Bash command invokes a writer script (e.g. write-qa-report.js),
-  // verify the caller is an authorized agent. This provides defense-in-depth
-  // alongside the script's own identity check.
-  let _tokenLog;
-  try {
-    ({ logTokenEvent: _tokenLog } = require(path.join(__dirname, '..', 'next-script-log')));
-  } catch {
-    _tokenLog = () => {};
-  }
-  if (toolName === 'Bash') {
-    const cmd = String(toolInput?.command || '');
-    const nodeMatches = getNodeInvocations(cmd);
-    for (const nodeExec of nodeMatches) {
-      const scriptPath = expandPluginRoot(nodeExec[1] || nodeExec[2] || nodeExec[3]);
-      const scriptBase = path.basename(scriptPath);
-      const gatedEntry = AGENT_GATED_SCRIPTS[scriptBase];
-      // Telemetry: log EVERY node-invocation seen by Rule 5, gated or not.
-      // Helps diagnose why a gated script's mint path isn't being reached.
-      _tokenLog('rule5-checked', {
-        scriptBase,
-        scriptPath,
-        gated: Boolean(gatedEntry),
-        gatedKeys: Object.keys(AGENT_GATED_SCRIPTS).slice(0, 20),
-        ticketId: ticketId || null,
-      });
-      if (gatedEntry) {
-        _tokenLog('rule5-match', {
-          scriptBase,
-          scriptPath,
-          ticketId: ticketId || null,
-          cmd: cmd.slice(0, 300),
-          envAgent: process.env.CLAUDE_CURRENT_AGENT || null,
-          subagentType: hookData?.tool_input?.subagent_type || null,
-          hookAgentType: hookData?.agent_type || null,
-        });
-        const allowedAgents = gatedEntry.agents;
-        debugLogCandidatePath(scriptPath);
-        if (!isTrustedScriptPath(scriptPath, TRUSTED_SCRIPT_DIRS)) {
-          didBlock = true;
-          const trustedSample = TRUSTED_SCRIPT_DIRS[0] || '<plugin>/scripts/workflows';
-          process.stderr.write(
-            `BLOCKED: Script ${scriptBase} is not in a trusted directory.\n` +
-              `  Resolved path: ${scriptPath}\n` +
-              `  Trusted root example: ${trustedSample}\n` +
-              `\nWHAT TO DO INSTEAD:\n` +
-              `  Use an ABSOLUTE path under \${CLAUDE_PLUGIN_ROOT}/scripts/workflows/...\n` +
-              `  Avoid relative paths like ../../scripts/... — they may not normalize to a trusted dir.\n`
-          );
-          process.exit(2);
-        }
-
-        // Verify agent identity
-        const transcriptPath = hookData?.transcript_path;
-        if (!isRunningInAgent(transcriptPath, allowedAgents, hookData)) {
-          didBlock = true;
-          const primaryAgent = allowedAgents[0];
-          process.stderr.write(
-            `BLOCKED: Cannot call ${scriptBase} — not running in an authorized agent.\n` +
-              `  Allowed agents: ${allowedAgents.join(', ')}\n` +
-              `\nWHAT TO DO INSTEAD:\n` +
-              `  Re-dispatch this invocation through the Task tool so it runs inside the\n` +
-              `  authorized agent's subprocess (where the hook can mint the write token).\n` +
-              `\n  Example:\n` +
-              `    Task(\n` +
-              `      subagent_type: "${primaryAgent}",\n` +
-              `      prompt: "node ${scriptBase} ${ticketId || '<TICKET>'} ...your args..."\n` +
-              `    )\n` +
-              `\n  Do NOT invoke ${scriptBase} directly from the orchestrator/main session.\n` +
-              `  Do NOT stash source files to /tmp to fake test failures — that is fabricated\n` +
-              `  TDD evidence and forbidden by user rules.\n`
-          );
-          process.exit(2);
-        }
-        // Enforce per-script step gating (GH-184).
-        if (ticketId) {
-          const state = loadStateFile(ticketId, '.work-state.json');
-          const currentStep = state?.stepStatus
-            ? WORK_STEPS.find((s) => state.stepStatus[s] === 'in_progress') || null
-            : null;
-          const requiredStep = gatedEntry.step;
-          const wrongStepActive = currentStep && currentStep !== requiredStep;
-          if (wrongStepActive) {
-            didBlock = true;
-            process.stderr.write(
-              `BLOCKED: Cannot issue write token — step '${currentStep}' is active, not '${requiredStep}'.\n` +
-                `  Script ${scriptBase} can only be called during the ${requiredStep} step.\n` +
-                `\nWHAT TO DO INSTEAD:\n` +
-                `  The workflow has moved past '${requiredStep}'. Do NOT try to record evidence\n` +
-                `  for a previous step now — that artifact window has closed.\n` +
-                `  If the workflow is genuinely stuck, run:\n` +
-                `    node \${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/work-next.js ${ticketId || '<TICKET>'}\n` +
-                `  and follow the action it prints for the CURRENT step ('${currentStep}').\n`
-            );
-            process.exit(2);
-          }
-        }
-
-        // Agent + step verified — issue a write token for the script to consume.
-        const { tokenPath, ensureTokenDir } = require(
-          path.join(__dirname, '..', 'scripts', 'write-report')
-        );
-        const detectedAgent = (() => {
-          const envAgent = process.env.CLAUDE_CURRENT_AGENT;
-          if (
-            envAgent &&
-            allowedAgents.some((a) => normalizeAgentName(a) === normalizeAgentName(envAgent))
-          )
-            return envAgent;
-          const hd = hookData?.tool_input?.subagent_type;
-          if (hd && allowedAgents.some((a) => normalizeAgentName(a) === normalizeAgentName(hd)))
-            return hd;
-          return allowedAgents[0];
-        })();
-        try {
-          ensureTokenDir();
-          const tokenData = {
-            agent: normalizeAgentName(detectedAgent),
-            timestamp: Date.now(),
-            tasksBase: ticketId ? path.join(TASKS_BASE, safeTicketPath(ticketId)) : null,
-          };
-          const writeOneToken = (basename) => {
-            // Key by ticket so parallel sessions on different tickets do
-            // not clobber each other's tokens (real incident: ECHO-4465
-            // and ECHO-4630 task-next.js runs colliding on the same
-            // /tmp/.claude-write-tokens/task-next.js file). When ticketId
-            // is null (no ticket context), falls back to the legacy
-            // unkeyed path.
-            //
-            // Strip ENFORCE_HOOK_SUFFIX from the ticket-key: getTicketId()
-            // appends the suffix (`<ticket>/<suffix>`) for phase-aware
-            // STATE-file paths, but consumers like tdd-phase-state.js look
-            // up tokens by the BARE ticket arg from the CLI (no suffix).
-            // Keying tokens with the suffix would make consumers miss them.
-            const bareTicket = ticketId ? ticketId.split('/')[0] : ticketId;
-            const tp = tokenPath(basename, bareTicket);
-            try {
-              fs.unlinkSync(tp);
-            } catch {
-              /* may not exist */
-            }
-            const fd = fs.openSync(tp, 'wx', 0o600);
-            try {
-              fs.writeSync(fd, JSON.stringify(tokenData));
-            } finally {
-              fs.closeSync(fd);
-            }
-          };
-          writeOneToken(scriptBase);
-          // Companion tokens: scripts the gated script calls internally via
-          // spawnSync (which bypasses the PreToolUse hook). Mint a matching
-          // token for each so the chained writer can authenticate without a
-          // second hook trip.
-          const companions = Array.isArray(gatedEntry.companionScripts)
-            ? gatedEntry.companionScripts
-            : [];
-          for (const companion of companions) {
-            writeOneToken(companion);
-          }
-        } catch (e) {
-          if (DEBUG) process.stderr.write(`WARNING: Failed to write token: ${e.message}\n`);
-          logHookError(__filename, e, { phase: 'issueWriteToken', scriptBase });
-        }
-      }
-    }
-  }
-
+  const rule3 = runPreBlockingRules(toolName, toolInput, hookData, ticketId);
   if (rule3.skipRemainingChecks) return; // Edit/Write/MultiEdit — skip per-workflow loop
 
-  // The per-workflow state/transition loop below needs a ticketId to load
-  // any state. Skip it entirely when ticketId could not be resolved (Rule 5
-  // and earlier rules already ran above with their own null-guards).
+  // The per-workflow state/transition loop needs a ticketId to load any state.
   if (!ticketId) return;
-
-  // 2. Check each workflow independently
-  for (const wf of WORKFLOWS) {
-    const state = loadStateFile(ticketId, wf.stateFile);
-    if (!state || !wf.isActive(state)) continue; // Workflow not active → skip
-
-    const currentStep = getCurrentStep(state, wf.steps);
-    if (!currentStep) continue; // No step in_progress → skip
-
-    // 3. Check exemptions for this workflow
-    if (isExempt(toolName, toolInput, wf.exemptPatterns)) continue;
-
-    // 4. Check if this is a transition command for THIS workflow (Rule 2)
-    const transition = parseTransitionLocal(toolName, toolInput, wf.transitionPattern);
-    if (transition.isTransition) {
-      // (Patch 10) Validate target is a real step in this workflow
-      if (!wf.steps.includes(transition.targetStep)) continue;
-
-      // Ticket-aware transition — skip if transition targets a different ticket
-      if (transition.ticket !== ticketId) continue;
-
-      // Rule 2 delegated to transition-gate policy
-      const evidence = loadEvidence(ticketId, wf.evidenceFile);
-      const result = evaluateTransitionGate({
-        workflow: wf,
-        ticketId,
-        currentStep,
-        transition,
-        evidence,
-      });
-      if (result.skipped) continue;
-      if (!result.blocked) continue;
-
-      if (wf.name === 'work') {
-        appendAction(ticketId, {
-          step: currentStep,
-          what: 'BLOCKED: transition without evidence',
-          meta: { rule: 2 },
-        });
-      }
-      didBlock = true;
-      process.stderr.write(
-        formatTransitionBlockMessage({
-          workflowName: wf.name,
-          currentStep: result.currentStep,
-          attemptedCmd: result.attemptedCmd,
-          expectedLines: result.expectedLines,
-        })
-      );
-      process.exit(2);
-    }
-
-    // 5. Map tool call to a step in THIS workflow (Rule 1)
-    const matchedStep = matchToolToStep(toolName, toolInput, wf.commandIndex);
-    if (!matchedStep) continue; // Not a step command for this workflow → skip
-
-    // /check agent bypass — compute checkStateActive once
-    let checkStateActive = false;
-    if (wf.name === 'work' && matchedStep !== currentStep) {
-      const agentType = toolInput?.subagent_type || '';
-      if (CHECK_AGENTS.has(agentType)) {
-        // Script-driven /check state (legacy .check2-state.json name kept as
-        // a fallback for in-flight tickets that predate the rename)
-        const checkState =
-          loadStateFile(ticketId, '.check-state.json') ||
-          loadStateFile(ticketId, '.check2-state.json');
-        checkStateActive = checkState?.status === 'in_progress';
-      }
-    }
-
-    const stepResult = evaluateStepGate({
-      workflowName: wf.name,
-      matchedStep,
-      currentStep,
-      toolInput,
-      checkAgents: CHECK_AGENTS,
-      checkStateActive,
-    });
-
-    // Rule 1: Block if matched step ≠ currentStep
-    if (stepResult.blocked) {
-      const cmdDesc = stepResult.cmdDesc;
-      if (wf.name === 'work') {
-        const truncDesc = String(cmdDesc).substring(0, 80);
-        appendAction(ticketId, {
-          step: matchedStep,
-          what: `BLOCKED: ${truncDesc} (step ${matchedStep} not in_progress)`,
-          meta: { rule: 1 },
-        });
-      }
-      didBlock = true;
-      process.stderr.write(
-        formatStepBlockMessage({
-          workflowName: wf.name,
-          matchedStep,
-          currentStep,
-          cmdDesc,
-          transitionHint: wf.transitionHint,
-          ticketId,
-        })
-      );
-      process.exit(2);
-    }
-
-    // Matched step IS current step → allow (for this workflow)
-  }
+  runPreWorkflowLoop(ticketId, toolName, toolInput);
 }
 
 // ─── PostToolUse ────────────────────────────────────────────────────────────
@@ -1266,97 +352,15 @@ function handlePostToolUse(hookData) {
   const toolName = hookData.tool_name || '';
   const toolInput = hookData.tool_input || {};
 
-  // 1. Find active ticket
   const ticketId = getTicketId();
   if (!ticketId) return;
 
-  // 2. Process each active workflow
+  // Process each active workflow — record evidence, clear on backward transitions
   for (const wf of WORKFLOWS) {
-    const state = loadStateFile(ticketId, wf.stateFile);
-    if (!state || !wf.isActive(state)) continue;
-
-    const currentStep = getCurrentStep(state, wf.steps);
-
-    // 3. Check if this is a transition command — clear evidence on backward transitions
     const transition = parseTransitionLocal(toolName, toolInput, wf.transitionPattern);
-    if (transition.isTransition) {
-      // (Patch 10) Validate target is a real step in this workflow
-      if (!wf.steps.includes(transition.targetStep)) continue;
-
-      // (Patch 3) Ticket-aware transition gate — mirror PreToolUse
-      if (transition.ticket !== ticketId) continue;
-
-      if (currentStep && transition.targetStep) {
-        const evidence = loadEvidence(ticketId, wf.evidenceFile);
-        const beforeKeys = Object.keys(evidence);
-        clearBackwardEvidence({
-          evidence,
-          steps: wf.steps,
-          currentStep,
-          targetStep: transition.targetStep,
-        });
-        const afterKeys = Object.keys(evidence);
-        if (beforeKeys.length !== afterKeys.length) {
-          saveEvidence(ticketId, wf.evidenceFile, evidence);
-        }
-      }
-      continue; // Don't also record evidence for transition commands
-    }
-
-    // 4. Map tool call to step and record evidence
-    const matchedStep = matchToolToStep(toolName, toolInput, wf.commandIndex);
-    if (!matchedStep) continue;
-
-    // (Patch 14) Strengthen pr evidence: verify .pr-update-sha matches HEAD
-    if (wf.name === 'work' && matchedStep === STEPS.pr) {
-      const tasksDir = path.join(TASKS_BASE, safeTicketPath(ticketId));
-      const prShaFile = path.join(tasksDir, '.pr-update-sha');
-      let prShaOk = false;
-      try {
-        let head;
-        try {
-          head = resolveGitHead();
-        } catch {
-          head = fs.readFileSync(path.join('.git', 'HEAD'), 'utf-8').trim();
-        }
-        const ref = head.startsWith('ref: ') ? head.slice(5) : head;
-        // For ref pointers, we can't easily get the SHA without git — skip validation
-        if (/^[0-9a-f]{40}$/.test(ref)) {
-          const storedSha = fs.readFileSync(prShaFile, 'utf-8').trim();
-          prShaOk = storedSha.split('|')[0] === ref;
-        } else {
-          // Can't compare ref to SHA — trust the file exists
-          prShaOk = fs.existsSync(prShaFile);
-        }
-      } catch {
-        prShaOk = false;
-      }
-      if (!prShaOk) {
-        if (DEBUG) process.stderr.write(`[enforce] pr: pr-update-sha missing or stale\n`);
-        continue; // Skip evidence recording — PR wasn't actually updated
-      }
-    }
-
-    const evidence = loadEvidence(ticketId, wf.evidenceFile);
-    evidence[matchedStep] = recordEvidenceEntry({ toolName, toolInput });
-    saveEvidence(ticketId, wf.evidenceFile, evidence);
-
-    // Log action for the /work workflow
-    if (wf.name === 'work') {
-      let what;
-      if (toolName === 'Skill') {
-        what = `Skill(${toolInput?.skill || 'unknown'})`;
-      } else if (toolName === 'Task' || toolName === 'Agent') {
-        const label =
-          toolInput?.subagent_type || String(toolInput?.description || 'unknown').substring(0, 60);
-        what = `${toolName}(${label})`;
-      } else if (toolName === 'Bash') {
-        what = String(toolInput?.command || '').substring(0, 80);
-      } else {
-        what = toolName;
-      }
-      appendAction(ticketId, { step: matchedStep, what });
-    }
+    // (Patch 10) Validate target is a real step in this workflow
+    if (transition.isTransition && !wf.steps.includes(transition.targetStep)) continue;
+    loopRules.recordWorkflowPost(wf, { ticketId, toolName, toolInput, transition });
   }
 }
 
@@ -1376,22 +380,7 @@ async function main() {
     const hookType = process.env.CLAUDE_HOOK_TYPE || 'PostToolUse';
 
     // Telemetry: log every fire so we can prove the hook ran. JSONL.
-    try {
-      const { logTokenEvent } = require(path.join(__dirname, '..', 'next-script-log'));
-      logTokenEvent('hook-fired', {
-        hookType,
-        toolName: hookData?.tool_name || null,
-        cmdSnippet: hookData?.tool_input?.command
-          ? String(hookData.tool_input.command).slice(0, 200)
-          : null,
-        envAgent: process.env.CLAUDE_CURRENT_AGENT || null,
-        subagentType: hookData?.tool_input?.subagent_type || null,
-        hookAgentType: hookData?.agent_type || null,
-        transcriptPath: hookData?.transcript_path || null,
-      });
-    } catch {
-      /* fail-open */
-    }
+    logHookFired(hookType, hookData);
 
     if (hookType === 'PreToolUse') {
       handlePreToolUse(hookData);

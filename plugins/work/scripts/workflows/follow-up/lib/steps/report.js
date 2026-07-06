@@ -32,6 +32,10 @@ function formatAttemptLine(attempt, repoUrl) {
 // were missing here, so a workflow that finished handling its review comments
 // (or a cancelled-CI retry) re-surfaced forever instead of completing
 // (echo-6204, memory: followup-reviews-surface-loop).
+// GH-670: writers now normalize 'reviews' → 'review_failure' at the source
+// (triage.js routeTo, follow-up-next.js applySurface) and fix-reviews clears
+// the category on its terminal path. 'reviews' stays in this set ONLY so
+// state files written by pre-3.58 versions recover instead of deadlocking.
 const KNOWN_RESOLVABLE_CATEGORIES = new Set([
   'infra-stuck',
   'conflict',

@@ -1,13 +1,9 @@
 /**
- * Step: 4_run_tests — Run automated tests inline (deterministic).
- * If tests fail, returns blocked so work-next.js can transition back to implement.
- *
- * Test runner priority:
- *   0. SCRIPT_RUN_AFFECTED_UNIT/INTEGRATION/E2E env vars (affected-only, fastest)
- *   1. $LINT_COMMAND / $TYPECHECK_COMMAND / $TEST_COMMAND env vars via dev-check.sh
- *   2. pnpm dev:check (project-defined)
- *   3. Bundled dev-check.sh
- *   4. pnpm test / node --test (fallback)
+ * Step: 4_run_tests — Run automated tests inline (deterministic). Failures
+ * return blocked so work-next.js transitions back to implement.
+ * Runner priority: 0 SCRIPT_RUN_AFFECTED_* (affected-only, fastest) →
+ * 1 $LINT/$TYPECHECK/$TEST_COMMAND via dev-check.sh → 2 pnpm dev:check →
+ * 3 bundled dev-check.sh → 4 pnpm test / node --test.
  */
 
 'use strict';
@@ -26,6 +22,8 @@ const {
 } = require('../changed-specs');
 // Allowlist sanitizer every env-derived command line passes before the shell.
 const { safeEnvCommand } = require('../safe-env-command');
+// Typecheck-error delta vs per-ticket baseline (echo-5137-issue-4).
+const typecheckBaseline = require('../typecheck-baseline');
 
 function runCommand(cmd, timeout, env) {
   try {
@@ -44,20 +42,11 @@ function runCommand(cmd, timeout, env) {
 }
 
 /**
- * Tier 0 (preferred): per-suite SCRIPT_RUN_AFFECTED_* env vars. Each set suite
- * is run in sequence; the first non-zero exit short-circuits. This lets repos
- * plug in their own affected-detection (nx, turbo, custom). Returns a result,
- * or null when no affected-suite env vars are configured.
- */
-/**
  * Lazy per-suite env resolver (computed at most once per suite kind):
- * - e2e: scoped CHANGED_SPECS + configurable per-spec budget — strictly-changed
- *   spec files (plus importers of changed helpers), so the repo's reliability
- *   sweep can't drag in unchanged siblings (echo-5224).
+ * - e2e: scoped CHANGED_SPECS + per-spec budget — strictly-changed spec files
+ *   plus importers of changed helpers (echo-5224).
  * - unit: impact-aware selection (echo-5820-3): IMPACT_TEST_FILES = test files
- *   that import a changed source file (one hop), so api-contract changes that
- *   break consumer-test mocks surface here instead of in full CI. Default on;
- *   CHECK_IMPACT_TESTS=0 disables.
+ *   importing a changed source file (one hop). CHECK_IMPACT_TESTS=0 disables.
  */
 function createSuiteEnvResolver(outputs) {
   const cache = {};
@@ -80,6 +69,8 @@ function createSuiteEnvResolver(outputs) {
   };
 }
 
+// Tier 0 (preferred): per-suite SCRIPT_RUN_AFFECTED_* env vars, run in
+// sequence; the first non-zero exit short-circuits. Null when unconfigured.
 function runAffectedSuites() {
   const suites = [
     { name: 'unit', cmd: safeEnvCommand(process.env.SCRIPT_RUN_AFFECTED_UNIT) },
@@ -127,11 +118,8 @@ function tryPnpmDevCheck() {
 
 /**
  * Tiers 1-4 (fallback when no affected-suite env vars are set):
- * Tier 1: $LINT_COMMAND / $TYPECHECK_COMMAND / $TEST_COMMAND routed through the
- *   bundled dev-check.sh (which evaluates them with $CHANGED_FILES).
- * Tier 2: pnpm dev:check
- * Tier 3: bundled dev-check.sh
- * Tier 4: pnpm test / node --test fallback
+ * 1: $LINT/$TYPECHECK/$TEST_COMMAND via bundled dev-check.sh (evaluated with
+ * $CHANGED_FILES); 2: pnpm dev:check; 3: bundled dev-check.sh; 4: pnpm test.
  */
 function runDevCheckTiers(checkHooksDir) {
   const devCheckScript = path.join(
@@ -177,10 +165,9 @@ function runQualityGate(checkHooksDir) {
 }
 
 // --- tests.check.md report sections (GH-394) --------------------------------
-// The report carries: Result (PASSED/FAILED/CRASHED/FLAKY), Crash Signature,
-// Flaky-passed list, Net-new vs pre-existing (when a baseline is available),
-// Output, Verdict. The first line after Changes Hash is the canonical
-// machine-readable `**Status:**` line — gates parse it FIRST.
+// Result, Crash Signature, Flaky-passed list, Net-new vs pre-existing,
+// Typecheck Delta, Output, Verdict. The first line after Changes Hash is the
+// canonical machine-readable `**Status:**` line — gates parse it FIRST.
 
 function crashSection(analysis) {
   return [
@@ -231,10 +218,14 @@ function baselineSection({ baseline, delta, outcome }) {
   return lines;
 }
 
-function verdictLine({ status, outcome, analysis, flakyTests }) {
+function verdictLine({ status, outcome, analysis, flakyTests, typecheck }) {
+  const tcNote =
+    typecheck && typecheck.netNew.length > 0
+      ? ` BUT typecheck regressed (${typecheck.netNew.length} net-new error(s) — see Typecheck Delta)`
+      : '';
   const byOutcome = Object.create(null);
-  byOutcome.PASSED = `**${status}** - All tests pass`;
-  byOutcome.FLAKY = `**${status}** - Tests pass (with warning: ${flakyTests.length || 'some'} flaky test(s) passed only on retry — see Flaky section)`;
+  byOutcome.PASSED = `**${status}** - All tests pass${tcNote}`;
+  byOutcome.FLAKY = `**${status}** - Tests pass (with warning: ${flakyTests.length || 'some'} flaky test(s) passed only on retry — see Flaky section)${tcNote}`;
   byOutcome.CRASHED = `**${status}** - Test runner CRASHED (infra failure, not test failures)`;
   return byOutcome[outcome] || `**${status}** - ${analysis.counts.failed ?? '?'} test(s) failing`;
 }
@@ -265,6 +256,7 @@ function buildTestsReport(input) {
   }
 
   lines.push(...baselineSection(input));
+  lines.push(...typecheckBaseline.typecheckSection(input.typecheck));
   lines.push('## Output', '```', result.output.substring(0, 5000), '```', '');
   lines.push('## Verdict', verdictLine(input));
 
@@ -321,12 +313,9 @@ function failureReason({ outcome, analysis, delta, baseline }) {
   return `Tests failed (${analysis.counts.failed ?? '?'} failing). Needs fix in implement step.`;
 }
 
-// Baseline delta (echo-5137-4): split failures into net-new vs
-// pre-existing when a cached baseline exists; refresh it on green runs.
-// The baseline lives in the ticket TASKS dir (same place .check-state.json
-// lives) — writing it to the app worktree root polluted consumer repos and
-// made 7_quality_recheck's `git status --porcelain` trigger fire every run
-// (PR #669 review).
+// Baseline delta (echo-5137-4): split failures into net-new vs pre-existing;
+// refresh on green. Lives in the ticket TASKS dir, NOT the app worktree —
+// repo-root writes tripped 7_quality_recheck's git status (PR #669 review).
 function assessBaseline(outcome, analysis, baselineDir) {
   const green = outcome === 'PASSED' || outcome === 'FLAKY';
   const baseline = readBaseline(baselineDir);
@@ -355,9 +344,16 @@ function registerRunTests(register) {
 
     const { baseline, delta, status } = assessBaseline(outcome, analysis, ctx.tasksDir);
 
+    // Typecheck delta (echo-5137-issue-4): net-new typecheck errors block even
+    // when tests pass; pre-existing errors are informational only. Skipped on
+    // CRASHED runs: the crash already blocks, and the section would be noise.
+    const typecheck =
+      outcome === 'CRASHED' ? null : typecheckBaseline.assessTypecheck(ctx.tasksDir, runCommand);
+    const finalStatus = typecheck && typecheck.netNew.length > 0 ? 'NEEDS_WORK' : status;
+
     const report = buildTestsReport({
       changesHash,
-      status,
+      status: finalStatus,
       outcome,
       result,
       analysis,
@@ -365,14 +361,18 @@ function registerRunTests(register) {
       retryNote,
       baseline,
       delta,
+      typecheck,
     });
 
     // Atomic (tmp + rename) so concurrent readers never see a 0-byte report (GH-611)
     writeReportAtomic(reportPath, report);
 
-    if (status !== 'APPROVED') {
+    if (finalStatus !== 'APPROVED') {
       state.testsFailed = true;
-      const reason = failureReason({ outcome, analysis, delta, baseline });
+      const reason =
+        status !== 'APPROVED'
+          ? failureReason({ outcome, analysis, delta, baseline })
+          : typecheckBaseline.typecheckFailureReason(typecheck);
       // Lazy require: registry-derived progress (cycle-safe — the registry
       // itself requires this module at load time).
       const { stepProgress } = require('../step-registry');
