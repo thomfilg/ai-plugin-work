@@ -141,6 +141,14 @@ function readIfExists(filePath) {
   }
 }
 
+/** Atomic write (tmp + rename): no check-then-write window, no torn files. */
+function writeFileAtomic(target, content) {
+  fs.mkdirSync(path.dirname(target), { recursive: true });
+  const tmp = `${target}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, content);
+  fs.renameSync(tmp, target);
+}
+
 function writeEnvrcTarget(answers, schemas, values) {
   const target = answers.envrcPath;
   if (!target) throw new Error('answers.envrcPath is required for target "envrc"');
@@ -150,13 +158,12 @@ function writeEnvrcTarget(answers, schemas, values) {
     backup = `${target}.bak-${Date.now()}`;
     fs.writeFileSync(backup, existing);
   }
-  fs.mkdirSync(path.dirname(target), { recursive: true });
   if (existing !== null && !answers.regenerate) {
     // Preserve hand-edited content (dynamic values, comments): merge exports.
-    fs.writeFileSync(target, mergeEnvContent(existing, values, { exportPrefix: true }));
+    writeFileAtomic(target, mergeEnvContent(existing, values, { exportPrefix: true }));
     return { written: target, backup, mode: 'merge' };
   }
-  fs.writeFileSync(
+  writeFileAtomic(
     target,
     renderEnvrc({ ghUser: answers.ghUser, gitIdentity: answers.gitIdentity, schemas, values })
   );
@@ -168,9 +175,8 @@ function writeTarget(answers, schemas) {
   if (answers.target === 'envrc') return writeEnvrcTarget(answers, schemas, values);
   const target = answers.envPath;
   if (!target) throw new Error('answers.envPath is required for env targets');
-  const existing = fs.existsSync(target) ? fs.readFileSync(target, 'utf8') : '';
-  fs.mkdirSync(path.dirname(target), { recursive: true });
-  fs.writeFileSync(target, mergeEnvContent(existing, values));
+  const existing = readIfExists(target) ?? '';
+  writeFileAtomic(target, mergeEnvContent(existing, values));
   return { written: target, backup: null, mode: 'merge' };
 }
 

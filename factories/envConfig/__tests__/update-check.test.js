@@ -100,7 +100,7 @@ test('refresh: npm hit wins, git raw is the fallback, offline is silent', async 
     packageName: 'pkg',
     fallbackRawUrl: 'https://raw.example/package.json',
     fetchImpl: async (url) =>
-      url.includes('registry.npmjs.org') ? okJson({ version: '2.0.0' }) : notFound,
+      url.startsWith('https://registry.npmjs.org/') ? okJson({ version: '2.0.0' }) : notFound,
   });
   assert.deepEqual(result, { latest: '2.0.0', source: 'npm' });
 
@@ -109,7 +109,7 @@ test('refresh: npm hit wins, git raw is the fallback, offline is silent', async 
     packageName: 'pkg',
     fallbackRawUrl: 'https://raw.example/package.json',
     fetchImpl: async (url) =>
-      url.includes('registry.npmjs.org') ? notFound : okJson({ version: '3.0.0' }),
+      url.startsWith('https://registry.npmjs.org/') ? notFound : okJson({ version: '3.0.0' }),
   });
   assert.deepEqual(result, { latest: '3.0.0', source: 'git' });
 
