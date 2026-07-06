@@ -41,7 +41,6 @@
 # against the GH-414 branch HEAD prior to Task 11+ wiring.
 
 plugins/work/scripts/workflows/work/scripts/follow-up-pr.js
-plugins/work/scripts/workflows/lib/hooks/enforce-step-workflow.js
 plugins/work/scripts/workflows/work/workflow-definition.js
 plugins/work/scripts/workflows/work-implement/task-next.js
 plugins/work/scripts/workflows/work/work-next.js
