@@ -24,10 +24,70 @@ function debugLog(method, msg) {
 }
 
 /**
+ * True when `value` normalizes to one of the given agent aliases.
+ * Falsy `value` never matches.
+ */
+function matchesAlias(value, agentAliases) {
+  if (!value) {
+    return false;
+  }
+  const normalized = normalizeAgentName(value);
+  return agentAliases.some((alias) => normalizeAgentName(alias) === normalized);
+}
+
+/**
+ * Whether a content item is a Task/Agent tool_use dispatching one of our aliases.
+ */
+function isMatchingTaskUse(item, agentAliases) {
+  if (item.type !== 'tool_use') {
+    return false;
+  }
+  if (item.name !== 'Task' && item.name !== 'Agent') {
+    return false;
+  }
+  return matchesAlias(item.input?.subagent_type || '', agentAliases);
+}
+
+/**
+ * Return the matching Task/Agent tool_use item for our aliases from a single
+ * assistant transcript entry, or null when the entry has no matching dispatch.
+ */
+function matchingTaskUse(entry, agentAliases) {
+  if (entry.type !== 'assistant' || !entry.message?.content) {
+    return null;
+  }
+  const items = Array.isArray(entry.message.content)
+    ? entry.message.content
+    : [entry.message.content];
+  return items.find((item) => isMatchingTaskUse(item, agentAliases)) || null;
+}
+
+/**
+ * Whether any transcript line after `startIdx` carries a tool_result for the
+ * given tool_use id (i.e. the Task dispatch has already completed).
+ */
+function hasToolResult(recentLines, startIdx, toolUseId) {
+  return recentLines.slice(startIdx + 1).some((line) => {
+    try {
+      const entry = JSON.parse(line);
+      if (entry.type !== 'user' || !entry.message?.content) {
+        return false;
+      }
+      const items = Array.isArray(entry.message.content)
+        ? entry.message.content
+        : [entry.message.content];
+      return items.some((li) => li.type === 'tool_result' && li.tool_use_id === toolUseId);
+    } catch {
+      return false;
+    }
+  });
+}
+
+/**
  * Check if we're running inside a subagent by scanning the transcript
  * for the MOST RECENT Task tool invocation that matches our agent.
  *
- * Only checks the last 50 lines. If the most recent matching Task call
+ * Only checks the last 200 lines. If the most recent matching Task call
  * has no tool_result yet, we're likely executing inside that agent.
  *
  * @param {string} transcriptPath - Path to the session transcript
@@ -41,70 +101,78 @@ function isSubagentFromTranscript(transcriptPath, agentAliases) {
 
   try {
     const content = fs.readFileSync(transcriptPath, 'utf8');
-    const lines = content.trim().split('\n');
-
     // Check the last 200 lines for recent Task calls (subagents may produce
     // many transcript lines between the Task invocation and subsequent tool calls)
-    const recentLines = lines.slice(-200);
+    const recentLines = content.trim().split('\n').slice(-200);
+    const ACTIVE_TASK_LINE_THRESHOLD = 200;
 
     // Scan in reverse to find the most recent Task tool invocation for our agent
     for (let i = recentLines.length - 1; i >= 0; i--) {
+      let entry;
       try {
-        const entry = JSON.parse(recentLines[i]);
-
-        // Look for assistant messages with tool_use
-        if (entry.type === 'assistant' && entry.message?.content) {
-          const contentItems = Array.isArray(entry.message.content)
-            ? entry.message.content
-            : [entry.message.content];
-
-          for (const item of contentItems) {
-            if (item.type === 'tool_use' && (item.name === 'Task' || item.name === 'Agent')) {
-              const subagentType = item.input?.subagent_type || '';
-              if (
-                agentAliases.some(
-                  (alias) => normalizeAgentName(alias) === normalizeAgentName(subagentType)
-                )
-              ) {
-                // Check if there's a corresponding tool_result in subsequent lines
-                const hasResult = recentLines.slice(i + 1).some((line) => {
-                  try {
-                    const laterEntry = JSON.parse(line);
-                    if (laterEntry.type === 'user' && laterEntry.message?.content) {
-                      const laterItems = Array.isArray(laterEntry.message.content)
-                        ? laterEntry.message.content
-                        : [laterEntry.message.content];
-                      return laterItems.some(
-                        (li) => li.type === 'tool_result' && li.tool_use_id === item.id
-                      );
-                    }
-                  } catch {
-                    /* ignore */
-                  }
-                  return false;
-                });
-
-                const ACTIVE_TASK_LINE_THRESHOLD = 200;
-                const linesFromEnd = recentLines.length - i;
-                if (!hasResult && linesFromEnd <= ACTIVE_TASK_LINE_THRESHOLD) {
-                  return true;
-                }
-
-                // Most recent Task for this agent already completed — stop
-                return false;
-              }
-            }
-          }
-        }
+        entry = JSON.parse(recentLines[i]);
       } catch {
         continue;
       }
+
+      const taskUse = matchingTaskUse(entry, agentAliases);
+      if (!taskUse) {
+        continue;
+      }
+
+      // Most recent Task for this agent: active (no tool_result yet) → we are it.
+      const hasResult = hasToolResult(recentLines, i, taskUse.id);
+      const linesFromEnd = recentLines.length - i;
+      return !hasResult && linesFromEnd <= ACTIVE_TASK_LINE_THRESHOLD;
     }
 
     return false;
   } catch {
     return false;
   }
+}
+
+/**
+ * Fallback: match a legacy transcript's frontmatter `name:` line against
+ * any of the agent aliases (with optional namespace prefix).
+ */
+function isAgentFromFrontmatter(transcriptPath, agentAliases) {
+  if (!transcriptPath || !fs.existsSync(transcriptPath)) {
+    return false;
+  }
+  try {
+    const content = fs.readFileSync(transcriptPath, 'utf8');
+    return agentAliases.some((alias) => {
+      const normalized = normalizeAgentName(alias);
+      // Allow optional namespace prefix (e.g. "name: work-workflow:quality-checker")
+      const frontmatterPattern = new RegExp(`^name:\\s*(?:[\\w-]+:)?${normalized}\\s*$`, 'mi');
+      return frontmatterPattern.test(content);
+    });
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Resolve agent identity from Claude Code hookData: agent_type (Primary-B,
+ * set when the hook fires inside a subagent) then tool_input.subagent_type
+ * (Secondary, available when the parent invokes Task/Agent).
+ */
+function agentFromHookData(hookData, agentAliases) {
+  const agentType = hookData?.agent_type;
+  if (matchesAlias(agentType, agentAliases)) {
+    debugLog('hookData', `matched agent_type=${agentType}`);
+    return true;
+  }
+  if (agentType) debugLog('hookData', `no match for agent_type=${agentType}`);
+
+  const subagentType = hookData?.tool_input?.subagent_type;
+  if (matchesAlias(subagentType, agentAliases)) {
+    debugLog('hookData', `matched subagent_type=${subagentType}`);
+    return true;
+  }
+  if (subagentType) debugLog('hookData', `no match for subagent_type=${subagentType}`);
+  return false;
 }
 
 /**
@@ -128,40 +196,19 @@ function isSubagentFromTranscript(transcriptPath, agentAliases) {
 function isRunningInAgent(transcriptPath, agentAliases, hookData) {
   // Primary: Check environment variable
   const currentAgent = process.env.CLAUDE_CURRENT_AGENT;
-  if (
-    currentAgent &&
-    agentAliases.some((alias) => normalizeAgentName(alias) === normalizeAgentName(currentAgent))
-  ) {
+  if (matchesAlias(currentAgent, agentAliases)) {
     debugLog('env', `matched CLAUDE_CURRENT_AGENT=${currentAgent}`);
     return true;
   }
   if (currentAgent) debugLog('env', `no match for CLAUDE_CURRENT_AGENT=${currentAgent}`);
 
-  // Primary-B: Check hookData.agent_type (set by Claude Code when hook fires inside a subagent)
-  const agentType = hookData?.agent_type;
-  if (
-    agentType &&
-    agentAliases.some((alias) => normalizeAgentName(alias) === normalizeAgentName(agentType))
-  ) {
-    debugLog('hookData', `matched agent_type=${agentType}`);
+  // Primary-B / Secondary: identity supplied directly on the hook payload.
+  if (agentFromHookData(hookData, agentAliases)) {
     return true;
   }
-  if (agentType) debugLog('hookData', `no match for agent_type=${agentType}`);
-
-  // Secondary: Check hookData for subagent_type (available when parent invokes Task/Agent)
-  const subagentType = hookData?.tool_input?.subagent_type;
-  if (
-    subagentType &&
-    agentAliases.some((alias) => normalizeAgentName(alias) === normalizeAgentName(subagentType))
-  ) {
-    debugLog('hookData', `matched subagent_type=${subagentType}`);
-    return true;
-  }
-  if (subagentType) debugLog('hookData', `no match for subagent_type=${subagentType}`);
 
   // Quick check: If this is a subagent process, its transcript initial
-  // prompt will mention the agent type. Check this early since it's fast
-  // and handles Task subprocesses that don't set CLAUDE_CURRENT_AGENT.
+  // prompt will carry a structural marker (attributionAgent / isSidechain).
   if (isSubagentFromInitialPrompt(transcriptPath, agentAliases)) {
     return true;
   }
@@ -172,33 +219,77 @@ function isRunningInAgent(transcriptPath, agentAliases, hookData) {
   }
 
   // Fallback: Transcript frontmatter (legacy)
-  if (!transcriptPath || !fs.existsSync(transcriptPath)) {
-    return false;
+  return isAgentFromFrontmatter(transcriptPath, agentAliases);
+}
+
+/**
+ * Extract the prose text of a single system/user transcript entry.
+ * Non-message entries and unknown content shapes yield an empty string.
+ */
+function extractEntryText(entry) {
+  if (entry.type !== 'system' && entry.type !== 'user') {
+    return '';
+  }
+  const msgContent = entry.message?.content;
+  if (typeof msgContent === 'string') {
+    return msgContent;
+  }
+  if (Array.isArray(msgContent)) {
+    return msgContent.map((i) => i.text || '').join(' ');
+  }
+  return '';
+}
+
+/**
+ * Read the structural subagent markers from early transcript lines.
+ *
+ * Mirrors the per-line JSON.parse-in-try/catch pattern used by
+ * isSubagentFromTranscript. Untrusted fields are read defensively.
+ *
+ * @param {string[]} earlyLines - The first N raw transcript lines
+ * @returns {{attributionAgent: string, isSidechain: boolean, promptText: string}}
+ */
+function readInitialMarkers(earlyLines) {
+  let attributionAgent = '';
+  let isSidechain = false;
+  let promptText = '';
+
+  for (const line of earlyLines) {
+    let entry;
+    try {
+      entry = JSON.parse(line);
+    } catch {
+      continue; // skip non-JSON lines
+    }
+
+    // A sidechain flag on ANY early line marks this as a subagent transcript.
+    if (entry.isSidechain === true) {
+      isSidechain = true;
+    }
+
+    // First attributionAgent wins — it is the authoritative identity.
+    if (!attributionAgent && entry.attributionAgent) {
+      attributionAgent = String(entry.attributionAgent);
+    }
+
+    // Accumulate prose from system/user messages for the gated name check.
+    const text = extractEntryText(entry);
+    if (text) {
+      promptText = promptText ? `${promptText} ${text}` : text;
+    }
   }
 
-  try {
-    const content = fs.readFileSync(transcriptPath, 'utf8');
-    for (const alias of agentAliases) {
-      const normalized = normalizeAgentName(alias);
-      // Allow optional namespace prefix (e.g. "name: work-workflow:quality-checker")
-      const frontmatterPattern = new RegExp(`^name:\\s*(?:[\\w-]+:)?${normalized}\\s*$`, 'mi');
-      if (frontmatterPattern.test(content)) {
-        return true;
-      }
-    }
-    return false;
-  } catch {
-    return false;
-  }
+  return { attributionAgent, isSidechain, promptText };
 }
 
 /**
  * Detect agent identity from the subagent's own transcript.
  *
- * When a subagent is launched via Task, its transcript starts with a
- * system/user message containing the prompt. The prompt often includes
- * the agent type name or role description. We check the first few
- * lines of the transcript for matches.
+ * A genuine Task-spawned subagent transcript carries positive structural
+ * markers (an authoritative `attributionAgent` field and/or `isSidechain`).
+ * We key on those markers rather than scanning user prose for the agent name
+ * as a substring, so a MAIN session whose opening prompt merely mentions an
+ * agent name is not misclassified as that agent.
  *
  * @param {string} transcriptPath - Path to the subagent's transcript
  * @param {string[]} agentAliases - Agent names to check for
@@ -213,42 +304,55 @@ function isSubagentFromInitialPrompt(transcriptPath, agentAliases) {
     const content = fs.readFileSync(transcriptPath, 'utf8');
     const lines = content.trim().split('\n');
 
-    // Check the first 10 lines for the agent type in system or user messages
-    const earlyLines = lines.slice(0, 10);
-    for (const line of earlyLines) {
-      try {
-        const entry = JSON.parse(line);
-        // System messages may contain subagent_type
-        if (entry.type === 'system' || entry.type === 'user') {
-          const msgContent = entry.message?.content;
-          const text =
-            typeof msgContent === 'string'
-              ? msgContent
-              : Array.isArray(msgContent)
-                ? msgContent.map((i) => i.text || '').join(' ')
-                : '';
+    // Read the structural subagent markers from the first 10 transcript lines.
+    const { attributionAgent, isSidechain, promptText } = readInitialMarkers(lines.slice(0, 10));
 
-          for (const alias of agentAliases) {
-            // Match agent name with word boundaries to avoid false positives
-            // from incidental substring matches (e.g. "qa" matching "quality")
-            const normalized = normalizeAgentName(alias);
-            const boundary = new RegExp(
-              `(?:^|[\\s"':,])${normalized.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:$|[\\s"':,])`,
-              'i'
-            );
-            if (boundary.test(text)) {
-              return true;
-            }
-          }
-        }
-      } catch {
-        /* skip non-JSON lines */
-      }
+    // 1. Authoritative signal: the attributionAgent identity of a genuine
+    //    Task-spawned subagent. When present it overrides any prose heuristic.
+    if (attributionAgent) {
+      const matched = matchesAlias(attributionAgent, agentAliases);
+      debugLog(
+        'initialPrompt',
+        matched
+          ? `matched attributionAgent=${attributionAgent}`
+          : `no match for attributionAgent=${attributionAgent}`
+      );
+      return matched;
     }
+
+    // 2. Gated fallback: only trust a bare name mention when the transcript is
+    //    positively identified as a sidechain (a real subagent transcript). A
+    //    main session that merely names an agent must NOT be classified as it.
+    if (isSidechain) {
+      return matchesNameMention(promptText, agentAliases);
+    }
+
+    // 3. No structural marker → not a subagent for these aliases.
+    debugLog('initialPrompt', 'no attributionAgent and not a sidechain transcript');
     return false;
   } catch {
     return false;
   }
+}
+
+/**
+ * Word-boundary match of any agent alias name within sidechain prompt text.
+ * Boundaries avoid incidental substring hits (e.g. "qa" inside "quality").
+ */
+function matchesNameMention(promptText, agentAliases) {
+  for (const alias of agentAliases) {
+    const normalized = normalizeAgentName(alias);
+    const boundary = new RegExp(
+      `(?:^|[\\s"':,])${normalized.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:$|[\\s"':,])`,
+      'i'
+    );
+    if (boundary.test(promptText)) {
+      debugLog('initialPrompt', `matched isSidechain name mention=${normalized}`);
+      return true;
+    }
+  }
+  debugLog('initialPrompt', 'sidechain transcript, no alias name mention');
+  return false;
 }
 
 module.exports = {
