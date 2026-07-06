@@ -67,13 +67,14 @@ function detect({ schema, cachePath, projectRoot, values }) {
   const hash = schemaHash(schema);
   const cache = loadCache(cachePath);
   const entry = cacheEntry(cache, projectRoot, schema.plugin);
-  if (entry && entry.schemaHash === hash) return { changed: false, hash };
+  const acknowledgedVars = entry ? entry.acknowledgedVars || [] : [];
+  if (entry && entry.schemaHash === hash) return { changed: false, hash, acknowledgedVars };
 
-  const acknowledged = new Set(entry ? entry.acknowledgedVars || [] : []);
+  const acknowledged = new Set(acknowledgedVars);
   const missing = Object.entries(schema.vars)
     .filter(([name, def]) => !def.advanced && !(name in values) && !acknowledged.has(name))
     .map(([name]) => name);
-  return { changed: true, firstRun: !entry, hash, missing };
+  return { changed: true, firstRun: !entry, hash, missing, acknowledgedVars };
 }
 
 /**

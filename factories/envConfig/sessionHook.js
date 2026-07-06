@@ -21,6 +21,7 @@ const { loadSchema, mergeSchemas } = require('./schema');
 const { readValues } = require('./envFiles');
 const { detect, projectKey, markConfigured } = require('./detect');
 const { findUnknownKeys, validateValues } = require('./validate');
+const { scanFulfillable } = require('./scan');
 
 const MAX_LISTED_VARS = 8;
 const MAX_WARNINGS = 10;
@@ -113,8 +114,29 @@ function run({
       lines.push(...driftLines({ schema, result, configureCommand }));
     }
   }
+  lines.push(...scanLines({ schema, projectRoot, values, result, configureCommand }));
   lines.push(...warningLines({ merged, values }));
   return lines.join('\n');
+}
+
+/**
+ * Nudge for scannable vars that sit empty while the repo has the docs to
+ * fill them. Fires on the fast path too — an acknowledged (keep-unset) var
+ * is the only off switch, so "set to empty and forgotten" cannot go silent.
+ */
+function scanLines({ schema, projectRoot, values, result, configureCommand }) {
+  const fulfillable = scanFulfillable({
+    schema,
+    projectRoot,
+    values,
+    acknowledged: new Set(result.acknowledgedVars || []),
+  });
+  if (fulfillable.length === 0) return [];
+  const names = fulfillable.map((entry) => entry.name);
+  return [
+    `📄 ${schema.plugin}: ${names.length} var(s) can be auto-filled from files in this repo: ${formatMissing(names)}`,
+    `  Run ${configureCommand} — the assistant can scan the matched docs and propose the values.`,
+  ];
 }
 
 /** Wrapper for hook entrypoints: never throws, prints, exits 0. */

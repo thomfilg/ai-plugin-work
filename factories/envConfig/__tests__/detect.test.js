@@ -58,6 +58,7 @@ test('markConfigured enables the fast path until the schema changes', () => {
   assert.deepEqual(detect({ schema, cachePath, projectRoot, values: {} }), {
     changed: false,
     hash: first.hash,
+    acknowledgedVars: [],
   });
 
   const grown = JSON.parse(JSON.stringify(schema));

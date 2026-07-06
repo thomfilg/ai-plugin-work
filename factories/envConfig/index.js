@@ -16,6 +16,7 @@ module.exports = {
   ...require('./validate'),
   ...require('./detect'),
   ...require('./render'),
+  ...require('./scan'),
   sessionHook: require('./sessionHook'),
   updateCheck: require('./updateCheck'),
 };

@@ -48,6 +48,23 @@ at direnv time via `gh auth token`.
    sensible), "Keep unset", and let "Other" capture a custom value. Never
    prompt for `advanced` vars — they render as commented defaults.
 
+3b. **Auto-fill scannable vars from repo docs.** When `plan.fulfillable` is
+   non-empty (e.g. the `READ_DOCS_ON_*` family with `.rulesync/` docs present
+   in the repo), scan and propose instead of asking blind:
+
+   - Each entry carries `name`, `candidates` (every matched file),
+     `suggested` (schema-filtered subset), and `value` (the suggested CSV).
+   - Skim the candidate files' titles/headings to sanity-check the mapping —
+     move a doc between categories when its content clearly belongs elsewhere,
+     and consider unmatched `candidates` for inclusion.
+   - Ask ONE AskUserQuestion per batch (multiSelect or grouped): "Auto-fill
+     doc vars from repo scan?" with options "Accept proposed mapping"
+     (Recommended — show the per-var value in the description/preview),
+     "Let me adjust", and "Keep unset".
+   - Accepted values go into `answers.values`; declined vars go into
+     `answers.acknowledged` — acknowledging is what stops the session-start
+     "can be auto-filled" reminder from repeating.
+
 4. **Write the answers file** (use the Write tool) to
    `/tmp/envconfig-answers-$$.json`:
 

@@ -369,63 +369,130 @@
       "default": "",
       "description": "Docs (csv paths) for the code-review agent",
       "section": "Agent Docs",
-      "advanced": true
+      "advanced": true,
+      "scan": {
+        "globs": [".rulesync/rules/*.md"]
+      }
     },
     "READ_DOCS_ON_QA": {
       "type": "string",
       "default": "",
       "description": "Docs for QA agents",
       "section": "Agent Docs",
-      "advanced": true
+      "advanced": true,
+      "scan": {
+        "globs": [".rulesync/rules/*.md", ".rulesync/subagents/qa.md"],
+        "names": [
+          "e2e-testing",
+          "state-api",
+          "ui-ux",
+          "qa",
+          "testing.local",
+          "security",
+          "performance",
+          "database"
+        ]
+      }
     },
     "READ_DOCS_ON_DEV": {
       "type": "string",
       "default": "",
       "description": "Docs for developer agents",
       "section": "Agent Docs",
-      "advanced": true
+      "advanced": true,
+      "scan": {
+        "globs": [".rulesync/rules/*.md"],
+        "names": [
+          "architecture",
+          "code-quality",
+          "types",
+          "react-components",
+          "react-hooks",
+          "database",
+          "pattern-first",
+          "security",
+          "performance",
+          "ui-ux",
+          "hard-cutover",
+          "state-api",
+          "testing.local"
+        ]
+      }
     },
     "READ_DOCS_ON_E2E": {
       "type": "string",
       "default": "",
       "description": "Docs for E2E test writing",
       "section": "Agent Docs",
-      "advanced": true
+      "advanced": true,
+      "scan": {
+        "globs": [".rulesync/rules/*.md"],
+        "names": ["e2e-testing", "state-api", "testing.local", "ui-ux", "database"]
+      }
     },
     "READ_DOCS_ON_TEST": {
       "type": "string",
       "default": "",
       "description": "Docs for unit test writing",
       "section": "Agent Docs",
-      "advanced": true
+      "advanced": true,
+      "scan": {
+        "globs": [".rulesync/rules/*.md"],
+        "names": ["unit-testing", "types", "testing.local", "database"]
+      }
     },
     "READ_DOCS_ON_STORYBOOK": {
       "type": "string",
       "default": "",
       "description": "Docs for Storybook story writing",
       "section": "Agent Docs",
-      "advanced": true
+      "advanced": true,
+      "scan": {
+        "globs": [".rulesync/rules/*.md"],
+        "names": ["react-components", "ui-ux", "react-hooks"]
+      }
     },
     "READ_DOCS_ON_PR": {
       "type": "string",
       "default": "",
       "description": "Docs for PR creation",
       "section": "Agent Docs",
-      "advanced": true
+      "advanced": true,
+      "scan": {
+        "globs": [".rulesync/rules/*.md"]
+      }
     },
     "READ_DOCS_ON_BRIEF": {
       "type": "string",
       "default": "",
       "description": "Docs for the brief-writer agent",
       "section": "Agent Docs",
-      "advanced": true
+      "advanced": true,
+      "scan": {
+        "globs": [".rulesync/subagents/product-owner.md", ".rulesync/rules/*.md", "docs/ARCH.md"],
+        "names": ["product-owner", "architecture", "integrations", "state-api", "ARCH"]
+      }
     },
     "READ_DOCS_ON_SPEC": {
       "type": "string",
       "default": "",
       "description": "Docs for the spec-writer agent",
       "section": "Agent Docs",
-      "advanced": true
+      "advanced": true,
+      "scan": {
+        "globs": [".rulesync/rules/*.md", ".rulesync/subagents/architect.md", "docs/ARCH.md"],
+        "names": [
+          "architecture",
+          "database",
+          "state-api",
+          "pattern-first",
+          "types",
+          "integrations",
+          "security",
+          "architect",
+          "ARCH"
+        ]
+      }
     }
   }
 }

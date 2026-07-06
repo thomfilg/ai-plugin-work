@@ -78,6 +78,48 @@ test('run is silent once all vars are set (auto-acknowledge) and cached', () => 
   assert.equal(run({ pluginRoot, configureCommand: '/d', cachePath, cwd: tmp }), '');
 });
 
+test('run nudges for scannable vars until acknowledged, even on the fast path', () => {
+  const { markConfigured, projectKey } = require('../detect');
+  const scanSchema = {
+    plugin: 'demo',
+    prefixes: ['DEMO_'],
+    vars: {
+      DEMO_DOCS: {
+        type: 'string',
+        default: '',
+        description: 'docs',
+        section: 'Docs',
+        advanced: true,
+        scan: { globs: ['.rulesync/rules/*.md'] },
+      },
+    },
+  };
+  const pluginRoot = path.join(tmp, 'scan-plugin');
+  fs.mkdirSync(pluginRoot, { recursive: true });
+  fs.writeFileSync(path.join(pluginRoot, 'config-schema.json'), JSON.stringify(scanSchema));
+  fs.mkdirSync(path.join(tmp, '.rulesync', 'rules'), { recursive: true });
+  fs.writeFileSync(path.join(tmp, '.rulesync', 'rules', 'types.md'), '# types\n');
+
+  // First run: no non-advanced vars missing → hash auto-absorbed, but the
+  // scan nudge still fires (that's the "set to empty and forgotten" signal).
+  const first = run({ pluginRoot, configureCommand: '/demo:configure', cachePath, cwd: tmp });
+  assert.match(first, /📄 demo: 1 var\(s\) can be auto-filled .*DEMO_DOCS/);
+  // Fast path (hash cached): still nudging.
+  const second = run({ pluginRoot, configureCommand: '/demo:configure', cachePath, cwd: tmp });
+  assert.match(second, /📄 demo/);
+  // Acknowledged as keep-unset via a configure pass: silent.
+  const { schemaHash } = require('../schema');
+  markConfigured({
+    cachePath,
+    projectRoot: projectKey(tmp),
+    plugin: 'demo',
+    hash: schemaHash(scanSchema),
+    acknowledgedVars: ['DEMO_DOCS'],
+  });
+  const third = run({ pluginRoot, configureCommand: '/demo:configure', cachePath, cwd: tmp });
+  assert.ok(!third.includes('📄'), `expected no scan nudge, got: ${third}`);
+});
+
 test('run returns empty when the plugin has no schema', () => {
   const emptyRoot = path.join(tmp, 'no-schema');
   fs.mkdirSync(emptyRoot, { recursive: true });

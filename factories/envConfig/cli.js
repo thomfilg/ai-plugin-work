@@ -33,6 +33,7 @@ const { readValues } = require('./envFiles');
 const { detect, projectKey, markConfigured } = require('./detect');
 const { findUnknownKeys, validateValues } = require('./validate');
 const { renderEnvrc, mergeEnvContent } = require('./render');
+const { scanFulfillable } = require('./scan');
 const { defaultCachePath } = require('./sessionHook');
 
 function parseArgs(argv) {
@@ -129,6 +130,12 @@ function cmdPlan(args) {
     ghAccounts: ghAccounts(),
     gitIdentity: gitIdentity(cwd),
     vars: varInventory(schemas, values),
+    fulfillable: schemas.flatMap((schema) =>
+      scanFulfillable({ schema, projectRoot, values }).map((entry) => ({
+        plugin: schema.plugin,
+        ...entry,
+      }))
+    ),
   };
   process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`);
 }
