@@ -64,9 +64,11 @@ process.stdin.on('end', () => {
 `;
 
     // Mirror the actual registry paths so the dispatcher resolves them.
+    // (GH-539: commit-writer was removed; repointed to qa-feature-tester, which
+    // has a Pre `.*` entry and mcp-matched Post entries.)
     const targets = [
-      'scripts/workflows/work/agents/commit-writer/commit-writer-block-write.js',
-      'scripts/workflows/work/agents/commit-writer/commit-writer-precommit-guard.js',
+      'scripts/workflows/check/agents/qa-feature-tester/qa-agent-start.js',
+      'scripts/workflows/check/agents/qa-feature-tester/track-navigated-url.js',
     ];
     for (const rel of targets) {
       const abs = path.join(pluginRoot, rel);
@@ -100,13 +102,13 @@ process.stdin.on('end', () => {
   });
 
   it('exits 0 when CLAUDE_HOOK_TYPE is missing', () => {
-    const r = run({ tool_name: 'Bash', agent_type: 'commit-writer' }, envBase);
+    const r = run({ tool_name: 'Bash', agent_type: 'qa-feature-tester' }, envBase);
     assert.equal(r.code, 0);
   });
 
   it('exits 0 when CLAUDE_HOOK_TYPE is invalid', () => {
     const r = run(
-      { tool_name: 'Bash', agent_type: 'commit-writer' },
+      { tool_name: 'Bash', agent_type: 'qa-feature-tester' },
       { ...envBase, CLAUDE_HOOK_TYPE: 'Bogus' }
     );
     assert.equal(r.code, 0);
@@ -131,10 +133,12 @@ process.stdin.on('end', () => {
     assert.equal(fs.existsSync(rec), false, 'no probe should have run');
   });
 
-  it('propagates child exit 2 from commit-writer PreToolUse Bash', () => {
+  it('propagates child exit 2 from a matched PreToolUse entry', () => {
+    // tool_name "Edit" matches only qa-feature-tester's Pre `.*` entry
+    // (qa-agent-start); "Task"/"Agent" are short-circuited by the dispatcher.
     const rec = path.join(tmp, 'probe-record.log');
     const r = run(
-      { tool_name: 'Bash', agent_type: 'commit-writer', tool_input: { command: 'rm -rf /' } },
+      { tool_name: 'Edit', agent_type: 'qa-feature-tester' },
       { ...envBase, CLAUDE_HOOK_TYPE: 'PreToolUse', PROBE_RECORD: rec, PROBE_EXIT: '2' }
     );
     assert.equal(r.code, 2);
@@ -143,27 +147,28 @@ process.stdin.on('end', () => {
 
   it('exits 0 when child exits 0', () => {
     const r = run(
-      { tool_name: 'Bash', agent_type: 'commit-writer' },
+      { tool_name: 'Edit', agent_type: 'qa-feature-tester' },
       { ...envBase, CLAUDE_HOOK_TYPE: 'PreToolUse', PROBE_EXIT: '0' }
     );
     assert.equal(r.code, 0);
   });
 
   it('skips entries whose matcher does not match tool_name', () => {
-    // commit-writer PostToolUse entry has matcher: "Bash" — Edit should be skipped.
+    // qa-feature-tester PostToolUse entries are mcp-matched — a plain Edit matches none.
     const rec = path.join(tmp, 'probe-record.log');
     const r = run(
-      { tool_name: 'Edit', agent_type: 'commit-writer' },
+      { tool_name: 'Edit', agent_type: 'qa-feature-tester' },
       { ...envBase, CLAUDE_HOOK_TYPE: 'PostToolUse', PROBE_RECORD: rec, PROBE_EXIT: '2' }
     );
-    assert.equal(r.code, 0, 'Edit should not trigger Bash matcher');
+    assert.equal(r.code, 0, 'Edit should not trigger an mcp matcher');
     assert.equal(fs.existsSync(rec), false);
   });
 
-  it('runs commit-writer PostToolUse entry when matcher matches', () => {
+  it('runs a PostToolUse entry when the matcher matches', () => {
+    // browser_navigate matches the track-navigated-url Post entry.
     const rec = path.join(tmp, 'probe-record.log');
     const r = run(
-      { tool_name: 'Bash', agent_type: 'commit-writer' },
+      { tool_name: 'mcp__playwright__browser_navigate', agent_type: 'qa-feature-tester' },
       { ...envBase, CLAUDE_HOOK_TYPE: 'PostToolUse', PROBE_RECORD: rec, PROBE_EXIT: '0' }
     );
     assert.equal(r.code, 0);
@@ -173,9 +178,8 @@ process.stdin.on('end', () => {
   it('passes the original stdin payload through to the child', () => {
     const rec = path.join(tmp, 'probe-record.log');
     const payload = {
-      tool_name: 'Bash',
-      agent_type: 'commit-writer',
-      tool_input: { command: 'git status' },
+      tool_name: 'Edit',
+      agent_type: 'qa-feature-tester',
       session_id: 'abc-123',
     };
     const r = run(payload, {
@@ -228,7 +232,7 @@ process.stdin.on('end', () => {
     const r = run(
       {
         tool_name: 'Task',
-        tool_input: { subagent_type: 'commit-writer', prompt: 'do something' },
+        tool_input: { subagent_type: 'qa-feature-tester', prompt: 'do something' },
       },
       { ...envBase, CLAUDE_HOOK_TYPE: 'PreToolUse', PROBE_RECORD: rec, PROBE_EXIT: '2' }
     );
@@ -243,7 +247,7 @@ process.stdin.on('end', () => {
     const r = run(
       {
         tool_name: 'Bash',
-        tool_input: { command: 'ls', subagent_type: 'commit-writer' },
+        tool_input: { command: 'ls', subagent_type: 'qa-feature-tester' },
         agent_type: 'no-such-agent',
       },
       { ...envBase, CLAUDE_HOOK_TYPE: 'PreToolUse', PROBE_RECORD: rec, PROBE_EXIT: '2' }

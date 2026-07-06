@@ -1,60 +1,72 @@
 'use strict';
 
-// GH-539: detectCommitMsgHook wires commit.js's hasCommitMsgHook branch to real
-// state. Without it the direct-commit path is dead code and every commit still
-// dispatches commit-writer. These tests confirm the detector resolves the active
-// hooks directory (core.hooksPath when set, else .git/hooks) and only reports the
-// hook present when a commit-msg shim delegating to validate-commit-msg exists.
+// GH-539: hasCommitMsgValidator is the ONE shared detector behind both
+// inspect.js's `hasCommitMsgHook` (commit step direct-commit choice) and
+// enforce-agent-usage.js's git-commit block lift. It reports the validator
+// present only when an EXECUTABLE commit-msg hook delegating to
+// validate-commit-msg exists in the active hooks dir (core.hooksPath else
+// .git/hooks). The executable-bit check matters: git silently skips a
+// non-exec hook, so a non-exec file must NOT count as "validated".
 
 const { describe, it, before, after } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { execFileSync } = require('child_process');
 
-const { detectCommitMsgHook } = require('../engine/inspect');
+const { hasCommitMsgValidator } = require('../../lib/commit-msg-hook');
 
-/** A `run` that returns the given core.hooksPath value (empty string = unset). */
-const runReturning = (hooksPath) => () => hooksPath;
+const VALIDATOR_SHIM = '#!/bin/sh\nexec node "/x/validate-commit-msg.js" "$1"\n';
 
-describe('detectCommitMsgHook', () => {
+/** Initialise a throwaway git repo so `git config --get core.hooksPath` works. */
+function initRepo() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gh539-cmh-'));
+  execFileSync('git', ['-C', dir, 'init', '-q'], { timeout: 5000 });
+  return dir;
+}
+
+describe('hasCommitMsgValidator', () => {
   let dir;
   before(() => {
-    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gh539-hook-'));
+    dir = initRepo();
   });
   after(() => {
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it('returns false when no commit-msg hook file exists', () => {
-    fs.mkdirSync(path.join(dir, '.git', 'hooks'), { recursive: true });
-    assert.equal(detectCommitMsgHook(dir, runReturning('')), false);
+  it('returns false when no commit-msg hook exists', () => {
+    assert.equal(hasCommitMsgValidator(dir), false);
   });
 
-  it('returns true for a .git/hooks/commit-msg shim delegating to the validator (hooksPath unset)', () => {
-    const hooks = path.join(dir, '.git', 'hooks');
-    fs.mkdirSync(hooks, { recursive: true });
-    fs.writeFileSync(
-      path.join(hooks, 'commit-msg'),
-      '#!/bin/sh\nexec node "/x/validate-commit-msg.js" "$1"\n',
-    );
-    assert.equal(detectCommitMsgHook(dir, runReturning('')), true);
+  it('returns true for an executable .git/hooks/commit-msg validator shim', () => {
+    const hook = path.join(dir, '.git', 'hooks', 'commit-msg');
+    fs.writeFileSync(hook, VALIDATOR_SHIM);
+    fs.chmodSync(hook, 0o755);
+    assert.equal(hasCommitMsgValidator(dir), true);
   });
 
-  it('returns false when a commit-msg hook exists but is not our validator', () => {
-    const hooks = path.join(dir, '.git', 'hooks');
-    fs.mkdirSync(hooks, { recursive: true });
-    fs.writeFileSync(path.join(hooks, 'commit-msg'), '#!/bin/sh\necho unrelated\n');
-    assert.equal(detectCommitMsgHook(dir, runReturning('')), false);
+  it('returns false when the validator hook is NOT executable (git would skip it)', () => {
+    const hook = path.join(dir, '.git', 'hooks', 'commit-msg');
+    fs.writeFileSync(hook, VALIDATOR_SHIM);
+    fs.chmodSync(hook, 0o644);
+    assert.equal(hasCommitMsgValidator(dir), false);
+  });
+
+  it('returns false when an executable commit-msg hook is not our validator', () => {
+    const hook = path.join(dir, '.git', 'hooks', 'commit-msg');
+    fs.writeFileSync(hook, '#!/bin/sh\necho unrelated\n');
+    fs.chmodSync(hook, 0o755);
+    assert.equal(hasCommitMsgValidator(dir), false);
   });
 
   it('resolves a relative core.hooksPath against the worktree root', () => {
+    execFileSync('git', ['-C', dir, 'config', 'core.hooksPath', 'scripts/hooks'], { timeout: 5000 });
     const hooks = path.join(dir, 'scripts', 'hooks');
     fs.mkdirSync(hooks, { recursive: true });
-    fs.writeFileSync(
-      path.join(hooks, 'commit-msg'),
-      '#!/bin/sh\nexec node "/x/validate-commit-msg.js" "$1"\n',
-    );
-    assert.equal(detectCommitMsgHook(dir, runReturning('scripts/hooks')), true);
+    const hook = path.join(hooks, 'commit-msg');
+    fs.writeFileSync(hook, VALIDATOR_SHIM);
+    fs.chmodSync(hook, 0o755);
+    assert.equal(hasCommitMsgValidator(dir), true);
   });
 });

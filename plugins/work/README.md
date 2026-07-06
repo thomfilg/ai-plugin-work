@@ -75,25 +75,30 @@ The plugin registers hooks that enforce workflow discipline:
 - **`enforce-screenshot-requirement`** - Ensures QA screenshots are captured before completing checks
 - **`work-orchestrator-hook`** - Pre-processes `/work` commands to initialize the workflow engine
 
-## Commit paths
+## Commits
 
-There are **two ways** a commit gets created, and they enforce the **same** semantic-commit
-rules from a single source of truth (`scripts/workflows/work/hooks/commit-msg-rules.js`):
+The `commit-writer` subagent was **removed** (GH-539). Instead:
 
-| Path | When it applies | How it works |
-|------|-----------------|--------------|
-| **Direct-commit + validator** (default) | The installed `commit-msg` validator hook (`validate-commit-msg.js`) is present in the worktree | The `commit` step commits directly; the `commit-msg` git hook validates the message at commit time and **rejects** it if any rule fails. No `commit-writer` dispatch. |
-| **Opt-in `commit-writer`** | On demand, or as a fallback when the validator hook is not installed | The `commit-writer` agent drafts a semantic message, self-validates it against `commit-msg-rules.js`, then commits/pushes. |
-
-Both paths validate against the same `commit-msg-rules.js` module, so a message that passes
-one passes the other. The `commit-msg` validator hook coexists with the biome `pre-commit`
-hook — both run on a direct `git commit`.
+- The **session agent authors the commit message** inline (it has the context) and commits
+  directly — `git add -A && git commit -m "…" && git push`. No subagent dispatch.
+- A git **`commit-msg` validator hook** (`validate-commit-msg.js`, installed by bootstrap into
+  each worktree) enforces the rules at commit time and **rejects** a bad commit. It checks,
+  from a single source of truth (`scripts/workflows/work/hooks/commit-msg-rules.js`):
+  - **semantic format** (`type(scope): description`, allowed types, ≤72-char title, no trailing
+    period, no emoji, imperative mood, ≤100-char body lines);
+  - **no AI/tool attribution** (`Co-Authored-By: Claude`, `Generated with Codex`, etc.);
+  - **a human git identity** — the committing `user.name`/`user.email` must not be an AI tool
+    (`claude`, `codex`, `gemini`, …). The identity is the worktree's effective git user (its
+    local config when a worktree `.envrc` set it up, else the global user).
+- The `enforce-agent-usage` hook blocks a raw `git commit` **unless** the validator hook is
+  installed — so commits can't skip validation. The hook coexists with the biome `pre-commit`
+  hook (both run on a direct `git commit`).
 
 ### Commit-message rule decisions
 
 - **Title ≤ 72 chars, body lines ≤ 100 chars.** The ticket's "≤72" refers to the commit
-  **title**; body lines use the ≤100 limit that `commit-writer` already enforced. Both limits
-  live in `commit-msg-rules.js` (`titleLengthRule`, `bodyLineLengthRule`).
+  **title**; body lines use the ≤100 limit. Both live in `commit-msg-rules.js`
+  (`titleLengthRule`, `bodyLineLengthRule`).
 - **Deferred:** a `no empty body when type is feat/breaking` rule is **not** enforced yet. It
   is deferred pending team confirmation on whether to **block** or merely **warn**, and is
   intentionally omitted from `commit-msg-rules.js` until that decision lands.

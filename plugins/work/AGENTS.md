@@ -51,7 +51,6 @@ For detailed documentation see **[docs/README.md](./docs/README.md)**.
 |---|---|
 | `pr-generator` | PR titles and descriptions from diffs |
 | `pr-post-generator` | Visual documentation for PRs |
-| `commit-writer` | Semantic commit messages |
 
 ### Coordination
 | Agent | Role |
@@ -67,7 +66,7 @@ For detailed documentation see **[docs/README.md](./docs/README.md)**.
 | brief | brief-writer |
 | spec | spec-writer |
 | implement | developer-* (by file type) |
-| commit | commit-writer |
+| commit | _(session agent authors; commit-msg validator hook enforces)_ |
 | check | code-checker, quality-checker, qa-*, completion-checker |
 | pr | pr-generator, pr-post-generator |
 

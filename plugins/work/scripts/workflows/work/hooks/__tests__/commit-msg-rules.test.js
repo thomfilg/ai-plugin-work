@@ -163,6 +163,16 @@ describe('noAiAttributionRule', () => {
     const msg = 'feat: add validator\n\nCo-Authored-By: ' + aiName + ' <noreply>';
     assertFailure(rules.noAiAttributionRule(msg, {}));
   });
+  it('fails a "Generated with <tool>" attribution line', () => {
+    const aiName = ['Cl', 'aude'].join('');
+    assertFailure(rules.noAiAttributionRule(`feat: add x\n\nGenerated with ${aiName} Code`, {}));
+  });
+  it('passes a BARE product mention that is not attribution', () => {
+    // e.g. integrating a tool by name must not be rejected (GH-539 review fix #2)
+    const openai = ['open', 'ai'].join('');
+    assert.deepEqual(rules.noAiAttributionRule(`feat: add ${openai} adapter (#123)`, {}), { ok: true });
+    assert.deepEqual(rules.noAiAttributionRule('fix: handle gemini rate limit (#123)', {}), { ok: true });
+  });
 });
 
 describe('ticketIdPresentRule (provider-aware)', () => {

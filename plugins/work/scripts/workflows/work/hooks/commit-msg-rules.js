@@ -46,7 +46,17 @@ const AI_TOOL_NAMES = [
   'ope' + 'nai',
   'gp' + 't',
 ];
-const AI_ATTRIBUTION_RE = new RegExp('\\b(' + AI_TOOL_NAMES.join('|') + ')\\b', 'i');
+// Block AI *attribution* — a co-author trailer or a "generated/written/created …
+// with/by <tool>" phrasing that names an AI tool — NOT a bare mention of the
+// product (e.g. "feat: add openai adapter" is fine; "Generated with Claude" is not).
+const AI_NAME_ALT = AI_TOOL_NAMES.join('|');
+const AI_ATTRIBUTION_RE = new RegExp(
+  '(?:co-?authored-?by:[^\\n]*\\b(?:' + AI_NAME_ALT + ')\\b)' +
+    '|(?:\\b(?:generated|written|created|authored|produced|co-?authored)\\b[^\\n]*\\b(?:with|by)\\b[^\\n]*\\b(?:' +
+    AI_NAME_ALT +
+    ')\\b)',
+  'i',
+);
 
 /** Title in `type(scope): description` form (scope and `!` optional). */
 const SEMANTIC_TITLE_RE = /^[a-zA-Z]+(?:\([^)]*\))?!?:\s.+$/;
@@ -228,4 +238,4 @@ function validateMessage(message, ctx) {
   return { ok: true };
 }
 
-module.exports = { rules, validateMessage, ALLOWED_TYPES, PASS };
+module.exports = { rules, validateMessage, ALLOWED_TYPES, PASS, AI_TOOL_NAMES };

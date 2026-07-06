@@ -16,6 +16,7 @@ const path = require('path');
 const { parseReportStatus } = require(
   path.join(__dirname, '..', '..', 'lib', 'parse-report-status')
 );
+const { hasCommitMsgValidator } = require(path.join(__dirname, '..', '..', 'lib', 'commit-msg-hook'));
 
 // Report-type mapping for the parse-report-status fallback (echo-5219: reviewer
 // agents emit prose verdicts like "## Overall Assessment: ✅ Well-Implemented"
@@ -25,33 +26,6 @@ const REPORT_TYPE_BY_FILE = Object.create(null);
 REPORT_TYPE_BY_FILE['tests.check.md'] = 'tests';
 REPORT_TYPE_BY_FILE['code-review.check.md'] = 'codeReview';
 REPORT_TYPE_BY_FILE['completion.check.md'] = 'completion';
-
-/**
- * Detect whether the shared commit-msg validator hook (GH-539) is installed in
- * the worktree. Resolves the active hooks directory the same way the installer
- * does — `core.hooksPath` when set (relative values anchored at the worktree
- * root), else `.git/hooks` — and confirms a `commit-msg` hook that delegates to
- * `validate-commit-msg`. When present, the commit step prefers a direct
- * `git commit` over dispatching commit-writer. Fails closed (false) on any error.
- * @param {string} worktree
- * @param {(cmd: string) => string} run
- * @returns {boolean}
- */
-function detectCommitMsgHook(worktree, run) {
-  try {
-    const configured = run(`git -C "${worktree}" config --get core.hooksPath 2>/dev/null`);
-    const hooksDir = configured
-      ? path.isAbsolute(configured)
-        ? configured
-        : path.resolve(worktree, configured)
-      : path.resolve(worktree, '.git', 'hooks');
-    const hookFile = path.join(hooksDir, 'commit-msg');
-    if (!fs.existsSync(hookFile)) return false;
-    return fs.readFileSync(hookFile, 'utf-8').includes('validate-commit-msg');
-  } catch {
-    return false;
-  }
-}
 
 /** Git facts from the ticket worktree (or the no-worktree defaults). */
 function collectGitState(s, deps, ticket) {
@@ -93,7 +67,7 @@ function collectGitState(s, deps, ticket) {
   s.hasUnpushed = s.branch
     ? run(`git -C "${c}" log origin/${s.branch}..HEAD --oneline 2>/dev/null`) !== ''
     : false;
-  s.hasCommitMsgHook = detectCommitMsgHook(c, run);
+  s.hasCommitMsgHook = hasCommitMsgValidator(c);
 }
 
 /** Open-PR info for the worktree branch (null when absent/unparseable). */
@@ -308,4 +282,4 @@ function inspect(ticket, providerConfig, suffix, deps) {
   return s;
 }
 
-module.exports = { inspect, detectCommitMsgHook };
+module.exports = { inspect };

@@ -18,7 +18,7 @@
  * OPEN via `logHookError` + exit 0, so a transient I/O fault never wedges the
  * commit path. A parsed rule failure is NEVER swallowed by the fail-open branch.
  *
- * Zero runtime dependencies: only Node built-ins plus two in-repo modules.
+ * Zero runtime dependencies: only Node built-ins plus in-repo modules.
  */
 
 'use strict';
@@ -27,6 +27,7 @@ const fs = require('fs');
 const { validateMessage } = require('./commit-msg-rules');
 const { getProviderConfig } = require('../../lib/ticket-provider');
 const { logHookError } = require('../../lib/hook-error-log');
+const { resolveGitUser, isAiIdentity } = require('../../lib/git-identity');
 
 /**
  * Render a rule failure into the two-line stderr block: the named rule followed
@@ -37,6 +38,16 @@ const { logHookError } = require('../../lib/hook-error-log');
 function formatFailure(result) {
   const reason = result.reason ? ` (${result.reason})` : '';
   return `commit-msg validation failed: ${result.rule}${reason}\n↳ Hint: ${result.hint}\n`;
+}
+
+/** Render the identity-guard rejection. */
+function formatIdentityFailure(user) {
+  return (
+    `commit-msg validation failed: aiIdentityRule ` +
+    `(git ${user.source} identity "${user.name} <${user.email}>" looks like an AI tool)\n` +
+    `↳ Hint: commit under a real human user — set git user.name/user.email ` +
+    `(claude/codex/gemini/etc. are rejected).\n`
+  );
 }
 
 /**
@@ -66,13 +77,23 @@ function main() {
 
   const providerConfig = getProviderConfig({ skipPrompt: true });
   const result = validateMessage(message, { providerConfig });
-  if (result.ok) {
-    process.exit(0);
+  if (!result.ok) {
+    process.stderr.write(formatFailure(result));
+    process.exit(1);
     return;
   }
 
-  process.stderr.write(formatFailure(result));
-  process.exit(1);
+  // Identity guard (GH-539): the committer must be a real human, not an AI tool.
+  // Uses the worktree's git user when a worktree .envrc exists, else the global
+  // user. Resolution failures leave the fields empty → not flagged (fail open).
+  const user = resolveGitUser(process.cwd());
+  if (isAiIdentity(user)) {
+    process.stderr.write(formatIdentityFailure(user));
+    process.exit(1);
+    return;
+  }
+
+  process.exit(0);
 }
 
 // Only run when invoked directly as the git hook; stay importable for tests.
