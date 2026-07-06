@@ -125,6 +125,26 @@ describe('4_run_tests — typecheck delta (echo-5137-issue-4)', () => {
     assert.equal(fs.existsSync(path.join(dir, 'pwned')), false, 'unsafe command never ran');
   });
 
+  it('CRASHED run skips typecheck entirely (never executed, no section)', () => {
+    // OOM signature + nonzero exit → CRASHED per classifyRun.
+    process.env.SCRIPT_RUN_AFFECTED_UNIT = makeScript(
+      'crash.sh',
+      'echo "FATAL ERROR: Reached heap limit Allocation failed - JavaScript heap out of memory"; exit 1'
+    );
+    process.env.SCRIPT_TYPECHECK_COMMAND = makeScript(
+      'typecheck-marker.sh',
+      `touch "${dir}/typecheck-ran"; exit 0`
+    );
+    const { result, report } = runStep();
+    assert.notEqual(result, null, 'CRASHED run must not advance');
+    assert.doesNotMatch(report, /Typecheck Delta/);
+    assert.equal(
+      fs.existsSync(path.join(dir, 'typecheck-ran')),
+      false,
+      'typecheck must not run on a crashed test environment'
+    );
+  });
+
   it('first run captures the baseline: green tests + inherited errors still pass', () => {
     greenUnitSuite();
     process.env.SCRIPT_TYPECHECK_COMMAND = typecheckScript(

@@ -346,7 +346,10 @@ function registerRunTests(register) {
 
     // Typecheck delta (echo-5137-issue-4): net-new typecheck errors block even
     // when tests pass; pre-existing (inherited) errors are informational only.
-    const typecheck = typecheckBaseline.assessTypecheck(ctx.tasksDir, runCommand);
+    // Skipped on CRASHED runs: the crash already blocks, and a typecheck
+    // section from a broken test environment is misleading noise.
+    const typecheck =
+      outcome === 'CRASHED' ? null : typecheckBaseline.assessTypecheck(ctx.tasksDir, runCommand);
     const finalStatus = typecheck && typecheck.netNew.length > 0 ? 'NEEDS_WORK' : status;
 
     const report = buildTestsReport({
