@@ -16,6 +16,8 @@ function makeTasksDir() {
   fs.writeFileSync(
     path.join(tasksDir, 'completion.check.md'),
     [
+      '**Status:** COMPLETE',
+      '',
       '## Requirements Verification',
       '',
       '### Original Request:',
@@ -27,7 +29,7 @@ function makeTasksDir() {
       '### Final Status:',
       '[COMPLETE]',
       '',
-    ].join('\n'),
+    ].join('\n')
   );
   return { root, tasksDir };
 }
@@ -80,9 +82,7 @@ test('verdict summary reads ctx.{reuseAuditChecked,scopeChecked,testsChecked} wh
     testsChecked: 4,
   };
   report.validate(ctx);
-  const doc = JSON.parse(
-    fs.readFileSync(path.join(tasksDir, 'completion-verdict.json'), 'utf8'),
-  );
+  const doc = JSON.parse(fs.readFileSync(path.join(tasksDir, 'completion-verdict.json'), 'utf8'));
   assert.deepEqual(doc.summary, { reuseChecked: 2, scopeChecked: 3, testsChecked: 4 });
   fs.rmSync(root, { recursive: true, force: true });
 });
@@ -91,9 +91,7 @@ test('verdict ok:true with empty failures when no records were pushed', () => {
   const { root, tasksDir } = makeTasksDir();
   const ctx = { ticket: 'GH-282', tasksDir, failures: [] };
   report.validate(ctx);
-  const doc = JSON.parse(
-    fs.readFileSync(path.join(tasksDir, 'completion-verdict.json'), 'utf8'),
-  );
+  const doc = JSON.parse(fs.readFileSync(path.join(tasksDir, 'completion-verdict.json'), 'utf8'));
   assert.equal(doc.ok, true);
   assert.deepEqual(doc.failures, []);
   fs.rmSync(root, { recursive: true, force: true });
@@ -113,13 +111,46 @@ test('persistVerdict does not create completion.check.md when absent (Bug 5)', (
   report.validate(ctx);
   assert.ok(
     fs.existsSync(path.join(tasksDir, 'completion-verdict.json')),
-    'completion-verdict.json must still be written',
+    'completion-verdict.json must still be written'
   );
   assert.equal(
     fs.existsSync(path.join(tasksDir, 'completion.check.md')),
     false,
-    'completion.check.md must NOT be conjured into existence',
+    'completion.check.md must NOT be conjured into existence'
   );
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('validate passes when canonical **Status:** COMPLETE line is present (echo-5219/echo-5349)', () => {
+  const { root, tasksDir } = makeTasksDir();
+  const res = report.validate({ ticket: 'GH-282', tasksDir, failures: [] });
+  assert.equal(res.ok, true);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('validate blocks a prose-only report missing the canonical Status line (echo-5219/echo-5349)', () => {
+  const { root, tasksDir } = makeTasksDir();
+  // Rewrite the fixture WITHOUT the canonical **Status:** line — the old
+  // prose-only template that downstream gates parsed as UNKNOWN.
+  fs.writeFileSync(
+    path.join(tasksDir, 'completion.check.md'),
+    [
+      '## Requirements Verification',
+      '',
+      '### Original Request:',
+      'X',
+      '',
+      '### Deliverables Checklist:',
+      '- [x] R1 - DELIVERED',
+      '',
+      '### Final Status:',
+      '[COMPLETE]',
+      '',
+    ].join('\n')
+  );
+  const res = report.validate({ ticket: 'GH-282', tasksDir, failures: [] });
+  assert.equal(res.ok, false);
+  assert.match(res.errors[0], /canonical status line/i);
   fs.rmSync(root, { recursive: true, force: true });
 });
 

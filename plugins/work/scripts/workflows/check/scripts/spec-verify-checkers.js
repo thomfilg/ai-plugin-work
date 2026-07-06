@@ -30,11 +30,22 @@ function checkFileExists(args, root) {
   if (fs.existsSync(full)) {
     return { type: 'FILE_EXISTS', args, passed: true };
   }
+  // GH-393 (echo-4465): spec checklists reference ticket artifacts (brief.md,
+  // <ticket>/gherkin.feature, …) that live under TASKS_BASE, OUTSIDE the
+  // worktree. Resolving worktree-only makes those assertions permanently red.
+  // Fall back to TASKS_BASE-relative resolution (same validated relative
+  // path — traversal segments were already rejected above).
+  const tasksBase = process.env.TASKS_BASE;
+  if (tasksBase && fs.existsSync(path.resolve(tasksBase, validation.resolved))) {
+    return { type: 'FILE_EXISTS', args, passed: true, resolvedFrom: 'TASKS_BASE' };
+  }
   return {
     type: 'FILE_EXISTS',
     args,
     passed: false,
-    reason: `Expected file ${filePath} to exist — not found`,
+    reason: `Expected file ${filePath} to exist — not found (checked worktree root${
+      tasksBase ? ' and TASKS_BASE' : ''
+    })`,
   };
 }
 

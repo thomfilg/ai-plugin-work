@@ -80,3 +80,68 @@ test('devops BLOCKS on app-source drift', () => {
   assert.ok(r.errors.some((e) => e.includes('app/api/foo.ts')));
   fs.rmSync(root, { recursive: true, force: true });
 });
+
+// ─── GH-652 regression: checks must FIRE for canonical closed-taxonomy tasks.md ───
+
+const CANONICAL_E2E_TASKS = [
+  '# Tasks',
+  '',
+  '## Task 1',
+  '',
+  '### Type',
+  'tests-only',
+  '',
+  '### Files in scope',
+  '- `tests/e2e/bar.spec.ts`',
+  '',
+].join('\n');
+
+test('GH-652: e2e check APPLIES and FIRES on a canonical closed-taxonomy tasks.md', () => {
+  const { root, tasksDir, worktreeRoot } = makeWorktree({
+    tasks: CANONICAL_E2E_TASKS,
+    files: {
+      'tests/e2e/bar.spec.ts':
+        "import { test } from '@playwright/test';\ntest('noop', async () => {});\n",
+    },
+    prContext: { base: 'origin/main', files: ['tests/e2e/bar.spec.ts'] },
+  });
+  assert.equal(
+    e2e.appliesTo({ tasksDir }),
+    true,
+    'e2e kind must be derived from the canonical `### Files in scope` (closed Type enum carries no domain)'
+  );
+  const r = e2e.validate({ tasksDir, worktreeRoot });
+  assert.equal(r.ok, false);
+  assert.ok(r.errors.some((e) => e.includes('expect(')));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('GH-393: e2e no-expect check skips fixtures/, helpers/ and non-code files under tests/e2e', () => {
+  const { root, tasksDir, worktreeRoot } = makeWorktree({
+    tasks: CANONICAL_E2E_TASKS,
+    files: {
+      'tests/e2e/bar.spec.ts':
+        "import { test, expect } from '@playwright/test';\ntest('x', async () => { expect(1).toBe(1); });\n",
+      'tests/e2e/fixtures/tasks/admin/type-user.ts':
+        "export async function typeUser(page) { await page.fill('#u', 'x'); }\n",
+      'tests/e2e/helpers/login.ts': 'export async function login(page) {}\n',
+      'tests/e2e/domain-index.json': '{"generatedAt":"2026-06-11","totalFiles":3748}\n',
+    },
+    prContext: {
+      base: 'origin/main',
+      files: [
+        'tests/e2e/bar.spec.ts',
+        'tests/e2e/fixtures/tasks/admin/type-user.ts',
+        'tests/e2e/helpers/login.ts',
+        'tests/e2e/domain-index.json',
+      ],
+    },
+  });
+  const r = e2e.validate({ tasksDir, worktreeRoot });
+  assert.equal(
+    r.ok,
+    true,
+    `fixtures/helpers/json must not be treated as specs — errors: ${JSON.stringify(r.errors)}`
+  );
+  fs.rmSync(root, { recursive: true, force: true });
+});

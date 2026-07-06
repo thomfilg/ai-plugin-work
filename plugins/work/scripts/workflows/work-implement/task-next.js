@@ -182,17 +182,14 @@ function resolveTasksBase() {
   return path.join(cwd, 'tasks');
 }
 
-// Use git's view of the worktree, not tasks/'s parent. In multi-worktree
+// ECHO-5322: resolve the ticket worktree from ticket id + env config
+// (WORKTREES_BASE/<REPO_NAME>-<ticket>), with cwd git-detection only as a
+// guarded fallback — see lib/resolve-ticket-worktree.js. In multi-worktree
 // layouts (e.g. w-tabwoah/tabwoah-ECHO-XXXX/), tasks/ lives outside the
-// actual checkout, so dirname(tasksBase) is the wrong cwd to run tests in.
-function resolveWorktreeRoot() {
-  const r = spawnSync('git', ['rev-parse', '--show-toplevel'], {
-    cwd: process.cwd(),
-    encoding: 'utf8',
-  });
-  if (r.status === 0 && r.stdout.trim()) return r.stdout.trim();
-  return null;
-}
+// actual checkout, so dirname(tasksBase) is the wrong cwd to run tests in —
+// and the caller's cwd (often the tasks dir, or the plugin checkout) is
+// equally wrong.
+const { resolveTicketWorktree } = require('../lib/resolve-ticket-worktree');
 
 function sanitizeTicketId(raw) {
   const s = String(raw || '').trim();
@@ -1032,12 +1029,12 @@ function runCheckpointFlow(ctx) {
  * { repoRoot, execution, isCitation, testCmd, testCmdSource }.
  */
 function resolveExecutionContext(ctx) {
-  // Prefer git's view of the worktree (correct for git-worktree layouts where
-  // tasks/ lives outside the actual checkout). Fall back to dirname(tasksBase)
-  // only when not inside a git repo. Resolved before command resolution:
+  // Prefer the ticket-configured worktree (WORKTREES_BASE/<REPO_NAME>-<id>),
+  // then git's cwd view (guarded against the plugin checkout). Fall back to
+  // dirname(tasksBase) last. Resolved before command resolution:
   // strategy synthesis reads the test-command envelope from the
   // worktree-rooted `.envrc`.
-  const worktreeRoot = resolveWorktreeRoot();
+  const worktreeRoot = resolveTicketWorktree(ctx.ticket);
   const repoRoot = worktreeRoot || path.dirname(ctx.tasksBase);
   _runBaseEnv = withEnvrcVars(process.env, repoRoot);
 
