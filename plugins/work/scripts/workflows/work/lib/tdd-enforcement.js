@@ -8,6 +8,18 @@
 const fs = require('fs');
 const path = require('path');
 const { taskSegment } = require('../../lib/allocate-output-folder');
+// Shared citation-kind set (verified-by / wiring-citation) — same module the
+// strategy synthesis/validation path uses, so the kind list never forks.
+const { CITATION_KIND_SET } = require('../../lib/test-strategy');
+// Exception categories — single source (aligned with the `### Type` enum via
+// task-types.js TDD_EXEMPT_TYPES) so the protocol text can never drift from
+// what validateExceptionCategory actually accepts.
+const { ALLOWED_CATEGORIES } = require('../../work-implement/exception-validator');
+// Closed `### Type` enum — the SAME taxonomy the planner wrote and the
+// implement gate consumes (skills/split-in-tasks/lib/task-types.js).
+const { isTddExempt } = require(
+  path.join(__dirname, '..', '..', '..', '..', 'skills', 'split-in-tasks', 'lib', 'task-types')
+);
 
 const TDD_PROTOCOL = `
 TDD protocol (hook-enforced for this step):
@@ -20,7 +32,7 @@ Initialize TDD state:
 
 Note: --task <N> is required when working inside a task-scoped workflow (tasks.md exists).
 Omit --task when running standalone /work-implement without task context.
-All subcommands (init, record-*, transition, exception) support --task when task context exists.
+All subcommands (init, record-*, transition) support --task when task context exists.
 
 For each behavior change, cycle through RED → GREEN → REFACTOR.
 Each phase has hook-enforced file restrictions.
@@ -49,10 +61,12 @@ REFACTOR Phase (clean up):
 Rules:
 - Evidence is recorded by the SCRIPT — it runs git diff and test commands itself.
 - Do NOT make local git commits during the cycle — the commit step handles that.
-- If the change is purely mechanical (config-only, no behavior change):
-  node <TDD_STATE_PATH> exception <TICKET_ID> --task <N> --category <category> --reason "<reason>"
-  Allowed categories: checkpoint, config-only, file-move, mechanical-refactor
-  Exception is BLOCKED when git diff contains new files with exports (use TDD instead).
+- TDD exemptions come ONLY from the planner's \`### Type\` line in tasks.md
+  (tests-only, docs, config, ci, mechanical-refactor, file-move, checkpoint).
+  The \`exception\` subcommand is OPERATOR-ONLY (WORK_OPERATOR_TOKEN-gated) —
+  do not invoke it; agent invocations are rejected. If the change genuinely
+  cannot be test-driven and its Type does not exempt it, STOP and report
+  \`BLOCKED (planner-defect): <one-line reason>\` back to the orchestrator.
 `.trim();
 
 /**
@@ -101,7 +115,6 @@ function validateTddEvidence(evidence) {
     }
     // Structured format: { category, reason }
     if (typeof evidence.exception === 'object' && evidence.exception !== null) {
-      const { ALLOWED_CATEGORIES } = require('../../work-implement/exception-validator');
       const cat = evidence.exception.category;
       if (typeof cat === 'string' && ALLOWED_CATEGORIES.includes(cat)) {
         // GH-258: validated against exception-validator.ALLOWED_CATEGORIES
@@ -141,6 +154,8 @@ function validateTddEvidence(evidence) {
   if (!completeCycle) {
     const partialCycle = cycles.find((c) => c.red && c.green);
     if (!partialCycle) {
+      const citation = validateCitationCycle(cycles);
+      if (citation) return citation;
       return {
         valid: false,
         reason:
@@ -152,4 +167,85 @@ function validateTddEvidence(evidence) {
   return { valid: true, reason: '' };
 }
 
-module.exports = { TDD_PROTOCOL, readTddEvidence, validateTddEvidence };
+/**
+ * GH-509 permanent-retry fix — a GREEN-only cycle recorded by peer citation
+ * (strategy.js recordCitationEvidence: { kind: 'verified-by'|'wiring-citation',
+ * peer, peerSha, scopeOverlap, recordedAt }) IS a complete cycle: citation
+ * kinds have no runnable command, so no RED can ever exist for them.
+ *
+ * Integrity: `peerSha` must be present (non-empty string) — it stamps which
+ * peer evidence state the citation was validated against. Citation evidence
+ * without it is rejected rather than treated as a normal incomplete cycle.
+ *
+ * @param {object[]} cycles
+ * @returns {{valid: boolean, reason: string}|null} null when no cycle carries
+ *   citation-kind GREEN evidence (caller falls through to the generic reject)
+ */
+function validateCitationCycle(cycles) {
+  const cited = cycles.find(
+    (c) => c && c.green && typeof c.green === 'object' && CITATION_KIND_SET.has(c.green.kind)
+  );
+  if (!cited) return null;
+  const peerSha = cited.green.peerSha;
+  if (typeof peerSha !== 'string' || peerSha.trim() === '') {
+    return {
+      valid: false,
+      reason:
+        `Citation evidence (kind "${cited.green.kind}") is missing peerSha. ` +
+        'Re-record via tdd-phase-state.js record-green so peer provenance is stamped.',
+    };
+  }
+  return { valid: true, reason: '' };
+}
+
+/**
+ * The ONE contract-aware evidence-acceptance function (unification invariant:
+ * ONE VALIDATOR IMPLEMENTATION, SHARED BY BOTH PHASES). Every consumer that
+ * knows the task's `### Type` MUST call this instead of the strict
+ * `validateTddEvidence`, so the implement gate, the SubagentStop hook, and the
+ * downstream check/complete validators all apply the SAME acceptance rule to
+ * the same tdd-phase.json:
+ *
+ *   - TDD-exempt Types (task-types.js TDD_EXEMPT_TYPES): red-only OR
+ *     green-only evidence (stub or real) is a complete record — the gate's
+ *     pre-test skip stub legitimately writes a red-only entry, and citation /
+ *     docs paths record green-only. Validating those with the strict rule
+ *     produced infinite retries at the gate (echo-4552 #2) and dead-ends at
+ *     check/complete after the gate advanced.
+ *   - TDD-required Types (and unknown/missing Types — fail closed): the
+ *     strict rule (complete RED→GREEN cycle, a recorded exception, or
+ *     citation-kind GREEN with peerSha).
+ *
+ * Exception evidence and citation cycles are accepted for exempt types too
+ * (superset via the strict fallback).
+ *
+ * @param {object|null} evidence
+ * @param {string|null} taskType - the task's `### Type` (null/unknown → strict)
+ * @returns {{valid: boolean, reason: string}}
+ */
+function validateTddEvidenceForType(evidence, taskType) {
+  if (!isTddExempt(taskType)) return validateTddEvidence(evidence);
+  if (!evidence || typeof evidence !== 'object') {
+    return { valid: false, reason: 'Evidence is null or not an object' };
+  }
+  const hasPhaseEvidence =
+    Array.isArray(evidence.cycles) && evidence.cycles.some((c) => c && (c.red || c.green));
+  if (hasPhaseEvidence) return { valid: true, reason: '' };
+  // No phase evidence — fall back to the strict rule so exception evidence
+  // (and any other strictly-valid shape) still passes for exempt types.
+  const strict = validateTddEvidence(evidence);
+  if (strict.valid) return strict;
+  return {
+    valid: false,
+    reason:
+      `TDD-exempt task type "${taskType}" has no recorded phase evidence ` +
+      '(RED or GREEN, stub or real) and no valid exception.',
+  };
+}
+
+module.exports = {
+  TDD_PROTOCOL,
+  readTddEvidence,
+  validateTddEvidence,
+  validateTddEvidenceForType,
+};

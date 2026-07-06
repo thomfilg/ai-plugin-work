@@ -41,6 +41,49 @@ function baseCtx(worktree, overrides = {}) {
 }
 
 describe('lib/command-existence-dispatcher.js — dispatch()', () => {
+  it('strict-mode prefix segments (`set -e; set -o pipefail;`) produce no errors (W9)', () => {
+    // lib/test-strategy.js prepends `set -e; set -o pipefail; ` to chained
+    // custom commands. `set` is a shell builtin, never a PATH binary — the
+    // dispatcher must skip those segments instead of emitting a false
+    // "command not found" at the draft gate.
+    const root = mkdtemp('cmd-disp-strict-prefix-');
+    try {
+      writeFile(
+        path.join(root, 'package.json'),
+        JSON.stringify({ scripts: { test: 'node --test' } })
+      );
+      const { dispatch } = loadModule();
+      const result = dispatch('set -e; set -o pipefail; pnpm test && pnpm test', baseCtx(root));
+      assert.equal(
+        result.ok,
+        true,
+        `expected ok:true, got errors=${JSON.stringify(result.errors)}`
+      );
+      assert.deepEqual(result.errors, []);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('strict-mode prefix does not mask a genuinely missing script (W9)', () => {
+    const root = mkdtemp('cmd-disp-strict-prefix-miss-');
+    try {
+      writeFile(
+        path.join(root, 'package.json'),
+        JSON.stringify({ scripts: { test: 'node --test' } })
+      );
+      const { dispatch } = loadModule();
+      const result = dispatch('set -e; set -o pipefail; pnpm nope-script', baseCtx(root));
+      assert.equal(result.ok, false, 'missing script after prefix must still error');
+      assert.ok(
+        result.errors.some((e) => /nope-script/.test(e)),
+        `expected an error naming nope-script, got: ${JSON.stringify(result.errors)}`
+      );
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('pnpm-script-hit: pnpm <script-that-exists> returns ok:true with no errors', () => {
     const root = mkdtemp('cmd-disp-pnpm-hit-');
     try {

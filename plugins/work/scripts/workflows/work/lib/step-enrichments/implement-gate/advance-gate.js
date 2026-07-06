@@ -16,21 +16,13 @@ const { resolveTaskType } = require(path.join(__dirname, '..', '..', 'resolve-ta
 
 const { reconcileTasksMetaWithFile } = require(path.join(__dirname, 'reconcile'));
 const { runNonCheckpointFlow } = require(path.join(__dirname, 'evidence-flow'));
-
-/** Keys that scope a retry-failure block to a specific task. */
-const RETRY_KEYS = [
-  '_tddRetryReason',
-  '_tddRetryCount',
-  '_tddRetryCommand',
-  '_tddRetryExitCode',
-  '_tddRetryOutputTail',
-  '_tddRetryTask',
-];
-
-/** Delete all per-task retry state from the work-state object. */
-function clearRetryState(ws) {
-  for (const k of RETRY_KEYS) delete ws[k];
-}
+// W3 — planner-defect operator-hold (retry-state keys live there too).
+const {
+  clearRetryState,
+  persistRetryFailure,
+  buildPlannerHoldInstruction,
+  resolvePlannerHold,
+} = require(path.join(__dirname, 'planner-hold'));
 
 /** Derive TASKS_BASE + a subprocess env from ctx.tasksDir. */
 function deriveGateExecEnv(ctx) {
@@ -60,7 +52,7 @@ function clearDispatchMarkers(loadWorkState, saveWorkState, safeName) {
   }
 }
 
-/** Update tasks.md checkboxes; fail-open. */
+/** Tick completed-task checkboxes in the plan file; fail-open. */
 function safeMarkProgress(tasksDir) {
   if (!tasksDir) return;
   try {
@@ -144,15 +136,12 @@ function advanceValidatedTask(safeName, ctx, deps, currentIdx, totalTasks) {
 }
 
 /**
- * Dispatch-advance gate for the implement step.
- *
- * @param {string} safeName - Sanitized ticket ID
- * @param {object} ctx - Context from work-next.js
- * @param {object} deps - Dependencies injected from work-next.js
- * @returns {null | { recurse: true }} - null=no action (re-dispatch), recurse=re-run orchestrator
+ * Load work state, reconcile tasksMeta with tasks.md, and bounds-check the
+ * task pointer. Returns null when the gate has nothing to do (no tasksMeta,
+ * or all tasks already done), else `{ ws, currentIdx, totalTasks, taskNum }`.
  */
-function dispatchAdvanceGate(safeName, ctx, deps) {
-  const { loadWorkState, saveWorkState, readTddEvidence, validateTddEvidence, stepName } = deps;
+function prepareGateTasks(safeName, ctx, deps) {
+  const { loadWorkState, saveWorkState } = deps;
 
   const ws = loadWorkState(safeName);
   if (!ws?.tasksMeta || !Array.isArray(ws.tasksMeta.tasks)) {
@@ -164,23 +153,42 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
 
   const currentIdx = ws.tasksMeta.currentTaskIndex ?? 0;
   const totalTasks = ws.tasksMeta.tasks.length;
-  const taskNum = currentIdx + 1; // 1-indexed
 
   if (handleAllTasksDone(ws, currentIdx, totalTasks, saveWorkState, safeName)) {
     return null;
   }
 
-  // Helper: persist retry-failure context so the next dispatch prompt can
-  // surface the exact command, exit code, and output to the agent.
-  const recordRetry = (reason, extras) => {
-    ws._tddRetryReason = reason;
-    ws._tddRetryCount = (ws._tddRetryCount || 0) + 1;
-    ws._tddRetryCommand = extras?.command || null;
-    ws._tddRetryExitCode = extras?.exitCode ?? null;
-    ws._tddRetryOutputTail = extras?.outputTail || '';
-    ws._tddRetryTask = taskNum;
-    saveWorkState(safeName, ws);
-  };
+  return { ws, currentIdx, totalTasks, taskNum: currentIdx + 1 }; // 1-indexed
+}
+
+/**
+ * Dispatch-advance gate for the implement step.
+ *
+ * @param {string} safeName - Sanitized ticket ID
+ * @param {object} ctx - Context from work-next.js
+ * @param {object} deps - Dependencies injected from work-next.js
+ * @returns {null | { recurse: true } | object} - null=no action (re-dispatch),
+ *   recurse=re-run orchestrator, object=full instruction (W3 operator-hold)
+ */
+function dispatchAdvanceGate(safeName, ctx, deps) {
+  const { saveWorkState, readTddEvidence, stepName } = deps;
+
+  const prepared = prepareGateTasks(safeName, ctx, deps);
+  if (!prepared) return null;
+  const { ws, currentIdx, totalTasks, taskNum } = prepared;
+
+  // W3 — an unresolved planner defect holds for the operator BEFORE any test
+  // re-runs or re-dispatch; the hold auto-clears (and normal flow resumes)
+  // once the defective task's tasks.md section hash changes.
+  const held = resolvePlannerHold({ ws, ctx, saveWorkState, safeName });
+  if (held) return held;
+
+  // Persist retry-failure context (planner-hold.js persistRetryFailure) so
+  // the next dispatch prompt — or the W3 operator-hold — can surface the
+  // exact command, exit code, and output.
+  const tasksDir = ctx && ctx.tasksDir ? ctx.tasksDir : null;
+  const recordRetry = (reason, extras) =>
+    persistRetryFailure({ ws, taskNum, tasksDir, saveWorkState, safeName }, reason, extras);
 
   // Check task type BEFORE evidence — checkpoint tasks are exempt from TDD.
   const taskType = resolveTaskType(ctx.tasksDir, taskNum);
@@ -202,14 +210,19 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
     gateTasksBase,
     recordRetry,
     saveWorkState,
-    validateTddEvidence,
     tddEnforcement,
     readTddEvidence,
     stepName,
   };
 
   const flow = runNonCheckpointFlow(state);
-  if (flow.handled) return null;
+  if (flow.handled) {
+    // W3 — a planner-defect retry recorded on THIS pass must not fall back to
+    // null (work-next.js would re-dispatch a developer agent at a defect it
+    // cannot fix). Emit the operator-hold immediately — no retry burn.
+    if (ws._tddRetryPlannerDefect) return buildPlannerHoldInstruction(ws, safeName);
+    return null;
+  }
 
   // Evidence valid — clear retry state.
   clearRetryState(ws);

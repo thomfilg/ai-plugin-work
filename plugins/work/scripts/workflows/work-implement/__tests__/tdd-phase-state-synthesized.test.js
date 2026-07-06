@@ -107,15 +107,7 @@ describe('tdd-phase-state record-red --synthesized', () => {
     const reason = 'regression backfill: pre-existing test already covers behavior';
 
     const res = runCli(
-      [
-        'record-red',
-        ticketId,
-        '--cmd',
-        passScript,
-        '--synthesized',
-        '--reason',
-        reason,
-      ],
+      ['record-red', ticketId, '--cmd', passScript, '--synthesized', '--reason', reason],
       homeDir,
       gitRepo
     );
@@ -125,6 +117,17 @@ describe('tdd-phase-state record-red --synthesized', () => {
       0,
       `expected exit 0 with --synthesized + reason, got ${res.exitCode}\nstderr: ${res.stderr}\nstdout: ${res.stdout}`
     );
+
+    // GH-570: --synthesized keeps working but emits a deprecation warning on
+    // stderr pointing at the ablation design (never on stdout — the success
+    // payload is machine-read JSON).
+    assert.match(
+      res.stderr,
+      /DEPRECATION \(GH-570\)/,
+      'stderr must carry the --synthesized deprecation warning'
+    );
+    assert.match(res.stderr, /red-mode: ablation/, 'warning must point at ablation mode');
+    assert.doesNotMatch(res.stdout, /DEPRECATION/, 'warning must not pollute stdout');
 
     // tdd-phase.json must record synthesized: true + the reason on the cycle's red evidence
     const state = readPhaseState(homeDir, ticketId);

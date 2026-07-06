@@ -58,12 +58,13 @@ function writeTasks(tasksBase, taskBlocks) {
   );
 }
 
-function runTaskNext(tasksBase, repoRoot, taskId = 'task1') {
+function runTaskNext(tasksBase, repoRoot, taskId = 'task1', extraEnv = {}) {
   const env = {
     ...process.env,
     TASKS_BASE: tasksBase,
     WORK_TDD_TOKEN_SKIP: '1',
     WORK_TDD_SKIP_WORKSPACE_CHECK: '1',
+    ...extraEnv,
   };
   // Real agent invocations don't run under a node:test parent. If we leak
   // NODE_TEST_CONTEXT into the spawned tree, an inner `node --test <file>`
@@ -325,5 +326,134 @@ describe('task-next.js — stray legacy ### Test Command block is ignored', () =
     );
     assert.doesNotMatch(r.stdout, /legacy-should-not-run/);
     assert.match(r.stdout, /RED accepted via .*docs-exempt fallback/);
+  });
+});
+
+describe('task-next.js — hung test command is rejected, not treated as RED (GH-584)', () => {
+  const HANG_ENV = { TASK_NEXT_TEST_TIMEOUT_MS: '1200' };
+
+  beforeEach(() => {
+    writeTasks(tasksBase, [
+      '# Tasks',
+      '',
+      '## Task 1 — task whose strategy command hangs',
+      '',
+      '### Type',
+      'docs',
+      '',
+      '### Files in scope',
+      '- docs/hang.md',
+      '',
+      '### Test Strategy',
+      '```',
+      'kind: custom',
+      'command: sleep 30',
+      '```',
+      '',
+    ]);
+    fs.mkdirSync(path.join(repoRoot, 'docs'), { recursive: true });
+    fs.writeFileSync(path.join(repoRoot, 'docs', 'hang.md'), 'seed\n');
+  });
+
+  it('blocks RED with a hang diagnostic and records no evidence', () => {
+    const r = runTaskNext(tasksBase, repoRoot, 'task1', HANG_ENV);
+    assert.equal(r.status, 2, `expected blocked (2); stdout=${r.stdout} stderr=${r.stderr}`);
+    assert.match(r.stdout, /BLOCKED in red/);
+    assert.match(r.stdout, /timed out/, 'block reason must name the timeout');
+    assert.match(r.stdout, /hang is not an assertion failure/);
+    assert.match(r.stdout, /planner-defect/, 'must follow the W3 message policy');
+    assert.doesNotMatch(
+      r.stdout,
+      /edit tasks\.md|Open tasks\.md|Update tasks\.md/,
+      'must NOT instruct the agent to edit tasks.md'
+    );
+    const state = readState(tasksBase);
+    if (state) {
+      const cycle = (state.cycles || []).find((c) => c.cycle === state.currentCycle);
+      assert.ok(!cycle || !cycle.red, 'no RED evidence may be recorded for a hang');
+    }
+  });
+});
+
+// Downstream-review finding 4 — gate-captured RED + already-implemented code.
+// The primary /work flow pre-captures RED at the gate; when the agent then
+// implements and re-invokes task-next, the command passes. The guidance must
+// NOT be assertion inversion: the cycle is mid-flight and the orchestrator
+// gate records GREEN against the captured RED on its next pass.
+describe('task-next.js — gate-captured RED with a now-passing command', () => {
+  function seedState(taskDirName, red) {
+    const dir = path.join(tasksBase, TICKET, taskDirName);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, STATE_FILENAME),
+      JSON.stringify({
+        ticket: TICKET,
+        task: 1,
+        currentPhase: 'red',
+        currentCycle: 1,
+        cycles: [{ cycle: 1, red }],
+      })
+    );
+  }
+
+  beforeEach(() => {
+    writeTasks(tasksBase, [
+      '# Tasks',
+      '',
+      '## Task 1 — behavior already implemented',
+      '',
+      '### Type',
+      'tdd-code',
+      '',
+      '### Files in scope',
+      '- src/thing.js',
+      '- src/thing.test.js',
+      '',
+      '### Test Strategy',
+      '```',
+      'kind: custom',
+      'command: node src/thing.test.js',
+      '```',
+      '',
+    ]);
+    fs.mkdirSync(path.join(repoRoot, 'src'), { recursive: true });
+    // Implementation done: the "test" passes with real output.
+    fs.writeFileSync(
+      path.join(repoRoot, 'src', 'thing.test.js'),
+      "console.log('ok 1 - thing works');process.exit(0);\n"
+    );
+  });
+
+  it('points at finishing the turn (gate records GREEN) — never assertion inversion', () => {
+    seedState('task1', {
+      testCommand: 'node src/thing.test.js',
+      testExitCode: 1,
+      timestamp: '2026-07-05T00:00:00.000Z',
+      capturedByGate: true,
+    });
+
+    const r = runTaskNext(tasksBase, repoRoot);
+    assert.equal(r.status, 2, `expected blocked (2); stdout=${r.stdout} stderr=${r.stderr}`);
+    assert.match(r.stdout, /captured for this task by the implement gate/);
+    assert.match(r.stdout, /Do NOT invert or weaken assertions/);
+    assert.match(r.stdout, /records GREEN against the captured RED/);
+    assert.doesNotMatch(
+      r.stdout,
+      /Rewrite the assertion so it actually fails/,
+      'assertion-inversion advice must not surface for gate-captured RED'
+    );
+  });
+
+  it('keeps the strict failing-RED demand when the RED was NOT gate-captured', () => {
+    seedState('task1', {
+      testCommand: 'node src/thing.test.js',
+      testExitCode: 1,
+      timestamp: '2026-07-05T00:00:00.000Z',
+    });
+
+    const r = runTaskNext(tasksBase, repoRoot);
+    assert.equal(r.status, 2, `expected blocked (2); stdout=${r.stdout} stderr=${r.stderr}`);
+    assert.match(r.stdout, /RED requires a real failing test/);
+    assert.doesNotMatch(r.stdout, /captured for this task by the implement gate/);
   });
 });

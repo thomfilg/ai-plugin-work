@@ -3,6 +3,12 @@
 /**
  * PreToolUse hook to enforce agent usage during /work-implement command.
  *
+ * Registered in plugins/work/hooks/hooks.json under PreToolUse with matcher
+ * `Edit|Write|MultiEdit`, after the protect-* hooks (W1, implement-phase fix
+ * design). Fail-open by design when no workflow/implement step is active:
+ * missing ticket id, no enforcement context, or implement not in_progress
+ * all exit 0 without blocking.
+ *
  * GH-219 Task 14: Rewritten for state-based activation via
  * loadEnforcementContext (R1). No transcript grep for implement-active
  * detection. Uses isWriteAllowedPath from Task 12 (R6, R12). Injects
@@ -21,6 +27,9 @@ const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-e
 // --- Task 12 import: task-readiness path gate (R6, R12) ---
 const { isWriteAllowedPath } = require(path.join(__dirname, '..', '..', 'lib', 'preflight'));
 const { taskSegment } = require(path.join(__dirname, '..', '..', 'lib', 'allocate-output-folder'));
+// Shared `<WORKTREES_BASE>/<repo>-<ticket>` lookup (same module the
+// enforce-tdd-on-stop hook uses — keeps the two hooks from drifting).
+const { conventionWorktreeDir } = require(path.join(__dirname, 'worktree-convention'));
 
 // Developer agents that satisfy the requirement
 const DEVELOPER_AGENTS = [
@@ -165,22 +174,9 @@ function resolveSafeTicketId(ticketId) {
  */
 function resolveTddStatePath(taskBase, safeTicketId) {
   // Resolve task number: env var → work state tasksMeta → null (legacy)
-  let taskNum = process.env.WORK_TASK_NUM ? parseInt(process.env.WORK_TASK_NUM, 10) : null;
+  const taskNum = resolveActiveTaskNum(taskBase, safeTicketId);
 
-  // If no env var, try reading from work state (supports /work which doesn't set env vars)
-  if (!taskNum) {
-    try {
-      const statePath = path.join(taskBase, safeTicketId, '.work-state.json');
-      const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
-      if (state?.tasksMeta?.currentTaskIndex != null) {
-        taskNum = state.tasksMeta.currentTaskIndex + 1; // 0-indexed → 1-indexed
-      }
-    } catch {
-      /* no state file — legacy mode */
-    }
-  }
-
-  if (taskNum && Number.isInteger(taskNum) && taskNum > 0) {
+  if (taskNum) {
     // Try per-task path first
     let segment;
     try {
@@ -204,11 +200,94 @@ function resolveTddStatePath(taskBase, safeTicketId) {
 }
 
 /**
+ * Read the configured task number: WORK_TASK_NUM env var, falling back to
+ * the work state's tasksMeta.currentTaskIndex. Returns the RAW value
+ * (number | NaN | null) — buildAllowedPaths needs the null-vs-invalid
+ * distinction to fail closed on a malformed WORK_TASK_NUM.
+ */
+function readConfiguredTaskNum(taskBase, safeTicketId) {
+  let taskNum = process.env.WORK_TASK_NUM ? parseInt(process.env.WORK_TASK_NUM, 10) : null;
+  if (!taskNum) {
+    try {
+      const statePath = path.join(taskBase, safeTicketId, '.work-state.json');
+      const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+      if (state?.tasksMeta?.currentTaskIndex != null) {
+        taskNum = state.tasksMeta.currentTaskIndex + 1; // 0-indexed → 1-indexed
+      }
+    } catch {
+      /* no state file */
+    }
+  }
+  return taskNum;
+}
+
+/**
+ * Resolve the active task number as a validated positive integer, or null.
+ */
+function resolveActiveTaskNum(taskBase, safeTicketId) {
+  const taskNum = readConfiguredTaskNum(taskBase, safeTicketId);
+  return Number.isInteger(taskNum) && taskNum > 0 ? taskNum : null;
+}
+
+/**
+ * GH-570 (W1×W8): during RED, a task whose planner-declared `### Test
+ * Strategy` carries `red-mode: ablation` produces its failing RED by
+ * TEMPORARILY mutating in-scope SOURCE files — the registry's "only .test
+ * or .spec files during RED" rule would deadlock it. The allowance is
+ * machine-verified from planner-owned tasks.md via the SHARED
+ * implement-gate resolver (resolveTaskTestExecution — the same module the
+ * gate, the stop hook, and task-next.js consume; never a parallel copy)
+ * and is scope-limited to the task's `### Files in scope`. The caller
+ * audit-logs every allow. Fail-closed: any resolution error keeps the
+ * RED block.
+ */
+function _ablationTaskScope(taskBase, safeTicketId, worktreeDir) {
+  const taskNum = resolveActiveTaskNum(taskBase, safeTicketId);
+  if (!taskNum) return null;
+  const shared = require(
+    path.join(
+      __dirname,
+      '..',
+      '..',
+      'work',
+      'lib',
+      'step-enrichments',
+      'implement-gate',
+      'test-command'
+    )
+  );
+  const tasksDir = path.join(taskBase, safeTicketId);
+  const execution = shared.resolveTaskTestExecution(tasksDir, taskNum, worktreeDir);
+  if (!execution || execution.redMode !== 'ablation') return null;
+  const task = shared.findTaskByNum(tasksDir, taskNum);
+  return (task && task.filesInScope) || [];
+}
+
+function ablationRedEditAllowed(filePath, taskBase, safeTicketId) {
+  try {
+    if (!filePath || !taskBase) return false;
+    const worktreeDir = detectWorktreeDir(safeTicketId);
+    if (!worktreeDir) return false;
+    const scope = _ablationTaskScope(taskBase, safeTicketId, worktreeDir);
+    if (!scope) return false;
+    const rel = path.relative(worktreeDir, path.resolve(filePath));
+    if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return false;
+    const { fileInTaskScope } = require(path.join(__dirname, '..', '..', 'lib', 'task-scope'));
+    return fileInTaskScope(rel, scope);
+  } catch {
+    return false; // fail-closed: keep the RED block
+  }
+}
+
+/**
  * Check TDD phase restrictions for a file path.
- * Returns 'block', 'allow', 'no-file', or 'no-state'.
+ * Returns 'block', 'allow', 'ablation-allow', 'no-file', or 'no-state'.
+ * ('ablation-allow' = a RED-phase source edit permitted by the GH-570
+ * ablation allowance — the caller audits it.)
  *
  * Uses per-task tdd-phase.json resolution via allocator (R7, R8).
- * PHASE_HOOKS behavior from tdd-phase-registry.js is UNCHANGED.
+ * PHASE_HOOKS behavior from tdd-phase-registry.js is UNCHANGED except the
+ * machine-verified ablation-RED allowance above.
  */
 function checkTddPhase(filePath, ticketId) {
   try {
@@ -225,6 +304,12 @@ function checkTddPhase(filePath, ticketId) {
     const hook = PHASE_HOOKS[state.currentPhase];
 
     if (hook && hook.shouldBlock(filePath)) {
+      if (
+        state.currentPhase === 'red' &&
+        ablationRedEditAllowed(filePath, taskBase, safeTicketId)
+      ) {
+        return 'ablation-allow';
+      }
       process.stderr.write(hook.blockMessage + '\n');
       return 'block';
     }
@@ -253,31 +338,15 @@ function checkTddPhase(filePath, ticketId) {
 function detectWorktreeDir(safeTicketId) {
   if (process.env.WORK_WORKTREE_DIR) return path.resolve(process.env.WORK_WORKTREE_DIR);
 
-  // Use config.REPO_NAME (which has the same fallback as work-next.js /
-  // follow-up-next.js use when CREATING worktrees). Otherwise convention-based
-  // detection silently fails when REPO_NAME env var is unset but worktrees
-  // exist as `<base>/my-project-<TICKET>`.
-  const wbase = process.env.WORKTREES_BASE;
-  let repo = process.env.REPO_NAME;
-  if (!repo) {
-    try {
-      repo = require(path.join(__dirname, '..', '..', 'lib', 'config')).REPO_NAME;
-    } catch {
-      /* config unavailable — leave repo undefined */
-    }
-  }
-  if (wbase && repo) {
-    const candidate = path.join(wbase, `${repo}-${safeTicketId}`);
-    try {
-      if (fs.statSync(candidate).isDirectory()) return path.resolve(candidate);
-    } catch {
-      /* not present */
-    }
-  }
+  // Shared `<WORKTREES_BASE>/<repo>-<ticket>` convention lookup (uses
+  // config.REPO_NAME as fallback — same module enforce-tdd-on-stop uses).
+  const conventional = conventionWorktreeDir(safeTicketId);
+  if (conventional) return conventional;
 
   // Walk up from cwd looking for `<something>-<safeTicketId>` whose parent
   // is WORKTREES_BASE (or any parent if WORKTREES_BASE unset).
   try {
+    const wbase = process.env.WORKTREES_BASE;
     const wbaseResolved = wbase ? path.resolve(wbase) : null;
     let dir = process.cwd();
     const root = path.parse(dir).root;
@@ -307,18 +376,7 @@ function detectWorktreeDir(safeTicketId) {
  * @returns {{ prDir: string|null, taskDir: string|null, ticketRoot: string, worktreeDir: string|null }|null}
  */
 function buildAllowedPaths(taskBase, safeTicketId) {
-  let taskNum = process.env.WORK_TASK_NUM ? parseInt(process.env.WORK_TASK_NUM, 10) : null;
-  if (!taskNum) {
-    try {
-      const stPath = path.join(taskBase, safeTicketId, '.work-state.json');
-      const st = JSON.parse(fs.readFileSync(stPath, 'utf8'));
-      if (st?.tasksMeta?.currentTaskIndex != null) {
-        taskNum = st.tasksMeta.currentTaskIndex + 1;
-      }
-    } catch {
-      /* no state file */
-    }
-  }
+  const taskNum = readConfiguredTaskNum(taskBase, safeTicketId);
 
   // No task num = legacy mode; invalid taskNum = fail-closed
   if (taskNum == null) return null;
@@ -458,6 +516,13 @@ async function main() {
     auditCb({ decision: 'deny', reasons: ['TDD_PHASE_VIOLATION'], origin: ctx.origin });
     process.exit(2);
   }
+  // GH-570 (W1×W8): audit the machine-verified ablation-RED source-edit
+  // allowance so every fired escape hatch is visible in .work-actions.json.
+  // The remaining gates (agent delegation, R6 path gate) still apply below.
+  if (tddPhaseResult === 'ablation-allow') {
+    const auditCb = createAuditCallback(ticketId, toolName, filePath, ctx);
+    auditCb({ decision: 'allow', reasons: ['ABLATION_RED_SOURCE_EDIT'], origin: ctx.origin });
+  }
   // Defense-in-depth: if TDD state doesn't exist and this is a production file,
   // block until TDD is initialized.
   if (
@@ -465,11 +530,21 @@ async function main() {
     !isFileAllowed(filePath) &&
     hasDeveloperAgentBeenInvoked(transcriptPath)
   ) {
-    const tddScript = path.join(__dirname, '..', 'tdd-phase-state.js');
+    // Message sweep (bugs review, W1 follow-up): this hook is now LIVE, so it
+    // must not point agents at the OPERATOR-ONLY `exception` subcommand
+    // (WORK_OPERATOR_TOKEN-gated — agents following that advice dead-end).
+    // Point at the single task entrypoint + the planner Type taxonomy, and
+    // the W3 BLOCKED report for tasks that genuinely cannot be test-driven.
+    const taskNextScript = path.join(__dirname, '..', 'task-next.js');
     const msg =
       'TDD not initialized. Production file writes are blocked until TDD state exists.\n' +
-      `Run: node ${tddScript} init <TICKET_ID>\n` +
-      `Or use: node ${tddScript} exception <TICKET_ID> --category <category> --reason "<reason>"\n`;
+      'Run the single task entrypoint (it initializes state and dictates the phase):\n' +
+      `  node ${taskNextScript} <TICKET_ID> task<N>\n` +
+      "TDD exemptions come ONLY from the planner's `### Type` line in tasks.md\n" +
+      '(tests-only/docs/config/ci/mechanical-refactor/file-move/checkpoint).\n' +
+      'If this task cannot be test-driven and its Type does not exempt it, STOP\n' +
+      'and report `BLOCKED (planner-defect): <one-line reason>` back to the\n' +
+      'orchestrator.\n';
     process.stderr.write(msg);
     // Audit the block (R13)
     const auditCb = createAuditCallback(ticketId, toolName, filePath, ctx);

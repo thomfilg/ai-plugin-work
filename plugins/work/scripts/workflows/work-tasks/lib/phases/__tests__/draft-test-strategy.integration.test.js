@@ -360,6 +360,95 @@ test('flag-on: checkpoint task without a Test Strategy stays exempt', () => {
   );
 });
 
+// --- W12: generation-time strategy satisfiability --------------------------
+
+function strategyTasksMd({ entry, scope }) {
+  return [
+    '## Extracted Requirements',
+    '',
+    '- R1',
+    '',
+    '## Task 1 — satisfiability probe',
+    '',
+    '### Type',
+    'tdd-code',
+    '',
+    '### Dependencies',
+    'none',
+    '',
+    '### Requirements Covered',
+    '- R1',
+    '',
+    '### Acceptance Criteria',
+    '- does the thing',
+    '',
+    '### Files in scope',
+    ...scope.map((s) => `- \`${s}\``),
+    '',
+    '### Test Strategy',
+    '```yaml',
+    'kind: unit',
+    `entry: ${entry}`,
+    '```',
+    '',
+  ].join('\n');
+}
+
+function writeManifest(dir) {
+  fs.writeFileSync(
+    path.join(dir, 'package.json'),
+    JSON.stringify({ name: 'fixture', scripts: { test: 'node --test' } }),
+    'utf8'
+  );
+}
+
+test('W12: kind=unit entry naming a non-test file is rejected at the draft gate', () => {
+  const dir = mkTasksDir();
+  writeSpec(dir);
+  writeTasks(dir, strategyTasksMd({ entry: 'src/foo.ts', scope: ['src/foo.ts'] }));
+  fs.mkdirSync(path.join(dir, 'src'), { recursive: true });
+  fs.writeFileSync(path.join(dir, 'src/foo.ts'), '// noop\n', 'utf8');
+  writeManifest(dir);
+
+  const errors = draft.validateArtifacts(dir, { workDir: dir });
+  assert.ok(
+    errors.some((e) => /not a test file/.test(e)),
+    `expected the non-test-entry satisfiability error; got: ${JSON.stringify(errors)}`
+  );
+});
+
+test('W12: kind=unit entry that neither exists nor is in scope is rejected', () => {
+  const dir = mkTasksDir();
+  writeSpec(dir);
+  writeTasks(
+    dir,
+    strategyTasksMd({ entry: 'src/ghost.test.ts', scope: ['src/other.ts', 'src/other.test.ts'] })
+  );
+  writeManifest(dir);
+
+  const errors = draft.validateArtifacts(dir, { workDir: dir });
+  assert.ok(
+    errors.some((e) => /does not exist and is not covered/.test(e)),
+    `expected the unsatisfiable-entry error; got: ${JSON.stringify(errors)}`
+  );
+});
+
+test('W12: kind=unit entry missing from disk but created by the task scope passes', () => {
+  const dir = mkTasksDir();
+  writeSpec(dir);
+  writeTasks(
+    dir,
+    strategyTasksMd({ entry: 'src/new.test.ts', scope: ['src/new.ts', 'src/new.test.ts'] })
+  );
+  writeManifest(dir);
+
+  const errors = draft.validateArtifacts(dir, { workDir: dir });
+  assert.ok(
+    !errors.some((e) => /does not exist and is not covered|not a test file/.test(e)),
+    `entry creatable by this task must not trip satisfiability; got: ${JSON.stringify(errors)}`
+  );
+});
+
 test('missing verification block is enforced even with the removed flag set to 0', () => {
   const dir = mkTasksDir();
   writeSpec(dir);

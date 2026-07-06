@@ -12,7 +12,6 @@
 const {
   safeParseTask,
   runTestCommand,
-  runTestCommandWithOutput,
   getCurrentCycleRecord,
   errorExit,
   successOut,
@@ -27,8 +26,53 @@ const {
   detectChangedTestFiles,
   resolveDocsExempt,
 } = require('./record-helpers');
-// GH-532 — RED load-failure heuristic.
-const { detectRedLoadFailure, extractLoadFailureSnippet } = require('../lib/red-load-failure');
+// Shared RED guard sequence (GH-584 hang + GH-532 load-failure rejections).
+const { runGuardedRedCommand } = require('./red-guards');
+// GH-570 — ablation-RED mode for regression-coverage tasks.
+const {
+  ABLATION_RED_MODE,
+  SYNTHESIZED_DEPRECATION_WARNING,
+  resolveAblationRedMode,
+  cmdRecordRedAblation,
+} = require('./ablation');
+
+/**
+ * GH-570 — route the special RED modes before the standard failing-test
+ * path. Returns true when the invocation was fully handled (caller returns):
+ * `--synthesized` (deprecated, warned) or a tasks.md-declared ablation task.
+ * `resolveAblationRedMode` rejects `--ablation` without the declaration and
+ * `--synthesized` WITH it.
+ */
+function routeSpecialRedModes(ticketId, args, cmd, taskNum, opts) {
+  const redMode = resolveAblationRedMode(ticketId, taskNum, args);
+  if (args.includes('--synthesized')) {
+    process.stderr.write(SYNTHESIZED_DEPRECATION_WARNING);
+    cmdRecordRedSynthesized(ticketId, args, cmd, taskNum, opts);
+    return true;
+  }
+  if (redMode === ABLATION_RED_MODE) {
+    cmdRecordRedAblation({ ticketId, cmd, taskNum, opts });
+    return true;
+  }
+  return false;
+}
+
+/** Block message for a `--red-skip-file-guard` request the contract rejects. */
+function redSkipFileGuardError(taskNum, declaredType) {
+  const num = taskNum || '?';
+  return (
+    '--red-skip-file-guard is restricted to Types whose contract sets ' +
+    'redRequiresTestFiles=false (tests-only / docs / config / ci / ' +
+    'mechanical-refactor / file-move / checkpoint). ' +
+    `Task ${num} has Type="${declaredType || 'unknown'}", ` +
+    'which still requires a *.test.* file modification at RED. ' +
+    'Author a failing test instead. If the `### Type` line is wrong, that ' +
+    'is a planner defect: tasks.md is planner-owned and LOCKED during ' +
+    'implement — do NOT edit it. STOP and report ' +
+    `\`BLOCKED (planner-defect): Type/contract mismatch for task ${num}\` ` +
+    'back to the orchestrator.'
+  );
+}
 
 /**
  * Resolve the `--red-skip-file-guard` opt-in. Returns false when not requested;
@@ -44,69 +88,16 @@ function resolveRedSkipFileGuard(ticketId, taskNum, args) {
     const contract = taskTypes.gateContractFor(declaredType);
     allowed = !!(contract && contract.redRequiresTestFiles === false);
   }
-  if (!allowed) {
-    errorExit(
-      '--red-skip-file-guard is restricted to Types whose contract sets ' +
-        'redRequiresTestFiles=false (tests-only / docs / config / ci / ' +
-        'mechanical-refactor / file-move / checkpoint). ' +
-        `Task ${taskNum || '?'} has Type="${declaredType || 'unknown'}", ` +
-        'which still requires a *.test.* file modification at RED. ' +
-        'Author a failing test, or fix the `### Type` line in tasks.md.'
-    );
-  }
+  if (!allowed) errorExit(redSkipFileGuardError(taskNum, declaredType));
   return true;
-}
-
-/**
- * Build the rejection diagnostic for a RED load-failure. Multi-sentence, names
- * the matched signature. MUST NOT contain a `BYPASS:` line — this is a
- * structural defect, not a justified bypass.
- */
-function formatRedLoadFailureDiagnostic(signature) {
-  return (
-    `Rejected RED: detected ${signature} in test runner output. ` +
-    'The test file is structurally broken (load-time error or zero tests collected), ' +
-    'not a behavior gap. Fix the test file and re-run ' +
-    '`tdd-phase-state.js record-red`.'
-  );
-}
-
-/**
- * GH-532 Task 2 / R7 / AC10 — append a structured audit row recording the RED
- * load-failure rejection, then call `errorExit` with the diagnostic. Audit
- * append is best-effort; errorExit always fires.
- */
-function rejectRedLoadFailure(args) {
-  try {
-    const { appendEnforcementAudit } = require('../../work/lib/work-actions');
-    appendEnforcementAudit(args.ticketId, {
-      origin: 'ai-subtask',
-      task: args.taskNum || null,
-      phase: 'red',
-      action: 'tdd-red-load-failure-rejected',
-      allow: false,
-      reason: args.signature,
-      outputPath: null,
-      meta: {
-        cycle: args.cycle,
-        testCommand: args.testCommand,
-        signature: args.signature,
-        snippet: args.snippet,
-      },
-    });
-  } catch {
-    /* fail-open on audit write — rejection still fires below */
-  }
-  errorExit(formatRedLoadFailureDiagnostic(args.signature));
 }
 
 function cmdRecordRed(ticketId, args) {
   const { cmd, taskNum, opts } = parseRecordArgs(ticketId, args);
 
-  // Spec §P0#4 — synthesized-cycle bypass.
-  if (args.includes('--synthesized')) {
-    return cmdRecordRedSynthesized(ticketId, args, cmd, taskNum, opts);
-  }
+  // GH-570 — `--synthesized` (deprecated, spec §P0#4) and tasks.md-declared
+  // ablation tasks are handled by the routing helper above.
+  if (routeSpecialRedModes(ticketId, args, cmd, taskNum, opts)) return;
 
   const state = requireState(ticketId, opts); // reads per-task path when taskNum provided
   assertRecordPhase(state, 'red', 'RED', 'red');
@@ -118,26 +109,15 @@ function cmdRecordRed(ticketId, args) {
     errorExit('No test files changed. RED phase requires modified .test or .spec files.');
   }
 
-  // Run tests — they must FAIL
-  const { exitCode, stdout, stderr } = runTestCommandWithOutput(cmd);
-  if (exitCode === 0) {
-    errorExit('Tests must FAIL in RED phase. Tests passed (exit 0).');
-  }
-
-  // GH-532: reject fake-RED caused by load failures. Scan stdout and stderr
-  // independently — concatenating them can leak an unclosed YAML-envelope
-  // state across the seam when stdout is truncated.
-  const loadFailure = detectRedLoadFailure({ stdout, stderr });
-  if (loadFailure.matched) {
-    rejectRedLoadFailure({
-      ticketId,
-      cycle: state.currentCycle,
-      testCommand: cmd,
-      signature: loadFailure.signature,
-      snippet: extractLoadFailureSnippet(loadFailure.line),
-      taskNum,
-    });
-  }
+  // Run tests — they must FAIL. runGuardedRedCommand rejects hangs (GH-584),
+  // passing runs, and load-failure fake-REDs (GH-532), in that order.
+  const { exitCode } = runGuardedRedCommand({
+    ticketId,
+    cmd,
+    taskNum,
+    state,
+    passedMsg: 'Tests must FAIL in RED phase. Tests passed (exit 0).',
+  });
 
   const record = getCurrentCycleRecord(state);
   record.red = {
@@ -259,9 +239,12 @@ function cmdRecordSkipRed(ticketId, args) {
     errorExit(
       'record-skip-red is restricted to Type=tests-only tasks. ' +
         `Task ${taskNum || '?'} has Type="${declaredType || 'unknown'}". ` +
-        'If this task is genuinely tests-only, fix the `### Type` line in tasks.md ' +
-        '(only the planner may author Type values — see split-in-tasks/lib/task-types.js). ' +
-        'Otherwise run record-red with a real failing test.'
+        'If this task is genuinely tests-only, the `### Type` line is a planner ' +
+        'defect (only the planner may author Type values — see ' +
+        'split-in-tasks/lib/task-types.js): tasks.md is planner-owned and ' +
+        'LOCKED during implement — do NOT edit it. STOP and report ' +
+        `\`BLOCKED (planner-defect): Type should be tests-only for task ${taskNum || '?'}\` ` +
+        'back to the orchestrator. Otherwise run record-red with a real failing test.'
     );
   }
 

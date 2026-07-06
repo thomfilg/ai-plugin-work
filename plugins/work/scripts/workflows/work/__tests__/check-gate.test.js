@@ -6,7 +6,7 @@ const os = require('os');
 
 const { CHECK_GATE_RULES, validateCheckGate } = require('../gates/check-gate');
 
-const TEMP = path.join(os.tmpdir(), 'check-gate-test-' + process.pid);
+const TEMP = fs.mkdtempSync(path.join(os.tmpdir(), 'check-gate-test-'));
 let testTicket;
 let testCount = 0;
 
@@ -183,11 +183,7 @@ describe('check-gate (unit)', () => {
     const rule = freshRules.find((r) => r.name === 'qa-reports');
     fs.mkdirSync(path.join(TEMP, testTicket), { recursive: true });
     const reasons = rule.check(path.join(TEMP, testTicket));
-    assert.equal(
-      reasons.length,
-      1,
-      'qa-reports should still require QA when WEB_APPS has entries'
-    );
+    assert.equal(reasons.length, 1, 'qa-reports should still require QA when WEB_APPS has entries');
     assert.ok(reasons[0].toLowerCase().includes('qa'));
   });
 
@@ -304,6 +300,78 @@ describe('check-gate (unit)', () => {
     const rule = CHECK_GATE_RULES.find((r) => r.name === 'per-task-tdd-evidence');
     const reasons = rule.check(dir, testTicket);
     assert.deepStrictEqual(reasons, []);
+  });
+
+  // Downstream-review finding 1/6 — the rule must apply the SAME
+  // contract-aware validator the implement gate used (validateTddEvidenceForType):
+  // gate-accepted red-only stub evidence for TDD-exempt Types must not
+  // dead-end at check, and the stale `t.type !== 'test'` filter is gone.
+  it('per-task-tdd-evidence accepts a red-only gate stub for a TDD-exempt (docs) task', () => {
+    const dir = path.join(TEMP, testTicket);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'tasks.md'),
+      '# Tasks\n\n## Task 1 — Docs\n\n### Type\ndocs\n\n## Task 2 — Code\n\n### Type\ntdd-code\n'
+    );
+    writeTaskFile(
+      'task1',
+      'tdd-phase.json',
+      JSON.stringify({
+        currentPhase: 'green',
+        cycles: [
+          {
+            cycle: 1,
+            red: {
+              testCommand: 'node verify.js',
+              testExitCode: 0,
+              capturedByGate: true,
+              note: 'RED skipped: task type "docs" does not require TDD.',
+            },
+          },
+        ],
+      })
+    );
+    writeTaskFile(
+      'task2',
+      'tdd-phase.json',
+      JSON.stringify({ cycles: [{ red: { ts: 1 }, green: { ts: 2 } }] })
+    );
+    const rule = CHECK_GATE_RULES.find((r) => r.name === 'per-task-tdd-evidence');
+    const reasons = rule.check(dir, testTicket);
+    assert.deepStrictEqual(reasons, [], 'exempt-type stub evidence must pass the check gate');
+  });
+
+  it('per-task-tdd-evidence still rejects red-only evidence for a tdd-code task', () => {
+    const dir = path.join(TEMP, testTicket);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'tasks.md'),
+      '# Tasks\n\n## Task 1 — Code\n\n### Type\ntdd-code\n'
+    );
+    writeTaskFile(
+      'task1',
+      'tdd-phase.json',
+      JSON.stringify({ cycles: [{ cycle: 1, red: { ts: 1 } }] })
+    );
+    const rule = CHECK_GATE_RULES.find((r) => r.name === 'per-task-tdd-evidence');
+    const reasons = rule.check(dir, testTicket);
+    assert.equal(reasons.length, 1);
+    assert.ok(reasons[0].includes('task1'));
+  });
+
+  it('per-task-tdd-evidence no longer exempts the nonexistent Type "test" from evidence', () => {
+    const dir = path.join(TEMP, testTicket);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'tasks.md'),
+      '# Tasks\n\n## Task 1 — Stale\n\n### Type\ntest\n'
+    );
+    // No tdd-phase.json at all — the old `t.type !== 'test'` filter skipped
+    // this task entirely; 'test' is not in the closed enum → strict → missing.
+    const rule = CHECK_GATE_RULES.find((r) => r.name === 'per-task-tdd-evidence');
+    const reasons = rule.check(dir, testTicket);
+    assert.equal(reasons.length, 1);
+    assert.ok(reasons[0].includes('Missing TDD evidence'));
   });
 
   it('per-task-tdd-evidence rule fails when tdd-phase.json is invalid JSON', () => {
