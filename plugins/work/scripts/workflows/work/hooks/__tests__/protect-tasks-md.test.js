@@ -454,3 +454,243 @@ describe('protect-tasks-md hook', () => {
     }
   });
 });
+
+// ── Coverage-check deadlock fixes (ECHO-5139/5145/5218/5320/5350/5818/5821) ──
+
+describe('protect-tasks-md — allowlist honesty (ECHO-5145)', () => {
+  it('should ALLOW Edit to tasks.md when step is complete (exit 0)', async () => {
+    const { code, stderr } = await runHookWithState(
+      {
+        tool_name: 'Edit',
+        tool_input: { file_path: '/home/user/project/tasks/GH-99/tasks.md' },
+      },
+      'GH-99',
+      { tasks: 'completed', implement: 'completed', check: 'completed', complete: 'in_progress' }
+    );
+    assert.strictEqual(
+      code,
+      0,
+      `Expected exit 0 (allow) during complete step (documented allowlist), got ${code}. stderr: ${stderr}`
+    );
+  });
+});
+
+describe('protect-tasks-md — one-shot completion write token (ECHO-5818)', () => {
+  const TOKEN_BASENAME = 'protect-tasks-md.js';
+
+  function mkTokenDir() {
+    return fs.mkdtempSync(path.join(os.tmpdir(), 'ptm-token-'));
+  }
+
+  function writeToken(tokenDir, ticketId, overrides = {}) {
+    const tp = path.join(tokenDir, `${TOKEN_BASENAME}.${ticketId}`);
+    fs.writeFileSync(tp, JSON.stringify({ ticket: ticketId, timestamp: Date.now(), ...overrides }));
+    return tp;
+  }
+
+  it('should ALLOW ONE tasks.md Edit during check when a fresh token exists — and consume it', async () => {
+    const tokenDir = mkTokenDir();
+    const tp = writeToken(tokenDir, 'GH-99');
+    try {
+      const { code, stderr } = await runHookWithState(
+        {
+          tool_name: 'Edit',
+          tool_input: { file_path: '/home/user/project/tasks/GH-99/tasks.md' },
+        },
+        'GH-99',
+        { implement: 'completed', tasks: 'completed', check: 'in_progress' },
+        { CLAUDE_WRITE_TOKEN_DIR: tokenDir }
+      );
+      assert.strictEqual(
+        code,
+        0,
+        `Expected exit 0 (token honored), got ${code}. stderr: ${stderr}`
+      );
+      assert.strictEqual(fs.existsSync(tp), false, 'token must be consumed (deleted) after use');
+    } finally {
+      fs.rmSync(tokenDir, { recursive: true, force: true });
+    }
+  });
+
+  it('should BLOCK the SECOND tasks.md Edit after the token is consumed (one-shot)', async () => {
+    const tokenDir = mkTokenDir();
+    writeToken(tokenDir, 'GH-99');
+    try {
+      const first = await runHookWithState(
+        { tool_name: 'Edit', tool_input: { file_path: '/home/user/project/tasks/GH-99/tasks.md' } },
+        'GH-99',
+        { implement: 'completed', tasks: 'completed', check: 'in_progress' },
+        { CLAUDE_WRITE_TOKEN_DIR: tokenDir }
+      );
+      assert.strictEqual(first.code, 0, 'first write should be allowed');
+      const second = await runHookWithState(
+        { tool_name: 'Edit', tool_input: { file_path: '/home/user/project/tasks/GH-99/tasks.md' } },
+        'GH-99',
+        { implement: 'completed', tasks: 'completed', check: 'in_progress' },
+        { CLAUDE_WRITE_TOKEN_DIR: tokenDir }
+      );
+      assert.strictEqual(second.code, 2, 'second write must be blocked (token was one-shot)');
+    } finally {
+      fs.rmSync(tokenDir, { recursive: true, force: true });
+    }
+  });
+
+  it('should BLOCK when the token is expired — and still consume it', async () => {
+    const tokenDir = mkTokenDir();
+    const tp = writeToken(tokenDir, 'GH-99', { timestamp: Date.now() - 16 * 60 * 1000 });
+    try {
+      const { code } = await runHookWithState(
+        { tool_name: 'Edit', tool_input: { file_path: '/home/user/project/tasks/GH-99/tasks.md' } },
+        'GH-99',
+        { implement: 'completed', tasks: 'completed', check: 'in_progress' },
+        { CLAUDE_WRITE_TOKEN_DIR: tokenDir }
+      );
+      assert.strictEqual(code, 2, 'expired token must not be honored');
+      assert.strictEqual(fs.existsSync(tp), false, 'expired token must still be consumed');
+    } finally {
+      fs.rmSync(tokenDir, { recursive: true, force: true });
+    }
+  });
+
+  it('should BLOCK when the token was minted for a different ticket', async () => {
+    const tokenDir = mkTokenDir();
+    // Keyed path for GH-99 but token payload claims GH-777
+    const tp = path.join(tokenDir, `${TOKEN_BASENAME}.GH-99`);
+    fs.writeFileSync(tp, JSON.stringify({ ticket: 'GH-777', timestamp: Date.now() }));
+    try {
+      const { code } = await runHookWithState(
+        { tool_name: 'Edit', tool_input: { file_path: '/home/user/project/tasks/GH-99/tasks.md' } },
+        'GH-99',
+        { implement: 'completed', tasks: 'completed', check: 'in_progress' },
+        { CLAUDE_WRITE_TOKEN_DIR: tokenDir }
+      );
+      assert.strictEqual(code, 2, 'cross-ticket token must not be honored');
+    } finally {
+      fs.rmSync(tokenDir, { recursive: true, force: true });
+    }
+  });
+
+  it('block message should mention the completion-next.js token path', async () => {
+    const { code, stderr } = await runHookWithState(
+      { tool_name: 'Edit', tool_input: { file_path: '/home/user/project/tasks/GH-99/tasks.md' } },
+      'GH-99',
+      { implement: 'completed', tasks: 'completed', check: 'in_progress' }
+    );
+    assert.strictEqual(code, 2);
+    assert.match(
+      stderr,
+      /completion-next\.js/,
+      'block message must point at the legitimate repair path'
+    );
+  });
+
+  it('should ALLOW Bash write to tasks.md during check when a fresh token exists', async () => {
+    const tokenDir = mkTokenDir();
+    const fixture = createStateFixture('GH-99', {
+      implement: 'completed',
+      tasks: 'completed',
+      check: 'in_progress',
+    });
+    writeToken(tokenDir, 'GH-99');
+    try {
+      const tasksFilePath = path.join(fixture.tasksBase, 'GH-99', 'tasks.md');
+      const { code, stderr } = await runHook(
+        {
+          tool_name: 'Bash',
+          tool_input: { command: `echo "| R1 | x | DELIVERED | src/a.js:1 |" >> ${tasksFilePath}` },
+        },
+        { TASKS_BASE: fixture.tasksBase, TICKET_ID: 'GH-99', CLAUDE_WRITE_TOKEN_DIR: tokenDir }
+      );
+      assert.strictEqual(
+        code,
+        0,
+        `Expected exit 0 (token honored for Bash), got ${code}. stderr: ${stderr}`
+      );
+    } finally {
+      fixture.cleanup();
+      fs.rmSync(tokenDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('protect-tasks-md — basename boundary matching (ECHO-5538 secondary)', () => {
+  it('should ALLOW Bash write to subtasks.md (substring must not match)', async () => {
+    const fixture = createStateFixture('GH-99', {
+      implement: 'in_progress',
+      tasks: 'completed',
+    });
+    try {
+      const target = path.join(fixture.tasksBase, 'GH-99', 'subtasks.md');
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `echo "notes" >> ${target}` } },
+        { TASKS_BASE: fixture.tasksBase, TICKET_ID: 'GH-99' }
+      );
+      assert.strictEqual(
+        code,
+        0,
+        `subtasks.md must not trip the tasks.md rule, got ${code}. stderr: ${stderr}`
+      );
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it('should ALLOW Bash write to tasks.md.bak (suffixed name must not match)', async () => {
+    const fixture = createStateFixture('GH-99', {
+      implement: 'in_progress',
+      tasks: 'completed',
+    });
+    try {
+      const target = path.join(fixture.tasksBase, 'GH-99', 'tasks.md.bak');
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `echo "backup" >> ${target}` } },
+        { TASKS_BASE: fixture.tasksBase, TICKET_ID: 'GH-99' }
+      );
+      assert.strictEqual(
+        code,
+        0,
+        `tasks.md.bak must not trip the tasks.md rule, got ${code}. stderr: ${stderr}`
+      );
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it('should ALLOW Bash write to tasks.mdx (extension superset must not match)', async () => {
+    const fixture = createStateFixture('GH-99', {
+      implement: 'in_progress',
+      tasks: 'completed',
+    });
+    try {
+      const target = path.join(fixture.tasksBase, 'GH-99', 'tasks.mdx');
+      const { code, stderr } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `echo "mdx" >> ${target}` } },
+        { TASKS_BASE: fixture.tasksBase, TICKET_ID: 'GH-99' }
+      );
+      assert.strictEqual(
+        code,
+        0,
+        `tasks.mdx must not trip the tasks.md rule, got ${code}. stderr: ${stderr}`
+      );
+    } finally {
+      fixture.cleanup();
+    }
+  });
+
+  it('should still BLOCK Bash redirect to the real tasks.md — regression', async () => {
+    const fixture = createStateFixture('GH-99', {
+      implement: 'in_progress',
+      tasks: 'completed',
+    });
+    try {
+      const target = path.join(fixture.tasksBase, 'GH-99', 'tasks.md');
+      const { code } = await runHook(
+        { tool_name: 'Bash', tool_input: { command: `echo "sneaky" >> ${target}` } },
+        { TASKS_BASE: fixture.tasksBase, TICKET_ID: 'GH-99' }
+      );
+      assert.strictEqual(code, 2, 'real tasks.md write must still be blocked');
+    } finally {
+      fixture.cleanup();
+    }
+  });
+});

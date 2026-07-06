@@ -58,6 +58,39 @@ test('devops BLOCKS on app-source drift', () => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+// ─── GH-652 regression: checks must FIRE for canonical closed-taxonomy tasks.md ───
+
+test('GH-652: e2e check APPLIES via scope-derived kinds and FIRES on .only', () => {
+  const { root, tasksDir, worktreeRoot } = makeWorktree({
+    tasks: [
+      '# Tasks',
+      '',
+      '## Task 1',
+      '',
+      '### Type',
+      'tests-only',
+      '',
+      '### Files in scope',
+      '- `tests/e2e/foo.spec.ts`',
+      '',
+    ].join('\n'),
+    files: {
+      'tests/e2e/foo.spec.ts':
+        "import { test, expect } from '@playwright/test';\ntest.only('x', async () => { expect(1).toBe(1); });\n",
+    },
+    prContext: { number: 1, files: ['tests/e2e/foo.spec.ts'] },
+  });
+  assert.equal(
+    e2e.appliesTo({ tasksDir }),
+    true,
+    'e2e kind must be derived from `### Files in scope` (closed Type enum carries no domain)'
+  );
+  const r = e2e.validate({ tasksDir, worktreeRoot });
+  assert.equal(r.ok, false);
+  assert.ok(r.errors.some((e) => e.includes('.only')));
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 test('e2e BLOCKS on .only', () => {
   const { root, tasksDir, worktreeRoot } = makeWorktree({
     tasks: '<!-- e2e -->',

@@ -98,8 +98,40 @@ function readRequirementCoverage(tasksDir) {
 }
 
 /**
+ * Parse brief-writer's canonical MoSCoW headings (`### Must Have (P0)`,
+ * `### Should Have (P1)`, `### Could Have (P2)`) into requirement items.
+ * Items may be numbered (`1. …`) or bulleted (`- …`). The explicit `(P0)`
+ * tag wins; otherwise Must→P0, Should→P1, Could→P2.
+ *
+ * ECHO-5530/ECHO-5145: the brief-writer agent emits exactly this format,
+ * but requirements_extract only recognized `- P0:` bullets — so the runner
+ * reported "No requirements found" against its own sibling agent's output.
+ */
+function parseMoscowRequirements(brief) {
+  const items = [];
+  const headingRe = /^###\s+.*\b(must|should|could)[-\s]haves?\b.*$/gim;
+  const fallbackPriority = { must: 'P0', should: 'P1', could: 'P2' };
+  let m;
+  while ((m = headingRe.exec(brief)) !== null) {
+    const tag = m[0].match(/\((P[0-2])\)/i);
+    const priority = (tag ? tag[1] : fallbackPriority[m[1].toLowerCase()]).toUpperCase();
+    const after = brief.slice(m.index + m[0].length);
+    const next = after.match(/^#{1,3}\s/m);
+    const block = next ? after.slice(0, next.index) : after;
+    for (const line of block.split('\n')) {
+      const im = line.match(/^\s*(?:[-*]|\d+[.)])\s+(?:\*\*)?(.+?)(?:\*\*)?\s*$/);
+      if (im) items.push({ priority, text: im[1].trim() });
+    }
+  }
+  return items;
+}
+
+/**
  * Pull bullet lines that begin with P0 / P1 markers out of brief.md
  * `## Requirements` section. Used to enumerate must-have requirements.
+ * Falls back to the brief-writer's canonical MoSCoW headings
+ * (`### Must Have (P0)` with numbered/bulleted items) when no `- P0:`
+ * bullets are found.
  */
 function readBriefRequirements(tasksDir) {
   const brief = specShared.readBrief(tasksDir);
@@ -107,13 +139,13 @@ function readBriefRequirements(tasksDir) {
   const block =
     specShared.sliceSection(brief, /^##\s+Requirements\b/im) ||
     specShared.sliceSection(brief, /^##\s+Must.have\b/im);
-  if (!block) return [];
   const items = [];
-  for (const line of block.split('\n')) {
+  for (const line of (block || '').split('\n')) {
     const m = line.match(/^\s*[-*]\s+(?:\*\*)?(P[0-2])(?:\*\*)?\s*[:-]?\s*(.+)$/i);
     if (m) items.push({ priority: m[1].toUpperCase(), text: m[2].trim() });
   }
-  return items;
+  if (items.length) return items;
+  return parseMoscowRequirements(brief);
 }
 
 /**
@@ -128,8 +160,11 @@ function readBriefRequirements(tasksDir) {
  * Recognized bullet shapes (#629 — grammar must match what spec-writer is
  * instructed to emit; see agents/spec-writer.md "Reuse Declarations"):
  *   - `Symbol` MUST be reused from `path/to/file.ext` — reason
+ *   - `Symbol` from `path/to/file.ext` MUST be reused — reason (path between
+ *     the symbol backticks and the verb — spec-writer emits this ordering too)
  *   - `Symbol` (`path/to/file.ext`) MUST be reused — reason
- *   - `Symbol` may be reused from `path` — reason (soft, mustReuse: false)
+ *   - `Symbol` may be reused from `path` — reason (soft, mustReuse: false;
+ *     MUST/may match case-insensitively in every ordering)
  *   - None — no reusable symbols found (explicit empty declaration)
  */
 function readReuseAudit(specDir) {
@@ -152,10 +187,13 @@ function readReuseAudit(specDir) {
       sawNoneMarker = true;
       continue;
     }
-    // Optional parenthesized path between the symbol and the verb tolerates
-    // the common `` `Symbol` (`path`) MUST be reused `` ordering (#629).
+    // Optional path between the symbol and the verb tolerates both the
+    // `` `Symbol` (`path`) MUST be reused `` ordering (#629) and the
+    // `` `Symbol` from `path` MUST be reused `` ordering spec-writer also
+    // emits (GH-282 follow-up: the canonical shape puts `from \`path\``
+    // AFTER the verb, but the parser must accept either side).
     const m = raw.match(
-      /^\s*[-*]\s+`([^`]+)`\s*(?:\([^)]*\)\s*)?(MUST\s+be\s+reused|be\s+reused|may\s+be\s+reused)/i
+      /^\s*[-*]\s+`([^`]+)`\s*(?:from\s+`[^`]+`\s*|\([^)]*\)\s*)?(MUST\s+be\s+reused|be\s+reused|may\s+be\s+reused)/i
     );
     if (!m) continue;
     const mustReuse = /MUST/i.test(m[2]);
@@ -233,6 +271,37 @@ function extractBulletPaths(block, headingRe) {
 }
 
 /**
+ * Return EVERY `###`-bounded block whose heading matches `headingRe`.
+ *
+ * Unlike work-spec's `sliceSection` (which captures from the matched heading
+ * all the way to the next `## ` h2 — correct for h2 sections, but for an h3
+ * heading it swallows every sibling h3 subsection that follows), each
+ * returned block ends at the NEXT `###` OR `## ` heading. And unlike
+ * `sliceSection` it walks the whole document (global), not just the first
+ * match — one block per matching task subsection.
+ *
+ * GH-408 / ECHO-5357 / ECHO-5813: `parseFilesOutOfScope` sliced Task 1's
+ * `### Files explicitly out of scope` up to `## Task 2`, so backticked
+ * tokens in the sibling `### Deliverables` / `### Test Command` /
+ * `### Suggested Scope` subsections leaked into the out-of-scope set — and
+ * only the first task's block was ever read.
+ */
+function sliceSubsections(text, headingRe) {
+  if (!text) return [];
+  const flags = headingRe.flags.includes('g') ? headingRe.flags : `${headingRe.flags}g`;
+  const re = new RegExp(headingRe.source, flags);
+  const blocks = [];
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const after = text.slice(m.index + m[0].length);
+    const next = after.match(/^#{2,3}\s/m);
+    blocks.push(next ? after.slice(0, next.index) : after);
+    if (re.lastIndex === m.index) re.lastIndex += 1; // zero-width safety
+  }
+  return blocks;
+}
+
+/**
  * Read the optional `tests.check.md` report produced by the tests-review
  * step. Returns `{ exists: true, content }` when present, otherwise
  * `{ exists: false }`. Callers decide whether absence is fatal.
@@ -248,10 +317,13 @@ module.exports = {
   readFile,
   readChangedFiles,
   readRequirementCoverage,
+  parseCoverageTableRow,
   readBriefRequirements,
+  parseMoscowRequirements,
   readReuseAudit,
   readSuggestedScopeFiles,
   readTestReport,
+  sliceSubsections,
   // Re-exports from spec-side shared:
   ...specSharedReexports(specShared),
 };

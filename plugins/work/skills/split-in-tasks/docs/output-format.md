@@ -161,14 +161,14 @@ _TDD Protocol: Every non-exempt implementation task follows RED -> GREEN -> REFA
 
 ## Requirement Coverage
 
-| Requirement | Covered By |
-|-------------|------------|
-| R1          | Task 1     |
-| R2          | Task 3     |
-| ...         | ...        |
+| ID  | Description                        | Status  | Evidence        |
+|-----|------------------------------------|---------|-----------------|
+| R1  | <requirement restated in one line> | Covered | tasks.md:Task 1 |
+| R2  | <requirement restated in one line> | Covered | tasks.md:Task 3 |
+| ... | ...                                | ...     | ...             |
 ```
 
-> **Note (GH-462):** The top-level `## Requirement Coverage` table above is MANDATORY in every emitted `tasks.md`. Each `## Task N` block must ALSO include a `### Requirements Covered` subsection listing the requirement IDs that task implements. The completion-checker parser reads the top-level table first; when absent or header-only, it aggregates the per-task `### Requirements Covered` subsections as a safety-net fallback (synthesizing rows with `status=DELIVERED`, `evidence=tasks.md:Task N`). Emit both — the dual-emission keeps the rollup table authoritative while ensuring the workflow never deadlocks if the table is accidentally omitted.
+> **Note (GH-462 / ECHO-5139 family):** The top-level `## Requirement Coverage` table above is MANDATORY in every emitted `tasks.md`, and its column shape is LOAD-BEARING: the completion-checker parses it positionally as `| ID | Description | Status | Evidence |`. Do NOT emit alternative shapes like `| Requirement | Covered By |` or `| Requirement | Source | Covered by Task(s) |` — their third column parses as an undelivered Status and blocks the `check` step, where tasks.md is write-protected. At authoring time set `Status` to `Covered` and `Evidence` to `tasks.md:Task N`; the completion-checker upgrades rows to `DELIVERED` with file:line citations at check time. Each `## Task N` block must ALSO include a `### Requirements Covered` subsection listing the requirement IDs that task implements. The completion-checker reads the top-level table first; when absent or header-only, it aggregates the per-task `### Requirements Covered` subsections as a safety-net fallback (synthesizing rows with `status=DELIVERED`, `evidence=tasks.md:Task N`). Emit both — the dual-emission keeps the rollup table authoritative while ensuring the workflow never deadlocks if the table is accidentally omitted. The tasks_gate fails a tasks.md whose table is missing or wrongly shaped.
 
 ## Format rules
 

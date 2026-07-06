@@ -113,9 +113,9 @@ After generating all tasks, verify coverage:
 1. Take your requirement list from Step 4.0
 2. For each requirement, confirm it appears in at least one task's `Requirements Covered` section
 3. If any requirement is missing: add it to an existing task or create a new task
-4. Generate the `Requirement Coverage` table (see [docs/output-format.md](./docs/output-format.md)).
+4. Generate the `Requirement Coverage` table (see [docs/output-format.md](./docs/output-format.md)) with the EXACT column shape `| ID | Description | Status | Evidence |` — Status `Covered`, Evidence `tasks.md:Task N`.
 
-**The trailing `## Requirement Coverage` table MUST be emitted in every `tasks.md`** even when per-task `### Requirements Covered` subsections are also present. The completion-checker parser primarily reads the top-level table; the subsection fallback exists as a safety net (see GH-462) but the table is still the source of truth. Omitting it forces the parser into the fallback path and obscures rollup status.
+**The trailing `## Requirement Coverage` table MUST be emitted in every `tasks.md`** even when per-task `### Requirements Covered` subsections are also present. The completion-checker parser primarily reads the top-level table and parses it positionally as `| ID | Description | Status | Evidence |` — other shapes (e.g. `| Requirement | Source | Covered by Task(s) |`) block the `check` step, where tasks.md is write-protected. The subsection fallback exists as a safety net (see GH-462) but the table is still the source of truth. Omitting it forces the parser into the fallback path and obscures rollup status; the tasks_gate fails a tasks.md whose table is missing or wrongly shaped.
 
 ### Step 5: Quality review pass (MANDATORY — do this BEFORE saving)
 

@@ -161,7 +161,7 @@ All hooks follow a strict fail-open policy:
 |---|---|
 | `work-implement-enforce.js` | TDD phase file gating (RED/GREEN/REFACTOR) |
 
-### /check2 hooks (`scripts/workflows/check/hooks/`)
+### /check hooks (`scripts/workflows/check/hooks/`)
 
 | Hook | Purpose |
 |---|---|
@@ -169,7 +169,7 @@ All hooks follow a strict fail-open policy:
 | `check-start-env.js` | Start dev servers |
 | `check-validate-reports.js` | Validate report format and status lines |
 
-### Shared hooks consumed by /check2 (`scripts/workflows/lib/hooks/`)
+### Shared hooks consumed by /check (`scripts/workflows/lib/hooks/`)
 
 | Hook | Purpose |
 |---|---|

@@ -125,7 +125,7 @@ When designing API / schema changes, also enumerate every consumer of a modified
 | {Existing component/utility/pattern} | `{file path}` | Reuse / Extend / Extract / Create New | {why this decision} |
 
 ### Reuse Declarations
-**MANDATORY, machine-parsed.** The completion checker's `reuse_audit_enforcement` gate parses ONLY this bullet grammar (tables above are for humans; the parser cannot read them — an unparseable section hard-blocks the ticket at `check`, where spec.md is locked). One bullet per Reuse/Extend row from the table above, in EXACTLY this shape — symbol backtick first, verb immediately after (a parenthesized path between them is tolerated but not preferred):
+**MANDATORY, machine-parsed.** The completion checker's `reuse_audit_enforcement` gate parses ONLY this bullet grammar (tables above are for humans; the parser cannot read them — an unparseable section hard-blocks the ticket at `check`, where spec.md is locked). One bullet per Reuse/Extend row from the table above, in EXACTLY this shape — symbol backtick first, verb immediately after, path after the verb (the parser also tolerates a parenthesized path or a ``from `path` `` clause between symbol and verb, but prefer the canonical shape below):
 
 - `{Symbol}` MUST be reused from `{path/to/file.ext:line}` — {one-line reason}
 - `{PatternName}` may be reused from `{path}` — {mirrored pattern, not imported}

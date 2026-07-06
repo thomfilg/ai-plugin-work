@@ -1,5 +1,6 @@
 /**
- * Tests for dependency wiring in work.workflow.js
+ * Tests for dependency wiring in the shared orchestrator context
+ * (lib/orchestrator-context.js — previously inlined in work.workflow.js).
  *
  * Verifies that required dependencies are properly wired into
  * buildTransitionDeps() for transitionStep calls.
@@ -12,10 +13,10 @@ const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
 
-const WORKFLOW_PATH = path.join(__dirname, '..', 'engine', 'work.workflow.js');
+const WORKFLOW_PATH = path.join(__dirname, '..', 'lib', 'orchestrator-context.js');
 const source = fs.readFileSync(WORKFLOW_PATH, 'utf-8');
 
-describe('work.workflow.js dependency wiring', () => {
+describe('orchestrator-context dependency wiring', () => {
   describe('buildTransitionDeps includes getHeadSha (GH-299 Task 5)', () => {
     it('should import getHeadSha from git-utils', () => {
       // Verify the require statement pulls getHeadSha from git-utils

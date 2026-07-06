@@ -198,8 +198,8 @@ const PROTECTED_STATE_BASENAMES = buildProtectedBasenames(WORKFLOWS, [
   '.work-actions.json',
   '.pr-update-sha',
   '.workflow-state.json',
-  '.check.workflow-state.json',
-  '.check2-state.json',
+  '.check-state.json',
+  '.check2-state.json', // legacy name — still protected for in-flight tickets
   '.follow-up-state.json',
   'follow-up-comments.json',
 ]);
@@ -281,7 +281,7 @@ const TRUSTED_SCRIPT_DIRS = [
   path.resolve(__dirname, '..', '..', 'work-reports'), // workflows/work-reports/
   path.resolve(__dirname, '..', '..', 'work-cleanup'), // workflows/work-cleanup/
   path.resolve(__dirname, '..', '..', 'work'), // workflows/work/
-  path.resolve(__dirname, '..', '..', 'check2'), // workflows/check2/
+  path.resolve(__dirname, '..', '..', 'check'), // workflows/check/
   path.resolve(__dirname, '..', '..', 'follow-up'), // workflows/follow-up/
 ];
 
@@ -1213,14 +1213,12 @@ function handlePreToolUse(hookData) {
     if (wf.name === 'work' && matchedStep !== currentStep) {
       const agentType = toolInput?.subagent_type || '';
       if (CHECK_AGENTS.has(agentType)) {
-        let checkState = loadStateFile(ticketId, '.check.workflow-state.json');
-        if (!checkState) {
-          const legacyState = loadStateFile(ticketId, '.workflow-state.json');
-          if (legacyState?.workflow === 'check') checkState = legacyState; // legacy compat
-        }
-        checkStateActive = !!(
-          checkState?.workflow === 'check' && checkState?.status === 'in_progress'
-        );
+        // Script-driven /check state (legacy .check2-state.json name kept as
+        // a fallback for in-flight tickets that predate the rename)
+        const checkState =
+          loadStateFile(ticketId, '.check-state.json') ||
+          loadStateFile(ticketId, '.check2-state.json');
+        checkStateActive = checkState?.status === 'in_progress';
       }
     }
 
