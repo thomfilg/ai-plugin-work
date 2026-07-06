@@ -283,7 +283,7 @@ Fix any issues before completing.
 
 **When in subtask mode (`--subtask` was set):**
 
-1. Commit changes using commit-writer agent (subtasks commit before returning, unlike normal mode)
+1. Commit changes directly — author a semantic message and `git add -A && git commit` (the commit-msg validator hook enforces format, no attribution, and identity). Subtasks commit before returning, unlike normal mode.
 2. Mark subtask as completed: `node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/work-state.js complete-subtask <TICKET_ID> <N>`
    (where `<N>` is the subtask index from the init-subtask output)
 3. Report completion briefly and return control to the parent workflow
@@ -328,7 +328,7 @@ Quality checks:
 
 Next steps:
 - Review the changes: git diff
-- Commit when ready: use commit-writer agent
+- Commit when ready: author a semantic message and `git commit` directly (validated by the commit-msg hook)
 ```
 ## Enforcement Infrastructure (GH-219)
 
@@ -349,7 +349,7 @@ Next steps:
 
 ## Notes
 
-- This command does NOT create commits - use `commit-writer` agent after reviewing
+- This command does NOT create commits - commit directly after reviewing (the commit-msg validator hook enforces conventions)
   - **Exception:** In `--subtask` mode, the subtask commits before returning
 - This command does NOT run /check - use `/check` separately if needed
 - This command does NOT create PRs - use `/work` for full workflow

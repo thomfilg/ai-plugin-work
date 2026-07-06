@@ -124,7 +124,7 @@ The orchestrator dispatches agents via `Task()` tool calls. Each step maps to on
 | implement | developer-nodejs-tdd, developer-react-senior, developer-devops |
 | check | code-checker, quality-checker, qa-feature-tester, completion-checker |
 | pr | pr-generator |
-| commit | commit-writer |
+| commit | _(session agent authors; commit-msg validator hook enforces)_ |
 
 ### Hooks → Workflows
 

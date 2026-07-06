@@ -138,8 +138,8 @@ follows:
   traversal segment.
 
 This step is non-fatal: a warning is acceptable if the installer fails, but a
-successful install means direct `git commit` in the worktree is validated
-without invoking the commit-writer agent.
+successful install means direct `git commit` in the worktree is validated with
+no subagent — the session agent authors the message and the hook enforces it.
 
 ### Step 6: Run custom bootstrap script (if configured)
 
