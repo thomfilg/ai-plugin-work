@@ -213,42 +213,100 @@ function isSubagentFromInitialPrompt(transcriptPath, agentAliases) {
     const content = fs.readFileSync(transcriptPath, 'utf8');
     const lines = content.trim().split('\n');
 
-    // Check the first 10 lines for the agent type in system or user messages
-    const earlyLines = lines.slice(0, 10);
-    for (const line of earlyLines) {
-      try {
-        const entry = JSON.parse(line);
-        // System messages may contain subagent_type
-        if (entry.type === 'system' || entry.type === 'user') {
-          const msgContent = entry.message?.content;
-          const text =
-            typeof msgContent === 'string'
-              ? msgContent
-              : Array.isArray(msgContent)
-                ? msgContent.map((i) => i.text || '').join(' ')
-                : '';
+    // Read the structural subagent markers from the first 10 transcript lines.
+    const { attributionAgent, isSidechain, promptText } = readInitialMarkers(lines.slice(0, 10));
 
-          for (const alias of agentAliases) {
-            // Match agent name with word boundaries to avoid false positives
-            // from incidental substring matches (e.g. "qa" matching "quality")
-            const normalized = normalizeAgentName(alias);
-            const boundary = new RegExp(
-              `(?:^|[\\s"':,])${normalized.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:$|[\\s"':,])`,
-              'i'
-            );
-            if (boundary.test(text)) {
-              return true;
-            }
-          }
-        }
-      } catch {
-        /* skip non-JSON lines */
-      }
+    // 1. Authoritative signal: the attributionAgent identity of a genuine
+    //    Task-spawned subagent. When present it overrides any prose heuristic.
+    if (attributionAgent) {
+      const matched = agentAliases.some(
+        (alias) => normalizeAgentName(alias) === normalizeAgentName(attributionAgent)
+      );
+      debugLog(
+        'initialPrompt',
+        matched
+          ? `matched attributionAgent=${attributionAgent}`
+          : `no match for attributionAgent=${attributionAgent}`
+      );
+      return matched;
     }
+
+    // 2. Gated fallback: only trust a bare name mention when the transcript is
+    //    positively identified as a sidechain (a real subagent transcript). A
+    //    main session that merely names an agent must NOT be classified as it.
+    if (isSidechain) {
+      for (const alias of agentAliases) {
+        // Match agent name with word boundaries to avoid false positives
+        // from incidental substring matches (e.g. "qa" matching "quality").
+        const normalized = normalizeAgentName(alias);
+        const boundary = new RegExp(
+          `(?:^|[\\s"':,])${normalized.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?:$|[\\s"':,])`,
+          'i'
+        );
+        if (boundary.test(promptText)) {
+          debugLog('initialPrompt', `matched isSidechain name mention=${normalized}`);
+          return true;
+        }
+      }
+      debugLog('initialPrompt', 'sidechain transcript, no alias name mention');
+      return false;
+    }
+
+    // 3. No structural marker → not a subagent for these aliases.
+    debugLog('initialPrompt', 'no attributionAgent and not a sidechain transcript');
     return false;
   } catch {
     return false;
   }
+}
+
+/**
+ * Read the structural subagent markers from early transcript lines.
+ *
+ * Mirrors the per-line JSON.parse-in-try/catch pattern used by
+ * isSubagentFromTranscript. Untrusted fields are read defensively.
+ *
+ * @param {string[]} earlyLines - The first N raw transcript lines
+ * @returns {{attributionAgent: string, isSidechain: boolean, promptText: string}}
+ */
+function readInitialMarkers(earlyLines) {
+  let attributionAgent = '';
+  let isSidechain = false;
+  let promptText = '';
+
+  for (const line of earlyLines) {
+    try {
+      const entry = JSON.parse(line);
+
+      // A sidechain flag on ANY early line marks this as a subagent transcript.
+      if (entry.isSidechain === true) {
+        isSidechain = true;
+      }
+
+      // First attributionAgent wins — it is the authoritative identity.
+      if (!attributionAgent && entry.attributionAgent) {
+        attributionAgent = String(entry.attributionAgent);
+      }
+
+      // Accumulate prose from system/user messages for the gated name check.
+      if (entry.type === 'system' || entry.type === 'user') {
+        const msgContent = entry.message?.content;
+        const text =
+          typeof msgContent === 'string'
+            ? msgContent
+            : Array.isArray(msgContent)
+              ? msgContent.map((i) => i.text || '').join(' ')
+              : '';
+        if (text) {
+          promptText = promptText ? `${promptText} ${text}` : text;
+        }
+      }
+    } catch {
+      /* skip non-JSON lines */
+    }
+  }
+
+  return { attributionAgent, isSidechain, promptText };
 }
 
 module.exports = {
