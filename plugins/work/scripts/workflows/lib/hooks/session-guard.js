@@ -568,24 +568,15 @@ function isCheckWorkflowActive(ticketId) {
     // Guard against path traversal — resolved path must stay under tasksBase
     if (!resolvedBase.startsWith(path.resolve(tasksBase) + path.sep)) return false;
 
-    // Check /check (old) state file
-    try {
-      const state = JSON.parse(
-        fs.readFileSync(path.join(resolvedBase, '.check.workflow-state.json'), 'utf-8')
-      );
-      if (state?.workflow === 'check' && state?.status === 'in_progress') return true;
-    } catch {
-      /* not found or corrupt */
-    }
-
-    // Check /check2 (new) state file
-    try {
-      const state2 = JSON.parse(
-        fs.readFileSync(path.join(resolvedBase, '.check2-state.json'), 'utf-8')
-      );
-      if (state2?.status === 'in_progress' || state2?.currentStep) return true;
-    } catch {
-      /* not found or corrupt */
+    // Check the script-driven /check state file (fall back to the legacy
+    // .check2-state.json name for in-flight tickets that predate the rename)
+    for (const stateName of ['.check-state.json', '.check2-state.json']) {
+      try {
+        const state = JSON.parse(fs.readFileSync(path.join(resolvedBase, stateName), 'utf-8'));
+        if (state?.status === 'in_progress' || state?.currentStep) return true;
+      } catch {
+        /* not found or corrupt */
+      }
     }
 
     return false;

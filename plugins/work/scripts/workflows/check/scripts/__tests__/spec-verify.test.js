@@ -5,7 +5,9 @@ const path = require('path');
 const os = require('os');
 const { execFileSync } = require('child_process');
 
-const TEMP = path.join(os.tmpdir(), 'spec-verify-test-' + process.pid);
+// Private per-run temp root (mkdtemp → mode 0700, unpredictable name) — never
+// write directly into the shared os.tmpdir() (insecure-temporary-file).
+const TEMP = fs.mkdtempSync(path.join(os.tmpdir(), 'spec-verify-test-'));
 const SCRIPT = path.resolve(__dirname, '..', 'spec-verify.js');
 let testDir;
 let testCount = 0;
@@ -39,6 +41,8 @@ function runScript(specPath, opts = {}) {
       timeout: 10000,
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe'],
+      // Deterministic: tests opt IN to the TASKS_BASE fallback via opts.env.
+      env: { ...process.env, TASKS_BASE: '', ...(opts.env || {}) },
     });
     return { exitCode: 0, stdout };
   } catch (err) {
@@ -138,6 +142,40 @@ describe('spec-verify.js', () => {
     assert.equal(json.success, false);
     assert.equal(json.checks[0].passed, false);
     assert.ok(json.checks[0].reason.includes('not found'));
+  });
+
+  // ── GH-393 (echo-4465): TASKS_BASE-relative fallback ─────────────────────
+
+  it('FILE_EXISTS passes via TASKS_BASE fallback when file lives outside the worktree', () => {
+    const tasksBase = path.join(TEMP, `tasks-base-${testCount}`);
+    fs.mkdirSync(path.join(tasksBase, 'ECHO-7777'), { recursive: true });
+    fs.writeFileSync(path.join(tasksBase, 'ECHO-7777', 'brief.md'), '# Brief\n');
+    const specPath = writeSpec(['- FILE_EXISTS ECHO-7777/brief.md']);
+    const result = runScript(specPath, { json: true, env: { TASKS_BASE: tasksBase } });
+    assert.equal(result.exitCode, 0, result.stdout);
+    const json = JSON.parse(result.stdout);
+    assert.equal(json.checks[0].passed, true);
+  });
+
+  it('FILE_EXISTS still fails when file is in neither worktree nor TASKS_BASE', () => {
+    const tasksBase = path.join(TEMP, `tasks-base-empty-${testCount}`);
+    fs.mkdirSync(tasksBase, { recursive: true });
+    const specPath = writeSpec(['- FILE_EXISTS ECHO-7777/brief.md']);
+    const result = runScript(specPath, { json: true, env: { TASKS_BASE: tasksBase } });
+    assert.equal(result.exitCode, 1);
+    const json = JSON.parse(result.stdout);
+    assert.equal(json.checks[0].passed, false);
+    assert.ok(json.checks[0].reason.includes('TASKS_BASE'));
+  });
+
+  it('FILE_EXISTS TASKS_BASE fallback still rejects path traversal', () => {
+    const tasksBase = path.join(TEMP, `tasks-base-sec-${testCount}`);
+    fs.mkdirSync(tasksBase, { recursive: true });
+    const specPath = writeSpec(['- FILE_EXISTS ../../../etc/passwd']);
+    const result = runScript(specPath, { json: true, env: { TASKS_BASE: tasksBase } });
+    assert.equal(result.exitCode, 1);
+    const json = JSON.parse(result.stdout);
+    assert.equal(json.checks[0].passed, false);
   });
 
   it('scenario 9: GREP with malformed regex fails gracefully', () => {

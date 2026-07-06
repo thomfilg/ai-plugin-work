@@ -54,9 +54,10 @@ claude-plugin-work/
 │   │   ├── tdd-phase-registry.js  # Phase definitions & transitions
 │   │   └── hooks/              # TDD file gating
 │   ├── work-pr/                # PR generation workflow
-│   └── check/                  # Quality verification workflow
-│       ├── check.workflow.js   # Check dispatcher
-│       ├── hooks/              # Check-specific hooks
+│   └── check/                  # Quality verification workflow (script-driven)
+│       ├── check-next.js       # Check orchestrator (one instruction at a time)
+│       ├── lib/                # Steps, step registry, staleness assessment
+│       ├── hooks/              # Check-specific hooks (incl. auto-advance)
 │       └── scripts/            # Report writers
 ├── agents/                     # 19 specialized agent definitions (markdown)
 ├── skills/                     # 23 slash command definitions (SKILL.md)

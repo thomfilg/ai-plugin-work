@@ -92,7 +92,7 @@ Protected files:
 - `.work-state.json`
 - `.work-actions.json`
 - `.workflow-state.json`
-- `.check.workflow-state.json`
+- `.check-state.json` (and the legacy `.check2-state.json` name, still protected for in-flight tickets)
 
 Only designated management scripts (such as `work-state.js` and `workflow-engine.js`) can write these workflow state files. Note: `tdd-phase.json` is protected via the TDD phase hook gating system (`work-implement-enforce.js`), not by `protect-state-files.js`.
 

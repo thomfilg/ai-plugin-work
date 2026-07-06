@@ -79,3 +79,32 @@ test('backend BLOCKS when Backend QA section missing', () => {
   assert.equal(r.ok, false);
   fs.rmSync(root, { recursive: true, force: true });
 });
+
+// ─── GH-652 regression: checks must FIRE for canonical closed-taxonomy tasks.md ───
+
+test('GH-652: frontend check APPLIES via scope-derived kinds and FIRES on missing QA section', () => {
+  const { root, tasksDir } = makeTasksDir({
+    tasks: [
+      '# Tasks',
+      '',
+      '## Task 1',
+      '',
+      '### Type',
+      'tdd-code',
+      '',
+      '### Files in scope',
+      '- `components/foo/Bar.tsx` (NEW)',
+      '',
+    ].join('\n'),
+    qaReport: '# QA\n\nNo kind sections here.\n',
+  });
+  assert.equal(
+    frontend.appliesTo({ tasksDir }),
+    true,
+    'frontend kind must be derived from `### Files in scope` paths (closed Type enum carries no domain)'
+  );
+  const r = frontend.validate({ tasksDir });
+  assert.equal(r.ok, false);
+  assert.ok(r.errors[0].includes('Frontend QA'));
+  fs.rmSync(root, { recursive: true, force: true });
+});

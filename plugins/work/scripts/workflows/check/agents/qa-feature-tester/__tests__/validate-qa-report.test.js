@@ -6,7 +6,9 @@ const os = require('os');
 const { spawn } = require('child_process');
 
 const SCRIPT = path.resolve(__dirname, '..', 'validate-qa-report.js');
-const TEMP = path.join(os.tmpdir(), 'validate-qa-report-test-' + process.pid);
+// Private per-run temp root (mkdtemp → mode 0700, unpredictable name) — never
+// write directly into the shared os.tmpdir() (insecure-temporary-file).
+const TEMP = fs.mkdtempSync(path.join(os.tmpdir(), 'validate-qa-report-test-'));
 
 /**
  * Build a minimal valid QA report with the given status in a table row
@@ -155,5 +157,39 @@ describe('validate-qa-report.js — hasTestStatus canonical status matching', ()
 
     const { exitCode, stderr } = await runScript(reportPath);
     assert.equal(exitCode, 0, `NEEDS_WORK in Status: line should be accepted, stderr: ${stderr}`);
+  });
+});
+
+// --- echo-5528-issue-003: MCP-disconnect BLOCKED reports ---
+
+describe('validate-qa-report.js — BLOCKED: Playwright MCP not connected', () => {
+  it('accepts an MCP-disconnect BLOCKED report without Playwright evidence', async () => {
+    const reportPath = path.join(TEMP, 'qa-mcp-blocked.check.md');
+    const content = [
+      '# QA Report',
+      '',
+      '**Changes Hash:** abc123',
+      '',
+      'BLOCKED: Playwright MCP not connected — run /mcp',
+      '',
+      'Backends checked: Playwright MCP (tool missing), Chrome MCP (extension not connected).',
+      '',
+    ].join('\n');
+    fs.writeFileSync(reportPath, content);
+
+    const { exitCode, stderr } = await runScript(reportPath);
+    assert.equal(
+      exitCode,
+      0,
+      `MCP-disconnect BLOCKED report must pass validation, stderr: ${stderr}`
+    );
+  });
+
+  it('still rejects a BLOCKED report that lacks the /mcp remediation hint', async () => {
+    const reportPath = path.join(TEMP, 'qa-mcp-blocked-no-hint.check.md');
+    fs.writeFileSync(reportPath, 'BLOCKED: something vague\n');
+
+    const { exitCode } = await runScript(reportPath);
+    assert.equal(exitCode, 2, 'vague BLOCKED must not bypass report requirements');
   });
 });

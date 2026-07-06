@@ -133,11 +133,10 @@ describe('discoverWorkflows', () => {
   it('finds all .workflow.js files', () => {
     const results = discoverWorkflows();
 
-    // Should find at least check.workflow.js and work-pr.workflow.js
-    assert.ok(results.length >= 2, `Expected at least 2 workflows, got ${results.length}`);
+    // Should find at least work-pr.workflow.js
+    assert.ok(results.length >= 1, `Expected at least 1 workflow, got ${results.length}`);
 
     const names = results.map((r) => r.file);
-    assert.ok(names.includes('check.workflow.js'), 'Should find check.workflow.js');
     assert.ok(names.includes('work-pr.workflow.js'), 'Should find work-pr.workflow.js');
 
     // Each result should have expected fields
@@ -155,10 +154,10 @@ describe('discoverWorkflows', () => {
 
 describe('loadWorkflow', () => {
   it('loads valid workflow, validates required fields', () => {
-    const wf = loadWorkflow('check');
+    const wf = loadWorkflow('work-pr');
 
-    assert.strictEqual(wf.name, 'check');
-    assert.strictEqual(wf.command, '/check');
+    assert.strictEqual(wf.name, 'work-pr');
+    assert.strictEqual(wf.command, '/work-pr');
     assert.ok(Array.isArray(wf.steps), 'steps should be an array');
     assert.ok(wf.steps.length > 0, 'steps should not be empty');
     assert.ok(Array.isArray(wf.transitions), 'transitions should be an array');
@@ -170,7 +169,7 @@ describe('loadWorkflow', () => {
     // Create a temporary workflow file with missing fields in a temp dir
     // that won't be found by loadWorkflow. Instead, test that loadWorkflow
     // validates by trying a non-existent workflow (which throws first).
-    // The real validation test is implicit — check.workflow.js has all fields.
+    // The real validation test is implicit — work-pr.workflow.js has all fields.
     // We can verify the error message format for nonexistent workflows.
     assert.throws(
       () => loadWorkflow('nonexistent-workflow-xyz'),

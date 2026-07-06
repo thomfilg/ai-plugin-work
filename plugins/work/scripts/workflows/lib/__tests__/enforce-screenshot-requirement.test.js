@@ -27,11 +27,12 @@ function getScreenshotDir(ticketId) {
   return path.join(path.dirname(repoRoot), 'tasks', ticketId, 'screenshots');
 }
 
-function runHookWithEnv(hookData, hookType = 'PreToolUse', extraEnv = {}) {
+function runHookWithEnv(hookData, hookType = 'PreToolUse', extraEnv = {}, opts = {}) {
   return new Promise((resolve, reject) => {
     const proc = spawn('node', [HOOK_PATH], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, ...extraEnv, CLAUDE_HOOK_TYPE: hookType }, // hookType always wins over extraEnv
+      cwd: opts.cwd,
     });
 
     let stdout = '';
@@ -447,6 +448,30 @@ describe('enforce-screenshot-requirement', () => {
       );
       assert.equal(r.code, 2, 'should block when WEB_APPS has entries and TSX changed');
       assert.match(r.stderr, /BLOCKED/);
+    });
+
+    it('resolves WEB_APPS from a cwd .env file when unset in env (PR #628 finding)', async () => {
+      // Raw process.env reads miss WEB_APPS values that only live in the
+      // repo/cwd .env file. The hook must resolve via lib/config (dotenv-aware)
+      // like check's validate-summary/verify-playwright.
+      const os = require('os');
+      const tmpCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'screenshot-hook-dotenv-'));
+      try {
+        fs.writeFileSync(
+          path.join(tmpCwd, '.env'),
+          'WEB_APPS=[{"name":"dotenv-app","defaultPort":3000,"type":"vite"}]\n'
+        );
+        const r = await runHookWithEnv(
+          { tool_name: 'Task', tool_input: { subagent_type: 'pr-generator', prompt: 'create PR' } },
+          'PreToolUse',
+          { ...testEnv, WEB_APPS: '' }, // unset in env — only the .env file has it
+          { cwd: tmpCwd }
+        );
+        assert.equal(r.code, 2, 'should block: WEB_APPS from cwd/.env must be honored');
+        assert.match(r.stderr, /BLOCKED/);
+      } finally {
+        fs.rmSync(tmpCwd, { recursive: true, force: true });
+      }
     });
   });
 

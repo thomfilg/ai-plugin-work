@@ -1,6 +1,6 @@
 /**
  * Shared ticket-argument normalization for workflow params() parsers
- * (work-pr.workflow.js, check.workflow.js). Both prefix a bare numeric id with
+ * (e.g. work-pr.workflow.js). These prefix a bare numeric id with
  * the default project key, then normalize — keeping it here once avoids a
  * cross-file duplicate-block.
  */

@@ -25,7 +25,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
 
-const { resolveTasksBaseWithFallback, resolveWorktreeRoot } = require('../ticket-validation');
+const { resolveTasksBaseWithFallback } = require('../ticket-validation');
+const { resolveTicketWorktree } = require('../resolve-ticket-worktree');
 
 let logNextScriptEvent;
 try {
@@ -39,15 +40,74 @@ function die(scriptName, msg) {
   process.exit(2);
 }
 
-function snapshotCompanionToken(stateCliBasename, ticketId) {
+// Max age accepted when re-establishing a companion token from the RUNNER's
+// own hook-minted token (see fallback below). Matches the phase-state CLI's
+// consume-side TTL so a lingering runner token from a long-dead invocation
+// can never be laundered into a fresh companion token.
+const RUNNER_TOKEN_FALLBACK_MAX_AGE_MS = (() => {
+  try {
+    return require('../scripts/write-report').TOKEN_MAX_AGE_MS;
+  } catch {
+    return 10_000;
+  }
+})();
+
+function readTokenFile(file) {
+  try {
+    if (!fs.existsSync(file)) return null;
+    return JSON.parse(fs.readFileSync(file, 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Snapshot the companion (phase-state CLI) write token so the runner can
+ * re-mint it before each internal spawnSync call — the CLI consumes the
+ * one-shot token on every write.
+ *
+ * ECHO-4450: when the companion token is already consumed (e.g. a previous
+ * runner invocation in the SAME Bash command — the PreToolUse hook mints
+ * once per Bash call, not per `node` invocation), fall back to the runner's
+ * OWN hook-minted token (`<runner>-next.js.<TICKET>`, which nothing
+ * consumes). The fallback source must be fresh (≤ TOKEN_MAX_AGE_MS) and the
+ * re-mint target is always the COMPANION path, preserving one-shot
+ * consumption semantics per write.
+ */
+function tokenCandidatePaths(dir, basename, bareTicket) {
+  const keyed = bareTicket ? path.join(dir, `${basename}.${bareTicket}`) : null;
+  return [keyed, path.join(dir, basename)].filter(Boolean);
+}
+
+function readFreshRunnerToken(dir, runnerScriptName, bareTicket) {
+  for (const file of tokenCandidatePaths(dir, runnerScriptName, bareTicket)) {
+    const data = readTokenFile(file);
+    if (!data) continue;
+    const age = Date.now() - (typeof data.timestamp === 'number' ? data.timestamp : 0);
+    if (age >= 0 && age <= RUNNER_TOKEN_FALLBACK_MAX_AGE_MS) return data;
+  }
+  return null;
+}
+
+function snapshotCompanionToken(stateCliBasename, ticketId, runnerScriptName) {
   try {
     const dir = process.env.CLAUDE_WRITE_TOKEN_DIR || '/tmp/.claude-write-tokens';
     const bareTicket = ticketId ? String(ticketId).split('/')[0] : null;
-    const keyed = bareTicket ? path.join(dir, `${stateCliBasename}.${bareTicket}`) : null;
-    const legacy = path.join(dir, stateCliBasename);
-    const file = keyed && fs.existsSync(keyed) ? keyed : fs.existsSync(legacy) ? legacy : null;
-    if (!file) return null;
-    return { path: file, data: JSON.parse(fs.readFileSync(file, 'utf8')) };
+    const companionCandidates = tokenCandidatePaths(dir, stateCliBasename, bareTicket);
+
+    // 1. Companion token still on disk — snapshot it as-is (existing path).
+    for (const file of companionCandidates) {
+      const data = readTokenFile(file);
+      if (data) return { path: file, data };
+    }
+
+    // 2. Fallback: the runner's own hook-minted token (same shape). Only a
+    //    FRESH source is accepted; the mint target stays the companion path.
+    if (runnerScriptName) {
+      const data = readFreshRunnerToken(dir, runnerScriptName, bareTicket);
+      if (data) return { path: companionCandidates[0], data };
+    }
+    return null;
   } catch {
     return null;
   }
@@ -75,7 +135,11 @@ function detectMemoryPlugin(env = process.env) {
         const dir = path.join(home, base);
         if (!fs.existsSync(dir)) continue;
         let entries;
-        try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+        try {
+          entries = fs.readdirSync(dir, { withFileTypes: true });
+        } catch {
+          continue;
+        }
         if (entries.some((e) => c.probe.test(e.name))) return c;
       }
     }
@@ -88,7 +152,11 @@ function detectMemoryPlugin(env = process.env) {
 function readRelatedManifest(tasksDir) {
   const p = path.join(tasksDir, 'related-tickets.json');
   if (!fs.existsSync(p)) return null;
-  try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return null; }
+  try {
+    return JSON.parse(fs.readFileSync(p, 'utf8'));
+  } catch {
+    return null;
+  }
 }
 
 function listLinkedIds(manifest) {
@@ -103,25 +171,46 @@ function listLinkedIds(manifest) {
 
 function callPhaseCli(phaseStateCliPath, tokenSnap, args) {
   mintCompanionToken(tokenSnap);
-  const r = spawnSync(process.execPath, [phaseStateCliPath, ...args], { encoding: 'utf8', stdio: 'pipe' });
+  const r = spawnSync(process.execPath, [phaseStateCliPath, ...args], {
+    encoding: 'utf8',
+    stdio: 'pipe',
+  });
   return { code: r.status ?? -1, out: (r.stdout || '') + (r.stderr || '') };
 }
 
 function getCurrentPhase(phaseStateCliPath, tokenSnap, ticket) {
   const r = callPhaseCli(phaseStateCliPath, tokenSnap, ['current', ticket]);
   if (r.code !== 0) return null;
-  try { return JSON.parse(r.out.trim().split('\n').pop()).currentPhase; } catch { return null; }
+  try {
+    return JSON.parse(r.out.trim().split('\n').pop()).currentPhase;
+  } catch {
+    return null;
+  }
 }
 
 function advancePhase(phaseStateCliPath, tokenSnap, ticket, phase, verdict, handler) {
   if (verdict.ok && handler.next) {
-    const rec = callPhaseCli(phaseStateCliPath, tokenSnap, ['record', ticket, phase, '--summary', verdict.summary || '']);
+    const rec = callPhaseCli(phaseStateCliPath, tokenSnap, [
+      'record',
+      ticket,
+      phase,
+      '--summary',
+      verdict.summary || '',
+    ]);
     if (rec.code !== 0) {
-      return { advanced: false, phase, blockReason: `Could not record phase ${phase}:\n${rec.out}` };
+      return {
+        advanced: false,
+        phase,
+        blockReason: `Could not record phase ${phase}:\n${rec.out}`,
+      };
     }
     const t = callPhaseCli(phaseStateCliPath, tokenSnap, ['transition', ticket, handler.next]);
     if (t.code !== 0) {
-      return { advanced: false, phase, blockReason: `Could not transition to ${handler.next}:\n${t.out}` };
+      return {
+        advanced: false,
+        phase,
+        blockReason: `Could not transition to ${handler.next}:\n${t.out}`,
+      };
     }
     return { advanced: true, phase: handler.next, blockReason: '' };
   }
@@ -151,7 +240,17 @@ function buildHeader(scriptName, ticket, ctx, phase, memory, linkedIds, advanced
 function buildBody(getPhase, phase, ctx, advanced, blockReason) {
   const instructions = getPhase(phase).instructions(ctx);
   if (blockReason && !advanced) {
-    return [`## ❌ Phase ${phase.toUpperCase()} blocked`, '', '```', blockReason, '```', '', '---', '', instructions].join('\n');
+    return [
+      `## ❌ Phase ${phase.toUpperCase()} blocked`,
+      '',
+      '```',
+      blockReason,
+      '```',
+      '',
+      '---',
+      '',
+      instructions,
+    ].join('\n');
   }
   return instructions;
 }
@@ -160,16 +259,28 @@ function writeFooter(scriptName, ticket, phase, advanced, blockReason) {
   try {
     const { renderNextActionFooter } = require('../next-action-footer');
     process.stdout.write(
-      renderNextActionFooter({ scriptName, ticket, phase, terminalPhase: 'done', advanced, blockReason })
+      renderNextActionFooter({
+        scriptName,
+        ticket,
+        phase,
+        terminalPhase: 'done',
+        advanced,
+        blockReason,
+      })
     );
   } catch {
     /* footer is optional */
   }
 }
 
-function renderAndExit(opts, { ticket, phase, ctx, advanced, blockReason, memory, linkedIds, startedAt }) {
+function renderAndExit(
+  opts,
+  { ticket, phase, ctx, advanced, blockReason, memory, linkedIds, startedAt }
+) {
   const { scriptName, getPhase } = opts;
-  process.stdout.write(buildHeader(scriptName, ticket, ctx, phase, memory, linkedIds, advanced, blockReason) + '\n');
+  process.stdout.write(
+    buildHeader(scriptName, ticket, ctx, phase, memory, linkedIds, advanced, blockReason) + '\n'
+  );
   process.stdout.write(buildBody(getPhase, phase, ctx, advanced, blockReason));
   writeFooter(scriptName, ticket, phase, advanced, blockReason);
   const exitCode = blockReason && !advanced ? 2 : 0;
@@ -196,21 +307,32 @@ function executePhase(opts, ticket, startedAt) {
     cwd: process.cwd(),
     agent: process.env.CLAUDE_CURRENT_AGENT || null,
   });
-  const tokenSnap = snapshotCompanionToken(path.basename(phaseStateCliPath), ticket);
+  const tokenSnap = snapshotCompanionToken(path.basename(phaseStateCliPath), ticket, scriptName);
   const tasksBase = resolveTasksBaseWithFallback();
   const tasksDir = path.join(tasksBase, ticket);
   if (!fs.existsSync(tasksDir)) die(scriptName, `tasks dir not found: ${tasksDir}`);
   const manifest = readRelatedManifest(tasksDir);
   const linkedIds = listLinkedIds(manifest);
   const memory = detectMemoryPlugin();
-  const worktreeRoot = resolveWorktreeRoot() || path.dirname(tasksBase);
+  // ECHO-5322: resolve the ticket's worktree from ticket id + env config
+  // (WORKTREES_BASE/REPO_NAME) so the runner works from ANY cwd — the tasks
+  // dir, the plugin checkout, anywhere. Cwd git-detection is only a fallback
+  // inside resolveTicketWorktree (and never resolves to the plugin checkout).
+  const worktreeRoot = resolveTicketWorktree(ticket) || path.dirname(tasksBase);
   const initRes = callPhaseCli(phaseStateCliPath, tokenSnap, ['init', ticket]);
   if (initRes.code !== 0) die(scriptName, `Could not init phase state:\n${initRes.out}`);
   const startPhase = getCurrentPhase(phaseStateCliPath, tokenSnap, ticket) || initialPhase;
   const ctx = { ticket, tasksDir, tasksBase, manifest, linkedIds, memory, worktreeRoot };
   const handler = getPhase(startPhase);
   const verdict = handler.validate(ctx);
-  const { advanced, phase, blockReason } = advancePhase(phaseStateCliPath, tokenSnap, ticket, startPhase, verdict, handler);
+  const { advanced, phase, blockReason } = advancePhase(
+    phaseStateCliPath,
+    tokenSnap,
+    ticket,
+    startPhase,
+    verdict,
+    handler
+  );
   renderAndExit(opts, { ticket, phase, ctx, advanced, blockReason, memory, linkedIds, startedAt });
 }
 

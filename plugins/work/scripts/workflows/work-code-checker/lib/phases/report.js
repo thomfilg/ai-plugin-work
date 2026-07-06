@@ -10,6 +10,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const { CODE_PHASES } = require('../../code-phase-registry');
+const { validateCheckReportStatus } = require('../../../lib/validate-check-report-status');
 
 const REQUIRED_SECTIONS = ['Overall Assessment', 'Policy Compliance Summary', 'Confidence'];
 
@@ -36,6 +37,18 @@ function validate(ctx) {
       ],
     };
   }
+  // Canonical machine-readable status line (echo-5219/echo-5349): downstream
+  // gates parse this FIRST — a prose-only verdict parses UNKNOWN and loops
+  // the check step. Require it here so every report is gate-readable.
+  const statusCheck = validateCheckReportStatus(text, 'codeReview');
+  if (!statusCheck.valid) {
+    return {
+      ok: false,
+      errors: [
+        `code-review.check.md is missing the canonical status line. Add \`**Status:** APPROVED\` (or NEEDS_WORK) matching your verdict. ${statusCheck.message || ''}`.trim(),
+      ],
+    };
+  }
   // Hard-block any 🔴 Critical that hasn't been resolved.
   const critical = (text.match(/🔴\s*Critical/gi) || []).length;
   const verdictFail = /Overall\s*Assessment.*❌/i.test(text);
@@ -58,6 +71,8 @@ function instructions(ctx) {
     `Fill out \`${path.join(ctx.tasksDir, 'code-review.check.md')}\` with the canonical structure from agents/code-checker.md:`,
     '',
     '```',
+    '**Status:** APPROVED   <- canonical machine-readable verdict: APPROVED or NEEDS_WORK (MANDATORY, first line)',
+    '',
     '## Overall Assessment: ✅ / ⚠️ / 🔧 / ❌',
     'Confidence: High / Medium / Low',
     '',
@@ -73,6 +88,14 @@ function instructions(ctx) {
     '## Recommended Refactors',
     '## Next Steps',
     '```',
+    '',
+    'Recommendation verification (echo-5213): any recommended fix in Issues Found /',
+    'Recommended Refactors that changes types, function signatures, or schemas MUST be',
+    'verified compilable before you write it — run the project typecheck (e.g.',
+    '`$TYPECHECK_COMMAND` / `tsc --noEmit`) against the touched file with the fix applied',
+    'in a scratch copy (leave the working tree untouched). If verification is not possible,',
+    'label that recommendation `UNVERIFIED` so the implementer knows it is a hypothesis,',
+    'not a validated fix.',
     '',
   ].join('\n');
 }

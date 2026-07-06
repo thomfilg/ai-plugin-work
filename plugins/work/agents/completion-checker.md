@@ -106,7 +106,7 @@ grep -r "pattern" <paths>
 
 ### Planning Artifact Verification (MANDATORY)
 
-**Your prompt includes a pre-loaded "Verification Context" section** with 4 layers extracted from the planning artifacts (ticket → brief → spec → tasks). This context is injected automatically by the check2 orchestrator — you do NOT need to read the artifact files yourself.
+**Your prompt includes a pre-loaded "Verification Context" section** with 4 layers extracted from the planning artifacts (ticket → brief → spec → tasks). This context is injected automatically by the check orchestrator — you do NOT need to read the artifact files yourself.
 
 **Verify each layer in order against the actual code diff:**
 

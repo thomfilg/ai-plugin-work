@@ -173,7 +173,7 @@ All hooks follow a strict fail-open policy:
 | `work-implement-enforce.js` | PreToolUse, `Edit\|Write\|MultiEdit` (after protect-*) | TDD phase file gating (RED/GREEN/REFACTOR) |
 | `enforce-tdd-on-stop.js` | SubagentStop, `.*` (self-filtering) | Block developer agents from stopping during `implement` without a valid TDD cycle; prints the `task-next.js` command, never records evidence itself |
 
-### /check2 hooks (`scripts/workflows/check/hooks/`)
+### /check hooks (`scripts/workflows/check/hooks/`)
 
 | Hook | Purpose |
 |---|---|
@@ -181,7 +181,7 @@ All hooks follow a strict fail-open policy:
 | `check-start-env.js` | Start dev servers |
 | `check-validate-reports.js` | Validate report format and status lines |
 
-### Shared hooks consumed by /check2 (`scripts/workflows/lib/hooks/`)
+### Shared hooks consumed by /check (`scripts/workflows/lib/hooks/`)
 
 | Hook | Purpose |
 |---|---|

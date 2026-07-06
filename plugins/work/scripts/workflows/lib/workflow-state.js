@@ -112,6 +112,31 @@ class WorkflowState {
     return this.save(instanceId, state);
   }
 
+  /**
+   * Archive an instance's state file (GH-307): copy it to
+   * `<state-file>.archived-<ts>` with the reason embedded, then remove the
+   * live file so the next plan/transition starts a fresh instance. Archival
+   * (never silent deletion) preserves the audit trail of SHA-gated resets.
+   * @param {string} instanceId
+   * @param {string} reason - Why the state was invalidated (e.g. "sha-drift: ...")
+   * @returns {string|null} Path of the archived file, or null when no state exists
+   */
+  archive(instanceId, reason) {
+    const p = this._statePath(instanceId);
+    if (!fs.existsSync(p)) return null;
+    const target = `${p}.archived-${Date.now()}`;
+    try {
+      const state = JSON.parse(fs.readFileSync(p, 'utf8'));
+      state.archivedReason = reason || 'unspecified';
+      state.archivedAt = new Date().toISOString();
+      fs.writeFileSync(target, JSON.stringify(state, null, 2));
+    } catch {
+      fs.copyFileSync(p, target); // unparseable state — archive verbatim
+    }
+    fs.unlinkSync(p);
+    return target;
+  }
+
   /** Set a step's status */
   setStepStatus(instanceId, step, status) {
     let state = this.load(instanceId);
@@ -237,6 +262,86 @@ class WorkflowState {
 
 // ─── CLI handler ──────────────────────────────────────────────────────────────
 
+// Search plugin workflows first (including subdirectories), then global
+function findWorkflowFile(name) {
+  const pluginDir = path.join(__dirname, '..');
+  const globalDir = path.join(process.env.HOME || '/home/node', '.claude', 'workflows');
+  const fileName = name + '.workflow.js';
+  for (const baseDir of [pluginDir, globalDir]) {
+    // Check directly in the base dir
+    let p = path.join(baseDir, fileName);
+    if (fs.existsSync(p)) return p;
+    // Check in subdirectory named after the workflow (e.g. workflows/work-pr/work-pr.workflow.js)
+    p = path.join(baseDir, name, fileName);
+    if (fs.existsSync(p)) return p;
+  }
+  return null;
+}
+
+// Try to load workflow definition to get stateDir, fallback to 'tasks/drafts'
+function resolveStateDir(workflowName) {
+  let stateDir = 'tasks/drafts';
+  try {
+    const wfPath = findWorkflowFile(workflowName);
+    if (wfPath) {
+      const wf = require(wfPath);
+      stateDir = wf.stateDir || stateDir;
+    }
+  } catch {
+    /* use default */
+  }
+  return stateDir;
+}
+
+// init needs steps — from the CLI arg or the workflow definition
+function resolveInitSteps(workflowName, stepsArg) {
+  if (stepsArg) return JSON.parse(stepsArg);
+  try {
+    const wfPath = findWorkflowFile(workflowName);
+    if (!wfPath) throw new Error('Not found');
+    const wf = require(wfPath);
+    return wf.steps.map((s) => s.id);
+  } catch {
+    console.error(
+      'Cannot determine steps. Pass steps JSON as 4th arg or ensure workflow definition exists.'
+    );
+    process.exit(1);
+  }
+}
+
+// Per-command CLI handlers: (ws, workflowName, instanceId, args) → void
+const CLI_COMMANDS = {
+  init(ws, workflowName, instanceId, args) {
+    const steps = resolveInitSteps(workflowName, args[3]);
+    const result = ws.init(instanceId, steps);
+    console.log(JSON.stringify(result, null, 2));
+  },
+  get(ws, workflowName, instanceId, args) {
+    const state = ws.load(instanceId);
+    if (args[3] === '--format') {
+      console.log(ws.formatState(instanceId));
+    } else {
+      console.log(JSON.stringify(state, null, 2));
+    }
+  },
+  'set-step'(ws, workflowName, instanceId, args) {
+    ws.setStepStatus(instanceId, args[3], args[4]);
+    console.log(JSON.stringify({ success: true, step: args[3], status: args[4] }));
+  },
+  'add-error'(ws, workflowName, instanceId, args) {
+    ws.addError(instanceId, args[3], args[4]);
+    console.log(JSON.stringify({ success: true, error: 'added' }));
+  },
+  complete(ws, workflowName, instanceId) {
+    const result = ws.complete(instanceId);
+    console.log(JSON.stringify(result, null, 2));
+  },
+  'resume-info'(ws, workflowName, instanceId) {
+    const result = ws.getResumeInfo(instanceId);
+    console.log(JSON.stringify(result, null, 2));
+  },
+};
+
 function main() {
   const args = process.argv.slice(2);
   const workflowName = args[0];
@@ -249,90 +354,14 @@ function main() {
     process.exit(1);
   }
 
-  // Search plugin workflows first (including subdirectories), then global
-  function findWorkflowFile(name) {
-    const pluginDir = path.join(__dirname, '..');
-    const globalDir = path.join(process.env.HOME || '/home/node', '.claude', 'workflows');
-    const fileName = name + '.workflow.js';
-    for (const baseDir of [pluginDir, globalDir]) {
-      // Check directly in the base dir
-      let p = path.join(baseDir, fileName);
-      if (fs.existsSync(p)) return p;
-      // Check in subdirectory named after the workflow (e.g. workflows/check/check.workflow.js)
-      p = path.join(baseDir, name, fileName);
-      if (fs.existsSync(p)) return p;
-    }
-    return null;
-  }
+  const ws = new WorkflowState(workflowName, resolveStateDir(workflowName));
 
-  // Try to load workflow definition to get stateDir, fallback to 'tasks/drafts'
-  let stateDir = 'tasks/drafts';
-  try {
-    const wfPath = findWorkflowFile(workflowName);
-    if (wfPath) {
-      const wf = require(wfPath);
-      stateDir = wf.stateDir || stateDir;
-    }
-  } catch {
-    /* use default */
+  const handler = CLI_COMMANDS[command];
+  if (!handler) {
+    console.error(`Unknown command: ${command}`);
+    process.exit(1);
   }
-
-  const ws = new WorkflowState(workflowName, stateDir);
-
-  switch (command) {
-    case 'init': {
-      // Need steps — load from workflow definition
-      let steps = args[3] ? JSON.parse(args[3]) : null;
-      if (!steps) {
-        try {
-          const wfPath = findWorkflowFile(workflowName);
-          if (!wfPath) throw new Error('Not found');
-          const wf = require(wfPath);
-          steps = wf.steps.map((s) => s.id);
-        } catch {
-          console.error(
-            'Cannot determine steps. Pass steps JSON as 4th arg or ensure workflow definition exists.'
-          );
-          process.exit(1);
-        }
-      }
-      const result = ws.init(instanceId, steps);
-      console.log(JSON.stringify(result, null, 2));
-      break;
-    }
-    case 'get': {
-      const state = ws.load(instanceId);
-      if (args[3] === '--format') {
-        console.log(ws.formatState(instanceId));
-      } else {
-        console.log(JSON.stringify(state, null, 2));
-      }
-      break;
-    }
-    case 'set-step': {
-      const result = ws.setStepStatus(instanceId, args[3], args[4]);
-      console.log(JSON.stringify({ success: true, step: args[3], status: args[4] }));
-      break;
-    }
-    case 'add-error': {
-      ws.addError(instanceId, args[3], args[4]);
-      console.log(JSON.stringify({ success: true, error: 'added' }));
-      break;
-    }
-    case 'complete': {
-      const result = ws.complete(instanceId);
-      console.log(JSON.stringify(result, null, 2));
-      break;
-    }
-    case 'resume-info': {
-      const result = ws.getResumeInfo(instanceId);
-      console.log(JSON.stringify(result, null, 2));
-      break;
-    }
-    default:
-      console.error(`Unknown command: ${command}`);
-      process.exit(1);
-  }
+  handler(ws, workflowName, instanceId, args);
 }
 
 if (require.main === module) {

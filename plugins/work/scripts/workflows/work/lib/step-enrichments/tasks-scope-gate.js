@@ -20,6 +20,7 @@
 const path = require('path');
 const { parseTasks } = require(path.join('..', '..', '..', 'work', 'lib', 'task-parser'));
 const { validateAll } = require('../../../lib/task-scope');
+const { validateCoverageTable } = require('../../../work-tasks/lib/phases/traceability');
 
 function buildBlocker(tasksDir, validation) {
   const errorList = validation.errors.map((e) => `  - ${e}`).join('\n');
@@ -55,11 +56,43 @@ module.exports = function registerTasksScopeGate(register) {
     if (!tasks) return;
 
     const validation = validateAll(tasks);
-    if (validation.valid) {
+    if (!validation.valid) {
+      entry._overrideInstruction = buildBlocker(tasksDir, validation);
+      return;
+    }
+
+    // Deadlock guard (ECHO-5139/5145/5218/5320/5350/5818/5821 family): a
+    // tasks.md that leaves this gate without a parser-shaped
+    // `## Requirement Coverage` table (`| ID | Description | Status |
+    // Evidence |`) blocks the completion-checker at the `check` step —
+    // where tasks.md is write-protected. Fail HERE, while tasks.md is
+    // still editable (tasks_gate is on the protect-tasks-md allowlist).
+    let coverageErrors = [];
+    try {
+      coverageErrors = validateCoverageTable(tasksDir);
+    } catch {
+      return; // fail-open on validator crash
+    }
+    if (coverageErrors.length === 0) {
       // Pass-through: leave entry as-is so the orchestrator advances to implement.
       return;
     }
 
-    entry._overrideInstruction = buildBlocker(tasksDir, validation);
+    entry._overrideInstruction = {
+      type: 'work_instruction',
+      action: 'blocked',
+      reason: 'tasks_gate: tasks.md `## Requirement Coverage` table is missing or malformed',
+      details:
+        'The completion-checker (check step) parses the trailing `## Requirement Coverage` table ' +
+        'positionally as `| ID | Description | Status | Evidence |`. tasks.md is write-protected ' +
+        'during the check step, so a missing/malformed table there is unrepairable — fix it now.\n\n' +
+        'Validation errors:\n' +
+        coverageErrors.map((e) => `  - ${e}`).join('\n'),
+      hint:
+        'Edit tasks.md in-place (allowed during tasks_gate): append a `## Requirement Coverage` table ' +
+        'with one row per `## Extracted Requirements` ID — Status `Covered`, Evidence `tasks.md:Task N` — ' +
+        'then re-run /work. See skills/split-in-tasks/docs/output-format.md for the exact shape.',
+      tasksFile: path.join(tasksDir, 'tasks.md'),
+    };
   });
 };

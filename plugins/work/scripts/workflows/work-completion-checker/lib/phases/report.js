@@ -14,6 +14,7 @@ const path = require('node:path');
 
 const { COMPLETION_PHASES } = require('../../completion-phase-registry');
 const { readState } = require('../failure-store');
+const { validateCheckReportStatus } = require('../../../lib/validate-check-report-status');
 
 const REQUIRED_SECTIONS = ['Requirements Verification', 'Deliverables Checklist', 'Final Status'];
 const VERIFICATION_HEADER = '## Reuse / Scope / Test-pass verification';
@@ -182,6 +183,18 @@ function validate(ctx) {
       ],
     };
   }
+  // Canonical machine-readable status line (echo-5219/echo-5349): downstream
+  // gates parse this FIRST — a prose-only "### Final Status:\n[COMPLETE]"
+  // verdict parses UNKNOWN in strict gates and loops the check step.
+  const statusCheck = validateCheckReportStatus(text, 'completion');
+  if (!statusCheck.valid) {
+    return {
+      ok: false,
+      errors: [
+        `completion.check.md is missing the canonical status line. Add \`**Status:** COMPLETE\` (or NEEDS_WORK/INCOMPLETE) matching your Final Status verdict. ${statusCheck.message || ''}`.trim(),
+      ],
+    };
+  }
   return { ok: true, summary: `${text.length} chars, all required sections present` };
 }
 
@@ -193,6 +206,8 @@ function instructions(ctx) {
     `Write \`${path.join(ctx.tasksDir, 'completion.check.md')}\` with the canonical structure from agents/completion-checker.md:`,
     '',
     '```markdown',
+    '**Status:** COMPLETE   <- canonical machine-readable verdict: COMPLETE or NEEDS_WORK (MANDATORY, first line)',
+    '',
     '## Requirements Verification',
     '',
     '### Original Request:',

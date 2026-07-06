@@ -77,3 +77,39 @@ test('backend BLOCKS when Requirement Coverage has non-delivered rows', () => {
   assert.ok(r.errors.some((e) => /incomplete|PENDING|R2/i.test(e)));
   fs.rmSync(root, { recursive: true, force: true });
 });
+
+// ─── GH-652 regression: checks must FIRE for canonical closed-taxonomy tasks.md ───
+
+test('GH-652: backend check APPLIES via scope-derived kinds and FIRES on incomplete coverage', () => {
+  const { root, tasksDir } = makeTasksDir({
+    tasks: [
+      '# Tasks',
+      '',
+      '## Task 1',
+      '',
+      '### Type',
+      'tdd-code',
+      '',
+      '### Files in scope',
+      '- `app/api/trpc/routers/explore.ts`',
+      '',
+      '## Requirement Coverage',
+      '',
+      '| ID | Requirement | Status | Evidence |',
+      '| --- | --- | --- | --- |',
+      '| R1 | Add endpoint | DELIVERED | foo.ts:42 |',
+      '| R2 | Add validation | PENDING |  |',
+      '',
+    ].join('\n'),
+    prContext: { base: 'origin/main', files: ['app/api/foo.ts'] },
+  });
+  assert.equal(
+    backend.appliesTo({ tasksDir }),
+    true,
+    'backend kind must be derived from `### Files in scope` paths (closed Type enum carries no domain)'
+  );
+  const r = backend.validate({ tasksDir });
+  assert.equal(r.ok, false);
+  assert.ok(r.errors.some((e) => /incomplete|PENDING|R2/i.test(e)));
+  fs.rmSync(root, { recursive: true, force: true });
+});
