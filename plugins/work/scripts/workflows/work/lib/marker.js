@@ -1,7 +1,7 @@
 /**
  * Marker file management for workflow session detection.
  *
- * Marker files (.work.pid, .follow-up-orchestrator.pid, .check2-orchestrator.pid)
+ * Marker files (.work.pid, .follow-up-orchestrator.pid, .check-orchestrator.pid)
  * let PostToolUse hooks detect an active workflow. Because every agent shares one
  * TASKS_BASE, a marker MUST carry the identity of the terminal that owns it so a
  * hook firing in worktree/session A never advances a workflow owned by B:
@@ -56,7 +56,7 @@ function writeMarkerFile(ticket, deps) {
 /**
  * Scan TASKS_BASE for the active marker of the given filename that the CURRENT
  * terminal owns. Reusable across workflows via the markerFilename parameter
- * (e.g. '.work.pid', '.follow-up-orchestrator.pid', '.check2-orchestrator.pid').
+ * (e.g. '.work.pid', '.follow-up-orchestrator.pid', '.check-orchestrator.pid').
  *
  * Scoping (kills cross-wiring under concurrent agents): a marker is skipped when
  * it carries an identity field that differs from the caller's — a different

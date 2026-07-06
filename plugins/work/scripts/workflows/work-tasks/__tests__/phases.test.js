@@ -184,3 +184,105 @@ test('gherkin_link blocks when a Scenario has no task reference (fallback path)'
   assert.equal(r.ok, false);
   fs.rmSync(root, { recursive: true, force: true });
 });
+
+// ── `## Requirement Coverage` table validation (ECHO-5139 deadlock family) ──
+
+test('traceability flags a tasks.md with NO Requirement Coverage table', () => {
+  const { root, tasksDir } = mkTasksDir({
+    'tasks.md': [
+      '## Extracted Requirements',
+      '- R1',
+      '',
+      '## Task 1',
+      '',
+      '### Requirements Covered',
+      '- R1',
+      '',
+    ].join('\n'),
+  });
+  const errors = traceability.validateCoverageTable(tasksDir);
+  assert.ok(errors.length > 0, 'missing table must fail');
+  assert.match(errors.join('\n'), /## Requirement Coverage/);
+  assert.match(errors.join('\n'), /ID \| Description \| Status \| Evidence/);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('traceability flags a wrongly-shaped coverage table (ECHO-5821 mismatch)', () => {
+  const { root, tasksDir } = mkTasksDir({
+    'tasks.md': [
+      '## Extracted Requirements',
+      '- R1',
+      '',
+      '## Requirement Coverage',
+      '',
+      '| Requirement | Source | Covered by Task(s) |',
+      '|---|---|---|',
+      '| R1 | brief | Task 1 |',
+      '',
+    ].join('\n'),
+  });
+  const errors = traceability.validateCoverageTable(tasksDir);
+  assert.ok(errors.length > 0, 'wrong header shape must fail');
+  assert.match(errors.join('\n'), /positionally/i);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('traceability flags a coverage table missing a requirement row', () => {
+  const { root, tasksDir } = mkTasksDir({
+    'tasks.md': [
+      '## Extracted Requirements',
+      '- R1',
+      '- R2',
+      '',
+      '## Requirement Coverage',
+      '',
+      '| ID | Description | Status | Evidence |',
+      '|---|---|---|---|',
+      '| R1 | thing one | Covered | tasks.md:Task 1 |',
+      '',
+    ].join('\n'),
+  });
+  const errors = traceability.validateCoverageTable(tasksDir);
+  assert.ok(
+    errors.some((e) => /`R2`/.test(e)),
+    `R2 missing row must be reported, got: ${JSON.stringify(errors)}`
+  );
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('traceability accepts a parser-shaped coverage table', () => {
+  const { root, tasksDir } = mkTasksDir({
+    'tasks.md': [
+      '## Extracted Requirements',
+      '- R1',
+      '- R2',
+      '',
+      '## Task 1',
+      '',
+      '### Type',
+      'frontend',
+      '',
+      '### Requirements Covered',
+      '- R1',
+      '- R2',
+      '',
+      '### Acceptance Criteria',
+      '- ok',
+      '',
+      '### Files in scope',
+      '- `components/foo.tsx`',
+      '',
+      '## Requirement Coverage',
+      '',
+      '| ID | Description | Status | Evidence |',
+      '|---|---|---|---|',
+      '| R1 | thing one | Covered | tasks.md:Task 1 |',
+      '| R2 | thing two | Covered | tasks.md:Task 1 |',
+      '',
+    ].join('\n'),
+  });
+  assert.deepEqual(traceability.validateCoverageTable(tasksDir), []);
+  const r = traceability.validate({ tasksDir });
+  assert.equal(r.ok, true, `full traceability must pass, errors: ${JSON.stringify(r.errors)}`);
+  fs.rmSync(root, { recursive: true, force: true });
+});

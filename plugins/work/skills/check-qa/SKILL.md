@@ -3,7 +3,7 @@ name: check-qa
 argument-hint: <app-name> [options-json]
 description: Run QA testing for a specific app using Playwright MCP
 user-invocable: true
-allowed-tools: Task, Bash, Read, AskUserQuestion
+allowed-tools: Task, Bash, Read, AskUserQuestion, ListMcpResourcesTool
 ---
 
 # /check-qa - QA Testing for Single App
@@ -12,12 +12,35 @@ Run QA testing for a specific application by launching the `qa-feature-tester` a
 
 ## What This Command Does
 
+0. **MCP preflight** — verify a browser MCP (Playwright/Chrome) is connected; if not, stop with `BLOCKED`
 1. Parse arguments (app name + optional JSON options)
 2. If no arguments → auto-discover affected apps
-3. **Initialize QA progress tracking** (enables resume on context loss)
-4. **Cleanup old screenshots** for the specific app being tested
-5. Launch `qa-feature-tester` agent with context
-6. Agent handles ALL testing (Playwright, screenshots, report)
+3. **Ensure the app is running** (standalone bootstrap — self-start via manifest when /check's env isn't up)
+4. **Initialize QA progress tracking** (enables resume on context loss)
+5. **Cleanup old screenshots** for the specific app being tested
+6. Launch `qa-feature-tester` agent with context
+7. Agent handles ALL testing (Playwright, screenshots, report)
+
+---
+
+## Step 0: MCP Preflight (BEFORE anything else)
+
+A disconnected Playwright MCP must surface as a clear, actionable BLOCKED message —
+never as `ACCESS_FAILED` (which reads like a test/infrastructure failure).
+
+1. Call `ListMcpResourcesTool` (or inspect your available tools) and check whether
+   `mcp__playwright__*` or `mcp__claude-in-chrome__*` tools are available/connected.
+2. If **neither** browser backend is available, STOP immediately and output:
+
+```
+BLOCKED: Playwright MCP not connected — run /mcp to reconnect, then re-run /check-qa
+```
+
+- Do NOT launch the qa-feature-tester agent.
+- Do NOT write an ACCESS_FAILED report — nothing was tested; the session is missing a tool.
+- Optionally use AskUserQuestion to prompt the user to reconnect via `/mcp` and retry.
+
+If at least one backend is available, continue to Step 1.
 
 ## Context Loss Protection
 
@@ -56,10 +79,38 @@ const QA_DOCS = options.qaDocs || '';   // from READ_DOCS_ON_QA via check-setup.
 const E2E_DOCS = options.e2eDocs || ''; // from READ_DOCS_ON_E2E via check-setup.js
 
 // App URL from structured access payload (provided by check-start-env.js via RUNNING_APPS)
-// RUNNING_APPS is set by the /check workflow; parse it to get the URL for each app.
+// RUNNING_APPS is a HINT (pre-warm optimization), not a requirement — when it's
+// missing or stale, Step 1.5 below self-starts the app from the manifest.
 const runningApps = JSON.parse(process.env.RUNNING_APPS || '{}');
-const APP_URL = options.appUrl || (runningApps[APP_NAME] && runningApps[APP_NAME].url) || 'http://host.docker.internal:3000';
+let APP_URL = options.appUrl || (runningApps[APP_NAME] && runningApps[APP_NAME].url) || null;
 ```
+
+---
+
+## Step 1.5: Ensure App Is Running (standalone bootstrap — GH-213)
+
+`/check-qa` must work WITHOUT `/check` having run first (e.g. invoked directly, or
+from `work-pr`'s screenshot gate). Never assume `check-start-env.js` already started
+the server — verify, and self-start when needed:
+
+```bash
+# Verifies health; if unhealthy/missing, starts the app from the WEB_APPS manifest
+# (same machinery as /check's 2_start_env) and re-checks health.
+ENSURE=$(node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/check/hooks/check-ensure-app.js "${APP_NAME}")
+ENSURE_EXIT=$?
+echo "$ENSURE"
+```
+
+Run this even when `APP_URL` came from `RUNNING_APPS` or options — the server may
+have died since `2_start_env` (dead tmux session, crash, retry of a stale run).
+
+| Exit code | `status` | Action |
+|-----------|----------|--------|
+| 0 | `READY` | Set `APP_URL=$(echo "$ENSURE" | jq -r '.url')` and continue |
+| 2 | `NOT_CONFIGURED` | **Stop cleanly** — report "QA skipped: no manifest entry for ${APP_NAME} (WEB_APPS not configured)". This is NOT a failure. |
+| 1 | `ACCESS_FAILED` | **Stop** — report the env failure (include `.startError` + `.diagnostics` from the JSON). Self-start was attempted and failed; do NOT dispatch the agent to rediscover this. |
+
+Only after `READY` do you have a trustworthy `APP_URL` for the agent prompt below.
 
 ---
 
@@ -419,7 +470,7 @@ ${E2E_DOCS}
 ```
 
 **The agent will:**
-1. **Navigate directly to APP_URL** (server is already running — started by check-start-env.js)
+1. **Navigate directly to APP_URL** (server is already running — verified/self-started by Step 1.5's check-ensure-app.js, or pre-warmed by check-start-env.js)
 2. **Track progress incrementally** (call qa-progress.js at each step)
 3. Run tests based on affected files (skip completed tests from resume info)
 4. Take screenshots
@@ -455,6 +506,10 @@ ${E2E_DOCS}
 Reports are validated by SubagentStop hook: `${CLAUDE_PLUGIN_ROOT}/scripts/workflows/check/agents/qa-feature-tester/validate-qa-report.js`
 
 **Report output status:** The `write-qa-report.js` script sets the report `Status:` line to `APPROVED` (when agent passes PASS) or `NEEDS_WORK` (when agent passes FAIL, ACCESS_FAILED, or BLOCKED). Agents still use the input vocabulary (PASS/FAIL/ACCESS_FAILED/BLOCKED) — the script handles the translation.
+
+**MCP-disconnect outcome:** If the agent finds browser MCP tools unavailable mid-run,
+it reports `BLOCKED: Playwright MCP not connected — run /mcp` (never ACCESS_FAILED).
+Surface that message to the user verbatim so they can reconnect and re-run.
 
 **Blocked if:**
 - Missing report file

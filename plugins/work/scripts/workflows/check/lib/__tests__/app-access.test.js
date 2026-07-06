@@ -594,3 +594,112 @@ describe('checkHealth', () => {
     server = null;
   });
 });
+
+// --- GH-213: ensureAppRunning — QA self-start fallback ---
+
+describe('ensureAppRunning', () => {
+  const { ensureAppRunning } = require('../app-access');
+  const manifest = [
+    {
+      name: 'my-app',
+      defaultPort: 3000,
+      appType: 'web',
+      healthEndpoint: '/',
+      startCommand: 'pnpm dev --filter=my-app',
+    },
+  ];
+  const ready = (port) => ({
+    status: AppAccessStatus.READY,
+    url: `http://localhost:${port}`,
+    healthEndpoint: '/',
+    responseCode: 200,
+  });
+  const failed = { status: AppAccessStatus.ACCESS_FAILED, error: 'connect ECONNREFUSED' };
+
+  it('returns NOT_CONFIGURED cleanly when the app has no manifest entry', async () => {
+    let startCalled = false;
+    const result = await ensureAppRunning('ghost-app', {
+      discover: () => manifest,
+      health: async () => ready(3000),
+      startApp: async () => {
+        startCalled = true;
+      },
+    });
+    assert.equal(result.status, AppAccessStatus.NOT_CONFIGURED);
+    assert.equal(result.selfStarted, false);
+    assert.match(result.reason, /No manifest entry/);
+    assert.equal(startCalled, false, 'must not attempt a start without a manifest');
+  });
+
+  it('does not start anything when the app is already healthy', async () => {
+    let startCalled = false;
+    const result = await ensureAppRunning('my-app', {
+      discover: () => manifest,
+      health: async () => ready(3000),
+      startApp: async () => {
+        startCalled = true;
+        return { started: true };
+      },
+    });
+    assert.equal(result.status, AppAccessStatus.READY);
+    assert.equal(result.selfStarted, false);
+    assert.equal(startCalled, false, 'healthy app must not be restarted');
+  });
+
+  it('self-starts via manifest startCommand when health fails, then succeeds', async () => {
+    const healthCalls = [];
+    let startArgs = null;
+    const result = await ensureAppRunning('my-app', {
+      discover: () => manifest,
+      health: async (app) => {
+        healthCalls.push(app.defaultPort);
+        return healthCalls.length === 1 ? failed : ready(app.defaultPort);
+      },
+      startApp: async (name, appConfig) => {
+        startArgs = { name, appConfig };
+        return { started: true, port: 3001, url: 'http://host.docker.internal:3001' };
+      },
+    });
+    assert.equal(result.status, AppAccessStatus.READY);
+    assert.equal(result.selfStarted, true);
+    assert.equal(startArgs.name, 'my-app');
+    assert.equal(startArgs.appConfig.startCommand, 'pnpm dev --filter=my-app');
+    assert.deepEqual(healthCalls, [3000, 3001], 're-check must target the port the start took');
+    assert.equal(result.port, 3001);
+  });
+
+  it('reports ACCESS_FAILED with startError when the manifest start fails', async () => {
+    const result = await ensureAppRunning('my-app', {
+      discover: () => manifest,
+      health: async () => failed,
+      startApp: async () => ({ started: false, error: 'Timeout waiting for app to start' }),
+    });
+    assert.equal(result.status, AppAccessStatus.ACCESS_FAILED);
+    assert.equal(result.selfStarted, false);
+    assert.equal(result.startError, 'Timeout waiting for app to start');
+  });
+
+  it('reports ACCESS_FAILED when start succeeds but health never recovers', async () => {
+    const result = await ensureAppRunning('my-app', {
+      discover: () => manifest,
+      health: async () => failed,
+      startApp: async () => ({ started: true, port: 3000 }),
+    });
+    assert.equal(result.status, AppAccessStatus.ACCESS_FAILED);
+    assert.equal(result.selfStarted, true);
+    assert.match(result.startError, /health check still failing/);
+  });
+
+  it('treats a throwing startApp as a failed start (no crash)', async () => {
+    const result = await ensureAppRunning('my-app', {
+      discover: () => manifest,
+      health: async () => failed,
+      startApp: async () => {
+        throw new Error('spawn EACCES');
+      },
+    });
+    assert.equal(result.status, AppAccessStatus.ACCESS_FAILED);
+    assert.equal(result.selfStarted, false);
+    assert.equal(result.startError, 'spawn EACCES');
+  });
+});

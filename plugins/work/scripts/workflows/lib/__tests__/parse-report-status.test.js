@@ -1150,3 +1150,143 @@ describe('parseReportStatus — GH-331 QA alias unification', () => {
     assert.equal(result.status, 'NEEDS_WORK', 'FAIL alias must resolve to NEEDS_WORK');
   });
 });
+
+// ---------------------------------------------------------------------------
+// echo-5219 issue 2 / echo-5349 issue 3 — canonical Status line authoritative,
+// negation-aware fail markers, real-world pass synonyms
+// ---------------------------------------------------------------------------
+describe('parseReportStatus — canonical **Status:** line is authoritative (echo-5349)', () => {
+  it('canonical line short-circuits fail-marker scanning ("NOT incomplete" body)', () => {
+    const content = [
+      '**Status:** COMPLETE',
+      '',
+      '## Deferred items',
+      'These are follow-ups; the ticket is **NOT incomplete** for THIS ticket.',
+      'Some items remain INCOMPLETE in the backlog.',
+    ].join('\n');
+    const result = parseReportStatus(content, 'completion');
+    assert.equal(result.status, 'APPROVED', 'canonical Status line must win over body markers');
+  });
+
+  it('canonical **Status:** APPROVED wins for codeReview despite CRITICAL in body', () => {
+    const content = '**Status:** APPROVED\n\nWe fixed the CRITICAL race described below.';
+    const result = parseReportStatus(content, 'codeReview');
+    assert.equal(result.status, 'APPROVED');
+  });
+
+  it('canonical **Status:** NEEDS_WORK wins over pass markers in body', () => {
+    const content = '**Status:** NEEDS_WORK\n\n### Final Status:\n[COMPLETE]';
+    const result = parseReportStatus(content, 'completion');
+    assert.equal(result.status, 'NEEDS_WORK');
+  });
+});
+
+describe('parseReportStatus — negation-aware fail markers (echo-5349)', () => {
+  it('"NOT incomplete" is not a completion failure (with Final Status [COMPLETE])', () => {
+    const content = [
+      '## Requirements Verification',
+      '',
+      'Deferred follow-ups exist but the delivery is **NOT incomplete** for THIS ticket.',
+      '',
+      '### Final Status:',
+      '[COMPLETE]',
+    ].join('\n');
+    const result = parseReportStatus(content, 'completion');
+    assert.equal(result.status, 'APPROVED', '"NOT incomplete" must not force NEEDS_WORK');
+  });
+
+  it('"NOT incomplete" alone (no pass marker) yields UNKNOWN, not NEEDS_WORK', () => {
+    const content = 'The work is not incomplete at all.';
+    const result = parseReportStatus(content, 'completion');
+    assert.equal(result.status, 'UNKNOWN');
+  });
+
+  it('"isn\'t INCOMPLETE" is not a completion failure', () => {
+    const content = "This ticket isn't INCOMPLETE.\n\n### Final Status:\n[COMPLETE]";
+    const result = parseReportStatus(content, 'completion');
+    assert.equal(result.status, 'APPROVED');
+  });
+
+  it('genuine INCOMPLETE still fails', () => {
+    const content = 'Requirement R2 lacks evidence.\nINCOMPLETE: missing API wiring.';
+    const result = parseReportStatus(content, 'completion');
+    assert.equal(result.status, 'NEEDS_WORK');
+  });
+
+  it('genuine INCOMPLETE after a sentence boundary still fails despite earlier negation', () => {
+    const content = 'There is no doubt here. INCOMPLETE — R3 was never implemented.';
+    const result = parseReportStatus(content, 'completion');
+    assert.equal(result.status, 'NEEDS_WORK');
+  });
+
+  it('mixed: one negated and one genuine INCOMPLETE occurrence still fails', () => {
+    const content = 'R1 is not incomplete.\nR2 is INCOMPLETE.';
+    const result = parseReportStatus(content, 'completion');
+    assert.equal(result.status, 'NEEDS_WORK');
+  });
+});
+
+describe('parseReportStatus — real-world pass synonyms (echo-5219/echo-5349)', () => {
+  it('"## Overall Assessment: ✅ Well-Implemented" resolves APPROVED for codeReview', () => {
+    const content = [
+      '## Overall Assessment: ✅ Well-Implemented',
+      'Confidence: High',
+      '',
+      'No verified issues found.',
+    ].join('\n');
+    const result = parseReportStatus(content, 'codeReview');
+    assert.equal(result.status, 'APPROVED');
+  });
+
+  it('"Overall Assessment: Well Implemented" (space form) resolves APPROVED for codeReview', () => {
+    const result = parseReportStatus('Overall Assessment: Well Implemented', 'codeReview');
+    assert.equal(result.status, 'APPROVED');
+  });
+
+  it('icon-only "## Overall Assessment: ✅" resolves APPROVED for codeReview', () => {
+    const result = parseReportStatus('## Overall Assessment: ✅\nConfidence: High', 'codeReview');
+    assert.equal(result.status, 'APPROVED');
+  });
+
+  it('icon-only "## Overall Assessment: ❌" resolves NEEDS_WORK for codeReview', () => {
+    const result = parseReportStatus('## Overall Assessment: ❌\nConfidence: High', 'codeReview');
+    assert.equal(result.status, 'NEEDS_WORK');
+  });
+
+  it('"### Final Status:" + "[COMPLETE]" on next line resolves APPROVED for completion', () => {
+    const content = '## Requirements Verification\n\n### Final Status:\n[COMPLETE]\n';
+    const result = parseReportStatus(content, 'completion');
+    assert.equal(result.status, 'APPROVED');
+  });
+
+  it('"### Final Status:" + "[INCOMPLETE]" resolves NEEDS_WORK for completion', () => {
+    const content = '## Requirements Verification\n\n### Final Status:\n[INCOMPLETE]\n';
+    const result = parseReportStatus(content, 'completion');
+    assert.equal(result.status, 'NEEDS_WORK');
+  });
+
+  it('"Status: WELL_IMPLEMENTED" resolves APPROVED for codeReview (real-world synonym)', () => {
+    const result = parseReportStatus('Status: WELL_IMPLEMENTED', 'codeReview');
+    assert.equal(result.status, 'APPROVED');
+  });
+
+  it('"APPROVED (SKIPPED)" body marker still resolves APPROVED for codeReview', () => {
+    const result = parseReportStatus('Verdict: APPROVED (SKIPPED — no code changes)', 'codeReview');
+    assert.equal(result.status, 'APPROVED');
+  });
+
+  it('"Well-Implemented" does NOT pass for tests type (type-scoped)', () => {
+    const result = parseReportStatus('Overall Assessment: Well-Implemented', 'tests');
+    assert.notEqual(result.status, 'APPROVED');
+  });
+
+  it('unrelated prose still yields UNKNOWN (fallback unchanged)', () => {
+    const result = parseReportStatus('Some notes about the review process.', 'codeReview');
+    assert.equal(result.status, 'UNKNOWN');
+  });
+
+  it('unrelated prose still yields UNKNOWN for completion', () => {
+    const result = parseReportStatus('Verification narrative with no verdict.', 'completion');
+    assert.equal(result.status, 'UNKNOWN');
+  });
+});
