@@ -6,7 +6,9 @@ const os = require('os');
 const { spawn } = require('child_process');
 
 const SCRIPT = path.resolve(__dirname, '..', 'validate-qa-report.js');
-const TEMP = path.join(os.tmpdir(), 'validate-qa-report-test-' + process.pid);
+// Private per-run temp root (mkdtemp → mode 0700, unpredictable name) — never
+// write directly into the shared os.tmpdir() (insecure-temporary-file).
+const TEMP = fs.mkdtempSync(path.join(os.tmpdir(), 'validate-qa-report-test-'));
 
 /**
  * Build a minimal valid QA report with the given status in a table row

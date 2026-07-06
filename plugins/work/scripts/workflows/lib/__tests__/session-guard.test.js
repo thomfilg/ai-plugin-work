@@ -416,7 +416,9 @@ describe('session-guard', () => {
   // ─── /check workflow interaction ───
 
   describe('/check workflow suppresses stop blocking', () => {
-    const TEMP_WB = path.join(require('os').tmpdir(), 'sg-check-test-' + process.pid);
+    // Private per-run temp root (mkdtemp → mode 0700, unpredictable name) —
+    // never write directly into the shared os.tmpdir() (insecure-temporary-file).
+    const TEMP_WB = fs.mkdtempSync(path.join(require('os').tmpdir(), 'sg-check-test-'));
     const TEMP_TASKS = path.join(TEMP_WB, 'tasks');
     const CHECK_TICKET = 'CHECK-777';
 

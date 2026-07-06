@@ -28,13 +28,19 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 
 const SPEC_RE = /\.spec\.[jt]sx?$/;
 const DEFAULT_SPEC_TIMEOUT_MS = 60000;
 
-function git(cmd, opts = {}) {
-  return execSync(cmd, {
+// Branch/ref names accepted from the environment (BASE_BRANCH) — anything
+// outside this conservative charset is ignored rather than used.
+const SAFE_REF_RE = /^[\w@./:-]+$/;
+
+// No shell: git is invoked directly with an argv array, so env-derived values
+// (base branch, file stems) are never interpreted as shell syntax.
+function git(args, opts = {}) {
+  return execFileSync('git', args, {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'ignore'],
     ...opts,
@@ -51,11 +57,12 @@ function git(cmd, opts = {}) {
 function resolveBaseRef(cwd) {
   const opts = cwd ? { cwd } : {};
   const candidates = [];
-  if (process.env.BASE_BRANCH) candidates.push(`origin/${process.env.BASE_BRANCH}`);
+  const envBase = process.env.BASE_BRANCH;
+  if (envBase && SAFE_REF_RE.test(envBase)) candidates.push(`origin/${envBase}`);
   candidates.push('origin/main', 'origin/master', 'origin/dev');
   for (const ref of candidates) {
     try {
-      git(`git rev-parse --verify --quiet "${ref}"`, opts);
+      git(['rev-parse', '--verify', '--quiet', ref], opts);
       return ref;
     } catch {
       /* try next */
@@ -75,7 +82,7 @@ function changedFiles(baseRef, cwd) {
   const opts = cwd ? { cwd } : {};
   const out = new Set();
   try {
-    for (const f of git(`git diff --name-only "${baseRef}...HEAD"`, opts).split('\n')) {
+    for (const f of git(['diff', '--name-only', `${baseRef}...HEAD`], opts).split('\n')) {
       if (f) out.add(f);
     }
   } catch {
@@ -85,7 +92,7 @@ function changedFiles(baseRef, cwd) {
     // Uncommitted (staged + unstaged + untracked) changes count too.
     // NOTE: parse via regex, not fixed slice — the trimmed exec output loses
     // the leading status-column space of the first line.
-    for (const line of git('git status --porcelain', opts).split('\n')) {
+    for (const line of git(['status', '--porcelain'], opts).split('\n')) {
       const m = line.match(/^\s*[A-Z?!]{1,2}\s+(.+)$/i);
       if (!m) continue;
       const f = m[1].trim();
@@ -112,9 +119,16 @@ function specsImportingHelpers(changedNonSpecs) {
     const stem = path.basename(helper).replace(/\.[jt]sx?$/, '');
     if (!stem) continue;
     try {
-      const hits = git(
-        `git grep -lF ${JSON.stringify(stem)} -- "*.spec.ts" "*.spec.js" "*.spec.tsx" "*.spec.jsx"`
-      );
+      const hits = git([
+        'grep',
+        '-lF',
+        stem,
+        '--',
+        '*.spec.ts',
+        '*.spec.js',
+        '*.spec.tsx',
+        '*.spec.jsx',
+      ]);
       for (const f of hits.split('\n')) {
         if (f) importers.add(f);
       }
@@ -248,12 +262,11 @@ function greppableStem(src) {
 
 function collectImporters(scannedSources, changedSet, opts) {
   const importers = new Set();
-  const pathspecs = TEST_PATHSPECS.map((s) => JSON.stringify(s)).join(' ');
   for (const src of scannedSources) {
     const stem = greppableStem(src);
     if (!stem) continue;
     try {
-      const hits = git(`git grep -lF ${JSON.stringify(stem)} -- ${pathspecs}`, opts);
+      const hits = git(['grep', '-lF', stem, '--', ...TEST_PATHSPECS], opts);
       for (const f of hits.split('\n')) {
         // Already-changed test files are in the affected set by definition.
         if (f && !changedSet.has(f)) importers.add(f);

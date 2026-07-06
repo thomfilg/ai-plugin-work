@@ -19,11 +19,6 @@ const path = require('path');
 const { resolveCompletedState } = require(path.join(__dirname, '..', 'workflow-engine'));
 const { WorkflowState } = require(path.join(__dirname, '..', 'workflow-state'));
 
-const HASH_A = 'aaaaaaaaaaaa';
-const HASH_B = 'bbbbbbbbbbbb';
-const HEAD_A = 'a'.repeat(40);
-const HEAD_B = 'b'.repeat(40);
-
 let dir;
 
 beforeEach(() => {

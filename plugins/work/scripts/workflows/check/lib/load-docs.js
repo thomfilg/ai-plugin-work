@@ -9,7 +9,7 @@
  * realpathSync + isFile + 256KB cap + git-ls-files (repo files only).
  */
 
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 
@@ -63,11 +63,15 @@ function withinBoundary(candidate, boundary) {
 /** Files inside the repo must be git-tracked (untracked/gitignored are rejected). */
 function isGitTracked(resolvedRoot, realPath) {
   const repoRelPath = path.relative(resolvedRoot, realPath);
+  // Paths must stay under the (already realpath'd) repo root — reject any
+  // relative path that escapes it before it reaches the git argv.
+  if (!repoRelPath || repoRelPath.startsWith('..') || path.isAbsolute(repoRelPath)) return false;
   try {
-    execSync(
-      `git -C ${JSON.stringify(resolvedRoot)} ls-files --error-unmatch -- ${JSON.stringify(repoRelPath)}`,
-      { stdio: 'ignore' }
-    );
+    // No shell: argv array, so the boundary-checked paths are never
+    // shell-interpreted; `--` stops option parsing before the pathspec.
+    execFileSync('git', ['-C', resolvedRoot, 'ls-files', '--error-unmatch', '--', repoRelPath], {
+      stdio: 'ignore',
+    });
     return true;
   } catch {
     return false;

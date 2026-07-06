@@ -84,13 +84,26 @@ function mintTasksMdWriteToken(ticketId, meta = {}) {
  * Returns the raw content, or null when absent / not a regular file.
  */
 function takeTokenFile(tp) {
+  let fd = null;
   let raw;
   try {
-    const stat = fs.lstatSync(tp);
-    if (!stat.isFile()) return null; // symlink or dir — never honor
-    raw = fs.readFileSync(tp, 'utf8');
+    // Single open — no lstat-then-read window (file-system race): O_NOFOLLOW
+    // rejects symlinks at the syscall level, and fstat on the OPEN descriptor
+    // (not the path) confirms a regular file before reading from that same
+    // descriptor.
+    fd = fs.openSync(tp, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW, 0o600);
+    if (!fs.fstatSync(fd).isFile()) return null; // dir/fifo — never honor
+    raw = fs.readFileSync(fd, 'utf8');
   } catch {
-    return null; // no token
+    return null; // no token (or symlink — ELOOP)
+  } finally {
+    if (fd !== null) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        /* already closed */
+      }
+    }
   }
   try {
     fs.unlinkSync(tp); // delete immediately — one-shot regardless of validity

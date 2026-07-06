@@ -24,6 +24,8 @@ const {
   computeImpactTests,
   buildUnitEnv,
 } = require('../changed-specs');
+// Allowlist sanitizer every env-derived command line passes before the shell.
+const { safeEnvCommand } = require('../safe-env-command');
 
 function runCommand(cmd, timeout, env) {
   try {
@@ -80,9 +82,9 @@ function createSuiteEnvResolver(outputs) {
 
 function runAffectedSuites() {
   const suites = [
-    { name: 'unit', cmd: process.env.SCRIPT_RUN_AFFECTED_UNIT },
-    { name: 'integration', cmd: process.env.SCRIPT_RUN_AFFECTED_INTEGRATION },
-    { name: 'e2e', cmd: process.env.SCRIPT_RUN_AFFECTED_E2E },
+    { name: 'unit', cmd: safeEnvCommand(process.env.SCRIPT_RUN_AFFECTED_UNIT) },
+    { name: 'integration', cmd: safeEnvCommand(process.env.SCRIPT_RUN_AFFECTED_INTEGRATION) },
+    { name: 'e2e', cmd: safeEnvCommand(process.env.SCRIPT_RUN_AFFECTED_E2E) },
   ].filter((s) => s.cmd);
 
   if (suites.length === 0) return null;

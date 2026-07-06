@@ -20,6 +20,7 @@ const path = require('path');
 // Reuse the single command runner from run-tests.js rather than spawning here —
 // one combined-output exec site for the whole /check subsystem.
 const { runCommand } = require('./steps/run-tests');
+const { safeEnvCommand } = require('./safe-env-command');
 const { writeReportAtomic } = require('./report-utils');
 const { classifyRun } = require('./test-run-analysis');
 const { computeChangedSpecs, buildE2eEnv } = require('./changed-specs');
@@ -84,8 +85,10 @@ function buildReport({ status, outcome, label, envVar, exitCode, analysis, outpu
 
 function runAffectedSuite({ envVar, stepName, reportFile, label, timeout, scopeSpecs }) {
   return (state, ctx) => {
-    const cmd = process.env[envVar];
-    if (!cmd) return null; // not configured → skip
+    // Env-derived command line — sanitized (allowlist charset, no shell
+    // chaining/substitution metacharacters) before it reaches the shell.
+    const cmd = safeEnvCommand(process.env[envVar]);
+    if (!cmd) return null; // not configured (or unsafe) → skip
 
     const reportFolder = state.setupResult?.reportFolder || ctx.tasksDir;
     const reportPath = path.join(reportFolder, reportFile);

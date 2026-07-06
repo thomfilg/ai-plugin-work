@@ -31,14 +31,14 @@
 'use strict';
 
 const path = require('path');
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 
 const { resolveBaseRef } = require('./changed-specs');
 const { resolveTicketWorktree } = require(
   path.join(__dirname, '..', '..', 'lib', 'resolve-ticket-worktree')
 );
 const parseGherkin = require(path.join(__dirname, '..', '..', 'work', 'lib', 'parse-gherkin'));
-const { isBackendFile, isFrontendFile, isE2eFile } = require(
+const { isBackendFile, isE2eFile } = require(
   path.join(__dirname, '..', '..', 'work-spec', 'lib', 'kind-checks', 'shared')
 );
 
@@ -253,7 +253,7 @@ function resolveWorktreeRoot(cwd, ticketId, deps = {}) {
     }
   }
   try {
-    return execSync('git rev-parse --show-toplevel', {
+    return execFileSync('git', ['rev-parse', '--show-toplevel'], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
       ...(cwd ? { cwd } : {}),
@@ -262,6 +262,10 @@ function resolveWorktreeRoot(cwd, ticketId, deps = {}) {
     return null;
   }
 }
+
+// Refs accepted into a git argv (resolveBaseRef output — defense in depth
+// against an env-derived BASE_BRANCH smuggling option-like/shell text).
+const SAFE_REF_RE = /^[\w@./:-]+$/;
 
 /**
  * COMMITTED diff vs base (three-dot merge-base diff) — unlike
@@ -272,8 +276,10 @@ function resolveWorktreeRoot(cwd, ticketId, deps = {}) {
  * @returns {string[]}
  */
 function committedChangedFiles(worktree, baseRef) {
+  if (!SAFE_REF_RE.test(String(baseRef || ''))) return [];
   try {
-    return execSync(`git -C ${JSON.stringify(worktree)} diff --name-only "${baseRef}...HEAD"`, {
+    // No shell: argv array, so worktree/baseRef are never shell-interpreted.
+    return execFileSync('git', ['-C', worktree, 'diff', '--name-only', `${baseRef}...HEAD`], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     })

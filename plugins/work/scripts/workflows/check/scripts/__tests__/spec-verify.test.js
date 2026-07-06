@@ -5,7 +5,9 @@ const path = require('path');
 const os = require('os');
 const { execFileSync } = require('child_process');
 
-const TEMP = path.join(os.tmpdir(), 'spec-verify-test-' + process.pid);
+// Private per-run temp root (mkdtemp → mode 0700, unpredictable name) — never
+// write directly into the shared os.tmpdir() (insecure-temporary-file).
+const TEMP = fs.mkdtempSync(path.join(os.tmpdir(), 'spec-verify-test-'));
 const SCRIPT = path.resolve(__dirname, '..', 'spec-verify.js');
 let testDir;
 let testCount = 0;

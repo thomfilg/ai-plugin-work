@@ -26,7 +26,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 
 const { parseReportStatus } = require(
   path.join(__dirname, '..', '..', 'lib', 'parse-report-status')
@@ -43,9 +43,15 @@ const REQUIRED_REPORTS = [
 // and write-qa-report.js.
 const CHANGES_HASH_RE = /\*\*Changes Hash:\*\*\s*([a-f0-9]{12}|no-changes)/;
 
-function safeExec(cmd, cwd) {
+// Branch/ref names that may reach a git argv — conservative allowlist so an
+// env/config-derived base branch can never smuggle option-like or shell text.
+const SAFE_REF_RE = /^[\w@./:-]+$/;
+
+// No shell: git is invoked directly with an argv array, so config/env-derived
+// values (base branch) are never interpreted as shell syntax.
+function safeExec(args, cwd) {
   try {
-    return execSync(cmd, {
+    return execFileSync('git', args, {
       encoding: 'utf8',
       timeout: 15000,
       stdio: ['pipe', 'pipe', 'pipe'],
@@ -71,10 +77,11 @@ function computeChangesHash(cwd) {
   } catch {
     baseBranch = 'main';
   }
+  if (!baseBranch || !SAFE_REF_RE.test(baseBranch)) baseBranch = 'main';
   // Probe git availability first so "empty diff" is distinguishable from
   // "git failed" (safeExec collapses both to '').
-  if (!safeExec('git rev-parse --git-dir', cwd)) return null;
-  const diff = safeExec(`git diff ${baseBranch}...HEAD -w`, cwd);
+  if (!safeExec(['rev-parse', '--git-dir'], cwd)) return null;
+  const diff = safeExec(['diff', `${baseBranch}...HEAD`, '-w'], cwd);
   if (!diff) return 'no-changes';
   return crypto.createHash('sha256').update(diff).digest('hex').substring(0, 12);
 }
@@ -85,7 +92,7 @@ function computeChangesHash(cwd) {
  * @returns {string|null}
  */
 function computeHeadSha(cwd) {
-  const sha = safeExec('git rev-parse HEAD', cwd);
+  const sha = safeExec(['rev-parse', 'HEAD'], cwd);
   return /^[0-9a-f]{7,40}$/i.test(sha) ? sha : null;
 }
 
