@@ -193,7 +193,7 @@ function buildE2eEnv(scoped) {
 
 // ─── Impact-aware unit-test selection (echo-5820-3) ─────────────────────────
 //
-// check2's affected-tests tier runs changed-files-only, so an API-contract
+// check's affected-tests tier runs changed-files-only, so an API-contract
 // change (e.g. a tRPC procedure rename) passes locally while every consumer
 // test that mocks the old contract breaks in full CI. Full impact analysis is
 // app-repo-specific; this is the pragmatic one-hop version: test files that

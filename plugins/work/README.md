@@ -42,7 +42,7 @@ For local development, point to a local directory instead:
 
 | Command | Description |
 |---------|-------------|
-| `/check2 <TICKET_ID>` | Run full quality check: lint, typecheck, tests, code review, QA, and requirements verification in parallel |
+| `/check <TICKET_ID>` | Run full quality check: lint, typecheck, tests, code review, QA, and requirements verification in parallel |
 | `/check-qa <app>` | Run QA testing for a specific app using Playwright |
 | `/check-browser` | Verify browser/UI state using API-first approach with browser fallback |
 
@@ -90,7 +90,7 @@ claude-plugin-work/
 │   │   ├── hook-error-log.js     # Hook error file logger (see Debugging Hooks)
 │   │   └── hooks/                # Shared hooks (enforce-step-workflow, etc.)
 │   ├── work/                     # /work orchestrator workflow
-│   ├── check/                    # /check2 workflow
+│   ├── check/                    # /check workflow
 │   └── work-pr/                  # /work-pr workflow
 ├── agents/                       # Agent definitions (18 specialized agents)
 │   ├── brief-writer.md           # Product brief generation

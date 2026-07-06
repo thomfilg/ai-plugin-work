@@ -1,7 +1,7 @@
 /**
  * Check step enrichment.
  *
- * - Rewrites the check step to invoke /check2 skill instead of the old /check skill.
+ * - Rewrites the check step to invoke the script-driven /check skill.
  * - Gate E: injects a scope-diff summary into the agent prompt comparing the
  *   current git diff against the union of every task's `### Files in scope`.
  *   Surfaces sibling-owned and unaccounted files for the completion-checker
@@ -75,7 +75,7 @@ function gitDiffFiles(worktreeDir, exec = execFileSync) {
 }
 
 /**
- * Build the scope-diff block for the check2 delegate prompt.
+ * Build the scope-diff block for the check delegate prompt.
  *
  * @param {string} tasksDir
  * @param {string|undefined} worktreeDir - Canonical ticket worktree path
@@ -125,10 +125,10 @@ function buildScopeDiffBlock(tasksDir, worktreeDir, deps = {}) {
 function registerCheck(register) {
   register('check', (entry, ctx) => {
     entry.agentType = 'skill';
-    entry.agentPrompt = `/work-workflow:check2 ${ctx.ticket || 'TICKET'}`;
+    entry.agentPrompt = `/work-workflow:check ${ctx.ticket || 'TICKET'}`;
 
     // Gate E — append scope-diff summary as additional context for the
-    // completion-checker that runs inside /check2. The diff is computed in
+    // completion-checker that runs inside /check. The diff is computed in
     // the ticket worktree (ctx.worktreeDir), NOT ctx.workDir (the plugin's
     // own checkout) — see gitDiffFiles docblock.
     const block = buildScopeDiffBlock(ctx.tasksDir, ctx.worktreeDir);

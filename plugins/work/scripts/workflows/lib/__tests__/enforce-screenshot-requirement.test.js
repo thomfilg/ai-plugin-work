@@ -453,7 +453,7 @@ describe('enforce-screenshot-requirement', () => {
     it('resolves WEB_APPS from a cwd .env file when unset in env (PR #628 finding)', async () => {
       // Raw process.env reads miss WEB_APPS values that only live in the
       // repo/cwd .env file. The hook must resolve via lib/config (dotenv-aware)
-      // like check2's validate-summary/verify-playwright.
+      // like check's validate-summary/verify-playwright.
       const os = require('os');
       const tmpCwd = fs.mkdtempSync(path.join(os.tmpdir(), 'screenshot-hook-dotenv-'));
       try {

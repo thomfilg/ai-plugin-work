@@ -5,7 +5,7 @@
  * The gate must:
  *   - REFUSE to advance while the latest report at the matching changes hash
  *     is NEEDS_WORK (blocked instruction, work state untouched)
- *   - re-dispatch /check2 when the hash/HEAD drifted since completion
+ *   - re-dispatch /check when the hash/HEAD drifted since completion
  *   - advance to pr only when complete + reports pass at the current hash
  *
  * SHA probes injected via deps.probes — no git required.
@@ -38,9 +38,9 @@ afterEach(() => {
   fs.rmSync(tasksDir, { recursive: true, force: true });
 });
 
-function writeCheckState(overrides = {}) {
+function writeCheckState(overrides = {}, fileName = '.check-state.json') {
   fs.writeFileSync(
-    path.join(tasksDir, '.check2-state.json'),
+    path.join(tasksDir, fileName),
     JSON.stringify({ ticketId: 'GH-1', status: 'complete', changesHash: HASH_A, ...overrides })
   );
 }
@@ -113,7 +113,7 @@ describe('check dispatch-advance gate — SHA + severity refusal', () => {
     assert.equal(ws.stepStatus.pr, 'pending');
   });
 
-  it('refuses when check2 state itself is needs_work at the current hash', () => {
+  it('refuses when check state itself is needs_work at the current hash', () => {
     writeCheckState({ status: 'needs_work' });
     writeReport('code-review.check.md', 'NEEDS_WORK', HASH_A);
     const out = dispatchAdvanceGate(
@@ -124,7 +124,7 @@ describe('check dispatch-advance gate — SHA + severity refusal', () => {
     assert.equal(out.action, 'blocked');
   });
 
-  it('re-dispatches /check2 (recurse, check stays in_progress) when the hash drifted', () => {
+  it('re-dispatches /check (recurse, check stays in_progress) when the hash drifted', () => {
     writeCheckState({ changesHash: HASH_A });
     writeAllApproved(HASH_A);
     const ws = makeWs();
@@ -151,8 +151,26 @@ describe('check dispatch-advance gate — SHA + severity refusal', () => {
     assert.equal(savedWs.stepStatus.check, 'completed');
   });
 
-  it('returns null when no check2 state exists', () => {
+  it('returns null when no check state exists', () => {
     const out = dispatchAdvanceGate('GH-1', { tasksDir }, makeDeps(makeWs(), {}));
     assert.equal(out, null);
+  });
+});
+
+describe('check dispatch-advance gate — legacy .check2-state.json fallback', () => {
+  it('reads state from the legacy name when the canonical file is absent', () => {
+    // In-flight ticket from before the check2 → check rename: state exists
+    // ONLY under the legacy name.
+    writeCheckState({}, '.check2-state.json');
+    writeAllApproved(HASH_A);
+    const ws = makeWs();
+    const out = dispatchAdvanceGate(
+      'GH-1',
+      { tasksDir },
+      makeDeps(ws, { currentHash: HASH_A, currentHead: null })
+    );
+    assert.deepEqual(out, { recurse: true });
+    assert.equal(savedWs.stepStatus.check, 'completed');
+    assert.equal(savedWs.stepStatus.pr, 'in_progress');
   });
 });

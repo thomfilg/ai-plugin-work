@@ -20,7 +20,7 @@ const { parseReportStatus } = require(
 // Report-type mapping for the parse-report-status fallback (echo-5219: reviewer
 // agents emit prose verdicts like "## Overall Assessment: ✅ Well-Implemented"
 // or "### Final Status:\n[COMPLETE]" that the strict passPattern regexes miss;
-// without the fallback the check step re-dispatches check2 in a loop).
+// without the fallback the check step re-dispatches check in a loop).
 const REPORT_TYPE_BY_FILE = Object.create(null);
 REPORT_TYPE_BY_FILE['tests.check.md'] = 'tests';
 REPORT_TYPE_BY_FILE['code-review.check.md'] = 'codeReview';

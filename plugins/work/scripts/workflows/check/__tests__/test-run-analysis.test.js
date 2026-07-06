@@ -1,5 +1,5 @@
 /**
- * Tests for check2/lib/test-run-analysis.js (GH-394).
+ * Tests for check/lib/test-run-analysis.js (GH-394).
  *
  * Fixtures are real-ish runner outputs:
  * - vitest full-suite OOM (echo-4491-003): all tests pass, worker fork OOMs,

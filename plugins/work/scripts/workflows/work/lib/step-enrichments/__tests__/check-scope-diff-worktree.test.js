@@ -186,7 +186,7 @@ describe('buildScopeDiffBlock — Gate E block construction', () => {
   });
 });
 
-describe('registerCheck — check2 delegate prompt', () => {
+describe('registerCheck — check delegate prompt', () => {
   function runEnrichment(ctx) {
     let fn;
     registerCheck((step, f) => {
@@ -201,7 +201,7 @@ describe('registerCheck — check2 delegate prompt', () => {
     const worktree = makeAppWorktree();
     const tasksDir = makeTasksDir('in-scope.ts');
     const entry = runEnrichment({ ticket: 'TICKET-1', tasksDir, worktreeDir: worktree });
-    assert.match(entry.agentPrompt, /^\/work-workflow:check2 TICKET-1/);
+    assert.match(entry.agentPrompt, /^\/work-workflow:check TICKET-1/);
     assert.match(entry.agentPrompt, /Scope-diff summary/);
     assert.match(entry.agentPrompt, /Gate E/);
     assert.ok(!entry.agentPrompt.includes('.claude.json.backup.123'));
@@ -222,6 +222,6 @@ describe('registerCheck — check2 delegate prompt', () => {
       !entry.agentPrompt.includes('unaccounted:'),
       'must not emit counts from the wrong repo'
     );
-    assert.ok(!/plugins\/work\//.test(entry.agentPrompt.replace('/work-workflow:check2', '')));
+    assert.ok(!/plugins\/work\//.test(entry.agentPrompt.replace('/work-workflow:check', '')));
   });
 });

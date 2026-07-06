@@ -42,7 +42,7 @@ function returnInstruction(entry, ctx, log) {
  * `worktreeDir` is the canonical ticket worktree; enrichments that shell
  * out to git (e.g. the check step's Gate E scope-diff) MUST use it, or
  * they end up diffing the plugin checkout (ECHO-5818/5821: 240 phantom
- * "unaccounted" plugin files injected into the check2 prompt).
+ * "unaccounted" plugin files injected into the check prompt).
  */
 function buildEnrichCtx(env, loop) {
   const enrichWorktreeDir =

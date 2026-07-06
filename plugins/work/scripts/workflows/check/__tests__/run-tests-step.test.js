@@ -1,5 +1,5 @@
 /**
- * Step-level tests for check2 4_run_tests (GH-394): crash-vs-fail reporting,
+ * Step-level tests for check 4_run_tests (GH-394): crash-vs-fail reporting,
  * flake-aware single retry (FLAKY = pass with warning), baseline net-new vs
  * pre-existing split, and the canonical `**Status:**` report line.
  *
@@ -256,7 +256,7 @@ describe('4_run_tests — baseline location (PR #669 review)', () => {
       assert.equal(result, null);
       assert.ok(
         fs.existsSync(path.join(tasksDir, BASELINE_FILE)),
-        'baseline must live in the tasks dir (same place the check2 state lives)'
+        'baseline must live in the tasks dir (same place the check state lives)'
       );
       assert.equal(
         fs.existsSync(path.join(dir, BASELINE_FILE)),

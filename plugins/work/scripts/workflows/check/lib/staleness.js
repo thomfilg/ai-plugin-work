@@ -1,8 +1,8 @@
 /**
- * staleness.js — SHA-keyed staleness + severity assessment for /check2 state
+ * staleness.js — SHA-keyed staleness + severity assessment for /check state
  * (GH-307, echo-5213-3, echo-5804-004, echo-5808-C).
  *
- * A terminal `.check2-state.json` (status complete/needs_work) is only
+ * A terminal `.check-state.json` (status complete/needs_work) is only
  * trustworthy while the code it verified is unchanged. This module answers,
  * deterministically:
  *
@@ -17,9 +17,8 @@
  *   - valid:      SHAs match and every present required report passes →
  *                 "still valid, nothing to do".
  *
- * Hash semantics mirror check-setup.js generateChangesHash() and the legacy
- * check.workflow.js getCurrentChangesHash(): 12-char SHA-256 of the
- * whitespace-insensitive diff, or 'no-changes'.
+ * Hash semantics mirror check-setup.js generateChangesHash(): 12-char
+ * SHA-256 of the whitespace-insensitive diff, or 'no-changes'.
  */
 
 'use strict';
@@ -41,7 +40,7 @@ const REQUIRED_REPORTS = [
 ];
 
 // Matches the `**Changes Hash:** <hash>` header written by report templates
-// and write-qa-report.js. Same pattern as check.workflow.js reportHasMatchingHash.
+// and write-qa-report.js.
 const CHANGES_HASH_RE = /\*\*Changes Hash:\*\*\s*([a-f0-9]{12}|no-changes)/;
 
 function safeExec(cmd, cwd) {
@@ -162,9 +161,9 @@ function driftReasons(state, recordedHash, currentHash, currentHead) {
 }
 
 /**
- * Assess a terminal check2 state against the current working tree.
+ * Assess a terminal check state against the current working tree.
  *
- * @param {object} state - Parsed .check2-state.json
+ * @param {object} state - Parsed .check-state.json
  * @param {string} reportFolder - Folder containing *.check.md reports
  * @param {{currentHash?:string|null,currentHead?:string|null,cwd?:string}} [probes]
  *        Test/caller injection: pre-computed SHAs, or a cwd to compute them in.
@@ -198,7 +197,7 @@ function assessTerminalState(state, reportFolder, probes = {}) {
 }
 
 /**
- * Record completion SHAs on the check2 state (GH-307 acceptance: store
+ * Record completion SHAs on the check state (GH-307 acceptance: store
  * completedHeadSha + completedChangesHash at the moment `complete` is set).
  * @param {object} state - Mutated in place
  * @param {{currentHead?:string|null,cwd?:string}} [probes]

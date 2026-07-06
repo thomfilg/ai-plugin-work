@@ -1,5 +1,5 @@
 /**
- * test-run-analysis.js — shared crash/flake/count parsing for the /check2 test
+ * test-run-analysis.js — shared crash/flake/count parsing for the /check test
  * runner steps (GH-394: echo-4491-003, echo-4492-001, echo-5137-4).
  *
  * The raw `exitCode !== 0` heuristic conflates three very different outcomes:

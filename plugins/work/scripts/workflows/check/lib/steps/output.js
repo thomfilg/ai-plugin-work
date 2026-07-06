@@ -45,7 +45,7 @@ module.exports = function registerOutput(register) {
           `Check finished but is NOT approved — ` +
           blocking.map((r) => `${r.file} parses as ${r.status}`).join('; ') +
           ` at the current changes hash (${state.changesHash || 'unknown'}). ` +
-          `Fix the reported issues and commit; the next /check2 run starts a fresh cycle.`,
+          `Fix the reported issues and commit; the next /check run starts a fresh cycle.`,
         reports,
       };
     }

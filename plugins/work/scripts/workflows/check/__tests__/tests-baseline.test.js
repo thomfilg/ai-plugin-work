@@ -1,5 +1,5 @@
 /**
- * Tests for check2/lib/tests-baseline.js (GH-394, echo-5137-4 partial):
+ * Tests for check/lib/tests-baseline.js (GH-394, echo-5137-4 partial):
  * cached tests-baseline.json read/write and the net-new vs pre-existing split.
  */
 

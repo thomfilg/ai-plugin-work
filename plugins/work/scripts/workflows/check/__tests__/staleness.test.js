@@ -1,5 +1,5 @@
 /**
- * Tests for check2/lib/staleness.js — SHA-keyed staleness + severity gating
+ * Tests for check/lib/staleness.js — SHA-keyed staleness + severity gating
  * (GH-307, echo-5213-3, echo-5804-004, echo-5808-C).
  *
  * node:test + node:assert/strict; temp report folders via fs.mkdtempSync.

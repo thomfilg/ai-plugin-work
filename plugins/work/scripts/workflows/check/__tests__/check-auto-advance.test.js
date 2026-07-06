@@ -1,8 +1,8 @@
 /**
- * Tests for check-auto-advance.js — PostToolUse hook for /check2.
+ * Tests for check-auto-advance.js — PostToolUse hook for /check.
  *
  * Regression guard: with multiple agents sharing one TASKS_BASE, a hook firing in
- * session/worktree B must NEVER advance a /check2 workflow owned by A.
+ * session/worktree B must NEVER advance a /check workflow owned by A.
  *
  * node:test + node:assert/strict; temp TASKS_BASE via fs.mkdtempSync.
  */
@@ -15,7 +15,7 @@ const os = require('os');
 const path = require('path');
 
 const hookPath = path.join(__dirname, '..', 'hooks', 'check-auto-advance.js');
-const MARKER = '.check2-orchestrator.pid';
+const MARKER = '.check-orchestrator.pid';
 const BANNER = 'CHECK2'; // printed only when the hook actually advances
 
 let TASKS_BASE;
@@ -40,7 +40,7 @@ function writeMarker(ticket, fields) {
   fs.mkdirSync(dir, { recursive: true });
   fs.writeFileSync(
     path.join(dir, MARKER),
-    JSON.stringify({ ticket, startedAt: new Date().toISOString(), workflow: '/check2', ...fields })
+    JSON.stringify({ ticket, startedAt: new Date().toISOString(), workflow: '/check', ...fields })
   );
 }
 

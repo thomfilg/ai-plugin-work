@@ -1,5 +1,5 @@
 /**
- * Tests for check2/lib/run-affected-suite.js (GH-394): crash-vs-fail
+ * Tests for check/lib/run-affected-suite.js (GH-394): crash-vs-fail
  * classification in the shared suite step, the canonical `**Status:**` line,
  * and the e2e Spec Scoping report section (echo-5224).
  */

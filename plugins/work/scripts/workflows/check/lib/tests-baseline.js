@@ -1,11 +1,11 @@
 /**
- * tests-baseline.js — net-new vs pre-existing failure split for the /check2
+ * tests-baseline.js — net-new vs pre-existing failure split for the /check
  * test runner (GH-394, echo-5137-4 partial).
  *
  * Answers "did MY changes regress tests?" instead of "is the whole repo
  * green?". Running the suite at origin/<BASE> is too expensive inline, so we
  * keep a cached baseline file (`tests-baseline.json`) in the ticket TASKS dir
- * (same place `.check2-state.json` lives — writing it to the consumer repo
+ * (same place `.check-state.json` lives — writing it to the consumer repo
  * root polluted worktrees and made 7_quality_recheck's `git status
  * --porcelain` trigger fire on every run; PR #669 review):
  *

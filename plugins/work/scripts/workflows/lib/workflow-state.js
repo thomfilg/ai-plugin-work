@@ -271,7 +271,7 @@ function findWorkflowFile(name) {
     // Check directly in the base dir
     let p = path.join(baseDir, fileName);
     if (fs.existsSync(p)) return p;
-    // Check in subdirectory named after the workflow (e.g. workflows/check/check.workflow.js)
+    // Check in subdirectory named after the workflow (e.g. workflows/work-pr/work-pr.workflow.js)
     p = path.join(baseDir, name, fileName);
     if (fs.existsSync(p)) return p;
   }

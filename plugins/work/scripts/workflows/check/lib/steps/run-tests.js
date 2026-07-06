@@ -321,7 +321,7 @@ function failureReason({ outcome, analysis, delta, baseline }) {
 
 // Baseline delta (echo-5137-4): split failures into net-new vs
 // pre-existing when a cached baseline exists; refresh it on green runs.
-// The baseline lives in the ticket TASKS dir (same place .check2-state.json
+// The baseline lives in the ticket TASKS dir (same place .check-state.json
 // lives) — writing it to the app worktree root polluted consumer repos and
 // made 7_quality_recheck's `git status --porcelain` trigger fire every run
 // (PR #669 review).
@@ -394,5 +394,5 @@ function registerRunTests(register) {
 module.exports = registerRunTests;
 module.exports.runQualityGate = runQualityGate;
 // Shared single command runner — also used by lib/run-affected-suite.js so the
-// whole /check2 subsystem has one combined-stdout/stderr exec site.
+// whole /check subsystem has one combined-stdout/stderr exec site.
 module.exports.runCommand = runCommand;

@@ -429,18 +429,17 @@ describe('session-guard', () => {
       } catch {}
     });
 
-    function writeCheckState(workflow, status) {
-      const statePath = path.join(TEMP_TASKS, CHECK_TICKET, '.check.workflow-state.json');
-      fs.writeFileSync(
-        statePath,
-        JSON.stringify({ workflow, instanceId: CHECK_TICKET, status, stepStatus: {} })
-      );
+    function writeCheckState(state, fileName = '.check-state.json') {
+      const statePath = path.join(TEMP_TASKS, CHECK_TICKET, fileName);
+      fs.writeFileSync(statePath, JSON.stringify({ ticketId: CHECK_TICKET, ...state }));
     }
 
     function removeCheckState() {
-      try {
-        fs.unlinkSync(path.join(TEMP_TASKS, CHECK_TICKET, '.check.workflow-state.json'));
-      } catch {}
+      for (const fileName of ['.check-state.json', '.check2-state.json']) {
+        try {
+          fs.unlinkSync(path.join(TEMP_TASKS, CHECK_TICKET, fileName));
+        } catch {}
+      }
     }
 
     afterEach(() => {
@@ -450,13 +449,24 @@ describe('session-guard', () => {
 
     it('allows stop when /check workflow is active', async () => {
       await runCli(['init', CHECK_TICKET, '/work'], { WORKTREES_BASE: TEMP_WB });
-      writeCheckState('check', 'in_progress');
+      writeCheckState({ status: 'in_progress', currentStep: '1_setup' });
 
       const r = await runHook({ stop_message: '' }, 'Stop', {
         WORKTREES_BASE: TEMP_WB,
         SESSION_GUARD_TICKET_ID: CHECK_TICKET,
       });
       assert.equal(r.code, 0, 'should allow stop when /check is active');
+    });
+
+    it('allows stop when /check is active under the legacy .check2-state.json name', async () => {
+      await runCli(['init', CHECK_TICKET, '/work'], { WORKTREES_BASE: TEMP_WB });
+      writeCheckState({ status: 'in_progress', currentStep: '1_setup' }, '.check2-state.json');
+
+      const r = await runHook({ stop_message: '' }, 'Stop', {
+        WORKTREES_BASE: TEMP_WB,
+        SESSION_GUARD_TICKET_ID: CHECK_TICKET,
+      });
+      assert.equal(r.code, 0, 'should allow stop when the legacy check state is active');
     });
 
     it('still blocks stop when /check is NOT active', async () => {
@@ -472,7 +482,7 @@ describe('session-guard', () => {
 
     it('still blocks stop when /check has completed', async () => {
       await runCli(['init', CHECK_TICKET, '/work'], { WORKTREES_BASE: TEMP_WB });
-      writeCheckState('check', 'completed');
+      writeCheckState({ status: 'complete' });
 
       const r = await runHook({ stop_message: '' }, 'Stop', {
         WORKTREES_BASE: TEMP_WB,

@@ -1,6 +1,6 @@
 /**
  * Tests for impact-aware unit-test selection (echo-5820-3):
- * check2's affected tier is changed-files-only, so api-contract changes miss
+ * check's affected tier is changed-files-only, so api-contract changes miss
  * consumer-test breakage. computeImpactTests adds the one-hop set — test
  * files that import (reference the basename stem of) any changed source
  * file — exported to SCRIPT_RUN_AFFECTED_UNIT as IMPACT_TEST_FILES.

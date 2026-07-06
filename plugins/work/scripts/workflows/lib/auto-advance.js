@@ -1,6 +1,6 @@
 /**
  * Shared runner for the PostToolUse auto-advance hooks
- * (follow-up/hooks/follow-up-auto-advance.js, check2/hooks/check-auto-advance.js).
+ * (follow-up/hooks/follow-up-auto-advance.js, check/hooks/check-auto-advance.js).
  *
  * Both hooks do the same thing — install fail-open guards, read the hook
  * payload from stdin, find this terminal's orchestrator pid marker, run the

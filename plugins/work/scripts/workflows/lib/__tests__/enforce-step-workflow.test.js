@@ -5239,7 +5239,6 @@ describe('enforce-step-workflow', () => {
         'work-pr-reviewer',
         'work-task-review',
         'work-reports',
-        'check2',
         'follow-up',
       ];
       for (const sib of siblings) {

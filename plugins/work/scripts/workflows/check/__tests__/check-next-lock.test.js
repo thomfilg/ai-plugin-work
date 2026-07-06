@@ -43,15 +43,15 @@ describe('check-next.js — per-ticket lock', () => {
     const ticketDir = path.join(TASKS_BASE, 'GH-611');
     fs.mkdirSync(ticketDir, { recursive: true });
     // Simulate a concurrent live invocation: fresh lock owned by a live pid
-    fs.writeFileSync(path.join(ticketDir, '.check2-next.lock'), String(process.pid));
+    fs.writeFileSync(path.join(ticketDir, '.check-next.lock'), String(process.pid));
 
     const out = runCheckNext('GH-611');
     assert.equal(out.type, 'check_instruction');
     assert.equal(out.action, 'locked');
     assert.match(out.reason, /already running/i);
     // The loser must not have executed steps: no state file was created
-    assert.equal(fs.existsSync(path.join(ticketDir, '.check2-state.json')), false);
+    assert.equal(fs.existsSync(path.join(ticketDir, '.check-state.json')), false);
     // And it must not have stolen the lock
-    assert.equal(fs.existsSync(path.join(ticketDir, '.check2-next.lock')), true);
+    assert.equal(fs.existsSync(path.join(ticketDir, '.check-next.lock')), true);
   });
 });

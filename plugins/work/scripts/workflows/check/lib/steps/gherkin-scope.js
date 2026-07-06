@@ -171,7 +171,7 @@ module.exports = function registerGherkinScope(register) {
           `${result.reasons.join(' | ')}. ` +
           `The implementation's actual scope exceeds what spec.md declared — transition back to the ` +
           `spec step and add the missing tagged scenario(s) to \`## Test Scenarios (Gherkin)\` ` +
-          `(or drop the gherkin-skip override), then re-run /check2.`,
+          `(or drop the gherkin-skip override), then re-run /check.`,
         report: reportPath,
       };
     }

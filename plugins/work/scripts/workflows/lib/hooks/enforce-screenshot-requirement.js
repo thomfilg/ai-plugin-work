@@ -170,7 +170,7 @@ function blockIfNoScreenshots(hookData) {
   // Skip screenshot enforcement when no web apps are configured (GH-181).
   // Resolve WEB_APPS through lib/config (dotenv-aware): a raw process.env
   // read misses values that live only in the repo/cwd .env file (PR #628
-  // finding — same fix as check2 validate-summary/verify-playwright). The
+  // finding — same fix as check validate-summary/verify-playwright). The
   // old "circular dependency" concern was stale: this hook already requires
   // ../config in getScreenshotDir. Fail-open on config load errors so a
   // misconfigured environment never bricks the hook.

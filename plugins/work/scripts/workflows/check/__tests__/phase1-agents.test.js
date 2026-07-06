@@ -1,5 +1,5 @@
 /**
- * Tests for check2 step 5_phase1_agents (GH-611, GH-343).
+ * Tests for check step 5_phase1_agents (GH-611, GH-343).
  *
  * - 0-byte reports are treated as MISSING (not present).
  * - Per-report completion is sticky: a report observed once stays done even

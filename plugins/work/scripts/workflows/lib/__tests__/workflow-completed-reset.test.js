@@ -2,8 +2,8 @@
  * Tests for the GH-307 completed-state SHA gate:
  *   - workflow-engine resolveCompletedState() — archive-on-drift / refuse-on-match
  *   - WorkflowState.archive() — audit-trail archival, never silent deletion
- *   - check.workflow.js completedStaleCheck() — the SHA conditions themselves
- *     (probes injected, no git required)
+ *     (per-workflow completedStaleCheck SHA conditions are covered by the
+ *     script-driven check tests in workflows/check/__tests__/staleness.test.js)
  *
  * node:test + node:assert/strict; temp state dirs via fs.mkdtempSync.
  */
@@ -102,76 +102,5 @@ describe('resolveCompletedState', () => {
     const res = resolveCompletedState(wf, st, 'T-1');
     assert.equal(res.reset, false);
     assert.ok(st.load('T-1'));
-  });
-});
-
-describe('check.workflow.js completedStaleCheck (GH-307 SHA conditions)', () => {
-  const checkWorkflow = require(path.join(__dirname, '..', '..', 'check', 'check.workflow.js'));
-
-  function writeReport(file, hash) {
-    fs.writeFileSync(
-      path.join(dir, file),
-      [`**Changes Hash:** ${hash}`, '', 'Status: APPROVED'].join('\n')
-    );
-  }
-
-  it('stale when the changes hash drifted', () => {
-    const res = checkWorkflow.completedStaleCheck(
-      'T-1',
-      { completedChangesHash: HASH_A },
-      { currentHash: HASH_B, currentHead: HEAD_A, reportFolder: dir }
-    );
-    assert.equal(res.stale, true);
-    assert.match(res.reasons[0], /changes hash/);
-  });
-
-  it('stale when HEAD drifted', () => {
-    const res = checkWorkflow.completedStaleCheck(
-      'T-1',
-      { completedChangesHash: HASH_A, completedHeadSha: HEAD_A },
-      { currentHash: HASH_A, currentHead: HEAD_B, reportFolder: dir }
-    );
-    assert.equal(res.stale, true);
-    assert.match(res.reasons[0], /HEAD/);
-  });
-
-  it("stale when a report's Changes Hash does not match the current hash", () => {
-    writeReport('code-review.check.md', HASH_B);
-    const res = checkWorkflow.completedStaleCheck(
-      'T-1',
-      { completedChangesHash: HASH_A, completedHeadSha: HEAD_A },
-      { currentHash: HASH_A, currentHead: HEAD_A, reportFolder: dir }
-    );
-    assert.equal(res.stale, true);
-    assert.match(res.reasons[0], /code-review\.check\.md/);
-  });
-
-  it('not stale when every SHA matches', () => {
-    writeReport('code-review.check.md', HASH_A);
-    writeReport('tests.check.md', HASH_A);
-    const res = checkWorkflow.completedStaleCheck(
-      'T-1',
-      { completedChangesHash: HASH_A, completedHeadSha: HEAD_A },
-      { currentHash: HASH_A, currentHead: HEAD_A, reportFolder: dir }
-    );
-    assert.equal(res.stale, false);
-  });
-
-  it('legacy state without completion SHAs falls back to README hash anchoring', () => {
-    // README missing/mismatching → stale (cannot prove the completion covers current diff)
-    const res = checkWorkflow.completedStaleCheck(
-      'T-1',
-      {},
-      { currentHash: HASH_A, currentHead: HEAD_A, reportFolder: dir }
-    );
-    assert.equal(res.stale, true);
-
-    fs.writeFileSync(path.join(dir, 'README.md'), `**Changes Hash:** ${HASH_A}\n`);
-    const res2 = checkWorkflow.completedStaleCheck(
-      'T-1',
-      {},
-      { currentHash: HASH_A, currentHead: HEAD_A, reportFolder: dir }
-    );
-    assert.equal(res2.stale, false);
   });
 });

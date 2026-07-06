@@ -1,5 +1,5 @@
 /**
- * Tests for check2/lib/changed-specs.js (GH-394, echo-5224):
+ * Tests for check/lib/changed-specs.js (GH-394, echo-5224):
  * the reliability sweep must be scoped to actually-changed spec files
  * (git diff origin/BASE...HEAD), keeping unchanged-but-required specs that
  * import a changed helper, and noting skipped same-directory siblings.

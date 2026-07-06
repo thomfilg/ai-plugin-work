@@ -2,16 +2,16 @@
  * Check dispatch-advance gate.
  *
  * Handles three cases:
- * 1. check2 reached a terminal state → verify the completion is SHA-fresh
+ * 1. check reached a terminal state → verify the completion is SHA-fresh
  *    and the reports at the matching changes hash actually pass BEFORE
  *    advancing to PR (echo-5213-3 / echo-5804-004: the orchestrator used to
  *    advance past check purely on `.check2-state.json: status complete`,
  *    even when the cached reports still said NEEDS_WORK or the diff had
  *    changed since).
- *      - stale (hash/HEAD drift)   → re-dispatch /check2 (it auto-resets)
+ *      - stale (hash/HEAD drift)   → re-dispatch /check (it auto-resets)
  *      - NEEDS_WORK at match hash  → REFUSE to advance (blocked)
  *      - valid                     → advance to pr
- * 2. check2 tests failed → transition back to implement
+ * 2. check tests failed → transition back to implement
  */
 
 'use strict';
@@ -20,12 +20,12 @@ const fs = require('fs');
 const path = require('path');
 const { ALL_STEPS } = require(path.join(__dirname, '..', '..', '..', 'work', 'step-registry'));
 const { assessTerminalState, recordCompletion } = require(
-  path.join(__dirname, '..', '..', '..', 'check2', 'lib', 'staleness')
+  path.join(__dirname, '..', '..', '..', 'check', 'lib', 'staleness')
 );
 
 /**
- * Diff/HEAD changed since check2 completed — the completion no longer
- * covers the current code. Re-dispatch /check2; its SHA-gated reset
+ * Diff/HEAD changed since check completed — the completion no longer
+ * covers the current code. Re-dispatch /check; its SHA-gated reset
  * starts a fresh cycle automatically.
  */
 function redispatchStaleCheck(gate, ws, assessment) {
@@ -49,7 +49,7 @@ function refuseNeedsWork(gate, assessment) {
   const reasons =
     assessment.reasons.length > 0
       ? assessment.reasons
-      : ['check2 state is needs_work at the current changes hash'];
+      : ['check state is needs_work at the current changes hash'];
   if (deps.log) {
     deps.log.error(`check→pr REFUSED: ${reasons.join('; ')}`);
   }
@@ -59,7 +59,7 @@ function refuseNeedsWork(gate, assessment) {
     state: { ...(ctx.stateCtx || {}), currentStep: 'check' },
     reason: `Cannot advance past check: ${reasons.join('; ')}.`,
     suggestion:
-      'Fix the issues in the failing report(s) and commit. The next /check2 run detects ' +
+      'Fix the issues in the failing report(s) and commit. The next /check run detects ' +
       'the new changes hash and starts a fresh cycle — do NOT delete state files or reports.',
     reports: assessment.reports,
   };
@@ -67,7 +67,7 @@ function refuseNeedsWork(gate, assessment) {
 
 /**
  * When the stored status is still 'needs_work' (reports re-written APPROVED
- * at the same hash) promote the check2 state file so the record matches —
+ * at the same hash) promote the check state file so the record matches —
  * the mirror of check-next.js answerStillValid's promotion (livelock fix,
  * PR #669 review).
  */
@@ -93,13 +93,13 @@ function advanceCheckToPr(gate, ws) {
   deps.saveWorkState(safeName, ws);
 
   if (deps.log) {
-    deps.log.recurse(deps.recursionDepth, 'check→pr (check2 complete)');
+    deps.log.recurse(deps.recursionDepth, 'check→pr (check complete)');
   }
 
   return { recurse: true };
 }
 
-/** Case 1: check2 reached a terminal state → validate before advancing. */
+/** Case 1: check reached a terminal state → validate before advancing. */
 function handleTerminalState(gate, checkState, ws) {
   // Compute the current SHAs inside the TICKET worktree (never the
   // orchestrator's cwd). deps.probes is a test-injection point.
@@ -145,7 +145,13 @@ function handleTestsFailed(gate, ws) {
  * @returns {null | { recurse: true } | object}
  */
 function dispatchAdvanceGate(safeName, ctx, deps) {
-  const checkStatePath = path.join(ctx.tasksDir, '.check2-state.json');
+  // Canonical state file, falling back to the legacy .check2-state.json name
+  // for in-flight tickets that predate the check2 → check rename.
+  let checkStatePath = path.join(ctx.tasksDir, '.check-state.json');
+  if (!fs.existsSync(checkStatePath)) {
+    const legacyPath = path.join(ctx.tasksDir, '.check2-state.json');
+    if (fs.existsSync(legacyPath)) checkStatePath = legacyPath;
+  }
   let checkState;
   try {
     checkState = JSON.parse(fs.readFileSync(checkStatePath, 'utf8'));
@@ -158,7 +164,7 @@ function dispatchAdvanceGate(safeName, ctx, deps) {
 
   const gate = { safeName, ctx, deps, checkStatePath };
 
-  // Case 1: check2 reached a terminal state → validate before advancing.
+  // Case 1: check reached a terminal state → validate before advancing.
   if (checkState.status === 'complete' || checkState.status === 'needs_work') {
     return handleTerminalState(gate, checkState, ws);
   }

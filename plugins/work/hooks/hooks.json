@@ -105,7 +105,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/check/hooks/enforce-env-start-failure.js"
+            "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/lib/hooks/enforce-env-start-failure.js"
           },
           {
             "type": "command",
@@ -155,7 +155,7 @@
           },
           {
             "type": "command",
-            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/check2/hooks/check-auto-advance.js"
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/check/hooks/check-auto-advance.js"
           },
           {
             "type": "command",
@@ -191,7 +191,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "CLAUDE_HOOK_TYPE=PostToolUse node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/check/hooks/enforce-env-start-failure.js"
+            "command": "CLAUDE_HOOK_TYPE=PostToolUse node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/lib/hooks/enforce-env-start-failure.js"
           },
           {
             "type": "command",
@@ -204,7 +204,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "CLAUDE_HOOK_TYPE=PostToolUse node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/check/hooks/enforce-env-start-failure.js"
+            "command": "CLAUDE_HOOK_TYPE=PostToolUse node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/lib/hooks/enforce-env-start-failure.js"
           }
         ]
       },

@@ -52,7 +52,7 @@ function writeKindSection(tasksDir, results) {
   if (next !== text) {
     try {
       // Atomic tmp + rename: a plain writeFileSync truncates first, leaving a
-      // 0-byte window that races with the /check2 orchestrator's report scan
+      // 0-byte window that races with the /check orchestrator's report scan
       // and the sibling checker (GH-611 clobber race).
       const tmp = `${p}.${process.pid}.tmp`;
       fs.writeFileSync(tmp, next);

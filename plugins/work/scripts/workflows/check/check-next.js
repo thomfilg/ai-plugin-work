@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * check-next.js — Script-driven orchestrator for /check2.
+ * check-next.js — Script-driven orchestrator for /check.
  *
  * Outputs a SINGLE instruction. Auto-advance hook calls this after each step.
  *
@@ -54,17 +54,36 @@ const { runStep, STEPS } = require(path.join(__dirname, 'lib', 'step-registry'))
 const { acquireLock, releaseLock } = require(path.join(__dirname, 'lib', 'report-utils'));
 const { assessTerminalState, recordCompletion } = require(path.join(__dirname, 'lib', 'staleness'));
 
-const checkHooksDir = path.join(__dirname, '..', 'check', 'hooks');
+const checkHooksDir = path.join(__dirname, 'hooks');
 
 // ─── State management ───────────────────────────────────────────────────────
 
 function stateFile(safeName) {
-  return path.join(TASKS_BASE, safeName, '.check2-state.json');
+  return path.join(TASKS_BASE, safeName, '.check-state.json');
+}
+
+// One-time migration: the state file was named .check2-state.json before the
+// check2 → check merge. If the new canonical file is absent but the legacy
+// one exists, rename it in place so in-flight tickets keep their state.
+function migrateLegacyState(safeName) {
+  const target = stateFile(safeName);
+  const legacy = path.join(TASKS_BASE, safeName, '.check2-state.json');
+  try {
+    if (!fs.existsSync(target) && fs.existsSync(legacy)) {
+      fs.renameSync(legacy, target);
+    }
+  } catch {
+    // Rename can fail (permissions, races) — fall back to reading the legacy
+    // path directly so state is never lost.
+    return legacy;
+  }
+  return target;
 }
 
 function loadState(safeName) {
+  const target = migrateLegacyState(safeName);
   try {
-    return JSON.parse(fs.readFileSync(stateFile(safeName), 'utf8'));
+    return JSON.parse(fs.readFileSync(target, 'utf8'));
   } catch {
     return null;
   }
@@ -139,7 +158,7 @@ function answerNeedsWork(safeName, state, assessment) {
       state: { ticket: safeName, currentStep: state.currentStep },
       reason:
         `Check is NOT complete: ${assessment.reasons.join('; ')}. ` +
-        `Fix the reported issues and commit — the next /check2 run will detect the new ` +
+        `Fix the reported issues and commit — the next /check run will detect the new ` +
         `changes hash and start a fresh cycle automatically.`,
       reports: assessment.reports,
     },
@@ -332,11 +351,11 @@ function main() {
     const markerDir = path.join(TASKS_BASE, safeName);
     fs.mkdirSync(markerDir, { recursive: true });
     fs.writeFileSync(
-      path.join(markerDir, '.check2-orchestrator.pid'),
+      path.join(markerDir, '.check-orchestrator.pid'),
       JSON.stringify({
         ticket: safeName,
         startedAt: new Date().toISOString(),
-        workflow: '/check2',
+        workflow: '/check',
         ...ownerStamp(),
       })
     );
@@ -346,7 +365,7 @@ function main() {
   // check-next.js invocation must not interleave (GH-611). Losing the race is
   // benign — the holder will emit the next instruction; we just report and
   // exit (action 'locked' has no banner in the hook, so it stays silent).
-  const lockPath = path.join(TASKS_BASE, safeName, '.check2-next.lock');
+  const lockPath = path.join(TASKS_BASE, safeName, '.check-next.lock');
   if (!acquireLock(lockPath)) {
     console.log(
       JSON.stringify(

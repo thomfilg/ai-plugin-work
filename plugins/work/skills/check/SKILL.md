@@ -1,17 +1,17 @@
 ---
-name: check2
+name: check
 description: Script-driven quality check (code review, tests, requirements verification)
 user_invocable: true
 ---
 
-# /check2 — Script-Driven Quality Check
+# /check — Script-Driven Quality Check
 
 Run the check-next.js orchestrator for the given ticket. It returns ONE instruction at a time.
 
 ## Usage
 
 ```bash
-node "${CLAUDE_PLUGIN_ROOT}/scripts/workflows/check2/check-next.js" <TICKET_ID> --init
+node "${CLAUDE_PLUGIN_ROOT}/scripts/workflows/check/check-next.js" <TICKET_ID> --init
 ```
 
 Execute the returned instruction. The PostToolUse auto-advance hook will call check-next.js again after each step completes.
@@ -33,7 +33,7 @@ Execute the returned instruction. The PostToolUse auto-advance hook will call ch
 
 Only the Phase 1 / Phase 2 steps (`5_phase1_agents`, `6_phase2_consensus`) require
 AI agent delegation — every other step is deterministic and executes inline.
-The canonical step order lives in `scripts/workflows/check2/lib/step-registry.js`.
+The canonical step order lives in `scripts/workflows/check/lib/step-registry.js`.
 
 ## Agent dispatch rules (MANDATORY)
 

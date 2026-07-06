@@ -18,7 +18,7 @@
 
 const path = require('path');
 // Reuse the single command runner from run-tests.js rather than spawning here —
-// one combined-output exec site for the whole /check2 subsystem.
+// one combined-output exec site for the whole /check subsystem.
 const { runCommand } = require('./steps/run-tests');
 const { writeReportAtomic } = require('./report-utils');
 const { classifyRun } = require('./test-run-analysis');

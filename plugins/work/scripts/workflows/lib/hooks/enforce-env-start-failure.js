@@ -20,8 +20,10 @@
 
 const fs = require('fs');
 const path = require('path');
-const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
-const { ACCESS_FAILED } = require(path.join(__dirname, '..', 'lib', 'app-access-status'));
+const { logHookError } = require(path.join(__dirname, '..', 'hook-error-log'));
+const { ACCESS_FAILED } = require(
+  path.join(__dirname, '..', '..', 'check', 'lib', 'app-access-status')
+);
 
 let didBlock = false;
 process.on('uncaughtException', (err) => {
@@ -35,13 +37,9 @@ process.on('unhandledRejection', (err) => {
 
 let config;
 try {
-  config = require('../../lib/config');
+  config = require('../config');
 } catch (err) {
-  if (
-    err &&
-    err.code === 'MODULE_NOT_FOUND' &&
-    /['"]\.\.\/\.\.\/lib\/config['"]/.test(err.message)
-  ) {
+  if (err && err.code === 'MODULE_NOT_FOUND' && /['"]\.\.\/config['"]/.test(err.message)) {
     config = null;
   } else {
     throw err;

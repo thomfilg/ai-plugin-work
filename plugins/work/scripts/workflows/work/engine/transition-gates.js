@@ -32,7 +32,7 @@ function getPostCheckSteps(allSteps, STEPS) {
     //   - post-merge steps 'cleanup' and 'reports' (echo-4465 issue 5): once
     //     the PR is merged, HEAD legitimately moves (merge commit, main
     //     pull) — firing the drift gate from cleanup/reports rewound a
-    //     COMPLETED check back to in_progress and looped /check2 ("Already
+    //     COMPLETED check back to in_progress and looped /check ("Already
     //     complete") forever. Drift detection is only meaningful while the
     //     verified code can still change before merge (pr/ready/follow_up/ci).
     _postCheckSteps = new Set(

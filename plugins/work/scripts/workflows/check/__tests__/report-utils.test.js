@@ -1,5 +1,5 @@
 /**
- * Tests for check2/lib/report-utils.js (GH-611, GH-343).
+ * Tests for check/lib/report-utils.js (GH-611, GH-343).
  *
  * - reportPresent/reportStatus: 0-byte report counts as MISSING ('empty').
  * - writeReportAtomic: content lands atomically, no tmp litter.
@@ -79,7 +79,7 @@ describe('writeReportAtomic', () => {
 
 describe('acquireLock / releaseLock — mutual exclusion', () => {
   it('second acquire fails while the (live) lock is held', () => {
-    const lock = path.join(dir, '.check2-next.lock');
+    const lock = path.join(dir, '.check-next.lock');
     assert.equal(acquireLock(lock), true);
     // Our own pid is alive and the file is fresh → held
     assert.equal(acquireLock(lock), false);
@@ -89,7 +89,7 @@ describe('acquireLock / releaseLock — mutual exclusion', () => {
   });
 
   it('reclaims a lock whose owning pid is dead', () => {
-    const lock = path.join(dir, '.check2-next.lock');
+    const lock = path.join(dir, '.check-next.lock');
     // Spawn a process that exits immediately, so the pid is dead but plausible
     const { spawnSync } = require('child_process');
     const child = spawnSync(process.execPath, ['-e', 'process.exit(0)']);
@@ -99,7 +99,7 @@ describe('acquireLock / releaseLock — mutual exclusion', () => {
   });
 
   it('reclaims a lock older than staleMs even when the pid is unparseable', () => {
-    const lock = path.join(dir, '.check2-next.lock');
+    const lock = path.join(dir, '.check-next.lock');
     fs.writeFileSync(lock, 'not-a-pid');
     const past = new Date(Date.now() - 60000);
     fs.utimesSync(lock, past, past);
@@ -108,7 +108,7 @@ describe('acquireLock / releaseLock — mutual exclusion', () => {
   });
 
   it('does NOT reclaim a fresh lock with an unparseable pid', () => {
-    const lock = path.join(dir, '.check2-next.lock');
+    const lock = path.join(dir, '.check-next.lock');
     fs.writeFileSync(lock, 'not-a-pid');
     assert.equal(acquireLock(lock, { staleMs: 30000 }), false);
   });

@@ -73,7 +73,7 @@ function discoverWorkflows() {
 
 /**
  * Locate <name>.workflow.js directly in a base dir or in a subdirectory named
- * after the workflow (e.g. workflows/check/check.workflow.js).
+ * after the workflow (e.g. workflows/work-pr/work-pr.workflow.js).
  */
 function findWorkflowFile(fileName, name) {
   for (const baseDir of [PLUGIN_WORKFLOWS_DIR, GLOBAL_WORKFLOWS_DIR]) {

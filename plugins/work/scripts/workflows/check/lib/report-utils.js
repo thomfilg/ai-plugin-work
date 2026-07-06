@@ -1,5 +1,5 @@
 /**
- * report-utils.js — shared helpers for /check2 report artifacts and
+ * report-utils.js — shared helpers for /check report artifacts and
  * orchestrator serialization (GH-611, GH-343).
  *
  * - reportPresent():   a *.check.md report only counts when it exists AND is

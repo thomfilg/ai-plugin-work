@@ -6,7 +6,7 @@
  * (pr/ready/follow_up/ci) but was also firing from post-merge steps
  * (cleanup → reports), where HEAD legitimately moves (merge commit / main
  * pull) — silently rewinding a COMPLETED check to in_progress and looping
- * /check2. The gate must NOT fire from cleanup or reports.
+ * /check. The gate must NOT fire from cleanup or reports.
  *
  * Strategy: same DI-stub harness as transition-step-gate-fingerprint.test.js
  * — no real fs/git; getHeadSha stubbed to simulate drift.

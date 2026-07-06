@@ -89,7 +89,7 @@ function writeReport(file, status, hash) {
 
 function writeCompleteState(overrides = {}) {
   fs.writeFileSync(
-    path.join(ticketDir, '.check2-state.json'),
+    path.join(ticketDir, '.check-state.json'),
     JSON.stringify(
       {
         ticketId: TICKET,
@@ -108,7 +108,7 @@ function writeCompleteState(overrides = {}) {
 }
 
 function loadState() {
-  return JSON.parse(fs.readFileSync(path.join(ticketDir, '.check2-state.json'), 'utf8'));
+  return JSON.parse(fs.readFileSync(path.join(ticketDir, '.check-state.json'), 'utf8'));
 }
 
 beforeEach(() => {
@@ -280,7 +280,7 @@ describe('check-next.js — needs_work → valid promotion (PR #669 review livel
       }
     );
     assert.deepEqual(gateResult, { recurse: true }, 'gate must advance, not refuse');
-    // The check2 state file was promoted on disk too.
+    // The check state file was promoted on disk too.
     const state = loadState();
     assert.equal(state.status, 'complete');
     assert.equal(state.completedChangesHash, hash);
@@ -354,5 +354,30 @@ describe('check-next.js — --force-reset (GH-307 AC)', () => {
     const archivedState = JSON.parse(fs.readFileSync(path.join(ticketDir, archived[0]), 'utf8'));
     assert.match(archivedState.archivedReason, /force-reset: manual re-verify after infra fix/);
     assert.equal(archivedState.status, 'complete');
+  });
+});
+
+describe('check-next.js — legacy .check2-state.json migration', () => {
+  it('picks up state written under the legacy name and renames it to .check-state.json', () => {
+    const hash = currentChangesHash();
+    const head = git(['rev-parse', 'HEAD']);
+    writeReport('tests.check.md', 'APPROVED', hash);
+    writeReport('code-review.check.md', 'APPROVED', hash);
+    writeReport('completion.check.md', 'COMPLETE', hash);
+    // In-flight ticket from before the check2 → check rename: state exists
+    // ONLY under the legacy name.
+    writeCompleteState({ changesHash: hash, completedChangesHash: hash, completedHeadSha: head });
+    fs.renameSync(
+      path.join(ticketDir, '.check-state.json'),
+      path.join(ticketDir, '.check2-state.json')
+    );
+
+    const out = runCheckNext();
+    // The legacy state was honored (no fresh cycle started)...
+    assert.equal(out.action, 'complete');
+    assert.match(out.summary, /still valid/i);
+    // ...and migrated to the canonical name.
+    assert.equal(fs.existsSync(path.join(ticketDir, '.check2-state.json')), false);
+    assert.equal(loadState().status, 'complete');
   });
 });
