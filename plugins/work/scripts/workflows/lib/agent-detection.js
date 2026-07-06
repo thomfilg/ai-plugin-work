@@ -154,24 +154,6 @@ function isAgentFromFrontmatter(transcriptPath, agentAliases) {
 }
 
 /**
- * Check if running inside a specific agent by examining context.
- *
- * Detection methods (in priority order):
- * 1.  CLAUDE_CURRENT_AGENT env var (Primary — most reliable)
- * 1b. hookData.agent_type (Primary-B — set by Claude Code when hook fires inside a subagent)
- * 2.  hookData.tool_input.subagent_type (Secondary — available when parent invokes Task/Agent)
- * 3.  Initial prompt scanning for agent type in subagent transcript
- * 4.  Transcript scanning for active Task tool invocations
- * 5.  Frontmatter parsing for legacy transcripts
- *
- * All comparisons use normalizeAgentName() for prefix-stripping and case-insensitive matching.
- *
- * @param {string} transcriptPath - Path to the session transcript
- * @param {string[]} agentAliases - Agent names to check for
- * @param {object} [hookData] - Hook data from Claude Code (may contain tool_input.subagent_type)
- * @returns {boolean} true if running inside one of the specified agents
- */
-/**
  * Resolve agent identity from Claude Code hookData: agent_type (Primary-B,
  * set when the hook fires inside a subagent) then tool_input.subagent_type
  * (Secondary, available when the parent invokes Task/Agent).
@@ -193,6 +175,24 @@ function agentFromHookData(hookData, agentAliases) {
   return false;
 }
 
+/**
+ * Check if running inside a specific agent by examining context.
+ *
+ * Detection methods (in priority order):
+ * 1.  CLAUDE_CURRENT_AGENT env var (Primary — most reliable)
+ * 1b. hookData.agent_type (Primary-B — set by Claude Code when hook fires inside a subagent)
+ * 2.  hookData.tool_input.subagent_type (Secondary — available when parent invokes Task/Agent)
+ * 3.  Initial prompt scanning for agent type in subagent transcript
+ * 4.  Transcript scanning for active Task tool invocations
+ * 5.  Frontmatter parsing for legacy transcripts
+ *
+ * All comparisons use normalizeAgentName() for prefix-stripping and case-insensitive matching.
+ *
+ * @param {string} transcriptPath - Path to the session transcript
+ * @param {string[]} agentAliases - Agent names to check for
+ * @param {object} [hookData] - Hook data from Claude Code (may contain tool_input.subagent_type)
+ * @returns {boolean} true if running inside one of the specified agents
+ */
 function isRunningInAgent(transcriptPath, agentAliases, hookData) {
   // Primary: Check environment variable
   const currentAgent = process.env.CLAUDE_CURRENT_AGENT;
