@@ -57,7 +57,7 @@ function createOutputScript(dir, name, { stdout = '', stderr = '', exitCode = 1 
   return scriptPath;
 }
 
-function runCli(args, homeDir, cwd) {
+function runCli(args, homeDir, cwd, extraEnv = {}) {
   try {
     const tasksBase = path.join(homeDir, 'worktrees', 'tasks');
     const argv = Array.isArray(args) ? args : String(args).match(/(?:[^\s"]+|"[^"]*")+/g) || [];
@@ -70,6 +70,7 @@ function runCli(args, homeDir, cwd) {
         TASKS_BASE: tasksBase,
         WORK_TDD_TOKEN_SKIP: '1',
         WORK_TDD_SKIP_WORKSPACE_CHECK: '1',
+        ...extraEnv,
       },
       stdio: ['pipe', 'pipe', 'pipe'],
       ...(cwd ? { cwd } : {}),
@@ -746,5 +747,169 @@ describe('tdd-phase-state record-red — load-failure rejection (GH-532)', () =>
       1,
       `expected exactly one rejection audit row across the round-trip, got ${rejections.length}`
     );
+  });
+});
+
+describe('tdd-phase-state — hung/timed-out test commands rejected (GH-584)', () => {
+  let homeDir;
+  let scriptDir;
+  let repo;
+  // Short timeout so the hang tests run in ~1s instead of the 5min default —
+  // proves the TDD_PHASE_TEST_TIMEOUT_MS override end-to-end.
+  const HANG_ENV = { TDD_PHASE_TEST_TIMEOUT_MS: '1200' };
+  const HANG_CMD = 'sleep 30';
+
+  const FAILING_TAP =
+    'TAP version 13\n' +
+    '# Subtest: feature works\n' +
+    'not ok 1 - feature works\n' +
+    '  ---\n' +
+    '  duration_ms: 1\n' +
+    '  failureType: testCodeFailure\n' +
+    '  error: |-\n' +
+    '    AssertionError [ERR_ASSERTION]: Expected 1 === 2\n' +
+    '  ...\n' +
+    '1..1\n' +
+    '# tests 1\n' +
+    '# pass 0\n' +
+    '# fail 1\n';
+  const PASSING_TAP = 'TAP version 13\nok 1 - feature works\n1..1\n# tests 1\n# pass 1\n# fail 0\n';
+
+  beforeEach(() => {
+    homeDir = createTempHome();
+    scriptDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tdd-hang-scripts-'));
+    repo = createTempGitRepo();
+  });
+
+  afterEach(() => {
+    fs.rmSync(homeDir, { recursive: true, force: true });
+    fs.rmSync(scriptDir, { recursive: true, force: true });
+    fs.rmSync(repo, { recursive: true, force: true });
+  });
+
+  /** Drive the ticket to the given phase via the real CLI. */
+  function advanceTo(ticket, phase) {
+    runCli(`init ${ticket}`, homeDir);
+    if (phase === 'red') return;
+    const failScript = createOutputScript(scriptDir, `${ticket}-fail`, {
+      stdout: FAILING_TAP,
+      exitCode: 1,
+    });
+    const red = runCli(`record-red ${ticket} --cmd "${failScript}"`, homeDir, repo);
+    assert.strictEqual(red.exitCode, 0, `setup record-red failed: ${red.stderr}`);
+    runCli(`transition ${ticket} green`, homeDir, repo);
+    if (phase === 'green') return;
+    const passScript = createOutputScript(scriptDir, `${ticket}-pass`, {
+      stdout: PASSING_TAP,
+      exitCode: 0,
+    });
+    const green = runCli(`record-green ${ticket} --cmd "${passScript}"`, homeDir, repo);
+    assert.strictEqual(green.exitCode, 0, `setup record-green failed: ${green.stderr}`);
+    runCli(`transition ${ticket} refactor`, homeDir, repo);
+  }
+
+  it('record-red rejects a timed-out command as a hang, not a failing test', () => {
+    advanceTo('GH-584-RED', 'red');
+    const { exitCode, stderr } = runCli(
+      `record-red GH-584-RED --cmd "${HANG_CMD}"`,
+      homeDir,
+      repo,
+      HANG_ENV
+    );
+    assert.strictEqual(exitCode, 1, `expected rejection, got stderr: ${stderr}`);
+    assert.match(stderr, /timed out/, 'diagnostic must name the timeout');
+    assert.match(stderr, /hang is not an assertion failure/);
+    assert.match(stderr, /planner-defect/, 'diagnostic must follow the W3 message policy');
+    assert.doesNotMatch(
+      stderr,
+      /edit tasks\.md|fix the `### /,
+      'diagnostic must NOT instruct the agent to edit tasks.md'
+    );
+    const state = readState(homeDir, 'GH-584-RED');
+    assert.strictEqual(state.currentPhase, 'red', 'phase must stay red on rejection');
+    const cycle = state.cycles.find((c) => c.cycle === state.currentCycle);
+    assert.ok(!cycle || !cycle.red, 'no record.red must be persisted for a hang');
+  });
+
+  it('record-red hang rejection appends a tdd-red-hang-rejected audit row', () => {
+    advanceTo('GH-584-AUD', 'red');
+    const { exitCode } = runCli(
+      `record-red GH-584-AUD --cmd "${HANG_CMD}"`,
+      homeDir,
+      repo,
+      HANG_ENV
+    );
+    assert.strictEqual(exitCode, 1, 'expected rejection exit code 1');
+    const actionsPath = path.join(
+      homeDir,
+      'worktrees',
+      'tasks',
+      'GH-584-AUD',
+      '.work-actions.json'
+    );
+    assert.ok(fs.existsSync(actionsPath), `expected .work-actions.json at ${actionsPath}`);
+    const actions = JSON.parse(fs.readFileSync(actionsPath, 'utf8'));
+    const rows = actions.filter((a) => a.action === 'tdd-red-hang-rejected');
+    assert.strictEqual(rows.length, 1, `expected exactly one hang audit row, got ${rows.length}`);
+    const row = rows[0];
+    assert.strictEqual(row.allow, false);
+    assert.strictEqual(row.phase, 'red');
+    assert.strictEqual(row.origin, 'ai-subtask');
+    assert.strictEqual(row.reason, 'test-command-timeout');
+    assert.ok(row.meta, 'audit row must have a meta object');
+    assert.ok(
+      typeof row.meta.testCommand === 'string' && row.meta.testCommand.includes('sleep'),
+      `meta.testCommand should include the hanging command, got: ${row.meta.testCommand}`
+    );
+    assert.strictEqual(row.meta.timeoutMs, 1200, 'meta.timeoutMs must record the applied timeout');
+  });
+
+  it('record-green rejects a timed-out command naming the hang, and persists nothing', () => {
+    advanceTo('GH-584-GRN', 'green');
+    const { exitCode, stderr } = runCli(
+      `record-green GH-584-GRN --cmd "${HANG_CMD}"`,
+      homeDir,
+      repo,
+      HANG_ENV
+    );
+    assert.strictEqual(exitCode, 1, `expected rejection, got stderr: ${stderr}`);
+    assert.match(stderr, /GREEN test command timed out/);
+    assert.match(stderr, /hang is not a passing run/);
+    const state = readState(homeDir, 'GH-584-GRN');
+    assert.strictEqual(state.currentPhase, 'green', 'phase must stay green on rejection');
+    const cycle = state.cycles.find((c) => c.cycle === state.currentCycle);
+    assert.ok(!cycle || !cycle.green, 'no record.green must be persisted for a hang');
+  });
+
+  it('record-refactor rejects a timed-out command naming the hang', () => {
+    advanceTo('GH-584-REF', 'refactor');
+    const { exitCode, stderr } = runCli(
+      `record-refactor GH-584-REF --cmd "${HANG_CMD}"`,
+      homeDir,
+      repo,
+      HANG_ENV
+    );
+    assert.strictEqual(exitCode, 1, `expected rejection, got stderr: ${stderr}`);
+    assert.match(stderr, /REFACTOR test command timed out/);
+    assert.match(stderr, /hang is not a passing run/);
+    const state = readState(homeDir, 'GH-584-REF');
+    assert.strictEqual(state.currentPhase, 'refactor', 'phase must stay refactor on rejection');
+    const cycle = state.cycles.find((c) => c.cycle === state.currentCycle);
+    assert.ok(!cycle || !cycle.refactor, 'no record.refactor must be persisted for a hang');
+  });
+
+  it('recovery: after a hang rejection, a real failing run records RED normally', () => {
+    advanceTo('GH-584-RECOV', 'red');
+    const hang = runCli(`record-red GH-584-RECOV --cmd "${HANG_CMD}"`, homeDir, repo, HANG_ENV);
+    assert.strictEqual(hang.exitCode, 1, 'hang attempt must be rejected');
+    const fixedScript = createOutputScript(scriptDir, 'hang-recov-fixed', {
+      stdout: FAILING_TAP,
+      exitCode: 1,
+    });
+    const ok = runCli(`record-red GH-584-RECOV --cmd "${fixedScript}"`, homeDir, repo, HANG_ENV);
+    assert.strictEqual(ok.exitCode, 0, `recovery must be accepted, got: ${ok.stderr}`);
+    const state = readState(homeDir, 'GH-584-RECOV');
+    const cycle = state.cycles.find((c) => c.cycle === state.currentCycle);
+    assert.ok(cycle && cycle.red, 'record.red must be persisted after recovery');
   });
 });

@@ -87,6 +87,28 @@ function findTask(tasks, taskNum) {
   return tasks.find((t) => t && t.num === taskNum) || null;
 }
 
+/**
+ * Scope-match for arbitrary (not just test) files: exact match, legacy
+ * bare-dir prefix, then the shared glob-aware matcher. ONE shared
+ * implementation (validator-unification rule) consumed by the
+ * resume-completed recorder (GH-509 condition d), the ablation recorder
+ * (GH-570 in-scope mutation requirement), and the work-implement-enforce
+ * hook's ablation-RED allowance.
+ *
+ * @param {string} rel - worktree-relative candidate path
+ * @param {Array<string>} scopeList - the task's `### Files in scope` entries
+ * @returns {boolean}
+ */
+function fileInTaskScope(rel, scopeList) {
+  if (typeof rel !== 'string' || !rel) return false;
+  const list = Array.isArray(scopeList) ? scopeList.filter((s) => typeof s === 'string' && s) : [];
+  return list.some((s) => {
+    if (rel === s) return true;
+    if (rel.startsWith(s.replace(/\/+$/, '') + '/')) return true;
+    return fileMatchesScope(rel, [s]);
+  });
+}
+
 module.exports = {
   validateTask,
   validateTddCycle,
@@ -97,6 +119,7 @@ module.exports = {
   unionFilesInScope,
   findTask,
   fileMatchesScope,
+  fileInTaskScope,
   isIntegrationTestPath,
   isE2eTestPath,
   TEST_FILE_EXT_RE,

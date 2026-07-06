@@ -4,7 +4,7 @@ Each task in `tasks.md` declares a `### Test Strategy` block whose first line is
 
 For the full spec see [`../skills/split-in-tasks/docs/test-strategy.md`](../skills/split-in-tasks/docs/test-strategy.md).
 
-## The five kinds (one example each)
+## The six kinds (one example each)
 
 ### `kind: unit`
 Default for per-task gates. The `entry:` points at a `*.test.*` file under this task's Files in scope; the gate prefixes `CHANGED_FILES="<entry>"` before invoking `$TEST_UNIT_COMMAND`.
@@ -51,6 +51,20 @@ kind: verified-by
 peer: Task 7
 cites: server/api/admin/general-settings.router.ts
 ```
+
+### `kind: wiring-citation`
+Like `verified-by`, but for pure wiring/glue tasks (re-exports, route registration) whose only observable behavior IS the peer's test passing. Citation kinds run no command of their own — at implement time the recorder validates the peer's GREEN evidence (peer sha + scope overlap) and records GREEN by citation.
+
+```markdown
+### Test Strategy
+kind: wiring-citation
+peer: Task 4
+cites: server/router/index.ts
+```
+
+## Optional `red-mode: ablation` (GH-570)
+
+Runnable kinds (`unit`/`integration`/`e2e`/`custom`) may add `red-mode: ablation` for tasks that pin already-working behavior (no natural failing RED). The agent produces RED via a temporary source mutation and GREEN by reverting it; the recorder verifies both (audit row `tdd-ablation-cycle`). See the [full spec](../skills/split-in-tasks/docs/test-strategy.md) for rules.
 
 ## When `kind: custom` is appropriate
 

@@ -4,17 +4,18 @@ This document covers the `### Test Strategy` block inside each task. See [output
 
 For the short, "explain it to me in one screen" overview, see [`../../../docs/test-strategy-kinds.md`](../../../docs/test-strategy-kinds.md).
 
-## The five kinds
+## The six kinds
 
 Every `### Test Strategy` block MUST declare exactly one `kind:` value from the closed enum below. The implement-gate's command-existence dispatcher routes the recorded command to a runner based on this kind.
 
-| `kind:`         | When to use                                                                                                | Required keys                       |
-|-----------------|------------------------------------------------------------------------------------------------------------|-------------------------------------|
-| `unit`          | Per-task gate for a unit/component change — one or more `*.test.*` files under this task's Files in scope. | `entry:` (test file path)           |
-| `integration`   | Task owns the entire boundary (handler + validator + helper) and the test exercises the boundary together. | `entry:` (`*.integration.test.*`)   |
-| `e2e`           | Playwright E2E spec under `tests/e2e/**` that drives the UI end-to-end.                                    | `entry:` (`*.e2e.test.*` or `tests/e2e/**`) |
-| `custom`        | Verification command that isn't a standard test runner (e.g. `pnpm dev:check` for stories-only tasks).      | `command:` (verbatim shell command — MUST resolve to an executable pnpm script or binary) |
-| `verified-by`   | Coverage delegated to a peer task whose test already exercises this task's scope.                          | `peer:` (Task number) + cited symbol/path |
+| `kind:`           | When to use                                                                                                | Required keys                       |
+|-------------------|------------------------------------------------------------------------------------------------------------|-------------------------------------|
+| `unit`            | Per-task gate for a unit/component change — one or more `*.test.*` files under this task's Files in scope. | `entry:` (test file path)           |
+| `integration`     | Task owns the entire boundary (handler + validator + helper) and the test exercises the boundary together. | `entry:` (`*.integration.test.*`)   |
+| `e2e`             | Playwright E2E spec under `tests/e2e/**` that drives the UI end-to-end.                                    | `entry:` (`*.e2e.test.*` or `tests/e2e/**`) |
+| `custom`          | Verification command that isn't a standard test runner (e.g. `pnpm dev:check` for stories-only tasks).      | `command:` (verbatim shell command — MUST resolve to an executable pnpm script or binary) |
+| `verified-by`     | Coverage delegated to a peer task whose test already exercises this task's scope.                          | `peer:` (Task number) + cited symbol/path |
+| `wiring-citation` | Pure wiring/glue task (re-export, route registration) whose entire scope is owned — and therefore tested — by the peer: the peer's Files in scope must be a superset of this task's (or its `entry` must match). | `peer:` (Task number) + cited symbol/path |
 
 ## Block format
 
@@ -51,6 +52,13 @@ peer: Task 7
 cites: server/api/admin/general-settings.router.ts
 ```
 
+```markdown
+### Test Strategy
+kind: wiring-citation
+peer: Task 4
+cites: server/router/index.ts
+```
+
 ## Runner dispatch via the `$TEST_*_COMMAND` envelope
 
 Authors do NOT write `pnpm test` / `pnpm e2e` / `pnpm dev:check` directly. The implement-gate resolves the kind to a runner env var via the project's `.envrc`:
@@ -62,6 +70,7 @@ Authors do NOT write `pnpm test` / `pnpm e2e` / `pnpm dev:check` directly. The i
 | `e2e`          | `$TEST_E2E_COMMAND`          |
 | `custom`       | the `command:` field verbatim |
 | `verified-by`  | the peer task's runner       |
+| `wiring-citation` | no command — GREEN recorded by validated peer citation |
 
 The literal `$CHANGED_FILES` placeholder inside these env vars is substituted with the space-separated list of files YOU changed. The gate prefixes the command before executing:
 
@@ -82,6 +91,7 @@ Hardcoded shell strings (e.g. `pnpm test:foo path/to/file`) are **only** allowed
 | `unit`          | Must NOT match either of the above patterns (no `.integration.` / `.e2e.` infix, not under `/integration/` or `/e2e/`) |
 | `custom`        | N/A — `command:` is opaque to the file-name validator                                                             |
 | `verified-by`   | Inherits the peer's pattern; validator follows the citation                                                       |
+| `wiring-citation` | Inherits the peer's pattern; validator follows the citation                                                     |
 
 If a test file is misnamed for its kind, the vitest config silently routes it to a different runner (or skips it). The gate then can't pass because the test never executes — or it executes against the wrong fixtures. When creating a NEW test file, also name it correctly upfront and include the proposed filename in the task's `### Files in scope`.
 
@@ -102,6 +112,34 @@ Rules:
 3. **Reserve cross-cutting `kind: e2e` for the final `checkpoint` task** — that task's scope is "verify the whole feature works end-to-end" and explicitly depends on every prior task.
 4. **Use `kind: verified-by` to model TDD-ownership** — when a sibling's test already exercises this task's scope, point at the sibling instead of duplicating the assertion. The TDD-ownership graph validator rejects an owned-but-uncovered path.
 5. **Audit every Test Strategy before emitting tasks.md**: for each task, walk the `entry:` (or peer citation) and confirm every file appears under this task's Files in scope. If any file is owned by a different task, switch to a narrower unit test or expand the scope.
+
+## `red-mode: ablation` — regression-coverage tasks (GH-570)
+
+Some tasks write tests around **already-working code** to pin existing behavior (regression coverage, backfill coverage before a refactor). These tasks have no natural failing RED: the new test passes immediately. Declare this **at planning time** with the optional `red-mode:` key:
+
+```markdown
+### Test Strategy
+kind: unit
+entry: lib/__tests__/flag-charset.test.js
+red-mode: ablation
+```
+
+Rules:
+
+- `ablation` is the ONLY legal value. The tasks gate rejects unknown values.
+- Only runnable kinds may declare it (`unit`, `integration`, `e2e`, `custom`). Citation kinds (`verified-by` / `wiring-citation`) run no command of their own — nothing to ablate.
+- The declaration is **planner-authored and human-reviewed at the tasks gate**. It is NOT grantable at execution time: the recorder rejects `--ablation` requests from tasks without the declaration.
+- Make sure the source file that owns the behavior under test is listed in `### Files in scope` — the RED phase temporarily mutates it, and the scope guard blocks edits outside scope.
+
+Execution contract (what the developer agent does):
+
+1. **RED** — write the pinning test (it passes), then apply a TEMPORARY mutation to a tracked in-scope source file that breaks the behavior (do NOT commit it). The recorder requires a non-empty source diff **with at least one mutated file inside the task's `### Files in scope`**, requires the in-scope test files to exist on disk with `it()`/`test()` blocks, hashes the mutation diff (`mutationSha`) AND the in-scope test files' content (`testFileStateSha`), requires the test command to FAIL, and records the failing test name(s) as `failingTest` (best-effort, `null` when the runner output is unparseable).
+2. **GREEN** — revert the mutation. The recorder requires the command to PASS, verifies the mutation diff is gone, and requires the in-scope test files to be **byte-identical to their RED state** (so the fail→pass flip is attributable to the reverted mutation, never a test edit), stamping `revertSha`.
+3. An audit row `tdd-ablation-cycle` with BOTH shas is appended to `.work-actions.json` so a reviewer can replay the cycle.
+
+When to declare it: the task's whole point is "add tests for behavior that already works". If the task also changes source behavior, it has a natural failing RED — do not declare `red-mode: ablation`.
+
+(The older `record-red --synthesized` bypass is deprecated in favor of this mode — it accepted a passing run with only a free-text reason, no machine-checkable evidence.)
 
 ## Migration notes (from the legacy `### Test Command` block)
 

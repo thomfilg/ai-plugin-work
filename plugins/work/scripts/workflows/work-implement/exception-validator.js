@@ -11,12 +11,14 @@ const path = require('path');
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
-const ALLOWED_CATEGORIES = Object.freeze([
-  'checkpoint',
-  'config-only',
-  'file-move',
-  'mechanical-refactor',
-]);
+// Exception categories align with the closed `### Type` TDD-exemption enum
+// (skills/split-in-tasks/lib/task-types.js TDD_EXEMPT_TYPES: tests-only,
+// docs, config, ci, mechanical-refactor, file-move, checkpoint) — built FROM
+// that shared list so the two can never drift. 'config-only' is kept as a
+// legacy alias for 'config' (pre-enum recordings and CLI muscle memory).
+const { TDD_EXEMPT_TYPES } = require('../../../skills/split-in-tasks/lib/task-types');
+
+const ALLOWED_CATEGORIES = Object.freeze([...TDD_EXEMPT_TYPES, 'config-only']);
 
 const SOURCE_EXTENSIONS = new Set(['.js', '.jsx', '.ts', '.tsx']);
 

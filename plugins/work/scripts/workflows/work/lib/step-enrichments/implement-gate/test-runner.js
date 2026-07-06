@@ -13,21 +13,35 @@ const path = require('path');
 const fs = require('fs');
 const { execSync } = require('child_process');
 
-const { findNearestEnvrc, detectMalformedTestCommand } = require(
+const { findNearestEnvrc, detectMalformedTestCommand, detectUnsetEnvelopeCommand } = require(
   path.join(__dirname, 'test-command')
 );
 
 const {
   writeTestLog,
-  isTddRequired,
   evidencePathFor,
   isE2eCommand,
   shouldSkipTestExecution,
   writeSkipStubEvidence,
+  malformedStrategyReason,
   malformedPreTestBlock,
-  recordNonTddPreTestStub,
+  unsetEnvelopeBlock,
+  unsetEnvelopeReason,
+  preTestPassOutcome,
   buildGreenEvidence,
 } = require(path.join(__dirname, 'evidence'));
+
+// W11 — the ONE gate evidence writer (atomic writes + recorder-parity traps).
+// Lives beside the recorder so both sides share the hang/load-failure guards.
+const { writeGateRed, writeGateGreen, gateHangRejection } = require(
+  path.join(__dirname, '..', '..', '..', '..', 'work-implement', 'tdd-phase-state', 'gate-writer')
+);
+// W5 §5 — same env-overridable timeout the recorder uses
+// (TDD_PHASE_TEST_TIMEOUT_MS, default 5min), so tests can exercise the
+// hang-rejection path without waiting minutes.
+const { resolveTestTimeoutMs } = require(
+  path.join(__dirname, '..', '..', '..', '..', 'work-implement', 'tdd-phase-state', 'io')
+);
 
 /**
  * Build the environment a synthesized test command runs in.
@@ -69,68 +83,78 @@ function withEnvrcVars(baseEnv, worktreeDir) {
 
 /**
  * Execute a test command and capture its exit code + combined output.
- * @returns {{ exitCode: number, output: string, timedOut?: boolean }}
+ * @returns {{ exitCode: number, output: string, timedOut?: boolean, timeoutMs: number }}
  */
 function execTestCommand(cmd, workingDir, env) {
+  const timeoutMs = resolveTestTimeoutMs();
   try {
     const output = execSync(cmd, {
       encoding: 'utf-8',
       cwd: workingDir,
       env,
-      timeout: 300000,
+      timeout: timeoutMs,
       stdio: 'pipe',
+      // Strict-mode prefixes (W9) need bash: `pipefail` is a bash-ism and
+      // /bin/sh is dash on Debian/Ubuntu. PATH-resolved `bash`, NOT an
+      // absolute /bin/bash pin — the recorder (tdd-phase-state/io.js) and
+      // task-next.js runTest resolve bash via PATH, and an absolute pin
+      // would ENOENT the gate half of the unified pipeline (NixOS etc.).
+      shell: 'bash',
     });
-    return { exitCode: 0, output };
+    return { exitCode: 0, output, timeoutMs };
   } catch (err) {
     const output = (err.stdout || '') + (err.stderr || '');
     if (err && err.signal) {
-      // timeout / killed — can't tell if test would have failed. Preserve any
-      // partial output so the post-implement path can surface it (matches the
-      // pre-refactor inline behavior); the pre-implement path early-returns on
-      // `timedOut` and ignores both exitCode and output.
-      return { exitCode: err.status ?? 1, output, timedOut: true };
+      // W5 / GH-584 — timeout/killed run: a HANG, not a test outcome. Callers
+      // must reject it as a planner defect (watch-mode/interactive command),
+      // never record it as RED or misread its exit as a plain failure.
+      // Preserve any partial output for the retry diagnostic.
+      return { exitCode: err.status ?? 1, output, timedOut: true, timeoutMs };
     }
-    return { exitCode: err.status ?? 1, output };
+    return { exitCode: err.status ?? 1, output, timeoutMs };
   }
 }
 
 /**
- * Write authentic RED evidence after a failing pre-implement test.
- * Phase is 'red' until the post-implement test passes and runTestAndRecord
- * transitions it to 'green'.
+ * W11 — capture authentic gate RED through the shared writer, which applies
+ * the recorder-parity traps (hang + RED load-failure rejection) and writes
+ * atomically. Rejections come back as a block decision the gate turns into a
+ * retry; `preTestIncomplete` keeps the pre-test marker unset so the next gate
+ * pass (after the defect is fixed) re-runs the pre-test.
  */
-function writeRedEvidence(taskDir, evidencePath, cmd, exitCode, output, now) {
-  const redLog = writeTestLog(taskDir, 'red', cmd, exitCode, output, now);
+function captureGateRed(p) {
+  const { gateTasksBase, safeName, taskNum, evidencePath, cmd, exitCode, output, now } = p;
+  const redLog = writeTestLog(path.dirname(evidencePath), 'red', cmd, exitCode, output, now);
+  let wr;
   try {
-    fs.mkdirSync(taskDir, { recursive: true });
-    fs.writeFileSync(
+    wr = writeGateRed({
+      tasksBase: gateTasksBase,
+      ticketId: safeName,
+      taskNum,
       evidencePath,
-      JSON.stringify(
-        {
-          currentPhase: 'red',
-          currentCycle: 1,
-          cycles: [
-            {
-              cycle: 1,
-              red: {
-                testFiles: [],
-                testCommand: cmd,
-                testExitCode: exitCode,
-                timestamp: now,
-                capturedByGate: true,
-                outputTail: String(output).slice(-2000),
-                ...(redLog ? { logPath: redLog.logPath, logBytes: redLog.logBytes } : {}),
-              },
-            },
-          ],
-        },
-        null,
-        2
-      )
-    );
+      cmd,
+      exitCode,
+      output,
+      now,
+      redLog,
+    });
   } catch {
-    /* fail-open */
+    /* fail-open on write error (matches the previous raw-write catch) */
+    wr = { written: true };
   }
+  if (wr.rejected) {
+    return {
+      decision: 'block',
+      preTestIncomplete: true,
+      plannerDefect: wr.plannerDefect,
+      defectKind: wr.defectKind,
+      reason: wr.reason,
+      command: cmd,
+      exitCode,
+      outputTail: String(output).slice(-4000),
+    };
+  }
+  return { decision: 'dispatch' };
 }
 
 /**
@@ -140,7 +164,8 @@ function writeRedEvidence(taskDir, evidencePath, cmd, exitCode, output, now) {
  *   - exit non-zero        → write real RED, return { decision: 'dispatch' }
  *   - exit zero, TDD type  → return { decision: 'block', reason }
  *   - exit zero, non-TDD   → write skip-stub RED, return { decision: 'dispatch' }
- *   - timeout/error        → return { decision: 'dispatch', preTestSkipped: true }
+ *   - timeout (hang)       → return { decision: 'block', plannerDefect: true } (W5 §4)
+ *   - unset envelope var   → return { decision: 'block', plannerDefect: true } (W6/GH-466)
  */
 function runPreImplementTest(cmd, safeName, taskNum, workingDir, env, gateTasksBase, taskType) {
   if (!gateTasksBase) {
@@ -155,37 +180,63 @@ function runPreImplementTest(cmd, safeName, taskNum, workingDir, env, gateTasksB
   }
 
   // Honor WORK_SKIP_E2E=1 / WORK_SKIP_E2E_TESTS=1 — record a skip stub and
-  // dispatch (or just advance, since the post-test will also skip).
-  const skipReason = shouldSkipTestExecution(cmd, env);
+  // dispatch. Operator choice: process.env only (see shouldSkipTestExecution).
+  const skipReason = shouldSkipTestExecution(cmd);
   if (skipReason) {
     writeSkipStubEvidence(cmd, safeName, taskNum, gateTasksBase, skipReason);
     return { decision: 'dispatch', preTestSkipped: true, skipReason };
   }
 
-  const { exitCode, output, timedOut } = execTestCommand(cmd, workingDir, env);
-  if (timedOut) {
-    return { decision: 'dispatch', preTestSkipped: true };
+  // W6 / GH-466 — an `eval "$VAR"` envelope whose var is unset in the run env
+  // would no-op to exit 0 and fabricate evidence. Refuse to execute it.
+  const unsetVar = detectUnsetEnvelopeCommand(cmd, env);
+  if (unsetVar) {
+    return unsetEnvelopeBlock(cmd, taskNum, unsetVar);
   }
 
+  const { exitCode, output, timedOut, timeoutMs } = execTestCommand(cmd, workingDir, env);
   const evidencePath = evidencePathFor(gateTasksBase, safeName, taskNum);
-  const taskDir = path.dirname(evidencePath);
   const now = new Date().toISOString();
 
-  if (exitCode === 0) {
-    if (isTddRequired(taskType)) {
-      return {
-        decision: 'block',
-        reason: `Pre-implement test passed for task type "${taskType || 'default'}". TDD requires a failing test before implementation. Update tasks.md or the test command for task ${taskNum}.`,
-        command: cmd,
-        exitCode: 0,
-        outputTail: String(output).slice(-4000),
-      };
-    }
-    return recordNonTddPreTestStub(cmd, taskType, taskDir, evidencePath, now);
+  // W5 §4 / GH-584 — a pre-test hang used to early-return `preTestSkipped`
+  // with NO evidence; the post-test then refused `noRedEvidence` and cleared
+  // the marker, looping forever on the hanging command. Block as a planner
+  // defect instead (audited via the shared writer's hang rejection).
+  if (timedOut) {
+    const rej = gateHangRejection({
+      tasksBase: gateTasksBase,
+      ticketId: safeName,
+      taskNum,
+      phase: 'red',
+      cmd,
+      timeoutMs,
+    });
+    return {
+      decision: 'block',
+      preTestIncomplete: true,
+      plannerDefect: true,
+      defectKind: 'hang', // never re-probed (would re-run the hang); hash-clearing only
+      reason: rej.reason,
+      command: cmd,
+      exitCode: null,
+      outputTail: String(output).slice(-4000),
+    };
   }
 
-  writeRedEvidence(taskDir, evidencePath, cmd, exitCode, output, now);
-  return { decision: 'dispatch' };
+  if (exitCode === 0) {
+    return preTestPassOutcome({ cmd, taskNum, taskType, output, evidencePath, now });
+  }
+
+  return captureGateRed({
+    gateTasksBase,
+    safeName,
+    taskNum,
+    evidencePath,
+    cmd,
+    exitCode,
+    output,
+    now,
+  });
 }
 
 /**
@@ -193,40 +244,101 @@ function runPreImplementTest(cmd, safeName, taskNum, workingDir, env, gateTasksB
  * skip policy. Returns a terminal result, or null to proceed with execution.
  */
 function preflightPostTest(cmd, env, safeName, taskNum, gateTasksBase) {
-  // Detect malformed parser output up front — return a structured failure so
-  // the gate can surface a clear "fix tasks.md" reason instead of "no GREEN".
+  // Detect malformed parser output up front — return a structured planner-
+  // defect failure (W3) so the gate holds for the operator instead of
+  // surfacing an opaque "no GREEN".
   const malformed = detectMalformedTestCommand(cmd);
   if (malformed) {
-    return { passed: false, malformed, command: String(cmd || ''), exitCode: null, outputTail: '' };
+    return {
+      passed: false,
+      malformed,
+      plannerDefect: true,
+      defectKind: 'malformed-strategy',
+      reason: malformedStrategyReason(cmd, taskNum, malformed),
+      command: String(cmd || ''),
+      exitCode: null,
+      outputTail: '',
+    };
   }
 
-  // Honor WORK_SKIP_E2E=1 / WORK_SKIP_E2E_TESTS=1 — write skip stub and pass.
-  const skipReason = shouldSkipTestExecution(cmd, env);
+  // Honor WORK_SKIP_E2E — write skip stub and pass (process.env only).
+  const skipReason = shouldSkipTestExecution(cmd);
   if (skipReason && gateTasksBase) {
     writeSkipStubEvidence(cmd, safeName, taskNum, gateTasksBase, skipReason);
     return { passed: true, skipped: skipReason };
+  }
+
+  // W6 / GH-466 — refuse to run (and therefore to record GREEN from) an
+  // `eval "$VAR"` envelope whose var is unset in the run env: `eval ""`
+  // exits 0 instantly with zero output and would record a false GREEN.
+  const unsetVar = detectUnsetEnvelopeCommand(cmd, env);
+  if (unsetVar) {
+    return {
+      passed: false,
+      plannerDefect: true,
+      defectKind: 'unset-envelope',
+      reason: unsetEnvelopeReason(taskNum, unsetVar),
+      command: String(cmd || ''),
+      exitCode: null,
+      outputTail: '',
+    };
   }
   return null;
 }
 
 /**
- * Post-implement test: run command, on pass record GREEN evidence.
+ * Post-implement test: run command, on pass record GREEN evidence via
+ * `persistGateGreen` (which preserves the pre-test RED and applies the
+ * recorder-parity traps, including RC-D).
  *
- * If a RED entry already exists (from runPreImplementTest), append GREEN
- * to the existing cycle. Otherwise refuse (no authentic RED).
- *
- * @returns {boolean} true if test passed and evidence is now complete
+ * @returns {object} result — { passed: true } or a structured failure
  */
-function runTestAndRecord(cmd, safeName, taskNum, workingDir, env, gateTasksBase) {
+function runTestAndRecord(cmd, safeName, taskNum, workingDir, env, gateTasksBase, taskType) {
   const early = preflightPostTest(cmd, env, safeName, taskNum, gateTasksBase);
   if (early) return early;
 
-  const { exitCode, output } = execTestCommand(cmd, workingDir, env);
+  const { exitCode, output, timedOut, timeoutMs } = execTestCommand(cmd, workingDir, env);
+
+  // W5 §4 / GH-584 — a post-test hang is not a failing test: reject it as a
+  // planner defect (audited) instead of surfacing "test failed (exit 1)".
+  if (timedOut) {
+    const rej = gateHangRejection({
+      tasksBase: gateTasksBase,
+      ticketId: safeName,
+      taskNum,
+      phase: 'green',
+      cmd,
+      timeoutMs,
+    });
+    return {
+      passed: false,
+      timedOut: true,
+      plannerDefect: true,
+      defectKind: 'hang', // hash-clearing only — never re-run to re-probe
+      reason: rej.reason,
+      command: cmd,
+      exitCode: null,
+      outputTail: String(output).slice(-4000),
+    };
+  }
 
   if (exitCode !== 0)
     return { passed: false, command: cmd, exitCode, outputTail: String(output).slice(-4000) };
   if (!gateTasksBase) return { passed: false, command: cmd, exitCode: 0, outputTail: '' };
 
+  return persistGateGreen({ cmd, output, safeName, taskNum, gateTasksBase, taskType });
+}
+
+/**
+ * Build + persist gate GREEN for a passing post-implement run. Preserves the
+ * pre-test RED entry (refusing when none exists) and writes via the shared
+ * gate writer, which applies the recorder-parity traps: hang rejection and
+ * the RC-D empty-output rejection per gateContractFor(taskType).rcdEmptyTrap
+ * (GH-466 fix #1 — a silent-success non-eval command must not record a
+ * zero-output gate GREEN the recorder would refuse).
+ */
+function persistGateGreen(p) {
+  const { cmd, output, safeName, taskNum, gateTasksBase, taskType } = p;
   const taskDir = path.join(gateTasksBase, safeName, `task${taskNum}`);
   const evidencePath = path.join(taskDir, 'tdd-phase.json');
   const now = new Date().toISOString();
@@ -242,18 +354,31 @@ function runTestAndRecord(cmd, safeName, taskNum, workingDir, env, gateTasksBase
   const greenLog = writeTestLog(taskDir, 'green', cmd, 0, output, now);
   const built = buildGreenEvidence(existing, cmd, output, now, greenLog);
   if (built.noRedEvidence) {
-    return {
-      passed: false,
-      command: cmd,
-      exitCode: 0,
-      outputTail: '',
-      noRedEvidence: true,
-    };
+    return { passed: false, command: cmd, exitCode: 0, outputTail: '', noRedEvidence: true };
   }
 
   try {
-    fs.mkdirSync(taskDir, { recursive: true });
-    fs.writeFileSync(evidencePath, JSON.stringify(built.evidence, null, 2));
+    // W11 — atomic write via the shared gate writer (no raw writeFileSync).
+    const wr = writeGateGreen({
+      tasksBase: gateTasksBase,
+      ticketId: safeName,
+      taskNum,
+      evidencePath,
+      evidence: built.evidence,
+      cmd,
+      output,
+      taskType,
+    });
+    if (wr.rejected) {
+      return {
+        passed: false,
+        plannerDefect: Boolean(wr.plannerDefect),
+        reason: wr.reason,
+        command: cmd,
+        exitCode: 0,
+        outputTail: String(output).slice(-4000),
+      };
+    }
     return { passed: true };
   } catch (err) {
     return {

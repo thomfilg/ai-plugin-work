@@ -122,4 +122,75 @@ describe('Pass D — emit-warnings.js CLI E2E', () => {
     const r = spawnSync('node', [CLI], { encoding: 'utf8' });
     assert.equal(r.status, 2);
   });
+
+  // W12/echo-5964: Pass D used to detect bad Types but exit 0 when the
+  // `### Type` value was missing/empty — the task then reached implement,
+  // fell back to the strictest tdd-code contract, and wedged at RED.
+  it('exits non-zero when `### Type` heading has an empty value', () => {
+    const md = [
+      '# Tasks',
+      '',
+      '## Task 1 — empty type value',
+      '',
+      '### Type',
+      '',
+      '### Acceptance Criteria',
+      '- Cover the reducer',
+      '',
+      '### Files in scope',
+      '- src/foo.js',
+      '- src/foo.test.js',
+      '',
+    ].join('\n');
+    const dir = makeTicketDir(md);
+    dirs.push(dir);
+    const r = runCli(dir);
+    assert.notEqual(r.status, 0, `expected non-zero; stdout=${r.stdout} stderr=${r.stderr}`);
+    assert.match(`${r.stdout}`, /Missing or empty `### Type`/);
+  });
+
+  it('exits non-zero when the `### Type` section is absent entirely', () => {
+    const md = [
+      '# Tasks',
+      '',
+      '## Task 1 — no type section at all',
+      '',
+      '### Acceptance Criteria',
+      '- Cover the reducer',
+      '',
+      '### Files in scope',
+      '- src/foo.js',
+      '- src/foo.test.js',
+      '',
+    ].join('\n');
+    const dir = makeTicketDir(md);
+    dirs.push(dir);
+    const r = runCli(dir);
+    assert.notEqual(r.status, 0, `expected non-zero; stdout=${r.stdout} stderr=${r.stderr}`);
+    assert.match(`${r.stdout}`, /Missing or empty `### Type`/);
+  });
+
+  it('exits non-zero on an unknown `### Type` value (regression pin)', () => {
+    const md = [
+      '# Tasks',
+      '',
+      '## Task 1 — legacy type',
+      '',
+      '### Type',
+      'frontend',
+      '',
+      '### Acceptance Criteria',
+      '- Cover the reducer',
+      '',
+      '### Files in scope',
+      '- src/foo.js',
+      '- src/foo.test.js',
+      '',
+    ].join('\n');
+    const dir = makeTicketDir(md);
+    dirs.push(dir);
+    const r = runCli(dir);
+    assert.notEqual(r.status, 0, `expected non-zero; stdout=${r.stdout} stderr=${r.stderr}`);
+    assert.match(`${r.stdout}`, /not in the closed taxonomy/);
+  });
 });

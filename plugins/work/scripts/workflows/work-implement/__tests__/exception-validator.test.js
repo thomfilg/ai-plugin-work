@@ -43,6 +43,22 @@ describe('validateExceptionCategory', () => {
     assert.deepStrictEqual(result, { valid: true, reason: '' });
   });
 
+  // W2.3 — categories aligned with the closed `### Type` enum (task-types.js).
+  for (const cat of ['config', 'docs', 'ci', 'tests-only']) {
+    it(`accepts "${cat}" as valid (Type-enum alignment)`, () => {
+      const { validateExceptionCategory } = load();
+      const result = validateExceptionCategory(cat);
+      assert.deepStrictEqual(result, { valid: true, reason: '' });
+    });
+  }
+
+  it('rejects "tdd-code" (TDD-required Type is never an exception category)', () => {
+    const { validateExceptionCategory } = load();
+    const result = validateExceptionCategory('tdd-code');
+    assert.strictEqual(result.valid, false);
+    assert.ok(result.reason.length > 0);
+  });
+
   it('rejects arbitrary string', () => {
     const { validateExceptionCategory } = load();
     const result = validateExceptionCategory('random-thing');
@@ -258,18 +274,37 @@ describe('ALLOWED_CATEGORIES', () => {
     return require(MOD_PATH);
   }
 
-  it('is a frozen array with exactly 4 entries', () => {
+  it('is a frozen array with exactly 8 entries', () => {
     const { ALLOWED_CATEGORIES } = load();
     assert.ok(Array.isArray(ALLOWED_CATEGORIES));
-    assert.strictEqual(ALLOWED_CATEGORIES.length, 4);
+    assert.strictEqual(ALLOWED_CATEGORIES.length, 8);
     assert.ok(Object.isFrozen(ALLOWED_CATEGORIES));
   });
 
-  it('contains the expected categories', () => {
+  it('contains every TDD-exempt Type plus the config-only legacy alias', () => {
     const { ALLOWED_CATEGORIES } = load();
     assert.deepStrictEqual(
       [...ALLOWED_CATEGORIES].sort(),
-      ['checkpoint', 'config-only', 'file-move', 'mechanical-refactor'].sort()
+      [
+        'checkpoint',
+        'ci',
+        'config',
+        'config-only',
+        'docs',
+        'file-move',
+        'mechanical-refactor',
+        'tests-only',
+      ].sort()
     );
+  });
+
+  it('stays aligned with task-types.js TDD_EXEMPT_TYPES (single taxonomy)', () => {
+    const { ALLOWED_CATEGORIES } = load();
+    const { TDD_EXEMPT_TYPES } = require(
+      path.join(__dirname, '..', '..', '..', '..', 'skills', 'split-in-tasks', 'lib', 'task-types')
+    );
+    for (const t of TDD_EXEMPT_TYPES) {
+      assert.ok(ALLOWED_CATEGORIES.includes(t), `TDD-exempt type "${t}" must be a valid category`);
+    }
   });
 });
