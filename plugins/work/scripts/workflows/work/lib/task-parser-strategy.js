@@ -31,6 +31,14 @@ const STRATEGY_KEY_HANDLERS = Object.freeze({
   verifiedby: (out, value) => {
     out.verifiedBy = value;
   },
+  // GH-570 — optional ablation-RED declaration for regression-coverage
+  // tasks (authored at planning time, validated by the draft gate).
+  'red-mode': (out, value) => {
+    out.redMode = value;
+  },
+  redmode: (out, value) => {
+    out.redMode = value;
+  },
 });
 
 function _parseStrategyLine(line, out) {
@@ -50,7 +58,15 @@ function _parseStrategyLine(line, out) {
 }
 
 function _parseStrategyKeys(body) {
-  const out = { kind: null, entry: null, peer: null, cites: null, command: null, verifiedBy: null };
+  const out = {
+    kind: null,
+    entry: null,
+    peer: null,
+    cites: null,
+    command: null,
+    verifiedBy: null,
+    redMode: null,
+  };
   for (const raw of body.split('\n')) {
     _parseStrategyLine(raw, out);
   }
@@ -97,7 +113,7 @@ function _parseFromFences(fences) {
 }
 
 function _buildStrategyResult(parsed, customBody) {
-  const { kind, entry, peer, cites, command, verifiedBy } = parsed;
+  const { kind, entry, peer, cites, command, verifiedBy, redMode } = parsed;
   if (!kind) return null;
   const resolvedCommand = command || customBody || null;
   const resolvedPeer = peer || verifiedBy || null;
@@ -109,6 +125,7 @@ function _buildStrategyResult(parsed, customBody) {
     command: resolvedCommand,
     verifiedBy: verifiedBy || peer || null,
     customBody: resolvedCommand,
+    redMode: redMode || null,
   };
 }
 

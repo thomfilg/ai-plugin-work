@@ -97,6 +97,10 @@
           {
             "type": "command",
             "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/hooks/protect-task-scope.js"
+          },
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-implement/hooks/work-implement-enforce.js"
           }
         ]
       },
@@ -259,6 +263,18 @@
           {
             "type": "command",
             "command": "CLAUDE_HOOK_TYPE=Stop node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/lib/hooks/agent-hook-dispatcher.js"
+          }
+        ]
+      }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-implement/hooks/enforce-tdd-on-stop.js",
+            "timeout": 30
           }
         ]
       }

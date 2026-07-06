@@ -29,7 +29,7 @@
  * dash.
  */
 
-const { describe, it } = require('node:test');
+const { describe, it, beforeEach, afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
@@ -121,5 +121,89 @@ describe('tdd-phase-state.js test-command execution path (review-comment-2)', ()
       /pipefail|Illegal option|bad option/i,
       `expected /bin/sh to complain about pipefail option; stderr=${shVersion.stderr}`
     );
+  });
+});
+
+// GH-584 — behavioral contract of runTestCommandWithOutput's hang detection.
+// Callers (record-red/record-green/record-refactor) reject when timedOut is
+// set; the flag and the in-band stderr diagnostic are asserted here directly.
+describe('runTestCommandWithOutput — timeout surfaces as timedOut (GH-584)', () => {
+  const io = require(TDD_PHASE_STATE_PATH);
+  let savedTimeout;
+
+  beforeEach(() => {
+    savedTimeout = process.env.TDD_PHASE_TEST_TIMEOUT_MS;
+  });
+  afterEach(() => {
+    if (savedTimeout === undefined) delete process.env.TDD_PHASE_TEST_TIMEOUT_MS;
+    else process.env.TDD_PHASE_TEST_TIMEOUT_MS = savedTimeout;
+  });
+
+  it('sets timedOut:true and embeds the diagnostic in result.stderr on a hang', () => {
+    process.env.TDD_PHASE_TEST_TIMEOUT_MS = '800';
+    const result = io.runTestCommandWithOutput('sleep 30');
+    assert.equal(result.timedOut, true, 'a killed hang must set timedOut');
+    assert.notEqual(result.exitCode, 0, 'a killed hang must not report exit 0');
+    assert.match(
+      result.stderr,
+      /timed out/,
+      'the timeout diagnostic must land in result.stderr, not only host stderr (GH-584)'
+    );
+    assert.equal(result.timeoutMs, 800, 'the applied timeout must be reported');
+  });
+
+  it('sets timedOut:false for a command that completes (pass and fail alike)', () => {
+    process.env.TDD_PHASE_TEST_TIMEOUT_MS = '5000';
+    const pass = io.runTestCommandWithOutput('printf ok');
+    assert.equal(pass.timedOut, false);
+    assert.equal(pass.exitCode, 0);
+    const fail = io.runTestCommandWithOutput('printf nope; exit 3');
+    assert.equal(fail.timedOut, false);
+    assert.equal(fail.exitCode, 3);
+  });
+
+  it('TDD_PHASE_TEST_TIMEOUT_MS overrides the 5-minute default; garbage values fall back', () => {
+    process.env.TDD_PHASE_TEST_TIMEOUT_MS = 'not-a-number';
+    assert.equal(io.resolveTestTimeoutMs(), 300000);
+    process.env.TDD_PHASE_TEST_TIMEOUT_MS = '-5';
+    assert.equal(io.resolveTestTimeoutMs(), 300000);
+    process.env.TDD_PHASE_TEST_TIMEOUT_MS = '1234';
+    assert.equal(io.resolveTestTimeoutMs(), 1234);
+    delete process.env.TDD_PHASE_TEST_TIMEOUT_MS;
+    assert.equal(io.resolveTestTimeoutMs(), 300000);
+  });
+
+  it('formatTestTimeout renders whole minutes and sub-minute values', () => {
+    assert.equal(io.formatTestTimeout(300000), '5min');
+    assert.equal(io.formatTestTimeout(60000), '1min');
+    assert.equal(io.formatTestTimeout(1500), '2s');
+  });
+});
+
+// Bugs review (bash-resolution parity) — the implement gate's execTestCommand
+// must resolve bash the SAME way the recorder (io.js) and task-next.js do:
+// PATH-resolved `bash`, never an absolute /bin/bash pin. An absolute pin
+// splits the unified pipeline on hosts where bash lives elsewhere (NixOS,
+// minimal containers): the gate ENOENTs while the recorder half still works.
+describe('implement-gate execTestCommand bash resolution parity', () => {
+  const GATE_TEST_RUNNER_PATH = path.resolve(
+    __dirname,
+    '..',
+    '..',
+    'work',
+    'lib',
+    'step-enrichments',
+    'implement-gate',
+    'test-runner.js'
+  );
+
+  it("execTestCommand uses PATH-resolved shell: 'bash' (no absolute /bin/bash pin)", () => {
+    const src = fs.readFileSync(GATE_TEST_RUNNER_PATH, 'utf8');
+    const fnIdx = src.indexOf('function execTestCommand');
+    assert.notEqual(fnIdx, -1, 'expected test-runner.js to define execTestCommand');
+    const rawBody = src.slice(fnIdx, fnIdx + 2500);
+    const body = rawBody.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|\s)\/\/[^\n]*/g, '');
+    assert.match(body, /shell:\s*'bash'/, 'gate must run under PATH-resolved bash');
+    assert.doesNotMatch(body, /'\/bin\/bash'/, 'gate must not pin an absolute bash path');
   });
 });

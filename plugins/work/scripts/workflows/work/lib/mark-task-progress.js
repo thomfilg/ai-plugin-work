@@ -28,20 +28,18 @@ function getTaskStatus(tasksDir, taskNum) {
   const taskDir = path.join(tasksDir, `task${taskNum}`);
   const tddPath = path.join(taskDir, 'tdd-phase.json');
 
-  // Check task type — test/checkpoint tasks complete with RED-only evidence
+  // Contract-aware completion via the ONE shared validator (tdd-enforcement
+  // validateTddEvidenceForType): TDD-exempt Types (task-types.js — docs,
+  // config, ci, tests-only, mechanical-refactor, file-move, checkpoint)
+  // complete with red-only or green-only evidence (e.g. the gate's non-TDD
+  // stub); TDD-required Types need a full RED+GREEN cycle, an exception, or
+  // citation-kind GREEN. ('test' is not in the closed Type enum — the old
+  // `taskType === 'test'` shortcut never fired for real `tests-only` tasks.)
   const taskType = resolveTaskType(tasksDir, taskNum);
-  const isTestOnly = taskType === 'test' || taskType === 'checkpoint';
 
   try {
     const state = JSON.parse(fs.readFileSync(tddPath, 'utf8'));
-    const cycles = state.cycles || [];
-
-    // For test/checkpoint tasks, any cycle (even RED-only) means completed
-    if (isTestOnly && cycles.length > 0) return 'completed';
-
-    // For other tasks, require RED+GREEN minimum
-    const hasCompleteCycle = cycles.some((c) => c.red && c.green);
-    if (hasCompleteCycle) return 'completed';
+    if (validateTddEvidenceForType(state, taskType).valid) return 'completed';
     // Legacy flat format
     const evidence = state.evidence || {};
     if (evidence.red && evidence.green) return 'completed';
@@ -53,6 +51,7 @@ function getTaskStatus(tasksDir, taskNum) {
 }
 
 const { resolveTaskType } = require(path.join(__dirname, 'resolve-task-type'));
+const { validateTddEvidenceForType } = require(path.join(__dirname, 'tdd-enforcement'));
 
 /**
  * Map task status to checkbox marker.

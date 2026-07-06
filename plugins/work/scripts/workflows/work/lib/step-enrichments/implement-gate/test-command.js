@@ -22,7 +22,7 @@ const { parseTasks } = require(path.join(ENRICH_DIR, '..', 'task-graph'));
 //     unit/integration/e2e/custom kinds; null for citation kinds.
 //   - findNearestEnvrc(worktreeDir): worktree-rooted `.envrc` parse (no shell).
 //   - parseTasks(tasksDir) from task-parser: exposes `task.testStrategy`.
-const { synthesizeCommand } = require(
+const { synthesizeCommand, detectMalformedTestCommand } = require(
   path.join(ENRICH_DIR, '..', '..', '..', 'lib', 'test-strategy')
 );
 const { findNearestEnvrc } = require(
@@ -81,28 +81,34 @@ function readTaskTestCommand(tasksDir, taskNum, worktreeDir) {
  * (e.g. a `custom` kind with neither a command nor a fenced body), so the
  * caller can tell that apart from "no strategy at all".
  *
+ * The `redMode` field threads the task's optional `red-mode:` declaration
+ * (GH-570 — `'ablation'` for regression-coverage tasks, else `null`) so
+ * callers can adapt their RED-phase guidance without re-parsing tasks.md.
+ *
  * @param {string} tasksDir
  * @param {number} taskNum - 1-indexed task number
  * @param {string} [worktreeDir] - worktree root used to resolve `.envrc`
  * @returns {{ command: string|null, strategyKind: string|null,
- *             citation: object|null, source: 'strategy'|null }}
+ *             citation: object|null, source: 'strategy'|null,
+ *             redMode: string|null }}
  */
 function resolveTaskTestExecution(tasksDir, taskNum, worktreeDir) {
   if (!worktreeDir) {
-    return { command: null, strategyKind: null, citation: null, source: null };
+    return { command: null, strategyKind: null, citation: null, source: null, redMode: null };
   }
 
   const task = findTaskByNum(tasksDir, taskNum);
   const strategy = task && task.testStrategy;
   if (!strategy) {
-    return { command: null, strategyKind: null, citation: null, source: null };
+    return { command: null, strategyKind: null, citation: null, source: null, redMode: null };
   }
 
   const kind = strategy.kind || null;
+  const redMode = strategy.redMode || null;
 
   // Citation kinds: no runnable command, the citation IS the resolution.
   if (CITATION_STRATEGY_KINDS.has(kind)) {
-    return { command: null, strategyKind: kind, citation: strategy, source: 'strategy' };
+    return { command: null, strategyKind: kind, citation: strategy, source: 'strategy', redMode };
   }
 
   const command = synthesizeCommand(strategy, findNearestEnvrc(worktreeDir));
@@ -112,32 +118,35 @@ function resolveTaskTestExecution(tasksDir, taskNum, worktreeDir) {
         '(expected a runnable command — check the strategy entry/command body)'
     );
   }
-  return { command, strategyKind: kind, citation: null, source: 'strategy' };
+  return { command, strategyKind: kind, citation: null, source: 'strategy', redMode };
 }
 
+// detectMalformedTestCommand moved to lib/test-strategy.js (W12 unification):
+// the tasks-phase draft gate now applies the SAME malformed-command trap at
+// generation that this gate applies at execution. Re-exported below so
+// existing consumers (test-runner.js, tests) keep their import path.
+
 /**
- * Detect a synthesized/custom command value that leaked from markdown
- * formatting (fenced-block fragment, bare shell name, unmatched backtick).
- * These would `execSync` silently and starve the gate of a real exit code,
- * causing infinite re-dispatch — return a clear block reason instead.
+ * W6 / GH-466 — detect an `eval "$VAR"`-shaped envelope command whose env var
+ * is unset/empty in the environment it is about to run in. `eval ""` is a
+ * successful no-op: it exits 0 instantly with zero output, which the gate
+ * previously recorded as authentic GREEN (false GREEN — GH-466). The
+ * synthesizer only emits this shape when the `.envrc` declared the var, so an
+ * unset var at run time means the run env diverged from the worktree's
+ * declared test envelope (missing/moved `.envrc`, or a custom command that
+ * hardcodes the eval shape) — refuse to execute instead of no-opping.
  *
- * @param {string} cmd
- * @returns {string|null} reason if malformed, null if usable
+ * @param {string} cmd - the resolved test command
+ * @param {object} env - the exact env the command would run with
+ * @returns {string|null} the unset env var name, or null when runnable
  */
-function detectMalformedTestCommand(cmd) {
-  const raw = String(cmd || '').trim();
-  if (!raw) return 'empty';
-  // Bare shell launchers with no arguments — the parser dropped the body
-  if (/^(?:bash|sh|zsh|fish|node|python|python3)\s*$/i.test(raw)) return 'bare-interpreter';
-  // Pure backtick / fence remnants
-  if (/^[`]+$/.test(raw)) return 'backticks-only';
-  // Markdown fence opener that survived (must come before the broader
-  // stray-backtick check, which would otherwise match first and label
-  // ```bash as a "stray-backtick").
-  if (/^```/.test(raw)) return 'fence-opener';
-  // Starts/ends with a stray backtick (parser failed to strip a partial fence)
-  if (/^`/.test(raw) || /`$/.test(raw)) return 'stray-backtick';
-  return null;
+const EVAL_ENVELOPE_RE = /\beval\s+"\$\{?(\w+)\}?"/;
+function detectUnsetEnvelopeCommand(cmd, env) {
+  const m = EVAL_ENVELOPE_RE.exec(String(cmd || ''));
+  if (!m) return null;
+  const value = env ? env[m[1]] : undefined;
+  if (typeof value === 'string' && value.trim().length > 0) return null;
+  return m[1];
 }
 
 module.exports = {
@@ -146,6 +155,7 @@ module.exports = {
   readTaskTestCommand,
   resolveTaskTestExecution,
   detectMalformedTestCommand,
+  detectUnsetEnvelopeCommand,
   parseTasks,
   synthesizeCommand,
   findNearestEnvrc,

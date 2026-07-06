@@ -1,6 +1,6 @@
 # Hook System
 
-The enforcement system uses Claude Code hooks (PreToolUse, PostToolUse, PreCompact, Stop) to gate tool usage, record evidence, and protect state files.
+The enforcement system uses Claude Code hooks (PreToolUse, PostToolUse, PreCompact, Stop, SubagentStop) to gate tool usage, record evidence, and protect state files.
 
 ## Hook Lifecycle
 
@@ -49,8 +49,9 @@ The actual `hooks.json` uses `matcher` regex patterns, `CLAUDE_HOOK_TYPE` env va
         "matcher": "Edit|Write|MultiEdit",
         "hooks": [
           { "type": "command", "command": "CLAUDE_HOOK_TYPE=PreToolUse node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/lib/hooks/enforce-step-workflow.js" },
-          { "type": "command", "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-implement/hooks/work-implement-enforce.js" },
-          { "type": "command", "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/hooks/work-require-implement.js" }
+          { "type": "command", "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/hooks/protect-tasks-md.js" },
+          { "type": "command", "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/hooks/protect-task-scope.js" },
+          { "type": "command", "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-implement/hooks/work-implement-enforce.js" }
         ]
       }
     ],
@@ -61,12 +62,20 @@ The actual `hooks.json` uses `matcher` regex patterns, `CLAUDE_HOOK_TYPE` env va
           { "type": "command", "command": "CLAUDE_HOOK_TYPE=PostToolUse node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/lib/hooks/enforce-step-workflow.js" }
         ]
       }
+    ],
+    "SubagentStop": [
+      {
+        "matcher": ".*",
+        "hooks": [
+          { "type": "command", "command": "node ${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work-implement/hooks/enforce-tdd-on-stop.js", "timeout": 30 }
+        ]
+      }
     ]
   }
 }
 ```
 
-Note: This is a simplified excerpt. The full `hooks.json` includes additional matchers for `Bash`, MCP tools, `AskUserQuestion`, `PreCompact`, and `Stop` events. `CLAUDE_HOOK_TYPE` is set as an env var prefix so the same script can distinguish Pre vs Post invocation.
+Note: This is a simplified excerpt. The full `hooks.json` includes additional matchers for `Bash`, MCP tools, `AskUserQuestion`, `PreCompact`, and `Stop` events, plus the remaining protect-* hooks (`protect-gherkin.js`, `protect-orchestrator-state.js`) on the write matchers. `CLAUDE_HOOK_TYPE` is set as an env var prefix so the same script can distinguish Pre vs Post invocation. `work-implement-enforce.js` runs AFTER the protect-* hooks; `enforce-tdd-on-stop.js` matches every subagent stop and self-filters (exit 0) for non-developer agents and non-implement contexts.
 
 ## Hook Input/Output Protocol
 
@@ -152,14 +161,17 @@ All hooks follow a strict fail-open policy:
 | Hook | Purpose |
 |---|---|
 | `enforce-coverage-fix.js` | Post-check coverage improvement |
-| `work-require-implement.js` | Block code changes outside implement step |
 | `work-code-review-status.js` | Track code review consensus |
+| `protect-tasks-md.js` | Block edits to planner-owned tasks.md outside the tasks phase |
+| `protect-task-scope.js` | Block edits outside the active task's `### Files in scope` |
+| `work-require-implement.js` | Block code changes outside implement step (hook script exists and consumes `preflight.js`, but is NOT currently registered in hooks.json) |
 
 ### /work-implement hooks (`scripts/workflows/work-implement/hooks/`)
 
-| Hook | Purpose |
-|---|---|
-| `work-implement-enforce.js` | TDD phase file gating (RED/GREEN/REFACTOR) |
+| Hook | Event / Matcher | Purpose |
+|---|---|---|
+| `work-implement-enforce.js` | PreToolUse, `Edit\|Write\|MultiEdit` (after protect-*) | TDD phase file gating (RED/GREEN/REFACTOR) |
+| `enforce-tdd-on-stop.js` | SubagentStop, `.*` (self-filtering) | Block developer agents from stopping during `implement` without a valid TDD cycle; prints the `task-next.js` command, never records evidence itself |
 
 ### /check hooks (`scripts/workflows/check/hooks/`)
 

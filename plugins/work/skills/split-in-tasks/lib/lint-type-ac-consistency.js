@@ -2,6 +2,7 @@
 
 const {
   isKnownTaskType,
+  allTaskTypes,
   scopeRulesFor,
   matchesTypeScope,
   isTestFilePath,
@@ -105,17 +106,6 @@ function parseFilesInScope(section) {
   return out;
 }
 
-function findOffendingAcLine(acLines) {
-  if (!Array.isArray(acLines)) return null;
-  for (const line of acLines) {
-    if (typeof line !== 'string') continue;
-    for (const pattern of DOCS_EXEMPTION_PATTERNS) {
-      if (pattern.test(line)) return line;
-    }
-  }
-  return null;
-}
-
 // Returns { line, alignedTypes } for the first AC line that matches a
 // docs-exemption rule, or null if none match.
 function findOffendingAcRule(acLines) {
@@ -165,7 +155,7 @@ function checkDocsExemptionTypeMismatch({ file, taskNumber, section, acceptanceC
   };
 }
 
-function checkTddCodeContract({ file, taskNumber, type, filesInScope, acceptanceCriteria }) {
+function checkTddCodeContract({ file, taskNumber, type, filesInScope }) {
   if (type !== 'tdd-code') return [];
   const warnings = [];
   // GH-594 (Cursor[bot] follow-up): use the shared glob-aware classifier
@@ -197,9 +187,8 @@ function checkTddCodeContract({ file, taskNumber, type, filesInScope, acceptance
       })
     );
   }
-  if (findOffendingAcLine(acceptanceCriteria)) {
-    // Already handled by checkDocsExemptionTypeMismatch — skip duplicate.
-  }
+  // Docs-exemption phrases in the AC are handled by
+  // checkDocsExemptionTypeMismatch — no duplicate check here.
   return warnings;
 }
 
@@ -303,15 +292,27 @@ function checkAllowlistedScope({ file, taskNumber, type, filesInScope }) {
   ];
 }
 
+// W12/echo-5964: a MISSING or EMPTY `### Type` must fail closed too — it
+// falls back to the strictest tdd-code gate contract at implement
+// (task-types.js gateContractFor) and wedges non-code tasks at RED. Pass D
+// used to skip these silently (exit 0), letting the defect reach implement.
 function checkUnknownType({ file, taskNumber, type }) {
-  if (!type) return null;
+  if (!type) {
+    return makeWarning({
+      file,
+      taskNumber,
+      message:
+        'Missing or empty `### Type` — every task must declare one of the closed taxonomy ' +
+        `(${allTaskTypes().join(', ')}). A missing Type falls back to the strictest tdd-code ` +
+        'gate contract at implement and wedges non-code tasks at RED.',
+      hint: 'add a `### Type` line with a value from plugins/work/skills/split-in-tasks/lib/task-types.js',
+    });
+  }
   if (isKnownTaskType(type)) return null;
   return makeWarning({
     file,
     taskNumber,
-    message:
-      `Type="${type}" is not in the closed taxonomy ` +
-      '(tdd-code, tests-only, docs, config, ci, mechanical-refactor, file-move, checkpoint).',
+    message: `Type="${type}" is not in the closed taxonomy (${allTaskTypes().join(', ')}).`,
     hint: 'pick a Type from plugins/work/skills/split-in-tasks/lib/task-types.js',
   });
 }

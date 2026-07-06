@@ -14,6 +14,14 @@ const fs = require('fs');
 const path = require('path');
 const { taskSegment } = require(path.join(__dirname, '..', '..', 'lib', 'allocate-output-folder'));
 const { SHA_REGEX } = require(path.join(__dirname, '..', 'lib', 'git-utils'));
+// Shared `### Type` reader + the ONE contract-aware evidence validator — the
+// SAME functions the implement gate, the SubagentStop hook, and the check
+// validators use, so this implement→commit gate can never apply a stricter
+// rule than the gate that advanced the task (unification invariant).
+const { resolveTaskType } = require(path.join(__dirname, '..', 'lib', 'resolve-task-type'));
+const { validateTddEvidenceForType } = require(
+  path.join(__dirname, '..', 'lib', 'tdd-enforcement')
+);
 
 /**
  * Derive the set of steps that come after `check` in the workflow.
@@ -56,44 +64,48 @@ function computeTaskNum(ws) {
     : undefined;
 }
 
+/**
+ * Resolve the task's `### Type` through the shared resolveTaskType (not a
+ * parallel inline regex, which truncated hyphenated Types). A null Type
+ * (single-task mode / unreadable tasks.md) validates strictly (fail closed).
+ */
+function resolveGateTaskType(ctx) {
+  const { taskNum, safeTicket, deps } = ctx;
+  if (!taskNum) return null;
+  try {
+    return resolveTaskType(path.join(deps.TASKS_BASE, safeTicket), taskNum);
+  } catch {
+    return null;
+  }
+}
+
 /** Checkpoint tasks skip TDD entirely — they verify, they don't write code. */
 function isCheckpointTask(ctx) {
-  const { taskNum, safeTicket, deps } = ctx;
-  if (!taskNum) return false;
-  try {
-    const tasksFile = path.join(deps.TASKS_BASE, safeTicket, 'tasks.md');
-    const content = fs.readFileSync(tasksFile, 'utf8');
-    const m = content.match(
-      new RegExp(`## Task ${taskNum}\\b[\\s\\S]*?### Type\\s*\\n(\\w+)`, 'm')
-    );
-    return m && m[1].trim().toLowerCase() === 'checkpoint';
-  } catch {
-    return false;
-  }
+  return resolveGateTaskType(ctx) === 'checkpoint';
 }
 
 function missingTddEvidenceMessage(ctx) {
   const { currentStep, taskNum, safeTicket, deps } = ctx;
   const taskLabel = taskNum ? ` for task ${taskNum}` : '';
-  // /work flow: implement-gate.js runs the task's `### Test Command` and
-  // writes tdd-phase.json itself. Agents must NOT invoke tdd-phase-state.js
-  // (the legacy CLI) — its writes to tdd-phase.json are blocked by the
-  // protect-orchestrator-state hook. Surface the gate-driven failure modes
-  // and the diagnostic that's actually available (state file).
+  // /work flow: the implement gate synthesizes the runnable command from the
+  // task's `### Test Strategy` (legacy `### Test Command` readers were removed
+  // in GH-653) and records evidence itself. Surface the gate-driven failure
+  // modes and the diagnostic that's actually available (state file).
   const wsPath = path.join(deps.TASKS_BASE, safeTicket, '.work-state.json');
   return [
     `Cannot leave ${currentStep} without TDD evidence${taskLabel}.`,
     '',
-    "In /work the implement-gate runs your task's `### Test Command`",
-    'automatically and writes tdd-phase.json. Agents do NOT invoke',
-    'tdd-phase-state.js, and direct writes to tdd-phase.json are blocked.',
+    'In /work the implement-gate synthesizes and runs the command from your',
+    "task's `### Test Strategy` and records evidence automatically. Direct",
+    'writes to the evidence file are blocked.',
     '',
     'If the gate keeps failing, diagnose:',
     `  1. Open ${wsPath} and read \`_tddRetryReason\` /`,
     '     `_tddRetryCommand` / `_tddRetryExitCode` / `_tddRetryOutputTail`',
     '     — they name the exact gate failure.',
-    `  2. Confirm tasks.md "## Task ${taskNum || '<N>'}" has a \`### Test Command\``,
-    '     block with a runnable shell command.',
+    `  2. Confirm tasks.md "## Task ${taskNum || '<N>'}" declares a \`### Test Strategy\``,
+    '     (tasks.md is planner-owned and locked during implement — a defect',
+    '     there surfaces as an operator-hold, not something you edit).',
     '  3. Common causes: required env var (e.g. $TEST_UNIT_COMMAND) unset,',
     "     test command references files that don't exist yet, malformed",
     '     parser output (fence remnant, bare interpreter name).',
@@ -116,7 +128,7 @@ function tddGate(ctx) {
   if (!exists || parseError) {
     return { error: true, message: missingTddEvidenceMessage(ctx) };
   }
-  const validation = deps.validateTddEvidence(evidence);
+  const validation = validateTddEvidenceForType(evidence, resolveGateTaskType(ctx));
   if (!validation.valid) {
     return { error: true, message: `TDD evidence invalid: ${validation.reason}` };
   }

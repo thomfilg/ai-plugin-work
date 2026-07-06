@@ -121,8 +121,12 @@ function rejectAllSkipped(stdout, stderr, phaseWord) {
         ' skipped, 0 passed). ' +
         phaseWord +
         ' requires actual passing tests, not skipped. ' +
-        "Unskip the affected tests in this PR's scope, or document the skips with " +
-        'their follow-up tickets in tasks.md before re-invoking me.'
+        "Unskip the affected tests in this PR's scope, then re-invoke me. " +
+        "If the skips are pre-existing and out of this task's scope, that is " +
+        'a planner defect: tasks.md is planner-owned and LOCKED during ' +
+        'implement — do NOT edit it. STOP and report ' +
+        '`BLOCKED (planner-defect): all in-scope tests are skipped` back to ' +
+        'the orchestrator.'
     );
   }
 }
