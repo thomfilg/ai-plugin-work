@@ -39,7 +39,6 @@ const gateWriter = require('../../work-implement/tdd-phase-state/gate-writer');
 
 // Built by concatenation so the live plugin's state-file protection hooks
 // never see the literal names next to write calls in this fixture script.
-const WORK_STATE_FILE = ['.work-state', 'json'].join('.');
 const TDD_EVIDENCE_FILE = ['tdd-phase', 'json'].join('.');
 const ACTIONS_FILE = ['.work-actions', 'json'].join('.');
 
