@@ -412,6 +412,42 @@ test('detectKinds derives devops from CI/deploy scope paths AND from Type: ci', 
   fs.rmSync(fixture2.root, { recursive: true, force: true });
 });
 
+test('isDevopsFile: app-source module under a scripts/ ancestor is NOT devops', () => {
+  // Regression: this repo's own source lives at plugins/work/scripts/workflows/lib/...,
+  // which matches both the `scripts/` devops heuristic and the `lib/` app-source
+  // heuristic. Before the fix that made kind_checks unresolvable (devops kind +
+  // app-source drift against the same files). App-source now wins over the
+  // generic scripts/ signal.
+  const pluginSource = 'plugins/work/scripts/workflows/lib/agent-detection.js';
+  assert.equal(specShared.isAppSourceFile(pluginSource), true, 'still app-source');
+  assert.equal(specShared.isDevopsFile(pluginSource), false, 'no longer devops');
+  // It carries no other domain signal, so it evidences no kind (not devops).
+  assert.deepEqual(specShared.classifyScopeEntry(pluginSource), []);
+
+  // Unambiguous infra signals still classify as devops even under a scripts/ tree
+  // or an app-source ancestor.
+  assert.equal(specShared.isDevopsFile('scripts/release.js'), true, 'plain script → devops');
+  assert.equal(specShared.isDevopsFile('.github/workflows/ci.yml'), true, '.github → devops');
+  assert.equal(specShared.isDevopsFile('lib/deploy/pipeline.yml'), true, 'yaml wins under lib/');
+  assert.equal(specShared.isDevopsFile('services/api/Dockerfile'), true, 'Dockerfile → devops');
+});
+
+test('detectKinds does not derive devops from an app-source file under scripts/', () => {
+  const { root, tasksDir } = makeTasksDir({
+    tasks: [
+      '# Tasks',
+      '## Task 1',
+      '### Type: tdd-code',
+      '### Files in scope',
+      '- `plugins/work/scripts/workflows/lib/agent-detection.js`',
+    ].join('\n'),
+  });
+  // The scope path evidences no domain kind (not devops), so kind_checks'
+  // devops handler never applies and cannot false-positive on app-source drift.
+  assert.deepEqual(specShared.detectKinds(tasksDir).sort(), []);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 test('detectKinds unions multiple tasks and composes frontend+backend → fullstack+wiring', () => {
   const { root, tasksDir } = makeTasksDir({
     tasks: [

@@ -350,13 +350,23 @@ function isE2eFile(p) {
 
 /** Heuristic: is a file path "devops/infra-like"? */
 function isDevopsFile(p) {
-  return (
+  // Unambiguous infra signals classify a file as devops regardless of where it
+  // lives in the tree.
+  if (
     /^\.github\//.test(p) ||
-    /(^|\/)scripts\//.test(p) ||
     /(^|\/)\.?ci\//.test(p) ||
     /\.(yml|yaml)$/.test(p) ||
     /(^|\/)Dockerfile/.test(p)
-  );
+  ) {
+    return true;
+  }
+  // The generic `scripts/` signal is overbroad: a plugin whose own source tree
+  // lives under a `scripts/` ancestor (e.g. this repo's own
+  // plugins/work/scripts/workflows/lib/...) would otherwise be classified as
+  // devops AND flagged as app-source drift against itself, wedging kind_checks.
+  // Only treat a `scripts/` path as devops when it is not an app-source module.
+  // (Mirrors the e2e-wins-over-devops carve-out in classifyScopeEntry.)
+  return /(^|\/)scripts\//.test(p) && !isAppSourceFile(p);
 }
 
 /** Heuristic: is a file path an "app-source" path (so devops should NOT touch it)? */
