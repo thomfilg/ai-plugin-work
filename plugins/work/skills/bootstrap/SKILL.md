@@ -32,7 +32,7 @@ Extract task IDs from input. If only numbers provided, prefix with your project 
 
 ### Step 2: For EACH task, execute the following steps
 
-Loop through each task ID and perform Steps 3-6.
+Loop through each task ID and perform Steps 3-7.
 
 ### Step 3: Fetch ticket details
 
@@ -111,7 +111,37 @@ the helper uses that value **verbatim** (no kebab transformation, no prefix prep
 `gitBranchName` fails the configured regex, the helper aborts with both the offending
 name and the regex in stderr, and no worktree is created.
 
-### Step 5: Run custom bootstrap script (if configured)
+### Step 5: Install commit-msg validator hook
+
+Immediately after `git worktree add` succeeds, install the validator
+`commit-msg` hook into the new worktree so git enforces the shared
+commit-message rules on every real `git commit` — with zero subagent dispatch.
+
+```bash
+node "${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/scripts/install-commit-msg-hook.js" "$WORKTREE_PATH"
+```
+
+The installer writes a thin, executable `commit-msg` shim that execs
+`validate-commit-msg.js "$1"`. It resolves the target hooks directory as
+follows:
+
+- When `git config --get core.hooksPath` returns a value, the shim is written
+  into **that** directory, **alongside** the existing biome `pre-commit` hook.
+  Both hooks then coexist and run.
+- When `core.hooksPath` is unset, the shim falls back to `.git/hooks/commit-msg`.
+
+**Guarantees:**
+- `core.hooksPath` is **never** written or cleared — the installer only reads it
+  via `git config --get` and only ever writes the `commit-msg` file. The existing
+  biome `pre-commit` hook is left untouched.
+- The worktree path is rejected (non-zero exit, no write) if it contains a `..`
+  traversal segment.
+
+This step is non-fatal: a warning is acceptable if the installer fails, but a
+successful install means direct `git commit` in the worktree is validated
+without invoking the commit-writer agent.
+
+### Step 6: Run custom bootstrap script (if configured)
 
 ```bash
 cd "$WORKTREE_PATH"
@@ -125,7 +155,7 @@ Configure in your `.envrc`:
 export BOOTSTRAP_SCRIPT="./scripts/bootstrap.sh"
 ```
 
-### Step 6: Report results
+### Step 7: Report results
 
 After processing all tasks, display summary:
 
@@ -179,8 +209,9 @@ Next steps:
 | 2 | Loop through tasks |
 | 3 | Fetch ticket details |
 | 4 | Create worktree + branch (uses `BASE_BRANCH` env var, defaults to `main`) |
-| 5 | Run custom bootstrap script (if `BOOTSTRAP_SCRIPT` is set) |
-| 6 | Display summary |
+| 5 | Install commit-msg validator hook (`install-commit-msg-hook.js`) |
+| 6 | Run custom bootstrap script (if `BOOTSTRAP_SCRIPT` is set) |
+| 7 | Display summary |
 
 **Note:** Bootstrap does NOT start the orchestrator listener. The
 `<TICKET>-listen` tmux session is started by `/work` on every

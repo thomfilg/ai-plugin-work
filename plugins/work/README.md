@@ -75,6 +75,29 @@ The plugin registers hooks that enforce workflow discipline:
 - **`enforce-screenshot-requirement`** - Ensures QA screenshots are captured before completing checks
 - **`work-orchestrator-hook`** - Pre-processes `/work` commands to initialize the workflow engine
 
+## Commit paths
+
+There are **two ways** a commit gets created, and they enforce the **same** semantic-commit
+rules from a single source of truth (`scripts/workflows/work/hooks/commit-msg-rules.js`):
+
+| Path | When it applies | How it works |
+|------|-----------------|--------------|
+| **Direct-commit + validator** (default) | The installed `commit-msg` validator hook (`validate-commit-msg.js`) is present in the worktree | The `commit` step commits directly; the `commit-msg` git hook validates the message at commit time and **rejects** it if any rule fails. No `commit-writer` dispatch. |
+| **Opt-in `commit-writer`** | On demand, or as a fallback when the validator hook is not installed | The `commit-writer` agent drafts a semantic message, self-validates it against `commit-msg-rules.js`, then commits/pushes. |
+
+Both paths validate against the same `commit-msg-rules.js` module, so a message that passes
+one passes the other. The `commit-msg` validator hook coexists with the biome `pre-commit`
+hook — both run on a direct `git commit`.
+
+### Commit-message rule decisions
+
+- **Title ≤ 72 chars, body lines ≤ 100 chars.** The ticket's "≤72" refers to the commit
+  **title**; body lines use the ≤100 limit that `commit-writer` already enforced. Both limits
+  live in `commit-msg-rules.js` (`titleLengthRule`, `bodyLineLengthRule`).
+- **Deferred:** a `no empty body when type is feat/breaking` rule is **not** enforced yet. It
+  is deferred pending team confirmation on whether to **block** or merely **warn**, and is
+  intentionally omitted from `commit-msg-rules.js` until that decision lands.
+
 ## Architecture
 
 ```

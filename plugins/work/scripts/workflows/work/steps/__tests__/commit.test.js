@@ -108,4 +108,32 @@ describe('commit step', () => {
     commitStep(add, null, makeCtx());
     assert.equal(entries[0].action, 'PENDING');
   });
+
+  it('emits a direct git commit RUN when the validator hook is present', () => {
+    const { add, entries } = makeAdd();
+    const s = makeState({
+      hasUncommitted: true,
+      uncommittedCount: 3,
+      hasCommitMsgHook: true,
+    });
+    commitStep(add, s, makeCtx());
+    assert.equal(entries[0].step, STEPS.commit);
+    assert.equal(entries[0].action, 'RUN');
+    assert.equal(entries[0].command, 'git commit');
+    assert.equal(entries[0].agentType, undefined);
+    assert.match(entries[0].reason, /3 uncommitted file/);
+  });
+
+  it('keeps Task(commit-writer) dispatch when the validator hook is absent', () => {
+    const { add, entries } = makeAdd();
+    const s = makeState({
+      hasUncommitted: true,
+      uncommittedCount: 4,
+      hasCommitMsgHook: false,
+    });
+    commitStep(add, s, makeCtx());
+    assert.equal(entries[0].action, 'RUN');
+    assert.equal(entries[0].command, 'Task(commit-writer)');
+    assert.equal(entries[0].agentType, 'commit-writer');
+  });
 });

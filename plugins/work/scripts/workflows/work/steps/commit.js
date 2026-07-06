@@ -9,10 +9,14 @@ module.exports = function commitStep(add, s, ctx) {
   const { STEPS, t } = ctx;
 
   if (s?.hasUncommitted) {
-    add(STEPS.commit, 'RUN', 'Task(commit-writer)', `${s.uncommittedCount} uncommitted file(s)`, {
-      agentType: 'commit-writer',
-      agentPrompt: `autonomous - commit staged changes for ${t}`,
-    });
+    if (s.hasCommitMsgHook) {
+      add(STEPS.commit, 'RUN', 'git commit', `${s.uncommittedCount} uncommitted file(s)`);
+    } else {
+      add(STEPS.commit, 'RUN', 'Task(commit-writer)', `${s.uncommittedCount} uncommitted file(s)`, {
+        agentType: 'commit-writer',
+        agentPrompt: `autonomous - commit staged changes for ${t}`,
+      });
+    }
   } else if (s?.hasCommitWithTicket) {
     add(STEPS.commit, 'DEFER', 'Task(commit-writer)', `Latest: "${s.lastCommitMsg}"`, {
       agentType: 'commit-writer',
