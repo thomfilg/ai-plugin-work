@@ -128,15 +128,32 @@ function noEmojiInTitleRule(message) {
   return fail('Title contains an emoji', 'Remove emoji from the commit title.');
 }
 
+// Common imperative verbs that end in "ed"/"s" and would otherwise trip the
+// naive past-tense / third-person suffix heuristic below. Whitelisted so real
+// imperatives ("process", "address", "embed", "feed") are never rejected.
+const IMPERATIVE_EXCEPTIONS = new Set([
+  // base verbs ending in "s"
+  'process', 'address', 'compress', 'express', 'focus', 'pass', 'bypass',
+  'dismiss', 'discuss', 'guess', 'press', 'access', 'cross', 'toss', 'miss',
+  // base verbs ending in "ed"
+  'embed', 'feed', 'seed', 'speed', 'need', 'proceed', 'exceed', 'succeed',
+  'breed', 'bleed', 'shed', 'wed', 'spread', 'thread',
+]);
+
 /**
  * Subject must be imperative mood. Blocks only unambiguous past-tense /
- * third-person: a leading description verb ending in "ed" or "s".
+ * third-person: a leading description verb ending in "ed" or "s", excluding
+ * base verbs (e.g. "process", "address", "embed") that share those endings.
  */
 function imperativeMoodRule(message) {
   const parsed = parseTitle(getTitle(message));
   if (!parsed) return { ok: true }; // not semantic form — semanticFormatRule owns it
   const firstWord = (parsed.description.match(/[a-zA-Z]+/) || [''])[0].toLowerCase();
   if (!firstWord) return { ok: true };
+  if (IMPERATIVE_EXCEPTIONS.has(firstWord)) return { ok: true };
+  // Base verbs ending in "ss"/"us" (e.g. "address", "focus") are never a
+  // third-person "-s" conjugation — only a trailing single "s" is.
+  if (/(ss|us)$/.test(firstWord)) return { ok: true };
   if (!/(ed|s)$/.test(firstWord)) return { ok: true };
   return fail(
     `Subject "${firstWord}" is not in imperative mood`,

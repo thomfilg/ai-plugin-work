@@ -129,6 +129,16 @@ describe('imperativeMoodRule', () => {
   it('fails a third-person subject (verb ending in s)', () => {
     assertFailure(rules.imperativeMoodRule('feat: adds the validator', {}));
   });
+  it('passes imperative verbs ending in "s"/"ss" (process, address, focus)', () => {
+    for (const w of ['process', 'address', 'focus', 'compress', 'bypass']) {
+      assert.deepEqual(rules.imperativeMoodRule(`feat: ${w} the queue`, {}), { ok: true });
+    }
+  });
+  it('passes imperative verbs ending in "ed" (embed, feed, speed)', () => {
+    for (const w of ['embed', 'feed', 'speed', 'spread']) {
+      assert.deepEqual(rules.imperativeMoodRule(`feat: ${w} the payload`, {}), { ok: true });
+    }
+  });
 });
 
 describe('bodyLineLengthRule (<=100)', () => {
