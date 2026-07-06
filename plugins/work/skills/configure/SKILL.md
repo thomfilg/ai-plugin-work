@@ -65,6 +65,22 @@ at direnv time via `gh auth token`.
      `answers.acknowledged` — acknowledging is what stops the session-start
      "can be auto-filled" reminder from repeating.
 
+3c. **Derive repo-specific vars (`plan.agentFill`).** These need interpretation,
+   not globbing — commands, app JSON, bootstrap scripts. For each entry
+   (`name` + `hint`), YOU derive a proposal from the repo before asking:
+
+   - Follow the entry's `hint`: read `package.json` scripts, framework config
+     files (next/vite/remix/playwright), the wrapper `../scripts/` directory,
+     and the git remote as directed.
+   - Preserve placeholder semantics: `$CHANGED_FILES` must stay literal in
+     command values (the write path single-quotes `command`-type vars so it
+     is not expanded at direnv time).
+   - Present the derived values grouped in AskUserQuestion batches (≤4) with
+     the proposal as the Recommended option, "Keep unset" as an option, and
+     "Other" for manual override. Show the exact value in the description.
+   - Accepted → `answers.values`; declined → `answers.acknowledged` (silences
+     the 🛠 session-start reminder).
+
 4. **Write the answers file** (use the Write tool) to
    `/tmp/envconfig-answers-$$.json`:
 

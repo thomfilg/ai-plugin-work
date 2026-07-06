@@ -61,6 +61,11 @@ function scanVar(projectRoot, def) {
   return { candidates, suggested };
 }
 
+function isUnset(values, name) {
+  const current = values[name];
+  return !current || current.value === '';
+}
+
 /**
  * All scannable vars of a schema that are unset, unacknowledged, and have
  * at least one suggestion in this repo.
@@ -70,9 +75,7 @@ function scanFulfillable({ schema, projectRoot, values = {}, acknowledged = new 
   const out = [];
   for (const [name, def] of Object.entries(schema.vars)) {
     if (!def.scan) continue;
-    const current = values[name];
-    if (current && current.value !== '') continue;
-    if (acknowledged.has(name)) continue;
+    if (!isUnset(values, name) || acknowledged.has(name)) continue;
     const result = scanVar(projectRoot, def);
     if (result && result.suggested.length > 0) {
       out.push({ name, ...result, value: result.suggested.join(',') });
@@ -81,4 +84,31 @@ function scanFulfillable({ schema, projectRoot, values = {}, acknowledged = new 
   return out;
 }
 
-module.exports = { expandGlob, scanVar, scanFulfillable };
+/**
+ * Vars whose value needs repo-specific INTERPRETATION (custom commands,
+ * app JSON, bootstrap scripts): schema marks them with an `agentFill`
+ * block — `{ "hint": "how to derive it", "signals": ["package.json"] }` —
+ * and the configure assistant derives a proposal from the repo instead of
+ * asking blind. Included when unset, unacknowledged, and at least one
+ * signal path exists (no signals declared → always eligible).
+ * Returns [{ name, hint }].
+ */
+function signalsPresent(projectRoot, fill) {
+  const signals = Array.isArray(fill.signals) ? fill.signals : [];
+  if (signals.length === 0) return true;
+  return signals.some((signal) => expandGlob(projectRoot, signal).length > 0);
+}
+
+function agentFillable({ schema, projectRoot, values = {}, acknowledged = new Set() }) {
+  const out = [];
+  for (const [name, def] of Object.entries(schema.vars)) {
+    const fill = def.agentFill;
+    if (!fill) continue;
+    if (!isUnset(values, name) || acknowledged.has(name)) continue;
+    if (!signalsPresent(projectRoot, fill)) continue;
+    out.push({ name, hint: fill.hint || '' });
+  }
+  return out;
+}
+
+module.exports = { expandGlob, scanVar, scanFulfillable, agentFillable };

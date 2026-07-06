@@ -105,6 +105,50 @@ test('scanFulfillable skips set and acknowledged vars', () => {
   assert.equal(empty.length, 1);
 });
 
+test('agentFillable: unset vars with satisfied signals, hint carried through', () => {
+  const { agentFillable } = require('../scan');
+  const fillSchema = {
+    plugin: 'demo',
+    prefixes: ['DEMO_'],
+    vars: {
+      DEMO_CMD: {
+        type: 'command',
+        default: '',
+        description: 'c',
+        section: 'S',
+        agentFill: { hint: 'read package.json scripts', signals: ['package.json'] },
+      },
+      DEMO_MISSING_SIGNAL: {
+        type: 'command',
+        default: '',
+        description: 'm',
+        section: 'S',
+        agentFill: { hint: 'x', signals: ['nonexistent.toml'] },
+      },
+      DEMO_NO_SIGNALS: {
+        type: 'string',
+        default: '',
+        description: 'n',
+        section: 'S',
+        agentFill: { hint: 'always eligible' },
+      },
+    },
+  };
+  fs.writeFileSync(path.join(tmp, 'package.json'), '{"scripts":{"test":"node --test"}}');
+  const out = agentFillable({ schema: fillSchema, projectRoot: tmp, values: {} });
+  assert.deepEqual(out, [
+    { name: 'DEMO_CMD', hint: 'read package.json scripts' },
+    { name: 'DEMO_NO_SIGNALS', hint: 'always eligible' },
+  ]);
+  const filtered = agentFillable({
+    schema: fillSchema,
+    projectRoot: tmp,
+    values: { DEMO_CMD: { value: 'pnpm test', dynamic: false, source: 'envrc' } },
+    acknowledged: new Set(['DEMO_NO_SIGNALS']),
+  });
+  assert.deepEqual(filtered, []);
+});
+
 test('work schema: READ_DOCS scan blocks resolve against a .rulesync fixture', () => {
   const workSchema = JSON.parse(
     fs.readFileSync(

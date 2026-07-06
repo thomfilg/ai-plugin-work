@@ -21,7 +21,7 @@ const { loadSchema, mergeSchemas } = require('./schema');
 const { readValues } = require('./envFiles');
 const { detect, projectKey, markConfigured } = require('./detect');
 const { findUnknownKeys, validateValues } = require('./validate');
-const { scanFulfillable } = require('./scan');
+const { scanFulfillable, agentFillable } = require('./scan');
 
 const MAX_LISTED_VARS = 8;
 const MAX_WARNINGS = 10;
@@ -120,23 +120,40 @@ function run({
 }
 
 /**
- * Nudge for scannable vars that sit empty while the repo has the docs to
- * fill them. Fires on the fast path too — an acknowledged (keep-unset) var
- * is the only off switch, so "set to empty and forgotten" cannot go silent.
+ * Nudges for vars the configure assistant can fulfill: scannable vars
+ * (repo docs match their globs) and agent-fill vars (repo-specific values
+ * the assistant derives — commands, app JSON, bootstrap scripts). Fires on
+ * the fast path too — an acknowledged (keep-unset) var is the only off
+ * switch, so "set to empty and forgotten" cannot go silent. Names already
+ * nagged by the drift missing-list are not repeated here.
  */
 function scanLines({ schema, projectRoot, values, result, configureCommand }) {
-  const fulfillable = scanFulfillable({
-    schema,
-    projectRoot,
-    values,
-    acknowledged: new Set(result.acknowledgedVars || []),
-  });
-  if (fulfillable.length === 0) return [];
-  const names = fulfillable.map((entry) => entry.name);
-  return [
-    `📄 ${schema.plugin}: ${names.length} var(s) can be auto-filled from files in this repo: ${formatMissing(names)}`,
-    `  Run ${configureCommand} — the assistant can scan the matched docs and propose the values.`,
-  ];
+  const acknowledged = new Set(result.acknowledgedVars || []);
+  const alreadyNagged = new Set(result.missing || []);
+  const lines = [];
+
+  const scannable = scanFulfillable({ schema, projectRoot, values, acknowledged }).filter(
+    (entry) => !alreadyNagged.has(entry.name)
+  );
+  if (scannable.length > 0) {
+    const names = scannable.map((entry) => entry.name);
+    lines.push(
+      `📄 ${schema.plugin}: ${names.length} var(s) can be auto-filled from files in this repo: ${formatMissing(names)}`,
+      `  Run ${configureCommand} — the assistant can scan the matched docs and propose the values.`
+    );
+  }
+
+  const derivable = agentFillable({ schema, projectRoot, values, acknowledged }).filter(
+    (entry) => !alreadyNagged.has(entry.name)
+  );
+  if (derivable.length > 0) {
+    const names = derivable.map((entry) => entry.name);
+    lines.push(
+      `🛠 ${schema.plugin}: ${names.length} repo-specific var(s) unset: ${formatMissing(names)}`,
+      `  Run ${configureCommand} — the assistant can derive them from this repo (package.json scripts, framework, wrapper layout).`
+    );
+  }
+  return lines;
 }
 
 /** Wrapper for hook entrypoints: never throws, prints, exits 0. */

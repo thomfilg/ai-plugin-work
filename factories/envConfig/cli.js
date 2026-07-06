@@ -33,7 +33,7 @@ const { readValues } = require('./envFiles');
 const { detect, projectKey, markConfigured } = require('./detect');
 const { findUnknownKeys, validateValues } = require('./validate');
 const { renderEnvrc, mergeEnvContent } = require('./render');
-const { scanFulfillable } = require('./scan');
+const { scanFulfillable, agentFillable } = require('./scan');
 const { defaultCachePath } = require('./sessionHook');
 
 function parseArgs(argv) {
@@ -132,6 +132,12 @@ function cmdPlan(args) {
     vars: varInventory(schemas, values),
     fulfillable: schemas.flatMap((schema) =>
       scanFulfillable({ schema, projectRoot, values }).map((entry) => ({
+        plugin: schema.plugin,
+        ...entry,
+      }))
+    ),
+    agentFill: schemas.flatMap((schema) =>
+      agentFillable({ schema, projectRoot, values }).map((entry) => ({
         plugin: schema.plugin,
         ...entry,
       }))
