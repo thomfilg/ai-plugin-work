@@ -20,6 +20,12 @@ const { notifyOperator } = require('../notify');
 // span forever on unactionable noise. Demote them to non-blocking notices
 // (counted separately) and recompute hasBlocking / the exit signal.
 //
+// Scope is deliberately ALL non-allowlisted authors, humans included: a
+// body-only COMMENTED review can never block the merge regardless of who
+// posted it, so a human's review-level aside is a notice too — anything
+// they want acted on arrives as CHANGES_REQUESTED or an inline comment,
+// both of which stay blocking.
+//
 // Invariants preserved:
 //   - CHANGES_REQUESTED stays blocking regardless of reviewer (never demoted).
 //   - Inline comments (item.path set) keep their classification.

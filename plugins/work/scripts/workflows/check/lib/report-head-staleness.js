@@ -40,6 +40,7 @@ function currentWorktreeHead(state, ctx) {
 
 // SHA equality tolerant of short vs full form (min 7 chars enforced by regex).
 function shaMatches(a, b) {
+  if (!a || !b) return false; // '' startsWith '' is true — never match on empty
   const x = String(a).toLowerCase();
   const y = String(b).toLowerCase();
   return x.startsWith(y) || y.startsWith(x);

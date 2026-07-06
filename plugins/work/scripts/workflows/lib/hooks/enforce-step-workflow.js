@@ -202,6 +202,10 @@ const PROTECTED_STATE_BASENAMES = buildProtectedBasenames(WORKFLOWS, [
   '.check2-state.json', // legacy name — still protected for in-flight tickets
   '.follow-up-state.json',
   'follow-up-comments.json',
+  // Check-step delta baselines: deleting one silently resets the
+  // net-new-vs-baseline signal, so they get the same protection as state.
+  'tests-baseline.json',
+  'typecheck-baseline.json',
 ]);
 
 // Map each protected basename to its workflow's transition hint
