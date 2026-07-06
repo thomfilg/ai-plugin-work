@@ -111,6 +111,11 @@ function handleNoMoreComments(state, commentsScript, ctx, scriptEnv) {
     state._skippedReviewsCount = statusResult.skipped || 0;
     state._solvedReviewsCount = statusResult.solved || 0;
   }
+  // GH-670: the review work that set failureCategory ('review_failure', or
+  // legacy 'reviews') is now terminal — every tracked comment is solved or
+  // skipped locally. Null it out (mirrors push-retry's loopBackToMonitor) so
+  // the report step routes to completion instead of surfacing forever.
+  state.failureCategory = null;
   // STRICT commits-only probe: the dirty-tree fallback would misroute a
   // no-upstream worktree with stray untracked files into an endless
   // done→push-retry cycle (review finding on PR #666).
