@@ -157,11 +157,11 @@ describe('work-implement-enforce — ablation-RED source-edit allowance (W1×W8)
 
   it('blocks edits outside the worktree even for an ablation task', async () => {
     writeTasksMd({ redMode: 'ablation' });
-    const outside = path.join(os.tmpdir(), 'wie-abl-outside-src', 'feature.js');
-    fs.mkdirSync(path.dirname(outside), { recursive: true });
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wie-abl-outside-src-'));
+    const outside = path.join(outsideDir, 'feature.js');
     fs.writeFileSync(outside, 'x\n');
     const { code } = await runHook(outside);
     assert.equal(code, 2, 'paths that do not resolve inside the worktree stay blocked');
-    fs.rmSync(path.dirname(outside), { recursive: true, force: true });
+    fs.rmSync(outsideDir, { recursive: true, force: true });
   });
 });
