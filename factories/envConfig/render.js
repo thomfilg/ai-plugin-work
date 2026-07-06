@@ -27,6 +27,8 @@ function renderGhTokenBlock(ghUser) {
     '# returns empty (token expired / logged out), do NOT export an empty GH_TOKEN —',
     '# that silently breaks auth. Unset it so gh falls back to stored creds',
     '# (hosts.yml) and surface the degradation via a visible warning.',
+    '# log_status is the direnv stdlib logger; shim it when the file is sourced directly.',
+    'command -v log_status >/dev/null 2>&1 || log_status() { echo "$*" >&2; }',
     `_gh_token=$(gh auth token -u ${ghUser} 2>/dev/null)`,
     'if [ -n "$_gh_token" ]; then',
     '  export GH_TOKEN="$_gh_token"',
@@ -44,11 +46,13 @@ function renderGhTokenBlock(ghUser) {
  */
 function renderGitIdentityBlock(identity = { mode: 'default' }) {
   if (identity.mode === 'custom') {
+    const name = dquoteEscape(identity.name);
+    const email = dquoteEscape(identity.email);
     return [
-      `export GIT_AUTHOR_NAME="${identity.name}"`,
-      `export GIT_COMMITTER_NAME="${identity.name}"`,
-      `export GIT_AUTHOR_EMAIL="${identity.email}"`,
-      `export GIT_COMMITTER_EMAIL="${identity.email}"`,
+      `export GIT_AUTHOR_NAME="${name}"`,
+      `export GIT_COMMITTER_NAME="${name}"`,
+      `export GIT_AUTHOR_EMAIL="${email}"`,
+      `export GIT_COMMITTER_EMAIL="${email}"`,
     ].join('\n');
   }
   return [
@@ -63,12 +67,25 @@ function needsQuoting(value) {
   return /[\s"'`$#\\]/.test(value);
 }
 
+function dquoteEscape(value) {
+  return String(value).replace(/[\\"]/g, '\\$&');
+}
+
+/**
+ * Quote a value for a shell assignment. Default is double-quoting so
+ * `$HOME`-style references still expand at source time; `literal: true`
+ * (command-type vars) single-quotes so expansion is deferred to run time.
+ */
+function quoteEnvValue(value, { literal = false } = {}) {
+  const str = String(value);
+  if (!needsQuoting(str)) return str;
+  if (literal) return `'${str.replace(/'/g, "'\\''")}'`;
+  return `"${dquoteEscape(str)}"`;
+}
+
 function renderVarLine(name, def, value) {
   if (value !== undefined && value !== null && value !== '') {
-    const rendered = needsQuoting(String(value))
-      ? `'${String(value).replace(/'/g, "'\\''")}'`
-      : value;
-    return `export ${name}=${rendered}`;
+    return `export ${name}=${quoteEnvValue(value, { literal: def.type === 'command' })}`;
   }
   const hint = def.example || def.default || '';
   return `# export ${name}=${hint}`;
@@ -145,13 +162,13 @@ function mergeEnvContent(existing, updates, { exportPrefix = false } = {}) {
     if (match && match[1] in pending) {
       const value = pending[match[1]];
       delete pending[match[1]];
-      return `${prefix}${match[1]}=${value}`;
+      return `${prefix}${match[1]}=${quoteEnvValue(value)}`;
     }
     return line;
   });
   while (merged.length && merged[merged.length - 1] === '') merged.pop();
   for (const [name, value] of Object.entries(pending)) {
-    merged.push(`${prefix}${name}=${value}`);
+    merged.push(`${prefix}${name}=${quoteEnvValue(value)}`);
   }
   return `${merged.join('\n')}\n`;
 }
@@ -160,6 +177,7 @@ module.exports = {
   sectionHeader,
   renderGhTokenBlock,
   renderGitIdentityBlock,
+  quoteEnvValue,
   renderVarLine,
   renderPluginSections,
   renderEnvrc,

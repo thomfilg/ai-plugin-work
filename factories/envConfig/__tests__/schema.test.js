@@ -84,8 +84,11 @@ test('mergeSchemas unions prefixes/internal, first declaration wins', () => {
 
 test('self-test: every marketplace plugin ships a valid schema', () => {
   const schemas = discoverSchemas(REPO_ROOT);
-  const names = schemas.map((s) => s.plugin).sort();
-  assert.deepEqual(names, ['heimdall', 'maestro', 'synapsys', 'work-workflow']);
+  const names = schemas.map((s) => s.plugin);
+  // Subset assertion: a future fifth plugin must not break this test.
+  for (const plugin of ['heimdall', 'maestro', 'synapsys', 'work-workflow']) {
+    assert.ok(names.includes(plugin), `missing schema for ${plugin}`);
+  }
 });
 
 test('findMarketplaceRoot walks up from a plugin dir', () => {

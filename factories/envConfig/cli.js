@@ -133,22 +133,26 @@ function cmdPlan(args) {
   process.stdout.write(`${JSON.stringify(plan, null, 2)}\n`);
 }
 
-function backupIfExists(filePath) {
-  if (!fs.existsSync(filePath)) return null;
-  const backup = `${filePath}.bak-${Date.now()}`;
-  fs.copyFileSync(filePath, backup);
-  return backup;
+function readIfExists(filePath) {
+  try {
+    return fs.readFileSync(filePath, 'utf8');
+  } catch {
+    return null;
+  }
 }
 
 function writeEnvrcTarget(answers, schemas, values) {
   const target = answers.envrcPath;
   if (!target) throw new Error('answers.envrcPath is required for target "envrc"');
-  const exists = fs.existsSync(target);
-  const backup = backupIfExists(target);
+  const existing = readIfExists(target);
+  let backup = null;
+  if (existing !== null) {
+    backup = `${target}.bak-${Date.now()}`;
+    fs.writeFileSync(backup, existing);
+  }
   fs.mkdirSync(path.dirname(target), { recursive: true });
-  if (exists && !answers.regenerate) {
+  if (existing !== null && !answers.regenerate) {
     // Preserve hand-edited content (dynamic values, comments): merge exports.
-    const existing = fs.readFileSync(`${backup}`, 'utf8');
     fs.writeFileSync(target, mergeEnvContent(existing, values, { exportPrefix: true }));
     return { written: target, backup, mode: 'merge' };
   }

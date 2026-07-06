@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const {
   renderGhTokenBlock,
   renderGitIdentityBlock,
+  quoteEnvValue,
   renderVarLine,
   renderEnvrc,
   mergeEnvContent,
@@ -50,8 +51,22 @@ test('git identity block: default defers to git config, custom pins literals', (
 test('renderVarLine exports set values and comments unset ones', () => {
   const def = schema.vars.DEMO_NAME;
   assert.equal(renderVarLine('DEMO_NAME', def, 'plain'), 'export DEMO_NAME=plain');
-  assert.equal(renderVarLine('DEMO_NAME', def, 'two words'), "export DEMO_NAME='two words'");
+  assert.equal(renderVarLine('DEMO_NAME', def, 'two words'), 'export DEMO_NAME="two words"');
   assert.equal(renderVarLine('DEMO_NAME', def, undefined), '# export DEMO_NAME=fallback');
+});
+
+test('quoting: $VAR refs expand (double quotes), command types stay literal', () => {
+  const pathDef = { type: 'path', default: '', description: 'p', section: 'S' };
+  const cmdDef = { type: 'command', default: '', description: 'c', section: 'S' };
+  assert.equal(
+    renderVarLine('DEMO_DIR', pathDef, '$HOME/my worktrees'),
+    'export DEMO_DIR="$HOME/my worktrees"'
+  );
+  assert.equal(
+    renderVarLine('DEMO_CMD', cmdDef, 'pnpm test $CHANGED_FILES'),
+    "export DEMO_CMD='pnpm test $CHANGED_FILES'"
+  );
+  assert.equal(quoteEnvValue('say "hi"'), '"say \\"hi\\""');
 });
 
 test('renderEnvrc assembles gh block, identity, and plugin sections', () => {
@@ -82,4 +97,14 @@ test('mergeEnvContent exportPrefix preserves .envrc form', () => {
   const merged = mergeEnvContent('export A=1\n', { A: '2', B: '3' }, { exportPrefix: true });
   assert.match(merged, /^export A=2$/m);
   assert.match(merged, /^export B=3$/m);
+});
+
+test('mergeEnvContent quotes values that need it (spaces stay one assignment)', () => {
+  const merged = mergeEnvContent(
+    'export DIR=/old\n',
+    { DIR: '/home/user/my worktrees', REF: '$HOME/tasks' },
+    { exportPrefix: true }
+  );
+  assert.match(merged, /^export DIR="\/home\/user\/my worktrees"$/m);
+  assert.match(merged, /^export REF="\$HOME\/tasks"$/m);
 });
