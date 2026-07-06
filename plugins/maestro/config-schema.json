@@ -1,0 +1,77 @@
+{
+  "plugin": "maestro",
+  "prefixes": ["MAESTRO_"],
+  "internal": [
+    "MAESTRO_FORCE",
+    "MAESTRO_RESTART_MODE",
+    "MAESTRO_STATE_DIR",
+    "MAESTRO_SESSION_DIR",
+    "MAESTRO_STOP_GUARD",
+    "MAESTRO_STOP_GUARD_STATE",
+    "MAESTRO_LINE"
+  ],
+  "vars": {
+    "MAESTRO_SKILL": {
+      "type": "string",
+      "default": "work",
+      "description": "Skill launched per ticket session (work, follow-up, or custom)",
+      "section": "Orchestration"
+    },
+    "MAESTRO_BRANCH_TEMPLATE": {
+      "type": "string",
+      "default": "{ticket}",
+      "example": "feature/{ticket_lower}",
+      "description": "Branch naming template for agent worktrees",
+      "section": "Orchestration"
+    },
+    "MAESTRO_NS": {
+      "type": "string",
+      "default": "",
+      "description": "Namespace segment isolating concurrent orchestrations",
+      "section": "Orchestration",
+      "advanced": true
+    },
+    "MAESTRO_INBOX_DIR": {
+      "type": "path",
+      "default": "",
+      "description": "File-mailbox directory for signal/listen IPC",
+      "section": "Orchestration",
+      "advanced": true
+    },
+    "MAESTRO_TASKS_BASE": {
+      "type": "path",
+      "default": "",
+      "description": "Where per-ticket .maestro-skill files persist",
+      "section": "Orchestration",
+      "advanced": true
+    },
+    "MAESTRO_DISABLE_HOME_STORES": {
+      "type": "bool01",
+      "default": "0",
+      "description": "Ignore home-directory session stores",
+      "section": "Orchestration",
+      "advanced": true
+    },
+    "MAESTRO_GROOM_DELAY_SEC": {
+      "type": "number",
+      "default": "3",
+      "description": "Delay before session grooming (seconds)",
+      "section": "Conductor Tuning",
+      "advanced": true
+    },
+    "MAESTRO_SEND_VERIFY_DELAY_SEC": {
+      "type": "number",
+      "default": "0.7",
+      "description": "Delay when sending keys to tmux (seconds)",
+      "section": "Conductor Tuning",
+      "advanced": true
+    },
+    "MAESTRO_PENDING_WINDOW_MIN": {
+      "type": "number",
+      "default": "",
+      "description": "Window (min) a pending task may wait before alerting",
+      "section": "Conductor Tuning",
+      "advanced": true
+    }
+  }
+}

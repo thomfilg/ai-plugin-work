@@ -1,0 +1,431 @@
+{
+  "plugin": "work-workflow",
+  "prefixes": [
+    "WORK_",
+    "TICKET_",
+    "JIRA_",
+    "LINEAR_",
+    "FOLLOW_UP_",
+    "READ_DOCS_ON_",
+    "SESSION_GUARD_",
+    "TASK_REVIEW_",
+    "REBASE_GUARD_",
+    "CHECK_",
+    "ENABLE_",
+    "SCRIPT_RUN_AFFECTED_",
+    "BOOTSTRAP_"
+  ],
+  "internal": [
+    "WORK_TICKET_ID",
+    "WORK_TASK_NUM",
+    "WORK_PR_SLOT",
+    "WORK_OPERATOR_TOKEN",
+    "WORK_DRAFT_WORKDIR",
+    "WORK_WORKTREE_DIR",
+    "WORK_STATE_PATH",
+    "WORK_TEST_STRATEGY_VALIDATOR",
+    "WORK_TDD_TOKEN_SKIP",
+    "WORK_TDD_SKIP_WORKSPACE_CHECK",
+    "WORK_TDD_ENFORCE",
+    "TICKET_ID",
+    "FOLLOW_UP_NEXT_PATH",
+    "SESSION_GUARD_DIR",
+    "SESSION_GUARD_PATH",
+    "SESSION_GUARD_TICKET_ID"
+  ],
+  "vars": {
+    "TICKET_PROVIDER": {
+      "type": "enum",
+      "values": ["jira", "linear", "github", "none"],
+      "default": "jira",
+      "description": "Ticket provider backend",
+      "section": "Ticket Provider",
+      "required": true
+    },
+    "TICKET_PROJECT_KEY": {
+      "type": "string",
+      "default": "PROJ",
+      "description": "Provider-agnostic issue prefix (e.g. MYPROJ)",
+      "section": "Ticket Provider"
+    },
+    "JIRA_PROJECT_KEY": {
+      "type": "string",
+      "default": "PROJ",
+      "description": "Jira project key; also the TICKET_PROJECT_KEY fallback",
+      "section": "Ticket Provider"
+    },
+    "JIRA_BASE_URL": {
+      "type": "string",
+      "default": "your-org.atlassian.net",
+      "description": "Jira instance domain, without https://",
+      "section": "Ticket Provider"
+    },
+    "JIRA_ASSIGNEE_EMAIL": {
+      "type": "string",
+      "default": "",
+      "description": "Default assignee email for new Jira tickets",
+      "section": "Ticket Provider"
+    },
+    "LINEAR_TEAM_ID": {
+      "type": "string",
+      "default": "",
+      "description": "Linear team UUID (when TICKET_PROVIDER=linear)",
+      "section": "Ticket Provider"
+    },
+    "REPO_NAME": {
+      "type": "string",
+      "default": "",
+      "example": "my-project",
+      "description": "Repository name — used for worktree folder naming",
+      "section": "Configuration",
+      "required": true
+    },
+    "GITHUB_ORG": {
+      "type": "string",
+      "default": "",
+      "description": "GitHub org/user for PR URLs and wiki links",
+      "section": "Configuration"
+    },
+    "BASE_BRANCH": {
+      "type": "string",
+      "default": "",
+      "example": "main",
+      "description": "Base branch for diffs/PRs (auto-detected if unset)",
+      "section": "Configuration"
+    },
+    "WORKTREES_BASE": {
+      "type": "path",
+      "default": "",
+      "example": "$HOME/worktrees",
+      "description": "Base directory holding all per-ticket worktrees",
+      "section": "Folders",
+      "required": true
+    },
+    "TASKS_BASE": {
+      "type": "path",
+      "default": "",
+      "example": "$WORKTREES_BASE/tasks",
+      "description": "Base directory for per-ticket task artifacts",
+      "section": "Folders"
+    },
+    "BOOTSTRAP_SCRIPT": {
+      "type": "path",
+      "default": "",
+      "description": "Script run after each worktree creation: <worktree> <ticket>",
+      "section": "Bootstrap"
+    },
+    "BOOTSTRAP_SCRIPT_TIMEOUT": {
+      "type": "number",
+      "default": "120",
+      "description": "Bootstrap script timeout in seconds",
+      "section": "Bootstrap",
+      "advanced": true
+    },
+    "ENABLE_SYMLINK": {
+      "type": "bool01",
+      "default": "0",
+      "description": "Allow symlink creation during worktree bootstrap",
+      "section": "Feature Flags"
+    },
+    "ENABLE_RESOLVE_OUTDATED_COMMENTS": {
+      "type": "bool01",
+      "default": "0",
+      "description": "Auto-resolve outdated PR comments in follow-up",
+      "section": "Feature Flags"
+    },
+    "ENABLE_DRAFT_PR": {
+      "type": "bool01",
+      "default": "0",
+      "description": "Create PRs as drafts (worktree-wrapper bootstrap convention)",
+      "section": "Feature Flags",
+      "advanced": true
+    },
+    "ENABLE_EMPTY_COMMIT": {
+      "type": "bool01",
+      "default": "0",
+      "description": "Seed worktrees with an empty commit (bootstrap-script convention)",
+      "section": "Feature Flags",
+      "advanced": true
+    },
+    "WORK_BRIEF_ENABLED": {
+      "type": "bool01",
+      "default": "1",
+      "description": "Run the brief step in /work",
+      "section": "Feature Flags"
+    },
+    "WORK_SPEC_ENABLED": {
+      "type": "bool01",
+      "default": "1",
+      "description": "Run the spec step in /work",
+      "section": "Feature Flags"
+    },
+    "WORK_TASKS_ENABLED": {
+      "type": "bool01",
+      "default": "1",
+      "description": "Run the task-split step in /work",
+      "section": "Feature Flags"
+    },
+    "WORK_ARCHITECT_ENABLED": {
+      "type": "bool01",
+      "default": "0",
+      "description": "Enable code-architect routing in /work-implement",
+      "section": "Feature Flags"
+    },
+    "TASK_REVIEW_ENABLED": {
+      "type": "bool01",
+      "default": "1",
+      "description": "Per-task review step between commit and check",
+      "section": "Feature Flags"
+    },
+    "TASK_REVIEW_MAX_FIXES": {
+      "type": "number",
+      "default": "3",
+      "description": "Max fix iterations per task review",
+      "section": "Feature Flags",
+      "advanced": true
+    },
+    "SESSION_GUARD_ENABLED": {
+      "type": "bool01",
+      "default": "1",
+      "description": "Workflow session locking",
+      "section": "Feature Flags"
+    },
+    "FOLLOW_UP_PR_POLL_REVIEWS": {
+      "type": "boolean",
+      "default": "true",
+      "description": "Poll PR review comments during /follow-up",
+      "section": "Follow-up"
+    },
+    "FOLLOW_UP_PR_BOT_REVIEWERS": {
+      "type": "string",
+      "default": "",
+      "example": "copilot-pull-request-reviewer,cursor-ai[bot]",
+      "description": "Comma-separated bot reviewer names for /follow-up",
+      "section": "Follow-up"
+    },
+    "DEV_COMMAND": {
+      "type": "command",
+      "default": "",
+      "description": "Custom dev-environment startup command",
+      "section": "Test Commands"
+    },
+    "TEST_COMMAND": {
+      "type": "command",
+      "default": "",
+      "description": "Full test-suite runner (legacy; prefer TEST_*_COMMAND)",
+      "section": "Test Commands"
+    },
+    "LINT_COMMAND": {
+      "type": "command",
+      "default": "",
+      "description": "Linter invocation",
+      "section": "Test Commands"
+    },
+    "TYPECHECK_COMMAND": {
+      "type": "command",
+      "default": "",
+      "description": "Type checker invocation",
+      "section": "Test Commands"
+    },
+    "TEST_UNIT_COMMAND": {
+      "type": "command",
+      "default": "",
+      "description": "Unit test runner; $CHANGED_FILES placeholder supported",
+      "section": "Test Commands"
+    },
+    "TEST_INTEGRATION_COMMAND": {
+      "type": "command",
+      "default": "",
+      "description": "Integration test runner; $CHANGED_FILES supported",
+      "section": "Test Commands"
+    },
+    "TEST_E2E_COMMAND": {
+      "type": "command",
+      "default": "",
+      "description": "E2E test runner; $CHANGED_FILES supported",
+      "section": "Test Commands"
+    },
+    "SCRIPT_RUN_AFFECTED_UNIT": {
+      "type": "command",
+      "default": "",
+      "description": "/check affected-unit-tests script (full diff vs base)",
+      "section": "Test Commands",
+      "advanced": true
+    },
+    "SCRIPT_RUN_AFFECTED_INTEGRATION": {
+      "type": "command",
+      "default": "",
+      "description": "/check affected-integration-tests script",
+      "section": "Test Commands",
+      "advanced": true
+    },
+    "SCRIPT_RUN_AFFECTED_E2E": {
+      "type": "command",
+      "default": "",
+      "description": "/check affected-e2e-tests script",
+      "section": "Test Commands",
+      "advanced": true
+    },
+    "WEB_APPS": {
+      "type": "json",
+      "default": "",
+      "example": "[{\"name\":\"my-app\",\"defaultPort\":3000,\"type\":\"vite\"}]",
+      "description": "JSON array of web apps for QA testing",
+      "section": "Web Apps"
+    },
+    "LOW_CONCURRENCY": {
+      "type": "bool01",
+      "default": "0",
+      "description": "Force single concurrency for dev checks",
+      "section": "Tuning",
+      "advanced": true
+    },
+    "TDD_PHASE_TEST_TIMEOUT_MS": {
+      "type": "number",
+      "default": "",
+      "description": "Timeout (ms) for TDD phase test runs",
+      "section": "Tuning",
+      "advanced": true
+    },
+    "REBASE_GUARD_ENABLED": {
+      "type": "bool01",
+      "default": "1",
+      "description": "Guard against risky rebases during follow-up",
+      "section": "Tuning",
+      "advanced": true
+    },
+    "REBASE_GUARD_THRESHOLD": {
+      "type": "number",
+      "default": "0",
+      "description": "Rebase guard commit-count threshold",
+      "section": "Tuning",
+      "advanced": true
+    },
+    "CHECK_IMPACT_TESTS": {
+      "type": "bool01",
+      "default": "1",
+      "description": "Run impact-selected tests during /check",
+      "section": "Tuning",
+      "advanced": true
+    },
+    "CHECK_TESTS_BASELINE": {
+      "type": "bool01",
+      "default": "1",
+      "description": "Compare /check test failures against a base-branch baseline",
+      "section": "Tuning",
+      "advanced": true
+    },
+    "CHECK_GHERKIN_SCOPE": {
+      "type": "bool01",
+      "default": "1",
+      "description": "Scope /check gherkin verification to the diff",
+      "section": "Tuning",
+      "advanced": true
+    },
+    "CHECK_FLAKE_RETRY": {
+      "type": "bool01",
+      "default": "1",
+      "description": "Retry suspected-flaky tests during /check",
+      "section": "Tuning",
+      "advanced": true
+    },
+    "CHECK_FLAKE_RETRY_MAX": {
+      "type": "number",
+      "default": "",
+      "description": "Max flake retries during /check",
+      "section": "Tuning",
+      "advanced": true
+    },
+    "CHECK_E2E_SPEC_TIMEOUT_MS": {
+      "type": "number",
+      "default": "",
+      "description": "Per-spec E2E timeout (ms) during /check",
+      "section": "Tuning",
+      "advanced": true
+    },
+    "CHECK_ENV_APP_TIMEOUT_MS": {
+      "type": "number",
+      "default": "",
+      "description": "App startup timeout (ms) for /check env verification",
+      "section": "Tuning",
+      "advanced": true
+    },
+    "CHECK_ENV_READY_WAIT_MS": {
+      "type": "number",
+      "default": "",
+      "description": "Readiness wait (ms) for /check env verification",
+      "section": "Tuning",
+      "advanced": true
+    },
+    "CHECK_ENV_DB_TIMEOUT_MS": {
+      "type": "number",
+      "default": "",
+      "description": "DB readiness timeout (ms) for /check env verification",
+      "section": "Tuning",
+      "advanced": true
+    },
+    "READ_DOCS_ON_REVIEW": {
+      "type": "string",
+      "default": "",
+      "description": "Docs (csv paths) for the code-review agent",
+      "section": "Agent Docs",
+      "advanced": true
+    },
+    "READ_DOCS_ON_QA": {
+      "type": "string",
+      "default": "",
+      "description": "Docs for QA agents",
+      "section": "Agent Docs",
+      "advanced": true
+    },
+    "READ_DOCS_ON_DEV": {
+      "type": "string",
+      "default": "",
+      "description": "Docs for developer agents",
+      "section": "Agent Docs",
+      "advanced": true
+    },
+    "READ_DOCS_ON_E2E": {
+      "type": "string",
+      "default": "",
+      "description": "Docs for E2E test writing",
+      "section": "Agent Docs",
+      "advanced": true
+    },
+    "READ_DOCS_ON_TEST": {
+      "type": "string",
+      "default": "",
+      "description": "Docs for unit test writing",
+      "section": "Agent Docs",
+      "advanced": true
+    },
+    "READ_DOCS_ON_STORYBOOK": {
+      "type": "string",
+      "default": "",
+      "description": "Docs for Storybook story writing",
+      "section": "Agent Docs",
+      "advanced": true
+    },
+    "READ_DOCS_ON_PR": {
+      "type": "string",
+      "default": "",
+      "description": "Docs for PR creation",
+      "section": "Agent Docs",
+      "advanced": true
+    },
+    "READ_DOCS_ON_BRIEF": {
+      "type": "string",
+      "default": "",
+      "description": "Docs for the brief-writer agent",
+      "section": "Agent Docs",
+      "advanced": true
+    },
+    "READ_DOCS_ON_SPEC": {
+      "type": "string",
+      "default": "",
+      "description": "Docs for the spec-writer agent",
+      "section": "Agent Docs",
+      "advanced": true
+    }
+  }
+}
