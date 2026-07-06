@@ -50,7 +50,7 @@ describe('fix-reviews — done-path routing and counts', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  function runDonePath(worktreeDir, statusJson) {
+  function runDonePath(worktreeDir, statusJson, stateOverrides) {
     if (statusJson) process.env.STUB_STATUS_JSON = statusJson;
     const handler = loadFixReviewsHandler();
     const state = {
@@ -58,6 +58,7 @@ describe('fix-reviews — done-path routing and counts', () => {
       prNumber: 5,
       currentStep: 'fix-reviews',
       _reviewSnapshotDone: true,
+      ...stateOverrides,
     };
     const result = handler(state, { worktreeDir, workScriptsDir });
     return { state, result };
@@ -123,6 +124,22 @@ describe('fix-reviews — done-path routing and counts', () => {
     assert.equal(counts.currentIndex, 3);
     // No status → unknowns, no crash.
     assert.deepEqual(computeCounts(null), { totalComments: '?', currentIndex: '?' });
+  });
+
+  it('terminal state clears failureCategory so report completes (GH-670)', () => {
+    // Legacy state files carry the 'reviews' spelling; newer ones carry
+    // 'review_failure'. Both must be nulled on the done path — otherwise a
+    // stale category makes the report step surface "Manual intervention
+    // required" forever.
+    for (const legacyCategory of ['reviews', 'review_failure']) {
+      const cleanDir = path.join(tmpDir, `clear-${legacyCategory}`);
+      fs.mkdirSync(cleanDir);
+      const { state } = runDonePath(cleanDir, '{"remaining":0,"total":1,"solved":1,"skipped":0}', {
+        failureCategory: legacyCategory,
+      });
+      assert.equal(state.failureCategory, null, `'${legacyCategory}' must be cleared`);
+      assert.equal(state.currentStep, 'report');
+    }
   });
 
   it('skipped>0: still records both counts', () => {

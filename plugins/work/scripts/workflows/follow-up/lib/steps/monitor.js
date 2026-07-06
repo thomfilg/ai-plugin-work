@@ -28,7 +28,10 @@ const {
   extractFailedTestPaths,
 } = require('./monitor-ci-context');
 const { buildOutput, buildStatusLine } = require('./monitor-status-line');
-const { notifyOperator } = require('../notify');
+const {
+  demoteNonAllowlistedCommentedReviews,
+  notifyOnNewBlockingComments,
+} = require('./monitor-notices');
 
 /**
  * Check if any workflow run for the PR's branch has already failed.
@@ -268,30 +271,6 @@ function attachClassifierContext(state, ci, initialFailedJobs, worktreeDir) {
   }
 }
 
-// Ping the operator mailbox when the blocking-comment count GROWS — new bot
-// review comments used to arrive silently while the agent idled in the poll
-// loop ("agents get stuck with no notifications of messages").
-//
-// The first observation only SEEDS the counter: comments already present at
-// workflow start are being actively processed by fix-reviews anyway, and
-// notifying for them meant every `--init` re-announced already-known comments
-// (review finding on PR #666).
-function notifyOnNewBlockingComments(state, reviews) {
-  const count = reviews && reviews.blocking ? reviews.blocking.length : 0;
-  if (state._lastBlockingCount === undefined) {
-    state._lastBlockingCount = count;
-    return;
-  }
-  const previous = state._lastBlockingCount;
-  if (count > previous) {
-    notifyOperator(
-      state.ticketId,
-      `${count - previous} new blocking review comment(s) on PR #${state.prNumber || '?'} (${count} total)`
-    );
-  }
-  state._lastBlockingCount = count;
-}
-
 module.exports = function registerMonitor(register) {
   register('monitor', (state, ctx) => {
     // Stale infra-failure cache is auto-cleared by the orchestrator in
@@ -325,7 +304,10 @@ module.exports = function registerMonitor(register) {
 
     const ci = fetchCi(state, prInfo, checkCI, ctx.worktreeDir);
     if (!ci) return null;
-    const reviews = fetchReviews(prInfo, getReviews);
+    const reviews = demoteNonAllowlistedCommentedReviews(
+      fetchReviews(prInfo, getReviews),
+      followUpPr.isBotAuthorLogin
+    );
 
     const output = buildOutput(state, prInfo, ci, reviews, formatReport);
     const exitCode = computeExitCode(prInfo, ci, reviews);
@@ -388,4 +370,5 @@ module.exports.__test__ = {
   computeNextStepOnGreen,
   extractFailedTestPaths,
   notifyOnNewBlockingComments,
+  demoteNonAllowlistedCommentedReviews,
 };

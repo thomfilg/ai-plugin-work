@@ -48,7 +48,9 @@ describe('triage step', () => {
     const state = makeState(1, 'CI: PASSED\nReviews: 2 BLOCKING\n  ✗ @cursor[bot]');
     const result = triage(state, {});
     assert.equal(result, null);
-    assert.equal(state.failureCategory, 'reviews');
+    // GH-670: canonical spelling — the legacy 'reviews' category was not in
+    // every reader's known set and deadlocked the report step.
+    assert.equal(state.failureCategory, 'review_failure');
     assert.equal(state.currentStep, 'fix-reviews');
   });
 
@@ -85,7 +87,7 @@ describe('triage step', () => {
     const state = makeState(1, 'CI: CANCELLED\nMERGE STATUS: BLOCKED\nReviews: 1 BLOCKING');
     const result = triage(state, {});
     assert.equal(result, null);
-    assert.equal(state.failureCategory, 'reviews');
+    assert.equal(state.failureCategory, 'review_failure');
     assert.equal(state.currentStep, 'fix-reviews');
   });
 
@@ -119,7 +121,7 @@ describe('triage step', () => {
   it('blocking reviews take priority over CI pending', () => {
     const state = makeState(1, 'CI: PENDING\nReviews: 1 BLOCKING');
     triage(state, {});
-    assert.equal(state.failureCategory, 'reviews');
+    assert.equal(state.failureCategory, 'review_failure');
     assert.equal(state.currentStep, 'fix-reviews');
   });
 });

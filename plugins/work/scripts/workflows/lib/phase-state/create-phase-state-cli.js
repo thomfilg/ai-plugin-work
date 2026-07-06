@@ -46,6 +46,11 @@ try {
 }
 
 const TOKEN_MAX_AGE_MS = 10_000;
+// Tokens are minted by a different process (the PreToolUse hook); under load
+// (WSL2, parallel test runners) the consumer's Date.now() can read a few
+// hundred ms behind the minter's, making a fresh token appear to be "from
+// the future". Tolerate small skew — anything beyond it is still rejected.
+const TOKEN_CLOCK_SKEW_MS = 2_000;
 const GATED_SUBCOMMANDS = ['init', 'record', 'transition'];
 
 function errorExit(message) {
@@ -108,7 +113,9 @@ function verifyToken(scriptName, allowedAgents, expectedTicketId) {
   // session. (Ported from brief-phase-state.js pre-factory comment.)
   const token = consumeToken(scriptName, expectedTicketId);
   if (!token) {
-    errorExit("No valid write token found. This script can only be called through Claude Code's agent system.");
+    errorExit(
+      "No valid write token found. This script can only be called through Claude Code's agent system."
+    );
   }
   if (typeof token.timestamp !== 'number' || !Number.isFinite(token.timestamp)) {
     errorExit('Token has invalid or missing timestamp.');
@@ -117,13 +124,17 @@ function verifyToken(scriptName, allowedAgents, expectedTicketId) {
     errorExit('Token has invalid or missing agent field.');
   }
   const age = Date.now() - token.timestamp;
-  if (age < 0) errorExit(`Write token timestamp is in the future (${Math.abs(age)}ms ahead).`);
+  if (age < -TOKEN_CLOCK_SKEW_MS) {
+    errorExit(`Write token timestamp is in the future (${Math.abs(age)}ms ahead).`);
+  }
   if (age > TOKEN_MAX_AGE_MS) {
     errorExit(`Write token expired (${age}ms old, max ${TOKEN_MAX_AGE_MS}ms).`);
   }
   const agentNormalized = normalizeAgentName(token.agent);
   if (!allowedAgents.includes(agentNormalized)) {
-    errorExit(`Agent "${token.agent}" is not authorized. Allowed agents: ${allowedAgents.join(', ')}.`);
+    errorExit(
+      `Agent "${token.agent}" is not authorized. Allowed agents: ${allowedAgents.join(', ')}.`
+    );
   }
   return token;
 }
@@ -167,8 +178,17 @@ function cmdRecord(stateFileName, phaseOrder, isPhase, ticket, phase, args) {
   successOut({ ok: true, recordedPhase: phase, state });
 }
 
-function cmdTransition(stateFileName, phaseOrder, isPhase, canTransition, nextPhases, ticket, target) {
-  if (!isPhase(target)) errorExit(`Unknown target phase "${target}". Valid: ${phaseOrder.join(', ')}.`);
+function cmdTransition(
+  stateFileName,
+  phaseOrder,
+  isPhase,
+  canTransition,
+  nextPhases,
+  ticket,
+  target
+) {
+  if (!isPhase(target))
+    errorExit(`Unknown target phase "${target}". Valid: ${phaseOrder.join(', ')}.`);
   const state = readState(stateFileName, ticket);
   if (!state) errorExit(`No phase state for ${ticket}. Run \`init\` first.`);
   if (!canTransition(state.currentPhase, target)) {
@@ -205,7 +225,15 @@ function dispatchSubcommand(opts, sub, args) {
   if (sub === 'transition') {
     const target = args[2];
     if (!target) errorExit(`Usage: ${opts.scriptName} transition <TICKET> <target>`);
-    return cmdTransition(stateFileName, PHASE_ORDER, isPhase, canTransition, nextPhases, ticket, target);
+    return cmdTransition(
+      stateFileName,
+      PHASE_ORDER,
+      isPhase,
+      canTransition,
+      nextPhases,
+      ticket,
+      target
+    );
   }
   errorExit(`Unknown subcommand: ${sub}`);
 }
@@ -214,7 +242,8 @@ function runCli(opts, argv) {
   try {
     const args = argv.slice(2);
     const sub = args[0];
-    if (!sub) errorExit(`Usage: ${opts.scriptName} <init|current|record|transition> <TICKET> [args]`);
+    if (!sub)
+      errorExit(`Usage: ${opts.scriptName} <init|current|record|transition> <TICKET> [args]`);
     const ticket = args[1];
     if (!ticket) errorExit('Missing ticket ID.');
     if (GATED_SUBCOMMANDS.includes(sub)) verifyToken(opts.scriptName, opts.allowedAgents, ticket);

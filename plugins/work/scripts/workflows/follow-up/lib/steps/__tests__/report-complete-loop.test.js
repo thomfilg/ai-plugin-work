@@ -54,6 +54,14 @@ describe('report step — completion vs surface loop', () => {
     assert.equal(state.status, 'complete');
   });
 
+  it("canonical 'review_failure' (GH-670 normalized spelling) completes too", () => {
+    const report = loadReportHandler();
+    const state = baseState({ failureCategory: 'review_failure' });
+    const result = report(state, ctx);
+    assert.equal(result.action, 'complete');
+    assert.equal(state.status, 'complete');
+  });
+
   it("failureCategory 'ci_cancelled_blocking' completes instead of surfacing", () => {
     const report = loadReportHandler();
     const state = baseState({ failureCategory: 'ci_cancelled_blocking' });

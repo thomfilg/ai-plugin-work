@@ -39,5 +39,6 @@ The canonical step order lives in `scripts/workflows/check/lib/step-registry.js`
 
 - Launch checker agents in the **FOREGROUND** — never with `run_in_background: true`. Reports written by background agents have silently disappeared (GH-343).
 - Each checker agent MUST create its `*.check.md` report with the **Write tool** (bash heredocs have silently failed) and verify the file exists and is **non-empty** before finishing. A chat-only verdict does NOT count.
+- Each phase-1 report MUST carry the canonical line `**Head:** <sha>` (the ticket worktree's `git rev-parse HEAD` at verification time) directly under the Status line. Sibling agents may commit fixes mid-review (GH-308): the orchestrator re-dispatches a FAILING report anchored to an older HEAD, so agents must re-check HEAD right before writing and re-verify findings if it moved. PASS reports and reports without a Head line are accepted as-is.
 - If the orchestrator returns `action: "blocked"` naming a missing/empty report after repeated dispatches, do NOT re-dispatch: recover the verdict from the agent's transcript, write the report yourself with the Write tool (including the changes hash), then re-run check-next.js.
 - Never run two check-next.js invocations concurrently — the orchestrator holds a per-ticket lock and reports `action: "locked"` if you try; just wait and re-run.

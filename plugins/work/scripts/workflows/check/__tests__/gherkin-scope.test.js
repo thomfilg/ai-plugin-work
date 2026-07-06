@@ -380,3 +380,140 @@ describe('4b_gherkin_scope step — CHECK_GHERKIN_SCOPE=0 off-switch', () => {
     assert.match(report, /CHECK_GHERKIN_SCOPE=0/);
   });
 });
+
+// ─── GH-274 coverage verification inside the 4b step ────────────────────────
+
+// Spec with two @unit scenarios; the repo below commits a test file whose
+// it() covers only the first. Test-only diff → scope PASSes early, so the
+// step outcome is driven purely by coverage gating.
+const COVERAGE_STEP_SPEC = [
+  '# Spec',
+  '',
+  '## Test Scenarios (Gherkin)',
+  '',
+  'Feature: Auth',
+  '',
+  '  @unit',
+  '  Scenario: login succeeds with valid credentials',
+  '    Given a user',
+  '    Then login succeeds',
+  '',
+  '  @unit',
+  '  Scenario: password reset email is dispatched',
+  '    Given a user',
+  '    Then an email goes out',
+  '',
+].join('\n');
+
+const COVERED_ANNOTATION =
+  '\n<!-- gherkin-covered: password reset email is dispatched -> mailer.test.js:9 -->\n';
+
+describe('4b_gherkin_scope step — GH-274 coverage gating', () => {
+  let repo;
+  let tasksDir3;
+  let originalCwd;
+  let savedBase;
+  let savedCoverage;
+  // Ticket id that resolves to no configured worktree → ambient cwd repo wins.
+  const state = { ticketId: 'GH-999274', changesHash: 'cov456', setupResult: null };
+
+  before(() => {
+    originalCwd = process.cwd();
+    savedBase = process.env.BASE_BRANCH;
+    savedCoverage = process.env.CHECK_GHERKIN_COVERAGE;
+    repo = fs.mkdtempSync(path.join(os.tmpdir(), 'gherkin-cov-step-repo-'));
+    tasksDir3 = fs.mkdtempSync(path.join(os.tmpdir(), 'gherkin-cov-step-tasks-'));
+
+    sh('git init -q -b main', repo);
+    write(repo, 'README.md', 'hi\n');
+    sh('git add -A && git commit -q -m base', repo);
+    sh('git update-ref refs/remotes/origin/main HEAD', repo);
+    sh('git checkout -q -b feature', repo);
+    write(
+      repo,
+      '__tests__/auth.test.js',
+      "it('login succeeds with valid credentials', () => {});\n"
+    );
+    sh('git add -A && git commit -q -m tests', repo);
+
+    process.chdir(repo);
+    process.env.BASE_BRANCH = 'main';
+    fs.writeFileSync(path.join(tasksDir3, 'spec.md'), COVERAGE_STEP_SPEC);
+  });
+
+  after(() => {
+    process.chdir(originalCwd);
+    if (savedBase === undefined) delete process.env.BASE_BRANCH;
+    else process.env.BASE_BRANCH = savedBase;
+    if (savedCoverage === undefined) delete process.env.CHECK_GHERKIN_COVERAGE;
+    else process.env.CHECK_GHERKIN_COVERAGE = savedCoverage;
+    fs.rmSync(repo, { recursive: true, force: true });
+    fs.rmSync(tasksDir3, { recursive: true, force: true });
+  });
+
+  const readReport = () =>
+    fs.readFileSync(path.join(tasksDir3, 'gherkin-scope.check.md'), 'utf8');
+
+  it('default (warn) mode: uncovered scenario warns in the report but auto-advances', () => {
+    delete process.env.CHECK_GHERKIN_COVERAGE;
+    const result = getHandler()(state, { tasksDir: tasksDir3 });
+
+    assert.equal(result, null, 'warn mode must auto-advance');
+    const report = readReport();
+    assert.ok(report.startsWith('**Status:** APPROVED'));
+    assert.match(report, /Gherkin Coverage: 1\/2 scenarios covered/);
+    assert.match(report, /✅ login succeeds with valid credentials → __tests__\/auth\.test\.js:1/);
+    assert.match(report, /❌ password reset email is dispatched → NO MATCH FOUND/);
+    assert.match(report, /1 scenarios missing test coverage\./);
+    assert.match(report, /⚠️ WARNING/);
+  });
+
+  it('CHECK_GHERKIN_COVERAGE=strict: uncovered scenario fails the step', () => {
+    process.env.CHECK_GHERKIN_COVERAGE = 'strict';
+    const result = getHandler()(state, { tasksDir: tasksDir3 });
+
+    assert.ok(result, 'strict mode must return a failing instruction');
+    assert.equal(result.action, 'failed');
+    assert.equal(result.state.currentStep, '4b_gherkin_scope');
+    assert.match(result.reason, /1 of 2 scenario\(s\) have no matching test description/);
+    assert.match(result.reason, /"password reset email is dispatched"/);
+    assert.match(result.reason, /gherkin-covered/);
+    assert.ok(readReport().startsWith('**Status:** APPROVED'), 'scope verdict stays APPROVED');
+  });
+
+  it('strict mode passes once a gherkin-covered override annotates the scenario', () => {
+    process.env.CHECK_GHERKIN_COVERAGE = 'strict';
+    fs.writeFileSync(path.join(tasksDir3, 'spec.md'), COVERAGE_STEP_SPEC + COVERED_ANNOTATION);
+    const result = getHandler()(state, { tasksDir: tasksDir3 });
+
+    assert.equal(result, null, 'override must satisfy strict mode');
+    const report = readReport();
+    assert.match(report, /Gherkin Coverage: 2\/2 scenarios covered/);
+    assert.match(
+      report,
+      /✅ password reset email is dispatched → mailer\.test\.js:9 \(manual override\)/
+    );
+    fs.writeFileSync(path.join(tasksDir3, 'spec.md'), COVERAGE_STEP_SPEC);
+  });
+
+  it('CHECK_GHERKIN_COVERAGE=0: coverage is disabled with a note, never gates', () => {
+    process.env.CHECK_GHERKIN_COVERAGE = '0';
+    const result = getHandler()(state, { tasksDir: tasksDir3 });
+
+    assert.equal(result, null);
+    const report = readReport();
+    assert.match(report, /Disabled via `CHECK_GHERKIN_COVERAGE=0`/);
+    assert.doesNotMatch(report, /NO MATCH FOUND/);
+  });
+
+  it('skips silently (no coverage section) when spec.md is absent — even in strict mode', () => {
+    process.env.CHECK_GHERKIN_COVERAGE = 'strict';
+    fs.rmSync(path.join(tasksDir3, 'spec.md'), { force: true });
+    const result = getHandler()(state, { tasksDir: tasksDir3 });
+
+    assert.equal(result, null, 'missing spec must not gate');
+    const report = readReport();
+    assert.doesNotMatch(report, /Gherkin Coverage/);
+    fs.writeFileSync(path.join(tasksDir3, 'spec.md'), COVERAGE_STEP_SPEC);
+  });
+});

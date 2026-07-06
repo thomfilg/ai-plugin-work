@@ -132,7 +132,12 @@ function routeTriage(state, signals) {
   // the bot to have SUBMITTED its review (not listed in pendingBots / not
   // still running). An in-progress review falls through to the wait branches
   // below, preserving the old wait-for-CI behavior (no partial reviews).
-  if (signals.reviewsActionable) return routeTo(state, 'fix-reviews', 'reviews');
+  // GH-670: the category is the canonical 'review_failure' spelling — the
+  // legacy 'reviews' spelling was not recognised everywhere and could leave
+  // the report step surfacing forever. 'reviews' is still accepted on READ
+  // (report.js KNOWN_RESOLVABLE_CATEGORIES, follow-up-next.js alias map) so
+  // state files written by older versions recover.
+  if (signals.reviewsActionable) return routeTo(state, 'fix-reviews', 'review_failure');
 
   // Bot check still running with blocking reviews — wait for it to finish.
   if (signals.reviewsWaiting) {

@@ -158,13 +158,24 @@ function summaryOf(reportResult) {
   return reportResult.summary || (reportResult.payload && reportResult.payload.summary) || null;
 }
 
+// GH-670: normalize legacy/monitor exit-reason spellings to the canonical
+// failureCategory before persisting. 'reviews' (the monitor/triage exit-reason
+// spelling) was stored verbatim, and report.js only recognised
+// 'review_failure' — so the workflow surfaced "Manual intervention required"
+// forever with no step ever clearing it.
+const FAILURE_CATEGORY_ALIASES = { reviews: 'review_failure' };
+
+function canonicalFailureCategory(reason) {
+  return FAILURE_CATEGORY_ALIASES[reason] || reason;
+}
+
 function applySurface(result, state, ctx) {
   state.currentStep = 'report';
   // Persist the surface reason as a failureCategory so the next /follow-up
   // cycle's report step recognises the workflow is still stuck and does NOT
   // mark status=complete.
   const reason = surfaceReasonOf(result);
-  if (reason) state.failureCategory = reason;
+  if (reason) state.failureCategory = canonicalFailureCategory(reason);
 
   // Bug 542-10: build the diagnostic summary BEFORE returning so the
   // auto-advance hook (which treats `surface` as terminal) shows the
@@ -381,5 +392,6 @@ module.exports = {
     initState,
     detectDefaultBranch,
     loadPrDiffFiles,
+    canonicalFailureCategory,
   },
 };

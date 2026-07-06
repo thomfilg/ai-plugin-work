@@ -9,21 +9,39 @@
 
 'use strict';
 
+// GH-670: one line for demoted body-only COMMENTED reviews from
+// non-allowlisted reviewers. Deliberately does NOT start with "Reviews:" so
+// triage's /Reviews:.*BLOCKING/ signal can never match it.
+function noticesLine(reviews) {
+  const n = reviews && reviews.notices ? reviews.notices.length : 0;
+  if (n === 0) return '';
+  return `Notices: ${n} notice(s) — comment-only review(s) from non-allowlisted reviewer(s); cannot block merge, no action required`;
+}
+
+// One-line reviews summary for the fallback report (formatReport threw).
+function reviewsSummaryLine(reviews) {
+  if (reviews.hasBlocking) return `Reviews: ${reviews.blocking.length} BLOCKING`;
+  if (reviews.pendingBots && reviews.pendingBots.length > 0) return 'Reviews: Awaiting bot reviews';
+  return 'Reviews: CLEAR';
+}
+
+// Minimal report used when formatReport throws.
+function fallbackReport(prInfo, ci, reviews, notices) {
+  const lines = [`PR: #${prInfo.number} — ${prInfo.title || ''}`, `CI: ${ci.status || 'unknown'}`];
+  lines.push(reviewsSummaryLine(reviews));
+  if (notices) lines.push(notices);
+  return lines.join('\n');
+}
+
 function buildOutput(state, prInfo, ci, reviews, formatReport) {
   const attempt = state.attempt || 1;
   const maxAttempts = state.maxAttempts || 40;
+  const notices = noticesLine(reviews);
   try {
-    return formatReport(prInfo, ci, reviews, attempt, maxAttempts, {});
+    const report = formatReport(prInfo, ci, reviews, attempt, maxAttempts, {});
+    return notices ? `${report}\n${notices}` : report;
   } catch {
-    const lines = [
-      `PR: #${prInfo.number} — ${prInfo.title || ''}`,
-      `CI: ${ci.status || 'unknown'}`,
-    ];
-    if (reviews.hasBlocking) lines.push(`Reviews: ${reviews.blocking.length} BLOCKING`);
-    else if (reviews.pendingBots && reviews.pendingBots.length > 0)
-      lines.push('Reviews: Awaiting bot reviews');
-    else lines.push('Reviews: CLEAR');
-    return lines.join('\n');
+    return fallbackReport(prInfo, ci, reviews, notices);
   }
 }
 
@@ -48,6 +66,8 @@ function ciCountParts(ci, reviews) {
   pushCount(parts, '⊘', ci.cancelled);
   pushCount(parts, '🤖', reviews.pendingBots);
   if (reviews.hasBlocking) parts.push(`💬 ${reviews.blocking.length}`);
+  // GH-670: non-blocking notices (demoted COMMENTED reviews) — separate count.
+  pushCount(parts, '🔔', reviews.notices);
   return parts;
 }
 

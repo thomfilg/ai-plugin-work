@@ -17,6 +17,21 @@
  *   are re-launched, and each report gets at most MAX_DISPATCH_ATTEMPTS
  *   dispatches. After that the step blocks with an actionable error naming
  *   the missing artifact instead of silently re-dispatching forever.
+ *
+ * HEAD-staleness validation (GH-308):
+ * - Phase-1 agents run in parallel; one agent's mid-run fix commit makes a
+ *   sibling's findings describe pre-fix code. Each report must therefore
+ *   carry a canonical `**Head:** <sha>` line (the worktree HEAD the agent
+ *   verified against). At collection time a FAILING report whose Head no
+ *   longer matches the current worktree HEAD is treated as STALE and its
+ *   agent re-dispatched — reusing the same sticky tracker + attempts cap as
+ *   missing-report retries (no second retry mechanism).
+ * - PASS reports are never invalidated by HEAD movement (fixes only move
+ *   code forward — re-verifying a pass would only churn).
+ * - Reports without a Head line (legacy agents, manual writes) are treated
+ *   as current-HEAD (backward compatible, no re-dispatch storm).
+ * - When the attempts cap is hit, the stale report is accepted as-is with a
+ *   visible `## Workflow Note` appended, instead of looping.
  */
 
 'use strict';
@@ -31,25 +46,40 @@ function stepProgress(name) {
 const fs = require('fs');
 const path = require('path');
 const { reportStatus } = require('../report-utils');
+// GH-308 HEAD-staleness helpers live in ../report-head-staleness (extracted
+// verbatim for the file-size budget — see that module's doc comment).
+const {
+  HEAD_LINE_RE,
+  currentWorktreeHead,
+  reportIsStale,
+  annotateStaleAccepted,
+} = require('../report-head-staleness');
 
 // Max times we ask the orchestrator to (re-)dispatch an agent for the same
 // missing/empty report before blocking with an actionable error.
 const MAX_DISPATCH_ATTEMPTS = 3;
 
 const REPORTS = [
-  { file: 'code-review.check.md', agent: 'work-workflow:code-checker' },
-  { file: 'completion.check.md', agent: 'work-workflow:completion-checker' },
+  { file: 'code-review.check.md', agent: 'work-workflow:code-checker', statusType: 'codeReview' },
+  {
+    file: 'completion.check.md',
+    agent: 'work-workflow:completion-checker',
+    statusType: 'completion',
+  },
 ];
 
 // Shared contract appended to every phase-1 agent prompt (GH-343: agents that
 // only give a chat verdict, or background-write failures, stall the step).
-function reportContractLines(reportPath) {
+function reportContractLines(reportPath, dispatchHead) {
   return [
     '',
     '### Report contract (MANDATORY — the orchestrator only reads the file)',
     '',
     `- Your verdict MUST be written to \`${reportPath}\` — a chat-only summary does NOT count and stalls the workflow.`,
     '- The report MUST start with the canonical machine-readable line `**Status:** APPROVED` (code review) / `**Status:** COMPLETE` (completion) — or `**Status:** NEEDS_WORK` when failing. Gates parse this line FIRST; prose-only verdicts parse as UNKNOWN and loop the check step.',
+    `- Directly under the Status line, write the canonical line \`**Head:** <sha>\` with the ticket worktree's \`git rev-parse HEAD\` at the moment you VERIFIED the code (GH-308${
+      dispatchHead ? `; HEAD at dispatch was ${dispatchHead}` : ''
+    }). Sibling agents may commit fixes while you review — the orchestrator compares your Head to the live HEAD and re-dispatches a FAILING report anchored to an older commit, so re-check HEAD right before writing the report and re-verify your findings if it moved.`,
     '- Create/update the report with the **Write tool** (not bash heredocs — they have silently failed before).',
     `- If the runner blocks and you cannot drive it to DONE, still write \`${reportPath}\` yourself with your verdict plus a \`## Workflow Note\` section describing the blocker.`,
     `- Before finishing, VERIFY the file exists and is non-empty (e.g. \`ls -l ${reportPath}\`). If it is missing or 0 bytes, write it again.`,
@@ -79,29 +109,66 @@ function markVerifiedFromCompletion(completionPath, ctx) {
 
 /**
  * Scan report files and update the sticky per-report tracker in state.
- * Returns { done: string[], missing: [{file, status}] }.
+ * A present report is only accepted when it is not HEAD-stale (GH-308):
+ * a FAILING report whose `**Head:**` sha no longer matches `currentHead`
+ * re-enters the missing list (status 'stale') for a targeted re-dispatch —
+ * unless its attempts cap is exhausted, in which case it is accepted as-is
+ * with a visible annotation.
+ * Returns { done: string[], missing: [{file, status, reportHead?}] }.
  */
-function scanReports(state, reportFolder, ctx) {
+function scanReports(state, reportFolder, ctx, currentHead) {
   if (!state.phase1Reports) state.phase1Reports = {};
   const done = [];
   const missing = [];
-  for (const { file } of REPORTS) {
-    const tracker = state.phase1Reports[file] || (state.phase1Reports[file] = { attempts: 0 });
-    if (!tracker.done) {
-      const status = reportStatus(path.join(reportFolder, file));
-      if (status === 'present') {
-        tracker.done = true;
-        tracker.seenAt = new Date().toISOString();
-        if (file === 'completion.check.md') {
-          markVerifiedFromCompletion(path.join(reportFolder, file), ctx);
-        }
-      } else {
-        missing.push({ file, status });
-      }
-    }
-    if (tracker.done) done.push(file);
+  for (const report of REPORTS) {
+    const miss = scanOneReport(state, reportFolder, ctx, currentHead, report);
+    if (miss) missing.push(miss);
+    if (state.phase1Reports[report.file].done) done.push(report.file);
   }
   return { done, missing };
+}
+
+// Scan a single report file, updating its sticky tracker. Returns a missing
+// entry ({file, status, ...}) when the report still needs a dispatch, or null
+// once the tracker is (or becomes) done.
+function scanOneReport(state, reportFolder, ctx, currentHead, { file, statusType }) {
+  const tracker = state.phase1Reports[file] || (state.phase1Reports[file] = { attempts: 0 });
+  if (tracker.done) return null;
+  const reportPath = path.join(reportFolder, file);
+  const status = reportStatus(reportPath);
+  if (status !== 'present') return { file, status };
+  const miss = evaluatePresentReport(tracker, reportPath, statusType, currentHead);
+  if (tracker.done && file === 'completion.check.md') {
+    markVerifiedFromCompletion(reportPath, ctx);
+  }
+  return miss ? { file, ...miss } : null;
+}
+
+// A present report is only accepted when it is not HEAD-stale (GH-308): a
+// FAILING report whose `**Head:**` sha no longer matches `currentHead` yields
+// a {status: 'stale', ...} missing entry for a targeted re-dispatch — unless
+// its attempts cap is exhausted, in which case it is accepted as-is with a
+// visible annotation.
+function evaluatePresentReport(tracker, reportPath, statusType, currentHead) {
+  let content = '';
+  try {
+    content = fs.readFileSync(reportPath, 'utf8');
+  } catch {
+    /* raced away — fall through, content stays '' (not stale) */
+  }
+  const headMatch = content.match(HEAD_LINE_RE);
+  if (reportIsStale(content, statusType, currentHead)) {
+    if (tracker.attempts < MAX_DISPATCH_ATTEMPTS) {
+      return { status: 'stale', reportHead: headMatch[1], currentHead };
+    }
+    // Cap hit: surface the stale report as-is with a clear note instead of
+    // looping (GH-308).
+    annotateStaleAccepted(reportPath, headMatch[1], currentHead, MAX_DISPATCH_ATTEMPTS);
+    tracker.staleAccepted = { reportHead: headMatch[1], currentHead };
+  }
+  tracker.done = true;
+  tracker.seenAt = new Date().toISOString();
+  return null;
 }
 
 // Build structured verification context from planning artifacts (best-effort).
@@ -116,7 +183,7 @@ function loadCompletionContext(ctx, state) {
   }
 }
 
-function buildCodeReviewDelegate(state, changesHash, codeReviewReport) {
+function buildCodeReviewDelegate(state, changesHash, codeReviewReport, dispatchHead) {
   return {
     type: 'task',
     agentType: 'work-workflow:code-checker',
@@ -145,13 +212,19 @@ function buildCodeReviewDelegate(state, changesHash, codeReviewReport) {
       '- Do NOT run tests (already handled by deterministic script)',
       '- Do NOT modify any code — only review and report',
       '- Verify your recommendations (echo-5213): any recommended fix that changes types, function signatures, or schemas MUST be verified compilable — run the project typecheck (e.g. `$TYPECHECK_COMMAND` / `tsc --noEmit`) scoped to the touched file with the fix applied in a scratch copy (never leave working-tree modifications behind). If you cannot verify it, mark the recommendation `UNVERIFIED` in the report — an unverified "fix" that breaks 14 call sites costs more dev cycles than no recommendation.',
-      ...reportContractLines(codeReviewReport),
+      ...reportContractLines(codeReviewReport, dispatchHead),
     ].join('\n'),
     note: 'Pass the prompt directly to the agent.',
   };
 }
 
-function buildCompletionDelegate(state, changesHash, completionReport, completionContext) {
+function buildCompletionDelegate(
+  state,
+  changesHash,
+  completionReport,
+  completionContext,
+  dispatchHead
+) {
   return {
     type: 'task',
     agentType: 'work-workflow:completion-checker',
@@ -181,24 +254,37 @@ function buildCompletionDelegate(state, changesHash, completionReport, completio
       'For EACH requirement/deliverable: grep or read the actual code to find evidence.',
       'Mark DELIVERED only with a code citation (file:line or diff excerpt).',
       'Mark INCOMPLETE if any P0 requirement lacks code evidence.',
-      ...reportContractLines(completionReport),
+      ...reportContractLines(completionReport, dispatchHead),
     ].join('\n'),
     note: 'Pass the prompt directly to the agent.',
   };
 }
 
-function buildDelegate(file, state, ctx, reportFolder, changesHash) {
+function buildDelegate(file, state, ctx, reportFolder, changesHash, dispatchHead) {
   const reportPath = path.join(reportFolder, file);
   if (file === 'code-review.check.md') {
-    return buildCodeReviewDelegate(state, changesHash, reportPath);
+    return buildCodeReviewDelegate(state, changesHash, reportPath, dispatchHead);
   }
-  return buildCompletionDelegate(state, changesHash, reportPath, loadCompletionContext(ctx, state));
+  return buildCompletionDelegate(
+    state,
+    changesHash,
+    reportPath,
+    loadCompletionContext(ctx, state),
+    dispatchHead
+  );
 }
 
 // Human-readable description of why a report is missing (GH-343: distinguish
 // "agent finished but the file was never created" from "file was truncated").
 function describeMissing(m, reportFolder) {
   const full = path.join(reportFolder, m.file);
+  if (m.status === 'stale') {
+    return (
+      `${full} is HEAD-STALE — its failing verdict was verified at Head ${m.reportHead} but the ` +
+      `worktree HEAD has since moved to ${m.currentHead} (a sibling agent committed fixes ` +
+      `mid-review, GH-308); its findings may already be fixed. Re-verify against the CURRENT code`
+    );
+  }
   return m.status === 'empty'
     ? `${full} exists but is EMPTY (0 bytes — truncated by a write race; the agent likely finished but its report was clobbered)`
     : `${full} was never created (the agent completed without writing its report file)`;
@@ -209,7 +295,11 @@ module.exports = function registerPhase1(register) {
     const reportFolder = state.setupResult?.reportFolder || ctx.tasksDir;
     const changesHash = state.changesHash || 'unknown';
 
-    const { missing } = scanReports(state, reportFolder, ctx);
+    // Ticket-worktree HEAD at this scan/dispatch (GH-308). Null → staleness
+    // validation is skipped (fail-open) but dispatch still proceeds.
+    const currentHead = currentWorktreeHead(state, ctx);
+
+    const { missing } = scanReports(state, reportFolder, ctx, currentHead);
 
     // All reports observed (sticky) → advance.
     if (missing.length === 0) return null;
@@ -242,12 +332,13 @@ module.exports = function registerPhase1(register) {
       }
     }
 
-    // Dispatch (first time: all reports; retries: ONLY the missing ones).
+    // Dispatch (first time: all reports; retries: ONLY the missing/stale ones).
     state.dispatched = '5_phase1_agents';
+    state.phase1HeadAtDispatch = currentHead; // observability (GH-308)
     const delegates = [];
     for (const m of missing) {
       state.phase1Reports[m.file].attempts += 1;
-      delegates.push(buildDelegate(m.file, state, ctx, reportFolder, changesHash));
+      delegates.push(buildDelegate(m.file, state, ctx, reportFolder, changesHash, currentHead));
     }
 
     const retryNote = alreadyDispatched
@@ -282,3 +373,4 @@ module.exports = function registerPhase1(register) {
 
 module.exports.MAX_DISPATCH_ATTEMPTS = MAX_DISPATCH_ATTEMPTS;
 module.exports.REPORTS = REPORTS;
+module.exports.HEAD_LINE_RE = HEAD_LINE_RE;

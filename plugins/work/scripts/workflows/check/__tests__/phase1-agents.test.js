@@ -10,6 +10,9 @@
  *   with an actionable error naming the missing artifact.
  * - Delegate prompts carry the report contract (Write tool + verify non-empty)
  *   and the instruction note forbids background dispatch.
+ * - HEAD-staleness (GH-308): a FAILING report whose `**Head:**` sha no longer
+ *   matches the current worktree HEAD is re-dispatched (targeted, capped);
+ *   PASS / Head-less / unknown-HEAD reports are always accepted.
  *
  * node:test + node:assert/strict; temp dirs via fs.mkdtempSync.
  */
@@ -141,5 +144,105 @@ describe('5_phase1_agents — dispatch & readiness', () => {
     writeReport('code-review.check.md');
     writeReport('completion.check.md');
     assert.equal(handler(state, ctx), null); // artifact-gated recovery → advance
+  });
+});
+
+describe('5_phase1_agents — HEAD-staleness validation (GH-308)', () => {
+  const HEAD_A = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
+  const HEAD_B = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+
+  const failReport = (head) => `**Status:** NEEDS_WORK\n**Head:** ${head}\n\n- bug at foo.js:12`;
+  const passReport = (head) => `**Status:** APPROVED\n**Head:** ${head}\n\nAll good.`;
+
+  beforeEach(() => {
+    // Inject the current-worktree-HEAD resolver (the tmp dir is not the
+    // ticket worktree; production resolves via resolveTicketWorktree).
+    ctx.resolveHeadSha = () => HEAD_B;
+  });
+
+  it('prompts require the canonical **Head:** line and cite the dispatch HEAD', () => {
+    const r = handler(state, ctx);
+    for (const d of r.delegates) {
+      assert.match(d.prompt, /\*\*Head:\*\* <sha>/);
+      assert.match(d.prompt, new RegExp(`HEAD at dispatch was ${HEAD_B}`));
+    }
+    assert.equal(state.phase1HeadAtDispatch, HEAD_B);
+  });
+
+  it('FAIL report anchored to an older HEAD → targeted re-dispatch of just that agent', () => {
+    handler(state, ctx);
+    writeReport('code-review.check.md', failReport(HEAD_A)); // stale FAIL
+    writeReport('completion.check.md', passReport(HEAD_B)); // current
+    const r = handler(state, ctx);
+    assert.equal(r.action, 'execute');
+    assert.equal(r.delegates.length, 1);
+    assert.equal(r.delegates[0].agentType, 'work-workflow:code-checker');
+    assert.match(r.note, /TARGETED RETRY/);
+    assert.match(r.note, /HEAD-STALE/);
+    assert.match(r.note, new RegExp(HEAD_A));
+    assert.equal(state.phase1Reports['code-review.check.md'].attempts, 2);
+    assert.equal(state.phase1Reports['completion.check.md'].done, true);
+    // Re-verified at the new HEAD → accepted, step advances
+    writeReport('code-review.check.md', failReport(HEAD_B));
+    assert.equal(handler(state, ctx), null);
+  });
+
+  it('short-sha Head lines prefix-match the full current HEAD', () => {
+    handler(state, ctx);
+    writeReport('code-review.check.md', failReport(HEAD_B.slice(0, 8)));
+    writeReport('completion.check.md', passReport(HEAD_B.slice(0, 8)));
+    assert.equal(handler(state, ctx), null);
+  });
+
+  it('PASS report with an old Head sha is accepted — never invalidated', () => {
+    handler(state, ctx);
+    writeReport('code-review.check.md', passReport(HEAD_A)); // old but PASSING
+    writeReport('completion.check.md', passReport(HEAD_A));
+    assert.equal(handler(state, ctx), null);
+    assert.equal(state.phase1Reports['code-review.check.md'].attempts, 1);
+  });
+
+  it('report without a Head line is accepted (legacy/back-compat)', () => {
+    handler(state, ctx);
+    writeReport('code-review.check.md', '**Status:** NEEDS_WORK\n\n- bug at foo.js:12');
+    writeReport('completion.check.md', '**Status:** COMPLETE\n\nDelivered.');
+    assert.equal(handler(state, ctx), null);
+  });
+
+  it('unresolvable current HEAD → staleness validation skipped (fail-open)', () => {
+    ctx.resolveHeadSha = () => null;
+    handler(state, ctx);
+    writeReport('code-review.check.md', failReport(HEAD_A));
+    writeReport('completion.check.md', passReport(HEAD_A));
+    assert.equal(handler(state, ctx), null);
+  });
+
+  it(`stale re-dispatch respects the cap: after ${MAX_DISPATCH_ATTEMPTS} attempts the report is accepted as-is with a Workflow Note`, () => {
+    handler(state, ctx); // attempts = 1
+    writeReport('completion.check.md', passReport(HEAD_B));
+    writeReport('code-review.check.md', failReport(HEAD_A));
+    // Each call sees the still-stale report and re-dispatches until the cap
+    let redispatches = 0;
+    for (let i = 0; i < 10; i++) {
+      const r = handler(state, ctx);
+      if (r === null) break;
+      assert.equal(r.action, 'execute', 'stale reports must re-dispatch, never block');
+      assert.equal(r.delegates.length, 1);
+      redispatches += 1;
+      // agent keeps writing the same stale verdict (HEAD keeps moving)
+      writeReport('code-review.check.md', failReport(HEAD_A));
+    }
+    assert.equal(redispatches, MAX_DISPATCH_ATTEMPTS - 1); // bounded, no loop
+    assert.equal(state.phase1Reports['code-review.check.md'].attempts, MAX_DISPATCH_ATTEMPTS);
+    assert.deepEqual(state.phase1Reports['code-review.check.md'].staleAccepted, {
+      reportHead: HEAD_A,
+      currentHead: HEAD_B,
+    });
+    // The accepted report is annotated so phase-2/humans see the staleness
+    const content = fs.readFileSync(path.join(dir, 'code-review.check.md'), 'utf8');
+    assert.match(content, /## Workflow Note/);
+    assert.match(content, /HEAD-staleness cap reached \(GH-308\)/);
+    // Advanced: subsequent calls stay advanced
+    assert.equal(handler(state, ctx), null);
   });
 });

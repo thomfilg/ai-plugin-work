@@ -248,7 +248,7 @@ describe('CI progression with mocked gh calls', () => {
 
       state.currentStep = 'triage';
       triage(state, {});
-      assert.equal(state.failureCategory, 'reviews');
+      assert.equal(state.failureCategory, 'review_failure'); // GH-670 canonical spelling
       assert.equal(state.currentStep, 'fix-reviews');
     });
   });
