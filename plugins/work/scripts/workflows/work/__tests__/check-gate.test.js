@@ -6,7 +6,7 @@ const os = require('os');
 
 const { CHECK_GATE_RULES, validateCheckGate } = require('../gates/check-gate');
 
-const TEMP = path.join(os.tmpdir(), 'check-gate-test-' + process.pid);
+const TEMP = fs.mkdtempSync(path.join(os.tmpdir(), 'check-gate-test-'));
 let testTicket;
 let testCount = 0;
 
