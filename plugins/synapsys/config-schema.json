@@ -1,0 +1,88 @@
+{
+  "plugin": "synapsys",
+  "prefixes": ["SYNAPSYS_"],
+  "internal": [
+    "SYNAPSYS_HOME",
+    "SYNAPSYS_PRETOOL_DIR",
+    "SYNAPSYS_PROFILES_DIR_FOR_TEST",
+    "SYNAPSYS_CONSOLIDATE_PROFILES_DIR_FOR_TEST",
+    "SYNAPSYS_CONSOLIDATE_BIN_FOR_TEST"
+  ],
+  "vars": {
+    "SYNAPSYS_TELEMETRY": {
+      "type": "bool01",
+      "default": "1",
+      "description": "Memory-injection telemetry (0 disables)",
+      "section": "Memory"
+    },
+    "SYNAPSYS_INJECT_BUDGET": {
+      "type": "number",
+      "default": "",
+      "description": "Max characters injected per event",
+      "section": "Memory",
+      "advanced": true
+    },
+    "SYNAPSYS_DISABLE_HOME_STORES": {
+      "type": "bool01",
+      "default": "0",
+      "description": "Use only project-local memory stores",
+      "section": "Memory"
+    },
+    "SYNAPSYS_NO_SETUP_HINT": {
+      "type": "bool01",
+      "default": "0",
+      "description": "Suppress the first-run setup hint",
+      "section": "Memory",
+      "advanced": true
+    },
+    "SYNAPSYS_SESSION_ROTATION_DISABLED": {
+      "type": "bool01",
+      "default": "0",
+      "description": "Disable session-id rotation",
+      "section": "Memory",
+      "advanced": true
+    },
+    "SYNAPSYS_DEBUG": {
+      "type": "bool01",
+      "default": "0",
+      "description": "Verbose hook debugging output",
+      "section": "Memory",
+      "advanced": true
+    },
+    "SYNAPSYS_SESSION_DIR": {
+      "type": "path",
+      "default": "",
+      "description": "Override session-id storage directory",
+      "section": "Memory",
+      "advanced": true
+    },
+    "SYNAPSYS_PRESETS_PATH": {
+      "type": "path",
+      "default": "",
+      "description": "Override path to presets.json",
+      "section": "Memory",
+      "advanced": true
+    },
+    "SYNAPSYS_CORTEX_DB": {
+      "type": "path",
+      "default": "",
+      "description": "Cortex database path override",
+      "section": "Cortex",
+      "advanced": true
+    },
+    "SYNAPSYS_CORTEX_RECALL_MODULE": {
+      "type": "path",
+      "default": "",
+      "description": "Cortex auto-recall module override",
+      "section": "Cortex",
+      "advanced": true
+    },
+    "SYNAPSYS_CORTEX_KEYWORDS": {
+      "type": "string",
+      "default": "",
+      "description": "Extra keywords steering Cortex auto-recall",
+      "section": "Cortex",
+      "advanced": true
+    }
+  }
+}

@@ -7,6 +7,10 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/synapsys.js\" SessionStart"
+          },
+          {
+            "type": "command",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/hooks/config-detect.js\""
           }
         ]
       }
