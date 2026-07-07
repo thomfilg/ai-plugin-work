@@ -32,10 +32,12 @@ const INLINE_INTERPRETER_PATTERN =
   /(?:\/usr\/bin\/env\s+)?\b(?:python[23]?)\s+-c\b|(?:\/usr\/bin\/env\s+)?\b(?:ruby|perl)\s+-e\b/;
 
 /** Write operations in inline interpreter code (w/a/x/r+/rb+ modes, File.write, os.rename, etc.)
- *  open() pattern uses (?:[^()]*|\([^()]*\))* to allow one level of nested parens (e.g. b64decode())
- *  without matching across statement boundaries like open(...).read(); print('w'). */
+ *  open() pattern uses (?:[^()]|\([^()]*\))* to allow one level of nested parens (e.g. b64decode())
+ *  without matching across statement boundaries like open(...).read(); print('w').
+ *  Each outer iteration consumes exactly one non-paren char OR one balanced paren group —
+ *  alternatives are disjoint on their first char, so backtracking stays linear (no ReDoS). */
 const INLINE_INTERPRETER_WRITES =
-  /open\((?:[^()]*|\([^()]*\))*['"](?:[wWaAxX>]|[wWaAxX][bB]?[+]?|[bB][wWaAxX]|[rR][bB]?[+])|\bFile\.write\b|\bIO\.write\b|\bos\.rename\b|\bshutil\.copy\b|\bshutil\.move\b/;
+  /open\((?:[^()]|\([^()]*\))*['"](?:[wWaAxX>]|[wWaAxX][bB]?[+]?|[bB][wWaAxX]|[rR][bB]?[+])|\bFile\.write\b|\bIO\.write\b|\bos\.rename\b|\bshutil\.copy\b|\bshutil\.move\b/;
 
 /** Base64 evasion patterns (case-insensitive to catch MIME::Base64, Base64.decode64, etc.) */
 const BASE64_EVASION_PATTERN = /\bbase64\b|\bb64decode\b|\bb64encode\b|\batob\b|\bbtoa\b/i;
