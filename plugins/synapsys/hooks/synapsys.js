@@ -146,9 +146,16 @@ function resolveSessionForPayload(payload) {
 // JSON — raw stdout is NOT added to model context for tool-use events, only
 // for UserPromptSubmit/SessionStart. Other events keep raw stdout. Empty
 // guard = no-match identity.
+//
+// WP-12 scenario B root cause: on codex, raw stdout that LOOKS like JSON
+// (the '[synapsys:local]'/'[synapsys:active]' headers are bracket-leading) is
+// sniffed, fails to parse, and the whole injection is DROPPED with the hook
+// marked Failed (GT §2.6.1) — guardStdoutContext prepends a lead-in line on
+// codex only; claude bytes are unchanged.
 const ENVELOPE_EVENTS = new Set(['PreToolUse', 'PostToolUse']);
+const { guardStdoutContext } = require(path.join(__dirname, '..', 'lib', 'runtime', 'emit'));
 
-function writeMatchedOutput(event, out) {
+function writeMatchedOutput(event, out, runtimeName) {
   if (!out) return;
   if (ENVELOPE_EVENTS.has(event)) {
     process.stdout.write(
@@ -157,7 +164,7 @@ function writeMatchedOutput(event, out) {
       })
     );
   } else {
-    process.stdout.write(out);
+    process.stdout.write(guardStdoutContext(runtimeName, out));
   }
 }
 
@@ -238,6 +245,7 @@ async function dispatch() {
 
   const payload = parsePayload(await readStdin());
   const cwd = payload.cwd || process.cwd();
+  const runtimeName = getRuntime(payload).name;
 
   // SessionStart: kick off the detached background recall before anything else.
   if (event === 'SessionStart') scheduleSessionRecall(payload);
@@ -255,9 +263,11 @@ async function dispatch() {
   // output (consumes + deletes the background recall cache).
   const autoBlock = event === 'UserPromptSubmit' ? consumeAutoRecall(payload) : '';
 
-  const sessionHint = getSessionStartHint(event, stores, memories, getRuntime(payload).name);
+  const sessionHint = getSessionStartHint(event, stores, memories, runtimeName);
   if (sessionHint) {
-    process.stdout.write(sessionHint);
+    // The hints are bracket-leading Claude literals ('[synapsys:setup-required]'
+    // / '[synapsys:empty-store]') — same codex JSON-sniff guard as matched output.
+    process.stdout.write(guardStdoutContext(runtimeName, sessionHint));
     process.exit(0);
   }
 
@@ -300,7 +310,7 @@ async function dispatch() {
     buildOutput(event, autoBlock, matched, sessionId, payload, subagentNames),
     enforcement.nudges
   );
-  writeMatchedOutput(event, output);
+  writeMatchedOutput(event, output, runtimeName);
   process.exit(0);
 }
 

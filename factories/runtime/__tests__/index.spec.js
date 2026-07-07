@@ -16,6 +16,7 @@ const path = require('node:path');
 const {
   getRuntime,
   detectRuntime,
+  sniffPayload,
   stampRuntime,
   resetRuntimeCache,
   stampPath,
@@ -86,6 +87,23 @@ describe('detectRuntime precedence', () => {
 
   it('7: nothing set defaults to claude', () => {
     assert.equal(detectRuntime(null, {}), 'claude');
+  });
+});
+
+describe('sniffPayload (exported for env-independent payload-shape checks)', () => {
+  it('codex-shaped: turn_id or rollout transcript_path', () => {
+    assert.equal(sniffPayload({ turn_id: '019f3c4b' }), 'codex');
+    assert.equal(sniffPayload({ transcript_path: ROLLOUT_PATH }), 'codex');
+  });
+
+  it('claude-shaped: /.claude/projects/ transcript_path', () => {
+    assert.equal(sniffPayload({ transcript_path: CLAUDE_PATH }), 'claude');
+  });
+
+  it('undecidable payloads return null (never guesses from env)', () => {
+    assert.equal(sniffPayload({}), null);
+    assert.equal(sniffPayload(null), null);
+    assert.equal(sniffPayload({ cwd: '/tmp' }), null);
   });
 });
 

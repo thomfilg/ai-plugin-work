@@ -16,8 +16,10 @@ const {
   contextChannel,
   renderContext,
   renderUpdatedCommand,
+  guardStdoutContext,
   pad,
   EMPTY_REASON_PAD,
+  CODEX_STDOUT_LEAD_IN,
 } = require('../emit');
 
 const EMIT_PATH = require.resolve('../emit');
@@ -67,6 +69,48 @@ describe('renderContext', () => {
 
   it('codex Stop is suppressed (no codex channel for Stop context)', () => {
     assert.deepEqual(renderContext('codex', 'Stop', 'info'), { channel: 'suppressed', output: '' });
+  });
+});
+
+describe('guardStdoutContext — codex JSON-sniff guard (GT §2.6.1, WP-12 scenario B)', () => {
+  it('claude text is returned verbatim even when bracket-leading', () => {
+    assert.equal(
+      guardStdoutContext('claude', '[synapsys:local] mem — desc'),
+      '[synapsys:local] mem — desc'
+    );
+  });
+
+  it('codex safe text is returned verbatim (byte parity when no sniff risk)', () => {
+    assert.equal(guardStdoutContext('codex', 'WORK2 ORCHESTRATOR PLAN'), 'WORK2 ORCHESTRATOR PLAN');
+  });
+
+  for (const lead of [
+    '[synapsys:local] mem',
+    '{"looks":"like json"}',
+    '"quoted lead"',
+    '  [indented bracket]',
+  ]) {
+    it(`codex JSON-looking text ${JSON.stringify(lead.slice(0, 12))}… gains the lead-in line`, () => {
+      assert.equal(guardStdoutContext('codex', lead), `${CODEX_STDOUT_LEAD_IN}\n${lead}`);
+    });
+  }
+
+  it('renderContext applies the guard on the codex stdout channel (UPS/SessionStart)', () => {
+    assert.deepEqual(renderContext('codex', 'UserPromptSubmit', '[maestro] ACTIVE'), {
+      channel: 'stdout',
+      output: `${CODEX_STDOUT_LEAD_IN}\n[maestro] ACTIVE\n`,
+    });
+    assert.deepEqual(renderContext('codex', 'SessionStart', '[synapsys:empty-store] hint'), {
+      channel: 'stdout',
+      output: `${CODEX_STDOUT_LEAD_IN}\n[synapsys:empty-store] hint\n`,
+    });
+  });
+
+  it('renderContext leaves claude stdout bytes untouched (bracket-leading included)', () => {
+    assert.deepEqual(renderContext('claude', 'UserPromptSubmit', '[synapsys:active] mem'), {
+      channel: 'stdout',
+      output: '[synapsys:active] mem\n',
+    });
   });
 });
 

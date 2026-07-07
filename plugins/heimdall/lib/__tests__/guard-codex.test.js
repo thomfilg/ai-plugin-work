@@ -189,9 +189,43 @@ describe('per-runtime block message', () => {
     assert.doesNotMatch(r.message, /codex exec resume/);
   });
 
-  it('codex exec mode: adds the codex exec resume answer channel', () => {
+  it('codex exec mode without a session id: --last fallback + the cwd-filter caveat', () => {
     const r = runPatch(lockedPatch, { mode: 'exec' });
     assert.match(r.message, /codex exec resume --last 'edit the vault'/);
+    assert.match(r.message, /--last is cwd-filtered/);
+  });
+
+  it('codex exec mode with a payload session id: exact verified resume form (C3 RESOLVED)', () => {
+    const r = evaluate({
+      toolName: 'apply_patch',
+      toolInput: { command: lockedPatch },
+      transcriptPath: emptyRollout,
+      entries: entries(),
+      runtime: 'codex',
+      mode: 'exec',
+      cwd: baseDir,
+      sessionId: '019f3db3-e1a2-76c2-8a49-4ab26b3c947c',
+    });
+    assert.match(
+      r.message,
+      /codex exec resume 019f3db3-e1a2-76c2-8a49-4ab26b3c947c 'edit the vault'/
+    );
+    assert.doesNotMatch(r.message, /--last/);
+  });
+
+  it('codex exec mode with an UNSAFE session id falls back to --last (no injection channel)', () => {
+    const r = evaluate({
+      toolName: 'apply_patch',
+      toolInput: { command: lockedPatch },
+      transcriptPath: emptyRollout,
+      entries: entries(),
+      runtime: 'codex',
+      mode: 'exec',
+      cwd: baseDir,
+      sessionId: "bad'; echo pwned;'",
+    });
+    assert.match(r.message, /codex exec resume --last 'edit the vault'/);
+    assert.doesNotMatch(r.message, /pwned/);
   });
 
   it('codex with an unknown transcript format drops the false phrase promise', () => {

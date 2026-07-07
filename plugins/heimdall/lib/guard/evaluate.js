@@ -36,6 +36,12 @@ function claudeUnlockInstruction(phrase) {
 // session rollout on the NEXT PreToolUse, and only event_msg/user_message
 // records count (see transcript.js). When the transcript format is unknown the
 // phrase promise would be FALSE — drop it and point at unprotect instead (C7).
+//
+// Resume form (WP-12 live-verified, design §0 C3 RESOLVED): `codex exec resume
+// [SESSION_ID] [PROMPT]` — the answer is a positional argument; the retried
+// tool call re-enters PreToolUse with the phrase now in the rollout. Prefer
+// the explicit SESSION_ID from the hook payload: `--last` is CWD-FILTERED and
+// resumes a different session when invoked from another directory.
 function codexUnlockInstruction(phrase, opts) {
   if (opts.unlockAvailable === false) {
     return (
@@ -47,7 +53,12 @@ function codexUnlockInstruction(phrase, opts) {
   msg += `phrase in their NEXT message (only user-typed text unlocks it):\n`;
   msg += `  ${phrase}\n`;
   if (opts.mode === 'exec') {
-    msg += `In exec mode they can send it via: codex exec resume --last '${phrase}'\n`;
+    if (opts.sessionId) {
+      msg += `In exec mode they can send it via: codex exec resume ${opts.sessionId} '${phrase}'\n`;
+    } else {
+      msg += `In exec mode they can send it via: codex exec resume --last '${phrase}'\n`;
+      msg += `(--last is cwd-filtered — run it from this session's working directory)\n`;
+    }
   }
   msg += `Then retry. Do NOT try alternative approaches or attempt to emit the phrase yourself.\n`;
   return msg;
@@ -207,6 +218,15 @@ const HANDLERS = {
   shell: evaluateBash,
 };
 
+// Only a safe id may reach the emitted resume command — the block message
+// must never become an injection channel for payload-controlled text.
+const SAFE_SESSION_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
+
+function safeSessionId(value) {
+  const s = value == null ? '' : String(value);
+  return SAFE_SESSION_ID_RE.test(s) ? s : '';
+}
+
 /** Evaluate one tool call against entries. */
 function evaluate({
   toolName,
@@ -216,6 +236,7 @@ function evaluate({
   runtime = 'claude',
   mode = 'interactive',
   cwd = process.cwd(),
+  sessionId = '',
 }) {
   if (!entries || entries.length === 0) return ALLOW;
   const handler = HANDLERS[canonicalToolKind(toolName, runtime)];
@@ -226,6 +247,7 @@ function evaluate({
     runtime,
     mode,
     cwd,
+    sessionId: safeSessionId(sessionId),
     unlockAvailable: runtime !== 'codex' || sniffFormat(transcriptPath) !== 'unknown',
   };
   return handler(toolInput || {}, entries, unlocked, ctx);

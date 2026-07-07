@@ -203,9 +203,19 @@ function printRemediation(out, gatesOff) {
   out.push('', '## remediation');
   if (gatesOff) {
     out.push(
-      '  - interactive: run the TUI `/hooks` review to trust the listed hooks',
+      '  - interactive: run the TUI `/hooks` review to trust the listed hooks. The TUI also',
+      '    prompts PROACTIVELY at session start (live-verified 0.142.5, GT §11.2):',
+      '      "Hooks need review / N hooks are new or changed. / Hooks can run outside the',
+      '       sandbox after you trust them."',
+      '      options: "1. Review hooks / 2. Trust all and continue / 3. Continue without',
+      '       trusting (hooks won\'t run)"',
+      '    review table: "Press t to trust all; enter to review hooks; esc to close";',
+      '    per-hook detail shows Event/Matcher/Source/Command/Timeout and',
+      '    "New hook - review required. Press t to trust; esc to go back".',
       '  - automation: relaunch with `codex exec --dangerously-bypass-hook-trust` (per-invocation;',
       '    does NOT persist trust)',
+      '  - trust persists as `[hooks.state."<plugin>@<marketplace>:hooks/hooks.json:<event>:<i>:<j>"]`',
+      '    `trusted_hash = "sha256:…"` entries in the USER config.toml — written by the TUI ONLY.',
       '  - NEVER script `trusted_hash` writes into config.toml — the formula is not bit-exact-',
       '    verified and pre-seeding trust is the exact gate-bypass pattern this repo forbids.'
     );

@@ -87,6 +87,12 @@ describe('runtime-doctor CLI', () => {
     assert.match(stdout, /hooks UNTRUSTED — gates are OFF/);
     assert.match(stdout, /--dangerously-bypass-hook-trust/);
     assert.match(stdout, /NEVER script `trusted_hash` writes/);
+    // Live-verified TUI trust UX quotes (WP-12, GT §11.2) — operators must be
+    // able to recognize the exact pane text the remediation points them at.
+    assert.match(stdout, /Hooks need review/);
+    assert.match(stdout, /Trust all and continue/);
+    assert.match(stdout, /Press t to trust all; enter to review hooks; esc to close/);
+    assert.match(stdout, /New hook - review required/);
   });
 
   it('fully-trusted config.toml ⇒ exit 0', async () => {

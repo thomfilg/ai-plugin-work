@@ -54,7 +54,7 @@ mode heuristic.
 |---|---|---|
 | Statusline bars (`install-followup-statusline`, `maestro:install`) | never (no surface) | CLI watch / tmux `status-right` — the installers print the recipe and exit 0 |
 | Parallel subagent fan-out | serialized | inline persona execution, one task at a time |
-| `AskUserQuestion` gates | no UI | TUI: `request_user_input` prose; exec: step parks BLOCKED — answer via maestro `/signal` or `codex exec resume --last "<answer>"` (resume answer-arg syntax still unverified; re-checked in the integration package) |
+| `AskUserQuestion` gates | no UI | TUI: `request_user_input` prose; exec: step parks BLOCKED — answer via maestro `/signal` or `codex exec resume <SESSION_ID> "<answer>"` (live-verified on 0.142.5: the answer is a positional `[PROMPT]` arg; `--last` also works but is **cwd-filtered** — run it from the agent's worktree or pass the explicit session id) |
 | `Monitor` tool | no analog | tmux listener pane + PostToolUse hook relay |
 | Read/Grep/Glob PreToolUse gating | dead lanes | Bash lane covers (codex reads via shell) |
 | `Skill()` tool dispatch / `$ARGUMENTS` | mention text only, no argument substitution | skills self-locate; guidance renders `$skill` mentions |

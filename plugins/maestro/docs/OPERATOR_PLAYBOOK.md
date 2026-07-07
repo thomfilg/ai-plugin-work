@@ -282,10 +282,17 @@ the agent's exec loop ends. Two channels reach it:
 1. `/signal <TICKET> "<answer>"` — lands in the file mailbox; the hook relay injects it on the
    next turn (context pointers travel this way too: codex has no composer, so `/rename` and
    typed nudges are skipped).
-2. `codex exec resume --last "<answer>"` in the agent's worktree — **the answer-argument
-   syntax is still unverified** (design §0 C3); the bare `codex exec resume --last` restart
-   form is what auto-restart uses. Until the integration package pins the answer form, prefer
-   the `/signal` channel.
+2. `codex exec resume <SESSION_ID> "<answer>"` — **live-verified on 0.142.5** (WP-12,
+   design §0 C3 RESOLVED): the answer is a positional `[PROMPT]` argument
+   (`Usage: codex exec resume [OPTIONS] [SESSION_ID] [PROMPT]`) and the resumed turn
+   re-fires SessionStart/UserPromptSubmit/Stop hooks, so unlock phrases land in the
+   rollout. `--last` works too but is **cwd-filtered** (newest session recorded for the
+   invoking directory, not globally) — run it from the agent's worktree or read the
+   session id from `<STATE_DIR>/<TICKET>.exec.jsonl`. `exec resume` REJECTS `-s`/`-C`;
+   set the sandbox via `-c 'sandbox_mode="workspace-write"'`. The bare
+   `codex exec resume --last` restart form auto-restart uses is safe because the
+   conductor launches it inside the worktree, where the cwd filter picks the right
+   session.
 
 ### Trust story (once per release)
 

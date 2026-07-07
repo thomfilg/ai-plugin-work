@@ -203,16 +203,107 @@ development/off; `memories`=experimental/off; `non_prefixed_mcp_tool_names`=unde
 | U5 | Is `CLAUDE_PLUGIN_ROOT` (or any PLUGIN_*) visible to the **model's shell** during skill execution (verified only for hook processes)? Decides whether every skill body's `${CLAUDE_PLUGIN_ROOT}/scripts/...` line works. | Install probe plugin whose skill says "run `echo $CLAUDE_PLUGIN_ROOT`"; invoke via `$probe-skill` in exec; read tool output. |
 | U6 | Are tolerated Claude skill frontmatter fields (allowed-tools, user-invocable, disable-model-invocation, argument-hint) semantically honored or fully ignored? | Probe skills toggling each field; observe injection (prompt-input), invocability, and tool restriction behavior. |
 | U7 | Marketplace-source persistence reconciliation (§7.3) + the exact re-add/upgrade path from the stale June cache to repo HEAD. | On the real `~/.codex` (with backup): `codex plugin marketplace add <repo>` then `plugin add` each plugin; diff config.toml; confirm `marketplace upgrade` behavior. |
-| U8 | Are subagent tools exposed in the interactive TUI by default (absent from exec — §4.2)? | TUI session; ask model to list tools verbatim / attempt spawn_agent. |
-| U9 | Does the TUI proactively prompt to review newly-discovered untrusted hooks at session start, or only in `/hooks`? Any visible indicator when exec skips untrusted hooks (none observed)? | Fresh plugin install + TUI start; watch for banner; then `/hooks`. |
+| U8 | ~~Are subagent tools exposed in the interactive TUI by default (absent from exec — §4.2)?~~ **RESOLVED — see §11.1.** | TUI session; ask model to list tools verbatim / attempt spawn_agent. |
+| U9 | ~~Does the TUI proactively prompt to review newly-discovered untrusted hooks at session start, or only in `/hooks`?~~ **RESOLVED — see §11.2.** | Fresh plugin install + TUI start; watch for banner; then `/hooks`. |
 | U10 | Does codex expose any CODEX_*/other vars to hook children beyond plain env inheritance (env-dump probe stalled at codex startup)? | Re-run trusted env-dump hook comparing parent vs hook env. |
 | U11 | TOML `[hooks]` inline support for UserPromptSubmit/Stop (enum blob showed 8 events). | config.toml with `[[hooks.UserPromptSubmit]]`/`[[hooks.Stop]]`; check discovery + firing. |
 | U12 | Does the TUI composer expand `/prompts:name` BEFORE UserPromptSubmit hooks run (hook sees raw or expanded text)? | TUI + UserPromptSubmit dump hook + a custom prompt. |
 | U13 | Hook output spill (`hook_outputs` dir): threshold and consumer behavior. | Trusted hook emitting multi-MB stdout; inspect `$CODEX_HOME`. |
 | U14 | Does codex read project-root `.mcp.json` (probable no)? | Isolated home + repo with `.mcp.json` defining a marker MCP server; check `codex mcp list`/tool availability. |
-| U15 | Does LD_PRELOAD survive inside codex's bubblewrap sandbox (heimdall fsguard delivery), given hooks themselves are unsandboxed but tool exec is not? | workspace-write exec running a command with LD_PRELOAD interposer set via updatedInput(allow) rewrite; observe EACCES behavior. |
+| U15 | Does LD_PRELOAD survive inside codex's bubblewrap sandbox (heimdall fsguard delivery), given hooks themselves are unsandboxed but tool exec is not? **PARTIALLY RESOLVED — see §11.4** (direct `codex sandbox` probe; the updatedInput(allow) rewrite leg is still open). | workspace-write exec running a command with LD_PRELOAD interposer set via updatedInput(allow) rewrite; observe EACCES behavior. |
 | U16 | Full 0.142.5 ↔ main delta beyond the hooks.json `description` field (binary strings match main's hooks crate closely; no exhaustive diff). | Diff binary schema blobs/strings against a main build, or wait for release notes. |
 | U17 | Does `codex exec --json` emit a tools/list event usable instead of model-self-report for tool inventory? | Parse `--json` stream of a short run. |
+
+---
+
+## 11. WP-12 LIVE RESOLUTIONS (2026-07-07, codex 0.142.5)
+
+All **[verified]** on this machine. Evidence artifacts: `/tmp/codex-wp12-payloads.jsonl`
+(41+ real hook payloads), `/tmp/codex-wp12-logs/*` (exec streams incl.
+`recon-ss-probe.jsonl` / `recon-tool-probe.jsonl`), isolated homes
+`/tmp/codex-wp12-home` / `/tmp/codex-wp12-home2`, TUI pane fixtures under
+`plugins/maestro/scripts/lib/maestro-conduct/__tests__/fixtures/codex-tui/`.
+
+### 11.1 U8 RESOLVED — subagent tools exist in the TUI
+
+`multi_agent` is stable=on (`codex features list`). A TUI prompt produced live PreToolUse/
+PostToolUse payloads for: `spawn_agent` (`tool_input: {agent_type: "explorer", message}` →
+response `{agent_id, nickname}`), `multi_agent_v1wait_agent` (`{targets: [id], timeout_ms}`),
+`multi_agent_v1close_agent` (`{target}`). The subagent runs its own hook stream
+(UserPromptSubmit/PreToolUse/PostToolUse) whose payloads carry extra `agent_id` +
+`agent_type` fields (§2.5.1 confirmed); the subagent's shell tool is named `Bash`. Pane
+markers: `• Spawned <id> (gpt-5.5 low)` / `• Waiting for <id>` / `• Finished waiting` /
+`• Closed <id>`. The `WORK_CODEX_SPAWN_AGENT=1` escape hatch (design §F) is viable in TUI
+sessions.
+
+### 11.2 U9 RESOLVED — proactive trust review at TUI startup
+
+Fresh home (auth + 4 plugins, no bypass flag) shows TWO sequential prompts at startup:
+(1) workspace trust — "Do you trust the contents of this directory? … 1. Yes, continue /
+2. No, quit"; (2) a PROACTIVE hooks review — exact text: **"Hooks need review / 59 hooks are
+new or changed. / Hooks can run outside the sandbox after you trust them."** with options
+"1. Review hooks / 2. Trust all and continue / 3. Continue without trusting (hooks won't
+run)". Review UI: per-event table (Installed/Active/Review, "Press t to trust all; enter to
+review hooks; esc to close") and per-hook detail (Event/Matcher/Source
+"Plugin - heimdall@work-workflow"/Command/Timeout/Trust "New hook - review required").
+Trust-all persists `[hooks.state."<plugin>@<marketplace>:hooks/hooks.json:<event>:<i>:<j>"]
+trusted_hash = "sha256:…"` entries in the **user** config.toml (§2.8.3 format confirmed).
+
+### 11.3 C3 RESOLVED — `codex exec resume` answer-argument syntax
+
+`Usage: codex exec resume [OPTIONS] [SESSION_ID] [PROMPT]` — the answer is a positional
+argument (`-` = stdin). Live-verified both `--last` and explicit-id forms; the resumed turn
+fires SessionStart/UserPromptSubmit/Stop hooks, and a heimdall phrase sent this way reached
+the next PreToolUse via the rollout (typed-phrase unlock works end-to-end). CAVEATS:
+`--last` is **cwd-filtered** (newest session recorded for the invoking directory, NOT
+globally newest; `--all` disables the filter for listing); `exec resume` REJECTS `-s`/`-C`
+— set sandbox via `-c 'sandbox_mode="workspace-write"'`; `--json`/`-o`/
+`--skip-git-repo-check`/`--dangerously-bypass-approvals-and-sandbox`/
+`--dangerously-bypass-hook-trust` are accepted. Working scripted form:
+`codex exec resume <SESSION_ID> --json --dangerously-bypass-hook-trust -c
+'sandbox_mode="workspace-write"' '<answer>'`.
+
+### 11.4 U15 OBSERVED — LD_PRELOAD × bubblewrap
+
+The exec/TUI sandbox is bubblewrap (WSL2 banner: "Codex will use the bundled bubblewrap").
+`LD_PRELOAD` PROPAGATES into `codex sandbox` children and ld.so honors it; uid unchanged;
+network isolation real. BUT out-of-workspace writes fail with **EROFS** (read-only bind
+mounts), not EACCES — inside the sandbox the mount-level denial masks the fsguard shim's
+EACCES semantics for non-workspace paths. The shim lane stays relevant for
+danger-full-access runs and for hooks (which run OUTSIDE the sandbox — the trust prompt
+itself says so). Still open: EACCES-vs-EROFS precedence for workspace-INTERNAL protected
+paths via the updatedInput(allow) rewrite.
+
+### 11.5 §2.6 amendments — context-injection reliability (exec, live probes)
+
+1. **JSON-looking plain stdout is DROPPED** on UPS/SessionStart (2/2 runs): stdout whose
+   first non-space char is `[`/`{` fails the per-event parse, the hook is marked Failed
+   ("hook returned invalid user prompt submit JSON output" in the TUI), and the text never
+   reaches the model. This broke synapsys ('[synapsys:*]' headers) and maestro
+   ('[maestro] …' banner) injections. Fix: a non-bracket lead-in line
+   (`factories/runtime/emit.js guardStdoutContext`) — the guarded form was verified
+   injected verbatim below the lead-in.
+2. **A Failed hook poisons SIBLING context nondeterministically**: with an invalid-output
+   hook in the batch, different sibling injections were lost across two otherwise-identical
+   runs (recon-ss: plain marker injected / envelope lost; recon-tool: reversed). One
+   misbehaving hook can therefore silently starve every other plugin's UPS/SS injection.
+3. **`hookSpecificOutput.additionalContext` is NOT a reliable channel on UPS/SessionStart**
+   (injected in one probe, absent in the other — under sibling-failure poisoning); plain
+   stdout is the verified channel there. On **PostToolUse the envelope IS injected**
+   (developer message, verified — the /work auto-advance channel is sound). On
+   **PreToolUse the envelope's additionalContext was NOT observed injected** in the one
+   probe run — do not rely on PreToolUse additionalContext for context delivery.
+4. Live `tool_response` is a plain STRING for both `Bash` and `apply_patch` (U2 partial);
+   live `tool_name` values observed: `Bash`, `apply_patch`, `spawn_agent`,
+   `multi_agent_v1wait_agent`, `multi_agent_v1close_agent` (U1 partial).
+
+### 11.6 Env-leak corollary (P2) — session-id cross-contamination
+
+A codex hook child spawned from inside a Claude session inherits
+`CLAUDE_CODE_SESSION_ID` (the OUTER Claude session's id). Any env-first session keying
+(synapsys inject-ledger pre-WP-12) writes the codex run's state into the launching Claude
+session's files — live-proven contamination. Rule: for codex-shaped payloads
+(`turn_id` / rollout `transcript_path`), `payload.session_id` MUST outrank the env leg.
 
 ---
 

@@ -362,4 +362,4 @@ You are the fleet's only event processor — while you sit inside `AskUserQuesti
   the driving session so /work question gates render `request_user_input`
   instead of parking. Driver CLIs have no hook payload, so unattended exec
   fleets default to PARKED gates (`[work:codex-degraded]` notice) — answer them
-  via the `/signal` inbox or `codex exec resume --last "<answer>"`.
+  via the `/signal` inbox or `codex exec resume --last "<answer>"` (verified; `--last` is cwd-filtered — run it from the agent worktree, or pass the session id).

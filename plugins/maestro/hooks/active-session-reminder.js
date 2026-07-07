@@ -33,6 +33,22 @@ const {
   eligibleTasks,
 } = require('../scripts/lib/maestro-conduct/session-shared');
 const namespace = require('../scripts/lib/maestro-conduct/namespace');
+const { getRuntime } = require('../scripts/lib/runtime/index');
+const { guardStdoutContext } = require('../scripts/lib/runtime/emit');
+
+// The banner is bracket-leading ('[maestro] …'): on codex that stdout is
+// sniffed as JSON, fails to parse, and the hook is marked Failed with the
+// text DROPPED (GT §2.6.1 — one of the two live "invalid user prompt submit
+// JSON output" failures in the WP-12 TUI probe). guardStdoutContext prepends
+// a lead-in line on codex only; claude bytes are unchanged. Runtime detection
+// reads the stdin payload; fail-open to {} like the config-detect hooks.
+function readPayload() {
+  try {
+    return JSON.parse(fs.readFileSync(0, 'utf8'));
+  } catch {
+    return {};
+  }
+}
 
 // Pending-decision surfacing: actionable alerts younger than this window are
 // re-shown on every user prompt. This is the "ask me when I'm looking at the
@@ -151,7 +167,7 @@ try {
     '  CLI: node plugins/maestro/scripts/maestro-session.js {summary|show <topic>|next <topic>|update <topic> <task> <status>|sync|clear <topic>}'
   );
 
-  process.stdout.write(lines.join('\n') + '\n');
+  process.stdout.write(`${guardStdoutContext(getRuntime(readPayload()).name, lines.join('\n'))}\n`);
 } catch {
   /* fail-open */
 }

@@ -16,6 +16,9 @@
  *     the user's permission prompt, so claude keeps the bare form (C16);
  *   - PostToolUse/PreToolUse plain stdout is NOT injected — context rides the
  *     hookSpecificOutput.additionalContext envelope (C2);
+ *   - UPS/SessionStart/SubagentStart plain stdout that LOOKS like JSON (leading
+ *     `{`/`[`/`"`) is parsed, fails, and is dropped — guarded with a lead-in
+ *     line (WP-12 scenario B root cause; see guardStdoutContext);
  *   - Stop-event context has no codex channel — suppressed (callers persist
  *     state themselves; the /work state machine already does).
  * NEVER emitted on codex: decision:'approve', permissionDecision:'ask', bare
@@ -26,6 +29,27 @@
 const EMPTY_REASON_PAD = 'Blocked by hook (no reason provided).';
 const STDOUT_CONTEXT_EVENTS = new Set(['UserPromptSubmit', 'SessionStart', 'SubagentStart']);
 const TOOL_CONTEXT_EVENTS = new Set(['PreToolUse', 'PostToolUse']);
+
+// Codex JSON-sniff guard (GT §2.6.1 + WP-12 recon probes, 2026-07-07): exit-0
+// stdout whose first non-whitespace char is `{`, `[` or `"` is sniffed as
+// JSON; when it is not a valid per-event response the hook is marked Failed
+// and the text is DROPPED (live: synapsys '[synapsys:local] …' lost, scenario
+// B) — and a Failed hook can race SIBLING hooks out of their injections
+// (recon-ss/recon-tool probes: same 3-hook batch lost different members per
+// run). A one-line lead-in defeats the sniff; the payload stays verbatim.
+// Claude is lenient (invalid JSON ⇒ plain text), so claude bytes never change.
+const JSON_LOOKING_RE = /^\s*["[{]/;
+const CODEX_STDOUT_LEAD_IN = 'hook context:';
+
+/**
+ * Make a plain-stdout context payload safe for the codex JSON sniff. Identity
+ * on claude and on already-safe text.
+ */
+function guardStdoutContext(runtime, text) {
+  const s = text == null ? '' : String(text);
+  if (runtime !== 'codex') return s;
+  return JSON_LOOKING_RE.test(s) ? `${CODEX_STDOUT_LEAD_IN}\n${s}` : s;
+}
 
 function pad(reason) {
   const text = reason == null ? '' : String(reason);
@@ -43,7 +67,7 @@ function contextChannel(runtime, event) {
 /** Pure renderer for context(event, text): { channel, output }. */
 function renderContext(runtime, event, text) {
   const channel = contextChannel(runtime, event);
-  if (channel === 'stdout') return { channel, output: `${text}\n` };
+  if (channel === 'stdout') return { channel, output: `${guardStdoutContext(runtime, text)}\n` };
   if (channel === 'envelope') {
     const envelope = { hookSpecificOutput: { hookEventName: event, additionalContext: text } };
     return { channel, output: `${JSON.stringify(envelope)}\n` };
@@ -110,6 +134,8 @@ module.exports = {
   contextChannel,
   renderContext,
   renderUpdatedCommand,
+  guardStdoutContext,
   pad,
   EMPTY_REASON_PAD,
+  CODEX_STDOUT_LEAD_IN,
 };

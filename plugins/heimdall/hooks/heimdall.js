@@ -67,6 +67,10 @@ async function main() {
     runtime: rt.name,
     mode: rt.mode(),
     cwd,
+    // Lets the codex exec block message emit the exact verified resume form
+    // (`codex exec resume <SESSION_ID> '<phrase>'`) instead of the cwd-filtered
+    // `--last` fallback (WP-12, design §0 C3 RESOLVED).
+    sessionId: evt.sessionId || '',
   });
 
   if (result.exitCode === 2) rt.emit.block(result.message);

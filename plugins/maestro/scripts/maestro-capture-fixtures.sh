@@ -11,9 +11,12 @@
 # Usage:
 #   bash maestro-capture-fixtures.sh <tmux-session> <label> [--force]
 #
-# Writes: plugins/maestro/scripts/__tests__/fixtures/codex-tui/<label>.pane.txt
-# (plain capture, same -p form the conductor reads) and refuses to overwrite
-# an existing fixture unless --force is passed.
+# Writes: plugins/maestro/scripts/lib/maestro-conduct/__tests__/fixtures/codex-tui/
+# <label>.pane.txt (plain capture, same -p form the conductor reads) and refuses
+# to overwrite an existing fixture unless --force is passed. The dir sits next
+# to the maestro-conduct detectors that will consume the dialect regexes —
+# the WP-12 TUI probe captured its 11 fixtures there (path reconciled from the
+# earlier scripts/__tests__ location, which never shipped fixtures).
 set -u
 set -o pipefail
 
@@ -38,7 +41,7 @@ if ! tmux has-session -t "$SESSION" 2>/dev/null; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-OUT_DIR="$SCRIPT_DIR/__tests__/fixtures/codex-tui"
+OUT_DIR="$SCRIPT_DIR/lib/maestro-conduct/__tests__/fixtures/codex-tui"
 OUT="$OUT_DIR/$LABEL.pane.txt"
 
 if [ -f "$OUT" ] && [ "$FORCE" != "--force" ]; then

@@ -120,6 +120,6 @@ comments are present. While a bot review is still running, comments are held
   state-file-first design is unchanged.
 - **Ambiguous review comments** ("ask the user"): interactive sessions use
   `request_user_input`; unattended exec parks the question — answers arrive
-  via the maestro `/signal` inbox or `codex exec resume --last "<answer>"`.
+  via the maestro `/signal` inbox or `codex exec resume --last "<answer>"` (verified; `--last` is cwd-filtered — run it from the agent worktree, or pass the session id).
 - `[work:codex-degraded]` notices in instructions are informational fallback
   notes, not errors.

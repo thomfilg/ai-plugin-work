@@ -160,6 +160,7 @@ function stampRuntime(payload) {
 module.exports = {
   getRuntime,
   detectRuntime,
+  sniffPayload,
   stampRuntime,
   resetRuntimeCache,
   readStamp,

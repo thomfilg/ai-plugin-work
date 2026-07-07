@@ -261,7 +261,17 @@ Run `node scripts/runtime-doctor.js` (repo root) for the live per-plugin lane ta
 
 Codex **silently skips untrusted hooks**: after install or ANY hooks.json change, every gate in
 this document is OFF until the hooks are re-trusted in the codex TUI `/hooks` review (one-time
-per change; changes are batched per release). Unattended runs use
+per change; changes are batched per release). The TUI also prompts **proactively at session
+start** (live-verified on 0.142.5, GT §11.2) — the exact pane text to look for:
+
+> Hooks need review
+> 59 hooks are new or changed.
+> Hooks can run outside the sandbox after you trust them.
+> 1. Review hooks / 2. Trust all and continue / 3. Continue without trusting (hooks won't run)
+
+The review table says "Press t to trust all; enter to review hooks; esc to close"; each hook
+detail shows Event/Matcher/Source/Command/Timeout plus "New hook - review required. Press t
+to trust; esc to go back". Unattended runs use
 `codex exec --dangerously-bypass-hook-trust` per invocation. Never script `[hooks.state]`
 `trusted_hash` writes — the hash formula is source-derived, not bit-exact-verified, and
 pre-seeding trust is a gate-bypass. Audit with `node scripts/runtime-doctor.js` (its
@@ -270,6 +280,18 @@ pre-seeding trust is a gate-bypass. Audit with `node scripts/runtime-doctor.js` 
 ### Interactive gates in `codex exec`
 
 Unattended exec has no question UI: gates that would call `AskUserQuestion` park the step
-BLOCKED and persist a hold file. Answer via the maestro `/signal` inbox or
-`codex exec resume --last "<answer>"` — the resume answer-argument syntax is **still
-unverified** (flagged in the design; the integration package pins the working form).
+BLOCKED and persist a hold file. Answer via the maestro `/signal` inbox or the resume-answer
+channel, **live-verified on 0.142.5** (WP-12, design §0 C3 RESOLVED):
+
+```
+codex exec resume <SESSION_ID> --json --dangerously-bypass-hook-trust \
+  -c 'sandbox_mode="workspace-write"' '<answer>'
+```
+
+- `Usage: codex exec resume [OPTIONS] [SESSION_ID] [PROMPT]` — the answer is a positional
+  argument (`-` reads stdin); the resumed turn re-fires SessionStart/UserPromptSubmit/Stop
+  hooks, so a heimdall unlock phrase sent this way lands in the rollout transcript.
+- `--last` also works but is **cwd-filtered** (it picks the newest session recorded for the
+  invoking directory, not globally) — run it from the agent's worktree or pass the id.
+- `exec resume` REJECTS `-s`/`-C` (narrower flag surface than `exec`) — set the sandbox via
+  `-c sandbox_mode=…`; `--json`/`-o`/`--skip-git-repo-check`/both bypass flags are accepted.

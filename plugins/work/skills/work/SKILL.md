@@ -155,6 +155,6 @@ only the dispatch surface changes:
 - **Question gates** (`action: "blocked"` with user questions): AskUserQuestion
   does not exist. Interactive sessions use `request_user_input`; unattended
   exec parks the gate — answers arrive via the maestro `/signal` inbox or
-  `codex exec resume --last "<answer>"`.
+  `codex exec resume --last "<answer>"` (verified; `--last` is cwd-filtered — run it from the agent worktree, or pass the session id).
 - Instructions carrying `[work:codex-degraded]` notices are informational —
   they explain the fallback in effect, not an error.
