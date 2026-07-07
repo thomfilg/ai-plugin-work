@@ -26,7 +26,7 @@ const { ACCESS_FAILED } = require(
 );
 // Vendored dual-runtime adapter: runtime detection (codex reads tool output
 // from the payload, not the claude transcript) + instruction vocabulary
-// (AskUserQuestion → request_user_input in emitted guidance).
+// (AskUserQuestion → plain-chat numbered options in emitted guidance).
 const { getRuntime } = require(path.join(__dirname, '..', 'runtime'));
 const { renderInstruction } = require(path.join(__dirname, '..', 'runtime', 'vocab'));
 
@@ -213,7 +213,7 @@ function phase2_blockUntilUserChoice(hookData, runtime) {
   const appList = (failInfo.failedApps || []).join(', ') || 'apps';
 
   // renderInstruction is a no-op on claude (byte-identical guidance); on
-  // codex it swaps AskUserQuestion → request_user_input (vocab layer, C13).
+  // codex it swaps AskUserQuestion → plain-chat numbered options (vocab layer, C13).
   process.stderr.write(
     renderInstruction(
       `BLOCKED: Dev apps failed to start (${appList}). ` +

@@ -1,7 +1,7 @@
 /**
  * Dual-runtime test for the work-pr screenshot gate's question command label
  * (WP-08, C3): 'AskUserQuestion' on claude (byte-identical to HEAD),
- * 'request_user_input' on codex. The static steps[] registry is display
+ * plain-chat numbered options on codex. The static steps[] registry is display
  * metadata and stays untouched (asserted below).
  *
  * Run: node --test scripts/workflows/work-pr/__tests__/work-pr-screenshot-gate-runtime.test.js
@@ -47,10 +47,10 @@ describe('4_screenshot_gate question command label', () => {
     });
   });
 
-  it('codex: renders request_user_input', () => {
+  it('codex: renders the plain-chat numbered-options question', () => {
     const r = decideGate('codex');
     assert.equal(r.action, 'RUN');
-    assert.equal(r.command, 'request_user_input');
+    assert.equal(r.command, 'a plain-chat question with numbered options');
   });
 
   it('static steps[] registry is untouched (display metadata, no churn)', () => {

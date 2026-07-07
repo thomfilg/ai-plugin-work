@@ -5,7 +5,7 @@
  *   - phase 2 gates BOTH runtimes' dispatch tools (Task/Skill on claude,
  *     spawn_agent — the `Agent` matcher alias target — on codex)
  *   - the block guidance renders the runtime's question tool (vocab C13:
- *     AskUserQuestion → request_user_input on codex, claude byte-identical)
+ *     AskUserQuestion → plain-chat numbered options on codex, claude byte-identical)
  *   - phase 3 clears the marker on BOTH question tool names
  *   - phase 1 on codex reads the Bash output from payload.tool_response
  *     (plain string — the claude transcript scan can't read rollouts)
@@ -88,7 +88,7 @@ describe('enforce-env-start-failure — dual runtime', () => {
     assert.match(r.stderr, /Call AskUserQuestion with options/);
   });
 
-  it('codex: spawn_agent blocked while marker exists — request_user_input guidance', () => {
+  it('codex: spawn_agent blocked while marker exists — plain-chat question guidance', () => {
     writeMarker();
     const r = runHook(
       {
@@ -101,7 +101,7 @@ describe('enforce-env-start-failure — dual runtime', () => {
       { AGENT_RUNTIME: 'codex', CLAUDE_HOOK_TYPE: 'PreToolUse' }
     );
     assert.equal(r.code, 2);
-    assert.match(r.stderr, /Call request_user_input with options/);
+    assert.match(r.stderr, /Call a plain-chat question with numbered options .* with options/);
     assert.doesNotMatch(r.stderr, /AskUserQuestion/);
   });
 
