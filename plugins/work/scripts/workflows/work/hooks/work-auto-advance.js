@@ -18,38 +18,30 @@ const { execFileSync } = require('child_process');
 process.on('uncaughtException', () => process.exit(0));
 process.on('unhandledRejection', () => process.exit(0));
 
-function main() {
-  // Read hook input from stdin
-  let hookData;
+// Read hook input from stdin
+function readHookData() {
   try {
     const input = fs.readFileSync(0, 'utf8');
-    hookData = JSON.parse(input);
+    return JSON.parse(input);
   } catch {
     process.exit(0);
   }
+}
 
-  const { getRuntime } = require(path.join(__dirname, '..', '..', 'lib', 'runtime'));
-  const rt = getRuntime(hookData);
-  const evt = rt.normalizeHookPayload(hookData, { event: 'PostToolUse' });
-
-  // Guard: do NOT fire inside sub-agents (would advance state while agent is working)
-  if (rt.isSubagentContext(evt)) process.exit(0);
-
-  // Bridge runtime identity to the work-next child (and any libs reading env):
-  // codex hook processes carry neither CLAUDE_CODE_SESSION_ID nor a runtime
-  // pin, so children would misclassify without this.
+// Bridge runtime identity to the work-next child (and any libs reading env):
+// codex hook processes carry neither CLAUDE_CODE_SESSION_ID nor a runtime
+// pin, so children would misclassify without this.
+function bridgeRuntimeEnv(rt, evt) {
   if (!process.env.AGENT_RUNTIME) process.env.AGENT_RUNTIME = rt.name;
   if (!process.env.AGENT_SESSION_ID && evt.sessionId) {
     process.env.AGENT_SESSION_ID = evt.sessionId;
   }
+}
 
-  // Guard: find active /work session via marker file
-  const { resolvePluginPaths } = require(path.join(__dirname, '..', 'lib', 'resolve-plugin-root'));
-  const { libDir } = resolvePluginPaths(__dirname, 3);
-  const getConfig = require(path.join(libDir, 'get-config'));
-  const WORKTREES_BASE = getConfig('WORKTREES_BASE') || '';
-  const TASKS_BASE =
-    getConfig('TASKS_BASE') || (WORKTREES_BASE ? path.join(WORKTREES_BASE, 'tasks') : '');
+// Guard: find this terminal's active /work session marker (recent, owned).
+function findRecentMarker() {
+  const { resolvePluginConfig } = require(path.join(__dirname, '..', '..', 'lib', 'plugin-config'));
+  const { TASKS_BASE } = resolvePluginConfig(path.resolve(__dirname, '..'));
   if (!TASKS_BASE) process.exit(0);
 
   // Find THIS terminal's .work.pid marker. findActiveMarker scopes by owning
@@ -57,15 +49,19 @@ function main() {
   // another agent's workflow (cross-wiring).
   const { findActiveMarker } = require(path.join(__dirname, '..', 'lib', 'marker'));
   const marker = findActiveMarker(TASKS_BASE, '.work.pid');
-  if (!marker) process.exit(0);
+  if (!marker) return null;
 
   // Guard: marker must be recent (less than 12 hours old) to avoid stale sessions
   const markerAge = Date.now() - new Date(marker.startedAt).getTime();
-  if (markerAge > 12 * 60 * 60 * 1000) process.exit(0);
+  if (markerAge > 12 * 60 * 60 * 1000) return null;
 
-  // Call work-next.js. Test seam: an absolute path override lets tests stub
-  // work-next.js without staging the entire plugin tree. Production code never
-  // sets WORK_NEXT_PATH; default resolves the sibling as before.
+  return marker;
+}
+
+// Call work-next.js. Test seam: an absolute path override lets tests stub
+// work-next.js without staging the entire plugin tree. Production code never
+// sets WORK_NEXT_PATH; default resolves the sibling as before.
+function runWorkNext(marker) {
   const workNextPath = process.env.WORK_NEXT_PATH || path.join(__dirname, '..', 'work-next.js');
   let result;
   try {
@@ -78,23 +74,25 @@ function main() {
     process.exit(0);
   }
 
-  // Parse and output instruction
-  let instruction;
+  // Parse instruction
   try {
-    instruction = JSON.parse(result);
+    return JSON.parse(result);
   } catch {
     process.exit(0);
   }
+}
 
-  // Output the instruction for the AI to see. On claude the emitted bytes
-  // match the previous console.log sequence exactly; on codex the same text
-  // rides the additionalContext envelope (plain PostToolUse stdout is not
-  // injected there).
-  const BANNERS = {
-    execute: ['═══ WORK2: NEXT STEP ═══', '════════════════════════'],
-    complete: ['═══ WORK2: COMPLETE ═══', '═══════════════════════'],
-    blocked: ['═══ WORK2: BLOCKED ═══', '══════════════════════'],
-  };
+// Output the instruction for the AI to see. On claude the emitted bytes
+// match the previous console.log sequence exactly; on codex the same text
+// rides the additionalContext envelope (plain PostToolUse stdout is not
+// injected there).
+const BANNERS = {
+  execute: ['═══ WORK2: NEXT STEP ═══', '════════════════════════'],
+  complete: ['═══ WORK2: COMPLETE ═══', '═══════════════════════'],
+  blocked: ['═══ WORK2: BLOCKED ═══', '══════════════════════'],
+};
+
+function emitInstruction(rt, instruction) {
   const banner = BANNERS[instruction.action];
   if (banner) {
     rt.emit.context(
@@ -102,6 +100,25 @@ function main() {
       ['', banner[0], JSON.stringify(instruction, null, 2), banner[1], ''].join('\n')
     );
   }
+}
+
+function main() {
+  const hookData = readHookData();
+
+  const { getRuntime } = require(path.join(__dirname, '..', '..', 'lib', 'runtime'));
+  const rt = getRuntime(hookData);
+  const evt = rt.normalizeHookPayload(hookData, { event: 'PostToolUse' });
+
+  // Guard: do NOT fire inside sub-agents (would advance state while agent is working)
+  if (rt.isSubagentContext(evt)) process.exit(0);
+
+  bridgeRuntimeEnv(rt, evt);
+
+  const marker = findRecentMarker();
+  if (!marker) process.exit(0);
+
+  const instruction = runWorkNext(marker);
+  emitInstruction(rt, instruction);
 
   process.exit(0);
 }

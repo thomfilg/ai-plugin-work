@@ -13,7 +13,9 @@
 
 const fs = require('fs');
 const path = require('path');
-const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
+const { installProcessGuards, loadConfigOrNull } = require(
+  path.join(__dirname, '..', '..', 'lib', 'hook-guards')
+);
 // Vendored dual-runtime adapter: emission channel (PostToolUse stdout is not
 // injected on codex — context rides the additionalContext envelope) and the
 // dual-format transcript reader for the CI-output scan.
@@ -22,29 +24,9 @@ const { sniffFormat, readToolEvents } = require(
   path.join(__dirname, '..', '..', 'lib', 'runtime', 'transcript')
 );
 
-process.on('uncaughtException', (err) => {
-  logHookError(__filename, err);
-  process.exit(0);
-});
-process.on('unhandledRejection', (err) => {
-  logHookError(__filename, err);
-  process.exit(0);
-});
+installProcessGuards(__filename);
 
-let config;
-try {
-  config = require('../../lib/config');
-} catch (err) {
-  if (
-    err &&
-    err.code === 'MODULE_NOT_FOUND' &&
-    /['"]\.\.\/\.\.\/lib\/config['"]/.test(err.message)
-  ) {
-    config = null;
-  } else {
-    throw err;
-  }
-}
+const config = loadConfigOrNull();
 
 const COVERAGE_FAILURE_PATTERNS = [
   /coverage\s+decrease/i,
@@ -64,6 +46,98 @@ const CI_CHECK_COMMANDS = [
   /gh\s+pr\s+checks/,
   /gh\s+run\s+list.*--status\s+failure/,
 ];
+
+/**
+ * Codex leg of the CI-output read: the transcript is a session rollout the
+ * legacy scan cannot read — take the payload's tool_response (a plain string
+ * on codex) plus recent tool outputs via the dual-format reader. Returns
+ * null when nothing was captured (caller stops).
+ */
+function readCodexOutput(hookData, transcriptPath) {
+  const parts = typeof hookData.tool_response === 'string' ? [hookData.tool_response] : [];
+  try {
+    for (const event of readToolEvents(transcriptPath).slice(-50)) {
+      if (typeof event.output === 'string' && event.output) parts.push(event.output);
+    }
+  } catch {
+    /* payload tool_response alone still feeds the scan */
+  }
+  const output = parts.join('\n');
+  return output || null;
+}
+
+/** Fold one transcript line's tool output into the scan buffer. */
+function extractEntryText(line) {
+  try {
+    const entry = JSON.parse(line);
+    // tool_result entries contain the output
+    if (entry.type === 'tool_result' || entry.content) {
+      return typeof entry.content === 'string'
+        ? entry.content
+        : JSON.stringify(entry.content || '');
+    }
+  } catch {
+    // Not JSON, skip
+  }
+  return null;
+}
+
+/**
+ * Claude leg: legacy last-50-lines transcript scan, byte-for-byte unchanged.
+ * Returns null when the transcript is missing/unreadable (caller stops).
+ */
+function readClaudeTranscriptTail(transcriptPath) {
+  if (!transcriptPath || !fs.existsSync(transcriptPath)) {
+    return null;
+  }
+
+  // Read last 50 lines of transcript (tool output should be recent)
+  let output = '';
+  try {
+    const content = fs.readFileSync(transcriptPath, 'utf8');
+    const lines = content.split('\n').filter(Boolean);
+    // Check last 50 entries for tool_result containing our output
+    for (const line of lines.slice(-50)) {
+      const text = extractEntryText(line);
+      if (text !== null) output += text + '\n';
+    }
+  } catch {
+    return null;
+  }
+  return output;
+}
+
+/** Determine ticket ID from the current branch (fallback literal otherwise). */
+function detectTicketId() {
+  let ticketId = 'TICKET_ID';
+  try {
+    const { execSync } = require('child_process');
+    const branch = execSync('git branch --show-current', { encoding: 'utf8' }).trim();
+    const match = branch.match(new RegExp(config.TICKET_PROJECT_KEY + '-\\d+', 'i'));
+    if (match) ticketId = match[0].toUpperCase();
+  } catch {
+    /* */
+  }
+  return ticketId;
+}
+
+function coverageFailureMessage(ticketId) {
+  return `🛑 COVERAGE FAILURE DETECTED IN CI OUTPUT
+
+╔══════════════════════════════════════════════════════════════════════╗
+║  MANDATORY: Run /test-coordination NOW                               ║
+║                                                                      ║
+║  DO NOT investigate CI config.                                       ║
+║  DO NOT argue it's "pre-existing" or "infrastructure".               ║
+║  DO NOT rationalize that "real tests passed".                        ║
+║                                                                      ║
+║  Run: Skill(test-coordination): ${ticketId.padEnd(16)}               ║
+║  Then: git push                                                      ║
+║  Then: Continue CI check loop                                        ║
+╚══════════════════════════════════════════════════════════════════════╝
+
+Per /follow-up-pr section 4.3: ANY coverage-related CI failure → /test-coordination. No exceptions.`;
+}
 
 async function main() {
   let input = '';
@@ -87,95 +161,28 @@ async function main() {
     return;
   }
 
-  // Read the tool output. Claude leg: legacy last-50-lines transcript scan,
-  // byte-for-byte unchanged. Codex leg: the transcript is a session rollout
-  // the legacy scan cannot read — take the payload's tool_response (a plain
-  // string on codex) plus recent tool outputs via the dual-format reader.
+  // Read the tool output via the runtime-appropriate leg.
   const transcriptPath = hookData.transcript_path;
-  let output = '';
-  if (transcriptPath && sniffFormat(transcriptPath) === 'codex') {
-    const parts = typeof hookData.tool_response === 'string' ? [hookData.tool_response] : [];
-    try {
-      for (const event of readToolEvents(transcriptPath).slice(-50)) {
-        if (typeof event.output === 'string' && event.output) parts.push(event.output);
-      }
-    } catch {
-      /* payload tool_response alone still feeds the scan */
-    }
-    output = parts.join('\n');
-    if (!output) return;
-  } else {
-    if (!transcriptPath || !fs.existsSync(transcriptPath)) {
-      return;
-    }
-
-    // Read last 50 lines of transcript (tool output should be recent)
-    try {
-      const content = fs.readFileSync(transcriptPath, 'utf8');
-      const lines = content.split('\n').filter(Boolean);
-      // Check last 50 entries for tool_result containing our output
-      const recentLines = lines.slice(-50);
-      for (const line of recentLines) {
-        try {
-          const entry = JSON.parse(line);
-          // tool_result entries contain the output
-          if (entry.type === 'tool_result' || entry.content) {
-            const text =
-              typeof entry.content === 'string'
-                ? entry.content
-                : JSON.stringify(entry.content || '');
-            output += text + '\n';
-          }
-        } catch {
-          // Not JSON, skip
-        }
-      }
-    } catch {
-      return;
-    }
-  }
+  const output =
+    transcriptPath && sniffFormat(transcriptPath) === 'codex'
+      ? readCodexOutput(hookData, transcriptPath)
+      : readClaudeTranscriptTail(transcriptPath);
+  if (output === null) return;
 
   // Check if output contains coverage failure patterns
   const hasCoverageFailure = COVERAGE_FAILURE_PATTERNS.some((p) => p.test(output));
 
   if (hasCoverageFailure) {
-    // Determine ticket ID from branch
-    let ticketId = 'TICKET_ID';
-    try {
-      const { execSync } = require('child_process');
-      const branch = execSync('git branch --show-current', { encoding: 'utf8' }).trim();
-      const match = branch.match(new RegExp(config.TICKET_PROJECT_KEY + '-\\d+', 'i'));
-      if (match) ticketId = match[0].toUpperCase();
-    } catch {
-      /* */
-    }
-
     // Claude branch of rt.emit.context is byte-identical to the historical
     // console.log (stdout + trailing newline); on codex the same text rides
     // the PostToolUse additionalContext envelope (plain stdout is not
     // injected there — design C2).
-    rt.emit.context(
-      'PostToolUse',
-      `🛑 COVERAGE FAILURE DETECTED IN CI OUTPUT
-
-╔══════════════════════════════════════════════════════════════════════╗
-║  MANDATORY: Run /test-coordination NOW                               ║
-║                                                                      ║
-║  DO NOT investigate CI config.                                       ║
-║  DO NOT argue it's "pre-existing" or "infrastructure".               ║
-║  DO NOT rationalize that "real tests passed".                        ║
-║                                                                      ║
-║  Run: Skill(test-coordination): ${ticketId.padEnd(16)}               ║
-║  Then: git push                                                      ║
-║  Then: Continue CI check loop                                        ║
-╚══════════════════════════════════════════════════════════════════════╝
-
-Per /follow-up-pr section 4.3: ANY coverage-related CI failure → /test-coordination. No exceptions.`
-    );
+    rt.emit.context('PostToolUse', coverageFailureMessage(detectTicketId()));
   }
 }
 
 main().catch((err) => {
+  const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
   logHookError(__filename, err);
   process.exit(0);
 });

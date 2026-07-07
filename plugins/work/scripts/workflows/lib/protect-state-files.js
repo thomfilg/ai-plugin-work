@@ -6,6 +6,7 @@
  *   - Edit / Write / MultiEdit (file_path basename)
  *   - Bash shell operators (>, >>, tee, cp, mv, dd of=)
  *   - Node.js fs calls in Bash (writeFileSync, appendFileSync, etc.)
+ *   - Script / inline-interpreter bypasses (see protect-script-bypass)
  *
  * Usage:
  *   const { createFileProtector, basenameProtector } = require('./lib/protect-state-files');
@@ -25,11 +26,12 @@
  *   if (result.skipRemainingChecks) return; // file tool with no match — no further checks needed
  */
 
-const fs = require('fs');
 const path = require('path');
-// Vendored dual-runtime adapter (see factories/runtime): parses the codex
-// apply_patch payload (`*** Add/Update/Delete File:` headers) into targets.
-const { parseApplyPatch } = require('./runtime/tools');
+// Shared resolver for codex apply_patch write targets (design C6).
+const { resolveApplyPatchTargets } = require('./apply-patch-targets');
+const scriptBypass = require('./protect-script-bypass');
+
+const { extractTokens, createBypassCheckers } = scriptBypass;
 
 // ─── Constants ──────────────────────────────────────────────────────────────
 
@@ -48,26 +50,6 @@ const BASH_WRITE_OPS = /(?:(?<![\d>])>{1,2}|\btee\b|\bcp\b|\bmv\b|\bdd\b.*\bof=)
 
 /** Node.js fs write calls executed via Bash (node -e, inline scripts) */
 const NODE_FS_WRITES = /\b(?:writeFileSync|appendFileSync|writeFile|createWriteStream)\b/;
-
-/** Filesystem write operations in any language (for script content scanning) */
-const SCRIPT_WRITE_OPS =
-  /\b(?:writeFileSync|appendFileSync|writeFile|createWriteStream|unlink|unlinkSync|rmSync|renameSync|copyFileSync|fs\.promises\.writeFile|fs\.promises\.rm)\b|>{1,2}\s*['"]|\btee\s+-a\b|open\(.*['"]w/;
-
-/** Interpreter patterns to extract script paths from Bash commands */
-const INTERPRETER_PATTERN =
-  /\b(?:node|python[23]?|ruby|perl|bash|sh)\s+(?:--?\w[\w-]*(?:=\S+)?\s+)*["']?([/\w._-]+\.(?:js|mjs|cjs|py|rb|pl|sh))["']?/g;
-
-/** Inline interpreter invocations: python3 -c, ruby -e, perl -e (with optional /usr/bin/env prefix) */
-const INLINE_INTERPRETER_PATTERN =
-  /(?:\/usr\/bin\/env\s+)?\b(?:python[23]?)\s+-c\b|(?:\/usr\/bin\/env\s+)?\b(?:ruby|perl)\s+-e\b/;
-
-/** Write operations in inline interpreter code (w/a/x/r+/rb+ modes, File.write, os.rename, etc.)
- *  open() pattern uses (?:[^()]*|\([^()]*\))* to allow one level of nested parens (e.g. b64decode())
- *  without matching across statement boundaries like open(...).read(); print('w'). */
-const INLINE_INTERPRETER_WRITES =
-  /open\((?:[^()]*|\([^()]*\))*['"](?:[wWaAxX>]|[wWaAxX][bB]?[+]?|[bB][wWaAxX]|[rR][bB]?[+])|\bFile\.write\b|\bIO\.write\b|\bos\.rename\b|\bshutil\.copy\b|\bshutil\.move\b/;
-/** Base64 evasion patterns (case-insensitive to catch MIME::Base64, Base64.decode64, etc.) */
-const BASE64_EVASION_PATTERN = /\bbase64\b|\bb64decode\b|\bb64encode\b|\batob\b|\bbtoa\b/i;
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -99,6 +81,85 @@ function basenameProtector(basenames) {
   };
 }
 
+// ─── Per-vector checks ──────────────────────────────────────────────────────
+
+function blockedResult(ctx, match, vector, skipRemainingChecks) {
+  return {
+    blocked: true,
+    match,
+    vector,
+    message: ctx.fmt(match, vector),
+    skipRemainingChecks,
+  };
+}
+
+/**
+ * Vector 1b: codex apply_patch (write-kind, no file_path field). The
+ * Edit/Write matcher lanes alias-fire for apply_patch on codex, but the
+ * payload carries a raw patch instead of file_path. Check EVERY parsed
+ * target; a multi-file patch touching one protected file blocks.
+ * Unparseable targets fail OPEN here — these are advisory workflow
+ * protectors, not the heimdall security boundary (design C6).
+ */
+function checkApplyPatchVector(ctx, toolInput, hookData) {
+  for (const resolved of resolveApplyPatchTargets(toolInput?.command, hookData)) {
+    const match = ctx.isProtected(resolved);
+    if (match && !ctx.isExempt('apply_patch', toolInput, hookData)) {
+      return blockedResult(ctx, match, 'apply_patch', true);
+    }
+  }
+  return { blocked: false, skipRemainingChecks: true };
+}
+
+/** Vector 1: Edit / Write / MultiEdit. */
+function checkFileToolVector(ctx, toolName, toolInput, hookData) {
+  const filePath = toolInput?.file_path || '';
+  if (!filePath) return { blocked: false, skipRemainingChecks: true };
+
+  const match = ctx.isProtected(filePath);
+  if (match && !ctx.isExempt(toolName, toolInput, hookData)) {
+    return blockedResult(ctx, match, toolName, true);
+  }
+  return { blocked: false, skipRemainingChecks: true };
+}
+
+/**
+ * Vector 2: Bash shell writes. Extract tokens, then normalize by stripping
+ * operator prefixes — handles ">>.state.json", "of=.state.json",
+ * ">.state.json", "x>>.state.json". Returns null when no token matches.
+ */
+function checkBashShellWrite(ctx, cmd, toolInput, hookData) {
+  const hasShellWrite = BASH_WRITE_OPS.test(cmd);
+  const hasNodeWrite = NODE_FS_WRITES.test(cmd);
+  if (!hasShellWrite && !hasNodeWrite) return null;
+
+  for (const token of extractTokens(cmd)) {
+    const match = ctx.isProtected(token);
+    if (match && !ctx.isExempt('Bash', toolInput, hookData)) {
+      return blockedResult(ctx, match, 'Bash', false);
+    }
+  }
+  return null;
+}
+
+/** Vectors 2–4 for Bash tool calls. */
+function checkBashVector(ctx, toolInput, hookData) {
+  const cmd = String(toolInput?.command || '');
+
+  const shellResult = checkBashShellWrite(ctx, cmd, toolInput, hookData);
+  if (shellResult) return shellResult;
+
+  // Vector 3: script bypass — node/python/etc script with write ops.
+  const scriptResult = ctx.checkScriptBypass(cmd, toolInput, hookData);
+  if (scriptResult.blocked) return scriptResult;
+
+  // Vector 4: inline interpreter bypass — python3 -c, ruby -e, perl -e.
+  const inlineResult = ctx.checkInlineInterpreterBypass(cmd, toolInput, hookData);
+  if (inlineResult.blocked) return inlineResult;
+
+  return { blocked: false, skipRemainingChecks: false };
+}
+
 // ─── Factory ────────────────────────────────────────────────────────────────
 
 /**
@@ -117,6 +178,14 @@ function basenameProtector(basenames) {
  *   Custom block message formatter. Receives the matched label and vector ('Edit'|'Bash'|etc).
  *   Defaults to a generic message.
  *
+ * @param {string[]} [opts.trustedScriptRoots]
+ *   Scripts whose realpath is inside any of these roots skip Vector 3
+ *   (script-content bypass detection). This is how a hook tells the
+ *   protector "these scripts are mine — they're the legitimate writers of
+ *   the protected files." Without this, the hook deadlocks: it can't run
+ *   its own orchestrator because the orchestrator's source mentions the
+ *   protected basenames and contains write ops.
+ *
  * @returns {{ check: (toolName: string, toolInput: object, hookData?: object) => CheckResult }}
  *
  * @typedef {object} CheckResult
@@ -128,21 +197,6 @@ function basenameProtector(basenames) {
  */
 function createFileProtector(opts) {
   const { isProtected, isExempt = () => false, formatMessage, trustedScriptRoots = [] } = opts;
-  // Resolve trusted script roots once. Scripts whose realpath is inside any of
-  // these roots skip Vector 3 (script-content bypass detection). This is how a
-  // hook tells the protector "these scripts are mine — they're the legitimate
-  // writers of the protected files." Without this, the hook deadlocks: it
-  // can't run its own orchestrator because the orchestrator's source mentions
-  // the protected basenames and contains write ops.
-  const resolvedTrustedRoots = trustedScriptRoots
-    .map((r) => {
-      try {
-        return fs.realpathSync(r);
-      } catch {
-        return null;
-      }
-    })
-    .filter(Boolean);
 
   const defaultMessage = (match, vector) =>
     `BLOCKED: Direct ${vector} to ${match} is not allowed.\n` +
@@ -150,314 +204,40 @@ function createFileProtector(opts) {
 
   const fmt = formatMessage || defaultMessage;
 
+  const bypass = createBypassCheckers({ isProtected, isExempt, fmt, trustedScriptRoots });
+
+  const ctx = {
+    isProtected,
+    isExempt,
+    fmt,
+    checkScriptBypass: bypass.checkScriptBypass,
+    checkInlineInterpreterBypass: bypass.checkInlineInterpreterBypass,
+  };
+
   function check(toolName, toolInput, hookData) {
-    // ── Vector 1b: codex apply_patch (write-kind, no file_path field) ─────
-    // The Edit/Write matcher lanes alias-fire for apply_patch on codex, but
-    // the payload carries a raw patch instead of file_path. Check EVERY
-    // parsed target; a multi-file patch touching one protected file blocks.
-    // Unparseable targets (ok:false) fail OPEN here — these are advisory
-    // workflow protectors, not the heimdall security boundary (design C6).
-    if (toolName === 'apply_patch') {
-      const cwd = (hookData && hookData.cwd) || process.cwd();
-      for (const target of parseApplyPatch(toolInput?.command)) {
-        if (!target.ok || !target.path) continue;
-        const resolved = path.isAbsolute(target.path)
-          ? target.path
-          : path.resolve(cwd, target.path);
-        const match = isProtected(resolved);
-        if (match && !isExempt(toolName, toolInput, hookData)) {
-          return {
-            blocked: true,
-            match,
-            vector: 'apply_patch',
-            message: fmt(match, 'apply_patch'),
-            skipRemainingChecks: true,
-          };
-        }
-      }
-      return { blocked: false, skipRemainingChecks: true };
-    }
-
-    // ── Vector 1: Edit / Write / MultiEdit ────────────────────────────────
+    if (toolName === 'apply_patch') return checkApplyPatchVector(ctx, toolInput, hookData);
     if (FILE_WRITE_TOOLS.has(toolName)) {
-      const filePath = toolInput?.file_path || '';
-      if (!filePath) return { blocked: false, skipRemainingChecks: true };
-
-      const match = isProtected(filePath);
-      if (match && !isExempt(toolName, toolInput, hookData)) {
-        return {
-          blocked: true,
-          match,
-          vector: toolName,
-          message: fmt(match, toolName),
-          skipRemainingChecks: true,
-        };
-      }
-      return { blocked: false, skipRemainingChecks: true };
+      return checkFileToolVector(ctx, toolName, toolInput, hookData);
     }
-
-    // ── Vector 2: Bash shell writes ───────────────────────────────────────
-    if (toolName === 'Bash') {
-      const cmd = String(toolInput?.command || '');
-      const hasShellWrite = BASH_WRITE_OPS.test(cmd);
-      const hasNodeWrite = NODE_FS_WRITES.test(cmd);
-
-      if (hasShellWrite || hasNodeWrite) {
-        // Extract tokens, then normalize by stripping operator prefixes
-        // Handles: ">>.state.json", "of=.state.json", ">.state.json", "x>>.state.json"
-        const tokens = extractTokens(cmd);
-        for (const token of tokens) {
-          const match = isProtected(token);
-          if (match && !isExempt(toolName, toolInput, hookData)) {
-            return {
-              blocked: true,
-              match,
-              vector: 'Bash',
-              message: fmt(match, 'Bash'),
-              skipRemainingChecks: false,
-            };
-          }
-        }
-      }
-
-      // ── Vector 3: Script bypass — node/python/etc script with write ops ──
-      const scriptResult = checkScriptBypass(cmd, toolInput, hookData);
-      if (scriptResult.blocked) return scriptResult;
-
-      // ── Vector 4: Inline interpreter bypass — python3 -c, ruby -e, perl -e ──
-      const inlineResult = checkInlineInterpreterBypass(cmd, toolInput, hookData);
-      if (inlineResult.blocked) return inlineResult;
-    }
-
+    if (toolName === 'Bash') return checkBashVector(ctx, toolInput, hookData);
     return { blocked: false, skipRemainingChecks: false };
   }
 
-  /**
-   * Extract script paths from a Bash command (node script.js, python script.py, etc.)
-   * @param {string} cmd
-   * @returns {string[]}
-   */
-  function extractScriptPaths(cmd) {
-    const scripts = [];
-    // Reset lastIndex since INTERPRETER_PATTERN has /g flag
-    INTERPRETER_PATTERN.lastIndex = 0;
-    let m;
-    while ((m = INTERPRETER_PATTERN.exec(cmd)) !== null) {
-      if (m[1] && !m[1].startsWith('-')) scripts.push(m[1]);
-    }
-    return scripts;
-  }
-
-  /**
-   * Vector 3: Script bypass detection.
-   * Checks if a Bash command runs a script that contains write operations
-   * AND references protected file names in its source.
-   *
-   * @param {string} cmd — Bash command string
-   * @param {object} toolInput
-   * @param {object} [hookData]
-   * @returns {CheckResult}
-   */
-  /**
-   * Check if a script path is a trusted test/mock file (GH-191).
-   * Only trusts scripts under __tests__/ or __mocks__/ directories,
-   * and verifies the path resolves within the current repo/worktree root.
-   * Suffix-based patterns (.test.js, .spec.js) are intentionally excluded
-   * as they could be exploited by placing malicious scripts with test suffixes.
-   *
-   * @param {string} scriptPath
-   * @returns {boolean}
-   */
-  // Cache repo root (lazy init) to avoid calling git rev-parse on every invocation
-  let _cachedRepoRoot;
-  function getRepoRoot() {
-    if (_cachedRepoRoot !== undefined) return _cachedRepoRoot;
-    try {
-      _cachedRepoRoot = require('child_process')
-        .execFileSync('git', ['rev-parse', '--show-toplevel'], { encoding: 'utf8' })
-        .trim();
-    } catch {
-      _cachedRepoRoot = process.cwd();
-    }
-    return _cachedRepoRoot;
-  }
-
-  function isTrustedTestScript(scriptPath) {
-    // Resolve symlinks for safety — if realpathSync fails (file doesn't exist), untrusted
-    let resolved;
-    try {
-      resolved = fs.realpathSync(scriptPath);
-    } catch {
-      return false;
-    }
-    // Script must resolve within the repo root
-    const repoRoot = getRepoRoot();
-    const rel = path.relative(repoRoot, resolved);
-    if (rel.startsWith('..') || path.isAbsolute(rel)) return false;
-    // Check that __tests__ or __mocks__ appears as a path segment
-    const segments = rel.split(path.sep);
-    if (!segments.includes('__tests__') && !segments.includes('__mocks__')) return false;
-    // Only trust git-tracked files — newly-created/untracked scripts are not exempt
-    try {
-      require('child_process').execFileSync('git', ['ls-files', '--error-unmatch', '--', rel], {
-        encoding: 'utf8',
-        cwd: repoRoot,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-      return true;
-    } catch {
-      return false; // Not tracked by git — untrusted
-    }
-  }
-
-  function isUnderTrustedRoot(scriptPath) {
-    if (resolvedTrustedRoots.length === 0) return false;
-    let resolved;
-    try {
-      resolved = fs.realpathSync(scriptPath);
-    } catch {
-      return false;
-    }
-    for (const root of resolvedTrustedRoots) {
-      const rel = path.relative(root, resolved);
-      if (!rel.startsWith('..') && !path.isAbsolute(rel)) return true;
-    }
-    return false;
-  }
-
-  function checkScriptBypass(cmd, toolInput, hookData) {
-    const scripts = extractScriptPaths(cmd);
-    for (const scriptPath of scripts) {
-      // Skip Vector 3 for trusted in-repo test/mock files (GH-191 + GH-141).
-      // Scoped to __tests__/__mocks__ dirs within repo root; symlink-safe via realpathSync.
-      // Resolves the GH-141 false positive: `node --test workflow-state.test.js` is no longer
-      // blocked because the test file is in __tests__/, within the repo root, and git-tracked.
-      if (isTrustedTestScript(scriptPath)) continue;
-      // Skip Vector 3 for scripts inside an explicitly trusted root (e.g. the
-      // plugin's own orchestrator scripts). The hook that owns the protected
-      // basenames declares its own scripts trusted; otherwise the orchestrator
-      // can't run itself.
-      if (isUnderTrustedRoot(scriptPath)) continue;
-
-      let content;
-      try {
-        if (!fs.existsSync(scriptPath)) continue;
-        content = fs.readFileSync(scriptPath, 'utf8');
-      } catch {
-        continue; // Can't read script → fail-open
-      }
-
-      // Only check scripts that have write operations
-      if (!SCRIPT_WRITE_OPS.test(content)) continue;
-
-      // Check if script content references any protected file
-      // We scan the script source for any token that isProtected matches
-      const tokens = content.match(/[^\s"'`|;&(){}[\],]+/g) || [];
-      for (const token of tokens) {
-        const match = isProtected(token);
-        if (match && !isExempt('Bash', toolInput, hookData)) {
-          return {
-            blocked: true,
-            match,
-            vector: 'Bash(script)',
-            message: fmt(match, `Bash(script: ${path.basename(scriptPath)})`),
-            skipRemainingChecks: false,
-          };
-        }
-      }
-    }
-    return { blocked: false, skipRemainingChecks: false };
-  }
-
-  /**
-   * Vector 4: Inline interpreter bypass detection.
-   * Checks if a Bash command uses an inline interpreter (python3 -c, ruby -e, perl -e)
-   * to write to protected files.
-   *
-   * @param {string} cmd — Bash command string
-   * @param {object} toolInput
-   * @param {object} [hookData]
-   * @returns {CheckResult}
-   */
-  /**
-   * Extract tokens from a string, splitting on whitespace, quotes, shell operators,
-   * redirect operators, and '=' (for dd of=path patterns).
-   * @param {string} str
-   * @returns {string[]}
-   */
-  function extractTokens(str) {
-    const rawTokens = str.match(/[^\s"'|;&()]+/g) || [];
-    return rawTokens.flatMap((t) => {
-      const redirectSplit = t.split(/>{1,2}|</);
-      return redirectSplit.flatMap((part) => part.split('=')).filter(Boolean);
-    });
-  }
-
-  function extractInlineCode(cmd, interpreterMatch) {
-    const flagIdx = interpreterMatch.index;
-    const afterFlag = cmd.slice(flagIdx);
-    const quotedMatch = afterFlag.match(/\s-[ce]\s+(["'])([\s\S]*?)\1/);
-    const unquotedMatch =
-      !quotedMatch && afterFlag.match(/\s-[ce]\s+(.*?)(?:\s*(?:\||;|&&|\|\|)\s|$)/s);
-    return quotedMatch ? quotedMatch[2] : unquotedMatch ? unquotedMatch[1] : cmd;
-  }
-
-  function checkInlineMatch(inlineCode, bareInterpreter, toolInput, hookData) {
-    const tokens = extractTokens(inlineCode);
-    const hasWriteOp = INLINE_INTERPRETER_WRITES.test(inlineCode);
-    for (const token of tokens) {
-      const match = isProtected(token);
-      if (match && hasWriteOp && !isExempt('Bash', toolInput, hookData)) {
-        return {
-          blocked: true,
-          match,
-          vector: `Bash(${bareInterpreter})`,
-          message: fmt(match, `Bash(${bareInterpreter})`),
-          skipRemainingChecks: false,
-        };
-      }
-    }
-    if (
-      BASE64_EVASION_PATTERN.test(inlineCode) &&
-      hasWriteOp &&
-      !isExempt('Bash', toolInput, hookData)
-    ) {
-      return {
-        blocked: true,
-        match: '(base64-encoded)',
-        vector: `Bash(${bareInterpreter} base64)`,
-        message: fmt('(base64-encoded)', `Bash(${bareInterpreter} base64)`),
-        skipRemainingChecks: false,
-      };
-    }
-    return null;
-  }
-
-  function checkInlineInterpreterBypass(cmd, toolInput, hookData) {
-    const globalPattern = new RegExp(INLINE_INTERPRETER_PATTERN.source, 'g');
-    const allMatches = [...cmd.matchAll(globalPattern)];
-    if (allMatches.length === 0) return { blocked: false, skipRemainingChecks: false };
-
-    for (const interpreterMatch of allMatches) {
-      const bareInterpreter = interpreterMatch[0].trim().replace(/^\/usr\/bin\/env\s+/, '');
-      const inlineCode = extractInlineCode(cmd, interpreterMatch);
-      const result = checkInlineMatch(inlineCode, bareInterpreter, toolInput, hookData);
-      if (result) return result;
-    }
-    return { blocked: false, skipRemainingChecks: false };
-  }
-
-  return { check, checkScriptBypass, checkInlineInterpreterBypass };
+  return {
+    check,
+    checkScriptBypass: bypass.checkScriptBypass,
+    checkInlineInterpreterBypass: bypass.checkInlineInterpreterBypass,
+  };
 }
 
 module.exports = {
   FILE_WRITE_TOOLS,
   BASH_WRITE_OPS,
   NODE_FS_WRITES,
-  SCRIPT_WRITE_OPS,
-  INLINE_INTERPRETER_PATTERN,
-  INLINE_INTERPRETER_WRITES,
-  BASE64_EVASION_PATTERN,
+  SCRIPT_WRITE_OPS: scriptBypass.SCRIPT_WRITE_OPS,
+  INLINE_INTERPRETER_PATTERN: scriptBypass.INLINE_INTERPRETER_PATTERN,
+  INLINE_INTERPRETER_WRITES: scriptBypass.INLINE_INTERPRETER_WRITES,
+  BASE64_EVASION_PATTERN: scriptBypass.BASE64_EVASION_PATTERN,
   buildProtectedBasenames,
   basenameProtector,
   createFileProtector,

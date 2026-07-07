@@ -14,22 +14,13 @@
 
 const fs = require('fs');
 const path = require('path');
-const { logHookError } = require(path.join(__dirname, '..', 'hook-error-log'));
-const { resolvePluginRootHonouringEnv } = require('../../work/lib/resolve-plugin-root');
+const { installFailOpenHandlers, resolveHookPluginRoot, runHookMain } = require('./hook-bootstrap');
 // Vendored dual-runtime adapter: codex installs drop the `workflows ->
 // scripts/workflows` symlink from the cache, so the historical PLUGIN_ROOT
 // path build needs a real-path fallback there (design C10).
 const { getRuntime } = require(path.join(__dirname, '..', 'runtime'));
 
-// Fail-open: unexpected errors should never block unrelated commands
-process.on('uncaughtException', (err) => {
-  logHookError(__filename, err);
-  process.exit(0);
-});
-process.on('unhandledRejection', (err) => {
-  logHookError(__filename, err);
-  process.exit(0);
-});
+installFailOpenHandlers(__filename);
 
 // Resolve via the shared helper. Fall back to the legacy chain only when the
 // helper cannot find a plugin root (unrecognized install layout).
@@ -37,8 +28,7 @@ process.on('unhandledRejection', (err) => {
 // plugin-scripts root. Use the env-honouring variant: the dev-check.sh path is
 // computed relative to PLUGIN_ROOT, so the user's CLAUDE_PLUGIN_ROOT must win
 // over an unrelated probe when the env value doesn't match a known layout.
-const PLUGIN_ROOT =
-  resolvePluginRootHonouringEnv(__dirname, 3) || path.resolve(__dirname, '..', '..', '..');
+const PLUGIN_ROOT = resolveHookPluginRoot(__dirname, 3);
 
 /**
  * Detection strategy: search for pnpm + blocked script name anywhere in the
@@ -140,7 +130,4 @@ async function main() {
   process.exit(2);
 }
 
-main().catch((err) => {
-  logHookError(__filename, err);
-  process.exit(0);
-});
+runHookMain(main, __filename);

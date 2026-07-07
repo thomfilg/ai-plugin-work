@@ -24,6 +24,14 @@ function str(value) {
   return typeof value === 'string' && value !== '' ? value : null;
 }
 
+function textOrNull(value) {
+  return typeof value === 'string' ? value : null;
+}
+
+function asObject(value) {
+  return value && typeof value === 'object' ? value : null;
+}
+
 function resolveEvent(raw, opts) {
   return (
     (opts && opts.event) || str(raw.hook_event_name) || str(process.env.CLAUDE_HOOK_TYPE) || null
@@ -93,6 +101,27 @@ function resolveSessionId(raw) {
   );
 }
 
+function resolveShellCommand(toolKind, toolInput) {
+  if (toolKind !== 'shell' || !toolInput) return null;
+  return textOrNull(toolInput.command);
+}
+
+/** Tool-facing slice of the canonical event (kind, input, targets, response). */
+function resolveToolFields(src, runtime) {
+  const rawToolName = str(src.tool_name);
+  const toolKind = rawToolName ? canonicalToolKind(rawToolName, runtime) : null;
+  const toolInput = asObject(src.tool_input);
+  return {
+    rawToolName,
+    toolKind,
+    toolInput,
+    shellCommand: resolveShellCommand(toolKind, toolInput),
+    writeTargets: rawToolName ? extractWriteTargets(rawToolName, toolInput || {}, runtime) : [],
+    toolResponseText: src.tool_response == null ? null : responseText(src.tool_response),
+    toolExitCode: resolveToolExitCode(src),
+  };
+}
+
 /**
  * Normalize a raw hook payload into a CanonicalHookEvent.
  *
@@ -100,15 +129,8 @@ function resolveSessionId(raw) {
  * @param {{event?: string, runtime?: string}} [opts]
  */
 function normalizeHookPayload(raw, opts = {}) {
-  const src = raw && typeof raw === 'object' ? raw : {};
+  const src = asObject(raw) || {};
   const runtime = opts.runtime || 'claude';
-  const rawToolName = str(src.tool_name);
-  const toolKind = rawToolName ? canonicalToolKind(rawToolName, runtime) : null;
-  const toolInput = src.tool_input && typeof src.tool_input === 'object' ? src.tool_input : null;
-  const shellCommand =
-    toolKind === 'shell' && toolInput && typeof toolInput.command === 'string'
-      ? toolInput.command
-      : null;
 
   return {
     runtime,
@@ -118,18 +140,11 @@ function normalizeHookPayload(raw, opts = {}) {
     cwd: str(src.cwd) || process.cwd(),
     transcriptPath: str(src.transcript_path),
     permissionMode: str(src.permission_mode),
-    prompt: typeof src.prompt === 'string' ? src.prompt : null,
-    rawToolName,
-    toolKind,
-    toolInput,
-    shellCommand,
-    writeTargets: rawToolName ? extractWriteTargets(rawToolName, toolInput || {}, runtime) : [],
-    toolResponseText: src.tool_response == null ? null : responseText(src.tool_response),
-    toolExitCode: resolveToolExitCode(src),
+    prompt: textOrNull(src.prompt),
+    ...resolveToolFields(src, runtime),
     agent: resolveAgent(src),
     stopHookActive: src.stop_hook_active === true,
-    lastAssistantText:
-      typeof src.last_assistant_message === 'string' ? src.last_assistant_message : null,
+    lastAssistantText: textOrNull(src.last_assistant_message),
     source: str(src.source),
     trigger: str(src.trigger),
     native: src,

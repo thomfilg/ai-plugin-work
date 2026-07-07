@@ -11,32 +11,14 @@
 
 const fs = require('fs');
 const path = require('path');
-const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
+const { installProcessGuards, loadConfigOrNull } = require(
+  path.join(__dirname, '..', '..', 'lib', 'hook-guards')
+);
 
 let didBlock = false;
-process.on('uncaughtException', (err) => {
-  logHookError(__filename, err);
-  process.exit(didBlock ? 2 : 0);
-});
-process.on('unhandledRejection', (err) => {
-  logHookError(__filename, err);
-  process.exit(didBlock ? 2 : 0);
-});
+installProcessGuards(__filename, () => (didBlock ? 2 : 0));
 
-let config;
-try {
-  config = require('../../lib/config');
-} catch (err) {
-  if (
-    err &&
-    err.code === 'MODULE_NOT_FOUND' &&
-    /['"]\.\.\/\.\.\/lib\/config['"]/.test(err.message)
-  ) {
-    config = null;
-  } else {
-    throw err;
-  }
-}
+const config = loadConfigOrNull();
 if (!config) process.exit(0);
 
 // Hook payload from stdin: the TOOL_INPUT env channel is legacy (kept first

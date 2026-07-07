@@ -114,6 +114,24 @@ function briefGateStep(add, s, ctx) {
 }
 
 /**
+ * Defensive type guard for the resolutions payload: reject `undefined`/`null`,
+ * stray primitives (number, string, boolean, symbol, bigint), and empty
+ * containers before doing any I/O. Only a non-empty Map or plain-object
+ * payload can carry resolution data; anything else is a caller bug (or a
+ * cancellation) and must be a silent no-op — the next planner pass will
+ * re-prompt.
+ *
+ * @param {Map<string,string>|Record<string,string>|null|undefined} resolutions
+ * @returns {boolean} true if the payload carries at least one resolution.
+ */
+function hasResolutionData(resolutions) {
+  if (resolutions === undefined || resolutions === null) return false;
+  if (typeof resolutions !== 'object') return false;
+  const size = resolutions instanceof Map ? resolutions.size : Object.keys(resolutions).length;
+  return size > 0;
+}
+
+/**
  * Post-resolve handler — invoked by the orchestrator after AskUserQuestion
  * returns. Rewrites `brief.md` in place with the user-supplied resolutions,
  * delegating all parsing/idempotency/injection-escape invariants to
@@ -128,20 +146,7 @@ function briefGateStep(add, s, ctx) {
  * @returns {boolean} true if brief.md was rewritten, false if skipped.
  */
 function applyBriefResolutions(briefPath, resolutions) {
-  if (resolutions === undefined || resolutions === null) return false;
-  // Defensive type guard: reject stray primitives (number, string, boolean,
-  // symbol, bigint) before doing any I/O. Only Map or plain-object payloads
-  // can carry resolution data; anything else is a caller bug and must be a
-  // silent no-op — the next planner pass will re-prompt.
-  if (typeof resolutions !== 'object') return false;
-  if (resolutions instanceof Map && resolutions.size === 0) return false;
-  if (
-    !(resolutions instanceof Map) &&
-    typeof resolutions === 'object' &&
-    Object.keys(resolutions).length === 0
-  ) {
-    return false;
-  }
+  if (!hasResolutionData(resolutions)) return false;
 
   let markdown;
   try {

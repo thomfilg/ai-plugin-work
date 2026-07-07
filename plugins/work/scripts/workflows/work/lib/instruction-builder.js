@@ -18,6 +18,78 @@ const { T, renderDelegateForRuntime, getRuntime } = require(
   path.join(__dirname, '..', '..', 'lib', 'instruction-vocab')
 );
 
+/** `<step> <reason>` trimmed and capped at 80 chars — the delegate description. */
+function shortDescription(entry) {
+  return `${entry.step} ${entry.reason || ''}`.trim().slice(0, 80);
+}
+
+function buildSkillDelegate(entry) {
+  const skillMatch = (entry.agentPrompt || '').match(/^\/([\w-]+)/);
+  return {
+    type: 'skill',
+    name: skillMatch ? skillMatch[1] : entry.command,
+    prompt: entry.agentPrompt,
+  };
+}
+
+function buildBashDelegate(entry) {
+  return {
+    type: 'bash',
+    // NOTE: unlike the other delegate kinds this description is NOT capped
+    // at 80 chars — preserved verbatim from the historical literal.
+    description: `${entry.step} ${entry.reason || ''}`.trim(),
+    command: entry.agentPrompt || entry.command,
+  };
+}
+
+// GH-539: the session agent authors the commit message and commits directly
+// (no subagent). The `prompt` is the directive the orchestrator executes.
+function buildCommitDelegate(entry) {
+  return {
+    type: 'commit',
+    description: shortDescription(entry),
+    prompt: entry.agentPrompt || entry.command,
+  };
+}
+
+/** Simple single-command prompts run as "bash" instead of spawning an agent. */
+function isSingleCommandPrompt(entry, prompt) {
+  return (
+    entry.agentType === 'general-purpose' &&
+    /^(Fetch|Run|Execute|Check)\b/.test(prompt) &&
+    /\bgh\s|\bgit\s|\bnode\s|\bcurl\s/.test(prompt) &&
+    prompt.split('\n').filter((l) => l.trim()).length <= 3
+  );
+}
+
+// Task-based (general-purpose, brief-writer, spec-writer, commit-writer, etc.)
+// Detect simple single-command prompts and emit as "bash" instead of spawning an agent
+function buildTaskDelegate(entry, rt) {
+  const prompt = entry.agentPrompt || '';
+  if (isSingleCommandPrompt(entry, prompt)) {
+    return {
+      type: 'bash',
+      description: shortDescription(entry),
+      command: prompt,
+    };
+  }
+  return {
+    type: 'task',
+    agentType: entry.agentType,
+    description: shortDescription(entry),
+    prompt,
+    note: T('delegate.task.note', {}, rt.name),
+  };
+}
+
+/** Delegation block — dispatch on entry.agentType. */
+function buildDelegate(entry, rt) {
+  if (entry.agentType === 'skill') return buildSkillDelegate(entry);
+  if (entry.agentType === 'Bash' || entry.agentType === 'bash') return buildBashDelegate(entry);
+  if (entry.agentType === 'inline-commit') return buildCommitDelegate(entry);
+  return buildTaskDelegate(entry, rt);
+}
+
 /**
  * Build a work_instruction from a plan entry.
  * @param {object} entry - Plan entry with step, agentType, agentPrompt, etc.
@@ -38,58 +110,9 @@ function buildInstruction(entry, stateCtx) {
     instruction.preCommands = entry.preCommands;
   }
 
-  // Delegation block
-  if (entry.agentType === 'skill') {
-    const skillMatch = (entry.agentPrompt || '').match(/^\/([\w-]+)/);
-    instruction.delegate = {
-      type: 'skill',
-      name: skillMatch ? skillMatch[1] : entry.command,
-      prompt: entry.agentPrompt,
-    };
-  } else if (entry.agentType === 'Bash' || entry.agentType === 'bash') {
-    instruction.delegate = {
-      type: 'bash',
-      description: `${entry.step} ${entry.reason || ''}`.trim(),
-      command: entry.agentPrompt || entry.command,
-    };
-  } else if (entry.agentType === 'inline-commit') {
-    // GH-539: the session agent authors the commit message and commits directly
-    // (no subagent). The `prompt` is the directive the orchestrator executes.
-    instruction.delegate = {
-      type: 'commit',
-      description: `${entry.step} ${entry.reason || ''}`.trim().slice(0, 80),
-      prompt: entry.agentPrompt || entry.command,
-    };
-  } else {
-    // Task-based (general-purpose, brief-writer, spec-writer, commit-writer, etc.)
-    // Detect simple single-command prompts and emit as "bash" instead of spawning an agent
-    const prompt = entry.agentPrompt || '';
-    const isSingleCommand =
-      entry.agentType === 'general-purpose' &&
-      /^(Fetch|Run|Execute|Check)\b/.test(prompt) &&
-      /\bgh\s|\bgit\s|\bnode\s|\bcurl\s/.test(prompt) &&
-      prompt.split('\n').filter((l) => l.trim()).length <= 3;
-
-    if (isSingleCommand) {
-      instruction.delegate = {
-        type: 'bash',
-        description: `${entry.step} ${entry.reason || ''}`.trim().slice(0, 80),
-        command: prompt,
-      };
-    } else {
-      instruction.delegate = {
-        type: 'task',
-        agentType: entry.agentType,
-        description: `${entry.step} ${entry.reason || ''}`.trim().slice(0, 80),
-        prompt,
-        note: T('delegate.task.note', {}, rt.name),
-      };
-    }
-  }
-
   // Runtime-correct delegate rendering (claude: same reference back — inert).
-  // Every branch above sets a delegate; renderDelegate passes falsy through.
-  instruction.delegate = renderDelegateForRuntime(instruction.delegate, rt);
+  // Every buildDelegate branch returns a delegate; renderDelegate passes falsy through.
+  instruction.delegate = renderDelegateForRuntime(buildDelegate(entry, rt), rt);
 
   return instruction;
 }

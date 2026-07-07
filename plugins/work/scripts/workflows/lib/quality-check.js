@@ -132,6 +132,74 @@ function resolveQualityCommand(repoRoot) {
 }
 
 /**
+ * For standard-scripts, run each individually to get per-script failure info.
+ * Use execFileSync so the script name and pnpm path are passed as argv tokens
+ * — no shell interpolation, no command-injection surface from env-derived
+ * paths or unusual script names.
+ */
+function runStandardScripts({ scripts, repoRoot, timeout, strategy, command }) {
+  const failures = [];
+  let allOutput = '';
+
+  for (const script of scripts) {
+    try {
+      const output = execFileSync('pnpm', ['run', script], {
+        encoding: 'utf8',
+        timeout,
+        cwd: repoRoot,
+        stdio: ['pipe', 'pipe', 'pipe'],
+      });
+      allOutput += output;
+    } catch (err) {
+      const output = (err.stdout || '') + '\n' + (err.stderr || '');
+      allOutput += output;
+      failures.push({ script, output: output.trim().split('\n').slice(-15).join('\n') });
+    }
+  }
+
+  if (failures.length > 0) {
+    const details = failures.map((f) => `[${f.script}]\n${f.output}`).join('\n\n');
+    return {
+      success: false,
+      output: `${failures.length}/${scripts.length} check(s) failed:\n${details}`,
+      strategy,
+      command,
+    };
+  }
+
+  return { success: true, output: allOutput, strategy, command };
+}
+
+/**
+ * For Tier 1 and Tier 2: run via execFileSync with a strategy-derived argv.
+ * The `command` string is preserved for the return value (so callers see what
+ * ran), but execution uses an explicit file+args pair so env-derived paths
+ * like BUNDLED_DEV_CHECK are never re-parsed by a shell.
+ */
+function runDevCheckCommand({ repoRoot, timeout, strategy, command }) {
+  const spec =
+    strategy === 'project-dev-check'
+      ? { file: 'pnpm', args: ['dev:check'] }
+      : { file: BUNDLED_DEV_CHECK, args: [] };
+  try {
+    const output = execFileSync(spec.file, spec.args, {
+      encoding: 'utf8',
+      timeout,
+      cwd: repoRoot,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    return { success: true, output: output.trim(), strategy, command };
+  } catch (err) {
+    const stdout = err.stdout || '';
+    const stderr = err.stderr || '';
+    const combined = (stdout + '\n' + stderr).trim();
+
+    return { success: false, output: combined, strategy, command };
+  }
+}
+
+/**
  * Run quality checks with the 3-tier fallback.
  *
  * @param {Object} options
@@ -154,67 +222,11 @@ function runQualityCheck(options = {}) {
     };
   }
 
-  // For standard-scripts, run each individually to get per-script failure info.
-  // Use execFileSync so the script name and pnpm path are passed as argv tokens
-  // — no shell interpolation, no command-injection surface from env-derived
-  // paths or unusual script names.
   if (strategy === 'standard-scripts') {
-    const failures = [];
-    let allOutput = '';
-
-    for (const script of scripts) {
-      try {
-        const output = execFileSync('pnpm', ['run', script], {
-          encoding: 'utf8',
-          timeout,
-          cwd: repoRoot,
-          stdio: ['pipe', 'pipe', 'pipe'],
-        });
-        allOutput += output;
-      } catch (err) {
-        const output = (err.stdout || '') + '\n' + (err.stderr || '');
-        allOutput += output;
-        failures.push({ script, output: output.trim().split('\n').slice(-15).join('\n') });
-      }
-    }
-
-    if (failures.length > 0) {
-      const details = failures.map((f) => `[${f.script}]\n${f.output}`).join('\n\n');
-      return {
-        success: false,
-        output: `${failures.length}/${scripts.length} check(s) failed:\n${details}`,
-        strategy,
-        command,
-      };
-    }
-
-    return { success: true, output: allOutput, strategy, command };
+    return runStandardScripts({ scripts, repoRoot, timeout, strategy, command });
   }
 
-  // For Tier 1 and Tier 2: run via execFileSync with a strategy-derived argv.
-  // The `command` string is preserved for the return value (so callers see what
-  // ran), but execution uses an explicit file+args pair so env-derived paths
-  // like BUNDLED_DEV_CHECK are never re-parsed by a shell.
-  const spec =
-    strategy === 'project-dev-check'
-      ? { file: 'pnpm', args: ['dev:check'] }
-      : { file: BUNDLED_DEV_CHECK, args: [] };
-  try {
-    const output = execFileSync(spec.file, spec.args, {
-      encoding: 'utf8',
-      timeout,
-      cwd: repoRoot,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-
-    return { success: true, output: output.trim(), strategy, command };
-  } catch (err) {
-    const stdout = err.stdout || '';
-    const stderr = err.stderr || '';
-    const combined = (stdout + '\n' + stderr).trim();
-
-    return { success: false, output: combined, strategy, command };
-  }
+  return runDevCheckCommand({ repoRoot, timeout, strategy, command });
 }
 
 /**

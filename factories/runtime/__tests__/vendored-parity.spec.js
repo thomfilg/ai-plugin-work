@@ -58,7 +58,11 @@ describe('vendored copies match factories/runtime (sha256)', () => {
       'envconfig-lite.js',
       'index.js',
       'payload.js',
+      'tickets.js',
       'tools.js',
+      'transcript-claude.js',
+      'transcript-codex.js',
+      'transcript-shared.js',
       'transcript.js',
       'vocab.js',
     ]);

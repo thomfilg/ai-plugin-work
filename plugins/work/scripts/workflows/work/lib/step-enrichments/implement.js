@@ -103,94 +103,120 @@ function buildSelfPacedPrompt(ticket, taskNum, totalTasks, taskTitle) {
   ].join('\n');
 }
 
-module.exports = function registerImplement(register) {
-  register('implement', (entry, ctx) => {
-    if (!entry.agentPrompt) return;
+/**
+ * Extract task coordinates from the buildTaskPrompt output. The
+ * "## Current Task: Task N — title" header is always emitted by
+ * buildTaskPrompt; the "Task N of M" context block is only present when
+ * allTasks.length > 1. Parse the header for the task number so single-task
+ * plans don't produce "Task null" / "tasknull" in the dispatched prompt.
+ */
+function parseTaskHeader(agentPrompt) {
+  const headerMatch = agentPrompt.match(/## Current Task: Task (\d+)/);
+  const totalMatch = agentPrompt.match(/Task \d+ of (\d+)/);
+  const titleMatch = agentPrompt.match(/## Current Task: Task \d+ — (.+?)(?:\n|$)/);
+  return {
+    currentTaskNum: headerMatch ? parseInt(headerMatch[1], 10) : null,
+    totalTasks: totalMatch ? parseInt(totalMatch[1], 10) : null,
+    taskTitle: titleMatch ? titleMatch[1].trim() : 'Implementation',
+  };
+}
 
-    const ticket = ctx.ticket || 'TICKET';
-    const tasksDir = ctx.tasksDir || '';
-    // The "## Current Task: Task N — title" header is always emitted by
-    // buildTaskPrompt; the "Task N of M" context block is only present when
-    // allTasks.length > 1. Parse the header for the task number so single-task
-    // plans don't produce "Task null" / "tasknull" in the dispatched prompt.
-    const headerMatch = entry.agentPrompt.match(/## Current Task: Task (\d+)/);
-    const totalMatch = entry.agentPrompt.match(/Task \d+ of (\d+)/);
-    const currentTaskNum = headerMatch ? parseInt(headerMatch[1], 10) : null;
-    const totalTasks = totalMatch ? parseInt(totalMatch[1], 10) : null;
+/**
+ * Parallel dispatch path: one delegate per ready-to-run task. Returns the
+ * override instruction, or null when the plan has no parallel batch to run.
+ */
+function buildParallelOverride(ticket, tasksDir, currentTaskNum, totalTasks) {
+  if (!tasksDir || !totalTasks || totalTasks <= 1) return null;
+  const { parallelTasks } = findReadyTasks(tasksDir, currentTaskNum - 1);
+  if (parallelTasks.length <= 1) return null;
 
-    // Parallel dispatch path: one delegate per ready-to-run task.
-    if (tasksDir && totalTasks && totalTasks > 1) {
-      const { parallelTasks } = findReadyTasks(tasksDir, currentTaskNum - 1);
-      if (parallelTasks.length > 1) {
-        const { parseTasks: parseFullTasks } = require(
-          path.join(__dirname, '..', '..', '..', 'work', 'lib', 'task-parser')
-        );
-        const allTasks = parseFullTasks(tasksDir) || [];
+  const { parseTasks: parseFullTasks } = require(
+    path.join(__dirname, '..', '..', '..', 'work', 'lib', 'task-parser')
+  );
+  const allTasks = parseFullTasks(tasksDir) || [];
 
-        const rt = getRuntime();
-        const delegates = parallelTasks.map((num) => {
-          const task = allTasks.find((t) => t.num === num);
-          const title = task?.title || 'Implementation';
-          const agentType = resolveAgentType(tasksDir, num);
-          return renderDelegateForRuntime(
-            {
-              type: 'task',
-              agentType,
-              description: `Task ${num}/${totalTasks} — ${title}`,
-              prompt: buildSelfPacedPrompt(ticket, num, totalTasks, title),
-              note: T('delegate.task.note.short', {}, rt.name),
-            },
-            rt
-          );
-        });
-
-        entry._overrideInstruction = {
-          type: 'work_instruction',
-          action: 'execute',
-          state: { ticket, currentStep: 'implement', progress: `${currentTaskNum}/${totalTasks}` },
-          continue: true,
-          parallel: true,
-          delegates,
-          note: T('parallel.dispatch', { count: delegates.length }, rt.name),
-        };
-        return;
-      }
-    }
-
-    // Single-task path.
-    const taskNum = currentTaskNum != null ? String(currentTaskNum) : null;
-    const titleMatch = entry.agentPrompt.match(/## Current Task: Task \d+ — (.+?)(?:\n|$)/);
-    const taskTitle = titleMatch ? titleMatch[1].trim() : 'Implementation';
-
-    if (tasksDir) {
-      try {
-        const { markProgress } = require(path.join(__dirname, '..', 'mark-task-progress'));
-        markProgress(tasksDir);
-      } catch {
-        /* fail-open */
-      }
-    }
-
-    // Checkpoint tasks: pure verification, no TDD. Keep the dedicated path.
-    const taskType = resolveTaskType(tasksDir, taskNum);
-    if (taskType === 'checkpoint') {
-      entry.agentPrompt = [
-        `## Checkpoint: Task ${taskNum || '?'}/${totalTasks || '?'} — ${taskTitle}`,
-        '',
-        '### What to verify',
-        `Read the acceptance criteria in ${path.join(tasksDir, 'tasks.md')} (find "## Task ${taskNum}" section).`,
-        'Run each verification command listed there and confirm all pass.',
-        '',
-        '### Rules',
-        '- Do NOT write or modify any code',
-        '- Do NOT record TDD evidence',
-        '- Run the test commands and report results',
-      ].join('\n');
-      entry.agentType = 'code-checker';
-      return;
-    }
-
-    entry.agentPrompt = buildSelfPacedPrompt(ticket, taskNum, totalTasks, taskTitle);
-    entry.agentType = resolveAgentType(tasksDir, taskNum);
+  const rt = getRuntime();
+  const delegates = parallelTasks.map((num) => {
+    const task = allTasks.find((t) => t.num === num);
+    const title = task?.title || 'Implementation';
+    const agentType = resolveAgentType(tasksDir, num);
+    return renderDelegateForRuntime(
+      {
+        type: 'task',
+        agentType,
+        description: `Task ${num}/${totalTasks} — ${title}`,
+        prompt: buildSelfPacedPrompt(ticket, num, totalTasks, title),
+        note: T('delegate.task.note.short', {}, rt.name),
+      },
+      rt
+    );
   });
+
+  return {
+    type: 'work_instruction',
+    action: 'execute',
+    state: { ticket, currentStep: 'implement', progress: `${currentTaskNum}/${totalTasks}` },
+    continue: true,
+    parallel: true,
+    delegates,
+    note: T('parallel.dispatch', { count: delegates.length }, rt.name),
+  };
+}
+
+/** Checkpoint tasks: pure verification, no TDD. Keep the dedicated path. */
+function buildCheckpointPrompt(tasksDir, taskNum, totalTasks, taskTitle) {
+  return [
+    `## Checkpoint: Task ${taskNum || '?'}/${totalTasks || '?'} — ${taskTitle}`,
+    '',
+    '### What to verify',
+    `Read the acceptance criteria in ${path.join(tasksDir, 'tasks.md')} (find "## Task ${taskNum}" section).`,
+    'Run each verification command listed there and confirm all pass.',
+    '',
+    '### Rules',
+    '- Do NOT write or modify any code',
+    '- Do NOT record TDD evidence',
+    '- Run the test commands and report results',
+  ].join('\n');
+}
+
+function markProgressSafe(tasksDir) {
+  if (!tasksDir) return;
+  try {
+    const { markProgress } = require(path.join(__dirname, '..', 'mark-task-progress'));
+    markProgress(tasksDir);
+  } catch {
+    /* fail-open */
+  }
+}
+
+function enrichImplement(entry, ctx) {
+  if (!entry.agentPrompt) return;
+
+  const ticket = ctx.ticket || 'TICKET';
+  const tasksDir = ctx.tasksDir || '';
+  const { currentTaskNum, totalTasks, taskTitle } = parseTaskHeader(entry.agentPrompt);
+
+  const override = buildParallelOverride(ticket, tasksDir, currentTaskNum, totalTasks);
+  if (override) {
+    entry._overrideInstruction = override;
+    return;
+  }
+
+  // Single-task path.
+  const taskNum = currentTaskNum != null ? String(currentTaskNum) : null;
+  markProgressSafe(tasksDir);
+
+  const taskType = resolveTaskType(tasksDir, taskNum);
+  if (taskType === 'checkpoint') {
+    entry.agentPrompt = buildCheckpointPrompt(tasksDir, taskNum, totalTasks, taskTitle);
+    entry.agentType = 'code-checker';
+    return;
+  }
+
+  entry.agentPrompt = buildSelfPacedPrompt(ticket, taskNum, totalTasks, taskTitle);
+  entry.agentType = resolveAgentType(tasksDir, taskNum);
+}
+
+module.exports = function registerImplement(register) {
+  register('implement', enrichImplement);
 };

@@ -333,6 +333,20 @@ function enforceProtectorResult(result, ticketId) {
   process.exit(2);
 }
 
+/**
+ * Whether the tool call references a file named tasks.md via any vector:
+ * direct file_path, a Bash command token, or a codex apply_patch target.
+ */
+function referencesTasksMd(toolName, toolInput, cmd, hookData) {
+  const targetBasename = toolInput.file_path ? path.basename(toolInput.file_path) : '';
+  if (targetBasename === 'tasks.md') return true;
+  if (toolName === 'Bash' && bashReferencesTasksMd(cmd)) return true;
+  return (
+    toolName === 'apply_patch' &&
+    applyPatchTargets(toolInput, hookData).some((p) => path.basename(p) === 'tasks.md')
+  );
+}
+
 async function main() {
   const hookData = await readHookData();
   const toolName = hookData.tool_name;
@@ -340,12 +354,7 @@ async function main() {
   const cmd = toolInput.command || '';
 
   const ticketId = getTicketId(hookData);
-  const targetBasename = toolInput.file_path ? path.basename(toolInput.file_path) : '';
-  const hasTasksMdReference =
-    targetBasename === 'tasks.md' ||
-    (toolName === 'Bash' && bashReferencesTasksMd(cmd)) ||
-    (toolName === 'apply_patch' &&
-      applyPatchTargets(toolInput, hookData).some((p) => path.basename(p) === 'tasks.md'));
+  const hasTasksMdReference = referencesTasksMd(toolName, toolInput, cmd, hookData);
   if (
     ticketId &&
     hasTasksMdReference &&

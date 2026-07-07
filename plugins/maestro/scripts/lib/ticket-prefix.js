@@ -20,38 +20,17 @@
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { execSync } = require('node:child_process');
+
+// Vendored runtime helpers keep normalizeRemoteUrl byte-compatible with
+// ticket-provider.js (both plugins consume the same factories/runtime master)
+// so ~/.claude/ticket-providers.json keys keep matching.
+const { normalizeRemoteUrl, remoteOriginKey } = require('./runtime/tickets');
 
 const VALID_PROVIDERS = new Set(['jira', 'linear', 'github', 'none']);
 
 function providersFile() {
   const home = os.homedir() || process.env.HOME || '/home/node';
   return path.join(home, '.claude', 'ticket-providers.json');
-}
-
-/** Same normalization as ticket-provider.js so file keys keep matching. */
-function normalizeRemoteUrl(url) {
-  if (!url) return null;
-  return url
-    .replace(/^git@/, '')
-    .replace(/^https?:\/\//, '')
-    .replace(/:/, '/')
-    .replace(/\.git$/, '')
-    .toLowerCase();
-}
-
-function remoteKey(cwd) {
-  try {
-    const url = execSync('git remote get-url origin', {
-      cwd: cwd || process.cwd(),
-      encoding: 'utf-8',
-      timeout: 5000,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    }).trim();
-    return normalizeRemoteUrl(url);
-  } catch {
-    return null;
-  }
 }
 
 function configFromEnv() {
@@ -64,7 +43,7 @@ function configFromEnv() {
 }
 
 function configFromProvidersFile(cwd) {
-  const key = remoteKey(cwd);
+  const key = remoteOriginKey(cwd);
   if (!key) return null;
   try {
     const providers = JSON.parse(fs.readFileSync(providersFile(), 'utf-8'));

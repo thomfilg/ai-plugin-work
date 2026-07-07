@@ -161,17 +161,27 @@ function anyWriteTargetMatches(evt, re) {
   return targets.some((t) => t.ok && typeof t.path === 'string' && re.test(t.path));
 }
 
+/** Native tool-name leg: exact tool, '*', or an empty (tool-less) spec. */
+function toolNameApplies(tool, rawToolName) {
+  return !tool || tool === '*' || tool === rawToolName;
+}
+
+function inputPatternMatches(evt, re) {
+  if (!re) return true;
+  return re.test(JSON.stringify((evt && evt.toolInput) || {}));
+}
+
+function aliasesToApplyPatch(tool, rawToolName) {
+  return rawToolName === 'apply_patch' && CLAUDE_WRITE_TOOLS.has(tool);
+}
+
 function matchesToolSpec(spec, evt) {
   const { tool, pat } = parseToolSpec(spec);
   const re = pat ? safeRegex(pat) : null;
   if (pat && !re) return false;
   const rawToolName = (evt && evt.rawToolName) || '';
-  if (!tool || tool === '*' || tool === rawToolName) {
-    return re ? re.test(JSON.stringify((evt && evt.toolInput) || {})) : true;
-  }
-  if (rawToolName === 'apply_patch' && CLAUDE_WRITE_TOOLS.has(tool)) {
-    return re ? anyWriteTargetMatches(evt, re) : true;
-  }
+  if (toolNameApplies(tool, rawToolName)) return inputPatternMatches(evt, re);
+  if (aliasesToApplyPatch(tool, rawToolName)) return !re || anyWriteTargetMatches(evt, re);
   return false;
 }
 

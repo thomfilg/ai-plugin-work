@@ -47,15 +47,19 @@ function loadSchemaLite(schemaPath) {
   }
 }
 
+/** JSON.stringify replacer that emits plain objects with locale-sorted keys. */
+function sortObjectKeys(_key, value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const sorted = {};
+  for (const key of Object.keys(value).sort((a, b) => a.localeCompare(b))) {
+    sorted[key] = value[key];
+  }
+  return sorted;
+}
+
 /** Same key-sorted content hash as factories/envConfig/schema.js schemaHash. */
 function schemaHash(schema) {
-  const canonical = JSON.stringify(schema, (_key, value) => {
-    if (value && typeof value === 'object' && !Array.isArray(value)) {
-      return Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b)));
-    }
-    return value;
-  });
-  return crypto.createHash('sha256').update(canonical).digest('hex');
+  return crypto.createHash('sha256').update(JSON.stringify(schema, sortObjectKeys)).digest('hex');
 }
 
 const ENV_LINE_RE = /^(?:export\s+)?([A-Z][A-Z0-9_]*)=(.*)$/;
@@ -109,81 +113,89 @@ function readValuesLite({ cwd = process.cwd(), home = os.homedir(), env = proces
   return values;
 }
 
+const GIT_TOPLEVEL_ARGS = ['rev-parse', '--show-toplevel'];
+
 /** Stable per-project key: git toplevel when available, else resolved cwd. */
 function projectKey(cwd = process.cwd()) {
+  const gitOpts = { cwd, encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] };
   try {
-    return execFileSync('git', ['rev-parse', '--show-toplevel'], {
-      cwd,
-      encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    }).trim();
+    return execFileSync('git', GIT_TOPLEVEL_ARGS, gitOpts).trim();
   } catch {
     return path.resolve(cwd);
   }
 }
 
 function loadCache(cachePath) {
+  const fresh = { version: CACHE_VERSION, projects: {} };
+  let parsed = null;
   try {
-    const parsed = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
-    if (parsed && parsed.version === CACHE_VERSION && parsed.projects) return parsed;
+    parsed = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
   } catch {
-    /* first run or corrupt cache — start fresh */
+    return fresh; // first run or corrupt cache — start fresh
   }
-  return { version: CACHE_VERSION, projects: {} };
+  const usable = parsed && parsed.version === CACHE_VERSION && parsed.projects;
+  return usable ? parsed : fresh;
 }
 
 function saveCache(cachePath, cache) {
+  const serialized = `${JSON.stringify(cache, null, 2)}\n`;
   fs.mkdirSync(path.dirname(cachePath), { recursive: true });
-  const tmp = `${cachePath}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, `${JSON.stringify(cache, null, 2)}\n`);
+  const tmp = [cachePath, process.pid, 'tmp'].join('.');
+  fs.writeFileSync(tmp, serialized);
   fs.renameSync(tmp, cachePath);
+}
+
+/** Declared, non-advanced vars that are neither set nor acknowledged. */
+function missingVarNames(vars, values, known) {
+  const missing = [];
+  for (const [name, def] of Object.entries(vars)) {
+    if (def.advanced || name in values || known.has(name)) continue;
+    missing.push(name);
+  }
+  return missing;
 }
 
 /** Schema-drift detection against the shared envconfig cache (GH-70 shape). */
 function detect({ schema, cachePath, projectRoot, values }) {
   const hash = schemaHash(schema);
-  const entry = (loadCache(cachePath).projects[projectRoot] || {})[schema.plugin] || null;
-  const acknowledgedVars = entry ? entry.acknowledgedVars || [] : [];
+  const projects = loadCache(cachePath).projects;
+  const entry = (projects[projectRoot] || {})[schema.plugin] || null;
+  const acknowledgedVars = (entry && entry.acknowledgedVars) || [];
   if (entry && entry.schemaHash === hash) return { changed: false, hash, acknowledgedVars };
-  const acknowledged = new Set(acknowledgedVars);
-  const missing = Object.entries(schema.vars)
-    .filter(([name, def]) => !def.advanced && !(name in values) && !acknowledged.has(name))
-    .map(([name]) => name);
+  const missing = missingVarNames(schema.vars, values, new Set(acknowledgedVars));
   return { changed: true, firstRun: !entry, hash, missing, acknowledgedVars };
 }
 
 function markConfigured({ cachePath, projectRoot, plugin, hash, acknowledgedVars = [] }) {
   const cache = loadCache(cachePath);
-  const project = cache.projects[projectRoot] || (cache.projects[projectRoot] = {});
-  const prior = project[plugin] ? project[plugin].acknowledgedVars || [] : [];
+  if (!cache.projects[projectRoot]) cache.projects[projectRoot] = {};
+  const project = cache.projects[projectRoot];
+  const acknowledged = new Set((project[plugin] && project[plugin].acknowledgedVars) || []);
+  for (const name of acknowledgedVars) acknowledged.add(name);
   project[plugin] = {
     schemaHash: hash,
     lastChecked: new Date().toISOString(),
-    acknowledgedVars: [...new Set([...prior, ...acknowledgedVars])],
+    acknowledgedVars: [...acknowledged],
   };
   saveCache(cachePath, cache);
 }
 
 function formatMissing(missing) {
-  const shown = missing.slice(0, MAX_LISTED_VARS).join(', ');
-  const extra =
-    missing.length > MAX_LISTED_VARS ? ` (+${missing.length - MAX_LISTED_VARS} more)` : '';
-  return `${shown}${extra}`;
+  const listed = missing.slice(0, MAX_LISTED_VARS);
+  const overflow = missing.length - listed.length;
+  return overflow > 0 ? `${listed.join(', ')} (+${overflow} more)` : listed.join(', ');
 }
 
 /** Byte-identical to factories/envConfig/sessionHook.js driftLines. */
 function driftLines({ schema, result, configureCommand }) {
-  const lines = [];
-  if (result.missing.length > 0) {
-    const kind = result.firstRun ? 'unconfigured' : 'new/unset';
-    lines.push(
-      `⚙ ${schema.plugin}: ${result.missing.length} ${kind} config var(s): ${formatMissing(result.missing)}`
-    );
-    lines.push(
-      `  Run ${configureCommand} to set them up${result.firstRun ? ' (first run — it can generate your .envrc)' : ''}, or ask the assistant to walk you through it now.`
-    );
-  }
-  return lines;
+  const count = result.missing.length;
+  if (count === 0) return [];
+  const kind = result.firstRun ? 'unconfigured' : 'new/unset';
+  const firstRunHint = result.firstRun ? ' (first run — it can generate your .envrc)' : '';
+  return [
+    `⚙ ${schema.plugin}: ${count} ${kind} config var(s): ${formatMissing(result.missing)}`,
+    `  Run ${configureCommand} to set them up${firstRunHint}, or ask the assistant to walk you through it now.`,
+  ];
 }
 
 /**
@@ -212,17 +224,11 @@ function run({
 }
 
 function readStdinCwd() {
-  let payload = '';
   try {
-    payload = fs.readFileSync(0, 'utf8');
+    const payload = JSON.parse(fs.readFileSync(0, 'utf8'));
+    return typeof payload.cwd === 'string' ? payload.cwd : null;
   } catch {
-    return null;
-  }
-  try {
-    const cwd = JSON.parse(payload).cwd;
-    return typeof cwd === 'string' ? cwd : null;
-  } catch {
-    return null;
+    return null; // no stdin attached, or non-JSON stdin
   }
 }
 
@@ -230,11 +236,15 @@ function resolveHookCwd() {
   return process.env.CLAUDE_PROJECT_DIR || readStdinCwd() || process.cwd();
 }
 
+function emitNudge(options) {
+  const nudge = run({ cwd: resolveHookCwd(), ...options });
+  if (nudge) process.stdout.write(`${nudge}\n`);
+}
+
 /** Hook-entrypoint wrapper: never throws, prints, exits 0. */
 function main(options) {
   try {
-    const output = run({ cwd: resolveHookCwd(), ...options });
-    if (output) process.stdout.write(`${output}\n`);
+    emitNudge(options);
   } catch {
     /* fail-open: config nudges must never break session start */
   }
@@ -243,7 +253,8 @@ function main(options) {
 
 /** One-line per-plugin entrypoint: hookDir is the plugin's hooks/ dir. */
 function tryMain(hookDir, configureCommand) {
-  main({ pluginRoot: path.join(hookDir, '..'), configureCommand });
+  const pluginRoot = path.join(hookDir, '..');
+  main({ pluginRoot, configureCommand });
 }
 
 module.exports = {

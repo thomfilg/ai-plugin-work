@@ -18,24 +18,19 @@
  * Hook events (via CLAUDE_HOOK_TYPE env var):
  *   PreCompact — Output workflow reminder to stdout
  *   Stop       — Block stop if unrevealed session exists
+ *
+ * Implementation lives in ./session-guard/ (store, context, commands,
+ * hook-handlers); this entrypoint only dispatches. Its path is registered in
+ * hooks.json and spawned by the orchestrator — do not move it.
  */
 
-const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
 
-// Cached TASKS_BASE resolution — loaded once per invocation
-const getConfig = require(path.join(__dirname, '..', 'get-config'));
 const { logHookError } = require(path.join(__dirname, '..', 'hook-error-log'));
-// Canonical git-worktree-root resolver — shared, do not reimplement.
-const { resolveWorktreeRoot } = require(path.join(__dirname, '..', 'ticket-validation'));
-
-let _tasksBase;
-function getTasksBase() {
-  if (_tasksBase) return _tasksBase;
-  _tasksBase = getConfig.orExit('TASKS_BASE');
-  return _tasksBase;
-}
+const commands = require(path.join(__dirname, 'session-guard', 'commands'));
+const { handlePreCompact, handleStop } = require(
+  path.join(__dirname, 'session-guard', 'hook-handlers')
+);
 
 // Allow disabling session guard entirely via env var
 if (process.env.SESSION_GUARD_ENABLED === '0') {
@@ -46,795 +41,63 @@ if (process.env.SESSION_GUARD_ENABLED === '0') {
 // CLI mode surfaces errors with non-zero exit codes for debuggability
 const isHookMode = Boolean(process.env.CLAUDE_HOOK_TYPE);
 if (isHookMode) {
-  process.on('uncaughtException', (err) => {
-    logHookError(__filename, err);
-    process.exit(0);
-  });
-  process.on('unhandledRejection', (err) => {
-    logHookError(__filename, err);
-    process.exit(0);
-  });
-}
-
-// Session files live in /tmp by default. Files are created with mode 0o600 and
-// ownership is verified before reading, but passphrases are stored in plaintext.
-// This is acceptable for a single-user local CLI tool — not for shared CI hosts.
-const SESSION_DIR = process.env.SESSION_GUARD_DIR || '/tmp';
-
-// NATO phonetic alphabet words for passphrase generation
-const NATO_WORDS = [
-  'ALPHA',
-  'BRAVO',
-  'CHARLIE',
-  'DELTA',
-  'ECHO',
-  'FOXTROT',
-  'GOLF',
-  'HOTEL',
-  'INDIA',
-  'JULIET',
-  'KILO',
-  'LIMA',
-  'MIKE',
-  'NOVEMBER',
-  'OSCAR',
-  'PAPA',
-  'QUEBEC',
-  'ROMEO',
-  'SIERRA',
-  'TANGO',
-  'UNIFORM',
-  'VICTOR',
-  'WHISKEY',
-  'XRAY',
-  'YANKEE',
-  'ZULU',
-];
-
-// ─── Helpers ─────────────────────────────────────────────────────────────────
-
-function sanitizeTicketId(ticketId) {
-  // Strip path separators and null bytes to prevent path traversal
-  const sanitized = String(ticketId).replace(/[/\\:\0]/g, '_');
-  const baseDir = path.resolve(SESSION_DIR);
-  const resolved = path.resolve(baseDir, `claude-session-guard-${sanitized}.json`);
-  // Verify resolved path stays under SESSION_DIR (handle root "/" where baseDir + sep = "//")
-  const prefix = baseDir.endsWith(path.sep) ? baseDir : baseDir + path.sep;
-  if (!resolved.startsWith(prefix) && resolved !== baseDir) {
-    throw new Error('Invalid ticketId: resolved path escapes SESSION_DIR');
-  }
-  return resolved; // validated: stays under SESSION_DIR
-}
-
-function sessionFilePath(ticketId) {
-  return sanitizeTicketId(ticketId);
-}
-
-function generatePassphrase() {
-  const w1 = NATO_WORDS[crypto.randomInt(NATO_WORDS.length)];
-  const w2 = NATO_WORDS[crypto.randomInt(NATO_WORDS.length)];
-  const num = String(crypto.randomInt(10000)).padStart(4, '0');
-  return `${w1}-${w2}-${num}`;
-}
-
-// ─── Ticket context resolution ──────────────────────────────────────────────
-
-let _cachedTicketId;
-let _ticketIdResolved = false;
-
-function resolveGitHead() {
-  const dotgitPath = '.git';
-  const dotgit = fs.readFileSync(dotgitPath, 'utf-8').trim();
-  if (dotgit.startsWith('gitdir: ')) {
-    const rawGitdir = dotgit.slice('gitdir: '.length);
-    const gitdir = path.resolve(path.dirname(dotgitPath), rawGitdir);
-    return fs.readFileSync(path.join(gitdir, 'HEAD'), 'utf-8').trim();
-  }
-  throw new Error('unexpected .git content');
-}
-
-function getTicketId() {
-  if (_ticketIdResolved) return _cachedTicketId;
-  _ticketIdResolved = true;
-  if ('SESSION_GUARD_TICKET_ID' in process.env) {
-    _cachedTicketId = process.env.SESSION_GUARD_TICKET_ID || null;
-    return _cachedTicketId;
-  }
-  try {
-    let head;
-    try {
-      head = resolveGitHead();
-    } catch {
-      head = fs.readFileSync(path.join('.git', 'HEAD'), 'utf-8').trim();
-    }
-    const ref = head.startsWith('ref: ') ? head.slice(5) : head;
-    const match = ref.match(/[A-Z]+-\d+/);
-    _cachedTicketId = match ? match[0] : null;
-  } catch {
-    _cachedTicketId = null;
-  }
-  return _cachedTicketId;
-}
-
-/**
- * Resolve the session id that owns the current terminal.
- * Claude Code exports this as CLAUDE_CODE_SESSION_ID and passes the same value
- * as `session_id` in hook payloads, so the two are directly comparable.
- * AGENT_SESSION_ID is the runtime-neutral bridge set by hook processes for
- * their children (codex sets no CLAUDE_* vars).
- * Returns null when unavailable (e.g. plain CLI runs / older harness).
- */
-function getOwnerSessionId() {
-  return process.env.CLAUDE_CODE_SESSION_ID || process.env.AGENT_SESSION_ID || null;
-}
-
-/**
- * The session id of the terminal firing the current hook. Prefer the hook
- * payload's session_id (authoritative), falling back to the env vars.
- */
-function currentSessionId(hookData) {
-  return (
-    hookData?.session_id ||
-    process.env.CLAUDE_CODE_SESSION_ID ||
-    process.env.AGENT_SESSION_ID ||
-    null
-  );
-}
-
-/**
- * A session belongs to a DIFFERENT terminal when it carries an ownerSessionId
- * that we can compare against and that differs from the current session id.
- * Legacy sessions (no ownerSessionId) or an unknown current id are treated as
- * "not foreign" so existing ticket/cwd scoping still applies (backward compat).
- */
-function isForeignSession(session, csid) {
-  return Boolean(session?.ownerSessionId && csid && session.ownerSessionId !== csid);
-}
-
-/**
- * A session belongs to a DIFFERENT git worktree when it carries a worktreeRoot
- * we can compare against and that differs from the current worktree root.
- * Legacy sessions (no worktreeRoot) or an unresolvable current root are treated
- * as "not foreign" so existing ticket/cwd scoping still applies (backward compat).
- */
-function isForeignWorktree(session, currentRoot) {
-  return Boolean(session?.worktreeRoot && currentRoot && session.worktreeRoot !== currentRoot);
-}
-
-/**
- * True when a session is owned by a different terminal OR a different worktree —
- * i.e. it must not hold the current Stop/PreCompact hook. Each signal closes a
- * distinct failure mode: session id handles two sessions sharing one cwd;
- * worktree root handles sibling ticket worktrees whose branch names don't encode
- * a parseable ticket.
- */
-function isOtherOwner(session, csid, currentRoot) {
-  return isForeignSession(session, csid) || isForeignWorktree(session, currentRoot);
-}
-
-function readSessionFile(ticketId) {
-  try {
-    const filePath = sessionFilePath(ticketId);
-    // Verify ownership before reading (same check as findActiveSessions)
-    if (typeof process.getuid === 'function') {
-      const stat = fs.statSync(filePath);
-      if (stat.uid !== process.getuid()) return null;
-    }
-    return JSON.parse(fs.readFileSync(filePath, 'utf8'));
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Write session data atomically: write to tmp → unlink existing target → rename tmp → target.
- * Ensures SESSION_DIR exists, handles Windows (where rename fails if target exists),
- * and cleans up the tmp file on any error.
- */
-function writeSessionAtomic(ticketId, data) {
-  const target = sessionFilePath(ticketId);
-  // Ensure the directory exists (SESSION_GUARD_DIR may point to a non-default/non-existent path)
-  fs.mkdirSync(path.dirname(target), { recursive: true });
-  const tmp = `${target}.${process.pid}.tmp`;
-  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
-  try {
-    // Unlink existing target before rename (required on Windows where rename fails if target exists)
-    try {
-      fs.unlinkSync(target);
-    } catch {
-      /* ENOENT — target doesn't exist yet */
-    }
-    fs.renameSync(tmp, target);
-  } catch (renameErr) {
-    try {
-      fs.unlinkSync(tmp);
-    } catch {
-      /* cleanup best-effort */
-    }
-    throw renameErr;
-  }
-}
-
-/**
- * Find all active session guard files in SESSION_DIR.
- * Checks file ownership before reading content to avoid parsing untrusted files.
- * Filters by filename prefix rather than scanning all of SESSION_DIR.
- */
-function findActiveSessions() {
-  const sessions = [];
-  const baseDir = path.resolve(SESSION_DIR);
-  try {
-    const prefix = 'claude-session-guard-';
-    const suffix = '.json';
-    for (const f of fs.readdirSync(baseDir)) {
-      if (!f.startsWith(prefix) || !f.endsWith(suffix)) continue;
-      const fullPath = path.resolve(baseDir, f);
-      if (!fullPath.startsWith(baseDir.endsWith(path.sep) ? baseDir : baseDir + path.sep)) continue;
-      try {
-        // Check ownership BEFORE reading content to skip untrusted files early
-        if (typeof process.getuid === 'function') {
-          const stat = fs.statSync(fullPath);
-          if (stat.uid !== process.getuid()) continue;
-        }
-        const data = JSON.parse(fs.readFileSync(fullPath, 'utf8'));
-        // Validate schema: must have ticketId + workflow + passphrase to be a real session
-        if (data?.ticketId && data?.workflow && data?.passphrase) sessions.push(data);
-      } catch {
-        /* skip corrupt or inaccessible files */
-      }
-    }
-  } catch {
-    /* can't read SESSION_DIR — fail open */
-  }
-  return sessions;
-}
-
-// ─── CLI Subcommands ─────────────────────────────────────────────────────────
-
-function cmdInit(ticketId, workflow) {
-  if (!ticketId || !workflow) {
-    process.stderr.write('Usage: session-guard.js init <ticketId> <workflow>\n');
-    process.exit(1);
-  }
-
-  const ownerSessionId = getOwnerSessionId();
-  const worktreeRoot = resolveWorktreeRoot();
-
-  // Idempotent: reuse existing session if one exists for this ticket
-  const existing = readSessionFile(ticketId);
-  if (existing && existing.ticketId === ticketId) {
-    // Update cwd if it changed (same ticket, different directory)
-    const currentCwd = process.cwd();
-    let dirty = false;
-    if (existing.cwd !== currentCwd) {
-      existing.cwd = currentCwd;
-      dirty = true;
-    }
-    // Backfill owning Claude session id on a legacy/unstamped session so the
-    // Stop hook can scope the lock to this terminal (prevents cross-terminal
-    // lock bleed when two sessions share one cwd).
-    if (!existing.ownerSessionId && ownerSessionId) {
-      existing.ownerSessionId = ownerSessionId;
-      dirty = true;
-    }
-    // Backfill the owning worktree root so the Stop hook can scope the lock to
-    // this checkout (prevents bleed across sibling ticket worktrees).
-    if (!existing.worktreeRoot && worktreeRoot) {
-      existing.worktreeRoot = worktreeRoot;
-      dirty = true;
-    }
-    if (dirty) {
-      writeSessionAtomic(ticketId, existing);
-      process.stderr.write(`Session guard for ${ticketId} updated (cwd/owner).\n`);
-    } else {
-      process.stderr.write(
-        `Session guard already active for ${ticketId} (${existing.workflow}). Reusing existing session.\n`
-      );
-    }
-    process.exit(0);
-  }
-
-  const passphrase = generatePassphrase();
-  const session = {
-    ticketId,
-    workflow,
-    passphrase,
-    cwd: process.cwd(),
-    // Claude session that owns this workflow. Used by the Stop hook to avoid
-    // force-holding an unrelated terminal that merely shares this cwd.
-    ownerSessionId,
-    // Git worktree root that owns this workflow. Used by the Stop hook to avoid
-    // force-holding a Stop firing in a different (sibling) worktree.
-    worktreeRoot,
-    startTime: new Date().toISOString(),
-    revealed: false,
-  };
-
-  writeSessionAtomic(ticketId, session);
-  process.stderr.write(
-    `Session guard active for ${ticketId} (${workflow}). Locked until all steps complete.\n`
-  );
-  process.exit(0);
-}
-
-function cmdReveal(ticketId) {
-  if (!ticketId) {
-    process.stderr.write('Usage: session-guard.js reveal <ticketId>\n');
-    process.exit(1);
-  }
-
-  const session = readSessionFile(ticketId);
-  if (!session) {
-    process.stderr.write(`No active session for ${ticketId} (skipping reveal)\n`);
-    process.exit(0); // fail-open: don't break complete step if guard wasn't initialized
-  }
-
-  // Output passphrase to stdout
-  process.stdout.write(session.passphrase + '\n');
-
-  // Update revealed flag
-  session.revealed = true;
-  writeSessionAtomic(ticketId, session);
-  process.exit(0);
-}
-
-function cmdComplete(ticketId, workflowFilter) {
-  if (!ticketId) {
-    process.stderr.write('Usage: session-guard.js complete <ticketId> [workflow]\n');
-    process.exit(1);
-  }
-
-  // If a workflow filter is provided, only clear when the active session
-  // belongs to that workflow. Prevents a sub-workflow (e.g. /follow-up)
-  // from tearing down a parent workflow's session (e.g. /work).
-  if (workflowFilter) {
-    const existing = readSessionFile(ticketId);
-    if (existing && existing.workflow && existing.workflow !== workflowFilter) {
-      process.stderr.write(
-        `Session for ${ticketId} owned by ${existing.workflow} — ${workflowFilter} complete is a no-op.\n`
-      );
+  for (const fatalEvent of ['uncaughtException', 'unhandledRejection']) {
+    process.on(fatalEvent, (err) => {
+      logHookError(__filename, err);
       process.exit(0);
-    }
+    });
   }
-
-  try {
-    fs.unlinkSync(sessionFilePath(ticketId));
-  } catch {
-    /* already gone — fine */
-  }
-  process.stderr.write(`Session guard cleared for ${ticketId}\n`);
-  process.exit(0);
-}
-
-/**
- * Atomic teardown: reveal passphrase then remove session file.
- * Replaces the fragile 3-step agent prompt with a single command.
- * Fail-open: exits 0 if no session exists (guard may be disabled).
- */
-function cmdFinish(ticketId) {
-  if (!ticketId) {
-    process.stderr.write('Usage: session-guard.js finish <ticketId>\n');
-    process.exit(1);
-  }
-
-  const session = readSessionFile(ticketId);
-  if (!session) {
-    process.stderr.write(`No active session for ${ticketId} (skipping finish)\n`);
-    process.exit(0);
-  }
-
-  // Reveal passphrase (unlock Stop hook)
-  process.stdout.write(session.passphrase + '\n');
-  session.revealed = true;
-  writeSessionAtomic(ticketId, session);
-
-  // Clean up session file
-  try {
-    fs.unlinkSync(sessionFilePath(ticketId));
-  } catch {
-    /* already gone — fine */
-  }
-  process.stderr.write(`Session guard finished for ${ticketId}\n`);
-  process.exit(0);
-}
-
-function cmdStatus(ticketId) {
-  if (ticketId) {
-    const session = readSessionFile(ticketId);
-    if (session) {
-      process.stdout.write(
-        JSON.stringify(
-          {
-            ticketId: session.ticketId,
-            workflow: session.workflow,
-            startTime: session.startTime,
-            revealed: session.revealed,
-          },
-          null,
-          2
-        ) + '\n'
-      );
-    } else {
-      process.stdout.write(`No active session for ${ticketId}\n`);
-    }
-  } else {
-    const sessions = findActiveSessions();
-    if (sessions.length === 0) {
-      process.stdout.write('No active sessions\n');
-    } else {
-      process.stdout.write(
-        JSON.stringify(
-          sessions.map((s) => ({
-            ticketId: s.ticketId,
-            workflow: s.workflow,
-            startTime: s.startTime,
-            revealed: s.revealed,
-          })),
-          null,
-          2
-        ) + '\n'
-      );
-    }
-  }
-  process.exit(0);
-}
-
-// ─── Hook Handlers ───────────────────────────────────────────────────────────
-
-function handlePreCompact(hookData) {
-  // Drop sessions owned by a different terminal or worktree (lock bleed).
-  const csid = currentSessionId(hookData);
-  const currentRoot = resolveWorktreeRoot();
-  const sessions = findActiveSessions().filter((s) => !isOtherOwner(s, csid, currentRoot));
-  if (sessions.length === 0) {
-    process.exit(0);
-    return;
-  }
-
-  // Only show reminders for sessions belonging to the current ticket context
-  const currentTicket = getTicketId();
-  const relevant = currentTicket ? sessions.filter((s) => s.ticketId === currentTicket) : sessions;
-  if (relevant.length === 0) {
-    process.exit(0);
-    return;
-  }
-
-  const lines = [];
-  for (const session of relevant) {
-    lines.push(
-      `ACTIVE WORKFLOW SESSION - DO NOT ABANDON`,
-      `Workflow: ${session.workflow} | Ticket: ${session.ticketId}`,
-      `You MUST continue this workflow. Run: ${session.workflow} ${session.ticketId}`,
-      `The session is locked with a passphrase. Complete all steps to unlock.`,
-      ''
-    );
-  }
-
-  process.stdout.write(lines.join('\n'));
-  process.exit(0);
-}
-
-/**
- * Read the /work workflow state for a ticket to determine the current step.
- * Returns { stepName, ticketId } or null on any failure.
- */
-function readWorkState(ticketId) {
-  try {
-    const tasksBase = getTasksBase();
-    if (!tasksBase) return null;
-
-    let safeId = ticketId;
-    try {
-      safeId = require(path.join(__dirname, '..', 'config')).safeTicketId(ticketId);
-    } catch {}
-
-    const resolved = path.resolve(tasksBase, safeId, '.work-state.json');
-    // Guard against path traversal
-    if (!resolved.startsWith(path.resolve(tasksBase) + path.sep)) return null;
-
-    const raw = fs.readFileSync(resolved, 'utf-8');
-    const state = JSON.parse(raw);
-    const stepIndex = state?.currentStep;
-    if (typeof stepIndex !== 'number') return null;
-
-    let stepName;
-    try {
-      const { STEP_ORDER } = require(path.join(__dirname, '..', '..', 'work', 'step-registry'));
-      // currentStep in .work-state.json is 1-based (see work-state.js: stepIndex + 1)
-      const zeroBasedIndex = stepIndex - 1;
-      if (zeroBasedIndex >= 0 && zeroBasedIndex < STEP_ORDER.length) {
-        stepName = STEP_ORDER[zeroBasedIndex];
-      }
-    } catch {
-      /* step-registry not available — stepName stays null */
-    }
-
-    if (!stepName) return null;
-    return { stepName, ticketId };
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Check if the /check workflow is actively running for a ticket.
- * When /check is active, the session guard should not block stops
- * because /check has its own quality gates and state management.
- */
-function isCheckWorkflowActive(ticketId) {
-  try {
-    // Validate ticketId to prevent path traversal
-    if (!ticketId || /[/\\:\0]/.test(ticketId)) return false;
-
-    const tasksBase = getTasksBase();
-    let safeId = ticketId;
-    try {
-      safeId = require(path.join(__dirname, '..', 'config')).safeTicketId(ticketId);
-    } catch {}
-    const resolvedBase = path.resolve(tasksBase, safeId);
-    // Guard against path traversal — resolved path must stay under tasksBase
-    if (!resolvedBase.startsWith(path.resolve(tasksBase) + path.sep)) return false;
-
-    // Check the script-driven /check state file (fall back to the legacy
-    // .check2-state.json name for in-flight tickets that predate the rename)
-    for (const stateName of ['.check-state.json', '.check2-state.json']) {
-      try {
-        const state = JSON.parse(fs.readFileSync(path.join(resolvedBase, stateName), 'utf-8'));
-        if (state?.status === 'in_progress' || state?.currentStep) return true;
-      } catch {
-        /* not found or corrupt */
-      }
-    }
-
-    return false;
-  } catch {
-    return false;
-  }
-}
-
-function handleStop(hookData) {
-  // Drop sessions owned by a different terminal or worktree first. Without this,
-  // a lock created by a workflow in worktree A (or a finished session whose
-  // worktree was removed, leaving its shell in another workflow's cwd) gets
-  // force-held by THAT workflow's lock and fed its delegate instructions.
-  // Scoping by Claude session id + git worktree root prevents the bleed.
-  const csid = currentSessionId(hookData);
-  const currentRoot = resolveWorktreeRoot();
-  const sessions = findActiveSessions().filter((s) => !isOtherOwner(s, csid, currentRoot));
-  if (sessions.length === 0) {
-    process.exit(0);
-    return;
-  }
-
-  // Check for abort keyword in stop message
-  const stopMessage = hookData?.stop_message || '';
-  if (/abort\s+workflow/i.test(stopMessage)) {
-    process.exit(0);
-    return;
-  }
-
-  // Only consider sessions owned by this ticket context (or cwd as fallback)
-  const currentTicket = getTicketId();
-  const currentCwd = process.cwd();
-  const ownedSessions = currentTicket
-    ? sessions.filter((s) => s.ticketId === currentTicket)
-    : sessions.filter((s) => !s.cwd || s.cwd === currentCwd); // fallback to cwd filter
-
-  // Check if any owned session is unrevealed (tests: cwd match, no-match, legacy without cwd)
-  const unrevealed = ownedSessions.filter((s) => !s.revealed);
-  if (unrevealed.length === 0) {
-    process.exit(0);
-    return;
-  }
-
-  // Allow stop only if ALL unrevealed sessions have /check active
-  const nonCheckSessions = unrevealed.filter((s) => !isCheckWorkflowActive(s.ticketId));
-  if (nonCheckSessions.length === 0) {
-    process.exit(0); // All sessions are under /check — allow stop
-    return;
-  }
-
-  const session = nonCheckSessions[0];
-
-  // For /work sessions, try to provide an actionable message with current step info
-  if (session.workflow === '/work') {
-    const workState = readWorkState(session.ticketId);
-    if (workState) {
-      process.stderr.write(
-        `BLOCKED: You are mid-workflow (/work ${workState.ticketId}). DO NOT STOP.\n\n` +
-          `Current step: ${workState.stepName}\n` +
-          `Your next action: Run the orchestrator to get your plan and continue executing ALL remaining steps:\n` +
-          '  node "${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/engine/work.workflow.js" ' +
-          workState.ticketId +
-          '\n\n' +
-          "Then execute each RUN step in order. Do NOT stop until the workflow reaches 'complete'.\n" +
-          'The only step that allows user interaction is brief_gate.\n'
-      );
-      process.exit(2);
-      return;
-    }
-  }
-
-  const workflow = session.workflow || '/work';
-  const ticketId = session.ticketId || '';
-
-  if (workflow === '/follow-up') {
-    // Check follow-up state — if completed, allow stop.
-    try {
-      const getConfig = require(path.join(__dirname, '..', 'get-config'));
-      const tasksBase = getConfig('TASKS_BASE');
-      if (tasksBase && ticketId) {
-        let safeId = ticketId;
-        try {
-          safeId = require(path.join(__dirname, '..', 'config')).safeTicketId(ticketId);
-        } catch {
-          /* use raw */
-        }
-        const fuPath = path.join(tasksBase, safeId, '.follow-up-state.json');
-        if (fs.existsSync(fuPath)) {
-          const fu = JSON.parse(fs.readFileSync(fuPath, 'utf8'));
-          if (fu && fu.status === 'complete') {
-            process.exit(0);
-            return;
-          }
-        }
-      }
-    } catch {
-      /* unreadable — fall through to block */
-    }
-
-    // Surface the most recently computed follow-up instruction (written by
-    // follow-up-auto-advance.js after each tool call) so the agent has the
-    // next step inline — not just "go run follow-up-next.js again".
-    let pendingInstruction = '';
-    try {
-      const getConfig = require(path.join(__dirname, '..', 'get-config'));
-      const tasksBase = getConfig('TASKS_BASE');
-      if (tasksBase && ticketId) {
-        let safeId = ticketId;
-        try {
-          safeId = require(path.join(__dirname, '..', 'config')).safeTicketId(ticketId);
-        } catch {
-          /* use raw */
-        }
-        const nextPath = path.join(tasksBase, safeId, '.follow-up-next.json');
-        if (fs.existsSync(nextPath)) {
-          pendingInstruction = fs.readFileSync(nextPath, 'utf8');
-        }
-      }
-    } catch {
-      /* fall through with empty instruction */
-    }
-
-    process.stderr.write(
-      `ACTIVE WORKFLOW SESSION — DO NOT ABANDON\n` +
-        `Workflow: ${workflow} | Ticket: ${ticketId}\n` +
-        `You MUST continue this workflow. Run:\n` +
-        `  node "\${CLAUDE_PLUGIN_ROOT}/scripts/workflows/follow-up/follow-up-next.js" ${ticketId}\n` +
-        `Execute the returned instruction, then re-run follow-up-next.js until action: "complete".\n` +
-        (pendingInstruction
-          ? `\n=== PENDING /follow-up INSTRUCTION ===\n${pendingInstruction}\n=== END INSTRUCTION ===\n\n`
-          : '') +
-        `The session is locked with a passphrase. Complete all steps to unlock.\n`
-    );
-    process.exit(2);
-    return;
-  }
-
-  if (workflow === '/work') {
-    // Check if the workflow step is dispatched (agent is waiting for sub-agent results)
-    // In this case, warn but allow stop — the agent isn't abandoning, it's waiting.
-    try {
-      const getConfig = require(path.join(__dirname, '..', 'get-config'));
-      const tasksBase = getConfig('TASKS_BASE');
-      if (tasksBase && ticketId) {
-        let safeId = ticketId;
-        try {
-          safeId = require(path.join(__dirname, '..', 'config')).safeTicketId(ticketId);
-        } catch {
-          /* use raw */
-        }
-        const wsPath = path.join(tasksBase, safeId, '.work-state.json');
-        const ws = JSON.parse(fs.readFileSync(wsPath, 'utf8'));
-        if (ws && ws._work2Dispatched) {
-          // Lock-by-default. The agent may only stop at the three user-review
-          // checkpoints (brief, spec, and tasks generation):
-          //   - brief_gate: user must approve the brief before spec
-          //   - spec_gate: user must approve the spec before tasks split
-          //   - tasks: user reviews tasks.md before implement begins
-          // Every other dispatched step (implement, commit, task_review,
-          // check, pr, ready, follow_up, ci, cleanup, reports) MUST continue.
-          const allowStopSteps = new Set(['brief_gate', 'spec_gate', 'tasks']);
-          if (allowStopSteps.has(ws._work2Dispatched)) {
-            process.stderr.write(
-              `Pausing at user-review checkpoint "${ws._work2Dispatched}".\n` +
-                `When ready, continue: node "\${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/work-next.js" ${ticketId}\n`
-            );
-            process.exit(0); // allow stop — this is a human-approval gate
-            return;
-          }
-        }
-      }
-    } catch {
-      // Can't read state — fall through to block
-    }
-
-    process.stderr.write(
-      `ACTIVE WORKFLOW SESSION — DO NOT ABANDON\n` +
-        `Workflow: ${workflow} | Ticket: ${ticketId}\n` +
-        `You MUST continue this workflow. Run:\n` +
-        `  node "\${CLAUDE_PLUGIN_ROOT}/scripts/workflows/work/work-next.js" ${ticketId}\n` +
-        `Execute the returned instruction, then re-run work-next.js until action: "complete".\n` +
-        `The session is locked with a passphrase. Complete all steps to unlock.\n`
-    );
-  } else {
-    process.stderr.write(
-      `ACTIVE WORKFLOW SESSION — DO NOT ABANDON\n` +
-        `Workflow: ${workflow} | Ticket: ${ticketId}\n` +
-        `You MUST continue this workflow. Run: ${workflow} ${ticketId}\n` +
-        `The session is locked with a passphrase. Complete all steps to unlock.\n`
-    );
-  }
-  process.exit(2);
 }
 
 // ─── Main ────────────────────────────────────────────────────────────────────
 
-async function main() {
-  const hookType = process.env.CLAUDE_HOOK_TYPE;
+async function runHookMode(hookType) {
+  let input = '';
+  for await (const chunk of process.stdin) {
+    input += chunk;
+  }
 
-  // Hook mode: read stdin and dispatch by hook type
-  if (hookType) {
-    let input = '';
-    for await (const chunk of process.stdin) {
-      input += chunk;
-    }
+  let hookData = {};
+  try {
+    hookData = JSON.parse(input);
+  } catch {
+    /* empty/invalid — use default */
+  }
 
-    let hookData = {};
-    try {
-      hookData = JSON.parse(input);
-    } catch {
-      /* empty/invalid — use default */
-    }
-
-    // Prevent infinite loops in Stop hooks
-    if (hookType === 'Stop' && hookData.stop_hook_active) {
-      process.exit(0);
-      return;
-    }
-
-    switch (hookType) {
-      case 'PreCompact':
-        handlePreCompact(hookData);
-        break;
-      case 'Stop':
-        handleStop(hookData);
-        break;
-      default:
-        process.exit(0);
-    }
+  // Prevent infinite loops in Stop hooks
+  if (hookType === 'Stop' && hookData.stop_hook_active) {
+    process.exit(0);
     return;
   }
 
-  // CLI mode: parse subcommand from argv
-  const args = process.argv.slice(2);
-  const command = args[0];
+  switch (hookType) {
+    case 'PreCompact':
+      handlePreCompact(hookData);
+      break;
+    case 'Stop':
+      handleStop(hookData);
+      break;
+    default:
+      process.exit(0);
+  }
+}
 
-  switch (command) {
+function runCli(args) {
+  switch (args[0]) {
     case 'init':
-      cmdInit(args[1], args[2]);
+      commands.cmdInit(args[1], args[2]);
       break;
     case 'reveal':
-      cmdReveal(args[1]);
+      commands.cmdReveal(args[1]);
       break;
     case 'complete':
-      cmdComplete(args[1], args[2]);
+      commands.cmdComplete(args[1], args[2]);
       break;
     case 'finish':
-      cmdFinish(args[1]);
+      commands.cmdFinish(args[1]);
       break;
     case 'status':
-      cmdStatus(args[1]);
+      commands.cmdStatus(args[1]);
       break;
     default:
       process.stderr.write(
@@ -847,6 +110,19 @@ async function main() {
       );
       process.exit(1);
   }
+}
+
+async function main() {
+  const hookType = process.env.CLAUDE_HOOK_TYPE;
+
+  // Hook mode: read stdin and dispatch by hook type
+  if (hookType) {
+    await runHookMode(hookType);
+    return;
+  }
+
+  // CLI mode: parse subcommand from argv
+  runCli(process.argv.slice(2));
 }
 
 main().catch((err) => {

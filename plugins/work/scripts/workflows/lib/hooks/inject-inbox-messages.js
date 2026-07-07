@@ -43,14 +43,9 @@ function readStdin() {
 
 function deriveTicket(hookData) {
   // Priority order: transcript_path > tool_input.command > .git/HEAD of cwd
-  const tp = hookData?.transcript_path;
-  if (typeof tp === 'string') {
-    const m = tp.match(/\b[A-Z]+-\d+\b/);
-    if (m) return m[0];
-  }
-  const cmd = hookData?.tool_input?.command;
-  if (typeof cmd === 'string') {
-    const m = cmd.match(/\b[A-Z]+-\d+\b/);
+  for (const source of [hookData?.transcript_path, hookData?.tool_input?.command]) {
+    if (typeof source !== 'string') continue;
+    const m = source.match(/\b[A-Z]+-\d+\b/);
     if (m) return m[0];
   }
   try {

@@ -63,23 +63,10 @@ function readStdinPayload() {
   }
 }
 
-function main() {
-  const payload = readStdinPayload();
-  const payloadPrompt = typeof payload.prompt === 'string' ? payload.prompt : '';
-  const userPrompt = process.env.CLAUDE_USER_PROMPT || payloadPrompt;
-
-  // Check if this is a /work invocation. Match /work followed by whitespace
-  // (so /work-implement, /work-pr, /work2 don't trigger this hook). This
-  // in-code check is also the self-filter on codex, where UserPromptSubmit
-  // matchers are ignored and the hook fires on every prompt.
-  const workMatch = userPrompt.match(/^\s*\/work\s+(.+)/i);
-  if (!workMatch) {
-    process.exit(0);
-  }
-
-  // Bridge runtime identity to the orchestrator child (and any libs reading
-  // env): codex hook processes carry neither CLAUDE_CODE_SESSION_ID nor a
-  // runtime pin, so children would misclassify without this.
+// Bridge runtime identity to the orchestrator child (and any libs reading
+// env): codex hook processes carry neither CLAUDE_CODE_SESSION_ID nor a
+// runtime pin, so children would misclassify without this.
+function bridgeRuntimeEnv(payload) {
   const rt = getRuntime(payload);
   if (!process.env.AGENT_RUNTIME) process.env.AGENT_RUNTIME = rt.name;
   if (
@@ -89,13 +76,11 @@ function main() {
   ) {
     process.env.AGENT_SESSION_ID = payload.session_id;
   }
+}
 
-  const args = workMatch[1].trim();
-  // Tokenize via the named helper to make the intent obvious at the call site.
-  // See tokenizeArgs() above for the scope-constraint rationale.
-  const parsedArgs = tokenizeArgs(args);
-
-  // Run the orchestrator via safeExec (uses execFileSync internally, no shell).
+// Run the orchestrator via safeExec (uses execFileSync internally, no shell)
+// and parse its plan. Failure paths log + inject a message and exit 0.
+function fetchPlan(parsedArgs) {
   // Use a null fallback so we can distinguish a failure from empty output.
   const result = safeExec(process.execPath, [ORCHESTRATOR_PATH, ...parsedArgs], {
     timeout: 30000,
@@ -121,8 +106,11 @@ function main() {
     console.log(`ORCHESTRATOR ERROR: ${plan.message}`);
     process.exit(0);
   }
+  return plan;
+}
 
-  // Log plan generation action
+// Log plan generation action
+function logPlanAction(plan) {
   if (plan.ticket && !plan.ticket.startsWith('TBD')) {
     const runCount = plan.summary?.run || 0;
     const mode = plan.mode || 'unknown';
@@ -132,12 +120,86 @@ function main() {
       what: `plan generated (${mode}, ${runCount} RUN)`,
     });
   }
+}
+
+function main() {
+  const payload = readStdinPayload();
+  const payloadPrompt = typeof payload.prompt === 'string' ? payload.prompt : '';
+  const userPrompt = process.env.CLAUDE_USER_PROMPT || payloadPrompt;
+
+  // Check if this is a /work invocation. Match /work followed by whitespace
+  // (so /work-implement, /work-pr, /work2 don't trigger this hook). This
+  // in-code check is also the self-filter on codex, where UserPromptSubmit
+  // matchers are ignored and the hook fires on every prompt.
+  const workMatch = userPrompt.match(/^\s*\/work\s+(.+)/i);
+  if (!workMatch) {
+    process.exit(0);
+  }
+
+  bridgeRuntimeEnv(payload);
+
+  const args = workMatch[1].trim();
+  // Tokenize via the named helper to make the intent obvious at the call site.
+  // See tokenizeArgs() above for the scope-constraint rationale.
+  const parsedArgs = tokenizeArgs(args);
+
+  const plan = fetchPlan(parsedArgs);
+  logPlanAction(plan);
 
   // Format the plan for injection
   const output = formatPlan(plan);
   console.log(output);
 
   process.exit(0);
+}
+
+// State summary
+function pushStateLines(lines, state) {
+  lines.push('  STATE:');
+  if (state.worktreeExists) {
+    lines.push(`    Worktree: EXISTS (branch: ${state.branch})`);
+  } else {
+    lines.push('    Worktree: NOT FOUND');
+  }
+  if (state.pr) {
+    lines.push(`    PR: #${state.pr.number} (draft: ${state.pr.isDraft})`);
+  }
+  if (state.hasDiffVsMain) {
+    lines.push(`    Changes: ${state.diffSummary}`);
+  }
+  if (state.hasUncommitted) {
+    lines.push(`    Uncommitted: ${state.uncommittedCount} file(s)`);
+  }
+  lines.push('');
+}
+
+// Plan steps
+const ACTION_ICONS = { RUN: '🔄', SKIP: '⏭️', DEFER: '🔮' };
+
+function pushPlanLines(lines, planSteps) {
+  lines.push('  PLAN:');
+  for (const step of planSteps) {
+    const icon = ACTION_ICONS[step.action] || '⏳';
+    const cmd = step.command ? ` → ${step.command}` : '';
+    lines.push(`    ${icon} ${step.step.padEnd(20)} ${step.action.padEnd(7)} ${step.reason}${cmd}`);
+  }
+  lines.push('');
+}
+
+// Summary — reads via `plan.summary` (not a destructured alias) on purpose:
+// keeps this hook's token stream distinct from lib/engine/planning.js's
+// formatSummaryLines, whose output format is close but not identical.
+function pushSummaryLines(lines, plan) {
+  lines.push(
+    `  SUMMARY: ${plan.summary.run} RUN, ${plan.summary.defer || 0} DEFER, ${plan.summary.skip} SKIP, ${plan.summary.pending} PENDING`
+  );
+  lines.push(`  FIRST ACTION: ${plan.summary.firstAction}`);
+  if (plan.summary.stepsToRun.length > 0) {
+    lines.push(`  STEPS TO RUN: ${plan.summary.stepsToRun.join(' → ')}`);
+  }
+  if (plan.summary.stepsDeferred && plan.summary.stepsDeferred.length > 0) {
+    lines.push(`  STEPS DEFERRED: ${plan.summary.stepsDeferred.join(' → ')}`);
+  }
 }
 
 function formatPlan(plan) {
@@ -150,54 +212,14 @@ function formatPlan(plan) {
   lines.push('═══════════════════════════════════════════════════════════════════');
   lines.push('');
 
-  // State summary
   if (plan.state) {
-    lines.push('  STATE:');
-    if (plan.state.worktreeExists) {
-      lines.push(`    Worktree: EXISTS (branch: ${plan.state.branch})`);
-    } else {
-      lines.push('    Worktree: NOT FOUND');
-    }
-    if (plan.state.pr) {
-      lines.push(`    PR: #${plan.state.pr.number} (draft: ${plan.state.pr.isDraft})`);
-    }
-    if (plan.state.hasDiffVsMain) {
-      lines.push(`    Changes: ${plan.state.diffSummary}`);
-    }
-    if (plan.state.hasUncommitted) {
-      lines.push(`    Uncommitted: ${plan.state.uncommittedCount} file(s)`);
-    }
-    lines.push('');
+    pushStateLines(lines, plan.state);
   }
 
-  // Plan steps
-  lines.push('  PLAN:');
-  for (const step of plan.plan) {
-    const icon =
-      step.action === 'RUN'
-        ? '🔄'
-        : step.action === 'SKIP'
-          ? '⏭️'
-          : step.action === 'DEFER'
-            ? '🔮'
-            : '⏳';
-    const cmd = step.command ? ` → ${step.command}` : '';
-    lines.push(`    ${icon} ${step.step.padEnd(20)} ${step.action.padEnd(7)} ${step.reason}${cmd}`);
-  }
-  lines.push('');
+  pushPlanLines(lines, plan.plan);
 
-  // Summary
   if (plan.summary) {
-    lines.push(
-      `  SUMMARY: ${plan.summary.run} RUN, ${plan.summary.defer || 0} DEFER, ${plan.summary.skip} SKIP, ${plan.summary.pending} PENDING`
-    );
-    lines.push(`  FIRST ACTION: ${plan.summary.firstAction}`);
-    if (plan.summary.stepsToRun.length > 0) {
-      lines.push(`  STEPS TO RUN: ${plan.summary.stepsToRun.join(' → ')}`);
-    }
-    if (plan.summary.stepsDeferred && plan.summary.stepsDeferred.length > 0) {
-      lines.push(`  STEPS DEFERRED: ${plan.summary.stepsDeferred.join(' → ')}`);
-    }
+    pushSummaryLines(lines, plan);
   }
 
   lines.push('');
