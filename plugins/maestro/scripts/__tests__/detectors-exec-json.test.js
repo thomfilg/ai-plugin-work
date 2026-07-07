@@ -73,20 +73,31 @@ test('detect: first sighting and appended bytes are alive; a stalled stream past
   assert.ok(under.silenceSec >= 0);
 
   // Same size, marker aged past the limit → silence verdict with stream info.
-  const size = fs.statSync(execLog).size;
-  state.write('GH-42-work', 'exec-json', { size, lastActiveAt: state.now() - 9999 });
-  const hit = execJson.detect(ctx);
-  assert.equal(hit.hit, true);
-  assert.equal(hit.kind, 'silence');
-  assert.ok(hit.silenceSec >= 9999);
-  assert.equal(hit.limitSec, 300);
-  assert.equal(hit.turnsCompleted, 2);
+  // Stat + append on ONE descriptor — no path-based check-then-use gap
+  // (CodeQL js/file-system-race, precedent 47107ae6). The 0o600 mode is
+  // inert for an existing file but satisfies js/insecure-temporary-file.
+  const fd = fs.openSync(execLog, 'a', 0o600);
+  try {
+    state.write('GH-42-work', 'exec-json', {
+      size: fs.fstatSync(fd).size,
+      lastActiveAt: state.now() - 9999,
+    });
+    const hit = execJson.detect(ctx);
+    assert.equal(hit.hit, true);
+    assert.equal(hit.kind, 'silence');
+    assert.ok(hit.silenceSec >= 9999);
+    assert.equal(hit.limitSec, 300);
+    assert.equal(hit.turnsCompleted, 2);
 
-  // Bytes appended → alive again and the marker refreshes.
-  fs.appendFileSync(execLog, '{"type":"turn.started"}\n');
-  assert.deepEqual(execJson.detect(ctx), { hit: false });
-  const refreshed = state.read('GH-42-work', 'exec-json');
-  assert.equal(refreshed.size, fs.statSync(execLog).size);
+    // Bytes appended → alive again and the marker refreshes. O_APPEND
+    // writes always land at EOF, and fstat reuses the same descriptor.
+    fs.appendFileSync(fd, '{"type":"turn.started"}\n');
+    assert.deepEqual(execJson.detect(ctx), { hit: false });
+    const refreshed = state.read('GH-42-work', 'exec-json');
+    assert.equal(refreshed.size, fs.fstatSync(fd).size);
+  } finally {
+    fs.closeSync(fd);
+  }
 });
 
 test('detect: missing/absent stream is fail-open (no-stream capability, never a restart verdict)', () => {
