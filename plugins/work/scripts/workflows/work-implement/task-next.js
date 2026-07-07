@@ -745,10 +745,34 @@ function _walkDirForTestFiles(dir, depth, out) {
 // every regular *source* scope entry triggers a depth-0 scan of its parent
 // directory for colocated `<basename>.test.<ext>` / `<basename>.spec.<ext>`
 // neighbours (e.g. `src/foo.test.js` next to `src/foo.js`).
+// Glob-aware scope entry: `fs.existsSync` treats a pattern like
+// `a/b/foo*.test.js` literally and never resolves it, so a glob-scoped test
+// file is invisible to the RED gate even though it exists on disk. Mirror the
+// glob semantics `filterChangedTestFilesByScope` already uses — walk the
+// entry's static directory prefix for test files and keep those that match
+// the pattern via the shared `fileMatchesScope` matcher.
+function _addGlobMatchedTestFiles(repoRoot, rel, out) {
+  const firstGlob = rel.search(/[*?[\]{}]/);
+  const staticPrefix = firstGlob === -1 ? rel : rel.slice(0, firstGlob);
+  const slash = staticPrefix.lastIndexOf('/');
+  const dirRel = slash === -1 ? '' : staticPrefix.slice(0, slash);
+  const found = new Set();
+  _walkDirForTestFiles(path.join(repoRoot, dirRel), 0, found);
+  for (const f of found) {
+    const relF = path.relative(repoRoot, f).split(path.sep).join('/');
+    if (fileMatchesScope(relF, [rel])) out.add(f);
+  }
+}
+
 function findTestFilesInScope(repoRoot, scope) {
   const out = new Set();
   const readdirCached = _makeReaddirCached();
   for (const rel of scope) {
+    // Glob patterns can't be resolved by existsSync — expand them separately.
+    if (/[*?[\]{}]/.test(rel)) {
+      _addGlobMatchedTestFiles(repoRoot, rel, out);
+      continue;
+    }
     const p = path.join(repoRoot, rel);
     if (!fs.existsSync(p)) continue;
     let stat;

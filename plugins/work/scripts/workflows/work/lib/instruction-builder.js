@@ -40,6 +40,14 @@ function buildInstruction(entry, stateCtx) {
       description: `${entry.step} ${entry.reason || ''}`.trim(),
       command: entry.agentPrompt || entry.command,
     };
+  } else if (entry.agentType === 'inline-commit') {
+    // GH-539: the session agent authors the commit message and commits directly
+    // (no subagent). The `prompt` is the directive the orchestrator executes.
+    instruction.delegate = {
+      type: 'commit',
+      description: `${entry.step} ${entry.reason || ''}`.trim().slice(0, 80),
+      prompt: entry.agentPrompt || entry.command,
+    };
   } else {
     // Task-based (general-purpose, brief-writer, spec-writer, commit-writer, etc.)
     // Detect simple single-command prompts and emit as "bash" instead of spawning an agent

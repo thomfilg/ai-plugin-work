@@ -98,7 +98,7 @@ Skills can invoke other skills and agents:
   │   └─ Task(spec-writer)
   ├─ /split-in-tasks (skill)
   ├─ Task(developer-react-senior)  ← implement step
-  ├─ Task(commit-writer)           ← commit step
+  ├─ (session agent commits; commit-msg hook validates)  ← commit step
   ├─ /check (skill)
   │   ├─ Task(code-checker)
   │   ├─ Task(quality-checker)
