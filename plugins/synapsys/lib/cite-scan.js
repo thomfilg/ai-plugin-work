@@ -18,6 +18,7 @@ const {
   isDisabled,
 } = require('./telemetry');
 const pretoolWindow = require('./pretool-window');
+const transcriptReader = require('./runtime/transcript');
 
 // Read names of memories with event:"fired" from the session JSONL.
 // Fail-open: any error returns an empty Set.
@@ -66,6 +67,12 @@ function transcriptRowToText(obj) {
 
 function extractFromTranscript(transcriptPath) {
   try {
+    // Codex rollout files (sniffed per file, never trusted from a runtime
+    // flag) go through the vendored dual-format reader; the Claude/legacy
+    // scan below is untouched (rollout `response_item` rows never match it).
+    if (transcriptReader.sniffFormat(transcriptPath) === 'codex') {
+      return transcriptReader.readLastAssistantText(transcriptPath) || '';
+    }
     const raw = fs.readFileSync(transcriptPath, 'utf8');
     const lines = raw.split('\n').filter((l) => l.length > 0);
     for (let i = lines.length - 1; i >= 0; i--) {
@@ -88,6 +95,14 @@ function extractResponseText(payload) {
   // would otherwise mask a transcript_path with the real assistant output.
   if (typeof payload.response === 'string' && payload.response.length > 0) {
     return payload.response;
+  }
+  // Codex Stop payloads carry the assistant prose inline (ground truth
+  // §2.5.2); Claude Stop payloads never set this field.
+  if (
+    typeof payload.last_assistant_message === 'string' &&
+    payload.last_assistant_message.length > 0
+  ) {
+    return payload.last_assistant_message;
   }
   if (typeof payload.transcript_path === 'string')
     return extractFromTranscript(payload.transcript_path);

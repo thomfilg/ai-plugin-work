@@ -27,4 +27,35 @@ const LIVE_SPINNER_SRC =
 // Multi-line flag so detectors can scan a whole pane buffer.
 const LIVE_SPINNER_RE = new RegExp(LIVE_SPINNER_SRC, 'm');
 
-module.exports = { LIVE_SPINNER_RE, LIVE_SPINNER_SRC, SPINNER_GLYPHS };
+// ── Pane dialects (WP-09, design §H) ────────────────────────────────────────
+// The patterns above describe the CLAUDE TUI only. Codex sessions come in two
+// dialects, neither of which these regexes can read:
+//   'codex-exec-json'         — fleet agents; evidence lives in the teed
+//                               `--json` stream (detectors/exec-json.js)
+//   'codex-tui-conservative'  — operator-attached codex TUI panes; the glyph
+//                               grammar is UNKNOWN until the capture harness
+//                               (maestro-capture-fixtures.sh) collects real
+//                               fixtures, so pane detectors must return
+//                               {hit:false, capability:'unsupported'} — never
+//                               an idle/restart verdict on glyph evidence.
+// An undefined dialect means "claude" (every pre-WP-09 caller), keeping the
+// claude paths byte-identical.
+const CODEX_PANE_DIALECTS = new Set(['codex-exec-json', 'codex-tui-conservative']);
+
+function isCodexPaneDialect(dialect) {
+  return CODEX_PANE_DIALECTS.has(dialect);
+}
+
+/** The live-spinner regex for a dialect, or null when the dialect has none. */
+function liveSpinnerReFor(dialect) {
+  return isCodexPaneDialect(dialect) ? null : LIVE_SPINNER_RE;
+}
+
+module.exports = {
+  LIVE_SPINNER_RE,
+  LIVE_SPINNER_SRC,
+  SPINNER_GLYPHS,
+  CODEX_PANE_DIALECTS,
+  isCodexPaneDialect,
+  liveSpinnerReFor,
+};

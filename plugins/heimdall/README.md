@@ -189,6 +189,28 @@ drive `/heimdall:harden`.
 The OS boundary holds only if the agent uid has **no** sudo and **no**
 docker-socket access — both are root-equivalent and bypass file permissions.
 
+### Codex CLI lane (config.toml, not .mcp.json)
+
+The uid/file-ownership boundary itself is runtime-agnostic — it denies the
+agent uid no matter which CLI is running. What differs on Codex CLI is the MCP
+wiring: codex reads MCP servers from `[mcp_servers.<name>]` in
+`$CODEX_HOME/config.toml` (managed via the `codex mcp` CLI) or a plugin's
+`.mcp.json` — the **project-root `.mcp.json` that `setup-secrets-heimdall.sh`
+rewrites is not read by codex**. The script deliberately does not touch
+`config.toml` (it's user config, and heimdall's own catalog protects it), so
+after `/heimdall:harden` mirror the broker-wrapped launch manually:
+
+```bash
+# same broker command the harden run wrote into .mcp.json
+codex mcp add <server-name> -- /usr/local/lib/mcp-broker/<repo>/mcp-pg-broker <wrapper-args…>
+```
+
+Two codex-specific protection notes (both pre-seeded in the `/heimdall:protect`
+catalog): `~/.codex/config.toml` holds the **hook trust store** — an agent that
+can edit it can self-trust malicious hooks, so keep it phrase-locked; and
+`~/.codex/auth.json` is conceal-grade (hard read-deny via `/heimdall:conceal`,
+not a phrase lock).
+
 ### Recovering from a broken config
 
 If `heimdall-conceal.json` is present but unreadable or invalid JSON, the hook

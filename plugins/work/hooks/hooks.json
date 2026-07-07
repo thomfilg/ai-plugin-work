@@ -1,5 +1,4 @@
 {
-  "description": "Work2 orchestrator hooks for deterministic workflow execution",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -25,7 +24,7 @@
         ]
       },
       {
-        "matcher": "Task|Skill",
+        "matcher": "Task|Skill|Agent",
         "hooks": [
           {
             "type": "command",
@@ -71,7 +70,7 @@
         ]
       },
       {
-        "matcher": "Task|Skill",
+        "matcher": "Task|Skill|Agent",
         "hooks": [
           {
             "type": "command",
@@ -127,7 +126,7 @@
         ]
       },
       {
-        "matcher": "Task|Skill",
+        "matcher": "Task|Skill|Agent",
         "hooks": [
           {
             "type": "command",
@@ -160,7 +159,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Task|Skill|Bash",
+        "matcher": "Task|Skill|Agent|Bash",
         "hooks": [
           {
             "type": "command",
@@ -217,7 +216,7 @@
         ]
       },
       {
-        "matcher": "AskUserQuestion",
+        "matcher": "AskUserQuestion|request_user_input",
         "hooks": [
           {
             "type": "command",

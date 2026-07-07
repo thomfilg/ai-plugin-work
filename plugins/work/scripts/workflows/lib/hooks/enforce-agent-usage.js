@@ -23,6 +23,9 @@ const path = require('path');
 const { isRunningInAgent } = require('../agent-detection');
 const { commandAccessesProtectedPaths } = require('../command-analysis');
 const { logHookError } = require('../hook-error-log');
+// Vendored dual-runtime adapter: runtime detection for the per-runtime block
+// texts (codex has no Task tool — required agents run as INLINE personas).
+const { getRuntime } = require('../runtime');
 
 // Absolute path to the sanctioned commit script agents are forced to use.
 const COMMIT_SCRIPT = path.resolve(__dirname, '..', '..', 'work', 'scripts', 'commit-and-push.js');
@@ -186,6 +189,23 @@ function agentHintsMatch(hookData, transcriptPath, agentAliases) {
   return hints.some((hint) => agentAliases.some((alias) => hint.includes(alias.toLowerCase())));
 }
 
+/**
+ * Per-runtime block text for a rule. The claude rendering is the rule's
+ * literal message, byte-identical to today's. On codex there is no Task tool
+ * (design C1): rules with a required agent render inline-persona guidance
+ * instead — the persona file IS the agent there. Rules without a required
+ * agent (Semantic Commits → commit-and-push.js) are runtime-neutral already.
+ */
+function renderRuleMessage(rule, runtime) {
+  if (runtime !== 'codex' || !rule.requiredAgent) return rule.message;
+  return (
+    `❌ ${rule.name} must run under the "${rule.requiredAgent}" persona.\n\n` +
+    `[work:codex-degraded] subagent '${rule.requiredAgent}' runs INLINE — codex has no Task tool.\n\n` +
+    `✅ Read the persona file agents/${rule.requiredAgent}.md (work plugin), adopt it,\n` +
+    `then perform this operation inline following that persona's rules.\n`
+  );
+}
+
 /** Whether `rule` applies to the current tool invocation (tool + command match). */
 function ruleMatches(rule, toolName, toolInput) {
   if (rule.toolName !== toolName) return false;
@@ -201,11 +221,13 @@ function ruleSatisfied(rule, toolInput, transcriptPath, hookData) {
   );
 }
 
-function enforceRules(toolName, toolInput, transcriptPath, hookData) {
+function enforceRules(toolName, toolInput, transcriptPath, hookData, runtime) {
   for (const rule of AGENT_ENFORCEMENT_RULES) {
     if (!ruleMatches(rule, toolName, toolInput)) continue;
     if (ruleSatisfied(rule, toolInput, transcriptPath, hookData)) continue;
-    process.stderr.write(`BLOCKED: ${rule.name} requires agent!\n\n${rule.message}\n`);
+    process.stderr.write(
+      `BLOCKED: ${rule.name} requires agent!\n\n${renderRuleMessage(rule, runtime)}\n`
+    );
     process.exit(2);
   }
 }
@@ -233,7 +255,7 @@ function ruleMatchedInScript(bashRules, scriptPath) {
   return bashRules.find((r) => r.commandPattern.test(source));
 }
 
-function enforceScriptBypass(toolName, toolInput, transcriptPath, hookData) {
+function enforceScriptBypass(toolName, toolInput, transcriptPath, hookData, runtime) {
   if (toolName !== 'Bash') return;
   const command = toolInput?.command || '';
   const bashRules = AGENT_ENFORCEMENT_RULES.filter(
@@ -248,7 +270,7 @@ function enforceScriptBypass(toolName, toolInput, transcriptPath, hookData) {
   if (!matchedRule) return;
   if (isRunningInAgent(transcriptPath, matchedRule.agentAliases, hookData)) return;
   process.stderr.write(
-    `BLOCKED: Script "${scriptCheck.scriptPath}" contains ${matchedRule.name} operation!\n\n${matchedRule.message}\n`
+    `BLOCKED: Script "${scriptCheck.scriptPath}" contains ${matchedRule.name} operation!\n\n${renderRuleMessage(matchedRule, runtime)}\n`
   );
   process.exit(2);
 }
@@ -257,13 +279,14 @@ async function main() {
   let input = '';
   for await (const chunk of process.stdin) input += chunk;
   const hookData = JSON.parse(input);
+  const runtime = getRuntime(hookData).name;
   const toolName = hookData.tool_name;
   const toolInput = hookData.tool_input || {};
   const transcriptPath = hookData.transcript_path;
 
   blockSelfCall(toolName, toolInput, transcriptPath);
-  enforceRules(toolName, toolInput, transcriptPath, hookData);
-  enforceScriptBypass(toolName, toolInput, transcriptPath, hookData);
+  enforceRules(toolName, toolInput, transcriptPath, hookData, runtime);
+  enforceScriptBypass(toolName, toolInput, transcriptPath, hookData, runtime);
   process.exit(0);
 }
 

@@ -10,11 +10,15 @@
 // Resolve the assistant-side text surface that trigger_stop_response evaluates
 // against. Strictly excludes tool inputs and tool results: only the assistant's
 // natural-language response counts. Reads payload.response, falling back to
-// payload.assistant_response, then payload.transcript. Returns '' otherwise.
+// payload.assistant_response, then payload.last_assistant_message (the codex
+// Stop payload's native field — ground truth §2.5.2; Claude Stop payloads
+// never carry it, so the claude path is unchanged), then payload.transcript.
+// Returns '' otherwise.
 function _extractStopResponse(payload) {
   if (!payload || typeof payload !== 'object') return '';
   if (typeof payload.response === 'string') return payload.response;
   if (typeof payload.assistant_response === 'string') return payload.assistant_response;
+  if (typeof payload.last_assistant_message === 'string') return payload.last_assistant_message;
   if (typeof payload.transcript === 'string') return payload.transcript;
   return '';
 }

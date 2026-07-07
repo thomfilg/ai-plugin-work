@@ -1,0 +1,9 @@
+{
+  "session_id": "019f3c4e-0eed-7e11-bab2-6c1b30b4943e",
+  "transcript_path": "/tmp/codex-probe-home/sessions/2026/07/07/rollout-2026-07-07T08-19-36-019f3c4e-0eed-7e11-bab2-6c1b30b4943e.jsonl",
+  "cwd": "/tmp/codex-probe-repo",
+  "model": "gpt-5.5",
+  "permission_mode": "bypassPermissions",
+  "hook_event_name": "SessionStart",
+  "source": "startup"
+}

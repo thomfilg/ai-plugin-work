@@ -13,3 +13,9 @@ node_modules
 # Local-only backward-compat symlink for stale sessions (workflows -> scripts/workflows)
 /workflows
 .in_use/
+
+# Codex CLI scratch (project-level config/session dirs are machine-specific;
+# .in_use/ above is codex's per-PID plugin-cache lock)
+/.codex/
+/.agents/
+*.exec.jsonl

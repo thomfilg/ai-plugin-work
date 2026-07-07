@@ -11,19 +11,24 @@
 #      $BOOTSTRAP_SCRIPT just like /work-workflow:bootstrap does). Skipped
 #      gracefully if the helper isn't found.
 #   4. Launch a <TICKET>-work tmux session running
-#      `$CLAUDE_BIN --dangerously-skip-permissions '/$SKILL_NAME <TICKET>'`.
+#      `$CLAUDE_BIN --dangerously-skip-permissions '/$SKILL_NAME <TICKET>'`
+#      (claude runtime, default) or `AGENT_RUNTIME=codex $CODEX_BIN exec
+#      --json … | tee -a <state>/<TICKET>.exec.jsonl` (--runtime=codex).
 #
 # Idempotent: skips tickets that already have a worktree or tmux session.
 #
 # Usage:
 #   bash maestro-bootstrap.sh GH-397 GH-398 GH-414
+#   bash maestro-bootstrap.sh --runtime=codex GH-397
 #
 # Env vars (with defaults; override or set in ../.envrc):
 #   WORKTREES_BASE    $HOME/worktrees
 #   REPO_NAME         claude-plugin-work
 #   BASE_BRANCH       main
 #   CLAUDE_BIN        claude
+#   CODEX_BIN         codex
 #   SKILL_NAME        work
+#   MAESTRO_RUNTIME   (unset)  Fleet-wide runtime default; --runtime= wins.
 #   BOOTSTRAP_SCRIPT  (unset)  Path to custom per-ticket setup script invoked
 #                              by work-workflow's bootstrap-custom-script.js.
 set -u
@@ -62,11 +67,15 @@ SKILL_FLAG=""
 # oracle — not a bespoke registry row — defines "done"). Mirrors the JS
 # skill-registry.isAllowedSkill(name, {hasOracle:true}) decision (GH-514).
 ALLOW_GENERIC=0
+RUNTIME_FLAG=""
 _FILTERED_ARGS=()
 for _arg in "$@"; do
   case "$_arg" in
     --skill=*)
       SKILL_FLAG="${_arg#--skill=}"
+      ;;
+    --runtime=*)
+      RUNTIME_FLAG="${_arg#--runtime=}"
       ;;
     --allow-generic)
       ALLOW_GENERIC=1
@@ -138,6 +147,55 @@ if [ -n "$SKILL_FLAG" ] || [ -n "${MAESTRO_SKILL:-}" ]; then
 fi
 
 RESOLVED_SKILL="$(resolve_skill)"
+
+# ── Runtime resolution (WP-09, design §H)
+#    Precedence: --runtime=<name> > MAESTRO_RUNTIME env > "claude".
+#    Mirrors lib/maestro-conduct/runtime-profile.js (which additionally reads
+#    the orchestration manifest between the file and the env legs).
+CODEX_BIN="${CODEX_BIN:-codex}"
+_RUNTIME_RE='^(claude|codex)$'
+
+resolve_runtime() {
+  local candidate=""
+  if [ -n "$RUNTIME_FLAG" ]; then
+    candidate="$RUNTIME_FLAG"
+  elif [ -n "${MAESTRO_RUNTIME:-}" ]; then
+    candidate="$MAESTRO_RUNTIME"
+  else
+    candidate="claude"
+  fi
+  if [[ "$candidate" =~ $_RUNTIME_RE ]]; then
+    echo "$candidate"
+  else
+    echo "[maestro] WARNING: unknown runtime '$candidate' (expected claude|codex) — falling open to 'claude'" >&2
+    echo "claude"
+  fi
+}
+
+RUNTIME_EXPLICIT=0
+if [ -n "$RUNTIME_FLAG" ] || [ -n "${MAESTRO_RUNTIME:-}" ]; then
+  RUNTIME_EXPLICIT=1
+fi
+
+RESOLVED_RUNTIME="$(resolve_runtime)"
+
+# Where fleet-launched codex agents tee their `--json` stream. Mirrors
+# namespace.stateDir() (STATE_DIR env wins, else ~/.cache/maestro-conduct with
+# a per-namespace subdir) so the conductor's exec-json detector reads the same
+# file this launcher writes.
+resolve_state_dir() {
+  if [ -n "${STATE_DIR:-}" ]; then
+    printf '%s' "$STATE_DIR"
+    return
+  fi
+  local base="$HOME/.cache/maestro-conduct"
+  if [[ "${MAESTRO_NS:-}" =~ ^[A-Za-z0-9_-]+$ ]]; then
+    printf '%s/%s' "$base" "$MAESTRO_NS"
+  else
+    printf '%s' "$base"
+  fi
+}
+MAESTRO_EXEC_STATE_DIR="$(resolve_state_dir)"
 
 # Per-ticket `.maestro-skill` file MUST land where skill-registry.js reads it.
 # The registry's tasksBase() resolves in this exact order: TASKS_BASE →
@@ -308,6 +366,25 @@ for TICKET in "$@"; do
     fi
   fi
 
+  # WP-09: persist the resolved runtime next to .maestro-skill with the same
+  # preserve-on-bare-re-run semantics — an explicit --runtime/MAESTRO_RUNTIME
+  # wins; otherwise a valid persisted value survives so a codex fleet isn't
+  # silently relaunched as claude (and vice versa). Malformed → overwrite.
+  TICKET_RUNTIME="$RESOLVED_RUNTIME"
+  if [ "$RUNTIME_EXPLICIT" = "1" ] || [ ! -f "$TICKET_DIR/.maestro-runtime" ]; then
+    printf '%s\n' "$TICKET_RUNTIME" > "$TICKET_DIR/.maestro-runtime"
+    echo "[$TICKET] .maestro-runtime = $TICKET_RUNTIME (written)"
+  else
+    EXISTING_RUNTIME="$(head -n1 "$TICKET_DIR/.maestro-runtime" | tr -d '[:space:]')"
+    if [[ "$EXISTING_RUNTIME" =~ $_RUNTIME_RE ]]; then
+      TICKET_RUNTIME="$EXISTING_RUNTIME"
+      echo "[$TICKET] .maestro-runtime = $EXISTING_RUNTIME (preserved — no explicit runtime on this invocation)"
+    else
+      echo "[$TICKET] .maestro-runtime on disk contains malformed runtime '$EXISTING_RUNTIME' — overwriting with '$TICKET_RUNTIME'" >&2
+      printf '%s\n' "$TICKET_RUNTIME" > "$TICKET_DIR/.maestro-runtime"
+    fi
+  fi
+
   # Per-ticket custom bootstrap (runs only on fresh worktrees).
   # Stub-skip gate (R4 / AC1): only the legacy `work` skill writes the
   # `.work-state.json` stub via bootstrap-custom-script.js. For any other
@@ -329,21 +406,44 @@ for TICKET in "$@"; do
     # elapsedMin=13896 interrupt on a brand-new session; 21 inherited
     # nudges-exhausted counts → instant kill). Idempotent, fail-open.
     node "$_MAESTRO_SCRIPT_DIR/maestro-cleanup.js" "$TICKET" --alert-counts >/dev/null 2>&1 || true
-    tmux new-session -d -s "$SESSION" -c "$WT" \
-      "${ENV_PIN}${INBOX_ENV}$CLAUDE_BIN --dangerously-skip-permissions '/$TICKET_SKILL $TICKET'"
-    echo "[$TICKET] launched tmux session $SESSION (claude /$TICKET_SKILL $TICKET)"
-    # Post-launch grooming (best-effort): name the conversation so sessions
-    # are distinguishable on mobile (GH-625), and point the agent at its
-    # orchestration context file when the operator wrote one.
-    (
-      sleep 3
-      tmux send-keys -t "$SESSION" -l "/rename $TICKET /$TICKET_SKILL maestro" 2>/dev/null
-      tmux send-keys -t "$SESSION" Enter 2>/dev/null
+    if [ "$TICKET_RUNTIME" = "codex" ]; then
+      # Codex fleet launch (design §H): exec mode with the `--json` stream
+      # teed for the conductor's exec-json detector. Both bypass flags are
+      # MANDATORY unattended — without --dangerously-bypass-hook-trust the
+      # untrusted hooks are SILENTLY skipped and the whole /work enforcement
+      # layer is off (ground truth §2.8.2). `</dev/null` because codex exec
+      # hangs on piped stdin; skill-mention prompt because codex has no
+      # /slash surface (SKILL.md driver instructions carry the loop).
+      mkdir -p "$MAESTRO_EXEC_STATE_DIR"
+      EXEC_LOG="$MAESTRO_EXEC_STATE_DIR/$TICKET.exec.jsonl"
+      tmux new-session -d -s "$SESSION" -c "$WT" \
+        "${ENV_PIN}${INBOX_ENV}AGENT_RUNTIME=codex $CODEX_BIN exec --json --dangerously-bypass-approvals-and-sandbox --dangerously-bypass-hook-trust \"Use the $TICKET_SKILL skill for $TICKET\" </dev/null | tee -a '$EXEC_LOG'"
+      echo "[$TICKET] launched tmux session $SESSION (codex exec \$$TICKET_SKILL $TICKET; stream → $EXEC_LOG)"
+      # §H grooming: no composer to /rename or type into — the context
+      # pointer travels through the file mailbox (maestro-signal.js does the
+      # secure channel-file create) and the /work inbox relay surfaces it.
       if [ -f "$TICKET_DIR/.maestro-context.md" ]; then
-        tmux send-keys -t "$SESSION" -l "[MAESTRO] Read your orchestration context at $TICKET_DIR/.maestro-context.md before starting." 2>/dev/null
-        tmux send-keys -t "$SESSION" Enter 2>/dev/null
+        node "$_MAESTRO_SCRIPT_DIR/maestro-signal.js" "$TICKET" \
+          "[MAESTRO] Read your orchestration context at $TICKET_DIR/.maestro-context.md before starting." \
+          2>/dev/null || true
       fi
-    ) &
+    else
+      tmux new-session -d -s "$SESSION" -c "$WT" \
+        "${ENV_PIN}${INBOX_ENV}$CLAUDE_BIN --dangerously-skip-permissions '/$TICKET_SKILL $TICKET'"
+      echo "[$TICKET] launched tmux session $SESSION (claude /$TICKET_SKILL $TICKET)"
+      # Post-launch grooming (best-effort): name the conversation so sessions
+      # are distinguishable on mobile (GH-625), and point the agent at its
+      # orchestration context file when the operator wrote one.
+      (
+        sleep 3
+        tmux send-keys -t "$SESSION" -l "/rename $TICKET /$TICKET_SKILL maestro" 2>/dev/null
+        tmux send-keys -t "$SESSION" Enter 2>/dev/null
+        if [ -f "$TICKET_DIR/.maestro-context.md" ]; then
+          tmux send-keys -t "$SESSION" -l "[MAESTRO] Read your orchestration context at $TICKET_DIR/.maestro-context.md before starting." 2>/dev/null
+          tmux send-keys -t "$SESSION" Enter 2>/dev/null
+        fi
+      ) &
+    fi
   fi
 done
 # Wait for the post-launch grooming subshells so callers see complete setup.

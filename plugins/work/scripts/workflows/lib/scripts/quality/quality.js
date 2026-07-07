@@ -38,6 +38,24 @@ const SKIP_DIRS_ROOT_ONLY = new Set(['tasks', 'external_scripts', 'references', 
 
 const TEST_FILE_RE = /(?:^|[\\/])__tests__[\\/]|\.test\.js$|\.spec\.js$/;
 
+// Vendored runtime copies — machine-verified byte-identical duplicates of
+// factories/runtime, kept in parity by `node scripts/sync-vendored.js --check`
+// in CI. Intentional duplication (codex cache-isolates each plugin, so the
+// lib is checked in per plugin): excluded from the gate here; the master
+// under factories/runtime is what gets linted. Mirror any change in
+// scripts/sync-vendored.js VENDOR_DIRS.
+const VENDORED_RUNTIME_DIRS = [
+  'plugins/heimdall/lib/runtime',
+  'plugins/maestro/scripts/lib/runtime',
+  'plugins/synapsys/lib/runtime',
+  'plugins/work/scripts/workflows/lib/runtime',
+];
+
+function isVendoredRuntimeFile(absFile, repoRoot) {
+  const rel = path.relative(repoRoot, absFile).split(path.sep).join('/');
+  return VENDORED_RUNTIME_DIRS.some((dir) => rel.startsWith(`${dir}/`));
+}
+
 function parseArgs(argv) {
   const opts = { changed: false, json: false, paths: [] };
   for (const a of argv) {
@@ -137,9 +155,11 @@ function changedFiles(repoRoot) {
 }
 
 function discoverFiles(opts, repoRoot) {
-  if (opts.paths.length > 0) return expandPaths(opts.paths, repoRoot);
-  if (opts.changed) return changedFiles(repoRoot);
-  return walkJsFiles(repoRoot);
+  let files;
+  if (opts.paths.length > 0) files = expandPaths(opts.paths, repoRoot);
+  else if (opts.changed) files = changedFiles(repoRoot);
+  else files = walkJsFiles(repoRoot);
+  return files.filter((f) => !isVendoredRuntimeFile(f, repoRoot));
 }
 
 function nonTestFiles(absFiles) {

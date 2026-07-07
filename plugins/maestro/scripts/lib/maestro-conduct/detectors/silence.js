@@ -71,7 +71,8 @@ function resolveSilenceLimit(ctx) {
 // Both detectors MUST consume the same regex; otherwise one classifies a pane
 // as active while the other classifies it as silent, and the escalation chain
 // becomes unpredictable for "still running" form spinners.
-const { LIVE_SPINNER_RE } = require('../live-spinner');
+const { LIVE_SPINNER_RE, isCodexPaneDialect } = require('../live-spinner');
+const execJson = require('./exec-json');
 
 function paneTokens(pane) {
   if (!pane) return null;
@@ -100,7 +101,22 @@ function isActive(pane, hashNow, toksNow, prev) {
   return false;
 }
 
-function detect({ session, ticket, pane, skill }) {
+/**
+ * Codex-dialect routing (WP-09): fleet agents ('codex-exec-json') get their
+ * aliveness from the teed `--json` stream (bytes appended / turn.completed —
+ * design C14); operator-attached codex TUI panes ('codex-tui-conservative')
+ * have an unknown glyph grammar and NEVER get an idle verdict. Returns null
+ * for claude dialects so the caller falls through to today's pane heuristics.
+ */
+function codexDialectVerdict({ session, ticket, skill, dialect, execLog }) {
+  if (dialect === 'codex-exec-json') {
+    return execJson.detect({ session, ticket, execLog, limitSec: resolveSilenceLimit({ skill }) });
+  }
+  if (isCodexPaneDialect(dialect)) return { hit: false, capability: 'unsupported' };
+  return null;
+}
+
+function detect({ session, ticket, pane, skill, dialect, execLog }) {
   // Marker is keyed by SESSION, not ticket. Multiple sessions share a ticket
   // (-work + -dev + -listen all map to the same ticket id) but each has its
   // own pane content; sharing a marker would cause hash ping-pong and leave
@@ -109,8 +125,13 @@ function detect({ session, ticket, pane, skill }) {
   const key = session || ticket;
   if (!key) return { hit: false };
   if (!pane) {
+    // Runtime-neutral: a vanished tmux session is hard evidence on every
+    // dialect (nothing left to mis-kill), so session-gone fires before any
+    // dialect gating.
     return { hit: true, kind: 'session-gone', silenceSec: Infinity, sessionGone: true };
   }
+  const codexVerdict = codexDialectVerdict({ session, ticket, skill, dialect, execLog });
+  if (codexVerdict) return codexVerdict;
 
   const hashNow = paneHash(pane);
   const toksNow = paneTokens(pane);

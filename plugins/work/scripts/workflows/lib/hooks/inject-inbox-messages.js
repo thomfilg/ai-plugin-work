@@ -25,6 +25,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
+const { getRuntime } = require('../runtime');
 
 function fail() {
   process.exit(0);
@@ -42,14 +43,9 @@ function readStdin() {
 
 function deriveTicket(hookData) {
   // Priority order: transcript_path > tool_input.command > .git/HEAD of cwd
-  const tp = hookData?.transcript_path;
-  if (typeof tp === 'string') {
-    const m = tp.match(/\b[A-Z]+-\d+\b/);
-    if (m) return m[0];
-  }
-  const cmd = hookData?.tool_input?.command;
-  if (typeof cmd === 'string') {
-    const m = cmd.match(/\b[A-Z]+-\d+\b/);
+  for (const source of [hookData?.transcript_path, hookData?.tool_input?.command]) {
+    if (typeof source !== 'string') continue;
+    const m = source.match(/\b[A-Z]+-\d+\b/);
     if (m) return m[0];
   }
   try {
@@ -130,11 +126,21 @@ function main() {
 
   // Cap at last 5 fresh lines to avoid flooding the agent if many piled up.
   const toShow = fresh.slice(-5);
-  process.stderr.write(
+  const text =
     `\n=== Monitor messages for ${ticket} (${toShow.length}/${fresh.length} new) ===\n` +
-      toShow.map((l) => `[MONITOR] ${l}`).join('\n') +
-      '\n=== end monitor messages ===\n'
-  );
+    toShow.map((l) => `[MONITOR] ${l}`).join('\n') +
+    '\n=== end monitor messages ===\n';
+  const rt = getRuntime(hookData);
+  if (rt.name === 'codex') {
+    // stderr-on-exit-0 never reaches the model on codex — relay through the
+    // PostToolUse additionalContext envelope instead (C11).
+    rt.emit.context(
+      'PostToolUse',
+      `[work:codex-degraded] inbox relayed via PostToolUse hook (no Monitor on codex)\n${text}`
+    );
+  } else {
+    process.stderr.write(text);
+  }
   process.exit(0);
 }
 

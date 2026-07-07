@@ -5,16 +5,18 @@
 # they can never disagree on a clean checkout.)
 #
 # Derive the session-name / ticket prefix from the ticket provider
-# (ticket-provider.js) instead of hardcoding "GH". Fail-open: any node/module
+# (vendored ticket-prefix.js) instead of hardcoding "GH". Fail-open: any node/module
 # failure, an empty projectKey (github / unconfigured), or a value that fails
 # the strict ^[A-Z][A-Z0-9]*$ validation all fall back to "GH" — never an empty
 # prefix. Sets the global PREFIX. Always exits 0 (never hard-errors the caller).
 resolve_prefix() {
   local script_dir provider_js raw
   script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-  # This lib lives in plugins/maestro/scripts/lib/, so the work plugin is three
-  # levels up (../../../work) — one deeper than the calling scripts.
-  provider_js="$script_dir/../../../work/scripts/workflows/lib/ticket-provider.js"
+  # Vendored maestro-local helper (WP-09): cache installs isolate each plugin,
+  # so the old ../../../work/scripts/workflows/lib/ticket-provider.js sourcing
+  # crashed there. ticket-prefix.js reproduces just the read-only projectKey
+  # resolution and exposes the same getProviderConfig() call shape.
+  provider_js="$script_dir/ticket-prefix.js"
 
   # Shell out to node to read the provider's projectKey, mirroring
   # config.js safeTicketId (getProviderConfig({ skipPrompt: true })). Any

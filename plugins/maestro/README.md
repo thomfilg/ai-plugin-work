@@ -47,6 +47,19 @@ over) a second daemon in the same namespace. Unset = the historical
 machine-global behaviour. Full recipe: `docs/OPERATOR_PLAYBOOK.md` → "Running
 concurrent maestro instances".
 
+### Codex CLI fleets
+
+Runtime is per-ticket: `maestro-bootstrap.sh --runtime=codex GH-N` (or a manifest
+`runtime` field / `MAESTRO_RUNTIME` env) launches that agent as
+`codex exec --json --dangerously-bypass-approvals-and-sandbox
+--dangerously-bypass-hook-trust … | tee -a <STATE_DIR>/<TICKET>.exec.jsonl`, and the
+conductor's detectors read that JSONL stream instead of pane glyphs. Mixed
+claude/codex fleets work under one conductor; unset everything and behavior is
+today's Claude flow byte-for-byte. The maestro statusline (`/maestro:install`) has
+no codex surface — the installer prints a `[maestro:codex-degraded]` notice with a
+tmux `status-right` recipe and exits 0. Full recipes, the trust story, and the
+verbatim unsupported list: `docs/OPERATOR_PLAYBOOK.md` → "Codex fleets".
+
 ## Skills (slash commands)
 
 - `/orchestrate <ticket-ids>` — bootstrap + launch + start the orchestrator for a set of tickets

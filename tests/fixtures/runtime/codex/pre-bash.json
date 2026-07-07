@@ -1,0 +1,14 @@
+{
+  "session_id": "019f3c4e-0eed-7e11-bab2-6c1b30b4943e",
+  "turn_id": "019f3c4e-0fa1-7db2-8979-a470735cf498",
+  "transcript_path": "/tmp/codex-probe-home/sessions/2026/07/07/rollout-2026-07-07T08-19-36-019f3c4e-0eed-7e11-bab2-6c1b30b4943e.jsonl",
+  "cwd": "/tmp/codex-probe-repo",
+  "hook_event_name": "PreToolUse",
+  "model": "gpt-5.5",
+  "permission_mode": "bypassPermissions",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "if [ -z \"${CLAUDE_PLUGIN_ROOT+x}\" ]; then echo VAR-UNSET; else echo \"VAR-SET=$CLAUDE_PLUGIN_ROOT\"; fi"
+  },
+  "tool_use_id": "call_dOqZh9bWPH3mk2oV4wWsLA44"
+}

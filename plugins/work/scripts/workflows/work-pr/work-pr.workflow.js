@@ -30,6 +30,7 @@ const safeTicketId = config.safeTicketId;
 const { safeExec, computeScreenshotHash, buildInspectData } = require(
   path.join(__dirname, 'work-pr-inspect')
 );
+const { T, getRuntime } = require(path.join(__dirname, '..', 'lib', 'instruction-vocab'));
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
@@ -97,7 +98,9 @@ function decideScreenshotGate(d) {
   return {
     action: 'RUN',
     reason: 'TSX/JSX changed but no screenshots — gate required',
-    command: 'AskUserQuestion',
+    // Display label routed through the vocab map: 'AskUserQuestion' on
+    // claude (byte-identical), 'request_user_input' on codex (C3).
+    command: T('tool.question', {}, getRuntime().name),
   };
 }
 

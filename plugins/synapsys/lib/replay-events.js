@@ -16,6 +16,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const matcher = require('./matcher');
+const transcriptReader = require('./runtime/transcript');
 
 // Synthetic user entries emitted by Claude Code (slash-command stdouts,
 // system-reminder wrappers, hook output, agent inbox notifications) should not
@@ -74,10 +75,46 @@ function extractAssistantEvents(message) {
     }));
 }
 
+// --- Codex rollout records (WP-05) -----------------------------------------
+// Same extraction rules as the vendored runtime transcript reader (design §E):
+// user text comes from `event_msg`/`user_message` records ONLY (response_item
+// user-role rows carry injected AGENTS.md/skill/hook context and would pollute
+// FP rates); tool calls come from `response_item` function_call payloads with
+// codex shell-like names normalized to 'Bash' so `Bash:` specs replay.
+
+const CODEX_SHELL_NAMES = new Set(['exec_command', 'shell', 'shell_command', 'unified_exec']);
+
+function parseCodexCallArguments(args) {
+  if (typeof args !== 'string') return args ?? undefined;
+  try {
+    return JSON.parse(args);
+  } catch {
+    return undefined;
+  }
+}
+
+function extractCodexUserEvents(payload) {
+  if (!payload || payload.type !== 'user_message' || typeof payload.message !== 'string') {
+    return [];
+  }
+  const prompt = transcriptReader.stripInjected(payload.message, 'codex');
+  return prompt.length > 0 ? [{ event: 'UserPromptSubmit', prompt }] : [];
+}
+
+function extractCodexToolEvents(payload) {
+  if (!payload || payload.type !== 'function_call' || typeof payload.name !== 'string') return [];
+  const tool = CODEX_SHELL_NAMES.has(payload.name) ? 'Bash' : payload.name;
+  return [{ event: 'PreToolUse', tool, tool_input: parseCodexCallArguments(payload.arguments) }];
+}
+
 /**
  * Pure transcript → synthetic-event mapper (Task 2, R2, G1+G2).
+ * Claude transcript rows:
  *   - `type=user`      → `{event:'UserPromptSubmit', prompt}`
  *   - `type=assistant` → one `{event:'PreToolUse', tool, tool_input}` per tool_use block
+ * Codex rollout rows (shape-keyed — no runtime flag needed):
+ *   - `type=event_msg` + `payload.type=user_message` → `{event:'UserPromptSubmit', prompt}`
+ *   - `type=response_item` + `payload.type=function_call` → `{event:'PreToolUse', tool, tool_input}`
  *   - else → `[]`
  */
 function extractEvents(parsedLine) {
@@ -85,6 +122,8 @@ function extractEvents(parsedLine) {
   const { type, message } = parsedLine;
   if (type === 'user') return extractUserEvents(message, parsedLine);
   if (type === 'assistant') return extractAssistantEvents(message);
+  if (type === 'event_msg') return extractCodexUserEvents(parsedLine.payload);
+  if (type === 'response_item') return extractCodexToolEvents(parsedLine.payload);
   return [];
 }
 
@@ -152,19 +191,41 @@ function collectRecentJsonl(projDir, cutoff) {
   return out;
 }
 
+// Codex leg (WP-05, design §M "v1 partial"): rollouts under
+// `<codexBase>/YYYY/MM/DD/rollout-*.jsonl` filtered by line-1
+// `session_meta.cwd` via the vendored reader. Runs only for default walks
+// (no explicit claude `baseDir`/`project` override — keeping test trees and
+// targeted claude runs untouched) or when `codexBase` is passed explicitly;
+// a cwd is required because the filter is cwd-keyed.
+function collectCodexRollouts({ since, codexBase, baseDir, project, cwd }) {
+  if (!cwd) return [];
+  if (!codexBase && (baseDir || project)) return [];
+  const root = codexBase || path.join(os.homedir(), '.codex', 'sessions');
+  if (!fs.existsSync(root)) return [];
+  try {
+    const maxAgeDays = parseSince(since || '7d') / (24 * 60 * 60 * 1000);
+    return transcriptReader.listSessionsForCwd(cwd, { root, maxAgeDays, runtime: 'codex' });
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Walk `*.jsonl` transcripts under `baseDir` (default `~/.claude/projects/`)
- * whose mtime falls within the `--since` window.
+ * whose mtime falls within the `--since` window, plus the codex rollouts
+ * recorded for `cwd` (see collectCodexRollouts).
  */
-function walkTranscripts({ since, project, baseDir, cwd, allProjects } = {}) {
-  const root = baseDir || path.join(os.homedir(), '.claude/projects');
-  if (!fs.existsSync(root)) return [];
-  const cutoff = Date.now() - parseSince(since || '7d');
-  const projectDirs = resolveProjectDirs(root, project, { cwd, allProjects });
+function walkTranscripts({ since, project, baseDir, cwd, allProjects, codexBase } = {}) {
   const out = [];
-  for (const projDir of projectDirs) {
-    out.push(...collectRecentJsonl(projDir, cutoff));
+  const root = baseDir || path.join(os.homedir(), '.claude/projects');
+  if (fs.existsSync(root)) {
+    const cutoff = Date.now() - parseSince(since || '7d');
+    const projectDirs = resolveProjectDirs(root, project, { cwd, allProjects });
+    for (const projDir of projectDirs) {
+      out.push(...collectRecentJsonl(projDir, cutoff));
+    }
   }
+  out.push(...collectCodexRollouts({ since, codexBase, baseDir, project, cwd }));
   return out;
 }
 

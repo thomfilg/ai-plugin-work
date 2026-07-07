@@ -1,0 +1,24 @@
+{
+  "session_id": "019f3c4e-0eed-7e11-bab2-6c1b30b4943e",
+  "turn_id": "019f3c4e-0fa1-7db2-8979-a470735cf498",
+  "transcript_path": "/tmp/codex-probe-home/sessions/2026/07/07/rollout-2026-07-07T08-19-36-019f3c4e-0eed-7e11-bab2-6c1b30b4943e.jsonl",
+  "cwd": "/tmp/codex-probe-repo",
+  "hook_event_name": "PostToolUse",
+  "model": "gpt-5.5",
+  "permission_mode": "bypassPermissions",
+  "tool_name": "update_plan",
+  "tool_input": {
+    "plan": [
+      {
+        "step": "Complete requested tool operations in order",
+        "status": "in_progress"
+      },
+      {
+        "step": "Report each step result",
+        "status": "pending"
+      }
+    ]
+  },
+  "tool_response": "Plan updated",
+  "tool_use_id": "call_YPt7pCIYORsR0lsOgqt4LGch"
+}

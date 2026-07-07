@@ -1,0 +1,22 @@
+{
+  "session_id": "019f3c4e-0eed-7e11-bab2-6c1b30b4943e",
+  "turn_id": "019f3c4e-0fa1-7db2-8979-a470735cf498",
+  "transcript_path": "/tmp/codex-probe-home/sessions/2026/07/07/rollout-2026-07-07T08-19-36-019f3c4e-0eed-7e11-bab2-6c1b30b4943e.jsonl",
+  "cwd": "/tmp/codex-probe-repo",
+  "hook_event_name": "PostToolUse",
+  "model": "gpt-5.5",
+  "permission_mode": "bypassPermissions",
+  "tool_name": "view_image",
+  "tool_input": {
+    "path": "/tmp/codex-probe-repo/img.png",
+    "detail": "high"
+  },
+  "tool_response": [
+    {
+      "type": "input_image",
+      "image_url": "data:application/octet-stream;base64,iVBORw0KGgoAAAANSUhEUgAAAAE…",
+      "detail": "high"
+    }
+  ],
+  "tool_use_id": "call_dNzbdEG40hCHSO5Gaua3XEpD"
+}

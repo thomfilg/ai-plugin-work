@@ -377,7 +377,8 @@ async function main() {
     if (!input.trim()) return; // Empty stdin → allow
 
     const hookData = JSON.parse(input);
-    const hookType = process.env.CLAUDE_HOOK_TYPE || 'PostToolUse';
+    // CLAUDE_HOOK_TYPE prefix survives both runtimes; hook_event_name is the payload fallback (C12).
+    const hookType = process.env.CLAUDE_HOOK_TYPE || hookData.hook_event_name || 'PostToolUse';
 
     // Telemetry: log every fire so we can prove the hook ran. JSONL.
     logHookFired(hookType, hookData);

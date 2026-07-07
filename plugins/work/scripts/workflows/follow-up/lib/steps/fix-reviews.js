@@ -20,6 +20,7 @@
 const path = require('path');
 const { execFileSync } = require('child_process');
 const { hasUnpushedCommitsStrict } = require('../git-unpushed');
+const { T, getRuntime } = require('../../../lib/instruction-vocab');
 
 function blocked(reason) {
   return { type: 'follow_up_instruction', action: 'blocked', reason };
@@ -266,7 +267,8 @@ function buildReviewExecute(state, comment, commentsScript, counts) {
       agentType: 'work-workflow:developer-nodejs-tdd',
       description: `Review comment ${counts.currentIndex} of ${counts.totalComments}: ${fileRef}`,
       prompt: buildReviewPrompt(comment, fileRef, counts, commands),
-      note: 'Pass the prompt directly to the agent.',
+      // Vocab token: claude byte-identical, codex says "execute inline" (C1).
+      note: T('delegate.task.note.short', {}, getRuntime().name),
     },
   };
 }

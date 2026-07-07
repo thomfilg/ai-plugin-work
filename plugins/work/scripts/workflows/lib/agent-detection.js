@@ -6,6 +6,11 @@
  */
 
 const fs = require('fs');
+// Vendored dual-runtime adapter (see factories/runtime): sniffs the transcript
+// format per file and provides the codex rollout leg (spawn_agent dispatch
+// scan). The claude scanning helpers below stay byte-for-byte — they are the
+// characterization-locked claude leg.
+const { sniffFormat, detectAgentContext } = require('./runtime/transcript');
 
 /**
  * Normalize an agent name by stripping optional namespace prefixes and lowercasing.
@@ -194,7 +199,16 @@ function agentFromHookData(hookData, agentAliases) {
  * @returns {boolean} true if running inside one of the specified agents
  */
 function isRunningInAgent(transcriptPath, agentAliases, hookData) {
-  // Primary: Check environment variable
+  // Primary: identity supplied directly on the hook payload. Payload-first is
+  // the dual-runtime rule (design C12): codex sets no CLAUDE_* env vars, and
+  // on claude the payload's agent_type is at least as authoritative as env.
+  // (Both this and the env check only ever return true on a match, so the
+  // reorder cannot change the function's verdict on claude.)
+  if (agentFromHookData(hookData, agentAliases)) {
+    return true;
+  }
+
+  // Primary-B: Check environment variable (claude legacy)
   const currentAgent = process.env.CLAUDE_CURRENT_AGENT;
   if (matchesAlias(currentAgent, agentAliases)) {
     debugLog('env', `matched CLAUDE_CURRENT_AGENT=${currentAgent}`);
@@ -202,9 +216,11 @@ function isRunningInAgent(transcriptPath, agentAliases, hookData) {
   }
   if (currentAgent) debugLog('env', `no match for CLAUDE_CURRENT_AGENT=${currentAgent}`);
 
-  // Primary-B / Secondary: identity supplied directly on the hook payload.
-  if (agentFromHookData(hookData, agentAliases)) {
-    return true;
+  // Codex rollout transcripts: none of the claude scanning helpers below can
+  // read them — route through the vendored reader's spawn_agent dispatch scan
+  // (most recent spawn_agent for one of our aliases without its output yet).
+  if (transcriptPath && sniffFormat(transcriptPath) === 'codex') {
+    return detectAgentContext(transcriptPath, agentAliases);
   }
 
   // Quick check: If this is a subagent process, its transcript initial

@@ -7,6 +7,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
+const { codexMcpWiring } = require('../lib/codex-mcp');
 
 // First non-flag arg is the repo dir; flags like --reminder are filtered out so
 // `node status.js --reminder` doesn't mistake the flag for a path.
@@ -238,6 +239,17 @@ function reportMcpWiring(mcpJson, broker) {
   }
 }
 
+// Codex wires MCP servers through config.toml [mcp_servers.*] tables (no
+// project .mcp.json lane on codex), so the audit covers that surface too.
+// Silent when no codex install exists, keeping claude-only output unchanged.
+function reportCodexMcpWiring(broker) {
+  const wiring = codexMcpWiring(broker);
+  if (!wiring) return;
+  console.log(
+    `codex mcp:   ${wiring.viaBroker}/${wiring.total} server(s) in ${wiring.cfgPath} route through the broker`
+  );
+}
+
 // Non-printing count of locked (present + agent-denied) secrets files — used by
 // the reminder path, which must compute the verdict without emitting the report.
 function countProtected(secretsFiles) {
@@ -329,6 +341,7 @@ function main() {
   console.log(`Broker conf: ${brokerConf}  [${stat(brokerConf)}]`);
 
   reportMcpWiring(m.mcpJson, broker);
+  reportCodexMcpWiring(broker);
   const bypassable = reportEscalation();
 
   console.log('');

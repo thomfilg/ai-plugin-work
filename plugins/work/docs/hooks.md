@@ -222,3 +222,76 @@ export WORK_TDD_TOKEN_SKIP=1
 # Disable session guard
 export SESSION_GUARD_ENABLED=0
 ```
+
+## Dual runtime: the same hooks.json on Codex CLI
+
+One `hooks/hooks.json` serves both runtimes (kept in the intersection both parsers accept by
+`scripts/lint-hooks-json.js`). Every hook script detects its runtime via the vendored
+`lib/runtime` detector (`AGENT_RUNTIME` pin → payload sniff → codex env signatures → session
+stamp → Claude signals → default `claude`) and adapts. What differs on codex:
+
+### Matcher lanes
+
+Codex only ever emits its own tool names, so some lanes can never fire there:
+
+| Matcher lane | claude | codex |
+|---|---|---|
+| `Bash` | fires | fires (codex reads files via shell too — this lane covers the Read/Grep/Glob loss) |
+| `Edit\|Write\|MultiEdit` | fires | `Write`/`Edit` alias-fire for `apply_patch`; `MultiEdit` dead |
+| `Task\|Skill\|Agent` | `Task`/`Skill` fire | only `Agent` fires (spawn-agent events) |
+| `AskUserQuestion\|request_user_input` | `AskUserQuestion` fires | only `request_user_input` fires — and only in Plan mode (openai/codex#10384); in code mode the model asks in chat, so this lane is rarely exercised |
+| `Read\|Grep\|Glob`, `MultiEdit`, `NotebookEdit`, `Skill`, `Monitor` | fire | dead — accepted loss, Bash/UPS lanes carry enforcement |
+| `UserPromptSubmit` / `Stop` matchers | applied by Claude | **ignored** — the hooks fire on every prompt/stop and re-apply their matcher in-script |
+
+Run `node scripts/runtime-doctor.js` (repo root) for the live per-plugin lane table.
+
+### Payload and emission differences
+
+- **Payload-first reads**: `CLAUDE_USER_PROMPT`, `TOOL_INPUT`, `CLAUDE_PROJECT_DIR` etc. are
+  never set by codex — every script reads the stdin payload first (`prompt`, `tool_input`,
+  `cwd`, `session_id`), env as legacy fallback.
+- **`tool_input.file_path` is absent** on codex writes — `apply_patch` carries a raw patch;
+  write targets are parsed from the `*** Add/Update/Delete File:` headers. Parse failure on a
+  write tool fails **closed** for protectors with active locks.
+- **Auto-advance channel**: plain PostToolUse stdout is not injected by codex — the drivetrain
+  banner rides `hookSpecificOutput.additionalContext` instead (identical text).
+- **Exit-2 stderr** and UserPromptSubmit/SessionStart plain stdout behave the same on both.
+
+### Trust model (codex only — READ THIS)
+
+Codex **silently skips untrusted hooks**: after install or ANY hooks.json change, every gate in
+this document is OFF until the hooks are re-trusted in the codex TUI `/hooks` review (one-time
+per change; changes are batched per release). The TUI also prompts **proactively at session
+start** (live-verified on 0.142.5, GT §11.2) — the exact pane text to look for:
+
+> Hooks need review
+> 59 hooks are new or changed.
+> Hooks can run outside the sandbox after you trust them.
+> 1. Review hooks / 2. Trust all and continue / 3. Continue without trusting (hooks won't run)
+
+The review table says "Press t to trust all; enter to review hooks; esc to close"; each hook
+detail shows Event/Matcher/Source/Command/Timeout plus "New hook - review required. Press t
+to trust; esc to go back". Unattended runs use
+`codex exec --dangerously-bypass-hook-trust` per invocation. Never script `[hooks.state]`
+`trusted_hash` writes — the hash formula is source-derived, not bit-exact-verified, and
+pre-seeding trust is a gate-bypass. Audit with `node scripts/runtime-doctor.js` (its
+"modified" verdicts are best-effort for the same reason).
+
+### Interactive gates in `codex exec`
+
+Unattended exec has no question UI: gates that would call `AskUserQuestion` park the step
+BLOCKED and persist a hold file. Answer via the maestro `/signal` inbox or the resume-answer
+channel, **live-verified on 0.142.5** (WP-12, design §0 C3 RESOLVED):
+
+```
+codex exec resume <SESSION_ID> --json --dangerously-bypass-hook-trust \
+  -c 'sandbox_mode="workspace-write"' '<answer>'
+```
+
+- `Usage: codex exec resume [OPTIONS] [SESSION_ID] [PROMPT]` — the answer is a positional
+  argument (`-` reads stdin); the resumed turn re-fires SessionStart/UserPromptSubmit/Stop
+  hooks, so a heimdall unlock phrase sent this way lands in the rollout transcript.
+- `--last` also works but is **cwd-filtered** (it picks the newest session recorded for the
+  invoking directory, not globally) — run it from the agent's worktree or pass the id.
+- `exec resume` REJECTS `-s`/`-C` (narrower flag surface than `exec`) — set the sandbox via
+  `-c sandbox_mode=…`; `--json`/`-o`/`--skip-git-repo-check`/both bypass flags are accepted.

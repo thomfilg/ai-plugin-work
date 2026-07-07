@@ -5,6 +5,7 @@
  */
 const { execSync, spawnSync } = require('child_process');
 const namespace = require('./namespace');
+const { isCodexPaneDialect } = require('./live-spinner');
 
 function sh(cmd) {
   try {
@@ -144,14 +145,20 @@ function capture(session) {
  * the alternate C-m keycode, re-check, and report.
  *
  * Returns a delivery status the caller should log:
- *   'submitted' | 'submitted-on-retry' | 'stuck-in-composer'
+ *   'submitted' | 'submitted-on-retry' | 'stuck-in-composer' |
+ *   'submitted-unverified' (codex dialects — see below)
+ *
+ * Receipt verification is CLAUDE-TUI-only (WP-09): the `❯` composer glyph is
+ * claude's. Codex dialects skip the probe — an exec pane has no composer at
+ * all and the codex TUI grammar is unknown until fixtures land — and report
+ * 'submitted-unverified' so operators can grep for undelivered directives.
  *
  * Uses spawnSync argv form (no shell) so shell metacharacters in `text`
  * (e.g. backticks, $, \, quotes) — which can flow in from external sources
  * like bot review titles fetched via the GitHub API — cannot trigger
  * command substitution or arbitrary shell execution.
  */
-function sendLine(session, text) {
+function sendLine(session, text, dialect) {
   // Newlines would submit mid-text under send-keys -l; flatten to a marker.
   const str = String(text).replace(/\r?\n/g, ' ⏎ ');
   // -l forces literal delivery so short strings like "Enter" or "Space" can't
@@ -160,6 +167,7 @@ function sendLine(session, text) {
   spawnVoid('tmux', ['send-keys', '-l', '-t', session, str]);
   spawnVoid('tmux', ['send-keys', '-t', session, 'End']);
   spawnVoid('tmux', ['send-keys', '-t', session, 'Enter']);
+  if (isCodexPaneDialect(dialect)) return 'submitted-unverified';
   // Receipt check. Probe on a short prefix: the composer renders at most one
   // pane-width of our text before wrapping.
   const probe = str.slice(0, 25);

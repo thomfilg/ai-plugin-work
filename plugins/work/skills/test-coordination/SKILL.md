@@ -1,6 +1,6 @@
 ---
 name: test-coordination
-argument-hint: [ticket-id]
+argument-hint: '[ticket-id]'
 description: Coordinate test coverage improvement - runs /tests-review and /tests-create in parallel until coverage is adequate
 user-invocable: true
 allowed-tools: Task, Bash, Read, Write, Edit, Grep, Glob, Skill

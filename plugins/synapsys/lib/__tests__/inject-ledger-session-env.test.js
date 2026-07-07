@@ -195,3 +195,59 @@ test('(k) resolveSessionIdWithSource tags source="fallback" when only sha1(cwd+p
     assert.equal(result.source, 'fallback');
   });
 });
+
+// --- WP-12: codex-shaped payloads win over the leaked Claude env leg ---
+// A codex hook child inherits the launching Claude session's full env
+// (CLAUDE_CODE_SESSION_ID included); keying by env there writes the codex
+// run's ledger into the OUTER Claude session's file (live cross-contamination
+// observed in the WP-12 smoke). Codex-shaped payloads are detected by shape
+// (turn_id / rollout transcript_path), never by env.
+
+test('(l) codex payload (turn_id) beats a set CLAUDE_CODE_SESSION_ID', () => {
+  const home = makeTmpHome();
+  withHomeAndEnv(home, 'outer-claude-session', (ledger) => {
+    const result = ledger.resolveSessionIdWithSource({
+      session_id: 'codex-session-id',
+      turn_id: '019f3db3-e291-7d41-a0be-63c0b4462eb8',
+    });
+    assert.equal(result.sessionId, 'codex-session-id');
+    assert.equal(result.source, 'payload');
+  });
+});
+
+test('(m) codex payload (rollout transcript_path, no turn_id — SessionStart shape) beats env', () => {
+  const home = makeTmpHome();
+  withHomeAndEnv(home, 'outer-claude-session', (ledger) => {
+    const result = ledger.resolveSessionIdWithSource({
+      session_id: 'codex-ss-id',
+      transcript_path: '/tmp/x/sessions/2026/07/07/rollout-2026-07-07T14-50-26-019f.jsonl',
+    });
+    assert.equal(result.sessionId, 'codex-ss-id');
+    assert.equal(result.source, 'payload');
+  });
+});
+
+test('(n) claude-shaped payload keeps the env-first contract (GH-583 unchanged)', () => {
+  const home = makeTmpHome();
+  withHomeAndEnv(home, 'env-claude-id', (ledger) => {
+    const result = ledger.resolveSessionIdWithSource({
+      session_id: 'payload-claude-id',
+      transcript_path: '/home/user/.claude/projects/-tmp-repo/abc.jsonl',
+    });
+    assert.equal(result.sessionId, 'env-claude-id');
+    assert.equal(result.source, 'env');
+  });
+});
+
+test('(o) codex payload with an UNSAFE session_id still wins but is hashed', () => {
+  const home = makeTmpHome();
+  withHomeAndEnv(home, 'outer-claude-session', (ledger) => {
+    const result = ledger.resolveSessionIdWithSource({
+      session_id: '../evil/codex',
+      turn_id: '019f3db3-e291',
+    });
+    assert.notEqual(result.sessionId, '../evil/codex');
+    assert.match(result.sessionId, /^[A-Za-z0-9_-]+$/);
+    assert.equal(result.source, 'payload');
+  });
+});

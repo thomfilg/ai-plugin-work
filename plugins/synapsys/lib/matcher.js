@@ -3,6 +3,7 @@
 const excludes = require('./matcher-excludes');
 const content = require('./matcher-content');
 const { safeRegex } = require('./matcher-regex');
+const { applyPatchAliasMatches } = require('./matcher-alias');
 
 const extractPretoolContent = content.extractPretoolContent;
 const findContentMatch = content.findContentMatch;
@@ -131,7 +132,10 @@ function parsePretoolSpec(spec) {
 
 function pretoolSpecMatches(spec, toolName, argBlob) {
   const { tool, pat } = parsePretoolSpec(spec);
-  if (tool && tool !== '*' && tool !== toolName) return false;
+  if (tool && tool !== '*' && tool !== toolName) {
+    // Codex alias hop: write-tool specs match apply_patch — see matcher-alias.js.
+    return toolName === 'apply_patch' && applyPatchAliasMatches(tool, pat, argBlob);
+  }
   if (!pat) return true;
   const re = safeRegex(pat);
   return re ? re.test(argBlob) : false;

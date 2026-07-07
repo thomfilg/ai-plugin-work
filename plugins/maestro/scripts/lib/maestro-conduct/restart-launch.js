@@ -16,10 +16,14 @@
  * (operator directive: "DO NOT RESTART A WORK THAT ALREADY STARTED — RELAUNCH
  * AN AGENT TO CONTINUE"). For those we `claude --continue` when a prior
  * conversation exists on disk.
+ *
+ * WP-09: launch strings + the resume probe are delegated to runtime-profile.js
+ * so codex fleet sessions relaunch as `codex exec --json …` with the mandatory
+ * hook-trust bypass. Every function keeps its claude behavior byte-identical
+ * when the runtime argument is omitted or 'claude'.
  */
 
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 const tmux = require('./tmux');
@@ -28,8 +32,7 @@ const alerts = require('./alerts');
 const state = require('./state');
 const progress = require('./progress');
 const skillRegistry = require('./skill-registry');
-
-const CLAUDE_BIN = process.env.CLAUDE_BIN || 'claude';
+const runtimeProfile = require('./runtime-profile');
 
 // GH-622: on an auto-restart, relaunch with the SAME mailbox dir
 // maestro-bootstrap.sh sets on the initial launch — otherwise the restarted
@@ -49,46 +52,71 @@ function inboxEnvPrefix() {
  * True when the worktree has a prior Claude conversation on disk, i.e.
  * `claude --continue` can actually resume something. The transcript dir name
  * is the cwd with path separators (and other specials) flattened to dashes.
+ * (Claude leg of the runtime-profile resume probe — kept exported for
+ * back-compat.)
  */
 function hasResumableConversation(worktree) {
-  try {
-    const encoded = path.resolve(worktree).replace(/[^A-Za-z0-9-]/g, '-');
-    const dir = path.join(os.homedir(), '.claude', 'projects', encoded);
-    return fs.readdirSync(dir).some((f) => f.endsWith('.jsonl'));
-  } catch {
-    return false;
-  }
+  return runtimeProfile.hasResumable('claude', worktree);
 }
 
-/** 'fresh' | 'continue' — MAESTRO_RESTART_MODE env forces one for the fleet. */
-function restartModeFor(skill, worktree) {
+/**
+ * 'fresh' | 'continue' — MAESTRO_RESTART_MODE env forces one for the fleet.
+ * The resume probe is runtime-aware (claude project JSONLs vs codex rollout
+ * tree via transcript.listSessionsForCwd).
+ */
+function restartModeFor(skill, worktree, runtime = 'claude') {
   const forced = process.env.MAESTRO_RESTART_MODE;
   if (forced === 'fresh' || forced === 'continue') return forced;
   const row = skillRegistry.get(skill) || skillRegistry.get('work');
-  if (row.generic && hasResumableConversation(worktree)) return 'continue';
+  if (row.generic && runtimeProfile.hasResumable(runtime, worktree)) return 'continue';
   return 'fresh';
 }
 
-function buildLaunchCommand(mode, skill, ticket) {
-  if (mode === 'continue') {
-    return `${inboxEnvPrefix()}${CLAUDE_BIN} --dangerously-skip-permissions --continue`;
+function buildLaunchCommand(mode, skill, ticket, runtime = 'claude') {
+  return runtimeProfile.launchCommand({
+    runtime,
+    mode,
+    skill,
+    ticket,
+    inboxEnv: inboxEnvPrefix(),
+  });
+}
+
+/**
+ * Codex leg of the context pointer: no composer to type into (§H grooming),
+ * so the pointer travels through the file mailbox the /work inbox relay
+ * surfaces. Secure create via lib/inbox (O_EXCL under /tmp). Best-effort.
+ */
+function signalContextViaInbox(ticket, contextFile) {
+  try {
+    const { ensureChannelFile } = require('../../../lib/inbox');
+    const file = ensureChannelFile(ticket);
+    const line = `[${new Date().toISOString()}] [MAESTRO] Read your orchestration context at ${contextFile} before continuing.\n`;
+    fs.appendFileSync(file, line);
+  } catch {
+    /* best-effort — grooming failures never block a restart */
   }
-  return `${inboxEnvPrefix()}${CLAUDE_BIN} --dangerously-skip-permissions '/${skill} ${ticket}'`;
 }
 
 /**
  * Post-launch grooming for a (re)started session: restore the conversation
  * title (a fresh claude resets it — GH-625) and point the agent at its
  * orchestration context file when one exists. Best-effort; failures only log.
+ * Codex sessions have no composer: `/rename` is skipped and the context
+ * pointer goes through the inbox instead (design §H grooming row).
  */
-function groomRestartedSession(session, ticket, skill) {
-  const bootDelay = process.env.MAESTRO_GROOM_DELAY_SEC || '3';
-  if (bootDelay !== '0') spawnSync('sleep', [bootDelay]); // let the TUI boot before typing into it
-  tmux.sendLine(session, `/rename ${ticket} /${skill} maestro`);
+function groomRestartedSession(session, ticket, skill, runtime = 'claude') {
   const contextFile = path.join(
     path.dirname(skillRegistry.ticketSkillFile(ticket)),
     '.maestro-context.md'
   );
+  if (!runtimeProfile.grooming(runtime).rename) {
+    if (fs.existsSync(contextFile)) signalContextViaInbox(ticket, contextFile);
+    return;
+  }
+  const bootDelay = process.env.MAESTRO_GROOM_DELAY_SEC || '3';
+  if (bootDelay !== '0') spawnSync('sleep', [bootDelay]); // let the TUI boot before typing into it
+  tmux.sendLine(session, `/rename ${ticket} /${skill} maestro`);
   if (fs.existsSync(contextFile)) {
     tmux.sendLine(
       session,

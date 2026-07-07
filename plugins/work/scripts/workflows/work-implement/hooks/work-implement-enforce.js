@@ -13,7 +13,8 @@
  * loadEnforcementContext (R1). No transcript grep for implement-active
  * detection. Uses isWriteAllowedPath from Task 12 (R6, R12). Injects
  * appendEnforcementAudit for audit records (R13). TDD phase resolution
- * via allocator per-task path with legacy fallback (R7, R8).
+ * via allocator per-task path with legacy fallback (R7, R8) — see the
+ * enforce-task-paths / enforce-tdd-phase sibling modules.
  *
  * When /work-implement is active (state: implement step in_progress),
  * blocks direct Write/Edit operations unless a developer-* agent has
@@ -23,43 +24,47 @@
 const fs = require('fs');
 const path = require('path');
 const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
+// Vendored dual-runtime adapter: runtime detection (per-runtime block text)
+// and apply_patch target parsing.
+const { getRuntime } = require(path.join(__dirname, '..', '..', 'lib', 'runtime'));
+const { parseApplyPatch } = require(path.join(__dirname, '..', '..', 'lib', 'runtime', 'tools'));
 
 // --- Task 12 import: task-readiness path gate (R6, R12) ---
 const { isWriteAllowedPath } = require(path.join(__dirname, '..', '..', 'lib', 'preflight'));
-const { taskSegment } = require(path.join(__dirname, '..', '..', 'lib', 'allocate-output-folder'));
-// Shared `<WORKTREES_BASE>/<repo>-<ticket>` lookup (same module the
-// enforce-tdd-on-stop hook uses — keeps the two hooks from drifting).
-const { conventionWorktreeDir } = require(path.join(__dirname, 'worktree-convention'));
-
-// Developer agents that satisfy the requirement
-const DEVELOPER_AGENTS = [
-  'developer-nodejs-tdd',
-  'developer-react-senior',
-  'developer-react-ui-architect',
-  'developer-devops',
-  ...(process.env.WORK_ARCHITECT_ENABLED === '1' ? ['code-architect'] : []),
-];
+const { resolveTaskBase, resolveSafeTicketId, buildAllowedPaths } = require(
+  path.join(__dirname, 'enforce-task-paths')
+);
+const { resolveTddStatePath, ablationRedEditAllowed } = require(
+  path.join(__dirname, 'enforce-tdd-phase')
+);
+const { payloadIsDeveloperAgent, hasDeveloperAgentBeenInvoked } = require(
+  path.join(__dirname, 'enforce-developer-detect')
+);
+const { tddNotInitializedMessage, delegationBlockMessage } = require(
+  path.join(__dirname, 'enforce-messages')
+);
 
 // Tools that require agent invocation first
 const BLOCKED_TOOLS = ['Write', 'Edit', 'MultiEdit'];
 
-// Files that are allowed without agent (config, non-code files)
+// Files that are allowed without agent (config, non-code files).
+// Kept as regex sources so the list reads as data (built once at load).
 const ALLOWED_PATTERNS = [
-  /\.md$/, // Markdown files
-  /\.json$/, // JSON config files
-  /\.ya?ml$/, // YAML files
-  /\.env/, // Environment files
-  /\.gitignore$/, // Git ignore
-  /\.eslintrc/, // ESLint config
-  /\.prettierrc/, // Prettier config
-  /package\.json$/, // Package files
-  /tsconfig/, // TypeScript config
-  /\/\.claude\//, // Files in .claude folder (hooks, commands, agents)
-  /\/__tests__\//, // Test directories
-  /\.test\.[jt]sx?$/, // .test.js, .test.ts, .test.tsx
-  /\.spec\.[jt]sx?$/, // .spec.js, .spec.ts, .spec.tsx
-  /work-implement-enforce\.js$/, // This file specifically
-];
+  '\\.md$', // Markdown files
+  '\\.json$', // JSON config files
+  '\\.ya?ml$', // YAML files
+  '\\.env', // Environment files
+  '\\.gitignore$', // Git ignore
+  '\\.eslintrc', // ESLint config
+  '\\.prettierrc', // Prettier config
+  'package\\.json$', // Package files
+  'tsconfig', // TypeScript config
+  '/\\.claude/', // Files in .claude folder (hooks, commands, agents)
+  '/__tests__/', // Test directories
+  '\\.test\\.[jt]sx?$', // .test.js, .test.ts, .test.tsx
+  '\\.spec\\.[jt]sx?$', // .spec.js, .spec.ts, .spec.tsx
+  'work-implement-enforce\\.js$', // This file specifically
+].map((src) => new RegExp(src));
 
 // ─── State-based activation (GH-219 R1) ──────────────────────────────────
 
@@ -83,200 +88,11 @@ function isImplementActive(ctx) {
 }
 
 /**
- * Check if a developer agent has been invoked (transcript-based).
- * This remains transcript-based because agent invocation is a session-level
- * signal, not a persisted state.
- */
-function hasDeveloperAgentBeenInvoked(transcriptPath) {
-  if (!transcriptPath || !fs.existsSync(transcriptPath)) {
-    return false;
-  }
-
-  try {
-    const content = fs.readFileSync(transcriptPath, 'utf8');
-
-    // Check if any developer agent has been called via Task tool
-    for (const agent of DEVELOPER_AGENTS) {
-      const pattern = new RegExp(`"subagent_type"\\s*:\\s*"(work-workflow:)?${agent}"`, 'i');
-      if (pattern.test(content)) {
-        return true;
-      }
-    }
-
-    // Also check if we're currently INSIDE a developer agent
-    for (const agent of DEVELOPER_AGENTS) {
-      const frontmatterPattern = new RegExp(`^name:\\s*${agent}`, 'm');
-      if (frontmatterPattern.test(content)) {
-        return true;
-      }
-    }
-
-    return false;
-  } catch {
-    return false;
-  }
-}
-
-/**
  * Check if the file being edited is allowed without agent
  */
 function isFileAllowed(filePath) {
   if (!filePath) return false;
   return ALLOWED_PATTERNS.some((pattern) => pattern.test(filePath));
-}
-
-/**
- * Resolve TASKS_BASE from environment or config.
- * Shared by checkTddPhase and the R6 path gate.
- */
-function resolveTaskBase() {
-  let taskBase;
-  try {
-    const cfg = require(path.join(__dirname, '..', '..', 'lib', 'config'));
-    taskBase = process.env.TASKS_BASE || cfg.TASKS_BASE || null;
-  } catch {
-    taskBase = process.env.TASKS_BASE || null;
-  }
-  if (!taskBase) {
-    taskBase =
-      process.env.HOME || process.env.USERPROFILE
-        ? path.join(process.env.HOME || process.env.USERPROFILE, 'worktrees', 'tasks')
-        : null;
-  }
-  return taskBase;
-}
-
-/**
- * Sanitize a ticket ID via config.safeTicketId if available.
- * Shared by checkTddPhase and the R6 path gate.
- */
-function resolveSafeTicketId(ticketId) {
-  try {
-    return require(path.join(__dirname, '..', '..', 'lib', 'config')).safeTicketId(ticketId);
-  } catch {
-    return ticketId;
-  }
-}
-
-/**
- * Resolve the TDD phase state path with per-task support (R7, R8).
- *
- * When WORK_TASK_NUM is set:
- *   - Try per-task path first: TASKS_BASE/<ticket>/task${N}/tdd-phase.json
- *   - Fall back to legacy root: TASKS_BASE/<ticket>/tdd-phase.json
- *
- * When WORK_TASK_NUM is NOT set:
- *   - Use legacy root path
- *
- * @param {string} taskBase - Resolved TASKS_BASE
- * @param {string} safeTicketId - Sanitized ticket ID
- * @returns {string|null} Path to tdd-phase.json, or null if not found
- */
-function resolveTddStatePath(taskBase, safeTicketId) {
-  // Resolve task number: env var → work state tasksMeta → null (legacy)
-  const taskNum = resolveActiveTaskNum(taskBase, safeTicketId);
-
-  if (taskNum) {
-    // Try per-task path first
-    let segment;
-    try {
-      segment = taskSegment(taskNum);
-    } catch {
-      segment = `task${taskNum}`;
-    }
-    const perTaskPath = path.join(taskBase, safeTicketId, segment, 'tdd-phase.json');
-    if (fs.existsSync(perTaskPath)) {
-      return perTaskPath;
-    }
-  }
-
-  // Legacy root fallback
-  const rootPath = path.join(taskBase, safeTicketId, 'tdd-phase.json');
-  if (fs.existsSync(rootPath)) {
-    return rootPath;
-  }
-
-  return null;
-}
-
-/**
- * Read the configured task number: WORK_TASK_NUM env var, falling back to
- * the work state's tasksMeta.currentTaskIndex. Returns the RAW value
- * (number | NaN | null) — buildAllowedPaths needs the null-vs-invalid
- * distinction to fail closed on a malformed WORK_TASK_NUM.
- */
-function readConfiguredTaskNum(taskBase, safeTicketId) {
-  let taskNum = process.env.WORK_TASK_NUM ? parseInt(process.env.WORK_TASK_NUM, 10) : null;
-  if (!taskNum) {
-    try {
-      const statePath = path.join(taskBase, safeTicketId, '.work-state.json');
-      const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
-      if (state?.tasksMeta?.currentTaskIndex != null) {
-        taskNum = state.tasksMeta.currentTaskIndex + 1; // 0-indexed → 1-indexed
-      }
-    } catch {
-      /* no state file */
-    }
-  }
-  return taskNum;
-}
-
-/**
- * Resolve the active task number as a validated positive integer, or null.
- */
-function resolveActiveTaskNum(taskBase, safeTicketId) {
-  const taskNum = readConfiguredTaskNum(taskBase, safeTicketId);
-  return Number.isInteger(taskNum) && taskNum > 0 ? taskNum : null;
-}
-
-/**
- * GH-570 (W1×W8): during RED, a task whose planner-declared `### Test
- * Strategy` carries `red-mode: ablation` produces its failing RED by
- * TEMPORARILY mutating in-scope SOURCE files — the registry's "only .test
- * or .spec files during RED" rule would deadlock it. The allowance is
- * machine-verified from planner-owned tasks.md via the SHARED
- * implement-gate resolver (resolveTaskTestExecution — the same module the
- * gate, the stop hook, and task-next.js consume; never a parallel copy)
- * and is scope-limited to the task's `### Files in scope`. The caller
- * audit-logs every allow. Fail-closed: any resolution error keeps the
- * RED block.
- */
-function _ablationTaskScope(taskBase, safeTicketId, worktreeDir) {
-  const taskNum = resolveActiveTaskNum(taskBase, safeTicketId);
-  if (!taskNum) return null;
-  const shared = require(
-    path.join(
-      __dirname,
-      '..',
-      '..',
-      'work',
-      'lib',
-      'step-enrichments',
-      'implement-gate',
-      'test-command'
-    )
-  );
-  const tasksDir = path.join(taskBase, safeTicketId);
-  const execution = shared.resolveTaskTestExecution(tasksDir, taskNum, worktreeDir);
-  if (!execution || execution.redMode !== 'ablation') return null;
-  const task = shared.findTaskByNum(tasksDir, taskNum);
-  return (task && task.filesInScope) || [];
-}
-
-function ablationRedEditAllowed(filePath, taskBase, safeTicketId) {
-  try {
-    if (!filePath || !taskBase) return false;
-    const worktreeDir = detectWorktreeDir(safeTicketId);
-    if (!worktreeDir) return false;
-    const scope = _ablationTaskScope(taskBase, safeTicketId, worktreeDir);
-    if (!scope) return false;
-    const rel = path.relative(worktreeDir, path.resolve(filePath));
-    if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return false;
-    const { fileInTaskScope } = require(path.join(__dirname, '..', '..', 'lib', 'task-scope'));
-    return fileInTaskScope(rel, scope);
-  } catch {
-    return false; // fail-closed: keep the RED block
-  }
 }
 
 /**
@@ -321,91 +137,6 @@ function checkTddPhase(filePath, ticketId) {
 }
 
 /**
- * Detect the worktree directory for a ticket.
- *
- * Worktrees follow the convention `<WORKTREES_BASE>/<repo>-<TICKET_ID>` (per
- * inspect.js:44). Detection priority:
- *   1. process.env.WORK_WORKTREE_DIR — explicit override
- *   2. WORKTREES_BASE/<MAIN_WORKTREE_FOLDER>-<safeTicketId> — convention
- *   3. Walk up from process.cwd() looking for a dir whose name ends with
- *      `-<safeTicketId>` and whose parent is WORKTREES_BASE
- *
- * Returns null if no worktree can be confidently identified.
- *
- * @param {string} safeTicketId
- * @returns {string|null}
- */
-function detectWorktreeDir(safeTicketId) {
-  if (process.env.WORK_WORKTREE_DIR) return path.resolve(process.env.WORK_WORKTREE_DIR);
-
-  // Shared `<WORKTREES_BASE>/<repo>-<ticket>` convention lookup (uses
-  // config.REPO_NAME as fallback — same module enforce-tdd-on-stop uses).
-  const conventional = conventionWorktreeDir(safeTicketId);
-  if (conventional) return conventional;
-
-  // Walk up from cwd looking for `<something>-<safeTicketId>` whose parent
-  // is WORKTREES_BASE (or any parent if WORKTREES_BASE unset).
-  try {
-    const wbase = process.env.WORKTREES_BASE;
-    const wbaseResolved = wbase ? path.resolve(wbase) : null;
-    let dir = process.cwd();
-    const root = path.parse(dir).root;
-    while (dir !== root) {
-      const base = path.basename(dir);
-      if (base.endsWith(`-${safeTicketId}`)) {
-        const parent = path.dirname(dir);
-        if (!wbaseResolved || path.resolve(parent) === wbaseResolved) {
-          return path.resolve(dir);
-        }
-      }
-      dir = path.dirname(dir);
-    }
-  } catch {
-    /* fail-closed */
-  }
-  return null;
-}
-
-/**
- * Build the allowed-paths object for isWriteAllowedPath (R6).
- * Only active when WORK_TASK_NUM is set (task-aware mode).
- * Legacy mode (no WORK_TASK_NUM) skips the path gate entirely.
- *
- * @param {string} taskBase - Resolved TASKS_BASE
- * @param {string} safeTicketId - Sanitized ticket ID
- * @returns {{ prDir: string|null, taskDir: string|null, ticketRoot: string, worktreeDir: string|null }|null}
- */
-function buildAllowedPaths(taskBase, safeTicketId) {
-  const taskNum = readConfiguredTaskNum(taskBase, safeTicketId);
-
-  // No task num = legacy mode; invalid taskNum = fail-closed
-  if (taskNum == null) return null;
-  if (!Number.isInteger(taskNum) || taskNum < 1)
-    return { prDir: null, taskDir: null, ticketRoot: null, worktreeDir: null };
-
-  const ticketRoot = path.join(taskBase, safeTicketId);
-  let taskDir = null;
-  try {
-    taskDir = path.join(ticketRoot, taskSegment(taskNum));
-  } catch {
-    taskDir = path.join(ticketRoot, 'task' + taskNum);
-  }
-
-  // PR slot for worktree dir
-  const prSlot = process.env.WORK_PR_SLOT ? parseInt(process.env.WORK_PR_SLOT, 10) : null;
-  const prDir =
-    prSlot && Number.isInteger(prSlot) && prSlot > 0 ? path.join(ticketRoot, 'PR' + prSlot) : null;
-
-  // Worktree path — when running inside a `<repo>-<TICKET>` worktree, the
-  // entire worktree is the legitimate write zone for this ticket. Most real
-  // tasks edit repo source files, not files under tasks/<TICKET>/task{N}/.
-  // (Workaround for path-gate-blocks-repo-writes issue from echo-4520-issue-2.)
-  const worktreeDir = detectWorktreeDir(safeTicketId);
-
-  return { prDir, taskDir, ticketRoot, worktreeDir };
-}
-
-/**
  * Create the audit callback for enforcement records (R13).
  * Wraps appendEnforcementAudit with the ticket context.
  */
@@ -415,20 +146,153 @@ function createAuditCallback(ticketId, toolName, filePath, ctx) {
       const { appendEnforcementAudit } = require(
         path.join(__dirname, '..', '..', 'work', 'lib', 'work-actions')
       );
+      const allow = entry.decision === 'allow';
+      const joinedReasons = (entry.reasons || []).join('; ');
       appendEnforcementAudit(ticketId, {
         origin: entry.origin || (ctx && ctx.origin) || 'user',
         task: null,
         phase: null,
         action: `${toolName}:${filePath || 'unknown'}`,
-        allow: entry.decision === 'allow',
-        reason:
-          (entry.reasons || []).join('; ') || (entry.decision === 'allow' ? 'allowed' : 'denied'),
+        allow,
+        reason: joinedReasons || (allow ? 'allowed' : 'denied'),
         outputPath: filePath || null,
       });
     } catch {
       // Audit is fail-open: never break enforcement for logging
     }
   };
+}
+
+/** Append one audit row (R13) for the gate's decision on this file. */
+function auditDecision(gate, filePath, decision, reasonCode) {
+  const auditCb = createAuditCallback(gate.ticketId, gate.toolName, filePath, gate.ctx);
+  auditCb({ decision, reasons: [reasonCode], origin: gate.ctx.origin });
+}
+
+// ─── Ticket / context resolution ──────────────────────────────────────────
+
+/**
+ * Resolve the ticket id (GH-219 R1). If TICKET_ID is explicitly set (even
+ * to empty), honor it; otherwise derive via get-ticket-id or the branch.
+ */
+function resolveTicketId() {
+  if ('TICKET_ID' in process.env) return process.env.TICKET_ID || null;
+  try {
+    const { getCurrentTaskId } = require(
+      path.join(__dirname, '..', '..', 'lib', 'scripts', 'get-ticket-id.js')
+    );
+    return getCurrentTaskId() || null;
+  } catch {
+    try {
+      const branch = require('child_process')
+        .execSync('git branch --show-current', { encoding: 'utf8' })
+        .trim();
+      const match = branch.match(/[A-Za-z]+-[0-9]+/i);
+      return match ? match[0] : null;
+    } catch {
+      return null;
+    }
+  }
+}
+
+/** Load enforcement context via the adapter; fail open when unavailable. */
+function loadContext(ticketId) {
+  try {
+    const { loadEnforcementContext } = require(
+      path.join(__dirname, '..', '..', 'work', 'lib', 'work-enforcement-context')
+    );
+    return loadEnforcementContext(ticketId);
+  } catch {
+    // If adapter not available, fail open
+    process.exit(0);
+  }
+}
+
+/**
+ * Write targets. Claude tools carry a single file_path; a codex apply_patch
+ * lists its targets in the patch headers — EVERY parsed path runs the same
+ * gate chain (a multi-file patch with one gated file blocks). Unparseable
+ * targets (ok:false) are dropped: this is the advisory workflow gate, the
+ * fail-closed lane for unparseable patches is heimdall's (C6).
+ */
+function collectWriteTargets(toolName, toolInput) {
+  if (toolName === 'apply_patch') {
+    return parseApplyPatch(toolInput.command)
+      .filter((t) => t.ok && t.path)
+      .map((t) => t.path);
+  }
+  return [toolInput.file_path || toolInput.path || ''];
+}
+
+// ─── Per-file gate chain ──────────────────────────────────────────────────
+
+/** TDD phase enforcement (BEFORE allowlist) — blocks or audits per phase. */
+function enforceTddPhaseGate(filePath, gate) {
+  const tddPhaseResult = checkTddPhase(filePath, gate.ticketId);
+  if (tddPhaseResult === 'block') {
+    auditDecision(gate, filePath, 'deny', 'TDD_PHASE_VIOLATION');
+    process.exit(2);
+  }
+  // GH-570 (W1×W8): audit the machine-verified ablation-RED source-edit
+  // allowance so every fired escape hatch is visible in .work-actions.json.
+  // The remaining gates (agent delegation, R6 path gate) still apply below.
+  if (tddPhaseResult === 'ablation-allow') {
+    auditDecision(gate, filePath, 'allow', 'ABLATION_RED_SOURCE_EDIT');
+  }
+  // Defense-in-depth: if TDD state doesn't exist and this is a production file,
+  // block until TDD is initialized.
+  if (tddPhaseResult === 'no-file' && !isFileAllowed(filePath) && gate.developerInvoked) {
+    process.stderr.write(tddNotInitializedMessage());
+    auditDecision(gate, filePath, 'deny', 'TDD_NOT_INITIALIZED');
+    process.exit(2);
+  }
+}
+
+/**
+ * R6: Task-readiness path gate (when task-aware). If WORK_TASK_NUM is set,
+ * enforce write paths via isWriteAllowedPath. Legacy mode (no WORK_TASK_NUM)
+ * skips the path gate.
+ */
+function enforcePathGate(filePath, gate) {
+  const allowedPaths = buildAllowedPaths(resolveTaskBase(), resolveSafeTicketId(gate.ticketId));
+  if (!allowedPaths || !filePath || isWriteAllowedPath(filePath, allowedPaths)) return;
+  process.stderr.write(
+    'Write to "' +
+      filePath +
+      '" is outside the allowed path set.\n' +
+      'Allowed: PR{N}/, task{N}/, shared whitelist at ticket root.\n' +
+      'Verify the file path falls under the claimed worker or task directory.\n'
+  );
+  auditDecision(gate, filePath, 'deny', 'PATH_NOT_ALLOWED');
+  process.exit(2);
+}
+
+function enforceFileGate(filePath, gate) {
+  // tdd-phase.json is NOT allowed via the generic .json allowlist
+  if (filePath && /tdd-phase\.json$/.test(filePath)) {
+    process.stderr.write(
+      'Direct edit of tdd-phase.json is blocked.\n' +
+        'Use tdd-phase-state.js CLI to manage TDD phase state.\n'
+    );
+    auditDecision(gate, filePath, 'deny', 'TDD_STATE_DIRECT_EDIT');
+    process.exit(2);
+  }
+
+  enforceTddPhaseGate(filePath, gate);
+
+  // Allow config/non-code files
+  if (isFileAllowed(filePath)) return;
+
+  // Check if a developer agent has been invoked
+  if (gate.developerInvoked) {
+    enforcePathGate(filePath, gate);
+    return;
+  }
+
+  // Block the operation — audit (R13)
+  auditDecision(gate, filePath, 'deny', 'AGENT_DELEGATION_REQUIRED');
+  process.stderr.write(delegationBlockMessage(gate.toolName, gate.runtimeName));
+  process.exit(2);
 }
 
 async function main() {
@@ -438,170 +302,45 @@ async function main() {
   }
 
   const hookData = JSON.parse(input);
+  const rt = getRuntime(hookData);
   const toolName = hookData.tool_name;
   const toolInput = hookData.tool_input || {};
   const transcriptPath = hookData.transcript_path;
 
-  // Only check blocked tools
-  if (!BLOCKED_TOOLS.includes(toolName)) {
+  // Only check blocked tools. The Edit|Write matcher lanes alias-fire for
+  // apply_patch on codex (the payload is a raw patch, no file_path).
+  if (!BLOCKED_TOOLS.includes(toolName) && toolName !== 'apply_patch') {
     process.exit(0);
   }
 
   // ── State-based activation (R1): load enforcement context ──────────────
-  // If TICKET_ID is explicitly set (even to empty), honor it; otherwise derive
-  const ticketId =
-    'TICKET_ID' in process.env
-      ? process.env.TICKET_ID || null
-      : (() => {
-          try {
-            const { getCurrentTaskId } = require(
-              path.join(__dirname, '..', '..', 'lib', 'scripts', 'get-ticket-id.js')
-            );
-            const id = getCurrentTaskId();
-            return id || null;
-          } catch {
-            try {
-              const branch = require('child_process')
-                .execSync('git branch --show-current', { encoding: 'utf8' })
-                .trim();
-              const match = branch.match(/[A-Za-z]+-[0-9]+/i);
-              return match ? match[0] : null;
-            } catch {
-              return null;
-            }
-          }
-        })();
+  const ticketId = resolveTicketId();
 
   // No ticket ID => no workflow to enforce
   if (!ticketId) {
     process.exit(0);
   }
 
-  let ctx;
-  try {
-    const { loadEnforcementContext } = require(
-      path.join(__dirname, '..', '..', 'work', 'lib', 'work-enforcement-context')
-    );
-    ctx = loadEnforcementContext(ticketId);
-  } catch {
-    // If adapter not available, fail open
-    process.exit(0);
-  }
+  const ctx = loadContext(ticketId);
 
   // Check if implement step is active using state (replaces transcript grep)
   if (!isImplementActive(ctx)) {
     process.exit(0);
   }
 
-  // Get the file path being edited
-  const filePath = toolInput.file_path || toolInput.path || '';
+  const filePaths = collectWriteTargets(toolName, toolInput);
 
-  // tdd-phase.json is NOT allowed via the generic .json allowlist
-  if (filePath && /tdd-phase\.json$/.test(filePath)) {
-    process.stderr.write(
-      'Direct edit of tdd-phase.json is blocked.\n' +
-        'Use tdd-phase-state.js CLI to manage TDD phase state.\n'
-    );
-    // Audit the block (R13)
-    const auditCb = createAuditCallback(ticketId, toolName, filePath, ctx);
-    auditCb({ decision: 'deny', reasons: ['TDD_STATE_DIRECT_EDIT'], origin: ctx.origin });
-    process.exit(2);
+  // Developer identification: payload agent_type first (both runtimes), then
+  // the transcript scan (claude Task dispatch grep / codex rollout reader).
+  const developerInvoked =
+    payloadIsDeveloperAgent(hookData) || hasDeveloperAgentBeenInvoked(transcriptPath);
+
+  const gate = { ticketId, toolName, ctx, developerInvoked, runtimeName: rt.name };
+  for (const filePath of filePaths) {
+    enforceFileGate(filePath, gate);
   }
 
-  // ── TDD Phase enforcement (BEFORE allowlist) ─────────────────────────
-  const tddPhaseResult = checkTddPhase(filePath, ticketId);
-  if (tddPhaseResult === 'block') {
-    // Audit the block (R13)
-    const auditCb = createAuditCallback(ticketId, toolName, filePath, ctx);
-    auditCb({ decision: 'deny', reasons: ['TDD_PHASE_VIOLATION'], origin: ctx.origin });
-    process.exit(2);
-  }
-  // GH-570 (W1×W8): audit the machine-verified ablation-RED source-edit
-  // allowance so every fired escape hatch is visible in .work-actions.json.
-  // The remaining gates (agent delegation, R6 path gate) still apply below.
-  if (tddPhaseResult === 'ablation-allow') {
-    const auditCb = createAuditCallback(ticketId, toolName, filePath, ctx);
-    auditCb({ decision: 'allow', reasons: ['ABLATION_RED_SOURCE_EDIT'], origin: ctx.origin });
-  }
-  // Defense-in-depth: if TDD state doesn't exist and this is a production file,
-  // block until TDD is initialized.
-  if (
-    tddPhaseResult === 'no-file' &&
-    !isFileAllowed(filePath) &&
-    hasDeveloperAgentBeenInvoked(transcriptPath)
-  ) {
-    // Message sweep (bugs review, W1 follow-up): this hook is now LIVE, so it
-    // must not point agents at the OPERATOR-ONLY `exception` subcommand
-    // (WORK_OPERATOR_TOKEN-gated — agents following that advice dead-end).
-    // Point at the single task entrypoint + the planner Type taxonomy, and
-    // the W3 BLOCKED report for tasks that genuinely cannot be test-driven.
-    const taskNextScript = path.join(__dirname, '..', 'task-next.js');
-    const msg =
-      'TDD not initialized. Production file writes are blocked until TDD state exists.\n' +
-      'Run the single task entrypoint (it initializes state and dictates the phase):\n' +
-      `  node ${taskNextScript} <TICKET_ID> task<N>\n` +
-      "TDD exemptions come ONLY from the planner's `### Type` line in tasks.md\n" +
-      '(tests-only/docs/config/ci/mechanical-refactor/file-move/checkpoint).\n' +
-      'If this task cannot be test-driven and its Type does not exempt it, STOP\n' +
-      'and report `BLOCKED (planner-defect): <one-line reason>` back to the\n' +
-      'orchestrator.\n';
-    process.stderr.write(msg);
-    // Audit the block (R13)
-    const auditCb = createAuditCallback(ticketId, toolName, filePath, ctx);
-    auditCb({ decision: 'deny', reasons: ['TDD_NOT_INITIALIZED'], origin: ctx.origin });
-    process.exit(2);
-  }
-
-  // Allow config/non-code files
-  if (isFileAllowed(filePath)) {
-    process.exit(0);
-  }
-
-  // Check if a developer agent has been invoked
-  if (hasDeveloperAgentBeenInvoked(transcriptPath)) {
-    // -- R6: Task-readiness path gate (when task-aware) --
-    // If WORK_TASK_NUM is set, enforce write paths via isWriteAllowedPath.
-    // Legacy mode (no WORK_TASK_NUM) skips the path gate.
-    const allowedPaths = buildAllowedPaths(resolveTaskBase(), resolveSafeTicketId(ticketId));
-    if (allowedPaths && filePath && !isWriteAllowedPath(filePath, allowedPaths)) {
-      process.stderr.write(
-        'Write to "' +
-          filePath +
-          '" is outside the allowed path set.\n' +
-          'Allowed: PR{N}/, task{N}/, shared whitelist at ticket root.\n' +
-          'Verify the file path falls under the claimed worker or task directory.\n'
-      );
-      const auditCb = createAuditCallback(ticketId, toolName, filePath, ctx);
-      auditCb({ decision: 'deny', reasons: ['PATH_NOT_ALLOWED'], origin: ctx.origin });
-      process.exit(2);
-    }
-
-    process.exit(0);
-  }
-
-  // Block the operation — audit (R13)
-  const auditCb = createAuditCallback(ticketId, toolName, filePath, ctx);
-  auditCb({ decision: 'deny', reasons: ['AGENT_DELEGATION_REQUIRED'], origin: ctx.origin });
-
-  const architectLine =
-    process.env.WORK_ARCHITECT_ENABLED === '1'
-      ? `  subagent_type: "code-architect",            // Architecture\n`
-      : '';
-  process.stderr.write(
-    `/work-implement requires agent delegation\n\n` +
-      `Direct ${toolName} blocked. Use a developer agent first:\n\n` +
-      `Task({\n` +
-      `  subagent_type: "developer-nodejs-tdd",      // Backend\n` +
-      `  subagent_type: "developer-react-senior",    // React logic\n` +
-      `  subagent_type: "developer-react-ui-architect", // UI design\n` +
-      `  subagent_type: "developer-devops",          // Infrastructure\n` +
-      architectLine +
-      `  prompt: "Implement: <your task>"\n` +
-      `})\n\n` +
-      `Or for simple config changes, edit allowed files:\n` +
-      `(.md, .json, .yml, .env, package.json, tsconfig.*, etc.)\n`
-  );
-  process.exit(2);
+  process.exit(0);
 }
 
 main().catch((err) => {

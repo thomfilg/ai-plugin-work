@@ -30,6 +30,7 @@ const skillRegistry = require('./lib/maestro-conduct/skill-registry');
 
 const ciGate = require('./lib/maestro-conduct/ci-gate-rotation');
 const manifest = require('./lib/maestro-conduct/manifest');
+const runtimeProfile = require('./lib/maestro-conduct/runtime-profile');
 const stopCondition = require('./lib/maestro-conduct/stop-condition');
 const prStatusPayload = require('./lib/maestro-conduct/pr-status-payload');
 const prCommentsHandler = require('./lib/maestro-conduct/pr-comments-handler');
@@ -57,6 +58,15 @@ const DEAD_END_REEMITS = parseInt(process.env.DEAD_END_REEMITS || '3', 10);
 function maybeEscalateToDeadEnd(ctx, kind, repeatCount, sha) {
   if (repeatCount < DEAD_END_REEMITS || ['wait_merge', 'ci', 'complete'].includes(ctx.phase))
     return;
+  // WP-09: operator-attached codex TUI panes are read-only to the conductor
+  // (no dialect regexes yet) — DEAD-END-HOLD is the default: alert-only,
+  // never auto-kill on pane evidence we cannot actually read.
+  if (ctx.dialect === 'codex-tui-conservative') {
+    alerts.log(
+      `${ctx.session} DEAD-END-HOLD ${kind} ×${repeatCount} — codex TUI dialect is read-only; operator must intervene (no auto-kill)`
+    );
+    return;
+  }
   actions.freeDeadEndSlot({
     session: ctx.session,
     ticket: ctx.ticket,
@@ -91,6 +101,11 @@ function ctxFor(session) {
   const worktree = path.join(workstate.WORKTREES_BASE, `${REPO_NAME}-${ticket}`);
   const pane = tmux.capture(session);
   const launch = manifest.launchConfigForTask(ticket);
+  // WP-09: per-ticket runtime (mixed fleets) + the pane dialect gating every
+  // claude-TUI heuristic. runtime='claude' resolves for every pre-WP-09 fleet
+  // (no .maestro-runtime file, no manifest runtime, no env) so those ctx
+  // objects only GAIN fields — detector behavior is byte-identical.
+  const runtime = runtimeProfile.runtimeForTicket(ticket);
   return {
     session,
     ticket,
@@ -101,7 +116,20 @@ function ctxFor(session) {
     pane,
     command: launch.command,
     commandBrief: launch.commandBrief,
+    runtime,
+    dialect: runtimeProfile.paneDialect(ticket, runtime),
+    execLog: runtimeProfile.execLogPath(ticket),
   };
+}
+
+// One-shot conductor notice per codex session (C14): the operator must know
+// question/spinner detection is off and which signals replace it.
+function noteCodexConducting(ctx) {
+  if (ctx.runtime !== 'codex' || state.read(ctx.session, 'codex-notice')) return;
+  state.write(ctx.session, 'codex-notice', { loggedAt: state.now(), dialect: ctx.dialect });
+  alerts.log(
+    `${ctx.ticket} (codex): question/spinner detection unavailable — using exec-json/workstate signals (dialect=${ctx.dialect})`
+  );
 }
 
 function handleQuestion(ctx, qHit) {
@@ -193,6 +221,7 @@ function runPhaseDetectors(ctx) {
 /** Run the per-session pipeline. Returns when the session has been fully processed. */
 function tickSession(session) {
   const ctx = ctxFor(session);
+  noteCodexConducting(ctx);
   // One progress observation per session per tick; detectors read the marker.
   const prog = progress.observe(ctx.ticket, ctx.worktree);
   // Real progress (phase forward-step) resets the dead-end strike counter so
@@ -346,4 +375,6 @@ if (require.main === module) main();
 // DETECTORS is exported so the cross-plugin dispatch-registry validator (in
 // `factories/dispatchRegistryValidator`) can assert that every detector name
 // referenced in phase-registry.PHASES[*].detectors resolves to a real module.
-module.exports = { tick, ctxFor, restartEligible, DETECTORS };
+// maybeEscalateToDeadEnd is exported so the WP-09 DEAD-END-HOLD acceptance
+// test can prove a codex TUI session is never rotated on glyph evidence.
+module.exports = { tick, ctxFor, restartEligible, DETECTORS, maybeEscalateToDeadEnd };

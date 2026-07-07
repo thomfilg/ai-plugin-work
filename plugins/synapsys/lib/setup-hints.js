@@ -4,12 +4,15 @@
  * SessionStart setup hints.
  *
  * Pure helpers extracted from `hooks/synapsys.js` to keep the dispatcher under
- * the static-gate line budget. No behavior change — these are the same strings
- * and the same `getSessionStartHint` policy, relocated behind a module
- * boundary.
+ * the static-gate line budget. The hint constants stay Claude literals; the
+ * emission point renders them through the shared vocabulary layer —
+ * `renderInstruction` is the identity on claude (byte-identical output) and
+ * swaps `/plugin:skill` / AskUserQuestion tokens on codex (design §F, C13).
  *
  * @module lib/setup-hints
  */
+
+const { renderInstruction } = require('./runtime/vocab');
 
 const SETUP_REQUIRED_HINT =
   '[synapsys:setup-required] No Synapsys memory store is configured for this repo/worktree.\n\n' +
@@ -32,11 +35,13 @@ function emptyStoreHint(stores) {
 
 // Returns a hint string when SessionStart fires with no store or no memories.
 // Returns null when no hint should be emitted (hint disabled or store + memories present).
-function getSessionStartHint(event, stores, memories) {
+// `runtime` defaults to 'claude', where renderInstruction returns the hint
+// unchanged (same reference — provably inert).
+function getSessionStartHint(event, stores, memories, runtime = 'claude') {
   if (event !== 'SessionStart') return null;
   if (process.env.SYNAPSYS_NO_SETUP_HINT === '1') return null;
-  if (!stores.length) return SETUP_REQUIRED_HINT;
-  if (!memories.length) return emptyStoreHint(stores);
+  if (!stores.length) return renderInstruction(SETUP_REQUIRED_HINT, runtime);
+  if (!memories.length) return renderInstruction(emptyStoreHint(stores), runtime);
   return null;
 }
 

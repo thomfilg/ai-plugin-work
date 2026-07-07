@@ -11,41 +11,44 @@
 
 const fs = require('fs');
 const path = require('path');
-const { logHookError } = require(path.join(__dirname, '..', '..', 'lib', 'hook-error-log'));
+const { installProcessGuards, loadConfigOrNull } = require(
+  path.join(__dirname, '..', '..', 'lib', 'hook-guards')
+);
 
 let didBlock = false;
-process.on('uncaughtException', (err) => {
-  logHookError(__filename, err);
-  process.exit(didBlock ? 2 : 0);
-});
-process.on('unhandledRejection', (err) => {
-  logHookError(__filename, err);
-  process.exit(didBlock ? 2 : 0);
-});
+installProcessGuards(__filename, () => (didBlock ? 2 : 0));
 
-let config;
-try {
-  config = require('../../lib/config');
-} catch (err) {
-  if (
-    err &&
-    err.code === 'MODULE_NOT_FOUND' &&
-    /['"]\.\.\/\.\.\/lib\/config['"]/.test(err.message)
-  ) {
-    config = null;
-  } else {
-    throw err;
-  }
-}
+const config = loadConfigOrNull();
 if (!config) process.exit(0);
+
+// Hook payload from stdin: the TOOL_INPUT env channel is legacy (kept first
+// for byte-identity when present) — current runtimes deliver tool_input in
+// the stdin JSON payload. Codex never sets TOOL_INPUT (ground truth §2.7.2).
+let payload = {};
+try {
+  payload = JSON.parse(fs.readFileSync(0, 'utf8'));
+} catch {
+  /* empty/invalid stdin — payload stays {} */
+}
+
+// No-op on codex: the Skill tool doesn't exist there (skills are $mentions,
+// not tool calls — design C5/C13), so /work-pr sequencing can't be observed
+// via this hook. The Skill matcher lane is already dead on codex; this guard
+// makes the no-op explicit if the lane ever widens.
+const { getRuntime } = require(path.join(__dirname, '..', '..', 'lib', 'runtime'));
+if (getRuntime(payload).name === 'codex') process.exit(0);
 
 let toolInput;
 try {
-  toolInput = JSON.parse(process.env.TOOL_INPUT || '{}');
+  toolInput = JSON.parse(process.env.TOOL_INPUT || 'null') || undefined;
 } catch {
-  toolInput = {};
+  toolInput = undefined;
 }
-const hookType = process.env.CLAUDE_HOOK_TYPE || 'PostToolUse'; // PreToolUse or PostToolUse
+if (!toolInput) {
+  toolInput =
+    payload.tool_input && typeof payload.tool_input === 'object' ? payload.tool_input : {};
+}
+const hookType = process.env.CLAUDE_HOOK_TYPE || payload.hook_event_name || 'PostToolUse'; // PreToolUse or PostToolUse
 
 // Only handle work and work-pr skills
 if (!['work', 'work-pr'].includes(toolInput.skill)) {

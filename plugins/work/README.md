@@ -27,6 +27,22 @@ For local development, point to a local directory instead:
 /plugin marketplace add ./path/to/claude-plugin-work
 ```
 
+### Codex CLI
+
+The same plugin installs natively on Codex CLI (0.142.5+):
+
+```
+codex plugin marketplace add thomfilg/claude-plugin-work
+codex plugin add work-workflow@work-workflow
+```
+
+Then run the one-time TUI `/hooks` trust review — codex **silently skips
+untrusted hooks**, so until then every workflow gate is off. `/work` is invoked
+as a skill mention (`$work GH-N`) rather than a slash command; subagents run
+inline (serialized) and interactive gates degrade per the
+`[work:codex-degraded]` notices. Details: the repo-root `README.md` install
+matrix and `docs/hooks.md` → "Dual runtime".
+
 ## Available Skills (Slash Commands)
 
 ### Core Workflow

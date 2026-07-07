@@ -17,10 +17,25 @@
  *   - If an existing NON-maestro status line is registered, it is preserved into
  *     the chain file so the renderer shows it BENEATH the maestro line. --remove
  *     restores it as the sole status line.
+ *   - Codex guard (design C4/§M): codex has no plugin statusline surface, so
+ *     under AGENT_RUNTIME=codex every mode refuses cleanly (exit 0) and prints
+ *     the tmux alternative instead of touching ~/.claude/settings.json.
  */
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+
+const { detectRuntime } = require('../../../scripts/lib/runtime');
+
+if (detectRuntime() === 'codex') {
+  process.stdout.write(
+    '[maestro:codex-degraded] statusline unavailable — codex has no plugin statusline surface.\n' +
+      'Fleet visibility without it:\n' +
+      "  tmux set -g status-right '#(tail -n1 /tmp/maestro-conduct.log | cut -c1-120)'\n" +
+      '  tail -f /tmp/maestro-alerts.jsonl   # the conductor alert stream\n'
+  );
+  process.exit(0);
+}
 
 const HOME = os.homedir();
 const SETTINGS = path.join(HOME, '.claude', 'settings.json');

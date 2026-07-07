@@ -24,7 +24,7 @@
  */
 
 const state = require('../state');
-const { LIVE_SPINNER_RE } = require('../live-spinner');
+const { LIVE_SPINNER_RE, isCodexPaneDialect } = require('../live-spinner');
 
 // Minutes the same composer text must persist before the detector hits.
 const STUCK_INPUT_MIN = parseInt(process.env.STUCK_INPUT_MIN || '5', 10);
@@ -45,7 +45,10 @@ function composerText(pane) {
   return null;
 }
 
-function detect({ session, pane }) {
+function detect({ session, pane, dialect }) {
+  // Codex dialects: composer glyph unknown (TUI) or absent entirely (exec
+  // stream pane) — "unsupported", never a stuck-input verdict (WP-09).
+  if (isCodexPaneDialect(dialect)) return { hit: false, capability: 'unsupported' };
   if (!session || !pane) return { hit: false };
   // A live spinner means the agent is mid-turn — queued text is expected to
   // sit until the turn ends. Only an IDLE pane with stuck text is anomalous.

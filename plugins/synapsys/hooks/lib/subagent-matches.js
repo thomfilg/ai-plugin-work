@@ -26,7 +26,10 @@ const injectLedger = require('../../lib/inject-ledger');
 // `trigger_stop_response` fire unconditionally — including them here would
 // inject end-of-turn policies into unrelated subagent spawns (PR #605, Cursor
 // "Stop matcher spurious subagent injection"; see tasks/GH-497/decisions.md).
-const SUBAGENT_TOOLS = new Set(['Task', 'Agent']);
+// spawn_agent is the codex subagent tool (ground truth §4.1); its verified
+// input fields are task_name/model/fork_turns, so the string-prompt guard
+// below simply fails open when no `tool_input.prompt` is present.
+const SUBAGENT_TOOLS = new Set(['Task', 'Agent', 'spawn_agent']);
 const SUBAGENT_PROMPT_EVENTS = ['UserPromptSubmit', 'SessionStart'];
 
 // Recompute activeDomains for the matcher event from the synthetic prompt

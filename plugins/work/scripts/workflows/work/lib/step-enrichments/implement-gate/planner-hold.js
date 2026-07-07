@@ -27,6 +27,10 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
+const { renderQuestionText } = require(
+  path.join(__dirname, '..', '..', '..', '..', 'lib', 'instruction-vocab')
+);
+
 /** Keys that scope a retry-failure block to a specific task. */
 const RETRY_KEYS = [
   '_tddRetryReason',
@@ -121,17 +125,21 @@ function buildPlannerHoldInstruction(ws, safeName) {
       exitCode: ws._tddRetryExitCode ?? null,
       outputTail: ws._tddRetryOutputTail || '',
     },
-    suggestion: [
-      'OPERATOR HOLD — do NOT re-dispatch a developer agent: the defect is in',
-      'tasks.md, which is planner-owned and LOCKED during implement, so no',
-      'implementing agent may correct it. Surface the defect above to the',
-      'operator with AskUserQuestion, offering:',
-      `  1. Operator corrects the "## Task ${taskNum ?? '?'}" section of tasks.md outside`,
-      '     the session — the gate hashes that section and resumes the normal',
-      '     flow automatically once its content changes (tasksMeta is re-synced',
-      '     by the gate reconciler on the same pass).',
-      '  2. Re-run the tasks phase to regenerate tasks.md.',
-    ].join('\n'),
+    // Rendered per-runtime (C3): claude byte-identical; codex swaps the
+    // question vocabulary and appends the parked-gate notice per mode.
+    suggestion: renderQuestionText(
+      [
+        'OPERATOR HOLD — do NOT re-dispatch a developer agent: the defect is in',
+        'tasks.md, which is planner-owned and LOCKED during implement, so no',
+        'implementing agent may correct it. Surface the defect above to the',
+        'operator with AskUserQuestion, offering:',
+        `  1. Operator corrects the "## Task ${taskNum ?? '?'}" section of tasks.md outside`,
+        '     the session — the gate hashes that section and resumes the normal',
+        '     flow automatically once its content changes (tasksMeta is re-synced',
+        '     by the gate reconciler on the same pass).',
+        '  2. Re-run the tasks phase to regenerate tasks.md.',
+      ].join('\n')
+    ),
   };
 }
 
