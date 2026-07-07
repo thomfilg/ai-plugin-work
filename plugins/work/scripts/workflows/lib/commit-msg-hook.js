@@ -61,23 +61,15 @@ function resolveHooksDir(worktree) {
  */
 function hasCommitMsgValidator(worktree) {
   const hookFile = path.join(resolveHooksDir(worktree), 'commit-msg');
-  // Open ONCE and fstat + read from the same descriptor so the mode check and
-  // the content read observe the same file — no check-then-use race (CodeQL).
-  let fd;
   try {
-    fd = fs.openSync(hookFile, 'r');
-    if ((fs.fstatSync(fd).mode & 0o111) === 0) return false; // git skips non-exec hooks
-    return fs.readFileSync(fd, 'utf-8').includes('validate-commit-msg');
+    // Read the content first — a single read of an existing file (no open/create,
+    // no existence check before use), which throws (→ false) when the hook is
+    // absent. Then confirm the executable bit: git silently skips a non-exec
+    // hook, so a non-exec file must not count as "installed".
+    if (!fs.readFileSync(hookFile, 'utf-8').includes('validate-commit-msg')) return false;
+    return (fs.statSync(hookFile).mode & 0o111) !== 0;
   } catch {
     return false; // missing / unreadable
-  } finally {
-    if (fd !== undefined) {
-      try {
-        fs.closeSync(fd);
-      } catch {
-        /* best-effort close */
-      }
-    }
   }
 }
 
