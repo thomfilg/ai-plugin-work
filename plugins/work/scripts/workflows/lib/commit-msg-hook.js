@@ -60,13 +60,24 @@ function resolveHooksDir(worktree) {
  * @returns {boolean}
  */
 function hasCommitMsgValidator(worktree) {
+  const hookFile = path.join(resolveHooksDir(worktree), 'commit-msg');
+  // Open ONCE and fstat + read from the same descriptor so the mode check and
+  // the content read observe the same file — no check-then-use race (CodeQL).
+  let fd;
   try {
-    const hookFile = path.join(resolveHooksDir(worktree), 'commit-msg');
-    if (!fs.existsSync(hookFile)) return false;
-    if ((fs.statSync(hookFile).mode & 0o111) === 0) return false; // git skips non-exec hooks
-    return fs.readFileSync(hookFile, 'utf-8').includes('validate-commit-msg');
+    fd = fs.openSync(hookFile, 'r');
+    if ((fs.fstatSync(fd).mode & 0o111) === 0) return false; // git skips non-exec hooks
+    return fs.readFileSync(fd, 'utf-8').includes('validate-commit-msg');
   } catch {
-    return false;
+    return false; // missing / unreadable
+  } finally {
+    if (fd !== undefined) {
+      try {
+        fs.closeSync(fd);
+      } catch {
+        /* best-effort close */
+      }
+    }
   }
 }
 
