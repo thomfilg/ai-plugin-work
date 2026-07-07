@@ -22,17 +22,30 @@ const { parseTasks } = require(path.join(__dirname, '..', '..', 'work', 'lib', '
 function readGitHead(cwd) {
   try {
     const gitPath = path.join(cwd, '.git');
-    const st = fs.statSync(gitPath);
-    if (st.isFile()) {
-      // worktree pointer
-      const raw = fs.readFileSync(gitPath, 'utf8').trim();
-      if (raw.startsWith('gitdir: ')) {
-        const gitDir = raw.slice('gitdir: '.length);
-        const headPath = path.isAbsolute(gitDir)
-          ? path.join(gitDir, 'HEAD')
-          : path.join(cwd, gitDir, 'HEAD');
-        return fs.readFileSync(headPath, 'utf8').trim();
+    // fstat + read on ONE descriptor — no path-based check-then-use gap
+    // (CodeQL js/file-system-race; precedents 31126330, 4fbbbb75). On
+    // platforms where opening a directory fails (e.g. Windows EISDIR),
+    // fall through to the directory branch below with raw = null.
+    let raw = null;
+    try {
+      const fd = fs.openSync(gitPath, 'r');
+      try {
+        if (fs.fstatSync(fd).isFile()) {
+          raw = fs.readFileSync(fd, 'utf8').trim();
+        }
+      } finally {
+        fs.closeSync(fd);
       }
+    } catch (err) {
+      if (err.code !== 'EISDIR') throw err;
+    }
+    if (raw !== null && raw.startsWith('gitdir: ')) {
+      // worktree pointer
+      const gitDir = raw.slice('gitdir: '.length);
+      const headPath = path.isAbsolute(gitDir)
+        ? path.join(gitDir, 'HEAD')
+        : path.join(cwd, gitDir, 'HEAD');
+      return fs.readFileSync(headPath, 'utf8').trim();
     }
     return fs.readFileSync(path.join(gitPath, 'HEAD'), 'utf8').trim();
   } catch {
